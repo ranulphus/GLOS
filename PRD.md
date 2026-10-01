@@ -4,8 +4,10 @@
 
 | | |
 |---|---|
-| Status | v0.1 — draft (plan approved 2026-10-01) |
+| Status | v0.2 — draft after the deep dive (2026-10-01) |
 | Last updated | 2026-10-01 |
+| Supersedes | v0.1. Changes are listed in Appendix D |
+| Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) (work breakdown) |
 | Licence | MIT |
 | Companion projects | MGA-Glide (`~/MGA-Glide`: the Loop A/B/C harness and the shared Matrox HAL), DOS-GL (`~/DOSGL`: OpenGL for Matrox cards and the SDL3 bridge), Fifth Wheel and the dgk kit (`~/FifthWheel`), DOSBench (`~/DOSBench`) |
 
@@ -71,7 +73,7 @@ GLOS also brings things to retro PCs that their owners lack today:
 - **One graphics chip, several owners.** The HAL caches chip state (FIFO space, OPMODE, MACCESS), and that cache goes stale when another program uses the chip (§9.6).
 - **A 486 is slow, and the minimum spec is a 486.**
   - There is no timestamp counter and no global pages, so every address-space switch flushes the TLB.
-  - A Curve25519 or Ed25519 operation takes tens of milliseconds.
+  - A Curve25519 or Ed25519 operation takes 150–390 ms on a 486DX2-66 (tens of milliseconds only on a Pentium), so an SSH handshake takes about 0.9 s there (§7.11).
 - **Licences.** Most DOS system software that could be reused is GPL, Artistic-licensed or freeware with no licence to modify: Jemm, HDPMI, CWSDPMI, the FreeDOS kernel, Watt-32, mTCP. GLOS writes its supervisor from specifications (§17).
 - **Scope.** v1 includes community features (D13) as well as the core. They have their own release gates so they can't hold the core back (§19).
 
@@ -84,7 +86,7 @@ GLOS also brings things to retro PCs that their owners lack today:
 | # | Goal |
 |---|---|
 | G1 | **An SSH agent that survives any program.** It provides commands with stdout/stderr and exit codes, SFTP, screenshots in any mode, keyboard and mouse injection, telemetry, gdb, killing a program, and unloading or rebooting. It works on 86Box VMs and bench PCs. |
-| G2 | **Run unmodified programs under the supervisor with results identical to running them without GLOS.** This covers real-mode programs, DJGPP programs (which expect CWSDPMI) and DOS/4GW programs, including MGA-Glide inside retail games (the supervisor gate, §14.3). |
+| G2 | **Run unmodified programs under the supervisor with results identical to running them without GLOS.** This covers real-mode programs, DJGPP programs (which expect CWSDPMI), DOS/4GW programs, including MGA-Glide inside retail games, and 16-bit DPMI programs such as Borland's (D30) (the supervisor gate, §14.3). |
 | G3 | **A desktop on any VESA 2.0 card** at 8, 16 and 32 bpp, with 2D acceleration and a hardware cursor on Matrox cards. |
 | G4 | **DOS-GL and SDL3 programs** run windowed or full-screen and preemptively multitasked, from the same EXE that runs on plain DOS. |
 | G5 | **GLOS API v1**, versioned and stable enough to become the v2 SDK, plus native apps: file manager, notepad, calculator, terminal, system monitor and a Control Panel with extensive configuration. |
@@ -133,7 +135,7 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D4** | **Agent first, GUI second.** (User) M1–M5 are headless. | The agent is useful to MGA-Glide, DOS-GL and Fifth Wheel immediately, and it speeds up building the GUI. | — |
 | **D5** | **DOS programs in windows come after v1.** (User) v1 runs them full-screen as exclusive sessions. | Virtual VGA, PIT, DMA and SB for windowed DOS is the largest single piece of work. Exclusive sessions still keep the agent alive. | After v1 |
 | **D6** | **Preemptive scheduling; the graphics chip changes owner only at swap or yield points.** (User) | No app can starve audio, the agent or other apps. Changing owner only at swaps means the HAL never has to save state in the middle of a frame (§9.6). | M8 |
-| **D7** | **Our own period-styled look**, in the spirit of OS/2 Warp, Windows 3.x and System 7 without copying any of them. (User) | It avoids trade-dress problems and gives GLOS its own identity. | M6 design pass (Q5) |
+| **D7** | **Our own period-styled look: flat and restrained**, in the spirit of System 7 (mostly black, white and greys, thin lines, one accent), copying no one. (User; refined in the deep dive) | It avoids trade-dress problems, gives GLOS its own identity, and stays crisp at 8 bpp on 1 MB cards. | M6 design pass (Q5) |
 | **D8** | **MIT licence.** (User) Third-party parts keep their own licences; FreeDOS ships alongside GLOS, not linked into it. | Matches the companion projects. | — |
 | **D9** | **NICs:** native 32-bit drivers in the supervisor for Intel 8255x (e100) and RTL8139, plus NE2000 for 86Box. (User) | DOS packet drivers can't be relied on while a program owns the system VM, and calling them costs two mode switches per packet. 86Box emulates all three. | M5 |
 | **D10** | **GLOS's agent replaces Loop B's BENCH.BAT poller** when GLOS is up. The poller, serial log, Epiphan capture and reset relay stay as the fallback. (User) | An interactive session replaces fetch, run, upload and reboot. The out-of-band path still covers boot and supervisor hangs. | M5 |
@@ -145,9 +147,9 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D16** | **GLOS runs on an existing DOS.** The reference is FreeDOS 1.4 (Loop A); MS-DOS 6.22 and 7.1 are supported (bench). DOS is not patched. | Like Windows 3.x. DOS's instance-data hooks vary widely, so GLOS relies on serialisation instead (§6.8). | M2 |
 | **D17** | **The loader has a raw mode** (E820/E801/88h memory, its own A20 control) **and an XMS mode** (locked blocks). It refuses to start under a V86 monitor or another DPMI host. | Loop A's FreeDOS boot has no HIMEM and must stay byte-identical; the bench uses HIMEM.SYS. | M1 |
 | **D18** | **Toolchains:** the supervisor with host gcc `-m32 -march=i486 -ffreestanding` and GNU as (ELF, converted to a flat image); the loader and 16-bit tools with Open Watcom; GLOS apps and libraries with DJGPP (gcc 12.2). No NASM. | Every one of these is already in the dev container; nothing new to pin. | M1 |
-| **D19** | **A monolithic ring-0 supervisor** holds memory, the scheduler, the V86 monitor, the DPMI host, the DOS server, virtual devices, drivers, lwIP, SSH, the window system and the API. HTTPS, the package manager, the Control Panel and font rasterisation are ring-3 GLOS apps. | One image is simpler to bring up and debug. Keeping the large parsers out of ring 0 limits the damage they can do. | M6 |
-| **D20** | **IOPL=0 everywhere, with a virtual interrupt flag; VME/PVI where the CPU has them.** HLT is treated as "yield until the next virtual interrupt". | With IOPL=3, `cli; jmp $` would freeze the agent. 86Box offers both 486 profiles without VME and Pentium-class profiles with it, so both paths get tested. | M2 |
-| **D21** | **The scheduler tick is the RTC periodic interrupt** (IRQ8, 1024 Hz). The RTC is virtualised per VM from the start; INT 15h 86h becomes a sleep; each app gets its own virtual PIT. | Programs reprogram PIT channel 0 (DJGPP's `uclock` does on first use) far more often than they touch the RTC. A 486 has no TSC, so the tick count is the supervisor's clock. | M2 |
+| **D19** | **A monolithic ring-0 supervisor** holds memory, the scheduler, the V86 monitor, the DPMI host, the DOS server, virtual devices, drivers, lwIP, SSH, the window system and the API. HTTPS, the package manager, the Control Panel and font rasterisation are ring-3 GLOS apps. (Window system in ring 0 confirmed by the user) | One image is simpler to bring up and debug. API calls cost one trap, not two address-space switches, which matters on a 486 (no global pages). Keeping the large parsers out of ring 0 limits the damage they can do. | M6 |
+| **D20** | **IOPL 0 by default, with a virtual interrupt flag; VME/PVI where the CPU has them. A program profile may opt out to IOPL 3 ("direct mode").** (User) HLT is treated as "yield until the next virtual interrupt". IOPL is constant within a session. | With IOPL 3, `cli; jmp $` would freeze the agent. The baselines (CWSDPMI, standard HDPMI) run clients at IOPL 3, so direct mode exists for programs that are too slow or misbehave when CLI/STI trap (on 486s without PVI). Direct mode gives up agent liveness while that program has interrupts off. The M0 survey under HDPMI32i (an IOPL-0 host) finds the candidates early. | M4e |
+| **D21** | **The kernel clock is the RTC periodic interrupt** (IRQ8, 1024 Hz by default, 256–8192 Hz configurable), always reading register C. The RTC is virtualised per VM from the start; INT 15h 86h/83h become sleeps. **GLOS keeps PIT channel 0 in mode 2, count FFFFh, and never latches it; exclusive sessions get ports 40h–43h and 61h passed through; GLOS apps (M6) get a virtual PIT.** | Programs reprogram PIT channel 0 far more often than they touch the RTC. Mode 2/FFFFh is what DJGPP's `uclock` sets, so latched reads stay coherent with the BIOS tick at 0x46C. A 486 has no TSC, so the tick count is the clock there. | M2 |
 | **D22** | **The DOS server:** one lock covers the whole system VM (every real-mode call, every BIOS and VBE call). Per-app DOS state is swapped on each call. Agent file operations wait until DOS is idle. | DOS isn't re-entrant and its per-process state is global (§6.8). | M6 |
 | **D23** | **GLOS is detected through DPMI function 0A00h with the vendor string "GLOS"**, which returns a versioned entry point. GLOS never answers INT 2Fh 1600h and never broadcasts 1605h. | This is the standard DPMI vendor-extension mechanism. Claiming to be Windows would make TSRs and programs expect Windows behaviour. | M6 |
 | **D24** | **GPU ownership is enforced by page faults.** A program's Matrox MMIO pages stay unmapped until it holds the GPU lock. The HAL gains `engine_resync()` for every change of owner, and a watchdog resets the engine and kills an app that holds the lock too long. | Every owner change is visible to the supervisor, and stale HAL state can't overflow the FIFO. | M8 |
@@ -156,6 +158,15 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D27** | **Changes to the shared HAL and harness go into MGA-Glide first, with its full regression.** GLOS pins MGA-Glide in `deps.mk` and vendors the HAL with `sync-hal` once the kernel needs it. | The project-wide rule that DOS-GL and DOSBench already follow. | — |
 | **D28** | **Performance budgets come from silicon and CPU models, not 86Box speed.** | 86Box on the build host runs far below real hardware, and the emulated Matrox FIFO thread runs in host time. | — |
 | **D29** | **SSH accepts public keys only.** Host keys are generated on first boot from IRQ-timing entropy; Loop A images carry a fixed test key; VNC is off by default and meant to be tunnelled over SSH. | Remote code execution must be authenticated. VNC's own authentication is weak. | M3 |
+| **D30** | **16-bit DPMI clients are hosted in v1.** (User) Acceptance: Borland's 16-bit DPMI (TPX.EXE on RTM.EXE + DPMI16BI.OVL from Turbo Pascal 7, kept privately in `~/BORLAND`) plus our own Open Watcom 16-bit conformance suite. | Borland protected-mode tools and other 16-bit extended programs then run under GLOS too. | M4d |
+| **D31** | **Switching away from an exclusive session is supported for text-mode programs only.** (User) Graphics-mode sessions run until they exit or are killed. | Saving arbitrary VGA/SVGA/Matrox state and VRAM reliably is a large job; text mode is cheap and covers editors, compilers and shells. | After v1 |
+| **D32** | **Distribution: a bootable FreeDOS + GLOS image (CF/SD/floppy) plus an installer onto an existing DOS.** (User) Tested DOSes: FreeDOS (Loop A) and MS-DOS 6.22/7.1 (bench); others best-effort. | The lowest barrier for the community, without abandoning existing installs. | Before release |
+| **D33** | **Shell: desktop icons plus a task bar** (launcher menu, running programs including DOS sessions, clock, status). **File manager: both spatial folders on the desktop and a browser app (tree + list).** (User) | Familiar, scales to many running tasks; spatial folders for browsing, the browser for work at 640×480 and from the keyboard. | M6 |
+| **D34** | **The UI fits 640×480 and is fully keyboard-operable** (menu accelerators, Tab order, task switching, window move/resize by keys). (User) | 486s with 1 MB cards and VGA monitors; users without mice; and scripted key input from the agent becomes reliable. | M6 |
+| **D35** | **A remote-session indicator in the task bar only** while SSH or VNC sessions are open; never drawn into full-screen programs or app content. (User) | Visible to the person at the PC, without disturbing screenshots or golden frames. | M5 |
+| **D36** | **Per-program profiles** (icon, command line, environment, memory, sound settings, `direct` mode), made by hand or by a wizard; programs without one run with defaults. (User) | Like Windows PIFs: the place for per-program settings, including D20's opt-out. | M4e (format), M6 (UI) |
+| **D37** | **UI fonts are bitmaps rendered at build time from open TrueType fonts** (OFL/MIT: a sans for the UI, a mono for terminals), with optional live anti-aliasing from the same fonts. (User) | Crisp at every depth, fast on a 486, and licence-clean. | M6 (Q16) |
+| **D38** | **86Box gets PCI variants of the Matrox cards at M7** (a local patch); until then 486 profiles use the S3 Trio64V2/DX. (User) | 86Box emulates the G-series as AGP only, while real G200/G450 PCI cards exist (the bench's G450 is PCI). | M7 |
 
 ---
 
@@ -171,12 +182,12 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 
 ### 4.2 Memory
 
-| Configuration | Target RAM (to be measured, §13) |
-|---|---|
-| Headless supervisor + network + SSH | 8 MB |
-| Desktop and native apps | 16 MB |
-| Windowed DOS-GL / SDL3 apps | 32 MB or more |
-| Loop A default / Half-Life runs | 64 MB / 128 MB (`--mem`) |
+| Configuration | Target RAM | Estimate (to be measured, §13) |
+|---|---|---|
+| Headless supervisor + network + SSH | 8 MB | Supervisor about 1.2–1.4 MB (0.4 MB code, 0.8–1.0 MB data: lwIP 100–150 KB RAM, about 90 KB per SSH connection, 150–250 KB of page tables and stacks for ten address spaces), leaving about 5.5 MB above the first MB for programs |
+| Desktop and native apps | 16 MB | Desktop 4–7 MB (back buffer 0.94 MB at 800×600×16, fonts 0.2–0.5 MB, VNC shadow about 1 MB, TLS and packages about 0.3 MB), leaving 9–12 MB for apps; default to 8 or 16 bpp at 16 MB |
+| Windowed DOS-GL / SDL3 apps | 32 MB or more | GLQuake and Quake 2 need at least 16 MB of their own |
+| Loop A default / Half-Life runs | 64 MB / 128 MB (`--mem`) | |
 
 ### 4.3 Video
 
@@ -189,9 +200,9 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 |---|---|---|
 | NE2000 (ISA, PCI) | GLOS | `ne2k`, `ne2kpci` (Loop A default) |
 | Realtek RTL8139 | GLOS | `rtl8139c+` |
-| Intel 8255x (EtherExpress Pro/100) | GLOS | `i82557`…`i82559er` |
+| Intel 8255x (EtherExpress Pro/100, Pro/100+) | GLOS | `i82557`, `i82558` (the other i8255x names in 86Box are BIOS revisions of these two devices) |
 
-GLOS refuses a NIC whose IRQ is shared with another active device, and a NIC already claimed by a loaded packet driver (§8.1).
+GLOS refuses a NIC whose IRQ is shared with another active device, and a NIC already claimed by a loaded packet driver (§8.1). 86Box's RTL8139 lacks TimerInt; GLOS's driver doesn't use it.
 
 ### 4.5 Sound, input and storage
 
@@ -209,8 +220,16 @@ GLOS refuses a NIC whose IRQ is shared with another active device, and a NIC alr
 
 ### 4.7 Machines
 
-- **Loop A:** ABIT BF6 (i440BX), Pentium II 350, Matrox card, COM1 to `serial.log`, the 86Box unit tester for exit codes. M0 adds a 486 profile and a generic VBE card (Q9).
-- **Bench:** the PCs in `tools/bench/bench.toml` (G100, G200, G400, G450), with Intel 8255x or RTL8139 NICs (D9). A 486 bench PC is open (Q10).
+- **Loop A profiles** (M0, `run.py --machine`):
+
+| Profile | Machine | CPU | Video | Purpose |
+|---|---|---|---|---|
+| `bf6` | ABIT BF6 (i440BX, Award) | Pentium II 350 | Matrox G100–G450 (AGP), or `vbe` | Reference; VME/PVI, PGE, TSC |
+| `486dx2` | Shuttle HOT-433A (UMC 8881, AwardBIOS 4.51PG) | i486DX2-66 (no CR4) | `vbe`: S3 Trio64V2/DX (VBE 2.0) | The pure trap path (no VME/PVI) |
+| `486dx4` | Shuttle HOT-433A | Intel iDX4-100 (VME/PVI) | `vbe` | VME/PVI on a 486 |
+
+  86Box emulates the Matrox G-series only as AGP cards, so 486 profiles can't have one until a local PCI-variant patch (D38, M7). Every profile has COM1 to `serial.log`, optional COM2 (`--com2`), a NIC (`--net`) and the unit tester for exit codes.
+- **Bench:** the PCs in `tools/bench/bench.toml` (G100, G200, G400, G450), with Intel 8255x or RTL8139 NICs (D9). A 486 bench PC may come later (Q10); until then 486 performance is modelled (D28).
 
 ---
 
@@ -241,9 +260,10 @@ GLOS refuses a NIC whose IRQ is shared with another active device, and a NIC alr
 
 ### 5.3 Address spaces
 
-- The **kernel** lives at the top of the linear address space, in supervisor-only pages, mapped in every address space. Global pages are used where the CPU has PGE.
-- Each **GLOS app** has its own page directory. Its DPMI memory blocks and physical mappings (0800h) go in its user region.
-- The **first MB** is identity-mapped everywhere (D25).
+- The **kernel** lives at C000_0000–DFFF_FFFF (image at C010_0000), in supervisor-only pages mapped in every address space. Global pages are used where the CPU has PGE.
+- Each **DPMI context** (a top-level program and its children, supervisor.md §12) has its own page directory. Its DPMI memory blocks go in the user region 0040_0000–BFFF_FFFF, ascending from 4 MB.
+- E000_0000–FFBF_FFFF is reserved so 0800h can map PCI BARs at **linear = physical**, which retail DOS/4GW games were only ever tested with.
+- The **first MB** (physical 0–10FFFFh) is identity-mapped everywhere through one shared page table (D25). No user memory sits below 4 MB.
 - A DJGPP program's "fat DS" (4 GB limit, near pointers formed by wrapping around its base address) can only reach pages that are mapped user-accessible. That keeps the protection intact even with near pointers.
 
 ### 5.4 Processes
@@ -282,7 +302,7 @@ A program calls DPMI 0A00h with "GLOS" (D23). The result is a far entry point pl
 
 - A physical page allocator, fed from the raw memory map or the XMS blocks.
 - Per-process page directories.
-- DPMI linear blocks (0501h–0503h) that never move when resized (0503h), so a fat-DS base stays valid.
+- DPMI linear blocks (0501h–0503h) handed out ascending and always above a context's first block. DJGPP's sbrk depends on this. 0503h resizes in place when it can and otherwise moves the block upwards; DJGPP's UNIX_SBRK path brackets that with 0900h/0901h.
 - Physical mappings (0800h/0801h) in the caller's address space.
 - Page locking (0600h/0601h) is accepted and recorded; GLOS doesn't page to disk in v1.
 - DOS memory (0100h–0102h) is allocated in the system VM under the DOS lock.
@@ -290,8 +310,10 @@ A program calls DPMI 0A00h with "GLOS" (D23). The result is a far entry point pl
 ### 6.3 CPU modes and protection
 
 - **IOPL and the interrupt flag:**
-  - The system VM and DPMI clients run at IOPL=0. CLI, STI, PUSHF, POPF, INT and IRET trap and are emulated against a virtual IF, or handled by VME/PVI where the CPU has them.
-  - Known hazard: POPF in ring 3 at IOPL=0 silently ignores IF. Code that relies on it (SDL's mutexes use CLI/STI) is handled through the trapped instructions and the virtual-IF bookkeeping.
+  - The system VM and DPMI clients run at IOPL 0 by default. CLI, STI, PUSHF, POPF, INT and IRET trap and are emulated against a virtual IF, or handled by VME/PVI where the CPU has them.
+  - Known hazard: POPF and IRET at IOPL<CPL silently ignore IF. Handler frames return through a host trampoline that restores the virtual IF (DJGPP's timer and keyboard paths IRET without STI).
+  - A watchdog logs `GLOS-WARN vif-stuck` when the virtual IF stays off for more than 50 ms with an interrupt pending.
+  - **Direct mode** (a per-program profile setting, D20) runs that session at IOPL 3, as CWSDPMI runs every client. IOPL never changes within a session.
 - **HLT** from V86 or ring 3 raises #GP; the supervisor treats it as "block until the next virtual interrupt". SDL's scheduler idles with HLT (`SDL_dos_scheduler.c:246`).
 - **I/O permission:** a per-VM and per-app I/O bitmap decides which ports are trapped and which pass through (§6.4).
 
@@ -314,17 +336,22 @@ A program calls DPMI 0A00h with "GLOS" (D23). The result is a far entry point pl
 
 ### 6.5 Time
 
-- **Tick:** the RTC periodic interrupt at 1024 Hz drives scheduling, timeouts and the supervisor clock.
-- **Clock:** a Pentium uses the TSC to interpolate between ticks. A 486 uses the tick count alone; the supervisor never latches PIT channel 0 behind a program's back, because that would break its two-byte reads.
-- **Virtual PIT:** each GLOS app's channel 0 runs from the tick, so virtual IRQ0 rates are rounded to 1 kHz. Programs that need faster rates (speaker sampling, Covox) run as exclusive sessions.
+- **Tick:** the RTC periodic interrupt (1024 Hz by default, 256–8192 Hz configurable) drives scheduling, timeouts and the supervisor clock. The handler always reads register C (a real MC146818 stops interrupting until it is read; 86Box doesn't).
+- **Clock:** a Pentium uses the TSC to interpolate between ticks. A 486 uses the tick count alone.
+- **PIT channel 0** stays in mode 2, count FFFFh: what DJGPP's `uclock` programs, so its latched reads stay coherent with the BIOS tick at 0x46C. GLOS never latches or reads channel 0 itself.
+- **Exclusive sessions** get ports 40h–43h and 61h passed through (Screamer Rally and GTA reprogram channel 0 from protected-mode INT 8 handlers); GLOS restores mode 2/FFFFh afterwards.
+- **Virtual PIT for GLOS apps (M6):** latched reads pass through while an app's programming matches the physical PIT; virtual IRQ0 rates are rounded to the tick. Programs that need faster rates (speaker sampling, Covox) run as exclusive sessions.
 - **INT 15h 86h** (BIOS wait) is emulated as a sleep, because AT BIOSes implement it with the RTC periodic interrupt and would switch GLOS's tick off.
 - **DOS time** is re-synchronised from the RTC after each exclusive session, and from SNTP when the network is up (§11.3).
 
 ### 6.6 DPMI host
 
-- **Coverage:** all of DPMI 0.9, plus the DPMI 1.0 functions real programs use. Appendix A lists the calls our programs make; C runtime start-up code and DOS/4GW use more (for example 0303h mouse callbacks, and 0E00h/0E01h and 0507h, which need confirming). Unimplemented calls are logged with the caller's address and fail cleanly.
-- **Clients:** 32-bit clients are required; 16-bit clients are open (they matter only for old Windows-era DOS tools).
-- **Detection:** 1687h and the mode-switch entry follow the specification. 0A00h "GLOS" returns the API entry (D23).
+- **Coverage:** all of DPMI 0.9, plus the DPMI 1.0 functions real programs use. The per-function table, with the programs that need each call and the baseline it is checked against, is in supervisor.md §13. Appendix A.3 has the start-up sequences of DJGPP and DOS/4GW. Unimplemented calls are logged with the caller's address and fail cleanly.
+- **Clients:** 32-bit and 16-bit clients (D30).
+- **Contexts:** one per top-level program tree; EXECed children share it, as on CWSDPMI and HDPMI (DOSBench's DBMENU starts BENCHG and BENCHGL).
+- **Detection:** 1687h and the mode-switch entry follow the specification. 0400h reports PIC bases **08h/70h** (DJGPP copies them), and IRQs are delivered on those vectors. 0A00h "GLOS" returns the API entry (D23); **any other vendor string gets CF=1** (DOS/4GW probes its own). Protected-mode INT 31h goes through the client's interrupt chain, so an extender that hooks INT 31h is honoured.
+- **Raw switch:** 0305h/0306h from M4a, because DOS/4GW needs them to start.
+- **16-bit stacks:** DOS/4GW clears the Big bit on its SS; every return to a 16-bit SS goes through espfix (supervisor.md §6.3).
 - **Exceptions:** 0202h/0203h and 0210h–0213h; the first-chance and last-chance handling DJGPP and DOS/4GW expect.
 - **Interrupts:** 0200h–0205h; hardware IRQs are delivered to client handlers through the virtual PIC.
 
@@ -456,7 +483,15 @@ When SSH is down (boot, supervisor panic), the host tools fall back to the seria
 ### 7.11 Security
 
 - **Algorithms:** curve25519-sha256 key exchange, ssh-ed25519 host keys, chacha20-poly1305 encryption. sntrup761 is left out: it costs too much on a 486.
-- **Cost on a 486:** Curve25519 and Ed25519 operations run in a preemptible supervisor task, so a handshake never stalls interrupts or the DOS session.
+- **Cost:** modelled from multiply counts and published cycle tables, anchored to published Pentium III and Cortex-M0 results (to be measured on silicon, D28):
+
+| CPU | X25519 | Ed25519 sign | Ed25519 verify | Server handshake | ChaCha20-Poly1305, CPU-bound |
+|---|---|---|---|---|---|
+| 486DX2-66 | ~150 ms | ~190 ms | ~390 ms | ~0.9 s (0.35–0.5 s optimised) | ~0.6 MB/s |
+| Pentium 100 | ~37 ms | ~45 ms | ~95 ms | ~0.2 s | ~2.3 MB/s |
+| Pentium II 266 | 4–7 ms | 5–8 ms | 10–16 ms | 25–45 ms | ~12 MB/s |
+
+  The 486 optimisations: a precomputed fixed-base table (about 30 KB) for signing and key generation, an ephemeral key precomputed while idle, and an assembly multiply. These operations run in a preemptible supervisor task, so a handshake never stalls interrupts or the DOS session.
 - **Entropy:** gathered from IRQ timing and saved as a seed file. Host keys are made on first boot; Loop A images ship a fixed, publicly known test key.
 
 ---
@@ -477,9 +512,9 @@ When SSH is down (boot, supervisor panic), the host tools fall back to the seria
 
 ### 8.3 SSH server
 
-- Built from TinySSH's protocol and cryptography code, reworked from one forked process per connection into a single event-driven supervisor task.
-- Channels: `session` (exec, shell, the `sftp` subsystem) and `direct-tcpip` (ours).
-- Several concurrent connections.
+- TinySSH's cryptography (portable C with 32-bit limbs) and packet and key-exchange code are reused. Its connection and channel layer is not: TinySSH runs one forked process per connection, keeps all state in global singletons, allows a single `session` channel, and allocates about 669 KB of buffers per connection.
+- GLOS writes its own event-driven layer in one supervisor task: several connections, several channels each (`session` with exec, shell and the `sftp` subsystem; `direct-tcpip`), about 90 KB per connection.
+- It is tested natively against OpenSSH's client before any Loop A run.
 
 ### 8.4 TLS
 
@@ -521,14 +556,15 @@ The display layer handles N screens (D15); v1 drives one.
 
 - Rectangles, lines, blits, clip regions, images and text.
 - A software renderer for every depth, with Matrox acceleration behind the same interface. Accelerated output must match the software output pixel for pixel (M7 exit).
-- **Text:** bitmap fonts by default. Anti-aliased TrueType rendering (stb_truetype, or FreeType) is optional and runs in ring 3 (D19).
+- **Text:** bitmap fonts rendered at build time from open TrueType fonts, a sans for the UI and a mono for terminals (D37, Q16). Live anti-aliased rendering from the same fonts (stb_truetype or FreeType) is optional, off by default, and runs in ring 3 (D19).
 - **Dirty rectangles** are tracked per screen. They drive redraws, VNC and capture.
 
 ### 9.4 Window manager
 
 - Overlapping windows, z-order, clipping regions, decorations, focus, moving and resizing, and Alt-Tab between windows and full-screen apps.
-- A desktop with icons, and a task list.
-- Our own period design (D7, Q5).
+- **Shell (D33):** desktop icons for drives, folders and programs; a task bar with a launcher menu, every running program (GLOS apps and DOS sessions alike), a clock, status icons and the remote-session indicator (D35).
+- **Look (D7):** flat and restrained, in the spirit of System 7; designed in the M6 pass (Q5).
+- **Fit and keys (D34):** every window and dialog fits 640×480; everything is reachable from the keyboard (menu accelerators, Tab order, task switching, moving and resizing windows by keys).
 
 ### 9.5 VRAM
 
@@ -618,7 +654,7 @@ Each app keeps SDL's cooperative threads in v1, and GLOS preempts between apps. 
 
 - **Toolkit:** a widget toolkit on the 2D library, covering buttons, lists, menus, text editing, scrolling, dialogs and a file dialog. Whether it's our own retained-mode toolkit or built on microui or Nuklear is decided in M6 (Q11).
 - **v1 native apps:**
-  - file manager;
+  - file manager: spatial folder windows from the desktop, plus a browser app with a tree and list (D33);
   - notepad;
   - calculator;
   - terminal (GLOS's shell, plus an SSH client);
@@ -640,7 +676,7 @@ Each app keeps SDL's cooperative threads in v1, and GLOS preempts between apps. 
 | Sound | Mixer, per-app volume, card resources |
 | Network | NIC, IP or DHCP, host name, mDNS, SNTP server, SSH keys, VNC |
 | Date and time | Time zone, SNTP |
-| Programs | Per-program settings for exclusive sessions: environment, memory, start-up commands |
+| Programs | Per-program profiles (D36): icon, command line, environment, memory, sound settings, `direct` mode (D20), start-up commands |
 | Packages | Package sources |
 | Start-up | Start-up behaviour |
 | Agent | Telemetry options |
@@ -700,7 +736,7 @@ Targets are measured on silicon or derived from CPU models, never from 86Box spe
 | P2 | Windowed DOS-GL at 90% or more of full-screen frame rate at the same size | Pentium II + G450 |
 | P3 | A window drag at 1024×768×16 holds 30 fps (accelerated) | Pentium II + G200 |
 | P4 | The desktop is usable at 640×480×8 (VBE) | 486DX2-66 (model; Q10) |
-| P5 | An SSH handshake takes under 1 s; SFTP reaches 1 MB/s or more | Pentium II + RTL8139 |
+| P5 | An SSH handshake takes under 0.1 s and SFTP reaches 1 MB/s or more on the reference; under 1 s and 0.3 MB/s on a 486DX2-66 | Pentium II 266 + RTL8139 (measured); 486DX2-66 (modelled until a 486 bench PC exists) |
 | P6 | Mixer refill latency under 20 ms; zero underruns in Fifth Wheel windowed | Pentium II + SB16 |
 
 **Levers:**
@@ -749,7 +785,11 @@ Every suite must show:
 - an SSH status probe answered at least every 2 s throughout, with a screenshot and a kill succeeding on request;
 - VECCHK OK and VMODE 3 afterwards.
 
-Timed `--shots` screenshots are left out, because they depend on timing.
+Timed `--shots` screenshots are left out, because they depend on timing. The SSH probe interval is measured in guest time (each reply carries the tick count), because 86Box runs below real time.
+
+The full matrix of suites, baselines (CWSDPMI r7, HDPMI32i, HDPMI16, DOS/4GW standalone, RTM), profiles (`bf6`, `486dx2`, `486dx4`) and boots is in [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md). It also covers our own DPMI conformance suites (32- and 16-bit), DJGPP's `djtst205` tests, ecm's `dpmitest`, HDPMI's regression suite, the retail games (GTA, Screamer Rally), DOSBench and TPX.EXE. Every suite also runs once with direct mode forced, to find programs that need a profile.
+
+**Survey first (M0):** before any DPMI code exists, every suite runs under HDPMI32i, an existing IOPL-0 host, to find which programs dislike trapped CLI/STI (`docs/survey-iopl0.md`).
 
 ### 14.4 Hostile programs
 
@@ -784,15 +824,19 @@ The bench runs the gate's suites through GLOS's agent (M5 on).
 
 | # | Item | Milestone |
 |---|---|---|
-| H1 | `--net CARD`: a NIC on SLiRP, plus `[SLiRP Port Forwarding #1]` with a host port per VM. 86Box already reads this section (`src/network/net_slirp.c`). | M0 |
-| H2 | `--machine`: a 486 profile (machine and CPU chosen in M0, Q9) next to the BF6 Pentium II | M0 |
-| H3 | `--com2`: COM2 to a host pty or socket, for the kernel gdb stub | M0 |
-| H4 | `--boot-cfg himemx`: a second golden boot image with HIMEMX. The default image stays byte-identical. | M0 |
-| H5 | A CPU self-test for V86 mode, TSS and the I/O bitmap (like STACKPG, which found the bug behind patch 0103) | M0 |
-| H6 | A generic VBE 2.0 card option, for "any VESA 2.0" coverage | M0 |
+| H0 | `--emit-config` and `make loopa-cfgcheck`: prove the default BF6 config and golden boot image stay byte-identical after every harness change | M0 |
+| H1 | `--net ne2k\|ne2kpci\|rtl8139c+\|i82557\|i82558[:PORT]`: a NIC on SLiRP, plus `[SLiRP Port Forwarding #1]` (`0_protocol/0_external/0_internal`) with a free host port recorded in `result.json`. 86Box already reads this section (`src/network/net_slirp.c`). | M0 |
+| H2 | `--machine bf6\|486dx2\|486dx4` (§4.7): the HOT-433A with AwardBIOS 4.51PG, NVR cache per profile, and `/machines/hot433/` and `/video/s3/` added to the sparse ROM checkout | M0 |
+| H3 | `--com2`: COM2 through 86Box's `pipe` device and a FIFO-to-TCP bridge, for the kernel gdb stub | M0 |
+| H4 | `--boot-cfg himemx`: a second golden boot image with HIMEMX and `DOS=HIGH`, in its own directory. The default image stays byte-identical. | M0 |
+| H5 | V86TEST: a CPU self-test for V86 mode, TSS, the I/O bitmap, VME/PVI, delivery faults, espfix, #PF codes, the RTC and A20 (cases A–U in the milestones doc), with a list of known 86Box deviations | M0 |
+| H6 | `--card vbe`: the S3 Trio64V2/DX (VBE 2.0), the only video on 486 profiles until D38 | M0 |
+| H6a | `--wrap PREFIX` (runs each test command under `GLOS.EXE`) and `--dynarec 0\|1` | M0 |
+| H6b | Local 86Box patches 0106 (VME-redirected INT pushes IF=VIF, IOPL=3), 0107 (INT3/INTO/BOUND in V86 through the IDT), 0108 (VME at IOPL 3 uses the redirection bitmap), and 0109 (dynarec PUSHF and IOPL) only if V86TEST case U fails | M0 |
 | H7 | SSH steps in Loop A jobs: wait for the SSH server, run commands, fetch files | M3 |
 | H8 | Loop B's SSH transport in `tools/bench/run.py`, with BENCH.BAT kept as the fallback | M5 |
 | H9 | Fixes for any 86Box CPU or device bug GLOS uncovers, as local patches (no fork) | As needed |
+| H10 | PCI variants of the Matrox G200/G400/G450 devices (D38) | M7 |
 
 ---
 
@@ -871,8 +915,10 @@ GLOS/
 
 Defined by their exit criteria. All exits are in Loop A unless marked "bench". v1 is M0–M9 plus the M10 gates; each M10 feature ships when it passes its own gate.
 
-**M0: harness (in MGA-Glide, with its full regression).** H1–H6 from §15.
-*Exit:* `loopa-selftest` and the full MGA-Glide regression unchanged. A NE2000 VM answers a TCP connection on its forwarded port. The 486 profile and the HIMEMX boot run the existing HX tools. The V86/TSS/IOPB self-test passes.
+The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md).
+
+**M0: harness (in MGA-Glide, with its full regression) and the IOPL-0 survey (GLOS).** H0–H6b from §15; the HDPMI32i survey (§14.3).
+*Exit:* `loopa-cfgcheck`, `loopa-selftest` and the full MGA-Glide regression unchanged. Self-tests pass for the 486 profiles, the VBE card, the network (a NE2000 VM answers on its forwarded port), COM2, the HIMEMX boot and V86TEST on all three profiles, with no known deviation left that a local patch fixes. `docs/survey-iopl0.md` lists every suite's result under HDPMI32i.
 
 **M1: ring 0 round trip.** Loader (raw and XMS modes), kernel image, protected mode with paging, serial log, gdb stub on COM2, return to DOS.
 *Exit:* a `GLOS-` line from ring 0, then back to DOS, with VECCHK clean, KEYWAIT working and VMODE 3. This holds on the Pentium II and 486 profiles and on raw and HIMEMX boots. gdb breaks in the kernel over COM2.
@@ -883,8 +929,12 @@ Defined by their exit criteria. All exits are in Loop A unless marked "bench". v
 **M3: network and a minimal agent.** NE2000 driver, lwIP with DHCP, the SSH server (exec, SFTP), text-mode screenshots, H7.
 *Exit:* from the host, over SSH: a 16-bit command runs with its output captured and exit code returned, an SFTP round trip is byte-identical, and a text-mode screenshot is taken.
 
-**M4: DPMI host and exclusive sessions.** Full DPMI 0.9 and the 1.0 subset, exceptions, crash reports, exclusive sessions with kill and restore.
-*Exit:* the supervisor gate (§14.3).
+**M4: DPMI host and exclusive sessions,** in five sub-milestones, each with its own exit:
+- **M4a:** 32-bit basics, including the raw switch, espfix and 0A00h; our DPMI conformance suite validated against CWSDPMI and HDPMI32i.
+- **M4b:** exceptions, IRQ delivery, real-mode callbacks, signals, the FPU and crash reports; DJGPP's `djtst205`.
+- **M4c:** DOS/4GW and the retail games, nested contexts, ecm's `dpmitest` and HDPMI's suite, MGA-Glide conformance and replays, DOSBench.
+- **M4d:** 16-bit clients (D30): our 16-bit suite against HDPMI16, and TPX.EXE on RTM/DPMI16BI.
+- **M4e:** exclusive sessions, profiles with direct mode, `glos run`, and the full supervisor gate (§14.3).
 
 **M5: the full agent and Loop B.** Graphics screenshots, input injection, telemetry, `glos gdb` through `direct-tcpip`, RTL8139 and 8255x drivers, mDNS, H8.
 *Exit:* a Loop A job driven entirely over SSH (keys, shots, logs) matches its `--keys`/`--shots` equivalent. Bench: Loop B runs over SSH with BENCH.BAT as fallback, and DOSBench is within 3% of its numbers without GLOS (P1).
@@ -949,19 +999,21 @@ Defined by their exit criteria. All exits are in Loop A unless marked "bench". v
 |---|---|---|
 | Q1 | Support the 486SX? The core can avoid the FPU; DJGPP programs would need FPU emulation and Matrox paths need an FPU | M1 |
 | Q2 | Enable SSE state (OSFXSR) for programs on Pentium III and later, matching what CWSDPMI and DOS/4GW do? | M4 |
-| Q3 | Which FreeDOS kernel to recommend or bundle (2044 and later improve Windows-style hooks GLOS doesn't use), and whether GLOS ships a FreeDOS-based boot image | Before release |
+| Q3 | Which FreeDOS kernel to bundle in the boot image (D32); 2044 and later improve Windows-style hooks GLOS doesn't use | Before release |
 | Q4 | Package format, signing keys and hosting | M10 |
 | Q5 | Look-and-feel design: colours, decorations, icons, desktop metaphor | M6 |
 | Q6 | A real-mode child process started by a GLOS app: run it as an exclusive session, or hold the DOS lock for its lifetime? | M6 |
 | Q7 | EMS for older games (needs DMA virtualisation once memory isn't identity-mapped) | After v1 |
 | Q8 | Launching apps: DOS EXEC through the DOS server, or GLOS loading DJGPP images itself as Windows' KERNEL loaded apps | M6 |
-| Q9 | Which 86Box 486 machine and CPU (with and without VME), and which generic VBE 2.0 card, for Loop A | M0 |
-| Q10 | A 486 bench PC, so the minimum spec is measured and not modelled | M5 |
+| Q9 | *Answered (v0.2):* HOT-433A with i486DX2-66 and iDX4-100; S3 Trio64V2/DX (§4.7) | — |
+| Q10 | A 486 bench PC, so the minimum spec is measured and not modelled. *User: maybe later; modelled meanwhile.* | M5 |
 | Q11 | Our own retained-mode toolkit, or microui/Nuklear underneath | M6 |
 | Q12 | SDL threads under GLOS: keep SDL's cooperative scheduler per app, or map them onto GLOS threads | M8 |
 | Q13 | VNC encodings and the recording format | M10 |
-| Q14 | Support 16-bit DPMI clients? | M4 |
+| Q14 | *Answered (v0.2):* yes, in v1 (D30) | — |
 | Q15 | Resizing DOS-GL windows: reallocate the buffers, or keep the size and scale with `engine_present` | M8 |
+| Q16 | Which open TrueType fonts (OFL/MIT) to render the UI and terminal bitmap fonts from (D37) | M6 |
+| Q17 | Which programs need direct-mode profiles by default (from the M0 survey and the M4e forced-direct runs) | M4e |
 
 ---
 
@@ -983,9 +1035,10 @@ Collected 2026-10-01 from DOS-GL, the shared HAL, SDL3's DOS port with the proje
 | 0501h/0502h memory blocks | DJGPP runtime | `sys_alloc` |
 | 0600h page locking | ISRs, rings, thread stacks (SDL); `_CRT0_FLAG_LOCK_MEMORY` | — |
 | 0800h/0801h physical mapping | Matrox MMIO and framebuffer (HAL `mga_map`); VBE LFB (SDL) | Matrox MMIO and framebuffer |
-| Not used | 0303h real-mode callbacks, PCI BIOS (INT 1Ah), RDTSC | — |
+| 0303h real-mode callback | **Every DJGPP program**: the runtime installs one as the real-mode INT 1Bh vector (Ctrl-Break) at start-up (corrected in v0.2) | DOS/4GW itself (A.3) |
+| Not used | PCI BIOS (INT 1Ah) | — |
 
-Runtime start-up code and DOS/4GW itself use more than this, for example 0303h for mouse callbacks (§6.6). The M4 gate finds the rest.
+v0.1 listed 0303h and RDTSC as unused. Both are used: 0303h by DJGPP's runtime, and RDTSC by the ports' `dbwrite.c` and by DOSBench (A.4). DJGPP's own libc uses RDTSC only on NT.
 
 ### A.2 Hardware and BIOS
 
@@ -1004,12 +1057,78 @@ Runtime start-up code and DOS/4GW itself use more than this, for example 0303h f
 - **Privileged instructions:** CLI/STI (SDL mutexes, semaphores, PlayDevice), HLT (SDL scheduler idle).
 - **Harness:** port 0E80h (86Box unit tester), COM1 3F8h–3FDh (polled, 115200 8N1), port 80h.
 
+### A.3 Runtime start-up sequences (added in v0.2)
+
+Collected from the DPMI specifications, DJGPP's stub and libc sources, the Open Watcom documentation and a disassembly of `DOS4GW.EXE`. They are behavioural notes only (D26). Per-function status is in supervisor.md §13.
+
+- **DJGPP stub:**
+  - INT 2Fh 1687h; if there is no host it EXECs CWSDPMI.EXE.
+  - Mode switch with AX=1.
+  - 0000h ×2, 0501h for the image, then 0007h/0009h (C09Bh/C093h | DPL<<5)/0008h.
+  - 0100h with BX=0F00h, **relying on a failure returning AX=0008h and BX=largest**.
+  - 0300h INT 21h reads with SS:SP=0, then a far jump to the COFF image at 1000h.
+- **DJGPP crt0/crt1:**
+  - 0507h to uncommit page 0 (null-pointer trap) unless `_CRT0_FLAG_NULLOK` is set.
+  - 000Ah for `__djgpp_ds_alias`.
+  - 0008h with FFFFFFFFh, checked with LSL (fat DS).
+  - 0006h; 0600h with `_CRT0_FLAG_LOCK_MEMORY`.
+  - `_dos_ds` from 0000h + 0008h (limit 10FFFFh); 0400h (PIC bases copied into `_go32_info_block`).
+  - sbrk allocates new 0501h blocks, which must be ascending above the first.
+  - At exit it frees selectors, including 0001h on the currently loaded DS, then 0502h and INT 21h 4Ch from a 16-bit stub.
+- **DJGPP signals:**
+  - 0203h for exceptions 0–11h.
+  - 0205h on protected-mode INT 9 (port 60h and 0040:0017; the Ctrl-C trick calls 0008h inside the IRQ handler to set a 0FFFh DS limit and force a fault), INT 75h (IRQ13: writes port F0h, EOIs both PICs), INT 24h, and INT 8 for SIGALRM.
+  - A 0303h callback as the real-mode INT 1Bh.
+  - FPU: 0E01h BX=1, or BX=3 with EMU387.DXE when there is no FPU.
+- **DJGPP timing:**
+  - `uclock` programs the PIT to mode 2/FFFFh on first use, spins on 0x46C calling INT 2Fh 1680h, then latches with `out 43h,0` and reads port 40h twice between reads of 0x46C.
+  - `usleep` uses `clock()` and 1680h; `delay` uses INT 15h 86h.
+- **DOS/4GW (1.97, and Professional bound into GTA):**
+  - 1687h, mode switch AX=1, then 000Bh/000Ch to **clear the Big bit on SS/DS** (16-bit stacks; espfix).
+  - 0A00h "RSI CLIENT 0.9" (its result is ignored). **Requires 0305h/0306h.**
+  - 0204h/0205h on INT 21h.
+  - Also 0000h–000Ch, 0200h–0205h, 0303h/0304h, 0400h, 0500h–0502h, 0600h/0601h, 0702h, 0902h and 0D00h.
+  - INT 2Fh 1600h, 1681h/1682h, 1686h, 4310h; a VCPI DE00h probe.
+  - The LE program sees base-0 flat 4 GB segments, with linear below 1 MB equal to physical.
+
+### A.4 Games and ports (added in v0.2)
+
+Static census of the ports' sources and byte scans of the retail executables (never run for the census).
+
+| Program | Extender | Beyond A.1–A.3 |
+|---|---|---|
+| GLQuake (`~/qdos-dosgl`) | CWSDPMI | INT 2Fh 160Ah Windows check (aborts if Windows is reported); `_CRT0_FLAG_UNIX_SBRK`, allocates all 0500h free memory, needs ≥16 MB; keyboard ISR with no chaining and its own EOI; PS/2 BIOS INT 15h C201h–C206h; INT 33h 0/3/0Bh/11h; polled 8237 DMA count (flip-flop) for SB; GUS GF1/CODEC; MSCDEX 15xxh; IPX through 0301h; COM ISR on IRQ3/4; frequent FLDCW; PIT channel 2 and port 61h (crash beep); INT 21h 71A0h |
+| Quake 2 (`~/q2dos-dosgl`) | CWSDPMI | As GLQuake, plus `GAMEX86.DXE` loaded through DXE3 (code in malloc'd memory) and the DOSLFN TSR |
+| Half-Life (`~/xash3d-fwgs-dos`) | CWSDPMI | Keyboard ISR (locked with 0600h); INT 33h; SB16 polled 16-bit DMA; COM1 UART; RDTSC/CPUID (`dbwrite.c`); 2 MB stack; 128 MB in Loop A; DOSLFN |
+| PrBoom-plus | CWSDPMI | SDL3 (A.1–A.2); COM1 UART; RDTSC/CPUID; ENDOOM writes B8000h |
+| ClassiCube | CWSDPMI | Mode 13h launcher, DAC through 3C8h/3C9h; INT 16h 10h/11h/02h; INT 21h 2Ch **every frame** (through the DOS lock) |
+| Fifth Wheel | CWSDPMI | Nothing beyond SDL3/DOS-GL and the COM1 UART |
+| DOSBench | CWSDPMI + DOS/4GW | RDTSC calibrated against 0x46C; DBMENU (DJGPP) starts BENCHG (DOS/4GW) and BENCHGL: **nested clients** |
+| MGA-Glide tests | DOS/4GW | LE loader into heap memory; port 80h magic, 0E80h, 3DAh polling; SB DAC with `uclock` |
+| Screamer Rally (retail) | DOS/4GW 1.97 | HMI SOS (`.386` drivers loaded into protected-mode memory); hooks INT 08h through 0204h/0205h and reprograms PIT channel 0 in mode 3 under CLI; INT 1Bh/23h in both modes; INT 2Fh, 4Bh (VDS) and 67h through 0300h; port 61h; reads 0x417/0x41A and A0000h flat |
+| GTA (retail) | DOS/4GW Professional (bound) | Miles 3.50D, Smacker, UniVBE embedded (needs VBE 2.0, probes the SVGA chipset); PIT channel 0 mode 2 with latched reads; 0007h ×13, 0008h, 0009h, 0800h, 0A00h; INT 10h and 66h through 0300h; INT 4Bh, 7Ah (IPX), 67h; CMOS 70h/71h; 201h |
+
+The gate's game runs mostly use `-nosound -nocdaudio -nolan`; Half-Life's Loop A default uses the SB16. The "retail replays" in MGA-Glide's suite are GLPLAY.EXE replaying traces, not the games themselves.
+
+**Riskiest behaviours for a new host, in order:**
+1. DOS/4GW as a client: descriptor get/set, the raw switch, the 0A00h probe, the zero-based flat model, VCPI and Windows probes.
+2. Clock coherence between latched PIT reads, 0x46C and the TSC.
+3. Polled DMA sound and VDS.
+4. Keyboard ISRs that don't chain, and Ctrl-Break paths in both modes.
+5. Memory reporting (programs that take all of it).
+6. Environment checks: 160Ah, 3306h, 1680h.
+7. FPU control-word churn and the IRQ13/F0h path.
+8. The PS/2 mouse BIOS through the virtual 8042.
+9. Real-mode services: MSCDEX, IPX far calls, DOSLFN's direct disk writes, COM1 shared with telemetry.
+10. Code running from data memory (DXE3, HMI, Miles, the LE loader).
+
 ## Appendix B: Cross-repo changes
 
 | Repo | Change | Milestone | Gate |
 |---|---|---|---|
-| MGA-Glide | Loop A H1–H7 (§15) | M0, M3 | Full MGA-Glide regression (conform 27 × 4, replays, `loopa-selftest`) |
+| MGA-Glide | Loop A H0–H7 and 86Box patches 0106–0108 (§15) | M0, M3 | Full MGA-Glide regression (conform 27 × 4, replays, `loopa-selftest`) |
 | MGA-Glide | Loop B SSH transport (H8) | M5 | The same, plus a vbench dry run |
+| MGA-Glide (86Box) | PCI variants of the Matrox devices (H10, D38) | M7 | The full regression; the 486 profiles with a Matrox card |
 | MGA-Glide (HAL) | `hal/port/glos.c` (`sys_rm_int` becomes a nested V86 call under the DOS lock; physical mapping through GLOS) | M7 | The same; `make sync-hal` into DOS-GL and GLOS afterwards |
 | MGA-Glide (HAL) | Screen-to-screen BITBLT, mono expansion, hardware cursor, a shared VRAM allocator, `engine_resync()`, display start through the CRTC | M7 | The same, plus new conformance tests for each primitive |
 | DOS-GL | The GLOS path in `src/dgl/context.c`: 0A00h detection, VRAM from GLOS, swap as present, the GPU lock, no VBE calls | M8 | DOS-GL conformance on G200, G400 and G450 on plain DOS (unchanged), and windowed under GLOS |
@@ -1061,3 +1180,35 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
 | Packet Driver Specification 1.11 | https://www.cs.vsb.cz/grygarek/PS/packet/pds111.txt |
 | SDL3 DOS port (merged 2026-04-23) | https://github.com/libsdl-org/SDL/pull/15377 |
 | Intel 486 and Pentium manuals; Ralf Brown's Interrupt List | Standard references |
+
+## Appendix D: Changes in v0.2 (deep dive, 2026-10-01)
+
+- **New user decisions D30–D38:** 16-bit clients in v1; text-mode-only session switching; distribution; shell and file manager; 640×480 and keyboard operation; the remote indicator; per-program profiles; bitmap UI fonts; PCI Matrox variants in 86Box at M7.
+- **Updated decisions:**
+  - D7: flat, restrained look.
+  - D19: window system in ring 0, confirmed.
+  - D20: IOPL 0 with a direct-mode opt-out.
+  - D21: PIT ownership policy.
+- **§1, §7.11:** crypto costs corrected. A 486 operation takes 150–390 ms, not tens of milliseconds; a handshake takes about 0.9 s on a 486DX2-66. Throughput figures added.
+- **§4:**
+  - §4.2: memory estimates.
+  - §4.4: 8255x device names corrected.
+  - §4.7: Loop A profiles (HOT-433A 486s, S3 Trio64V2/DX); 86Box's Matrox cards are AGP only.
+- **§5–§6:**
+  - §5.3: linear map.
+  - §6.2: block allocation rules.
+  - §6.3: virtual-IF trampoline and direct mode.
+  - §6.5: PIT policy.
+  - §6.6: contexts per program tree, 0400h PIC bases, 0A00h rules, raw switch in M4a, espfix, 16-bit clients.
+- **§8.3:** TinySSH reuse limits.
+- **§9.3, §9.4, §10.6, §10.7:** UI/UX decisions.
+- **P5:** split by CPU.
+- **§14.3:** baseline matrix and the M0 survey.
+- **§15:** H0, H6a, H6b and H10; the harness items detailed.
+- **§19:** M0 includes the survey; M4 split into M4a–M4e.
+- **§21:** Q9 and Q14 answered; Q3 and Q10 updated; Q16 and Q17 added.
+- **Appendix A:**
+  - 0303h and RDTSC corrected.
+  - A.3: runtime start-up sequences.
+  - A.4: games and ports.
+- **New documents:** docs/supervisor.md and docs/milestones-m0-m4.md.
