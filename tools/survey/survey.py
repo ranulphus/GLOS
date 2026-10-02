@@ -48,12 +48,17 @@ VARIANTS = {
     "base": [],
     "hdpmi32": ["--file", HX + "/HDPMI32.EXE=/HX/HDPMI32.EXE", "--pre", "HDPMI32 -r"],
     "hdpmi32i": ["--file", HX + "/HDPMI32I.EXE=/HX/HDPMI32I.EXE", "--pre", "HDPMI32I -r"],
+    # Diagnosis only (not in the default set): HDPMI reporting less free memory (-n).
+    "hdpmi32i-n": ["--file", HX + "/HDPMI32I.EXE=/HX/HDPMI32I.EXE", "--pre", "HDPMI32I -r -n"],
 }
+DEFAULT_VARIANTS = ["base", "hdpmi32", "hdpmi32i"]
 
 # name -> how to run it. "run": MGA-Glide's run.py with these arguments,
 # started from `cwd` (the repo whose files it uses, so the dev container
 # mounts it). "script": a DOS-GL runner, output in its out/<NAME>.
 SUITES = {
+    # How the host treats a client's CLI, PUSHF/CLI/POPF and STI (tests/dos/iftest.c).
+    "iftest": dict(kind="run", cwd=ROOT, args=["--exe", "build/dj/IFTEST.EXE"]),
     # MGA-Glide's own test programs: DOS/4GW and DJGPP.
     "mga-hello": dict(kind="run", cwd=MGA, args=["--exe", "build/ow/dos/HELLO.EXE"]),
     "mga-stackpg": dict(kind="run", cwd=MGA, args=["--exe", "build/djgpp/STACKPG.EXE"]),
@@ -76,15 +81,15 @@ SUITES = {
                                                     "--timeout", "1500", "--idle", "300"]),
     "fifthwheel": dict(kind="run", cwd=FW, args=["--exe", "build/dos/FWHEEL.EXE", "--file", "build/data/WORLD.PAK",
                                                  "--args=-test -fixed -autopilot -laps 1 -hash", "--card", "g450",
-                                                 "--sound", "sb16", "--pre", BLASTER, "--idle", "90",
-                                                 "--timeout", "600"]),
+                                                 "--sound", "sb16", "--pre", BLASTER, "--idle", "300",
+                                                 "--timeout", "2400"]),
     "quake": dict(kind="script", cwd=DOSGL, cmd=["tools/quake/run.sh", "quake", "g450"]),
     "prboom": dict(kind="script", cwd=DOSGL, cmd=["tools/doom/run.sh", "timedemo", "g450"]),
     "halflife": dict(kind="script", cwd=DOSGL, cmd=["tools/halflife/run.sh", "timedemo", "g450"]),
     # A retail game with DOS/4GW 1.97 and MGA-Glide in its attract mode.
     "screamer-rally": dict(kind="run", cwd=MGA, args=["--game", "sr", "--ovl", "build/ow/GLIDE2X.OVL", "--card",
                                                       "g450", "--pre", "SET MGAGLIDE=exit_after=400",
-                                                      "--timeout", "900", "--idle", "300"]),
+                                                      "--timeout", "2400", "--idle", "1500"]),
 }
 
 
@@ -160,23 +165,23 @@ def summary(name, variant):
         if os.path.exists(os.path.join(d, "serial.log")) else ""
     tests = sorted(l.split(" ", 3)[1] + " " + l.split(" ", 3)[2] for l in serial.split("\n")
                    if l.startswith("HX-TEST ") and len(l.split(" ")) > 2)
-    ends = sorted(set(re.findall(r"^(HX-DONE \S+|DGL-EXIT|MGL-EXIT|HX-GAME-EXIT|MGL-EXC|DGL-FAULT|HX-SDLCRASH)",
-                                 serial, re.M)))
+    ends = sorted(set(re.findall(r"^(HX-DONE \S+|DGL-EXIT frames=\d+|MGL-EXIT frames=\d+|HX-GAME-EXIT|MGL-EXC|"
+                                 r"DGL-FAULT|DGL-GLERR \S+|DGL-TEXOOM|HX-SDLCRASH)", serial, re.M)))
+    # Deterministic program output (Fifth Wheel's -fixed run hashes its state every 60 ticks).
+    hashes = [l for l in serial.split("\n") if l.startswith("FW-HASH")]
     frames = sorted(f for f in os.listdir(d) if f.endswith(".png"))
-    return {"status": open(os.path.join(d, "status")).read().strip(), "tests": tests, "ends": ends, "frames": frames}
+    return {"status": open(os.path.join(d, "status")).read().strip(), "tests": tests, "ends": ends, "frames": frames,
+            "hashes": hashes}
 
 
 def same_frames(name, a, b, frames):
-    """Frames identical in variants a and b (MGA-Glide's samepix)."""
+    """Frames whose RGB pixels differ between variants a and b (or are missing)."""
+    sys.path.insert(0, os.path.join(MGA, "tools/loopa"))
+    import png
     bad = []
     for f in frames:
         pa, pb = os.path.join(OUT, name, a, f), os.path.join(OUT, name, b, f)
-        if not os.path.exists(pb):
-            bad.append(f)
-            continue
-        r = subprocess.run([sys.executable, os.path.join(MGA, "tools/loopa/samepix.py"), pa, pb],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if r.returncode != 0:
+        if not os.path.exists(pb) or png.read_png(pa) != png.read_png(pb):
             bad.append(f)
     return bad
 
@@ -193,6 +198,10 @@ def compare(name, variant):
         diffs.append("tests differ (%s)" % ", ".join(lost[:4]) if lost else "tests differ")
     if base["ends"] != other["ends"]:
         diffs.append("end %s" % " ".join(other["ends"]) if other["ends"] else "no end marker")
+    n = min(len(base["hashes"]), len(other["hashes"]))
+    if base["hashes"][:n] != other["hashes"][:n]:
+        first = next(i for i in range(n) if base["hashes"][i] != other["hashes"][i])
+        diffs.append("state hash differs from %s" % base["hashes"][first].split()[1])
     bad = same_frames(name, "base", variant, base["frames"])
     if bad:
         diffs.append("%d of %d frames differ" % (len(bad), len(base["frames"])))
@@ -236,7 +245,7 @@ def main():
         return report()
     prepare_hosts()
     for name, spec in all_jobs(a.suite or list(SUITES)):
-        for v in a.variant or list(VARIANTS):
+        for v in a.variant or DEFAULT_VARIANTS:
             run_job(name, spec, v)
     return 0
 

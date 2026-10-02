@@ -87,13 +87,15 @@
 | U | With the dynarec on, the same V86 code block under IOPL 0, then 3, then 0 |
 
    - T: `selftest-cpu` on all three profiles.
-9. **Local 86Box patches:**
+9. **Local 86Box patches** (as V86TEST found them):
    - `0106-cpu-vme-int-redirect-flags`: a redirected INT pushes FLAGS with IF=VIF and IOPL=3.
-   - `0107-cpu-v86-int3-into-bound`: INT3/INTO go through the IDT in V86 as on silicon.
+   - `0107-cpu-v86-int3-into`: INT3/INTO in V86 mode go through the IDT as on silicon.
    - `0108-cpu-vme-iopl3-redirect`: VME at IOPL 3 consults the redirection bitmap.
-   - `0109-dynarec-iopl`: only if case U fails.
+   - `0109-cpu-popfd-vif-vip`: POPFD never loads VIF or VIP (found by case H; the dynarec patch planned
+     for this number wasn't needed, as case U passed).
+   - `0110-cpu-iopb-two-bytes`: a byte port's two bitmap bytes must both be inside the TSS limit.
 
-   Each patch removes its line from `known-86box.txt`.
+   Each patch removes its line from `known-86box.txt`, which is now empty.
 10. **`docs/loops.md`:** the new options and self-tests.
 
 **M0 exit (MGA-Glide worktree):**

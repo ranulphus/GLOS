@@ -3,6 +3,7 @@
 #   make                build/ow/GLOS.EXE (16-bit loader; a stub until G1)
 #   make loopa [CARD=g450]   run GLOS.EXE in 86Box through MGA-Glide's Loop A: out/loopa-CARD/
 #   make check-deps     MGA-Glide at or after deps.mk's pin
+#   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
 include deps.mk
@@ -16,11 +17,11 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all loopa check-deps clean help
+.PHONY: all loopa check-deps clean help survey-tools
 all: build/ow/GLOS.EXE
 
 help:
-	@sed -n '2,6p' Makefile | sed 's/^# //'
+	@sed -n '3,6p' Makefile | sed 's/^# //'
 
 check-deps:
 	@git -C "$(MGA_GLIDE)" merge-base --is-ancestor "$(MGA_GLIDE_PIN)" HEAD 2>/dev/null \
@@ -47,6 +48,15 @@ loopa: all check-deps
 	$(Q)$(DEV) python3 $(MGA_GLIDE)/tools/loopa/run.py --name glos --card $(CARD) \
 	  --exe build/ow/GLOS.EXE --out $(CURDIR)/out/loopa-$(CARD) --timeout $(LOOPA_TIMEOUT); \
 	  cat out/loopa-$(CARD)/status
+
+# The M0 survey's own probe (tests/dos/iftest.c): DJGPP, run under CWSDPMI and HDPMI.
+DJENV := env LD_LIBRARY_PATH=$(DJGPP_PREFIX)/hostlib
+DJCC  := $(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-gcc
+build/dj/IFTEST.EXE: tests/dos/iftest.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+survey-tools: build/dj/IFTEST.EXE
 
 clean:
 	rm -rf build out

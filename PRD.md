@@ -1013,7 +1013,7 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 | Q14 | *Answered (v0.2):* yes, in v1 (D30) | — |
 | Q15 | Resizing DOS-GL windows: reallocate the buffers, or keep the size and scale with `engine_present` | M8 |
 | Q16 | Which open TrueType fonts (OFL/MIT) to render the UI and terminal bitmap fonts from (D37) | M6 |
-| Q17 | Which programs need direct-mode profiles by default (from the M0 survey and the M4e forced-direct runs) | M4e |
+| Q17 | Which programs need direct-mode profiles by default. *M0 survey (docs/survey-iopl0.md): none among ours or Screamer Rally; the M4e forced-direct runs check the rest.* | M4e |
 
 ---
 

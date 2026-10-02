@@ -214,8 +214,13 @@ A `mode` field (V86 / PM16 / PM32 / ring 0) is derived from EFLAGS.VM and CS's d
 ### 8.3 BIOS waits
 
 - INT 15h 86h and 83h are emulated as sleeps on the kernel clock.
-- Whether the BF6's Award BIOS uses the RTC periodic interrupt for them is checked by M0's V86TEST case R.
-  Either way GLOS never lets a BIOS turn its periodic interrupt off (§10).
+- V86TEST case R (M0) confirmed that both Loop A BIOSes implement INT 15h 86h with the RTC periodic
+  interrupt:
+  - the BF6's Award BIOS turns PIE on for the wait and **leaves it on** afterwards (register B 02h → 42h);
+  - the HOT-433A's Award BIOS turns it off again.
+
+  GLOS never lets a BIOS touch the real RTC (§10). These BIOSes don't support INT 15h 2401h (A20) either,
+  so the loader uses port 92h, then the keyboard controller.
 
 ## 9. V86 monitor
 
@@ -232,8 +237,8 @@ A `mode` field (V86 / PM16 / PM32 / ring 0) is derived from EFLAGS.VM and CS's d
 - the 16- and 32-bit operand and address size prefixes, segment overrides and REP;
 - CLI, STI;
 - PUSHF(D), POPF(D) (respecting TF and the virtual IF);
-- INT n, INT3, INTO (decoded from #GP, because 86Box raises #GP for INT3/INTO at IOPL<3 even with VME until
-  patch 0107 [86Box]);
+- INT n; INT3 and INTO only arrive as #BP/#OF through the IDT (they aren't IOPL-sensitive in V86 mode;
+  86Box raised #GP until local patch 0107);
 - IRET(D);
 - HLT ("wait for the next virtual interrupt");
 - IN, OUT, INS, OUTS on trapped ports, dispatched to the virtual devices.
@@ -247,7 +252,10 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 - **With VME:** VIP is set while an IRQ is pending, and the next STI or POPF faults so it can be delivered.
 - **Redirected software INTs:** with VME, the redirection bitmap sends most INTs straight to the IVT. Vectors
   GLOS handles (13h, 10h busy tracking; 15h; 21h for capture and EXEC tracking; 2Fh; 67h) stay clear.
-- **86Box bug:** a redirected INT pushes the real FLAGS (patch 0106 fixes the emulator) [86Box].
+- **PVI covers CLI and STI only.** With PVI, ring-3 CLI/STI change VIF without trapping, but **POPF never
+  changes VIF** (or IF at IOPL < CPL) and doesn't trap. A client's `pushf; cli; ...; popf` therefore leaves
+  VIF clear on PVI CPUs, and IF unchanged without PVI. This is the POPF hazard of IOPL 0 that the M0 survey
+  measures. 86Box loaded VIF from the image until local patch 0109; V86TEST case H checks it.
 - **Watchdog:** if the virtual IF stays off for more than 50 ms with an IRQ pending, GLOS writes
   `GLOS-WARN vif-stuck cs:ip`. It doesn't force the flag in v1.
 
@@ -354,6 +362,9 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   UNIX_SBRK path brackets it with 0900h/0901h).
 - 0500h reports accurate figures. GLQuake and Q2 allocate everything 0500h reports and need at least 16 MB
   [census].
+- The M0 survey showed why this matters. Under HDPMI (either IOPL), GLQuake's UNIX_SBRK heap couldn't grow,
+  and its first texture failed with GL_OUT_OF_MEMORY; under CWSDPMI it runs. GLOS follows CWSDPMI here, and
+  DPMICONF tests growing a UNIX_SBRK heap past 32 MB.
 
 ### 12.4 Physical mappings
 
@@ -572,16 +583,17 @@ DOS is entered through the INT 21h entry captured at load.
 
 | Deviation | Effect on GLOS | Handling |
 |---|---|---|
-| A VME-redirected INT pushes the real FLAGS (IF, IOPL) | VIF becomes the real IF after the handler's IRET | Local patch 0106 |
-| INT3/INTO/BOUND raise #GP in V86 at IOPL<3 even with VME | The #BP/#OF paths go untested | Patch 0107; the decoder also handles them from #GP |
-| VME at IOPL 3 skips the redirection bitmap | Direct mode on VME CPUs behaves unlike silicon | Patch 0108 |
+| A VME-redirected INT pushed the real FLAGS (IF, IOPL) | VIF became the real IF after the handler's IRET | **Fixed:** local patch 0106 |
+| INT3/INTO raised #GP in V86 at IOPL<3 | The #BP/#OF paths went untested | **Fixed:** patch 0107 (BOUND was right) |
+| VME at IOPL 3 skipped the redirection bitmap | Direct mode on VME CPUs behaved unlike silicon | **Fixed:** patch 0108 |
+| POPFD at CPL > 0 loaded VIF and VIP from the image | Hid the PVI POPF hazard (§9.3) | **Fixed:** patch 0109 |
 | Any fault during interrupt delivery becomes #DF | Real hardware would give #PF/#GP | Invariant: ring-0 stacks, GDT, IDT, TSS and LDT always present |
 | Inter-privilege delivery leaves state inconsistent if a push faults | | Same invariant |
 | #PF error code U bit reflects CPL during supervisor pushes | | Recorded by V86TEST; the kernel doesn't depend on U for implicit accesses |
-| The IOPB trailing FFh byte isn't enforced | A missing byte works in 86Box, fails on silicon | Static assertion and host test |
+| A byte port's second bitmap byte wasn't checked against the TSS limit | A missing trailing FFh byte worked in 86Box | **Fixed:** patch 0110; static assertion and host test too |
 | IRQ8 keeps firing without a read of register C | A tick that forgets C works in 86Box, freezes on silicon | Always read C (§8.1) |
 | PGE is stored but every flush is global | None | |
-| The dynarec compiles PUSHF per IOPL | IOPL changes inside a session could be ignored | IOPL constant per session; case U decides on patch 0109 |
+| The dynarec compiles PUSHF per IOPL | IOPL changes inside a session could be ignored | V86TEST case U found no problem; IOPL stays constant per session anyway |
 | Matrox G-series cards are AGP only | 486 profiles can't have a Matrox card | S3 Trio64V2/DX until a PCI-variant patch at M7 |
 
 ## 21. Invariants checklist (for code review)
