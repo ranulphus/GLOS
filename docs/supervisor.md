@@ -124,23 +124,43 @@ to COM1 at each step:
   that no vector a C runtime hooks (00h–07h, 1Bh, 23h, 24h) points into the memory being freed
   (`GLOS-WARN ivt-into-loader`). The stub then shrinks the block and runs the EXEC loop. After the kernel
   leaves, the stub puts A20 and the XMS blocks back as found, writes `GLOS-EXIT` and ends with INT 21h 4Ch.
-- **Measured (M3):** the stub is 2,030 bytes. With the PSP and the environment, MEM /C shows GLOS at 2,480
-  bytes, and the largest program is 2,480 bytes smaller than under plain DOS.
+- **Measured (M3):** the stub is 2,372 bytes. With the PSP and the environment, MEM /C shows GLOS at 2,832
+  bytes, and the largest program is 2,832 bytes smaller than under plain DOS.
 - **From a prompt or AUTOEXEC.BAT:** COMMAND.COM stays the shell; `glos exit` returns to it.
-- **As the shell (`SHELL=C:\GLOS\GLOS.EXE` in CONFIG.SYS):**
-  - `GLOS.EXE`'s PSP is the root of the PSP chain, and its environment is the master environment (1 KB by
-    default, set in GLOS.CFG). GLOS sets `COMSPEC` to COMMAND.COM, found next to the kernel, in the boot
-    drive's root or through `PATH`.
-  - Once the kernel is running, the stub runs `COMMAND.COM /C AUTOEXEC.BAT`. When that COMMAND.COM ends
-    (INT 21h 4Ch with its PSP), the kernel copies its environment into the master environment before DOS
-    frees it.
+- **As the shell (`SHELL=C:\GLOS\GLOS.EXE /SHELL` in CONFIG.SYS; done in M3):**
+  - `/SHELL` says so; so does a PSP that is its own parent (MS-DOS's shell). FreeDOS doesn't make its shell its
+    own parent, so `/SHELL` is needed there. FreeDOS also ignores a `SHELL=` line much longer than 64
+    characters, so the settings belong in GLOS.CFG:
+
+    ```
+    [shell]
+    comspec  = A:\FREEDOS\BIN\COMMAND.COM   ; else COMSPEC, the boot drive's \, \FREEDOS\BIN or \DOS,
+                                              ; GLOS.EXE's directory, or PATH
+    autoexec = C:\AUTOEXEC.BAT                ; else the boot drive's \AUTOEXEC.BAT
+    console  = C:\KIOSK.BAT                   ; run (through COMSPEC /C) instead of the prompt
+    envsize  = 2048                           ; the master environment, in bytes (default 1024)
+    ```
+
+    `/COMSPEC=`, `/P=`, `/E:` and `/CON=` on the command line override them, like COMMAND.COM's own options.
+  - `GLOS.EXE`'s environment becomes the master environment: what DOS gave it, with `COMSPEC` set, in a
+    block of `envsize` bytes that the stub allocates right above itself once resident.
+  - Once the kernel is running, the stub runs `COMSPEC /C AUTOEXEC.BAT`. When that COMMAND.COM ends (INT 21h
+    4Ch or 00h from a child of `GLOS.EXE`), the kernel copies its environment into the master environment
+    before DOS frees it: whole strings, as far as the block holds (`GLOS-VM env bytes=… of …`).
   - .COM and .EXE programs are EXECed directly. COMMAND.COM runs batch files, internal commands and
     `%COMSPEC%` shell-outs.
-  - Until the desktop exists (M6), the local console is a COMMAND.COM the stub runs and runs again whenever it
-    exits. Agent commands run alongside it at safe points (§17.2).
-  - GLOS never just ends: a refusal (§2 item 1), a missing kernel or a failure before the system VM exists
-    runs COMMAND.COM in real mode instead, after a `GLOS-REFUSE` line and a message on screen. `glos exit`
-    leaves protected mode and runs COMMAND.COM; its `EXIT` starts GLOS again.
+  - Until the desktop exists (M6), the local console is `COMSPEC` (or `COMSPEC /C console`), which the stub
+    runs and runs again whenever it exits. Agent commands run alongside it at safe points (§17.2).
+  - GLOS never just ends. A refusal (§2 item 1), a missing kernel or a failure before the system VM exists
+    leads to `GLOS-SHELL fallback=COMSPEC /P…`: the stub goes resident without the kernel and runs
+    `COMSPEC /P` (with `=autoexec` and `/E:` when given) as the permanent shell. That fallback costs only the
+    stub. If even COMSPEC can't run, `GLOS-SHELL error=cannot-run`, and the machine halts. When the kernel
+    leaves (`glos exit`, M3), the stub does the same after its cleanup; `EXIT` returning to GLOS comes with
+    `glos exit`.
+  - Measured on the glosshell boots: GLOS takes 4,720 bytes (the stub and PSP, and the 2 KB master
+    environment). While a batch file runs, the largest program is 577,776 bytes on the raw boot (plain DOS:
+    511,152, because COMMAND.COM swaps itself into GLOS's XMS) and 628,448 on the HIMEMX boot (plain DOS:
+    631,488).
 - **Later (opt-in, M9):** the stub moves into an unused upper-memory page that GLOS maps for the system VM,
   leaving the PSP and environment (about 0.5 KB) below 640K. A page qualifies only when it reads back as
   open bus (FFh), holds no option ROM signature and isn't claimed by any PCI BAR.

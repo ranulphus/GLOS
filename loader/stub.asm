@@ -22,10 +22,14 @@
 ;   void stub_resident(void)
 ;       does not return: copies the stub down, tells the kernel (RESIDENT),
 ;       continues in the copy, shrinks GLOS.EXE's memory block to the PSP and
-;       the stub, and from then on runs what the kernel says (NEXT): EXEC
-;       the program in stub_data, report how it ended, ask again. When the
+;       the stub, installs the master environment the C code staged (as the
+;       shell), and from then on runs what the kernel says (NEXT): EXEC the
+;       program in stub_data, report how it ended, ask again. When the
 ;       kernel leaves, _pm_ret ends here too: A20 and XMS as found, the
-;       GLOS-EXIT line on COM1, INT 21h 4Ch with the kernel's code.
+;       GLOS-EXIT line on COM1, INT 21h 4Ch with the kernel's code; as the
+;       shell, COMSPEC with the fallback tail instead, again and again.
+;       With realmode set there is no kernel at all: the same, without the
+;       kernel calls (the shell's fallback when GLOS can't start).
 ; Entry points for the kernel and programs (offsets in bootinfo):
 ;   _glos_xms_entry  the XMS entry under GLOS: five bytes for hooks, then the
 ;                    ARPL at _glos_bp_xms; the kernel serves the call and
@@ -45,16 +49,24 @@ GLOSSTUB segment para public 'STUB' use16
 
 stub_start:
 
-; ---- what the C code fills in (struct stub_data in loader/main.c, packed)
+; ---- what the C code fills in (struct stub_data, include/glos/bootinfo.h)
 _stub_data label byte
 sd_mode         db      0               ; 1: XMS mode
 sd_a20init      db      0               ; A20 was on when GLOS started
 sd_resident     db      0               ; set once resident: _pm_ret then exits
 sd_nxms         db      0
+sd_shell        db      0               ; GLOS is the DOS shell: it never ends
+sd_realmode     db      0               ; no kernel: EXEC path/tail again and again
+                db      0, 0
 sd_xms          dd      0               ; the XMS driver's entry
 sd_handles      dw      4 dup (0)
+sd_env_src      dd      0               ; the master environment the C code staged
+sd_env_len      dw      0
+sd_env_paras    dw      0               ; 0: keep the environment we have
 sd_path         db      80 dup (0)      ; EXEC: the program, ASCIIZ
 sd_tail         db      128 dup (0)     ; EXEC: length, text, CR
+sd_comspec      db      80 dup (0)      ; the shell's fallback: COMSPEC ...
+sd_fbtail       db      64 dup (0)      ; ... with this tail
 
 ; ---- the stub's own data
 _vm_state label word                    ; the kernel reads these three to resume
@@ -84,6 +96,7 @@ fcb2            db      37 dup (0)
 msg_exit        db      'GLOS-EXIT code=', 0
 msg_a20         db      ' a20=', 0
 msg_crlf        db      13, 10, 0
+msg_noshell     db      'GLOS-SHELL error=cannot-run', 13, 10, 0
 
 ; ---- pm_enter
 _pm_enter proc far
@@ -259,10 +272,12 @@ _stub_resident proc far
         xor     di, di
         mov     cx, offset _stub_end
         rep     movsb                   ; downwards: the source lies above its copy
+        cmp     cs:sd_realmode, 0
+        jne     moved
         mov     ax, GLOS_CALL_RESIDENT  ; from here, where the kernel knows the stub
         movzx   ebx, bx
         call    kcall
-        push    cs:new_seg
+moved:  push    cs:new_seg
         push    offset resident
         retf
 _stub_resident endp
@@ -281,14 +296,17 @@ resident:
         mov     ah, 4Ah
         int     21h
         mov     cs:sd_resident, 1
+        call    set_env
         mov     ebx, 0FFFFFFFFh         ; no program has run yet
 next:
         mov     cs:save_ss, ss
         mov     cs:save_sp, sp
         mov     cs:save_ds, ds
+        cmp     cs:sd_realmode, 0
+        jne     exec
         mov     ax, GLOS_CALL_NEXT
         call    kcall                   ; EAX = 1: EXEC sd_path with sd_tail
-        push    cs
+exec:   push    cs
         pop     ds
         push    cs
         pop     es
@@ -322,7 +340,52 @@ next:
 cannot:
         movzx   ebx, ax
         or      ebx, 10000h
-        jmp     next
+        cmp     cs:sd_realmode, 0
+        je      next
+        mov     si, offset msg_noshell  ; no kernel and no COMMAND.COM: nothing more to do
+        call    puts
+halt:   sti
+        hlt
+        jmp     halt
+
+; The master environment, as the shell: a block just above the stub, filled
+; with what the C code staged in its (now free, still intact) data, and then
+; grown to its full size. Allocating only what the text needs first keeps
+; DOS's new arena header below the staged text while it is copied.
+set_env proc near
+        mov     cx, cs:sd_env_len
+        or      cx, cx
+        jz      se_done
+        mov     bx, cx
+        add     bx, 15
+        shr     bx, 4
+        mov     ah, 48h
+        int     21h
+        jc      se_done
+        mov     es, ax
+        lds     si, cs:sd_env_src
+        xor     di, di
+        cld
+        rep     movsb
+        mov     bx, cs:sd_env_paras
+        mov     ah, 4Ah
+        int     21h                     ; ES: the new block, grown in place
+        mov     ax, es
+        mov     es, cs:psp_seg
+        mov     bx, es:[2Ch]            ; the environment DOS gave us ...
+        mov     es:[2Ch], ax            ; ... is replaced, and freed
+        or      bx, bx
+        jz      se_done
+        mov     es, bx
+        mov     ah, 49h
+        int     21h
+se_done:
+        push    cs
+        pop     ds
+        push    cs
+        pop     es
+        ret
+set_env endp
 
 ; ---- the end: back in real mode, interrupts off, EAX = the kernel's code
 stub_exit:
@@ -387,9 +450,26 @@ a20_put:
         call    putc
         mov     si, offset msg_crlf
         call    puts
+        cmp     sd_shell, 0
+        jne     shell_on
         mov     al, exit_code
         mov     ah, 4Ch
         int     21h
+shell_on:                               ; the shell never ends: COMMAND.COM from now on
+        push    cs
+        pop     es
+        cld
+        mov     si, offset sd_comspec
+        mov     di, offset sd_path
+        mov     cx, 80
+        rep     movsb
+        mov     si, offset sd_fbtail
+        mov     di, offset sd_tail
+        mov     cx, 64
+        rep     movsb
+        mov     sd_realmode, 1
+        mov     ebx, 0FFFFFFFFh
+        jmp     next
         assume  ds:nothing
 
 ; ZF clear when A20 is on: 0000:0500 and FFFF:0510 are different bytes.

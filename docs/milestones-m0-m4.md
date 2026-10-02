@@ -249,8 +249,11 @@ Differences from the plan:
   (`/NOVME` turns it off). `make loopa-sched` (`/SELFTEST`: bulk at 30% of contended ticks, the urgent sleeper
   never late), `loopa-m2`, `loopa-hostile`, `loopa-m1`, the refusal and `loopa-gdb` pass on all six
   combinations.
-- **Item 0a: the stub done; `SHELL=` mode under way.** `loader/stub.asm`. `make loopa-mem` passes on all six:
-  GLOS takes 2,480 bytes (was 38,192) and the largest program is 2,480 bytes smaller than under plain DOS.
+- **Item 0a done.** `loader/stub.asm`. `make loopa-mem` passes on all six: GLOS takes 2,832 bytes (was
+  38,192), and the largest program is 2,832 bytes smaller than under plain DOS. `SHELL=` mode
+  (supervisor.md §2.2): `make loopa-shell` on the glosshell boots (MGA-Glide 556bf7a) checks AUTOEXEC.BAT's
+  environment copied back, the console from GLOS.CFG, and the fallback to `COMMAND.COM /P` without a kernel;
+  all six pass, and so do mem, sched, m2, hostile, m1, the refusal and gdb.
 1. **PCI and NE2000.** `kernel/drv/pci.c` (enumeration, claiming) and `drv/nic/ne2k.c` (ISA and PCI), with the
    refusal rules (shared IRQ, a packet-driver signature on the same base).
 2. Wait queues, timers and mutexes.

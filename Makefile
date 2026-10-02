@@ -10,6 +10,7 @@
 #   make loopa-hostile  M2's exit: hostile programs killed with the hotkey
 #   make loopa-sched    the scheduler's self-test threads beside the VM (M3)
 #   make loopa-mem      conventional memory under GLOS against plain DOS (PRD P7)
+#   make loopa-shell    GLOS as the DOS shell: SHELL= boots, AUTOEXEC.BAT, the fallback
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
@@ -24,7 +25,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all dos-tests kernel host-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-gdb check-deps clean help survey-tools
+.PHONY: all dos-tests kernel host-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-gdb check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -125,6 +126,8 @@ loopa-sched: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py sched -j $(JOBS)
 loopa-mem: all check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py mem -j $(JOBS)
+loopa-shell: all check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py shell -j $(JOBS)
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
 loopa-gdb: all check-deps

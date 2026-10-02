@@ -8,6 +8,7 @@ through MGA-Glide's harness:
   jobs.py hostile [--profile P ...] [--boot B ...] [-j N]
   jobs.py sched [--profile P ...] [--boot B ...] [-j N]
   jobs.py mem [--profile P ...] [--boot B ...] [-j N]
+  jobs.py shell [--profile P ...] [-j N]      (MGA_GLIDE must have the glosshell boots)
 
 m1: on each machine profile (bf6, 486dx2, 486dx4) and boot (default: no
 XMS driver, raw mode; himemx: XMS mode, DOS=HIGH), RUN.BAT does
@@ -34,6 +35,13 @@ budget).
 mem: MEM /C natively and under "GLOS /RUN MEM /C" (PRD P7): GLOS's own
 memory (its PSP, the resident stub and its environment) is 4 KB or less,
 and MEM's largest program size is within 4 KB of plain DOS's.
+
+shell: GLOS as the DOS shell (SHELL= on the glosshell and glosshell-himemx
+boots). RUN.BAT, run from AUTOEXEC.BAT, sets a variable and EXITs; GLOS
+copies that environment back and runs the console from GLOS.CFG
+(SHCON.BAT), which must see the variable, PATH and COMSPEC, and reports
+MEM /C. Then without GLOSK.BIN: GLOS refuses and hands over to
+COMMAND.COM /P, which runs AUTOEXEC.BAT and so the job.
 
 hostile: HOSRUN.BAT runs every tests/dos/hostile.c case under one "GLOS /RUN
 COMMAND /C"; the harness types Ctrl-Alt-Shift-Esc after each one's "armed"
@@ -272,6 +280,51 @@ def mem(profile, boot):
                                                    "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+SHCON = ["@ECHO OFF", "SERSAY HX-SHELL console var=%GLOSVAR% comspec=%COMSPEC%", "MEM /C > C:\\OUT\\SHELL.TXT",
+         "SERSAY HX-DONE 0", "UTEXIT 0"]
+
+
+def shell(profile, boot):
+    """boot is the RAM configuration: default or himemx; the boot floppy is glosshell(-himemx)."""
+    tag = "%s-%s" % (profile, boot)
+    cfg_boot = "glosshell" + ("-himemx" if boot == "himemx" else "")
+    con = batfile("shell-%s/SHCON.BAT" % tag, SHCON)
+    cfg = batfile("shell-%s/GLOS.CFG" % tag, ["; GLOS as the shell, for jobs.py shell", "[shell]",
+                                               "console = C:\\TEST\\SHCON.BAT"])
+    st, serial = run("shell-" + tag, ["--machine", profile, "--boot-cfg", cfg_boot] + GLOS_FILES + [
+        "--file", con + "=/TEST/SHCON.BAT", "--file", cfg + "=/TEST/GLOS.CFG",
+        "--cmd", "SERSAY HX-START shell", "--cmd", "SET GLOSVAR=from-autoexec",
+        "--cmd", "SERSAY HX-SHELL autoexec comspec=%COMSPEC%", "--cmd", "EXIT"])
+    text = ""
+    p = os.path.join(ROOT, "out", "shell-" + tag, "files", "SHELL.TXT")
+    if os.path.exists(p):
+        text = open(p, "rb").read().decode("latin-1")
+    own = re.search(r"^\s*GLOS\s+([\d,]+)", text, re.M)
+    largest = re.search(r"Largest executable program size\s+\d+K \(([\d,]+) bytes\)", text)
+    comspec = "comspec=A:\\FREEDOS\\BIN\\COMMAND.COM"
+    checks = {
+        "status": st == "PASS",
+        "shell": "GLOS-BOOT step=shell" in serial and "GLOS-VM resident" in serial,
+        "autoexec": "HX-SHELL autoexec " + comspec in serial and "GLOS-VM autoexec code=" in serial,
+        "env-back": "GLOS-VM env bytes=" in serial,
+        "console": "HX-SHELL console var=from-autoexec " + comspec in serial,
+        "clean": "GLOS-WARN" not in serial and "GLOS-PANIC" not in serial,
+        "mem": bool(own and largest),
+    }
+    # The fallback: no kernel to start.
+    st2, fb = run("shellfb-" + tag, ["--machine", profile, "--boot-cfg", cfg_boot,
+                                     "--file", "build/ow/GLOS.EXE=/TEST/GLOS.EXE",
+                                     "--cmd", "SERSAY HX-START shellfb", "--cmd", "SERSAY HX-FB comspec=%COMSPEC%",
+                                     "--cmd", "SERSAY HX-DONE 0"])
+    checks["fallback"] = st2 == "PASS" and "GLOS-REFUSE reason=no-kernel" in fb \
+        and "GLOS-SHELL fallback=A:\\FREEDOS\\BIN\\COMMAND.COM /P=A:\\AUTOEXEC.BAT /E:2048" in fb \
+        and "HX-FB " + comspec in fb
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s glos=%s largest=%s%s" % ("shell-" + tag, "PASS" if not bad else "FAIL",
+                                               own.group(1) if own else "?", largest.group(1) if largest else "?",
+                                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def matrix(fn, combos, jobs):
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
         results = list(ex.map(lambda pb: fn(*pb), combos))
@@ -282,7 +335,7 @@ def matrix(fn, combos, jobs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem"])
+    ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -296,6 +349,8 @@ def main():
             if r[2]:
                 print("    %s-%s XMSTEST: %s" % (p, b, "; ".join(l[11:] for l in r[2])))
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "shell":
+        return 0 if all(r[1] for r in matrix(shell, combos, a.jobs)) else 1
     if a.suite == "mem":
         return 0 if all(r[1] for r in matrix(mem, combos, a.jobs)) else 1
     if a.suite == "sched":

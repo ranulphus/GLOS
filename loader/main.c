@@ -4,9 +4,14 @@
  * the first page tables and enters the kernel; when the kernel returns, it
  * restores A20, frees what it took and exits with the kernel's result.
  *     GLOS [/ROUNDTRIP] [/GDB] [/SELFTEST] [/NOVME] [/RUN program [args...]]
+ *     SHELL=GLOS.EXE /SHELL [/COMSPEC=path] [/P=autoexec] [/E:bytes] [/CON=command]
  * /RUN keeps DOS running in the kernel's system VM (V86 mode): GLOS.EXE then
  * shrinks to its resident stub (stub.asm), which runs the program and leaves
- * when it ends, with its exit code (supervisor.md §2.2).
+ * when it ends, with its exit code. As the shell (/SHELL, or started by DOS
+ * as its own parent), it runs AUTOEXEC.BAT and then the console instead, and
+ * never ends: if GLOS can't start, the stub runs COMMAND.COM (supervisor.md
+ * §2.2). The [shell] section of GLOS.CFG, next to GLOS.EXE, gives the same
+ * settings as comspec=, autoexec=, console= and envsize=.
  * Progress goes to COM1 as GLOS-BOOT lines; refusals as GLOS-REFUSE. */
 #include <conio.h>
 #include <dos.h>
@@ -29,15 +34,6 @@ extern int __cdecl cpu_id1(unsigned long *eax, unsigned long *edx);
 extern int __cdecl bios_e820(void *buf20, unsigned long *cont);
 
 /* The resident stub (stub.asm), in a segment of its own. */
-#pragma pack(1)
-struct stub_data {
-    unsigned char mode, a20init, resident, nxms;
-    void (__far *xms)(void);
-    unsigned short handles[4];
-    char path[80];                              /* EXEC: the program, ASCIIZ */
-    unsigned char tail[128];                    /* EXEC: length, text, CR */
-};
-#pragma pack()
 extern struct stub_data __far __cdecl stub_data;
 extern unsigned long __cdecl __far pm_enter(unsigned gdtr, unsigned long cr3, unsigned long src, unsigned long dst,
                                             unsigned long file_dwords, unsigned long bss_dwords,
@@ -59,6 +55,11 @@ static unsigned stub_off(void (__cdecl __far *f)(void))
     union { void (__cdecl __far *f)(void); unsigned long l; } u;
     u.f = f;
     return (unsigned)u.l;
+}
+
+static unsigned long far_addr(const void __far *p)
+{
+    return ((unsigned long)FP_SEG(p) << 16) | FP_OFF(p);
 }
 
 /* ---- COM1 */
@@ -147,6 +148,8 @@ static void a20_set(int on)
 
 static struct bootinfo bi;
 static unsigned xms_handles[4], n_xms;
+static unsigned buf_seg, tab_seg;                       /* the kernel image and the first page tables */
+static int shell;                                       /* GLOS is the DOS shell */
 
 static void add_range(unsigned long base, unsigned long len, unsigned long type)
 {
@@ -300,21 +303,20 @@ static void kernel_path(char *out, const char *argv0)
     strcpy(out + n, "GLOSK.BIN");
 }
 
-int main(int argc, char **argv)
+static int glos_main(int argc, char **argv)
 {
     struct SREGS sr;
     union REGS r;
     struct { unsigned long magic, entry, file_size, total; } hdr;
     unsigned long eax_, edx_, buf_phys, tab_phys, a, ret;
-    unsigned buf_seg = 0, tab_seg = 0, i, pages;
+    unsigned i, pages;
     char path[128];
     FILE *f;
     int xms_mode, run_at = 0;
 
-    outp(0x3FB, 0x80); outp(0x3F8, 1); outp(0x3F9, 0); outp(0x3FB, 0x03);
-    outp(0x3FA, 0xC7); outp(0x3FC, 0x03);
-    say("GLOS-BOOT step=start build=" GLOS_BUILD);
-    for (i = 1; i < (unsigned)argc; i++) {
+    if (shell)
+        bi.flags |= BI_F_SHELL | BI_F_VM;
+    for (i = 1; i < (unsigned)argc && !shell; i++) {
         if (!stricmp(argv[i], "/ROUNDTRIP")) bi.flags |= BI_F_ROUNDTRIP;
         else if (!stricmp(argv[i], "/GDB")) bi.flags |= BI_F_GDB;
         else if (!stricmp(argv[i], "/SELFTEST")) bi.flags |= BI_F_SELFTEST;
@@ -444,7 +446,7 @@ int main(int argc, char **argv)
     bi.stub_paras = (stub_off(stub_end) + 15) >> 4;
     stub_data.mode = bi.mode == BI_MODE_XMS;
     stub_data.a20init = (unsigned char)bi.a20_initial;
-    stub_data.xms = xms;
+    stub_data.xms = far_addr((const void __far *)xms);
     for (i = 0; i < n_xms; i++)
         stub_data.handles[i] = xms_handles[i];
     stub_data.nxms = (unsigned char)n_xms;
@@ -468,6 +470,14 @@ int main(int argc, char **argv)
         _dos_freemem(tab_seg);
         _dos_freemem(buf_seg);
         tab_seg = buf_seg = 0;
+        if (shell) {
+            if (FP_SEG(&stub_data) < _psp + 0x10 + bi.stub_paras) {
+                say("GLOS-VM error=stub-layout seg=%04x psp=%04x", FP_SEG(&stub_data), _psp);
+                return (int)glos_call(GLOS_CALL_LEAVE, 126);
+            }
+            say("GLOS-VM shell comspec=%s autoexec=%s", bi.comspec, bi.autoexec);
+            stub_resident();
+        }
         if (find_program(argv + run_at) != 0) {
             say("GLOS-VM error=cannot-run program=%s", argv[run_at]);
             ret = glos_call(GLOS_CALL_LEAVE, 126);
@@ -490,4 +500,196 @@ int main(int argc, char **argv)
     if (buf_seg) _dos_freemem(buf_seg);
     say("GLOS-EXIT code=%lu a20=%d", ret, a20_on());
     return (int)ret;
+}
+
+/* ---- GLOS as the DOS shell (supervisor.md §2.2) */
+
+static int shell_p, shell_e;                            /* /P= and /E: were given */
+static unsigned envsize = 1024;
+static char envbuf[4096];
+
+static void opt_str(char *dst, unsigned n, const char *v)
+{
+    strncpy(dst, v, n - 1);
+    dst[n - 1] = 0;
+}
+
+/* The [shell] section of GLOS.CFG next to GLOS.EXE: key = value lines. */
+static void read_cfg(const char *argv0)
+{
+    char line[160], path[128], *k, *v, *e;
+    const char *slash = strrchr(argv0, '\\');
+    size_t n = slash ? (size_t)(slash - argv0 + 1) : 0;
+    int in_shell = 0;
+    FILE *f;
+
+    memcpy(path, argv0, n);
+    strcpy(path + n, "GLOS.CFG");
+    if (!(f = fopen(path, "r")))
+        return;
+    while (fgets(line, sizeof line, f)) {
+        for (k = line; *k == ' ' || *k == '\t'; k++) ;
+        if (*k == ';' || *k == '#' || !*k)
+            continue;
+        if (*k == '[') {
+            in_shell = !strnicmp(k, "[shell]", 7);
+            continue;
+        }
+        if (!in_shell || !(v = strchr(k, '=')))
+            continue;
+        for (e = v; e > k && (e[-1] == ' ' || e[-1] == '\t'); e--) ;
+        *e = 0;
+        for (v++; *v == ' ' || *v == '\t'; v++) ;
+        for (e = v + strlen(v); e > v && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' '); e--) ;
+        *e = 0;
+        if (!stricmp(k, "comspec")) opt_str(bi.comspec, sizeof bi.comspec, v);
+        else if (!stricmp(k, "autoexec")) opt_str(bi.autoexec, sizeof bi.autoexec, v), shell_p = 1;
+        else if (!stricmp(k, "console")) opt_str(bi.console, sizeof bi.console, v);
+        else if (!stricmp(k, "envsize")) envsize = (unsigned)atoi(v), shell_e = 1;
+    }
+    fclose(f);
+}
+
+/* Is GLOS the shell, and with what? Options override GLOS.CFG; COMSPEC is
+   found as given, in the environment, on the boot drive (root, \FREEDOS\BIN,
+   \DOS), next to GLOS.EXE or along PATH; AUTOEXEC.BAT as given or in the
+   boot drive's root. Keep the SHELL= line short: FreeDOS ignores one much
+   longer than 64 characters, so settings belong in GLOS.CFG. */
+static void shell_setup(int argc, char **argv)
+{
+    static char p[80];
+    union REGS r;
+    const char *c;
+    int i;
+
+    shell = *(unsigned far *)MK_FP(_psp, 0x16) == _psp;        /* DOS made us our own parent */
+    for (i = 1; i < argc; i++)
+        if (!stricmp(argv[i], "/SHELL"))
+            shell = 1;
+    if (!shell)
+        return;
+    read_cfg(argv[0]);
+    for (i = 1; i < argc; i++) {
+        if (!strnicmp(argv[i], "/COMSPEC=", 9)) opt_str(bi.comspec, sizeof bi.comspec, argv[i] + 9);
+        else if (!strnicmp(argv[i], "/P=", 3)) opt_str(bi.autoexec, sizeof bi.autoexec, argv[i] + 3), shell_p = 1;
+        else if (!strnicmp(argv[i], "/E:", 3) || !strnicmp(argv[i], "/E=", 3))
+            envsize = (unsigned)atoi(argv[i] + 3), shell_e = 1;
+        else if (!strnicmp(argv[i], "/CON=", 5)) opt_str(bi.console, sizeof bi.console, argv[i] + 5);
+    }
+    if (envsize < 256) envsize = 256;
+    if (envsize > 32768U) envsize = 32768U;
+    r.x.ax = 0x3305;                                    /* the boot drive */
+    intdos(&r, &r);
+    if (!bi.comspec[0] && (c = getenv("COMSPEC")) != NULL)
+        opt_str(bi.comspec, sizeof bi.comspec, c);
+    for (i = 0; i < 4 && !bi.comspec[0]; i++) {
+        static const char *const dirs[] = { "\\", "\\FREEDOS\\BIN\\", "\\DOS\\" };
+        if (i < 3) {
+            sprintf(p, "%c:%sCOMMAND.COM", 'A' + r.h.dl - 1, dirs[i]);
+        } else {
+            kernel_path(p, argv[0]);
+            strcpy(strrchr(p, '\\') ? strrchr(p, '\\') + 1 : p, "COMMAND.COM");
+        }
+        if (access(p, 0) == 0)
+            strcpy(bi.comspec, p);
+    }
+    if (!bi.comspec[0]) {
+        _searchenv("COMMAND.COM", "PATH", p);
+        strcpy(bi.comspec, p[0] ? p : "COMMAND.COM");
+    }
+    if (!bi.autoexec[0])
+        sprintf(bi.autoexec, "%c:\\AUTOEXEC.BAT", 'A' + r.h.dl - 1);
+    if (access(bi.autoexec, 0) != 0)
+        bi.autoexec[0] = 0;
+}
+
+/* The master environment for the stub to install: ours, with COMSPEC. */
+static void stage_env(void)
+{
+    unsigned seg = *(unsigned far *)MK_FP(_psp, 0x2C), n = 0, len;
+    char far *e = (char far *)MK_FP(seg, 0);
+
+    while (seg && *e) {
+        len = _fstrlen(e);
+        if (_fstrnicmp(e, "COMSPEC=", 8) && n + len + 1 < sizeof envbuf - sizeof bi.comspec - 16) {
+            _fmemcpy(envbuf + n, e, len + 1);
+            n += len + 1;
+        }
+        e += len + 1;
+    }
+    n += sprintf(envbuf + n, "COMSPEC=%s", bi.comspec) + 1;
+    envbuf[n++] = 0;                                    /* the end of the strings */
+    envbuf[n++] = 0;                                    /* and no program name after them */
+    envbuf[n++] = 0;
+    stub_data.env_src = far_addr(envbuf);
+    stub_data.env_len = n;
+    stub_data.env_paras = ((envsize > n ? envsize : n) + 15) >> 4;
+}
+
+static void set_tail(unsigned char __far *t, const char *text)
+{
+    unsigned n = strlen(text);
+    t[0] = (unsigned char)n;
+    _fmemcpy(t + 1, text, n);
+    t[n + 1] = 0x0D;
+}
+
+/* GLOS couldn't start (or left): the stub runs COMSPEC as the permanent
+   shell, from now on, without the kernel. */
+static void shell_fallback(void)
+{
+    char tail[64];
+
+    if (tab_seg) _dos_freemem(tab_seg);
+    if (buf_seg) _dos_freemem(buf_seg);
+    tab_seg = buf_seg = 0;
+    if (n_xms) {
+        xms_call(0x0600, 0);
+        xms_release();
+    } else if (bi.mode == BI_MODE_RAW && bi.a20_initial == 0 && a20_on()) {
+        a20_set(0);
+    }
+    strcpy(tail, shell_p && bi.autoexec[0] ? " /P=" : " /P");
+    if (shell_p && bi.autoexec[0])
+        strcat(tail, bi.autoexec);
+    if (shell_e)
+        sprintf(tail + strlen(tail), " /E:%u", envsize);
+    say("GLOS-SHELL fallback=%s%s", bi.comspec, tail);
+    stub_data.mode = 0;
+    stub_data.nxms = 0;
+    stub_data.shell = 1;
+    stub_data.realmode = 1;
+    _fstrcpy(stub_data.path, bi.comspec);
+    set_tail(stub_data.tail, tail);
+    stage_env();
+    if (FP_SEG(&stub_data) >= _psp + 0x10 + ((stub_off(stub_end) + 15) >> 4))
+        stub_resident();
+    for (;;)                                            /* last resort: COMSPEC under all of GLOS.EXE */
+        spawnl(P_WAIT, bi.comspec, bi.comspec, "/P", NULL);
+}
+
+int main(int argc, char **argv)
+{
+    int code;
+    outp(0x3FB, 0x80); outp(0x3F8, 1); outp(0x3F9, 0); outp(0x3FB, 0x03);
+    outp(0x3FA, 0xC7); outp(0x3FC, 0x03);
+    say("GLOS-BOOT step=start build=" GLOS_BUILD);
+    shell_setup(argc, argv);
+    if (shell) {
+        char tail[64];
+        say("GLOS-BOOT step=shell comspec=%s autoexec=%s console=%s", bi.comspec, bi.autoexec, bi.console);
+        stub_data.shell = 1;
+        _fstrcpy(stub_data.comspec, bi.comspec);
+        strcpy(tail, shell_p && bi.autoexec[0] ? " /P=" : " /P");
+        if (shell_p && bi.autoexec[0])
+            strcat(tail, bi.autoexec);
+        if (shell_e)
+            sprintf(tail + strlen(tail), " /E:%u", envsize);
+        set_tail(stub_data.fbtail, tail);
+        stage_env();
+    }
+    code = glos_main(argc, argv);
+    if (shell)
+        shell_fallback();
+    return code;
 }

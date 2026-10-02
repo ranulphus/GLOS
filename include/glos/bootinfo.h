@@ -36,6 +36,7 @@ typedef unsigned int   bi_u32;
 #define BI_F_VM          0x0004                 /* /RUN: keep DOS running in the system VM (M2) */
 #define BI_F_SELFTEST    0x0008                 /* /SELFTEST: scheduler test threads beside the VM (M3) */
 #define BI_F_NOVME       0x0010                 /* /NOVME: trap every INT and CLI/STI even with VME (M3) */
+#define BI_F_SHELL       0x0020                 /* GLOS is the DOS shell (SHELL=, supervisor.md §2.2) */
 
 /* glos_call() functions (the ARPL at bp_call_off, AX = fn, EBX = arg). */
 #define GLOS_CALL_LEAVE  1                      /* stop the VM, back to real mode; arg = exit code */
@@ -78,6 +79,25 @@ struct bootinfo {
     /* M3 */
     bi_u32 indos;                               /* DOS's InDOS flag (linear) */
     bi_u32 stub_paras;                          /* the resident stub's size, in paragraphs */
+    /* M3: GLOS as the shell (BI_F_SHELL) */
+    char comspec[80];                           /* COMMAND.COM, for batch files and the console */
+    char autoexec[80];                          /* run first through COMSPEC /C; empty: none */
+    char console[128];                          /* then, again and again, COMSPEC /C this; empty: COMSPEC */
+};
+
+/* The resident stub's data (loader/stub.asm), at offset 0 of its segment.
+   Byte arrays and naturally aligned fields only: no compiler pads it. */
+struct stub_data {
+    unsigned char mode, a20init, resident, nxms;        /* mode 1: XMS */
+    unsigned char shell, realmode, pad[2];              /* realmode: no kernel, EXEC path/tail forever */
+    bi_u32 xms;                                 /* far pointer: the XMS driver's entry */
+    unsigned short handles[4];
+    bi_u32 env_src;                             /* far pointer: the master environment to install */
+    unsigned short env_len, env_paras;          /* its bytes; the block to allocate (0: keep ours) */
+    char path[80];                              /* EXEC: the program, ASCIIZ */
+    unsigned char tail[128];                    /* EXEC: length, text, CR */
+    char comspec[80];                           /* the shell's fallback: COMSPEC ... */
+    unsigned char fbtail[64];                   /* ... with this tail (length, text, CR) */
 };
 
 #endif

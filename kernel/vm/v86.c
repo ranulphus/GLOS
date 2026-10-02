@@ -313,10 +313,80 @@ static void vm_resident(u16 seg)
             (end - psp - vm.bi->stub_paras - 0x10) * 16);
 }
 
+/* The stub's EXEC buffers (struct stub_data at offset 0 of its segment):
+   path, and the tail t1 t2 as length, text, CR. */
+static void stub_exec(const char *path, const char *t1, const char *t2)
+{
+    u32 p = ((u32)vm.loader_cs << 4) + __builtin_offsetof(struct stub_data, path);
+    u32 t = ((u32)vm.loader_cs << 4) + __builtin_offsetof(struct stub_data, tail), i, n = 0;
+    for (i = 0; path[i] && i < 79; i++)
+        vm_wr8(p + i, (u8)path[i]);
+    vm_wr8(p + i, 0);
+    for (i = 0; t1[i] && n < 126; i++)
+        vm_wr8(t + 1 + n++, (u8)t1[i]);
+    for (i = 0; t2[i] && n < 126; i++)
+        vm_wr8(t + 1 + n++, (u8)t2[i]);
+    vm_wr8(t, (u8)n);
+    vm_wr8(t + 1 + n, 0x0D);
+}
+
+/* As the shell (PRD D39, D40): AUTOEXEC.BAT through COMSPEC /C, then the
+   console (COMSPEC, or COMSPEC /C the configured command), again and again. */
+static void vm_shell_next(struct trapframe *tf, u32 result)
+{
+    struct bootinfo *bi = vm.bi;
+    if (result != 0xFFFFFFFFu)
+        kprintf("GLOS-VM %s code=%u%s\n", vm.shell_state == 1 ? "autoexec" : "console", result & 0xFF,
+                (result & 0x10000) ? " cannot-run" : "");
+    if (vm.shell_state == 0 && bi->autoexec[0]) {
+        vm.shell_state = 1;
+        stub_exec(bi->comspec, " /C ", bi->autoexec);
+    } else {
+        vm.shell_state = 2;
+        stub_exec(bi->comspec, bi->console[0] ? " /C " : "", bi->console);
+    }
+    tf->eax = 1;
+}
+
+/* The COMMAND.COM running AUTOEXEC.BAT is ending (INT 21h 4Ch or 00h, before
+   DOS frees its memory): its environment becomes the master environment,
+   the one GLOS.EXE's PSP points at, as far as that block holds (PRD D40). */
+static void vm_env_back(void)
+{
+    u16 psp = vm_current_psp();
+    u32 s, d, size, i = 0, end = 0;
+
+    if (!psp || vm_rd16(psp * 16u + 0x16) != vm.loader_psp)
+        return;
+    s = (u32)vm_rd16(psp * 16u + 0x2C) << 4;
+    d = (u32)vm_rd16((u32)vm.loader_psp * 16 + 0x2C) << 4;
+    if (!s || !d)
+        return;
+    size = (u32)vm_rd16(d - 16 + 3) << 4;               /* the master block, from its arena header */
+    while (i < 32768 && vm_rd8(s + i)) {                /* whole strings that fit, with 3 bytes to end */
+        u32 j = i;
+        while (j < 32768 && vm_rd8(s + j))
+            j++;
+        if (j + 1 + 3 > size)
+            break;
+        i = end = j + 1;
+    }
+    for (i = 0; i < end; i++)
+        vm_wr8(d + i, vm_rd8(s + i));
+    vm_wr8(d + end, 0);                                 /* the end of the strings, no program name */
+    vm_wr8(d + end + 1, 0);
+    vm_wr8(d + end + 2, 0);
+    kprintf("GLOS-VM env bytes=%u of %u\n", end + 1, size);
+}
+
 /* What the stub does next: EXEC the /RUN program it holds, then leave with
-   its exit code (M3 item 0a; SHELL= mode adds more). */
+   its exit code; as the shell, vm_shell_next(). */
 static void vm_next(struct trapframe *tf, u32 result)
 {
+    if (vm.bi->flags & BI_F_SHELL) {
+        vm_shell_next(tf, result);
+        return;
+    }
     if (result == 0xFFFFFFFFu) {
         tf->eax = 1;
         return;
@@ -427,6 +497,8 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
     case 0x21:
         if ((ax >> 8) == 0x4B && (ax & 0xFF) <= 1)
             vm_exec_snap();
+        if (vm.shell_state == 1 && ((ax >> 8) == 0x4C || (ax >> 8) == 0x00))
+            vm_env_back();
         break;
     }
     vm_int(tf, n, next);
