@@ -33,6 +33,12 @@ typedef unsigned int   bi_u32;
 /* Command-line flags. */
 #define BI_F_ROUNDTRIP   0x0001                 /* /ROUNDTRIP: tick for a second, report, return */
 #define BI_F_GDB         0x0002                 /* /GDB: stop in the gdb stub on COM2 first */
+#define BI_F_VM          0x0004                 /* /RUN: keep DOS running in the system VM (M2) */
+
+/* glos_call() functions (the ARPL at bp_call_off, AX = fn, EBX = arg). */
+#define GLOS_CALL_LEAVE  1                      /* stop the VM, back to real mode; arg = exit code */
+#define GLOS_CALL_DOSPTR 2                      /* arg = linear InDOS flag; the SDA in bootinfo.sda */
+#define GLOS_CALL_EXEC   3                      /* about to EXEC the /RUN program; arg = GLOS.EXE's PSP */
 
 struct bi_range { bi_u32 base, length, type; };
 
@@ -53,6 +59,16 @@ struct bootinfo {
     bi_u32 video_mode;                          /* INT 10h 0Fh */
     bi_u32 a20_initial;                         /* 1 if A20 was on when GLOS started */
     bi_u32 result;                              /* the kernel's exit code */
+    /* version 1, M2: resuming the loader in V86 mode */
+    bi_u32 vm_resume_off;                       /* _vm_resume in the loader's code segment */
+    bi_u32 vm_state_off;                        /* save_ss, save_sp, save_ds (words) there */
+    bi_u32 bp_call_off;                         /* the ARPL of glos_call() */
+    bi_u32 bp_xms_off;                          /* the ARPL of the XMS entry point (entry + 5) */
+    bi_u32 sda;                                 /* DOS's swappable data area (linear), 0 unknown */
+    bi_u32 kill_off, kill_sp;                   /* _glos_kill and its stack's top, in the code segment */
+    bi_u32 xms_ver, xms_rev, xms_hma;           /* XMS mode: the driver's function 00h (AX, BX, DX) */
+    bi_u32 hma_used;                            /* XMS mode: the HMA was taken (DOS=HIGH) */
+    bi_u32 xms_table;                           /* XMS mode: INT 2Fh 4309h's handle table (linear), 0 none */
 };
 
 #endif

@@ -49,6 +49,19 @@ trap_common:
         addl    $8, %esp
         iretl
 
+/* void vm_enter(struct trapframe *tf): into the system VM, as if returning
+   from a trap that came from it. */
+        .globl  vm_enter
+vm_enter:
+        movl    4(%esp), %esp
+        popal
+        popl    %gs
+        popl    %fs
+        popl    %es
+        popl    %ds
+        addl    $8, %esp
+        iretl
+
 /* The #DF task (a task gate in the IDT): report and stop. */
         .globl  df_entry
 df_entry:

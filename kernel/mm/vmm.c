@@ -13,6 +13,7 @@
 
 #define PTE_P 1u
 #define PTE_W 2u
+#define PTE_U 4u
 #define MAX_FRAMES (1u << 18)                   /* 1 GB of physical memory tracked */
 
 extern char __kernel_start[], __kernel_end[];
@@ -33,6 +34,33 @@ u32 mm_cr3(void) { return kernel_phys(kpd); }
 u32 pmm_alloc(void) { return pmm_take(&pmm); }
 void pmm_free(u32 phys) { pmm_give(&pmm, phys); }
 u32 pmm_free_frames(void) { return pmm.free; }
+u32 pmm_alloc_run(u32 n) { return pmm_take_run(&pmm, n); }
+int pmm_claim(u32 phys, u32 n) { return pmm_take_at(&pmm, phys, n); }
+void pmm_free_run(u32 phys, u32 n) { pmm_give_run(&pmm, phys, n); }
+u32 pmm_largest(void) { return pmm_largest_run(&pmm); }
+
+/* V86 code runs at CPL 3: the identity map of 0-10FFFFh becomes user pages
+   (supervisor.md §4). Nothing of the kernel's is in them. */
+void mm_vm_init(int a20)
+{
+    u32 i;
+    for (i = 0; i < 0x110; i++)
+        kpt_low[i] |= PTE_U;
+    kpd[0] |= PTE_U;
+    write_cr3(mm_cr3());
+    mm_set_a20(a20);
+}
+
+/* The A20 gate stays on physically; with it virtually off, the HMA's 16 pages
+   map onto 0-FFFFh, so FFFF:0010 wraps to 0:0000 as on an 8086. */
+void mm_set_a20(int on)
+{
+    u32 i;
+    for (i = 0; i < 16; i++) {
+        kpt_low[0x100 + i] = ((on ? 0x100 + i : i) << 12) | PTE_P | PTE_W | PTE_U;
+        invlpg(0x100000 + (i << 12));
+    }
+}
 
 void *kmap(u32 phys)
 {

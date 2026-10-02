@@ -3,11 +3,14 @@
  * (raw: INT 15h E820h/E801h/88h; XMS: locked blocks), reads GLOSK.BIN, builds
  * the first page tables and enters the kernel; when the kernel returns, it
  * restores A20, frees what it took and exits with the kernel's result.
- *     GLOS [/ROUNDTRIP] [/GDB]
+ *     GLOS [/ROUNDTRIP] [/GDB] [/RUN program [args...]]
+ * /RUN keeps DOS running in the kernel's system VM (V86 mode), runs the
+ * program there and leaves when it ends, with its exit code.
  * Progress goes to COM1 as GLOS-BOOT lines; refusals as GLOS-REFUSE. */
 #include <conio.h>
 #include <dos.h>
 #include <i86.h>
+#include <process.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +29,15 @@ extern unsigned long __cdecl pm_enter(unsigned gdtr, unsigned long cr3, unsigned
                                       unsigned long file_dwords, unsigned long bss_dwords,
                                       unsigned long entry, unsigned long arg);
 extern void __cdecl pm_ret(void);
+extern unsigned long __cdecl glos_call(unsigned fn, unsigned long arg);
+/* Labels in the code segment: declared as functions so that their offsets
+   are taken against it, not DGROUP. */
+extern void __cdecl vm_resume(void);
+extern void __cdecl vm_state(void);
+extern void __cdecl glos_bp_call(void);
+extern void __cdecl glos_bp_xms(void);
+extern void __cdecl glos_kill(void);
+extern void __cdecl glos_kill_top(void);
 
 /* ---- COM1 */
 
@@ -219,7 +231,7 @@ int main(int argc, char **argv)
     unsigned buf_seg = 0, tab_seg = 0, i, pages;
     char path[128];
     FILE *f;
-    int xms_mode;
+    int xms_mode, run_at = 0;
 
     outp(0x3FB, 0x80); outp(0x3F8, 1); outp(0x3F9, 0); outp(0x3FB, 0x03);
     outp(0x3FA, 0xC7); outp(0x3FC, 0x03);
@@ -227,6 +239,11 @@ int main(int argc, char **argv)
     for (i = 1; i < (unsigned)argc; i++) {
         if (!stricmp(argv[i], "/ROUNDTRIP")) bi.flags |= BI_F_ROUNDTRIP;
         else if (!stricmp(argv[i], "/GDB")) bi.flags |= BI_F_GDB;
+        else if (!stricmp(argv[i], "/RUN") && i + 1 < (unsigned)argc) {
+            bi.flags |= BI_F_VM;
+            run_at = (int)i + 1;
+            break;
+        }
     }
 
     /* Refusals (supervisor.md §2.1). */
@@ -294,8 +311,16 @@ int main(int argc, char **argv)
         xms_call(0x0800, 0);                    /* largest free block, KB; 64 KB left for others */
         if (xms_ax > 64 && xms_block(pool_kb = xms_ax - 64, &pool) == 0)
             add_range(pool, (unsigned long)pool_kb * 1024UL, BI_MEM_FREE);
+        xms_call(0x0000, 0);                    /* what the kernel's XMS server reports as */
+        bi.xms_ver = xms_ax; bi.xms_rev = xms_bx; bi.xms_hma = xms_dx;
+        xms_call(0x0100, 0xFFFF);               /* is the HMA free? (DOS=HIGH takes it) */
+        if (xms_ax == 1) xms_call(0x0200, 0);
+        else bi.hma_used = (xms_bx & 0xFF) == 0x91;
+        r.x.ax = 0x4309; int86x(0x2F, &r, &r, &sr);     /* the handle table, for handles made before GLOS */
+        if (r.h.al == 0x43) bi.xms_table = ((unsigned long)sr.es << 4) + r.x.bx;
         xms_call(0x0500, 0);                    /* local A20 enable */
-        say("GLOS-BOOT step=memory mode=xms kernel=%08lx pool_kb=%u", bi.kernel_phys, pool_kb);
+        say("GLOS-BOOT step=memory mode=xms kernel=%08lx pool_kb=%u ver=%04lx hma_used=%lu table=%05lx",
+            bi.kernel_phys, pool_kb, bi.xms_ver, bi.hma_used, bi.xms_table);
     } else {
         bi.mode = BI_MODE_RAW;
         if (raw_memory() != 0) return refuse("no-memory-map");
@@ -326,6 +351,12 @@ int main(int argc, char **argv)
     bi.cs_base = (unsigned long)sr.cs << 4;
     bi.ds_base = (unsigned long)sr.ds << 4;
     bi.ret_off = (unsigned)pm_ret;
+    bi.vm_resume_off = (unsigned)vm_resume;
+    bi.vm_state_off = (unsigned)vm_state;
+    bi.bp_call_off = (unsigned)glos_bp_call;
+    bi.bp_xms_off = (unsigned)glos_bp_xms;
+    bi.kill_off = (unsigned)glos_kill;
+    bi.kill_sp = (unsigned)glos_kill_top;
     set_desc(0x08, 0, 0xFFFFF, 0x9A, 0xC0);
     set_desc(0x10, 0, 0xFFFFF, 0x92, 0xC0);
     set_desc(BOOT_SEL_CODE16, bi.cs_base, 0xFFFF, 0x9A, 0x00);
@@ -337,6 +368,28 @@ int main(int argc, char **argv)
     ret = pm_enter((unsigned)&gdtr, bi.pd_phys, buf_phys, KERNEL_LINK, (hdr.file_size + 3) >> 2,
                    (bi.kernel_total - ((hdr.file_size + 3) & ~3UL)) >> 2, KERNEL_LINK + hdr.entry,
                    bi.ds_base + (unsigned)&bi);
+    if (ret == 0x10000UL) {
+        /* Running in the system VM (V86 mode) under the kernel. The image and
+           the first page tables are no longer needed; DOS gets the memory. */
+        int code;
+        _dos_freemem(tab_seg);
+        _dos_freemem(buf_seg);
+        tab_seg = buf_seg = 0;
+        r.h.ah = 0x34; int86x(0x21, &r, &r, &sr);           /* InDOS flag */
+        a = ((unsigned long)sr.es << 4) + r.x.bx;
+        r.x.ax = 0x5D06; int86x(0x21, &r, &r, &sr);         /* swappable data area */
+        bi.sda = r.x.cflag ? 0 : ((unsigned long)sr.ds << 4) + r.x.si;
+        segread(&sr);
+        glos_call(GLOS_CALL_DOSPTR, a);
+        say("GLOS-VM run=%s", argv[run_at]);
+        glos_call(GLOS_CALL_EXEC, _psp);
+        code = spawnvp(P_WAIT, argv[run_at], (const char **)(argv + run_at));
+        if (code < 0) {
+            say("GLOS-VM error=cannot-run program=%s", argv[run_at]);
+            code = 126;
+        }
+        ret = glos_call(GLOS_CALL_LEAVE, (unsigned long)code);
+    }
 
     if (bi.mode == BI_MODE_XMS) {
         xms_call(0x0600, 0);                    /* local A20 disable */
@@ -344,8 +397,8 @@ int main(int argc, char **argv)
     } else if (!bi.a20_initial) {
         a20_set(0);
     }
-    _dos_freemem(tab_seg);
-    _dos_freemem(buf_seg);
+    if (tab_seg) _dos_freemem(tab_seg);
+    if (buf_seg) _dos_freemem(buf_seg);
     say("GLOS-EXIT code=%lu a20=%d", ret, a20_on());
     return (int)ret;
 }

@@ -14,12 +14,27 @@
 ;       and jumps to entry (CS=08h, DS=ES=SS=10h, ESI=arg). The kernel comes
 ;       back with a far jump to 38h:_pm_ret, EAX = its result, interrupts off;
 ;       that leaves protected mode and returns EAX in DX:AX.
+;       When the kernel keeps DOS running (M2), it instead resumes this
+;       program in virtual-8086 mode at _vm_resume, which returns 10000h.
+;   unsigned long glos_call(unsigned fn, unsigned long arg)
+;       a call into the kernel from V86 mode (an ARPL at _glos_bp_call, which
+;       raises #UD there). fn 1 (leave) comes back through _pm_ret in real
+;       mode, like pm_enter, with the kernel's result.
+;   _glos_xms_entry
+;       the XMS entry point INT 2Fh 4310h hands out under GLOS: five bytes
+;       for hooks, then the ARPL at _glos_bp_xms (the kernel serves the call
+;       and resumes at the RETF).
+;   _glos_kill
+;       where the kernel sends a killed program: INT 21h 4CFFh as that
+;       program, on the small stack below _glos_kill_top.
 .586p
 
 _TEXT   segment word public 'CODE' use16
         assume  cs:_TEXT
 
         public  _cpu_is486, _cpu_v86, _cpu_id1, _bios_e820, _pm_enter, _pm_ret
+        public  _vm_resume, _vm_state, _glos_call, _glos_bp_call, _glos_xms_entry, _glos_bp_xms
+        public  _glos_kill, _glos_kill_top
 
 _cpu_is486 proc near
         pushf
@@ -235,6 +250,58 @@ rm_back:
         ret
 _pm_enter endp
 
+; Resumed here in V86 mode with SS:SP and DS as pm_enter saved them.
+_vm_resume label near
+        mov     ax, 0
+        mov     dx, 1                   ; 10000h: running under GLOS
+        popf
+        pop     es
+        pop     ds
+        pop     di
+        pop     si
+        pop     bp
+        ret
+
+_glos_call proc near
+        push    bp
+        mov     bp, sp
+        push    si
+        push    di
+        push    ds
+        push    es
+        pushf
+        mov     cs:save_ss, ss          ; for the way back through _pm_ret
+        mov     cs:save_sp, sp
+        mov     cs:save_ds, ds
+        mov     ax, [bp+4]              ; fn
+        mov     ebx, [bp+6]             ; arg
+_glos_bp_call label near
+        db      63h, 0C0h               ; arpl ax, ax: #UD in V86 mode
+        mov     edx, eax
+        shr     edx, 16
+        popf
+        pop     es
+        pop     ds
+        pop     di
+        pop     si
+        pop     bp
+        ret
+_glos_call endp
+
+_glos_xms_entry label far
+        db      0EBh, 03h, 90h, 90h, 90h        ; jmp short +3: where hooks patch (XMS 3.0)
+_glos_bp_xms label near
+        db      63h, 0C0h
+        retf
+
+_glos_kill label near
+        mov     ax, 4CFFh
+        int     21h
+        jmp     short _glos_kill
+        dw      128 dup (0)
+_glos_kill_top label word
+
+_vm_state label word                    ; the kernel reads these three to resume
 save_ss  dw     0
 save_sp  dw     0
 save_ds  dw     0

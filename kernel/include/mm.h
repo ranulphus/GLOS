@@ -18,6 +18,14 @@ u32 pmm_alloc(void);                    /* a free frame, 0 when none */
 void pmm_free(u32 phys);
 u32 pmm_free_frames(void);
 
+u32 pmm_alloc_run(u32 n);                /* the kernel's frames: n contiguous, 0 if none */
+int pmm_claim(u32 phys, u32 n);
+void pmm_free_run(u32 phys, u32 n);
+u32 pmm_largest(void);
+
+void mm_vm_init(int a20);               /* 0-10FFFFh user-accessible for V86 mode */
+void mm_set_a20(int on);                /* 100000h-10FFFFh: the HMA, or wrapped onto 0-FFFFh */
+
 void *kmap(u32 phys);
 void kunmap(void *p);
 
@@ -47,5 +55,9 @@ void pmm_add_free(struct pmm *p, u32 base, u32 length);
 void pmm_reserve(struct pmm *p, u32 base, u32 length);
 u32 pmm_take(struct pmm *p);
 void pmm_give(struct pmm *p, u32 phys);
+u32 pmm_take_run(struct pmm *p, u32 n);         /* n contiguous frames, lowest first; 0 if none */
+int pmm_take_at(struct pmm *p, u32 phys, u32 n);        /* exactly these frames if all free; 0 or -1 */
+void pmm_give_run(struct pmm *p, u32 phys, u32 n);
+u32 pmm_largest_run(const struct pmm *p);       /* in frames */
 
 #endif

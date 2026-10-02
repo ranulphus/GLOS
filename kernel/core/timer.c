@@ -8,6 +8,7 @@
 
 static volatile u32 ticks, spurious_c;
 static u8 rtc_a, rtc_b;
+static void (*tick_hook)(struct trapframe *tf, u8 c);
 
 void pic_init(u8 master_base, u8 slave_base, u16 mask)
 {
@@ -29,12 +30,24 @@ static void cmos_set(u8 reg, u8 v) { outb(0x70, reg); outb(0x71, v); }
 
 static void rtc_irq(struct trapframe *tf)
 {
-    (void)tf;
-    if (cmos(0x0C) & 0x40)                      /* PF: a periodic interrupt */
+    u8 c = cmos(0x0C);
+    if (c & 0x40)                               /* PF: a periodic interrupt */
         ticks++;
     else
         spurious_c++;
+    if (tick_hook)
+        tick_hook(tf, c);
 }
+
+void timer_set_hook(void (*fn)(struct trapframe *tf, u8 c)) { tick_hook = fn; }
+u8 rtc_read(u8 reg) { return cmos(reg); }
+void rtc_write(u8 reg, u8 v) { cmos_set(reg, v); }
+u8 timer_found_a(void) { return rtc_a; }
+u8 timer_found_b(void) { return rtc_b; }
+
+/* Register B as the program wants it but with the kernel's PIE: only SET,
+   SQWE, DM, 24/12 and DSE reach the chip (supervisor.md §10). */
+void timer_write_b(u8 b) { cmos_set(0x0B, (u8)((b & 0x8F) | 0x40)); }
 
 void timer_start(void)
 {
@@ -46,10 +59,12 @@ void timer_start(void)
     (void)cmos(0x0C);
 }
 
-void timer_stop(void)
+void timer_stop(void) { timer_stop_to(rtc_a, rtc_b); }
+
+void timer_stop_to(u8 a, u8 b)
 {
-    cmos_set(0x0B, rtc_b);
-    cmos_set(0x0A, rtc_a);
+    cmos_set(0x0B, b);
+    cmos_set(0x0A, a);
     (void)cmos(0x0C);
     set_irq_handler(8, NULL);
 }

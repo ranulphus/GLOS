@@ -32,6 +32,24 @@ int main(void)
     CHECK(p.free == f + 64);
     pmm_give(&p, got[0]);                               /* double free is ignored */
     CHECK(p.free == f + 64);
+
+    /* Contiguous runs (XMS blocks). */
+    pmm_setup(&p, bits, 4096);                          /* 16 MB */
+    pmm_add_free(&p, 0x100000, 0xF00000);
+    pmm_reserve(&p, 0x200000, 0x1000);                  /* a hole at 2 MB */
+    CHECK(pmm_largest_run(&p) == (0x1000000 - 0x201000) / 4096);
+    f = pmm_take_run(&p, 16);
+    CHECK(f == 0x100000);                               /* lowest first */
+    CHECK(pmm_take_run(&p, 0x100) == 0x201000);         /* 1 MB does not fit below the hole ... */
+    CHECK(pmm_take_run(&p, 0xF0) == 0x110000);          /* ... but 240 frames do, exactly */
+    CHECK(pmm_take_run(&p, 0x10000) == 0);              /* too big */
+    i = p.free;
+    pmm_give_run(&p, 0x100000, 16);
+    CHECK(p.free == i + 16);
+    CHECK(pmm_take_at(&p, 0x100000, 16) == 0);          /* claimed back exactly */
+    CHECK(pmm_take_at(&p, 0x100000, 1) == -1);          /* already used */
+    CHECK(pmm_take_at(&p, 0x301000, 2) == 0);           /* just after the 1 MB run */
+    CHECK(pmm_take_run(&p, 0) == 0);
     printf("pmm_test: %d failures\n", fails);
     return fails != 0;
 }

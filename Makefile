@@ -6,6 +6,8 @@
 #   make host-test      kernel code's host tests (in the dev container)
 #   make loopa-m1       M1's exit matrix in Loop A (tests/loopa/jobs.py)
 #   make loopa-gdb      gdb on the kernel's COM2 stub in Loop A (tools/gdb-loopa.sh)
+#   make loopa-m2       M2's exit: HX tools with and without GLOS (JOBS=3 at once)
+#   make loopa-hostile  M2's exit: hostile programs killed with the hotkey
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
@@ -20,7 +22,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all kernel host-test loopa loopa-m1 loopa-gdb check-deps clean help survey-tools
+.PHONY: all dos-tests kernel host-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-gdb check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -32,7 +34,8 @@ check-deps:
 
 # ---- Host tests: kernel code built 32-bit for Linux (in the dev container,
 # which has the 32-bit C library) --------------------------------------------
-HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c
+HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:kernel/vm/v86dec.c \
+              vpic_test:kernel/vm/vpic.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
 host-test-run:
@@ -54,7 +57,20 @@ build/ow/obj16/lowlevel.obj: $(LOADER_ASM)
 	$(Q)$(OWENV) $(OWBIN)/wasm -q -fo=$@ $<
 build/ow/GLOS.EXE: build/ow/obj16/main.obj build/ow/obj16/lowlevel.obj
 	$(Q)echo "  WLINK   $@"
-	$(Q)$(WLINK) system dos option quiet option stack=4k name $@ file build/ow/obj16/main.obj,build/ow/obj16/lowlevel.obj
+	$(Q)$(WLINK) system dos option quiet option stack=4k option map=build/ow/GLOS.map name $@ file build/ow/obj16/main.obj,build/ow/obj16/lowlevel.obj
+
+# ---- DOS test programs (Open Watcom, small model): tests/dos/name.c -> build/ow/dos/NAME.EXE
+define dos_test
+build/ow/dos/$(1).EXE: tests/dos/$(2).c
+	@mkdir -p build/ow/dos/obj
+	$$(Q)echo "  WCC16   $$<"
+	$$(Q)$$(WCC16) -bt=dos -ms -3 -os -zq -we -fo=build/ow/dos/obj/$(2).obj $$<
+	$$(Q)$$(WLINK) system dos option quiet option stack=4k name $$@ file build/ow/dos/obj/$(2).obj
+endef
+$(eval $(call dos_test,HOSTILE,hostile))
+$(eval $(call dos_test,XMSTEST,xmstest))
+DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE
+dos-tests: $(DOS_TESTS)
 
 # ---- GLOSK.BIN: the kernel (host gcc -m32, linked at C0100000h) -------------
 KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protector \
@@ -62,7 +78,8 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -O2 -g -Wall -Wextra -Werror -nostdinc -Iinclude -Ikernel/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c kernel/core/timer.c \
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c \
-         kernel/dbg/gdbstub.c
+         kernel/dbg/gdbstub.c kernel/vm/v86.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c \
+         kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 build/kernel/%.o: kernel/% $(wildcard kernel/include/*.h include/glos/*.h)
 	@mkdir -p $(dir $@)
@@ -92,6 +109,14 @@ loopa: all check-deps
 # M1's exit matrix: three machine profiles x raw and HIMEMX boots (tests/loopa/jobs.py).
 loopa-m1: all check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py m1
+
+# M2's exit: the HX tools' lines with and without GLOS, and the hostile
+# programs killed (tests/loopa/jobs.py; JOBS runs at once).
+JOBS ?= 3
+loopa-m2: all dos-tests check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py m2 -j $(JOBS)
+loopa-hostile: all dos-tests check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py hostile -j $(JOBS)
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
 loopa-gdb: all check-deps

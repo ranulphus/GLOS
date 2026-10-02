@@ -18,10 +18,21 @@ extern struct { u32 off; u16 sel; } __attribute__((packed)) ret_farptr;
 
 static u32 gdt[2 * 12] __attribute__((aligned(8)));     /* selectors 00h-58h */
 static u32 idt[2 * 256] __attribute__((aligned(8)));
-static struct tss tss __attribute__((aligned(16)));
+/* The TSS's fixed part, the 32-byte VME redirection bitmap, the 8 KB I/O
+   permission bitmap and its mandatory trailing FFh byte: three pages
+   (supervisor.md §3.3). */
+static u8 tss_area[3 * 4096] __attribute__((aligned(4096)));
+#define TSS ((struct tss *)tss_area)
+#define TSS_REDIR (tss_area + 104)
+#define TSS_IOPB  (tss_area + 136)
+#define TSS_LIMIT (136 + 8192)
+_Static_assert(104 + 32 == 136, "the redirection bitmap ends where the I/O map starts");
+_Static_assert(TSS_LIMIT + 1 <= sizeof tss_area, "the I/O map's trailing FFh byte is inside the TSS area");
 static struct tss dftss __attribute__((aligned(16)));
 static u8 df_stack[4096] __attribute__((aligned(16)));
 static u8 trap_stack[8192] __attribute__((aligned(16)));
+
+#define EFLAGS_VM 0x00020000u
 
 static void (*irq_fn[16])(struct trapframe *);
 static int (*trap_fn[32])(struct trapframe *);
@@ -50,7 +61,7 @@ void cpu_init(u32 cs16_base, u32 ds16_base, u32 ret_off)
 
     set_desc(SEL_KCODE, 0, 0xFFFFF, 0x9A, 0xC0);
     set_desc(SEL_KDATA, 0, 0xFFFFF, 0x92, 0xC0);
-    set_desc(SEL_TSS, (u32)&tss, sizeof tss - 1, 0x89, 0x00);
+    set_desc(SEL_TSS, (u32)tss_area, TSS_LIMIT, 0x89, 0x00);
     set_desc(SEL_DFTSS, (u32)&dftss, sizeof dftss - 1, 0x89, 0x00);
     set_desc(SEL_CODE16, cs16_base, 0xFFFF, 0x9A, 0x00);
     set_desc(SEL_DATA16, ds16_base, 0xFFFF, 0x92, 0x00);
@@ -68,9 +79,12 @@ void cpu_init(u32 cs16_base, u32 ds16_base, u32 ret_off)
     d.base = (u32)idt;
     __asm__ volatile("lidt %0" :: "m"(d));
 
-    tss.ss0 = SEL_KDATA;
-    tss.esp0 = (u32)trap_stack + sizeof trap_stack;
-    tss.iomap = sizeof tss;                             /* no I/O bitmap until M2 */
+    TSS->ss0 = SEL_KDATA;
+    TSS->esp0 = (u32)trap_stack + sizeof trap_stack;
+    TSS->iomap = 136;
+    memset(TSS_REDIR, 0xFF, 32);                        /* no software INT redirected (VME is off) */
+    memset(TSS_IOPB, 0x00, 8192);                       /* every port passed through ... */
+    TSS_IOPB[8192] = 0xFF;                              /* ... then the trailing byte */
     dftss.cr3 = read_cr3();
     dftss.eip = (u32)df_entry;
     dftss.esp = (u32)df_stack + sizeof df_stack;
@@ -101,6 +115,15 @@ void cpu_features(void)
     }
 }
 
+/* Trap (1) or pass through (0) a port for V86 code and ring-3 code below IOPL. */
+void cpu_io_trap(u32 port, int trap)
+{
+    if (trap) TSS_IOPB[port >> 3] |= (u8)(1u << (port & 7));
+    else TSS_IOPB[port >> 3] &= (u8)~(1u << (port & 7));
+}
+
+void cpu_set_esp0(u32 esp0) { TSS->esp0 = esp0; }
+
 void set_irq_handler(int irq, void (*fn)(struct trapframe *)) { irq_fn[irq] = fn; }
 void set_trap_handler(int vec, int (*fn)(struct trapframe *)) { trap_fn[vec] = fn; }
 
@@ -124,7 +147,7 @@ void panic(const char *why, struct trapframe *tf)
 
 void double_fault(void)
 {
-    kprintf("GLOS-PANIC why=double-fault eip=%p esp=%p\n", tss.eip, tss.esp);
+    kprintf("GLOS-PANIC why=double-fault eip=%p esp=%p\n", TSS->eip, TSS->esp);
     for (;;)
         hlt();
 }
@@ -138,13 +161,21 @@ void trap_dispatch(struct trapframe *tf)
             outb(irq == 7 ? 0x20 : 0xA0, 0x0B);
             if (!(inb(irq == 7 ? 0x20 : 0xA0) & 0x80)) {
                 if (irq == 15) outb(0x20, 0x20);
-                return;
+                goto out;
             }
         }
         if (irq_fn[irq])
             irq_fn[irq](tf);
         if (irq >= 8) outb(0xA0, 0x20);
         outb(0x20, 0x20);
+    out:
+        if (tf->eflags & EFLAGS_VM)
+            vm_return(tf);
+        return;
+    }
+    if (tf->eflags & EFLAGS_VM) {                       /* from the system VM */
+        vm_exception(tf);
+        vm_return(tf);
         return;
     }
     if (fixup_eip && (tf->cs & 3) == 0) {               /* a try_* helper faulted */

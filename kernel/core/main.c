@@ -9,6 +9,7 @@
 #include "kprintf.h"
 #include "mm.h"
 #include "timer.h"
+#include "vm.h"
 
 #define WINDOWS 18                              /* 18 x 54.925 ms = 988.6 ms */
 
@@ -40,6 +41,9 @@ void kmain(struct bootinfo *bi)
         kprintf("GLOS-GDB waiting on COM2\n");
         gdb_breakpoint();
     }
+
+    if (bi->flags & BI_F_VM)
+        vm_start(bi);                           /* DOS carries on in V86 mode (M2) */
 
     /* The clock: all IRQs masked but the cascade and the RTC. */
     pic_init(IRQ_BASE_MASTER, IRQ_BASE_SLAVE, 0xFEFB);
