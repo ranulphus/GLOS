@@ -66,9 +66,10 @@ to COM1 at each step:
    - Physical home: 110000h in raw mode (above the HMA); a locked XMS block in XMS mode. XMS mode also locks a
      second block for GLOS's memory, leaving 64 KB of XMS for others.
    - The loader leaves a **resident stub** in conventional memory. It holds the breakpoint stubs, the host
-     real-mode stacks and the agent shell (§17).
-5. **Bootinfo** (`include/glos/bootinfo.h`, version 1; M1 implements the fields below except the IVT and BDA
-   copies, which arrive with the system VM in M2):
+     real-mode stacks and the agent shell (§17). Until M3, the stub is the whole of `GLOS.EXE`, which stays
+     loaded while it runs the `/RUN` program (§2.1).
+5. **Bootinfo** (`include/glos/bootinfo.h`, version 1; M1 and M2 implement the fields below except the IVT
+   and BDA copies, which DOS keeps owning in the system VM (§2.1); M2 adds the fields of §2.1):
    - the memory map and XMS handles;
    - copies of the IVT and the BIOS data area;
    - PIC masks and ICW state as found;
@@ -78,13 +79,31 @@ to COM1 at each step:
    - the real-mode return point.
 6. **Entering the kernel:** `loader/pm.asm` (OW wasm) disables interrupts, loads a temporary GDT and enters
    protected mode with paging. The kernel takes over from there.
-7. **Exit** (`glos exit`, or a fatal error before the system VM exists):
-   - the kernel restores the PIC (ICW2 08h/70h and the original masks), RTC registers A/B, PIT channel 0
-     (mode 3 count 0, as the BIOS sets it at POST), and A20 as found;
-   - it switches back through the 16-bit CS/DS selectors (§3) and reloads the IVT copy, patched for any
-     vectors DOS legitimately changed;
+7. **Exit** (`glos exit`, the end of the `/RUN` program, or a fatal error before the system VM exists):
+   - the kernel restores the PIC (to the virtual PIC's ICW2 and mask, which are 08h/70h and the original
+     masks unless a program changed them), RTC registers A/B (as the program last set them), PIT channel 0
+     (mode 3 count 0, as the BIOS sets it at POST), the 8042's command byte, and A20 as found;
+   - it switches back through the 16-bit CS/DS selectors (§3). The IVT isn't reloaded: DOS owned it
+     throughout, and a kill puts back each killed program's vectors (§9.6);
    - the resident stub returns to DOS with the requested exit code.
    - **Acceptance:** VECCHK OK and VMODE 3 afterwards.
+
+### 2.1 The system VM's start and GLOS.EXE's calls (M2)
+
+- `GLOS /RUN program [args]` sets `BI_F_VM`. The kernel then doesn't return to real mode: it resumes
+  `GLOS.EXE` in V86 mode at `_vm_resume`, with SS, SP and DS as `pm_enter` saved them, so `pm_enter`
+  appears to return 10000h. `GLOS.EXE` frees the kernel image's buffer and the first page tables, and runs
+  the program with `spawnvp`. When it ends, `glos_call(LEAVE, code)` stops the VM; the kernel leaves through
+  `_pm_ret` as in M1 and `pm_enter`'s caller sees the exit code.
+- **Calls into the kernel** are ARPL instructions, which raise #UD in V86 mode (§9.2), at offsets that bootinfo
+  gives: `bp_call_off` for `glos_call(fn, arg)` (AX, EBX; the result in EAX) and `bp_xms_off` for the XMS entry
+  point (§16).
+- **Functions:** LEAVE (1, the exit code); DOSPTR (2, the linear InDOS flag, with the SDA from INT 21h 5D06h
+  in `bootinfo.sda`); EXEC (3, `GLOS.EXE`'s PSP, which a kill never ends).
+- **Bootinfo fields:** `vm_resume_off`, `vm_state_off`, `bp_call_off`, `bp_xms_off`, `sda`, `kill_off` and
+  `kill_sp` (the kill stub and its 256-byte stack, §9.6), and in XMS mode the driver's version (`xms_ver`,
+  `xms_rev`, `xms_hma`), whether the HMA was already taken (`hma_used`, so DOS=HIGH) and INT 2Fh 4309h's
+  handle table (`xms_table`).
 
 ## 3. CPU tables [fixed]
 
@@ -115,11 +134,11 @@ The order above never changes. New selectors are appended.
 
 ### 3.3 TSS and I/O bitmap
 
-- One 32-bit TSS. The fixed part sits in a kernel page.
-- The 32-byte VME **interrupt redirection bitmap**, the 8 KB **I/O permission bitmap** and the mandatory
-  **trailing FFh byte** (8225 bytes in all) fill three pages directly after it.
-- A session switch swaps those three page-table entries and runs three INVLPGs: no 8 KB copy, no hardware task
-  switch.
+- One 32-bit TSS, page-aligned: the 104-byte fixed part, the 32-byte VME **interrupt redirection bitmap**,
+  the 8 KB **I/O permission bitmap** and the mandatory **trailing FFh byte** (8329 bytes) fill three pages.
+  The I/O map base is 136.
+- A session switch (M4e) swaps those three page-table entries and runs three INVLPGs: no 8 KB copy, no
+  hardware task switch. M2 has the one area, with every port passed through except those of §10.
 - ESP0 is written per thread on every switch.
 - A second TSS, with its own stack, handles #DF through a task gate and dumps `GLOS-PANIC`. It never returns.
 - **The trailing FFh byte is mandatory on silicon.** 86Box doesn't enforce it [86Box], so it is a static
@@ -265,7 +284,20 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 - **Watchdog:** if the virtual IF stays off for more than 50 ms with an IRQ pending, GLOS writes
   `GLOS-WARN vif-stuck cs:ip`. It doesn't force the flag in v1.
 
-### 9.4 Nested execution
+### 9.4 M2: what the first system VM does
+
+- **No threads yet.** The kernel runs only in traps from the VM (and in HLT while the VM waits, §9.2). The
+  threads and the scheduler of §7 arrive at the start of M3, with the network stack that needs them.
+- **No VME yet.** Every software INT and every IOPL-sensitive instruction traps, on all three Loop A profiles.
+  The VME/PVI path of §9.3 comes with the scheduler.
+- **Exceptions** a real-mode CPU would raise (00h, 01h, 03h–07h, 0Ch) are reflected through the IVT. #GP for
+  a segment limit becomes INT 0Dh. A system instruction (0Fh 20h-23h, LMSW, LGDT and the like) can't be
+  emulated: the program is killed (`GLOS-WARN v86-priv`, then the kill of §9.6).
+- **HLT** with the virtual IF off waits for a kill. `STI; HLT` with an IRQ pending skips the HLT, as on silicon.
+- **INT 15h 86h** is executed again until its deadline (keyed by CS:IP and SS:SP), so the IRQs that arrive
+  meanwhile are delivered in front of it.
+
+### 9.5 Nested execution
 
 - Only the system VM thread runs V86 code. DPMI 0300h–0302h calls, interrupt reflections and the agent's DOS
   calls nest on that thread, up to 16 levels. Each level saves the V86 state and uses its own host real-mode
@@ -273,7 +305,22 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 - Requests from other threads are **posted** and run at the next safe point (§17.2). That serialises DOS and
   the BIOS by construction.
 
-### 9.5 Direct mode
+### 9.6 Kill
+
+- **Ctrl-Alt-Shift-Esc** ends the current program. The 8042 code (§10) sees the keys as bytes arrive from the
+  chip, so the kill works whatever the program does to interrupts, the PIC or its own keyboard handler. The
+  Esc and its break code never reach the program.
+- **Snapshot:** on each INT 21h 4B00h/4B01h, the kernel saves the IVT, the virtual PIC, the virtual A20 and
+  RTC registers A/B, and the 8042 command byte, keyed by the parent's PSP (8 levels).
+- **Kill:** at the next return to the VM, unless InDOS is set (then up to 2 s later). The current PSP comes from
+  the SDA, and its parent's snapshot is put back: the IVT, the virtual PIC (keeping requests, nothing in
+  service), A20, RTC A/B, the 8042 command byte and PIT channel 0 at mode 2, count FFFFh (§8.2). A keyboard
+  byte the program left unread is raised again. The VM then runs `GLOS.EXE`'s kill stub (INT 21h 4CFFh) as
+  that program, so DOS ends it normally and its parent sees exit code FFh.
+- `GLOS-KILL psp=… at=cs:ip ticks=…`, or `GLOS-KILL none` when only `GLOS.EXE` (or nothing that GLOS saw
+  start) is running.
+
+### 9.7 Direct mode
 
 - A program profile with `direct=1` runs its session at IOPL 3. V86 code still sees the I/O bitmap;
   protected-mode code at CPL 3 ≤ IOPL bypasses it.
@@ -300,8 +347,21 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 | GLOS-owned NIC | Trapped; reads return FFh | Trapped | From M3 |
 | VGA 3B0h–3DFh, SB, GUS, DMA 00h–0Fh/80h–8Fh/C0h–DFh, 201h, F0h | Passed through | Passed through | Live 8237 count reads, GUS GF1/CODEC, UniVBE chipset probes and the IRQ13 acknowledge at F0h all need real hardware [census] |
 
+**M2 status:**
+- **Implemented:** the PIC, RTC, 8042, 92h, CF8h–CFFh and CF9h rows (`kernel/vm/vdev.c`, `vkbc.c`, `vpic.c`).
+  The PIT is passed through and set to mode 2, count FFFFh when the VM starts.
+- **Not yet:** ELCR (passed through), the COM1 mirror ring (M3, with the agent's log).
+- **The 8042:** the kernel reads every byte the chip receives (IRQ 1, IRQ 12 and each tick) into one queue
+  and hands them to the program one at a time; the next byte comes a tick after the last was read. The
+  command byte's IRQ 1 enable and keyboard clock stay on in the chip whatever the program writes. A20 (D1h,
+  DDh/DFh), the reset pulse and the self-tests are answered virtually. Other commands go to the chip.
+- **The RTC:** registers A, B and C are virtual. The periodic flag follows the program's rate (at most once
+  per kernel tick); AF and UF come from the chip. IRQ 8 is raised for the VM when IRQF rises. Writes to
+  register B reach the chip except PIE, AIE and UIE.
+
 **IRQ routing:**
-- IRQ0 → the system VM's (or the exclusive session's) virtual IRQ0.
+- IRQ0 → the system VM's (or the exclusive session's) virtual IRQ0. Every IRQ passed to the VM masks its
+  physical line until the program's EOI on the virtual PIC, so a level-triggered device can't storm.
 - IRQ1/IRQ12 → the virtual 8042, which raises virtual IRQ1/IRQ12.
 - IRQ8 → the kernel clock (§8), plus a virtual IRQ8 only if the program enabled a virtual periodic, alarm or
   update interrupt.
@@ -495,7 +555,7 @@ saved when the protected-mode handler was hooked, so the IRQ doesn't loop.
 
 ## 15. Real-mode calls, callbacks and raw switch
 
-- **0300h–0302h** run as nested V86 execution on the system VM thread (§9.4), under the DOS lock (§17).
+- **0300h–0302h** run as nested V86 execution on the system VM thread (§9.5), under the DOS lock (§17).
 - **0303h:** a callback entry is a breakpoint stub in the resident stub. It enters the client on the locked
   stack with DS:(E)SI = real-mode SS:SP and ES:(E)DI = the register structure ([DPMI0.9]).
 - **0305h/0306h:**
@@ -510,9 +570,14 @@ saved when the protected-mode handler was hooked, so the IRQ doesn't loop.
 - **XMS 3.0 server** for the system VM through INT 2Fh 4310h, including 88h/89h/8Eh/8Fh and the HMA. In XMS
   mode GLOS takes over the driver's role for new requests and keeps the existing handles. `DOS=HIGH` (HMA in
   use by DOS) is respected.
+- **M2:** blocks are contiguous runs of GLOS's frames, so a lock (0Ch) returns a physical address. GLOS keeps
+  1 MB of its memory for itself. In XMS mode the driver's version and HMA state carry over, and its handles
+  from before GLOS stay its own: a program that kept the driver's entry point still reaches it, and the
+  driver's moves (INT 15h 87h in V86 mode) can't reach GLOS's memory. UMBs (10h–12h) aren't provided (80h).
+  The function results and error codes match HIMEMX's (XMSTEST, M2 exit).
 - **INT 15h:**
-  - 87h (block move) is emulated.
-  - 88h, E801h and E820h report no free extended memory.
+  - 87h (block move) is emulated, and refused (AH=02h) for any part of GLOS's memory.
+  - 88h, E801h and E820h report no free extended memory (E820h: CF set).
   - 86h and 83h are sleeps.
   - 24xxh drives the virtual A20.
   - C2xxh is the PS/2 mouse BIOS, passed to the BIOS against the virtual 8042.
@@ -521,7 +586,7 @@ saved when the protected-mode handler was hooked, so the IRQ doesn't loop.
 
 ### 17.1 The DOS lock
 
-- All V86 execution happens on the system VM thread (§9.4), so DOS and the BIOS are serialised.
+- All V86 execution happens on the system VM thread (§9.5), so DOS and the BIOS are serialised.
 - The lock is held across every reflected INT 21h, every 0300h–0302h call and every BIOS call.
 - ClassiCube reflects INT 21h 2Ch every frame, so the lock path must be cheap [census].
 
@@ -569,8 +634,9 @@ DOS is entered through the INT 21h entry captured at load.
 | RING0 | Ring-0 entry |
 | EXIT | Exit |
 | WARN | e.g. `vif-stuck` |
-| KILL | A kill |
-| RESET-REQ | A reset request |
+| VM | The system VM: `run=`, `dos indos= sda= psp=`, `leave code= ticks= gp= int= irq= spurious=` |
+| KILL | A kill (§9.6) |
+| RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
 | DPMI-UNIMPL | An unimplemented call |
 | PANIC | A panic: registers, stack, last log lines |
 

@@ -204,10 +204,38 @@ a resident HDPMI. `make host-test` runs the frame bitmap and heap tests. Differe
   Afterwards the tick still advances, VECCHK is OK and VMODE reports 3.
 - Borland: `$(BORLAND_DIR)` is checked for TPX.EXE, RTM.EXE and DPMI16BI.OVL (needed by M4d).
 
+**M2 status (2026-10-02): done, with two items moved to M3.** On all six machine and boot combinations:
+- `make loopa-m2`: M2.BAT (XMSINFO, VBEINFO, VMODE, XMSTEST, WAITSEC, KEYWAIT) gives the same HX lines under
+  `GLOS /RUN COMMAND /C` as without GLOS. The only differences allowed are XMS free/largest; on the raw boots
+  the XMS lines aren't compared, because there's no driver without GLOS. On the HIMEMX boots, GLOS's XMS
+  server matches HIMEMX line for line, error codes included.
+- `make loopa-hostile`: all 11 hostile cases end in `GLOS-KILL` under one `GLOS /RUN`, each followed by a
+  KEYWAIT that gets its key. The reset requests (kbc, cf9, cad), the A20 wrap and three `vif-stuck` warnings
+  appear as expected. After GLOS: the tick advanced, VECCHK, the BIOS tick, a key and text mode.
+- `make loopa-m1`, `loopa-gdb` and the refusal still pass. `make host-test` adds the decoder and virtual PIC
+  tests.
+- Borland: TPX.EXE, RTM.EXE and DPMI16BI.OVL are in `~/BORLAND/TP7`.
+
+Differences from the plan:
+- **Moved to M3: threads and the scheduler (item 1) and the VME/PVI path (part of item 4).** The single
+  system VM runs from trap context, and every software INT traps (supervisor.md §9.4). The network stack in M3
+  is the first thing that needs threads.
+- **Not yet:** ELCR (passed through) and the COM1 mirror ring (M3, with the agent's log).
+- **Kill snapshots** are taken at INT 21h 4B00h/4B01h and keyed by the parent's PSP. A program that can't be
+  emulated (a system instruction) is killed by GLOS itself. supervisor.md §9.6 has the details.
+- The hostile programs are one OW program with a case argument (`tests/dos/hostile.c`, plus PRIV), not one
+  .COM each. XMSTEST is `tests/dos/xmstest.c`.
+- **Bug found by the per-kill KEYWAIT:** a program whose keyboard handler takes IRQ 1 without reading port 60h
+  (PICREMAP) left a byte in the virtual 8042, and nothing raised IRQ 1 for it again after the kill. The kill
+  now raises it again, and leaving GLOS empties the chip.
+
 ---
 
 ## M3: network and minimal agent
 
+0. **From M2: threads and the scheduler** (supervisor.md §7; M2's item 1), with the system VM as a thread,
+   **and the VME/PVI path** with the redirection bitmap and the `vif-stuck` watchdog on it (M2's item 4).
+   T: `make loopa-m2 loopa-hostile` unchanged.
 1. **PCI and NE2000.** `kernel/drv/pci.c` (enumeration, claiming) and `drv/nic/ne2k.c` (ISA and PCI), with the
    refusal rules (shared IRQ, a packet-driver signature on the same base).
 2. Wait queues, timers and mutexes.
