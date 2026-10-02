@@ -55,8 +55,10 @@ static void write_cmd_byte(void)
 
 static void raise(int aux)
 {
-    if (aux ? (cmd & 0x02) : (cmd & 0x01))
+    if (aux ? (cmd & 0x02) : (cmd & 0x01)) {
         vpic_raise(&vm.pic, aux ? 12 : 1);
+        vm_kick();
+    }
 }
 
 /* 1: the byte is the kernel's (a hotkey). Set 1 codes, as translated. */
@@ -83,6 +85,7 @@ static int hotkey(u8 b)
         if (!brk && (mods & M_CTRL) && (mods & M_ALT) && (mods & (M_LSHIFT | M_RSHIFT))) {
             vm.kill_req = 1;
             vm.kill_since = timer_ticks();
+            vm_kick();
             swallow = 0x81;
             return 1;
         }

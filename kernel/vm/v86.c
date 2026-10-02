@@ -9,12 +9,14 @@
  *   IRQs    the physical line is masked and passed to the virtual PIC, and
  *           unmasked when the program's EOI ends it there.
  * Before every IRET to V86 mode, vm_return() delivers the highest pending
- * virtual IRQ when the virtual IF allows, and carries out a kill. M2 has no
- * threads and no VME: every software INT traps. */
+ * virtual IRQ when the virtual IF allows, and carries out a kill. The VM is
+ * a thread (core/sched.c): its V86 frame always sits at the top of its
+ * stack, and its waits (HLT, INT 15h 86h) block it until vm_kick(). */
 #include "glos/bootinfo.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
+#include "sched.h"
 #include "timer.h"
 #include "v86dec.h"
 #include "vm.h"
@@ -88,15 +90,37 @@ void vm_int(struct trapframe *tf, u8 n, u32 ret_ip)
     tf->eip = v & 0xFFFF;
 }
 
+/* The VM thread waits, interrupts off, until an IRQ it can take, a kill or
+   the tick `until` (0: no deadline). Other threads run meanwhile. */
 void vm_idle(u32 until)
 {
-    for (;;) {
-        if (vm.kill_req || (vm.vif && vpic_pending(&vm.pic)))
-            return;
-        if (until && (s32)(timer_ticks() - until) >= 0)
-            return;
-        __asm__ volatile("sti; hlt; cli" ::: "memory");
-    }
+    vm.wait_deadline = until;
+    vm.waiting = 1;
+    while (!vm.kill_req && !(vm.vif && vpic_pending(&vm.pic))
+           && !(until && (s32)(timer_ticks() - until) >= 0))
+        thread_block(&vm.waitq);
+    vm.waiting = 0;
+    vm.wait_deadline = 0;
+}
+
+/* Something the VM may be waiting for happened (an IRQ raised, a kill, a
+   deadline): wake it, and let it take the CPU from bulk work. */
+void vm_kick(void)
+{
+    thread_wake(&vm.waitq);
+    if (current && current != vm.thread && current->prio > PRIO_NORMAL)
+        sched_resched();
+}
+
+struct trapframe *vm_frame(void) { return (struct trapframe *)(vm.thread->stack_top - sizeof(struct trapframe)); }
+
+/* With VME the virtual IF lives in EFLAGS.VIF while V86 code runs: it is
+   read at every trap from V86 mode and written back by vm_return(), with
+   VIP set while an IRQ waits for it (so the STI or POPF that sets it traps). */
+void vm_trap_entry(struct trapframe *tf)
+{
+    if (vm.vme)
+        vm.vif = (tf->eflags & FL_VIF) != 0;
 }
 
 void vm_sync_mask(void)
@@ -116,6 +140,7 @@ static void vm_irq_line(struct trapframe *tf)
     vm.phys_mask |= (u16)(1u << irq);
     pic_set_mask(vm.phys_mask);
     vpic_raise_hw(&vm.pic, irq);
+    vm_kick();
 }
 
 void vm_set_a20(int on)
@@ -235,6 +260,13 @@ void vm_return(struct trapframe *tf)
             vm_int(tf, (u8)vec, tf->eip & 0xFFFF);
         }
     }
+    if (vm.vme) {
+        tf->eflags &= ~(FL_VIF | FL_VIP);
+        if (vm.vif)
+            tf->eflags |= FL_VIF;
+        else if (vpic_pending(&vm.pic))
+            tf->eflags |= FL_VIP;
+    }
 }
 
 /* ---- GLOS.EXE's calls and leaving */
@@ -245,10 +277,55 @@ static void vm_leave(u32 code)
     vkbc_leave();
     vdev_leave();
     pic_init(vm.pic.p[0].base, vm.pic.p[1].base, vpic_imr(&vm.pic));
+    if (vm.vme)
+        cpu_set_cr4(0, 1);
+    sched_report();
+    if (vm.bi->flags & BI_F_SELFTEST)
+        selftest_report();
     kprintf("GLOS-VM leave code=%u ticks=%u gp=%u int=%u irq=%u spurious=%u\n", code, timer_ticks(), vm.n_gp,
             vm.n_int, vm.n_irq, timer_spurious());
     vm.bi->result = code;
     leave_to_loader(code, mm_cr3());
+}
+
+/* GLOS.EXE's stub moved to seg:0, just above its PSP; the rest of GLOS.EXE
+   goes back to DOS. A vector the C runtime hooked would be left pointing at
+   free memory: the ones a runtime hooks are checked (others may hold any
+   value, and some do, by chance inside that range). */
+static void vm_resident(u16 seg)
+{
+    static const u8 hooked[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x1B, 0x23, 0x24 };
+    u16 psp = (u16)(seg - 0x10);
+    u32 end = psp + vm_rd16(((u32)psp - 1) * 16 + 3), lo = (u32)(seg + vm.bi->stub_paras) << 4, i, v, x, lin;
+
+    for (i = 0; i < sizeof hooked; i++) {
+        v = hooked[i];
+        x = vm_rd32(v * 4);
+        lin = (x >> 16) * 16 + (x & 0xFFFF);
+        if (lin >= lo && lin < end * 16)
+            kprintf("GLOS-WARN ivt-into-loader vec=%02x at=%04x:%04x\n", v, x >> 16, x & 0xFFFF);
+    }
+    vm.loader_cs = seg;
+    vm.loader_psp = psp;
+    vm.bi->cs_base = (u32)seg << 4;
+    cpu_set_code16_base(vm.bi->cs_base);
+    kprintf("GLOS-VM resident psp=%04x stub=%u freed=%u\n", psp, (vm.bi->stub_paras + 0x10) * 16,
+            (end - psp - vm.bi->stub_paras - 0x10) * 16);
+}
+
+/* What the stub does next: EXEC the /RUN program it holds, then leave with
+   its exit code (M3 item 0a; SHELL= mode adds more). */
+static void vm_next(struct trapframe *tf, u32 result)
+{
+    if (result == 0xFFFFFFFFu) {
+        tf->eax = 1;
+        return;
+    }
+    if (result & 0x10000) {
+        kprintf("GLOS-VM error=cannot-run dos_error=%u\n", result & 0xFFFF);
+        vm_leave(126);
+    }
+    vm_leave(result & 0xFF);
 }
 
 static void vm_call(struct trapframe *tf)
@@ -258,15 +335,16 @@ static void vm_call(struct trapframe *tf)
     switch (fn) {
     case GLOS_CALL_LEAVE:
         vm_leave(arg);
-    case GLOS_CALL_DOSPTR:
-        vm.indos = arg;
-        vm.sda = vm.bi->sda;
-        kprintf("GLOS-VM dos indos=%05x sda=%05x psp=%04x\n", vm.indos, vm.sda, vm_current_psp());
-        tf->eax = 0;
-        break;
     case GLOS_CALL_EXEC:
         vm.loader_psp = (u16)arg;
         tf->eax = 0;
+        break;
+    case GLOS_CALL_RESIDENT:
+        vm_resident((u16)arg);
+        tf->eax = 0;
+        break;
+    case GLOS_CALL_NEXT:
+        vm_next(tf, arg);
         break;
     default:
         tf->eax = 0xFFFFFFFFu;
@@ -463,8 +541,23 @@ void vm_exception(struct trapframe *tf)
 /* ---- starting: GLOS.EXE resumes in V86 mode at _vm_resume with SS, SP and
    DS as pm_enter saved them (bootinfo vm_state_off). */
 
+/* Software INTs GLOS handles (supervisor.md §9.3): with VME, the rest go
+   straight through the IVT. */
+static const u8 trapped_ints[] = { 0x15, 0x21, 0x2F };
+
 static const u16 trapped_ports[] = { 0x20, 0x21, 0xA0, 0xA1, 0x60, 0x64, 0x70, 0x71, 0x92,
                                      0xCF8, 0xCF9, 0xCFA, 0xCFB, 0xCFC, 0xCFD, 0xCFE, 0xCFF };
+
+/* The VM thread: the start frame onto the top of its stack, then into V86
+   mode; it comes back only through traps. */
+static void vm_thread_main(void *arg)
+{
+    struct trapframe *tf = vm_frame();
+    (void)arg;
+    cli();
+    *tf = start_frame;
+    vm_enter(tf);
+}
 
 void vm_start(struct bootinfo *bi)
 {
@@ -473,6 +566,8 @@ void vm_start(struct bootinfo *bi)
     u32 i;
 
     vm.bi = bi;
+    vm.indos = bi->indos;
+    vm.sda = bi->sda;
     vm.loader_cs = (u16)(bi->cs_base >> 4);
     vm.a20 = bi->a20_initial ? 1 : 0;
     mm_vm_init(vm.a20);
@@ -492,6 +587,14 @@ void vm_start(struct bootinfo *bi)
     vkbc_init();
     xms_init(bi);
     vm_sync_mask();
+    if ((cpu_cr4_bits & 1) && !(bi->flags & BI_F_NOVME)) {
+        vm.vme = 1;
+        for (i = 0; i < 256; i++)
+            cpu_int_redirect(i, 1);
+        for (i = 0; i < ARRAY_SIZE(trapped_ints); i++)
+            cpu_int_redirect(trapped_ints[i], 0);
+        cpu_set_cr4(1, 0);
+    }
 
     memset(tf, 0, sizeof *tf);
     tf->eip = bi->vm_resume_off;
@@ -501,7 +604,9 @@ void vm_start(struct bootinfo *bi)
     tf->esp = (u32)(st[2] | (st[3] << 8));
     tf->v86_ds = tf->v86_es = (u32)(st[4] | (st[5] << 8));
     vm.vif = 0;                                 /* pm_enter's CLI; _vm_resume's POPF sets it */
-    kprintf("GLOS-RING0 step=vm cs=%04x ss:sp=%04x:%04x a20=%u pic=%04x kbc=%02x xms=%s\n", vm.loader_cs, tf->ss,
-            tf->esp, vm.a20, vpic_imr(&vm.pic), vkbc_cmd(), bi->mode == BI_MODE_XMS ? "takeover" : "raw");
-    vm_enter(tf);
+    kprintf("GLOS-RING0 step=vm cs=%04x ss:sp=%04x:%04x a20=%u pic=%04x kbc=%02x xms=%s vme=%u\n", vm.loader_cs,
+            tf->ss, tf->esp, vm.a20, vpic_imr(&vm.pic), vkbc_cmd(), bi->mode == BI_MODE_XMS ? "takeover" : "raw",
+            vm.vme);
+    kprintf("GLOS-VM dos indos=%05x sda=%05x psp=%04x\n", vm.indos, vm.sda, vm_current_psp());
+    vm.thread = thread_create("vm", PRIO_NORMAL, vm_thread_main, NULL);
 }

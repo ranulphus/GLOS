@@ -8,6 +8,8 @@
 #   make loopa-gdb      gdb on the kernel's COM2 stub in Loop A (tools/gdb-loopa.sh)
 #   make loopa-m2       M2's exit: HX tools with and without GLOS (JOBS=3 at once)
 #   make loopa-hostile  M2's exit: hostile programs killed with the hotkey
+#   make loopa-sched    the scheduler's self-test threads beside the VM (M3)
+#   make loopa-mem      conventional memory under GLOS against plain DOS (PRD P7)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
@@ -22,7 +24,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all dos-tests kernel host-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-gdb check-deps clean help survey-tools
+.PHONY: all dos-tests kernel host-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-gdb check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -46,18 +48,19 @@ host-test-run:
 
 # ---- GLOS.EXE: the 16-bit loader (Open Watcom, small model) ----------------
 LOADER_C   := loader/main.c
-LOADER_ASM := loader/lowlevel.asm
+LOADER_ASM := loader/lowlevel.asm loader/stub.asm
 build/ow/obj16/%.obj: loader/%.c include/glos/bootinfo.h build/build_id
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WCC16   $<"
 	$(Q)$(WCC16) -bt=dos -ms -3 -os -zq -we -iinclude -dGLOS_BUILD="\"$(BUILD_ID)\"" -fo=$@ $<
-build/ow/obj16/lowlevel.obj: $(LOADER_ASM)
+build/ow/obj16/%.obj: loader/%.asm
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WASM    $<"
 	$(Q)$(OWENV) $(OWBIN)/wasm -q -fo=$@ $<
-build/ow/GLOS.EXE: build/ow/obj16/main.obj build/ow/obj16/lowlevel.obj
+build/ow/GLOS.EXE: build/ow/obj16/main.obj build/ow/obj16/lowlevel.obj build/ow/obj16/stub.obj
 	$(Q)echo "  WLINK   $@"
-	$(Q)$(WLINK) system dos option quiet option stack=4k option map=build/ow/GLOS.map name $@ file build/ow/obj16/main.obj,build/ow/obj16/lowlevel.obj
+	$(Q)$(WLINK) system dos option quiet option stack=4k option map=build/ow/GLOS.map name $@ \
+	  file build/ow/obj16/main.obj,build/ow/obj16/lowlevel.obj,build/ow/obj16/stub.obj
 
 # ---- DOS test programs (Open Watcom, small model): tests/dos/name.c -> build/ow/dos/NAME.EXE
 define dos_test
@@ -77,6 +80,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -fno-asynchronous-unwind-tables -fno-delete-null-pointer-checks -mgeneral-regs-only \
            -O2 -g -Wall -Wextra -Werror -nostdinc -Iinclude -Ikernel/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c kernel/core/timer.c \
+         kernel/core/sched.c \
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c \
          kernel/dbg/gdbstub.c kernel/vm/v86.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c \
          kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c
@@ -117,6 +121,10 @@ loopa-m2: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py m2 -j $(JOBS)
 loopa-hostile: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py hostile -j $(JOBS)
+loopa-sched: all dos-tests check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py sched -j $(JOBS)
+loopa-mem: all check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py mem -j $(JOBS)
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
 loopa-gdb: all check-deps

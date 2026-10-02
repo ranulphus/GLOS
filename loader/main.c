@@ -3,12 +3,14 @@
  * (raw: INT 15h E820h/E801h/88h; XMS: locked blocks), reads GLOSK.BIN, builds
  * the first page tables and enters the kernel; when the kernel returns, it
  * restores A20, frees what it took and exits with the kernel's result.
- *     GLOS [/ROUNDTRIP] [/GDB] [/RUN program [args...]]
- * /RUN keeps DOS running in the kernel's system VM (V86 mode), runs the
- * program there and leaves when it ends, with its exit code.
+ *     GLOS [/ROUNDTRIP] [/GDB] [/SELFTEST] [/NOVME] [/RUN program [args...]]
+ * /RUN keeps DOS running in the kernel's system VM (V86 mode): GLOS.EXE then
+ * shrinks to its resident stub (stub.asm), which runs the program and leaves
+ * when it ends, with its exit code (supervisor.md §2.2).
  * Progress goes to COM1 as GLOS-BOOT lines; refusals as GLOS-REFUSE. */
 #include <conio.h>
 #include <dos.h>
+#include <io.h>
 #include <i86.h>
 #include <process.h>
 #include <stdarg.h>
@@ -25,19 +27,39 @@ extern int __cdecl cpu_is486(void);
 extern int __cdecl cpu_v86(void);
 extern int __cdecl cpu_id1(unsigned long *eax, unsigned long *edx);
 extern int __cdecl bios_e820(void *buf20, unsigned long *cont);
-extern unsigned long __cdecl pm_enter(unsigned gdtr, unsigned long cr3, unsigned long src, unsigned long dst,
-                                      unsigned long file_dwords, unsigned long bss_dwords,
-                                      unsigned long entry, unsigned long arg);
-extern void __cdecl pm_ret(void);
-extern unsigned long __cdecl glos_call(unsigned fn, unsigned long arg);
-/* Labels in the code segment: declared as functions so that their offsets
-   are taken against it, not DGROUP. */
-extern void __cdecl vm_resume(void);
-extern void __cdecl vm_state(void);
-extern void __cdecl glos_bp_call(void);
-extern void __cdecl glos_bp_xms(void);
-extern void __cdecl glos_kill(void);
-extern void __cdecl glos_kill_top(void);
+
+/* The resident stub (stub.asm), in a segment of its own. */
+#pragma pack(1)
+struct stub_data {
+    unsigned char mode, a20init, resident, nxms;
+    void (__far *xms)(void);
+    unsigned short handles[4];
+    char path[80];                              /* EXEC: the program, ASCIIZ */
+    unsigned char tail[128];                    /* EXEC: length, text, CR */
+};
+#pragma pack()
+extern struct stub_data __far __cdecl stub_data;
+extern unsigned long __cdecl __far pm_enter(unsigned gdtr, unsigned long cr3, unsigned long src, unsigned long dst,
+                                            unsigned long file_dwords, unsigned long bss_dwords,
+                                            unsigned long entry, unsigned long arg);
+extern unsigned long __cdecl __far glos_call(unsigned fn, unsigned long arg);
+extern void __cdecl __far stub_resident(void);
+/* Labels in the stub: declared as far functions, for their offsets in its segment. */
+extern void __cdecl __far pm_ret(void);
+extern void __cdecl __far vm_resume(void);
+extern void __cdecl __far vm_state(void);
+extern void __cdecl __far glos_bp_call(void);
+extern void __cdecl __far glos_bp_xms(void);
+extern void __cdecl __far glos_kill(void);
+extern void __cdecl __far glos_kill_top(void);
+extern void __cdecl __far stub_end(void);
+
+static unsigned stub_off(void (__cdecl __far *f)(void))
+{
+    union { void (__cdecl __far *f)(void); unsigned long l; } u;
+    u.f = f;
+    return (unsigned)u.l;
+}
 
 /* ---- COM1 */
 
@@ -213,6 +235,62 @@ static void set_desc(int sel, unsigned long base, unsigned long limit, unsigned 
 static void far *phys(unsigned long p) { return MK_FP((unsigned)(p >> 4), (unsigned)(p & 15)); }
 static void poke32(unsigned long p, unsigned long v) { *(unsigned long far *)phys(p) = v; }
 
+/* The /RUN program for the stub to EXEC: its name in stub_data.path, its
+   command tail in stub_data.tail. As COMMAND.COM: .COM, .EXE, then .BAT,
+   here and then along PATH; a batch file runs under %COMSPEC% /C. */
+static char run_path[80];
+
+static int find_program(char **args)
+{
+    static const char *const ext[] = { ".COM", ".EXE", ".BAT" };
+    const char *base = args[0], *slash = strrchr(base, '\\'), *comspec;
+    char name[80], found[80], tail[130];
+    int i, has_ext = strchr(slash ? slash : base, '.') != NULL;
+    unsigned n;
+
+    found[0] = 0;
+    for (i = 0; i < 3 && !found[0]; i++) {
+        if (strlen(base) + 5 > sizeof name)
+            return -1;
+        strcpy(name, base);
+        if (!has_ext)
+            strcat(name, ext[i]);
+        if (strpbrk(name, "\\:")) {
+            if (access(name, 0) == 0)
+                strcpy(found, name);
+        } else {
+            _searchenv(name, "PATH", found);
+        }
+        if (has_ext)
+            break;
+    }
+    if (!found[0])
+        return -1;
+    tail[0] = 0;
+    n = strlen(found);
+    if (n > 4 && !stricmp(found + n - 4, ".BAT")) {
+        comspec = getenv("COMSPEC");
+        if (!comspec || strlen(comspec) >= sizeof found || strlen(found) + 4 >= sizeof tail)
+            return -1;
+        strcpy(tail, " /C ");
+        strcat(tail, found);
+        strcpy(found, comspec);
+    }
+    for (i = 1; args[i]; i++) {
+        if (strlen(tail) + 1 + strlen(args[i]) > 126)
+            return -1;
+        strcat(tail, " ");
+        strcat(tail, args[i]);
+    }
+    n = strlen(tail);
+    strcpy(run_path, found);
+    _fstrcpy(stub_data.path, found);
+    stub_data.tail[0] = (unsigned char)n;
+    _fmemcpy(stub_data.tail + 1, tail, n);
+    stub_data.tail[n + 1] = 0x0D;
+    return 0;
+}
+
 /* GLOSK.BIN next to GLOS.EXE */
 static void kernel_path(char *out, const char *argv0)
 {
@@ -239,6 +317,8 @@ int main(int argc, char **argv)
     for (i = 1; i < (unsigned)argc; i++) {
         if (!stricmp(argv[i], "/ROUNDTRIP")) bi.flags |= BI_F_ROUNDTRIP;
         else if (!stricmp(argv[i], "/GDB")) bi.flags |= BI_F_GDB;
+        else if (!stricmp(argv[i], "/SELFTEST")) bi.flags |= BI_F_SELFTEST;
+        else if (!stricmp(argv[i], "/NOVME")) bi.flags |= BI_F_NOVME;
         else if (!stricmp(argv[i], "/RUN") && i + 1 < (unsigned)argc) {
             bi.flags |= BI_F_VM;
             run_at = (int)i + 1;
@@ -344,19 +424,30 @@ int main(int argc, char **argv)
     for (i = 0; i < pages; i++)
         poke32(tab_phys + 0x2000 + (0x100 + i) * 4UL, (bi.kernel_phys + ((unsigned long)i << 12)) | 3);
 
+    r.h.ah = 0x34; int86x(0x21, &r, &r, &sr);               /* InDOS flag */
+    bi.indos = ((unsigned long)sr.es << 4) + r.x.bx;
+    r.x.ax = 0x5D06; int86x(0x21, &r, &r, &sr);             /* swappable data area */
+    bi.sda = r.x.cflag ? 0 : ((unsigned long)sr.ds << 4) + r.x.si;
     segread(&sr);
     bi.magic = BOOTINFO_MAGIC;
     bi.version = BOOTINFO_VERSION;
     bi.size = sizeof bi;
-    bi.cs_base = (unsigned long)sr.cs << 4;
+    bi.cs_base = (unsigned long)FP_SEG(&stub_data) << 4;    /* 38h: the stub's segment */
     bi.ds_base = (unsigned long)sr.ds << 4;
-    bi.ret_off = (unsigned)pm_ret;
-    bi.vm_resume_off = (unsigned)vm_resume;
-    bi.vm_state_off = (unsigned)vm_state;
-    bi.bp_call_off = (unsigned)glos_bp_call;
-    bi.bp_xms_off = (unsigned)glos_bp_xms;
-    bi.kill_off = (unsigned)glos_kill;
-    bi.kill_sp = (unsigned)glos_kill_top;
+    bi.ret_off = stub_off(pm_ret);
+    bi.vm_resume_off = stub_off(vm_resume);
+    bi.vm_state_off = stub_off(vm_state);
+    bi.bp_call_off = stub_off(glos_bp_call);
+    bi.bp_xms_off = stub_off(glos_bp_xms);
+    bi.kill_off = stub_off(glos_kill);
+    bi.kill_sp = stub_off(glos_kill_top);
+    bi.stub_paras = (stub_off(stub_end) + 15) >> 4;
+    stub_data.mode = bi.mode == BI_MODE_XMS;
+    stub_data.a20init = (unsigned char)bi.a20_initial;
+    stub_data.xms = xms;
+    for (i = 0; i < n_xms; i++)
+        stub_data.handles[i] = xms_handles[i];
+    stub_data.nxms = (unsigned char)n_xms;
     set_desc(0x08, 0, 0xFFFFF, 0x9A, 0xC0);
     set_desc(0x10, 0, 0xFFFFF, 0x92, 0xC0);
     set_desc(BOOT_SEL_CODE16, bi.cs_base, 0xFFFF, 0x9A, 0x00);
@@ -370,25 +461,23 @@ int main(int argc, char **argv)
                    bi.ds_base + (unsigned)&bi);
     if (ret == 0x10000UL) {
         /* Running in the system VM (V86 mode) under the kernel. The image and
-           the first page tables are no longer needed; DOS gets the memory. */
-        int code;
+           the first page tables go back to DOS, and so does the rest of
+           GLOS.EXE: the stub, copied down to just above the PSP, runs the
+           program and leaves when it ends. This code never runs again. The
+           copy must not overlap the stub where it is now. */
         _dos_freemem(tab_seg);
         _dos_freemem(buf_seg);
         tab_seg = buf_seg = 0;
-        r.h.ah = 0x34; int86x(0x21, &r, &r, &sr);           /* InDOS flag */
-        a = ((unsigned long)sr.es << 4) + r.x.bx;
-        r.x.ax = 0x5D06; int86x(0x21, &r, &r, &sr);         /* swappable data area */
-        bi.sda = r.x.cflag ? 0 : ((unsigned long)sr.ds << 4) + r.x.si;
-        segread(&sr);
-        glos_call(GLOS_CALL_DOSPTR, a);
-        say("GLOS-VM run=%s", argv[run_at]);
-        glos_call(GLOS_CALL_EXEC, _psp);
-        code = spawnvp(P_WAIT, argv[run_at], (const char **)(argv + run_at));
-        if (code < 0) {
+        if (find_program(argv + run_at) != 0) {
             say("GLOS-VM error=cannot-run program=%s", argv[run_at]);
-            code = 126;
+            ret = glos_call(GLOS_CALL_LEAVE, 126);
+        } else if (FP_SEG(&stub_data) < _psp + 0x10 + bi.stub_paras) {
+            say("GLOS-VM error=stub-layout seg=%04x psp=%04x", FP_SEG(&stub_data), _psp);
+            ret = glos_call(GLOS_CALL_LEAVE, 126);
+        } else {
+            say("GLOS-VM run=%s", run_path);
+            stub_resident();
         }
-        ret = glos_call(GLOS_CALL_LEAVE, (unsigned long)code);
     }
 
     if (bi.mode == BI_MODE_XMS) {

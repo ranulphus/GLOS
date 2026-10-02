@@ -206,6 +206,7 @@ static void rtc_tick(u8 c)
     if ((vm.rtc_c & vm.rtc_b & 0x70) && !(before & 0x80)) {
         vm.rtc_c |= 0x80;
         vpic_raise(&vm.pic, 8);
+        vm_kick();
     }
 }
 
@@ -222,11 +223,10 @@ static void watchdog(struct trapframe *tf, u32 now)
         return;
     }
     if (!vm.stuck_warned && now - vm.stuck_since > 51) {
+        struct trapframe *f = vm_frame();       /* the same frame as tf when the tick hit V86 code */
+        (void)tf;
         vm.stuck_warned = 1;
-        if (tf->eflags & FL_VM)
-            kprintf("GLOS-WARN vif-stuck at=%04x:%04x\n", tf->cs, tf->eip & 0xFFFF);
-        else
-            kprintf("GLOS-WARN vif-stuck at=hlt\n");
+        kprintf("GLOS-WARN vif-stuck at=%04x:%04x%s\n", f->cs, f->eip & 0xFFFF, vm.waiting ? " hlt" : "");
     }
 }
 
@@ -236,5 +236,7 @@ void vdev_tick(struct trapframe *tf, u8 c)
     rtc_tick(c);
     vkbc_tick();
     vm_int15_tick(now);
+    if (vm.waiting && vm.wait_deadline && (s32)(now - vm.wait_deadline) >= 0)
+        vm_kick();
     watchdog(tf, now);
 }

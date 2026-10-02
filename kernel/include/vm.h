@@ -5,6 +5,7 @@
 #ifndef K_VM_H
 #define K_VM_H
 #include "arch.h"
+#include "sched.h"
 #include "vpic.h"
 
 struct bootinfo;
@@ -17,6 +18,8 @@ struct bootinfo;
 #define FL_HI    0x00007000u            /* IOPL and NT: virtual, as the program set them */
 #define FL_VM    0x00020000u
 #define FL_AC    0x00040000u
+#define FL_VIF   0x00080000u
+#define FL_VIP   0x00100000u
 #define FL_ID    0x00200000u
 
 #define SNAP_LEVELS 8
@@ -32,7 +35,8 @@ struct vm_snap {
 struct vm {
     struct bootinfo *bi;
     u16 loader_cs, loader_psp;
-    u8 vif;                             /* the virtual interrupt flag */
+    u8 vif;                             /* the virtual interrupt flag (EFLAGS.VIF in V86 mode with VME) */
+    u8 vme;                             /* CR4.VME on: CLI, STI, PUSHF, POPF, IRET and most INTs in hardware */
     u32 vflags_hi;                      /* IOPL, NT */
     struct vpic pic;
     u16 phys_mask;                      /* what the physical PIC's IMR holds */
@@ -56,15 +60,23 @@ struct vm {
     u8 stuck_warned;
     /* counts for the leave line */
     u32 n_gp, n_int, n_irq;
+    /* the VM thread and its waits */
+    struct thread *thread;
+    struct waitq waitq;
+    u32 wait_deadline;
+    u8 waiting;
 };
 
 extern struct vm vm;
 
-void vm_start(struct bootinfo *bi) __attribute__((noreturn));
+void vm_start(struct bootinfo *bi);              /* sets up and creates the VM thread */
+void vm_kick(void);                             /* the VM may have something to do: wake it */
+struct trapframe *vm_frame(void);               /* the VM thread's V86 frame */
+void selftest_report(void);                     /* core/main.c, /SELFTEST */
 void vm_exception(struct trapframe *tf);        /* a CPU exception from V86 mode */
 void vm_return(struct trapframe *tf);           /* last thing before IRET to V86 mode */
 void vm_int(struct trapframe *tf, u8 n, u32 ret_ip);    /* real-mode INT n through the IVT */
-void vm_idle(u32 until);                        /* HLT until a deliverable IRQ, a kill or tick `until` (0: none) */
+void vm_idle(u32 until);                        /* block until a deliverable IRQ, a kill or tick `until` (0: none) */
 void vm_set_a20(int on);
 void vm_sync_mask(void);                        /* the physical IMR from the virtual one */
 void vm_reset_req(const char *source);

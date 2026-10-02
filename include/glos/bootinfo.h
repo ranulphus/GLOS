@@ -34,11 +34,17 @@ typedef unsigned int   bi_u32;
 #define BI_F_ROUNDTRIP   0x0001                 /* /ROUNDTRIP: tick for a second, report, return */
 #define BI_F_GDB         0x0002                 /* /GDB: stop in the gdb stub on COM2 first */
 #define BI_F_VM          0x0004                 /* /RUN: keep DOS running in the system VM (M2) */
+#define BI_F_SELFTEST    0x0008                 /* /SELFTEST: scheduler test threads beside the VM (M3) */
+#define BI_F_NOVME       0x0010                 /* /NOVME: trap every INT and CLI/STI even with VME (M3) */
 
 /* glos_call() functions (the ARPL at bp_call_off, AX = fn, EBX = arg). */
 #define GLOS_CALL_LEAVE  1                      /* stop the VM, back to real mode; arg = exit code */
-#define GLOS_CALL_DOSPTR 2                      /* arg = linear InDOS flag; the SDA in bootinfo.sda */
-#define GLOS_CALL_EXEC   3                      /* about to EXEC the /RUN program; arg = GLOS.EXE's PSP */
+#define GLOS_CALL_DOSPTR 2                      /* unused since M3: bootinfo.indos and .sda instead */
+#define GLOS_CALL_EXEC   3                      /* unused since M3: RESIDENT gives the PSP */
+#define GLOS_CALL_NEXT   4                      /* the stub asks what to do; arg = how the last EXEC ended
+                                                   (INT 21h 4Dh's AX, 10000h + the error if EXEC failed,
+                                                   FFFFFFFFh at first); EAX = 1: EXEC the stub's path/tail */
+#define GLOS_CALL_RESIDENT 5                    /* the stub moves to arg:0, right after GLOS.EXE's PSP */
 
 struct bi_range { bi_u32 base, length, type; };
 
@@ -69,6 +75,9 @@ struct bootinfo {
     bi_u32 xms_ver, xms_rev, xms_hma;           /* XMS mode: the driver's function 00h (AX, BX, DX) */
     bi_u32 hma_used;                            /* XMS mode: the HMA was taken (DOS=HIGH) */
     bi_u32 xms_table;                           /* XMS mode: INT 2Fh 4309h's handle table (linear), 0 none */
+    /* M3 */
+    bi_u32 indos;                               /* DOS's InDOS flag (linear) */
+    bi_u32 stub_paras;                          /* the resident stub's size, in paragraphs */
 };
 
 #endif

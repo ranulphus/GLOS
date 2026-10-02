@@ -6,6 +6,8 @@ through MGA-Glide's harness:
   jobs.py refuse
   jobs.py m2 [--profile P ...] [--boot B ...] [-j N]
   jobs.py hostile [--profile P ...] [--boot B ...] [-j N]
+  jobs.py sched [--profile P ...] [--boot B ...] [-j N]
+  jobs.py mem [--profile P ...] [--boot B ...] [-j N]
 
 m1: on each machine profile (bf6, 486dx2, 486dx4) and boot (default: no
 XMS driver, raw mode; himemx: XMS mode, DOS=HIGH), RUN.BAT does
@@ -22,6 +24,16 @@ XMSINFO's free= and largest= (GLOS's own memory comes out of the pool), and
 on the raw boot every XMS line (there is no driver without GLOS; GLOS's
 XMSTEST lines are compared with the HIMEMX boot's instead, but for the HMA
 and A20). After GLOS: VECCHK, a key through the BIOS and text mode.
+
+sched: m2 with "GLOS /SELFTEST": a bulk thread that never blocks and an
+urgent one sleeping 10 ticks at a time run beside the VM. The HX lines must
+still match; the sleeper must wake every 10 ticks, at most 2 late; and bulk
+must get 20-40% of the ticks when it and the VM were both ready (the 30%
+budget).
+
+mem: MEM /C natively and under "GLOS /RUN MEM /C" (PRD P7): GLOS's own
+memory (its PSP, the resident stub and its environment) is 4 KB or less,
+and MEM's largest program size is within 4 KB of plain DOS's.
 
 hostile: HOSRUN.BAT runs every tests/dos/hostile.c case under one "GLOS /RUN
 COMMAND /C"; the harness types Ctrl-Alt-Shift-Esc after each one's "armed"
@@ -139,17 +151,18 @@ def normalise(lines, raw):
     return out
 
 
-def m2(profile, boot):
+def m2(profile, boot, selftest=False):
     """One profile and boot: M2.BAT natively, then under GLOS."""
     tag = "%s-%s" % (profile, boot)
+    suite = "sched" if selftest else "m2"
     bat = batfile("m2-%s/M2.BAT" % tag, M2_BAT)
     common = ["--machine", profile, "--boot-cfg", boot, "--file", bat + "=/TEST/M2.BAT"] + M2_FILES + GLOS_FILES
     st0, base = run("m2-base-" + tag, common + [
         "--cmd", "SERSAY HX-START m2", "--cmd", "CALL C:\\TEST\\M2.BAT", "--cmd", "SERSAY HX-DONE 0",
         "--keys", KEY_ENTER])
-    st1, glos = run("m2-glos-" + tag, common + [
+    st1, glos = run(suite + "-glos-" + tag, common + [
         "--cmd", "SERSAY HX-START m2", "--cmd", "VECCHK save",
-        "--cmd", "C:\\TEST\\GLOS.EXE /RUN %COMSPEC% /C C:\\TEST\\M2.BAT", "--cmd", "VECCHK check",
+        "--cmd", "C:\\TEST\\GLOS.EXE %s/RUN %%COMSPEC%% /C C:\\TEST\\M2.BAT" % ("/SELFTEST " if selftest else ""), "--cmd", "VECCHK check",
         "--cmd", "KEYWAIT 20", "--cmd", "SERSAY HX-DONE 0", "--keys", KEY_ENTER + "," + KEY_ENTER])
     lb, lg = hx_lines(base, "HX-M2 begin", "HX-M2 end"), hx_lines(glos, "HX-M2 begin", "HX-M2 end")
     raw = boot == "default"
@@ -165,14 +178,24 @@ def m2(profile, boot):
         "keyboard": glos.count("HX-KEY scan=1c") == 2,
         "textmode": "HX-VMODE bios=03" in glos.split("GLOS-EXIT")[-1],
     }
+    info = ""
+    if selftest:
+        sc = re.search(r"GLOS-SCHED switches=\d+ contended_bulk=(\d+) contended_normal=(\d+)", glos)
+        st = re.search(r"GLOS-SCHEDTEST wakes=(\d+) late_max=(\d+) burn=(\d+)", glos)
+        lv = re.search(r"GLOS-VM leave code=\d+ ticks=(\d+)", glos)
+        share = int(sc.group(1)) / max(1, int(sc.group(1)) + int(sc.group(2))) if sc else -1
+        checks["sleeper"] = bool(st and lv) and int(st.group(1)) >= int(lv.group(1)) // 10 - 50 \
+            and int(st.group(2)) <= 2
+        checks["budget"] = 0.20 <= share <= 0.40
+        info = " bulk=%.0f%%%s" % (share * 100, " late_max=" + st.group(2) if st else "")
     bad = [k for k, v in checks.items() if not v]
     if not same and lb is not None and lg is not None:
         nb, ng = normalise(lb, raw), normalise(lg, raw)
         diff = ["-" + l for l in nb if l not in ng] + ["+" + l for l in ng if l not in nb]
         bad.append("diff: " + " | ".join(diff[:8]))
     xms = [l for l in (lg or []) if l.startswith("HX-XMSTEST ")]
-    return "  %-22s %s%s" % ("m2-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
-        not bad, xms
+    return "  %-22s %s%s%s" % (suite + "-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad, xms
 
 
 def hostile(profile, boot):
@@ -220,6 +243,35 @@ def hostile(profile, boot):
                                       "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def mem(profile, boot):
+    tag = "%s-%s" % (profile, boot)
+    st, serial = run("mem-" + tag, ["--machine", profile, "--boot-cfg", boot] + GLOS_FILES + [
+        "--cmd", "SERSAY HX-START mem", "--cmd", "MEM /C > C:\\OUT\\BASE.TXT",
+        "--cmd", "C:\\TEST\\GLOS.EXE /RUN MEM /C > C:\\OUT\\GLOS.TXT", "--cmd", "SERSAY HX-DONE 0"])
+    files = os.path.join(ROOT, "out", "mem-" + tag, "files")
+
+    def read(n):
+        p = os.path.join(files, n)
+        return open(p, "rb").read().decode("latin-1") if os.path.exists(p) else ""
+
+    def largest(t):
+        m = re.search(r"Largest executable program size\s+\d+K \(([\d,]+) bytes\)", t)
+        return int(m.group(1).replace(",", "")) if m else -1
+    base, glos = read("BASE.TXT"), read("GLOS.TXT")
+    own = re.search(r"^\s*GLOS\s+([\d,]+)", glos, re.M)
+    own = int(own.group(1).replace(",", "")) if own else -1
+    lb, lg = largest(base), largest(glos)
+    checks = {
+        "status": st == "PASS" and "GLOS-EXIT code=0" in serial,
+        "resident": "GLOS-VM resident" in serial and "GLOS-WARN" not in serial,
+        "own<=4K": 0 < own <= 4096,
+        "largest": lb > 0 and lg > 0 and lb - lg <= 4096,
+    }
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s glos=%d largest=%d/%d%s" % ("mem-" + tag, "PASS" if not bad else "FAIL", own, lg, lb,
+                                                   "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def matrix(fn, combos, jobs):
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
         results = list(ex.map(lambda pb: fn(*pb), combos))
@@ -230,7 +282,7 @@ def matrix(fn, combos, jobs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile"])
+    ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -244,6 +296,10 @@ def main():
             if r[2]:
                 print("    %s-%s XMSTEST: %s" % (p, b, "; ".join(l[11:] for l in r[2])))
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "mem":
+        return 0 if all(r[1] for r in matrix(mem, combos, a.jobs)) else 1
+    if a.suite == "sched":
+        return 0 if all(r[1] for r in matrix(lambda p, b: m2(p, b, True), combos, a.jobs)) else 1
     if a.suite == "hostile":
         return 0 if all(r[1] for r in matrix(hostile, combos, a.jobs)) else 1
     ok = True

@@ -31,10 +31,14 @@ void cpu_features(void);
 void set_irq_handler(int irq, void (*fn)(struct trapframe *));
 void cpu_io_trap(u32 port, int trap);
 void cpu_set_esp0(u32 esp0);
+void cpu_set_code16_base(u32 base);
+void cpu_int_redirect(u32 vec, int redirect);
+void cpu_set_cr4(u32 set, u32 clear);   /* only when cpu_has_cr4 */
 void set_trap_handler(int vec, int (*fn)(struct trapframe *));    /* returns 1 if handled */
 void panic(const char *why, struct trapframe *tf) __attribute__((noreturn));
 
 /* vm/v86.c: traps from the system VM (EFLAGS.VM set in the frame) */
+void vm_trap_entry(struct trapframe *tf);
 void vm_exception(struct trapframe *tf);
 void vm_return(struct trapframe *tf);
 

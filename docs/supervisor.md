@@ -88,32 +88,44 @@ to COM1 at each step:
    - the resident stub returns to DOS with the requested exit code.
    - **Acceptance:** VECCHK OK and VMODE 3 afterwards.
 
-### 2.1 The system VM's start and GLOS.EXE's calls (M2)
-
-M2 runs the program given after `/RUN` and leaves when it ends. M3 replaces this with the start modes of §2.2.
+### 2.1 The system VM's start and GLOS.EXE's calls
 
 - `GLOS /RUN program [args]` sets `BI_F_VM`. The kernel then doesn't return to real mode: it resumes
   `GLOS.EXE` in V86 mode at `_vm_resume`, with SS, SP and DS as `pm_enter` saved them, so `pm_enter`
-  appears to return 10000h. `GLOS.EXE` frees the kernel image's buffer and the first page tables, and runs
-  the program with `spawnvp`. When it ends, `glos_call(LEAVE, code)` stops the VM; the kernel leaves through
-  `_pm_ret` as in M1 and `pm_enter`'s caller sees the exit code.
-- **Calls into the kernel** are ARPL instructions, which raise #UD in V86 mode (§9.2), at offsets that bootinfo
-  gives: `bp_call_off` for `glos_call(fn, arg)` (AX, EBX; the result in EAX) and `bp_xms_off` for the XMS entry
-  point (§16).
-- **Functions:** LEAVE (1, the exit code); DOSPTR (2, the linear InDOS flag, with the SDA from INT 21h 5D06h
-  in `bootinfo.sda`); EXEC (3, `GLOS.EXE`'s PSP, which a kill never ends).
-- **Bootinfo fields:** `vm_resume_off`, `vm_state_off`, `bp_call_off`, `bp_xms_off`, `sda`, `kill_off` and
-  `kill_sp` (the kill stub and its 256-byte stack, §9.6), and in XMS mode the driver's version (`xms_ver`,
-  `xms_rev`, `xms_hma`), whether the HMA was already taken (`hma_used`, so DOS=HIGH) and INT 2Fh 4309h's
-  handle table (`xms_table`).
+  appears to return 10000h. `GLOS.EXE` frees the kernel image's buffer and the first page tables, finds the
+  program as COMMAND.COM would (.COM, .EXE, .BAT; here, then `PATH`; a batch file under `%COMSPEC% /C`) and
+  hands over to its resident stub (§2.2), which runs it. When it ends, the kernel leaves through `_pm_ret`
+  as in M1, and the stub exits with the program's code.
+- **The kernel copies bootinfo** at entry: `GLOS.EXE`'s data doesn't outlive the stub. The loader fills in
+  the DOS pointers (`indos`, `sda`) before entering the kernel.
+- **Calls into the kernel** are ARPL instructions, which raise #UD in V86 mode (§9.2), at offsets in the
+  stub's segment that bootinfo gives: `bp_call_off` for `glos_call(fn, arg)` (AX, EBX; the result in EAX) and
+  `bp_xms_off` for the XMS entry point (§16).
+- **Functions:** LEAVE (1, the exit code); NEXT (4, the stub asks what to run, passing how the last EXEC
+  ended: INT 21h 4Dh's AX, 10000h plus the DOS error if EXEC failed, FFFFFFFFh at first; EAX = 1 means EXEC
+  the stub's path and tail); RESIDENT (5, the stub has moved to `arg`:0). DOSPTR (2) and EXEC (3) were M2's
+  and are no longer used.
+- **Bootinfo fields:** `vm_resume_off`, `vm_state_off`, `bp_call_off`, `bp_xms_off`, `indos`, `sda`,
+  `kill_off` and `kill_sp` (the kill stub and its 256-byte stack, §9.6), `stub_paras`, and in XMS mode the
+  driver's version (`xms_ver`, `xms_rev`, `xms_hma`), whether the HMA was already taken (`hma_used`, so
+  DOS=HIGH) and INT 2Fh 4309h's handle table (`xms_table`).
 
 ### 2.2 Start modes and the resident stub (M3; PRD D39–D41)
 
-- **The stub.** Once the kernel is running, `GLOS.EXE` keeps only a resident stub of 4 KB or less (P7) and
-  frees the rest of its memory block (INT 21h 4Ah), like a TSR. The stub is assembly at the start of the
-  image: the kernel-call and XMS entry points, the kill stub, the real-mode stacks of §9.5 and the EXEC
-  loop. Everything else (parsing, the agent, later the desktop) runs in the kernel and asks the stub to EXEC.
-  INT 2Fh 1687h reports no real-mode memory needed per DPMI client.
+- **The stub** (`loader/stub.asm`, done in M3). Once the kernel is running, `GLOS.EXE` keeps only a resident
+  stub of 4 KB or less (P7) and frees the rest of its memory block (INT 21h 4Ah), like a TSR. The stub holds
+  the mode switch, the kernel-call and XMS entry points, the kill stub, its stacks (the real-mode stacks of
+  §9.5 join them in M4) and the EXEC loop. Everything else (finding programs, the agent, later the desktop)
+  runs in the kernel, which tells the stub what to EXEC (NEXT, §2.1). INT 2Fh 1687h will report no real-mode
+  memory needed per DPMI client.
+- **Going resident.** Open Watcom puts its runtime's code at the start of the image, so the stub is written to
+  run from any segment (data through CS, no segment fixups) and is copied down to the paragraph after the
+  PSP. The copy tells the kernel (RESIDENT), which moves selector 38h and the call sites to it and checks
+  that no vector a C runtime hooks (00h–07h, 1Bh, 23h, 24h) points into the memory being freed
+  (`GLOS-WARN ivt-into-loader`). The stub then shrinks the block and runs the EXEC loop. After the kernel
+  leaves, the stub puts A20 and the XMS blocks back as found, writes `GLOS-EXIT` and ends with INT 21h 4Ch.
+- **Measured (M3):** the stub is 2,030 bytes. With the PSP and the environment, MEM /C shows GLOS at 2,480
+  bytes, and the largest program is 2,480 bytes smaller than under plain DOS.
 - **From a prompt or AUTOEXEC.BAT:** COMMAND.COM stays the shell; `glos exit` returns to it.
 - **As the shell (`SHELL=C:\GLOS\GLOS.EXE` in CONFIG.SYS):**
   - `GLOS.EXE`'s PSP is the root of the PSP chain, and its environment is the master environment (1 KB by
@@ -241,6 +253,22 @@ A `mode` field (V86 / PM16 / PM32 / ring 0) is derived from EFLAGS.VM and CS's d
 
 - **Idle:** HLT in ring 0 with interrupts on.
 
+**As built (M3, `kernel/core/sched.c`):**
+- Run queues per class. Turns are 20 ticks (about 20 ms at 1024 Hz). Bulk threads take turns with normal
+  threads until they have used 30 ticks of the current 100-tick window, then run only when no normal thread
+  is ready. The exclusive-session distinction arrives with sessions (M4e).
+- A switch happens only in `schedule()`, with interrupts off: when a thread blocks, sleeps or yields, and on
+  the way out of an IRQ or a trap from V86 mode when a reschedule is due. An interrupted kernel thread is
+  preempted only if it had interrupts on and isn't in a `preempt_disable()` section. The system VM's trap
+  paths run with interrupts off, so they are never preempted midway.
+- A woken thread that outranks the running one gets the CPU at the next safe point. An IRQ for the system VM
+  wakes it and takes the CPU from bulk work (`vm_kick`).
+- The system VM's V86 frame always sits at the top of its stack (TSS ESP0). Its waits (HLT, INT 15h 86h)
+  block the thread.
+- Each stack has a canary word at its base, checked at every switch (`GLOS-PANIC why=stack-overflow`).
+- `/SELFTEST` adds a bulk thread that never blocks and an urgent thread sleeping 10 ticks at a time. Over the
+  M2 batch on all six Loop A combinations, bulk got 30% of the contended ticks and the sleeper was never late.
+
 ## 8. Time and PIT ownership [fixed]
 
 ### 8.1 The clock
@@ -312,12 +340,15 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 - **Watchdog:** if the virtual IF stays off for more than 50 ms with an IRQ pending, GLOS writes
   `GLOS-WARN vif-stuck cs:ip`. It doesn't force the flag in v1.
 
-### 9.4 M2: what the first system VM does
+### 9.4 The system VM as built (M2, M3)
 
-- **No threads yet.** The kernel runs only in traps from the VM (and in HLT while the VM waits, §9.2). The
-  threads and the scheduler of §7 arrive at the start of M3, with the network stack that needs them.
-- **No VME yet.** Every software INT and every IOPL-sensitive instruction traps, on all three Loop A profiles.
-  The VME/PVI path of §9.3 comes with the scheduler.
+- **A thread** (§7, M3). In M2 it ran from trap context alone.
+- **VME** (M3) where CR4.VME exists (the Pentium II and iDX4 profiles; `/NOVME` turns it off): CLI, STI,
+  PUSHF, POPF, IRET and software INTs run in hardware against EFLAGS.VIF. Only INT 15h, 21h and 2Fh trap,
+  through the redirection bitmap; INT 10h and 13h join them with the DOS server's busy tracking (§17.2). The
+  monitor reads VIF at every trap from V86 mode and writes it back, with VIP set while an IRQ waits. The same
+  MEM run traps 1,237 times with VME and 33,968 times without. PUSHFD, POPFD and IRETD still trap. On the
+  486DX2 every one traps, as in M2.
 - **Exceptions** a real-mode CPU would raise (00h, 01h, 03h–07h, 0Ch) are reflected through the IVT. #GP for
   a segment limit becomes INT 0Dh. A system instruction (0Fh 20h-23h, LMSW, LGDT and the like) can't be
   emulated: the program is killed (`GLOS-WARN v86-priv`, then the kill of §9.6).
@@ -662,7 +693,8 @@ DOS is entered through the INT 21h entry captured at load.
 | RING0 | Ring-0 entry |
 | EXIT | Exit |
 | WARN | e.g. `vif-stuck` |
-| VM | The system VM: `run=`, `dos indos= sda= psp=`, `leave code= ticks= gp= int= irq= spurious=` |
+| VM | The system VM: `run=`, `dos indos= sda= psp=`, `resident psp= stub= freed=`, `leave code= ticks= gp= int= irq= spurious=` |
+| SCHED | At leave: context switches, contended ticks per class, and each thread's ticks |
 | KILL | A kill (§9.6) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
 | DPMI-UNIMPL | An unimplemented call |

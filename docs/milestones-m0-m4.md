@@ -243,6 +243,14 @@ Differences from the plan:
    T: `jobs.py mem` (MEM /C with and without GLOS, P7, on both boots); `jobs.py shell` (the `SHELL=` boot:
    AUTOEXEC.BAT's `SET` and `PATH` visible to the next program, RUN.BAT runs, and a refusal (no GLOSK.BIN)
    falls back to a working prompt).
+
+**M3 status (2026-10-02):**
+- **Item 0 done.** `kernel/core/sched.c`; the system VM is a thread; VME on the Pentium II and iDX4 profiles
+  (`/NOVME` turns it off). `make loopa-sched` (`/SELFTEST`: bulk at 30% of contended ticks, the urgent sleeper
+  never late), `loopa-m2`, `loopa-hostile`, `loopa-m1`, the refusal and `loopa-gdb` pass on all six
+  combinations.
+- **Item 0a: the stub done; `SHELL=` mode under way.** `loader/stub.asm`. `make loopa-mem` passes on all six:
+  GLOS takes 2,480 bytes (was 38,192) and the largest program is 2,480 bytes smaller than under plain DOS.
 1. **PCI and NE2000.** `kernel/drv/pci.c` (enumeration, claiming) and `drv/nic/ne2k.c` (ISA and PCI), with the
    refusal rules (shared IRQ, a packet-driver signature on the same base).
 2. Wait queues, timers and mutexes.

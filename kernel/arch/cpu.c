@@ -4,6 +4,7 @@
 #include "arch.h"
 #include "io.h"
 #include "kprintf.h"
+#include "sched.h"
 
 struct tss {
     u32 link, esp0, ss0, esp1, ss1, esp2, ss2, cr3, eip, eflags, eax, ecx, edx, ebx;
@@ -98,6 +99,9 @@ void cpu_init(u32 cs16_base, u32 ds16_base, u32 ret_off)
     ret_farptr.sel = SEL_CODE16;
 }
 
+/* 38h follows GLOS.EXE's resident stub when it moves (supervisor.md §2.2). */
+void cpu_set_code16_base(u32 base) { set_desc(SEL_CODE16, base, 0xFFFF, 0x9A, 0x00); }
+
 /* The #DF task must use the kernel's own page directory once there is one. */
 void cpu_set_df_cr3(u32 cr3) { dftss.cr3 = cr3; }
 
@@ -123,6 +127,21 @@ void cpu_io_trap(u32 port, int trap)
 }
 
 void cpu_set_esp0(u32 esp0) { TSS->esp0 = esp0; }
+
+/* VME's interrupt redirection bitmap: with CR4.VME, INT n in V86 mode goes
+   straight through the IVT when its bit is clear, and traps when set. */
+void cpu_int_redirect(u32 vec, int redirect)
+{
+    if (redirect) TSS_REDIR[vec >> 3] &= (u8)~(1u << (vec & 7));
+    else TSS_REDIR[vec >> 3] |= (u8)(1u << (vec & 7));
+}
+
+void cpu_set_cr4(u32 set, u32 clear)
+{
+    u32 v;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(v));
+    __asm__ volatile("mov %0, %%cr4" :: "r"((v & ~clear) | set) : "memory");
+}
 
 void set_irq_handler(int irq, void (*fn)(struct trapframe *)) { irq_fn[irq] = fn; }
 void set_trap_handler(int vec, int (*fn)(struct trapframe *)) { trap_fn[vec] = fn; }
@@ -155,6 +174,8 @@ void double_fault(void)
 void trap_dispatch(struct trapframe *tf)
 {
     u32 v = tf->vec;
+    if (tf->eflags & EFLAGS_VM)
+        vm_trap_entry(tf);
     if (v >= IRQ_BASE_MASTER && v < IRQ_BASE_MASTER + 16) {
         int irq = (int)(v - IRQ_BASE_MASTER);
         if ((irq == 7 || irq == 15) && !irq_fn[irq]) {     /* spurious unless in service */
@@ -169,12 +190,14 @@ void trap_dispatch(struct trapframe *tf)
         if (irq >= 8) outb(0xA0, 0x20);
         outb(0x20, 0x20);
     out:
+        sched_trap_exit(tf);
         if (tf->eflags & EFLAGS_VM)
             vm_return(tf);
         return;
     }
     if (tf->eflags & EFLAGS_VM) {                       /* from the system VM */
         vm_exception(tf);
+        sched_trap_exit(tf);
         vm_return(tf);
         return;
     }

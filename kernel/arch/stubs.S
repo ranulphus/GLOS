@@ -62,6 +62,26 @@ vm_enter:
         addl    $8, %esp
         iretl
 
+/* void switch_to(u32 *save_esp, u32 new_esp): the scheduler's stack switch
+   (core/sched.c). Saves the callee-saved registers on this stack, its ESP
+   in *save_esp, and resumes the other stack where it called switch_to (or
+   at thread_start for a new thread). */
+        .globl  switch_to
+switch_to:
+        movl    4(%esp), %eax
+        movl    8(%esp), %edx
+        pushl   %ebp
+        pushl   %ebx
+        pushl   %esi
+        pushl   %edi
+        movl    %esp, (%eax)
+        movl    %edx, %esp
+        popl    %edi
+        popl    %esi
+        popl    %ebx
+        popl    %ebp
+        ret
+
 /* The #DF task (a task gate in the IDT): report and stop. */
         .globl  df_entry
 df_entry:

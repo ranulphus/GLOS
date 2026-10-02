@@ -4,6 +4,7 @@
  * never touched; channel 2 times the measurement. */
 #include "arch.h"
 #include "io.h"
+#include "sched.h"
 #include "timer.h"
 
 static volatile u32 ticks, spurious_c;
@@ -31,10 +32,12 @@ static void cmos_set(u8 reg, u8 v) { outb(0x70, reg); outb(0x71, v); }
 static void rtc_irq(struct trapframe *tf)
 {
     u8 c = cmos(0x0C);
-    if (c & 0x40)                               /* PF: a periodic interrupt */
+    if (c & 0x40) {                             /* PF: a periodic interrupt */
         ticks++;
-    else
+        sched_tick();
+    } else {
         spurious_c++;
+    }
     if (tick_hook)
         tick_hook(tf, c);
 }
