@@ -58,11 +58,17 @@ to COM1 at each step:
    - In either mode, physical 0–10FFFFh is reserved for the system VM.
 3. **A20:** port 92h, then 8042 command D1h, checked with a wrap test. In XMS mode, through XMS 03h.
 4. **Kernel load:**
-   - `GLOSK.BIN` (a flat image with a header: magic, version, entry, bss size, CRC32) goes into extended memory
-     through INT 15h 87h (raw mode) or XMS 0Bh (XMS mode).
+   - `GLOSK.BIN` is a flat image with a 16-byte header: magic `GLOK`, entry offset, file size, size including
+     bss.
+   - The loader reads it into conventional memory. Its mode-switch code copies it to the kernel's high mapping
+     (and so into extended memory) with 32-bit addressing, then zeroes the bss. That works the same in raw and
+     XMS modes, so neither INT 15h 87h nor XMS 0Bh is needed.
+   - Physical home: 110000h in raw mode (above the HMA); a locked XMS block in XMS mode. XMS mode also locks a
+     second block for GLOS's memory, leaving 64 KB of XMS for others.
    - The loader leaves a **resident stub** in conventional memory. It holds the breakpoint stubs, the host
      real-mode stacks and the agent shell (§17).
-5. **Bootinfo** (`include/glos/bootinfo.h`, version 1):
+5. **Bootinfo** (`include/glos/bootinfo.h`, version 1; M1 implements the fields below except the IVT and BDA
+   copies, which arrive with the system VM in M2):
    - the memory map and XMS handles;
    - copies of the IVT and the BIOS data area;
    - PIC masks and ICW state as found;

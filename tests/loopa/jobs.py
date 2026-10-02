@@ -3,6 +3,7 @@
 through MGA-Glide's harness:
 
   jobs.py m1 [--profile P ...] [--boot B ...]
+  jobs.py refuse
 
 m1: on each machine profile (bf6, 486dx2, 486dx4) and boot (default: no
 XMS driver, raw mode; himemx: XMS mode, DOS=HIGH), RUN.BAT does
@@ -62,12 +63,30 @@ def m1(profile, boot):
     return not bad
 
 
+HX = os.path.join(os.environ.get("MGA_CACHE", os.path.expanduser("~/.cache/mga-glide")), "glos", "hx")
+
+
+def refuse():
+    """GLOS refuses to start over another DPMI host and leaves the machine as it was."""
+    status, serial = run("m1-refuse-dpmi", [
+        "--file", "build/ow/GLOS.EXE=/TEST/GLOS.EXE", "--file", "build/kernel/GLOSK.BIN=/TEST/GLOSK.BIN",
+        "--file", HX + "/HDPMI32.EXE=/HX/HDPMI32.EXE",
+        "--cmd", "SERSAY HX-START refuse", "--cmd", "HDPMI32 -r", "--cmd", "VECCHK save",
+        "--cmd", "C:\\TEST\\GLOS.EXE /ROUNDTRIP", "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
+    ok = status == "PASS" and "GLOS-REFUSE reason=dpmi" in serial and "HX-VECCHK ok" in serial \
+        and "GLOS-RING0" not in serial
+    print("  %-22s %s" % ("m1-refuse-dpmi", "PASS" if ok else "FAIL"), flush=True)
+    return ok
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("suite", choices=["m1"])
+    ap.add_argument("suite", choices=["m1", "refuse"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     a = ap.parse_args()
+    if a.suite == "refuse":
+        return 0 if refuse() else 1
     ok = True
     for p in a.profile or PROFILES:
         for b in a.boot or BOOTS:

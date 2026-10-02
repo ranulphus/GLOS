@@ -3,7 +3,9 @@
 #   make                build/ow/GLOS.EXE (16-bit loader) and build/kernel/GLOSK.BIN (the kernel)
 #   make loopa [CARD=g450]   run GLOS.EXE in 86Box through MGA-Glide's Loop A: out/loopa-CARD/
 #   make check-deps     MGA-Glide at or after deps.mk's pin
+#   make host-test      kernel code's host tests (in the dev container)
 #   make loopa-m1       M1's exit matrix in Loop A (tests/loopa/jobs.py)
+#   make loopa-gdb      gdb on the kernel's COM2 stub in Loop A (tools/gdb-loopa.sh)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
@@ -18,15 +20,26 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all kernel loopa loopa-m1 check-deps clean help survey-tools
+.PHONY: all kernel host-test loopa loopa-m1 loopa-gdb check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
-	@sed -n '3,7p' Makefile | sed 's/^# //'
+	@sed -n '3,9p' Makefile | sed 's/^# //'
 
 check-deps:
 	@git -C "$(MGA_GLIDE)" merge-base --is-ancestor "$(MGA_GLIDE_PIN)" HEAD 2>/dev/null \
 	  || { echo "$(MGA_GLIDE) is not at or after $(MGA_GLIDE_PIN) (deps.mk)"; exit 1; }
+
+# ---- Host tests: kernel code built 32-bit for Linux (in the dev container,
+# which has the 32-bit C library) --------------------------------------------
+HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c
+host-test:
+	$(Q)$(DEV) $(MAKE) -s host-test-run
+host-test-run:
+	@mkdir -p build/host
+	@set -e; for t in $(HOST_TESTS); do n=$${t%%:*}; src=$${t#*:}; \
+	  $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/$$n tests/host/$$n.c $$src; \
+	  build/host/$$n; done
 
 # ---- GLOS.EXE: the 16-bit loader (Open Watcom, small model) ----------------
 LOADER_C   := loader/main.c
@@ -79,6 +92,10 @@ loopa: all check-deps
 # M1's exit matrix: three machine profiles x raw and HIMEMX boots (tests/loopa/jobs.py).
 loopa-m1: all check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py m1
+
+# gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
+loopa-gdb: all check-deps
+	$(Q)$(DEV) tools/gdb-loopa.sh
 
 # The M0 survey's own probe (tests/dos/iftest.c): DJGPP, run under CWSDPMI and HDPMI.
 DJENV := env LD_LIBRARY_PATH=$(DJGPP_PREFIX)/hostlib

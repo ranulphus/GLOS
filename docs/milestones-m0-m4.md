@@ -155,6 +155,14 @@
     `tests/loopa/gdb-smoke.gdb` (break, step, read memory, continue).
 12. **`tests/loopa/jobs.py`:** the profile × boot matrix over `run.py --wrap`, with expected line sets.
 
+**M1 status (2026-10-02): done.** `make loopa-m1` passes on all six machine and boot combinations (ticks
+1011–1012 of an expected 1012). `make loopa-gdb` passes. `tests/loopa/jobs.py refuse` checks the refusal over
+a resident HDPMI. `make host-test` runs the frame bitmap and heap tests. Differences from the plan:
+- the loader copies the kernel itself (supervisor.md §2.4), so no INT 15h 87h;
+- an E820 parser host test was dropped: the parser lives in the 16-bit loader, and both raw-mode boots
+  exercise it;
+- MGA-Glide gained `OUT/com2.port` for the gdb test.
+
 **M1 exit:** `make host-test kernel loopa-m1 loopa-gdb`.
 - On bf6, 486dx2 and 486dx4, each with raw and HIMEMX boots,
   `VECCHK save; GLOS /ROUNDTRIP; VECCHK check; KEYWAIT; VMODE` gives:
