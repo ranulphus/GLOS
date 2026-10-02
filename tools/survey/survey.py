@@ -18,7 +18,7 @@ differences; hdpmi32i against hdpmi32 isolates IOPL 0.
   survey.py list
 
 Jobs run through MGA-Glide's Loop A harness ($MGA_GLIDE, default
-~/wt-mga-glos while M0 is on its branch, else ~/MGA-Glide): directly with
+~/MGA-Glide): directly with
 its run.py, or through DOS-GL's own runners with MGAHAL_DIR pointing at
 it and LOOPA_EXTRA_ARGS carrying the host. HDPMI is run as a behavioural
 baseline only (PRD D26). Set BOX86_DIR to choose the 86Box build."""
@@ -35,8 +35,7 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 HOME = os.path.expanduser("~")
-MGA = os.environ.get("MGA_GLIDE", os.path.join(HOME, "wt-mga-glos") if os.path.isdir(os.path.join(HOME, "wt-mga-glos"))
-                     else os.path.join(HOME, "MGA-Glide"))
+MGA = os.environ.get("MGA_GLIDE", os.path.join(HOME, "MGA-Glide"))
 DOSGL = os.environ.get("DOSGL", os.path.join(HOME, "DOSGL"))
 FW = os.environ.get("FIFTHWHEEL", os.path.join(HOME, "FifthWheel"))
 CACHE = os.environ.get("MGA_CACHE", os.path.join(HOME, ".cache", "mga-glide"))
