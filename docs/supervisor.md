@@ -90,6 +90,8 @@ to COM1 at each step:
 
 ### 2.1 The system VM's start and GLOS.EXE's calls (M2)
 
+M2 runs the program given after `/RUN` and leaves when it ends. M3 replaces this with the start modes of §2.2.
+
 - `GLOS /RUN program [args]` sets `BI_F_VM`. The kernel then doesn't return to real mode: it resumes
   `GLOS.EXE` in V86 mode at `_vm_resume`, with SS, SP and DS as `pm_enter` saved them, so `pm_enter`
   appears to return 10000h. `GLOS.EXE` frees the kernel image's buffer and the first page tables, and runs
@@ -104,6 +106,32 @@ to COM1 at each step:
   `kill_sp` (the kill stub and its 256-byte stack, §9.6), and in XMS mode the driver's version (`xms_ver`,
   `xms_rev`, `xms_hma`), whether the HMA was already taken (`hma_used`, so DOS=HIGH) and INT 2Fh 4309h's
   handle table (`xms_table`).
+
+### 2.2 Start modes and the resident stub (M3; PRD D39–D41)
+
+- **The stub.** Once the kernel is running, `GLOS.EXE` keeps only a resident stub of 4 KB or less (P7) and
+  frees the rest of its memory block (INT 21h 4Ah), like a TSR. The stub is assembly at the start of the
+  image: the kernel-call and XMS entry points, the kill stub, the real-mode stacks of §9.5 and the EXEC
+  loop. Everything else (parsing, the agent, later the desktop) runs in the kernel and asks the stub to EXEC.
+  INT 2Fh 1687h reports no real-mode memory needed per DPMI client.
+- **From a prompt or AUTOEXEC.BAT:** COMMAND.COM stays the shell; `glos exit` returns to it.
+- **As the shell (`SHELL=C:\GLOS\GLOS.EXE` in CONFIG.SYS):**
+  - `GLOS.EXE`'s PSP is the root of the PSP chain, and its environment is the master environment (1 KB by
+    default, set in GLOS.CFG). GLOS sets `COMSPEC` to COMMAND.COM, found next to the kernel, in the boot
+    drive's root or through `PATH`.
+  - Once the kernel is running, the stub runs `COMMAND.COM /C AUTOEXEC.BAT`. When that COMMAND.COM ends
+    (INT 21h 4Ch with its PSP), the kernel copies its environment into the master environment before DOS
+    frees it.
+  - .COM and .EXE programs are EXECed directly. COMMAND.COM runs batch files, internal commands and
+    `%COMSPEC%` shell-outs.
+  - Until the desktop exists (M6), the local console is a COMMAND.COM the stub runs and runs again whenever it
+    exits. Agent commands run alongside it at safe points (§17.2).
+  - GLOS never just ends: a refusal (§2 item 1), a missing kernel or a failure before the system VM exists
+    runs COMMAND.COM in real mode instead, after a `GLOS-REFUSE` line and a message on screen. `glos exit`
+    leaves protected mode and runs COMMAND.COM; its `EXIT` starts GLOS again.
+- **Later (opt-in, M9):** the stub moves into an unused upper-memory page that GLOS maps for the system VM,
+  leaving the PSP and environment (about 0.5 KB) below 640K. A page qualifies only when it reads back as
+  open bus (FFh), holds no option ROM signature and isn't claimed by any PCI BAR.
 
 ## 3. CPU tables [fixed]
 

@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| Status | v0.2 — draft after the deep dive (2026-10-01) |
+| Status | v0.3 — start modes and conventional memory (2026-10-02), after the v0.2 deep dive (2026-10-01) |
 | Last updated | 2026-10-01 |
 | Supersedes | v0.1. Changes are listed in Appendix D |
 | Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) (work breakdown) |
@@ -167,6 +167,9 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D36** | **Per-program profiles** (icon, command line, environment, memory, sound settings, `direct` mode), made by hand or by a wizard; programs without one run with defaults. (User) | Like Windows PIFs: the place for per-program settings, including D20's opt-out. | M4e (format), M6 (UI) |
 | **D37** | **UI fonts are bitmaps rendered at build time from open TrueType fonts** (OFL/MIT: a sans for the UI, a mono for terminals), with optional live anti-aliasing from the same fonts. (User) | Crisp at every depth, fast on a 486, and licence-clean. | M6 (Q16) |
 | **D38** | **86Box gets PCI variants of the Matrox cards at M7** (a local patch); until then 486 profiles use the S3 Trio64V2/DX. (User) | 86Box emulates the G-series as AGP only, while real G200/G450 PCI cards exist (the bench's G450 is PCI). | M7 |
+| **D39** | **GLOS starts either as the DOS shell (`SHELL=` in CONFIG.SYS) or from the last line of AUTOEXEC.BAT, like WIN.** `SHELL=` is the default in the bootable image; the installer offers either. As the shell, GLOS never just exits: a refusal or a failed start runs COMMAND.COM instead, and "exit to DOS" runs COMMAND.COM with `EXIT` returning to GLOS. (User, 2026-10-02) | As the shell, COMMAND.COM isn't resident (4 KB with an XMS driver, 72 KB for FreeDOS's COMMAND.COM without one), and the machine boots straight into GLOS. The fallback keeps a machine with GLOS as its shell from ever being left without a prompt. | M3 |
+| **D40** | **As the shell, GLOS runs AUTOEXEC.BAT through `COMMAND.COM /C` once the kernel is up, and keeps the environment it leaves** as the master environment. GLOS sets `COMSPEC` itself and runs .COM/.EXE programs directly; COMMAND.COM is used for batch files, internal commands and `%COMSPEC%` shell-outs. (User, 2026-10-02) | Full batch-language compatibility, with no batch interpreter of GLOS's own. GLOS sees the child's environment because it runs the VM. TSRs loaded there sit above a small hole (the child COMMAND.COM, about 4 KB once it can swap into GLOS's XMS). | M3 |
+| **D41** | **Minimal conventional memory: a resident stub of 4 KB or less from M3**, holding only the real-mode code that must run inside DOS (kernel-call and XMS entry points, the kill stub, real-mode stacks, the EXEC loop). No C runtime stays resident, and the DPMI host asks for no real-mode memory per client. **Later, an opt-in setting** puts the stub in an unused upper-memory page that GLOS maps itself, leaving only the PSP and environment (about 0.5 KB). (User, 2026-10-02) | Programs get as much conventional memory as plain DOS gives them. M2's measured cost was 37 KB, because the whole of GLOS.EXE stayed loaded. The upper-memory page is GLOS's own use, so D25 (no UMBs for programs) stands; it is opt-in because adapter ROMs make free pages hard to be sure of. | M3 (stub), M9 (UMA option) |
 
 ---
 
@@ -297,6 +300,7 @@ A program calls DPMI 0A00h with "GLOS" (D23). The result is a far entry point pl
 - XMS mode allocates and locks blocks (XMS 0Ch) to learn their physical addresses, using the XMS 3.0 calls 88h and 89h above 64 MB.
 - It refuses to start when a V86 monitor or DPMI host is present: V86 mode detected via SMSW or VCPI, or INT 2Fh 1687h answering.
 - It writes `GLOS-` lines on COM1 at each step, so Loop A can see where it stopped.
+- It runs from a prompt or as the DOS shell (`SHELL=`, D39, D40). After start-up only a resident stub of 4 KB or less stays in conventional memory (D41).
 
 ### 6.2 Memory
 
@@ -738,6 +742,7 @@ Targets are measured on silicon or derived from CPU models, never from 86Box spe
 | P4 | The desktop is usable at 640×480×8 (VBE) | 486DX2-66 (model; Q10) |
 | P5 | An SSH handshake takes under 0.1 s and SFTP reaches 1 MB/s or more on the reference; under 1 s and 0.3 MB/s on a 486DX2-66 | Pentium II 266 + RTL8139 (measured); 486DX2-66 (modelled until a 486 bench PC exists) |
 | P6 | Mixer refill latency under 20 ms; zero underruns in Fifth Wheel windowed | Pentium II + SB16 |
+| P7 | GLOS's resident stub is 4 KB or less (MEM /C), so MEM's largest program size under GLOS is within 4 KB of plain DOS from the same boot (D41) | Loop A, HIMEMX boot (measured) |
 
 **Levers:**
 - VME/PVI;
@@ -926,8 +931,8 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 **M2: the system VM.** V86 monitor, virtual PIC, RTC, 8042, A20 and XMS; the RTC tick; DOS running under GLOS.
 *Exit:* RUN.BAT runs under V86, and the HX tools give the same output as without GLOS. The hostile-program suite leaves the tick alive and every program killable (kill reported on COM1 at this stage).
 
-**M3: network and a minimal agent.** NE2000 driver, lwIP with DHCP, the SSH server (exec, SFTP), text-mode screenshots, H7.
-*Exit:* from the host, over SSH: a 16-bit command runs with its output captured and exit code returned, an SFTP round trip is byte-identical, and a text-mode screenshot is taken.
+**M3: network and a minimal agent.** Threads, the scheduler and the VME path (moved from M2); the resident stub (D41) and GLOS as the DOS shell (D39, D40); NE2000 driver, lwIP with DHCP, the SSH server (exec, SFTP), text-mode screenshots, H7.
+*Exit:* from the host, over SSH: a 16-bit command runs with its output captured and exit code returned, an SFTP round trip is byte-identical, and a text-mode screenshot is taken. GLOS meets P7, and a `SHELL=` boot runs AUTOEXEC.BAT with its environment kept and falls back to COMMAND.COM when GLOS refuses to start.
 
 **M4: DPMI host and exclusive sessions,** in five sub-milestones, each with its own exit:
 - **M4a:** 32-bit basics, including the raw switch, espfix and 0A00h; our DPMI conformance suite validated against CWSDPMI and HDPMI32i.
@@ -1212,3 +1217,10 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
   - A.3: runtime start-up sequences.
   - A.4: games and ports.
 - **New documents:** docs/supervisor.md and docs/milestones-m0-m4.md.
+
+## Appendix E: Changes in v0.3 (2026-10-02)
+
+- **New user decisions D39–D41:** GLOS as the DOS shell or from AUTOEXEC.BAT; AUTOEXEC.BAT through `COMMAND.COM /C` with its environment kept; a resident stub of 4 KB or less, with an opt-in upper-memory page later.
+- **§6.1:** start modes and the resident stub.
+- **§13:** P7 (conventional memory).
+- **M2 done** (docs/milestones-m0-m4.md has the status). Threads, the scheduler and the VME path moved to the start of M3.

@@ -236,6 +236,13 @@ Differences from the plan:
 0. **From M2: threads and the scheduler** (supervisor.md §7; M2's item 1), with the system VM as a thread,
    **and the VME/PVI path** with the redirection bitmap and the `vif-stuck` watchdog on it (M2's item 4).
    T: `make loopa-m2 loopa-hostile` unchanged.
+0a. **The resident stub and start modes** (supervisor.md §2.2; PRD D39–D41, P7). `loader/stub.asm` linked
+   first; GLOS.EXE shrinks to it after start-up. `SHELL=` mode: COMSPEC, AUTOEXEC.BAT through `COMMAND.COM
+   /C` with its environment kept, the local COMMAND.COM console, and the fallback to COMMAND.COM.
+   MGA-Glide harness item: a `--boot-cfg` variant whose CONFIG.SYS has `SHELL=C:\TEST\GLOS.EXE` (D27).
+   T: `jobs.py mem` (MEM /C with and without GLOS, P7, on both boots); `jobs.py shell` (the `SHELL=` boot:
+   AUTOEXEC.BAT's `SET` and `PATH` visible to the next program, RUN.BAT runs, and a refusal (no GLOSK.BIN)
+   falls back to a working prompt).
 1. **PCI and NE2000.** `kernel/drv/pci.c` (enumeration, claiming) and `drv/nic/ne2k.c` (ISA and PCI), with the
    refusal rules (shared IRQ, a packet-driver signature on the same base).
 2. Wait queues, timers and mutexes.
