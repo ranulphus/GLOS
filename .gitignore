@@ -1,3 +1,4 @@
 build/
 out/
 config.local.mk
+__pycache__/
