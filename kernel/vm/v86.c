@@ -13,6 +13,7 @@
  * a thread (core/sched.c): its V86 frame always sits at the top of its
  * stack, and its waits (HLT, INT 15h 86h) block it until vm_kick(). */
 #include "glos/bootinfo.h"
+#include "agent.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
@@ -101,7 +102,7 @@ void vm_idle(u32 until)
     vm.wait_deadline = until;
     vm.waiting = 1;
     while (!vm.kill_req && !(vm.vif && vpic_pending(&vm.pic))
-           && !(until && (s32)(timer_ticks() - until) >= 0))
+           && !(until && (s32)(timer_ticks() - until) >= 0) && !(vm.idle_agent && agent_vm_wake_pending()))
         thread_block(&vm.waitq);
     vm.waiting = 0;
     vm.wait_deadline = 0;
@@ -402,10 +403,30 @@ static void vm_env_back(void)
     kprintf("GLOS-VM env bytes=%u of %u\n", end + 1, size);
 }
 
+/* Headless: the agent's next command (kernel/dos/agent.c), or a halt until
+   one comes (EAX = 2), or glos exit. INT 29h traps only while a command
+   runs, for the capture. */
+static void vm_agent_next(struct trapframe *tf, u32 result)
+{
+    struct agent_exec x;
+    int r = agent_vm_next(result, vm.bi->comspec, &x);
+    if (vm.vme)
+        cpu_int_redirect(0x29, !agent_vm_capturing());
+    if (r < 0)
+        vm_leave(0);
+    if (r > 0)
+        stub_exec(x.path, x.t1, x.t2);
+    tf->eax = r > 0 ? 1 : 2;
+}
+
 /* What the stub does next: EXEC the /RUN program it holds, then leave with
-   its exit code; as the shell, vm_shell_next(). */
+   its exit code; as the shell, vm_shell_next(); headless, vm_agent_next(). */
 static void vm_next(struct trapframe *tf, u32 result)
 {
+    if (vm.bi->flags & BI_F_AGENT) {
+        vm_agent_next(tf, result);
+        return;
+    }
     if (vm.bi->flags & BI_F_SHELL) {
         vm_shell_next(tf, result);
         return;
@@ -517,7 +538,11 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
             return;
         }
         break;
+    case 0x29:
+        agent_vm_int29(tf);
+        break;
     case 0x21:
+        agent_vm_int21(tf);
         if ((ax >> 8) == 0x4B && (ax & 0xFF) <= 1)
             vm_exec_snap();
         if (vm.shell_state == 1 && ((ax >> 8) == 0x4C || (ax >> 8) == 0x00))
@@ -572,7 +597,9 @@ static void vm_gp(struct trapframe *tf)
         break;
     case V86_HLT:
         tf->eip = next;
+        vm.idle_agent = (tf->cs & 0xFFFF) == vm.loader_cs;     /* the stub, waiting for a command */
         vm_idle(0);
+        vm.idle_agent = 0;
         return;
     case V86_INT:
         soft_int(tf, in.imm, next);

@@ -65,6 +65,7 @@ struct vm {
     struct waitq waitq;
     u32 wait_deadline;
     u8 waiting;
+    u8 idle_agent;                      /* the halt is the stub's: an agent command ends it too */
     u8 shell_state;                     /* as the shell: 0 start, 1 AUTOEXEC.BAT running, 2 the console */
 };
 

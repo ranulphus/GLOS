@@ -51,14 +51,16 @@ host to the echo service (port 7, forwarded) comes back, and DOS is clean
 afterwards; with the Crynwr packet driver loaded, GLOS leaves the card alone
 (GLOS-NET refuse reason=packet-driver).
 
-ssh: GLOS with the test keys (tests/keys) on bf6 + RTL8029 and 486DX2 + ISA
-NE2000; from the host, through SLiRP's forward of port 22, OpenSSH's ssh runs
-built-in commands (output and exit codes exact), three at once, and a
-stranger's key is refused. The guest waits in KEYWAIT until the host's last
-command ("glos echo ssh-done") shows on COM1 and the harness types Enter: a
-fixed wait in guest time lost to run.py's wall-clock idle limit whenever
-86Box ran slower than real time. The first connection's time is logged, not
-judged (PRD D28).
+ssh: GLOS headless (the agent) with the test keys (tests/keys) on bf6 +
+RTL8029 and 486DX2 + ISA NE2000; from the host, through SLiRP's forward of
+port 22, OpenSSH's ssh runs built-in commands (output and exit codes exact),
+three at once, then DOS commands: ECHOARGS's stdout (through INT 21h 40h,
+09h, 02h, 06h and INT 29h), stderr and exit code 7 exactly, a program found
+in the current directory, an internal command (COMMAND.COM), three queued at
+once; a stranger's key is refused, and "glos exit" ends the run. (The run
+ends on the host's word: a fixed wait in guest time lost to run.py's
+wall-clock idle limit whenever 86Box ran slower than real time.) The first
+connection's time is logged, not judged (PRD D28).
 
 hostile: HOSRUN.BAT runs every tests/dos/hostile.c case under one "GLOS /RUN
 COMMAND /C"; the harness types Ctrl-Alt-Shift-Esc after each one's "armed"
@@ -405,8 +407,8 @@ def ssh_case(profile, card):
     s.close()
     proc = run("ssh-" + tag, os.environ.get("SSH_EXTRA", "").split() + ["--machine", profile, "--net", card, "--net-fwd", "%d:22" % port, "--timeout", "600",
                               "--idle", "300"] + GLOS_FILES + KEYS + [
-        "--cmd", "SERSAY HX-START ssh", "--cmd", "C:\\TEST\\GLOS.EXE /RUN KEYWAIT 900", "--cmd", "SERSAY HX-DONE 0",
-        "--keys", "@ssh-done,1:0x1c"],
+        "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+        "--cmd", "SERSAY HX-START ssh", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
         background=True)
     serial = os.path.join(ROOT, "out", "ssh-" + tag, "serial.log")
     tmp = tempfile.mkdtemp()
@@ -436,24 +438,40 @@ def ssh_case(profile, card):
         checks["ver"] = rc == 0 and out.startswith("GLOS M3")
         rc, out, _ = ssh("glos echo hello from " + tag)
         checks["echo"] = rc == 0 and out == "hello from %s\n" % tag
-        rc, out, err = ssh("nosuch")
+        rc, out, err = ssh("glos nosuch")
         checks["unknown-127"] = rc == 127 and "no such command" in err
         ps = [subprocess.Popen(opts + ["glos@127.0.0.1", "glos echo par%d" % i], stdout=subprocess.PIPE)
               for i in range(3)]
         outs = [p.communicate(timeout=300)[0].decode() for p in ps]
         checks["three-at-once"] = sorted(outs) == ["par0\n", "par1\n", "par2\n"]
+        # DOS commands through the agent: every capture path, exactly, and the exit code.
+        rc, out, err = ssh("C:\\TEST\\ECHOARGS.EXE a b c")
+        checks["dos-capture"] = (rc == 7 and out == "a b c\r\nnine two six int29\r\n"
+                                 and err == "echoargs: 3 arguments\r\n")
+        if not checks["dos-capture"]:
+            info += " capture=%r/%r/%d" % (out, err, rc)
+        rc, out, _ = ssh("cd \\TEST")
+        rc2, out2, _ = ssh("echoargs found")       # the current directory, no extension
+        checks["dos-lookup"] = rc == 0 and rc2 == 7 and out2.startswith("found\r\n")
+        rc, out, _ = ssh("dir C:\\TEST")           # an internal command: COMMAND.COM
+        checks["dos-internal"] = rc == 0 and "ECHOARGS" in out
+        ps = [subprocess.Popen(opts + ["glos@127.0.0.1", "echoargs q%d" % i], stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL) for i in range(3)]
+        outs = [(p.communicate(timeout=300)[0].decode("latin-1"), p.returncode) for p in ps]
+        checks["dos-queued"] = sorted(outs) == [("q%d\r\nnine two six int29\r\n" % i, 7) for i in range(3)]
         stranger = os.path.join(tmp, "stranger")
         subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", stranger], check=True)
         rc, _, _ = ssh("glos ver", keyfile=stranger)
         checks["stranger-refused"] = rc == 255
-        ssh("glos echo ssh-done")               # its exec line lets KEYWAIT (and GLOS) end
+        rc, _, _ = ssh("glos exit")
+        checks["exit"] = rc == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     proc.wait()
     text = open(serial, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(serial) else ""
     checks["strict-kex"] = "GLOS-SSH kex done strict=1" in text
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-EXIT code=0" in text
-    checks["key-ended"] = "HX-KEY scan=1c" in text
+    checks["done"] = "HX-DONE 0" in text
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad

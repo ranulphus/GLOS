@@ -297,6 +297,20 @@ Differences from the plan:
      up ("Connection refused"); `jobs.py` now removes it first.
 7. **Agent shell** in the resident stub (supervisor.md §17.3).
 8. **Output capture** `kernel/dos/capture.c`.
+
+   **Items 7-8 status (2026-10-03): done** (supervisor.md §17.3, §17.4).
+   - **Headless mode:** GLOS.EXE without a mode option (or `/AGENT`). The stub halts between commands
+     (NEXT's new answer 2), so DOS keeps its clock.
+   - **Jobs:** `kernel/dos/agent.c` (capture lives there too, not in a `capture.c`). Programs are EXECed
+     directly (current directory, then PATH, `.COM` before `.EXE`) for an exact exit code; anything else goes
+     through `COMSPEC /C`. Four may queue.
+   - **Capture:** INT 21h 02h/06h/09h/40h when the handle's SFT entry is the console (the loader now passes the
+     List of Lists), INT 29h outside DOS; handle 2 is stderr.
+   - **`glos exit`** leaves from headless mode.
+   - **Cost:** the stub's wait loop adds 18 bytes: MEM /C now shows GLOS at 2,848 bytes (4,736 as the shell).
+   - **T:** `make loopa-ssh` runs GLOS headless: `tests/dos/echoargs.c`'s stdout through every captured path,
+     its stderr and exit code 7 exactly, a program found in the current directory, `dir` through COMMAND.COM,
+     three DOS commands queued at once, and `glos exit` to end the run.
 9. **SFTP.** `kernel/dos/idle.c` (safe points) and a port of OpenSSH `sftp-server.c` (ISC). 8.3 names only.
 10. **Built-in commands.** Text-mode `glos shot` (B800h + BDA → a CP437 bitmap font rendered at build time →
     PNG via stb_image_write), plus `glos exit|ps|log|kill`.

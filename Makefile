@@ -92,7 +92,8 @@ build/ow/dos/$(1).EXE: tests/dos/$(2).c
 endef
 $(eval $(call dos_test,HOSTILE,hostile))
 $(eval $(call dos_test,XMSTEST,xmstest))
-DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE
+$(eval $(call dos_test,ECHOARGS,echoargs))
+DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/ECHOARGS.EXE
 dos-tests: $(DOS_TESTS)
 
 # ---- GLOSK.BIN: the kernel (host gcc -m32, linked at C0100000h) -------------
@@ -107,7 +108,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/ssh/sshd.c \
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c \
          kernel/dbg/gdbstub.c kernel/vm/v86.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c \
-         kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c
+         kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c kernel/dos/agent.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
@@ -168,7 +169,7 @@ loopa-shell: all check-deps
 loopa-net: all check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py net -j $(JOBS)
 # On the host: ssh is not in the dev container; jobs.py starts Loop A through it.
-loopa-ssh: all check-deps
+loopa-ssh: all dos-tests check-deps
 	$(Q)python3 tests/loopa/jobs.py ssh -j $(JOBS)
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).

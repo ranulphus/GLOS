@@ -339,12 +339,17 @@ static int glos_main(int argc, char **argv)
         else if (!stricmp(argv[i], "/GDB")) bi.flags |= BI_F_GDB;
         else if (!stricmp(argv[i], "/SELFTEST")) bi.flags |= BI_F_SELFTEST;
         else if (!stricmp(argv[i], "/NOVME")) bi.flags |= BI_F_NOVME;
+        else if (!stricmp(argv[i], "/AGENT")) bi.flags |= BI_F_AGENT;
         else if (!stricmp(argv[i], "/RUN") && i + 1 < (unsigned)argc) {
             bi.flags |= BI_F_VM;
             run_at = (int)i + 1;
             break;
         }
     }
+    if (run_at || shell)
+        bi.flags &= ~BI_F_AGENT;
+    else if (!(bi.flags & BI_F_ROUNDTRIP))
+        bi.flags |= BI_F_VM | BI_F_AGENT;               /* no mode: headless, the agent (supervisor.md §17.3) */
 
     /* Refusals (supervisor.md §2.1). */
     if (!cpu_is486()) return refuse("cpu");
@@ -452,6 +457,8 @@ static int glos_main(int argc, char **argv)
     bi.indos = ((unsigned long)sr.es << 4) + r.x.bx;
     r.x.ax = 0x5D06; int86x(0x21, &r, &r, &sr);             /* swappable data area */
     bi.sda = r.x.cflag ? 0 : ((unsigned long)sr.ds << 4) + r.x.si;
+    r.h.ah = 0x52; sr.es = 0; int86x(0x21, &r, &r, &sr);    /* List of Lists: the SFT chain */
+    bi.lol = sr.es ? ((unsigned long)sr.es << 4) + r.x.bx : 0;
     segread(&sr);
     bi.magic = BOOTINFO_MAGIC;
     bi.version = BOOTINFO_VERSION;
@@ -492,12 +499,15 @@ static int glos_main(int argc, char **argv)
         _dos_freemem(tab_seg);
         _dos_freemem(buf_seg);
         tab_seg = buf_seg = 0;
-        if (shell) {
+        if (shell || (bi.flags & BI_F_AGENT)) {
             if (FP_SEG(&stub_data) < _psp + 0x10 + bi.stub_paras) {
                 say("GLOS-VM error=stub-layout seg=%04x psp=%04x", FP_SEG(&stub_data), _psp);
                 return (int)glos_call(GLOS_CALL_LEAVE, 126);
             }
-            say("GLOS-VM shell comspec=%s autoexec=%s", bi.comspec, bi.autoexec);
+            if (shell)
+                say("GLOS-VM shell comspec=%s autoexec=%s", bi.comspec, bi.autoexec);
+            else
+                say("GLOS-VM agent comspec=%s", bi.comspec);
             stub_resident();
         }
         if (find_program(argv + run_at) != 0) {
@@ -572,24 +582,53 @@ static void read_cfg(const char *argv0)
     fclose(f);
 }
 
-/* Is GLOS the shell, and with what? Options override GLOS.CFG; COMSPEC is
-   found as given, in the environment, on the boot drive (root, \FREEDOS\BIN,
-   \DOS), next to GLOS.EXE or along PATH; AUTOEXEC.BAT as given or in the
-   boot drive's root. Keep the SHELL= line short: FreeDOS ignores one much
-   longer than 64 characters, so settings belong in GLOS.CFG. */
-static void shell_setup(int argc, char **argv)
+/* COMSPEC as given, in the environment, on the boot drive (root,
+   \\FREEDOS\\BIN, \\DOS), next to GLOS.EXE or along PATH. */
+static void find_comspec(const char *argv0)
 {
     static char p[80];
     union REGS r;
     const char *c;
     int i;
 
+    r.x.ax = 0x3305;                                    /* the boot drive */
+    intdos(&r, &r);
+    if (!bi.comspec[0] && (c = getenv("COMSPEC")) != NULL)
+        opt_str(bi.comspec, sizeof bi.comspec, c);
+    for (i = 0; i < 4 && !bi.comspec[0]; i++) {
+        static const char *const dirs[] = { "\\", "\\FREEDOS\\BIN\\", "\\DOS\\" };
+        if (i < 3) {
+            sprintf(p, "%c:%sCOMMAND.COM", 'A' + r.h.dl - 1, dirs[i]);
+        } else {
+            kernel_path(p, argv0);
+            strcpy(strrchr(p, '\\') ? strrchr(p, '\\') + 1 : p, "COMMAND.COM");
+        }
+        if (access(p, 0) == 0)
+            strcpy(bi.comspec, p);
+    }
+    if (!bi.comspec[0]) {
+        _searchenv("COMMAND.COM", "PATH", p);
+        strcpy(bi.comspec, p[0] ? p : "COMMAND.COM");
+    }
+}
+
+/* Is GLOS the shell, and with what? Options override GLOS.CFG; COMSPEC as
+   find_comspec() finds it (the agent needs it too); AUTOEXEC.BAT as given or
+   in the boot drive's root. Keep the SHELL= line short: FreeDOS ignores one much
+   longer than 64 characters, so settings belong in GLOS.CFG. */
+static void shell_setup(int argc, char **argv)
+{
+    union REGS r;
+    int i;
+
     shell = *(unsigned far *)MK_FP(_psp, 0x16) == _psp;        /* DOS made us our own parent */
     for (i = 1; i < argc; i++)
         if (!stricmp(argv[i], "/SHELL"))
             shell = 1;
-    if (!shell)
+    if (!shell) {
+        find_comspec(argv[0]);                          /* the agent runs commands through it */
         return;
+    }
     read_cfg(argv[0]);
     for (i = 1; i < argc; i++) {
         if (!strnicmp(argv[i], "/COMSPEC=", 9)) opt_str(bi.comspec, sizeof bi.comspec, argv[i] + 9);
@@ -600,25 +639,9 @@ static void shell_setup(int argc, char **argv)
     }
     if (envsize < 256) envsize = 256;
     if (envsize > 32768U) envsize = 32768U;
+    find_comspec(argv[0]);
     r.x.ax = 0x3305;                                    /* the boot drive */
     intdos(&r, &r);
-    if (!bi.comspec[0] && (c = getenv("COMSPEC")) != NULL)
-        opt_str(bi.comspec, sizeof bi.comspec, c);
-    for (i = 0; i < 4 && !bi.comspec[0]; i++) {
-        static const char *const dirs[] = { "\\", "\\FREEDOS\\BIN\\", "\\DOS\\" };
-        if (i < 3) {
-            sprintf(p, "%c:%sCOMMAND.COM", 'A' + r.h.dl - 1, dirs[i]);
-        } else {
-            kernel_path(p, argv[0]);
-            strcpy(strrchr(p, '\\') ? strrchr(p, '\\') + 1 : p, "COMMAND.COM");
-        }
-        if (access(p, 0) == 0)
-            strcpy(bi.comspec, p);
-    }
-    if (!bi.comspec[0]) {
-        _searchenv("COMMAND.COM", "PATH", p);
-        strcpy(bi.comspec, p[0] ? p : "COMMAND.COM");
-    }
     if (!bi.autoexec[0])
         sprintf(bi.autoexec, "%c:\\AUTOEXEC.BAT", 'A' + r.h.dl - 1);
     if (access(bi.autoexec, 0) != 0)

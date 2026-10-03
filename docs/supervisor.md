@@ -124,8 +124,8 @@ to COM1 at each step:
   that no vector a C runtime hooks (00h–07h, 1Bh, 23h, 24h) points into the memory being freed
   (`GLOS-WARN ivt-into-loader`). The stub then shrinks the block and runs the EXEC loop. After the kernel
   leaves, the stub puts A20 and the XMS blocks back as found, writes `GLOS-EXIT` and ends with INT 21h 4Ch.
-- **Measured (M3):** the stub is 2,372 bytes. With the PSP and the environment, MEM /C shows GLOS at 2,832
-  bytes, and the largest program is 2,832 bytes smaller than under plain DOS.
+- **Measured (M3, with the agent's wait):** the stub is 2,390 bytes. With the PSP and the environment, MEM /C
+  shows GLOS at 2,848 bytes, and the largest program is 2,848 bytes smaller than under plain DOS.
 - **From a prompt or AUTOEXEC.BAT:** COMMAND.COM stays the shell; `glos exit` returns to it.
 - **As the shell (`SHELL=C:\GLOS\GLOS.EXE /SHELL` in CONFIG.SYS; done in M3):**
   - `/SHELL` says so; so does a PSP that is its own parent (MS-DOS's shell). FreeDOS doesn't make its shell its
@@ -157,9 +157,9 @@ to COM1 at each step:
     stub. If even COMSPEC can't run, `GLOS-SHELL error=cannot-run`, and the machine halts. When the kernel
     leaves (`glos exit`, M3), the stub does the same after its cleanup; `EXIT` returning to GLOS comes with
     `glos exit`.
-  - Measured on the glosshell boots: GLOS takes 4,720 bytes (the stub and PSP, and the 2 KB master
-    environment). While a batch file runs, the largest program is 577,776 bytes on the raw boot (plain DOS:
-    511,152, because COMMAND.COM swaps itself into GLOS's XMS) and 628,448 on the HIMEMX boot (plain DOS:
+  - Measured on the glosshell boots: GLOS takes 4,736 bytes (the stub and PSP, and the 2 KB master
+    environment). While a batch file runs, the largest program is 577,760 bytes on the raw boot (plain DOS:
+    511,152, because COMMAND.COM swaps itself into GLOS's XMS) and 628,432 on the HIMEMX boot (plain DOS:
     631,488).
 - **Later (opt-in, M9):** the stub moves into an unused upper-memory page that GLOS maps for the system VM,
   leaving the PSP and environment (about 0.5 KB) below 640K. A page qualifies only when it reads back as
@@ -687,17 +687,38 @@ DOS is entered through the INT 21h entry captured at load.
 
 ### 17.3 The agent shell (M3)
 
-- After start-up, the system VM's foreground program is `GLOS.EXE`'s resident stub. In headless mode it waits
-  at a breakpoint for the next command.
-- For each command it EXECs `COMMAND.COM /C …` and returns the exit code from INT 21h 4Dh. DOS is never
-  re-entered behind a running program's back.
+- **Headless** is GLOS.EXE without a mode option (or with `/AGENT`); `/RUN` and `/SHELL` are the other modes.
+  The system VM's foreground program is then the resident stub, which asks the kernel what to run (NEXT).
+  While there is nothing, NEXT says so and the stub halts (`STI; HLT`), so DOS keeps taking its interrupts and
+  its clock runs. A posted command or `glos exit` ends the halt.
+- An SSH exec that isn't a built-in `glos …` command becomes a **job** (`kernel/dos/agent.c`). Jobs run one at
+  a time, in the order they came; four can wait.
+  - A program (`NAME`, `NAME.COM` or `NAME.EXE`: the current directory, then each PATH directory, `.COM` before
+    `.EXE`, as COMMAND.COM looks) is EXECed directly. Its exit code arrives exactly, which MS-DOS's
+    `COMMAND /C` wouldn't pass on.
+  - Anything else runs as `COMSPEC /C <command>`: internal commands, batch files, redirection and pipes, and
+    names found nowhere (COMMAND.COM then reports them).
+  - The exit status is INT 21h 4Dh's code; 126 when not even COMSPEC could be run.
+- DOS is never re-entered behind a running program's back: the stub only EXECs from its own NEXT loop.
+- `glos exit` (headless only, for now) leaves at the next idle NEXT, half a second after it replies.
+- Not yet: stdin for jobs (the client's input is dropped), killing a job when its client goes (its output is
+  then dropped), and commands while `/RUN` or `/SHELL` keeps DOS busy (§17.2's safe points, item 9).
 - In desktop mode (M6) the same stub hosts the launcher.
 
 ### 17.4 Output capture
 
-- Program output is captured from INT 29h and INT 21h 02h, 06h, 09h and 40h.
-- For 40h, only handles whose open-file table entry is a character device count. 8.3 file names only (no LFN
-  API in v1).
+- While a job runs, what its programs write to the console through DOS is copied into the job's two 16 KB
+  rings, which the ssh thread empties into the channel:
+  - INT 21h 02h, 06h and 09h (DOS writes them to handle 1), and 40h on any handle, when the handle's file is
+    the console: its SFT entry (through the PSP's handle table and the List of Lists' SFT chain) has device
+    information bits 7 (a character device) and 1 (console output). Handle 2 goes to SSH's stderr, the rest to
+    stdout. Output redirected to a file isn't captured.
+  - INT 29h only outside DOS (InDOS clear): DOS's console driver calls it for output already counted. With VME,
+    INT 29h traps only while a job runs.
+- A full ring holds the program until the ssh thread makes room (the client's window); once the client has
+  gone, output is dropped.
+- Text written straight to the screen isn't captured (`glos shot` shows it). 8.3 file names only (no LFN API
+  in v1).
 
 ### 17.5 Critical errors and Ctrl-Break
 
@@ -751,6 +772,7 @@ DOS is entered through the INT 21h entry captured at load.
 | RANDOM | At start: the seed's length and whether there is a TSC |
 | CRYPTO | `/SELFTEST`: the known-answer tests and two timings |
 | SSH | `listen`, `off`, `connect`, `client version=`, `kex done strict=`, `auth ok`, `exec=`, `close why=`, `refuse` |
+| AGENT | A job: `run seq= cmd=`, `done seq= code= via=` (the program, or `comspec`) |
 | KILL | A kill (§9.6) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
 | DPMI-UNIMPL | An unimplemented call |

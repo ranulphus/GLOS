@@ -6,13 +6,15 @@
  *   rx  bytes from the client: the net thread writes, the ssh thread reads;
  *   tx  bytes to the client: the other way round.
  * The host key and AUTHKEYS come from KEYS\ beside GLOS.EXE (bootinfo);
- * without a host key there is no SSH (GLOS-SSH off). Commands are the
- * built-in "glos ..." ones until the agent shell runs DOS commands (item 7). */
+ * without a host key there is no SSH (GLOS-SSH off). A command is a
+ * built-in "glos ..." one, or, headless, a DOS command line for the agent
+ * (kernel/dos/agent.c), whose output and exit code come back here. */
 #include <string.h>
 
 #include "lwip/tcp.h"
 
 #include "glos/bootinfo.h"
+#include "agent.h"
 #include "arch.h"
 #include "io.h"
 #include "kprintf.h"
@@ -48,6 +50,7 @@ static struct waitq sshq;
 static struct thread *ssh_thread;
 static volatile u8 ssh_kick;
 static void (*kick_net)(void);
+static int agent_mode;
 
 /* ---- rings: one writer, one reader; x86 keeps stores in order */
 
@@ -242,26 +245,58 @@ static void k_log(const char *fmt, ...)
     kprintf("GLOS-SSH %s\n", line);
 }
 
-/* The built-in commands. */
+static void say(struct ssh_chan *ch, int stream, const char *s)
+{
+    ssh_chan_write(ch, stream, (const uint8_t *)s, (uint32_t)strlen(s));
+}
+
+/* The built-in commands, and DOS command lines for the agent. */
 static int k_exec(struct ssh_chan *ch, const char *cmd)
 {
     static const char ver[] = "GLOS M3 (" __DATE__ ")\n";
     kprintf("GLOS-SSH exec=\"%s\"\n", cmd);
+    if (strncmp(cmd, "glos ", 5) && strcmp(cmd, "glos")) {
+        if (!agent_mode) {
+            say(ch, 1, "glos: DOS commands need GLOS started without /RUN or /SHELL\n");
+            ssh_chan_exit(ch, 126);
+        } else if (agent_post(ch, cmd) != 0) {
+            say(ch, 1, "glos: busy\n");
+            ssh_chan_exit(ch, 126);
+        }
+        return 0;
+    }
     if (!strcmp(cmd, "glos ver")) {
-        ssh_chan_write(ch, 0, (const uint8_t *)ver, sizeof ver - 1);
+        say(ch, 0, ver);
         ssh_chan_exit(ch, 0);
-        return 0;
-    }
-    if (!strncmp(cmd, "glos echo ", 10)) {
-        ssh_chan_write(ch, 0, (const uint8_t *)cmd + 10, (uint32_t)strlen(cmd + 10));
-        ssh_chan_write(ch, 0, (const uint8_t *)"\n", 1);
+    } else if (!strncmp(cmd, "glos echo ", 10)) {
+        say(ch, 0, cmd + 10);
+        say(ch, 0, "\n");
         ssh_chan_exit(ch, 0);
-        return 0;
+    } else if (!strcmp(cmd, "glos exit")) {
+        if (!agent_mode) {
+            say(ch, 1, "glos: exit needs GLOS started without /RUN or /SHELL\n");
+            ssh_chan_exit(ch, 1);
+        } else {
+            ssh_chan_exit(ch, 0);
+            agent_exit(512);                    /* half a second for the reply to leave */
+        }
+    } else {
+        say(ch, 1, "glos: no such command\n");
+        ssh_chan_exit(ch, 127);
     }
-    ssh_chan_write(ch, 1, (const uint8_t *)"glos: no such command yet\n", 26);
-    ssh_chan_exit(ch, 127);
     return 0;
 }
+
+/* The agent's output into a channel, while the client keeps up. */
+static u32 agent_write(void *owner, int stream, const u8 *d, u32 n)
+{
+    struct ssh_chan *ch = owner;
+    if (ssh_chan_pending(ch) > 0x8000)
+        return 0;
+    return ssh_chan_write(ch, stream, d, n);
+}
+
+static void agent_done(void *owner, u32 code) { ssh_chan_exit(owner, code); }
 
 static int k_subsystem(struct ssh_chan *ch, const char *name)
 {
@@ -272,7 +307,7 @@ static int k_subsystem(struct ssh_chan *ch, const char *name)
 
 static void k_data(struct ssh_chan *ch, const uint8_t *d, uint32_t n) { (void)ch; (void)d; (void)n; }
 static void k_eof(struct ssh_chan *ch) { (void)ch; }
-static void k_gone(struct ssh_chan *ch) { (void)ch; }
+static void k_gone(struct ssh_chan *ch) { agent_drop(ch); }
 
 static const struct ssh_ops ops = { k_alloc, k_free, k_send, k_log, k_exec, k_subsystem, k_data, k_eof, k_gone };
 
@@ -323,6 +358,7 @@ static void ssh_main(void *arg)
             else if (!ssh_conn_authenticated(s->conn) && timer_ticks() - s->since > GRACE)
                 finish(s, "login-grace");
         }
+        agent_service(agent_write, agent_done);
     }
 }
 
@@ -332,6 +368,8 @@ void sshd_start(const struct bootinfo *bi)
     srv.n_authkeys = ssh_parse_authkeys(bi->authkeys, bi->authkeys_len, srv.authkeys, SSH_MAX_AUTHKEYS);
     srv.ops = &ops;
     srv.version = "SSH-2.0-GLOS_M3";
+    agent_mode = (bi->flags & BI_F_AGENT) != 0;
+    agent_init(wake_ssh);
     if (!bi->hostkey_len || ssh_parse_privkey(bi->hostkey, bi->hostkey_len, srv.host_sk, srv.host_pk) != 0) {
         kprintf("GLOS-SSH off reason=%s\n", bi->hostkey_len ? "bad-hostkey" : "no-hostkey");
         return;

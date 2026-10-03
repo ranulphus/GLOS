@@ -24,7 +24,8 @@
 ;       continues in the copy, shrinks GLOS.EXE's memory block to the PSP and
 ;       the stub, installs the master environment the C code staged (as the
 ;       shell), and from then on runs what the kernel says (NEXT): EXEC the
-;       program in stub_data, report how it ended, ask again. When the
+;       program in stub_data, report how it ended, ask again; or, headless
+;       with nothing to run, halt until an interrupt and ask again. When the
 ;       kernel leaves, _pm_ret ends here too: A20 and XMS as found, the
 ;       GLOS-EXIT line on COM1, INT 21h 4Ch with the kernel's code; as the
 ;       shell, COMSPEC with the fallback tail instead, again and again.
@@ -306,6 +307,12 @@ next:
         jne     exec
         mov     ax, GLOS_CALL_NEXT
         call    kcall                   ; EAX = 1: EXEC sd_path with sd_tail
+        cmp     eax, 2                  ; 2: nothing yet (the agent): halt until an
+        jne     exec                    ; interrupt or a command, then ask again
+        sti
+        hlt
+        mov     ebx, 0FFFFFFFFh         ; nothing ran
+        jmp     next
 exec:   push    cs
         pop     ds
         push    cs
