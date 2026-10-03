@@ -335,7 +335,8 @@ Differences from the plan:
     - **T:** `make loopa-ssh`: after `cls` and ECHOARGS, `glos shot`'s pixels match `tests/loopa/golden.txt`
       (`GLOS_GOLDEN=update` records them); `glos log` holds the kernel's lines and GLOS.EXE's from V86;
       `glos ps` lists the VM thread and the DOS program; `glos kill` ends a `WAITSEC 120` with status 255.
-11. **MGA-Glide H7:** `run.py --ssh-steps FILE --ssh-key K` (exec/expect, put/get, shot).
+11. **MGA-Glide H7:** `run.py --ssh-steps FILE --ssh-key K` (exec/expect, put/get, shot). **Done** (MGA-Glide
+    416fcda).
 
 **M3 exit:** `make loopa-m3` on bf6 + `ne2kpci` and 486dx2 + `ne2k`:
 - `tests/dos/echoargs.c`'s stdout, stderr and exit code 7 are captured exactly;
@@ -345,11 +346,13 @@ Differences from the plan:
 
 Handshake time is logged, not judged (PRD D28).
 
-**M3 exit status (2026-10-03):** `make loopa-m3` passes on bf6 with each card and on 486dx2 with the ISA NE2000
-(the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2). Item 11 (H7, `run.py --ssh-steps`) and
-86Box patch 0111 (the emulator ignores SIGPIPE) wait on the MGA-Glide branch `glos-m3-harness` for merging.
-Without 0111, a client closing its connection while SLiRP is writing can kill 86Box (status CRASH, exit -13);
-until then GLOS's SSH runs use a private build (`BOX86_DIR`).
+**M3 exit status (2026-10-03): done.** `make loopa-m3` passes on bf6 with each card and on 486dx2 with the ISA
+NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
+- **Item 11 (H7) is in MGA-Glide 416fcda:** `run.py --ssh-steps FILE --ssh-key KEY` runs `wait`, `exec`,
+  `expect rc|out|err`, `put`, `get` and `shot` steps against GLOS. Checked with GLOS on bf6 and the 486DX2.
+- **86Box patch 0111** came with it: the emulator ignores SIGPIPE. Before it, a client closing its connection
+  while SLiRP wrote could kill 86Box (status CRASH, exit -13).
+- `deps.mk` pins MGA-Glide 416fcda.
 
 ---
 
