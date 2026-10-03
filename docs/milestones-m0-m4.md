@@ -345,6 +345,12 @@ Differences from the plan:
 
 Handshake time is logged, not judged (PRD D28).
 
+**M3 exit status (2026-10-03):** `make loopa-m3` passes on bf6 with each card and on 486dx2 with the ISA NE2000
+(the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2). Item 11 (H7, `run.py --ssh-steps`) and
+86Box patch 0111 (the emulator ignores SIGPIPE) wait on the MGA-Glide branch `glos-m3-harness` for merging.
+Without 0111, a client closing its connection while SLiRP is writing can kill 86Box (status CRASH, exit -13);
+until then GLOS's SSH runs use a private build (`BOX86_DIR`).
+
 ---
 
 ## M4: DPMI host, in five sub-milestones
