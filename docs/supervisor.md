@@ -701,8 +701,10 @@ DOS is entered through the INT 21h entry captured at load.
   - The exit status is INT 21h 4Dh's code; 126 when not even COMSPEC could be run.
 - DOS is never re-entered behind a running program's back: the stub only EXECs from its own NEXT loop.
 - `glos exit` (headless only, for now) leaves at the next idle NEXT, half a second after it replies.
-- Not yet: stdin for jobs (the client's input is dropped), killing a job when its client goes (its output is
-  then dropped), and commands while `/RUN` or `/SHELL` keeps DOS busy (§17.2's safe points, item 9).
+- **Ending a job:** `glos kill`, or its client going away, kills it: every half second the program in front
+  gets the kill of §9.6 (innermost first) until the job has ended, with exit status 255; its output is dropped.
+- Not yet: stdin for jobs (the client's input is dropped), and DOS commands while `/RUN` or `/SHELL` keeps DOS
+  busy (§17.2's safe points, item 9).
 - In desktop mode (M6) the same stub hosts the launcher.
 
 ### 17.4 Output capture
@@ -746,6 +748,15 @@ DOS is entered through the INT 21h entry captured at load.
   exchange takes hundreds of milliseconds on a 486). Each connection has two single-writer rings between them,
   so neither waits on a lock. Four connections at once; a fifth is refused (`GLOS-SSH refuse reason=busy`).
 - **Limits:** 60 s to log in; 20 authentication attempts per connection.
+- **Built-in commands (M3):** `glos ver`, `glos echo …`, `glos shot`, `glos log`, `glos ps`, `glos kill`,
+  `glos exit`; anything else starting `glos` gives status 127.
+  - `glos shot`: the text-mode screen as a PNG on stdout (4-bit indexed, deflate's stored blocks;
+    `kernel/lib/png.c`). It reads the visible page and the BIOS data area (mode, columns, rows, page start,
+    character height) and draws each cell with the video BIOS's own 8x16, 8x14 or 8x8 font, which GLOS.EXE
+    finds with INT 10h 1130h: the glyphs the card shows, and no font in GLOS. Cells are 8 pixels wide (VGA's
+    9th column is left out); blinking text shows steadily. Graphics modes later (status 1 until then).
+  - `glos log`: the last 16 KB of COM1: the kernel's lines and what programs wrote there (no CRs).
+  - `glos ps`: the jobs, the DOS program in front (PSP and its arena name), and each thread.
 
 ## 18. Logging
 

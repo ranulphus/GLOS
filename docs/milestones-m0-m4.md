@@ -314,6 +314,16 @@ Differences from the plan:
 9. **SFTP.** `kernel/dos/idle.c` (safe points) and a port of OpenSSH `sftp-server.c` (ISC). 8.3 names only.
 10. **Built-in commands.** Text-mode `glos shot` (B800h + BDA → a CP437 bitmap font rendered at build time →
     PNG via stb_image_write), plus `glos exit|ps|log|kill`.
+
+    **Item 10 status (2026-10-03): done** (supervisor.md §17.6).
+    - **`glos shot`** uses the video BIOS's own font (INT 10h 1130h, found by GLOS.EXE) instead of a font built
+      in, and its own small PNG writer (stored deflate blocks) instead of stb_image_write. Both are simpler, and
+      the picture matches the card. `tests/host/png_test.c` checks the writer.
+    - **`glos log`** (a 16 KB COM1 mirror), **`glos ps`** (jobs, the DOS program in front, threads), **`glos
+      kill`** (the running job, through M2's kill), **`glos exit`**.
+    - **T:** `make loopa-ssh`: after `cls` and ECHOARGS, `glos shot`'s pixels match `tests/loopa/golden.txt`
+      (`GLOS_GOLDEN=update` records them); `glos log` holds the kernel's lines and GLOS.EXE's from V86;
+      `glos ps` lists the VM thread and the DOS program; `glos kill` ends a `WAITSEC 120` with status 255.
 11. **MGA-Glide H7:** `run.py --ssh-steps FILE --ssh-key K` (exec/expect, put/get, shot).
 
 **M3 exit:** `make loopa-m3` on bf6 + `ne2kpci` and 486dx2 + `ne2k`:

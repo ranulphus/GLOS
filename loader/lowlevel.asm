@@ -6,12 +6,13 @@
 ;   int  cpu_v86(void)                      1 if the CPU is already in protected/V86 mode
 ;   int  cpu_id1(unsigned long *eax, unsigned long *edx)   CPUID 1, 0 without CPUID
 ;   int  bios_e820(void *buf20, unsigned long *cont)       one INT 15h E820h entry
+;   unsigned long vga_font(unsigned which)  INT 10h 1130h: a ROM font's linear address
 .586p
 
 _TEXT   segment word public 'CODE' use16
         assume  cs:_TEXT
 
-        public  _cpu_is486, _cpu_v86, _cpu_id1, _bios_e820
+        public  _cpu_is486, _cpu_v86, _cpu_id1, _bios_e820, _vga_font
 
 _cpu_is486 proc near
         pushf
@@ -125,6 +126,32 @@ e8ret:  pop     es
         pop     bp
         ret
 _bios_e820 endp
+
+; BH = which (2: 8x14, 3 and 4: 8x8's two halves, 6: 8x16); the BIOS answers
+; in ES:BP.
+_vga_font proc near
+        push    bp
+        mov     bp, sp
+        push    es
+        push    bx
+        mov     bh, [bp+4]
+        mov     ax, 1130h
+        xor     cx, cx
+        push    bp
+        int     10h
+        mov     ax, bp
+        pop     bp
+        mov     dx, es
+        mov     cx, dx                  ; DX:AX = DX * 16 + AX
+        shr     dx, 12
+        shl     cx, 4
+        add     ax, cx
+        adc     dx, 0
+        pop     bx
+        pop     es
+        pop     bp
+        ret
+_vga_font endp
 
 _TEXT   ends
         end

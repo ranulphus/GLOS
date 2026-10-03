@@ -376,6 +376,20 @@ void sched_panic_report(void)
                 t->state, (u32)t->stack, t->stack_top, t->esp, *(u32 *)t->stack == CANARY ? "ok" : "bad");
 }
 
+/* glos ps: "thread NAME CLASS STATE ticks=N" lines. */
+u32 sched_ps(char *buf, u32 max)
+{
+    static const char *const prio[] = { "urgent", "normal", "bulk", "idle" };
+    static const char *const state[] = { "ready", "running", "blocked", "dead" };
+    struct thread *t;
+    u32 n = 0, f = irq_save();
+    for (t = all_threads; t && n < max; t = t->all)
+        n += (u32)ksnprintf(buf + n, max - n, "thread %s %s %s ticks=%u\n", t->name, prio[t->prio & 3],
+                            state[t->state & 3], t->ticks);
+    irq_restore(f);
+    return n < max ? n : max;
+}
+
 void sched_report(void)
 {
     struct thread *t;

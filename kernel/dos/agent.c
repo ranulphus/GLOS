@@ -26,7 +26,11 @@
  * and frees it. Each ring has one writer and one reader, and the ssh side
  * changes a job's state with interrupts off, so the VM never sees half a
  * change. A full ring holds the program (the VM thread waits) until the ssh
- * thread makes room; once the client has gone, output is dropped. */
+ * thread makes room.
+ *
+ * glos kill, or the client going away, kills a running job: every half
+ * second the program in front is killed (the kill of supervisor.md §9.6),
+ * innermost first, until the job has ended; its output is then dropped. */
 #include "glos/bootinfo.h"
 #include "agent.h"
 #include "io.h"
@@ -50,6 +54,7 @@ struct agent_job {
     volatile u8 state;
     u8 cand;                                    /* the next program to try */
     u8 shell;                                   /* running as COMSPEC /C */
+    volatile u8 kill;                           /* end it: glos kill, or its client has gone */
     u32 seq;
     u32 result;                                 /* INT 21h 4Dh's AX, or 10000h + the EXEC error */
     void *owner;                                /* the ssh side's channel; NULL once it has gone */
@@ -64,6 +69,7 @@ static struct agent_job jobs[NJOBS];
 static struct agent_job *running;
 static u32 next_seq;
 static struct waitq roomq;                      /* the VM thread, waiting for ring space */
+static u32 last_kill;
 static volatile u32 exit_at;
 static volatile u8 exit_req;
 static void (*kick_ssh)(void);
@@ -109,6 +115,7 @@ int agent_post(void *owner, const char *cmd)
     j->result = 0;
     j->cand = 0;
     j->shell = 0;
+    j->kill = 0;
     j->out[0].head = j->out[0].tail = j->out[1].head = j->out[1].tail = 0;
     f = irq_save();
     j->seq = next_seq++;
@@ -126,6 +133,8 @@ void agent_drop(void *owner)
             jobs[i].owner = NULL;
             if (jobs[i].state == J_QUEUED)
                 jobs[i].state = J_FREE;
+            else
+                jobs[i].kill = 1;
         }
     thread_wake(&roomq);
     irq_restore(f);
@@ -167,6 +176,28 @@ void agent_service(u32 (*write)(void *owner, int stream, const u8 *d, u32 n), vo
             irq_restore(f);
         }
     }
+}
+
+int agent_kill(void)
+{
+    u32 f = irq_save();
+    int r = running ? 0 : -1;
+    if (running)
+        running->kill = 1;
+    irq_restore(f);
+    return r;
+}
+
+u32 agent_ps(char *buf, u32 max)
+{
+    static const char *const names[] = { "free", "queued", "running", "done" };
+    u32 n = 0, i, f = irq_save();
+    for (i = 0; i < NJOBS && n < max; i++)
+        if (jobs[i].state == J_QUEUED || jobs[i].state == J_RUNNING)
+            n += (u32)ksnprintf(buf + n, max - n, "job %u %s%s %s\n", jobs[i].seq, names[jobs[i].state],
+                                jobs[i].kill ? " killing" : "", jobs[i].cmd);
+    irq_restore(f);
+    return n < max ? n : max;
 }
 
 void agent_exit(u32 delay_ticks)
@@ -341,11 +372,22 @@ int agent_vm_wake_pending(void)
 
 int agent_vm_capturing(void) { return running != 0; }
 
+/* Every tick (interrupts off): a job being killed gets the next kill. */
+void agent_vm_tick(u32 now)
+{
+    if (running && running->kill && !vm.kill_req && now - last_kill >= 512) {
+        last_kill = now;
+        vm.kill_req = 1;
+        vm.kill_since = now;
+        vm_kick();
+    }
+}
+
 static void put(int stream, u8 c)
 {
     struct ring *r = &running->out[stream];
     while (ring_used(r) == RING) {
-        if (!running->owner || vm.kill_req)
+        if (!running->owner || running->kill || vm.kill_req)
             return;                             /* nobody reads it: dropped */
         if (kick_ssh)
             kick_ssh();

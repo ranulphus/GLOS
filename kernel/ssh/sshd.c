@@ -20,10 +20,12 @@
 #include "kprintf.h"
 #include "mm.h"
 #include "sched.h"
+#include "shot.h"
 #include "ssh.h"
 #include "sshbuf.h"
 #include "sshd.h"
 #include "timer.h"
+#include "vm.h"
 
 #define NCONN      4
 #define RING       0x10000u                     /* a power of two */
@@ -272,6 +274,53 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         say(ch, 0, cmd + 10);
         say(ch, 0, "\n");
         ssh_chan_exit(ch, 0);
+    } else if (!strcmp(cmd, "glos shot")) {
+        const char *why = "";
+        u32 len;
+        u8 *png = shot_text(&len, &why);
+        if (!png) {
+            say(ch, 1, "glos shot: ");
+            say(ch, 1, why);
+            say(ch, 1, "\n");
+            ssh_chan_exit(ch, 1);
+        } else {
+            ssh_chan_write(ch, 0, png, len);    /* fits: a stream buffers 256 KB */
+            kfree(png);
+            ssh_chan_exit(ch, 0);
+        }
+    } else if (!strcmp(cmd, "glos log") || !strcmp(cmd, "glos ps")) {
+        char *buf = kmalloc(0x4000);
+        u32 n = 0;
+        u16 psp;
+        if (!buf) {
+            say(ch, 1, "glos: no memory\n");
+            ssh_chan_exit(ch, 1);
+            return 0;
+        }
+        if (cmd[5] == 'l') {
+            n = klog_read(buf, 0x4000);
+        } else {
+            n = agent_ps(buf, 0x1000);
+            psp = vm_current_psp();
+            if (psp) {
+                u32 mcb = ((u32)psp - 1) << 4, k;
+                n += (u32)ksnprintf(buf + n, 0x2000 - n, "dos psp=%04x name=", psp);
+                for (k = 0; k < 8 && vm_rd8(mcb + 8 + k) > ' '; k++)
+                    buf[n++] = (char)vm_rd8(mcb + 8 + k);
+                buf[n++] = '\n';
+            }
+            n += sched_ps(buf + n, 0x4000 - n);
+        }
+        ssh_chan_write(ch, 0, (const uint8_t *)buf, n);
+        kfree(buf);
+        ssh_chan_exit(ch, 0);
+    } else if (!strcmp(cmd, "glos kill")) {
+        if (agent_kill() != 0) {
+            say(ch, 1, "glos kill: nothing is running\n");
+            ssh_chan_exit(ch, 1);
+        } else {
+            ssh_chan_exit(ch, 0);
+        }
     } else if (!strcmp(cmd, "glos exit")) {
         if (!agent_mode) {
             say(ch, 1, "glos: exit needs GLOS started without /RUN or /SHELL\n");
@@ -281,7 +330,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             agent_exit(512);                    /* half a second for the reply to leave */
         }
     } else {
-        say(ch, 1, "glos: no such command\n");
+        say(ch, 1, "glos: no such command (glos ver, echo, shot, log, ps, kill, exit)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;

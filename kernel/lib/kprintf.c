@@ -23,8 +23,46 @@ int (*kprintf_hold)(void);
 static char held[4096];
 static u32 held_len, direct;
 
+/* The COM1 mirror for glos log: the last 16 KB of the kernel's lines and of
+   what programs write there, without CRs. Writers run with interrupts off. */
+#define LOG_RING 0x4000u
+static char log_ring[LOG_RING];
+static u32 log_head;
+
+void klog_put(const char *s, u32 n)
+{
+    for (; n; n--, s++)
+        if (*s != '\r')
+            log_ring[log_head++ & (LOG_RING - 1)] = *s;
+}
+
+u32 klog_read(char *out, u32 max)
+{
+    u32 f, n, start, i;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(f) :: "memory");
+    n = log_head < LOG_RING ? log_head : LOG_RING;
+    if (n > max)
+        n = max;
+    start = log_head - n;
+    for (i = 0; i < n; i++)
+        out[i] = log_ring[(start + i) & (LOG_RING - 1)];
+    if (f & 0x200)
+        sti();
+    if (n == max && n < log_head) {             /* cut short: start at a whole line */
+        for (i = 0; i < n && out[i] != '\n'; i++) ;
+        if (i < n) {
+            u32 k;
+            for (k = 0; k + i + 1 < n; k++)
+                out[k] = out[k + i + 1];
+            n -= i + 1;
+        }
+    }
+    return n;
+}
+
 static void raw_out(const char *s, u32 n)
 {
+    klog_put(s, n);
     for (; n; n--, s++) {
         if (*s == '\n') serial_putc(COM1, '\r');
         serial_putc(COM1, *s);

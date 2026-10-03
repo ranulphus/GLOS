@@ -81,6 +81,7 @@ struct bootinfo {
     /* M3 */
     bi_u32 indos;                               /* DOS's InDOS flag (linear) */
     bi_u32 lol;                                 /* DOS's List of Lists (INT 21h 52h, linear), 0 unknown */
+    bi_u32 font16, font14, font8, font8hi;      /* the video BIOS's 8x16, 8x14 and 8x8 (two halves) fonts */
     bi_u32 stub_paras;                          /* the resident stub's size, in paragraphs */
     /* M3: GLOS as the shell (BI_F_SHELL) */
     char comspec[80];                           /* COMMAND.COM, for batch files and the console (and the agent's) */

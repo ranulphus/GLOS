@@ -44,7 +44,7 @@ check-deps:
 TINYSSH_SRCS := $(filter-out %_lib25519.c %_lib1305.c,$(wildcard third_party/tinyssh/*.c)) \
                 $(foreach t,int8 int16 int32 int64 uint8 uint16 uint32 uint64,third_party/tinyssh/cryptoint/$(t)_optblocker.c)
 HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:kernel/vm/v86dec.c \
-              vpic_test:kernel/vm/vpic.c
+              vpic_test:kernel/vm/vpic.c png_test:kernel/lib/png.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
 host-test-run:
@@ -108,7 +108,8 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/ssh/sshd.c \
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c \
          kernel/dbg/gdbstub.c kernel/vm/v86.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c \
-         kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c kernel/dos/agent.c
+         kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c kernel/dos/agent.c \
+         kernel/dos/shot.c kernel/lib/png.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.

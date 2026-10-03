@@ -57,7 +57,9 @@ port 22, OpenSSH's ssh runs built-in commands (output and exit codes exact),
 three at once, then DOS commands: ECHOARGS's stdout (through INT 21h 40h,
 09h, 02h, 06h and INT 29h), stderr and exit code 7 exactly, a program found
 in the current directory, an internal command (COMMAND.COM), three queued at
-once; a stranger's key is refused, and "glos exit" ends the run. (The run
+once; then glos shot of a known screen against tests/loopa/golden.txt
+(GLOS_GOLDEN=update records it), glos log, glos ps, and glos kill ending a
+WAITSEC; a stranger's key is refused, and "glos exit" ends the run. (The run
 ends on the host's word: a fixed wait in guest time lost to run.py's
 wall-clock idle limit whenever 86Box ran slower than real time.) The first
 connection's time is logged, not judged (PRD D28).
@@ -396,6 +398,41 @@ SSH_CASES = ([(os.environ.get("SSH_PROFILE", "bf6"), os.environ.get("SSH_CARD", 
 KEYS = ["--file", "tests/keys/hostkey=/TEST/KEYS/HOSTKEY", "--file", "tests/keys/AUTHKEYS=/TEST/KEYS/AUTHKEYS"]
 
 
+GOLDEN = os.path.join(ROOT, "tests/loopa/golden.txt")      # "NAME SHA256" lines
+
+
+def png_pixels(data):
+    """(width, height, sha256 of the decoded scanlines) of a PNG, or None."""
+    import hashlib
+    import struct
+    import zlib
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    p, idat, w, h = 8, b"", 0, 0
+    while p + 12 <= len(data):
+        n = struct.unpack(">I", data[p:p + 4])[0]
+        kind, body = data[p + 4:p + 8], data[p + 8:p + 8 + n]
+        if zlib.crc32(kind + body) != struct.unpack(">I", data[p + 8 + n:p + 12 + n])[0]:
+            return None
+        if kind == b"IHDR":
+            w, h = struct.unpack(">II", body[:8])
+        elif kind == b"IDAT":
+            idat += body
+        p += 12 + n
+    return w, h, hashlib.sha256(zlib.decompress(idat)).hexdigest()
+
+
+def golden(name, value):
+    """value against tests/loopa/golden.txt; GLOS_GOLDEN=update records it instead."""
+    lines = dict(l.split() for l in open(GOLDEN) if l.strip()) if os.path.exists(GOLDEN) else {}
+    if os.environ.get("GLOS_GOLDEN") == "update":
+        lines[name] = value
+        with open(GOLDEN, "w") as f:
+            f.writelines("%s %s\n" % kv for kv in sorted(lines.items()))
+        return True
+    return lines.get(name) == value
+
+
 def ssh_case(profile, card):
     import socket
     import tempfile
@@ -459,6 +496,26 @@ def ssh_case(profile, card):
                                stderr=subprocess.DEVNULL) for i in range(3)]
         outs = [(p.communicate(timeout=300)[0].decode("latin-1"), p.returncode) for p in ps]
         checks["dos-queued"] = sorted(outs) == [("q%d\r\nnine two six int29\r\n" % i, 7) for i in range(3)]
+        # Built-ins: a known screen in a PNG, the COM1 mirror, the process list, and a kill.
+        ssh("cls")
+        ssh("echoargs GOLDEN")
+        p = subprocess.run(opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=180)
+        open(os.path.join(ROOT, "out", "ssh-" + tag, "shot.png"), "wb").write(p.stdout)
+        px = png_pixels(p.stdout)
+        checks["shot"] = p.returncode == 0 and px is not None and px[:2] == (640, 400) \
+            and golden("shot-" + profile, px[2])
+        rc, out, _ = ssh("glos log")
+        checks["log"] = rc == 0 and "GLOS-SSH exec=\"glos shot\"" in out and "GLOS-VM agent comspec=" in out
+        rc, out, _ = ssh("glos ps")
+        checks["ps"] = rc == 0 and "thread vm normal" in out and "dos psp=" in out
+        slow = subprocess.Popen(opts + ["glos@127.0.0.1", "WAITSEC 120"], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        t2 = time.time()
+        while time.time() - t2 < 120 and 'cmd="WAITSEC 120"' not in open(serial, "rb").read().decode("latin-1"):
+            time.sleep(0.5)
+        time.sleep(2)
+        rc, _, _ = ssh("glos kill")
+        checks["kill"] = rc == 0 and slow.wait(timeout=120) == 255
         stranger = os.path.join(tmp, "stranger")
         subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", stranger], check=True)
         rc, _, _ = ssh("glos ver", keyfile=stranger)

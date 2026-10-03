@@ -32,6 +32,7 @@ extern int __cdecl cpu_is486(void);
 extern int __cdecl cpu_v86(void);
 extern int __cdecl cpu_id1(unsigned long *eax, unsigned long *edx);
 extern int __cdecl bios_e820(void *buf20, unsigned long *cont);
+extern unsigned long __cdecl vga_font(unsigned which);
 
 /* The resident stub (stub.asm), in a segment of its own. */
 extern struct stub_data __far __cdecl stub_data;
@@ -373,6 +374,10 @@ static int glos_main(int argc, char **argv)
     }
     r.h.ah = 0x0F; int86(0x10, &r, &r);
     bi.video_mode = r.h.al & 0x7F;
+    bi.font16 = vga_font(6);                                /* for glos shot: the card's own glyphs */
+    bi.font14 = vga_font(2);
+    bi.font8 = vga_font(3);                                 /* characters 00h-7Fh ... */
+    bi.font8hi = vga_font(4);                               /* ... and 80h-FFh */
     bi.pic_mask = inp(0x21) | ((unsigned long)inp(0xA1) << 8);
     say("GLOS-BOOT step=checks cpu=%lu cpuid_edx=%08lx", bi.cpu_family, bi.cpuid_edx);
 

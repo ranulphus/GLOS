@@ -16,6 +16,8 @@ extern int (*kprintf_hold)(void);       /* 1 while a program's COM1 line is unfi
 void kprintf_flush(int force);
 void kprintf_direct(void);              /* a panic: no more holding */
 int kvsnprintf(char *buf, size_t n, const char *fmt, __builtin_va_list ap);
+void klog_put(const char *s, u32 n);    /* into the COM1 mirror (glos log), interrupts off */
+u32 klog_read(char *out, u32 max);      /* its last max bytes or fewer, from a line start */
 
 void *memset(void *d, int c, size_t n);
 void *memcpy(void *d, const void *s, size_t n);

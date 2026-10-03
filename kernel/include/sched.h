@@ -63,5 +63,6 @@ void sched_tick(void);                  /* every kernel tick, from the clock's I
 void sched_trap_exit(struct trapframe *tf);     /* the end of an IRQ or a trap from V86 */
 void sched_report(void);                /* GLOS-SCHED lines */
 void sched_panic_report(void);          /* GLOS-PANIC thread= lines */
+u32 sched_ps(char *buf, u32 max);       /* glos ps: a line per thread */
 
 #endif

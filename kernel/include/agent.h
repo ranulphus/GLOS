@@ -14,6 +14,8 @@ void agent_drop(void *owner);                   /* the channel has gone */
 void agent_service(u32 (*write)(void *owner, int stream, const u8 *d, u32 n),
                    void (*done)(void *owner, u32 code));       /* code: the exit status */
 void agent_exit(u32 delay_ticks);               /* glos exit: leave once idle, this many ticks on */
+int agent_kill(void);                           /* glos kill: end the running job; -1 if none */
+u32 agent_ps(char *buf, u32 max);               /* "job SEQ STATE COMMAND" lines */
 
 /* The VM thread's side (trap context). */
 struct agent_exec {
@@ -22,6 +24,7 @@ struct agent_exec {
 int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x);  /* 1 EXEC, 0 wait, -1 leave */
 int agent_vm_wake_pending(void);                /* a job or an exit is waiting for the halted stub */
 int agent_vm_capturing(void);
+void agent_vm_tick(u32 now);                    /* every kernel tick: the kills of a job being ended */
 void agent_vm_int21(const struct trapframe *tf);
 void agent_vm_int29(const struct trapframe *tf);
 

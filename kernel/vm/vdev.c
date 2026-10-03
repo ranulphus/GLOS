@@ -8,6 +8,7 @@
  * Wider accesses to byte devices are split into bytes. Each kernel tick also
  * drives the virtual RTC's flags, the 8042's queue, INT 15h's waits and the
  * vif-stuck watchdog. */
+#include "agent.h"
 #include "io.h"
 #include "kprintf.h"
 #include "pci.h"
@@ -26,10 +27,11 @@ static int com1_hold(void) { return com1_mid; }
 
 static void com1_out(u8 v)
 {
-    if (!(inb(0x3FB) & 0x80)) {                 /* not the divisor latch */
+    if (!(inb(0x3FB) & 0x80)) {                 /* not the divisor latch: a character */
         if (!com1_mid && v != '\n')
             com1_since = timer_ticks();
         com1_mid = v != '\n';
+        klog_put((const char *)&v, 1);
     }
     outb(0x3F8, v);
     if (!com1_mid)
@@ -288,6 +290,7 @@ void vdev_tick(struct trapframe *tf, u8 c)
     rtc_tick(c);
     vkbc_tick();
     vm_int15_tick(now);
+    agent_vm_tick(now);
     if (vm.waiting && vm.wait_deadline && (s32)(now - vm.wait_deadline) >= 0)
         vm_kick();
     if (com1_mid && now - com1_since > 100) {   /* a line that never ends: write ours anyway */
