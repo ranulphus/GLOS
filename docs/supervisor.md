@@ -124,8 +124,9 @@ to COM1 at each step:
   that no vector a C runtime hooks (00h–07h, 1Bh, 23h, 24h) points into the memory being freed
   (`GLOS-WARN ivt-into-loader`). The stub then shrinks the block and runs the EXEC loop. After the kernel
   leaves, the stub puts A20 and the XMS blocks back as found, writes `GLOS-EXIT` and ends with INT 21h 4Ch.
-- **Measured (M3, with the agent's wait):** the stub is 2,390 bytes. With the PSP and the environment, MEM /C
-  shows GLOS at 2,848 bytes, and the largest program is 2,848 bytes smaller than under plain DOS.
+- **Measured (M3, with the agent's wait and the DOS server's call):** the stub is 2,514 bytes. With the PSP
+  and the environment, MEM /C shows GLOS at 2,976 bytes, and the largest program is 2,976 bytes smaller than
+  under plain DOS.
 - **From a prompt or AUTOEXEC.BAT:** COMMAND.COM stays the shell; `glos exit` returns to it.
 - **As the shell (`SHELL=C:\GLOS\GLOS.EXE /SHELL` in CONFIG.SYS; done in M3):**
   - `/SHELL` says so; so does a PSP that is its own parent (MS-DOS's shell). FreeDOS doesn't make its shell its
@@ -157,9 +158,9 @@ to COM1 at each step:
     stub. If even COMSPEC can't run, `GLOS-SHELL error=cannot-run`, and the machine halts. When the kernel
     leaves (`glos exit`, M3), the stub does the same after its cleanup; `EXIT` returning to GLOS comes with
     `glos exit`.
-  - Measured on the glosshell boots: GLOS takes 4,736 bytes (the stub and PSP, and the 2 KB master
-    environment). While a batch file runs, the largest program is 577,760 bytes on the raw boot (plain DOS:
-    511,152, because COMMAND.COM swaps itself into GLOS's XMS) and 628,432 on the HIMEMX boot (plain DOS:
+  - Measured on the glosshell boots: GLOS takes 4,864 bytes (the stub and PSP, and the 2 KB master
+    environment). While a batch file runs, the largest program is 577,632 bytes on the raw boot (plain DOS:
+    511,152, because COMMAND.COM swaps itself into GLOS's XMS) and 628,304 on the HIMEMX boot (plain DOS:
     631,488).
 - **Later (opt-in, M9):** the stub moves into an unused upper-memory page that GLOS maps for the system VM,
   leaving the PSP and environment (about 0.5 KB) below 640K. A page qualifies only when it reads back as
@@ -685,6 +686,17 @@ A posted call (an agent file operation; later, DOS calls from GLOS apps) runs on
 
 DOS is entered through the INT 21h entry captured at load.
 
+**As built in M3 (the DOS server, `kernel/dos/dos.c`):** the safe point is headless mode's idle stub, the one
+place where nothing else is in DOS by construction.
+- A request is up to four INT 21h calls, made in order until one returns with CF set, with bytes copied into
+  a transfer buffer before the first call and out of it after the last.
+- The kernel hands the stub the registers through NEXT's answer 3 (`stub_data.dregs`); the stub makes the call
+  and asks again.
+- The transfer buffer is a DOS block of up to 32 KB that the stub allocates on the first request (so it belongs
+  to GLOS.EXE) and frees when the last user (an SFTP session) lets go: conventional memory only while in use.
+- A running job holds requests back until it ends. The conditions above (InDOS, INT 13h/10h, IRQs in service)
+  come with posted calls during programs, which `/RUN` and `/SHELL` need.
+
 ### 17.3 The agent shell (M3)
 
 - **Headless** is GLOS.EXE without a mode option (or with `/AGENT`); `/RUN` and `/SHELL` are the other modes.
@@ -757,6 +769,16 @@ DOS is entered through the INT 21h entry captured at load.
     9th column is left out); blinking text shows steadily. Graphics modes later (status 1 until then).
   - `glos log`: the last 16 KB of COM1: the kernel's lines and what programs wrote there (no CRs).
   - `glos ps`: the jobs, the DOS program in front (PSP and its arena name), and each thread.
+- **SFTP (M3, `kernel/ssh/sftp.c`):** protocol version 3, which OpenSSH's `sftp` and `scp` speak, written for
+  DOS (no permissions, links or owners, and 8.3 names) on the DOS server; headless only for now.
+  - Paths: `/C/TEST/FILE.TXT` is `C:\TEST\FILE.TXT`; relative paths start at DOS's current directory when the
+    session began; `.` and `..` are resolved before DOS sees them. A name that isn't 8.3 is refused, since DOS
+    would silently truncate it.
+  - Attributes: size, permissions (directories 0755, files 0644, read-only 0444) and times (DOS's local time,
+    given as UTC). SETSTAT is accepted and ignored; links and extensions are unsupported.
+  - Each session serves one request at a time. The window reopens as requests finish (`ssh_chan_hold`), and no
+    new one starts while more than 128 KB of output waits, so a session holds at most a window of input.
+  - Files a client leaves open are closed when its channel goes.
 
 ## 18. Logging
 

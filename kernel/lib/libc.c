@@ -14,6 +14,13 @@ void *memmove(void *d, const void *s, size_t n)
     return d;
 }
 
+char *strcpy(char *d, const char *s)
+{
+    char *r = d;
+    while ((*d++ = *s++) != 0) ;
+    return r;
+}
+
 int strcmp(const char *a, const char *b)
 {
     while (*a && *a == *b)

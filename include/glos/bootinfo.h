@@ -46,7 +46,9 @@ typedef unsigned int   bi_u32;
 #define GLOS_CALL_NEXT   4                      /* the stub asks what to do; arg = how the last EXEC ended
                                                    (INT 21h 4Dh's AX, 10000h + the error if EXEC failed,
                                                    FFFFFFFFh: nothing ran); EAX = 1: EXEC the stub's
-                                                   path/tail; 2: halt until an interrupt, then ask again */
+                                                   path/tail; 2: halt until an interrupt, then ask again;
+                                                   3: INT 21h with stub_data.dregs, then ask again with
+                                                   FFFFFFFEh */
 #define GLOS_CALL_RESIDENT 5                    /* the stub moves to arg:0, right after GLOS.EXE's PSP */
 
 struct bi_range { bi_u32 base, length, type; };
@@ -109,6 +111,8 @@ struct stub_data {
     unsigned char tail[128];                    /* EXEC: length, text, CR */
     char comspec[80];                           /* the shell's fallback: COMSPEC ... */
     unsigned char fbtail[64];                   /* ... with this tail (length, text, CR) */
+    unsigned short dregs[9];                    /* NEXT 3: INT 21h with AX BX CX DX SI DI DS ES; then
+                                                   what came back, and FLAGS (the DOS server) */
 };
 
 #endif

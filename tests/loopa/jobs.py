@@ -57,9 +57,13 @@ port 22, OpenSSH's ssh runs built-in commands (output and exit codes exact),
 three at once, then DOS commands: ECHOARGS's stdout (through INT 21h 40h,
 09h, 02h, 06h and INT 29h), stderr and exit code 7 exactly, a program found
 in the current directory, an internal command (COMMAND.COM), three queued at
-once; then glos shot of a known screen against tests/loopa/golden.txt
+once; 1 MB up and back by sftp and by scp (same sha256), with a listing, a
+rename, a removal and a directory made and removed; then glos shot of a
+known screen against tests/loopa/golden.txt
 (GLOS_GOLDEN=update records it), glos log, glos ps, and glos kill ending a
-WAITSEC; a stranger's key is refused, and "glos exit" ends the run. (The run
+WAITSEC; a stranger's key is refused, and "glos exit" ends the run with
+VECCHK clean. With the two cases on 486DX2 and bf6 + RTL8029, this is M3's
+exit (make loopa-m3). (The run
 ends on the host's word: a fixed wait in guest time lost to run.py's
 wall-clock idle limit whenever 86Box ran slower than real time.) The first
 connection's time is logged, not judged (PRD D28).
@@ -445,7 +449,8 @@ def ssh_case(profile, card):
     proc = run("ssh-" + tag, os.environ.get("SSH_EXTRA", "").split() + ["--machine", profile, "--net", card, "--net-fwd", "%d:22" % port, "--timeout", "600",
                               "--idle", "300"] + GLOS_FILES + KEYS + [
         "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
-        "--cmd", "SERSAY HX-START ssh", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
+        "--cmd", "SERSAY HX-START ssh", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"],
         background=True)
     serial = os.path.join(ROOT, "out", "ssh-" + tag, "serial.log")
     tmp = tempfile.mkdtemp()
@@ -496,6 +501,32 @@ def ssh_case(profile, card):
                                stderr=subprocess.DEVNULL) for i in range(3)]
         outs = [(p.communicate(timeout=300)[0].decode("latin-1"), p.returncode) for p in ps]
         checks["dos-queued"] = sorted(outs) == [("q%d\r\nnine two six int29\r\n" % i, 7) for i in range(3)]
+        # SFTP on the DOS server: 1 MB there and back by sftp and by scp, intact; a listing,
+        # a rename, a removal, a directory made and removed.
+        import hashlib
+        big = os.path.join(tmp, "big.bin")
+        open(big, "wb").write(os.urandom(1 << 20))
+        want = hashlib.sha256(open(big, "rb").read()).hexdigest()
+        fx = ["-P", str(port)] + base[3:] + ["-i", key]
+        batch = os.path.join(tmp, "batch")
+        open(batch, "w").write("cd /C/TEST\nput %s\nls -l\nget BIG.BIN %s\nrename BIG.BIN OLD.BIN\nrm OLD.BIN\n"
+                               "mkdir NEWDIR\nrmdir NEWDIR\nls\n" % (big, os.path.join(tmp, "back.bin")))
+        t3 = time.time()
+        p = subprocess.run(["sftp"] + fx + ["-b", batch, "glos@127.0.0.1"], capture_output=True, timeout=600)
+        info += " sftp=%.1fs" % (time.time() - t3)
+        lsout = p.stdout.decode("latin-1")
+        back = os.path.join(tmp, "back.bin")
+        checks["sftp"] = (p.returncode == 0 and os.path.exists(back)
+                          and hashlib.sha256(open(back, "rb").read()).hexdigest() == want
+                          and "BIG.BIN" in lsout and "1048576" in lsout)
+        if not checks["sftp"]:
+            info += " sftp-rc=%d err=%r" % (p.returncode, p.stderr.decode("latin-1")[-200:])
+        sback = os.path.join(tmp, "sback.bin")
+        p1 = subprocess.run(["scp"] + fx + [big, "glos@127.0.0.1:/C/TEST/S.BIN"], capture_output=True, timeout=600)
+        p2 = subprocess.run(["scp"] + fx + ["glos@127.0.0.1:/C/TEST/S.BIN", sback], capture_output=True, timeout=600)
+        checks["scp"] = (p1.returncode == 0 and p2.returncode == 0 and os.path.exists(sback)
+                         and hashlib.sha256(open(sback, "rb").read()).hexdigest() == want)
+        rc, _, _ = ssh("del C:\\TEST\\S.BIN")
         # Built-ins: a known screen in a PNG, the COM1 mirror, the process list, and a kill.
         ssh("cls")
         ssh("echoargs GOLDEN")
@@ -528,7 +559,7 @@ def ssh_case(profile, card):
     text = open(serial, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(serial) else ""
     checks["strict-kex"] = "GLOS-SSH kex done strict=1" in text
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-EXIT code=0" in text
-    checks["done"] = "HX-DONE 0" in text
+    checks["done"] = "HX-DONE 0" in text and "HX-VECCHK ok" in text
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad

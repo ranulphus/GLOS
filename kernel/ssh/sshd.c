@@ -19,7 +19,9 @@
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
+#include "dos.h"
 #include "sched.h"
+#include "sftp.h"
 #include "shot.h"
 #include "ssh.h"
 #include "sshbuf.h"
@@ -53,6 +55,7 @@ static struct thread *ssh_thread;
 static volatile u8 ssh_kick;
 static void (*kick_net)(void);
 static int agent_mode;
+static struct sftp *sftps[8];                   /* SFTP sessions, kept until they have closed their files */
 
 /* ---- rings: one writer, one reader; x86 keeps stores in order */
 
@@ -347,16 +350,50 @@ static u32 agent_write(void *owner, int stream, const u8 *d, u32 n)
 
 static void agent_done(void *owner, u32 code) { ssh_chan_exit(owner, code); }
 
+/* SFTP (kernel/ssh/sftp.c) on the DOS server: headless only, for now. */
 static int k_subsystem(struct ssh_chan *ch, const char *name)
 {
-    (void)ch;
-    kprintf("GLOS-SSH subsystem=%s refused\n", name);
-    return -1;
+    struct sftp *s;
+    u32 i;
+    for (i = 0; i < ARRAY_SIZE(sftps) && sftps[i]; i++) ;
+    if (strcmp(name, "sftp") || !agent_mode || i == ARRAY_SIZE(sftps) || !(s = sftp_open(ch))) {
+        kprintf("GLOS-SSH subsystem=%s refused\n", name);
+        return -1;
+    }
+    kprintf("GLOS-SSH subsystem=sftp\n");
+    sftps[i] = s;
+    ssh_chan_set_user(ch, s);
+    return 0;
 }
 
-static void k_data(struct ssh_chan *ch, const uint8_t *d, uint32_t n) { (void)ch; (void)d; (void)n; }
-static void k_eof(struct ssh_chan *ch) { (void)ch; }
-static void k_gone(struct ssh_chan *ch) { agent_drop(ch); }
+static void k_data(struct ssh_chan *ch, const uint8_t *d, uint32_t n)
+{
+    if (ssh_chan_user(ch))
+        sftp_input(ssh_chan_user(ch), d, n);
+}
+
+static void k_eof(struct ssh_chan *ch)
+{
+    if (ssh_chan_user(ch))
+        sftp_eof(ssh_chan_user(ch));
+}
+
+static void k_gone(struct ssh_chan *ch)
+{
+    agent_drop(ch);
+    if (ssh_chan_user(ch))
+        sftp_close(ssh_chan_user(ch));
+}
+
+static void sftp_turn(void)
+{
+    u32 i;
+    for (i = 0; i < ARRAY_SIZE(sftps); i++)
+        if (sftps[i] && sftp_service(sftps[i]) < 0) {
+            sftp_free(sftps[i]);
+            sftps[i] = 0;
+        }
+}
 
 static const struct ssh_ops ops = { k_alloc, k_free, k_send, k_log, k_exec, k_subsystem, k_data, k_eof, k_gone };
 
@@ -408,6 +445,7 @@ static void ssh_main(void *arg)
                 finish(s, "login-grace");
         }
         agent_service(agent_write, agent_done);
+        sftp_turn();
     }
 }
 
@@ -419,6 +457,7 @@ void sshd_start(const struct bootinfo *bi)
     srv.version = "SSH-2.0-GLOS_M3";
     agent_mode = (bi->flags & BI_F_AGENT) != 0;
     agent_init(wake_ssh);
+    dos_init(wake_ssh);
     if (!bi->hostkey_len || ssh_parse_privkey(bi->hostkey, bi->hostkey_len, srv.host_sk, srv.host_pk) != 0) {
         kprintf("GLOS-SSH off reason=%s\n", bi->hostkey_len ? "bad-hostkey" : "no-hostkey");
         return;

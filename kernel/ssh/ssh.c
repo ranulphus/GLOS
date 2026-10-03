@@ -52,6 +52,8 @@ struct ssh_chan {
     struct ssh_conn *conn;
     uint32_t id, peer, peer_window, peer_maxpkt, our_window;
     uint8_t started, eof_recv, close_sent, close_recv, exit_pending;
+    uint8_t held;                               /* the window reopens only as the platform consumes */
+    uint32_t unconsumed;                        /* held: input delivered and not yet consumed */
     uint32_t exit_status;
     uint8_t *out[2];
     uint32_t out_len[2], out_cap[2];
@@ -80,6 +82,7 @@ struct ssh_conn {
 
 static int handle(struct ssh_conn *c, const uint8_t *p, uint32_t n);
 static void flush(struct ssh_chan *ch);
+static void window_adjust(struct ssh_chan *ch);
 
 /* ---- packets out */
 
@@ -342,9 +345,12 @@ static int newkeys(struct ssh_conn *c)
     c->ops->free(c->ic);
     c->ops->free(c->is);
     c->ic = c->is = NULL;
-    for (i = 0; i < SSH_MAX_CHANNELS; i++)      /* output held during the key exchange */
-        if (c->chans[i])
+    for (i = 0; i < SSH_MAX_CHANNELS; i++)      /* output and window held during the key exchange */
+        if (c->chans[i]) {
             flush(c->chans[i]);
+            if (c->chans[i])
+                window_adjust(c->chans[i]);
+        }
     return 0;
 }
 
@@ -644,14 +650,38 @@ static int chan_request(struct ssh_conn *c, const uint8_t *p, uint32_t n)
     return 0;
 }
 
+/* Reopen the client's window once half of it is in use, counting input the
+   platform still holds. */
+static void window_adjust(struct ssh_chan *ch)
+{
+    uint32_t open = WINDOW - ch->our_window - ch->unconsumed;
+    uint8_t m[16];
+    struct sbuf b;
+    if (ch->conn->kex || ch->conn->dead || ch->close_sent || ch->our_window + ch->unconsumed > WINDOW
+        || open < WINDOW / 2)
+        return;
+    sb_init(&b, m, sizeof m);
+    sb_u8(&b, MSG_CHANNEL_WINDOW_ADJUST);
+    sb_u32(&b, ch->peer);
+    sb_u32(&b, open);
+    send_sb(ch->conn, &b);
+    ch->our_window += open;
+}
+
+void ssh_chan_hold(struct ssh_chan *ch) { ch->held = 1; }
+
+void ssh_chan_consumed(struct ssh_chan *ch, uint32_t n)
+{
+    ch->unconsumed -= n < ch->unconsumed ? n : ch->unconsumed;
+    window_adjust(ch);
+}
+
 static int chan_data(struct ssh_conn *c, const uint8_t *p, uint32_t n, int ext)
 {
     struct sread r;
     struct ssh_chan *ch;
     const uint8_t *d;
     uint32_t len;
-    uint8_t m[16];
-    struct sbuf b;
 
     sr_init(&r, p + 1, n - 1);
     ch = chan_of(c, &r);
@@ -663,16 +693,12 @@ static int chan_data(struct ssh_conn *c, const uint8_t *p, uint32_t n, int ext)
     if (len > ch->our_window)
         return disconnect(c, DISC_PROTOCOL_ERROR, "window exceeded"), -1;
     ch->our_window -= len;
-    if (!ext && !ch->eof_recv && len)
+    if (!ext && !ch->eof_recv && len) {
+        if (ch->held)
+            ch->unconsumed += len;
         c->ops->chan_data(ch, d, len);
-    if (ch->our_window < WINDOW / 2 && !ch->close_sent) {
-        sb_init(&b, m, sizeof m);
-        sb_u8(&b, MSG_CHANNEL_WINDOW_ADJUST);
-        sb_u32(&b, ch->peer);
-        sb_u32(&b, WINDOW - ch->our_window);
-        send_sb(c, &b);
-        ch->our_window = WINDOW;
     }
+    window_adjust(ch);
     return 0;
 }
 

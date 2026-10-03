@@ -312,6 +312,17 @@ Differences from the plan:
      its stderr and exit code 7 exactly, a program found in the current directory, `dir` through COMMAND.COM,
      three DOS commands queued at once, and `glos exit` to end the run.
 9. **SFTP.** `kernel/dos/idle.c` (safe points) and a port of OpenSSH `sftp-server.c` (ISC). 8.3 names only.
+
+   **Item 9 status (2026-10-03): done** (supervisor.md §17.2, §17.6).
+   - **The DOS server** (`kernel/dos/dos.c`) makes DOS calls from headless mode's idle stub (NEXT's answer 3),
+     with a 32 KB transfer buffer that exists only while an SFTP session does.
+   - **SFTP is GLOS's own** (`kernel/ssh/sftp.c`, protocol version 3) rather than a port of `sftp-server.c`:
+     the port's Unix half (permissions, owners, links, `stat`) would all have been replaced, and the
+     protocol half is small.
+   - **SSH channels can pace their input** (`ssh_chan_hold`/`ssh_chan_consumed`), so uploads can't outrun DOS.
+   - **Cost:** the stub's DOS call adds 124 bytes: MEM /C shows GLOS at 2,976 bytes (4,864 as the shell).
+   - **T:** `make loopa-ssh`: 1 MB up and back by `sftp` and by `scp` with the same sha256, `ls -l`, rename,
+     remove, mkdir and rmdir.
 10. **Built-in commands.** Text-mode `glos shot` (B800h + BDA → a CP437 bitmap font rendered at build time →
     PNG via stb_image_write), plus `glos exit|ps|log|kill`.
 

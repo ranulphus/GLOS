@@ -14,6 +14,7 @@
  * stack, and its waits (HLT, INT 15h 86h) block it until vm_kick(). */
 #include "glos/bootinfo.h"
 #include "agent.h"
+#include "dos.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
@@ -403,13 +404,23 @@ static void vm_env_back(void)
     kprintf("GLOS-VM env bytes=%u of %u\n", end + 1, size);
 }
 
-/* Headless: the agent's next command (kernel/dos/agent.c), or a halt until
+/* Headless: between jobs, the DOS server's calls (kernel/dos/dos.c, EAX =
+   3); then the agent's next command (kernel/dos/agent.c), or a halt until
    one comes (EAX = 2), or glos exit. INT 29h traps only while a command
    runs, for the capture. */
 static void vm_agent_next(struct trapframe *tf, u32 result)
 {
     struct agent_exec x;
-    int r = agent_vm_next(result, vm.bi->comspec, &x);
+    int r;
+    if (!agent_vm_capturing()) {
+        u32 regs = ((u32)vm.loader_cs << 4) + __builtin_offsetof(struct stub_data, dregs);
+        if (dos_vm_next(result == 0xFFFFFFFEu, regs)) {
+            tf->eax = 3;
+            return;
+        }
+        result = 0xFFFFFFFFu;
+    }
+    r = agent_vm_next(result, vm.bi->comspec, &x);
     if (vm.vme)
         cpu_int_redirect(0x29, !agent_vm_capturing());
     if (r < 0)

@@ -68,6 +68,7 @@ sd_path         db      80 dup (0)      ; EXEC: the program, ASCIIZ
 sd_tail         db      128 dup (0)     ; EXEC: length, text, CR
 sd_comspec      db      80 dup (0)      ; the shell's fallback: COMSPEC ...
 sd_fbtail       db      64 dup (0)      ; ... with this tail
+sd_dregs        dw      9 dup (0)       ; NEXT 3: AX BX CX DX SI DI DS ES in, the same and FLAGS out
 
 ; ---- the stub's own data
 _vm_state label word                    ; the kernel reads these three to resume
@@ -307,11 +308,41 @@ next:
         jne     exec
         mov     ax, GLOS_CALL_NEXT
         call    kcall                   ; EAX = 1: EXEC sd_path with sd_tail
+        cmp     eax, 3
+        je      dcall
         cmp     eax, 2                  ; 2: nothing yet (the agent): halt until an
         jne     exec                    ; interrupt or a command, then ask again
         sti
         hlt
         mov     ebx, 0FFFFFFFFh         ; nothing ran
+        jmp     next
+; NEXT 3, the DOS server: INT 21h for the kernel (SFTP), with the registers
+; in sd_dregs, which then hold what came back. Only this loop makes one, so
+; it never runs while a program does.
+dcall:  push    ds
+        push    es
+        mov     ax, cs:sd_dregs[0]
+        mov     bx, cs:sd_dregs[2]
+        mov     cx, cs:sd_dregs[4]
+        mov     dx, cs:sd_dregs[6]
+        mov     si, cs:sd_dregs[8]
+        mov     di, cs:sd_dregs[10]
+        mov     es, cs:sd_dregs[14]
+        mov     ds, cs:sd_dregs[12]
+        int     21h
+        mov     cs:sd_dregs[0], ax
+        mov     cs:sd_dregs[2], bx
+        mov     cs:sd_dregs[4], cx
+        mov     cs:sd_dregs[6], dx
+        mov     cs:sd_dregs[8], si
+        mov     cs:sd_dregs[10], di
+        mov     cs:sd_dregs[12], ds
+        mov     cs:sd_dregs[14], es
+        pushf
+        pop     cs:sd_dregs[16]
+        pop     es
+        pop     ds
+        mov     ebx, 0FFFFFFFEh         ; a DOS call ran
         jmp     next
 exec:   push    cs
         pop     ds

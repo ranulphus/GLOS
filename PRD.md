@@ -440,7 +440,7 @@ Each command is an SSH exec request. `ssh <pc> <command>` runs a DOS command lin
 
 ### 7.3 Files
 
-- SFTP is a port of OpenSSH's `sftp-server.c` onto the DOS server. That gives `scp` and `sftp`, and `sshfs` mounts on the build server.
+- SFTP (protocol version 3) runs on the DOS server. That gives `scp` and `sftp`, and `sshfs` mounts on the build server. (Planned as a port of OpenSSH's `sftp-server.c`; built in M3 as GLOS's own, since the port's Unix half would all have been replaced.)
 - Paths: `/C/TEST/FW.EXE` maps to `C:\TEST\FW.EXE`. Long names are refused in v1, because DOS gives no long-name API without LFN support.
 
 ### 7.4 Program output

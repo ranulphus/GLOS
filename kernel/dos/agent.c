@@ -33,6 +33,7 @@
  * innermost first, until the job has ended; its output is then dropped. */
 #include "glos/bootinfo.h"
 #include "agent.h"
+#include "dos.h"
 #include "io.h"
 #include "kprintf.h"
 #include "sched.h"
@@ -362,7 +363,7 @@ exec:
 int agent_vm_wake_pending(void)
 {
     u32 i;
-    if (exit_req)
+    if (exit_req || dos_vm_pending())
         return 1;
     for (i = 0; i < NJOBS; i++)
         if (jobs[i].state == J_QUEUED)

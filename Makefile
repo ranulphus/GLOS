@@ -14,6 +14,7 @@
 #   make loopa-shell    GLOS as the DOS shell: SHELL= boots, AUTOEXEC.BAT, the fallback
 #   make loopa-net      the NE2000s: DHCP, TCP echo, refused under a packet driver
 #   make loopa-ssh      ssh from the host into GLOS in Loop A (runs on the host)
+#   make loopa-m3       M3's exit: the ssh suite (agent, capture, SFTP, glos shot, VECCHK)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
@@ -28,7 +29,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-gdb check-deps clean help survey-tools
+.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-gdb check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -109,7 +110,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c \
          kernel/dbg/gdbstub.c kernel/vm/v86.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c \
          kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c kernel/dos/agent.c \
-         kernel/dos/shot.c kernel/lib/png.c
+         kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
@@ -172,6 +173,8 @@ loopa-net: all check-deps
 # On the host: ssh is not in the dev container; jobs.py starts Loop A through it.
 loopa-ssh: all dos-tests check-deps
 	$(Q)python3 tests/loopa/jobs.py ssh -j $(JOBS)
+# M3's exit: the ssh suite (its 486DX2 + NE2000 and bf6 + RTL8029 cases).
+loopa-m3: loopa-ssh
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
 loopa-gdb: all check-deps

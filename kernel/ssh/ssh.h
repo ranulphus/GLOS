@@ -61,5 +61,10 @@ uint32_t ssh_chan_write(struct ssh_chan *ch, int stream, const uint8_t *data, ui
 /* The command ended: exit-status, EOF and CLOSE once the output has gone. */
 void ssh_chan_exit(struct ssh_chan *ch, uint32_t status);
 uint32_t ssh_chan_pending(const struct ssh_chan *ch);       /* output bytes not yet sent */
+/* Input at the platform's pace: after ssh_chan_hold(), the client's window
+   reopens only as ssh_chan_consumed() reports input used, so what the
+   platform buffers never exceeds one window (256 KB). */
+void ssh_chan_hold(struct ssh_chan *ch);
+void ssh_chan_consumed(struct ssh_chan *ch, uint32_t n);
 
 #endif
