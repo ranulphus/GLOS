@@ -8,7 +8,11 @@
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
+#include "nic.h"
+#include "pci.h"
+#include "random.h"
 #include "sched.h"
+#include "sshd.h"
 #include "timer.h"
 #include "vm.h"
 
@@ -47,8 +51,17 @@ void selftest_report(void)
     kprintf("GLOS-SCHEDTEST wakes=%u late_max=%u burn=%u\n", sleeper_wakes, sleeper_late_max, burn_count);
 }
 
+void crypto_selftest(void);
+
+static void kat_thread(void *arg)
+{
+    (void)arg;
+    crypto_selftest();
+}
+
 static void selftest_start(void)
 {
+    thread_create("kat", PRIO_BULK, kat_thread, NULL);
     thread_create("burn", PRIO_BULK, burn, NULL);
     thread_create("sleeper", PRIO_URGENT, sleeper, NULL);
 }
@@ -90,7 +103,13 @@ void kmain(struct bootinfo *loader_bi)
 
     if (bi->flags & BI_F_VM) {                  /* DOS carries on in V86 mode, as a thread */
         sched_init();
+        random_init(bi);
         vm_start(bi);
+        pci_scan();
+        if (ne2k_probe() == 0) {
+            sshd_start(bi);                     /* before the net thread, which listens for it */
+            net_start(bi->flags & BI_F_SELFTEST);
+        }
         if (bi->flags & BI_F_SELFTEST)
             selftest_start();
         sched_idle();

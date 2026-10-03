@@ -80,6 +80,8 @@ void vm_int(struct trapframe *tf, u8 n, u32 ret_ip);    /* real-mode INT n throu
 void vm_idle(u32 until);                        /* block until a deliverable IRQ, a kill or tick `until` (0: none) */
 void vm_set_a20(int on);
 void vm_sync_mask(void);                        /* the physical IMR from the virtual one */
+void vm_claim_irq(int irq, void (*fn)(struct trapframe *));    /* the line becomes the kernel's */
+void vm_kmask(int irq, int masked);             /* a kernel line masked while its driver works */
 void vm_reset_req(const char *source);
 u16 vm_current_psp(void);
 
@@ -98,6 +100,7 @@ static inline void vm_wr8(u32 lin, u8 v) { *vm_ptr(lin) = v; }
 
 /* vdev.c: the trapped ports */
 void vdev_init(void);
+void vdev_hide(u16 base, u16 len);              /* ports the kernel owns: FFh to the VM, writes dropped */
 u32 vdev_in(u16 port, int width);
 void vdev_out(u16 port, u32 val, int width);
 void vdev_tick(struct trapframe *tf, u8 c);     /* every kernel tick, with RTC register C */

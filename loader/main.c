@@ -294,6 +294,24 @@ static int find_program(char **args)
     return 0;
 }
 
+/* KEYS\name beside GLOS.EXE, into buf (at most max bytes); the length read. */
+static unsigned long read_key_file(const char *argv0, const char *name, void *buf, unsigned max)
+{
+    char path[128];
+    const char *slash = strrchr(argv0, '\\');
+    size_t n = slash ? (size_t)(slash - argv0 + 1) : 0;
+    FILE *f;
+    unsigned got;
+    memcpy(path, argv0, n);
+    strcpy(path + n, "KEYS\\");
+    strcat(path, name);
+    if (!(f = fopen(path, "rb")))
+        return 0;
+    got = (unsigned)fread(buf, 1, max, f);
+    fclose(f);
+    return got;
+}
+
 /* GLOSK.BIN next to GLOS.EXE */
 static void kernel_path(char *out, const char *argv0)
 {
@@ -426,6 +444,10 @@ static int glos_main(int argc, char **argv)
     for (i = 0; i < pages; i++)
         poke32(tab_phys + 0x2000 + (0x100 + i) * 4UL, (bi.kernel_phys + ((unsigned long)i << 12)) | 3);
 
+    bi.seed_len = read_key_file(argv[0], "SEED.BIN", bi.seed, sizeof bi.seed);
+    bi.hostkey_len = read_key_file(argv[0], "HOSTKEY", bi.hostkey, sizeof bi.hostkey);
+    bi.authkeys_len = read_key_file(argv[0], "AUTHKEYS", bi.authkeys, sizeof bi.authkeys);
+    say("GLOS-BOOT step=keys seed=%lu hostkey=%lu authkeys=%lu", bi.seed_len, bi.hostkey_len, bi.authkeys_len);
     r.h.ah = 0x34; int86x(0x21, &r, &r, &sr);               /* InDOS flag */
     bi.indos = ((unsigned long)sr.es << 4) + r.x.bx;
     r.x.ax = 0x5D06; int86x(0x21, &r, &r, &sr);             /* swappable data area */

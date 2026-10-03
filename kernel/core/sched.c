@@ -72,6 +72,29 @@ static struct thread *pick(void)
     return NULL;
 }
 
+static void unsleep(struct thread *t)
+{
+    struct thread **pp;
+    for (pp = &sleepers; *pp; pp = &(*pp)->snext)
+        if (*pp == t) {
+            *pp = t->snext;
+            break;
+        }
+}
+
+static void unwait(struct thread *t)
+{
+    struct thread **pp;
+    if (!t->waiting_on)
+        return;
+    for (pp = &t->waiting_on->head; *pp; pp = &(*pp)->next)
+        if (*pp == t) {
+            *pp = t->next;
+            break;
+        }
+    t->waiting_on = NULL;
+}
+
 /* A woken thread that outranks the running one gets the CPU at the next safe
    point; so does the system VM over bulk work (supervisor.md §7). */
 static void wake(struct thread *t)
@@ -128,6 +151,9 @@ struct thread *thread_create(const char *name, int prio, void (*fn)(void *), voi
     t->fn = fn;
     t->arg = arg;
     t->ticks = 0;
+    t->snext = NULL;
+    t->waiting_on = NULL;
+    t->timed_out = 0;
     sp = (u32 *)t->stack_top;
     *--sp = 0;                                  /* thread_start never returns */
     *--sp = (u32)thread_start;                  /* switch_to's RET */
@@ -196,8 +222,13 @@ void sched_idle(void)
 
 void thread_block(struct waitq *q)
 {
+    u32 f;
+    __asm__ volatile("pushfl; popl %0" : "=r"(f));
+    if (f & EFLAGS_IF)
+        panic("thread_block-with-interrupts-on", NULL);
     current->state = T_BLOCKED;
     current->next = q->head;
+    current->waiting_on = q;
     q->head = current;
     schedule();
 }
@@ -205,11 +236,17 @@ void thread_block(struct waitq *q)
 int thread_wake(struct waitq *q)
 {
     struct thread *t = q->head, *n;
+    u32 f;
+    __asm__ volatile("pushfl; popl %0" : "=r"(f));
+    if (f & EFLAGS_IF)                          /* the lists would race with IRQs that wake threads */
+        panic("thread_wake-with-interrupts-on", NULL);
     q->head = NULL;
     if (!t)
         return 0;
     for (; t; t = n) {
         n = t->next;
+        t->waiting_on = NULL;
+        unsleep(t);
         wake(t);
     }
     return 1;
@@ -234,11 +271,31 @@ void thread_sleep_until(u32 tick)
     if ((s32)(tick - timer_ticks()) > 0) {
         current->wake_at = tick;
         current->state = T_BLOCKED;
-        current->next = sleepers;
+        current->snext = sleepers;
         sleepers = current;
         schedule();
     }
     irq_restore(f);
+}
+
+int thread_wait(struct waitq *q, u32 tick)
+{
+    u32 f = irq_save();
+    int woken = 1;
+    if (!tick || (s32)(tick - timer_ticks()) > 0) {
+        current->timed_out = 0;
+        if (tick) {
+            current->wake_at = tick;
+            current->snext = sleepers;
+            sleepers = current;
+        }
+        thread_block(q);
+        woken = !current->timed_out;
+    } else {
+        woken = 0;
+    }
+    irq_restore(f);
+    return woken;
 }
 
 void thread_yield(void)
@@ -283,10 +340,14 @@ void sched_tick(void)
     }
     while ((t = *pp)) {
         if ((s32)(now - t->wake_at) >= 0) {
-            *pp = t->next;
+            *pp = t->snext;
+            if (t->waiting_on) {
+                unwait(t);
+                t->timed_out = 1;
+            }
             wake(t);
         } else {
-            pp = &t->next;
+            pp = &t->snext;
         }
     }
     if (current != &idle_thread && current->slice && --current->slice == 0)
@@ -304,6 +365,15 @@ void sched_trap_exit(struct trapframe *tf)
         return;
     if ((tf->eflags & EFLAGS_VM) || (tf->eflags & EFLAGS_IF))
         schedule();
+}
+
+/* For the #DF report: each thread's stack, saved ESP and canary. */
+void sched_panic_report(void)
+{
+    struct thread *t;
+    for (t = all_threads; t; t = t->all)
+        kprintf("GLOS-PANIC thread=%s cur=%u state=%u stack=%p top=%p esp=%p canary=%s\n", t->name, t == current,
+                t->state, (u32)t->stack, t->stack_top, t->esp, *(u32 *)t->stack == CANARY ? "ok" : "bad");
 }
 
 void sched_report(void)

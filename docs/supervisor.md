@@ -242,6 +242,11 @@ One trapframe layout for every entry:
 
 A `mode` field (V86 / PM16 / PM32 / ring 0) is derived from EFLAGS.VM and CS's descriptor.
 
+The common entry clears DF before any C code runs: a gate leaves DF as the interrupted code had it, and DOS
+may be part-way through an `STD; REP MOVSB`. The kernel's string instructions (GCC's inlined copies, the hash
+functions' state copies) would otherwise run backwards, and so would any thread the scheduler resumes from that
+path. The IRET restores the interrupted code's DF.
+
 ### 6.2 Fixup table
 
 - Kernel instructions that may fault on client-supplied data have entries in an exception fixup table: copies
@@ -259,7 +264,7 @@ A `mode` field (V86 / PM16 / PM32 / ring 0) is derived from EFLAGS.VM and CS's d
 
 ## 7. Threads and scheduling
 
-- **Threads** are kernel objects with their own kernel stack (8 KB) and a saved trapframe. The **system VM**
+- **Threads** are kernel objects with their own kernel stack (16 KB since M3 item 6: the SSH thread's crypto reached 5.4 KB, and IRQs nest on the current stack) and a saved trapframe. The **system VM**
   is one thread. Each DPMI client thread runs inside a context (§12). Supervisor tasks are kernel threads.
 - **Preemption:** kernel code runs with a preempt count. Interrupt top halves queue deferred work, which runs
   on the way out of the outermost interrupt. Trap paths (V86 decoding, INT 31h) are never preempted midway.
@@ -423,7 +428,8 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 | 80h, E80h | Passed through | Passed through | POST code and the 86Box unit tester (the harness) |
 | 3F8h–3FFh (COM1) | Passed through; output mirrored to the log ring | Passed through | Programs reprogram the UART (Xash, PrBoom, Fifth Wheel [census]) |
 | 2F8h–2FFh (COM2) | Owned by the gdb stub when `/GDB` is given, otherwise passed through | Same | |
-| GLOS-owned NIC | Trapped; reads return FFh | Trapped | From M3 |
+| GLOS-owned NIC | Trapped; reads return FFh, writes dropped; its PCI function reads as absent | Trapped | M3: an NE2000 (the RTL8029 on PCI, or ISA at 300h, 280h, 320h, 340h, 360h). Its IRQ is the kernel's: the VM never sees it. Refused (`GLOS-NET refuse`) under a packet driver or on a PCI IRQ line another function shares. |
+| 3F8h (COM1 data) | Trapped for output, passed through | Same | M3: tells the kernel when a program is part-way through a line, so the kernel's lines wait for it (§18) |
 | VGA 3B0h–3DFh, SB, GUS, DMA 00h–0Fh/80h–8Fh/C0h–DFh, 201h, F0h | Passed through | Passed through | Live 8237 count reads, GUS GF1/CODEC, UniVBE chipset probes and the IRQ13 acknowledge at F0h all need real hardware [census] |
 
 **M2 status:**
@@ -699,10 +705,34 @@ DOS is entered through the INT 21h entry captured at load.
   swallowed (CWSDPMI hooks real-mode INT 23h with IRET).
 - For GLOS apps (M6), INT 24h becomes a dialog.
 
+### 17.6 Keys and the SSH server (M3)
+
+- **Files:** `KEYS\` beside `GLOS.EXE` holds `SEED.BIN` (entropy carried across boots), `HOSTKEY` (an OpenSSH
+  ed25519 private key without a passphrase) and `AUTHKEYS` (`authorized_keys` lines; ed25519 only). The loader
+  reads them into bootinfo; the kernel keeps its own copy and GLOS.EXE's is freed with the rest of its data.
+  Without `HOSTKEY` there is no SSH server (`GLOS-SSH off`). Loop A uses the public test keys in `tests/keys/`.
+- **Randomness** (`kernel/core/random.c`): every IRQ adds its timing (the TSC where there is one) to a small
+  buffer; requests fold it and a counter into a SHA-512 pool, which keys ChaCha20 with fast key erasure. The
+  seed file is mixed in at start; writing a fresh one back waits for the DOS server (item 9).
+- **Crypto:** TinySSH's (CC0) X25519, Ed25519, SHA-2, ChaCha20 and Poly1305 in `third_party/tinyssh/`.
+  Ed25519 signatures are hedged (randomised), so known-answer tests check RFC 8032's signatures by
+  verification. `/SELFTEST` runs RFC 7748, 8032 and 8439 vectors in a bulk thread (`GLOS-CRYPTO`).
+- **Protocol** (`kernel/ssh/ssh.c`, also built natively for `tests/host/sshd`): curve25519-sha256 with strict
+  KEX, ssh-ed25519, chacha20-poly1305@openssh.com, re-keying, public-key authentication for user `glos`,
+  `session` channels with `exec` and window flow control. Commands are built-in `glos …` ones until the agent
+  shell (§17.3) runs DOS commands.
+- **Threads:** lwIP's TCP runs in the net thread (urgent); the protocol runs in the ssh thread (bulk: a key
+  exchange takes hundreds of milliseconds on a 486). Each connection has two single-writer rings between them,
+  so neither waits on a lock. Four connections at once; a fifth is refused (`GLOS-SSH refuse reason=busy`).
+- **Limits:** 60 s to log in; 20 authentication attempts per connection.
+
 ## 18. Logging
 
 - Lines on COM1 have the form `GLOS-<TAG> key=value …`, one line per event, written synchronously so the last
   line survives a hang.
+- **Whole lines only.** Programs in the system VM write to COM1 too (Loop A's HX tools, GLOS.EXE itself). While
+  one is part-way through a line, the kernel holds its own lines and writes them when that line ends, or after
+  100 ticks at the latest (M3). A panic is written at once.
 - **No periodic output, ever:** Loop A detects hangs by serial silence.
 - Tags:
 
@@ -715,16 +745,28 @@ DOS is entered through the INT 21h entry captured at load.
 | WARN | e.g. `vif-stuck` |
 | VM | The system VM: `run=`, `dos indos= sda= psp=`, `resident psp= stub= freed=`, `leave code= ticks= gp= int= irq= spurious=` |
 | SCHED | At leave: context switches, contended ticks per class, and each thread's ticks |
+| PCI | The number of functions found; each one GLOS claims |
+| NET | The card GLOS took (or why not), DHCP's address, and counters at leave |
+| LWIP | lwIP's own diagnostics and assertions |
+| RANDOM | At start: the seed's length and whether there is a TSC |
+| CRYPTO | `/SELFTEST`: the known-answer tests and two timings |
+| SSH | `listen`, `off`, `connect`, `client version=`, `kex done strict=`, `auth ok`, `exec=`, `close why=`, `refuse` |
 | KILL | A kill (§9.6) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
 | DPMI-UNIMPL | An unimplemented call |
-| PANIC | A panic: registers, stack, last log lines |
+| PANIC | A panic: registers and CR2. A double fault adds the interrupted context from the TSS, ESP0 and its page-table entry, any IDT gate or GDT descriptor that changed since start-up, and a `thread=` line per thread (stack, saved ESP, canary) |
 
 ## 19. Debugging
 
 - **Kernel:** a gdb remote stub on COM2 (`/GDB`) supports `g G m M c s Z0` and hardware breakpoints in
   DR0–DR3. Loop A routes COM2 through a FIFO pair to TCP (M0's `--com2`).
 - **Clients (M5):** a stub per process, reached through an SSH `direct-tcpip` forward.
+- **Loop A hangs:** `run.py`'s `--idle` and `--timeout` count host seconds, but guest time slows when the host is
+  busy (2026-10-03: a Pentium II profile at under half speed). Before debugging a HANG, compare the guest's time
+  (the BIOS tick at 46Ch, `GLOS-VM leave ticks=`) with the run's `elapsed_s`. Tests end guest waits on a host
+  signal (a serial marker that makes the harness type a key), not on a fixed `WAITSEC`.
+- **86Box monitor peeks** of kernel memory must read physical addresses: a linear read goes through the MMU at
+  the guest's CPL and, from V86 code, leaves a page fault for the guest to take.
 - **Crash reports:**
   - registers, the faulting instruction bytes, the stack and the context's module map (EXE and base
     addresses);
@@ -765,3 +807,4 @@ DOS is entered through the INT 21h entry captured at load.
 12. No periodic COM1 output.
 13. IOPL never changes within a session.
 14. Every client-visible vector number matches what 0400h reported.
+15. Trap entry clears DF; no kernel C code runs with DF set.

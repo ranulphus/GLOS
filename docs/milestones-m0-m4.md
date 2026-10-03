@@ -259,6 +259,14 @@ Differences from the plan:
 2. Wait queues, timers and mutexes.
 3. **lwIP.** `third_party/lwip` (BSD-3), `NO_SYS=1`, DHCP, the port in `kernel/net/`, and `THIRD_PARTY.md`.
    T: `tests/host/net_loop.c`.
+
+   **Items 1-3 status (2026-10-02): done.** `kernel/drv/pci.c`, `kernel/drv/ne2k.c` (the RTL8029, or ISA with its
+   IRQ found from the PICs' request registers), timed waits in the scheduler (`thread_wait`), lwIP 2.2.0
+   vendored with its signature checked, and the net thread (`kernel/net/net.c`): the card's IRQ wakes it, and
+   it sleeps until lwIP's next timer. `make loopa-net` (bf6 and 486DX2 with each card, 486DX4 with the
+   RTL8029): DHCP gives 10.0.2.15, a line from the host comes back from the `/SELFTEST` echo service, and
+   the Crynwr packet driver keeps GLOS off the ISA card. Instead of `net_loop.c`, Loop A's SLiRP is the peer.
+   Kernel lines now wait for a program's half-written COM1 line (supervisor.md §18).
 4. **Keys.** Entropy pool and seed file; the fixed Loop A test host key and client key in `tests/keys/`.
 5. **Crypto.** TinySSH crypto (CC0) in `third_party/tinyssh/`, sntrup761 left out. T: known-answer tests from
    RFC 7748, RFC 8032 and RFC 8439.
@@ -269,6 +277,24 @@ Differences from the plan:
    - About 90 KB per connection.
    - T: `tests/host/sshd` built natively on sockets and driven by OpenSSH `ssh`/`sftp` with concurrent
      sessions, before any Loop A run.
+
+   **Items 4-6 status (2026-10-03): done** (supervisor.md §17.6).
+   - **Keys:** the loader reads `KEYS\SEED.BIN`, `HOSTKEY` and `AUTHKEYS`; `kernel/core/random.c` is the
+     SHA-512 pool with ChaCha20 fast key erasure, fed by IRQ timing.
+   - **Crypto:** TinySSH's crypto vendored. `make host-test` runs RFC 7748, 8032 and 8439 vectors (extracted
+     from the RFC texts), and so does `/SELFTEST` in the kernel.
+   - **SSH:** `kernel/ssh/` (protocol, buffers, keys, the kernel glue). `make ssh-test` passes 12 checks against
+     OpenSSH 9.6 on the host. `make loopa-ssh` passes on bf6 with each card and on 486DX2 with the ISA card:
+     `glos ver`, `glos echo`, exit code 127 for an unknown command, three sessions at once, a stranger's key
+     refused, and strict KEX.
+   - **Found on the way:** the trap entry left DF as the interrupted code had it, so kernel string instructions
+     could run backwards after an IRQ from DOS code mid `STD`; it now clears it. Thread stacks went to 16 KB.
+     The double-fault report gained the TSS state, ESP0's page and the threads.
+   - **A false hang:** the bf6 SSH runs "hung" after the last connection. The kernel was fine. The guest's
+     `WAITSEC 240` ran at under half speed on a loaded host and outlasted run.py's 300 s wall-clock idle
+     limit. The suite now ends the guest when the host's last command shows on COM1 (supervisor.md §19).
+     A second harness fault: a rerun polled the previous run's `serial.log` and connected before 86Box was
+     up ("Connection refused"); `jobs.py` now removes it first.
 7. **Agent shell** in the resident stub (supervisor.md §17.3).
 8. **Output capture** `kernel/dos/capture.c`.
 9. **SFTP.** `kernel/dos/idle.c` (safe points) and a port of OpenSSH `sftp-server.c` (ISC). 8.3 names only.

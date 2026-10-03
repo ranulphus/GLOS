@@ -9,6 +9,8 @@ through MGA-Glide's harness:
   jobs.py sched [--profile P ...] [--boot B ...] [-j N]
   jobs.py mem [--profile P ...] [--boot B ...] [-j N]
   jobs.py shell [--profile P ...] [-j N]      (MGA_GLIDE must have the glosshell boots)
+  jobs.py net [-j N]
+  jobs.py ssh [-j N]                          (on the host: it needs ssh, and runs Loop A through tools/dev)
 
 m1: on each machine profile (bf6, 486dx2, 486dx4) and boot (default: no
 XMS driver, raw mode; himemx: XMS mode, DOS=HIGH), RUN.BAT does
@@ -43,6 +45,21 @@ copies that environment back and runs the console from GLOS.CFG
 MEM /C. Then without GLOSK.BIN: GLOS refuses and hands over to
 COMMAND.COM /P, which runs AUTOEXEC.BAT and so the job.
 
+net: GLOS /SELFTEST with each Loop A NE2000 (M3 items 1-3): the card is
+found and claimed, DHCP gives lwIP SLiRP's 10.0.2.15, a line sent from the
+host to the echo service (port 7, forwarded) comes back, and DOS is clean
+afterwards; with the Crynwr packet driver loaded, GLOS leaves the card alone
+(GLOS-NET refuse reason=packet-driver).
+
+ssh: GLOS with the test keys (tests/keys) on bf6 + RTL8029 and 486DX2 + ISA
+NE2000; from the host, through SLiRP's forward of port 22, OpenSSH's ssh runs
+built-in commands (output and exit codes exact), three at once, and a
+stranger's key is refused. The guest waits in KEYWAIT until the host's last
+command ("glos echo ssh-done") shows on COM1 and the harness types Enter: a
+fixed wait in guest time lost to run.py's wall-clock idle limit whenever
+86Box ran slower than real time. The first connection's time is logged, not
+judged (PRD D28).
+
 hostile: HOSRUN.BAT runs every tests/dos/hostile.c case under one "GLOS /RUN
 COMMAND /C"; the harness types Ctrl-Alt-Shift-Esc after each one's "armed"
 line (and Ctrl-Alt-Del first for CAD). Each must end in GLOS-KILL (PRIV by
@@ -64,12 +81,27 @@ BOOTS = ["default", "himemx"]
 EXPECT, TOL = 1012, 0.02
 
 
-def run(name, args):
+IN_CONTAINER = os.path.exists("/.dockerenv")
+
+
+def runpy_cmd():
+    """run.py, directly in the dev container, else through it (on the host network)."""
+    if IN_CONTAINER:
+        return [sys.executable, os.path.join(MGA, "tools/loopa/run.py")]
+    return [os.path.join(MGA, "tools/dev"), "python3", os.path.join(MGA, "tools/loopa/run.py")]
+
+
+def run(name, args, background=False):
     out = os.path.join(ROOT, "out", name)
     os.makedirs(out, exist_ok=True)
-    subprocess.run([sys.executable, os.path.join(MGA, "tools/loopa/run.py"), "--name", name, "--out", out,
-                    "--idle", "60", "--boot-grace", "60", "--timeout", "300"] + args,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ROOT)
+    for stale in ("serial.log", "status", "result.json"):   # a background run's caller polls these
+        if os.path.exists(os.path.join(out, stale)):
+            os.remove(os.path.join(out, stale))
+    env = dict(os.environ, MGA_DOCKER_NETWORK="host") if not IN_CONTAINER else None
+    cmd = runpy_cmd() + ["--name", name, "--out", out, "--idle", "60", "--boot-grace", "60", "--timeout", "300"] + args
+    if background:
+        return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ROOT, env=env)
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ROOT, env=env)
     status = open(os.path.join(out, "status")).read().strip() if os.path.exists(os.path.join(out, "status")) else "?"
     serial = open(os.path.join(out, "serial.log"), "rb").read().decode("latin-1").replace("\r", "") \
         if os.path.exists(os.path.join(out, "serial.log")) else ""
@@ -325,6 +357,108 @@ def shell(profile, boot):
                                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+NET_CASES = [("bf6", "ne2kpci"), ("bf6", "ne2k"), ("486dx2", "ne2k"), ("486dx2", "ne2kpci"), ("486dx4", "ne2kpci")]
+
+
+def net(profile, card):
+    tag = "%s-%s" % (profile, card)
+    line = "hello-glos-" + tag
+    st, serial = run("net-" + tag, ["--machine", profile, "--net", card, "--net-fwd", "7",
+                                    "--tcp-send", "GLOS-NET dhcp|net:7|" + line] + GLOS_FILES + [
+        "--cmd", "SERSAY HX-START net", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /SELFTEST /RUN WAITSEC 12",
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
+    want = "rtl8029" if card == "ne2kpci" else "ne2000"
+    echo = os.path.join(ROOT, "out", "net-" + tag, "tcp-0.txt")
+    echo = open(echo, "rb").read().decode("latin-1") if os.path.exists(echo) else ""
+    checks = {
+        "status": st == "PASS" and "GLOS-EXIT code=0" in serial,
+        "card": "GLOS-NET card=%s base=" % want in serial,
+        "dhcp": "GLOS-NET dhcp ip=10.0.2.15 gw=10.0.2.2 mask=255.255.255.0" in serial,
+        "echo": line in echo,
+        "clean": "GLOS-WARN" not in serial and "GLOS-PANIC" not in serial and "HX-VECCHK ok" in serial,
+    }
+    if card == "ne2k":                          # the Crynwr driver owns the ISA card: GLOS refuses it
+        st2, s2 = run("netpd-" + tag, ["--machine", profile, "--net", card, "--net-dos"] + GLOS_FILES + [
+            "--cmd", "SERSAY HX-START netpd", "--cmd", "NE2000 0x60 10 0x300",
+            "--cmd", "C:\\TEST\\GLOS.EXE /SELFTEST /RUN WAITSEC 1", "--cmd", "SERSAY HX-DONE 0"])
+        checks["pktdrv"] = st2 == "PASS" and "GLOS-NET refuse reason=packet-driver int=60" in s2 \
+            and "GLOS-EXIT code=0" in s2 and "GLOS-NET card=" not in s2
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("net-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+# SSH_ONE=1 runs one case (SSH_PROFILE, SSH_CARD); SSH_TAG suffixes its name; SSH_EXTRA adds run.py options.
+SSH_CASES = ([(os.environ.get("SSH_PROFILE", "bf6"), os.environ.get("SSH_CARD", "ne2kpci"))] if os.environ.get("SSH_ONE")
+             else [("bf6", "ne2kpci"), ("486dx2", "ne2k"), ("bf6", "ne2k")])
+KEYS = ["--file", "tests/keys/hostkey=/TEST/KEYS/HOSTKEY", "--file", "tests/keys/AUTHKEYS=/TEST/KEYS/AUTHKEYS"]
+
+
+def ssh_case(profile, card):
+    import socket
+    import tempfile
+    import time
+    tag = "%s-%s%s" % (profile, card, os.environ.get("SSH_TAG", ""))
+    s = socket.socket()
+    s.bind(("0.0.0.0", 0))
+    port = s.getsockname()[1]
+    s.close()
+    proc = run("ssh-" + tag, os.environ.get("SSH_EXTRA", "").split() + ["--machine", profile, "--net", card, "--net-fwd", "%d:22" % port, "--timeout", "600",
+                              "--idle", "300"] + GLOS_FILES + KEYS + [
+        "--cmd", "SERSAY HX-START ssh", "--cmd", "C:\\TEST\\GLOS.EXE /RUN KEYWAIT 900", "--cmd", "SERSAY HX-DONE 0",
+        "--keys", "@ssh-done,1:0x1c"],
+        background=True)
+    serial = os.path.join(ROOT, "out", "ssh-" + tag, "serial.log")
+    tmp = tempfile.mkdtemp()
+    key, known = os.path.join(tmp, "client"), os.path.join(tmp, "known")
+    open(key, "w").write(open(os.path.join(ROOT, "tests/keys/client")).read())
+    os.chmod(key, 0o600)
+    open(known, "w").write("[127.0.0.1]:%d %s" % (port, open(os.path.join(ROOT, "tests/keys/hostkey.pub")).read()))
+    base = ["ssh", "-p", str(port), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+            "-o", "UserKnownHostsFile=" + known, "-o", "ConnectTimeout=60", "-o", "LogLevel=ERROR"]
+    opts = base + ["-i", key]
+
+    def ssh(cmd, keyfile=None):
+        p = subprocess.run((base + ["-i", keyfile] if keyfile else opts) + ["glos@127.0.0.1", cmd],
+                           capture_output=True, timeout=180)
+        return p.returncode, p.stdout.decode("latin-1"), p.stderr.decode("latin-1")
+    checks, info = {}, ""
+    t0 = time.time()
+    while time.time() - t0 < 240:
+        text = open(serial, "rb").read().decode("latin-1") if os.path.exists(serial) else ""
+        if "GLOS-NET dhcp" in text and "GLOS-SSH listen" in text:
+            break
+        time.sleep(1)
+    try:
+        t1 = time.time()
+        rc, out, _ = ssh("glos ver")
+        info = " first=%.1fs" % (time.time() - t1)
+        checks["ver"] = rc == 0 and out.startswith("GLOS M3")
+        rc, out, _ = ssh("glos echo hello from " + tag)
+        checks["echo"] = rc == 0 and out == "hello from %s\n" % tag
+        rc, out, err = ssh("nosuch")
+        checks["unknown-127"] = rc == 127 and "no such command" in err
+        ps = [subprocess.Popen(opts + ["glos@127.0.0.1", "glos echo par%d" % i], stdout=subprocess.PIPE)
+              for i in range(3)]
+        outs = [p.communicate(timeout=300)[0].decode() for p in ps]
+        checks["three-at-once"] = sorted(outs) == ["par0\n", "par1\n", "par2\n"]
+        stranger = os.path.join(tmp, "stranger")
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", stranger], check=True)
+        rc, _, _ = ssh("glos ver", keyfile=stranger)
+        checks["stranger-refused"] = rc == 255
+        ssh("glos echo ssh-done")               # its exec line lets KEYWAIT (and GLOS) end
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    proc.wait()
+    text = open(serial, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(serial) else ""
+    checks["strict-kex"] = "GLOS-SSH kex done strict=1" in text
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-EXIT code=0" in text
+    checks["key-ended"] = "HX-KEY scan=1c" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def matrix(fn, combos, jobs):
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
         results = list(ex.map(lambda pb: fn(*pb), combos))
@@ -335,7 +469,7 @@ def matrix(fn, combos, jobs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell"])
+    ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -349,6 +483,10 @@ def main():
             if r[2]:
                 print("    %s-%s XMSTEST: %s" % (p, b, "; ".join(l[11:] for l in r[2])))
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "ssh":
+        return 0 if all(r[1] for r in matrix(ssh_case, SSH_CASES, a.jobs)) else 1
+    if a.suite == "net":
+        return 0 if all(r[1] for r in matrix(net, NET_CASES, a.jobs)) else 1
     if a.suite == "shell":
         return 0 if all(r[1] for r in matrix(shell, combos, a.jobs)) else 1
     if a.suite == "mem":

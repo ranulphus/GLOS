@@ -28,13 +28,16 @@ stub_base:
 
 /* struct trapframe (arch.h), low to high: pushal (edi..eax), gs, fs, es, ds,
    vector, error code, then what the CPU pushed. trap_dispatch may edit it;
-   the IRET resumes whatever it says. */
+   the IRET resumes whatever it says. A gate leaves DF as the interrupted
+   code had it (DOS may be mid STD; REP MOVSB), and C code, and any thread
+   the scheduler resumes from here, needs it clear: the IRET restores it. */
 trap_common:
         pushl   %ds
         pushl   %es
         pushl   %fs
         pushl   %gs
         pushal
+        cld
         movw    $0x10, %ax
         movw    %ax, %ds
         movw    %ax, %es

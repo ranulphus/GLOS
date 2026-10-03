@@ -16,12 +16,16 @@
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
+#include "nic.h"
 #include "sched.h"
 #include "timer.h"
 #include "v86dec.h"
 #include "vm.h"
 
-#define KERNEL_LINES ((1u << 1) | (1u << 2) | (1u << 8) | (1u << 12))  /* keyboard, cascade, clock, AUX */
+/* The kernel's lines: keyboard, cascade, clock, AUX, and any it claims later
+   (the network card); kernel_masked holds those a driver has masked. */
+static u16 kernel_lines = (1u << 1) | (1u << 2) | (1u << 8) | (1u << 12);
+static u16 kernel_masked;
 
 struct vm vm;
 static struct trapframe start_frame;
@@ -125,11 +129,29 @@ void vm_trap_entry(struct trapframe *tf)
 
 void vm_sync_mask(void)
 {
-    u16 m = (u16)((vpic_imr(&vm.pic) | vm.pic.inflight) & ~KERNEL_LINES);
+    u16 m = (u16)(((vpic_imr(&vm.pic) | vm.pic.inflight) & ~kernel_lines) | (kernel_masked & kernel_lines));
     if (m != vm.phys_mask) {
         vm.phys_mask = m;
         pic_set_mask(m);
     }
+}
+
+/* A line becomes the kernel's: the VM never sees it again (supervisor.md §10). */
+void vm_claim_irq(int irq, void (*fn)(struct trapframe *))
+{
+    kernel_lines |= (u16)(1u << irq);
+    set_irq_handler(irq, fn);
+    vm_sync_mask();
+}
+
+/* A kernel driver masks its line while its thread works (interrupts off). */
+void vm_kmask(int irq, int masked)
+{
+    if (masked)
+        kernel_masked |= (u16)(1u << irq);
+    else
+        kernel_masked &= (u16)~(1u << irq);
+    vm_sync_mask();
 }
 
 /* A physical IRQ for the VM: masked until the program's EOI (so a level-
@@ -280,6 +302,7 @@ static void vm_leave(u32 code)
     if (vm.vme)
         cpu_set_cr4(0, 1);
     sched_report();
+    net_report();
     if (vm.bi->flags & BI_F_SELFTEST)
         selftest_report();
     kprintf("GLOS-VM leave code=%u ticks=%u gp=%u int=%u irq=%u spurious=%u\n", code, timer_ticks(), vm.n_gp,
@@ -648,7 +671,7 @@ void vm_start(struct bootinfo *bi)
 
     vpic_reset(&vm.pic, 0x08, 0x70, (u16)bi->pic_mask);
     for (i = 0; i < 16; i++)
-        if (!(KERNEL_LINES & (1u << i)))
+        if (!(kernel_lines & (1u << i)))
             set_irq_handler((int)i, vm_irq_line);
     set_irq_handler(1, vkbc_irq);
     set_irq_handler(12, vkbc_irq);

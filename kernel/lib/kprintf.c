@@ -1,4 +1,8 @@
-/* A small printf for the kernel and its string helpers. */
+/* A small printf for the kernel and its string helpers. Lines go to COM1
+ * whole: while a program in the system VM is part-way through a line of
+ * its own there (vm/vdev.c traps the data port and says so), the kernel's
+ * output is held and written when that line ends, or at the latest 100
+ * ticks on (supervisor.md §18). A panic writes at once. */
 #include "io.h"
 #include "kprintf.h"
 
@@ -14,6 +18,30 @@ int memcmp(const void *a, const void *b, size_t n)
 size_t strlen(const char *s) { size_t n = 0; while (s[n]) n++; return n; }
 
 struct out { char *buf; size_t n, len; };
+
+int (*kprintf_hold)(void);
+static char held[4096];
+static u32 held_len, direct;
+
+static void raw_out(const char *s, u32 n)
+{
+    for (; n; n--, s++) {
+        if (*s == '\n') serial_putc(COM1, '\r');
+        serial_putc(COM1, *s);
+    }
+}
+
+static u32 irq_save(void)
+{
+    u32 f;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(f) :: "memory");
+    return f;
+}
+
+static void irq_restore(u32 f)
+{
+    if (f & 0x200) sti();
+}
 
 static void emit(struct out *o, char c)
 {
@@ -61,11 +89,28 @@ static void vfmt(struct out *o, const char *f, __builtin_va_list ap)
 
 void kprintf(const char *fmt, ...)
 {
-    struct out o = { NULL, 0, 0 };
     __builtin_va_list ap;
     __builtin_va_start(ap, fmt);
-    vfmt(&o, fmt, ap);
+    kvprintf(fmt, ap);
     __builtin_va_end(ap);
+}
+
+/* Held lines out, unless a program is still mid-line (force: regardless). */
+void kprintf_flush(int force)
+{
+    u32 f = irq_save();
+    if (held_len && (force || !kprintf_hold || !kprintf_hold())) {
+        raw_out(held, held_len);
+        held_len = 0;
+    }
+    irq_restore(f);
+}
+
+/* From now on everything is written at once (a panic). */
+void kprintf_direct(void)
+{
+    kprintf_flush(1);
+    direct = 1;
 }
 
 int ksnprintf(char *buf, size_t n, const char *fmt, ...)
@@ -75,6 +120,33 @@ int ksnprintf(char *buf, size_t n, const char *fmt, ...)
     __builtin_va_start(ap, fmt);
     vfmt(&o, fmt, ap);
     __builtin_va_end(ap);
+    if (n) buf[o.len < n ? o.len : n - 1] = 0;
+    return (int)o.len;
+}
+
+void kvprintf(const char *fmt, __builtin_va_list ap)
+{
+    char line[256];
+    struct out o = { line, sizeof line, 0 };
+    u32 n, f;
+    vfmt(&o, fmt, ap);
+    n = o.len < sizeof line ? o.len : sizeof line - 1;
+    f = irq_save();
+    if (!direct && (held_len || (kprintf_hold && kprintf_hold()))) {
+        if (held_len + n <= sizeof held) {
+            memcpy(held + held_len, line, n);
+            held_len += n;
+        }
+    } else {
+        raw_out(line, n);
+    }
+    irq_restore(f);
+}
+
+int kvsnprintf(char *buf, size_t n, const char *fmt, __builtin_va_list ap)
+{
+    struct out o = { buf, n, 0 };
+    vfmt(&o, fmt, ap);
     if (n) buf[o.len < n ? o.len : n - 1] = 0;
     return (int)o.len;
 }

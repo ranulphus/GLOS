@@ -4,6 +4,7 @@
 #   make loopa [CARD=g450]   run GLOS.EXE in 86Box through MGA-Glide's Loop A: out/loopa-CARD/
 #   make check-deps     MGA-Glide at or after deps.mk's pin
 #   make host-test      kernel code's host tests (in the dev container)
+#   make ssh-test       the SSH layer on host sockets against OpenSSH's ssh (M3)
 #   make loopa-m1       M1's exit matrix in Loop A (tests/loopa/jobs.py)
 #   make loopa-gdb      gdb on the kernel's COM2 stub in Loop A (tools/gdb-loopa.sh)
 #   make loopa-m2       M2's exit: HX tools with and without GLOS (JOBS=3 at once)
@@ -11,6 +12,8 @@
 #   make loopa-sched    the scheduler's self-test threads beside the VM (M3)
 #   make loopa-mem      conventional memory under GLOS against plain DOS (PRD P7)
 #   make loopa-shell    GLOS as the DOS shell: SHELL= boots, AUTOEXEC.BAT, the fallback
+#   make loopa-net      the NE2000s: DHCP, TCP echo, refused under a packet driver
+#   make loopa-ssh      ssh from the host into GLOS in Loop A (runs on the host)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
@@ -25,7 +28,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all dos-tests kernel host-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-gdb check-deps clean help survey-tools
+.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-gdb check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -37,6 +40,9 @@ check-deps:
 
 # ---- Host tests: kernel code built 32-bit for Linux (in the dev container,
 # which has the 32-bit C library) --------------------------------------------
+# TinySSH's crypto (third_party/tinyssh; THIRD_PARTY.md): the SSH algorithms only.
+TINYSSH_SRCS := $(filter-out %_lib25519.c %_lib1305.c,$(wildcard third_party/tinyssh/*.c)) \
+                $(foreach t,int8 int16 int32 int64 uint8 uint16 uint32 uint64,third_party/tinyssh/cryptoint/$(t)_optblocker.c)
 HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:kernel/vm/v86dec.c \
               vpic_test:kernel/vm/vpic.c
 host-test:
@@ -46,6 +52,19 @@ host-test-run:
 	@set -e; for t in $(HOST_TESTS); do n=$${t%%:*}; src=$${t#*:}; \
 	  $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/$$n tests/host/$$n.c $$src; \
 	  build/host/$$n; done
+	@$(HOST_CC) -m32 -O2 -g -Wall -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -o build/host/crypto_kat \
+	  tests/host/crypto_kat.c $(TINYSSH_SRCS) && build/host/crypto_kat
+
+# The SSH layer (kernel/ssh) on host sockets against OpenSSH's client
+# (tests/host/sshd_test.sh): native, on the host, which has ssh.
+SSH_SRCS := kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c
+build/host/sshd: tests/host/sshd.c $(SSH_SRCS) $(wildcard kernel/ssh/*.h) $(TINYSSH_SRCS)
+	@mkdir -p build/host
+	$(Q)echo "  CC      $@"
+	$(Q)gcc -O2 -g -Wall -Wextra -Ikernel/ssh -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -o $@ \
+	  tests/host/sshd.c $(SSH_SRCS) $(TINYSSH_SRCS)
+ssh-test: build/host/sshd
+	$(Q)tests/host/sshd_test.sh build/host/sshd
 
 # ---- GLOS.EXE: the 16-bit loader (Open Watcom, small model) ----------------
 LOADER_C   := loader/main.c
@@ -79,21 +98,39 @@ dos-tests: $(DOS_TESTS)
 # ---- GLOSK.BIN: the kernel (host gcc -m32, linked at C0100000h) -------------
 KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protector \
            -fno-asynchronous-unwind-tables -fno-delete-null-pointer-checks -mgeneral-regs-only \
-           -O2 -g -Wall -Wextra -Werror -nostdinc -Iinclude -Ikernel/include
+           -O2 -g -Wall -Wextra -Werror -nostdinc -Iinclude -Ikernel/include \
+           -isystem $(shell $(HOST_CC) -m32 -print-file-name=include) -Ikernel/include/libc -Ikernel/net/port \
+           -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c kernel/core/timer.c \
-         kernel/core/sched.c \
+         kernel/core/sched.c kernel/drv/pci.c kernel/drv/ne2k.c kernel/net/net.c kernel/lib/libc.c \
+         kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
+         kernel/ssh/sshd.c \
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c \
          kernel/dbg/gdbstub.c kernel/vm/v86.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c \
          kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
+# lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
+# with the kernel's flags but without -Werror.
+LWIP_SRCS := $(wildcard third_party/lwip/src/core/*.c third_party/lwip/src/core/ipv4/*.c) \
+             third_party/lwip/src/netif/ethernet.c
+LWIP_OBJS := $(patsubst third_party/lwip/src/%.c,build/lwip/%.o,$(LWIP_SRCS))
+build/lwip/%.o: third_party/lwip/src/%.c $(wildcard kernel/net/port/*.h kernel/net/port/arch/*.h)
+	@mkdir -p $(dir $@)
+	$(Q)echo "  LWIP    $<"
+	$(Q)$(HOST_CC) $(filter-out -Werror -Wextra,$(KCFLAGS)) -c -o $@ $<
 build/kernel/%.o: kernel/% $(wildcard kernel/include/*.h include/glos/*.h)
 	@mkdir -p $(dir $@)
 	$(Q)echo "  KCC     $<"
 	$(Q)$(HOST_CC) $(KCFLAGS) -c -o $@ $<
-build/kernel/glosk.elf: $(KOBJS) kernel/kernel.ld
+TINYSSH_OBJS := $(patsubst third_party/tinyssh/%.c,build/tinyssh/%.o,$(TINYSSH_SRCS))
+build/tinyssh/%.o: third_party/tinyssh/%.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  TINYSSH $<"
+	$(Q)$(HOST_CC) $(filter-out -Werror -Wextra,$(KCFLAGS)) -c -o $@ $<
+build/kernel/glosk.elf: $(KOBJS) $(LWIP_OBJS) $(TINYSSH_OBJS) kernel/kernel.ld
 	$(Q)echo "  KLD     $@"
 	$(Q)$(HOST_CC) $(KCFLAGS) -nostdlib -no-pie -Wl,-T,kernel/kernel.ld -Wl,--build-id=none \
-	  -Wl,--no-warn-rwx-segments -o $@ $(KOBJS)
+	  -Wl,--no-warn-rwx-segments -o $@ $(KOBJS) $(LWIP_OBJS) $(TINYSSH_OBJS)
 build/kernel/GLOSK.BIN: build/kernel/glosk.elf
 	$(Q)objcopy -O binary $< $@
 kernel: build/kernel/GLOSK.BIN
@@ -128,6 +165,11 @@ loopa-mem: all check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py mem -j $(JOBS)
 loopa-shell: all check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py shell -j $(JOBS)
+loopa-net: all check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py net -j $(JOBS)
+# On the host: ssh is not in the dev container; jobs.py starts Loop A through it.
+loopa-ssh: all check-deps
+	$(Q)python3 tests/loopa/jobs.py ssh -j $(JOBS)
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
 loopa-gdb: all check-deps

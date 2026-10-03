@@ -4,6 +4,7 @@
 #include "arch.h"
 #include "io.h"
 #include "kprintf.h"
+#include "random.h"
 #include "sched.h"
 
 struct tss {
@@ -19,6 +20,7 @@ extern struct { u32 off; u16 sel; } __attribute__((packed)) ret_farptr;
 
 static u32 gdt[2 * 12] __attribute__((aligned(8)));     /* selectors 00h-58h */
 static u32 idt[2 * 256] __attribute__((aligned(8)));
+static u32 gdt_copy[2 * 12];                           /* for the #DF report */
 /* The TSS's fixed part, the 32-byte VME redirection bitmap, the 8 KB I/O
    permission bitmap and its mandatory trailing FFh byte: three pages
    (supervisor.md §3.3). */
@@ -94,13 +96,18 @@ void cpu_init(u32 cs16_base, u32 ds16_base, u32 ret_off)
     dftss.ds = dftss.es = dftss.ss = dftss.fs = dftss.gs = SEL_KDATA;
     dftss.iomap = sizeof dftss;
     __asm__ volatile("ltr %w0" :: "r"(SEL_TSS));
+    memcpy(gdt_copy, gdt, sizeof gdt);
 
     ret_farptr.off = ret_off;
     ret_farptr.sel = SEL_CODE16;
 }
 
 /* 38h follows GLOS.EXE's resident stub when it moves (supervisor.md §2.2). */
-void cpu_set_code16_base(u32 base) { set_desc(SEL_CODE16, base, 0xFFFF, 0x9A, 0x00); }
+void cpu_set_code16_base(u32 base)
+{
+    set_desc(SEL_CODE16, base, 0xFFFF, 0x9A, 0x00);
+    memcpy(gdt_copy, gdt, sizeof gdt);
+}
 
 /* The #DF task must use the kernel's own page directory once there is one. */
 void cpu_set_df_cr3(u32 cr3) { dftss.cr3 = cr3; }
@@ -159,14 +166,40 @@ static void dump(const char *why, struct trapframe *tf)
 void panic(const char *why, struct trapframe *tf)
 {
     cli();
+    kprintf_direct();
     dump(why, tf);
     for (;;)
         hlt();
 }
 
+/* The #DF task runs on its own stack and the kernel's page directory, so it
+   can report what the fault left: the interrupted context (saved in the
+   main TSS by the task switch), ESP0 and the page under it, any gate or
+   descriptor that changed since cpu_init, and every thread's stack. */
+static u32 pte_of(u32 lin)
+{
+    u32 pde = *(volatile u32 *)(0xFFFFF000u + (lin >> 22) * 4);
+    return (pde & 1) ? *(volatile u32 *)(0xFFC00000u + (lin >> 12) * 4) : 0;
+}
+
 void double_fault(void)
 {
-    kprintf("GLOS-PANIC why=double-fault eip=%p esp=%p\n", TSS->eip, TSS->esp);
+    u32 v, bad = 0;
+    kprintf_direct();
+    kprintf("GLOS-PANIC why=double-fault eip=%p esp=%p cs=%x ss=%x eflags=%x cr2=%p esp0=%p ss0=%x pte=%p\n",
+            TSS->eip, TSS->esp, TSS->cs, TSS->ss, TSS->eflags, read_cr2(), TSS->esp0, TSS->ss0,
+            pte_of(TSS->esp0 - 4));
+    for (v = 0; v < 256; v++) {
+        u32 off = (u32)stub_base + v * 16;
+        u32 lo = (off & 0xFFFF) | ((u32)SEL_KCODE << 16);
+        u32 hi = (off & 0xFFFF0000) | ((u32)((v == 3 || v == 4) ? 0xEE : 0x8E) << 8);
+        if (v != 8 && (idt[v * 2] != lo || idt[v * 2 + 1] != hi) && bad++ < 4)
+            kprintf("GLOS-PANIC gate=%x is=%p:%p\n", v, idt[v * 2 + 1], idt[v * 2]);
+    }
+    for (v = 0; v < ARRAY_SIZE(gdt); v++)
+        if (gdt[v] != gdt_copy[v] && v / 2 != SEL_TSS / 8 && v / 2 != SEL_DFTSS / 8 && bad++ < 8)
+            kprintf("GLOS-PANIC gdt=%x is=%p was=%p\n", v / 2 * 8, gdt[v], gdt_copy[v]);
+    sched_panic_report();
     for (;;)
         hlt();
 }
@@ -178,6 +211,7 @@ void trap_dispatch(struct trapframe *tf)
         vm_trap_entry(tf);
     if (v >= IRQ_BASE_MASTER && v < IRQ_BASE_MASTER + 16) {
         int irq = (int)(v - IRQ_BASE_MASTER);
+        random_event(v);
         if ((irq == 7 || irq == 15) && !irq_fn[irq]) {     /* spurious unless in service */
             outb(irq == 7 ? 0x20 : 0xA0, 0x0B);
             if (!(inb(irq == 7 ? 0x20 : 0xA0) & 0x80)) {

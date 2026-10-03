@@ -10,8 +10,51 @@
  * vif-stuck watchdog. */
 #include "io.h"
 #include "kprintf.h"
+#include "pci.h"
 #include "timer.h"
 #include "vm.h"
+
+static struct { u16 base, len; } hidden[4];
+static int nhidden;
+
+/* COM1's data port, trapped: whether a program is part-way through a line,
+   so the kernel's lines wait for it (lib/kprintf.c). */
+static u8 com1_mid;
+static u32 com1_since;
+
+static int com1_hold(void) { return com1_mid; }
+
+static void com1_out(u8 v)
+{
+    if (!(inb(0x3FB) & 0x80)) {                 /* not the divisor latch */
+        if (!com1_mid && v != '\n')
+            com1_since = timer_ticks();
+        com1_mid = v != '\n';
+    }
+    outb(0x3F8, v);
+    if (!com1_mid)
+        kprintf_flush(0);
+}
+
+void vdev_hide(u16 base, u16 len)
+{
+    u32 p;
+    if (nhidden == ARRAY_SIZE(hidden))
+        panic("vdev-hide", NULL);
+    hidden[nhidden].base = base;
+    hidden[nhidden++].len = len;
+    for (p = base; p < (u32)base + len; p++)
+        cpu_io_trap(p, 1);
+}
+
+static int is_hidden(u16 port)
+{
+    int i;
+    for (i = 0; i < nhidden; i++)
+        if (port >= hidden[i].base && port < hidden[i].base + hidden[i].len)
+            return 1;
+    return 0;
+}
 
 void vdev_init(void)
 {
@@ -19,6 +62,8 @@ void vdev_init(void)
     vm.rtc_b = timer_found_b();
     vm.rtc_c = 0;
     vm.rtc_index = 0x0D;
+    cpu_io_trap(0x3F8, 1);
+    kprintf_hold = com1_hold;
     outb(0x43, 0x34);                           /* PIT channel 0: mode 2, count FFFFh (§8.2) */
     outb(0x40, 0xFF);
     outb(0x40, 0xFF);
@@ -27,6 +72,9 @@ void vdev_init(void)
 
 void vdev_leave(void)
 {
+    kprintf_hold = NULL;
+    kprintf_flush(1);
+    cpu_io_trap(0x3F8, 0);
     timer_set_hook(NULL);
     timer_stop_to(vm.rtc_a, vm.rtc_b);          /* the chip as the program set it */
     outb(0x43, 0x36);                           /* PIT channel 0 as the BIOS sets it at POST: */
@@ -81,8 +129,8 @@ static u32 pci_in(u16 port, int w)
     if (port == 0xCF9 && w == 1)
         return vm.cf9;
     if (port >= 0xCFC) {
-        if (!(vm.pci_addr & 0x80000000u))
-            return w == 4 ? 0xFFFFFFFFu : w == 2 ? 0xFFFFu : 0xFFu;
+        if (!(vm.pci_addr & 0x80000000u) || pci_owned_addr(vm.pci_addr))
+            return w == 4 ? 0xFFFFFFFFu : w == 2 ? 0xFFFFu : 0xFFu;   /* nothing, or GLOS's card */
         outl(0xCF8, vm.pci_addr);
     }
     return w == 4 ? inl(port) : w == 2 ? inw(port) : inb(port);
@@ -101,7 +149,7 @@ static void pci_out(u16 port, u32 v, int w)
         return;
     }
     if (port >= 0xCFC) {
-        if (!(vm.pci_addr & 0x80000000u))
+        if (!(vm.pci_addr & 0x80000000u) || pci_owned_addr(vm.pci_addr))
             return;
         outl(0xCF8, vm.pci_addr);
     }
@@ -132,7 +180,7 @@ static u8 dev_inb(u16 port)
     case 0x92:
         return (u8)((inb(0x92) & ~3u) | (vm.a20 << 1));
     default:
-        return inb(port);
+        return is_hidden(port) ? 0xFF : inb(port);
     }
 }
 
@@ -158,8 +206,12 @@ static void dev_outb(u16 port, u8 v)
             vm_reset_req("port92");
         vm_set_a20((v >> 1) & 1);
         return;
+    case 0x3F8:
+        com1_out(v);
+        return;
     default:
-        outb(port, v);
+        if (!is_hidden(port))
+            outb(port, v);
     }
 }
 
@@ -238,5 +290,9 @@ void vdev_tick(struct trapframe *tf, u8 c)
     vm_int15_tick(now);
     if (vm.waiting && vm.wait_deadline && (s32)(now - vm.wait_deadline) >= 0)
         vm_kick();
+    if (com1_mid && now - com1_since > 100) {   /* a line that never ends: write ours anyway */
+        com1_mid = 0;
+        kprintf_flush(1);
+    }
     watchdog(tf, now);
 }

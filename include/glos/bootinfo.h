@@ -83,6 +83,13 @@ struct bootinfo {
     char comspec[80];                           /* COMMAND.COM, for batch files and the console */
     char autoexec[80];                          /* run first through COMSPEC /C; empty: none */
     char console[128];                          /* then, again and again, COMSPEC /C this; empty: COMSPEC */
+    /* M3: KEYS\ beside GLOS.EXE, read at start (the kernel has no files yet) */
+    unsigned char seed[32];                     /* KEYS\SEED.BIN: entropy from the last run */
+    bi_u32 seed_len;
+    char hostkey[1024];                         /* KEYS\HOSTKEY: OpenSSH private key (ed25519, unencrypted) */
+    bi_u32 hostkey_len;
+    char authkeys[2048];                        /* KEYS\AUTHKEYS: authorized_keys lines (ssh-ed25519) */
+    bi_u32 authkeys_len;
 };
 
 /* The resident stub's data (loader/stub.asm), at offset 0 of its segment.
