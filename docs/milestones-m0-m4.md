@@ -366,6 +366,24 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
 | **M4d** | 16-bit clients: 16-bit frames, stacks, RMCBs, raw switch; espfix on every return | DPMICONF-16 (`tests/dos/dpmi16/`, OW 16-bit, reporting over COM1) against HDPMI16; TPX.EXE from `$(BORLAND_DIR)` on RTM/DPMI16BI, driven by `--keys` (open a file, compile, exit) | `make loopa-m4d` |
 | **M4e** | Exclusive sessions (`kernel/vm/session.c`): save and restore, kill; per-program profiles (`direct=1` for IOPL 3); `glos run`; `tools/gate/` | The full gate | `make gate` |
 
+**M4a status (2026-10-03): done** (supervisor.md §12.1a, §13).
+- **The host:** `kernel/dpmi/{host,ldt,mem,rmcall,int31}.c`.
+  - The mode switch through 1687h's ARPL, for 16- and 32-bit clients.
+  - Contexts with their own page directory and an 8192-entry LDT.
+  - The virtual IDT with host defaults in a trampoline page.
+  - Nested real-mode calls on the VM thread; IRQs reflected to real mode while a client runs; espfix.
+  - INT 21h 4Ch teardown, and a kill that works from protected mode.
+- **Functions:** every one listed for M4a. 0202h/0203h are kept and 0303h/0304h allocated for M4b to deliver,
+  and 0E00h/0E01h are done. Unknown ones log `GLOS-DPMI-UNIMPL` and fail with 8001h; 0506h and 0507h (page
+  attributes) are the ones DOS/4GW and DJGPP ask for, and both carry on.
+- **T: `make loopa-m4a`** (`jobs.py dpmi`):
+  - DPMIMINI (`tests/dos/dpmimini.asm`) as a 16- and 32-bit client: mode switch, 0400h, LDT and 0501h memory,
+    0300h, a reflected INT 21h, 0A00h, espfix, and exit code 7 from protected mode. HDPMI32i proves it, and it
+    passes on all six profile and boot combinations.
+  - DPMICONF-32 (`tests/dos/dpmiconf.c`, 37 checks): 0 failures on CWSDPMI r7, HDPMI32i and GLOS, on all six.
+  - MGA-Glide's DOS/4GW and DJGPP HELLO on bf6: the same HX-TEST and HX-IMG lines (CRCs) with and without GLOS.
+- **Cost:** the stub's DPMI ARPLs add 42 bytes; MEM /C shows GLOS at 3,008 bytes (4,896 as the shell).
+
 ### The gate's baseline matrix (M4e)
 
 | Suite | Baseline | Profiles | Boots |

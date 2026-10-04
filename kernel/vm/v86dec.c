@@ -3,15 +3,18 @@
  * here: they are not IOPL-sensitive in V86 mode and arrive as #BP and #OF. */
 #include "v86dec.h"
 
-int v86_decode(const u8 *b, u32 n, struct v86insn *in)
+/* The same decoder serves DPMI clients' code (kernel/dpmi), whose segment
+   may default to 32-bit operands and addresses: def is 2 or 4, and 66h and
+   67h switch to the other size. */
+int v86_decode_size(const u8 *b, u32 n, struct v86insn *in, u32 def)
 {
     u32 i = 0;
-    u8 op;
+    u8 op, other = (u8)(def == 4 ? 2 : 4);
 
     in->kind = V86_OTHER;
     in->len = 0;
-    in->opsize = 2;
-    in->adsize = 2;
+    in->opsize = (u8)def;
+    in->adsize = (u8)def;
     in->seg = V86_SEG_NONE;
     in->rep = 0;
     in->width = 0;
@@ -26,8 +29,8 @@ int v86_decode(const u8 *b, u32 n, struct v86insn *in)
             return V86_OTHER;
         }
         switch (b[i]) {
-        case 0x66: in->opsize = 4; continue;
-        case 0x67: in->adsize = 4; continue;
+        case 0x66: in->opsize = other; continue;
+        case 0x67: in->adsize = other; continue;
         case 0x26: in->seg = 0; continue;
         case 0x2E: in->seg = 1; continue;
         case 0x36: in->seg = 2; continue;
@@ -81,3 +84,5 @@ int v86_decode(const u8 *b, u32 n, struct v86insn *in)
     in->len = (u8)i;
     return in->kind;
 }
+
+int v86_decode(const u8 *b, u32 n, struct v86insn *in) { return v86_decode_size(b, n, in, 2); }

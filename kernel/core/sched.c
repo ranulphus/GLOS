@@ -122,7 +122,7 @@ void schedule(void)
         panic("stack-overflow", NULL);
     n_switches++;
     current = next;
-    cpu_set_esp0(next->stack_top);
+    cpu_set_esp0(next->esp0);
     switch_to(&prev->esp, next->esp);
 }
 
@@ -146,6 +146,7 @@ struct thread *thread_create(const char *name, int prio, void (*fn)(void *), voi
         panic("thread-create", NULL);
     *(u32 *)t->stack = CANARY;
     t->stack_top = (u32)t->stack + THREAD_STACK;
+    t->esp0 = t->stack_top;
     t->prio = (u8)prio;
     t->name = name;
     t->fn = fn;
@@ -185,6 +186,7 @@ void sched_init(void)
 {
     idle_thread.stack = (u8 *)boot_stack;
     idle_thread.stack_top = (u32)boot_stack_top;
+    idle_thread.esp0 = idle_thread.stack_top;
     *(u32 *)idle_thread.stack = CANARY;
     idle_thread.prio = PRIO_IDLE;
     idle_thread.state = T_RUNNING;

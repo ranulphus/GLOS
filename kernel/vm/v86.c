@@ -15,6 +15,7 @@
 #include "glos/bootinfo.h"
 #include "agent.h"
 #include "dos.h"
+#include "dpmi.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
@@ -271,6 +272,9 @@ static int vm_try_kill(struct trapframe *tf, int force)
     kprintf("GLOS-KILL psp=%04x at=%04x:%04x ticks=%u\n", psp, at_cs, at_ip, timer_ticks());
     return 1;
 }
+
+/* A kill now, wherever the program is (the DPMI host's end of a client). */
+void vm_kill_now(struct trapframe *tf) { vm_try_kill(tf, 1); }
 
 void vm_return(struct trapframe *tf)
 {
@@ -536,7 +540,12 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
         if (vm_int15(tf, next))
             return;
         break;
-    case 0x2F:                                  /* XMS: GLOS's own server */
+    case 0x2F:                                  /* XMS: GLOS's own server; the DPMI host */
+        if (ax == 0x1687) {
+            dpmi_1687(tf);
+            tf->eip = next;
+            return;
+        }
         if (ax == 0x4300) {
             SETLO(tf->eax, 0x80);
             tf->eip = next;
@@ -558,6 +567,14 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
             vm_exec_snap();
         if (vm.shell_state == 1 && ((ax >> 8) == 0x4C || (ax >> 8) == 0x00))
             vm_env_back();
+        if ((ax >> 8) == 0x4C || (ax >> 8) == 0x00) {
+            int client = dctx && vm_current_psp() == dctx->psp;
+            dpmi_dos_exit(tf);
+            if (client && rm_nesting()) {       /* it ended inside a nested real-mode call */
+                vm_int(tf, n, next);
+                rm_unwind(tf);
+            }
+        }
         break;
     }
     vm_int(tf, n, next);
@@ -661,6 +678,8 @@ void vm_exception(struct trapframe *tf)
             tf->eip = (ip + 2) & 0xFFFF;
             return;
         }
+        if (dpmi_v86_bp(tf))
+            return;
         vm_int(tf, 6, ip);
         return;
     case 0: case 1: case 3: case 4: case 5: case 7: case 12:
@@ -707,6 +726,7 @@ void vm_start(struct bootinfo *bi)
     for (i = 0; i < ARRAY_SIZE(trapped_ports); i++)
         cpu_io_trap(trapped_ports[i], 1);
 
+    dpmi_init();
     vpic_reset(&vm.pic, 0x08, 0x70, (u16)bi->pic_mask);
     for (i = 0; i < 16; i++)
         if (!(kernel_lines & (1u << i)))

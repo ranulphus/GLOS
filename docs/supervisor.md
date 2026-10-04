@@ -124,9 +124,9 @@ to COM1 at each step:
   that no vector a C runtime hooks (00h–07h, 1Bh, 23h, 24h) points into the memory being freed
   (`GLOS-WARN ivt-into-loader`). The stub then shrinks the block and runs the EXEC loop. After the kernel
   leaves, the stub puts A20 and the XMS blocks back as found, writes `GLOS-EXIT` and ends with INT 21h 4Ch.
-- **Measured (M3, with the agent's wait and the DOS server's call):** the stub is 2,514 bytes. With the PSP
-  and the environment, MEM /C shows GLOS at 2,976 bytes, and the largest program is 2,976 bytes smaller than
-  under plain DOS.
+- **Measured (M4a, with the agent's wait, the DOS server's call and the DPMI host's ARPLs):** the stub is 2,556
+  bytes. With the PSP and the environment, MEM /C shows GLOS at 3,008 bytes, and the largest program is 3,008
+  bytes smaller than under plain DOS.
 - **From a prompt or AUTOEXEC.BAT:** COMMAND.COM stays the shell; `glos exit` returns to it.
 - **As the shell (`SHELL=C:\GLOS\GLOS.EXE /SHELL` in CONFIG.SYS; done in M3):**
   - `/SHELL` says so; so does a PSP that is its own parent (MS-DOS's shell). FreeDOS doesn't make its shell its
@@ -158,9 +158,9 @@ to COM1 at each step:
     stub. If even COMSPEC can't run, `GLOS-SHELL error=cannot-run`, and the machine halts. When the kernel
     leaves (`glos exit`, M3), the stub does the same after its cleanup; `EXIT` returning to GLOS comes with
     `glos exit`.
-  - Measured on the glosshell boots: GLOS takes 4,864 bytes (the stub and PSP, and the 2 KB master
-    environment). While a batch file runs, the largest program is 577,632 bytes on the raw boot (plain DOS:
-    511,152, because COMMAND.COM swaps itself into GLOS's XMS) and 628,304 on the HIMEMX boot (plain DOS:
+  - Measured on the glosshell boots: GLOS takes 4,896 bytes (the stub and PSP, and the 2 KB master
+    environment). While a batch file runs, the largest program is 577,600 bytes on the raw boot (plain DOS:
+    511,152, because COMMAND.COM swaps itself into GLOS's XMS) and 628,272 on the HIMEMX boot (plain DOS:
     631,488).
 - **Later (opt-in, M9):** the stub moves into an unused upper-memory page that GLOS maps for the system VM,
   leaving the PSP and environment (about 0.5 KB) below 640K. A page qualifies only when it reads back as
@@ -494,6 +494,43 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 - A child's mode switch pushes a client level. On the child's 4Ch, GLOS frees the blocks, selectors, RMCBs and
   handlers allocated at that level, and restores PSP:2Ch.
 
+### 12.1a As built in M4a (`kernel/dpmi/`)
+
+- **One context at a time.** A child program's own mode switch fails with 8011h until M4c.
+- **The VM thread runs the client.** It alternates between V86 code and the client at ring 3, on one kernel
+  stack. A ring-3 entry pushes 16 bytes fewer than a V86 entry, so ESP0 sits 16 bytes lower while the client
+  runs. The trapframe then lies at the same address in either mode, and the mode switch, raw switches and the end
+  are edits of that one frame (`kernel/arch/cpu.c`).
+- **Nested real-mode calls** (0300h–0302h, reflected INTs, IRQs) build a V86 frame below the caller's kernel
+  stack and enter it. The stub's nest ARPL returns longjmp-style (`kernel/dpmi/rmcall.c`). A program that ends
+  inside one leaves its nested levels behind: the V86 frame moves to the top and carries on.
+- **The host's real-mode stack** is the block of 1687h's SI paragraphs (80h: 2 KB) that the client allocates
+  and passes in ES at the mode switch, 512 bytes per nesting level.
+- **The trampoline page** (SEL_TRAMP, at 3FF000h in PDE 0's shared table) holds HLTs: the default handler for
+  each vector (offset = vector), 0306h's protected-to-real switch, 0305h's save/restore (nothing to save), and
+  the "GLOS" vendor entry. A HLT at ring 3 is a #GP, so the host sees which one.
+- **Software interrupts:**
+  - 20h–4Fh and 60h–FFh arrive through DPL-3 gates; 0–1Fh and 50h–5Fh arrive as #GP, decoded from the error
+    code and the INT instruction.
+  - A vector the client hooked (0205h) gets an interrupt frame on the client's stack, with the virtual IF clear.
+  - Otherwise the host's default handles it: INT 31h is the API; INT 21h 4Ch ends the client; INT 2Fh 1686h
+    returns AX=0; the rest are reflected to real mode with the general registers and arithmetic flags (DS and ES
+    there are the host's segment).
+- **IRQs while the client runs** go through the virtual PIC as in V86 mode. On the way back to ring 3, with the
+  virtual IF on, each runs its real-mode handler, nested. Protected-mode handlers first: M4b.
+- **Ring-3 emulation:** CLI, STI, HLT and IN/OUT to trapped ports are emulated as in V86 mode (32-bit code
+  decoded with 32-bit defaults). PUSHF/POPF can't see or change IF at IOPL 0 (0900h–0902h can). Other
+  exceptions end the client (`GLOS-DPMI exception`) through the kill path, so its vectors and devices are put
+  back. Handlers: M4b.
+- **Before IRET to ring 3,** the frame's segment registers are checked: an unloadable DS, ES, FS or GS becomes
+  0, and a bad CS or SS ends the client. So the IRET never faults in ring 0.
+- **espfix** (§6.3) on every return to a 16-bit stack: trap_dispatch moves selector 30h's base so the IRET frame
+  is addressed with the client's ESP[31:16]. DPMIMINI checks it.
+- **The end:** INT 21h 4Ch in protected mode frees the context and carries on in V86 mode at the stub's INT 21h,
+  as the program, with AX as it was. A program that ends from real mode (after a raw switch, or inside a nested
+  call) frees the context when its 4Ch reaches DOS.
+- **`/DPMITRACE`** logs every INT 31h call and its result (`GLOS-DPMI call`).
+
 ### 12.2 Initial state after the mode switch ([DPMI0.9 §4])
 
 | Register | Value |
@@ -555,12 +592,12 @@ Statuses:
 | 000Eh/000Fh | Get/set multiple (1.0) | log | | |
 | 0100h–0102h | DOS memory | M4a | Under the DOS lock. **On failure AX=0008h and BX=largest block**: the DJGPP stub relies on it. | CWSDPMI |
 | 0200h/0201h | Get/set real-mode vector | M4a | DJGPP installs its INT 1Bh RMCB here | |
-| 0202h/0203h | Get/set exception handler | M4b | DJGPP: 0–11h; MGA-Glide OW: 00h, 06h, 0Dh, 0Eh | CWSDPMI |
+| 0202h/0203h | Get/set exception handler | M4a (kept), M4b (delivered) | DJGPP: 0–11h; MGA-Glide OW: 00h, 06h, 0Dh, 0Eh | CWSDPMI |
 | 0204h/0205h | Get/set PM vector | M4a (vectors), M4b (IRQ delivery) | INT 8/9/1Bh/23h/24h/75h, IRQ3/4, INT 21h (DOS/4GW, MGA-Glide exit hook) | CWSDPMI, DOS/4GW |
 | 0210h–0213h | Extended exception handlers (1.0) | M4b | | HDPMI32i |
 | 0300h | Simulate real-mode interrupt | M4a | SS:SP=0 means the host stack; CX words copied; IF/TF clear | CWSDPMI |
 | 0301h/0302h | Call real-mode far / IRET procedure | M4a | GLQuake IPX entry; SDL VBE bank switch | |
-| 0303h/0304h | Allocate/free real-mode callback | M4b | **Every DJGPP program** (INT 1Bh); DOS/4GW. At least 16 per context. ES:EDI returned unchanged. | CWSDPMI |
+| 0303h/0304h | Allocate/free real-mode callback | M4a (allocated: 16 ARPLs in the stub), M4b (called) | **Every DJGPP program** (INT 1Bh); DOS/4GW. At least 16 per context. ES:EDI returned unchanged. Until M4b a call returns at once. | CWSDPMI |
 | 0305h/0306h | State save / raw switch addresses | **M4a** | **DOS/4GW needs it to start.** The "real-mode" side is a V86 trap stub. | DOS/4GW, HDPMI32i |
 | 0400h | Version | M4a | 0.90, BX bit 0=32-bit, bit 1=0 (reflection in V86); **DH=08h, DL=70h** (or the virtual PIC's ICW2) | CWSDPMI |
 | 0401h | Capabilities (1.0) | M4c | | HDPMI32i |
@@ -578,7 +615,7 @@ Statuses:
 | 0B00h–0B03h | Watchpoints | M4c | DR0–DR3, shared with the gdb stub | HDPMI32i |
 | 0C00h/0C01h | TSR services (1.0) | log | | |
 | 0D00h–0D03h | Shared memory (1.0) | fail (8001h) | DOS/4GW probes 0D00h | |
-| 0E00h/0E01h | Coprocessor status / emulation | M4b | DJGPP: 0E01h BX=1; without an FPU, BX=3 and EMU387 | CWSDPMI (ignores 0E00h) |
+| 0E00h/0E01h | Coprocessor status / emulation | M4a | DJGPP: 0E01h BX=1; without an FPU, BX=3 and EMU387. GLOS reports an FPU; emulation fails. | CWSDPMI (ignores 0E00h) |
 
 **INT 2Fh** (handled by the host in both modes):
 
@@ -808,6 +845,7 @@ place where nothing else is in DOS by construction.
 | AGENT | A job: `run seq= cmd=`, `done seq= code= via=` (the program, or `comspec`) |
 | KILL | A kill (§9.6) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
+| DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exception vec= err= at=`, `bad-frame`, and with `/DPMITRACE` `call fn= ... -> cf= ax=` |
 | DPMI-UNIMPL | An unimplemented call |
 | PANIC | A panic: registers and CR2. A double fault adds the interrupted context from the TSS, ESP0 and its page-table entry, any IDT gate or GDT descriptor that changed since start-up, and a `thread=` line per thread (stack, saved ESP, canary) |
 

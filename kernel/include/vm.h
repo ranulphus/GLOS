@@ -78,6 +78,7 @@ void selftest_report(void);                     /* core/main.c, /SELFTEST */
 void vm_exception(struct trapframe *tf);        /* a CPU exception from V86 mode */
 void vm_return(struct trapframe *tf);           /* last thing before IRET to V86 mode */
 void vm_int(struct trapframe *tf, u8 n, u32 ret_ip);    /* real-mode INT n through the IVT */
+void vm_kill_now(struct trapframe *tf);         /* the kill (Ctrl-Alt-Shift-Esc's), now */
 void vm_idle(u32 until);                        /* block until a deliverable IRQ, a kill or tick `until` (0: none) */
 void vm_set_a20(int on);
 void vm_sync_mask(void);                        /* the physical IMR from the virtual one */

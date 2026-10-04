@@ -92,6 +92,88 @@ static int heap_grow(struct heap *h, u32 new_size)
     return 0;
 }
 
+/* ---- DPMI address spaces (supervisor.md §4, §12.1): a page directory per
+   context with the kernel's PDEs (identity, image, heap, kmap) and its own
+   recursive slot; the user region's page tables are its own. Mapping works
+   on the current space, through the recursive slot. */
+
+#define CUR_PD  ((volatile u32 *)0xFFFFF000u)
+#define CUR_PT  ((volatile u32 *)RECURSIVE)
+
+u32 mm_space_new(void)
+{
+    u32 f = pmm_alloc(), i;
+    u32 *pd;
+    if (!f)
+        return 0;
+    pd = kmap(f);
+    for (i = 0; i < 1024; i++)
+        pd[i] = kpd[i];
+    pd[1023] = f | PTE_P | PTE_W;
+    kunmap(pd);
+    return f;
+}
+
+void mm_space_free(u32 pd_phys)
+{
+    u32 *pd = kmap(pd_phys), i;
+    for (i = 1; i < 1023; i++)
+        if ((pd[i] & PTE_P) && pd[i] != kpd[i])
+            pmm_free(pd[i] & ~0xFFFu);
+    kunmap(pd);
+    pmm_free(pd_phys);
+}
+
+void mm_space_enter(u32 pd_phys) { write_cr3(pd_phys ? pd_phys : mm_cr3()); }
+
+int mm_map(u32 lin, u32 phys, u32 flags)
+{
+    u32 i = lin >> 22;
+    if (!(CUR_PD[i] & PTE_P)) {
+        u32 f = pmm_alloc(), k;
+        if (!f)
+            return -1;
+        CUR_PD[i] = f | PTE_P | PTE_W | PTE_U;
+        invlpg(RECURSIVE + (i << 12));
+        for (k = 0; k < 1024; k++)
+            CUR_PT[(i << 10) + k] = 0;
+    }
+    CUR_PT[lin >> 12] = (phys & ~0xFFFu) | PTE_P | (flags & (PTE_W | PTE_U | 0x18));     /* 18h: PWT, PCD */
+    invlpg(lin);
+    return 0;
+}
+
+u32 mm_unmap(u32 lin)
+{
+    u32 pte;
+    if (!(CUR_PD[lin >> 22] & PTE_P))
+        return 0;
+    pte = CUR_PT[lin >> 12];
+    CUR_PT[lin >> 12] = 0;
+    invlpg(lin);
+    return (pte & PTE_P) ? pte & ~0xFFFu : 0;
+}
+
+u32 mm_lookup(u32 lin)
+{
+    if (!(CUR_PD[lin >> 22] & PTE_P))
+        return 0;
+    return CUR_PT[lin >> 12];
+}
+
+/* The DPMI host's trampoline page (supervisor.md §3.1): a frame at
+   TRAMP_LIN in PDE 0's table, so in every address space; ring 3 may run
+   and read it, not write it. Returns it for the host to fill. */
+void *mm_tramp_page(u32 lin)
+{
+    u32 f = pmm_alloc();
+    if (!f)
+        return 0;
+    kpt_low[lin >> 12] = f | PTE_P | PTE_U;
+    invlpg(lin);
+    return (void *)lin;
+}
+
 void *kmalloc(size_t n) { return heap_alloc(&kheap, n); }
 void kfree(void *p) { heap_free(&kheap, p); }
 

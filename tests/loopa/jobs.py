@@ -401,6 +401,135 @@ SSH_CASES = ([(os.environ.get("SSH_PROFILE", "bf6"), os.environ.get("SSH_CARD", 
              else [("bf6", "ne2kpci"), ("486dx2", "ne2k"), ("bf6", "ne2k")])
 KEYS = ["--file", "tests/keys/hostkey=/TEST/KEYS/HOSTKEY", "--file", "tests/keys/AUTHKEYS=/TEST/KEYS/AUTHKEYS"]
 
+# HDPMI32i (the HX runtime, a behavioural baseline only: PRD D26), fetched by tools/survey/survey.py.
+HX = os.path.join(os.environ.get("MGA_CACHE", os.path.join(os.path.expanduser("~"), ".cache", "mga-glide")),
+                  "glos", "hx")
+
+
+def dpmiconf(profile, boot):
+    """DPMICONF-32 (tests/dos/dpmiconf.c) under CWSDPMI (the DJGPP stub
+    loads it from C:\\HX), HDPMI32i and GLOS: the baselines prove the
+    checks, GLOS must pass them all."""
+    tag = "%s-%s" % (profile, boot)
+    common = ["--machine", profile, "--boot-cfg", boot, "--file", "build/dj/DPMICONF.EXE=/TEST/DPMICONF.EXE",
+              "--timeout", "400", "--idle", "150", "--cmd", "SERSAY HX-START dpmiconf"]
+    end = ["--cmd", "SERSAY HX-DONE 0"]
+    out = {
+        "cwsdpmi": run("dpmiconf-cws-" + tag, common + ["--cmd", "C:\\TEST\\DPMICONF.EXE"] + end),
+        "hdpmi32i": run("dpmiconf-hdpmi-" + tag, common + ["--file", HX + "/HDPMI32I.EXE=/HX/HDPMI32I.EXE",
+                        "--cmd", "HDPMI32I -r", "--cmd", "C:\\TEST\\DPMICONF.EXE"] + end),
+        "glos": run("dpmiconf-glos-" + tag, common + GLOS_FILES + [
+            "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\DPMICONF.EXE", "--cmd", "VECCHK check"]
+            + end),
+    }
+    checks, info = {}, ""
+    for host, (st, text) in out.items():
+        checks[host] = "HX-TEST dpmi-end fails=0" in text
+        if not checks[host]:
+            info += " %s:[%s]" % (host, " ".join(l.split()[1] for l in text.splitlines()
+                                                 if l.startswith("HX-TEST") and " FAIL" in l))
+    gl = out["glos"][1]
+    unimpl = re.findall(r"GLOS-DPMI-UNIMPL \S+ ax=(\w+)", gl)
+    checks["unimpl-known"] = set(unimpl) <= {"0507"}            # 0507h arrives with M4b
+    checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "GLOS-DPMI exception" not in gl
+    checks["vecchk"] = "HX-VECCHK ok" in gl
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("dpmiconf-" + tag, "PASS" if not bad else "FAIL",
+                               "" if not bad else " failed: " + " ".join(bad), info), not bad
+
+
+def same_screen(a, b):
+    """Two screenshots alike but for a text cursor's blink: whatever differs
+    lies inside one 9x16 character cell (MGA-Glide's PNG reader)."""
+    sys.path.insert(0, os.path.join(MGA, "tools", "loopa"))
+    import png as mga_png
+    try:
+        (w, h, p), (w2, h2, q) = mga_png.read_png(a), mga_png.read_png(b)
+    except (OSError, ValueError, AssertionError):
+        return False
+    if (w, h) != (w2, h2):
+        return False
+    cells, row = set(), w * 3
+    for y in range(h):
+        if p[y * row:(y + 1) * row] == q[y * row:(y + 1) * row]:
+            continue
+        for x in range(w):
+            if p[y * row + x * 3:y * row + x * 3 + 3] != q[y * row + x * 3:y * row + x * 3 + 3]:
+                cells.add((x // 9, y // 16))
+        if len(cells) > 1:
+            return False
+    return True
+
+
+def dpmi_hello(boot):
+    """MGA-Glide's HELLO, DOS/4GW (Open Watcom) and DJGPP, on bf6 (Matrox
+    cards are AGP-only in 86Box): the same HX-TEST and HX-IMG lines with and
+    without GLOS, the pictures alike but for the text cursor's blink."""
+    res, info = {}, ""
+    for kind, exe in (("dos4gw", "build/ow/dos/HELLO.EXE"), ("djgpp", "build/djgpp/HELLO.EXE")):
+        path = os.path.join(MGA, exe)
+        if not os.path.exists(path):
+            res[kind] = False
+            info += " %s: no %s (make it in MGA-Glide)" % (kind, exe)
+            continue
+        common = ["--machine", "bf6", "--boot-cfg", boot, "--exe", path]
+        st0, base = run("hello-%s-base-%s" % (kind, boot), common)
+        st1, gl = run("hello-%s-glos-%s" % (kind, boot), common + GLOS_FILES + ["--wrap", "C:\\TEST\\GLOS.EXE /RUN"])
+
+        def lines(t):                           # HX-IMG without its CRC: the pictures are compared below
+            return sorted(re.sub(r" crc=\w+", "", l.strip()) for l in t.splitlines()
+                          if l.startswith("HX-TEST") or l.startswith("HX-IMG"))
+        imgs = re.findall(r"^HX-IMG (\S+)", base, re.M)
+        same = all(same_screen(os.path.join(ROOT, "out", "hello-%s-base-%s" % (kind, boot), i + ".png"),
+                               os.path.join(ROOT, "out", "hello-%s-glos-%s" % (kind, boot), i + ".png")) for i in imgs)
+        unimpl = set(re.findall(r"GLOS-DPMI-UNIMPL \S+ ax=(\w+)", gl))
+        res[kind] = (st0 == "PASS" and st1 == "PASS" and lines(gl) == lines(base) and lines(base) != [] and same
+                     and "GLOS-DPMI start" in gl and "GLOS-PANIC" not in gl and "GLOS-DPMI exception" not in gl
+                     and unimpl <= {"0507", "0506"})          # page attributes: M4b
+        if not res[kind]:
+            info += " %s: %s/%s" % (kind, st0, st1)
+    bad = [k for k, v in res.items() if not v]
+    return "  %-22s %s%s" % ("hello-bf6-" + boot, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad) + info), not bad
+
+
+def dpmi(profile, boot):
+    """DPMIMINI (tests/dos/dpmimini.asm): with no host; as a 32-bit client
+    under HDPMI32i, which proves the test; and under GLOS as a 16-bit and a
+    32-bit client."""
+    tag = "%s-%s" % (profile, boot)
+    common = ["--machine", profile, "--boot-cfg", boot, "--file", "build/ow/dos/DPMIMINI.COM=/TEST/DPMIMINI.COM"]
+    st0, none = run("dpmi-none-" + tag, common + [
+        "--cmd", "SERSAY HX-START dpmi", "--cmd", "C:\\TEST\\DPMIMINI", "--cmd", "SERSAY HX-DONE 0"])
+    st1, hd = run("dpmi-hdpmi-" + tag, common + ["--file", HX + "/HDPMI32I.EXE=/HX/HDPMI32I.EXE",
+        "--cmd", "SERSAY HX-START dpmi", "--cmd", "HDPMI32I -r", "--cmd", "C:\\TEST\\DPMIMINI /32",
+        "--cmd", "SERSAY HX-DONE 0"])
+    runs = {}
+    for bits in ("16", "32"):
+        runs[bits] = run("dpmi-glos%s-%s" % (bits, tag), common + GLOS_FILES + [
+            "--cmd", "SERSAY HX-START dpmi", "--cmd", "VECCHK save",
+            "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\DPMIMINI.COM%s" % (" /32" if bits == "32" else ""),
+            "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
+
+    def line(text, key):
+        m = re.search(r"HX-DPMI %s[^\r\n]*" % key, text)
+        return m.group(0) if m else None
+    checks = {"none": "HX-DPMI none" in none, "hdpmi": "HX-DPMI done" in hd}
+    for bits, (st, gl) in runs.items():
+        checks.update({
+            "glos" + bits: st == "PASS" and "HX-DPMI done" in gl and "GLOS-DPMI start bits=" + bits in gl,
+            "exit7-" + bits: "GLOS-DPMI exit code=7" in gl and "GLOS-EXIT code=7" in gl,
+            "same-dos-" + bits: line(gl, "rm") is not None and line(gl, "rm") == line(hd, "rm")
+                                and line(gl, "int21") == line(hd, "int21"),
+            "vendor" + bits: "HX-DPMI vendor glos=0 dos4g=1" in gl,
+            "espfix" + bits: bits == "32" or "HX-DPMI espfix hi=1234" in gl,
+            "clean" + bits: "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "DPMI-UNIMPL" not in gl,
+            "vecchk" + bits: "HX-VECCHK ok" in gl,
+        })
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("dpmi-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
 
 GOLDEN = os.path.join(ROOT, "tests/loopa/golden.txt")      # "NAME SHA256" lines
 
@@ -575,7 +704,7 @@ def matrix(fn, combos, jobs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh"])
+    ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -591,6 +720,10 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ssh":
         return 0 if all(r[1] for r in matrix(ssh_case, SSH_CASES, a.jobs)) else 1
+    if a.suite == "dpmi":
+        res = matrix(dpmi, combos, a.jobs) + matrix(dpmiconf, combos, a.jobs)
+        res += matrix(dpmi_hello, [(b,) for b in a.boot or BOOTS], a.jobs)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "net":
         return 0 if all(r[1] for r in matrix(net, NET_CASES, a.jobs)) else 1
     if a.suite == "shell":

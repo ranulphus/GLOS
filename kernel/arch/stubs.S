@@ -44,26 +44,63 @@ trap_common:
         pushl   %esp
         call    trap_dispatch
         addl    $4, %esp
+/* The way out of every trap, and into user mode from a frame the kernel
+   built (vm_enter, nest_enter, frame_resume). A ring-3 return to a 16-bit
+   stack goes through espfix (supervisor.md §6.3): trap_dispatch has set the
+   espfix selector's base and espfix_ptr so that SS:ESP addresses this same
+   frame with ESP[31:16] already the client's. */
+trap_exit:
         popal
         popl    %gs
         popl    %fs
         popl    %es
         popl    %ds
         addl    $8, %esp
+        cmpl    $0, %ss:espfix_pending
+        jne     1f
         iretl
+1:      movl    $0, %ss:espfix_pending
+        lss     %ss:espfix_ptr, %esp
+        iretl
+
+/* u32 nest_enter(struct trapframe *f, u32 *save): into user mode from frame
+   f, which lies below this call's own stack, so that what the caller has on
+   the stack survives; returns the value given to nest_leave() by a trap
+   handler further down (kernel/dpmi/rmcall.c). */
+        .globl  nest_enter, nest_leave, frame_resume
+nest_enter:
+        movl    4(%esp), %eax
+        movl    8(%esp), %edx
+        pushl   %ebp
+        pushl   %ebx
+        pushl   %esi
+        pushl   %edi
+        movl    %esp, (%edx)
+        movl    %eax, %esp
+        jmp     trap_exit
+
+/* void nest_leave(u32 saved_esp, u32 value): back into nest_enter's caller. */
+nest_leave:
+        movl    8(%esp), %eax
+        movl    4(%esp), %esp
+        popl    %edi
+        popl    %esi
+        popl    %ebx
+        popl    %ebp
+        ret
+
+/* void frame_resume(struct trapframe *f): into user mode from f, dropping
+   everything on the kernel stack above it (a nested level that ended). */
+frame_resume:
+        movl    4(%esp), %esp
+        jmp     trap_exit
 
 /* void vm_enter(struct trapframe *tf): into the system VM, as if returning
    from a trap that came from it. */
         .globl  vm_enter
 vm_enter:
         movl    4(%esp), %esp
-        popal
-        popl    %gs
-        popl    %fs
-        popl    %es
-        popl    %ds
-        addl    $8, %esp
-        iretl
+        jmp     trap_exit
 
 /* void switch_to(u32 *save_esp, u32 new_esp): the scheduler's stack switch
    (core/sched.c). Saves the callee-saved registers on this stack, its ESP
@@ -128,6 +165,28 @@ try_wr_cr4:
         incl    %eax
         ret
 
+/* u32 ucopy(void *dst, const void *src, u32 n): a copy to or from a DPMI
+   client's memory, which may not be mapped: 0, or 1 + the fault's vector. */
+        .globl  ucopy
+ucopy:
+        pushl   %esi
+        pushl   %edi
+        movl    12(%esp), %edi
+        movl    16(%esp), %esi
+        movl    20(%esp), %ecx
+        movl    $7f, fixup_eip
+        rep movsb
+        movl    $0, fixup_eip
+        xorl    %eax, %eax
+        popl    %edi
+        popl    %esi
+        ret
+7:      movl    fixup_vec, %eax
+        incl    %eax
+        popl    %edi
+        popl    %esi
+        ret
+
 /* u32 try_rd32(u32 addr, u32 *v) / try_wr8(u32 addr, u32 v): the same for
    memory (the gdb stub reads and writes through these). */
         .globl  try_rd32, try_wr8
@@ -154,9 +213,13 @@ try_wr8:
 
         .data
         .align  4
-        .globl  fixup_eip, fixup_vec, ret_farptr
+        .globl  fixup_eip, fixup_vec, ret_farptr, espfix_pending, espfix_ptr
 fixup_eip:      .long 0
 fixup_vec:      .long 0
+espfix_pending: .long 0
+espfix_ptr:     .long 0                 /* ESP, then SS (the espfix selector) */
+                .word 0
+                .word 0
 ret_farptr:     .long 0                 /* offset, then the selector */
                 .word 0
 

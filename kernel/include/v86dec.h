@@ -28,5 +28,7 @@ struct v86insn {
 
 /* Decodes the instruction in b[0..n-1] (n is V86_MAX_LEN at CS:IP); returns in->kind. */
 int v86_decode(const u8 *b, u32 n, struct v86insn *in);
+/* The same with 2- or 4-byte default operand and address sizes (protected-mode code). */
+int v86_decode_size(const u8 *b, u32 n, struct v86insn *in, u32 def);
 
 #endif

@@ -49,6 +49,12 @@ extern void __cdecl __far glos_bp_call(void);
 extern void __cdecl __far glos_bp_xms(void);
 extern void __cdecl __far glos_kill(void);
 extern void __cdecl __far glos_kill_top(void);
+extern void __cdecl __far glos_bp_dpmi(void);
+extern void __cdecl __far glos_bp_nest(void);
+extern void __cdecl __far glos_bp_raw(void);
+extern void __cdecl __far glos_retf(void);
+extern void __cdecl __far glos_int21(void);
+extern void __cdecl __far glos_rmcb(void);
 extern void __cdecl __far stub_end(void);
 
 static unsigned stub_off(void (__cdecl __far *f)(void))
@@ -341,6 +347,7 @@ static int glos_main(int argc, char **argv)
         else if (!stricmp(argv[i], "/SELFTEST")) bi.flags |= BI_F_SELFTEST;
         else if (!stricmp(argv[i], "/NOVME")) bi.flags |= BI_F_NOVME;
         else if (!stricmp(argv[i], "/AGENT")) bi.flags |= BI_F_AGENT;
+        else if (!stricmp(argv[i], "/DPMITRACE")) bi.flags |= BI_F_DPMITRACE;
         else if (!stricmp(argv[i], "/RUN") && i + 1 < (unsigned)argc) {
             bi.flags |= BI_F_VM;
             run_at = (int)i + 1;
@@ -477,6 +484,12 @@ static int glos_main(int argc, char **argv)
     bi.bp_xms_off = stub_off(glos_bp_xms);
     bi.kill_off = stub_off(glos_kill);
     bi.kill_sp = stub_off(glos_kill_top);
+    bi.bp_dpmi_off = stub_off(glos_bp_dpmi);
+    bi.bp_nest_off = stub_off(glos_bp_nest);
+    bi.bp_raw_off = stub_off(glos_bp_raw);
+    bi.retf_off = stub_off(glos_retf);
+    bi.int21_off = stub_off(glos_int21);
+    bi.rmcb_off = stub_off(glos_rmcb);
     bi.stub_paras = (stub_off(stub_end) + 15) >> 4;
     stub_data.mode = bi.mode == BI_MODE_XMS;
     stub_data.a20init = (unsigned char)bi.a20_initial;

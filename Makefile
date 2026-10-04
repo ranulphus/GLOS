@@ -15,6 +15,8 @@
 #   make loopa-net      the NE2000s: DHCP, TCP echo, refused under a packet driver
 #   make loopa-ssh      ssh from the host into GLOS in Loop A (runs on the host)
 #   make loopa-m3       M3's exit: the ssh suite (agent, capture, SFTP, glos shot, VECCHK)
+#   make loopa-dpmi     the DPMI host: DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i,
+#                       MGA-Glide's HELLOs (M4a's exit: make loopa-m4a)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
@@ -29,7 +31,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-gdb check-deps clean help survey-tools
+.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-gdb check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -94,7 +96,13 @@ endef
 $(eval $(call dos_test,HOSTILE,hostile))
 $(eval $(call dos_test,XMSTEST,xmstest))
 $(eval $(call dos_test,ECHOARGS,echoargs))
-DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/ECHOARGS.EXE
+# DPMIMINI.COM: the smallest DPMI client, in assembly (M4a).
+build/ow/dos/DPMIMINI.COM: tests/dos/dpmimini.asm
+	@mkdir -p build/ow/dos/obj
+	$(Q)echo "  WASM    $<"
+	$(Q)$(OWENV) $(OWBIN)/wasm -q -fo=build/ow/dos/obj/dpmimini.obj $<
+	$(Q)$(WLINK) format dos com option quiet name $@ file build/ow/dos/obj/dpmimini.obj
+DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM
 dos-tests: $(DOS_TESTS)
 
 # ---- GLOSK.BIN: the kernel (host gcc -m32, linked at C0100000h) -------------
@@ -110,7 +118,8 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c \
          kernel/dbg/gdbstub.c kernel/vm/v86.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c \
          kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c kernel/dos/agent.c \
-         kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c
+         kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
+         kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
@@ -175,6 +184,10 @@ loopa-ssh: all dos-tests check-deps
 	$(Q)python3 tests/loopa/jobs.py ssh -j $(JOBS)
 # M3's exit: the ssh suite (its 486DX2 + NE2000 and bf6 + RTL8029 cases).
 loopa-m3: loopa-ssh
+# M4a: the DPMI host's checks (DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i).
+loopa-dpmi: all dos-tests build/dj/DPMICONF.EXE check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py dpmi -j $(JOBS)
+loopa-m4a: loopa-dpmi
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
 loopa-gdb: all check-deps
@@ -188,6 +201,11 @@ build/dj/IFTEST.EXE: tests/dos/iftest.c
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 survey-tools: build/dj/IFTEST.EXE
+# DPMICONF-32 (tests/dos/dpmiconf.c): the DPMI host's conformance checks, DJGPP (M4a).
+build/dj/DPMICONF.EXE: tests/dos/dpmiconf.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 
 clean:
 	rm -rf build out

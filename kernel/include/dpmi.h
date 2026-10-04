@@ -1,0 +1,131 @@
+/* The DPMI host (supervisor.md §12-§15; M4a). A DOS program in the system
+ * VM switches to protected mode through INT 2Fh 1687h's entry and then runs
+ * at ring 3 on the VM thread, in a context of its own: an address space, an
+ * LDT and a virtual IDT. Its software interrupts arrive through DPL-3 gates
+ * (as #GP for vectors 0-1Fh and 50h-5Fh), INT 31h is the API, and its
+ * real-mode calls and reflected interrupts run nested on the same thread.
+ *   host.c    contexts, the mode switch and the end, traps from ring 3,
+ *             the virtual IDT and the trampolines
+ *   ldt.c     descriptors and selectors
+ *   mem.c     linear and physical memory, DOS memory
+ *   rmcall.c  nested real-mode execution, 0300h-0302h, the raw switch
+ *   int31.c   the INT 31h functions */
+#ifndef K_DPMI_H
+#define K_DPMI_H
+#include "types.h"
+
+struct trapframe;
+
+#define LDT_ENTRIES    8192
+#define SEL_FIRST      16               /* 0000h's first index: selectors 04h-7Ch stay free for 000Dh */
+#define RM_STACK_PARAS 0x80             /* 1687h's SI: the host's real-mode stack, 2 KB of the client's */
+#define NRMCB          16
+#define NSEGSEL        64               /* 0002h's selectors */
+#define USER_BASE      0x00400000u      /* the user region (supervisor.md §4) */
+#define USER_END       0xC0000000u
+#define PHYS_WINDOW    0xE0000000u      /* 0800h: linear = physical from here to FFBFFFFFh */
+
+/* The trampoline page (SEL_TRAMP:offset), each entry a HLT that faults. */
+#define TR_VEC       0x000              /* + vector: the host's default PM handler for it */
+#define TR_RAW       0x100              /* 0306h: raw switch to real mode */
+#define TR_SAVE      0x101              /* 0305h: protected-mode state save/restore */
+#define TR_VENDOR    0x102              /* 0A00h "GLOS": the vendor API entry */
+#define TR_COUNT     0x103
+
+struct farptr {
+    u32 off;
+    u16 sel;
+};
+
+struct block {                          /* 0501h, and 0800h mappings */
+    u32 handle, lin, size;              /* size: a whole number of pages */
+    u8 phys;                            /* 0800h: physical memory, not ours to free */
+    struct block *next;
+};
+
+struct dosblk {                         /* 0100h */
+    u16 seg, sel, nsel;
+    struct dosblk *next;
+};
+
+struct rmcb {                           /* 0303h (called from M4b) */
+    u8 used;
+    struct farptr pm, regs;
+};
+
+struct dpmi_ctx {
+    u32 cr3;                            /* its page directory */
+    u32 *ldt;                           /* LDT_ENTRIES descriptors (two dwords each) */
+    u8 *ldt_used;
+    u8 bits32;                          /* a 32-bit client */
+    u16 psp, env_seg;                   /* real-mode segments */
+    u16 psp_sel, env_sel;
+    u16 rm_seg;                         /* the host's real-mode stack: the client's 1687h block */
+    u32 rm_sp;
+    struct farptr vidt[256];            /* 0204h/0205h; sel 0: the host's own handler */
+    struct farptr exc[32];              /* 0202h/0203h; delivered from M4b */
+    struct rmcb rmcb[NRMCB];
+    struct { u16 seg, sel; } segsel[NSEGSEL];   /* 0002h */
+    struct block *blocks;
+    u32 next_handle;
+    u32 lin_floor;                      /* the first 0501h block: the rest go above it (§12.3) */
+    u32 frames;                         /* physical frames held */
+    struct dosblk *dosblks;
+};
+
+extern struct dpmi_ctx *dctx;           /* the context, or 0 */
+
+/* host.c */
+void dpmi_init(void);
+void dpmi_1687(struct trapframe *tf);   /* INT 2Fh AX=1687h from V86 mode */
+int dpmi_v86_bp(struct trapframe *tf);  /* #UD at one of the stub's ARPLs: 1 if it was the host's */
+void dpmi_dos_exit(struct trapframe *tf);       /* V86 INT 21h 4Ch/00h: the client's program may be ending */
+void dpmi_to_pm(struct trapframe *tf, u16 cs, u32 eip, u16 ss, u32 esp, u16 ds, u16 es);
+void dpmi_to_v86(struct trapframe *tf, u16 cs, u32 ip, u16 ss, u32 sp, u16 ds, u16 es);
+void dpmi_iret(struct trapframe *tf);   /* pop an interrupt frame from the client's stack */
+void dpmi_unimpl(struct trapframe *tf, const char *what);
+
+/* ldt.c */
+void ldt_init(struct dpmi_ctx *c);
+int ldt_alloc(u32 n);                   /* the first of n free consecutive indices, or -1 */
+u16 ldt_new(u32 base, u32 limit, u8 access, u8 flags);  /* 0 if the LDT is full */
+int ldt_free(u16 sel);
+int ldt_valid(u16 sel);                 /* one of the client's allocated selectors */
+u32 sel_base(u16 sel);
+u32 sel_limit(u16 sel);                 /* in bytes, granularity applied */
+void sel_set_base(u16 sel, u32 base);
+void sel_set_limit(u16 sel, u32 limit);
+int sel_set_desc(u16 sel, u32 lo, u32 hi);      /* validated (DPL 3, code or data) */
+void sel_get_desc(u16 sel, u32 *lo, u32 *hi);
+int sel_lin(u16 sel, u32 off, u32 len, u32 *lin);       /* sel:off..+len inside the limit: its linear address */
+int user_rd(u16 sel, u32 off, void *dst, u32 n);        /* 0, or -1 if outside or not mapped */
+int user_wr(u16 sel, u32 off, const void *src, u32 n);
+
+/* mem.c */
+void lin_free_all(struct dpmi_ctx *c);
+int lin_alloc(u32 size, struct block **out);    /* 0, or a DPMI error */
+int lin_free(u32 handle);
+int lin_resize(u32 handle, u32 size, struct block **out);
+void lin_info(u32 *out12);              /* 0500h's twelve dwords */
+int phys_map(u32 phys, u32 size, u32 *lin);
+int phys_unmap(u32 lin);
+
+/* rmcall.c */
+struct rmregs {                         /* 0300h's structure ([DPMI0.9]) */
+    u32 edi, esi, ebp, reserved, ebx, edx, ecx, eax;
+    u16 flags, es, ds, fs, gs, ip, cs, sp, ss;
+} __attribute__((packed));
+enum { RM_INT, RM_FAR, RM_IRET };
+int rm_call(struct rmregs *r, int kind, u8 vec, const u16 *words, u32 nwords);  /* 0, or -1 */
+int rm_nest_return(struct trapframe *tf);       /* #UD at the nest breakpoint: 1 if it was one */
+void rm_reflect(struct trapframe *tf, u8 vec);  /* a PM software INT to real mode, general registers through */
+void rm_irq(u8 vec);                    /* an IRQ while the client runs: its real-mode handler, nested */
+void rm_raw_to_pm(struct trapframe *tf);        /* the stub's raw-switch ARPL */
+void rm_raw_to_rm(struct trapframe *tf);        /* SEL_TRAMP:TR_RAW */
+int rm_nesting(void);
+void rm_unwind(struct trapframe *tf) __attribute__((noreturn));  /* the client ended inside a nested call */
+
+/* int31.c */
+void int31(struct trapframe *tf);
+
+#endif

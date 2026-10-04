@@ -47,6 +47,7 @@ GLOSSTUB segment para public 'STUB' use16
 
         public  _stub_data, _pm_enter, _pm_ret, _vm_resume, _vm_state, _glos_call, _glos_bp_call
         public  _glos_xms_entry, _glos_bp_xms, _glos_kill, _glos_kill_top, _stub_resident, _stub_end
+        public  _glos_bp_dpmi, _glos_bp_nest, _glos_bp_raw, _glos_retf, _glos_int21, _glos_rmcb
 
 stub_start:
 
@@ -258,6 +259,21 @@ _glos_kill label near
         mov     ax, 4CFFh
         int     21h
         jmp     short _glos_kill
+
+; The DPMI host's real-mode side (M4a, kernel/dpmi): ARPLs it recognises.
+_glos_bp_dpmi label near                ; INT 2Fh 1687h's mode-switch entry (called far)
+        db      63h, 0C0h
+_glos_bp_nest label near                ; where the host's nested real-mode calls come back
+        db      63h, 0C0h
+_glos_bp_raw label near                 ; 0306h: the raw switch to protected mode (jumped to)
+        db      63h, 0C0h
+_glos_retf label near                   ; 0305h: real-mode state save/restore, nothing to do
+        retf
+_glos_int21 label near                  ; a client's INT 21h 4Ch, as the program, once the host let go
+        int     21h
+        jmp     short _glos_int21
+_glos_rmcb label near                   ; 0303h: real-mode callbacks, two bytes each
+        db      16 dup (63h, 0C0h)
 
 ; ---- going resident
 _stub_resident proc far

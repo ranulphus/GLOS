@@ -38,6 +38,7 @@ typedef unsigned int   bi_u32;
 #define BI_F_NOVME       0x0010                 /* /NOVME: trap every INT and CLI/STI even with VME (M3) */
 #define BI_F_SHELL       0x0020                 /* GLOS is the DOS shell (SHELL=, supervisor.md §2.2) */
 #define BI_F_AGENT       0x0040                 /* headless: SSH commands run in DOS (no mode option, or /AGENT) */
+#define BI_F_DPMITRACE   0x0080                 /* /DPMITRACE: every INT 31h call and its result on COM1 */
 
 /* glos_call() functions (the ARPL at bp_call_off, AX = fn, EBX = arg). */
 #define GLOS_CALL_LEAVE  1                      /* stop the VM, back to real mode; arg = exit code */
@@ -84,6 +85,9 @@ struct bootinfo {
     bi_u32 indos;                               /* DOS's InDOS flag (linear) */
     bi_u32 lol;                                 /* DOS's List of Lists (INT 21h 52h, linear), 0 unknown */
     bi_u32 font16, font14, font8, font8hi;      /* the video BIOS's 8x16, 8x14 and 8x8 (two halves) fonts */
+    /* M4a: the DPMI host's real-mode side, in the stub's segment */
+    bi_u32 bp_dpmi_off, bp_nest_off, bp_raw_off;        /* mode switch, nested-call return, raw switch */
+    bi_u32 retf_off, int21_off, rmcb_off;               /* a RETF, INT 21h, 16 callback ARPLs */
     bi_u32 stub_paras;                          /* the resident stub's size, in paragraphs */
     /* M3: GLOS as the shell (BI_F_SHELL) */
     char comspec[80];                           /* COMMAND.COM, for batch files and the console (and the agent's) */

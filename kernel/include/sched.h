@@ -33,6 +33,7 @@ struct thread {
     void *arg;
     u32 wake_at;                        /* sleeping: the tick to wake at */
     u32 ticks;                          /* ticks spent running */
+    u32 esp0;                           /* where a trap from user mode builds its frame (TSS.ESP0) */
 };
 
 struct waitq {
