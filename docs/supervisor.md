@@ -946,7 +946,7 @@ place where nothing else is in DOS by construction.
 | PGE is stored but every flush is global | None | |
 | The dynarec compiles PUSHF per IOPL | IOPL changes inside a session could be ignored | V86TEST case U found no problem; IOPL stays constant per session anyway |
 | Matrox G-series cards are AGP only | 486 profiles can't have a Matrox card | S3 Trio64V2/DX until a PCI-variant patch at M7 |
-| The dynarec (the old one MGA-Glide builds) checks segment limits on stores, never on loads (`MEM_LOAD_ADDR_EA_*`) | DJGPP's Ctrl-C and SIGALRM cut DS's limit to 4 KB in the IRQ handler; a loop that only reads never faults, on any host (found by djtst205's HANG, M4b) | djtst's signal tests run with `--dynarec 0` until local patch 0112 (MGA-Glide branch `dynarec-load-limits`, 81c0686; V86TEST case V) is merged |
+| The dynarec (the old one MGA-Glide builds) checks segment limits on stores, never on loads (`MEM_LOAD_ADDR_EA_*`) | DJGPP's Ctrl-C and SIGALRM cut DS's limit to 4 KB in the IRQ handler; a loop that only reads never faults, on any host (found by djtst205's HANG, M4b) | **Fixed:** patch 0112 (MGA-Glide 81c0686; V86TEST case V) |
 
 ## 21. Invariants checklist (for code review)
 

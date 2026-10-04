@@ -410,9 +410,9 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   - **MGA-Glide's STACKPG, MOUSETST, JOYTEST and SBBEEP** (`jobs.py dpmitools`): the same HX-TEST results with
     and without GLOS, and SBBEEP's 440 Hz recorded under GLOS.
 - **86Box:** the dynarec checks no segment limit on loads (supervisor.md §20), so DJGPP's Ctrl-C and SIGALRM
-  trick never faults in a read-only loop, on any host. djtst's three signal tests run with `--dynarec 0` until
-  local patch 0112 is merged: MGA-Glide branch `dynarec-load-limits` (81c0686), with V86TEST case V, which fails
-  without it on all three profiles. With it, HANG and CTRLC end on Ctrl-C under the dynarec on both hosts.
+  trick never faults in a read-only loop, on any host. Local patch 0112 fixes it (MGA-Glide 81c0686, merged and
+  pushed with the user's approval; deps.mk pins it), with V86TEST case V, which fails without it on all three
+  profiles. djtst runs every test with the dynarec on again.
 - **Test notes:** SIGNALS is held to its own ending (the deliberate SIGFPE), since one CWSDPMI run died of a GPF
   in its signal storm; the baseline batch is CALLed, so RUN.BAT goes on to HX-DONE.
 - **Found on the way:**

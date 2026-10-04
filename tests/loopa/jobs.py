@@ -537,12 +537,12 @@ CTRL_C = ["3:0x1d:down", "3.3:0x2e:down", "3.6:0x2e:up", "3.9:0x1d:up"]
 # NAME, keys timed from RUNOUT's "HX-RUN-START NAME" (scan codes: 39h space, 10h q)
 DJTST = [("FAULT", []), ("NULL", []), ("FPU", []), ("RAISE", []), ("INFOBLK", []), ("BRK", []), ("MULTISPN", []),
          ("NEAR", []), ("NEAR2", []), ("NEAR3", []), ("ENABLE", []), ("GETOCW", []), ("STAT", []),
-         ("TIMER", ["4:0x39"]), ("UCLOCK", ["3:0x39"]), ("CRASHME", []), ("CRASHGP", [])]
+         ("TIMER", ["4:0x39"]), ("UCLOCK", ["3:0x39"]), ("HANG", CTRL_C), ("CTRLC", CTRL_C),
+         ("SIGNALS", ["2:0x39", "10:0x10"]), ("CRASHME", []), ("CRASHGP", [])]
 # DJGPP turns a key or the timer into a signal by cutting DS's limit to 4 KB
-# in the IRQ handler, so the next data access faults. 86Box's dynarec checks
-# no segment limit on loads (src/codegen MEM_LOAD_ADDR_EA_*), so a loop that
-# only reads never faults, on any host: these run on the interpreter.
-DJTST_SIG = [("HANG", CTRL_C), ("CTRLC", CTRL_C), ("SIGNALS", ["2:0x39", "10:0x10"])]
+# in the IRQ handler, so the next data access faults: HANG, CTRLC and
+# SIGNALS need MGA-Glide's 86Box patch 0112 (pinned in deps.mk), without
+# which the dynarec checked no limit on loads.
 EXC_LINE = re.compile(r"^(.*?) at eip=([0-9a-f]+)")
 
 
@@ -552,7 +552,7 @@ def dj_runs(text):
     for l in text.splitlines():
         m = re.match(r"HX-OUT (\S+) ?(.*)", l)
         if m:
-            out.setdefault(m.group(1), [[], None])[0].append(m.group(2).rstrip())
+            out.setdefault(m.group(1), [[], None])[0].append(m.group(2))     # as sent: a cut keeps its length
         m = re.match(r"HX-RUN (\S+) code=(-?\d+)", l)
         if m:
             out.setdefault(m.group(1), [[], None])[1] = int(m.group(2))
@@ -632,32 +632,28 @@ DJ_EXPECT = {"SIGNALS": (255, ["Floating Point exception", "Exiting due to signa
 
 def djtst(profile, boot):
     """DJGPP 2.05's tests (djtst205) by RUNOUT, which sends what each prints
-    to COM1: under CWSDPMI, the baseline, and GLOS. The signal tests run on
-    86Box's interpreter (DJTST_SIG). Then CRASHME's crash report, its file,
-    and symcrash naming the code."""
+    to COM1: under CWSDPMI, the baseline, and GLOS. Then CRASHME's crash
+    report, its file, and symcrash naming the code."""
     tag = "%s-%s" % (profile, boot)
-    hosts = {}
-    for part, tests, extra in (("main", DJTST, []), ("sig", DJTST_SIG, ["--dynarec", "0"])):
-        bat = os.path.join(ROOT, "out", "djtst-%s-%s.bat" % (part, tag))
-        with open(bat, "w", newline="\r\n") as f:
-            for name, _ in tests:
-                prog = {"CRASHME": "C:\\TEST\\DJ\\CRASHME.EXE", "CRASHGP": "C:\\TEST\\DJ\\CRASHME.EXE gp"}.get(
-                    name, "C:\\TEST\\DJ\\%s.EXE" % name)
-                f.write("C:\\TEST\\RUNOUT.EXE %s %s\n" % (name, prog))
-            if part == "main":
-                f.write("C:\\TEST\\RUNOUT.EXE CRASHFILE %COMSPEC% /C TYPE C:\\GLOS\\CRASH\\CRASH000.TXT\n")
-        files = ["--file", bat + "=/TEST/DJ.BAT", "--file", "build/ow/dos/RUNOUT.EXE=/TEST/RUNOUT.EXE",
-                 "--file", "build/dj/CRASHME.EXE=/TEST/DJ/CRASHME.EXE"]
-        for name, _ in tests:
-            if name not in ("CRASHME", "CRASHGP"):
-                files += ["--file", "build/dj/djtst/%s.EXE=/TEST/DJ/%s.EXE" % (name, name)]
-        keys = ",".join("@HX-RUN-START %s,%s" % (n, ",".join(k)) for n, k in tests if k)
-        common = ["--machine", profile, "--boot-cfg", boot, "--timeout", "1500", "--idle", "300",
-                  "--cmd", "SERSAY HX-START djtst"] + extra + files + (["--keys", keys] if keys else [])
-        end = ["--cmd", "SERSAY HX-DONE 0"]
-        hosts["cws-" + part] = common + ["--cmd", "CALL C:\\TEST\\DJ.BAT"] + end      # CALL: back to RUN.BAT
-        hosts["glos-" + part] = common + GLOS_FILES + [
-            "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\DJ.BAT", "--cmd", "VECCHK check"] + end
+    bat = os.path.join(ROOT, "out", "djtst-" + tag + ".bat")
+    with open(bat, "w", newline="\r\n") as f:
+        for name, _ in DJTST:
+            prog = {"CRASHME": "C:\\TEST\\DJ\\CRASHME.EXE", "CRASHGP": "C:\\TEST\\DJ\\CRASHME.EXE gp"}.get(
+                name, "C:\\TEST\\DJ\\%s.EXE" % name)
+            f.write("C:\\TEST\\RUNOUT.EXE %s %s\n" % (name, prog))
+        f.write("C:\\TEST\\RUNOUT.EXE CRASHFILE %COMSPEC% /C TYPE C:\\GLOS\\CRASH\\CRASH000.TXT\n")
+    files = ["--file", bat + "=/TEST/DJ.BAT", "--file", "build/ow/dos/RUNOUT.EXE=/TEST/RUNOUT.EXE",
+             "--file", "build/dj/CRASHME.EXE=/TEST/DJ/CRASHME.EXE"]
+    for name, _ in DJTST:
+        if name not in ("CRASHME", "CRASHGP"):
+            files += ["--file", "build/dj/djtst/%s.EXE=/TEST/DJ/%s.EXE" % (name, name)]
+    keys = ",".join("@HX-RUN-START %s,%s" % (n, ",".join(k)) for n, k in DJTST if k)
+    common = ["--machine", profile, "--boot-cfg", boot, "--timeout", "1500", "--idle", "300", "--keys", keys,
+              "--cmd", "SERSAY HX-START djtst"] + files
+    end = ["--cmd", "SERSAY HX-DONE 0"]
+    hosts = {"cws": common + ["--cmd", "CALL C:\\TEST\\DJ.BAT"] + end,     # CALL: back to RUN.BAT
+             "glos": common + GLOS_FILES + ["--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\DJ.BAT",
+                                            "--cmd", "VECCHK check"] + end}
     procs = {h: run("djtst-%s-%s" % (h, tag), a, background=True) for h, a in hosts.items()}
     text, status = {}, {}
     for h, pr in procs.items():
@@ -666,13 +662,11 @@ def djtst(profile, boot):
         log = os.path.join(out, "serial.log")
         text[h] = open(log, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(log) else ""
         status[h] = open(os.path.join(out, "status")).read().strip() if os.path.exists(os.path.join(out, "status")) else "?"
-    text = {"cws": text["cws-main"] + text["cws-sig"], "glos": text["glos-main"] + text["glos-sig"],
-            "glos-main": text["glos-main"]}
     runs = {h: dj_runs(t) for h, t in text.items()}
     checks, info = {"runs-pass": all(v == "PASS" for v in status.values())}, ""
     if not checks["runs-pass"]:
         info += " runs: %s;" % " ".join("%s=%s" % kv for kv in sorted(status.items()))
-    for name, _ in DJTST + DJTST_SIG:
+    for name, _ in DJTST:
         if name in ("CRASHME", "CRASHGP"):
             continue
         g, c = runs["glos"].get(name), runs["cws"].get(name)
@@ -709,12 +703,12 @@ def djtst(profile, boot):
     checks["crash-codes"] = (runs["glos"].get("CRASHME", [[], None])[1] == 255
                              and runs["glos"].get("CRASHGP", [[], None])[1] == 255)
     checks["crash-file"] = any(l.startswith("why=exception vec=0e") for l in runs["glos"].get("CRASHFILE", [[]])[0])
-    log = os.path.join(ROOT, "out", "djtst-glos-main-" + tag, "serial.log")
+    log = os.path.join(ROOT, "out", "djtst-glos-" + tag, "serial.log")
     sym = subprocess.run([sys.executable, os.path.join(ROOT, "tools/symcrash.py"), log, "--exe",
                           os.path.join(ROOT, "build/dj/CRASHME.EXE")], capture_output=True, text=True).stdout
     checks["symcrash"] = re.search(r"^eip\s+\w+\s+_crash_here", sym, re.M) is not None and \
         re.search(r"^eip\s+\w+\s+_crash_gp", sym, re.M) is not None
-    checks["vecchk"] = gl.count("HX-VECCHK ok") == 2
+    checks["vecchk"] = "HX-VECCHK ok" in gl
     checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "DPMI-UNIMPL" not in gl
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("djtst-" + tag, "PASS" if not bad else "FAIL",
@@ -957,7 +951,7 @@ def main():
         res += matrix(dpmi_hello, [(b,) for b in a.boot or BOOTS], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "djtst":
-        return 0 if all(r[1] for r in matrix(djtst, combos, max(1, a.jobs // 3))) else 1
+        return 0 if all(r[1] for r in matrix(djtst, combos, max(1, a.jobs // 2))) else 1
     if a.suite == "dpmitools":
         return 0 if all(r[1] for r in matrix(dpmi_tools, [(b,) for b in a.boot or BOOTS], a.jobs)) else 1
     if a.suite == "net":
