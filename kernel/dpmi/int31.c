@@ -1,8 +1,9 @@
-/* The INT 31h functions (supervisor.md §13; M4a). Registers are the
+/* The INT 31h functions (supervisor.md §13; M4a, M4b). Registers are the
  * client's own, a 16-bit client using the low words of the index
  * registers; pointers are selector:offset in its LDT. Success clears CF;
- * failure sets it with the DPMI error in AX. Functions M4a doesn't have are
- * logged (GLOS-DPMI-UNIMPL) and fail with 8001h. */
+ * failure sets it with the DPMI error in AX. Functions GLOS doesn't have
+ * are logged (GLOS-DPMI-UNIMPL) and fail with 8001h. Handlers the client
+ * runs (IRQs, exceptions, callbacks) may call any of them (deliver.c). */
 #include <string.h>
 
 #include "glos/bootinfo.h"
@@ -195,7 +196,7 @@ static void fn_dos(struct trapframe *tf, u32 fn)
         r.es = d->seg;
     }
     r.flags = 2;
-    if (rm_call(&r, RM_INT, 0x21, 0, 0) != 0)
+    if (rm_call(tf, &r, RM_INT, 0x21, 0, 0) != 0)
         return fail(tf, 0x8010);
     if (r.flags & FL_CF) {                      /* DOS's error, and the largest block (the DJGPP stub reads BX) */
         SET16(tf->ebx, r.ebx);
@@ -214,7 +215,7 @@ static void fn_dos(struct trapframe *tf, u32 fn)
             r.eax = 0x4900;
             r.es = seg;
             r.flags = 2;
-            rm_call(&r, RM_INT, 0x21, 0, 0);
+            rm_call(tf, &r, RM_INT, 0x21, 0, 0);
             return fail(tf, 0x8011);
         }
         d->seg = (u16)r.eax;
@@ -253,7 +254,7 @@ static void fn_rmcall(struct trapframe *tf, u32 fn)
     sp = (cpu_desc_hi(tf->ss) & (1u << 22)) ? tf->esp : tf->esp & 0xFFFF;
     if (n && user_rd((u16)tf->ss, sp, words, n * 2) != 0)
         return fail(tf, 0x8021);
-    if (rm_call(&r, fn == 0x0300 ? RM_INT : fn == 0x0301 ? RM_FAR : RM_IRET, (u8)tf->ebx, words, n) != 0)
+    if (rm_call(tf, &r, fn == 0x0300 ? RM_INT : fn == 0x0301 ? RM_FAR : RM_IRET, (u8)tf->ebx, words, n) != 0)
         return fail(tf, 0x8012);
     if (user_wr((u16)tf->es, r_di(tf), &r, sizeof r) != 0)
         return fail(tf, 0x8021);
@@ -265,7 +266,7 @@ static void fn_rmcb(struct trapframe *tf, u32 fn)
     u32 i;
     if (fn == 0x0303) {
         for (i = 0; i < NRMCB && dctx->rmcb[i].used; i++) ;
-        if (i == NRMCB)
+        if (i == NRMCB || !(dctx->rmcb[i].stack_sel = ldt_new(0, 0xFFFF, 0xF2, 0)))
             return fail(tf, 0x8015);
         dctx->rmcb[i].used = 1;
         dctx->rmcb[i].pm.sel = (u16)tf->ds;
@@ -280,21 +281,34 @@ static void fn_rmcb(struct trapframe *tf, u32 fn)
     if (cx(tf) != vm.loader_cs || dx(tf) < vm.bi->rmcb_off || i >= NRMCB || !dctx->rmcb[i].used)
         return fail(tf, 0x8024);
     dctx->rmcb[i].used = 0;
+    ldt_free(dctx->rmcb[i].stack_sel);
     ok(tf);
 }
 
 /* ---- the rest */
 
+static int is_rmcb(u32 v)
+{
+    u32 ip = v & 0xFFFF;
+    return (v >> 16) == vm.loader_cs && ip >= vm.bi->rmcb_off && ip < vm.bi->rmcb_off + 2 * NRMCB;
+}
+
+/* A handler taking a code selector of the client's (or the host's own default back). */
+static int code_sel(u16 sel) { return ldt_valid(sel) && (cpu_desc_hi(sel) & 0x0800); }
+
 static void fn_vectors(struct trapframe *tf, u32 fn)
 {
     u8 n = (u8)tf->ebx;
     struct farptr *p;
+    u32 ivt = vm_rd32(n * 4u);
     switch (fn) {
     case 0x0200:
         SET16(tf->ecx, vm_rd16(n * 4u + 2));
         SET16(tf->edx, vm_rd16(n * 4u));
         break;
     case 0x0201:
+        if (is_rmcb(pair(cx(tf), dx(tf))) && !is_rmcb(ivt))
+            dctx->rm_prev[n] = ivt;             /* an RMCB takes it over: the pass-up guard's way on (§14.5) */
         vm_wr8(n * 4u, (u8)tf->edx);
         vm_wr8(n * 4u + 1, (u8)(tf->edx >> 8));
         vm_wr8(n * 4u + 2, (u8)tf->ecx);
@@ -302,19 +316,27 @@ static void fn_vectors(struct trapframe *tf, u32 fn)
         break;
     case 0x0202:
     case 0x0203:
-        if (n >= 32)
-            return fail(tf, 0x8021);
+    case 0x0210:
+    case 0x0212:
+        if (n >= 32 || (fn >= 0x0210 && !dctx->bits32))
+            return fail(tf, fn >= 0x0210 ? 0x8001 : 0x8021);    /* the 1.0 frame for 16-bit clients: M4d */
         p = &dctx->exc[n];
-        if (fn == 0x0202) {
-            u32 off = p->sel ? p->off : TR_VEC + n;
+        if (fn == 0x0202 || fn == 0x0210) {
+            u32 off = p->sel ? p->off : TR_EXC + n;
             SET16(tf->ecx, p->sel ? p->sel : SEL_TRAMP);
             if (dctx->bits32)
                 tf->edx = off;
             else
                 SET16(tf->edx, off);
+        } else if (cx(tf) == SEL_TRAMP && r_dx(tf) == TR_EXC + n) {
+            p->sel = 0;                         /* the host's own again */
+            dctx->exc10[n] = 0;
         } else {
+            if (!code_sel(cx(tf)))
+                return fail(tf, 0x8022);
             p->sel = cx(tf);
             p->off = r_dx(tf);
+            dctx->exc10[n] = fn == 0x0212;
         }
         break;
     case 0x0204:
@@ -330,8 +352,10 @@ static void fn_vectors(struct trapframe *tf, u32 fn)
         if (cx(tf) == SEL_TRAMP && r_dx(tf) == TR_VEC + n) {
             p->sel = 0;                         /* the host's own again */
         } else {
-            if (!(cpu_desc_hi(cx(tf)) & 0x0800) || !ldt_valid(cx(tf)))
+            if (!code_sel(cx(tf)))
                 return fail(tf, 0x8022);
+            if (!is_rmcb(ivt))
+                dctx->rm_prev[n] = ivt;         /* the pass-up guard's way on (§14.5) */
             p->sel = cx(tf);
             p->off = r_dx(tf);
         }
@@ -376,6 +400,35 @@ static void fn_mem(struct trapframe *tf, u32 fn)
         if ((e = phys_unmap(pair(bx(tf), cx(tf)))) != 0)
             return fail(tf, (u32)e);
         break;
+    }
+    ok(tf);
+}
+
+/* 0506h/0507h ([DPMI1.0]): ESI the handle, EBX the offset in the block,
+   ECX the pages, ES:(E)DX the attribute words; ECX after a failure: the
+   pages done. DJGPP uncommits its null page (crt0); DOS/4GW reads them. */
+static void fn_pages(struct trapframe *tf, u32 fn)
+{
+    u16 attr[64];
+    u32 left = tf->ecx, off = tf->ebx, at = r_dx(tf), done, all = 0;
+    int e;
+    while (left) {
+        u32 n = left > 64 ? 64 : left;
+        if (fn == 0x0507 && user_rd((u16)tf->es, at, attr, n * 2) != 0) {
+            tf->ecx = all;
+            return fail(tf, 0x8021);
+        }
+        e = page_attr(tf->esi, off, n, attr, fn == 0x0507, &done);
+        all += done;
+        if (e) {
+            tf->ecx = all;
+            return fail(tf, (u32)e);
+        }
+        if (fn == 0x0506 && user_wr((u16)tf->es, at, attr, n * 2) != 0)
+            return fail(tf, 0x8021);
+        left -= n;
+        off += n << 12;
+        at += n * 2;
     }
     ok(tf);
 }
@@ -425,7 +478,7 @@ static void dispatch(struct trapframe *tf)
         return;
     case 0x000D: fn_specific(tf); return;
     case 0x0100: case 0x0101: case 0x0102: fn_dos(tf, fn); return;
-    case 0x0200: case 0x0201: case 0x0202: case 0x0203: case 0x0204: case 0x0205:
+    case 0x0200: case 0x0201: case 0x0202: case 0x0203: case 0x0204: case 0x0205: case 0x0210: case 0x0212:
         fn_vectors(tf, fn);
         return;
     case 0x0300: case 0x0301: case 0x0302: fn_rmcall(tf, fn); return;
@@ -455,6 +508,7 @@ static void dispatch(struct trapframe *tf)
     case 0x0500: case 0x0501: case 0x0502: case 0x0503: case 0x0800: case 0x0801:
         fn_mem(tf, fn);
         return;
+    case 0x0506: case 0x0507: fn_pages(tf, fn); return;
     case 0x0600: case 0x0601: case 0x0602: case 0x0603: case 0x0702: case 0x0703:
         ok(tf);                                 /* locking and discarding: nothing pages out */
         return;

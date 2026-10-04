@@ -219,26 +219,20 @@ static void vm_exec_snap(void)
    from GLOS.EXE's stub, so DOS ends it and its parent carries on. Not while
    it is inside DOS, unless it stays there for two seconds (or force).
    1 when it did. */
-static int vm_try_kill(struct trapframe *tf, int force)
+/* The vectors and virtual devices as parent's child found them (the
+   snapshot of its EXEC), and the PIT as GLOS keeps it: 1, or 0 if there is
+   no snapshot. */
+static int snap_restore(u16 parent)
 {
-    u16 psp = vm_current_psp(), parent = 0;
-    u32 at_cs = tf->cs, at_ip = tf->eip & 0xFFFF;
     struct vm_snap *s;
     u8 irr[2];
     int i;
 
-    if (!force && vm.indos && vm_rd8(vm.indos) && timer_ticks() - vm.kill_since < 2048)
-        return 0;
-    vm.kill_req = 0;
-    if (psp)
-        parent = vm_rd16(psp * 16u + 0x16);
     for (i = SNAP_LEVELS - 1; i >= 0; i--)
         if (vm.snap[i].parent_psp && vm.snap[i].parent_psp == parent)
             break;
-    if (!psp || psp == vm.loader_psp || i < 0) {
-        kprintf("GLOS-KILL none psp=%04x\n", psp);
+    if (i < 0)
         return 0;
-    }
     s = &vm.snap[i];
     memcpy(vm_ptr(0), s->ivt, sizeof s->ivt);
     irr[0] = vm.pic.p[0].irr;
@@ -260,6 +254,27 @@ static int vm_try_kill(struct trapframe *tf, int force)
     for (; i < SNAP_LEVELS; i++)
         vm.snap[i].parent_psp = 0;
     reset_reqs = 0;
+    return 1;
+}
+
+/* A program DOS has just ended without its INT 21h 4Ch (an abort): its
+   parent is current again; what the program changed goes, as on a kill. */
+int vm_restore_child(void) { return snap_restore(vm_current_psp()); }
+
+static int vm_try_kill(struct trapframe *tf, int force)
+{
+    u16 psp = vm_current_psp(), parent = 0;
+    u32 at_cs = tf->cs, at_ip = tf->eip & 0xFFFF;
+
+    if (!force && vm.indos && vm_rd8(vm.indos) && timer_ticks() - vm.kill_since < 2048)
+        return 0;
+    vm.kill_req = 0;
+    if (psp)
+        parent = vm_rd16(psp * 16u + 0x16);
+    if (!psp || psp == vm.loader_psp || !snap_restore(parent)) {
+        kprintf("GLOS-KILL none psp=%04x\n", psp);
+        return 0;
+    }
 
     vm.vif = 1;
     vm.vflags_hi = 0;
@@ -285,6 +300,10 @@ void vm_return(struct trapframe *tf)
         vec = vpic_ack(&vm.pic);
         if (vec >= 0) {
             vm.n_irq++;
+            if (dctx && dpmi_irq(tf, (u8)vec)) {    /* a DPMI client's handler first, in protected mode (§14.1) */
+                dpmi_return(tf);
+                return;
+            }
             vm_int(tf, (u8)vec, tf->eip & 0xFFFF);
         }
     }
@@ -561,6 +580,12 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
     case 0x29:
         agent_vm_int29(tf);
         break;
+    case 0x1C:
+    case 0x23:
+    case 0x24:
+        if (dpmi_passup(tf, n, next))
+            return;
+        break;
     case 0x21:
         agent_vm_int21(tf);
         if ((ax >> 8) == 0x4B && (ax & 0xFF) <= 1)
@@ -695,7 +720,7 @@ void vm_exception(struct trapframe *tf)
 
 /* Software INTs GLOS handles (supervisor.md §9.3): with VME, the rest go
    straight through the IVT. */
-static const u8 trapped_ints[] = { 0x15, 0x21, 0x2F };
+static const u8 trapped_ints[] = { 0x15, 0x1C, 0x21, 0x23, 0x24, 0x2F };   /* 1Ch/23h/24h: a DPMI client's (§14.4) */
 
 static const u16 trapped_ports[] = { 0x20, 0x21, 0xA0, 0xA1, 0x60, 0x64, 0x70, 0x71, 0x92,
                                      0xCF8, 0xCF9, 0xCFA, 0xCFB, 0xCFC, 0xCFD, 0xCFE, 0xCFF };

@@ -18,20 +18,24 @@
  * trampoline page (SEL_TRAMP), so a client that chains to the "previous
  * handler" 0204h gave it reaches them too.
  *
- * Interrupts: IRQs that arrive while the client runs go to the virtual PIC
- * as always; on the way back to ring 3, with the virtual IF on, each is run
- * by its real-mode handler, nested (M4b gives clients protected-mode IRQ
- * handlers first). Exceptions end the client (handlers: M4b).
+ * Interrupts: IRQs go to the virtual PIC as always; when the virtual IF
+ * lets one through, a client's protected-mode handler gets it first, in
+ * either mode (deliver.c), and the end of its chain, the host's handler,
+ * runs the real-mode one nested. Exceptions go to the client's handlers
+ * (deliver.c), and those it has none for end it with a crash report.
  *
  * The end: INT 21h 4Ch in protected mode frees the context and goes on in
  * V86 mode, as the program, at the stub's INT 21h with AX as it was; DOS
  * then ends the program. A program that ends from real mode (after a raw
  * switch, or inside a nested call) frees the context when DOS sees its
- * 4Ch. One context at a time in M4a; children's own mode switches arrive
+ * 4Ch. Any other way DOS ends it (a Ctrl-C or critical-error abort) is
+ * caught at its terminate address, PSP:0Ah, which the mode switch points at
+ * the stub's term ARPL (M4b). One context at a time in M4a; children's own mode switches arrive
  * with M4c. */
 #include "glos/bootinfo.h"
 #include "arch.h"
 #include "dpmi.h"
+#include "io.h"
 #include "kprintf.h"
 #include "mm.h"
 #include "sched.h"
@@ -41,6 +45,7 @@
 
 struct dpmi_ctx *dctx;
 static struct dpmi_ctx ctx_store;
+static u32 term_vec;                            /* the client's own terminate address, PSP:0Ah's before */
 
 void dpmi_init(void)
 {
@@ -81,12 +86,12 @@ void dpmi_to_v86(struct trapframe *tf, u16 cs, u32 ip, u16 ss, u32 sp, u16 ds, u
     tf->eflags = (tf->eflags & (FL_ARITH | FL_TF | FL_AC)) | FL_VM | FL_IF | 2;
 }
 
-static u32 sp_of(const struct trapframe *tf)
+u32 sp_of(const struct trapframe *tf)
 {
     return (cpu_desc_hi(tf->ss) & (1u << 22)) ? tf->esp : tf->esp & 0xFFFF;
 }
 
-static void set_sp(struct trapframe *tf, u32 sp)
+void set_sp(struct trapframe *tf, u32 sp)
 {
     if (cpu_desc_hi(tf->ss) & (1u << 22))
         tf->esp = sp;
@@ -165,13 +170,16 @@ static void retf(struct trapframe *tf)
 
 /* ---- contexts */
 
-static void ctx_destroy(void)
+/* psp: the PSP is still the program's (not when DOS has ended it). */
+static void ctx_destroy(int psp)
 {
     struct dpmi_ctx *c = dctx;
     if (!c)
         return;
-    vm_wr8(c->psp * 16u + 0x2C, (u8)c->env_seg);       /* PSP:2Ch as it was */
-    vm_wr8(c->psp * 16u + 0x2D, (u8)(c->env_seg >> 8));
+    if (psp) {
+        vm_wr8(c->psp * 16u + 0x2C, (u8)c->env_seg);   /* PSP:2Ch as it was */
+        vm_wr8(c->psp * 16u + 0x2D, (u8)(c->env_seg >> 8));
+    }
     lin_free_all(c);
     while (c->dosblks) {                        /* DOS frees the blocks with the program */
         struct dosblk *d = c->dosblks;
@@ -222,6 +230,7 @@ static void mode_switch(struct trapframe *tf)
     dctx = c;
     ldt_init(c);
     c->bits32 = tf->eax & 1;
+    c->exc_depth = 0;
     c->psp = vm_current_psp();
     c->env_seg = vm_rd16(c->psp * 16u + 0x2C);
     c->rm_seg = (u16)tf->v86_es;
@@ -237,8 +246,23 @@ static void mode_switch(struct trapframe *tf)
     c->psp_sel = ldt_new(c->psp * 16u, 0xFFFF, 0xF2, 0x00);
     env_size = c->env_seg ? (u32)vm_rd16((c->env_seg - 1) * 16u + 3) * 16 : 16;
     c->env_sel = c->env_seg ? ldt_new(c->env_seg * 16u, env_size - 1, 0xF2, 0x00) : 0;
+    if (lin_host(LSTACK_LIN, LSTACK_SIZE) != 0) {       /* the locked stack (§14.2) */
+        kprintf("GLOS-DPMI start failed why=memory\n");
+        ctx_destroy(1);
+        tf->cs = ret_cs;
+        tf->eip = ret_ip;
+        SET16(tf->eax, 0x8013);
+        tf->eflags |= FL_CF;
+        return;
+    }
+    c->lsel = ldt_new(LSTACK_LIN, LSTACK_SIZE - 1, 0xF2, data_flags);
     vm_wr8(c->psp * 16u + 0x2C, (u8)c->env_sel);
     vm_wr8(c->psp * 16u + 0x2D, (u8)(c->env_sel >> 8));
+    term_vec = vm_rd32(c->psp * 16u + 0x0A);    /* DOS goes there when the program ends, however it ends */
+    vm_wr8(c->psp * 16u + 0x0A, (u8)vm.bi->bp_term_off);
+    vm_wr8(c->psp * 16u + 0x0B, (u8)(vm.bi->bp_term_off >> 8));
+    vm_wr8(c->psp * 16u + 0x0C, (u8)vm.loader_cs);
+    vm_wr8(c->psp * 16u + 0x0D, (u8)(vm.loader_cs >> 8));
 
     dpmi_to_pm(tf, cs_sel, ret_ip, ss_sel, sp + 4, ds_sel, c->psp_sel);
     tf->eflags &= ~FL_CF;
@@ -260,16 +284,23 @@ void dpmi_1687(struct trapframe *tf)
 
 /* ---- the end */
 
-static void end_client(struct trapframe *tf, u8 code, int killed)
+/* The end from protected mode: INT 21h 4Ch, a kill, a crash. Inside a
+   nested real-mode call (a handler run from V86 mode), the levels below
+   are dropped and the V86 code carries on from the top. */
+void dpmi_end(struct trapframe *tf, u8 code, int killed)
 {
     kprintf("GLOS-DPMI exit code=%u%s\n", code, killed ? " killed" : "");
-    ctx_destroy();
+    ctx_destroy(1);
     dpmi_to_v86(tf, vm.loader_cs, killed ? vm.bi->kill_off : vm.bi->int21_off, vm.loader_cs, vm.bi->kill_sp,
                 vm.loader_cs, vm.loader_cs);
     SET16(tf->eax, 0x4C00 | code);
     vm.vif = 1;
     if (killed)
         vm_kill_now(tf);                        /* vectors and devices as the program found them */
+    if (rm_nesting()) {
+        vm_return(tf);
+        rm_unwind(tf);
+    }
 }
 
 /* The program's INT 21h 4Ch (or 00h) reaching DOS from V86 mode. */
@@ -278,16 +309,10 @@ void dpmi_dos_exit(struct trapframe *tf)
     if (!dctx || vm_current_psp() != dctx->psp)
         return;
     kprintf("GLOS-DPMI exit code=%u real-mode\n", (tf->eax >> 8) == 0x4C ? tf->eax & 0xFF : 0);
-    ctx_destroy();
+    ctx_destroy(1);
 }
 
 /* ---- traps from ring 3 */
-
-static void exception(struct trapframe *tf)
-{
-    kprintf("GLOS-DPMI exception vec=%x err=%x at=%04x:%p\n", tf->vec, tf->err, tf->cs & 0xFFFF, tf->eip);
-    end_client(tf, 0xFF, 1);
-}
 
 /* The host's own handler for vector n (the default the virtual IDT holds). */
 static void host_int(struct trapframe *tf, u8 n)
@@ -296,7 +321,7 @@ static void host_int(struct trapframe *tf, u8 n)
     if (n == 0x31) {
         int31(tf);
     } else if (n == 0x21 && (ax >> 8) == 0x4C) {
-        end_client(tf, (u8)ax, 0);
+        dpmi_end(tf, (u8)ax, 0);
     } else if (n == 0x2F && ax == 0x1686) {
         SET16(tf->eax, 0);                      /* in protected mode */
     } else {
@@ -304,16 +329,15 @@ static void host_int(struct trapframe *tf, u8 n)
     }
 }
 
-static void soft_int(struct trapframe *tf, u8 n, u32 next)
+void pm_soft_int(struct trapframe *tf, u8 n, u32 next)
 {
     struct farptr *h = &dctx->vidt[n];
     tf->eip = next;
-    if (h->sel) {                               /* the client's handler, as an interrupt gate */
-        if (push_frame(tf, next) != 0) {
-            exception(tf);
+    if (h->sel) {                               /* the client's handler, the virtual IF as it was: */
+        if (push_frame(tf, next) != 0) {        /* its IRET can't give it back at IOPL 0 (§14.3) */
+            crash_report(tf, "no-stack");
             return;
         }
-        vm.vif = 0;
         tf->cs = h->sel;
         tf->eip = h->off;
         return;
@@ -324,12 +348,20 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
 /* A host trampoline (a HLT at SEL_TRAMP:off). */
 static void trampoline(struct trapframe *tf, u32 off)
 {
-    if (off < 0x100) {                          /* a client chained to the host's handler */
+    if (off < TR_EXC) {                         /* a client chained to the host's handler */
         int ending;
         host_int(tf, (u8)off);
         ending = (tf->eflags & FL_VM) != 0;     /* INT 21h 4Ch: no frame to return through */
         if (!ending)
             iret_frame(tf, 1);
+        return;
+    }
+    if (off < TR_EXC + 32) {
+        dpmi_exc_default(tf, off - TR_EXC);
+        return;
+    }
+    if (off >= TR_RET && off < TR_RET + NENTRY) {
+        dpmi_entry_return(tf, off - TR_RET);
         return;
     }
     switch (off) {
@@ -346,8 +378,14 @@ static void trampoline(struct trapframe *tf, u32 off)
         retf(tf);
         return;
     default:
-        exception(tf);
+        crash_report(tf, "trampoline");
     }
+}
+
+static int at_return(const struct trapframe *tf)
+{
+    return dctx && !(tf->eflags & FL_VM) && (tf->cs & 0xFFFF) == SEL_TRAMP && tf->eip >= TR_RET
+           && tf->eip < TR_RET + NENTRY;
 }
 
 static void general_protection(struct trapframe *tf)
@@ -357,17 +395,20 @@ static void general_protection(struct trapframe *tf)
     u32 lin, n = V86_MAX_LEN, v, port;
 
     if ((tf->cs & 0xFFFF) == SEL_TRAMP) {
-        trampoline(tf, tf->eip);
+        int k = 0;
+        do                                      /* a chain to the host's handler often ends in an entry's return */
+            trampoline(tf, tf->eip);
+        while (at_return(tf) && ++k < 4);
         return;
     }
     while (n && sel_lin((u16)tf->cs, tf->eip, n, &lin) != 0)
         n--;                                    /* the instruction may end at the segment's limit */
     if (!n || ucopy(b, (const void *)lin, n)) {
-        exception(tf);
+        dpmi_exception(tf);
         return;
     }
     if ((tf->err & 3) == 2 && b[0] == 0xCD && b[1] == (tf->err >> 3)) {   /* INT n through a DPL-0 gate */
-        soft_int(tf, b[1], tf->eip + 2);
+        pm_soft_int(tf, b[1], tf->eip + 2);
         return;
     }
     v86_decode_size(b, n, &in, (cpu_desc_hi(tf->cs) & (1u << 22)) ? 4 : 2);
@@ -393,7 +434,7 @@ static void general_protection(struct trapframe *tf)
         vdev_out((u16)port, tf->eax, in.width);
         break;
     default:
-        exception(tf);
+        dpmi_exception(tf);
         return;
     }
     tf->eip += in.len;
@@ -405,12 +446,14 @@ void dpmi_trap(struct trapframe *tf)
     if (!dctx) {                                /* ring 3 without a client: can't happen */
         panic("ring3-without-client", tf);
     }
+    if (v == 14)
+        dctx->cr2 = read_cr2();                 /* before anything else can fault */
     if (v == 13)
         general_protection(tf);
     else if (v >= 0x20)
-        soft_int(tf, (u8)v, tf->eip);           /* a DPL-3 gate: EIP is past the INT already */
+        pm_soft_int(tf, (u8)v, tf->eip);        /* a DPL-3 gate: EIP is past the INT already */
     else
-        exception(tf);
+        dpmi_exception(tf);
 }
 
 /* ---- back to ring 3 */
@@ -438,16 +481,18 @@ static int loadable(u32 sel, int code)
 void dpmi_return(struct trapframe *tf)
 {
     if (vm.kill_req) {
-        end_client(tf, 0xFF, 1);
+        dpmi_end(tf, 0xFF, 1);
         vm_return(tf);
         return;
     }
-    while (vm.vif && vpic_pending(&vm.pic) && dctx) {   /* IRQs: their real-mode handlers (M4a) */
+    while (vm.vif && vpic_pending(&vm.pic) && dctx) {
         int vec = vpic_ack(&vm.pic);
         if (vec < 0)
             break;
         vm.n_irq++;
-        rm_irq((u8)vec);
+        if (dpmi_irq(tf, (u8)vec))              /* the client's handler first, its virtual IF off */
+            break;
+        rm_irq(tf, (u8)vec);
     }
     if (tf->eflags & FL_VM) {
         vm_return(tf);
@@ -459,7 +504,7 @@ void dpmi_return(struct trapframe *tf)
     if (!loadable(tf->gs, 0)) tf->gs = 0;
     if (!loadable(tf->cs, 1) || !loadable(tf->ss, 0) || (tf->ss & 0xFFFF) < 4) {
         kprintf("GLOS-DPMI bad-frame cs=%04x ss=%04x\n", tf->cs & 0xFFFF, tf->ss & 0xFFFF);
-        end_client(tf, 0xFF, 1);
+        crash_report(tf, "bad-frame");
         vm_return(tf);
         return;
     }
@@ -468,12 +513,31 @@ void dpmi_return(struct trapframe *tf)
 
 /* ---- the stub's ARPLs from V86 mode */
 
+/* DOS ended the program and went to its terminate address: the context
+   goes, if nothing ended it before, and DOS's way on is the old address.
+   An abort from inside a nested real-mode call leaves the levels below. */
+static void terminated(struct trapframe *tf)
+{
+    if (dctx) {                                 /* an abort: vectors and devices as a kill leaves them */
+        kprintf("GLOS-DPMI exit terminated restored=%u\n", vm_restore_child());
+        ctx_destroy(0);
+    }
+    tf->cs = term_vec >> 16;
+    tf->eip = term_vec & 0xFFFF;
+    if (rm_nesting())                           /* it ended inside a nested real-mode call */
+        rm_unwind(tf);
+}
+
 int dpmi_v86_bp(struct trapframe *tf)
 {
     u32 ip = tf->eip & 0xFFFF;
     const struct bootinfo *bi = vm.bi;
     if (tf->cs != vm.loader_cs)
         return 0;
+    if (ip == bi->bp_term_off && term_vec) {
+        terminated(tf);
+        return 1;
+    }
     if (ip == bi->bp_dpmi_off) {
         mode_switch(tf);
         return 1;
@@ -484,8 +548,13 @@ int dpmi_v86_bp(struct trapframe *tf)
         rm_raw_to_pm(tf);
         return 1;
     }
-    if (ip >= bi->rmcb_off && ip < bi->rmcb_off + 2 * NRMCB && dctx) {
-        dpmi_unimpl(tf, "rmcb-call");           /* M4b; meanwhile as if it returned at once */
+    if (ip >= bi->rmcb_off && ip < bi->rmcb_off + 2 * NRMCB && !((ip - bi->rmcb_off) & 1) && dctx) {
+        if (dctx->rmcb[(ip - bi->rmcb_off) / 2].used && !dctx->ending) {
+            dpmi_rmcb(tf, (ip - bi->rmcb_off) / 2);
+            return 1;
+        }
+        if (!dctx->ending)                      /* a callback since freed, or one while the crash report */
+            dpmi_unimpl(tf, "rmcb-free");       /* is written: as if it returned at once */
         tf->eip = vm_rd16(vm_lin(tf->ss, tf->esp & 0xFFFF));
         tf->cs = vm_rd16(vm_lin(tf->ss, (tf->esp + 2) & 0xFFFF));
         SET16(tf->esp, tf->esp + 6);

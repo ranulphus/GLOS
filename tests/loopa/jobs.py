@@ -430,8 +430,8 @@ def dpmiconf(profile, boot):
                                                  if l.startswith("HX-TEST") and " FAIL" in l))
     gl = out["glos"][1]
     unimpl = re.findall(r"GLOS-DPMI-UNIMPL \S+ ax=(\w+)", gl)
-    checks["unimpl-known"] = set(unimpl) <= {"0507"}            # 0507h arrives with M4b
-    checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "GLOS-DPMI exception" not in gl
+    checks["unimpl-none"] = not unimpl
+    checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "GLOS-CRASH" not in gl
     checks["vecchk"] = "HX-VECCHK ok" in gl
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("dpmiconf-" + tag, "PASS" if not bad else "FAIL",
@@ -484,8 +484,8 @@ def dpmi_hello(boot):
                                os.path.join(ROOT, "out", "hello-%s-glos-%s" % (kind, boot), i + ".png")) for i in imgs)
         unimpl = set(re.findall(r"GLOS-DPMI-UNIMPL \S+ ax=(\w+)", gl))
         res[kind] = (st0 == "PASS" and st1 == "PASS" and lines(gl) == lines(base) and lines(base) != [] and same
-                     and "GLOS-DPMI start" in gl and "GLOS-PANIC" not in gl and "GLOS-DPMI exception" not in gl
-                     and unimpl <= {"0507", "0506"})          # page attributes: M4b
+                     and "GLOS-DPMI start" in gl and "GLOS-PANIC" not in gl and "GLOS-CRASH" not in gl
+                     and not unimpl)
         if not res[kind]:
             info += " %s: %s/%s" % (kind, st0, st1)
     bad = [k for k, v in res.items() if not v]
@@ -529,6 +529,210 @@ def dpmi(profile, boot):
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("dpmi-" + tag, "PASS" if not bad else "FAIL",
                              "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+# ---- M4b: DJGPP 2.05's own tests (make djtst), CRASHME, MGA-Glide's DJGPP tools
+
+CTRL_C = ["3:0x1d:down", "3.3:0x2e:down", "3.6:0x2e:up", "3.9:0x1d:up"]
+# NAME, keys timed from RUNOUT's "HX-RUN-START NAME" (scan codes: 39h space, 10h q)
+DJTST = [("FAULT", []), ("NULL", []), ("FPU", []), ("RAISE", []), ("INFOBLK", []), ("BRK", []), ("MULTISPN", []),
+         ("NEAR", []), ("NEAR2", []), ("NEAR3", []), ("ENABLE", []), ("GETOCW", []), ("STAT", []),
+         ("TIMER", ["4:0x39"]), ("UCLOCK", ["3:0x39"]), ("CRASHME", []), ("CRASHGP", [])]
+# DJGPP turns a key or the timer into a signal by cutting DS's limit to 4 KB
+# in the IRQ handler, so the next data access faults. 86Box's dynarec checks
+# no segment limit on loads (src/codegen MEM_LOAD_ADDR_EA_*), so a loop that
+# only reads never faults, on any host: these run on the interpreter.
+DJTST_SIG = [("HANG", CTRL_C), ("CTRLC", CTRL_C), ("SIGNALS", ["2:0x39", "10:0x10"])]
+EXC_LINE = re.compile(r"^(.*?) at eip=([0-9a-f]+)")
+
+
+def dj_runs(text):
+    """{NAME: (output lines, exit code)} from RUNOUT's HX-OUT and HX-RUN lines."""
+    out = {}
+    for l in text.splitlines():
+        m = re.match(r"HX-OUT (\S+) ?(.*)", l)
+        if m:
+            out.setdefault(m.group(1), [[], None])[0].append(m.group(2).rstrip())
+        m = re.match(r"HX-RUN (\S+) code=(-?\d+)", l)
+        if m:
+            out.setdefault(m.group(1), [[], None])[1] = int(m.group(2))
+    return out
+
+
+def dj_key(name, lines):
+    """What must be the same on two hosts: the lines that don't hold their
+    addresses, selectors or timings, and the fault's kind and EIP."""
+    keep = []
+    for l in lines:
+        m = EXC_LINE.match(l)
+        if m and not l.startswith("SIGFPE handler"):
+            keep.append("%s at eip=%s" % (m.group(1), m.group(2)) if name not in ("HANG", "CTRLC", "SIGNALS")
+                        else m.group(1))                # where a key or a timer stopped it: anywhere
+        elif "xiting due to" in l or l.startswith("gnal SIG"):
+            continue                            # below, from the joined text
+        elif l.startswith("Call frame traceback"):
+            keep.append(l)
+        elif name in ("FPU", "RAISE", "GETOCW", "STAT", "BRK", "ENABLE"):
+            keep.append(l)
+        elif name == "INFOBLK" and not re.search(r"linear_address|pid|selector|run mode", l):
+            keep.append(l)
+        elif name == "TIMER" and not l.startswith("iter"):
+            keep.append(l)
+    # DJGPP's signal line may follow a line the program hadn't ended, and
+    # RUNOUT cuts lines at 160 bytes: look for it in the whole output.
+    keep += ["Exiting due to signal " + m for m in re.findall(r"Exiting due to signal (SIG[A-Z]+)", "".join(lines))]
+    return keep
+
+
+def dj_own(name, lines):
+    """Checks a run must pass on its own: None, or why not."""
+    if name == "TIMER":
+        tics = [int(m.group(1)) for m in (re.search(r"tics = (\d+)", l) for l in lines) if m]
+        return None if tics and max(tics) >= 5 else "tics=%s" % (max(tics) if tics else 0)
+    if name == "UCLOCK":
+        if sum(1 for l in lines if l.startswith("uclock ->")) < 40:
+            return "only %d readings" % sum(1 for l in lines if l.startswith("uclock ->"))
+        for l in lines[1:]:
+            m = re.match(r"uclock -> \w{8} \w{8}\s+(\w{8}) (\w{8})", l)
+            if m and (m.group(1) != "00000000" or int(m.group(2), 16) >= 0x80000000):
+                return "went back: " + l
+        return None
+    if name in ("HANG", "CTRLC"):
+        return None if any(l.startswith("INTR key Pressed") for l in lines) else "no SIGINT"
+    if name == "SIGNALS":
+        ticks = [int(m.group(1)) for m in (re.match(r"Tick (\d+)", l) for l in lines) if m]
+        fpe = sum(1 for l in lines if l.endswith("SIGFPE") and l.startswith("."))
+        return None if ticks and max(ticks) >= 5 and fpe else "ticks=%s fpe=%d" % (max(ticks) if ticks else 0, fpe)
+    return None
+
+
+# ENABLE reads IF with PUSHF after DJGPP's disable(). CWSDPMI (IOPL 3) clears
+# the real IF; HDPMI32i clears it too, at IOPL 0, by returning to the client
+# with IF off, which a `cli; jmp $` then turns into a dead machine. GLOS keeps
+# the virtual IF (PRD D20), so PUSHF shows IF set and ENABLE stops at its
+# first check: expected until direct-mode profiles (IOPL 3, M4e) run it.
+DJ_KNOWN = {"ENABLE": (1, "disable -> incorrect; expected 0")}
+
+
+def djtst(profile, boot):
+    """DJGPP 2.05's tests (djtst205) by RUNOUT, which sends what each prints
+    to COM1: under CWSDPMI, the baseline, and GLOS. The signal tests run on
+    86Box's interpreter (DJTST_SIG). Then CRASHME's crash report, its file,
+    and symcrash naming the code."""
+    tag = "%s-%s" % (profile, boot)
+    hosts = {}
+    for part, tests, extra in (("main", DJTST, []), ("sig", DJTST_SIG, ["--dynarec", "0"])):
+        bat = os.path.join(ROOT, "out", "djtst-%s-%s.bat" % (part, tag))
+        with open(bat, "w", newline="\r\n") as f:
+            for name, _ in tests:
+                prog = {"CRASHME": "C:\\TEST\\DJ\\CRASHME.EXE", "CRASHGP": "C:\\TEST\\DJ\\CRASHME.EXE gp"}.get(
+                    name, "C:\\TEST\\DJ\\%s.EXE" % name)
+                f.write("C:\\TEST\\RUNOUT.EXE %s %s\n" % (name, prog))
+            if part == "main":
+                f.write("C:\\TEST\\RUNOUT.EXE CRASHFILE %COMSPEC% /C TYPE C:\\GLOS\\CRASH\\CRASH000.TXT\n")
+        files = ["--file", bat + "=/TEST/DJ.BAT", "--file", "build/ow/dos/RUNOUT.EXE=/TEST/RUNOUT.EXE",
+                 "--file", "build/dj/CRASHME.EXE=/TEST/DJ/CRASHME.EXE"]
+        for name, _ in tests:
+            if name not in ("CRASHME", "CRASHGP"):
+                files += ["--file", "build/dj/djtst/%s.EXE=/TEST/DJ/%s.EXE" % (name, name)]
+        keys = ",".join("@HX-RUN-START %s,%s" % (n, ",".join(k)) for n, k in tests if k)
+        common = ["--machine", profile, "--boot-cfg", boot, "--timeout", "1500", "--idle", "300",
+                  "--cmd", "SERSAY HX-START djtst"] + extra + files + (["--keys", keys] if keys else [])
+        end = ["--cmd", "SERSAY HX-DONE 0"]
+        hosts["cws-" + part] = common + ["--cmd", "C:\\TEST\\DJ.BAT"] + end
+        hosts["glos-" + part] = common + GLOS_FILES + [
+            "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\DJ.BAT", "--cmd", "VECCHK check"] + end
+    procs = {h: run("djtst-%s-%s" % (h, tag), a, background=True) for h, a in hosts.items()}
+    text = {}
+    for h, pr in procs.items():
+        pr.wait()
+        log = os.path.join(ROOT, "out", "djtst-%s-%s" % (h, tag), "serial.log")
+        text[h] = open(log, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(log) else ""
+    text = {"cws": text["cws-main"] + text["cws-sig"], "glos": text["glos-main"] + text["glos-sig"],
+            "glos-main": text["glos-main"]}
+    runs = {h: dj_runs(t) for h, t in text.items()}
+    checks, info = {}, ""
+    for name, _ in DJTST + DJTST_SIG:
+        if name in ("CRASHME", "CRASHGP"):
+            continue
+        g, c = runs["glos"].get(name), runs["cws"].get(name)
+        why = None
+        if name in DJ_KNOWN:
+            code, text_ = DJ_KNOWN[name]
+            checks[name.lower() + "-known"] = bool(g) and g[1] == code and any(text_ in l for l in g[0])
+            info += " %s: known (M4e);" % name
+            continue
+        if not g or g[1] is None:
+            why = "no run"
+        elif not c or c[1] is None:
+            why = "no baseline"
+        elif g[1] != c[1]:
+            why = "code %s, baseline %s" % (g[1], c[1])
+        elif dj_key(name, g[0]) != dj_key(name, c[0]):
+            diff = [l for l in dj_key(name, g[0]) if l not in dj_key(name, c[0])][:2]
+            why = "output: " + " | ".join(diff or ["(lines missing)"])
+        else:
+            why = dj_own(name, g[0]) or dj_own(name, c[0])
+        checks[name.lower()] = why is None
+        if why:
+            info += " %s: %s;" % (name, why)
+    gl = text["glos"]
+    reports = re.findall(r"^GLOS-CRASH why=(\S+) vec=(\w+)", gl, re.M)
+    checks["crash-reports"] = reports == [("exception", "0e"), ("exception", "0d")]
+    checks["crash-codes"] = (runs["glos"].get("CRASHME", [[], None])[1] == 255
+                             and runs["glos"].get("CRASHGP", [[], None])[1] == 255)
+    checks["crash-file"] = any(l.startswith("why=exception vec=0e") for l in runs["glos"].get("CRASHFILE", [[]])[0])
+    log = os.path.join(ROOT, "out", "djtst-glos-main-" + tag, "serial.log")
+    sym = subprocess.run([sys.executable, os.path.join(ROOT, "tools/symcrash.py"), log, "--exe",
+                          os.path.join(ROOT, "build/dj/CRASHME.EXE")], capture_output=True, text=True).stdout
+    checks["symcrash"] = re.search(r"^eip\s+\w+\s+_crash_here", sym, re.M) is not None and \
+        re.search(r"^eip\s+\w+\s+_crash_gp", sym, re.M) is not None
+    checks["vecchk"] = gl.count("HX-VECCHK ok") == 2
+    checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "DPMI-UNIMPL" not in gl
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("djtst-" + tag, "PASS" if not bad else "FAIL",
+                               "" if not bad else " failed: " + " ".join(bad), info), not bad
+
+
+def dpmi_tools(boot):
+    """MGA-Glide's DJGPP tools on bf6, without GLOS and under it (--wrap):
+    STACKPG (INT 31h's stack), MOUSETST (CuteMouse's PS/2 IRQ and its INT
+    33h), JOYTEST (the game port, timed with uclock), SBBEEP (the Sound
+    Blaster DAC at uclock pace, 440 Hz in the recording)."""
+    res, info = {}, ""
+    joy = ("@HX-TEST centre,1:joy:axis:0:-32767,2:joy:axis:0:32767,3:joy:axis:0:0,3:joy:axis:1:-32767,"
+           "4:joy:axis:1:32767,5:joy:axis:1:0,5:joy:axis:2:-32767,6:joy:axis:2:32767,7:joy:axis:2:0,"
+           "7:joy:axis:3:-32767,8:joy:axis:3:32767,9:joy:axis:3:0,10:joy:button:0:1,11:joy:button:1:1,"
+           "12:joy:button:2:1,13:joy:button:3:1")
+    tools = [("stackpg", "STACKPG", []),
+             ("mouse", "MOUSETST", ["--mouse", "ps2", "--keys", "@HX-TEST driver,1:mouse:40:-20:1,2:mouse:40:-20:0"]),
+             ("joy", "JOYTEST", ["--keys", joy]),
+             ("wav", "SBBEEP", ["--sound", "sb16", "--wav", "--pre", "SET BLASTER=A220 I5 D1 H5 T6"])]
+    for key, exe, extra in tools:
+        path = os.path.join(MGA, "build/djgpp/%s.EXE" % exe)
+        if not os.path.exists(path):
+            res[key] = False
+            info += " %s: no %s (make it in MGA-Glide)" % (key, path)
+            continue
+        common = ["--machine", "bf6", "--boot-cfg", boot, "--exe", path, "--timeout", "200", "--idle", "80"] + extra
+        st0, base = run("tools-%s-base-%s" % (key, boot), common)
+        st1, gl = run("tools-%s-glos-%s" % (key, boot), common + GLOS_FILES + ["--wrap", "C:\\TEST\\GLOS.EXE /RUN"])
+
+        def lines(t):
+            return sorted(re.sub(r"\b(ms|t|us|ticks|spin)=\S+", "", l.strip()) for l in t.splitlines()
+                          if l.startswith("HX-TEST"))
+        ok = st0 == "PASS" and st1 == "PASS" and "GLOS-DPMI start" in gl and "GLOS-PANIC" not in gl \
+            and "GLOS-CRASH" not in gl and "DPMI-UNIMPL" not in gl
+        if key == "wav":
+            wav = os.path.join(ROOT, "out", "tools-wav-glos-%s" % boot, "audio.wav")
+            ok = ok and subprocess.run([sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone",
+                                        "440"], capture_output=True).returncode == 0
+        res[key] = ok
+        if not ok:
+            info += " %s: %s/%s" % (key, st0, st1)
+    bad = [k for k, v in res.items() if not v]
+    return "  %-22s %s%s" % ("tools-bf6-" + boot, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad) + info), not bad
 
 
 GOLDEN = os.path.join(ROOT, "tests/loopa/golden.txt")      # "NAME SHA256" lines
@@ -704,7 +908,8 @@ def matrix(fn, combos, jobs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi"])
+    ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
+                                      "djtst", "dpmitools"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -724,6 +929,10 @@ def main():
         res = matrix(dpmi, combos, a.jobs) + matrix(dpmiconf, combos, a.jobs)
         res += matrix(dpmi_hello, [(b,) for b in a.boot or BOOTS], a.jobs)
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "djtst":
+        return 0 if all(r[1] for r in matrix(djtst, combos, max(1, a.jobs // 3))) else 1
+    if a.suite == "dpmitools":
+        return 0 if all(r[1] for r in matrix(dpmi_tools, [(b,) for b in a.boot or BOOTS], a.jobs)) else 1
     if a.suite == "net":
         return 0 if all(r[1] for r in matrix(net, NET_CASES, a.jobs)) else 1
     if a.suite == "shell":

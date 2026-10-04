@@ -116,6 +116,10 @@ void cpu_init(u32 cs16_base, u32 ds16_base, u32 ret_off)
     dftss.iomap = sizeof dftss;
     __asm__ volatile("ltr %w0" :: "r"(SEL_TSS));
     memcpy(gdt_copy, gdt, sizeof gdt);
+    /* FPU errors as IRQ13 (CR0.NE clear, the PC's way), as DOS programs, DJGPP's
+       INT 75h handler and CWSDPMI expect: the FPU has one user, the system VM,
+       until GLOS apps (supervisor.md §14.7). */
+    write_cr0(read_cr0() & ~0x20u);
 
     ret_farptr.off = ret_off;
     ret_farptr.sel = SEL_CODE16;

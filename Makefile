@@ -17,6 +17,8 @@
 #   make loopa-m3       M3's exit: the ssh suite (agent, capture, SFTP, glos shot, VECCHK)
 #   make loopa-dpmi     the DPMI host: DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i,
 #                       MGA-Glide's HELLOs (M4a's exit: make loopa-m4a)
+#   make loopa-m4b      loopa-dpmi, djtst205 against CWSDPMI (loopa-djtst), MGA-Glide's DJGPP
+#                       tools (loopa-dpmitools)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
@@ -31,11 +33,11 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-gdb check-deps clean help survey-tools
+.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-gdb djtst check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
-	@sed -n '3,9p' Makefile | sed 's/^# //'
+	@sed -n '3,/^[^#]/p' Makefile | grep '^#' | sed 's/^# //'
 
 check-deps:
 	@git -C "$(MGA_GLIDE)" merge-base --is-ancestor "$(MGA_GLIDE_PIN)" HEAD 2>/dev/null \
@@ -96,13 +98,15 @@ endef
 $(eval $(call dos_test,HOSTILE,hostile))
 $(eval $(call dos_test,XMSTEST,xmstest))
 $(eval $(call dos_test,ECHOARGS,echoargs))
+$(eval $(call dos_test,RUNOUT,runout))
 # DPMIMINI.COM: the smallest DPMI client, in assembly (M4a).
 build/ow/dos/DPMIMINI.COM: tests/dos/dpmimini.asm
 	@mkdir -p build/ow/dos/obj
 	$(Q)echo "  WASM    $<"
 	$(Q)$(OWENV) $(OWBIN)/wasm -q -fo=build/ow/dos/obj/dpmimini.obj $<
 	$(Q)$(WLINK) format dos com option quiet name $@ file build/ow/dos/obj/dpmimini.obj
-DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM
+DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
+             build/ow/dos/RUNOUT.EXE
 dos-tests: $(DOS_TESTS)
 
 # ---- GLOSK.BIN: the kernel (host gcc -m32, linked at C0100000h) -------------
@@ -119,7 +123,8 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/dbg/gdbstub.c kernel/vm/v86.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c \
          kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c kernel/dos/agent.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
-         kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c
+         kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
+         kernel/dpmi/deliver.c kernel/dbg/crash.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
@@ -188,6 +193,12 @@ loopa-m3: loopa-ssh
 loopa-dpmi: all dos-tests build/dj/DPMICONF.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py dpmi -j $(JOBS)
 loopa-m4a: loopa-dpmi
+# M4b: DJGPP 2.05's tests and CRASHME against CWSDPMI; MGA-Glide's STACKPG, MOUSETST, JOYTEST, SBBEEP.
+loopa-djtst: all dos-tests djtst check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py djtst -j $(JOBS)
+loopa-dpmitools: all check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py dpmitools -j $(JOBS)
+loopa-m4b: loopa-dpmi loopa-djtst loopa-dpmitools
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
 loopa-gdb: all check-deps
@@ -201,11 +212,38 @@ build/dj/IFTEST.EXE: tests/dos/iftest.c
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 survey-tools: build/dj/IFTEST.EXE
-# DPMICONF-32 (tests/dos/dpmiconf.c): the DPMI host's conformance checks, DJGPP (M4a).
-build/dj/DPMICONF.EXE: tests/dos/dpmiconf.c
+# DPMICONF-32 (tests/dos/dpmiconf.c, its handlers in dpmiconf_h.S): the DPMI host's conformance checks, DJGPP (M4a, M4b).
+build/dj/DPMICONF.EXE: tests/dos/dpmiconf.c tests/dos/dpmiconf_h.S
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
-	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $^
+# CRASHME (tests/dos/crashme.c): a fault with no handler, for the crash report (M4b).
+build/dj/CRASHME.EXE: tests/dos/crashme.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -g -Wall -Werror -o $@ $<
+
+# DJGPP 2.05's own tests (djtst205.zip, pinned in tools/setup/versions.mk), built
+# from the cached archive: NAME:path under tests/libc (M4b's exit, jobs.py djtst).
+include tools/setup/versions.mk
+MGA_CACHE ?= $(HOME)/.cache/mga-glide
+DJTST := FAULT:go32/fault NULL:crt0/null FPU:go32/fpu RAISE:go32/raise INFOBLK:go32/infoblk BRK:crt0/brk \
+         MULTISPN:crt0/multispn NEAR:pc_hw/nearptr/near NEAR2:pc_hw/nearptr/near2 NEAR3:pc_hw/nearptr/near3 \
+         ENABLE:pc_hw/hwint/enable GETOCW:pc_hw/fpu/getocw STAT:pc_hw/fpu/stat TIMER:go32/timer HANG:go32/hang \
+         CTRLC:go32/ctrlc SIGNALS:go32/signals UCLOCK:pc_hw/timer/uclock
+DJTST_EXES := $(foreach t,$(DJTST),build/dj/djtst/$(word 1,$(subst :, ,$(t))).EXE)
+build/dj/djtst/.unpacked: tools/setup/versions.mk
+	@mkdir -p build/dj/djtst/src
+	$(Q)tools/setup/fetch.sh $(DJTST_URL) $(DJTST_SHA256) $(MGA_CACHE)/dl/djtst205.zip
+	$(Q)unzip -qo $(MGA_CACHE)/dl/djtst205.zip -d build/dj/djtst/src
+	$(Q)touch $@
+define djtst_rule
+build/dj/djtst/$(1).EXE: build/dj/djtst/.unpacked
+	$$(Q)echo "  DJCC    djtst $(2)"
+	$$(Q)$$(DJCC) -O2 -w -o $$@ build/dj/djtst/src/tests/libc/$(2).c -lm
+endef
+$(foreach t,$(DJTST),$(eval $(call djtst_rule,$(word 1,$(subst :, ,$(t))),$(word 2,$(subst :, ,$(t))))))
+djtst: $(DJTST_EXES) build/dj/CRASHME.EXE build/ow/dos/RUNOUT.EXE
 
 clean:
 	rm -rf build out

@@ -55,6 +55,7 @@ extern void __cdecl __far glos_bp_raw(void);
 extern void __cdecl __far glos_retf(void);
 extern void __cdecl __far glos_int21(void);
 extern void __cdecl __far glos_rmcb(void);
+extern void __cdecl __far glos_bp_term(void);
 extern void __cdecl __far stub_end(void);
 
 static unsigned stub_off(void (__cdecl __far *f)(void))
@@ -490,6 +491,7 @@ static int glos_main(int argc, char **argv)
     bi.retf_off = stub_off(glos_retf);
     bi.int21_off = stub_off(glos_int21);
     bi.rmcb_off = stub_off(glos_rmcb);
+    bi.bp_term_off = stub_off(glos_bp_term);
     bi.stub_paras = (stub_off(stub_end) + 15) >> 4;
     stub_data.mode = bi.mode == BI_MODE_XMS;
     stub_data.a20init = (unsigned char)bi.a20_initial;

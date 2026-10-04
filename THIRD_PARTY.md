@@ -18,3 +18,13 @@ GLOS's port of lwIP is its own code: `kernel/net/port/` (the options and
 
 CWSDPMI, HDPMI and DJGPP's runtime are used as behavioural baselines only
 (PRD D26, docs/supervisor.md §1).
+
+## Test inputs fetched at build time (not in the repository)
+
+| Input | Use | Pin | Licence |
+|---|---|---|---|
+| HX DOS extender runtime 2.23 (`HXRT223.zip`) | HDPMI32i as a DPMI baseline in Loop A | `tools/setup/versions.mk` | Freeware ("may be used for any purpose") |
+| DJGPP 2.05 test suite (`djtst205.zip`) | Its tests, compiled by `make djtst` and compared under CWSDPMI and GLOS (M4b) | `tools/setup/versions.mk` | DJGPP's licence (`COPYING.DJ`) |
+
+DJGPP's library sources (`djlsr205.zip`) were read as a behavioural reference for its exception and signal
+paths (M4b); none of it is in GLOS.

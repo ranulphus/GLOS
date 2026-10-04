@@ -1,11 +1,13 @@
 /* DPMICONF-32: conformance checks for a DPMI host's services to a 32-bit
- * client (GLOS M4a, docs/milestones-m0-m4.md), as a DJGPP program. Each
+ * client (GLOS M4a, M4b; docs/milestones-m0-m4.md), as a DJGPP program,
+ * with its handlers in dpmiconf_h.S. Each
  * check prints
  *     HX-TEST dpmi-<name> ok|FAIL [detail]
  * on COM1 (or INFO for what hosts may choose), and the run ends with
  *     HX-TEST dpmi-end fails=<n>
  * and exit code 0, or 1 if anything failed. A check must pass on CWSDPMI r7
- * and HDPMI32i before it may judge GLOS: one that fails on both is wrong. */
+ * and HDPMI32i before it may judge GLOS: one that fails on both is wrong.
+ * Checks named glos-* are GLOS's own behaviour and run only under GLOS. */
 #include <dpmi.h>
 #include <go32.h>
 #include <pc.h>
@@ -16,8 +18,10 @@
 #include <sys/farptr.h>
 #include <sys/movedata.h>
 #include <sys/nearptr.h>
+#include <sys/exceptn.h>
 
 static int fails;
+static int is_glos;
 
 static void ser(const char *s)
 {
@@ -305,14 +309,281 @@ static void t_misc(void)
     }
 }
 
+
+/* ---- M4b: exceptions (dpmiconf_h.S has the handlers) */
+
+extern unsigned short hd_ds;
+extern unsigned long old8[2], old1c[2], old75[2], irq8_mode;
+extern volatile unsigned long irq8_hits, irq8_vif, irq8_ss, irq8_base, i1c_hits, irq13_hits, mf_hits;
+extern volatile unsigned long exc_hits, exc_err, exc_eip, exc_cs, exc_flags, exc_esp, exc_ss, exc_hss;
+extern unsigned long exc_skip, exc_ebx, exc_new_eip, exc_new_esp, exc_esp_before;
+extern volatile unsigned long x10_hits, x10_eip, x10_cs, x10_info, x10_flags, x10_es, x10_ds, x10_cr2, x10_pte;
+extern volatile unsigned long rmcb_hits, rmcb_eax, rmcb_sp, rmcb_ss_base;
+extern char exc_handler[], x10_handler[], gp_insn[], pf_insn[], exc_resume[];
+extern char irq8_handler[], i1c_handler[], irq13_handler[], mf_handler[], rmcb_far[], rmcb_int[];
+unsigned fault_gp(unsigned ebx);
+unsigned fault_pf(unsigned sel, unsigned off);
+unsigned fault_resume(void);
+void fpu_divzero(void);
+
+static unsigned long alt_stack[1024];
+
+static void set_exc(int n, void *h, __dpmi_paddr *old)
+{
+    __dpmi_paddr p;
+    if (old)
+        __dpmi_get_processor_exception_handler_vector(n, old);
+    p.selector = _my_cs();
+    p.offset32 = (unsigned long)h;
+    __dpmi_set_processor_exception_handler_vector(n, &p);
+}
+
+static void t_exc(void)
+{
+    __dpmi_paddr old13, old14, p;
+    __dpmi_meminfo m;
+    unsigned ebx, esp;
+    unsigned short attr[3] = { 0, 0, 0 };
+    int sel, ok;
+
+    set_exc(13, exc_handler, &old13);
+    exc_hits = 0;
+    exc_skip = 3;
+    exc_ebx = 0x13579BDF;
+    ebx = fault_gp(0);
+    say("exc-gp", exc_hits == 1 && exc_eip == (unsigned long)gp_insn && exc_cs == _my_cs(),
+        "hits=%lu eip=%lx(%lx) cs=%lx", exc_hits, exc_eip, (unsigned long)gp_insn, exc_cs);
+    say("exc-gp-err", -1, "err=%lx (the CPU's: 0; HDPMI32i gives 2E00h)", exc_err);
+    say("exc-frame-stack", exc_ss == _my_ds() && exc_esp == exc_esp_before && (exc_flags & 0x200),
+        "ss=%lx esp=%lx(%lx) flags=%lx", exc_ss, exc_esp, exc_esp_before, exc_flags);
+    say("exc-regs-kept", ebx == 0x13579BDF, "ebx=%x", ebx);
+    say("exc-host-stack", -1, "ss=%lx (ours %x)", exc_hss, _my_ds());
+    exc_skip = 0;                                               /* the frame's CS:EIP and SS:ESP edited, as DJGPP does */
+    exc_new_eip = (unsigned long)exc_resume;
+    exc_new_esp = (unsigned long)&alt_stack[1024];
+    esp = fault_resume();
+    exc_new_eip = exc_new_esp = 0;
+    say("exc-frame-edit", esp == (unsigned long)&alt_stack[1024] && exc_hits == 2, "esp=%x want=%lx", esp,
+        (unsigned long)&alt_stack[1024]);
+    __dpmi_set_processor_exception_handler_vector(13, &old13);
+
+    /* 0507h/0506h: page 1 of a 3-page block uncommitted, a #PF there, back */
+    m.size = 3 * 4096;
+    sel = __dpmi_allocate_ldt_descriptors(1);
+    if (sel <= 0 || __dpmi_allocate_memory(&m) != 0) {
+        say("page-attr", 0, "no memory");
+        return;
+    }
+    __dpmi_set_segment_base_address(sel, m.address);
+    __dpmi_set_segment_limit(sel, 3 * 4096 - 1);
+    _farpokel(sel, 0x1000, 0x55AA55AA);
+    {
+        __dpmi_meminfo a = m;
+        unsigned short none = 0;
+        a.address = 0x1000;                                     /* the offset in the block */
+        a.size = 1;
+        ok = __dpmi_set_page_attributes(&a, (short *)&none) == 0;
+        a.address = 0;
+        a.size = 3;
+        ok = ok && __dpmi_get_page_attributes(&a, (short *)attr) == 0;
+    }
+    say("page-attr", ok && (attr[0] & 7) == 1 && (attr[1] & 7) == 0 && (attr[0] & 8),
+        "attr=%04x %04x %04x", attr[0], attr[1], attr[2]);
+    if (ok) {
+        unsigned v;
+        set_exc(14, exc_handler, &old14);
+        exc_hits = 0;
+        exc_skip = 3;
+        v = fault_pf(sel, 0x1000);
+        __dpmi_set_processor_exception_handler_vector(14, &old14);
+        say("exc-pf", exc_hits == 1 && exc_eip == (unsigned long)pf_insn && (exc_err & 5) == 4 && v == 0,
+            "hits=%lu err=%lx eip=%lx v=%x", exc_hits, exc_err, exc_eip, v);
+        if (__dpmi_get_extended_exception_handler_vector_pm(14, &p) == 0) {
+            __dpmi_paddr x;
+            x.selector = _my_cs();
+            x.offset32 = (unsigned long)x10_handler;
+            if (__dpmi_set_extended_exception_handler_vector_pm(14, &x) == 0) {
+                x10_hits = 0;
+                v = fault_pf(sel, 0x1234);
+                __dpmi_set_extended_exception_handler_vector_pm(14, &p);
+                say("exc-frame10", x10_hits == 1 && x10_eip == (unsigned long)pf_insn && x10_cs == _my_cs()
+                    && x10_cr2 == m.address + 0x1234 && x10_ds == _my_ds(),
+                    "eip=%lx cs=%lx cr2=%lx(%lx) ds=%lx es=%lx info=%lx pte=%lx", x10_eip, x10_cs, x10_cr2,
+                    m.address + 0x1234, x10_ds, x10_es, x10_info, x10_pte);
+            } else {
+                say("exc-frame10", -1, "0212h refused");
+            }
+        } else {
+            say("exc-frame10", -1, "0210h refused");
+        }
+        {
+            __dpmi_meminfo a = m;
+            unsigned short rw = 9;                              /* committed, writable */
+            a.address = 0x1000;
+            a.size = 1;
+            ok = __dpmi_set_page_attributes(&a, (short *)&rw) == 0;
+            say("page-recommit-content", -1, "v=%lx", ok ? _farpeekl(sel, 0x1000) : 0);   /* hosts keep it, or not */
+            if (ok)
+                _farpokel(sel, 0x1004, 0xC0FFEE);
+            say("page-recommit", ok && _farpeekl(sel, 0x1004) == 0xC0FFEE, "");
+        }
+    }
+    __dpmi_free_memory(m.handle);
+    __dpmi_free_ldt_descriptor(sel);
+}
+
+/* ---- M4b: IRQs and INTs passed up */
+
+static unsigned long ticks(void) { return _farpeekl(_dos_ds, 0x46C); }
+
+/* Until the BIOS tick moves n times, or a long count passes (a host that
+   loses the tick must not hang the run). */
+static int wait_ticks(int n)
+{
+    unsigned long t = ticks(), k;
+    for (k = 0; k < 400000000ul; k++)
+        if (ticks() - t >= (unsigned long)n)
+            return 1;
+    return 0;
+}
+
+static void hook(int vec, void *h, unsigned long *old, __dpmi_paddr *save)
+{
+    __dpmi_paddr p;
+    __dpmi_get_protected_mode_interrupt_vector(vec, save);
+    old[0] = save->offset32;
+    old[1] = save->selector;
+    p.selector = _my_cs();
+    p.offset32 = (unsigned long)h;
+    __dpmi_set_protected_mode_interrupt_vector(vec, &p);
+}
+
+static void t_irq(void)
+{
+    __dpmi_paddr s8, s1c, s75, old16;
+    __dpmi_regs r;
+    unsigned long t0, h0;
+    int ok;
+    static const unsigned char wait3[] = {                      /* real mode: STI, wait 3 BIOS ticks, RETF */
+        0xFB, 0x1E, 0x31, 0xC0, 0x8E, 0xD8, 0x8B, 0x1E, 0x6C, 0x04, 0x83, 0xC3, 0x03,
+        0xA1, 0x6C, 0x04, 0x29, 0xD8, 0x78, 0xF9, 0x1F, 0xCB,
+    };
+
+    irq8_mode = 0;
+    irq8_hits = 0;
+    hook(8, irq8_handler, old8, &s8);
+    t0 = ticks();
+    ok = wait_ticks(5);
+    say("irq-pm", ok && irq8_hits >= 5, "hits=%lu ticks=%lu", irq8_hits, ticks() - t0);
+    say("irq-pm-int31", irq8_vif == 0 && irq8_base == __djgpp_base_address, "vif=%lu base=%lx", irq8_vif,
+        irq8_base);
+    say("irq-pm-vif-after", __dpmi_get_virtual_interrupt_state() == 1, "");
+    say("irq-pm-stack", -1, "ss=%lx (ours %x)", irq8_ss, _my_ds());
+    if (dos_seg > 0) {                                          /* while the program is in real mode */
+        movedata(_my_ds(), (unsigned)wait3, dos_sel, 0x100, sizeof wait3);
+        memset(&r, 0, sizeof r);
+        r.x.cs = dos_seg;
+        r.x.ip = 0x100;
+        h0 = irq8_hits;
+        ok = __dpmi_simulate_real_mode_procedure_retf(&r) == 0;
+        say("irq-pm-from-rm", ok && irq8_hits - h0 >= 2, "hits=%lu", irq8_hits - h0);
+    }
+    irq8_mode = 1;                                              /* EOI and IRET, no STI: the IF comes back anyway */
+    h0 = irq8_hits;
+    t0 = 0;
+    while (irq8_hits - h0 < 3 && ++t0 < 400000000ul) ;
+    irq8_mode = 0;
+    say("irq-iret-vif", irq8_hits - h0 >= 3 && __dpmi_get_virtual_interrupt_state() == 1, "hits=%lu vif=%d",
+        irq8_hits - h0, __dpmi_get_virtual_interrupt_state());
+    __dpmi_set_protected_mode_interrupt_vector(8, &s8);
+
+    i1c_hits = 0;                                               /* the BIOS's INT 1Ch, passed up */
+    hook(0x1C, i1c_handler, old1c, &s1c);
+    ok = wait_ticks(4);
+    __dpmi_set_protected_mode_interrupt_vector(0x1C, &s1c);
+    say("int1c-passup", ok && i1c_hits >= 3, "hits=%lu", i1c_hits);
+
+    irq13_hits = mf_hits = 0;                                   /* an FPU error: IRQ13 (NE=0) or #MF (NE=1) */
+    hook(0x75, irq13_handler, old75, &s75);
+    set_exc(16, mf_handler, &old16);
+    fpu_divzero();
+    __dpmi_set_processor_exception_handler_vector(16, &old16);
+    __dpmi_set_protected_mode_interrupt_vector(0x75, &s75);
+    say("fpu-error", irq13_hits + mf_hits == 1, "irq13=%lu mf=%lu", irq13_hits, mf_hits);
+}
+
+/* ---- M4b: real-mode callbacks */
+
+static void t_rmcb(void)
+{
+    __dpmi_regs cbr, r;
+    __dpmi_raddr cb, old66;
+    unsigned long base = 0;
+    int ok;
+
+    memset(&cbr, 0, sizeof cbr);
+    rmcb_hits = 0;
+    ok = __dpmi_allocate_real_mode_callback((void (*)(void))rmcb_far, &cbr, &cb) == 0;
+    say("rmcb-alloc", ok, "at=%04x:%04x", cb.segment, cb.offset16);
+    if (!ok)
+        return;
+    memset(&r, 0, sizeof r);
+    r.x.cs = cb.segment;
+    r.x.ip = cb.offset16;
+    r.d.eax = 0x12345678;
+    ok = __dpmi_simulate_real_mode_procedure_retf(&r) == 0;
+    say("rmcb-call", ok && rmcb_hits == 1 && rmcb_eax == 0x12345678 && r.x.bx == 0xBEEF, "hits=%lu eax=%lx bx=%04x",
+        rmcb_hits, rmcb_eax, r.x.bx);
+    __dpmi_get_segment_base_address(rmcb_ss_base, &base);
+    say("rmcb-stack", base / 16 == r.x.ss || r.x.ss == 0, "dsbase=%lx sp=%lx", base, rmcb_sp);
+    __dpmi_free_real_mode_callback(&cb);
+
+    memset(&cbr, 0, sizeof cbr);                                /* through the IVT, returning as an IRET */
+    rmcb_hits = 0;
+    if (__dpmi_allocate_real_mode_callback((void (*)(void))rmcb_int, &cbr, &cb) == 0) {
+        __dpmi_get_real_mode_interrupt_vector(0x66, &old66);
+        __dpmi_set_real_mode_interrupt_vector(0x66, &cb);
+        memset(&r, 0, sizeof r);
+        ok = __dpmi_simulate_real_mode_interrupt(0x66, &r) == 0;
+        say("rmcb-int", ok && rmcb_hits == 1 && r.x.cx == 0xCAFE, "hits=%lu cx=%04x", rmcb_hits, r.x.cx);
+        if (is_glos) {                                          /* §14.5: a PM INT 8 hook over an IVT pointing at our RMCB */
+            __dpmi_paddr s8;
+            __dpmi_raddr old8r;
+            unsigned long t0;
+            irq8_mode = 0;
+            irq8_hits = 0;
+            rmcb_hits = 0;
+            hook(8, irq8_handler, old8, &s8);
+            __dpmi_get_real_mode_interrupt_vector(8, &old8r);
+            __dpmi_set_real_mode_interrupt_vector(8, &cb);
+            t0 = ticks();
+            ok = wait_ticks(3);
+            __dpmi_set_real_mode_interrupt_vector(8, &old8r);
+            __dpmi_set_protected_mode_interrupt_vector(8, &s8);
+            say("glos-passup-guard", ok && irq8_hits >= 3 && rmcb_hits == 0, "hits=%lu rmcb=%lu ticks=%lu",
+                irq8_hits, rmcb_hits, ticks() - t0);
+        }
+        __dpmi_set_real_mode_interrupt_vector(0x66, &old66);
+        __dpmi_free_real_mode_callback(&cb);
+    } else {
+        say("rmcb-int", 0, "no second callback");
+    }
+}
+
 int main(void)
 {
+    __dpmi_paddr g;
     ser("HX-TEST dpmi-start INFO\r\n");
+    hd_ds = __djgpp_ds_alias;
+    is_glos = __dpmi_get_vendor_specific_api_entry_point("GLOS", &g) == 0;
     t_misc();
     t_ldt();
     t_dos();
     t_rm();
     t_mem();
+    t_exc();
+    t_irq();
+    t_rmcb();
     if (dos_seg > 0)
         __dpmi_free_dos_memory(dos_sel);
     {

@@ -512,16 +512,16 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 - **Software interrupts:**
   - 20h–4Fh and 60h–FFh arrive through DPL-3 gates; 0–1Fh and 50h–5Fh arrive as #GP, decoded from the error
     code and the INT instruction.
-  - A vector the client hooked (0205h) gets an interrupt frame on the client's stack, with the virtual IF clear.
+  - A vector the client hooked (0205h) gets an interrupt frame on the client's stack. The virtual IF stays as
+    it was: the handler's IRET couldn't give it back at IOPL 0 (M4b found M4a clearing it).
   - Otherwise the host's default handles it: INT 31h is the API; INT 21h 4Ch ends the client; INT 2Fh 1686h
     returns AX=0; the rest are reflected to real mode with the general registers and arithmetic flags (DS and ES
     there are the host's segment).
 - **IRQs while the client runs** go through the virtual PIC as in V86 mode. On the way back to ring 3, with the
-  virtual IF on, each runs its real-mode handler, nested. Protected-mode handlers first: M4b.
+  virtual IF on, each runs its real-mode handler, nested (M4b: the client's protected-mode handler first, §12.1b).
 - **Ring-3 emulation:** CLI, STI, HLT and IN/OUT to trapped ports are emulated as in V86 mode (32-bit code
   decoded with 32-bit defaults). PUSHF/POPF can't see or change IF at IOPL 0 (0900h–0902h can). Other
-  exceptions end the client (`GLOS-DPMI exception`) through the kill path, so its vectors and devices are put
-  back. Handlers: M4b.
+  exceptions go to the client's handlers (M4b, §12.1b).
 - **Before IRET to ring 3,** the frame's segment registers are checked: an unloadable DS, ES, FS or GS becomes
   0, and a bad CS or SS ends the client. So the IRET never faults in ring 0.
 - **espfix** (§6.3) on every return to a 16-bit stack: trap_dispatch moves selector 30h's base so the IRET frame
@@ -530,6 +530,57 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   as the program, with AX as it was. A program that ends from real mode (after a raw switch, or inside a nested
   call) frees the context when its 4Ch reaches DOS.
 - **`/DPMITRACE`** logs every INT 31h call and its result (`GLOS-DPMI call`).
+
+### 12.1b As built in M4b (`kernel/dpmi/deliver.c`, `kernel/dbg/crash.c`)
+
+- **Entries.** Every handler the host calls in the client (an IRQ, an INT passed up, an exception, a real-mode
+  callback) is an entry: the context keeps what it interrupted, V86 or protected mode, and the handler starts
+  with SEL_TRAMP:TR_RET+n as its return address (n: the entry's index, up to 32). Its IRET, or an exception
+  handler's RETF, comes back to the host there, and the host carries on from the entry, the virtual IF
+  included (§14.3). Returning to an older entry drops the newer ones, whose handlers never returned.
+- **One frame, both modes.** A handler for something that happened in V86 mode turns the VM thread's V86 frame
+  into a protected-mode one; the entry's return turns it back. Real-mode calls the handler makes nest below as
+  in M4a, and remember the protected-mode frame that called (`rm_pm_caller`).
+- **The locked stack** (§14.2) is 16 KB at BFFF0000h, committed at the mode switch, with a selector of the
+  client's bitness. A handler starts at its top when no entry holds it; otherwise on the stack the interrupted
+  protected-mode code was using, or, from V86 mode, the one the real-mode call came from (HDPMI's rule). A
+  handler that has moved to a stack of its own (DJGPP's IRET wrappers) so never has the locked stack's frames
+  overwritten.
+- **IRQs** go to the client's handler when it hooked the vector (0205h), from protected or V86 mode; the end
+  of its chain, the host's TR_VEC handler, reflects to real mode. Unhooked ones run their real-mode handlers as
+  in M4a. A chain that ends at the host's handler returns through TR_RET without another trip to ring 3.
+- **INT 1Ch, 23h and 24h** in V86 mode trap (also with VME) and go to the client's handler when it hooked them;
+  its general registers and arithmetic flags come back down (INT 24h's AL). **An INT 23h no handler takes is
+  ignored** while a client lives, as CWSDPMI does: otherwise DOS's Ctrl-C abort ends a DJGPP program in the
+  middle of its own SIGINT path, which restores what it changed (djtst205's HANG and CTRLC; HDPMI32i lets DOS
+  abort, and its next client crashes).
+- **Every end is seen.** The mode switch points the client's terminate address (PSP:0Ah) at the stub's term
+  ARPL. A DOS abort that bypassed INT 21h 4Ch (a critical-error "Abort") lands there: the context goes, the
+  vectors and devices are restored from the EXEC snapshot as on a kill (`GLOS-DPMI exit terminated`), nested
+  levels are dropped, and DOS carries on at the old address.
+- **Exceptions** go to the client's 0203h or 0212h handler with the 0.9 frame, and for a 32-bit client the 1.0
+  frame above it at +20h (laid out as HDPMI32i lays it out: DPMICONF's `exc-frame10` passes on both). The RETF
+  resumes from the frame as the handler left it (CS:EIP, EFLAGS, SS:ESP; the 1.0 frame's segment registers
+  for a 0212h handler), with the general registers as the handler left them. Five nested ones end the client.
+- **No handler** (or a chain to 0202h's TR_EXC default): 1–4 go on as the interrupt, through the client's PM
+  handler or to real mode; 0, 5 and 7 likewise if the client hooked that interrupt; the rest end the client
+  with a crash report. A fault reflected to real mode would only come back to the same instruction.
+- **Real-mode callbacks** (0303h): the stub's ARPL enters the client's handler with DS:(E)SI the real-mode
+  SS:SP (a selector per callback) and ES:(E)DI its register structure, filled in; the IRET resumes V86 code
+  from the structure.
+- **The pass-up guard** (§14.5): 0201h and 0205h remember the real-mode vector an RMCB or a PM hook took over;
+  a reflection from the host's handler that would reach the client's own RMCB goes there instead.
+- **0506h/0507h:** page attributes on 0501h blocks. Uncommitted pages free their frames; recommitted ones come
+  back zeroed (the baselines keep the old contents; DJGPP's null page doesn't care). DJGPP's crt0 uncommits
+  its null page, so a NULL write is a page fault.
+- **The FPU** keeps CR0.NE clear (§14.7): errors arrive as IRQ13, through the virtual PIC to the client's INT
+  75h handler first, as on CWSDPMI. DJGPP's handler writes port F0h, which is passed through.
+- **Crash reports** (§19): `GLOS-CRASH` lines and `C:\GLOS\CRASH\CRASHnnn.TXT`, then the kill path (exit code
+  FFh, vectors and devices restored). While the report is written the client gets no more handlers.
+- **Software INTs to the client's handlers keep the virtual IF** (above), and **PUSHF still shows IF set**:
+  DJGPP's `disable()` returns 1 even when the virtual IF is off. HDPMI32i returns to the client with the real IF
+  clear after CLI, which PUSHF then shows; GLOS doesn't, so that `cli; jmp $` can't stop the agent (PRD D20).
+  djtst205's ENABLE is the one test that notices; direct mode (M4e) runs it at IOPL 3.
 
 ### 12.2 Initial state after the mode switch ([DPMI0.9 §4])
 
@@ -592,19 +643,20 @@ Statuses:
 | 000Eh/000Fh | Get/set multiple (1.0) | log | | |
 | 0100h–0102h | DOS memory | M4a | Under the DOS lock. **On failure AX=0008h and BX=largest block**: the DJGPP stub relies on it. | CWSDPMI |
 | 0200h/0201h | Get/set real-mode vector | M4a | DJGPP installs its INT 1Bh RMCB here | |
-| 0202h/0203h | Get/set exception handler | M4a (kept), M4b (delivered) | DJGPP: 0–11h; MGA-Glide OW: 00h, 06h, 0Dh, 0Eh | CWSDPMI |
+| 0202h/0203h | Get/set exception handler | M4b | DJGPP: 0–11h; MGA-Glide OW: 00h, 06h, 0Dh, 0Eh. The default is SEL_TRAMP:TR_EXC+n; setting it back restores the host's own. | CWSDPMI |
 | 0204h/0205h | Get/set PM vector | M4a (vectors), M4b (IRQ delivery) | INT 8/9/1Bh/23h/24h/75h, IRQ3/4, INT 21h (DOS/4GW, MGA-Glide exit hook) | CWSDPMI, DOS/4GW |
-| 0210h–0213h | Extended exception handlers (1.0) | M4b | | HDPMI32i |
+| 0210h/0212h | Get/set extended PM exception handler (1.0) | M4b | 32-bit clients (16-bit: M4d). The 1.0 frame at +20h, as HDPMI32i's. | HDPMI32i |
+| 0211h/0213h | Get/set extended real-mode exception handler (1.0) | log | Real-mode exceptions go to the IVT, as on a real-mode CPU | |
 | 0300h | Simulate real-mode interrupt | M4a | SS:SP=0 means the host stack; CX words copied; IF/TF clear | CWSDPMI |
 | 0301h/0302h | Call real-mode far / IRET procedure | M4a | GLQuake IPX entry; SDL VBE bank switch | |
-| 0303h/0304h | Allocate/free real-mode callback | M4a (allocated: 16 ARPLs in the stub), M4b (called) | **Every DJGPP program** (INT 1Bh); DOS/4GW. At least 16 per context. ES:EDI returned unchanged. Until M4b a call returns at once. | CWSDPMI |
+| 0303h/0304h | Allocate/free real-mode callback | M4b | **Every DJGPP program** (INT 1Bh); DOS/4GW. 16 per context (ARPLs in the stub), each with a selector for the real-mode stack. ES:EDI returned unchanged. A freed one returns at once. | CWSDPMI |
 | 0305h/0306h | State save / raw switch addresses | **M4a** | **DOS/4GW needs it to start.** The "real-mode" side is a V86 trap stub. | DOS/4GW, HDPMI32i |
 | 0400h | Version | M4a | 0.90, BX bit 0=32-bit, bit 1=0 (reflection in V86); **DH=08h, DL=70h** (or the virtual PIC's ICW2) | CWSDPMI |
 | 0401h | Capabilities (1.0) | M4c | | HDPMI32i |
 | 0500h | Free memory info | M4a | Accurate; programs allocate all of it | CWSDPMI |
 | 0501h–0503h | Linear blocks | M4a | Ascending (§12.3) | CWSDPMI |
-| 0504h–0506h | 1.0 linear memory, page attributes | log | | |
-| 0507h | Set page attributes | M4b | DJGPP crt0 uncommits page 0 (null trap) unless NULLOK | CWSDPMI |
+| 0504h/0505h | 1.0 linear memory | log | | |
+| 0506h/0507h | Get/set page attributes | M4b | DJGPP crt0 uncommits page 0 (null trap) unless NULLOK; DOS/4GW reads them | CWSDPMI, HDPMI32i |
 | 0508h/0509h | Map device / conventional memory (1.0) | M4c | HDPMI suite | HDPMI32i |
 | 0600h–0603h | Lock/unlock | nop (recorded) | SDL, Quake, LOCK_MEMORY | |
 | 0604h | Page size | M4a | 4096 | |
@@ -665,16 +717,23 @@ saved when the protected-mode handler was hooked, so the IRQ doesn't loop.
   at +20h for 0210h handlers.
 - **Edits to the frame are honoured** on RETF. DJGPP rewrites CS:EIP and SS:ESP.
 - Unhandled exceptions:
-  - 0–5 and 7 reflect to real-mode interrupts;
-  - 6 and 8–1Fh terminate the client with a crash report (§19).
+  - 1–4 (traps) go on as the interrupt: the client's PM handler, else real mode;
+  - 0, 5 and 7 (faults) likewise only if the client hooked that interrupt, since real mode would return to the
+    same instruction;
+  - the rest terminate the client with a crash report (§19).
   - After 5 nested exceptions the client is terminated (CWSDPMI's rule).
 
 ### 14.7 FPU
 
-- Lazy switching (CR0.TS, #NM).
-- NE=1, so errors arrive as #MF (vector 10h) for 32-bit clients. IRQ13 is synthesised for V86 code and for
-  clients that hooked INT 75h (DJGPP writes port F0h and EOIs both PICs).
-- Per-client FPU state, including the control word: GLQuake changes FLDCW constantly [census].
+- **As built (M4b): CR0.NE clear**, the PC's way. FPU errors raise IRQ13 through FERR#; the line goes to the
+  virtual PIC like any VM line, so a client's INT 75h handler gets it first (§14.1) and V86 code gets the BIOS's.
+  Port F0h (the acknowledge, which asserts IGNNE#) is passed through. This is what DOS programs, DJGPP's INT 75h
+  handler and CWSDPMI expect, and while the system VM is the FPU's only user nothing else is needed.
+- **With the FPU's second user** (GLOS apps, M6; sessions, M4e): lazy switching (CR0.TS, #NM) and per-client
+  state, including the control word (GLQuake changes FLDCW constantly [census]). NE=1 then reports an error as
+  #MF in the context that caused it, and IRQ13 is synthesised for V86 code and for clients that hooked INT 75h
+  (DJGPP writes port F0h and EOIs both PICs). The deep dive chose NE=1 from the start; M4b deferred it because,
+  with one user, NE=0 gives the same behaviour without emulating IGNNE#.
 
 ## 15. Real-mode calls, callbacks and raw switch
 
@@ -845,7 +904,8 @@ place where nothing else is in DOS by construction.
 | AGENT | A job: `run seq= cmd=`, `done seq= code= via=` (the program, or `comspec`) |
 | KILL | A kill (§9.6) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
-| DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exception vec= err= at=`, `bad-frame`, and with `/DPMITRACE` `call fn= ... -> cf= ax=` |
+| DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... -> cf= ax=`, `deliver irq=|passup=|exception=|rmcb= to= from= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |
+| CRASH | A client the host ends (§19): `why= vec= err= prog= psp= bits= mode=`, `cs:eip= ss:esp= eflags= cr2=`, the general registers, `code=` (16 bytes at CS:EIP), `stack=`, a `seg` line per segment register, `handlers= lstack= nesting=`, `file=` |
 | DPMI-UNIMPL | An unimplemented call |
 | PANIC | A panic: registers and CR2. A double fault adds the interrupted context from the TSS, ESP0 and its page-table entry, any IDT gate or GDT descriptor that changed since start-up, and a `thread=` line per thread (stack, saved ESP, canary) |
 
@@ -860,11 +920,15 @@ place where nothing else is in DOS by construction.
   signal (a serial marker that makes the harness type a key), not on a fixed `WAITSEC`.
 - **86Box monitor peeks** of kernel memory must read physical addresses: a linear read goes through the MMU at
   the guest's CPL and, from V86 code, leaves a page fault for the guest to take.
-- **Crash reports:**
-  - registers, the faulting instruction bytes, the stack and the context's module map (EXE and base
-    addresses);
-  - written to `C:\GLOS\CRASH\` and the log;
-  - `tools/symcrash.py` symbolises them against DJGPP COFF or Watcom maps.
+- **Crash reports** (M4b, `kernel/dbg/crash.c`), for a client the host ends: an exception it has no handler
+  for, five nested ones, a frame it can't return to:
+  - the program's path, the registers, the 16 bytes at CS:EIP, 12 stack words, each segment's base and limit,
+    the host's entry count;
+  - written to the log as `GLOS-CRASH` lines, and to `C:\GLOS\CRASH\CRASHnnn.TXT` by the program's own DOS
+    calls, nested (not when DOS was busy: `file=none why=indos`);
+  - `tools/symcrash.py REPORT --exe PROG.EXE` names EIP and the stack's return addresses from a DJGPP image's
+    COFF symbols (its EIPs are image addresses); `--map PROG.MAP --base ADDR` reads an Open Watcom map for a
+    flat program (EIP is linear, ADDR where object 1 was loaded).
 
 ## 20. 86Box deviations [86Box]
 
@@ -882,6 +946,7 @@ place where nothing else is in DOS by construction.
 | PGE is stored but every flush is global | None | |
 | The dynarec compiles PUSHF per IOPL | IOPL changes inside a session could be ignored | V86TEST case U found no problem; IOPL stays constant per session anyway |
 | Matrox G-series cards are AGP only | 486 profiles can't have a Matrox card | S3 Trio64V2/DX until a PCI-variant patch at M7 |
+| The dynarec (the old one MGA-Glide builds) checks segment limits on stores, never on loads (`MEM_LOAD_ADDR_EA_*`) | DJGPP's Ctrl-C and SIGALRM cut DS's limit to 4 KB in the IRQ handler; a loop that only reads never faults, on any host (found by djtst205's HANG, M4b) | djtst's signal tests run with `--dynarec 0`; a local patch is proposed (M4b) |
 
 ## 21. Invariants checklist (for code review)
 

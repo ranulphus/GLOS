@@ -401,7 +401,8 @@ A program calls DPMI 0A00h with "GLOS" (D23). The result is a far entry point pl
 ### 6.10 FPU
 
 - Lazy switching: CR0.TS is set on a task switch, and the first FPU use saves the previous owner's state.
-- CR0.NE=1, with IRQ13 synthesised for V86 code that expects the old error interrupt.
+- CR0.NE=1, with IRQ13 synthesised for V86 code that expects the old error interrupt, once the FPU has a second
+  user (GLOS apps, sessions). Until then NE=0: errors arrive as IRQ13 the PC's way (supervisor.md §14.7, M4b).
 - Kernel code that uses the FPU (HAL paths such as `engine_present`) runs inside explicit FPU sections.
 - On Pentium II and later, whether to enable SSE state (OSFXSR) is open (Q2).
 

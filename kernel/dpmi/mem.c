@@ -61,7 +61,7 @@ static struct block *by_handle(u32 h)
 {
     struct block *b;
     for (b = dctx->blocks; b && b->handle != h; b = b->next) ;
-    return b && !b->phys ? b : 0;
+    return b && b->kind == BK_MEM ? b : 0;
 }
 
 /* Fresh zeroed frames for pages [from, to) of a block at lin; -1 (with
@@ -112,7 +112,7 @@ int lin_alloc(u32 size, struct block **out)
     b->handle = ++dctx->next_handle;
     b->lin = lin;
     b->size = size;
-    b->phys = 0;
+    b->kind = BK_MEM;
     insert(b);
     if (!dctx->lin_floor)
         dctx->lin_floor = lin;
@@ -158,9 +158,10 @@ int lin_resize(u32 handle, u32 size, struct block **out)
         return 0x8012;
     if (commit(lin, old, want) != 0)
         return 0x8013;
-    for (i = 0; i < old; i++) {
-        u32 f = mm_unmap(b->lin + (i << 12));
-        mm_map(lin + (i << 12), f, MM_W | MM_U);
+    for (i = 0; i < old; i++) {                 /* with their attributes; uncommitted pages stay so (0507h) */
+        u32 pte = mm_lookup(b->lin + (i << 12)), f = mm_unmap(b->lin + (i << 12));
+        if (f)
+            mm_map(lin + (i << 12), f, MM_U | (pte & MM_W));
     }
     unlink(b);
     b->lin = lin;
@@ -174,7 +175,7 @@ void lin_free_all(struct dpmi_ctx *c)
     while (c->blocks) {
         struct block *b = c->blocks;
         c->blocks = b->next;
-        if (!b->phys)
+        if (b->kind != BK_PHYS)
             release(b->lin, 0, b->size >> 12);
         else
             for (u32 i = 0; i < b->size >> 12; i++)
@@ -246,7 +247,7 @@ int phys_map(u32 phys, u32 size, u32 *lin)
     b->handle = 0;
     b->lin = at;
     b->size = n << 12;
-    b->phys = 1;
+    b->kind = BK_PHYS;
     insert(b);
     *lin = at + off;
     return 0;
@@ -258,12 +259,75 @@ int phys_unmap(u32 lin)
     u32 i;
     if (lin < 0x110000)
         return 0;
-    for (b = dctx->blocks; b && !(b->phys && lin >= b->lin && lin < b->lin + b->size); b = b->next) ;
+    for (b = dctx->blocks; b && !(b->kind == BK_PHYS && lin >= b->lin && lin < b->lin + b->size); b = b->next) ;
     if (!b)
         return 0x8025;                          /* invalid linear address */
     for (i = 0; i < b->size >> 12; i++)
         mm_unmap(b->lin + (i << 12));
     unlink(b);
     kfree(b);
+    return 0;
+}
+
+/* Host memory inside the context (the locked stack): committed now, freed
+   with the context, out of every handle's reach. */
+int lin_host(u32 lin, u32 size)
+{
+    struct block *b = kmalloc(sizeof *b);
+    if (!b)
+        return -1;
+    size = pages_of(size) << 12;
+    if (commit(lin, 0, size >> 12) != 0) {
+        kfree(b);
+        return -1;
+    }
+    b->handle = 0;
+    b->lin = lin;
+    b->size = size;
+    b->kind = BK_HOST;
+    insert(b);
+    return 0;
+}
+
+/* 0506h/0507h ([DPMI1.0]): n pages of a block from byte off, one word each:
+   bits 0-2 the type (0 uncommitted, 1 committed, 3 for 0507h: keep it),
+   bit 3 writable, bit 4 with accessed (5) and dirty (6). GLOS commits at
+   once, so a page is committed or not, and 0507h does it now. *done:
+   pages handled, also on failure. */
+int page_attr(u32 handle, u32 off, u32 n, u16 *attr, int set, u32 *done)
+{
+    struct block *b = by_handle(handle);
+    u32 i;
+    *done = 0;
+    if (!b)
+        return 0x8023;
+    if ((off & 0xFFF) || off >= b->size || n > (b->size - off) >> 12)
+        return 0x8025;                          /* invalid linear address */
+    for (i = 0; i < n; i++, (*done)++) {
+        u32 lin = b->lin + off + (i << 12), pte = mm_lookup(lin), type = attr[i] & 7;
+        if (!set) {
+            attr[i] = (pte & 1) ? (u16)(1 | ((pte & MM_W) ? 8 : 0) | 0x10 | ((pte & 0x20) ? 0x20 : 0)
+                                        | ((pte & 0x40) ? 0x40 : 0)) : 0;
+            continue;
+        }
+        if (type == 2 || type > 3)
+            return 0x8021;                      /* mapped pages: only 0508h makes them */
+        if (type == 0) {
+            u32 f = mm_unmap(lin);
+            if (f) {
+                pmm_free(f);
+                dctx->frames--;
+            }
+            continue;
+        }
+        if (!(pte & 1)) {
+            if (type == 3)
+                continue;                       /* uncommitted, and stays so */
+            if (commit(lin, 0, 1) != 0)
+                return 0x8013;
+            pte = mm_lookup(lin);
+        }
+        mm_map(lin, pte & ~0xFFFu, MM_U | ((attr[i] & 8) ? MM_W : 0));
+    }
     return 0;
 }

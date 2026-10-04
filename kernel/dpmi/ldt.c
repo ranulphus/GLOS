@@ -162,10 +162,21 @@ int sel_lin(u16 sel, u32 off, u32 len, u32 *lin)
     return 0;
 }
 
+/* The host's own copies reach only what the client may: conventional
+   memory and the HMA, the user region, the PCI window. A segment over the
+   kernel would otherwise have the host write there for it. */
+static int user_range(u32 lin, u32 n)
+{
+    u32 end = lin + n;
+    if (end < lin)
+        return 0;
+    return end <= 0x110000 || (lin >= USER_BASE && end <= USER_END) || (lin >= PHYS_WINDOW && end <= 0xFFC00000u);
+}
+
 int user_rd(u16 sel, u32 off, void *dst, u32 n)
 {
     u32 lin;
-    if (sel_lin(sel, off, n, &lin) != 0)
+    if (sel_lin(sel, off, n, &lin) != 0 || !user_range(lin, n))
         return -1;
     return ucopy(dst, (const void *)lin, n) ? -1 : 0;
 }
@@ -173,7 +184,7 @@ int user_rd(u16 sel, u32 off, void *dst, u32 n)
 int user_wr(u16 sel, u32 off, const void *src, u32 n)
 {
     u32 lin;
-    if (sel_lin(sel, off, n, &lin) != 0)
+    if (sel_lin(sel, off, n, &lin) != 0 || !user_range(lin, n))
         return -1;
     return ucopy((void *)lin, src, n) ? -1 : 0;
 }

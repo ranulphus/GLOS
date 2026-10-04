@@ -88,6 +88,7 @@ struct bootinfo {
     /* M4a: the DPMI host's real-mode side, in the stub's segment */
     bi_u32 bp_dpmi_off, bp_nest_off, bp_raw_off;        /* mode switch, nested-call return, raw switch */
     bi_u32 retf_off, int21_off, rmcb_off;               /* a RETF, INT 21h, 16 callback ARPLs */
+    bi_u32 bp_term_off;                         /* M4b: a client's terminate address (PSP:0Ah) */
     bi_u32 stub_paras;                          /* the resident stub's size, in paragraphs */
     /* M3: GLOS as the shell (BI_F_SHELL) */
     char comspec[80];                           /* COMMAND.COM, for batch files and the console (and the agent's) */

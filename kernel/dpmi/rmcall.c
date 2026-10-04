@@ -27,10 +27,13 @@
 static struct {
     u32 save;                                   /* nest_enter's stack, for nest_leave */
     struct trapframe *f;
+    struct trapframe *from;                     /* the protected-mode frame that called, or 0 */
 } nests[NEST_MAX];
 static int depth;
 
 int rm_nesting(void) { return depth; }
+
+struct trapframe *rm_pm_caller(void) { return depth ? nests[depth - 1].from : 0; }
 
 static void push16(u32 ss, u32 *sp, u32 v)
 {
@@ -39,7 +42,7 @@ static void push16(u32 ss, u32 *sp, u32 v)
     vm_wr8(vm_lin(ss, *sp + 1), (u8)(v >> 8));
 }
 
-int rm_call(struct rmregs *r, int kind, u8 vec, const u16 *words, u32 nwords)
+int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u16 *words, u32 nwords)
 {
     struct trapframe *f;
     u32 here, ss, sp, i, flags, ivt, vif = vm.vif;
@@ -90,6 +93,7 @@ int rm_call(struct rmregs *r, int kind, u8 vec, const u16 *words, u32 nwords)
     f->ebp = r->ebp;
 
     nests[depth].f = f;
+    nests[depth].from = from && !(from->eflags & FL_VM) ? from : 0;
     depth++;
     current->esp0 = (u32)f + sizeof *f;
     cpu_set_esp0(current->esp0);
@@ -119,6 +123,18 @@ int rm_nest_return(struct trapframe *tf)
     nest_leave(nests[depth - 1].save, 1);
 }
 
+/* The real-mode vector for a reflection from the host's own handler: the
+   IVT's, unless that is one of the client's callbacks (DOS/4GW points the
+   IVT at an RMCB that calls its PM handler: the "automatic pass-up"), when
+   it is the vector the callback or the PM hook took over (§14.5). */
+u32 rm_vector(u8 vec)
+{
+    u32 v = vm_rd32(vec * 4u), ip = v & 0xFFFF;
+    if ((v >> 16) == vm.loader_cs && ip >= vm.bi->rmcb_off && ip < vm.bi->rmcb_off + 2 * NRMCB)
+        return dctx->rm_prev[vec];
+    return v;
+}
+
 /* A software INT from protected mode that the client hasn't hooked: to
    real mode with the general registers and the arithmetic flags; DS and ES
    there are the host's segment ([DPMI0.9]: segment registers don't go
@@ -126,7 +142,10 @@ int rm_nest_return(struct trapframe *tf)
 void rm_reflect(struct trapframe *tf, u8 vec)
 {
     struct rmregs r;
+    u32 v = rm_vector(vec);
     memset(&r, 0, sizeof r);
+    if (!v)
+        return;                                 /* nowhere to go: as if handled */
     r.eax = tf->eax;
     r.ebx = tf->ebx;
     r.ecx = tf->ecx;
@@ -136,7 +155,9 @@ void rm_reflect(struct trapframe *tf, u8 vec)
     r.ebp = tf->ebp;
     r.flags = (u16)((tf->eflags & FL_ARITH) | (vm.vif ? FL_IF : 0) | 2);
     r.ds = r.es = dctx->rm_seg;
-    if (rm_call(&r, RM_INT, vec, 0, 0) != 0)
+    r.cs = (u16)(v >> 16);
+    r.ip = (u16)v;
+    if (rm_call(tf, &r, RM_IRET, vec, 0, 0) != 0)
         return;
     tf->eax = r.eax;
     tf->ebx = r.ebx;
@@ -148,13 +169,18 @@ void rm_reflect(struct trapframe *tf, u8 vec)
     tf->eflags = (tf->eflags & ~FL_ARITH) | (r.flags & FL_ARITH);
 }
 
-void rm_irq(u8 vec)
+void rm_irq(struct trapframe *tf, u8 vec)
 {
     struct rmregs r;
+    u32 v = rm_vector(vec);
     memset(&r, 0, sizeof r);
+    if (!v)
+        return;
     r.flags = 2;
     r.ds = r.es = dctx->rm_seg;
-    rm_call(&r, RM_INT, vec, 0, 0);
+    r.cs = (u16)(v >> 16);
+    r.ip = (u16)v;
+    rm_call(tf, &r, RM_IRET, vec, 0, 0);
 }
 
 /* 0306h, real to protected: AX = DS, CX = ES, DX = SS, (E)BX = (E)SP,

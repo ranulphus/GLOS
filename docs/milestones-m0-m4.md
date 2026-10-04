@@ -384,6 +384,42 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   - MGA-Glide's DOS/4GW and DJGPP HELLO on bf6: the same HX-TEST and HX-IMG lines (CRCs) with and without GLOS.
 - **Cost:** the stub's DPMI ARPLs add 42 bytes; MEM /C shows GLOS at 3,008 bytes (4,896 as the shell).
 
+**M4b status (2026-10-04): done** (supervisor.md §12.1b, §13, §14, §19).
+- **The host:** `kernel/dpmi/deliver.c`:
+  - entries that keep what a handler interrupted and return through TR_RET+n;
+  - the locked stack;
+  - IRQs to the client's handler first, from either mode; INT 1Ch/23h/24h passed up (an unhooked INT 23h is
+    ignored, as CWSDPMI does);
+  - exceptions with the 0.9 and 1.0 frames and frame edits; real-mode callbacks and the pass-up guard.
+
+  Also: `kernel/dbg/crash.c` and `tools/symcrash.py`; 0506h/0507h and 0210h/0212h; a stub ARPL at the
+  client's terminate address, so a DOS abort frees the context and restores the vectors as a kill does;
+  CR0.NE kept clear.
+- **T: `make loopa-m4b`:**
+  - **DPMICONF-32** gains 22 checks (exceptions, frame edits, page attributes, PM IRQs from both modes, INT 31h
+    inside an IRQ handler, the IRET's virtual IF, INT 1Ch passed up, the FPU error, callbacks, the GLOS-only
+    pass-up guard). 0 failures on CWSDPMI r7, HDPMI32i and GLOS, on all six profile and boot combinations.
+  - **djtst205** (`jobs.py djtst`): 17 of DJGPP 2.05's own tests run by RUNOUT (`tests/dos/runout.c`), which
+    sends their output to COM1. On all six combinations GLOS matches CWSDPMI's exit codes and output: the fault
+    messages with their EIPs, Ctrl-C (HANG, CTRLC), SIGALRM and SIGFPE (SIGNALS), the PIT (TIMER, UCLOCK).
+  - **ENABLE** reads IF with PUSHF, which shows the real IF at IOPL 0, so it stops at its first check. That is
+    expected under PRD D20 until direct mode (M4e).
+  - **CRASHME** faults with no handler (a page fault on the null page, a #GP): GLOS writes both crash reports
+    (the log and `C:\GLOS\CRASH\`), exits 255 with VECCHK OK, and `symcrash.py` names `crash_here` and
+    `crash_gp`.
+  - **MGA-Glide's STACKPG, MOUSETST, JOYTEST and SBBEEP** (`jobs.py dpmitools`): the same HX-TEST results with
+    and without GLOS, and SBBEEP's 440 Hz recorded under GLOS.
+- **86Box:** the dynarec checks no segment limit on loads (supervisor.md §20), so DJGPP's Ctrl-C and SIGALRM
+  trick never faults in a read-only loop, on any host. djtst's three signal tests run with `--dynarec 0`; a
+  local patch (0112) is proposed in MGA-Glide.
+- **Found on the way:**
+  - M4a cleared the virtual IF for software INTs to a client's handler, which the handler's IRET could never
+    restore.
+  - HDPMI32i lets DOS abort a DJGPP program on Ctrl-C (and then crashes the next one); CWSDPMI doesn't, and GLOS
+    follows CWSDPMI.
+- **Deferred:** per-client FPU state and NE=1 (the FPU's second user); multispn's nested runs (M4c);
+  0211h/0213h; the 1.0 frame for 16-bit clients (M4d).
+
 ### The gate's baseline matrix (M4e)
 
 | Suite | Baseline | Profiles | Boots |
