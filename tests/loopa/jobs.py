@@ -579,9 +579,21 @@ def dj_key(name, lines):
         elif name == "TIMER" and not l.startswith("iter"):
             keep.append(l)
     # DJGPP's signal line may follow a line the program hadn't ended, and
-    # RUNOUT cuts lines at 160 bytes: look for it in the whole output.
-    keep += ["Exiting due to signal " + m for m in re.findall(r"Exiting due to signal (SIG[A-Z]+)", "".join(lines))]
+    # RUNOUT cuts lines at 160 bytes: look for it in the lines as written.
+    keep += ["Exiting due to signal " + m for m in re.findall(r"Exiting due to signal (SIG[A-Z]+)", "\n".join(dj_unwrap(lines)))]
     return keep
+
+
+def dj_unwrap(lines):
+    """RUNOUT's lines with its 160-byte cuts joined up again."""
+    out, cont = [], False
+    for l in lines:
+        if cont:
+            out[-1] += l
+        else:
+            out.append(l)
+        cont = len(l) == 160
+    return out
 
 
 def dj_own(name, lines):
@@ -612,6 +624,10 @@ def dj_own(name, lines):
 # the virtual IF (PRD D20), so PUSHF shows IF set and ENABLE stops at its
 # first check: expected until direct-mode profiles (IOPL 3, M4e) run it.
 DJ_KNOWN = {"ENABLE": (1, "disable -> incorrect; expected 0")}
+# SIGNALS fires SIGALRM and SIGFPE as fast as it can, then ends on purpose with
+# an FP exception. CWSDPMI doesn't always get there (one bf6 run died with a
+# GPF in the signal storm), so GLOS is held to the test's own ending.
+DJ_EXPECT = {"SIGNALS": (255, ["Floating Point exception", "Exiting due to signal SIGFPE"])}
 
 
 def djtst(profile, boot):
@@ -639,19 +655,23 @@ def djtst(profile, boot):
         common = ["--machine", profile, "--boot-cfg", boot, "--timeout", "1500", "--idle", "300",
                   "--cmd", "SERSAY HX-START djtst"] + extra + files + (["--keys", keys] if keys else [])
         end = ["--cmd", "SERSAY HX-DONE 0"]
-        hosts["cws-" + part] = common + ["--cmd", "C:\\TEST\\DJ.BAT"] + end
+        hosts["cws-" + part] = common + ["--cmd", "CALL C:\\TEST\\DJ.BAT"] + end      # CALL: back to RUN.BAT
         hosts["glos-" + part] = common + GLOS_FILES + [
             "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\DJ.BAT", "--cmd", "VECCHK check"] + end
     procs = {h: run("djtst-%s-%s" % (h, tag), a, background=True) for h, a in hosts.items()}
-    text = {}
+    text, status = {}, {}
     for h, pr in procs.items():
         pr.wait()
-        log = os.path.join(ROOT, "out", "djtst-%s-%s" % (h, tag), "serial.log")
+        out = os.path.join(ROOT, "out", "djtst-%s-%s" % (h, tag))
+        log = os.path.join(out, "serial.log")
         text[h] = open(log, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(log) else ""
+        status[h] = open(os.path.join(out, "status")).read().strip() if os.path.exists(os.path.join(out, "status")) else "?"
     text = {"cws": text["cws-main"] + text["cws-sig"], "glos": text["glos-main"] + text["glos-sig"],
             "glos-main": text["glos-main"]}
     runs = {h: dj_runs(t) for h, t in text.items()}
-    checks, info = {}, ""
+    checks, info = {"runs-pass": all(v == "PASS" for v in status.values())}, ""
+    if not checks["runs-pass"]:
+        info += " runs: %s;" % " ".join("%s=%s" % kv for kv in sorted(status.items()))
     for name, _ in DJTST + DJTST_SIG:
         if name in ("CRASHME", "CRASHGP"):
             continue
@@ -662,7 +682,14 @@ def djtst(profile, boot):
             checks[name.lower() + "-known"] = bool(g) and g[1] == code and any(text_ in l for l in g[0])
             info += " %s: known (M4e);" % name
             continue
-        if not g or g[1] is None:
+        if name in DJ_EXPECT and g and g[1] is not None:
+            code, want = DJ_EXPECT[name]
+            key = dj_key(name, g[0])
+            why = None if g[1] == code and all(w in key for w in want) else "ending: code %s %s" % (g[1], key[-2:])
+            why = why or dj_own(name, g[0])
+            if c and dj_key(name, c[0]) != key:
+                info += " %s: baseline ended %s;" % (name, dj_key(name, c[0])[-1:])
+        elif not g or g[1] is None:
             why = "no run"
         elif not c or c[1] is None:
             why = "no baseline"
