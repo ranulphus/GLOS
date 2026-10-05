@@ -19,6 +19,8 @@
 #include <sys/movedata.h>
 #include <sys/nearptr.h>
 #include <sys/exceptn.h>
+#include <process.h>
+#include <unistd.h>
 
 static int fails;
 static int is_glos;
@@ -570,9 +572,180 @@ static void t_rmcb(void)
     }
 }
 
-int main(void)
+/* ---- M4c: a child client (this program again, "child ...") in the same context */
+
+static volatile int hits61;
+static void pm61(void) { hits61++; }
+
+/* The child's part: take what it can and leave without giving it back. */
+static int child(const char *how)
+{
+    __dpmi_meminfo m;
+    __dpmi_paddr p;
+    _go32_dpmi_seginfo w;
+    __dpmi_allocate_ldt_descriptors(8);
+    m.size = 1024 * 1024;
+    __dpmi_allocate_memory(&m);
+    w.pm_offset = (unsigned long)pm61;
+    w.pm_selector = _my_cs();
+    if (_go32_dpmi_allocate_iret_wrapper(&w) == 0) {
+        p.offset32 = w.pm_offset;
+        p.selector = w.pm_selector;
+        __dpmi_set_protected_mode_interrupt_vector(0x61, &p);
+    }
+    if (!strcmp(how, "fault"))
+        *(volatile int *)0 = 0;                 /* DJGPP's own SIGSEGV: exit 255 */
+    _exit(42);
+}
+
+static void t_nest(const char *self)
+{
+    __dpmi_free_mem_info a, b;
+    __dpmi_paddr old61, now, mine;
+    _go32_dpmi_seginfo w;
+    int code, sel, sel2, ok;
+
+    __dpmi_get_protected_mode_interrupt_vector(0x61, &old61);
+    w.pm_offset = (unsigned long)pm61;
+    w.pm_selector = _my_cs();
+    if (_go32_dpmi_allocate_iret_wrapper(&w) != 0) {
+        say("nest", 0, "no wrapper");
+        return;
+    }
+    mine.offset32 = w.pm_offset;
+    mine.selector = w.pm_selector;
+    __dpmi_set_protected_mode_interrupt_vector(0x61, &mine);
+    sel = __dpmi_allocate_ldt_descriptors(1);
+    __dpmi_set_segment_base_address(sel, 0x12340);
+    __dpmi_get_free_memory_information(&a);
+
+    code = spawnl(P_WAIT, self, self, "child", "leave", NULL);
+    __dpmi_get_free_memory_information(&b);
+    __dpmi_get_protected_mode_interrupt_vector(0x61, &now);
+    say("nest-child-exit", code == 42, "code=%d", code);
+    say("nest-vector-back", is_glos ? now.selector == mine.selector && now.offset32 == mine.offset32 : -1,
+        "now=%04x:%08lx (CWSDPMI keeps the child's hook, into code that is gone)", now.selector, now.offset32);
+    say("nest-memory-back", b.total_number_of_free_pages + 16 >= a.total_number_of_free_pages,
+        "free pages before=%lu after=%lu", a.total_number_of_free_pages, b.total_number_of_free_pages);
+    {
+        unsigned long base = 0;
+        __dpmi_get_segment_base_address(sel, &base);
+        sel2 = __dpmi_allocate_ldt_descriptors(1);
+        say("nest-selectors-kept", base == 0x12340 && sel2 > 0, "base=%lx", base);
+        if (sel2 > 0)
+            __dpmi_free_ldt_descriptor(sel2);
+    }
+    if (now.selector != mine.selector || now.offset32 != mine.offset32) {
+        __dpmi_set_protected_mode_interrupt_vector(0x61, &mine);   /* (the child's is code that is gone) */
+        say("nest-hook-works", -1, "skipped: the host kept the child's hook");
+    } else {
+        hits61 = 0;
+        __asm__ volatile("int $0x61" ::: "memory");
+        say("nest-hook-works", hits61 == 1, "hits=%d", hits61);
+    }
+
+    code = spawnl(P_WAIT, self, self, "child", "fault", NULL);
+    __dpmi_get_protected_mode_interrupt_vector(0x61, &now);
+    hits61 = 0;
+    if (now.selector == mine.selector && now.offset32 == mine.offset32)
+        __asm__ volatile("int $0x61" ::: "memory");
+    ok = !is_glos || (now.selector == mine.selector && now.offset32 == mine.offset32 && hits61 == 1);
+    say("nest-child-fault", code == 255 && ok, "code=%d hits=%d", code, hits61);
+
+    __dpmi_set_protected_mode_interrupt_vector(0x61, &old61);
+    _go32_dpmi_free_iret_wrapper(&w);
+    __dpmi_free_ldt_descriptor(sel);
+}
+
+/* ---- M4c: DPMI 1.0 extras (0401h, 0508h/0509h, 0B00h-0B03h), INT 2Fh */
+
+__attribute__((noinline)) static int watch_target(int x) { return x + 1; }
+extern unsigned long exc_or_flags;
+
+static void t_extras(void)
+{
+    unsigned char caps[128];
+    __dpmi_meminfo m;
+    __dpmi_paddr old1;
+    int sel, cap, i, ok;
+    unsigned short attr[2] = { 0, 0 };
+
+    memset(caps, 0, sizeof caps);
+    cap = __dpmi_get_capabilities(&i, (char *)caps);
+    say("caps", cap == -1 ? -1 : (caps[2] != 0), "caps=%x host=%d.%d vendor=%.20s", i, caps[0], caps[1], caps + 2);
+
+    m.size = 2 * 4096;
+    sel = __dpmi_allocate_ldt_descriptors(1);
+    if (sel > 0 && __dpmi_allocate_memory(&m) == 0) {
+        __dpmi_set_segment_base_address(sel, m.address);
+        __dpmi_set_segment_limit(sel, 2 * 4096 - 1);
+        /* 0509h: page 1 shows the text screen */
+        __asm__ volatile("int $0x31; sbbl %0, %0" : "=a"(ok) : "a"(0x0509), "S"(m.handle), "b"(0x1000), "c"(1),
+                         "d"(0xB8000) : "memory", "cc");
+        if (ok == 0) {
+            _farpokew(_dos_ds, 0xB8000 + 158, 0x1F41);
+            ok = _farpeekw(sel, 0x1000 + 158) == 0x1F41;
+            {
+                __dpmi_meminfo a = m;
+                a.address = 0;
+                a.size = 2;
+                __dpmi_get_page_attributes(&a, (short *)attr);
+            }
+            say("map-dos", ok, "attr=%04x %04x", attr[0], attr[1]);
+            say("map-dos-type", (attr[1] & 7) == 2, "page 1 type=%d (2: mapped)", attr[1] & 7);
+        } else {
+            say("map-dos", -1, "0509h refused");
+        }
+        __asm__ volatile("int $0x31; sbbl %0, %0" : "=a"(ok) : "a"(0x0508), "S"(m.handle), "b"(0), "c"(1),
+                         "d"(0xFF000) : "memory", "cc");
+        if (ok == 0)                                            /* 0508h: page 0 is the BIOS's last page */
+            say("map-device", _farpeekl(sel, 0xFF0) == _farpeekl(_dos_ds, 0xFFFF0) && _farpeekb(sel, 0xFF0) == 0xEA,
+                "reset vector %08lx", _farpeekl(sel, 0xFF0));
+        else
+            say("map-device", -1, "0508h refused");
+        __dpmi_free_memory(m.handle);
+        __dpmi_free_ldt_descriptor(sel);
+    }
+
+    /* an execute watchpoint: exception 1 at the function's first byte, the
+       handler sets RF to run it, and 0B02h says it fired. INFO only: 86Box
+       fires no DR0-DR3 breakpoint on these profiles, under any host (with or
+       without the dynarec; supervisor.md §20), so silicon decides. */
+    {
+        unsigned long lin = __djgpp_base_address + (unsigned long)watch_target;
+        int h = -1, v;
+        __asm__ volatile("int $0x31; jc 1f; movzwl %%bx, %0; 1:" : "+r"(h) : "a"(0x0B00), "b"(lin >> 16),
+                         "c"(lin & 0xFFFF), "d"(0x0001) : "memory", "cc");
+        if (h < 0) {
+            say("watch", -1, "0B00h refused");
+        } else {
+            int state = 0;
+            set_exc(1, exc_handler, &old1);
+            exc_hits = 0;
+            exc_skip = 0;
+            exc_or_flags = 0x10000;
+            v = watch_target(41);
+            exc_or_flags = 0;
+            __dpmi_set_processor_exception_handler_vector(1, &old1);
+            __asm__ volatile("int $0x31" : "=a"(state) : "a"(0x0B02), "b"(h) : "memory", "cc");
+            __asm__ volatile("int $0x31" :: "a"(0x0B01), "b"(h) : "memory", "cc");
+            say("watch", -1, "hits=%lu eip=%lx(%lx) v=%d state=%x (86Box fires no DR breakpoints: §20)", exc_hits,
+                exc_eip, (unsigned long)watch_target, v, state & 0xFFFF);
+        }
+    }
+    {
+        unsigned short ax;
+        __asm__ volatile("int $0x2f" : "=a"(ax) : "a"(0x1680) : "memory");
+        /* a real yield, but "not supported" as on plain DOS (supervisor.md §13) */
+        say("glos-yield", is_glos ? (ax & 0xFF) == 0x80 : -1, "al=%02x", ax & 0xFF);
+    }
+}
+
+int main(int argc, char **argv)
 {
     __dpmi_paddr g;
+    if (argc > 2 && !strcmp(argv[1], "child"))
+        return child(argv[2]);
     ser("HX-TEST dpmi-start INFO\r\n");
     hd_ds = __djgpp_ds_alias;
     is_glos = __dpmi_get_vendor_specific_api_entry_point("GLOS", &g) == 0;
@@ -584,6 +757,8 @@ int main(void)
     t_exc();
     t_irq();
     t_rmcb();
+    t_extras();
+    t_nest(argv[0]);
     if (dos_seg > 0)
         __dpmi_free_dos_memory(dos_sel);
     {

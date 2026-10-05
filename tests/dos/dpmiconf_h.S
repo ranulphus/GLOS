@@ -9,7 +9,7 @@
         .globl  _hd_ds, _old8, _old1c, _old75, _irq8_mode
         .globl  _irq8_hits, _irq8_vif, _irq8_ss, _irq8_base, _i1c_hits, _irq13_hits, _mf_hits
         .globl  _exc_hits, _exc_err, _exc_eip, _exc_cs, _exc_flags, _exc_esp, _exc_ss, _exc_hss
-        .globl  _exc_skip, _exc_ebx, _exc_new_eip, _exc_new_esp
+        .globl  _exc_skip, _exc_ebx, _exc_new_eip, _exc_new_esp, _exc_or_flags
         .globl  _x10_hits, _x10_eip, _x10_cs, _x10_info, _x10_flags, _x10_es, _x10_ds, _x10_cr2, _x10_pte
         .globl  _rmcb_hits, _rmcb_eax, _rmcb_sp, _rmcb_ss_base
         .balign 4
@@ -40,6 +40,7 @@ _exc_skip:      .long   0               /* bytes to add to EIP in the frame */
 _exc_ebx:       .long   0               /* EBX the handler leaves (the resumed code keeps it) */
 _exc_new_eip:   .long   0               /* if set: EIP for the frame */
 _exc_new_esp:   .long   0               /* if set: ESP for the frame */
+_exc_or_flags:  .long   0               /* bits to set in the frame's EFLAGS (RF) */
 _x10_hits:      .long   0
 _x10_eip:       .long   0
 _x10_cs:        .long   0
@@ -90,7 +91,9 @@ _exc_handler:
         testl   %eax, %eax
         jz      2f
         movl    %eax, 32(%esp)
-2:      movl    _exc_ebx, %ebx
+2:      movl    _exc_or_flags, %eax
+        orl     %eax, 28(%esp)
+        movl    _exc_ebx, %ebx
         popl    %eax
         popl    %ds
         lret

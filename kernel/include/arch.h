@@ -11,10 +11,11 @@
 #define SEL_LDT      0x28
 #define SEL_ESPFIX   0x30
 #define SEL_CODE16   0x38
-#define SEL_DATA16   0x40
+#define SEL_BIOS     0x40       /* ring-3 data at 400h: the 0040h that Windows-era code loads (GTA, M4c) */
 #define SEL_TRAMP    0x4B       /* ring-3 code: the host's trampolines (kernel/dpmi) */
 #define SEL_TRAMPD   0x53       /* its data alias */
-#define SEL_BIOS     0x5B       /* ring-3 data at 400h, for clients that expect 0040h-style access */
+#define SEL_BIOS5B   0x5B       /* the same as 40h (M1-M4b's BIOS selector) */
+#define SEL_DATA16   0x60       /* 16-bit data at the resident stub, to leave protected mode */
 #define TRAMP_LIN    0x3FF000u  /* the trampoline page, in PDE 0's table, so in every address space */
 
 /* The physical PIC's vectors (supervisor.md §3.2). */
@@ -54,6 +55,7 @@ extern int cpu_has_cr4;
 /* kernel/dpmi: traps from a DPMI client (ring 3), and the way back to it */
 void dpmi_trap(struct trapframe *tf);
 void dpmi_return(struct trapframe *tf);
+int dpmi_db_hit(void);                  /* kernel/dpmi: a #DB was a client watchpoint (noted) */
 
 /* stubs.S */
 u32 try_rd_cr4(u32 *v);

@@ -21,7 +21,7 @@ typedef unsigned int   bi_u32;
 #define BOOT_SEL_CODE32  0x08
 #define BOOT_SEL_DATA32  0x10
 #define BOOT_SEL_CODE16  0x38                   /* base = loader CS * 16 */
-#define BOOT_SEL_DATA16  0x40                   /* base = loader DS * 16 */
+#define BOOT_SEL_DATA16  0x60                   /* base = loader DS * 16 (40h is clients' BIOS data) */
 
 #define BI_MEM_RANGES    32
 #define BI_MEM_FREE      1                      /* usable by GLOS */
@@ -89,6 +89,7 @@ struct bootinfo {
     bi_u32 bp_dpmi_off, bp_nest_off, bp_raw_off;        /* mode switch, nested-call return, raw switch */
     bi_u32 retf_off, int21_off, rmcb_off;               /* a RETF, INT 21h, 16 callback ARPLs */
     bi_u32 bp_term_off;                         /* M4b: a client's terminate address (PSP:0Ah) */
+    bi_u32 int2f_off;                           /* M4c: GLOS's INT 2Fh handler, in the IVT's chain */
     bi_u32 stub_paras;                          /* the resident stub's size, in paragraphs */
     /* M3: GLOS as the shell (BI_F_SHELL) */
     char comspec[80];                           /* COMMAND.COM, for batch files and the console (and the agent's) */

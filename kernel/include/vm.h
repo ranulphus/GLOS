@@ -15,7 +15,9 @@ struct bootinfo;
 #define FL_ARITH 0x00000CD5u            /* CF PF AF ZF SF DF OF */
 #define FL_TF    0x00000100u
 #define FL_IF    0x00000200u
-#define FL_HI    0x00007000u            /* IOPL and NT: virtual, as the program set them */
+#define FL_HI    0x00007000u            /* IOPL and NT */
+#define FL_NT    0x00004000u            /* virtual in V86 mode, as the program set it */
+#define FL_IOPL3 0x00003000u
 #define FL_VM    0x00020000u
 #define FL_AC    0x00040000u
 #define FL_VIF   0x00080000u
@@ -37,7 +39,7 @@ struct vm {
     u16 loader_cs, loader_psp;
     u8 vif;                             /* the virtual interrupt flag (EFLAGS.VIF in V86 mode with VME) */
     u8 vme;                             /* CR4.VME on: CLI, STI, PUSHF, POPF, IRET and most INTs in hardware */
-    u32 vflags_hi;                      /* IOPL, NT */
+    u32 vflags_hi;                      /* NT */
     struct vpic pic;
     u16 phys_mask;                      /* what the physical PIC's IMR holds */
     u8 a20;
@@ -49,6 +51,7 @@ struct vm {
     u32 event_lin, event_until;
     /* DOS */
     u32 indos, sda;                     /* linear addresses, 0 unknown */
+    u32 int2f_prev;                     /* INT 2Fh's vector under GLOS's own (v86.c vm_int2f) */
     struct vm_snap snap[SNAP_LEVELS];
     u8 kill_req;
     u32 kill_since;

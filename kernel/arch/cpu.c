@@ -23,9 +23,9 @@ extern struct { u32 esp; u16 sel; } __attribute__((packed)) espfix_ptr;
 static const u32 *ldt_base;
 static u32 ldt_limit;
 
-static u32 gdt[2 * 12] __attribute__((aligned(8)));     /* selectors 00h-58h */
+static u32 gdt[2 * 13] __attribute__((aligned(8)));     /* selectors 00h-60h */
 static u32 idt[2 * 256] __attribute__((aligned(8)));
-static u32 gdt_copy[2 * 12];                           /* for the #DF report */
+static u32 gdt_copy[ARRAY_SIZE(gdt)];                   /* for the #DF report */
 /* The TSS's fixed part, the 32-byte VME redirection bitmap, the 8 KB I/O
    permission bitmap and its mandatory trailing FFh byte: three pages
    (supervisor.md §3.3). */
@@ -93,7 +93,8 @@ void cpu_init(u32 cs16_base, u32 ds16_base, u32 ret_off)
     set_desc(SEL_ESPFIX, 0, 0xFFFFF, 0x92, 0xC0);       /* flat; the base moves for each espfix return */
     set_desc(SEL_TRAMP & ~3, TRAMP_LIN, 0xFFF, 0xFA, 0x40);     /* ring-3 code, 32-bit */
     set_desc(SEL_TRAMPD & ~3, TRAMP_LIN, 0xFFF, 0xF2, 0x40);
-    set_desc(SEL_BIOS & ~3, 0x400, 0xFFFF, 0xF2, 0x00);
+    set_desc(SEL_BIOS, 0x400, 0xFFFF, 0xF2, 0x00);
+    set_desc(SEL_BIOS5B & ~3, 0x400, 0xFFFF, 0xF2, 0x00);
     for (v = 0; v < 256; v++)
         set_gate(v, (u32)stub_base + v * 16, SEL_KCODE, gate_type(v));
     set_gate(8, 0, SEL_DFTSS, 0x85);                    /* #DF: a task gate */
@@ -259,6 +260,8 @@ static void back_to_user(struct trapframe *tf)
         dpmi_return(tf);
 }
 
+static u32 stray_db;                                    /* single steps dropped in ring 0 (86Box) */
+
 static void dispatch(struct trapframe *tf)
 {
     u32 v = tf->vec;
@@ -302,8 +305,17 @@ static void dispatch(struct trapframe *tf)
         fixup_vec = v;
         return;
     }
+    if (v == 1 && dpmi_db_hit())                        /* the kernel touched a client's watchpoint */
+        return;
     if (v < 32 && trap_fn[v] && trap_fn[v](tf))
         return;
+    if (v == 1) {                                       /* a #DB in ring 0 no one claims: never the kernel's own */
+        u32 dr6 = read_dr6();                           /* (it sets no TF, and its DRs are clients' watchpoints). */
+        write_dr6(dr6 & ~0x400Fu);                      /* 86Box keeps the single step of an instruction that */
+        if (!stray_db++)                                /* faulted into the kernel pending, and takes it in the */
+            kprintf("GLOS-CPU stray-db at=%p dr6=%x\n", tf->eip, dr6);  /* handler (silicon doesn't, SDM 17.3.1.4) */
+        return;
+    }
     panic(v < 32 ? "exception" : "unexpected-interrupt", tf);
 }
 

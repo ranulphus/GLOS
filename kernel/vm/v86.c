@@ -67,20 +67,31 @@ static u32 pop32(struct trapframe *tf)
 }
 
 /* ---- FLAGS as the program sees them: the real arithmetic flags, TF, AC and
-   ID; the virtual IF; IOPL and NT as last written (a 386 in real mode keeps
-   them, which CPU detection code checks). VM, IF and IOPL 0 stay real. */
+   ID; the virtual IF; NT as last written; IOPL 3, as VME's PUSHF shows it
+   (and an IOPL-3 host's real mode), so V86 code sees the same FLAGS on every
+   profile (HDPMI's I3103022 on the 486DX2, M4c). CPU detection still finds a
+   386 or later: bits 12-14 neither all clear nor all set after a POPF of 0.
+   VM, IF and IOPL 0 stay real.
+   ID only where the CPU has CPUID (the loader found it toggling): 86Box's
+   IRET to V86 mode loads EFLAGS unmasked, so a 486DX2 there "kept" an ID a
+   POPFD had set, and lDebugX's probe then ran CPUID into #UD (M4c). */
+
+static u32 flags_wide(void)
+{
+    return FL_ARITH | FL_TF | FL_AC | (vm.bi->cpuid_edx ? FL_ID : 0);
+}
 
 static u32 flags_image(const struct trapframe *tf)
 {
-    return (tf->eflags & (FL_ARITH | FL_TF | FL_AC | FL_ID)) | (vm.vif ? FL_IF : 0) | vm.vflags_hi | 2;
+    return (tf->eflags & flags_wide()) | (vm.vif ? FL_IF : 0) | (vm.vflags_hi & FL_NT) | FL_IOPL3 | 2;
 }
 
 static void flags_apply(struct trapframe *tf, u32 f, int wide)
 {
-    u32 keep = wide ? (FL_ARITH | FL_TF | FL_AC | FL_ID) : (FL_ARITH | FL_TF);
+    u32 keep = wide ? flags_wide() : (FL_ARITH | FL_TF);
     tf->eflags = (tf->eflags & ~keep) | (f & keep);
     vm.vif = (f & FL_IF) != 0;
-    vm.vflags_hi = f & FL_HI;
+    vm.vflags_hi = f & FL_NT;
 }
 
 /* ---- interrupts */
@@ -294,6 +305,8 @@ void vm_kill_now(struct trapframe *tf) { vm_try_kill(tf, 1); }
 void vm_return(struct trapframe *tf)
 {
     int vec;
+    if (fpu_msw_dos != ~0u)
+        fpu_msw_set(fpu_msw_dos);               /* a client's 0E01h EM is its own */
     if (vm.kill_req)
         vm_try_kill(tf, 0);
     if (vm.vif && vpic_pending(&vm.pic)) {
@@ -318,9 +331,12 @@ void vm_return(struct trapframe *tf)
 
 /* ---- GLOS.EXE's calls and leaving */
 
+static void int2f_hook(u16 old_cs);
+static void int2f_unhook(void);
 static void vm_leave(u32 code) __attribute__((noreturn));
 static void vm_leave(u32 code)
 {
+    int2f_unhook();
     vkbc_leave();
     vdev_leave();
     pic_init(vm.pic.p[0].base, vm.pic.p[1].base, vpic_imr(&vm.pic));
@@ -353,7 +369,11 @@ static void vm_resident(u16 seg)
         if (lin >= lo && lin < end * 16)
             kprintf("GLOS-WARN ivt-into-loader vec=%02x at=%04x:%04x\n", v, x >> 16, x & 0xFFFF);
     }
-    vm.loader_cs = seg;
+    {
+        u16 old = vm.loader_cs;
+        vm.loader_cs = seg;
+        int2f_hook(old);
+    }
     vm.loader_psp = psp;
     vm.bi->cs_base = (u32)seg << 4;
     cpu_set_code16_base(vm.bi->cs_base);
@@ -550,6 +570,67 @@ static void string_io(struct trapframe *tf, const struct v86insn *in)
     }
 }
 
+/* GLOS's INT 2Fh (M4c): the DPMI host's 1687h, the XMS server's 4300h and
+   4310h, a real yield for 1680h, and never Windows (1600h, 160Ah), answered
+   at the bottom of the IVT's chain, as a DPMI host or an XMS driver that is
+   a TSR answers them. A program that hooks INT 2Fh after GLOS started (a
+   debugger wrapping the DPMI entry, lDebugX) sees these calls first, as it
+   would under HDPMI or CWSDPMI; anything else goes on down the chain. The
+   vector points at the stub's int2f ARPL, and follows the stub when it
+   moves (vm_resident); the leave puts the old one back. */
+static void int2f_hook(u16 old_cs)
+{
+    u32 ours = (u32)vm.loader_cs << 16 | vm.bi->int2f_off, cur = vm_rd32(0x2F * 4);
+    if (!vm.int2f_prev)
+        vm.int2f_prev = cur;
+    else if (cur != ((u32)old_cs << 16 | vm.bi->int2f_off))
+        return;                                 /* hooked over by now: the chain still reaches the old ARPL */
+    vm_wr8(0x2F * 4, (u8)ours);
+    vm_wr8(0x2F * 4 + 1, (u8)(ours >> 8));
+    vm_wr8(0x2F * 4 + 2, (u8)(ours >> 16));
+    vm_wr8(0x2F * 4 + 3, (u8)(ours >> 24));
+}
+
+static void int2f_unhook(void)
+{
+    u32 ours = (u32)vm.loader_cs << 16 | vm.bi->int2f_off, v = vm.int2f_prev;
+    if (vm_rd32(0x2F * 4) != ours) {
+        kprintf("GLOS-WARN int2f-hooked-over vec=%08x\n", vm_rd32(0x2F * 4));
+        return;
+    }
+    vm_wr8(0x2F * 4, (u8)v);
+    vm_wr8(0x2F * 4 + 1, (u8)(v >> 8));
+    vm_wr8(0x2F * 4 + 2, (u8)(v >> 16));
+    vm_wr8(0x2F * 4 + 3, (u8)(v >> 24));
+}
+
+static void vm_int2f(struct trapframe *tf)
+{
+    u32 ax = tf->eax & 0xFFFF, f;
+    if (ax == 0x1687) {
+        dpmi_1687(tf);
+    } else if (ax == 0x4300) {
+        SETLO(tf->eax, 0x80);
+    } else if (ax == 0x4310) {
+        tf->v86_es = vm.loader_cs;
+        SET16(tf->ebx, vm.bi->bp_xms_off - 5);
+    } else if (ax == 0x1680) {                  /* a real yield (§13): the kernel's threads run. AL */
+        thread_yield();                         /* stays 80h, "not supported", as on plain DOS: DJGPP's */
+                                                /* uclock() takes AL=0 for Windows 9x and waits for a */
+                                                /* BIOS tick, forever if called with interrupts off */
+    } else if (ax == 0x1600) {                  /* never Windows (§13); 160Ah: AX as it was */
+        SETLO(tf->eax, 0);
+    } else if (ax != 0x160A) {
+        tf->cs = vm.int2f_prev >> 16;           /* on down the chain, the INT's frame as it is */
+        tf->eip = vm.int2f_prev & 0xFFFF;
+        return;
+    }
+    tf->eip = pop16(tf);                        /* IRET */
+    tf->cs = pop16(tf);
+    f = pop16(tf);
+    flags_apply(tf, (f & ~FL_ARITH) | (tf->eflags & FL_ARITH), 0);    /* the answer's flags, the caller's IF */
+}
+
 static void soft_int(struct trapframe *tf, u8 n, u32 next)
 {
     u32 ax = tf->eax & 0xFFFF;
@@ -558,24 +639,6 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
     case 0x15:
         if (vm_int15(tf, next))
             return;
-        break;
-    case 0x2F:                                  /* XMS: GLOS's own server; the DPMI host */
-        if (ax == 0x1687) {
-            dpmi_1687(tf);
-            tf->eip = next;
-            return;
-        }
-        if (ax == 0x4300) {
-            SETLO(tf->eax, 0x80);
-            tf->eip = next;
-            return;
-        }
-        if (ax == 0x4310) {
-            tf->v86_es = vm.loader_cs;
-            SET16(tf->ebx, vm.bi->bp_xms_off - 5);
-            tf->eip = next;
-            return;
-        }
         break;
     case 0x29:
         agent_vm_int29(tf);
@@ -592,14 +655,8 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
             vm_exec_snap();
         if (vm.shell_state == 1 && ((ax >> 8) == 0x4C || (ax >> 8) == 0x00))
             vm_env_back();
-        if ((ax >> 8) == 0x4C || (ax >> 8) == 0x00) {
-            int client = dctx && vm_current_psp() == dctx->psp;
-            dpmi_dos_exit(tf);
-            if (client && rm_nesting()) {       /* it ended inside a nested real-mode call */
-                vm_int(tf, n, next);
-                rm_unwind(tf);
-            }
-        }
+        if ((ax >> 8) == 0x4C || (ax >> 8) == 0x00)
+            dpmi_dos_exit(tf, n, next);         /* a DPMI client's program ending (may not come back) */
         break;
     }
     vm_int(tf, n, next);
@@ -703,11 +760,17 @@ void vm_exception(struct trapframe *tf)
             tf->eip = (ip + 2) & 0xFFFF;
             return;
         }
+        if (tf->cs == vm.loader_cs && ip == vm.bi->int2f_off) {
+            vm_int2f(tf);
+            return;
+        }
         if (dpmi_v86_bp(tf))
             return;
         vm_int(tf, 6, ip);
         return;
     case 0: case 1: case 3: case 4: case 5: case 7: case 12:
+        if (tf->vec == 1)
+            dpmi_db_hit();                      /* a client's watchpoint met in V86 code is still a hit */
         vm_int(tf, (u8)tf->vec, ip);            /* as a real-mode CPU would */
         return;
     default:
@@ -720,7 +783,7 @@ void vm_exception(struct trapframe *tf)
 
 /* Software INTs GLOS handles (supervisor.md §9.3): with VME, the rest go
    straight through the IVT. */
-static const u8 trapped_ints[] = { 0x15, 0x1C, 0x21, 0x23, 0x24, 0x2F };   /* 1Ch/23h/24h: a DPMI client's (§14.4) */
+static const u8 trapped_ints[] = { 0x15, 0x1C, 0x21, 0x23, 0x24 };     /* 1Ch/23h/24h: a DPMI client's (§14.4) */
 
 static const u16 trapped_ports[] = { 0x20, 0x21, 0xA0, 0xA1, 0x60, 0x64, 0x70, 0x71, 0x92,
                                      0xCF8, 0xCF9, 0xCFA, 0xCFB, 0xCFC, 0xCFD, 0xCFE, 0xCFF };
@@ -752,6 +815,7 @@ void vm_start(struct bootinfo *bi)
         cpu_io_trap(trapped_ports[i], 1);
 
     dpmi_init();
+    int2f_hook(vm.loader_cs);
     vpic_reset(&vm.pic, 0x08, 0x70, (u16)bi->pic_mask);
     for (i = 0; i < 16; i++)
         if (!(kernel_lines & (1u << i)))

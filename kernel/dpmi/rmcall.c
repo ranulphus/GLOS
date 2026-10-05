@@ -74,10 +74,14 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
         f->cs = r->cs;
         f->eip = r->ip;
     }
-    if (kind != RM_FAR)                         /* handlers start with IF and TF clear */
+    if (kind != RM_FAR) {                       /* handlers start with IF and TF clear */
         flags &= ~(FL_IF | FL_TF);
-    vm.vif = (flags & FL_IF) != 0;
+        vm.vif = 0;
+    }                                           /* a far procedure keeps the caller's IF ([DPMI0.9] gives
+                                                   the structure's FLAGS no part in 0301h; as HDPMI32i) */
     f->eflags = (flags & FL_ARITH) | FL_VM | FL_IF | 2;
+    if (vm.vme && vm.vif)                       /* (nest_enter's IRET skips vm_return(), which sets VIF) */
+        f->eflags |= FL_VIF;
     f->ss = ss;
     f->esp = sp;
     f->v86_ds = r->ds;
@@ -141,8 +145,12 @@ u32 rm_vector(u8 vec)
    through). */
 void rm_reflect(struct trapframe *tf, u8 vec)
 {
+    static u32 traced;
     struct rmregs r;
     u32 v = rm_vector(vec);
+    if ((vm.bi->flags & BI_F_DPMITRACE) && traced++ < 200)     /* /DPMITRACE: the first ones */
+        kprintf("GLOS-DPMI reflect int=%02x ax=%04x bx=%04x cx=%04x dx=%08x from=%04x:%08x\n", vec,
+                tf->eax & 0xFFFF, tf->ebx & 0xFFFF, tf->ecx & 0xFFFF, tf->edx, tf->cs & 0xFFFF, tf->eip);
     memset(&r, 0, sizeof r);
     if (!v)
         return;                                 /* nowhere to go: as if handled */
@@ -197,15 +205,17 @@ void rm_raw_to_rm(struct trapframe *tf)
     dpmi_to_v86(tf, (u16)tf->esi, tf->edi & 0xFFFF, (u16)tf->edx, tf->ebx & 0xFFFF, (u16)tf->eax, (u16)tf->ecx);
 }
 
-/* The client's program ended inside a nested call (its INT 21h 4Ch, or a
-   kill, reached DOS from real mode): what the nested levels left on the
-   kernel stack is dropped, and the V86 code carries on from the top. */
-void rm_unwind(struct trapframe *tf)
+/* A client's program ended inside nested calls of its own (its INT 21h
+   4Ch, a kill or an abort reached DOS from real mode, or it ended in a
+   handler): what those levels left on the kernel stack is dropped, and the
+   V86 code carries on in frame f, the one the client switched in, at the
+   nesting depth it switched at (0 and the VM frame for a first client; its
+   parent's EXEC call for a child). */
+void rm_unwind_to(int d, struct trapframe *f, struct trapframe *tf)
 {
-    struct trapframe *top = vm_frame();
-    memmove(top, tf, sizeof *top);
-    depth = 0;
-    current->esp0 = (u32)top + sizeof *top;
+    memmove(f, tf, sizeof *f);
+    depth = d;
+    current->esp0 = (u32)f + sizeof *f;
     cpu_set_esp0(current->esp0);
-    frame_resume(top);
+    frame_resume(f);
 }

@@ -30,6 +30,7 @@ void mm_set_a20(int on);                /* 100000h-10FFFFh: the HMA, or wrapped 
 #define MM_W 2u                         /* writable */
 #define MM_U 4u                         /* user (ring 3) */
 #define MM_UC 0x18u                     /* uncached (PCD, PWT): device memory */
+#define MM_MAPPED 0x200u                /* (an AVL bit) not a frame of ours: 0508h/0509h mappings */
 u32 mm_space_new(void);                 /* a page directory with the kernel's PDEs; 0 without memory */
 void mm_space_free(u32 pd_phys);        /* not the current one: its page tables and itself */
 void mm_space_enter(u32 pd_phys);       /* CR3; 0: the kernel's own */

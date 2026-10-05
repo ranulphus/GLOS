@@ -536,7 +536,7 @@ def dpmi(profile, boot):
 CTRL_C = ["3:0x1d:down", "3.3:0x2e:down", "3.6:0x2e:up", "3.9:0x1d:up"]
 # NAME, keys timed from RUNOUT's "HX-RUN-START NAME" (scan codes: 39h space, 10h q)
 DJTST = [("FAULT", []), ("NULL", []), ("FPU", []), ("RAISE", []), ("INFOBLK", []), ("BRK", []), ("MULTISPN", []),
-         ("NEAR", []), ("NEAR2", []), ("NEAR3", []), ("ENABLE", []), ("GETOCW", []), ("STAT", []),
+         ("MULTISPN3", []), ("NEAR", []), ("NEAR2", []), ("NEAR3", []), ("ENABLE", []), ("GETOCW", []), ("STAT", []),
          ("TIMER", ["4:0x39"]), ("UCLOCK", ["3:0x39"]), ("HANG", CTRL_C), ("CTRLC", CTRL_C),
          ("SIGNALS", ["2:0x39", "10:0x10"]), ("CRASHME", []), ("CRASHGP", [])]
 # DJGPP turns a key or the timer into a signal by cutting DS's limit to 4 KB
@@ -578,6 +578,8 @@ def dj_key(name, lines):
             keep.append(l)
         elif name == "TIMER" and not l.startswith("iter"):
             keep.append(l)
+        elif name == "MULTISPN3":               # itself 3 times by system(), each a client level (M4c)
+            keep.append(re.sub(r"\b[0-9a-f]{4}\b", "#", l))
     # DJGPP's signal line may follow a line the program hadn't ended, and
     # RUNOUT cuts lines at 160 bytes: look for it in the lines as written.
     keep += ["Exiting due to signal " + m for m in re.findall(r"Exiting due to signal (SIG[A-Z]+)", "\n".join(dj_unwrap(lines)))]
@@ -638,14 +640,15 @@ def djtst(profile, boot):
     bat = os.path.join(ROOT, "out", "djtst-" + tag + ".bat")
     with open(bat, "w", newline="\r\n") as f:
         for name, _ in DJTST:
-            prog = {"CRASHME": "C:\\TEST\\DJ\\CRASHME.EXE", "CRASHGP": "C:\\TEST\\DJ\\CRASHME.EXE gp"}.get(
+            prog = {"CRASHME": "C:\\TEST\\DJ\\CRASHME.EXE", "CRASHGP": "C:\\TEST\\DJ\\CRASHME.EXE gp",
+                    "MULTISPN3": "C:\\TEST\\DJ\\MULTISPN.EXE 3"}.get(
                 name, "C:\\TEST\\DJ\\%s.EXE" % name)
             f.write("C:\\TEST\\RUNOUT.EXE %s %s\n" % (name, prog))
         f.write("C:\\TEST\\RUNOUT.EXE CRASHFILE %COMSPEC% /C TYPE C:\\GLOS\\CRASH\\CRASH000.TXT\n")
     files = ["--file", bat + "=/TEST/DJ.BAT", "--file", "build/ow/dos/RUNOUT.EXE=/TEST/RUNOUT.EXE",
              "--file", "build/dj/CRASHME.EXE=/TEST/DJ/CRASHME.EXE"]
     for name, _ in DJTST:
-        if name not in ("CRASHME", "CRASHGP"):
+        if name not in ("CRASHME", "CRASHGP", "MULTISPN3"):
             files += ["--file", "build/dj/djtst/%s.EXE=/TEST/DJ/%s.EXE" % (name, name)]
     keys = ",".join("@HX-RUN-START %s,%s" % (n, ",".join(k)) for n, k in DJTST if k)
     common = ["--machine", profile, "--boot-cfg", boot, "--timeout", "1500", "--idle", "300", "--keys", keys,
@@ -710,6 +713,9 @@ def djtst(profile, boot):
         re.search(r"^eip\s+\w+\s+_crash_gp", sym, re.M) is not None
     checks["vecchk"] = "HX-VECCHK ok" in gl
     checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "DPMI-UNIMPL" not in gl
+    # MULTISPN3's children ran as levels of its context (M4c).
+    ms = gl[gl.find("HX-RUN-START MULTISPN3"):gl.find("HX-RUN MULTISPN3")]
+    checks["multispn-levels"] = ms.count("level=2\n") == 6     # each child's start and exit
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("djtst-" + tag, "PASS" if not bad else "FAIL",
                                "" if not bad else " failed: " + " ".join(bad), info), not bad
@@ -754,6 +760,150 @@ def dpmi_tools(boot):
     bad = [k for k, v in res.items() if not v]
     return "  %-22s %s%s" % ("tools-bf6-" + boot, "PASS" if not bad else "FAIL",
                              "" if not bad else " failed: " + " ".join(bad) + info), not bad
+
+
+# ---- M4c: HDPMI's regression tests (make m4c-inputs), HDPMI32i against GLOS
+
+# Left out: interactive (WAITKEY, MOUEVNT*, NEWCLMZ starts a shell), HDPMI's
+# own internals or privileges (DISPGDT, DISPIDT, PRVILEG0, SETCR0, SETCR4,
+# SETMSR, EXC0ER0, I3102103 fault inside HDPMI, I4B8105 its VDS), a speed
+# test (INTSPEED), EMUHLT, IRQ1EXC and IRQ12EXC (they wait for keys or the mouse under HDPMI32i too), and
+# GETCLMZ (EXEC2D's helper).
+HR_SKIP = {"EMUHLT", "IRQ1EXC", "IRQ12EXC", "WAITKEY", "MOUEVNT1", "MOUEVNT2", "MOUEVNT3", "NEWCLMZ", "DISPGDT", "DISPIDT", "PRVILEG0", "SETCR0",
+           "SETCR4", "SETMSR", "EXC0ER0", "I3102103", "I4B8105", "INTSPEED", "GETCLMZ"}
+
+
+# Differences from HDPMI32i that are expected, and why (supervisor.md §13,
+# §14, §20). A test that differs only in selector numbers (GLOS's client
+# code selector is 97h where HDPMI's is 9Fh, its callbacks' stack another)
+# needs no entry.
+HR_KNOWN = {
+    # HDPMI's own INT 21h translation for 32-bit clients (EXEC, 55h, AH=09h
+    # from a 32-bit DS:EDX), which a plain DPMI host doesn't do.
+    "EXEC2C": "hx-api", "EXEC2D": "hx-api", "INT2155": "hx-api", "EXC0E2": "hx-api",
+    # An unhandled exception: the same exit code, but HDPMI prints its dump on
+    # the program's output and GLOS writes GLOS-CRASH to the log (§19).
+    "EXC00": "dump", "EXC05": "dump", "EXC06": "dump", "EXC07": "dump", "EXC0B": "dump", "EXC0C": "dump",
+    "EXC0D": "dump", "EXC0E": "dump", "I3105032": "dump",
+    "EXC11": "privileged",      # HDPMI sets CR0.AM for the client; a ring-3 client can't
+    "EXAMPLE": "timing",        # the exit code counts IRQs
+    "EXC01MZ": "int1-routing",  # HDPMI gives a single-step trap to the INT 1 handler, skipping the exception handler
+    "I3100001": "error-code",   # 0000h with CX=0: 8021h ([DPMI1.0]); HDPMI leaves AX=0
+    # HDPMI refuses a second client started by the first; GLOS runs it as a level (M4c).
+    "I3100002": "nested", "NEWCL": "nested", "NEWCL2": "nested",
+    "I3100003": "layout",       # the host's own LDT layout
+    "I3103002": "xms",          # the HDPMI run has no XMS; GLOS's server has no 4309h handle table
+    "I31090X": "iopl0",         # PUSHF shows the real IF at IOPL 0 (D20)
+    # 0305h: GLOS has no state to save (size 0), HDPMI 1Ch; RAWJMP5 then loops
+    # once more inside RUNOUT's window.
+    "RAWJMP1": "state-size", "RAWJMP2": "state-size", "RAWJMP3": "state-size", "RAWJMP5": "state-size",
+    "RAWJMP6": "iopl0",
+    "RMCB7": "rmcb-fs",         # FS in a callback's register structure: HDPMI passes a selector, GLOS 0
+    "RMCB8": "nest-limit",      # GLOS fails the 17th nested real-mode call; HDPMI exits fatally at 39
+}
+
+
+def hr_tests():
+    d = os.path.join(ROOT, "build", "hdpmireg")
+    return sorted((f[:-4].upper(), f) for f in os.listdir(d) if f.lower().endswith(".exe")) if os.path.isdir(d) else []
+
+
+def hdpmireg(profile, boot):
+    """HDPMI's regression tests by RUNOUT, under HDPMI32i (their baseline)
+    and GLOS: each test's exit code and output, compared."""
+    tag = "%s-%s" % (profile, boot)
+    tests = [(n, f) for n, f in hr_tests() if n not in HR_SKIP]
+    bat = os.path.join(ROOT, "out", "hdpmireg-" + tag + ".bat")
+    with open(bat, "w", newline="\r\n") as f:
+        for n, _ in tests:
+            f.write("C:\\TEST\\RUNOUT.EXE %s C:\\TEST\\HR\\%s.EXE\n" % (n, n))
+    files = ["--file", bat + "=/TEST/HR.BAT", "--file", "build/ow/dos/RUNOUT.EXE=/TEST/RUNOUT.EXE"]
+    for n, fn in hr_tests():                    # GETCLMZ too: EXEC2D starts it
+        files += ["--file", "build/hdpmireg/%s=/TEST/HR/%s.EXE" % (fn, n)]
+    # Some wait for a key at the end (EXAMPLE): Enter, then Esc, a few seconds
+    # into each; RUNOUT drops what a quicker test left in the buffer.
+    keys = ",".join("@HX-RUN-START %s,6:0x1c,8:0x01" % n for n, _ in tests)
+    common = ["--machine", profile, "--boot-cfg", boot, "--timeout", "2400", "--idle", "240", "--keys", keys,
+              "--cmd", "SERSAY HX-START hdpmireg", "--cmd", "CD \\TEST\\HR"] + files
+    end = ["--cmd", "SERSAY HX-DONE 0"]
+    hosts = {"hdpmi": common + ["--file", HX + "/HDPMI32I.EXE=/HX/HDPMI32I.EXE", "--cmd", "HDPMI32I -r",
+                                "--cmd", "CALL C:\\TEST\\HR.BAT"] + end,
+             "glos": common + GLOS_FILES + ["--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\HR.BAT",
+                                            "--cmd", "VECCHK check"] + end}
+    procs = {h: run("hdpmireg-%s-%s" % (h, tag), a, background=True) for h, a in hosts.items()}
+    text, status = {}, {}
+    for h, pr in procs.items():
+        pr.wait()
+        out = os.path.join(ROOT, "out", "hdpmireg-%s-%s" % (h, tag))
+        log = os.path.join(out, "serial.log")
+        text[h] = open(log, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(log) else ""
+        status[h] = open(os.path.join(out, "status")).read().strip() if os.path.exists(os.path.join(out, "status")) else "?"
+    runs = {h: dj_runs(t) for h, t in text.items()}
+    same, sel, known, new, gone = [], [], [], [], []
+    for n, _ in tests:
+        g, h = runs["glos"].get(n), runs["hdpmi"].get(n)
+        if g and h and g[1] == h[1] and hr_norm(g[0]) == hr_norm(h[0]):
+            (gone if n in HR_KNOWN else same).append(n)
+        elif g and h and g[1] == h[1] and hr_sel(g[0]) == hr_sel(h[0]):
+            (gone if n in HR_KNOWN else sel).append(n)
+        elif n in HR_KNOWN:
+            known.append(n)
+        else:
+            new.append(n)
+    ok = not new and all(v == "PASS" for v in status.values())
+    return "  %-22s %s same=%d selectors=%d known=%d%s%s%s" % (
+        "hdpmireg-" + tag, "PASS" if ok else "FAIL", len(same), len(sel), len(known),
+        " differ: " + " ".join(new) if new else "", " (known, now alike: %s)" % " ".join(gone) if gone else "",
+        "" if all(v == "PASS" for v in status.values()) else " runs=%s" % status), ok
+
+
+def hr_norm(lines):
+    """A test's lines with what is the host's own (addresses, HDPMI banners)
+    made comparable: hex numbers of 3 or more digits become #."""
+    return [re.sub(r"\b[0-9A-Fa-f]{3,8}h?\b", "#", l).rstrip() for l in lines]
+
+
+def hr_sel(lines):
+    """hr_norm, and two-digit hex after = or : too (selectors)."""
+    return [re.sub(r"(?<=[=:])[0-9A-Fa-f]{2}\b", "#", l) for l in hr_norm(lines)]
+
+
+
+# ---- M4c: ecm's lDebugX stepping his dpmimini.com (make m4c-inputs)
+
+def ecm(profile, boot):
+    """lDebugX, a debugger that follows its program into protected mode,
+    runs ecm's dpmimini.com from tests/ecm/script.txt (go to each of its
+    breakpoints, registers, a trace step) under HDPMI32i and GLOS: the same
+    output but for selectors and addresses."""
+    tag = "%s-%s" % (profile, boot)
+    files = ["--file", "build/ow/dos/RUNOUT.EXE=/TEST/RUNOUT.EXE", "--file", "build/ecm/ldebugx.com=/TEST/ECM/LDEBUGX.COM",
+             "--file", "build/ecm/dpmimini.com=/TEST/ECM/DPMIMINI.COM", "--file", "tests/ecm/script.txt=/TEST/ECM/SCRIPT.TXT"]
+    line = "C:\\TEST\\RUNOUT.EXE ECM C:\\TEST\\ECM\\LDEBUGX.COM C:\\TEST\\ECM\\DPMIMINI.COM < C:\\TEST\\ECM\\SCRIPT.TXT"
+    common = ["--machine", profile, "--boot-cfg", boot, "--timeout", "600", "--idle", "120",
+              "--cmd", "SERSAY HX-START ecm", "--cmd", "CD \\TEST\\ECM"] + files
+    end = ["--cmd", "SERSAY HX-DONE 0"]
+    bat = os.path.join(ROOT, "out", "ecm-" + tag + ".bat")
+    with open(bat, "w", newline="\r\n") as f:
+        f.write(line + "\n")
+    hosts = {"hdpmi": common + ["--file", HX + "/HDPMI32I.EXE=/HX/HDPMI32I.EXE", "--cmd", "HDPMI32I -r", "--cmd", line] + end,
+             "glos": common + GLOS_FILES + ["--file", bat + "=/TEST/ECM.BAT", "--cmd", "VECCHK save",
+                                            "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\ECM.BAT", "--cmd", "VECCHK check"] + end}
+    procs = {h: run("ecm-%s-%s" % (h, tag), a, background=True) for h, a in hosts.items()}
+    text = {}
+    for h, pr in procs.items():
+        pr.wait()
+        log = os.path.join(ROOT, "out", "ecm-%s-%s" % (h, tag), "serial.log")
+        text[h] = open(log, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(log) else ""
+    runs = {h: dj_runs(t).get("ECM") for h, t in text.items()}
+    g, hd = runs["glos"], runs["hdpmi"]
+    ok = bool(g and hd and g[1] == hd[1] and hr_norm(g[0]) == hr_norm(hd[0]))
+    ok = ok and "HX-VECCHK ok" in text["glos"] and "GLOS-PANIC" not in text["glos"]
+    info = ""
+    if g and hd and not ok:
+        a, b = hr_norm(g[0]), hr_norm(hd[0])
+        info = " first difference: %r / %r" % next(((x, y) for x, y in zip(a, b) if x != y), (len(a), len(b)))
+    return "  %-22s %s%s" % ("ecm-" + tag, "PASS" if ok else "FAIL", info), ok
 
 
 GOLDEN = os.path.join(ROOT, "tests/loopa/golden.txt")      # "NAME SHA256" lines
@@ -930,7 +1080,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -952,6 +1102,10 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "djtst":
         return 0 if all(r[1] for r in matrix(djtst, combos, max(1, a.jobs // 2))) else 1
+    if a.suite == "ecm":
+        return 0 if all(r[1] for r in matrix(ecm, combos, max(1, a.jobs // 2))) else 1
+    if a.suite == "hdpmireg":
+        return 0 if all(r[1] for r in matrix(hdpmireg, combos, max(1, a.jobs // 2))) else 1
     if a.suite == "dpmitools":
         return 0 if all(r[1] for r in matrix(dpmi_tools, [(b,) for b in a.boot or BOOTS], a.jobs)) else 1
     if a.suite == "net":

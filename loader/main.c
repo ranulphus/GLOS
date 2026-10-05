@@ -56,6 +56,7 @@ extern void __cdecl __far glos_retf(void);
 extern void __cdecl __far glos_int21(void);
 extern void __cdecl __far glos_rmcb(void);
 extern void __cdecl __far glos_bp_term(void);
+extern void __cdecl __far glos_int2f(void);
 extern void __cdecl __far stub_end(void);
 
 static unsigned stub_off(void (__cdecl __far *f)(void))
@@ -230,7 +231,7 @@ static void xms_release(void)
 
 /* ---- the GDT the kernel starts with (supervisor.md §3.1: 08h, 10h, 38h, 40h) */
 
-static unsigned char gdt[8 * 9];
+static unsigned char gdt[8 * 13];
 static struct { unsigned short limit; unsigned long base; } gdtr;
 
 static void set_desc(int sel, unsigned long base, unsigned long limit, unsigned char access, unsigned char flags)
@@ -329,6 +330,20 @@ static void kernel_path(char *out, const char *argv0)
     strcpy(out + n, "GLOSK.BIN");
 }
 
+/* A flag that only sets a bootinfo bit: from the command line, or GLOS.CFG's
+   [shell] options (a SHELL= line has no room for them). */
+static int flag_arg(const char *a)
+{
+    if (!stricmp(a, "/ROUNDTRIP")) bi.flags |= BI_F_ROUNDTRIP;
+    else if (!stricmp(a, "/GDB")) bi.flags |= BI_F_GDB;
+    else if (!stricmp(a, "/SELFTEST")) bi.flags |= BI_F_SELFTEST;
+    else if (!stricmp(a, "/NOVME")) bi.flags |= BI_F_NOVME;
+    else if (!stricmp(a, "/AGENT")) bi.flags |= BI_F_AGENT;
+    else if (!stricmp(a, "/DPMITRACE")) bi.flags |= BI_F_DPMITRACE;
+    else return 0;
+    return 1;
+}
+
 static int glos_main(int argc, char **argv)
 {
     struct SREGS sr;
@@ -343,12 +358,8 @@ static int glos_main(int argc, char **argv)
     if (shell)
         bi.flags |= BI_F_SHELL | BI_F_VM;
     for (i = 1; i < (unsigned)argc && !shell; i++) {
-        if (!stricmp(argv[i], "/ROUNDTRIP")) bi.flags |= BI_F_ROUNDTRIP;
-        else if (!stricmp(argv[i], "/GDB")) bi.flags |= BI_F_GDB;
-        else if (!stricmp(argv[i], "/SELFTEST")) bi.flags |= BI_F_SELFTEST;
-        else if (!stricmp(argv[i], "/NOVME")) bi.flags |= BI_F_NOVME;
-        else if (!stricmp(argv[i], "/AGENT")) bi.flags |= BI_F_AGENT;
-        else if (!stricmp(argv[i], "/DPMITRACE")) bi.flags |= BI_F_DPMITRACE;
+        if (flag_arg(argv[i]))
+            ;
         else if (!stricmp(argv[i], "/RUN") && i + 1 < (unsigned)argc) {
             bi.flags |= BI_F_VM;
             run_at = (int)i + 1;
@@ -492,6 +503,7 @@ static int glos_main(int argc, char **argv)
     bi.int21_off = stub_off(glos_int21);
     bi.rmcb_off = stub_off(glos_rmcb);
     bi.bp_term_off = stub_off(glos_bp_term);
+    bi.int2f_off = stub_off(glos_int2f);
     bi.stub_paras = (stub_off(stub_end) + 15) >> 4;
     stub_data.mode = bi.mode == BI_MODE_XMS;
     stub_data.a20init = (unsigned char)bi.a20_initial;
@@ -598,6 +610,9 @@ static void read_cfg(const char *argv0)
         else if (!stricmp(k, "autoexec")) opt_str(bi.autoexec, sizeof bi.autoexec, v), shell_p = 1;
         else if (!stricmp(k, "console")) opt_str(bi.console, sizeof bi.console, v);
         else if (!stricmp(k, "envsize")) envsize = (unsigned)atoi(v), shell_e = 1;
+        else if (!stricmp(k, "options"))                /* e.g. /DPMITRACE /NOVME */
+            for (v = strtok(v, " \t"); v; v = strtok(NULL, " \t"))
+                flag_arg(v);
     }
     fclose(f);
 }

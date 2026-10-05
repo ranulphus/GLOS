@@ -42,7 +42,7 @@ int ldt_alloc(u32 n)
         for (k = 0; k < n && !dctx->ldt_used[i + k]; k++) ;
         if (k == n) {
             for (k = 0; k < n; k++)
-                dctx->ldt_used[i + k] = 1;
+                dctx->ldt_used[i + k] = (u8)dctx->nlv;     /* the client level it belongs to */
             return (int)i;
         }
         i += k;
@@ -87,7 +87,7 @@ static void get(u16 sel, u32 *lo, u32 *hi)
     }
     *hi = cpu_desc_hi(sel);                     /* the GDT's ring-3 selectors (BIOS, trampoline data) */
     *lo = 0;
-    if (sel == SEL_BIOS)
+    if ((sel & ~3) == SEL_BIOS || sel == SEL_BIOS5B)
         *lo = 0xFFFF | (0x400u << 16);
     else if (sel == SEL_TRAMPD)
         *lo = 0xFFF | ((TRAMP_LIN & 0xFFFF) << 16);

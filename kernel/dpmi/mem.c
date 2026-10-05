@@ -86,12 +86,14 @@ static int commit(u32 lin, u32 from, u32 to)
 
 static void release(u32 lin, u32 from, u32 to)
 {
-    u32 i, f;
-    for (i = from; i < to; i++)
-        if ((f = mm_unmap(lin + (i << 12))) != 0) {
+    u32 i, f, pte;
+    for (i = from; i < to; i++) {
+        pte = mm_lookup(lin + (i << 12));
+        if ((f = mm_unmap(lin + (i << 12))) != 0 && !(pte & MM_MAPPED)) {
             pmm_free(f);
             dctx->frames--;
         }
+    }
 }
 
 int lin_alloc(u32 size, struct block **out)
@@ -113,6 +115,7 @@ int lin_alloc(u32 size, struct block **out)
     b->lin = lin;
     b->size = size;
     b->kind = BK_MEM;
+    b->level = (u8)dctx->nlv;
     insert(b);
     if (!dctx->lin_floor)
         dctx->lin_floor = lin;
@@ -131,7 +134,53 @@ int lin_free(u32 handle)
     return 0;
 }
 
+/* A linear address inside one of the client's own memory blocks. */
+int lin_in_block(u32 lin)
+{
+    struct block *b;
+    for (b = dctx->blocks; b; b = b->next)
+        if (b->kind == BK_MEM && lin >= b->lin && lin < b->lin + b->size)
+            return 1;
+    return 0;
+}
+
+/* 0504h ([DPMI1.0]): size bytes at lin (0: the lowest place above the
+   floor), committed now or left for 0507h to commit; no floor of its own. */
+int lin_alloc_at(u32 lin, u32 size, int now, struct block **out)
+{
+    struct block *b;
+    if (!size || (lin & 0xFFF))
+        return lin ? 0x8025 : 0x8021;
+    size = pages_of(size) << 12;
+    if (lin) {
+        if (lin < USER_BASE || lin + size > USER_END || lin + size < lin || place(size, lin, 0) != lin)
+            return 0x8012;                      /* not free there */
+    } else if (!(lin = place(size, floor_lin(), 0))) {
+        return 0x8012;
+    }
+    if (!(b = kmalloc(sizeof *b)))
+        return 0x8013;
+    if (now && commit(lin, 0, size >> 12) != 0) {
+        kfree(b);
+        return 0x8013;
+    }
+    b->handle = ++dctx->next_handle;
+    b->lin = lin;
+    b->size = size;
+    b->kind = BK_MEM;
+    b->level = (u8)dctx->nlv;
+    insert(b);
+    *out = b;
+    return 0;
+}
+
 int lin_resize(u32 handle, u32 size, struct block **out)
+{
+    return lin_resize2(handle, size, 1, out);
+}
+
+/* now: the pages it grows by are committed (0503h always; 0505h asks). */
+int lin_resize2(u32 handle, u32 size, int now, struct block **out)
 {
     struct block *b = by_handle(handle), *n;
     u32 old, want, lin, i;
@@ -149,19 +198,19 @@ int lin_resize(u32 handle, u32 size, struct block **out)
     }
     n = b->next;
     if ((!n || n->lin >= b->lin + (want << 12)) && b->lin + (want << 12) <= USER_END) {
-        if (commit(b->lin, old, want) != 0)     /* room after it: grow in place */
+        if (now && commit(b->lin, old, want) != 0)      /* room after it: grow in place */
             return 0x8013;
         b->size = want << 12;
         return 0;
     }
     if (!(lin = place(want << 12, floor_lin(), b)))     /* move it: its frames go along */
         return 0x8012;
-    if (commit(lin, old, want) != 0)
+    if (now && commit(lin, old, want) != 0)
         return 0x8013;
     for (i = 0; i < old; i++) {                 /* with their attributes; uncommitted pages stay so (0507h) */
         u32 pte = mm_lookup(b->lin + (i << 12)), f = mm_unmap(b->lin + (i << 12));
         if (f)
-            mm_map(lin + (i << 12), f, MM_U | (pte & MM_W));
+            mm_map(lin + (i << 12), f, MM_U | (pte & (MM_W | MM_UC | MM_MAPPED)));
     }
     unlink(b);
     b->lin = lin;
@@ -180,6 +229,25 @@ void lin_free_all(struct dpmi_ctx *c)
         else
             for (u32 i = 0; i < b->size >> 12; i++)
                 mm_unmap(b->lin + (i << 12));
+        kfree(b);
+    }
+}
+
+void lin_free_level(u32 level)
+{
+    struct block **pp = &dctx->blocks;
+    while (*pp) {
+        struct block *b = *pp;
+        if (b->level < level) {
+            pp = &b->next;
+            continue;
+        }
+        if (b->kind != BK_PHYS)
+            release(b->lin, 0, b->size >> 12);
+        else
+            for (u32 i = 0; i < b->size >> 12; i++)
+                mm_unmap(b->lin + (i << 12));
+        *pp = b->next;
         kfree(b);
     }
 }
@@ -248,6 +316,7 @@ int phys_map(u32 phys, u32 size, u32 *lin)
     b->lin = at;
     b->size = n << 12;
     b->kind = BK_PHYS;
+    b->level = (u8)dctx->nlv;
     insert(b);
     *lin = at + off;
     return 0;
@@ -285,6 +354,7 @@ int lin_host(u32 lin, u32 size)
     b->lin = lin;
     b->size = size;
     b->kind = BK_HOST;
+    b->level = 1;
     insert(b);
     return 0;
 }
@@ -306,28 +376,48 @@ int page_attr(u32 handle, u32 off, u32 n, u16 *attr, int set, u32 *done)
     for (i = 0; i < n; i++, (*done)++) {
         u32 lin = b->lin + off + (i << 12), pte = mm_lookup(lin), type = attr[i] & 7;
         if (!set) {
-            attr[i] = (pte & 1) ? (u16)(1 | ((pte & MM_W) ? 8 : 0) | 0x10 | ((pte & 0x20) ? 0x20 : 0)
-                                        | ((pte & 0x40) ? 0x40 : 0)) : 0;
+            attr[i] = (pte & 1) ? (u16)(((pte & MM_MAPPED) ? 2 : 1) | ((pte & MM_W) ? 8 : 0) | 0x10
+                                        | ((pte & 0x20) ? 0x20 : 0) | ((pte & 0x40) ? 0x40 : 0)) : 0;
             continue;
         }
         if (type == 2 || type > 3)
-            return 0x8021;                      /* mapped pages: only 0508h makes them */
+            return 0x8021;                      /* mapped pages: only 0508h/0509h make them */
         if (type == 0) {
-            u32 f = mm_unmap(lin);
-            if (f) {
-                pmm_free(f);
-                dctx->frames--;
-            }
+            release(lin, 0, 1);
             continue;
         }
-        if (!(pte & 1)) {
+        if (!(pte & 1) || (type == 1 && (pte & MM_MAPPED))) {
             if (type == 3)
                 continue;                       /* uncommitted, and stays so */
+            release(lin, 0, 1);                 /* a mapping becomes memory of its own (I310508a) */
             if (commit(lin, 0, 1) != 0)
                 return 0x8013;
             pte = mm_lookup(lin);
         }
-        mm_map(lin, pte & ~0xFFFu, MM_U | ((attr[i] & 8) ? MM_W : 0));
+        mm_map(lin, pte & ~0xFFFu, MM_U | ((attr[i] & 8) ? MM_W : 0) | (pte & (MM_UC | MM_MAPPED | 0x60)));
+    }
+    return 0;
+}
+
+/* 0508h/0509h ([DPMI1.0]): n pages of a block from byte off become the
+   physical pages from phys (a device's, uncached; or conventional memory's,
+   whose linear address is its physical one). What was committed there is
+   freed; the pages are "mapped" (type 2) for 0506h. */
+int page_map(u32 handle, u32 off, u32 n, u32 phys, int device)
+{
+    struct block *b = by_handle(handle);
+    u32 i;
+    if (!b)
+        return 0x8023;
+    if ((off & 0xFFF) || (phys & 0xFFF) || off >= b->size || !n || n > (b->size - off) >> 12)
+        return 0x8025;
+    if (!device && phys + (n << 12) > 0x110000)
+        return 0x8025;                          /* 0509h: below 1 MB (and the HMA) only */
+    for (i = 0; i < n; i++) {
+        u32 lin = b->lin + off + (i << 12);
+        release(lin, 0, 1);
+        if (mm_map(lin, phys + (i << 12), MM_W | MM_U | MM_MAPPED | (device ? MM_UC : 0)) != 0)
+            return 0x8013;
     }
     return 0;
 }

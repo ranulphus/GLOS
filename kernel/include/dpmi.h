@@ -8,6 +8,8 @@
  *             the virtual IDT and the trampolines
  *   deliver.c handlers the host calls: IRQs, INTs passed up, exceptions,
  *             real-mode callbacks, on the locked stack (M4b)
+ *   level.c   client levels: a child program's own mode switch shares its
+ *             parent's context (M4c)
  *   ldt.c     descriptors and selectors
  *   mem.c     linear and physical memory, DOS memory
  *   rmcall.c  nested real-mode execution, 0300h-0302h, the raw switch
@@ -27,6 +29,7 @@
 #define LSTACK_SIZE    0x4000u          /* the locked host stack (§14.2) ... */
 #define LSTACK_LIN     (USER_END - 0x10000u)    /* ... at the top of the user region, a hole below it */
 #define NENTRY         32               /* handlers the host has called and not seen return */
+#define NLEVEL         6                /* client levels: a client's children's own mode switches (M4c) */
 #define EXC_NEST_MAX   5                /* exceptions inside exception handlers (CWSDPMI's rule) */
 
 /* The trampoline page (SEL_TRAMP:offset), each entry a HLT that faults. */
@@ -36,7 +39,8 @@
 #define TR_SAVE      0x121u             /* 0305h: protected-mode state save/restore */
 #define TR_VENDOR    0x122u             /* 0A00h "GLOS": the vendor API entry */
 #define TR_RET       0x140u             /* + entry: a handler the host called returns (deliver.c) */
-#define TR_COUNT     (TR_RET + NENTRY)
+#define TR_RET10     (TR_RET + NENTRY)  /* + entry: an exception handler returns through the 1.0 frame's address */
+#define TR_COUNT     (TR_RET10 + NENTRY)
 
 struct farptr {
     u32 off;
@@ -48,16 +52,18 @@ enum { BK_MEM, BK_PHYS, BK_HOST };
 struct block {                          /* 0501h, 0800h mappings and the host's own */
     u32 handle, lin, size;              /* size: a whole number of pages */
     u8 kind;                            /* BK_PHYS: not ours to free; BK_HOST: no handle */
+    u8 level;                           /* the client level that made it (1: the first client) */
     struct block *next;
 };
 
 struct dosblk {                         /* 0100h */
     u16 seg, sel, nsel;
+    u8 level;
     struct dosblk *next;
 };
 
 struct rmcb {                           /* 0303h */
-    u8 used;
+    u8 used;                            /* the level that made it, 0 free */
     u16 stack_sel;                      /* DS for the handler: the real-mode stack */
     struct farptr pm, regs;
 };
@@ -72,6 +78,21 @@ struct pmentry {
     u8 frame10;                         /* PE_EXC: a 0212h handler, which returns through the 1.0 frame */
     struct trapframe *at;               /* the frame it ran in (the same for every trap meanwhile) */
     struct trapframe saved;             /* what it interrupted */
+};
+
+/* A client level (level.c): a program's own mode switch inside a context
+   that exists already (its parent's). It keeps what the level's end needs:
+   its own identity while a child runs above it, where it started, and the
+   parent's handler tables to put back. */
+struct dpmi_level {
+    u16 psp, env_seg, env_sel, psp_sel, rm_seg;
+    u32 rm_sp, lin_floor, term_vec;
+    u8 bits32;
+    int depth;                          /* rm_nesting() at its mode switch ... */
+    struct trapframe *frame;            /* ... and the frame it switched in */
+    u32 npe;                            /* entries live when it began */
+    struct farptr vidt[256], exc[32];   /* the parent's, back at the end (level 2 up) */
+    u8 exc10[32];
 };
 
 struct dpmi_ctx {
@@ -89,10 +110,16 @@ struct dpmi_ctx {
     u32 rm_prev[256];                   /* the real-mode vector that a PM hook or an RMCB took over (§14.5) */
     struct rmcb rmcb[NRMCB];
     u16 lsel;                           /* the locked stack */
+    struct dpmi_level lv[NLEVEL];       /* lv[nlv - 1]: the client running now */
+    u32 nlv;
+    u32 term_vec;                       /* the running client's own terminate address (PSP:0Ah) */
     u32 lstack_use;                     /* entries that moved onto it */
     struct pmentry pe[NENTRY];
     u32 npe, exc_depth;
     u32 cr2;                            /* the last page fault's address */
+    struct { u8 level, rw, hit; u32 lin; } wp[4];       /* 0B00h watchpoints: DR0-DR3 */
+    u32 db_rf;                          /* an execute watchpoint fired here: resume past it (RF) */
+    u8 fpu_msw;                         /* 0E01h: bit 0 MP, bit 1 EM, in CR0 while the client runs */
     u8 ending;                          /* a crash report is being written: no more handlers */
     struct { u16 seg, sel; } segsel[NSEGSEL];   /* 0002h */
     struct block *blocks;
@@ -108,7 +135,7 @@ extern struct dpmi_ctx *dctx;           /* the context, or 0 */
 void dpmi_init(void);
 void dpmi_1687(struct trapframe *tf);   /* INT 2Fh AX=1687h from V86 mode */
 int dpmi_v86_bp(struct trapframe *tf);  /* #UD at one of the stub's ARPLs: 1 if it was the host's */
-void dpmi_dos_exit(struct trapframe *tf);       /* V86 INT 21h 4Ch/00h: the client's program may be ending */
+void dpmi_dos_exit(struct trapframe *tf, u8 n, u32 next);       /* V86 INT 21h 4Ch/00h: a client's program may be ending */
 void dpmi_to_pm(struct trapframe *tf, u16 cs, u32 eip, u16 ss, u32 esp, u16 ds, u16 es);
 void dpmi_to_v86(struct trapframe *tf, u16 cs, u32 ip, u16 ss, u32 sp, u16 ds, u16 es);
 void dpmi_iret(struct trapframe *tf);   /* pop an interrupt frame from the client's stack */
@@ -123,11 +150,16 @@ int dpmi_irq(struct trapframe *tf, u8 vec);     /* an IRQ to the client's PM han
 int dpmi_passup(struct trapframe *tf, u8 n, u32 next);  /* V86 INT 1Ch/23h/24h: 1 if a PM handler takes it */
 void dpmi_exception(struct trapframe *tf);      /* a fault in protected mode: the client's handler, or the end */
 void dpmi_rmcb(struct trapframe *tf, u32 i);    /* V86 code called RMCB i */
-void dpmi_entry_return(struct trapframe *tf, u32 i);    /* SEL_TRAMP:TR_RET + i */
+void dpmi_entry_return(struct trapframe *tf, u32 i, int via10);        /* SEL_TRAMP:TR_RET(10) + i */
 void dpmi_exc_default(struct trapframe *tf, u32 v);     /* SEL_TRAMP:TR_EXC + v: chained to the host's */
 void dpmi_exc_unhandled(struct trapframe *tf, u32 v, u32 err);  /* no client handler: the default action */
 u32 rm_vector(u8 vec);                  /* the IVT's vector, past the client's own RMCB (§14.5) */
 void crash_report(struct trapframe *tf, const char *why);       /* kernel/dbg/crash.c */
+
+/* level.c */
+int level_push(struct trapframe *tf);   /* a child's mode switch: 0, or a DPMI error */
+void level_pop(int psp);                /* the running child ends; psp: its PSP is still there */
+void level_init(struct trapframe *tf);  /* level 1, at the first client's mode switch */
 
 /* ldt.c */
 void ldt_init(struct dpmi_ctx *c);
@@ -147,14 +179,19 @@ int user_wr(u16 sel, u32 off, const void *src, u32 n);
 
 /* mem.c */
 void lin_free_all(struct dpmi_ctx *c);
+void lin_free_level(u32 level);         /* the blocks a client level made */
 int lin_alloc(u32 size, struct block **out);    /* 0, or a DPMI error */
 int lin_free(u32 handle);
 int lin_resize(u32 handle, u32 size, struct block **out);
+int lin_resize2(u32 handle, u32 size, int now, struct block **out);     /* 0505h: now, commit what it gains */
+int lin_alloc_at(u32 lin, u32 size, int now, struct block **out);      /* 0504h */
+int lin_in_block(u32 lin);              /* inside a 0501h/0504h block of the client's */
 void lin_info(u32 *out12);              /* 0500h's twelve dwords */
 int phys_map(u32 phys, u32 size, u32 *lin);
 int phys_unmap(u32 lin);
 int lin_host(u32 lin, u32 size);        /* host memory in the context: committed, no handle */
 int page_attr(u32 handle, u32 off, u32 n, u16 *attr, int set, u32 *done);      /* 0506h/0507h */
+int page_map(u32 handle, u32 off, u32 n, u32 phys, int device);                 /* 0508h/0509h */
 
 /* rmcall.c */
 struct rmregs {                         /* 0300h's structure ([DPMI0.9]) */
@@ -171,9 +208,16 @@ void rm_irq(struct trapframe *tf, u8 vec);     /* an IRQ while the client runs: 
 void rm_raw_to_pm(struct trapframe *tf);        /* the stub's raw-switch ARPL */
 void rm_raw_to_rm(struct trapframe *tf);        /* SEL_TRAMP:TR_RAW */
 int rm_nesting(void);
-void rm_unwind(struct trapframe *tf) __attribute__((noreturn));  /* the client ended inside a nested call */
+void rm_unwind_to(int depth, struct trapframe *f, struct trapframe *tf) __attribute__((noreturn));
+                                        /* a client ended inside nested calls: tf on in f, at that depth */
+
+/* host.c */
+void fpu_msw_set(u32 msw);              /* CR0.MP/EM as the code about to run wants them (bit 0 MP, 1 EM) */
+extern u32 fpu_msw_dos;                 /* DOS's own, from the start */
 
 /* int31.c */
 void int31(struct trapframe *tf);
+int dpmi_db_hit(void);                  /* a #DB anywhere: note watchpoints that fired (DR6); 1 if any did */
+void wp_clear_level(u32 level);         /* a level's watchpoints go with it */
 
 #endif

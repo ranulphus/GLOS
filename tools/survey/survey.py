@@ -15,6 +15,7 @@ differences; hdpmi32i against hdpmi32 isolates IOPL 0.
 
   survey.py run [--suite S ...] [--variant V ...]    results in out/survey/
   survey.py report                                  writes docs/survey-iopl0.md
+  survey.py diff [--suite S ...] [--variant V ...]  each job's variants against base, printed
   survey.py list
 
 Jobs run through MGA-Glide's Loop A harness ($MGA_GLIDE, default
@@ -49,6 +50,10 @@ VARIANTS = {
     "hdpmi32i": ["--file", HX + "/HDPMI32I.EXE=/HX/HDPMI32I.EXE", "--pre", "HDPMI32I -r"],
     # Diagnosis only (not in the default set): HDPMI reporting less free memory (-n).
     "hdpmi32i-n": ["--file", HX + "/HDPMI32I.EXE=/HX/HDPMI32I.EXE", "--pre", "HDPMI32I -r -n"],
+    # GLOS as the shell (M4c): every program runs in its system VM, with GLOS as the DPMI host. `make
+    # glos-cache` puts the build in the cache first.
+    "glos": ["--boot-cfg", "glosshell", "--file", CACHE + "/glos/bin/GLOS.EXE=/TEST/GLOS.EXE",
+             "--file", CACHE + "/glos/bin/GLOSK.BIN=/TEST/GLOSK.BIN"],
 }
 DEFAULT_VARIANTS = ["base", "hdpmi32", "hdpmi32i"]
 
@@ -85,6 +90,11 @@ SUITES = {
     "quake": dict(kind="script", cwd=DOSGL, cmd=["tools/quake/run.sh", "quake", "g450"]),
     "prboom": dict(kind="script", cwd=DOSGL, cmd=["tools/doom/run.sh", "timedemo", "g450"]),
     "halflife": dict(kind="script", cwd=DOSGL, cmd=["tools/halflife/run.sh", "timedemo", "g450"]),
+    # Retail: GTA (3dfx build, DOS/4GW) through its menus into the game. Enter until well after the menu
+    # appears (about 34 s in; a few seconds later under GLOS, which the 35 s press missed, M4c).
+    "gta": dict(kind="run", cwd=MGA, args=["--game", "gta", "--ovl", "build/ow/GLIDE2X.OVL", "--card", "g450",
+                                           "--keys", "25:0x1c,30:0x1c,35:0x1c,45:0x1c,55:0x1c,65:0x1c", "--pre", "SET MGAGLIDE=exit_after=600",
+                                           "--timeout", "1500", "--idle", "600"]),
     # A retail game with DOS/4GW 1.97 and MGA-Glide in its attract mode.
     "screamer-rally": dict(kind="run", cwd=MGA, args=["--game", "sr", "--ovl", "build/ow/GLIDE2X.OVL", "--card",
                                                       "g450", "--pre", "SET MGAGLIDE=exit_after=400",
@@ -232,7 +242,7 @@ def report():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", choices=["run", "report", "list"])
+    ap.add_argument("action", choices=["run", "report", "list", "diff"])
     ap.add_argument("--suite", action="append", choices=sorted(SUITES))
     ap.add_argument("--variant", action="append", choices=sorted(VARIANTS))
     a = ap.parse_args()
@@ -242,6 +252,14 @@ def main():
         return 0
     if a.action == "report":
         return report()
+    if a.action == "diff":
+        bad = 0
+        for name, _ in all_jobs(a.suite or list(SUITES)):
+            for v in a.variant or ["glos"]:
+                c = compare(name, v)
+                bad += c != "same"
+                print("  %-26s %-9s %s" % (name, v, c))
+        return 1 if bad else 0
     prepare_hosts()
     for name, spec in all_jobs(a.suite or list(SUITES)):
         for v in a.variant or DEFAULT_VARIANTS:

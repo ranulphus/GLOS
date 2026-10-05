@@ -138,7 +138,8 @@ int mm_map(u32 lin, u32 phys, u32 flags)
         for (k = 0; k < 1024; k++)
             CUR_PT[(i << 10) + k] = 0;
     }
-    CUR_PT[lin >> 12] = (phys & ~0xFFFu) | PTE_P | (flags & (PTE_W | PTE_U | 0x18));     /* 18h: PWT, PCD */
+    CUR_PT[lin >> 12] = (phys & ~0xFFFu) | PTE_P | (flags & (PTE_W | PTE_U | 0x18 | 0x60 | 0x200));
+                                                                /* PWT, PCD; accessed, dirty (kept); AVL 9 */
     invlpg(lin);
     return 0;
 }

@@ -48,6 +48,7 @@ GLOSSTUB segment para public 'STUB' use16
         public  _stub_data, _pm_enter, _pm_ret, _vm_resume, _vm_state, _glos_call, _glos_bp_call
         public  _glos_xms_entry, _glos_bp_xms, _glos_kill, _glos_kill_top, _stub_resident, _stub_end
         public  _glos_bp_dpmi, _glos_bp_nest, _glos_bp_raw, _glos_retf, _glos_int21, _glos_rmcb, _glos_bp_term
+        public  _glos_int2f
 
 stub_start:
 
@@ -173,7 +174,7 @@ pm16:
         retf
 
 _pm_ret label near
-        mov     bx, 40h                 ; 16-bit data: real-mode limits in the caches
+        mov     bx, 60h                 ; 16-bit data: real-mode limits in the caches
         mov     ds, bx
         mov     es, bx
         mov     fs, bx
@@ -275,6 +276,8 @@ _glos_int21 label near                  ; a client's INT 21h 4Ch, as the program
 _glos_rmcb label near                   ; 0303h: real-mode callbacks, two bytes each
         db      16 dup (63h, 0C0h)
 _glos_bp_term label near                ; a client's terminate address (PSP:0Ah): DOS ended it (M4b)
+        db      63h, 0C0h
+_glos_int2f label near                  ; GLOS's INT 2Fh, at the bottom of the chain: DPMI, XMS (M4c)
         db      63h, 0C0h
 
 ; ---- going resident

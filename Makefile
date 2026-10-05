@@ -19,6 +19,10 @@
 #                       MGA-Glide's HELLOs (M4a's exit: make loopa-m4a)
 #   make loopa-m4b      loopa-dpmi, djtst205 against CWSDPMI (loopa-djtst), MGA-Glide's DJGPP
 #                       tools (loopa-dpmitools)
+#   make loopa-m4c      loopa-m4b, HDPMI's regression tests against HDPMI32i (loopa-hdpmireg),
+#                       lDebugX on ecm's dpmimini (loopa-ecm), and MGA-Glide's conform and replays,
+#                       GTA, Screamer Rally and DOSBench under GLOS as the shell (loopa-m4c-games,
+#                       tools/m4c-games.sh; M4C_MGA= an MGA-Glide tree at deps.mk's pin)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
@@ -33,7 +37,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-gdb djtst check-deps clean help survey-tools
+.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-gdb djtst glos-cache m4c-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -124,7 +128,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c kernel/dos/agent.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
-         kernel/dpmi/deliver.c kernel/dbg/crash.c
+         kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dbg/crash.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
@@ -199,6 +203,15 @@ loopa-djtst: all dos-tests djtst check-deps
 loopa-dpmitools: all check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py dpmitools -j $(JOBS)
 loopa-m4b: loopa-dpmi loopa-djtst loopa-dpmitools
+# M4c: HDPMI's suite (bf6, 486DX2) and lDebugX (all three profiles), raw boots, each against HDPMI32i;
+# then the programs under GLOS as the shell.
+loopa-hdpmireg: all dos-tests m4c-inputs check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py hdpmireg --profile bf6 --profile 486dx2 --boot default -j $(JOBS)
+loopa-ecm: all dos-tests m4c-inputs check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py ecm --boot default -j $(JOBS)
+loopa-m4c-games: glos-cache check-deps
+	$(Q)tools/m4c-games.sh
+loopa-m4c: loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
 loopa-gdb: all check-deps
@@ -244,6 +257,26 @@ build/dj/djtst/$(1).EXE: build/dj/djtst/.unpacked
 endef
 $(foreach t,$(DJTST),$(eval $(call djtst_rule,$(word 1,$(subst :, ,$(t))),$(word 2,$(subst :, ,$(t))))))
 djtst: $(DJTST_EXES) build/dj/CRASHME.EXE build/ow/dos/RUNOUT.EXE
+
+# HDPMI's regression tests and ecm's lDebugX tests (M4c; pinned in versions.mk).
+build/hdpmireg/.unpacked: tools/setup/versions.mk
+	@mkdir -p build/hdpmireg
+	$(Q)tools/setup/fetch.sh $(HDPMIREG_URL) $(HDPMIREG_SHA256) $(MGA_CACHE)/dl/hdpmi-regression-f2276db9accf.zip
+	$(Q)unzip -qoL $(MGA_CACHE)/dl/hdpmi-regression-f2276db9accf.zip -d build/hdpmireg
+	$(Q)touch $@
+build/ecm/.unpacked: tools/setup/versions.mk
+	@mkdir -p build/ecm
+	$(Q)tools/setup/fetch.sh $(ECMTEST_URL) $(ECMTEST_SHA256) $(MGA_CACHE)/dl/ecm-test-20210127.zip
+	$(Q)unzip -qoL $(MGA_CACHE)/dl/ecm-test-20210127.zip -d build/ecm
+	$(Q)touch $@
+m4c-inputs: build/hdpmireg/.unpacked build/ecm/.unpacked build/ow/dos/RUNOUT.EXE
+
+# GLOS for other repos' Loop A jobs (M4c): in the cache the dev container
+# mounts, for LOOPA_EXTRA_ARGS="--boot-cfg glosshell --file $(GLOS_CACHE)/GLOS.EXE=/TEST/GLOS.EXE ..."
+GLOS_CACHE := $(MGA_CACHE)/glos/bin
+glos-cache: all
+	@mkdir -p $(GLOS_CACHE)
+	$(Q)cp build/ow/GLOS.EXE build/kernel/GLOSK.BIN $(GLOS_CACHE)/
 
 clean:
 	rm -rf build out

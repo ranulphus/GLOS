@@ -140,6 +140,7 @@ to COM1 at each step:
     autoexec = C:\AUTOEXEC.BAT                ; else the boot drive's \AUTOEXEC.BAT
     console  = C:\KIOSK.BAT                   ; run (through COMSPEC /C) instead of the prompt
     envsize  = 2048                           ; the master environment, in bytes (default 1024)
+    options  = /DPMITRACE                     ; GLOS.EXE's flags: /DPMITRACE, /NOVME, /GDB (M4c)
     ```
 
     `/COMSPEC=`, `/P=`, `/E:` and `/CON=` on the command line override them, like COMMAND.COM's own options.
@@ -178,12 +179,16 @@ to COM1 at each step:
 | 20h | #DF task TSS |
 | 28h | LDT of the current DPMI context (the descriptor is rewritten on context switch) |
 | 30h | espfix stack segment (§6.3) |
-| 38h, 40h | 16-bit code and data at the resident stub, used to leave protected mode |
+| 38h | 16-bit code at the resident stub, used to leave protected mode |
+| 40h | BIOS data selector, base 400h, limit FFFFh, ring 3: the 0040h that Windows-era code loads directly (GTA's DOS/4GW code does). Until M4c this was the 16-bit data selector below, and the game faulted |
 | 4Bh | Ring-3 trampoline code: host-owned stubs (IRET trampoline, PM breakpoints, the RMCB return) |
 | 53h | Ring-3 data alias of the trampoline page |
-| 5Bh | BIOS data selector, base 400h, limit FFFFh, ring 3 (for Windows-era clients that expect 0040h-style access) |
+| 5Bh | The same as 40h (M1–M4b's BIOS selector) |
+| 60h | 16-bit data at the resident stub, used to leave protected mode (40h until M4c) |
 
-The order above never changes. New selectors are appended.
+The order above never changes, and new selectors are appended. M4c's move of the 16-bit data selector
+from 40h to 60h was the one exception: the deep dive's "0040h selector" had been built at 5Bh, where no
+program looks for it.
 
 ### 3.2 IDT
 
@@ -343,7 +348,10 @@ path. The IRET restores the interrupted code's DF.
 `kernel/vm/v86dec.c` handles:
 - the 16- and 32-bit operand and address size prefixes, segment overrides and REP;
 - CLI, STI;
-- PUSHF(D), POPF(D) (respecting TF and the virtual IF);
+- PUSHF(D), POPF(D) (respecting TF and the virtual IF). The image the program sees (M4c): the real arithmetic
+  flags, TF and AC; ID only on a CPU with CPUID (86Box's IRET to V86 mode would keep an ID a 486DX2 can't
+  hold, and lDebugX's probe then ran CPUID into #UD); the virtual IF; NT as last written; IOPL always 3, as
+  VME's PUSHF shows it, so V86 code sees the same FLAGS on every profile;
 - INT n; INT3 and INTO only arrive as #BP/#OF through the IDT (they aren't IOPL-sensitive in V86 mode;
   86Box raised #GP until local patch 0107);
 - IRET(D);
@@ -370,8 +378,9 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 
 - **A thread** (§7, M3). In M2 it ran from trap context alone.
 - **VME** (M3) where CR4.VME exists (the Pentium II and iDX4 profiles; `/NOVME` turns it off): CLI, STI,
-  PUSHF, POPF, IRET and software INTs run in hardware against EFLAGS.VIF. Only INT 15h, 21h and 2Fh trap,
-  through the redirection bitmap; INT 10h and 13h join them with the DOS server's busy tracking (§17.2). The
+  PUSHF, POPF, IRET and software INTs run in hardware against EFLAGS.VIF. Only INT 15h and 21h trap
+  through the redirection bitmap (with 1Ch, 23h and 24h for a client's handlers, M4b; INT 2Fh's handler is
+  GLOS's at the bottom of the IVT chain from M4c, §12.1c); INT 10h and 13h join them with the DOS server's busy tracking (§17.2). The
   monitor reads VIF at every trap from V86 mode and writes it back, with VIP set while an IRQ waits. The same
   MEM run traps 1,237 times with VME and 33,968 times without. PUSHFD, POPFD and IRETD still trap. On the
   486DX2 every one traps, as in M2.
@@ -490,7 +499,8 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   - a memory-block list, an RMCB table, exception handlers, and a 16 KB locked host stack;
   - the **client bitness** (16 or 32), a field from day one.
 - **Child programs** EXECed by a client share their parent's context, as in CWSDPMI and HDPMI's default
-  ([DPMI deep dive]; DOSBench's DBMENU (DJGPP) starts BENCHG (DOS/4GW) and BENCHGL [census]).
+  ([DPMI deep dive]; DOSBench's DBMENU (DJGPP) started BENCHG (DOS/4GW) and BENCHGL [census]; since DOSBench's
+  D9 redesign it writes a batch file and exits instead, and DJGPP's `system()` is the case in our programs).
 - A child's mode switch pushes a client level. On the child's 4Ch, GLOS frees the blocks, selectors, RMCBs and
   handlers allocated at that level, and restores PSP:2Ch.
 
@@ -582,6 +592,60 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   clear after CLI, which PUSHF then shows; GLOS doesn't, so that `cli; jmp $` can't stop the agent (PRD D20).
   djtst205's ENABLE is the one test that notices; direct mode (M4e) runs it at IOPL 3.
 
+### 12.1c As built in M4c (`kernel/dpmi/level.c`, `kernel/vm/v86.c`)
+
+- **Client levels.** A program a client EXECs that switches to protected mode itself pushes a level in the
+  parent's context (up to 6), as under CWSDPMI and HDPMI32i: one address space, one LDT, one virtual IDT.
+  - Everything a level makes is tagged with its number: LDT entries, 0501h/0504h blocks, DOS blocks' selectors,
+    RMCBs and watchpoints. Its end frees exactly those, puts back the parent's interrupt and exception vectors
+    (a level starts with copies of them), drops the entries its handlers left, and restores PSP:2Ch.
+  - Per level: the PSP and its selector, the environment selector, the host's real-mode stack, the first-block
+    floor (§12.3) and the terminate address.
+  - The parent waits inside its EXEC, a nested real-mode call, so the child runs at that depth and ends there:
+    what nested deeper is unwound, and the parent's EXEC returns as on a plain DOS.
+  - A child of the other bitness (a 16-bit child of a 32-bit client, or the reverse) fails with 8011h and
+    `GLOS-DPMI-UNIMPL mixed-bitness`; frames and stacks follow the context's bitness. Only the first client
+    gets the locked stack; the levels share it.
+  - DPMICONF's `nest` (a child that leaves its vector hooked, and one that faults) passes on GLOS, HDPMI32i and
+    CWSDPMI. CWSDPMI keeps a child's hook after the child ends; GLOS and HDPMI32i put the parent's back.
+- **The terminate address** (PSP:0Ah) of each level points at the stub's term ARPL, and a pending-end stack
+  matches each DOS end to its level, so an abort that bypassed 4Ch (§12.1b) ends the right level.
+- **INT 2Fh in V86 mode is a chain.** GLOS hooks INT 2Fh at the bottom of the IVT chain (the stub's int2f ARPL)
+  instead of trapping the vector, so a TSR or debugger loaded under GLOS can hook 1687h itself: ecm's lDebugX
+  does, to follow its program into protected mode ("DPMI entry cannot be hooked!" otherwise). GLOS answers
+  1687h, 4300h/4310h (§16), 1680h, 1600h and 160Ah, and passes the rest to the previous vector. At the end it
+  unhooks, with `GLOS-WARN int2f-hooked-over` if something hooked above it and stayed.
+- **INT 2Fh 1680h** in either mode yields the VM thread to the kernel's (`uclock`, `usleep`), and leaves AL at
+  80h as plain DOS does (§13).
+- **INT 41h** from protected mode does nothing: it is the Windows debugger interface, and HDPMI's I310508A calls
+  it. Reflected, it would jump through the BIOS's disk-parameter pointer in the IVT (the test hung).
+- **DPMI 1.0 functions** (§13): 0401h, 0504h/0505h, 0508h/0509h, 050Bh, 0B00h–0B03h; 0E01h honoured per client.
+  - The 1.0 exception frame's handlers return through their own trampoline offsets (TR_RET10), so a RETF from
+    a 0212h handler takes the 1.0 frame, from a 0203h handler the 0.9 one. Each is read where that handler's
+    RETF leaves ESP.
+  - The 1.0 frame's PTE field for a page fault is the faulting page's PTE attributes. An uncommitted page in a
+    client block reads as user and writable, though not present (HDPMI32i's suite checks it).
+- **The FPU per client** (0E01h): its MP and EM bits are in CR0 while it runs, and DOS's while V86 code runs.
+  EM set means the client emulates: ESC instructions raise exception 7, to its handler. 0E00h reports them,
+  with the FPU present and the CPU type.
+- **Selector 0040h** is ring-3 BIOS data (§3.1), and a data register may hold it with RPL 0, which the
+  check before IRET (§12.1a) now allows; CS and SS still need RPL 3, and SS writable data.
+- **0301h keeps the caller's IF:** [DPMI0.9] gives the register structure's FLAGS no part in a far call
+  (0300h/0302h push them and clear IF/TF), and clients leave them zero. M4a loaded IF from them, so the
+  procedure ran with interrupts off (HDPMI's RAWJMP6). With VME the nested V86 frame carries the virtual IF in
+  EFLAGS.VIF itself: its entry (`nest_enter`) skips `vm_return()`, which sets VIF on every other way into V86
+  mode, and the first trap from the procedure would otherwise read IF back as clear.
+- **A stray #DB in ring 0 is dropped** (§20): 86Box keeps a single-step trap pending across an instruction
+  that faults into the kernel and delivers it in the handler. DR6 is 0 then; GLOS logs `GLOS-CPU stray-db`
+  once and carries on. A #DB that hits a client's watchpoint in ring 0 is recorded for 0B02h.
+- **Test inputs** (THIRD_PARTY.md): ecm's dpmimini and lDebugX (`make loopa-ecm`) give the same output under
+  GLOS and HDPMI32i but for selectors and addresses. HDPMI's own regression suite (`make loopa-hdpmireg`) runs
+  each test under HDPMI32i and GLOS. A test passes when the exit code and output agree, or differ only in
+  selector numbers. Each remaining difference is listed with its reason in `HR_KNOWN`
+  (`tests/loopa/jobs.py`): HDPMI's crash dump on the program's output, its INT 21h translation API, its
+  single-step routing, IOPL 0's PUSHF (D20), 0305h's empty state, and HDPMI refusing a nested client. Any
+  other difference fails the job.
+
 ### 12.2 Initial state after the mode switch ([DPMI0.9 §4])
 
 | Register | Value |
@@ -629,7 +693,7 @@ Statuses:
 
 | Fn | Function | Status | Who / notes | Baseline |
 |---|---|---|---|---|
-| 0000h | Allocate LDT descriptors | M4a | DJGPP stub, DOS/4GW | CWSDPMI, HDPMI32i |
+| 0000h | Allocate LDT descriptors | M4a | DJGPP stub, DOS/4GW. CX=0 fails with 8021h ([DPMI1.0]; HDPMI32i leaves AX=0). | CWSDPMI, HDPMI32i |
 | 0001h | Free descriptor | M4a | DJGPP exit frees the loaded DS. GLOS zeroes any segment register holding it ([DPMI1.0]; CWSDPMI does the same). | CWSDPMI |
 | 0002h | Segment to descriptor | M4a | GLQuake | CWSDPMI |
 | 0003h | Selector increment | M4a | 8 | |
@@ -641,33 +705,34 @@ Statuses:
 | 000Bh/000Ch | Get/set descriptor | M4a, M4c | DOS/4GW clears the Big bit on SS/DS (espfix, §6.3); validated | DOS/4GW |
 | 000Dh | Allocate specific descriptor | M4a | Selectors 04h–7Ch reserved | |
 | 000Eh/000Fh | Get/set multiple (1.0) | log | | |
-| 0100h–0102h | DOS memory | M4a | Under the DOS lock. **On failure AX=0008h and BX=largest block**: the DJGPP stub relies on it. | CWSDPMI |
+| 0100h–0102h | DOS memory | M4a | Under the DOS lock. **On failure AX=0008h and BX=largest block**: the DJGPP stub relies on it. A 32-bit client gets one selector whose limit is the whole block, so 0102h can grow it in place (M4c, HDPMI's I310102); a 16-bit client one per 64 KB ([DPMI0.9]), and 0102h fails with 8011h before DOS resizes if it would need more. | CWSDPMI |
 | 0200h/0201h | Get/set real-mode vector | M4a | DJGPP installs its INT 1Bh RMCB here | |
 | 0202h/0203h | Get/set exception handler | M4b | DJGPP: 0–11h; MGA-Glide OW: 00h, 06h, 0Dh, 0Eh. The default is SEL_TRAMP:TR_EXC+n; setting it back restores the host's own. | CWSDPMI |
 | 0204h/0205h | Get/set PM vector | M4a (vectors), M4b (IRQ delivery) | INT 8/9/1Bh/23h/24h/75h, IRQ3/4, INT 21h (DOS/4GW, MGA-Glide exit hook) | CWSDPMI, DOS/4GW |
 | 0210h/0212h | Get/set extended PM exception handler (1.0) | M4b | 32-bit clients (16-bit: M4d). The 1.0 frame at +20h, as HDPMI32i's. | HDPMI32i |
 | 0211h/0213h | Get/set extended real-mode exception handler (1.0) | log | Real-mode exceptions go to the IVT, as on a real-mode CPU | |
 | 0300h | Simulate real-mode interrupt | M4a | SS:SP=0 means the host stack; CX words copied; IF/TF clear | CWSDPMI |
-| 0301h/0302h | Call real-mode far / IRET procedure | M4a | GLQuake IPX entry; SDL VBE bank switch | |
+| 0301h/0302h | Call real-mode far / IRET procedure | M4a | GLQuake IPX entry; SDL VBE bank switch. 0301h keeps the caller's IF (M4c, §12.1c); 0302h clears IF/TF. | HDPMI32i |
 | 0303h/0304h | Allocate/free real-mode callback | M4b | **Every DJGPP program** (INT 1Bh); DOS/4GW. 16 per context (ARPLs in the stub), each with a selector for the real-mode stack. ES:EDI returned unchanged. A freed one returns at once. | CWSDPMI |
-| 0305h/0306h | State save / raw switch addresses | **M4a** | **DOS/4GW needs it to start.** The "real-mode" side is a V86 trap stub. | DOS/4GW, HDPMI32i |
+| 0305h/0306h | State save / raw switch addresses | **M4a** | **DOS/4GW needs it to start.** The "real-mode" side is a V86 trap stub. The state size is 0: nothing to save (HDPMI32i: 1Ch). | DOS/4GW, HDPMI32i |
 | 0400h | Version | M4a | 0.90, BX bit 0=32-bit, bit 1=0 (reflection in V86); **DH=08h, DL=70h** (or the virtual PIC's ICW2) | CWSDPMI |
-| 0401h | Capabilities (1.0) | M4c | | HDPMI32i |
+| 0401h | Capabilities (1.0) | M4c | AX=002Fh, as HDPMI32i: page accessed/dirty, exceptions restartable, device and conventional-memory mapping, write-protect for clients. Not demand zero-fill: an uncommitted page faults. The buffer: version 0.4, "GLOS". | HDPMI32i |
 | 0500h | Free memory info | M4a | Accurate; programs allocate all of it | CWSDPMI |
 | 0501h–0503h | Linear blocks | M4a | Ascending (§12.3) | CWSDPMI |
-| 0504h/0505h | 1.0 linear memory | log | | |
+| 0504h/0505h | 1.0 linear memory | M4c | 0504h at a given address (EBX, page aligned) or anywhere; committed or not (EDX bit 0). 0505h resizes; EDX bit 1 rebases the selectors listed at ES:EBX when the block moves. | HDPMI32i |
 | 0506h/0507h | Get/set page attributes | M4b | DJGPP crt0 uncommits page 0 (null trap) unless NULLOK; DOS/4GW reads them | CWSDPMI, HDPMI32i |
-| 0508h/0509h | Map device / conventional memory (1.0) | M4c | HDPMI suite | HDPMI32i |
+| 0508h/0509h | Map device / conventional memory (1.0) | M4c | Pages of a 0504h block onto physical memory (0508h) or the first megabyte (0509h). A mapped page is page type 2 for 0506h; 0507h's commit replaces the mapping (HDPMI's I310508A). Mapped frames are never freed. | HDPMI32i |
+| 050Bh | Memory information (1.0) | M4c | The 0500h figures in 1.0's layout, laid out as HDPMI32i's (nothing pages, so physical = virtual) | HDPMI32i |
 | 0600h–0603h | Lock/unlock | nop (recorded) | SDL, Quake, LOCK_MEMORY | |
 | 0604h | Page size | M4a | 4096 | |
 | 0702h/0703h | Discardable | nop | DOS/4GW | |
 | 0800h/0801h | Physical mapping | M4a | Matrox BARs, VBE LFB; linear = physical (§12.4) | DOS/4GW |
 | 0900h–0902h | Virtual IF | M4a | Return the old state in AL | |
 | 0A00h | Vendor API | M4a | "GLOS" → entry point and API version (PRD D23). **Any other string → CF=1, AX=8001h** (DOS/4GW probes "RSI CLIENT 0.9"/"RATIONAL DOS/4G"). | |
-| 0B00h–0B03h | Watchpoints | M4c | DR0–DR3, shared with the gdb stub | HDPMI32i |
+| 0B00h–0B03h | Watchpoints | M4c | DR0–DR3 (the gdb stub uses software breakpoints). A hit is exception 1 to the client and sets 0B02h's bit; an execute watchpoint resumes with RF. Freed with the level that set it. 86Box never fires them (§20): checked on silicon. | HDPMI32i |
 | 0C00h/0C01h | TSR services (1.0) | log | | |
 | 0D00h–0D03h | Shared memory (1.0) | fail (8001h) | DOS/4GW probes 0D00h | |
-| 0E00h/0E01h | Coprocessor status / emulation | M4a | DJGPP: 0E01h BX=1; without an FPU, BX=3 and EMU387. GLOS reports an FPU; emulation fails. | CWSDPMI (ignores 0E00h) |
+| 0E00h/0E01h | Coprocessor status / emulation | M4a, M4c | DJGPP: 0E01h BX=1; without an FPU, BX=3 and EMU387. 0E01h sets the client's MP and EM, in CR0 while it runs (M4c): EM means the client emulates, and gets exception 7. 0E00h reports them, the FPU present and the CPU type. | CWSDPMI (ignores 0E00h), HDPMI32i |
 
 **INT 2Fh** (handled by the host in both modes):
 
@@ -676,10 +741,11 @@ Statuses:
 | 1687h | The DPMI host, with SI = private paragraphs |
 | 1686h | AX=0 in protected mode |
 | 168Ah | 1.0 vendor API, same rules as 0A00h |
-| 1680h | **A real yield** (`uclock`'s start-up spin and `usleep` call it [census]) |
-| 1600h, 160Ah | **Never report Windows.** GLQuake aborts if Windows is reported [census]. |
+| 1680h | **A real yield** in either mode (`uclock`'s start-up spin and `usleep` call it [census]). AL stays 80h ("not supported"), as on plain DOS: DJGPP's `uclock()` takes AL=0 for Windows 9x and waits for a BIOS tick, which never comes when it is first called with interrupts off (JOYTEST hung, M4c) |
+| 1600h, 160Ah | **Never report Windows.** GLQuake aborts if Windows is reported [census]. 1600h returns AL=0; 160Ah leaves AX as it was. |
 | 1681h/1682h | Reflected (no handler, as on the baselines) |
-| 4300h/4310h | GLOS's XMS server (§16) |
+| 4300h/4310h | GLOS's XMS server (§16). 4309h (HIMEM's handle table) isn't provided. |
+| Others | In V86 mode, GLOS's handler is at the bottom of the INT 2Fh chain and passes them on (§12.1c) |
 
 **INT 67h:** VCPI DE00h and EMS are absent, so VCPI probes fail as they do with no EMM loaded (PRD D25).
 
@@ -904,15 +970,15 @@ place where nothing else is in DOS by construction.
 | AGENT | A job: `run seq= cmd=`, `done seq= code= via=` (the program, or `comspec`) |
 | KILL | A kill (§9.6) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
-| DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... -> cf= ax=`, `deliver irq=|passup=|exception=|rmcb= to= from= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |
+| DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... if= -> cf= ax=` (`if=` the virtual IF at the call), `deliver irq=|passup=|exception=|rmcb= to= from= at= err= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |
 | CRASH | A client the host ends (§19): `why= vec= err= prog= psp= bits= mode=`, `cs:eip= ss:esp= eflags= cr2=`, the general registers, `code=` (16 bytes at CS:EIP), `stack=`, a `seg` line per segment register, `handlers= lstack= nesting=`, `file=` |
 | DPMI-UNIMPL | An unimplemented call |
 | PANIC | A panic: registers and CR2. A double fault adds the interrupted context from the TSS, ESP0 and its page-table entry, any IDT gate or GDT descriptor that changed since start-up, and a `thread=` line per thread (stack, saved ESP, canary) |
 
 ## 19. Debugging
 
-- **Kernel:** a gdb remote stub on COM2 (`/GDB`) supports `g G m M c s Z0` and hardware breakpoints in
-  DR0–DR3. Loop A routes COM2 through a FIFO pair to TCP (M0's `--com2`).
+- **Kernel:** a gdb remote stub on COM2 (`/GDB`) supports `g G m M c s Z0` (software breakpoints). DR0–DR3
+  are the clients' 0B00h watchpoints. Loop A routes COM2 through a FIFO pair to TCP (M0's `--com2`).
 - **Clients (M5):** a stub per process, reached through an SSH `direct-tcpip` forward.
 - **Loop A hangs:** `run.py`'s `--idle` and `--timeout` count host seconds, but guest time slows when the host is
   busy (2026-10-03: a Pentium II profile at under half speed). Before debugging a HANG, compare the guest's time
@@ -945,6 +1011,9 @@ place where nothing else is in DOS by construction.
 | IRQ8 keeps firing without a read of register C | A tick that forgets C works in 86Box, freezes on silicon | Always read C (§8.1) |
 | PGE is stored but every flush is global | None | |
 | The dynarec compiles PUSHF per IOPL | IOPL changes inside a session could be ignored | V86TEST case U found no problem; IOPL stays constant per session anyway |
+| DR0–DR3 breakpoints never fire on the bf6 profile (data ones are checked only in the 386 core's MMU path; an execute one didn't fire on the interpreter either, under CWSDPMI) | 0B00h–0B03h can't be seen working in Loop A, on any host | DPMICONF's `watch` is INFO; silicon checks it (M4c) |
+| A single-step trap stays pending across an instruction that faults into ring 0, and is taken in the kernel's handler (silicon discards it, SDM 17.3.1.4) | A #DB in ring 0 with DR6=0, which the kernel never causes (M4c: an lDebugX trace step onto one of the stub's ARPLs, a #UD, panicked GLOS) | Such a #DB is dropped, `GLOS-CPU stray-db` logged once (§12.1c). An 86Box patch and V86TEST case are proposed to MGA-Glide |
+| IRETD to V86 mode loads EFLAGS[31:16] unmasked (POPFD masks by CPU model), so a 486DX2 keeps ID | An emulated POPFD that set ID made CPUID look present (lDebugX ran it into #UD, M4c) | GLOS's FLAGS image has ID only where the loader found CPUID (§9.2) |
 | Matrox G-series cards are AGP only | 486 profiles can't have a Matrox card | S3 Trio64V2/DX until a PCI-variant patch at M7 |
 | The dynarec (the old one MGA-Glide builds) checks segment limits on stores, never on loads (`MEM_LOAD_ADDR_EA_*`) | DJGPP's Ctrl-C and SIGALRM cut DS's limit to 4 KB in the IRQ handler; a loop that only reads never faults, on any host (found by djtst205's HANG, M4b) | **Fixed:** patch 0112 (MGA-Glide 81c0686; V86TEST case V) |
 

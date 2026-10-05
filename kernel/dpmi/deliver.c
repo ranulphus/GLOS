@@ -106,8 +106,9 @@ static void trace(const char *what, u32 n, u16 cs, u32 eip, const struct trapfra
     if (!(vm.bi->flags & BI_F_DPMITRACE) || seen[k][n & 0xFF] >= 4)
         return;
     seen[k][n & 0xFF]++;
-    kprintf("GLOS-DPMI deliver %s=%02x to=%04x:%08x from=%s entries=%u lstack=%u\n", what, n & 0xFF, cs, eip,
-            (tf->eflags & FL_VM) ? "v86" : "pm", dctx->npe, dctx->lstack_use);
+    kprintf("GLOS-DPMI deliver %s=%02x to=%04x:%08x from=%s at=%04x:%08x err=%x entries=%u lstack=%u\n", what,
+            n & 0xFF, cs, eip, (tf->eflags & FL_VM) ? "v86" : "pm", tf->cs & 0xFFFF, tf->eip, tf->err, dctx->npe,
+            dctx->lstack_use);
 }
 
 /* ---- IRQs and INTs passed up: an interrupt frame that IRETs to TR_RET */
@@ -190,9 +191,11 @@ void dpmi_exception(struct trapframe *tf)
         return;
     }
     if (dctx->bits32) {
-        u32 r = ret_off(e), cr2 = v == 14 ? dctx->cr2 : 0, pte = v == 14 ? mm_lookup(cr2) : 0;
+        u32 r = ret_off(e), cr2 = v == 14 ? dctx->cr2 : 0, pte = v == 14 ? mm_lookup(cr2) & 0xFFF : 0;
+        if (v == 14 && !(pte & 1) && lin_in_block(cr2))
+            pte = MM_U | MM_W;                  /* an uncommitted page of a block: user, writable (HDPMI32i) */
         u32 fr[22] = { r, SEL_TRAMP, tf->err, tf->eip, tf->cs & 0xFFFF, f, tf->esp, tf->ss & 0xFFFF,
-                       r, SEL_TRAMP, tf->err, tf->eip, tf->cs & 0xFFFF, f, tf->esp, tf->ss & 0xFFFF,
+                       r - TR_RET + TR_RET10, SEL_TRAMP, tf->err, tf->eip, tf->cs & 0xFFFF, f, tf->esp, tf->ss & 0xFFFF,
                        tf->es & 0xFFFF, tf->ds & 0xFFFF, tf->fs & 0xFFFF, tf->gs & 0xFFFF, cr2, pte };
         if (push(ss, &sp, fr, sizeof fr) != 0) {
             crash_report(tf, "no-stack");
@@ -214,18 +217,21 @@ void dpmi_exception(struct trapframe *tf)
 
 /* The handler's RETF: on from the frame as it left it ([DPMI0.9]: CS:EIP,
    EFLAGS and SS:ESP; the 1.0 frame adds the segment registers); the
-   general registers are the handler's own. */
-static void exc_return(struct trapframe *tf, const struct pmentry *e)
+   general registers are the handler's own. A 0212h handler may RETF
+   through either frame's return address: through the 0.9 one, the 1.0
+   frame lies 20h above; through the 1.0 one (via10), it starts at ESP. */
+static void exc_return(struct trapframe *tf, const struct pmentry *e, int via10)
 {
     u32 sp = sp_of(tf), eip, cs, fl, esp, ss;
+    int ten = e->frame10 || via10;
     if (dctx->bits32) {
         u32 v[10];
-        if (user_rd((u16)tf->ss, sp + (e->frame10 ? 0x20 : 0), v, e->frame10 ? 40 : 24) != 0) {
+        if (user_rd((u16)tf->ss, sp + (ten && !via10 ? 0x20 : 0), v, ten ? 40 : 24) != 0) {
             crash_report(tf, "exception-frame");
             return;
         }
         eip = v[1], cs = v[2] & 0xFFFF, fl = v[3], esp = v[4], ss = v[5] & 0xFFFF;
-        if (e->frame10) {
+        if (ten) {
             tf->es = v[6] & 0xFFFF;
             tf->ds = v[7] & 0xFFFF;
             tf->fs = v[8] & 0xFFFF;
@@ -243,7 +249,7 @@ static void exc_return(struct trapframe *tf, const struct pmentry *e)
     tf->cs = cs;
     tf->esp = esp;
     tf->ss = ss;
-    tf->eflags = (fl & (FL_ARITH | FL_TF)) | FL_IF | 2;
+    tf->eflags = (fl & (FL_ARITH | FL_TF | 0x10000)) | FL_IF | 2;  /* RF: past an execute breakpoint */
     vm.vif = (fl & FL_IF) != 0;
 }
 
@@ -282,7 +288,7 @@ void dpmi_exc_default(struct trapframe *tf, u32 v)
         crash_report(tf, "bad-chain");
         return;
     }
-    dpmi_entry_return(tf, r[0] - TR_RET);
+    dpmi_entry_return(tf, r[0] - TR_RET, 0);
     if (!(tf->eflags & FL_VM) && dctx)
         dpmi_exc_unhandled(tf, v, r[2]);
 }
@@ -373,7 +379,7 @@ static void rmcb_return(struct trapframe *tf, const struct pmentry *e)
 
 /* ---- back from a handler: SEL_TRAMP:TR_RET + i */
 
-void dpmi_entry_return(struct trapframe *tf, u32 i)
+void dpmi_entry_return(struct trapframe *tf, u32 i, int via10)
 {
     struct pmentry *e;
     if (i >= dctx->npe || dctx->pe[i].at != tf) {
@@ -408,7 +414,7 @@ void dpmi_entry_return(struct trapframe *tf, u32 i)
             break;
         }
     case PE_EXC:
-        exc_return(tf, e);
+        exc_return(tf, e, via10);
         break;
     case PE_RMCB:
         rmcb_return(tf, e);

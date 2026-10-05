@@ -25,6 +25,8 @@ CWSDPMI, HDPMI and DJGPP's runtime are used as behavioural baselines only
 |---|---|---|---|
 | HX DOS extender runtime 2.23 (`HXRT223.zip`) | HDPMI32i as a DPMI baseline in Loop A | `tools/setup/versions.mk` | Freeware ("may be used for any purpose") |
 | DJGPP 2.05 test suite (`djtst205.zip`) | Its tests, compiled by `make djtst` and compared under CWSDPMI and GLOS (M4b) | `tools/setup/versions.mk` | DJGPP's licence (`COPYING.DJ`) |
+| HDPMI's regression tests (HX repository, `Src/HDPMI/Regression/Regression.zip`) | Run under HDPMI32i and GLOS and compared (`make loopa-hdpmireg`, M4c) | `tools/setup/versions.mk` (commit f2276db9) | HX: freeware ("Copyright 1996-2026 Japheth", HXsrc.txt) |
+| ecm's test builds (`pushbx.org/ecm/test/20210127.zip`: lDebugX, dpmimini) | lDebugX steps dpmimini into protected mode under HDPMI32i and GLOS (`make loopa-ecm`, M4c) | `tools/setup/versions.mk` | lDebug: Fair License (ecm) |
 
 DJGPP's library sources (`djlsr205.zip`) were read as a behavioural reference for its exception and signal
 paths (M4b); none of it is in GLOS.

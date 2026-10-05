@@ -30,8 +30,9 @@
  * switch, or inside a nested call) frees the context when DOS sees its
  * 4Ch. Any other way DOS ends it (a Ctrl-C or critical-error abort) is
  * caught at its terminate address, PSP:0Ah, which the mode switch points at
- * the stub's term ARPL (M4b). One context at a time in M4a; children's own mode switches arrive
- * with M4c. */
+ * the stub's term ARPL (M4b). A program a client starts that switches to
+ * protected mode itself joins the context as a client level (level.c, M4c),
+ * and its end ends only that level. */
 #include "glos/bootinfo.h"
 #include "arch.h"
 #include "dpmi.h"
@@ -45,7 +46,27 @@
 
 struct dpmi_ctx *dctx;
 static struct dpmi_ctx ctx_store;
-static u32 term_vec;                            /* the client's own terminate address, PSP:0Ah's before */
+
+/* CR0.MP and EM for the code that runs next: a client's own (0E01h), or DOS's
+   as GLOS found them. Written only when they change. */
+u32 fpu_msw_dos = ~0u;
+static u32 fpu_msw_now = ~0u;
+
+void fpu_msw_set(u32 msw)
+{
+    u32 cr0;
+    if (fpu_msw_dos == ~0u)
+        fpu_msw_dos = fpu_msw_now = (read_cr0() >> 1) & 3;
+    if (msw == fpu_msw_now)
+        return;
+    cr0 = read_cr0();
+    write_cr0((cr0 & ~6u) | (msw & 3) << 1);
+    fpu_msw_now = msw;
+}
+/* Terminate addresses DOS is about to go to: each client the host has seen
+   end leaves its own here, for the term ARPL (they outlive the context). */
+static u32 term_pend[NLEVEL];
+static u32 nterm;
 
 void dpmi_init(void)
 {
@@ -186,6 +207,7 @@ static void ctx_destroy(int psp)
         c->dosblks = d->next;
         kfree(d);
     }
+    wp_clear_level(1);
     mm_space_enter(0);
     mm_space_free(c->cr3);
     cpu_set_ldt(0, 0);
@@ -194,50 +216,58 @@ static void ctx_destroy(int psp)
     dctx = 0;
 }
 
-/* The far call to the mode-switch entry, from V86 mode. */
+static void switch_fail(struct trapframe *tf, u32 ret_cs, u32 ret_ip, u32 err)
+{
+    tf->cs = ret_cs;
+    tf->eip = ret_ip;
+    SET16(tf->eax, err);
+    tf->eflags |= FL_CF;
+}
+
+/* The far call to the mode-switch entry, from V86 mode: a new context, or,
+   from a program a client started, a new level in that client's (M4c). */
 static void mode_switch(struct trapframe *tf)
 {
     struct dpmi_ctx *c = &ctx_store;
-    u32 sp = tf->esp & 0xFFFF, ret_ip, ret_cs, env_size;
+    u32 sp = tf->esp & 0xFFFF, ret_ip, ret_cs, env_size, e;
     u16 ds = (u16)tf->v86_ds, ss = (u16)tf->ss, cs_sel, ds_sel, ss_sel;
     u8 data_flags;
+    int child = dctx != 0;
 
     ret_ip = vm_rd16(vm_lin(tf->ss, sp));
     ret_cs = vm_rd16(vm_lin(tf->ss, sp + 2));
     SET16(tf->esp, sp + 4);
-    if (dctx) {                                 /* a child's own client: M4c */
-        tf->cs = ret_cs;
-        tf->eip = ret_ip;
-        SET16(tf->eax, 0x8011);
-        tf->eflags |= FL_CF;
-        dpmi_unimpl(tf, "nested-client");
-        return;
+    if (child) {
+        if ((e = (u32)level_push(tf)) != 0) {
+            switch_fail(tf, ret_cs, ret_ip, e);
+            return;
+        }
+    } else {
+        memset(c, 0, sizeof *c);
+        c->ldt = kmalloc(LDT_ENTRIES * 8);
+        c->ldt_used = kmalloc(LDT_ENTRIES);
+        c->cr3 = mm_space_new();
+        if (!c->ldt || !c->ldt_used || !c->cr3) {
+            if (c->ldt) kfree(c->ldt);
+            if (c->ldt_used) kfree(c->ldt_used);
+            if (c->cr3) mm_space_free(c->cr3);
+            switch_fail(tf, ret_cs, ret_ip, 0x8011);    /* descriptor unavailable */
+            return;
+        }
+        dctx = c;
+        level_init(tf);
+        ldt_init(c);
+        c->bits32 = tf->eax & 1;
+        c->next_handle = 0x1000;
+        fpu_msw_set(fpu_msw_dos == ~0u ? (read_cr0() >> 1) & 3 : fpu_msw_dos);   /* (learns DOS's first) */
+        c->fpu_msw = (u8)(fpu_msw_dos & ~2u);   /* the FPU, not enabled for it until 0E01h ([DPMI0.9]) */
+        mm_space_enter(c->cr3);
+        cpu_set_ldt(c->ldt, LDT_ENTRIES * 8 - 1);
     }
-    memset(c, 0, sizeof *c);
-    c->ldt = kmalloc(LDT_ENTRIES * 8);
-    c->ldt_used = kmalloc(LDT_ENTRIES);
-    c->cr3 = mm_space_new();
-    if (!c->ldt || !c->ldt_used || !c->cr3) {
-        if (c->ldt) kfree(c->ldt);
-        if (c->ldt_used) kfree(c->ldt_used);
-        if (c->cr3) mm_space_free(c->cr3);
-        tf->cs = ret_cs;
-        tf->eip = ret_ip;
-        SET16(tf->eax, 0x8011);                 /* descriptor unavailable */
-        tf->eflags |= FL_CF;
-        return;
-    }
-    dctx = c;
-    ldt_init(c);
-    c->bits32 = tf->eax & 1;
-    c->exc_depth = 0;
     c->psp = vm_current_psp();
     c->env_seg = vm_rd16(c->psp * 16u + 0x2C);
     c->rm_seg = (u16)tf->v86_es;
     c->rm_sp = RM_STACK_PARAS * 16;
-    c->next_handle = 0x1000;
-    mm_space_enter(c->cr3);
-    cpu_set_ldt(c->ldt, LDT_ENTRIES * 8 - 1);
 
     data_flags = c->bits32 ? 0x40 : 0x00;       /* Big for a 32-bit client */
     cs_sel = ldt_new(ret_cs * 16u, 0xFFFF, 0xFA, 0x00);
@@ -246,19 +276,18 @@ static void mode_switch(struct trapframe *tf)
     c->psp_sel = ldt_new(c->psp * 16u, 0xFFFF, 0xF2, 0x00);
     env_size = c->env_seg ? (u32)vm_rd16((c->env_seg - 1) * 16u + 3) * 16 : 16;
     c->env_sel = c->env_seg ? ldt_new(c->env_seg * 16u, env_size - 1, 0xF2, 0x00) : 0;
-    if (lin_host(LSTACK_LIN, LSTACK_SIZE) != 0) {       /* the locked stack (§14.2) */
-        kprintf("GLOS-DPMI start failed why=memory\n");
-        ctx_destroy(1);
-        tf->cs = ret_cs;
-        tf->eip = ret_ip;
-        SET16(tf->eax, 0x8013);
-        tf->eflags |= FL_CF;
-        return;
+    if (!child) {
+        if (lin_host(LSTACK_LIN, LSTACK_SIZE) != 0) {   /* the locked stack (§14.2), for every level */
+            kprintf("GLOS-DPMI start failed why=memory\n");
+            ctx_destroy(1);
+            switch_fail(tf, ret_cs, ret_ip, 0x8013);
+            return;
+        }
+        c->lsel = ldt_new(LSTACK_LIN, LSTACK_SIZE - 1, 0xF2, data_flags);
     }
-    c->lsel = ldt_new(LSTACK_LIN, LSTACK_SIZE - 1, 0xF2, data_flags);
     vm_wr8(c->psp * 16u + 0x2C, (u8)c->env_sel);
     vm_wr8(c->psp * 16u + 0x2D, (u8)(c->env_sel >> 8));
-    term_vec = vm_rd32(c->psp * 16u + 0x0A);    /* DOS goes there when the program ends, however it ends */
+    c->term_vec = vm_rd32(c->psp * 16u + 0x0A);    /* DOS goes there when the program ends, however it ends */
     vm_wr8(c->psp * 16u + 0x0A, (u8)vm.bi->bp_term_off);
     vm_wr8(c->psp * 16u + 0x0B, (u8)(vm.bi->bp_term_off >> 8));
     vm_wr8(c->psp * 16u + 0x0C, (u8)vm.loader_cs);
@@ -266,8 +295,8 @@ static void mode_switch(struct trapframe *tf)
 
     dpmi_to_pm(tf, cs_sel, ret_ip, ss_sel, sp + 4, ds_sel, c->psp_sel);
     tf->eflags &= ~FL_CF;
-    kprintf("GLOS-DPMI start bits=%u psp=%04x cs=%04x ds=%04x ss=%04x\n", c->bits32 ? 32 : 16, c->psp, cs_sel,
-            ds_sel, ss_sel);
+    kprintf("GLOS-DPMI start bits=%u psp=%04x cs=%04x ds=%04x ss=%04x level=%u\n", c->bits32 ? 32 : 16, c->psp,
+            cs_sel, ds_sel, ss_sel, c->nlv);
 }
 
 void dpmi_1687(struct trapframe *tf)
@@ -284,32 +313,59 @@ void dpmi_1687(struct trapframe *tf)
 
 /* ---- the end */
 
-/* The end from protected mode: INT 21h 4Ch, a kill, a crash. Inside a
-   nested real-mode call (a handler run from V86 mode), the levels below
-   are dropped and the V86 code carries on from the top. */
+/* The running client level ends: the level, or with the first client the
+   context. *depth and *f: where its V86 code goes on (level.c). seen: DOS
+   has yet to end the program, and will go to its terminate address. */
+static void end_level(int psp, int seen, int *depth, struct trapframe **f)
+{
+    struct dpmi_level *l = &dctx->lv[dctx->nlv - 1];
+    *depth = l->depth;
+    *f = l->frame;
+    if (seen && nterm < NLEVEL)
+        term_pend[nterm++] = dctx->term_vec;
+    if (dctx->nlv > 1)
+        level_pop(psp);
+    else
+        ctx_destroy(psp);
+}
+
+/* The end from protected mode: INT 21h 4Ch, a kill, a crash. The program
+   goes on in V86 mode at the stub's INT 21h 4Ch (or its kill) as itself,
+   in the frame it switched in: deeper nested calls (it ended in a handler
+   run from V86 mode, or inside its own real-mode call) are dropped. */
 void dpmi_end(struct trapframe *tf, u8 code, int killed)
 {
-    kprintf("GLOS-DPMI exit code=%u%s\n", code, killed ? " killed" : "");
-    ctx_destroy(1);
+    struct trapframe *f;
+    int d;
+    kprintf("GLOS-DPMI exit code=%u%s level=%u\n", code, killed ? " killed" : "", dctx->nlv);
+    end_level(1, 1, &d, &f);
     dpmi_to_v86(tf, vm.loader_cs, killed ? vm.bi->kill_off : vm.bi->int21_off, vm.loader_cs, vm.bi->kill_sp,
                 vm.loader_cs, vm.loader_cs);
     SET16(tf->eax, 0x4C00 | code);
     vm.vif = 1;
     if (killed)
         vm_kill_now(tf);                        /* vectors and devices as the program found them */
-    if (rm_nesting()) {
+    if (rm_nesting() > d) {
         vm_return(tf);
-        rm_unwind(tf);
+        rm_unwind_to(d, f, tf);
     }
 }
 
-/* The program's INT 21h 4Ch (or 00h) reaching DOS from V86 mode. */
-void dpmi_dos_exit(struct trapframe *tf)
+/* A program's INT 21h 4Ch (or 00h) reaching DOS from V86 mode (n, next: the
+   INT about to run): if it is the running client, its level ends; from
+   inside its own nested calls, the INT runs in the frame it switched in. */
+void dpmi_dos_exit(struct trapframe *tf, u8 n, u32 next)
 {
+    struct trapframe *f;
+    int d;
     if (!dctx || vm_current_psp() != dctx->psp)
         return;
-    kprintf("GLOS-DPMI exit code=%u real-mode\n", (tf->eax >> 8) == 0x4C ? tf->eax & 0xFF : 0);
-    ctx_destroy(1);
+    kprintf("GLOS-DPMI exit code=%u real-mode level=%u\n", (tf->eax >> 8) == 0x4C ? tf->eax & 0xFF : 0, dctx->nlv);
+    end_level(1, 1, &d, &f);
+    if (rm_nesting() > d) {
+        vm_int(tf, n, next);
+        rm_unwind_to(d, f, tf);
+    }
 }
 
 /* ---- traps from ring 3 */
@@ -322,8 +378,16 @@ static void host_int(struct trapframe *tf, u8 n)
         int31(tf);
     } else if (n == 0x21 && (ax >> 8) == 0x4C) {
         dpmi_end(tf, (u8)ax, 0);
+    } else if (n == 0x41) {
+        /* the kernel debugger's notifications (DS_*; HX's loader sends them):
+           no debugger, nothing to do. Real mode's 41h is a BIOS disk table. */
     } else if (n == 0x2F && ax == 0x1686) {
         SET16(tf->eax, 0);                      /* in protected mode */
+    } else if (n == 0x2F && ax == 0x1680) {
+        thread_yield();                         /* a real yield: the kernel's threads run; AL stays 80h (§13) */
+    } else if (n == 0x2F && (ax == 0x1600 || ax == 0x160A)) {
+        if (ax == 0x1600)                       /* never Windows: GLQuake gives up under it */
+            SETLO(tf->eax, 0);
     } else {
         rm_reflect(tf, n);
     }
@@ -360,8 +424,8 @@ static void trampoline(struct trapframe *tf, u32 off)
         dpmi_exc_default(tf, off - TR_EXC);
         return;
     }
-    if (off >= TR_RET && off < TR_RET + NENTRY) {
-        dpmi_entry_return(tf, off - TR_RET);
+    if (off >= TR_RET && off < TR_RET10 + NENTRY) {
+        dpmi_entry_return(tf, (off - TR_RET) % NENTRY, off >= TR_RET10);
         return;
     }
     switch (off) {
@@ -385,7 +449,7 @@ static void trampoline(struct trapframe *tf, u32 off)
 static int at_return(const struct trapframe *tf)
 {
     return dctx && !(tf->eflags & FL_VM) && (tf->cs & 0xFFFF) == SEL_TRAMP && tf->eip >= TR_RET
-           && tf->eip < TR_RET + NENTRY;
+           && tf->eip < TR_RET10 + NENTRY;
 }
 
 static void general_protection(struct trapframe *tf)
@@ -448,6 +512,8 @@ void dpmi_trap(struct trapframe *tf)
     }
     if (v == 14)
         dctx->cr2 = read_cr2();                 /* before anything else can fault */
+    if (v == 1)
+        dpmi_db_hit();                          /* a watchpoint's (0B00h), or a single step */
     if (v == 13)
         general_protection(tf);
     else if (v >= 0x20)
@@ -459,14 +525,18 @@ void dpmi_trap(struct trapframe *tf)
 /* ---- back to ring 3 */
 
 /* A selector the IRET or the ring-0 pops can load: 0 (data registers only),
-   or present code (CS) or data (the rest) of DPL 3. */
-static int loadable(u32 sel, int code)
+   or present code (CS) or data (the rest) of DPL 3. CS and SS need RPL 3;
+   a data register may hold RPL 0, as the BIOS selector 0040h does (M4c). */
+enum { SEG_DATA, SEG_CODE, SEG_STACK };
+
+static int loadable(u32 sel, int kind)
 {
     u32 hi;
+    int code = kind == SEG_CODE;
     sel &= 0xFFFF;
-    if (!code && sel < 4)
+    if (kind == SEG_DATA && sel < 4)
         return 1;
-    if ((sel & 3) != 3)
+    if ((sel & 3) != 3 && kind != SEG_DATA)
         return 0;
     if ((sel & 4) && !ldt_valid((u16)sel))
         return 0;
@@ -475,6 +545,8 @@ static int loadable(u32 sel, int code)
         return 0;
     if (code)
         return (hi & 0x0800) != 0;
+    if (kind == SEG_STACK)
+        return !(hi & 0x0800) && (hi & 0x0200);    /* writable data only: the IRET would fault in ring 0 */
     return !(hi & 0x0800) || (hi & 0x0200);    /* data, or readable code */
 }
 
@@ -498,34 +570,54 @@ void dpmi_return(struct trapframe *tf)
         vm_return(tf);
         return;
     }
-    if (!loadable(tf->ds, 0)) tf->ds = 0;
-    if (!loadable(tf->es, 0)) tf->es = 0;
-    if (!loadable(tf->fs, 0)) tf->fs = 0;
-    if (!loadable(tf->gs, 0)) tf->gs = 0;
-    if (!loadable(tf->cs, 1) || !loadable(tf->ss, 0) || (tf->ss & 0xFFFF) < 4) {
+    if (!loadable(tf->ds, SEG_DATA)) tf->ds = 0;
+    if (!loadable(tf->es, SEG_DATA)) tf->es = 0;
+    if (!loadable(tf->fs, SEG_DATA)) tf->fs = 0;
+    if (!loadable(tf->gs, SEG_DATA)) tf->gs = 0;
+    if (!loadable(tf->cs, SEG_CODE) || !loadable(tf->ss, SEG_STACK)) {
         kprintf("GLOS-DPMI bad-frame cs=%04x ss=%04x\n", tf->cs & 0xFFFF, tf->ss & 0xFFFF);
         crash_report(tf, "bad-frame");
         vm_return(tf);
         return;
     }
     tf->eflags = (tf->eflags & ~(FL_HI | FL_VM)) | FL_IF;
+    fpu_msw_set(dctx->fpu_msw);
+    if (dctx->db_rf) {                          /* back at an execute watchpoint that fired: past it once */
+        if (sel_base((u16)tf->cs) + tf->eip == dctx->db_rf)
+            tf->eflags |= 0x10000;              /* RF */
+        dctx->db_rf = 0;
+    }
 }
 
 /* ---- the stub's ARPLs from V86 mode */
 
-/* DOS ended the program and went to its terminate address: the context
-   goes, if nothing ended it before, and DOS's way on is the old address.
-   An abort from inside a nested real-mode call leaves the levels below. */
+/* DOS ended a client's program and went to its terminate address (the
+   term ARPL): on to the program's own. If the host saw the end coming
+   (term_pend), that's all; otherwise it was an abort (a critical error, a
+   TSR exit) of the running level, which ends now, its vectors and devices
+   as a kill leaves them, from wherever in its nested calls it was. */
 static void terminated(struct trapframe *tf)
 {
-    if (dctx) {                                 /* an abort: vectors and devices as a kill leaves them */
-        kprintf("GLOS-DPMI exit terminated restored=%u\n", vm_restore_child());
-        ctx_destroy(0);
+    struct trapframe *f;
+    u32 vec;
+    int d;
+    if (nterm) {
+        vec = term_pend[--nterm];
+        tf->cs = vec >> 16;
+        tf->eip = vec & 0xFFFF;
+        return;
     }
-    tf->cs = term_vec >> 16;
-    tf->eip = term_vec & 0xFFFF;
-    if (rm_nesting())                           /* it ended inside a nested real-mode call */
-        rm_unwind(tf);
+    if (!dctx) {
+        kprintf("GLOS-DPMI term-unknown\n");
+        return;
+    }
+    vec = dctx->term_vec;
+    kprintf("GLOS-DPMI exit terminated restored=%u level=%u\n", vm_restore_child(), dctx->nlv);
+    end_level(0, 0, &d, &f);
+    tf->cs = vec >> 16;
+    tf->eip = vec & 0xFFFF;
+    if (rm_nesting() > d)
+        rm_unwind_to(d, f, tf);
 }
 
 int dpmi_v86_bp(struct trapframe *tf)
@@ -534,7 +626,7 @@ int dpmi_v86_bp(struct trapframe *tf)
     const struct bootinfo *bi = vm.bi;
     if (tf->cs != vm.loader_cs)
         return 0;
-    if (ip == bi->bp_term_off && term_vec) {
+    if (ip == bi->bp_term_off) {
         terminated(tf);
         return 1;
     }

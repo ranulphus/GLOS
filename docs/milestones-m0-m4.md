@@ -362,7 +362,7 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
 |---|---|---|---|
 | **M4a** | 32-bit basics: `kernel/dpmi/{host,int31,ldt,mem,rmcall}.c`; 1687h and the mode switch; contexts (supervisor.md §12); 0000h–000Dh, 0100h–0102h, 0200h/0201h, 0204h/0205h (vectors), 0300h–0302h, 0305h/0306h, 0400h, 0500h–0503h, 0600h–0604h, 0800h/0801h, 0900h–0902h, 0A00h; PSP and environment selectors; INT 21h 4Ch teardown; espfix | DPMICONF-32 (`tests/dos/dpmi/`, DJGPP; first validated against CWSDPMI and HDPMI32i — a test that fails on both is wrong); MGA-Glide DJGPP HELLO and DOS4GW HELLO | `make loopa-m4a` |
 | **M4b** | Exceptions (0202h/0203h, 0210h–0213h), the locked stack, frame edits; protected-mode-first IRQ delivery and the IRET trampoline; 0303h/0304h with the pass-up loop guard; INT 31h reentrant from IRQ handlers; 0507h; 0E00h/0E01h, IRQ13/INT 75h; crash reports (`kernel/dbg/crash.c`, `tools/symcrash.py`) | djtst205 (ctrlc, fault, fpu, hang, infoblk, raise, signals, timer, null, brk, multispn, nearptr, hwint); DPMICONF exception, IRQ and RMCB tests; MGA-Glide STACKPG, MOUSETST, JOYTEST, SBBEEP | `make loopa-m4b` |
-| **M4c** | DOS/4GW and retail: 000Bh/000Ch Big-bit changes; INT 2Fh 1600h/160Ah/1680h–1682h/1686h/4310h; VCPI and EMS absent; 0D00h failing cleanly; nested contexts; 0401h, 0508h/0509h, 0B00h–0B03h | ecm dpmitest; the HDPMI regression suite (against HDPMI32i); MGA-Glide conform 27×4 and replays; GTA; Screamer Rally; DOSBench (DBMENU → BENCHG/BENCHGL) | `make loopa-m4c` |
+| **M4c** | DOS/4GW and retail: 000Bh/000Ch Big-bit changes; INT 2Fh 1600h/160Ah/1680h–1682h/1686h/4310h; VCPI and EMS absent; 0D00h failing cleanly; nested contexts; 0401h, 0508h/0509h, 0B00h–0B03h | ecm dpmitest; the HDPMI regression suite (against HDPMI32i); MGA-Glide conform 27×4 and replays; GTA; Screamer Rally; DOSBench (BENCHGL, BENCHG, DBMENU); nesting: DPMICONF `nest`, djtst205 MULTISPN 3 | `make loopa-m4c` |
 | **M4d** | 16-bit clients: 16-bit frames, stacks, RMCBs, raw switch; espfix on every return | DPMICONF-16 (`tests/dos/dpmi16/`, OW 16-bit, reporting over COM1) against HDPMI16; TPX.EXE from `$(BORLAND_DIR)` on RTM/DPMI16BI, driven by `--keys` (open a file, compile, exit) | `make loopa-m4d` |
 | **M4e** | Exclusive sessions (`kernel/vm/session.c`): save and restore, kill; per-program profiles (`direct=1` for IOPL 3); `glos run`; `tools/gate/` | The full gate | `make gate` |
 
@@ -422,6 +422,51 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
     follows CWSDPMI.
 - **Deferred:** per-client FPU state and NE=1 (the FPU's second user); multispn's nested runs (M4c);
   0211h/0213h; the 1.0 frame for 16-bit clients (M4d).
+
+**M4c status (2026-10-04): done** (supervisor.md §9.2, §12.1c, §13, §20).
+- **The host:**
+  - client levels (`kernel/dpmi/level.c`): a client's child that switches to protected mode shares its
+    context, and its end frees what its level made and puts back the parent's handlers;
+  - each level's terminate address;
+  - INT 2Fh as a link in the V86 IVT chain, so lDebugX can hook 1687h;
+  - INT 41h ignored; 1680h a real yield;
+  - DPMI 1.0's 0401h, 0504h/0505h, 0508h/0509h, 050Bh and 0B00h–0B03h;
+  - 0E01h's MP/EM per client;
+  - the 1.0 exception frame's own return path and its PTE field;
+  - for debugging, an `options` key in GLOS.CFG's `[shell]` section (a SHELL= line has no room for
+    `/DPMITRACE`), and the exception trace now gives the faulting address.
+- **Found by the new suites:**
+  - 0301h ran the procedure with IF from the structure's FLAGS (zero), and nested V86 calls never set VIF.
+  - The emulated FLAGS image let ID toggle on a 486DX2, because 86Box's IRETD to V86 mode doesn't mask it, so
+    lDebugX ran CPUID into #UD. That image now shows IOPL 3, as VME's does.
+  - Answering 1680h with AL=0 made DJGPP's `uclock()` wait for a tick with interrupts off (JOYTEST hung). AL
+    now stays 80h, as on plain DOS.
+  - A pending single-step trap reached the kernel through an ARPL #UD (an 86Box deviation; the stray #DB is
+    dropped).
+  - GTA's DOS/4GW code loads selector 0040h, which was GLOS's ring-0 16-bit data selector, so the game died
+    with a #GP (exit code 209). 0040h is now the BIOS data selector (supervisor.md §3.1).
+  - GTA's menus come up a few seconds later under GLOS than the 35 s the job's last Enter allowed; the job
+    now presses Enter until 65 s.
+- **T: `make loopa-m4c`:**
+  - **loopa-m4b**, with DPMICONF's `nest` (a child that keeps a vector hooked, one that faults) and 1.0 checks,
+    and djtst205's MULTISPN running itself 3 times through `system()` (each child a level), on all six
+    combinations.
+  - **HDPMI's regression suite** (`loopa-hdpmireg`), 69 tests under HDPMI32i and GLOS. On bf6, 30 are the same,
+    9 differ only in selectors and 30 differ for listed reasons (`HR_KNOWN`: HDPMI's crash dump and INT 21h
+    translation API, IOPL 0's PUSHF, 0305h's empty state, HDPMI refusing nested clients). The 486DX2 gives
+    29/10/30. Any unlisted difference fails.
+  - **lDebugX** stepping ecm's dpmimini into protected mode (`loopa-ecm`): the same output as under HDPMI32i on
+    bf6, 486DX2 and 486DX4.
+  - **Under GLOS as the shell** (`loopa-m4c-games`, `tools/m4c-games.sh`):
+    - MGA-Glide's conform, 27/27 on G100, G200, G400 and G450;
+    - the GTA and Screamer Rally replays on G200, G400 and G450;
+    - GTA and Screamer Rally themselves, against runs without GLOS;
+    - DOSBench's Loop A job (BENCHGL on DJGPP, BENCHG on DOS/4GW, DBMENU).
+- **Deferred:**
+  - an 86Box patch and V86TEST case for the stale single-step trap (MGA-Glide, with the user's approval);
+  - watchpoints checked on silicon (86Box fires no DR breakpoints);
+  - mixed-bitness levels (a 16-bit child of a 32-bit client) with M4d;
+  - XMS 4309h.
 
 ### The gate's baseline matrix (M4e)
 
