@@ -256,7 +256,8 @@ static int find_program(char **args)
 {
     static const char *const ext[] = { ".COM", ".EXE", ".BAT" };
     const char *base = args[0], *slash = strrchr(base, '\\'), *comspec;
-    char name[80], found[80], tail[130];
+    char name[80], found[_MAX_PATH], tail[130];     /* _searchenv() fills _MAX_PATH bytes: an 80-byte
+                                                       found[] let it smash the stack (M4c's GTA hang) */
     int i, has_ext = strchr(slash ? slash : base, '.') != NULL;
     unsigned n;
 
@@ -295,6 +296,8 @@ static int find_program(char **args)
         strcat(tail, args[i]);
     }
     n = strlen(tail);
+    if (strlen(found) >= sizeof run_path)               /* the stub's EXEC path holds as much */
+        return -1;
     strcpy(run_path, found);
     _fstrcpy(stub_data.path, found);
     stub_data.tail[0] = (unsigned char)n;
@@ -621,7 +624,7 @@ static void read_cfg(const char *argv0)
    \\FREEDOS\\BIN, \\DOS), next to GLOS.EXE or along PATH. */
 static void find_comspec(const char *argv0)
 {
-    static char p[80];
+    static char p[_MAX_PATH];                           /* _searchenv() fills _MAX_PATH bytes */
     union REGS r;
     const char *c;
     int i;
@@ -639,11 +642,11 @@ static void find_comspec(const char *argv0)
             strcpy(strrchr(p, '\\') ? strrchr(p, '\\') + 1 : p, "COMMAND.COM");
         }
         if (access(p, 0) == 0)
-            strcpy(bi.comspec, p);
+            opt_str(bi.comspec, sizeof bi.comspec, p);
     }
     if (!bi.comspec[0]) {
         _searchenv("COMMAND.COM", "PATH", p);
-        strcpy(bi.comspec, p[0] ? p : "COMMAND.COM");
+        opt_str(bi.comspec, sizeof bi.comspec, p[0] ? p : "COMMAND.COM");
     }
 }
 

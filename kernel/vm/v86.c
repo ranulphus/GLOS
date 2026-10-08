@@ -283,7 +283,11 @@ static int vm_try_kill(struct trapframe *tf, int force)
     if (psp)
         parent = vm_rd16(psp * 16u + 0x16);
     if (!psp || psp == vm.loader_psp || !snap_restore(parent)) {
-        kprintf("GLOS-KILL none psp=%04x\n", psp);
+        u32 st = vm_lin(tf->ss, tf->esp & 0xFFFF);
+        kprintf("GLOS-KILL none psp=%04x at=%04x:%04x ss:sp=%04x:%04x stack=%04x %04x %04x %04x %04x %04x %04x %04x\n",
+                psp, at_cs, at_ip, tf->ss & 0xFFFF, tf->esp & 0xFFFF, vm_rd16(st), vm_rd16(st + 2), vm_rd16(st + 4),
+                vm_rd16(st + 6), vm_rd16(st + 8), vm_rd16(st + 10), vm_rd16(st + 12), vm_rd16(st + 14));
+                                                /* (where GLOS.EXE itself was, if it hung) */
         return 0;
     }
 
