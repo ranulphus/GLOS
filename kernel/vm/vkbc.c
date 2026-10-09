@@ -25,6 +25,7 @@ static u8 out, out_aux, obf;                    /* the virtual output buffer */
 static u8 cmd;                                  /* the program's command byte */
 static u8 pending;                              /* a command waiting for its byte at 60h */
 static u8 a2;                                   /* the last write was to 64h */
+static u8 to_aux;                               /* D4h passed: the next byte at 60h goes to the AUX device */
 static u8 mods, e0, swallow;                    /* hotkey tracking */
 
 enum { M_CTRL = 1, M_ALT = 2, M_LSHIFT = 4, M_RSHIFT = 8 };
@@ -84,6 +85,7 @@ static int hotkey(u8 b)
     case 0x01:
         if (!brk && (mods & M_CTRL) && (mods & M_ALT) && (mods & (M_LSHIFT | M_RSHIFT))) {
             vm.kill_req = 1;
+            vm.kill_reason = "hotkey";
             vm.kill_since = timer_ticks();
             vm_kick();
             swallow = 0x81;
@@ -166,6 +168,7 @@ static void chip_answer(u8 c)
 
 static void command(u8 c)
 {
+    to_aux = 0;
     switch (c) {
     case 0x20:
         respond(cmd, 0);
@@ -207,6 +210,7 @@ static void command(u8 c)
             return;
         }
     }
+    to_aux = c == 0xD4;
     chip_cmd(c);
 }
 
@@ -247,6 +251,11 @@ void vkbc_out(u16 port, u8 v)
         respond(v, p == 0xD3);
         return;
     default:
+        if (!to_aux) {                          /* to the keyboard: the 8042 enables its interface (the BIOS */
+            cmd &= (u8)~0x10;                   /* sends LED commands between ADh and AEh and waits for */
+            refill();                           /* the ACK; 86Box's kbc_at does the same) */
+        }
+        to_aux = 0;
         chip_data(v);                           /* to the keyboard, or a passed command's byte */
     }
 }

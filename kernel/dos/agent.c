@@ -394,6 +394,7 @@ void agent_vm_tick(u32 now)
     if (running && running->kill && !vm.kill_req && now - last_kill >= 512) {
         last_kill = now;
         vm.kill_req = 1;
+        vm.kill_reason = "agent";
         vm.kill_since = now;
         vm_kick();
     }

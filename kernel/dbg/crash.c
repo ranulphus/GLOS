@@ -206,5 +206,6 @@ void crash_report(struct trapframe *tf, const char *why)
     line("handlers=%u lstack=%u nesting=%u", dctx->npe, dctx->lstack_use, rm_nesting());
     write_file(tf, name, sizeof name);
     kprintf("GLOS-CRASH file=%s\n", name);
+    vm.kill_reason = "crash";
     dpmi_end(tf, 0xFF, 1);
 }

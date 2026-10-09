@@ -96,12 +96,74 @@ static u16 owner(u32 vec)
     return 0xFFFF;
 }
 
+/* The BIOS video mode back to mode (INT 10h, and so the palette) if the
+   program left another: 1 if it did. */
+static int remode_to(u8 mode)
+{
+    struct rmregs r;
+    if ((vm_rd8(0x449) & 0x7F) == (mode & 0x7F))
+        return 0;
+    memset(&r, 0, sizeof r);
+    r.eax = mode & 0x7F;
+    bios(&r, 0x10);
+    return 1;
+}
+
+/* Sound Blaster DMA stopped: channels 1 and 3, 5 to 7 masked, and the DSP
+   reset at BLASTER's A. */
+static void sb_stop(void)
+{
+    outb(0x0A, 0x05);
+    outb(0x0A, 0x07);
+    outb(0xD4, 0x05);
+    outb(0xD4, 0x06);
+    outb(0xD4, 0x07);
+    if (vm.bi->sb_port) {
+        u32 i;
+        outb((u16)(vm.bi->sb_port + 6), 1);
+        for (i = 0; i < 100; i++)
+            inb(0x80);
+        outb((u16)(vm.bi->sb_port + 6), 0);
+    }
+}
+
+/* The BIOS clock from the RTC (INT 1Ah 02h, then 01h): the tick count set,
+   or 0. A program that sped the PIT up has run the DOS clock fast. */
+static u32 clock_from_rtc(void)
+{
+    struct rmregs r;
+    u32 s, ticks;
+    memset(&r, 0, sizeof r);
+    r.eax = 0x0200;
+    if (bios(&r, 0x1A) != 0 || (r.flags & FL_CF))
+        return 0;
+    s = bcd((u8)(r.ecx >> 8)) * 3600 + bcd((u8)r.ecx) * 60 + bcd((u8)(r.edx >> 8));
+    ticks = (u32)(((unsigned long long)(s * 2 + 1) * 1193180ull) >> 17);   /* (the middle of that second) */
+    memset(&r, 0, sizeof r);
+    r.eax = 0x0100;
+    r.ecx = ticks >> 16;
+    r.edx = ticks & 0xFFFF;
+    bios(&r, 0x1A);
+    return ticks;
+}
+
+/* A kill (or an abort) has put back what the killed program found at its
+   EXEC (v86.c snap_restore): also the video mode and lock bits it found, Sound
+   Blaster DMA and the BIOS clock, as a session's end does (E5). */
+void session_kill(u8 mode, u8 leds)
+{
+    int remode = remode_to(mode);
+    vm_wr8(0x417, (u8)((vm_rd8(0x417) & ~0x70) | leds));
+    sb_stop();
+    kprintf("GLOS-SESSION kill-restore mode=%02x%s ticks=%u\n", mode, remode ? " remode=1" : "", clock_from_rtc());
+}
+
 static void end(const char *why)
 {
     struct rmregs r;
-    u32 v, fixed = 0, ticks = 0;
+    u32 v, fixed = 0, ticks;
     u8 mode = vm_rd8(0x449);
-    int remode = (mode & 0x7F) != (ses.mode & 0x7F);
+    int remode;
 
     ses.active = 0;
     vm_direct(0);                               /* (before the BIOS calls: they run at IOPL 0) */
@@ -116,11 +178,7 @@ static void end(const char *why)
         bios(&r, 0x21);
         ses.env_seg = 0;
     }
-    if (remode) {                               /* the mode it began in, and so the palette */
-        memset(&r, 0, sizeof r);
-        r.eax = ses.mode & 0x7F;
-        bios(&r, 0x10);
-    }
+    remode = remode_to(ses.mode);               /* the mode it began in, and so the palette */
     outb(0x43, 0x34);                           /* PIT channel 0: mode 2, count FFFFh (§8.2) */
     outb(0x40, 0xFF);
     outb(0x40, 0xFF);
@@ -132,18 +190,7 @@ static void end(const char *why)
     timer_write_b(vm.rtc_b);
     vkbc_restore(ses.kbc_cmd);
     vm_wr8(0x417, (u8)((vm_rd8(0x417) & ~0x70) | ses.leds));
-    outb(0x0A, 0x05);                           /* Sound Blaster DMA: channels 1 and 3, 5 to 7 masked */
-    outb(0x0A, 0x07);
-    outb(0xD4, 0x05);
-    outb(0xD4, 0x06);
-    outb(0xD4, 0x07);
-    if (vm.bi->sb_port) {                       /* BLASTER's A: the DSP reset */
-        u32 i;
-        outb((u16)(vm.bi->sb_port + 6), 1);
-        for (i = 0; i < 100; i++)
-            inb(0x80);
-        outb((u16)(vm.bi->sb_port + 6), 0);
-    }
+    sb_stop();
     for (v = 0; v < 256; v++) {                 /* hooks left in memory DOS has taken back (which the */
         u32 cur = vm_rd32(v * 4u);              /* shell may have loaded something into since) */
         if (cur != ses.ivt[v] && (owner(cur) == 0 || cur == ses.dangle[v])) {
@@ -154,17 +201,7 @@ static void end(const char *why)
             fixed++;
         }
     }
-    memset(&r, 0, sizeof r);                    /* the BIOS clock from the RTC */
-    r.eax = 0x0200;
-    if (bios(&r, 0x1A) == 0 && !(r.flags & FL_CF)) {
-        u32 s = bcd((u8)(r.ecx >> 8)) * 3600 + bcd((u8)r.ecx) * 60 + bcd((u8)(r.edx >> 8));
-        ticks = (u32)(((unsigned long long)s * 1193180ull) >> 16);
-        memset(&r, 0, sizeof r);
-        r.eax = 0x0100;
-        r.ecx = ticks >> 16;
-        r.edx = ticks & 0xFFFF;
-        bios(&r, 0x1A);
-    }
+    ticks = clock_from_rtc();
     kprintf("GLOS-SESSION end n=%u prog=%s why=%s mode=%02x%s vectors=%u ticks=%u t=%u\n", ses.n, ses.prog, why, mode,
             remode ? " remode=1" : "", fixed, ticks, timer_ticks() - ses.t0);
 }

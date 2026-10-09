@@ -3,7 +3,9 @@
  * BIOS's default handler takes it if it was masked), PIT channel 0
  * at 16 times the BIOS rate for two seconds (the DOS clock runs ahead), Caps
  * Lock in the BIOS flags, and INT 60h hooked into its own code, which DOS
- * frees when it exits. On COM1: HX-SESS done. Open Watcom, real mode. */
+ * frees when it exits. On COM1: HX-SESS done. With the argument "hang" it
+ * then says HX-SESS armed and spins until it is killed (M4e E5: the kill
+ * puts the same things back). Open Watcom, real mode. */
 #include <conio.h>
 #include <dos.h>
 #include <i86.h>
@@ -19,7 +21,7 @@ static void ser(const char *s)
 
 static void __interrupt __far int60(void) { }
 
-int main(void)
+int main(int argc, char **argv)
 {
     union REGS r;
     volatile unsigned long __far *tick = MK_FP(0x40, 0x6C);
@@ -38,5 +40,10 @@ int main(void)
     *(unsigned char __far *)MK_FP(0x40, 0x17) |= 0x40;     /* Caps Lock */
     _dos_setvect(0x60, int60);          /* into memory DOS takes back at the exit */
     ser("HX-SESS done\r\n");
+    if (argc > 1 && (argv[1][0] | 0x20) == 'h') {
+        ser("HX-SESS armed\r\n");
+        for (;;)
+            ;
+    }
     return 0;
 }

@@ -419,8 +419,14 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   service), A20, RTC A/B, the 8042 command byte and PIT channel 0 at mode 2, count FFFFh (§8.2). A keyboard
   byte the program left unread is raised again. The VM then runs `GLOS.EXE`'s kill stub (INT 21h 4CFFh) as
   that program, so DOS ends it normally and its parent sees exit code FFh.
-- `GLOS-KILL psp=… at=cs:ip ticks=…`, or `GLOS-KILL none` when only `GLOS.EXE` (or nothing that GLOS saw
-  start) is running.
+- **What a session's end puts back, too** (M4e E5): each snapshot also holds the BIOS video mode and the lock
+  bits, and after restoring it the kill sets that mode again (INT 10h), stops Sound Blaster DMA and sets the
+  BIOS clock from the RTC (`session_kill()`, kernel/vm/session.c; `GLOS-SESSION kill-restore mode= [remode=1]
+  ticks=`). A program killed inside a batch file leaves nothing behind for the next line, before its session
+  has ended. An abort (§17.5) gets the same.
+- `GLOS-KILL psp=… at=cs:ip ticks=… reason=…`, or `GLOS-KILL none … reason=…` when only `GLOS.EXE` (or nothing
+  that GLOS saw start) is running. The reason (M4e) is `hotkey`, `agent` (`glos kill`, or a job's client gone),
+  `priv` (a system instruction in V86 code) or `crash` (the DPMI host ending a client, §19).
 
 ### 9.7 Direct mode
 
@@ -489,7 +495,10 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 - **The 8042:** the kernel reads every byte the chip receives (IRQ 1, IRQ 12 and each tick) into one queue
   and hands them to the program one at a time; the next byte comes a tick after the last was read. The
   command byte's IRQ 1 enable and keyboard clock stay on in the chip whatever the program writes. A20 (D1h,
-  DDh/DFh), the reset pulse and the self-tests are answered virtually. Other commands go to the chip.
+  DDh/DFh), the reset pulse and the self-tests are answered virtually. Other commands go to the chip. A byte
+  written to the keyboard (port 60h, not D4h's) clears the program's keyboard-disable bit, as the chip does:
+  the BIOS's INT 09h sends the LED update between ADh and AEh and polls, interrupts off, for the ACK, which
+  GLOS held back until M4e E5 (a program that changed the lock bits in 0417h stalled the next keystroke).
 - **The RTC:** registers A, B and C are virtual. The periodic flag follows the program's rate (at most once
   per kernel tick); AF and UF come from the chip. IRQ 8 is raised for the VM when IRQF rises. Writes to
   register B reach the chip except PIE, AIE and UIE.
@@ -554,13 +563,13 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
     had when a program in the session ended pointing into that program's own memory (INT 20h, INT 21h 4Ch/00h
     from V86 code). The second rule matters with GLOS as the shell: COMMAND.COM may have put something in the
     freed memory before it asks for the exit code. A TSR's hooks stay: its memory is still allocated;
-  - the BIOS tick count from the RTC (INT 1Ah 02h, then 01h). A program that sped the PIT up has run the DOS
-    clock fast; it ends within a second of the RTC.
+  - the BIOS tick count from the RTC (INT 1Ah 02h, then 01h), set to the middle of the RTC's second. A program
+    that sped the PIT up has run the DOS clock fast; it ends within a second of the RTC.
 
   The BIOS calls run nested (§15) on the stub's spare stack (the kill stub's, `kill_sp`), with no DPMI client
   needed.
-- **Not yet:** pausing GLOS apps (M6), the display state beyond the mode, kills ending a session (E5) and
-  switching away (M6).
+- **Kills** (E5, §9.6) put back the same things for the killed program, from its EXEC's snapshot.
+- **Not yet:** pausing GLOS apps (M6), the display state beyond the mode, and switching away (M6).
 - **Tests.** `jobs.py sess` (`make loopa-sess`). SESSTEST leaves each of these changed natively; under
   `GLOS /RUN`, as the shell and as an agent job, none is (VECCHK, VMODE, TIMECHK).
 
@@ -1139,7 +1148,7 @@ place where nothing else is in DOS by construction.
 | CRYPTO | `/SELFTEST`: the known-answer tests and two timings |
 | SSH | `listen`, `off`, `connect`, `client version=`, `kex done strict=`, `auth ok`, `exec=`, `close why=`, `refuse` |
 | AGENT | A job: `run seq= cmd= [direct=1] [profile=]`, `done seq= code= via=` (the program, or `comspec`) |
-| KILL | A kill (§9.6) |
+| KILL | A kill (§9.6): `psp= at= ticks= reason=hotkey\|agent\|priv\|crash` |
 | SESSION | A session (§11.1): `begin n= prog= parent= mode= [profile=] [direct=1]`, `direct-end imr= rtc=` (§9.7), `end n= prog= why=exit\|next-exec\|stub mode= [remode=1] vectors= ticks= t=` (`mode=` the mode it ended in, `vectors=` those put back, `ticks=` the BIOS tick count set from the RTC, `t=` its length in kernel ticks) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
 | DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... if= -> cf= ax=` (`if=` the virtual IF at the call), `raw to=rm|pm`, `dosx ax= ... -> cf=`, `vendor name=`, `v86-int21` (a client's real-mode DOS calls), `exception-code` (the code bytes and registers at a fault),, `deliver irq=|passup=|exception=|rmcb= to= from= at= err= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |

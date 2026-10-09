@@ -83,7 +83,11 @@ sees the shell's environment and gets more than 8 MB. Direct mode (E3):
 under direct profiles djtst205's ENABLE passes, DIRTEST runs at IOPL 3
 with an IRQ 0 handler that EOIs the PIC itself and GLOS takes back its
 keyboard line and RTC rate from it, and SESSTEST leaves nothing behind;
-without a profile ENABLE still stops at its first check.
+without a profile ENABLE still stops at its first check. Kills (E5): a
+SESSTEST that hangs once it has made its changes, killed with the hotkey
+inside a batch file's session, leaves nothing behind when the batch goes
+on (the kill alone puts it back), and glos kill of one as an agent job is
+reason=agent.
 
 hostile: HOSRUN.BAT runs every tests/dos/hostile.c case under one "GLOS /RUN
 COMMAND /C"; the harness types Ctrl-Alt-Shift-Esc after each one's "armed"
@@ -119,7 +123,7 @@ def runpy_cmd():
 
 def run(name, args, background=False):
     if os.environ.get("GLOS_SET"):              # GLOS.EXE's flags for the whole run (GLOS_SET=/DIRECT: forced direct mode;
-        args = ["--cmd", "SET GLOS=" + os.environ["GLOS_SET"]] + args      # not as the shell, started before RUN.BAT)
+        args = ["--pre", "SET GLOS=" + os.environ["GLOS_SET"]] + args      # not as the shell, started before RUN.BAT)
     out = os.path.join(ROOT, "out", name)
     os.makedirs(out, exist_ok=True)
     for stale in ("serial.log", "status", "result.json"):   # a background run's caller polls these
@@ -299,6 +303,7 @@ def hostile(profile, boot):
         "a20-wrap": "HX-HOSTILE a20 wrap=1" in serial,
         "vif-stuck": serial.count("GLOS-WARN vif-stuck") >= 3,
         "priv": "GLOS-WARN v86-priv" in serial and "HX-HOSTILE survived" not in serial,
+        "reasons": serial.count(" reason=hotkey") == len(HOSTILE) - 1 and " reason=priv" in serial,     # (M4e)
         "tick-alive": bool(leave and kills and int(leave.group(1)) > kills[-1] + 800),
         "exit0": "GLOS-EXIT code=0" in serial,
         "no-panic": "GLOS-PANIC" not in serial,
@@ -1348,6 +1353,31 @@ def sess_direct(profile, boot):
                              "" if not bad else " failed: " + " ".join(bad) + " direct=%s control=%s" % (d1, d0)), not bad
 
 
+def sess_kill(profile, boot):
+    """Kills (E5): SESSTEST hang under GLOS /RUN COMMAND /C, killed with the hotkey once armed; the batch goes on
+    in the same session, and VECCHK, VMODE and TIMECHK must find everything put back by the kill alone."""
+    tag = "kill-%s-%s" % (profile, boot)
+    steps = list(SESS_STEPS)
+    steps[2] = "C:\\TEST\\SESSTEST.EXE hang"
+    bat = batfile("sess-%s/KILL.BAT" % tag, ["@ECHO OFF"] + steps + ["SERSAY HX-KILLBAT end"])
+    args = ["--machine", profile, "--boot-cfg", boot] + SESS_FILES + GLOS_FILES + ["--file", bat + "=/TEST/KILL.BAT"]
+    for c in ["SERSAY HX-START sess-kill", "C:\\TEST\\GLOS.EXE /RUN %COMSPEC% /C C:\\TEST\\KILL.BAT",
+              "SERSAY HX-DONE 0"]:
+        args += ["--cmd", c]
+    st, serial = run("sess-" + tag, args + ["--keys", "@HX-SESS armed," + KILL_KEYS])
+    a = serial.find("HX-SESS armed")
+    left = sess_left(serial[:serial.find("HX-KILLBAT end")] if "HX-KILLBAT end" in serial else "")
+    checks = {"status": st == "PASS", "ran": a >= 0 and left is not None,
+              "kill": bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=hotkey", serial[a:])),
+              "restore": "GLOS-SESSION kill-restore mode=03 remode=1" in serial,
+              "batch-on": "HX-KILLBAT end" in serial and "GLOS-EXIT code=0" in serial,
+              "clean": "GLOS-PANIC" not in serial and "GLOS-WARN" not in serial}
+    checks.update({"kept-" + k: v for k, v in (left or {}).items()})
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("sess-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def sess_agent(profile, card):
     """SESSTEST and the checks as agent jobs, through ssh: each job is a session (the agent EXECs a program
     directly, trying each place along PATH; only the one found begins a session). Then glos run (E4):
@@ -1376,6 +1406,13 @@ def sess_agent(profile, card):
         rc, _, err = agent.ssh("glos run --profile NOSUCH.EXE C:\\TEST\\ENABLE.EXE")
         checks["run-noprofile"] = rc == 2 and "NOSUCH.EXE" in err
         checks["run-usage"] = agent.ssh("glos run --direct")[0] == 2
+        import time
+        hang = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\SESSTEST.EXE hang"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 120 and "HX-SESS armed" not in agent.log():
+            time.sleep(0.5)
+        checks["kill"] = agent.ssh("glos kill")[0] == 0 and hang.wait(timeout=120) == 255
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
@@ -1384,7 +1421,8 @@ def sess_agent(profile, card):
     checks["ran"] = "HX-SESS done" in text and left is not None
     checks.update({"kept-" + k: v for k, v in (left or {}).items()})
     checks.update(sess_checks(text))
-    checks["one-each"] = len(re.findall(r"GLOS-SESSION begin ", text)) == len(SESS_STEPS) + 3   # no failed EXECs
+    checks["one-each"] = len(re.findall(r"GLOS-SESSION begin ", text)) == len(SESS_STEPS) + 4   # no failed EXECs
+    checks["kill-reason"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=agent", text))
     checks["run-sessions"] = bool(re.search(r"GLOS-SESSION begin n=\d+ prog=ENABLE.EXE \S+ mode=03 direct=1", text)) \
         and bool(re.search(r"GLOS-SESSION begin n=\d+ prog=NOPROF.EXE \S+ mode=03 profile=PROFCHK.EXE\n", text)) \
         and "HX-PROF var=yes path=C:\\PROF" in text and text.count("GLOS-SESSION direct-end") == 1
@@ -1425,6 +1463,7 @@ def main():
         res = matrix(sess, [(p, b, h) for p, b in combos for h in ("base", "run", "shell")], a.jobs)
         res += matrix(sess_prof, combos, a.jobs)
         res += matrix(sess_direct, combos, a.jobs)
+        res += matrix(sess_kill, combos, a.jobs)
         res += matrix(sess_agent, [c for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "dpmi":

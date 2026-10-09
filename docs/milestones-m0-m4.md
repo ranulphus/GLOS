@@ -540,7 +540,7 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   binary sha, profile, boot, card and 86Box key, the comparisons below, forced-direct runs, a kill job and a
   screenshot job per suite, and VECCHK/VMODE after each. T: `make gate`.
 
-**M4e status (2026-10-09): E1-E4 done.**
+**M4e status (2026-10-09): E1-E5 done.**
 - **E1 sessions** (02020d5; supervisor.md §11.1). Each top-level program is a session: the stub's EXECs (agent
   jobs, `/RUN`) and, as the shell, the console COMMAND.COM's (FreeCOM is its own parent). An EXEC of a file that
   isn't there starts none (the agent tries each place along PATH). The end puts back the video mode, PIT channel
@@ -561,11 +561,21 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   - T: djtst205's ENABLE passes under a direct profile (and still stops without one). DIRTEST sees IOPL 3, keeps
     an IRQ 0 handler that EOIs the PIC itself, and loses the keyboard line and the RTC rate back to GLOS.
     SESSTEST at IOPL 3 leaves nothing behind. All three profiles.
+  - Forced (`GLOS_SET=/DIRECT`): DPMICONF-32 and -16, djtst205 (ENABLE now as under CWSDPMI) and MGA-Glide's
+    HELLOs pass on every profile and boot they run on.
 - **E4 `glos run`** (supervisor.md §17.3): `--direct` and `--profile NAME` for the job's session; `--exclusive`
   accepted; `--app`, an unknown profile and a missing command refused with status 2. Found on the way: a DPMI
   client's console output never reached the ssh client, because its DOS calls go through nested real-mode calls
   the capture didn't see. Now `rm_call()` passes them on. T: the agent cases of `jobs.py sess` run ENABLE through
   `glos run --direct` (its output exact) and without it, and give NOPROF.EXE PROFCHK's profile by `--profile`.
+- **E5 kills** (supervisor.md §9.6): `GLOS-KILL ... reason=hotkey|agent|priv|crash`; after its snapshot a kill
+  also sets the video mode back, stops Sound Blaster DMA, puts back the lock bits and sets the BIOS clock from
+  the RTC. Found on the way, in the virtual 8042: a byte written to the keyboard didn't clear the program's
+  keyboard-disable bit, as the chip does. So after a program changed the lock bits, the BIOS's LED update
+  polled for an ACK that GLOS held back (a stall of seconds with interrupts off, `vif-stuck` in BIOS code).
+  T: `sess-kill-*`: SESSTEST killed with the hotkey inside a batch file's session leaves VECCHK, VMODE and the
+  clock clean for the next line. The agent cases end a job with `glos kill` (`reason=agent`), and the hostile
+  suite checks every kill's reason (`hotkey`, one `priv`).
 
 ### The gate's baseline matrix (M4e)
 

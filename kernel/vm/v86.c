@@ -290,6 +290,8 @@ static void vm_exec_snap(void)
     s->rtc_a = vm.rtc_a;
     s->rtc_b = vm.rtc_b;
     s->kbc_cmd = vkbc_cmd();
+    s->mode = vm_rd8(0x449);
+    s->leds = vm_rd8(0x417) & 0x70;
 }
 
 /* The kill (Ctrl-Alt-Shift-Esc): the current program's interrupt vectors
@@ -329,6 +331,7 @@ static int snap_restore(u16 parent)
     outb(0x43, 0x34);                           /* PIT channel 0: mode 2, count FFFFh (§8.2) */
     outb(0x40, 0xFF);
     outb(0x40, 0xFF);
+    session_kill(s->mode, s->leds);             /* and what a session's end puts back (M4e) */
     for (; i < SNAP_LEVELS; i++)
         vm.snap[i].parent_psp = 0;
     reset_reqs = 0;
@@ -351,9 +354,11 @@ static int vm_try_kill(struct trapframe *tf, int force)
         parent = vm_rd16(psp * 16u + 0x16);
     if (!psp || psp == vm.loader_psp || !snap_restore(parent)) {
         u32 st = vm_lin(tf->ss, tf->esp & 0xFFFF);
-        kprintf("GLOS-KILL none psp=%04x at=%04x:%04x ss:sp=%04x:%04x stack=%04x %04x %04x %04x %04x %04x %04x %04x\n",
-                psp, at_cs, at_ip, tf->ss & 0xFFFF, tf->esp & 0xFFFF, vm_rd16(st), vm_rd16(st + 2), vm_rd16(st + 4),
-                vm_rd16(st + 6), vm_rd16(st + 8), vm_rd16(st + 10), vm_rd16(st + 12), vm_rd16(st + 14));
+        kprintf("GLOS-KILL none psp=%04x at=%04x:%04x ss:sp=%04x:%04x stack=%04x %04x %04x %04x %04x %04x %04x %04x"
+                " reason=%s\n", psp, at_cs, at_ip, tf->ss & 0xFFFF, tf->esp & 0xFFFF, vm_rd16(st), vm_rd16(st + 2),
+                vm_rd16(st + 4), vm_rd16(st + 6), vm_rd16(st + 8), vm_rd16(st + 10), vm_rd16(st + 12),
+                vm_rd16(st + 14), vm.kill_reason ? vm.kill_reason : "crash");
+        vm.kill_reason = 0;
                                                 /* (where GLOS.EXE itself was, if it hung) */
         return 0;
     }
@@ -366,7 +371,9 @@ static int vm_try_kill(struct trapframe *tf, int force)
     tf->ss = vm.loader_cs;
     tf->esp = vm.bi->kill_sp;
     tf->v86_ds = tf->v86_es = vm.loader_cs;
-    kprintf("GLOS-KILL psp=%04x at=%04x:%04x ticks=%u\n", psp, at_cs, at_ip, timer_ticks());
+    kprintf("GLOS-KILL psp=%04x at=%04x:%04x ticks=%u reason=%s\n", psp, at_cs, at_ip, timer_ticks(),
+            vm.kill_reason ? vm.kill_reason : "crash");
+    vm.kill_reason = 0;
     return 1;
 }
 
@@ -825,6 +832,7 @@ static void vm_gp(struct trapframe *tf)
         break;
     case V86_PRIV:                              /* MOV CRn, LMSW, LGDT...: no way to emulate */
         kprintf("GLOS-WARN v86-priv at=%04x:%04x op=0f%02x\n", tf->cs, ip, in.imm);
+        vm.kill_reason = "priv";
         if (!vm_try_kill(tf, 1))
             panic("v86-priv", tf);
         return;

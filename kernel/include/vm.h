@@ -32,6 +32,7 @@ struct vm_snap {
     u32 ivt[256];
     struct vpic pic;
     u8 a20, rtc_a, rtc_b, kbc_cmd;
+    u8 mode, leds;                      /* the BIOS video mode and the lock bits (M4e) */
 };
 
 struct vm {
@@ -56,6 +57,7 @@ struct vm {
     u32 int2f_prev;                     /* INT 2Fh's vector under GLOS's own (v86.c vm_int2f) */
     struct vm_snap snap[SNAP_LEVELS];
     u8 kill_req;
+    const char *kill_reason;            /* hotkey, agent, priv or crash (M4e) */
     u32 kill_since;
     /* PCI configuration mechanism 1 */
     u32 pci_addr;
