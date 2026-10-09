@@ -41,7 +41,10 @@ trap_common:
         movw    $0x10, %ax
         movw    %ax, %ds
         movw    %ax, %es
-        pushl   %esp
+        xorl    %eax, %eax                      /* FS and GS too (null): a client's selectors in them would */
+        movw    %ax, %fs                        /* go with the kernel into whatever thread it switches to, */
+        movw    %ax, %gs                        /* and fault in that thread's trap_exit once the client's LDT */
+        pushl   %esp                            /* has gone (M4e: the gate's probe of Quake 2) */
         call    trap_dispatch
         addl    $4, %esp
 /* The way out of every trap, and into user mode from a frame the kernel

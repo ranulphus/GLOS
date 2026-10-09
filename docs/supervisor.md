@@ -261,6 +261,12 @@ may be part-way through an `STD; REP MOVSB`. The kernel's string instructions (G
 functions' state copies) would otherwise run backwards, and so would any thread the scheduler resumes from that
 path. The IRET restores the interrupted code's DF.
 
+The common entry also loads the kernel's data selector into DS and ES and the null selector into FS and GS
+(M4e). The frame keeps the interrupted code's selectors for the way back. Until M4e, FS and GS kept a DPMI
+client's selectors while the kernel ran. A thread the scheduler switched to from inside such a trap carried them
+along, and once the client had ended and its LDT was gone, that thread's next trap_exit faulted reloading GS:
+`GLOS-PANIC ... vec=d err=d4` at `pop %gs`, found by the gate's ssh probe of Quake 2.
+
 ### 6.2 Fixup table
 
 - Kernel instructions that may fault on client-supplied data have entries in an exception fixup table: copies
