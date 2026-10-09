@@ -55,6 +55,7 @@ extern int cpu_has_cr4;
 
 /* kernel/dpmi: traps from a DPMI client (ring 3), and the way back to it */
 void dpmi_trap(struct trapframe *tf);
+int lin_fault(u32 lin);                         /* kernel/dpmi/mem.c: a client page backed on its first touch */
 void dpmi_return(struct trapframe *tf);
 int dpmi_db_hit(void);                  /* kernel/dpmi: a #DB was a client watchpoint (noted) */
 

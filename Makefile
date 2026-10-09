@@ -211,7 +211,7 @@ loopa-ssh: all dos-tests check-deps
 # M3's exit: the ssh suite (its 486DX2 + NE2000 and bf6 + RTL8029 cases).
 loopa-m3: loopa-ssh
 # M4a: the DPMI host's checks (DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i).
-loopa-dpmi: all dos-tests build/dj/DPMICONF.EXE check-deps
+loopa-dpmi: all dos-tests build/dj/DPMICONF.EXE build/dj/LAZYCHK.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py dpmi -j $(JOBS)
 loopa-m4a: loopa-dpmi
 # M4b: DJGPP 2.05's tests and CRASHME against CWSDPMI; MGA-Glide's STACKPG, MOUSETST, JOYTEST, SBBEEP.
@@ -263,6 +263,11 @@ build/dj/DPMICONF.EXE: tests/dos/dpmiconf.c tests/dos/dpmiconf_h.S
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $^
 # PROFCHK (tests/dos/profchk.c): what a profile gives a program, its environment and memory (M4e).
 build/dj/PROFCHK.EXE: tests/dos/profchk.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+# LAZYCHK (tests/dos/lazychk.c): DPMI memory backed when first touched (M4e).
+build/dj/LAZYCHK.EXE: tests/dos/lazychk.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<

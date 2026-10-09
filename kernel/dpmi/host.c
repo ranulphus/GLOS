@@ -556,6 +556,8 @@ void dpmi_trap(struct trapframe *tf)
     if (!dctx) {                                /* ring 3 without a client: can't happen */
         panic("ring3-without-client", tf);
     }
+    if (v == 14 && lin_fault(read_cr2()))
+        return;                                 /* a page of its memory backed on its first touch */
     if (v == 14)
         dctx->cr2 = read_cr2();                 /* before anything else can fault */
     if (v == 1)

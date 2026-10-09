@@ -137,6 +137,7 @@ struct dpmi_ctx {
     u32 next_handle;
     u32 lin_floor;                      /* the first 0501h block: the rest go above it (§12.3) */
     u32 frames;                         /* physical frames held */
+    u32 lazy;                           /* pages of its blocks still to be backed when first touched */
     u32 frame_cap;                      /* the most it may hold (the session's profile's memory), 0 none */
     struct dosblk *dosblks;
 };
@@ -205,6 +206,8 @@ int lin_resize2(u32 handle, u32 size, int now, struct block **out);     /* 0505h
 int lin_alloc_at(u32 lin, u32 size, int now, struct block **out);      /* 0504h */
 int lin_in_block(u32 lin);              /* inside a 0501h/0504h block of the client's */
 void lin_info(u32 *out12);              /* 0500h's twelve dwords */
+int lin_fault(u32 lin);                 /* a page fault on a page still to be backed: 1 when it now is */
+int lin_lock(u32 lin, u32 size);        /* 0600h: back what isn't yet; 0, or 0x8013 */
 int phys_map(u32 phys, u32 size, u32 *lin);
 int phys_unmap(u32 lin);
 int lin_host(u32 lin, u32 size);        /* host memory in the context: committed, no handle */

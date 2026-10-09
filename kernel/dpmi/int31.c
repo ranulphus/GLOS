@@ -717,8 +717,15 @@ static void dispatch(struct trapframe *tf)
         }
     case 0x0401: fn_caps(tf); return;
     case 0x0B00: case 0x0B01: case 0x0B02: case 0x0B03: fn_watch(tf, fn); return;
-    case 0x0600: case 0x0601: case 0x0602: case 0x0603: case 0x0702: case 0x0703:
-        ok(tf);                                 /* locking and discarding: nothing pages out */
+    case 0x0600: {                              /* lock: pages still to be backed get their frames now */
+            int e = lin_lock((bx(tf) << 16) | cx(tf), ((tf->esi & 0xFFFF) << 16) | (tf->edi & 0xFFFF));
+            if (e)
+                return fail(tf, (u16)e);
+            ok(tf);
+            return;
+        }
+    case 0x0601: case 0x0602: case 0x0603: case 0x0702: case 0x0703:
+        ok(tf);                                 /* unlocking and discarding: nothing pages out */
         return;
     case 0x0604:
         SET16(tf->ebx, 0);

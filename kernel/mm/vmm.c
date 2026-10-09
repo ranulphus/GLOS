@@ -126,7 +126,8 @@ void mm_space_free(u32 pd_phys)
 
 void mm_space_enter(u32 pd_phys) { write_cr3(pd_phys ? pd_phys : mm_cr3()); }
 
-int mm_map(u32 lin, u32 phys, u32 flags)
+/* The page table for lin in the current space, made if there is none: 0, or -1. */
+static int pt_for(u32 lin)
 {
     u32 i = lin >> 22;
     if (!(CUR_PD[i] & PTE_P)) {
@@ -138,6 +139,13 @@ int mm_map(u32 lin, u32 phys, u32 flags)
         for (k = 0; k < 1024; k++)
             CUR_PT[(i << 10) + k] = 0;
     }
+    return 0;
+}
+
+int mm_map(u32 lin, u32 phys, u32 flags)
+{
+    if (pt_for(lin) != 0)
+        return -1;
     CUR_PT[lin >> 12] = (phys & ~0xFFFu) | PTE_P | (flags & (PTE_W | PTE_U | 0x18 | 0x60 | 0x200));
                                                                 /* PWT, PCD; accessed, dirty (kept); AVL 9 */
     invlpg(lin);
@@ -153,6 +161,17 @@ u32 mm_unmap(u32 lin)
     CUR_PT[lin >> 12] = 0;
     invlpg(lin);
     return (pte & PTE_P) ? pte & ~0xFFFu : 0;
+}
+
+/* A page of a DPMI block that gets its frame when first touched (the host's
+   page fault, kernel/dpmi/mem.c lin_fault()): a not-present PTE marked. */
+int mm_lazy(u32 lin)
+{
+    if (pt_for(lin) != 0)
+        return -1;
+    CUR_PT[lin >> 12] = MM_LAZY | MM_W | MM_U;
+    invlpg(lin);
+    return 0;
 }
 
 u32 mm_lookup(u32 lin)

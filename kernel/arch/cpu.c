@@ -299,6 +299,8 @@ static void dispatch(struct trapframe *tf)
         back_to_user(tf);
         return;
     }
+    if (v == 14 && lin_fault(read_cr2()))               /* the kernel touched a client's page still to */
+        return;                                         /* be backed (kernel/dpmi/mem.c) */
     if (fixup_eip) {                                    /* a try_* helper or ucopy faulted */
         tf->eip = fixup_eip;
         fixup_eip = 0;

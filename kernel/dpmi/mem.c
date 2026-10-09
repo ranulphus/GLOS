@@ -2,11 +2,16 @@
  * 0800h/0801h). Blocks live in the user region from 4 MB, kept in address
  * order; a new one goes in the lowest gap that fits at or above the
  * context's first block, never below it (DJGPP's sbrk counts on that).
- * Pages are committed and zeroed at once: GLOS has no paging to disk. A
- * resize stays in place when the pages after the block are free, and
- * otherwise moves the block by mapping its frames elsewhere. 0500h keeps a
- * reserve back for page tables and the kernel, and reports the rest
- * exactly: programs allocate all of it.
+ * GLOS has no paging to disk, but as under CWSDPMI a page of 0501h/0503h
+ * memory gets its frame, zeroed, when it is first touched (lin_fault(),
+ * from the host's page faults and the kernel's own accesses): GLQuake's
+ * UNIX_SBRK heap takes nearly all the memory 0500h reports and touches a
+ * little of it (M4e). A frame that isn't there when it is touched is the
+ * client's page fault. A resize stays in place when the pages after the
+ * block are free, and otherwise moves the block by mapping its frames (and
+ * its pages still to be backed) elsewhere. 0500h keeps a reserve back for
+ * page tables and the kernel, and reports the rest exactly: programs
+ * allocate all of it.
  *
  * Physical mappings (0800h): linear = physical below 110000h (the identity
  * map) and in the PCI window E0000000h-FFBFFFFFh, uncached; elsewhere at a
@@ -70,7 +75,7 @@ static int commit(u32 lin, u32 from, u32 to)
 {
     u32 i;
     for (i = from; i < to; i++) {
-        u32 f = pmm_free_frames() > RESERVE / 2 && (!dctx->frame_cap || dctx->frames < dctx->frame_cap)
+        u32 f = pmm_free_frames() > RESERVE / 2 && (!dctx->frame_cap || dctx->frames + dctx->lazy < dctx->frame_cap)
                     ? pmm_alloc() : 0;
         if (!f || mm_map(lin + (i << 12), f, MM_W | MM_U) != 0) {
             if (f)
@@ -85,6 +90,26 @@ static int commit(u32 lin, u32 from, u32 to)
     return 0;
 }
 
+/* Pages [from, to) of a block at lin to be backed when first touched; -1
+   (with those pages unmapped again) without page tables or past the
+   session's cap (its profile's memory, which counts these too). */
+static int reserve(u32 lin, u32 from, u32 to)
+{
+    u32 i;
+    if (dctx->frame_cap && dctx->frames + dctx->lazy + (to - from) > dctx->frame_cap)
+        return -1;
+    for (i = from; i < to; i++) {
+        if (mm_lazy(lin + (i << 12)) != 0) {
+            while (i-- > from)
+                mm_unmap(lin + (i << 12));
+            dctx->lazy -= i - from;
+            return -1;
+        }
+        dctx->lazy++;
+    }
+    return 0;
+}
+
 static void release(u32 lin, u32 from, u32 to)
 {
     u32 i, f, pte;
@@ -93,8 +118,45 @@ static void release(u32 lin, u32 from, u32 to)
         if ((f = mm_unmap(lin + (i << 12))) != 0 && !(pte & MM_MAPPED)) {
             pmm_free(f);
             dctx->frames--;
+        } else if (!(pte & 1) && (pte & MM_LAZY)) {
+            dctx->lazy--;
         }
     }
+}
+
+/* A page fault at lin (the client's, or the kernel's touching the client's
+   memory): a page still to be backed gets its zeroed frame. 1 when it did. */
+int lin_fault(u32 lin)
+{
+    u32 pte, f;
+    if (!dctx || lin < USER_BASE || lin >= USER_END)
+        return 0;
+    pte = mm_lookup(lin);
+    if ((pte & 1) || !(pte & MM_LAZY) || pmm_free_frames() <= RESERVE / 4 || !(f = pmm_alloc()))
+        return 0;
+    if (mm_map(lin & ~0xFFFu, f, MM_W | MM_U) != 0) {
+        pmm_free(f);
+        return 0;
+    }
+    memset((void *)(lin & ~0xFFFu), 0, 4096);
+    dctx->lazy--;
+    dctx->frames++;
+    return 1;
+}
+
+/* 0600h: the region's pages still to be backed get their frames now (an
+   IRQ handler's memory, say). */
+int lin_lock(u32 lin, u32 size)
+{
+    u32 p, end = lin + size;
+    if (!dctx || !size || end < lin)
+        return 0;
+    for (p = lin & ~0xFFFu; p < end; p += 4096) {
+        u32 pte = mm_lookup(p);
+        if (!(pte & 1) && (pte & MM_LAZY) && !lin_fault(p))
+            return 0x8013;
+    }
+    return 0;
 }
 
 int lin_alloc(u32 size, struct block **out)
@@ -108,7 +170,7 @@ int lin_alloc(u32 size, struct block **out)
         return 0x8012;                          /* linear memory unavailable */
     if (!(b = kmalloc(sizeof *b)))
         return 0x8013;
-    if (commit(lin, 0, size >> 12) != 0) {
+    if (reserve(lin, 0, size >> 12) != 0) {
         kfree(b);
         return 0x8013;                          /* physical memory unavailable */
     }
@@ -161,7 +223,7 @@ int lin_alloc_at(u32 lin, u32 size, int now, struct block **out)
     }
     if (!(b = kmalloc(sizeof *b)))
         return 0x8013;
-    if (now && commit(lin, 0, size >> 12) != 0) {
+    if (now && reserve(lin, 0, size >> 12) != 0) {
         kfree(b);
         return 0x8013;
     }
@@ -199,19 +261,21 @@ int lin_resize2(u32 handle, u32 size, int now, struct block **out)
     }
     n = b->next;
     if ((!n || n->lin >= b->lin + (want << 12)) && b->lin + (want << 12) <= USER_END) {
-        if (now && commit(b->lin, old, want) != 0)      /* room after it: grow in place */
+        if (now && reserve(b->lin, old, want) != 0)     /* room after it: grow in place */
             return 0x8013;
         b->size = want << 12;
         return 0;
     }
     if (!(lin = place(want << 12, floor_lin(), b)))     /* move it: its frames go along */
         return 0x8012;
-    if (now && commit(lin, old, want) != 0)
+    if (now && reserve(lin, old, want) != 0)
         return 0x8013;
     for (i = 0; i < old; i++) {                 /* with their attributes; uncommitted pages stay so (0507h) */
         u32 pte = mm_lookup(b->lin + (i << 12)), f = mm_unmap(b->lin + (i << 12));
         if (f)
             mm_map(lin + (i << 12), f, MM_U | (pte & (MM_W | MM_UC | MM_MAPPED)));
+        else if (pte & MM_LAZY)
+            mm_lazy(lin + (i << 12));           /* (still to be backed, there) */
     }
     unlink(b);
     b->lin = lin;
@@ -277,7 +341,7 @@ void lin_info(u32 *o)
     gap = avail / 1024 + 1;                     /* page tables for that many pages */
     avail = avail > gap ? avail - gap : 0;
     if (dctx->frame_cap) {                      /* the session's profile's cap */
-        gap = dctx->frames < dctx->frame_cap ? dctx->frame_cap - dctx->frames : 0;
+        gap = dctx->frames + dctx->lazy < dctx->frame_cap ? dctx->frame_cap - dctx->frames - dctx->lazy : 0;
         if (avail > gap)
             avail = gap;
     }
@@ -407,7 +471,8 @@ int page_attr(u32 handle, u32 off, u32 n, u16 *attr, int set, u32 *done)
         u32 lin = b->lin + off + (i << 12), pte = mm_lookup(lin), type = attr[i] & 7;
         if (!set) {
             attr[i] = (pte & 1) ? (u16)(((pte & MM_MAPPED) ? 2 : 1) | ((pte & MM_W) ? 8 : 0) | 0x10
-                                        | ((pte & 0x20) ? 0x20 : 0) | ((pte & 0x40) ? 0x40 : 0)) : 0;
+                                        | ((pte & 0x20) ? 0x20 : 0) | ((pte & 0x40) ? 0x40 : 0))
+                    : (pte & MM_LAZY) ? (u16)(1 | 8 | 0x10) : 0;    /* (committed, as far as the client knows) */
             continue;
         }
         if (type == 2 || type > 3)
@@ -416,6 +481,9 @@ int page_attr(u32 handle, u32 off, u32 n, u16 *attr, int set, u32 *done)
             release(lin, 0, 1);
             continue;
         }
+        if ((!(pte & 1) && (pte & MM_LAZY)) && type == 1 && !lin_fault(lin))
+            return 0x8013;                      /* (committed now: then its attributes, as for any) */
+        pte = mm_lookup(lin);
         if (!(pte & 1) || (type == 1 && (pte & MM_MAPPED))) {
             if (type == 3)
                 continue;                       /* uncommitted, and stays so */
