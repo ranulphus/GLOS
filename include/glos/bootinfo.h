@@ -54,6 +54,17 @@ typedef unsigned int   bi_u32;
 
 struct bi_range { bi_u32 base, length, type; };
 
+/* M4e: a [program NAME.EXT] section of GLOS.CFG (supervisor.md §11.2). */
+#define BI_PROFILES      16
+#define BI_PROF_ENV      192
+#define BI_PROF_DIRECT   0x0001                 /* direct = 1: the session runs at IOPL 3 (E3) */
+struct bi_profile {
+    char name[16];                              /* NAME.EXT, upper case; empty: an unused slot */
+    bi_u32 flags;                               /* BI_PROF_* */
+    bi_u32 memory_kb;                           /* memory = KB: the cap on a DPMI context's memory; 0 none */
+    char env[BI_PROF_ENV];                      /* env = NAME=VALUE lines: each string NUL-ended, then a NUL */
+};
+
 struct bootinfo {
     bi_u32 magic, version, size;
     bi_u32 flags;
@@ -103,6 +114,7 @@ struct bootinfo {
     bi_u32 hostkey_len;
     char authkeys[2048];                        /* KEYS\AUTHKEYS: authorized_keys lines (ssh-ed25519) */
     bi_u32 authkeys_len;
+    struct bi_profile profiles[BI_PROFILES];    /* M4e: GLOS.CFG's [program] sections */
 };
 
 /* The resident stub's data (loader/stub.asm), at offset 0 of its segment.

@@ -137,6 +137,7 @@ struct dpmi_ctx {
     u32 next_handle;
     u32 lin_floor;                      /* the first 0501h block: the rest go above it (§12.3) */
     u32 frames;                         /* physical frames held */
+    u32 frame_cap;                      /* the most it may hold (the session's profile's memory), 0 none */
     struct dosblk *dosblks;
 };
 

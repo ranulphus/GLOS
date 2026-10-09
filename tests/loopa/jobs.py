@@ -76,7 +76,10 @@ TIMECHK afterwards must see every one of those (or the test proves nothing);
 under GLOS /RUN, with GLOS as the shell (glosshell boots) and as an agent
 job by ssh (bf6 + RTL8029, 486DX2 + NE2000), none, and GLOS's log must show
 the session beginning and ending with the mode put back and the vector
-taken out.
+taken out. Profiles (E2): with GLOS as the shell and a GLOS.CFG giving
+PROFCHK.EXE a variable, a PATH of its own and a 4 MB cap, PROFCHK (DJGPP)
+sees them and gets at most 4 MB from DPMI; the same program as NOPROF.EXE
+sees the shell's environment and gets more than 8 MB.
 
 hostile: HOSRUN.BAT runs every tests/dos/hostile.c case under one "GLOS /RUN
 COMMAND /C"; the harness types Ctrl-Alt-Shift-Esc after each one's "armed"
@@ -1249,6 +1252,37 @@ def sess(profile, boot, how):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+PROF_CFG = ["; profiles, for jobs.py sess", "[program PROFCHK.EXE]", "env = GLOSPROF=yes", "env = PATH=C:\\PROF",
+            "memory = 4096"]
+
+
+def sess_prof(profile, boot):
+    """Profiles (E2), with GLOS as the shell: PROFCHK gets its profile's environment (a variable added and PATH
+    replaced) and a DPMI context capped at 4 MB; the same program as NOPROF.EXE gets neither."""
+    tag = "prof-%s-%s" % (profile, boot)
+    cfg = batfile("sess-%s/GLOS.CFG" % tag, PROF_CFG)
+    args = ["--machine", profile, "--boot-cfg", "glosshell" + ("-himemx" if boot == "himemx" else "")] + GLOS_FILES + [
+        "--file", cfg + "=/TEST/GLOS.CFG", "--file", "build/dj/PROFCHK.EXE=/TEST/PROFCHK.EXE",
+        "--file", "build/dj/PROFCHK.EXE=/TEST/NOPROF.EXE"]
+    for c in ["SERSAY HX-START sess-prof", "C:\\TEST\\PROFCHK.EXE", "C:\\TEST\\NOPROF.EXE", "SERSAY HX-DONE 0"]:
+        args += ["--cmd", c]
+    st, serial = run("sess-" + tag, args)
+    lines = re.findall(r"HX-PROF var=(\S+) path=(\S*) largest=(\d+) got=(\d+)", serial)
+    checks = {"status": st == "PASS", "ran": len(lines) == 2,
+              "profile": bool(re.search(r"GLOS-SESSION begin n=\d+ prog=PROFCHK.EXE .* profile=PROFCHK.EXE", serial)),
+              "clean": "GLOS-PANIC" not in serial and "GLOS-WARN" not in serial}
+    info = ""
+    if len(lines) == 2:
+        (v1, p1, l1, g1), (v2, p2, l2, g2) = lines
+        checks["env"] = v1 == "yes" and p1 == "C:\\PROF"
+        checks["memory"] = int(l1) <= 4096 and 2048 <= int(g1) <= 4096
+        checks["none"] = v2 == "-" and p2 != "C:\\PROF" and int(g2) > 8192
+        info = " got=%s/%s" % (g1, g2)
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("sess-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def sess_agent(profile, card):
     """SESSTEST and the checks as agent jobs, through ssh: each job is a session (the agent EXECs a program
     directly, trying each place along PATH; only the one found begins a session)."""
@@ -1304,6 +1338,7 @@ def main():
         return 0 if all(r[1] for r in matrix(ssh_case, SSH_CASES, a.jobs)) else 1
     if a.suite == "sess":
         res = matrix(sess, [(p, b, h) for p, b in combos for h in ("base", "run", "shell")], a.jobs)
+        res += matrix(sess_prof, combos, a.jobs)
         res += matrix(sess_agent, [c for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "dpmi":

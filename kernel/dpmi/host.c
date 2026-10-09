@@ -40,6 +40,7 @@
 #include "kprintf.h"
 #include "mm.h"
 #include "sched.h"
+#include "session.h"
 #include "v86dec.h"
 #include "vm.h"
 #include "vpic.h"
@@ -260,6 +261,7 @@ static void mode_switch(struct trapframe *tf)
         ldt_init(c);
         c->bits32 = tf->eax & 1;
         c->next_handle = 0x1000;
+        c->frame_cap = session_memory_kb() / 4; /* (in pages) */
         fpu_msw_set(fpu_msw_dos == ~0u ? (read_cr0() >> 1) & 3 : fpu_msw_dos);   /* (learns DOS's first) */
         c->fpu_msw = (u8)(fpu_msw_dos & ~2u);   /* the FPU, not enabled for it until 0E01h ([DPMI0.9]) */
         mm_space_enter(c->cr3);

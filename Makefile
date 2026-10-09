@@ -235,7 +235,7 @@ loopa-tpx: all dos-tests m4d-inputs check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py tpx --profile bf6 --profile 486dx2 --boot default -j $(JOBS)
 loopa-m4d: loopa-m4c loopa-dpmi16 loopa-tpx
 # M4e: exclusive sessions (on the host, as loopa-ssh: its agent cases use ssh).
-loopa-sess: all dos-tests check-deps
+loopa-sess: all dos-tests build/dj/PROFCHK.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py sess -j $(JOBS)
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
@@ -255,6 +255,11 @@ build/dj/DPMICONF.EXE: tests/dos/dpmiconf.c tests/dos/dpmiconf_h.S
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $^
+# PROFCHK (tests/dos/profchk.c): what a profile gives a program, its environment and memory (M4e).
+build/dj/PROFCHK.EXE: tests/dos/profchk.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 # CRASHME (tests/dos/crashme.c): a fault with no handler, for the crash report (M4b).
 build/dj/CRASHME.EXE: tests/dos/crashme.c
 	@mkdir -p $(dir $@)

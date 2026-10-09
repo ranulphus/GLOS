@@ -14,7 +14,12 @@
  * changed that now point into free memory, or still point where a program
  * left them in its own memory when it ended (a TSR's hooks stay, with its
  * memory); and it sets the BIOS clock from the RTC, which a program that
- * sped up the PIT has run fast. */
+ * sped up the PIT has run fast.
+ *
+ * A session takes the profile (GLOS.CFG's [program NAME.EXT], §11.2) of the
+ * program that begins it: its env lines go into that EXEC's environment (a
+ * copy GLOS makes in DOS memory the parent owns, freed at the end), and its
+ * memory caps the DPMI context the session makes. */
 #include <string.h>
 
 #include "glos/bootinfo.h"
@@ -33,6 +38,9 @@ static struct session {
     u8 imr[2];
     u32 ivt[256];
     u32 dangle[256];                            /* what the program left pointing into its own memory, or 0 */
+    const struct bi_profile *prof;              /* its profile, or 0 */
+    u16 env_seg, env_old;                       /* the environment GLOS made, and the EXEC block's own */
+    u32 env_pb;                                 /* the EXEC block (linear) */
     u32 t0;
     u32 n;
 } ses;
@@ -94,6 +102,17 @@ static void end(const char *why)
     int remode = (mode & 0x7F) != (ses.mode & 0x7F);
 
     ses.active = 0;
+    if (ses.env_seg) {                          /* the profile's environment: DOS has copied it */
+        if (vm_rd16(ses.env_pb) == ses.env_seg) {
+            vm_wr8(ses.env_pb, (u8)ses.env_old);
+            vm_wr8(ses.env_pb + 1, (u8)(ses.env_old >> 8));
+        }
+        memset(&r, 0, sizeof r);
+        r.eax = 0x4900;
+        r.es = ses.env_seg;
+        bios(&r, 0x21);
+        ses.env_seg = 0;
+    }
     if (remode) {                               /* the mode it began in, and so the palette */
         memset(&r, 0, sizeof r);
         r.eax = ses.mode & 0x7F;
@@ -147,6 +166,77 @@ static void end(const char *why)
             remode ? " remode=1" : "", fixed, ticks, timer_ticks() - ses.t0);
 }
 
+/* The profile for program file name prog (upper case): its NAME.EXT, or a
+   NAME without an extension for either. */
+static const struct bi_profile *profile_for(const char *prog)
+{
+    const struct bi_profile *p;
+    u32 n;
+    for (n = 0; prog[n] && prog[n] != '.'; n++) ;
+    for (p = vm.bi->profiles; p < vm.bi->profiles + BI_PROFILES; p++)
+        if (p->name[0] && (!strcmp(p->name, prog) || (!strncmp(p->name, prog, n) && !p->name[n])))
+            return p;
+    return 0;
+}
+
+/* Two environment strings set the same variable (case aside). */
+static int same_var(const char *a, const char *b)
+{
+    for (; *a && *a != '=' && *b && *b != '='; a++, b++)
+        if (*a != *b && !((*a | 0x20) == (*b | 0x20) && (*a | 0x20) >= 'a' && (*a | 0x20) <= 'z'))
+            return 0;
+    return *a == '=' && *b == '=';
+}
+
+/* The profile's env lines into the environment the EXEC at tf gives the
+   program: a copy of the one it names (or the parent's), without the
+   variables the profile sets, then the profile's lines. */
+static void profile_env(const struct trapframe *tf, u16 psp)
+{
+    static char buf[8192];
+    struct rmregs r;
+    u32 pb = vm_lin(tf->v86_es, tf->ebx), src, n = 0, i, len;
+    const char *e;
+    u16 seg = vm_rd16(pb);
+
+    src = (u32)(seg ? seg : vm_rd16(psp * 16u + 0x2C)) << 4;
+    for (i = 0; src && i < 32768 && vm_rd8(src + i);) {        /* its strings, but those the profile sets */
+        const char *s = (const char *)vm_ptr(src + i);
+        int keep = 1;
+        len = (u32)strlen(s) + 1;
+        for (e = ses.prof->env; *e && keep; e += strlen(e) + 1)
+            keep = !same_var(s, e);
+        if (keep) {
+            if (n + len > sizeof buf - BI_PROF_ENV - 2) {
+                kprintf("GLOS-WARN session-env prog=%s why=too-big\n", ses.prog);
+                return;
+            }
+            memcpy(buf + n, s, len);
+            n += len;
+        }
+        i += len;
+    }
+    for (e = ses.prof->env; *e; e += len) {     /* then the profile's */
+        len = (u32)strlen(e) + 1;
+        memcpy(buf + n, e, len);
+        n += len;
+    }
+    buf[n++] = 0;
+    memset(&r, 0, sizeof r);
+    r.eax = 0x4800;
+    r.ebx = (n + 15) >> 4;
+    if (bios(&r, 0x21) != 0 || (r.flags & FL_CF)) {
+        kprintf("GLOS-WARN session-env prog=%s why=no-memory\n", ses.prog);
+        return;
+    }
+    ses.env_seg = (u16)r.eax;
+    ses.env_pb = pb;
+    ses.env_old = seg;
+    memcpy(vm_ptr((u32)ses.env_seg << 4), buf, n);
+    vm_wr8(pb, (u8)ses.env_seg);
+    vm_wr8(pb + 1, (u8)(ses.env_seg >> 8));
+}
+
 /* INT 21h 4B00h from V86 code (DS:DX the program). */
 void session_exec(const struct trapframe *tf)
 {
@@ -184,7 +274,12 @@ void session_exec(const struct trapframe *tf)
     memcpy(ses.ivt, vm_ptr(0), sizeof ses.ivt);
     ses.t0 = timer_ticks();
     ses.n++;
-    kprintf("GLOS-SESSION begin n=%u prog=%s parent=%04x mode=%02x\n", ses.n, ses.prog, psp, ses.mode);
+    ses.prof = profile_for(ses.prog);
+    ses.env_seg = 0;
+    if (ses.prof && ses.prof->env[0])
+        profile_env(tf, psp);
+    kprintf("GLOS-SESSION begin n=%u prog=%s parent=%04x mode=%02x%s%s\n", ses.n, ses.prog, psp, ses.mode,
+            ses.prof ? " profile=" : "", ses.prof ? ses.prof->name : "");
 }
 
 /* INT 20h, or INT 21h 4Ch or 00h, from V86 code: a program ending (the
@@ -219,3 +314,7 @@ void session_stub_next(void)
 }
 
 int session_active(void) { return ses.active; }
+
+u32 session_memory_kb(void) { return ses.active && ses.prof ? ses.prof->memory_kb : 0; }
+
+int session_direct(void) { return ses.active && ses.prof && (ses.prof->flags & BI_PROF_DIRECT); }

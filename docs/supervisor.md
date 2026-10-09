@@ -135,13 +135,19 @@ to COM1 at each step:
 
     ```
     [shell]
-    comspec  = A:\FREEDOS\BIN\COMMAND.COM   ; else COMSPEC, the boot drive's \, \FREEDOS\BIN or \DOS,
-                                              ; GLOS.EXE's directory, or PATH
-    autoexec = C:\AUTOEXEC.BAT                ; else the boot drive's \AUTOEXEC.BAT
-    console  = C:\KIOSK.BAT                   ; run (through COMSPEC /C) instead of the prompt
-    envsize  = 2048                           ; the master environment, in bytes (default 1024)
-    options  = /DPMITRACE                     ; GLOS.EXE's flags: /DPMITRACE, /NOVME, /GDB (M4c)
+    ; else COMSPEC, the boot drive's \, \FREEDOS\BIN or \DOS, GLOS.EXE's directory, or PATH
+    comspec  = A:\FREEDOS\BIN\COMMAND.COM
+    ; else the boot drive's \AUTOEXEC.BAT
+    autoexec = C:\AUTOEXEC.BAT
+    ; run (through COMSPEC /C) instead of the prompt
+    console  = C:\KIOSK.BAT
+    ; the master environment, in bytes (default 1024)
+    envsize  = 2048
+    ; GLOS.EXE's flags: /DPMITRACE, /NOVME, /GDB (M4c)
+    options  = /DPMITRACE
     ```
+
+    Comments are whole lines (`;` or `#`): a value runs to the end of its line, since PATH has semicolons in it.
 
     `/COMSPEC=`, `/P=`, `/E:` and `/CON=` on the command line override them, like COMMAND.COM's own options.
   - `GLOS.EXE`'s environment becomes the master environment: what DOS gave it, with `COMSPEC` set, in a
@@ -519,10 +525,40 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 
   The BIOS calls run nested (§15) on the stub's spare stack (the kill stub's, `kill_sp`), with no DPMI client
   needed.
-- **Not yet:** pausing GLOS apps (M6), the display state beyond the mode, profiles (E2), direct mode (E3),
-  kills ending a session (E5) and switching away (M6).
+- **Not yet:** pausing GLOS apps (M6), the display state beyond the mode, direct mode (E3), kills ending a
+  session (E5) and switching away (M6).
 - **Tests.** `jobs.py sess` (`make loopa-sess`). SESSTEST leaves each of these changed natively; under
   `GLOS /RUN`, as the shell and as an agent job, none is (VECCHK, VMODE, TIMECHK).
+
+### 11.2 Profiles (M4e E2)
+
+A program's profile is a section of GLOS.CFG (beside GLOS.EXE), like a Windows PIF:
+
+```
+[program GAME.EXE]
+; added to (or replacing in) the environment GAME.EXE starts with; repeatable
+env    = BLASTER=A220 I5 D1 T4
+env    = PATH=C:\GAME;C:\DOS
+; the most memory its DPMI context may hold, in KB (0500h reports no more; 0501h fails past it)
+memory = 8192
+; the session runs at IOPL 3 (E3, §9.7)
+direct = 1
+```
+
+- **Which:** the loader reads up to 16 sections, in every mode (`[shell]` only as the shell), into bootinfo's
+  `profiles` (name, flags, `memory_kb`, and `env` as NUL-ended strings, 192 bytes). Unknown keys and too much
+  `env` give `GLOS-WARN cfg-...`. A name without an extension matches either.
+- **When:** a session takes the profile of the program that begins it (§11.1), logged as `profile=` on its
+  `begin` line. A program a session runs later (from a batch file, say) doesn't take its own: `glos run
+  --profile` (E4) names one for the session.
+- **env:** at the EXEC, GLOS copies the environment the EXEC block names (or the parent's) without the
+  variables the profile sets, adds the profile's, puts the copy in a DOS block the parent owns (a nested INT
+  21h 48h) and points the EXEC block at it; DOS copies it for the program as usual. At the session's end GLOS
+  frees the block and puts the EXEC block's word back.
+- **memory:** the DPMI context made during the session holds at most that many frames: `commit()` stops there
+  and 0500h's figures are capped.
+- **Tests.** `jobs.py sess` (`sess-prof-*`): PROFCHK (DJGPP) under a profile, and the same program as
+  NOPROF.EXE without one.
 
 ## 12. DPMI context model [fixed]
 

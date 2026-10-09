@@ -70,7 +70,8 @@ static int commit(u32 lin, u32 from, u32 to)
 {
     u32 i;
     for (i = from; i < to; i++) {
-        u32 f = pmm_free_frames() > RESERVE / 2 ? pmm_alloc() : 0;
+        u32 f = pmm_free_frames() > RESERVE / 2 && (!dctx->frame_cap || dctx->frames < dctx->frame_cap)
+                    ? pmm_alloc() : 0;
         if (!f || mm_map(lin + (i << 12), f, MM_W | MM_U) != 0) {
             if (f)
                 pmm_free(f);
@@ -275,6 +276,11 @@ void lin_info(u32 *o)
     avail = avail > RESERVE ? avail - RESERVE : 0;
     gap = avail / 1024 + 1;                     /* page tables for that many pages */
     avail = avail > gap ? avail - gap : 0;
+    if (dctx->frame_cap) {                      /* the session's profile's cap */
+        gap = dctx->frames < dctx->frame_cap ? dctx->frame_cap - dctx->frames : 0;
+        if (avail > gap)
+            avail = gap;
+    }
     if (largest > avail)
         largest = avail;
     o[0] = largest << 12;                       /* the largest block, in bytes */

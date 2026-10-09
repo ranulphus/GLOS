@@ -8,4 +8,6 @@ void session_terminate(void);                   /* INT 20h, INT 21h 4Ch or 00h f
 void session_exit_code(void);                   /* INT 21h 4Dh from V86 code */
 void session_stub_next(void);                   /* GLOS.EXE's stub's NEXT */
 int session_active(void);
+u32 session_memory_kb(void);                    /* the session's profile's memory cap, 0 none */
+int session_direct(void);                       /* its profile says direct = 1 */
 #endif

@@ -11,7 +11,8 @@
  * as its own parent), it runs AUTOEXEC.BAT and then the console instead, and
  * never ends: if GLOS can't start, the stub runs COMMAND.COM (supervisor.md
  * §2.2). The [shell] section of GLOS.CFG, next to GLOS.EXE, gives the same
- * settings as comspec=, autoexec=, console= and envsize=.
+ * settings as comspec=, autoexec=, console= and envsize=; its [program
+ * NAME.EXT] sections, read in every mode, are profiles (§11.2).
  * Progress goes to COM1 as GLOS-BOOT lines; refusals as GLOS-REFUSE. */
 #include <conio.h>
 #include <dos.h>
@@ -589,13 +590,48 @@ static void opt_str(char *dst, unsigned n, const char *v)
     dst[n - 1] = 0;
 }
 
-/* The [shell] section of GLOS.CFG next to GLOS.EXE: key = value lines. */
-static void read_cfg(const char *argv0)
+/* A [program NAME.EXT] section's slot (a new one if it's not there yet), or
+   NULL when they are all taken. */
+static struct bi_profile *profile_slot(const char *name)
+{
+    struct bi_profile *p, *free_slot = NULL;
+    for (p = bi.profiles; p < bi.profiles + BI_PROFILES; p++) {
+        if (!p->name[0] && !free_slot)
+            free_slot = p;
+        if (p->name[0] && !stricmp(p->name, name))
+            return p;
+    }
+    if (free_slot) {
+        opt_str(free_slot->name, sizeof free_slot->name, name);
+        strupr(free_slot->name);
+    }
+    return free_slot;
+}
+
+/* env = NAME=VALUE in a profile: after the strings it has (a later one for
+   the same NAME wins in the EXEC's environment, which the kernel builds). */
+static void profile_env(struct bi_profile *p, const char *v)
+{
+    unsigned n = 0, len = (unsigned)strlen(v);
+    while (p->env[n])
+        n += (unsigned)strlen(p->env + n) + 1;
+    if (!strchr(v, '=') || n + len + 2 > sizeof p->env) {
+        say("GLOS-WARN cfg-env program=%s env=\"%s\" (no '=' or no room)", p->name, v);
+        return;
+    }
+    memcpy(p->env + n, v, len + 1);
+    p->env[n + len + 1] = 0;
+}
+
+/* GLOS.CFG next to GLOS.EXE: [program NAME.EXT] sections (profiles), and
+   as the shell the [shell] section; key = value lines. */
+static void read_cfg(const char *argv0, int shell_keys)
 {
     char line[160], path[128], *k, *v, *e;
     const char *slash = strrchr(argv0, '\\');
     size_t n = slash ? (size_t)(slash - argv0 + 1) : 0;
     int in_shell = 0;
+    struct bi_profile *prof = NULL;
     FILE *f;
 
     memcpy(path, argv0, n);
@@ -607,16 +643,31 @@ static void read_cfg(const char *argv0)
         if (*k == ';' || *k == '#' || !*k)
             continue;
         if (*k == '[') {
-            in_shell = !strnicmp(k, "[shell]", 7);
+            in_shell = shell_keys && !strnicmp(k, "[shell]", 7);
+            prof = NULL;
+            if (!strnicmp(k, "[program", 8) && (e = strchr(k, ']')) != NULL) {
+                *e = 0;
+                for (v = k + 8; *v == ' ' || *v == '\t'; v++) ;
+                if (*v && !(prof = profile_slot(v)))
+                    say("GLOS-WARN cfg-profiles max=%d", BI_PROFILES);
+            }
             continue;
         }
-        if (!in_shell || !(v = strchr(k, '=')))
+        if ((!in_shell && !prof) || !(v = strchr(k, '=')))
             continue;
         for (e = v; e > k && (e[-1] == ' ' || e[-1] == '\t'); e--) ;
         *e = 0;
         for (v++; *v == ' ' || *v == '\t'; v++) ;
         for (e = v + strlen(v); e > v && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' '); e--) ;
         *e = 0;
+        if (prof) {
+            if (!stricmp(k, "direct")) prof->flags = atoi(v) ? prof->flags | BI_PROF_DIRECT
+                                                             : prof->flags & ~BI_PROF_DIRECT;
+            else if (!stricmp(k, "memory")) prof->memory_kb = strtoul(v, NULL, 10);
+            else if (!stricmp(k, "env")) profile_env(prof, v);
+            else say("GLOS-WARN cfg-key program=%s key=%s", prof->name, k);
+            continue;
+        }
         if (!stricmp(k, "comspec")) opt_str(bi.comspec, sizeof bi.comspec, v);
         else if (!stricmp(k, "autoexec")) opt_str(bi.autoexec, sizeof bi.autoexec, v), shell_p = 1;
         else if (!stricmp(k, "console")) opt_str(bi.console, sizeof bi.console, v);
@@ -671,11 +722,11 @@ static void shell_setup(int argc, char **argv)
     for (i = 1; i < argc; i++)
         if (!stricmp(argv[i], "/SHELL"))
             shell = 1;
+    read_cfg(argv[0], shell);
     if (!shell) {
         find_comspec(argv[0]);                          /* the agent runs commands through it */
         return;
     }
-    read_cfg(argv[0]);
     for (i = 1; i < argc; i++) {
         if (!strnicmp(argv[i], "/COMSPEC=", 9)) opt_str(bi.comspec, sizeof bi.comspec, argv[i] + 9);
         else if (!strnicmp(argv[i], "/P=", 3)) opt_str(bi.autoexec, sizeof bi.autoexec, argv[i] + 3), shell_p = 1;
