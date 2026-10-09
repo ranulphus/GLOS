@@ -47,8 +47,8 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
     struct trapframe *f;
     u32 here, ss, sp, i, flags, ivt, vif = vm.vif;
 
-    if (depth >= NEST_MAX || !dctx)
-        return -1;
+    if (depth >= NEST_MAX || (!dctx && !r->ss && !r->sp))
+        return -1;                              /* (without a client, the caller gives a stack: sessions) */
     __asm__ volatile("movl %%esp, %0" : "=r"(here));
     f = (struct trapframe *)((here - 256 - sizeof *f) & ~15u);
     memset(f, 0, sizeof *f);

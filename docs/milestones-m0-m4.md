@@ -505,6 +505,41 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   - a resident client at a level above the first;
   - writes through "MS-DOS"'s LDT selector (none seen).
 
+**M4e plan (2026-10-09).** Each step is a commit with its tests.
+- **E1 Sessions** (`kernel/vm/session.c`, supervisor.md §11):
+  - A session is a top-level program: an agent job, a `/RUN` program, or a program the shell-mode COMMAND.COM
+    EXECs. Nested EXECs belong to it.
+  - It begins at that EXEC (`GLOS-SESSION begin`) and ends when the program does (`GLOS-SESSION end`).
+  - At the end GLOS restores:
+    - the video mode it began in (INT 10h);
+    - the virtual PIC's masks, PIT channel 0 (mode 2, FFFFh), the virtual RTC A/B, the 8042 command byte and
+      the keyboard LEDs;
+    - Sound Blaster DMA stopped (8237 masks; a DSP reset at BLASTER's port).
+  - It also restores interrupt vectors the session changed that now point into free DOS memory (a TSR's stay),
+    and sets DOS's time from the RTC.
+  - T: hostile programs and a new SESSTEST (changes each of these and exits) leave VECCHK, VMODE and the time
+    clean.
+- **E2 Profiles:**
+  - `[program NAME.EXE]` sections in GLOS.CFG (the PRD's one settings file), read by GLOS.EXE into bootinfo.
+  - Keys: `direct = 0|1`, `env = NAME=VALUE` (repeatable: added to the EXEC's environment block), `memory = KB`
+    (caps 0500h/0501h).
+  - A session takes the profile of the program that begins it.
+  - T: env and memory seen by a DJGPP probe; a missing profile changes nothing.
+- **E3 Direct mode** (supervisor.md §9.7, D20): a session with `direct = 1` runs at IOPL 3, in V86 mode and
+  protected mode.
+  - CLI/STI/PUSHF/POPF/IRET act on the real IF.
+  - V86 INT n arrives through the IDT and is reflected as before.
+  - Protected-mode code bypasses the I/O bitmap (it owns the PIC, PIT and 8042 as under CWSDPMI). GLOS puts its
+    own lines' masks and the RTC's periodic interrupt back at every trap. A program that re-initialises the
+    PIC isn't supported.
+  - T: djtst205's ENABLE passes under a direct profile; DPMICONF-32/16 and the games pass with direct forced.
+- **E4 `glos run [--exclusive|--app] [--direct] [--profile NAME] COMMAND`:** a job with session options;
+  `--app` waits for M6. T: the ssh suite.
+- **E5 Kill** reports `reason=` (hotkey, agent, crash) and runs the session-end restoration.
+- **E6 The gate** (`tools/gate/`, the matrix below): each cell's baseline and GLOS runs, baselines cached by
+  binary sha, profile, boot, card and 86Box key, the comparisons below, forced-direct runs, a kill job and a
+  screenshot job per suite, and VECCHK/VMODE after each. T: `make gate`.
+
 ### The gate's baseline matrix (M4e)
 
 | Suite | Baseline | Profiles | Boots |

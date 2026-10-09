@@ -16,6 +16,7 @@
 #include "agent.h"
 #include "dos.h"
 #include "dpmi.h"
+#include "session.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
@@ -516,6 +517,7 @@ static void vm_call(struct trapframe *tf)
         tf->eax = 0;
         break;
     case GLOS_CALL_NEXT:
+        session_stub_next();
         vm_next(tf, arg);
         break;
     default:
@@ -653,6 +655,9 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
         if (dpmi_passup(tf, n, next))
             return;
         break;
+    case 0x20:
+        session_terminate();
+        break;
     case 0x21:
         if (dctx && (vm.bi->flags & BI_F_DPMITRACE)) {     /* a client's own real-mode code, too */
             static u32 n21;
@@ -664,10 +669,16 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
         agent_vm_int21(tf);
         if ((ax >> 8) == 0x31)
             dpmi_tsr_seen();
+        if ((ax >> 8) == 0x4B)
+            session_exec(tf);
+        if ((ax >> 8) == 0x4D)
+            session_exit_code();
         if ((ax >> 8) == 0x4B && (ax & 0xFF) <= 1)
             vm_exec_snap();
         if (vm.shell_state == 1 && ((ax >> 8) == 0x4C || (ax >> 8) == 0x00))
             vm_env_back();
+        if ((ax >> 8) == 0x4C || (ax >> 8) == 0x00)
+            session_terminate();
         if ((ax >> 8) == 0x4C || (ax >> 8) == 0x00)
             dpmi_dos_exit(tf, n, next);         /* a DPMI client's program ending (may not come back) */
         break;

@@ -499,6 +499,14 @@ static int glos_main(int argc, char **argv)
     bi.bp_xms_off = stub_off(glos_bp_xms);
     bi.kill_off = stub_off(glos_kill);
     bi.kill_sp = stub_off(glos_kill_top);
+    {                                                   /* BLASTER=A220 ...: the Sound Blaster's port */
+        const char *b = getenv("BLASTER");
+        for (; b && *b; b++)
+            if ((*b == 'A' || *b == 'a') && (b == getenv("BLASTER") || b[-1] == ' ')) {
+                bi.sb_port = strtoul(b + 1, 0, 16);
+                break;
+            }
+    }
     bi.bp_dpmi_off = stub_off(glos_bp_dpmi);
     bi.bp_nest_off = stub_off(glos_bp_nest);
     bi.bp_raw_off = stub_off(glos_bp_raw);

@@ -11,6 +11,7 @@ through MGA-Glide's harness:
   jobs.py shell [--profile P ...] [-j N]      (MGA_GLIDE must have the glosshell boots)
   jobs.py net [-j N]
   jobs.py ssh [-j N]                          (on the host: it needs ssh, and runs Loop A through tools/dev)
+  jobs.py sess [--profile P ...] [--boot B ...] [-j N]   (on the host, as ssh)
 
 m1: on each machine profile (bf6, 486dx2, 486dx4) and boot (default: no
 XMS driver, raw mode; himemx: XMS mode, DOS=HIGH), RUN.BAT does
@@ -68,13 +69,23 @@ ends on the host's word: a fixed wait in guest time lost to run.py's
 wall-clock idle limit whenever 86Box ran slower than real time.) The first
 connection's time is logged, not judged (PRD D28).
 
+sess: exclusive sessions (M4e E1). SESSTEST leaves behind video mode 13h,
+IRQ5's PIC mask bit flipped, a DOS clock 30 s fast (the PIT sped up), Caps
+Lock and INT 60h hooked into its own memory. Natively, VECCHK, VMODE and
+TIMECHK afterwards must see every one of those (or the test proves nothing);
+under GLOS /RUN, with GLOS as the shell (glosshell boots) and as an agent
+job by ssh (bf6 + RTL8029, 486DX2 + NE2000), none, and GLOS's log must show
+the session beginning and ending with the mode put back and the vector
+taken out.
+
 hostile: HOSRUN.BAT runs every tests/dos/hostile.c case under one "GLOS /RUN
 COMMAND /C"; the harness types Ctrl-Alt-Shift-Esc after each one's "armed"
 line (and Ctrl-Alt-Del first for CAD). Each must end in GLOS-KILL (PRIV by
 GLOS itself) and be followed by a KEYWAIT that gets Enter, with the reset requests, the A20 wrap and the vif-stuck
 warnings expected; then the batch, GLOS and the machine carry on: the
 kernel's tick still advancing, VECCHK, WAITSEC (the BIOS tick), a key and
-text mode. Exit status 1 if any job fails."""
+text mode, and DOS's clock within 2 s of the RTC (the session's end, M4e).
+Exit status 1 if any job fails."""
 import argparse
 import concurrent.futures
 import os
@@ -263,10 +274,11 @@ def hostile(profile, boot):
     # "HOSTILE CLIJMP" would run the batch file again.
     bat = batfile("hostile-%s/HOSRUN.BAT" % tag, lines)
     st, serial = run("hostile-" + tag, ["--machine", profile, "--boot-cfg", boot, "--file",
-                                        bat + "=/TEST/HOSRUN.BAT"] + M2_FILES + GLOS_FILES + [
+                                        bat + "=/TEST/HOSRUN.BAT"] + M2_FILES + GLOS_FILES + SESS_FILES + [
         "--cmd", "SERSAY HX-START hostile", "--cmd", "VECCHK save",
         "--cmd", "C:\\TEST\\GLOS.EXE /RUN %COMSPEC% /C C:\\TEST\\HOSRUN.BAT", "--cmd", "VECCHK check",
-        "--cmd", "WAITSEC 1", "--cmd", "SERSAY HX-HOS waited", "--cmd", "KEYWAIT 20", "--cmd", "SERSAY HX-DONE 0",
+        "--cmd", "WAITSEC 1", "--cmd", "SERSAY HX-HOS waited", "--cmd", "C:\\TEST\\TIMECHK.EXE",
+        "--cmd", "KEYWAIT 20", "--cmd", "SERSAY HX-DONE 0",
         "--keys", ",".join(keys + [KEY_ENTER]), "--timeout", "900"])
     kills = [int(t) for t in re.findall(r"GLOS-KILL psp=\w+ at=\S+ ticks=(\d+)", serial)]
     leave = re.search(r"GLOS-VM leave code=\d+ ticks=(\d+)", serial)
@@ -283,6 +295,7 @@ def hostile(profile, boot):
         "no-panic": "GLOS-PANIC" not in serial,
         "vecchk": "HX-VECCHK ok" in serial,
         "bios-tick": "HX-HOS waited" in serial,
+        "time": bool(re.search(r"HX-TIME rtc=\S+ dos=\S+ diff=[012] ", serial)),     # the session's end (M4e)
         "keyboard": serial.count("HX-KEY scan=1c") == len(HOSTILE) + 1,
         "textmode": "HX-VMODE bios=03" in serial,
     }
@@ -1027,42 +1040,67 @@ def golden(name, value):
     return lines.get(name) == value
 
 
+class Agent:
+    """GLOS headless (the agent) in a background Loop A run with the test keys,
+    and OpenSSH's ssh to it through SLiRP's forward of port 22 (on the host)."""
+
+    def __init__(self, name, profile, card, args, timeout=600):
+        import socket
+        import tempfile
+        s = socket.socket()
+        s.bind(("0.0.0.0", 0))
+        self.port = s.getsockname()[1]
+        s.close()
+        self.proc = run(name, os.environ.get("SSH_EXTRA", "").split() + [
+            "--machine", profile, "--net", card, "--net-fwd", "%d:22" % self.port, "--timeout", str(timeout),
+            "--idle", "300"] + GLOS_FILES + KEYS + args, background=True)
+        self.serial = os.path.join(ROOT, "out", name, "serial.log")
+        self.tmp = tempfile.mkdtemp()
+        self.key, known = os.path.join(self.tmp, "client"), os.path.join(self.tmp, "known")
+        open(self.key, "w").write(open(os.path.join(ROOT, "tests/keys/client")).read())
+        os.chmod(self.key, 0o600)
+        open(known, "w").write("[127.0.0.1]:%d %s" % (self.port,
+                                                      open(os.path.join(ROOT, "tests/keys/hostkey.pub")).read()))
+        self.base = ["ssh", "-p", str(self.port), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
+                     "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + known,
+                     "-o", "ConnectTimeout=60", "-o", "LogLevel=ERROR"]
+        self.opts = self.base + ["-i", self.key]
+
+    def log(self):
+        return open(self.serial, "rb").read().decode("latin-1").replace("\r", "") \
+            if os.path.exists(self.serial) else ""
+
+    def listening(self, limit=240):
+        import time
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            text = self.log()
+            if "GLOS-NET dhcp" in text and "GLOS-SSH listen" in text:
+                return True
+            time.sleep(1)
+        return False
+
+    def ssh(self, cmd, keyfile=None, timeout=180):
+        p = subprocess.run((self.base + ["-i", keyfile] if keyfile else self.opts) + ["glos@127.0.0.1", cmd],
+                           capture_output=True, timeout=timeout)
+        return p.returncode, p.stdout.decode("latin-1"), p.stderr.decode("latin-1")
+
+    def wait(self):
+        self.proc.wait()
+        return self.log()
+
+
 def ssh_case(profile, card):
-    import socket
-    import tempfile
     import time
     tag = "%s-%s%s" % (profile, card, os.environ.get("SSH_TAG", ""))
-    s = socket.socket()
-    s.bind(("0.0.0.0", 0))
-    port = s.getsockname()[1]
-    s.close()
-    proc = run("ssh-" + tag, os.environ.get("SSH_EXTRA", "").split() + ["--machine", profile, "--net", card, "--net-fwd", "%d:22" % port, "--timeout", "600",
-                              "--idle", "300"] + GLOS_FILES + KEYS + [
+    agent = Agent("ssh-" + tag, profile, card, [
         "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
         "--cmd", "SERSAY HX-START ssh", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
-        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"],
-        background=True)
-    serial = os.path.join(ROOT, "out", "ssh-" + tag, "serial.log")
-    tmp = tempfile.mkdtemp()
-    key, known = os.path.join(tmp, "client"), os.path.join(tmp, "known")
-    open(key, "w").write(open(os.path.join(ROOT, "tests/keys/client")).read())
-    os.chmod(key, 0o600)
-    open(known, "w").write("[127.0.0.1]:%d %s" % (port, open(os.path.join(ROOT, "tests/keys/hostkey.pub")).read()))
-    base = ["ssh", "-p", str(port), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
-            "-o", "UserKnownHostsFile=" + known, "-o", "ConnectTimeout=60", "-o", "LogLevel=ERROR"]
-    opts = base + ["-i", key]
-
-    def ssh(cmd, keyfile=None):
-        p = subprocess.run((base + ["-i", keyfile] if keyfile else opts) + ["glos@127.0.0.1", cmd],
-                           capture_output=True, timeout=180)
-        return p.returncode, p.stdout.decode("latin-1"), p.stderr.decode("latin-1")
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
+    serial, tmp, key, port, base, opts, ssh = (agent.serial, agent.tmp, agent.key, agent.port, agent.base,
+                                               agent.opts, agent.ssh)
     checks, info = {}, ""
-    t0 = time.time()
-    while time.time() - t0 < 240:
-        text = open(serial, "rb").read().decode("latin-1") if os.path.exists(serial) else ""
-        if "GLOS-NET dhcp" in text and "GLOS-SSH listen" in text:
-            break
-        time.sleep(1)
+    agent.listening()
     try:
         t1 = time.time()
         rc, out, _ = ssh("glos ver")
@@ -1145,14 +1183,96 @@ def ssh_case(profile, card):
         checks["exit"] = rc == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
-    proc.wait()
-    text = open(serial, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(serial) else ""
+    text = agent.wait()
     checks["strict-kex"] = "GLOS-SSH kex done strict=1" in text
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-EXIT code=0" in text
     checks["done"] = "HX-DONE 0" in text and "HX-VECCHK ok" in text
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+SESS_FILES = ["--file", "build/ow/dos/SESSTEST.EXE=/TEST/SESSTEST.EXE",
+              "--file", "build/ow/dos/TIMECHK.EXE=/TEST/TIMECHK.EXE"]
+SESS_STEPS = ["C:\\TEST\\TIMECHK.EXE", "VECCHK save", "C:\\TEST\\SESSTEST.EXE", "VECCHK check", "VMODE",
+              "C:\\TEST\\TIMECHK.EXE"]
+SESS_AGENT = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
+
+
+def sess_left(text):
+    """What SESSTEST changed and left changed, from the HX lines around it: each of
+    the PIC mask (VECCHK), the video mode, the DOS clock, INT 60h and the lock
+    bits, True when it is as before."""
+    a = text.find("HX-SESS done")
+    before = re.search(r"HX-TIME rtc=\S+ dos=\S+ diff=(\d+) vec60=(\w+) kbd=(\w+)", text[:a] if a >= 0 else "")
+    after = re.search(r"HX-TIME rtc=\S+ dos=\S+ diff=(\d+) vec60=(\w+) kbd=(\w+)", text[a:] if a >= 0 else "")
+    if not before or not after:
+        return None
+    return {"pic": "HX-VECCHK ok" in text[a:], "mode": "HX-VMODE bios=03" in text[a:],
+            "clock": int(after.group(1)) <= 2, "int60": after.group(2) == before.group(2),
+            "locks": after.group(3) == before.group(3)}
+
+
+def sess_checks(text, prog="SESSTEST.EXE"):
+    """GLOS's own account of the session: it began and ended, with the mode put back and INT 60h's hook
+    taken out."""
+    end = re.search(r"GLOS-SESSION end n=\d+ prog=%s why=(\w+) mode=13 remode=1 vectors=(\d+)" % re.escape(prog),
+                    text)
+    return {"begin": "GLOS-SESSION begin n=" in text and " prog=%s " % prog in text,
+            "end": bool(end and int(end.group(2)) >= 1),
+            "no-panic": "GLOS-PANIC" not in text and "GLOS-WARN" not in text}
+
+
+def sess(profile, boot, how):
+    """SESSTEST natively (base: every change must show), under GLOS /RUN and
+    with GLOS as the shell (none may)."""
+    tag = "%s-%s-%s" % (how, profile, boot)
+    cfg = boot if how != "shell" else "glosshell" + ("-himemx" if boot == "himemx" else "")
+    steps = list(SESS_STEPS)
+    if how == "run":
+        steps[2] = "C:\\TEST\\GLOS.EXE /RUN " + steps[2]
+    args = ["--machine", profile, "--boot-cfg", cfg] + SESS_FILES + GLOS_FILES
+    for c in ["SERSAY HX-START sess"] + steps + ["SERSAY HX-DONE 0"]:
+        args += ["--cmd", c]
+    st, serial = run("sess-" + tag, args)
+    left = sess_left(serial)
+    checks = {"status": st == "PASS", "ran": "HX-SESS done" in serial and left is not None}
+    if how == "base":                           # the test changes each of these
+        checks.update({"changed-" + k: not v for k, v in (left or {}).items()})
+    else:
+        checks.update({"kept-" + k: v for k, v in (left or {}).items()})
+        checks.update(sess_checks(serial))
+        if how == "run":
+            checks["exit0"] = "GLOS-EXIT code=0" in serial
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("sess-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+def sess_agent(profile, card):
+    """SESSTEST and the checks as agent jobs, through ssh: each job is a session (the agent EXECs a program
+    directly, trying each place along PATH; only the one found begins a session)."""
+    tag = "agent-%s-%s" % (profile, card)
+    agent = Agent("sess-" + tag, profile, card, SESS_FILES + [
+        "--cmd", "SERSAY HX-START sess", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
+    checks = {"listen": agent.listening()}
+    try:
+        rcs = [agent.ssh(c)[0] for c in SESS_STEPS]
+        checks["jobs"] = rcs == [0] * len(SESS_STEPS)
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    left = sess_left(text)
+    checks["ran"] = "HX-SESS done" in text and left is not None
+    checks.update({"kept-" + k: v for k, v in (left or {}).items()})
+    checks.update(sess_checks(text))
+    checks["one-each"] = len(re.findall(r"GLOS-SESSION begin ", text)) == len(SESS_STEPS)   # no failed EXECs
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and text.count("HX-VECCHK ok") == 2
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("sess-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
 def matrix(fn, combos, jobs):
@@ -1166,7 +1286,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -1182,6 +1302,10 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ssh":
         return 0 if all(r[1] for r in matrix(ssh_case, SSH_CASES, a.jobs)) else 1
+    if a.suite == "sess":
+        res = matrix(sess, [(p, b, h) for p, b in combos for h in ("base", "run", "shell")], a.jobs)
+        res += matrix(sess_agent, [c for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "dpmi":
         res = matrix(dpmi, combos, a.jobs) + matrix(dpmiconf, combos, a.jobs)
         res += matrix(dpmi_hello, [(b,) for b in a.boot or BOOTS], a.jobs)

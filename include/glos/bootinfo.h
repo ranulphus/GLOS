@@ -91,6 +91,7 @@ struct bootinfo {
     bi_u32 bp_term_off;                         /* M4b: a client's terminate address (PSP:0Ah) */
     bi_u32 int2f_off;                           /* M4c: GLOS's INT 2Fh handler, in the IVT's chain */
     bi_u32 stub_paras;                          /* the resident stub's size, in paragraphs */
+    bi_u32 sb_port;                             /* M4e: BLASTER's A (a session's end resets the DSP), 0 none */
     /* M3: GLOS as the shell (BI_F_SHELL) */
     char comspec[80];                           /* COMMAND.COM, for batch files and the console (and the agent's) */
     char autoexec[80];                          /* run first through COMSPEC /C; empty: none */

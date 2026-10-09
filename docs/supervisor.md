@@ -486,6 +486,44 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 - **Switching away** is supported only for text-mode programs (save B800h/B000h, cursor and mode). A
   graphics-mode session runs until it exits or is killed.
 
+### 11.1 As built (M4e E1; kernel/vm/session.c)
+
+- **What a session is.** One top-level DOS program, with everything it EXECs. GLOS sees the EXEC as an
+  INT 21h 4B00h from V86 code by a *session parent*:
+  - the resident stub, for agent jobs (each job's `COMMAND /C`) and `/RUN`;
+  - with GLOS as the shell, the console COMMAND.COM (or AUTOEXEC.BAT's): a PSP other than the stub's whose
+    parent is the stub, or itself (FreeCOM makes itself its own parent).
+
+  Only one session is open at a time; EXECs inside it belong to it. Load-only EXECs (4B01h/03h) start none,
+  and nor does an EXEC of a file that isn't there (a nested INT 21h 4300h says so first): the agent looks for
+  a program by trying each place along PATH.
+- **The snapshot at the EXEC:** the BIOS video mode (0449h), the lock bits of the keyboard flags (0417h bits
+  4-6), the virtual PIC's two masks, the virtual RTC's A and B, the 8042's command byte, and the whole IVT.
+- **The end** comes at the first of:
+  - the parent's INT 21h 4Dh (the stub and COMMAND.COM both ask for the exit code);
+  - the parent's next EXEC (the last one failed to load);
+  - the stub's NEXT call.
+- **What the end puts back** (`end()`):
+  - the video mode, by INT 10h 00h, when it differs (the palette comes with it);
+  - PIT channel 0 at mode 2, count FFFFh (§8);
+  - the virtual PIC masks, the virtual RTC's A and B (and so the periodic rate), the 8042 command byte and the
+    lock bits;
+  - Sound Blaster DMA stopped: 8237 channels 1, 3, 5, 6 and 7 masked, and the DSP reset at BLASTER's `A`
+    address (the loader puts it in bootinfo's `sb_port`);
+  - every vector the session changed that now points into a free DOS block, or that still holds the value it
+    had when a program in the session ended pointing into that program's own memory (INT 20h, INT 21h 4Ch/00h
+    from V86 code). The second rule matters with GLOS as the shell: COMMAND.COM may have put something in the
+    freed memory before it asks for the exit code. A TSR's hooks stay: its memory is still allocated;
+  - the BIOS tick count from the RTC (INT 1Ah 02h, then 01h). A program that sped the PIT up has run the DOS
+    clock fast; it ends within a second of the RTC.
+
+  The BIOS calls run nested (§15) on the stub's spare stack (the kill stub's, `kill_sp`), with no DPMI client
+  needed.
+- **Not yet:** pausing GLOS apps (M6), the display state beyond the mode, profiles (E2), direct mode (E3),
+  kills ending a session (E5) and switching away (M6).
+- **Tests.** `jobs.py sess` (`make loopa-sess`). SESSTEST leaves each of these changed natively; under
+  `GLOS /RUN`, as the shell and as an agent job, none is (VECCHK, VMODE, TIMECHK).
+
 ## 12. DPMI context model [fixed]
 
 ### 12.1 Contexts
@@ -1023,6 +1061,7 @@ place where nothing else is in DOS by construction.
 | SSH | `listen`, `off`, `connect`, `client version=`, `kex done strict=`, `auth ok`, `exec=`, `close why=`, `refuse` |
 | AGENT | A job: `run seq= cmd=`, `done seq= code= via=` (the program, or `comspec`) |
 | KILL | A kill (§9.6) |
+| SESSION | A session (§11.1): `begin n= prog= parent= mode=`, `end n= prog= why=exit\|next-exec\|stub mode= [remode=1] vectors= ticks= t=` (`mode=` the mode it ended in, `vectors=` those put back, `ticks=` the BIOS tick count set from the RTC, `t=` its length in kernel ticks) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
 | DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... if= -> cf= ax=` (`if=` the virtual IF at the call), `raw to=rm|pm`, `dosx ax= ... -> cf=`, `vendor name=`, `v86-int21` (a client's real-mode DOS calls), `exception-code` (the code bytes and registers at a fault),, `deliver irq=|passup=|exception=|rmcb= to= from= at= err= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |
 | CRASH | A client the host ends (§19): `why= vec= err= prog= psp= bits= mode=`, `cs:eip= ss:esp= eflags= cr2=`, the general registers, `code=` (16 bytes at CS:EIP), `stack=`, a `seg` line per segment register, `handlers= lstack= nesting=`, `file=` |
