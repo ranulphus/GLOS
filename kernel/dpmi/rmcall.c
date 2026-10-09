@@ -193,15 +193,27 @@ void rm_irq(struct trapframe *tf, u8 vec)
 
 /* 0306h, real to protected: AX = DS, CX = ES, DX = SS, (E)BX = (E)SP,
    SI = CS, (E)DI = (E)IP, all selectors; EBP is kept. */
+/* /DPMITRACE: the first raw switches, either way, and where they go. */
+static void raw_trace(const struct trapframe *tf, const char *to)
+{
+    static u32 n;
+    if ((vm.bi->flags & BI_F_DPMITRACE) && n++ < 40)
+        kprintf("GLOS-DPMI raw to=%s from=%04x:%08x cs:ip=%04x:%08x ss:sp=%04x:%08x ds=%04x es=%04x\n", to,
+                tf->cs & 0xFFFF, tf->eip, tf->esi & 0xFFFF, tf->edi, tf->edx & 0xFFFF, tf->ebx, tf->eax & 0xFFFF,
+                tf->ecx & 0xFFFF);
+}
+
 void rm_raw_to_pm(struct trapframe *tf)
 {
     u32 esp = dctx->bits32 ? tf->ebx : tf->ebx & 0xFFFF, eip = dctx->bits32 ? tf->edi : tf->edi & 0xFFFF;
+    raw_trace(tf, "pm");
     dpmi_to_pm(tf, (u16)tf->esi, eip, (u16)tf->edx, esp, (u16)tf->eax, (u16)tf->ecx);
 }
 
 /* 0306h, protected to real: the same registers, as segments. */
 void rm_raw_to_rm(struct trapframe *tf)
 {
+    raw_trace(tf, "rm");
     dpmi_to_v86(tf, (u16)tf->esi, tf->edi & 0xFFFF, (u16)tf->edx, tf->ebx & 0xFFFF, (u16)tf->eax, (u16)tf->ecx);
 }
 

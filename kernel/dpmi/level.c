@@ -10,8 +10,10 @@
  * terminate address, kept in dctx while it runs and in its lv[] slot while a
  * child runs above it. The parent waits inside its EXEC, a nested real-mode
  * call, so the child runs in that call's frame (`depth`, `frame`), and ends
- * there. Levels share the client's bitness: a 16-bit child of a 32-bit
- * client (or the reverse) is refused. */
+ * there. A level may differ from its parent in bitness (a 16-bit child of
+ * a 32-bit client, or the reverse; M4d): every handler keeps its own
+ * client's bitness, and its frames and its locked-stack selector follow it
+ * (deliver.c). */
 #include <string.h>
 
 #include "arch.h"
@@ -62,11 +64,8 @@ int level_push(struct trapframe *tf)
         dpmi_unimpl(tf, "client-levels");
         return 0x8011;
     }
-    if ((tf->eax & 1) != dctx->bits32) {        /* frames and stacks follow the context's bitness */
-        dpmi_unimpl(tf, "mixed-bitness");
-        return 0x8011;
-    }
     save_fields(&dctx->lv[dctx->nlv - 1]);
+    dctx->bits32 = tf->eax & 1;                 /* its own: handlers keep their own client's (M4d) */
     l = &dctx->lv[dctx->nlv];
     memset(l, 0, sizeof *l);
     memcpy(l->vidt, dctx->vidt, sizeof l->vidt);

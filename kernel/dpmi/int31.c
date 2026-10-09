@@ -67,22 +67,28 @@ static void fn_free(struct trapframe *tf)
     ok(tf);
 }
 
-static void fn_seg2desc(struct trapframe *tf)
+u16 dpmi_seg_sel(u16 seg)
 {
     u32 i, free_i = NSEGSEL;
-    u16 seg = bx(tf), s;
+    u16 s;
     for (i = 0; i < NSEGSEL; i++) {
-        if (dctx->segsel[i].sel && dctx->segsel[i].seg == seg) {
-            SET16(tf->eax, dctx->segsel[i].sel);
-            return ok(tf);
-        }
+        if (dctx->segsel[i].sel && dctx->segsel[i].seg == seg)
+            return dctx->segsel[i].sel;
         if (!dctx->segsel[i].sel && free_i == NSEGSEL)
             free_i = i;
     }
     if (free_i == NSEGSEL || !(s = ldt_new(seg * 16u, 0xFFFF, 0xF2, 0)))
-        return fail(tf, 0x8011);
+        return 0;
     dctx->segsel[free_i].seg = seg;
     dctx->segsel[free_i].sel = s;
+    return s;
+}
+
+static void fn_seg2desc(struct trapframe *tf)
+{
+    u16 s = dpmi_seg_sel(bx(tf));
+    if (!s)
+        return fail(tf, 0x8011);
     SET16(tf->eax, s);
     ok(tf);
 }
@@ -290,6 +296,7 @@ static void fn_rmcb(struct trapframe *tf, u32 fn)
         dctx->rmcb[i].used = (u8)dctx->nlv;
         dctx->rmcb[i].pm.sel = (u16)tf->ds;
         dctx->rmcb[i].pm.off = r_si(tf);
+        dctx->rmcb[i].pm.b32 = dctx->bits32;
         dctx->rmcb[i].regs.sel = (u16)tf->es;
         dctx->rmcb[i].regs.off = r_di(tf);
         SET16(tf->ecx, vm.loader_cs);
@@ -337,8 +344,8 @@ static void fn_vectors(struct trapframe *tf, u32 fn)
     case 0x0203:
     case 0x0210:
     case 0x0212:
-        if (n >= 32 || (fn >= 0x0210 && !dctx->bits32))
-            return fail(tf, fn >= 0x0210 ? 0x8001 : 0x8021);    /* the 1.0 frame for 16-bit clients: M4d */
+        if (n >= 32)
+            return fail(tf, 0x8021);
         p = &dctx->exc[n];
         if (fn == 0x0202 || fn == 0x0210) {
             u32 off = p->sel ? p->off : TR_EXC + n;
@@ -355,6 +362,7 @@ static void fn_vectors(struct trapframe *tf, u32 fn)
                 return fail(tf, 0x8022);
             p->sel = cx(tf);
             p->off = r_dx(tf);
+            p->b32 = dctx->bits32;
             dctx->exc10[n] = fn == 0x0212;
         }
         break;
@@ -377,6 +385,7 @@ static void fn_vectors(struct trapframe *tf, u32 fn)
                 dctx->rm_prev[n] = ivt;         /* the pass-up guard's way on (§14.5) */
             p->sel = cx(tf);
             p->off = r_dx(tf);
+            p->b32 = dctx->bits32;              /* its frames: its own client's (a level's may differ) */
         }
         break;
     }
@@ -559,6 +568,35 @@ static void fn_vendor(struct trapframe *tf)
     else
         SET16(tf->edi, TR_VENDOR);
     ok(tf);
+}
+
+/* INT 2Fh 168Ah in protected mode ([DPMI1.0]): DS:(E)SI a vendor's name;
+   ES:(E)DI its entry and AL=0, or AL as it was. "GLOS" as 0A00h; "MS-DOS"
+   is Windows' extension, whose 0100h gives a selector for the LDT: Borland's
+   RTM won't start without it (TPX, M4d), and HDPMI16 has it. Ours is
+   read-only (§12.1d). */
+void dpmi_vendor_2f(struct trapframe *tf)
+{
+    char name[16];
+    u32 i, at = 0;
+    for (i = 0; i < sizeof name - 1; i++)
+        if (user_rd((u16)tf->ds, r_si(tf) + i, &name[i], 1) != 0 || !name[i])
+            break;
+    name[i] = 0;
+    if (!strcmp(name, "GLOS"))
+        at = TR_VENDOR;
+    else if (!strcmp(name, "MS-DOS"))
+        at = TR_MSDOS;
+    if (vm.bi->flags & BI_F_DPMITRACE)
+        kprintf("GLOS-DPMI vendor name=%s -> %s\n", name, at ? "yes" : "no");
+    if (!at)
+        return;
+    tf->es = SEL_TRAMP;
+    if (dctx->bits32)
+        tf->edi = at;
+    else
+        SET16(tf->edi, at);
+    SETLO(tf->eax, 0);
 }
 
 static void dispatch(struct trapframe *tf);

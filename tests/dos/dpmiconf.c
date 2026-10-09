@@ -359,6 +359,7 @@ static void t_exc(void)
     say("exc-frame-stack", exc_ss == _my_ds() && exc_esp == exc_esp_before && (exc_flags & 0x200),
         "ss=%lx esp=%lx(%lx) flags=%lx", exc_ss, exc_esp, exc_esp_before, exc_flags);
     say("exc-regs-kept", ebx == 0x13579BDF, "ebx=%x", ebx);
+    exc_ebx = 0;                                                /* (the handler's later faults keep EBX) */
     say("exc-host-stack", -1, "ss=%lx (ours %x)", exc_hss, _my_ds());
     exc_skip = 0;                                               /* the frame's CS:EIP and SS:ESP edited, as DJGPP does */
     exc_new_eip = (unsigned long)exc_resume;
@@ -652,6 +653,15 @@ static void t_nest(const char *self)
     ok = !is_glos || (now.selector == mine.selector && now.offset32 == mine.offset32 && hits61 == 1);
     say("nest-child-fault", code == 255 && ok, "code=%d hits=%d", code, hits61);
 
+    if (is_glos) {                              /* a 16-bit child of this 32-bit client (M4d) */
+        code = spawnl(P_WAIT, "C:\\TEST\\DPMI16.EXE", "C:\\TEST\\DPMI16.EXE", "child", "leave", NULL);
+        __dpmi_get_protected_mode_interrupt_vector(0x61, &now);
+        hits61 = 0;
+        if (now.selector == mine.selector && now.offset32 == mine.offset32)
+            __asm__ volatile("int $0x61" ::: "memory");
+        say("glos-nest-16in32", code == 42 && hits61 == 1, "code=%d hits=%d", code, hits61);
+    }
+
     __dpmi_set_protected_mode_interrupt_vector(0x61, &old61);
     _go32_dpmi_free_iret_wrapper(&w);
     __dpmi_free_ldt_descriptor(sel);
@@ -660,7 +670,7 @@ static void t_nest(const char *self)
 /* ---- M4c: DPMI 1.0 extras (0401h, 0508h/0509h, 0B00h-0B03h), INT 2Fh */
 
 __attribute__((noinline)) static int watch_target(int x) { return x + 1; }
-extern unsigned long exc_or_flags;
+extern volatile unsigned long exc_or_flags;     /* (volatile: the call between its two stores reads it, unseen) */
 
 static void t_extras(void)
 {
@@ -708,9 +718,8 @@ static void t_extras(void)
     }
 
     /* an execute watchpoint: exception 1 at the function's first byte, the
-       handler sets RF to run it, and 0B02h says it fired. INFO only: 86Box
-       fires no DR0-DR3 breakpoint on these profiles, under any host (with or
-       without the dynarec; supervisor.md §20), so silicon decides. */
+       handler sets RF to run it, and 0B02h says it fired (86Box fires DR0-DR3
+       breakpoints from MGA-Glide's patch 0115: supervisor.md §20). */
     {
         unsigned long lin = __djgpp_base_address + (unsigned long)watch_target;
         int h = -1, v;
@@ -729,8 +738,9 @@ static void t_extras(void)
             __dpmi_set_processor_exception_handler_vector(1, &old1);
             __asm__ volatile("int $0x31" : "=a"(state) : "a"(0x0B02), "b"(h) : "memory", "cc");
             __asm__ volatile("int $0x31" :: "a"(0x0B01), "b"(h) : "memory", "cc");
-            say("watch", -1, "hits=%lu eip=%lx(%lx) v=%d state=%x (86Box fires no DR breakpoints: §20)", exc_hits,
-                exc_eip, (unsigned long)watch_target, v, state & 0xFFFF);
+            say("watch", exc_hits == 1 && exc_eip == (unsigned long)watch_target && v == 42 && (state & 1),
+                "hits=%lu eip=%lx(%lx) v=%d state=%x", exc_hits, exc_eip, (unsigned long)watch_target, v,
+                state & 0xFFFF);
         }
     }
     {

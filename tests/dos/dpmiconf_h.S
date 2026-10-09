@@ -93,8 +93,10 @@ _exc_handler:
         movl    %eax, 32(%esp)
 2:      movl    _exc_or_flags, %eax
         orl     %eax, 28(%esp)
+        cmpl    $0, _exc_ebx            /* exc-regs-kept's EBX, when it is set */
+        je      3f
         movl    _exc_ebx, %ebx
-        popl    %eax
+3:      popl    %eax
         popl    %ds
         lret
 

@@ -23,6 +23,8 @@
 #                       lDebugX on ecm's dpmimini (loopa-ecm), and MGA-Glide's conform and replays,
 #                       GTA, Screamer Rally and DOSBench under GLOS as the shell (loopa-m4c-games,
 #                       tools/m4c-games.sh; M4C_MGA= an MGA-Glide tree at deps.mk's pin)
+#   make loopa-m4d      loopa-m4c, DPMICONF-16 against HDPMI16/16i (loopa-dpmi16), and TPX on RTM
+#                       compiling and running a program (loopa-tpx; BORLAND_DIR, make m4d-inputs)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
@@ -37,7 +39,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-gdb djtst glos-cache m4c-inputs check-deps clean help survey-tools
+.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -109,8 +111,17 @@ build/ow/dos/DPMIMINI.COM: tests/dos/dpmimini.asm
 	$(Q)echo "  WASM    $<"
 	$(Q)$(OWENV) $(OWBIN)/wasm -q -fo=build/ow/dos/obj/dpmimini.obj $<
 	$(Q)$(WLINK) format dos com option quiet name $@ file build/ow/dos/obj/dpmimini.obj
+# DPMICONF-16 (tests/dos/dpmi16/): the 16-bit client's checks, C and WASM (M4d).
+build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
+	@mkdir -p build/ow/dos/obj
+	$(Q)echo "  WCC16   tests/dos/dpmi16/dpmi16.c"
+	$(Q)$(WCC16) -bt=dos -ms -3 -os -s -zq -we -fo=build/ow/dos/obj/dpmi16.obj tests/dos/dpmi16/dpmi16.c
+	$(Q)echo "  WASM    tests/dos/dpmi16/dpmi16a.asm"
+	$(Q)$(OWENV) $(OWBIN)/wasm -q -fpi87 -fo=build/ow/dos/obj/dpmi16a.obj tests/dos/dpmi16/dpmi16a.asm
+	$(Q)$(WLINK) system dos option quiet option stack=4k name $@ \
+	  file build/ow/dos/obj/dpmi16.obj,build/ow/dos/obj/dpmi16a.obj
 DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
-             build/ow/dos/RUNOUT.EXE
+             build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE
 dos-tests: $(DOS_TESTS)
 
 # ---- GLOSK.BIN: the kernel (host gcc -m32, linked at C0100000h) -------------
@@ -128,7 +139,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c kernel/dos/agent.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
-         kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dbg/crash.c
+         kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
@@ -212,6 +223,13 @@ loopa-ecm: all dos-tests m4c-inputs check-deps
 loopa-m4c-games: glos-cache check-deps
 	$(Q)tools/m4c-games.sh
 loopa-m4c: loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games
+# M4d: DPMICONF-16 against HDPMI16 and HDPMI16i (all six profile and boot combinations), and TPX (Turbo
+# Pascal 7's IDE on Borland's RTM) compiling and running a program, without GLOS and under it.
+loopa-dpmi16: all dos-tests m4d-inputs check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py dpmi16 -j $(JOBS)
+loopa-tpx: all dos-tests m4d-inputs check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py tpx --profile bf6 --profile 486dx2 --boot default -j $(JOBS)
+loopa-m4d: loopa-m4c loopa-dpmi16 loopa-tpx
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
 loopa-gdb: all check-deps
@@ -270,6 +288,23 @@ build/ecm/.unpacked: tools/setup/versions.mk
 	$(Q)unzip -qoL $(MGA_CACHE)/dl/ecm-test-20210127.zip -d build/ecm
 	$(Q)touch $@
 m4c-inputs: build/hdpmireg/.unpacked build/ecm/.unpacked build/ow/dos/RUNOUT.EXE
+# HDPMI16 and HDPMI16i, DPMICONF-16's baselines, from the pinned HX runtime (M4d).
+GLOS_HX := $(MGA_CACHE)/glos/hx
+$(GLOS_HX)/.hdpmi16: tools/setup/versions.mk
+	@mkdir -p $(GLOS_HX)
+	$(Q)tools/setup/fetch.sh $(HXRT_URL) $(HXRT_SHA256) $(MGA_CACHE)/dl/HXRT223.zip
+	$(Q)unzip -p $(MGA_CACHE)/dl/HXRT223.zip BIN/HDPMI16.EXE > $(GLOS_HX)/HDPMI16.EXE
+	$(Q)unzip -p $(MGA_CACHE)/dl/HXRT223.zip BIN/HDPMI16i.EXE > $(GLOS_HX)/HDPMI16I.EXE
+	$(Q)touch $@
+# TPX (Turbo Pascal 7's protected-mode IDE) and its RTM, from $(BORLAND_DIR) (private: copied into the
+# cache, which the dev container mounts, and never into the repository).
+GLOS_BORLAND := $(MGA_CACHE)/glos/borland
+TPX_FILES := TPX.EXE RTM.EXE DPMI16BI.OVL TURBO.TPL
+$(GLOS_BORLAND)/.tpx: $(addprefix $(BORLAND_DIR)/TP7/,$(TPX_FILES))
+	@mkdir -p $(GLOS_BORLAND)
+	$(Q)cp $^ $(GLOS_BORLAND)/
+	$(Q)touch $@
+m4d-inputs: $(GLOS_HX)/.hdpmi16 build/ow/dos/DPMI16.EXE build/dj/DPMICONF.EXE $(GLOS_BORLAND)/.tpx
 
 # GLOS for other repos' Loop A jobs (M4c): in the cache the dev container
 # mounts, for LOOPA_EXTRA_ARGS="--boot-cfg glosshell --file $(GLOS_CACHE)/GLOS.EXE=/TEST/GLOS.EXE ..."

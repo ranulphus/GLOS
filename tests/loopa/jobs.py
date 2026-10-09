@@ -412,6 +412,7 @@ def dpmiconf(profile, boot):
     checks, GLOS must pass them all."""
     tag = "%s-%s" % (profile, boot)
     common = ["--machine", profile, "--boot-cfg", boot, "--file", "build/dj/DPMICONF.EXE=/TEST/DPMICONF.EXE",
+              "--file", "build/ow/dos/DPMI16.EXE=/TEST/DPMI16.EXE",       # its 16-bit child (M4d)
               "--timeout", "400", "--idle", "150", "--cmd", "SERSAY HX-START dpmiconf"]
     end = ["--cmd", "SERSAY HX-DONE 0"]
     out = {
@@ -436,6 +437,90 @@ def dpmiconf(profile, boot):
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("dpmiconf-" + tag, "PASS" if not bad else "FAIL",
                                "" if not bad else " failed: " + " ".join(bad), info), not bad
+
+
+def dpmiconf16(profile, boot):
+    """DPMICONF-16 (tests/dos/dpmi16/) under HDPMI16 and HDPMI16i, its
+    baselines, and GLOS (M4d): the baselines prove the checks, GLOS must pass
+    them all, its glos-* ones too (a 32-bit child of the 16-bit client)."""
+    tag = "%s-%s" % (profile, boot)
+    common = ["--machine", profile, "--boot-cfg", boot, "--file", "build/ow/dos/DPMI16.EXE=/TEST/DPMI16.EXE",
+              "--file", "build/dj/DPMICONF.EXE=/TEST/DPMICONF.EXE", "--timeout", "400", "--idle", "150",
+              "--cmd", "SERSAY HX-START dpmi16"]
+    end = ["--cmd", "SERSAY HX-DONE 0"]
+    hosts = {
+        "hdpmi16": common + ["--file", HX + "/HDPMI16.EXE=/HX/HDPMI16.EXE", "--cmd", "HDPMI16 -r",
+                             "--cmd", "C:\\TEST\\DPMI16.EXE"] + end,
+        "hdpmi16i": common + ["--file", HX + "/HDPMI16I.EXE=/HX/HDPMI16I.EXE", "--cmd", "HDPMI16I -r",
+                              "--cmd", "C:\\TEST\\DPMI16.EXE"] + end,
+        "glos": common + GLOS_FILES + ["--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\DPMI16.EXE",
+                                       "--cmd", "VECCHK check"] + end,
+    }
+    procs = {h: run("dpmi16-%s-%s" % (h, tag), a, background=True) for h, a in hosts.items()}
+    text = {}
+    for h, pr in procs.items():
+        pr.wait()
+        log = os.path.join(ROOT, "out", "dpmi16-%s-%s" % (h, tag), "serial.log")
+        text[h] = open(log, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(log) else ""
+    checks, info = {}, ""
+    for host, t in text.items():
+        checks[host] = "HX-TEST dpmi16-end fails=0" in t
+        if not checks[host]:
+            info += " %s:[%s]" % (host, " ".join(l.split()[1] for l in t.splitlines()
+                                                 if l.startswith("HX-TEST") and " FAIL" in l) or "no end")
+    gl = text["glos"]
+    checks["unimpl-none"] = not re.findall(r"GLOS-DPMI-UNIMPL \S+ ax=(\w+)", gl)
+    checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl
+    checks["one-crash"] = gl.count("GLOS-CRASH why=") == 1            # the child that faults on purpose
+    checks["vecchk"] = "HX-VECCHK ok" in gl
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("dpmi16-" + tag, "PASS" if not bad else "FAIL",
+                               "" if not bad else " failed: " + " ".join(bad), info), not bad
+
+
+BORLAND = os.path.join(os.environ.get("MGA_CACHE", os.path.expanduser("~/.cache/mga-glide")), "glos", "borland")
+# Ctrl-F9 (compile and run) once the IDE is up; Alt-X when the program has reported.
+TPX_KEYS = "@HX-TPX start,15:0x1d:down,15.2:0x43,15.4:0x1d:up,@HX-TEST tpx-run,4:0x38:down,4.2:0x2d,4.4:0x38:up"
+
+
+def tpx(profile, boot):
+    """TPX.EXE, Turbo Pascal 7's IDE, a 16-bit DPMI client on Borland's RTM
+    (M4d): it opens tests/borland/hello.pas, compiles and runs it (Ctrl-F9),
+    the program reports over COM1, and Alt-X leaves. Without GLOS RTM loads
+    DPMI16BI.OVL as the host; under GLOS, GLOS is the host. Both must report,
+    and TPX end with code 0."""
+    tag = "%s-%s" % (profile, boot)
+    files = []
+    for f in ("TPX.EXE", "RTM.EXE", "DPMI16BI.OVL", "TURBO.TPL"):
+        files += ["--file", "%s/%s=/TP/%s" % (BORLAND, f, f)]
+    files += ["--file", "tests/borland/hello.pas=/TP/HELLO.PAS", "--file", "build/ow/dos/RUNOUT.EXE=/TEST/RUNOUT.EXE"]
+    # RUNOUT: it empties the BIOS key buffer first (the boot's F1 would open TPX's help) and reports the exit code.
+    common = ["--machine", profile, "--boot-cfg", boot, "--timeout", "400", "--idle", "150", "--keys", TPX_KEYS,
+              "--cmd", "C:", "--cmd", "CD \\TP", "--cmd", "SERSAY HX-TPX start"] + files
+    line = "C:\\TEST\\RUNOUT.EXE TPX C:\\TP\\TPX.EXE HELLO.PAS"
+    end = ["--cmd", "SERSAY HX-DONE 0"]
+    hosts = {"base": common + ["--cmd", line] + end,
+             "glos": common + GLOS_FILES + ["--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /RUN " + line,
+                                            "--cmd", "VECCHK check"] + end}
+    if not os.path.exists(os.path.join(BORLAND, "TPX.EXE")):
+        return "  %-22s FAIL no %s/TPX.EXE (make m4d-inputs; BORLAND_DIR)" % ("tpx-" + tag, BORLAND), False
+    procs = {h: run("tpx-%s-%s" % (h, tag), a, background=True) for h, a in hosts.items()}
+    text = {}
+    for h, pr in procs.items():
+        pr.wait()
+        log = os.path.join(ROOT, "out", "tpx-%s-%s" % (h, tag), "serial.log")
+        text[h] = open(log, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(log) else ""
+    checks = {}
+    for h, t in text.items():
+        checks[h + "-ran"] = "HX-TEST tpx-run ok sum=5050" in t
+        checks[h + "-exit0"] = "HX-RUN TPX code=0" in t
+    gl = text["glos"]
+    checks["glos-16bit"] = "GLOS-DPMI start bits=16" in gl and "GLOS-DPMI resident" in gl     # RTM's TSR
+    checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "GLOS-CRASH" not in gl and "DPMI-UNIMPL" not in gl
+    checks["vecchk"] = "HX-VECCHK ok" in gl
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("tpx-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
+        not bad
 
 
 def same_screen(a, b):
@@ -715,7 +800,8 @@ def djtst(profile, boot):
     checks["clean"] = "GLOS-PANIC" not in gl and "GLOS-WARN" not in gl and "DPMI-UNIMPL" not in gl
     # MULTISPN3's children ran as levels of its context (M4c).
     ms = gl[gl.find("HX-RUN-START MULTISPN3"):gl.find("HX-RUN MULTISPN3")]
-    checks["multispn-levels"] = ms.count("level=2\n") == 6     # each child's start and exit
+    checks["multispn-levels"] = (len(re.findall(r"GLOS-DPMI start [^\n]* level=2 ", ms)) == 3      # each child's
+                                 and len(re.findall(r"GLOS-DPMI exit code=\d+ level=2", ms)) == 3)  # start and exit
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("djtst-" + tag, "PASS" if not bad else "FAIL",
                                "" if not bad else " failed: " + " ".join(bad), info), not bad
@@ -787,7 +873,7 @@ HR_KNOWN = {
     "EXC0D": "dump", "EXC0E": "dump", "I3105032": "dump",
     "EXC11": "privileged",      # HDPMI sets CR0.AM for the client; a ring-3 client can't
     "EXAMPLE": "timing",        # the exit code counts IRQs
-    "EXC01MZ": "int1-routing",  # HDPMI gives a single-step trap to the INT 1 handler, skipping the exception handler
+    # (EXC01MZ, single-step routing, differed only through 86Box's stale single-step trap: patch 0113, M4d.)
     "I3100001": "error-code",   # 0000h with CX=0: 8021h ([DPMI1.0]); HDPMI leaves AX=0
     # HDPMI refuses a second client started by the first; GLOS runs it as a level (M4c).
     "I3100002": "nested", "NEWCL": "nested", "NEWCL2": "nested",
@@ -1080,7 +1166,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -1100,6 +1186,10 @@ def main():
         res = matrix(dpmi, combos, a.jobs) + matrix(dpmiconf, combos, a.jobs)
         res += matrix(dpmi_hello, [(b,) for b in a.boot or BOOTS], a.jobs)
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "tpx":
+        return 0 if all(r[1] for r in matrix(tpx, combos, max(1, a.jobs // 2))) else 1
+    if a.suite == "dpmi16":
+        return 0 if all(r[1] for r in matrix(dpmiconf16, combos, max(1, a.jobs // 2))) else 1
     if a.suite == "djtst":
         return 0 if all(r[1] for r in matrix(djtst, combos, max(1, a.jobs // 2))) else 1
     if a.suite == "ecm":

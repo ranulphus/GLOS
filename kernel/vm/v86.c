@@ -654,7 +654,16 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
             return;
         break;
     case 0x21:
+        if (dctx && (vm.bi->flags & BI_F_DPMITRACE)) {     /* a client's own real-mode code, too */
+            static u32 n21;
+            if (n21++ < 200)
+                kprintf("GLOS-DPMI v86-int21 ax=%04x bx=%04x cx=%04x dx=%04x ds=%04x es=%04x from=%04x:%04x\n", ax,
+                        tf->ebx & 0xFFFF, tf->ecx & 0xFFFF, tf->edx & 0xFFFF, tf->v86_ds & 0xFFFF,
+                        tf->v86_es & 0xFFFF, tf->cs & 0xFFFF, tf->eip & 0xFFFF);
+        }
         agent_vm_int21(tf);
+        if ((ax >> 8) == 0x31)
+            dpmi_tsr_seen();
         if ((ax >> 8) == 0x4B && (ax & 0xFF) <= 1)
             vm_exec_snap();
         if (vm.shell_state == 1 && ((ax >> 8) == 0x4C || (ax >> 8) == 0x00))

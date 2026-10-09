@@ -28,6 +28,7 @@
 #define PHYS_WINDOW    0xE0000000u      /* 0800h: linear = physical from here to FFBFFFFFh */
 #define LSTACK_SIZE    0x4000u          /* the locked host stack (§14.2) ... */
 #define LSTACK_LIN     (USER_END - 0x10000u)    /* ... at the top of the user region, a hole below it */
+#define LDT_ALIAS_LIN  (LSTACK_LIN - 0x20000u)  /* the LDT, read-only, for "MS-DOS" 0100h (M4d), a hole above */
 #define NENTRY         32               /* handlers the host has called and not seen return */
 #define NLEVEL         6                /* client levels: a client's children's own mode switches (M4c) */
 #define EXC_NEST_MAX   5                /* exceptions inside exception handlers (CWSDPMI's rule) */
@@ -38,6 +39,7 @@
 #define TR_RAW       0x120u             /* 0306h: raw switch to real mode */
 #define TR_SAVE      0x121u             /* 0305h: protected-mode state save/restore */
 #define TR_VENDOR    0x122u             /* 0A00h "GLOS": the vendor API entry */
+#define TR_MSDOS     0x123u             /* 168Ah "MS-DOS": Windows' extension entry (0100h: the LDT's selector) */
 #define TR_RET       0x140u             /* + entry: a handler the host called returns (deliver.c) */
 #define TR_RET10     (TR_RET + NENTRY)  /* + entry: an exception handler returns through the 1.0 frame's address */
 #define TR_COUNT     (TR_RET10 + NENTRY)
@@ -45,6 +47,7 @@
 struct farptr {
     u32 off;
     u16 sel;
+    u8 b32;                             /* a handler: its client's bitness, which its frames follow (M4d) */
 };
 
 enum { BK_MEM, BK_PHYS, BK_HOST };
@@ -76,6 +79,7 @@ struct pmentry {
     u8 switched;                        /* it moved to the locked stack */
     u8 vif;                             /* the virtual IF it interrupted */
     u8 frame10;                         /* PE_EXC: a 0212h handler, which returns through the 1.0 frame */
+    u8 b32;                             /* the handler's bitness: its frame's */
     struct trapframe *at;               /* the frame it ran in (the same for every trap meanwhile) */
     struct trapframe saved;             /* what it interrupted */
 };
@@ -97,7 +101,14 @@ struct dpmi_level {
 
 struct dpmi_ctx {
     u32 cr3;                            /* its page directory */
-    u32 *ldt;                           /* LDT_ENTRIES descriptors (two dwords each) */
+    u32 *ldt;                           /* LDT_ENTRIES descriptors (two dwords each), page-aligned ... */
+    void *ldt_mem;                      /* ... in this allocation (so its frames hold the LDT only) */
+    u16 ldt_alias;                      /* "MS-DOS" 0100h: a selector for it, read-only; 0 until asked */
+    u8 tsr_pending;                     /* the client's program called INT 21h 31h: it goes resident ... */
+    u16 resident_parent;                /* ... and its context with it, until this program (its parent) ends */
+    u16 xbuf_seg;                       /* dosx.c: DOS memory for 16-bit clients' INT 21h buffers */
+    u16 xret_ds, xret_es, xret_si;      /* the segments (and SI) its last DOS call returned */
+    u16 dta_sel, dta_off;               /* the client's DTA (1Ah), 0: its PSP's */
     u8 *ldt_used;
     u8 bits32;                          /* a 32-bit client */
     u16 psp, env_seg;                   /* real-mode segments */
@@ -109,7 +120,7 @@ struct dpmi_ctx {
     u8 exc10[32];                       /* set by 0212h: the handler returns through the 1.0 frame */
     u32 rm_prev[256];                   /* the real-mode vector that a PM hook or an RMCB took over (§14.5) */
     struct rmcb rmcb[NRMCB];
-    u16 lsel;                           /* the locked stack */
+    u16 lsel[2];                        /* the locked stack, 16- and 32-bit (the other made when needed) */
     struct dpmi_level lv[NLEVEL];       /* lv[nlv - 1]: the client running now */
     u32 nlv;
     u32 term_vec;                       /* the running client's own terminate address (PSP:0Ah) */
@@ -168,6 +179,12 @@ u16 ldt_new(u32 base, u32 limit, u8 access, u8 flags);  /* 0 if the LDT is full 
 int ldt_free(u16 sel);
 int ldt_valid(u16 sel);                 /* one of the client's allocated selectors */
 u32 sel_base(u16 sel);
+void dpmi_vendor_2f(struct trapframe *tf);
+void dpmi_tsr_seen(void);
+int dosx_int21(struct trapframe *tf);   /* a 16-bit client's INT 21h, translated: 1, or 0 to reflect */
+u16 dpmi_seg_sel(u16 seg);              /* 0002h: a selector for a real-mode segment, 0 if none */
+int ldt_alias_sel(void);                /* "MS-DOS" 0100h's selector, made the first time; 0 if it can't be */
+int lin_alias(u32 lin, const void *kva, u32 size);      /* kernel memory, read-only for the client, at lin */
 u32 sel_limit(u16 sel);                 /* in bytes, granularity applied */
 void sel_set_base(u16 sel, u32 base);
 void sel_set_limit(u16 sel, u32 limit);

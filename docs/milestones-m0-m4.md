@@ -468,6 +468,43 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   - mixed-bitness levels (a 16-bit child of a 32-bit client) with M4d;
   - XMS 4309h.
 
+**M4d status (2026-10-08): done** (supervisor.md §12.1d, §13, §20).
+- **The host:**
+  - every handler keeps its own client's bitness: frames, returns and a locked-stack selector of each bitness;
+  - levels of either bitness (a 16-bit child of a 32-bit client and the reverse);
+  - 0210h/0212h for 16-bit clients (the 1.0 frame as HDPMI16 lays it out);
+  - INT 2Fh 168Ah's "MS-DOS" entry (0100h: a read-only selector for the LDT, whose pages now hold only it);
+  - clients that go resident with INT 21h 31h keep their context until the program they returned to ends;
+  - DOS API translation for 16-bit clients (`kernel/dpmi/dosx.c`): selectors for segments, buffers through an
+    8 KB block of DOS memory.
+- **Why the extras:** Borland's RTM, under TPX, needs them. It asks for "MS-DOS"'s LDT selector and won't start
+  without one. It goes resident from inside its own EXEC and comes back through raw switches. It calls DOS from
+  protected mode with selectors (50h with its PSP's selector, 34h and 5D06h for the InDOS flag).
+- **T: `make loopa-m4d`:**
+  - loopa-m4c;
+  - **DPMICONF-16** (`tests/dos/dpmi16/`, Open Watcom C and WASM, 82 lines, 77 judged under GLOS: descriptors, DOS
+    memory tiled for a 16-bit client, real-mode calls, vectors, memory, exceptions with both frames, IRQs and INT
+    1Ch passed up, the FPU error, callbacks, a raw round trip, espfix, nested clients, the DOS translation): 0
+    failures on HDPMI16, HDPMI16i and GLOS on all six profile and boot combinations, with GLOS's mixed-bitness
+    nests both ways (DPMICONF-32 gains `glos-nest-16in32`);
+  - **TPX** on RTM, without GLOS and under it on bf6 and the 486DX2: it opens `tests/borland/hello.pas`, compiles
+    and runs it (Ctrl-F9), and the program reports over COM1. Alt-X ends TPX with code 0.
+- **86Box:** patches 0113–0115 (a faulting instruction takes no single-step trap; IRETD loads only the model's
+  EFLAGS bits; the debug registers built in), found by M4c and prepared on a branch with V86TEST cases W–Y, merged
+  into MGA-Glide main as a8684e5 with the user's approval. deps.mk pins it. With them, HDPMI's EXC01MZ matches
+  (its "single-step routing" difference was 86Box's stale trap, not HDPMI's; HR_KNOWN loses it).
+- **DR breakpoints in Loop A:** with 0115, DPMICONF's `watch` is a check again (CWSDPMI, HDPMI32i, GLOS). It
+  found GLOS dropping the RF owed to an execute watchpoint's return: `db_rf` was spent entering the client's
+  exception handler, so the breakpoint fired forever. It also found two test bugs: a non-volatile `exc_or_flags`,
+  and the shared handler's EBX from an earlier check.
+- **Also:** GLOS.EXE's `/RUN` stack smash (`_searchenv()` given 80 bytes for `_MAX_PATH`), fixed separately
+  (d697999); the DPMI trace gained raw switches, translated DOS calls, a client's real-mode DOS calls, and the code
+  and registers at a fault.
+- **Deferred:**
+  - translation of EXEC (4Bh) and the other pointer functions dosx.c logs;
+  - a resident client at a level above the first;
+  - writes through "MS-DOS"'s LDT selector (none seen).
+
 ### The gate's baseline matrix (M4e)
 
 | Suite | Baseline | Profiles | Boots |

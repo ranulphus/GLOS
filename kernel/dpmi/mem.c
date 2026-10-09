@@ -340,6 +340,30 @@ int phys_unmap(u32 lin)
 
 /* Host memory inside the context (the locked stack): committed now, freed
    with the context, out of every handle's reach. */
+/* Kernel memory (whole pages) shown to the client read-only at lin, as a
+   host block that 0501h's search skips; the frames stay the kernel's. */
+int lin_alias(u32 lin, const void *kva, u32 size)
+{
+    struct block *b = kmalloc(sizeof *b);
+    u32 i, n = pages_of(size);
+    if (!b)
+        return -1;
+    for (i = 0; i < n; i++)
+        if (mm_map(lin + (i << 12), mm_lookup((u32)kva + (i << 12)) & ~0xFFFu, MM_U | MM_MAPPED) != 0) {
+            while (i--)
+                mm_unmap(lin + (i << 12));
+            kfree(b);
+            return -1;
+        }
+    b->handle = 0;
+    b->lin = lin;
+    b->size = n << 12;
+    b->kind = BK_HOST;
+    b->level = 1;
+    insert(b);
+    return 0;
+}
+
 int lin_host(u32 lin, u32 size)
 {
     struct block *b = kmalloc(sizeof *b);

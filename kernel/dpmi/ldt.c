@@ -59,6 +59,22 @@ u16 ldt_new(u32 base, u32 limit, u8 access, u8 flags)
     return (u16)((u32)i * 8 | 7);
 }
 
+/* "MS-DOS" 0100h: a data selector over the LDT's own pages, read-only:
+   reading descriptors is all that is safe (a client that could write it
+   could make a call gate into ring 0). Made once, as the first client's. */
+int ldt_alias_sel(void)
+{
+    if (!dctx->ldt_alias) {
+        u32 nlv = dctx->nlv;
+        if (lin_alias(LDT_ALIAS_LIN, dctx->ldt, LDT_ENTRIES * 8) != 0)
+            return 0;
+        dctx->nlv = 1;
+        dctx->ldt_alias = ldt_new(LDT_ALIAS_LIN, LDT_ENTRIES * 8 - 1, 0xF2, 0x00);
+        dctx->nlv = nlv;
+    }
+    return dctx->ldt_alias != 0;
+}
+
 int ldt_valid(u16 sel)
 {
     u32 i = sel >> 3;

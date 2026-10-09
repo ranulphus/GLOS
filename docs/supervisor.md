@@ -603,9 +603,9 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
     floor (§12.3) and the terminate address.
   - The parent waits inside its EXEC, a nested real-mode call, so the child runs at that depth and ends there:
     what nested deeper is unwound, and the parent's EXEC returns as on a plain DOS.
-  - A child of the other bitness (a 16-bit child of a 32-bit client, or the reverse) fails with 8011h and
-    `GLOS-DPMI-UNIMPL mixed-bitness`; frames and stacks follow the context's bitness. Only the first client
-    gets the locked stack; the levels share it.
+  - In M4c a child of the other bitness (a 16-bit child of a 32-bit client, or the reverse) failed with 8011h;
+    M4d takes it as a level like any other (§12.1d). Only the first client gets the locked stack; the levels
+    share it.
   - DPMICONF's `nest` (a child that leaves its vector hooked, and one that faults) passes on GLOS, HDPMI32i and
     CWSDPMI. CWSDPMI keeps a child's hook after the child ends; GLOS and HDPMI32i put the parent's back.
 - **The terminate address** (PSP:0Ah) of each level points at the stub's term ARPL, and a pending-end stack
@@ -642,9 +642,60 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   GLOS and HDPMI32i but for selectors and addresses. HDPMI's own regression suite (`make loopa-hdpmireg`) runs
   each test under HDPMI32i and GLOS. A test passes when the exit code and output agree, or differ only in
   selector numbers. Each remaining difference is listed with its reason in `HR_KNOWN`
-  (`tests/loopa/jobs.py`): HDPMI's crash dump on the program's output, its INT 21h translation API, its
-  single-step routing, IOPL 0's PUSHF (D20), 0305h's empty state, and HDPMI refusing a nested client. Any
+  (`tests/loopa/jobs.py`): HDPMI's crash dump on the program's output, its INT 21h translation API,
+  IOPL 0's PUSHF (D20), 0305h's empty state, and HDPMI refusing a nested client. Any
   other difference fails the job.
+
+### 12.1d As built in M4d (`kernel/dpmi/dosx.c`; 16-bit clients)
+
+- **Every handler keeps its own client's bitness** (`struct farptr.b32`, set by 0203h/0212h, 0205h and 0303h).
+  Its frames follow it: the IRET frame of an IRQ or INT passed up, an exception's 0.9 frame, a callback's, and
+  the frame of a software INT to it. So do the reads when it returns (an exception handler's RETF, a callback's
+  structure pointer, the chain's end at the host's own handler).
+  - The locked stack has a selector of each bitness, the second made when a handler of the other bitness first
+    needs it. A handler that interrupts code of the other bitness on the locked stack carries on there through
+    its own alias. From a stack of the client's own of the other bitness there is nowhere safe to go, and the
+    client ends (`no-stack`).
+- **Levels of either bitness:** a 16-bit child of a 32-bit client, or the reverse, is a level like any other
+  (M4c refused it). Its handlers and frames are its own; the parent's, inherited, keep theirs. DPMICONF-16's
+  `glos-nest-32in16` (DPMICONF-32 as its child) and DPMICONF-32's `glos-nest-16in32` check both ways.
+- **The 1.0 exception frame for 16-bit handlers** (0210h/0212h), laid out as HDPMI16 lays it out: the 0.9 part
+  in words at 0 (IP:CS of the host, error code, IP, CS, FLAGS, SP, SS), padded to 20h; the 1.0 part in dwords
+  at 20h as for 32-bit handlers, except that its return address is IP:CS followed by a zero dword. The handler
+  returns with a 16-bit RETF through either return address.
+- **INT 2Fh 168Ah** in protected mode ([DPMI1.0]) gives "GLOS" (as 0A00h) and **"MS-DOS"**, Windows'
+  extension. Its function 0100h returns a selector for the LDT. Borland's RTM won't start without it, and
+  HDPMI16 has it. GLOS's selector shows the LDT's own frames **read-only**, at BFFD0000h: a client that could
+  write its LDT could build a call gate into ring 0. The LDT is page-aligned so that its frames hold nothing
+  else. RTM only reads it; a write through it is a page fault for the client, logged once as
+  `GLOS-WARN ldt-alias-write`.
+- **A client that goes resident** (INT 21h 31h from its program, in either mode, at the first level) keeps its
+  context: the terminate address carries on without ending it or restoring vectors (`GLOS-DPMI resident`).
+  The context ends when the program it returned to ends (`GLOS-DPMI exit resident`), or when a client of it
+  ends with 4Ch from protected mode. Borland's RTM works this way: TPX.EXE runs RTM.EXE, which switches to
+  protected mode, sets itself up and goes resident; TPX then reaches it through its INT 2Fh, and RTM
+  raw-switches back into its context.
+- **DOS API translation for 16-bit clients** (`dosx.c`), as Windows' DOSX gives its 16-bit clients and HDPMI16
+  copies; RTM relies on it. 32-bit clients bring their own extender (DJGPP, DOS/4GW) and keep plain
+  reflection, as under CWSDPMI. For a 16-bit client, GLOS's own INT 21h handler:
+  - turns returned segments into selectors (0002h's): 34h, 52h, 1Bh/1Ch/1Fh/32h, 5D06h;
+  - gives and takes the PSP as a selector: 50h, 51h, 62h (the client's own PSP selector for its PSP);
+  - keeps the client's DTA (1Ah, 2Fh) and copies 4Eh/4Fh's results into it;
+  - reads and sets protected-mode vectors for 25h/35h (as 0205h/0204h), and allocates DOS memory as
+    0100h–0102h for 48h/49h/4Ah;
+  - copies through an 8 KB block of DOS memory (taken the first time) the paths of 39h–3Dh, 41h, 43h, 4Eh, 56h,
+    5Ah, 5Bh and 6Ch, the strings and buffers of 09h, 3Fh and 40h (in 7.5 KB pieces), 47h's directory, 38h's
+    country data, and 29h's name and FCB.
+  - Other functions with pointers are logged once (`GLOS-DPMI-UNIMPL dosx-21-NN`) and reflected as they are:
+    EXEC (4Bh) among them, which RTM does itself.
+- **Test inputs:** DPMICONF-16 (`tests/dos/dpmi16/`, Open Watcom C and WASM; the same check names as DPMICONF-32,
+  prefixed `dpmi16-`) passes on HDPMI16, HDPMI16i and GLOS on all six profile and boot combinations; its
+  `dosx-*` checks cover the translation. HDPMI16 returns ESP[31:16] as 0 after a trap on a 16-bit stack, GLOS
+  the client's own (espfix); either is accepted. TPX.EXE (Turbo Pascal 7's IDE, `$(BORLAND_DIR)`, copied into
+  the cache by `make m4d-inputs`) opens `tests/borland/hello.pas`, compiles and runs it (Ctrl-F9), and leaves
+  (Alt-X), without GLOS (RTM loads DPMI16BI.OVL as the host) and under it.
+- **Found on the way:** GLOS.EXE's `/RUN` gave `_searchenv()` an 80-byte buffer where it fills `_MAX_PATH`
+  bytes, and a bare program name in the current directory smashed the loader's stack (fixed before M4d).
 
 ### 12.2 Initial state after the mode switch ([DPMI0.9 §4])
 
@@ -709,7 +760,7 @@ Statuses:
 | 0200h/0201h | Get/set real-mode vector | M4a | DJGPP installs its INT 1Bh RMCB here | |
 | 0202h/0203h | Get/set exception handler | M4b | DJGPP: 0–11h; MGA-Glide OW: 00h, 06h, 0Dh, 0Eh. The default is SEL_TRAMP:TR_EXC+n; setting it back restores the host's own. | CWSDPMI |
 | 0204h/0205h | Get/set PM vector | M4a (vectors), M4b (IRQ delivery) | INT 8/9/1Bh/23h/24h/75h, IRQ3/4, INT 21h (DOS/4GW, MGA-Glide exit hook) | CWSDPMI, DOS/4GW |
-| 0210h/0212h | Get/set extended PM exception handler (1.0) | M4b | 32-bit clients (16-bit: M4d). The 1.0 frame at +20h, as HDPMI32i's. | HDPMI32i |
+| 0210h/0212h | Get/set extended PM exception handler (1.0) | M4b, M4d | The 1.0 frame at +20h, as HDPMI32i's; for a 16-bit handler as HDPMI16's (§12.1d). | HDPMI32i, HDPMI16 |
 | 0211h/0213h | Get/set extended real-mode exception handler (1.0) | log | Real-mode exceptions go to the IVT, as on a real-mode CPU | |
 | 0300h | Simulate real-mode interrupt | M4a | SS:SP=0 means the host stack; CX words copied; IF/TF clear | CWSDPMI |
 | 0301h/0302h | Call real-mode far / IRET procedure | M4a | GLQuake IPX entry; SDL VBE bank switch. 0301h keeps the caller's IF (M4c, §12.1c); 0302h clears IF/TF. | HDPMI32i |
@@ -729,7 +780,7 @@ Statuses:
 | 0800h/0801h | Physical mapping | M4a | Matrox BARs, VBE LFB; linear = physical (§12.4) | DOS/4GW |
 | 0900h–0902h | Virtual IF | M4a | Return the old state in AL | |
 | 0A00h | Vendor API | M4a | "GLOS" → entry point and API version (PRD D23). **Any other string → CF=1, AX=8001h** (DOS/4GW probes "RSI CLIENT 0.9"/"RATIONAL DOS/4G"). | |
-| 0B00h–0B03h | Watchpoints | M4c | DR0–DR3 (the gdb stub uses software breakpoints). A hit is exception 1 to the client and sets 0B02h's bit; an execute watchpoint resumes with RF. Freed with the level that set it. 86Box never fires them (§20): checked on silicon. | HDPMI32i |
+| 0B00h–0B03h | Watchpoints | M4c | DR0–DR3 (the gdb stub uses software breakpoints). A hit is exception 1 to the client and sets 0B02h's bit; returning to an execute watchpoint that fired sets RF once (kept across the client's exception handler). Freed with the level that set it. DPMICONF's `watch` passes on CWSDPMI, HDPMI32i and GLOS since 86Box patch 0115 (§20). | HDPMI32i |
 | 0C00h/0C01h | TSR services (1.0) | log | | |
 | 0D00h–0D03h | Shared memory (1.0) | fail (8001h) | DOS/4GW probes 0D00h | |
 | 0E00h/0E01h | Coprocessor status / emulation | M4a, M4c | DJGPP: 0E01h BX=1; without an FPU, BX=3 and EMU387. 0E01h sets the client's MP and EM, in CR0 while it runs (M4c): EM means the client emulates, and gets exception 7. 0E00h reports them, the FPU present and the CPU type. | CWSDPMI (ignores 0E00h), HDPMI32i |
@@ -740,12 +791,15 @@ Statuses:
 |---|---|
 | 1687h | The DPMI host, with SI = private paragraphs |
 | 1686h | AX=0 in protected mode |
-| 168Ah | 1.0 vendor API, same rules as 0A00h |
+| 168Ah | 1.0 vendor API in protected mode: "GLOS" as 0A00h, and Windows' "MS-DOS" (0100h: a read-only selector for the LDT; §12.1d). Others: AL as it was |
 | 1680h | **A real yield** in either mode (`uclock`'s start-up spin and `usleep` call it [census]). AL stays 80h ("not supported"), as on plain DOS: DJGPP's `uclock()` takes AL=0 for Windows 9x and waits for a BIOS tick, which never comes when it is first called with interrupts off (JOYTEST hung, M4c) |
 | 1600h, 160Ah | **Never report Windows.** GLQuake aborts if Windows is reported [census]. 1600h returns AL=0; 160Ah leaves AX as it was. |
 | 1681h/1682h | Reflected (no handler, as on the baselines) |
 | 4300h/4310h | GLOS's XMS server (§16). 4309h (HIMEM's handle table) isn't provided. |
 | Others | In V86 mode, GLOS's handler is at the bottom of the INT 2Fh chain and passes them on (§12.1c) |
+
+**INT 21h from 16-bit clients** is translated (selectors for segments, buffers copied: §12.1d); from 32-bit
+clients it is reflected as it is.
 
 **INT 67h:** VCPI DE00h and EMS are absent, so VCPI probes fail as they do with no EMM loaded (PRD D25).
 
@@ -970,7 +1024,7 @@ place where nothing else is in DOS by construction.
 | AGENT | A job: `run seq= cmd=`, `done seq= code= via=` (the program, or `comspec`) |
 | KILL | A kill (§9.6) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
-| DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... if= -> cf= ax=` (`if=` the virtual IF at the call), `deliver irq=|passup=|exception=|rmcb= to= from= at= err= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |
+| DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... if= -> cf= ax=` (`if=` the virtual IF at the call), `raw to=rm|pm`, `dosx ax= ... -> cf=`, `vendor name=`, `v86-int21` (a client's real-mode DOS calls), `exception-code` (the code bytes and registers at a fault),, `deliver irq=|passup=|exception=|rmcb= to= from= at= err= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |
 | CRASH | A client the host ends (§19): `why= vec= err= prog= psp= bits= mode=`, `cs:eip= ss:esp= eflags= cr2=`, the general registers, `code=` (16 bytes at CS:EIP), `stack=`, a `seg` line per segment register, `handlers= lstack= nesting=`, `file=` |
 | DPMI-UNIMPL | An unimplemented call |
 | PANIC | A panic: registers and CR2. A double fault adds the interrupted context from the TSS, ESP0 and its page-table entry, any IDT gate or GDT descriptor that changed since start-up, and a `thread=` line per thread (stack, saved ESP, canary) |
@@ -1011,9 +1065,9 @@ place where nothing else is in DOS by construction.
 | IRQ8 keeps firing without a read of register C | A tick that forgets C works in 86Box, freezes on silicon | Always read C (§8.1) |
 | PGE is stored but every flush is global | None | |
 | The dynarec compiles PUSHF per IOPL | IOPL changes inside a session could be ignored | V86TEST case U found no problem; IOPL stays constant per session anyway |
-| DR0–DR3 breakpoints never fire on the bf6 profile (data ones are checked only in the 386 core's MMU path; an execute one didn't fire on the interpreter either, under CWSDPMI) | 0B00h–0B03h can't be seen working in Loop A, on any host | DPMICONF's `watch` is INFO; silicon checks it (M4c) |
-| A single-step trap stays pending across an instruction that faults into ring 0, and is taken in the kernel's handler (silicon discards it, SDM 17.3.1.4) | A #DB in ring 0 with DR6=0, which the kernel never causes (M4c: an lDebugX trace step onto one of the stub's ARPLs, a #UD, panicked GLOS) | Such a #DB is dropped, `GLOS-CPU stray-db` logged once (§12.1c). An 86Box patch and V86TEST case are proposed to MGA-Glide |
-| IRETD to V86 mode loads EFLAGS[31:16] unmasked (POPFD masks by CPU model), so a 486DX2 keeps ID | An emulated POPFD that set ID made CPUID look present (lDebugX ran it into #UD, M4c) | GLOS's FLAGS image has ID only where the loader found CPUID (§9.2) |
+| DR0–DR3 breakpoints never fire (86Box's debug-register support is behind its `DEBUGREGS486` build option, off by default) | 0B00h–0B03h couldn't be seen working in Loop A, on any host | **Fixed:** patch 0115 builds it (case Y); the emulated Pentium II's CPUID now reports DE, as the chip does. DPMICONF's `watch` is a check again; it found GLOS dropping the RF it owed the client's handler's return (M4d) |
+| A single-step trap stays pending across an instruction that faults into ring 0, and is taken in the kernel's handler (silicon discards it, SDM 17.3.1.4) | A #DB in ring 0 with DR6=0, which the kernel never causes (M4c: an lDebugX trace step onto one of the stub's ARPLs, a #UD, panicked GLOS) | Such a #DB is dropped, `GLOS-CPU stray-db` logged once (§12.1c). **Fixed:** patch 0113 (MGA-Glide a8684e5; V86TEST case W). GLOS keeps the drop: harmless on silicon |
+| IRETD to V86 mode loads EFLAGS[31:16] unmasked (POPFD masks by CPU model), so a 486DX2 keeps ID | An emulated POPFD that set ID made CPUID look present (lDebugX ran it into #UD, M4c) | GLOS's FLAGS image has ID only where the loader found CPUID (§9.2). **Fixed** too: patch 0114 (case X) |
 | Matrox G-series cards are AGP only | 486 profiles can't have a Matrox card | S3 Trio64V2/DX until a PCI-variant patch at M7 |
 | The dynarec (the old one MGA-Glide builds) checks segment limits on stores, never on loads (`MEM_LOAD_ADDR_EA_*`) | DJGPP's Ctrl-C and SIGALRM cut DS's limit to 4 KB in the IRQ handler; a loop that only reads never faults, on any host (found by djtst205's HANG, M4b) | **Fixed:** patch 0112 (MGA-Glide 81c0686; V86TEST case V) |
 

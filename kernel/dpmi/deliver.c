@@ -28,20 +28,42 @@
 #include "mm.h"
 #include "vm.h"
 
-/* The stack a handler starts on; 1 if that is the locked stack's top (the
-   entry then holds it), 0 if not, -1 if there is none. */
-static int pick_stack(const struct trapframe *tf, u16 *ss, u32 *sp)
+/* The locked stack's selector of a bitness: the other one is made when a
+   handler of the other bitness first needs it (a child level, M4d), as the
+   first client's, so it outlives the level. */
+static u16 lstack_sel(int b32)
+{
+    if (!dctx->lsel[b32]) {
+        u32 nlv = dctx->nlv;
+        dctx->nlv = 1;                          /* (ldt_alloc() tags it with the level) */
+        dctx->lsel[b32] = ldt_new(LSTACK_LIN, LSTACK_SIZE - 1, 0xF2, b32 ? 0x40 : 0x00);
+        dctx->nlv = nlv;
+    }
+    return dctx->lsel[b32];
+}
+
+/* The stack a handler of bitness b32 starts on; 1 if that is the locked
+   stack's top (the entry then holds it), 0 if not, -1 if there is none. A
+   handler of the other bitness than the stack it interrupted carries on on
+   the locked stack through its own alias, and can't from a stack of the
+   client's own. */
+static int pick_stack(const struct trapframe *tf, int b32, u16 *ss, u32 *sp)
 {
     const struct trapframe *pm = (tf->eflags & FL_VM) ? rm_pm_caller() : tf;
     if (!dctx->lstack_use) {
-        *ss = dctx->lsel;
+        *ss = lstack_sel(b32);
         *sp = LSTACK_SIZE;
-        return 1;
+        return *ss ? 1 : -1;
     }
     if (!pm)
         return -1;
     *ss = (u16)pm->ss;
     *sp = sp_of(pm);
+    if (((cpu_desc_hi(*ss) >> 22) & 1) != (u32)b32) {
+        if (sel_base(*ss) != LSTACK_LIN || !lstack_sel(b32))
+            return -1;
+        *ss = dctx->lsel[b32];
+    }
     return 0;
 }
 
@@ -63,14 +85,15 @@ static u32 flags_image(const struct trapframe *tf, u32 vif)
     return (tf->eflags & (FL_ARITH | FL_TF)) | (vif ? FL_IF : 0) | 2;
 }
 
-static struct pmentry *entry_new(struct trapframe *tf, int kind, u16 *ss, u32 *sp)
+static struct pmentry *entry_new(struct trapframe *tf, int kind, int b32, u16 *ss, u32 *sp)
 {
     struct pmentry *e;
     int sw;
-    if (dctx->ending || dctx->npe >= NENTRY || (sw = pick_stack(tf, ss, sp)) < 0)
+    if (dctx->ending || dctx->npe >= NENTRY || (sw = pick_stack(tf, b32, ss, sp)) < 0)
         return 0;
     e = &dctx->pe[dctx->npe];
     e->kind = (u8)kind;
+    e->b32 = (u8)b32;
     e->switched = (u8)sw;
     e->vif = vm.vif;
     e->frame10 = 0;
@@ -119,12 +142,12 @@ static int iret_entry(struct trapframe *tf, int kind, u8 vec, u32 next)
     struct pmentry *e;
     u16 ss;
     u32 sp, f = flags_image(tf, vm.vif);
-    if (!h.sel || !(e = entry_new(tf, kind, &ss, &sp)))
+    if (!h.sel || !(e = entry_new(tf, kind, h.b32, &ss, &sp)))
         return 0;
     trace(kind == PE_INT ? "passup" : "irq", vec, h.sel, h.off, tf);
     if (kind == PE_INT)
         e->saved.eip = next;
-    if (dctx->bits32) {
+    if (h.b32) {
         u32 v[3] = { ret_off(e), SEL_TRAMP, f };
         if (push(ss, &sp, v, sizeof v) != 0)
             return 0;
@@ -167,10 +190,12 @@ int dpmi_passup(struct trapframe *tf, u8 n, u32 next)
 /* ---- exceptions */
 
 /* The frame of [DPMI0.9]: return CS:EIP, error code, CS:EIP, EFLAGS, SS:ESP,
-   in dwords for a 32-bit client. Above it at +20h, for a 32-bit client,
+   in dwords for a 32-bit handler, words for a 16-bit one. Above it at +20h
    the 1.0 frame: return address, error code, CS:EIP with info bits (none:
    the fault was the client's, in protected mode), EFLAGS, SS:ESP, ES, DS,
-   FS, GS, and for a page fault CR2 and the PTE ([DPMI1.0] 0210h). */
+   FS, GS, and for a page fault CR2 and the PTE ([DPMI1.0] 0210h), in
+   dwords either way; a 16-bit handler's return address there is IP:CS and
+   a zero dword (M4d: as HDPMI16 lays it out). */
 void dpmi_exception(struct trapframe *tf)
 {
     u32 v = tf->vec, sp, f = flags_image(tf, vm.vif);
@@ -178,6 +203,11 @@ void dpmi_exception(struct trapframe *tf)
     struct pmentry *e;
     u16 ss;
 
+    if (v == 14 && (tf->err & 2) && dctx->cr2 - LDT_ALIAS_LIN < LDT_ENTRIES * 8) {
+        static int warned;                      /* "MS-DOS" 0100h's LDT is read-only (§12.1d) */
+        if (!warned++)
+            kprintf("GLOS-WARN ldt-alias-write at=%04x:%08x cr2=%08x\n", tf->cs & 0xFFFF, tf->eip, dctx->cr2);
+    }
     if (!h.sel || dctx->ending) {
         dpmi_exc_unhandled(tf, v, tf->err);
         return;
@@ -186,30 +216,41 @@ void dpmi_exception(struct trapframe *tf)
         crash_report(tf, "nested-exceptions");
         return;
     }
-    if (!(e = entry_new(tf, PE_EXC, &ss, &sp))) {
+    if (!(e = entry_new(tf, PE_EXC, h.b32, &ss, &sp))) {
         crash_report(tf, "no-stack");
         return;
     }
-    if (dctx->bits32) {
+    {
         u32 r = ret_off(e), cr2 = v == 14 ? dctx->cr2 : 0, pte = v == 14 ? mm_lookup(cr2) & 0xFFF : 0;
+        u32 esp = sp_of(tf);
         if (v == 14 && !(pte & 1) && lin_in_block(cr2))
             pte = MM_U | MM_W;                  /* an uncommitted page of a block: user, writable (HDPMI32i) */
-        u32 fr[22] = { r, SEL_TRAMP, tf->err, tf->eip, tf->cs & 0xFFFF, f, tf->esp, tf->ss & 0xFFFF,
-                       r - TR_RET + TR_RET10, SEL_TRAMP, tf->err, tf->eip, tf->cs & 0xFFFF, f, tf->esp, tf->ss & 0xFFFF,
+        u32 fr[22] = { r, SEL_TRAMP, tf->err, tf->eip, tf->cs & 0xFFFF, f, esp, tf->ss & 0xFFFF,
+                       r - TR_RET + TR_RET10, SEL_TRAMP, tf->err, tf->eip, tf->cs & 0xFFFF, f, esp, tf->ss & 0xFFFF,
                        tf->es & 0xFFFF, tf->ds & 0xFFFF, tf->fs & 0xFFFF, tf->gs & 0xFFFF, cr2, pte };
-        if (push(ss, &sp, fr, sizeof fr) != 0) {
-            crash_report(tf, "no-stack");
-            return;
+        if (!h.b32) {                           /* the 0.9 part in words, padded to 20h */
+            u16 *w = (u16 *)fr;
+            w[0] = (u16)r, w[1] = SEL_TRAMP, w[2] = (u16)tf->err, w[3] = (u16)tf->eip, w[4] = (u16)tf->cs;
+            w[5] = (u16)f, w[6] = (u16)esp, w[7] = (u16)tf->ss;
+            memset(&w[8], 0, 16);
+            fr[8] = (r - TR_RET + TR_RET10) | (u32)SEL_TRAMP << 16;   /* IP:CS, then a zero dword */
+            fr[9] = 0;
         }
-    } else {
-        u16 fr[8] = { (u16)ret_off(e), SEL_TRAMP, (u16)tf->err, (u16)tf->eip, (u16)tf->cs, (u16)f, (u16)tf->esp,
-                      (u16)tf->ss };
         if (push(ss, &sp, fr, sizeof fr) != 0) {
             crash_report(tf, "no-stack");
             return;
         }
     }
     trace("exception", v, h.sel, h.off, tf);
+    if ((vm.bi->flags & BI_F_DPMITRACE) && !(tf->eflags & FL_VM)) {     /* and what faulted */
+        u8 c[10];
+        if (user_rd((u16)tf->cs, tf->eip, c, sizeof c) == 0)
+            kprintf("GLOS-DPMI exception-code %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x ds=%04x es=%04x "
+                    "ss=%04x fs=%04x gs=%04x eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x "
+                    "esp=%08x\n", c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], tf->ds & 0xFFFF,
+                    tf->es & 0xFFFF, tf->ss & 0xFFFF, tf->fs & 0xFFFF, tf->gs & 0xFFFF, tf->eax, tf->ebx, tf->ecx,
+                    tf->edx, tf->esi, tf->edi, tf->ebp, tf->esp);
+    }
     e->frame10 = dctx->exc10[v];
     dctx->exc_depth++;
     entry_go(tf, e, h.sel, h.off, ss, sp);
@@ -219,14 +260,16 @@ void dpmi_exception(struct trapframe *tf)
    EFLAGS and SS:ESP; the 1.0 frame adds the segment registers); the
    general registers are the handler's own. A 0212h handler may RETF
    through either frame's return address: through the 0.9 one, the 1.0
-   frame lies 20h above; through the 1.0 one (via10), it starts at ESP. */
+   frame lies 20h above; through the 1.0 one (via10), it starts at ESP.
+   For a 16-bit handler, past its 4-byte return address: 24h above, or 4
+   (the zero dword). */
 static void exc_return(struct trapframe *tf, const struct pmentry *e, int via10)
 {
     u32 sp = sp_of(tf), eip, cs, fl, esp, ss;
     int ten = e->frame10 || via10;
-    if (dctx->bits32) {
-        u32 v[10];
-        if (user_rd((u16)tf->ss, sp + (ten && !via10 ? 0x20 : 0), v, ten ? 40 : 24) != 0) {
+    if (e->b32 || ten) {
+        u32 v[10], at = e->b32 ? sp + (ten && !via10 ? 0x20 : 0) : sp + (via10 ? 4 : 0x24);
+        if (user_rd((u16)tf->ss, at, v, ten ? 40 : 24) != 0) {
             crash_report(tf, "exception-frame");
             return;
         }
@@ -273,7 +316,7 @@ void dpmi_exc_unhandled(struct trapframe *tf, u32 v, u32 err)
 void dpmi_exc_default(struct trapframe *tf, u32 v)
 {
     u32 sp = sp_of(tf), r[3];
-    if (dctx->bits32) {
+    if (dctx->exc[v].sel ? dctx->exc[v].b32 : dctx->bits32) {
         if (user_rd((u16)tf->ss, sp, r, 12) != 0)
             r[1] = 0;
         set_sp(tf, sp + 8);
@@ -323,12 +366,13 @@ void dpmi_rmcb(struct trapframe *tf, u32 i)
     r.cs = (u16)tf->cs;
     r.sp = (u16)rsp;
     r.ss = (u16)rss;
-    if (user_wr(cb->regs.sel, cb->regs.off, &r, sizeof r) != 0 || !(e = entry_new(tf, PE_RMCB, &ss, &sp))) {
+    if (user_wr(cb->regs.sel, cb->regs.off, &r, sizeof r) != 0
+        || !(e = entry_new(tf, PE_RMCB, cb->pm.b32, &ss, &sp))) {
         kprintf("GLOS-DPMI rmcb-failed n=%u\n", i);
         crash_report(tf, "rmcb");
         return;
     }
-    if (dctx->bits32) {
+    if (cb->pm.b32) {
         u32 v[3] = { ret_off(e), SEL_TRAMP, r.flags };
         if (push(ss, &sp, v, sizeof v) != 0) {
             crash_report(tf, "rmcb");
@@ -353,7 +397,7 @@ void dpmi_rmcb(struct trapframe *tf, u32 i)
 static void rmcb_return(struct trapframe *tf, const struct pmentry *e)
 {
     struct rmregs r;
-    if (user_rd((u16)tf->es, dctx->bits32 ? tf->edi : tf->edi & 0xFFFF, &r, sizeof r) != 0) {
+    if (user_rd((u16)tf->es, e->b32 ? tf->edi : tf->edi & 0xFFFF, &r, sizeof r) != 0) {
         crash_report(tf, "rmcb-regs");
         return;
     }
