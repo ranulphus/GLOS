@@ -241,6 +241,7 @@ loopa-sess: all dos-tests build/dj/PROFCHK.EXE build/dj/DIRTEST.EXE build/dj/djt
 	$(Q)python3 tests/loopa/jobs.py sess -j $(JOBS)
 # M4e's exit: the gate (tools/gate/run.py). Its baselines are cached in $(MGA_CACHE)/glos/gate.
 gate: all dos-tests djtst build/dj/DPMICONF.EXE build/dj/PROFCHK.EXE build/dj/DIRTEST.EXE build/dj/CRASHME.EXE \
+      build/dj/LAZYCHK.EXE \
       m4c-inputs m4d-inputs glos-cache check-deps
 	$(Q)python3 tools/gate/run.py -j $(JOBS)
 

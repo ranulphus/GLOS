@@ -10,6 +10,8 @@ strip = [
     ' crc=\w+',
     # MGA-Glide's DLL start line: the arguments its caller passed, uninitialised (whatever was on the stack).
     '(?<=^MGL-DLLSTART) .*$',
+    # Fifth Wheel's audio check counts the chunks it played, as many as the run took time.
+    ' of \d+ chunks',
 ]
 # Lines dropped altogether: statistics and timing reports.
 drop = ['^HX-STAT', '^DGL-STAT', '^MGL-STAT', '^DGL-PERF', '^MGL-PERF', '^DGL-TIME', '^MGL-TIME']

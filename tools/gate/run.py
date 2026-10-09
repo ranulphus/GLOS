@@ -242,6 +242,16 @@ def base_key(job, spec, boot):
     return hashlib.sha256(json.dumps(k, sort_keys=True).encode()).hexdigest()[:24]
 
 
+def slack(spec):
+    """run.py's --timeout for a GLOS run: half as long again as the program's own, which is sized for its run
+    without GLOS (Fifth Wheel's takes 2,379 of its 2,400 s; GLOS and a gate's load add a few per cent)."""
+    a = spec.get("args", [])
+    if spec["kind"] != "run":                   # (a script sets its own, which LOOPA_EXTRA_ARGS would override)
+        return []
+    t = float(a[a.index("--timeout") + 1]) if "--timeout" in a else 300.0
+    return ["--timeout", "%d" % (t * 1.5)]
+
+
 def glos_args(boot, direct=False):
     a = ["--boot-cfg", "glosshell" + ("-himemx" if boot == "himemx" else ""),
          "--file", BIN + "/GLOS.EXE=/TEST/GLOS.EXE", "--file", BIN + "/GLOSK.BIN=/TEST/GLOSK.BIN"]
@@ -319,7 +329,10 @@ KEY = os.path.join(ROOT, "tests", "keys", "client")
 
 
 class Probe:
-    """`glos tick` over ssh about once a second (wall time) while a run goes, and one `glos shot`."""
+    """`glos tick` over ssh about once a second (wall time) while a run goes, and one `glos shot`. The
+    probes share one connection (OpenSSH's ControlMaster), so each measures the agent's answer, not a key
+    exchange at the 30% CPU budget bulk work gets beside a game (a fresh connection per probe put
+    Screamer Rally's worst gap at 2.07 s)."""
 
     def __init__(self, port):
         self.port, self.replies, self.fails, self.shot = port, [], [], None
@@ -329,7 +342,9 @@ class Probe:
         os.chmod(self.key, 0o600)
         self.ssh = ["ssh", "-p", str(port), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
                     "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
-                    "-o", "ConnectTimeout=20", "-i", self.key, "glos@127.0.0.1"]
+                    "-o", "ConnectTimeout=20", "-o", "ControlMaster=auto", "-o",
+                    "ControlPath=" + os.path.join(self.tmp, "cm"), "-o", "ControlPersist=600",
+                    "-i", self.key, "glos@127.0.0.1"]
 
     def call(self, cmd, timeout=30):
         try:
@@ -359,6 +374,10 @@ class Probe:
             elif not os.path.exists(status) and not end.search(read(serial)):     # (not the run ending)
                 self.fails.append((w, rc, e.decode("latin-1").strip()[:80]))
             time.sleep(1)
+        if os.path.exists(status):              # (a probe the run's end cut off: its last 15 s don't count)
+            end_at = os.path.getmtime(status)
+            self.fails = [f for f in self.fails if f[0] < end_at - 15]
+        subprocess.run(self.ssh[:-1] + ["-O", "exit", "glos@127.0.0.1"], capture_output=True, timeout=30)
         shutil.rmtree(self.tmp, ignore_errors=True)
         return self
 
@@ -413,7 +432,7 @@ def program_job(cell, job, spec, boot, kill_at, fresh, direct):
     base_st = read(os.path.join(d, "base", "status")).strip()
     res.append(("%s/%s/%s/base" % (cell, job, boot), base_st == "PASS", "%s (%s)" % (base_st, how)))
     for variant in ["glos"] + (["direct"] if direct else []):
-        run_program(job, spec, glos_args(boot, variant == "direct"), os.path.join(d, variant))
+        run_program(job, spec, glos_args(boot, variant == "direct") + slack(spec), os.path.join(d, variant))
         diffs = compare(os.path.join(d, "base"), os.path.join(d, variant))
         bad, reports = glos_trouble(read(os.path.join(d, variant, "serial.log")))
         res.append(("%s/%s/%s/%s" % (cell, job, boot, variant), not diffs and not bad,
@@ -421,7 +440,7 @@ def program_job(cell, job, spec, boot, kill_at, fresh, direct):
     if boot != "default" or kill_at is None:   # (a kill and a probe for one job of a suite, on the raw boot)
         return res
     kspec, kargs = with_keys(spec, kill_keys(kill_at))
-    run_program(job, kspec, glos_args(boot) + kargs, os.path.join(d, "kill"))
+    run_program(job, kspec, glos_args(boot) + kargs + slack(spec), os.path.join(d, "kill"))
     s = read(os.path.join(d, "kill", "serial.log"))
     k = s.find("reason=hotkey")
     bad, reports = glos_trouble(s)
@@ -429,7 +448,7 @@ def program_job(cell, job, spec, boot, kill_at, fresh, direct):
     res.append(("%s/%s/kill" % (cell, job), ok, "; ".join(
         (["no kill %gs into it (did it end first?)" % kill_at] if k < 0 else []) + bad + reports) or "killed, clean"))
     port = free_port()
-    probe = run_program(job, spec, glos_args(boot) + [
+    probe = run_program(job, spec, glos_args(boot) + slack(spec) + [
         "--net", "ne2kpci", "--net-fwd", "%d:22" % port, "--file", BIN + "/keys/HOSTKEY=/TEST/KEYS/HOSTKEY",
         "--file", BIN + "/keys/AUTHKEYS=/TEST/KEYS/AUTHKEYS"], os.path.join(d, "probe"), during=Probe(port))
     ok, what = probe.judge()

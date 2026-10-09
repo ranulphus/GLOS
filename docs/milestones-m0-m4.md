@@ -540,7 +540,13 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   binary sha, profile, boot, card and 86Box key, the comparisons below, forced-direct runs, a kill job and a
   screenshot job per suite, and VECCHK/VMODE after each. T: `make gate`.
 
-**M4e status (2026-10-09): E1-E5 done.**
+**M4e status (2026-10-09): done.** Every gate cell has passed:
+- the full `make gate` run on 68ea0ae (133 parts: 125 passed);
+- the cells it failed, rerun after their fixes (Half-Life and Fifth Wheel each in full, Screamer Rally's probe);
+- after the last two commits (the XMS loader, the memory cap): the jobs suites' HIMEMX runs, dpmi and sess on
+  bf6, and GLQuake.
+
+The suites the gate doesn't run (m1, refuse, shell, sched, net, ssh) pass on the final tree.
 - **E1 sessions** (02020d5; supervisor.md §11.1). Each top-level program is a session: the stub's EXECs (agent
   jobs, `/RUN`) and, as the shell, the console COMMAND.COM's (FreeCOM is its own parent). An EXEC of a file that
   isn't there starts none (the agent tries each place along PATH). The end puts back the video mode, PIT channel
@@ -551,7 +557,8 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   hostile suite also checks the clock afterwards.
 - **E2 profiles** (supervisor.md §11.2): GLOS.CFG's `[program NAME.EXT]` sections (env, memory, direct), read
   in every mode. A session takes the profile of the program that begins it. T: PROFCHK sees its profile's
-  variable and PATH and gets 3,328 KB under a 4 MB cap; as NOPROF.EXE it gets neither (about 62 MB).
+  variable and PATH and gets 3,328 KB under a 4 MB cap; as NOPROF.EXE it gets neither (184 MB since memory is
+  backed when touched: the cap of three times the machine's).
 - **E3 direct mode** (supervisor.md §9.7): sessions at IOPL 3 by profile or `/DIRECT` (also `SET
   GLOS=/DIRECT`).
   - The real IF stands for the virtual IF: it is read at each entry and written back in `trap_exit`.
@@ -576,6 +583,35 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   T: `sess-kill-*`: SESSTEST killed with the hotkey inside a batch file's session leaves VECCHK, VMODE and the
   clock clean for the next line. The agent cases end a job with `glos kill` (`reason=agent`), and the hostile
   suite checks every kill's reason (`hotkey`, one `priv`).
+- **E6 the gate** (`tools/gate/run.py`, `make gate`, on the host; "As built" below).
+  - Run on bf6/486DX2/iDX4 and raw/HIMEMX where the matrix asks: 10 jobs cells (7 with direct mode forced), 10
+    program cells (base, GLOS, forced direct, kill, probe), and 2 script cells.
+  - Its first full run found four GLOS bugs, each now fixed with a test of its own:
+    - **Direct mode's keyboard** (GTA with direct mode forced stayed in its menu). The program's
+      protected-mode handler reads the 8042 itself, so GLOS now puts each byte back into the chip (D2h/D3h)
+      after reading it for the hotkey. T: DIRTEST gets a tapped key through such a handler, and a hotkey kill
+      at IOPL 3.
+    - **DPMI memory committed at once** (GLQuake: GL_OUT_OF_MEMORY, as under HDPMI). Pages are now backed when
+      first touched, as under CWSDPMI, and what isn't backed yet is capped at three times the memory there is.
+      T: LAZYCHK.
+    - **FS/GS leaking into kernel threads** (a GLOS-PANIC after Quake 2 ended, in its probe run). Trap entry
+      now nulls them.
+    - **XMS mode's 64 MB** (Half-Life faulted on the HIMEMX boot of a 128 MB machine). The loader now takes up
+      to three pool blocks.
+  - And three of its own: the probe now shares one ssh connection (a fresh key exchange per probe at the 30%
+    bulk budget put Screamer Rally's worst gap at 2.07 s; now 0.68 s); GLOS runs get one and a half times a
+    program's timeout (Fifth Wheel's baseline takes 2,379 of 2,400 s); Fifth Wheel's audio chunk count is a
+    timing field.
+  - Forced direct mode runs everything that has a cell for it: MGA-Glide's conform 27×4, the replays and
+    DOSBench, DOS-GL's ports and SDL checks, and the jobs suites. hostile is left out: at IOPL 3 a CLI loop
+    can't be killed, which direct mode gives up.
+- **Reported, not failed:** one `vif-stuck` in GTA's probe run, at the host's INT 31h trampoline, during an ssh
+  key exchange. DOS/4GW's own short interrupts-off moment was stretched past 50 ms while the VM thread waited
+  its turn. The shared probe connection now makes key exchanges rare.
+- **Open:** once in about a dozen runs of `sess-kill-*`, the hotkey's key releases race the BIOS's LED update
+  after the kill has put the lock bits back. The BIOS then waits about 4 s for the keyboard's ACK with
+  interrupts off (`vif-stuck` at f000:b058, a stray second hotkey, the DOS clock 4 s behind). Seen once, on bf6
+  HIMEMX; three reruns passed.
 
 ### The gate's baseline matrix (M4e)
 
@@ -623,10 +659,14 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   - GLOS's own lines are judged too. PANIC, CRASH and REFUSE fail; DPMI-UNIMPL must be listed; vif-stuck is
     reported. Every session's end line must say `irq=ok`, the VECCHK comparison done by the kernel, so no batch
     file has to wrap the program.
-  - On the raw boot: a **kill** run (the hotkey at the cell's time: `reason=hotkey`, then text mode) and a
-    **probe** run with an RTL8029. It sends `glos tick` over ssh about once a second while the program runs:
-    every probe answers, none later than 2 s of guest time once the time between probes is taken off, one
-    `glos shot` answers, and the program still ends as in the baseline.
+  - On the raw boot: a **kill** run (the hotkey at the cell's time after the program's DPMI start:
+    `reason=hotkey`, then text mode) and a **probe** run with an RTL8029. It sends `glos tick` over ssh about
+    once a second while the program runs. The probes share one connection (OpenSSH's ControlMaster), so each
+    measures the agent's answer, not a key exchange at the 30% bulk budget. Every probe must answer, none later
+    than 2 s of guest time once the time between probes is taken off. One `glos shot` must answer, and the
+    program must still end as in the baseline.
+  - GLOS runs get one and a half times the program's own run.py timeout. It was sized for the baseline:
+    Fifth Wheel's takes 2,379 of 2,400 s, and GLOS under a gate's load ran about 4% slower.
 - **script cells:** tools/m4c-games.sh (MGA-Glide's conform 27×4 and replays against their references,
   DOSBench) and DOS-GL's loopa-sdl, under GLOS and with direct mode forced (loopa-sdl's baseline too).
 - `out/gate/summary.txt` has a line per part; the exit status is 1 if any failed.
