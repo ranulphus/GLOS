@@ -28,12 +28,16 @@
  * change. A full ring holds the program (the VM thread waits) until the ssh
  * thread makes room.
  *
+ * glos run [--direct] [--profile NAME] COMMAND (M4e) posts a job whose
+ * session (supervisor.md §11) runs in direct mode or takes that profile.
+ *
  * glos kill, or the client going away, kills a running job: every half
  * second the program in front is killed (the kill of supervisor.md §9.6),
  * innermost first, until the job has ended; its output is then dropped. */
 #include "glos/bootinfo.h"
 #include "agent.h"
 #include "dos.h"
+#include "session.h"
 #include "io.h"
 #include "kprintf.h"
 #include "sched.h"
@@ -55,6 +59,8 @@ struct agent_job {
     volatile u8 state;
     u8 cand;                                    /* the next program to try */
     u8 shell;                                   /* running as COMSPEC /C */
+    u8 direct;                                  /* glos run --direct */
+    char profile[16];                           /* glos run --profile NAME, or empty */
     volatile u8 kill;                           /* end it: glos kill, or its client has gone */
     u32 seq;
     u32 result;                                 /* INT 21h 4Dh's AX, or 10000h + the EXEC error */
@@ -96,7 +102,9 @@ static char upper(char c) { return c >= 'a' && c <= 'z' ? (char)(c - 32) : c; }
 
 void agent_init(void (*kick)(void)) { kick_ssh = kick; }
 
-int agent_post(void *owner, const char *cmd)
+int agent_post(void *owner, const char *cmd) { return agent_post_run(owner, cmd, 0, ""); }
+
+int agent_post_run(void *owner, const char *cmd, int direct, const char *profile)
 {
     struct agent_job *j = NULL;
     u32 f, i;
@@ -117,6 +125,10 @@ int agent_post(void *owner, const char *cmd)
     j->cand = 0;
     j->shell = 0;
     j->kill = 0;
+    j->direct = (u8)(direct != 0);
+    for (i = 0; profile[i] && i < sizeof j->profile - 1; i++)
+        j->profile[i] = profile[i];
+    j->profile[i] = 0;
     j->out[0].head = j->out[0].tail = j->out[1].head = j->out[1].tail = 0;
     f = irq_save();
     j->seq = next_seq++;
@@ -337,17 +349,20 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
     if (j) {
         j->state = J_RUNNING;
         running = j;
-        kprintf("GLOS-AGENT run seq=%u cmd=\"%s\"\n", j->seq, j->cmd);
+        kprintf("GLOS-AGENT run seq=%u cmd=\"%s\"%s%s%s\n", j->seq, j->cmd, j->direct ? " direct=1" : "",
+                j->profile[0] ? " profile=" : "", j->profile);
         j->shell = (u8)split(j);
         if (!j->shell && !candidate(j, 0))
             j->shell = 1;
         goto exec;
     }
+    session_job(0, "");
     if (exit_req && (s32)(timer_ticks() - exit_at) >= 0)
         return -1;
     return 0;
 exec:
     j = running;
+    session_job(j->direct, j->profile);         /* for the session this EXEC begins */
     if (j->shell) {
         x->path = comspec;
         x->t1 = " /C ";

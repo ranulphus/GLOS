@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "glos/bootinfo.h"
+#include "agent.h"
 #include "arch.h"
 #include "dpmi.h"
 #include "kprintf.h"
@@ -95,6 +96,8 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
     f->esi = r->esi;
     f->edi = r->edi;
     f->ebp = r->ebp;
+    if (vec == 0x21 && kind != RM_FAR)
+        agent_vm_int21(f);                      /* a client's DOS output, for an agent job's capture (§17.4) */
 
     nests[depth].f = f;
     nests[depth].from = from && !(from->eflags & FL_VM) ? from : 0;

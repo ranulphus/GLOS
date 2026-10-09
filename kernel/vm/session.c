@@ -40,6 +40,7 @@ static struct session {
     u32 ivt[256];
     u32 dangle[256];                            /* what the program left pointing into its own memory, or 0 */
     const struct bi_profile *prof;              /* its profile, or 0 */
+    u8 direct;                                  /* glos run --direct */
     u16 env_seg, env_old;                       /* the environment GLOS made, and the EXEC block's own */
     u32 env_pb;                                 /* the EXEC block (linear) */
     u32 t0;
@@ -168,16 +169,31 @@ static void end(const char *why)
             remode ? " remode=1" : "", fixed, ticks, timer_ticks() - ses.t0);
 }
 
-/* The profile for program file name prog (upper case): its NAME.EXT, or a
-   NAME without an extension for either. */
+/* glos run's options for the session the stub's next EXEC begins (E4). */
+static struct { u8 direct; char profile[16]; } job;
+
+void session_job(int direct, const char *profile)
+{
+    u32 i;
+    job.direct = (u8)(direct != 0);
+    for (i = 0; profile[i] && i < sizeof job.profile - 1; i++)
+        job.profile[i] = profile[i] >= 'a' && profile[i] <= 'z' ? (char)(profile[i] - 32) : profile[i];
+    job.profile[i] = 0;
+}
+
+/* The profile for program file name prog (upper case): the same NAME.EXT,
+   or the same NAME when either has no extension. */
 static const struct bi_profile *profile_for(const char *prog)
 {
     const struct bi_profile *p;
-    u32 n;
+    u32 n, m;
     for (n = 0; prog[n] && prog[n] != '.'; n++) ;
-    for (p = vm.bi->profiles; p < vm.bi->profiles + BI_PROFILES; p++)
-        if (p->name[0] && (!strcmp(p->name, prog) || (!strncmp(p->name, prog, n) && !p->name[n])))
+    for (p = vm.bi->profiles; p < vm.bi->profiles + BI_PROFILES; p++) {
+        for (m = 0; p->name[m] && p->name[m] != '.'; m++) ;
+        if (p->name[0] && (!strcmp(p->name, prog)
+                           || (m == n && !strncmp(p->name, prog, n) && (!p->name[m] || !prog[n]))))
             return p;
+    }
     return 0;
 }
 
@@ -276,7 +292,8 @@ void session_exec(const struct trapframe *tf)
     memcpy(ses.ivt, vm_ptr(0), sizeof ses.ivt);
     ses.t0 = timer_ticks();
     ses.n++;
-    ses.prof = profile_for(ses.prog);
+    ses.prof = profile_for(psp == vm.loader_psp && job.profile[0] ? job.profile : ses.prog);
+    ses.direct = psp == vm.loader_psp && job.direct;
     ses.env_seg = 0;
     if (ses.prof && ses.prof->env[0])
         profile_env(tf, psp);
@@ -323,5 +340,16 @@ u32 session_memory_kb(void) { return ses.active && ses.prof ? ses.prof->memory_k
 
 int session_direct(void)
 {
-    return ses.active && ((vm.bi->flags & BI_F_DIRECT) || (ses.prof && (ses.prof->flags & BI_PROF_DIRECT)));
+    return ses.active && ((vm.bi->flags & BI_F_DIRECT) || ses.direct
+                          || (ses.prof && (ses.prof->flags & BI_PROF_DIRECT)));
+}
+
+int session_profile_known(const char *name)
+{
+    char up[16];
+    u32 i;
+    for (i = 0; name[i] && i < sizeof up - 1; i++)
+        up[i] = name[i] >= 'a' && name[i] <= 'z' ? (char)(name[i] - 32) : name[i];
+    up[i] = 0;
+    return profile_for(up) != 0;
 }

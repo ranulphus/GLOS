@@ -1037,6 +1037,12 @@ place where nothing else is in DOS by construction.
   - The exit status is INT 21h 4Dh's code; 126 when not even COMSPEC could be run.
 - DOS is never re-entered behind a running program's back: the stub only EXECs from its own NEXT loop.
 - `glos exit` (headless only, for now) leaves at the next idle NEXT, half a second after it replies.
+- **`glos run [--exclusive|--app] [--direct] [--profile NAME] COMMAND`** (M4e) posts COMMAND as a job whose
+  session (§11) runs in direct mode (§9.7) or takes GLOS.CFG's `[program NAME]` profile instead of its program's
+  own. That works for a batch file too, whose session's program is COMMAND.COM. `--exclusive` is what every
+  session is until M6. `--app` waits for GLOS apps (M6) and is refused with status 2, as are an unknown
+  profile and a missing command. The agent hands the options to the session code before each EXEC the job
+  makes (`session_job()`), and the session that begins takes them.
 - **Ending a job:** `glos kill`, or its client going away, kills it: every half second the program in front
   gets the kill of §9.6 (innermost first) until the job has ended, with exit status 255; its output is dropped.
 - Not yet: stdin for jobs (the client's input is dropped), and DOS commands while `/RUN` or `/SHELL` keeps DOS
@@ -1053,6 +1059,9 @@ place where nothing else is in DOS by construction.
     stdout. Output redirected to a file isn't captured.
   - INT 29h only outside DOS (InDOS clear): DOS's console driver calls it for output already counted. With VME,
     INT 29h traps only while a job runs.
+  - The same INT 21h calls from a DPMI client: it reaches DOS through a nested real-mode call (0300h, a
+    reflection, the 16-bit translation), which `rm_call()` hands to the capture too (M4e; before that, a DJGPP
+    program's output never reached the client).
 - A full ring holds the program until the ssh thread makes room (the client's window); once the client has
   gone, output is dropped.
 - Text written straight to the screen isn't captured (`glos shot` shows it). 8.3 file names only (no LFN API
@@ -1084,8 +1093,8 @@ place where nothing else is in DOS by construction.
   exchange takes hundreds of milliseconds on a 486). Each connection has two single-writer rings between them,
   so neither waits on a lock. Four connections at once; a fifth is refused (`GLOS-SSH refuse reason=busy`).
 - **Limits:** 60 s to log in; 20 authentication attempts per connection.
-- **Built-in commands (M3):** `glos ver`, `glos echo …`, `glos shot`, `glos log`, `glos ps`, `glos kill`,
-  `glos exit`; anything else starting `glos` gives status 127.
+- **Built-in commands (M3):** `glos ver`, `glos echo …`, `glos run …` (M4e, §17.3), `glos shot`, `glos log`,
+  `glos ps`, `glos kill`, `glos exit`; anything else starting `glos` gives status 127.
   - `glos shot`: the text-mode screen as a PNG on stdout (4-bit indexed, deflate's stored blocks;
     `kernel/lib/png.c`). It reads the visible page and the BIOS data area (mode, columns, rows, page start,
     character height) and draws each cell with the video BIOS's own 8x16, 8x14 or 8x8 font, which GLOS.EXE
@@ -1129,7 +1138,7 @@ place where nothing else is in DOS by construction.
 | RANDOM | At start: the seed's length and whether there is a TSC |
 | CRYPTO | `/SELFTEST`: the known-answer tests and two timings |
 | SSH | `listen`, `off`, `connect`, `client version=`, `kex done strict=`, `auth ok`, `exec=`, `close why=`, `refuse` |
-| AGENT | A job: `run seq= cmd=`, `done seq= code= via=` (the program, or `comspec`) |
+| AGENT | A job: `run seq= cmd= [direct=1] [profile=]`, `done seq= code= via=` (the program, or `comspec`) |
 | KILL | A kill (§9.6) |
 | SESSION | A session (§11.1): `begin n= prog= parent= mode= [profile=] [direct=1]`, `direct-end imr= rtc=` (§9.7), `end n= prog= why=exit\|next-exec\|stub mode= [remode=1] vectors= ticks= t=` (`mode=` the mode it ended in, `vectors=` those put back, `ticks=` the BIOS tick count set from the RTC, `t=` its length in kernel ticks) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |

@@ -540,7 +540,7 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   binary sha, profile, boot, card and 86Box key, the comparisons below, forced-direct runs, a kill job and a
   screenshot job per suite, and VECCHK/VMODE after each. T: `make gate`.
 
-**M4e status (2026-10-09): E1-E3 done.**
+**M4e status (2026-10-09): E1-E4 done.**
 - **E1 sessions** (02020d5; supervisor.md §11.1). Each top-level program is a session: the stub's EXECs (agent
   jobs, `/RUN`) and, as the shell, the console COMMAND.COM's (FreeCOM is its own parent). An EXEC of a file that
   isn't there starts none (the agent tries each place along PATH). The end puts back the video mode, PIT channel
@@ -561,6 +561,11 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   - T: djtst205's ENABLE passes under a direct profile (and still stops without one). DIRTEST sees IOPL 3, keeps
     an IRQ 0 handler that EOIs the PIC itself, and loses the keyboard line and the RTC rate back to GLOS.
     SESSTEST at IOPL 3 leaves nothing behind. All three profiles.
+- **E4 `glos run`** (supervisor.md §17.3): `--direct` and `--profile NAME` for the job's session; `--exclusive`
+  accepted; `--app`, an unknown profile and a missing command refused with status 2. Found on the way: a DPMI
+  client's console output never reached the ssh client, because its DOS calls go through nested real-mode calls
+  the capture didn't see. Now `rm_call()` passes them on. T: the agent cases of `jobs.py sess` run ENABLE through
+  `glos run --direct` (its output exact) and without it, and give NOPROF.EXE PROFCHK's profile by `--profile`.
 
 ### The gate's baseline matrix (M4e)
 

@@ -1350,15 +1350,32 @@ def sess_direct(profile, boot):
 
 def sess_agent(profile, card):
     """SESSTEST and the checks as agent jobs, through ssh: each job is a session (the agent EXECs a program
-    directly, trying each place along PATH; only the one found begins a session)."""
+    directly, trying each place along PATH; only the one found begins a session). Then glos run (E4):
+    --direct runs ENABLE at IOPL 3, --profile gives NOPROF.EXE PROFCHK's profile, and --app, an unknown
+    profile and no command are refused with status 2."""
     tag = "agent-%s-%s" % (profile, card)
+    cfg = batfile("sess-%s/GLOS.CFG" % tag, PROF_CFG)
     agent = Agent("sess-" + tag, profile, card, SESS_FILES + [
+        "--file", cfg + "=/TEST/GLOS.CFG", "--file", "build/dj/djtst/ENABLE.EXE=/TEST/ENABLE.EXE",
+        "--file", "build/dj/PROFCHK.EXE=/TEST/NOPROF.EXE",
         "--cmd", "SERSAY HX-START sess", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
         "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
     checks = {"listen": agent.listening()}
     try:
         rcs = [agent.ssh(c)[0] for c in SESS_STEPS]
         checks["jobs"] = rcs == [0] * len(SESS_STEPS)
+        rc, out, _ = agent.ssh("glos run --direct C:\\TEST\\ENABLE.EXE")
+        checks["run-direct"] = rc == 0 and out.replace("\r", "").splitlines() == ENABLE_OK
+        if not checks["run-direct"]:
+            print("    run --direct: rc=%d out=%r" % (rc, out[:300]))
+        rc, out, _ = agent.ssh("glos run --exclusive C:\\TEST\\ENABLE.EXE")
+        checks["run-plain"] = rc == 1 and "incorrect" in out
+        checks["run-profile"] = agent.ssh("glos run --profile profchk C:\\TEST\\NOPROF.EXE")[0] == 0
+        rc, _, err = agent.ssh("glos run --app C:\\TEST\\ENABLE.EXE")
+        checks["run-app"] = rc == 2 and "M6" in err
+        rc, _, err = agent.ssh("glos run --profile NOSUCH.EXE C:\\TEST\\ENABLE.EXE")
+        checks["run-noprofile"] = rc == 2 and "NOSUCH.EXE" in err
+        checks["run-usage"] = agent.ssh("glos run --direct")[0] == 2
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
@@ -1367,7 +1384,10 @@ def sess_agent(profile, card):
     checks["ran"] = "HX-SESS done" in text and left is not None
     checks.update({"kept-" + k: v for k, v in (left or {}).items()})
     checks.update(sess_checks(text))
-    checks["one-each"] = len(re.findall(r"GLOS-SESSION begin ", text)) == len(SESS_STEPS)   # no failed EXECs
+    checks["one-each"] = len(re.findall(r"GLOS-SESSION begin ", text)) == len(SESS_STEPS) + 3   # no failed EXECs
+    checks["run-sessions"] = bool(re.search(r"GLOS-SESSION begin n=\d+ prog=ENABLE.EXE \S+ mode=03 direct=1", text)) \
+        and bool(re.search(r"GLOS-SESSION begin n=\d+ prog=NOPROF.EXE \S+ mode=03 profile=PROFCHK.EXE\n", text)) \
+        and "HX-PROF var=yes path=C:\\PROF" in text and text.count("GLOS-SESSION direct-end") == 1
     checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and text.count("HX-VECCHK ok") == 2
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("sess-" + tag, "PASS" if not bad else "FAIL",

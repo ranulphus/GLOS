@@ -21,6 +21,7 @@
 #include "mm.h"
 #include "dos.h"
 #include "sched.h"
+#include "session.h"
 #include "sftp.h"
 #include "shot.h"
 #include "ssh.h"
@@ -270,6 +271,53 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
         return 0;
     }
+    if (!strncmp(cmd, "glos run", 8) && (cmd[8] == ' ' || !cmd[8])) {
+        const char *p = cmd + 8;                /* glos run [--exclusive|--app] [--direct] [--profile NAME] COMMAND */
+        char prof[16];
+        int direct = 0;
+        u32 n;
+        prof[0] = 0;
+        for (;;) {
+            while (*p == ' ')
+                p++;
+            if (!strncmp(p, "--exclusive", 11) && (p[11] == ' ' || !p[11])) {
+                p += 11;                        /* (every session is, until M6's apps) */
+            } else if (!strncmp(p, "--direct", 8) && (p[8] == ' ' || !p[8])) {
+                direct = 1;
+                p += 8;
+            } else if (!strncmp(p, "--app", 5) && (p[5] == ' ' || !p[5])) {
+                say(ch, 1, "glos run: --app needs GLOS apps (M6)\n");
+                ssh_chan_exit(ch, 2);
+                return 0;
+            } else if (!strncmp(p, "--profile ", 10)) {
+                for (p += 10; *p == ' '; p++) ;
+                for (n = 0; p[n] && p[n] != ' ' && n < sizeof prof - 1; n++)
+                    prof[n] = p[n];
+                prof[n] = 0;
+                p += n;
+                if (!session_profile_known(prof)) {
+                    say(ch, 1, "glos run: no [program ");
+                    say(ch, 1, prof);
+                    say(ch, 1, "] in GLOS.CFG\n");
+                    ssh_chan_exit(ch, 2);
+                    return 0;
+                }
+            } else {
+                break;
+            }
+        }
+        if (!*p || *p == '-') {
+            say(ch, 1, "glos run: usage: glos run [--exclusive|--app] [--direct] [--profile NAME] COMMAND\n");
+            ssh_chan_exit(ch, 2);
+        } else if (!agent_mode) {
+            say(ch, 1, "glos: DOS commands need GLOS started without /RUN or /SHELL\n");
+            ssh_chan_exit(ch, 126);
+        } else if (agent_post_run(ch, p, direct, prof) != 0) {
+            say(ch, 1, "glos: busy\n");
+            ssh_chan_exit(ch, 126);
+        }
+        return 0;
+    }
     if (!strcmp(cmd, "glos ver")) {
         say(ch, 0, ver);
         ssh_chan_exit(ch, 0);
@@ -333,7 +381,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             agent_exit(512);                    /* half a second for the reply to leave */
         }
     } else {
-        say(ch, 1, "glos: no such command (glos ver, echo, shot, log, ps, kill, exit)\n");
+        say(ch, 1, "glos: no such command (glos ver, echo, run, shot, log, ps, kill, exit)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;
