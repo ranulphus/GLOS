@@ -10,7 +10,14 @@
  * pulses), and anything that would stop the kernel hearing the keyboard:
  * the command byte's IRQ 1 enable and keyboard clock stay on in the chip,
  * whatever the program's own copy says. Other commands go to the chip;
- * those that answer are answered at once. */
+ * those that answer are answered at once.
+ *
+ * In a direct-mode session (supervisor.md §9.7) the program's protected-
+ * mode code reads the chip itself, so its bytes can't wait in a virtual
+ * buffer: GLOS still reads each byte first (the kill hotkey) and puts it
+ * back into the chip's output buffer (D2h, or D3h for AUX), and the IRQ the
+ * chip raises for it is the program's. Reads from V86 code go to the chip
+ * too; its writes are handled as always (A20 and resets stay GLOS's). */
 #include "io.h"
 #include "kprintf.h"
 #include "timer.h"
@@ -27,6 +34,7 @@ static u8 pending;                              /* a command waiting for its byt
 static u8 a2;                                   /* the last write was to 64h */
 static u8 to_aux;                               /* D4h passed: the next byte at 60h goes to the AUX device */
 static u8 mods, e0, swallow;                    /* hotkey tracking */
+static u8 reinjected;                           /* direct mode: the chip holds a byte GLOS put back */
 
 enum { M_CTRL = 1, M_ALT = 2, M_LSHIFT = 4, M_RSHIFT = 8 };
 
@@ -142,9 +150,27 @@ static void refill(void)
     raise(out_aux);
 }
 
+/* Direct mode: a byte into the chip's output buffer for the program (D2h,
+   or D3h for AUX), as if the device had sent it; the chip raises its IRQ.
+   Back once the chip holds it, so that nothing gets in ahead of it. */
+static void direct_put(u8 b, int aux)
+{
+    u32 n = 0;
+    wait_write();
+    outb(0x64, aux ? 0xD3 : 0xD2);
+    wait_write();
+    outb(0x60, b);
+    reinjected = 1;
+    while (!(inb(0x64) & 1) && ++n < 100000) ;
+}
+
 /* A controller's answer goes ahead of anything queued. */
 static void respond(u8 b, int aux)
 {
+    if (vm.direct) {
+        direct_put(b, aux);
+        return;
+    }
     if (obf) {
         qh--;
         q[qh % QSIZE] = (u16)(out | (out_aux ? AUX : 0));
@@ -216,6 +242,8 @@ static void command(u8 c)
 
 u8 vkbc_in(u16 port)
 {
+    if (vm.direct)
+        return inb(port);                       /* (the chip holds what the program reads) */
     drain();
     if (port == 0x60) {
         obf = 0;                                /* the next byte comes on the next tick */
@@ -260,17 +288,61 @@ void vkbc_out(u16 port, u8 v)
     }
 }
 
+/* Direct mode's IRQ 1 and 12: a byte GLOS put back is the program's; any
+   other is read (the hotkey) and put back. */
+static void direct_irq(void)
+{
+    u8 s = inb(0x64), b;
+    if (!(s & 1)) {                             /* (the program read it before the IRQ came) */
+        reinjected = 0;
+        return;
+    }
+    if (reinjected) {
+        reinjected = 0;
+        vpic_raise(&vm.pic, (s & 0x20) ? 12 : 1);
+        vm_kick();
+        return;
+    }
+    chip_cmd(0xAD);                             /* the keyboard held off: its next byte can't get in between */
+    b = inb(0x60);
+    if ((s & 0x20) || !hotkey(b))
+        direct_put(b, (s & 0x20) != 0);
+    chip_cmd(0xAE);                             /* (and while the byte waits in the chip, the chip holds it off) */
+}
+
 void vkbc_irq(struct trapframe *tf)
 {
     (void)tf;
+    if (vm.direct) {
+        direct_irq();
+        return;
+    }
     drain();
     refill();
 }
 
 void vkbc_tick(void)
 {
+    if (vm.direct)                              /* (a byte is the program's: no stealing it) */
+        return;
     drain();
     refill();
+}
+
+/* A direct-mode session begins (1) or ends (0): the byte the program would
+   have read next goes into the chip; at the end what the chip still holds
+   goes into the queue. */
+void vkbc_direct(int on)
+{
+    if (on) {
+        if (obf)
+            direct_put(out, out_aux);
+        obf = 0;
+    } else {
+        reinjected = 0;
+        drain();
+        refill();
+    }
 }
 
 void vkbc_init(void)

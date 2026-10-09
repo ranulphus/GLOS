@@ -191,6 +191,9 @@ M2_BAT = ["@ECHO OFF", "SERSAY HX-M2 begin", "XMSINFO", "VBEINFO", "VMODE", "XMS
           "SERSAY HX-M2 waited", "KEYWAIT 20", "SERSAY HX-M2 end"]
 KEY_ENTER = "@HX-KEYWAIT ready,1:0x1c"
 KILL_KEYS = "1:0x1d:down,1:0x38:down,1:0x2a:down,1.3:0x01,1.6:0x2a:up,1.6:0x38:up,1.6:0x1d:up"
+# The same as a person types it, a third of a second apart: in direct mode the keys wait in the keyboard,
+# which drops them when the BIOS sends it an LED update (as on silicon; supervisor.md §9.7).
+KILL_KEYS_SPACED = "1:0x1d:down,1.3:0x38:down,1.6:0x2a:down,1.9:0x01,2.2:0x2a:up,2.5:0x38:up,2.8:0x1d:up"
 CAD_KEYS = "1:0x1d:down,1:0x38:down,1.2:0x53,1.5:0x38:up,1.5:0x1d:up"
 HOSTILE = ["CLIJMP", "POPFIF", "HLTCLI", "A20OFF", "PICREMAP", "RTCWRITE", "PITPROG", "KBCRESET", "CF9RESET", "CAD",
            "PRIV"]
@@ -1307,8 +1310,10 @@ def sess_direct(profile, boot):
     CLI) passes under a direct profile and, as ENABLE0.EXE, still stops at its
     first check without one; DIRTEST sees IOPL 3, keeps its IRQ 0 handler
     that EOIs the PIC itself, and loses its writes to GLOS's keyboard line
-    and RTC rate (DIRTEST0.EXE, without a profile, at IOPL 0); SESSTEST at
-    IOPL 3 leaves nothing behind."""
+    and RTC rate (DIRTEST0.EXE, without a profile, at IOPL 0); its own IRQ 1
+    handler, reading the 8042 itself, gets a tapped key's bytes (both ways);
+    SESSTEST at IOPL 3 leaves nothing behind, and is killed with the hotkey
+    there too (typed as a person would: supervisor.md §9.7)."""
     tag = "direct-%s-%s" % (profile, boot)
     cfg = batfile("sess-%s/GLOS.CFG" % tag, DIRECT_CFG)
     args = ["--machine", profile, "--boot-cfg", "glosshell" + ("-himemx" if boot == "himemx" else "")] + GLOS_FILES + \
@@ -1320,10 +1325,12 @@ def sess_direct(profile, boot):
     cmds = ["SERSAY HX-START sess-direct", "C:\\TEST\\ENABLE.EXE > C:\\OUT\\ENABLE.TXT",
             "IF NOT ERRORLEVEL 1 SERSAY HX-ENABLE code=0", "C:\\TEST\\ENABLE0.EXE > C:\\OUT\\ENABLE0.TXT",
             "IF ERRORLEVEL 1 SERSAY HX-ENABLE0 code=1", "SERSAY HX-DIRTEST", "C:\\TEST\\DIRTEST.EXE",
-            "SERSAY HX-DIRTEST0", "C:\\TEST\\DIRTEST0.EXE", "SERSAY HX-SESSTEST"] + SESS_STEPS + ["SERSAY HX-DONE 0"]
+            "SERSAY HX-DIRTEST0", "C:\\TEST\\DIRTEST0.EXE", "SERSAY HX-SESSTEST"] + SESS_STEPS + [
+            "SERSAY HX-KILL", "C:\\TEST\\SESSTEST.EXE hang", "VMODE", "SERSAY HX-DONE 0"]
     for c in cmds:
         args += ["--cmd", c]
-    st, serial = run("sess-" + tag, args)
+    st, serial = run("sess-" + tag, args + ["--keys", "@HX-DIRECT armed-key,1:0x1c,@HX-DIRECT armed-key,1:0x1c,"
+                                            "@HX-SESS armed," + KILL_KEYS_SPACED])
     files = os.path.join(ROOT, "out", "sess-" + tag, "files")
 
     def read(n):
@@ -1334,7 +1341,8 @@ def sess_direct(profile, boot):
         return dict(kv for l in part.splitlines() if l.startswith("HX-DIRECT ") for kv in re.findall(r"(\w+)=(\w+)", l))
     d = serial.split("HX-DIRTEST0")
     d1, d0 = (dirtest(d[0].split("HX-DIRTEST")[-1]), dirtest(d[1].split("HX-SESSTEST")[0])) if len(d) == 2 else ({}, {})
-    sess_part = serial[serial.find("HX-SESSTEST"):]
+    sess_part = serial[serial.find("HX-SESSTEST"):serial.find("HX-KILL")]
+    kill_part = serial[serial.find("HX-KILL"):]
     left = sess_left(sess_part)
     checks = {
         "status": st == "PASS",
@@ -1342,10 +1350,13 @@ def sess_direct(profile, boot):
         "enable0": "HX-ENABLE0 code=1" in serial and any("incorrect" in l for l in read("ENABLE0.TXT")),
         "direct": d1.get("iopl") == "3" and int(d1.get("n", 0)) >= 10 and d1.get("irq5") == "1"
                   and d1.get("irq1") == "0" and d1.get("a") == "26",
-        "control": d0.get("iopl") == "0" and int(d0.get("n", 0)) >= 10,
+        "direct-keys": d1.get("keys") == "1c9c",
+        "control": d0.get("iopl") == "0" and int(d0.get("n", 0)) >= 10 and d0.get("keys") == "1c9c",
         "sesstest": left is not None and all(left.values()) and "direct=1" in sess_part
                     and all(sess_checks(sess_part).values()),
-        "direct-ends": serial.count("GLOS-SESSION direct-end") == 3,
+        "direct-kill": bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=hotkey", kill_part))
+                       and "GLOS-SESSION kill-restore mode=03 remode=1" in kill_part and "HX-VMODE bios=03" in kill_part,
+        "direct-ends": serial.count("GLOS-SESSION direct-end") == 4,
         "clean": "GLOS-PANIC" not in serial and "GLOS-WARN" not in serial,
     }
     bad = [k for k, v in checks.items() if not v]

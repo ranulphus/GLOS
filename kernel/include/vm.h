@@ -125,6 +125,7 @@ void vkbc_irq(struct trapframe *tf);
 void vkbc_tick(void);
 u8 vkbc_cmd(void);
 void vkbc_restore(u8 cmd);
+void vkbc_direct(int on);                       /* a direct-mode session begins (1) or ends (0) */
 void vkbc_leave(void);
 
 /* int15.c, xms.c */

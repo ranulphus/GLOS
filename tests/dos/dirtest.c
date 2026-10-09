@@ -12,11 +12,17 @@
  *         keyboard's line);
  *     HX-DIRECT rtc a=NN
  *         RTC register A after the program sets 2Fh (2 Hz) there and makes
- *         32 DOS calls (direct mode: GLOS's 26h again). */
+ *         32 DOS calls (direct mode: GLOS's 26h again);
+ *     HX-DIRECT armed-key, then HX-DIRECT keys=XXXX
+ *         the bytes its own IRQ 1 handler, which reads the 8042 itself as
+ *         GTA's does (status, then data), gets for a key the harness taps
+ *         (Enter: 1c9c; GLOS reads each byte first, for the kill hotkey,
+ *         and in direct mode puts it back into the chip). */
 #include <dpmi.h>
 #include <go32.h>
 #include <pc.h>
 #include <stdio.h>
+#include <sys/farptr.h>
 
 static void ser(const char *s)
 {
@@ -27,7 +33,16 @@ static void ser(const char *s)
     }
 }
 
-static volatile int n0;
+static volatile int n0, nk;
+static volatile unsigned char keys[4];
+
+static void irq1(void)
+{
+    if ((inportb(0x64) & 1) && nk < 4)
+        keys[nk++] = inportb(0x60);
+    outportb(0x20, 0x20);
+}
+static void irq1_end(void) { }
 
 static void irq0(void)
 {
@@ -91,6 +106,24 @@ int main(void)
     outportb(0x71, a0 & 0x7F);
     __asm__ volatile("sti");
     snprintf(line, sizeof line, "HX-DIRECT rtc a=%02x\r\n", a & 0x7F);
+    ser(line);
+
+    _go32_dpmi_lock_code(irq1, (char *)irq1_end - (char *)irq1);
+    _go32_dpmi_lock_data((void *)&nk, sizeof nk);
+    _go32_dpmi_lock_data((void *)keys, sizeof keys);
+    _go32_dpmi_get_protected_mode_interrupt_vector(9, &old);
+    info.pm_offset = (unsigned long)irq1;
+    info.pm_selector = _go32_my_cs();
+    _go32_dpmi_allocate_iret_wrapper(&info);
+    _go32_dpmi_set_protected_mode_interrupt_vector(9, &info);
+    ser("HX-DIRECT armed-key\r\n");
+    {
+        unsigned long t0 = _farpeekl(_dos_ds, 0x46C);
+        while (nk < 2 && _farpeekl(_dos_ds, 0x46C) - t0 < 18 * 20) ;
+    }
+    _go32_dpmi_set_protected_mode_interrupt_vector(9, &old);
+    _go32_dpmi_free_iret_wrapper(&info);
+    snprintf(line, sizeof line, "HX-DIRECT keys=%02x%02x\r\n", nk > 0 ? keys[0] : 0, nk > 1 ? keys[1] : 0);
     ser(line);
     return 0;
 }

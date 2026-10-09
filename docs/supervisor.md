@@ -464,8 +464,21 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   it puts them back (`timer_reclaim()`), and what the program wrote becomes the virtual RTC's A and B. A program
   that reads CMOS from protected mode must keep interrupts off between its 70h and 71h accesses, as under any
   host whose clock is the RTC: GLOS's IRQ 8 writes 70h 1024 times a second.
-- **The PIT and the 8042** are the program's, as in any session (§8.2, §10); GLOS's keyboard IRQ still reads
-  the byte first (the kill hotkey), and the program then reads port 60h's latch.
+- **The PIT** is the program's, as in any session (§8.2).
+- **The 8042** (M4e, found by the gate's forced-direct GTA): the program's protected-mode keyboard handler reads
+  the chip itself, status then data. So a byte can't wait in the virtual 8042's output buffer: GTA never emptied
+  it, and saw only the first key. GLOS still reads each byte first (the kill hotkey) and then puts it back with
+  the 8042's own commands, D2h ("write keyboard output buffer"), or D3h for AUX. The chip raises the IRQ again,
+  and that one is the program's. Reads from V86 code go to the chip too (the BIOS's INT 09h, when the
+  program's handler chains to it). Writes are handled as always, so A20 and the reset pulse stay GLOS's;
+  answers to commands go into the chip the same way. The tick doesn't drain the chip, so a program polling
+  with IRQ 1 off keeps its bytes, but then the kill hotkey can't be heard. Keys pressed in the same instant
+  wait in the keyboard, not in GLOS's queue, so a command sent to the keyboard drops them, as on silicon. The
+  BIOS's LED update after a program changed the lock bits is one such command: the kill hotkey's three keys
+  sent at once lost Shift to it. Typed a third of a second apart, they work. A program's own writes to the IMR bits
+  of GLOS's lines (keyboard, RTC, AUX) don't reach the virtual PIC: GLOS keeps those lines unmasked at the
+  chip, so a write there can't be told from no write. (Taking them over broke DIRTEST's IRQ 1 once it had
+  masked and unmasked the line.)
 - `GLOS-SESSION begin ... direct=1`; at the end `GLOS-SESSION direct-end imr=N rtc=N` (how often GLOS took
   each back).
 - **Tests.** `jobs.py sess` (`sess-direct-*`): djtst205's ENABLE passes under a direct profile and still stops

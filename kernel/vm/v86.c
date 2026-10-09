@@ -205,6 +205,7 @@ void vm_direct(int on)
     }
     vm.direct = (u8)on;
     vm.pic.auto_eoi = (u8)on;
+    vkbc_direct(on);
     vm_sync_mask();
 }
 
