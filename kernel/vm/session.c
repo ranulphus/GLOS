@@ -19,7 +19,8 @@
  * A session takes the profile (GLOS.CFG's [program NAME.EXT], §11.2) of the
  * program that begins it: its env lines go into that EXEC's environment (a
  * copy GLOS makes in DOS memory the parent owns, freed at the end), and its
- * memory caps the DPMI context the session makes. */
+ * memory caps the DPMI context the session makes; direct = 1 (or GLOS.EXE's
+ * /DIRECT) runs the session in direct mode, at IOPL 3 (§9.7, v86.c). */
 #include <string.h>
 
 #include "glos/bootinfo.h"
@@ -102,6 +103,7 @@ static void end(const char *why)
     int remode = (mode & 0x7F) != (ses.mode & 0x7F);
 
     ses.active = 0;
+    vm_direct(0);                               /* (before the BIOS calls: they run at IOPL 0) */
     if (ses.env_seg) {                          /* the profile's environment: DOS has copied it */
         if (vm_rd16(ses.env_pb) == ses.env_seg) {
             vm_wr8(ses.env_pb, (u8)ses.env_old);
@@ -278,8 +280,10 @@ void session_exec(const struct trapframe *tf)
     ses.env_seg = 0;
     if (ses.prof && ses.prof->env[0])
         profile_env(tf, psp);
-    kprintf("GLOS-SESSION begin n=%u prog=%s parent=%04x mode=%02x%s%s\n", ses.n, ses.prog, psp, ses.mode,
-            ses.prof ? " profile=" : "", ses.prof ? ses.prof->name : "");
+    kprintf("GLOS-SESSION begin n=%u prog=%s parent=%04x mode=%02x%s%s%s\n", ses.n, ses.prog, psp, ses.mode,
+            ses.prof ? " profile=" : "", ses.prof ? ses.prof->name : "", session_direct() ? " direct=1" : "");
+    if (session_direct())
+        vm_direct(1);                           /* from the return into DOS's EXEC on */
 }
 
 /* INT 20h, or INT 21h 4Ch or 00h, from V86 code: a program ending (the
@@ -317,4 +321,7 @@ int session_active(void) { return ses.active; }
 
 u32 session_memory_kb(void) { return ses.active && ses.prof ? ses.prof->memory_kb : 0; }
 
-int session_direct(void) { return ses.active && ses.prof && (ses.prof->flags & BI_PROF_DIRECT); }
+int session_direct(void)
+{
+    return ses.active && ((vm.bi->flags & BI_F_DIRECT) || (ses.prof && (ses.prof->flags & BI_PROF_DIRECT)));
+}

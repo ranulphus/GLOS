@@ -7,6 +7,7 @@ struct trapframe;
 
 void pic_init(u8 master_base, u8 slave_base, u16 mask);   /* mask: master bits 0-7, slave 8-15 */
 void pic_set_mask(u16 mask);
+int timer_reclaim(u8 *a, u8 *b);                /* direct mode: the kernel's RTC rate and PIE back */
 void timer_start(void);                 /* RTC periodic interrupt at 1024 Hz on IRQ 8 */
 void timer_stop(void);                  /* the RTC's registers A and B as found */
 void timer_stop_to(u8 a, u8 b);         /* ... or as given */

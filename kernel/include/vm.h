@@ -39,6 +39,8 @@ struct vm {
     u16 loader_cs, loader_psp;
     u8 vif;                             /* the virtual interrupt flag (EFLAGS.VIF in V86 mode with VME) */
     u8 vme;                             /* CR4.VME on: CLI, STI, PUSHF, POPF, IRET and most INTs in hardware */
+    u8 direct;                          /* a direct-mode session: IOPL 3, the real IF (supervisor.md §9.7) */
+    u8 direct_rtc;                      /* user entries since the RTC was last checked (direct mode) */
     u32 vflags_hi;                      /* NT */
     struct vpic pic;
     u16 phys_mask;                      /* what the physical PIC's IMR holds */
@@ -86,6 +88,7 @@ int vm_restore_child(void);                     /* after DOS aborted the current
 void vm_idle(u32 until);                        /* block until a deliverable IRQ, a kill or tick `until` (0: none) */
 void vm_set_a20(int on);
 void vm_sync_mask(void);                        /* the physical IMR from the virtual one */
+void vm_direct(int on);                         /* a direct-mode session begins (1) or ends (0) */
 void vm_claim_irq(int irq, void (*fn)(struct trapframe *));    /* the line becomes the kernel's */
 void vm_kmask(int irq, int masked);             /* a kernel line masked while its driver works */
 void vm_reset_req(const char *source);

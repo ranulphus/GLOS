@@ -55,6 +55,8 @@ VARIANTS = {
     "glos": ["--boot-cfg", "glosshell", "--file", CACHE + "/glos/bin/GLOS.EXE=/TEST/GLOS.EXE",
              "--file", CACHE + "/glos/bin/GLOSK.BIN=/TEST/GLOSK.BIN"],
 }
+# The same with every program in direct mode (IOPL 3, M4e): GLOS.CFG's [shell] options = /DIRECT.
+VARIANTS["glos-direct"] = VARIANTS["glos"] + ["--file", CACHE + "/glos/bin/direct/GLOS.CFG=/TEST/GLOS.CFG"]
 DEFAULT_VARIANTS = ["base", "hdpmi32", "hdpmi32i"]
 
 # name -> how to run it. "run": MGA-Glide's run.py with these arguments,

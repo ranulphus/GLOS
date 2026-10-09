@@ -265,8 +265,8 @@ static u32 stray_db;                                    /* single steps dropped 
 static void dispatch(struct trapframe *tf)
 {
     u32 v = tf->vec;
-    if (tf->eflags & EFLAGS_VM)
-        vm_trap_entry(tf);
+    if ((tf->eflags & EFLAGS_VM) || (tf->cs & 3))
+        vm_user_entry(tf);
     if (v >= IRQ_BASE_MASTER && v < IRQ_BASE_MASTER + 16) {
         int irq = (int)(v - IRQ_BASE_MASTER);
         random_event(v);

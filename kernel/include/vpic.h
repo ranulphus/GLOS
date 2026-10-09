@@ -20,6 +20,7 @@ struct pic8259 {
 struct vpic {
     struct pic8259 p[2];        /* master, slave (on the master's IR2) */
     u16 inflight;               /* lines a physical IRQ raised that are not yet EOIed virtually */
+    u8 auto_eoi;                /* every acknowledge ends the IRQ, as with ICW4's AEOI (direct mode) */
 };
 
 void vpic_reset(struct vpic *v, u8 master_base, u8 slave_base, u16 imr);

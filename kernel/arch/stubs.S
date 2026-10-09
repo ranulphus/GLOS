@@ -48,8 +48,12 @@ trap_common:
    built (vm_enter, nest_enter, frame_resume). A ring-3 return to a 16-bit
    stack goes through espfix (supervisor.md §6.3): trap_dispatch has set the
    espfix selector's base and espfix_ptr so that SS:ESP addresses this same
-   frame with ESP[31:16] already the client's. */
+   frame with ESP[31:16] already the client's. vm_user_exit() gives a frame
+   to user mode its IOPL and IF (a direct-mode session's, v86.c). */
 trap_exit:
+        pushl   %esp
+        call    vm_user_exit
+        addl    $4, %esp
         popal
         popl    %gs
         popl    %fs

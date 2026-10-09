@@ -79,7 +79,11 @@ the session beginning and ending with the mode put back and the vector
 taken out. Profiles (E2): with GLOS as the shell and a GLOS.CFG giving
 PROFCHK.EXE a variable, a PATH of its own and a 4 MB cap, PROFCHK (DJGPP)
 sees them and gets at most 4 MB from DPMI; the same program as NOPROF.EXE
-sees the shell's environment and gets more than 8 MB.
+sees the shell's environment and gets more than 8 MB. Direct mode (E3):
+under direct profiles djtst205's ENABLE passes, DIRTEST runs at IOPL 3
+with an IRQ 0 handler that EOIs the PIC itself and GLOS takes back its
+keyboard line and RTC rate from it, and SESSTEST leaves nothing behind;
+without a profile ENABLE still stops at its first check.
 
 hostile: HOSRUN.BAT runs every tests/dos/hostile.c case under one "GLOS /RUN
 COMMAND /C"; the harness types Ctrl-Alt-Shift-Esc after each one's "armed"
@@ -114,6 +118,8 @@ def runpy_cmd():
 
 
 def run(name, args, background=False):
+    if os.environ.get("GLOS_SET"):              # GLOS.EXE's flags for the whole run (GLOS_SET=/DIRECT: forced direct mode;
+        args = ["--cmd", "SET GLOS=" + os.environ["GLOS_SET"]] + args      # not as the shell, started before RUN.BAT)
     out = os.path.join(ROOT, "out", name)
     os.makedirs(out, exist_ok=True)
     for stale in ("serial.log", "status", "result.json"):   # a background run's caller polls these
@@ -725,8 +731,9 @@ def dj_own(name, lines):
 # the real IF; HDPMI32i clears it too, at IOPL 0, by returning to the client
 # with IF off, which a `cli; jmp $` then turns into a dead machine. GLOS keeps
 # the virtual IF (PRD D20), so PUSHF shows IF set and ENABLE stops at its
-# first check: expected until direct-mode profiles (IOPL 3, M4e) run it.
-DJ_KNOWN = {"ENABLE": (1, "disable -> incorrect; expected 0")}
+# first check, unless the run is in direct mode (IOPL 3, M4e: GLOS_SET=/DIRECT).
+DJ_KNOWN = {"ENABLE": (1, "disable -> incorrect; expected 0")} if "/DIRECT" not in os.environ.get("GLOS_SET", "").upper() \
+    else {}
 # SIGNALS fires SIGALRM and SIGFPE as fast as it can, then ends on purpose with
 # an FP exception. CWSDPMI doesn't always get there (one bf6 run died with a
 # GPF in the signal storm), so GLOS is held to the test's own ending.
@@ -1283,6 +1290,64 @@ def sess_prof(profile, boot):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+DIRECT_CFG = ["; direct mode, for jobs.py sess", "[program ENABLE.EXE]", "direct = 1", "[program DIRTEST.EXE]",
+              "direct = 1", "[program SESSTEST.EXE]", "direct = 1"]
+ENABLE_OK = ["1(=1?) -> enable  -> 1(=1?)", "1(=1?) -> disable -> 0(=0?)", "0(=0?) -> disable -> 0(=0?)",
+             "0(=0?) -> enable  -> 1(=1?)", "1(=1?) -> enable  -> 1(=1?)", "1(=1?) -> disable -> 0(=0?)",
+             "0(=0?) -> enable  -> 1(=1?)"]
+
+
+def sess_direct(profile, boot):
+    """Direct mode (E3), with GLOS as the shell: djtst205's ENABLE (PUSHF after
+    CLI) passes under a direct profile and, as ENABLE0.EXE, still stops at its
+    first check without one; DIRTEST sees IOPL 3, keeps its IRQ 0 handler
+    that EOIs the PIC itself, and loses its writes to GLOS's keyboard line
+    and RTC rate (DIRTEST0.EXE, without a profile, at IOPL 0); SESSTEST at
+    IOPL 3 leaves nothing behind."""
+    tag = "direct-%s-%s" % (profile, boot)
+    cfg = batfile("sess-%s/GLOS.CFG" % tag, DIRECT_CFG)
+    args = ["--machine", profile, "--boot-cfg", "glosshell" + ("-himemx" if boot == "himemx" else "")] + GLOS_FILES + \
+        SESS_FILES + ["--file", cfg + "=/TEST/GLOS.CFG"]
+    for f in ("ENABLE", "ENABLE0"):
+        args += ["--file", "build/dj/djtst/ENABLE.EXE=/TEST/%s.EXE" % f]
+    for f in ("DIRTEST", "DIRTEST0"):
+        args += ["--file", "build/dj/DIRTEST.EXE=/TEST/%s.EXE" % f]
+    cmds = ["SERSAY HX-START sess-direct", "C:\\TEST\\ENABLE.EXE > C:\\OUT\\ENABLE.TXT",
+            "IF NOT ERRORLEVEL 1 SERSAY HX-ENABLE code=0", "C:\\TEST\\ENABLE0.EXE > C:\\OUT\\ENABLE0.TXT",
+            "IF ERRORLEVEL 1 SERSAY HX-ENABLE0 code=1", "SERSAY HX-DIRTEST", "C:\\TEST\\DIRTEST.EXE",
+            "SERSAY HX-DIRTEST0", "C:\\TEST\\DIRTEST0.EXE", "SERSAY HX-SESSTEST"] + SESS_STEPS + ["SERSAY HX-DONE 0"]
+    for c in cmds:
+        args += ["--cmd", c]
+    st, serial = run("sess-" + tag, args)
+    files = os.path.join(ROOT, "out", "sess-" + tag, "files")
+
+    def read(n):
+        p = os.path.join(files, n)
+        return open(p, "rb").read().decode("latin-1").replace("\r", "").splitlines() if os.path.exists(p) else []
+
+    def dirtest(part):
+        return dict(kv for l in part.splitlines() if l.startswith("HX-DIRECT ") for kv in re.findall(r"(\w+)=(\w+)", l))
+    d = serial.split("HX-DIRTEST0")
+    d1, d0 = (dirtest(d[0].split("HX-DIRTEST")[-1]), dirtest(d[1].split("HX-SESSTEST")[0])) if len(d) == 2 else ({}, {})
+    sess_part = serial[serial.find("HX-SESSTEST"):]
+    left = sess_left(sess_part)
+    checks = {
+        "status": st == "PASS",
+        "enable": read("ENABLE.TXT") == ENABLE_OK and "HX-ENABLE code=0" in serial,
+        "enable0": "HX-ENABLE0 code=1" in serial and any("incorrect" in l for l in read("ENABLE0.TXT")),
+        "direct": d1.get("iopl") == "3" and int(d1.get("n", 0)) >= 10 and d1.get("irq5") == "1"
+                  and d1.get("irq1") == "0" and d1.get("a") == "26",
+        "control": d0.get("iopl") == "0" and int(d0.get("n", 0)) >= 10,
+        "sesstest": left is not None and all(left.values()) and "direct=1" in sess_part
+                    and all(sess_checks(sess_part).values()),
+        "direct-ends": serial.count("GLOS-SESSION direct-end") == 3,
+        "clean": "GLOS-PANIC" not in serial and "GLOS-WARN" not in serial,
+    }
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("sess-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad) + " direct=%s control=%s" % (d1, d0)), not bad
+
+
 def sess_agent(profile, card):
     """SESSTEST and the checks as agent jobs, through ssh: each job is a session (the agent EXECs a program
     directly, trying each place along PATH; only the one found begins a session)."""
@@ -1339,6 +1404,7 @@ def main():
     if a.suite == "sess":
         res = matrix(sess, [(p, b, h) for p, b in combos for h in ("base", "run", "shell")], a.jobs)
         res += matrix(sess_prof, combos, a.jobs)
+        res += matrix(sess_direct, combos, a.jobs)
         res += matrix(sess_agent, [c for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "dpmi":

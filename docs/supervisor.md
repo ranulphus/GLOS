@@ -143,11 +143,13 @@ to COM1 at each step:
     console  = C:\KIOSK.BAT
     ; the master environment, in bytes (default 1024)
     envsize  = 2048
-    ; GLOS.EXE's flags: /DPMITRACE, /NOVME, /GDB (M4c)
+    ; GLOS.EXE's flags: /DPMITRACE, /NOVME, /GDB (M4c), /DIRECT (M4e)
     options  = /DPMITRACE
     ```
 
     Comments are whole lines (`;` or `#`): a value runs to the end of its line, since PATH has semicolons in it.
+  - In any mode the `GLOS` environment variable gives GLOS.EXE flags too (`SET GLOS=/DIRECT /DPMITRACE`; M4e),
+    before the command line's.
 
     `/COMSPEC=`, `/P=`, `/E:` and `/CON=` on the command line override them, like COMMAND.COM's own options.
   - `GLOS.EXE`'s environment becomes the master environment: what DOS gave it, with `COMSPEC` set, in a
@@ -422,11 +424,43 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 
 ### 9.7 Direct mode
 
-- A program profile with `direct=1` runs its session at IOPL 3. V86 code still sees the I/O bitmap;
-  protected-mode code at CPL 3 ≤ IOPL bypasses it.
-- IOPL is constant for a session's lifetime, because 86Box's dynarec compiles PUSHF for one IOPL [86Box].
+- A program profile with `direct = 1` (§11.2), or GLOS.EXE's `/DIRECT` for every session, runs its session at
+  IOPL 3. V86 code still sees the I/O bitmap; protected-mode code at CPL 3 ≤ IOPL bypasses it.
+- IOPL changes only at a session's start and end. (The worry was 86Box's dynarec compiling PUSHF for one IOPL;
+  V86TEST case U runs the same code at IOPL 0, 3 and 0 and passes.)
 - In direct mode, agent liveness isn't guaranteed while the program has interrupts off. The documentation says
   so.
+
+**As built (M4e E3; kernel/vm/v86.c, kernel/arch/stubs.S):**
+- **IF.** The program's CLI, STI, POPF and IRET act on the real IF, which stands for the virtual IF while the
+  session runs: every entry from user mode copies it into `vm.vif` (`vm_user_entry()`), and every way out
+  through `trap_exit` writes `vm.vif` back with IOPL 3 (`vm_user_exit()`). Delivery, the IRET trampoline and
+  0900h-0902h work on `vm.vif` as before. Out of direct mode `vm_user_exit()` only turns a frame left from a
+  direct session back to IOPL 0 with IF on. VME's VIF and VIP aren't used at IOPL 3, and the `vif-stuck`
+  watchdog is off: interrupts off are the program's own.
+- **INT n from V86 code** reaches the IDT at IOPL 3 (without VME always; with VME for the vectors GLOS keeps in
+  the redirection bitmap). The DPL-0 gates (00h-1Fh, 50h-5Fh) raise #GP, decoded as before; the DPL-3 fast
+  gates (20h-4Fh, 60h-FFh) arrive as that vector with a V86 frame, EIP already past the INT, and go to the same
+  software-interrupt path.
+- **The PIC.** Protected-mode code reads and writes the real PIC. GLOS still ends every IRQ at the real PIC
+  when it arrives, so the program's own EOI there does nothing, and the virtual PIC ends each IRQ it delivers at
+  once (as ICW4's AEOI): it can't see an EOI that never traps. At every entry GLOS reads the real IMR; when it
+  isn't what GLOS last wrote, the program wrote it, and its bits for the VM's lines become the virtual IMR's,
+  while GLOS's own lines (keyboard, cascade, RTC, AUX, the network card) are unmasked again. Re-initialising
+  the PIC (ICW1-4 from protected mode) is not supported: the IRQs would arrive at the exception vectors.
+- **The RTC.** At every 16th entry GLOS reads registers A and B; if the rate isn't its 1024 Hz or PIE is off,
+  it puts them back (`timer_reclaim()`), and what the program wrote becomes the virtual RTC's A and B. A program
+  that reads CMOS from protected mode must keep interrupts off between its 70h and 71h accesses, as under any
+  host whose clock is the RTC: GLOS's IRQ 8 writes 70h 1024 times a second.
+- **The PIT and the 8042** are the program's, as in any session (§8.2, §10); GLOS's keyboard IRQ still reads
+  the byte first (the kill hotkey), and the program then reads port 60h's latch.
+- `GLOS-SESSION begin ... direct=1`; at the end `GLOS-SESSION direct-end imr=N rtc=N` (how often GLOS took
+  each back).
+- **Tests.** `jobs.py sess` (`sess-direct-*`): djtst205's ENABLE passes under a direct profile and still stops
+  at its first check without one; DIRTEST (DJGPP) sees IOPL 3, keeps an IRQ 0 handler that ends the IRQ at
+  the PIC itself without chaining, and loses its writes to the keyboard's IMR bit and the RTC rate; SESSTEST
+  at IOPL 3 leaves nothing behind. Forced direct mode: `GLOS_SET=/DIRECT` for jobs.py's suites run on the host
+  (it adds `SET GLOS=/DIRECT` to RUN.BAT) and `M4C_DIRECT=1` for tools/m4c-games.sh.
 
 ## 10. Virtual devices
 
@@ -525,8 +559,8 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 
   The BIOS calls run nested (§15) on the stub's spare stack (the kill stub's, `kill_sp`), with no DPMI client
   needed.
-- **Not yet:** pausing GLOS apps (M6), the display state beyond the mode, direct mode (E3), kills ending a
-  session (E5) and switching away (M6).
+- **Not yet:** pausing GLOS apps (M6), the display state beyond the mode, kills ending a session (E5) and
+  switching away (M6).
 - **Tests.** `jobs.py sess` (`make loopa-sess`). SESSTEST leaves each of these changed natively; under
   `GLOS /RUN`, as the shell and as an agent job, none is (VECCHK, VMODE, TIMECHK).
 
@@ -1097,7 +1131,7 @@ place where nothing else is in DOS by construction.
 | SSH | `listen`, `off`, `connect`, `client version=`, `kex done strict=`, `auth ok`, `exec=`, `close why=`, `refuse` |
 | AGENT | A job: `run seq= cmd=`, `done seq= code= via=` (the program, or `comspec`) |
 | KILL | A kill (§9.6) |
-| SESSION | A session (§11.1): `begin n= prog= parent= mode=`, `end n= prog= why=exit\|next-exec\|stub mode= [remode=1] vectors= ticks= t=` (`mode=` the mode it ended in, `vectors=` those put back, `ticks=` the BIOS tick count set from the RTC, `t=` its length in kernel ticks) |
+| SESSION | A session (§11.1): `begin n= prog= parent= mode= [profile=] [direct=1]`, `direct-end imr= rtc=` (§9.7), `end n= prog= why=exit\|next-exec\|stub mode= [remode=1] vectors= ticks= t=` (`mode=` the mode it ended in, `vectors=` those put back, `ticks=` the BIOS tick count set from the RTC, `t=` its length in kernel ticks) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
 | DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... if= -> cf= ax=` (`if=` the virtual IF at the call), `raw to=rm|pm`, `dosx ax= ... -> cf=`, `vendor name=`, `v86-int21` (a client's real-mode DOS calls), `exception-code` (the code bytes and registers at a fault),, `deliver irq=|passup=|exception=|rmcb= to= from= at= err= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |
 | CRASH | A client the host ends (§19): `why= vec= err= prog= psp= bits= mode=`, `cs:eip= ss:esp= eflags= cr2=`, the general registers, `code=` (16 bytes at CS:EIP), `stack=`, a `seg` line per segment register, `handlers= lstack= nesting=`, `file=` |

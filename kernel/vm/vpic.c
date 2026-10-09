@@ -55,8 +55,8 @@ static void take(struct vpic *v, int chip, int level)
 {
     struct pic8259 *c = &v->p[chip];
     c->irr &= (u8)~(1u << level);
-    if (c->icw4 & 0x02) {                       /* automatic EOI */
-        if (c->rotate_aeoi)
+    if ((c->icw4 & 0x02) || v->auto_eoi) {     /* automatic EOI */
+        if (c->rotate_aeoi && (c->icw4 & 0x02))
             c->lowest = (u8)level;
         v->inflight &= (u16)~(1u << (chip * 8 + level));
     } else {

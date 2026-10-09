@@ -267,7 +267,7 @@ static void rtc_tick(u8 c)
 /* An IRQ waiting longer than 50 ms behind a cleared virtual IF. */
 static void watchdog(struct trapframe *tf, u32 now)
 {
-    if (vm.vif || !vpic_pending(&vm.pic)) {
+    if (vm.vif || !vpic_pending(&vm.pic) || vm.direct) {     /* (direct mode: the real IF, the program's own) */
         vm.stuck_since = 0;
         vm.stuck_warned = 0;
         return;

@@ -344,9 +344,12 @@ static int flag_arg(const char *a)
     else if (!stricmp(a, "/NOVME")) bi.flags |= BI_F_NOVME;
     else if (!stricmp(a, "/AGENT")) bi.flags |= BI_F_AGENT;
     else if (!stricmp(a, "/DPMITRACE")) bi.flags |= BI_F_DPMITRACE;
+    else if (!stricmp(a, "/DIRECT")) bi.flags |= BI_F_DIRECT;
     else return 0;
     return 1;
 }
+
+static void opt_str(char *dst, unsigned n, const char *v);
 
 static int glos_main(int argc, char **argv)
 {
@@ -361,6 +364,13 @@ static int glos_main(int argc, char **argv)
 
     if (shell)
         bi.flags |= BI_F_SHELL | BI_F_VM;
+    if (getenv("GLOS") != NULL) {                       /* SET GLOS=/DIRECT ...: flags in any mode (M4e) */
+        static char env_flags[128];
+        char *t;
+        opt_str(env_flags, sizeof env_flags, getenv("GLOS"));
+        for (t = strtok(env_flags, " \t"); t; t = strtok(NULL, " \t"))
+            flag_arg(t);
+    }
     for (i = 1; i < (unsigned)argc && !shell; i++) {
         if (flag_arg(argv[i]))
             ;

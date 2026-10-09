@@ -52,6 +52,23 @@ u8 timer_found_b(void) { return rtc_b; }
    SQWE, DM, 24/12 and DSE reach the chip (supervisor.md §10). */
 void timer_write_b(u8 b) { cmos_set(0x0B, (u8)((b & 0x8F) | 0x40)); }
 
+/* Direct mode (supervisor.md §9.7): protected-mode code at IOPL 3 reaches
+   the RTC itself. When register A's rate or B's PIE is no longer the
+   kernel's, the kernel's go back (B's other bits as the program left them)
+   and 1 is returned, with what the program had written in *a and *b. */
+int timer_reclaim(u8 *a, u8 *b)
+{
+    u8 ra = cmos(0x0A), rb = cmos(0x0B);
+    if ((ra & 0x7F) == 0x26 && (rb & 0x40))
+        return 0;
+    *a = (u8)(ra & 0x7F);
+    *b = rb;
+    cmos_set(0x0A, 0x26);
+    timer_write_b(rb);
+    (void)cmos(0x0C);
+    return 1;
+}
+
 void timer_start(void)
 {
     rtc_a = cmos(0x0A);

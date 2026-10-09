@@ -133,13 +133,79 @@ void vm_kick(void)
 
 struct trapframe *vm_frame(void) { return (struct trapframe *)(vm.thread->stack_top - sizeof(struct trapframe)); }
 
-/* With VME the virtual IF lives in EFLAGS.VIF while V86 code runs: it is
+/* ---- every entry from user mode, and every way out
+
+   With VME the virtual IF lives in EFLAGS.VIF while V86 code runs: it is
    read at every trap from V86 mode and written back by vm_return(), with
-   VIP set while an IRQ waits for it (so the STI or POPF that sets it traps). */
-void vm_trap_entry(struct trapframe *tf)
+   VIP set while an IRQ waits for it (so the STI or POPF that sets it traps).
+
+   In a direct-mode session (supervisor.md §9.7) the program runs at IOPL 3:
+   its CLI, STI, POPF and IRET act on the real IF, which is the virtual IF
+   while it runs. It is read at every entry and written back on the way out
+   (trap_exit). The program's protected-mode code also reaches the PIC and
+   the RTC: at every entry GLOS takes a mask the program wrote into the
+   virtual PIC and puts its own lines back, and puts the RTC's periodic
+   interrupt back (checked at every 16th entry). The virtual PIC ends each
+   IRQ it delivers at once, since the program's EOI goes to the real PIC
+   (which GLOS ended when the IRQ came). */
+static u32 direct_imr, direct_rtc;              /* what the session took back: for its end line */
+
+void vm_user_entry(struct trapframe *tf)
 {
-    if (vm.vme)
-        vm.vif = (tf->eflags & FL_VIF) != 0;
+    u16 m, phys, own;
+    u8 a, b;
+    if (!vm.direct) {
+        if (vm.vme && (tf->eflags & FL_VM))
+            vm.vif = (tf->eflags & FL_VIF) != 0;
+        return;
+    }
+    vm.vif = (tf->eflags & FL_IF) != 0;
+    phys = (u16)(inb(0x21) | (inb(0xA1) << 8));
+    if (phys != vm.phys_mask) {                 /* the program's (the kernel's lines and those in flight */
+        own = (u16)(kernel_lines | vm.pic.inflight);    /* are GLOS's) */
+        m = (u16)((vpic_imr(&vm.pic) & own) | (phys & ~own));
+        vm.pic.p[0].imr = (u8)m;
+        vm.pic.p[1].imr = (u8)(m >> 8);
+        vm.phys_mask = phys;                    /* (what the chip holds: vm_sync_mask() puts GLOS's back) */
+        vm_sync_mask();
+        direct_imr++;
+    }
+    if (!(vm.direct_rtc++ & 15) && timer_reclaim(&a, &b)) {
+        vm.rtc_a = a;                           /* what it wrote: its own (virtual) RTC */
+        vm.rtc_b = b;
+        direct_rtc++;
+    }
+}
+
+void vm_user_exit(struct trapframe *tf)
+{
+    if (!(tf->eflags & FL_VM) && !(tf->cs & 3))
+        return;
+    if (vm.direct)
+        tf->eflags = (tf->eflags & ~(FL_IF | FL_VIF | FL_VIP)) | FL_IOPL3 | (vm.vif ? FL_IF : 0);
+    else if (tf->eflags & FL_IOPL3)             /* a frame from a direct-mode session that has ended */
+        tf->eflags = (tf->eflags & ~FL_IOPL3) | FL_IF;
+}
+
+/* A direct-mode session begins or ends (session.c). At the end the physical
+   IMR is GLOS's again, and the RTC's rate and PIE. */
+void vm_direct(int on)
+{
+    u8 a, b;
+    if (on == vm.direct)
+        return;
+    if (on) {
+        direct_imr = direct_rtc = 0;
+        vm.direct_rtc = 0;
+    } else {
+        vm.phys_mask = (u16)(inb(0x21) | (inb(0xA1) << 8));
+        if (timer_reclaim(&a, &b))
+            direct_rtc++;
+        kprintf("GLOS-SESSION direct-end imr=%u rtc=%u\n", direct_imr, direct_rtc);
+    }
+    vm.direct = (u8)on;
+    vm.pic.auto_eoi = (u8)on;
+    vm_sync_mask();
 }
 
 void vm_sync_mask(void)
@@ -316,6 +382,8 @@ void vm_return(struct trapframe *tf)
         vm_try_kill(tf, 0);
     if (vm.vif && vpic_pending(&vm.pic)) {
         vec = vpic_ack(&vm.pic);
+        if (vm.direct)
+            vm_sync_mask();                     /* (ended at once: the line is unmasked again) */
         if (vec >= 0) {
             vm.n_irq++;
             if (dctx && dpmi_irq(tf, (u8)vec)) {    /* a DPMI client's handler first, in protected mode (§14.1) */
@@ -325,7 +393,7 @@ void vm_return(struct trapframe *tf)
             vm_int(tf, (u8)vec, tf->eip & 0xFFFF);
         }
     }
-    if (vm.vme) {
+    if (vm.vme && !vm.direct) {
         tf->eflags &= ~(FL_VIF | FL_VIP);
         if (vm.vif)
             tf->eflags |= FL_VIF;
@@ -798,6 +866,10 @@ void vm_exception(struct trapframe *tf)
         vm_int(tf, (u8)tf->vec, ip);            /* as a real-mode CPU would */
         return;
     default:
+        if (tf->vec >= 0x20) {                  /* INT n at IOPL 3 (direct mode), through a DPL-3 gate: */
+            soft_int(tf, (u8)tf->vec, ip);      /* EIP is already past it */
+            return;
+        }
         panic("v86-exception", tf);
     }
 }

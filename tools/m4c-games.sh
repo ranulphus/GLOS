@@ -14,6 +14,8 @@
 # need the owner's traces and fixtures in ~/.cache/mga-glide (skipped, and
 # reported, without them). `make glos-cache` (a prerequisite of make
 # loopa-m4c) puts GLOS.EXE and GLOSK.BIN where the runs take them from.
+# M4C_DIRECT=1 runs every program in direct mode (IOPL 3, M4e): GLOS.CFG's
+# [shell] options = /DIRECT, from the same place.
 set -u
 GLOS=$(cd "$(dirname "$0")/.." && pwd)
 CACHE=${MGA_CACHE:-$HOME/.cache/mga-glide}
@@ -21,6 +23,11 @@ MGA_TREE=${M4C_MGA:-${MGA_GLIDE:-$HOME/MGA-Glide}}
 DOSBENCH=${DOSBENCH:-$HOME/DOSBench}
 BIN=$CACHE/glos/bin
 export LOOPA_EXTRA_ARGS="--boot-cfg glosshell --file $BIN/GLOS.EXE=/TEST/GLOS.EXE --file $BIN/GLOSK.BIN=/TEST/GLOSK.BIN"
+VARIANT=glos
+if [ "${M4C_DIRECT:-0}" = 1 ]; then
+    LOOPA_EXTRA_ARGS="$LOOPA_EXTRA_ARGS --file $BIN/direct/GLOS.CFG=/TEST/GLOS.CFG"
+    VARIANT=glos-direct
+fi
 fail=0
 
 result() {      # PART NAME OK DETAIL
@@ -69,16 +76,16 @@ part_replay() {
 part_survey() {
     local out j bad=""
     env -u LOOPA_EXTRA_ARGS MGA_GLIDE=$MGA_TREE python3 "$GLOS/tools/survey/survey.py" run --suite gta \
-        --suite screamer-rally --variant base --variant glos
+        --suite screamer-rally --variant base --variant $VARIANT
     out=$(env -u LOOPA_EXTRA_ARGS MGA_GLIDE=$MGA_TREE python3 "$GLOS/tools/survey/survey.py" diff --suite gta \
-        --suite screamer-rally --variant glos)
+        --suite screamer-rally --variant $VARIANT)
     local st=$?
     echo "$out"
-    for j in gta/base gta/glos screamer-rally/base screamer-rally/glos; do
+    for j in gta/base gta/$VARIANT screamer-rally/base screamer-rally/$VARIANT; do
         grep -q "MGL-EXIT frames=" "$GLOS/out/survey/$j/serial.log" 2>/dev/null || bad="$bad $j:no-exit"
         [ "$(cat "$GLOS/out/survey/$j/status" 2>/dev/null)" = PASS ] || bad="$bad $j:status"
     done
-    bad="$bad $(glos_trouble "$GLOS"/out/survey/*/glos/serial.log)"
+    bad="$bad $(glos_trouble "$GLOS"/out/survey/*/$VARIANT/serial.log)"
     result survey games "$([ $st = 0 ] && [ -z "${bad// }" ] && echo 1)" \
         "$(echo "$out" | tr -s ' ' | tr '\n' ';')$bad"
 }

@@ -45,7 +45,8 @@ void set_trap_handler(int vec, int (*fn)(struct trapframe *));    /* returns 1 i
 void panic(const char *why, struct trapframe *tf) __attribute__((noreturn));
 
 /* vm/v86.c: traps from the system VM (EFLAGS.VM set in the frame) */
-void vm_trap_entry(struct trapframe *tf);
+void vm_user_entry(struct trapframe *tf);       /* every entry from V86 mode or ring 3 */
+void vm_user_exit(struct trapframe *tf);        /* every way out (trap_exit), to any ring */
 void vm_exception(struct trapframe *tf);
 void vm_return(struct trapframe *tf);
 

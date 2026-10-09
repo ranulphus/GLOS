@@ -540,6 +540,28 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   binary sha, profile, boot, card and 86Box key, the comparisons below, forced-direct runs, a kill job and a
   screenshot job per suite, and VECCHK/VMODE after each. T: `make gate`.
 
+**M4e status (2026-10-09): E1-E3 done.**
+- **E1 sessions** (02020d5; supervisor.md §11.1). Each top-level program is a session: the stub's EXECs (agent
+  jobs, `/RUN`) and, as the shell, the console COMMAND.COM's (FreeCOM is its own parent). An EXEC of a file that
+  isn't there starts none (the agent tries each place along PATH). The end puts back the video mode, PIT channel
+  0, the virtual PIC, RTC A/B, the 8042 command byte and the lock bits; it stops Sound Blaster DMA and resets
+  the DSP at BLASTER's port; it puts back vectors left in freed memory; and it sets the BIOS clock from the RTC.
+  T: `make loopa-sess` (on the host): SESSTEST changes each of these natively, and leaves none changed under
+  `/RUN`, as the shell, or as an agent job over ssh. 20 runs pass across bf6/486DX2/iDX4, raw and HIMEMX. The
+  hostile suite also checks the clock afterwards.
+- **E2 profiles** (supervisor.md §11.2): GLOS.CFG's `[program NAME.EXT]` sections (env, memory, direct), read
+  in every mode. A session takes the profile of the program that begins it. T: PROFCHK sees its profile's
+  variable and PATH and gets 3,328 KB under a 4 MB cap; as NOPROF.EXE it gets neither (about 62 MB).
+- **E3 direct mode** (supervisor.md §9.7): sessions at IOPL 3 by profile or `/DIRECT` (also `SET
+  GLOS=/DIRECT`).
+  - The real IF stands for the virtual IF: it is read at each entry and written back in `trap_exit`.
+  - V86 INT n arrives through the DPL-3 gates.
+  - The virtual PIC ends what it delivers at once.
+  - GLOS takes back its own IMR lines and the RTC rate at entries.
+  - T: djtst205's ENABLE passes under a direct profile (and still stops without one). DIRTEST sees IOPL 3, keeps
+    an IRQ 0 handler that EOIs the PIC itself, and loses the keyboard line and the RTC rate back to GLOS.
+    SESSTEST at IOPL 3 leaves nothing behind. All three profiles.
+
 ### The gate's baseline matrix (M4e)
 
 | Suite | Baseline | Profiles | Boots |

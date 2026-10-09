@@ -39,6 +39,7 @@ typedef unsigned int   bi_u32;
 #define BI_F_SHELL       0x0020                 /* GLOS is the DOS shell (SHELL=, supervisor.md §2.2) */
 #define BI_F_AGENT       0x0040                 /* headless: SSH commands run in DOS (no mode option, or /AGENT) */
 #define BI_F_DPMITRACE   0x0080                 /* /DPMITRACE: every INT 31h call and its result on COM1 */
+#define BI_F_DIRECT      0x0100                 /* /DIRECT: every session in direct mode (M4e: the gate's runs) */
 
 /* glos_call() functions (the ARPL at bp_call_off, AX = fn, EBX = arg). */
 #define GLOS_CALL_LEAVE  1                      /* stop the VM, back to real mode; arg = exit code */

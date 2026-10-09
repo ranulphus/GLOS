@@ -605,6 +605,8 @@ void dpmi_return(struct trapframe *tf)
     }
     while (vm.vif && vpic_pending(&vm.pic) && dctx) {
         int vec = vpic_ack(&vm.pic);
+        if (vm.direct)
+            vm_sync_mask();                     /* (direct mode: ended at once, v86.c) */
         if (vec < 0)
             break;
         vm.n_irq++;

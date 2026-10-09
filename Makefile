@@ -235,7 +235,7 @@ loopa-tpx: all dos-tests m4d-inputs check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py tpx --profile bf6 --profile 486dx2 --boot default -j $(JOBS)
 loopa-m4d: loopa-m4c loopa-dpmi16 loopa-tpx
 # M4e: exclusive sessions (on the host, as loopa-ssh: its agent cases use ssh).
-loopa-sess: all dos-tests build/dj/PROFCHK.EXE check-deps
+loopa-sess: all dos-tests build/dj/PROFCHK.EXE build/dj/DIRTEST.EXE build/dj/djtst/ENABLE.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py sess -j $(JOBS)
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
@@ -257,6 +257,11 @@ build/dj/DPMICONF.EXE: tests/dos/dpmiconf.c tests/dos/dpmiconf_h.S
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $^
 # PROFCHK (tests/dos/profchk.c): what a profile gives a program, its environment and memory (M4e).
 build/dj/PROFCHK.EXE: tests/dos/profchk.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+# DIRTEST (tests/dos/dirtest.c): a program at IOPL 3 and what GLOS takes back from it (M4e).
+build/dj/DIRTEST.EXE: tests/dos/dirtest.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
@@ -322,8 +327,10 @@ m4d-inputs: $(GLOS_HX)/.hdpmi16 build/ow/dos/DPMI16.EXE build/dj/DPMICONF.EXE $(
 # mounts, for LOOPA_EXTRA_ARGS="--boot-cfg glosshell --file $(GLOS_CACHE)/GLOS.EXE=/TEST/GLOS.EXE ..."
 GLOS_CACHE := $(MGA_CACHE)/glos/bin
 glos-cache: all
-	@mkdir -p $(GLOS_CACHE)
+	@mkdir -p $(GLOS_CACHE)/direct
 	$(Q)cp build/ow/GLOS.EXE build/kernel/GLOSK.BIN $(GLOS_CACHE)/
+	$(Q)printf '; every program in direct mode (M4C_DIRECT=1, the survey variant glos-direct)\r\n[shell]\r\noptions = /DIRECT\r\n' \
+	    > $(GLOS_CACHE)/direct/GLOS.CFG
 
 clean:
 	rm -rf build out
