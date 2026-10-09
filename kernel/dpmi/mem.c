@@ -91,12 +91,17 @@ static int commit(u32 lin, u32 from, u32 to)
 }
 
 /* Pages [from, to) of a block at lin to be backed when first touched; -1
-   (with those pages unmapped again) without page tables or past the
-   session's cap (its profile's memory, which counts these too). */
+   (with those pages unmapped again) without page tables, past the session's
+   cap (its profile's memory, which counts these too), or past three times
+   the physical memory the context could have: a program that allocates
+   until 0501h fails and then touches it all would otherwise find out only
+   at a page fault (CWSDPMI's virtual size in Loop A is 190 MB of 64). */
 static int reserve(u32 lin, u32 from, u32 to)
 {
     u32 i;
     if (dctx->frame_cap && dctx->frames + dctx->lazy + (to - from) > dctx->frame_cap)
+        return -1;
+    if (dctx->frames + dctx->lazy + (to - from) > 3 * (dctx->frames + pmm_free_frames()))
         return -1;
     for (i = from; i < to; i++) {
         if (mm_lazy(lin + (i << 12)) != 0) {

@@ -1,11 +1,13 @@
 /* LAZYCHK (GLOS M4e): DPMI memory backed when first touched, as under
  * CWSDPMI (supervisor.md §12.3). DJGPP. On COM1:
- *     HX-LAZY largest=KB first=0|1 second=0|1 zero=0|1 kept=0|1
+ *     HX-LAZY largest=KB first=0|1 second=0|1 zero=0|1 kept=0|1 huge=0|1
  * largest is 0500h's largest block; first, whether 0501h hands over all of
  * it; second, whether 0501h then hands over 8 MB more (more than is free,
  * were the first block's pages taken at once); zero, whether pages read as
  * zero when first touched (one in 16 of the first block, all of the
- * second); kept, whether what was written there reads back. */
+ * second); kept, whether what was written there reads back; huge, whether
+ * 0501h hands over four times the largest block besides (GLOS: no, it
+ * caps what isn't backed yet at three times the memory there is). */
 #include <dpmi.h>
 #include <go32.h>
 #include <pc.h>
@@ -54,8 +56,8 @@ static void touch(unsigned long lin, unsigned long size, unsigned long step, int
 int main(void)
 {
     __dpmi_free_mem_info fi;
-    __dpmi_meminfo a, b;
-    int first, second, zero = 1, kept = 1;
+    __dpmi_meminfo a, b, c;
+    int first, second, huge, zero = 1, kept = 1;
     unsigned long largest;
     char line[160];
 
@@ -65,12 +67,16 @@ int main(void)
     first = __dpmi_allocate_memory(&a) == 0;
     b.size = 8ul << 20;
     second = __dpmi_allocate_memory(&b) == 0;
+    c.size = largest * 4;
+    huge = __dpmi_allocate_memory(&c) == 0;
+    if (huge)
+        __dpmi_free_memory(c.handle);
     if (first)
         touch(a.address, a.size, 16, &zero, &kept);
     if (second)
         touch(b.address, b.size, 1, &zero, &kept);
-    snprintf(line, sizeof line, "HX-LAZY largest=%lu first=%d second=%d zero=%d kept=%d\r\n", largest >> 10, first,
-             second, zero, kept);
+    snprintf(line, sizeof line, "HX-LAZY largest=%lu first=%d second=%d zero=%d kept=%d huge=%d\r\n", largest >> 10,
+             first, second, zero, kept, huge);
     ser(line);
     if (second) __dpmi_free_memory(b.handle);
     if (first) __dpmi_free_memory(a.handle);

@@ -611,7 +611,7 @@ def dpmi_hello(boot):
 def lazy(profile, boot):
     """LAZYCHK (M4e): DPMI memory backed when first touched. Under GLOS 0501h hands over all of 0500h's largest
     block and then 8 MB more, pages read as zero when first touched and keep what is written (GLQuake's UNIX_SBRK
-    heap). CWSDPMI's line is shown, not judged."""
+    heap), but not four times that block besides. CWSDPMI's line is shown, not judged."""
     tag = "%s-%s" % (profile, boot)
     common = ["--machine", profile, "--boot-cfg", boot, "--file", "build/dj/LAZYCHK.EXE=/TEST/LAZYCHK.EXE",
               "--timeout", "300", "--cmd", "SERSAY HX-START lazy"]
@@ -619,9 +619,9 @@ def lazy(profile, boot):
     st0, cws = run("lazy-cws-" + tag, common + ["--cmd", "C:\\TEST\\LAZYCHK.EXE"] + end)
     st1, gl = run("lazy-glos-" + tag, common + GLOS_FILES + [
         "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\LAZYCHK.EXE"] + end)
-    m = re.search(r"HX-LAZY largest=(\d+) first=(\d) second=(\d) zero=(\d) kept=(\d)", gl)
+    m = re.search(r"HX-LAZY largest=(\d+) first=(\d) second=(\d) zero=(\d) kept=(\d) huge=(\d)", gl)
     c = re.search(r"HX-LAZY .*", cws)
-    checks = {"status": st1 == "PASS", "lazy": bool(m) and m.groups()[1:] == ("1", "1", "1", "1")
+    checks = {"status": st1 == "PASS", "lazy": bool(m) and m.groups()[1:] == ("1", "1", "1", "1", "0")
               and int(m.group(1)) > 32768,
               "clean": "GLOS-PANIC" not in gl and "GLOS-CRASH" not in gl and "GLOS-WARN" not in gl}
     bad = [k for k, v in checks.items() if not v]

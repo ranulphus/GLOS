@@ -860,10 +860,12 @@ direct = 1
   frame, zeroes it and maps it (`lin_fault()`, kernel/dpmi/mem.c). GLQuake's UNIX_SBRK heap takes about 50 MB of
   a 64 MB machine in one 0503h and touches a little of it. When everything was committed at once, the next
   0501h for DOS-GL's textures failed with 8013h. Moves carry the marked pages along; 0507h reports them as
-  committed; 0600h (lock) backs them now. A profile's memory cap counts them. A touch with no frame left is the
-  client's page fault: GLOS can't swap. CWSDPMI, for comparison, reports its virtual size in 0500h (190 MB in
+  committed; 0600h (lock) backs them now. A profile's memory cap counts them, and so does a cap of three times
+  the physical memory the context could have: a program that allocates until 0501h fails and then touches it
+  all finds out at 0501h, not at a page fault. A touch with no frame left is the client's page fault: GLOS can't
+  swap. CWSDPMI, for comparison, reports its virtual size in 0500h (190 MB in
   Loop A), refuses 8 MB beyond it, and doesn't zero fresh pages. LAZYCHK (jobs.py dpmi, `lazy-*`) checks that
-  GLOS hands over all of 0500h's largest block and 8 MB more, zeroed and kept.
+  GLOS hands over all of 0500h's largest block and 8 MB more, zeroed and kept, but not four times the block.
 - 0500h reports accurate figures: the physical frames free. GLQuake and Q2 allocate everything 0500h reports
   and need at least 16 MB [census].
 - The M0 survey showed why this matters. Under HDPMI (either IOPL), GLQuake's UNIX_SBRK heap couldn't grow,
