@@ -318,6 +318,13 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
         return 0;
     }
+    if (!strcmp(cmd, "glos tick")) {              /* the kernel's tick count: the gate's probe (M4e) */
+        char t[32];
+        ksnprintf(t, sizeof t, "ticks=%u hz=1024\n", timer_ticks());
+        say(ch, 0, t);
+        ssh_chan_exit(ch, 0);
+        return 0;
+    }
     if (!strcmp(cmd, "glos ver")) {
         say(ch, 0, ver);
         ssh_chan_exit(ch, 0);
@@ -381,7 +388,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             agent_exit(512);                    /* half a second for the reply to leave */
         }
     } else {
-        say(ch, 1, "glos: no such command (glos ver, echo, run, shot, log, ps, kill, exit)\n");
+        say(ch, 1, "glos: no such command (glos ver, echo, run, shot, log, ps, tick, kill, exit)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;

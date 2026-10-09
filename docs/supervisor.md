@@ -1103,7 +1103,8 @@ place where nothing else is in DOS by construction.
   so neither waits on a lock. Four connections at once; a fifth is refused (`GLOS-SSH refuse reason=busy`).
 - **Limits:** 60 s to log in; 20 authentication attempts per connection.
 - **Built-in commands (M3):** `glos ver`, `glos echo …`, `glos run …` (M4e, §17.3), `glos shot`, `glos log`,
-  `glos ps`, `glos kill`, `glos exit`; anything else starting `glos` gives status 127.
+  `glos ps`, `glos tick` (M4e: `ticks=N hz=1024`, the kernel's clock, for the gate's probe), `glos kill`,
+  `glos exit`; anything else starting `glos` gives status 127.
   - `glos shot`: the text-mode screen as a PNG on stdout (4-bit indexed, deflate's stored blocks;
     `kernel/lib/png.c`). It reads the visible page and the BIOS data area (mode, columns, rows, page start,
     character height) and draws each cell with the video BIOS's own 8x16, 8x14 or 8x8 font, which GLOS.EXE
@@ -1149,7 +1150,7 @@ place where nothing else is in DOS by construction.
 | SSH | `listen`, `off`, `connect`, `client version=`, `kex done strict=`, `auth ok`, `exec=`, `close why=`, `refuse` |
 | AGENT | A job: `run seq= cmd= [direct=1] [profile=]`, `done seq= code= via=` (the program, or `comspec`) |
 | KILL | A kill (§9.6): `psp= at= ticks= reason=hotkey\|agent\|priv\|crash` |
-| SESSION | A session (§11.1): `begin n= prog= parent= mode= [profile=] [direct=1]`, `direct-end imr= rtc=` (§9.7), `end n= prog= why=exit\|next-exec\|stub mode= [remode=1] vectors= ticks= t=` (`mode=` the mode it ended in, `vectors=` those put back, `ticks=` the BIOS tick count set from the RTC, `t=` its length in kernel ticks) |
+| SESSION | A session (§11.1): `begin n= prog= parent= mode= [profile=] [direct=1]`, `direct-end imr= rtc=` (§9.7), `end n= prog= why=exit\|next-exec\|stub mode= [remode=1] vectors= ticks= t= irq=` (`mode=` the mode it ended in, `vectors=` those put back, `ticks=` the BIOS tick count set from the RTC, `t=` its length in kernel ticks, `irq=` `ok` when IRQ 0, 1, 5, 7 and 12's vectors and mask bits are as the session found them, as VECCHK compares, else which aren't) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
 | DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... if= -> cf= ax=` (`if=` the virtual IF at the call), `raw to=rm|pm`, `dosx ax= ... -> cf=`, `vendor name=`, `v86-int21` (a client's real-mode DOS calls), `exception-code` (the code bytes and registers at a fault),, `deliver irq=|passup=|exception=|rmcb= to= from= at= err= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |
 | CRASH | A client the host ends (§19): `why= vec= err= prog= psp= bits= mode=`, `cs:eip= ss:esp= eflags= cr2=`, the general registers, `code=` (16 bytes at CS:EIP), `stack=`, a `seg` line per segment register, `handlers= lstack= nesting=`, `file=` |

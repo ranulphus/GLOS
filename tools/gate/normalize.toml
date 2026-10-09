@@ -1,0 +1,23 @@
+# What tools/gate/run.py compares between a program's baseline run and its runs under GLOS
+# (docs/milestones-m0-m4.md, "The gate's baseline matrix"). Patterns are Python regular expressions.
+
+[lines]
+# Serial lines compared as multisets, by prefix.
+prefixes = ["HX-TEST ", "HX-IMG ", "DGL-", "MGL-"]
+# Removed from those lines first: timings and other numbers that move from run to run.
+strip = [
+    '\b(ms|fps|t|mem_free_kb|elapsed|us|cycles|ticks|seconds|secs|time|wall|load_ms|avg|max|min)=\S+',
+    ' crc=\w+',
+    # MGA-Glide's DLL start line: the arguments its caller passed, uninitialised (whatever was on the stack).
+    '(?<=^MGL-DLLSTART) .*$',
+]
+# Lines dropped altogether: statistics and timing reports.
+drop = ['^HX-STAT', '^DGL-STAT', '^MGL-STAT', '^DGL-PERF', '^MGL-PERF', '^DGL-TIME', '^MGL-TIME']
+
+[glos]
+# A GLOS run fails on any of these.
+fail = ["GLOS-PANIC", "GLOS-CRASH", "GLOS-REFUSE"]
+# DPMI-UNIMPL calls (by AX) a program may make without failing its cell.
+unimpl_ok = []
+# Reported, not failed.
+report = ["GLOS-WARN vif-stuck"]

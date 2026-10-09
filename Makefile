@@ -27,6 +27,8 @@
 #                       compiling and running a program (loopa-tpx; BORLAND_DIR, make m4d-inputs)
 #   make loopa-sess     exclusive sessions: what SESSTEST leaves behind, natively and under
 #                       GLOS /RUN, as the shell and as agent jobs (runs on the host)
+#   make gate           M4e's exit: the baseline matrix under GLOS and with direct mode forced, a kill and
+#                       an ssh probe for every program (tools/gate/run.py; on the host; hours)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
@@ -41,7 +43,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -237,6 +239,10 @@ loopa-m4d: loopa-m4c loopa-dpmi16 loopa-tpx
 # M4e: exclusive sessions (on the host, as loopa-ssh: its agent cases use ssh).
 loopa-sess: all dos-tests build/dj/PROFCHK.EXE build/dj/DIRTEST.EXE build/dj/djtst/ENABLE.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py sess -j $(JOBS)
+# M4e's exit: the gate (tools/gate/run.py). Its baselines are cached in $(MGA_CACHE)/glos/gate.
+gate: all dos-tests djtst build/dj/DPMICONF.EXE build/dj/PROFCHK.EXE build/dj/DIRTEST.EXE build/dj/CRASHME.EXE \
+      m4c-inputs m4d-inputs glos-cache check-deps
+	$(Q)python3 tools/gate/run.py -j $(JOBS)
 
 # gdb attached to the kernel over COM2 (tools/gdb-loopa.sh).
 loopa-gdb: all check-deps
@@ -327,8 +333,10 @@ m4d-inputs: $(GLOS_HX)/.hdpmi16 build/ow/dos/DPMI16.EXE build/dj/DPMICONF.EXE $(
 # mounts, for LOOPA_EXTRA_ARGS="--boot-cfg glosshell --file $(GLOS_CACHE)/GLOS.EXE=/TEST/GLOS.EXE ..."
 GLOS_CACHE := $(MGA_CACHE)/glos/bin
 glos-cache: all
-	@mkdir -p $(GLOS_CACHE)/direct
+	@mkdir -p $(GLOS_CACHE)/direct $(GLOS_CACHE)/keys
 	$(Q)cp build/ow/GLOS.EXE build/kernel/GLOSK.BIN $(GLOS_CACHE)/
+	$(Q)cp tests/keys/hostkey $(GLOS_CACHE)/keys/HOSTKEY
+	$(Q)cp tests/keys/AUTHKEYS $(GLOS_CACHE)/keys/AUTHKEYS
 	$(Q)printf '; every program in direct mode (M4C_DIRECT=1, the survey variant glos-direct)\r\n[shell]\r\noptions = /DIRECT\r\n' \
 	    > $(GLOS_CACHE)/direct/GLOS.CFG
 

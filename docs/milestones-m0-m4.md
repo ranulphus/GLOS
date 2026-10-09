@@ -607,6 +607,30 @@ NE2000 (the SFTP round trip takes about 5 s on bf6 and 27 s on the 486DX2).
   86Box runs below real time). Each suite also gets one screenshot job and one kill job, and VECCHK/VMODE run
   afterwards.
 
+**As built (E6, `tools/gate/run.py`, `make gate`; on the host):** `run.py list` names the cells.
+- **jobs cells:** the jobs.py suites, which run their baselines (CWSDPMI, HDPMI32i, HDPMI16/16i, RTM, no GLOS)
+  and judge each run themselves: dpmiconf32 (with DPMIMINI and MGA-Glide's HELLOs), ecm, hdpmireg, djtst,
+  dpmiconf16, tpx, hxtools (m2), hostile, sess. All but hostile and sess run again with `GLOS_SET=/DIRECT`.
+  Hostile is left out because direct mode gives up killing a CLI loop; sess has direct cases of its own.
+- **program cells:** the survey's programs (GTA, Screamer Rally, DOS-GL's conform and TEXCUBE, ClassiCube,
+  GLQuake, Quake 2, Half-Life, PrBoom-plus, Fifth Wheel) on bf6 + G450, raw and HIMEMX (the retail games raw
+  only).
+  - Each has a baseline run (cached in `~/.cache/mga-glide/glos/gate/`, keyed by the program's files, its
+    repository's HEAD and diff, the harness's, the boot and the 86Box build), a run under GLOS as the shell, and
+    one with direct mode forced (`[shell] options = /DIRECT`).
+  - Each is compared after `tools/gate/normalize.toml`: status, HX-TEST/HX-IMG/DGL-/MGL- lines as multisets with
+    timing fields stripped, end markers, state hashes, and dumped frames through MGA-Glide's samepix.
+  - GLOS's own lines are judged too. PANIC, CRASH and REFUSE fail; DPMI-UNIMPL must be listed; vif-stuck is
+    reported. Every session's end line must say `irq=ok`, the VECCHK comparison done by the kernel, so no batch
+    file has to wrap the program.
+  - On the raw boot: a **kill** run (the hotkey at the cell's time: `reason=hotkey`, then text mode) and a
+    **probe** run with an RTL8029. It sends `glos tick` over ssh about once a second while the program runs:
+    every probe answers, none later than 2 s of guest time once the time between probes is taken off, one
+    `glos shot` answers, and the program still ends as in the baseline.
+- **script cells:** tools/m4c-games.sh (MGA-Glide's conform 27×4 and replays against their references,
+  DOSBench) and DOS-GL's loopa-sdl, under GLOS and with direct mode forced (loopa-sdl's baseline too).
+- `out/gate/summary.txt` has a line per part; the exit status is 1 if any failed.
+
 ---
 
 ## Risks for M0–M4, in mitigation order

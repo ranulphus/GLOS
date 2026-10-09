@@ -15,13 +15,14 @@
 # reported, without them). `make glos-cache` (a prerequisite of make
 # loopa-m4c) puts GLOS.EXE and GLOSK.BIN where the runs take them from.
 # M4C_DIRECT=1 runs every program in direct mode (IOPL 3, M4e): GLOS.CFG's
-# [shell] options = /DIRECT, from the same place.
+# [shell] options = /DIRECT, from the same place. GLOS_BIN: another such
+# place (inside the cache, which the dev container mounts).
 set -u
 GLOS=$(cd "$(dirname "$0")/.." && pwd)
 CACHE=${MGA_CACHE:-$HOME/.cache/mga-glide}
 MGA_TREE=${M4C_MGA:-${MGA_GLIDE:-$HOME/MGA-Glide}}
 DOSBENCH=${DOSBENCH:-$HOME/DOSBench}
-BIN=$CACHE/glos/bin
+BIN=${GLOS_BIN:-$CACHE/glos/bin}       # make glos-cache's (GLOS_CACHE=)
 export LOOPA_EXTRA_ARGS="--boot-cfg glosshell --file $BIN/GLOS.EXE=/TEST/GLOS.EXE --file $BIN/GLOSK.BIN=/TEST/GLOSK.BIN"
 VARIANT=glos
 if [ "${M4C_DIRECT:-0}" = 1 ]; then

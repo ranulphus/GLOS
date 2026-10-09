@@ -158,6 +158,22 @@ void session_kill(u8 mode, u8 leds)
     kprintf("GLOS-SESSION kill-restore mode=%02x%s ticks=%u\n", mode, remode ? " remode=1" : "", clock_from_rtc());
 }
 
+/* What VECCHK compares, after the restoration: IRQ 0, 1, 5, 7 and 12's
+   vectors and mask bits as the session found them ("ok"), or which not
+   (a TSR's hooks stay). For the gate (tools/gate/run.py). */
+static const char *irq_left(void)
+{
+    static const u8 vec[] = { 0x08, 0x09, 0x0D, 0x0F, 0x74 };
+    static char buf[24];
+    u32 i, n = 0;
+    for (i = 0; i < sizeof vec; i++)
+        if (vm_rd32(vec[i] * 4u) != ses.ivt[vec[i]])
+            n += (u32)ksnprintf(buf + n, sizeof buf - n, "%s%02x", n ? "," : "", vec[i]);
+    if (((vm.pic.p[0].imr ^ ses.imr[0]) & 0xA3) || ((vm.pic.p[1].imr ^ ses.imr[1]) & 0x10))
+        n += (u32)ksnprintf(buf + n, sizeof buf - n, "%spic", n ? "," : "");
+    return n ? buf : "ok";
+}
+
 static void end(const char *why)
 {
     struct rmregs r;
@@ -202,8 +218,8 @@ static void end(const char *why)
         }
     }
     ticks = clock_from_rtc();
-    kprintf("GLOS-SESSION end n=%u prog=%s why=%s mode=%02x%s vectors=%u ticks=%u t=%u\n", ses.n, ses.prog, why, mode,
-            remode ? " remode=1" : "", fixed, ticks, timer_ticks() - ses.t0);
+    kprintf("GLOS-SESSION end n=%u prog=%s why=%s mode=%02x%s vectors=%u ticks=%u t=%u irq=%s\n", ses.n, ses.prog, why,
+            mode, remode ? " remode=1" : "", fixed, ticks, timer_ticks() - ses.t0, irq_left());
 }
 
 /* glos run's options for the session the stub's next EXEC begins (E4). */
