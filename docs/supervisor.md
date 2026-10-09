@@ -53,8 +53,11 @@ to COM1 at each step:
    - Windows answers INT 2Fh 1600h.
 2. **Memory:**
    - **Raw mode** (no XMS driver): INT 15h E820h, then E801h, then 88h.
-   - **XMS mode:** allocate the largest block(s) (XMS 09h/89h) and lock them (0Ch) to learn their physical
-     addresses.
+   - **XMS mode:** allocate the largest block(s) and lock them (0Ch) to learn their physical addresses. As
+     built: one block for the kernel, then the largest free block again and again (08h/09h), up to three, 64 KB
+     left for others. XMS 2.0's sizes are 16-bit kilobyte counts, so one block is at most 65,535 KB. Until M4e
+     the loader took one, and a 128 MB machine's HIMEMX boot gave GLOS 64 MB: Half-Life, which the same boot gives
+     98 MB under CWSDPMI, ran out of frames.
    - In either mode, physical 0–10FFFFh is reserved for the system VM.
 3. **A20:** port 92h, then 8042 command D1h, checked with a wrap test. In XMS mode, through XMS 03h.
 4. **Kernel load:**
@@ -241,7 +244,7 @@ program looks for it.
 - **Raw mode:** all extended memory reported by E820 belongs to GLOS.
 - **XMS mode:** only the locked blocks are GLOS's. Handles that other programs allocated before GLOS started
   stay theirs. The XMS server (§16) takes over HIMEM's handle table semantics for new requests.
-- **No paging to disk** in v1. 0600h locks are recorded but change nothing.
+- **No paging to disk** in v1. Pages are backed when first touched (§12.3), and 0600h backs them at once.
 
 ## 6. Trapframes, fixups and espfix
 

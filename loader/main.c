@@ -209,7 +209,10 @@ static int raw_memory(void)
     return -1;
 }
 
-/* XMS mode: a locked block for the kernel, and one for GLOS's own memory. */
+/* XMS mode: a locked block for the kernel, and up to three for GLOS's own
+   memory (the stub keeps four handles): XMS 2.0's calls count kilobytes in
+   16 bits, so a block is at most 65535 KB, and a 128 MB machine needs two
+   (M4e: Half-Life ran out of memory on the HIMEMX boot). */
 static int xms_block(unsigned kb, unsigned long *phys)
 {
     xms_call(0x0900, kb);
@@ -442,7 +445,7 @@ static int glos_main(int argc, char **argv)
     bi.a20_initial = a20_on();
     if (xms_mode) {
         unsigned long pool;
-        unsigned pool_kb = 0;
+        unsigned long pool_kb = 0;
         segread(&sr);
         r.x.ax = 0x4310; int86x(0x2F, &r, &r, &sr);
         xms = (void (far *)(void))MK_FP(sr.es, r.x.bx);
@@ -451,9 +454,15 @@ static int glos_main(int argc, char **argv)
             xms_release();
             return refuse("xms-kernel");
         }
-        xms_call(0x0800, 0);                    /* largest free block, KB; 64 KB left for others */
-        if (xms_ax > 64 && xms_block(pool_kb = xms_ax - 64, &pool) == 0)
-            add_range(pool, (unsigned long)pool_kb * 1024UL, BI_MEM_FREE);
+        while (n_xms < 4) {                     /* the largest free block, KB, again and again; 64 KB */
+            unsigned kb;                        /* left for others */
+            xms_call(0x0800, 0);
+            kb = xms_ax == 0xFFFF ? 0xFFFF : xms_ax - 64;
+            if (xms_ax <= 64 || xms_block(kb, &pool) != 0)
+                break;
+            add_range(pool, (unsigned long)kb * 1024UL, BI_MEM_FREE);
+            pool_kb += kb;
+        }
         xms_call(0x0000, 0);                    /* what the kernel's XMS server reports as */
         bi.xms_ver = xms_ax; bi.xms_rev = xms_bx; bi.xms_hma = xms_dx;
         xms_call(0x0100, 0xFFFF);               /* is the HMA free? (DOS=HIGH takes it) */
@@ -462,8 +471,8 @@ static int glos_main(int argc, char **argv)
         r.x.ax = 0x4309; int86x(0x2F, &r, &r, &sr);     /* the handle table, for handles made before GLOS */
         if (r.h.al == 0x43) bi.xms_table = ((unsigned long)sr.es << 4) + r.x.bx;
         xms_call(0x0500, 0);                    /* local A20 enable */
-        say("GLOS-BOOT step=memory mode=xms kernel=%08lx pool_kb=%u ver=%04lx hma_used=%lu table=%05lx",
-            bi.kernel_phys, pool_kb, bi.xms_ver, bi.hma_used, bi.xms_table);
+        say("GLOS-BOOT step=memory mode=xms kernel=%08lx pool_kb=%lu blocks=%u ver=%04lx hma_used=%lu table=%05lx",
+            bi.kernel_phys, pool_kb, n_xms - 1, bi.xms_ver, bi.hma_used, bi.xms_table);
     } else {
         bi.mode = BI_MODE_RAW;
         if (raw_memory() != 0) return refuse("no-memory-map");
