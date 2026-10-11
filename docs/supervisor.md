@@ -245,6 +245,10 @@ program looks for it.
 - **XMS mode:** only the locked blocks are GLOS's. Handles that other programs allocated before GLOS started
   stay theirs. The XMS server (§16) takes over HIMEM's handle table semantics for new requests.
 - **No paging to disk** in v1. Pages are backed when first touched (§12.3), and 0600h backs them at once.
+- **Locking:** the frame bitmap and the kernel heap belong to every thread, and a preemptible one (ssh,
+  net) can lose the CPU to the VM thread in the middle of a call, so each call runs with interrupts off
+  (`kernel/mm/vmm.c`; found in M5, by reading: until then they ran unguarded). A `kmap` window is its
+  caller's for a moment only (the slots go round), so a preemptible thread keeps interrupts off across it.
 
 ## 6. Trapframes, fixups and espfix
 
@@ -397,7 +401,8 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 - **VME** (M3) where CR4.VME exists (the Pentium II and iDX4 profiles; `/NOVME` turns it off): CLI, STI,
   PUSHF, POPF, IRET and software INTs run in hardware against EFLAGS.VIF. Only INT 15h and 21h trap
   through the redirection bitmap (with 1Ch, 23h and 24h for a client's handlers, M4b; INT 2Fh's handler is
-  GLOS's at the bottom of the IVT chain from M4c, §12.1c); INT 10h and 13h join them with the DOS server's busy tracking (§17.2). The
+  GLOS's at the bottom of the IVT chain from M4c, §12.1c), and INT 10h from M5, for the video mode `glos shot`
+  must know (§17.7); INT 13h joins them with the DOS server's busy tracking (§17.2). The
   monitor reads VIF at every trap from V86 mode and writes it back, with VIP set while an IRQ waits. The same
   MEM run traps 1,237 times with VME and 33,968 times without. PUSHFD, POPFD and IRETD still trap. On the
   486DX2 every one traps, as in M2.
@@ -415,6 +420,19 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   stack in the resident stub.
 - Requests from other threads are **posted** and run at the next safe point (§17.2). That serialises DOS and
   the BIOS by construction.
+- **Work posted to the VM thread** (M5, `vm_post()` in `kernel/vm/v86.c`): a function another thread hands
+  over, which the VM thread runs with interrupts off on its way back to the program, in V86 mode
+  (`vm_return`) or to a DPMI client (`dpmi_return`). `glos shot`'s capture is the one user (§17.7).
+  - It runs where the program would take an interrupt: its virtual IF is on. What the work does to the
+    machine is then what an interrupt handler of the program's might do. If the virtual IF stays off for the
+    work's `patience` (a quarter of a second for a screenshot), it runs wherever the program is.
+  - The program is stopped between two instructions, and the work may make real-mode calls (`rm_call`),
+    which nest as any other.
+  - A halted VM is woken for it. One piece of work at a time; the poster can withdraw it until it starts.
+  - A kill waits until running work has ended: delivered into the work's real-mode call, it would leave
+    that call's nest on the kernel stack for good. The same holds for no other nested call yet.
+  - A direct-mode program with the real IF off never comes back to the kernel, so its work is never run;
+    the poster gives up (three seconds for a screenshot).
 
 ### 9.6 Kill
 
@@ -1139,11 +1157,7 @@ place where nothing else is in DOS by construction.
 - **Built-in commands (M3):** `glos ver`, `glos echo …`, `glos run …` (M4e, §17.3), `glos shot`, `glos log`,
   `glos ps`, `glos tick` (M4e: `ticks=N hz=1024`, the kernel's clock, for the gate's probe), `glos kill`,
   `glos exit`; anything else starting `glos` gives status 127.
-  - `glos shot`: the text-mode screen as a PNG on stdout (4-bit indexed, deflate's stored blocks;
-    `kernel/lib/png.c`). It reads the visible page and the BIOS data area (mode, columns, rows, page start,
-    character height) and draws each cell with the video BIOS's own 8x16, 8x14 or 8x8 font, which GLOS.EXE
-    finds with INT 10h 1130h: the glyphs the card shows, and no font in GLOS. Cells are 8 pixels wide (VGA's
-    9th column is left out); blinking text shows steadily. Graphics modes later (status 1 until then).
+  - `glos shot [--raw]`: the screen as a PNG on stdout, in any mode (§17.7).
   - `glos log`: the last 16 KB of COM1: the kernel's lines and what programs wrote there (no CRs).
   - `glos ps`: the jobs, the DOS program in front (PSP and its arena name), and each thread.
 - **SFTP (M3, `kernel/ssh/sftp.c`):** protocol version 3, which OpenSSH's `sftp` and `scp` speak, written for
@@ -1156,6 +1170,76 @@ place where nothing else is in DOS by construction.
   - Each session serves one request at a time. The window reopens as requests finish (`ssh_chan_hold`), and no
     new one starts while more than 128 KB of output waits, so a session holds at most a window of input.
   - Files a client leaves open are closed when its channel goes.
+- **Streams** (M5): a built-in command that takes time, or has more to say than a channel buffers, is a
+  stream. The ssh thread gives it a turn each time round; it writes while its channel has less than 32 KB
+  waiting and ends the channel itself. A stream goes with its channel.
+
+### 17.7 Screenshots (M5)
+
+`glos shot` gives a PNG of the visible screen in whatever mode the program has set; `glos shot --raw` gives
+16 bytes (`GLOSRAW1`, the width and the height as 32-bit little-endian numbers) and then RGB, a byte each.
+The code is `kernel/dos/shot.c` and `kernel/lib/png.c`.
+
+- **The capture** is work posted to the VM thread (§9.5): the program stands still while its frame is
+  copied into kernel frames (not the heap: 1024×768 in 32 bits is 3 MB), along with what turns it into
+  colours. A frame of more than 16 MB, or one that would leave the system under 1 MB, is refused.
+  - The copy runs with interrupts off and lets them in every 16 KB, without a switch to another thread,
+    so the kernel's tick and the network go on. The program's own interrupts wait until the copy is
+    done: a timer it runs fast loses ticks for that long.
+  - If the program is inside the video BIOS (a V86 code segment in C000h–C7FFh), the capture waits for
+    the call to end, for a quarter of a second at most.
+- **The file** is made by the ssh thread from the copy, a piece (about 16 KB of scanlines) at a time as
+  the channel takes them, while the program runs on. Each piece is one IDAT chunk holding one of
+  deflate's stored blocks, so there is no compressor. Text and 16-colour modes give a 4-bit indexed PNG,
+  256-colour modes an 8-bit one, direct-colour modes 24-bit RGB.
+- **Which mode it is:**
+  - A VBE mode, if INT 10h 4F02h set one last. GLOS sees every INT 10h: from V86 code through a trap
+    (the redirection bitmap with VME), from a DPMI client in the host's real-mode calls. A V86 program's
+    4F02h is made for it as a nested call, so that the BIOS's answer is seen; a failed mode set changes
+    nothing. AH 00h, a plain mode set, forgets the VBE mode.
+  - Otherwise what the VGA's registers say: text; the CGA's modes (graphics at B8000h, one or two bits a
+    pixel, two interleaved banks); 16 colours in four planes; 256 colours chained (13h) or unchained
+    ("mode X"). The size comes from the CRTC (horizontal and vertical display end, the scan lines to a
+    row, double scanning), the start from its start address, a split screen from its line compare. Pel
+    panning is not followed.
+- **A VBE mode** is described by the BIOS: 4F01h (once for each mode set; it needs 256 bytes of conventional
+  memory, for which the stub's EXEC buffers are lent and put back), 4F06h for the scan line's length as it
+  is now (a program can change it), 4F07h for where the display starts (a program that flips pages), 4F08h
+  for the DAC's width. The frame is read through the linear framebuffer
+  when the mode was set with one, else window by window with 4F05h, the window put back afterwards.
+  VBE 3's separate linear layout is used when the BIOS gives one. The calls run on the DPMI host's
+  real-mode stack for a client and on the stub's spare (kill) stack otherwise.
+- **The modes MGA-Glide's HAL sets** (which DOS-GL shares) are VBE modes with a linear framebuffer, then
+  made its own: a longer scan line (4F06h), page flips (4F07h), and on a small frame the card's zoom, where
+  the DAC repeats pixels (XZOOMCTRL) and the CRTC lines (its maximum scan line). The first two are the
+  BIOS's to report. For the zoom, on a Matrox card in its own mode (CRTCEXT3's MGAMODE), the picture's
+  size is what the CRTC's display ends and the zoom come to, when that is smaller than the VBE mode: the
+  top left part of the frame, which is what the screen shows. XZOOMCTRL is read through the card's
+  registers in memory (the DAC's index put back). The card's BIOS makes its own low modes the same way,
+  and they come out right by the same rule.
+- **What the capture changes on the card, and puts back:**
+  - the index registers at 3C4h, 3CEh and 3D4h, and the attribute controller's, whose flip-flop is left at
+    "index" (a VGA doesn't let it be read);
+  - the attribute controller's palette can be read only with the screen off: for those sixteen reads it is;
+  - for the planes of an unchained mode: the read map, the graphics mode and memory map registers and the
+    sequencer's memory mode;
+  - the latches. Reading a plane loads them, and a program stopped between its read and its write of a
+    pixel needs them. They are written first (write mode 1) to offset FFFFh of every plane and read back
+    at the end. **The four bytes at plane offset FFFFh are lost**: a VGA has no other place for them. In a
+    banked planar mode they go into the frame's last bank;
+  - the DAC's index, and whether it was last set for reading or writing. Where the program was within an
+    entry's three bytes can't be read or put back: a program stopped there, with its interrupts on, gets
+    that entry wrong.
+- **The palette** is read from the DAC at that moment, not kept as a shadow (PRD §7.5 planned one):
+  trapping 3C8h and 3C9h would cost a trap for each byte of every palette fade. 16-colour modes and text go
+  through the attribute controller's palette, colour select and plane enable; the pel mask applies.
+- **Text** is drawn with the video BIOS's own 8x16, 8x14 or 8x8 font, which GLOS.EXE finds with INT 10h
+  1130h: no font in GLOS, but a font the program loaded is not seen. Cells are 8 pixels wide (VGA's 9th
+  column is left out), there is no cursor, and blinking text shows steadily. Columns, rows and the cell's
+  height come from the CRTC (the BIOS data area's when those make no sense).
+- **Direct-colour modes** give the framebuffer's values, not what a gamma ramp in the DAC makes of them.
+- **Refusals** (status 1, a line on stderr): `no memory`; `a video mode glos shot doesn't know`;
+  `the program doesn't stop (its interrupts are off)` after three seconds; `busy`.
 
 ## 18. Logging
 

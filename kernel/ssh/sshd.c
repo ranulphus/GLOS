@@ -256,6 +256,80 @@ static void say(struct ssh_chan *ch, int stream, const char *s)
     ssh_chan_write(ch, stream, (const uint8_t *)s, (uint32_t)strlen(s));
 }
 
+/* A built-in that takes time, or has more to say than a channel buffers: its
+   turn() is called on every turn of this thread, writes what the channel
+   has room for, and returns 1 once it has ended the channel. */
+#define ROOM 0x8000u                            /* output a channel may have waiting */
+struct stream {
+    struct ssh_chan *ch;                        /* 0: free */
+    int (*turn)(struct ssh_chan *ch, void *arg);
+    void (*drop)(void *arg);
+    void *arg;
+};
+static struct stream streams[8];
+
+static int stream_add(struct ssh_chan *ch, int (*turn)(struct ssh_chan *, void *), void (*drop)(void *), void *arg)
+{
+    u32 i;
+    for (i = 0; i < ARRAY_SIZE(streams) && streams[i].ch; i++) ;
+    if (i == ARRAY_SIZE(streams))
+        return -1;
+    streams[i].turn = turn;
+    streams[i].drop = drop;
+    streams[i].arg = arg;
+    streams[i].ch = ch;
+    return 0;
+}
+
+static void streams_turn(void)
+{
+    u32 i;
+    for (i = 0; i < ARRAY_SIZE(streams); i++)
+        if (streams[i].ch && streams[i].turn(streams[i].ch, streams[i].arg)) {
+            streams[i].drop(streams[i].arg);
+            streams[i].ch = 0;
+        }
+}
+
+static void streams_gone(struct ssh_chan *ch)
+{
+    u32 i;
+    for (i = 0; i < ARRAY_SIZE(streams); i++)
+        if (streams[i].ch == ch) {
+            streams[i].drop(streams[i].arg);
+            streams[i].ch = 0;
+        }
+}
+
+/* glos shot: the capture is the VM thread's (kernel/dos/shot.c); then the
+   file, a piece at a time. */
+static int shot_turn(struct ssh_chan *ch, void *arg)
+{
+    static u8 piece[SHOT_PIECE];
+    struct shot *sh = arg;
+    int st = shot_poll(sh);
+    u32 n;
+    if (!st)
+        return 0;
+    if (st < 0) {
+        say(ch, 1, "glos shot: ");
+        say(ch, 1, shot_why(sh));
+        say(ch, 1, "\n");
+        ssh_chan_exit(ch, 1);
+        return 1;
+    }
+    while (ssh_chan_pending(ch) < ROOM) {
+        if (!(n = shot_read(sh, piece))) {
+            ssh_chan_exit(ch, 0);
+            return 1;
+        }
+        ssh_chan_write(ch, 0, piece, n);
+    }
+    return 0;
+}
+
+static void shot_drop(void *arg) { shot_free(arg); }
+
 /* The built-in commands, and DOS command lines for the agent. */
 static int k_exec(struct ssh_chan *ch, const char *cmd)
 {
@@ -332,19 +406,13 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         say(ch, 0, cmd + 10);
         say(ch, 0, "\n");
         ssh_chan_exit(ch, 0);
-    } else if (!strcmp(cmd, "glos shot")) {
-        const char *why = "";
-        u32 len;
-        u8 *png = shot_text(&len, &why);
-        if (!png) {
-            say(ch, 1, "glos shot: ");
-            say(ch, 1, why);
-            say(ch, 1, "\n");
+    } else if (!strcmp(cmd, "glos shot") || !strcmp(cmd, "glos shot --raw")) {
+        struct shot *sh = shot_new(cmd[9] != 0, wake_ssh);
+        if (!sh || stream_add(ch, shot_turn, shot_drop, sh) != 0) {
+            if (sh)
+                shot_free(sh);
+            say(ch, 1, sh ? "glos shot: busy\n" : "glos shot: no memory\n");
             ssh_chan_exit(ch, 1);
-        } else {
-            ssh_chan_write(ch, 0, png, len);    /* fits: a stream buffers 256 KB */
-            kfree(png);
-            ssh_chan_exit(ch, 0);
         }
     } else if (!strcmp(cmd, "glos log") || !strcmp(cmd, "glos ps")) {
         char *buf = kmalloc(0x4000);
@@ -436,6 +504,7 @@ static void k_eof(struct ssh_chan *ch)
 static void k_gone(struct ssh_chan *ch)
 {
     agent_drop(ch);
+    streams_gone(ch);
     if (ssh_chan_user(ch))
         sftp_close(ssh_chan_user(ch));
 }
@@ -501,6 +570,7 @@ static void ssh_main(void *arg)
         }
         agent_service(agent_write, agent_done);
         sftp_turn();
+        streams_turn();
     }
 }
 

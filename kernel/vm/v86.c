@@ -22,6 +22,7 @@
 #include "mm.h"
 #include "nic.h"
 #include "sched.h"
+#include "shot.h"
 #include "timer.h"
 #include "v86dec.h"
 #include "vm.h"
@@ -109,13 +110,69 @@ void vm_int(struct trapframe *tf, u8 n, u32 ret_ip)
     tf->eip = v & 0xFFFF;
 }
 
-/* The VM thread waits, interrupts off, until an IRQ it can take, a kill or
-   the tick `until` (0: no deadline). Other threads run meanwhile. */
+/* ---- work posted to the VM thread (vm.h) */
+
+static struct vm_work *volatile work;
+
+int vm_post(struct vm_work *w)
+{
+    u32 f = irq_save();
+    if (work) {
+        irq_restore(f);
+        return -1;
+    }
+    w->posted = timer_ticks();
+    w->state = VW_POSTED;
+    work = w;
+    vm_kick();                                  /* (halted: it goes round to its return) */
+    irq_restore(f);
+    return 0;
+}
+
+int vm_unpost(struct vm_work *w)
+{
+    u32 f = irq_save();
+    int got = work == w && w->state == VW_POSTED;
+    if (got) {
+        work = 0;
+        w->state = VW_IDLE;
+    }
+    irq_restore(f);
+    return got;
+}
+
+int vm_work_due(void)
+{
+    struct vm_work *w = work;
+    return w && w->state == VW_POSTED && (vm.vif || timer_ticks() - w->posted >= w->patience);
+}
+
+int vm_work_running(void) { return work && work->state == VW_RUNNING; }
+
+void vm_work_turn(struct trapframe *tf)
+{
+    struct vm_work *w = work;
+    if (!vm_work_due())
+        return;
+    w->state = VW_RUNNING;                      /* (its real-mode calls return to user mode too) */
+    if (w->fn(w, tf)) {
+        w->state = VW_POSTED;
+        return;
+    }
+    work = 0;
+    w->state = VW_DONE;
+    if (w->done)
+        w->done();
+}
+
+/* The VM thread waits, interrupts off, until an IRQ it can take, a kill,
+   posted work or the tick `until` (0: no deadline). Other threads run
+   meanwhile. */
 void vm_idle(u32 until)
 {
     vm.wait_deadline = until;
     vm.waiting = 1;
-    while (!vm.kill_req && !(vm.vif && vpic_pending(&vm.pic))
+    while (!vm.kill_req && !(vm.vif && vpic_pending(&vm.pic)) && !vm_work_due()
            && !(until && (s32)(timer_ticks() - until) >= 0) && !(vm.idle_agent && agent_vm_wake_pending()))
         thread_block(&vm.waitq);
     vm.waiting = 0;
@@ -386,8 +443,10 @@ void vm_return(struct trapframe *tf)
     int vec;
     if (fpu_msw_dos != ~0u)
         fpu_msw_set(fpu_msw_dos);               /* a client's 0E01h EM is its own */
-    if (vm.kill_req)
+    if (vm.kill_req && !vm_work_running())      /* (not into the work's real-mode call: it would never return) */
         vm_try_kill(tf, 0);
+    if (work)
+        vm_work_turn(tf);
     if (vm.vif && vpic_pending(&vm.pic)) {
         vec = vpic_ack(&vm.pic);
         if (vm.direct)
@@ -713,11 +772,38 @@ static void vm_int2f(struct trapframe *tf)
     flags_apply(tf, (f & ~FL_ARITH) | (tf->eflags & FL_ARITH), 0);    /* the answer's flags, the caller's IF */
 }
 
+/* INT 10h 4F02h, a VBE mode set, made for the program as a nested call, so
+   that the BIOS's answer is seen (rm_call tells glos shot): 1 if made. */
+static int vbe_set(struct trapframe *tf, u32 next)
+{
+    struct rmregs r;
+    memset(&r, 0, sizeof r);
+    r.eax = tf->eax, r.ebx = tf->ebx, r.ecx = tf->ecx, r.edx = tf->edx;
+    r.esi = tf->esi, r.edi = tf->edi, r.ebp = tf->ebp;
+    r.ds = (u16)tf->v86_ds, r.es = (u16)tf->v86_es, r.fs = (u16)tf->v86_fs, r.gs = (u16)tf->v86_gs;
+    r.ss = (u16)tf->ss;                         /* on the program's stack, as its INT would be */
+    r.sp = (u16)tf->esp;
+    r.flags = (u16)flags_image(tf);
+    if (rm_call(0, &r, RM_INT, 0x10, 0, 0) != 0)
+        return 0;
+    tf->eax = r.eax, tf->ebx = r.ebx, tf->ecx = r.ecx, tf->edx = r.edx;
+    tf->esi = r.esi, tf->edi = r.edi, tf->ebp = r.ebp;
+    tf->v86_ds = r.ds, tf->v86_es = r.es, tf->v86_fs = r.fs, tf->v86_gs = r.gs;
+    tf->eflags = (tf->eflags & ~FL_ARITH) | (r.flags & FL_ARITH);
+    tf->eip = next;
+    return 1;
+}
+
 static void soft_int(struct trapframe *tf, u8 n, u32 next)
 {
     u32 ax = tf->eax & 0xFFFF;
     vm.n_int++;
     switch (n) {
+    case 0x10:                                  /* the video mode, for glos shot (kernel/dos/shot.c) */
+        if (ax == 0x4F02 && vbe_set(tf, next))
+            return;
+        shot_int10(ax, tf->ebx, 0);
+        break;
     case 0x15:
         if (vm_int15(tf, next))
             return;
@@ -888,7 +974,8 @@ void vm_exception(struct trapframe *tf)
 
 /* Software INTs GLOS handles (supervisor.md §9.3): with VME, the rest go
    straight through the IVT. */
-static const u8 trapped_ints[] = { 0x15, 0x1C, 0x21, 0x23, 0x24 };     /* 1Ch/23h/24h: a DPMI client's (§14.4) */
+static const u8 trapped_ints[] = { 0x10, 0x15, 0x1C, 0x21, 0x23, 0x24 };       /* 10h: the video mode, for
+                                                   glos shot; 1Ch/23h/24h: a DPMI client's (§14.4) */
 
 static const u16 trapped_ports[] = { 0x20, 0x21, 0xA0, 0xA1, 0x60, 0x64, 0x70, 0x71, 0x92,
                                      0xCF8, 0xCF9, 0xCFA, 0xCFB, 0xCFC, 0xCFD, 0xCFE, 0xCFF };

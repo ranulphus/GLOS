@@ -7,7 +7,7 @@
 | Status | v0.3 — start modes and conventional memory (2026-10-02), after the v0.2 deep dive (2026-10-01) |
 | Last updated | 2026-10-01 |
 | Supersedes | v0.1. Changes are listed in Appendix D |
-| Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) (work breakdown) |
+| Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) and [docs/milestones-m5.md](docs/milestones-m5.md) (work breakdown) |
 | Licence | MIT |
 | Companion projects | MGA-Glide (`~/MGA-Glide`: the Loop A/B/C harness and the shared Matrox HAL), DOS-GL (`~/DOSGL`: OpenGL for Matrox cards and the SDL3 bridge), Fifth Wheel and the dgk kit (`~/FifthWheel`), DOSBench (`~/DOSBench`) |
 
@@ -451,9 +451,11 @@ Each command is an SSH exec request. `ssh <pc> <command>` runs a DOS command lin
 
 ### 7.5 Screenshots
 
-- Text, VGA, VBE LFB and Matrox modes, including during exclusive sessions.
-- The supervisor saves and restores the VGA index registers (3C4h, 3CEh, 3D4h and CF8h are readable), keeps a shadow copy of the DAC (the 3C9h step counter can't be read back), and saves the VGA latches for planar modes.
-- PNG encoding uses stb_image_write.
+- Text, VGA, VBE (linear framebuffer or banked) and Matrox modes, including during exclusive sessions.
+- The supervisor saves and restores the VGA index registers (3C4h, 3CEh, 3D4h and CF8h are readable) and saves the VGA latches for planar modes.
+- The DAC is read when the picture is taken. (Planned as a shadow copy, because the 3C9h step counter can't be read back. Built in M5 without one: trapping 3C8h and 3C9h would cost a trap per byte of every palette fade, and the capture runs only where the program would take an interrupt. A program stopped between the three bytes of one entry gets that entry wrong.)
+- The PNG is written a piece at a time by GLOS's own writer, in deflate's stored blocks. (Planned with stb_image_write, which wants the whole picture in memory at once.)
+- As built: [docs/supervisor.md](docs/supervisor.md) §17.7.
 
 ### 7.6 Input injection
 
@@ -921,7 +923,7 @@ GLOS/
 
 Defined by their exit criteria. All exits are in Loop A unless marked "bench". v1 is M0–M9 plus the M10 gates; each M10 feature ships when it passes its own gate.
 
-The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md).
+The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md); M5's is in [docs/milestones-m5.md](docs/milestones-m5.md).
 
 **M0: harness (in MGA-Glide, with its full regression) and the IOPL-0 survey (GLOS).** H0–H6b from §15; the HDPMI32i survey (§14.3).
 *Exit:* `loopa-cfgcheck`, `loopa-selftest` and the full MGA-Glide regression unchanged. Self-tests pass for the 486 profiles, the VBE card, the network (a NE2000 VM answers on its forwarded port), COM2, the HIMEMX boot and V86TEST on all three profiles, with no known deviation left that a local patch fixes. `docs/survey-iopl0.md` lists every suite's result under HDPMI32i.

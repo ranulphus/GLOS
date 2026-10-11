@@ -1,9 +1,10 @@
-/* PNG files for glos shot (PRD §7.2): 4-bit indexed colour, with the image
- * data in deflate's stored blocks, so no compressor is needed (a text
- * screen comes to about 130 KB). CRC-32 for the chunks, Adler-32 for the
- * zlib stream. */
+/* PNG files for glos shot (PRD §7.5), written a piece at a time so that a
+ * picture of any size goes out through a small buffer: the head, then an
+ * IDAT chunk for each group of scanlines the caller gives, each chunk one
+ * of deflate's stored blocks (no compressor is needed; a 640x480 picture
+ * in 256 colours comes to about 310 KB). CRC-32 for the chunks, Adler-32
+ * for the zlib stream. */
 #include "kprintf.h"
-#include "mm.h"
 #include "png.h"
 
 static u32 crc_table[256];
@@ -41,55 +42,66 @@ static u8 *chunk(u8 *p, const char *type, u32 n)
     return p + 12 + n;
 }
 
-u8 *png_indexed4(u32 w, u32 h, const u8 rgb[16][3], const u8 *pix, u32 *len)
+u32 png_begin(struct png *p, u32 w, u32 h, int depth, const u8 (*rgb)[3], u32 colours, u8 *out)
 {
-    u32 row = 1 + (w + 1) / 2, raw = row * h, blocks = (raw + 65534) / 65535;
-    u32 size = 8 + 25 + 60 + 12 + 2 + blocks * 5 + raw + 4 + 12, a = 1, b = 0, x, y, i;
-    u8 *out = kmalloc(size), *p, *z;
     static const u8 sig[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+    u8 *q = out + 8;
+    u32 i;
 
-    if (!out)
-        return 0;
+    p->w = w;
+    p->h = h;
+    p->y = 0;
+    p->a = 1;
+    p->b = 0;
+    p->row = 1 + (depth == 24 ? w * 3 : depth == 8 ? w : (w + 1) / 2);
     memcpy(out, sig, 8);
-    p = out + 8;
-    be32(p + 8, w);                             /* IHDR */
-    be32(p + 12, h);
-    p[16] = 4;                                  /* 4 bits per pixel, */
-    p[17] = 3;                                  /* indexed colour */
-    p[18] = p[19] = p[20] = 0;
-    p = chunk(p, "IHDR", 13);
-    for (i = 0; i < 16; i++)                    /* PLTE */
-        memcpy(p + 8 + i * 3, rgb[i], 3);
-    p = chunk(p, "PLTE", 48);
-    z = p + 8;                                  /* IDAT: zlib, stored blocks */
-    *z++ = 0x78;
-    *z++ = 0x01;
-    for (y = 0, i = 0; y < h; y++)
-        for (x = 0; x < row; x++, i++) {
-            u8 v;
-            if (i % 65535 == 0) {
-                u32 n = raw - i < 65535 ? raw - i : 65535;
-                *z++ = n == raw - i;            /* BFINAL on the last; BTYPE 00 */
-                *z++ = (u8)n;
-                *z++ = (u8)(n >> 8);
-                *z++ = (u8)~n;
-                *z++ = (u8)(~n >> 8);
-            }
-            if (x == 0)
-                v = 0;                          /* filter: none */
-            else {
-                u32 px = (x - 1) * 2;
-                v = (u8)(pix[y * w + px] << 4);
-                if (px + 1 < w)
-                    v |= pix[y * w + px + 1] & 15;
-            }
-            *z++ = v;
-            a = (a + v) % 65521;
-            b = (b + a) % 65521;
+    be32(q + 8, w);                             /* IHDR */
+    be32(q + 12, h);
+    q[16] = (u8)(depth == 24 ? 8 : depth);      /* bits per sample */
+    q[17] = depth == 24 ? 2 : 3;                /* RGB, or indexed colour */
+    q[18] = q[19] = q[20] = 0;
+    q = chunk(q, "IHDR", 13);
+    if (depth != 24) {
+        for (i = 0; i < colours; i++)
+            memcpy(q + 8 + i * 3, rgb[i], 3);
+        q = chunk(q, "PLTE", colours * 3);
+    }
+    return (u32)(q - out);
+}
+
+u32 png_rows(struct png *p, const u8 *rows, u32 n, u8 *out)
+{
+    u32 len = n * p->row, i, a = p->a, b = p->b, last;
+    u8 *z = out + 8, *q;
+
+    if (!p->y) {                                /* the zlib stream's head */
+        *z++ = 0x78;
+        *z++ = 0x01;
+    }
+    p->y += n;
+    last = p->y >= p->h;
+    *z++ = (u8)last;                            /* BFINAL; BTYPE 00, stored */
+    *z++ = (u8)len;
+    *z++ = (u8)(len >> 8);
+    *z++ = (u8)~len;
+    *z++ = (u8)(~len >> 8);
+    memcpy(z, rows, len);
+    z += len;
+    for (i = 0; i < len;) {                     /* 5552 bytes are the most before the sums must be reduced */
+        u32 end = len - i > 5552 ? i + 5552 : len;
+        for (; i < end; i++) {
+            a += rows[i];
+            b += a;
         }
-    z = be32(z, (b << 16) | a);
-    p = chunk(p, "IDAT", (u32)(z - (p + 8)));
-    p = chunk(p, "IEND", 0);
-    *len = (u32)(p - out);
-    return out;
+        a %= 65521;
+        b %= 65521;
+    }
+    p->a = a;
+    p->b = b;
+    if (last)
+        z = be32(z, (b << 16) | a);
+    q = chunk(out, "IDAT", (u32)(z - (out + 8)));
+    if (last)
+        q = chunk(q, "IEND", 0);
+    return (u32)(q - out);
 }

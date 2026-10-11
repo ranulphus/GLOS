@@ -111,6 +111,7 @@ $(eval $(call dos_test,ECHOARGS,echoargs))
 $(eval $(call dos_test,RUNOUT,runout))
 $(eval $(call dos_test,SESSTEST,sesstest))
 $(eval $(call dos_test,TIMECHK,timechk))
+$(eval $(call dos_test,SHOTTEST,shottest))
 # DPMIMINI.COM: the smallest DPMI client, in assembly (M4a).
 build/ow/dos/DPMIMINI.COM: tests/dos/dpmimini.asm
 	@mkdir -p build/ow/dos/obj
@@ -127,7 +128,8 @@ build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
 	$(Q)$(WLINK) system dos option quiet option stack=4k name $@ \
 	  file build/ow/dos/obj/dpmi16.obj,build/ow/dos/obj/dpmi16a.obj
 DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
-             build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE
+             build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
+             build/ow/dos/SHOTTEST.EXE
 dos-tests: $(DOS_TESTS)
 
 # ---- GLOSK.BIN: the kernel (host gcc -m32, linked at C0100000h) -------------
@@ -210,6 +212,9 @@ loopa-ssh: all dos-tests check-deps
 	$(Q)python3 tests/loopa/jobs.py ssh -j $(JOBS)
 # M3's exit: the ssh suite (its 486DX2 + NE2000 and bf6 + RTL8029 cases).
 loopa-m3: loopa-ssh
+# glos shot in every video mode (M5 A2): SHOTTEST's pictures on the Matrox and S3 VBE BIOSes and a 486.
+loopa-shot: all dos-tests build/dj/SHOTDJ.EXE check-deps
+	$(Q)python3 tests/loopa/jobs.py shot -j $(JOBS)
 # M4a: the DPMI host's checks (DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i).
 loopa-dpmi: all dos-tests build/dj/DPMICONF.EXE build/dj/LAZYCHK.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py dpmi -j $(JOBS)
@@ -269,6 +274,11 @@ build/dj/PROFCHK.EXE: tests/dos/profchk.c
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 # LAZYCHK (tests/dos/lazychk.c): DPMI memory backed when first touched (M4e).
 build/dj/LAZYCHK.EXE: tests/dos/lazychk.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+# SHOTDJ (tests/dos/shottest.c as a DPMI client): a known picture in each video mode, for glos shot (M5).
+build/dj/SHOTDJ.EXE: tests/dos/shottest.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<

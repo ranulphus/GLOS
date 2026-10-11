@@ -600,11 +600,13 @@ static int loadable(u32 sel, int kind)
 
 void dpmi_return(struct trapframe *tf)
 {
-    if (vm.kill_req) {
+    if (vm.kill_req && !vm_work_running()) {
         dpmi_end(tf, 0xFF, 1);
         vm_return(tf);
         return;
     }
+    if (!(tf->eflags & FL_VM))
+        vm_work_turn(tf);                       /* (in real mode: vm_return's) */
     while (vm.vif && vpic_pending(&vm.pic) && dctx) {
         int vec = vpic_ack(&vm.pic);
         if (vm.direct)

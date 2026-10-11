@@ -78,6 +78,26 @@ struct vm {
 
 extern struct vm vm;
 
+/* Work for the VM thread from another one (a screenshot, M5): fn runs on it
+   with interrupts off at a return to the program, where the program would
+   take an interrupt (its virtual IF is on), or wherever it is once `patience`
+   ticks have passed. The program is then stopped between two instructions,
+   and fn may make real-mode calls (rm_call). fn returns 0, or 1 to be called
+   again at a later return. One piece of work at a time. */
+enum { VW_IDLE, VW_POSTED, VW_RUNNING, VW_DONE };
+struct vm_work {
+    int (*fn)(struct vm_work *w, struct trapframe *tf);
+    void (*done)(void);                 /* after fn's 0, interrupts off: a wake for the poster */
+    u32 patience;                       /* ticks */
+    u32 posted;                         /* the tick it was posted at */
+    volatile u8 state;                  /* VW_ */
+};
+int vm_post(struct vm_work *w);         /* 0, or -1: another is waiting */
+int vm_unpost(struct vm_work *w);       /* 1: withdrawn; 0: it has run or is running */
+int vm_work_due(void);                  /* posted work could run now */
+int vm_work_running(void);
+void vm_work_turn(struct trapframe *tf);        /* at a return to user mode */
+
 void vm_start(struct bootinfo *bi);              /* sets up and creates the VM thread */
 void vm_kick(void);                             /* the VM may have something to do: wake it */
 struct trapframe *vm_frame(void);               /* the VM thread's V86 frame */

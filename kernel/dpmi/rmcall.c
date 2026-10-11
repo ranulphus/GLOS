@@ -21,6 +21,7 @@
 #include "dpmi.h"
 #include "kprintf.h"
 #include "sched.h"
+#include "shot.h"
 #include "vm.h"
 
 #define NEST_MAX 8
@@ -46,7 +47,7 @@ static void push16(u32 ss, u32 *sp, u32 v)
 int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u16 *words, u32 nwords)
 {
     struct trapframe *f;
-    u32 here, ss, sp, i, flags, ivt, vif = vm.vif;
+    u32 here, ss, sp, i, flags, ivt, vif = vm.vif, ax = r->eax, bx = r->ebx;
 
     if (depth >= NEST_MAX || (!dctx && !r->ss && !r->sp))
         return -1;                              /* (without a client, the caller gives a stack: sessions) */
@@ -106,6 +107,8 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
     cpu_set_esp0(current->esp0);
     nest_enter(f, &nests[depth - 1].save);      /* comes back from rm_nest_return() */
     depth--;
+    if (vec == 0x10 && kind != RM_FAR)
+        shot_int10(ax, bx, f->eax);             /* the video mode, for glos shot */
 
     r->eax = f->eax;
     r->ebx = f->ebx;

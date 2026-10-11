@@ -291,7 +291,7 @@ void vdev_tick(struct trapframe *tf, u8 c)
     vkbc_tick();
     vm_int15_tick(now);
     agent_vm_tick(now);
-    if (vm.waiting && vm.wait_deadline && (s32)(now - vm.wait_deadline) >= 0)
+    if (vm.waiting && ((vm.wait_deadline && (s32)(now - vm.wait_deadline) >= 0) || vm_work_due()))
         vm_kick();
     if (com1_mid && now - com1_since > 100) {   /* a line that never ends: write ours anyway */
         com1_mid = 0;

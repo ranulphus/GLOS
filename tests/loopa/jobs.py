@@ -1465,6 +1465,184 @@ def sess_agent(profile, card):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+# ---- glos shot in every video mode (M5 A2)
+
+SHOT_MODES = ["text", "textb", "text50", "cga4", "cga2", "ega0d", "ega0e", "ega10", "vga12", "vga13", "vga13c", "x",
+              "xpage",
+              "xsplit", "v101", "v101l", "v101s", "v101d", "v103", "v102", "v105", "v110", "v110l", "v111", "v111l",
+              "v112", "v112l", "v118l", "v111p", "v111z"]
+# (machine, video card, network card, the program: SHOTTEST in real mode, SHOTDJ a DPMI client)
+SHOT_CASES = [("bf6", "g200", "ne2kpci", "SHOTTEST"), ("bf6", "vbe", "ne2kpci", "SHOTTEST"),
+              ("486dx2", "vbe", "ne2k", "SHOTTEST"), ("bf6", "g200", "ne2kpci", "SHOTDJ"),
+              ("bf6", "vbe", "ne2kpci", "SHOTDJ")]
+
+
+def png_rgb(data):
+    """(width, height, RGB bytes) of one of glos shot's PNGs (indexed or RGB, no scanline filter), or None."""
+    import struct
+    import zlib
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    p, idat, pal, head = 8, b"", b"", None
+    while p + 12 <= len(data):
+        n = struct.unpack(">I", data[p:p + 4])[0]
+        kind, body = data[p + 4:p + 8], data[p + 8:p + 8 + n]
+        if zlib.crc32(kind + body) != struct.unpack(">I", data[p + 8 + n:p + 12 + n])[0]:
+            return None
+        if kind == b"IHDR":
+            head = struct.unpack(">IIBB", body[:10])
+        elif kind == b"PLTE":
+            pal = body
+        elif kind == b"IDAT":
+            idat += body
+        p += 12 + n
+    if not head or p != len(data):
+        return None
+    w, h, depth, ctype = head
+    try:
+        raw = zlib.decompress(idat)
+    except zlib.error:
+        return None
+    row = 1 + (w * 3 if ctype == 2 else w if depth == 8 else (w + 1) // 2)
+    if len(raw) != row * h or any(raw[y * row] for y in range(h)):
+        return None
+    colours = [pal[i:i + 3] for i in range(0, len(pal), 3)]
+    out = bytearray()
+    for y in range(h):
+        line = raw[y * row + 1:(y + 1) * row]
+        if ctype == 2:
+            out += line
+        elif depth == 8:
+            out += b"".join(colours[i] for i in line)
+        else:
+            out += b"".join(colours[b >> 4] + colours[b & 15] for b in line)[:w * 3]
+    return w, h, bytes(out)
+
+
+def shot_want(f):
+    """The picture SHOTTEST drew, from its HX-SHOT line's fields (tests/dos/shottest.c): RGB bytes."""
+    w, h, kind = int(f["w"]), int(f["h"]), f["kind"]
+
+    def six(v):
+        return ((v & 63) << 2) | ((v & 63) >> 4)
+
+    def dac(i, wide=False):
+        return bytes((i, (5 * i + 9) & 255, 255 - i)) if wide else bytes((six(i), six(5 * i + 9), six((255 - i) >> 2)))
+
+    def pat(x, y):
+        return (x + 3 * y + 5 * ((x >> 4) ^ (y >> 3))) & 255
+
+    out = bytearray()
+    if kind == "pal256":
+        table, split = [dac(i, f.get("wide") == "1") for i in range(256)], int(f.get("split", h))
+        for y in range(h):
+            if y < split:
+                out += b"".join(table[pat(x, y)] for x in range(w))
+            else:
+                out += b"".join(table[pat(x, y - split) ^ 255] for x in range(w))
+    elif kind == "pal16":
+        table, n = [dac(0x50 + 3 * v) for v in range(16)], int(f["colours"])
+        for y in range(h):
+            if n == 2:
+                out += b"".join(table[(pat(x, y) >> 1) & 1] for x in range(w))
+            else:
+                out += b"".join(table[pat(x, y) & (n - 1)] for x in range(w))
+    elif kind == "text":
+        table, rows, blink = [dac(0x50 + 3 * v) for v in range(16)], int(f["rows"]), f["blink"] == "1"
+        for cy in range(rows):
+            line = b""
+            for cx in range(80):
+                a = (7 * cx + 13 * cy) & 255
+                line += table[a & 15 if (cx + cy) & 1 else (a >> 4) & 7 if blink else a >> 4] * 8
+            out += line * (h // rows)
+    elif kind == "rgb":
+        def cut(v, size):
+            c, bits = (v >> (8 - size)) << (8 - size), size
+            while bits < 8:
+                c |= c >> bits
+                bits *= 2
+            return c & 255
+        rs, gs, bs = (int(f[k].split("/")[0]) for k in "rgb")
+        red, green, blue = ([cut(v, s) for v in range(256)] for s in (rs, gs, bs))
+        for y in range(h):
+            out += b"".join(bytes((red[x & 255], green[y & 255], blue[(x ^ y) & 255])) for x in range(w))
+    return bytes(out)
+
+
+def shot_case(profile, vcard, card, prog):
+    """SHOTTEST's picture in each video mode against glos shot's, as a PNG and raw, over ssh while the program
+    waits; then the program is killed, and the session's end puts text mode back. A mode the card's BIOS hasn't
+    is skipped, but each kind of picture must have been taken. Real mode (SHOTTEST) goes through the V86
+    monitor's INT 10h, a DPMI client (SHOTDJ) through the host's real-mode calls. vga13c keeps its
+    interrupts off for five seconds and calls no one: its picture must come while it does (GLOS waits a
+    quarter of a second for a program to take interrupts, then stops it where it is)."""
+    import time
+    tag = "%s-%s-%s" % (prog.lower(), profile, vcard)
+    exe = "build/ow/dos/SHOTTEST.EXE" if prog == "SHOTTEST" else "build/dj/SHOTDJ.EXE"
+    files = ["--file", "%s=/TEST/%s.EXE" % (exe, prog)]
+    agent = Agent("shot-" + tag, profile, card, ["--card", vcard] + files + [
+        "--cmd", "SERSAY HX-START shot", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=2400 if profile == "bf6" else 4800)
+    out = os.path.join(ROOT, "out", "shot-" + tag)
+    checks, info, taken, skipped = {"listen": agent.listening()}, "", set(), []
+    # One connection for every command (OpenSSH's ControlMaster): a key exchange takes a 486 seconds.
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=900"]
+    try:
+        checks["ver"] = agent.ssh("glos ver")[0] == 0
+        for mode in SHOT_MODES:
+            job = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\%s.EXE %s" % (prog, mode)],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            t0, line = time.time(), None
+            while time.time() - t0 < 180 and not line:
+                m = re.findall(r"^HX-SHOT mode=%s (.*)\n" % mode, agent.log(), re.M)    # (a whole line)
+                line = m[0] if m else None
+                if not line:
+                    time.sleep(0.3)
+            if not line or " skip" in " " + line:
+                skipped.append(mode + ("" if line else "?"))
+                checks[mode] = bool(line)
+                job.wait(timeout=120)
+                continue
+            f = dict(kv.split("=", 1) for kv in line.split() if "=" in kv)
+            want = shot_want(f)
+            p = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=180)
+            if mode == "vga13c":
+                checks["deaf"] = "HX-SHOT mode=vga13c resumed" not in agent.log()
+            open(os.path.join(out, mode + ".png"), "wb").write(p.stdout)
+            got = png_rgb(p.stdout)
+            r = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot --raw"], capture_output=True, timeout=180)
+            head = b"GLOSRAW1" + int(f["w"]).to_bytes(4, "little") + int(f["h"]).to_bytes(4, "little")
+            checks[mode] = (p.returncode == 0 and got is not None and got[:2] == (int(f["w"]), int(f["h"]))
+                            and got[2] == want)
+            if mode != "vga13c":                # (its five seconds may be over by now)
+                checks[mode + "-raw"] = r.returncode == 0 and r.stdout == head + want
+            if not checks[mode]:
+                open(os.path.join(out, mode + ".want"), "wb").write(want)
+                bad = sum(1 for i in range(0, min(len(want), len(got[2])), 3) if want[i:i + 3] != got[2][i:i + 3]) \
+                    if got else -1
+                info += " %s:%s" % (mode, "%s differ=%d" % (got[:2], bad) if got else p.stderr.decode("latin-1")[:80])
+            taken.add(f["kind"] + (f.get("bpp", "")))
+            if mode == "vga13c":
+                checks[mode + "-end"] = job.wait(timeout=120) == 0
+            else:
+                checks[mode + "-kill"] = agent.ssh("glos kill")[0] == 0 and job.wait(timeout=120) == 255
+        rc, _, _ = agent.ssh("glos shot")       # text mode is back: a picture of the DOS screen
+        checks["after"] = rc == 0
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    subprocess.run(agent.opts + ["-O", "exit", "glos@127.0.0.1"], capture_output=True, timeout=30)
+    text = agent.wait()
+    checks["kinds"] = {"text", "pal16", "pal256"} <= taken and any(k.startswith("rgb") for k in taken)
+    checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-CRASH|GLOS-WARN (?!vif-stuck)|DPMI-UNIMPL", text)   # (vga13c)
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-26s %s modes=%d skipped=%s%s%s" % (
+        "shot-" + tag, "PASS" if not bad else "FAIL", len(SHOT_MODES) - len(skipped), ",".join(skipped) or "none",
+        "" if not bad else " failed: " + " ".join(bad), info), not bad
+
+
 def matrix(fn, combos, jobs):
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
         results = list(ex.map(lambda pb: fn(*pb), combos))
@@ -1476,7 +1654,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -1492,6 +1670,11 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ssh":
         return 0 if all(r[1] for r in matrix(ssh_case, SSH_CASES, a.jobs)) else 1
+    if a.suite == "shot":
+        cases = [c for c in SHOT_CASES if not a.profile or c[0] in a.profile]
+        if os.environ.get("SHOT_ONLY"):         # e.g. SHOT_ONLY=SHOTTEST-bf6-vbe
+            cases = [c for c in cases if "%s-%s-%s" % (c[3], c[0], c[1]) in os.environ["SHOT_ONLY"].split(",")]
+        return 0 if all(r[1] for r in matrix(shot_case, cases, a.jobs)) else 1
     if a.suite == "sess":
         res = matrix(sess, [(p, b, h) for p, b in combos for h in ("base", "run", "shell")], a.jobs)
         res += matrix(sess_prof, combos, a.jobs)
