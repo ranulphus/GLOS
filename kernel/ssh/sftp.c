@@ -768,15 +768,14 @@ static void home_set(struct sftp *s)
     s->home[n] = 0;
 }
 
+/* More input, behind what waits. Nothing here moves: the request at the
+   front may be at work, its DOS calls still to read their bytes from this
+   buffer (a WRITE's data, on the VM thread). consumed() makes the room. */
 void sftp_input(struct sftp *s, const u8 *d, u32 n)
 {
-    if (s->in_off + s->in_len + n > IN_CAP) {   /* make room at the front */
-        memcpy(s->in, s->in + s->in_off, s->in_len);
-        s->in_off = 0;
-    }
-    if (s->in_len + n > IN_CAP)
-        n = IN_CAP - s->in_len;                 /* can't happen: the window bounds it */
-    memcpy(s->in + s->in_off + s->in_len, d, n);
+    if (s->in_off + s->in_len + n > IN_CAP)
+        n = IN_CAP - s->in_off - s->in_len;     /* can't happen: the window bounds what waits, and */
+    memcpy(s->in + s->in_off + s->in_len, d, n);        /* consumed() what lies in front of it */
     s->in_len += n;
 }
 
@@ -786,8 +785,12 @@ static void consumed(struct sftp *s)
     u32 k = 4 + s->plen;
     s->in_off += k;
     s->in_len -= k;
-    if (!s->in_len)
+    if (!s->in_len) {
         s->in_off = 0;
+    } else if (s->in_off >= MAX_PACKET) {       /* what waits, back to the front: no request is at work now */
+        memmove(s->in, s->in + s->in_off, s->in_len);
+        s->in_off = 0;
+    }
     s->plen = 0;
     ssh_chan_consumed(s->ch, k);
 }
