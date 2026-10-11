@@ -31,13 +31,19 @@ static u32 image_phys, kmap_next;
 u32 kernel_phys(const void *p) { return image_phys + ((u32)p - (u32)__kernel_start); }
 u32 mm_cr3(void) { return kernel_phys(kpd); }
 
-u32 pmm_alloc(void) { return pmm_take(&pmm); }
-void pmm_free(u32 phys) { pmm_give(&pmm, phys); }
+/* The frame bitmap and the heap belong to every thread, and a preemptible
+   one (ssh, net) can lose the CPU to the VM thread in the middle of a call:
+   each runs with interrupts off. */
+#define LOCKED(type, expr) do { u32 f_ = irq_save(); type r_ = (expr); irq_restore(f_); return r_; } while (0)
+#define LOCKED_V(stmt) do { u32 f_ = irq_save(); stmt; irq_restore(f_); } while (0)
+
+u32 pmm_alloc(void) { LOCKED(u32, pmm_take(&pmm)); }
+void pmm_free(u32 phys) { LOCKED_V(pmm_give(&pmm, phys)); }
 u32 pmm_free_frames(void) { return pmm.free; }
-u32 pmm_alloc_run(u32 n) { return pmm_take_run(&pmm, n); }
-int pmm_claim(u32 phys, u32 n) { return pmm_take_at(&pmm, phys, n); }
-void pmm_free_run(u32 phys, u32 n) { pmm_give_run(&pmm, phys, n); }
-u32 pmm_largest(void) { return pmm_largest_run(&pmm); }
+u32 pmm_alloc_run(u32 n) { LOCKED(u32, pmm_take_run(&pmm, n)); }
+int pmm_claim(u32 phys, u32 n) { LOCKED(int, pmm_take_at(&pmm, phys, n)); }
+void pmm_free_run(u32 phys, u32 n) { LOCKED_V(pmm_give_run(&pmm, phys, n)); }
+u32 pmm_largest(void) { LOCKED(u32, pmm_largest_run(&pmm)); }
 
 /* V86 code runs at CPL 3: the identity map of 0-10FFFFh becomes user pages
    (supervisor.md §4). Nothing of the kernel's is in them. */
@@ -194,8 +200,8 @@ void *mm_tramp_page(u32 lin)
     return (void *)lin;
 }
 
-void *kmalloc(size_t n) { return heap_alloc(&kheap, n); }
-void kfree(void *p) { heap_free(&kheap, p); }
+void *kmalloc(size_t n) { LOCKED(void *, heap_alloc(&kheap, n)); }
+void kfree(void *p) { LOCKED_V(heap_free(&kheap, p)); }
 
 void mm_init(struct bootinfo *bi)
 {

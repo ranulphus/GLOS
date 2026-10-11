@@ -254,19 +254,6 @@ int thread_wake(struct waitq *q)
     return 1;
 }
 
-static u32 irq_save(void)
-{
-    u32 f;
-    __asm__ volatile("pushfl; popl %0; cli" : "=r"(f) :: "memory");
-    return f;
-}
-
-static void irq_restore(u32 f)
-{
-    if (f & EFLAGS_IF)
-        sti();
-}
-
 void thread_sleep_until(u32 tick)
 {
     u32 f = irq_save();

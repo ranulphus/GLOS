@@ -81,19 +81,6 @@ static volatile u32 exit_at;
 static volatile u8 exit_req;
 static void (*kick_ssh)(void);
 
-static u32 irq_save(void)
-{
-    u32 f;
-    __asm__ volatile("pushfl; popl %0; cli" : "=r"(f) :: "memory");
-    return f;
-}
-
-static void irq_restore(u32 f)
-{
-    if (f & 0x200)
-        sti();
-}
-
 static u32 ring_used(const struct ring *r) { return r->head - r->tail; }
 
 static char upper(char c) { return c >= 'a' && c <= 'z' ? (char)(c - 32) : c; }

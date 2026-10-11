@@ -69,18 +69,6 @@ static void raw_out(const char *s, u32 n)
     }
 }
 
-static u32 irq_save(void)
-{
-    u32 f;
-    __asm__ volatile("pushfl; popl %0; cli" : "=r"(f) :: "memory");
-    return f;
-}
-
-static void irq_restore(u32 f)
-{
-    if (f & 0x200) sti();
-}
-
 static void emit(struct out *o, char c)
 {
     if (o->buf) {

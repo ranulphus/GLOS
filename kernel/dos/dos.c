@@ -29,19 +29,6 @@ static u16 xfer_seg;
 static u8 state, alloc_failed;
 static void (*kick)(void);
 
-static u32 irq_save(void)
-{
-    u32 f;
-    __asm__ volatile("pushfl; popl %0; cli" : "=r"(f) :: "memory");
-    return f;
-}
-
-static void irq_restore(u32 f)
-{
-    if (f & 0x200)
-        sti();
-}
-
 /* ---- the ssh thread's side */
 
 void dos_init(void (*k)(void)) { kick = k; }

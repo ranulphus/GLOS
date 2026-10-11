@@ -31,6 +31,18 @@ static inline void invlpg(u32 a) { __asm__ volatile("invlpg (%0)" :: "r"(a) : "m
 static inline void cli(void) { __asm__ volatile("cli" ::: "memory"); }
 static inline void sti(void) { __asm__ volatile("sti" ::: "memory"); }
 static inline void hlt(void) { __asm__ volatile("hlt" ::: "memory"); }
+/* Interrupts off, and back as they were. */
+static inline u32 irq_save(void)
+{
+    u32 f;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(f) :: "memory");
+    return f;
+}
+static inline void irq_restore(u32 f)
+{
+    if (f & 0x200)
+        sti();
+}
 static inline u64 rdtsc(void) { u32 lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return ((u64)hi << 32) | lo; }
 
 #endif
