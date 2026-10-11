@@ -118,8 +118,8 @@ Each step is a commit with its tests.
     up, `glos shot` takes it, `glos key` sends the key.
   - The program's lines are the same from both, and each `glos shot` equals 86Box's screenshot pixel for
     pixel, and the picture the host computes.
-- **A9, the gate:** the probe now takes `glos shot` twice in every program's run (after its 5th and 25th
-  answer) and each must be a whole PNG; they are kept as `probe-shot-N.png`. **The gate has not been run
+- **A9, the gate:** the probe now takes `glos shot` up to six times in every program's run (after its 5th,
+  25th and each 100th answer) and each must be a whole PNG; they are kept as `probe-shot-N.png`. **The gate has not been run
   with it yet.**
 - **H8** is on MGA-Glide's branch `glos-loopb` (not merged): `tools/bench/run.py` drives a bench PC through
   GLOS over ssh when it answers and through BENCH.BAT otherwise; `vpc.py start --glos` gives the virtual

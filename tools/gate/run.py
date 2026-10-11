@@ -27,8 +27,9 @@ Three kinds of cell (CELLS below):
                     always answer, never more than 2 s of guest time late
                     (the replies carry the kernel's tick: 86Box runs below
                     real time), `glos shot` must give a picture of the
-                    screen twice (M5: in whatever mode the program has
-                    set), and the program must still end as in the baseline
+                    screen each time it is asked (M5: up to six times, in
+                    whatever mode the program has set), and the program
+                    must still end as in the baseline
   script   a runner that judges itself (tools/m4c-games.sh: MGA-Glide's
            conform and replays, DOSBench; DOS-GL's loopa-sdl): as the shell,
            and with direct mode forced (loopa-sdl's baseline too)
@@ -330,8 +331,9 @@ KEY = os.path.join(ROOT, "tests", "keys", "client")
 
 
 class Probe:
-    """`glos tick` over ssh about once a second (wall time) while a run goes, and `glos shot` twice (after the
-    5th and the 25th answer: the program starting, and at work; M5), each kept as probe-shot-N.png. The
+    """`glos tick` over ssh about once a second (wall time) while a run goes, and `glos shot` after the 5th,
+    25th, 100th, 200th, 300th and 400th answer (the program starting, then at work: a game needs a minute or
+    two of wall time to show its first frame in 86Box; M5), each kept as probe-shot-N.png. The
     probes share one connection (OpenSSH's ControlMaster), so each measures the agent's answer, not a key
     exchange at the 30% CPU budget bulk work gets beside a game (a fresh connection per probe put
     Screamer Rally's worst gap at 2.07 s)."""
@@ -370,7 +372,7 @@ class Probe:
             m = re.match(rb"ticks=(\d+)", o)
             if rc == 0 and m:
                 self.replies.append((w, time.time(), int(m.group(1))))
-                if len(self.replies) in (5, 25):
+                if len(self.replies) in (5, 25, 100, 200, 300, 400):
                     rc2, o2, e2 = self.call("glos shot", timeout=90)
                     good = rc2 == 0 and o2[:8] == b"\x89PNG\r\n\x1a\n" and o2[12:16] == b"IHDR" \
                         and o2[-8:-4] == b"IEND"
