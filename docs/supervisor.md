@@ -539,6 +539,18 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   written to the keyboard (port 60h, not D4h's) clears the program's keyboard-disable bit, as the chip does:
   the BIOS's INT 09h sends the LED update between ADh and AEh and polls, interrupts off, for the ACK, which
   GLOS held back until M4e E5 (a program that changed the lock bits in 0417h stalled the next keystroke).
+- **Injected input** (M5; `glos key`, `glos type`, `glos mouse`, §17.8) goes the keyboard's and the mouse's
+  way: bytes into the same queue, with the hotkeys watched as for a real key, so a typed Ctrl-Alt-Shift-Esc
+  kills. In a direct-mode session (§9.7) the bytes wait in a queue of their own and go into the chip (D2h,
+  D3h), with the keyboard held off, each time its output buffer is free.
+  - A mouse packet has the form the program asked the mouse for. GLOS reads the commands that pass to
+    the AUX device: F4h and F5h (reporting on and off), F6h and FFh (off again), and the sample rates
+    200, 100, 80 in a row, which turn a wheel mouse's fourth byte on.
+  - A mouse driver loaded before GLOS has done all that already. At its start GLOS takes the mouse to
+    be on if the command byte has the AUX port and IRQ 12 enabled, and asks the device for its ID (F2h):
+    3 or 4 is a wheel mouse by now.
+  - A packet for a mouse no program has on is refused. GLOS makes up no mouse: on a PC without one, the
+    driver finds none and there is nothing to inject into.
 - **The RTC:** registers A, B and C are virtual. The periodic flag follows the program's rate (at most once
   per kernel tick); AF and UF come from the chip. IRQ 8 is raised for the VM when IRQF rises. Writes to
   register B reach the chip except PIE, AIE and UIE.
@@ -1240,6 +1252,29 @@ The code is `kernel/dos/shot.c` and `kernel/lib/png.c`.
 - **Direct-colour modes** give the framebuffer's values, not what a gamma ramp in the DAC makes of them.
 - **Refusals** (status 1, a line on stderr): `no memory`; `a video mode glos shot doesn't know`;
   `the program doesn't stop (its interrupts are off)` after three seconds; `busy`.
+
+### 17.8 Injected input (M5)
+
+Input into the program in front, over ssh, as from the keyboard and the mouse (§10). The lists are those
+of Loop A's `--keys` (MGA-Glide's `tools/loopa/run.py`), so a script moves between the emulator's own input
+and GLOS's:
+
+- `glos key LIST`: items with commas between, each at its time from the command's start; the command ends
+  (status 0) when the last has gone in.
+  - `SECONDS:CODE[:down|up]`: a key by its set 1 make code, 100h and above for the keys with an E0 prefix
+    (148h is the grey Up arrow), as 86Box's monitor takes them. Without `down` or `up` it is a tap: down,
+    and up 50 ms later.
+  - `SECONDS:mouse:DX:DY[:BUTTONS]`: the mouse moved by DX, DY mickeys (right and down positive), its
+    buttons set (bit 0 left, 1 right, 2 middle) or left as they were.
+  - `SECONDS:` may be left out: now. SECONDS takes a fraction. Loop A's `@TEXT` anchors and `joy` items
+    are the host's and have no meaning here.
+- `glos type TEXT`: each character as its key on the US layout, with Shift where it needs it, 25 a second;
+  `\n` is Enter, `\t` Tab, `\e` Esc, `\b` Backspace, `\\` a backslash.
+- `glos mouse DX DY [BUTTONS]`: one move, now.
+- Status 2 and a line on stderr for a list or a character that makes no sense; status 1 for a mouse no
+  program has on. When the queue is full (64 bytes) the next event waits for the program to read.
+- The events are a stream (§17.6): the ssh thread wakes at each one's time. It is a bulk thread, so under
+  load an event can be some milliseconds late; their order holds.
 
 ## 18. Logging
 

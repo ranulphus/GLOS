@@ -267,6 +267,15 @@ struct stream {
     void *arg;
 };
 static struct stream streams[8];
+static u32 stream_due;                          /* the tick a stream next wants a turn at whatever happens; 0: none */
+
+static void stream_at(u32 tick)
+{
+    if (!tick)
+        tick = 1;
+    if (!stream_due || (s32)(tick - stream_due) < 0)
+        stream_due = tick;
+}
 
 static int stream_add(struct ssh_chan *ch, int (*turn)(struct ssh_chan *, void *), void (*drop)(void *), void *arg)
 {
@@ -284,6 +293,7 @@ static int stream_add(struct ssh_chan *ch, int (*turn)(struct ssh_chan *, void *
 static void streams_turn(void)
 {
     u32 i;
+    stream_due = 0;
     for (i = 0; i < ARRAY_SIZE(streams); i++)
         if (streams[i].ch && streams[i].turn(streams[i].ch, streams[i].arg)) {
             streams[i].drop(streams[i].arg);
@@ -329,6 +339,250 @@ static int shot_turn(struct ssh_chan *ch, void *arg)
 }
 
 static void shot_drop(void *arg) { shot_free(arg); }
+
+/* glos key, type and mouse (PRD §7.6): input into the program in front, as
+   from the keyboard and the mouse (kernel/vm/vkbc.c), each event at its
+   time from the command's start. */
+enum { EV_DOWN, EV_UP, EV_MOUSE };
+struct inev {
+    u32 at;                                     /* ticks */
+    u8 kind;
+    int a, b, c;                                /* the key's code; the mouse's dx, dy, buttons (-1: as they are) */
+};
+struct input {
+    u32 t0, n, i, max;
+    struct inev ev[1];
+};
+#define TAP 51                                  /* ticks a tapped key stays down: 50 ms, as 86Box's monitor */
+
+static struct input *input_new(u32 max)
+{
+    struct input *in = kmalloc(sizeof *in + max * sizeof in->ev[0]);
+    if (in) {
+        in->n = in->i = 0;
+        in->max = max;
+    }
+    return in;
+}
+
+/* An event into its place by time (those at the same time stay in the order given). */
+static void input_add(struct input *in, u32 at, int kind, int a, int b, int c)
+{
+    u32 i;
+    if (in->n >= in->max)
+        return;
+    for (i = in->n; i > 0 && in->ev[i - 1].at > at; i--)
+        in->ev[i] = in->ev[i - 1];
+    in->ev[i].at = at;
+    in->ev[i].kind = (u8)kind;
+    in->ev[i].a = a;
+    in->ev[i].b = b;
+    in->ev[i].c = c;
+    in->n++;
+}
+
+static int input_turn(struct ssh_chan *ch, void *arg)
+{
+    struct input *in = arg;
+    u32 now = timer_ticks();
+    while (in->i < in->n && (s32)(now - (in->t0 + in->ev[in->i].at)) >= 0) {
+        const struct inev *e = &in->ev[in->i];
+        int r = e->kind == EV_MOUSE ? vkbc_mouse(e->a, e->b, e->c) : vkbc_key((u32)e->a, e->kind == EV_DOWN);
+        if (r == -1) {                          /* the queue is full: when the program has read some */
+            stream_at(now + 16);
+            return 0;
+        }
+        if (r == -2) {
+            say(ch, 1, "glos mouse: no program has the mouse on\n");
+            ssh_chan_exit(ch, 1);
+            return 1;
+        }
+        in->i++;
+    }
+    if (in->i == in->n) {
+        ssh_chan_exit(ch, 0);
+        return 1;
+    }
+    stream_at(in->t0 + in->ev[in->i].at);
+    return 0;
+}
+
+static void input_drop(void *arg) { kfree(arg); }
+
+/* A number (decimal, 0x hexadecimal, a minus sign) at *p, which moves past it: 0, or -1 if there is none. */
+static int number(const char **p, int *v)
+{
+    const char *s = *p;
+    int neg = *s == '-', n = 0, digits = 0;
+    if (neg)
+        s++;
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        for (s += 2;; s++, digits++) {
+            int d = *s >= '0' && *s <= '9' ? *s - '0' : (*s | 32) >= 'a' && (*s | 32) <= 'f' ? (*s | 32) - 'a' + 10 : -1;
+            if (d < 0)
+                break;
+            n = n * 16 + d;
+        }
+    } else {
+        for (; *s >= '0' && *s <= '9'; s++, digits++)
+            n = n * 10 + (*s - '0');
+    }
+    if (!digits)
+        return -1;
+    *v = neg ? -n : n;
+    *p = s;
+    return 0;
+}
+
+/* Seconds with a fraction ("1.25") as ticks. */
+static int seconds(const char **p, u32 *ticks)
+{
+    const char *s = *p;
+    u32 whole = 0, frac = 0, scale = 1, digits = 0;
+    for (; *s >= '0' && *s <= '9'; s++, digits++)
+        whole = whole * 10 + (u32)(*s - '0');
+    if (*s == '.')
+        for (s++; *s >= '0' && *s <= '9'; s++, digits++)
+            if (scale < 1000) {
+                frac = frac * 10 + (u32)(*s - '0');
+                scale *= 10;
+            }
+    if (!digits || whole > 3600)
+        return -1;
+    *ticks = whole * 1024 + frac * 1024 / scale;
+    *p = s;
+    return 0;
+}
+
+/* glos key's list, Loop A's --keys (MGA-Glide's tools/loopa/run.py): items
+   SECONDS:CODE[:down|up] and SECONDS:mouse:DX:DY[:BUTTONS] with commas
+   between; the SECONDS: may be left out (now). A code is the key's set 1
+   make code, 100h and above for the keys with an E0 prefix; without down
+   or up it is a tap. 0, or the item that makes no sense. */
+static const char *input_parse(struct input *in, const char *p)
+{
+    while (*p) {
+        const char *item = p, *q;
+        u32 at = 0;
+        int code, dx, dy, buttons = -1;
+        for (q = p; *q && *q != ',' && *q != ':'; q++) ;
+        if (*q == ':' && strncmp(p, "mouse", 5) && (q[1] < 'a' || q[1] == 'm')) {   /* SECONDS: first */
+            if (seconds(&p, &at) != 0 || *p++ != ':')
+                return item;
+        }
+        if (!strncmp(p, "mouse:", 6)) {
+            p += 6;
+            if (number(&p, &dx) != 0 || *p++ != ':' || number(&p, &dy) != 0)
+                return item;
+            if (*p == ':' && (p++, number(&p, &buttons) != 0))
+                return item;
+            input_add(in, at, EV_MOUSE, dx, dy, buttons);
+        } else {
+            if (number(&p, &code) != 0 || code < 1 || code > 0x1FF || (code & 0x80))
+                return item;
+            if (!strncmp(p, ":down", 5)) {
+                p += 5;
+                input_add(in, at, EV_DOWN, code, 0, 0);
+            } else if (!strncmp(p, ":up", 3)) {
+                p += 3;
+                input_add(in, at, EV_UP, code, 0, 0);
+            } else {
+                if (!strncmp(p, ":tap", 4))
+                    p += 4;
+                input_add(in, at, EV_DOWN, code, 0, 0);
+                input_add(in, at + TAP, EV_UP, code, 0, 0);
+            }
+        }
+        if (*p == ',')
+            p++;
+        else if (*p)
+            return item;
+    }
+    return 0;
+}
+
+/* The key for a character on the US layout: its code, 200h added with Shift; 0 if it has none. */
+static int us_key(char c)
+{
+    static const char plain[] = "\0331234567890-=\b\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 ";
+    static const char shift[] = "\0!@#$%^&*()_+\0\0QWERTYUIOP{}\0\0ASDFGHJKL:\"~\0|ZXCVBNM<>?";
+    u32 i;
+    if (!c)
+        return 0;
+    for (i = 0; i < sizeof plain - 1; i++)
+        if (plain[i] == c && i != 0x36 && i != 0x37)
+            return (int)i + 1;
+    for (i = 0; i < sizeof shift - 1; i++)
+        if (shift[i] == c)
+            return ((int)i + 1) | 0x200;
+    return 0;
+}
+
+/* glos type's text: each character a key, 40 ticks apart; \n, \t, \e, \b and \\ as in C.
+   0, or the character without a key. */
+static const char *type_parse(struct input *in, const char *p)
+{
+    u32 at = 0;
+    for (; *p; p++, at += 40) {
+        char c = *p;
+        int k;
+        if (c == '\\' && p[1]) {
+            p++;
+            c = *p == 'n' ? '\n' : *p == 't' ? '\t' : *p == 'e' ? 27 : *p == 'b' ? '\b' : *p;
+        }
+        if (!(k = us_key(c)))
+            return p;
+        if (k & 0x200)
+            input_add(in, at, EV_DOWN, 0x2A, 0, 0);
+        input_add(in, at + 5, EV_DOWN, k & 0xFF, 0, 0);
+        input_add(in, at + 20, EV_UP, k & 0xFF, 0, 0);
+        if (k & 0x200)
+            input_add(in, at + 25, EV_UP, 0x2A, 0, 0);
+    }
+    return 0;
+}
+
+/* glos key LIST, glos type TEXT, glos mouse DX DY [BUTTONS]. */
+static void input_cmd(struct ssh_chan *ch, const char *cmd)
+{
+    const char *arg = cmd + (cmd[5] == 'k' ? 9 : cmd[5] == 't' ? 10 : 11), *bad = 0;
+    const char *what = cmd[5] == 'k' ? "key" : cmd[5] == 't' ? "type" : "mouse";
+    struct input *in = strlen(arg) > 2000 ? 0 : input_new(cmd[5] == 't' ? (u32)strlen(arg) * 4 + 1 : (u32)strlen(arg) + 2);
+    int dx, dy, buttons = -1;
+    if (!in) {
+        say(ch, 1, "glos: no memory\n");
+        ssh_chan_exit(ch, 1);
+        return;
+    }
+    if (cmd[5] == 'k') {
+        bad = input_parse(in, arg);
+    } else if (cmd[5] == 't') {
+        bad = type_parse(in, arg);
+    } else {
+        const char *p = arg;
+        if (number(&p, &dx) != 0 || *p++ != ' ' || number(&p, &dy) != 0 || (*p == ' ' && (p++, number(&p, &buttons) != 0))
+            || *p)
+            bad = arg;
+        else
+            input_add(in, 0, EV_MOUSE, dx, dy, buttons);
+    }
+    if (bad || !in->n) {
+        say(ch, 1, "glos ");
+        say(ch, 1, what);
+        say(ch, 1, bad ? ": not understood: " : ": nothing to do");
+        say(ch, 1, bad ? bad : "");
+        say(ch, 1, "\n");
+        ssh_chan_exit(ch, 2);
+        kfree(in);
+        return;
+    }
+    in->t0 = timer_ticks();
+    if (stream_add(ch, input_turn, input_drop, in) != 0) {
+        say(ch, 1, "glos: busy\n");
+        ssh_chan_exit(ch, 1);
+        kfree(in);
+    }
+}
 
 /* The built-in commands, and DOS command lines for the agent. */
 static int k_exec(struct ssh_chan *ch, const char *cmd)
@@ -414,6 +668,8 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             say(ch, 1, sh ? "glos shot: busy\n" : "glos shot: no memory\n");
             ssh_chan_exit(ch, 1);
         }
+    } else if (!strncmp(cmd, "glos key ", 9) || !strncmp(cmd, "glos type ", 10) || !strncmp(cmd, "glos mouse ", 11)) {
+        input_cmd(ch, cmd);
     } else if (!strcmp(cmd, "glos log") || !strcmp(cmd, "glos ps")) {
         char *buf = kmalloc(0x4000);
         u32 n = 0;
@@ -538,8 +794,13 @@ static void ssh_main(void *arg)
     for (;;) {
         u32 f;
         __asm__ volatile("pushfl; popl %0; cli" : "=r"(f) :: "memory");
-        if (!ssh_kick)
-            thread_wait(&sshq, timer_ticks() + 1024);
+        if (!ssh_kick) {
+            u32 until = timer_ticks() + 1024;
+            if (stream_due && (s32)(stream_due - until) < 0)
+                until = stream_due;
+            if ((s32)(until - timer_ticks()) > 0)
+                thread_wait(&sshq, until);
+        }
         ssh_kick = 0;
         if (f & 0x200)
             sti();

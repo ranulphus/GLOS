@@ -58,8 +58,8 @@ Each step is a commit with its tests.
 
 ## Status
 
-- **A1 to A3 are done** (2026-10-11); as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
-  (streams) and §17.7 (screenshots).
+- **A1 to A4 are done** (2026-10-11); as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
+  (streams), §17.7 (screenshots), §10 and §17.8 (injected input).
 - **`make loopa-shot`** (`jobs.py shot`): SHOTTEST draws a picture the host can compute, in one mode a run, and
   waits; `glos shot` and `glos shot --raw` over ssh must both equal it; then the program is killed. Five cases,
   all passing: real mode on bf6 with the G200's and the S3's VBE BIOS and on the 486DX2 (no VME: every INT
@@ -79,6 +79,19 @@ Each step is a commit with its tests.
   | v101s, v101d, v111p | the display start (4F07h), the 8-bit DAC (4F08h; the S3 BIOS has none: skipped), the scan line made longer (4F06h) |
   | v111z | a Matrox card zoomed by two the way MGA-Glide's HAL does it (SHOTDJ on the G200 only: the registers are in memory) |
 
+- **`make loopa-input`** (`jobs.py input`), on bf6 and the 486DX2, both passing. In one run the same programs
+  get their input first from Loop A's `--keys` (86Box's keyboard and mouse) and then from `glos key` with the
+  same lists:
+  - KEYWAIT reports the same key from both: Enter, and the grey Up arrow (an E0 code);
+  - MGA-Glide's MOUSETST (CuteMouse on the PS/2 mouse, bf6 only: the 486 board has no mouse port) passes with
+    both. The mickey counts are not compared: 86Box scales its monitor's by the window, and gave 270 by -110
+    and 270 by -122 in two runs for 80 by -40; GLOS's came to 240 by -120, three times what was asked (the
+    driver's doing), in proportion;
+  - `glos type` of a line with shifted characters arrives through DOS as typed;
+  - the kill hotkey typed with `glos key` kills (`reason=hotkey`);
+  - in a direct-mode session DIRTEST's own IRQ 1 handler reads the injected key from the 8042 (`1c9c`);
+  - a list or a character that makes no sense is refused, and so is a mouse move when no program has one on.
+
 ### Found on the way
 
 - **The kernel heap and the frame bitmap had no lock.** The ssh and net threads are preemptible, and the VM
@@ -95,6 +108,8 @@ Each step is a commit with its tests.
   mode, and every such picture came back blank on the G200. It now draws straight into the framebuffer (INT
   15h 87h in real mode, a mapping as a DPMI client).
 - **Mode 110h on the G200 says 16 bits a pixel** with 5:5:5 masks; the capture goes by the masks.
+- **MGA-Glide's test programs end the emulator when they finish** (the shim's `hx_done` writes to 86Box's
+  unit-tester device): one that runs as an agent job in the middle of a run takes `--noexit`.
 - **A 486 needs one ssh connection for the suite** (OpenSSH's ControlMaster): with a key exchange for each of
   a hundred commands the run took longer than its 25 minutes.
 

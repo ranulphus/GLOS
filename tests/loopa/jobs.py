@@ -1643,6 +1643,92 @@ def shot_case(profile, vcard, card, prog):
         "" if not bad else " failed: " + " ".join(bad), info), not bad
 
 
+# ---- glos key, type and mouse (M5 A4)
+
+INPUT_CASES = [("bf6", "ne2kpci", True), ("486dx2", "ne2k", False)]      # (the 486 board has no PS/2 mouse port)
+MOUSE_KEYS = "1:mouse:40:-20:1,2:mouse:40:-20:0"        # MGA-Glide's selftest-mouse: right and up, the left button held
+
+
+def input_case(profile, card, mouse_too):
+    """Input injected over ssh against the same input from Loop A's --keys (86Box's keyboard and mouse), in one
+    run: KEYWAIT's key (Enter; the grey Up arrow, an E0 code) must be the same from both, and MGA-Glide's
+    MOUSETST (CuteMouse on the PS/2 mouse) must pass with both. Then glos type's line through DOS, a list that makes no sense
+    refused, the kill hotkey typed with glos key (the list jobs.py gives --keys elsewhere), and DIRTEST's own
+    IRQ 1 handler in a direct-mode session, where an injected byte goes into the 8042 itself."""
+    import time
+    tag = "%s-%s" % (profile, card)
+    agent = Agent("input-" + tag, profile, card, SESS_FILES + [
+        "--file", "build/ow/dos/TYPEIN.EXE=/TEST/TYPEIN.EXE", "--file", "build/dj/DIRTEST.EXE=/TEST/DIRTEST.EXE",
+        "--file", os.path.join(MGA, "build/djgpp/MOUSETST.EXE") + "=/TEST/MOUSETST.EXE",
+        "--mouse", "ps2" if mouse_too else "none",
+        "--keys", "@HX-KEYWAIT ready,0.5:0x1c,@HX-KEYWAIT ready,0.5:0x148,@HX-TEST driver," + MOUSE_KEYS,
+        "--cmd", "SERSAY HX-START input", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=900 if profile == "bf6" else 1800)
+    checks, info = {"listen": agent.listening()}, ""
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=900"]
+
+    def job(cmd, mark, n, then=None, limit=120):
+        """cmd as an agent job; when its n-th `mark` is on COM1, the ssh command `then`; the job's exit code."""
+        p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < limit and agent.log().count(mark) < n and p.poll() is None:
+            time.sleep(0.3)
+        rc = agent.ssh(then)[0] if then else 0
+        return p.wait(timeout=limit), rc
+
+    try:
+        checks["ver"] = agent.ssh("glos ver")[0] == 0
+        # From 86Box (--keys), then from glos key: the same programs, the same lists.
+        job("KEYWAIT 20", "HX-KEYWAIT ready", 1)
+        job("KEYWAIT 20", "HX-KEYWAIT ready", 2)
+        if mouse_too:
+            job("C:\\TEST\\MOUSETST.EXE --noexit", "HX-TEST driver", 99, limit=60)    # (or its end stops 86Box)
+        checks["key-rc"] = job("KEYWAIT 20", "HX-KEYWAIT ready", 3, "glos key 0.5:0x1c") == (0, 0)
+        checks["ext-rc"] = job("KEYWAIT 20", "HX-KEYWAIT ready", 4, "glos key 0.5:0x148") == (0, 0)
+        if mouse_too:
+            checks["mouse-rc"] = job("C:\\TEST\\MOUSETST.EXE --noexit", "HX-TEST driver", 2,
+                                     "glos key " + MOUSE_KEYS)[1] == 0
+        else:                                   # no mouse, so no program has it on
+            rc, _, err = agent.ssh("glos mouse 5 5")
+            checks["mouse-off"] = rc == 1 and "mouse" in err
+        text = "Hello, World! 1+2=3 (ok) <a_b> ~x^y \"q\" z|w"
+        checks["type-rc"] = job("C:\\TEST\\TYPEIN.EXE", "HX-TYPE ready", 1, "glos type " + text + "\\n") == (0, 0)
+        rc, _, err = agent.ssh("glos key 1:0x1c,bogus")
+        checks["refuse"] = rc == 2 and "bogus" in err
+        rc, _, err = agent.ssh("glos type caf\xe9")
+        checks["refuse-char"] = rc == 2
+        checks["hotkey"] = job("C:\\TEST\\SESSTEST.EXE hang", "HX-SESS armed", 1, "glos key " + KILL_KEYS) == (255, 0)
+        checks["direct-rc"] = job("glos run --direct C:\\TEST\\DIRTEST.EXE", "HX-DIRECT armed-key", 1,
+                                  "glos key 1:0x1c")[1] == 0
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    subprocess.run(agent.opts + ["-O", "exit", "glos@127.0.0.1"], capture_output=True, timeout=30)
+    log = agent.wait()
+    keys = re.findall(r"^HX-KEY (.*)$", log, re.M)
+    checks["key"] = len(keys) == 4 and keys[0] == keys[2] and keys[0].startswith("scan=1c")
+    checks["ext"] = len(keys) == 4 and keys[1] == keys[3] and keys[1].startswith("scan=48")
+    mouse = re.findall(r"^HX-STAT mouse (.*)$", log, re.M)
+    tests = re.findall(r"^HX-TEST (motion|buttons) (\S+)", log, re.M)
+    if mouse_too:
+        checks["mouse"] = len(mouse) == 2 and tests == [("motion", "PASS"), ("buttons", "PASS")] * 2
+        # 86Box scales its monitor's mickeys by the window (270 by -110 and 270 by -122 seen for 80 by -40), so the
+        # counts are not compared: GLOS's must keep the proportion they were given in (CuteMouse triples them).
+        ours = re.match(r"dx=(-?\d+) dy=(-?\d+) ", mouse[1]) if len(mouse) == 2 else None
+        checks["mouse-exact"] = bool(ours) and int(ours.group(1)) > 0 and int(ours.group(1)) == -2 * int(ours.group(2))
+    checks["type"] = "HX-TYPE got=" + text + "\n" in log
+    checks["hotkey-reason"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=hotkey", log))
+    checks["direct"] = "HX-DIRECT keys=1c9c" in log
+    checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-CRASH|GLOS-WARN|DPMI-UNIMPL", log)
+    checks["done"] = "GLOS-EXIT code=0" in log and "HX-DONE 0" in log and "HX-VECCHK ok" in log
+    if not (checks["key"] and checks["ext"] and checks.get("mouse", True) and checks.get("mouse-exact", True)):
+        info = " keys=%r mouse=%r tests=%r" % (keys, mouse, tests)
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-26s %s%s%s" % ("input-" + tag, "PASS" if not bad else "FAIL",
+                               "" if not bad else " failed: " + " ".join(bad), info), not bad
+
+
 def matrix(fn, combos, jobs):
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
         results = list(ex.map(lambda pb: fn(*pb), combos))
@@ -1654,7 +1740,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -1670,6 +1756,9 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ssh":
         return 0 if all(r[1] for r in matrix(ssh_case, SSH_CASES, a.jobs)) else 1
+    if a.suite == "input":
+        return 0 if all(r[1] for r in matrix(input_case, [c for c in INPUT_CASES if not a.profile or c[0] in a.profile],
+                                             a.jobs)) else 1
     if a.suite == "shot":
         cases = [c for c in SHOT_CASES if not a.profile or c[0] in a.profile]
         if os.environ.get("SHOT_ONLY"):         # e.g. SHOT_ONLY=SHOTTEST-bf6-vbe

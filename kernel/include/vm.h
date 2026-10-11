@@ -147,6 +147,9 @@ u8 vkbc_cmd(void);
 void vkbc_restore(u8 cmd);
 void vkbc_direct(int on);                       /* a direct-mode session begins (1) or ends (0) */
 void vkbc_leave(void);
+int vkbc_key(u32 code, int down);               /* injected: a set 1 code (100h up: with E0); 0, or -1: no room */
+int vkbc_mouse(int dx, int dy, int buttons);    /* injected: 0; -1: no room; -2: no program has the mouse on */
+int vkbc_room(void);                            /* bytes the input queue still takes */
 
 /* int15.c, xms.c */
 int vm_int15(struct trapframe *tf, u32 ret_ip); /* 1: emulated */
