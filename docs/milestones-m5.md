@@ -58,7 +58,7 @@ Each step is a commit with its tests.
 
 ## Status
 
-- **A1 to A8 are done** (2026-10-11); as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
+- **A1 to A9 and H8 are done** (2026-10-11), but for the gate's run with its new probe and the bench; as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
   (streams, forwarded channels and the command list), §17.7 (screenshots), §10 and §17.8 (injected input),
   §17.9 (telemetry), §10 (the network cards), §19.2 (the program debugger).
 - **`make loopa-shot`** (`jobs.py shot`): SHOTTEST draws a picture the host can compute, in one mode a run, and
@@ -110,6 +110,22 @@ Each step is a commit with its tests.
   `direct-tcpip` too: 300 KB echoed through `ssh -W`, and beside a command on one connection.
 - **A8:** `jobs.py net` on all ten of its cases: the responder starts under the name GLOS.CFG gives (one case;
   `glos` elsewhere) and answers `/SELFTEST`'s query for it with the interface's address.
+- **A9, the exit job:** `make loopa-m5exit` (`jobs.py m5exit`), bf6 with the G200 and with the S3, both
+  passing. SHOTDJ's `v112k` mode shows three pictures (640×480 in 32 bits), each until a key.
+  - The twin runs under plain DOS (CWSDPMI) with Loop A's `--keys`, anchored on the program's lines, and
+    86Box's own screenshots (`--shots`).
+  - The other runs under GLOS's agent with nothing but ssh: `glos log --follow` tells when each picture is
+    up, `glos shot` takes it, `glos key` sends the key.
+  - The program's lines are the same from both, and each `glos shot` equals 86Box's screenshot pixel for
+    pixel, and the picture the host computes.
+- **A9, the gate:** the probe now takes `glos shot` twice in every program's run (after its 5th and 25th
+  answer) and each must be a whole PNG; they are kept as `probe-shot-N.png`. **The gate has not been run
+  with it yet.**
+- **H8** is on MGA-Glide's branch `glos-loopb` (not merged): `tools/bench/run.py` drives a bench PC through
+  GLOS over ssh when it answers and through BENCH.BAT otherwise; `vpc.py start --glos` gives the virtual
+  bench PC a GLOS. The dry run on vbench-g200 is in MGA-Glide's `docs/bench.md`: jobs over ssh, the
+  fallback to the poller after `glos exit`, `C:\OUT` fetched by SFTP, a timed-out job killed without a reset.
+  The bench half of the exit (DOSBench within 3%, P1) needs the bench.
 
 ### Found on the way
 

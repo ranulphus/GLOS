@@ -26,8 +26,9 @@ Three kinds of cell (CELLS below):
                     ssh about once a second while the program runs must
                     always answer, never more than 2 s of guest time late
                     (the replies carry the kernel's tick: 86Box runs below
-                    real time), one `glos shot` must answer, and the
-                    program must still end as in the baseline
+                    real time), `glos shot` must give a picture of the
+                    screen twice (M5: in whatever mode the program has
+                    set), and the program must still end as in the baseline
   script   a runner that judges itself (tools/m4c-games.sh: MGA-Glide's
            conform and replays, DOSBench; DOS-GL's loopa-sdl): as the shell,
            and with direct mode forced (loopa-sdl's baseline too)
@@ -329,13 +330,14 @@ KEY = os.path.join(ROOT, "tests", "keys", "client")
 
 
 class Probe:
-    """`glos tick` over ssh about once a second (wall time) while a run goes, and one `glos shot`. The
+    """`glos tick` over ssh about once a second (wall time) while a run goes, and `glos shot` twice (after the
+    5th and the 25th answer: the program starting, and at work; M5), each kept as probe-shot-N.png. The
     probes share one connection (OpenSSH's ControlMaster), so each measures the agent's answer, not a key
     exchange at the 30% CPU budget bulk work gets beside a game (a fresh connection per probe put
     Screamer Rally's worst gap at 2.07 s)."""
 
     def __init__(self, port):
-        self.port, self.replies, self.fails, self.shot = port, [], [], None
+        self.port, self.replies, self.fails, self.shots = port, [], [], []
         self.tmp = tempfile.mkdtemp()
         self.key = os.path.join(self.tmp, "key")
         shutil.copyfile(KEY, self.key)
@@ -368,9 +370,15 @@ class Probe:
             m = re.match(rb"ticks=(\d+)", o)
             if rc == 0 and m:
                 self.replies.append((w, time.time(), int(m.group(1))))
-                if self.shot is None and len(self.replies) == 5:
-                    rc2, o2, e2 = self.call("glos shot", timeout=60)
-                    self.shot = (rc2, o2[:8] == b"\x89PNG\r\n\x1a\n", e2.decode("latin-1").strip())
+                if len(self.replies) in (5, 25):
+                    rc2, o2, e2 = self.call("glos shot", timeout=90)
+                    good = rc2 == 0 and o2[:8] == b"\x89PNG\r\n\x1a\n" and o2[12:16] == b"IHDR" \
+                        and o2[-8:-4] == b"IEND"
+                    size = "%dx%d" % (int.from_bytes(o2[16:20], "big"), int.from_bytes(o2[20:24], "big")) if good \
+                        else e2.decode("latin-1").strip()[:60] or "rc=%d" % rc2
+                    if good:
+                        open(os.path.join(out, "probe-shot-%d.png" % len(self.shots)), "wb").write(o2)
+                    self.shots.append((good, size))
             elif not os.path.exists(status) and not end.search(read(serial)):     # (not the run ending)
                 self.fails.append((w, rc, e.decode("latin-1").strip()[:80]))
             time.sleep(1)
@@ -382,7 +390,8 @@ class Probe:
         return self
 
     def judge(self):
-        """(ok, what): every probe answered, none later than 2 s of guest time, and the shot answered."""
+        """(ok, what): every probe answered, none later than 2 s of guest time, and every screenshot taken was a
+        whole PNG (at least one: a run too short for the first has no probe to speak of)."""
         if len(self.replies) < 3:
             return False, "%d replies" % len(self.replies)
         (w0, _, k0), (w1, _, k1) = self.replies[0], self.replies[-1]
@@ -390,11 +399,9 @@ class Probe:
         worst = 0.0
         for (wa, ra, ka), (wb, rb, kb) in zip(self.replies, self.replies[1:]):
             worst = max(worst, (kb - ka) / 1024.0 - rate * max(wb - ra, 0))     # less the time between probes
-        ok = not self.fails and worst <= 2.0 and self.shot is not None and \
-            (self.shot[1] or "graphics modes come later" in self.shot[2])
-        what = "replies=%d worst=%.2fs rate=%.2f fails=%d shot=%s" % (
-            len(self.replies), worst, rate, len(self.fails),
-            "png" if self.shot and self.shot[1] else (self.shot[2] if self.shot else "none"))
+        ok = not self.fails and worst <= 2.0 and bool(self.shots) and all(s[0] for s in self.shots)
+        what = "replies=%d worst=%.2fs rate=%.2f fails=%d shots=%s" % (
+            len(self.replies), worst, rate, len(self.fails), ",".join(s[1] for s in self.shots) or "none")
         return ok, what
 
 
@@ -452,8 +459,8 @@ def program_job(cell, job, spec, boot, kill_at, fresh, direct):
         "--net", "ne2kpci", "--net-fwd", "%d:22" % port, "--file", BIN + "/keys/HOSTKEY=/TEST/KEYS/HOSTKEY",
         "--file", BIN + "/keys/AUTHKEYS=/TEST/KEYS/AUTHKEYS"], os.path.join(d, "probe"), during=Probe(port))
     ok, what = probe.judge()
-    json.dump({"replies": probe.replies, "fails": probe.fails, "shot": probe.shot and list(probe.shot[:1]) +
-               [probe.shot[1], probe.shot[2]]}, open(os.path.join(d, "probe", "probe.json"), "w"), indent=1)
+    json.dump({"replies": probe.replies, "fails": probe.fails, "shots": probe.shots},
+              open(os.path.join(d, "probe", "probe.json"), "w"), indent=1)
     s = read(os.path.join(d, "probe", "serial.log"))
     eb, ep = sorted(set(ENDS.findall(read(os.path.join(d, "base", "serial.log"))))), sorted(set(ENDS.findall(s)))
     bad, reports = glos_trouble(s)

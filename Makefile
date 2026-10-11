@@ -218,6 +218,9 @@ loopa-m3: loopa-ssh
 # glos shot in every video mode (M5 A2): SHOTTEST's pictures on the Matrox and S3 VBE BIOSes and a 486.
 loopa-shot: all dos-tests build/dj/SHOTDJ.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py shot -j $(JOBS)
+# M5's exit: a job driven entirely over SSH against its --keys/--shots twin.
+loopa-m5exit: all build/dj/SHOTDJ.EXE check-deps
+	$(Q)python3 tests/loopa/jobs.py m5exit -j $(JOBS)
 # glos gdb (M5 A7): the host's gdb through ssh -W on a DJGPP program.
 loopa-gdbprog: all build/dj/GDBME.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py gdb -j $(JOBS)

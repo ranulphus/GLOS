@@ -1680,8 +1680,11 @@ def shot_want(f):
             return c & 255
         rs, gs, bs = (int(f[k].split("/")[0]) for k in "rgb")
         red, green, blue = ([cut(v, s) for v in range(256)] for s in (rs, gs, bs))
+        sx, sy = 37 * int(f.get("shift", 0)), 11 * int(f.get("shift", 0))      # (the exit job's later pictures)
         for y in range(h):
-            out += b"".join(bytes((red[x & 255], green[y & 255], blue[(x ^ y) & 255])) for x in range(w))
+            v = (y + sy) & 255
+            out += b"".join(bytes((red[(x + sx) & 255], green[v], blue[((x + sx) ^ (y + sy)) & 255]))
+                            for x in range(w))
     return bytes(out)
 
 
@@ -1932,6 +1935,85 @@ def gdb_case(profile, card):
                                "" if not bad else " failed: " + " ".join(bad), info), not bad
 
 
+# ---- M5's exit: a job driven over SSH against its --keys/--shots twin
+
+EXIT_KEYS = [0x1E, 0x30, 0x2E]                  # a, b, c
+EXIT_CASES = [("bf6", "g200"), ("bf6", "vbe")]
+
+
+def exit_case(profile, vcard):
+    """PRD §19's exit for M5. SHOTDJ v112k shows three pictures (640x480 in 32 bits), each until a key.
+    The twin: plain DOS (CWSDPMI), Loop A's --keys anchored on the program's lines, 86Box's own screenshots
+    (--shots). Then the same under GLOS's agent with nothing but ssh: glos log --follow tells when each
+    picture is up, glos shot takes it, glos key sends the key. The program's lines must be the same from both,
+    and each picture the same as 86Box's and as the one the host computes."""
+    import threading
+    import time
+    sys.path.insert(0, os.path.join(MGA, "tools", "loopa"))
+    import png as mga_png
+    tag = "%s-%s" % (profile, vcard)
+    files = ["--file", "build/dj/SHOTDJ.EXE=/TEST/SHOTDJ.EXE"]
+    keys = ",".join("@step=%d w=,45:0x%x" % (k, c) for k, c in enumerate(EXIT_KEYS))
+    host = run("m5exit-host-" + tag, ["--machine", profile, "--card", vcard, "--timeout", "500", "--idle", "150"] + files + [
+        "--cmd", "SERSAY HX-START exit", "--cmd", "C:\\TEST\\SHOTDJ.EXE v112k", "--cmd", "SERSAY HX-DONE 0",
+        "--keys", keys, "--shots", "30,80,130"], background=True)
+    agent = Agent("m5exit-ssh-" + tag, profile, "ne2kpci", ["--card", vcard] + files + [
+        "--cmd", "SERSAY HX-START exit", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    out = os.path.join(ROOT, "out", "m5exit-ssh-" + tag)
+    checks, info, shots, seen = {"listen": agent.listening()}, "", [], []
+    try:
+        follow = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "glos log --follow"], stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL)
+
+        def reader():
+            for line in iter(follow.stdout.readline, b""):
+                seen.append(line.decode("latin-1"))
+        threading.Thread(target=reader, daemon=True).start()
+        job = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\SHOTDJ.EXE v112k"], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        for k, code in enumerate(EXIT_KEYS):
+            t0 = time.time()
+            while time.time() - t0 < 180 and not any("step=%d w=" % k in l for l in seen):
+                time.sleep(0.3)
+            p = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=180)
+            open(os.path.join(out, "step-%d.png" % k), "wb").write(p.stdout)
+            shots.append(png_rgb(p.stdout))
+            checks["key-%d" % k] = agent.ssh("glos key 0x%x" % code)[0] == 0
+        checks["end"] = job.wait(timeout=180) == 0
+        time.sleep(2)                           # (the last key's line, into the followed log)
+        follow.terminate()
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    agent.wait()
+    host.wait()
+    hdir = os.path.join(ROOT, "out", "m5exit-host-" + tag)
+    serial = open(os.path.join(hdir, "serial.log"), "rb").read().decode("latin-1").replace("\r", "") \
+        if os.path.exists(os.path.join(hdir, "serial.log")) else ""
+    lines_host = re.findall(r"^HX-SHOT .*$", serial, re.M)
+    lines_ssh = [l.strip() for l in seen if l.startswith("HX-SHOT ")]
+    checks["lines"] = len(lines_host) == 6 and lines_host == lines_ssh
+    if not checks["lines"]:
+        info += " host=%r ssh=%r" % (lines_host, lines_ssh)
+    steps = [l for l in lines_host if " step=" in l]
+    for k in range(3):
+        f = dict(kv.split("=", 1) for kv in steps[k].split() if "=" in kv) if k < len(steps) else None
+        want = shot_want(f) if f else None
+        ours = shots[k] if k < len(shots) else None
+        try:
+            box = mga_png.read_png(os.path.join(hdir, "screen-%d.png" % k))
+        except (OSError, ValueError, AssertionError):
+            box = None
+        checks["shot-%d" % k] = bool(f and ours and ours[:2] == (int(f["w"]), int(f["h"])) and ours[2] == want)
+        checks["86box-%d" % k] = bool(ours and box and tuple(box[:2]) == ours[:2] and bytes(box[2]) == ours[2])
+        if not checks["86box-%d" % k]:
+            info += " 86box-%d=%s" % (k, tuple(box[:2]) if box else None)
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-26s %s%s%s" % ("m5exit-" + tag, "PASS" if not bad else "FAIL",
+                               "" if not bad else " failed: " + " ".join(bad), info), not bad
+
+
 def matrix(fn, combos, jobs):
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
         results = list(ex.map(lambda pb: fn(*pb), combos))
@@ -1943,7 +2025,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -1962,6 +2044,8 @@ def main():
         if not os.environ.get("SSH_ONE") and not os.environ.get("SSH_ONLY"):
             res += matrix(reboot_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "m5exit":
+        return 0 if all(r[1] for r in matrix(exit_case, EXIT_CASES, a.jobs)) else 1
     if a.suite == "gdb":
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(gdb_case, cases, a.jobs)) else 1

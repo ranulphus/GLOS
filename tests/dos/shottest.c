@@ -40,7 +40,10 @@
  *   rows down)  vNNNd (the DAC 8 bits wide)  vNNNp (scan lines made 1024
  *   pixels long with 4F06h)  vNNNz (SHOTDJ on a Matrox card: linear, and
  *   zoomed by two as MGA-Glide's HAL does it, XZOOMCTRL and the CRTC's
- *   maximum scan line: the top left quarter is what shows) */
+ *   maximum scan line: the top left quarter is what shows)  vNNNk (linear,
+ *   three pictures with a key between them, for M5's exit job: picture K
+ *   is the rgb one moved by 37K, 11K; "HX-SHOT mode=NAME step=K ..." when
+ *   each is up, "HX-SHOT key=SS" with the scan code of each key) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -88,6 +91,14 @@ static unsigned long ticks(void)
     dosmemget(0x46C, 4, &t);
     return t;
 }
+static unsigned scankey(void)                    /* the next key's scan code */
+{
+    __dpmi_regs d;
+    memset(&d, 0, sizeof d);
+    __dpmi_int(0x16, &d);
+    return d.h.ah;
+}
+
 static int key(int take)                        /* a key waits; take: read it */
 {
     __dpmi_regs d;
@@ -119,6 +130,8 @@ static void vput(unsigned long lin, const unsigned char *p, unsigned n)
     _fmemcpy(MK_FP((unsigned)(lin >> 4), (unsigned)(lin & 15)), p, n);
 }
 static unsigned long ticks(void) { return *(unsigned long far *)MK_FP(0x40, 0x6C); }
+static unsigned scankey(void) { return _bios_keybrd(_KEYBRD_READ) >> 8; }
+
 static int key(int take)
 {
     if (!_bios_keybrd(_KEYBRD_READY))
@@ -459,7 +472,8 @@ static int mga_zoom2(void)
 
 static void vbe(unsigned m, int flag)
 {
-    int lfb = flag == 'l' || flag == 'z', start = flag == 's', wide = flag == 'd';
+    int lfb = flag == 'l' || flag == 'z' || flag == 'k', start = flag == 's', wide = flag == 'd';
+    unsigned step, steps = flag == 'k' ? 3 : 1, sx, sy;
     unsigned w, h, bpp, model, pitch, bytes, x, y, p, y0 = start ? 64 : 0, planes = 1;
     unsigned rs, rp, gs, gp, bs, bp;
     unsigned long phys;
@@ -513,6 +527,8 @@ static void vbe(unsigned m, int flag)
     } else if (bpp > 8 && (!rs || !gs || !bs)) {
         skip("no-masks");
     }
+    for (step = 0; step < steps; step++) {
+    sx = 37 * step, sy = 11 * step;
     for (p = 0; p < planes; p++) {
         if (planes > 1)
             pout(0x3C4, 2), pout(0x3C5, 1 << p);
@@ -529,9 +545,9 @@ static void vbe(unsigned m, int flag)
                         rowbuf[x] = (unsigned char)pat(x, y);
                         continue;
                     }
-                    field(x & 255, rs, rp, &px);
-                    field(y & 255, gs, gp, &px);
-                    field((x ^ y) & 255, bs, bp, &px);
+                    field((x + sx) & 255, rs, rp, &px);
+                    field((y + sy) & 255, gs, gp, &px);
+                    field(((x + sx) ^ (y + sy)) & 255, bs, bp, &px);
                     for (i = 0; i < bytes; i++)
                         rowbuf[x * bytes + i] = (unsigned char)(px >> (8 * i));
                 }
@@ -541,6 +557,21 @@ static void vbe(unsigned m, int flag)
             else
                 vbe_put((unsigned long)(y0 + y) * pitch, rowbuf, planes > 1 ? w / 8 : w * bytes);
         }
+    }
+    if (flag == 'k') {                          /* this picture is up: say so, and wait for a key */
+        char line[160];
+        if (bpp <= 8)
+            skip("no-rgb");
+        sprintf(line, "HX-SHOT mode=%s step=%u w=%u h=%u kind=rgb bpp=%u r=%u/%u g=%u/%u b=%u/%u shift=%u\r\n", name,
+                step, w, h, bpp, rs, rp, gs, gp, bs, bp, step);
+        ser(line);
+        sprintf(line, "HX-SHOT key=%02x\r\n", scankey());
+        ser(line);
+    }
+    }
+    if (flag == 'k') {
+        mode(3);
+        return;
     }
     if (planes > 1)
         pout(0x3C4, 2), pout(0x3C5, 0x0F);
