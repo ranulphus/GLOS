@@ -379,6 +379,17 @@ u32 sched_ps(char *buf, u32 max)
     return n < max ? n : max;
 }
 
+/* glos stat: "NAME":ticks for each thread, commas between. */
+u32 sched_stat(char *buf, u32 max)
+{
+    struct thread *t;
+    u32 n = 0, f = irq_save();
+    for (t = all_threads; t && n < max; t = t->all)
+        n += (u32)ksnprintf(buf + n, max - n, "%s\"%s\":%u", n ? "," : "", t->name, t->ticks);
+    irq_restore(f);
+    return n < max ? n : max;
+}
+
 void sched_report(void)
 {
     struct thread *t;

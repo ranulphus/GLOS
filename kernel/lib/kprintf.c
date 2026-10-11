@@ -60,6 +60,23 @@ u32 klog_read(char *out, u32 max)
     return n;
 }
 
+u32 klog_pos(void) { return log_head; }
+
+u32 klog_from(u32 *pos, char *out, u32 max)
+{
+    u32 f = irq_save(), n, i;
+    if (log_head - *pos > LOG_RING)             /* the ring has gone round: what is left */
+        *pos = log_head - LOG_RING;
+    n = log_head - *pos;
+    if (n > max)
+        n = max;
+    for (i = 0; i < n; i++)
+        out[i] = log_ring[(*pos + i) & (LOG_RING - 1)];
+    *pos += n;
+    irq_restore(f);
+    return n;
+}
+
 static void raw_out(const char *s, u32 n)
 {
     klog_put(s, n);

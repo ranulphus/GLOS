@@ -38,6 +38,8 @@ void cpu_io_trap(u32 port, int trap);
 void cpu_set_esp0(u32 esp0);
 void cpu_set_code16_base(u32 base);
 void cpu_int_redirect(u32 vec, int redirect);
+u32 cpu_irq_count(int irq);             /* interrupts taken on a line since the start */
+void cpu_reboot(void) __attribute__((noreturn));        /* the machine reset */
 void cpu_set_cr4(u32 set, u32 clear);   /* only when cpu_has_cr4 */
 void cpu_set_ldt(const void *base, u32 limit);  /* the current context's LDT (selector 28h); 0 limit: none */
 u32 cpu_desc_hi(u32 sel);               /* the high dword of a GDT or LDT descriptor (0 if out of range) */

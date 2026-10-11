@@ -216,6 +216,24 @@ void net_report(void)
             nic0->tx_frames, nic0->rx_errors, nic0->overruns);
 }
 
+/* glos net (lines) and glos stat (a JSON object, or null). */
+u32 net_stat(char *buf, u32 max, int json)
+{
+    char ip[16], gw[16], mask[16];
+    if (!nic0)
+        return (u32)ksnprintf(buf, max, json ? "null" : "no network card\n");
+    ip4addr_ntoa_r(netif_ip4_addr(&nif), ip, sizeof ip);
+    ip4addr_ntoa_r(netif_ip4_gw(&nif), gw, sizeof gw);
+    ip4addr_ntoa_r(netif_ip4_netmask(&nif), mask, sizeof mask);
+    if (json)
+        return (u32)ksnprintf(buf, max, "{\"card\":\"%s\",\"ip\":\"%s\",\"rx\":%u,\"tx\":%u,\"rx_errors\":%u,\"overruns\":%u}",
+                              nic0->name, ip, nic0->rx_frames, nic0->tx_frames, nic0->rx_errors, nic0->overruns);
+    return (u32)ksnprintf(buf, max, "card=%s io=%04x irq=%u mac=%02x:%02x:%02x:%02x:%02x:%02x\n"
+                          "ip=%s mask=%s gw=%s\nrx=%u tx=%u rx_errors=%u overruns=%u\n", nic0->name, nic0->base,
+                          nic0->irq, nic0->mac[0], nic0->mac[1], nic0->mac[2], nic0->mac[3], nic0->mac[4], nic0->mac[5],
+                          ip, mask, gw, nic0->rx_frames, nic0->tx_frames, nic0->rx_errors, nic0->overruns);
+}
+
 void net_start(int st)
 {
     selftest = st;

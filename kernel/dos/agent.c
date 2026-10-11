@@ -188,6 +188,38 @@ int agent_kill(void)
     return r;
 }
 
+/* glos kill SEQ: the running job killed, a queued one taken out (its client
+   gets status 255); -1 if there is no such job. */
+int agent_kill_seq(u32 seq)
+{
+    u32 f = irq_save(), i;
+    int r = -1;
+    for (i = 0; i < NJOBS; i++) {
+        struct agent_job *j = &jobs[i];
+        if (j->seq != seq || (j->state != J_QUEUED && j->state != J_RUNNING))
+            continue;
+        if (j->state == J_RUNNING) {
+            j->kill = 1;
+        } else {
+            j->result = 0xFF;
+            j->state = J_DONE;                  /* (agent_service tells its client) */
+        }
+        r = 0;
+    }
+    irq_restore(f);
+    return r;
+}
+
+/* A job runs or waits. */
+int agent_busy(void)
+{
+    u32 i;
+    for (i = 0; i < NJOBS; i++)
+        if (jobs[i].state == J_QUEUED || jobs[i].state == J_RUNNING)
+            return 1;
+    return 0;
+}
+
 u32 agent_ps(char *buf, u32 max)
 {
     static const char *const names[] = { "free", "queued", "running", "done" };

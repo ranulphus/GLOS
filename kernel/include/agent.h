@@ -16,6 +16,8 @@ void agent_service(u32 (*write)(void *owner, int stream, const u8 *d, u32 n),
                    void (*done)(void *owner, u32 code));       /* code: the exit status */
 void agent_exit(u32 delay_ticks);               /* glos exit: leave once idle, this many ticks on */
 int agent_kill(void);                           /* glos kill: end the running job; -1 if none */
+int agent_kill_seq(u32 seq);                    /* glos kill SEQ: that job, running or waiting; -1 if none */
+int agent_busy(void);                           /* a job runs or waits */
 u32 agent_ps(char *buf, u32 max);               /* "job SEQ STATE COMMAND" lines */
 
 /* The VM thread's side (trap context). */

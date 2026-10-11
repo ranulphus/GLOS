@@ -58,8 +58,8 @@ Each step is a commit with its tests.
 
 ## Status
 
-- **A1 to A4 are done** (2026-10-11); as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
-  (streams), §17.7 (screenshots), §10 and §17.8 (injected input).
+- **A1 to A5 are done** (2026-10-11); as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
+  (streams and the command list), §17.7 (screenshots), §10 and §17.8 (injected input), §17.9 (telemetry).
 - **`make loopa-shot`** (`jobs.py shot`): SHOTTEST draws a picture the host can compute, in one mode a run, and
   waits; `glos shot` and `glos shot --raw` over ssh must both equal it; then the program is killed. Five cases,
   all passing: real mode on bf6 with the G200's and the S3's VBE BIOS and on the 486DX2 (no VME: every INT
@@ -91,6 +91,12 @@ Each step is a commit with its tests.
   - the kill hotkey typed with `glos key` kills (`reason=hotkey`);
   - in a direct-mode session DIRTEST's own IRQ 1 handler reads the injected key from the 8042 (`1c9c`);
   - a list or a character that makes no sense is refused, and so is a mouse move when no program has one on.
+
+- **The ssh suite** (`make loopa-ssh`) checks A5 on its three machines, all passing: `glos stat`'s JSON with its
+  counters moving and the session in it while a job runs; `--follow` giving a line a second, and the log's
+  showing a command as it comes; `glos mem`, `glos net`; `glos kill SEQ` taking a waiting job out of the queue
+  and killing the running one. Two more cases (bf6, 486DX2) for `glos reboot`: refused while a job runs, then
+  the machine resets, boots and starts GLOS again, which answers.
 
 ### Found on the way
 

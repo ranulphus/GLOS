@@ -13,4 +13,5 @@ u32 session_memory_kb(void);                    /* the session's profile's memor
 int session_direct(void);                       /* direct mode: its profile, glos run --direct or /DIRECT */
 void session_job(int direct, const char *profile);     /* glos run's options for the stub's next EXEC */
 int session_profile_known(const char *name);    /* GLOS.CFG has [program NAME] */
+u32 session_stat(char *buf, u32 max);           /* glos stat: the session as a JSON object, or null */
 #endif

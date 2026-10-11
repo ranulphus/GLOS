@@ -406,3 +406,12 @@ int session_profile_known(const char *name)
     up[i] = 0;
     return profile_for(up) != 0;
 }
+
+/* glos stat: the session as a JSON object, or null. */
+u32 session_stat(char *buf, u32 max)
+{
+    if (!ses.active)
+        return (u32)ksnprintf(buf, max, "null");
+    return (u32)ksnprintf(buf, max, "{\"n\":%u,\"program\":\"%s\",\"direct\":%u,\"mode\":%u,\"ticks\":%u}", ses.n,
+                          ses.prog, vm.direct, vm_rd8(0x449) & 0x7Fu, timer_ticks() - ses.t0);
+}

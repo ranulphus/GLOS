@@ -20,6 +20,8 @@
 #include "kprintf.h"
 #include "mm.h"
 #include "dos.h"
+#include "dpmi.h"
+#include "nic.h"
 #include "sched.h"
 #include "session.h"
 #include "sftp.h"
@@ -584,6 +586,56 @@ static void input_cmd(struct ssh_chan *ch, const char *cmd)
     }
 }
 
+/* glos log --follow: the COM1 mirror from its last 16 KB on, until the
+   client goes. The log is looked at sixteen times a second. */
+static int follow_turn(struct ssh_chan *ch, void *arg)
+{
+    static char buf[2048];
+    u32 *pos = arg, n;
+    while (ssh_chan_pending(ch) < ROOM && (n = klog_from(pos, buf, sizeof buf)) != 0)
+        ssh_chan_write(ch, 0, (const uint8_t *)buf, n);
+    stream_at(timer_ticks() + 64);
+    return 0;
+}
+
+static void plain_drop(void *arg) { kfree(arg); }
+
+/* glos stat: one line of JSON. Counters count from GLOS's start; ticks are
+   1024 to the second. */
+static u32 stat_line(char *b, u32 max)
+{
+    u32 n = 0, i;
+    n += (u32)ksnprintf(b + n, max - n, "{\"ticks\":%u,\"hz\":1024,\"threads\":{", timer_ticks());
+    n += sched_stat(b + n, max - n);
+    n += (u32)ksnprintf(b + n, max - n, "},\"mem\":{\"total_kb\":%u,\"free_kb\":%u,\"heap_kb\":%u},\"irq\":[",
+                        pmm_total_frames() * 4, pmm_free_frames() * 4, kheap_bytes() / 1024);
+    for (i = 0; i < 16; i++)
+        n += (u32)ksnprintf(b + n, max - n, "%s%u", i ? "," : "", cpu_irq_count((int)i));
+    n += (u32)ksnprintf(b + n, max - n, "],\"vm\":{\"gp\":%u,\"int\":%u,\"irq\":%u},\"net\":", vm.n_gp, vm.n_int, vm.n_irq);
+    n += net_stat(b + n, max - n, 1);
+    n += (u32)ksnprintf(b + n, max - n, ",\"session\":");
+    n += session_stat(b + n, max - n);
+    n += (u32)ksnprintf(b + n, max - n, ",\"dpmi\":");
+    n += dpmi_stat(b + n, max - n);
+    n += (u32)ksnprintf(b + n, max - n, "}\n");
+    return n < max ? n : max;
+}
+
+/* glos stat --follow: a line a second. */
+static int stat_turn(struct ssh_chan *ch, void *arg)
+{
+    static char line[1536];
+    u32 *next = arg, now = timer_ticks();
+    if ((s32)(now - *next) >= 0 && ssh_chan_pending(ch) < ROOM) {
+        ssh_chan_write(ch, 0, (const uint8_t *)line, stat_line(line, sizeof line));
+        *next = now + 1024;
+    }
+    stream_at(*next);
+    return 0;
+}
+
+static u32 reboot_at;                           /* glos reboot: the tick to reset at; 0: no */
+
 /* The built-in commands, and DOS command lines for the agent. */
 static int k_exec(struct ssh_chan *ch, const char *cmd)
 {
@@ -670,6 +722,57 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
     } else if (!strncmp(cmd, "glos key ", 9) || !strncmp(cmd, "glos type ", 10) || !strncmp(cmd, "glos mouse ", 11)) {
         input_cmd(ch, cmd);
+    } else if (!strcmp(cmd, "glos log --follow") || !strcmp(cmd, "glos stat --follow")) {
+        u32 *st = kmalloc(sizeof *st);
+        if (st)                                 /* the log's place, or the next line's time */
+            *st = cmd[5] == 'l' ? (klog_pos() > 0x4000 ? klog_pos() - 0x4000 : 0) : timer_ticks();
+        if (!st || stream_add(ch, cmd[5] == 'l' ? follow_turn : stat_turn, plain_drop, st) != 0) {
+            if (st)
+                kfree(st);
+            say(ch, 1, "glos: busy\n");
+            ssh_chan_exit(ch, 1);
+        }
+    } else if (!strcmp(cmd, "glos stat") || !strcmp(cmd, "glos net") || !strcmp(cmd, "glos mem")) {
+        char *b = kmalloc(1536);
+        u32 n = 0;
+        if (!b) {
+            say(ch, 1, "glos: no memory\n");
+            ssh_chan_exit(ch, 1);
+            return 0;
+        }
+        if (cmd[5] == 's') {
+            n = stat_line(b, 1536);
+        } else if (cmd[5] == 'n') {
+            n = net_stat(b, 1536, 0);
+        } else {                                /* glos mem: where the memory GLOS has is */
+            n = (u32)ksnprintf(b, 1536, "memory total_kb=%u free_kb=%u\nkernel image_kb=%u heap_kb=%u heap_max_kb=%u\n",
+                               pmm_total_frames() * 4, pmm_free_frames() * 4, kernel_bytes() / 1024, kheap_bytes() / 1024,
+                               HEAP_MAX / 1024);
+            n += (u32)ksnprintf(b + n, 1536 - n, "dpmi ");
+            n += dpmi_stat(b + n, 1536 - n);
+            n += (u32)ksnprintf(b + n, 1536 - n, "\n");
+        }
+        ssh_chan_write(ch, 0, (const uint8_t *)b, n);
+        kfree(b);
+        ssh_chan_exit(ch, 0);
+    } else if (!strncmp(cmd, "glos kill ", 10)) {
+        const char *q = cmd + 10;
+        int seq;
+        if (number(&q, &seq) != 0 || *q || agent_kill_seq((u32)seq) != 0) {
+            say(ch, 1, "glos kill: no such job (glos ps lists them)\n");
+            ssh_chan_exit(ch, 1);
+        } else {
+            ssh_chan_exit(ch, 0);
+        }
+    } else if (!strcmp(cmd, "glos reboot") || !strcmp(cmd, "glos reboot --force")) {
+        if (!cmd[11] && agent_busy()) {
+            say(ch, 1, "glos reboot: a job is running or waiting (glos kill it, or glos reboot --force)\n");
+            ssh_chan_exit(ch, 1);
+        } else {
+            ssh_chan_exit(ch, 0);
+            reboot_at = (timer_ticks() + 512) | 1;      /* half a second for the reply to leave */
+            stream_at(reboot_at);
+        }
     } else if (!strcmp(cmd, "glos log") || !strcmp(cmd, "glos ps")) {
         char *buf = kmalloc(0x4000);
         u32 n = 0;
@@ -712,7 +815,8 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             agent_exit(512);                    /* half a second for the reply to leave */
         }
     } else {
-        say(ch, 1, "glos: no such command (glos ver, echo, run, shot, log, ps, tick, kill, exit)\n");
+        say(ch, 1, "glos: no such command (glos ver, echo, run, shot, key, type, mouse, log, stat, ps, mem, net, tick, "
+                   "kill, exit, reboot)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;
@@ -832,6 +936,14 @@ static void ssh_main(void *arg)
         agent_service(agent_write, agent_done);
         sftp_turn();
         streams_turn();
+        if (reboot_at) {
+            if ((s32)(timer_ticks() - reboot_at) >= 0) {
+                kprintf("GLOS-REBOOT\n");
+                kprintf_flush(1);
+                cpu_reboot();
+            }
+            stream_at(reboot_at);
+        }
     }
 }
 

@@ -17,6 +17,9 @@ u32 kernel_phys(const void *p);         /* physical address of a kernel image/bs
 u32 pmm_alloc(void);                    /* a free frame, 0 when none */
 void pmm_free(u32 phys);
 u32 pmm_free_frames(void);
+u32 pmm_total_frames(void);             /* frames the loader gave GLOS (in XMS mode, its pool) */
+u32 kheap_bytes(void);                  /* the heap's size now */
+u32 kernel_bytes(void);                 /* the image and its bss */
 
 u32 pmm_alloc_run(u32 n);                /* the kernel's frames: n contiguous, 0 if none */
 int pmm_claim(u32 phys, u32 n);

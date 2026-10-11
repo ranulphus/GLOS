@@ -26,7 +26,7 @@ static u32 kpt_kmap[1024] __attribute__((aligned(4096)));
 static u32 frame_bits[MAX_FRAMES / 32];
 static struct pmm pmm;
 static struct heap kheap;
-static u32 image_phys, kmap_next;
+static u32 image_phys, kmap_next, given;       /* given: the frames the loader handed over */
 
 u32 kernel_phys(const void *p) { return image_phys + ((u32)p - (u32)__kernel_start); }
 u32 mm_cr3(void) { return kernel_phys(kpd); }
@@ -40,6 +40,9 @@ u32 mm_cr3(void) { return kernel_phys(kpd); }
 u32 pmm_alloc(void) { LOCKED(u32, pmm_take(&pmm)); }
 void pmm_free(u32 phys) { LOCKED_V(pmm_give(&pmm, phys)); }
 u32 pmm_free_frames(void) { return pmm.free; }
+u32 pmm_total_frames(void) { return given; }
+u32 kheap_bytes(void) { return kheap.size; }
+u32 kernel_bytes(void) { return (u32)__kernel_end - (u32)__kernel_start; }
 u32 pmm_alloc_run(u32 n) { LOCKED(u32, pmm_take_run(&pmm, n)); }
 int pmm_claim(u32 phys, u32 n) { LOCKED(int, pmm_take_at(&pmm, phys, n)); }
 void pmm_free_run(u32 phys, u32 n) { LOCKED_V(pmm_give_run(&pmm, phys, n)); }
@@ -221,8 +224,10 @@ void mm_init(struct bootinfo *bi)
 
     pmm_setup(&pmm, frame_bits, MAX_FRAMES);
     for (i = 0; i < bi->n_ranges; i++)
-        if (bi->range[i].type == BI_MEM_FREE)
+        if (bi->range[i].type == BI_MEM_FREE) {
             pmm_add_free(&pmm, bi->range[i].base, bi->range[i].length);
+            given += (u32)(bi->range[i].length >> 12);
+        }
     pmm_reserve(&pmm, 0, 0x110000);                     /* conventional memory, UMA, HMA */
     pmm_reserve(&pmm, image_phys, pages * PAGE_SIZE);   /* the kernel */
 

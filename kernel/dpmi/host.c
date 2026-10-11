@@ -719,3 +719,12 @@ int dpmi_v86_bp(struct trapframe *tf)
     }
     return 0;
 }
+
+/* glos stat: the context as a JSON object, or null. */
+u32 dpmi_stat(char *buf, u32 max)
+{
+    if (!dctx)
+        return (u32)ksnprintf(buf, max, "null");
+    return (u32)ksnprintf(buf, max, "{\"bits\":%u,\"psp\":%u,\"held_kb\":%u,\"unbacked_kb\":%u,\"cap_kb\":%u}",
+                          dctx->bits32 ? 32u : 16u, dctx->psp, dctx->frames * 4, dctx->lazy * 4, dctx->frame_cap * 4);
+}

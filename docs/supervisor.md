@@ -1166,12 +1166,21 @@ place where nothing else is in DOS by construction.
   exchange takes hundreds of milliseconds on a 486). Each connection has two single-writer rings between them,
   so neither waits on a lock. Four connections at once; a fifth is refused (`GLOS-SSH refuse reason=busy`).
 - **Limits:** 60 s to log in; 20 authentication attempts per connection.
-- **Built-in commands (M3):** `glos ver`, `glos echo …`, `glos run …` (M4e, §17.3), `glos shot`, `glos log`,
-  `glos ps`, `glos tick` (M4e: `ticks=N hz=1024`, the kernel's clock, for the gate's probe), `glos kill`,
-  `glos exit`; anything else starting `glos` gives status 127.
+- **Built-in commands:** `glos ver`, `glos echo …`, `glos run …` (M4e, §17.3), `glos shot`, `glos key`,
+  `glos type`, `glos mouse`, `glos log`, `glos stat`, `glos ps`, `glos mem`, `glos net`, `glos tick` (M4e:
+  `ticks=N hz=1024`, the kernel's clock, for the gate's probe), `glos kill`, `glos exit`, `glos reboot`;
+  anything else starting `glos` gives status 127.
   - `glos shot [--raw]`: the screen as a PNG on stdout, in any mode (§17.7).
-  - `glos log`: the last 16 KB of COM1: the kernel's lines and what programs wrote there (no CRs).
-  - `glos ps`: the jobs, the DOS program in front (PSP and its arena name), and each thread.
+  - `glos key`, `glos type`, `glos mouse`: input into the program in front (§17.8).
+  - `glos log [--follow]`, `glos stat [--follow]`, `glos mem`, `glos net`: telemetry (§17.9).
+  - `glos ps`: the jobs (`job SEQ queued|running COMMAND`), the DOS program in front (PSP and its arena
+    name), and each thread.
+  - `glos kill [SEQ]`: the running job killed (§17.3); with a job's number, that job: killed if it runs,
+    taken out of the queue if it waits (its client gets status 255). Status 1 if there is none.
+  - `glos reboot [--force]`: the machine reset half a second after the reply (`GLOS-REBOOT` on COM1): the
+    8042's reset pulse, then the chipset's reset register (CF9h), then a triple fault, with the BIOS's
+    warm-boot word set so that it skips the memory count. Refused (status 1) while a job runs or waits,
+    unless forced. DOS has nothing to flush at its prompt; a disk cache with delayed writes would.
 - **SFTP (M3, `kernel/ssh/sftp.c`):** protocol version 3, which OpenSSH's `sftp` and `scp` speak, written for
   DOS (no permissions, links or owners, and 8.3 names) on the DOS server; headless only for now.
   - Paths: `/C/TEST/FILE.TXT` is `C:\TEST\FILE.TXT`; relative paths start at DOS's current directory when the
@@ -1275,6 +1284,28 @@ and GLOS's:
   program has on. When the queue is full (64 bytes) the next event waits for the program to read.
 - The events are a stream (§17.6): the ssh thread wakes at each one's time. It is a bulk thread, so under
   load an event can be some milliseconds late; their order holds.
+
+### 17.9 Telemetry (M5)
+
+- `glos log`: the last 16 KB of COM1: the kernel's lines and what programs wrote there (no CRs). With
+  `--follow` it goes on from there as the log grows, until the client goes (a stream that looks at the log
+  sixteen times a second). COM1 itself carries no heartbeat (PRD §7.7); a client that wants one follows.
+- `glos stat`: one line of JSON; with `--follow` a line a second. Counters count from GLOS's start.
+
+  | Field | Meaning |
+  |---|---|
+  | `ticks`, `hz` | the kernel's clock and its rate (1024) |
+  | `threads` | ticks each thread has run: `idle`, `vm` (DOS and its programs), `net`, `ssh` |
+  | `mem` | `total_kb` (what GLOS was given: all extended memory, or its XMS pool), `free_kb`, and the kernel heap's `heap_kb` |
+  | `irq` | interrupts taken on each of the 16 lines |
+  | `vm` | the system VM's traps: `gp` (instructions emulated), `int` (software INTs seen), `irq` (delivered to it) |
+  | `net` | `card`, `ip`, `rx`, `tx` (frames), `rx_errors`, `overruns`; `null` without a card |
+  | `session` | `n`, `program`, `direct`, `mode` (the BIOS video mode), `ticks` it has run; `null` at the prompt |
+  | `dpmi` | the client in front: `bits`, `psp`, `held_kb`, `unbacked_kb` (reserved, not yet touched), `cap_kb` (its profile's limit, 0 none); `null` without one |
+
+  The DOS and GPU locks' wait and hold times (PRD §7.2) come with those locks, in M6.
+- `glos mem`: total and free memory, the kernel's image and heap, and the DPMI client's as above.
+- `glos net`: the card (name, I/O base, IRQ, MAC), the address DHCP gave, and the frame counters.
 
 ## 18. Logging
 

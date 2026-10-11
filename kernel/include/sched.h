@@ -65,5 +65,6 @@ void sched_trap_exit(struct trapframe *tf);     /* the end of an IRQ or a trap f
 void sched_report(void);                /* GLOS-SCHED lines */
 void sched_panic_report(void);          /* GLOS-PANIC thread= lines */
 u32 sched_ps(char *buf, u32 max);       /* glos ps: a line per thread */
+u32 sched_stat(char *buf, u32 max);     /* glos stat: "NAME":ticks for each thread */
 
 #endif

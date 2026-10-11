@@ -261,6 +261,9 @@ static void back_to_user(struct trapframe *tf)
 }
 
 static u32 stray_db;                                    /* single steps dropped in ring 0 (86Box) */
+static u32 irq_n[16];                                   /* interrupts taken on each line (glos stat) */
+
+u32 cpu_irq_count(int irq) { return irq_n[irq & 15]; }
 
 static void dispatch(struct trapframe *tf)
 {
@@ -269,6 +272,7 @@ static void dispatch(struct trapframe *tf)
         vm_user_entry(tf);
     if (v >= IRQ_BASE_MASTER && v < IRQ_BASE_MASTER + 16) {
         int irq = (int)(v - IRQ_BASE_MASTER);
+        irq_n[irq]++;
         random_event(v);
         if ((irq == 7 || irq == 15) && !irq_fn[irq]) {     /* spurious unless in service */
             outb(irq == 7 ? 0x20 : 0xA0, 0x0B);
@@ -346,4 +350,28 @@ void trap_dispatch(struct trapframe *tf)
     }
     current->esp0 = top;
     cpu_set_esp0(top);
+}
+
+/* glos reboot: the machine reset, as its reset button would. The 8042's
+   pulse first, then the chipset's reset register, then a triple fault. The
+   BIOS's warm-boot word spares the memory count. */
+void cpu_reboot(void)
+{
+    static const struct { u16 limit; u32 base; } __attribute__((packed)) none = { 0, 0 };
+    volatile u16 *warm;
+    u32 n;
+    __asm__("" : "=r"(warm) : "0"(0x472));       /* (an address in low memory, not a null pointer's field) */
+    cli();
+    *warm = 0x1234;
+    for (n = 0; n < 100000 && (inb(0x64) & 2); n++) ;
+    outb(0x64, 0xFE);
+    for (n = 0; n < 2000000; n++)
+        inb(0x80);
+    outb(0xCF9, 0x02);
+    outb(0xCF9, 0x06);
+    for (n = 0; n < 2000000; n++)
+        inb(0x80);
+    __asm__ volatile("lidt %0; int3" :: "m"(none));
+    for (;;)
+        hlt();
 }

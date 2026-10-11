@@ -143,6 +143,7 @@ struct dpmi_ctx {
 };
 
 extern struct dpmi_ctx *dctx;           /* the context, or 0 */
+u32 dpmi_stat(char *buf, u32 max);      /* glos stat: the context as a JSON object, or null */
 
 /* host.c */
 void dpmi_init(void);

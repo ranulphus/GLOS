@@ -28,5 +28,6 @@ void net_start(int selftest);           /* the net thread, once a card is claime
 void net_rx(struct nic *n, const u8 *frame, u32 len);
 void net_irq(struct trapframe *tf);     /* the card's IRQ handler */
 void net_report(void);                  /* GLOS-NET counters, at leave */
+u32 net_stat(char *buf, u32 max, int json);     /* glos net's lines, or glos stat's JSON object */
 
 #endif

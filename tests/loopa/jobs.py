@@ -1130,13 +1130,50 @@ class Agent:
         return self.log()
 
 
+def reboot_case(profile, card):
+    """glos reboot (M5 A5): refused while a job runs, then the machine resets, comes up and starts GLOS again
+    (Loop A's boot runs the same RUN.BAT), which answers and leaves."""
+    import time
+    tag = "reboot-%s-%s" % (profile, card)
+    agent = Agent("ssh-" + tag, profile, card, ["--cmd", "SERSAY HX-START reboot", "--cmd", "C:\\TEST\\GLOS.EXE",
+                                                "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks = {"listen": agent.listening()}
+    try:
+        slow = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "WAITSEC 100"], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 120 and 'cmd="WAITSEC 100"' not in agent.log():
+            time.sleep(0.5)
+        rc, _, err = agent.ssh("glos reboot")
+        checks["refused"] = rc == 1 and "a job is running" in err
+        checks["kill"] = agent.ssh("glos kill")[0] == 0 and slow.wait(timeout=120) == 255
+        checks["reboot"] = agent.ssh("glos reboot")[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 400 and agent.log().count("GLOS-SSH listen") < 2:
+            time.sleep(1)
+        while time.time() - t0 < 400 and agent.log().count("GLOS-NET dhcp") < 2:
+            time.sleep(1)
+        rc, out, _ = agent.ssh("glos ver")
+        checks["again"] = rc == 0 and out.startswith("GLOS ")
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["line"] = "GLOS-REBOOT\n" in text and text.count("HX-START reboot") == 2
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
+        not bad
+
+
 def ssh_case(profile, card):
     import time
     tag = "%s-%s%s" % (profile, card, os.environ.get("SSH_TAG", ""))
     agent = Agent("ssh-" + tag, profile, card, [
         "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
         "--cmd", "SERSAY HX-START ssh", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
-        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=1500)
     serial, tmp, key, port, base, opts, ssh = (agent.serial, agent.tmp, agent.key, agent.port, agent.base,
                                                agent.opts, agent.ssh)
     checks, info = {}, ""
@@ -1215,6 +1252,71 @@ def ssh_case(profile, card):
         time.sleep(2)
         rc, _, _ = ssh("glos kill")
         checks["kill"] = rc == 0 and slow.wait(timeout=120) == 255
+        # Telemetry (M5 A5). glos stat: a line of JSON, its counters moving; with --follow a line a second,
+        # and the log's --follow shows a command as it comes; glos mem and glos net.
+        import json
+
+        def stat():
+            rc, out, _ = ssh("glos stat")
+            try:
+                return json.loads(out) if rc == 0 else None
+            except ValueError:
+                return None
+        s1, s2 = stat(), stat()
+        checks["stat"] = bool(s1 and s2 and s2["ticks"] > s1["ticks"] and s1["hz"] == 1024
+                              and {"vm", "ssh", "net"} <= set(s1["threads"]) and s1["mem"]["free_kb"] > 0
+                              and len(s1["irq"]) == 16 and s2["irq"][8] > s1["irq"][8] and s2["net"]["rx"] > s1["net"]["rx"]
+                              and s1["session"] is None and s1["dpmi"] is None)
+        if not checks["stat"] or os.environ.get("SSH_SHOW"):
+            info += " stat=%r" % (s1,)
+        fstat = subprocess.Popen(opts + ["glos@127.0.0.1", "glos stat --follow"], stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL)
+        flog = subprocess.Popen(opts + ["glos@127.0.0.1", "glos log --follow"], stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL)
+        t2 = time.time()                        # (both are in once the log shows them)
+        while time.time() - t2 < 120 and 'exec="glos log --follow"' not in agent.log():
+            time.sleep(0.5)
+        ssh("glos echo marker-" + tag)
+        ssh("glos echo marker2-" + tag)
+        time.sleep(3)
+        fstat.terminate()
+        flog.terminate()
+        lines = fstat.communicate(timeout=60)[0].decode("latin-1").splitlines()
+        followed = flog.communicate(timeout=60)[0].decode("latin-1")
+        try:
+            ticks = [json.loads(l)["ticks"] for l in lines]
+        except ValueError:
+            ticks = []
+        checks["stat-follow"] = len(ticks) >= 2 and all(900 <= b - a <= 1400 for a, b in zip(ticks, ticks[1:]))
+        checks["log-follow"] = ("GLOS-VM agent comspec=" in followed          # the log so far, then as it grows
+                                and 'GLOS-SSH exec="glos echo marker2-%s"' % tag in followed)
+        if not (checks["stat-follow"] and checks["log-follow"]):
+            info += " follow=%r/%d" % (ticks, len(followed))
+        rc, out, _ = ssh("glos mem")
+        checks["mem"] = rc == 0 and bool(re.search(r"memory total_kb=\d+ free_kb=\d+\nkernel image_kb=\d+ ", out)) \
+            and "dpmi null" in out
+        rc, out, _ = ssh("glos net")
+        checks["net"] = rc == 0 and "ip=10.0.2.15 mask=255.255.255.0 gw=10.0.2.2" in out and "card=" in out
+        # glos kill SEQ: a job that waits its turn is taken out, then the one that runs is killed; and the
+        # session shows in glos stat while it does.
+        slow = subprocess.Popen(opts + ["glos@127.0.0.1", "WAITSEC 100"], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        t2 = time.time()
+        while time.time() - t2 < 120 and 'cmd="WAITSEC 100"' not in agent.log():
+            time.sleep(0.5)
+        waiting = subprocess.Popen(opts + ["glos@127.0.0.1", "echoargs waiting"], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        t2, seqs = time.time(), {}
+        while time.time() - t2 < 120 and len(seqs) < 2:
+            seqs = {m[1]: int(m[0]) for m in re.findall(r"^job (\d+) (queued|running) ", ssh("glos ps")[1], re.M)}
+        s3 = stat()
+        checks["stat-session"] = bool(s3 and s3["session"] and s3["session"]["program"].startswith("WAITSEC"))
+        checks["kill-queued"] = len(seqs) == 2 and ssh("glos kill %d" % seqs["queued"])[0] == 0 \
+            and waiting.wait(timeout=120) == 255
+        checks["kill-seq"] = len(seqs) == 2 and ssh("glos kill %d" % seqs["running"])[0] == 0 \
+            and slow.wait(timeout=120) == 255
+        rc, _, err = ssh("glos kill 9999")
+        checks["kill-none"] = rc == 1 and "no such job" in err
         stranger = os.path.join(tmp, "stranger")
         subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", stranger], check=True)
         rc, _, _ = ssh("glos ver", keyfile=stranger)
@@ -1755,7 +1857,10 @@ def main():
                 print("    %s-%s XMSTEST: %s" % (p, b, "; ".join(l[11:] for l in r[2])))
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ssh":
-        return 0 if all(r[1] for r in matrix(ssh_case, SSH_CASES, a.jobs)) else 1
+        res = matrix(ssh_case, SSH_CASES, a.jobs)
+        if not os.environ.get("SSH_ONE"):
+            res += matrix(reboot_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "input":
         return 0 if all(r[1] for r in matrix(input_case, [c for c in INPUT_CASES if not a.profile or c[0] in a.profile],
                                              a.jobs)) else 1
