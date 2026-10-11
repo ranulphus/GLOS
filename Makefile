@@ -145,7 +145,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
          kernel/ssh/sshd.c \
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c \
-         kernel/dbg/gdbstub.c kernel/vm/v86.c kernel/vm/session.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c \
+         kernel/dbg/gdbstub.c kernel/dbg/gdbprog.c kernel/vm/v86.c kernel/vm/session.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c \
          kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c kernel/dos/agent.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
@@ -217,6 +217,9 @@ loopa-m3: loopa-ssh
 # glos shot in every video mode (M5 A2): SHOTTEST's pictures on the Matrox and S3 VBE BIOSes and a 486.
 loopa-shot: all dos-tests build/dj/SHOTDJ.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py shot -j $(JOBS)
+# glos gdb (M5 A7): the host's gdb through ssh -W on a DJGPP program.
+loopa-gdbprog: all build/dj/GDBME.EXE check-deps
+	$(Q)python3 tests/loopa/jobs.py gdb -j $(JOBS)
 # glos key, type and mouse (M5 A4) against the same input from Loop A's --keys.
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py input -j $(JOBS)
@@ -287,6 +290,13 @@ build/dj/SHOTDJ.EXE: tests/dos/shottest.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+# GDBME (tests/dos/gdbme.c): a program for glos gdb, and its symbols' addresses for the host's gdb, which
+# reads no DJGPP executable (M5).
+build/dj/GDBME.EXE: tests/dos/gdbme.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O0 -g -Wall -Werror -o $@ $<
+	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-nm $@ > build/dj/GDBME.sym
 # DIRTEST (tests/dos/dirtest.c): a program at IOPL 3 and what GLOS takes back from it (M4e).
 build/dj/DIRTEST.EXE: tests/dos/dirtest.c
 	@mkdir -p $(dir $@)

@@ -21,6 +21,7 @@
 #include "mm.h"
 #include "dos.h"
 #include "dpmi.h"
+#include "gdbprog.h"
 #include "nic.h"
 #include "sched.h"
 #include "session.h"
@@ -636,6 +637,15 @@ static int stat_turn(struct ssh_chan *ch, void *arg)
 
 static u32 reboot_at;                           /* glos reboot: the tick to reset at; 0: no */
 
+/* glos gdb (kernel/dbg/gdbprog.c): gdb's channel, a direct-tcpip one to GDBP_PORT. */
+static struct ssh_chan *gdb_chan;
+
+static void gdb_send(const u8 *d, u32 n)
+{
+    if (gdb_chan)
+        ssh_chan_write(gdb_chan, 0, d, n);
+}
+
 /* The built-in commands, and DOS command lines for the agent. */
 static int k_exec(struct ssh_chan *ch, const char *cmd)
 {
@@ -764,6 +774,13 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         } else {
             ssh_chan_exit(ch, 0);
         }
+    } else if (!strcmp(cmd, "glos gdb")) {
+        char t[160];
+        gdbp_arm(wake_ssh);
+        ksnprintf(t, sizeof t, "glos gdb: the program stops when it next runs its 32-bit code, and waits for gdb\n"
+                  "at port %u here: ssh -W localhost:%u, or ssh -L\n", GDBP_PORT, GDBP_PORT);
+        say(ch, 0, t);
+        ssh_chan_exit(ch, 0);
     } else if (!strcmp(cmd, "glos reboot") || !strcmp(cmd, "glos reboot --force")) {
         if (!cmd[11] && agent_busy()) {
             say(ch, 1, "glos reboot: a job is running or waiting (glos kill it, or glos reboot --force)\n");
@@ -816,7 +833,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
     } else {
         say(ch, 1, "glos: no such command (glos ver, echo, run, shot, key, type, mouse, log, stat, ps, mem, net, tick, "
-                   "kill, exit, reboot)\n");
+                   "kill, gdb, exit, reboot)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;
@@ -849,20 +866,46 @@ static int k_subsystem(struct ssh_chan *ch, const char *name)
     return 0;
 }
 
+/* A direct-tcpip channel: to glos gdb's port here, once it is armed, and nowhere else. */
+static int k_tcpip(struct ssh_chan *ch, const char *host, uint32_t port)
+{
+    if (port != GDBP_PORT || gdb_chan || (strcmp(host, "localhost") && strcmp(host, "127.0.0.1"))
+        || gdbp_attach(gdb_send) != 0) {
+        kprintf("GLOS-SSH forward to=%s:%u refused\n", host, port);
+        return -1;
+    }
+    gdb_chan = ch;
+    kprintf("GLOS-SSH forward to=gdb\n");
+    return 0;
+}
+
 static void k_data(struct ssh_chan *ch, const uint8_t *d, uint32_t n)
 {
+    if (ch == gdb_chan) {
+        gdbp_input(d, n);
+        return;
+    }
     if (ssh_chan_user(ch))
         sftp_input(ssh_chan_user(ch), d, n);
 }
 
 static void k_eof(struct ssh_chan *ch)
 {
+    if (ch == gdb_chan) {                       /* gdb has gone: its side closes too, and the program runs on */
+        gdbp_detach();
+        ssh_chan_close(ch);
+        return;
+    }
     if (ssh_chan_user(ch))
         sftp_eof(ssh_chan_user(ch));
 }
 
 static void k_gone(struct ssh_chan *ch)
 {
+    if (ch == gdb_chan) {
+        gdbp_detach();
+        gdb_chan = 0;
+    }
     agent_drop(ch);
     streams_gone(ch);
     if (ssh_chan_user(ch))
@@ -879,7 +922,7 @@ static void sftp_turn(void)
         }
 }
 
-static const struct ssh_ops ops = { k_alloc, k_free, k_send, k_log, k_exec, k_subsystem, k_data, k_eof, k_gone };
+static const struct ssh_ops ops = { k_alloc, k_free, k_send, k_log, k_exec, k_subsystem, k_data, k_eof, k_gone, k_tcpip };
 
 static void finish(struct sconn *s, const char *why)
 {
@@ -936,6 +979,7 @@ static void ssh_main(void *arg)
         agent_service(agent_write, agent_done);
         sftp_turn();
         streams_turn();
+        gdbp_turn();
         if (reboot_at) {
             if ((s32)(timer_ticks() - reboot_at) >= 0) {
                 kprintf("GLOS-REBOOT\n");

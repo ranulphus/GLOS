@@ -10,6 +10,7 @@
  * vif-stuck watchdog. */
 #include "agent.h"
 #include "io.h"
+#include "gdbprog.h"
 #include "kprintf.h"
 #include "pci.h"
 #include "timer.h"
@@ -267,7 +268,8 @@ static void rtc_tick(u8 c)
 /* An IRQ waiting longer than 50 ms behind a cleared virtual IF. */
 static void watchdog(struct trapframe *tf, u32 now)
 {
-    if (vm.vif || !vpic_pending(&vm.pic) || vm.direct) {     /* (direct mode: the real IF, the program's own) */
+    if (vm.vif || !vpic_pending(&vm.pic) || vm.direct || gdbp_stopped()) {    /* (direct mode: the real IF, the
+                                                   program's own; glos gdb holds a stopped one) */
         vm.stuck_since = 0;
         vm.stuck_warned = 0;
         return;

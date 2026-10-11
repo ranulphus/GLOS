@@ -58,9 +58,9 @@ Each step is a commit with its tests.
 
 ## Status
 
-- **A1 to A6 are done** (2026-10-11); as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
-  (streams and the command list), §17.7 (screenshots), §10 and §17.8 (injected input), §17.9 (telemetry), §10
-  (the network cards).
+- **A1 to A7 are done** (2026-10-11); as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
+  (streams, forwarded channels and the command list), §17.7 (screenshots), §10 and §17.8 (injected input),
+  §17.9 (telemetry), §10 (the network cards), §19.2 (the program debugger).
 - **`make loopa-shot`** (`jobs.py shot`): SHOTTEST draws a picture the host can compute, in one mode a run, and
   waits; `glos shot` and `glos shot --raw` over ssh must both equal it; then the program is killed. Five cases,
   all passing: real mode on bf6 with the G200's and the S3's VBE BIOS and on the 486DX2 (no VME: every INT
@@ -102,6 +102,12 @@ Each step is a commit with its tests.
 - **A6:** `jobs.py net` (DHCP and a TCP echo) passes on the RTL8139 (bf6, 486DX2) and the 8255x (82557 and
   82558 on bf6, 82557 on the 486DX4); the whole ssh suite passes over each (bf6 with all three, the 486DX2 with
   the RTL8139), with the NE2000 cases as before.
+- **A7:** `make loopa-gdbprog` (`jobs.py gdb`), bf6 and 486DX2, both passing: the host's gdb through
+  `ssh -W` on GDBME, a DJGPP program. It stops in its start-up code; gdb breaks at `main`, reads a variable
+  (42), sets it (1000), steps an instruction and lets go, and the program prints what the new value makes.
+  Then let go at once; then run to its end under gdb, which hears of it. A forward to another port, or to
+  the debugger unarmed, is refused. `make ssh-test` (the ssh layer natively against OpenSSH) has
+  `direct-tcpip` too: 300 KB echoed through `ssh -W`, and beside a command on one connection.
 
 ### Found on the way
 
@@ -126,6 +132,9 @@ Each step is a commit with its tests.
 - **Mode 110h on the G200 says 16 bits a pixel** with 5:5:5 masks; the capture goes by the masks.
 - **MGA-Glide's test programs end the emulator when they finish** (the shim's `hx_done` writes to 86Box's
   unit-tester device): one that runs as an agent job in the middle of a run takes `--noexit`.
+- **The host's gdb is built for Linux**: it reads no DJGPP executable (nor does the host's objcopy, and
+  DJGPP's makes no ELF), and with `set architecture i386` it writes Linux's `orig_eax` before it resumes a
+  program. The test goes by `nm`'s addresses, and the stub lets writes to registers it hasn't pass.
 - **A 486 needs one ssh connection for the suite** (OpenSSH's ControlMaster): with a key exchange for each of
   a hundred commands the run took longer than its 25 minutes.
 

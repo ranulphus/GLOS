@@ -34,6 +34,10 @@ struct ssh_ops {
     void (*chan_data)(struct ssh_chan *ch, const uint8_t *data, uint32_t len);   /* the client's stdin */
     void (*chan_eof)(struct ssh_chan *ch);
     void (*chan_gone)(struct ssh_chan *ch);     /* closed both ways: drop any reference to ch */
+    /* A direct-tcpip channel (ssh -L, -W) to host:port: 0 to take it (its bytes
+       come through chan_data, the end through ssh_chan_close), -1 to refuse.
+       May be NULL: every one is refused. */
+    int (*tcpip)(struct ssh_chan *ch, const char *host, uint32_t port);
 };
 
 struct ssh_server {
@@ -60,6 +64,7 @@ void ssh_chan_set_user(struct ssh_chan *ch, void *user);
 uint32_t ssh_chan_write(struct ssh_chan *ch, int stream, const uint8_t *data, uint32_t len);
 /* The command ended: exit-status, EOF and CLOSE once the output has gone. */
 void ssh_chan_exit(struct ssh_chan *ch, uint32_t status);
+void ssh_chan_close(struct ssh_chan *ch);       /* a forwarded channel's end: EOF and CLOSE once the output has gone */
 uint32_t ssh_chan_pending(const struct ssh_chan *ch);       /* output bytes not yet sent */
 /* Input at the platform's pace: after ssh_chan_hold(), the client's window
    reopens only as ssh_chan_consumed() reports input used, so what the

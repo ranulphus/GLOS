@@ -157,9 +157,26 @@ static int x_subsystem(struct ssh_chan *ch, const char *name)
     return -1;
 }
 
+/* A direct-tcpip channel (ssh -W, -L): localhost:7 echoes; anything else is refused. */
+static char forward;                            /* (its address marks a channel as one) */
+
+static int x_tcpip(struct ssh_chan *ch, const char *host, uint32_t port)
+{
+    if (strcmp(host, "localhost") || port != 7) {
+        x_log("forward to %s:%u refused", host, (unsigned)port);
+        return -1;
+    }
+    ssh_chan_set_user(ch, &forward);
+    return 0;
+}
+
 static void x_data(struct ssh_chan *ch, const uint8_t *d, uint32_t n)
 {
     struct job *j = ssh_chan_user(ch);
+    if ((void *)j == (void *)&forward) {
+        ssh_chan_write(ch, 0, d, n);
+        return;
+    }
     if (j && j->kind == 1)
         ssh_chan_write(ch, 0, d, n);
 }
@@ -167,6 +184,11 @@ static void x_data(struct ssh_chan *ch, const uint8_t *d, uint32_t n)
 static void x_eof(struct ssh_chan *ch)
 {
     struct job *j = ssh_chan_user(ch);
+    if ((void *)j == (void *)&forward) {
+        ssh_chan_close(ch);
+        ssh_chan_set_user(ch, NULL);
+        return;
+    }
     if (j && j->kind == 1) {
         ssh_chan_exit(ch, 0);
         drop_job(j);
@@ -177,11 +199,11 @@ static void x_eof(struct ssh_chan *ch)
 static void x_gone(struct ssh_chan *ch)
 {
     struct job *j = ssh_chan_user(ch);
-    if (j)
+    if (j && (void *)j != (void *)&forward)
         drop_job(j);
 }
 
-static const struct ssh_ops ops = { x_alloc, x_free, x_send, x_log, x_exec, x_subsystem, x_data, x_eof, x_gone };
+static const struct ssh_ops ops = { x_alloc, x_free, x_send, x_log, x_exec, x_subsystem, x_data, x_eof, x_gone, x_tcpip };
 
 /* The jobs that produce output over time. */
 static void run_jobs(void)

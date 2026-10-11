@@ -47,7 +47,15 @@ jobs=()
 for i in 1 2 3 4; do ssh "${opts[@]}" -o ControlPath="$tmp/mux" glos@127.0.0.1 sleep 300 > "$tmp/mux$i" & jobs+=($!); done
 wait "${jobs[@]}"
 check "4 channels on one connection" [ "$(cat "$tmp"/mux? | grep -c slept)" -eq 4 ]
+printf 'through\n' | ssh "${opts[@]}" -o ControlPath="$tmp/mux" -W localhost:7 glos@127.0.0.1 > "$tmp/fwd2"
+out=$(ssh "${opts[@]}" -o ControlPath="$tmp/mux" glos@127.0.0.1 echo beside a forward)
+check "a forward on that connection too" [ "$out" = "beside a forward" -a "$(cat "$tmp/fwd2")" = through ]
 ssh "${opts[@]}" -o ControlPath="$tmp/mux" -O exit glos@127.0.0.1 2>/dev/null
+
+ssh "${opts[@]}" -W localhost:7 glos@127.0.0.1 < "$tmp/in" > "$tmp/fwd"
+check "direct-tcpip echoed (300 KB, ssh -W)" cmp -s "$tmp/in" "$tmp/fwd"
+ssh "${opts[@]}" -W localhost:9 glos@127.0.0.1 < /dev/null > /dev/null 2>&1; rc=$?
+check "direct-tcpip elsewhere refused" [ $rc -ne 0 ]
 
 ssh-keygen -q -t ed25519 -N "" -f "$tmp/stranger"
 ssh -p "$port" -i "$tmp/stranger" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \

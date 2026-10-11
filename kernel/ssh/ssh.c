@@ -53,6 +53,8 @@ struct ssh_chan {
     uint32_t id, peer, peer_window, peer_maxpkt, our_window;
     uint8_t started, eof_recv, close_sent, close_recv, exit_pending;
     uint8_t held;                               /* the window reopens only as the platform consumes */
+    uint8_t forward;                            /* a direct-tcpip channel: no exec, no exit status */
+    uint8_t unconfirmed;                        /* its open isn't answered yet: nothing may go out on it */
     uint32_t unconsumed;                        /* held: input delivered and not yet consumed */
     uint32_t exit_status;
     uint8_t *out[2];
@@ -494,7 +496,7 @@ static void flush(struct ssh_chan *ch)
     struct sbuf b;
     int s;
 
-    if (c->kex || c->dead || ch->close_sent)
+    if (c->kex || c->dead || ch->close_sent || ch->unconfirmed)
         return;
     for (s = 0; s < 2; s++)
         while (ch->out_len[s] && ch->peer_window) {
@@ -515,13 +517,15 @@ static void flush(struct ssh_chan *ch)
         }
     if (ch->exit_pending && !ch->out_len[0] && !ch->out_len[1]) {
         uint8_t x[64];
-        sb_init(&b, x, sizeof x);
-        sb_u8(&b, MSG_CHANNEL_REQUEST);
-        sb_u32(&b, ch->peer);
-        sb_cstr(&b, "exit-status");
-        sb_u8(&b, 0);
-        sb_u32(&b, ch->exit_status);
-        send_sb(c, &b);
+        if (!ch->forward) {                     /* (a forwarded connection has no status) */
+            sb_init(&b, x, sizeof x);
+            sb_u8(&b, MSG_CHANNEL_REQUEST);
+            sb_u32(&b, ch->peer);
+            sb_cstr(&b, "exit-status");
+            sb_u8(&b, 0);
+            sb_u32(&b, ch->exit_status);
+            send_sb(c, &b);
+        }
         chan_msg(ch, MSG_CHANNEL_EOF);
         chan_msg(ch, MSG_CHANNEL_CLOSE);
         ch->close_sent = 1;
@@ -568,6 +572,8 @@ void ssh_chan_exit(struct ssh_chan *ch, uint32_t status)
     flush(ch);
 }
 
+void ssh_chan_close(struct ssh_chan *ch) { ssh_chan_exit(ch, 0); }
+
 uint32_t ssh_chan_pending(const struct ssh_chan *ch) { return ch->out_len[0] + ch->out_len[1]; }
 void *ssh_chan_user(const struct ssh_chan *ch) { return ch->user; }
 void ssh_chan_set_user(struct ssh_chan *ch, void *user) { ch->user = user; }
@@ -577,34 +583,63 @@ static int chan_open(struct ssh_conn *c, const uint8_t *p, uint32_t n)
     struct sread r;
     struct sbuf b;
     const uint8_t *type;
-    uint32_t tlen, sender, window, maxpkt, i;
+    uint32_t tlen, sender, window, maxpkt, i, hlen = 0, port = 0;
     uint8_t m[64];
     struct ssh_chan *ch;
+    const uint8_t *host = NULL;
+    char name[64];
+    int session, forward, why = 3;      /* unknown channel type */
 
     sr_init(&r, p + 1, n - 1);
     type = sr_string(&r, &tlen);
     sender = sr_u32(&r);
     window = sr_u32(&r);
     maxpkt = sr_u32(&r);
+    session = sr_streq(type, tlen, "session");
+    forward = sr_streq(type, tlen, "direct-tcpip");
+    if (forward) {                              /* RFC 4254 7.2: where to, and where from (not used) */
+        host = sr_string(&r, &hlen);
+        port = sr_u32(&r);
+    }
     if (r.err)
         return disconnect(c, DISC_PROTOCOL_ERROR, "bad channel open"), -1;
     for (i = 0; i < SSH_MAX_CHANNELS && c->chans[i]; i++) ;
     sb_init(&b, m, sizeof m);
-    if (!sr_streq(type, tlen, "session") || i == SSH_MAX_CHANNELS || !(ch = c->ops->alloc(sizeof *ch))) {
+    ch = NULL;
+    if (session || forward) {
+        why = 4;                                /* resource shortage */
+        if (i < SSH_MAX_CHANNELS)
+            ch = c->ops->alloc(sizeof *ch);
+    }
+    if (ch) {
+        ch->conn = c;
+        ch->id = i;
+        ch->peer = sender;
+        ch->peer_window = window;
+        ch->peer_maxpkt = maxpkt ? maxpkt : 1;
+        ch->our_window = WINDOW;
+        if (forward) {
+            ch->forward = ch->started = ch->unconfirmed = 1;    /* (no exec on it) */
+            memcpy(name, host, hlen < sizeof name ? hlen : sizeof name - 1);
+            name[hlen < sizeof name ? hlen : sizeof name - 1] = 0;
+            c->chans[i] = ch;                   /* (the platform may write to it at once) */
+            if (!c->ops->tcpip || c->ops->tcpip(ch, name, port) != 0) {
+                c->chans[i] = NULL;
+                c->ops->free(ch);
+                ch = NULL;
+                why = 2;                        /* connect failed */
+            }
+        }
+    }
+    if (!ch) {
         sb_u8(&b, MSG_CHANNEL_OPEN_FAILURE);
         sb_u32(&b, sender);
-        sb_u32(&b, sr_streq(type, tlen, "session") ? 4 : 3);   /* resource shortage / unknown type */
-        sb_cstr(&b, sr_streq(type, tlen, "session") ? "too many channels" : "unknown channel type");
+        sb_u32(&b, (uint32_t)why);
+        sb_cstr(&b, why == 4 ? "too many channels" : why == 2 ? "nothing listens there" : "unknown channel type");
         sb_cstr(&b, "");
         send_sb(c, &b);
         return 0;
     }
-    ch->conn = c;
-    ch->id = i;
-    ch->peer = sender;
-    ch->peer_window = window;
-    ch->peer_maxpkt = maxpkt ? maxpkt : 1;
-    ch->our_window = WINDOW;
     c->chans[i] = ch;
     sb_u8(&b, MSG_CHANNEL_OPEN_CONFIRMATION);
     sb_u32(&b, sender);
@@ -612,6 +647,10 @@ static int chan_open(struct ssh_conn *c, const uint8_t *p, uint32_t n)
     sb_u32(&b, WINDOW);
     sb_u32(&b, MAXPKT);
     send_sb(c, &b);
+    if (ch->unconfirmed) {
+        ch->unconfirmed = 0;
+        flush(ch);                              /* what the platform wrote on it meanwhile */
+    }
     return 0;
 }
 

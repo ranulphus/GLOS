@@ -1837,6 +1837,93 @@ def input_case(profile, card, mouse_too):
                                "" if not bad else " failed: " + " ".join(bad), info), not bad
 
 
+# ---- glos gdb (M5 A7)
+
+def gdb_case(profile, card):
+    """The host's gdb on GDBME through an ssh direct-tcpip channel (ssh -W). glos gdb arms the debugger and
+    the program stops in its start-up code; gdb sets a breakpoint at main, runs to it, reads counter (42),
+    sets it to 1000, steps an instruction and lets go, and the program then says 2001. Twice more: let go
+    at once, and run to its end under gdb, which hears that it has gone. The host's gdb reads no DJGPP
+    executable, so the addresses are nm's (build/dj/GDBME.sym). A forward to anything else is refused, and
+    so is one to the debugger when nothing is armed."""
+    import shlex
+    import time
+    tag = "%s-%s" % (profile, card)
+    sym = dict((l.split()[2], int(l.split()[0], 16)) for l in open(os.path.join(ROOT, "build/dj/GDBME.sym"))
+               if len(l.split()) == 3)
+    agent = Agent("gdb-" + tag, profile, card, ["--file", "build/dj/GDBME.EXE=/TEST/GDBME.EXE",
+                                                "--cmd", "SERSAY HX-START gdb", "--cmd", "VECCHK save",
+                                                "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VECCHK check",
+                                                "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    out = os.path.join(ROOT, "out", "gdb-" + tag)
+    checks, info = {"listen": agent.listening()}, ""
+    try:
+        fwd = agent.opts + ["-W", "localhost:2345", "glos@127.0.0.1"]
+        p = subprocess.run(fwd, stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
+        checks["unarmed-refused"] = p.returncode != 0
+        rc, text, _ = agent.ssh("glos gdb")
+        checks["arm"] = rc == 0 and "2345" in text
+        p = subprocess.run(agent.opts + ["-W", "localhost:80", "glos@127.0.0.1"], stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=120)
+        checks["other-refused"] = p.returncode != 0
+        job = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\GDBME.EXE"], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 120 and "GLOS-GDB stop" not in agent.log():
+            time.sleep(0.5)
+        checks["stopped"] = "GLOS-GDB stop" in agent.log() and "HX-GDBME start" not in agent.log()
+        script = ["set architecture i386", "set pagination off", "set confirm off",
+                  "target remote | " + " ".join(shlex.quote(a) for a in fwd),
+                  "info registers eip", "break *0x%x" % sym["_main"], "continue", "info registers eip",
+                  "x/dw 0x%x" % sym["_counter"], "set {int}0x%x = 1000" % sym["_counter"],
+                  "x/dw 0x%x" % sym["_counter"], "stepi", "info registers eip", "delete", "detach"]
+        g = subprocess.run(["gdb", "-q", "-batch"] + [x for s in script for x in ("-ex", s)], capture_output=True,
+                           timeout=300, stdin=subprocess.DEVNULL)
+        text = g.stdout.decode("latin-1") + g.stderr.decode("latin-1")
+        open(os.path.join(out, "gdb.log"), "w").write(text)
+        eips = [int(x, 16) for x in re.findall(r"^eip\s+0x([0-9a-f]+)", text, re.M)]
+        checks["breakpoint"] = bool(re.search(r"Breakpoint 1, 0x0*%x in" % sym["_main"], text))
+        checks["eip"] = len(eips) == 3 and eips[1] == sym["_main"] and eips[2] != eips[1]
+        vals = re.findall(r"^0x[0-9a-f]+:\s+(-?\d+)", text, re.M)
+        checks["read"] = vals[:1] == ["42"]
+        checks["write"] = vals[1:2] == ["1000"]
+        checks["end"] = job.wait(timeout=120) == (2001 & 0x7F)
+        if not all(checks[k] for k in ("breakpoint", "eip", "read", "write", "end")):
+            info = " eips=%r vals=%r" % (eips, vals)
+        # Again, untouched: armed, attached, let go at once.
+        checks["arm2"] = agent.ssh("glos gdb")[0] == 0
+        job = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\GDBME.EXE"], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 120 and agent.log().count("GLOS-GDB stop") < 2:
+            time.sleep(0.5)
+        g = subprocess.run(["gdb", "-q", "-batch", "-ex", "set architecture i386", "-ex", script[3], "-ex", "detach"],
+                           capture_output=True, timeout=300, stdin=subprocess.DEVNULL)
+        checks["detach"] = job.wait(timeout=120) == 85
+        # And run to its end under gdb, which is told that it has gone.
+        checks["arm3"] = agent.ssh("glos gdb")[0] == 0
+        job = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\GDBME.EXE"], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 120 and agent.log().count("GLOS-GDB stop") < 3:
+            time.sleep(0.5)
+        g = subprocess.run(["gdb", "-q", "-batch", "-ex", "set architecture i386", "-ex", script[3], "-ex", "continue"],
+                           capture_output=True, timeout=300, stdin=subprocess.DEVNULL)
+        text3 = g.stdout.decode("latin-1") + g.stderr.decode("latin-1")
+        open(os.path.join(out, "gdb3.log"), "w").write(text3)
+        checks["ran-out"] = job.wait(timeout=120) == 85 and "exited normally" in text3
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    log = agent.wait()
+    checks["said"] = "HX-GDBME counter=2001" in log and log.count("HX-GDBME counter=85") == 2
+    checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-CRASH|GLOS-WARN|DPMI-UNIMPL", log)
+    checks["done"] = "GLOS-EXIT code=0" in log and "HX-DONE 0" in log and "HX-VECCHK ok" in log
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-26s %s%s%s" % ("gdb-" + tag, "PASS" if not bad else "FAIL",
+                               "" if not bad else " failed: " + " ".join(bad), info), not bad
+
+
 def matrix(fn, combos, jobs):
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
         results = list(ex.map(lambda pb: fn(*pb), combos))
@@ -1848,7 +1935,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -1867,6 +1954,9 @@ def main():
         if not os.environ.get("SSH_ONE") and not os.environ.get("SSH_ONLY"):
             res += matrix(reboot_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "gdb":
+        cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(gdb_case, cases, a.jobs)) else 1
     if a.suite == "input":
         return 0 if all(r[1] for r in matrix(input_case, [c for c in INPUT_CASES if not a.profile or c[0] in a.profile],
                                              a.jobs)) else 1

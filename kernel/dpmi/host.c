@@ -36,6 +36,7 @@
 #include "glos/bootinfo.h"
 #include "arch.h"
 #include "dpmi.h"
+#include "gdbprog.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
@@ -562,6 +563,8 @@ void dpmi_trap(struct trapframe *tf)
         dctx->cr2 = read_cr2();                 /* before anything else can fault */
     if (v == 1)
         dpmi_db_hit();                          /* a watchpoint's (0B00h), or a single step */
+    if ((v == 1 || v == 3) && gdbp_trap(tf))
+        return;                                 /* glos gdb's step or breakpoint */
     if (v == 13)
         general_protection(tf);
     else if (v >= 0x20)
@@ -605,8 +608,10 @@ void dpmi_return(struct trapframe *tf)
         vm_return(tf);
         return;
     }
-    if (!(tf->eflags & FL_VM))
+    if (!(tf->eflags & FL_VM)) {
         vm_work_turn(tf);                       /* (in real mode: vm_return's) */
+        gdbp_return(tf);                        /* glos gdb: a stop it was asked for */
+    }
     while (vm.vif && vpic_pending(&vm.pic) && dctx) {
         int vec = vpic_ack(&vm.pic);
         if (vm.direct)

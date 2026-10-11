@@ -25,6 +25,7 @@
 
 #include "glos/bootinfo.h"
 #include "dpmi.h"
+#include "gdbprog.h"
 #include "io.h"
 #include "kprintf.h"
 #include "session.h"
@@ -181,6 +182,7 @@ static void end(const char *why)
     u8 mode = vm_rd8(0x449);
     int remode;
 
+    gdbp_program_end(0);                        /* (glos gdb: its program has gone) */
     ses.active = 0;
     vm_direct(0);                               /* (before the BIOS calls: they run at IOPL 0) */
     if (ses.env_seg) {                          /* the profile's environment: DOS has copied it */

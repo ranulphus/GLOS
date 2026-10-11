@@ -435,7 +435,7 @@ Each command is an SSH exec request. `ssh <pc> <command>` runs a DOS command lin
 | `glos key`, `glos type`, `glos mouse` | Inject keyboard and mouse input. Same syntax as Loop A's `--keys`, so scripts move between Loop A and the bench. |
 | `glos stat [--follow]` | JSON lines: CPU per process, memory, IRQ counts, DOS-lock and GPU-lock wait and hold times, network counters, plus DGL-/MGL- statistics. |
 | `glos log [--follow]` | The COM1 mirror (HX-, DGL-, MGL- and GLOS- lines) and the supervisor log. |
-| `glos gdb <pid>` | Starts the gdb stub for a process; reached with `ssh -L`. |
+| `glos gdb <pid>` | Starts the gdb stub for a process; reached with `ssh -L`. (M5 built `glos gdb` for the one program in front, [docs/supervisor.md](docs/supervisor.md) §19.2; the pid comes with GLOS apps, M6.) |
 | `glos config get/set`, `glos net`, `glos mem` | Configuration, network state, memory map. |
 | `glos exit`, `glos reboot` | Unload GLOS back to DOS; controlled reboot. |
 

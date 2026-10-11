@@ -1186,7 +1186,8 @@ place where nothing else is in DOS by construction.
 - **Limits:** 60 s to log in; 20 authentication attempts per connection.
 - **Built-in commands:** `glos ver`, `glos echo …`, `glos run …` (M4e, §17.3), `glos shot`, `glos key`,
   `glos type`, `glos mouse`, `glos log`, `glos stat`, `glos ps`, `glos mem`, `glos net`, `glos tick` (M4e:
-  `ticks=N hz=1024`, the kernel's clock, for the gate's probe), `glos kill`, `glos exit`, `glos reboot`;
+  `ticks=N hz=1024`, the kernel's clock, for the gate's probe), `glos kill`, `glos gdb`, `glos exit`,
+  `glos reboot`;
   anything else starting `glos` gives status 127.
   - `glos shot [--raw]`: the screen as a PNG on stdout, in any mode (§17.7).
   - `glos key`, `glos type`, `glos mouse`: input into the program in front (§17.8).
@@ -1195,6 +1196,7 @@ place where nothing else is in DOS by construction.
     name), and each thread.
   - `glos kill [SEQ]`: the running job killed (§17.3); with a job's number, that job: killed if it runs,
     taken out of the queue if it waits (its client gets status 255). Status 1 if there is none.
+  - `glos gdb`: arms the program debugger (§19.2).
   - `glos reboot [--force]`: the machine reset half a second after the reply (`GLOS-REBOOT` on COM1): the
     8042's reset pulse, then the chipset's reset register (CF9h), then a triple fault, with the BIOS's
     warm-boot word set so that it skips the memory count. Refused (status 1) while a job runs or waits,
@@ -1209,6 +1211,10 @@ place where nothing else is in DOS by construction.
   - Each session serves one request at a time. The window reopens as requests finish (`ssh_chan_hold`), and no
     new one starts while more than 128 KB of output waits, so a session holds at most a window of input.
   - Files a client leaves open are closed when its channel goes.
+- **Forwarded channels** (M5): `direct-tcpip`, the channel type behind `ssh -L` and `ssh -W`, to ports GLOS
+  serves itself: `localhost:2345`, the program debugger (§19.2), while it is armed. Any other host or port
+  is refused ("connect failed"); GLOS opens no connections for a client. Such a channel carries bytes both
+  ways under the usual windows and ends with EOF and CLOSE, without an exit status.
 - **Streams** (M5): a built-in command that takes time, or has more to say than a channel buffers, is a
   stream. The ssh thread gives it a turn each time round; it writes while its channel has less than 32 KB
   waiting and ends the channel itself. A stream goes with its channel.
@@ -1361,9 +1367,12 @@ and GLOS's:
 
 ## 19. Debugging
 
+### 19.1 The kernel, hangs and crashes
+
 - **Kernel:** a gdb remote stub on COM2 (`/GDB`) supports `g G m M c s Z0` (software breakpoints). DR0–DR3
   are the clients' 0B00h watchpoints. Loop A routes COM2 through a FIFO pair to TCP (M0's `--com2`).
-- **Clients (M5):** a stub per process, reached through an SSH `direct-tcpip` forward.
+- **Clients (M5):** `glos gdb`, a gdb remote stub for the program in front, reached through an SSH
+  `direct-tcpip` forward (§19.2).
 - **Loop A hangs:** `run.py`'s `--idle` and `--timeout` count host seconds, but guest time slows when the host is
   busy (2026-10-03: a Pentium II profile at under half speed). Before debugging a HANG, compare the guest's time
   (the BIOS tick at 46Ch, `GLOS-VM leave ticks=`) with the run's `elapsed_s`. Tests end guest waits on a host
@@ -1379,6 +1388,46 @@ and GLOS's:
   - `tools/symcrash.py REPORT --exe PROG.EXE` names EIP and the stack's return addresses from a DJGPP image's
     COFF symbols (its EIPs are image addresses); `--map PROG.MAP --base ADDR` reads an Open Watcom map for a
     flat program (EIP is linear, ADDR where object 1 was loaded).
+
+### 19.2 The program debugger (M5)
+
+`glos gdb` gives gdb the program in front, a 32-bit DPMI client (`kernel/dbg/gdbprog.c`):
+
+```
+ssh pc glos gdb                         # arm: the program stops when it next runs its 32-bit code
+ssh pc 'C:\TEST\PROG.EXE' &             # (or it is running already)
+gdb -ex 'set architecture i386' -ex 'target remote | ssh -W localhost:2345 pc'
+```
+
+(or `ssh -L 2345:localhost:2345 pc` and `target remote :2345`).
+
+- **Stops.** Armed, the program stops at its next return from the kernel to its own 32-bit code: a ring-3
+  code segment with the D bit that isn't the host's trampolines. For a DJGPP program started after the
+  arming that is in its start-up code, well before `main`: its 16-bit stub doesn't count, and the first
+  DPMI call of the 32-bit code does. gdb's interrupt (Ctrl-C) stops it the same way. Its INT3s and single
+  steps come to the debugger before the client's own exception handlers.
+- **Stopped,** the VM thread waits in the kernel with the program's frame kept, and the rest of GLOS runs
+  on: the network, ssh, other commands. The program's interrupts wait; its clock stands. A kill ends the
+  wait. The stuck-interrupts watchdog (§9.3) is quiet meanwhile.
+- **gdb's packets** are answered by the ssh thread from that frame and from the program's memory, which is
+  there for any thread while the program is stopped (the client's address space stays current); a bad
+  address is an error reply, not a fault. Served: `? g G P m M c s D k H T` and the `q` packets a
+  connection starts with. gdb sets its breakpoints itself by writing INT3 (no `Z`); the registers are the
+  sixteen of an i386 without its FPU; only the general registers, EIP and the arithmetic flags can be set.
+- **Addresses are the program's own.** DJGPP links at offsets in a segment whose base is wherever its
+  memory landed, so every address gdb gives is taken from the base of the code segment the program first
+  stopped in (`GLOS-GDB stop cs= base= eip=`). The kernel's memory can't be reached.
+- **When the program ends** under gdb, gdb is told (`W00`). When gdb lets go, or its channel closes, the
+  program runs on.
+- **Limits:**
+  - one program, the one in front; one gdb at a time;
+  - a program inside a real-mode call (waiting at a DOS prompt) stops when it comes back from it;
+  - 16-bit clients and real-mode programs have no debugger;
+  - no hardware watchpoints for gdb (DR0-DR3 are the client's own, 0B00h), no FPU registers;
+  - the exit code gdb hears is always 0;
+  - a gdb built for Linux reads no DJGPP executable: it works by address (`nm` from DJGPP's binutils gives
+    them), and its writes to registers the program hasn't (`orig_eax`) are let pass. A gdb built for
+    `i586-pc-msdosdjgpp` has the symbols.
 
 ## 20. 86Box deviations [86Box]
 
