@@ -122,7 +122,8 @@ Each step is a commit with its tests.
   25th and each 100th answer) and each must be a whole PNG; they are kept as `probe-shot-N.png`.
 - **The gate** (`make gate`) on a4616a6: 133 parts, none failed, no `vif-stuck` reported and no ACK made up.
   The probes' pictures are the games at work (GTA in the street, GLQuake's and Half-Life's demos, 640×480).
-- **H8** is on MGA-Glide's branch `glos-loopb` (not merged): `tools/bench/run.py` drives a bench PC through
+- **H8** is in MGA-Glide (3a164b0, merged 2026-10-11 with the owner's approval; `deps.mk` pins it):
+  `tools/bench/run.py` drives a bench PC through
   GLOS over ssh when it answers and through BENCH.BAT otherwise; `vpc.py start --glos` gives the virtual
   bench PC a GLOS. The dry run on vbench-g200 is in MGA-Glide's `docs/bench.md`: jobs over ssh, the
   fallback to the poller after `glos exit`, `C:\OUT` fetched by SFTP, a timed-out job killed without a reset.
@@ -179,7 +180,6 @@ Each step is a commit with its tests.
   it, 3.5 s on the NE2000s and 4.7 s on the RTL8139, with no errors or overruns counted. Not looked into:
   transfer rates are P5's, measured on silicon. The driver sends one frame at a time (a single transmit
   block) and takes an interrupt for each; a ring of blocks is the first thing to try if the bench agrees.
-- **H8 is not merged** into MGA-Glide (branch `glos-loopb`); GLOS's `deps.mk` pin moves when it is.
 - **The bench half of the exit:** Loop B over ssh on a real PC, and DOSBench within 3% of its numbers
   without GLOS (P1).
 
