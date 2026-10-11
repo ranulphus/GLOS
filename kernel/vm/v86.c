@@ -772,8 +772,9 @@ static void vm_int2f(struct trapframe *tf)
     flags_apply(tf, (f & ~FL_ARITH) | (tf->eflags & FL_ARITH), 0);    /* the answer's flags, the caller's IF */
 }
 
-/* INT 10h 4F02h, a VBE mode set, made for the program as a nested call, so
-   that the BIOS's answer is seen (rm_call tells glos shot): 1 if made. */
+/* INT 10h 00h or 4F02h, a mode set, made for the program as a nested call,
+   so that its return and the BIOS's answer are seen (rm_call tells glos
+   shot): 1 if made. */
 static int vbe_set(struct trapframe *tf, u32 next)
 {
     struct rmregs r;
@@ -799,10 +800,9 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
     u32 ax = tf->eax & 0xFFFF;
     vm.n_int++;
     switch (n) {
-    case 0x10:                                  /* the video mode, for glos shot (kernel/dos/shot.c) */
-        if (ax == 0x4F02 && vbe_set(tf, next))
-            return;
-        shot_int10(ax, tf->ebx, 0);
+    case 0x10:                                  /* a mode set, for glos shot (kernel/dos/shot.c): made for the */
+        if ((ax == 0x4F02 || !(ax >> 8)) && vbe_set(tf, next))  /* program, so that its end and its answer */
+            return;                             /* are seen */
         break;
     case 0x15:
         if (vm_int15(tf, next))

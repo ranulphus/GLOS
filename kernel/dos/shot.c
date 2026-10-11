@@ -49,7 +49,10 @@
 #include "timer.h"
 #include "vm.h"
 
-#define PATIENCE  256u                          /* ticks for the program to take interrupts, or its BIOS call to end */
+#define PATIENCE  256u                          /* ticks for the program to take interrupts */
+#define BIOS_WAIT 2048u                         /* ticks for the video BIOS to end what it is at: a mode set takes
+                                                   a Matrox BIOS more than a quarter of a second, and its
+                                                   registers halfway are no mode at all */
 #define TIMEOUT   3072u                         /* ticks until glos shot gives up */
 #define SHOT_MAX  (16u << 20)                   /* bytes of a frame */
 #define SPARE     256u                          /* frames left to the system */
@@ -90,8 +93,21 @@ static struct {
     u8 info[0x40];                              /* the start of 4F01h's block */
 } vbe;
 
+/* Mode sets under way: INT 10h calls GLOS makes for a program (every one of
+   a DPMI client's; a V86 program's mode sets), counted from their start to
+   their return. The card's registers halfway through one are no mode at
+   all, wherever the CPU is just then (an interrupt handler on top of the
+   BIOS as likely as the BIOS itself), so a capture waits for the count. */
+static u8 int10_busy;
+
+void shot_int10_begin(void) { int10_busy++; }
+
+void shot_session_end(void) { int10_busy = 0; }     /* (a program killed inside one) */
+
 void shot_int10(u32 ax, u32 bx, u32 ax_out)
 {
+    if (int10_busy)
+        int10_busy--;
     ax &= 0xFFFF;
     if (!(ax >> 8)) {                           /* AH 00h: a plain mode */
         vbe.mode = 0;
@@ -665,7 +681,7 @@ static int capture(struct vm_work *w, struct trapframe *tf)
     struct vga v;
     int r = 0;
 
-    if ((tf->eflags & FL_VM) && cs >= 0xC000 && cs < 0xC800 && timer_ticks() - w->posted < w->patience)
+    if ((int10_busy || ((tf->eflags & FL_VM) && cs >= 0xC000 && cs < 0xC800)) && timer_ticks() - w->posted < BIOS_WAIT)
         return 1;                               /* the video BIOS is at work: when it has done */
     vga_read(&v);
     if (vbe.mode)
@@ -673,6 +689,10 @@ static int capture(struct vm_work *w, struct trapframe *tf)
     if (!r)
         r = (v.gc6 & 1) ? grab_vga(s, &v) : grab_text(s, &v);
     s->got = r;
+    if (r > 0) {                                /* what GLOS took the screen for */
+        static const char *const kinds[] = { "text", "cga", "planar", "unchained", "packed", "direct" };
+        kprintf("GLOS-SHOT kind=%s size=%ux%u vbe=%04x\n", kinds[s->kind], s->w, s->h, vbe.mode);
+    }
     return 0;
 }
 

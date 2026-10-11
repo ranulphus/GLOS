@@ -100,6 +100,8 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
     if (vec == 0x21 && kind != RM_FAR)
         agent_vm_int21(f);                      /* a client's DOS output, for an agent job's capture (§17.4) */
 
+    if (vec == 0x10 && kind != RM_FAR)
+        shot_int10_begin();                     /* (shot_int10 at its return, below) */
     nests[depth].f = f;
     nests[depth].from = from && !(from->eflags & FL_VM) ? from : 0;
     depth++;

@@ -18,5 +18,7 @@ void shot_free(struct shot *s);
 /* Every INT 10h, as it was called and AX as it came back (0 where that
    isn't known: only a VBE mode set needs it). */
 void shot_int10(u32 ax, u32 bx, u32 ax_out);
+void shot_int10_begin(void);            /* GLOS is about to make an INT 10h for a program (shot_int10 at its return) */
+void shot_session_end(void);            /* the program has gone: none of its calls is under way */
 
 #endif

@@ -29,6 +29,7 @@
 #include "io.h"
 #include "kprintf.h"
 #include "session.h"
+#include "shot.h"
 #include "timer.h"
 #include "vm.h"
 
@@ -183,6 +184,7 @@ static void end(const char *why)
     int remode;
 
     gdbp_program_end(0);                        /* (glos gdb: its program has gone) */
+    shot_session_end();
     ses.active = 0;
     vm_direct(0);                               /* (before the BIOS calls: they run at IOPL 0) */
     if (ses.env_seg) {                          /* the profile's environment: DOS has copied it */
