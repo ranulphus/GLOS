@@ -514,7 +514,7 @@ When SSH is down (boot, supervisor panic), the host tools fall back to the seria
 ### 8.2 lwIP
 
 - lwIP 2.2 in the supervisor, as one task, using the raw API internally.
-- Features: IPv4 and IPv6, DHCP, DNS, an mDNS responder, an SNTP client, TCP sized for 8 MB machines.
+- Features: IPv4 and IPv6, DHCP, DNS, an mDNS responder, an SNTP client, TCP sized for 8 MB machines. (Built so far: IPv4, DHCP, and from M5 IGMP and the mDNS responder; the PC's name is `[net] hostname` in GLOS.CFG.)
 - Ring-3 apps get BSD-style sockets through the GLOS API.
 
 ### 8.3 SSH server

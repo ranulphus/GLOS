@@ -145,7 +145,7 @@ static int setup(void)
     wr(IMR, ISR_PRX | ISR_PTX | ISR_RXE | ISR_TXE | ISR_OVW);
     wr(CR, 0x22);                               /* started */
     wr(TCR, 0x00);
-    wr(RCR, 0x04);                              /* broadcasts too */
+    wr(RCR, 0x0C);                              /* broadcasts and multicasts too (mDNS's group) */
     return 0;
 }
 

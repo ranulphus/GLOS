@@ -642,14 +642,14 @@ static void profile_env(struct bi_profile *p, const char *v)
     p->env[n + len + 1] = 0;
 }
 
-/* GLOS.CFG next to GLOS.EXE: [program NAME.EXT] sections (profiles), and
-   as the shell the [shell] section; key = value lines. */
+/* GLOS.CFG next to GLOS.EXE: [program NAME.EXT] sections (profiles), [net],
+   and as the shell the [shell] section; key = value lines. */
 static void read_cfg(const char *argv0, int shell_keys)
 {
     char line[160], path[128], *k, *v, *e;
     const char *slash = strrchr(argv0, '\\');
     size_t n = slash ? (size_t)(slash - argv0 + 1) : 0;
-    int in_shell = 0;
+    int in_shell = 0, in_net = 0;
     struct bi_profile *prof = NULL;
     FILE *f;
 
@@ -663,6 +663,7 @@ static void read_cfg(const char *argv0, int shell_keys)
             continue;
         if (*k == '[') {
             in_shell = shell_keys && !strnicmp(k, "[shell]", 7);
+            in_net = !strnicmp(k, "[net]", 5);
             prof = NULL;
             if (!strnicmp(k, "[program", 8) && (e = strchr(k, ']')) != NULL) {
                 *e = 0;
@@ -672,13 +673,22 @@ static void read_cfg(const char *argv0, int shell_keys)
             }
             continue;
         }
-        if ((!in_shell && !prof) || !(v = strchr(k, '=')))
+        if ((!in_shell && !prof && !in_net) || !(v = strchr(k, '=')))
             continue;
         for (e = v; e > k && (e[-1] == ' ' || e[-1] == '\t'); e--) ;
         *e = 0;
         for (v++; *v == ' ' || *v == '\t'; v++) ;
         for (e = v + strlen(v); e > v && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' '); e--) ;
         *e = 0;
+        if (in_net) {                           /* hostname = NAME: for mDNS (NAME.local) and DHCP */
+            if (!stricmp(k, "hostname") && strlen(v) < sizeof bi.hostname
+                && strspn(v, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-") == strlen(v)
+                && *v && *v != '-')
+                strcpy(bi.hostname, v);
+            else
+                say("GLOS-WARN cfg-key section=net key=%s", k);
+            continue;
+        }
         if (prof) {
             if (!stricmp(k, "direct")) prof->flags = atoi(v) ? prof->flags | BI_PROF_DIRECT
                                                              : prof->flags & ~BI_PROF_DIRECT;

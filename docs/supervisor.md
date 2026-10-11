@@ -555,7 +555,8 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 - **The network cards** (`kernel/drv/nic.c` chooses; one driver each):
   - **NE2000** (`ne2k.c`, M3): the card's own 16 KB through its data port; nothing in the PC's memory.
   - **RTL8139** (`rtl8139.c`, M5; 86Box's RTL8139C+ answers to it): the mode the whole family has. The card
-    writes received frames into an 8 KB ring in memory, each behind a header of its status and length;
+    writes received frames into a 32 KB ring in memory (8 KB overran in every 1 MB transfer in 86Box), each
+    behind a header of its status and length;
     with WRAP a frame runs past the ring's end instead of being split, so the ring has a frame's room
     more. Four transmit slots of 2 KB, used in turn; a short frame is padded by the driver.
   - **Intel 8255x** (`e100.c`, M5: 82557, 82558, 82559), through its I/O registers. Command blocks for
@@ -567,7 +568,7 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
     by the zero the part puts out after the last address bit.
   - Both take every multicast frame (mDNS's group is one).
   - **Memory a card reads and writes itself** comes from `dma_alloc()`: frames in a row, mapped in the
-    kernel for good at C0800000h (4 MB at most; five frames for the RTL8139, seven for the 8255x). They
+    kernel for good at C0800000h (4 MB at most; eleven frames for the RTL8139, seven for the 8255x). They
     are taken only when that card is found.
 - **The RTC:** registers A, B and C are virtual. The periodic flag follows the program's rate (at most once
   per kernel tick); AF and UF come from the chip. IRQ 8 is raised for the VM when IRQF rises. Writes to
@@ -1211,6 +1212,13 @@ place where nothing else is in DOS by construction.
   - Each session serves one request at a time. The window reopens as requests finish (`ssh_chan_hold`), and no
     new one starts while more than 128 KB of output waits, so a session holds at most a window of input.
   - Files a client leaves open are closed when its channel goes.
+- **The PC's name** (M5): GLOS answers to `NAME.local` (mDNS: lwIP's responder, `kernel/net/net.c`) and offers
+  its SSH server as a service (`_ssh._tcp`, port 22). NAME is `hostname` in GLOS.CFG's `[net]` section
+  (letters, digits and hyphens, 15 at most), or `glos`; DHCP is told the same name. The responder follows
+  the address DHCP gives. Every driver takes multicast frames; lwIP joins the group with IGMP.
+  - Under `/SELFTEST` GLOS asks the responder for its own name with a query made up in the kernel and
+    watches for the answer on its way out (`GLOS-NET mdns answer=ok`): 86Box's SLiRP carries no multicast,
+    so nothing outside can ask in Loop A. That a name resolves on a LAN is for the bench to show.
 - **Forwarded channels** (M5): `direct-tcpip`, the channel type behind `ssh -L` and `ssh -W`, to ports GLOS
   serves itself: `localhost:2345`, the program debugger (§19.2), while it is armed. Any other host or port
   is refused ("connect failed"); GLOS opens no connections for a client. Such a channel carries bytes both

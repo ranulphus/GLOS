@@ -58,7 +58,7 @@ Each step is a commit with its tests.
 
 ## Status
 
-- **A1 to A7 are done** (2026-10-11); as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
+- **A1 to A8 are done** (2026-10-11); as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
   (streams, forwarded channels and the command list), §17.7 (screenshots), §10 and §17.8 (injected input),
   §17.9 (telemetry), §10 (the network cards), §19.2 (the program debugger).
 - **`make loopa-shot`** (`jobs.py shot`): SHOTTEST draws a picture the host can compute, in one mode a run, and
@@ -108,6 +108,8 @@ Each step is a commit with its tests.
   Then let go at once; then run to its end under gdb, which hears of it. A forward to another port, or to
   the debugger unarmed, is refused. `make ssh-test` (the ssh layer natively against OpenSSH) has
   `direct-tcpip` too: 300 KB echoed through `ssh -W`, and beside a command on one connection.
+- **A8:** `jobs.py net` on all ten of its cases: the responder starts under the name GLOS.CFG gives (one case;
+  `glos` elsewhere) and answers `/SELFTEST`'s query for it with the interface's address.
 
 ### Found on the way
 

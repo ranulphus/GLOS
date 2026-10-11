@@ -1,5 +1,5 @@
-/* lwIP's options for GLOS (M3 item 3): IPv4 with ARP, ICMP, UDP, TCP and
- * DHCP, raw API only, NO_SYS: everything runs in the net thread, so there
+/* lwIP's options for GLOS (M3 item 3): IPv4 with ARP, ICMP, UDP, TCP, DHCP
+ * and (M5) IGMP with the mDNS responder, raw API only, NO_SYS: everything runs in the net thread, so there
  * is no locking. The heap and pools are static, in the kernel's bss. */
 #ifndef GLOS_LWIPOPTS_H
 #define GLOS_LWIPOPTS_H
@@ -22,7 +22,12 @@
 #define LWIP_AUTOIP                 0
 #define LWIP_ACD                    0
 #define LWIP_DHCP_DOES_ACD_CHECK    0
-#define LWIP_IGMP                   0
+#define LWIP_IGMP                   1           /* for mDNS's group, 224.0.0.251 */
+#define LWIP_MDNS_RESPONDER         1           /* NAME.local (M5): third_party/lwip/src/apps/mdns */
+#define LWIP_NUM_NETIF_CLIENT_DATA  1           /* (the responder's, on the interface) */
+#define LWIP_NETIF_EXT_STATUS_CALLBACK 1        /* (it follows the address DHCP gives) */
+#define MDNS_MAX_SERVICES           1
+#define MEMP_NUM_SYS_TIMEOUT        (LWIP_NUM_SYS_TIMEOUT_INTERNAL + 8)     /* (and its timers) */
 #define LWIP_DNS                    0
 
 #define LWIP_NETIF_STATUS_CALLBACK  1

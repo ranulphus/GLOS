@@ -402,10 +402,16 @@ if os.environ.get("NET_ONLY"):                  # e.g. NET_ONLY=rtl8139c+,i82557
 
 
 def net(profile, card):
+    """A card found and claimed, DHCP, a TCP echo from the host, and the mDNS responder answering for its name
+    (GLOS asks it itself under /SELFTEST: SLiRP carries no multicast). On bf6 with the RTL8029 the name
+    comes from GLOS.CFG's [net] section; elsewhere it is "glos"."""
     tag = "%s-%s" % (profile, card)
     line = "hello-glos-" + tag
+    name = "bench-g450" if (profile, card) == ("bf6", "ne2kpci") else "glos"
+    cfg = ["--file", batfile("net-%s/GLOS.CFG" % tag, ["[net]", "hostname = " + name]) + "=/TEST/GLOS.CFG"] \
+        if name != "glos" else []
     st, serial = run("net-" + tag, ["--machine", profile, "--net", card, "--net-fwd", "7",
-                                    "--tcp-send", "GLOS-NET dhcp|net:7|" + line] + GLOS_FILES + [
+                                    "--tcp-send", "GLOS-NET dhcp|net:7|" + line] + GLOS_FILES + cfg + [
         "--cmd", "SERSAY HX-START net", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /SELFTEST /RUN WAITSEC 12",
         "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
     want = {"ne2kpci": "rtl8029", "rtl8139c+": "rtl8139", "i82557": "i8255x", "i82558": "i8255x"}.get(card, "ne2000")
@@ -416,6 +422,8 @@ def net(profile, card):
         "card": "GLOS-NET card=%s base=" % want in serial,
         "dhcp": "GLOS-NET dhcp ip=10.0.2.15 gw=10.0.2.2 mask=255.255.255.0" in serial,
         "echo": line in echo,
+        "mdns": "GLOS-NET mdns name=%s.local\n" % name in serial
+                and "GLOS-NET mdns answer=ok name=%s.local\n" % name in serial,
         "clean": "GLOS-WARN" not in serial and "GLOS-PANIC" not in serial and "HX-VECCHK ok" in serial,
     }
     if card == "ne2k":                          # the Crynwr driver owns the ISA card: GLOS refuses it

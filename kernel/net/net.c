@@ -3,8 +3,13 @@
  * services the card (frames go straight into lwIP), unmasks, and runs
  * lwIP's timers; it sleeps until the next IRQ or timer. lwIP runs with
  * NO_SYS=1 in this thread alone, so nothing else may call it. DHCP brings
- * the interface up (GLOS-NET dhcp). Under /SELFTEST a TCP echo service
- * listens on port 7 (tests/loopa/jobs.py net). */
+ * the interface up (GLOS-NET dhcp). The PC answers to NAME.local (mDNS:
+ * lwIP's responder; the name is GLOS.CFG's [net] hostname, or "glos") and
+ * offers its SSH server as a service (_ssh._tcp). Under /SELFTEST a TCP echo
+ * service listens on port 7, and the responder is asked for its own name
+ * with a query made up here (tests/loopa/jobs.py net: SLiRP carries no
+ * multicast, so nothing outside can ask). */
+#include "lwip/apps/mdns.h"
 #include "lwip/dhcp.h"
 #include "lwip/etharp.h"
 #include "lwip/init.h"
@@ -15,6 +20,7 @@
 
 #include <string.h>
 
+#include "glos/bootinfo.h"
 #include "io.h"
 #include "kprintf.h"
 #include "nic.h"
@@ -28,6 +34,9 @@ static volatile u8 pending;
 static int selftest;
 static struct netif nif;
 static u8 txbuf[ETH_MAX];
+static const char *hostname = "glos";
+static u32 bound_at;                            /* the tick DHCP gave an address at */
+static u8 mdns_asked, mdns_answered;            /* /SELFTEST's question to the responder */
 static u32 rng;
 
 /* Another thread has work for this one (the ssh thread's output); from any
@@ -84,10 +93,31 @@ unsigned int glos_net_rand(void)
 
 /* ---- the interface */
 
+/* /SELFTEST: is this frame the responder's answer, our address for our name?
+   (UDP from port 5353 with an A record whose data is the interface's address.) */
+static void mdns_watch(const u8 *f, u32 len)
+{
+    u32 ip = ip4_addr_get_u32(netif_ip4_addr(&nif)), ihl, i;
+    if (len < 14 + 20 + 8 + 12 || f[12] != 8 || f[13] != 0 || f[23] != 17)
+        return;
+    ihl = (f[14] & 15u) * 4;
+    if (len < 14 + ihl + 8 + 12 || f[14 + ihl] != 0x14 || f[14 + ihl + 1] != 0xE9 || !(f[14 + ihl + 8 + 2] & 0x80))
+        return;                                 /* (not from port 5353, or not a response) */
+    for (i = 14 + ihl + 8 + 12; i + 14 <= len; i++)     /* type A, class IN (cache flush or not), TTL, 4 bytes */
+        if (f[i] == 0 && f[i + 1] == 1 && (f[i + 2] & 0x7F) == 0 && f[i + 3] == 1 && f[i + 8] == 0 && f[i + 9] == 4
+            && !memcmp(f + i + 10, &ip, 4)) {
+            mdns_answered = 1;
+            kprintf("GLOS-NET mdns answer=ok name=%s.local\n", hostname);
+            return;
+        }
+}
+
 static err_t link_out(struct netif *n, struct pbuf *p)
 {
     u16 len = pbuf_copy_partial(p, txbuf, sizeof txbuf, 0);
     (void)n;
+    if (mdns_asked && !mdns_answered)
+        mdns_watch(txbuf, len);
     return nic0->send(nic0, txbuf, len) == 0 ? ERR_OK : ERR_IF;
 }
 
@@ -100,8 +130,8 @@ static err_t nif_init(struct netif *n)
     n->mtu = 1500;
     n->hwaddr_len = 6;
     memcpy(n->hwaddr, nic0->mac, 6);
-    n->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP | NETIF_FLAG_ETHERNET | NETIF_FLAG_LINK_UP;
-    netif_set_hostname(n, "glos");
+    n->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP | NETIF_FLAG_ETHERNET | NETIF_FLAG_LINK_UP | NETIF_FLAG_IGMP;
+    netif_set_hostname(n, hostname);
     return ERR_OK;
 }
 
@@ -126,6 +156,37 @@ static void status_cb(struct netif *n)
     ip4addr_ntoa_r(netif_ip4_gw(n), gw, sizeof gw);
     ip4addr_ntoa_r(netif_ip4_netmask(n), mask, sizeof mask);
     kprintf("GLOS-NET dhcp ip=%s gw=%s mask=%s ticks=%u\n", ip, gw, mask, timer_ticks());
+    bound_at = timer_ticks() | 1;
+}
+
+/* /SELFTEST: a question for NAME.local's address, as if from the gateway to
+   mDNS's group, handed to the stack as a received frame. The answer is seen
+   on its way out (mdns_watch). */
+static void mdns_ask(void)
+{
+    static u8 f[14 + 20 + 8 + 12 + 40];
+    static const u8 head[14 + 20] = { 0x01, 0x00, 0x5E, 0x00, 0x00, 0xFB, 0x52, 0x55, 0x0A, 0x00, 0x02, 0x02, 0x08, 0x00,
+                                      0x45, 0x00, 0, 0, 0x12, 0x34, 0, 0, 0xFF, 17, 0, 0, 10, 0, 2, 2, 224, 0, 0, 251 };
+    u32 n = 14 + 20 + 8 + 12, l = (u32)strlen(hostname), sum = 0, i, ip, udp;
+    memcpy(f, head, sizeof head);
+    f[n - 12 + 5] = 1;                          /* one question */
+    f[n++] = (u8)l;
+    memcpy(f + n, hostname, l);
+    n += l;
+    memcpy(f + n, "\005local\0\0\001\0\001", 11);     /* .local, type A, class IN */
+    n += 11;
+    ip = n - 14;
+    udp = ip - 20;
+    f[16] = (u8)(ip >> 8), f[17] = (u8)ip;
+    f[34] = 0x14, f[35] = 0xE9, f[36] = 0x14, f[37] = 0xE9;     /* ports 5353; no UDP checksum */
+    f[38] = (u8)(udp >> 8), f[39] = (u8)udp;
+    for (i = 14; i < 34; i += 2)
+        sum += ((u32)f[i] << 8) | f[i + 1];
+    sum = (sum & 0xFFFF) + (sum >> 16);
+    sum = ~((sum & 0xFFFF) + (sum >> 16));
+    f[24] = (u8)(sum >> 8), f[25] = (u8)sum;
+    mdns_asked = 1;
+    net_rx(nic0, f, n);
 }
 
 /* ---- /SELFTEST: TCP echo on port 7; the connection closes after a line */
@@ -184,6 +245,12 @@ static void net_thread(void *arg)
     netif_set_status_callback(&nif, status_cb);
     netif_set_up(&nif);
     dhcp_start(&nif);
+    mdns_resp_init();
+    if (mdns_resp_add_netif(&nif, hostname) != ERR_OK
+        || mdns_resp_add_service(&nif, hostname, "_ssh", DNSSD_PROTO_TCP, 22, NULL, NULL) < 0)
+        kprintf("GLOS-NET error=mdns\n");
+    else
+        kprintf("GLOS-NET mdns name=%s.local\n", hostname);
     if (selftest)
         echo_start();
     sshd_net_start(net_kick);
@@ -203,6 +270,8 @@ static void net_thread(void *arg)
         sti();
         sys_check_timeouts();
         sshd_net_poll();
+        if (selftest && bound_at && !mdns_asked && timer_ticks() - bound_at > 3 * 1024)
+            mdns_ask();                         /* (the responder has probed for its name by then) */
     }
 }
 
@@ -237,5 +306,7 @@ u32 net_stat(char *buf, u32 max, int json)
 void net_start(int st)
 {
     selftest = st;
+    if (vm.bi->hostname[0])
+        hostname = vm.bi->hostname;
     thread_create("net", PRIO_URGENT, net_thread, NULL);
 }

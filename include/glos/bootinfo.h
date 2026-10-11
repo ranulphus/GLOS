@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 1
+#define BOOTINFO_VERSION 2
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -116,6 +116,7 @@ struct bootinfo {
     char authkeys[2048];                        /* KEYS\AUTHKEYS: authorized_keys lines (ssh-ed25519) */
     bi_u32 authkeys_len;
     struct bi_profile profiles[BI_PROFILES];    /* M4e: GLOS.CFG's [program] sections */
+    char hostname[16];                          /* M5: GLOS.CFG's [net] hostname (letters, digits, hyphens); empty: "glos" */
 };
 
 /* The resident stub's data (loader/stub.asm), at offset 0 of its segment.
