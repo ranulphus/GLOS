@@ -2,8 +2,9 @@
  * mode every member of the family has: one receive ring the card fills, and
  * four transmit slots.
  *
- * The card reads and writes memory itself: an 8 KB receive ring (with 16
- * bytes more, and room for the frame it runs past the end with: WRAP) and
+ * The card reads and writes memory itself: a 32 KB receive ring (with 16
+ * bytes more, and room for the frame it runs past the end with: WRAP; 8 KB
+ * overran in every 1 MB transfer in 86Box, a frame or two each time) and
  * four 2 KB transmit buffers, from dma_alloc(). In the ring each frame has
  * a header of two words, its status and its length with the CRC; the next
  * starts on the next multiple of four. CAPR, where the driver has read to,
@@ -45,8 +46,8 @@
 
 #define TSD_OWN  0x2000                 /* the card has taken the frame (or the slot was never used) */
 
-#define RING     8192u
-#define RING_FRAMES 3                   /* 8192 + 16 + a frame, in pages */
+#define RING     32768u
+#define RING_FRAMES 9                   /* 32768 + 16 + a frame, in pages */
 #define TX_SLOTS 4
 #define TX_SIZE  2048u
 
@@ -78,7 +79,7 @@ static int start(void)
     wr8(CR, CR_RE | CR_TE);                     /* (the two below take no writes before this) */
     wr32(MAR0, 0xFFFFFFFF);                     /* every multicast group (mDNS's is one) */
     wr32(MAR0 + 4, 0xFFFFFFFF);
-    wr32(RCR, 0x0000E78E);                      /* frames for us, multicasts and broadcasts; WRAP; an 8 KB
+    wr32(RCR, 0x0000F78E);                      /* frames for us, multicasts and broadcasts; WRAP; a 32 KB
                                                    ring; whole frames, in DMA bursts of any length */
     wr32(TCR, 0x03000700);                      /* the standard gap between frames; DMA bursts of 2048 */
     wr16(CAPR, 0xFFF0);                         /* read to the start (16 behind) */
