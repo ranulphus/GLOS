@@ -17,6 +17,7 @@
 
 #include "glos/bootinfo.h"
 #include "agent.h"
+#include "app.h"
 #include "arch.h"
 #include "dpmi.h"
 #include "kprintf.h"
@@ -47,8 +48,10 @@ static void push16(u32 ss, u32 *sp, u32 v)
 int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u16 *words, u32 nwords)
 {
     struct trapframe *f;
-    u32 here, ss, sp, i, flags, ivt, vif = vm.vif, ax = r->eax, bx = r->ebx;
+    u32 here, ss, sp, i, flags, ivt, vif = current->vif, ax = r->eax, bx = r->ebx;
 
+    if (current != vm.thread)                   /* an app's: the VM thread makes it, when the system VM is idle */
+        return app_rm_call(from, r, kind, vec, words, nwords);
     if (depth >= NEST_MAX || (!dctx && !r->ss && !r->sp))
         return -1;                              /* (without a client, the caller gives a stack: sessions) */
     __asm__ volatile("movl %%esp, %0" : "=r"(here));
@@ -78,11 +81,11 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
     }
     if (kind != RM_FAR) {                       /* handlers start with IF and TF clear */
         flags &= ~(FL_IF | FL_TF);
-        vm.vif = 0;
+        current->vif = 0;
     }                                           /* a far procedure keeps the caller's IF ([DPMI0.9] gives
                                                    the structure's FLAGS no part in 0301h; as HDPMI32i) */
     f->eflags = (flags & FL_ARITH) | FL_VM | FL_IF | 2;
-    if (vm.vme && vm.vif)                       /* (nest_enter's IRET skips vm_return(), which sets VIF) */
+    if (vm.vme && current->vif)                       /* (nest_enter's IRET skips vm_return(), which sets VIF) */
         f->eflags |= FL_VIF;
     f->ss = ss;
     f->esp = sp;
@@ -123,8 +126,8 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
     r->es = (u16)f->v86_es;
     r->fs = (u16)f->v86_fs;
     r->gs = (u16)f->v86_gs;
-    r->flags = (u16)((f->eflags & FL_ARITH) | (vm.vif ? FL_IF : 0) | 2);
-    vm.vif = vif;
+    r->flags = (u16)((f->eflags & FL_ARITH) | (current->vif ? FL_IF : 0) | 2);
+    current->vif = vif;
     return 0;
 }
 
@@ -135,13 +138,25 @@ int rm_nest_return(struct trapframe *tf)
     nest_leave(nests[depth - 1].save, 1);
 }
 
+/* The frame of the nested call at depth d (1: the outermost). */
+struct trapframe *rm_nest_frame(int d) { return d >= 1 && d <= depth ? nests[d - 1].f : 0; }
+
+/* The nested call at depth d ends where the code inside it is, and those
+   inside it with it: its rm_call() returns (an app's process has ended in
+   the call the VM thread made for it, app.c). */
+void rm_nest_end(int d)
+{
+    depth = d;
+    nest_leave(nests[d - 1].save, 2);
+}
+
 /* The real-mode vector for a reflection from the host's own handler: the
    IVT's, unless that is one of the client's callbacks (DOS/4GW points the
    IVT at an RMCB that calls its PM handler: the "automatic pass-up"), when
    it is the vector the callback or the PM hook took over (§14.5). */
 u32 rm_vector(u8 vec)
 {
-    u32 v = vm_rd32(vec * 4u), ip = v & 0xFFFF;
+    u32 v = app_ivt_get(vec), ip = v & 0xFFFF;
     if ((v >> 16) == vm.loader_cs && ip >= vm.bi->rmcb_off && ip < vm.bi->rmcb_off + 2 * NRMCB)
         return dctx->rm_prev[vec];
     return v;
@@ -169,7 +184,7 @@ void rm_reflect(struct trapframe *tf, u8 vec)
     r.esi = tf->esi;
     r.edi = tf->edi;
     r.ebp = tf->ebp;
-    r.flags = (u16)((tf->eflags & FL_ARITH) | (vm.vif ? FL_IF : 0) | 2);
+    r.flags = (u16)((tf->eflags & FL_ARITH) | (current->vif ? FL_IF : 0) | 2);
     r.ds = r.es = dctx->rm_seg;
     r.cs = (u16)(v >> 16);
     r.ip = (u16)v;

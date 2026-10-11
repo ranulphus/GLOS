@@ -187,6 +187,20 @@ static u8 *at(u32 a, u32 n)
     return (u8 *)lin;
 }
 
+/* A copy to or from the program's memory, on the ssh thread: with the VM
+   thread's context loaded for it (an app's thread may have run since the
+   program stopped, and left its own: M6). */
+static u32 prog_copy(void *dst, const void *src, u32 n)
+{
+    u32 f = irq_save(), r;
+    struct dpmi_ctx *was = dctx;
+    dpmi_ctx_load(vm.thread->ctx);
+    r = ucopy(dst, src, n);
+    dpmi_ctx_load(was);
+    irq_restore(f);
+    return r;
+}
+
 /* eax ecx edx ebx esp ebp esi edi eip eflags cs ss ds es fs gs */
 static u32 *reg(struct trapframe *tf, u32 n)
 {
@@ -290,7 +304,7 @@ static void command(char *p)
         n = *q++ == ',' ? parse_hex(&q) : 0;
         if (n > sizeof mem)
             n = sizeof mem;
-        if (!tf || !(m = at(a, n)) || ucopy(mem, m, n) != 0) {
+        if (!tf || !(m = at(a, n)) || prog_copy(mem, m, n) != 0) {
             ksnprintf(out, sizeof out, "E14");
             break;
         }
@@ -309,7 +323,7 @@ static void command(char *p)
         }
         for (i = 0; i < n && hexv(q[i * 2]) >= 0 && hexv(q[i * 2 + 1]) >= 0; i++)
             mem[i] = (u8)((hexv(q[i * 2]) << 4) | hexv(q[i * 2 + 1]));
-        ksnprintf(out, sizeof out, i == n && ucopy(m, mem, n) == 0 ? "OK" : "E14");
+        ksnprintf(out, sizeof out, i == n && prog_copy(m, mem, n) == 0 ? "OK" : "E14");
         break;
     case 'c':
     case 's':

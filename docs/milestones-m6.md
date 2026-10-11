@@ -1,0 +1,161 @@
+# GLOS M6: the GUI core on VBE
+
+The task-level breakdown of PRD §19's M6, in the form of [milestones-m5.md](milestones-m5.md). PRD sections: §5.4
+(processes), §6.5 (the virtual PIT), §6.8 (the DOS server), §9 (graphics and the window system), §10.1–10.2 (the
+API).
+
+**Exit (PRD §19):** two GLOS apps run at once, and a busy-looping one never stalls the other or the agent.
+Desktop golden images match at 8, 16 and 32 bpp on the generic VBE card and on a Matrox card in VBE mode.
+
+## Decisions taken here (proposals, PRD §21's open questions)
+
+- **Q8, launching: DOS EXEC, and the program's own stub.** A GLOS app starts as any DOS program does: the
+  resident stub EXECs it, its go32 stub loads it and switches to protected mode, its start-up code runs. It
+  becomes an app when it first calls the GLOS API. GLOS loads no images itself: nothing of DJGPP's stub or
+  start-up contract is re-implemented, and a program that never calls the API is an exclusive session as
+  before (D12's one EXE).
+- **Q6, a real-mode child of an app** (its `system()`, a spawn) runs in the system VM as part of that app's
+  call into it, which is an exclusive session for as long as it lasts: the other apps wait.
+- **Windows keep their pixels.** Each window has a backing store at the screen's depth, owned by the kernel
+  (system memory in M6; VRAM on a Matrox card in M7). The screen is composed from them by dirty rectangles. An
+  app never has to repaint because another window moved, a screenshot or a VNC frame is a copy, and the
+  desktop comes back after an exclusive session without asking anyone. The cost is memory: a full-screen
+  window is 300 KB at 640×480×8 and 1.5 MB at 1024×768×16, on machines that have it at those modes.
+- **Q11, the toolkit** is M9's; M6 gives it the 2D library and events to build on. Proposed then: our own
+  retained-mode toolkit (the look of D7 is its own, and microui and Nuklear are immediate-mode libraries that
+  repaint everything on every event).
+- **Q5 and Q16, the look and the fonts,** are the owner's: asked in step G, with pictures from the real
+  renderer.
+
+## How an app runs (step A, as built: `kernel/app/app.c`)
+
+- **An app is a DPMI context with a thread of its own.** Until now the one context ran on the VM thread. The
+  scheduler's switch hook loads what a thread that runs user-mode code needs when it gets the CPU: its
+  context (page directory, LDT, watchpoints), the FPU's state, and for an app an I/O map out of reach. The
+  virtual interrupt flag is the thread's.
+- **Becoming one.** The program is EXECed and starts as a session on the VM thread. Its first API call
+  (`glos_init`, function 1 of the entry DPMI 0A00h "GLOS" gives) moves its context to a new thread, which goes
+  on from the call's return; the VM thread goes to the stub's `detached` entry, and the stub asks for its
+  next job as if the program had ended, though DOS still has it as a process, the stub's child. Refused, with
+  a reason, for a program GLOS didn't start itself (COMMAND.COM's child, a program's child), from a handler
+  or a callback, for a 16-bit client, and for a session started with `glos run --exclusive` or in direct
+  mode: the program then runs on as the session it is.
+- **Its protected-mode code runs on its own thread,** preempted like any other, and so does what the DPMI
+  host can do for it without real mode: memory, descriptors, handlers, exceptions, its API calls.
+- **What needs real mode needs the system VM.** Every real-mode call the host makes for a client goes through
+  one function (`rm_call`: a reflected DOS or BIOS interrupt, 0300h to 0302h, a DOS memory block). On an
+  app's thread that function hands the call to the VM thread and waits. The VM thread makes it when the stub
+  asks for its next job: nothing else is in DOS then, by construction (as for SFTP's calls since M3). For
+  the length of the call the VM thread is the app's: the app's context is loaded, so its real-mode
+  callbacks, and whatever they call, run exactly as in a session. (The first design re-ran the app's whole
+  trap on the VM thread; handing over only the call needs no guess at which traps need real mode.)
+- **DOS state for each app** (PRD §6.8), put in place for the call and taken out after:
+  - the current PSP and DTA, in DOS's swappable data area;
+  - the current drive and directory, set through DOS only when DOS has another (so an app that stays where
+    the system VM is costs nothing), and read back after a call that may have changed them (0Eh, 3Bh, 4Bh,
+    71xxh);
+  - the real-mode vectors the app changed: the table is the system's while the app is out of the VM,
+    compared with it when the app leaves and its changes put back when it returns. 0200h and 0201h on the
+    app's thread read and write its own copy;
+  - a spare parent frame. DOS ends a process by going back into the last INT 21h frame of its parent, kept
+    in the parent's PSP; the parent is the stub, which has made other calls since. For the call that pointer
+    is a spare frame on the stub's kill stack, and DOS goes on at the program's terminate address, which the
+    mode switch pointed at the host.
+- **A program an app runs** (its `system()`, a spawn: INT 21h 4Bh) runs inside that call, and is an exclusive
+  session for as long as it lasts (Q6). Its exit code is asked of DOS at once and kept for the app's own
+  INT 21h 4Dh: DOS has one for everybody, and another app may end first.
+- **Its end.** INT 21h 4Ch, a kill or a crash on its own thread frees the context there; the thread then has
+  the VM thread make one last call, INT 21h 4Ch as the program. An end inside a call the VM thread is making
+  (in a callback, in real mode, DOS's own abort) ends that call. Either way DOS has ended the process when
+  the VM thread sees the terminate address; the exit code is INT 21h 4Dh's.
+- **Paused by sessions.** While a session runs (a DOS command, a program that has yet to become an app, an
+  app's child program) every app stops at its next trap (PRD §6.9), and calls into the VM wait for the stub
+  anyway. A session's end wakes them.
+- **Callbacks' addresses** are ARPLs in the stub, the same in every context, so each belongs to one context
+  at a time (there are 32 now, for all of them together): a call that arrives while another context is the
+  VM's returns at once.
+- **The agent.** A job whose program becomes an app stays that app's: its output (while the VM thread makes
+  its DOS calls), its exit code, its kill (`glos kill SEQ`, its client going away). The stub is free, and
+  the next job runs. `glos ps` and `glos stat` list apps; `glos exit` ends them first.
+- **The scheduler.** Apps share the normal class with the VM thread, in 20-tick turns. A thread woken from
+  a wait with some of its turn left goes ahead of the queue (an app back from a DOS call doesn't wait out a
+  busy app's turn, and can't starve it: its own turn runs out too); the VM thread goes ahead whenever it is
+  woken, for an interrupt DOS or the BIOS must not wait a round of apps for.
+- **The FPU** is saved and loaded at the switch between threads that run user-mode code (not lazily: two
+  instructions a switch, and no CR0.TS beside the clients' own MP and EM). An app begins with its program's
+  state as it was at `glos_init`.
+- **Devices.** An app reaches no port: every IN and OUT traps. Step B gives it a timer and a PIC of its own;
+  until then reads give FFh. INT 15h 86h (the BIOS wait, DJGPP's `delay`) is a sleep on its own thread.
+- **Not yet:** an app's raw mode switch (0306h) ends it with a crash report (DJGPP has no use for it); an app
+  waiting for a key in DOS or the BIOS holds the system VM until step E gives it its own keyboard; FPU errors
+  still arrive the PC's way, at whoever runs then (step B); a real-mode child of an app can't be killed on
+  its own, as a session client's child can't.
+
+## Plan (2026-10-11)
+
+Each step is a commit with its tests. The gate (`make gate`) must still pass at B, at F and at the end.
+
+- **A. App threads.**
+  - Contexts on the heap; the scheduler's switch hook (page directory, LDT, watchpoints, FPU, I/O map); the
+    virtual IF the thread's.
+  - `glos_init` (the API's entry through 0A00h, function 1): the client leaves the VM thread; the stub's
+    detached entry; `glos ps` and `glos stat` list apps, `glos kill SEQ` kills one.
+  - An app's real-mode calls, made by the VM thread at the stub's idle point.
+  - DOS state for each app; the end; apps paused while a session runs.
+  - The agent: an app's job stays the app's (its output, its exit code) while other jobs run.
+  - The API so far: `glos_version`, `glos_init`, `glos_yield`, `glos_sleep`, `glos_ticks` (an app ends as any
+    program does). The client library (`sdk/libglos`, DJGPP) and `include/glos/api.h`.
+  - T (`jobs.py apps`): two APPTESTs at once, each in its own directory with its own files, directory search
+    and timing loop, their results as when run alone; a third that spins forever stalls neither them nor
+    `glos tick` (the gate's 2 s rule); it is killed; a session beside them (a DOS command over ssh) pauses
+    and resumes them; an app crashes and the others go on; an app runs a real-mode child; `glos exit` with
+    an app running ends it first.
+- **B. An app's timer.** The virtual PIT and PIC, IRQ 0 to a protected-mode handler, latched reads.
+  T: DJGPP's `uclock` and a hooked timer at 100 Hz count right in two apps at once; djtst205's TIMER as an app.
+- **C. The display layer and the 2D library.**
+  - `kernel/gfx/`: surfaces at 8, 16 and 32 bpp; fills, lines, blits with clipping and a clip region;
+    1-bit glyph text; the 8 bpp palette (a 6×6×6 cube, greys and the system colours) and dithered images.
+  - Fonts: bitmaps made at build time from open TrueType fonts by a host tool (candidates in step G).
+  - The display: a VBE mode with a linear framebuffer, set through the system VM (`[display]` in GLOS.CFG:
+    mode and depth); N screens in the data model, one driven; text mode back at `glos exit` and for sessions.
+  - T: host tests of every primitive against reference pictures at each depth; `glos shot` of a test card
+    equals the host's rendering, on the S3 and the G200.
+- **D. The window manager.** Windows with backing stores, z-order, focus, moving and resizing, the composer
+  (dirty rectangles), decorations, the software pointer, the task bar (programs, clock, the remote-session
+  indicator of D35).
+  T: host tests of the composer (windows as rectangles of colour); golden desktops.
+- **E. Input and events.** The keyboard and the PS/2 mouse for the desktop (the kernel reads the 8042 as it
+  does already); focus, Alt-Tab, moving and resizing by keys (D34); an event queue for each app; INT 16h,
+  port 60h with IRQ 1, and INT 33h served to an app from its queue (PRD §6.8).
+  T: `glos key` and `glos mouse` drive windows over ssh; an app reading keys three ways gets them only while
+  it has the focus.
+- **F. API v1** (PRD §10.1): windows, events, the 2D calls on a window's surface, direct access to its pixels
+  with `present`; headers with size-prefixed structures and an append-only function table; libglos.
+  T: the exit's first half with windows: two apps drawing at once, one busy-looping.
+- **G. The look** (D7, Q5, Q16): decorations, colours, the pointer, icons for the task bar, the fonts. The
+  owner chooses from rendered candidates.
+- **H. The exit.** Golden desktops at 8, 16 and 32 bpp on the S3 and on the G200 in VBE mode; the gate.
+
+## Status
+
+- **A. App threads: done** (2026-10-12). `make loopa-apps`: on the Pentium II with the RTL8029 and the 486DX2
+  with the NE2000, 24 apps a run: alone; two at once beside one that loops for ever (`glos tick` answered
+  within 0.11 s throughout; each got through 8.8 turns a second on the Pentium II against 11.7 alone, 4.5
+  against 7.7 on the 486, the two sharing the system VM for their DOS calls); beside a session, a crash and
+  each other; a real-mode child; kills of one looping, one asleep and one waiting in DOS for the keyboard;
+  ten more that start and end, after which the kernel has the memory it had; `glos exit` with one running.
+  `GLOS.EXE /RUN` with an app on the three machines: GLOS leaves with the app's exit code.
+  Found on the way:
+  - a new thread's first frame can't be built by code running on that thread's stack: it lies where the
+    frame goes (`frame_start`);
+  - beside a busy app, every DOS call of another waited out the busy one's turn (10 ms on average): turns
+    are now kept across waits, and a woken thread with turn left goes ahead (the scheduler, supervisor.md
+    §7);
+  - a kill asked for while the VM thread made a call for an app outlived the app, and killed the next
+    program started;
+  - FreeDOS leaves InDOS at 1 when a program is killed inside DOS (it counts one call's end where MS-DOS
+    zeroes the flag): INT 29h output was then never captured again, and every later kill waited its two
+    seconds. The stub's NEXT, where nothing is in DOS, now clears it (`GLOS-VM indos=reset`).
+  Limits, as built: four agent jobs at once (an app keeps its job's slot while it runs); one current
+  directory an app (the current drive's).
+- B to H: to do.

@@ -12,11 +12,17 @@
  *
  * The file is written by the program's own DOS calls, nested from here,
  * unless DOS was busy (InDOS) when the crash came: then the log has all of
- * it. While the report is written the client gets no more interrupts. */
+ * it. While the report is written the client gets no more interrupts.
+ *
+ * A GLOS app's report is written from its own thread (M6): the DOS calls
+ * wait for the system VM like any of the app's, and other reports may be
+ * written meanwhile, so the file is written from a copy of the text. */
 #include "glos/bootinfo.h"
+#include "app.h"
 #include "arch.h"
 #include "dpmi.h"
 #include "kprintf.h"
+#include "mm.h"
 #include "vm.h"
 
 static char text[2048];
@@ -98,28 +104,33 @@ static void put_str(u32 lin, const char *s)
     while (*s++);
 }
 
-/* 0, with the file's name in name; -1 with why there. */
-static int write_file(struct trapframe *tf, char *name, u32 n)
+/* The file, from t (tn bytes): 0, with the file's name in name; -1 with why
+   there. */
+static int write_file(struct trapframe *tf, char *name, u32 n, const char *t, u32 tn)
 {
     struct rmregs r;
     u32 lin, i, k, handle;
     u16 seg;
 
-    if (vm.indos && vm_rd8(vm.indos)) {
+    if (!t) {
+        ksnprintf(name, n, "none why=memory");
+        return -1;
+    }
+    if (!app_cur() && vm.indos && vm_rd8(vm.indos)) {
         ksnprintf(name, n, "none why=indos");
         return -1;
     }
     memset(&r, 0, sizeof r);
     r.eax = 0x4800;
-    r.ebx = (64 + tlen + 15) >> 4;
+    r.ebx = (64 + tn + 15) >> 4;
     if (dos(tf, &r) != 0) {
         ksnprintf(name, n, "none why=memory");
         return -1;
     }
     seg = (u16)r.eax;
     lin = seg * 16u;
-    for (i = 0; i < tlen; i++)
-        vm_wr8(lin + 64 + i, (u8)text[i]);
+    for (i = 0; i < tn; i++)
+        vm_wr8(lin + 64 + i, (u8)t[i]);
     put_str(lin, "C:\\GLOS");
     memset(&r, 0, sizeof r);
     r.eax = 0x3900;                             /* the directories may be there already */
@@ -148,7 +159,7 @@ static int write_file(struct trapframe *tf, char *name, u32 n)
         memset(&r, 0, sizeof r);
         r.eax = 0x4000;
         r.ebx = handle;
-        r.ecx = tlen;
+        r.ecx = tn;
         r.edx = 64;
         r.ds = seg;
         dos(tf, &r);
@@ -170,7 +181,7 @@ static int write_file(struct trapframe *tf, char *name, u32 n)
 
 void crash_report(struct trapframe *tf, const char *why)
 {
-    char path[80], b[140], name[48];
+    char path[80], b[140], name[48], *copy;
     u8 code[16];
     u32 st[12], sp, i, n, wide = dctx->bits32;
 
@@ -180,7 +191,7 @@ void crash_report(struct trapframe *tf, const char *why)
     line("why=%s vec=%02x err=%04x prog=%s psp=%04x bits=%u mode=%s", why, tf->vec & 0xFF, tf->err & 0xFFFF,
          path[0] ? path : "?", dctx->psp, wide ? 32 : 16, (tf->eflags & FL_VM) ? "v86" : "pm");
     line("cs:eip=%04x:%08x ss:esp=%04x:%08x eflags=%08x cr2=%08x", tf->cs & 0xFFFF, tf->eip, tf->ss & 0xFFFF,
-         tf->esp, (tf->eflags & ~(FL_IF | FL_VIF | FL_VIP)) | (vm.vif ? FL_IF : 0), tf->vec == 14 ? dctx->cr2 : 0);
+         tf->esp, (tf->eflags & ~(FL_IF | FL_VIF | FL_VIP)) | (current->vif ? FL_IF : 0), tf->vec == 14 ? dctx->cr2 : 0);
     line("eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x", tf->eax, tf->ebx, tf->ecx, tf->edx,
          tf->esi, tf->edi, tf->ebp);
     for (n = 16; n && user_rd((u16)tf->cs, tf->eip, code, n) != 0; n--) ;
@@ -204,7 +215,12 @@ void crash_report(struct trapframe *tf, const char *why)
     seg("es", tf->es);
     seg("ss", tf->ss);
     line("handlers=%u lstack=%u nesting=%u", dctx->npe, dctx->lstack_use, rm_nesting());
-    write_file(tf, name, sizeof name);
+    n = tlen;
+    if ((copy = kmalloc(n ? n : 1)))
+        memcpy(copy, text, n);
+    write_file(tf, name, sizeof name, copy, n);
+    if (copy)
+        kfree(copy);
     kprintf("GLOS-CRASH file=%s\n", name);
     vm.kill_reason = "crash";
     dpmi_end(tf, 0xFF, 1);

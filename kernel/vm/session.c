@@ -24,6 +24,7 @@
 #include <string.h>
 
 #include "glos/bootinfo.h"
+#include "app.h"
 #include "dpmi.h"
 #include "gdbprog.h"
 #include "io.h"
@@ -43,6 +44,7 @@ static struct session {
     u32 dangle[256];                            /* what the program left pointing into its own memory, or 0 */
     const struct bi_profile *prof;              /* its profile, or 0 */
     u8 direct;                                  /* glos run --direct */
+    u8 exclusive;                               /* glos run --exclusive: not to become an app */
     u16 env_seg, env_old;                       /* the environment GLOS made, and the EXEC block's own */
     u32 env_pb;                                 /* the EXEC block (linear) */
     u32 t0;
@@ -186,6 +188,7 @@ static void end(const char *why)
     gdbp_program_end(0);                        /* (glos gdb: its program has gone) */
     shot_session_end();
     ses.active = 0;
+    app_session_end();                          /* (paused apps run on) */
     vm_direct(0);                               /* (before the BIOS calls: they run at IOPL 0) */
     if (ses.env_seg) {                          /* the profile's environment: DOS has copied it */
         if (vm_rd16(ses.env_pb) == ses.env_seg) {
@@ -227,12 +230,13 @@ static void end(const char *why)
 }
 
 /* glos run's options for the session the stub's next EXEC begins (E4). */
-static struct { u8 direct; char profile[16]; } job;
+static struct { u8 direct, exclusive; char profile[16]; } job;
 
-void session_job(int direct, const char *profile)
+void session_job(int direct, int exclusive, const char *profile)
 {
     u32 i;
     job.direct = (u8)(direct != 0);
+    job.exclusive = (u8)(exclusive != 0);
     for (i = 0; profile[i] && i < sizeof job.profile - 1; i++)
         job.profile[i] = profile[i] >= 'a' && profile[i] <= 'z' ? (char)(profile[i] - 32) : profile[i];
     job.profile[i] = 0;
@@ -351,6 +355,7 @@ void session_exec(const struct trapframe *tf)
     ses.n++;
     ses.prof = profile_for(psp == vm.loader_psp && job.profile[0] ? job.profile : ses.prog);
     ses.direct = psp == vm.loader_psp && job.direct;
+    ses.exclusive = psp == vm.loader_psp && job.exclusive;
     ses.env_seg = 0;
     if (ses.prof && ses.prof->env[0])
         profile_env(tf, psp);
@@ -392,6 +397,12 @@ void session_stub_next(void)
 }
 
 int session_active(void) { return ses.active; }
+
+const char *session_prog(void) { return ses.prog; }
+
+const u32 *session_ivt(void) { return ses.ivt; }
+
+int session_exclusive(void) { return ses.active && ses.exclusive; }
 
 u32 session_memory_kb(void) { return ses.active && ses.prof ? ses.prof->memory_kb : 0; }
 

@@ -107,7 +107,9 @@ to COM1 at each step:
 - **Functions:** LEAVE (1, the exit code); NEXT (4, the stub asks what to run, passing how the last EXEC
   ended: INT 21h 4Dh's AX, 10000h plus the DOS error if EXEC failed, FFFFFFFFh at first; EAX = 1 means EXEC
   the stub's path and tail); RESIDENT (5, the stub has moved to `arg`:0). DOSPTR (2) and EXEC (3) were M2's
-  and are no longer used.
+  and are no longer used. NEXT with FFFFFFFDh (M6): the program EXECed last has become a GLOS app (§12.5) and
+  runs on; the kernel sent the VM to the stub's `detached` entry (`detached_off`, bootinfo version 3), which
+  takes the stub's own stack back and asks again.
 - **Bootinfo fields:** `vm_resume_off`, `vm_state_off`, `bp_call_off`, `bp_xms_off`, `indos`, `sda`,
   `kill_off` and `kill_sp` (the kill stub and its 256-byte stack, §9.6), `stub_paras`, and in XMS mode the
   driver's version (`xms_ver`, `xms_rev`, `xms_hma`), whether the HMA was already taken (`hma_used`, so
@@ -321,6 +323,25 @@ along, and once the client had ended and its LDT was gone, that thread's next tr
 - Each stack has a canary word at its base, checked at every switch (`GLOS-PANIC why=stack-overflow`).
 - `/SELFTEST` adds a bulk thread that never blocks and an urgent thread sleeping 10 ticks at a time. Over the
   M2 batch on all six Loop A combinations, bulk got 30% of the contended ticks and the sleeper was never late.
+
+**As built (M6: threads that run user-mode code):**
+- The VM thread and each GLOS app's thread (§12.5) run user-mode code. Such a thread has a virtual interrupt
+  flag of its own (`thread.vif`; it was the VM's, a global), may have a DPMI context (`thread.ctx`), and has
+  the FPU's state while another has the FPU. `schedule()` calls a switch hook before every switch to another
+  thread (`user_switch`, kernel/dpmi/host.c): for a thread that runs user-mode code it loads the context (CR3,
+  the LDT, DR0 to DR3 and DR7 when a context has watchpoints), puts the TSS's I/O map in or out of reach (an
+  app reaches no port) and swaps the FPU's state (FNSAVE, FRSTOR, §14.7). A kernel thread runs on with
+  whatever was loaded, and must not look at `dctx`: code on another thread that needs a context's memory
+  loads it for the copy (glos gdb's reads and writes).
+- **Turns.** A turn is 20 ticks of running, however often the thread waits meanwhile. A thread woken with
+  some of its turn left goes ahead of its class's queue and takes the CPU from a thread of its class; one
+  that loses the CPU that way keeps the rest of its turn, and goes on after those that went ahead. So an app
+  back from a DOS call doesn't wait out a busy app's turn (measured in the apps suite: a DOS call beside a
+  busy-looping app took 10 ms on average before this, the wait for half a turn), and can't starve the busy
+  one either: its own turn runs out. `thread_yield()` gives the rest of the turn up.
+- **The VM thread goes ahead whenever it is woken** (`thread.front`), and to the head of the queue when an
+  IRQ is raised for it while it is ready (`vm_kick`, `sched_front`): it wakes for an interrupt DOS or the
+  BIOS must not wait a round of busy apps for (the BIOS's tick is 55 ms; three busy apps' turns are 60).
 
 ## 8. Time and PIT ownership [fixed]
 
@@ -943,6 +964,57 @@ direct = 1
   physical.
 - Other ranges are mapped into the user region.
 
+### 12.5 GLOS apps: contexts with threads (M6 step A; `kernel/app/`)
+
+- **Several contexts.** A context is on the heap (about 20 KB, with 72 KB for its LDT and 16 KB for the
+  thread's stack when it is an app's). `dctx` is the one loaded, the running thread's own (§7); the session's
+  client's is the VM thread's.
+- **An app** is a 32-bit client that called the GLOS API's init (the entry 0A00h "GLOS" gives is a HLT at
+  `SEL_TRAMP:TR_VENDOR`; the function is in EAX, `include/glos/api.h`). Checked first: the client is the
+  session's own program, at its level 1, outside every handler and nested call; the stub EXECed it (its PSP's
+  parent is the stub's, and a session is active); the session isn't direct or `--exclusive`. Then:
+  - a thread is made (`app<id>`, normal class) with the FPU's state as it is and the client's frame as the
+    far call's return left it; the context becomes that thread's;
+  - the program's real-mode vector changes since its session began are taken out of the table and kept;
+    DOS's current PSP and DTA become the stub's (in the SDA); the drive and directory are read;
+  - the VM thread's frame becomes the stub's `detached` entry (§2.1), on the kill stack with the virtual IF
+    off. The stub's NEXT then ends the session (`why=stub`), which lets the app's thread run: it waits like
+    every app while a session is active.
+- **`rm_call()` on an app's thread** queues the call (its arguments stay on the app's kernel stack, which is
+  in every address space) and blocks. `app_vm_turn()`, at every NEXT, takes up to 16 calls or 8 ticks' worth,
+  then the system VM's own work has its turn (the DOS server, the agent's next job). For each call
+  (`serve()`): DOS's drive and directory are made the app's if they differ (as the system, before anything
+  else: a kill then finds no program); the VM thread's virtual IF, the agent's capturing job, DOS's PSP and
+  DTA, the vector table (copied whole, then the app's changes written in) and the stub's PSP:2Eh (the spare
+  parent frame, 160 bytes below the kill stack's top) are saved and made the app's; the context is loaded;
+  the call is made with `rm_call()` as the VM thread's own, at nesting depth 1; and all of that is undone,
+  the vector table compared to find the app's changes. `from` is the app's own protected-mode frame, so a
+  callback run inside the call finds the stack it should use (§14.2).
+- **The level's base.** Level 1 of a session's client began in the VM thread's top frame at depth 0; an
+  app's, for the VM thread, in the frame of the call it is making (`app_vm_base()`): an end inside the call
+  (a callback's INT 21h 4Ch, the program's own real-mode 4Ch, a kill there) unwinds to it as a child level's
+  end unwinds to its parent's EXEC.
+- **The end.** `terminated()` (the terminate address) recognises an app's process three ways: `TERM_APP` on
+  the pending list (the host saw the end, on the VM thread); the VM thread making an app's last call (the
+  end was on the app's thread: `app_end()` frees the context there and queues INT 21h 4Ch); or an abort with
+  the app's context loaded. `app_vm_ended()` then ends the call under way (`rm_nest_end()`: its `rm_call()`
+  returns), `serve()` puts the system's state back, asks DOS how the process ended (4Dh) and tells the
+  agent, and the app's thread, woken, frees the app and ends. `GLOS-APP start id= prog= psp= thread=
+  vectors=`, `GLOS-APP end id= prog= code= how= calls= ticks= t=`, `GLOS-APP refuse psp= why=`,
+  `GLOS-APP kill id= reason=`.
+- **A kill** (`app_kill()`: `glos kill SEQ`, the job's client gone, `glos exit`) sets the app's flag: its
+  thread ends at its next return to its code (within a tick). If the VM thread is making a call for it, the
+  system VM's kill (§9.6) is requested too: it ends the program DOS has in front, without a snapshot when
+  that is the app itself (no device was the app's, and its vectors go with it).
+- **Callbacks.** A callback's real-mode address is one of the stub's ARPLs, the same for every context, so
+  each belongs to one context at a time (`rmcb_owner[]`; 32 of them since M6, for all contexts together). One
+  called while another context is the VM's (an address an app left with a driver, say) returns at once.
+- **Not the app's:** the system VM's interrupts met during a call (they go to real mode, never to the app's
+  protected-mode handlers; nor is the BIOS's INT 1Ch passed up); INT 23h and 24h raised in its own DOS call
+  are passed up as in a session.
+- **Per app, kept by the kernel:** 1 KB for the vector copy, the DTA pointer, the drive and directory (one
+  directory: the current drive's), a child's exit code.
+
 ## 13. INT 31h function table
 
 Statuses:
@@ -993,7 +1065,7 @@ Statuses:
 | 0702h/0703h | Discardable | nop | DOS/4GW | |
 | 0800h/0801h | Physical mapping | M4a | Matrox BARs, VBE LFB; linear = physical (§12.4) | DOS/4GW |
 | 0900h–0902h | Virtual IF | M4a | Return the old state in AL | |
-| 0A00h | Vendor API | M4a | "GLOS" → entry point and API version (PRD D23). **Any other string → CF=1, AX=8001h** (DOS/4GW probes "RSI CLIENT 0.9"/"RATIONAL DOS/4G"). | |
+| 0A00h | Vendor API | M4a, M6 | "GLOS" → entry point (PRD D23): the GLOS API, `include/glos/api.h` (function 0 gives its version; §12.5). **Any other string → CF=1, AX=8001h** (DOS/4GW probes "RSI CLIENT 0.9"/"RATIONAL DOS/4G"). | |
 | 0B00h–0B03h | Watchpoints | M4c | DR0–DR3 (the gdb stub uses software breakpoints). A hit is exception 1 to the client and sets 0B02h's bit; returning to an execute watchpoint that fired sets RF once (kept across the client's exception handler). Freed with the level that set it. DPMICONF's `watch` passes on CWSDPMI, HDPMI32i and GLOS since 86Box patch 0115 (§20). | HDPMI32i |
 | 0C00h/0C01h | TSR services (1.0) | log | | |
 | 0D00h–0D03h | Shared memory (1.0) | fail (8001h) | DOS/4GW probes 0D00h | |
@@ -1068,6 +1140,15 @@ saved when the protected-mode handler was hooked, so the IRQ doesn't loop.
   #MF in the context that caused it, and IRQ13 is synthesised for V86 code and for clients that hooked INT 75h
   (DJGPP writes port F0h and EOIs both PICs). The deep dive chose NE=1 from the start; M4b deferred it because,
   with one user, NE=0 gives the same behaviour without emulating IGNNE#.
+- **As built (M6 step A): the state is switched, eagerly.** The FPU's state belongs to one of the threads
+  that run user-mode code; the switch hook saves it for its owner and loads the next one's when another such
+  thread gets the CPU (FNSAVE and FRSTOR, with CR0.EM and TS cleared for the moment: the code that runs next
+  gets its own MP and EM at its return, as before). Kernel threads don't touch it, so a switch to one and
+  back costs nothing. Lazy switching would save two instructions on some switches and put a second meaning
+  on #NM beside the clients' own EM; not worth it. An app begins with a copy of its program's state. A
+  machine with no FPU (CR0.EM set at the start, or FNINIT leaves no status) switches nothing. Errors are
+  still NE=0's IRQ13, which reaches whoever runs then: NE=1 and the synthesised IRQ13 come with the apps'
+  virtual PIC (M6 step B).
 
 ## 15. Real-mode calls, callbacks and raw switch
 
@@ -1126,6 +1207,8 @@ place where nothing else is in DOS by construction.
   to GLOS.EXE) and frees when the last user (an SFTP session) lets go: conventional memory only while in use.
 - A running job holds requests back until it ends. The conditions above (InDOS, INT 13h/10h, IRQs in service)
   come with posted calls during programs, which `/RUN` and `/SHELL` need.
+- **GLOS apps' calls (M6)** use the same safe point: every NEXT begins with the calls apps wait with
+  (§12.5), before the DOS server's and the agent's next job, and a waiting call ends the stub's halt.
 
 ### 17.3 The agent shell (M3)
 
@@ -1145,9 +1228,9 @@ place where nothing else is in DOS by construction.
 - `glos exit` (headless only, for now) leaves at the next idle NEXT, half a second after it replies.
 - **`glos run [--exclusive|--app] [--direct] [--profile NAME] COMMAND`** (M4e) posts COMMAND as a job whose
   session (§11) runs in direct mode (§9.7) or takes GLOS.CFG's `[program NAME]` profile instead of its program's
-  own. That works for a batch file too, whose session's program is COMMAND.COM. `--exclusive` is what every
-  session is until M6. `--app` waits for GLOS apps (M6) and is refused with status 2, as are an unknown
-  profile and a missing command. The agent hands the options to the session code before each EXEC the job
+  own. That works for a batch file too, whose session's program is COMMAND.COM. A program becomes a GLOS app
+  when it asks to (§12.5): `--exclusive` has that refused, so it stays a session, and `--app` is what happens
+  without it (M6). An unknown profile and a missing command are refused with status 2. The agent hands the options to the session code before each EXEC the job
   makes (`session_job()`), and the session that begins takes them.
 - **Ending a job:** `glos kill`, or its client going away, kills it: every half second the program in front
   gets the kill of §9.6 (innermost first) until the job has ended, with exit status 255; its output is dropped.
@@ -1495,3 +1578,9 @@ gdb -ex 'set architecture i386' -ex 'target remote | ssh -W localhost:2345 pc'
 13. IOPL never changes within a session.
 14. Every client-visible vector number matches what 0400h reported.
 15. Trap entry clears DF; no kernel C code runs with DF set.
+16. `dctx` is the running thread's context, for the VM thread and apps' threads only. A kernel thread loads the
+    context it needs for the length of a copy, with interrupts off, and puts back what was there.
+17. An app's thread never runs V86 code and never touches DOS's state: `rm_call()` on it queues the call for
+    the VM thread. The vector table is the system's whenever no call for an app is under way.
+18. A thread's first frame is copied to the top of its stack by code that uses none of that stack
+    (`frame_start`).

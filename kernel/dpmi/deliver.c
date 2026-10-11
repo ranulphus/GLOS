@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "glos/bootinfo.h"
+#include "app.h"
 #include "arch.h"
 #include "dpmi.h"
 #include "io.h"
@@ -95,7 +96,7 @@ static struct pmentry *entry_new(struct trapframe *tf, int kind, int b32, u16 *s
     e->kind = (u8)kind;
     e->b32 = (u8)b32;
     e->switched = (u8)sw;
-    e->vif = vm.vif;
+    e->vif = current->vif;
     e->frame10 = 0;
     e->at = tf;
     e->saved = *tf;
@@ -118,7 +119,7 @@ static void entry_go(struct trapframe *tf, struct pmentry *e, u16 cs, u32 eip, u
     tf->ss = ss;
     tf->esp = sp;
     tf->eflags = (tf->eflags & FL_ARITH) | FL_IF | 2;
-    vm.vif = 0;
+    current->vif = 0;
 }
 
 /* /DPMITRACE: the first few calls of each kind into a handler. */
@@ -141,7 +142,7 @@ static int iret_entry(struct trapframe *tf, int kind, u8 vec, u32 next)
     struct farptr h = dctx->vidt[vec];
     struct pmentry *e;
     u16 ss;
-    u32 sp, f = flags_image(tf, vm.vif);
+    u32 sp, f = flags_image(tf, current->vif);
     if (!h.sel || !(e = entry_new(tf, kind, h.b32, &ss, &sp)))
         return 0;
     trace(kind == PE_INT ? "passup" : "irq", vec, h.sel, h.off, tf);
@@ -162,7 +163,12 @@ static int iret_entry(struct trapframe *tf, int kind, u8 vec, u32 next)
 
 /* IRQs go to the client's protected-mode handler first, from either mode
    (§14.1); its chain ends at the host's, which reflects to real mode. */
-int dpmi_irq(struct trapframe *tf, u8 vec) { return iret_entry(tf, PE_IRQ, vec, 0); }
+int dpmi_irq(struct trapframe *tf, u8 vec)
+{
+    if (dctx->app && current == vm.thread)      /* the system VM's interrupt, met while the VM thread makes a */
+        return 0;                               /* call for an app: not the app's (its own come from app.c) */
+    return iret_entry(tf, PE_IRQ, vec, 0);
+}
 
 /* Real mode's INT 1Ch (the BIOS tick), 23h (Ctrl-C) and 24h (critical
    error) go up to protected-mode handlers [DPMI0.9]; the handler's general
@@ -172,7 +178,7 @@ int dpmi_irq(struct trapframe *tf, u8 vec) { return iret_entry(tf, PE_IRQ, vec, 
    path, which restores what it changed), as it does under HDPMI32i. */
 int dpmi_passup(struct trapframe *tf, u8 n, u32 next)
 {
-    if (!dctx || !(tf->eflags & FL_VM))
+    if (!dctx || !(tf->eflags & FL_VM) || (n == 0x1C && dctx->app))    /* (the BIOS's tick is the system VM's) */
         return 0;
     if (n != 0x1C && (vm.bi->flags & BI_F_DPMITRACE))
         kprintf("GLOS-DPMI int%02x from=%04x:%04x hooked=%u ivt=%08x\n", n, tf->cs & 0xFFFF, tf->eip & 0xFFFF,
@@ -198,7 +204,7 @@ int dpmi_passup(struct trapframe *tf, u8 n, u32 next)
    a zero dword (M4d: as HDPMI16 lays it out). */
 void dpmi_exception(struct trapframe *tf)
 {
-    u32 v = tf->vec, sp, f = flags_image(tf, vm.vif);
+    u32 v = tf->vec, sp, f = flags_image(tf, current->vif);
     struct farptr h = dctx->exc[v];
     struct pmentry *e;
     u16 ss;
@@ -293,7 +299,7 @@ static void exc_return(struct trapframe *tf, const struct pmentry *e, int via10)
     tf->esp = esp;
     tf->ss = ss;
     tf->eflags = (fl & (FL_ARITH | FL_TF | 0x10000)) | FL_IF | 2;  /* RF: past an execute breakpoint */
-    vm.vif = (fl & FL_IF) != 0;
+    current->vif = (fl & FL_IF) != 0;
 }
 
 /* No handler of the client's: 1-4 (traps) go on as the interrupt, as on
@@ -357,7 +363,7 @@ void dpmi_rmcb(struct trapframe *tf, u32 i)
     r.edx = tf->edx;
     r.ecx = tf->ecx;
     r.eax = tf->eax;
-    r.flags = (u16)flags_image(tf, vm.vif);
+    r.flags = (u16)flags_image(tf, current->vif);
     r.es = (u16)tf->v86_es;
     r.ds = (u16)tf->v86_ds;
     r.fs = (u16)tf->v86_fs;
@@ -418,7 +424,7 @@ static void rmcb_return(struct trapframe *tf, const struct pmentry *e)
     tf->ss = r.ss;
     tf->esp = r.sp;
     tf->eflags = (r.flags & (FL_ARITH | FL_TF)) | FL_VM | FL_IF | 2;
-    vm.vif = (r.flags & FL_IF) != 0;
+    current->vif = (r.flags & FL_IF) != 0;
 }
 
 /* ---- back from a handler: SEL_TRAMP:TR_RET + i */
@@ -441,7 +447,7 @@ void dpmi_entry_return(struct trapframe *tf, u32 i, int via10)
     switch (e->kind) {
     case PE_IRQ:
         *tf = e->saved;
-        vm.vif = e->vif;
+        current->vif = e->vif;
         break;
     case PE_INT: {
             struct trapframe t = e->saved;
@@ -454,7 +460,7 @@ void dpmi_entry_return(struct trapframe *tf, u32 i, int via10)
             t.ebp = tf->ebp;
             t.eflags = (t.eflags & ~FL_ARITH) | (tf->eflags & FL_ARITH);
             *tf = t;
-            vm.vif = e->vif;
+            current->vif = e->vif;
             break;
         }
     case PE_EXC:

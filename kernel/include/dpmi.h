@@ -21,7 +21,7 @@
 #define LDT_ENTRIES    8192
 #define SEL_FIRST      16               /* 0000h's first index: selectors 04h-7Ch stay free for 000Dh */
 #define RM_STACK_PARAS 0x80             /* 1687h's SI: the host's real-mode stack, 2 KB of the client's */
-#define NRMCB          16
+#define NRMCB          32               /* the stub's ARPLs: for every context together (M6) */
 #define NSEGSEL        64               /* 0002h's selectors */
 #define USER_BASE      0x00400000u      /* the user region (supervisor.md §4) */
 #define USER_END       0xC0000000u
@@ -140,9 +140,16 @@ struct dpmi_ctx {
     u32 lazy;                           /* pages of its blocks still to be backed when first touched */
     u32 frame_cap;                      /* the most it may hold (the session's profile's memory), 0 none */
     struct dosblk *dosblks;
+    struct app *app;                    /* a GLOS app's context (kernel/app/app.c), or 0: a session's */
 };
 
-extern struct dpmi_ctx *dctx;           /* the context, or 0 */
+struct app;
+struct thread;
+extern struct dpmi_ctx *dctx;           /* the context loaded: the running thread's own (VM and app threads), or 0 */
+void dpmi_ctx_load(struct dpmi_ctx *c); /* another one (or none) loaded: page directory, LDT, watchpoints */
+void dpmi_user_init(struct thread *vm); /* the switch hook, and the FPU as the VM thread's */
+void fpu_fork(struct thread *t);        /* a new thread's FPU state: the running one's, as it is */
+void fpu_drop(struct thread *t);        /* the thread is ending */
 u32 dpmi_stat(char *buf, u32 max);      /* glos stat: the context as a JSON object, or null */
 
 /* host.c */
@@ -230,6 +237,8 @@ void rm_irq(struct trapframe *tf, u8 vec);     /* an IRQ while the client runs: 
 void rm_raw_to_pm(struct trapframe *tf);        /* the stub's raw-switch ARPL */
 void rm_raw_to_rm(struct trapframe *tf);        /* SEL_TRAMP:TR_RAW */
 int rm_nesting(void);
+struct trapframe *rm_nest_frame(int d); /* the frame of the nested call at depth d (1: the outermost), or 0 */
+void rm_nest_end(int d) __attribute__((noreturn));      /* that call returns from where the code inside it is */
 void rm_unwind_to(int depth, struct trapframe *f, struct trapframe *tf) __attribute__((noreturn));
                                         /* a client ended inside nested calls: tf on in f, at that depth */
 
@@ -240,6 +249,9 @@ extern u32 fpu_msw_dos;                 /* DOS's own, from the start */
 /* int31.c */
 void int31(struct trapframe *tf);
 int dpmi_db_hit(void);                  /* a #DB anywhere: note watchpoints that fired (DR6); 1 if any did */
+void wp_load(void);                     /* the loaded context's watchpoints into the debug registers */
+int rmcb_mine(u32 i);                   /* callback i is the loaded context's */
+void rmcb_free_ctx(const struct dpmi_ctx *c);   /* its callbacks' addresses free again (a level's, or all) */
 void wp_clear_level(u32 level);         /* a level's watchpoints go with it */
 
 #endif

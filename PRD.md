@@ -7,7 +7,7 @@
 | Status | v0.3 — start modes and conventional memory (2026-10-02), after the v0.2 deep dive (2026-10-01) |
 | Last updated | 2026-10-01 |
 | Supersedes | v0.1. Changes are listed in Appendix D |
-| Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) and [docs/milestones-m5.md](docs/milestones-m5.md) (work breakdown) |
+| Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md) and [docs/milestones-m6.md](docs/milestones-m6.md) (work breakdown) |
 | Licence | MIT |
 | Companion projects | MGA-Glide (`~/MGA-Glide`: the Loop A/B/C harness and the shared Matrox HAL), DOS-GL (`~/DOSGL`: OpenGL for Matrox cards and the SDL3 bridge), Fifth Wheel and the dgk kit (`~/FifthWheel`), DOSBench (`~/DOSBench`) |
 
@@ -923,7 +923,7 @@ GLOS/
 
 Defined by their exit criteria. All exits are in Loop A unless marked "bench". v1 is M0–M9 plus the M10 gates; each M10 feature ships when it passes its own gate.
 
-The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md); M5's is in [docs/milestones-m5.md](docs/milestones-m5.md).
+The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md); M5's is in [docs/milestones-m5.md](docs/milestones-m5.md), M6's in [docs/milestones-m6.md](docs/milestones-m6.md).
 
 **M0: harness (in MGA-Glide, with its full regression) and the IOPL-0 survey (GLOS).** H0–H6b from §15; the HDPMI32i survey (§14.3).
 *Exit:* `loopa-cfgcheck`, `loopa-selftest` and the full MGA-Glide regression unchanged. Self-tests pass for the 486 profiles, the VBE card, the network (a NE2000 VM answers on its forwarded port), COM2, the HIMEMX boot and V86TEST on all three profiles, with no known deviation left that a local patch fixes. `docs/survey-iopl0.md` lists every suite's result under HDPMI32i.

@@ -1,10 +1,17 @@
 /* Threads and the scheduler (supervisor.md §7).
  *   urgent   first, always (network receive, input, short replies)
- *   normal   round-robin, 20-tick turns (the system VM; apps later)
+ *   normal   round-robin, 20-tick turns (the system VM, GLOS apps)
  *   bulk     takes turns with normal threads until it has used 30 ticks of
  *            the current 100-tick window, then runs only when no normal
  *            thread is ready (crypto, SFTP, PNG)
  *   idle     HLT with interrupts on
+ * A turn is 20 ticks of running, however often the thread waits meanwhile:
+ * woken with some of its turn left, it goes ahead of its class's queue and
+ * takes the CPU from a thread of its class (M6: an app back from a DOS call
+ * doesn't wait out a busy app's turn; nor can it starve one, its turn runs
+ * out too). A thread that loses the CPU that way keeps the rest of its
+ * turn, and goes on after those that went ahead. The VM thread goes ahead
+ * whenever it is woken: it wakes for an interrupt.
  * A thread's stack has a canary word at its base, checked at each switch. */
 #include "arch.h"
 #include "io.h"
@@ -24,6 +31,7 @@ extern char boot_stack[], boot_stack_top[];
 extern void switch_to(u32 *save_esp, u32 new_esp);
 
 struct thread *current;
+void (*sched_switch)(struct thread *next);
 static struct thread idle_thread;
 static struct thread *rq_head[3], *rq_tail[3];
 static struct thread *sleepers, *dead, *all_threads;
@@ -44,6 +52,28 @@ static void enqueue(struct thread *t)
     rq_tail[p] = t;
 }
 
+/* Ahead of the queue: woken (ahead: before those that went ahead earlier),
+   or having lost the CPU with turn left (after them all). */
+static void enqueue_front(struct thread *t, int woken)
+{
+    struct thread *q, *prev = NULL;
+    int p = t->prio;
+    t->state = T_READY;
+    t->ahead = (u8)woken;
+    if (!woken)
+        for (q = rq_head[p]; q && q->ahead; q = q->next)
+            prev = q;
+    if (prev) {
+        t->next = prev->next;
+        prev->next = t;
+    } else {
+        t->next = rq_head[p];
+        rq_head[p] = t;
+    }
+    if (!t->next)
+        rq_tail[p] = t;
+}
+
 static struct thread *dequeue(int p)
 {
     struct thread *t = rq_head[p];
@@ -52,6 +82,7 @@ static struct thread *dequeue(int p)
         if (!rq_head[p])
             rq_tail[p] = NULL;
         t->next = NULL;
+        t->ahead = 0;
     }
     return t;
 }
@@ -96,9 +127,17 @@ static void unwait(struct thread *t)
 }
 
 /* A woken thread that outranks the running one gets the CPU at the next safe
-   point; so does the system VM over bulk work (supervisor.md §7). */
+   point; so does the system VM over bulk work (supervisor.md §7), and over
+   an app: it wakes for an interrupt DOS or the BIOS must not wait a round
+   of busy apps for (M6). */
 static void wake(struct thread *t)
 {
+    if (t->front || t->slice) {
+        enqueue_front(t, 1);
+        if (t->prio < current->prio || (t->prio == current->prio && !current->front && current != t))
+            need_resched = 1;
+        return;
+    }
     enqueue(t);
     if (t->prio < current->prio)
         need_resched = 1;
@@ -109,24 +148,56 @@ void schedule(void)
     struct thread *prev = current, *next;
 
     need_resched = 0;
-    if (prev->state == T_RUNNING && prev != &idle_thread)
-        enqueue(prev);
+    if (prev->state == T_RUNNING && prev != &idle_thread) {
+        if (prev->slice)
+            enqueue_front(prev, 0);             /* (it lost the CPU: the rest of its turn comes) */
+        else
+            enqueue(prev);
+    }
     next = pick();
     if (!next)
         next = &idle_thread;
     next->state = T_RUNNING;
-    next->slice = SLICE;
+    if (!next->slice)
+        next->slice = SLICE;
     if (next == prev)
         return;
     if (*(u32 *)prev->stack != CANARY)
         panic("stack-overflow", NULL);
     n_switches++;
     current = next;
+    if (sched_switch)
+        sched_switch(next);
     cpu_set_esp0(next->esp0);
     switch_to(&prev->esp, next->esp);
 }
 
 void sched_resched(void) { need_resched = 1; }
+
+/* A thread that waits its turn in a run queue goes to the head of it, and
+   gets the CPU from a thread of its class or a lower one at the next safe
+   point (the VM thread, for an interrupt raised while it is ready). */
+void sched_front(struct thread *t)
+{
+    struct thread *q, *prev = NULL;
+    int p = t->prio;
+    if (t->state != T_READY || t == current)
+        return;
+    for (q = rq_head[p]; q && q != t; q = q->next)
+        prev = q;
+    if (!q)
+        return;
+    if (prev) {
+        prev->next = t->next;
+        if (rq_tail[p] == t)
+            rq_tail[p] = prev;
+        t->next = rq_head[p];
+        rq_head[p] = t;
+    }
+    t->ahead = 1;
+    if (p <= current->prio)
+        need_resched = 1;
+}
 
 /* ---- threads */
 
@@ -138,12 +209,19 @@ static void thread_start(void)
     thread_exit();
 }
 
-struct thread *thread_create(const char *name, int prio, void (*fn)(void *), void *arg)
+struct thread *thread_new(const char *name, int prio, void (*fn)(void *), void *arg, int user)
 {
     struct thread *t = kmalloc(sizeof *t);
-    u32 *sp, flags;
-    if (!t || !(t->stack = kmalloc(THREAD_STACK)))
-        panic("thread-create", NULL);
+    u32 *sp, f;
+    if (!t)
+        return NULL;
+    memset(t, 0, sizeof *t);
+    if (!(t->stack = kmalloc(THREAD_STACK)) || (user && !(t->fpu = kmalloc(108)))) {
+        if (t->stack)
+            kfree(t->stack);
+        kfree(t);
+        return NULL;
+    }
     *(u32 *)t->stack = CANARY;
     t->stack_top = (u32)t->stack + THREAD_STACK;
     t->esp0 = t->stack_top;
@@ -151,10 +229,8 @@ struct thread *thread_create(const char *name, int prio, void (*fn)(void *), voi
     t->name = name;
     t->fn = fn;
     t->arg = arg;
-    t->ticks = 0;
-    t->snext = NULL;
-    t->waiting_on = NULL;
-    t->timed_out = 0;
+    t->user = (u8)user;
+    t->state = T_BLOCKED;
     sp = (u32 *)t->stack_top;
     *--sp = 0;                                  /* thread_start never returns */
     *--sp = (u32)thread_start;                  /* switch_to's RET */
@@ -163,12 +239,24 @@ struct thread *thread_create(const char *name, int prio, void (*fn)(void *), voi
     *--sp = 0;                                  /* esi */
     *--sp = 0;                                  /* edi */
     t->esp = (u32)sp;
-    __asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+    f = irq_save();
     t->all = all_threads;
     all_threads = t;
+    irq_restore(f);
+    return t;
+}
+
+void thread_go(struct thread *t) { wake(t); }
+
+struct thread *thread_create(const char *name, int prio, void (*fn)(void *), void *arg)
+{
+    struct thread *t = thread_new(name, prio, fn, arg, TU_NONE);
+    u32 f;
+    if (!t)
+        panic("thread-create", NULL);
+    f = irq_save();
     wake(t);
-    if (flags & EFLAGS_IF)
-        sti();
+    irq_restore(f);
     return t;
 }
 
@@ -212,6 +300,8 @@ void sched_idle(void)
                     break;
                 }
             kfree(t->stack);
+            if (t->fpu)
+                kfree(t->fpu);
             kfree(t);
         }
         if (need_resched || rq_head[0] || rq_head[1] || rq_head[2])
@@ -290,6 +380,7 @@ int thread_wait(struct waitq *q, u32 tick)
 void thread_yield(void)
 {
     u32 f = irq_save();
+    current->slice = 0;                         /* the rest of its turn given up */
     schedule();
     irq_restore(f);
 }

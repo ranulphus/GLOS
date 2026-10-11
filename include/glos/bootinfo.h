@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 2
+#define BOOTINFO_VERSION 3
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -50,7 +50,8 @@ typedef unsigned int   bi_u32;
                                                    FFFFFFFFh: nothing ran); EAX = 1: EXEC the stub's
                                                    path/tail; 2: halt until an interrupt, then ask again;
                                                    3: INT 21h with stub_data.dregs, then ask again with
-                                                   FFFFFFFEh */
+                                                   FFFFFFFEh. FFFFFFFDh (M6): the program runs on as a
+                                                   GLOS app, and the kernel sent the stub to detached_off */
 #define GLOS_CALL_RESIDENT 5                    /* the stub moves to arg:0, right after GLOS.EXE's PSP */
 
 struct bi_range { bi_u32 base, length, type; };
@@ -99,7 +100,7 @@ struct bootinfo {
     bi_u32 font16, font14, font8, font8hi;      /* the video BIOS's 8x16, 8x14 and 8x8 (two halves) fonts */
     /* M4a: the DPMI host's real-mode side, in the stub's segment */
     bi_u32 bp_dpmi_off, bp_nest_off, bp_raw_off;        /* mode switch, nested-call return, raw switch */
-    bi_u32 retf_off, int21_off, rmcb_off;               /* a RETF, INT 21h, 16 callback ARPLs */
+    bi_u32 retf_off, int21_off, rmcb_off;               /* a RETF, INT 21h, 32 callback ARPLs */
     bi_u32 bp_term_off;                         /* M4b: a client's terminate address (PSP:0Ah) */
     bi_u32 int2f_off;                           /* M4c: GLOS's INT 2Fh handler, in the IVT's chain */
     bi_u32 stub_paras;                          /* the resident stub's size, in paragraphs */
@@ -117,6 +118,7 @@ struct bootinfo {
     bi_u32 authkeys_len;
     struct bi_profile profiles[BI_PROFILES];    /* M4e: GLOS.CFG's [program] sections */
     char hostname[16];                          /* M5: GLOS.CFG's [net] hostname (letters, digits, hyphens); empty: "glos" */
+    bi_u32 detached_off;                        /* M6: where the stub goes on when the program it EXECed became an app */
 };
 
 /* The resident stub's data (loader/stub.asm), at offset 0 of its segment.

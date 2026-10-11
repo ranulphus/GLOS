@@ -33,9 +33,15 @@
  *
  * glos kill, or the client going away, kills a running job: every half
  * second the program in front is killed (the kill of supervisor.md §9.6),
- * innermost first, until the job has ended; its output is then dropped. */
+ * innermost first, until the job has ended; its output is then dropped.
+ *
+ * A job whose program becomes a GLOS app (M6, kernel/app/app.c) stays that
+ * app's until the app ends: its output while the VM thread makes its DOS
+ * calls, its exit code, its kill. The stub is free meanwhile, and the next
+ * job runs. */
 #include "glos/bootinfo.h"
 #include "agent.h"
+#include "app.h"
 #include "dos.h"
 #include "session.h"
 #include "io.h"
@@ -60,6 +66,8 @@ struct agent_job {
     u8 cand;                                    /* the next program to try */
     u8 shell;                                   /* running as COMSPEC /C */
     u8 direct;                                  /* glos run --direct */
+    u8 exclusive;                               /* glos run --exclusive */
+    u8 app;                                     /* its program runs on as a GLOS app */
     char profile[16];                           /* glos run --profile NAME, or empty */
     volatile u8 kill;                           /* end it: glos kill, or its client has gone */
     u32 seq;
@@ -89,9 +97,9 @@ static char upper(char c) { return c >= 'a' && c <= 'z' ? (char)(c - 32) : c; }
 
 void agent_init(void (*kick)(void)) { kick_ssh = kick; }
 
-int agent_post(void *owner, const char *cmd) { return agent_post_run(owner, cmd, 0, ""); }
+int agent_post(void *owner, const char *cmd) { return agent_post_run(owner, cmd, 0, 0, ""); }
 
-int agent_post_run(void *owner, const char *cmd, int direct, const char *profile)
+int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, const char *profile)
 {
     struct agent_job *j = NULL;
     u32 f, i;
@@ -112,7 +120,9 @@ int agent_post_run(void *owner, const char *cmd, int direct, const char *profile
     j->cand = 0;
     j->shell = 0;
     j->kill = 0;
+    j->app = 0;
     j->direct = (u8)(direct != 0);
+    j->exclusive = (u8)(exclusive != 0);
     for (i = 0; profile[i] && i < sizeof j->profile - 1; i++)
         j->profile[i] = profile[i];
     j->profile[i] = 0;
@@ -131,10 +141,13 @@ void agent_drop(void *owner)
     for (i = 0; i < NJOBS; i++)
         if (jobs[i].state != J_FREE && jobs[i].owner == owner) {
             jobs[i].owner = NULL;
-            if (jobs[i].state == J_QUEUED)
+            if (jobs[i].state == J_QUEUED) {
                 jobs[i].state = J_FREE;
-            else
+            } else {
                 jobs[i].kill = 1;
+                if (jobs[i].app)
+                    app_kill_job(&jobs[i]);
+            }
         }
     thread_wake(&roomq);
     irq_restore(f);
@@ -200,6 +213,8 @@ int agent_kill_seq(u32 seq)
             continue;
         if (j->state == J_RUNNING) {
             j->kill = 1;
+            if (j->app)
+                app_kill_job(j);
         } else {
             j->result = 0xFF;
             j->state = J_DONE;                  /* (agent_service tells its client) */
@@ -226,8 +241,8 @@ u32 agent_ps(char *buf, u32 max)
     u32 n = 0, i, f = irq_save();
     for (i = 0; i < NJOBS && n < max; i++)
         if (jobs[i].state == J_QUEUED || jobs[i].state == J_RUNNING)
-            n += (u32)ksnprintf(buf + n, max - n, "job %u %s%s %s\n", jobs[i].seq, names[jobs[i].state],
-                                jobs[i].kill ? " killing" : "", jobs[i].cmd);
+            n += (u32)ksnprintf(buf + n, max - n, "job %u %s%s%s %s\n", jobs[i].seq, names[jobs[i].state],
+                                jobs[i].app ? " app" : "", jobs[i].kill ? " killing" : "", jobs[i].cmd);
     irq_restore(f);
     return n < max ? n : max;
 }
@@ -345,6 +360,14 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
 {
     struct agent_job *j = running;
     u32 i;
+    if (j && result == NEXT_DETACHED) {         /* its program is an app now: the job goes with it */
+        j->app = 1;
+        kprintf("GLOS-AGENT app seq=%u via=%s\n", j->seq, j->shell ? "comspec" : j->path);
+        running = NULL;
+        if (j->kill)
+            app_kill_job(j);
+        j = NULL;
+    }
     if (j) {
         u32 err = result & 0xFFFF;
         if (!j->shell && (result & 0x10000) && (err == 2 || err == 3 || err == 5)) {
@@ -375,13 +398,13 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
             j->shell = 1;
         goto exec;
     }
-    session_job(0, "");
+    session_job(0, 0, "");
     if (exit_req && (s32)(timer_ticks() - exit_at) >= 0)
         return -1;
     return 0;
 exec:
     j = running;
-    session_job(j->direct, j->profile);         /* for the session this EXEC begins */
+    session_job(j->direct, j->exclusive, j->profile);  /* for the session this EXEC begins */
     if (j->shell) {
         x->path = comspec;
         x->t1 = " /C ";
@@ -407,10 +430,36 @@ int agent_vm_wake_pending(void)
 
 int agent_vm_capturing(void) { return running != 0; }
 
+/* The job whose program runs now (it may become an app's). */
+void *agent_vm_job(void) { return running; }
+
+/* The VM thread makes a call for an app (or has made it): output is that
+   app's job's (or again the job's that was running). The one before. */
+void *agent_vm_as(void *job)
+{
+    void *was = running;
+    running = job;
+    if (vm.vme)
+        cpu_int_redirect(0x29, !running);       /* (INT 29h traps only while a job captures, v86.c) */
+    return was;
+}
+
+/* An app that began as a job has ended: result as INT 21h 4Dh gave it. */
+void agent_app_done(void *job, u32 result)
+{
+    struct agent_job *j = job;
+    j->result = result;
+    j->state = J_DONE;
+    kprintf("GLOS-AGENT done seq=%u code=%u via=app\n", j->seq, result & 0xFF);
+    if (kick_ssh)
+        kick_ssh();
+}
+
 /* Every tick (interrupts off): a job being killed gets the next kill. */
 void agent_vm_tick(u32 now)
 {
-    if (running && running->kill && !vm.kill_req && now - last_kill >= 512) {
+    if (running && !running->app && running->kill && !vm.kill_req && now - last_kill >= 512) {     /* (an app's
+                                                   kill is app.c's: one request, in the call under way) */
         last_kill = now;
         vm.kill_req = 1;
         vm.kill_reason = "agent";

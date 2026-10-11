@@ -32,8 +32,18 @@
  * caught at its terminate address, PSP:0Ah, which the mode switch points at
  * the stub's term ARPL (M4b). A program a client starts that switches to
  * protected mode itself joins the context as a client level (level.c, M4c),
- * and its end ends only that level. */
+ * and its end ends only that level.
+ *
+ * Contexts (M6). A session's client runs on the VM thread; a GLOS app's
+ * context has a thread of its own (kernel/app/app.c), and there may be
+ * several. dctx is the one loaded: the running thread's own, with its page
+ * directory in CR3, its LDT and its watchpoints. The scheduler's switch
+ * hook (user_switch) loads what a thread that runs user-mode code needs
+ * when it gets the CPU; kernel threads run on with whatever was there, and
+ * must not look at dctx. The FPU's state follows the same threads, saved
+ * and loaded at the switch. */
 #include "glos/bootinfo.h"
+#include "app.h"
 #include "arch.h"
 #include "dpmi.h"
 #include "gdbprog.h"
@@ -47,7 +57,6 @@
 #include "vpic.h"
 
 struct dpmi_ctx *dctx;
-static struct dpmi_ctx ctx_store;
 
 /* CR0.MP and EM for the code that runs next: a client's own (0E01h), or DOS's
    as GLOS found them. Written only when they change. */
@@ -65,8 +74,86 @@ void fpu_msw_set(u32 msw)
     write_cr0((cr0 & ~6u) | (msw & 3) << 1);
     fpu_msw_now = msw;
 }
+/* ---- what a thread that runs user-mode code has of the CPU (M6) */
+
+static struct thread *fpu_owner;                /* whose state the FPU holds */
+static u8 has_fpu;
+
+/* The FPU usable by the kernel for a moment: no emulation, no task-switched
+   trap (the code that runs next gets its own CR0 bits at its return). */
+static void fpu_open(void)
+{
+    fpu_msw_set((fpu_msw_dos == ~0u ? (read_cr0() >> 1) & 3 : fpu_msw_now) & ~2u);
+    __asm__ volatile("clts");
+}
+
+static void fpu_switch(struct thread *next)
+{
+    if (!has_fpu || fpu_owner == next)
+        return;
+    fpu_open();
+    if (fpu_owner)
+        __asm__ volatile("fnsave (%0)" :: "r"(fpu_owner->fpu) : "memory");
+    else
+        __asm__ volatile("fninit");
+    __asm__ volatile("frstor (%0)" :: "r"(next->fpu) : "memory");
+    fpu_owner = next;
+}
+
+/* A new thread starts with the FPU as the running one has it (an app with
+   its program's, as it was when it became one). */
+void fpu_fork(struct thread *t)
+{
+    if (!has_fpu)
+        return;
+    fpu_open();
+    __asm__ volatile("fnsave (%0)" :: "r"(t->fpu) : "memory");
+    __asm__ volatile("frstor (%0)" :: "r"(t->fpu) : "memory");
+}
+
+/* The thread is ending. */
+void fpu_drop(struct thread *t)
+{
+    if (fpu_owner == t)
+        fpu_owner = 0;
+}
+
+void dpmi_ctx_load(struct dpmi_ctx *c)
+{
+    if (c == dctx)
+        return;
+    dctx = c;
+    mm_space_enter(c ? c->cr3 : 0);
+    cpu_set_ldt(c ? c->ldt : 0, c ? LDT_ENTRIES * 8 - 1 : 0);
+    wp_load();
+}
+
+static void user_switch(struct thread *next)
+{
+    if (!next->user)
+        return;
+    dpmi_ctx_load(next->ctx);
+    cpu_io_reach(next->user != TU_APP);         /* an app reaches no port: every IN and OUT traps */
+    fpu_switch(next);
+}
+
+/* The first thread that runs user-mode code, the VM's: the FPU is its. */
+void dpmi_user_init(struct thread *t)
+{
+    u16 sw = 0x5A5A;
+    if (!(read_cr0() & 4)) {                    /* (EM: no FPU, or DOS has an emulator's) */
+        __asm__ volatile("clts; fninit; fnstsw %0" : "+m"(sw));
+        has_fpu = (sw & 0xFF) == 0;
+    }
+    fpu_owner = has_fpu ? t : 0;
+    sched_switch = user_switch;
+}
+
 /* Terminate addresses DOS is about to go to: each client the host has seen
-   end leaves its own here, for the term ARPL (they outlive the context). */
+   end leaves its own here, for the term ARPL (they outlive the context).
+   TERM_APP: the client was an app, and its process's end is the end of the
+   call the VM thread was making for it (app.c). */
+#define TERM_APP 0xFFFFFFFFu
 static u32 term_pend[NLEVEL];
 static u32 nterm;
 
@@ -126,7 +213,7 @@ void set_sp(struct trapframe *tf, u32 sp)
    the client's stack; -1 if the stack isn't writable there. */
 static int push_frame(struct trapframe *tf, u32 eip, int b32)
 {
-    u32 f = (tf->eflags & (FL_ARITH | FL_TF | FL_AC)) | (vm.vif ? FL_IF : 0) | 2, sp = sp_of(tf);
+    u32 f = (tf->eflags & (FL_ARITH | FL_TF | FL_AC)) | (current->vif ? FL_IF : 0) | 2, sp = sp_of(tf);
     if (b32) {
         u32 v[3] = { eip, tf->cs, f };
         if (user_wr((u16)tf->ss, sp - 12, v, 12) != 0)
@@ -165,7 +252,7 @@ static void iret_frame(struct trapframe *tf, int keep, int b32)
     if (keep)
         f = (f & ~FL_ARITH) | (tf->eflags & FL_ARITH);
     tf->eflags = (f & (FL_ARITH | FL_TF | FL_AC)) | FL_IF | 2;
-    vm.vif = (f & FL_IF) != 0;
+    current->vif = (f & FL_IF) != 0;
 }
 
 void dpmi_iret(struct trapframe *tf) { iret_frame(tf, 0, dctx->bits32); }
@@ -210,12 +297,13 @@ static void ctx_destroy(int psp)
         kfree(d);
     }
     wp_clear_level(1);
-    mm_space_enter(0);
+    rmcb_free_ctx(c);
+    current->ctx = 0;
+    dpmi_ctx_load(0);
     mm_space_free(c->cr3);
-    cpu_set_ldt(0, 0);
     kfree(c->ldt_mem);
     kfree(c->ldt_used);
-    dctx = 0;
+    kfree(c);
 }
 
 static void switch_fail(struct trapframe *tf, u32 ret_cs, u32 ret_ip, u32 err)
@@ -230,7 +318,7 @@ static void switch_fail(struct trapframe *tf, u32 ret_cs, u32 ret_ip, u32 err)
    from a program a client started, a new level in that client's (M4c). */
 static void mode_switch(struct trapframe *tf)
 {
-    struct dpmi_ctx *c = &ctx_store;
+    struct dpmi_ctx *c = dctx;
     u32 sp = tf->esp & 0xFFFF, ret_ip, ret_cs, env_size, e;
     u16 ds = (u16)tf->v86_ds, ss = (u16)tf->ss, cs_sel, ds_sel, ss_sel;
     u8 data_flags;
@@ -245,6 +333,10 @@ static void mode_switch(struct trapframe *tf)
             return;
         }
     } else {
+        if (!(c = kmalloc(sizeof *c))) {
+            switch_fail(tf, ret_cs, ret_ip, 0x8011);    /* descriptor unavailable */
+            return;
+        }
         memset(c, 0, sizeof *c);
         c->ldt_mem = kmalloc(LDT_ENTRIES * 8 + 4096);
         c->ldt = c->ldt_mem ? (u32 *)(((u32)c->ldt_mem + 4095) & ~4095u) : 0;
@@ -254,10 +346,12 @@ static void mode_switch(struct trapframe *tf)
             if (c->ldt_mem) kfree(c->ldt_mem);
             if (c->ldt_used) kfree(c->ldt_used);
             if (c->cr3) mm_space_free(c->cr3);
-            switch_fail(tf, ret_cs, ret_ip, 0x8011);    /* descriptor unavailable */
+            kfree(c);
+            switch_fail(tf, ret_cs, ret_ip, 0x8011);
             return;
         }
-        dctx = c;
+        current->ctx = c;
+        dpmi_ctx_load(c);
         level_init(tf);
         ldt_init(c);
         c->bits32 = tf->eax & 1;
@@ -265,8 +359,6 @@ static void mode_switch(struct trapframe *tf)
         c->frame_cap = session_memory_kb() / 4; /* (in pages) */
         fpu_msw_set(fpu_msw_dos == ~0u ? (read_cr0() >> 1) & 3 : fpu_msw_dos);   /* (learns DOS's first) */
         c->fpu_msw = (u8)(fpu_msw_dos & ~2u);   /* the FPU, not enabled for it until 0E01h ([DPMI0.9]) */
-        mm_space_enter(c->cr3);
-        cpu_set_ldt(c->ldt, LDT_ENTRIES * 8 - 1);
     }
     c->psp = vm_current_psp();
     c->env_seg = vm_rd16(c->psp * 16u + 0x2C);
@@ -323,10 +415,13 @@ void dpmi_1687(struct trapframe *tf)
 static void end_level(int psp, int seen, int *depth, struct trapframe **f)
 {
     struct dpmi_level *l = &dctx->lv[dctx->nlv - 1];
-    *depth = l->depth;
+    int app = dctx->app && dctx->nlv == 1;      /* an app's own end, in the call the VM thread makes for it: */
+    *depth = l->depth;                          /* that call's frame is where it began, as far as the VM goes */
     *f = l->frame;
+    if (app)
+        app_vm_base(depth, f);
     if (seen && nterm < NLEVEL)
-        term_pend[nterm++] = dctx->term_vec;
+        term_pend[nterm++] = app ? TERM_APP : dctx->term_vec;
     if (dctx->nlv > 1)
         level_pop(psp);
     else
@@ -340,15 +435,22 @@ static void end_level(int psp, int seen, int *depth, struct trapframe **f)
 void dpmi_end(struct trapframe *tf, u8 code, int killed)
 {
     struct trapframe *f;
-    int d;
+    struct app *a = app_cur();
+    int d, app = dctx->app && dctx->nlv == 1;
     kprintf("GLOS-DPMI exit code=%u%s level=%u\n", code, killed ? " killed" : "", dctx->nlv);
+    if (a) {                                    /* an app, on its own thread: the context goes here, and the */
+        end_level(1, 0, &d, &f);                /* VM thread has DOS end the process when it next can */
+        app_end(a, code);
+    }
     end_level(1, 1, &d, &f);
     dpmi_to_v86(tf, vm.loader_cs, killed ? vm.bi->kill_off : vm.bi->int21_off, vm.loader_cs, vm.bi->kill_sp,
                 vm.loader_cs, vm.loader_cs);
     SET16(tf->eax, 0x4C00 | code);
-    vm.vif = 1;
-    if (killed)
+    current->vif = 1;
+    if (killed && !app)
         vm_kill_now(tf);                        /* vectors and devices as the program found them */
+    else if (killed)
+        vm.kill_req = 0;                        /* (an app's: its vectors go with it, the devices were never its) */
     if (rm_nesting() > d) {
         vm_return(tf);
         rm_unwind_to(d, f, tf);
@@ -365,8 +467,8 @@ void dpmi_end(struct trapframe *tf, u8 code, int killed)
    raw-switches back into that context; M4d). */
 void dpmi_tsr_seen(void)
 {
-    if (dctx && dctx->nlv == 1 && vm_current_psp() == dctx->psp)
-        dctx->tsr_pending = 1;
+    if (dctx && !dctx->app && dctx->nlv == 1 && vm_current_psp() == dctx->psp)
+        dctx->tsr_pending = 1;                  /* (an app that stays resident has ended: terminated()) */
 }
 
 void dpmi_dos_exit(struct trapframe *tf, u8 n, u32 next)
@@ -412,6 +514,9 @@ static void host_int(struct trapframe *tf, u8 n)
         int31(tf);
     } else if (n == 0x21 && (ax >> 8) == 0x4C) {
         dpmi_end(tf, (u8)ax, 0);
+    } else if (n == 0x15 && (ax >> 8) == 0x86 && app_cur()) {
+        app_sleep(app_cur(), (((tf->ecx & 0xFFFF) << 16 | (tf->edx & 0xFFFF)) + 976) / 977);   /* (the BIOS's wait */
+        tf->eflags &= ~FL_CF;                   /* would hold the system VM for as long) */
     } else if (n == 0x21 && dosx_int21(tf)) {
         /* a 16-bit client's call, translated (dosx.c) */
     } else if (n == 0x41) {
@@ -468,6 +573,10 @@ static void trampoline(struct trapframe *tf, u32 off)
     }
     switch (off) {
     case TR_RAW:
+        if (app_cur()) {                        /* an app has no real mode of its own to switch to */
+            crash_report(tf, "raw-switch");
+            return;
+        }
         rm_raw_to_rm(tf);
         return;
     case TR_SAVE:
@@ -482,11 +591,13 @@ static void trampoline(struct trapframe *tf, u32 off)
         }
         retf(tf);
         return;
-    case TR_VENDOR:
-        dpmi_unimpl(tf, "glos-api");
-        SET16(tf->eax, 0x8001);
-        tf->eflags |= FL_CF;
-        retf(tf);
+    case TR_VENDOR:                             /* the GLOS API (kernel/app/api.c) */
+        if (glos_api(tf)) {                     /* the program becomes an app: on in a thread of its own, */
+            retf(tf);                           /* from its call's return; this one back to the stub */
+            app_detach(tf);
+        } else {
+            retf(tf);
+        }
         return;
     default:
         crash_report(tf, "trampoline");
@@ -526,23 +637,29 @@ static void general_protection(struct trapframe *tf)
     port = in.port_dx ? (tf->edx & 0xFFFF) : in.imm;
     switch (in.kind) {
     case V86_CLI:
-        vm.vif = 0;
+        current->vif = 0;
         break;
     case V86_STI:
-        vm.vif = 1;
+        current->vif = 1;
         break;
     case V86_HLT:
         tf->eip += in.len;
-        vm_idle(0);
+        if (app_cur())
+            app_idle(app_cur());
+        else
+            vm_idle(0);
         return;
     case V86_IN:
-        v = vdev_in((u16)port, in.width);
+        v = app_cur() ? app_in(app_cur(), (u16)port, in.width) : vdev_in((u16)port, in.width);
         if (in.width == 1) SETLO(tf->eax, v);
         else if (in.width == 2) SET16(tf->eax, v);
         else tf->eax = v;
         break;
     case V86_OUT:
-        vdev_out((u16)port, tf->eax, in.width);
+        if (app_cur())
+            app_out(app_cur(), (u16)port, tf->eax, in.width);
+        else
+            vdev_out((u16)port, tf->eax, in.width);
         break;
     default:
         dpmi_exception(tf);
@@ -563,8 +680,8 @@ void dpmi_trap(struct trapframe *tf)
         dctx->cr2 = read_cr2();                 /* before anything else can fault */
     if (v == 1)
         dpmi_db_hit();                          /* a watchpoint's (0B00h), or a single step */
-    if ((v == 1 || v == 3) && gdbp_trap(tf))
-        return;                                 /* glos gdb's step or breakpoint */
+    if ((v == 1 || v == 3) && current == vm.thread && gdbp_trap(tf))
+        return;                                 /* glos gdb's step or breakpoint (the session's program) */
     if (v == 13)
         general_protection(tf);
     else if (v >= 0x20)
@@ -603,29 +720,34 @@ static int loadable(u32 sel, int kind)
 
 void dpmi_return(struct trapframe *tf)
 {
-    if (vm.kill_req && !vm_work_running()) {
-        dpmi_end(tf, 0xFF, 1);
-        vm_return(tf);
-        return;
-    }
-    if (!(tf->eflags & FL_VM)) {
-        vm_work_turn(tf);                       /* (in real mode: vm_return's) */
-        gdbp_return(tf);                        /* glos gdb: a stop it was asked for */
-    }
-    while (vm.vif && vpic_pending(&vm.pic) && dctx) {
-        int vec = vpic_ack(&vm.pic);
-        if (vm.direct)
-            vm_sync_mask();                     /* (direct mode: ended at once, v86.c) */
-        if (vec < 0)
-            break;
-        vm.n_irq++;
-        if (dpmi_irq(tf, (u8)vec))              /* the client's handler first, its virtual IF off */
-            break;
-        rm_irq(tf, (u8)vec);
-    }
-    if (tf->eflags & FL_VM) {
-        vm_return(tf);
-        return;
+    struct app *a = app_cur();
+    if (a) {
+        app_return(a, tf);                      /* its kill, its pause (it has no real mode to return to) */
+    } else {
+        if (vm.kill_req && !vm_work_running()) {
+            dpmi_end(tf, 0xFF, 1);
+            vm_return(tf);
+            return;
+        }
+        if (!(tf->eflags & FL_VM)) {
+            vm_work_turn(tf);                   /* (in real mode: vm_return's) */
+            gdbp_return(tf);                    /* glos gdb: a stop it was asked for */
+        }
+        while (current->vif && vpic_pending(&vm.pic) && dctx) {
+            int vec = vpic_ack(&vm.pic);
+            if (vm.direct)
+                vm_sync_mask();                 /* (direct mode: ended at once, v86.c) */
+            if (vec < 0)
+                break;
+            vm.n_irq++;
+            if (dpmi_irq(tf, (u8)vec))          /* the client's handler first, its virtual IF off */
+                break;
+            rm_irq(tf, (u8)vec);
+        }
+        if (tf->eflags & FL_VM) {
+            vm_return(tf);
+            return;
+        }
     }
     if (!loadable(tf->ds, SEG_DATA)) tf->ds = 0;
     if (!loadable(tf->es, SEG_DATA)) tf->es = 0;
@@ -660,8 +782,8 @@ static void terminated(struct trapframe *tf)
 {
     struct trapframe *f;
     u32 vec;
-    int d;
-    if (dctx && dctx->tsr_pending) {            /* INT 21h 31h: resident, context and all */
+    int d, app;
+    if (dctx && dctx->tsr_pending && !dctx->app) {     /* INT 21h 31h: resident, context and all */
         dctx->tsr_pending = 0;
         dctx->resident_parent = vm_current_psp();       /* DOS made its parent current */
         vec = dctx->term_vec;
@@ -672,18 +794,25 @@ static void terminated(struct trapframe *tf)
     }
     if (nterm) {
         vec = term_pend[--nterm];
+        if (vec == TERM_APP)
+            app_vm_ended(tf);                   /* an app's: the VM thread's call for it ends here */
         tf->cs = vec >> 16;
         tf->eip = vec & 0xFFFF;
         return;
     }
     if (!dctx) {
+        if (app_vm_ending())                    /* an app that ended on its own thread: DOS has now ended it */
+            app_vm_ended(tf);
         kprintf("GLOS-DPMI term-unknown\n");
         return;
     }
     vec = dctx->term_vec;
+    app = dctx->app && dctx->nlv == 1;
     kprintf("GLOS-DPMI exit terminated to=%08x psp=%04x restored=%u level=%u\n", vec, vm_current_psp(),
-            vm_restore_child(), dctx->nlv);
+            app ? 0 : vm_restore_child(), dctx->nlv);
     end_level(0, 0, &d, &f);
+    if (app)
+        app_vm_ended(tf);
     tf->cs = vec >> 16;
     tf->eip = vec & 0xFFFF;
     if (rm_nesting() > d)
@@ -710,13 +839,15 @@ int dpmi_v86_bp(struct trapframe *tf)
         rm_raw_to_pm(tf);
         return 1;
     }
-    if (ip >= bi->rmcb_off && ip < bi->rmcb_off + 2 * NRMCB && !((ip - bi->rmcb_off) & 1) && dctx) {
-        if (dctx->rmcb[(ip - bi->rmcb_off) / 2].used && !dctx->ending) {
-            dpmi_rmcb(tf, (ip - bi->rmcb_off) / 2);
+    if (ip >= bi->rmcb_off && ip < bi->rmcb_off + 2 * NRMCB && !((ip - bi->rmcb_off) & 1)) {
+        u32 i = (ip - bi->rmcb_off) / 2;
+        if (dctx && rmcb_mine(i) && dctx->rmcb[i].used && !dctx->ending) {
+            dpmi_rmcb(tf, i);
             return 1;
         }
-        if (!dctx->ending)                      /* a callback since freed, or one while the crash report */
-            dpmi_unimpl(tf, "rmcb-free");       /* is written: as if it returned at once */
+        if (!dctx || !dctx->ending)             /* a callback since freed, another context's (an app's, */
+            dpmi_unimpl(tf, "rmcb-free");       /* reached while it isn't the one in the VM), or one while the
+                                                   crash report is written: as if it returned at once */
         tf->eip = vm_rd16(vm_lin(tf->ss, tf->esp & 0xFFFF));
         tf->cs = vm_rd16(vm_lin(tf->ss, (tf->esp + 2) & 0xFFFF));
         SET16(tf->esp, tf->esp + 6);
@@ -728,8 +859,9 @@ int dpmi_v86_bp(struct trapframe *tf)
 /* glos stat: the context as a JSON object, or null. */
 u32 dpmi_stat(char *buf, u32 max)
 {
-    if (!dctx)
+    const struct dpmi_ctx *c = vm.thread->ctx;  /* the session's (an app's while the VM thread works for it) */
+    if (!c)
         return (u32)ksnprintf(buf, max, "null");
     return (u32)ksnprintf(buf, max, "{\"bits\":%u,\"psp\":%u,\"held_kb\":%u,\"unbacked_kb\":%u,\"cap_kb\":%u}",
-                          dctx->bits32 ? 32u : 16u, dctx->psp, dctx->frames * 4, dctx->lazy * 4, dctx->frame_cap * 4);
+                          c->bits32 ? 32u : 16u, c->psp, c->frames * 4, c->lazy * 4, c->frame_cap * 4);
 }

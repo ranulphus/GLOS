@@ -15,6 +15,7 @@
 
 #include "glos/bootinfo.h"
 #include "agent.h"
+#include "app.h"
 #include "arch.h"
 #include "io.h"
 #include "kprintf.h"
@@ -618,14 +619,16 @@ static u32 stat_line(char *b, u32 max)
     n += session_stat(b + n, max - n);
     n += (u32)ksnprintf(b + n, max - n, ",\"dpmi\":");
     n += dpmi_stat(b + n, max - n);
-    n += (u32)ksnprintf(b + n, max - n, "}\n");
+    n += (u32)ksnprintf(b + n, max - n, ",\"apps\":");
+    n += app_stat(b + n, max - n);
+    n += (u32)ksnprintf(b + n, max > n ? max - n : 0, "}\n");
     return n < max ? n : max;
 }
 
 /* glos stat --follow: a line a second. */
 static int stat_turn(struct ssh_chan *ch, void *arg)
 {
-    static char line[1536];
+    static char line[4096];
     u32 *next = arg, now = timer_ticks();
     if ((s32)(now - *next) >= 0 && ssh_chan_pending(ch) < ROOM) {
         ssh_chan_write(ch, 0, (const uint8_t *)line, stat_line(line, sizeof line));
@@ -664,21 +667,21 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
     if (!strncmp(cmd, "glos run", 8) && (cmd[8] == ' ' || !cmd[8])) {
         const char *p = cmd + 8;                /* glos run [--exclusive|--app] [--direct] [--profile NAME] COMMAND */
         char prof[16];
-        int direct = 0;
+        int direct = 0, excl = 0;
         u32 n;
         prof[0] = 0;
         for (;;) {
             while (*p == ' ')
                 p++;
             if (!strncmp(p, "--exclusive", 11) && (p[11] == ' ' || !p[11])) {
-                p += 11;                        /* (every session is, until M6's apps) */
+                excl = 1;                       /* a session, even if the program asks to be an app (M6) */
+                p += 11;
             } else if (!strncmp(p, "--direct", 8) && (p[8] == ' ' || !p[8])) {
                 direct = 1;
                 p += 8;
             } else if (!strncmp(p, "--app", 5) && (p[5] == ' ' || !p[5])) {
-                say(ch, 1, "glos run: --app needs GLOS apps (M6)\n");
-                ssh_chan_exit(ch, 2);
-                return 0;
+                excl = 0;                       /* an app if the program asks to be one: as without it */
+                p += 5;
             } else if (!strncmp(p, "--profile ", 10)) {
                 for (p += 10; *p == ' '; p++) ;
                 for (n = 0; p[n] && p[n] != ' ' && n < sizeof prof - 1; n++)
@@ -702,7 +705,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         } else if (!agent_mode) {
             say(ch, 1, "glos: DOS commands need GLOS started without /RUN or /SHELL\n");
             ssh_chan_exit(ch, 126);
-        } else if (agent_post_run(ch, p, direct, prof) != 0) {
+        } else if (agent_post_run(ch, p, direct, excl, prof) != 0) {
             say(ch, 1, "glos: busy\n");
             ssh_chan_exit(ch, 126);
         }
@@ -743,7 +746,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             ssh_chan_exit(ch, 1);
         }
     } else if (!strcmp(cmd, "glos stat") || !strcmp(cmd, "glos net") || !strcmp(cmd, "glos mem")) {
-        char *b = kmalloc(1536);
+        char *b = kmalloc(4096);
         u32 n = 0;
         if (!b) {
             say(ch, 1, "glos: no memory\n");
@@ -751,16 +754,16 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             return 0;
         }
         if (cmd[5] == 's') {
-            n = stat_line(b, 1536);
+            n = stat_line(b, 4096);
         } else if (cmd[5] == 'n') {
-            n = net_stat(b, 1536, 0);
+            n = net_stat(b, 4096, 0);
         } else {                                /* glos mem: where the memory GLOS has is */
-            n = (u32)ksnprintf(b, 1536, "memory total_kb=%u free_kb=%u\nkernel image_kb=%u heap_kb=%u heap_max_kb=%u\n",
+            n = (u32)ksnprintf(b, 4096, "memory total_kb=%u free_kb=%u\nkernel image_kb=%u heap_kb=%u heap_max_kb=%u\n",
                                pmm_total_frames() * 4, pmm_free_frames() * 4, kernel_bytes() / 1024, kheap_bytes() / 1024,
                                HEAP_MAX / 1024);
-            n += (u32)ksnprintf(b + n, 1536 - n, "dpmi ");
-            n += dpmi_stat(b + n, 1536 - n);
-            n += (u32)ksnprintf(b + n, 1536 - n, "\n");
+            n += (u32)ksnprintf(b + n, 4096 - n, "dpmi ");
+            n += dpmi_stat(b + n, 4096 - n);
+            n += (u32)ksnprintf(b + n, 4096 - n, "\n");
         }
         ssh_chan_write(ch, 0, (const uint8_t *)b, n);
         kfree(b);
@@ -803,6 +806,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             n = klog_read(buf, 0x4000);
         } else {
             n = agent_ps(buf, 0x1000);
+            n += app_ps(buf + n, 0x1000);
             psp = vm_current_psp();
             if (psp) {
                 u32 mcb = ((u32)psp - 1) << 4, k;

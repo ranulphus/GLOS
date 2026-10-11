@@ -14,6 +14,7 @@
  * stack, and its waits (HLT, INT 15h 86h) block it until vm_kick(). */
 #include "glos/bootinfo.h"
 #include "agent.h"
+#include "app.h"
 #include "dos.h"
 #include "dpmi.h"
 #include "session.h"
@@ -85,14 +86,14 @@ static u32 flags_wide(void)
 
 static u32 flags_image(const struct trapframe *tf)
 {
-    return (tf->eflags & flags_wide()) | (vm.vif ? FL_IF : 0) | (vm.vflags_hi & FL_NT) | FL_IOPL3 | 2;
+    return (tf->eflags & flags_wide()) | (current->vif ? FL_IF : 0) | (vm.vflags_hi & FL_NT) | FL_IOPL3 | 2;
 }
 
 static void flags_apply(struct trapframe *tf, u32 f, int wide)
 {
     u32 keep = wide ? flags_wide() : (FL_ARITH | FL_TF);
     tf->eflags = (tf->eflags & ~keep) | (f & keep);
-    vm.vif = (f & FL_IF) != 0;
+    current->vif = (f & FL_IF) != 0;
     vm.vflags_hi = f & FL_NT;
 }
 
@@ -104,7 +105,7 @@ void vm_int(struct trapframe *tf, u8 n, u32 ret_ip)
     push16(tf, flags_image(tf));
     push16(tf, tf->cs);
     push16(tf, ret_ip);
-    vm.vif = 0;
+    current->vif = 0;
     tf->eflags &= ~(FL_TF | FL_AC);
     tf->cs = v >> 16;
     tf->eip = v & 0xFFFF;
@@ -144,7 +145,7 @@ int vm_unpost(struct vm_work *w)
 int vm_work_due(void)
 {
     struct vm_work *w = work;
-    return w && w->state == VW_POSTED && (vm.vif || timer_ticks() - w->posted >= w->patience);
+    return w && w->state == VW_POSTED && (vm.thread->vif || timer_ticks() - w->posted >= w->patience);
 }
 
 int vm_work_running(void) { return work && work->state == VW_RUNNING; }
@@ -172,20 +173,21 @@ void vm_idle(u32 until)
 {
     vm.wait_deadline = until;
     vm.waiting = 1;
-    while (!vm.kill_req && !(vm.vif && vpic_pending(&vm.pic)) && !vm_work_due()
-           && !(until && (s32)(timer_ticks() - until) >= 0) && !(vm.idle_agent && agent_vm_wake_pending()))
+    while (!vm.kill_req && !(current->vif && vpic_pending(&vm.pic)) && !vm_work_due()
+           && !(until && (s32)(timer_ticks() - until) >= 0)
+           && !(vm.idle_agent && (agent_vm_wake_pending() || app_vm_pending())))
         thread_block(&vm.waitq);
     vm.waiting = 0;
     vm.wait_deadline = 0;
 }
 
 /* Something the VM may be waiting for happened (an IRQ raised, a kill, a
-   deadline): wake it, and let it take the CPU from bulk work. */
+   deadline): wake it, and it takes the CPU from bulk work and from apps
+   (a front thread, core/sched.c). */
 void vm_kick(void)
 {
-    thread_wake(&vm.waitq);
-    if (current && current != vm.thread && current->prio > PRIO_NORMAL)
-        sched_resched();
+    if (!thread_wake(&vm.waitq) && vm.thread)
+        sched_front(vm.thread);
 }
 
 struct trapframe *vm_frame(void) { return (struct trapframe *)(vm.thread->stack_top - sizeof(struct trapframe)); }
@@ -211,12 +213,12 @@ void vm_user_entry(struct trapframe *tf)
 {
     u16 m, phys, own;
     u8 a, b;
-    if (!vm.direct) {
+    if (!vm.direct || current != vm.thread) {   /* (an app's thread: never direct) */
         if (vm.vme && (tf->eflags & FL_VM))
-            vm.vif = (tf->eflags & FL_VIF) != 0;
+            current->vif = (tf->eflags & FL_VIF) != 0;
         return;
     }
-    vm.vif = (tf->eflags & FL_IF) != 0;
+    current->vif = (tf->eflags & FL_IF) != 0;
     phys = (u16)(inb(0x21) | (inb(0xA1) << 8));
     if (phys != vm.phys_mask) {                 /* the program's (the kernel's lines and those in flight */
         own = (u16)(kernel_lines | vm.pic.inflight);    /* are GLOS's) */
@@ -238,8 +240,8 @@ void vm_user_exit(struct trapframe *tf)
 {
     if (!(tf->eflags & FL_VM) && !(tf->cs & 3))
         return;
-    if (vm.direct)
-        tf->eflags = (tf->eflags & ~(FL_IF | FL_VIF | FL_VIP)) | FL_IOPL3 | (vm.vif ? FL_IF : 0);
+    if (vm.direct && current == vm.thread)
+        tf->eflags = (tf->eflags & ~(FL_IF | FL_VIF | FL_VIP)) | FL_IOPL3 | (current->vif ? FL_IF : 0);
     else if (tf->eflags & FL_IOPL3)             /* a frame from a direct-mode session that has ended */
         tf->eflags = (tf->eflags & ~FL_IOPL3) | FL_IF;
 }
@@ -410,7 +412,9 @@ static int vm_try_kill(struct trapframe *tf, int force)
     vm.kill_req = 0;
     if (psp)
         parent = vm_rd16(psp * 16u + 0x16);
-    if (!psp || psp == vm.loader_psp || !snap_restore(parent)) {
+    if (!psp || psp == vm.loader_psp || (psp != app_vm_psp() && !snap_restore(parent))) {
+                                                /* (an app, in the call the VM thread makes for it, changed no
+                                                   device of the system's, and its vectors go with it: app.c) */
         u32 st = vm_lin(tf->ss, tf->esp & 0xFFFF);
         kprintf("GLOS-KILL none psp=%04x at=%04x:%04x ss:sp=%04x:%04x stack=%04x %04x %04x %04x %04x %04x %04x %04x"
                 " reason=%s\n", psp, at_cs, at_ip, tf->ss & 0xFFFF, tf->esp & 0xFFFF, vm_rd16(st), vm_rd16(st + 2),
@@ -421,7 +425,7 @@ static int vm_try_kill(struct trapframe *tf, int force)
         return 0;
     }
 
-    vm.vif = 1;
+    current->vif = 1;
     vm.vflags_hi = 0;
     tf->eflags = (tf->eflags & FL_ARITH & ~0x400u) | FL_VM | FL_IF | 2;
     tf->cs = vm.loader_cs;
@@ -447,7 +451,7 @@ void vm_return(struct trapframe *tf)
         vm_try_kill(tf, 0);
     if (work)
         vm_work_turn(tf);
-    if (vm.vif && vpic_pending(&vm.pic)) {
+    if (current->vif && vpic_pending(&vm.pic)) {
         vec = vpic_ack(&vm.pic);
         if (vm.direct)
             vm_sync_mask();                     /* (ended at once: the line is unmasked again) */
@@ -462,7 +466,7 @@ void vm_return(struct trapframe *tf)
     }
     if (vm.vme && !vm.direct) {
         tf->eflags &= ~(FL_VIF | FL_VIP);
-        if (vm.vif)
+        if (current->vif)
             tf->eflags |= FL_VIF;
         else if (vpic_pending(&vm.pic))
             tf->eflags |= FL_VIP;
@@ -606,6 +610,10 @@ static void vm_agent_next(struct trapframe *tf, u32 result)
     r = agent_vm_next(result, vm.bi->comspec, &x);
     if (vm.vme)
         cpu_int_redirect(0x29, !agent_vm_capturing());
+    if (r < 0 && app_count()) {                 /* glos exit: the apps end first */
+        app_kill_all("exit");
+        r = 0;
+    }
     if (r < 0)
         vm_leave(0);
     if (r > 0)
@@ -617,6 +625,8 @@ static void vm_agent_next(struct trapframe *tf, u32 result)
    its exit code; as the shell, vm_shell_next(); headless, vm_agent_next(). */
 static void vm_next(struct trapframe *tf, u32 result)
 {
+    static u8 ran;
+    app_vm_turn();                              /* apps' calls into the system VM, now that it is idle (M6) */
     if (vm.bi->flags & BI_F_AGENT) {
         vm_agent_next(tf, result);
         return;
@@ -625,9 +635,17 @@ static void vm_next(struct trapframe *tf, u32 result)
         vm_shell_next(tf, result);
         return;
     }
-    if (result == 0xFFFFFFFFu) {
+    if (result == 0xFFFFFFFFu && !ran) {
+        ran = 1;
         tf->eax = 1;
         return;
+    }
+    if (result == NEXT_DETACHED || result == 0xFFFFFFFFu) {    /* /RUN's program became an app: its end is */
+        if (app_count()) {                      /* the run's, with its exit code */
+            tf->eax = 2;
+            return;
+        }
+        result = app_last_code();
     }
     if (result & 0x10000) {
         kprintf("GLOS-VM error=cannot-run dos_error=%u\n", result & 0xFFFF);
@@ -652,6 +670,10 @@ static void vm_call(struct trapframe *tf)
         tf->eax = 0;
         break;
     case GLOS_CALL_NEXT:
+        if (vm.indos && vm_rd8(vm.indos)) {     /* nothing is in DOS when the stub asks. A program killed inside */
+            kprintf("GLOS-VM indos=reset was=%u\n", vm_rd8(vm.indos));  /* DOS leaves the flag set (FreeDOS */
+            vm_wr8(vm.indos, 0);                /* counts one call's end; MS-DOS zeroes it itself) */
+        }
         session_stub_next();
         vm_next(tf, arg);
         break;
@@ -863,10 +885,10 @@ static void vm_gp(struct trapframe *tf)
 
     switch (in.kind) {
     case V86_CLI:
-        vm.vif = 0;
+        current->vif = 0;
         break;
     case V86_STI:
-        vm.vif = 1;
+        current->vif = 1;
         /* STI; HLT with an IRQ pending: the IRQ wakes the HLT at once. */
         if (vpic_pending(&vm.pic) && vm_rd8(vm_lin(tf->cs, next)) == 0xF4)
             next = (next + 1) & 0xFFFF;
@@ -995,7 +1017,7 @@ void vm_start(struct bootinfo *bi)
 {
     struct trapframe *tf = &start_frame;
     u8 *st = vm_ptr(bi->cs_base + bi->vm_state_off);
-    u32 i;
+    u32 i, f;
 
     vm.bi = bi;
     vm.indos = bi->indos;
@@ -1037,10 +1059,16 @@ void vm_start(struct bootinfo *bi)
     tf->ss = (u32)(st[0] | (st[1] << 8));
     tf->esp = (u32)(st[2] | (st[3] << 8));
     tf->v86_ds = tf->v86_es = (u32)(st[4] | (st[5] << 8));
-    vm.vif = 0;                                 /* pm_enter's CLI; _vm_resume's POPF sets it */
     kprintf("GLOS-RING0 step=vm cs=%04x ss:sp=%04x:%04x a20=%u pic=%04x kbc=%02x xms=%s vme=%u\n", vm.loader_cs,
             tf->ss, tf->esp, vm.a20, vpic_imr(&vm.pic), vkbc_cmd(), bi->mode == BI_MODE_XMS ? "takeover" : "raw",
             vm.vme);
     kprintf("GLOS-VM dos indos=%05x sda=%05x psp=%04x\n", vm.indos, vm.sda, vm_current_psp());
-    vm.thread = thread_create("vm", PRIO_NORMAL, vm_thread_main, NULL);
+    vm.thread = thread_new("vm", PRIO_NORMAL, vm_thread_main, NULL, TU_VM);    /* (its virtual IF off: pm_enter's */
+    if (!vm.thread)                             /* CLI; _vm_resume's POPF sets it) */
+        panic("vm-thread", NULL);
+    vm.thread->front = 1;
+    dpmi_user_init(vm.thread);
+    f = irq_save();
+    thread_go(vm.thread);
+    irq_restore(f);
 }

@@ -102,6 +102,21 @@ frame_resume:
         movl    4(%esp), %esp
         jmp     trap_exit
 
+/* void frame_start(const struct trapframe *f, u32 top): a new thread's way
+   into user mode (an app's, kernel/app/app.c): frame f, which lies
+   elsewhere, to the top of its stack, where every trap from there will
+   build its own, and out through it. Nothing else on the stack is kept. */
+        .globl  frame_start
+frame_start:
+        movl    4(%esp), %esi
+        movl    8(%esp), %edi
+        subl    $92, %edi                       /* sizeof(struct trapframe) */
+        movl    %edi, %esp
+        movl    $23, %ecx
+        cld
+        rep movsl
+        jmp     trap_exit
+
 /* void vm_enter(struct trapframe *tf): into the system VM, as if returning
    from a trap that came from it. */
         .globl  vm_enter

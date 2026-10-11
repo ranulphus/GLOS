@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "glos/bootinfo.h"
+#include "app.h"
 #include "arch.h"
 #include "dpmi.h"
 #include "io.h"
@@ -286,13 +287,29 @@ static void fn_rmcall(struct trapframe *tf, u32 fn)
     ok(tf);
 }
 
+/* A callback's real-mode address is one of the stub's ARPLs, the same for
+   every context, so each belongs to one context at a time (M6): a call
+   that arrives while another context is the VM's is not its owner's. */
+static struct dpmi_ctx *rmcb_owner[NRMCB];
+
+int rmcb_mine(u32 i) { return i < NRMCB && rmcb_owner[i] == dctx; }
+
+void rmcb_free_ctx(const struct dpmi_ctx *c)
+{
+    u32 i;
+    for (i = 0; i < NRMCB; i++)
+        if (rmcb_owner[i] == c && (!c->rmcb[i].used || c->nlv <= 1 || c->rmcb[i].used >= c->nlv))
+            rmcb_owner[i] = 0;                  /* (a level's end: its own; the context's: all) */
+}
+
 static void fn_rmcb(struct trapframe *tf, u32 fn)
 {
     u32 i;
     if (fn == 0x0303) {
-        for (i = 0; i < NRMCB && dctx->rmcb[i].used; i++) ;
+        for (i = 0; i < NRMCB && rmcb_owner[i]; i++) ;
         if (i == NRMCB || !(dctx->rmcb[i].stack_sel = ldt_new(0, 0xFFFF, 0xF2, 0)))
             return fail(tf, 0x8015);
+        rmcb_owner[i] = dctx;
         dctx->rmcb[i].used = (u8)dctx->nlv;
         dctx->rmcb[i].pm.sel = (u16)tf->ds;
         dctx->rmcb[i].pm.off = r_si(tf);
@@ -304,9 +321,10 @@ static void fn_rmcb(struct trapframe *tf, u32 fn)
         return ok(tf);
     }
     i = (dx(tf) - vm.bi->rmcb_off) / 2;
-    if (cx(tf) != vm.loader_cs || dx(tf) < vm.bi->rmcb_off || i >= NRMCB || !dctx->rmcb[i].used)
+    if (cx(tf) != vm.loader_cs || dx(tf) < vm.bi->rmcb_off || i >= NRMCB || !rmcb_mine(i) || !dctx->rmcb[i].used)
         return fail(tf, 0x8024);
     dctx->rmcb[i].used = 0;
+    rmcb_owner[i] = 0;
     ldt_free(dctx->rmcb[i].stack_sel);
     ok(tf);
 }
@@ -326,19 +344,16 @@ static void fn_vectors(struct trapframe *tf, u32 fn)
 {
     u8 n = (u8)tf->ebx;
     struct farptr *p;
-    u32 ivt = vm_rd32(n * 4u);
+    u32 ivt = app_ivt_get(n);                   /* (an app's own vectors, while it isn't in the VM: app.c) */
     switch (fn) {
     case 0x0200:
-        SET16(tf->ecx, vm_rd16(n * 4u + 2));
-        SET16(tf->edx, vm_rd16(n * 4u));
+        SET16(tf->ecx, ivt >> 16);
+        SET16(tf->edx, ivt);
         break;
     case 0x0201:
         if (is_rmcb(pair(cx(tf), dx(tf))) && !is_rmcb(ivt))
             dctx->rm_prev[n] = ivt;             /* an RMCB takes it over: the pass-up guard's way on (§14.5) */
-        vm_wr8(n * 4u, (u8)tf->edx);
-        vm_wr8(n * 4u + 1, (u8)(tf->edx >> 8));
-        vm_wr8(n * 4u + 2, (u8)tf->ecx);
-        vm_wr8(n * 4u + 3, (u8)(tf->ecx >> 8));
+        app_ivt_set(n, pair(cx(tf), dx(tf)));
         break;
     case 0x0202:
     case 0x0203:
@@ -494,6 +509,22 @@ static void dr7_set(void)
     write_dr7(v);
 }
 
+/* Another context is the loaded one (host.c dpmi_ctx_load): its watchpoints
+   into the debug registers, the last one's out. */
+void wp_load(void)
+{
+    static u8 live;                             /* the registers hold some context's */
+    u32 i, any = 0;
+    for (i = 0; i < 4; i++)
+        if (dctx && dctx->wp[i].level) {
+            write_dr((int)i, dctx->wp[i].lin);
+            any = 1;
+        }
+    if (any || live)
+        dr7_set();
+    live = (u8)any;
+}
+
 static void fn_watch(struct trapframe *tf, u32 fn)
 {
     u32 i = bx(tf), lin = pair(bx(tf), cx(tf)), len = tf->edx & 0xFF, type = (tf->edx >> 8) & 0xFF, rw;
@@ -604,7 +635,7 @@ static void dispatch(struct trapframe *tf);
 /* /DPMITRACE: each call, then CF and AX after it. */
 void int31(struct trapframe *tf)
 {
-    u32 fn = tf->eax & 0xFFFF, bx0 = tf->ebx & 0xFFFF, cx0 = tf->ecx & 0xFFFF, dx0 = tf->edx & 0xFFFF, if0 = vm.vif;
+    u32 fn = tf->eax & 0xFFFF, bx0 = tf->ebx & 0xFFFF, cx0 = tf->ecx & 0xFFFF, dx0 = tf->edx & 0xFFFF, if0 = current->vif;
     dispatch(tf);
     if (vm.bi->flags & BI_F_DPMITRACE)
         kprintf("GLOS-DPMI call fn=%04x bx=%04x cx=%04x dx=%04x if=%u -> cf=%u ax=%04x bx=%04x cx=%04x dx=%04x\n", fn,
@@ -733,9 +764,9 @@ static void dispatch(struct trapframe *tf)
         ok(tf);
         return;
     case 0x0900: case 0x0901: case 0x0902:
-        v = vm.vif;
+        v = current->vif;
         if (fn != 0x0902)
-            vm.vif = fn == 0x0901;
+            current->vif = fn == 0x0901;
         SETLO(tf->eax, v);
         ok(tf);
         return;

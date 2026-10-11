@@ -5,7 +5,13 @@
  * interrupt or a trap from V86 mode when a reschedule is due. Kernel
  * threads run with interrupts on and are preemptible unless they raise the
  * preempt count; the trap paths of the system VM run with interrupts off
- * and are never preempted midway. */
+ * and are never preempted midway.
+ *
+ * Threads that run user-mode code (M6): the system VM's, and one for each
+ * GLOS app (kernel/app/app.c). Each has a virtual interrupt flag, may have a
+ * DPMI context (an address space, an LDT), and has the FPU's state while
+ * another of them has the FPU. The switch hook loads what the next one
+ * needs (kernel/dpmi/host.c). */
 #ifndef K_SCHED_H
 #define K_SCHED_H
 #include "types.h"
@@ -34,7 +40,15 @@ struct thread {
     u32 wake_at;                        /* sleeping: the tick to wake at */
     u32 ticks;                          /* ticks spent running */
     u32 esp0;                           /* where a trap from user mode builds its frame (TSS.ESP0) */
+    u8 user;                            /* TU_: it runs user-mode code */
+    u8 vif;                             /* ... whose virtual interrupt flag this is (EFLAGS.VIF in V86 mode with VME) */
+    u8 front;                           /* woken, it always goes ahead of its class's queue (the VM thread) */
+    u8 ahead;                           /* in a run queue: it went ahead when woken */
+    void *ctx;                          /* ... in this DPMI context (struct dpmi_ctx), or 0 */
+    u8 *fpu;                            /* ... and its FPU state (FNSAVE's 108 bytes) while it isn't in the FPU */
 };
+
+enum { TU_NONE, TU_VM, TU_APP };
 
 struct waitq {
     struct thread *head;
@@ -45,6 +59,10 @@ extern struct thread *current;
 void sched_init(void);                  /* the caller becomes the idle thread */
 void sched_idle(void) __attribute__((noreturn));
 struct thread *thread_create(const char *name, int prio, void (*fn)(void *), void *arg);
+struct thread *thread_new(const char *name, int prio, void (*fn)(void *), void *arg, int user);
+                                        /* the same, 0 without memory; user: TU_ (a suspended start: thread_go) */
+void thread_go(struct thread *t);       /* a thread_new() thread becomes ready (interrupts off) */
+extern void (*sched_switch)(struct thread *next);       /* called before every switch to another thread */
 void thread_exit(void) __attribute__((noreturn));
 
 /* With interrupts off. */
@@ -52,6 +70,7 @@ void schedule(void);
 void thread_block(struct waitq *q);     /* until thread_wake(q) */
 int thread_wake(struct waitq *q);       /* every waiter; 1 if any */
 void sched_resched(void);               /* switch at the next safe point */
+void sched_front(struct thread *t);     /* a ready thread to the head of its queue, and the CPU to it soon */
 
 /* With interrupts on or off; they come back as they were. */
 void thread_sleep_until(u32 tick);

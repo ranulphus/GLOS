@@ -10,7 +10,7 @@ struct trapframe;
 /* The ssh thread's side. owner is its channel. */
 void agent_init(void (*kick_ssh)(void));       /* kick_ssh: output or an end is waiting */
 int agent_post(void *owner, const char *cmd);   /* 0, or -1 when every job slot is taken */
-int agent_post_run(void *owner, const char *cmd, int direct, const char *profile);     /* glos run's */
+int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, const char *profile);      /* glos run's */
 void agent_drop(void *owner);                   /* the channel has gone */
 void agent_service(u32 (*write)(void *owner, int stream, const u8 *d, u32 n),
                    void (*done)(void *owner, u32 code));       /* code: the exit status */
@@ -27,6 +27,9 @@ struct agent_exec {
 int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x);  /* 1 EXEC, 0 wait, -1 leave */
 int agent_vm_wake_pending(void);                /* a job or an exit is waiting for the halted stub */
 int agent_vm_capturing(void);
+void *agent_vm_job(void);                       /* the running job, or 0 */
+void *agent_vm_as(void *job);                   /* output is this job's from now (an app's); returns the one before */
+void agent_app_done(void *job, u32 result);     /* the app that job became has ended */
 void agent_vm_tick(u32 now);                    /* every kernel tick: the kills of a job being ended */
 void agent_vm_int21(const struct trapframe *tf);
 void agent_vm_int29(const struct trapframe *tf);

@@ -54,7 +54,7 @@ static int dos(struct trapframe *tf, u16 ds, u16 es, int ovr, u32 bx, u32 dx, u3
     r.ebp = tf->ebp & 0xFFFF;
     r.ds = ds;
     r.es = es;
-    r.flags = (u16)((tf->eflags & FL_ARITH) | (vm.vif ? FL_IF : 0) | 2);
+    r.flags = (u16)((tf->eflags & FL_ARITH) | (current->vif ? FL_IF : 0) | 2);
     if (rm_call(tf, &r, RM_INT, 0x21, 0, 0) != 0)
         return -1;
     SET16(tf->eax, r.eax);

@@ -38,7 +38,6 @@ struct vm_snap {
 struct vm {
     struct bootinfo *bi;
     u16 loader_cs, loader_psp;
-    u8 vif;                             /* the virtual interrupt flag (EFLAGS.VIF in V86 mode with VME) */
     u8 vme;                             /* CR4.VME on: CLI, STI, PUSHF, POPF, IRET and most INTs in hardware */
     u8 direct;                          /* a direct-mode session: IOPL 3, the real IF (supervisor.md §9.7) */
     u8 direct_rtc;                      /* user entries since the RTC was last checked (direct mode) */

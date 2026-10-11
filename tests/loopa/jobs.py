@@ -1532,8 +1532,8 @@ def sess_kill(profile, boot):
 def sess_agent(profile, card):
     """SESSTEST and the checks as agent jobs, through ssh: each job is a session (the agent EXECs a program
     directly, trying each place along PATH; only the one found begins a session). Then glos run (E4):
-    --direct runs ENABLE at IOPL 3, --profile gives NOPROF.EXE PROFCHK's profile, and --app, an unknown
-    profile and no command are refused with status 2."""
+    --direct runs ENABLE at IOPL 3, --profile gives NOPROF.EXE PROFCHK's profile, --exclusive and --app
+    run it as plain does, and an unknown profile and no command are refused with status 2."""
     tag = "agent-%s-%s" % (profile, card)
     cfg = batfile("sess-%s/GLOS.CFG" % tag, PROF_CFG)
     agent = Agent("sess-" + tag, profile, card, SESS_FILES + [
@@ -1552,8 +1552,8 @@ def sess_agent(profile, card):
         rc, out, _ = agent.ssh("glos run --exclusive C:\\TEST\\ENABLE.EXE")
         checks["run-plain"] = rc == 1 and "incorrect" in out
         checks["run-profile"] = agent.ssh("glos run --profile profchk C:\\TEST\\NOPROF.EXE")[0] == 0
-        rc, _, err = agent.ssh("glos run --app C:\\TEST\\ENABLE.EXE")
-        checks["run-app"] = rc == 2 and "M6" in err
+        rc, out, _ = agent.ssh("glos run --app C:\\TEST\\ENABLE.EXE")        # (M6: as without it)
+        checks["run-app"] = rc == 1 and "incorrect" in out
         rc, _, err = agent.ssh("glos run --profile NOSUCH.EXE C:\\TEST\\ENABLE.EXE")
         checks["run-noprofile"] = rc == 2 and "NOSUCH.EXE" in err
         checks["run-usage"] = agent.ssh("glos run --direct")[0] == 2
@@ -1572,7 +1572,7 @@ def sess_agent(profile, card):
     checks["ran"] = "HX-SESS done" in text and left is not None
     checks.update({"kept-" + k: v for k, v in (left or {}).items()})
     checks.update(sess_checks(text))
-    checks["one-each"] = len(re.findall(r"GLOS-SESSION begin ", text)) == len(SESS_STEPS) + 4   # no failed EXECs
+    checks["one-each"] = len(re.findall(r"GLOS-SESSION begin ", text)) == len(SESS_STEPS) + 5   # no failed EXECs
     checks["kill-reason"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=agent", text))
     checks["run-sessions"] = bool(re.search(r"GLOS-SESSION begin n=\d+ prog=ENABLE.EXE \S+ mode=03 direct=1", text)) \
         and bool(re.search(r"GLOS-SESSION begin n=\d+ prog=NOPROF.EXE \S+ mode=03 profile=PROFCHK.EXE\n", text)) \
@@ -1943,6 +1943,177 @@ EXIT_KEYS = [0x1E, 0x30, 0x2E]                  # a, b, c
 EXIT_CASES = [("bf6", "g200"), ("bf6", "vbe")]
 
 
+APPS_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
+
+
+def apps_run(profile, boot):
+    """GLOS.EXE /RUN with a program that becomes an app: GLOS stays until the app ends, and leaves with its
+    exit code."""
+    tag = "%s-%s" % (profile, boot)
+    args = ["--machine", profile, "--boot-cfg", boot, "--file", "build/dj/APPTEST.EXE=/TEST/APPTEST.EXE"] + GLOS_FILES
+    for c in ["SERSAY HX-START apps", "VECCHK save", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\APPTEST.EXE run R 2",
+              "VECCHK check", "SERSAY HX-DONE 0"]:
+        args += ["--cmd", c]
+    st, serial = run("apps-run-" + tag, args)
+    checks = {"status": st == "PASS", "app": "GLOS-APP start id=1 prog=APPTEST.EXE" in serial,
+              "end": bool(re.search(r"GLOS-APP end id=1 prog=APPTEST.EXE code=57 how=0", serial)),
+              "exit": "GLOS-EXIT code=57" in serial, "vectors": "HX-VECCHK ok" in serial,
+              "no-panic": "GLOS-PANIC" not in serial}
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("apps-run-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+def apps_case(profile, card):
+    """GLOS apps (M6 step A): APPTEST becomes an app (its own thread) and runs for some seconds in its own
+    directory, checking between sleeps that its directory, its directory search (its DTA), its file's bytes,
+    its FPU sum and its clock are its own. Alone; then two at once beside a third that loops for ever,
+    while glos tick is asked again and again (the gate's rule: an answer within 2 s), each getting through
+    at least a third of the turns a second it does alone; beside a session (a DOS command, which pauses
+    them); beside one that crashes; one that runs a real-mode child; kills, by the job's number: of the
+    spinner, of one asleep, of one waiting for the keyboard in DOS; ten that start and end, after which
+    the kernel has the memory it had; glos exit with an app running. Refusals: glos run --exclusive, a
+    second init, a program COMMAND.COM started."""
+    import json
+    import time
+    tag = "%s-%s" % (profile, card)
+    agent = Agent("apps-" + tag, profile, card, [
+        "--file", "build/dj/APPTEST.EXE=/TEST/APPTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+        "--cmd", "SERSAY HX-START apps", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=1800)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    app = "C:\\TEST\\APPTEST.EXE "
+    checks, info = {"listen": agent.listening()}, ""
+
+    def start(cmd):
+        return subprocess.Popen(agent.opts + ["glos@127.0.0.1", cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def finish(p, limit=600):
+        out, err = p.communicate(timeout=limit)
+        return p.returncode, out.decode("latin-1").replace("\r", ""), err.decode("latin-1")
+
+    def started(n, limit=240):                  # n apps have started since GLOS did
+        t0 = time.time()
+        while time.time() - t0 < limit and agent.log().count("GLOS-APP start ") < n:
+            time.sleep(0.3)
+        return agent.log().count("GLOS-APP start ") >= n
+
+    rate = {}                                   # turns a second, by name
+
+    def ran(res, name, seconds):
+        rc, out, _ = res
+        m = re.search(r"^APP-OK name=%s loops=(\d+) slept=\d+ found=12 " % name, out, re.M)
+        if rc != 40 + ord(name) - 65 or not m:
+            print("    %s run %s: rc=%d out=%r" % (tag, name, rc, out[-400:]))
+            return False
+        rate[name] = int(m.group(1)) / seconds
+        return True
+
+    def kill(pattern, p):                       # the job whose command ends so, by its number
+        m = re.search(r"^job (\d+) running app \S+ %s$" % pattern, agent.ssh("glos ps")[1].replace("\r", ""), re.M)
+        return bool(m) and agent.ssh("glos kill " + m.group(1))[0] == 0 and p.wait(timeout=300) == 255
+
+    def mem():
+        m = re.search(r"free_kb=(\d+)\n.*heap_kb=(\d+)", agent.ssh("glos mem")[1])
+        return (int(m.group(1)), int(m.group(2))) if m else None
+
+    try:
+        checks["ver"] = agent.ssh("glos ver")[0] == 0
+        checks["alone"] = ran(agent.ssh(app + "run A 3", timeout=600), "A", 3)
+        rc, out, _ = agent.ssh(app + "plain")
+        checks["plain"] = rc == 7 and "APP-PLAIN version=10000" in out
+        rc, out, _ = agent.ssh("glos run --exclusive " + app + "exit 5")
+        checks["exclusive"] = rc == 3 and "APP-REFUSED error=5 reason=5" in out
+        rc, out, _ = agent.ssh("glos run --app " + app + "exit 6")
+        checks["run-app"] = rc == 6 and "APP-EXIT id=" in out
+        rc, out, _ = agent.ssh(app + "twice")
+        checks["twice"] = rc == 0 and "APP-TWICE r=-1 error=5 reason=1" in out
+        checks["exit-code"] = agent.ssh(app + "exit 23")[0] == 23
+        agent.ssh(app + "exit 9 > NUL")         # (through COMMAND.COM: not GLOS's own child; refused, in the log)
+        n0 = agent.log().count("GLOS-APP start ")
+
+        spin = start(app + "spin")
+        checks["spin-started"] = started(n0 + 1)
+        b, c = start(app + "run B 8"), start(app + "run C 8")
+        checks["both-started"] = started(n0 + 3)
+        worst, probes, ps, stat = 0.0, 0, "", None
+        while b.poll() is None or c.poll() is None:
+            t = time.time()
+            rc, out, _ = agent.ssh("glos tick")
+            worst = max(worst, time.time() - t)
+            probes += rc == 0 and out.startswith("ticks=")
+            if not ps and b.poll() is None and c.poll() is None:
+                ps = agent.ssh("glos ps")[1]
+                stat = json.loads(agent.ssh("glos stat")[1])
+            time.sleep(0.2)
+        checks["two-at-once"] = ran(finish(b), "B", 8) and ran(finish(c), "C", 8)
+        checks["agent-answers"] = probes >= 5 and worst < 2.0
+        checks["not-stalled"] = min(rate.get("B", 0), rate.get("C", 0)) >= rate.get("A", 1e9) / 3
+        info += " probes=%d worst=%.2fs turns/s alone=%.1f beside=%.1f,%.1f" % (
+            probes, worst, rate.get("A", 0), rate.get("B", 0), rate.get("C", 0))
+        checks["ps"] = len(re.findall(r"^app \d+ APPTEST.EXE \S+ psp=\w+ thread=app\d+ ", ps, re.M)) == 3 \
+            and len(re.findall(r"^job \d+ running app ", ps, re.M)) == 3
+        checks["stat"] = bool(stat) and len(stat.get("apps", [])) == 3 \
+            and all(x["program"] == "APPTEST.EXE" and x["held_kb"] > 0 for x in stat["apps"])
+        if not checks["ps"] or not checks["stat"]:
+            print("    %s ps=%r stat=%r" % (tag, ps, stat and stat.get("apps")))
+
+        d = start(app + "run D 10")             # a session beside an app: the app waits, then runs on
+        checks["d-started"] = started(n0 + 4)
+        rc, out, err = agent.ssh("C:\\TEST\\ECHOARGS.EXE x y")
+        checks["session"] = rc == 7 and out == "x y\r\nnine two six int29\r\n" and err == "echoargs: 2 arguments\r\n"
+        checks["beside-session"] = ran(finish(d), "D", 10)
+
+        e = start(app + "run E 10")             # a crash beside an app
+        checks["e-started"] = started(n0 + 5)
+        rc, out, _ = agent.ssh(app + "crash", timeout=600)
+        checks["crash"] = rc == 255 and "APP-CRASH id=" in out
+        checks["beside-crash"] = ran(finish(e), "E", 10)
+
+        rc, out, err = agent.ssh(app + "child C:\\TEST\\ECHOARGS.EXE", timeout=600)
+        checks["child"] = rc == 7 and "from an app\r\nnine two six int29\r\n" in out and "APP-CHILD-BACK r=7 ticks=1" in out \
+            and err == "echoargs: 3 arguments\r\n"
+        if not checks["child"]:
+            print("    %s child: rc=%d out=%r err=%r" % (tag, rc, out, err))
+
+        checks["kill"] = kill("spin", spin)
+        n1 = agent.log().count("GLOS-APP start ")
+        nap = start(app + "sleep 600")
+        checks["kill-asleep"] = started(n1 + 1) and kill("sleep 600", nap)
+        key = start(app + "key")                # (in DOS for good: the system VM's kill, after its two seconds)
+        checks["kill-in-dos"] = started(n1 + 2) and kill("key", key)
+        checks["none-left"] = not re.search(r"^app ", agent.ssh("glos ps")[1], re.M)
+        rc, out, err = agent.ssh("C:\\TEST\\ECHOARGS.EXE after kills")     # (DOS as it was: INT 29h counts outside DOS)
+        checks["dos-after-kill"] = rc == 7 and out == "after kills\r\nnine two six int29\r\n"
+        m0 = mem()
+        for i in range(10):
+            checks["again-%d" % i] = agent.ssh(app + "exit %d" % (30 + i))[0] == 30 + i
+        m1 = mem()
+        checks["memory-back"] = bool(m0) and m0 == m1
+        if not checks["memory-back"]:
+            info += " mem=%r->%r" % (m0, m1)
+
+        last = start(app + "spin")              # glos exit ends it first
+        t0 = time.time()
+        while time.time() - t0 < 240 and not re.search(r"^app ", agent.ssh("glos ps")[1], re.M):
+            time.sleep(0.5)
+        checks["exit"] = agent.ssh("glos exit")[0] == 0 and last.wait(timeout=300) == 255
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["balanced"] = text.count("GLOS-APP start ") == text.count("GLOS-APP end ") == 24
+    checks["killed-in-dos"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=agent", text))
+    checks["refused"] = len(re.findall(r"GLOS-APP refuse psp=\w+ why=(exclusive|already|parent)", text)) == 3
+    checks["crash-report"] = bool(re.search(r"GLOS-CRASH why=exception vec=0e .*prog=C:\\TEST\\APPTEST.EXE", text)) \
+        and bool(re.search(r"GLOS-CRASH file=C:\\GLOS\\CRASH\\CRASH\d+\.TXT", text))
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-APP error" not in text and "GLOS-APP warn" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("apps-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def exit_case(profile, vcard):
     """PRD §19's exit for M5. SHOTDJ v112k shows three pictures (640x480 in 32 bits), each until a key.
     The twin: plain DOS (CWSDPMI), Loop A's --keys anchored on the program's lines, 86Box's own screenshots
@@ -2027,7 +2198,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -2045,6 +2216,11 @@ def main():
         res = matrix(ssh_case, SSH_CASES, a.jobs)
         if not os.environ.get("SSH_ONE") and not os.environ.get("SSH_ONLY"):
             res += matrix(reboot_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
+        return 0 if all(r[1] for r in res) else 1
+    if a.suite == "apps":
+        cases = [c for c in APPS_CASES if not a.profile or c[0] in a.profile]
+        res = matrix(apps_case, cases, a.jobs)
+        res += matrix(apps_run, [(p, b) for p in a.profile or PROFILES for b in a.boot or ["default"]], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "m5exit":
         return 0 if all(r[1] for r in matrix(exit_case, EXIT_CASES, a.jobs)) else 1

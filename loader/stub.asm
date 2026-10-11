@@ -48,7 +48,7 @@ GLOSSTUB segment para public 'STUB' use16
         public  _stub_data, _pm_enter, _pm_ret, _vm_resume, _vm_state, _glos_call, _glos_bp_call
         public  _glos_xms_entry, _glos_bp_xms, _glos_kill, _glos_kill_top, _stub_resident, _stub_end
         public  _glos_bp_dpmi, _glos_bp_nest, _glos_bp_raw, _glos_retf, _glos_int21, _glos_rmcb, _glos_bp_term
-        public  _glos_int2f
+        public  _glos_int2f, _glos_detached
 
 stub_start:
 
@@ -274,7 +274,7 @@ _glos_int21 label near                  ; a client's INT 21h 4Ch, as the program
         int     21h
         jmp     short _glos_int21
 _glos_rmcb label near                   ; 0303h: real-mode callbacks, two bytes each
-        db      16 dup (63h, 0C0h)
+        db      32 dup (63h, 0C0h)
 _glos_bp_term label near                ; a client's terminate address (PSP:0Ah): DOS ended it (M4b)
         db      63h, 0C0h
 _glos_int2f label near                  ; GLOS's INT 2Fh, at the bottom of the chain: DPMI, XMS (M4c)
@@ -395,6 +395,20 @@ exec:   push    cs
         mov     ah, 4Dh                 ; AH = how it ended, AL = its code
         int     21h
         movzx   ebx, ax
+        jmp     next
+; The program EXECed last has become a GLOS app (M6, kernel/app/app.c): it
+; runs on in a thread of its own, and the kernel sends the system VM here
+; from it, on the kill stack. DOS still has the program as our child; there
+; is no exit code to ask for.
+_glos_detached label near
+        cli
+        mov     bx, cs
+        mov     ss, bx
+        mov     sp, cs:exec_sp
+        mov     ds, bx
+        mov     es, bx
+        sti
+        mov     ebx, 0FFFFFFFDh
         jmp     next
 cannot:
         movzx   ebx, ax

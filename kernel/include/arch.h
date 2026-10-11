@@ -35,6 +35,7 @@ void cpu_init(u32 cs16_base, u32 ds16_base, u32 ret_off);
 void cpu_features(void);
 void set_irq_handler(int irq, void (*fn)(struct trapframe *));
 void cpu_io_trap(u32 port, int trap);
+void cpu_io_reach(int on);               /* the I/O map in reach (the system VM), or every port trapped (an app) */
 void cpu_set_esp0(u32 esp0);
 void cpu_set_code16_base(u32 base);
 void cpu_int_redirect(u32 vec, int redirect);
@@ -70,6 +71,8 @@ u32 ucopy(void *dst, const void *src, u32 n);   /* 0, or 1 + the vector of a fau
 u32 nest_enter(struct trapframe *f, u32 *save);
 void nest_leave(u32 saved_esp, u32 value) __attribute__((noreturn));
 void frame_resume(struct trapframe *f) __attribute__((noreturn));
+void frame_start(const struct trapframe *f, u32 top) __attribute__((noreturn));
+_Static_assert(sizeof(struct trapframe) == 92, "stubs.S frame_start copies 23 dwords");
 void leave_to_loader(u32 code, u32 loader_cr3) __attribute__((noreturn));
 
 #endif

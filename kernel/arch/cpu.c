@@ -157,6 +157,10 @@ void cpu_io_trap(u32 port, int trap)
     else TSS_IOPB[port >> 3] &= (u8)~(1u << (port & 7));
 }
 
+/* The I/O map within the TSS's limit (1), or past it: every port then traps
+   for ring-3 code below IOPL, whatever the map says (a GLOS app's thread). */
+void cpu_io_reach(int on) { TSS->iomap = on ? 136 : TSS_LIMIT + 1; }
+
 void cpu_set_esp0(u32 esp0) { TSS->esp0 = esp0; }
 
 void cpu_set_ldt(const void *base, u32 limit)

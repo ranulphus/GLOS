@@ -27,6 +27,8 @@
 #                       compiling and running a program (loopa-tpx; BORLAND_DIR, make m4d-inputs)
 #   make loopa-sess     exclusive sessions: what SESSTEST leaves behind, natively and under
 #                       GLOS /RUN, as the shell and as agent jobs (runs on the host)
+#   make loopa-apps     GLOS apps (M6): APPTESTs at once, beside a busy one, a session, a crash; kills;
+#                       GLOS /RUN with an app (runs on the host)
 #   make gate           M4e's exit: the baseline matrix under GLOS and with direct mode forced, a kill and
 #                       an ssh probe for every program (tools/gate/run.py; on the host; hours)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
@@ -43,7 +45,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: loopa-apps all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -149,7 +151,8 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c kernel/dos/agent.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
-         kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c
+         kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
+         kernel/app/app.c kernel/app/api.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
@@ -225,6 +228,9 @@ loopa-m5exit: all build/dj/SHOTDJ.EXE check-deps
 loopa-gdbprog: all build/dj/GDBME.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py gdb -j $(JOBS)
 # glos key, type and mouse (M5 A4) against the same input from Loop A's --keys.
+# GLOS apps (M6 step A): APPTESTs at once, beside a spinning one, a session and a crash.
+loopa-apps: all dos-tests build/dj/APPTEST.EXE check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py apps -j $(JOBS)
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py input -j $(JOBS)
 # M4a: the DPMI host's checks (DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i).
@@ -302,6 +308,16 @@ build/dj/GDBME.EXE: tests/dos/gdbme.c
 	$(Q)$(DJCC) -O0 -g -Wall -Werror -o $@ $<
 	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-nm $@ > build/dj/GDBME.sym
 # DIRTEST (tests/dos/dirtest.c): a program at IOPL 3 and what GLOS takes back from it (M4e).
+# libglos (sdk/libglos, include/glos/api.h): the GLOS API for DJGPP programs (M6), and APPTEST, the apps suite's app.
+build/sdk/libglos.a: sdk/libglos/glos.c include/glos/api.h
+	@mkdir -p build/sdk
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/glos.o $<
+	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/glos.o
+build/dj/APPTEST.EXE: tests/dos/apptest.c build/sdk/libglos.a
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
 build/dj/DIRTEST.EXE: tests/dos/dirtest.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"

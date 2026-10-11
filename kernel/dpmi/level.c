@@ -107,6 +107,7 @@ void level_pop(int psp)
             pp = &d->next;
         }
     }
+    rmcb_free_ctx(dctx);                        /* (the level's own: before nlv goes down) */
     for (i = 0; i < NRMCB; i++)
         if (dctx->rmcb[i].used >= lev)
             dctx->rmcb[i].used = 0;             /* (their stack selectors go with the LDT below) */

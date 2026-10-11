@@ -1,0 +1,650 @@
+/* GLOS apps (PRD §5.4, §6.8; docs/milestones-m6.md step A).
+ *
+ * An app is a DPMI client with a thread of its own. It starts as any DOS
+ * program does: the resident stub EXECs it, its own stub switches to
+ * protected mode, and it runs as a session on the VM thread. When it calls
+ * the GLOS API's init (api.c) its context moves to a new thread, which goes
+ * on from that call's return; the VM thread goes back to the stub, which
+ * asks for its next job as if the program had ended. DOS still has the
+ * program as a process, the stub's child.
+ *
+ * On its thread the app runs its protected-mode code, preempted like any
+ * thread, and the DPMI host serves what needs no real mode there: memory,
+ * descriptors, handlers, exceptions. What needs real mode needs the system
+ * VM: every real-mode call the host would make for it (rm_call(): a DOS or
+ * BIOS call reflected or through 0300h, a DOS memory block) is made by the
+ * VM thread instead, when the stub asks for its next job: nothing else is
+ * in DOS then. The app's thread waits. For the length of the call the VM
+ * thread is the app's (it "adopts" it): the app's context is loaded, so its
+ * real-mode callbacks and whatever they call run as they would in a
+ * session, and DOS is given the app's state:
+ *   - its PSP and DTA, in DOS's swappable data area;
+ *   - its current drive and directory, set only when DOS has another;
+ *   - the real-mode vectors it changed: the table is the system's while the
+ *     app is out of the VM, compared with it when the app leaves and its
+ *     changes put back when it returns;
+ *   - a parent's stack frame for DOS to end it through. DOS ends a process
+ *     by going back into its parent's last INT 21h frame, kept in the
+ *     parent's PSP; the parent is the stub, which has made other calls
+ *     since, so for the call that frame is a spare one on the stub's kill
+ *     stack, and DOS goes on at the program's terminate address, which the
+ *     mode switch pointed at the host (host.c terminated()).
+ *
+ * An app's end (INT 21h 4Ch, a kill, a crash) frees its context on its own
+ * thread, which then has the VM thread make one last call for it, INT 21h
+ * 4Ch as the program; an end inside a call the VM thread is making (in a
+ * callback, in real mode, DOS's own abort) ends that call. Either way DOS
+ * has ended the process when the VM thread sees the terminate address, and
+ * the thread ends.
+ *
+ * While a session runs (a DOS command, a program that has yet to become an
+ * app, an app's own child program) every app is paused at its next trap:
+ * the session owns the machine (PRD §6.9), and calls into the VM wait for
+ * the stub anyway.
+ *
+ * An app reaches no port (the TSS's I/O map is out of reach while its
+ * thread runs): step B gives it a timer and a PIC of its own; until then
+ * reads give FFh. */
+#include <string.h>
+
+#include "glos/api.h"
+#include "glos/bootinfo.h"
+#include "agent.h"
+#include "app.h"
+#include "dpmi.h"
+#include "io.h"
+#include "kprintf.h"
+#include "mm.h"
+#include "session.h"
+#include "timer.h"
+#include "vm.h"
+
+#define MAX_APPS 16
+#define SPARE    160u                           /* the spare parent frame: this far below the kill stack's top */
+
+enum { AC_NONE, AC_RM, AC_END };
+
+struct cwd {
+    u8 known, drive;
+    char dir[66];                               /* as INT 21h 47h gives it: no drive, no first backslash */
+};
+
+struct app {
+    struct app *next;                           /* every app */
+    struct app *qnext;                          /* those waiting for the VM thread */
+    u32 id;
+    char tname[8];                              /* its thread's name: app<id> */
+    char prog[13];
+    struct dpmi_ctx *ctx;                       /* 0 once it has ended */
+    struct thread *thread;
+    struct trapframe start;                     /* where its thread begins: the return of its init call */
+    void *job;                                  /* the agent's job it began as, or 0 */
+    u16 psp;
+    u32 dta;
+    struct cwd cwd;
+    u32 ivt[256];                               /* the real-mode vectors it changed ... */
+    u8 ivt_mine[32];                            /* ... a bit for each */
+    volatile u8 kill;
+    u8 adopted;                                 /* the VM thread is making a call for it */
+    u8 dead;                                    /* DOS has ended its process */
+    u8 call;                                    /* AC_: what it waits for the VM thread with */
+    struct {
+        struct trapframe *from;
+        struct rmregs *r;
+        int kind;
+        u8 vec;
+        const u16 *words;
+        u32 nwords;
+    } c;
+    int result;
+    u8 child_have;                              /* a program it ran has ended: INT 21h 4Dh's answer is kept for it */
+    u16 child;                                  /* (DOS has one for everybody, and another app may end first) */
+    u32 code;                                   /* its exit code; then INT 21h 4Dh's AX */
+    struct waitq wq;                            /* its thread: for the call, in a sleep */
+    u32 t0, ncalls;
+};
+
+static struct app *apps, *pending;
+static struct app *callq, *callq_tail;
+static struct app *adopted;                     /* the VM thread is making a call for it ... */
+static int base;                                /* ... which is the nested call at this depth ... */
+static u8 ending;                               /* ... its last */
+static u8 exclusive;                            /* ... or one that runs a program: the other apps wait */
+static struct waitq pauseq;
+static u32 next_id = 1, napps, last_code;
+static struct cwd dos_has, sys_cwd;             /* DOS's drive and directory now; the system VM's own */
+static struct {                                 /* the system VM's own, while the VM thread is an app's */
+    u8 vif;
+    void *job;
+    u16 psp;
+    u32 dta, ps_stack;
+    u32 ivt[256];
+} sys;
+
+struct app *app_cur(void) { return current->user == TU_APP ? current->arg : 0; }
+
+static void wr16(u32 lin, u32 v)
+{
+    vm_wr8(lin, (u8)v);
+    vm_wr8(lin + 1, (u8)(v >> 8));
+}
+
+static void wr32(u32 lin, u32 v)
+{
+    wr16(lin, v);
+    wr16(lin + 2, v >> 16);
+}
+
+static int mine(const struct app *a, u32 v) { return (a->ivt_mine[v >> 3] >> (v & 7)) & 1; }
+
+/* ---- DOS's current drive and directory (the VM thread, as the system) */
+
+static int dos21(struct rmregs *r)
+{
+    r->ss = vm.loader_cs;
+    r->sp = (u16)vm.bi->kill_sp;
+    r->flags = 2;
+    return rm_call(0, r, RM_INT, 0x21, 0, 0);
+}
+
+/* (The stub's EXEC path is free between the stub's jobs: 80 bytes.) */
+static u32 scratch(void) { return ((u32)vm.loader_cs << 4) + __builtin_offsetof(struct stub_data, path); }
+
+static void cwd_read(struct cwd *c)
+{
+    struct rmregs r;
+    u32 buf = scratch(), i;
+    memset(&r, 0, sizeof r);
+    r.eax = 0x1900;
+    dos21(&r);
+    c->drive = (u8)r.eax;
+    memset(&r, 0, sizeof r);
+    r.eax = 0x4700;
+    r.ds = vm.loader_cs;
+    r.esi = __builtin_offsetof(struct stub_data, path);
+    vm_wr8(buf, 0);
+    dos21(&r);
+    for (i = 0; i < sizeof c->dir - 1 && vm_rd8(buf + i); i++)
+        c->dir[i] = (char)vm_rd8(buf + i);
+    c->dir[i] = 0;
+    c->known = 1;
+}
+
+static void cwd_want(const struct cwd *w)
+{
+    struct rmregs r;
+    u32 buf = scratch(), i;
+    if (!dos_has.known)
+        cwd_read(&dos_has);
+    if (dos_has.drive == w->drive && !strcmp(dos_has.dir, w->dir))
+        return;
+    if (dos_has.drive != w->drive) {
+        memset(&r, 0, sizeof r);
+        r.eax = 0x0E00;
+        r.edx = w->drive;
+        dos21(&r);
+    }
+    vm_wr8(buf, '\\');
+    for (i = 0; w->dir[i]; i++)
+        vm_wr8(buf + 1 + i, (u8)w->dir[i]);
+    vm_wr8(buf + 1 + i, 0);
+    memset(&r, 0, sizeof r);
+    r.eax = 0x3B00;
+    r.ds = vm.loader_cs;
+    r.edx = __builtin_offsetof(struct stub_data, path);
+    if (dos21(&r) != 0 || (r.flags & FL_CF))
+        kprintf("GLOS-APP warn=directory-gone drive=%c dir=\\%s\n", 'A' + w->drive, w->dir);
+    dos_has = *w;
+}
+
+/* ---- becoming an app (the VM thread, in the program's trap) */
+
+static void app_main(void *arg);
+
+int app_init(struct trapframe *tf, u32 *id)
+{
+    struct dpmi_ctx *c = dctx;
+    struct app *a;
+    u16 psp = vm_current_psp();
+    u32 i;
+    (void)tf;
+    if (app_cur() || c->app)
+        return GLOS_INIT_ALREADY;
+    if (c->nlv != 1 || c->npe || c->lstack_use || rm_nesting())
+        return GLOS_INIT_NESTED;                /* a child program's, or from a handler or a callback */
+    if (!c->bits32)
+        return GLOS_INIT_16BIT;
+    if (session_exclusive() || vm.direct)
+        return GLOS_INIT_EXCLUSIVE;             /* glos run --exclusive or --direct, a direct-mode profile */
+    if (!vm.sda || !vm.bi->detached_off || (vm.bi->flags & BI_F_SHELL) || !session_active() || psp != c->psp
+        || vm_rd16(psp * 16u + 0x16) != vm.loader_psp)
+        return GLOS_INIT_PARENT;                /* GLOS itself didn't start it (a program's child, a batch file's) */
+    if (napps >= MAX_APPS || !(a = kmalloc(sizeof *a)))
+        return GLOS_INIT_MEMORY;
+    memset(a, 0, sizeof *a);
+    a->id = next_id++;
+    ksnprintf(a->tname, sizeof a->tname, "app%u", a->id);
+    if (!(a->thread = thread_new(a->tname, PRIO_NORMAL, app_main, a, TU_APP))) {
+        kfree(a);
+        return GLOS_INIT_MEMORY;
+    }
+    a->ctx = c;
+    a->psp = psp;
+    for (i = 0; i < sizeof a->prog - 1 && session_prog()[i]; i++)
+        a->prog[i] = session_prog()[i];
+    pending = a;
+    *id = a->id;
+    return 0;
+}
+
+void app_detach(struct trapframe *tf)
+{
+    struct app *a = pending;
+    struct dpmi_ctx *c = a->ctx;
+    const u32 *sivt = session_ivt();
+    u32 v, nvec = 0;
+
+    pending = 0;
+    c->app = a;
+    a->start = *tf;
+    a->thread->vif = current->vif;
+    a->thread->ctx = c;
+    fpu_fork(a->thread);
+    current->ctx = 0;                           /* the VM thread has no client any more */
+    dpmi_ctx_load(0);
+    a->dta = vm_rd32(vm.sda + 0x0C);
+    for (v = 0; v < 256; v++) {                 /* its vectors out of the table: as its session found it */
+        u32 cur = vm_rd32(v * 4);
+        if (cur != sivt[v]) {
+            a->ivt[v] = cur;
+            a->ivt_mine[v >> 3] |= (u8)(1u << (v & 7));
+            wr32(v * 4, sivt[v]);
+            nvec++;
+        }
+    }
+    wr16(vm.sda + 0x10, vm.loader_psp);         /* DOS's current program: the stub again */
+    wr32(vm.sda + 0x0C, (u32)vm.loader_psp << 16 | 0x80);
+    cwd_read(&dos_has);                         /* where it is, it stays; so does the system VM */
+    sys_cwd = a->cwd = dos_has;
+    a->job = agent_vm_job();
+    a->t0 = timer_ticks();
+    a->next = apps;
+    apps = a;
+    napps++;
+    dpmi_to_v86(tf, vm.loader_cs, vm.bi->detached_off, vm.loader_cs, vm.bi->kill_sp, vm.loader_cs, vm.loader_cs);
+    current->vif = 0;
+    kprintf("GLOS-APP start id=%u prog=%s psp=%04x thread=%s vectors=%u\n", a->id, a->prog, a->psp, a->tname, nvec);
+    thread_go(a->thread);
+}
+
+/* The app's thread: its frame to the top of the stack, where a trap from
+   its code would have left it, and out through the trap's way back. */
+static void app_main(void *arg)
+{
+    struct app *a = arg;
+    cli();
+    current->esp0 = current->stack_top - 16;    /* a ring-3 frame's (arch/cpu.c trap_dispatch) */
+    cpu_set_esp0(current->esp0);
+    dpmi_return(&a->start);                     /* (its wait for the session it began in to end) */
+    frame_start(&a->start, current->stack_top);
+}
+
+/* ---- on the app's thread */
+
+static void app_thread_end(struct app *a) __attribute__((noreturn));
+static void app_thread_end(struct app *a)
+{
+    struct app **pp;
+    for (pp = &apps; *pp && *pp != a; pp = &(*pp)->next) ;
+    if (*pp)
+        *pp = a->next;
+    napps--;
+    fpu_drop(current);
+    current->user = TU_NONE;
+    current->name = "app-gone";
+    kfree(a);
+    vm_kick();                                  /* (the stub may be waiting for the last app to go) */
+    thread_exit();
+}
+
+/* The call waits for the VM thread, and the thread for the call. */
+static int app_wait(struct app *a, int what)
+{
+    a->call = (u8)what;
+    a->qnext = 0;
+    if (callq_tail)
+        callq_tail->qnext = a;
+    else
+        callq = a;
+    callq_tail = a;
+    vm_kick();
+    while (a->call)
+        thread_block(&a->wq);
+    if (a->dead)
+        app_thread_end(a);
+    return a->result;
+}
+
+int app_rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u16 *words, u32 nwords)
+{
+    struct app *a = app_cur();
+    if (!a)
+        return -1;                              /* (a kernel thread: only the VM's and apps' make them) */
+    if (vec == 0x21 && kind != RM_FAR && ((r->eax >> 8) & 0xFF) == 0x4D && a->child_have) {
+        a->child_have = 0;                      /* how its child ended: asked of DOS when the child did */
+        r->eax = (r->eax & ~0xFFFFu) | a->child;
+        r->flags &= (u16)~FL_CF;
+        return 0;
+    }
+    a->c.from = from;
+    a->c.r = r;
+    a->c.kind = kind;
+    a->c.vec = vec;
+    a->c.words = words;
+    a->c.nwords = nwords;
+    return app_wait(a, AC_RM);
+}
+
+void app_end(struct app *a, u32 code)
+{
+    a->ctx = 0;
+    a->code = code;
+    app_wait(a, AC_END);
+    panic("app-end", NULL);
+}
+
+void app_return(struct app *a, struct trapframe *tf)
+{
+    for (;;) {
+        if (a->kill)
+            dpmi_end(tf, 0xFF, 1);              /* (doesn't come back) */
+        if (!session_active() && !exclusive)
+            return;
+        thread_block(&pauseq);                  /* a session has the machine */
+    }
+}
+
+void app_sleep(struct app *a, u32 ticks)
+{
+    u32 until = timer_ticks() + ticks;
+    if (!until)
+        until = 1;
+    while (!a->kill && (s32)(until - timer_ticks()) > 0)
+        thread_wait(&a->wq, until);
+}
+
+void app_idle(struct app *a) { app_sleep(a, 1); }      /* (step B: until an interrupt of its own) */
+
+u32 app_in(struct app *a, u16 port, int width)
+{
+    (void)a;
+    (void)port;
+    return width == 1 ? 0xFF : width == 2 ? 0xFFFF : 0xFFFFFFFFu;
+}
+
+void app_out(struct app *a, u16 port, u32 val, int width)
+{
+    (void)a;
+    (void)port;
+    (void)val;
+    (void)width;
+}
+
+u32 app_ivt_get(u8 n)
+{
+    const struct app *a = app_cur();
+    return a && mine(a, n) ? a->ivt[n] : vm_rd32(n * 4u);
+}
+
+void app_ivt_set(u8 n, u32 v)
+{
+    struct app *a = app_cur();
+    if (a) {                                    /* into the table when the VM thread next makes a call for it */
+        a->ivt[n] = v;
+        a->ivt_mine[n >> 3] |= (u8)(1u << (n & 7));
+    } else {
+        wr32(n * 4u, v);
+    }
+}
+
+/* ---- on the VM thread: the calls */
+
+int app_vm_pending(void) { return callq != 0; }
+
+u16 app_vm_psp(void) { return adopted ? adopted->psp : 0; }
+
+int app_vm_ending(void) { return adopted && ending; }
+
+void app_vm_base(int *depth, struct trapframe **f)
+{
+    if (adopted && current == vm.thread) {
+        *depth = base;
+        *f = rm_nest_frame(base);
+    }
+}
+
+/* DOS has ended the app's process and gone to its terminate address, in
+   the call under way or one nested in it: that call is over. */
+void app_vm_ended(struct trapframe *tf)
+{
+    (void)tf;
+    adopted->dead = 1;
+    adopted->ctx = 0;
+    rm_nest_end(base);
+}
+
+static void adopt(struct app *a)
+{
+    u32 lp = (u32)vm.loader_psp << 4, spare = vm.bi->kill_sp - SPARE, v;
+
+    if (!sys_cwd.known) {                       /* (a session may have left another) */
+        cwd_read(&dos_has);
+        sys_cwd = dos_has;
+    }
+    if (a->ctx)
+        cwd_want(&a->cwd);
+    sys.vif = current->vif;
+    sys.psp = vm_current_psp();
+    sys.dta = vm_rd32(vm.sda + 0x0C);
+    sys.ps_stack = vm_rd32(lp + 0x2E);
+    memcpy(sys.ivt, vm_ptr(0), sizeof sys.ivt);
+    sys.job = agent_vm_as(a->job);
+    for (v = 0; v < 256; v++)
+        if (mine(a, v))
+            wr32(v * 4, a->ivt[v]);
+    wr16(vm.sda + 0x10, a->psp);
+    wr32(vm.sda + 0x0C, a->dta);
+    memset(vm_ptr(((u32)vm.loader_cs << 4) + spare), 0, 48);
+    wr32(lp + 0x2E, (u32)vm.loader_cs << 16 | spare);
+    current->vif = a->ctx ? a->thread->vif : 1;
+    current->ctx = a->ctx;
+    dpmi_ctx_load(a->ctx);
+    base = rm_nesting() + 1;
+    adopted = a;
+    a->adopted = 1;
+}
+
+/* cwd: the call may have changed the drive or the directory. */
+static void unadopt(struct app *a, int cwd)
+{
+    u32 lp = (u32)vm.loader_psp << 4, v;
+
+    adopted = 0;
+    a->adopted = 0;
+    vm.kill_req = 0;                            /* (a kill asked for during the call was the app's: its flag has it) */
+    agent_vm_as(sys.job);
+    if (!a->dead) {
+        a->dta = vm_rd32(vm.sda + 0x0C);
+        a->thread->vif = current->vif;
+        for (v = 0; v < 256; v++) {
+            u32 cur = vm_rd32(v * 4);
+            if (cur != sys.ivt[v]) {
+                a->ivt[v] = cur;
+                a->ivt_mine[v >> 3] |= (u8)(1u << (v & 7));
+            } else {
+                a->ivt_mine[v >> 3] &= (u8)~(1u << (v & 7));
+            }
+        }
+    }
+    memcpy(vm_ptr(0), sys.ivt, sizeof sys.ivt);
+    wr16(vm.sda + 0x10, sys.psp);
+    wr32(vm.sda + 0x0C, sys.dta);
+    wr32(lp + 0x2E, sys.ps_stack);
+    current->ctx = 0;
+    dpmi_ctx_load(0);
+    current->vif = sys.vif;
+    if (cwd && !a->dead) {
+        cwd_read(&dos_has);
+        a->cwd = dos_has;
+    }
+}
+
+static void serve(struct app *a)
+{
+    struct rmregs r;
+    int cwd = 0;
+
+    adopt(a);
+    if (a->call == AC_RM) {
+        if (a->c.vec == 0x21 && a->c.kind != RM_FAR) {
+            u32 ah = (a->c.r->eax >> 8) & 0xFF;
+            cwd = ah == 0x0E || ah == 0x3B || ah == 0x4B || ah == 0x71;
+            exclusive = ah == 0x4B;             /* its child program is a session of its own (PRD Q6) */
+        }
+        a->ncalls++;
+        a->result = rm_call(a->c.from, a->c.r, a->c.kind, a->c.vec, a->c.words, a->c.nwords);
+        if (exclusive) {
+            exclusive = 0;
+            thread_wake(&pauseq);
+            if (!a->dead && a->result == 0 && !(a->c.r->flags & FL_CF)) {
+                memset(&r, 0, sizeof r);        /* the child's exit code, before anyone else's end changes it */
+                r.eax = 0x4D00;
+                if (dos21(&r) == 0) {
+                    a->child = (u16)r.eax;
+                    a->child_have = 1;
+                }
+            }
+        }
+    } else {                                    /* its end: INT 21h 4Ch as the program; DOS doesn't come back, */
+        memset(&r, 0, sizeof r);                /* terminated() ends the call */
+        r.eax = 0x4C00 | (a->code & 0xFF);
+        ending = 1;
+        dos21(&r);
+        ending = 0;
+        if (!a->dead) {
+            kprintf("GLOS-APP error=end-returned id=%u psp=%04x\n", a->id, a->psp);
+            a->dead = 1;
+        }
+    }
+    unadopt(a, cwd);
+    if (a->dead) {                              /* how DOS says it ended: AH the way, AL the code */
+        memset(&r, 0, sizeof r);
+        r.eax = 0x4D00;
+        a->code = dos21(&r) == 0 ? r.eax & 0xFFFF : 0xFF;
+        last_code = a->code;
+        kprintf("GLOS-APP end id=%u prog=%s code=%u how=%u calls=%u ticks=%u t=%u\n", a->id, a->prog, a->code & 0xFF,
+                a->code >> 8, a->ncalls, a->thread->ticks, timer_ticks() - a->t0);
+        if (a->job)
+            agent_app_done(a->job, a->code);
+    }
+    a->call = AC_NONE;
+    thread_wake(&a->wq);
+}
+
+void app_vm_turn(void)
+{
+    u32 t0 = timer_ticks(), n = 0;
+    struct app *a;
+    if (current != vm.thread || adopted)
+        return;
+    while ((a = callq) && n++ < 16 && timer_ticks() - t0 < 8) {        /* (then the system VM's own work has a turn) */
+        callq = a->qnext;
+        if (!callq)
+            callq_tail = 0;
+        serve(a);
+    }
+    if (sys_cwd.known)
+        cwd_want(&sys_cwd);                     /* DOS's directory is the system VM's again */
+    if (!apps)
+        sys_cwd.known = dos_has.known = 0;
+}
+
+/* ---- from anywhere */
+
+void app_kill(struct app *a, const char *why)
+{
+    u32 f = irq_save();
+    if (!a->kill) {
+        a->kill = 1;
+        kprintf("GLOS-APP kill id=%u reason=%s\n", a->id, why);
+    }
+    if (a->adopted) {                           /* in the system VM: the kill there (v86.c), which ends its call */
+        vm.kill_req = 1;
+        vm.kill_reason = why;
+        vm.kill_since = timer_ticks();
+        vm_kick();
+    }
+    thread_wake(&a->wq);
+    thread_wake(&pauseq);
+    irq_restore(f);
+}
+
+void app_kill_job(void *job)
+{
+    struct app *a;
+    u32 f = irq_save();
+    for (a = apps; a; a = a->next)
+        if (a->job == job)
+            app_kill(a, "agent");
+    irq_restore(f);
+}
+
+void app_kill_all(const char *why)
+{
+    struct app *a;
+    u32 f = irq_save();
+    for (a = apps; a; a = a->next)
+        app_kill(a, why);
+    irq_restore(f);
+}
+
+void app_session_end(void)
+{
+    sys_cwd.known = dos_has.known = 0;          /* (the session may have left DOS somewhere else) */
+    thread_wake(&pauseq);
+}
+
+u32 app_count(void) { return napps; }
+
+u32 app_last_code(void) { return last_code; }
+
+static const char *state_of(const struct app *a)
+{
+    return !a->ctx ? "ending" : a->adopted ? "in-dos" : a->call ? "waiting" : a->kill ? "killed" : "running";
+}
+
+u32 app_ps(char *buf, u32 max)
+{
+    const struct app *a;
+    u32 n = 0, f = irq_save();
+    for (a = apps; a && n < max; a = a->next)
+        n += (u32)ksnprintf(buf + n, max - n, "app %u %s %s psp=%04x thread=%s held_kb=%u calls=%u ticks=%u\n", a->id,
+                            a->prog, state_of(a), a->psp, a->tname, a->ctx ? a->ctx->frames * 4 : 0, a->ncalls,
+                            a->thread->ticks);
+    irq_restore(f);
+    return n < max ? n : max;
+}
+
+u32 app_stat(char *buf, u32 max)
+{
+    const struct app *a;
+    u32 n = 0, f = irq_save();
+    n += (u32)ksnprintf(buf + n, max - n, "[");
+    for (a = apps; a && n < max; a = a->next)
+        n += (u32)ksnprintf(buf + n, max - n, "%s{\"id\":%u,\"program\":\"%s\",\"state\":\"%s\",\"psp\":%u,"
+                            "\"held_kb\":%u,\"calls\":%u,\"ticks\":%u}", a == apps ? "" : ",", a->id, a->prog,
+                            state_of(a), a->psp, a->ctx ? a->ctx->frames * 4 : 0, a->ncalls, a->thread->ticks);
+    irq_restore(f);
+    n += (u32)ksnprintf(buf + n, max > n ? max - n : 0, "]");
+    return n < max ? n : max;
+}
