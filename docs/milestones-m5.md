@@ -138,6 +138,19 @@ Each step is a commit with its tests.
   the write then took the last 512 bytes of its 32 KB from 64 KB further on in the file. It needed input to
   keep coming faster than DOS wrote it, which the NE2000s never managed: the Intel 8255x's first ssh run
   showed it, one to three bad sectors in each 1 MB upload. Fixed in `kernel/ssh/sftp.c`.
+- **A screenshot taken during a mode set was no picture.** The gate's probe got 320×480 of black from
+  DOS-GL's first conformance test: the Matrox BIOS was halfway through setting 640×480, which takes it more
+  than the quarter second a capture waited for the video BIOS, and when the wait ran out the CPU was in a
+  timer handler on top of it. Mode sets are now counted from their start to their return (GLOS makes
+  every one itself), and a capture waits for the count, two seconds at most.
+- **M4e's open stall after a hotkey kill** was looked into with a trace of the virtual 8042 (kept:
+  supervisor.md §10). After the kill the BIOS updates the keyboard's LEDs (the kill put the lock bits
+  back), a few milliseconds after the hotkey's Esc. The command reaches the chip, and 86Box's keyboard
+  gives no ACK, nor the Esc's release; the BIOS waits seconds, interrupts off, then asks for a resend,
+  which brings the Esc again and a second kill with nothing to kill. GLOS's own traffic with the chip is
+  clean in every trace, and writing the command byte less often changed nothing; the rate goes with the
+  host's load (1 run in 90, then 8 in 150 beside a gate). GLOS now gives the program the ACK itself after
+  20 ms. Whether silicon ever needs it is for the bench to show (`GLOS-KBC ack=made-up` in the log).
 - **A3 turned out small.** MGA-Glide's HAL sets its modes through VBE (4F02h with the linear framebuffer),
   then changes the scan line's length (4F06h), flips pages (4F07h) and, for a small frame, sets the card's
   zoom. So A2's VBE path covers them once it asks the BIOS for the scan line's length and reads the zoom. The
@@ -155,6 +168,26 @@ Each step is a commit with its tests.
   program. The test goes by `nm`'s addresses, and the stub lets writes to registers it hasn't pass.
 - **A 486 needs one ssh connection for the suite** (OpenSSH's ControlMaster): with a key exchange for each of
   a hundred commands the run took longer than its 25 minutes.
+
+### Open
+
+- **The 8255x is slower than the others in 86Box:** the ssh suite's two 1 MB transfers take 6 to 8 s on
+  it, 3.5 s on the NE2000s and 4.7 s on the RTL8139, with no errors or overruns counted. Not looked into:
+  transfer rates are P5's, measured on silicon. The driver sends one frame at a time (a single transmit
+  block) and takes an interrupt for each; a ring of blocks is the first thing to try if the bench agrees.
+- **The gate's first run with the new probe** (main at 790636d) passed every program cell reached so far
+  and failed `sess` on the hotkey-kill stall (below), which the ACK from GLOS has since cured in 150
+  runs. The gate is to be run again on the tree with that in.
+- **H8 is not merged** into MGA-Glide (branch `glos-loopb`); GLOS's `deps.mk` pin moves when it is.
+- **The bench half of the exit:** Loop B over ssh on a real PC, and DOSBench within 3% of its numbers
+  without GLOS (P1).
+
+### Left for later milestones
+
+- **The remote-session indicator** (PRD D35, listed under M5) lives in the task bar, which M6 brings.
+- `glos config get/set` comes with the configuration schema (M9); `glos shot --screen N` with a second
+  screen (after v1); `glos gdb <pid>` with GLOS apps (M6).
+- The DOS and GPU locks' times in `glos stat` come with those locks (M6).
 
 ### Limits (in supervisor.md §17.7)
 

@@ -540,6 +540,20 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   written to the keyboard (port 60h, not D4h's) clears the program's keyboard-disable bit, as the chip does:
   the BIOS's INT 09h sends the LED update between ADh and AEh and polls, interrupts off, for the ACK, which
   GLOS held back until M4e E5 (a program that changed the lock bits in 0417h stalled the next keystroke).
+- **The keyboard's answers** (M5). A byte the program sends the keyboard (an LED command from the BIOS's
+  INT 09h or INT 16h, which then polls for the ACK with its interrupts off) is owed an answer:
+  - the answer (FAh, or FEh "resend") goes ahead of any key waiting in the queue, as a keyboard sends it;
+    until it comes, no key is put before the program;
+  - if the keyboard hasn't answered in 20 ms, the program gets the ACK from GLOS (`GLOS-KBC ack=made-up
+    n=`). Otherwise the BIOS waits out its own time-out, seconds long, with the clock standing. 86Box's
+    keyboard gives none now and then when a key is on its way as the command comes: the kill hotkey's
+    Esc, then the BIOS's LED update for the lock bits the kill put back. That was M4e's open stall (one
+    sess-kill run in 12 to 90, more on a busy host);
+  - GLOS writes the chip's command byte only when it changes.
+- **The 8042's trace:** the last 64 things that passed through the virtual 8042 (bytes from the chip, bytes
+  put before the program, its reads and writes, GLOS's own writes to the chip) are kept, and written as
+  `GLOS-KBC` lines when the program sits in the BIOS with its interrupts off (`GLOS-WARN vif-stuck` at
+  F000h): as a rule it is waiting for the keyboard.
 - **Injected input** (M5; `glos key`, `glos type`, `glos mouse`, §17.8) goes the keyboard's and the mouse's
   way: bytes into the same queue, with the hotkeys watched as for a real key, so a typed Ctrl-Alt-Shift-Esc
   kills. In a direct-mode session (§9.7) the bytes wait in a queue of their own and go into the chip (D2h,
@@ -1239,8 +1253,13 @@ The code is `kernel/dos/shot.c` and `kernel/lib/png.c`.
   - The copy runs with interrupts off and lets them in every 16 KB, without a switch to another thread,
     so the kernel's tick and the network go on. The program's own interrupts wait until the copy is
     done: a timer it runs fast loses ticks for that long.
-  - If the program is inside the video BIOS (a V86 code segment in C000h–C7FFh), the capture waits for
-    the call to end, for a quarter of a second at most.
+  - A capture waits for a mode set to end, two seconds at most: the card's registers halfway through one
+    are no mode at all, and a Matrox BIOS takes more than a quarter of a second over one. GLOS knows when
+    one is under way because it makes the call itself: every INT 10h of a DPMI client goes through the
+    host's real-mode calls, and a V86 program's mode sets (AH 00h, 4F02h) are made for it as nested calls,
+    so each has a start and a return. Where the CPU is just then says little (an interrupt handler on top
+    of the BIOS as likely as the BIOS), though a V86 code segment in C000h–C7FFh makes it wait too.
+  - Each capture leaves a line in the log: `GLOS-SHOT kind= size= vbe=`, what GLOS took the screen for.
 - **The file** is made by the ssh thread from the copy, a piece (about 16 KB of scanlines) at a time as
   the channel takes them, while the program runs on. Each piece is one IDAT chunk holding one of
   deflate's stored blocks, so there is no compressor. Text and 16-colour modes give a 4-bit indexed PNG,
@@ -1248,7 +1267,7 @@ The code is `kernel/dos/shot.c` and `kernel/lib/png.c`.
 - **Which mode it is:**
   - A VBE mode, if INT 10h 4F02h set one last. GLOS sees every INT 10h: from V86 code through a trap
     (the redirection bitmap with VME), from a DPMI client in the host's real-mode calls. A V86 program's
-    4F02h is made for it as a nested call, so that the BIOS's answer is seen; a failed mode set changes
+    mode sets are made for it as nested calls, so that the BIOS's answer is seen; a failed 4F02h changes
     nothing. AH 00h, a plain mode set, forgets the VBE mode.
   - Otherwise what the VGA's registers say: text; the CGA's modes (graphics at B8000h, one or two bits a
     pixel, two interleaved banks); 16 colours in four planes; 256 colours chained (13h) or unchained

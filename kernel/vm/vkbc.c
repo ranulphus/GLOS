@@ -33,6 +33,7 @@
 
 #define QSIZE 64                                /* a power of two: the indices wrap */
 #define AUX   0x100
+#define REPLY 0x200                             /* the keyboard's answer to a byte the program sent it */
 
 static u16 q[QSIZE];
 static u32 qh, qt;
@@ -43,11 +44,50 @@ static u8 a2;                                   /* the last write was to 64h */
 static u8 to_aux;                               /* D4h passed: the next byte at 60h goes to the AUX device */
 static u8 mods, e0, swallow;                    /* hotkey tracking */
 static u8 reinjected;                           /* direct mode: the chip holds a byte GLOS put back */
+static u8 replies;                              /* bytes the program sent the keyboard, still to be answered */
+static u32 reply_since;
+static u32 acks_made;                           /* ACKs GLOS gave for a keyboard that didn't */
 static u16 inj[QSIZE];                          /* direct mode: injected bytes waiting for the chip */
 static u32 injh, injt;
 static u8 aux_on, aux_wheel, aux_rate[3], aux_arg, aux_buttons;        /* the mouse, as the program set it */
 
 enum { M_CTRL = 1, M_ALT = 2, M_LSHIFT = 4, M_RSHIFT = 8 };
+
+/* The last things that passed through here, for the log when the program
+   sits with its interrupts off (GLOS-WARN vif-stuck: the BIOS waiting for
+   the keyboard, as a rule). k: a byte from the chip (and its status); f: a
+   byte put before the program; r: its read of 60h; w, c: its writes to 60h
+   and 64h; C, D: GLOS's own writes to the chip's 64h and 60h (and the status
+   before each); h: a hotkey's byte kept back; x: an answer given up on; p:
+   the chip's status as the program polls it, when it changes. */
+#define NTRACE 64
+static struct { u32 t; char what; u8 a, b; } tr[NTRACE];
+static u32 trn;
+
+static void trace(char what, u8 a, u8 b)
+{
+    tr[trn % NTRACE].t = timer_ticks();
+    tr[trn % NTRACE].what = what;
+    tr[trn % NTRACE].a = a;
+    tr[trn % NTRACE].b = b;
+    trn++;
+}
+
+void vkbc_trace(void)
+{
+    u32 i = trn > NTRACE ? trn - NTRACE : 0;
+    kprintf("GLOS-KBC cmd=%02x obf=%u out=%02x queued=%u replies=%u now=%u\n", cmd, obf, out, qt - qh, replies,
+            timer_ticks());
+    for (; i < trn; i += 8) {
+        u32 k;
+        kprintf("GLOS-KBC");
+        for (k = i; k < i + 8 && k < trn; k++)
+            kprintf(" %u:%c%02x/%02x", tr[k % NTRACE].t, tr[k % NTRACE].what, tr[k % NTRACE].a, tr[k % NTRACE].b);
+        kprintf("\n");
+    }
+}
+
+static void trace(char what, u8 a, u8 b);
 
 static void wait_write(void)
 {
@@ -58,19 +98,30 @@ static void wait_write(void)
 static void chip_cmd(u8 c)
 {
     wait_write();
+    trace('C', c, inb(0x64));
     outb(0x64, c);
 }
 
 static void chip_data(u8 d)
 {
     wait_write();
+    trace('D', d, inb(0x64));
     outb(0x60, d);
 }
 
+/* The chip's command byte: the program's, with IRQ 1 on and the keyboard
+   enabled. Written only when it changes (a kill puts the killed program's
+   byte back, as a rule the one the chip has). */
+static u16 chip_byte = 0x100;                   /* what the chip was given last; 100h: not known */
+
 static void write_cmd_byte(void)
 {
+    u8 v = (u8)((cmd | 0x01) & ~0x10);
+    if (v == chip_byte)
+        return;
     chip_cmd(0x60);
-    chip_data((u8)((cmd | 0x01) & ~0x10));      /* IRQ 1 on, keyboard enabled */
+    chip_data(v);
+    chip_byte = v;
 }
 
 static void raise(int aux)
@@ -137,27 +188,41 @@ static void drain(void)
     u8 s, b;
     while (((s = inb(0x64)) & 1) && ++n < 32) {
         b = inb(0x60);
-        if (s & 0x20)
+        trace('k', b, s);
+        if (s & 0x20) {
             enqueue(b, 1);
-        else if (!hotkey(b))
+        } else if (replies && (b == 0xFA || b == 0xFE)) {       /* its ACK or "resend": ahead of the keys */
+            replies--;                                          /* that wait, as a keyboard sends it */
+            if (qt - qh < QSIZE)
+                q[--qh % QSIZE] = (u16)(b | REPLY);
+        } else if (!hotkey(b)) {
             enqueue(b, 0);
+        } else {
+            trace('h', b, mods);
+        }
     }
 }
 
 /* The next byte into the empty output buffer: not a keyboard byte while the
-   program has the keyboard disabled (it waits, as in the keyboard). */
+   program has the keyboard disabled (it waits, as in the keyboard), and not
+   a key while the keyboard owes the program an answer: the BIOS sends the
+   LED command from its INT 09h and polls for the ACK with interrupts off,
+   and takes whatever byte comes next for it. A key released at that moment
+   (the kill hotkey's three at once) made it wait out its time-out, seconds
+   long (M4e's open item; found in M5). */
 static void refill(void)
 {
     u16 e;
     if (obf || qh == qt)
         return;
     e = q[qh % QSIZE];
-    if (!(e & AUX) && (cmd & 0x10))
+    if (!(e & AUX) && !(e & REPLY) && ((cmd & 0x10) || replies))
         return;
     qh++;
     out = (u8)e;
     out_aux = (e & AUX) != 0;
     obf = 1;
+    trace('f', out, (u8)(e >> 8));
     raise(out_aux);
 }
 
@@ -237,8 +302,10 @@ static void command(u8 c)
         return;
     case 0xA9: case 0xAA: case 0xAB: case 0xC0: case 0xE0:
         chip_answer(c);
-        if (c == 0xAA)
+        if (c == 0xAA) {                        /* (the self-test resets the chip's byte) */
+            chip_byte = 0x100;
             write_cmd_byte();
+        }
         return;
     default:
         if (c >= 0xF0) {                        /* pulse output lines: bit 0 is reset */
@@ -281,21 +348,31 @@ u8 vkbc_in(u16 port)
         return inb(port);                       /* (the chip holds what the program reads) */
     drain();
     if (port == 0x60) {
+        trace('r', out, obf);
         obf = 0;                                /* the next byte comes on the next tick */
         return out;
     }
-    return (u8)((inb(0x64) & 0x14) | obf | (obf && out_aux ? 0x20 : 0) | (a2 ? 0x08 : 0));
+    {
+        static u8 last;
+        u8 st = inb(0x64);
+        if (st != last)
+            trace('p', st, obf);
+        last = st;
+        return (u8)((st & 0x14) | obf | (obf && out_aux ? 0x20 : 0) | (a2 ? 0x08 : 0));
+    }
 }
 
 void vkbc_out(u16 port, u8 v)
 {
     u8 p = pending;
     if (port == 0x64) {
+        trace('c', v, cmd);
         a2 = 1;
         pending = 0;
         command(v);
         return;
     }
+    trace('w', v, p);
     a2 = 0;
     pending = 0;
     switch (p) {
@@ -316,7 +393,9 @@ void vkbc_out(u16 port, u8 v)
     default:
         if (!to_aux) {                          /* to the keyboard: the 8042 enables its interface (the BIOS */
             cmd &= (u8)~0x10;                   /* sends LED commands between ADh and AEh and waits for */
-            refill();                           /* the ACK; 86Box's kbc_at does the same) */
+            if (replies < 4)                    /* the ACK; 86Box's kbc_at does the same), and the answer */
+                replies++;                      /* comes before any key (refill) */
+            reply_since = timer_ticks();
         } else {
             aux_seen(v);
         }
@@ -449,6 +528,21 @@ void vkbc_tick(void)
         inject_turn();
         return;
     }
+    /* A keyboard has 20 ms to answer a command. When it hasn't, the program
+       gets the ACK from here: the BIOS polls for it with interrupts off and
+       would wait out its own time-out, seconds long, the clock standing.
+       86Box's keyboard does this now and then when a key is on its way as
+       the command comes (the kill hotkey's Esc, then the BIOS's LED update:
+       one sess-kill run in 20 on a busy host). A real ACK that still comes
+       is then one more byte for INT 09h, which takes it for what it is. */
+    if (replies && timer_ticks() - reply_since > 20) {
+        trace('x', replies, 0);
+        replies--;
+        reply_since = timer_ticks();
+        if (qt - qh < QSIZE)
+            q[--qh % QSIZE] = (u16)(0xFA | REPLY);
+        kprintf("GLOS-KBC ack=made-up n=%u\n", ++acks_made);       /* (the keyboard gave none in 20 ms) */
+    }
     drain();
     refill();
 }
@@ -517,6 +611,7 @@ void vkbc_restore(u8 c)
 {
     cmd = c;
     pending = 0;
+    replies = 0;
     write_cmd_byte();
     if (obf)
         raise(out_aux);

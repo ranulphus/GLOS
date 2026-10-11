@@ -283,6 +283,8 @@ static void watchdog(struct trapframe *tf, u32 now)
         (void)tf;
         vm.stuck_warned = 1;
         kprintf("GLOS-WARN vif-stuck at=%04x:%04x%s\n", f->cs, f->eip & 0xFFFF, vm.waiting ? " hlt" : "");
+        if ((f->cs & 0xFFFF) >= 0xF000)         /* in the BIOS: as a rule it waits for the keyboard */
+            vkbc_trace();
     }
 }
 

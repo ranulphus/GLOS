@@ -1301,7 +1301,9 @@ def ssh_case(profile, card):
             ticks = [json.loads(l)["ticks"] for l in lines]
         except ValueError:
             ticks = []
-        checks["stat-follow"] = len(ticks) >= 2 and all(900 <= b - a <= 1400 for a, b in zip(ticks, ticks[1:]))
+        # A second apart, or more: the ssh thread is a bulk one, and on a 486 a key exchange beside it (the
+        # commands below) has held a line back by half a second.
+        checks["stat-follow"] = len(ticks) >= 2 and all(900 <= b - a <= 3000 for a, b in zip(ticks, ticks[1:]))
         checks["log-follow"] = ("GLOS-VM agent comspec=" in followed          # the log so far, then as it grows
                                 and 'GLOS-SSH exec="glos echo marker2-%s"' % tag in followed)
         if not (checks["stat-follow"] and checks["log-follow"]):
