@@ -58,7 +58,7 @@ Each step is a commit with its tests.
 
 ## Status
 
-- **A1 to A9 and H8 are done** (2026-10-11), but for the gate's run with its new probe and the bench; as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
+- **A1 to A9 and H8 are done** (2026-10-11), and the gate passes; the bench half of the exit is left; as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
   (streams, forwarded channels and the command list), §17.7 (screenshots), §10 and §17.8 (injected input),
   §17.9 (telemetry), §10 (the network cards), §19.2 (the program debugger).
 - **`make loopa-shot`** (`jobs.py shot`): SHOTTEST draws a picture the host can compute, in one mode a run, and
@@ -119,8 +119,9 @@ Each step is a commit with its tests.
   - The program's lines are the same from both, and each `glos shot` equals 86Box's screenshot pixel for
     pixel, and the picture the host computes.
 - **A9, the gate:** the probe now takes `glos shot` up to six times in every program's run (after its 5th,
-  25th and each 100th answer) and each must be a whole PNG; they are kept as `probe-shot-N.png`. **The gate has not been run
-  with it yet.**
+  25th and each 100th answer) and each must be a whole PNG; they are kept as `probe-shot-N.png`.
+- **The gate** (`make gate`) on a4616a6: 133 parts, none failed, no `vif-stuck` reported and no ACK made up.
+  The probes' pictures are the games at work (GTA in the street, GLQuake's and Half-Life's demos, 640×480).
 - **H8** is on MGA-Glide's branch `glos-loopb` (not merged): `tools/bench/run.py` drives a bench PC through
   GLOS over ssh when it answers and through BENCH.BAT otherwise; `vpc.py start --glos` gives the virtual
   bench PC a GLOS. The dry run on vbench-g200 is in MGA-Glide's `docs/bench.md`: jobs over ssh, the
@@ -151,6 +152,9 @@ Each step is a commit with its tests.
   clean in every trace, and writing the command byte less often changed nothing; the rate goes with the
   host's load (1 run in 90, then 8 in 150 beside a gate). GLOS now gives the program the ACK itself after
   20 ms. Whether silicon ever needs it is for the bench to show (`GLOS-KBC ack=made-up` in the log).
+- **The gate's first run with the new probe** (main at 790636d, stopped at 114 parts passed) failed `sess`
+  on that stall, and its probes' pictures showed the two things fixed above: 320×480 from a mode set under
+  way, and black from games still loading 25 probes in (the probe now also asks later).
 - **A3 turned out small.** MGA-Glide's HAL sets its modes through VBE (4F02h with the linear framebuffer),
   then changes the scan line's length (4F06h), flips pages (4F07h) and, for a small frame, sets the card's
   zoom. So A2's VBE path covers them once it asks the BIOS for the scan line's length and reads the zoom. The
@@ -175,9 +179,6 @@ Each step is a commit with its tests.
   it, 3.5 s on the NE2000s and 4.7 s on the RTL8139, with no errors or overruns counted. Not looked into:
   transfer rates are P5's, measured on silicon. The driver sends one frame at a time (a single transmit
   block) and takes an interrupt for each; a ring of blocks is the first thing to try if the bench agrees.
-- **The gate's first run with the new probe** (main at 790636d) passed every program cell reached so far
-  and failed `sess` on the hotkey-kill stall (below), which the ACK from GLOS has since cured in 150
-  runs. The gate is to be run again on the tree with that in.
 - **H8 is not merged** into MGA-Glide (branch `glos-loopb`); GLOS's `deps.mk` pin moves when it is.
 - **The bench half of the exit:** Loop B over ssh on a real PC, and DOSBench within 3% of its numbers
   without GLOS (P1).
