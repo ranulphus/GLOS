@@ -2,6 +2,7 @@
  *   PDE 0      0-10FFFFh identity (the same table in every address space)
  *   PDE 300h   the kernel image and bss at C0100000h (contiguous physically)
  *   PDE 301h   the kmalloc heap at C0400000h
+ *   PDE 302h   memory devices read and write themselves (dma_alloc) at C0800000h
  *   PDE 37Fh   the kmap window at DFC00000h
  *   PDE 3FFh   the page directory itself (page tables visible at FFC00000h)
  * All of these tables live in the kernel's bss, so their physical addresses
@@ -23,10 +24,12 @@ static u32 kpt_low[1024] __attribute__((aligned(4096)));
 static u32 kpt_kernel[1024] __attribute__((aligned(4096)));
 static u32 kpt_heap[1024] __attribute__((aligned(4096)));
 static u32 kpt_kmap[1024] __attribute__((aligned(4096)));
+static u32 kpt_dma[1024] __attribute__((aligned(4096)));
 static u32 frame_bits[MAX_FRAMES / 32];
 static struct pmm pmm;
 static struct heap kheap;
 static u32 image_phys, kmap_next, given;       /* given: the frames the loader handed over */
+static u32 dma_next;
 
 u32 kernel_phys(const void *p) { return image_phys + ((u32)p - (u32)__kernel_start); }
 u32 mm_cr3(void) { return kernel_phys(kpd); }
@@ -203,6 +206,28 @@ void *mm_tramp_page(u32 lin)
     return (void *)lin;
 }
 
+/* n frames in a row, zeroed and mapped in the kernel for good, for a device
+   that reads and writes memory itself (a network card's rings): where they
+   are, and physically in *phys; 0 without memory. */
+void *dma_alloc(u32 n, u32 *phys)
+{
+    u32 f = irq_save(), base = 0, i;
+    u8 *p = 0;
+    if (n && dma_next + n <= 1024 && (base = pmm_take_run(&pmm, n)) != 0) {
+        for (i = 0; i < n; i++)
+            kpt_dma[dma_next + i] = (base + (i << 12)) | PTE_P | PTE_W;
+        p = (u8 *)(DMA_BASE + (dma_next << 12));
+        dma_next += n;
+    }
+    irq_restore(f);
+    if (p) {
+        for (i = 0; i < n << 12; i++)
+            p[i] = 0;
+        *phys = base;
+    }
+    return p;
+}
+
 void *kmalloc(size_t n) { LOCKED(void *, heap_alloc(&kheap, n)); }
 void kfree(void *p) { LOCKED_V(heap_free(&kheap, p)); }
 
@@ -219,6 +244,7 @@ void mm_init(struct bootinfo *bi)
     kpd[KERNEL_PDE] = kernel_phys(kpt_kernel) | PTE_P | PTE_W;
     kpd[HEAP_BASE >> 22] = kernel_phys(kpt_heap) | PTE_P | PTE_W;
     kpd[KMAP_BASE >> 22] = kernel_phys(kpt_kmap) | PTE_P | PTE_W;
+    kpd[DMA_BASE >> 22] = kernel_phys(kpt_dma) | PTE_P | PTE_W;
     kpd[1023] = kernel_phys(kpd) | PTE_P | PTE_W;
     write_cr3(mm_cr3());
 

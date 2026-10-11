@@ -8,6 +8,7 @@ struct bootinfo;
 #define KMAP_BASE   0xDFC00000u         /* 1024 one-page windows onto any frame */
 #define HEAP_BASE   0xC0400000u         /* kmalloc's region, grown a page at a time */
 #define HEAP_MAX    0x00400000u
+#define DMA_BASE    0xC0800000u         /* dma_alloc's region: 4 MB at most */
 #define RECURSIVE   0xFFC00000u         /* PDE 1023 maps the page directory itself */
 
 void mm_init(struct bootinfo *bi);
@@ -46,6 +47,8 @@ void *mm_tramp_page(u32 lin);           /* a ring-3 read-only page in PDE 0's ta
 
 void *kmap(u32 phys);
 void kunmap(void *p);
+
+void *dma_alloc(u32 frames, u32 *phys); /* contiguous, zeroed, mapped for good: a device's own memory; 0 if none */
 
 void *kmalloc(size_t n);
 void kfree(void *p);

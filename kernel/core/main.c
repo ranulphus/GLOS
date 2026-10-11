@@ -106,7 +106,7 @@ void kmain(struct bootinfo *loader_bi)
         random_init(bi);
         vm_start(bi);
         pci_scan();
-        if (ne2k_probe() == 0) {
+        if (nic_probe() == 0) {
             sshd_start(bi);                     /* before the net thread, which listens for it */
             net_start(bi->flags & BI_F_SELFTEST);
         }

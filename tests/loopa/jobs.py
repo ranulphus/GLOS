@@ -395,7 +395,10 @@ def shell(profile, boot):
                                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
-NET_CASES = [("bf6", "ne2kpci"), ("bf6", "ne2k"), ("486dx2", "ne2k"), ("486dx2", "ne2kpci"), ("486dx4", "ne2kpci")]
+NET_CASES = [("bf6", "ne2kpci"), ("bf6", "ne2k"), ("486dx2", "ne2k"), ("486dx2", "ne2kpci"), ("486dx4", "ne2kpci"),
+             ("bf6", "rtl8139c+"), ("bf6", "i82557"), ("bf6", "i82558"), ("486dx2", "rtl8139c+"), ("486dx4", "i82557")]
+if os.environ.get("NET_ONLY"):                  # e.g. NET_ONLY=rtl8139c+,i82557
+    NET_CASES = [c for c in NET_CASES if c[1] in os.environ["NET_ONLY"].split(",")]
 
 
 def net(profile, card):
@@ -405,7 +408,7 @@ def net(profile, card):
                                     "--tcp-send", "GLOS-NET dhcp|net:7|" + line] + GLOS_FILES + [
         "--cmd", "SERSAY HX-START net", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE /SELFTEST /RUN WAITSEC 12",
         "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
-    want = "rtl8029" if card == "ne2kpci" else "ne2000"
+    want = {"ne2kpci": "rtl8029", "rtl8139c+": "rtl8139", "i82557": "i8255x", "i82558": "i8255x"}.get(card, "ne2000")
     echo = os.path.join(ROOT, "out", "net-" + tag, "tcp-0.txt")
     echo = open(echo, "rb").read().decode("latin-1") if os.path.exists(echo) else ""
     checks = {
@@ -428,7 +431,10 @@ def net(profile, card):
 
 # SSH_ONE=1 runs one case (SSH_PROFILE, SSH_CARD); SSH_TAG suffixes its name; SSH_EXTRA adds run.py options.
 SSH_CASES = ([(os.environ.get("SSH_PROFILE", "bf6"), os.environ.get("SSH_CARD", "ne2kpci"))] if os.environ.get("SSH_ONE")
-             else [("bf6", "ne2kpci"), ("486dx2", "ne2k"), ("bf6", "ne2k")])
+             else [("bf6", "ne2kpci"), ("486dx2", "ne2k"), ("bf6", "ne2k"), ("bf6", "rtl8139c+"), ("bf6", "i82557"),
+                   ("bf6", "i82558"), ("486dx2", "rtl8139c+")])    # (M5 A6: the bus-master cards)
+if os.environ.get("SSH_ONLY"):                  # e.g. SSH_ONLY=rtl8139c+,i82557: those cards' cases, no reboot ones
+    SSH_CASES = [c for c in SSH_CASES if c[1] in os.environ["SSH_ONLY"].split(",")]
 KEYS = ["--file", "tests/keys/hostkey=/TEST/KEYS/HOSTKEY", "--file", "tests/keys/AUTHKEYS=/TEST/KEYS/AUTHKEYS"]
 
 # HDPMI32i (the HX runtime, a behavioural baseline only: PRD D26), fetched by tools/survey/survey.py.
@@ -1858,7 +1864,7 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ssh":
         res = matrix(ssh_case, SSH_CASES, a.jobs)
-        if not os.environ.get("SSH_ONE"):
+        if not os.environ.get("SSH_ONE") and not os.environ.get("SSH_ONLY"):
             res += matrix(reboot_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "input":

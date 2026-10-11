@@ -2,10 +2,8 @@
  * base (PRD §4.4). 16 KB of card memory: transmit buffer at 4000h (pages
  * 40h-45h), receive ring 4600h-7FFFh. Word-wide remote DMA throughout.
  *
- * Refused, with a GLOS-NET line, when a packet driver is loaded (it owns the
- * card) or when the card's PCI IRQ line is shared with another function
- * (the IRQ would no longer reach the VM's device). An ISA card's IRQ is found
- * by making it interrupt and reading the PICs' request registers. */
+ * What makes GLOS refuse a card is in nic.c. An ISA card's IRQ is found by
+ * making it interrupt and reading the PICs' request registers. */
 #include "io.h"
 #include "kprintf.h"
 #include "nic.h"
@@ -46,7 +44,6 @@
 #define ISR_RDC 0x40
 #define ISR_RST 0x80
 
-struct nic *nic0;
 static struct nic ne;
 static u8 frame[ETH_MAX + 6];
 static int tx_busy;
@@ -266,19 +263,6 @@ static void ne_service(struct nic *n)
     }
 }
 
-/* A packet driver (a "PKT DRVR" signature at INT 60h-80h) owns a card. */
-static int packet_driver(void)
-{
-    u32 v, x, lin;
-    for (v = 0x60; v <= 0x80; v++) {
-        x = vm_rd32(v * 4);
-        lin = (x >> 16) * 16 + (x & 0xFFFF) + 3;
-        if (x && lin + 8 < 0x110000 && !memcmp(vm_ptr(lin), "PKT DRVR", 8))
-            return (int)v;
-    }
-    return 0;
-}
-
 /* An ISA card's IRQ: have it interrupt (remote DMA complete) with every line
    masked, and see which request appears. */
 static int isa_irq(void)
@@ -313,7 +297,7 @@ static int isa_irq(void)
     return -1;
 }
 
-static int claim(const char *name, u16 base, int irq)
+static int claim(const char *name, u16 base, int irq, struct pci_dev *d)
 {
     ne.name = name;
     ne.base = base;
@@ -331,10 +315,7 @@ static int claim(const char *name, u16 base, int irq)
     ne.send = ne_send;
     ne.service = ne_service;
     vdev_hide(base, 0x20);
-    vm_claim_irq(irq, net_irq);
-    nic0 = &ne;
-    kprintf("GLOS-NET card=%s base=%x irq=%u mac=%02x:%02x:%02x:%02x:%02x:%02x\n", name, base, irq, ne.mac[0],
-            ne.mac[1], ne.mac[2], ne.mac[3], ne.mac[4], ne.mac[5]);
+    nic_claimed(&ne, d);
     return 0;
 }
 
@@ -342,24 +323,17 @@ int ne2k_probe(void)
 {
     static const u16 isa[] = { 0x300, 0x280, 0x320, 0x340, 0x360 };
     struct pci_dev *d = pci_find(0x10EC, 0x8029, 0);
-    int pd = packet_driver();
     u32 i;
 
-    if (pd) {
-        kprintf("GLOS-NET refuse reason=packet-driver int=%02x\n", pd);
-        return -1;
-    }
     if (d) {
-        if (!(d->bar[0] & 1) || pci_irq_shared(d)) {
-            kprintf("GLOS-NET refuse card=rtl8029 reason=%s irq=%u\n", (d->bar[0] & 1) ? "shared-irq" : "no-io",
-                    d->irq);
+        if (!(d->bar[0] & 1)) {
+            kprintf("GLOS-NET refuse card=rtl8029 reason=no-io\n");
             return -1;
         }
-        pci_write32(d->bus, d->dev, d->fn, 4, pci_read32(d->bus, d->dev, d->fn, 4) | 0x05);  /* I/O, bus master */
-        if (claim("rtl8029", (u16)(d->bar[0] & ~3u), d->irq) != 0)
+        if (nic_pci(d, "rtl8029") != 0)
             return -1;
-        pci_claim(d);
-        return 0;
+        pci_write32(d->bus, d->dev, d->fn, 4, pci_read32(d->bus, d->dev, d->fn, 4) | 0x05);  /* I/O, bus master */
+        return claim("rtl8029", (u16)(d->bar[0] & ~3u), d->irq, d);
     }
     for (i = 0; i < ARRAY_SIZE(isa); i++) {
         u8 cr = inb(isa[i]);
@@ -367,7 +341,7 @@ int ne2k_probe(void)
             continue;
         ne.base = isa[i];
         if (reset() == 0)
-            return claim("ne2000", isa[i], -1);
+            return claim("ne2000", isa[i], -1, 0);
     }
     return -1;
 }

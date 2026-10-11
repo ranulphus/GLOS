@@ -58,8 +58,9 @@ Each step is a commit with its tests.
 
 ## Status
 
-- **A1 to A5 are done** (2026-10-11); as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
-  (streams and the command list), §17.7 (screenshots), §10 and §17.8 (injected input), §17.9 (telemetry).
+- **A1 to A6 are done** (2026-10-11); as built in [supervisor.md](supervisor.md) §9.5 (posted work), §17.6
+  (streams and the command list), §17.7 (screenshots), §10 and §17.8 (injected input), §17.9 (telemetry), §10
+  (the network cards).
 - **`make loopa-shot`** (`jobs.py shot`): SHOTTEST draws a picture the host can compute, in one mode a run, and
   waits; `glos shot` and `glos shot --raw` over ssh must both equal it; then the program is killed. Five cases,
   all passing: real mode on bf6 with the G200's and the S3's VBE BIOS and on the 486DX2 (no VME: every INT
@@ -98,12 +99,21 @@ Each step is a commit with its tests.
   and killing the running one. Two more cases (bf6, 486DX2) for `glos reboot`: refused while a job runs, then
   the machine resets, boots and starts GLOS again, which answers.
 
+- **A6:** `jobs.py net` (DHCP and a TCP echo) passes on the RTL8139 (bf6, 486DX2) and the 8255x (82557 and
+  82558 on bf6, 82557 on the 486DX4); the whole ssh suite passes over each (bf6 with all three, the 486DX2 with
+  the RTL8139), with the NE2000 cases as before.
+
 ### Found on the way
 
 - **The kernel heap and the frame bitmap had no lock.** The ssh and net threads are preemptible, and the VM
   thread allocates too (every DPMI block, every page backed on first touch): a switch in the middle of
   `kmalloc` could corrupt the block list. Found by reading, while deciding where a capture may allocate; no
   failure was ever traced to it. Each call now runs with interrupts off (`kernel/mm/vmm.c`).
+- **SFTP uploads could be corrupted** (since M3). A WRITE's data is read from the session's input buffer by
+  the DOS server, later, on the VM thread; more input arriving meanwhile could move the buffer's contents, and
+  the write then took the last 512 bytes of its 32 KB from 64 KB further on in the file. It needed input to
+  keep coming faster than DOS wrote it, which the NE2000s never managed: the Intel 8255x's first ssh run
+  showed it, one to three bad sectors in each 1 MB upload. Fixed in `kernel/ssh/sftp.c`.
 - **A3 turned out small.** MGA-Glide's HAL sets its modes through VBE (4F02h with the linear framebuffer),
   then changes the scan line's length (4F06h), flips pages (4F07h) and, for a small frame, sets the card's
   zoom. So A2's VBE path covers them once it asks the BIOS for the scan line's length and reads the zoom. The

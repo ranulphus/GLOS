@@ -228,12 +228,13 @@ program looks for it.
 | 0000_0000–0010_FFFF | Identity map of physical 0–10FFFFh (conventional memory, UMA, HMA). Shared page table for PDE 0 in every address space. |
 | 0011_0000–003F_FFFF | Unused, so no client data shares PDE 0's page table |
 | 0040_0000–BFFF_FFFF | User region of the current DPMI context. DPMI blocks are handed out **ascending from 4 MB** (§12.3). |
-| C000_0000–DFFF_FFFF | Kernel: image at C010_0000, heap, per-thread stacks, kmap window, recursive page-directory slot |
+| C000_0000–DFFF_FFFF | Kernel: image at C010_0000, heap at C040_0000, devices' own memory at C080_0000 (`dma_alloc`, M5), kmap window at DFC0_0000 |
 | E000_0000–FFBF_FFFF | Reserved, so 0800h can return **linear = physical** for PCI BARs (§12.4) |
 | FFC0_0000–FFFF_FFFF | Recursive mapping of the current page directory |
 
 - Kernel pages are supervisor-only and global (PGE where present).
-- The kernel has no full direct map of RAM; physical frames are reached through the kmap window.
+- The kernel has no full direct map of RAM; physical frames are reached through the kmap window. Memory a
+  device reads and writes itself (a network card's rings) is mapped for good in a region of its own (§10).
 - **With A20 virtually off,** the HMA page-table entries (100000h–10FFFFh) are remapped onto 0–FFFFh, so the
   1 MB wrap is emulated without touching the real A20 gate (§10).
 
@@ -524,7 +525,7 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 | 80h, E80h | Passed through | Passed through | POST code and the 86Box unit tester (the harness) |
 | 3F8h–3FFh (COM1) | Passed through; output mirrored to the log ring | Passed through | Programs reprogram the UART (Xash, PrBoom, Fifth Wheel [census]) |
 | 2F8h–2FFh (COM2) | Owned by the gdb stub when `/GDB` is given, otherwise passed through | Same | |
-| GLOS-owned NIC | Trapped; reads return FFh, writes dropped; its PCI function reads as absent | Trapped | M3: an NE2000 (the RTL8029 on PCI, or ISA at 300h, 280h, 320h, 340h, 360h). Its IRQ is the kernel's: the VM never sees it. Refused (`GLOS-NET refuse`) under a packet driver or on a PCI IRQ line another function shares. |
+| GLOS-owned NIC | Trapped; reads return FFh, writes dropped; its PCI function reads as absent | Trapped | One card, the first found of: an RTL8139 (M5), an Intel 8255x (M5), an NE2000 (M3: the RTL8029 on PCI, or ISA at 300h, 280h, 320h, 340h, 360h). Its IRQ is the kernel's: the VM never sees it. Refused (`GLOS-NET refuse`) under a packet driver or on a PCI IRQ line another function shares. See "The network cards" below. |
 | 3F8h (COM1 data) | Trapped for output, passed through | Same | M3: tells the kernel when a program is part-way through a line, so the kernel's lines wait for it (§18) |
 | VGA 3B0h–3DFh, SB, GUS, DMA 00h–0Fh/80h–8Fh/C0h–DFh, 201h, F0h | Passed through | Passed through | Live 8237 count reads, GUS GF1/CODEC, UniVBE chipset probes and the IRQ13 acknowledge at F0h all need real hardware [census] |
 
@@ -551,6 +552,23 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
     3 or 4 is a wheel mouse by now.
   - A packet for a mouse no program has on is refused. GLOS makes up no mouse: on a PC without one, the
     driver finds none and there is nothing to inject into.
+- **The network cards** (`kernel/drv/nic.c` chooses; one driver each):
+  - **NE2000** (`ne2k.c`, M3): the card's own 16 KB through its data port; nothing in the PC's memory.
+  - **RTL8139** (`rtl8139.c`, M5; 86Box's RTL8139C+ answers to it): the mode the whole family has. The card
+    writes received frames into an 8 KB ring in memory, each behind a header of its status and length;
+    with WRAP a frame runs past the ring's end instead of being split, so the ring has a frame's room
+    more. Four transmit slots of 2 KB, used in turn; a short frame is padded by the driver.
+  - **Intel 8255x** (`e100.c`, M5: 82557, 82558, 82559), through its I/O registers. Command blocks for
+    configuring, setting the address and transmitting, and a ring of 16 receive frame descriptors, each
+    with the frame's room behind it (simplified mode). The ring's last descriptor carries EL: the card
+    stops there (receive not ready), and the driver, having handed the earlier ones back, starts it
+    again. One transmit block: a frame waits up to about a millisecond for the one before to leave. The
+    address comes from the serial EEPROM, clocked bit by bit; its address width (93C46 or 93C66) is found
+    by the zero the part puts out after the last address bit.
+  - Both take every multicast frame (mDNS's group is one).
+  - **Memory a card reads and writes itself** comes from `dma_alloc()`: frames in a row, mapped in the
+    kernel for good at C0800000h (4 MB at most; five frames for the RTL8139, seven for the 8255x). They
+    are taken only when that card is found.
 - **The RTC:** registers A, B and C are virtual. The periodic flag follows the program's rate (at most once
   per kernel tick); AF and UF come from the chip. IRQ 8 is raised for the VM when IRQF rises. Writes to
   register B reach the chip except PIE, AIE and UIE.

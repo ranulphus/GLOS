@@ -1,13 +1,15 @@
-/* The network card GLOS owns (supervisor.md §10; PRD §4.4). One card in M3:
- * an NE2000 (ISA, or the RTL8029 on PCI). Its ports read FFh for the
- * system VM, its PCI function disappears from the VM's view, and its IRQ is
- * the kernel's. All register access happens in the net thread; the IRQ only
- * masks the line and wakes it. */
+/* The network card GLOS owns (supervisor.md §10; PRD §4.4, §8.1). One card:
+ * an RTL8139 or an Intel 8255x on PCI (M5), else an NE2000 (the RTL8029 on
+ * PCI, or an ISA card). Its ports read FFh for the system VM, its PCI
+ * function disappears from the VM's view, and its IRQ is the kernel's. All
+ * register access happens in the net thread; the IRQ only masks the line
+ * and wakes it. */
 #ifndef K_NIC_H
 #define K_NIC_H
 #include "types.h"
 
 struct trapframe;
+struct pci_dev;
 
 #define ETH_MAX 1514
 
@@ -23,7 +25,12 @@ struct nic {
 
 extern struct nic *nic0;
 
-int ne2k_probe(void);                   /* finds, refuses or claims an NE2000; sets nic0 */
+int nic_probe(void);                    /* finds, refuses or claims a card (kernel/drv/nic.c); sets nic0 */
+int nic_pci(struct pci_dev *d, const char *name);       /* a PCI card may be taken: 0, or -1 with the refusal said */
+void nic_claimed(struct nic *n, struct pci_dev *d);     /* its IRQ and PCI function are the kernel's; the card line */
+int ne2k_probe(void);                   /* each: 0 once it has claimed its card */
+int rtl8139_probe(void);
+int e100_probe(void);
 void net_start(int selftest);           /* the net thread, once a card is claimed */
 void net_rx(struct nic *n, const u8 *frame, u32 len);
 void net_irq(struct trapframe *tf);     /* the card's IRQ handler */

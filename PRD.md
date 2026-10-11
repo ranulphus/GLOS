@@ -507,8 +507,8 @@ When SSH is down (boot, supervisor panic), the host tools fall back to the seria
 
 ### 8.1 NIC drivers
 
-- NE2000 (ISA PIO, PCI), RTL8139 (PCI, bus-master receive ring), Intel 8255x (PCI, command and receive frame lists).
-- Interrupt-driven, with a polled fallback for diagnosis.
+- NE2000 (ISA PIO, PCI), RTL8139 (PCI, bus-master receive ring), Intel 8255x (PCI, command and receive frame lists). As built: [docs/supervisor.md](docs/supervisor.md) §10, "The network cards".
+- Interrupt-driven. (A polled fallback for diagnosis was planned; none has been needed.)
 - **Refused:** a NIC whose IRQ is shared with an active device, and a NIC already owned by a packet driver. The packet driver must be unloaded, or the NIC excluded in `GLOS.CFG`.
 
 ### 8.2 lwIP
