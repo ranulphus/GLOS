@@ -71,6 +71,19 @@ host-test-run:
 	  build/host/$$n; done
 	@$(HOST_CC) -m32 -O2 -g -Wall -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -o build/host/crypto_kat \
 	  tests/host/crypto_kat.c $(TINYSSH_SRCS) && build/host/crypto_kat
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/gfx_test \
+	  tests/host/gfx_test.c $(GFX_SRCS) kernel/lib/png.c && build/host/gfx_test
+
+# The 2D library (kernel/gfx; M6 step C) and its fonts: 1-bit bitmaps made from TrueType fonts by
+# tools/mkfont.py, on the host (python3-pil), and kept in the repository so that the kernel's build needs
+# neither. `make fonts` makes them again from FONT_DIR's files.
+GFX_SRCS := kernel/gfx/gfx.c kernel/gfx/pal.c kernel/gfx/font.c kernel/gfx/region.c kernel/gfx/testcard.c \
+            kernel/gfx/fonts/ui.c kernel/gfx/fonts/bold.c kernel/gfx/fonts/mono.c
+FONT_DIR ?= /usr/share/fonts/truetype/dejavu
+fonts:
+	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSans.ttf 11 ui > kernel/gfx/fonts/ui.c
+	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSans-Bold.ttf 11 bold > kernel/gfx/fonts/bold.c
+	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSansMono.ttf 11 mono > kernel/gfx/fonts/mono.c
 
 # The SSH layer (kernel/ssh) on host sockets against OpenSSH's client
 # (tests/host/sshd_test.sh): native, on the host, which has ssh.
