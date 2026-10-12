@@ -137,3 +137,74 @@ G200: the test card at 640×480 in 8, 16 and 32 bits, each screenshot equal to t
 through the DAC's 6 bits, as the screenshot code widens them); a DOS program gets text mode and the card is
 back after it; an app starts, writes to the console and files, and ends with the card untouched; `glos
 display off`; a mode no card has; GLOS leaves in text mode.
+
+## 3. The window manager (`kernel/wm/`)
+
+### 3.1 The core (`wm.c`, `kernel/include/wm.h`)
+
+Pure code on surfaces, like the 2D library, and tested on the host the same way.
+
+- **A window keeps its client area's pixels** in a surface of its own, in the screen's format. Whoever owns the
+  window draws there, with the 2D library or straight into the memory, and says where it drew (`wm_damage`).
+  Nobody is ever asked to draw again because something else moved: a window uncovered is copied from its own
+  pixels, and after a session the whole desktop is.
+- **The manager draws the frame**: a framed window (`WF_FRAME`) has a border, a title bar with a close box and
+  its title, and a line under the bar, drawn straight onto the screen from the look (`struct wm_look`:
+  widths, colours, fonts; step G's to set). The frame's pixels are nobody's to keep.
+- **The order** is one list from the bottom up. Topmost windows (`WF_TOPMOST`: the task bar) stay above the
+  rest; `wm_raise` puts a window at the top of its kind. **The focus** is one shown window or none; its title
+  bar and its task-bar button show it; `wm_next` gives the next in the order windows were made (Alt-Tab).
+- **Where a point is** (`wm_hit`): the topmost shown window there, and the part: client, title bar, close
+  box, the bottom right corner (12 pixels, where a window that may be resized is dragged to do it), border.
+
+### 3.2 The composer
+
+`dirty` is what of the screen is out of date: a region (§1.5), added to by everything that changes what is
+seen (a window shown, hidden, moved, resized, raised, its title, the focus, its owner's drawing, the pointer,
+the task bar's text). `wm_compose()` brings the screen up to date:
+
+1. From the top window down: the part of the region the window's frame covers is drawn from that window
+   (frame, then its pixels copied), rectangle by rectangle with the screen's clip set to each, and the frame
+   is taken out of the region.
+2. What is left when the windows are done is desktop.
+3. The pointer is drawn on every rectangle as it is finished, clipped to it.
+
+Nothing is drawn and then drawn over, so the manager can draw on the screen itself without a second buffer
+and without flicker. If the region runs out of room for its rectangles it can only cover too much (§1.5):
+that one time everything in its bounds is drawn from the bottom up.
+
+### 3.3 The task bar
+
+A window of the manager's own along the bottom, topmost and never the focus: GLOS's name, a button for every
+framed window that is shown (in the order they were made, the focus's filled in), and at the right a note
+and the clock. The note is "ssh" while someone is connected (PRD D35): the remote-session sign is there and
+nowhere else, never drawn over a program's own picture.
+
+### 3.4 In the kernel (`desk.c`)
+
+- One manager for the one screen, its state one thread's at a time (`desk_lock`).
+- **The composer's thread** is of the normal class, with the system VM and the apps (not urgent, as PRD §5.4
+  has the supervisor's tasks: a whole screen drawn takes a 486 tens of milliseconds, and the system VM would
+  wait that long for its interrupts; the first desktop after a session did exactly that, `vif-stuck`). It
+  mostly waits, so it runs at once when woken (supervisor.md §7), and the VM thread still goes first. It
+  wakes when something changed (or every five seconds, for the clock, which comes from the RTC), and
+  composes onto the screen when the screen is the desktop's. While a session has it nothing is drawn; when the display's mode is set again the
+  display calls the desktop's painter, which says "everything" and wakes the thread.
+- **Memory:** a window's pixels are whole pages of their own at `WIN_BASE` (C2000000h, 32 MB of addresses
+  whose page tables are in every address space from the start), a frame each, so that an app's window can be
+  mapped into the app as well (step F). The last 64 free frames are never given to windows.
+- `glos desk` lists the windows; `glos desk demo` puts up the demonstration (`demo.c`: three windows, the
+  bar, the pointer) and `glos desk clear` takes it down.
+
+### 3.5 Tests
+
+- `tests/host/wm_test.c` (`make host-test`). With windows as rectangles of colour, 30,000 random things done
+  to up to twelve windows at each depth (made, shown, hidden, moved, resized, raised, focused, drawn in,
+  removed), and after every few the screen as the composer has brought it up to date must be the picture a
+  model paints from nothing: for each pixel, the topmost shown window over it, or the desktop. With frames,
+  the bar and the pointer, against the composer's own picture of everything drawn afresh: nothing that
+  changed may have gone undamaged. Then hit-testing, the focus's order, the bar's buttons, and the memory
+  given back.
+- `make loopa-desk` (`jobs.py desk`): the demonstration composed on the real screen at 640×480 in 8, 16 and
+  32 bits on the S3 (both machines) and the G200, each screenshot equal to the host's composition
+  (`build/host/wm-desk-N.png`); the same again after a DOS program had the screen.

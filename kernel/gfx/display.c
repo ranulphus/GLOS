@@ -52,7 +52,8 @@ static struct {
     u16 mode;                           /* its VBE number */
     u32 phys;
     struct gfx_surface fb;
-    void (*paint)(struct gfx_surface *fb);
+    void (*paint)(struct gfx_surface *fb);      /* who draws the whole screen now ... */
+    void (*home)(struct gfx_surface *fb);       /* ... and when it isn't the test card's */
 } d;
 
 static u32 le16(const u8 *p) { return p[0] | (u32)p[1] << 8; }
@@ -230,13 +231,15 @@ static int mode_set(void)
 
 static void blank(struct gfx_surface *fb) { gfx_fill(fb, 0, 0, fb->w, fb->h, 0x808080); }
 
-void display_painter(void (*paint)(struct gfx_surface *fb)) { d.paint = paint ? paint : blank; }
+void display_painter(void (*paint)(struct gfx_surface *fb)) { d.paint = d.home = paint ? paint : blank; }
 
-struct gfx_surface *display_fb(void) { return d.on && !d.held ? &d.fb : 0; }
+/* The screen, while the desktop draws on it: not a session's, not the test card's. */
+struct gfx_surface *display_fb(void) { return d.on && !d.held && d.paint != gfx_testcard ? &d.fb : 0; }
 
 void display_init(const struct bootinfo *bi)
 {
-    d.paint = blank;
+    if (!d.paint)
+        d.paint = d.home = blank;
     if (bi->display_w) {
         d.w = (u16)bi->display_w;
         d.h = (u16)bi->display_h;
@@ -292,8 +295,7 @@ void display_vm_turn(void)
     d.on = 0;
     if (mode_set() != 0)
         return;
-    if (what == DISPLAY_CARD)
-        d.paint = gfx_testcard;
+    d.paint = what == DISPLAY_CARD ? gfx_testcard : d.home;
     d.paint(&d.fb);
 }
 

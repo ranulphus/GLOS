@@ -17,6 +17,7 @@
 #include "agent.h"
 #include "app.h"
 #include "arch.h"
+#include "desk.h"
 #include "display.h"
 #include "io.h"
 #include "kprintf.h"
@@ -801,6 +802,23 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             ssh_chan_exit(ch, 1);
         } else {
             ssh_chan_exit(ch, 0);
+        }
+    } else if (!strcmp(cmd, "glos desk") || !strcmp(cmd, "glos desk demo") || !strcmp(cmd, "glos desk clear")) {
+        /* glos desk [demo | clear]: the desktop's windows; the demonstration's put up, or taken down */
+        if (cmd[9]) {
+            if (desk_demo(cmd[10] == 'd') != 0) {
+                say(ch, 1, "glos desk: no memory\n");
+                ssh_chan_exit(ch, 1);
+            } else {
+                ssh_chan_exit(ch, 0);
+            }
+        } else {
+            char *b = kmalloc(2048);
+            if (b)
+                ssh_chan_write(ch, 0, (const uint8_t *)b, desk_stat(b, 2048));
+            if (b)
+                kfree(b);
+            ssh_chan_exit(ch, b ? 0 : 1);
         }
     } else if (!strncmp(cmd, "glos kill ", 10)) {
         const char *q = cmd + 10;

@@ -217,4 +217,18 @@ Each step is a commit with its tests. The gate (`make gate`) must still pass at 
   - Found on the way: the Matrox BIOS's teletype writes into a VBE mode's framebuffer, so an app's console
     output drew on the desktop. While the desktop has the screen, programs' video BIOS calls are answered
     by the kernel and the VGA's memory at A0000h is out of reach (graphics.md §2.3).
-- D to H: to do.
+- **D. The window manager: done** (2026-10-12; graphics.md §3).
+  - `kernel/wm/wm.c`, the core: windows that keep their pixels, the order, the focus, frames drawn from the
+    look, the task bar (a button a window, the remote-session note of D35, the clock), the pointer, and the
+    composer, which draws each damaged part of the screen once, from the top window down.
+  - `kernel/wm/desk.c`: the core in the kernel, with its own thread and windows' pixels in pages of their
+    own; `glos desk`, `glos desk demo|clear`.
+  - Host test: the composer against a model, with windows as rectangles of colour (30,000 random things at
+    each depth), and with frames, bar and pointer against everything drawn afresh.
+  - `make loopa-desk`: the demonstration desktop at 640x480 in 8, 16 and 32 bits on the S3 Trio64V2 (Pentium
+    II and 486DX2) and the G200, each screenshot equal to the host's composition; the same after a session.
+  - Found on the way: the composer's thread as an urgent one kept the system VM from its interrupts for the
+    length of a whole screen's drawing (`vif-stuck` after a session): it is of the normal class.
+  - Left for step E: moving and resizing by hand (the calls are there, and tested); for step F: windows that
+    are apps'.
+- E to H: to do.

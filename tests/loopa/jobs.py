@@ -2053,6 +2053,95 @@ def display_case(profile, vcard, card, cfg_mode):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+DESK_CASES = [("bf6", "vbe", "ne2kpci"), ("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")]
+
+
+def desk_case(profile, vcard, card):
+    """The desktop (kernel/wm): the demonstration's windows, task bar and pointer composed on the real screen at
+    640x480 in 8, 16 and 32 bits, each screenshot equal to the host's composition (tests/host/wm_test.c wrote
+    build/host/wm-desk-N.png). A DOS program (a session) takes the screen and the desktop is back after it as
+    it was, from the windows' own pixels; the windows taken down leave the bare desktop and its bar."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("desk-" + tag, profile, card, ["--card", vcard,
+        "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+        "--cmd", "SERSAY HX-START desk", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=1800)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    out = os.path.join(ROOT, "out", "desk-" + tag)
+    checks, info = {"listen": agent.listening()}, ""
+
+    def state(want, limit=60):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            line = agent.ssh("glos display")[1]
+            if line.startswith(want):
+                return line
+            time.sleep(0.5)
+        return ""
+
+    def shot(name):
+        p = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=300)
+        open(os.path.join(out, name + ".png"), "wb").write(p.stdout)
+        return png_rgb(p.stdout) if p.returncode == 0 else None
+
+    def golden(bits, line):
+        w, h, rgb = png_rgb(open(os.path.join(ROOT, "build/host/wm-desk-%d.png" % bits), "rb").read())
+        if bits == 8 and " dac=6" in line:
+            rgb = bytes((((v >> 2) << 2) | (v >> 6)) for v in rgb)
+        return w, h, rgb
+
+    def same(name, want, what, tries=6):         # (the composer has its own thread: a moment)
+        got = None
+        for _ in range(tries):
+            got = shot(name)
+            if got == want:
+                return True
+            time.sleep(1)
+        if not got or got[:2] != want[:2]:
+            print("    %s %s: %s" % (tag, what, "no picture" if not got else "%dx%d" % got[:2]))
+            return False
+        bad = [i // 3 for i in range(0, len(want[2]), 3) if got[2][i:i + 3] != want[2][i:i + 3]]
+        print("    %s %s: %d pixels differ, the first at %d,%d: %s for %s" % (
+            tag, what, len(bad), bad[0] % want[0], bad[0] // want[0], got[2][bad[0] * 3:bad[0] * 3 + 3].hex(),
+            want[2][bad[0] * 3:bad[0] * 3 + 3].hex()))
+        return False
+
+    try:
+        checks["ver"] = agent.ssh("glos ver")[0] == 0
+        line = ""
+        for bits in (8, 16, 32):
+            agent.ssh("glos desk clear")
+            checks["ask-%d" % bits] = agent.ssh("glos display on 640x480x%d" % bits)[0] == 0
+            line = state("display on mode=")
+            checks["on-%d" % bits] = " 640x480x%d " % bits in line
+            checks["demo-%d" % bits] = agent.ssh("glos desk demo")[0] == 0
+            if checks["on-%d" % bits]:
+                checks["desk-%d" % bits] = same("desk-%d" % bits, golden(bits, line), "the desktop at %d bits" % bits)
+        st = agent.ssh("glos desk")[1]
+        checks["stat"] = st.startswith("desk 640x480x32 windows=4 ") and len(re.findall(r"^window \d+ shown", st, re.M)) == 4
+        rc, o, _ = agent.ssh("C:\\TEST\\ECHOARGS.EXE over the desktop")
+        checks["session"] = rc == 7 and "over the desktop" in o
+        line = state("display on mode=")
+        checks["back"] = bool(line) and same("after-session", golden(32, line), "the desktop after a session")
+        checks["clear"] = agent.ssh("glos desk clear")[0] == 0
+        time.sleep(2)
+        bare = shot("bare")
+        checks["bare"] = bool(bare) and bare[:2] == (640, 480) and bare[2][:3] * 640 == bare[2][:640 * 3] \
+            and bare[2][:3] == bytes((0x66, 0x99, 0x99))
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["text-at-exit"] = "HX-VMODE bios=03" in text
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("desk-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 APPS_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
 
 
@@ -2346,7 +2435,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -2365,6 +2454,9 @@ def main():
         if not os.environ.get("SSH_ONE") and not os.environ.get("SSH_ONLY"):
             res += matrix(reboot_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "desk":
+        cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(desk_case, cases, a.jobs)) else 1
     if a.suite == "display":
         cases = [c for c in DISPLAY_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(display_case, cases, a.jobs)) else 1

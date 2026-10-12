@@ -26,6 +26,8 @@ static u32 kpt_heap[1024] __attribute__((aligned(4096)));
 static u32 kpt_kmap[1024] __attribute__((aligned(4096)));
 static u32 kpt_dma[1024] __attribute__((aligned(4096)));
 static u32 kpt_fb[FB_MAX >> 22][1024] __attribute__((aligned(4096)));
+static u32 kpt_win[WIN_MAX >> 22][1024] __attribute__((aligned(4096)));
+static u32 win_used[(WIN_MAX >> 12) / 32];      /* a bit a page of the windows' region */
 static u32 frame_bits[MAX_FRAMES / 32];
 static struct pmm pmm;
 static struct heap kheap;
@@ -210,6 +212,48 @@ void *mm_tramp_page(u32 lin)
 /* n frames in a row, zeroed and mapped in the kernel for good, for a device
    that reads and writes memory itself (a network card's rings): where they
    are, and physically in *phys; 0 without memory. */
+/* Windows' pixels (kernel/wm/desk.c): `bytes` of memory, zeroed, in whole
+   pages at WIN_BASE, each page a frame of its own (so a window's can also
+   be mapped into its app: mm_win_frame). NULL without memory or room. */
+void *mm_win_alloc(u32 bytes)
+{
+    u32 n = (bytes + 0xFFF) >> 12, i, run = 0, first = 0, f = irq_save();
+    u8 *p = 0;
+    for (i = 0; n && i < WIN_MAX >> 12 && run < n; i++) {
+        if (win_used[i >> 5] & (1u << (i & 31)))
+            run = 0;
+        else if (!run++)
+            first = i;
+    }
+    if (n && run == n && pmm.free > n + 64) {   /* (never the last frames: the kernel's own needs come first) */
+        for (i = first; i < first + n; i++) {
+            win_used[i >> 5] |= 1u << (i & 31);
+            kpt_win[i >> 10][i & 1023] = pmm_take(&pmm) | PTE_P | PTE_W;
+            invlpg(WIN_BASE + (i << 12));
+        }
+        p = (u8 *)(WIN_BASE + (first << 12));
+    }
+    irq_restore(f);
+    if (p)
+        memset(p, 0, n << 12);
+    return p;
+}
+
+void mm_win_free(void *mem, u32 bytes)
+{
+    u32 n = (bytes + 0xFFF) >> 12, first = ((u32)mem - WIN_BASE) >> 12, i, f = irq_save();
+    for (i = first; i < first + n && i < WIN_MAX >> 12; i++) {
+        pmm_give(&pmm, kpt_win[i >> 10][i & 1023] & ~0xFFFu);
+        kpt_win[i >> 10][i & 1023] = 0;
+        invlpg(WIN_BASE + (i << 12));
+        win_used[i >> 5] &= ~(1u << (i & 31));
+    }
+    irq_restore(f);
+}
+
+/* The frame behind a page of a window's pixels. */
+u32 mm_win_frame(const void *p) { u32 i = ((u32)p - WIN_BASE) >> 12; return kpt_win[i >> 10][i & 1023] & ~0xFFFu; }
+
 /* The VGA's memory at A0000h-BFFFFh out of reach (1) or back (0): while the
    desktop has the screen, a program that writes text there (straight to
    B8000h, as DOS programs do) must not hit the card, whose window onto the
@@ -283,6 +327,8 @@ void mm_init(struct bootinfo *bi)
     kpd[DMA_BASE >> 22] = kernel_phys(kpt_dma) | PTE_P | PTE_W;
     for (i = 0; i < FB_MAX >> 22; i++)          /* (every address space copies these: before the first is made) */
         kpd[(FB_BASE >> 22) + i] = kernel_phys(kpt_fb[i]) | PTE_P | PTE_W;
+    for (i = 0; i < WIN_MAX >> 22; i++)
+        kpd[(WIN_BASE >> 22) + i] = kernel_phys(kpt_win[i]) | PTE_P | PTE_W;
     kpd[1023] = kernel_phys(kpd) | PTE_P | PTE_W;
     write_cr3(mm_cr3());
 

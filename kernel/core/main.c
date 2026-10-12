@@ -4,6 +4,7 @@
  * milestones-m0-m4.md M1). */
 #include "glos/bootinfo.h"
 #include "arch.h"
+#include "desk.h"
 #include "display.h"
 #include "gdb.h"
 #include "io.h"
@@ -107,6 +108,7 @@ void kmain(struct bootinfo *loader_bi)
         random_init(bi);
         display_init(bi);
         vm_start(bi);
+        desk_init();
         pci_scan();
         if (nic_probe() == 0) {
             sshd_start(bi);                     /* before the net thread, which listens for it */
