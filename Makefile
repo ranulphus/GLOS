@@ -27,6 +27,9 @@
 #                       compiling and running a program (loopa-tpx; BORLAND_DIR, make m4d-inputs)
 #   make loopa-sess     exclusive sessions: what SESSTEST leaves behind, natively and under
 #                       GLOS /RUN, as the shell and as agent jobs (runs on the host)
+#   make loopa-display  the desktop's screen (M6): the 2D library's test card at 8, 16 and 32 bits on the S3
+#                       and the G200, a screenshot of each against the host's own rendering
+#   make fonts          kernel/gfx/fonts again from TrueType fonts (tools/mkfont.py; on the host)
 #   make loopa-apps     GLOS apps (M6): APPTESTs at once, beside a busy one, a session, a crash; kills;
 #                       GLOS /RUN with an app (runs on the host)
 #   make gate           M4e's exit: the baseline matrix under GLOS and with direct mode forced, a kill and
@@ -45,7 +48,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: loopa-apps all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: loopa-apps loopa-display fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -74,11 +77,7 @@ host-test-run:
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/gfx_test \
 	  tests/host/gfx_test.c $(GFX_SRCS) kernel/lib/png.c && build/host/gfx_test
 
-# The 2D library (kernel/gfx; M6 step C) and its fonts: 1-bit bitmaps made from TrueType fonts by
-# tools/mkfont.py, on the host (python3-pil), and kept in the repository so that the kernel's build needs
-# neither. `make fonts` makes them again from FONT_DIR's files.
-GFX_SRCS := kernel/gfx/gfx.c kernel/gfx/pal.c kernel/gfx/font.c kernel/gfx/region.c kernel/gfx/testcard.c \
-            kernel/gfx/fonts/ui.c kernel/gfx/fonts/bold.c kernel/gfx/fonts/mono.c
+# (`make fonts` makes kernel/gfx/fonts again from FONT_DIR's TrueType files: on the host, with python3-pil.)
 FONT_DIR ?= /usr/share/fonts/truetype/dejavu
 fonts:
 	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSans.ttf 11 ui > kernel/gfx/fonts/ui.c
@@ -148,6 +147,12 @@ DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/ECHO
              build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE
 dos-tests: $(DOS_TESTS)
 
+# The 2D library (kernel/gfx; M6 step C) and its fonts: 1-bit bitmaps made from TrueType fonts by
+# tools/mkfont.py, on the host (python3-pil), and kept in the repository so that the kernel's build needs
+# neither. `make fonts` makes them again from FONT_DIR's files.
+GFX_SRCS := kernel/gfx/gfx.c kernel/gfx/pal.c kernel/gfx/font.c kernel/gfx/region.c kernel/gfx/testcard.c \
+            kernel/gfx/fonts/ui.c kernel/gfx/fonts/bold.c kernel/gfx/fonts/mono.c
+
 # ---- GLOSK.BIN: the kernel (host gcc -m32, linked at C0100000h) -------------
 KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protector \
            -fno-asynchronous-unwind-tables -fno-delete-null-pointer-checks -mgeneral-regs-only \
@@ -165,7 +170,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c kernel/app/dev.c
+         kernel/app/app.c kernel/app/api.c kernel/app/dev.c $(GFX_SRCS) kernel/gfx/display.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
@@ -244,6 +249,9 @@ loopa-gdbprog: all build/dj/GDBME.EXE check-deps
 # GLOS apps (M6 step A): APPTESTs at once, beside a spinning one, a session and a crash.
 loopa-apps: all dos-tests djtst build/dj/APPTEST.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py apps -j $(JOBS)
+# The desktop's screen and the 2D library (M6 step C): the test card on the S3 and the G200 against the host's.
+loopa-display: all dos-tests build/dj/APPTEST.EXE host-test check-deps
+	$(Q)python3 tests/loopa/jobs.py display -j $(JOBS)
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py input -j $(JOBS)
 # M4a: the DPMI host's checks (DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i).

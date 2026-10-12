@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 3
+#define BOOTINFO_VERSION 4
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -119,6 +119,7 @@ struct bootinfo {
     struct bi_profile profiles[BI_PROFILES];    /* M4e: GLOS.CFG's [program] sections */
     char hostname[16];                          /* M5: GLOS.CFG's [net] hostname (letters, digits, hyphens); empty: "glos" */
     bi_u32 detached_off;                        /* M6: where the stub goes on when the program it EXECed became an app */
+    bi_u32 display_w, display_h, display_bpp;   /* M6: GLOS.CFG's [display] mode = WxHxBPP; 0: no desktop (text mode) */
 };
 
 /* The resident stub's data (loader/stub.asm), at offset 0 of its segment.

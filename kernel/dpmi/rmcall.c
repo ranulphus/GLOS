@@ -19,6 +19,7 @@
 #include "agent.h"
 #include "app.h"
 #include "arch.h"
+#include "display.h"
 #include "dpmi.h"
 #include "kprintf.h"
 #include "sched.h"
@@ -175,6 +176,8 @@ void rm_reflect(struct trapframe *tf, u8 vec)
     static u32 traced;
     struct rmregs r;
     u32 v = rm_vector(vec);
+    if (vec == 0x10 && display_quiet(&tf->eax, &tf->ebx, &tf->ecx, &tf->edx, app_cur() || app_vm_psp()))
+        return;                                 /* the desktop has the screen (gfx/display.c) */
     if ((vm.bi->flags & BI_F_DPMITRACE) && traced++ < 200)     /* /DPMITRACE: the first ones */
         kprintf("GLOS-DPMI reflect int=%02x ax=%04x bx=%04x cx=%04x dx=%08x from=%04x:%08x\n", vec,
                 tf->eax & 0xFFFF, tf->ebx & 0xFFFF, tf->ecx & 0xFFFF, tf->edx, tf->cs & 0xFFFF, tf->eip);

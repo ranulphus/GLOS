@@ -9,6 +9,7 @@
 #include "glos/bootinfo.h"
 #include "app.h"
 #include "arch.h"
+#include "display.h"
 #include "dpmi.h"
 #include "io.h"
 #include "kprintf.h"
@@ -272,7 +273,7 @@ static void fn_rmcall(struct trapframe *tf, u32 fn)
 {
     struct rmregs r;
     u16 words[64];
-    u32 n = cx(tf), sp;
+    u32 n = cx(tf), sp, a, b, c, d;
     if (n > 64)
         return fail(tf, 0x8021);
     if (user_rd((u16)tf->es, r_di(tf), &r, sizeof r) != 0)
@@ -280,8 +281,13 @@ static void fn_rmcall(struct trapframe *tf, u32 fn)
     sp = (cpu_desc_hi(tf->ss) & (1u << 22)) ? tf->esp : tf->esp & 0xFFFF;
     if (n && user_rd((u16)tf->ss, sp, words, n * 2) != 0)
         return fail(tf, 0x8021);
-    if (rm_call(tf, &r, fn == 0x0300 ? RM_INT : fn == 0x0301 ? RM_FAR : RM_IRET, (u8)tf->ebx, words, n) != 0)
+    a = r.eax, b = r.ebx, c = r.ecx, d = r.edx;
+    if (fn == 0x0300 && (u8)tf->ebx == 0x10 && display_quiet(&a, &b, &c, &d, app_cur() || app_vm_psp())) {
+        r.eax = a, r.ebx = b, r.ecx = c, r.edx = d;     /* the desktop has the screen: answered there, not by the
+                                                   BIOS (gfx/display.c) */
+    } else if (rm_call(tf, &r, fn == 0x0300 ? RM_INT : fn == 0x0301 ? RM_FAR : RM_IRET, (u8)tf->ebx, words, n) != 0) {
         return fail(tf, 0x8012);
+    }
     if (user_wr((u16)tf->es, r_di(tf), &r, sizeof r) != 0)
         return fail(tf, 0x8021);
     ok(tf);

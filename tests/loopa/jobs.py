@@ -1943,6 +1943,116 @@ EXIT_KEYS = [0x1E, 0x30, 0x2E]                  # a, b, c
 EXIT_CASES = [("bf6", "g200"), ("bf6", "vbe")]
 
 
+# ---- the display and the 2D library (M6 step C)
+
+# (machine, video card, network card, GLOS.CFG's [display] mode or none)
+DISPLAY_CASES = [("bf6", "vbe", "ne2kpci", ""), ("bf6", "g200", "ne2kpci", "800x600x16"), ("486dx2", "vbe", "ne2k", "640x480x8")]
+
+
+def display_case(profile, vcard, card, cfg_mode):
+    """The desktop's screen (kernel/gfx/display.c): at 640x480 in 8, 16 and 32 bits a pixel, the kernel draws the
+    2D library's test card on the real screen, and glos shot's picture of it must be the host's own rendering
+    (tests/host/gfx_test.c wrote it: build/host/gfx-card-N.png), pixel for pixel; at 8 bits through the DAC's
+    6 bits a colour where the BIOS can't give 8. Then: a DOS program (a session) gets text mode and the card
+    is back after it; a program marked as a GLOS app starts, writes to the console and ends with the card
+    untouched; glos display off is text mode; a mode no card has is refused; GLOS leaves in text mode. With a
+    [display] mode in GLOS.CFG the desktop is there from the start, one colour all over."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    cfg = ["--file", batfile("display-%s/GLOS.CFG" % tag, ["[display]", "mode = " + cfg_mode]) + "=/TEST/GLOS.CFG"] \
+        if cfg_mode else []
+    agent = Agent("display-" + tag, profile, card, ["--card", vcard] + cfg + [
+        "--file", "build/dj/APPTEST.EXE=/TEST/APPTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+        "--cmd", "SERSAY HX-START display", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=1800)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    out = os.path.join(ROOT, "out", "display-" + tag)
+    checks, info = {"listen": agent.listening()}, ""
+
+    def state(want, limit=60):                  # glos display's line once it starts with `want`
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            line = agent.ssh("glos display")[1]
+            if line.startswith(want):
+                return line
+            time.sleep(0.5)
+        return ""
+
+    def shot(name):
+        p = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=300)
+        open(os.path.join(out, name + ".png"), "wb").write(p.stdout)
+        return png_rgb(p.stdout) if p.returncode == 0 else None
+
+    def card(bits, line):                       # the host's picture, as this screen shows it
+        w, h, rgb = png_rgb(open(os.path.join(ROOT, "build/host/gfx-card-%d.png" % bits), "rb").read())
+        if bits == 8 and " dac=6" in line:      # (what glos shot makes of a 6-bit DAC's colours)
+            rgb = bytes((((v >> 2) << 2) | (v >> 6)) for v in rgb)
+        return w, h, rgb
+
+    def same(got, want, what):
+        if got == want:
+            return True
+        if not got or got[:2] != want[:2]:
+            print("    %s %s: %s" % (tag, what, "no picture" if not got else "%dx%d" % got[:2]))
+            return False
+        bad = [i // 3 for i in range(0, len(want[2]), 3) if got[2][i:i + 3] != want[2][i:i + 3]]
+        print("    %s %s: %d pixels differ, the first at %d,%d: %s for %s" % (
+            tag, what, len(bad), bad[0] % want[0], bad[0] // want[0], got[2][bad[0] * 3:bad[0] * 3 + 3].hex(),
+            want[2][bad[0] * 3:bad[0] * 3 + 3].hex()))
+        return False
+
+    try:
+        checks["ver"] = agent.ssh("glos ver")[0] == 0
+        if cfg_mode:                            # the desktop from the start, as GLOS.CFG asks
+            line = state("display on mode=")
+            first = shot("first")
+            w, h = [int(v) for v in cfg_mode.split("x")[:2]]
+            checks["from-cfg"] = (" %s " % cfg_mode) in line and bool(first) and first[:2] == (w, h) \
+                and first[2] == first[2][:3] * (w * h)
+        else:
+            checks["off-first"] = agent.ssh("glos display")[1].startswith("display off")
+        line = ""
+        for bits in (8, 16, 32):
+            checks["ask-%d" % bits] = agent.ssh("glos display card 640x480x%d" % bits)[0] == 0
+            line = state("display on mode=")
+            checks["on-%d" % bits] = " 640x480x%d " % bits in line
+            if checks["on-%d" % bits]:
+                checks["card-%d" % bits] = same(shot("card-%d" % bits), card(bits, line), "card at %d bits" % bits)
+        info = " " + " ".join(w for w in line.split() if w.startswith(("mode=", "rgb=", "lfb=")))
+        # A session takes the screen and gives it back; an app doesn't take it.
+        rc, o, _ = agent.ssh("C:\\TEST\\ECHOARGS.EXE on the screen")
+        checks["session"] = rc == 7 and "on the screen" in o
+        line = state("display on mode=")
+        checks["back"] = bool(line) and same(shot("after-session"), card(32, line), "the card after a session")
+        n = agent.log().count("GLOS-DISPLAY on ")
+        rc, o, _ = agent.ssh("C:\\TEST\\APPTEST.EXE run A 2", timeout=600)     # (it writes to the console, and files)
+        checks["app"] = rc == 40 and "APP-OK" in o and agent.log().count("GLOS-DISPLAY on ") == n \
+            and same(shot("after-app"), card(32, line), "the card after an app")
+        rc, _, err = agent.ssh("glos display on 640x480x24")
+        checks["usage"] = rc == 2 and "usage" in err
+        agent.ssh("glos display on 1234x567x8")         # (no such mode on any card)
+        time.sleep(3)
+        checks["no-mode"] = "GLOS-DISPLAY error=no-mode want=1234x567x8" in agent.log()
+        agent.ssh("glos display card 640x480x8")
+        checks["again"] = bool(state("display on mode="))
+        checks["off"] = agent.ssh("glos display off")[0] == 0 and bool(state("display off"))
+        t = shot("text")
+        checks["text"] = bool(t) and t[:2] == (640, 400)
+        agent.ssh("glos display card 640x480x16")
+        checks["on-again"] = bool(state("display on mode="))
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["text-at-exit"] = "HX-VMODE bios=03" in text
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("display-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 APPS_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
 
 
@@ -2236,7 +2346,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -2255,6 +2365,9 @@ def main():
         if not os.environ.get("SSH_ONE") and not os.environ.get("SSH_ONLY"):
             res += matrix(reboot_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "display":
+        cases = [c for c in DISPLAY_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(display_case, cases, a.jobs)) else 1
     if a.suite == "apps":
         cases = [c for c in APPS_CASES if not a.profile or c[0] in a.profile]
         res = matrix(apps_case, cases, a.jobs)

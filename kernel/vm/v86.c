@@ -15,6 +15,7 @@
 #include "glos/bootinfo.h"
 #include "agent.h"
 #include "app.h"
+#include "display.h"
 #include "dos.h"
 #include "dpmi.h"
 #include "session.h"
@@ -175,7 +176,7 @@ void vm_idle(u32 until)
     vm.waiting = 1;
     while (!vm.kill_req && !(current->vif && vpic_pending(&vm.pic)) && !vm_work_due()
            && !(until && (s32)(timer_ticks() - until) >= 0)
-           && !(vm.idle_agent && (agent_vm_wake_pending() || app_vm_pending())))
+           && !(vm.idle_agent && (agent_vm_wake_pending() || app_vm_pending() || display_vm_pending())))
         thread_block(&vm.waitq);
     vm.waiting = 0;
     vm.wait_deadline = 0;
@@ -490,6 +491,7 @@ static void vm_leave(u32 code) __attribute__((noreturn));
 static void vm_leave(u32 code)
 {
     kprintf_direct();                           /* (no more traps to write the log from) */
+    display_leave();
     int2f_unhook();
     vkbc_leave();
     vdev_leave();
@@ -636,6 +638,7 @@ static void vm_agent_next(struct trapframe *tf, u32 result)
 static void vm_next(struct trapframe *tf, u32 result)
 {
     static u8 ran;
+    display_vm_turn();                          /* the desktop's mode set or given up (gfx/display.c) */
     app_vm_turn();                              /* apps' calls into the system VM, now that it is idle (M6) */
     if (vm.bi->flags & BI_F_AGENT) {
         vm_agent_next(tf, result);
@@ -832,7 +835,11 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
     u32 ax = tf->eax & 0xFFFF;
     vm.n_int++;
     switch (n) {
-    case 0x10:                                  /* a mode set, for glos shot (kernel/dos/shot.c): made for the */
+    case 0x10:
+        if (display_quiet(&tf->eax, &tf->ebx, &tf->ecx, &tf->edx, app_vm_psp() != 0)) {
+            tf->eip = next;                     /* the desktop has the screen: nothing of the BIOS's on it */
+            return;
+        }                                       /* a mode set, for glos shot (kernel/dos/shot.c): made for the */
         if ((ax == 0x4F02 || !(ax >> 8)) && vbe_set(tf, next))  /* program, so that its end and its answer */
             return;                             /* are seen */
         break;

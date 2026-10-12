@@ -17,6 +17,7 @@
 #include "agent.h"
 #include "app.h"
 #include "arch.h"
+#include "display.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
@@ -769,6 +770,38 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         ssh_chan_write(ch, 0, (const uint8_t *)b, n);
         kfree(b);
         ssh_chan_exit(ch, 0);
+    } else if (!strcmp(cmd, "glos display") || !strncmp(cmd, "glos display ", 13)) {
+        /* glos display [on [WxHxBITS] | off | card [WxHxBITS]]: the desktop's screen (gfx/display.c). The VM
+           thread does it when the stub next asks: the answer says only that it was asked. */
+        const char *q = cmd + 12;
+        char b[160];
+        int what = -1, w = 0, h = 0, bits = 0;
+        while (*q == ' ')
+            q++;
+        if (!strncmp(q, "on", 2) && (q[2] == ' ' || !q[2]))
+            what = DISPLAY_ON, q += 2;
+        else if (!strncmp(q, "card", 4) && (q[4] == ' ' || !q[4]))
+            what = DISPLAY_CARD, q += 4;
+        else if (!strcmp(q, "off"))
+            what = DISPLAY_OFF, q += 3;
+        while (*q == ' ')
+            q++;
+        if (what > DISPLAY_OFF && *q
+            && (number(&q, &w) != 0 || *q++ != 'x' || number(&q, &h) != 0 || *q++ != 'x' || number(&q, &bits) != 0 || *q
+                || w < 320 || w > 1600 || h < 200 || h > 1200 || (bits != 8 && bits != 16 && bits != 32)))
+            what = -2;
+        if ((what < 0 && *q) || what == -2) {
+            say(ch, 1, "glos display: usage: glos display [on [WxHxBITS] | card [WxHxBITS] | off] (BITS 8, 16 or 32)\n");
+            ssh_chan_exit(ch, 2);
+        } else if (what < 0) {
+            ssh_chan_write(ch, 0, (const uint8_t *)b, display_stat(b, sizeof b));
+            ssh_chan_exit(ch, 0);
+        } else if (display_ask(what, (u32)w, (u32)h, (u32)bits) != 0) {
+            say(ch, 1, "glos display: busy\n");
+            ssh_chan_exit(ch, 1);
+        } else {
+            ssh_chan_exit(ch, 0);
+        }
     } else if (!strncmp(cmd, "glos kill ", 10)) {
         const char *q = cmd + 10;
         int seq;

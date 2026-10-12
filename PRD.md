@@ -7,7 +7,7 @@
 | Status | v0.3 — start modes and conventional memory (2026-10-02), after the v0.2 deep dive (2026-10-01) |
 | Last updated | 2026-10-01 |
 | Supersedes | v0.1. Changes are listed in Appendix D |
-| Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md) and [docs/milestones-m6.md](docs/milestones-m6.md) (work breakdown) |
+| Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md) and [docs/milestones-m6.md](docs/milestones-m6.md) (work breakdown) |
 | Licence | MIT |
 | Companion projects | MGA-Glide (`~/MGA-Glide`: the Loop A/B/C harness and the shared Matrox HAL), DOS-GL (`~/DOSGL`: OpenGL for Matrox cards and the SDL3 bridge), Fifth Wheel and the dgk kit (`~/FifthWheel`), DOSBench (`~/DOSBench`) |
 

@@ -645,13 +645,13 @@ static void profile_env(struct bi_profile *p, const char *v)
 }
 
 /* GLOS.CFG next to GLOS.EXE: [program NAME.EXT] sections (profiles), [net],
-   and as the shell the [shell] section; key = value lines. */
+   [display], and as the shell the [shell] section; key = value lines. */
 static void read_cfg(const char *argv0, int shell_keys)
 {
     char line[160], path[128], *k, *v, *e;
     const char *slash = strrchr(argv0, '\\');
     size_t n = slash ? (size_t)(slash - argv0 + 1) : 0;
-    int in_shell = 0, in_net = 0;
+    int in_shell = 0, in_net = 0, in_display = 0;
     struct bi_profile *prof = NULL;
     FILE *f;
 
@@ -666,6 +666,7 @@ static void read_cfg(const char *argv0, int shell_keys)
         if (*k == '[') {
             in_shell = shell_keys && !strnicmp(k, "[shell]", 7);
             in_net = !strnicmp(k, "[net]", 5);
+            in_display = !strnicmp(k, "[display]", 9);
             prof = NULL;
             if (!strnicmp(k, "[program", 8) && (e = strchr(k, ']')) != NULL) {
                 *e = 0;
@@ -675,13 +676,25 @@ static void read_cfg(const char *argv0, int shell_keys)
             }
             continue;
         }
-        if ((!in_shell && !prof && !in_net) || !(v = strchr(k, '=')))
+        if ((!in_shell && !prof && !in_net && !in_display) || !(v = strchr(k, '=')))
             continue;
         for (e = v; e > k && (e[-1] == ' ' || e[-1] == '\t'); e--) ;
         *e = 0;
         for (v++; *v == ' ' || *v == '\t'; v++) ;
         for (e = v + strlen(v); e > v && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' '); e--) ;
         *e = 0;
+        if (in_display) {                       /* mode = WIDTHxHEIGHTxBITS: the desktop's (M6); none: text mode */
+            unsigned w, h, b;
+            if (!stricmp(k, "mode") && sscanf(v, "%ux%ux%u", &w, &h, &b) == 3 && w >= 320 && w <= 1600 && h >= 200
+                && h <= 1200 && (b == 8 || b == 16 || b == 32)) {
+                bi.display_w = w;
+                bi.display_h = h;
+                bi.display_bpp = b;
+            } else {
+                say("GLOS-WARN cfg-key section=display key=%s", k);
+            }
+            continue;
+        }
         if (in_net) {                           /* hostname = NAME: for mDNS (NAME.local) and DHCP */
             if (!stricmp(k, "hostname") && strlen(v) < sizeof bi.hostname
                 && strspn(v, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-") == strlen(v)

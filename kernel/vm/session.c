@@ -36,6 +36,7 @@
 
 #include "glos/bootinfo.h"
 #include "app.h"
+#include "display.h"
 #include "dpmi.h"
 #include "gdbprog.h"
 #include "io.h"
@@ -249,6 +250,7 @@ static void end(const char *why)
         ses.env_seg = 0;
     }
     remode = remode_to(ses.mode);               /* the mode it began in, and so the palette */
+    display_session(0);                         /* ... and the desktop's again, if it had the screen */
     if (pit_moved()) {
         outb(0x43, 0x34);                       /* PIT channel 0: mode 2, count FFFFh (§8.2) */
         outb(0x40, 0xFF);
@@ -431,6 +433,9 @@ void session_exec(const struct trapframe *tf)
     ses.active = 1;
     ses.parent = psp;
     memset(ses.dangle, 0, sizeof ses.dangle);
+    ses.hint = (psp == vm.loader_psp && job.app) || marked(tf);
+    if (!ses.hint)
+        display_session(1);                     /* the screen is the session's: text mode (gfx/display.c) */
     ses.mode = vm_rd8(0x449);
     ses.leds = vm_rd8(0x417) & 0x70;
     ses.imr[0] = vm.pic.p[0].imr;
@@ -448,7 +453,6 @@ void session_exec(const struct trapframe *tf)
     ses.direct = psp == vm.loader_psp && job.direct;
     ses.exclusive = psp == vm.loader_psp && job.exclusive;
     ses.app = psp == vm.loader_psp && job.app;
-    ses.hint = ses.app || marked(tf);
     ses.env_seg = 0;
     if (ses.prof && ses.prof->env[0])
         profile_env(tf, psp);

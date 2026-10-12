@@ -4,6 +4,7 @@
  * milestones-m0-m4.md M1). */
 #include "glos/bootinfo.h"
 #include "arch.h"
+#include "display.h"
 #include "gdb.h"
 #include "io.h"
 #include "kprintf.h"
@@ -104,6 +105,7 @@ void kmain(struct bootinfo *loader_bi)
     if (bi->flags & BI_F_VM) {                  /* DOS carries on in V86 mode, as a thread */
         sched_init();
         random_init(bi);
+        display_init(bi);
         vm_start(bi);
         pci_scan();
         if (nic_probe() == 0) {

@@ -25,6 +25,7 @@ static u32 kpt_kernel[1024] __attribute__((aligned(4096)));
 static u32 kpt_heap[1024] __attribute__((aligned(4096)));
 static u32 kpt_kmap[1024] __attribute__((aligned(4096)));
 static u32 kpt_dma[1024] __attribute__((aligned(4096)));
+static u32 kpt_fb[FB_MAX >> 22][1024] __attribute__((aligned(4096)));
 static u32 frame_bits[MAX_FRAMES / 32];
 static struct pmm pmm;
 static struct heap kheap;
@@ -209,6 +210,41 @@ void *mm_tramp_page(u32 lin)
 /* n frames in a row, zeroed and mapped in the kernel for good, for a device
    that reads and writes memory itself (a network card's rings): where they
    are, and physically in *phys; 0 without memory. */
+/* The VGA's memory at A0000h-BFFFFh out of reach (1) or back (0): while the
+   desktop has the screen, a program that writes text there (straight to
+   B8000h, as DOS programs do) must not hit the card, whose window onto the
+   same memory may be anywhere in the picture. One spare frame stands in for
+   all 32 pages. In every address space: they share this page table. */
+void mm_vga_hide(int on)
+{
+    static u32 spare;
+    u32 i, f = irq_save();
+    if (on && !spare)
+        spare = pmm_take(&pmm);
+    for (i = 0xA0; i < 0xC0; i++) {
+        kpt_low[i] = (kpt_low[i] & 0xFFF) | (on && spare ? spare : i << 12);
+        invlpg(i << 12);
+    }
+    irq_restore(f);
+}
+
+/* The screen's framebuffer (kernel/gfx/display.c): `bytes` of a device's
+   memory at phys, at FB_BASE. One at a time: a new one replaces the last.
+   Cached as the machine has that memory (its chipset's or MTRRs' say). */
+void *mm_fb_map(u32 phys, u32 bytes)
+{
+    u32 n = ((phys & 0xFFF) + bytes + 0xFFF) >> 12, i, f;
+    if (!bytes || n > FB_MAX >> 12)
+        return 0;
+    f = irq_save();
+    for (i = 0; i < FB_MAX >> 12; i++) {
+        kpt_fb[i >> 10][i & 1023] = i < n ? ((phys & ~0xFFFu) + (i << 12)) | PTE_P | PTE_W : 0;
+        invlpg(FB_BASE + (i << 12));
+    }
+    irq_restore(f);
+    return (void *)(FB_BASE + (phys & 0xFFF));
+}
+
 void *dma_alloc(u32 n, u32 *phys)
 {
     u32 f = irq_save(), base = 0, i;
@@ -245,6 +281,8 @@ void mm_init(struct bootinfo *bi)
     kpd[HEAP_BASE >> 22] = kernel_phys(kpt_heap) | PTE_P | PTE_W;
     kpd[KMAP_BASE >> 22] = kernel_phys(kpt_kmap) | PTE_P | PTE_W;
     kpd[DMA_BASE >> 22] = kernel_phys(kpt_dma) | PTE_P | PTE_W;
+    for (i = 0; i < FB_MAX >> 22; i++)          /* (every address space copies these: before the first is made) */
+        kpd[(FB_BASE >> 22) + i] = kernel_phys(kpt_fb[i]) | PTE_P | PTE_W;
     kpd[1023] = kernel_phys(kpd) | PTE_P | PTE_W;
     write_cr3(mm_cr3());
 

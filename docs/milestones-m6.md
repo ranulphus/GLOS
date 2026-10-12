@@ -203,4 +203,18 @@ Each step is a commit with its tests. The gate (`make gate`) must still pass at 
   Not done here: CR0.NE=1 with a synthesised IRQ 13 (PRD §6.10). With NE clear the error interrupt arrives
   while its maker runs, which is all that routing it needs; NE=1 would change what sessions see for no gain
   yet.
-- C to H: to do.
+- **C. The display layer and the 2D library: done** (2026-10-12; design in [graphics.md](graphics.md)).
+  - `kernel/gfx/`: surfaces at 8, 16 and 32 bits; fills, frames, lines, copies, 1-bit and true-colour
+    pictures, UTF-8 text, regions; the palette every 8-bit surface has. Host test: 240,000 random drawing
+    calls against a one-pixel-at-a-time model, and they agreed at the first run.
+  - Fonts from TrueType files by `tools/mkfont.py` (`make fonts`; DejaVu at 11 pixels as stand-ins).
+  - `kernel/gfx/display.c`: a VBE mode with a linear framebuffer, found by its description, set through the
+    system VM; `[display] mode = WxHxBITS` in GLOS.CFG, `glos display on|card|off`; text mode for sessions and
+    the desktop back after them.
+  - `make loopa-display`: the test card at 640x480 in 8, 16 and 32 bits on the S3 Trio64V2 (Pentium II and
+    486DX2) and the G200, each screenshot equal to the host's rendering pixel for pixel; a session and an
+    app beside it; the desktop from GLOS.CFG (640x480x8, 800x600x16).
+  - Found on the way: the Matrox BIOS's teletype writes into a VBE mode's framebuffer, so an app's console
+    output drew on the desktop. While the desktop has the screen, programs' video BIOS calls are answered
+    by the kernel and the VGA's memory at A0000h is out of reach (graphics.md §2.3).
+- D to H: to do.

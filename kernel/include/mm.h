@@ -9,6 +9,8 @@ struct bootinfo;
 #define HEAP_BASE   0xC0400000u         /* kmalloc's region, grown a page at a time */
 #define HEAP_MAX    0x00400000u
 #define DMA_BASE    0xC0800000u         /* dma_alloc's region: 4 MB at most */
+#define FB_BASE     0xC0C00000u         /* mm_fb_map's region: the screen's framebuffer */
+#define FB_MAX      0x00800000u         /* 8 MB: 1280x1024 at 32 bits is 5 */
 #define RECURSIVE   0xFFC00000u         /* PDE 1023 maps the page directory itself */
 
 void mm_init(struct bootinfo *bi);
@@ -49,6 +51,8 @@ void *kmap(u32 phys);
 void kunmap(void *p);
 
 void *dma_alloc(u32 frames, u32 *phys); /* contiguous, zeroed, mapped for good: a device's own memory; 0 if none */
+void mm_vga_hide(int on);                /* A0000h-BFFFFh: a spare frame's (1), or the VGA's again (0) */
+void *mm_fb_map(u32 phys, u32 bytes);   /* a framebuffer's memory at FB_BASE (in place of the last); 0 if too big */
 
 void *kmalloc(size_t n);
 void kfree(void *p);
