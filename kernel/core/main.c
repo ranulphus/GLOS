@@ -112,6 +112,7 @@ void kmain(struct bootinfo *loader_bi)
         }
         if (bi->flags & BI_F_SELFTEST)
             selftest_start();
+        kprintf_defer();                        /* (log lines are written where interrupts may come: kprintf.c) */
         sched_idle();
     }
 

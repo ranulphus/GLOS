@@ -22,10 +22,31 @@
  *   APPTEST key                becomes an app and waits for a line from the
  *                              keyboard, in DOS
  *   APPTEST sleep SECONDS      becomes an app and sleeps
+ *   APPTEST uclock SECONDS     becomes an app and reads DJGPP's uclock() as
+ *                              fast as it can: it must never go back, and
+ *                              must have moved as far as GLOS's clock
+ *   APPTEST timer HZ SECONDS [SLACK]
+ *                              becomes an app, sets the timer to HZ and
+ *                              counts its interrupts in a handler of its
+ *                              own, while it sleeps (the API's, the BIOS's
+ *                              wait), halts and spins in turn: HZ a second,
+ *                              the counter always below what it set, and the
+ *                              BIOS's own tick (the system's) at 18.2. SLACK:
+ *                              the interrupts in a hundred that may be
+ *                              missing (3)
+ *   APPTEST drain              never asks: takes the keys that wait
+ *   APPTEST kb                 never asks: says whether a key waits (kbhit(),
+ *                              three times), for the keyboard's state as a
+ *                              program made an app without asking sees it
  *   APPTEST plain              never asks: an ordinary session
  * Without GLOS (CWSDPMI) every mode says APP-NOGLOS and ends with 2. */
 #include <dir.h>
 #include <dos.h>
+#include <dpmi.h>
+#include <go32.h>
+#include <pc.h>
+#include <sys/farptr.h>
+#include <time.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <io.h>
@@ -136,11 +157,105 @@ static int run(const char *name, int seconds)
     return fails ? 1 : 40 + name[0] - 'A';
 }
 
+static int uclk(int seconds)
+{
+    uclock_t u0, u, last;
+    unsigned t0, t, n = 0, back = 0, ms, ms2;
+
+    last = u0 = uclock();
+    t0 = glos_ticks();
+    while (glos_ticks() - t0 < (unsigned)seconds * 1000) {
+        u = uclock();
+        if (u < last)
+            back++;
+        last = u;
+        if (!(++n & 255))
+            glos_yield();
+    }
+    u = uclock();                               /* GLOS's clock between two readings: other apps may run anywhere */
+    t = glos_ticks() - t0;
+    ms = (unsigned)((u - u0) * 1000 / UCLOCKS_PER_SEC);
+    ms2 = (unsigned)((uclock() - u0) * 1000 / UCLOCKS_PER_SEC);
+    if (back || u < last || t + 60 < ms || t > ms2 + 60)       /* (60 ms: a BIOS tick, and the ms's rounding) */
+        fails++;
+    printf("%s ms=%u..%u clock=%u reads=%u back=%u\n", fails ? "APP-UCLOCK-FAIL" : "APP-UCLOCK-OK", ms, ms2, t, n, back);
+    return fails ? 1 : 0;
+}
+
+static volatile unsigned tics;
+
+static void tick(void)
+{
+    tics++;
+    outportb(0x20, 0x20);
+}
+
+/* slack: how many of a hundred interrupts may be missing. */
+static int timer(int hz, int seconds, int slack)
+{
+    _go32_dpmi_seginfo old, mine;
+    unsigned count = 1193182 / hz, t0, t, n, c, want, phase = 0, over = 0, bios, bwant, s0;
+
+    _go32_dpmi_get_protected_mode_interrupt_vector(8, &old);
+    mine.pm_offset = (unsigned long)tick;
+    mine.pm_selector = _go32_my_cs();
+    _go32_dpmi_allocate_iret_wrapper(&mine);
+    _go32_dpmi_set_protected_mode_interrupt_vector(8, &mine);
+    outportb(0x43, 0x34);
+    outportb(0x40, count & 0xFF);
+    outportb(0x40, count >> 8);
+    bios = _farpeekl(_dos_ds, 0x46C);
+    t0 = glos_ticks();
+    tics = 0;
+    while ((t = glos_ticks() - t0) < (unsigned)seconds * 1000) {
+        switch (phase++ % 4) {
+        case 0: glos_sleep(30); break;
+        case 1: delay(30); break;
+        case 2: __asm__ __volatile__("hlt"); break;
+        default: for (s0 = glos_ticks(); glos_ticks() - s0 < 5;) ;     /* busy, for 5 ms */
+        }
+        outportb(0x43, 0x00);
+        c = inportb(0x40);
+        c |= inportb(0x40) << 8;
+        if (c > count)
+            over++;
+    }
+    n = tics;
+    t = glos_ticks() - t0;
+    bios = _farpeekl(_dos_ds, 0x46C) - bios;
+    outportb(0x43, 0x34);
+    outportb(0x40, 0xFF);
+    outportb(0x40, 0xFF);
+    _go32_dpmi_set_protected_mode_interrupt_vector(8, &old);
+    _go32_dpmi_free_iret_wrapper(&mine);
+    want = (unsigned)hz * t / 1000;
+    bwant = t * 182 / 10000;
+    if (n + want * slack / 100 + 2 < want || n > want + want / 33 + 2 || over || bios + 3 < bwant || bios > bwant + 3)
+        fails++;
+    printf("%s hz=%d ms=%u tics=%u want=%u over=%u bios=%u of %u turns=%u\n", fails ? "APP-TIMER-FAIL" : "APP-TIMER-OK",
+           hz, t, n, want, over, bios, bwant, phase);
+    return fails ? 1 : 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *mode = argc > 1 ? argv[1] : "";
     volatile unsigned n = 0;
 
+    if (!strcmp(mode, "drain")) {               /* keys left in the BIOS's buffer (the boot's) out of it */
+        int n = 0;
+        while (kbhit()) {
+            getkey();
+            n++;
+        }
+        printf("APP-DRAIN %d\n", n);
+        return 0;
+    }
+    if (!strcmp(mode, "kb")) {
+        int a = kbhit(), b = kbhit(), c = kbhit();
+        printf("APP-KB %d %d %d head=%04x tail=%04x\n", a, b, c, _farpeekw(_dos_ds, 0x41A), _farpeekw(_dos_ds, 0x41C));
+        return 0;
+    }
     if (!strcmp(mode, "plain")) {
         printf("APP-PLAIN version=%x\n", glos_version());
         return 7;
@@ -185,6 +300,10 @@ int main(int argc, char **argv)
         printf("APP-CHILD-BACK r=%d ticks=%u\n", r, glos_ticks() != 0);
         return r;
     }
+    if (!strcmp(mode, "uclock") && argc > 2)
+        return uclk(atoi(argv[2]));
+    if (!strcmp(mode, "timer") && argc > 3)
+        return timer(atoi(argv[2]), atoi(argv[3]), argc > 4 ? atoi(argv[4]) : 3);
     if (!strcmp(mode, "key")) {
         char line[40];
         printf("APP-KEY id=%u\n", glos_id());
@@ -198,6 +317,7 @@ int main(int argc, char **argv)
         printf("APP-SLEPT\n");
         return 0;
     }
-    printf("usage: APPTEST run NAME SECONDS | spin | crash | exit N | twice | child PROGRAM | plain\n");
+    printf("usage: APPTEST run NAME SECONDS | spin | crash | exit N | twice | child PROGRAM | key | sleep SECONDS |"
+           " uclock SECONDS | timer HZ SECONDS | plain\n");
     return 2;
 }

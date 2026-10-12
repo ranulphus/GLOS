@@ -300,6 +300,15 @@ void vm_kmask(int irq, int masked)
 static void vm_irq_line(struct trapframe *tf)
 {
     int irq = (int)(tf->vec - IRQ_BASE_MASTER);
+    if (irq == 13 && app_cur()) {               /* an FPU error in an app's code: the app's own (app/dev.c) */
+        app_fpu_irq(app_cur());
+        return;
+    }
+    if (irq == 0) {
+        timer_pit_irq(!session_active() && !app_vm_psp());      /* (the kernel's tick is checked against it,
+                                                   core/timer.c: when no program has the timer's ports) */
+        app_irq0();                             /* (apps whose timer is the PC's count it too) */
+    }
     vm.phys_mask |= (u16)(1u << irq);
     pic_set_mask(vm.phys_mask);
     vpic_raise_hw(&vm.pic, irq);
@@ -480,6 +489,7 @@ static void int2f_unhook(void);
 static void vm_leave(u32 code) __attribute__((noreturn));
 static void vm_leave(u32 code)
 {
+    kprintf_direct();                           /* (no more traps to write the log from) */
     int2f_unhook();
     vkbc_leave();
     vdev_leave();

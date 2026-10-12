@@ -1,7 +1,9 @@
 /* The GLOS API's entry (PRD §5.6, §10; include/glos/api.h): the far
  * procedure DPMI 0A00h "GLOS" gives a program, a HLT in the host's
  * trampoline page. The function is in EAX; its results go into the frame,
- * and the host's far return follows (kernel/dpmi/host.c). */
+ * and the host's far return follows (kernel/dpmi/host.c). 1: the program
+ * becomes an app. 2: the call is to be made again from the same HLT, when a
+ * handler of the app's has run (a sleep an interrupt of its own cut short). */
 #define GLOS_KERNEL
 #include "glos/api.h"
 #include "app.h"
@@ -21,7 +23,7 @@ int glos_api(struct trapframe *tf)
 {
     static const char *const why[] = { "?", "already", "nested", "16-bit", "parent", "exclusive", "memory" };
     struct app *a = app_cur();
-    u32 fn = tf->eax, id, ms;
+    u32 fn = tf->eax, id, ms, left;
     int r;
 
     tf->eflags &= ~FL_CF;
@@ -54,7 +56,11 @@ int glos_api(struct trapframe *tf)
         break;
     case GLOS_FN_SLEEP:
         ms = tf->ebx > 0x03FFFFFFu ? 0x03FFFFFFu : tf->ebx;     /* (18 hours: the sum below in 32 bits) */
-        app_sleep(a, ms + (ms * 24 + 999) / 1000);              /* 1024 ticks to the second */
+        left = app_sleep(a, ms + (ms * 24 + 999) / 1000);       /* 1024 ticks to the second */
+        if (left) {                             /* an interrupt of its own is due: its handler runs, and the call */
+            tf->ebx = (left * 125 + 127) >> 7;  /* is made again, for the rest */
+            return 2;
+        }
         tf->eax = 0;
         break;
     case GLOS_FN_TICKS:

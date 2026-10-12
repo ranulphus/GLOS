@@ -68,28 +68,48 @@ Desktop golden images match at 8, 16 and 32 bpp on the generic VBE card and on a
   the VM thread make one last call, INT 21h 4Ch as the program. An end inside a call the VM thread is making
   (in a callback, in real mode, DOS's own abort) ends that call. Either way DOS has ended the process when
   the VM thread sees the terminate address; the exit code is INT 21h 4Dh's.
-- **Paused by sessions.** While a session runs (a DOS command, a program that has yet to become an app, an
-  app's child program) every app stops at its next trap (PRD §6.9), and calls into the VM wait for the stub
-  anyway. A session's end wakes them.
+- **Paused by sessions.** While a session has the machine every app stops at its next trap (PRD §6.9), and
+  a session's end wakes them. A program that says it is an app is no such session while it starts (step B):
+  its file is marked ("GLOSAPP1" in its MZ header's padding: `tools/glosmark.py`, run by the build on
+  programs made with libglos), or it was started with `glos run --app`; the others run on beside it (their
+  calls into the VM wait for the stub either way).
 - **Callbacks' addresses** are ARPLs in the stub, the same in every context, so each belongs to one context
   at a time (there are 32 now, for all of them together): a call that arrives while another context is the
   VM's returns at once.
 - **The agent.** A job whose program becomes an app stays that app's: its output (while the VM thread makes
   its DOS calls), its exit code, its kill (`glos kill SEQ`, its client going away). The stub is free, and
   the next job runs. `glos ps` and `glos stat` list apps; `glos exit` ends them first.
-- **The scheduler.** Apps share the normal class with the VM thread, in 20-tick turns. A thread woken from
-  a wait with some of its turn left goes ahead of the queue (an app back from a DOS call doesn't wait out a
-  busy app's turn, and can't starve it: its own turn runs out too); the VM thread goes ahead whenever it is
-  woken, for an interrupt DOS or the BIOS must not wait a round of apps for.
+- **The scheduler.** Apps share the normal class with the VM thread by running time: the ready thread that
+  has run least goes next, and a woken one that has run less than the running one takes the CPU from it. An
+  app back from a DOS call, or with a timer interrupt to take, so runs at once beside busy apps, and busy
+  ones share what is left. The VM thread goes first whenever it is woken, for an interrupt DOS or the BIOS
+  must not wait a round of apps for.
 - **The FPU** is saved and loaded at the switch between threads that run user-mode code (not lazily: two
   instructions a switch, and no CR0.TS beside the clients' own MP and EM). An app begins with its program's
   state as it was at `glos_init`.
-- **Devices.** An app reaches no port: every IN and OUT traps. Step B gives it a timer and a PIC of its own;
-  until then reads give FFh. INT 15h 86h (the BIOS wait, DJGPP's `delay`) is a sleep on its own thread.
+- **Devices (step B, `kernel/app/dev.c`).** An app reaches no port: every IN and OUT traps, and is answered
+  from devices of its own.
+  - **A PIC pair**, as the system VM has one. Line 0 is its timer's, line 13 the FPU's: an FPU error
+    interrupts while the code that made it runs (CR0.NE stays clear), so one in an app's code is the app's.
+  - **A timer** (PIT channel 0). While its count is what GLOS keeps the real timer at (FFFFh, DJGPP's
+    `uclock()` setting; or 0), reads are the real counter's and its IRQ 0 comes with the real one: coherent
+    with the BIOS tick at 0040:006C, which is the system's and which apps read from memory. Programmed
+    otherwise, count and interrupts run off the kernel's tick: right on average at any rate up to 1024 Hz.
+  - Its interrupts go to the handlers it hooked in protected mode, at a return to its code with its virtual
+    interrupt flag on. One with no handler is ended as the BIOS would end it (the timer's goes on to its
+    INT 1Ch handler); real mode's handlers are the system VM's, and never run for an app's interrupt.
+  - A wait in the kernel (the API's sleep, INT 15h 86h, HLT) ends early for an interrupt of the app's: its
+    handler runs, then the call is made again for the time left.
+- **Without asking.** `glos run --app PROGRAM` makes an app of a 32-bit DPMI program that never calls the
+  API, at its first protected-mode instruction: DJGPP 2.05's own TIMER, UCLOCK and SIGNALS tests run so,
+  unchanged.
 - **Not yet:** an app's raw mode switch (0306h) ends it with a crash report (DJGPP has no use for it); an app
-  waiting for a key in DOS or the BIOS holds the system VM until step E gives it its own keyboard; FPU errors
-  still arrive the PC's way, at whoever runs then (step B); a real-mode child of an app can't be killed on
-  its own, as a session client's child can't.
+  waiting for a key in DOS or the BIOS holds the system VM until step E gives it its own keyboard; a
+  real-mode child of an app can't be killed on its own, as a session client's child can't; an app's handler
+  for INT 8 that passes the interrupt on doesn't reach its own INT 1Ch handler; while the kernel writes a
+  line of its log to COM1 (9 ms for a hundred characters) only urgent threads run, so an app's timer faster
+  than about 100 Hz loses an interrupt for each line written meanwhile (lines come with events, a program's
+  start or end, not with time).
 
 ## Plan (2026-10-11)
 
@@ -158,4 +178,29 @@ Each step is a commit with its tests. The gate (`make gate`) must still pass at 
     seconds. The stub's NEXT, where nothing is in DOS, now clears it (`GLOS-VM indos=reset`).
   Limits, as built: four agent jobs at once (an app keeps its job's slot while it runs); one current
   directory an app (the current drive's).
-- B to H: to do.
+- **B. An app's timer: done** (2026-10-12), with what it showed up in the kernel's own timekeeping.
+  `make loopa-apps`, now 33 apps a run: `uclock()` never goes back and keeps time with GLOS's clock; a timer
+  set to 100 Hz with a handler of the app's own counts 100 a second through the API's sleep, the BIOS's
+  wait, HLT and a busy loop in turn, the BIOS's tick still the system's 18.2; two of each at once (100 and
+  250 Hz); DJGPP 2.05's TIMER, UCLOCK and SIGNALS (FPU errors as signals, 70 to 230 of them a run) as apps
+  without asking.
+  Found on the way, none of it in the app code:
+  - every session's end set the BIOS clock from the RTC, to the middle of its second: a step of up to half
+    a second either way, at every program start once apps run beside. DJGPP's `uclock()` takes a step back
+    for midnight. The clock is now left alone when it is right to the tick (supervisor.md §11.1), and the PIT
+    is no longer set again at a session's end unless the program moved it (that cost the BIOS clock up to a
+    tick each time);
+  - apps were woken before the session's end had done its BIOS calls, and paused for the whole start of
+    every program, half a second of nothing on the 486 each time another app started. A program marked as
+    an app (`tools/glosmark.py`) no longer pauses the others while it starts;
+  - the kernel's log cost its own clock: a line written to COM1 with interrupts off loses eight 1024 Hz
+    ticks for every hundred characters, 110 ms in 4 s while four apps started on the 486. Lines now wait in
+    a ring and are written with interrupts on at the way out of traps and in the idle loop
+    (`kprintf_pump`), and the tick count is checked against the PC timer's interrupts while that is GLOS's
+    own (`timer_pit_irq`, supervisor.md §8.1);
+  - the normal class's round-robin lost a quarter of a 100 Hz timer's interrupts in an app beside two busy
+    ones on the 486: it is shared by running time now (supervisor.md §7).
+  Not done here: CR0.NE=1 with a synthesised IRQ 13 (PRD §6.10). With NE clear the error interrupt arrives
+  while its maker runs, which is all that routing it needs; NE=1 would change what sessions see for no gain
+  yet.
+- C to H: to do.

@@ -10,7 +10,8 @@ struct trapframe;
 /* The ssh thread's side. owner is its channel. */
 void agent_init(void (*kick_ssh)(void));       /* kick_ssh: output or an end is waiting */
 int agent_post(void *owner, const char *cmd);   /* 0, or -1 when every job slot is taken */
-int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, const char *profile);      /* glos run's */
+int agent_post_run(void *owner, const char *cmd, int direct, int how, const char *profile);    /* glos run's
+                                                   (how: 0, 1 --exclusive, 2 --app) */
 void agent_drop(void *owner);                   /* the channel has gone */
 void agent_service(u32 (*write)(void *owner, int stream, const u8 *d, u32 n),
                    void (*done)(void *owner, u32 code));       /* code: the exit status */

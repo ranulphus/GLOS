@@ -9,6 +9,7 @@
  * drives the virtual RTC's flags, the 8042's queue, INT 15h's waits and the
  * vif-stuck watchdog. */
 #include "agent.h"
+#include "app.h"
 #include "io.h"
 #include "gdbprog.h"
 #include "kprintf.h"
@@ -29,6 +30,8 @@ static int com1_hold(void) { return com1_mid; }
 static void com1_out(u8 v)
 {
     if (!(inb(0x3FB) & 0x80)) {                 /* not the divisor latch: a character */
+        if (!com1_mid)
+            kprintf_flush(1);                   /* the kernel's lines made before this one go before it */
         if (!com1_mid && v != '\n')
             com1_since = timer_ticks();
         com1_mid = v != '\n';
@@ -295,6 +298,7 @@ void vdev_tick(struct trapframe *tf, u8 c)
     vkbc_tick();
     vm_int15_tick(now);
     agent_vm_tick(now);
+    app_tick();
     if (vm.waiting && ((vm.wait_deadline && (s32)(now - vm.wait_deadline) >= 0) || vm_work_due()))
         vm_kick();
     if (com1_mid && now - com1_since > 100) {   /* a line that never ends: write ours anyway */

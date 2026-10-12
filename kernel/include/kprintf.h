@@ -15,6 +15,8 @@ void kvprintf(const char *fmt, __builtin_va_list ap);
 extern int (*kprintf_hold)(void);       /* 1 while a program's COM1 line is unfinished (vm/vdev.c) */
 void kprintf_flush(int force);
 void kprintf_direct(void);              /* a panic: no more holding */
+void kprintf_defer(void);               /* the threads run: lines wait in a ring for kprintf_pump() */
+int kprintf_pump(u32 max);              /* up to max waiting characters to COM1, interrupts on meanwhile; 1 if any */
 int kvsnprintf(char *buf, size_t n, const char *fmt, __builtin_va_list ap);
 void klog_put(const char *s, u32 n);    /* into the COM1 mirror (glos log), interrupts off */
 u32 klog_read(char *out, u32 max);      /* its last max bytes or fewer, from a line start */

@@ -43,14 +43,21 @@
  * the stub anyway.
  *
  * An app reaches no port (the TSS's I/O map is out of reach while its
- * thread runs): step B gives it a timer and a PIC of its own; until then
- * reads give FFh. */
+ * thread runs): dev.c answers, with a timer and a PIC of the app's own. Its
+ * interrupts are raised there and given to its protected-mode handlers
+ * here, at a return to its code with its virtual interrupt flag on; a wait
+ * in the kernel for it (its sleep, the BIOS's wait) ends early for one, and
+ * the call is made again when the handler has returned.
+ *
+ * glos run --app makes an app of a program that never asks: at its first
+ * return to its own protected-mode code where init would be allowed. */
 #include <string.h>
 
 #include "glos/api.h"
 #include "glos/bootinfo.h"
 #include "agent.h"
 #include "app.h"
+#include "appint.h"
 #include "dpmi.h"
 #include "io.h"
 #include "kprintf.h"
@@ -58,51 +65,6 @@
 #include "session.h"
 #include "timer.h"
 #include "vm.h"
-
-#define MAX_APPS 16
-#define SPARE    160u                           /* the spare parent frame: this far below the kill stack's top */
-
-enum { AC_NONE, AC_RM, AC_END };
-
-struct cwd {
-    u8 known, drive;
-    char dir[66];                               /* as INT 21h 47h gives it: no drive, no first backslash */
-};
-
-struct app {
-    struct app *next;                           /* every app */
-    struct app *qnext;                          /* those waiting for the VM thread */
-    u32 id;
-    char tname[8];                              /* its thread's name: app<id> */
-    char prog[13];
-    struct dpmi_ctx *ctx;                       /* 0 once it has ended */
-    struct thread *thread;
-    struct trapframe start;                     /* where its thread begins: the return of its init call */
-    void *job;                                  /* the agent's job it began as, or 0 */
-    u16 psp;
-    u32 dta;
-    struct cwd cwd;
-    u32 ivt[256];                               /* the real-mode vectors it changed ... */
-    u8 ivt_mine[32];                            /* ... a bit for each */
-    volatile u8 kill;
-    u8 adopted;                                 /* the VM thread is making a call for it */
-    u8 dead;                                    /* DOS has ended its process */
-    u8 call;                                    /* AC_: what it waits for the VM thread with */
-    struct {
-        struct trapframe *from;
-        struct rmregs *r;
-        int kind;
-        u8 vec;
-        const u16 *words;
-        u32 nwords;
-    } c;
-    int result;
-    u8 child_have;                              /* a program it ran has ended: INT 21h 4Dh's answer is kept for it */
-    u16 child;                                  /* (DOS has one for everybody, and another app may end first) */
-    u32 code;                                   /* its exit code; then INT 21h 4Dh's AX */
-    struct waitq wq;                            /* its thread: for the call, in a sleep */
-    u32 t0, ncalls;
-};
 
 static struct app *apps, *pending;
 static struct app *callq, *callq_tail;
@@ -268,6 +230,7 @@ void app_detach(struct trapframe *tf)
     sys_cwd = a->cwd = dos_has;
     a->job = agent_vm_job();
     a->t0 = timer_ticks();
+    appdev_init(a);
     a->next = apps;
     apps = a;
     napps++;
@@ -330,6 +293,20 @@ int app_rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, cons
     struct app *a = app_cur();
     if (!a)
         return -1;                              /* (a kernel thread: only the VM's and apps' make them) */
+    if (vec == 0x15 && kind != RM_FAR && ((r->eax >> 8) & 0xFF) == 0x86) {
+        /* The BIOS's wait (DJGPP's delay()): a sleep on its own thread, not the system VM held for as long. An
+           interrupt of its own ends it early: the handler runs, and the INT is made again for what is left. */
+        u32 us = (r->ecx & 0xFFFF) << 16 | (r->edx & 0xFFFF), left;
+        left = app_sleep(a, us / 977 + 1);
+        if (left && from && (from->cs & 0xFFFF) != SEL_TRAMP) {
+            us = left * 977;
+            r->ecx = (r->ecx & ~0xFFFFu) | us >> 16;
+            r->edx = (r->edx & ~0xFFFFu) | (us & 0xFFFF);
+            from->eip -= 2;                     /* (INT 31h or INT 15h: two bytes either way) */
+        }
+        r->flags &= (u16)~FL_CF;
+        return 0;
+    }
     if (vec == 0x21 && kind != RM_FAR && ((r->eax >> 8) & 0xFF) == 0x4D && a->child_have) {
         a->child_have = 0;                      /* how its child ended: asked of DOS when the child did */
         r->eax = (r->eax & ~0xFFFFu) | a->child;
@@ -353,41 +330,96 @@ void app_end(struct app *a, u32 code)
     panic("app-end", NULL);
 }
 
+/* Apps wait: a session has the machine (session.c), or an app's own child
+   program does. */
+static int paused(void) { return exclusive || session_pauses(); }
+
 void app_return(struct app *a, struct trapframe *tf)
 {
     for (;;) {
         if (a->kill)
             dpmi_end(tf, 0xFF, 1);              /* (doesn't come back) */
-        if (!session_active() && !exclusive)
-            return;
+        if (!paused())
+            break;
         thread_block(&pauseq);                  /* a session has the machine */
+    }
+    while (current->vif && vpic_pending(&a->pic)) {     /* its own interrupts: to its handlers */
+        int vec = vpic_ack(&a->pic);
+        if (vec < 0)
+            break;
+        if (dpmi_irq(tf, (u8)vec))
+            break;                              /* (its virtual IF is off until the handler returns) */
+        app_irq_default(a, (u8)vec);            /* nobody's: ended, as the BIOS would */
+        if (vec == 0x08 && dpmi_irq(tf, 0x1C))  /* ... and the timer's goes on to INT 1Ch, as the BIOS's does */
+            break;
     }
 }
 
-void app_sleep(struct app *a, u32 ticks)
+/* An interrupt of its own that could be given to it now. */
+static int irq_due(const struct app *a) { return current->vif && vpic_pending(&a->pic); }
+
+/* Sleeps `ticks`, or until an interrupt of its own is due or it is killed:
+   the ticks left then (0: slept them all). */
+u32 app_sleep(struct app *a, u32 ticks)
 {
     u32 until = timer_ticks() + ticks;
+    s32 left;
     if (!until)
         until = 1;
-    while (!a->kill && (s32)(until - timer_ticks()) > 0)
+    while ((left = (s32)(until - timer_ticks())) > 0 && !a->kill && !irq_due(a))
         thread_wait(&a->wq, until);
+    return left > 0 ? (u32)left : 0;
 }
 
-void app_idle(struct app *a) { app_sleep(a, 1); }      /* (step B: until an interrupt of its own) */
-
-u32 app_in(struct app *a, u16 port, int width)
+/* Its HLT: until an interrupt of its own. */
+void app_idle(struct app *a)
 {
-    (void)a;
-    (void)port;
-    return width == 1 ? 0xFF : width == 2 ? 0xFFFF : 0xFFFFFFFFu;
+    while (!a->kill && !vpic_pending(&a->pic))
+        thread_block(&a->wq);
 }
 
-void app_out(struct app *a, u16 port, u32 val, int width)
+/* Every kernel tick, and every interrupt of the PC's timer (interrupts
+   off): the apps' own timers. Not while a session has the machine: their
+   time stands still with them. */
+void app_tick(void)
 {
-    (void)a;
-    (void)port;
-    (void)val;
-    (void)width;
+    struct app *a;
+    if (!apps || paused())
+        return;
+    for (a = apps; a; a = a->next)
+        if (a->ctx)
+            appdev_tick(a);
+}
+
+void app_irq0(void)
+{
+    struct app *a;
+    appdev_irq0_at(timer_ticks());
+    if (!apps || paused())
+        return;
+    for (a = apps; a; a = a->next)
+        if (a->ctx)
+            appdev_irq0(a);
+}
+
+/* glos run --app: the session's program becomes an app without asking, at a
+   return to its protected-mode code (the VM thread). 1: it has, and the
+   frame is the stub's now. */
+int app_force(struct trapframe *tf)
+{
+    u32 id;
+    int r;
+    if (!session_app() || !dctx || dctx->app || dctx->no_app)
+        return 0;
+    if ((r = app_init(tf, &id)) == GLOS_INIT_NESTED)
+        return 0;                               /* not here: at a later return */
+    if (r) {
+        dctx->no_app = 1;
+        kprintf("GLOS-APP refuse psp=%04x why=%u forced=1\n", dctx->psp, (u32)r);
+        return 0;
+    }
+    app_detach(tf);
+    return 1;
 }
 
 u32 app_ivt_get(u8 n)
@@ -542,8 +574,9 @@ static void serve(struct app *a)
         r.eax = 0x4D00;
         a->code = dos21(&r) == 0 ? r.eax & 0xFFFF : 0xFF;
         last_code = a->code;
-        kprintf("GLOS-APP end id=%u prog=%s code=%u how=%u calls=%u ticks=%u t=%u\n", a->id, a->prog, a->code & 0xFF,
-                a->code >> 8, a->ncalls, a->thread->ticks, timer_ticks() - a->t0);
+        kprintf("GLOS-APP end id=%u prog=%s code=%u how=%u calls=%u ticks=%u t=%u irq0=%u irq13=%u\n", a->id, a->prog,
+                a->code & 0xFF, a->code >> 8, a->ncalls, a->thread->ticks, timer_ticks() - a->t0, a->nirq[0],
+                a->nirq[13]);
         if (a->job)
             agent_app_done(a->job, a->code);
     }
@@ -628,9 +661,9 @@ u32 app_ps(char *buf, u32 max)
     const struct app *a;
     u32 n = 0, f = irq_save();
     for (a = apps; a && n < max; a = a->next)
-        n += (u32)ksnprintf(buf + n, max - n, "app %u %s %s psp=%04x thread=%s held_kb=%u calls=%u ticks=%u\n", a->id,
-                            a->prog, state_of(a), a->psp, a->tname, a->ctx ? a->ctx->frames * 4 : 0, a->ncalls,
-                            a->thread->ticks);
+        n += (u32)ksnprintf(buf + n, max - n, "app %u %s %s psp=%04x thread=%s held_kb=%u calls=%u ticks=%u irq0=%u\n",
+                            a->id, a->prog, state_of(a), a->psp, a->tname, a->ctx ? a->ctx->frames * 4 : 0, a->ncalls,
+                            a->thread->ticks, a->nirq[0]);
     irq_restore(f);
     return n < max ? n : max;
 }
@@ -642,8 +675,9 @@ u32 app_stat(char *buf, u32 max)
     n += (u32)ksnprintf(buf + n, max - n, "[");
     for (a = apps; a && n < max; a = a->next)
         n += (u32)ksnprintf(buf + n, max - n, "%s{\"id\":%u,\"program\":\"%s\",\"state\":\"%s\",\"psp\":%u,"
-                            "\"held_kb\":%u,\"calls\":%u,\"ticks\":%u}", a == apps ? "" : ",", a->id, a->prog,
-                            state_of(a), a->psp, a->ctx ? a->ctx->frames * 4 : 0, a->ncalls, a->thread->ticks);
+                            "\"held_kb\":%u,\"calls\":%u,\"ticks\":%u,\"irq0\":%u,\"irq13\":%u}", a == apps ? "" : ",",
+                            a->id, a->prog, state_of(a), a->psp, a->ctx ? a->ctx->frames * 4 : 0, a->ncalls,
+                            a->thread->ticks, a->nirq[0], a->nirq[13]);
     irq_restore(f);
     n += (u32)ksnprintf(buf + n, max > n ? max - n : 0, "]");
     return n < max ? n : max;

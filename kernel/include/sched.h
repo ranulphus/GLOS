@@ -42,8 +42,9 @@ struct thread {
     u32 esp0;                           /* where a trap from user mode builds its frame (TSS.ESP0) */
     u8 user;                            /* TU_: it runs user-mode code */
     u8 vif;                             /* ... whose virtual interrupt flag this is (EFLAGS.VIF in V86 mode with VME) */
-    u8 front;                           /* woken, it always goes ahead of its class's queue (the VM thread) */
-    u8 ahead;                           /* in a run queue: it went ahead when woken */
+    u8 front;                           /* woken, it goes first in its class, whatever it has run (the VM thread) */
+    u8 ahead;                           /* in a run queue: it goes first */
+    u32 vrun;                           /* the normal class: ticks it has run, from the class's floor when it began */
     void *ctx;                          /* ... in this DPMI context (struct dpmi_ctx), or 0 */
     u8 *fpu;                            /* ... and its FPU state (FNSAVE's 108 bytes) while it isn't in the FPU */
 };
@@ -70,7 +71,9 @@ void schedule(void);
 void thread_block(struct waitq *q);     /* until thread_wake(q) */
 int thread_wake(struct waitq *q);       /* every waiter; 1 if any */
 void sched_resched(void);               /* switch at the next safe point */
-void sched_front(struct thread *t);     /* a ready thread to the head of its queue, and the CPU to it soon */
+void sched_front(struct thread *t);     /* a ready thread goes first in its class, and gets the CPU soon */
+int sched_urgent_turn(void);            /* urgent threads run now, then the caller goes on before anyone else */
+void sched_nudge(struct thread *t);     /* something came for it: the CPU now, if it has run less than the running one */
 
 /* With interrupts on or off; they come back as they were. */
 void thread_sleep_until(u32 tick);

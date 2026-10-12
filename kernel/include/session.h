@@ -12,9 +12,14 @@ int session_active(void);
 const char *session_prog(void);                 /* the session's program's file name */
 const u32 *session_ivt(void);                   /* the real-mode vectors as the session found them */
 int session_exclusive(void);                    /* glos run --exclusive: it stays a session (app.c) */
+int session_app(void);                          /* glos run --app: its program is to be an app without asking */
+void session_video(void);                       /* the program in front set a video mode */
+int session_pauses(void);                       /* GLOS apps wait for it (not for a program marked as an app, while
+                                                   it starts; its end's work) */
 u32 session_memory_kb(void);                    /* the session's profile's memory cap, 0 none */
 int session_direct(void);                       /* direct mode: its profile, glos run --direct or /DIRECT */
-void session_job(int direct, int exclusive, const char *profile);      /* glos run's options for the stub's next EXEC */
+void session_job(int direct, int how, const char *profile);     /* glos run's options for the stub's next EXEC
+                                                   (how: 0, 1 --exclusive, 2 --app) */
 int session_profile_known(const char *name);    /* GLOS.CFG has [program NAME] */
 u32 session_stat(char *buf, u32 max);           /* glos stat: the session as a JSON object, or null */
 #endif

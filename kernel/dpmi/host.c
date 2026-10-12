@@ -514,9 +514,9 @@ static void host_int(struct trapframe *tf, u8 n)
         int31(tf);
     } else if (n == 0x21 && (ax >> 8) == 0x4C) {
         dpmi_end(tf, (u8)ax, 0);
-    } else if (n == 0x15 && (ax >> 8) == 0x86 && app_cur()) {
-        app_sleep(app_cur(), (((tf->ecx & 0xFFFF) << 16 | (tf->edx & 0xFFFF)) + 976) / 977);   /* (the BIOS's wait */
-        tf->eflags &= ~FL_CF;                   /* would hold the system VM for as long) */
+    } else if (app_cur() && app_irq_default(app_cur(), n)) {
+        /* an app's own interrupt, passed on by its handler (or INT 08h-0Fh, 70h-77h): the BIOS's part, on its
+           own PIC, and never real mode's handler (app/dev.c) */
     } else if (n == 0x21 && dosx_int21(tf)) {
         /* a 16-bit client's call, translated (dosx.c) */
     } else if (n == 0x41) {
@@ -592,10 +592,14 @@ static void trampoline(struct trapframe *tf, u32 off)
         retf(tf);
         return;
     case TR_VENDOR:                             /* the GLOS API (kernel/app/api.c) */
-        if (glos_api(tf)) {                     /* the program becomes an app: on in a thread of its own, */
+        switch (glos_api(tf)) {
+        case 1:                                 /* the program becomes an app: on in a thread of its own, */
             retf(tf);                           /* from its call's return; this one back to the stub */
             app_detach(tf);
-        } else {
+            break;
+        case 2:                                 /* an interrupt of the app's is due: its handler first, */
+            break;                              /* then this call again, from the same instruction */
+        default:
             retf(tf);
         }
         return;
@@ -727,6 +731,10 @@ void dpmi_return(struct trapframe *tf)
         if (vm.kill_req && !vm_work_running()) {
             dpmi_end(tf, 0xFF, 1);
             vm_return(tf);
+            return;
+        }
+        if (!(tf->eflags & FL_VM) && app_force(tf)) {   /* glos run --app: on as an app, this thread at */
+            vm_return(tf);                      /* the stub */
             return;
         }
         if (!(tf->eflags & FL_VM)) {

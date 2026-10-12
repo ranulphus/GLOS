@@ -333,15 +333,22 @@ along, and once the client had ended and its LDT was gone, that thread's next tr
   app reaches no port) and swaps the FPU's state (FNSAVE, FRSTOR, §14.7). A kernel thread runs on with
   whatever was loaded, and must not look at `dctx`: code on another thread that needs a context's memory
   loads it for the copy (glos gdb's reads and writes).
-- **Turns.** A turn is 20 ticks of running, however often the thread waits meanwhile. A thread woken with
-  some of its turn left goes ahead of its class's queue and takes the CPU from a thread of its class; one
-  that loses the CPU that way keeps the rest of its turn, and goes on after those that went ahead. So an app
-  back from a DOS call doesn't wait out a busy app's turn (measured in the apps suite: a DOS call beside a
-  busy-looping app took 10 ms on average before this, the wait for half a turn), and can't starve the busy
-  one either: its own turn runs out. `thread_yield()` gives the rest of the turn up.
-- **The VM thread goes ahead whenever it is woken** (`thread.front`), and to the head of the queue when an
-  IRQ is raised for it while it is ready (`vm_kick`, `sched_front`): it wakes for an interrupt DOS or the
-  BIOS must not wait a round of busy apps for (the BIOS's tick is 55 ms; three busy apps' turns are 60).
+- **The normal class is shared by running time** (step B; the VM thread and apps). Each thread counts the
+  ticks it has run (`thread.vrun`); the ready one that has run least goes next, for 20 ticks at most before
+  the choice is made again, and a thread woken having run less than the running one (by 2 ticks) takes the
+  CPU from it. A thread that mostly waits so runs at once beside busy ones: an app back from a DOS call, or
+  one whose timer interrupt is due (`sched_nudge`). Busy threads share what is left equally. A thread that
+  wakes after a long wait starts no more than 10 ticks behind the class's floor (`min_vrun`, the running time
+  of the last thread chosen, which only grows), and a new one starts at the floor. `thread_yield()` puts the
+  thread behind every ready one of its class.
+  - Before this the class was a round-robin of 20-tick turns. Beside one busy-looping app every DOS call of
+    another waited out the busy one's turn (10 ms on average, measured in the apps suite); keeping a turn
+    across waits cured that, but a thread that had used its turn up still waited a whole round, and a 100 Hz
+    timer in an app beside two busy ones lost a quarter of its interrupts on the 486.
+- **The VM thread goes first whenever it is woken** (`thread.front`), whatever it has run, and when an IRQ is
+  raised for it while it is ready (`vm_kick`, `sched_front`): it wakes for an interrupt DOS or the BIOS must
+  not wait a round of busy apps for (the BIOS's tick is 55 ms; three busy apps' turns are 60). Running on
+  after that, it is chosen like any other.
 
 ## 8. Time and PIT ownership [fixed]
 
@@ -353,18 +360,51 @@ along, and once the client had ended and its LDT was gone, that thread's next tr
   MC146818 stops [86Box nvr_at.c]. A counter of spurious IRQ8s is kept.
 - On CPUs with a TSC (Pentium and later), time between ticks is interpolated from it. A 486 uses the tick count
   alone.
+- **Lost ticks are added back (M6 step B, `timer_pit_irq`).** A tick is lost whenever interrupts stay off for
+  a millisecond, and the kernel's own log lines do that: each is written to COM1 there and then, 87 µs a
+  character at 115200 baud, so a hundred characters cost eight ticks. (Found when an app's `uclock()` ran
+  110 ms ahead of the kernel's clock in four seconds on the 486, while other apps started.) The PC's timer
+  loses nothing in such a time: its period is 55 ms. While it runs as GLOS keeps it (§8.2; no session has
+  its ports), each IRQ 0 is a check: 56.2428 ticks should have passed since the last, and a count that is 2
+  or more behind is brought to 1 behind (21 at most at a time). An IRQ 0 that comes more than 8 ticks late
+  (one before it was lost, the timer was set going again) starts the reckoning again from there. So the
+  kernel's clock keeps the PC timer's pace, which is the BIOS clock's too. More than 300 ticks to add in
+  1024 is more than interrupts held off could lose: the timer runs fast, left so by a program unseen, and
+  the check stops (`GLOS-TIMER check=off`) until a session's end has put the timer right (§11.1). `glos
+  stat` has the ticks added (`caught_up`).
+- **The log no longer costs ticks** (step B, `kprintf_pump`): once the threads run, a line waits in an 8 KB
+  ring instead of being written where `kprintf()` is called. It is written with interrupts on while each
+  character waits for the UART, and no thread switch meanwhile, in three places: on every way out of a trap
+  from user mode, after the trap's work and before `back_to_user()` (whole lines, until 64 characters have
+  gone); in the idle loop (a line at a time); and in `kprintf()` itself when its caller had interrupts on (a
+  kernel thread). Lines come out whole (a direct-mode program writes COM1 unseen: no line of the kernel's is
+  left half-way), in the order they were made, and before a program's own COM1 line that starts later (the
+  trapped data port flushes first, §10). A panic and the leave write at once, as before.
 
 ### 8.2 The PIT and the BIOS tick
 
 - **The system VM:** GLOS keeps PIT channel 0 in **mode 2, count FFFFh**, which is exactly what DJGPP's `uclock`
   programs [census]. IRQ0 goes to the system VM's virtual PIC, so the BIOS updates 0x46C as usual and latched
   reads of port 40h stay coherent with it.
-- **GLOS never latches or reads PIT channel 0 itself.** That would break a program's lo/hi read sequence.
+- **GLOS never latches or reads PIT channel 0 itself** while a session runs. That would break a program's
+  lo/hi read sequence. (Between sessions it reads it for apps: below.)
 - **Exclusive sessions:** ports 40h–43h and 61h are passed through untrapped. Programs reprogram channel 0
   freely (Screamer Rally: mode 3 at a run-time divisor; GLQuake: channel 2 for the crash beep). On exit GLOS
   restores mode 2, count FFFFh.
 - **GLOS apps (M6):** each gets a virtual PIT. Latched reads pass through while the app's programming matches
   the physical PIT; virtual IRQ0 rates are rounded to the tick.
+- **As built (M6 step B, `kernel/app/dev.c`):** an app's channel 0 starts as the PC's is kept (mode 2, FFFFh).
+  - While its count is FFFFh or 0 (65536), untouched or programmed so, the timer is the real one: a read
+    latches and reads the real counter there and then, in the trap (so both bytes are of one moment), and the
+    app's IRQ 0 is raised when the real IRQ 0 comes. `uclock()` so runs as on plain DOS, coherent with the BIOS
+    tick at 0040:006C, which is the system VM's and which the app reads straight from memory; so does a
+    program that counts its own INT 8s beside the counter.
+  - Programmed to anything else, count and IRQ 0 run off the kernel's tick: every tick adds 1,165 and
+    222/1024 counts to the period; a period's end raises IRQ 0. Right on average at any rate up to 1024 Hz;
+    the counter reads in steps of a tick. Mode 3 reads as a square wave's counter does (down twice, by twos).
+  - The real PIT is never written for an app, and not read while a session runs (apps are paused then; a
+    read that still arrives is answered from the tick).
+  - Not while paused: an app's time stands still with it.
 
 ### 8.3 BIOS waits
 
@@ -660,7 +700,10 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   - the stub's NEXT call.
 - **What the end puts back** (`end()`):
   - the video mode, by INT 10h 00h, when it differs (the palette comes with it);
-  - PIT channel 0 at mode 2, count FFFFh (§8);
+  - PIT channel 0 at mode 2, count FFFFh (§8), if the program left it otherwise: another mode (the 8254's
+    status read-back), or a count of IRQ 0s over the session that isn't the 18.2 a second of GLOS's setting
+    (M6: setting it again starts its period again, which cost the BIOS clock up to a tick at every session's
+    end);
   - the virtual PIC masks, the virtual RTC's A and B (and so the periodic rate), the 8042 command byte and the
     lock bits;
   - Sound Blaster DMA stopped: 8237 channels 1, 3, 5, 6 and 7 masked, and the DSP reset at BLASTER's `A`
@@ -669,8 +712,21 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
     had when a program in the session ended pointing into that program's own memory (INT 20h, INT 21h 4Ch/00h
     from V86 code). The second rule matters with GLOS as the shell: COMMAND.COM may have put something in the
     freed memory before it asks for the exit code. A TSR's hooks stay: its memory is still allocated;
-  - the BIOS tick count from the RTC (INT 1Ah 02h, then 01h), set to the middle of the RTC's second. A program
-    that sped the PIT up has run the DOS clock fast; it ends within a second of the RTC.
+  - the BIOS tick count, if it is wrong. A program that sped the PIT up has run the DOS clock fast. Where
+    the count should be is known to the tick: what it was when the session began, and the BIOS ticks (65535
+    PIT counts each) in the kernel's ticks since. A count within 2 of that is left alone (M6: until then
+    every session's end set the clock from the RTC, to the middle of its second, which stepped it by up to
+    half a second either way; GLOS apps running beside read the tick, and a step back is a day to DJGPP's
+    `uclock()`). Otherwise the RTC is read (INT 1Ah 02h): if it agrees with the reckoning within a second and
+    a half, the reckoned count is set (INT 1Ah 01h); if not (the time was set on purpose, midnight passed),
+    the RTC's time, at the middle of its second.
+- **Apps wait** for a session (`session_pauses()`, M6) from its start and through its end's work. Not while
+  a program starts that says it is an app itself: its file is marked ("GLOSAPP1" at 1Ch, in its MZ header's
+  padding, where a DJGPP program has its stub's comment; `tools/glosmark.py`, which the build runs on every
+  program made with libglos; `marked()` reads it at the EXEC, `app=1` on the session's begin line), or it
+  was started with `glos run --app`. Apps run on beside such a program for two seconds at most, less if it
+  sets a video mode (it is a session after all). The mark says only what to expect: an unmarked program may
+  still ask to be an app, and a marked one that doesn't is a session.
 
   The BIOS calls run nested (§15) on the stub's spare stack (the kill stub's, `kill_sp`), with no DPMI client
   needed.
@@ -1009,6 +1065,26 @@ direct = 1
 - **Callbacks.** A callback's real-mode address is one of the stub's ARPLs, the same for every context, so
   each belongs to one context at a time (`rmcb_owner[]`; 32 of them since M6, for all contexts together). One
   called while another context is the VM's (an address an app left with a driver, say) returns at once.
+- **Its interrupts (step B, `dev.c`).** An app has a virtual PIC pair of its own (`vpic.c`, bases 08h and 70h,
+  the masks its program found). Line 0 is its timer's (§8.2); line 13 the FPU's: IRQ 13 (CR0.NE is still
+  clear, §14.7) arrives while the code that made the error runs, so when that is an app's the kernel clears
+  the latch (port F0h) and raises the app's line instead of the system VM's. At every return to the app's
+  code with its virtual interrupt flag on, pending lines are acknowledged and given to its protected-mode
+  handlers (`dpmi_irq`, an entry as for a session's client). One with no handler is ended on the app's PIC,
+  as the BIOS's handler would, and the timer's then goes to its INT 1Ch handler if it has one; so is one its
+  handler passes on to the handler it replaced (the host's default for 08h-0Fh and 70h-77h on an app's
+  thread ends the interrupt and never reflects: real mode's handler is the system VM's, with the system's PIC
+  behind it). An interrupt is raised only for an app that has a handler for it.
+- **Waiting in the kernel** (the API's sleep, INT 15h 86h, which is a sleep on the app's own thread and
+  not the BIOS's wait in the system VM, and HLT) ends early when an interrupt of the app's is due: the frame
+  is left at the call (the API's HLT in the trampoline page; the INT, its EIP put back two bytes) with the
+  time left in its registers, the handler's entry is made on top, and its return runs the call again.
+- **Ports.** 20h/21h/A0h/A1h and 40h/43h as above; 61h's bit 4 toggles at each read; 70h/71h read the clock
+  and CMOS from the chip, registers A to D as at rest; everything else reads FFh and drops writes.
+- **Without asking** (`glos run --app`): a session's program becomes an app at the first return to its
+  protected-mode code where init would be allowed, as a rule its very first instruction after the mode
+  switch, so that its stub loads it as an app already. DJGPP 2.05's TIMER, UCLOCK and SIGNALS tests run so,
+  unchanged.
 - **Not the app's:** the system VM's interrupts met during a call (they go to real mode, never to the app's
   protected-mode handlers; nor is the BIOS's INT 1Ch passed up); INT 23h and 24h raised in its own DOS call
   are passed up as in a session.
@@ -1230,7 +1306,8 @@ place where nothing else is in DOS by construction.
   session (§11) runs in direct mode (§9.7) or takes GLOS.CFG's `[program NAME]` profile instead of its program's
   own. That works for a batch file too, whose session's program is COMMAND.COM. A program becomes a GLOS app
   when it asks to (§12.5): `--exclusive` has that refused, so it stays a session, and `--app` is what happens
-  without it (M6). An unknown profile and a missing command are refused with status 2. The agent hands the options to the session code before each EXEC the job
+  without it, and makes an app of a program that never asks, too (§12.5). An unknown profile and a missing
+  command are refused with status 2. The agent hands the options to the session code before each EXEC the job
   makes (`session_job()`), and the session that begins takes them.
 - **Ending a job:** `glos kill`, or its client going away, kills it: every half second the program in front
   gets the kill of §9.6 (innermost first) until the job has ended, with exit status 255; its output is dropped.
@@ -1458,7 +1535,7 @@ and GLOS's:
 | RING0 | Ring-0 entry |
 | EXIT | Exit |
 | WARN | e.g. `vif-stuck` |
-| VM | The system VM: `run=`, `dos indos= sda= psp=`, `resident psp= stub= freed=`, `leave code= ticks= gp= int= irq= spurious=` |
+| VM | The system VM: `run=`, `dos indos= sda= psp=`, `resident psp= stub= freed=`, `leave code= ticks= gp= int= irq= spurious=`, `indos=reset was=` (InDOS left set by a program killed inside DOS, cleared at the stub's NEXT; M6) |
 | SCHED | At leave: context switches, contended ticks per class, and each thread's ticks |
 | PCI | The number of functions found; each one GLOS claims |
 | NET | The card GLOS took (or why not), DHCP's address, and counters at leave |
@@ -1466,7 +1543,9 @@ and GLOS's:
 | RANDOM | At start: the seed's length and whether there is a TSC |
 | CRYPTO | `/SELFTEST`: the known-answer tests and two timings |
 | SSH | `listen`, `off`, `connect`, `client version=`, `kex done strict=`, `auth ok`, `exec=`, `close why=`, `refuse` |
-| AGENT | A job: `run seq= cmd= [direct=1] [profile=]`, `done seq= code= via=` (the program, or `comspec`) |
+| AGENT | A job: `run seq= cmd= [direct=1] [profile=]`, `done seq= code= via=` (the program, `comspec`, or `app`), `app seq= via=` (its program is an app now, M6) |
+| APP | A GLOS app (§12.5): `start id= prog= psp= thread= vectors=`, `end id= prog= code= how= calls= ticks= t= irq0= irq13=`, `refuse psp= why=` (a name, or the reason's number with `forced=1`), `kill id= reason=` |
+| TIMER | `check=off behind=`: the PC's timer was found running fast, and no longer checks the tick (§8.1) |
 | KILL | A kill (§9.6): `psp= at= ticks= reason=hotkey\|agent\|priv\|crash` |
 | SESSION | A session (§11.1): `begin n= prog= parent= mode= [profile=] [direct=1]`, `direct-end imr= rtc=` (§9.7), `end n= prog= why=exit\|next-exec\|stub mode= [remode=1] vectors= ticks= t= irq=` (`mode=` the mode it ended in, `vectors=` those put back, `ticks=` the BIOS tick count set from the RTC, `t=` its length in kernel ticks, `irq=` `ok` when IRQ 0, 1, 5, 7 and 12's vectors and mask bits are as the session found them, as VECCHK compares, else which aren't) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
@@ -1566,7 +1645,7 @@ gdb -ex 'set architecture i386' -ex 'target remote | ssh -W localhost:2345 pc'
    whenever interrupts can occur.
 2. The IOPB is followed by an FFh byte inside the TSS limit.
 3. The RTC handler reads register C on every IRQ8.
-4. GLOS never latches or reads PIT channel 0.
+4. GLOS never latches or reads PIT channel 0 while a session runs, and never writes it for anyone but itself.
 5. Every return to a 16-bit SS goes through espfix.
 6. Only the system VM thread executes V86 code; everything else posts.
 7. A posted call runs only at a safe point (§17.2).

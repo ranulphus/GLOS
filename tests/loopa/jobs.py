@@ -1973,14 +1973,20 @@ def apps_case(profile, card):
     them); beside one that crashes; one that runs a real-mode child; kills, by the job's number: of the
     spinner, of one asleep, of one waiting for the keyboard in DOS; ten that start and end, after which
     the kernel has the memory it had; glos exit with an app running. Refusals: glos run --exclusive, a
-    second init, a program COMMAND.COM started."""
+    second init, a program COMMAND.COM started.
+    Step B, an app's own timer: uclock() never goes back and keeps time; a timer set to 100 Hz with a handler of
+    the app's own counts 100 a second through sleeps, halts and busy loops, the BIOS's tick still the system's;
+    four of those at once; and DJGPP 2.05's own TIMER, UCLOCK and SIGNALS tests (the last with FPU errors as
+    signals), made apps without asking (glos run --app), keys typed with glos key."""
     import json
     import time
     tag = "%s-%s" % (profile, card)
     agent = Agent("apps-" + tag, profile, card, [
         "--file", "build/dj/APPTEST.EXE=/TEST/APPTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+        "--file", "build/dj/djtst/TIMER.EXE=/TEST/TIMER.EXE", "--file", "build/dj/djtst/UCLOCK.EXE=/TEST/UCLOCK.EXE",
+        "--file", "build/dj/djtst/SIGNALS.EXE=/TEST/SIGNALS.EXE",
         "--cmd", "SERSAY HX-START apps", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
-        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=1800)
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
                    "-o", "ControlPersist=600"]
     app = "C:\\TEST\\APPTEST.EXE "
@@ -2025,8 +2031,8 @@ def apps_case(profile, card):
         checks["plain"] = rc == 7 and "APP-PLAIN version=10000" in out
         rc, out, _ = agent.ssh("glos run --exclusive " + app + "exit 5")
         checks["exclusive"] = rc == 3 and "APP-REFUSED error=5 reason=5" in out
-        rc, out, _ = agent.ssh("glos run --app " + app + "exit 6")
-        checks["run-app"] = rc == 6 and "APP-EXIT id=" in out
+        rc, out, _ = agent.ssh("glos run --app " + app + "exit 6")     # (an app before it asks: step B)
+        checks["run-app"] = rc == 3 and "APP-REFUSED error=5 reason=1" in out
         rc, out, _ = agent.ssh(app + "twice")
         checks["twice"] = rc == 0 and "APP-TWICE r=-1 error=5 reason=1" in out
         checks["exit-code"] = agent.ssh(app + "exit 23")[0] == 23
@@ -2077,7 +2083,39 @@ def apps_case(profile, card):
         if not checks["child"]:
             print("    %s child: rc=%d out=%r err=%r" % (tag, rc, out, err))
 
-        checks["kill"] = kill("spin", spin)
+        # (step B) an app's own timer
+        rc, out, _ = agent.ssh(app + "uclock 3", timeout=600)
+        checks["uclock"] = rc == 0 and "APP-UCLOCK-OK" in out
+        rc, out2, _ = agent.ssh(app + "timer 100 3", timeout=600)
+        checks["timer"] = rc == 0 and "APP-TIMER-OK" in out2
+        if not checks["uclock"] or not checks["timer"]:
+            print("    %s uclock=%r timer=%r" % (tag, out, out2))
+        kill_spin = kill("spin", spin)          # (four jobs at once at most: the spinner makes room)
+        # (other programs start meanwhile: the kernel writes its log a line at a time, 9 ms for a hundred
+        # characters, and only urgent threads run until a line is out, which costs a 250 Hz timer an interrupt)
+        four = [start(app + c) for c in ("uclock 4", "uclock 4", "timer 100 4", "timer 250 4 7")]
+        res = [finish(p) for p in four]
+        checks["timers-at-once"] = all(r[0] == 0 and "-OK " in r[1] for r in res)
+        if not checks["timers-at-once"]:
+            print("    %s at once: %r" % (tag, [r[1] for r in res]))
+        agent.ssh(app + "drain")                # (a key from the boot waits in the BIOS's buffer)
+        for name, keys in (("TIMER", "4:0x39"), ("UCLOCK", "3:0x39"), ("SIGNALS", "2:0x39,10:0x10")):
+            n2 = agent.log().count("GLOS-APP start ")
+            p = start("glos run --app C:\\TEST\\%s.EXE" % name)
+            forced = started(n2 + 1)
+            agent.ssh("glos key " + keys, timeout=120)
+            rc, out, err = finish(p)
+            lines = [l.replace("\t", ".") for l in (out + err).splitlines()]     # (as RUNOUT shows a tab: dj_own)
+            want = DJ_EXPECT.get(name)
+            why = dj_own(name, lines) if forced else "never an app"
+            if not why and want and (rc != want[0] or not all(any(w in l for l in lines) for w in want[1])):
+                why = "rc=%d" % rc
+            if not why and not want and rc != 0:
+                why = "rc=%d" % rc
+            checks["dj-" + name.lower()] = not why
+            if why:
+                print("    %s %s as an app: %s; last lines %r" % (tag, name, why, lines[-4:]))
+        checks["kill"] = kill_spin
         n1 = agent.log().count("GLOS-APP start ")
         nap = start(app + "sleep 600")
         checks["kill-asleep"] = started(n1 + 1) and kill("sleep 600", nap)
@@ -2102,9 +2140,9 @@ def apps_case(profile, card):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["balanced"] = text.count("GLOS-APP start ") == text.count("GLOS-APP end ") == 24
+    checks["balanced"] = text.count("GLOS-APP start ") == text.count("GLOS-APP end ") == 33
     checks["killed-in-dos"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=agent", text))
-    checks["refused"] = len(re.findall(r"GLOS-APP refuse psp=\w+ why=(exclusive|already|parent)", text)) == 3
+    checks["refused"] = len(re.findall(r"GLOS-APP refuse psp=\w+ why=(exclusive|already|parent)", text)) == 4
     checks["crash-report"] = bool(re.search(r"GLOS-CRASH why=exception vec=0e .*prog=C:\\TEST\\APPTEST.EXE", text)) \
         and bool(re.search(r"GLOS-CRASH file=C:\\GLOS\\CRASH\\CRASH\d+\.TXT", text))
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-APP error" not in text and "GLOS-APP warn" not in text

@@ -2,12 +2,46 @@
  * whole: while a program in the system VM is part-way through a line of
  * its own there (vm/vdev.c traps the data port and says so), the kernel's
  * output is held and written when that line ends, or at the latest 100
- * ticks on (supervisor.md §18). A panic writes at once. */
+ * ticks on (supervisor.md §18). A panic writes at once.
+ *
+ * Once the threads run, a line is not written where kprintf() is called
+ * (M6): COM1 takes 87 microseconds a character, and most callers have
+ * interrupts off, so a hundred characters cost the kernel's clock eight
+ * ticks and every interrupt nine milliseconds. The line waits in a ring,
+ * and kprintf_pump() writes from it with interrupts on while each
+ * character waits for the UART, where that is safe: on the way out of a
+ * trap from user mode, in the idle loop, and in kprintf() itself for a
+ * caller that had interrupts on. No thread switch happens meanwhile but to
+ * urgent threads, between characters, which come back to the writer (they
+ * write nothing to COM1 themselves): so lines come out whole and in the
+ * order they were made, and before any program's own line that starts
+ * later (vdev.c flushes first). */
 #include "io.h"
 #include "kprintf.h"
+#include "sched.h"
 
-void *memset(void *d, int c, size_t n) { u8 *p = d; while (n--) *p++ = (u8)c; return d; }
-void *memcpy(void *d, const void *s, size_t n) { u8 *p = d; const u8 *q = s; while (n--) *p++ = *q++; return d; }
+/* By dwords, then the bytes left: an LDT is 64 KB to clear, and most callers
+   have interrupts off (M6: byte loops cost a 486 seven ticks there). */
+void *memset(void *d, int c, size_t n)
+{
+    void *p = d;
+    u32 v = (u8)c * 0x01010101u, k = n >> 2;
+    __asm__ volatile("rep stosl" : "+D"(p), "+c"(k) : "a"(v) : "memory");
+    k = n & 3;
+    __asm__ volatile("rep stosb" : "+D"(p), "+c"(k) : "a"(v) : "memory");
+    return d;
+}
+
+void *memcpy(void *d, const void *s, size_t n)
+{
+    void *p = d;
+    const void *q = s;
+    u32 k = n >> 2;
+    __asm__ volatile("rep movsl" : "+D"(p), "+S"(q), "+c"(k) :: "memory");
+    k = n & 3;
+    __asm__ volatile("rep movsb" : "+D"(p), "+S"(q), "+c"(k) :: "memory");
+    return d;
+}
 int memcmp(const void *a, const void *b, size_t n)
 {
     const u8 *p = a, *q = b;
@@ -19,9 +53,13 @@ size_t strlen(const char *s) { size_t n = 0; while (s[n]) n++; return n; }
 
 struct out { char *buf; size_t n, len; };
 
+#define HELD 0x2000u                    /* a power of two */
+
 int (*kprintf_hold)(void);
-static char held[4096];
-static u32 held_len, direct;
+static char held[HELD];
+static u32 held_head, held_tail;        /* written to, written from */
+static u32 direct, deferred;
+static u8 pumping;
 
 /* The COM1 mirror for glos log: the last 16 KB of the kernel's lines and of
    what programs write there, without CRs. Writers run with interrupts off. */
@@ -138,22 +176,60 @@ void kprintf(const char *fmt, ...)
     __builtin_va_end(ap);
 }
 
-/* Held lines out, unless a program is still mid-line (force: regardless). */
+/* Held lines out, here and now, unless a program is still mid-line (force:
+   regardless). */
 void kprintf_flush(int force)
 {
     u32 f = irq_save();
-    if (held_len && (force || !kprintf_hold || !kprintf_hold())) {
-        raw_out(held, held_len);
-        held_len = 0;
-    }
+    if (force || !kprintf_hold || !kprintf_hold())
+        while (held_tail != held_head)
+            raw_out(&held[held_tail++ & (HELD - 1)], 1);
     irq_restore(f);
 }
 
-/* From now on everything is written at once (a panic). */
+/* From now on everything is written at once (a panic, the leave). */
 void kprintf_direct(void)
 {
     kprintf_flush(1);
     direct = 1;
+}
+
+/* The threads run: lines wait for kprintf_pump(). */
+void kprintf_defer(void) { deferred = 1; }
+
+/* Held lines out, whole ones, until max characters have gone: with
+   interrupts on while each character waits for the UART, and no thread
+   switch (called with interrupts off, which they are again at the return).
+   Whole, because a program in a direct-mode session writes to COM1 without
+   the kernel seeing it: a line of the kernel's must not be left half-way.
+   1 if anything was written. */
+int kprintf_pump(u32 max)
+{
+    u32 n = 0, spin;
+    char last = '\n';
+    if (pumping || held_tail == held_head || (kprintf_hold && kprintf_hold()))
+        return 0;
+    pumping = 1;
+    preempt_disable();
+    while (held_tail != held_head && (n < max || last != '\n')) {
+        char c = held[held_tail & (HELD - 1)];
+        int cr = c == '\n';
+        do {
+            spin = 0;
+            sti();
+            while (!(inb(COM1 + 5) & 0x20) && ++spin < 100000) ;
+            cli();
+            outb(COM1, (u8)(cr ? '\r' : c));
+        } while (cr--);
+        klog_put(&c, 1);
+        held_tail++;
+        n++;
+        last = c;
+        sched_urgent_turn();                    /* (network receive and the like don't wait for the line's end) */
+    }
+    pumping = 0;
+    preempt_enable();
+    return 1;
 }
 
 int ksnprintf(char *buf, size_t n, const char *fmt, ...)
@@ -171,17 +247,19 @@ void kvprintf(const char *fmt, __builtin_va_list ap)
 {
     char line[256];
     struct out o = { line, sizeof line, 0 };
-    u32 n, f;
+    u32 n, f, i;
     vfmt(&o, fmt, ap);
     n = o.len < sizeof line ? o.len : sizeof line - 1;
     f = irq_save();
-    if (!direct && (held_len || (kprintf_hold && kprintf_hold()))) {
-        if (held_len + n <= sizeof held) {
-            memcpy(held + held_len, line, n);
-            held_len += n;
-        }
+    if (direct || (!deferred && held_tail == held_head && !(kprintf_hold && kprintf_hold()))) {
+        raw_out(line, n);                       /* (before the threads run, and in a panic) */
     } else {
-        raw_out(line, n);
+        if (held_head - held_tail + n > HELD)   /* no room: what waits goes out now */
+            kprintf_flush(1);
+        for (i = 0; i < n; i++)
+            held[held_head++ & (HELD - 1)] = line[i];
+        if (deferred && (f & 0x200))            /* a thread with interrupts on: its line out before it goes on */
+            kprintf_pump(~0u);
     }
     irq_restore(f);
 }

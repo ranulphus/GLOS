@@ -5,13 +5,15 @@
  *            the current 100-tick window, then runs only when no normal
  *            thread is ready (crypto, SFTP, PNG)
  *   idle     HLT with interrupts on
- * A turn is 20 ticks of running, however often the thread waits meanwhile:
- * woken with some of its turn left, it goes ahead of its class's queue and
- * takes the CPU from a thread of its class (M6: an app back from a DOS call
- * doesn't wait out a busy app's turn; nor can it starve one, its turn runs
- * out too). A thread that loses the CPU that way keeps the rest of its
- * turn, and goes on after those that went ahead. The VM thread goes ahead
- * whenever it is woken: it wakes for an interrupt.
+ * The normal class is shared by running time (M6): each thread counts the
+ * ticks it has run, and the ready one that has run least goes next, for 20
+ * ticks at most before the choice is made again. A thread woken having run
+ * less than the running one takes the CPU from it. So one that mostly
+ * waits (an app back from a DOS call, or with a timer interrupt to take)
+ * runs at once beside busy ones, and busy ones share what is left equally;
+ * a long sleep earns no more than 10 ticks of advance. The VM thread goes
+ * first whenever it is woken, whatever it has run: it wakes for an
+ * interrupt.
  * A thread's stack has a canary word at its base, checked at each switch. */
 #include "arch.h"
 #include "io.h"
@@ -39,6 +41,11 @@ static u32 need_resched, preempt_count, n_switches;
 static u32 bulk_used, window_start;
 static u32 bulk_contended, normal_contended;    /* ticks run while the other class was ready */
 static u8 last_bulk;
+static u32 min_vrun;                    /* the normal class's running times start from here (it only grows) */
+static struct thread *held_for;         /* sched_urgent_turn(): the thread that goes on when the urgent ones are done */
+
+#define SLEEPER 10                      /* ticks of advance a thread wakes with at most */
+#define GRAN    2                       /* a woken thread takes the CPU when it is this far behind */
 
 static void enqueue(struct thread *t)
 {
@@ -50,28 +57,6 @@ static void enqueue(struct thread *t)
     else
         rq_head[p] = t;
     rq_tail[p] = t;
-}
-
-/* Ahead of the queue: woken (ahead: before those that went ahead earlier),
-   or having lost the CPU with turn left (after them all). */
-static void enqueue_front(struct thread *t, int woken)
-{
-    struct thread *q, *prev = NULL;
-    int p = t->prio;
-    t->state = T_READY;
-    t->ahead = (u8)woken;
-    if (!woken)
-        for (q = rq_head[p]; q && q->ahead; q = q->next)
-            prev = q;
-    if (prev) {
-        t->next = prev->next;
-        prev->next = t;
-    } else {
-        t->next = rq_head[p];
-        rq_head[p] = t;
-    }
-    if (!t->next)
-        rq_tail[p] = t;
 }
 
 static struct thread *dequeue(int p)
@@ -87,16 +72,62 @@ static struct thread *dequeue(int p)
     return t;
 }
 
+/* The normal class's next: one that went first when woken (the VM thread),
+   or the one that has run least; among equals, the one that has waited
+   longest. */
+static struct thread *pick_normal(void)
+{
+    struct thread *t, *prev = NULL, *best = NULL, *bprev = NULL;
+    for (t = rq_head[PRIO_NORMAL]; t; prev = t, t = t->next) {
+        if (t->ahead) {
+            best = t;
+            bprev = prev;
+            break;
+        }
+        if (!best || (s32)(t->vrun - best->vrun) < 0) {
+            best = t;
+            bprev = prev;
+        }
+    }
+    if (!best)
+        return NULL;
+    if (bprev)
+        bprev->next = best->next;
+    else
+        rq_head[PRIO_NORMAL] = best->next;
+    if (rq_tail[PRIO_NORMAL] == best)
+        rq_tail[PRIO_NORMAL] = bprev;
+    best->next = NULL;
+    best->ahead = 0;
+    if ((s32)(best->vrun - min_vrun) > 0)
+        min_vrun = best->vrun;
+    return best;
+}
+
 static struct thread *pick(void)
 {
-    struct thread *t;
+    struct thread *t, **pp;
     if ((t = dequeue(PRIO_URGENT)))
         return t;
+    if ((t = held_for)) {                       /* (the idle thread is in no queue: NULL is it) */
+        if (t == &idle_thread)
+            return NULL;
+        for (pp = &rq_head[t->prio]; *pp && *pp != t; pp = &(*pp)->next) ;
+        if (*pp) {
+            struct thread *q;
+            *pp = t->next;
+            for (q = rq_head[t->prio]; q && q->next; q = q->next) ;
+            rq_tail[t->prio] = q;
+            t->next = NULL;
+            t->ahead = 0;
+            return t;
+        }
+    }
     if (rq_head[PRIO_BULK] && (!rq_head[PRIO_NORMAL] || (bulk_used < BULK_BUDGET && !last_bulk))) {
         last_bulk = 1;
         return dequeue(PRIO_BULK);
     }
-    if ((t = dequeue(PRIO_NORMAL))) {
+    if ((t = pick_normal())) {
         last_bulk = 0;
         return t;
     }
@@ -127,19 +158,22 @@ static void unwait(struct thread *t)
 }
 
 /* A woken thread that outranks the running one gets the CPU at the next safe
-   point; so does the system VM over bulk work (supervisor.md §7), and over
-   an app: it wakes for an interrupt DOS or the BIOS must not wait a round
-   of busy apps for (M6). */
+   point; so does the system VM over bulk work (supervisor.md §7), and in
+   the normal class a thread that has run less than the running one, and
+   the VM thread always (it wakes for an interrupt DOS or the BIOS must not
+   wait a round of busy apps for; M6). */
 static void wake(struct thread *t)
 {
-    if (t->front || t->slice) {
-        enqueue_front(t, 1);
-        if (t->prio < current->prio || (t->prio == current->prio && !current->front && current != t))
-            need_resched = 1;
-        return;
+    if (t->prio == PRIO_NORMAL) {
+        if ((s32)(t->vrun - (min_vrun - SLEEPER)) < 0)
+            t->vrun = min_vrun - SLEEPER;
+        t->ahead = t->front;
     }
     enqueue(t);
     if (t->prio < current->prio)
+        need_resched = 1;
+    else if (t->prio == PRIO_NORMAL && current->prio == PRIO_NORMAL && current != t
+             && (t->front ? !current->front : (s32)(t->vrun + GRAN - current->vrun) < 0))
         need_resched = 1;
 }
 
@@ -148,18 +182,13 @@ void schedule(void)
     struct thread *prev = current, *next;
 
     need_resched = 0;
-    if (prev->state == T_RUNNING && prev != &idle_thread) {
-        if (prev->slice)
-            enqueue_front(prev, 0);             /* (it lost the CPU: the rest of its turn comes) */
-        else
-            enqueue(prev);
-    }
+    if (prev->state == T_RUNNING && prev != &idle_thread)
+        enqueue(prev);
     next = pick();
     if (!next)
         next = &idle_thread;
     next->state = T_RUNNING;
-    if (!next->slice)
-        next->slice = SLICE;
+    next->slice = SLICE;
     if (next == prev)
         return;
     if (*(u32 *)prev->stack != CANARY)
@@ -174,28 +203,39 @@ void schedule(void)
 
 void sched_resched(void) { need_resched = 1; }
 
-/* A thread that waits its turn in a run queue goes to the head of it, and
-   gets the CPU from a thread of its class or a lower one at the next safe
-   point (the VM thread, for an interrupt raised while it is ready). */
+/* Urgent threads that are ready run now, and then the caller goes on, before
+   any other thread: for a caller that must not be overtaken (the log's
+   writer in the middle of a line, lib/kprintf.c) but shouldn't keep network
+   receive waiting. Interrupts off. 1 if any ran. */
+int sched_urgent_turn(void)
+{
+    if (!rq_head[PRIO_URGENT] || held_for)
+        return 0;
+    held_for = current;
+    schedule();
+    held_for = NULL;
+    return 1;
+}
+
+/* A ready thread goes first in its class (the VM thread, for an interrupt
+   raised while it waits its turn), and gets the CPU from a thread of its
+   class or a lower one at the next safe point. */
 void sched_front(struct thread *t)
 {
-    struct thread *q, *prev = NULL;
-    int p = t->prio;
     if (t->state != T_READY || t == current)
         return;
-    for (q = rq_head[p]; q && q != t; q = q->next)
-        prev = q;
-    if (!q)
-        return;
-    if (prev) {
-        prev->next = t->next;
-        if (rq_tail[p] == t)
-            rq_tail[p] = prev;
-        t->next = rq_head[p];
-        rq_head[p] = t;
-    }
     t->ahead = 1;
-    if (p <= current->prio)
+    if (t->prio <= current->prio)
+        need_resched = 1;
+}
+
+/* Something came for a thread that may be ready and waiting its turn (an
+   app's own interrupt): if it has run less than the running one, the
+   choice is made again now. */
+void sched_nudge(struct thread *t)
+{
+    if (t->state == T_READY && t->prio == PRIO_NORMAL && current->prio == PRIO_NORMAL
+        && (s32)(t->vrun + GRAN - current->vrun) < 0)
         need_resched = 1;
 }
 
@@ -231,6 +271,7 @@ struct thread *thread_new(const char *name, int prio, void (*fn)(void *), void *
     t->arg = arg;
     t->user = (u8)user;
     t->state = T_BLOCKED;
+    t->vrun = min_vrun;
     sp = (u32 *)t->stack_top;
     *--sp = 0;                                  /* thread_start never returns */
     *--sp = (u32)thread_start;                  /* switch_to's RET */
@@ -306,6 +347,8 @@ void sched_idle(void)
         }
         if (need_resched || rq_head[0] || rq_head[1] || rq_head[2])
             schedule();
+        if (kprintf_pump(1))                    /* a log line to COM1 while there is nothing else to do, then a */
+            continue;                           /* look at the queues again */
         __asm__ volatile("sti; hlt" ::: "memory");
     }
 }
@@ -380,7 +423,11 @@ int thread_wait(struct waitq *q, u32 tick)
 void thread_yield(void)
 {
     u32 f = irq_save();
-    current->slice = 0;                         /* the rest of its turn given up */
+    struct thread *t;
+    if (current->prio == PRIO_NORMAL)           /* behind every ready thread of its class */
+        for (t = rq_head[PRIO_NORMAL]; t; t = t->next)
+            if ((s32)(t->vrun - current->vrun) > 0)
+                current->vrun = t->vrun;
     schedule();
     irq_restore(f);
 }
@@ -407,6 +454,8 @@ void sched_tick(void)
     if (!current)
         return;
     current->ticks++;
+    if (current->prio == PRIO_NORMAL)
+        current->vrun++;
     if (current->prio == PRIO_BULK) {
         bulk_used++;
         if (rq_head[PRIO_NORMAL])

@@ -1,9 +1,19 @@
 /* The kernel clock: the RTC periodic interrupt (IRQ 8), 1024 Hz. Its handler
  * reads register C every time: a real MC146818 stops interrupting until C is
  * read, 86Box does not (supervisor.md §8.1, V86TEST case Q). PIT channel 0 is
- * never touched; channel 2 times the measurement. */
+ * never touched; channel 2 times the measurement.
+ *
+ * A tick is lost whenever interrupts stay off for a millisecond, and a log
+ * line to COM1 takes that for every 11 characters (115200 baud, written
+ * there and then). The PC's timer loses nothing in such a time: its period
+ * is 55 ms. So while it runs as GLOS keeps it (no session has its ports),
+ * each of its interrupts checks the count: 56.24 ticks should have passed
+ * since the last (with how late each was taken, which its counter tells),
+ * and what is missing is added (M6: GLOS apps read this clock beside the
+ * BIOS's, which the PC's timer drives). */
 #include "arch.h"
 #include "io.h"
+#include "kprintf.h"
 #include "sched.h"
 #include "timer.h"
 
@@ -88,6 +98,53 @@ void timer_stop_to(u8 a, u8 b)
     (void)cmos(0x0C);
     set_irq_handler(8, NULL);
 }
+
+/* The PC's timer interrupted (IRQ 0; interrupts off). ours: it runs as GLOS
+   keeps it, mode 2 with count FFFFh. */
+static u32 pit_n, pit_base, caught_up, win_at, win_n;
+static u8 pit_on, pit_off;
+
+void timer_pit_irq(int ours)
+{
+    u32 want, late;
+    s32 behind;
+    if (!ours) {                                /* (a session: the check starts again after it) */
+        pit_on = pit_off = 0;
+        return;
+    }
+    if (pit_off)
+        return;
+    outb(0x43, 0x00);                           /* how long ago it interrupted: the counter began again then */
+    late = inb(0x40);
+    late = (0xFFFF - (late | (u32)inb(0x40) << 8)) / 1165;      /* (1165 counts to a tick) */
+    if (!pit_on || pit_n >= 0x1000000) {        /* from here */
+        pit_on = 1;
+        pit_n = 0;
+        pit_base = ticks - late;
+        return;
+    }
+    pit_n++;                                    /* 65535 * 1024 / 1193182 = 56.2428 ticks each */
+    want = pit_base + pit_n * 56 + (u32)(((unsigned long long)pit_n * 1042614360ull) >> 32) + late;
+    behind = (s32)(want - ticks);
+    if (behind >= 2) {                          /* (1: the two clocks' own jitter) */
+        if (ticks - win_at >= 1024) {
+            win_at = ticks;
+            win_n = 0;
+        }
+        if ((win_n += (u32)behind - 1) > 300) { /* more than interrupts held off could lose: the timer runs fast, */
+            pit_off = 1;                        /* left so by a program unseen. No check until a session's end */
+            kprintf("GLOS-TIMER check=off behind=%u\n", (u32)behind);     /* has put it right (session.c) */
+            return;
+        }
+        ticks += (u32)behind - 1;
+        caught_up += (u32)behind - 1;
+    } else if (behind < -8) {                   /* one before this was lost, or the timer was set going again: */
+        pit_n = 0;                              /* from here */
+        pit_base = ticks - late;
+    }
+}
+
+u32 timer_caught_up(void) { return caught_up; }
 
 u32 timer_ticks(void) { return ticks; }
 u32 timer_spurious(void) { return spurious_c; }

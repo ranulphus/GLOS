@@ -607,7 +607,8 @@ static void plain_drop(void *arg) { kfree(arg); }
 static u32 stat_line(char *b, u32 max)
 {
     u32 n = 0, i;
-    n += (u32)ksnprintf(b + n, max - n, "{\"ticks\":%u,\"hz\":1024,\"threads\":{", timer_ticks());
+    n += (u32)ksnprintf(b + n, max - n, "{\"ticks\":%u,\"hz\":1024,\"caught_up\":%u,\"threads\":{", timer_ticks(),
+                        timer_caught_up());
     n += sched_stat(b + n, max - n);
     n += (u32)ksnprintf(b + n, max - n, "},\"mem\":{\"total_kb\":%u,\"free_kb\":%u,\"heap_kb\":%u},\"irq\":[",
                         pmm_total_frames() * 4, pmm_free_frames() * 4, kheap_bytes() / 1024);
@@ -680,7 +681,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
                 direct = 1;
                 p += 8;
             } else if (!strncmp(p, "--app", 5) && (p[5] == ' ' || !p[5])) {
-                excl = 0;                       /* an app if the program asks to be one: as without it */
+                excl = 2;                       /* an app, though the program never asks to be one (M6 B) */
                 p += 5;
             } else if (!strncmp(p, "--profile ", 10)) {
                 for (p += 10; *p == ' '; p++) ;

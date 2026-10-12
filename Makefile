@@ -152,7 +152,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c
+         kernel/app/app.c kernel/app/api.c kernel/app/dev.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
@@ -229,7 +229,7 @@ loopa-gdbprog: all build/dj/GDBME.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py gdb -j $(JOBS)
 # glos key, type and mouse (M5 A4) against the same input from Loop A's --keys.
 # GLOS apps (M6 step A): APPTESTs at once, beside a spinning one, a session and a crash.
-loopa-apps: all dos-tests build/dj/APPTEST.EXE check-deps
+loopa-apps: all dos-tests djtst build/dj/APPTEST.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py apps -j $(JOBS)
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py input -j $(JOBS)
@@ -314,10 +314,11 @@ build/sdk/libglos.a: sdk/libglos/glos.c include/glos/api.h
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/glos.o $<
 	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/glos.o
-build/dj/APPTEST.EXE: tests/dos/apptest.c build/sdk/libglos.a
+build/dj/APPTEST.EXE: tests/dos/apptest.c build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)python3 tools/glosmark.py $@
 build/dj/DIRTEST.EXE: tests/dos/dirtest.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"

@@ -18,6 +18,8 @@ u8 rtc_read(u8 reg);                    /* CMOS/RTC registers, NMI left enabled 
 void rtc_write(u8 reg, u8 v);
 void timer_write_b(u8 b);               /* register B's time-keeping bits; PIE stays on */
 u32 timer_ticks(void);
+void timer_pit_irq(int ours);           /* IRQ 0: the PC's timer, a check on the tick count while it is GLOS's own */
+u32 timer_caught_up(void);              /* ticks that check has added */
 u32 timer_spurious(void);
 void pit2_wait(void);                   /* one PIT channel 2 count of FFFFh: 54.925 ms */
 

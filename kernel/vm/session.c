@@ -13,8 +13,19 @@
  * stops Sound Blaster DMA; it puts back interrupt vectors the session
  * changed that now point into free memory, or still point where a program
  * left them in its own memory when it ended (a TSR's hooks stay, with its
- * memory); and it sets the BIOS clock from the RTC, which a program that
- * sped up the PIT has run fast.
+ * memory); and it puts the BIOS clock right if a program that sped up the
+ * PIT has run it fast: to where the kernel's own clock says it should be
+ * by now (to the RTC's time only when that can't be told). A clock that is
+ * right is left alone, to the tick: GLOS apps running beside read it (M6),
+ * and a step back is a day to DJGPP's uclock().
+ *
+ * GLOS apps wait while a session has the machine (PRD §6.9). A program that
+ * says it is an app itself is no such session while it starts: its file is
+ * marked ("GLOSAPP1" at 1Ch, in its MZ header's padding: tools/glosmark.py,
+ * and so every program built with libglos), or it was started with glos run
+ * --app. The others run on beside it for up to two seconds, unless it shows
+ * first that it is a session after all (it sets a video mode, or was
+ * started as one: --exclusive, direct mode).
  *
  * A session takes the profile (GLOS.CFG's [program NAME.EXT], §11.2) of the
  * program that begins it: its env lines go into that EXEC's environment (a
@@ -45,6 +56,12 @@ static struct session {
     const struct bi_profile *prof;              /* its profile, or 0 */
     u8 direct;                                  /* glos run --direct */
     u8 exclusive;                               /* glos run --exclusive: not to become an app */
+    u8 app;                                     /* glos run --app: an app without asking */
+    u8 hint;                                    /* its file is marked as a GLOS app's, or glos run --app */
+    u8 grab;                                    /* it set a video mode: a session for sure */
+    u8 ending;                                  /* its end's work is under way */
+    u32 bios0;                                  /* the BIOS's tick count when it began */
+    u32 irq0;                                   /* the PC's timer's interrupts until then */
     u16 env_seg, env_old;                       /* the environment GLOS made, and the EXEC block's own */
     u32 env_pb;                                 /* the EXEC block (linear) */
     u32 t0;
@@ -131,18 +148,35 @@ static void sb_stop(void)
     }
 }
 
-/* The BIOS clock from the RTC (INT 1Ah 02h, then 01h): the tick count set,
-   or 0. A program that sped the PIT up has run the DOS clock fast. */
-static u32 clock_from_rtc(void)
+/* The BIOS clock put right, if the session's program has run it wrong (it
+   sped the PIT up): the tick count set, or 0 when the clock was right and
+   is left as it is. Where it should be: the count the session began with
+   and the BIOS ticks (65535 PIT counts each, §8.2) in the kernel's ticks
+   since. If the RTC's time (INT 1Ah 02h, good to a second) agrees with
+   that, that is what is set, to the tick; if it doesn't (the time was set
+   on purpose, midnight passed, or there is no session to go by), the
+   RTC's. */
+#define DAY_TICKS 0x1800B0u
+
+static u32 clock_right(void)
 {
     struct rmregs r;
-    u32 s, ticks;
+    u32 now = vm_rd32(0x46C), s, ticks, want = 0, d;
+    if (ses.t0) {                               /* 1193182 / (1024 * 65535) BIOS ticks to a kernel tick, << 32 */
+        want = ses.bios0 + (u32)(((unsigned long long)(timer_ticks() - ses.t0) * 76363801ull) >> 32);
+        d = now > want ? now - want : want - now;
+        if (want < DAY_TICKS && d <= 2)
+            return 0;
+    }
     memset(&r, 0, sizeof r);
     r.eax = 0x0200;
     if (bios(&r, 0x1A) != 0 || (r.flags & FL_CF))
         return 0;
     s = bcd((u8)(r.ecx >> 8)) * 3600 + bcd((u8)r.ecx) * 60 + bcd((u8)(r.edx >> 8));
     ticks = (u32)(((unsigned long long)(s * 2 + 1) * 1193180ull) >> 17);   /* (the middle of that second) */
+    d = ticks > want ? ticks - want : want - ticks;
+    if (ses.t0 && want < DAY_TICKS && d <= 28)  /* (a second and a half) */
+        ticks = want;
     memset(&r, 0, sizeof r);
     r.eax = 0x0100;
     r.ecx = ticks >> 16;
@@ -159,7 +193,7 @@ void session_kill(u8 mode, u8 leds)
     int remode = remode_to(mode);
     vm_wr8(0x417, (u8)((vm_rd8(0x417) & ~0x70) | leds));
     sb_stop();
-    kprintf("GLOS-SESSION kill-restore mode=%02x%s ticks=%u\n", mode, remode ? " remode=1" : "", clock_from_rtc());
+    kprintf("GLOS-SESSION kill-restore mode=%02x%s ticks=%u\n", mode, remode ? " remode=1" : "", clock_right());
 }
 
 /* What VECCHK compares, after the restoration: IRQ 0, 1, 5, 7 and 12's
@@ -178,6 +212,19 @@ static const char *irq_left(void)
     return n ? buf : "ok";
 }
 
+/* The session's program left PIT channel 0 other than GLOS keeps it: in
+   another mode (the 8254's read-back of its status), or it interrupted at
+   another rate while the session ran. Setting it again starts its period
+   again, which costs the BIOS clock up to a tick: not done for nothing
+   (M6: apps running beside read both). */
+static int pit_moved(void)
+{
+    u32 n = cpu_irq_count(0) - ses.irq0;
+    u32 want = (u32)(((unsigned long long)(timer_ticks() - ses.t0) * 76363801ull) >> 32);
+    outb(0x43, 0xE2);
+    return (inb(0x40) & 0x3F) != 0x34 || n > want + 2 || n + 2 < want;
+}
+
 static void end(const char *why)
 {
     struct rmregs r;
@@ -188,7 +235,7 @@ static void end(const char *why)
     gdbp_program_end(0);                        /* (glos gdb: its program has gone) */
     shot_session_end();
     ses.active = 0;
-    app_session_end();                          /* (paused apps run on) */
+    ses.ending = 1;                             /* (apps wait on until this is done) */
     vm_direct(0);                               /* (before the BIOS calls: they run at IOPL 0) */
     if (ses.env_seg) {                          /* the profile's environment: DOS has copied it */
         if (vm_rd16(ses.env_pb) == ses.env_seg) {
@@ -202,9 +249,11 @@ static void end(const char *why)
         ses.env_seg = 0;
     }
     remode = remode_to(ses.mode);               /* the mode it began in, and so the palette */
-    outb(0x43, 0x34);                           /* PIT channel 0: mode 2, count FFFFh (§8.2) */
-    outb(0x40, 0xFF);
-    outb(0x40, 0xFF);
+    if (pit_moved()) {
+        outb(0x43, 0x34);                       /* PIT channel 0: mode 2, count FFFFh (§8.2) */
+        outb(0x40, 0xFF);
+        outb(0x40, 0xFF);
+    }
     vm.pic.p[0].imr = ses.imr[0];
     vm.pic.p[1].imr = ses.imr[1];
     vm_sync_mask();
@@ -224,19 +273,24 @@ static void end(const char *why)
             fixed++;
         }
     }
-    ticks = clock_from_rtc();
+    ticks = clock_right();
     kprintf("GLOS-SESSION end n=%u prog=%s why=%s mode=%02x%s vectors=%u ticks=%u t=%u irq=%s\n", ses.n, ses.prog, why,
             mode, remode ? " remode=1" : "", fixed, ticks, timer_ticks() - ses.t0, irq_left());
+    ses.ending = 0;
+    ses.t0 = 0;
+    app_session_end();                          /* (paused apps run on) */
 }
 
 /* glos run's options for the session the stub's next EXEC begins (E4). */
-static struct { u8 direct, exclusive; char profile[16]; } job;
+static struct { u8 direct, exclusive, app; char profile[16]; } job;
 
-void session_job(int direct, int exclusive, const char *profile)
+/* how: 0 as the program asks, 1 --exclusive, 2 --app. */
+void session_job(int direct, int how, const char *profile)
 {
     u32 i;
     job.direct = (u8)(direct != 0);
-    job.exclusive = (u8)(exclusive != 0);
+    job.exclusive = (u8)(how == 1);
+    job.app = (u8)(how == 2);
     for (i = 0; profile[i] && i < sizeof job.profile - 1; i++)
         job.profile[i] = profile[i] >= 'a' && profile[i] <= 'z' ? (char)(profile[i] - 32) : profile[i];
     job.profile[i] = 0;
@@ -316,6 +370,40 @@ static void profile_env(const struct trapframe *tf, u16 psp)
     vm_wr8(pb + 1, (u8)(ses.env_seg >> 8));
 }
 
+/* The program about to start (DS:DX in tf) is marked as a GLOS app:
+   "GLOSAPP1" at 1Ch of its file. Read into the stub's DOS-server registers,
+   which nothing else uses while an EXEC is under way. */
+static int marked(const struct trapframe *tf)
+{
+    struct rmregs r;
+    u32 buf = ((u32)vm.loader_cs << 4) + __builtin_offsetof(struct stub_data, dregs), h;
+    int ok;
+    memset(&r, 0, sizeof r);
+    r.eax = 0x3D00;
+    r.ds = (u16)tf->v86_ds;
+    r.edx = tf->edx & 0xFFFF;
+    if (bios(&r, 0x21) != 0 || (r.flags & FL_CF))
+        return 0;
+    h = r.eax & 0xFFFF;
+    memset(&r, 0, sizeof r);
+    r.eax = 0x4200;
+    r.ebx = h;
+    r.edx = 0x1C;
+    bios(&r, 0x21);
+    memset(&r, 0, sizeof r);
+    r.eax = 0x3F00;
+    r.ebx = h;
+    r.ecx = 8;
+    r.ds = vm.loader_cs;
+    r.edx = __builtin_offsetof(struct stub_data, dregs);
+    ok = bios(&r, 0x21) == 0 && !(r.flags & FL_CF) && (r.eax & 0xFFFF) == 8 && !memcmp(vm_ptr(buf), "GLOSAPP1", 8);
+    memset(&r, 0, sizeof r);
+    r.eax = 0x3E00;
+    r.ebx = h;
+    bios(&r, 0x21);
+    return ok;
+}
+
 /* INT 21h 4B00h from V86 code (DS:DX the program). */
 void session_exec(const struct trapframe *tf)
 {
@@ -351,16 +439,22 @@ void session_exec(const struct trapframe *tf)
     ses.rtc_b = vm.rtc_b;
     ses.kbc_cmd = vkbc_cmd();
     memcpy(ses.ivt, vm_ptr(0), sizeof ses.ivt);
-    ses.t0 = timer_ticks();
+    ses.t0 = timer_ticks() | 1;
+    ses.bios0 = vm_rd32(0x46C);
+    ses.irq0 = cpu_irq_count(0);
+    ses.grab = 0;
     ses.n++;
     ses.prof = profile_for(psp == vm.loader_psp && job.profile[0] ? job.profile : ses.prog);
     ses.direct = psp == vm.loader_psp && job.direct;
     ses.exclusive = psp == vm.loader_psp && job.exclusive;
+    ses.app = psp == vm.loader_psp && job.app;
+    ses.hint = ses.app || marked(tf);
     ses.env_seg = 0;
     if (ses.prof && ses.prof->env[0])
         profile_env(tf, psp);
-    kprintf("GLOS-SESSION begin n=%u prog=%s parent=%04x mode=%02x%s%s%s\n", ses.n, ses.prog, psp, ses.mode,
-            ses.prof ? " profile=" : "", ses.prof ? ses.prof->name : "", session_direct() ? " direct=1" : "");
+    kprintf("GLOS-SESSION begin n=%u prog=%s parent=%04x mode=%02x%s%s%s%s\n", ses.n, ses.prog, psp, ses.mode,
+            ses.prof ? " profile=" : "", ses.prof ? ses.prof->name : "", session_direct() ? " direct=1" : "",
+            ses.hint ? " app=1" : "");
     if (session_direct())
         vm_direct(1);                           /* from the return into DOS's EXEC on */
 }
@@ -403,6 +497,24 @@ const char *session_prog(void) { return ses.prog; }
 const u32 *session_ivt(void) { return ses.ivt; }
 
 int session_exclusive(void) { return ses.active && ses.exclusive; }
+
+int session_app(void) { return ses.active && ses.app; }
+
+/* The session's program set a video mode (rmcall.c): it is no app. */
+void session_video(void)
+{
+    if (ses.active && !app_vm_psp())            /* (not an app's own call, made by the VM thread) */
+        ses.grab = 1;
+}
+
+/* GLOS apps wait: a session has the machine, or its end's work is under way.
+   Not for a program that says it is an app, while it starts. */
+int session_pauses(void)
+{
+    if (ses.ending)
+        return 1;
+    return ses.active && (!ses.hint || ses.exclusive || vm.direct || ses.grab || timer_ticks() - ses.t0 >= 2048);
+}
 
 u32 session_memory_kb(void) { return ses.active && ses.prof ? ses.prof->memory_kb : 0; }
 

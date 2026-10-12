@@ -264,6 +264,12 @@ static void back_to_user(struct trapframe *tf)
         dpmi_return(tf);
 }
 
+/* Log lines waiting for COM1 (lib/kprintf.c): a line or two of them out on
+   every way back to user mode, where the trap's work is done and interrupts
+   may come (they are on while a character waits for the UART; what they
+   change, back_to_user() then sees). */
+#define LOG_TURN 64
+
 static u32 stray_db;                                    /* single steps dropped in ring 0 (86Box) */
 static u32 irq_n[16];                                   /* interrupts taken on each line (glos stat) */
 
@@ -290,6 +296,8 @@ static void dispatch(struct trapframe *tf)
         if (irq >= 8) outb(0xA0, 0x20);
         outb(0x20, 0x20);
     out:
+        if ((tf->eflags & EFLAGS_VM) || (tf->cs & 3))
+            kprintf_pump(LOG_TURN);
         sched_trap_exit(tf);
         if ((tf->eflags & EFLAGS_VM) || (tf->cs & 3))
             back_to_user(tf);
@@ -297,12 +305,14 @@ static void dispatch(struct trapframe *tf)
     }
     if (tf->eflags & EFLAGS_VM) {                       /* from the system VM */
         vm_exception(tf);
+        kprintf_pump(LOG_TURN);
         sched_trap_exit(tf);
         back_to_user(tf);
         return;
     }
     if ((tf->cs & 3) == 3) {                            /* from a DPMI client */
         dpmi_trap(tf);
+        kprintf_pump(LOG_TURN);
         sched_trap_exit(tf);
         back_to_user(tf);
         return;

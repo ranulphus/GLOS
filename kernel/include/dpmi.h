@@ -141,6 +141,7 @@ struct dpmi_ctx {
     u32 frame_cap;                      /* the most it may hold (the session's profile's memory), 0 none */
     struct dosblk *dosblks;
     struct app *app;                    /* a GLOS app's context (kernel/app/app.c), or 0: a session's */
+    u8 no_app;                          /* glos run --app was refused for it: not asked again */
 };
 
 struct app;

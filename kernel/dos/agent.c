@@ -66,7 +66,7 @@ struct agent_job {
     u8 cand;                                    /* the next program to try */
     u8 shell;                                   /* running as COMSPEC /C */
     u8 direct;                                  /* glos run --direct */
-    u8 exclusive;                               /* glos run --exclusive */
+    u8 exclusive;                               /* glos run: 1 --exclusive, 2 --app */
     u8 app;                                     /* its program runs on as a GLOS app */
     char profile[16];                           /* glos run --profile NAME, or empty */
     volatile u8 kill;                           /* end it: glos kill, or its client has gone */
@@ -122,7 +122,7 @@ int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, cons
     j->kill = 0;
     j->app = 0;
     j->direct = (u8)(direct != 0);
-    j->exclusive = (u8)(exclusive != 0);
+    j->exclusive = (u8)exclusive;
     for (i = 0; profile[i] && i < sizeof j->profile - 1; i++)
         j->profile[i] = profile[i];
     j->profile[i] = 0;
