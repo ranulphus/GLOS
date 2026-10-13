@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| Status | v0.3 — start modes and conventional memory (2026-10-02), after the v0.2 deep dive (2026-10-01) |
-| Last updated | 2026-10-01 |
-| Supersedes | v0.1. Changes are listed in Appendix D |
+| Status | v0.4 — the look, the fonts and DOS text in windows (2026-10-13), after v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
+| Last updated | 2026-10-13 |
+| Supersedes | v0.1. Changes are listed in Appendices D to F |
 | Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md) and [docs/milestones-m6.md](docs/milestones-m6.md) (work breakdown) |
 | Licence | MIT |
 | Companion projects | MGA-Glide (`~/MGA-Glide`: the Loop A/B/C harness and the shared Matrox HAL), DOS-GL (`~/DOSGL`: OpenGL for Matrox cards and the SDL3 bridge), Fifth Wheel and the dgk kit (`~/FifthWheel`), DOSBench (`~/DOSBench`) |
@@ -135,7 +135,7 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D4** | **Agent first, GUI second.** (User) M1–M5 are headless. | The agent is useful to MGA-Glide, DOS-GL and Fifth Wheel immediately, and it speeds up building the GUI. | — |
 | **D5** | **DOS programs in windows come after v1.** (User) v1 runs them full-screen as exclusive sessions. | Virtual VGA, PIT, DMA and SB for windowed DOS is the largest single piece of work. Exclusive sessions still keep the agent alive. | After v1 |
 | **D6** | **Preemptive scheduling; the graphics chip changes owner only at swap or yield points.** (User) | No app can starve audio, the agent or other apps. Changing owner only at swaps means the HAL never has to save state in the middle of a frame (§9.6). | M8 |
-| **D7** | **Our own period-styled look: flat and restrained**, in the spirit of System 7 (mostly black, white and greys, thin lines, one accent), copying no one. (User; refined in the deep dive) | It avoids trade-dress problems, gives GLOS its own identity, and stays crisp at 8 bpp on 1 MB cards. | M6 design pass (Q5) |
+| **D7** | **Our own period-styled look: flat and restrained**, in the spirit of System 7 (mostly black, white and greys, thin lines, one accent), copying no one. (User; refined in the deep dive) **As chosen (Q5, 2026-10-13): "Slate"**, dark title bars and a dark task bar on a grey desktop, with orange as the one accent: the close box and the task-bar button of the window in front. | It avoids trade-dress problems, gives GLOS its own identity, and stays crisp at 8 bpp on 1 MB cards. | M6 (chosen) |
 | **D8** | **MIT licence.** (User) Third-party parts keep their own licences; FreeDOS ships alongside GLOS, not linked into it. | Matches the companion projects. | — |
 | **D9** | **NICs:** native 32-bit drivers in the supervisor for Intel 8255x (e100) and RTL8139, plus NE2000 for 86Box. (User) | DOS packet drivers can't be relied on while a program owns the system VM, and calling them costs two mode switches per packet. 86Box emulates all three. | M5 |
 | **D10** | **GLOS's agent replaces Loop B's BENCH.BAT poller** when GLOS is up. The poller, serial log, Epiphan capture and reset relay stay as the fallback. (User) | An interactive session replaces fetch, run, upload and reboot. The out-of-band path still covers boot and supervisor hangs. | M5 |
@@ -165,11 +165,12 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D34** | **The UI fits 640×480 and is fully keyboard-operable** (menu accelerators, Tab order, task switching, window move/resize by keys). (User) | 486s with 1 MB cards and VGA monitors; users without mice; and scripted key input from the agent becomes reliable. | M6 |
 | **D35** | **A remote-session indicator in the task bar only** while SSH or VNC sessions are open; never drawn into full-screen programs or app content. (User) | Visible to the person at the PC, without disturbing screenshots or golden frames. | M5 |
 | **D36** | **Per-program profiles** (icon, command line, environment, memory, sound settings, `direct` mode), made by hand or by a wizard; programs without one run with defaults. (User) | Like Windows PIFs: the place for per-program settings, including D20's opt-out. | M4e (format), M6 (UI) |
-| **D37** | **UI fonts are bitmaps rendered at build time from open TrueType fonts** (OFL/MIT: a sans for the UI, a mono for terminals), with optional live anti-aliasing from the same fonts. (User) | Crisp at every depth, fast on a 486, and licence-clean. | M6 (Q16) |
+| **D37** | **UI fonts are bitmaps rendered at build time from open TrueType fonts** (OFL/MIT: a sans for the UI, a mono for terminals), with optional live anti-aliasing from the same fonts. (User) **As chosen (Q16, 2026-10-13): DejaVu Sans, Sans Bold and Sans Mono at 11 pixels.** | Crisp at every depth, fast on a 486, and licence-clean. | M6 (chosen) |
 | **D38** | **86Box gets PCI variants of the Matrox cards at M7** (a local patch); until then 486 profiles use the S3 Trio64V2/DX. (User) | 86Box emulates the G-series as AGP only, while real G200/G450 PCI cards exist (the bench's G450 is PCI). | M7 |
 | **D39** | **GLOS starts either as the DOS shell (`SHELL=` in CONFIG.SYS) or from the last line of AUTOEXEC.BAT, like WIN.** `SHELL=` is the default in the bootable image; the installer offers either. As the shell, GLOS never just exits: a refusal or a failed start runs COMMAND.COM instead, and "exit to DOS" runs COMMAND.COM with `EXIT` returning to GLOS. (User, 2026-10-02) | As the shell, COMMAND.COM isn't resident (4 KB with an XMS driver, 72 KB for FreeDOS's COMMAND.COM without one), and the machine boots straight into GLOS. The fallback keeps a machine with GLOS as its shell from ever being left without a prompt. | M3 |
 | **D40** | **As the shell, GLOS runs AUTOEXEC.BAT through `COMMAND.COM /C` once the kernel is up, and keeps the environment it leaves** as the master environment. GLOS sets `COMSPEC` itself and runs .COM/.EXE programs directly; COMMAND.COM is used for batch files, internal commands and `%COMSPEC%` shell-outs. (User, 2026-10-02) | Full batch-language compatibility, with no batch interpreter of GLOS's own. GLOS sees the child's environment because it runs the VM. TSRs loaded there sit above a small hole (the child COMMAND.COM, about 4 KB once it can swap into GLOS's XMS). | M3 |
 | **D41** | **Minimal conventional memory: a resident stub of 4 KB or less from M3**, holding only the real-mode code that must run inside DOS (kernel-call and XMS entry points, the kill stub, real-mode stacks, the EXEC loop). No C runtime stays resident, and the DPMI host asks for no real-mode memory per client. **Later, an opt-in setting** puts the stub in an unused upper-memory page that GLOS maps itself, leaving only the PSP and environment (about 0.5 KB). (User, 2026-10-02) | Programs get as much conventional memory as plain DOS gives them. M2's measured cost was 37 KB, because the whole of GLOS.EXE stayed loaded. The upper-memory page is GLOS's own use, so D25 (no UMBs for programs) stands; it is opt-in because adapter ROMs make free pages hard to be sure of. | M3 (stub), M9 (UMA option) |
+| **D42** | **A DOS program in a window is drawn in the VGA's own fonts**, at the cell size of its text mode: the video card's 8, 14 and 16-row ROM fonts, which GLOS reads from the card (as `glos shot` does already), and a font the program has loaded where GLOS can see it. Never the UI fonts. (User) | It must look the same in a window as it does full-screen; in another typeface it would look odd. The fixed-width UI font is for GLOS's own apps. Reading the card's own ROM gives exactly that card's letters and puts no font data of IBM's in GLOS. | With DOS programs in windows (D5, after v1); any terminal that shows a DOS program's text |
 
 ---
 
@@ -1009,7 +1010,7 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 | Q2 | Enable SSE state (OSFXSR) for programs on Pentium III and later, matching what CWSDPMI and DOS/4GW do? | M4 |
 | Q3 | Which FreeDOS kernel to bundle in the boot image (D32); 2044 and later improve Windows-style hooks GLOS doesn't use | Before release |
 | Q4 | Package format, signing keys and hosting | M10 |
-| Q5 | Look-and-feel design: colours, decorations, icons, desktop metaphor | M6 |
+| Q5 | *Answered (v0.4):* the look is "Slate" (D7), chosen by the owner from four rendered candidates. Icons and the desktop metaphor come with the shell (D33) | — |
 | Q6 | A real-mode child process started by a GLOS app: run it as an exclusive session, or hold the DOS lock for its lifetime? | M6 |
 | Q7 | EMS for older games (needs DMA virtualisation once memory isn't identity-mapped) | After v1 |
 | Q8 | Launching apps: DOS EXEC through the DOS server, or GLOS loading DJGPP images itself as Windows' KERNEL loaded apps | M6 |
@@ -1020,8 +1021,9 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 | Q13 | VNC encodings and the recording format | M10 |
 | Q14 | *Answered (v0.2):* yes, in v1 (D30) | — |
 | Q15 | Resizing DOS-GL windows: reallocate the buffers, or keep the size and scale with `engine_present` | M8 |
-| Q16 | Which open TrueType fonts (OFL/MIT) to render the UI and terminal bitmap fonts from (D37) | M6 |
+| Q16 | *Answered (v0.4):* DejaVu Sans, Sans Bold and Sans Mono at 11 pixels (D37); a DOS program's text is in the VGA's own fonts (D42) | — |
 | Q17 | Which programs need direct-mode profiles by default. *M0 survey (docs/survey-iopl0.md): none among ours or Screamer Rally; the M4e forced-direct runs check the rest.* | M4e |
+| Q18 | GLOS's own shell for the terminal app (§10.6): a command interpreter of our own, more modern than COMMAND.COM (the owner's idea, 2026-10-13). To settle: its commands and syntax, how much of DOS's it keeps, batch files (its own interpreter, or handed to `COMMAND.COM /C` as the agent does), and how it starts DOS programs (full-screen sessions in v1; in windows after, D5). COMMAND.COM itself stays runnable full-screen as any DOS program | M9 |
 
 ---
 
@@ -1227,3 +1229,11 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
 - **§6.1:** start modes and the resident stub.
 - **§13:** P7 (conventional memory).
 - **M2 done** (docs/milestones-m0-m4.md has the status). Threads, the scheduler and the VME path moved to the start of M3.
+
+## Appendix F: Changes in v0.4 (2026-10-13)
+
+- **Q5 answered (D7):** the look is "Slate", the owner's choice of four candidates drawn by the window manager itself at 640×480 and 8 bits a pixel.
+- **Q16 answered (D37):** the UI fonts are DejaVu Sans, Sans Bold and Sans Mono at 11 pixels, the owner's choice of four sets.
+- **New user decision D42:** a DOS program in a window is drawn in the VGA's own fonts, read from the card.
+- **§21:** Q18 added (GLOS's own shell for the terminal app).
+- **M6 steps A to G done** (docs/milestones-m6.md has the status; docs/graphics.md the design).

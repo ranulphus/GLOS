@@ -2129,7 +2129,7 @@ def desk_case(profile, vcard, card):
         time.sleep(2)
         bare = shot("bare")
         checks["bare"] = bool(bare) and bare[:2] == (640, 480) and bare[2][:3] * 640 == bare[2][:640 * 3] \
-            and bare[2][:3] == bytes((0x66, 0x99, 0x99))
+            and bare[2][:3] == bytes((0x66, 0x66, 0x66))
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
@@ -2291,7 +2291,7 @@ def win_case(profile, vcard, card, bits, bits2):
         d = until(lambda d: has("A")(d) and (d["win"]["WINTEST A"]["w"], d["win"]["WINTEST A"]["h"]) == (230, 140))
         checks["sized"] = bool(d) and picture("A")
         ids = sorted(w["id"] for t, w in desk()["win"].items() if t.startswith("WINTEST"))
-        click(44 + 120 * ids.index(wb["id"]) + 10, 470)
+        click(62 + 120 * ids.index(wb["id"]) + 10, 470)        # (the bar's buttons: from 62, 120 wide)
         checks["bar-button"] = bool(until(focus("B")))
         click(wb["x"] + BORDER + 50, wb["y"] + BORDER + TITLE + BORDER + 30)
         click(wb["x"] + BORDER + 4 + 5, wb["y"] + BORDER + 4 + 5)

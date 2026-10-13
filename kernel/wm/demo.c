@@ -1,6 +1,6 @@
 /* A desktop to look at and to compare (kernel/include/wm.h): the task bar,
  * three windows that overlap, one of them the focus, something drawn in
- * each, and the pointer. The host test composes it and writes it out
+ * each in one of the three fonts, and the pointer. The host test composes it and writes it out
  * (tests/host/wm_test.c: build/host/wm-desk-N.png); the kernel composes the
  * same on the real screen (glos desk demo), and a screenshot of that must be
  * the host's picture (make loopa-desk). */
@@ -17,7 +17,7 @@ void wm_demo(struct wm *m)
     wm_bar_text(m, "12:34", "ssh");
     a = wm_create(m, 24, 20, 260, 150, "Read me", WF_FRAME, 0);
     b = wm_create(m, 180, 90, 300, 200, "Pictures", WF_FRAME, 0);
-    c = wm_create(m, 60, 220, 220, 120, "C:\\GLOS", WF_FRAME | WF_FIXED, 0);
+    c = wm_create(m, 60, 220, 220, 120, "Processes", WF_FRAME | WF_FIXED, 0);
     if (!a || !b || !c)
         return;
     for (i = 0; i < 8; i++)
@@ -34,11 +34,14 @@ void wm_demo(struct wm *m)
     for (i = 0; i < 6; i++)
         gfx_text(&b->store, 8 + (i % 3) * 98, 78 + (i / 3) * 96, &gfx_font_ui,
                  (const char *[]){ "one.bmp", "two.bmp", "three.bmp", "four.bmp", "five.bmp", "six.bmp" }[i], -1, 0xFFFFFF);
-    gfx_fill(&c->store, 0, 0, 220, 120, 0x000000);
+    /* (GLOS's own text in columns, in the fixed-width UI font. Not a DOS program's screen, nor a prompt: one
+       of those in a window is drawn in the VGA's fonts, PRD D42.) */
+    gfx_fill(&c->store, 0, 0, 220, 120, 0x333333);
     for (i = 0; i < 6; i++)
         gfx_text(&c->store, 4, 4 + i * 15, &gfx_font_mono,
-                 (const char *[]){ "C:\\GLOS>dir /w", "GLOS.EXE   GLOSK.BIN  GLOS.CFG", "KEYS       CRASH",
-                                   "        3 file(s)", "        2 dir(s)", "C:\\GLOS>_" }[i], -1, 0x55FF55);
+                 (const char *[]){ "ID PROGRAM     STATE    KB", " 1 EDIT.EXE    running 184", " 2 PAINT.EXE   waiting 412",
+                                   " 3 CALC.EXE    running  96", "   desk        thread", "   vm          thread" }[i], -1,
+                 i ? 0xCCCCCC : 0xFFFFFF);
     wm_show(m, a, 1);
     wm_show(m, b, 1);
     wm_show(m, c, 1);

@@ -25,7 +25,7 @@ Desktop golden images match at 8, 16 and 32 bpp on the generic VBE card and on a
   retained-mode toolkit (the look of D7 is its own, and microui and Nuklear are immediate-mode libraries that
   repaint everything on every event).
 - **Q5 and Q16, the look and the fonts,** are the owner's: asked in step G, with pictures from the real
-  renderer.
+  renderer, and answered there (the status below).
 
 ## How an app runs (step A, as built: `kernel/app/app.c`)
 
@@ -255,4 +255,13 @@ Each step is a commit with its tests. The gate (`make gate`) must still pass at 
     `glos tick` answered within 0.1 s; the busy one ended by the hotkey.
   - A window's pixels can change behind the app (the user's new size, another depth): the app is told and
     asks again, and memory it has mapped is never reused until it has let go.
-- G and H: to do.
+- **G. The look: done** (2026-10-13; graphics.md §3.6).
+  - The owner chose from rendered candidates (four looks, four font sets, each the demonstration desktop as
+    the window manager draws it at 640x480 and 8 bits): the look "Slate", and DejaVu Sans at 11 pixels as
+    it was (PRD Q5 and Q16 answered).
+  - With it a new decision, PRD D42: a DOS program in a window is drawn in the VGA's own fonts, not the
+    UI's. Nothing draws one yet (D5); the demonstration's third window, which looked like a DOS prompt in
+    the UI's fixed-width font, shows GLOS's own text instead.
+  - `kernel/wm/wm.c`: the look's colours, the focus's close box filled with the one accent, and the task
+    bar's pictures (GLOS's mark, a window on each button, a sign beside the remote-session note).
+- H: to do.

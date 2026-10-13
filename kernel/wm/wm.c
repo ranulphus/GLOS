@@ -26,19 +26,38 @@
 #include "wm.h"
 
 
+/* "Slate" (PRD Q5, the owner's choice of four): dark title bars and a dark
+   task bar on a grey desktop, and orange for the window in front: its close
+   box and its task-bar button. Every colour is one of the palette's cube. */
 const struct wm_look wm_look_default = {
     1, 18, 10,
-    0x669999,
-    0x000000, 0xCCCCCC, 0x000000,
-    0xFFFFFF, 0x808080,
-    0xCCCCCC, 0x000000, 0x333333, 0xFFFFFF,
+    0x666666,
+    0x000000, 0x333333, 0xFFFFFF,
+    0x999999, 0x333333,
+    0xCC6633,
+    0x333333, 0xFFFFFF, 0xCC6633, 0xFFFFFF,
     &gfx_font_ui, &gfx_font_bold,
 };
 
 #define BAR_H     20                    /* the task bar's height */
-#define BAR_NAME  44                    /* its buttons start here, after GLOS's name */
+#define BAR_NAME  62                    /* its buttons start here, after GLOS's mark and name */
 #define BAR_BTN   120                   /* a button's width at most */
-#define BAR_RIGHT 96                    /* room for the note and the clock */
+#define BAR_RIGHT 110                   /* room for the note and the clock */
+#define ICON_W    11
+
+/* The task bar's pictures, one bit a pixel: GLOS's mark (two windows), a
+   window (a button's), and a line in use (beside the note). */
+static const u8 ico_glos[11][2] = {
+    { 0xFE, 0x00 }, { 0xFE, 0x00 }, { 0x82, 0x00 }, { 0x8F, 0xE0 }, { 0x8F, 0xE0 }, { 0x88, 0x20 },
+    { 0xF8, 0x20 }, { 0x08, 0x20 }, { 0x08, 0x20 }, { 0x08, 0x20 }, { 0x0F, 0xE0 },
+};
+static const u8 ico_win[9][2] = {
+    { 0xFF, 0xE0 }, { 0xFF, 0xE0 }, { 0x80, 0x20 }, { 0x80, 0x20 }, { 0x80, 0x20 }, { 0x80, 0x20 },
+    { 0x80, 0x20 }, { 0x80, 0x20 }, { 0xFF, 0xE0 },
+};
+static const u8 ico_link[7][2] = {
+    { 0x01, 0x00 }, { 0xFF, 0x80 }, { 0x01, 0x00 }, { 0x00, 0x00 }, { 0x10, 0x00 }, { 0x3F, 0xE0 }, { 0x10, 0x00 },
+};
 #define PTR_W     12
 #define PTR_H     19
 
@@ -175,8 +194,10 @@ static void bar_paint(struct wm *m)
     gfx_clip(s, 0);
     gfx_fill(s, 0, 0, s->w, s->h, l->bar);
     gfx_fill(s, 0, 0, s->w, 1, l->edge);
-    gfx_text(s, 6, ty, l->bold, "GLOS", -1, l->bar_text);
+    gfx_mono(s, 6, (BAR_H - 11) / 2 + 1, &ico_glos[0][0], ICON_W, 11, 2, l->bar_text, GFX_NONE);
+    gfx_text(s, 6 + ICON_W + 5, ty, l->bold, "GLOS", -1, l->bar_text);
     for (k = 0; (w = bar_button(m, k, &bw)); k++) {
+        u32 ink = w == m->focus ? l->bar_on_text : l->bar_text;
         x = BAR_NAME + (s32)k * bw;
         clip.x = x, clip.y = 1, clip.w = bw - 2, clip.h = s->h - 1;
         gfx_clip(s, &clip);
@@ -186,13 +207,17 @@ static void bar_paint(struct wm *m)
             gfx_frame(s, x, 3, bw - 2, s->h - 5, l->edge);
         clip.x += 4, clip.w -= 8;
         gfx_clip(s, &clip);
-        gfx_text(s, x + 4, ty, l->font, w->title, -1, w == m->focus ? l->bar_on_text : l->bar_text);
+        gfx_mono(s, x + 5, (BAR_H - 9) / 2 + 1, &ico_win[0][0], ICON_W, 9, 2, ink, GFX_NONE);
+        gfx_text(s, x + 5 + ICON_W + 4, ty, l->font, w->title, -1, ink);
     }
     gfx_clip(s, 0);
     tw = gfx_text_width(l->font, m->clock, -1);
     gfx_text(s, s->w - 6 - tw, ty, l->font, m->clock, -1, l->bar_text);
-    if (m->note[0])
-        gfx_text(s, s->w - 14 - tw - gfx_text_width(l->bold, m->note, -1), ty, l->bold, m->note, -1, l->bar_text);
+    if (m->note[0]) {                           /* someone is connected: the sign, and what by */
+        x = s->w - 14 - tw - gfx_text_width(l->bold, m->note, -1);
+        gfx_text(s, x, ty, l->bold, m->note, -1, l->bar_text);
+        gfx_mono(s, x - ICON_W - 4, (BAR_H - 7) / 2 + 1, &ico_link[0][0], ICON_W, 7, 2, l->bar_text, GFX_NONE);
+    }
     damage(m, &m->bar->frame);
 }
 
@@ -540,6 +565,8 @@ static void draw_window(const struct wm *m, struct gfx_surface *scr, const struc
         if (gfx_rect_cut(&bar, &keep)) {        /* the title, inside its bar and what is being drawn */
             s32 box = y + b + (l->title_h - l->box) / 2;
             gfx_clip(scr, &bar);
+            if (focus && l->mark != GFX_NONE)
+                gfx_fill(scr, x + b + (l->title_h - l->box) / 2, box, l->box, l->box, l->mark);
             gfx_frame(scr, x + b + (l->title_h - l->box) / 2, box, l->box, l->box, focus ? l->text : l->text_off);
             gfx_text(scr, x + b + l->title_h + 2, y + b + (l->title_h - l->bold->height) / 2 + 1, focus ? l->bold : l->font,
                      w->title, -1, focus ? l->text : l->text_off);

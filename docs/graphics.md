@@ -151,7 +151,7 @@ Pure code on surfaces, like the 2D library, and tested on the host the same way.
   pixels, and after a session the whole desktop is.
 - **The manager draws the frame**: a framed window (`WF_FRAME`) has a border, a title bar with a close box and
   its title, and a line under the bar, drawn straight onto the screen from the look (`struct wm_look`:
-  widths, colours, fonts; step G's to set). The frame's pixels are nobody's to keep.
+  widths, colours, fonts; §3.6). The frame's pixels are nobody's to keep.
 - **The order** is one list from the bottom up. Topmost windows (`WF_TOPMOST`: the task bar) stay above the
   rest; `wm_raise` puts a window at the top of its kind. **The focus** is one shown window or none; its title
   bar and its task-bar button show it; `wm_next` gives the next in the order windows were made (Alt-Tab).
@@ -178,10 +178,11 @@ that one time everything in its bounds is drawn from the bottom up.
 
 ### 3.3 The task bar
 
-A window of the manager's own along the bottom, topmost and never the focus: GLOS's name, a button for every
-framed window that is shown (in the order they were made, the focus's filled in), and at the right a note
-and the clock. The note is "ssh" while someone is connected (PRD D35): the remote-session sign is there and
-nowhere else, never drawn over a program's own picture.
+A window of the manager's own along the bottom, topmost and never the focus: GLOS's mark and name, a button
+for every framed window that is shown (in the order they were made, the focus's filled in), and at the right
+a note and the clock. The note is "ssh" while someone is connected, with a sign beside it (PRD D35): the
+remote-session sign is there and nowhere else, never drawn over a program's own picture. Its pictures are
+one-bit bitmaps of 11 pixels: the mark (two windows), a window on each button, a line in use.
 
 ### 3.4 In the kernel (`desk.c`)
 
@@ -212,6 +213,23 @@ nowhere else, never drawn over a program's own picture.
 - `make loopa-desk` (`jobs.py desk`): the demonstration composed on the real screen at 640×480 in 8, 16 and
   32 bits on the S3 (both machines) and the G200, each screenshot equal to the host's composition
   (`build/host/wm-desk-N.png`); the same again after a DOS program had the screen.
+
+### 3.6 The look and the fonts (PRD D7, D37, D42)
+
+The owner chose both from candidates the window manager itself drew (four looks, four font sets, 640×480 at
+8 bits a pixel).
+
+- **"Slate"** (`wm_look_default`): title bars and the task bar in dark grey with white writing, on a grey
+  desktop; a window that isn't the focus has a lighter bar and dark writing; borders and lines are one pixel
+  of black. One colour is not a grey, an orange: the close box and the task-bar button of the window in
+  front. Every colour is one of the palette's cube, so the desktop is the same picture at 8, 16 and 32 bits.
+- **The fonts** are DejaVu Sans and DejaVu Sans Bold for the desktop and DejaVu Sans Mono for GLOS's own
+  fixed-width text, at 11 pixels, one bit a pixel (§1.4).
+- **A DOS program's text is never in those.** One shown in a window (after v1, PRD D5) is drawn in the VGA's
+  own fonts at its text mode's cell size, so that it looks as it does full-screen: the card's ROM fonts,
+  which the loader finds with INT 10h 1130h and `glos shot` draws text screens with already
+  (supervisor.md §17.7).
+- **The pointer** is an arrow of 12 by 19, black with a white inside, which shows on anything.
 
 ## 4. Input (`kernel/wm/deskin.c`)
 

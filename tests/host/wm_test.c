@@ -226,8 +226,9 @@ static void places(void)
     wm_show(&m, b, 0);
     CHECK(wm_next(&m, a) == c);
     wm_show(&m, b, 1);
-    CHECK(wm_bar_hit(&m, 50, 230) == a && wm_bar_hit(&m, 50 + 120, 230) == b && wm_bar_hit(&m, 20, 230) == 0
-          && wm_bar_hit(&m, 50 + 240, 230) == 0 && wm_bar_hit(&m, 50, 100) == 0);      /* (c has no frame: no button) */
+    /* (two buttons from 62, 74 wide here; c has no frame: no button) */
+    CHECK(wm_bar_hit(&m, 70, 230) == a && wm_bar_hit(&m, 70 + 74, 230) == b && wm_bar_hit(&m, 20, 230) == 0
+          && wm_bar_hit(&m, 70 + 148, 230) == 0 && wm_bar_hit(&m, 70, 100) == 0);
     t = wm_create(&m, 0, 0, 20, 20, "T", WF_TOPMOST, 0);
     wm_show(&m, t, 1);
     wm_raise(&m, a);

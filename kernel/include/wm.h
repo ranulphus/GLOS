@@ -30,12 +30,14 @@ struct wm_window {
     char title[WM_TITLE_MAX];
 };
 
-/* The look: sizes, colours and fonts the manager draws with (step G sets them). */
+/* The look: sizes, colours and fonts the manager draws with. Greys, and one
+   colour that isn't (`mark`), which says which window is in front. */
 struct wm_look {
     s32 border, title_h, box;           /* the border's width, the title bar's height, the close box's side */
     u32 desk;                           /* the desktop */
     u32 edge, face, text;               /* a window's border, its title bar and title */
     u32 face_off, text_off;             /* ... when it isn't the focus */
+    u32 mark;                           /* the focus's close box, filled (GFX_NONE: an outline, as the others') */
     u32 bar, bar_text, bar_on, bar_on_text;     /* the task bar; its button for the focus */
     const struct gfx_font *font, *bold;
 };
