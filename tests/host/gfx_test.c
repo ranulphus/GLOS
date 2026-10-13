@@ -15,7 +15,6 @@
 #include "gfx.h"
 #include "png.h"
 
-extern const struct gfx_font gfx_font_ui, gfx_font_bold, gfx_font_mono;
 void gfx_testcard(struct gfx_surface *s);
 
 static int fails;

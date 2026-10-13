@@ -1,13 +1,14 @@
 # GLOS graphics and window system: design
 
-What [supervisor.md](supervisor.md) is for the supervisor, for PRD §9: the 2D library, the display, and (as M6's
-steps D to F land) the window manager, events and the app's side of them. Each part says what is built and
-where. Plan and status: [milestones-m6.md](milestones-m6.md).
+What [supervisor.md](supervisor.md) is for the supervisor, for PRD §9 and §10: the 2D library, the display, the
+window manager, input, and apps' windows through the API. Each part says what is built and where. Plan and
+status: [milestones-m6.md](milestones-m6.md).
 
-## 1. The 2D library (`kernel/gfx/`, `kernel/include/gfx.h`)
+## 1. The 2D library (`kernel/gfx/`, `include/glos/gfx.h`)
 
 What the window system draws with, and what an app draws into its window with. Pure code on memory: it knows
-nothing of the kernel, and `tests/host/gfx_test.c` runs it on the host.
+nothing of the kernel, and `tests/host/gfx_test.c` runs it on the host. Its header is a public one, in plain C
+types; `sdk/libglos` builds the same sources for the program (§5.3).
 
 ### 1.1 Surfaces
 
@@ -156,6 +157,8 @@ Pure code on surfaces, like the 2D library, and tested on the host the same way.
   bar and its task-bar button show it; `wm_next` gives the next in the order windows were made (Alt-Tab).
 - **Where a point is** (`wm_hit`): the topmost shown window there, and the part: client, title bar, close
   box, the bottom right corner (12 pixels, where a window that may be resized is dragged to do it), border.
+- **The outline** (`wm_ghost`): one rectangle's outline above every window, two pixels wide, black outside and
+  white inside so that it shows on anything. It is where a window being moved or sized will be (§4.3).
 
 ### 3.2 The composer
 
@@ -192,7 +195,8 @@ nowhere else, never drawn over a program's own picture.
   display calls the desktop's painter, which says "everything" and wakes the thread.
 - **Memory:** a window's pixels are whole pages of their own at `WIN_BASE` (C2000000h, 32 MB of addresses
   whose page tables are in every address space from the start), a frame each, so that an app's window can be
-  mapped into the app as well (step F). The last 64 free frames are never given to windows.
+  mapped into the app as well (§5.2). The core says which of its memory is pixels (`wm_host`); the rest
+  comes from the kernel's heap. The last 64 free frames are never given to windows.
 - `glos desk` lists the windows; `glos desk demo` puts up the demonstration (`demo.c`: three windows, the
   bar, the pointer) and `glos desk clear` takes it down.
 
@@ -208,3 +212,143 @@ nowhere else, never drawn over a program's own picture.
 - `make loopa-desk` (`jobs.py desk`): the demonstration composed on the real screen at 640×480 in 8, 16 and
   32 bits on the S3 (both machines) and the G200, each screenshot equal to the host's composition
   (`build/host/wm-desk-N.png`); the same again after a DOS program had the screen.
+
+## 4. Input (`kernel/wm/deskin.c`)
+
+### 4.1 Whose the keyboard and the mouse are
+
+While the desktop has the screen they are the desktop's (`vkbc_desk()`, called by the display when its mode is
+set and when a session takes the screen). The 8042's code (`kernel/vm/vkbc.c`, supervisor.md §10) reads the
+chip as it always does, and hands every byte to the desktop instead of the system VM's queue: DOS and the BIOS
+see no keys meanwhile. Injected input (`glos key`, `glos type`, `glos mouse`) goes the same way, so everything
+here can be driven over ssh.
+
+- The bytes go into a ring from the interrupt; the composer's thread takes them in its turn, with the manager
+  locked. Only **the kill hotkey** (Ctrl-Alt-Shift-Esc) is carried out at once, from the interrupt: it ends
+  the app whose window has the focus, and has to work when nothing else does.
+- **The mouse:** one a DOS driver has turned on is left as the driver set it (its packets have a fourth byte
+  if the driver turned a wheel on). One nobody has on is turned on for the desktop (the AUX port, IRQ 12,
+  reporting) and off again when a session takes over, on a controller that has an AUX port at all. Whether
+  a mouse reports is asked of the mouse itself at GLOS's start (its status, E9h): a driver that was unloaded
+  again leaves the port and IRQ 12 on and the mouse quiet. A packet's first byte has bit 3 set; anything
+  else is dropped until one comes, and half a packet is forgotten after a tenth of a second.
+- **When they change hands** everything held is forgotten: the app that saw a key or a button go down sees
+  it let go.
+
+### 4.2 Keys
+
+A key is its set 1 scan code, 100h added for those with an E0 prefix, and whether it went down or up. Its
+character comes from the US layout (Shift, Caps Lock, Num Lock for the number pad, Ctrl for the control
+characters; none with Alt). The locks start as the BIOS has them (40:17h). Other layouts are for later.
+
+**The manager's own**, never passed on:
+
+| Keys | |
+|---|---|
+| Alt-Tab | the focus to the next window, in the order they were made |
+| Alt-F4 | the window is asked to close |
+| Alt-F7 | the window is moved with the arrow keys |
+| Alt-F8 | ... or given another size |
+| Ctrl-Alt-Shift-Esc | the app with the focus is ended |
+
+In the last two an outline follows the arrows, eight pixels a step, one with Shift; Enter makes it so, Esc
+leaves the window alone (PRD D34: everything the mouse does here, the keys do).
+
+**Everything else** goes to the app whose window has the focus (§5.4). An app gets the keys that went down
+while it had the focus, and the up of each whatever happens between; when the focus leaves, the keys it still
+has down are let go for it first. The up of a key it never saw go down is not passed on.
+
+### 4.3 The mouse
+
+- A press on a window gives it the focus (and raises it); on a task-bar button, that button's window.
+- **The title bar** moves the window, **the bottom right corner** sizes it. An outline follows the pointer
+  and the window is moved or sized when the button is let go: nothing is copied meanwhile, which a 486
+  would be slow at. The outline stays where a window may be: a client area of at least 80 by 40, no larger
+  than the screen, the title bar always in reach.
+- **The close box** closes when the button is let go on it.
+- **The client area** of the focus's window is the app's: movements over it, and from a button's press there
+  everything until all buttons are up again, wherever the pointer goes (so a drag can leave the window). The
+  press that gives a window the focus is passed on too.
+- The pointer is hidden until the mouse first moves.
+
+A window of an app is sized by the manager, at once; the app is told afterwards (§5.2). A window asked to
+close is the app's to close: it gets the event, and Alt-F4 on an app that never looks does nothing (the kill
+hotkey is for that).
+
+## 5. Apps' windows (`kernel/wm/deskapp.c`, `kernel/app/api.c`, `sdk/libglos`)
+
+### 5.1 The API
+
+`include/glos/api.h` is the reference: functions 5 to 15 of the entry behind DPMI 0A00h "GLOS" (the event
+queue; a window made, closed, shown, moved, sized, titled, given the focus; its pixels; `present`; the
+screen). Structures start with their size, and the kernel reads and writes as much of one as it knows.
+They run on the app's own thread, each with the manager locked for its length.
+
+### 5.2 A window's pixels
+
+- They are the manager's memory, **mapped into the app as well** (`win_map`, at 80000000h and above, clear
+  of the blocks a program asks for). The app draws there itself, in the screen's own format, and says where
+  (`present`, which is `wm_damage`): the composer copies from the same memory. There is no second copy and
+  no call per drawing operation.
+- The mapping is made and undone **on the app's thread only**, in its own address space.
+- **The manager may give a window new pixels behind the app's back:** the user gave it another size, or the
+  screen has another format (then every window's are new, and cleared). The app gets `GLOS_EV_RESIZE` and
+  asks where its pixels are now (`GLOS_FN_PIXELS`). Until it has, it draws in the old ones, which nothing
+  shows any more but which stay its own to write on: **memory an app has mapped is never given to anyone
+  else** (`pins`). It lets go of them at its next window call, and at its end. So a window can be sized
+  while its app is busy or stuck, and the worst an app that never asks can do is keep one window's worth of
+  memory.
+- An app's end takes its windows away, wherever it happens.
+
+### 5.3 libglos
+
+`sdk/libglos` is the C side for DJGPP: a wrapper for each function, `glos_ptr()` (a linear address as the
+program's own pointer, through DJGPP's near pointers) and `glos_surface()` (a window's pixels as a surface of
+the 2D library). The 2D library and the three fonts are in it: the kernel's sources, built for the program.
+
+### 5.4 The keyboard and the mouse a DOS program reads
+
+An app that has made a window has a keyboard and a mouse of its own (`kernel/app/dev.c`), fed with what the
+desktop gives it, so code written for DOS reads the keys of its own window and nobody else's:
+
+- **INT 16h** (00h/10h, 01h/11h, 02h/12h, 05h) from a buffer of its own, with the BIOS's codes (the function
+  keys' with Shift, Ctrl and Alt; the grey keys' E0h, which the old functions give as 00h). The wait for a
+  key is a sleep on the app's thread, not the BIOS's loop in the system VM.
+- **Port 60h and IRQ 1** for an app with a handler: a scan code at a time, the next when the last has been
+  read and its interrupt has ended. A handler that passes the interrupt on (DJGPP's own does, having looked
+  for Ctrl-C) reaches the host's default, which keeps the key for INT 16h as the BIOS's would.
+- **INT 33h**: there is a mouse, with two buttons; where it is in the window's client area and its buttons
+  (03h), how far it has moved (0Bh). The rest is accepted and does nothing.
+
+An app with no window reads the PC's keyboard through DOS and the BIOS as before; while the desktop has the
+keyboard there are no keys for it (a terminal is M9's; DOS programs in windows come after v1, PRD D5).
+
+### 5.5 Tests
+
+- `make loopa-win` (`jobs.py win`; `tests/dos/wintest.c`), at 640×480 in 32 bits on the S3, 16 on the G200
+  and 8 on the 486, everything driven with `glos key` and `glos mouse`:
+  - two apps' windows where they asked to be, each with its own picture on the real screen;
+  - keys to the one with the focus only; Alt-Tab;
+  - a window moved by its title bar (the outline first), sized by its corner (the app draws again in its new
+    pixels), the focus by a task-bar button, a press in the client area, the close box;
+  - the same by keys: Alt-F7 and Alt-F8 with arrows and Enter, Esc, Alt-F4;
+  - three apps reading the keyboard three ways (events, INT 16h, port 60h with their own IRQ 1 handler):
+    each gets the keys typed while it had the focus, and none of the others';
+  - INT 33h: the position in the client area, the buttons;
+  - an app that draws 50 times a second, alone and beside one that draws in a busy loop: at least a third of
+    its pace kept (measured: 47 against 49 on the Pentium II, 42 against 49 on the 486), `glos tick`
+    answered within 0.1 s throughout, the busy one's picture moving; the kill hotkey ends the busy one;
+  - a session beside a window (the window is there again after); another depth (the app is told, and draws
+    again); ten apps that end with a window up, after which the kernel has the memory it had; `glos exit`
+    with a window up.
+- The same suite's two `winphys` cases use 86Box's own keyboard and PS/2 mouse, through the 8042: the pointer
+  into a window, a press, a key, Alt-F4; once with CuteMouse loaded and once with it unloaded before GLOS
+  starts, when the desktop turns the mouse on for itself.
+
+### 5.6 Limits
+
+- One layout (US). No key repeat of the manager's own: the keyboard's.
+- Ctrl-C in a window is a key (INT 16h gives 2E03h), not DJGPP's SIGINT: its handler looks at the BIOS's
+  shift flags at 40:17h, which are the system VM's.
+- INT 33h has no handler calls (0Ch, 14h), no ranges and no cursor of its own.
+- The pointer has one shape and no acceleration.

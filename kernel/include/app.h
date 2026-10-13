@@ -44,6 +44,13 @@ int app_vm_ending(void);                /* the call under way is an app's end */
 void app_vm_ended(struct trapframe *tf) __attribute__((noreturn));      /* DOS has ended the app's process */
 u16 app_vm_psp(void);                   /* the PSP of the app the VM thread makes a call for, or 0 */
 
+/* Events (app.c): the desktop gives them (e->size and e->time carry the
+   pointer's movement for a mouse event on the way in), the API takes them. */
+struct glos_event;
+void app_event(struct app *a, const struct glos_event *e);
+int app_event_get(struct app *a, struct glos_event *e);         /* 1 and the oldest, or 0 */
+int app_event_waiting(const struct app *a);
+
 /* From interrupts. */
 void app_tick(void);                    /* every kernel tick */
 void app_irq0(void);                    /* the PC's timer's interrupt */

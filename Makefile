@@ -31,6 +31,8 @@
 #                       and the G200, a screenshot of each against the host's own rendering
 #   make loopa-desk     the desktop (M6): the demonstration's windows, task bar and pointer composed on the
 #                       real screen at each depth, against the host's composition
+#   make loopa-win      windows, input and the API (M6): apps with windows on the real screen, driven with
+#                       glos key and glos mouse; the keyboard three ways; a busy app beside one that draws
 #   make fonts          kernel/gfx/fonts again from TrueType fonts (tools/mkfont.py; on the host)
 #   make loopa-apps     GLOS apps (M6): APPTESTs at once, beside a busy one, a session, a crash; kills;
 #                       GLOS /RUN with an app (runs on the host)
@@ -50,7 +52,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: loopa-apps loopa-display loopa-desk fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: loopa-apps loopa-display loopa-desk loopa-win fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -175,7 +177,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c kernel/app/dev.c $(GFX_SRCS) kernel/gfx/display.c $(WM_SRCS) kernel/wm/desk.c
+         kernel/app/app.c kernel/app/api.c kernel/app/dev.c $(GFX_SRCS) kernel/gfx/display.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
@@ -260,6 +262,9 @@ loopa-display: all dos-tests build/dj/APPTEST.EXE host-test check-deps
 # The desktop (M6 step D): the demonstration's windows on the S3 and the G200 against the host's composition.
 loopa-desk: all dos-tests host-test check-deps
 	$(Q)python3 tests/loopa/jobs.py desk -j $(JOBS)
+# Windows, input and the API (M6 steps E and F): WINTESTs on the desktop, driven with glos key and glos mouse.
+loopa-win: all dos-tests build/dj/WINTEST.EXE check-deps
+	$(Q)python3 tests/loopa/jobs.py win -j $(JOBS)
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py input -j $(JOBS)
 # M4a: the DPMI host's checks (DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i).
@@ -338,12 +343,25 @@ build/dj/GDBME.EXE: tests/dos/gdbme.c
 	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-nm $@ > build/dj/GDBME.sym
 # DIRTEST (tests/dos/dirtest.c): a program at IOPL 3 and what GLOS takes back from it (M4e).
 # libglos (sdk/libglos, include/glos/api.h): the GLOS API for DJGPP programs (M6), and APPTEST, the apps suite's app.
-build/sdk/libglos.a: sdk/libglos/glos.c include/glos/api.h
+# The 2D library in it is the kernel's own code (kernel/gfx), built for the program.
+LIBGLOS_GFX := kernel/gfx/gfx.c kernel/gfx/pal.c kernel/gfx/font.c kernel/gfx/region.c \
+               kernel/gfx/fonts/ui.c kernel/gfx/fonts/bold.c kernel/gfx/fonts/mono.c
+build/sdk/libglos.a: sdk/libglos/glos.c include/glos/api.h include/glos/gfx.h $(LIBGLOS_GFX)
 	@mkdir -p build/sdk
 	$(Q)echo "  DJCC    $<"
+	$(Q)rm -f $@ build/sdk/*.o
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/glos.o $<
-	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/glos.o
+	$(Q)for f in $(LIBGLOS_GFX); do \
+	    $(DJCC) -O2 -Wall -Werror -ffreestanding -Iinclude -Ikernel/include -c -o build/sdk/gfx_$$(basename $$f .c).o $$f || exit 1; \
+	  done
+	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/*.o
 build/dj/APPTEST.EXE: tests/dos/apptest.c build/sdk/libglos.a tools/glosmark.py
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)python3 tools/glosmark.py $@
+# WINTEST (tests/dos/wintest.c): an app with a window, for the win suite (M6 steps E and F).
+build/dj/WINTEST.EXE: tests/dos/wintest.c build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a

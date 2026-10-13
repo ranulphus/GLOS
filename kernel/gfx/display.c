@@ -224,6 +224,7 @@ static int mode_set(void)
         palette();
     d.on = 1;
     mm_vga_hide(!d.held);
+    vkbc_desk(!d.held);
     kprintf("GLOS-DISPLAY on mode=%x %ux%ux%u pitch=%u lfb=%08x rgb=%u.%u.%u dac=%u\n", d.mode, d.w, d.h, d.bpp, pitch,
             d.phys, f.rsize, f.gsize, f.bsize, f.bpp == 8 ? d.dac : 0);
     return 0;
@@ -281,6 +282,7 @@ void display_vm_turn(void)
         }
         d.on = d.held = 0;
         mm_vga_hide(0);
+        vkbc_desk(0);
         return;
     }
     if (!d.w) {
@@ -306,6 +308,7 @@ void display_session(int begin)
     if (begin && !d.held) {
         d.held = 1;
         mm_vga_hide(0);
+        vkbc_desk(0);
         text_mode();
     } else if (!begin && d.held) {
         d.held = 0;
@@ -322,6 +325,7 @@ void display_leave(void)
     if (was)
         text_mode();
     mm_vga_hide(0);
+    vkbc_desk(0);
 }
 
 /* A program's INT 10h (its registers at eax to edx) while the desktop has

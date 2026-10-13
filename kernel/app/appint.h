@@ -1,6 +1,8 @@
 /* GLOS apps: what kernel/app's files share (app.c, dev.c). */
 #ifndef K_APPINT_H
 #define K_APPINT_H
+#define GLOS_KERNEL
+#include "glos/api.h"
 #include "app.h"
 #include "dpmi.h"
 #include "vpic.h"
@@ -66,7 +68,30 @@ struct app {
     } pit;
     u8 p61, rtc_index;
     u32 nirq[16];                               /* interrupts given to it, by line */
+    /* its input (dev.c): what the desktop gave it while a window of its own had the focus. An app that has
+       made a window reads this keyboard and this mouse; one that never has reads the PC's, with DOS. */
+    u8 gui;
+    struct glos_event evq[32];                  /* events, for the API */
+    u32 evh, evt;
+    struct {
+        u8 byte;                                /* a scan code, for port 60h ... */
+        u16 key;                                /* ... and with a key's last byte, the key as the BIOS keeps it (0: none) */
+    } kb_q[32];
+    u32 kb_qh, kb_qt;
+    u8 kb_out, kb_full;                         /* the byte port 60h holds, and whether it has been read */
+    u16 kb_out_key;
+    u16 kb_keys[16];                            /* keys as the BIOS has them (scan code, character), for INT 16h */
+    u32 kb_kh, kb_kt;
+    u8 kb_shift;                                /* the BIOS's shift flags: right shift, left shift, Ctrl, Alt */
+    s32 ms_x, ms_y, ms_dx, ms_dy;               /* the mouse, for INT 33h: where, and how far since last asked */
+    u8 ms_buttons;
 };
+
+/* dev.c: its keyboard and mouse as a DOS program reads them. */
+void appdev_key(struct app *a, u32 key, int down, u32 ch, u32 mods);
+void appdev_mouse(struct app *a, s32 x, s32 y, s32 dx, s32 dy, u32 buttons);
+int appdev_int16(struct app *a, struct trapframe *from, struct rmregs *r);      /* 1: answered */
+int appdev_int33(struct app *a, struct rmregs *r);
 
 
 /* dev.c: an app's own devices. */

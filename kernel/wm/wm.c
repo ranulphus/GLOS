@@ -25,7 +25,6 @@
  * name, a button for every framed window, a note and the clock. */
 #include "wm.h"
 
-extern const struct gfx_font gfx_font_ui, gfx_font_bold;
 
 const struct wm_look wm_look_default = {
     1, 18, 10,
@@ -266,7 +265,7 @@ void wm_init(struct wm *m, const struct wm_host *host, s32 w, s32 h, const struc
 static int store_new(struct wm *m, struct gfx_surface *s, void **mem, s32 cw, s32 ch)
 {
     u32 pitch = (u32)cw * (m->fmt.bpp / 8u);
-    void *p = m->host.alloc(pitch * (u32)ch);
+    void *p = m->host.alloc(pitch * (u32)ch, 1);
     if (!p)
         return -1;
     gfx_init(s, p, cw, ch, pitch, &m->fmt);
@@ -279,12 +278,12 @@ struct wm_window *wm_create(struct wm *m, s32 x, s32 y, s32 cw, s32 ch, const ch
 {
     struct wm_window *w;
     u32 i;
-    if (cw < 1 || ch < 1 || cw > 4096 || ch > 4096 || !(w = m->host.alloc(sizeof *w)))
+    if (cw < 1 || ch < 1 || cw > 4096 || ch > 4096 || !(w = m->host.alloc(sizeof *w, 0)))
         return 0;
     for (i = 0; i < sizeof *w; i++)
         ((u8 *)w)[i] = 0;
     if (store_new(m, &w->store, &w->mem, cw, ch) != 0) {
-        m->host.free(w, sizeof *w);
+        m->host.free(w, sizeof *w, 0);
         return 0;
     }
     w->id = m->next_id++;
@@ -307,10 +306,10 @@ void wm_destroy(struct wm *m, struct wm_window *w)
         m->focus = 0;
     if (m->bar == w)
         m->bar = 0;
-    m->host.free(w->mem, w->store.pitch * (u32)w->store.h);
+    m->host.free(w->mem, w->store.pitch * (u32)w->store.h, 1);
     w->flags = 0;
     bar_stale(m);
-    m->host.free(w, sizeof *w);
+    m->host.free(w, sizeof *w, 0);
 }
 
 void wm_show(struct wm *m, struct wm_window *w, int on)
@@ -348,7 +347,7 @@ int wm_resize(struct wm *m, struct wm_window *w, s32 cw, s32 ch)
     gfx_blit(&s, 0, 0, &w->store, 0, 0, w->store.w, w->store.h);
     if (shown(w))
         damage(m, &w->frame);
-    m->host.free(w->mem, w->store.pitch * (u32)w->store.h);
+    m->host.free(w->mem, w->store.pitch * (u32)w->store.h, 1);
     w->store = s;
     w->mem = mem;
     set_frame(m, w, w->frame.x, w->frame.y);
@@ -470,6 +469,33 @@ void wm_pointer(struct wm *m, s32 x, s32 y, int on)
         damage(m, &r);
 }
 
+/* The outline's four sides. */
+static void ghost_damage(struct wm *m)
+{
+    struct gfx_rect g = m->ghost, r;
+    if (!m->ghost_on)
+        return;
+    r = g, r.h = 2;
+    damage(m, &r);
+    r.y = g.y + g.h - 2;
+    damage(m, &r);
+    r = g, r.w = 2;
+    damage(m, &r);
+    r.x = g.x + g.w - 2;
+    damage(m, &r);
+}
+
+void wm_ghost(struct wm *m, const struct gfx_rect *r)
+{
+    if (r && m->ghost_on && r->x == m->ghost.x && r->y == m->ghost.y && r->w == m->ghost.w && r->h == m->ghost.h)
+        return;
+    ghost_damage(m);
+    m->ghost_on = r != 0;
+    if (r)
+        m->ghost = *r;
+    ghost_damage(m);
+}
+
 void wm_screen(struct wm *m, s32 w, s32 h, const struct gfx_fmt *fmt)
 {
     struct wm_window *v;
@@ -484,7 +510,7 @@ void wm_screen(struct wm *m, s32 w, s32 h, const struct gfx_fmt *fmt)
         struct gfx_surface s;
         void *mem;
         if (store_new(m, &s, &mem, v->store.w, v->store.h) == 0) {
-            m->host.free(v->mem, v->store.pitch * (u32)v->store.h);
+            m->host.free(v->mem, v->store.pitch * (u32)v->store.h, 1);
             v->store = s;
             v->mem = mem;
         }
@@ -523,8 +549,14 @@ static void draw_window(const struct wm *m, struct gfx_surface *scr, const struc
     gfx_blit(scr, c.x, c.y, &w->store, 0, 0, c.w, c.h);
 }
 
+/* What is above every window: the outline (black outside, white inside: it
+   shows on anything), and the pointer. */
 static void draw_pointer(const struct wm *m, struct gfx_surface *scr)
 {
+    if (m->ghost_on) {
+        gfx_frame(scr, m->ghost.x, m->ghost.y, m->ghost.w, m->ghost.h, 0x000000);
+        gfx_frame(scr, m->ghost.x + 1, m->ghost.y + 1, m->ghost.w - 2, m->ghost.h - 2, 0xFFFFFF);
+    }
     if (!m->pointer)
         return;
     gfx_mono(scr, m->px, m->py, &ptr_fill[0][0], PTR_W, PTR_H, 2, 0xFFFFFF, GFX_NONE);

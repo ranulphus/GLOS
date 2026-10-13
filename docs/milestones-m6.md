@@ -231,4 +231,28 @@ Each step is a commit with its tests. The gate (`make gate`) must still pass at 
     length of a whole screen's drawing (`vif-stuck` after a session): it is of the normal class.
   - Left for step E: moving and resizing by hand (the calls are there, and tested); for step F: windows that
     are apps'.
-- E to H: to do.
+- **E. Input and events: done** (2026-10-12; graphics.md §4, §5.4).
+  - `kernel/wm/deskin.c`: the keyboard and the mouse while the desktop has the screen, from the 8042's code
+    (real bytes and injected ones alike); the focus by a press, a task-bar button and Alt-Tab; moving and
+    sizing by the title bar and the corner, and by Alt-F7 and Alt-F8 with the arrows (an outline, then the
+    window); the close box and Alt-F4; the kill hotkey for the app in front.
+  - An event queue for each app (`GLOS_FN_EVENT`), and for an app with a window a keyboard and a mouse of
+    its own as a DOS program reads them: INT 16h, port 60h with IRQ 1, INT 33h (`kernel/app/dev.c`).
+  - Found on the way:
+    - DJGPP's own IRQ 1 handler reads port 60h and passes the interrupt on to the BIOS's, which reads it
+      again: the port must hold a byte until its interrupt has ended (the first model gave the next byte at
+      once, and INT 16h lost every other key);
+    - a mouse driver unloaded before GLOS starts leaves the AUX port and IRQ 12 on and the mouse quiet: the
+      mouse is asked whether it reports (E9h).
+- **F. API v1: done** (2026-10-12; graphics.md §5; `include/glos/api.h`, `include/glos/gfx.h`).
+  - Functions 5 to 15: events; windows made, closed, shown, moved, sized, titled, focused; their pixels,
+    mapped into the app; `present`; the screen. `kernel/wm/deskapp.c` is the desktop's side.
+  - libglos: the wrappers, `glos_ptr`, `glos_surface`, and the 2D library with its fonts, the kernel's own
+    sources built for the program.
+  - `make loopa-win`: five cases (the S3 at 32 bits, the G200 at 16, the 486 at 8; 86Box's own keyboard and
+    PS/2 mouse with CuteMouse and without). The exit's first half: an app drawing 50 times a second keeps
+    47 a second beside one drawing in a busy loop on the Pentium II (49 alone) and 42 on the 486 (49);
+    `glos tick` answered within 0.1 s; the busy one ended by the hotkey.
+  - A window's pixels can change behind the app (the user's new size, another depth): the app is told and
+    asks again, and memory it has mapped is never reused until it has let go.
+- G and H: to do.

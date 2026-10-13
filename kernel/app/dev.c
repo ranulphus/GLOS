@@ -20,6 +20,14 @@
  *                      tick: right on average, in steps of about a
  *                      millisecond (1,165 counts), and no faster than 1024
  *                      interrupts a second.
+ *   60h, 64h           the keyboard, with keys only while a window of the
+ *                      app's has the focus (the desktop gives them:
+ *                      appdev_key): scan codes one at a time at 60h, each
+ *                      with IRQ 1 if the app has a handler for it. A key
+ *                      nobody's handler took, or that its handler passed
+ *                      on, goes into a buffer as the BIOS's would, for
+ *                      INT 16h (answered here: appdev_int16), and INT 33h
+ *                      is the mouse in the app's window (appdev_int33)
  *   61h                bit 4 toggles at every read (delay loops watch it);
  *                      writes are dropped: no speaker for an app
  *   70h/71h            the RTC and CMOS, to read: the time from the chip,
@@ -83,6 +91,8 @@ void appdev_irq0(struct app *a)
 /* By the kernel's clock, not by the calls: ticks the clock was given all at
    once (core/timer.c: lost while interrupts were off) count, and a pause
    (no calls) is cut to 60. */
+static void kb_feed(struct app *a);
+
 void appdev_tick(struct app *a)
 {
     u32 now = timer_ticks(), n = now - a->pit.at;
@@ -98,6 +108,8 @@ void appdev_tick(struct app *a)
         if (!pit_real(a) && wants_irq0(a))
             raise(a, 0);
     }
+    if (!a->kb_full && a->kb_qh != a->kb_qt)    /* the keyboard's next byte */
+        kb_feed(a);
 }
 
 /* The FPU reported an error while the app's code ran (IRQ 13, CR0.NE
@@ -210,6 +222,158 @@ static u8 rtc_in(const struct app *a)
     }
 }
 
+/* ---- the keyboard and the mouse, as a DOS program reads them */
+
+/* A key as the BIOS keeps it (scan code, character): into the buffer INT 16h reads. */
+static void cook(struct app *a, u16 key)
+{
+    if (key && a->kb_kt - a->kb_kh < ARRAY_SIZE(a->kb_keys)) {
+        a->kb_keys[a->kb_kt++ % ARRAY_SIZE(a->kb_keys)] = key;
+        thread_wake(&a->wq);
+    }
+}
+
+/* The next scan code into port 60h, with IRQ 1, for an app that has a
+   handler for it: when the last has been read and its interrupt has ended.
+   Not before: a handler reads the port and passes the interrupt on to the
+   one it replaced, which reads the port again and must find the same byte
+   (DJGPP's own does, looking for Ctrl-C, and the BIOS's keeps the key).
+   For an app with no handler the keys go straight to the BIOS's buffer, as
+   the BIOS's own handler would put them. */
+static void kb_feed(struct app *a)
+{
+    u32 n = ARRAY_SIZE(a->kb_q);
+    if (!(a->ctx && a->ctx->vidt[0x09].sel)) {
+        while (a->kb_qh != a->kb_qt) {
+            a->kb_out = a->kb_q[a->kb_qh % n].byte;
+            cook(a, a->kb_q[a->kb_qh++ % n].key);
+        }
+        a->kb_full = 0;
+        return;
+    }
+    if (a->kb_full || a->kb_qh == a->kb_qt || (a->pic.p[0].isr & 2))
+        return;
+    a->kb_out = a->kb_q[a->kb_qh % n].byte;
+    a->kb_out_key = a->kb_q[a->kb_qh++ % n].key;
+    a->kb_full = 1;
+    raise(a, 1);
+}
+
+/* A key that went down as the BIOS would keep it: its scan code and its
+   character (E0h for the grey keys' none); 0 for the keys it keeps
+   nothing of (the shifts, the locks). The function keys' codes change with
+   a shift, as the BIOS has them. */
+static u16 bios_key(u32 key, u32 ch, u32 mods)
+{
+    u32 scan = key & 0x7F;
+    switch (key) {
+    case 0x2A: case 0x36: case 0x1D: case 0x11D: case 0x38: case 0x138: case 0x3A: case 0x45: case 0x46:
+        return 0;
+    }
+    if (key >= 0x3B && key <= 0x44)
+        scan += mods & GLOS_MOD_ALT ? 0x2D : mods & GLOS_MOD_CTRL ? 0x23 : mods & GLOS_MOD_SHIFT ? 0x19 : 0;
+    return (u16)(scan << 8 | ((key & 0x100) && !ch ? 0xE0 : ch & 0xFF));
+}
+
+/* The desktop: a key, for the app whose window has the focus. */
+void appdev_key(struct app *a, u32 key, int down, u32 ch, u32 mods)
+{
+    u32 f = irq_save(), n = ARRAY_SIZE(a->kb_q);
+    a->kb_shift = (u8)((mods & GLOS_MOD_SHIFT ? 2 : 0) | (mods & GLOS_MOD_CTRL ? 4 : 0) | (mods & GLOS_MOD_ALT ? 8 : 0));
+    if (n - (a->kb_qt - a->kb_qh) >= 2) {
+        if (key & 0x100) {
+            a->kb_q[a->kb_qt % n].byte = 0xE0;
+            a->kb_q[a->kb_qt++ % n].key = 0;
+        }
+        a->kb_q[a->kb_qt % n].byte = (u8)((key & 0x7F) | (down ? 0 : 0x80));
+        a->kb_q[a->kb_qt++ % n].key = down ? bios_key(key, ch, mods) : 0;
+    }
+    kb_feed(a);
+    irq_restore(f);
+}
+
+void appdev_mouse(struct app *a, s32 x, s32 y, s32 dx, s32 dy, u32 buttons)
+{
+    a->ms_x = x;
+    a->ms_y = y;
+    a->ms_dx += dx;
+    a->ms_dy += dy;
+    a->ms_buttons = (u8)buttons;
+}
+
+/* A key as INT 16h's old functions give it (00h, 01h): the grey keys as
+   the number pad's, with no character. */
+static u16 old(u32 ah, u16 k) { return ah < 0x10 && (k & 0xFF) == 0xE0 && (k >> 8) ? (u16)(k & 0xFF00) : k; }
+
+/* INT 16h from the app (reflected, or through 0300h): its own keys. 1:
+   answered here. The wait for a key (00h, 10h) ends early for an interrupt
+   of the app's, and the INT is made again after the handler. */
+int appdev_int16(struct app *a, struct trapframe *from, struct rmregs *r)
+{
+    u32 ah = (r->eax >> 8) & 0xFF;
+    u16 k;
+    switch (ah) {
+    case 0x00: case 0x10:
+        while (a->kb_kh == a->kb_kt) {
+            if (app_sleep(a, 1024)) {           /* (an interrupt, or a key: look again) */
+                if (a->kb_kh != a->kb_kt)
+                    break;
+                if (from && (from->cs & 0xFFFF) != SEL_TRAMP)
+                    from->eip -= 2;
+                return 1;
+            }
+        }
+        k = a->kb_keys[a->kb_kh++ % ARRAY_SIZE(a->kb_keys)];
+        r->eax = (r->eax & ~0xFFFFu) | old(ah, k);
+        return 1;
+    case 0x01: case 0x11:
+        if (a->kb_kh == a->kb_kt) {
+            r->flags |= FL_ZF;
+        } else {
+            r->flags &= (u16)~FL_ZF;
+            r->eax = (r->eax & ~0xFFFFu) | old(ah, a->kb_keys[a->kb_kh % ARRAY_SIZE(a->kb_keys)]);
+        }
+        return 1;
+    case 0x02: case 0x12:
+        r->eax = (r->eax & ~0xFFu) | a->kb_shift;
+        return 1;
+    case 0x05:                                  /* a key put into the buffer */
+        cook(a, (u16)r->ecx);
+        r->eax &= ~0xFFu;
+        return 1;
+    default:
+        return 1;                               /* (the rate, the LEDs: not an app's to set) */
+    }
+}
+
+/* INT 33h from the app: the mouse in its window. 1: answered here. */
+int appdev_int33(struct app *a, struct rmregs *r)
+{
+    u32 ax = r->eax & 0xFFFF;
+    switch (ax) {
+    case 0x00: case 0x21:                       /* is there a mouse: yes, with two buttons */
+        r->eax = (r->eax & ~0xFFFFu) | 0xFFFF;
+        r->ebx = (r->ebx & ~0xFFFFu) | 2;
+        a->ms_dx = a->ms_dy = 0;
+        break;
+    case 0x03:                                  /* where, and the buttons */
+        r->ebx = (r->ebx & ~0xFFFFu) | a->ms_buttons;
+        r->ecx = (r->ecx & ~0xFFFFu) | (u16)a->ms_x;
+        r->edx = (r->edx & ~0xFFFFu) | (u16)a->ms_y;
+        break;
+    case 0x0B:                                  /* how far it moved since last asked */
+        r->ecx = (r->ecx & ~0xFFFFu) | (u16)a->ms_dx;
+        r->edx = (r->edx & ~0xFFFFu) | (u16)a->ms_dy;
+        a->ms_dx = a->ms_dy = 0;
+        break;
+    case 0x24:                                  /* the driver: version 8.0, a PS/2 mouse */
+        r->ebx = (r->ebx & ~0xFFFFu) | 0x0800;
+        r->ecx = (r->ecx & ~0xFFFFu) | 0x0400;
+        break;
+    }
+    return 1;                                   /* (the rest: showing it, its range, handlers: nothing to do) */
+}
+
 static u8 in8(struct app *a, u16 port)
 {
     switch (port) {
@@ -217,6 +381,13 @@ static u8 in8(struct app *a, u16 port)
         return vpic_read(&a->pic, port);
     case 0x40:
         return pit_read(a);
+    case 0x60:                                  /* the scan code; the same again until the next has come, */
+        if (!a->gui)                            /* which is at a tick after this one's interrupt has ended */
+            return 0xFF;
+        a->kb_full = 0;
+        return a->kb_out;
+    case 0x64:                                  /* a byte waits; the self-test passed, the keyboard is not locked */
+        return a->gui ? (u8)(0x14 | a->kb_full) : 0xFF;
     case 0x61:
         a->p61 ^= 0x10;
         return a->p61;
@@ -274,5 +445,11 @@ int app_irq_default(struct app *a, u8 vec)
     if (slave)                                  /* the end of that interrupt, by its level (one that has */
         vpic_write(&a->pic, 0xA0, (u8)(0x60 | (vec & 7)));     /* ended already: nothing) */
     vpic_write(&a->pic, 0x20, (u8)(0x60 | (slave ? 2 : vec & 7)));
+    if (vec == 0x09) {                          /* the keyboard's: the BIOS takes the byte and keeps the key */
+        cook(a, a->kb_out_key);
+        a->kb_out_key = 0;
+        a->kb_full = 0;
+        kb_feed(a);
+    }
     return 1;
 }

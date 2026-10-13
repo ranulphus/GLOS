@@ -219,6 +219,7 @@ int lin_fault(u32 lin);                 /* a page fault on a page still to be ba
 int lin_lock(u32 lin, u32 size);        /* 0600h: back what isn't yet; 0, or 0x8013 */
 int phys_map(u32 phys, u32 size, u32 *lin);
 int phys_unmap(u32 lin);
+int win_map(const void *kmem, u32 bytes, u32 *lin);     /* a window's pixels into the context (app/api.c) */
 int lin_host(u32 lin, u32 size);        /* host memory in the context: committed, no handle */
 int page_attr(u32 handle, u32 off, u32 n, u16 *attr, int set, u32 *done);      /* 0506h/0507h */
 int page_map(u32 handle, u32 off, u32 n, u32 phys, int device);                 /* 0508h/0509h */

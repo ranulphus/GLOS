@@ -58,6 +58,7 @@
 #include "agent.h"
 #include "app.h"
 #include "appint.h"
+#include "desk.h"
 #include "dpmi.h"
 #include "io.h"
 #include "kprintf.h"
@@ -263,6 +264,7 @@ static void app_thread_end(struct app *a)
         *pp = a->next;
     napps--;
     fpu_drop(current);
+    desk_app_gone(a);                           /* (its windows; none may point at it after this) */
     current->user = TU_NONE;
     current->name = "app-gone";
     kfree(a);
@@ -307,6 +309,10 @@ int app_rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, cons
         r->flags &= (u16)~FL_CF;
         return 0;
     }
+    if (a->gui && vec == 0x16 && kind != RM_FAR && appdev_int16(a, from, r))
+        return 0;                               /* an app with a window: its own keyboard (dev.c) */
+    if (a->gui && vec == 0x33 && kind != RM_FAR && appdev_int33(a, r))
+        return 0;                               /* ... and its own mouse */
     if (vec == 0x21 && kind != RM_FAR && ((r->eax >> 8) & 0xFF) == 0x4D && a->child_have) {
         a->child_have = 0;                      /* how its child ended: asked of DOS when the child did */
         r->eax = (r->eax & ~0xFFFFu) | a->child;
@@ -358,18 +364,53 @@ void app_return(struct app *a, struct trapframe *tf)
 /* An interrupt of its own that could be given to it now. */
 static int irq_due(const struct app *a) { return current->vif && vpic_pending(&a->pic); }
 
-/* Sleeps `ticks`, or until an interrupt of its own is due or it is killed:
-   the ticks left then (0: slept them all). */
+/* Sleeps `ticks`, or until something is there for it: an interrupt of its
+   own that is due, an event, a key for INT 16h, its kill. The ticks left
+   then (0: slept them all). */
 u32 app_sleep(struct app *a, u32 ticks)
 {
-    u32 until = timer_ticks() + ticks;
+    u32 until = timer_ticks() + ticks, ev = a->evt, key = a->kb_kt;
     s32 left;
     if (!until)
         until = 1;
-    while ((left = (s32)(until - timer_ticks())) > 0 && !a->kill && !irq_due(a))
+    while ((left = (s32)(until - timer_ticks())) > 0 && !a->kill && !irq_due(a) && a->evt == ev && a->kb_kt == key)
         thread_wait(&a->wq, until);
     return left > 0 ? (u32)left : 0;
 }
+
+/* ---- events (the desktop gives them, the API takes them) */
+
+void app_event(struct app *a, const struct glos_event *e)
+{
+    u32 f = irq_save(), n = ARRAY_SIZE(a->evq);
+    struct glos_event *last = a->evt != a->evh ? &a->evq[(a->evt - 1) % n] : 0;
+    if (last && e->type == GLOS_EV_MOUSE && !e->key && last->type == GLOS_EV_MOUSE && !last->key
+        && last->window == e->window) {
+        *last = *e;                             /* (a movement after a movement: the newer one) */
+    } else if (a->evt - a->evh < n) {
+        a->evq[a->evt++ % n] = *e;
+    }
+    if (e->type == GLOS_EV_KEY)
+        appdev_key(a, e->key, (int)e->down, e->ch, e->mods);
+    else if (e->type == GLOS_EV_MOUSE)
+        appdev_mouse(a, e->x, e->y, (s32)e->size, (s32)e->time, e->buttons);    /* (the desktop's: dx, dy there) */
+    a->evq[(a->evt - 1) % n].size = sizeof *e;
+    a->evq[(a->evt - 1) % n].time = (u32)(((unsigned long long)timer_ticks() * 125) >> 7);
+    thread_wake(&a->wq);
+    irq_restore(f);
+}
+
+int app_event_get(struct app *a, struct glos_event *e)
+{
+    u32 f = irq_save();
+    int got = a->evt != a->evh;
+    if (got)
+        *e = a->evq[a->evh++ % ARRAY_SIZE(a->evq)];
+    irq_restore(f);
+    return got;
+}
+
+int app_event_waiting(const struct app *a) { return a->evt != a->evh; }
 
 /* Its HLT: until an interrupt of its own. */
 void app_idle(struct app *a)

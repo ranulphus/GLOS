@@ -28,8 +28,8 @@ static u32 rnd(void) { rnd_state = rnd_state * 1664525u + 1013904223u; return rn
 static s32 rin(s32 lo, s32 hi) { return lo + (s32)(rnd() % (u32)(hi - lo + 1)); }
 
 static long held, allocs;
-static void *h_alloc(u32 n) { held += n; allocs++; return calloc(1, n ? n : 1); }
-static void h_free(void *p, u32 n) { held -= n; allocs--; free(p); }
+static void *h_alloc(u32 n, int pixels) { (void)pixels; held += n; allocs++; return calloc(1, n ? n : 1); }
+static void h_free(void *p, u32 n, int pixels) { (void)pixels; held -= n; allocs--; free(p); }
 static const struct wm_host host = { h_alloc, h_free };
 
 #define SW 160
@@ -143,8 +143,12 @@ static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rou
                 wm_title(mp, w, rnd() & 1 ? "Another name for it" : "x");
             break;
         case 10:
-            if (framed)
+            if (framed && (rnd() & 1)) {
                 wm_pointer(mp, rin(-5, SW + 5), rin(-5, SH + 5), rnd() % 4 != 0);
+            } else if (framed) {                /* the outline of a move or a new size */
+                struct gfx_rect g = { rin(-40, SW), rin(-40, SH), rin(1, 150), rin(1, 120) };
+                wm_ghost(mp, rnd() % 3 ? &g : 0);
+            }
             break;
         default:
             if (framed)

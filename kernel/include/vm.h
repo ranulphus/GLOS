@@ -145,6 +145,7 @@ void vkbc_tick(void);
 u8 vkbc_cmd(void);
 void vkbc_restore(u8 cmd);
 void vkbc_direct(int on);                       /* a direct-mode session begins (1) or ends (0) */
+void vkbc_desk(int on);                         /* the desktop has the keyboard and the mouse (1), or the VM again (0) */
 void vkbc_leave(void);
 void vkbc_trace(void);                          /* GLOS-KBC lines: its last 64 events (with a vif-stuck warning) */
 int vkbc_key(u32 code, int down);               /* injected: a set 1 code (100h up: with E0); 0, or -1: no room */

@@ -5,7 +5,6 @@
  * picture, pixel for pixel. */
 #include "gfx.h"
 
-extern const struct gfx_font gfx_font_ui, gfx_font_bold, gfx_font_mono;
 
 static const u8 arrow[16][2] = {                /* a pointer, 12 wide */
     { 0x80, 0x00 }, { 0xC0, 0x00 }, { 0xE0, 0x00 }, { 0xF0, 0x00 }, { 0xF8, 0x00 }, { 0xFC, 0x00 }, { 0xFE, 0x00 },

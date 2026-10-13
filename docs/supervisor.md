@@ -627,6 +627,9 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
     3 or 4 is a wheel mouse by now.
   - A packet for a mouse no program has on is refused. GLOS makes up no mouse: on a PC without one, the
     driver finds none and there is nothing to inject into.
+- **While the desktop has the screen** (M6; `vkbc_desk()`) every byte from the keyboard and the mouse, real
+  or injected, goes to the desktop and not to the queue: [graphics.md](graphics.md) §4.1. The kill hotkey is
+  then the desktop's to carry out, on the app in front.
 - **The network cards** (`kernel/drv/nic.c` chooses; one driver each):
   - **NE2000** (`ne2k.c`, M3): the card's own 16 KB through its data port; nothing in the PC's memory.
   - **RTL8139** (`rtl8139.c`, M5; 86Box's RTL8139C+ answers to it): the mode the whole family has. The card
@@ -1081,6 +1084,11 @@ direct = 1
   time left in its registers, the handler's entry is made on top, and its return runs the call again.
 - **Ports.** 20h/21h/A0h/A1h and 40h/43h as above; 61h's bit 4 toggles at each read; 70h/71h read the clock
   and CMOS from the chip, registers A to D as at rest; everything else reads FFh and drops writes.
+- **Its keyboard and its mouse** (step E): an app that has made a window reads the keys and the mouse of
+  its own windows, through INT 16h, port 60h with IRQ 1, and INT 33h ([graphics.md](graphics.md) §5.4). One
+  that never has reads the PC's, through DOS.
+- **Its windows** (step F): their pixels are the window manager's pages mapped into the app's address space
+  at 80000000h and above (`win_map`, a block of the physical-mapping kind, §12.4); graphics.md §5.2.
 - **Without asking** (`glos run --app`): a session's program becomes an app at the first return to its
   protected-mode code where init would be allowed, as a rule its very first instruction after the mode
   switch, so that its stub loads it as an app already. DJGPP 2.05's TIMER, UCLOCK and SIGNALS tests run so,

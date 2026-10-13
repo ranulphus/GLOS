@@ -397,6 +397,36 @@ int phys_map(u32 phys, u32 size, u32 *lin)
     return 0;
 }
 
+/* A window's pixels (mm_win_alloc's pages at kmem) into the context, for
+   its app to draw in: at 80000000h or above, clear of the blocks a program
+   asks for, which go up from 4 MB and must stay in order (§12.3). Undone
+   by phys_unmap(); the frames are the window's, and stay. 0, or a DPMI
+   error. */
+int win_map(const void *kmem, u32 bytes, u32 *lin)
+{
+    struct block *b;
+    u32 n = pages_of(bytes), at, i;
+    if (!n || !(at = place(n << 12, 0x80000000u, 0)))
+        return 0x8012;
+    if (!(b = kmalloc(sizeof *b)))
+        return 0x8013;
+    for (i = 0; i < n; i++)
+        if (mm_map(at + (i << 12), mm_win_frame((const u8 *)kmem + (i << 12)), MM_W | MM_U | MM_MAPPED) != 0) {
+            while (i--)
+                mm_unmap(at + (i << 12));
+            kfree(b);
+            return 0x8013;
+        }
+    b->handle = 0;
+    b->lin = at;
+    b->size = n << 12;
+    b->kind = BK_PHYS;
+    b->level = (u8)dctx->nlv;
+    insert(b);
+    *lin = at;
+    return 0;
+}
+
 int phys_unmap(u32 lin)
 {
     struct block *b;

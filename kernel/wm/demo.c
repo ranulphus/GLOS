@@ -6,7 +6,6 @@
  * the host's picture (make loopa-desk). */
 #include "wm.h"
 
-extern const struct gfx_font gfx_font_ui, gfx_font_bold, gfx_font_mono;
 
 void wm_demo(struct wm *m)
 {

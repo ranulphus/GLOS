@@ -1956,7 +1956,7 @@ def display_case(profile, vcard, card, cfg_mode):
     6 bits a colour where the BIOS can't give 8. Then: a DOS program (a session) gets text mode and the card
     is back after it; a program marked as a GLOS app starts, writes to the console and ends with the card
     untouched; glos display off is text mode; a mode no card has is refused; GLOS leaves in text mode. With a
-    [display] mode in GLOS.CFG the desktop is there from the start, one colour all over."""
+    [display] mode in GLOS.CFG the desktop is there from the start, one colour above its task bar."""
     import time
     tag = "%s-%s" % (profile, vcard)
     cfg = ["--file", batfile("display-%s/GLOS.CFG" % tag, ["[display]", "mode = " + cfg_mode]) + "=/TEST/GLOS.CFG"] \
@@ -2009,7 +2009,7 @@ def display_case(profile, vcard, card, cfg_mode):
             first = shot("first")
             w, h = [int(v) for v in cfg_mode.split("x")[:2]]
             checks["from-cfg"] = (" %s " % cfg_mode) in line and bool(first) and first[:2] == (w, h) \
-                and first[2] == first[2][:3] * (w * h)
+                and first[2][:w * (h - 20) * 3] == first[2][:3] * (w * (h - 20))   # (above the task bar)
         else:
             checks["off-first"] = agent.ssh("glos display")[1].startswith("display off")
         line = ""
@@ -2142,6 +2142,362 @@ def desk_case(profile, vcard, card):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+# ---- windows, input and the API (M6 steps E and F)
+
+# (machine, video card, network card, bits a pixel, the bits to change to)
+WIN_CASES = [("bf6", "vbe", "ne2kpci", 32, 16), ("bf6", "g200", "ne2kpci", 16, 8), ("486dx2", "vbe", "ne2k", 8, 16)]
+WIN_COLOUR = {"A": (0xCC, 0x33, 0x33), "B": (0x33, 0x33, 0xCC), "C": (0x33, 0xCC, 0x33)}
+
+
+def win_case(profile, vcard, card, bits, bits2):
+    """Apps with windows (tests/dos/wintest.c; kernel/wm/deskin.c, deskapp.c; the API's events and windows):
+    two apps' windows on the real screen, each with its own picture; keys go to the one with the focus, Alt-Tab
+    moves it; the mouse moves a window by its title bar and sizes it by its corner (the app draws again in its
+    new pixels), a task-bar button gives the focus, the close box closes; the keys do the same (Alt-F7, Alt-F8,
+    Alt-F4). Three apps read the keyboard three ways (the API's events, INT 16h, port 60h from their own IRQ 1
+    handler) and each gets the keys typed while it had the focus, and no others; one reads the mouse with
+    INT 33h. The exit's first half: an app that draws at a steady rate beside one that draws in a busy loop
+    makes at least a third of the steps it makes alone, the agent answering throughout, and the kill hotkey
+    ends the busy one, which had the focus. A session beside a window; another depth, which the app is told
+    of; ten apps that make a window and end, after which the kernel has the memory it had; glos exit with a
+    window up."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("win-" + tag, profile, card, ["--card", vcard,
+        "--file", "build/dj/WINTEST.EXE=/TEST/WINTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+        "--cmd", "SERSAY HX-START win", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    out = os.path.join(ROOT, "out", "win-" + tag)
+    app = "C:\\TEST\\WINTEST.EXE "
+    checks, info = {"listen": agent.listening()}, ""
+    BORDER, TITLE = 1, 18                       # the look's sizes (kernel/wm/wm.c)
+    ALT_TAB, ALT_F4 = "0x38:down,0x0F,0x38:up", "0x38:down,0x3E,0x38:up"
+
+    def start(cmd):
+        return subprocess.Popen(agent.opts + ["glos@127.0.0.1", cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def finish(p, limit=600):
+        o, e = p.communicate(timeout=limit)
+        return p.returncode, o.decode("latin-1").replace("\r", ""), e.decode("latin-1")
+
+    def state(want, limit=60):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            line = agent.ssh("glos display")[1]
+            if line.startswith(want):
+                return line
+            time.sleep(0.5)
+        return ""
+
+    def desk():                                 # the focus, the pointer, and each window by its title
+        text = agent.ssh("glos desk")[1].replace("\r", "")
+        m = re.search(r"focus=(\d+) pointer=(-?\d+),(-?\d+)", text)
+        d = {"focus": int(m.group(1)) if m else -1, "ptr": (int(m.group(2)), int(m.group(3))) if m else (0, 0), "win": {}}
+        for w in re.finditer(r'^window (\d+) (\w+)(?: \w+)? at (-?\d+),(-?\d+) (\d+)x(\d+) "(.*)"$', text, re.M):
+            d["win"][w.group(7)] = {"id": int(w.group(1)), "x": int(w.group(3)), "y": int(w.group(4)),
+                                    "w": int(w.group(5)), "h": int(w.group(6))}
+        return d
+
+    def until(test, limit=30):                  # the desktop once `test` holds for it (the composer and the apps
+        t0 = time.time()                        # have their own threads: a moment)
+        d = desk()
+        while not test(d) and time.time() - t0 < limit:
+            time.sleep(0.3)
+            d = desk()
+        return d if test(d) else None
+
+    def has(name):
+        return lambda d: "WINTEST " + name in d["win"]
+
+    def focus(name):
+        return lambda d: "WINTEST " + name in d["win"] and d["focus"] == d["win"]["WINTEST " + name]["id"]
+
+    def point(x, y, buttons=None):              # the pointer to a place on the screen
+        px, py = desk()["ptr"]
+        agent.ssh("glos mouse %d %d%s" % (x - px, y - py, "" if buttons is None else " %d" % buttons))
+
+    def click(x, y, button=1):
+        point(x, y)
+        agent.ssh("glos mouse 0 0 %d" % button)
+        agent.ssh("glos mouse 0 0 0")
+
+    def shot(name):
+        p = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=300)
+        open(os.path.join(out, name + ".png"), "wb").write(p.stdout)
+        return png_rgb(p.stdout) if p.returncode == 0 else None
+
+    def pixel(pic, x, y):
+        return tuple(pic[2][(y * pic[0] + x) * 3:(y * pic[0] + x) * 3 + 3]) if pic else None
+
+    def near(a, b):                             # (5 or 6 bits a colour, on the screen or in the DAC)
+        return bool(a) and all(abs(a[i] - b[i]) <= 8 for i in range(3))
+
+    def picture(name, tries=8):                 # the app's colour in the middle of its client area
+        got = None
+        for _ in range(tries):
+            w = desk()["win"].get("WINTEST " + name)
+            pic = shot("%s-%d" % (name, _))
+            got = w and pixel(pic, w["x"] + BORDER + w["w"] // 2, w["y"] + BORDER + TITLE + BORDER + w["h"] // 2)
+            if near(got, WIN_COLOUR[name]):
+                return True
+            time.sleep(1)
+        print("    %s window %s: its middle is %r, should be %r" % (tag, name, got, WIN_COLOUR[name]))
+        return False
+
+    def mem():
+        m = re.search(r"free_kb=(\d+)\n.*heap_kb=(\d+)", agent.ssh("glos mem")[1])
+        return (int(m.group(1)), int(m.group(2))) if m else None
+
+    def said(res, rc, *lines):
+        ok = res[0] == rc and all(l in res[1].split("\n") for l in lines)
+        if not ok:
+            print("    %s: rc=%d (want %d), wanted %r in %r" % (tag, res[0], rc, lines, res[1][-900:]))
+        return ok
+
+    try:
+        checks["ver"] = agent.ssh("glos ver")[0] == 0
+        checks["on"] = agent.ssh("glos display on 640x480x%d" % bits)[0] == 0 and (" 640x480x%d " % bits) in state("display on mode=")
+
+        # Two windows; keys to the focus; Alt-Tab.
+        a = start(app + "show A 900 40 40 200 120")
+        checks["a-up"] = bool(until(focus("A")))
+        b = start(app + "show B 900 300 60 200 120")
+        d = until(focus("B"))
+        checks["b-up"] = bool(d)
+        wa, wb = (d or desk())["win"].get("WINTEST A"), (d or desk())["win"].get("WINTEST B")
+        checks["placed"] = bool(wa and wb) and (wa["x"], wa["y"], wa["w"], wa["h"]) == (40, 40, 200, 120) \
+            and (wb["x"], wb["y"]) == (300, 60)
+        checks["pictures"] = picture("A") and picture("B")
+        agent.ssh("glos key 0x1E")              # a: B's
+        agent.ssh("glos key " + ALT_TAB)
+        checks["alt-tab"] = bool(until(focus("A")))
+        agent.ssh("glos key 0x2A:down,0x30,0x2A:up")    # B: A's
+        # The mouse: A by its title bar, then by its corner; B by its task-bar button; a press in B; B's close box.
+        point(wa["x"] + 100, wa["y"] + BORDER + 8)
+        agent.ssh("glos mouse 0 0 1")
+        agent.ssh("glos mouse 100 150")
+        ghost = shot("drag")                    # (the outline, not the window: its corner is black, the window is where it was)
+        checks["outline"] = pixel(ghost, wa["x"] + 100, wa["y"] + 150) == (0, 0, 0) and near(
+            pixel(ghost, wa["x"] + 100, wa["y"] + BORDER + TITLE + BORDER + 60), WIN_COLOUR["A"])
+        agent.ssh("glos mouse 0 0 0")
+        d = until(lambda d: has("A")(d) and (d["win"]["WINTEST A"]["x"], d["win"]["WINTEST A"]["y"]) == (140, 190))
+        checks["moved"] = bool(d)
+        point(140 + 202 - 5, 190 + 141 - 5)
+        agent.ssh("glos mouse 0 0 1")
+        agent.ssh("glos mouse 30 20")
+        agent.ssh("glos mouse 0 0 0")
+        d = until(lambda d: has("A")(d) and (d["win"]["WINTEST A"]["w"], d["win"]["WINTEST A"]["h"]) == (230, 140))
+        checks["sized"] = bool(d) and picture("A")
+        ids = sorted(w["id"] for t, w in desk()["win"].items() if t.startswith("WINTEST"))
+        click(44 + 120 * ids.index(wb["id"]) + 10, 470)
+        checks["bar-button"] = bool(until(focus("B")))
+        click(wb["x"] + BORDER + 50, wb["y"] + BORDER + TITLE + BORDER + 30)
+        click(wb["x"] + BORDER + 4 + 5, wb["y"] + BORDER + 4 + 5)
+        rb = finish(b)
+        checks["close-box"] = said(rb, 40, "EV B key 01E ch=97 down=1 mods=0", "EV B key 01E ch=0 down=0 mods=0",
+                                   "EV B mouse 50,30 buttons=1 button=1 down=1", "EV B mouse 50,30 buttons=0 button=1 down=0",
+                                   "EV B close", "WIN-OK B closed") and "key 030" not in rb[1]
+        # The keys: A moved and sized by the arrows, left alone with Esc, closed with Alt-F4.
+        checks["focus-back"] = bool(until(focus("A")))
+        agent.ssh("glos key 0x38:down,0x41,0x38:up,0x14B,0x14B,0x148,0x1C")
+        d = until(lambda d: has("A")(d) and (d["win"]["WINTEST A"]["x"], d["win"]["WINTEST A"]["y"]) == (124, 182))
+        checks["key-move"] = bool(d)
+        agent.ssh("glos key 0x38:down,0x42,0x38:up,0x14D,0x150,0x150,0x1C")
+        d = until(lambda d: has("A")(d) and (d["win"]["WINTEST A"]["w"], d["win"]["WINTEST A"]["h"]) == (238, 156))
+        checks["key-size"] = bool(d)
+        agent.ssh("glos key 0x38:down,0x41,0x38:up,0x14D,0x14D,0x01")
+        time.sleep(1)
+        d = desk()
+        checks["key-esc"] = has("A")(d) and (d["win"]["WINTEST A"]["x"], d["win"]["WINTEST A"]["y"]) == (124, 182)
+        agent.ssh("glos key " + ALT_F4)
+        ra = finish(a)
+        checks["alt-f4"] = said(ra, 40, "EV A key 030 ch=66 down=1 mods=1", "EV A resize 230x140 now=230x140 bpp=%d" % bits,
+                                "EV A resize 238x156 now=238x156 bpp=%d" % bits, "EV A close", "WIN-OK A closed") \
+            and "key 01E" not in ra[1]
+        checks["none-up"] = bool(until(lambda d: not any(t.startswith("WINTEST") for t in d["win"])))
+
+        # The keyboard three ways: q for the first to have the focus, w for the second, e for the third.
+        ways = [("A", "ev"), ("B", "bios"), ("C", "port")]
+        progs = {}
+        for name, how in ways:
+            progs[name] = start(app + "keys %s %s 900" % (name, how))
+            checks["keys-%s-up" % how] = bool(until(focus(name)))
+        order = []
+        for k, code in enumerate((0x10, 0x11, 0x12)):
+            d = desk()
+            order.append([t[8:] for t, w in d["win"].items() if w["id"] == d["focus"]][0])
+            agent.ssh("glos key 0x%02X,0x148" % code)   # (and the grey up arrow: a key with a prefix)
+            time.sleep(1)
+            agent.ssh("glos key " + ALT_TAB)
+            time.sleep(1)
+        checks["each-had-it"] = sorted(order) == ["A", "B", "C"]
+        for name, how in ways:
+            for _ in range(3):
+                if focus(name)(desk()):
+                    break
+                agent.ssh("glos key " + ALT_TAB)
+                time.sleep(1)
+            agent.ssh("glos key 0x01")
+            res = finish(progs[name])
+            k = order.index(name) if name in order else 0
+            code, ch = (0x10, 0x11, 0x12)[k], "qwe"[k]
+            mine = {"ev": ["KEY A ev %03X %d 1" % (code, ord(ch)), "KEY A ev 148 0 1", "KEY A ev 001 27 1"],
+                    "bios": ["KEY B bios %02X%02X shift=00" % (code, ord(ch)), "KEY B bios 48E0 shift=00",
+                             "KEY B bios 011B shift=00"],
+                    "port": ["KEY C port %03X 1" % code, "KEY C port %03X 0" % code, "KEY C port 148 1",
+                             "KEY C port 001 1"]}[how]
+            others = [c for c in (0x10, 0x11, 0x12) if c != code]
+            theirs = [l for l in res[1].split("\n") if l.startswith("KEY") and any(
+                re.search(r" (0%02X|%02X[0-9A-F][0-9A-F])( |$)" % (c, c), l) for c in others)]
+            checks["keys-" + how] = said(res, 42, *mine) and not theirs
+            if theirs:
+                print("    %s keys %s: another's keys %r" % (tag, how, theirs))
+
+        # INT 33h: the mouse in the app's own window.
+        c = start(app + "mouse C 900")
+        d = until(focus("C"))
+        checks["mouse-up"] = bool(d)
+        wc = d["win"]["WINTEST C"] if d else {"x": 0, "y": 0}
+        cx, cy = wc["x"] + BORDER, wc["y"] + BORDER + TITLE + BORDER
+        point(cx + 20, cy + 30)
+        time.sleep(1)
+        agent.ssh("glos mouse 15 10 1")
+        time.sleep(1)
+        agent.ssh("glos mouse 0 0 0")
+        time.sleep(1)
+        agent.ssh("glos mouse 0 0 2")
+        rc_ = finish(c)
+        checks["int33"] = said(rc_, 42, "MOUSE C driver=FFFF buttons=2", "WIN-OK C right") \
+            and bool(re.search(r"^MOUSE C at=20,30 b=0 ", rc_[1], re.M)) \
+            and bool(re.search(r"^MOUSE C at=35,40 b=1 ", rc_[1], re.M)) \
+            and bool(re.search(r"^MOUSE C at=35,40 b=2 moved=-?\d+,-?\d+$", rc_[1], re.M))
+        agent.ssh("glos mouse 0 0 0")
+
+        # The exit's first half: one draws at its own pace, alone and then beside one that never stops.
+        alone = finish(start(app + "draw A 6"))
+        m = re.search(r"^WIN-OK A frames=(\d+) ms=(\d+)$", alone[1], re.M)
+        f_alone = int(m.group(1)) * 1000.0 / int(m.group(2)) if m and alone[0] == 41 else 0
+        spin = start(app + "spin C")
+        checks["spin-up"] = bool(until(focus("C")))
+        beside = start(app + "draw B 10")
+        checks["draw-up"] = bool(until(focus("B")))
+        agent.ssh("glos key " + ALT_TAB)        # (the busy one in front: the hotkey is for it)
+        worst, probes, moving = 0.0, 0, []
+        while beside.poll() is None:
+            t = time.time()
+            rc, o, _ = agent.ssh("glos tick")
+            worst = max(worst, time.time() - t)
+            probes += rc == 0 and o.startswith("ticks=")
+            if len(moving) < 6 and len(set(moving)) < 2:    # (a slow host gives the guest little time between two)
+                pic, w = shot("spin-%d" % len(moving)), desk()["win"].get("WINTEST C")
+                if pic and w:
+                    row = (w["y"] + BORDER + TITLE + BORDER + 30) * pic[0] + w["x"] + BORDER
+                    moving.append(pic[2][row * 3:(row + w["w"]) * 3])
+            time.sleep(0.2)
+        res = finish(beside)
+        m = re.search(r"^WIN-OK B frames=(\d+) ms=(\d+)$", res[1], re.M)
+        f_beside = int(m.group(1)) * 1000.0 / int(m.group(2)) if m and res[0] == 41 else 0
+        checks["two-at-once"] = f_alone > 5 and f_beside >= f_alone / 3
+        checks["agent-answers"] = probes >= 5 and worst < 2.0
+        checks["busy-draws"] = len(set(moving)) >= 2 and bytes((255, 255, 255)) in moving[0]
+        info += " %dbpp steps/s alone=%.1f beside=%.1f probes=%d worst=%.2fs" % (bits, f_alone, f_beside, probes, worst)
+        checks["busy-in-front"] = bool(until(focus("C")))
+        agent.ssh("glos key 0x1D:down,0x38:down,0x2A:down,0x01,0x2A:up,0x38:up,0x1D:up")
+        checks["hotkey"] = spin.wait(timeout=300) == 255 and "GLOS-APP kill id=" in agent.log() \
+            and " reason=hotkey" in agent.log()
+
+        # A session beside a window: the screen is the program's, then the desktop's again with the window as it was.
+        a = start(app + "show A 900 60 50 240 160")
+        checks["a-again"] = bool(until(focus("A"))) and picture("A")
+        rc, o, _ = agent.ssh("C:\\TEST\\ECHOARGS.EXE beside a window")
+        checks["session"] = rc == 7 and "beside a window" in o and bool(state("display on mode=")) and picture("A")
+        # Another depth: the app is told its pixels are elsewhere, and draws again.
+        checks["depth"] = agent.ssh("glos display on 640x480x%d" % bits2)[0] == 0 \
+            and (" 640x480x%d " % bits2) in state("display on mode=") and picture("A")
+        agent.ssh("glos key " + ALT_F4)
+        ra = finish(a)
+        checks["told"] = said(ra, 40, "EV A resize 240x160 now=240x160 bpp=%d" % bits2, "WIN-OK A closed")
+        # Apps that end with a window up: the window goes, and the memory comes back.
+        finish(start(app + "draw B 1"))
+        m0 = mem()
+        for i in range(10):
+            checks["again-%d" % i] = finish(start(app + "draw %s 1" % "ABC"[i % 3]))[0] == 41
+        m1 = mem()
+        checks["memory-back"] = bool(m0) and m0 == m1
+        if m0 != m1:
+            print("    %s memory: %r then %r" % (tag, m0, m1))
+        checks["windows-gone"] = not any(t.startswith("WINTEST") for t in desk()["win"])
+        last = start(app + "show B 900")
+        checks["last-up"] = bool(until(focus("B")))
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+        last.wait(timeout=120)
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["text-at-exit"] = "HX-VMODE bios=03" in text
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("win-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+# (machine, video card, network card, the DOS mouse driver unloaded before GLOS starts)
+WIN_PHYS_CASES = [("bf6", "vbe", "ne2kpci", False), ("486dx2", "vbe", "ne2k", True)]
+
+
+def win_phys_case(profile, vcard, card, unload):
+    """The desktop's keyboard and mouse as the PC has them: 86Box's own keyboard and PS/2 mouse (Loop A's --keys),
+    through the 8042. The desktop is there from the start (GLOS.CFG); an app with a window starts; the mouse
+    moves the pointer into the window and its button is pressed there, a key is typed, and Alt-F4 closes it.
+    With CuteMouse loaded the mouse is on as DOS's driver set it; with CuteMouse unloaded before GLOS starts
+    nobody has it on, and the desktop turns it on for itself."""
+    import time
+    tag = "%s-%s" % (profile, "nodriver" if unload else "ctmouse")
+    script = ("@GLOS-APP start id=1,5:mouse:-100:-70,6:mouse:-100:-70,8:mouse:0:0:1,9:mouse:0:0:0,10:0x1E,"
+              "12:0x38:down,12.5:0x3E,13:0x38:up")
+    agent = Agent("winphys-" + tag, profile, card, ["--card", vcard, "--mouse", "ps2", "--keys", script,
+        "--file", batfile("winphys-%s/GLOS.CFG" % tag, ["[display]", "mode = 640x480x8"]) + "=/TEST/GLOS.CFG",
+        "--file", "build/dj/WINTEST.EXE=/TEST/WINTEST.EXE",
+        "--cmd", "SERSAY HX-START winphys"] + (["--cmd", "CTMOUSE /U"] if unload else []) + [
+        "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=1200)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    checks, info = {"listen": agent.listening()}, ""
+    try:
+        t0 = time.time()
+        while time.time() - t0 < 60 and not agent.ssh("glos display")[1].startswith("display on mode="):
+            time.sleep(0.5)
+        checks["desktop"] = agent.ssh("glos display")[1].startswith("display on mode=")
+        p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\WINTEST.EXE show A 300 40 40 200 120"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        o, _ = p.communicate(timeout=600)
+        o = o.decode("latin-1").replace("\r", "")
+        m = re.search(r"^EV A mouse (-?\d+),(-?\d+) buttons=1 button=1 down=1$", o, re.M)
+        checks["closed"] = p.returncode == 40 and "WIN-OK A closed" in o
+        # (from the middle of the screen by -200, -140: 79, 40 in the client area, if a count is a pixel)
+        checks["mouse"] = bool(m) and abs(int(m.group(1)) - 79) <= 40 and abs(int(m.group(2)) - 40) <= 40 \
+            and bool(re.search(r"^EV A mouse -?\d+,-?\d+ buttons=0 button=1 down=0$", o, re.M))
+        checks["key"] = "EV A key 01E ch=97 down=1 mods=0" in o and "EV A key 01E ch=0 down=0 mods=0" in o
+        if m:
+            info = " pressed at %s,%s" % m.groups()
+        if not all(checks.values()):
+            print("    %s: rc=%s out=%r" % (tag, p.returncode, o[-700:]))
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["started"] = "GLOS-APP start id=1" in text
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("winphys-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 APPS_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
 
 
@@ -2248,7 +2604,8 @@ def apps_case(profile, card):
             rc, out, _ = agent.ssh("glos tick")
             worst = max(worst, time.time() - t)
             probes += rc == 0 and out.startswith("ticks=")
-            if not ps and b.poll() is None and c.poll() is None:
+            # (a job is "running app" a moment after its app has started: asked again until all three are)
+            if len(re.findall(r"^job \d+ running app ", ps, re.M)) < 3 and b.poll() is None and c.poll() is None:
                 ps = agent.ssh("glos ps")[1]
                 stat = json.loads(agent.ssh("glos stat")[1])
             time.sleep(0.2)
@@ -2435,7 +2792,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -2457,6 +2814,10 @@ def main():
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(desk_case, cases, a.jobs)) else 1
+    if a.suite == "win":
+        cases = [(win_case,) + c for c in WIN_CASES if not a.profile or c[0] in a.profile] \
+            + [(win_phys_case,) + c for c in WIN_PHYS_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(lambda fn, *c: fn(*c), cases, a.jobs)) else 1
     if a.suite == "display":
         cases = [c for c in DISPLAY_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(display_case, cases, a.jobs)) else 1

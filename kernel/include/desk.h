@@ -10,6 +10,29 @@ struct wm *desk_lock(void);             /* the manager, for the caller alone unt
 void desk_unlock(void);                 /* ... and the composer told to look */
 void desk_kick(void);                   /* something changed (from anywhere, interrupts on or off) */
 void desk_note(const char *note);       /* the task bar's note: a remote session's (PRD D35), or "" */
+/* Input, from the 8042's code (vm/vkbc.c; interrupts off): a keyboard byte
+   (set 1); a byte of the mouse's (b: its packets have a fourth byte, a
+   wheel's); a movement already told apart (dx, dy, the buttons now); the
+   kill hotkey; or word that the keyboard has changed hands (whatever was
+   held is forgotten). */
+enum { DESK_KEY, DESK_AUX, DESK_MOUSE, DESK_KILL, DESK_RESET };
+void desk_in(int what, int a, int b, int c);
+/* Apps' windows (wm/deskapp.c), for the API (app/api.c), on the app's own
+   thread: 0, or a GLOS_E_ code. */
+struct app;
+struct glos_window;
+struct glos_rect;
+int desk_win_create(struct app *a, struct glos_window *g);      /* g: what is asked for, then what it is */
+int desk_win_close(struct app *a, u32 id);
+int desk_win_show(struct app *a, u32 id, int on);
+int desk_win_move(struct app *a, u32 id, s32 x, s32 y);
+int desk_win_resize(struct app *a, u32 id, s32 cw, s32 ch);
+int desk_win_title(struct app *a, u32 id, const char *title);
+int desk_win_pixels(struct app *a, u32 id, struct glos_window *g);
+int desk_win_present(struct app *a, u32 id, const struct glos_rect *r);        /* NULL: all of it */
+int desk_win_focus(struct app *a, u32 id);
+void desk_screen(struct glos_window *g);
+void desk_app_gone(struct app *a);      /* an app has ended (on its thread): its windows go */
 int desk_demo(int on);                  /* glos desk demo|clear: wm/demo.c's windows; -1: no memory */
 u32 desk_stat(char *buf, u32 max);      /* glos desk: its windows, a line each */
 

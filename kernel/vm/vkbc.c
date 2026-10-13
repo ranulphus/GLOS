@@ -25,7 +25,17 @@
  * their own and go into the chip when its output buffer is free. A mouse
  * packet has the form the program asked the mouse for: GLOS reads the
  * commands that pass to the AUX device (enable, disable, reset, and the
- * sample rates 200, 100, 80 that turn a wheel mouse's fourth byte on). */
+ * sample rates 200, 100, 80 that turn a wheel mouse's fourth byte on).
+ *
+ * While the desktop has the screen (M6; vkbc_desk()), the keyboard and the
+ * mouse are the desktop's: every byte from either, real or injected, goes
+ * to kernel/wm/desk.c and not to the queue, so DOS and the BIOS see no
+ * keys meanwhile; the kill hotkey is the desktop's to carry out. A mouse no
+ * DOS driver has turned on is turned on for the desktop (the AUX port, IRQ
+ * 12, the mouse's reporting) and off again after, where the controller has
+ * an AUX port at all: an AT keyboard controller takes the byte after D4h
+ * for the keyboard's own, and F5h there turns the keyboard off. */
+#include "desk.h"
 #include "io.h"
 #include "kprintf.h"
 #include "timer.h"
@@ -50,6 +60,9 @@ static u32 acks_made;                           /* ACKs GLOS gave for a keyboard
 static u16 inj[QSIZE];                          /* direct mode: injected bytes waiting for the chip */
 static u32 injh, injt;
 static u8 aux_on, aux_wheel, aux_rate[3], aux_arg, aux_buttons;        /* the mouse, as the program set it */
+static u8 desk_on;                              /* the desktop has the keyboard and the mouse */
+static u8 aux_port;                             /* the controller has an AUX port */
+static u8 desk_acks;                            /* the mouse's answers to the desktop's own commands, to drop */
 
 enum { M_CTRL = 1, M_ALT = 2, M_LSHIFT = 4, M_RSHIFT = 8 };
 
@@ -117,6 +130,8 @@ static u16 chip_byte = 0x100;                   /* what the chip was given last;
 static void write_cmd_byte(void)
 {
     u8 v = (u8)((cmd | 0x01) & ~0x10);
+    if (desk_on && aux_port)
+        v = (u8)((v | 0x02) & ~0x20);           /* the desktop's mouse: IRQ 12, and its clock */
     if (v == chip_byte)
         return;
     chip_cmd(0x60);
@@ -154,10 +169,14 @@ static int hotkey(u8 b)
     case 0x36: if (!ext) mods = (u8)(brk ? mods & ~M_RSHIFT : mods | M_RSHIFT); return 0;
     case 0x01:
         if (!brk && (mods & M_CTRL) && (mods & M_ALT) && (mods & (M_LSHIFT | M_RSHIFT))) {
-            vm.kill_req = 1;
-            vm.kill_reason = "hotkey";
-            vm.kill_since = timer_ticks();
-            vm_kick();
+            if (desk_on) {                      /* the app in front, not DOS's program */
+                desk_in(DESK_KILL, 0, 0, 0);
+            } else {
+                vm.kill_req = 1;
+                vm.kill_reason = "hotkey";
+                vm.kill_since = timer_ticks();
+                vm_kick();
+            }
             swallow = 0x81;
             return 1;
         }
@@ -189,14 +208,22 @@ static void drain(void)
     while (((s = inb(0x64)) & 1) && ++n < 32) {
         b = inb(0x60);
         trace('k', b, s);
-        if (s & 0x20) {
-            enqueue(b, 1);
+        if ((s & 0x20) && desk_acks && b == 0xFA) {
+            desk_acks--;                        /* (the mouse's answer to the desktop's own command) */
+        } else if (s & 0x20) {
+            if (desk_on)
+                desk_in(DESK_AUX, b, aux_wheel, 0);
+            else
+                enqueue(b, 1);
         } else if (replies && (b == 0xFA || b == 0xFE)) {       /* its ACK or "resend": ahead of the keys */
             replies--;                                          /* that wait, as a keyboard sends it */
             if (qt - qh < QSIZE)
                 q[--qh % QSIZE] = (u16)(b | REPLY);
         } else if (!hotkey(b)) {
-            enqueue(b, 0);
+            if (desk_on)
+                desk_in(DESK_KEY, b, 0, 0);
+            else
+                enqueue(b, 0);
         } else {
             trace('h', b, mods);
         }
@@ -448,6 +475,10 @@ static int inject(u8 b, int aux)
 {
     if (!aux && hotkey(b))
         return 0;
+    if (desk_on) {
+        desk_in(aux ? DESK_AUX : DESK_KEY, b, aux_wheel, 0);
+        return 0;
+    }
     if (vm.direct) {
         if (injt - injh >= QSIZE)
             return -1;
@@ -488,7 +519,9 @@ int vkbc_mouse(int dx, int dy, int buttons)
     int r = 0;
     if (buttons >= 0)
         aux_buttons = (u8)(buttons & 7);
-    if (!aux_on || (cmd & 0x20)) {
+    if (desk_on) {                              /* (no packets: the desktop takes it as it is) */
+        desk_in(DESK_MOUSE, dx, dy, aux_buttons);
+    } else if (!aux_on || (cmd & 0x20)) {
         r = -2;
     } else {
         do {                                    /* a packet carries 255 at most each way */
@@ -550,6 +583,38 @@ void vkbc_tick(void)
 /* A direct-mode session begins (1) or ends (0): the byte the program would
    have read next goes into the chip; at the end what the chip still holds
    goes into the queue. */
+/* The desktop takes the keyboard and the mouse (1), or gives them back (0:
+   a session has the screen, or there is no desktop). Interrupts off. */
+void vkbc_desk(int on)
+{
+    if ((on != 0) == desk_on)
+        return;
+    if (on) {
+        desk_on = 1;
+        if (aux_port && !aux_on) {              /* a mouse nobody has turned on: for the desktop */
+            chip_cmd(0xA8);
+            write_cmd_byte();
+            chip_cmd(0xD4);
+            chip_data(0xF4);
+            desk_acks++;
+        } else {
+            write_cmd_byte();
+        }
+    } else {
+        if (aux_port && !aux_on) {
+            chip_cmd(0xD4);
+            chip_data(0xF5);
+            desk_acks++;
+        }
+        desk_on = 0;
+        write_cmd_byte();
+        if (aux_port && !aux_on && !(cmd & 0x02) && (cmd & 0x20))
+            chip_cmd(0xA7);                     /* (the port off again, as the program's byte has it) */
+        mods = e0 = 0;                          /* (keys held across the change mean nothing to the other side) */
+    }
+    desk_in(DESK_RESET, 0, 0, 0);
+}
+
 void vkbc_direct(int on)
 {
     if (on) {
@@ -594,11 +659,40 @@ void vkbc_init(void)
        port and IRQ 12 are on in the command byte. Injected packets need to
        know whether it is a wheel mouse by now (its ID is 3 or 4 then). */
     aux_on = (cmd & 0x22) == 0x02;
+    aux_port = aux_on;
+    if (!aux_on) {                              /* is there an AUX port? Its clock's bit follows A7h and A8h then */
+        u8 off, on;
+        chip_cmd(0xA7);
+        chip_cmd(0x20);
+        for (n = 0; !(inb(0x64) & 1) && ++n < 200000;) ;
+        off = (inb(0x64) & 1) ? inb(0x60) : 0;
+        chip_cmd(0xA8);
+        chip_cmd(0x20);
+        for (n = 0; !(inb(0x64) & 1) && ++n < 200000;) ;
+        on = (inb(0x64) & 1) ? inb(0x60) : 0x20;
+        aux_port = (off & 0x20) && !(on & 0x20);
+        if (cmd & 0x20)
+            chip_cmd(0xA7);                     /* off, as it was */
+        chip_byte = 0x100;                      /* (whatever those did to the byte: written again below) */
+        write_cmd_byte();
+    }
     if (aux_on) {
         chip_cmd(0xD4);
         chip_data(0xF2);
         if (aux_byte() == 0xFA)
             aux_wheel = aux_byte() >= 3;
+        /* ... and whether the mouse reports at all: a driver that was
+           unloaded again (CuteMouse's /U) leaves the port and IRQ 12 on and
+           the mouse quiet. Its status says (E9h: bit 5 of the first byte). */
+        chip_cmd(0xD4);
+        chip_data(0xE9);
+        if (aux_byte() == 0xFA) {
+            int st = aux_byte();
+            aux_byte();
+            aux_byte();
+            if (st >= 0)
+                aux_on = (st & 0x20) != 0;
+        }
     }
 }
 

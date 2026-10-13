@@ -42,8 +42,8 @@ struct wm_look {
 
 /* What the core needs from its host. */
 struct wm_host {
-    void *(*alloc)(u32 bytes);          /* a window's pixels: zeroed, or NULL */
-    void (*free)(void *mem, u32 bytes);
+    void *(*alloc)(u32 bytes, int pixels);      /* memory, zeroed, or NULL; pixels: for a window's (the kernel's side */
+    void (*free)(void *mem, u32 bytes, int pixels);     /* gives whole pages, which an app can have mapped) */
 };
 
 struct wm {
@@ -56,6 +56,8 @@ struct wm {
     struct gfx_region dirty;            /* what of the screen is to be drawn again */
     s32 px, py;                         /* the pointer's hot spot */
     u8 pointer;                         /* shown */
+    u8 ghost_on;
+    struct gfx_rect ghost;              /* an outline above every window: where one is being moved or sized to */
     u32 next_id, count;
     char clock[8], note[16];            /* the task bar's right end: the time, and a note (a remote session's, D35) */
 };
@@ -84,6 +86,7 @@ struct wm_window *wm_hit(const struct wm *m, s32 x, s32 y, int *part);  /* the w
 struct wm_window *wm_next(const struct wm *m, const struct wm_window *w);       /* the next to give the focus (Alt-Tab) */
 
 void wm_pointer(struct wm *m, s32 x, s32 y, int shown);
+void wm_ghost(struct wm *m, const struct gfx_rect *r);  /* the outline, two pixels wide; NULL: none */
 void wm_bar(struct wm *m, int on);                      /* the task bar: made, or taken away */
 void wm_bar_text(struct wm *m, const char *clock, const char *note);
 struct wm_window *wm_bar_hit(const struct wm *m, s32 x, s32 y); /* the window whose button is at a point of the bar */

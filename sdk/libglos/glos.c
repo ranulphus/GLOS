@@ -3,8 +3,10 @@
  * another DPMI host) every function fails or does nothing, so a program can
  * call glos_init() and carry on as a plain DOS program when it returns -1. */
 #include <dpmi.h>
+#include <sys/nearptr.h>
 
 #include <glos/api.h>
+#include <glos/gfx.h>
 
 static struct {
     unsigned long off;
@@ -29,12 +31,11 @@ static int find(void)
     return state;
 }
 
-/* Function fn with b in EBX; EAX's result in *a, EBX's in *b: 0, or -1 with
-   error (and reason) set. */
-static int call(unsigned fn, unsigned *a, unsigned *b)
+/* Function fn with b in EBX, c in ECX and d in EDX; EAX's result in *a,
+   EBX's in *b: 0, or -1 with error (and reason) set. */
+static int call4(unsigned fn, unsigned *a, unsigned *b, unsigned c, unsigned d)
 {
     unsigned char failed;
-    unsigned c = 0, d = 0;
     if (find() < 0) {
         error = 0;
         return -1;
@@ -50,6 +51,15 @@ static int call(unsigned fn, unsigned *a, unsigned *b)
         return -1;
     }
     return 0;
+}
+
+static int call(unsigned fn, unsigned *a, unsigned *b) { return call4(fn, a, b, 0, 0); }
+
+/* ... for the functions that give nothing back but whether they worked. */
+static int call3(unsigned fn, unsigned b, unsigned c, unsigned d)
+{
+    unsigned a;
+    return call4(fn, &a, &b, c, d);
 }
 
 unsigned glos_version(void)
@@ -87,4 +97,62 @@ unsigned glos_ticks(void)
 {
     unsigned a, b = 0;
     return call(GLOS_FN_TICKS, &a, &b) == 0 ? a : 0;
+}
+
+int glos_event(struct glos_event *ev, unsigned wait_ms)
+{
+    unsigned a, b = (unsigned)ev;
+    ev->size = sizeof *ev;
+    return call4(GLOS_FN_EVENT, &a, &b, wait_ms, 0) == 0 ? (int)a : 0;
+}
+
+int glos_window(struct glos_window *w)
+{
+    w->size = sizeof *w;
+    return call3(GLOS_FN_WINDOW, (unsigned)w, 0, 0);
+}
+
+int glos_close(unsigned id) { return call3(GLOS_FN_CLOSE, id, 0, 0); }
+int glos_show(unsigned id, int on) { return call3(GLOS_FN_SHOW, id, on != 0, 0); }
+int glos_move(unsigned id, int x, int y) { return call3(GLOS_FN_MOVE, id, (unsigned)x, (unsigned)y); }
+int glos_resize(unsigned id, int w, int h) { return call3(GLOS_FN_RESIZE, id, (unsigned)w, (unsigned)h); }
+int glos_title(unsigned id, const char *title) { return call3(GLOS_FN_TITLE, id, (unsigned)title, 0); }
+
+int glos_pixels(unsigned id, struct glos_window *w)
+{
+    w->size = sizeof *w;
+    return call3(GLOS_FN_PIXELS, id, (unsigned)w, 0);
+}
+
+int glos_present(unsigned id, const struct glos_rect *r) { return call3(GLOS_FN_PRESENT, id, (unsigned)r, 0); }
+int glos_focus(unsigned id) { return call3(GLOS_FN_FOCUS, id, 0, 0); }
+
+int glos_screen(struct glos_window *w)
+{
+    w->size = sizeof *w;
+    return call3(GLOS_FN_SCREEN, (unsigned)w, 0, 0);
+}
+
+/* A linear address as the program's own pointer: its data segment reaches
+   everything from here on (DJGPP's "near pointers"), and the address is
+   taken from the segment's base, which moves when the program's memory
+   grows: so the pointer is asked for again after anything that may have
+   allocated (or the program starts with _CRT0_FLAG_UNIX_SBRK, and it
+   stays). */
+void *glos_ptr(unsigned linear)
+{
+    static int on;
+    if (!linear || (!on && !(on = __djgpp_nearptr_enable())))
+        return 0;
+    return (void *)(linear + __djgpp_conventional_base);
+}
+
+int glos_surface(const struct glos_window *w, struct gfx_surface *s)
+{
+    struct gfx_fmt f = { (unsigned char)w->bpp, w->rpos, w->rsize, w->gpos, w->gsize, w->bpos, w->bsize };
+    void *pix = glos_ptr(w->pixels);
+    if (!pix)
+        return -1;
+    gfx_init(s, pix, w->w, w->h, w->pitch, &f);
+    return 0;
 }

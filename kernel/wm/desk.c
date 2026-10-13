@@ -23,7 +23,7 @@
  * program's own picture. */
 #include <string.h>
 
-#include "desk.h"
+#include "deskint.h"
 #include "display.h"
 #include "io.h"
 #include "kprintf.h"
@@ -40,13 +40,13 @@ static volatile u8 changed, repaint;
 static u8 demo;                                 /* the demonstration's windows are up: its clock stands */
 static char note[16];
 
-static void *d_alloc(u32 bytes) { return bytes < 2048 ? kmalloc(bytes) : mm_win_alloc(bytes); }
+static void *d_alloc(u32 bytes, int pixels) { return pixels ? mm_win_alloc(bytes) : kmalloc(bytes); }
 
-static void d_free(void *p, u32 bytes)
+static void d_free(void *p, u32 bytes, int pixels)
 {
-    if (bytes < 2048)
+    if (!pixels)
         kfree(p);
-    else
+    else if (!deskapp_keep(p))                  /* (an app that has them mapped lets go first) */
         mm_win_free(p, bytes);
 }
 
@@ -64,7 +64,9 @@ struct wm *desk_lock(void)
 
 void desk_unlock(void)
 {
-    u32 f = irq_save();
+    u32 f;
+    deskin_focus(&desk);
+    f = irq_save();
     owner = 0;
     thread_wake(&lockq);
     changed = 1;
@@ -115,17 +117,22 @@ static void desk_thread(void *arg)
         changed = 0;
         irq_restore(f);
         m = desk_lock();
+        deskin_turn(m);
         fb = display_fb();
         if (fb) {
-            if (repaint || fb->w != m->w || fb->h != m->h || fb->fmt.bpp != m->fmt.bpp || fb->fmt.gsize != m->fmt.gsize) {
+            int fmt = fb->fmt.bpp != m->fmt.bpp || fb->fmt.gsize != m->fmt.gsize || fb->fmt.rpos != m->fmt.rpos;
+            if (repaint || fmt || fb->w != m->w || fb->h != m->h) {
                 repaint = 0;
-                if (fb->w != m->w || fb->h != m->h || fb->fmt.bpp != m->fmt.bpp || fb->fmt.gsize != m->fmt.gsize)
+                if (fmt || fb->w != m->w || fb->h != m->h)
                     wm_screen(m, fb->w, fb->h, &fb->fmt);
+                if (fmt)
+                    deskapp_screen(m);          /* (every window has new pixels: the apps are told) */
                 wm_damage_all(m);
             }
             bar_text(m);
             wm_compose(m, fb);
         }
+        deskin_focus(m);
         f = irq_save();                         /* (not desk_unlock(): that would wake this thread again) */
         owner = 0;
         thread_wake(&lockq);
@@ -185,6 +192,7 @@ void desk_init(void)
 {
     wm_init(&desk, &host, 640, 480, &gfx_fmt8); /* (the screen's own size and format when there is one) */
     wm_bar(&desk, 1);
+    deskin_init();
     display_painter(painter);
     thread_create("desk", PRIO_NORMAL, desk_thread, NULL);
 }
