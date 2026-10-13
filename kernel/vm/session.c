@@ -412,6 +412,7 @@ void session_exec(const struct trapframe *tf)
     struct rmregs r;
     u16 psp = vm_current_psp();
     u32 path = vm_lin(tf->v86_ds, tf->edx), i, b = 0;
+    int hint;
     if (ses.active && psp == ses.parent)
         end("next-exec");                       /* the last one's EXEC failed */
     if (ses.active || !is_session_parent(psp) || (tf->eax & 0xFF) != 0)
@@ -430,10 +431,17 @@ void session_exec(const struct trapframe *tf)
         ses.prog[i] = c >= 'a' && c <= 'z' ? (char)(c - 32) : c;
     }
     ses.prog[i] = 0;
+    /* Whether it says it is an app is read from its file, with DOS calls that take their time and let other
+       threads run: before the session is there for anyone to see. Seen active with no hint and no start time
+       yet, it paused the apps (session_pauses()), and an app that looked just then waited for the whole of
+       the new program's start, which nothing ends early: a 100 Hz timer of an app's lost 30 interrupts in
+       400 on the 486 one time in five when another app started beside it. */
+    hint = (psp == vm.loader_psp && job.app) || marked(tf);
+    ses.t0 = timer_ticks() | 1;
+    ses.hint = (u8)hint;
     ses.active = 1;
     ses.parent = psp;
     memset(ses.dangle, 0, sizeof ses.dangle);
-    ses.hint = (psp == vm.loader_psp && job.app) || marked(tf);
     if (!ses.hint)
         display_session(1);                     /* the screen is the session's: text mode (gfx/display.c) */
     ses.mode = vm_rd8(0x449);
@@ -444,7 +452,6 @@ void session_exec(const struct trapframe *tf)
     ses.rtc_b = vm.rtc_b;
     ses.kbc_cmd = vkbc_cmd();
     memcpy(ses.ivt, vm_ptr(0), sizeof ses.ivt);
-    ses.t0 = timer_ticks() | 1;
     ses.bios0 = vm_rd32(0x46C);
     ses.irq0 = cpu_irq_count(0);
     ses.grab = 0;

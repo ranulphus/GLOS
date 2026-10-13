@@ -343,11 +343,16 @@ static int paused(void) { return exclusive || session_pauses(); }
 void app_return(struct app *a, struct trapframe *tf)
 {
     for (;;) {
+        u32 f = irq_save();                     /* (looked at and waited for in one piece: the session's end clears
+                                                   it and wakes whoever waits, once) */
+        int wait = !a->kill && paused();
+        if (wait)
+            thread_block(&pauseq);              /* a session has the machine */
+        irq_restore(f);
         if (a->kill)
             dpmi_end(tf, 0xFF, 1);              /* (doesn't come back) */
-        if (!paused())
+        if (!wait)
             break;
-        thread_block(&pauseq);                  /* a session has the machine */
     }
     while (current->vif && vpic_pending(&a->pic)) {     /* its own interrupts: to its handlers */
         int vec = vpic_ack(&a->pic);

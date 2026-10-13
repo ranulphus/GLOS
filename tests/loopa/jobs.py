@@ -2401,7 +2401,9 @@ def win_case(profile, vcard, card, bits, bits2):
         f_beside = int(m.group(1)) * 1000.0 / int(m.group(2)) if m and res[0] == 41 else 0
         checks["two-at-once"] = f_alone > 5 and f_beside >= f_alone / 3
         checks["agent-answers"] = probes >= 5 and worst < 2.0
-        checks["busy-draws"] = len(set(moving)) >= 2 and bytes((255, 255, 255)) in moving[0]
+        # (its picture moves, and its square is in it; not in every one: the composer may copy the band between
+        # the app's clearing it and drawing the square, graphics.md 5.2)
+        checks["busy-draws"] = len(set(moving)) >= 2 and any(bytes((255, 255, 255)) in row for row in moving)
         info += " %dbpp steps/s alone=%.1f beside=%.1f probes=%d worst=%.2fs" % (bits, f_alone, f_beside, probes, worst)
         checks["busy-in-front"] = bool(until(focus("C")))
         agent.ssh("glos key 0x1D:down,0x38:down,0x2A:down,0x01,0x2A:up,0x38:up,0x1D:up")

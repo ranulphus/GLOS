@@ -264,4 +264,12 @@ Each step is a commit with its tests. The gate (`make gate`) must still pass at 
     the UI's fixed-width font, shows GLOS's own text instead.
   - `kernel/wm/wm.c`: the look's colours, the focus's close box filled with the one accent, and the task
     bar's pictures (GLOS's mark, a window on each button, a sign beside the remote-session note).
-- H: to do.
+- **H. The exit: under way.**
+  - Found on the way: a program marked as an app paused the apps for a moment while its mark was read at
+    the EXEC, and an app that looked just then waited out the whole start of the new program (a quarter to
+    three quarters of a second on the 486). It showed as the apps suite's four timers at once failing now
+    and then, a 100 Hz timer short of 30 interrupts in 400; it had been there since step B. With the order
+    put right (supervisor.md §11.1), twenty rounds of the four lose 11 of 400 at worst.
+  - The window suite's busy app is judged by its picture moving and its square being in one of the
+    samples: on the 486 the composer copied its band between the app's clearing it and drawing the square
+    (graphics.md §5.2).

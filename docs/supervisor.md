@@ -730,6 +730,12 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   was started with `glos run --app`. Apps run on beside such a program for two seconds at most, less if it
   sets a video mode (it is a session after all). The mark says only what to expect: an unmarked program may
   still ask to be an app, and a marked one that doesn't is a session.
+  - The mark is read before the session exists for anyone to see (reading it is four DOS calls, which let
+    other threads run), and the session's start time is set with it. Until M6's step H the session was
+    active first: with no mark known and no start time yet it paused the apps, and an app that returned to
+    its code just then waited for the whole of the new program's start.
+  - An app looks whether it is to wait and waits in one piece (interrupts off), so the end of a session,
+    which clears the reason and wakes the waiters once, can't fall between the two.
 
   The BIOS calls run nested (§15) on the stub's spare stack (the kill stub's, `kill_sp`), with no DPMI client
   needed.

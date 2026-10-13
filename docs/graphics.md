@@ -308,6 +308,11 @@ They run on the app's own thread, each with the manager locked for its length.
   of the blocks a program asks for). The app draws there itself, in the screen's own format, and says where
   (`present`, which is `wm_damage`): the composer copies from the same memory. There is no second copy and
   no call per drawing operation.
+- **The composer copies whenever it runs**, not only at a `present`: when something else changes over the
+  window too, and a moment after a `present` when it was busy. An app that draws a frame by clearing first
+  can so be caught between the two (seen on the 486: a square redrawn on a cleared band, the band on the
+  screen without its square now and then). Nothing is locked against it, by design: the cure is the app's,
+  which draws what changes and no more, or makes the frame elsewhere and copies it in whole.
 - The mapping is made and undone **on the app's thread only**, in its own address space.
 - **The manager may give a window new pixels behind the app's back:** the user gave it another size, or the
   screen has another format (then every window's are new, and cleared). The app gets `GLOS_EV_RESIZE` and
