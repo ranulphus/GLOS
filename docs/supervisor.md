@@ -349,6 +349,12 @@ along, and once the client had ended and its LDT was gone, that thread's next tr
   raised for it while it is ready (`vm_kick`, `sched_front`): it wakes for an interrupt DOS or the BIOS must
   not wait a round of busy apps for (the BIOS's tick is 55 ms; three busy apps' turns are 60). Running on
   after that, it is chosen like any other.
+  - **And while an interrupt waits behind its cleared flag**, for 50 ms at most (the vif-stuck watchdog's
+    time, §9.3; step H): its code is in a stretch that keeps interrupts off, and if another thread got the
+    CPU in the middle of it (the composer drawing a whole screen after a session, an app back from its
+    pause) the interrupt waited for that thread's turn too. The watchdog then said `vif-stuck` of a VM that
+    was only waiting for the CPU. A program that keeps its interrupts off longer gets its share, no more,
+    and the warning.
 
 ## 8. Time and PIT ownership [fixed]
 

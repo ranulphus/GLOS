@@ -277,11 +277,21 @@ static void watchdog(struct trapframe *tf, u32 now)
         vm.stuck_warned = 0;
         return;
     }
+    /* Its code is in a stretch it has its interrupts off for, and one waits. If another thread has the CPU
+       meanwhile (the composer drawing a whole screen after a session, an app back from its pause), the VM
+       thread goes first, as for an interrupt raised while it is ready (vm_kick): the stretch is short, and
+       DOS's interrupt waits for nobody else's turn. For these 50 ms only; a program that keeps them off
+       longer gets its share and no more, and the warning. */
     if (!vm.stuck_since) {
-        vm.stuck_since = now | 1;
+        vm.stuck_since = now | 1;               /* (which may be the tick after this one) */
+        sched_front(vm.thread);
         return;
     }
-    if (!vm.stuck_warned && now - vm.stuck_since > 51) {
+    if ((s32)(now - vm.stuck_since) <= 51) {
+        sched_front(vm.thread);
+        return;
+    }
+    if (!vm.stuck_warned) {
         struct trapframe *f = vm_frame();       /* the same frame as tf when the tick hit V86 code */
         (void)tf;
         vm.stuck_warned = 1;

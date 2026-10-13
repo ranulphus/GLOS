@@ -956,6 +956,15 @@ HR_KNOWN = {
 }
 
 
+# Tests whose own output may be damaged, on a boot without HIMEM. Their printf writes a number's digits through DS
+# at an address it took from EBP: in an exception handler, on the host's locked stack, that is low memory at the
+# stack's offset (3F5xh with GLOS's 16 KB stack; F5xh under HDPMI), and there FreeDOS has its disk buffers when it
+# isn't loaded high. Which buffer holds the test's own output file then depends on what is where on the disk: when
+# it is the one at that address, a few bytes of a line are the digits printed after them (M6 step H: the loader
+# grew, the files moved, and both tests' lines changed). Nothing of GLOS's is wrong in either case.
+HR_SCRIBBLE = {"I3102101", "I3102102"}
+
+
 def hr_tests():
     d = os.path.join(ROOT, "build", "hdpmireg")
     return sorted((f[:-4].upper(), f) for f in os.listdir(d) if f.lower().endswith(".exe")) if os.path.isdir(d) else []
@@ -999,8 +1008,8 @@ def hdpmireg(profile, boot):
             (gone if n in HR_KNOWN else same).append(n)
         elif g and h and g[1] == h[1] and hr_sel(g[0]) == hr_sel(h[0]):
             (gone if n in HR_KNOWN else sel).append(n)
-        elif n in HR_KNOWN:
-            known.append(n)
+        elif n in HR_KNOWN or (n in HR_SCRIBBLE and g and h and g[1] == h[1] and len(g[0]) == len(h[0])):
+            known.append(n)                     # (a scribbled one: the same exit code and as many lines)
         else:
             new.append(n)
     ok = not new and all(v == "PASS" for v in status.values())

@@ -717,6 +717,11 @@ void vkbc_restore(u8 c)
    again, waits for a rising edge that would never come. */
 void vkbc_leave(void)
 {
+    /* The mouse's answer to the desktop's last word to it (stop reporting): taken here, not left for real mode
+       to find in the chip. */
+    while (desk_acks && aux_byte() >= 0)
+        desk_acks--;
+    desk_acks = 0;
     drain();
     qh = qt;
     obf = 0;

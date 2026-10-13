@@ -273,3 +273,21 @@ Each step is a commit with its tests. The gate (`make gate`) must still pass at 
   - The window suite's busy app is judged by its picture moving and its square being in one of the
     samples: on the 486 the composer copied its band between the app's clearing it and drawing the square
     (graphics.md §5.2).
+  - `GLOS-WARN vif-stuck` once after a session beside a window on the G200: the system VM, preempted inside
+    a stretch with its interrupts off and one waiting, sat out the composer's whole screen and the app's
+    turn. The VM thread goes first while an interrupt waits behind its cleared flag, for the watchdog's 50
+    ms (supervisor.md §7).
+  - HDPMI's regression tests I3102101 and I3102102 printed a damaged line each. The tests' own doing: their
+    printf writes a number's digits through DS at an address taken from EBP, which in an exception handler
+    on the host's stack is low memory at the stack's offset (3F5xh under GLOS, F5xh under HDPMI). On a boot
+    without HIMEM FreeDOS has its disk buffers there, and since step C's larger loader moved the files on
+    the test disk, the buffer at that address was the one with the test's own output in it. Found by the
+    file's bytes (the digits with their NUL) and the test's code; the suite lets those two differ in their
+    text (`HR_SCRIBBLE`). Under HIMEMX, which the suite's standard cases don't run, I310508A differs in a
+    page's accessed and dirty bits after 0508h (79h for HDPMI's 19h), at step B as now: not looked into.
+  - When GLOS leaves, the mouse's answer to the desktop's "stop reporting" is taken before real mode gets
+    the chip back (`vkbc_leave`); it could have come after.
+  - Seen once and not explained: on the 486, with three machines running at once, the batch file's last
+    line never ran after `glos exit` from the desktop. GLOS had left as it should (exit code 0, the
+    vectors as they were, text mode) and two programs ran after it. The same case alone passed six times
+    and a shorter one six more; its log is kept, and the next time decides whether it is ours.
