@@ -877,6 +877,12 @@ direct = 1
 - **0506h/0507h:** page attributes on 0501h blocks. Uncommitted pages free their frames; recommitted ones come
   back zeroed (the baselines keep the old contents; DJGPP's null page doesn't care). DJGPP's crt0 uncommits
   its null page, so a NULL write is a page fault.
+  - **Accessed and dirty** (bits 5 and 6, which 0401h says GLOS has) are the page table's own, and say what
+    the *client* has done to a page. A page's new frame is zeroed through the page's own address, which
+    sets both: they are cleared again before the client sees the page (M6 step H; until then every fresh
+    page read as written). 0507h sets them as given when its bit 4 says they are given, and leaves them
+    otherwise. HDPMI32i answers the same with XMS; without it, pages 0507h has just committed read as
+    accessed and written there (its test I310508A, a known difference on a boot without HIMEM).
 - **The FPU** keeps CR0.NE clear (§14.7): errors arrive as IRQ13, through the virtual PIC to the client's INT
   75h handler first, as on CWSDPMI. DJGPP's handler writes port F0h, which is passed through.
 - **Crash reports** (§19): `GLOS-CRASH` lines and `C:\GLOS\CRASH\CRASHnnn.TXT`, then the kill path (exit code
@@ -1153,7 +1159,7 @@ Statuses:
 | 0500h | Free memory info | M4a | Accurate; programs allocate all of it | CWSDPMI |
 | 0501h–0503h | Linear blocks | M4a | Ascending (§12.3) | CWSDPMI |
 | 0504h/0505h | 1.0 linear memory | M4c | 0504h at a given address (EBX, page aligned) or anywhere; committed or not (EDX bit 0). 0505h resizes; EDX bit 1 rebases the selectors listed at ES:EBX when the block moves. | HDPMI32i |
-| 0506h/0507h | Get/set page attributes | M4b | DJGPP crt0 uncommits page 0 (null trap) unless NULLOK; DOS/4GW reads them | CWSDPMI, HDPMI32i |
+| 0506h/0507h | Get/set page attributes | M4b | DJGPP crt0 uncommits page 0 (null trap) unless NULLOK; DOS/4GW reads them. Accessed and dirty bits: the client's own accesses only, settable with 0507h's bit 4 (M6) | CWSDPMI, HDPMI32i |
 | 0508h/0509h | Map device / conventional memory (1.0) | M4c | Pages of a 0504h block onto physical memory (0508h) or the first megabyte (0509h). A mapped page is page type 2 for 0506h; 0507h's commit replaces the mapping (HDPMI's I310508A). Mapped frames are never freed. | HDPMI32i |
 | 050Bh | Memory information (1.0) | M4c | The 0500h figures in 1.0's layout, laid out as HDPMI32i's (nothing pages, so physical = virtual) | HDPMI32i |
 | 0600h–0603h | Lock/unlock | nop (recorded) | SDL, Quake, LOCK_MEMORY | |

@@ -684,6 +684,37 @@ static void t_extras(void)
     cap = __dpmi_get_capabilities(&i, (char *)caps);
     say("caps", cap == -1 ? -1 : (caps[2] != 0), "caps=%x host=%d.%d vendor=%.20s", i, caps[0], caps[1], caps + 2);
 
+    /* Accessed and dirty bits (0506h, 0507h) on a host that says it has them (0401h, bit 0): cleared when the
+       program asks, and set after that by what the program does to the page: a read, then a write. */
+    m.size = 4096;
+    sel = __dpmi_allocate_ldt_descriptors(1);
+    if (cap != -1 && (i & 1) && sel > 0 && __dpmi_allocate_memory(&m) == 0) {
+        __dpmi_meminfo a = m;
+        unsigned short at = 0x19;                               /* committed, writable; the bits given, both clear */
+        volatile unsigned long v;
+        __dpmi_set_segment_base_address(sel, m.address);
+        __dpmi_set_segment_limit(sel, 4095);
+        _farpokel(sel, 0, 1);                                   /* (written: dirty by now, on any host) */
+        a.address = 0, a.size = 1;
+        ok = __dpmi_set_page_attributes(&a, (short *)&at) == 0;
+        a.address = 0, a.size = 1;
+        ok = ok && __dpmi_get_page_attributes(&a, (short *)&at) == 0;
+        say("page-ad-clear", ok && (at & 0x77) == 0x11, "attr=%04x", at);
+        v = _farpeekl(sel, 0);
+        a.address = 0, a.size = 1;
+        __dpmi_get_page_attributes(&a, (short *)&at);
+        say("page-ad-read", (at & 0x70) == 0x30 && v == 1, "attr=%04x", at);
+        _farpokel(sel, 4, 2);
+        a.address = 0, a.size = 1;
+        __dpmi_get_page_attributes(&a, (short *)&at);
+        say("page-ad-write", (at & 0x70) == 0x70, "attr=%04x", at);
+        __dpmi_free_memory(m.handle);
+    } else {
+        say("page-ad-clear", -1, "no accessed and dirty bits (0401h caps=%x)", cap == -1 ? 0 : i);
+    }
+    if (sel > 0)
+        __dpmi_free_ldt_descriptor(sel);
+
     m.size = 2 * 4096;
     sel = __dpmi_allocate_ldt_descriptors(1);
     if (sel > 0 && __dpmi_allocate_memory(&m) == 0) {

@@ -69,6 +69,15 @@ static struct block *by_handle(u32 h)
     return b && b->kind == BK_MEM ? b : 0;
 }
 
+/* A page's new frame f, zeroed, and as the client left it: not accessed,
+   not written. 0506h reports those bits (0401h says so), and the filling,
+   through the page's own address, was the host's doing, not the client's. */
+static void fresh(u32 lin, u32 f)
+{
+    memset((void *)lin, 0, 4096);
+    mm_map(lin, f, MM_W | MM_U);
+}
+
 /* Fresh zeroed frames for pages [from, to) of a block at lin; -1 (with
    those pages unmapped again) when memory runs out. */
 static int commit(u32 lin, u32 from, u32 to)
@@ -84,7 +93,7 @@ static int commit(u32 lin, u32 from, u32 to)
                 pmm_free(mm_unmap(lin + (i << 12)));
             return -1;
         }
-        memset((void *)(lin + (i << 12)), 0, 4096);
+        fresh(lin + (i << 12), f);
         dctx->frames++;
     }
     return 0;
@@ -143,7 +152,7 @@ int lin_fault(u32 lin)
         pmm_free(f);
         return 0;
     }
-    memset((void *)(lin & ~0xFFFu), 0, 4096);
+    fresh(lin & ~0xFFFu, f);                    /* (the access that faulted is made again, and sets its own bits) */
     dctx->lazy--;
     dctx->frames++;
     return 1;
@@ -527,7 +536,9 @@ int page_attr(u32 handle, u32 off, u32 n, u16 *attr, int set, u32 *done)
                 return 0x8013;
             pte = mm_lookup(lin);
         }
-        mm_map(lin, pte & ~0xFFFu, MM_U | ((attr[i] & 8) ? MM_W : 0) | (pte & (MM_UC | MM_MAPPED | 0x60)));
+        /* Accessed and dirty: as the client gives them (bit 4 says it does), or as they are. */
+        mm_map(lin, pte & ~0xFFFu, MM_U | ((attr[i] & 8) ? MM_W : 0) | (pte & (MM_UC | MM_MAPPED))
+                                       | ((attr[i] & 0x10) ? (u32)(attr[i] & 0x60) : (pte & 0x60)));
     }
     return 0;
 }

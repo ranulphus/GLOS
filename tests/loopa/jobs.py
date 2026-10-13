@@ -945,6 +945,10 @@ HR_KNOWN = {
     # HDPMI refuses a second client started by the first; GLOS runs it as a level (M4c).
     "I3100002": "nested", "NEWCL": "nested", "NEWCL2": "nested",
     "I3100003": "layout",       # the host's own LDT layout
+    # Pages 0507h has just made memory of (they were a device's, 0508h), which nobody has touched since: GLOS says
+    # not accessed, not written (19h). HDPMI says so with XMS, and accessed and written (79h) without, which is how
+    # this suite's cases boot.
+    "I310508A": "fresh-page-bits",
     "I3103002": "xms",          # the HDPMI run has no XMS; GLOS's server has no 4309h handle table
     "I31090X": "iopl0",         # PUSHF shows the real IF at IOPL 0 (D20)
     # 0305h: GLOS has no state to save (size 0), HDPMI 1Ch; RAWJMP5 then loops

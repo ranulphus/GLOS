@@ -264,7 +264,21 @@ Each step is a commit with its tests. The gate (`make gate`) must still pass at 
     the UI's fixed-width font, shows GLOS's own text instead.
   - `kernel/wm/wm.c`: the look's colours, the focus's close box filled with the one accent, and the task
     bar's pictures (GLOS's mark, a window on each button, a sign beside the remote-session note).
-- **H. The exit: under way.**
+- **H. The exit: the gate is running** (2026-10-13).
+  - **Golden desktops:** `make loopa-desk`, the demonstration in the chosen look at 640x480 in 8, 16 and 32
+    bits, each screenshot equal to the host's composition, on the S3 Trio64V2 (Pentium II and 486DX2) and on
+    the G200 in VBE mode; the same after a session.
+  - **Two apps at once, one busy:** `make loopa-apps` (two beside one that loops for ever: 7.4 turns a second
+    each against 11.7 alone on the Pentium II, 3.5 against 8.0 on the 486; `glos tick` within 0.13 s) and
+    `make loopa-win` (one drawing 50 times a second beside one drawing in a busy loop: 47 a second against
+    49 on the Pentium II, 42 on the 486; `glos tick` within 0.1 s).
+  - **The regression** on the last commit, alone on the host: the host tests and 24 Loop A suites (m1, m2,
+    mem, shell, sess, ssh, gdbprog, input, djtst, dpmitools, hdpmireg, ecm, dpmi16, tpx, dpmi, hostile,
+    sched, apps, net, shot, m5exit, display, desk, win), 161 cases, none failed.
+  - **The gate** at step B, run beside other suites: 130 of 133 parts, the three one cell (Fifth Wheel
+    under HIMEMX: its plain-DOS baseline timed out, and on a second try its baseline on the other boot
+    underran its audio while GLOS's runs passed). That cell needs the host to itself; the gate runs alone
+    from now on, once on the last commit for step F and the end together (step G changed the look only).
   - Found on the way: a program marked as an app paused the apps for a moment while its mark was read at
     the EXEC, and an app that looked just then waited out the whole start of the new program (a quarter to
     three quarters of a second on the 486). It showed as the apps suite's four timers at once failing now
@@ -283,8 +297,14 @@ Each step is a commit with its tests. The gate (`make gate`) must still pass at 
     without HIMEM FreeDOS has its disk buffers there, and since step C's larger loader moved the files on
     the test disk, the buffer at that address was the one with the test's own output in it. Found by the
     file's bytes (the digits with their NUL) and the test's code; the suite lets those two differ in their
-    text (`HR_SCRIBBLE`). Under HIMEMX, which the suite's standard cases don't run, I310508A differs in a
-    page's accessed and dirty bits after 0508h (79h for HDPMI's 19h), at step B as now: not looked into.
+    text (`HR_SCRIBBLE`).
+  - HDPMI's I310508A, looked into at the owner's word: under HIMEMX it differed from HDPMI in a page's
+    accessed and dirty bits (79h for 19h) after 0507h made memory of mapped pages. It was HDPMI's answer
+    that changed with the boot (79h without XMS, where the suite runs, and so "the same"); GLOS said 79h
+    always, because the kernel zeroes a new page through the page's own address and the CPU marks it. A
+    fresh page now reads as the client left it, not accessed and not written, and 0507h sets the two bits
+    when asked (it ignored them). DPMICONF has the checks: cleared on request, then set by a read and by a
+    write; CWSDPMI, HDPMI32i and GLOS all pass them.
   - When GLOS leaves, the mouse's answer to the desktop's "stop reporting" is taken before real mode gets
     the chip back (`vkbc_leave`); it could have come after.
   - Seen once and not explained: on the 486, with three machines running at once, the batch file's last
