@@ -14,9 +14,15 @@
  * their pixels, are all there again when it comes back (the display calls
  * the painter then, which says "everything").
  *
- * Windows' pixels are whole pages of their own (mm_win_alloc), so that an
- * app's window can be mapped into the app as well (step F); the small
- * things come from the kernel's heap.
+ * An app's window's pixels are whole pages of their own (mm_win_alloc), so
+ * that they can be mapped into the app as well; the small things come from
+ * the kernel's heap. The desktop's own windows (the task bar, its own
+ * windows) keep their pixels in the card's memory while a drawing engine is
+ * up and there is room (M7 step E), where the engine copies them to the
+ * screen; before the screen changes hands (a session, another mode) they
+ * are moved into the system's memory, and back when the engine is up again.
+ * Apps' windows stay in the system's memory: a session takes the card's
+ * memory whole, and an app may be drawing in its window meanwhile.
  *
  * The task bar shows the time from the RTC, to the minute, and a note while
  * someone is connected over ssh (PRD D35): there, and never drawn over a
@@ -40,17 +46,55 @@ static volatile u8 changed, repaint;
 static u8 demo;                                 /* the demonstration's windows are up: its clock stands */
 static char note[16];
 
-static void *d_alloc(u32 bytes, int pixels) { return pixels ? mm_win_alloc(bytes) : kmalloc(bytes); }
-
-static void d_free(void *p, u32 bytes, int pixels)
+static void *d_alloc(u32 bytes, int kind)
 {
-    if (!pixels)
+    void *p;
+    if (kind == WM_MEM_SMALL)
+        return kmalloc(bytes);
+    if (kind == WM_MEM_DESK && (p = display_vram_alloc(bytes)) != 0)
+        return p;
+    return mm_win_alloc(bytes);
+}
+
+static void d_free(void *p, u32 bytes, int kind)
+{
+    if (kind == WM_MEM_SMALL)
         kfree(p);
-    else if (!deskapp_keep(p))                  /* (an app that has them mapped lets go first) */
+    else if (display_vram_free(p))
+        ;
+    else if (kind != WM_MEM_APP || !deskapp_keep(p))    /* (an app that has them mapped lets go first) */
         mm_win_free(p, bytes);
 }
 
-static const struct wm_host host = { d_alloc, d_free };
+static const struct wm_host host = { d_alloc, d_free, display_vram_dev };
+
+/* The display is about to change hands or modes: the desktop's windows'
+   pixels out of the card's memory (on the display's thread). */
+static void evict(void)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *w;
+    u32 n = 0, failed = 0;
+    for (w = m->bottom; w; w = w->above)
+        if (w->store.dev)
+            wm_store_again(m, w, WM_MEM_RAM) == 0 ? n++ : failed++;
+    if (n || failed)
+        kprintf("GLOS-DESK vram-out windows=%u failed=%u\n", n, failed);
+    desk_unlock();
+}
+
+/* The engine is up: the desktop's windows' pixels into the card's memory,
+   while there is room. */
+static void place(struct wm *m)
+{
+    struct wm_window *w;
+    u32 n = 0;
+    for (w = m->bottom; w; w = w->above)
+        if (!w->owner && !w->store.dev && wm_store_again(m, w, WM_MEM_DESK) == 0 && w->store.dev)
+            n++;
+    if (n)
+        kprintf("GLOS-DESK vram-in windows=%u\n", n);
+}
 
 struct wm *desk_lock(void)
 {
@@ -128,6 +172,7 @@ static void desk_thread(void *arg)
                     wm_screen(m, fb->w, fb->h, &fb->fmt);
                 if (fmt)
                     deskapp_screen(m);          /* (every window has new pixels: the apps are told) */
+                place(m);
                 wm_damage_all(m);
             }
             bar_text(m);
@@ -179,8 +224,12 @@ u32 desk_stat(char *buf, u32 max)
 {
     struct wm *m = desk_lock();
     const struct wm_window *w;
-    u32 n = (u32)ksnprintf(buf, max, "desk %dx%dx%u windows=%u focus=%u pointer=%d,%d%s\n", m->w, m->h, m->fmt.bpp, m->count,
-                           m->focus ? m->focus->id : 0, m->px, m->py, m->pointer ? "" : " hidden");
+    u32 n, vram = 0, bytes = 0;
+    for (w = m->top; w; w = w->below)
+        if (w->store.dev)                       /* (pixels in the card's memory) */
+            vram++, bytes += w->store.pitch * (u32)w->store.h;
+    n = (u32)ksnprintf(buf, max, "desk %dx%dx%u windows=%u focus=%u pointer=%d,%d%s vram=%u/%uK\n", m->w, m->h, m->fmt.bpp,
+                       m->count, m->focus ? m->focus->id : 0, m->px, m->py, m->pointer ? "" : " hidden", vram, bytes >> 10);
     for (w = m->top; w && n < max; w = w->below)
         n += (u32)ksnprintf(buf + n, max - n, "window %u %s%s at %d,%d %dx%d \"%s\"\n", w->id,
                             w->flags & WF_SHOWN ? "shown" : "hidden", w == m->bar ? " bar" : w->owner ? " app" : "", w->frame.x,
@@ -200,5 +249,6 @@ void desk_init(void)
         display_cursor_image(and_mask, xor_mask);
     }
     display_painter(painter);
+    display_evicter(evict);
     thread_create("desk", PRIO_NORMAL, desk_thread, NULL);
 }

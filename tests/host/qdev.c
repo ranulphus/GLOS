@@ -15,10 +15,10 @@ enum { Q_FILL, Q_MEM, Q_DEV, Q_MONO };
 
 struct q {
     int kind;
-    struct gfx_surface *d;
+    struct gfx_surface d;                       /* (as it was when asked: a card takes the address then) */
     struct gfx_rect r;
     unsigned px, fg, bg;
-    const struct gfx_surface *s;                /* Q_DEV: the source, read when done */
+    struct gfx_surface s;                       /* Q_DEV: the source, its pixels read when done */
     int sx, sy, x, y, w, h;
     unsigned stride;
     unsigned char *data;                        /* Q_MEM: the pixels; Q_MONO: the bits */
@@ -66,7 +66,7 @@ static int q_fill(struct gfx_surface *s, const struct gfx_rect *r, unsigned px)
     if (declined())
         return 0;
     e = push();
-    e->kind = Q_FILL, e->d = s, e->r = *r, e->px = px;
+    e->kind = Q_FILL, e->d = *s, e->r = *r, e->px = px;
     return 1;
 }
 
@@ -78,7 +78,7 @@ static int q_copy(struct gfx_surface *d, const struct gfx_rect *r, const struct 
     if (declined())
         return 0;
     e = push();
-    e->d = d, e->r = *r, e->s = s, e->sx = sx, e->sy = sy;
+    e->d = *d, e->r = *r, e->s = *s, e->sx = sx, e->sy = sy;
     if (s->dev) {
         e->kind = Q_DEV;
         return 1;
@@ -97,7 +97,7 @@ static int q_mono(struct gfx_surface *s, const struct gfx_rect *r, int x, int y,
     if (declined())
         return 0;
     e = push();
-    e->kind = Q_MONO, e->d = s, e->r = *r, e->x = x, e->y = y, e->w = w, e->h = h, e->stride = stride, e->fg = fg,
+    e->kind = Q_MONO, e->d = *s, e->r = *r, e->x = x, e->y = y, e->w = w, e->h = h, e->stride = stride, e->fg = fg,
     e->bg = bg;
     e->data = malloc(stride * (unsigned)h + 1);
     memcpy(e->data, bits, stride * (unsigned)h);
@@ -106,24 +106,24 @@ static int q_mono(struct gfx_surface *s, const struct gfx_rect *r, int x, int y,
 
 static void run(struct q *e)
 {
-    unsigned bytes = e->d->fmt.bpp / 8u, row = (unsigned)e->r.w * bytes;
+    unsigned bytes = e->d.fmt.bpp / 8u, row = (unsigned)e->r.w * bytes;
     int i, j;
     switch (e->kind) {
     case Q_FILL:
         for (j = 0; j < e->r.h; j++)
             for (i = 0; i < e->r.w; i++)
-                put(e->d, e->r.x + i, e->r.y + j, e->px);
+                put(&e->d, e->r.x + i, e->r.y + j, e->px);
         break;
     case Q_MEM:
         for (j = 0; j < e->r.h; j++)
-            memcpy(at(e->d, e->r.x, e->r.y + j), e->data + row * (unsigned)j, row);
+            memcpy(at(&e->d, e->r.x, e->r.y + j), e->data + row * (unsigned)j, row);
         break;
     case Q_DEV: {                               /* the source as it is now, all of it before any is written */
         unsigned char *keep = malloc(row * (unsigned)e->r.h);
         for (j = 0; j < e->r.h; j++)
-            memcpy(keep + row * (unsigned)j, at(e->s, e->sx, e->sy + j), row);
+            memcpy(keep + row * (unsigned)j, at(&e->s, e->sx, e->sy + j), row);
         for (j = 0; j < e->r.h; j++)
-            memcpy(at(e->d, e->r.x, e->r.y + j), keep + row * (unsigned)j, row);
+            memcpy(at(&e->d, e->r.x, e->r.y + j), keep + row * (unsigned)j, row);
         free(keep);
         break;
     }
@@ -132,9 +132,9 @@ static void run(struct q *e)
             for (i = 0; i < e->r.w; i++) {
                 int k = e->r.x + i - e->x, l = e->r.y + j - e->y;
                 if (e->data[(unsigned)l * e->stride + (unsigned)k / 8] & (0x80u >> (k & 7)))
-                    put(e->d, e->r.x + i, e->r.y + j, e->fg);
+                    put(&e->d, e->r.x + i, e->r.y + j, e->fg);
                 else if (e->bg != GFX_NONE)
-                    put(e->d, e->r.x + i, e->r.y + j, e->bg);
+                    put(&e->d, e->r.x + i, e->r.y + j, e->bg);
             }
     }
 }

@@ -44,8 +44,15 @@ struct wm_look {
 
 /* What the core needs from its host. */
 struct wm_host {
-    void *(*alloc)(u32 bytes, int pixels);      /* memory, zeroed, or NULL; pixels: for a window's (the kernel's side */
-    void (*free)(void *mem, u32 bytes, int pixels);     /* gives whole pages, which an app can have mapped) */
+    void *(*alloc)(u32 bytes, int kind);        /* memory (WM_MEM_), zeroed, or NULL */
+    void (*free)(void *mem, u32 bytes, int kind);
+    const struct gfx_dev *(*dev)(const void *mem);      /* a drawing engine at a window's pixels, or NULL (NULL: none) */
+};
+enum {
+    WM_MEM_SMALL,                       /* the manager's own things */
+    WM_MEM_APP,                         /* an app's window's pixels (whole pages, which the app can have mapped) */
+    WM_MEM_DESK,                        /* the desktop's own window's: anywhere, the card's memory too (M7 step E) */
+    WM_MEM_RAM                          /* ... but in the system's memory */
 };
 
 struct wm {
@@ -90,6 +97,8 @@ struct wm_window *wm_next(const struct wm *m, const struct wm_window *w);       
 
 void wm_pointer(struct wm *m, s32 x, s32 y, int shown);
 void wm_hw_pointer(struct wm *m, int on);       /* the card shows the pointer from now on (1), or this does (0) */
+int wm_store_again(struct wm *m, struct wm_window *w, int kind);        /* the window's pixels moved into memory of
+                                                   that kind (WM_MEM_DESK or WM_MEM_RAM; not an app's): 0, or -1 (none) */
 void wm_pointer_masks(u8 and_mask[512], u8 xor_mask[512]);     /* the pointer as a 64 x 64 AND/XOR cursor, its hot
                                                    spot the top left: colour 0 black, colour 1 white */
 void wm_ghost(struct wm *m, const struct gfx_rect *r);  /* the outline, two pixels wide; NULL: none */

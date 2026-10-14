@@ -29,9 +29,48 @@ static u32 rnd(void) { rnd_state = rnd_state * 1664525u + 1013904223u; return rn
 static s32 rin(s32 lo, s32 hi) { return lo + (s32)(rnd() % (u32)(hi - lo + 1)); }
 
 static long held, allocs;
-static void *h_alloc(u32 n, int pixels) { (void)pixels; held += n; allocs++; return calloc(1, n ? n : 1); }
-static void h_free(void *p, u32 n, int pixels) { (void)pixels; held -= n; allocs--; free(p); }
-static const struct wm_host host = { h_alloc, h_free };
+/* With an engine (dev_stores), the desktop's windows' pixels are its, as
+   in a card's memory; WM_MEM_RAM's are not. */
+static int dev_stores;
+static void *dev_mem[64];
+
+static void *h_alloc(u32 n, int kind)
+{
+    void *p = calloc(1, n ? n : 1);
+    u32 i;
+    held += n;
+    allocs++;
+    if (dev_stores && kind == WM_MEM_DESK)
+        for (i = 0; i < 64; i++)
+            if (!dev_mem[i]) {
+                dev_mem[i] = p;
+                break;
+            }
+    return p;
+}
+
+static void h_free(void *p, u32 n, int kind)
+{
+    u32 i;
+    (void)kind;
+    for (i = 0; i < 64; i++)
+        if (dev_mem[i] == p)
+            dev_mem[i] = 0;
+    held -= n;
+    allocs--;
+    free(p);
+}
+
+static const struct gfx_dev *h_dev(const void *p)
+{
+    u32 i;
+    for (i = 0; i < 64; i++)
+        if (p && dev_mem[i] == p)
+            return &qdev;
+    return 0;
+}
+
+static const struct wm_host host = { h_alloc, h_free, h_dev };
 
 #define SW 160
 #define SH 120
@@ -98,6 +137,7 @@ static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rou
 
     screen_new(&scr, f, SW, SH);
     screen_new(&ref, f, SW, SH);
+    dev_stores = dev;
     if (dev)
         scr.dev = &qdev;
     wm_init(mp, &host, SW, SH, f);
@@ -156,6 +196,8 @@ static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rou
         default:
             if (framed)
                 wm_bar_text(mp, rnd() & 1 ? "09:15" : "23:59", rnd() & 1 ? "ssh" : "");
+            if (dev && rnd() % 3 == 0)          /* (into the system's memory and back: the pixels go with it) */
+                CHECK(wm_store_again(mp, w, rnd() & 1 ? WM_MEM_RAM : WM_MEM_DESK) == 0);
         }
         list_check(mp);
         if (rnd() % 3)                          /* (not after every one: damage adds up) */
@@ -191,6 +233,7 @@ static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rou
         if (win[n])
             wm_destroy(mp, win[n]);
     wm_bar(mp, 0);
+    dev_stores = 0;
     CHECK(mp->count == 0 && held == before);
     printf("wm %s%s%s: %u things, %u compositions\n", name, framed ? " framed" : "", dev ? " engine" : "", rounds,
            composed);

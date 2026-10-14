@@ -287,15 +287,40 @@ void wm_init(struct wm *m, const struct wm_host *host, s32 w, s32 h, const struc
 }
 
 /* The store for a client area of cw x ch: 0, or -1. */
-static int store_new(struct wm *m, struct gfx_surface *s, void **mem, s32 cw, s32 ch)
+/* A window's pixels: an app's from pages it can map; the desktop's own with
+   rows of a multiple of 32 pixels, which a drawing engine can have. */
+static int store_new(struct wm *m, struct gfx_surface *s, void **mem, s32 cw, s32 ch, int kind)
 {
-    u32 pitch = (u32)cw * (m->fmt.bpp / 8u);
-    void *p = m->host.alloc(pitch * (u32)ch, 1);
+    u32 pitch = (kind == WM_MEM_APP ? (u32)cw : ((u32)cw + 31) & ~31u) * (m->fmt.bpp / 8u);
+    void *p = m->host.alloc(pitch * (u32)ch, kind);
     if (!p)
         return -1;
     gfx_init(s, p, cw, ch, pitch, &m->fmt);
+    s->dev = m->host.dev ? m->host.dev(p) : 0;
     gfx_fill(s, 0, 0, cw, ch, 0xFFFFFF);
     *mem = p;
+    return 0;
+}
+
+static int kind_of(const struct wm_window *w) { return w->owner ? WM_MEM_APP : WM_MEM_DESK; }
+
+static void store_free(struct wm *m, struct wm_window *w)
+{
+    m->host.free(w->mem, w->store.pitch * (u32)w->store.h, w->owner ? WM_MEM_APP : w->store.dev ? WM_MEM_DESK : WM_MEM_RAM);
+}
+
+int wm_store_again(struct wm *m, struct wm_window *w, int kind)
+{
+    struct gfx_surface s;
+    void *mem;
+    if (w->owner || store_new(m, &s, &mem, w->store.w, w->store.h, kind) != 0)
+        return -1;
+    gfx_blit(&s, 0, 0, &w->store, 0, 0, w->store.w, w->store.h);
+    if (w->store.dev)
+        w->store.dev->sync(&w->store);          /* (the engine had it: done with it before it goes) */
+    store_free(m, w);
+    w->store = s;
+    w->mem = mem;
     return 0;
 }
 
@@ -303,16 +328,16 @@ struct wm_window *wm_create(struct wm *m, s32 x, s32 y, s32 cw, s32 ch, const ch
 {
     struct wm_window *w;
     u32 i;
-    if (cw < 1 || ch < 1 || cw > 4096 || ch > 4096 || !(w = m->host.alloc(sizeof *w, 0)))
+    if (cw < 1 || ch < 1 || cw > 4096 || ch > 4096 || !(w = m->host.alloc(sizeof *w, WM_MEM_SMALL)))
         return 0;
     for (i = 0; i < sizeof *w; i++)
         ((u8 *)w)[i] = 0;
-    if (store_new(m, &w->store, &w->mem, cw, ch) != 0) {
-        m->host.free(w, sizeof *w, 0);
+    w->owner = owner;
+    if (store_new(m, &w->store, &w->mem, cw, ch, kind_of(w)) != 0) {
+        m->host.free(w, sizeof *w, WM_MEM_SMALL);
         return 0;
     }
     w->id = m->next_id++;
-    w->owner = owner;
     w->flags = (u16)(flags & ~WF_SHOWN);
     copy_title(w->title, title);
     set_frame(m, w, x, y);
@@ -331,10 +356,12 @@ void wm_destroy(struct wm *m, struct wm_window *w)
         m->focus = 0;
     if (m->bar == w)
         m->bar = 0;
-    m->host.free(w->mem, w->store.pitch * (u32)w->store.h, 1);
+    if (w->store.dev)
+        w->store.dev->sync(&w->store);
+    store_free(m, w);
     w->flags = 0;
     bar_stale(m);
-    m->host.free(w, sizeof *w, 0);
+    m->host.free(w, sizeof *w, WM_MEM_SMALL);
 }
 
 void wm_show(struct wm *m, struct wm_window *w, int on)
@@ -367,12 +394,14 @@ int wm_resize(struct wm *m, struct wm_window *w, s32 cw, s32 ch)
         return -1;
     if (cw == w->store.w && ch == w->store.h)
         return 0;
-    if (store_new(m, &s, &mem, cw, ch) != 0)
+    if (store_new(m, &s, &mem, cw, ch, kind_of(w)) != 0)
         return -1;
     gfx_blit(&s, 0, 0, &w->store, 0, 0, w->store.w, w->store.h);
+    if (w->store.dev)
+        w->store.dev->sync(&w->store);
     if (shown(w))
         damage(m, &w->frame);
-    m->host.free(w->mem, w->store.pitch * (u32)w->store.h, 1);
+    store_free(m, w);
     w->store = s;
     w->mem = mem;
     set_frame(m, w, w->frame.x, w->frame.y);
@@ -563,8 +592,10 @@ void wm_screen(struct wm *m, s32 w, s32 h, const struct gfx_fmt *fmt)
     for (v = m->bottom; v && !same; v = v->above) {    /* pixels of another format mean nothing: cleared */
         struct gfx_surface s;
         void *mem;
-        if (store_new(m, &s, &mem, v->store.w, v->store.h) == 0) {
-            m->host.free(v->mem, v->store.pitch * (u32)v->store.h, 1);
+        if (store_new(m, &s, &mem, v->store.w, v->store.h, kind_of(v)) == 0) {
+            if (v->store.dev)
+                v->store.dev->sync(&v->store);
+            store_free(m, v);
             v->store = s;
             v->mem = mem;
         }

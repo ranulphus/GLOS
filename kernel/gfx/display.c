@@ -55,6 +55,7 @@ static struct {
     struct gfx_surface fb;
     void (*paint)(struct gfx_surface *fb);      /* who draws the whole screen now ... */
     void (*home)(struct gfx_surface *fb);       /* ... and when it isn't the test card's */
+    void (*evict)(void);                        /* ... and whose pixels are to leave the card's memory first */
 } d;
 
 static u32 le16(const u8 *p) { return p[0] | (u32)p[1] << 8; }
@@ -244,6 +245,19 @@ void display_sync(void) { mga_display_sync(); }
 
 void display_cursor_image(const u8 *and_mask, const u8 *xor_mask) { mga_cursor_image(and_mask, xor_mask); }
 
+void display_evicter(void (*evict)(void)) { d.evict = evict; }
+
+static void leaving(void)                       /* the card's memory is about to be another's, or laid out again */
+{
+    if (d.evict && mga_display_on())
+        d.evict();
+}
+
+void *display_vram_alloc(u32 bytes) { return mga_store_alloc(bytes); }
+int display_vram_free(void *p) { return mga_store_free(p); }
+const struct gfx_dev *display_vram_dev(const void *p) { return mga_store_dev(p); }
+void display_vram_limit(u32 bytes) { mga_store_limit(bytes); }
+
 int display_cursor(int on, s32 x, s32 y) { return d.on && !d.held && mga_cursor(on, x, y); }
 
 void display_init(const struct bootinfo *bi)
@@ -284,6 +298,7 @@ void display_vm_turn(void)
     if (!d.ask)
         return;
     d.ask = 0;
+    leaving();
     if (what == DISPLAY_OFF) {
         mga_display_down();
         if (d.on) {
@@ -317,6 +332,7 @@ void display_session(int begin)
     if (!d.on)
         return;
     if (begin && !d.held) {
+        leaving();
         mga_display_down();
         d.held = 1;
         mm_vga_hide(0);
@@ -333,6 +349,7 @@ void display_session(int begin)
 void display_leave(void)
 {
     int was = d.on && !d.held;
+    leaving();
     mga_display_down();
     d.on = 0;
     if (was)

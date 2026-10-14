@@ -31,6 +31,7 @@
 
 #define OWN_SCREEN 1u                           /* (VRAM owners) */
 #define OWN_CURSOR 2u
+#define OWN_STORE  3u                           /* the desktop's windows' pixels (step E) */
 
 static struct {
     u8 off;                                     /* [display] accel = off */
@@ -43,6 +44,7 @@ static struct {
     u32 screen_bytes;
     u8 busy;                                    /* drawn since the last sync */
     u32 ops;                                    /* draws the engine has had */
+    u32 store_max;                              /* bytes of VRAM the desktop's windows may have (glos display vram) */
     struct thread *owner;                       /* who has the engine */
     struct waitq q;
     /* The hardware cursor (step F): the desktop's pointer, its image loaded
@@ -219,6 +221,37 @@ void mga_display_sync(void)
 }
 
 int mga_display_on(void) { return m.up; }
+
+/* ---- the desktop's windows' pixels (step E) */
+
+void *mga_store_alloc(u32 bytes)
+{
+    void *p = 0;
+    u32 off;
+    take();
+    if (m.up && (!m.store_max || vram_owned_bytes(&m.heap, OWN_STORE) + bytes <= m.store_max)
+        && vram_alloc(&m.heap, bytes, 64, 0, OWN_STORE, &off) == 0)
+        p = (u8 *)mga_fb + off;
+    give();
+    return p;
+}
+
+static int owns(const void *p) { return mga_fb && (const u8 *)p >= (const u8 *)mga_fb && (const u8 *)p < (const u8 *)mga_fb + m.vram; }
+
+int mga_store_free(void *p)
+{
+    if (!owns(p))
+        return 0;
+    take();
+    if (m.up)
+        vram_free(&m.heap, (u32)((u8 *)p - (u8 *)mga_fb));
+    give();
+    return 1;
+}
+
+const struct gfx_dev *mga_store_dev(const void *p) { return owns(p) ? &mga_dev : 0; }
+
+void mga_store_limit(u32 bytes) { m.store_max = bytes; }
 
 u32 mga_display_stat(char *buf, u32 max)
 {

@@ -22,6 +22,11 @@ u32 display_stat(char *buf, u32 max);           /* glos display: a line */
 void display_sync(void);                        /* a drawing engine's work on the screen finished: before reading it */
 void display_cursor_image(const u8 *and_mask, const u8 *xor_mask);      /* the pointer, for a hardware cursor */
 int display_cursor(int on, s32 x, s32 y);       /* the pointer by the card's cursor: 1, or 0 if it must be drawn */
+void display_evicter(void (*evict)(void));      /* who moves pixels out of the card's memory before it changes hands */
+void *display_vram_alloc(u32 bytes);            /* the card's memory for pixels (a drawing engine's), or NULL */
+int display_vram_free(void *p);                 /* 1 if p was such, now free */
+const struct gfx_dev *display_vram_dev(const void *p);  /* the engine at such pixels, or NULL */
+void display_vram_limit(u32 bytes);             /* at most this much of it for them from now on (0: no limit) */
 void display_leave(void);                       /* GLOS is leaving: text mode */
 int display_quiet(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, int app);    /* a program's INT 10h while the desktop
                                                    has the screen: 1 if answered here, not by the BIOS */

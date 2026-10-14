@@ -2160,6 +2160,17 @@ def desk_case(profile, vcard, card):
         checks["pointer"] = bool(m) and same("pointer", golden(32, line, "ptr-"), "the desktop with the pointer")
         if vcard in MATROX_CARDS:
             checks["cursor"] = "GLOS-MGA cursor at=" in agent.log()
+            # The desktop's windows' pixels in the card's memory (M7 step E): out of it for the session (vram-out),
+            # back after it; then with room for some only, the same picture from some of each.
+            v = re.search(r" vram=(\d+)/", agent.ssh("glos desk")[1])
+            checks["vram-stores"] = bool(v) and int(v.group(1)) == 4 and "GLOS-DESK vram-out windows=4" in agent.log()
+            agent.ssh("glos display vram 300")
+            agent.ssh("glos desk clear")
+            agent.ssh("glos desk demo")
+            v = re.search(r" vram=(\d+)/", agent.ssh("glos desk")[1])
+            checks["vram-some"] = bool(v) and int(v.group(1)) == 2 \
+                and same("vram-some", golden(32, line), "the desktop from VRAM and memory")
+            agent.ssh("glos display vram 0")
         checks["clear"] = agent.ssh("glos desk clear")[0] == 0
         time.sleep(2)
         bare = shot("bare")
