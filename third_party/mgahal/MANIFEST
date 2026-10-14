@@ -1,5 +1,5 @@
 b95fdd062dbe9bdb197937afed9e7bcb36bbe859714461ba491d2d5398061ba9  ./LICENSE
-cec93eeca629a10c9a11f14198e94485ef3e81837cf6bc9a4a5c696f9298d13e  ./VERSION
+2969ccd7d40550d8eb00582248f3e9c6897a22c9a13a18831acd3909f54dc353  ./VERSION
 3def6299163eaa1812378a92ed97b6a69e938611d63a8af7f2202de8678c6b41  ./docs/matrox-2d.md
 d4971a2cb4e3597d12106a24cf69551b55c4f28ebcc643429d4e70bc7b9aaa1e  ./hal/include/mga/fp.h
 0d90f4d3244b420e9dc975f605be367cd1e95c7cc8daac44226b61c59f5cad8f  ./hal/include/mga/hal.h
@@ -10,7 +10,7 @@ aa2906c31ebdd9e4c20a7fe2a2111a6622b866478008e8ac8ecd466e7d3a977a  ./hal/include/
 6c57598148b89485ab96b294bf373be5c397969427081c490258157e5e8c3336  ./hal/include/mga/serial.h
 76d6fb8aaa796199272c56fffcbbfb19a3220a155cdbb78f0e88adf58b80c367  ./hal/include/mga/setup.h
 db658cdb30392b2d62ec8f983de6fa6bab749709cea66d0a27b445a40f71da33  ./hal/include/mga/setupconv.h
-b8c47214cdaf88d21ee241cba1f14d087af22ae7ae8baa1c36f04756d8b7280e  ./hal/include/mga/sys.h
+b0fe8e905f948b71bbc7d1fa3cab624115a21d0dd0b811c6111cd20068f71f26  ./hal/include/mga/sys.h
 043f39bd55987e4c241a2e1fbaf291cfa8c1e1411b92a4b8543a627dd6c2a60f  ./hal/include/mga/tex.h
 5f33e9652105f432a2641c760e670e2cc80b1de1a83a8a79b688a68ecc176e56  ./hal/include/mga/types.h
 fda5d6ce000d18884b074b1edc9354e55e5fca5a63f01109b3e1ddcbeb69ab80  ./hal/port/djgpp.c
