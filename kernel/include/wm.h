@@ -58,6 +58,7 @@ struct wm {
     struct gfx_region dirty;            /* what of the screen is to be drawn again */
     s32 px, py;                         /* the pointer's hot spot */
     u8 pointer;                         /* shown */
+    u8 hw_pointer;                      /* the card shows it (its hardware cursor): not drawn here */
     u8 ghost_on;
     struct gfx_rect ghost;              /* an outline above every window: where one is being moved or sized to */
     u32 next_id, count;
@@ -88,6 +89,9 @@ struct wm_window *wm_hit(const struct wm *m, s32 x, s32 y, int *part);  /* the w
 struct wm_window *wm_next(const struct wm *m, const struct wm_window *w);       /* the next to give the focus (Alt-Tab) */
 
 void wm_pointer(struct wm *m, s32 x, s32 y, int shown);
+void wm_hw_pointer(struct wm *m, int on);       /* the card shows the pointer from now on (1), or this does (0) */
+void wm_pointer_masks(u8 and_mask[512], u8 xor_mask[512]);     /* the pointer as a 64 x 64 AND/XOR cursor, its hot
+                                                   spot the top left: colour 0 black, colour 1 white */
 void wm_ghost(struct wm *m, const struct gfx_rect *r);  /* the outline, two pixels wide; NULL: none */
 void wm_bar(struct wm *m, int on);                      /* the task bar: made, or taken away */
 void wm_bar_text(struct wm *m, const char *clock, const char *note);

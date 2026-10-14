@@ -256,7 +256,7 @@ static u32 crc32(const u8 *p, u32 n)
     return ~c;
 }
 
-static void desk(const struct gfx_fmt *f, const char *name, s32 w, s32 h)
+static void desk(const struct gfx_fmt *f, const char *name, s32 w, s32 h, int ptr)
 {
     struct gfx_surface s;
     struct wm m;
@@ -269,6 +269,8 @@ static void desk(const struct gfx_fmt *f, const char *name, s32 w, s32 h)
     screen_new(&s, f, w, h);
     wm_init(&m, &host, w, h, f);
     wm_demo(&m);
+    if (ptr)                                    /* (wm-desk-ptr-N: with the pointer at 200,150) */
+        wm_pointer(&m, 200, 150, 1);
     wm_compose(&m, &s);
     for (y = 0; y < h; y++) {
         rgb[(u32)y * row] = 0;
@@ -278,7 +280,7 @@ static void desk(const struct gfx_fmt *f, const char *name, s32 w, s32 h)
             p[0] = (u8)(c >> 16), p[1] = (u8)(c >> 8), p[2] = (u8)c;
         }
     }
-    snprintf(path, sizeof path, "build/host/wm-desk-%s.png", name);
+    snprintf(path, sizeof path, "build/host/wm-desk-%s%s.png", ptr ? "ptr-" : "", name);
     if ((fp = fopen(path, "wb"))) {
         n = png_begin(&png, (u32)w, (u32)h, 24, 0, 0, out);
         fwrite(out, 1, n, fp);
@@ -290,8 +292,43 @@ static void desk(const struct gfx_fmt *f, const char *name, s32 w, s32 h)
         }
         fclose(fp);
     }
-    printf("wm desk %s %dx%d crc=%08x\n", name, w, h, crc32(rgb, row * (u32)h));
+    printf("wm desk %s%s %dx%d crc=%08x\n", ptr ? "ptr-" : "", name, w, h, crc32(rgb, row * (u32)h));
     free(rgb), free(out), free(s.pix);
+}
+
+/* The pointer as the card's cursor shows it (wm_pointer_masks, drawn here
+   as the monitor would) is the pointer the composer draws (M7 step F). */
+static void cursor_masks(const struct gfx_fmt *f, const char *name)
+{
+    struct gfx_surface a, b;
+    struct wm m;
+    u8 and_mask[512], xor_mask[512];
+    s32 x, y, px, py;
+    screen_new(&a, f, SW, SH);
+    screen_new(&b, f, SW, SH);
+    wm_init(&m, &host, SW, SH, f);
+    wm_bar(&m, 1);
+    wm_pointer(&m, SW / 3, SH / 4, 1);
+    wm_compose(&m, &a);
+    wm_hw_pointer(&m, 1);
+    wm_damage_all(&m);
+    wm_compose(&m, &b);
+    CHECK(!screens_same(&a, &b));               /* (the pointer is gone from it) */
+    wm_pointer_masks(and_mask, xor_mask);
+    px = m.px, py = m.py;
+    for (y = 0; y < 64; y++)
+        for (x = 0; x < 64; x++) {
+            u8 bit = (u8)(0x80 >> (x & 7));
+            if (!(and_mask[y * 8 + x / 8] & bit) && px + x < SW && py + y < SH)
+                gfx_fill(&b, px + x, py + y, 1, 1, xor_mask[y * 8 + x / 8] & bit ? 0xFFFFFF : 0x000000);
+            CHECK(!(and_mask[y * 8 + x / 8] & bit) || !(xor_mask[y * 8 + x / 8] & bit));     /* (none inverted) */
+        }
+    if (!screens_same(&a, &b)) {
+        printf("FAIL wm %s: the cursor's masks are not the pointer drawn\n", name);
+        fails++;
+    }
+    wm_bar(&m, 0);
+    free(a.pix), free(b.pix);
 }
 
 int main(void)
@@ -308,10 +345,14 @@ int main(void)
     churn(&gfx_fmt888, "32", 1, 20000, 1);
     churn(&gfx_fmt565, "16", 0, 20000, 1);
     places();
+    cursor_masks(&gfx_fmt8, "8");
+    cursor_masks(&gfx_fmt565, "16");
+    cursor_masks(&gfx_fmt888, "32");
     CHECK(held == 0 && allocs == 0);
-    desk(&gfx_fmt8, "8", 640, 480);
-    desk(&gfx_fmt565, "16", 640, 480);
-    desk(&gfx_fmt888, "32", 640, 480);
+    desk(&gfx_fmt8, "8", 640, 480, 0);
+    desk(&gfx_fmt565, "16", 640, 480, 0);
+    desk(&gfx_fmt888, "32", 640, 480, 0);
+    desk(&gfx_fmt888, "32", 640, 480, 1);
     printf("wm_test: %s\n", fails ? "FAILED" : "ok");
     return fails ? 1 : 0;
 }

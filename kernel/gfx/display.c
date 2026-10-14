@@ -242,6 +242,10 @@ struct gfx_surface *display_fb(void) { return d.on && !d.held && d.paint != gfx_
 
 void display_sync(void) { mga_display_sync(); }
 
+void display_cursor_image(const u8 *and_mask, const u8 *xor_mask) { mga_cursor_image(and_mask, xor_mask); }
+
+int display_cursor(int on, s32 x, s32 y) { return d.on && !d.held && mga_cursor(on, x, y); }
+
 void display_init(const struct bootinfo *bi)
 {
     if (!d.paint)

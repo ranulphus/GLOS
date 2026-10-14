@@ -119,6 +119,7 @@ static void desk_thread(void *arg)
         m = desk_lock();
         deskin_turn(m);
         fb = display_fb();
+        wm_hw_pointer(m, fb && display_cursor(m->pointer, m->px, m->py));     /* (M7 step F) */
         if (fb) {
             int fmt = fb->fmt.bpp != m->fmt.bpp || fb->fmt.gsize != m->fmt.gsize || fb->fmt.rpos != m->fmt.rpos;
             if (repaint || fmt || fb->w != m->w || fb->h != m->h) {
@@ -193,6 +194,11 @@ void desk_init(void)
     wm_init(&desk, &host, 640, 480, &gfx_fmt8); /* (the screen's own size and format when there is one) */
     wm_bar(&desk, 1);
     deskin_init();
+    {
+        u8 and_mask[512], xor_mask[512];
+        wm_pointer_masks(and_mask, xor_mask);
+        display_cursor_image(and_mask, xor_mask);
+    }
     display_painter(painter);
     thread_create("desk", PRIO_NORMAL, desk_thread, NULL);
 }

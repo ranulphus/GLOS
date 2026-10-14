@@ -42,6 +42,7 @@
 #include "io.h"
 #include "display.h"
 #include "kprintf.h"
+#include "mgadisp.h"
 #include "mm.h"
 #include "pci.h"
 #include "png.h"
@@ -79,6 +80,11 @@ struct shot {
     u32 w, h;                                   /* pixels */
     u32 rowlen;                                 /* a row's bytes in the copy (one plane's, K_PLANAR and K_MODEX) */
     u8 pal[256][3];                             /* RGB by pixel value */
+    /* the card's cursor, where the monitor shows it over the picture (M7 step F) */
+    u8 cursor;
+    s32 cx, cy;
+    const u8 *cand, *cxor;
+    u8 black, white;                            /* K_PACKED: colours 0 and 1 as the palette has them nearest */
     /* the copy */
     u32 *frames, nframes, len, fill, since;
     /* the reader */
@@ -690,6 +696,11 @@ static int capture(struct vm_work *w, struct trapframe *tf)
     if (!r)
         r = (v.gc6 & 1) ? grab_vga(s, &v) : grab_text(s, &v);
     s->got = r;
+    if (r > 0 && (s->kind == K_DIRECT || s->kind == K_PACKED) && mga_cursor_state(&s->cx, &s->cy, &s->cand, &s->cxor)) {
+        s->cursor = 1;
+        s->black = gfx_pal_nearest(0x000000);
+        s->white = gfx_pal_nearest(0xFFFFFF);
+    }
     if (r > 0) {                                /* what GLOS took the screen for */
         static const char *const kinds[] = { "text", "cga", "planar", "unchained", "packed", "direct" };
         kprintf("GLOS-SHOT kind=%s size=%ux%u vbe=%04x\n", kinds[s->kind], s->w, s->h, vbe.mode);
@@ -820,11 +831,37 @@ static u8 field(u32 v, u32 pos, u32 size)
     return (u8)c;
 }
 
+/* The cursor over row y: RGB (three bytes a pixel) or palette indices (one). */
+static void cursor_over(const struct shot *s, u32 y, u8 *out, int rgb)
+{
+    s32 iy = (s32)y - s->cy, ix, x;
+    if (!s->cursor || iy < 0 || iy >= 64)
+        return;
+    for (ix = 0; ix < 64; ix++) {
+        u8 bit = (u8)(0x80 >> (ix & 7));
+        int a = (s->cand[iy * 8 + ix / 8] & bit) != 0, o = (s->cxor[iy * 8 + ix / 8] & bit) != 0;
+        if ((x = s->cx + ix) < 0 || (u32)x >= s->w || (a && !o))
+            continue;
+        if (rgb) {
+            u8 *p = out + (u32)x * 3;
+            if (a)
+                p[0] = (u8)~p[0], p[1] = (u8)~p[1], p[2] = (u8)~p[2];
+            else
+                p[0] = p[1] = p[2] = o ? 0xFF : 0x00;
+        } else if (!a) {                        /* (inverting a palette's colours has no index: not drawn) */
+            out[x] = o ? s->white : s->black;
+        }
+    }
+}
+
 /* Row y as RGB. */
 static void row_rgb(struct shot *s, u32 y, u8 *out)
 {
+    u8 *start = out;
     u32 x, bytes = (s->bits + 7u) / 8;
     row(s, y);
+    if (s->kind == K_PACKED)
+        cursor_over(s, y, s->pix, 0);
     for (x = 0; x < s->w; x++, out += 3) {
         if (s->kind == K_DIRECT) {
             const u8 *q = s->src + x * bytes;
@@ -836,6 +873,8 @@ static void row_rgb(struct shot *s, u32 y, u8 *out)
             memcpy(out, s->pal[s->pix[x]], 3);
         }
     }
+    if (s->kind == K_DIRECT)
+        cursor_over(s, y, start, 1);
 }
 
 u32 shot_read(struct shot *s, u8 *out)
@@ -872,6 +911,8 @@ u32 shot_read(struct shot *s, u8 *out)
         if (d == 8) {
             u8 *l = s->lines + i * s->png.row;
             *l = 0;
+            if (s->kind == K_PACKED)
+                cursor_over(s, s->y, s->pix, 0);
             memcpy(l + 1, s->pix, s->w);
         } else {
             u8 *l = s->lines + i * s->png.row;

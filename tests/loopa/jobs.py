@@ -2037,7 +2037,8 @@ def display_case(profile, vcard, card, cfg_mode, accel="on"):
             checks["ask-%d" % bits] = agent.ssh("glos display card 640x480x%d" % bits)[0] == 0
             line = state("display on mode=")
             checks["on-%d" % bits] = " 640x480x%d " % bits in line
-            checks["accel-%d" % bits] = want_accel in line
+            checks["accel-%d" % bits] = want_accel in line and (not engine or int((re.findall(r"draws=(\d+)", line)
+                                                                                    or ["0"])[0]) > 0)
             if checks["on-%d" % bits]:
                 checks["card-%d" % bits] = same(shot("card-%d" % bits), card(bits, line), "card at %d bits" % bits)
         info = " " + " ".join(w for w in line.split() if w.startswith(("mode=", "rgb=", "lfb=")))
@@ -2112,8 +2113,8 @@ def desk_case(profile, vcard, card):
         open(os.path.join(out, name + ".png"), "wb").write(p.stdout)
         return png_rgb(p.stdout) if p.returncode == 0 else None
 
-    def golden(bits, line):
-        w, h, rgb = png_rgb(open(os.path.join(ROOT, "build/host/wm-desk-%d.png" % bits), "rb").read())
+    def golden(bits, line, ptr=""):
+        w, h, rgb = png_rgb(open(os.path.join(ROOT, "build/host/wm-desk-%s%d.png" % (ptr, bits)), "rb").read())
         if bits == 8 and " dac=6" in line:
             rgb = bytes((((v >> 2) << 2) | (v >> 6)) for v in rgb)
         return w, h, rgb
@@ -2151,6 +2152,14 @@ def desk_case(profile, vcard, card):
         checks["session"] = rc == 7 and "over the desktop" in o
         line = state("display on mode=")
         checks["back"] = bool(line) and same("after-session", golden(32, line), "the desktop after a session")
+        # The pointer at 200,150: drawn by the composer, or the card's cursor (M7 step F, a Matrox card), which
+        # glos shot draws into its picture where the monitor shows it: the same picture either way.
+        m = re.search(r"pointer=(-?\d+),(-?\d+)", agent.ssh("glos desk")[1])
+        if m:
+            agent.ssh("glos mouse %d %d" % (200 - int(m.group(1)), 150 - int(m.group(2))))
+        checks["pointer"] = bool(m) and same("pointer", golden(32, line, "ptr-"), "the desktop with the pointer")
+        if vcard in MATROX_CARDS:
+            checks["cursor"] = "GLOS-MGA cursor at=" in agent.log()
         checks["clear"] = agent.ssh("glos desk clear")[0] == 0
         time.sleep(2)
         bare = shot("bare")

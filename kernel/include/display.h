@@ -20,6 +20,8 @@ struct gfx_surface *display_fb(void);           /* the screen, or NULL while it 
 void display_painter(void (*paint)(struct gfx_surface *fb));    /* who draws the whole screen when it comes (back) */
 u32 display_stat(char *buf, u32 max);           /* glos display: a line */
 void display_sync(void);                        /* a drawing engine's work on the screen finished: before reading it */
+void display_cursor_image(const u8 *and_mask, const u8 *xor_mask);      /* the pointer, for a hardware cursor */
+int display_cursor(int on, s32 x, s32 y);       /* the pointer by the card's cursor: 1, or 0 if it must be drawn */
 void display_leave(void);                       /* GLOS is leaving: text mode */
 int display_quiet(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, int app);    /* a program's INT 10h while the desktop
                                                    has the screen: 1 if answered here, not by the BIOS */

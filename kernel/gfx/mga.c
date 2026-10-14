@@ -30,6 +30,7 @@
 #include "mga/mmio.h"
 
 #define OWN_SCREEN 1u                           /* (VRAM owners) */
+#define OWN_CURSOR 2u
 
 static struct {
     u8 off;                                     /* [display] accel = off */
@@ -41,8 +42,14 @@ static struct {
     u8 *screen_pix;                             /* the screen's pixels in display.c's mapping */
     u32 screen_bytes;
     u8 busy;                                    /* drawn since the last sync */
+    u32 ops;                                    /* draws the engine has had */
     struct thread *owner;                       /* who has the engine */
     struct waitq q;
+    /* The hardware cursor (step F): the desktop's pointer, its image loaded
+       into VRAM on each desktop mode. */
+    u8 cur_and[512], cur_xor[512];
+    u8 cur_have, cur_loaded, cur_shown;
+    s32 cur_x, cur_y;
 } m;
 static u32 row_buf[4096];                       /* an image's row, padded to dwords */
 
@@ -112,6 +119,7 @@ static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes)
     m.screen.bpp = (int)bpp;
     m.screen.zbits = 16;
     engine_init(m.screen.pitch_px, m.screen.bpp);
+    crtc_set_start(m.screen.color_off);         /* (the screen where the VRAM manager has it, whatever ran before) */
     engine_set_target(&m.screen);
     engine_set_clip(0, 0, m.screen.pitch_px, (int)h);
     if (engine_sync(200000) != 0) {
@@ -121,6 +129,7 @@ static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes)
     vram_init(&m.heap, 0, m.vram);
     vram_reserve(&m.heap, m.screen.color_off, bytes, OWN_SCREEN);
     m.cur = m.screen;
+    m.cur_loaded = m.cur_shown = 0;             /* (the image again, in this mode's VRAM) */
     m.screen_pix = pix;
     m.screen_bytes = bytes;
     m.busy = 0;
@@ -135,10 +144,69 @@ void mga_display_down(void)
     take();
     if (m.up) {
         engine_sync(200000);
-        m.up = m.busy = 0;
+        if (m.cur_shown)
+            cursor_show(0);
+        m.up = m.busy = m.cur_shown = m.cur_loaded = 0;
         kprintf("GLOS-MGA down\n");
     }
     give();
+}
+
+/* ---- the hardware cursor */
+
+void mga_cursor_image(const u8 *and_mask, const u8 *xor_mask)
+{
+    take();
+    memcpy(m.cur_and, and_mask, sizeof m.cur_and);
+    memcpy(m.cur_xor, xor_mask, sizeof m.cur_xor);
+    m.cur_have = 1;
+    m.cur_loaded = 0;
+    give();
+}
+
+/* Its image in VRAM: as high as there is room, within the first 16 MB (8 on
+   a G100), which is all the cursor's address reaches. */
+static int cursor_place(void)
+{
+    u32 reach = mga.family == MGA_FAMILY_G100 ? 8u << 20 : 16u << 20, off;
+    if (vram_alloc(&m.heap, MGA_CURSOR_BYTES, 1024, MGA_VRAM_TOP, OWN_CURSOR, &off) != 0)
+        return -1;
+    if (off + MGA_CURSOR_BYTES > reach) {
+        vram_free(&m.heap, off);
+        off = reach - MGA_CURSOR_BYTES;
+        if (vram_reserve(&m.heap, off, MGA_CURSOR_BYTES, OWN_CURSOR) != 0)
+            return -1;
+    }
+    if (cursor_load(off, m.cur_and, m.cur_xor) != 0)
+        return -1;
+    cursor_colours(0x000000, 0xFFFFFF);
+    kprintf("GLOS-MGA cursor at=%x\n", off);
+    return 0;
+}
+
+int mga_cursor(int on, s32 x, s32 y)
+{
+    int r = 0;
+    take();
+    if (m.up && m.cur_have && (m.cur_loaded || cursor_place() == 0)) {
+        m.cur_loaded = 1;
+        if (on && (!m.cur_shown || x != m.cur_x || y != m.cur_y))
+            cursor_move(x, y);
+        if ((on != 0) != m.cur_shown)
+            cursor_show(on);
+        m.cur_shown = on != 0, m.cur_x = x, m.cur_y = y;
+        r = 1;
+    }
+    give();
+    return r;
+}
+
+int mga_cursor_state(s32 *x, s32 *y, const u8 **and_mask, const u8 **xor_mask)
+{
+    if (!m.up || !m.cur_shown)
+        return 0;
+    *x = m.cur_x, *y = m.cur_y, *and_mask = m.cur_and, *xor_mask = m.cur_xor;
+    return 1;
 }
 
 void mga_display_sync(void)
@@ -162,8 +230,8 @@ u32 mga_display_stat(char *buf, u32 max)
     if (!m.up)
         return (u32)ksnprintf(buf, max, "accel idle %s\n", mga.name);
     free_ = vram_free_bytes(&m.heap, &largest);
-    return (u32)ksnprintf(buf, max, "accel on %s vram=%uK free=%uK largest=%uK\n", mga.name, m.vram >> 10,
-                          free_ >> 10, largest >> 10);
+    return (u32)ksnprintf(buf, max, "accel on %s vram=%uK free=%uK largest=%uK draws=%u\n", mga.name, m.vram >> 10,
+                          free_ >> 10, largest >> 10, m.ops);
 }
 
 /* ---- the device behind the screen's surface */
@@ -201,6 +269,7 @@ static int on(const struct gfx_surface *s)
         engine_set_clip(0, 0, m.cur.pitch_px, s->h);
     }
     m.busy = 1;
+    m.ops++;
     return 1;
 }
 

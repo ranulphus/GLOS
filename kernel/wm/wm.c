@@ -484,14 +484,43 @@ void wm_pointer(struct wm *m, s32 x, s32 y, int on)
     struct gfx_rect r = { m->px, m->py, PTR_W, PTR_H };
     if (x == m->px && y == m->py && (on != 0) == m->pointer)
         return;
-    if (m->pointer)
+    if (m->pointer && !m->hw_pointer)
         damage(m, &r);
     m->px = x < 0 ? 0 : x >= m->w ? m->w - 1 : x;
     m->py = y < 0 ? 0 : y >= m->h ? m->h - 1 : y;
     m->pointer = on != 0;
     r.x = m->px, r.y = m->py;
-    if (m->pointer)
+    if (m->pointer && !m->hw_pointer)
         damage(m, &r);
+}
+
+void wm_hw_pointer(struct wm *m, int on)
+{
+    struct gfx_rect r = { m->px, m->py, PTR_W, PTR_H };
+    if ((on != 0) == m->hw_pointer)
+        return;
+    m->hw_pointer = on != 0;
+    if (m->pointer)                             /* (drawn now, or no longer) */
+        damage(m, &r);
+}
+
+/* The inside white (XOR 1), the outline black over it (XOR 0), both opaque
+   (AND 0); the rest the screen (AND 1, XOR 0): as draw_pointer() draws it. */
+void wm_pointer_masks(u8 and_mask[512], u8 xor_mask[512])
+{
+    s32 x, y;
+    for (y = 0; y < 64 * 8; y++)
+        and_mask[y] = 0xFF, xor_mask[y] = 0;
+    for (y = 0; y < PTR_H; y++)
+        for (x = 0; x < PTR_W; x++) {
+            u8 bit = (u8)(0x80 >> (x & 7));
+            int edge = ptr_edge[y][x / 8] & bit, fill = ptr_fill[y][x / 8] & bit;
+            if (edge || fill) {
+                and_mask[y * 8 + x / 8] &= (u8)~bit;
+                if (!edge)
+                    xor_mask[y * 8 + x / 8] |= bit;
+            }
+        }
 }
 
 /* The outline's four sides. */
@@ -584,7 +613,7 @@ static void draw_pointer(const struct wm *m, struct gfx_surface *scr)
         gfx_frame(scr, m->ghost.x, m->ghost.y, m->ghost.w, m->ghost.h, 0x000000);
         gfx_frame(scr, m->ghost.x + 1, m->ghost.y + 1, m->ghost.w - 2, m->ghost.h - 2, 0xFFFFFF);
     }
-    if (!m->pointer)
+    if (!m->pointer || m->hw_pointer)
         return;
     gfx_mono(scr, m->px, m->py, &ptr_fill[0][0], PTR_W, PTR_H, 2, 0xFFFFFF, GFX_NONE);
     gfx_mono(scr, m->px, m->py, &ptr_edge[0][0], PTR_W, PTR_H, 2, 0x000000, GFX_NONE);
