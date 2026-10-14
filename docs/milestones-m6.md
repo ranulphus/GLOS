@@ -279,6 +279,14 @@ Each step is a commit with its tests. The gate (`make gate`) must still pass at 
     under HIMEMX: its plain-DOS baseline timed out, and on a second try its baseline on the other boot
     underran its audio while GLOS's runs passed). That cell needs the host to itself; the gate runs alone
     from now on, once on the last commit for step F and the end together (step G changed the look only).
+  - **The gate on the last commit, first try** (2026-10-13 evening): 126 of 133, and none of the seven
+    GLOS's. The host ran out of memory in the middle of it (another project's build; the kernel's log has
+    the out-of-memory killer called at 22:53:44, swap full, and nothing killed until 23:00:50, then again
+    at 23:07:17). Three games that had started at different times all "hung" and ended within two seconds
+    of each other at 23:00:44, two suites' results came right after, one ssh probe went unanswered. Away
+    from that the same build hung in none of 28 ClassiCube runs (twelve at once among them) and failed
+    none of 18 ecm runs. The gate's runner now reads the kernel's log for such kills during its run and
+    says so in its summary (`host_oom`).
   - Found on the way: a program marked as an app paused the apps for a moment while its mark was read at
     the EXEC, and an app that looked just then waited out the whole start of the new program (a quarter to
     three quarters of a second on the 486). It showed as the apps suite's four timers at once failing now

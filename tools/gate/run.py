@@ -492,6 +492,19 @@ def script_cell(name, cwd, cmd, with_base, direct):
     return res
 
 
+def host_oom(since):
+    """The host's out-of-memory kills since `since` (epoch seconds), from the kernel's log: its lines, or [] (also
+    when the log can't be read). A machine that runs out of memory stands still for minutes before the kernel
+    kills something; every Loop A run under way then stops with it and fails by its own clock, whatever GLOS did
+    (2026-10-13: seven parts in one gate, three of them hung games that ended in the same two seconds)."""
+    try:
+        out = subprocess.run(["journalctl", "-k", "--no-pager", "-o", "short-iso", "--since", "@%d" % since],
+                             capture_output=True, text=True, timeout=60).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [l for l in out.splitlines() if "invoked oom-killer" in l or "Out of memory: Killed process" in l]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("action", nargs="?", default="run", choices=["run", "list"])
@@ -516,6 +529,7 @@ def main():
             raise SystemExit("gate: no %s in %s (make glos-cache)" % (f, BIN))
     want = [c for c in (a.cell or CELLS) if c not in a.skip]
     os.makedirs(OUT, exist_ok=True)
+    began = time.time()
     results = []
     summary = open(os.path.join(OUT, "summary.txt"), "w")
     lock = threading.Lock()
@@ -563,6 +577,14 @@ def main():
     for t in side:
         t.join()
     bad = [r for r in results if not r[1]]
+    oom = host_oom(began)
+    if oom:                                     # (said either way: a part may have passed late, too)
+        line = "gate: the host ran out of memory during this run, %d times in its kernel's log, first %s" % (
+            len(oom), " ".join(oom[0].split()[:1]))
+        if bad:
+            line += ": the parts that failed then are the host's, not GLOS's; run their cells again (--cell)"
+        print(line)
+        summary.write(line + "\n")
     line = "gate: %d parts, %d failed" % (len(results), len(bad))
     print(line)
     summary.write(line + "\n")
