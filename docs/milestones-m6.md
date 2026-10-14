@@ -264,7 +264,10 @@ Each step is a commit with its tests. The gate (`make gate`) must still pass at 
     the UI's fixed-width font, shows GLOS's own text instead.
   - `kernel/wm/wm.c`: the look's colours, the focus's close box filled with the one accent, and the task
     bar's pictures (GLOS's mark, a window on each button, a sign beside the remote-session note).
-- **H. The exit: the gate is running** (2026-10-13).
+- **H. The exit: done** (2026-10-14). M6's exit (PRD §19) is met: two GLOS apps run at once and a
+  busy-looping one stalls neither the other nor the agent; the desktop's golden images match at 8, 16 and 32
+  bits on the generic VBE card and on a Matrox card in VBE mode; the regression and the gate pass on the last
+  commit, 763383d (the gate's two failures were the host's, below, and their cells pass again).
   - **Golden desktops:** `make loopa-desk`, the demonstration in the chosen look at 640x480 in 8, 16 and 32
     bits, each screenshot equal to the host's composition, on the S3 Trio64V2 (Pentium II and 486DX2) and on
     the G200 in VBE mode; the same after a session.
@@ -287,6 +290,16 @@ Each step is a commit with its tests. The gate (`make gate`) must still pass at 
     from that the same build hung in none of 28 ClassiCube runs (twelve at once among them) and failed
     none of 18 ecm runs. The gate's runner now reads the kernel's log for such kills during its run and
     says so in its summary (`host_oom`).
+  - **The gate on the last commit, second try** (2026-10-14 night, four runs at a time): 131 of 133. The
+    host ran out of memory again (the kernel's log: 04:17:15 to 04:20:15), and the summary said so. One
+    failure was in it: the G450 conformance (m4c, forced direct) ran from 04:12:51 to 04:20:39, five of its
+    tests hung together and the next passed. The other was not: Fifth Wheel with the ssh probe underran its
+    audio (24,581 of 43,122 chunks) from 04:56 to 05:42, its game and its probes fine. That counter follows
+    the host's load, not GLOS (it failed once in a baseline with no GLOS at all): the probe run again, twice
+    on this build and twice on step B's side by side, passed all four times with no chunk underrun and
+    every probe answered. The m4c cell was run again by itself and passed, both ways (MGA-Glide's
+    conformance 27 of 27 on G100, G200, G400 and G450, the GTA and Screamer Rally replays, DOSBench),
+    though the host ran out of memory once more meanwhile.
   - Found on the way: a program marked as an app paused the apps for a moment while its mark was read at
     the EXEC, and an app that looked just then waited out the whole start of the new program (a quarter to
     three quarters of a second on the 486). It showed as the apps suite's four timers at once failing now

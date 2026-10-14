@@ -1236,4 +1236,4 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
 - **Q16 answered (D37):** the UI fonts are DejaVu Sans, Sans Bold and Sans Mono at 11 pixels, the owner's choice of four sets.
 - **New user decision D42:** a DOS program in a window is drawn in the VGA's own fonts, read from the card.
 - **§21:** Q18 added (GLOS's own shell for the terminal app).
-- **M6 steps A to G done** (docs/milestones-m6.md has the status; docs/graphics.md the design).
+- **M6 done** (2026-10-14; docs/milestones-m6.md has the status and the exit's evidence, docs/graphics.md the design).
