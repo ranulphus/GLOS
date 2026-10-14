@@ -10,12 +10,21 @@
  * target, the screen's bytes kept in the VRAM manager. Before a session
  * takes the screen, and when the desktop ends, the engine is drained and
  * let go of: from then on the card is the session's. GLOS.CFG's [display]
- * accel = off keeps it out of use. */
+ * accel = off keeps it out of use.
+ *
+ * The screen's surface then has a device (gfx.h's struct gfx_dev, step D):
+ * fills, copies between VRAM and from memory, and 1-bit pictures go to the
+ * engine, each exactly what the software would draw; the software waits
+ * for the engine before touching the pixels itself. The HAL is one
+ * thread's at a time (its FIFO count is a variable of its own): the
+ * engine's lock covers every use, each draw on its own. */
 #include <string.h>
 
 #include "glos/bootinfo.h"
+#include "io.h"
 #include "kprintf.h"
 #include "mgadisp.h"
+#include "sched.h"
 
 #include "mga/hal.h"
 #include "mga/mmio.h"
@@ -28,7 +37,33 @@ static struct {
     u32 vram;                                   /* bytes, sized at the first desktop */
     mga_vram heap;
     mga_target screen;
+    mga_target cur;                             /* the engine's target now */
+    u8 *screen_pix;                             /* the screen's pixels in display.c's mapping */
+    u32 screen_bytes;
+    u8 busy;                                    /* drawn since the last sync */
+    struct thread *owner;                       /* who has the engine */
+    struct waitq q;
 } m;
+static u32 row_buf[4096];                       /* an image's row, padded to dwords */
+
+static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes);
+
+static void take(void)
+{
+    u32 f = irq_save();
+    while (m.owner && m.owner != current)
+        thread_block(&m.q);
+    m.owner = current;
+    irq_restore(f);
+}
+
+static void give(void)
+{
+    u32 f = irq_save();
+    m.owner = 0;
+    thread_wake(&m.q);
+    irq_restore(f);
+}
 
 void mga_display_init(const struct bootinfo *bi)
 {
@@ -42,9 +77,18 @@ void mga_display_init(const struct bootinfo *bi)
             mga.revision, mga.bus, mga.dev, mga.fn, mga.fb_phys, mga.mmio_phys);
 }
 
-int mga_display_up(u32 lfb, u32 pitch, u32 bpp, u32 h)
+int mga_display_up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h)
 {
     u32 bytes = pitch * h;
+    int r;
+    take();
+    r = up(pix, lfb, pitch, bpp, h, bytes);
+    give();
+    return r;
+}
+
+static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes)
+{
     m.up = 0;
     if (!m.found)
         return 0;
@@ -76,6 +120,10 @@ int mga_display_up(u32 lfb, u32 pitch, u32 bpp, u32 h)
     }
     vram_init(&m.heap, 0, m.vram);
     vram_reserve(&m.heap, m.screen.color_off, bytes, OWN_SCREEN);
+    m.cur = m.screen;
+    m.screen_pix = pix;
+    m.screen_bytes = bytes;
+    m.busy = 0;
     m.up = 1;
     kprintf("GLOS-MGA up %s vram=%u screen=%x+%u pitch=%u bpp=%u\n", mga.name, m.vram, m.screen.color_off, bytes,
             m.screen.pitch_px, bpp);
@@ -84,11 +132,22 @@ int mga_display_up(u32 lfb, u32 pitch, u32 bpp, u32 h)
 
 void mga_display_down(void)
 {
-    if (!m.up)
-        return;
-    engine_sync(200000);
-    m.up = 0;
-    kprintf("GLOS-MGA down\n");
+    take();
+    if (m.up) {
+        engine_sync(200000);
+        m.up = m.busy = 0;
+        kprintf("GLOS-MGA down\n");
+    }
+    give();
+}
+
+void mga_display_sync(void)
+{
+    take();
+    if (m.up && m.busy)
+        engine_sync(200000);
+    m.busy = 0;
+    give();
 }
 
 int mga_display_on(void) { return m.up; }
@@ -106,3 +165,98 @@ u32 mga_display_stat(char *buf, u32 max)
     return (u32)ksnprintf(buf, max, "accel on %s vram=%uK free=%uK largest=%uK\n", mga.name, m.vram >> 10,
                           free_ >> 10, largest >> 10);
 }
+
+/* ---- the device behind the screen's surface */
+
+/* Where a surface's pixels are in VRAM, or -1 if they aren't the card's. */
+static s32 vram_off(const struct gfx_surface *s)
+{
+    if (s->pix >= m.screen_pix && s->pix < m.screen_pix + m.screen_bytes)
+        return (s32)(m.screen.color_off + (u32)(s->pix - m.screen_pix));
+    if (mga_fb && s->pix >= (const u8 *)mga_fb && s->pix < (const u8 *)mga_fb + m.vram)
+        return (s32)(s->pix - (const u8 *)mga_fb);
+    return -1;
+}
+
+/* The engine (taken) set on surface s: 1, or 0 (not taken) if it can't draw
+   there: not up, not the card's memory, not a layout the engine has. */
+static int on(const struct gfx_surface *s)
+{
+    u32 bpp_b = s->fmt.bpp / 8u, pitch_px;
+    s32 off;
+    take();
+    off = m.up ? vram_off(s) : -1;
+    pitch_px = s->pitch / bpp_b;
+    if (off < 0 || (off & 63) || s->pitch % bpp_b || (pitch_px & 31) || pitch_px > 4096) {
+        give();
+        return 0;
+    }
+    if ((u32)off != m.cur.color_off || (int)pitch_px != m.cur.pitch_px || s->fmt.bpp != m.cur.bpp) {
+        memset(&m.cur, 0, sizeof m.cur);
+        m.cur.color_off = (u32)off;
+        m.cur.pitch_px = (int)pitch_px;
+        m.cur.bpp = s->fmt.bpp;
+        m.cur.zbits = 16;
+        engine_set_target(&m.cur);
+        engine_set_clip(0, 0, m.cur.pitch_px, s->h);
+    }
+    m.busy = 1;
+    return 1;
+}
+
+static int dev_fill(struct gfx_surface *s, const struct gfx_rect *r, unsigned px)
+{
+    if (!on(s))
+        return 0;
+    engine_fill(r->x, r->y, r->w, r->h, px);
+    give();
+    return 1;
+}
+
+static int dev_copy(struct gfx_surface *d, const struct gfx_rect *r, const struct gfx_surface *s, int sx, int sy)
+{
+    u32 bytes = (u32)r->w * (d->fmt.bpp / 8u);
+    s32 soff;
+    int j;
+    if (!on(d))
+        return 0;
+    if (s->dev) {                               /* VRAM to VRAM */
+        if ((soff = vram_off(s)) < 0) {
+            give();
+            return 0;
+        }
+        engine_copy_from((u32)soff, (int)(s->pitch / (s->fmt.bpp / 8u)), sx, sy, r->x, r->y, r->w, r->h);
+    } else {                                    /* memory to VRAM: rows from the CPU */
+        if (bytes > sizeof row_buf || !engine_image_begin(r->x, r->y, r->w, r->h)) {
+            give();
+            return 0;
+        }
+        for (j = 0; j < r->h; j++) {
+            memcpy(row_buf, s->pix + (u32)(sy + j) * s->pitch + (u32)sx * (s->fmt.bpp / 8u), bytes);
+            engine_iload_row(row_buf);
+        }
+        engine_iload_end();
+    }
+    give();
+    return 1;
+}
+
+static int dev_mono(struct gfx_surface *s, const struct gfx_rect *r, int x, int y, const unsigned char *bits, int w, int h,
+                    unsigned stride, unsigned fg, unsigned bg)
+{
+    if (!on(s))
+        return 0;
+    engine_set_clip(r->x, r->y, r->x + r->w, r->y + r->h);
+    engine_mono(x, y, w, h, bits, (int)stride, fg, bg == GFX_NONE ? 0 : bg, bg == GFX_NONE ? MGA_MONO_TRANSPARENT : 0);
+    engine_set_clip(0, 0, m.cur.pitch_px, s->h);
+    give();
+    return 1;
+}
+
+static void dev_sync(const struct gfx_surface *s)
+{
+    (void)s;
+    mga_display_sync();
+}
+
+const struct gfx_dev mga_dev = { dev_fill, dev_copy, dev_mono, dev_sync };

@@ -2173,7 +2173,8 @@ def desk_case(profile, vcard, card):
 # ---- windows, input and the API (M6 steps E and F)
 
 # (machine, video card, network card, bits a pixel, the bits to change to)
-WIN_CASES = [("bf6", "vbe", "ne2kpci", 32, 16), ("bf6", "g200", "ne2kpci", 16, 8), ("486dx2", "vbe", "ne2k", 8, 16)]
+WIN_CASES = [("bf6", "vbe", "ne2kpci", 32, 16), ("bf6", "g200", "ne2kpci", 16, 8), ("486dx2", "vbe", "ne2k", 8, 16),
+             ("bf6", "g400", "ne2kpci", 32, 8), ("bf6", "g450", "ne2kpci", 8, 32)]
 WIN_COLOUR = {"A": (0xCC, 0x33, 0x33), "B": (0x33, 0x33, 0xCC), "C": (0x33, 0xCC, 0x33)}
 
 

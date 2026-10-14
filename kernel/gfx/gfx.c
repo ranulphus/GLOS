@@ -1,7 +1,9 @@
 /* The 2D library's drawing (kernel/include/gfx.h; PRD §9.3): fills, lines,
  * copies, 1-bit and true-colour pictures, at 8, 16 and 32 bits a pixel.
  * Each function cuts what it is asked for down to the surface's clip
- * rectangle first, then writes rows with a loop for the pixel size. */
+ * rectangle first, then writes rows with a loop for the pixel size; on a
+ * surface with a drawing engine (s->dev) it asks the engine first, and
+ * waits for it before the CPU touches the pixels itself. */
 #include "gfx.h"
 
 void *memmove(void *d, const void *s, size_t n);
@@ -26,7 +28,15 @@ void gfx_init(struct gfx_surface *s, void *pix, s32 w, s32 h, u32 pitch, const s
     s->h = h;
     s->pitch = pitch;
     s->fmt = *fmt;
+    s->dev = 0;
     gfx_clip(s, 0);
+}
+
+/* The CPU is about to touch s's pixels. */
+static void cpu(const struct gfx_surface *s)
+{
+    if (s->dev)
+        s->dev->sync(s);
 }
 
 /* An 8-bit value into a field of n bits, and back with the top bits
@@ -64,6 +74,7 @@ u32 gfx_get(const struct gfx_surface *s, s32 x, s32 y)
     const u8 *p;
     if (x < 0 || y < 0 || x >= s->w || y >= s->h)
         return 0;
+    cpu(s);
     p = at(s, x, y);
     return s->fmt.bpp == 8 ? *p : s->fmt.bpp == 16 ? *(const u16 *)p : *(const u32 *)p;
 }
@@ -100,6 +111,9 @@ void gfx_fill(struct gfx_surface *s, s32 x, s32 y, s32 w, s32 h, u32 rgb)
     s32 j;
     if (!gfx_rect_cut(&r, &s->clip))
         return;
+    if (s->dev && s->dev->fill(s, &r, px))
+        return;
+    cpu(s);
     for (j = 0; j < r.h; j++)
         span(at(s, r.x, r.y + j), (u32)r.w, px, s->fmt.bpp);
 }
@@ -135,6 +149,7 @@ void gfx_line(struct gfx_surface *s, s32 x0, s32 y0, s32 x1, s32 y1, u32 rgb)
         return;
     }
     px = gfx_px(&s->fmt, rgb);
+    cpu(s);
     for (;;) {
         if (inside(s, x0, y0))
             put(s, x0, y0, px);
@@ -171,6 +186,11 @@ void gfx_blit(struct gfx_surface *d, s32 dx, s32 dy, const struct gfx_surface *s
         return;
     sx += r.x - dx;
     sy += r.y - dy;
+    if (d->dev && (!s->dev || s->dev == d->dev) && d->dev->copy(d, &r, s, sx, sy))
+        return;
+    cpu(d);
+    if (s->dev != d->dev)
+        cpu(s);
     if (at(d, r.x, r.y) > at(s, sx, sy)) {      /* (the same memory, perhaps: towards higher addresses, last row first) */
         for (j = r.h - 1; j >= 0; j--)
             memmove(at(d, r.x, r.y + j), at(s, sx, sy + j), (u32)r.w * bytes);
@@ -187,6 +207,9 @@ void gfx_mono(struct gfx_surface *s, s32 x, s32 y, const u8 *bits, s32 w, s32 h,
     s32 i, j;
     if (!gfx_rect_cut(&r, &s->clip))
         return;
+    if (s->dev && s->dev->mono(s, &r, x, y, bits, w, h, stride, f, bg == GFX_NONE ? GFX_NONE : b))
+        return;
+    cpu(s);
     for (j = 0; j < r.h; j++) {
         const u8 *row = bits + (u32)(r.y + j - y) * stride;
         u8 *p = at(s, r.x, r.y + j);
@@ -201,24 +224,47 @@ void gfx_mono(struct gfx_surface *s, s32 x, s32 y, const u8 *bits, s32 w, s32 h,
     }
 }
 
+/* One row of a picture in s's own format, into pix, as the software writes it. */
+static void convert(const struct gfx_surface *s, u8 *p, const u32 *row, s32 n, s32 x, s32 y)
+{
+    s32 i;
+    if (s->fmt.bpp == 8) {
+        for (i = 0; i < n; i++)
+            p[i] = gfx_pal_dither(row[i], x + i, y);
+    } else if (s->fmt.bpp == 16) {
+        for (i = 0; i < n; i++)
+            ((u16 *)p)[i] = (u16)gfx_px(&s->fmt, row[i]);
+    } else {
+        for (i = 0; i < n; i++)
+            ((u32 *)p)[i] = gfx_px(&s->fmt, row[i]);
+    }
+}
+
 void gfx_image(struct gfx_surface *s, s32 x, s32 y, const u32 *rgb, s32 w, s32 h, u32 stride)
 {
     struct gfx_rect r = { x, y, w, h };
     s32 i, j;
     if (!gfx_rect_cut(&r, &s->clip))
         return;
-    for (j = 0; j < r.h; j++) {
-        const u32 *row = rgb + (u32)(r.y + j - y) * stride + (u32)(r.x - x);
-        u8 *p = at(s, r.x, r.y + j);
-        if (s->fmt.bpp == 8) {
-            for (i = 0; i < r.w; i++)
-                p[i] = gfx_pal_dither(row[i], r.x + i, r.y + j);
-        } else if (s->fmt.bpp == 16) {
-            for (i = 0; i < r.w; i++)
-                ((u16 *)p)[i] = (u16)gfx_px(&s->fmt, row[i]);
-        } else {
-            for (i = 0; i < r.w; i++)
-                ((u32 *)p)[i] = gfx_px(&s->fmt, row[i]);
-        }
+    if (s->dev) {                               /* on a device: converted a piece of a row at a time, and copied */
+        u32 buf[256];
+        struct gfx_surface m;
+        struct gfx_rect piece;
+        s32 n;
+        for (j = 0; j < r.h; j++)
+            for (i = 0; i < r.w; i += n) {
+                n = r.w - i < 256 ? r.w - i : 256;
+                convert(s, (u8 *)buf, rgb + (u32)(r.y + j - y) * stride + (u32)(r.x + i - x), n, r.x + i, r.y + j);
+                gfx_init(&m, buf, n, 1, sizeof buf, &s->fmt);
+                piece.x = r.x + i, piece.y = r.y + j, piece.w = n, piece.h = 1;
+                if (!s->dev->copy(s, &piece, &m, 0, 0)) {
+                    cpu(s);
+                    convert(s, at(s, r.x + i, r.y + j), rgb + (u32)(r.y + j - y) * stride + (u32)(r.x + i - x), n,
+                            r.x + i, r.y + j);
+                }
+            }
+        return;
     }
+    for (j = 0; j < r.h; j++)
+        convert(s, at(s, r.x, r.y + j), rgb + (u32)(r.y + j - y) * stride + (u32)(r.x - x), r.w, r.x, r.y + j);
 }

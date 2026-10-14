@@ -223,7 +223,8 @@ static int mode_set(void)
     gfx_init(&d.fb, fb, d.w, d.h, pitch, &f);
     if (f.bpp == 8)
         palette();
-    mga_display_up(d.phys, pitch, f.bpp, d.h);
+    if (mga_display_up(d.fb.pix, d.phys, pitch, f.bpp, d.h))
+        d.fb.dev = &mga_dev;                    /* (the engine draws on it: M7 step D) */
     d.on = 1;
     mm_vga_hide(!d.held);
     vkbc_desk(!d.held);
@@ -238,6 +239,8 @@ void display_painter(void (*paint)(struct gfx_surface *fb)) { d.paint = d.home =
 
 /* The screen, while the desktop draws on it: not a session's, not the test card's. */
 struct gfx_surface *display_fb(void) { return d.on && !d.held && d.paint != gfx_testcard ? &d.fb : 0; }
+
+void display_sync(void) { mga_display_sync(); }
 
 void display_init(const struct bootinfo *bi)
 {

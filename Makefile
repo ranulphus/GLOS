@@ -86,9 +86,9 @@ host-test-run:
 	@$(HOST_CC) -m32 -O2 -g -Wall -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -o build/host/crypto_kat \
 	  tests/host/crypto_kat.c $(TINYSSH_SRCS) && build/host/crypto_kat
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/gfx_test \
-	  tests/host/gfx_test.c $(GFX_SRCS) kernel/lib/png.c && build/host/gfx_test
+	  tests/host/gfx_test.c tests/host/qdev.c $(GFX_SRCS) kernel/lib/png.c && build/host/gfx_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/wm_test \
-	  tests/host/wm_test.c $(WM_SRCS) $(GFX_SRCS) kernel/lib/png.c && build/host/wm_test
+	  tests/host/wm_test.c tests/host/qdev.c $(WM_SRCS) $(GFX_SRCS) kernel/lib/png.c && build/host/wm_test
 
 # (`make fonts` makes kernel/gfx/fonts again from FONT_DIR's TrueType files: on the host, with python3-pil.)
 FONT_DIR ?= /usr/share/fonts/truetype/dejavu

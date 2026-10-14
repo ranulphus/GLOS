@@ -40,6 +40,7 @@
 #include "glos/bootinfo.h"
 #include "dpmi.h"
 #include "io.h"
+#include "display.h"
 #include "kprintf.h"
 #include "mm.h"
 #include "pci.h"
@@ -741,6 +742,7 @@ int shot_poll(struct shot *s)
         }
         if (s->got <= 0)
             return fail(s, s->why);
+        display_sync();                         /* (what a drawing engine had queued is on the screen) */
         row = s->raw ? s->w * 3 : 1 + (depth(s) == 24 ? s->w * 3 : depth(s) == 8 ? s->w : (s->w + 1) / 2);
         planes = s->kind == K_PLANAR || s->kind == K_MODEX ? 4 : 1;
         s->group = GROUP / row ? GROUP / row : 1;

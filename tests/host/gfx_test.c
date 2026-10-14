@@ -8,12 +8,17 @@
  * palette, the colour conversions, text and regions on their own, and the
  * test card (kernel/gfx/testcard.c) at each depth, written to
  * build/host/gfx-card-N.png to be looked at and compared with a screenshot
- * of the real thing (its CRC is printed). */
+ * of the real thing (its CRC is printed).
+ *
+ * The fuzzing and the test card again with a drawing engine behind the
+ * library's surface (tests/host/qdev.c: its work done only when synced, a
+ * third of the calls declined): the same pictures (M7 step D). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "gfx.h"
 #include "png.h"
+#include "qdev.h"
 
 void gfx_testcard(struct gfx_surface *s);
 
@@ -145,7 +150,7 @@ static int same(const struct pair *p) { return !memcmp(p->lib_mem, p->model_mem,
 
 static u32 some_rgb(void) { return rnd() & 1 ? rnd() & 0xFFFFFF : (rnd() & 0xFF) * 0x010101; }
 
-static void fuzz(const struct gfx_fmt *f, const char *name)
+static void fuzz(const struct gfx_fmt *f, const char *name, int dev)
 {
     static const char *const words[] = { "GLOS", "Wy", "x", "{[|]}", "The quick brown fox", "" };
     static u8 bits[64 * 8];
@@ -153,6 +158,8 @@ static void fuzz(const struct gfx_fmt *f, const char *name)
     struct pair p;
     u32 i, n, bad = 0;
     pair_init(&p, f);
+    if (dev)
+        p.lib.dev = &qdev;
     for (i = 0; i < sizeof bits; i++)
         bits[i] = (u8)rnd();
     for (i = 0; i < ARRAY_SIZE(rgb); i++)
@@ -210,8 +217,10 @@ static void fuzz(const struct gfx_fmt *f, const char *name)
             CHECK(a == b && a - x == gfx_text_width(font, t, -1));
         }
         }
+        if (dev)
+            qdev_sync();
         if (!same(&p)) {
-            printf("FAIL %s: op %u differs at call %u (x=%d y=%d w=%d h=%d x1=%d y1=%d clip=%d,%d %dx%d)\n", name, op, n,
+            printf("FAIL %s%s: op %u differs at call %u (x=%d y=%d w=%d h=%d x1=%d y1=%d clip=%d,%d %dx%d)\n", name, dev ? " engine" : "", op, n,
                    x, y, w, h, x1, y1, p.lib.clip.x, p.lib.clip.y, p.lib.clip.w, p.lib.clip.h);
             memcpy(p.model_mem, p.lib_mem, p.bytes + 2 * GUARD);
             bad++;
@@ -373,15 +382,22 @@ static u32 crc32(const u8 *p, u32 n)
 
 static void card(const struct gfx_fmt *f, const char *name, s32 w, s32 h)
 {
-    struct gfx_surface s;
+    struct gfx_surface s, e;
     struct png png;
     char path[64];
     u32 pitch = (u32)w * (f->bpp / 8u), row = 1 + (u32)w * 3, n;
     u8 *pix = calloc(pitch, (size_t)h), *rgb = malloc(row * (size_t)h), *out = malloc(PNG_ROWS_MAX(PNG_BLOCK) + PNG_HEAD_MAX);
     s32 x, y, at = 0;
     FILE *fp;
+    u8 *epix = calloc(pitch, (size_t)h);
     gfx_init(&s, pix, w, h, pitch, f);
     gfx_testcard(&s);
+    gfx_init(&e, epix, w, h, pitch, f);         /* (the same through an engine) */
+    e.dev = &qdev;
+    gfx_testcard(&e);
+    qdev_sync();
+    CHECK(!memcmp(pix, epix, pitch * (u32)h));
+    free(epix);
     for (y = 0; y < h; y++) {
         rgb[(u32)y * row] = 0;
         for (x = 0; x < w; x++) {
@@ -408,10 +424,16 @@ static void card(const struct gfx_fmt *f, const char *name, s32 w, s32 h)
 
 int main(void)
 {
-    fuzz(&gfx_fmt8, "8");
-    fuzz(&gfx_fmt555, "15");
-    fuzz(&gfx_fmt565, "16");
-    fuzz(&gfx_fmt888, "32");
+    fuzz(&gfx_fmt8, "8", 0);
+    fuzz(&gfx_fmt555, "15", 0);
+    fuzz(&gfx_fmt565, "16", 0);
+    fuzz(&gfx_fmt888, "32", 0);
+    qdev_refuse(3);
+    fuzz(&gfx_fmt8, "8", 1);
+    fuzz(&gfx_fmt555, "15", 1);
+    fuzz(&gfx_fmt565, "16", 1);
+    fuzz(&gfx_fmt888, "32", 1);
+    printf("gfx engine: %lu operations done\n", qdev_done);
     colours();
     text();
     regions();

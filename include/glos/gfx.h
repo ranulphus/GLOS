@@ -30,12 +30,31 @@ struct gfx_fmt {
     unsigned char rpos, rsize, gpos, gsize, bpos, bsize;        /* 16 and 32: each field's lowest bit and width */
 };
 
+struct gfx_dev;
+
 struct gfx_surface {
     unsigned char *pix;
     int w, h;
     unsigned pitch;                     /* bytes from a row to the next */
     struct gfx_fmt fmt;
     struct gfx_rect clip;
+    const struct gfx_dev *dev;          /* a drawing engine at these pixels (the kernel's); NULL: the CPU alone */
+};
+
+/* A drawing engine behind a surface (the kernel's, on a Matrox card: PRD
+   §9.3, docs/milestones-m7.md step D). Each hook draws, on rectangles
+   already cut to the clip and to the surfaces, exactly what the software
+   would, and returns 1; or 0, and the software does it. The software
+   touches a device surface's pixels only after sync, which waits for the
+   engine to finish. Pixel values are the surface's own (gfx_px). */
+struct gfx_dev {
+    int (*fill)(struct gfx_surface *s, const struct gfx_rect *r, unsigned px);
+    /* r of d from (sx, sy) of s: s the same device's (d itself, overlapping perhaps) or memory (s->dev NULL) */
+    int (*copy)(struct gfx_surface *d, const struct gfx_rect *r, const struct gfx_surface *s, int sx, int sy);
+    /* r of the 1-bit picture at (x, y): bg GFX_NONE leaves clear bits alone */
+    int (*mono)(struct gfx_surface *s, const struct gfx_rect *r, int x, int y, const unsigned char *bits, int w, int h,
+                unsigned stride, unsigned fg, unsigned bg);
+    void (*sync)(const struct gfx_surface *s);
 };
 
 extern const struct gfx_fmt gfx_fmt8, gfx_fmt565, gfx_fmt555, gfx_fmt888;

@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "wm.h"
+#include "qdev.h"
 #include "png.h"
 
 void wm_demo(struct wm *m);
@@ -87,7 +88,7 @@ static void list_check(const struct wm *m)
 
 /* Random things done to up to 12 windows; framed: with frames, the bar and
    the pointer, and judged against a fresh composition instead of the model. */
-static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rounds)
+static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rounds, int dev)
 {
     struct gfx_surface scr, ref;
     struct wm m, *mp = &m;
@@ -97,6 +98,8 @@ static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rou
 
     screen_new(&scr, f, SW, SH);
     screen_new(&ref, f, SW, SH);
+    if (dev)
+        scr.dev = &qdev;
     wm_init(mp, &host, SW, SH, f);
     if (framed)
         wm_bar(mp, 1);
@@ -158,6 +161,8 @@ static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rou
         if (rnd() % 3)                          /* (not after every one: damage adds up) */
             continue;
         composed += (u32)wm_compose(mp, &scr);
+        if (dev)
+            qdev_sync();
         CHECK(mp->dirty.n == 0);
         if (framed) {
             struct gfx_region none = mp->dirty;
@@ -172,8 +177,8 @@ static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rou
             for (y = 0; y < SH; y++)
                 for (x = 0; x < SW; x++)
                     if (gfx_get(&scr, x, y) != gfx_get(&ref, x, y)) {
-                        printf("FAIL wm %s%s: after %u things (the last: %u on window %u) pixel %d,%d is %x, should be %x\n",
-                               name, framed ? " framed" : "", n + 1, op, k, x, y, gfx_get(&scr, x, y), gfx_get(&ref, x, y));
+                        printf("FAIL wm %s%s%s: after %u things (the last: %u on window %u) pixel %d,%d is %x, should be %x\n",
+                               name, framed ? " framed" : "", dev ? " engine" : "", n + 1, op, k, x, y, gfx_get(&scr, x, y), gfx_get(&ref, x, y));
                         y = SH;
                         break;
                     }
@@ -187,7 +192,8 @@ static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rou
             wm_destroy(mp, win[n]);
     wm_bar(mp, 0);
     CHECK(mp->count == 0 && held == before);
-    printf("wm %s%s: %u things, %u compositions\n", name, framed ? " framed" : "", rounds, composed);
+    printf("wm %s%s%s: %u things, %u compositions\n", name, framed ? " framed" : "", dev ? " engine" : "", rounds,
+           composed);
     free(scr.pix), free(ref.pix);
 }
 
@@ -290,12 +296,17 @@ static void desk(const struct gfx_fmt *f, const char *name, s32 w, s32 h)
 
 int main(void)
 {
-    churn(&gfx_fmt8, "8", 0, 30000);
-    churn(&gfx_fmt565, "16", 0, 30000);
-    churn(&gfx_fmt888, "32", 0, 30000);
-    churn(&gfx_fmt8, "8", 1, 30000);
-    churn(&gfx_fmt565, "16", 1, 20000);
-    churn(&gfx_fmt888, "32", 1, 20000);
+    churn(&gfx_fmt8, "8", 0, 30000, 0);
+    churn(&gfx_fmt565, "16", 0, 30000, 0);
+    churn(&gfx_fmt888, "32", 0, 30000, 0);
+    churn(&gfx_fmt8, "8", 1, 30000, 0);
+    churn(&gfx_fmt565, "16", 1, 20000, 0);
+    churn(&gfx_fmt888, "32", 1, 20000, 0);
+    qdev_refuse(3);                             /* (M7 step D: the composer on a screen with an engine) */
+    churn(&gfx_fmt8, "8", 1, 20000, 1);
+    churn(&gfx_fmt565, "16", 1, 20000, 1);
+    churn(&gfx_fmt888, "32", 1, 20000, 1);
+    churn(&gfx_fmt565, "16", 0, 20000, 1);
     places();
     CHECK(held == 0 && allocs == 0);
     desk(&gfx_fmt8, "8", 640, 480);

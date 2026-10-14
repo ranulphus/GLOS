@@ -19,6 +19,7 @@ void display_session(int begin);                /* the VM thread: a session take
 struct gfx_surface *display_fb(void);           /* the screen, or NULL while it isn't the desktop's */
 void display_painter(void (*paint)(struct gfx_surface *fb));    /* who draws the whole screen when it comes (back) */
 u32 display_stat(char *buf, u32 max);           /* glos display: a line */
+void display_sync(void);                        /* a drawing engine's work on the screen finished: before reading it */
 void display_leave(void);                       /* GLOS is leaving: text mode */
 int display_quiet(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, int app);    /* a program's INT 10h while the desktop
                                                    has the screen: 1 if answered here, not by the BIOS */
