@@ -354,7 +354,7 @@ static int dev_copy(struct gfx_surface *d, const struct gfx_rect *r, const struc
 static int dev_mono(struct gfx_surface *s, const struct gfx_rect *r, int x, int y, const unsigned char *bits, int w, int h,
                     unsigned stride, unsigned fg, unsigned bg)
 {
-    if (!on(s))
+    if (w > 4096 || !on(s))                     /* (wider: the HAL's limit, the software's to draw) */
         return 0;
     engine_set_clip(r->x, r->y, r->x + r->w, r->y + r->h);
     engine_mono(x, y, w, h, bits, (int)stride, fg, bg == GFX_NONE ? 0 : bg, bg == GFX_NONE ? MGA_MONO_TRANSPARENT : 0);

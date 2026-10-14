@@ -94,3 +94,31 @@ Each step ends with its tests passing; the gate runs at the end.
   20, the cursor's size, colours and address). TWODTEST passes on the G100, G200, G400 and G450 and on the 486DX2
   with the PCI G200 and G450 (and fails on the model without 0117); `test_vram`; the full regression again. Both
   steps merged into MGA-Glide main with the user's approval (not pushed). Questions for real cards: §7 there.
+- **C done** (2026-10-14). `third_party/mgahal` from MGA-Glide main 1e1d08e (`make sync-hal`, `make check-hal`),
+  whose `hal/port/glos.c` is the kernel's port; the kernel builds the HAL's FPU-free part; `mm_dev_map` (the
+  device region at C4000000h); `kernel/gfx/mga.c` brings the engine up after each desktop mode set on the card's
+  framebuffer and lets it go for sessions, `glos display off` and the exit; `glos display` says `accel on/idle/
+  off/none`; `[display] accel = off`. The display and desk suites gained the G400 and G450 and a G200 run with
+  `accel = off`, and check the engine's state through every change: all pass (one find: the aperture's size
+  was unset for chips other than the G400, so the G200's framebuffer was taken for another's).
+- **D done** (2026-10-14). `struct gfx_dev` in the 2D library (fills, copies, 1-bit pictures; sync before the
+  CPU touches the pixels); `mga_dev`, behind the engine's lock (the HAL is one thread's at a time); `glos shot`
+  drains the engine first. Host tests on a queued engine (`tests/host/qdev.c`): the library's fuzzing (95,000
+  operations), the test card, the composer; a missing sync is caught. Loop A: the display, desk and win suites
+  pass on the G200, G400 and G450, the test card and the desktops equal to the host's software pictures, and
+  `glos display`'s draw count shows the engine drew them.
+- **F done** (2026-10-14). The pointer is the hardware cursor while the engine is up (`wm_pointer_masks`,
+  `wm_hw_pointer`, `display_cursor`); `glos shot` draws it in. Host test: the masks over a composition without
+  the pointer give the one with it. Desk suite: the pointer at 200,150 against a host golden, the software
+  pointer on the S3 and the card's cursor on the Matrox cards; all pass. The display start is set to the
+  screen's place when the engine comes up (TWODTEST covers `crtc_set_start`, step B).
+- **E done** (2026-10-14), changed as recorded above (PRD D43): the desktop's own windows' stores in VRAM,
+  moved out before the screen changes hands and back after; apps' windows in the system's memory. Host tests:
+  the composer with the stores on the queued engine, moved between kinds at random (it found that a store
+  freed while copies from it were queued would be read after its memory was reused: every store with an engine
+  is drained before it is freed). Desk suite: four windows in VRAM after a session, then two of four under a
+  300 KB budget, the picture the golden.
+- **G done** (2026-10-14). The display, desk and win suites on the 486DX2 with the PCI G200 and G450: all pass.
+  The win suite's busy phase runs at 8 bits on the 486: at 16 and 32 a screenshot takes seconds there and too
+  few probes fit in its ten (the S3 fails the same way at 32 bits; at 8 bits each PCI card passed three times
+  in a row). One run at 16 bits once showed the busy window unchanged across six screenshots; not seen again.
