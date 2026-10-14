@@ -57,6 +57,14 @@ static u32 row_buf[4096];                       /* an image's row, padded to dwo
 
 static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes);
 
+/* The engine finished (within a second: on a card, microseconds), or reset
+   by the HAL, which is worth saying. */
+static void drain(const char *when)
+{
+    if (engine_sync(1000000) != 0)
+        kprintf("GLOS-WARN mga-reset when=%s resets=%u\n", when, engine_resets);
+}
+
 static void take(void)
 {
     u32 f = irq_save();
@@ -124,7 +132,7 @@ static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes)
     crtc_set_start(m.screen.color_off);         /* (the screen where the VRAM manager has it, whatever ran before) */
     engine_set_target(&m.screen);
     engine_set_clip(0, 0, m.screen.pitch_px, (int)h);
-    if (engine_sync(200000) != 0) {
+    if (engine_sync(1000000) != 0) {
         kprintf("GLOS-MGA error=engine resets=%u\n", engine_resets);
         return 0;
     }
@@ -145,7 +153,7 @@ void mga_display_down(void)
 {
     take();
     if (m.up) {
-        engine_sync(200000);
+        drain("down");
         if (m.cur_shown)
             cursor_show(0);
         m.up = m.busy = m.cur_shown = m.cur_loaded = 0;
@@ -215,7 +223,7 @@ void mga_display_sync(void)
 {
     take();
     if (m.up && m.busy)
-        engine_sync(200000);
+        drain("sync");
     m.busy = 0;
     give();
 }

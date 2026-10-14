@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| Status | v0.4 — the look, the fonts and DOS text in windows (2026-10-13), after v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
+| Status | v0.5 — M7's Matrox 2D (2026-10-14), after v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
 | Last updated | 2026-10-13 |
 | Supersedes | v0.1. Changes are listed in Appendices D to F |
 | Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md), [docs/milestones-m6.md](docs/milestones-m6.md) and [docs/milestones-m7.md](docs/milestones-m7.md) (work breakdown) |
@@ -171,6 +171,7 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D40** | **As the shell, GLOS runs AUTOEXEC.BAT through `COMMAND.COM /C` once the kernel is up, and keeps the environment it leaves** as the master environment. GLOS sets `COMSPEC` itself and runs .COM/.EXE programs directly; COMMAND.COM is used for batch files, internal commands and `%COMSPEC%` shell-outs. (User, 2026-10-02) | Full batch-language compatibility, with no batch interpreter of GLOS's own. GLOS sees the child's environment because it runs the VM. TSRs loaded there sit above a small hole (the child COMMAND.COM, about 4 KB once it can swap into GLOS's XMS). | M3 |
 | **D41** | **Minimal conventional memory: a resident stub of 4 KB or less from M3**, holding only the real-mode code that must run inside DOS (kernel-call and XMS entry points, the kill stub, real-mode stacks, the EXEC loop). No C runtime stays resident, and the DPMI host asks for no real-mode memory per client. **Later, an opt-in setting** puts the stub in an unused upper-memory page that GLOS maps itself, leaving only the PSP and environment (about 0.5 KB). (User, 2026-10-02) | Programs get as much conventional memory as plain DOS gives them. M2's measured cost was 37 KB, because the whole of GLOS.EXE stayed loaded. The upper-memory page is GLOS's own use, so D25 (no UMBs for programs) stands; it is opt-in because adapter ROMs make free pages hard to be sure of. | M3 (stub), M9 (UMA option) |
 | **D42** | **A DOS program in a window is drawn in the VGA's own fonts**, at the cell size of its text mode: the video card's 8, 14 and 16-row ROM fonts, which GLOS reads from the card (as `glos shot` does already), and a font the program has loaded where GLOS can see it. Never the UI fonts. (User) | It must look the same in a window as it does full-screen; in another typeface it would look odd. The fixed-width UI font is for GLOS's own apps. Reading the card's own ROM gives exactly that card's letters and puts no font data of IBM's in GLOS. | With DOS programs in windows (D5, after v1); any terminal that shows a DOS program's text |
+| **D43** | **On a Matrox card the desktop's own windows keep their pixels in VRAM; apps' windows keep theirs in the system's memory until M8.** The task bar's and the kernel's windows' stores go into the card's memory while there is room, and move into the system's memory before a session or another mode; an app's window stays in pages of the system's memory, which the app maps, and the engine copies them to the screen from there. (M7 step E, 2026-10-14) | A session takes the card's memory whole, so whatever is there must leave it first. An app's mapped window can't be moved from under it while it may be drawing: it would draw into the session's memory. The CPU also reads the card's memory slowly. M8's GPU lock says when an app may touch the card; apps' VRAM comes with it. | M7 (desktop), M8 (apps) |
 
 ---
 
@@ -581,11 +582,13 @@ The supervisor owns VRAM allocation. Example for an 8 MB G200 at 1024×768×16:
 | Use | Size |
 |---|---|
 | Desktop front buffer | 1.5 MB |
-| Cursor and glyph cache | 0.25 MB |
+| Cursor, and the desktop's own windows (D43) | 0.25 MB |
 | Two 640×480 GL windows (colour + Z each) | 2.4 MB |
 | Left for textures and off-screen windows | about 3.8 MB |
 
 DOS-GL asks GLOS for its buffers and texture heap through the API; it no longer lays out VRAM itself (Appendix B).
+Apps' windows' pixels stay in the system's memory until then (D43); text is expanded from the CPU by the engine,
+with no glyph cache.
 
 ### 9.6 GPU ownership
 
@@ -1237,3 +1240,8 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
 - **New user decision D42:** a DOS program in a window is drawn in the VGA's own fonts, read from the card.
 - **§21:** Q18 added (GLOS's own shell for the terminal app).
 - **M6 done** (2026-10-14; docs/milestones-m6.md has the status and the exit's evidence, docs/graphics.md the design).
+
+## Appendix G: Changes in v0.5 (2026-10-14)
+
+- **D43** (M7 step E): the desktop's own windows' pixels in VRAM on a Matrox card, apps' in the system's memory until M8; §9.5 says so, and that there is no glyph cache.
+- **M7** under way: docs/milestones-m7.md has the plan and status, docs/graphics.md §6 the design.
