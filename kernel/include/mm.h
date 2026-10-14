@@ -13,6 +13,8 @@ struct bootinfo;
 #define FB_MAX      0x00800000u         /* 8 MB: 1280x1024 at 32 bits is 5 */
 #define WIN_BASE    0xC2000000u         /* mm_win_alloc's region: windows' pixels */
 #define WIN_MAX     0x02000000u         /* 32 MB of addresses (32 KB of page tables, there from the start) */
+#define DEV_BASE    0xC4000000u         /* mm_dev_map's region: devices' registers and memory (the Matrox card's) */
+#define DEV_MAX     0x02800000u         /* 40 MB: a G450's 32 MB and its registers */
 #define RECURSIVE   0xFFC00000u         /* PDE 1023 maps the page directory itself */
 
 void mm_init(struct bootinfo *bi);
@@ -58,6 +60,8 @@ void mm_win_free(void *mem, u32 bytes);
 u32 mm_win_frame(const void *p);        /* the frame behind a page of them */
 void mm_vga_hide(int on);                /* A0000h-BFFFFh: a spare frame's (1), or the VGA's again (0) */
 void *mm_fb_map(u32 phys, u32 bytes);   /* a framebuffer's memory at FB_BASE (in place of the last); 0 if too big */
+void *mm_dev_map(u32 phys, u32 bytes);  /* a device's physical range, uncached, at DEV_BASE for good; 0 if no room */
+void mm_dev_unmap(void *p, u32 bytes);
 
 void *kmalloc(size_t n);
 void kfree(void *p);

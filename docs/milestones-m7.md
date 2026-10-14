@@ -77,4 +77,15 @@ Each step ends with its tests passing; the gate runs at the end.
 
 ## Status
 
-- Not started (2026-10-14).
+- **A done** (2026-10-14, MGA-Glide 4d0d5de). Patch 0116; Loop A `--card g200pci|g400pci|g450pci` on any profile
+  (the G200 boots Matrox's PCI BIOS, 899-33: with the AGP one it found 2 MB and no linear framebuffer);
+  `loopa-selftest-ext`'s new `pci` check (the HAL's PROBE on the 486DX2 with each card). Conformance 27/27 on the
+  486DX2 with the PCI G200 and G450; MGA-Glide's full regression green (conformance 108/108, 27 self-tests,
+  hreplay, the six game replays).
+- **B done** (2026-10-14, MGA-Glide d5a5cac; `docs/matrox-2d.md` there gives each rule's source). Copies (on the
+  G200 and G400 through SRCORG, a band of rows at a time, keeping AR0 within its 18 bits), colour expansion from the
+  CPU and from VRAM, image loads, 8-bpp targets, `engine_resync`, the cursor (AND/XOR masks in XGA mode) and
+  `crtc_set_start`, and `vram.c`. Patch 0117 brings the model to the specifications (SRCORG, display start bit
+  20, the cursor's size, colours and address). TWODTEST passes on the G100, G200, G400 and G450 and on the 486DX2
+  with the PCI G200 and G450 (and fails on the model without 0117); `test_vram`; the full regression again. Both
+  steps merged into MGA-Glide main with the user's approval (not pushed). Questions for real cards: §7 there.

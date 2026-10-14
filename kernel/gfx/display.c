@@ -38,6 +38,7 @@
 #include "dpmi.h"
 #include "io.h"
 #include "kprintf.h"
+#include "mgadisp.h"
 #include "mm.h"
 #include "vm.h"
 
@@ -222,6 +223,7 @@ static int mode_set(void)
     gfx_init(&d.fb, fb, d.w, d.h, pitch, &f);
     if (f.bpp == 8)
         palette();
+    mga_display_up(d.phys, pitch, f.bpp, d.h);
     d.on = 1;
     mm_vga_hide(!d.held);
     vkbc_desk(!d.held);
@@ -241,6 +243,7 @@ void display_init(const struct bootinfo *bi)
 {
     if (!d.paint)
         d.paint = d.home = blank;
+    mga_display_init(bi);
     if (bi->display_w) {
         d.w = (u16)bi->display_w;
         d.h = (u16)bi->display_h;
@@ -275,6 +278,7 @@ void display_vm_turn(void)
         return;
     d.ask = 0;
     if (what == DISPLAY_OFF) {
+        mga_display_down();
         if (d.on) {
             d.on = 0;
             text_mode();
@@ -306,6 +310,7 @@ void display_session(int begin)
     if (!d.on)
         return;
     if (begin && !d.held) {
+        mga_display_down();
         d.held = 1;
         mm_vga_hide(0);
         vkbc_desk(0);
@@ -321,6 +326,7 @@ void display_session(int begin)
 void display_leave(void)
 {
     int was = d.on && !d.held;
+    mga_display_down();
     d.on = 0;
     if (was)
         text_mode();
@@ -372,9 +378,12 @@ int display_quiet(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, int app)
 
 u32 display_stat(char *buf, u32 max)
 {
+    u32 n;
     if (!d.on)
-        return (u32)ksnprintf(buf, max, "display off%s\n", d.w ? "" : " (no mode given)");
-    return (u32)ksnprintf(buf, max, "display %s mode=%x %ux%ux%u pitch=%u lfb=%08x rgb=%u.%u.%u dac=%u\n",
-                          d.held ? "held" : "on", d.mode, d.w, d.h, d.bpp, d.fb.pitch, d.phys, d.fb.fmt.rsize,
-                          d.fb.fmt.gsize, d.fb.fmt.bsize, d.fb.fmt.bpp == 8 ? d.dac : 0);
+        n = (u32)ksnprintf(buf, max, "display off%s\n", d.w ? "" : " (no mode given)");
+    else
+        n = (u32)ksnprintf(buf, max, "display %s mode=%x %ux%ux%u pitch=%u lfb=%08x rgb=%u.%u.%u dac=%u\n",
+                           d.held ? "held" : "on", d.mode, d.w, d.h, d.bpp, d.fb.pitch, d.phys, d.fb.fmt.rsize,
+                           d.fb.fmt.gsize, d.fb.fmt.bsize, d.fb.fmt.bpp == 8 ? d.dac : 0);
+    return n < max ? n + mga_display_stat(buf + n, max - n) : n;
 }

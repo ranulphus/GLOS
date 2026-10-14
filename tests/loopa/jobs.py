@@ -1959,21 +1959,28 @@ EXIT_CASES = [("bf6", "g200"), ("bf6", "vbe")]
 # ---- the display and the 2D library (M6 step C)
 
 # (machine, video card, network card, GLOS.CFG's [display] mode or none)
-DISPLAY_CASES = [("bf6", "vbe", "ne2kpci", ""), ("bf6", "g200", "ne2kpci", "800x600x16"), ("486dx2", "vbe", "ne2k", "640x480x8")]
+DISPLAY_CASES = [("bf6", "vbe", "ne2kpci", ""), ("bf6", "g200", "ne2kpci", "800x600x16"), ("486dx2", "vbe", "ne2k", "640x480x8"),
+                 ("bf6", "g400", "ne2kpci", ""), ("bf6", "g450", "ne2kpci", "1024x768x32"),
+                 ("bf6", "g200", "ne2kpci", "640x480x8", "off")]
+MATROX_CARDS = ("g100", "g200", "g400", "g450", "g200pci", "g400pci", "g450pci")
 
 
-def display_case(profile, vcard, card, cfg_mode):
+def display_case(profile, vcard, card, cfg_mode, accel="on"):
     """The desktop's screen (kernel/gfx/display.c): at 640x480 in 8, 16 and 32 bits a pixel, the kernel draws the
     2D library's test card on the real screen, and glos shot's picture of it must be the host's own rendering
     (tests/host/gfx_test.c wrote it: build/host/gfx-card-N.png), pixel for pixel; at 8 bits through the DAC's
     6 bits a colour where the BIOS can't give 8. Then: a DOS program (a session) gets text mode and the card
     is back after it; a program marked as a GLOS app starts, writes to the console and ends with the card
     untouched; glos display off is text mode; a mode no card has is refused; GLOS leaves in text mode. With a
-    [display] mode in GLOS.CFG the desktop is there from the start, one colour above its task bar."""
+    [display] mode in GLOS.CFG the desktop is there from the start, one colour above its task bar.
+    On a Matrox card the drawing engine is up on every desktop mode (M7 step C: glos display says "accel on",
+    and the card is let go of for a session and with the desktop off), unless GLOS.CFG's accel = off."""
     import time
-    tag = "%s-%s" % (profile, vcard)
-    cfg = ["--file", batfile("display-%s/GLOS.CFG" % tag, ["[display]", "mode = " + cfg_mode]) + "=/TEST/GLOS.CFG"] \
-        if cfg_mode else []
+    tag = "%s-%s%s" % (profile, vcard, "" if accel == "on" else "-accel-" + accel)
+    cfg = ["--file", batfile("display-%s/GLOS.CFG" % tag, ["[display]", "mode = " + cfg_mode, "accel = " + accel]) +
+           "=/TEST/GLOS.CFG"] if cfg_mode else []
+    engine = vcard in MATROX_CARDS and accel == "on"
+    want_accel = "accel on " if engine else "accel off" if accel != "on" else "accel none"
     agent = Agent("display-" + tag, profile, card, ["--card", vcard] + cfg + [
         "--file", "build/dj/APPTEST.EXE=/TEST/APPTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
         "--cmd", "SERSAY HX-START display", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
@@ -2030,6 +2037,7 @@ def display_case(profile, vcard, card, cfg_mode):
             checks["ask-%d" % bits] = agent.ssh("glos display card 640x480x%d" % bits)[0] == 0
             line = state("display on mode=")
             checks["on-%d" % bits] = " 640x480x%d " % bits in line
+            checks["accel-%d" % bits] = want_accel in line
             if checks["on-%d" % bits]:
                 checks["card-%d" % bits] = same(shot("card-%d" % bits), card(bits, line), "card at %d bits" % bits)
         info = " " + " ".join(w for w in line.split() if w.startswith(("mode=", "rgb=", "lfb=")))
@@ -2038,6 +2046,9 @@ def display_case(profile, vcard, card, cfg_mode):
         checks["session"] = rc == 7 and "on the screen" in o
         line = state("display on mode=")
         checks["back"] = bool(line) and same(shot("after-session"), card(32, line), "the card after a session")
+        checks["accel-back"] = want_accel in line
+        if engine:                              # (let go of for the session, up again after it)
+            checks["accel-session"] = agent.log().count("GLOS-MGA down") >= 1 and agent.log().count("GLOS-MGA up") >= 4
         n = agent.log().count("GLOS-DISPLAY on ")
         rc, o, _ = agent.ssh("C:\\TEST\\APPTEST.EXE run A 2", timeout=600)     # (it writes to the console, and files)
         checks["app"] = rc == 40 and "APP-OK" in o and agent.log().count("GLOS-DISPLAY on ") == n \
@@ -2050,6 +2061,7 @@ def display_case(profile, vcard, card, cfg_mode):
         agent.ssh("glos display card 640x480x8")
         checks["again"] = bool(state("display on mode="))
         checks["off"] = agent.ssh("glos display off")[0] == 0 and bool(state("display off"))
+        checks["accel-off"] = ("accel idle" if engine else want_accel) in agent.ssh("glos display")[1]
         t = shot("text")
         checks["text"] = bool(t) and t[:2] == (640, 400)
         agent.ssh("glos display card 640x480x16")
@@ -2066,7 +2078,8 @@ def display_case(profile, vcard, card, cfg_mode):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
-DESK_CASES = [("bf6", "vbe", "ne2kpci"), ("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")]
+DESK_CASES = [("bf6", "vbe", "ne2kpci"), ("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k"), ("bf6", "g400", "ne2kpci"),
+              ("bf6", "g450", "ne2kpci")]
 
 
 def desk_case(profile, vcard, card):
@@ -2150,6 +2163,8 @@ def desk_case(profile, vcard, card):
     checks["text-at-exit"] = "HX-VMODE bios=03" in text
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    if vcard in MATROX_CARDS:                   # (M7 step C: the engine up on each mode, drawing nothing yet)
+        checks["accel"] = text.count("GLOS-MGA up ") >= 4 and "GLOS-MGA down" in text and "GLOS-MGA error" not in text
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("desk-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad

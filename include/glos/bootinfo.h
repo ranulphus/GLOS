@@ -120,7 +120,9 @@ struct bootinfo {
     char hostname[16];                          /* M5: GLOS.CFG's [net] hostname (letters, digits, hyphens); empty: "glos" */
     bi_u32 detached_off;                        /* M6: where the stub goes on when the program it EXECed became an app */
     bi_u32 display_w, display_h, display_bpp;   /* M6: GLOS.CFG's [display] mode = WxHxBPP; 0: no desktop (text mode) */
+    bi_u32 display_flags;                       /* M7: BI_DISPLAY_ */
 };
+#define BI_DISPLAY_NOACCEL 1u                   /* [display] accel = off: the CPU draws the desktop, on a Matrox card too */
 
 /* The resident stub's data (loader/stub.asm), at offset 0 of its segment.
    Byte arrays and naturally aligned fields only: no compiler pads it. */

@@ -684,12 +684,15 @@ static void read_cfg(const char *argv0, int shell_keys)
         for (e = v + strlen(v); e > v && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' '); e--) ;
         *e = 0;
         if (in_display) {                       /* mode = WIDTHxHEIGHTxBITS: the desktop's (M6); none: text mode */
-            unsigned w, h, b;
+            unsigned w, h, b;                   /* accel = on | off: a Matrox card's drawing engine (M7) */
             if (!stricmp(k, "mode") && sscanf(v, "%ux%ux%u", &w, &h, &b) == 3 && w >= 320 && w <= 1600 && h >= 200
                 && h <= 1200 && (b == 8 || b == 16 || b == 32)) {
                 bi.display_w = w;
                 bi.display_h = h;
                 bi.display_bpp = b;
+            } else if (!stricmp(k, "accel") && (!stricmp(v, "on") || !stricmp(v, "off"))) {
+                bi.display_flags = !stricmp(v, "off") ? bi.display_flags | BI_DISPLAY_NOACCEL
+                                                      : bi.display_flags & ~BI_DISPLAY_NOACCEL;
             } else {
                 say("GLOS-WARN cfg-key section=display key=%s", k);
             }

@@ -3,6 +3,8 @@
 #   make                build/ow/GLOS.EXE (16-bit loader) and build/kernel/GLOSK.BIN (the kernel)
 #   make loopa [CARD=g450]   run GLOS.EXE in 86Box through MGA-Glide's Loop A: out/loopa-CARD/
 #   make check-deps     MGA-Glide at or after deps.mk's pin
+#   make sync-hal       third_party/mgahal from $(MGA_GLIDE) (the HAL; tools/sync-hal.sh)
+#   make check-hal      the vendored HAL against its MANIFEST
 #   make host-test      kernel code's host tests (in the dev container)
 #   make ssh-test       the SSH layer on host sockets against OpenSSH's ssh (M3)
 #   make loopa-m1       M1's exit matrix in Loop A (tests/loopa/jobs.py)
@@ -52,7 +54,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: loopa-apps loopa-display loopa-desk loopa-win fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: loopa-apps loopa-display loopa-desk loopa-win fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -61,6 +63,11 @@ help:
 check-deps:
 	@git -C "$(MGA_GLIDE)" merge-base --is-ancestor "$(MGA_GLIDE_PIN)" HEAD 2>/dev/null \
 	  || { echo "$(MGA_GLIDE) is not at or after $(MGA_GLIDE_PIN) (deps.mk)"; exit 1; }
+
+sync-hal:
+	tools/sync-hal.sh $(MGA_GLIDE)
+check-hal:
+	tools/sync-hal.sh --check
 
 # ---- Host tests: kernel code built 32-bit for Linux (in the dev container,
 # which has the 32-bit C library) --------------------------------------------
@@ -165,7 +172,8 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -fno-asynchronous-unwind-tables -fno-delete-null-pointer-checks -mgeneral-regs-only \
            -O2 -g -Wall -Wextra -Werror -nostdinc -Iinclude -Ikernel/include \
            -isystem $(shell $(HOST_CC) -m32 -print-file-name=include) -Ikernel/include/libc -Ikernel/net/port \
-           -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh
+           -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh \
+           -Ithird_party/mgahal/hal/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c kernel/core/timer.c \
          kernel/core/sched.c kernel/drv/pci.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
          kernel/net/net.c kernel/lib/libc.c \
@@ -177,8 +185,17 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c kernel/app/dev.c $(GFX_SRCS) kernel/gfx/display.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c
+         kernel/app/app.c kernel/app/api.c kernel/app/dev.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
+# The Matrox HAL (third_party/mgahal: MGA-Glide's, make sync-hal), the part
+# without FPU code, with its port for this kernel (docs/milestones-m7.md step C).
+MGAHAL := third_party/mgahal/hal
+HAL_SRCS := $(addprefix $(MGAHAL)/src/,pci.c chip.c fifo.c engine.c blit.c cursor.c vram.c) $(MGAHAL)/port/glos.c
+HAL_OBJS := $(patsubst $(MGAHAL)/%.c,build/mgahal/%.o,$(HAL_SRCS))
+build/mgahal/%.o: $(MGAHAL)/%.c $(wildcard $(MGAHAL)/include/mga/*.h kernel/include/*.h)
+	@mkdir -p $(dir $@)
+	$(Q)echo "  HAL     $<"
+	$(Q)$(HOST_CC) $(KCFLAGS) -DMGA_GLOS=1 -c -o $@ $<
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
 LWIP_SRCS := $(wildcard third_party/lwip/src/core/*.c third_party/lwip/src/core/ipv4/*.c \
@@ -198,10 +215,10 @@ build/tinyssh/%.o: third_party/tinyssh/%.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  TINYSSH $<"
 	$(Q)$(HOST_CC) $(filter-out -Werror -Wextra,$(KCFLAGS)) -c -o $@ $<
-build/kernel/glosk.elf: $(KOBJS) $(LWIP_OBJS) $(TINYSSH_OBJS) kernel/kernel.ld
+build/kernel/glosk.elf: $(KOBJS) $(LWIP_OBJS) $(TINYSSH_OBJS) $(HAL_OBJS) kernel/kernel.ld
 	$(Q)echo "  KLD     $@"
 	$(Q)$(HOST_CC) $(KCFLAGS) -nostdlib -no-pie -Wl,-T,kernel/kernel.ld -Wl,--build-id=none \
-	  -Wl,--no-warn-rwx-segments -o $@ $(KOBJS) $(LWIP_OBJS) $(TINYSSH_OBJS)
+	  -Wl,--no-warn-rwx-segments -o $@ $(KOBJS) $(LWIP_OBJS) $(TINYSSH_OBJS) $(HAL_OBJS)
 build/kernel/GLOSK.BIN: build/kernel/glosk.elf
 	$(Q)objcopy -O binary $< $@
 kernel: build/kernel/GLOSK.BIN

@@ -27,12 +27,13 @@ static u32 kpt_kmap[1024] __attribute__((aligned(4096)));
 static u32 kpt_dma[1024] __attribute__((aligned(4096)));
 static u32 kpt_fb[FB_MAX >> 22][1024] __attribute__((aligned(4096)));
 static u32 kpt_win[WIN_MAX >> 22][1024] __attribute__((aligned(4096)));
+static u32 kpt_dev[DEV_MAX >> 22][1024] __attribute__((aligned(4096)));
 static u32 win_used[(WIN_MAX >> 12) / 32];      /* a bit a page of the windows' region */
 static u32 frame_bits[MAX_FRAMES / 32];
 static struct pmm pmm;
 static struct heap kheap;
 static u32 image_phys, kmap_next, given;       /* given: the frames the loader handed over */
-static u32 dma_next;
+static u32 dma_next, dev_next;          /* pages handed out of the DMA and device regions */
 
 u32 kernel_phys(const void *p) { return image_phys + ((u32)p - (u32)__kernel_start); }
 u32 mm_cr3(void) { return kernel_phys(kpd); }
@@ -289,6 +290,40 @@ void *mm_fb_map(u32 phys, u32 bytes)
     return (void *)(FB_BASE + (phys & 0xFFF));
 }
 
+/* A device's registers or memory (the HAL's: hal/port/glos.c): `bytes` at
+   phys, uncached, in the device region, from where the last ended. Undone
+   by mm_dev_unmap; the region's room comes back only from its end. */
+void *mm_dev_map(u32 phys, u32 bytes)
+{
+    u32 n = ((phys & 0xFFF) + bytes + 0xFFF) >> 12, i, f = irq_save();
+    u8 *p = 0;
+    if (bytes && n <= (DEV_MAX >> 12) - dev_next) {
+        for (i = 0; i < n; i++) {
+            kpt_dev[(dev_next + i) >> 10][(dev_next + i) & 1023] = ((phys & ~0xFFFu) + (i << 12)) | PTE_P | PTE_W | MM_UC;
+            invlpg(DEV_BASE + ((dev_next + i) << 12));
+        }
+        p = (u8 *)(DEV_BASE + (dev_next << 12) + (phys & 0xFFF));
+        dev_next += n;
+    }
+    irq_restore(f);
+    return p;
+}
+
+void mm_dev_unmap(void *p, u32 bytes)
+{
+    u32 first = ((u32)p - DEV_BASE) >> 12, n = (((u32)p & 0xFFF) + bytes + 0xFFF) >> 12, i, f;
+    if ((u32)p < DEV_BASE || first >= DEV_MAX >> 12)
+        return;
+    f = irq_save();
+    for (i = first; i < first + n && i < DEV_MAX >> 12; i++) {
+        kpt_dev[i >> 10][i & 1023] = 0;
+        invlpg(DEV_BASE + (i << 12));
+    }
+    if (first + n == dev_next)
+        dev_next = first;
+    irq_restore(f);
+}
+
 void *dma_alloc(u32 n, u32 *phys)
 {
     u32 f = irq_save(), base = 0, i;
@@ -329,6 +364,8 @@ void mm_init(struct bootinfo *bi)
         kpd[(FB_BASE >> 22) + i] = kernel_phys(kpt_fb[i]) | PTE_P | PTE_W;
     for (i = 0; i < WIN_MAX >> 22; i++)
         kpd[(WIN_BASE >> 22) + i] = kernel_phys(kpt_win[i]) | PTE_P | PTE_W;
+    for (i = 0; i < DEV_MAX >> 22; i++)
+        kpd[(DEV_BASE >> 22) + i] = kernel_phys(kpt_dev[i]) | PTE_P | PTE_W;
     kpd[1023] = kernel_phys(kpd) | PTE_P | PTE_W;
     write_cr3(mm_cr3());
 

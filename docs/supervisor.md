@@ -230,7 +230,7 @@ program looks for it.
 | 0000_0000–0010_FFFF | Identity map of physical 0–10FFFFh (conventional memory, UMA, HMA). Shared page table for PDE 0 in every address space. |
 | 0011_0000–003F_FFFF | Unused, so no client data shares PDE 0's page table |
 | 0040_0000–BFFF_FFFF | User region of the current DPMI context. DPMI blocks are handed out **ascending from 4 MB** (§12.3). |
-| C000_0000–DFFF_FFFF | Kernel: image at C010_0000, heap at C040_0000, devices' own memory at C080_0000 (`dma_alloc`, M5), kmap window at DFC0_0000 |
+| C000_0000–DFFF_FFFF | Kernel: image at C010_0000, heap at C040_0000, devices' own memory at C080_0000 (`dma_alloc`, M5), the screen's framebuffer at C0C0_0000 and windows' pixels at C200_0000 (M6), devices' registers and memory at C400_0000 (`mm_dev_map`: the Matrox card's, M7), kmap window at DFC0_0000 |
 | E000_0000–FFBF_FFFF | Reserved, so 0800h can return **linear = physical** for PCI BARs (§12.4) |
 | FFC0_0000–FFFF_FFFF | Recursive mapping of the current page directory |
 
