@@ -1961,7 +1961,8 @@ EXIT_CASES = [("bf6", "g200"), ("bf6", "vbe")]
 # (machine, video card, network card, GLOS.CFG's [display] mode or none)
 DISPLAY_CASES = [("bf6", "vbe", "ne2kpci", ""), ("bf6", "g200", "ne2kpci", "800x600x16"), ("486dx2", "vbe", "ne2k", "640x480x8"),
                  ("bf6", "g400", "ne2kpci", ""), ("bf6", "g450", "ne2kpci", "1024x768x32"),
-                 ("bf6", "g200", "ne2kpci", "640x480x8", "off")]
+                 ("bf6", "g200", "ne2kpci", "640x480x8", "off"),
+                 ("486dx2", "g200pci", "ne2k", ""), ("486dx2", "g450pci", "ne2k", "640x480x16")]   # (M7 step G)
 MATROX_CARDS = ("g100", "g200", "g400", "g450", "g200pci", "g400pci", "g450pci")
 
 
@@ -2080,7 +2081,7 @@ def display_case(profile, vcard, card, cfg_mode, accel="on"):
 
 
 DESK_CASES = [("bf6", "vbe", "ne2kpci"), ("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k"), ("bf6", "g400", "ne2kpci"),
-              ("bf6", "g450", "ne2kpci")]
+              ("bf6", "g450", "ne2kpci"), ("486dx2", "g200pci", "ne2k"), ("486dx2", "g450pci", "ne2k")]
 
 
 def desk_case(profile, vcard, card):
@@ -2194,7 +2195,8 @@ def desk_case(profile, vcard, card):
 
 # (machine, video card, network card, bits a pixel, the bits to change to)
 WIN_CASES = [("bf6", "vbe", "ne2kpci", 32, 16), ("bf6", "g200", "ne2kpci", 16, 8), ("486dx2", "vbe", "ne2k", 8, 16),
-             ("bf6", "g400", "ne2kpci", 32, 8), ("bf6", "g450", "ne2kpci", 8, 32)]
+             ("bf6", "g400", "ne2kpci", 32, 8), ("bf6", "g450", "ne2kpci", 8, 32),
+             ("486dx2", "g200pci", "ne2k", 16, 8), ("486dx2", "g450pci", "ne2k", 32, 16)]
 WIN_COLOUR = {"A": (0xCC, 0x33, 0x33), "B": (0x33, 0x33, 0xCC), "C": (0x33, 0xCC, 0x33)}
 
 
