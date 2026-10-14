@@ -64,10 +64,15 @@ Each step ends with its tests passing; the gate runs at the end.
   T: host tests that run the composer on a device that records the calls and replays them in software (same
   pixels); in Loop A, the same scripted desktop (windows made, moved, sized, drawn in, text, a session in
   between) with acceleration on and off gives the same screenshots, on the three cards at each depth.
-- **E. The VRAM manager and windows off screen.** The front buffer, the cursor, a glyph cache and windows' backing
-  stores in VRAM while there is room (the system's memory after that); copies between them by the engine;
-  apps' windows in VRAM mapped into the app as the card's memory. `glos desk` and `glos stat` show the use.
-  T: as D, with stores in VRAM, in system memory, and some of each; an app drawing in a window in VRAM.
+- **E. The VRAM manager and windows off screen.** The front buffer, the cursor and the desktop's own windows'
+  stores in VRAM while there is room (the system's memory after that), moved out before a session or another
+  mode and back after; copies between them by the engine. `glos desk` and `glos display` show the use.
+  T: as D, with stores in VRAM, in system memory, and some of each.
+  *Changed while building it (2026-10-14):* apps' windows stay in the system's memory, and there is no glyph
+  cache. A session takes the card's memory whole, so stores there must leave it first; an app's window mapped
+  into the app can't be moved from under it while it may be drawing (it would draw into the session's memory),
+  and the CPU reads VRAM slowly. Apps' VRAM waits for M8's GPU lock. Text is expanded from the CPU
+  (`engine_mono`), which needs no cache.
 - **F. The hardware cursor and the display start.** The pointer as the card's cursor; screenshots with it drawn
   in. The display start through the CRTC (the HAL's; GLOS uses it to put the desktop at the start of VRAM).
   T: the goldens with the cursor; TWODTEST's cursor and display-start cases.

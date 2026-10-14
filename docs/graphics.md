@@ -1,8 +1,9 @@
 # GLOS graphics and window system: design
 
 What [supervisor.md](supervisor.md) is for the supervisor, for PRD §9 and §10: the 2D library, the display, the
-window manager, input, and apps' windows through the API. Each part says what is built and where. Plan and
-status: [milestones-m6.md](milestones-m6.md).
+window manager, input, apps' windows through the API, and the Matrox card's acceleration (§6). Each part says
+what is built and where. Plan and status: [milestones-m6.md](milestones-m6.md),
+[milestones-m7.md](milestones-m7.md).
 
 ## 1. The 2D library (`kernel/gfx/`, `include/glos/gfx.h`)
 
@@ -128,8 +129,10 @@ after all, and gets the screen from there.
 
 ### 2.4 Screenshots
 
-`glos shot` needs nothing new: the display's mode sets go through `rm_call()`, which tells the screenshot
-code the mode, and the capture reads the linear framebuffer as for any VBE mode.
+`glos shot` needs nothing new for the screen's pixels: the display's mode sets go through `rm_call()`, which
+tells the screenshot code the mode, and the capture reads the linear framebuffer as for any VBE mode. On a
+Matrox card it first waits for the drawing engine to finish, and draws the hardware cursor into the picture
+where the monitor shows it (§6.4), so a screenshot is what is on the screen.
 
 ### 2.5 Tests
 
@@ -375,3 +378,85 @@ keyboard there are no keys for it (a terminal is M9's; DOS programs in windows c
   shift flags at 40:17h, which are the system VM's.
 - INT 33h has no handler calls (0Ch, 14h), no ranges and no cursor of its own.
 - The pointer has one shape and no acceleration.
+
+## 6. The Matrox card (M7: `kernel/gfx/mga.c`, `third_party/mgahal`)
+
+On a G100, G200, G400 or G450 the desktop is drawn by the card's drawing engine, through MGA-Glide's HAL. The
+mode is still set through the video BIOS (§2.1); what the engine draws is, pixel for pixel, what the 2D
+library's software draws (the M7 exit).
+
+### 6.1 The HAL in the kernel
+
+- **A vendored copy** of MGA-Glide's HAL in `third_party/mgahal` (its `hal/`, licence and 2D reference),
+  refreshed with `make sync-hal` from the pinned MGA-Glide and checked by `make check-hal` against its
+  MANIFEST. It is never edited here: changes are made in MGA-Glide (PRD D27).
+- **The kernel builds the part with no FPU code** (it is built `-mgeneral-regs-only`): PCI, the chips'
+  capabilities, the FIFO, the engine, 2D drawing, the cursor and display start, the VRAM allocator. Not the 3D
+  set-up, the texture code, `engine_present` or the VBE code.
+- **The port** is MGA-Glide's `hal/port/glos.c`: port I/O, physical ranges mapped with `mm_dev_map` (the
+  kernel's device region at C4000000h, 40 MB, uncached: a G450's 32 MB and its registers), the kernel's 1024 Hz
+  clock (the HAL asks only for timeouts), `kmalloc`. No real-mode calls: GLOS sets modes itself.
+
+### 6.2 The engine and the screen
+
+- The card is found on the PCI bus at the start (`GLOS-MGA found`), unless GLOS.CFG's `[display]` has
+  `accel = off` (bootinfo `display_flags`).
+- After each desktop mode set whose framebuffer is the card's, its registers and all of its memory are mapped
+  (once), VRAM is sized (once: the G200's BIOS tells VBE 2 MB), the engine is set up on the screen and the
+  display start set to it, and the screen's bytes are the VRAM manager's first block (`GLOS-MGA up`).
+- Before a session takes the screen, at `glos display off` and when GLOS leaves, the engine is drained and let
+  go of (`GLOS-MGA down`): the card is the session's from then.
+- **One thread at a time.** The HAL keeps its FIFO count and register shadows in variables of its own, so every
+  use of the engine (a draw, a sync, the cursor, bringing it up or down) takes the engine's lock, each draw on
+  its own: the composer's thread, the VM thread's test card and mode sets, `glos shot`'s thread.
+- `glos display` says `accel on` (the chip, VRAM, free, the largest block, the draws so far), `idle`, `off`
+  or `none`.
+
+### 6.3 Drawing: a device behind a surface
+
+- A surface may have a drawing engine (`struct gfx_dev` in `include/glos/gfx.h`; NULL in apps): fills, copies
+  and 1-bit pictures are offered to it on rectangles already cut to the clip and the surfaces, each to draw
+  what the software would; it may decline, and the software does it. Before the CPU touches a device surface's
+  pixels (a line, a pixel read, a declined call) the library syncs: the engine has finished. A true-colour
+  picture is converted by the software a piece of a row at a time and copied by the engine.
+- **The Matrox device** (`mga_dev`) draws on any surface in the card's memory whose layout the engine can
+  have (64-byte aligned, a pitch of a multiple of 32 pixels): fills (`engine_fill`), copies within VRAM
+  (`engine_copy_from`, overlapping ones too), copies from memory (image loads: `engine_image_begin`), 1-bit
+  pictures (`engine_mono`, the clip set to the rectangle). The screen's surface has it while the engine is up.
+- So the composer (§3.2), the test card and everything the desktop draws go through the engine unchanged.
+
+### 6.4 The pointer: the hardware cursor
+
+- While the engine is up the pointer is the card's cursor (the HAL's, in XGA mode): `wm_pointer_masks` gives
+  the arrow as 64 x 64 AND/XOR masks (colour 0 black, colour 1 white), loaded into VRAM below 16 MB on each
+  desktop mode. The composer's thread moves it after input (`display_cursor`) and the composer no longer draws
+  the pointer (`wm_hw_pointer`); when the card can't show it, the pointer is drawn again.
+- `glos shot` draws it into its picture with the cursor's masks: white and black at 16 and 32 bits, the palette's
+  nearest at 8, as the composer would have drawn the pointer.
+
+### 6.5 VRAM
+
+- The VRAM manager (the HAL's `vram.c`) holds the screen, the cursor's image and the desktop's own windows'
+  pixels: the task bar's and the kernel's windows', with rows of a multiple of 32 pixels, in the card's memory
+  while there is room (`glos display vram KB` limits it), where the engine copies them to the screen.
+- Before the card's memory changes hands (a session, another mode, the desktop off, GLOS leaving) they move
+  into the system's memory, and back on the next desktop (`GLOS-DESK vram-out`, `vram-in`). Any store with an
+  engine is drained before its memory is freed.
+- **Apps' windows stay in the system's memory** (a decision of M7 step E; milestones-m7.md): the engine copies
+  them to the screen from there. A session takes the card's memory whole, and an app's window mapped into the
+  app can't be moved from under it while the app may be drawing in it (it would draw into the session's
+  memory); and the CPU reads the card's memory slowly. Apps' windows in VRAM come with M8's GPU lock, which
+  says when an app may touch the card.
+- `glos desk` shows how many of the desktop's windows are in VRAM and their size.
+
+### 6.6 Tests
+
+- Host: the library's fuzzing, the test card and the composer again on a queued engine (`tests/host/qdev.c`:
+  its work done only when synced, a third of the calls declined, addresses taken when asked as a card takes
+  them), with the desktop's windows' stores on it too and moved between kinds at random; the same pictures. The
+  cursor's masks over a composition without the pointer give the one with it.
+- Loop A: the display, desk and win suites on the G200, G400 and G450 (the Pentium II) and the PCI G200 and G450
+  (the 486DX2), with acceleration: the test card at 8, 16 and 32 bits and the desktops against the host's
+  software pictures, the engine's state through every change, `accel = off`, the pointer at a place against a
+  golden (the card's cursor in the screenshot), the desktop's windows in VRAM after a session and from VRAM and
+  memory both.
