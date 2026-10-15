@@ -1244,4 +1244,4 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
 ## Appendix G: Changes in v0.5 (2026-10-14)
 
 - **D43** (M7 step E): the desktop's own windows' pixels in VRAM on a Matrox card, apps' in the system's memory until M8; §9.5 says so, and that there is no glyph cache.
-- **M7** under way: docs/milestones-m7.md has the plan and status, docs/graphics.md §6 the design.
+- **M7 done** (2026-10-15): docs/milestones-m7.md has the plan, the status and the exit's evidence, docs/graphics.md §6 the design.

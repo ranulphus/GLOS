@@ -122,3 +122,18 @@ Each step ends with its tests passing; the gate runs at the end.
   The win suite's busy phase runs at 8 bits on the 486: at 16 and 32 a screenshot takes seconds there and too
   few probes fit in its ten (the S3 fails the same way at 32 bits; at 8 bits each PCI card passed three times
   in a row). One run at 16 bits once showed the busy window unchanged across six screenshots; not seen again.
+- **H done** (2026-10-15): **M7 is done.**
+  - **The exit.** The desk suite's golden desktops at 8, 16 and 32 bits, drawn by the engine, equal the host's
+    software compositions (the VBE desktop's) on the G200, G400 and G450 with the Pentium II and the PCI G200 and
+    G450 with the 486DX2, the pointer the card's cursor; so do the display suite's test cards and the win
+    suite's screens. `glos display`'s draw count shows the engine drew them.
+  - **The regression** on cbe5255, alone on the host: the host tests and 24 Loop A suites (the M6 set), 174
+    cases, none failed.
+  - **The gate** on cb4487b: 133 parts. The first run had 20 failures, all the host's: it ran out of memory
+    seven times from 20:54 on (other projects' qemu, node and chrome; a 15-minute load of 124 at 21:52), and the
+    failed parts are plain-DOS baselines that hung or timed out (Half-Life, PrBoom, Fifth Wheel), three session
+    cases whose machines never reached DOS (all three declared hung together, four seconds before the killer
+    ran), and the m4c replay and conformance runs of the same hour. Every failed cell passed when run again
+    (sess, halflife, prboom, m4c: 27 parts; fifthwheel, whose baseline timed out once more beside other work:
+    8 of 8 alone on the quiet host at 04:30), so no part failed on GLOS's account.
+  - Still open: the 486 run noted in G; the questions for real cards in MGA-Glide's docs/matrox-2d.md §7.
