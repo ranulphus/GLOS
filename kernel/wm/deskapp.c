@@ -20,7 +20,9 @@
 #include "deskint.h"
 #include "dpmi.h"
 #include "io.h"
+#include "display.h"
 #include "kprintf.h"
+#include "mgadisp.h"
 #include "mm.h"
 
 /* Pixels an app has mapped. */
@@ -234,6 +236,44 @@ int desk_win_present(struct app *a, u32 id, const struct glos_rect *r)
     }
     desk_unlock();
     return w ? 0 : GLOS_E_WINDOW;
+}
+
+int desk_win_vram(struct app *a, u32 id, u32 off, u32 pitch)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *w = own(m, a, id);
+    struct gfx_surface s;
+    u32 bpp_b = m->fmt.bpp / 8u;
+    int r = 0;
+    if (!w) {
+        r = GLOS_E_WINDOW;
+    } else if (off == 0xFFFFFFFFu) {
+        wm_ext(m, w, 0);
+    } else if (m->fmt.bpp != 16 || m->fmt.gsize != 6 || !mga_card()) {
+        r = GLOS_E_NO_GPU;                      /* (GLOS_CAP_GLWIN: the app's pixels are RGB565) */
+    } else if ((off & 63) || (pitch & 63) || pitch < (u32)w->store.w * bpp_b
+               || !mga_app_block(app_id(a), off, pitch * (u32)(w->store.h - 1) + (u32)w->store.w * bpp_b, 0, 0)) {
+        r = GLOS_E_ARGUMENT;                    /* (only its own blocks) */
+    } else {
+        gfx_init(&s, mga_vram_ptr(off), w->store.w, w->store.h, pitch, &m->fmt);
+        s.dev = display_vram_dev(s.pix);
+        wm_ext(m, w, &s);
+    }
+    desk_unlock();
+    return r;
+}
+
+void desk_app_vram_gone(struct app *a, u32 off, u32 bytes)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *w;
+    for (w = m->bottom; w; w = w->above)
+        if (w->owner == a && w->has_ext) {
+            u32 at = (u32)((u8 *)w->ext.pix - (u8 *)mga_vram_ptr(0));
+            if (at >= off && at - off < bytes)
+                wm_ext(m, w, 0);
+        }
+    desk_unlock();
 }
 
 int desk_win_focus(struct app *a, u32 id)

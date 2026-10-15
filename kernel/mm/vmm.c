@@ -179,6 +179,23 @@ u32 mm_unmap(u32 lin)
     return (pte & PTE_P) ? pte & ~0xFFFu : 0;
 }
 
+/* One page's entry in any space, the current one or another (pd_phys its
+   directory), through kmap: an app's registers taken from it while another
+   thread runs (kernel/gfx/gpu.c). -1 if it has no page table there. */
+int mm_space_set(u32 pd_phys, u32 lin, u32 pte)
+{
+    u32 *pd = kmap(pd_phys), pde = pd[lin >> 22], *pt;
+    kunmap(pd);
+    if (!(pde & PTE_P))
+        return -1;
+    pt = kmap(pde & ~0xFFFu);
+    pt[(lin >> 12) & 1023] = pte;
+    kunmap(pt);
+    if ((read_cr3() & ~0xFFFu) == pd_phys)
+        invlpg(lin);
+    return 0;
+}
+
 /* A page of a DPMI block that gets its frame when first touched (the host's
    page fault, kernel/dpmi/mem.c lin_fault()): a not-present PTE marked. */
 int mm_lazy(u32 lin)

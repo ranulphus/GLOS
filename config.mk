@@ -13,3 +13,6 @@ LOOPA_TIMEOUT ?= 120
 # Private test fixtures, never committed: Turbo Pascal 7 / Turbo C++ installs
 # (TPX.EXE on RTM.EXE + DPMI16BI.OVL is a 16-bit DPMI acceptance test, PRD D30).
 BORLAND_DIR   ?= $(HOME)/BORLAND
+
+# DOS-GL, for M8's windowed GL suites (its conformance EXEs, SDL): a built tree.
+DOSGL_DIR     ?= $(HOME)/DOSGL

@@ -44,6 +44,7 @@
  * counter began again. */
 #include "appint.h"
 #include "io.h"
+#include "kprintf.h"
 #include "session.h"
 #include "timer.h"
 #include "vm.h"
@@ -374,9 +375,51 @@ int appdev_int33(struct app *a, struct rmregs *r)
     return 1;                                   /* (the rest: showing it, its range, handlers: nothing to do) */
 }
 
+/* COM1 (M8): a UART that is always ready to send, whose lines go into GLOS's
+   log as they are, so what an app writes there (DOS-GL's DGL- lines, a test's
+   HX- lines) is seen as a session's is; it receives nothing. */
+static void com_out(struct app *a, u16 port, u8 v)
+{
+    switch (port - 0x3F8) {
+    case 0:
+        if (a->com.lcr & 0x80)                  /* (the divisor: no matter) */
+            break;
+        if (v == '\n' || a->com.len == sizeof a->com.line - 1) {
+            a->com.line[a->com.len] = 0;
+            kprintf("%s\n", a->com.line);
+            a->com.len = 0;
+        }
+        if (v != '\n' && v != '\r')
+            a->com.line[a->com.len++] = (char)v;
+        break;
+    case 1: if (!(a->com.lcr & 0x80)) a->com.ier = v; break;
+    case 3: a->com.lcr = v; break;
+    case 4: a->com.mcr = v; break;
+    case 7: a->com.scr = v; break;
+    }
+}
+
+static u8 com_in(struct app *a, u16 port)
+{
+    switch (port - 0x3F8) {
+    case 1: return a->com.lcr & 0x80 ? 0 : a->com.ier;
+    case 2: return 0x01;                        /* no interrupt waits */
+    case 3: return a->com.lcr;
+    case 4: return a->com.mcr;
+    case 5: return 0x60;                        /* the transmitter empty: ready */
+    case 6: return 0xB0;                        /* carrier, DSR, CTS */
+    case 7: return a->com.scr;
+    default: return 0;
+    }
+}
+
 static u8 in8(struct app *a, u16 port)
 {
+    if (port >= 0x3F8 && port <= 0x3FF)
+        return com_in(a, port);
     switch (port) {
+    case 0x201:                                 /* the gameport: the PC's own (M8: SDL's joystick) */
+        return inb(0x201);
     case 0x20: case 0x21: case 0xA0: case 0xA1:
         return vpic_read(&a->pic, port);
     case 0x40:
@@ -400,7 +443,14 @@ static u8 in8(struct app *a, u16 port)
 
 static void out8(struct app *a, u16 port, u8 v)
 {
+    if (port >= 0x3F8 && port <= 0x3FF) {
+        com_out(a, port, v);
+        return;
+    }
     switch (port) {
+    case 0x201:
+        outb(0x201, v);
+        break;
     case 0x20: case 0x21: case 0xA0: case 0xA1:
         vpic_write(&a->pic, port, v);
         break;

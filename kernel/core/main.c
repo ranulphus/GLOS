@@ -9,6 +9,7 @@
 #include "gdb.h"
 #include "io.h"
 #include "kprintf.h"
+#include "mixer.h"
 #include "mm.h"
 #include "nic.h"
 #include "pci.h"
@@ -108,6 +109,7 @@ void kmain(struct bootinfo *loader_bi)
         random_init(bi);
         display_init(bi);
         vm_start(bi);
+        mixer_init(bi);                         /* (it plays once the desktop is up: display.c) */
         desk_init();
         pci_scan();
         if (nic_probe() == 0) {

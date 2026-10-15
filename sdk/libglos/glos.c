@@ -31,9 +31,9 @@ static int find(void)
     return state;
 }
 
-/* Function fn with b in EBX, c in ECX and d in EDX; EAX's result in *a,
-   EBX's in *b: 0, or -1 with error (and reason) set. */
-static int call4(unsigned fn, unsigned *a, unsigned *b, unsigned c, unsigned d)
+/* Function fn with b in EBX, c in ECX, d in EDX and si in ESI; EAX's result
+   in *a, EBX's in *b: 0, or -1 with error (and reason) set. */
+static int call5(unsigned fn, unsigned *a, unsigned *b, unsigned c, unsigned d, unsigned si)
 {
     unsigned char failed;
     if (find() < 0) {
@@ -42,9 +42,9 @@ static int call4(unsigned fn, unsigned *a, unsigned *b, unsigned c, unsigned d)
     }
     *a = fn;
     __asm__ __volatile__("lcall *%[e]\n\tsetc %[f]"
-                         : "+a"(*a), "+b"(*b), "+c"(c), "+d"(d), [f] "=m"(failed)
+                         : "+a"(*a), "+b"(*b), "+c"(c), "+d"(d), "+S"(si), [f] "=m"(failed)
                          : [e] "m"(entry)
-                         : "esi", "edi", "cc", "memory");
+                         : "edi", "cc", "memory");
     if (failed) {
         error = (int)*a;
         reason = (int)*b;
@@ -52,6 +52,8 @@ static int call4(unsigned fn, unsigned *a, unsigned *b, unsigned c, unsigned d)
     }
     return 0;
 }
+
+static int call4(unsigned fn, unsigned *a, unsigned *b, unsigned c, unsigned d) { return call5(fn, a, b, c, d, 0); }
 
 static int call(unsigned fn, unsigned *a, unsigned *b) { return call4(fn, a, b, 0, 0); }
 
@@ -132,6 +134,47 @@ int glos_screen(struct glos_window *w)
     w->size = sizeof *w;
     return call3(GLOS_FN_SCREEN, (unsigned)w, 0, 0);
 }
+
+unsigned glos_caps(void)
+{
+    unsigned a, b = 0;
+    return call(GLOS_FN_VERSION, &a, &b) == 0 && a >= 0x10001u ? b : 0;
+}
+
+int glos_gpu(struct glos_gpu *g)
+{
+    g->size = sizeof *g;
+    return call3(GLOS_FN_GPU, (unsigned)g, 0, 0);
+}
+
+int glos_gpu_lock(void) { return call3(GLOS_FN_GPU_LOCK, 0, 0, 0); }
+int glos_gpu_unlock(void) { return call3(GLOS_FN_GPU_UNLOCK, 0, 0, 0); }
+
+int glos_vram(unsigned min, unsigned max, unsigned align, unsigned *off, unsigned *bytes)
+{
+    unsigned a, b = 0;
+    if (call5(GLOS_FN_VRAM, &a, &b, min, max, align) != 0)
+        return -1;
+    *off = a;
+    if (bytes)
+        *bytes = b;
+    return 0;
+}
+
+int glos_vram_free(unsigned off) { return call3(GLOS_FN_VRAM, 1, off, 0); }
+int glos_winvram(unsigned id, unsigned off, unsigned pitch) { return call3(GLOS_FN_WINVRAM, id, off, pitch); }
+
+int glos_audio(unsigned rate, unsigned channels, unsigned bytes, unsigned *id, struct glos_stream **s)
+{
+    unsigned a, b = 0;
+    if (call5(GLOS_FN_AUDIO, &a, &b, rate, channels, bytes) != 0 || !(*s = glos_ptr(b)))
+        return -1;
+    *id = a;
+    return 0;
+}
+
+int glos_audio_close(unsigned id) { return call3(GLOS_FN_AUDIO, 1, id, 0); }
+int glos_audio_volume(unsigned id, unsigned volume) { return call3(GLOS_FN_AUDIO, 2, id, volume); }
 
 /* A linear address as the program's own pointer: its data segment reaches
    everything from here on (DJGPP's "near pointers"), and the address is

@@ -404,6 +404,7 @@ int wm_resize(struct wm *m, struct wm_window *w, s32 cw, s32 ch)
     store_free(m, w);
     w->store = s;
     w->mem = mem;
+    w->has_ext = 0;                             /* (of the old size) */
     set_frame(m, w, w->frame.x, w->frame.y);
     if (shown(w))
         damage(m, &w->frame);
@@ -579,6 +580,14 @@ void wm_ghost(struct wm *m, const struct gfx_rect *r)
     ghost_damage(m);
 }
 
+void wm_ext(struct wm *m, struct wm_window *w, const struct gfx_surface *s)
+{
+    w->has_ext = s && s->w == w->store.w && s->h == w->store.h;
+    if (w->has_ext)
+        w->ext = *s;
+    wm_damage(m, w, 0);
+}
+
 void wm_screen(struct wm *m, s32 w, s32 h, const struct gfx_fmt *fmt)
 {
     struct wm_window *v;
@@ -592,6 +601,7 @@ void wm_screen(struct wm *m, s32 w, s32 h, const struct gfx_fmt *fmt)
     for (v = m->bottom; v && !same; v = v->above) {    /* pixels of another format mean nothing: cleared */
         struct gfx_surface s;
         void *mem;
+        v->has_ext = 0;
         if (store_new(m, &s, &mem, v->store.w, v->store.h, kind_of(v)) == 0) {
             if (v->store.dev)
                 v->store.dev->sync(&v->store);
@@ -633,7 +643,7 @@ static void draw_window(const struct wm *m, struct gfx_surface *scr, const struc
             gfx_clip(scr, &keep);
         }
     }
-    gfx_blit(scr, c.x, c.y, &w->store, 0, 0, c.w, c.h);
+    gfx_blit(scr, c.x, c.y, w->has_ext ? &w->ext : &w->store, 0, 0, c.w, c.h);
 }
 
 /* What is above every window: the outline (black outside, white inside: it

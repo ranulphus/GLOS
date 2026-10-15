@@ -436,6 +436,27 @@ int win_map(const void *kmem, u32 bytes, u32 *lin)
     return 0;
 }
 
+/* Addresses in the context with nothing behind them yet (an app's view of
+   the card: kernel/gfx/gpu.c maps what is its own), at 80000000h or above
+   as win_map's. Undone by phys_unmap(). 0, or a DPMI error. */
+int lin_reserve(u32 bytes, u32 *lin)
+{
+    struct block *b;
+    u32 n = pages_of(bytes), at;
+    if (!n || !(at = place(n << 12, 0x80000000u, 0)))
+        return 0x8012;
+    if (!(b = kmalloc(sizeof *b)))
+        return 0x8013;
+    b->handle = 0;
+    b->lin = at;
+    b->size = n << 12;
+    b->kind = BK_PHYS;
+    b->level = (u8)dctx->nlv;
+    insert(b);
+    *lin = at;
+    return 0;
+}
+
 int phys_unmap(u32 lin)
 {
     struct block *b;

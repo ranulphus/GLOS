@@ -6,8 +6,12 @@
  * handler of the app's has run (a sleep an interrupt of its own cut short). */
 #include "appint.h"
 #include "desk.h"
+#include "display.h"
 #include "dpmi.h"
+#include "gpu.h"
 #include "kprintf.h"
+#include "mgadisp.h"
+#include "mixer.h"
 #include "timer.h"
 #include "vm.h"
 
@@ -46,21 +50,30 @@ static int done(struct trapframe *tf, int e)
     return 0;
 }
 
+/* What the machine can do (GLOS_FN_VERSION's EBX): the desktop's, even while a session has the screen (a program
+   asking is often that session, and has the desktop again once it is an app). */
+static u32 caps(void)
+{
+    u32 bpp = (u32)display_desktop_bpp();
+    u32 c = mixer_on() || mixer_found() ? GLOS_CAP_AUDIO : 0u;
+    if (!bpp || !mga_desktop_card())
+        return c;
+    return c | GLOS_CAP_GPU | (bpp == 16 ? GLOS_CAP_GLWIN : 0u);
+}
+
+static int app_fn(struct app *a, struct trapframe *tf, u32 fn);
+
 int glos_api(struct trapframe *tf)
 {
     static const char *const why[] = { "?", "already", "nested", "16-bit", "parent", "exclusive", "memory" };
     struct app *a = app_cur();
-    struct glos_window gw;
-    struct glos_event ev;
-    struct glos_rect gr;
-    char title[sizeof gw.title];
-    u32 fn = tf->eax, id, left, i;
+    u32 fn = tf->eax, id;
     int r;
 
     tf->eflags &= ~FL_CF;
     if (fn == GLOS_FN_VERSION) {
         tf->eax = GLOS_API_VERSION;
-        tf->ebx = 0;
+        tf->ebx = caps();
         tf->ecx = GLOS_FN_COUNT;
         return 0;
     }
@@ -78,8 +91,34 @@ int glos_api(struct trapframe *tf)
     }
     if (fn >= GLOS_FN_COUNT)
         return fail(tf, GLOS_E_FUNCTION);
+    if (fn == GLOS_FN_SCREEN && !a) {           /* (1.1: for any program, as GLOS_FN_VERSION: the desktop's size
+                                                   before it asks to be an app, for DOS-GL's windowed sizes) */
+        struct glos_window gw;
+        if (get(tf, tf->ebx, &gw, sizeof gw) != 0)
+            return fail(tf, GLOS_E_ARGUMENT);
+        desk_screen(&gw);
+        return done(tf, put(tf, tf->ebx, &gw, sizeof gw) != 0 ? GLOS_E_ARGUMENT : 0);
+    }
     if (!a)
         return fail(tf, GLOS_E_NOT_APP);
+    if (fn == GLOS_FN_GPU_LOCK)                 /* (not a safe point: the lock is being taken, not left) */
+        return gpu_app_lock(a) == 0 ? done(tf, 0) : fail(tf, GLOS_E_NO_GPU);
+    gpu_safe_begin(a);                          /* the app's turn with the engine may end here */
+    r = app_fn(a, tf, fn);
+    gpu_safe_end(a);
+    return r;
+}
+
+static int app_fn(struct app *a, struct trapframe *tf, u32 fn)
+{
+    struct glos_window gw;
+    struct glos_event ev;
+    struct glos_rect gr;
+    struct glos_gpu gg;
+    char title[sizeof gw.title];
+    u32 left, i, off, bytes;
+    int r;
+
     switch (fn) {
     case GLOS_FN_YIELD:
         thread_yield();
@@ -161,6 +200,42 @@ int glos_api(struct trapframe *tf)
             return fail(tf, GLOS_E_ARGUMENT);
         desk_screen(&gw);
         return done(tf, put(tf, tf->ebx, &gw, sizeof gw) != 0 ? GLOS_E_ARGUMENT : 0);
+    case GLOS_FN_GPU:
+        if (get(tf, tf->ebx, &gg, sizeof gg) != 0)
+            return fail(tf, GLOS_E_ARGUMENT);
+        if ((r = gpu_app_open(a, &gg)) == 0 && put(tf, tf->ebx, &gg, sizeof gg) != 0)
+            r = GLOS_E_ARGUMENT;
+        return done(tf, r);
+    case GLOS_FN_GPU_UNLOCK:
+        gpu_app_unlock(a);
+        return done(tf, 0);
+    case GLOS_FN_VRAM:
+        if (tf->ebx == 1) {
+            if (mga_app_block(a->id, tf->ecx, 1, &off, &bytes) && off == tf->ecx)
+                desk_app_vram_gone(a, off, bytes);      /* (no window may show it after) */
+            return done(tf, gpu_vram_free(a, tf->ecx));
+        }
+        if (tf->ebx != 0)
+            return fail(tf, GLOS_E_ARGUMENT);
+        if ((r = gpu_vram_alloc(a, tf->ecx, tf->edx, tf->esi, &off, &bytes)) != 0)
+            return fail(tf, (u32)r);
+        tf->eax = off;
+        tf->ebx = bytes;
+        return 0;
+    case GLOS_FN_WINVRAM:
+        return done(tf, desk_win_vram(a, tf->ebx, tf->ecx, tf->edx));
+    case GLOS_FN_AUDIO:
+        if (tf->ebx == 1)
+            return done(tf, mixer_close(a, tf->ecx));
+        if (tf->ebx == 2)
+            return done(tf, mixer_volume(a, tf->ecx, tf->edx));
+        if (tf->ebx != 0)
+            return fail(tf, GLOS_E_ARGUMENT);
+        if ((r = mixer_open(a, tf->ecx, tf->edx, tf->esi, &off, &bytes)) != 0)
+            return fail(tf, (u32)r);
+        tf->eax = off;                          /* (its id) */
+        tf->ebx = bytes;                        /* (its header's address in the app) */
+        return 0;
     }
     return 0;
 }

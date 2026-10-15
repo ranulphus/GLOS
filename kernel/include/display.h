@@ -31,4 +31,6 @@ void display_leave(void);                       /* GLOS is leaving: text mode */
 int display_quiet(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, int app);    /* a program's INT 10h while the desktop
                                                    has the screen: 1 if answered here, not by the BIOS */
 
+int display_desktop_bpp(void);                  /* the desktop's depth, the screen its or held by a session; 0: none */
+
 #endif

@@ -30,6 +30,8 @@ int desk_win_resize(struct app *a, u32 id, s32 cw, s32 ch);
 int desk_win_title(struct app *a, u32 id, const char *title);
 int desk_win_pixels(struct app *a, u32 id, struct glos_window *g);
 int desk_win_present(struct app *a, u32 id, const struct glos_rect *r);        /* NULL: all of it */
+int desk_win_vram(struct app *a, u32 id, u32 off, u32 pitch);         /* GLOS_FN_WINVRAM */
+void desk_app_vram_gone(struct app *a, u32 off, u32 bytes);     /* its windows stop showing that block */
 int desk_win_focus(struct app *a, u32 id);
 void desk_screen(struct glos_window *g);
 void desk_app_gone(struct app *a);      /* an app has ended (on its thread): its windows go */

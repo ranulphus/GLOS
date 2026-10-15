@@ -2499,6 +2499,448 @@ def win_case(profile, vcard, card, bits, bits2):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+# (machine, video card, network card): the GPU lock and apps' VRAM (M8 steps B and C)
+GPU_CASES = [("bf6", "g200", "ne2kpci"), ("bf6", "g400", "ne2kpci"), ("bf6", "g450", "ne2kpci"),
+             ("486dx2", "g450pci", "ne2k")]
+
+
+def gpu_case(profile, vcard, card):
+    """The Matrox engine shared with apps (M8 steps B and C; kernel/gfx/gpu.c, tests/dos/gputest.c): GPUTEST draws
+    with the engine from its own copy of the HAL into two buffers of its own VRAM and checks every frame's pixels
+    through its view of VRAM; its window shows the buffers in turn. Two at once, while the desktop moves their
+    windows (the composer takes the engine between their frames): no frame wrong, each had its turn taken from it
+    and resynchronised. A session between frames: the apps' VRAM goes out to memory and comes back, and the frames
+    go on right. A touch of the registers without the lock takes it. An app that keeps the lock in a loop is
+    ended by the watchdog when the desktop needs the engine, and the next app draws right. Blocks of VRAM come
+    back when their apps end. On an 8-bit desktop GLOS says there is no windowed GL, and a window can't show
+    VRAM."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("gpu-" + tag, profile, card, ["--card", vcard,
+        "--file", "build/dj/GPUTEST.EXE=/TEST/GPUTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+        "--cmd", "SERSAY HX-START gpu", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=3000)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    out = os.path.join(ROOT, "out", "gpu-" + tag)
+    app = "C:\\TEST\\GPUTEST.EXE "
+    checks, info = {"listen": agent.listening()}, ""
+    BORDER, TITLE = 1, 18
+
+    def start(cmd):
+        return subprocess.Popen(agent.opts + ["glos@127.0.0.1", cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def finish(p, limit=900):
+        o, e = p.communicate(timeout=limit)
+        return p.returncode, o.decode("latin-1").replace("\r", ""), e.decode("latin-1")
+
+    def display():
+        return agent.ssh("glos display")[1].replace("\r", "")
+
+    def state(want, limit=60):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            line = display()
+            if line.startswith(want):
+                return line
+            time.sleep(0.5)
+        return ""
+
+    def desk():
+        text = agent.ssh("glos desk")[1].replace("\r", "")
+        d = {}
+        for w in re.finditer(r'^window (\d+) (\w+)(?: \w+)? at (-?\d+),(-?\d+) (\d+)x(\d+) "(.*)"$', text, re.M):
+            d[w.group(7)] = {"id": int(w.group(1)), "x": int(w.group(3)), "y": int(w.group(4)), "w": int(w.group(5)),
+                             "h": int(w.group(6))}
+        return d
+
+    def until(name, limit=60):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            if "GPUTEST " + name in desk():
+                return True
+            time.sleep(0.5)
+        return False
+
+    def shot(name):
+        p = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=300)
+        open(os.path.join(out, name + ".png"), "wb").write(p.stdout)
+        return png_rgb(p.stdout) if p.returncode == 0 else None
+
+    def picture(name, tries=6):                 # the app's colour near its client area's bottom (no square there)
+        got = None
+        for i in range(tries):
+            w = desk().get("GPUTEST " + name)
+            pic = shot("%s-%d" % (name, i))
+            if w and pic:
+                x, y = w["x"] + BORDER + w["w"] // 2, w["y"] + BORDER + TITLE + BORDER + w["h"] - 10
+                got = tuple(pic[2][(y * pic[0] + x) * 3:(y * pic[0] + x) * 3 + 3])
+                if all(abs(got[k] - WIN_COLOUR[name][k]) <= 8 for k in range(3)):
+                    return True
+            time.sleep(1)
+        print("    %s window %s: %r, should be %r" % (tag, name, got, WIN_COLOUR[name]))
+        return False
+
+    def ok_line(res, name, closed=False):
+        m = re.search(r"^GPU-OK %s frames=(\d+) bad=(\d+) worst=(\d+) lost=(\d+) resyncs=(\d+)" % name, res[1], re.M)
+        good = bool(m) and res[0] == (40 if closed else 41) and m.group(2) == "0" and int(m.group(1)) >= 10
+        if not good:
+            print("    %s GPUTEST %s: rc=%d %r" % (tag, name, res[0], res[1][-600:]))
+        return (good, int(m.group(4)) if m else 0, int(m.group(1)) if m else 0)
+
+    def free_kb():
+        m = re.search(r" free=(\d+)K", display())
+        return int(m.group(1)) if m else -1
+
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0 and " 640x480x16 " in state("display on mode=")
+        rc, o, _ = agent.ssh(app + "info")
+        checks["info"] = rc == 0 and "caps=3" in o and re.search(r"GPU-INFO device=05(20|21|25) ", o) is not None
+        checks["stat"] = "gpu owner=" in display()
+        free0 = free_kb()
+
+        # Two at once while the desktop moves their windows: every frame right, turns taken from both.
+        a = start(app + "draw A 40 40 40 200 120")
+        b = start(app + "draw B 40 300 60 200 120")
+        checks["up"] = until("A") and until("B")
+        checks["pictures"] = picture("A") and picture("B")
+        for i in range(6):                      # (Alt-F7 and arrows: the composer redraws as each window moves)
+            agent.ssh("glos key 0x38:down,0x41,0x38:up")
+            agent.ssh("glos key %s,0x1C" % ",".join(["0x14D" if i % 2 else "0x14B"] * 4))
+            agent.ssh("glos key 0x38:down,0x0F,0x38:up")
+        ra, rb = finish(a), finish(b)
+        (oka, lost_a, fa), (okb, lost_b, fb) = ok_line(ra, "A"), ok_line(rb, "B")
+        checks["two"] = oka and okb
+        checks["turns-taken"] = lost_a > 0 and lost_b > 0
+        info += " frames=%d,%d lost=%d,%d" % (fa, fb, lost_a, lost_b)
+
+        # A session between frames: their VRAM out and back, the frames still right.
+        a = start(app + "draw A 40 40 40 200 120")
+        checks["a-again"] = until("A")
+        rc, o, _ = agent.ssh("C:\\TEST\\ECHOARGS.EXE beside a GL window")
+        checks["session"] = rc == 7 and bool(state("display on mode="))
+        checks["after-session"] = picture("A")
+        checks["vram-out-in"] = "GLOS-MGA vram-out app=" in agent.log() and "GLOS-MGA vram-in app=" in agent.log()
+        checks["a-right"] = ok_line(finish(a), "A")[0]
+
+        # The registers touched without the lock.
+        rc, o, _ = agent.ssh(app + "raw")
+        checks["raw"] = rc == 0 and re.search(r"^GPU-RAW status=\w+ held=1", o, re.M) is not None
+        checks["faults"] = re.search(r"gpu owner=\S+ turns=\d+ faults=[1-9]", display()) is not None
+
+        # Kept in a loop: the watchdog, when the desktop needs the engine.
+        h = start(app + "hang H")
+        t0 = time.time()
+        while time.time() - t0 < 60 and "owner=app" not in display():
+            time.sleep(0.5)
+        checks["hang-holds"] = "owner=app" in display()
+        shot("hang")                            # (glos shot syncs the engine: the desktop wants it)
+        checks["watchdog"] = h.wait(timeout=300) == 255 and "GLOS-GPU watchdog app=" in agent.log() \
+            and "reason=gpu-watchdog" in agent.log()
+        checks["after-watchdog"] = ok_line(finish(start(app + "draw C 6 300 200 160 100")), "C")[0]
+
+        # Blocks of VRAM come back when their apps end.
+        for i in range(10):
+            checks["vram-%d" % i] = agent.ssh(app + "vram 512")[0] == 0
+        free1 = free_kb()
+        checks["vram-back"] = free0 > 0 and free1 == free0
+        info += " free=%d,%d" % (free0, free1)
+
+        # 8 bits: no windowed GL, and no window shows VRAM.
+        checks["on-8"] = agent.ssh("glos display on 640x480x8")[0] == 0 and " 640x480x8 " in state("display on mode=")
+        rc, o, _ = agent.ssh(app + "info")
+        checks["info-8"] = rc == 0 and "caps=1" in o
+        rc, o, _ = agent.ssh(app + "draw A 3")
+        checks["refused-8"] = rc == 45 and "GPU-ERR A winvram error=8" in o
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["text-at-exit"] = "HX-VMODE bios=03" in text
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("gpu-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+# (machine, video card, network card): GLOS's mixer (M8 step E); it is the desktop's, on any card
+AUDIO_CASES = [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")]
+
+
+def audio_case(profile, vcard, card):
+    """GLOS's mixer (M8 step E; kernel/drv/mixer.c, sb16.c, tests/dos/audtest.c): with the desktop up GLOS plays
+    the SB16 itself; AUDTEST's tone through a stream, then two streams of other rates and channels at once, then
+    one while a session (a DOS program) has the card: no underrun in any while it was fed, the card given to the
+    session and taken back, every tone in 86Box's recording, the card stopped when GLOS leaves (SBCHK)."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("audio-" + tag, profile, card, ["--card", vcard, "--sound", "sb16", "--wav",
+        "--pre", "SET BLASTER=A220 I5 D1 H5 T6",
+        "--file", "build/dj/AUDTEST.EXE=/TEST/AUDTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+        "--cmd", "SERSAY HX-START audio", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "SBCHK", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    app = "C:\\TEST\\AUDTEST.EXE "
+    checks, info = {"listen": agent.listening()}, ""
+
+    def start(cmd):
+        return subprocess.Popen(agent.opts + ["glos@127.0.0.1", cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def finish(p, limit=600):
+        o, e = p.communicate(timeout=limit)
+        return p.returncode, o.decode("latin-1").replace("\r", "")
+
+    def played(res, name):
+        m = re.search(r"^AUD-OK %s periods=(\d+) underruns=(\d+)" % name, res[1], re.M)
+        good = res[0] == 41 and bool(m) and int(m.group(1)) >= 100 and m.group(2) == "0"
+        if not good:
+            print("    %s AUDTEST %s: rc=%d %r" % (tag, name, res[0], res[1][-400:]))
+        return good, (int(m.group(1)) if m else 0)
+
+    try:
+        checks["idle"] = agent.ssh("glos audio")[1].startswith("audio idle ")
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and not agent.ssh("glos audio")[1].startswith("audio on "):
+            time.sleep(0.5)
+        checks["mixer"] = agent.ssh("glos audio")[1].startswith("audio on rate=22050 ")
+        rc, o, _ = agent.ssh(app + "info")
+        checks["caps"] = rc == 0 and re.search(r"caps=[4-7]\b", o) is not None
+        ok, n = played(finish(start(app + "tone A 440 6")), "A")
+        checks["one"] = ok
+        b, c = start(app + "tone B 1000 6 44100 2 32768"), start(app + "tone C 784 6 11025 1 8192")
+        checks["two"] = played(finish(b), "B")[0] and played(finish(c), "C")[0]
+        d = start(app + "tone D 523 20")
+        time.sleep(4)
+        rc, o, _ = agent.ssh("C:\\TEST\\ECHOARGS.EXE beside the mixer")
+        checks["session"] = rc == 7
+        checks["after-session"] = played(finish(d), "D")[0]
+        log = agent.log()
+        checks["handed-over"] = log.count("GLOS-SB start") >= 2 and "GLOS-SB stop" in log
+        info += " periods=%d" % n
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    wav = os.path.join(ROOT, "out", "audio-" + tag, "audio.wav")
+    checks["recorded"] = os.path.exists(wav) and subprocess.run(
+        [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440", "--tone", "1000",
+         "--tone", "784", "--tone", "523"], capture_output=True).returncode == 0
+    checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("audio-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+# (machine, video card, network card, desktop): windowed DOS-GL (M8 step D)
+GLWIN_CASES = [("bf6", "g200", "ne2kpci", "800x600x16"), ("bf6", "g400", "ne2kpci", "1024x768x16"),
+               ("bf6", "g450", "ne2kpci", "1024x768x16")]
+
+
+def glwin_case(profile, vcard, card, desk):
+    """Windowed DOS-GL (M8 step D; DOS-GL's src/dgl/glos.c, kernel/gfx/gpu.c): DOS-GL's conformance programs
+    (build/dosgl/conform, from DOSGL_DIR: make dosgl-inputs), the same EXEs, run full-screen on plain DOS and then
+    each in a window on a GLOS desktop, which it opens itself; every frame each writes (glReadPixels of its own
+    buffer) identical between the two. Under GLOS each is an app with a window and its turns with the engine."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    src = os.path.join(ROOT, "build/dosgl/conform")
+    tests = sorted(f for f in os.listdir(src) if re.match(r"T\d\d\.EXE$", f)) if os.path.isdir(src) else []
+    if os.environ.get("GLWIN_TESTS"):            # e.g. GLWIN_TESTS=T01,T05
+        tests = [t for t in tests if t[:-4] in os.environ["GLWIN_TESTS"].split(",")]
+    files = []
+    for t in tests:
+        files += ["--file", "%s=/TEST/%s" % (os.path.join(src, t), t)]
+    checks, info = {"tests": bool(tests)}, " tests=%d" % len(tests)
+    # Full-screen, on plain DOS.
+    dos = []
+    for t in tests:
+        dos += ["--cmd", "C:\\TEST\\%s --noexit" % t]
+    name = "glwin-dos-" + tag
+    run(name, ["--machine", profile, "--card", vcard, "--timeout", "2400", "--idle", "240"] + files
+        + ["--cmd", "SERSAY HX-START glwin"] + dos + ["--cmd", "SERSAY HX-DONE 0"])
+    dos_log = open(os.path.join(ROOT, "out", name, "serial.log"), "rb").read().decode("latin-1") \
+        if os.path.exists(os.path.join(ROOT, "out", name, "serial.log")) else ""
+    checks["dos-ran"] = dos_log.count("HX-DONE 0") == len(tests) + 1
+    # Windowed, on GLOS's desktop.
+    agent = Agent("glwin-" + tag, profile, card, ["--card", vcard] + files + [
+        "--cmd", "SERSAY HX-START glwin", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=3600)
+    checks["listen"] = agent.listening()
+    try:
+        checks["on"] = agent.ssh("glos display on " + desk)[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and not agent.ssh("glos display")[1].startswith("display on mode="):
+            time.sleep(0.5)
+        bad_rc = []
+        for t in tests:
+            rc, o, e = agent.ssh("C:\\TEST\\%s --noexit" % t, timeout=900)
+            if rc != 0:
+                bad_rc.append("%s:%d" % (t[:-4], rc))
+        checks["windowed-ran"] = not bad_rc
+        if bad_rc:
+            print("    %s windowed: %s" % (tag, " ".join(bad_rc)))
+        gpu = agent.ssh("glos display")[1]
+        m = re.search(r"gpu owner=\S+ turns=(\d+)", gpu)
+        checks["turns"] = bool(m) and int(m.group(1)) > len(tests)
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["apps"] = text.count("GLOS-APP start id=") >= len(tests)
+    checks["windowed-done"] = text.count("HX-DONE 0") == len(tests) + 1
+    # The frames: the same bytes.
+    a_dir, b_dir = os.path.join(ROOT, "out", name, "files"), os.path.join(ROOT, "out", "glwin-" + tag, "files")
+    frames = sorted(f for f in os.listdir(a_dir) if f.upper().endswith(".PPM")) if os.path.isdir(a_dir) else []
+    differ = [f for f in frames if not os.path.exists(os.path.join(b_dir, f))
+              or open(os.path.join(a_dir, f), "rb").read() != open(os.path.join(b_dir, f), "rb").read()]
+    checks["frames"] = bool(frames) and not differ
+    info += " frames=%d" % len(frames)
+    if differ:
+        print("    %s frames that differ: %s" % (tag, " ".join(differ)))
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("glwin-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+# (machine, video card, network card, desktop): SDL3 windowed (M8 step F)
+SDLWIN_CASES = [("bf6", "g450", "ne2kpci", "800x600x16"), ("bf6", "g200", "ne2kpci", "800x600x16")]
+
+
+def sdlwin_case(profile, vcard, card, desk):
+    """SDL3 windowed (M8 step F; DOS-GL's SDL patches 0008 and 0009, build/dosgl/sdl from DOSGL_DIR): DOS-GL's SDL
+    examples on a GLOS desktop with the SB16 the mixer's. SDLINFO finds SDL's glos video and audio drivers; SDLKEYS
+    gets the keys typed into its window; SDLBEEP plays through the mixer with no underrun, also with a main thread
+    that yields once in 37 ms; SDLGL's 150th frame, drawn through SDL in a window, equals TEXCUBE's in a window and
+    TEXCUBE's full-screen on plain DOS (DOS-GL's snapshots, DGL_SNAP in GLOS.CFG profiles); SDLGL makes a window in
+    each size SDL lists; SDLCRASH dies and GLOS ends it, its stream and window gone, and the next program plays;
+    DOS-GL's exit() inside a swap ends the app cleanly."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    src = os.path.join(ROOT, "build/dosgl/sdl")
+    exes = ["SDLINFO", "SDLKEYS", "SDLBEEP", "SDLGL", "SDLCRASH", "TEXCUBE"]
+    out = os.path.join(ROOT, "out", "sdlwin-" + tag)
+    os.makedirs(out, exist_ok=True)
+    files = []
+    for e in exes:
+        files += ["--file", "%s=/TEST/%s.EXE" % (os.path.join(src, e + ".EXE"), e)]
+    files += ["--file", "%s=/TEST/SDLGLX.EXE" % os.path.join(src, "SDLGL.EXE")]
+    cfg = os.path.join(out, "GLOS.CFG")
+    with open(cfg, "w") as f:
+        f.write("[program SDLGL.EXE]\nenv = DGL_SNAP=150\nenv = DGL_STATS=1\n"
+                "[program TEXCUBE.EXE]\nenv = DGL_SNAP=150\n"
+                "[program SDLGLX.EXE]\nenv = DGL_EXIT_AFTER=30\n")
+    checks, info = {"inputs": all(os.path.exists(os.path.join(src, e + ".EXE")) for e in exes)}, ""
+    blaster = "SET BLASTER=A220 I5 D1 H5 T6"
+    # TEXCUBE full-screen on plain DOS: the reference frame.
+    name = "sdlwin-dos-" + tag
+    run(name, ["--machine", profile, "--card", vcard, "--timeout", "900", "--idle", "120",
+               "--file", "%s=/TEST/TEXCUBE.EXE" % os.path.join(src, "TEXCUBE.EXE"), "--pre", "SET DGL_SNAP=150",
+               "--cmd", "SERSAY HX-START sdlwin", "--cmd", "C:\\TEST\\TEXCUBE.EXE --frames 150 --noexit",
+               "--cmd", "SERSAY HX-DONE 0"])
+    ref = os.path.join(ROOT, "out", name, "files", "F00150.PPM")
+    checks["reference"] = os.path.exists(ref)
+    agent = Agent("sdlwin-" + tag, profile, card, ["--card", vcard, "--sound", "sb16", "--wav", "--pre", blaster,
+        "--file", cfg + "=/TEST/GLOS.CFG"] + files + [
+        "--cmd", "SERSAY HX-START sdlwin", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "SBCHK", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=3600)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    checks["listen"] = agent.listening()
+
+    def start(cmd):
+        return subprocess.Popen(agent.opts + ["glos@127.0.0.1", cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def since(mark):                            # the log from a point on
+        return agent.log()[mark:]
+
+    def fetch(remote, local):
+        p = subprocess.run(["scp", "-q", "-P", str(agent.port)] + agent.opts[agent.opts.index("-o"):] +
+                           ["glos@127.0.0.1:" + remote, local], capture_output=True, timeout=300)
+        return p.returncode == 0 and os.path.exists(local)
+
+    try:
+        checks["on"] = agent.ssh("glos display on " + desk)[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and not agent.ssh("glos audio")[1].startswith("audio on "):
+            time.sleep(0.5)
+        # info
+        m = len(agent.log())
+        rc, o, _ = agent.ssh("C:\\TEST\\SDLINFO.EXE --noexit")
+        t = since(m)
+        checks["info"] = rc == 0 and "drivers video=glos audio=glos" in t and "HX-TEST modes PASS" in t
+        # keys
+        m = len(agent.log())
+        k = start("C:\\TEST\\SDLKEYS.EXE --noexit")
+        t0 = time.time()
+        while time.time() - t0 < 120 and "HX-TEST ready" not in since(m):
+            time.sleep(0.5)
+        time.sleep(1)
+        for key in ("0x1C", "0x1E", "0x01"):
+            agent.ssh("glos key " + key)
+        k.wait(timeout=120)
+        checks["keys"] = "HX-TEST escape PASS" in since(m)
+        # beep, busy
+        for what, args in (("beep", ""), ("busy", " --busy 37")):
+            m = len(agent.log())
+            rc, o, _ = agent.ssh("C:\\TEST\\SDLBEEP.EXE%s --noexit" % args)
+            u = re.search(r"HX-TEST underruns (\w+) (\d+) of (\d+)", since(m))
+            checks[what] = rc == 0 and bool(u) and u.group(1) == "PASS" and int(u.group(3)) > 0
+            info += " %s=%s" % (what, "%s/%s" % (u.group(2), u.group(3)) if u else "?")
+        # gl: TEXCUBE and SDLGL windowed, their 150th frames
+        a, b = os.path.join(out, "texcube-150.ppm"), os.path.join(out, "sdlgl-150.ppm")
+        rc1 = agent.ssh("C:\\TEST\\TEXCUBE.EXE --frames 150 --noexit", timeout=900)[0]
+        got_a = fetch("C:/OUT/F00150.PPM", a)
+        agent.ssh("del C:\\OUT\\F00150.PPM")
+        m = len(agent.log())
+        rc2 = agent.ssh("C:\\TEST\\SDLGL.EXE --frames 150 --noexit", timeout=900)[0]
+        got_b = fetch("C:/OUT/F00150.PPM", b)
+        hooks = re.findall(r"hooks=(\d+)", since(m))
+        same = got_a and got_b and open(a, "rb").read() == open(b, "rb").read()
+        checks["gl"] = rc1 == 0 and rc2 == 0 and same and bool(hooks) and int(hooks[-1]) > 0
+        checks["gl-as-dos"] = same and os.path.exists(ref) and open(ref, "rb").read() == open(a, "rb").read()
+        # modes
+        m = len(agent.log())
+        rc, o, _ = agent.ssh("C:\\TEST\\SDLGL.EXE --modes --noexit", timeout=900)
+        mm = re.search(r"HX-TEST modes (\w+) (.*)", since(m))
+        checks["modes"] = rc == 0 and bool(mm) and mm.group(1) == "PASS"
+        info += " modes=%s" % (mm.group(2).strip() if mm else "?")
+        # crash, then a program that plays
+        m = len(agent.log())
+        rc, o, _ = agent.ssh("C:\\TEST\\SDLCRASH.EXE --noexit", timeout=600)
+        checks["crash-ended"] = "GLOS-APP" in since(m) and ("GLOS-CRASH" in since(m) or "reason=crash" in since(m)
+                                                             or rc != 0)
+        checks["crash-stream-gone"] = "stream " not in agent.ssh("glos audio")[1]
+        m = len(agent.log())
+        rc, o, _ = agent.ssh("C:\\TEST\\SDLBEEP.EXE --noexit")
+        checks["after-crash"] = rc == 0 and "HX-TEST underruns PASS" in since(m)
+        # exit() inside a swap
+        m = len(agent.log())
+        rc, o, _ = agent.ssh("C:\\TEST\\SDLGLX.EXE --frames 300 --noexit", timeout=600)
+        checks["exit"] = "DGL-EXIT frames=30" in since(m) and "stream " not in agent.ssh("glos audio")[1]
+        checks["desk-left"] = not re.search(r'"(sdlgl|sdlcrash|sdlkeys)"', agent.ssh("glos desk")[1])
+        checks["glos-exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    wav = os.path.join(ROOT, "out", "sdlwin-" + tag, "audio.wav")
+    checks["recorded"] = os.path.exists(wav) and subprocess.run(
+        [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440"],
+        capture_output=True).returncode == 0
+    checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("sdlwin-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 # (machine, video card, network card, the DOS mouse driver unloaded before GLOS starts)
 WIN_PHYS_CASES = [("bf6", "vbe", "ne2kpci", False), ("486dx2", "vbe", "ne2k", True)]
 
@@ -2847,7 +3289,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -2873,6 +3315,24 @@ def main():
         cases = [(win_case,) + c for c in WIN_CASES if not a.profile or c[0] in a.profile] \
             + [(win_phys_case,) + c for c in WIN_PHYS_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(lambda fn, *c: fn(*c), cases, a.jobs)) else 1
+    if a.suite == "sdlwin":
+        cases = [c for c in SDLWIN_CASES if not a.profile or c[0] in a.profile]
+        if os.environ.get("SDLWIN_ONLY"):
+            cases = [c for c in cases if c[1] in os.environ["SDLWIN_ONLY"].split(",")]
+        return 0 if all(r[1] for r in matrix(sdlwin_case, cases, a.jobs)) else 1
+    if a.suite == "glwin":
+        cases = [c for c in GLWIN_CASES if not a.profile or c[0] in a.profile]
+        if os.environ.get("GLWIN_ONLY"):        # e.g. GLWIN_ONLY=g200
+            cases = [c for c in cases if c[1] in os.environ["GLWIN_ONLY"].split(",")]
+        return 0 if all(r[1] for r in matrix(glwin_case, cases, a.jobs)) else 1
+    if a.suite == "audio":
+        cases = [c for c in AUDIO_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(audio_case, cases, a.jobs)) else 1
+    if a.suite == "gpu":
+        cases = [c for c in GPU_CASES if not a.profile or c[0] in a.profile]
+        if os.environ.get("GPU_ONLY"):          # e.g. GPU_ONLY=g200
+            cases = [c for c in cases if c[1] in os.environ["GPU_ONLY"].split(",")]
+        return 0 if all(r[1] for r in matrix(gpu_case, cases, a.jobs)) else 1
     if a.suite == "display":
         cases = [c for c in DISPLAY_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(display_case, cases, a.jobs)) else 1

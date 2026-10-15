@@ -27,6 +27,9 @@ struct wm_window {
     struct gfx_rect frame;              /* on the screen, title bar and border included */
     struct gfx_surface store;           /* the client area's pixels, in the screen's format */
     void *mem;                          /* ... and their memory, from wm_host.alloc */
+    struct gfx_surface ext;             /* what it shows instead, if has_ext: pixels that aren't the manager's (an
+                                           app's in the card's memory, M8), of the client area's size and format */
+    u8 has_ext;
     char title[WM_TITLE_MAX];
 };
 
@@ -88,6 +91,8 @@ int wm_resize(struct wm *m, struct wm_window *w, s32 cw, s32 ch);       /* its p
 void wm_raise(struct wm *m, struct wm_window *w);       /* above the others of its kind */
 void wm_set_focus(struct wm *m, struct wm_window *w);   /* (and raised); NULL: none */
 void wm_title(struct wm *m, struct wm_window *w, const char *title);
+void wm_ext(struct wm *m, struct wm_window *w, const struct gfx_surface *s);   /* it shows s from now on (NULL: its
+                                                   own pixels again); dropped when its size or the screen's format changes */
 void wm_damage(struct wm *m, struct wm_window *w, const struct gfx_rect *r);    /* its owner drew there (client
                                                                                     coordinates; NULL: all of it) */
 void wm_client(const struct wm *m, const struct wm_window *w, struct gfx_rect *out);    /* its client area on the screen */

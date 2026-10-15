@@ -21,6 +21,7 @@
 #include "session.h"
 #include "io.h"
 #include "kprintf.h"
+#include "mixer.h"
 #include "mm.h"
 #include "nic.h"
 #include "sched.h"
@@ -283,6 +284,16 @@ void vm_claim_irq(int irq, void (*fn)(struct trapframe *))
 {
     kernel_lines |= (u16)(1u << irq);
     set_irq_handler(irq, fn);
+    vm_sync_mask();
+}
+
+static void vm_irq_line(struct trapframe *tf);
+
+void vm_unclaim_irq(int irq)
+{
+    kernel_lines &= (u16)~(1u << irq);
+    kernel_masked &= (u16)~(1u << irq);
+    set_irq_handler(irq, vm_irq_line);
     vm_sync_mask();
 }
 

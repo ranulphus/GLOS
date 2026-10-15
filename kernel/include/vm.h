@@ -111,6 +111,7 @@ void vm_set_a20(int on);
 void vm_sync_mask(void);                        /* the physical IMR from the virtual one */
 void vm_direct(int on);                         /* a direct-mode session begins (1) or ends (0) */
 void vm_claim_irq(int irq, void (*fn)(struct trapframe *));    /* the line becomes the kernel's */
+void vm_unclaim_irq(int irq);                   /* ... and the system VM's again (the SB16's, for a session) */
 void vm_kmask(int irq, int masked);             /* a kernel line masked while its driver works */
 void vm_reset_req(const char *source);
 u16 vm_current_psp(void);

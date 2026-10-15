@@ -121,7 +121,12 @@ struct bootinfo {
     bi_u32 detached_off;                        /* M6: where the stub goes on when the program it EXECed became an app */
     bi_u32 display_w, display_h, display_bpp;   /* M6: GLOS.CFG's [display] mode = WxHxBPP; 0: no desktop (text mode) */
     bi_u32 display_flags;                       /* M7: BI_DISPLAY_ */
+    bi_u32 gpu_watchdog_ms;                     /* M8: [display] gpu_watchdog = MS (0: 500 ms; FFFFFFFFh: off) */
+    bi_u32 sb_irq, sb_dma8, sb_dma16;           /* M8: BLASTER's (or [sound] blaster's) I, D and H; FFh: not given */
+    bi_u32 sound_rate;                          /* M8: [sound] rate = HZ (0: 22050) */
+    bi_u32 sound_flags;                         /* M8: BI_SOUND_ */
 };
+#define BI_SOUND_OFF 1u                         /* [sound] mixer = off: GLOS leaves the Sound Blaster to programs */
 #define BI_DISPLAY_NOACCEL 1u                   /* [display] accel = off: the CPU draws the desktop, on a Matrox card too */
 
 /* The resident stub's data (loader/stub.asm), at offset 0 of its segment.

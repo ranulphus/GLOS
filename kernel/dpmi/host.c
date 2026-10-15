@@ -48,6 +48,7 @@
 #include "dpmi.h"
 #include "gdbprog.h"
 #include "io.h"
+#include "gpu.h"
 #include "kprintf.h"
 #include "mm.h"
 #include "sched.h"
@@ -680,6 +681,8 @@ void dpmi_trap(struct trapframe *tf)
     }
     if (v == 14 && lin_fault(read_cr2()))
         return;                                 /* a page of its memory backed on its first touch */
+    if (v == 14 && app_cur() && gpu_fault(app_cur(), read_cr2()))
+        return;                                 /* the card's registers or its VRAM (M8): its own now, and again */
     if (v == 14)
         dctx->cr2 = read_cr2();                 /* before anything else can fault */
     if (v == 1)

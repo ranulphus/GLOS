@@ -35,10 +35,12 @@
 
 #include "glos/bootinfo.h"
 #include "display.h"
+#include "gpu.h"
 #include "dpmi.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mgadisp.h"
+#include "mixer.h"
 #include "mm.h"
 #include "vm.h"
 
@@ -231,6 +233,8 @@ static int mode_set(void)
     vkbc_desk(!d.held);
     kprintf("GLOS-DISPLAY on mode=%x %ux%ux%u pitch=%u lfb=%08x rgb=%u.%u.%u dac=%u\n", d.mode, d.w, d.h, d.bpp, pitch,
             d.phys, f.rsize, f.gsize, f.bsize, f.bpp == 8 ? d.dac : 0);
+    if (!d.held)
+        mixer_desktop(1);                       /* (the mixer is the desktop's: M8) */
     return 0;
 }
 
@@ -265,6 +269,7 @@ void display_init(const struct bootinfo *bi)
     if (!d.paint)
         d.paint = d.home = blank;
     mga_display_init(bi);
+    gpu_init(!bi->gpu_watchdog_ms ? 500 : bi->gpu_watchdog_ms == 0xFFFFFFFFu ? 0 : bi->gpu_watchdog_ms);
     if (bi->display_w) {
         d.w = (u16)bi->display_w;
         d.h = (u16)bi->display_h;
@@ -300,6 +305,7 @@ void display_vm_turn(void)
     d.ask = 0;
     leaving();
     if (what == DISPLAY_OFF) {
+        mixer_desktop(0);
         mga_display_down();
         if (d.on) {
             d.on = 0;
@@ -327,11 +333,14 @@ void display_vm_turn(void)
     d.paint(&d.fb);
 }
 
+int display_desktop_bpp(void) { return d.on ? d.bpp : 0; }
+
 void display_session(int begin)
 {
     if (!d.on)
         return;
     if (begin && !d.held) {
+        mixer_desktop(0);                       /* (the session's: the Sound Blaster too) */
         leaving();
         mga_display_down();
         d.held = 1;
@@ -349,6 +358,7 @@ void display_session(int begin)
 void display_leave(void)
 {
     int was = d.on && !d.held;
+    mixer_desktop(0);
     leaving();
     mga_display_down();
     d.on = 0;
@@ -409,5 +419,9 @@ u32 display_stat(char *buf, u32 max)
         n = (u32)ksnprintf(buf, max, "display %s mode=%x %ux%ux%u pitch=%u lfb=%08x rgb=%u.%u.%u dac=%u\n",
                            d.held ? "held" : "on", d.mode, d.w, d.h, d.bpp, d.fb.pitch, d.phys, d.fb.fmt.rsize,
                            d.fb.fmt.gsize, d.fb.fmt.bsize, d.fb.fmt.bpp == 8 ? d.dac : 0);
-    return n < max ? n + mga_display_stat(buf + n, max - n) : n;
+    if (n < max)
+        n += mga_display_stat(buf + n, max - n);
+    if (n < max && mga_display_on())
+        n += gpu_stat(buf + n, max - n);
+    return n;
 }

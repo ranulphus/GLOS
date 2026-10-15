@@ -21,6 +21,7 @@
 #include "display.h"
 #include "io.h"
 #include "kprintf.h"
+#include "mixer.h"
 #include "mm.h"
 #include "dos.h"
 #include "dpmi.h"
@@ -814,6 +815,11 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         } else {
             ssh_chan_exit(ch, 0);
         }
+    } else if (!strcmp(cmd, "glos audio")) {
+        /* glos audio: the mixer and its streams (M8) */
+        char b[512];
+        ssh_chan_write(ch, 0, (const uint8_t *)b, mixer_stat(b, sizeof b));
+        ssh_chan_exit(ch, 0);
     } else if (!strcmp(cmd, "glos desk") || !strcmp(cmd, "glos desk demo") || !strcmp(cmd, "glos desk clear")) {
         /* glos desk [demo | clear]: the desktop's windows; the demonstration's put up, or taken down */
         if (cmd[9]) {

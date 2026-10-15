@@ -5,6 +5,7 @@
 #include "glos/api.h"
 #include "app.h"
 #include "dpmi.h"
+#include "gpu.h"
 #include "vpic.h"
 
 #define MAX_APPS 16
@@ -85,6 +86,11 @@ struct app {
     u8 kb_shift;                                /* the BIOS's shift flags: right shift, left shift, Ctrl, Alt */
     s32 ms_x, ms_y, ms_dx, ms_dy;               /* the mouse, for INT 33h: where, and how far since last asked */
     u8 ms_buttons;
+    struct gpu_app gpu;                         /* its use of the Matrox card (kernel/gfx/gpu.c, M8) */
+    struct {                                    /* COM1 as it sees it (dev.c, M8): its lines into GLOS's log */
+        char line[160];
+        u8 len, lcr, ier, mcr, scr;
+    } com;
 };
 
 /* dev.c: its keyboard and mouse as a DOS program reads them. */

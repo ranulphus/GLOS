@@ -48,6 +48,7 @@ void mm_space_enter(u32 pd_phys);       /* CR3; 0: the kernel's own */
 int mm_map(u32 lin, u32 phys, u32 flags);       /* one page in the current space; -1 without memory */
 u32 mm_unmap(u32 lin);                  /* the frame that was there, or 0 */
 u32 mm_lookup(u32 lin);                 /* the PTE, 0 if none */
+int mm_space_set(u32 pd_phys, u32 lin, u32 pte);       /* a page's entry in any space; -1 without a page table */
 int mm_lazy(u32 lin);                   /* not present, MM_LAZY | W | U: backed on the first touch; -1 without memory */
 void *mm_tramp_page(u32 lin);           /* a ring-3 read-only page in PDE 0's table, for the host to fill */
 

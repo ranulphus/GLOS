@@ -355,6 +355,8 @@ static int flag_arg(const char *a)
 
 static void opt_str(char *dst, unsigned n, const char *v);
 
+static char cfg_blaster[48];                    /* [sound] blaster = ..., in place of the environment's BLASTER */
+
 static int glos_main(int argc, char **argv)
 {
     struct SREGS sr;
@@ -520,12 +522,17 @@ static int glos_main(int argc, char **argv)
     bi.bp_xms_off = stub_off(glos_bp_xms);
     bi.kill_off = stub_off(glos_kill);
     bi.kill_sp = stub_off(glos_kill_top);
-    {                                                   /* BLASTER=A220 ...: the Sound Blaster's port */
-        const char *b = getenv("BLASTER");
-        for (; b && *b; b++)
-            if ((*b == 'A' || *b == 'a') && (b == getenv("BLASTER") || b[-1] == ' ')) {
-                bi.sb_port = strtoul(b + 1, 0, 16);
-                break;
+    {                                                   /* BLASTER=A220 I5 D1 H5 ...: the Sound Blaster */
+        const char *b0 = cfg_blaster[0] ? (const char *)cfg_blaster : (const char *)getenv("BLASTER"), *b;
+        bi.sb_irq = bi.sb_dma8 = bi.sb_dma16 = 0xFF;
+        for (b = b0; b && *b; b++)
+            if (b == b0 || b[-1] == ' ') {
+                switch (*b) {
+                case 'A': case 'a': bi.sb_port = strtoul(b + 1, 0, 16); break;
+                case 'I': case 'i': bi.sb_irq = strtoul(b + 1, 0, 10); break;
+                case 'D': case 'd': bi.sb_dma8 = strtoul(b + 1, 0, 10); break;
+                case 'H': case 'h': bi.sb_dma16 = strtoul(b + 1, 0, 10); break;
+                }
             }
     }
     bi.bp_dpmi_off = stub_off(glos_bp_dpmi);
@@ -645,13 +652,13 @@ static void profile_env(struct bi_profile *p, const char *v)
 }
 
 /* GLOS.CFG next to GLOS.EXE: [program NAME.EXT] sections (profiles), [net],
-   [display], and as the shell the [shell] section; key = value lines. */
+   [display], [sound], and as the shell the [shell] section; key = value lines. */
 static void read_cfg(const char *argv0, int shell_keys)
 {
     char line[160], path[128], *k, *v, *e;
     const char *slash = strrchr(argv0, '\\');
     size_t n = slash ? (size_t)(slash - argv0 + 1) : 0;
-    int in_shell = 0, in_net = 0, in_display = 0;
+    int in_shell = 0, in_net = 0, in_display = 0, in_sound = 0;
     struct bi_profile *prof = NULL;
     FILE *f;
 
@@ -667,6 +674,7 @@ static void read_cfg(const char *argv0, int shell_keys)
             in_shell = shell_keys && !strnicmp(k, "[shell]", 7);
             in_net = !strnicmp(k, "[net]", 5);
             in_display = !strnicmp(k, "[display]", 9);
+            in_sound = !strnicmp(k, "[sound]", 7);
             prof = NULL;
             if (!strnicmp(k, "[program", 8) && (e = strchr(k, ']')) != NULL) {
                 *e = 0;
@@ -676,7 +684,7 @@ static void read_cfg(const char *argv0, int shell_keys)
             }
             continue;
         }
-        if ((!in_shell && !prof && !in_net && !in_display) || !(v = strchr(k, '=')))
+        if ((!in_shell && !prof && !in_net && !in_display && !in_sound) || !(v = strchr(k, '=')))
             continue;
         for (e = v; e > k && (e[-1] == ' ' || e[-1] == '\t'); e--) ;
         *e = 0;
@@ -685,6 +693,8 @@ static void read_cfg(const char *argv0, int shell_keys)
         *e = 0;
         if (in_display) {                       /* mode = WIDTHxHEIGHTxBITS: the desktop's (M6); none: text mode */
             unsigned w, h, b;                   /* accel = on | off: a Matrox card's drawing engine (M7) */
+                                                /* gpu_watchdog = MS | off: how long the desktop waits for an app's
+                                                   turn with the engine before ending it (M8; 500) */
             if (!stricmp(k, "mode") && sscanf(v, "%ux%ux%u", &w, &h, &b) == 3 && w >= 320 && w <= 1600 && h >= 200
                 && h <= 1200 && (b == 8 || b == 16 || b == 32)) {
                 bi.display_w = w;
@@ -693,9 +703,23 @@ static void read_cfg(const char *argv0, int shell_keys)
             } else if (!stricmp(k, "accel") && (!stricmp(v, "on") || !stricmp(v, "off"))) {
                 bi.display_flags = !stricmp(v, "off") ? bi.display_flags | BI_DISPLAY_NOACCEL
                                                       : bi.display_flags & ~BI_DISPLAY_NOACCEL;
+            } else if (!stricmp(k, "gpu_watchdog") && (!stricmp(v, "off") || (atol(v) >= 50 && atol(v) <= 60000))) {
+                bi.gpu_watchdog_ms = !stricmp(v, "off") ? 0xFFFFFFFFul : (unsigned long)atol(v);   /* (M8) */
             } else {
                 say("GLOS-WARN cfg-key section=display key=%s", k);
             }
+            continue;
+        }
+        if (in_sound) {                         /* (M8) mixer = on | off: GLOS drives the SB16 and mixes the apps'
+                                                   sound; rate = 11025 | 22050 | 44100; blaster = A220 I5 D1 H5 */
+            if (!stricmp(k, "mixer") && (!stricmp(v, "on") || !stricmp(v, "off")))
+                bi.sound_flags = !stricmp(v, "off") ? bi.sound_flags | BI_SOUND_OFF : bi.sound_flags & ~BI_SOUND_OFF;
+            else if (!stricmp(k, "rate") && (atol(v) == 11025 || atol(v) == 22050 || atol(v) == 44100))
+                bi.sound_rate = (unsigned long)atol(v);
+            else if (!stricmp(k, "blaster") && strlen(v) < sizeof cfg_blaster)
+                strcpy(cfg_blaster, v);
+            else
+                say("GLOS-WARN cfg-key section=sound key=%s", k);
             continue;
         }
         if (in_net) {                           /* hostname = NAME: for mDNS (NAME.local) and DHCP */

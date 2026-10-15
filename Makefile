@@ -185,7 +185,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c kernel/app/dev.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c
+         kernel/app/app.c kernel/app/api.c kernel/app/dev.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS))
 # The Matrox HAL (third_party/mgahal: MGA-Glide's, make sync-hal), the part
 # without FPU code, with its port for this kernel (docs/milestones-m7.md step C).
@@ -195,7 +195,7 @@ HAL_OBJS := $(patsubst $(MGAHAL)/%.c,build/mgahal/%.o,$(HAL_SRCS))
 build/mgahal/%.o: $(MGAHAL)/%.c $(wildcard $(MGAHAL)/include/mga/*.h kernel/include/*.h)
 	@mkdir -p $(dir $@)
 	$(Q)echo "  HAL     $<"
-	$(Q)$(HOST_CC) $(KCFLAGS) -DMGA_GLOS=1 -c -o $@ $<
+	$(Q)$(HOST_CC) $(KCFLAGS) -DMGA_GLOS=1 -MMD -MP -c -o $@ $<
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
 LWIP_SRCS := $(wildcard third_party/lwip/src/core/*.c third_party/lwip/src/core/ipv4/*.c \
@@ -209,7 +209,9 @@ build/lwip/%.o: third_party/lwip/src/%.c $(wildcard kernel/net/port/*.h kernel/n
 build/kernel/%.o: kernel/% $(wildcard kernel/include/*.h include/glos/*.h)
 	@mkdir -p $(dir $@)
 	$(Q)echo "  KCC     $<"
-	$(Q)$(HOST_CC) $(KCFLAGS) -c -o $@ $<
+	$(Q)$(HOST_CC) $(KCFLAGS) -MMD -MP -c -o $@ $<
+# (each object's headers, local ones too: kernel/app/appint.h, kernel/wm/deskint.h, the HAL's)
+-include $(KOBJS:.o=.d) $(HAL_OBJS:.o=.d)
 TINYSSH_OBJS := $(patsubst third_party/tinyssh/%.c,build/tinyssh/%.o,$(TINYSSH_SRCS))
 build/tinyssh/%.o: third_party/tinyssh/%.c
 	@mkdir -p $(dir $@)
@@ -282,6 +284,27 @@ loopa-desk: all dos-tests host-test check-deps
 # Windows, input and the API (M6 steps E and F): WINTESTs on the desktop, driven with glos key and glos mouse.
 loopa-win: all dos-tests build/dj/WINTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py win -j $(JOBS)
+# The GPU lock and apps' VRAM (M8 steps B and C): GPUTESTs drawing with the engine beside the desktop.
+loopa-gpu: all dos-tests build/dj/GPUTEST.EXE check-deps
+	$(Q)python3 tests/loopa/jobs.py gpu -j $(JOBS)
+# GLOS's mixer (M8 step E): AUDTESTs through the SB16, recorded.
+loopa-audio: all dos-tests build/dj/AUDTEST.EXE check-deps
+	$(Q)python3 tests/loopa/jobs.py audio -j $(JOBS)
+# Windowed DOS-GL (M8 step D): DOS-GL's conformance EXEs (from DOSGL_DIR's build) full-screen on plain DOS and
+# windowed on GLOS desktops, their frames identical.
+dosgl-inputs:
+	@test -f $(DOSGL_DIR)/build/exe/conform/T01.EXE || { echo "dosgl-inputs: no DOS-GL build in $(DOSGL_DIR) (make conform-dos there)" >&2; exit 1; }
+	@mkdir -p build/dosgl/conform
+	$(Q)cp $(DOSGL_DIR)/build/exe/conform/T*.EXE build/dosgl/conform/
+	@mkdir -p build/dosgl/sdl
+	$(Q)for e in SDLINFO SDLKEYS SDLBEEP SDLGL SDLCRASH TEXCUBE; do \
+	    test -f $(DOSGL_DIR)/build/exe/$$e.EXE && cp $(DOSGL_DIR)/build/exe/$$e.EXE build/dosgl/sdl/ || true; done
+	$(Q)git -C $(DOSGL_DIR) log -1 --format="dosgl-inputs: DOS-GL %h %s" 2>/dev/null || true
+loopa-glwin: all dos-tests dosgl-inputs check-deps
+	$(Q)python3 tests/loopa/jobs.py glwin -j $(JOBS)
+# SDL3 windowed (M8 step F): DOS-GL's SDL examples (SDL patches 0008-0009) on GLOS desktops.
+loopa-sdlwin: all dos-tests dosgl-inputs check-deps
+	$(Q)python3 tests/loopa/jobs.py sdlwin -j $(JOBS)
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py input -j $(JOBS)
 # M4a: the DPMI host's checks (DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i).
@@ -382,6 +405,20 @@ build/dj/WINTEST.EXE: tests/dos/wintest.c build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)python3 tools/glosmark.py $@
+# GPUTEST (tests/dos/gputest.c): an app that draws with the Matrox engine from its own copy of the HAL (M8).
+GPUTEST_HAL := $(addprefix $(MGAHAL)/,src/pci.c src/chip.c src/fifo.c src/engine.c src/blit.c src/debug/serial.c \
+               port/djgpp.c)
+build/dj/GPUTEST.EXE: tests/dos/gputest.c build/sdk/libglos.a $(GPUTEST_HAL) tools/glosmark.py
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -DMGA_DJGPP=1 -Iinclude -I$(MGAHAL)/include -o $@ $< $(GPUTEST_HAL) build/sdk/libglos.a
+	$(Q)python3 tools/glosmark.py $@
+# AUDTEST (tests/dos/audtest.c): a tone through GLOS's mixer (M8 step E).
+build/dj/AUDTEST.EXE: tests/dos/audtest.c build/sdk/libglos.a tools/glosmark.py
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a -lm
 	$(Q)python3 tools/glosmark.py $@
 build/dj/DIRTEST.EXE: tests/dos/dirtest.c
 	@mkdir -p $(dir $@)

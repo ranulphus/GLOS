@@ -62,6 +62,7 @@
 #include "dpmi.h"
 #include "io.h"
 #include "kprintf.h"
+#include "mixer.h"
 #include "mm.h"
 #include "session.h"
 #include "timer.h"
@@ -265,6 +266,8 @@ static void app_thread_end(struct app *a)
     napps--;
     fpu_drop(current);
     desk_app_gone(a);                           /* (its windows; none may point at it after this) */
+    gpu_app_gone(a);                            /* (the engine, if it had it; its blocks of VRAM) */
+    mixer_app_gone(a);                          /* (its streams) */
     current->user = TU_NONE;
     current->name = "app-gone";
     kfree(a);
@@ -290,11 +293,24 @@ static int app_wait(struct app *a, int what)
     return a->result;
 }
 
+static int rm_call_app(struct app *a, struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u16 *words,
+                       u32 nwords);
+
 int app_rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u16 *words, u32 nwords)
 {
     struct app *a = app_cur();
+    int res;
     if (!a)
         return -1;                              /* (a kernel thread: only the VM's and apps' make them) */
+    gpu_safe_begin(a);                          /* (a DOS or BIOS call: its turn with the engine may end) */
+    res = rm_call_app(a, from, r, kind, vec, words, nwords);
+    gpu_safe_end(a);
+    return res;
+}
+
+static int rm_call_app(struct app *a, struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u16 *words,
+                       u32 nwords)
+{
     if (vec == 0x15 && kind != RM_FAR && ((r->eax >> 8) & 0xFF) == 0x86) {
         /* The BIOS's wait (DJGPP's delay()): a sleep on its own thread, not the system VM held for as long. An
            interrupt of its own ends it early: the handler runs, and the INT is made again for what is left. */
@@ -330,6 +346,7 @@ int app_rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, cons
 
 void app_end(struct app *a, u32 code)
 {
+    gpu_app_unlock(a);                          /* (its turn with the engine ends with it: nobody waits for an end) */
     a->ctx = 0;
     a->code = code;
     app_wait(a, AC_END);
@@ -340,12 +357,15 @@ void app_end(struct app *a, u32 code)
    program does. */
 static int paused(void) { return exclusive || session_pauses(); }
 
+int apps_paused(void) { return paused(); }
+
 void app_return(struct app *a, struct trapframe *tf)
 {
     for (;;) {
         u32 f = irq_save();                     /* (looked at and waited for in one piece: the session's end clears
                                                    it and wakes whoever waits, once) */
-        int wait = !a->kill && paused();
+        int wait = !a->kill && paused() && !gpu_app_holds(a);  /* (with the engine: on to its next GLOS or DOS
+                                                   call, where its turn ends: gpu.c) */
         if (wait)
             thread_block(&pauseq);              /* a session has the machine */
         irq_restore(f);
@@ -420,8 +440,10 @@ int app_event_waiting(const struct app *a) { return a->evt != a->evh; }
 /* Its HLT: until an interrupt of its own. */
 void app_idle(struct app *a)
 {
+    gpu_safe_begin(a);
     while (!a->kill && !vpic_pending(&a->pic))
         thread_block(&a->wq);
+    gpu_safe_end(a);
 }
 
 /* Every kernel tick, and every interrupt of the PC's timer (interrupts
@@ -665,6 +687,18 @@ void app_kill(struct app *a, const char *why)
     }
     thread_wake(&a->wq);
     thread_wake(&pauseq);
+    irq_restore(f);
+}
+
+u32 app_id(const struct app *a) { return a->id; }
+
+void app_kill_id(u32 id, const char *why)
+{
+    struct app *a;
+    u32 f = irq_save();
+    for (a = apps; a; a = a->next)
+        if (a->id == id)
+            app_kill(a, why);
     irq_restore(f);
 }
 

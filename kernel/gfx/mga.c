@@ -16,14 +16,21 @@
  * fills, copies between VRAM and from memory, and 1-bit pictures go to the
  * engine, each exactly what the software would draw; the software waits
  * for the engine before touching the pixels itself. The HAL is one
- * thread's at a time (its FIFO count is a variable of its own): the
- * engine's lock covers every use, each draw on its own. */
+ * thread's at a time (its FIFO count is a variable of its own), and from M8
+ * the engine is shared with apps that have a HAL of their own: the GPU lock
+ * (gpu.c) covers every use, each draw on its own. The cursor's registers and
+ * the VRAM manager's table are not the engine's: they are kept with
+ * interrupts off for a moment instead, so the pointer moves while an app
+ * has the engine. */
 #include <string.h>
 
 #include "glos/bootinfo.h"
+#include "app.h"
 #include "io.h"
+#include "gpu.h"
 #include "kprintf.h"
 #include "mgadisp.h"
+#include "mm.h"
 #include "sched.h"
 
 #include "mga/hal.h"
@@ -32,10 +39,13 @@
 #define OWN_SCREEN 1u                           /* (VRAM owners) */
 #define OWN_CURSOR 2u
 #define OWN_STORE  3u                           /* the desktop's windows' pixels (step E) */
+#define OWN_APP    0x100u                       /* + an app's id: its blocks (M8) */
+#define APP_BLOCKS 64
 
 static struct {
     u8 off;                                     /* [display] accel = off */
     u8 found, mapped, up;
+    u8 desk;                                    /* the last desktop mode was on the card (up() worked) */
     u32 vram;                                   /* bytes, sized at the first desktop */
     mga_vram heap;
     mga_target screen;
@@ -45,8 +55,7 @@ static struct {
     u8 busy;                                    /* drawn since the last sync */
     u32 ops;                                    /* draws the engine has had */
     u32 store_max;                              /* bytes of VRAM the desktop's windows may have (glos display vram) */
-    struct thread *owner;                       /* who has the engine */
-    struct waitq q;
+    mga_card_info info;                         /* (for apps: gpu.c) */
     /* The hardware cursor (step F): the desktop's pointer, its image loaded
        into VRAM on each desktop mode. */
     u8 cur_and[512], cur_xor[512];
@@ -54,6 +63,85 @@ static struct {
     s32 cur_x, cur_y;
 } m;
 static u32 row_buf[4096];                       /* an image's row, padded to dwords */
+
+/* Apps' blocks (M8 step C): at the same offsets for the app's life, so they
+   are kept here as well as in the VRAM manager's table, which each desktop
+   mode begins afresh; while the card is another's, their contents are in
+   frames of the system's memory. */
+static struct ablk {
+    u32 id;                                     /* the app's (0: a free entry) */
+    u32 off, bytes;
+    u32 *saved;                                 /* its pages' frames while the card is another's, or 0 */
+} ab[APP_BLOCKS];
+
+static void ab_drop(struct ablk *b)
+{
+    u32 i;
+    if (b->saved) {
+        for (i = 0; i < b->bytes >> 12; i++)
+            if (b->saved[i])
+                pmm_free(b->saved[i]);
+        kfree(b->saved);
+    }
+    memset(b, 0, sizeof *b);
+}
+
+/* Their contents into the system's memory (the engine drained): an app whose
+   blocks don't fit there is ended. */
+static void apps_out(void)
+{
+    u32 i, p;
+    for (i = 0; i < APP_BLOCKS; i++) {
+        struct ablk *b = &ab[i];
+        u32 n = b->bytes >> 12;
+        if (!b->id || b->saved)
+            continue;
+        if (!(b->saved = kmalloc(n * sizeof *b->saved))) {
+            app_kill_id(b->id, "vram-lost");
+            continue;
+        }
+        memset(b->saved, 0, n * sizeof *b->saved);
+        for (p = 0; p < n; p++) {
+            u8 *k;
+            if (!(b->saved[p] = pmm_alloc()))
+                break;
+            k = kmap(b->saved[p]);
+            memcpy(k, (const u8 *)mga_fb + b->off + (p << 12), 4096);
+            kunmap(k);
+        }
+        if (p < n)
+            app_kill_id(b->id, "vram-lost");
+        kprintf("GLOS-MGA vram-out app=%u at=%x bytes=%u%s\n", b->id, b->off, b->bytes, p < n ? " lost=1" : "");
+    }
+}
+
+/* ... and back, at the same offsets, beside the new screen. */
+static void apps_in(void)
+{
+    u32 i, p;
+    for (i = 0; i < APP_BLOCKS; i++) {
+        struct ablk *b = &ab[i];
+        if (!b->id)
+            continue;
+        if (vram_reserve(&m.heap, b->off, b->bytes, OWN_APP + b->id) != 0) {
+            kprintf("GLOS-MGA vram-in app=%u at=%x bytes=%u lost=1\n", b->id, b->off, b->bytes);
+            app_kill_id(b->id, "vram-lost");
+            ab_drop(b);
+            continue;
+        }
+        if (!b->saved)
+            continue;
+        for (p = 0; p < b->bytes >> 12 && b->saved[p]; p++) {
+            u8 *k = kmap(b->saved[p]);
+            memcpy((u8 *)mga_fb + b->off + (p << 12), k, 4096);
+            kunmap(k);
+            pmm_free(b->saved[p]);
+        }
+        kfree(b->saved);
+        b->saved = 0;
+        kprintf("GLOS-MGA vram-in app=%u at=%x bytes=%u\n", b->id, b->off, b->bytes);
+    }
+}
 
 static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes);
 
@@ -65,22 +153,8 @@ static void drain(const char *when)
         kprintf("GLOS-WARN mga-reset when=%s resets=%u\n", when, engine_resets);
 }
 
-static void take(void)
-{
-    u32 f = irq_save();
-    while (m.owner && m.owner != current)
-        thread_block(&m.q);
-    m.owner = current;
-    irq_restore(f);
-}
-
-static void give(void)
-{
-    u32 f = irq_save();
-    m.owner = 0;
-    thread_wake(&m.q);
-    irq_restore(f);
-}
+static void take(void) { gpu_take(); }
+static void give(void) { gpu_give(); }
 
 void mga_display_init(const struct bootinfo *bi)
 {
@@ -98,15 +172,23 @@ int mga_display_up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h)
 {
     u32 bytes = pitch * h;
     int r;
-    take();
+    gpu_take_force();                           /* (an app's turn ends wherever it is: the mode is new) */
     r = up(pix, lfb, pitch, bpp, h, bytes);
-    give();
+    if (!r) {
+        u32 i;
+        for (i = 0; i < APP_BLOCKS; i++)        /* (apps' blocks kept for a desktop on the card: none now) */
+            if (ab[i].id) {
+                app_kill_id(ab[i].id, "vram-lost");
+                ab_drop(&ab[i]);
+            }
+    }
+    gpu_give();
     return r;
 }
 
 static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes)
 {
-    m.up = 0;
+    m.up = m.desk = 0;
     if (!m.found)
         return 0;
     if (lfb < mga.fb_phys || lfb - mga.fb_phys >= mga.fb_size) {
@@ -138,12 +220,21 @@ static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes)
     }
     vram_init(&m.heap, 0, m.vram);
     vram_reserve(&m.heap, m.screen.color_off, bytes, OWN_SCREEN);
+    apps_in();
     m.cur = m.screen;
     m.cur_loaded = m.cur_shown = 0;             /* (the image again, in this mode's VRAM) */
     m.screen_pix = pix;
     m.screen_bytes = bytes;
     m.busy = 0;
-    m.up = 1;
+    m.info.device = mga.device_id;
+    m.info.revision = mga.revision;
+    m.info.vram = m.vram;
+    m.info.bpp = bpp;
+    m.info.fb_phys = mga.fb_phys;
+    m.info.regs_phys = mga.mmio_phys;
+    m.info.option = mga.option;
+    m.info.subsys = mga.subsys;
+    m.up = m.desk = 1;
     kprintf("GLOS-MGA up %s vram=%u screen=%x+%u pitch=%u bpp=%u\n", mga.name, m.vram, m.screen.color_off, bytes,
             m.screen.pitch_px, bpp);
     return 1;
@@ -151,27 +242,30 @@ static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes)
 
 void mga_display_down(void)
 {
-    take();
+    gpu_take();                                 /* (an app with the engine is paused only at its next safe point:
+                                                   app.c app_return) */
     if (m.up) {
         drain("down");
+        gpu_views_out();                        /* (apps touching their blocks now wait for the next desktop) */
+        apps_out();
         if (m.cur_shown)
             cursor_show(0);
         m.up = m.busy = m.cur_shown = m.cur_loaded = 0;
         kprintf("GLOS-MGA down\n");
     }
-    give();
+    gpu_give();
 }
 
 /* ---- the hardware cursor */
 
 void mga_cursor_image(const u8 *and_mask, const u8 *xor_mask)
 {
-    take();
+    u32 f = irq_save();
     memcpy(m.cur_and, and_mask, sizeof m.cur_and);
     memcpy(m.cur_xor, xor_mask, sizeof m.cur_xor);
     m.cur_have = 1;
     m.cur_loaded = 0;
-    give();
+    irq_restore(f);
 }
 
 /* Its image in VRAM: as high as there is room, within the first 16 MB (8 on
@@ -197,7 +291,7 @@ static int cursor_place(void)
 int mga_cursor(int on, s32 x, s32 y)
 {
     int r = 0;
-    take();
+    u32 f = irq_save();                         /* (the RAMDAC's registers: not the engine's) */
     if (m.up && m.cur_have && (m.cur_loaded || cursor_place() == 0)) {
         m.cur_loaded = 1;
         if (on && (!m.cur_shown || x != m.cur_x || y != m.cur_y))
@@ -207,7 +301,7 @@ int mga_cursor(int on, s32 x, s32 y)
         m.cur_shown = on != 0, m.cur_x = x, m.cur_y = y;
         r = 1;
     }
-    give();
+    irq_restore(f);
     return r;
 }
 
@@ -230,17 +324,125 @@ void mga_display_sync(void)
 
 int mga_display_on(void) { return m.up; }
 
+const mga_card_info *mga_card(void) { return m.up ? &m.info : 0; }
+
+int mga_desktop_card(void) { return m.desk; }
+
+u32 mga_regs_phys(void) { return mga.mmio_phys; }
+
+/* ---- apps' blocks (M8 step C) */
+
+int mga_app_vram(u32 id, u32 min, u32 max, u32 align, u32 *off, u32 *bytes)
+{
+    u32 f, largest, n, i;
+    int r = -1;
+    min = (min + 4095) & ~4095u;
+    max = max < min ? min : (max + 4095) & ~4095u;
+    if (align < 4096)
+        align = 4096;
+    if (!min || (align & (align - 1)))
+        return -1;
+    f = irq_save();
+    for (i = 0; i < APP_BLOCKS && ab[i].id; i++) ;
+    if (m.up && i < APP_BLOCKS) {
+        vram_free_bytes(&m.heap, &largest);
+        for (n = max < (largest & ~4095u) ? max : largest & ~4095u; n >= min; n -= 4096)
+            if (vram_alloc(&m.heap, n, align, MGA_VRAM_TOP, OWN_APP + id, off) == 0) {
+                ab[i].id = id;
+                ab[i].off = *off;
+                ab[i].bytes = *bytes = n;
+                r = 0;
+                break;
+            }
+    }
+    irq_restore(f);
+    return r;
+}
+
+u32 mga_app_vram_free(u32 id, u32 off)
+{
+    u32 f = irq_save(), i, bytes = 0;
+    for (i = 0; i < APP_BLOCKS; i++)
+        if (ab[i].id == id && ab[i].off == off) {
+            bytes = ab[i].bytes;
+            if (m.up && !ab[i].saved)
+                vram_free(&m.heap, off);
+            ab_drop(&ab[i]);
+            break;
+        }
+    irq_restore(f);
+    return bytes;
+}
+
+int mga_app_block(u32 id, u32 off, u32 len, u32 *start, u32 *bytes)
+{
+    u32 i;
+    for (i = 0; i < APP_BLOCKS; i++)
+        if (ab[i].id == id && off >= ab[i].off && len <= ab[i].bytes && off - ab[i].off <= ab[i].bytes - len) {
+            if (start)
+                *start = ab[i].off;
+            if (bytes)
+                *bytes = ab[i].bytes;
+            return 1;
+        }
+    return 0;
+}
+
+void mga_app_gone(u32 id)
+{
+    u32 f = irq_save(), i;
+    for (i = 0; i < APP_BLOCKS; i++)
+        if (ab[i].id == id) {
+            if (m.up && !ab[i].saved)
+                vram_free(&m.heap, ab[i].off);
+            ab_drop(&ab[i]);
+        }
+    irq_restore(f);
+}
+
+void *mga_vram_ptr(u32 off) { return (u8 *)mga_fb + off; }
+
+u32 mga_vram_size(void) { return m.vram; }
+
+int mga_app_next(u32 id, u32 from, u32 *start, u32 *bytes)
+{
+    u32 i, best = 0xFFFFFFFFu;
+    for (i = 0; i < APP_BLOCKS; i++)
+        if (ab[i].id == id && ab[i].off >= from && ab[i].off < best) {
+            best = ab[i].off;
+            *bytes = ab[i].bytes;
+        }
+    *start = best;
+    return best != 0xFFFFFFFFu;
+}
+
+int mga_handover(int kernel, int reset)
+{
+    int r = 0;
+    if (!m.mapped)
+        return 0;
+    if (reset) {
+        engine_reset();                         /* (the watchdog's: an app had it, stuck) */
+    } else if (engine_sync(1000000) != 0) {
+        kprintf("GLOS-WARN mga-reset when=handover resets=%u\n", engine_resets);
+        r = -1;
+    }
+    if (kernel)
+        engine_resync();                        /* nothing the kernel's HAL knew of the registers holds */
+    m.busy = 0;
+    return r;
+}
+
 /* ---- the desktop's windows' pixels (step E) */
 
 void *mga_store_alloc(u32 bytes)
 {
     void *p = 0;
-    u32 off;
-    take();
+    u32 off, f = irq_save();
     if (m.up && (!m.store_max || vram_owned_bytes(&m.heap, OWN_STORE) + bytes <= m.store_max)
         && vram_alloc(&m.heap, bytes, 64, 0, OWN_STORE, &off) == 0)
         p = (u8 *)mga_fb + off;
-    give();
+    irq_restore(f);
     return p;
 }
 
@@ -248,12 +450,13 @@ static int owns(const void *p) { return mga_fb && (const u8 *)p >= (const u8 *)m
 
 int mga_store_free(void *p)
 {
+    u32 f;
     if (!owns(p))
         return 0;
-    take();
+    f = irq_save();
     if (m.up)
         vram_free(&m.heap, (u32)((u8 *)p - (u8 *)mga_fb));
-    give();
+    irq_restore(f);
     return 1;
 }
 

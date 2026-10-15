@@ -41,6 +41,7 @@
 #include "gdbprog.h"
 #include "io.h"
 #include "kprintf.h"
+#include "mixer.h"
 #include "session.h"
 #include "shot.h"
 #include "timer.h"
@@ -250,7 +251,10 @@ static void end(const char *why)
         ses.env_seg = 0;
     }
     remode = remode_to(ses.mode);               /* the mode it began in, and so the palette */
-    display_session(0);                         /* ... and the desktop's again, if it had the screen */
+    if (!mixer_on())
+        sb_stop();                              /* (not the mixer's: a program's that started as an app's) */
+    display_session(0);                         /* ... and the desktop's again, if it had the screen (and the mixer
+                                                   the Sound Blaster) */
     if (pit_moved()) {
         outb(0x43, 0x34);                       /* PIT channel 0: mode 2, count FFFFh (§8.2) */
         outb(0x40, 0xFF);
@@ -264,7 +268,6 @@ static void end(const char *why)
     timer_write_b(vm.rtc_b);
     vkbc_restore(ses.kbc_cmd);
     vm_wr8(0x417, (u8)((vm_rd8(0x417) & ~0x70) | ses.leds));
-    sb_stop();
     for (v = 0; v < 256; v++) {                 /* hooks left in memory DOS has taken back (which the */
         u32 cur = vm_rd32(v * 4u);              /* shell may have loaded something into since) */
         if (cur != ses.ivt[v] && (owner(cur) == 0 || cur == ses.dangle[v])) {

@@ -58,6 +58,9 @@ void app_fpu_irq(struct app *a);        /* IRQ 13 while the app's code ran: the 
 
 /* From anywhere (interrupts off). */
 void app_kill(struct app *a, const char *why);
+void app_kill_id(u32 id, const char *why);      /* the app with that id, if it still runs */
+u32 app_id(const struct app *a);
+int apps_paused(void);                          /* a session (or an app's child program) has the machine */
 void app_kill_job(void *job);           /* the app that agent job began, if it still runs */
 void app_kill_all(const char *why);
 void app_session_end(void);             /* a session has ended: paused apps run on */
