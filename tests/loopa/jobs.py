@@ -3217,7 +3217,7 @@ def apps_case(profile, card):
         checks["ver"] = agent.ssh("glos ver")[0] == 0
         checks["alone"] = ran(agent.ssh(app + "run A 3", timeout=600), "A", 3)
         rc, out, _ = agent.ssh(app + "plain")
-        checks["plain"] = rc == 7 and "APP-PLAIN version=10000" in out
+        checks["plain"] = rc == 7 and "APP-PLAIN version=10001" in out    # (API 1.1: M8)
         rc, out, _ = agent.ssh("glos run --exclusive " + app + "exit 5")
         checks["exclusive"] = rc == 3 and "APP-REFUSED error=5 reason=5" in out
         rc, out, _ = agent.ssh("glos run --app " + app + "exit 6")     # (an app before it asks: step B)
