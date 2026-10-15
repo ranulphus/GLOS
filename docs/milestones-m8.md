@@ -166,3 +166,31 @@ shared checkouts; nothing is merged into their mains or pushed without the owner
 - **E done** (2026-10-15, GLOS fd89eca): `make loopa-audio` passes on the Pentium II with a G200 and on the 486DX2
   with the S3 (tones at 11025, 22050 and 44100 Hz, mono and stereo, two at once and beside a session, all
   recorded; no underrun; the card the session's and back; SBCHK after GLOS).
+- **H done** (2026-10-15): **M8 is done.**
+  - **The exit** (`make loopa-m8`: the gpu, audio, glwin, sdlwin and games suites):
+    1. Windowed equals full-screen: DOS-GL's 27 conformance programs windowed on 16-bit GLOS desktops write the
+       same render surfaces as full-screen on plain DOS, all 28 frames byte for byte, on the G200, G400 and G450
+       (glwin).
+    2. The same EXEs still pass on plain DOS: glwin runs each full-screen on plain DOS first; at DOS-GL 7c9a8b9
+       (6fd0969 adds docs only) DOS-GL's conformance (27 of 27) and `loopa-sdl` (10 of 10) pass on the three
+       cards, PrBoom-plus's seven demos without drawing and its GL timedemos give their gametics and checksums,
+       and Fifth Wheel's `make regress` passes (its shots, sound, exit, crash, modes and 30 hashes).
+    3. The games windowed with no underrun: Fifth Wheel and PrBoom-plus on the G450 and the G200 (games), each
+       `GLOS: 0 of N chunks underran` (in the regression 0 of 2272 and 0 of 2266 for Fifth Wheel, 0 of 4124 and 0
+       of 2980 for PrBoom), their hashes, gametics, checksums and frame 200 as on DOS.
+    4. A forced GL hang recovered: TEXCUBE `--hang` begins a frame and never ends it; the desktop asks for the
+       engine (`glos shot`), the watchdog ends the program (`reason=gpu-watchdog`) and resets the engine, and the
+       next conformance program draws right (glwin, all three cards); GPUTEST `--hang` likewise (gpu).
+  - **The regression** on 5e96eac, alone on the host: the host tests and 29 Loop A suites (the M7 set and M8's
+    five), 187 cases. Three failed, in two suites. The apps suite's two expected APPTEST's plain run to report API
+    1.0 (it is 1.1 now; the test fixed in 2fb1e17, passing since). djtst on the 486DX2 with HIMEMX failed once
+    (its crash-report checks): SIGNALS.EXE left a crash report, a #GP with DS's limit at 0FFFh and no handler
+    counted (DJGPP's Ctrl-C trick, which shrinks DS so that the program's next touch of it faults into the
+    signal's handler). Run alone the case passed three times in three, and it passed in M7's regression, so it is
+    recorded as intermittent: a likely race, still to find. The kernel is the same in 5e96eac and 2fb1e17.
+  - **The gate** on 2fb1e17, alone on the host (19:49 to 23:03): 133 parts, none failed. Its programs are the
+    shared mains' builds from before M8 (DOS-GL 65862b4, Fifth Wheel a007803, MGA-Glide's), so they show that
+    programs which know nothing of GLOS's GPU lock or mixer run under M8's kernel as they did under M7's: full-screen
+    in sessions, the same frames and lines as plain DOS, killed clean, the agent answering throughout.
+  - Left for the bench (PRD §14): the lock's hand-overs and the watchdog's reset on real cards, and the mixer on a
+    real SB16 (86Box's SB16 answers DSP 4.05; a real card's FIFO and 16-bit acknowledge are to be seen).

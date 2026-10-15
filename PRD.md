@@ -1255,3 +1255,4 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
 
 - **D44-D48** (M8): the GPU lock's safe points, apps' VRAM and windows that show it, windowed GL on 16-bit Matrox desktops, the mixer as the desktop's, apps' COM1 and gameport. D24 points at D44; §9.6, §9.7, §10.4 and §10.5 say what was built; Q12 and Q15 are answered.
 - docs/milestones-m8.md has the plan and status, docs/graphics.md §7 the design.
+- **M8 done** (2026-10-15): DOS-GL's conformance windowed equals full-screen on the G200, G400 and G450; the same EXEs pass on plain DOS; Fifth Wheel and PrBoom-plus run windowed with no underrun; a forced GL hang is ended by the watchdog (`make loopa-m8`). The regression (187 cases) and the gate (133 parts) are recorded in docs/milestones-m8.md step H.

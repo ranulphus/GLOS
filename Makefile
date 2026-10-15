@@ -38,6 +38,12 @@
 #   make fonts          kernel/gfx/fonts again from TrueType fonts (tools/mkfont.py; on the host)
 #   make loopa-apps     GLOS apps (M6): APPTESTs at once, beside a busy one, a session, a crash; kills;
 #                       GLOS /RUN with an app (runs on the host)
+#   make loopa-gpu      the GPU lock and apps' VRAM (M8): GPUTESTs drawing with the engine beside the desktop
+#   make loopa-audio    GLOS's mixer (M8): AUDTESTs through the SB16, recorded
+#   make loopa-glwin    DOS-GL's conformance EXEs (DOSGL_DIR) full-screen on plain DOS and windowed on GLOS
+#   make loopa-sdlwin   DOS-GL's SDL examples (DOSGL_DIR) in GLOS windows, sound through the mixer
+#   make loopa-games    Fifth Wheel (FIFTHWHEEL_DIR) and PrBoom-plus (DOSGL_DIR) on plain DOS and windowed
+#   make loopa-m8       M8's exit: loopa-gpu, loopa-audio, loopa-glwin, loopa-sdlwin and loopa-games
 #   make gate           M4e's exit: the baseline matrix under GLOS and with direct mode forced, a kill and
 #                       an ssh probe for every program (tools/gate/run.py; on the host; hours)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
@@ -54,7 +60,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: loopa-apps loopa-display loopa-desk loopa-win fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
+.PHONY: loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -315,6 +321,9 @@ loopa-games: all dos-tests games-inputs check-deps
 # SDL3 windowed (M8 step F): DOS-GL's SDL examples (SDL patches 0008-0009) on GLOS desktops.
 loopa-sdlwin: all dos-tests dosgl-inputs check-deps
 	$(Q)python3 tests/loopa/jobs.py sdlwin -j $(JOBS)
+# M8's exit (docs/milestones-m8.md step H): the four checks are in glwin (windowed = full-screen, the same EXEs
+# on plain DOS, the hang), games (no underrun) and gpu (the watchdog).
+loopa-m8: loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py input -j $(JOBS)
 # M4a: the DPMI host's checks (DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i).
