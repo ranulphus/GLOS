@@ -545,6 +545,11 @@ unmarked DOS-GL program starts as a session, which has taken the screen, and ask
 - **Sessions get the card:** when a session takes the screen the mixer stops the card and gives its line back to
   the system VM; at the session's end the DSP is reset as before (only when the mixer wasn't playing) and the mixer
   starts again with the desktop. `glos audio` shows the mixer and its streams.
+- **Where a program starves its stream:** after each burst of underruns the mixer logs `GLOS-AUDIO short
+  stream=N periods=P t=T`, and for the first few periods of each burst `GLOS-AUDIO stall` with the app's EIP (map it
+  with the program's symbols) or, while the app waited, the thread that ran. A program whose sound comes from a
+  cooperative thread (SDL's on DOS) starves it wherever it goes long without yielding; this is how PrBoom-plus's
+  stalls were found (milestones-m8.md, step G).
 
 ### 7.5 SDL3 (DOS-GL's SDL patches 0008, 0009)
 

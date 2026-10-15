@@ -134,6 +134,35 @@ shared checkouts; nothing is merged into their mains or pushed without the owner
   ending a hung app after 500 ms; VRAM back; refused at 8 bits). Found on the way: an ending app kept the engine
   until the watchdog (it is released at the end now); a struct grown under objects built against the old one
   (the Makefile tracks headers now).
+- **D done** (2026-10-15, DOS-GL `m8-glos`): DOS-GL's GLOS path (`src/dgl/glos.c`). `make loopa-glwin`: DOS-GL's 27
+  conformance programs, the same EXEs, full-screen on plain DOS and windowed on GLOS desktops (800x600x16 on the
+  G200, 1024x768x16 on the G400 and G450): all 28 frames byte for byte the same on all three cards. Found on the
+  way: test 27 (two frames read back and made into textures with no call to GLOS between) kept the desktop
+  waiting until the watchdog ended it, so the shared page gained `quiet` (DOS-GL marks its long work without the
+  engine, and the time between frames); `dglGetDeviceInfo` probed the PCI bus from inside an app, found nothing
+  and zeroed the chip's description (the next FIFO wait never ended), so a windowed DOS-GL reports what GLOS
+  described; the ILOAD texture path took no lock.
+- **F done** (2026-10-15, DOS-GL SDL patches 0008, 0009): `make loopa-sdlwin` passes on the G450 and the G200 at
+  800x600x16: SDL's `glos` drivers chosen; keys typed into SDLKEYS's window; SDLBEEP through the mixer with no
+  underrun (189 periods), also with a main thread that yields once in 37 ms; SDLGL's 150th frame in a window the
+  same bytes as TEXCUBE's in a window and full-screen on plain DOS (DGL_SNAP through GLOS.CFG profiles); SDLGL's
+  six windowed sizes; SDLCRASH ended with its stream and window gone and the next program playing; DOS-GL's
+  `exit()` inside a swap. Found: a program's retrace wait on port 3DAh (the test shim's) trapped millions of times
+  in an app; apps see a retrace there now. Patch 0009 opens the stream at the mixer's rate (22050), so SDL
+  converts once and a ring of 16 KB holds 186 ms.
+- **G done** (2026-10-15): `make loopa-games` on the G450 and the G200, each game full-screen on plain DOS and then
+  windowed on a 800x600x16 GLOS desktop with the SB16 the mixer's. **Fifth Wheel** (its source unchanged; FWHEEL.EXE
+  relinked against the M8 DOS-GL and SDL): its 30 frame hashes over 1800 fixed steps the same as on DOS, `GLOS: 0
+  of 2284 chunks underran` (G450; 0 of 2271 on the G200; on DOS 0 of 1337 too). **PrBoom-plus** (GL timedemo of
+  DOOM's demo 1): its 1710 gametics, its game-state checksum and frame 200 the same as on DOS, no GL call refused,
+  `GLOS: 0 of 4154 chunks underran` (G450; 0 of 3062 on the G200). It took finding where the game kept SDL's
+  cooperative audio thread waiting: the mixer now logs each burst of underruns and samples what the app was doing
+  (`GLOS-AUDIO short`, `GLOS-AUDIO stall`), which pointed at DOS-GL's texture writes and read-backs (DOS-GL runs
+  the program's wait hook in them now, every 4 ms), and in PrBoom's port at lumps read one after another, its log
+  written to COM1 a byte at a time, DOSBench's frame capture, the music's set-up with the device open and the files
+  written at a timedemo's end (yields and reorderings in the fork, f5fc28c0 and af530e2b). The same build on plain
+  DOS: 188 of 12364 Sound Blaster chunks underran (13071 of 13075 before: its 4-chunk ring is 46 ms). Also found:
+  GLOS's agent kept 127 characters of a command, so a program's path and a long tail lost the tail's end.
 - **E done** (2026-10-15, GLOS fd89eca): `make loopa-audio` passes on the Pentium II with a G200 and on the 486DX2
   with the S3 (tones at 11025, 22050 and 44100 Hz, mono and stereo, two at once and beside a session, all
   recorded; no underrun; the card the session's and back; SBCHK after GLOS).
