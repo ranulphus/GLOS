@@ -26,11 +26,13 @@
 #include "glos/api.h"
 #include "glos/bootinfo.h"
 #include "app.h"
+#include "arch.h"
 #include "dpmi.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mixer.h"
 #include "mm.h"
+#include "sched.h"
 #include "timer.h"
 
 #define STREAMS   8
@@ -70,8 +72,11 @@ int mixer_init(const struct bootinfo *bi)
 int mixer_on(void) { return mx.on && !mx.out; }
 int mixer_found(void) { return mx.on; }
 
-/* One stream's samples for the period, added into mx.acc. */
-static void take(struct strm *s, u32 frames)
+/* One stream's samples for the period, added into mx.acc. tf: what the
+   card's interrupt broke into; an underrun while it was the stream's own app
+   running its code says where in it (the first few of each burst: where a
+   program keeps its sound waiting). */
+static void take(struct strm *s, u32 frames, const struct trapframe *tf)
 {
     struct glos_stream *h = s->h;
     u32 have = (h->write - h->read) / s->frame_bytes, need, i, vol = h->volume, mask = h->bytes - 1;
@@ -85,6 +90,13 @@ static void take(struct strm *s, u32 frames)
     h->periods++;
     if (have < need) {
         h->underruns++;
+        if (tf && s->short_run < 6 && s->bursts < 16) {
+            if ((tf->cs & 3) == 3 && app_cur() == s->a)
+                kprintf("GLOS-AUDIO stall stream=%u eip=%x\n", s->id, tf->eip);
+            else                                /* (the app waits: for whom) */
+                kprintf("GLOS-AUDIO stall stream=%u in=%s%s eip=%x\n", s->id, current->name,
+                        (tf->eflags & 0x20000) ? ":v86" : (tf->cs & 3) ? ":user" : "", tf->eip);
+        }
         s->short_run++;
     } else if (s->short_run) {                  /* a burst of them over: when, and how long (the first 16) */
         if (s->bursts++ < 16)
@@ -118,13 +130,13 @@ static void take(struct strm *s, u32 frames)
 }
 
 /* The card's interrupt: a half to fill (16-bit stereo). */
-static void fill(s16 *out, u32 frames)
+static void fill(s16 *out, u32 frames, const struct trapframe *tf)
 {
     u32 i;
     memset(mx.acc, 0, frames * 2 * sizeof mx.acc[0]);
     for (i = 0; i < STREAMS && !apps_paused(); i++)    /* (paused apps' streams wait with them) */
         if (st[i].a)
-            take(&st[i], frames);
+            take(&st[i], frames, tf);
     for (i = 0; i < frames * 2; i++)
         out[i] = (s16)(mx.acc[i] > 32767 ? 32767 : mx.acc[i] < -32768 ? -32768 : mx.acc[i]);
     mx.periods++;
@@ -198,8 +210,8 @@ static void drop(struct strm *s)
     u32 f = irq_save();
     struct glos_stream *h = s->h;
     u32 pages = s->pages;
-    kprintf("GLOS-AUDIO close app=%u stream=%u periods=%u underruns=%u\n", app_id(s->a), s->id, h->periods,
-            h->underruns);
+    kprintf("GLOS-AUDIO close app=%u stream=%u periods=%u underruns=%u%s%u\n", app_id(s->a), s->id, h->periods,
+            h->underruns, " short-at-close=", s->short_run);
     s->a = 0;
     irq_restore(f);
     mm_win_free(h, pages);                      /* (its mapping in the app: undone by the caller, or gone with it) */

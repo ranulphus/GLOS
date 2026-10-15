@@ -15,6 +15,7 @@
  * The card is a session's while one runs (session.c): the mixer stops it and
  * gives the line back to the system VM first, and starts it again after. */
 #include "glos/bootinfo.h"
+#include "arch.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mixer.h"
@@ -31,7 +32,7 @@ static struct {
     u32 frames;                                 /* a half's */
     u32 half;                                   /* the half the card plays next */
     u32 irqs;
-    void (*fill)(s16 *out, u32 frames);
+    void (*fill)(s16 *out, u32 frames, const struct trapframe *tf);
 } sb;
 
 static const u8 page_port[4] = { 0, 0x8B, 0x89, 0x8A };        /* channels 5, 6, 7 (4 is the cascade) */
@@ -93,18 +94,17 @@ int sb16_init(const struct bootinfo *bi)
 
 static void irq(struct trapframe *tf)
 {
-    (void)tf;
     inb((u16)(sb.base + 0x0F));                 /* (the 16-bit interrupt acknowledged) */
     if (!sb.running)
         return;
     sb.irqs++;
-    sb.fill((s16 *)(sb.buf + sb.half * sb.frames * 4), sb.frames);
+    sb.fill((s16 *)(sb.buf + sb.half * sb.frames * 4), sb.frames, tf);
     sb.half ^= 1;
 }
 
 static void dma_stop(void) { outb(0xD4, (u8)(4 | (sb.dma & 3))); }
 
-int sb16_start(u32 rate, u32 frames, void (*fill)(s16 *out, u32 frames))
+int sb16_start(u32 rate, u32 frames, void (*fill)(s16 *out, u32 frames, const struct trapframe *tf))
 {
     u32 words = frames * 2 * 2, ch = sb.dma & 3, addr;
     if (!sb.found)
@@ -122,8 +122,8 @@ int sb16_start(u32 rate, u32 frames, void (*fill)(s16 *out, u32 frames))
     sb.frames = frames;
     sb.fill = fill;
     sb.half = 0;
-    fill((s16 *)sb.buf, frames);
-    fill((s16 *)(sb.buf + frames * 4), frames);
+    fill((s16 *)sb.buf, frames, 0);
+    fill((s16 *)(sb.buf + frames * 4), frames, 0);
     if (dsp_reset() != 0)
         return -1;
     addr = sb.phys >> 1;                        /* (words) */

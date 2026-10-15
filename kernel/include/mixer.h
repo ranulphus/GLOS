@@ -19,7 +19,9 @@ void mixer_app_gone(struct app *a);
 u32 mixer_stat(char *buf, u32 max);             /* glos audio */
 
 int sb16_init(const struct bootinfo *bi);       /* the DSP found, version 4 or later: 0 */
-int sb16_start(u32 rate, u32 frames, void (*fill)(s16 *out, u32 frames));      /* two halves of `frames` */
+struct trapframe;
+int sb16_start(u32 rate, u32 frames, void (*fill)(s16 *out, u32 frames, const struct trapframe *tf));
+                                                /* (tf: what the card's interrupt broke into) */      /* two halves of `frames` */
 void sb16_stop(void);
 int sb16_running(void);
 u32 sb16_irqs(void);

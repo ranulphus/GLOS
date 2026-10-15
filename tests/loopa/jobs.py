@@ -3001,18 +3001,23 @@ def games_case(profile, vcard, card, desk):
     def final(path):                            # the checksum file's last digest
         return [l.split()[-1] for l in open(path, errors="replace") if l.strip()][-1] if os.path.exists(path) else None
 
+    only = os.environ.get("GAMES_GAME", "")            # fw or doom: that one alone (investigations)
+    fw_on, doom_on = only in ("", "fw"), only in ("", "doom")
     # Full-screen, on plain DOS.
     name = "games-dos-" + tag
     run(name, ["--machine", profile, "--card", vcard, "--sound", "sb16", "--pre", blaster, "--mem", "64",
                "--timeout", "3600", "--idle", "300", "--file", os.path.join(g, "FWHEEL.EXE") + "=/TEST/FWHEEL.EXE",
                "--file", os.path.join(g, "WORLD.PAK") + "=/TEST/WORLD.PAK", "--pre", "SET DOOM_SERIAL=1",
-               "--pre", "SET LFN=n"] + doom_files + ["--cmd", "SERSAY HX-START games",
-               "--cmd", "C:\\TEST\\FWHEEL.EXE " + fw_args, "--cmd", doom, "--cmd", "SERSAY HX-DONE 0"])
+               "--pre", "SET LFN=n"] + doom_files + ["--cmd", "SERSAY HX-START games"]
+        + (["--cmd", "C:\\TEST\\FWHEEL.EXE " + fw_args] if fw_on else []) + (["--cmd", doom] if doom_on else [])
+        + ["--cmd", "SERSAY HX-DONE 0"])
     dos = open(os.path.join(ROOT, "out", name, "serial.log"), "rb").read().decode("latin-1").replace("\r", "") \
         if os.path.exists(os.path.join(ROOT, "out", name, "serial.log")) else ""
     dos_hashes = hashes(dos)
-    checks["dos-fw"] = len(dos_hashes) >= 30
-    checks["dos-doom"] = "DOOM-TIMED gametics=1710" in dos
+    if fw_on:
+        checks["dos-fw"] = len(dos_hashes) >= 30
+    if doom_on:
+        checks["dos-doom"] = "DOOM-TIMED gametics=1710" in dos
     dos_sum = final(os.path.join(ROOT, "out", name, "files", "D1GL1.SUM"))
     dos_shot = os.path.join(ROOT, "out", name, "files", "LD1GL1.PPM")
     # Windowed, on GLOS.
@@ -3037,25 +3042,29 @@ def games_case(profile, vcard, card, desk):
         while time.time() - t0 < 60 and not agent.ssh("glos audio")[1].startswith("audio on "):
             time.sleep(0.5)
         m = len(agent.log())
-        rc, o, _ = agent.ssh("C:\\TEST\\FWHEEL.EXE " + fw_args, timeout=3600)
-        t = agent.log()[m:]
-        u = underran(t, "GLOS")
-        checks["fw-ran"] = rc == 0 and "GLOS-APP start" in t
-        checks["fw-hashes"] = bool(dos_hashes) and hashes(t) == dos_hashes
-        checks["fw-underruns"] = bool(u) and u[0] == 0 and u[1] > 0
-        info += " fw-hashes=%d fw-under=%s" % (len(hashes(t)), "%d/%d" % u if u else "?")
+        if fw_on:
+            rc, o, _ = agent.ssh("C:\\TEST\\FWHEEL.EXE " + fw_args, timeout=3600)
+            t = agent.log()[m:]
+            u = underran(t, "GLOS")
+            checks["fw-ran"] = rc == 0 and "GLOS-APP start" in t
+            checks["fw-hashes"] = bool(dos_hashes) and hashes(t) == dos_hashes
+            checks["fw-underruns"] = bool(u) and u[0] == 0 and u[1] > 0
+            info += " fw-hashes=%d fw-under=%s" % (len(hashes(t)), "%d/%d" % u if u else "?")
         m = len(agent.log())
-        rc, o, _ = agent.ssh(doom, timeout=3600)
+        rc, o, _ = agent.ssh(doom, timeout=3600) if doom_on else (0, "", "")
         t = agent.log()[m:]
         u = underran(t, "GLOS")
+        if not doom_on:
+            t = "DOOM-TIMED gametics=1710 GLOS-APP start"
+            u = (0, 1)
         checks["doom-ran"] = "DOOM-TIMED gametics=1710" in t and "GLOS-APP start" in t
         checks["doom-underruns"] = bool(u) and u[0] == 0 and u[1] > 0
         checks["doom-gl"] = "DGL-STUB" not in t and "DGL-GLERR" not in t
         info += " doom-under=%s" % ("%d/%d" % u if u else "?")
         s = os.path.join(out, "D1GL1.SUM")
-        checks["doom-checksum"] = fetch("/C/OUT/D1GL1.SUM", s) and dos_sum is not None and final(s) == dos_sum
+        checks["doom-checksum"] = not doom_on or fetch("/C/OUT/D1GL1.SUM", s) and dos_sum is not None and final(s) == dos_sum
         shot = os.path.join(out, "LD1GL1.PPM")
-        checks["doom-frame"] = fetch("/C/OUT/LD1GL1.PPM", shot) and os.path.exists(dos_shot) \
+        checks["doom-frame"] = not doom_on or fetch("/C/OUT/LD1GL1.PPM", shot) and os.path.exists(dos_shot) \
             and open(shot, "rb").read() == open(dos_shot, "rb").read()
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:

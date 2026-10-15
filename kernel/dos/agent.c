@@ -73,7 +73,7 @@ struct agent_job {
     u32 seq;
     u32 result;                                 /* INT 21h 4Dh's AX, or 10000h + the EXEC error */
     void *owner;                                /* the ssh side's channel; NULL once it has gone */
-    char cmd[128];
+    char cmd[256];                              /* (a program's path, up to 79, and a tail of up to 126) */
     char prog[80];                              /* the command's first word */
     const char *args;                           /* the rest, from the separator on */
     char path[80];                              /* what the stub is EXECing */
