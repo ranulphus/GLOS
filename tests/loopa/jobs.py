@@ -2920,11 +2920,11 @@ def sdlwin_case(profile, vcard, card, desk):
         # gl: TEXCUBE and SDLGL windowed, their 150th frames
         a, b = os.path.join(out, "texcube-150.ppm"), os.path.join(out, "sdlgl-150.ppm")
         rc1 = agent.ssh("C:\\TEST\\TEXCUBE.EXE --frames 150 --noexit", timeout=900)[0]
-        got_a = fetch("C:/OUT/F00150.PPM", a)
+        got_a = fetch("/C/OUT/F00150.PPM", a)
         agent.ssh("del C:\\OUT\\F00150.PPM")
         m = len(agent.log())
         rc2 = agent.ssh("C:\\TEST\\SDLGL.EXE --frames 150 --noexit", timeout=900)[0]
-        got_b = fetch("C:/OUT/F00150.PPM", b)
+        got_b = fetch("/C/OUT/F00150.PPM", b)
         hooks = re.findall(r"hooks=(\d+)", since(m))
         same = got_a and got_b and open(a, "rb").read() == open(b, "rb").read()
         checks["gl"] = rc1 == 0 and rc2 == 0 and same and bool(hooks) and int(hooks[-1]) > 0
@@ -2982,7 +2982,7 @@ def games_case(profile, vcard, card, desk):
     out = os.path.join(ROOT, "out", "games-" + tag)
     os.makedirs(out, exist_ok=True)
     blaster = "SET BLASTER=A220 I5 D1 H5 T6"
-    fw_args = "-test -fixed -autopilot -frames 1800 -hash"
+    fw_args = "-test -fixed -autopilot -frames 1800 -hash -noexit"
     doom = "D:\\DOOM\\PRBOOMP.EXE -iwad D:\\DOOM\\DOOM.WAD -vidmode gl -timedemo demo1 -dosbench C:\\OUT D1GL1 " \
            "-dbshot 200 -checksum C:\\OUT\\D1GL1.SUM"
     doom_files = ["--games-file", os.path.join(g, "games.json"), "--game", "doom",
@@ -3053,9 +3053,9 @@ def games_case(profile, vcard, card, desk):
         checks["doom-gl"] = "DGL-STUB" not in t and "DGL-GLERR" not in t
         info += " doom-under=%s" % ("%d/%d" % u if u else "?")
         s = os.path.join(out, "D1GL1.SUM")
-        checks["doom-checksum"] = fetch("C:/OUT/D1GL1.SUM", s) and dos_sum is not None and final(s) == dos_sum
+        checks["doom-checksum"] = fetch("/C/OUT/D1GL1.SUM", s) and dos_sum is not None and final(s) == dos_sum
         shot = os.path.join(out, "LD1GL1.PPM")
-        checks["doom-frame"] = fetch("C:/OUT/LD1GL1.PPM", shot) and os.path.exists(dos_shot) \
+        checks["doom-frame"] = fetch("/C/OUT/LD1GL1.PPM", shot) and os.path.exists(dos_shot) \
             and open(shot, "rb").read() == open(dos_shot, "rb").read()
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:

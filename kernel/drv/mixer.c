@@ -31,6 +31,7 @@
 #include "kprintf.h"
 #include "mixer.h"
 #include "mm.h"
+#include "timer.h"
 
 #define STREAMS   8
 #define PERIOD    256                           /* frames */
@@ -45,6 +46,7 @@ static struct strm {
     u32 step, frac;                             /* 16.16: stream frames a mixer frame */
     u8 begun, frame_bytes;
     u32 lin;                                    /* where its app has it */
+    u32 short_run, bursts;                      /* underruns in a row now; bursts logged */
 } st[STREAMS];
 
 static struct {
@@ -81,8 +83,14 @@ static void take(struct strm *s, u32 frames)
     }
     need = (u32)(((unsigned long long)frames * s->step + frac + 0xFFFF) >> 16) + 1;       /* (the last one's neighbour) */
     h->periods++;
-    if (have < need)
+    if (have < need) {
         h->underruns++;
+        s->short_run++;
+    } else if (s->short_run) {                  /* a burst of them over: when, and how long (the first 16) */
+        if (s->bursts++ < 16)
+            kprintf("GLOS-AUDIO short stream=%u periods=%u t=%u\n", s->id, s->short_run, timer_ticks());
+        s->short_run = 0;
+    }
     for (i = 0; i < frames; i++) {
         u32 at = frac >> 16, f = frac & 0xFFFF;
         s32 l, r;
@@ -175,6 +183,7 @@ int mixer_open(struct app *a, u32 rate, u32 channels, u32 bytes, u32 *id, u32 *l
     s->frac = 0;
     s->begun = 0;
     s->frame_bytes = (u8)(channels * 2);
+    s->short_run = s->bursts = 0;
     s->id = mx.next_id++;
     s->lin = *lin;
     s->a = a;

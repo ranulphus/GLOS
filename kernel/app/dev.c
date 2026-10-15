@@ -420,6 +420,10 @@ static u8 in8(struct app *a, u16 port)
     switch (port) {
     case 0x201:                                 /* the gameport: the PC's own (M8: SDL's joystick) */
         return inb(0x201);
+    case 0x3DA:                                 /* the VGA's status (M8): a retrace a millisecond long 70 times
+                                                   a second, so a program's wait for one ends as on a card (each
+                                                   read here is a trap: millions of them took minutes) */
+        return timer_ticks() % 15 == 0 ? 0x09 : 0x00;
     case 0x20: case 0x21: case 0xA0: case 0xA1:
         return vpic_read(&a->pic, port);
     case 0x40:
