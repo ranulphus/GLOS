@@ -157,15 +157,18 @@ struct glos_gpu {
     unsigned option, subsys;    /* its PCI OPTION register and subsystem IDs */
 };
 
-/* GLOS writes it; the app reads it before each piece of work with the engine: if `held` is 0 it calls
-   GLOS_FN_GPU_LOCK; then if `lost` is not what it was the last time, someone else has had the engine since, and
-   whatever the app's HAL believes of the registers is to be forgotten (MGA-Glide's engine_resync()). The lock
-   never leaves the app between that look and its drawing: only in a GLOS or DOS call. */
+/* GLOS writes it; the app reads it before each piece of work with the engine: it clears `quiet`, then if `held`
+   is 0 it calls GLOS_FN_GPU_LOCK, and if `lost` is not what it was the last time, someone else has had the engine
+   since, and whatever the app's HAL believes of the registers is to be forgotten (MGA-Glide's engine_resync()).
+   The lock never leaves the app between that look and its drawing: only in a GLOS or DOS call, or while `quiet`
+   is set. The app sets `quiet` where it does long work without the engine (reading pixels back, converting
+   textures, between frames), so the desktop needn't wait for it; its next look takes the lock again. */
 struct glos_gpu_share {
     unsigned size;
     volatile unsigned held;     /* 1: the engine is the app's (its registers are mapped) */
     volatile unsigned lost;     /* the times it was given the engine after someone else had it */
     volatile unsigned want;     /* someone waits for the engine while the app has it */
+    volatile unsigned quiet;    /* (the app's) 1: it isn't using the engine now; its turn may end at any moment */
 };
 
 /* A stream of sound (GLOS_FN_AUDIO): this header, then its ring of samples (interleaved when there are two

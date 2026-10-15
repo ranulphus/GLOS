@@ -8,8 +8,8 @@
  * stopped only where it can be told: an app's turn ends when someone else
  * wants the engine and the app is at a safe point (in a GLOS API call, or
  * waiting for the system VM in a DOS or BIOS call: never inside the HAL's
- * own work), or by force when a session takes the card (the apps are paused
- * then) or the app is ended. The app learns of it from the page GLOS shares
+ * own work), or quiet (it says so in the shared page: long work without the
+ * engine, between frames), or when it is ended. The app learns of it from the page GLOS shares
  * with it (glos_gpu_share: held, lost) before its next piece of work, and
  * resynchronises (engine_resync).
  *
@@ -91,7 +91,10 @@ static void revoke(struct app *a)
     thread_wake(&g.q);
 }
 
-static int safe(const struct app *a) { return (a->gpu.safe && !a->gpu.granting) || a->kill; }
+static int safe(const struct app *a)
+{
+    return ((a->gpu.safe || a->gpu.share->quiet) && !a->gpu.granting) || a->kill;
+}
 
 static void watchdog(struct app *a, u32 waited)
 {
@@ -124,7 +127,8 @@ static void wait_turn(int force, struct app *me)
         if (g.app)
             g.app->gpu.share->want = 1;
         g.waiting++;
-        thread_wait(&g.q, g.app && g.limit ? start + g.limit : 0);
+        thread_wait(&g.q, g.app ? timer_ticks() + 8 : 0);  /* (an app's turn: looked at again every 8 ms, for its
+                                                   `quiet`, which it sets without telling anyone) */
         g.waiting--;
     }
 }
@@ -265,7 +269,7 @@ int gpu_app_lock(struct app *a)
     return 0;
 }
 
-int gpu_app_holds(const struct app *a) { return g.app == a && !a->gpu.safe; }
+int gpu_app_holds(const struct app *a) { return g.app == a && !a->gpu.safe && !a->gpu.share->quiet; }
 
 void gpu_app_unlock(struct app *a)
 {
@@ -388,6 +392,17 @@ void gpu_app_gone(struct app *a)
     if (a->gpu.share)
         mm_win_free(a->gpu.share, 4096);        /* (its mappings went with its context) */
     a->gpu.share = 0;
+}
+
+int gpu_guards(u32 phys, u32 size)
+{
+    const mga_card_info *c = mga_card();
+    u32 end = phys + size;
+    if (!mga_desktop_card() && !c)
+        return 0;
+    if (!c)
+        return 1;                               /* (a session has the card: its apertures are still not an app's) */
+    return (phys < c->regs_phys + REGS && end > c->regs_phys) || (phys < c->fb_phys + c->vram && end > c->fb_phys);
 }
 
 u32 gpu_stat(char *buf, u32 max)

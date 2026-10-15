@@ -302,6 +302,16 @@ dosgl-inputs:
 	$(Q)git -C $(DOSGL_DIR) log -1 --format="dosgl-inputs: DOS-GL %h %s" 2>/dev/null || true
 loopa-glwin: all dos-tests dosgl-inputs check-deps
 	$(Q)python3 tests/loopa/jobs.py glwin -j $(JOBS)
+# The games windowed (M8 step G): Fifth Wheel (FIFTHWHEEL_DIR, built against DOS-GL unchanged) and PrBoom-plus
+# (DOSGL_DIR's tools/doom/build.sh), on plain DOS and in windows on GLOS desktops.
+games-inputs:
+	@test -f $(FIFTHWHEEL_DIR)/build/dos/FWHEEL.EXE || { echo "games-inputs: no FWHEEL.EXE in $(FIFTHWHEEL_DIR)" >&2; exit 1; }
+	@test -f $(DOSGL_DIR)/build/doom/PRBOOMP.EXE || { echo "games-inputs: no PRBOOMP.EXE in $(DOSGL_DIR) (make doom)" >&2; exit 1; }
+	@mkdir -p build/games
+	$(Q)cp $(FIFTHWHEEL_DIR)/build/dos/FWHEEL.EXE $(FIFTHWHEEL_DIR)/build/data/WORLD.PAK build/games/
+	$(Q)cp $(DOSGL_DIR)/build/doom/PRBOOMP.EXE $(DOSGL_DIR)/build/doom/PRBOOM.WAD $(DOSGL_DIR)/tools/doom/games.json build/games/
+loopa-games: all dos-tests games-inputs check-deps
+	$(Q)python3 tests/loopa/jobs.py games -j $(JOBS)
 # SDL3 windowed (M8 step F): DOS-GL's SDL examples (SDL patches 0008-0009) on GLOS desktops.
 loopa-sdlwin: all dos-tests dosgl-inputs check-deps
 	$(Q)python3 tests/loopa/jobs.py sdlwin -j $(JOBS)

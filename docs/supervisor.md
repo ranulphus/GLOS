@@ -1040,6 +1040,9 @@ direct = 1
 - Retail DOS/4GW games were only ever tested under DOS/4GW with no external DPMI host, where linear equals
   physical.
 - Other ranges are mapped into the user region.
+- **Not for apps on the Matrox card (M8):** while the desktop is (or was last) on a Matrox card, a GLOS app's 0800h
+  of a range touching the card's registers or memory is refused (8012h): those are `GLOS_FN_GPU`'s, the registers
+  behind the GPU lock and the memory the app's own blocks only (graphics.md §7). Sessions map the card as before.
 
 ### 12.5 GLOS apps: contexts with threads (M6 step A; `kernel/app/`)
 
@@ -1116,6 +1119,15 @@ direct = 1
   are passed up as in a session.
 - **Per app, kept by the kernel:** 1 KB for the vector copy, the DTA pointer, the drive and directory (one
   directory: the current drive's), a child's exit code.
+
+### 12.6 Apps' devices added in M8 (`kernel/app/dev.c`)
+
+- **COM1** is a UART of the app's own: always ready to send, receiving nothing; every line it writes there goes
+  into GLOS's log as it is (DOS-GL's `DGL-` lines and the test shims' `HX-` lines reach Loop A so).
+- **The gameport** (201h) is the PC's own, read and written through (SDL's joystick times its one-shots there).
+- **The SB16** is GLOS's mixer's while the desktop has the screen: its line is claimed from the system VM
+  (`vm_claim_irq`) and given back to it when a session takes the screen (`vm_unclaim_irq`); apps reach it only
+  through `GLOS_FN_AUDIO` streams (graphics.md §7.4).
 
 ## 13. INT 31h function table
 

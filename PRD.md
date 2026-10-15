@@ -4,10 +4,10 @@
 
 | | |
 |---|---|
-| Status | v0.5 — M7's Matrox 2D (2026-10-14), after v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
-| Last updated | 2026-10-13 |
-| Supersedes | v0.1. Changes are listed in Appendices D to F |
-| Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md), [docs/milestones-m6.md](docs/milestones-m6.md) and [docs/milestones-m7.md](docs/milestones-m7.md) (work breakdown) |
+| Status | v0.6 — M8's windowed DOS-GL, SDL3 and the mixer (2026-10-15), after v0.5 (M7's Matrox 2D, 2026-10-14), v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
+| Last updated | 2026-10-15 |
+| Supersedes | v0.1. Changes are listed in Appendices D to H |
+| Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md), [docs/milestones-m6.md](docs/milestones-m6.md), [docs/milestones-m7.md](docs/milestones-m7.md) and [docs/milestones-m8.md](docs/milestones-m8.md) (work breakdown) |
 | Licence | MIT |
 | Companion projects | MGA-Glide (`~/MGA-Glide`: the Loop A/B/C harness and the shared Matrox HAL), DOS-GL (`~/DOSGL`: OpenGL for Matrox cards and the SDL3 bridge), Fifth Wheel and the dgk kit (`~/FifthWheel`), DOSBench (`~/DOSBench`) |
 
@@ -152,7 +152,7 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D21** | **The kernel clock is the RTC periodic interrupt** (IRQ8, 1024 Hz by default, 256–8192 Hz configurable), always reading register C. The RTC is virtualised per VM from the start; INT 15h 86h/83h become sleeps. **GLOS keeps PIT channel 0 in mode 2, count FFFFh, and never latches it; exclusive sessions get ports 40h–43h and 61h passed through; GLOS apps (M6) get a virtual PIT.** | Programs reprogram PIT channel 0 far more often than they touch the RTC. Mode 2/FFFFh is what DJGPP's `uclock` sets, so latched reads stay coherent with the BIOS tick at 0x46C. A 486 has no TSC, so the tick count is the clock there. | M2 |
 | **D22** | **The DOS server:** one lock covers the whole system VM (every real-mode call, every BIOS and VBE call). Per-app DOS state is swapped on each call. Agent file operations wait until DOS is idle. | DOS isn't re-entrant and its per-process state is global (§6.8). | M6 |
 | **D23** | **GLOS is detected through DPMI function 0A00h with the vendor string "GLOS"**, which returns a versioned entry point. GLOS never answers INT 2Fh 1600h and never broadcasts 1605h. | This is the standard DPMI vendor-extension mechanism. Claiming to be Windows would make TSRs and programs expect Windows behaviour. | M6 |
-| **D24** | **GPU ownership is enforced by page faults.** A program's Matrox MMIO pages stay unmapped until it holds the GPU lock. The HAL gains `engine_resync()` for every change of owner, and a watchdog resets the engine and kills an app that holds the lock too long. | Every owner change is visible to the supervisor, and stale HAL state can't overflow the FIFO. | M8 |
+| **D24** | **GPU ownership is enforced by page faults.** A program's Matrox MMIO pages stay unmapped until it holds the GPU lock. The HAL gains `engine_resync()` for every change of owner, and a watchdog resets the engine and kills an app that holds the lock too long. *Worked out in M8: D44.* | Every owner change is visible to the supervisor, and stale HAL state can't overflow the FIFO. | M8 |
 | **D25** | **No EMS, VCPI or UMBs in v1.** GLOS provides its own XMS 3.0 server, and the first MB is identity-mapped in every address space. | Matches the HIMEM-only baselines. SDL's Sound Blaster driver assumes linear = physical below 1 MB for its DMA buffer. | After v1 |
 | **D26** | **Provenance: write from specifications.** Code under GPL, Artistic or no licence (Jemm, HDPMI, CWSDPMI, DPMIONE, 386MAX, the FreeDOS kernel, Watt-32, mTCP) is reference and test baseline only, never copied. Leaked Microsoft source is never consulted. | An MIT licence that holds up (§17). | — |
 | **D27** | **Changes to the shared HAL and harness go into MGA-Glide first, with its full regression.** GLOS pins MGA-Glide in `deps.mk` and vendors the HAL with `sync-hal` once the kernel needs it. | The project-wide rule that DOS-GL and DOSBench already follow. | — |
@@ -172,6 +172,11 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D41** | **Minimal conventional memory: a resident stub of 4 KB or less from M3**, holding only the real-mode code that must run inside DOS (kernel-call and XMS entry points, the kill stub, real-mode stacks, the EXEC loop). No C runtime stays resident, and the DPMI host asks for no real-mode memory per client. **Later, an opt-in setting** puts the stub in an unused upper-memory page that GLOS maps itself, leaving only the PSP and environment (about 0.5 KB). (User, 2026-10-02) | Programs get as much conventional memory as plain DOS gives them. M2's measured cost was 37 KB, because the whole of GLOS.EXE stayed loaded. The upper-memory page is GLOS's own use, so D25 (no UMBs for programs) stands; it is opt-in because adapter ROMs make free pages hard to be sure of. | M3 (stub), M9 (UMA option) |
 | **D42** | **A DOS program in a window is drawn in the VGA's own fonts**, at the cell size of its text mode: the video card's 8, 14 and 16-row ROM fonts, which GLOS reads from the card (as `glos shot` does already), and a font the program has loaded where GLOS can see it. Never the UI fonts. (User) | It must look the same in a window as it does full-screen; in another typeface it would look odd. The fixed-width UI font is for GLOS's own apps. Reading the card's own ROM gives exactly that card's letters and puts no font data of IBM's in GLOS. | With DOS programs in windows (D5, after v1); any terminal that shows a DOS program's text |
 | **D43** | **On a Matrox card the desktop's own windows keep their pixels in VRAM; apps' windows keep theirs in the system's memory until M8.** The task bar's and the kernel's windows' stores go into the card's memory while there is room, and move into the system's memory before a session or another mode; an app's window stays in pages of the system's memory, which the app maps, and the engine copies them to the screen from there. (M7 step E, 2026-10-14) | A session takes the card's memory whole, so whatever is there must leave it first. An app's mapped window can't be moved from under it while it may be drawing: it would draw into the session's memory. The CPU also reads the card's memory slowly. M8's GPU lock says when an app may touch the card; apps' VRAM comes with it. | M7 (desktop), M8 (apps) |
+| **D44** | **An app's turn with the engine ends only at a safe point, when someone else wants the engine:** in a GLOS API call, a DOS or BIOS call, or a halt; while the app says it is quiet (long work without the engine: reading pixels back, converting textures, between frames); at its end; or, for a session or another mode, at its next safe point (it isn't paused before one). It is not given back at swaps. A page shared with the app says whether it holds the lock and how often others had the engine since; before each piece of engine work it takes the lock if need be and resynchronises its HAL if others had it. Hand-overs drain the engine. The watchdog ends an app that keeps a waiting thread waiting past the limit (500 ms, `[display] gpu_watchdog`). The cursor and display start are outside the lock. (M8 step B, 2026-10-15) | An app stopped between two register writes would go on with the engine in another's state; at a GLOS or DOS call it is never in the middle of its HAL's work. Giving the lock up at swaps would leave the desktop waiting through level loads, which never swap. | M8 |
+| **D45** | **Apps get blocks of VRAM from the top of the card's memory, at offsets that stay theirs, and see only those** (a view in which each is at its own offset); before a session or another mode they are copied into the system's memory and back to the same offsets after, and an app whose blocks can't come back is ended. A window can show part of a block of its app's (`GLOS_FN_WINVRAM`): a GL swap is that call with the other buffer. Apps can't map the card's apertures themselves (0800h). (M8 step C) | The engine's addresses can't be virtualised: an app's offsets must not move under it. Showing the app's own buffer costs no copy by the CPU, and the composer already copies VRAM windows with the engine (D43). | M8 |
+| **D46** | **Windowed GL needs a Matrox card drawing a 16-bit RGB565 desktop** (`GLOS_CAP_GLWIN`); elsewhere (8 or 32 bits, VBE cards) DOS-GL and SDL programs run full-screen as sessions, exactly as on DOS. Capabilities describe the desktop a program will have, also while its own session has the screen. (M8 step D) | DOS-GL draws RGB565 and the engine's copies don't convert. 32 bits can come later by presenting into a 32-bit window with `engine_present` (refines §9.2). | M8 |
+| **D47** | **The mixer is the desktop's:** GLOS plays the SB16 while the desktop has the screen (16-bit stereo, 22050 Hz by default, `[sound] rate`), mixing the apps' streams from the card's interrupt; a session that takes the screen gets the card and its line, and `[sound] mixer = off` leaves it to programs. Underruns are counted per stream; SDL's `glos` driver logs them as patch 0005 does. (M8 step E) | Refilling never waits for an app (§10.5); sessions keep the card they expect. 22050 Hz is what the games ask for and keeps a 486's mixing cheap. | M8 |
+| **D48** | **Apps' writes to COM1 reach GLOS's log line by line, and the gameport is theirs.** A virtual UART per app takes what it writes there (DOS-GL's and the tests' lines); port 201h passes through. (M8) | The serial lines DOS-GL and the test shims write are how Loop A sees a program; the joystick is timed by its own reads. | M8 |
 
 ---
 
@@ -592,19 +597,19 @@ with no glyph cache.
 
 ### 9.6 GPU ownership
 
-- **Lock.** A program takes the GPU lock with its first access to the chip after a swap, and releases it at its next swap or yield.
+- **Lock.** A program takes the GPU lock with `GLOS_FN_GPU_LOCK` or its first access to the chip, and keeps it until someone else wants the engine while the program is at a safe point: a GLOS or DOS call (D44). Not at swaps.
 - **Enforcement.** The Matrox MMIO pages are unmapped from every app that doesn't hold the lock. The first access faults, the supervisor hands over the lock, maps the pages and resumes the program (D24). The desktop's own 2D drawing takes the same lock.
-- **Change of owner.** Each new owner gets `engine_resync()`: re-read FIFO status and drop cached OPMODE, MACCESS and DMA-window state (`fifo.c` keeps `fifo_free` in a static). Then `engine_restore` puts back the owner's own target and clip.
-- **Watchdog.** If a lock is held past the limit (configurable, default 500 ms), GLOS resets the engine (`engine_reset`) and kills the app.
+- **Change of owner.** The engine is drained. Each new owner whose engine someone else had gets `engine_resync()` (DOS-GL from the shared page's count; the kernel itself): FIFO status read again, the shadows dropped, its own target and clip written.
+- **Watchdog.** If a thread waits for the engine past the limit (configurable, default 500 ms) while an app holds it outside a safe point, GLOS resets the engine (`engine_reset`) and kills the app.
 - **Cursor.** The hardware cursor keeps the pointer moving while a long GL frame holds the lock.
 
 ### 9.7 Windowed DOS-GL
 
 - Each GL window gets its own colour and Z buffers in VRAM.
-- `dglSwapBuffers` becomes a clipped `engine_present` (or a blit, when no scaling is needed) of the back buffer into the window's visible rectangles.
+- `dglSwapBuffers` tells GLOS which buffer the window shows (`GLOS_FN_WINVRAM`); the desktop's composer copies it into the window's visible rectangles with the engine (D45).
 - Full-screen GL apps flip pages, setting the display start through the CRTC.
 - A GL app's address space maps only its own VRAM, never the desktop's front buffer.
-- Whether resizing a window reallocates the buffers or scales them is open (Q15).
+- A GL window has a fixed size; a program changes size as on DOS, with a new context (Q15, answered in v0.6).
 
 ### 9.8 Capture and VNC hooks
 
@@ -648,18 +653,18 @@ On plain DOS nothing changes.
 
 ### 10.4 SDL3
 
-SDL patches 0007 onward (in `~/DOSGL/tools/sdl/patches`) add a GLOS backend to SDL's DOS port:
+SDL patches 0008 and 0009 (in `~/DOSGL/tools/sdl/patches`) add a GLOS backend to SDL's DOS port:
 - **video:** windows; OpenGL through DOS-GL's GLOS path;
 - **audio:** GLOS mixer streams;
 - **input:** GLOS events.
 
-Each app keeps SDL's cooperative threads in v1, and GLOS preempts between apps. Whether SDL threads should map onto GLOS threads is open (Q12).
+Each app keeps SDL's cooperative threads in v1, and GLOS preempts between apps (Q12, answered in v0.6).
 
 ### 10.5 Audio mixer
 
 - The SB16 runs in auto-init DMA, and the mixer refills from the Sound Blaster interrupt. Refilling never depends on when apps yield.
 - Apps queue samples into their streams. The mixer converts rates and applies per-app volumes.
-- Exclusive sessions get the card directly.
+- Exclusive sessions get the card directly: the mixer stops it when a session takes the screen (D47).
 
 ### 10.6 Toolkit and native apps
 
@@ -1020,10 +1025,10 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 | Q9 | *Answered (v0.2):* HOT-433A with i486DX2-66 and iDX4-100; S3 Trio64V2/DX (§4.7) | — |
 | Q10 | A 486 bench PC, so the minimum spec is measured and not modelled. *User: maybe later; modelled meanwhile.* | M5 |
 | Q11 | Our own retained-mode toolkit, or microui/Nuklear underneath | M6 |
-| Q12 | SDL threads under GLOS: keep SDL's cooperative scheduler per app, or map them onto GLOS threads | M8 |
+| Q12 | *Answered (v0.6):* SDL keeps its cooperative scheduler inside each app; GLOS preempts between apps | — |
 | Q13 | VNC encodings and the recording format | M10 |
 | Q14 | *Answered (v0.2):* yes, in v1 (D30) | — |
-| Q15 | Resizing DOS-GL windows: reallocate the buffers, or keep the size and scale with `engine_present` | M8 |
+| Q15 | *Answered (v0.6):* neither: a GL window has a fixed size (`GLOS_WIN_FIXED`); a program changes size with a new context, as on DOS | — |
 | Q16 | *Answered (v0.4):* DejaVu Sans, Sans Bold and Sans Mono at 11 pixels (D37); a DOS program's text is in the VGA's own fonts (D42) | — |
 | Q17 | Which programs need direct-mode profiles by default. *M0 survey (docs/survey-iopl0.md): none among ours or Screamer Rally; the M4e forced-direct runs check the rest.* | M4e |
 | Q18 | GLOS's own shell for the terminal app (§10.6): a command interpreter of our own, more modern than COMMAND.COM (the owner's idea, 2026-10-13). To settle: its commands and syntax, how much of DOS's it keeps, batch files (its own interpreter, or handed to `COMMAND.COM /C` as the agent does), and how it starts DOS programs (full-screen sessions in v1; in windows after, D5). COMMAND.COM itself stays runnable full-screen as any DOS program | M9 |
@@ -1245,3 +1250,8 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
 
 - **D43** (M7 step E): the desktop's own windows' pixels in VRAM on a Matrox card, apps' in the system's memory until M8; §9.5 says so, and that there is no glyph cache.
 - **M7 done** (2026-10-15): docs/milestones-m7.md has the plan, the status and the exit's evidence, docs/graphics.md §6 the design.
+
+## Appendix H: Changes in v0.6 (2026-10-15)
+
+- **D44-D48** (M8): the GPU lock's safe points, apps' VRAM and windows that show it, windowed GL on 16-bit Matrox desktops, the mixer as the desktop's, apps' COM1 and gameport. D24 points at D44; §9.6, §9.7, §10.4 and §10.5 say what was built; Q12 and Q15 are answered.
+- docs/milestones-m8.md has the plan and status, docs/graphics.md §7 the design.

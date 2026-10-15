@@ -3,7 +3,7 @@
 What [supervisor.md](supervisor.md) is for the supervisor, for PRD §9 and §10: the 2D library, the display, the
 window manager, input, apps' windows through the API, and the Matrox card's acceleration (§6). Each part says
 what is built and where. Plan and status: [milestones-m6.md](milestones-m6.md),
-[milestones-m7.md](milestones-m7.md).
+[milestones-m7.md](milestones-m7.md), [milestones-m8.md](milestones-m8.md).
 
 ## 1. The 2D library (`kernel/gfx/`, `include/glos/gfx.h`)
 
@@ -407,8 +407,9 @@ library's software draws (the M7 exit).
 - Before a session takes the screen, at `glos display off` and when GLOS leaves, the engine is drained and let
   go of (`GLOS-MGA down`): the card is the session's from then.
 - **One thread at a time.** The HAL keeps its FIFO count and register shadows in variables of its own, so every
-  use of the engine (a draw, a sync, the cursor, bringing it up or down) takes the engine's lock, each draw on
-  its own: the composer's thread, the VM thread's test card and mode sets, `glos shot`'s thread.
+  use of the engine (a draw, a sync, bringing it up or down) takes the engine's lock, each draw on its own: the
+  composer's thread, the VM thread's test card and mode sets, `glos shot`'s thread. From M8 the lock is the GPU
+  lock, shared with apps (§7.1), and the cursor is outside it.
 - `glos display` says `accel on` (the chip, VRAM, free, the largest block, the draws so far), `idle`, `off`
   or `none`.
 
@@ -460,3 +461,108 @@ library's software draws (the M7 exit).
   software pictures, the engine's state through every change, `accel = off`, the pointer at a place against a
   golden (the card's cursor in the screenshot), the desktop's windows in VRAM after a session and from VRAM and
   memory both.
+
+## 7. The engine shared with apps, windowed GL and the mixer (M8)
+
+Plan and status: [milestones-m8.md](milestones-m8.md). A program with its own copy of MGA-Glide's HAL (DOS-GL)
+draws with the Matrox card's engine itself, in a window, beside the desktop and other such programs; GLOS mixes
+everybody's sound into the Sound Blaster.
+
+### 7.1 The GPU lock (`kernel/gfx/gpu.c`; PRD D24)
+
+- **One owner at a time:** a kernel thread (each of mga.c's uses: the composer's draws, the test card, `glos shot`'s
+  sync, the mode's bring-up and let-go) or an app. A kernel thread waits for an app; kernel threads take it from
+  each other as before (nested within one).
+- **An app takes it** with `GLOS_FN_GPU_LOCK`, or by touching the card's registers: the 16 KB of them are mapped
+  into the app (`GLOS_FN_GPU` says where) only while it holds the lock, so a touch without it faults, and the fault
+  takes the lock for it, waiting if need be. A program that never asks is kept out of others' turns too.
+- **An app's turn ends only at a safe point**, and only when someone else wants the engine: when it enters a GLOS
+  API call or a DOS or BIOS call (where it waits for the system VM), or halts, or while it is *quiet*: it sets the
+  shared page's `quiet` where it does long work without the engine (DOS-GL: reading pixels back, converting
+  textures, from each swap to the next frame's drawing), and its next look at the page clears it. A waiting thread
+  looks at an owner's `quiet` every 8 ms. DOS-GL's conformance test 27 (two full frames read back and made into
+  textures with no call in between) had the watchdog end it before `quiet` existed. Never in the middle of its own
+  drawing, so its HAL's register shadows and FIFO count are never wrong half-way through a sequence. Its turn also
+  ends when it ends, and when a session or another mode takes the card (then it runs on to its next safe point
+  before it is paused: `app_return` doesn't pause an app that holds the lock outside one). GLOS doesn't take the
+  lock back at swaps: a game would otherwise give it up and take it again every frame for nothing, and keep the
+  desktop off it through level loads that never swap.
+- **The shared page** (`struct glos_gpu_share`): `held`, and `lost`, the times the app was given the engine after
+  someone else had it; `quiet`, the app's. Before each piece of work with the engine the app clears `quiet`, takes
+  the lock if `held` is 0, and if
+  `lost` moved it resynchronises (`engine_resync`: the shadows dropped, FIFO space read again, target and clip
+  written; DOS-GL also marks its GL state to be written again). Nothing can take the lock between that look and
+  its drawing.
+- **Hand-overs:** the engine is drained between two owners (a second at most; then the HAL resets it, and an app
+  that left it hung is ended: `gpu-hang`), and the kernel's HAL resynchronises when it gets the engine back from an
+  app. The hardware cursor and the display start are the RAMDAC's and the CRTC's registers, not the engine's: they
+  are written with interrupts off for a moment, whoever has the engine, so the pointer moves through a long frame.
+- **The watchdog:** a thread that has waited longer than the limit (`[display] gpu_watchdog`, 500 ms; `off`) for
+  an app outside a safe point ends that app (`GLOS-GPU watchdog`, `GLOS-APP kill reason=gpu-watchdog`) and resets
+  the engine. Nobody waiting, nothing to recover.
+- `glos display` adds `gpu owner=... turns=... faults=... watchdogs=... hangs=...`.
+
+### 7.2 Apps' VRAM and windows that show it
+
+- **Blocks** (`GLOS_FN_VRAM`) come from the top of the card's memory (the screen, the cursor and the desktop's
+  windows from the bottom), at offsets that stay the app's for its life. The app sees its own blocks at their
+  offsets from its view's base (`struct glos_gpu`'s `base`), nothing else of the card, so a HAL's `mga_fb + off`
+  and the engine's offset are one number.
+- **Before the card is another's** (a session, another desktop mode, the desktop off) the apps' views are unmapped
+  and the blocks' contents copied into frames of the system's memory (`GLOS-MGA vram-out app=`); on the next
+  desktop they are reserved again at the same offsets and copied back (`vram-in`). A touch meanwhile waits for the
+  desktop. An app whose blocks no longer fit beside the new screen, or for which memory runs short, is ended
+  (`vram-lost`).
+- **`GLOS_FN_WINVRAM`** makes a window show part of a block of the app's (`wm_window.ext`): the composer copies from
+  there with the engine as from the desktop's own windows. A swap is the same call with the other buffer: nothing
+  is copied by the CPU, and the screen follows when the composer next runs. Only on a desktop of 16 bits in RGB565
+  (`GLOS_CAP_GLWIN`); dropped when the window's size or the screen's format changes, and when the block is freed.
+
+### 7.3 Windowed DOS-GL (DOS-GL's `src/dgl/glos.c`)
+
+Under GLOS with `GLOS_CAP_GLWIN`, `dglInit` makes the program an app (or finds it one already) and opens a window
+of the context's size (`GLOS_WIN_FIXED`: Q15, no scaling) titled with the program's name; GLOS refusing the app (a
+session's child, an exclusive session) or `DGL_FULLSCREEN=1` leave it full-screen, as a session. The chip comes from
+`GLOS_FN_GPU`, not the PCI bus or VBE; the two colour buffers, the depth buffer and the texture heap are blocks of
+VRAM; a swap is `GLOS_FN_WINVRAM`. `DGL_GPU_ENTER` (the shared page's look, §7.1) is at the start of every piece of
+engine work: drawing (`emit_begin`), clears, syncs, targets, the swap. The window is 16 bits; GL windows need a
+16-bit desktop (32 bits: later, by presenting into a 32-bit window with `engine_present`).
+
+Capabilities (`GLOS_FN_VERSION`'s EBX) describe the desktop a program will have, not the screen this instant: an
+unmarked DOS-GL program starts as a session, which has taken the screen, and asks then.
+
+### 7.4 The mixer (`kernel/drv/sb16.c`, `kernel/drv/mixer.c`; PRD §10.5)
+
+- While the desktop has the screen GLOS plays the SB16 itself (BLASTER's or `[sound] blaster`'s A, I, H; DSP 4):
+  16-bit stereo at `[sound] rate` (22050 by default; 11025 and 44100), auto-initialised DMA from a buffer of two
+  halves of 256 frames, the card's line claimed from the system VM. `[sound] mixer = off` leaves the card to
+  programs.
+- **Streams** (`GLOS_FN_AUDIO`): a ring of signed 16-bit samples (mono or stereo, 4,000 to 48,000 a second) in pages
+  shared with the app (`struct glos_stream`), the app moving `write`, the mixer `read`. At each half's interrupt
+  the mixer converts every stream's rate (16.16 steps, linear between neighbours, all in integers), applies its
+  volume, sums and clips. A period in which a stream that has begun has too few samples is an underrun: what there
+  is plays, then silence. Paused apps' streams wait with them.
+- **Sessions get the card:** when a session takes the screen the mixer stops the card and gives its line back to
+  the system VM; at the session's end the DSP is reset as before (only when the mixer wasn't playing) and the mixer
+  starts again with the desktop. `glos audio` shows the mixer and its streams.
+
+### 7.5 SDL3 (DOS-GL's SDL patches 0008, 0009)
+
+SDL's `glos` video driver (chosen before `vesa` when GLOS has `GLOS_CAP_GLWIN`): GLOS windows for software windows
+(their pixels, presented by rectangle) and DOS-GL's window for OpenGL ones; "fullscreen" is a window of the mode's
+size; keys, the mouse (relative mode from the moves), focus, size and close as GLOS events. Its `glos` audio driver
+(with `GLOS_CAP_AUDIO` too): a stream the audio thread keeps full, yielding as the Sound Blaster driver does; closing
+it logs `GLOS: U of N chunks underran`. SDL keeps its cooperative threads inside the app (Q12). The gameport is
+passed through to apps; their writes to COM1 reach GLOS's log line by line (a virtual UART in `app/dev.c`).
+
+### 7.6 Tests
+
+- `make loopa-gpu` (GPUTEST): two apps drawing with the engine into their own VRAM while the desktop moves their
+  windows, every frame's pixels checked; a session between frames; the registers touched without the lock; a hung
+  app ended by the watchdog; VRAM given back; refused on an 8-bit desktop. G200, G400, G450, and the 486 with a PCI
+  G450.
+- `make loopa-audio` (AUDTEST): tones through streams at three rates, two at once, one beside a session; recorded by
+  86Box and found; no underrun while fed.
+- `make loopa-glwin` (DOSGL_DIR): DOS-GL's 27 conformance programs full-screen on plain DOS and windowed on GLOS,
+  every frame the same bytes. `make loopa-sdlwin`: DOS-GL's SDL examples windowed. `make loopa-games`
+  (FIFTHWHEEL_DIR too): Fifth Wheel and PrBoom-plus's GL timedemo windowed, as on DOS, with no underrun.

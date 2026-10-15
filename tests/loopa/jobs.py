@@ -2745,7 +2745,9 @@ def glwin_case(profile, vcard, card, desk):
     """Windowed DOS-GL (M8 step D; DOS-GL's src/dgl/glos.c, kernel/gfx/gpu.c): DOS-GL's conformance programs
     (build/dosgl/conform, from DOSGL_DIR: make dosgl-inputs), the same EXEs, run full-screen on plain DOS and then
     each in a window on a GLOS desktop, which it opens itself; every frame each writes (glReadPixels of its own
-    buffer) identical between the two. Under GLOS each is an app with a window and its turns with the engine."""
+    buffer) identical between the two. Under GLOS each is an app with a window and its turns with the engine. Then
+    a forced GL hang: TEXCUBE --hang keeps the engine in the middle of a frame until the watchdog ends it, and the
+    next program draws right."""
     import time
     tag = "%s-%s" % (profile, vcard)
     src = os.path.join(ROOT, "build/dosgl/conform")
@@ -2756,6 +2758,7 @@ def glwin_case(profile, vcard, card, desk):
     for t in tests:
         files += ["--file", "%s=/TEST/%s" % (os.path.join(src, t), t)]
     checks, info = {"tests": bool(tests)}, " tests=%d" % len(tests)
+    texcube = os.path.join(ROOT, "build/dosgl/sdl/TEXCUBE.EXE")
     # Full-screen, on plain DOS.
     dos = []
     for t in tests:
@@ -2768,7 +2771,7 @@ def glwin_case(profile, vcard, card, desk):
     checks["dos-ran"] = dos_log.count("HX-DONE 0") == len(tests) + 1
     # Windowed, on GLOS's desktop.
     agent = Agent("glwin-" + tag, profile, card, ["--card", vcard] + files + [
-        "--cmd", "SERSAY HX-START glwin", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--file", texcube + "=/TEST/TEXCUBE.EXE", "--cmd", "SERSAY HX-START glwin", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
         "--cmd", "VECCHK check", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=3600)
     checks["listen"] = agent.listening()
     try:
@@ -2787,12 +2790,33 @@ def glwin_case(profile, vcard, card, desk):
         gpu = agent.ssh("glos display")[1]
         m = re.search(r"gpu owner=\S+ turns=(\d+)", gpu)
         checks["turns"] = bool(m) and int(m.group(1)) > len(tests)
+        # A forced GL hang (the exit's fourth check): TEXCUBE begins a frame and never finishes it; the desktop
+        # wants the engine (glos shot), the watchdog ends the program and resets the engine, and GL draws right
+        # again after.
+        mark = len(agent.log())
+        h = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\TEXCUBE.EXE --frames 300 --hang --noexit"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 300 and "HX-TEXCUBE hang" not in agent.log()[mark:]:
+            time.sleep(1)
+        time.sleep(2)
+        subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=300)
+        try:
+            hrc = h.wait(timeout=300)
+        except subprocess.TimeoutExpired:
+            h.kill()
+            hrc = None
+        t = agent.log()[mark:]
+        checks["hang-ended"] = hrc == 255 and "GLOS-GPU watchdog" in t and "reason=gpu-watchdog" in t
+        if tests:
+            again = agent.ssh("C:\\TEST\\%s --noexit" % tests[0], timeout=900)[0] == 0
+            checks["after-hang"] = again
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
     checks["apps"] = text.count("GLOS-APP start id=") >= len(tests)
-    checks["windowed-done"] = text.count("HX-DONE 0") == len(tests) + 1
+    checks["windowed-done"] = text.count("HX-DONE 0") >= len(tests) + 1
     # The frames: the same bytes.
     a_dir, b_dir = os.path.join(ROOT, "out", name, "files"), os.path.join(ROOT, "out", "glwin-" + tag, "files")
     frames = sorted(f for f in os.listdir(a_dir) if f.upper().endswith(".PPM")) if os.path.isdir(a_dir) else []
@@ -2831,7 +2855,7 @@ def sdlwin_case(profile, vcard, card, desk):
     for e in exes:
         files += ["--file", "%s=/TEST/%s.EXE" % (os.path.join(src, e + ".EXE"), e)]
     files += ["--file", "%s=/TEST/SDLGLX.EXE" % os.path.join(src, "SDLGL.EXE")]
-    cfg = os.path.join(out, "GLOS.CFG")
+    cfg = os.path.join(ROOT, "out", "sdlwin-%s.cfg" % tag)        # (not in the run's own directory: run.py empties it)
     with open(cfg, "w") as f:
         f.write("[program SDLGL.EXE]\nenv = DGL_SNAP=150\nenv = DGL_STATS=1\n"
                 "[program TEXCUBE.EXE]\nenv = DGL_SNAP=150\n"
@@ -2938,6 +2962,110 @@ def sdlwin_case(profile, vcard, card, desk):
     checks["done"] = "GLOS-EXIT code=0" in text and "HX-VECCHK ok" in text
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("sdlwin-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+# (machine, video card, network card, desktop): the games windowed (M8 step G)
+GAMES_CASES = [("bf6", "g450", "ne2kpci", "800x600x16"), ("bf6", "g200", "ne2kpci", "800x600x16")]
+
+
+def games_case(profile, vcard, card, desk):
+    """The games windowed (M8 step G; build/games from FIFTHWHEEL_DIR and DOSGL_DIR: make games-inputs): Fifth Wheel
+    (its source unchanged, built against DOS-GL with SDL's glos drivers) driving itself for 1800 fixed-step frames,
+    and PrBoom-plus's GL timedemo of DOOM's demo 1, each first full-screen on plain DOS (the same EXEs) and then in a
+    window on a GLOS desktop with the SB16 the mixer's: Fifth Wheel's frame hashes the same, PrBoom's gametics, game-
+    state checksum and frame 200 the same, no GL call refused, and on GLOS no chunk underran (SDL patch 0005's count:
+    GLOS: U of N chunks underran)."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    g = os.path.join(ROOT, "build/games")
+    out = os.path.join(ROOT, "out", "games-" + tag)
+    os.makedirs(out, exist_ok=True)
+    blaster = "SET BLASTER=A220 I5 D1 H5 T6"
+    fw_args = "-test -fixed -autopilot -frames 1800 -hash"
+    doom = "D:\\DOOM\\PRBOOMP.EXE -iwad D:\\DOOM\\DOOM.WAD -vidmode gl -timedemo demo1 -dosbench C:\\OUT D1GL1 " \
+           "-dbshot 200 -checksum C:\\OUT\\D1GL1.SUM"
+    doom_files = ["--games-file", os.path.join(g, "games.json"), "--game", "doom",
+                  "--file", os.path.join(g, "PRBOOMP.EXE") + "=D:/DOOM/PRBOOMP.EXE",
+                  "--file", os.path.join(g, "PRBOOM.WAD") + "=D:/DOOM/PRBOOM.WAD"]
+    checks, info = {"inputs": all(os.path.exists(os.path.join(g, f)) for f in
+                                  ("FWHEEL.EXE", "WORLD.PAK", "PRBOOMP.EXE", "PRBOOM.WAD", "games.json"))}, ""
+
+    def hashes(text):
+        return [l for l in text.split("\n") if l.startswith("FW-HASH")]
+
+    def underran(text, what):
+        m = re.findall(r"%s: (\d+) of (\d+) chunks underran" % what, text)
+        return (int(m[-1][0]), int(m[-1][1])) if m else None
+
+    def final(path):                            # the checksum file's last digest
+        return [l.split()[-1] for l in open(path, errors="replace") if l.strip()][-1] if os.path.exists(path) else None
+
+    # Full-screen, on plain DOS.
+    name = "games-dos-" + tag
+    run(name, ["--machine", profile, "--card", vcard, "--sound", "sb16", "--pre", blaster, "--mem", "64",
+               "--timeout", "3600", "--idle", "300", "--file", os.path.join(g, "FWHEEL.EXE") + "=/TEST/FWHEEL.EXE",
+               "--file", os.path.join(g, "WORLD.PAK") + "=/TEST/WORLD.PAK", "--pre", "SET DOOM_SERIAL=1",
+               "--pre", "SET LFN=n"] + doom_files + ["--cmd", "SERSAY HX-START games",
+               "--cmd", "C:\\TEST\\FWHEEL.EXE " + fw_args, "--cmd", doom, "--cmd", "SERSAY HX-DONE 0"])
+    dos = open(os.path.join(ROOT, "out", name, "serial.log"), "rb").read().decode("latin-1").replace("\r", "") \
+        if os.path.exists(os.path.join(ROOT, "out", name, "serial.log")) else ""
+    dos_hashes = hashes(dos)
+    checks["dos-fw"] = len(dos_hashes) >= 30
+    checks["dos-doom"] = "DOOM-TIMED gametics=1710" in dos
+    dos_sum = final(os.path.join(ROOT, "out", name, "files", "D1GL1.SUM"))
+    dos_shot = os.path.join(ROOT, "out", name, "files", "LD1GL1.PPM")
+    # Windowed, on GLOS.
+    cfg = os.path.join(ROOT, "out", "games-%s.cfg" % tag)         # (not in the run's own directory: run.py empties it)
+    with open(cfg, "w") as f:
+        f.write("[program PRBOOMP.EXE]\nenv = DOOM_SERIAL=1\nenv = LFN=n\n")
+    agent = Agent("games-" + tag, profile, card, ["--card", vcard, "--sound", "sb16", "--pre", blaster, "--mem", "64",
+        "--file", cfg + "=/TEST/GLOS.CFG", "--file", os.path.join(g, "FWHEEL.EXE") + "=/TEST/FWHEEL.EXE",
+        "--file", os.path.join(g, "WORLD.PAK") + "=/TEST/WORLD.PAK"] + doom_files + [
+        "--cmd", "SERSAY HX-START games", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "SBCHK", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=7200)
+    checks["listen"] = agent.listening()
+
+    def fetch(remote, local):
+        p = subprocess.run(["scp", "-q", "-P", str(agent.port)] + agent.opts[agent.opts.index("-o"):] +
+                           ["glos@127.0.0.1:" + remote, local], capture_output=True, timeout=300)
+        return p.returncode == 0 and os.path.exists(local)
+
+    try:
+        checks["on"] = agent.ssh("glos display on " + desk)[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and not agent.ssh("glos audio")[1].startswith("audio on "):
+            time.sleep(0.5)
+        m = len(agent.log())
+        rc, o, _ = agent.ssh("C:\\TEST\\FWHEEL.EXE " + fw_args, timeout=3600)
+        t = agent.log()[m:]
+        u = underran(t, "GLOS")
+        checks["fw-ran"] = rc == 0 and "GLOS-APP start" in t
+        checks["fw-hashes"] = bool(dos_hashes) and hashes(t) == dos_hashes
+        checks["fw-underruns"] = bool(u) and u[0] == 0 and u[1] > 0
+        info += " fw-hashes=%d fw-under=%s" % (len(hashes(t)), "%d/%d" % u if u else "?")
+        m = len(agent.log())
+        rc, o, _ = agent.ssh(doom, timeout=3600)
+        t = agent.log()[m:]
+        u = underran(t, "GLOS")
+        checks["doom-ran"] = "DOOM-TIMED gametics=1710" in t and "GLOS-APP start" in t
+        checks["doom-underruns"] = bool(u) and u[0] == 0 and u[1] > 0
+        checks["doom-gl"] = "DGL-STUB" not in t and "DGL-GLERR" not in t
+        info += " doom-under=%s" % ("%d/%d" % u if u else "?")
+        s = os.path.join(out, "D1GL1.SUM")
+        checks["doom-checksum"] = fetch("C:/OUT/D1GL1.SUM", s) and dos_sum is not None and final(s) == dos_sum
+        shot = os.path.join(out, "LD1GL1.PPM")
+        checks["doom-frame"] = fetch("C:/OUT/LD1GL1.PPM", shot) and os.path.exists(dos_shot) \
+            and open(shot, "rb").read() == open(dos_shot, "rb").read()
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("games-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
@@ -3289,7 +3417,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -3315,6 +3443,11 @@ def main():
         cases = [(win_case,) + c for c in WIN_CASES if not a.profile or c[0] in a.profile] \
             + [(win_phys_case,) + c for c in WIN_PHYS_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(lambda fn, *c: fn(*c), cases, a.jobs)) else 1
+    if a.suite == "games":
+        cases = [c for c in GAMES_CASES if not a.profile or c[0] in a.profile]
+        if os.environ.get("GAMES_ONLY"):
+            cases = [c for c in cases if c[1] in os.environ["GAMES_ONLY"].split(",")]
+        return 0 if all(r[1] for r in matrix(games_case, cases, a.jobs)) else 1
     if a.suite == "sdlwin":
         cases = [c for c in SDLWIN_CASES if not a.profile or c[0] in a.profile]
         if os.environ.get("SDLWIN_ONLY"):

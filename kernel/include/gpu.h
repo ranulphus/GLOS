@@ -40,6 +40,7 @@ int gpu_vram_free(struct app *a, u32 off);
 void gpu_views_out(void);                       /* mga.c: the card is about to be another's: apps' blocks unmapped */
 void gpu_app_gone(struct app *a);               /* its end */
 
+int gpu_guards(u32 phys, u32 size);             /* the range touches the card's registers or memory (0800h for apps) */
 u32 gpu_stat(char *buf, u32 max);               /* glos display: a line */
 
 #endif

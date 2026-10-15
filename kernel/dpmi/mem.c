@@ -18,6 +18,7 @@
  * fresh linear range. */
 #include "arch.h"
 #include "dpmi.h"
+#include "gpu.h"
 #include "kprintf.h"
 #include "mm.h"
 
@@ -379,6 +380,9 @@ int phys_map(u32 phys, u32 size, u32 *lin)
     u32 off = phys & 0xFFF, base = phys & ~0xFFFu, n = pages_of(size + off), at, i;
     if (!size || phys + size < phys)
         return 0x8021;
+    if (dctx->app && gpu_guards(phys, size))
+        return 0x8012;                          /* (an app: the Matrox card's registers and memory are GLOS_FN_GPU's,
+                                                   behind the GPU lock: M8) */
     if (phys + size <= 0x110000) {              /* the identity map */
         *lin = phys;
         return 0;

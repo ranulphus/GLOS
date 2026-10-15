@@ -16,3 +16,5 @@ BORLAND_DIR   ?= $(HOME)/BORLAND
 
 # DOS-GL, for M8's windowed GL suites (its conformance EXEs, SDL): a built tree.
 DOSGL_DIR     ?= $(HOME)/DOSGL
+# Fifth Wheel, for M8's games suite: a tree built against DOSGL_DIR (its source unchanged).
+FIFTHWHEEL_DIR ?= $(HOME)/FifthWheel

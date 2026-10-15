@@ -26,12 +26,13 @@ programs do what they do today.
 
 ## Decisions taken here (proposals)
 
-- **The GPU lock (D24, worked out).** The engine's owner is a kernel thread (the desktop's composer, the test
-  card, `glos shot`) or an app. An app becomes the owner with `GLOS_FN_GPU_LOCK`, or by touching the card's
+- **The GPU lock (D24, worked out: PRD D44).** The engine's owner is a kernel thread (the desktop's composer, the
+  test card, `glos shot`) or an app. An app becomes the owner with `GLOS_FN_GPU_LOCK`, or by touching the card's
   registers: their pages are mapped into the app only while it owns the engine, so the first touch faults and
   the fault makes it the owner (waiting for the engine if need be). The app does not give the engine back at
   its swaps. Its turn ends when someone else wants the engine **and** the app is at a *safe point*: inside a
-  GLOS API call or a DOS or BIOS call (while it waits for the system VM), paused by a session, or ended. A safe
+  GLOS API call or a DOS or BIOS call (while it waits for the system VM), *quiet* (it says so in the shared page,
+  around long work without the engine: added in step D), or ended; a session waits for its next safe point. A safe
   point is never in the middle of the HAL's work, so the app's HAL never finds its register shadows wrong
   half-way through a sequence of writes: before each piece of engine work DOS-GL looks at a page GLOS shares
   with it (`held`, and `lost`, a count of the times someone else had the engine since it last did), takes the
@@ -124,3 +125,15 @@ shared checkouts; nothing is merged into their mains or pushed without the owner
 ## Status
 
 - Planned 2026-10-15.
+- **A done** (2026-10-15, DOS-GL branch `m8-glos` e76d1b7): `make sync-hal` to MGA-Glide 1e1d08e. DOS-GL
+  conformance 27/27 and `loopa-sdl` 10/10 on the G200, G400 and G450. No change to MGA-Glide was needed: the HAL
+  already had `engine_resync` and the 2D primitives (M7).
+- **B and C done** (2026-10-15, GLOS fd89eca): `kernel/gfx/gpu.c`, apps' VRAM, `GLOS_FN_WINVRAM`. `make loopa-gpu`
+  passes on the G200, G400, G450 and the 486DX2 with a PCI G450 (two GPUTESTs at about 48 frames a second each,
+  every frame right, every frame's turn taken from them by the composer; a session between frames; the watchdog
+  ending a hung app after 500 ms; VRAM back; refused at 8 bits). Found on the way: an ending app kept the engine
+  until the watchdog (it is released at the end now); a struct grown under objects built against the old one
+  (the Makefile tracks headers now).
+- **E done** (2026-10-15, GLOS fd89eca): `make loopa-audio` passes on the Pentium II with a G200 and on the 486DX2
+  with the S3 (tones at 11025, 22050 and 44100 Hz, mono and stereo, two at once and beside a session, all
+  recorded; no underrun; the card the session's and back; SBCHK after GLOS).
