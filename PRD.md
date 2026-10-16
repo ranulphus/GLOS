@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| Status | v0.6 — M8's windowed DOS-GL, SDL3 and the mixer (2026-10-15), after v0.5 (M7's Matrox 2D, 2026-10-14), v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
+| Status | v0.7 — M9's apps: the toolkit, the shell and the terminal's DOS programs, the SSH client to M10 (2026-10-16), after v0.6 (M8's windowed DOS-GL, SDL3 and the mixer, 2026-10-15), v0.5 (M7's Matrox 2D, 2026-10-14), v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
 | Last updated | 2026-10-15 |
 | Supersedes | v0.1. Changes are listed in Appendices D to H |
 | Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md), [docs/milestones-m6.md](docs/milestones-m6.md), [docs/milestones-m7.md](docs/milestones-m7.md) and [docs/milestones-m8.md](docs/milestones-m8.md) (work breakdown) |
@@ -177,6 +177,10 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D46** | **Windowed GL needs a Matrox card drawing a 16-bit RGB565 desktop** (`GLOS_CAP_GLWIN`); elsewhere (8 or 32 bits, VBE cards) DOS-GL and SDL programs run full-screen as sessions, exactly as on DOS. Capabilities describe the desktop a program will have, also while its own session has the screen. (M8 step D) | DOS-GL draws RGB565 and the engine's copies don't convert. 32 bits can come later by presenting into a 32-bit window with `engine_present` (refines §9.2). | M8 |
 | **D47** | **The mixer is the desktop's:** GLOS plays the SB16 while the desktop has the screen (16-bit stereo, 22050 Hz by default, `[sound] rate`), mixing the apps' streams from the card's interrupt; a session that takes the screen gets the card and its line, and `[sound] mixer = off` leaves it to programs. Underruns are counted per stream; SDL's `glos` driver logs them as patch 0005 does. (M8 step E) | Refilling never waits for an app (§10.5); sessions keep the card they expect. 22050 Hz is what the games ask for and keeps a 486's mixing cheap. | M8 |
 | **D48** | **Apps' writes to COM1 reach GLOS's log line by line, and the gameport is theirs.** A virtual UART per app takes what it writes there (DOS-GL's and the tests' lines); port 201h passes through. (M8) | The serial lines DOS-GL and the test shims write are how Loop A sees a program; the joystick is timed by its own reads. | M8 |
+| **D49** | **Our own retained-mode toolkit** (`sdk/gui`): widgets that keep their state and redraw only what changed, on the 2D library, in the Slate look and the DejaVu fonts, keyboard-first. (User, Q11, 2026-10-16) | Windows keep their pixels (M6), so redrawing only what changed is cheap on a 486; microui and Nuklear are immediate-mode, repainting on every event, and their looks and input models would need bending to D7 and D34. | M9 |
+| **D50** | **GLOS's shell is DOS, modernised:** COMMAND.COM's command names and syntax (`DIR`, `COPY`, `CD`, `SET`, `%VAR%`, redirection and pipes) with line editing, history, Tab completion, `&&`, `\|\|` and colour. Batch files go to `COMMAND.COM /C` (D40). (User, Q18, 2026-10-16) | Familiar to everyone who will use GLOS; nothing new to learn for DOS's own tools; no second batch language to keep compatible. | M9 |
+| **D51** | **A DOS program started from the terminal runs in the terminal's window until it wants the screen:** what it writes through DOS or the BIOS's teletype goes into the window and it reads the terminal's keys; its first mode set, or touch of the text or graphics screen, makes it a full-screen session for the rest of its run. (User, 2026-10-16) | Command-line tools (compilers, `MEM`, `CHKDSK`, `DIR`) stay in the window, beside the other apps; programs that draw the screen themselves get it, as D5 and D31 have it for v1. | M9 |
+| **D52** | **The terminal's SSH client comes in M10, with the HTTPS client.** (User, 2026-10-16) | Both need ring-3 crypto, entropy and host-key handling; built once, there. M9's terminal is the shell only. | M10 |
 
 ---
 
@@ -668,12 +672,12 @@ Each app keeps SDL's cooperative threads in v1, and GLOS preempts between apps (
 
 ### 10.6 Toolkit and native apps
 
-- **Toolkit:** a widget toolkit on the 2D library, covering buttons, lists, menus, text editing, scrolling, dialogs and a file dialog. Whether it's our own retained-mode toolkit or built on microui or Nuklear is decided in M6 (Q11).
+- **Toolkit:** our own retained-mode widget toolkit on the 2D library (D49), covering buttons, lists, menus, text editing, scrolling, dialogs and a file dialog.
 - **v1 native apps:**
   - file manager: spatial folder windows from the desktop, plus a browser app with a tree and list (D33);
   - notepad;
   - calculator;
-  - terminal (GLOS's shell, plus an SSH client);
+  - terminal (GLOS's shell, D50 and D51; its SSH client comes in M10, D52);
   - system monitor (the `glos stat` data);
   - image viewer;
   - package manager;
@@ -918,7 +922,7 @@ GLOS/
     api/         GLOS API dispatcher
     dbg/         gdb stubs, crash reports
   include/glos/  public API headers (SDK-ready, D14)
-  lib/           ring-3 libraries (libglos for DJGPP, toolkit, TLS)
+  sdk/           ring-3 libraries apps link (libglos, the toolkit gui; TLS in M10)
   apps/          native apps, Control Panel, package manager
   third_party/   tinyssh/, lwip/, bearssl/, stb/, mgahal/ (vendored)
   tests/         host/, dos/ (DPMI conformance, hostile suite), goldens/
@@ -932,7 +936,7 @@ GLOS/
 
 Defined by their exit criteria. All exits are in Loop A unless marked "bench". v1 is M0–M9 plus the M10 gates; each M10 feature ships when it passes its own gate.
 
-The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md); M5's is in [docs/milestones-m5.md](docs/milestones-m5.md), M6's in [docs/milestones-m6.md](docs/milestones-m6.md), M7's in [docs/milestones-m7.md](docs/milestones-m7.md).
+The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md); M5's is in [docs/milestones-m5.md](docs/milestones-m5.md), M6's in [docs/milestones-m6.md](docs/milestones-m6.md), M7's in [docs/milestones-m7.md](docs/milestones-m7.md), M8's in [docs/milestones-m8.md](docs/milestones-m8.md), M9's in [docs/milestones-m9.md](docs/milestones-m9.md).
 
 **M0: harness (in MGA-Glide, with its full regression) and the IOPL-0 survey (GLOS).** H0–H6b from §15; the HDPMI32i survey (§14.3).
 *Exit:* `loopa-cfgcheck`, `loopa-selftest` and the full MGA-Glide regression unchanged. Self-tests pass for the 486 profiles, the VBE card, the network (a NE2000 VM answers on its forwarded port), COM2, the HIMEMX boot and V86TEST on all three profiles, with no known deviation left that a local patch fixes. `docs/survey-iopl0.md` lists every suite's result under HDPMI32i.
@@ -975,6 +979,7 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 **M10: community features (separate gates).**
 - SNTP and mDNS (if not already done in M5).
 - The BearSSL HTTPS client, after SNTP so certificate dates can be checked.
+- The terminal's SSH client (D52), on the same ring-3 crypto.
 - The package manager.
 - VNC and capture.
 - UTF-8 and the optional anti-aliased fonts.
@@ -1024,14 +1029,14 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 | Q8 | Launching apps: DOS EXEC through the DOS server, or GLOS loading DJGPP images itself as Windows' KERNEL loaded apps | M6 |
 | Q9 | *Answered (v0.2):* HOT-433A with i486DX2-66 and iDX4-100; S3 Trio64V2/DX (§4.7) | — |
 | Q10 | A 486 bench PC, so the minimum spec is measured and not modelled. *User: maybe later; modelled meanwhile.* | M5 |
-| Q11 | Our own retained-mode toolkit, or microui/Nuklear underneath | M6 |
+| Q11 | *Answered (v0.7):* our own retained-mode toolkit (D49) | — |
 | Q12 | *Answered (v0.6):* SDL keeps its cooperative scheduler inside each app; GLOS preempts between apps | — |
 | Q13 | VNC encodings and the recording format | M10 |
 | Q14 | *Answered (v0.2):* yes, in v1 (D30) | — |
 | Q15 | *Answered (v0.6):* neither: a GL window has a fixed size (`GLOS_WIN_FIXED`); a program changes size with a new context, as on DOS | — |
 | Q16 | *Answered (v0.4):* DejaVu Sans, Sans Bold and Sans Mono at 11 pixels (D37); a DOS program's text is in the VGA's own fonts (D42) | — |
 | Q17 | Which programs need direct-mode profiles by default. *M0 survey (docs/survey-iopl0.md): none among ours or Screamer Rally; the M4e forced-direct runs check the rest.* | M4e |
-| Q18 | GLOS's own shell for the terminal app (§10.6): a command interpreter of our own, more modern than COMMAND.COM (the owner's idea, 2026-10-13). To settle: its commands and syntax, how much of DOS's it keeps, batch files (its own interpreter, or handed to `COMMAND.COM /C` as the agent does), and how it starts DOS programs (full-screen sessions in v1; in windows after, D5). COMMAND.COM itself stays runnable full-screen as any DOS program | M9 |
+| Q18 | *Answered (v0.7):* DOS, modernised (D50); DOS programs run in the terminal until they want the screen (D51); batch files go to `COMMAND.COM /C` (D40) | — |
 
 ---
 
@@ -1256,3 +1261,10 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
 - **D44-D48** (M8): the GPU lock's safe points, apps' VRAM and windows that show it, windowed GL on 16-bit Matrox desktops, the mixer as the desktop's, apps' COM1 and gameport. D24 points at D44; §9.6, §9.7, §10.4 and §10.5 say what was built; Q12 and Q15 are answered.
 - docs/milestones-m8.md has the plan and status, docs/graphics.md §7 the design.
 - **M8 done** (2026-10-15): DOS-GL's conformance windowed equals full-screen on the G200, G400 and G450; the same EXEs pass on plain DOS; Fifth Wheel and PrBoom-plus run windowed with no underrun; a forced GL hang is ended by the watchdog (`make loopa-m8`). The regression (187 cases) and the gate (133 parts) are recorded in docs/milestones-m8.md step H.
+
+## Appendix I: Changes in v0.7 (2026-10-16)
+
+- **Q11 and Q18 answered by the owner (D49, D50):** our own retained-mode toolkit; GLOS's shell is DOS, modernised.
+- **D51** (user): DOS programs started from the terminal run in its window until they want the screen.
+- **D52** (user): the terminal's SSH client moves to M10, with HTTPS (§10.6, §19).
+- §18: the SDK's libraries are in `sdk/`. docs/milestones-m9.md has the plan.
