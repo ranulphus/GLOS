@@ -220,7 +220,7 @@ build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
 	  file build/ow/dos/obj/dpmi16.obj,build/ow/dos/obj/dpmi16a.obj
 DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
              build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
-             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE
+             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE
 dos-tests: $(DOS_TESTS)
 
 # The 2D library (kernel/gfx; M6 step C) and its fonts: 1-bit bitmaps made from TrueType fonts by
