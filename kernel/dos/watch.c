@@ -6,8 +6,8 @@
  * Every DOS call passes the V86 monitor or the DPMI host's reflection of it
  * (agent_vm_int21 sees both), so the calls that change a directory are
  * seen there before DOS makes them: 39h, 3Ah, 3Ch, 41h, 43h (setting), 56h,
- * 5Bh, 6Ch, and 3Eh of a handle written to (40h with bytes, to a file, not a
- * device). Their paths are as the
+ * 5Bh, 6Ch when it may create or truncate, and 3Eh of a handle written to (40h
+ * with bytes, to a file, not a device). Their paths are as the
  * program gave them: one with a drive and a full path marks the watches of
  * its directory; any other (relative, or a handle's) marks every watch,
  * which costs the watcher a look at a directory that may not have changed.
@@ -122,7 +122,7 @@ void watch_path(const char *path)
 }
 
 /* A DOS call about to be made (the VM thread's, trap context): a path at DS:DX (or DS:SI for 6Ch). */
-void watch_int21(u16 ax, u16 bx, u16 cx, u32 dx_lin, u32 si_lin)
+void watch_int21(u16 ax, u16 bx, u16 cx, u16 dx, u32 dx_lin, u32 si_lin)
 {
     u32 ah = ax >> 8, i, lin = dx_lin;
     char p[80];
@@ -142,7 +142,10 @@ void watch_int21(u16 ax, u16 bx, u16 cx, u32 dx_lin, u32 si_lin)
         if ((ax & 0xFF) != 1)
             return;
         break;
-    case 0x6C:
+    case 0x6C:                                  /* (DJGPP opens every file so: a change only if it may create the
+                                                   file (DL's high nibble 1) or truncate it (low nibble 2)) */
+        if ((dx & 0x0F) != 2 && (dx & 0xF0) != 0x10)
+            return;
         lin = si_lin;
         break;
     case 0x56:                                  /* (a rename may move it to another directory: all of them) */

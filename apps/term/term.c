@@ -70,6 +70,29 @@ static void new_line(void)
 
 static void damage_all(void) { gui_damage(grid); }
 
+static int drawn_first = -1, drawn_count = -1; /* what the last drawing showed: the first line and the count */
+static int first_shown(void);
+
+/* Lines from `line` to the end changed: their rows drawn again, not the whole grid (a 486 can't redraw two
+   thousand characters for every key typed); everything when the grid has scrolled or grown. */
+static void damage_from(int line)
+{
+    struct gfx_rect r;
+    int first = first_shown();
+    if (!grid || first != drawn_first || count != drawn_count || !ch) {
+        damage_all();
+        return;
+    }
+    if (line < first)
+        line = first;
+    r.x = grid->r.x + 1;
+    r.w = grid->r.w - GUI_SB - 1;
+    r.y = grid->r.y + 2 + (line - first) * ch;
+    r.h = grid->r.y + grid->r.h - 1 - r.y;
+    if (r.h > 0)
+        gui_damage_rect(grid->win, &r);
+}
+
 /* ---- output (a program's, the shell's) */
 
 void term_attr(int a) { attr_now = (unsigned char)a; }
@@ -129,13 +152,16 @@ void term_put(unsigned char c)
 
 void term_write(const char *s, int n)
 {
-    int i;
+    int i, from = count ? count - 1 : 0, was_back = back;
     if (n < 0)
         n = (int)strlen(s);
     for (i = 0; i < n; i++)
         term_put((unsigned char)s[i]);
     back = 0;
-    damage_all();
+    if (was_back)
+        damage_all();
+    else
+        damage_from(from);
 }
 
 void term_print(const char *s) { term_write(s, -1); }
@@ -159,7 +185,7 @@ static void input_erase(void)
 
 static void input_show(void)
 {
-    int i;
+    int i, was_back = back;
     input_erase();
     in_start_line = count - 1;
     in_start_col = cur_col;
@@ -169,7 +195,10 @@ static void input_show(void)
     attr_now = 0;
     in_shown = 1;
     back = 0;
-    damage_all();
+    if (was_back)
+        damage_all();
+    else
+        damage_from(in_start_line);
 }
 
 void term_prompt_done(void)                     /* the prompt written: the line begins after it */
@@ -232,12 +261,15 @@ static int in_sel(int line, int col)
 
 static void grid_draw(struct gui_widget *w, struct gfx_surface *s)
 {
-    int k, first, x0 = w->r.x + 4, y0 = w->r.y + 2;
+    int k, kmin, kmax, first, x0 = w->r.x + 4, y0 = w->r.y + 2;
     struct gfx_rect frame = { w->r.x, w->r.y, w->r.w - GUI_SB + 1, w->r.h };
     layout_grid();
     gui_draw_field(s, &frame, 1);
     first = first_shown();
-    for (k = 0; k < lines_shown() && first + k < count; k++) {
+    drawn_first = first, drawn_count = count;
+    kmin = (s->clip.y - y0) / ch;               /* (only the rows being drawn again) */
+    kmax = (s->clip.y + s->clip.h - y0) / ch + 1;
+    for (k = kmin > 0 ? kmin : 0; k < lines_shown() && k <= kmax && first + k < count; k++) {
         const struct line *l = line_at(first + k);
         int c, y = y0 + k * ch;
         for (c = 0; c < l->n && c < cols; c++) {
@@ -294,10 +326,10 @@ static void input_key(struct gui_ev *e)
         return;
     }
     switch (e->key) {
-    case GUI_K_LEFT: if (in_pos > 0) in_pos--; damage_all(); return;
-    case GUI_K_RIGHT: if (in_pos < in_len) in_pos++; damage_all(); return;
-    case GUI_K_HOME: in_pos = 0; damage_all(); return;
-    case GUI_K_END: in_pos = in_len; damage_all(); return;
+    case GUI_K_LEFT: if (in_pos > 0) in_pos--; damage_from(in_start_line); return;
+    case GUI_K_RIGHT: if (in_pos < in_len) in_pos++; damage_from(in_start_line); return;
+    case GUI_K_HOME: in_pos = 0; damage_from(in_start_line); return;
+    case GUI_K_END: in_pos = in_len; damage_from(in_start_line); return;
     case GUI_K_UP: shell_history(-1); return;
     case GUI_K_DOWN: shell_history(1); return;
     case GUI_K_BACK:

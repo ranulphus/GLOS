@@ -200,8 +200,18 @@ Each step ends with its tests passing; the regression and the gate run at the en
     (supervisor.md §17.10); a console job's INT 29h output stops at the capture;
   - `[desktop] start` is empty by default, not `FILES.EXE` (PRD D53): the bootable image's GLOS.CFG will name it,
     and a file without it keeps the bare desktop every earlier suite expects;
-  - a console job's unread keys are its app's again when it ends (type-ahead; `GLOS_FN_JOB` EBX 4), and the
-    file manager's watches count a close only for a file written to (an app's printf told its own watch);
+  - a console job's unread keys are its app's again when it ends (type-ahead; `GLOS_FN_JOB` EBX 4); the BIOS's
+    buffer is emptied as one starts;
+  - the watches count a close only for a file written to (an app's printf told its own watch), and INT 21h 6Ch
+    only when it may create or truncate (DJGPP opens every file with it: the file manager, reading the files
+    of a folder it showed, told itself the folder had changed, a hundred times a script);
+  - apps keep 256 events (32 lost a 486's typed keys), and `glos key` and `glos type` wait while the app with
+    the keyboard is far behind (ten seconds at most, then `GLOS-WARN input-wait`);
+  - the mouse's NAK to the desktop's own F5h, as a program took the screen, was put before the program, whose
+    IRQ 12 was masked: nobody read it, and every key behind it waited (since M6, any program started from the
+    desktop without a mouse driver of its own had a dead keyboard). It is dropped as the ACK is;
+  - seen, not chased: with four machines on the host, the desktop's thread now and then left its input for
+    a second or two (the guest's clock runs on while the host is busy); nothing is lost now, but it is slow;
   - `rm_call()`'s hooks run before it builds its nested frame below its stack pointer (supervisor.md invariant
     19): the watches' buffers had overwritten it, and the file manager's first Loop A run panicked the kernel;
   - the loader copies the kernel to extended memory in 32 KB pieces (it had grown past what low memory holds),

@@ -361,6 +361,7 @@ struct inev {
 };
 struct input {
     u32 t0, n, i, max;
+    u32 waiting;                                /* since when a key has waited for a slow app (0: none) */
     struct inev ev[1];
 };
 #define TAP 51                                  /* ticks a tapped key stays down: 50 ms, as 86Box's monitor */
@@ -369,7 +370,7 @@ static struct input *input_new(u32 max)
 {
     struct input *in = kmalloc(sizeof *in + max * sizeof in->ev[0]);
     if (in) {
-        in->n = in->i = 0;
+        in->n = in->i = in->waiting = 0;
         in->max = max;
     }
     return in;
@@ -397,7 +398,18 @@ static int input_turn(struct ssh_chan *ch, void *arg)
     u32 now = timer_ticks();
     while (in->i < in->n && (s32)(now - (in->t0 + in->ev[in->i].at)) >= 0) {
         const struct inev *e = &in->ev[in->i];
-        int r = e->kind == EV_MOUSE ? vkbc_mouse(e->a, e->b, e->c) : vkbc_key((u32)e->a, e->kind == EV_DOWN);
+        int r;
+        if (e->kind != EV_MOUSE && vkbc_key_busy()) {   /* the app with the keyboard is far behind: a moment, */
+            if (!in->waiting)                           /* ten seconds at most, then the key goes anyway */
+                in->waiting = now | 1;
+            if (now - in->waiting < 10240) {
+                stream_at(now + 16);
+                return 0;
+            }
+            kprintf("GLOS-WARN input-wait %s\n", desk_focus_line());
+        }
+        in->waiting = 0;
+        r = e->kind == EV_MOUSE ? vkbc_mouse(e->a, e->b, e->c) : vkbc_key((u32)e->a, e->kind == EV_DOWN);
         if (r == -1) {                          /* the queue is full: when the program has read some */
             stream_at(now + 16);
             return 0;

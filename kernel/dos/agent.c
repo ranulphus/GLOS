@@ -933,7 +933,7 @@ static int is_console(u16 h)
 void agent_vm_int21(const struct trapframe *tf)
 {
     u32 ah = (tf->eax >> 8) & 0xFF, i, n;
-    watch_int21((u16)tf->eax, (u16)tf->ebx, (u16)tf->ecx, vm_lin(tf->v86_ds, tf->edx),
+    watch_int21((u16)tf->eax, (u16)tf->ebx, (u16)tf->ecx, (u16)tf->edx, vm_lin(tf->v86_ds, tf->edx),
                 vm_lin(tf->v86_ds, tf->esi));  /* (a directory's watchers, M9) */
     if (!running || running->console)           /* (a console job's: all of it through INT 29h, echo too) */
         return;

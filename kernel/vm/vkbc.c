@@ -503,13 +503,17 @@ static int inject(u8 b, int aux)
 
 int vkbc_room(void) { return (int)(QSIZE - (vm.direct ? injt - injh : qt - qh)); }
 
+/* An injected key had better wait a moment: the desktop has the keyboard and the app with it is behind
+   (desk_in_busy()). */
+int vkbc_key_busy(void) { return desk_on && desk_in_busy(); }
+
 /* A key down (1) or up (0): a set 1 code, 100h and above with the E0 prefix
    (the numbers 86Box's monitor takes). */
 int vkbc_key(u32 code, int down)
 {
     u32 f = irq_save();
     int r = -1;
-    if (vkbc_room() >= 2 && !(desk_on && desk_in_busy())) {    /* (-1: glos type tries again in a moment) */
+    if (vkbc_room() >= 2) {
         if (code & 0x100)
             inject(0xE0, 0);
         r = inject((u8)((code & 0x7F) | (down ? 0 : 0x80)), 0);

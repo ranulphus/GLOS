@@ -72,7 +72,7 @@ struct app {
     /* its input (dev.c): what the desktop gave it while a window of its own had the focus. An app that has
        made a window reads this keyboard and this mouse; one that never has reads the PC's, with DOS. */
     u8 gui;
-    struct glos_event evq[32];                  /* events, for the API */
+    struct glos_event evq[256];                 /* events, for the API (32 lost a 486's typed keys, M9) */
     u32 evh, evt;
     u32 ndrop;                                  /* events lost to a full queue */
     struct {

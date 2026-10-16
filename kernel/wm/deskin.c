@@ -91,12 +91,24 @@ void desk_in(int what, int a, int b, int c)
     desk_kick();
 }
 
-/* An injected key waits (glos key and glos type, through vkbc_key) while input waits here or the app with the
-   keyboard has a quarter of its queue of events unread: it keeps 32, and a slow app (on a 486) lost keys. */
+/* An injected key waits (glos key and glos type, through vkbc_key) while the input waiting here and the events
+   the app with the keyboard hasn't read come to half its queue (256): a slow app (on a 486) lost keys. */
 int desk_in_busy(void)
 {
     struct app *a = foc_app;
-    return rt != rh || (a && app_event_backlog(a) >= 8);
+    return rt - rh + (a ? app_event_backlog(a) : 0) >= 128;
+}
+
+/* What desk_in_busy() saw, for the log. */
+const char *desk_focus_line(void)
+{
+    static char b[64];
+    u32 f = irq_save();
+    struct app *a = foc_app;
+    ksnprintf(b, sizeof b, "app=%u window=%u backlog=%u input=%u", a ? app_id(a) : 0, foc_id,
+              a ? app_event_backlog(a) : 0, rt - rh);
+    irq_restore(f);
+    return b;
 }
 
 /* ---- events to apps */

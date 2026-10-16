@@ -1534,9 +1534,10 @@ and GLOS's:
 - `glos mouse DX DY [BUTTONS]`: one move, now.
 - Status 2 and a line on stderr for a list or a character that makes no sense; status 1 for a mouse no
   program has on. When the queue is full (64 bytes) the next event waits for the program to read. On the
-  desktop (M6), a key waits too while the desktop has input of its own to hand out or the app with the
-  keyboard has 8 events or more unread (M9: its queue keeps 32, and a slow app, on a 486, lost keys of a
-  `glos type` that came faster than it read them).
+  desktop (M6), a key waits too while the input the desktop has yet to hand out and the events the app with
+  the keyboard hasn't read come to 128, half its queue (M9: a queue of 32 lost keys of a `glos type` that came
+  faster than a slow app, on a 486, read them); ten seconds at most, then it goes anyway, with
+  `GLOS-WARN input-wait app=N window=N backlog=N input=N` (an app that has stopped reading).
 - The events are a stream (§17.6): the ssh thread wakes at each one's time. It is a bulk thread, so under
   load an event can be some milliseconds late; their order holds.
 
