@@ -1,0 +1,31 @@
+# The system monitor (apps/monitor; M9 step G): its four pages, and a program ended from its list. In Loop A its
+# figures are the machine's: the shots mask them and the status bar (the host's are made up, the same each run).
+run MONITOR.EXE
+wait "Monitor"
+run NOTEPAD.EXE
+wait "Untitled - Notepad"
+pause 2500
+shot mon-programs "Monitor" 14 55 459 214 0 312 500 18
+key ctrl+tab
+pause 2000
+shot mon-performance "Monitor" 13 55 474 203 75 260 418 41 0 312 500 18
+key ctrl+tab
+shot mon-system "Monitor" 116 30 376 270 0 312 500 18
+key ctrl+tab
+shot mon-log "Monitor" 13 35 474 235 0 312 500 18
+key ctrl+tab
+key tab
+type N
+key alt+e
+wait "End Program"
+shot mon-end "End Program"
+key alt+y
+gone "End Program"
+gone "Untitled - Notepad"
+pause 1500
+key alt+f4
+gone "Monitor"
+expect MONITOR has MONITOR.EXE
+expect MONITOR has NOTEPAD.EXE
+expect MONITOR ended NOTEPAD.EXE
+expect MONITOR end

@@ -567,6 +567,8 @@ void gui_win_realize(struct gui_window *w, int x, int y, int anywhere)
         f |= GLOS_WIN_POPUP;
     if (w->flags & GUI_W_BARE)
         f |= GLOS_WIN_BARE;
+    if (w->flags & GUI_W_DESKTOP)
+        f |= GLOS_WIN_DESKTOP;
     if (anywhere)
         f |= GLOS_WIN_ANYWHERE;
     memset(&gw, 0, sizeof gw);
@@ -984,9 +986,17 @@ static void resized(struct gui_window *w)
         w->on_resize(w);
 }
 
+static void (*app_events)(const struct glos_event *ev);
+
+void gui_on_event(void (*fn)(const struct glos_event *ev)) { app_events = fn; }
+
 static void dispatch(const struct glos_event *ev)
 {
     struct gui_window *w = gui_window_of(ev->window);
+    if (!ev->window && app_events) {
+        app_events(ev);
+        return;
+    }
     if (!w)
         return;
     switch (ev->type) {

@@ -1,0 +1,32 @@
+#loopa-only (its programs run in Loop A only: the host runs none, so its expects are for the suite)
+# The terminal's programs (apps/term; M9 step E, PRD D51), in Loop A only: their output and keys in the window,
+# a batch file with a variable the shell set, exit codes with ||, a program that takes the screen and gives it back.
+run TERM.EXE -log
+wait "Terminal"
+type cd \\gui\n
+type c:\\test\\echoargs one two\n
+pause 3000
+type set GLOSVAR=from-the-shell\n
+type run.bat first\n
+pause 3000
+type c:\\test\\conin line\n
+pause 2000
+type typed into it\n
+pause 2000
+type c:\\test\\conin code 3 || echo failed with %errorlevel%\n
+pause 3000
+type c:\\test\\conin mode\n
+pause 6000
+type echo back\n
+pause 1000
+type exit\n
+gone "Terminal"
+expect TERM| C:\GUI>c:\test\echoargs one two
+expect TERM| one two
+expect TERM| batch first from-the-shell
+expect TERM| typed into it
+expect TERM| LINE typed into it
+expect TERM| failed with 3
+expect TERM| MODE done
+expect TERM| back
+expect TERM end

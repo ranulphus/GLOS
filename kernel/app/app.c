@@ -81,6 +81,7 @@ static struct cwd dos_has, sys_cwd;             /* DOS's drive and directory now
 static struct {                                 /* the system VM's own, while the VM thread is an app's */
     u8 vif;
     void *job;
+    void *ctx;                                  /* (a console job's DPMI program's, at INT 28h: M9) */
     u16 psp;
     u32 dta, ps_stack;
     u32 ivt[256];
@@ -548,6 +549,7 @@ static void adopt(struct app *a)
     if (a->ctx)
         cwd_want(&a->cwd);
     sys.vif = current->vif;
+    sys.ctx = current->ctx;
     sys.psp = vm_current_psp();
     sys.dta = vm_rd32(vm.sda + 0x0C);
     sys.ps_stack = vm_rd32(lp + 0x2E);
@@ -594,8 +596,8 @@ static void unadopt(struct app *a, int cwd)
     wr16(vm.sda + 0x10, sys.psp);
     wr32(vm.sda + 0x0C, sys.dta);
     wr32(lp + 0x2E, sys.ps_stack);
-    current->ctx = 0;
-    dpmi_ctx_load(0);
+    current->ctx = sys.ctx;
+    dpmi_ctx_load(sys.ctx);
     current->vif = sys.vif;
     if (cwd && !a->dead) {
         cwd_read(&dos_has);
@@ -672,6 +674,58 @@ void app_vm_turn(void)
         cwd_want(&sys_cwd);                     /* DOS's directory is the system VM's again */
     if (!apps)
         sys_cwd.known = dos_has.known = 0;
+}
+
+/* A console job's program waits for a key (M9; v86.c): in DOS's idle call (in_dos: INT 28h, inside a console
+   function, 01h-0Ch) the apps' DOS calls above 0Ch are made, and BIOS calls; outside DOS (INT 16h), any call but
+   one that runs a program or ends one. Apps whose calls can't be made now wait on, in their order. */
+static int idle_safe(const struct app *a, int in_dos)
+{
+    u32 ah = (a->c.r->eax >> 8) & 0xFF;
+    if (a->call != AC_RM)
+        return 0;
+    if (a->c.vec == 0x21 && a->c.kind != RM_FAR)
+        return ah != 0x00 && ah != 0x26 && ah != 0x31 && ah != 0x4B && ah != 0x4C && (!in_dos || ah > 0x0C);
+    if (!in_dos)
+        return a->c.vec != 0x20 && a->c.vec != 0x27;
+    return a->c.kind != RM_FAR && (a->c.vec == 0x10 || a->c.vec == 0x11 || a->c.vec == 0x12 || a->c.vec == 0x15
+                                   || a->c.vec == 0x16 || a->c.vec == 0x1A || a->c.vec == 0x33);
+}
+
+void app_vm_idle_turn(int in_dos)
+{
+    u32 t0 = timer_ticks(), n = 0;
+    struct app *a, *prev = 0;
+    struct cwd here, keep = sys_cwd;
+    if (current != vm.thread || adopted || exclusive || !callq)
+        return;
+    if (in_dos && vm.indos && vm_rd8(vm.indos - 1))    /* (DOS's critical error flag, before InDOS in the SDA) */
+        return;
+    for (a = callq; a && !idle_safe(a, in_dos); a = a->qnext)
+        ;
+    if (!a)
+        return;
+    cwd_read(&here);                            /* the job's drive and directory, as they are now: back after */
+    dos_has = sys_cwd = here;
+    for (a = callq; a && n < 16 && timer_ticks() - t0 < 8;) {
+        struct app *next = a->qnext;
+        if (!idle_safe(a, in_dos)) {
+            prev = a;
+            a = next;
+            continue;
+        }
+        if (prev)
+            prev->qnext = next;
+        else
+            callq = next;
+        if (callq_tail == a)
+            callq_tail = prev;
+        serve(a);
+        n++;
+        a = next;
+    }
+    cwd_want(&here);                            /* DOS's directory is the console job's again */
+    sys_cwd = keep;
 }
 
 /* ---- from anywhere */

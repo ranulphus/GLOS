@@ -227,6 +227,7 @@ static int xms_block(unsigned kb, unsigned long *phys)
 }
 
 #define KCHUNK 32768UL                          /* the kernel image goes up this much at a time */
+static unsigned long xms_kernel_block;          /* XMS mode: where the kernel's block begins */
 
 /* bytes (even) of the buffer at seg:0 to the kernel's place in extended memory, at off: 0, or -1. */
 static int kernel_up(unsigned seg, unsigned long off, unsigned long bytes)
@@ -238,7 +239,7 @@ static int kernel_up(unsigned seg, unsigned long off, unsigned long bytes)
         m.sh = 0;
         m.so = (unsigned long)seg << 16;
         m.dh = xms_handles[0];
-        m.doff = off;
+        m.doff = off + (bi.kernel_phys - xms_kernel_block);
         _asm {
             mov ah, 0Bh
             mov si, mp
@@ -485,10 +486,12 @@ static int glos_main(int argc, char **argv)
         r.x.ax = 0x4310; int86x(0x2F, &r, &r, &sr);
         xms = (void (far *)(void))MK_FP(sr.es, r.x.bx);
         bi.mode = BI_MODE_XMS;
-        if (xms_block((unsigned)(bi.kernel_total >> 10), &bi.kernel_phys) != 0) {
+        if (xms_block((unsigned)(bi.kernel_total >> 10) + 4, &xms_kernel_block) != 0) {
             xms_release();
             return refuse("xms-kernel");
         }
+        bi.kernel_phys = (xms_kernel_block + 0xFFFUL) & ~0xFFFUL;     /* (a page's boundary: the page tables map
+                                                   it from there; the block need not begin on one) */
         while (n_xms < 4) {                     /* the largest free block, KB, again and again; 64 KB */
             unsigned kb;                        /* left for others */
             xms_call(0x0800, 0);
@@ -538,6 +541,10 @@ static int glos_main(int argc, char **argv)
     }
     fclose(f);
     if (a != hdr.file_size) return refuse("short-kernel");
+    if (bi.mode == BI_MODE_RAW) {               /* (INT 15h 87h leaves A20 off on many BIOSes: on again) */
+        a20_set(1);
+        if (!a20_on()) return refuse("a20");
+    }
 
     /* Page directory, the 0-4 MB table (0-10FFFFh identity) and the kernel's
        table at 0xC0000000 (supervisor.md §4). */

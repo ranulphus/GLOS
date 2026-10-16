@@ -169,6 +169,7 @@ struct gui_window *gui_window(const char *title, int w, int h, unsigned flags); 
 struct gui_window *gui_window_at(const char *title, int x, int y, int w, int h, unsigned flags);
 void gui_show(struct gui_window *w, int on);
 void gui_close(struct gui_window *w);   /* gone, with its widgets */
+void gui_close_later(struct gui_window *w);     /* ... once the event being handled is done */
 void gui_title(struct gui_window *w, const char *title);
 void gui_resize(struct gui_window *w, int cw, int ch);
 void gui_fit(struct gui_window *w);     /* the size its widgets want */
@@ -220,6 +221,7 @@ void gui_tabs_set(struct gui_widget *tabs, int page);
 struct gui_widget *gui_label(struct gui_widget *parent, const char *text);
 void gui_label_style(struct gui_widget *w, const struct gfx_font *font, unsigned rgb, int align);   /* -1 left, 0
                                            centred, 1 right */
+void gui_label_box(struct gui_widget *w, int on);      /* drawn in a white box, as a field (a display) */
 struct gui_widget *gui_button(struct gui_widget *parent, const char *text, void (*on)(struct gui_widget *, int), int id);
 struct gui_widget *gui_check(struct gui_widget *parent, const char *text, int on);
 struct gui_widget *gui_radio(struct gui_widget *parent, const char *text, struct gui_widget *first_of_group);
@@ -256,7 +258,8 @@ void gui_editor_replace_sel(struct gui_widget *w, const char *text);
 void gui_editor_goto(struct gui_widget *w, int line);         /* (1 is the first) */
 void gui_editor_where(struct gui_widget *w, int *line, int *col);       /* the caret's (from 1) */
 int gui_editor_command(struct gui_widget *w, int cmd);        /* GUI_CMD_: 1 done */
-enum { GUI_CMD_CUT = 1, GUI_CMD_COPY, GUI_CMD_PASTE, GUI_CMD_DELETE, GUI_CMD_ALL, GUI_CMD_UNDO };
+enum { GUI_CMD_CUT = 1, GUI_CMD_COPY, GUI_CMD_PASTE, GUI_CMD_DELETE, GUI_CMD_ALL, GUI_CMD_UNDO,
+       GUI_CMD_END };                    /* (END: the caret to the text's end, shown at the bottom) */
 
 /* ---- lists and trees */
 struct gui_widget *gui_list(struct gui_widget *parent, int columns, const char *const *heads, const int *widths);
@@ -289,6 +292,8 @@ struct gui_node *gui_tree_opening(struct gui_widget *w);        /* in GUI_ON_CHA
 void *gui_node_user(struct gui_node *n);
 const char *gui_node_text(struct gui_node *n);
 struct gui_node *gui_node_parent(struct gui_node *n);
+struct gui_node *gui_tree_child(struct gui_widget *w, struct gui_node *n, const char *text);     /* n's child by its
+                                           text (n NULL: the top's), or NULL */
 
 /* ---- choosing one of a few */
 struct gui_widget *gui_choice(struct gui_widget *parent, int chars);   /* a button that drops a list down */
@@ -344,6 +349,22 @@ const char *gui_path_name(const char *path);    /* the last part */
 int gui_clip_set(const char *text, size_t n);
 char *gui_clip_get(size_t *n);          /* malloc'd (NUL after), or NULL */
 
+/* ---- scroll bars, for widgets of an app's own (a part of the widget that has one) */
+#define GUI_SB 14                       /* a scroll bar's width */
+struct gui_sb {
+    int pos, page, total;               /* the first unit shown, how many show, how many there are */
+    struct gfx_rect r;                  /* the bar (empty: none) */
+    int drag, drag_off;                 /* the thumb held, and where in it */
+    int held;                           /* an arrow (1 up, 2 down) or the trough (3 above, 4 below) held */
+};
+void gui_sb_draw(struct gfx_surface *s, const struct gui_sb *b, int enabled);
+int gui_sb_event(struct gui_widget *w, struct gui_sb *b, struct gui_ev *e, int line);  /* 1: taken; pos may move */
+void gui_sb_clamp(struct gui_sb *b);
+
+
+/* ---- events of the app's own (window 0: GLOS_EV_JOB, GLOS_EV_FILES, GLOS_EV_LAUNCH, GLOS_EV_SYSKEY) */
+void gui_on_event(void (*fn)(const struct glos_event *ev));
+
 /* ---- drawing, for widgets of an app's own */
 void gui_draw_text(struct gfx_surface *s, int x, int y, const struct gfx_font *f, const char *text, unsigned rgb);
                                         /* with "&x" drawn as x underlined ("&&": "&") */
@@ -353,6 +374,11 @@ void gui_draw_box(struct gfx_surface *s, const struct gfx_rect *r, unsigned face
 void gui_draw_field(struct gfx_surface *s, const struct gfx_rect *r, int enabled);     /* white, framed */
 void gui_draw_icon(struct gfx_surface *s, int x, int y, const unsigned char *icon, int side);
 int gui_is_focus(struct gui_widget *w);
+int gui_char_w(const struct gfx_font *f, unsigned c);   /* one character's advance */
+void gui_text_fit(struct gfx_surface *s, int x, int y, int w, const struct gfx_font *f, const char *text,
+                  unsigned rgb);        /* cut with "..." to fit w */
+void gui_send(struct gui_widget *w, int what);          /* its `on` told, as if the user did it */
+int gui_window_active(struct gui_window *w);            /* it has the keyboard */
 
 
 

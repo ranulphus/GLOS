@@ -24,7 +24,8 @@ int agent_busy(void);                           /* a job runs or waits */
 u32 agent_ps(char *buf, u32 max);               /* "job SEQ STATE COMMAND" lines */
 
 /* Apps' jobs (GLOS_FN_RUN, GLOS_FN_JOB; M9 step C), on the app's thread. app: its struct app. */
-int agent_post_app(void *app, const struct glos_run *r, u32 *seq);    /* 0, or a GLOS_E_ */
+int agent_post_app(void *app, const struct glos_run *r, u32 *seq);    /* (app may be 0 with GLOS_RUN_DETACH) */
+int agent_post_detached(const char *cmd, const char *dir);     /* the kernel's own: nobody's */    /* 0, or a GLOS_E_ */
 int agent_app_read(void *app, u32 seq, u8 *out, u32 room, u32 wait_ticks, u32 *state, u32 *code);   /* bytes, or -1 */
 int agent_app_type(void *app, u32 seq, const u16 *keys, u32 n);       /* the keys taken, or -1 */
 int agent_app_kill(void *app, u32 seq);
@@ -50,6 +51,7 @@ void *agent_vm_as(void *job);                   /* output is this job's from now
 void agent_app_done(void *job, u32 result);     /* the app that job became has ended */
 void agent_vm_tick(u32 now);                    /* every kernel tick: the kills of a job being ended */
 void agent_vm_int21(const struct trapframe *tf);
-void agent_vm_int29(const struct trapframe *tf);
+void agent_vm_traps(void);                      /* INT 29h, 16h, 28h trapped as the job running needs */
+int agent_vm_int29(const struct trapframe *tf);   /* 1: taken (a console job's), not to be reflected */
 
 #endif

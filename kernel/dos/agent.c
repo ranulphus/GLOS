@@ -92,6 +92,7 @@ struct agent_job {
     u8 told;                                    /* the GLOS_JOB_ state its app last heard of, FFh none */
     void *app_owner;                            /* its app (struct app), or NULL */
     char dir[80];
+    char env[512];                              /* NAME=VALUE strings, a NUL after each and one more: its own */
     u16 keys[64];                               /* typed by its app, on their way into the BIOS's buffer */
     volatile u32 kh, kt;
     struct waitq readq;                         /* its app, waiting for output */
@@ -148,6 +149,7 @@ int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, cons
     j->told = 0xFF;
     j->app_owner = NULL;
     j->dir[0] = 0;
+    j->env[0] = j->env[1] = 0;
     j->kh = j->kt = 0;
     f = irq_save();
     j->seq = next_seq++;
@@ -209,6 +211,10 @@ int agent_post_app(void *app, const struct glos_run *r, u32 *seq)
     for (i = 0; r->dir[i] && i < sizeof j->dir - 1; i++)
         j->dir[i] = r->dir[i];
     j->dir[i] = 0;
+    for (i = 0; i < sizeof j->env - 2 && (r->env[i] || (i && r->env[i - 1])); i++)
+        j->env[i] = r->env[i];                  /* (to its double NUL) */
+    j->env[i] = 0;
+    j->env[i + 1 < sizeof j->env ? i + 1 : i] = 0;
     j->owner = NULL;
     j->result = 0;
     j->cand = j->shell = 0;
@@ -232,9 +238,23 @@ int agent_post_app(void *app, const struct glos_run *r, u32 *seq)
     *seq = j->seq;
     vm_kick();
     irq_restore(f);
-    kprintf("GLOS-AGENT post seq=%u app=%u%s%s%s cmd=\"%s\"\n", j->seq, app_id(app), j->console ? " console=1" : "",
+    kprintf("GLOS-AGENT post seq=%u app=%u%s%s%s cmd=\"%s\"\n", j->seq, app ? app_id(app) : 0, j->console ? " console=1" : "",
             j->full ? " full=1" : "", j->detach ? " detach=1" : "", j->cmd);
     return 0;
+}
+
+/* A job of nobody's (the kernel's: the desktop's start list): run, its output not kept. */
+int agent_post_detached(const char *cmd, const char *dir)
+{
+    static struct glos_run r;                   /* (the VM thread's alone: no other caller) */
+    u32 seq, i;
+    memset(&r, 0, sizeof r);
+    for (i = 0; cmd[i] && i < sizeof r.command - 1; i++)
+        r.command[i] = cmd[i];
+    for (i = 0; dir[i] && i < sizeof r.dir - 1; i++)
+        r.dir[i] = dir[i];
+    r.flags = GLOS_RUN_DETACH;
+    return agent_post_app(0, &r, &seq);
 }
 
 static struct agent_job *app_job(void *app, u32 seq)
@@ -295,8 +315,8 @@ int agent_app_read(void *app, u32 seq, u8 *out, u32 room, u32 wait_ticks, u32 *s
     }
     *state = app_state(j);
     *code = code_of(j);
-    if (j->state == J_DONE && !ring_used(&j->out[0]) && !ring_used(&j->out[1])) {
-        f = irq_save();                         /* (its end told: the slot is free again) */
+    if (j->state == J_DONE && n < room && !ring_used(&j->out[0]) && !ring_used(&j->out[1])) {
+        f = irq_save();                         /* (its end told, with room to spare: the slot is free again) */
         j->app_owner = NULL;
         j->state = J_FREE;
         irq_restore(f);
@@ -681,7 +701,7 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
         }
         goto start;
     }
-    session_job(0, 0, "");
+    session_job(0, 0, "", "");
     if (exit_req && (s32)(timer_ticks() - exit_at) >= 0)
         return -1;
     return 0;
@@ -692,8 +712,9 @@ start:
         j->shell = 1;
 exec:
     j = running;
-    session_job(j->direct, j->console ? (j->full ? 4 : 3) : j->exclusive, j->profile);     /* for the session this
-                                                   EXEC begins (3: a console job's, 4: full-screen from the start) */
+    session_job(j->direct, j->console ? (j->full ? 4 : 3) : j->exclusive, j->profile, j->env);     /* for the
+                                                   session this EXEC begins (3: a console job's, 4: full-screen from
+                                                   the start), with its own environment's strings */
     if (j->shell) {
         x->path = comspec;
         x->t1 = " /C ";
@@ -728,9 +749,20 @@ void *agent_vm_as(void *job)
 {
     void *was = running;
     running = job;
-    if (vm.vme)
-        cpu_int_redirect(0x29, !running);       /* (INT 29h traps only while a job captures, v86.c) */
+    agent_vm_traps();
     return was;
+}
+
+/* The interrupts that trap only while a job runs (with VME; without it every INT traps): INT 29h for the
+   capture; INT 16h and 28h while a console job's program may wait for keys, so that apps' calls are made
+   meanwhile (v86.c). */
+void agent_vm_traps(void)
+{
+    if (!vm.vme)
+        return;
+    cpu_int_redirect(0x29, !running);
+    cpu_int_redirect(0x16, !(running && running->console));
+    cpu_int_redirect(0x28, !(running && running->console));
 }
 
 /* An app that began as a job has ended: result as INT 21h 4Dh gave it. */
@@ -852,10 +884,15 @@ void agent_vm_int21(const struct trapframe *tf)
     }
 }
 
-void agent_vm_int29(const struct trapframe *tf)
+int agent_vm_int29(const struct trapframe *tf)
 {
+    if (agent_vm_console()) {                   /* a console job's: its window's only (DOS's console driver */
+        put(0, (u8)tf->eax);                    /* would hand it to INT 10h 0Eh, which takes it again) */
+        return 1;
+    }
     if (running && (running->console || !vm.indos || !vm_rd8(vm.indos)))
         put(0, (u8)tf->eax);
+    return 0;
 }
 
 /* ---- console jobs (M9; the VM thread's) */

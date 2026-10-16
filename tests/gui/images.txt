@@ -1,0 +1,44 @@
+# The image viewer (apps/images; M9 step D): each format, fitted; next and previous; zoom and moving about.
+run IMAGES.EXE C:\GUI\IMG\A.PNG
+wait "A.PNG - Images"
+shot png "A.PNG - Images"
+key pgdn
+wait "B.JPG - Images"
+shot jpg "B.JPG - Images"
+key pgdn
+wait "BIG.PNG - Images"
+shot big-fit "BIG.PNG - Images"
+key 1
+shot big-actual "BIG.PNG - Images"
+key right right down
+shot big-moved "BIG.PNG - Images"
+key - -
+shot big-small "BIG.PNG - Images"
+key f pgdn
+wait "C.BMP - Images"
+shot bmp "C.BMP - Images"
+key pgdn
+wait "D.GIF - Images"
+shot gif "D.GIF - Images"
+key pgdn
+wait "E.TGA - Images"
+shot tga "E.TGA - Images"
+key pgdn
+wait "F.PPM - Images"
+shot ppm "F.PPM - Images"
+key pgdn
+wait "G.PCX - Images"
+shot pcx8 "G.PCX - Images"
+key pgdn
+wait "H.PCX - Images"
+shot pcx24 "H.PCX - Images"
+key pgdn
+wait "A.PNG - Images"
+key pgup
+wait "H.PCX - Images"
+key alt+f4
+gone "H.PCX - Images"
+expect IMAGES open C:\GUI\IMG\B.JPG 160x120 JPG
+expect IMAGES open C:\GUI\IMG\G.PCX 160x120 PCX
+expect IMAGES open C:\GUI\IMG\H.PCX 160x120 PCX
+expect IMAGES end

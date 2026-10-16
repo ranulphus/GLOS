@@ -142,7 +142,7 @@ shared), Alt+F4 a close request.
 A **test script** (`tests/gui/NAME.txt`) says what to do: run the app with arguments, wait for a window, keys
 (`ctrl+s`, `alt+f`, `shift+tab`), typed text, clicks and drags at a window's client coordinates, pauses, the
 clipboard's text, and shots: a window's client area by its title. On the host the shim plays the script and
-writes each shot as a PNG (`make gui-goldens`: build/host/gui/NAME-BITS.png, at 8, 16 and 32 bits). In Loop A
+writes each shot as a PNG (`make gui-goldens`: build/host/gui/SCRIPT/NAME-BITS.png, at 8, 16 and 32 bits). In Loop A
 (`tests/loopa/jobs.py`'s `GuiDriver`) the same script is played over ssh on a GLOS desktop: the app started as an
 agent job, keys through `glos key`, text through `glos type`, the pointer moved by `glos mouse` to the window
 `glos desk` says is there, and each shot cut from `glos shot` and compared with the host's, byte for byte, a few
@@ -150,3 +150,19 @@ times while the app catches up. Lines the app writes are checked when it has end
 
 The pictures are the same on both because they are drawn by the same code from the same fonts into the same
 formats; what differs between a host and a GLOS desktop (where a window is put, the time) is kept out of them.
+
+What a picture can't hold the same on both is masked: a shot may name rectangles of the client area (`shot NAME
+"TITLE" X Y W H ...`) that both sides paint black before comparing, as the monitor's figures and the file
+manager's dates are. `quick` sends keys that open no menu in one `glos key` (the Loop A driver otherwise waits
+after each Alt and letter for the menu it may open). `make gui-goldens` also checks each script's `expect` lines
+against what the host run printed, except in a script marked `#loopa-only` (the terminal's programs, which only
+Loop A runs).
+
+The shim stands in for the kernel where an app asks it about the machine: the settings are a GLOS.CFG in memory,
+read from `$GLOS_HOST_DRIVES/C/GLOS/GLOS.CFG` and checked by the same schema (`sdk/config/cfg.c`) as the kernel
+checks them; `GLOS_FN_STAT` gives made-up figures that follow the script's clock (two apps, a job, a log), and
+one of the apps can be ended. Neither runs programs.
+
+The Control Panel's every setting is changed by keys in the `control` suite: it reads the schema from
+`sdk/config/cfg.c`, writes a script that changes each setting from its default (Alt and the label's letter, the
+value typed or chosen), plays it, and checks `glos config get` and the file the kernel wrote.

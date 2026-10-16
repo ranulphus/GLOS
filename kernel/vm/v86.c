@@ -651,7 +651,7 @@ static void vm_agent_next(struct trapframe *tf, u32 result)
         return;
     }
     if (vm.vme)
-        cpu_int_redirect(0x29, !agent_vm_capturing());
+        agent_vm_traps();
     if (r < 0 && app_count()) {                 /* glos exit: the apps end first */
         app_kill_all("exit");
         r = 0;
@@ -860,11 +860,36 @@ static int vbe_set(struct trapframe *tf, u32 next)
     return 1;
 }
 
-static void soft_int(struct trapframe *tf, u8 n, u32 next)
+/* A console job's program waits for a key at INT 16h (AH 0 or 10h) with none in the BIOS's buffer: apps' calls
+   into the system VM are made meanwhile (M9; outside DOS, any but an EXEC or an end), and the INT is done again
+   after a moment, so that the VM idles instead of spinning in the BIOS. 1 if so. */
+static int key_wait(struct trapframe *tf, u32 at)
+{
+    u32 ah = (tf->eax >> 8) & 0xFF;
+    if (!agent_vm_console() || (ah != 0x00 && ah != 0x10) || vm_rd16(0x41A) != vm_rd16(0x41C))
+        return 0;
+    if (!vm.indos || !vm_rd8(vm.indos))
+        app_vm_idle_turn(0);
+    if (vm_rd16(0x41A) != vm_rd16(0x41C))
+        return 0;                               /* (a key came meanwhile: the BIOS has it for the program) */
+    tf->eip = at;
+    vm_idle(timer_ticks() + 8);
+    return 1;
+}
+
+static void soft_int(struct trapframe *tf, u8 n, u32 next, u32 at)
 {
     u32 ax = tf->eax & 0xFFFF;
     vm.n_int++;
     switch (n) {
+    case 0x16:
+        if (key_wait(tf, at))
+            return;
+        break;
+    case 0x28:                                  /* DOS idle, waiting for console input (functions 01h-0Ch): an */
+        if (agent_vm_console())                 /* app's calls above 0Ch are made meanwhile (M9, console jobs) */
+            app_vm_idle_turn(1);
+        break;
     case 0x10:
         if (display_quiet(&tf->eax, &tf->ebx, &tf->ecx, &tf->edx, app_vm_psp() != 0)) {
             tf->eip = next;                     /* the desktop has the screen: nothing of the BIOS's on it */
@@ -878,7 +903,10 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next)
             return;
         break;
     case 0x29:
-        agent_vm_int29(tf);
+        if (agent_vm_int29(tf)) {
+            tf->eip = next;
+            return;
+        }
         break;
     case 0x1C:
     case 0x23:
@@ -967,7 +995,7 @@ static void vm_gp(struct trapframe *tf)
         vm.idle_agent = 0;
         return;
     case V86_INT:
-        soft_int(tf, in.imm, next);
+        soft_int(tf, in.imm, next, ip);
         return;
     case V86_IN:
         v = vdev_in((u16)port, in.width);
@@ -1035,7 +1063,7 @@ void vm_exception(struct trapframe *tf)
         return;
     default:
         if (tf->vec >= 0x20) {                  /* INT n at IOPL 3 (direct mode), through a DPL-3 gate: */
-            soft_int(tf, (u8)tf->vec, ip);      /* EIP is already past it */
+            soft_int(tf, (u8)tf->vec, ip, (ip - 2) & 0xFFFF);  /* EIP is already past it */
             return;
         }
         panic("v86-exception", tf);

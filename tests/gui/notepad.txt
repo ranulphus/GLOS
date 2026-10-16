@@ -1,0 +1,42 @@
+# Notepad (apps/notepad; M9 step D): a file opened, typed in, found in, saved, wrapped; Save As; Go To.
+run NOTEPAD.EXE C:\GUI\EDIT.TXT
+wait "EDIT.TXT - Notepad"
+shot open "EDIT.TXT - Notepad"
+key ctrl+end
+type A new line typed at the end.\n
+shot typed "*EDIT.TXT - Notepad"
+key ctrl+f
+wait "Find"
+type second
+key enter
+gone "Find"
+shot found "*EDIT.TXT - Notepad"
+key f3
+shot found-again "*EDIT.TXT - Notepad"
+key ctrl+s
+wait "EDIT.TXT - Notepad"
+file C:\GUI\EDIT.TXT GLOS Notepad test file.\r\nThe second line has the word second in it.\r\n\tA line that starts with a tab.\r\nThe last line.\r\nA new line typed at the end.\r\n
+key ctrl+g
+wait "Go To Line"
+type 3\n
+gone "Go To Line"
+key shift+end ctrl+c
+key ctrl+end ctrl+v
+shot pasted "*EDIT.TXT - Notepad"
+key alt+o w
+shot wrapped "*EDIT.TXT - Notepad"
+key alt+f a
+wait "Save As"
+type C:\\GUI\\COPY.TXT\n
+wait "COPY.TXT - Notepad"
+file C:\GUI\COPY.TXT GLOS Notepad test file.\r\nThe second line has the word second in it.\r\n\tA line that starts with a tab.\r\nThe last line.\r\nA new line typed at the end.\r\n\tA line that starts with a tab.
+key ctrl+n
+type unsaved
+key alt+f4
+wait "Notepad"
+shot ask-save "Notepad"
+key alt+n
+gone "Untitled - Notepad"
+expect NOTEPAD saved C:\GUI\EDIT.TXT
+expect NOTEPAD saved C:\GUI\COPY.TXT
+expect NOTEPAD end

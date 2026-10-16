@@ -1,0 +1,4 @@
+GLOS Notepad test file.
+The second line has the word second in it.
+	A line that starts with a tab.
+The last line.

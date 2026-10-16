@@ -136,8 +136,8 @@ static int run(int argc, char **argv)
             fflush(stdout);
             typed = 1;
         }
-        if (st == GLOS_JOB_DONE && n == 0)
-            break;
+        if (st == GLOS_JOB_DONE && n < (int)sizeof buf)
+            break;                              /* (its last output: the job is gone now, as the API has it) */
         if (n == 0)
             glos_event(&ev, 200);               /* (GLOS_EV_JOB when there is more, or a moment) */
     }

@@ -37,6 +37,7 @@ void app_ivt_set(u8 n, u32 v);
 
 /* On the VM thread. */
 void app_vm_turn(void);                 /* the stub's NEXT: the calls apps wait with */
+void app_vm_idle_turn(int in_dos);      /* a console job waits for a key: the calls that are safe then */
 int app_vm_pending(void);               /* one waits (the stub's halt ends) */
 void app_vm_system(void);               /* before the system VM's own DOS work: DOS's state its own again */
 void app_vm_base(int *depth, struct trapframe **f);     /* where an app's level 1 began, for the VM: its call */

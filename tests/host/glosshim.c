@@ -18,10 +18,13 @@
  *   click "TITLE" X Y [right] [double]
  *   drag "TITLE" X0 Y0 X1 Y1
  *   pause MS                   time passes (timers run)
+ *   launch, syskey             the shell's events: the launcher (Ctrl+Esc), the task list (Ctrl+Alt+Del)
  *   clip TEXT                  the clipboard's text (glos clip)
- *   shot NAME "TITLE"          OUTDIR/NAME-BPP.png: that window's client area
+ *   shot NAME "TITLE" [X Y W H]   OUTDIR/NAME-BPP.png: that window's client area (the rectangle, if given,
+ *                              black: what differs from run to run, a date, a count)
  *   gone "TITLE"               (Loop A: until it is gone)
  *   expect TEXT                (Loop A: a line the app wrote, checked when it has ended)
+ *   file PATH TEXT             the file's bytes are TEXT (C escapes: \r \n \t \\ \xNN)
  * When the script is done and the app waits for an event for ever, the run
  * ends (status 0). Its lines on stdout: "SHOT name WxH", "SCRIPT-ERROR ...". */
 #include <stdarg.h>
@@ -30,6 +33,7 @@
 #include <string.h>
 
 #include "glos/api.h"
+#include "glos/config.h"
 #include "glos/gfx.h"
 #include "keymap.h"
 #include "png.h"
@@ -59,7 +63,7 @@ static struct {
     unsigned qh, qt;
     FILE *script;
     const char *out;
-    int bpp, line, done;
+    int bpp, line, done, settled;
     char *clip;
     unsigned clip_n;
     int px, py;                         /* the pointer */
@@ -120,6 +124,8 @@ static void ev_focus(unsigned id, int down)
 static void set_focus(unsigned id)
 {
     struct hwin *w = find(id);
+    if (getenv("GLOS_SHIM_DEBUG"))
+        printf("DEBUG focus %u -> %u \"%s\"\n", H.focus, id, w ? w->title : "?");
     if (H.focus == id)
         return;
     if (H.focus)
@@ -205,6 +211,10 @@ int glos_window(struct glos_window *g)
     w->used = 1;
     w->id = ++H.next_id + 1;                    /* (the task bar is the kernel's first) */
     w->flags = g->flags & ~GLOS_WIN_ANYWHERE;
+    if (g->flags & GLOS_WIN_DESKTOP) {          /* (the window manager's: the screen less the task bar) */
+        g->x = g->y = 0, g->w = H.sw, g->h = H.sh - 20;
+        framed = 0;
+    }
     if (g->flags & GLOS_WIN_ANYWHERE) {         /* (as the window manager places them: on the screen) */
         int fw = g->w + (framed ? 2 : 0), fh = g->h + (framed ? 21 : 0);
         w->x = 24 + (int)(w->id % 8) * 24, w->y = 16 + (int)(w->id % 8) * 24;
@@ -330,11 +340,237 @@ int glos_clip_get(char *out, unsigned room, unsigned *n)
     return 0;
 }
 
-/* The settings: the defaults (an app's own tests set none). */
-int glos_config_get(const char *section, const char *key, char *out, unsigned room) { (void)section, (void)key, (void)out, (void)room; return -1; }
-int glos_config_set(const char *s, const char *k, const char *v, char *why, unsigned room) { (void)s, (void)k, (void)v, (void)why, (void)room; return -1; }
-int glos_config_unset(const char *s, const char *k) { (void)s, (void)k; return -1; }
-int glos_config_sections(char *out, unsigned room) { (void)out, (void)room; return -1; }
+/* The settings: GLOS.CFG's lines in memory, from $GLOS_HOST_DRIVES/C/GLOS/GLOS.CFG if there is one, checked by the
+ * schema as the kernel checks them (kernel/core/config.c; the file isn't written back). */
+static struct cfg_line { char sec[48], key[32], val[200]; } cfg[128];
+static int ncfg, cfg_read;
+
+static int cfg_same(const char *a, const char *b)
+{
+    for (; *a && *b && ((*a | 0x20) == (*b | 0x20) || *a == *b); a++, b++)
+        ;
+    return !*a && !*b;
+}
+
+static void cfg_trim(char *t)
+{
+    size_t n = strlen(t);
+    while (n && (t[n - 1] == ' ' || t[n - 1] == '\t' || t[n - 1] == '\r' || t[n - 1] == '\n'))
+        t[--n] = 0;
+}
+
+static void cfg_load(void)
+{
+    const char *root = getenv("GLOS_HOST_DRIVES");
+    char path[512], line[300], sec[48] = "";
+    FILE *f;
+    if (cfg_read)
+        return;
+    cfg_read = 1;
+    snprintf(path, sizeof path, "%s/C/GLOS/GLOS.CFG", root ? root : ".");
+    if (!(f = fopen(path, "r")))
+        return;
+    while (fgets(line, sizeof line, f) && ncfg < 128) {
+        char *p = line, *eq;
+        cfg_trim(line);
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (*p == '[') {
+            char *e = strchr(p, ']');
+            if (e) {
+                *e = 0;
+                snprintf(sec, sizeof sec, "%s", p + 1);
+            }
+        } else if (*p && *p != ';' && *p != '#' && (eq = strchr(p, '='))) {
+            char *v = eq + 1;
+            *eq = 0;
+            cfg_trim(p);
+            while (*v == ' ' || *v == '\t')
+                v++;
+            snprintf(cfg[ncfg].sec, sizeof cfg[ncfg].sec, "%s", sec);
+            snprintf(cfg[ncfg].key, sizeof cfg[ncfg].key, "%s", p);
+            snprintf(cfg[ncfg].val, sizeof cfg[ncfg].val, "%s", v);
+            ncfg++;
+        }
+    }
+    fclose(f);
+}
+
+int glos_config_get(const char *section, const char *key, char *out, unsigned room)
+{
+    const struct cfg_key *k = cfg_find(section, key);
+    int i, found = 0;
+    size_t n = 0;
+    cfg_load();
+    if (!k || !room)
+        return -1;
+    out[0] = 0;
+    for (i = 0; i < ncfg; i++)
+        if (cfg_same(cfg[i].sec, section) && cfg_same(cfg[i].key, key)) {
+            if (found && k->type == CFG_ENV && n + 1 < room)
+                out[n++] = '\n';
+            else if (!(found && k->type == CFG_ENV))
+                n = 0;
+            n += (size_t)snprintf(out + n, room - n, "%s", cfg[i].val);
+            if (n >= room)
+                n = room - 1;
+            found = 1;
+        }
+    if (!found)
+        snprintf(out, room, "%s", k->def);
+    return found;
+}
+
+int glos_config_unset(const char *section, const char *key)
+{
+    int i, j;
+    cfg_load();
+    if (!cfg_find(section, key))
+        return -1;
+    for (i = j = 0; i < ncfg; i++)
+        if (!(cfg_same(cfg[i].sec, section) && cfg_same(cfg[i].key, key)))
+            cfg[j++] = cfg[i];
+    ncfg = j;
+    return 0;
+}
+
+int glos_config_set(const char *section, const char *key, const char *value, char *why, unsigned room)
+{
+    const struct cfg_key *k = cfg_find(section, key);
+    char one[200];
+    const char *p;
+    int lines = strchr(value, '\n') != NULL;
+    if (!k || !cfg_section_ok(section)) {
+        snprintf(why, room, "no such setting: [%s] %s", section, key);
+        return -1;
+    }
+    for (p = value;;) {                         /* (env: lines, or parts by ";") */
+        size_t n = 0;
+        while (*p && (k->type != CFG_ENV || (*p != '\n' && (lines || *p != ';'))) && n < sizeof one - 1)
+            one[n++] = *p++;
+        one[n] = 0;
+        if (cfg_check(k, one, why, (int)room) != 0)
+            return -1;
+        if (!*p++ || k->type != CFG_ENV)
+            break;
+    }
+    glos_config_unset(section, key);
+    for (p = value; ncfg < 128;) {
+        size_t n = 0;
+        while (*p && (k->type != CFG_ENV || (*p != '\n' && (lines || *p != ';'))) && n < sizeof one - 1)
+            one[n++] = *p++;
+        one[n] = 0;
+        snprintf(cfg[ncfg].sec, sizeof cfg[ncfg].sec, "%s", section);
+        snprintf(cfg[ncfg].key, sizeof cfg[ncfg].key, "%s", key);
+        snprintf(cfg[ncfg].val, sizeof cfg[ncfg].val, "%s", one);
+        ncfg++;
+        if (!*p++ || k->type != CFG_ENV)
+            break;
+    }
+    return k->when;
+}
+
+int glos_config_sections(char *out, unsigned room)
+{
+    int i, j;
+    size_t n = 0;
+    cfg_load();
+    for (i = 0; i < ncfg; i++) {
+        for (j = 0; j < i && !cfg_same(cfg[j].sec, cfg[i].sec); j++)
+            ;
+        if (j == i && n < room)
+            n += (size_t)snprintf(out + n, room - n, "%s\n", cfg[i].sec);
+    }
+    return (int)(n < room ? n : room);
+}
+
+int glos_config_keys(const char *section, char *out, unsigned room)
+{
+    int i;
+    size_t n = 0;
+    cfg_load();
+    for (i = 0; i < ncfg && n < room; i++)
+        if (cfg_same(cfg[i].sec, section))
+            n += (size_t)snprintf(out + n, room - n, "%s = %s\n", cfg[i].key, cfg[i].val);
+    return (int)(n < room ? n : room);
+}
+
+/* Programs, jobs, watches, the shell (M9 step C): nothing runs on the host (the tests run built-in work only). */
+int glos_run(const struct glos_run *r) { (void)r; return -1; }
+int glos_job_read(unsigned id, char *out, unsigned room, unsigned w, unsigned *st, unsigned *code)
+{
+    (void)id, (void)out, (void)room, (void)w, (void)st, (void)code;
+    return -1;
+}
+int glos_job_type(unsigned id, const unsigned short *k, unsigned n) { (void)id, (void)k, (void)n; return -1; }
+int glos_job_kill(unsigned id) { (void)id; return -1; }
+int glos_job_forget(unsigned id) { (void)id; return -1; }
+int glos_shell(int on) { (void)on; return 0; }
+
+/* The machine's figures (GLOS_FN_STAT; MONITOR's tests): made up, from the script's clock, the same each run.
+ * Two apps (the one under test and NOTEPAD) and a job; NOTEPAD can be ended. */
+static int notepad_ended;
+int glos_stat(unsigned what, void *out, unsigned room)
+{
+    static const char log[] = "GLOS-DISPLAY on mode=640x480 bpp=16\nGLOS-APP start id=1 prog=MONITOR.EXE\n"
+                              "GLOS-APP start id=2 prog=NOTEPAD.EXE\nGLOS-AGENT job id=1 cmd=\"DIR /S\"\n";
+    unsigned s = H.clock / 1000, n = 0;
+    if (what == GLOS_STAT_SYSTEM) {
+        struct glos_stat_system y;
+        memset(&y, 0, sizeof y);
+        y.size = sizeof y;
+        y.version = GLOS_API_MAJOR << 16 | GLOS_API_MINOR;
+        y.uptime_ms = 3723000 + H.clock;
+        {                                       /* 40% to 100% and back, a second at a time */
+            static const unsigned pct[7] = { 40, 55, 70, 85, 100, 70, 55 };
+            unsigned k;
+            for (k = 0; k < s; k++)
+                y.busy_ms += pct[k % 7] * 10;
+            y.busy_ms += H.clock % 1000 * pct[s % 7] / 100;
+        }
+        y.idle_ms = H.clock - y.busy_ms;
+        y.cpu_family = 6;
+        y.mem_kb = 65536, y.mem_free_kb = 41216, y.heap_kb = 2048;
+        y.threads = 9, y.apps = notepad_ended ? 1 : 2, y.windows = notepad_ended ? 1 : 2;
+        y.net_rx = s * 12, y.net_tx = s * 9;
+        y.ip[0] = 10, y.ip[1] = 0, y.ip[2] = 2, y.ip[3] = 15;
+        y.screen_w = (unsigned)H.sw, y.screen_h = (unsigned)H.sh, y.screen_bpp = (unsigned)H.bpp;
+        y.accel = 1, y.vram_kb = 8192, y.vram_free_kb = 5120;
+        y.mixer_rate = 22050, y.streams = 1;
+        strcpy(y.card, "Matrox G200"), strcpy(y.nic, "NE2000 PCI"), strcpy(y.hostname, "glos");
+        memcpy(out, &y, room < sizeof y ? room : sizeof y);
+        return (int)(room < sizeof y ? room : sizeof y);
+    }
+    if (what == GLOS_STAT_APPS) {
+        static const struct glos_stat_app all[3] = {
+            { sizeof(struct glos_stat_app), 0, 1, 1250, 1536, 1, 0, "MONITOR.EXE" },
+            { sizeof(struct glos_stat_app), 0, 2, 31400, 2304, 1, 0, "NOTEPAD.EXE" },
+            { sizeof(struct glos_stat_app), 1, 1, 0, 0, 0, GLOS_JOB_RUNNING, "DIR /S" } };
+        int i;
+        for (i = 0; i < 3; i++)
+            if (!(i == 1 && notepad_ended) && n + sizeof *all <= room)
+                memcpy((char *)out + n, &all[i], sizeof *all), n += sizeof *all;
+        return (int)n;
+    }
+    if (what == GLOS_STAT_LOG) {
+        n = room < sizeof log - 1 ? room : sizeof log - 1;
+        memcpy(out, log, n);
+        return (int)n;
+    }
+    return -1;
+}
+
+int glos_kill(unsigned kind, unsigned id)
+{
+    if (kind == 0 && id == 2 && !notepad_ended) {
+        notepad_ended = 1;
+        return 0;
+    }
+    return -1;
+}
+static unsigned watches;
+int glos_watch(const char *dir) { (void)dir; return (int)++watches; }
+int glos_unwatch(unsigned id) { (void)id; return 0; }
 
 /* The unused parts of the API, for the linker. */
 int glos_gpu(struct glos_gpu *g) { (void)g; return -1; }
@@ -375,6 +611,9 @@ static char *word(char **p, char *buf, size_t room)
 static void key_event(unsigned key, int down, unsigned mods)
 {
     struct glos_event e;
+    if (getenv("GLOS_SHIM_DEBUG"))
+        printf("DEBUG key %x down=%d mods=%x to=%u \"%s\"\n", key, down, mods, H.focus,
+               find(H.focus) ? find(H.focus)->title : "?");
     if (!H.focus)
         return;
     memset(&e, 0, sizeof e);
@@ -567,6 +806,17 @@ static void release(unsigned button)
         mouse_event(w, button, 0);
 }
 
+static int masks[8][4], nmask;               /* a shot's areas that differ in Loop A (x, y, w, h): black */
+
+static int masked(int x, int y)
+{
+    int i;
+    for (i = 0; i < nmask; i++)
+        if (x >= masks[i][0] && y >= masks[i][1] && x < masks[i][0] + masks[i][2] && y < masks[i][1] + masks[i][3])
+            return 1;
+    return 0;
+}
+
 static void png_out(struct hwin *w, const char *name)
 {
     char path[512];
@@ -580,7 +830,7 @@ static void png_out(struct hwin *w, const char *name)
     for (y = 0; y < w->h; y++) {
         rgb[(unsigned)y * row] = 0;
         for (x = 0; x < w->w; x++) {
-            unsigned c = gfx_rgb(&H.fmt, gfx_get(&s, x, y));
+            unsigned c = masked(x, y) ? 0 : gfx_rgb(&H.fmt, gfx_get(&s, x, y));
             unsigned char *p = rgb + (unsigned)y * row + 1 + (unsigned)x * 3;
             p[0] = (unsigned char)(c >> 16), p[1] = (unsigned char)(c >> 8), p[2] = (unsigned char)c;
         }
@@ -606,14 +856,24 @@ static void png_out(struct hwin *w, const char *name)
 static int step(void)
 {
     char line[1024], cmd[32], a[256], b[64];
-    while (fgets(line, sizeof line, H.script)) {
+    for (;;) {
+        long at = ftell(H.script);
         char *p = line;
+        if (!fgets(line, sizeof line, H.script))
+            break;
         H.line++;
+        if (!strncmp(line, "shot", 4) && !H.settled) {     /* half a second first, as Loop A's shot has: the */
+            H.settled = 1;                      /* app's timers run and it draws what they changed */
+            fseek(H.script, at, SEEK_SET);
+            H.line--;
+            H.clock += 500;
+            return 1;
+        }
         if (!word(&p, cmd, sizeof cmd) || cmd[0] == '#')
             continue;
         if (!strcmp(cmd, "run") || !strcmp(cmd, "wait") || !strcmp(cmd, "gone") || !strcmp(cmd, "expect")) {
             continue;
-        } else if (!strcmp(cmd, "key")) {
+        } else if (!strcmp(cmd, "key") || !strcmp(cmd, "quick")) {
             while (word(&p, a, sizeof a))
                 key_spec(a);
             return 1;
@@ -649,6 +909,17 @@ static int step(void)
                 release(button);
             }
             return 1;
+        } else if (!strcmp(cmd, "launch") || !strcmp(cmd, "syskey")) {
+            struct glos_event e;
+            memset(&e, 0, sizeof e);
+            e.size = sizeof e;
+            e.type = cmd[0] == 'l' ? GLOS_EV_LAUNCH : GLOS_EV_SYSKEY;
+            e.window = 0;
+            e.x = 0, e.y = H.sh - 20;
+            e.time = H.clock;
+            push(&e);
+            H.clock += 50;
+            return 1;
         } else if (!strcmp(cmd, "pause")) {
             H.clock += (unsigned)atoi(word(&p, b, sizeof b) ? b : "0");
             return 1;
@@ -659,12 +930,52 @@ static int step(void)
             if ((e = strchr(p, '\n')) != NULL)
                 *e = 0;
             glos_clip_set(p, (unsigned)strlen(p));
+        } else if (!strcmp(cmd, "file")) {
+            char want[2048], got[2048], *q;
+            const char *root = getenv("GLOS_HOST_DRIVES");
+            int n = 0, k;
+            FILE *f;
+            if (!word(&p, a, sizeof a) || !root)
+                fail("file: no path");
+            while (*p == ' ')
+                p++;
+            for (q = p; *q && *q != '\n' && n < (int)sizeof want; q++) {
+                char c = *q;
+                if (c == '\\' && q[1]) {
+                    q++;
+                    c = *q == 'r' ? '\r' : *q == 'n' ? '\n' : *q == 't' ? '\t' : *q;
+                    if (*q == 'x' && q[1] && q[2]) {
+                        char hx[3] = { q[1], q[2], 0 };
+                        c = (char)strtol(hx, NULL, 16);
+                        q += 2;
+                    }
+                }
+                want[n++] = c;
+            }
+            snprintf(got, sizeof got, "%s/%c%s", root, a[0], a + 2);
+            for (q = got + strlen(root); *q; q++)
+                if (*q == '\\')
+                    *q = '/';
+            if (!(f = fopen(got, "rb")))
+                fail("file %s: not there", a);
+            k = (int)fread(got, 1, sizeof got, f);
+            fclose(f);
+            if (k != n || memcmp(got, want, (size_t)n))
+                fail("file %s: %d bytes, not the %d wanted", a, k, n);
+            printf("FILE %s ok\n", a);
         } else if (!strcmp(cmd, "shot")) {
             struct hwin *w;
             char title[64];
             if (!word(&p, a, sizeof a) || !word(&p, title, sizeof title) || !(w = by_title(title)))
                 fail("shot: no window \"%s\"", title);
+            for (nmask = 0; nmask < 8 && word(&p, b, sizeof b); nmask++) {
+                masks[nmask][0] = atoi(b);
+                masks[nmask][1] = atoi(word(&p, b, sizeof b) ? b : "0");
+                masks[nmask][2] = atoi(word(&p, b, sizeof b) ? b : "0");
+                masks[nmask][3] = atoi(word(&p, b, sizeof b) ? b : "0");
+            }
             png_out(w, a);
+            H.settled = 0;
         } else {
             fail("no command %s", cmd);
         }
@@ -681,18 +992,22 @@ int glos_event(struct glos_event *ev, unsigned wait_ms)
     if (H.qh != H.qt) {
         *ev = H.q[H.qh++ % 256];
         ev->size = sizeof *ev;
+        if (ev->type == GLOS_EV_KEY) {          /* (a key goes to the window with the focus when it arrives, as the
+                                                   window manager sends it: a menu opened by the key before) */
+            if (!H.focus)
+                return glos_event(ev, wait_ms);
+            ev->window = H.focus;
+        }
         if (ev->time > H.clock)
             H.clock = ev->time;
         return 1;
     }
-    if (wait_ms != 0xFFFFFFFFu) {
-        H.clock += wait_ms;
-        return 0;
-    }
-    if (H.done) {
+    if (H.done) {                               /* (the script done, nothing left: the run is over) */
         fflush(stdout);
         exit(0);
     }
+    if (wait_ms != 0xFFFFFFFFu)
+        H.clock += wait_ms;
     return 0;
 }
 

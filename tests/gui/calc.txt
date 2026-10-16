@@ -1,0 +1,36 @@
+# The calculator (apps/calc; M9 step D): sums by keys and by presses, the memory, an error, the clipboard.
+run CALC.EXE
+wait "Calculator"
+shot start "Calculator"
+type 12+7*3=
+shot sum "Calculator"
+key esc
+type 2@
+shot sqrt "Calculator"
+key esc
+type 1/0=
+shot divzero "Calculator"
+key esc
+click "Calculator" 30 131
+click "Calculator" 78 161
+click "Calculator" 174 191
+click "Calculator" 30 161
+click "Calculator" 174 221
+shot pressed "Calculator"
+key ctrl+m
+key esc
+type 3*
+key ctrl+r
+type =
+shot memory "Calculator"
+key ctrl+c
+clip 1234.5
+key ctrl+v
+shot pasted "Calculator"
+key alt+f4
+gone "Calculator"
+expect CALC = 57
+expect CALC = error
+expect CALC = 79
+expect CALC = 237
+expect CALC end

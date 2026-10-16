@@ -1,0 +1,55 @@
+# The file manager and the desktop's shell (apps/files; M9 step F): the desktop's icons, the launcher, an icon
+# moved; a folder opened by the launcher's Run; a new folder, a file copied into it, one deleted, one renamed.
+run FILES.EXE
+wait "Desktop"
+shot desktop "Desktop"
+launch
+shot launcher ""
+key esc
+key down down
+shot chosen "Desktop"
+drag "Desktop" 46 20 238 180
+shot dragged "Desktop"
+launch
+key r
+wait "Run"
+type C:\\FM\n
+wait "C:\FM"
+shot fm "C:\FM"
+key ctrl+shift+n
+wait "New Folder"
+type BACKUP\n
+gone "New Folder"
+type r
+key ctrl+c
+type b
+key enter
+wait "C:\FM\BACKUP"
+key ctrl+v
+shot backup "C:\FM\BACKUP"
+file C:\FM\BACKUP\README.TXT readme\r\n
+key ctrl+w
+gone "C:\FM\BACKUP"
+type da
+key del
+wait "Delete"
+key alt+y
+gone "Delete"
+type r
+key f2
+wait "Rename"
+type NOTES.TXT\n
+gone "Rename"
+shot fm-changed "C:\FM"
+key alt+v d
+shot fm-details "C:\FM"
+key ctrl+w
+gone "C:\FM"
+key alt+f4
+gone "Desktop"
+expect FILES launcher 
+expect FILES made C:\FM\BACKUP
+expect FILES pasted 1 copied
+expect FILES deleted C:\FM\DATA.DAT
+expect FILES renamed C:\FM\NOTES.TXT
+expect FILES end 

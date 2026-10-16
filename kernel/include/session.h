@@ -20,7 +20,7 @@ int session_pauses(void);                       /* GLOS apps wait for it (not fo
                                                    it starts; its end's work) */
 u32 session_memory_kb(void);                    /* the session's profile's memory cap, 0 none */
 int session_direct(void);                       /* direct mode: its profile, glos run --direct or /DIRECT */
-void session_job(int direct, int how, const char *profile);     /* glos run's options for the stub's next EXEC
+void session_job(int direct, int how, const char *profile, const char *env);     /* glos run's options for the stub's next EXEC
                                                    (how: 0, 1 --exclusive, 2 --app) */
 int session_profile_known(const char *name);    /* GLOS.CFG has [program NAME] */
 u32 session_stat(char *buf, u32 max);           /* glos stat: the session as a JSON object, or null */

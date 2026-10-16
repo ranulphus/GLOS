@@ -295,12 +295,16 @@ static void end(const char *why)
 }
 
 /* glos run's options for the session the stub's next EXEC begins (E4). */
-static struct { u8 direct, exclusive, app, console; char profile[16]; } job;
+static struct { u8 direct, exclusive, app, console; char profile[16]; char env[512]; } job;
 
 /* how: 0 as the program asks, 1 --exclusive, 2 --app, 3 a console job's, 4 ... full-screen from the start. */
-void session_job(int direct, int how, const char *profile)
+void session_job(int direct, int how, const char *profile, const char *env)
 {
     u32 i;
+    for (i = 0; i < sizeof job.env - 2 && (env[i] || (i && env[i - 1])); i++)
+        job.env[i] = env[i];                    /* (an app's job's own strings, M9: to their double NUL) */
+    job.env[i] = 0;
+    job.env[i + 1 < sizeof job.env ? i + 1 : i] = 0;
     job.direct = (u8)(direct != 0);
     job.exclusive = (u8)(how == 1);
     job.app = (u8)(how == 2);
@@ -343,7 +347,7 @@ static int same_var(const char *a, const char *b)
 /* The profile's env lines into the environment the EXEC at tf gives the
    program: a copy of the one it names (or the parent's), without the
    variables the profile sets, then the profile's lines. */
-static void profile_env(const struct trapframe *tf, u16 psp)
+static void profile_env(const struct trapframe *tf, u16 psp, const char *add)
 {
     static char buf[8192];
     struct rmregs r;
@@ -356,7 +360,7 @@ static void profile_env(const struct trapframe *tf, u16 psp)
         const char *s = (const char *)vm_ptr(src + i);
         int keep = 1;
         len = (u32)strlen(s) + 1;
-        for (e = ses.prof->env; *e && keep; e += strlen(e) + 1)
+        for (e = add; *e && keep; e += strlen(e) + 1)
             keep = !same_var(s, e);
         if (keep) {
             if (n + len > sizeof buf - BI_PROF_ENV - 2) {
@@ -368,7 +372,7 @@ static void profile_env(const struct trapframe *tf, u16 psp)
         }
         i += len;
     }
-    for (e = ses.prof->env; *e; e += len) {     /* then the profile's */
+    for (e = add; *e; e += len) {               /* then the profile's, and the job's */
         len = (u32)strlen(e) + 1;
         memcpy(buf + n, e, len);
         n += len;
@@ -482,8 +486,32 @@ void session_exec(const struct trapframe *tf)
     ses.exclusive = psp == vm.loader_psp && job.exclusive;
     ses.app = psp == vm.loader_psp && job.app;
     ses.env_seg = 0;
-    if (ses.prof && ses.prof->env[0])
-        profile_env(tf, psp);
+    {                                           /* the profile's strings, then the job's own (M9) over them */
+        static char add[BI_PROF_ENV + sizeof job.env];
+        const char *e;
+        u32 n = 0, l;
+        for (e = ses.prof ? ses.prof->env : ""; *e; e += l) {
+            const char *j;
+            int keep = 1;
+            l = (u32)strlen(e) + 1;
+            for (j = psp == vm.loader_psp ? job.env : ""; *j && keep; j += strlen(j) + 1)
+                keep = !same_var(e, j);
+            if (keep && n + l < sizeof add - 1) {
+                memcpy(add + n, e, l);
+                n += l;
+            }
+        }
+        for (e = psp == vm.loader_psp ? job.env : ""; *e; e += l) {
+            l = (u32)strlen(e) + 1;
+            if (n + l < sizeof add - 1) {
+                memcpy(add + n, e, l);
+                n += l;
+            }
+        }
+        add[n] = 0;
+        if (n)
+            profile_env(tf, psp, add);
+    }
     kprintf("GLOS-SESSION begin n=%u prog=%s parent=%04x mode=%02x%s%s%s%s\n", ses.n, ses.prog, psp, ses.mode,
             ses.prof ? " profile=" : "", ses.prof ? ses.prof->name : "", session_direct() ? " direct=1" : "",
             ses.hint ? " app=1" : "");

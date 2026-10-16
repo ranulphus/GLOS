@@ -28,5 +28,5 @@ key alt+f4
 gone "GUITEST Dialogs"
 expect GUI message no
 expect GUI ask NEWDIR
-expect GUI save as C:\GUI\SUB\NEW.TXT
+expect GUI save as C:\GUI\IMG\NEW.TXT
 expect GUI end

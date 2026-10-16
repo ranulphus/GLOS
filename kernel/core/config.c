@@ -18,6 +18,7 @@
 #include "glos/bootinfo.h"
 #include "glos/config.h"
 #include "kcfg.h"
+#include "agent.h"
 #include "display.h"
 #include "gpu.h"
 #include "mixer.h"
@@ -320,7 +321,7 @@ int kcfg_set(const char *section, const char *key, const char *value, char *why,
 {
     const struct cfg_key *k = cfg_find(section, key);
     const char *given = value;                  /* (value is used up below; this is what was asked for) */
-    char one[200];
+    char one[200], semi = ';';                  /* (env: lines, or with none, parts by ";" as ssh gives them) */
     u32 end, i;
     int at, r;
     if (!k || !cfg_section_ok(section)) {
@@ -333,9 +334,12 @@ int kcfg_set(const char *section, const char *key, const char *value, char *why,
     }
     if (value) {                                /* every part checked first */
         const char *p = value;
+        for (i = 0; value[i]; i++)
+            if (value[i] == '\n')
+                semi = '\n';
         do {
             u32 n = 0;
-            while (*p && (k->type != CFG_ENV || (*p != ';' && *p != '\n')) && n < sizeof one - 1)
+            while (*p && (k->type != CFG_ENV || (*p != semi && *p != '\n')) && n < sizeof one - 1)
                 one[n++] = *p++;
             one[n] = 0;
             if (*p)
@@ -384,7 +388,7 @@ int kcfg_set(const char *section, const char *key, const char *value, char *why,
             end--;                              /* (after the section's last line, before blank ones) */
         do {
             u32 n = 0;
-            while (*p && (k->type != CFG_ENV || (*p != ';' && *p != '\n')) && n < sizeof one - 1)
+            while (*p && (k->type != CFG_ENV || (*p != semi && *p != '\n')) && n < sizeof one - 1)
                 one[n++] = *p++;
             one[n] = 0;
             if (*p)
@@ -457,6 +461,41 @@ static void apply_read(void)
     kcfg_apply("input", "repeat_rate", "");
 }
 
+/* The desktop has come on (display.c, the VM thread): [desktop] start's programs, beside GLOS.EXE when they have
+   no folder of their own, each a job of nobody's. */
+void kcfg_desktop_started(void)
+{
+    char list[128], cmd[200], dir[80];
+    u32 i, n;
+    const char *p, *slash = 0;
+    if (kcfg_get("desktop", "start", list, sizeof list) < 0 || !list[0])
+        return;
+    for (p = c.path; *p; p++)
+        if (*p == '\\')
+            slash = p;
+    n = slash ? (u32)(slash - c.path) : 0;
+    memcpy(dir, c.path, n);
+    dir[n] = 0;
+    for (p = list; *p; ) {
+        u32 k = 0;
+        while (*p == ' ')
+            p++;
+        if (!*p)
+            break;
+        for (i = 0; p[i] && p[i] != ' ' && i < 60; i++)
+            ;
+        if (chr(p, ':') && chr(p, ':') < p + i)
+            k = (u32)ksnprintf(cmd, sizeof cmd, "%s", "");
+        else
+            k = (u32)ksnprintf(cmd, sizeof cmd, "%s\\", dir);
+        memcpy(cmd + k, p, i);
+        cmd[k + i] = 0;
+        agent_post_detached(cmd, dir);
+        kprintf("GLOS-CFG desktop-start cmd=%s\n", cmd);
+        p += i;
+    }
+}
+
 /* ---- listing */
 
 /* Every setting of the schema that applies, with its value, then the file's own sections' (programs, [open]):
@@ -509,6 +548,33 @@ u32 kcfg_sections(char *buf, u32 max)
     for (i = 0; i < c.n && n < max; i++)
         if (header(c.line[i], sec, sizeof sec))
             n += (u32)ksnprintf(buf + n, max - n, "%s\n", sec);
+    unlock();
+    return n < max ? n : max;
+}
+
+/* One section's KEY = VALUE lines as the file has them ([open]'s kinds of file): "key = value" a line. */
+u32 kcfg_keys(const char *section, char *buf, u32 max)
+{
+    u32 n = 0, i, end;
+    int at;
+    lock();
+    at = find_section(section, &end);
+    for (i = at < 0 ? end : (u32)at + 1; at >= 0 && i < end && n < max; i++) {
+        const char *kk, *vv;
+        u32 kn, vn;
+        char kb[32], vb[200];                   /* (no %.*s in ksnprintf) */
+        if (!pair(c.line[i], &kk, &kn, &vv, &vn))
+            continue;
+        if (kn > sizeof kb - 1)
+            kn = sizeof kb - 1;
+        if (vn > sizeof vb - 1)
+            vn = sizeof vb - 1;
+        memcpy(kb, kk, kn);
+        kb[kn] = 0;
+        memcpy(vb, vv, vn);
+        vb[vn] = 0;
+        n += (u32)ksnprintf(buf + n, max - n, "%s = %s\n", kb, vb);
+    }
     unlock();
     return n < max ? n : max;
 }

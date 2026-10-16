@@ -64,7 +64,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: gui-goldens gui-goldens-run loopa-gui loopa-config loopa-console loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
+.PHONY: apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -99,9 +99,10 @@ host-test-run:
 	  tests/host/gfx_test.c tests/host/qdev.c $(GFX_SRCS) kernel/lib/png.c && build/host/gfx_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/wm_test \
 	  tests/host/wm_test.c tests/host/qdev.c $(WM_SRCS) $(GFX_SRCS) kernel/lib/png.c && build/host/wm_test
-	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Ikernel/include -Iinclude -DGLOSSHIM_NO_MAIN \
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Ikernel/include -Iinclude \
+	  -DGLOSSHIM_NO_MAIN \
 	  -o build/host/gui_test tests/host/gui_test.c tests/host/glosshim.c $(filter-out sdk/gui/field.c,$(GUI_SRCS)) \
-	  $(GFX_SRCS) kernel/lib/png.c && build/host/gui_test
+	  $(GFX_SRCS) kernel/lib/png.c sdk/config/cfg.c && build/host/gui_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Itests/host/kstub -Ikernel/include -Iinclude \
 	  -o build/host/cfg_test tests/host/cfg_test.c sdk/config/cfg.c && build/host/cfg_test
 
@@ -109,22 +110,37 @@ host-test-run:
 # (tests/gui/NAME.txt) run at 8, 16 and 32 bits, its shots written to build/host/gui/ (the goldens Loop A's
 # gui suites compare with). `make gui-goldens` (in the dev container).
 GUI_SRCS := $(wildcard sdk/gui/*.c)
-GUI_HOST := $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Ikernel/include -Iinclude
+GUI_HOST := $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Ikernel/include -Iinclude
 build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h \
-                    tests/host/glosshim.c kernel/include/keymap.h
+                    tests/host/glosshim.c kernel/include/keymap.h sdk/config/cfg.c include/glos/config.h
 	@mkdir -p build/host
 	$(Q)$(GUI_HOST) -Dmain=app_main -c -o build/host/guitest-app.o tests/dos/guitest.c
-	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c
+	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
+	  sdk/config/cfg.c
+# The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
+APPS := notepad calc images term files monitor control
+APP_HOST_FLAGS := -Ithird_party/stb
+define app_host
+build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h tests/host/glosshim.c \
+                 kernel/include/keymap.h sdk/config/cfg.c include/glos/config.h
+	@mkdir -p build/host
+	$$(Q)$$(GUI_HOST) $$(APP_HOST_FLAGS) -Dmain=app_main -c -o build/host/$(1)-app.o apps/$(1)/$(1).c
+	$$(Q)$$(GUI_HOST) -o $$@ build/host/$(1)-app.o $$(filter-out apps/$(1)/$(1).c,$$(wildcard apps/$(1)/*.c)) \
+	  tests/host/glosshim.c $$(GUI_SRCS) $$(LIBGLOS_GFX) kernel/lib/png.c sdk/config/cfg.c -lm
+endef
+$(foreach a,$(APPS),$(eval $(call app_host,$(a))))
 GUI_SCRIPTS := $(wildcard tests/gui/*.txt)
 gui-goldens:
 	$(Q)$(DEV) $(MAKE) -s gui-goldens-run
-gui-goldens-run: build/host/guitest
+gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS))
 	@rm -rf build/host/gui build/host/gui-drives && mkdir -p build/host/gui
-	@cp -r tests/gui/drives build/host/gui-drives
 	@set -e; for t in $(GUI_SCRIPTS); do n=$$(basename $$t .txt); prog=$$(awk '$$1=="run"{print tolower($$2); exit}' $$t); \
-	  prog=$${prog%.exe}; for b in 8 16 32; do \
-	    GLOS_HOST_DRIVES=build/host/gui-drives build/host/$$prog $$t build/host/gui $$b > build/host/gui/$$n-$$b.log \
+	  prog=$${prog%.exe}; mkdir -p build/host/gui/$$n; for b in 8 16 32; do rm -rf build/host/gui-drives; \
+	    cp -r tests/gui/drives build/host/gui-drives; \
+	    GLOS_HOST_DRIVES=build/host/gui-drives build/host/$$prog $$t build/host/gui/$$n $$b > build/host/gui/$$n-$$b.log \
 	      || { echo "gui-goldens: $$n at $$b bits:"; cat build/host/gui/$$n-$$b.log; exit 1; }; done; \
+	  grep -q '^#loopa-only' $$t || sed -n 's/^expect //p' $$t | while IFS= read -r e; do \
+	    grep -qxF -- "$$e" build/host/gui/$$n-16.log || { echo "gui-goldens: $$n: no line '$$e'"; exit 1; }; done; \
 	  echo "gui-goldens: $$n $$(grep -c ^SHOT build/host/gui/$$n-8.log) shots"; done
 
 # (`make fonts` makes kernel/gfx/fonts again from FONT_DIR's TrueType files: on the host, with python3-pil.)
@@ -368,6 +384,9 @@ loopa-m8: loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games
 # The toolkit (M9 step A): GUITEST's scripts (tests/gui) on the desktop against the host's goldens (gui-goldens).
 loopa-gui: all dos-tests build/dj/GUITEST.EXE gui-goldens check-deps
 	$(Q)python3 tests/loopa/jobs.py gui -j $(JOBS)
+# The native apps (M9 steps D-G): their scripts (tests/gui) on the desktop against the host's goldens.
+loopa-native: all dos-tests apps gui-goldens check-deps
+	$(Q)python3 tests/loopa/jobs.py native -j $(JOBS)
 # The settings (M9 step B): every setting set over ssh, the file kept and written, a new start reading it.
 loopa-config: all check-deps
 	$(Q)python3 tests/loopa/jobs.py config -j $(JOBS)
@@ -455,11 +474,13 @@ build/dj/GDBME.EXE: tests/dos/gdbme.c
 # The 2D library in it is the kernel's own code (kernel/gfx), built for the program.
 LIBGLOS_GFX := kernel/gfx/gfx.c kernel/gfx/pal.c kernel/gfx/font.c kernel/gfx/region.c \
                kernel/gfx/fonts/ui.c kernel/gfx/fonts/bold.c kernel/gfx/fonts/mono.c
-build/sdk/libglos.a: sdk/libglos/glos.c include/glos/api.h include/glos/gfx.h $(LIBGLOS_GFX)
+build/sdk/libglos.a: sdk/libglos/glos.c include/glos/api.h include/glos/gfx.h $(LIBGLOS_GFX) sdk/config/cfg.c \
+                     include/glos/config.h
 	@mkdir -p build/sdk
 	$(Q)echo "  DJCC    $<"
 	$(Q)rm -f $@ build/sdk/*.o
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/glos.o $<
+	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/cfg.o sdk/config/cfg.c
 	$(Q)for f in $(LIBGLOS_GFX); do \
 	    $(DJCC) -O2 -Wall -Werror -ffreestanding -Iinclude -Ikernel/include -c -o build/sdk/gfx_$$(basename $$f .c).o $$f || exit 1; \
 	  done
@@ -487,6 +508,18 @@ build/dj/GUITEST.EXE: tests/dos/guitest.c build/sdk/libgui.a build/sdk/libglos.a
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -o $@ $< build/sdk/libgui.a build/sdk/libglos.a
 	$(Q)python3 tools/glosmark.py $@
+# The native apps for DOS: build/apps/NAME.EXE.
+APP_EXES := $(foreach a,$(APPS),build/apps/$(shell echo $(a) | tr a-z A-Z).EXE)
+define app_exe
+build/apps/$(1).EXE: $$(wildcard apps/$(2)/*.c apps/$(2)/*.h) build/sdk/libgui.a build/sdk/libglos.a tools/glosmark.py
+	@mkdir -p build/apps
+	$$(Q)echo "  DJCC    apps/$(2)"
+	$$(Q)$$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -Iinclude -Ithird_party/stb -o $$@ $$(wildcard apps/$(2)/*.c) build/sdk/libgui.a \
+	  build/sdk/libglos.a -lm
+	$$(Q)python3 tools/glosmark.py $$@
+endef
+$(foreach a,$(APPS),$(eval $(call app_exe,$(shell echo $(a) | tr a-z A-Z),$(a))))
+apps: $(APP_EXES)
 build/dj/APPTEST.EXE: tests/dos/apptest.c build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"

@@ -14,8 +14,10 @@ int kcfg_set(const char *section, const char *key, const char *value, char *why,
 int kcfg_profile(const char *name, struct bi_profile *p);       /* 0; -1 none; -2 the file not read (bi's) */
 u32 kcfg_list(char *buf, u32 max);
 u32 kcfg_sections(char *buf, u32 max);
+u32 kcfg_keys(const char *section, char *buf, u32 max);  /* a section's "key = value" lines */
 u32 kcfg_stat(char *buf, u32 max);
 void kcfg_apply(const char *section, const char *key, const char *value);   /* a setting in effect now */
+void kcfg_desktop_started(void);        /* [desktop] start's programs started */
 void kcfg_on_change(void (*apply)(const char *section, const char *key, const char *value));
 
 #endif

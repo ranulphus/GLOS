@@ -655,6 +655,14 @@ static int choice_event(struct gui_widget *w, struct gui_ev *e)
         gui_send(w, GUI_ON_SELECT);
         return 1;
     }
+    if ((e->key == GUI_K_HOME || e->key == GUI_K_END) && c->menu.n) {     /* the first, the last */
+        int to = e->key == GUI_K_HOME ? 0 : c->menu.n - 1;
+        if (to != c->value) {
+            gui_choice_value(w, 1, to);
+            gui_send(w, GUI_ON_SELECT);
+        }
+        return 1;
+    }
     if (e->key == GUI_K_UP || e->key == GUI_K_DOWN || e->key == GUI_K_LEFT || e->key == GUI_K_RIGHT)
         return 1;
     return 0;

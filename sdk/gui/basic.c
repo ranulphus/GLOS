@@ -11,7 +11,7 @@ struct label {
     struct gui_widget w;
     const struct gfx_font *font;
     unsigned rgb;
-    int align;
+    int align, boxed;
 };
 
 static void label_measure(struct gui_widget *w, int *pw, int *ph)
@@ -24,11 +24,15 @@ static void label_measure(struct gui_widget *w, int *pw, int *ph)
 static void label_draw(struct gui_widget *w, struct gfx_surface *s)
 {
     struct label *l = (struct label *)w;
-    int tw = gui_text_w(l->font, gui_get_text(w)), x = w->r.x;
+    int tw = gui_text_w(l->font, gui_get_text(w)), x = w->r.x, pad = l->boxed ? 6 : 0;
+    if (l->boxed)
+        gui_draw_field(s, &w->r, 1);
     if (l->align == 0)
         x += (w->r.w - tw) / 2;
     else if (l->align > 0)
-        x += w->r.w - tw;
+        x += w->r.w - tw - pad;
+    else
+        x += pad;
     gui_draw_text(s, x, w->r.y + (w->r.h - l->font->height) / 2, l->font, gui_get_text(w),
                   w->flags & GUI_DISABLED ? GUI_DIM : l->rgb);
 }
@@ -43,6 +47,12 @@ struct gui_widget *gui_label(struct gui_widget *parent, const char *text)
     l->align = -1;
     gui_set_text(&l->w, text);
     return &l->w;
+}
+
+void gui_label_box(struct gui_widget *w, int on)
+{
+    ((struct label *)w)->boxed = on;
+    gui_damage(w);
 }
 
 void gui_label_style(struct gui_widget *w, const struct gfx_font *font, unsigned rgb, int align)

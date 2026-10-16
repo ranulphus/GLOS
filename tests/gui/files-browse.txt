@@ -1,0 +1,16 @@
+# The file manager's browser (apps/files; M9 step F): the tree of folders and the list with its columns (the
+# dates' column blanked: they are the copy's), large icons; a folder opened from the tree.
+run FILES.EXE -browse C:\FM
+wait "C:\FM - Files"
+shot browse "C:\FM - Files" 371 0 169 330
+key shift+tab
+key right down
+wait "C:\FM\DOCS - Files"
+shot tree "C:\FM\DOCS - Files" 371 0 169 330
+key tab
+key alt+v l
+shot icons "C:\FM\DOCS - Files"
+key alt+f4
+gone "C:\FM\DOCS - Files"
+expect FILES browser C:\FM
+expect FILES end 

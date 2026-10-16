@@ -11,7 +11,6 @@
 #define GUI_BTN_H    22
 #define GUI_BTN_W    72                 /* a button's width at least */
 #define GUI_FIELD_H  20
-#define GUI_SB       14                 /* a scroll bar's width */
 #define GUI_ROW_H    16                 /* a list's row, a tree's, a menu's item less its gap */
 #define GUI_DBLCLICK 500                /* milliseconds (step B makes it a setting) */
 
@@ -33,9 +32,7 @@ struct gui_widget *gui_hit(struct gui_widget *w, int x, int y);
 void gui_measure(struct gui_widget *w, int *pw, int *ph);
 void gui_place(struct gui_widget *w, int x, int y, int cw, int ch);    /* w->r, and its children laid out */
 void gui_set_mnemonic(struct gui_widget *w, const char *text);
-void gui_send(struct gui_widget *w, int what);          /* w->on(w, what), if it has one */
 struct gui_window *gui_window_of(unsigned id);
-int gui_window_active(struct gui_window *w);            /* it has the keyboard */
 unsigned gui_now(void);
 void gui_win_realize(struct gui_window *w, int x, int y, int anywhere);
 int gui_shortcut_parse(const char *s, unsigned *key, unsigned *mods);
@@ -48,30 +45,15 @@ void gui_frame(struct gfx_surface *s, const struct gfx_rect *r, unsigned rgb);
 void gui_text_latin1(struct gfx_surface *s, int x, int y, const struct gfx_font *f, const char *bytes, int n,
                      unsigned rgb);     /* bytes as Latin-1 code points (a file's text) */
 int gui_latin1_w(const struct gfx_font *f, const char *bytes, int n);
-int gui_char_w(const struct gfx_font *f, unsigned c);   /* one code point's advance */
 void gui_draw_arrow(struct gfx_surface *s, int cx, int cy, int dir, unsigned rgb);    /* 0 up 1 down 2 left 3 right */
 void gui_draw_check(struct gfx_surface *s, int x, int y, int on, int enabled);
 void gui_draw_radio(struct gfx_surface *s, int x, int y, int on, int enabled);
-void gui_text_fit(struct gfx_surface *s, int x, int y, int w, const struct gfx_font *f, const char *text,
-                  unsigned rgb);        /* cut with "..." to fit w */
 void gui_strip_amp(char *out, const char *in, int room);       /* "&File" -> "File" */
-
-/* ---- scroll bars (a part of the widget that has one: list, tree, editor, scroll area) */
-struct gui_sb {
-    int pos, page, total;               /* the first unit shown, how many show, how many there are */
-    struct gfx_rect r;                  /* the bar (empty: none) */
-    int drag, drag_off;                 /* the thumb held, and where in it */
-    int held;                           /* an arrow (1 up, 2 down) or the trough (3 above, 4 below) held */
-};
-void gui_sb_draw(struct gfx_surface *s, const struct gui_sb *b, int enabled);
-int gui_sb_event(struct gui_widget *w, struct gui_sb *b, struct gui_ev *e, int line);  /* 1: taken; pos may move */
-void gui_sb_clamp(struct gui_sb *b);
 
 /* ---- menu.c */
 int gui_menubar_key(struct gui_window *w, struct gui_ev *e, int late);  /* Alt+letter, F10, shortcuts: 1 taken.
                                            late 0: before the focus has the key (shortcuts with Ctrl or Alt); 1: after
                                            it has left it (those without) */
-void gui_close_later(struct gui_window *w);     /* closed when the event being handled is done */
 void gui_post_command(struct gui_window *w, int id);    /* w's on_command(id), then */
 void gui_popdown_all(void);
 int gui_menubar_height(struct gui_menubar *b);

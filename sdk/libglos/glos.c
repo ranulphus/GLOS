@@ -189,6 +189,15 @@ int glos_config_set(const char *section, const char *key, const char *value, cha
     return (int)a;
 }
 
+int glos_config_keys(const char *section, char *out, unsigned room)
+{
+    char req[64];
+    unsigned a, b = 4;
+    if (!pack(req, sizeof req, section, 0, 0) || call5(GLOS_FN_CONFIG, &a, &b, (unsigned)req, (unsigned)out, room) != 0)
+        return -1;
+    return (int)a;
+}
+
 int glos_config_unset(const char *section, const char *key)
 {
     char req[128];

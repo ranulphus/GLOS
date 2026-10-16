@@ -1,0 +1,35 @@
+# The terminal and GLOS's shell (apps/term; M9 step E): built-in commands, variables, && and ||, history,
+# completion, redirection, CLS. (Programs: term-run.txt, in Loop A.)
+run TERM.EXE
+wait "Terminal"
+shot start "Terminal"
+type cd \\gui\n
+type dir /w\n
+shot dir "Terminal"
+type set X=hello\n
+type echo %X% world && ver\n
+type md new && cd new && echo made\n
+type cd .. || echo not shown\n
+type cd nosuch || echo no such folder\n
+type copy notes.txt new\n
+type dir new /b\n
+shot commands "Terminal"
+type echo kept > out.txt\n
+type echo more >> out.txt\n
+file C:\GUI\OUT.TXT kept \r\nmore \r\n
+type type out.txt\n
+type ty
+key tab
+type  ou
+key tab
+key enter
+type ren out.txt done.txt && del new\\*.* && rd new\n
+type nosuch\n
+key up up
+shot history "Terminal"
+key esc
+type cls\n
+shot cls "Terminal"
+type exit\n
+gone "Terminal"
+expect TERM end

@@ -57,6 +57,10 @@ static int shown(struct list *l)
 
 static void sb_place(struct list *l)
 {
+    if (l->top > lines(l) - shown(l))           /* (the same for a list) */
+        l->top = lines(l) - shown(l);
+    if (l->top < 0)
+        l->top = 0;
     l->sb.r.x = l->w.r.x + l->w.r.w - GUI_SB, l->sb.r.y = l->w.r.y, l->sb.r.w = GUI_SB, l->sb.r.h = l->w.r.h;
     l->sb.total = lines(l);
     l->sb.page = shown(l);
@@ -296,6 +300,8 @@ static int list_event(struct gui_widget *w, struct gui_ev *e)
     }
     if (e->mods & GLOS_MOD_ALT)
         return 0;
+    if (ctrl || e->ch <= 0x20 || e->ch >= 0x100)
+        l->find[0] = 0;                         /* (another key: the next letters are a new name) */
     switch (e->key) {
     case GUI_K_UP: go(l, l->cur - step, shift, 0); return 1;
     case GUI_K_DOWN: go(l, l->cur < 0 ? 0 : l->cur + step, shift, 0); return 1;
@@ -598,6 +604,11 @@ static int tree_rows(struct tree *t)
 
 static void tree_sb(struct tree *t)
 {
+    int total = count_shown(t);
+    if (t->top > total - tree_rows(t))          /* (no further down than there is: a choice made before the */
+        t->top = total - tree_rows(t);          /* tree had its size may have scrolled it) */
+    if (t->top < 0)
+        t->top = 0;
     t->sb.r.x = t->w.r.x + t->w.r.w - GUI_SB, t->sb.r.y = t->w.r.y, t->sb.r.w = GUI_SB, t->sb.r.h = t->w.r.h;
     t->sb.total = count_shown(t);
     t->sb.page = tree_rows(t);
@@ -855,3 +866,12 @@ struct gui_node *gui_tree_opening(struct gui_widget *w) { return TR(w)->opening;
 void *gui_node_user(struct gui_node *n) { return n ? n->user : NULL; }
 const char *gui_node_text(struct gui_node *n) { return n ? n->text : ""; }
 struct gui_node *gui_node_parent(struct gui_node *n) { return n && n->parent && n->parent->parent ? n->parent : NULL; }
+
+struct gui_node *gui_tree_child(struct gui_widget *w, struct gui_node *n, const char *text)
+{
+    struct gui_node *c;
+    for (c = n ? n->first : TR(w)->root.first; c; c = c->next)
+        if (!strcmp(c->text, text))
+            return c;
+    return NULL;
+}

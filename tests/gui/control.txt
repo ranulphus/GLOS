@@ -1,0 +1,37 @@
+# The Control Panel (apps/control; M9 step G): its pages, drawn from the settings' schema with GLOS.CFG's values
+# (tests/gui/drives/C/GLOS/GLOS.CFG; beside GLOS.EXE in Loop A); what the setting with the keyboard does and when
+# it takes effect; a program's profile; a wrong value refused with the schema's rule, before anything is set; a
+# new program; Cancel, which sets nothing. (Every setting changed by keys: the control suite.)
+run CONTROL.EXE
+wait "Control Panel"
+shot cp-display "Control Panel"
+key ctrl+tab alt+s
+shot cp-input "Control Panel"
+key ctrl+tab
+shot cp-sound "Control Panel"
+key ctrl+tab
+shot cp-network "Control Panel"
+key ctrl+tab
+shot cp-desktop "Control Panel"
+key ctrl+tab
+shot cp-shell "Control Panel"
+key ctrl+tab
+shot cp-types "Control Panel"
+key ctrl+tab
+shot cp-programs "Control Panel"
+key alt+m home shift+end
+type 99x
+key alt+p
+wait "Not Applied"
+shot cp-refused "Not Applied"
+key enter
+gone "Not Applied"
+key alt+n
+wait "New Program"
+type quake.exe\n
+gone "New Program"
+shot cp-new "Control Panel"
+key esc
+gone "Control Panel"
+expect CONTROL start
+expect CONTROL end

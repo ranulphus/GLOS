@@ -1138,11 +1138,14 @@ class Agent:
         return open(self.serial, "rb").read().decode("latin-1").replace("\r", "") \
             if os.path.exists(self.serial) else ""
 
-    def listening(self, limit=240):
+    def listening(self, limit=240, after=None):
+        """GLOS up with its network and listening (after the line `after`, for a second start)."""
         import time
         t0 = time.time()
         while time.time() - t0 < limit:
             text = self.log()
+            if after:
+                text = text[text.index(after):] if after in text else ""
             if "GLOS-NET dhcp" in text and "GLOS-SSH listen" in text:
                 return True
             time.sleep(1)
@@ -3505,7 +3508,7 @@ class GuiDriver:
         return None
 
     def golden(self, name):
-        path = os.path.join(ROOT, "build", "host", "gui", "%s-%d.png" % (name, self.bits))
+        path = os.path.join(ROOT, "build", "host", "gui", self.script, "%s-%d.png" % (name, self.bits))
         if not os.path.exists(path):
             return None
         w, h, rgb = png_rgb(open(path, "rb").read())
@@ -3513,7 +3516,7 @@ class GuiDriver:
             rgb = bytes((((v >> 2) << 2) | (v >> 6)) for v in rgb)
         return w, h, rgb
 
-    def shot(self, name, title, tries=10):
+    def shot(self, name, title, mask=None, tries=10):
         want = self.golden(name)
         if not want:
             self.bad.append("golden-" + name)
@@ -3526,9 +3529,14 @@ class GuiDriver:
             pic = png_rgb(p.stdout) if p.returncode == 0 else None
             if w and pic:
                 sw = pic[0]
-                rows = [pic[2][((w["y"] + y) * sw + w["x"]) * 3:((w["y"] + y) * sw + w["x"] + w["w"]) * 3]
+                rows = [bytearray(pic[2][((w["y"] + y) * sw + w["x"]) * 3:((w["y"] + y) * sw + w["x"] + w["w"]) * 3])
                         for y in range(w["h"])]
-                got = (w["w"], w["h"], b"".join(rows))
+                for mx, my, mw, mh in mask or []:  # (what differs from run to run: black, as the host's golden has it)
+                    for y in range(max(0, my), min(w["h"], my + mh)):
+                        x0, x1 = max(0, mx), min(w["w"], mx + mw)
+                        if x1 > x0:
+                            rows[y][x0 * 3:x1 * 3] = bytes(3 * (x1 - x0))
+                got = (w["w"], w["h"], b"".join(bytes(r) for r in rows))
                 if got == want:
                     return
                 if i == tries - 1:
@@ -3557,6 +3565,7 @@ class GuiDriver:
             self.agent.ssh("glos mouse %d %d" % (x - px, y - py))
 
     def play(self, script):
+        self.script = os.path.splitext(os.path.basename(script))[0]     # (its goldens: build/host/gui/SCRIPT/)
         for n, line in enumerate(open(os.path.join(ROOT, script)), 1):
             words = gui_words(line.rstrip("\n"))
             if not words or words[0].startswith("#"):
@@ -3572,8 +3581,13 @@ class GuiDriver:
             elif cmd == "gone":
                 if not self.until(lambda d: self.window(args[0], d) is None, 60):
                     self.bad.append("gone-%d" % n)
-            elif cmd == "key":
+            elif cmd == "quick":                # keys that open no menu, in one go
                 self.agent.ssh("glos key " + gui_key_list(args))
+            elif cmd == "key":                  # a spec at a time; after Alt and a letter, the menu it opens
+                for spec in args:
+                    self.agent.ssh("glos key " + gui_key_list([spec]))
+                    if re.match(r"^alt\+[a-z0-9]$", spec):
+                        self.until(lambda d: any(w["shown"] and w["kind"] == "popup" for w in d["win"]), 5)
             elif cmd == "type":
                 text = line.split(None, 1)[1].rstrip("\n") if len(line.split(None, 1)) > 1 else ""
                 self.agent.ssh("glos type " + text)
@@ -3595,12 +3609,38 @@ class GuiDriver:
                     self.agent.ssh("glos key 0:mouse:0:0:%d,0.05:mouse:0:0:0" % button)
             elif cmd == "pause":
                 time.sleep(int(args[0]) / 1000.0)
+            elif cmd == "launch":               # Ctrl+Esc: the launcher, the shell's; its menu then
+                self.agent.ssh("glos key 0x1D:down,0.05:0x01,0.2:0x1D:up")
+                self.until(lambda d: any(w["shown"] and w["kind"] == "popup" for w in d["win"]), 5)
+            elif cmd == "syskey":
+                self.agent.ssh("glos key 0x1D:down,0.05:0x38:down,0.1:0x153,0.25:0x38:up,0.3:0x1D:up")
             elif cmd == "clip":
                 self.agent.ssh("glos clip " + line.split(None, 1)[1].rstrip("\n"))
             elif cmd == "shot":
-                self.shot(args[0], args[1])
+                v = [int(x) for x in args[2:]]
+                self.shot(args[0], args[1], [tuple(v[i:i + 4]) for i in range(0, len(v) - 3, 4)])
             elif cmd == "expect":
                 self.expects.append(line.split(None, 1)[1].rstrip("\n"))
+            elif cmd == "file":                 # a file's bytes, fetched over SFTP once the app has written it
+                rest = line.split(None, 2)[2].rstrip("\n") if len(line.split(None, 2)) > 2 else ""
+                want = re.sub(r"\\(x[0-9a-fA-F]{2}|.)", lambda m: chr(int(m.group(1)[1:], 16)) if m.group(1)[0] == "x"
+                              else {"r": "\r", "n": "\n", "t": "\t"}.get(m.group(1), m.group(1)), rest).encode("latin-1")
+                path = args[0]
+                dst = os.path.join(self.out, "file-%d" % n)
+                got = None
+                for _ in range(10):             # (the app writes it when it gets to it)
+                    f = subprocess.run(["scp", "-P", str(self.agent.port), "-i", self.agent.key, "-o", "IdentitiesOnly=yes",
+                                        "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o",
+                                        "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
+                                        "glos@127.0.0.1:/" + path[0] + path[2:].replace("\\", "/"), dst],
+                                       capture_output=True, timeout=120)
+                    got = open(dst, "rb").read() if f.returncode == 0 else None
+                    if got == want:
+                        break
+                    time.sleep(1)
+                if got != want:
+                    self.bad.append("file-%d" % n)
+                    self.notes.append("%s: %r, not %r" % (path, got[:80] if got else got, want[:80]))
             else:
                 self.bad.append("script-%d" % n)
 
@@ -3755,7 +3795,7 @@ def config_case(profile, vcard, card):
         while time.time() - t0 < 30 and " pending" in agent.ssh("glos config")[1].split("\n")[0]:
             time.sleep(0.5)
         checks["exit-1"] = agent.ssh("glos exit")[0] == 0
-        checks["listen-2"] = agent.listening()
+        checks["listen-2"] = agent.listening(after="HX-AGAIN")
         checks["loaded-2"] = loaded()
         t0 = time.time()
         while time.time() - t0 < 60 and " 800x600x16 " not in agent.ssh("glos display")[1]:
@@ -3791,7 +3831,7 @@ def console_case(profile, vcard, card, bits):
     tag = "%s-%s-%d" % (profile, vcard, bits)
     out = os.path.join(ROOT, "out", "console-" + tag)
     os.makedirs(out, exist_ok=True)
-    bat = os.path.join(out, "T.BAT")
+    bat = os.path.join(ROOT, "out", "console-%s.bat" % tag)     # (not in the run's own directory: run.py empties it)
     open(bat, "w").write("@ECHO batch %1 %2\r\n@C:\\TEST\\CONIN.EXE code 4\r\n@IF ERRORLEVEL 4 ECHO level 4\r\n")
     agent = Agent("console-" + tag, profile, card, ["--card", vcard,
         "--file", "build/dj/RUNTEST.EXE=/TEST/RUNTEST.EXE", "--file", "build/dj/PMVGA.EXE=/TEST/PMVGA.EXE",
@@ -3932,6 +3972,182 @@ def console_case(profile, vcard, card, bits):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+# The native apps (M9 steps D-G): their scripts (tests/gui, all but GUITEST's) on the desktop, the apps beside
+# GLOS.EXE.
+NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL"]
+NATIVE_CASES = [("bf6", "vbe", "ne2kpci", 8), ("bf6", "g200", "ne2kpci", 16), ("bf6", "g400", "ne2kpci", 32),
+                ("486dx2", "vbe", "ne2k", 8)]
+
+
+def native_case(profile, vcard, card, bits):
+    scripts = sorted(f for f in os.listdir(os.path.join(ROOT, "tests", "gui"))
+                     if f.endswith(".txt") and "GUITEST" not in open(os.path.join(ROOT, "tests", "gui", f)).read())
+    only = os.environ.get("NATIVE_ONLY")        # e.g. NATIVE_ONLY=notepad,calc
+    if only:
+        scripts = [f for f in scripts if f[:-4] in only.split(",")]
+    return gui_case(profile, vcard, card, bits, scripts=scripts, tag_prefix="native",
+                    files=["build/apps/%s.EXE=/TEST/%s.EXE" % (a, a) for a in NATIVE_APPS]
+                    + ["build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE", "build/ow/dos/CONIN.EXE=/TEST/CONIN.EXE",
+                       "tests/gui/drives/C/GLOS/GLOS.CFG=/TEST/GLOS.CFG"])   # (the Control Panel's, beside GLOS.EXE)
+
+
+# ---- the Control Panel (M9 step G): every setting the schema has, changed by keys alone
+
+CONTROL_CASES = [("bf6", "g200", "ne2kpci")]
+CONTROL_PAGES = ["display", "input", "sound", "net", "desktop", "shell", "open", "program"]   # (cfg_sections)
+CONTROL_NUMBERS = {"gpu_watchdog": "1000", "repeat_rate": "20", "double_click": "400", "envsize": "2048",
+                   "memory": "8192"}
+CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\KIOSK.BAT", "options": "/NOVME",
+                 "title": "CP Test", "args": "-a -b", "comspec": "C:\\COMMAND.COM",
+                 "autoexec": "C:\\AUTOEXEC.BAT", "dir": "C:\\CP", "blaster": "A220 I7 D1 H5",
+                 "env": "CPA=1\nPATH=C:\\A;C:\\B"}
+
+
+def cfg_schema():
+    """The settings' schema as sdk/config/cfg.c has it: a dict a setting (section, key, type, when, min, max,
+    choices, default, label)."""
+    src = open(os.path.join(ROOT, "sdk", "config", "cfg.c")).read()
+    at = src.index("cfg_schema[] = {")
+    body = src[at:src.index("\n};", at)]
+    keys = []
+    for m in re.finditer(r'\{\s*"(\w+)",\s*"([^"]+)",\s*(CFG_\w+),\s*(CFG_\w+),\s*(-?\d+),\s*(-?\d+),\s*'
+                         r'("[^"]*"|0),\s*"([^"]*)",\s*"([^"]*)"', body):
+        sec, key, typ, when, mn, mx, ch, d, label = m.groups()
+        keys.append({"section": sec, "key": key, "type": typ, "when": when, "min": int(mn), "max": int(mx),
+                     "choices": None if ch == "0" else ch.strip('"').split("|"), "default": d, "label": label})
+    return keys
+
+
+def control_script(schema):
+    """Keys for CONTROL.EXE that change every setting from its default (the file the suite gives it has none),
+    a page at a time; the values each should then have: (section, key, value)."""
+    lines, want, page = ["run CONTROL.EXE", 'wait "Control Panel"'], [], 0
+
+    def to(p):
+        nonlocal page
+        if p != page:
+            lines.append("quick" + " ctrl+tab" * ((p - page) % len(CONTROL_PAGES)))
+            page = p
+
+    def value(k):
+        letter = k["label"][k["label"].index("&") + 1].lower()
+        ch = k["choices"]
+        if k["type"] == "CFG_CHOICE" and ch in (["on", "off"], ["0", "1"]):
+            lines.append("quick alt+" + letter)  # (its letter presses a check box)
+            return ch[1] if k["default"] == ch[0] else ch[0]
+        if k["type"] == "CFG_CHOICE":
+            i = (ch.index(k["default"]) + 1) % len(ch)
+            lines.append("quick alt+%s home%s" % (letter, " down" * i))
+            return ch[i]
+        v = CONTROL_NUMBERS.get(k["key"]) if k["type"] == "CFG_NUMBER" else CONTROL_TEXTS.get(k["key"], "X")
+        if k["type"] == "CFG_ENV":
+            lines.append("quick alt+%s ctrl+a" % letter)
+        else:
+            lines.append("quick alt+%s home shift+end" % letter)
+        lines.append("type " + v.replace("\\", "\\\\").replace("\n", "\\n"))  # (the script's escapes)
+        return v
+
+    for k in schema:
+        if k["section"] in ("open", "program") or k["type"] == "CFG_MODE":
+            continue
+        to(CONTROL_PAGES.index(k["section"]))
+        want.append((k["section"], k["key"], value(k)))
+    to(CONTROL_PAGES.index("open"))             # a kind of file
+    lines += ["key alt+a", 'wait "Add"', "quick home shift+end", "type .doc\\n", "pause 1500", 'wait "Add"',
+              "type NOTEPAD.EXE\\n", 'gone "Add"']
+    want.append(("open", ".DOC", "NOTEPAD.EXE"))
+    to(CONTROL_PAGES.index("program"))          # a new program's profile
+    lines += ["key alt+n", 'wait "New Program"', "type cptest.exe\\n", 'gone "New Program"']
+    for k in schema:
+        if k["section"] == "program":
+            want.append(("program CPTEST.EXE", k["key"], value(k)))
+    lines += ["quick alt+p", "pause 3000"]
+    for s, k, v in want:
+        lines.append("expect CONTROL set [%s] %s = %s" % (s, k, v.replace("\n", "|")))
+    to(0)                                       # the screen: a mode kept, and one let go back
+    lines += ["quick alt+s home" + " down" * 5, "quick alt+p", 'wait "Screen"', "pause 2000", "key alt+k",
+              'gone "Screen"', "pause 2000", "quick alt+s home" + " down" * 2, "quick alt+p", 'wait "Screen"',
+              "pause 18000", 'gone "Screen"', "pause 2000", "key alt+f4", 'gone "Control Panel"',
+              "expect CONTROL mode kept 800x600x16", "expect CONTROL mode back 800x600x16", "expect CONTROL end"]
+    return lines, want
+
+
+def control_case(profile, vcard, card):
+    """Every setting in GLOS.CFG changed from the Control Panel (M9 step G; apps/control): from a file with none
+    of them, the suite walks the schema (sdk/config/cfg.c), changes each setting from its default by keys alone
+    (a page at a time, Alt and the label's letter, the value typed or chosen), adds a kind of file and a new
+    program's profile with every key, and applies; then glos config get and the file agree with each; a screen
+    mode kept and one let go back after fifteen seconds."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    out = os.path.join(ROOT, "out", "control-" + tag)
+    os.makedirs(out, exist_ok=True)
+    cfg = os.path.join(ROOT, "out", "control-%s.cfg" % tag)
+    open(cfg, "w").write("; GLOS.CFG for the control suite: nothing set, every setting its default.\r\n[display]\r\n")
+    lines, want = control_script(cfg_schema())
+    script = os.path.join("out", "control-%s.txt" % tag)
+    open(os.path.join(ROOT, script), "w").write("\n".join(lines) + "\n")
+    agent = Agent("control-" + tag, profile, card, ["--card", vcard, "--sound", "sb16",
+        "--pre", "SET BLASTER=A220 I5 D1 H5 T6", "--file", "%s=/TEST/GLOS.CFG" % os.path.relpath(cfg, ROOT),
+        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE",
+        "--cmd", "SERSAY HX-START control", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VMODE",
+        "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    checks, notes = {"listen": agent.listening()}, []
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and " 640x480x16 " not in agent.ssh("glos display")[1]:
+            time.sleep(0.5)
+        g = GuiDriver(agent, out, 16, False, "C:\\TEST\\")
+        g.play(script)
+        text = g.finish()
+        open(os.path.join(out, "control.out"), "w").write(text)
+        checks["script"] = not g.bad
+        notes += g.notes + (["script: " + " ".join(g.bad)] if g.bad else [])
+        bad = []
+        for sec, key, val in want:
+            rc, o, _ = agent.ssh("glos config get %s %s" % (sec.replace("program ", "program:"), key))
+            if rc != 0 or o.replace("\r", "").rstrip("\n") != val:
+                bad.append("%s.%s=%r" % (sec, key, o.strip()))
+        checks["get"] = not bad
+        if bad:
+            notes.append("get: " + " ".join(bad))
+        rc, o, _ = agent.ssh("glos config get display mode")
+        checks["mode-kept"] = o.strip() == "800x600x16" and " 800x600x16 " in agent.ssh("glos display")[1]
+        t0 = time.time()
+        while time.time() - t0 < 30 and " pending" in agent.ssh("glos config")[1].split("\n")[0]:
+            time.sleep(0.5)
+        f = subprocess.run(["scp", "-P", str(agent.port), "-i", agent.key, "-o", "IdentitiesOnly=yes", "-o",
+                            "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                            "-o", "LogLevel=ERROR", "glos@127.0.0.1:/C/TEST/GLOS.CFG", os.path.join(out, "GLOS.CFG")],
+                           capture_output=True, timeout=120)
+        ftext = open(os.path.join(out, "GLOS.CFG"), "rb").read().decode("latin-1") if f.returncode == 0 else ""
+        sec, have = "", set()
+        for l in ftext.replace("\r\n", "\n").split("\n"):
+            if l.startswith("["):
+                sec = l.strip("[]")
+            elif " = " in l:
+                k, v = l.split(" = ", 1)
+                have.add((sec.lower(), k.lower(), v))
+        missing = [(s, k, v) for s, k, v in want for one in v.split("\n") if (s.lower(), k.lower(), one) not in have]
+        checks["file"] = not missing
+        if missing:
+            notes.append("the file lacks %r" % missing[:6])
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    for n in notes:
+        print("    control-%s %s" % (tag, n))
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("control-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 # (machine, video card, network card, bits a pixel)
 GUI_CASES = [("bf6", "vbe", "ne2kpci", 8), ("bf6", "g200", "ne2kpci", 16), ("bf6", "g400", "ne2kpci", 32),
              ("486dx2", "vbe", "ne2k", 8)]
@@ -3969,13 +4185,16 @@ def gui_case(profile, vcard, card, bits, scripts=None, files=None, tag_prefix="g
             line = agent.ssh("glos display")[1]
             time.sleep(0.5)
         checks["mode"] = (" 640x480x%d " % bits) in line
+        if os.environ.get("GUI_SCRIPTS"):       # e.g. GUI_SCRIPTS=dialogs,files
+            scripts = [x + ".txt" for x in os.environ["GUI_SCRIPTS"].split(",")]
         for script in scripts or sorted(f for f in os.listdir(os.path.join(ROOT, "tests", "gui"))
                                         if f.endswith(".txt") and open(os.path.join(ROOT, "tests", "gui", f)).readline()
                                         and "GUITEST" in open(os.path.join(ROOT, "tests", "gui", f)).read()):
             g = GuiDriver(agent, out, bits, " dac=6" in line, appdir)
             name = os.path.splitext(os.path.basename(script))[0]
             g.play(os.path.join("tests", "gui", os.path.basename(script)))
-            g.finish()
+            with open(os.path.join(out, name + ".out"), "w") as f:
+                f.write(g.finish())
             checks[name] = not g.bad
             if g.bad:
                 notes.append("%s: %s" % (name, " ".join(g.bad)))
@@ -4027,7 +4246,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -4056,9 +4275,17 @@ def main():
     if a.suite == "config":
         cases = [c for c in CONFIG_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(config_case, cases, a.jobs)) else 1
+    if a.suite == "control":
+        cases = [c for c in CONTROL_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(control_case, cases, a.jobs)) else 1
     if a.suite == "console":
         cases = [c for c in CONSOLE_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(console_case, cases, a.jobs)) else 1
+    if a.suite == "native":
+        cases = [c for c in NATIVE_CASES if not a.profile or c[0] in a.profile]
+        if os.environ.get("GUI_ONLY"):
+            cases = [c for c in cases if c[1] in os.environ["GUI_ONLY"].split(",")]
+        return 0 if all(r[1] for r in matrix(native_case, cases, a.jobs)) else 1
     if a.suite == "gui":
         cases = [c for c in GUI_CASES if not a.profile or c[0] in a.profile]
         if os.environ.get("GUI_ONLY"):          # e.g. GUI_ONLY=g200

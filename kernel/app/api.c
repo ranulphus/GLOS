@@ -179,7 +179,12 @@ static int config_fn(struct trapframe *tf)
             user_wr((u16)tf->ds, tf->edx, out, strlen(out) + 1 <= tf->esi ? strlen(out) + 1 : tf->esi);
         break;
     case 3:
-        len = kcfg_sections(out, sizeof out);
+    case 4:
+        if (tf->ebx == 4 && strings(tf, tf->ecx, req, sizeof req, s, 1) != 1) {
+            r = -1;
+            break;
+        }
+        len = tf->ebx == 3 ? kcfg_sections(out, sizeof out) : kcfg_keys(s[0], out, sizeof out);
         r = tf->esi && user_wr((u16)tf->ds, tf->edx, out, len <= tf->esi ? len : tf->esi) != 0 ? -1 : 0;
         tf->eax = len;
         break;

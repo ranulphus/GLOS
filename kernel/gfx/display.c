@@ -41,6 +41,7 @@
 #include "session.h"
 #include "agent.h"
 #include "io.h"
+#include "kcfg.h"
 #include "kprintf.h"
 #include "mgadisp.h"
 #include "mixer.h"
@@ -333,11 +334,16 @@ void display_vm_turn(void)
         d.paint = gfx_testcard;
         return;
     }
-    d.on = 0;
-    if (mode_set() != 0)
-        return;
-    d.paint = what == DISPLAY_CARD ? gfx_testcard : d.home;
-    d.paint(&d.fb);
+    {
+        int was = d.on;
+        d.on = 0;
+        if (mode_set() != 0)
+            return;
+        d.paint = what == DISPLAY_CARD ? gfx_testcard : d.home;
+        d.paint(&d.fb);
+        if (!was && what == DISPLAY_ON)
+            kcfg_desktop_started();             /* ([desktop] start: the shell, M9) */
+    }
 }
 
 int display_desktop_bpp(void) { return d.on ? d.bpp : 0; }

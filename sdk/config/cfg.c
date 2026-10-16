@@ -22,7 +22,7 @@ const struct cfg_key cfg_schema[] = {
       "How long a key is held before it repeats" },
     { "input", "repeat_rate", CFG_NUMBER, CFG_NOW, 2, 30, 0, "10", "Repeat &rate (a second)",
       "How many times a second a held key repeats" },
-    { "input", "pointer_speed", CFG_CHOICE, CFG_NOW, 0, 0, "1|2|3", "1", "&Pointer speed",
+    { "input", "pointer_speed", CFG_CHOICE, CFG_NOW, 0, 0, "1|2|3", "1", "Pointer &speed",
       "How far the pointer moves for the mouse's movement: 1, 2 or 3 times" },
     { "input", "double_click", CFG_NUMBER, CFG_APP, 200, 1000, 0, "500", "Dou&ble click (ms)",
       "The longest time between the presses of a double click" },
@@ -37,8 +37,8 @@ const struct cfg_key cfg_schema[] = {
     { "net", "hostname", CFG_TEXT, CFG_RESTART, 1, 15, "host", "glos", "&Host name",
       "This machine's name on the network (NAME.local)" },
     /* [desktop] (M9) */
-    { "desktop", "start", CFG_TEXT, CFG_DESKTOP, 0, 120, "line", "FILES.EXE", "&Start with the desktop",
-      "Programs started when the desktop starts (the first draws the desktop's icons)" },
+    { "desktop", "start", CFG_TEXT, CFG_DESKTOP, 0, 120, "line", "", "&Start with the desktop",
+      "Programs started when the desktop starts, beside GLOS.EXE (FILES.EXE draws the desktop's icons)" },
     /* [shell] (M3, M4e) */
     { "shell", "comspec", CFG_PATH, CFG_RESTART, 0, 79, 0, "", "&COMMAND.COM",
       "The command interpreter for batch files and the console (empty: COMSPEC, or found)" },
@@ -63,7 +63,7 @@ const struct cfg_key cfg_schema[] = {
     { "program", "icon", CFG_CHOICE, CFG_NOW, 0, 0, "program|game|tool|text|picture|sound|network", "program",
       "&Icon", "Its picture in the launcher and on the desktop" },
     { "program", "menu", CFG_CHOICE, CFG_NOW, 0, 0, "0|1", "0", "In the &launcher", "It is in the launcher's menu" },
-    { "program", "desktop", CFG_CHOICE, CFG_NOW, 0, 0, "0|1", "0", "On the &desktop", "It has an icon on the desktop" },
+    { "program", "desktop", CFG_CHOICE, CFG_NOW, 0, 0, "0|1", "0", "On the des&ktop", "It has an icon on the desktop" },
     { "program", "screen", CFG_CHOICE, CFG_PROGRAM, 0, 0, "window|full", "window", "&Screen",
       "From the terminal: in the window until it wants the screen, or always full-screen" },
     { "program", "direct", CFG_CHOICE, CFG_PROGRAM, 0, 0, "0|1", "0", "&Direct mode",

@@ -1556,6 +1556,36 @@ and GLOS's:
 - `glos mem`: total and free memory, the kernel's image and heap, and the DPMI client's as above.
 - `glos net`: the card (name, I/O base, IRQ, MAC), the address DHCP gave, and the frame counters.
 
+### 17.10 Programs started by apps, and console jobs (M9)
+
+- **`GLOS_FN_RUN`** posts a job for an app, on the agent's queue, with its own folder and environment (the
+  profile's, then the app's on top): a GLOS app runs beside the others; any other program runs as a session
+  (§11), or, with `GLOS_RUN_CONSOLE`, as a **console job** whose output the app reads and whose keys it types
+  (`GLOS_FN_JOB`). Before the EXEC, the stub's NEXT answers 3 for the DOS calls that set the job's drive and
+  folder (`agent_vm_next`). The read that says the job is done with bytes to spare is its last: the job is gone.
+- **A console job's output** is its console's: INT 29h (which DOS's console driver calls for everything written
+  to the console, echo included) goes into the job's ring and goes no further, so DOS's driver doesn't hand it to
+  INT 10h 0Eh too. Outside DOS, INT 10h is answered by the monitor for what a line-by-line program needs
+  (`display_quiet()`: 0Eh into the ring; the cursor, the mode and the card's descriptions answered; a whole-screen
+  scroll is CLS, `\f` in the ring). Anything else that draws, a VGA port (3B0h-3DFh, trapped meanwhile) or a
+  touch of A0000h-BFFFFh (not present meanwhile, for real-mode and protected-mode code alike) makes the job a
+  full-screen session there and then (`session_console_full()`), with the call or access done for real.
+- **Its keys** are the app's: `GLOS_FN_JOB` puts them in a queue that each tick moves into the BIOS's buffer at
+  40:1E as it has room, where INT 16h and DOS find them. Ctrl-C is 2E03h; the app's Ctrl-Break kills the job.
+- **Apps' DOS calls while it waits for keys.** The apps go on running beside a console job, but their calls into
+  the system VM (§17.2) would wait until it ends, and an app that must type the job's keys may be waiting for
+  one: a deadlock. So while a console job runs, INT 16h and INT 28h trap too (with VME; without it every INT
+  traps), and two more safe points serve the apps' calls (`app_vm_idle_turn()`):
+  - INT 28h, DOS's idle call, which DOS makes while it waits for console input inside functions 01h-0Ch
+    (FreeDOS's `Do_DosIdle_loop`): INT 21h calls above 0Ch, as a TSR may make them there, and BIOS calls; not
+    while DOS's critical-error flag is set;
+  - INT 16h 00h or 10h with the BIOS's buffer empty, outside DOS: any call but an EXEC, a TSR's or an end; then
+    the INT is done again after 8 ticks of idling, so that the VM doesn't spin in the BIOS's wait.
+
+  A served call takes the app's PSP, DTA, vectors and DPMI context as at the stub's NEXT, and gives back the
+  job's, its context included (a DJGPP program reading a line); DOS's drive and folder are read before and put
+  back after. Calls that can't be made then (a console function inside DOS, an EXEC) wait on, in their order.
+
 ## 18. Logging
 
 - Lines on COM1 have the form `GLOS-<TAG> key=value …`, one line per event, written synchronously so the last

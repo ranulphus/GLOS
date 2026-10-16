@@ -297,6 +297,7 @@ struct editor {
     int rdirty, wrap, wrap_w;
     size_t caret, anchor;
     int top, left;                      /* the first row shown; pixels scrolled to the right */
+    int show;                           /* the caret to be shown once it has a size: 1, or 2 a third of the way down */
     int goal;                           /* the pixel column Up and Down aim for (-1: the caret's) */
     struct gui_sb vsb, hsb;
     int drag, modified, crlf, tabw;
@@ -687,8 +688,14 @@ static void e_bars(struct editor *e)
 
 static void e_scroll_to_caret(struct editor *e)
 {
-    int row = e_row_of(e, e->caret), shown = e_rows_shown(e), x;
+    int row, shown, x;
     size_t a, b;
+    if (e->w.r.w <= 0 || e->w.r.h <= 0) {      /* (not laid out yet, a hidden page's: when it is drawn) */
+        if (!e->show)
+            e->show = 1;
+        return;
+    }
+    row = e_row_of(e, e->caret), shown = e_rows_shown(e);
     if (row < e->top)
         e->top = row;
     if (row >= e->top + shown)
@@ -711,6 +718,13 @@ static void editor_draw(struct gui_widget *w, struct gfx_surface *s)
     struct gfx_rect in = { w->r.x + 1, w->r.y + 1, w->r.w - GUI_SB, w->r.h - 2 - (e->wrap ? 0 : GUI_SB - 1) };
     struct gfx_rect frame = { w->r.x, w->r.y, w->r.w - GUI_SB + 1, w->r.h - (e->wrap ? 0 : GUI_SB - 1) };
     struct gfx_rect clip = s->clip;
+    if (e->show) {
+        int third = e->show == 2;
+        e->show = 0;
+        e_scroll_to_caret(e);
+        if (third)
+            e->top = e_row_of(e, e->caret) - shown / 3 > 0 ? e_row_of(e, e->caret) - shown / 3 : 0;
+    }
     e_bars(e);
     gui_draw_field(s, &frame, on);
     gfx_rect_cut(&in, &clip);
@@ -893,6 +907,10 @@ int gui_editor_command(struct gui_widget *w, int cmd)
         return 1;
     case GUI_CMD_UNDO:
         e_undo(e);
+        return 1;
+    case GUI_CMD_END:
+        e->goal = -1;
+        e_go(e, e_len(e), 0);
         return 1;
     }
     return 0;
@@ -1084,7 +1102,7 @@ void gui_editor_set(struct gui_widget *w, const char *text, size_t n)
             break;
         }
     e->caret = e->anchor = 0;
-    e->top = e->left = 0;
+    e->top = e->left = e->show = 0;
     e->goal = -1;
     e->modified = 0;
     gui_damage(w);
@@ -1177,7 +1195,10 @@ void gui_editor_goto(struct gui_widget *w, int line)
         line = e->nl;
     e->goal = -1;
     e_go(e, e->ls[line - 1], 0);
-    e->top = e_row_of(e, e->caret) - e_rows_shown(e) / 3 > 0 ? e_row_of(e, e->caret) - e_rows_shown(e) / 3 : 0;
+    if (e->show)
+        e->show = 2;
+    else
+        e->top = e_row_of(e, e->caret) - e_rows_shown(e) / 3 > 0 ? e_row_of(e, e->caret) - e_rows_shown(e) / 3 : 0;
 }
 
 void gui_editor_where(struct gui_widget *w, int *line, int *col)

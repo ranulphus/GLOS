@@ -83,17 +83,20 @@
                                    ("program NAME.EXT" a program's section), DS:EDX room for ESI bytes -> EAX the
                                    value's bytes (env: its lines, LF between), the value (NUL-ended) copied, EBX 1
                                    if the file sets it, 0 if it is the default. EBX 1: DS:ECX "SECTION\0KEY\0VALUE\0"
-                                   set (env: lines between ';'), DS:EDX room for ESI bytes of why it was refused
-                                   -> EAX when it takes effect (CFG_NOW ...). EBX 2: DS:ECX "SECTION\0KEY\0" unset
-                                   (the default again). EBX 3: DS:EDX room for ESI bytes -> EAX the bytes of the
-                                   file's sections' names, a line each. Refused: GLOS_E_CONFIG */
+                                   set (env: lines between LF, or with no LF, between ';'), DS:EDX room for ESI bytes
+                                   of why it was refused -> EAX when it takes effect (CFG_NOW ...). EBX 2: DS:ECX
+                                   "SECTION\0KEY\0" unset (the default again). EBX 3: DS:EDX room for ESI bytes ->
+                                   EAX the bytes of the file's sections' names, a line each. EBX 4: DS:ECX
+                                   "SECTION\0", DS:EDX room for ESI bytes -> EAX the bytes of its "KEY = VALUE"
+                                   lines as the file has them ([open]'s). Refused: GLOS_E_CONFIG */
 #define GLOS_FN_RUN      24     /* DS:EBX a struct glos_run -> EAX the job's id: a program, or a line for COMMAND.COM,
                                    started as the agent starts jobs (one at a time, by GLOS's stub, in the system VM):
                                    a GLOS app runs beside the others, any other program as a session, or, with
                                    GLOS_RUN_CONSOLE, in the app's console (docs/milestones-m9.md, "Console jobs") */
 #define GLOS_FN_JOB      25     /* EBX 0: ECX a job's id, DS:EDX room for ESI bytes, EDI how long to wait for some
                                    (ms; FFFFFFFFh for ever) -> EAX the bytes of its console's output copied, EBX its
-                                   GLOS_JOB_ state, ECX its exit code once done. EBX 1: ECX id, DS:EDX ESI characters
+                                   GLOS_JOB_ state, ECX its exit code once done (the read that says DONE with
+                                   bytes to spare is its last: the job is gone after it). EBX 1: ECX id, DS:EDX ESI characters
                                    typed into its console (CP437 bytes; a key's scan code in the high byte of a word
                                    with EDI 2: words) -> EAX those taken. EBX 2: ECX id: ended (as glos kill).
                                    EBX 3: ECX id: forgotten (a running job runs on, detached) */
@@ -246,6 +249,8 @@ struct glos_run {
     char command[256];          /* a program and its arguments, or a line for COMMAND.COM (a batch file, an
                                    internal command, a redirection), as glos run takes them */
     char dir[80];               /* the drive and folder it starts in ("" : the system's) */
+    char env[512];              /* NAME=VALUE strings, each NUL-ended, then a NUL: added to its environment (over the
+                                   system's, and its profile's) */
 };
 
 enum { GLOS_JOB_QUEUED, GLOS_JOB_RUNNING, GLOS_JOB_FULL, GLOS_JOB_APP, GLOS_JOB_DONE };
@@ -318,6 +323,7 @@ int glos_config_set(const char *section, const char *key, const char *value, cha
                                         /* when it takes effect (CFG_NOW ...), or -1 and why */
 int glos_config_unset(const char *section, const char *key);
 int glos_config_sections(char *out, unsigned room);    /* the bytes: a line a section; -1 */
+int glos_config_keys(const char *section, char *out, unsigned room);   /* the bytes: "key = value" a line; -1 */
 int glos_run(const struct glos_run *r);                 /* the job's id, or -1 */
 int glos_job_read(unsigned id, char *out, unsigned room, unsigned wait_ms, unsigned *state, unsigned *code);
                                         /* the bytes read, or -1 */
