@@ -360,6 +360,25 @@ static void job_key(struct gui_ev *e)
         shell_type(&k, 1);
 }
 
+/* Keys typed into a program that ended without reading them (type-ahead): the prompt's, or the next program's,
+   as DOS's BIOS buffer would have kept them. */
+void term_keys(const unsigned short *k, int n)
+{
+    int i;
+    for (i = 0; i < n; i++) {
+        struct gui_ev e;
+        unsigned scan = k[i] >> 8, c = k[i] & 0xFF;
+        memset(&e, 0, sizeof e);
+        e.type = GUI_EV_KEY;
+        e.key = scan | ((c == 0 || c == 0xE0) && scan >= 0x47 && scan <= 0x53 ? 0x100u : 0u);
+        e.ch = c == 0xE0 ? 0 : c;
+        if (term_busy())
+            job_key(&e);
+        else
+            input_key(&e);
+    }
+}
+
 void term_paste(void)
 {
     size_t n, i;

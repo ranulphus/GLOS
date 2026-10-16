@@ -48,6 +48,9 @@
 #   make loopa-gui      GUITEST's scripts on the desktop against them (M9)
 #   make loopa-config   GLOS.CFG's settings over ssh, kept and written by the kernel (M9)
 #   make loopa-console  programs started by apps, console jobs, the shell's events, stats, watches (M9)
+#   make loopa-native   the native apps' scripts on the desktop against the host's goldens (M9)
+#   make loopa-control  every setting changed from the Control Panel by keys (M9)
+#   make loopa-m9       M9's exit: gui, config, console, native and control
 #   make gate           M4e's exit: the baseline matrix under GLOS and with direct mode forced, a kill and
 #                       an ssh probe for every program (tools/gate/run.py; on the host; hours)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
@@ -64,7 +67,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
+.PHONY: apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -130,6 +133,7 @@ build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/g
 endef
 $(foreach a,$(APPS),$(eval $(call app_host,$(a))))
 GUI_SCRIPTS := $(wildcard tests/gui/*.txt)
+# (A:, C:\HX, C:\OUT and C:\TEST are the Loop A machine's own, which the file manager's tree shows.)
 gui-goldens:
 	$(Q)$(DEV) $(MAKE) -s gui-goldens-run
 gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS))
@@ -137,6 +141,7 @@ gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS))
 	@set -e; for t in $(GUI_SCRIPTS); do n=$$(basename $$t .txt); prog=$$(awk '$$1=="run"{print tolower($$2); exit}' $$t); \
 	  prog=$${prog%.exe}; mkdir -p build/host/gui/$$n; for b in 8 16 32; do rm -rf build/host/gui-drives; \
 	    cp -r tests/gui/drives build/host/gui-drives; \
+	    mkdir -p build/host/gui-drives/A build/host/gui-drives/C/HX build/host/gui-drives/C/OUT build/host/gui-drives/C/TEST; \
 	    GLOS_HOST_DRIVES=build/host/gui-drives build/host/$$prog $$t build/host/gui/$$n $$b > build/host/gui/$$n-$$b.log \
 	      || { echo "gui-goldens: $$n at $$b bits:"; cat build/host/gui/$$n-$$b.log; exit 1; }; done; \
 	  grep -q '^#loopa-only' $$t || sed -n 's/^expect //p' $$t | while IFS= read -r e; do \
@@ -393,6 +398,11 @@ loopa-config: all check-deps
 # Programs started by apps and console jobs (M9 step C): RUNTEST, CONIN, PMVGA.
 loopa-console: all dos-tests build/dj/RUNTEST.EXE build/dj/PMVGA.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py console -j $(JOBS)
+# The Control Panel (M9 step G): every setting changed by keys alone, a screen mode kept and one let go back.
+loopa-control: all apps check-deps
+	$(Q)python3 tests/loopa/jobs.py control -j $(JOBS)
+# M9's exit: the toolkit, the settings, console jobs, the apps, the Control Panel.
+loopa-m9: loopa-gui loopa-config loopa-console loopa-native loopa-control
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py input -j $(JOBS)
 # M4a: the DPMI host's checks (DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i).

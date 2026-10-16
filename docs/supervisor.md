@@ -1572,6 +1572,13 @@ and GLOS's:
   full-screen session there and then (`session_console_full()`), with the call or access done for real.
 - **Its keys** are the app's: `GLOS_FN_JOB` puts them in a queue that each tick moves into the BIOS's buffer at
   40:1E as it has room, where INT 16h and DOS find them. Ctrl-C is 2E03h; the app's Ctrl-Break kills the job.
+  When the job ends, what it didn't read (the BIOS's buffer, unless it had the screen, then the queue) is kept,
+  and the buffer emptied: `GLOS_FN_JOB` EBX 4 gives it back, so that keys typed ahead reach the terminal's prompt
+  or its next program, as DOS's buffer would have kept them for COMMAND.COM.
+- **Watches** (`GLOS_FN_WATCH`, `kernel/dos/watch.c`) see the DOS calls that change a directory before DOS makes
+  them, from any program; a close counts only for a handle written to that is a file's (its SFT entry isn't a
+  device's): an app's stdout is no change, or a watcher that prints would be told of its own output, again and
+  again.
 - **Apps' DOS calls while it waits for keys.** The apps go on running beside a console job, but their calls into
   the system VM (§17.2) would wait until it ends, and an app that must type the job's keys may be waiting for
   one: a deadlock. So while a console job runs, INT 16h and INT 28h trap too (with VME; without it every INT
@@ -1731,3 +1738,7 @@ gdb -ex 'set architecture i386' -ex 'target remote | ssh -W localhost:2345 pc'
     the VM thread. The vector table is the system's whenever no call for an app is under way.
 18. A thread's first frame is copied to the top of its stack by code that uses none of that stack
     (`frame_start`).
+19. `rm_call()` builds its nested V86 frame 256 bytes below its own stack pointer: between taking that place and
+    `nest_enter()`, nothing is called that uses more than a few bytes of stack. Hooks on the call (the capture,
+    the watches, `glos shot`'s) run before, on a frame of the function's own (M9: the watches' buffers overwrote
+    it).

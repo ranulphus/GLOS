@@ -49,6 +49,8 @@ static void fill_programs(void)
         const struct glos_stat_app *a = (const struct glos_stat_app *)(appbuf + o);
         char id[12], cpu[16], mem[16], wins[8], state[16];
         const char *cells[7];
+        if (a->kind == 1 && a->state == GLOS_JOB_APP)
+            continue;                           /* (a job whose program is an app: the app's row is it) */
         snprintf(id, sizeof id, "%u", a->id);
         snprintf(cpu, sizeof cpu, "%u.%u s", a->busy_ms / 1000, a->busy_ms % 1000 / 100);
         line_text(mem, sizeof mem, a->mem_kb);

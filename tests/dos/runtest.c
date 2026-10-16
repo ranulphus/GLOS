@@ -66,13 +66,25 @@ static unsigned short key_of(char c)
     return (unsigned char)c;
 }
 
+/* A job's state as an event told it (GLOS_EV_JOB): apps pause while a job has the screen, so the reads may never
+   see GLOS_JOB_FULL, but its event waits for them. */
+static void job_event(const struct glos_event *ev, unsigned id, unsigned *last)
+{
+    if (ev->type == GLOS_EV_JOB && ev->key == id && (unsigned)ev->x != *last) {
+        printf("STATE %u\n", (unsigned)ev->x);
+        fflush(stdout);
+        *last = (unsigned)ev->x;
+    }
+}
+
 static int run(int argc, char **argv)
 {
     struct glos_run r;
+    struct glos_event ev;
     const char *keys = 0, *after = 0;
     char buf[1024], seen[4096];
     unsigned id, st = 99, code = 0, last = 99;
-    int i, typed = 0, n, nseen = 0;
+    int i, typed = 0, n, nseen = 0, now = 0, nowtyped = -1;
     memset(&r, 0, sizeof r);
     r.flags = GLOS_RUN_CONSOLE;
     for (i = 2; i < argc && argv[i][0] == '-' && argv[i][1] == '-'; i++) {
@@ -86,6 +98,8 @@ static int run(int argc, char **argv)
             keys = argv[++i];
         else if (!strcmp(argv[i], "--after") && i + 1 < argc)
             after = argv[++i];
+        else if (!strcmp(argv[i], "--now"))
+            now = 1;                            /* --type's keys at once, queued with the job */
     }
     for (; i < argc; i++) {
         strncat(r.command, argv[i], sizeof r.command - strlen(r.command) - 2);
@@ -96,12 +110,22 @@ static int run(int argc, char **argv)
         printf("RUN refused %d\n", glos_error());
         return 1;
     }
+    if (keys && now) {                          /* (before any DOS call of its own, which may wait for the job) */
+        unsigned short k[128];
+        int m = 0;
+        const char *p;
+        for (p = keys; *p && m < 128; p++)
+            k[m++] = key_of(*p);
+        nowtyped = glos_job_type(id, k, (unsigned)m);
+        typed = 1;
+    }
     printf("RUN id=%u\n", id);
+    if (nowtyped >= 0)
+        printf("TYPED %d\n", nowtyped);
     fflush(stdout);
     if (r.flags & GLOS_RUN_DETACH)
         return 0;
     for (;;) {
-        struct glos_event ev;
         n = glos_job_read(id, buf, sizeof buf, 0, &st, &code);
         if (n < 0) {
             printf("RUN lost\n");
@@ -138,8 +162,20 @@ static int run(int argc, char **argv)
         }
         if (st == GLOS_JOB_DONE && n < (int)sizeof buf)
             break;                              /* (its last output: the job is gone now, as the API has it) */
-        if (n == 0)
-            glos_event(&ev, 200);               /* (GLOS_EV_JOB when there is more, or a moment) */
+        if (n == 0 && glos_event(&ev, 200))     /* (GLOS_EV_JOB when there is more, or a moment) */
+            job_event(&ev, id, &last);
+    }
+    while (glos_event(&ev, 0))                  /* states it was told of while it was paused (a full-screen job's) */
+        job_event(&ev, id, &last);
+    {                                           /* keys typed that it didn't read: ours again (type-ahead) */
+        unsigned short left[64];
+        int i, nl = glos_job_keys(id, left, 64);
+        if (nl > 0) {
+            printf("LEFT ");
+            for (i = 0; i < nl; i++)
+                putchar(left[i] & 0xFF);
+            printf("\n");
+        }
     }
     printf("DONE code=%u\n", code);
     return 0;

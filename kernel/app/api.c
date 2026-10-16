@@ -134,6 +134,12 @@ static int job_fn(struct app *a, struct trapframe *tf)
         return done(tf, agent_app_kill(a, tf->ecx) == 0 ? 0 : GLOS_E_ARGUMENT);
     case 3:
         return done(tf, agent_app_forget(a, tf->ecx) == 0 ? 0 : GLOS_E_ARGUMENT);
+    case 4:
+        if ((n = agent_app_keys(a, tf->ecx, keys, tf->esi < 64 ? tf->esi : 64)) < 0
+            || (n && user_wr((u16)tf->ds, tf->edx, keys, (u32)n * 2) != 0))
+            return fail(tf, GLOS_E_ARGUMENT);
+        tf->eax = (u32)n;
+        return 0;
     }
     return fail(tf, GLOS_E_ARGUMENT);
 }

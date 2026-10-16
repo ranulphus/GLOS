@@ -189,3 +189,14 @@ Each step ends with its tests passing; the regression and the gate run at the en
 
 - Planned 2026-10-16. The owner answered Q11, Q18, the terminal's DOS programs and the SSH client's milestone the
   same day.
+- Steps A-G built 2026-10-16 (branch `m9`). What changed from the plan as it was built:
+  - the apps' scripts are one suite, `native` (the terminal's and the file manager's included: `loopa-term` and a
+    files suite of their own weren't needed), and the Control Panel's every-setting walk is the `control` suite;
+  - goldens live in a directory per script (`build/host/gui/SCRIPT/`), so two scripts can't share a shot's name;
+  - `GLOS_FN_CONFIG` gained EBX 4 (a section's lines, for `[open]`); an env value given with LFs keeps its
+    semicolons (`PATH=C:\A;C:\B`);
+  - console jobs: an app's calls into the system VM are made while the job waits for keys (INT 28h; INT 16h
+    with the BIOS's buffer empty), or an app that types a job's keys while it writes to stdout deadlocks with it
+    (supervisor.md §17.10); a console job's INT 29h output stops at the capture;
+  - the loader copies the kernel to extended memory in 32 KB pieces (it had grown past what low memory holds),
+    with A20 on again after INT 15h 87h, and aligns its XMS block to a page.

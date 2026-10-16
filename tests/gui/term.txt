@@ -1,9 +1,10 @@
 # The terminal and GLOS's shell (apps/term; M9 step E): built-in commands, variables, && and ||, history,
-# completion, redirection, CLS. (Programs: term-run.txt, in Loop A.)
+# completion, redirection, CLS, in C:\TERM (a folder no other script writes: in Loop A the scripts share one
+# machine). (Programs: term-run.txt, in Loop A.)
 run TERM.EXE
 wait "Terminal"
 shot start "Terminal"
-type cd \\gui\n
+type cd \\term\n
 type dir /w\n
 shot dir "Terminal"
 type set X=hello\n
@@ -16,11 +17,11 @@ type dir new /b\n
 shot commands "Terminal"
 type echo kept > out.txt\n
 type echo more >> out.txt\n
-file C:\GUI\OUT.TXT kept \r\nmore \r\n
+file C:\TERM\OUT.TXT kept \r\nmore \r\n
 type type out.txt\n
 type ty
 key tab
-type  ou
+type ou
 key tab
 key enter
 type ren out.txt done.txt && del new\\*.* && rd new\n

@@ -99,7 +99,9 @@
                                    bytes to spare is its last: the job is gone after it). EBX 1: ECX id, DS:EDX ESI characters
                                    typed into its console (CP437 bytes; a key's scan code in the high byte of a word
                                    with EDI 2: words) -> EAX those taken. EBX 2: ECX id: ended (as glos kill).
-                                   EBX 3: ECX id: forgotten (a running job runs on, detached) */
+                                   EBX 3: ECX id: forgotten (a running job runs on, detached). EBX 4: ECX id of a
+                                   console job that is done, DS:EDX room for ESI words -> EAX the keys typed into
+                                   it that it didn't read, as words (type-ahead: the app's again) */
 #define GLOS_FN_SHELL    26     /* the app is the desktop's shell (the file manager): it is sent GLOS_EV_LAUNCH and
                                    GLOS_EV_SYSKEY; EBX 0: no longer */
 #define GLOS_FN_STAT     27     /* EBX GLOS_STAT_, DS:ECX room for EDX bytes -> EAX the bytes copied (structures that
@@ -331,6 +333,7 @@ int glos_job_type(unsigned id, const unsigned short *keys, unsigned n);        /
                                            its scan code in the high; the keys taken, or -1 */
 int glos_job_kill(unsigned id);
 int glos_job_forget(unsigned id);
+int glos_job_keys(unsigned id, unsigned short *out, unsigned room);    /* a done console job's unread keys: 0+ */
 int glos_shell(int on);
 int glos_stat(unsigned what, void *out, unsigned room);        /* the bytes, or -1 */
 int glos_kill(unsigned kind, unsigned id);

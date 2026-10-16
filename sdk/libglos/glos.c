@@ -262,6 +262,12 @@ int glos_job_type(unsigned id, const unsigned short *keys, unsigned n)
 
 int glos_job_kill(unsigned id) { return call3(GLOS_FN_JOB, 2, id, 0); }
 int glos_job_forget(unsigned id) { return call3(GLOS_FN_JOB, 3, id, 0); }
+
+int glos_job_keys(unsigned id, unsigned short *out, unsigned room)
+{
+    unsigned a, b = 4;
+    return call5(GLOS_FN_JOB, &a, &b, id, (unsigned)out, room) == 0 ? (int)a : -1;
+}
 int glos_shell(int on) { return call3(GLOS_FN_SHELL, on != 0, 0, 0); }
 
 int glos_stat(unsigned what, void *out, unsigned room)

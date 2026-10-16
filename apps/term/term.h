@@ -17,6 +17,7 @@ void term_title(const char *t);
 void term_quit(int code);
 void term_copy(void);
 void term_paste(void);
+void term_keys(const unsigned short *k, int n);  /* keys a program left unread: the prompt's or the next one's */
 
 /* shell.c: the shell */
 void shell_start(void);

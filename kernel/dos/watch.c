@@ -6,7 +6,8 @@
  * Every DOS call passes the V86 monitor or the DPMI host's reflection of it
  * (agent_vm_int21 sees both), so the calls that change a directory are
  * seen there before DOS makes them: 39h, 3Ah, 3Ch, 41h, 43h (setting), 56h,
- * 5Bh, 6Ch, and 3Eh after a write (40h with bytes). Their paths are as the
+ * 5Bh, 6Ch, and 3Eh of a handle written to (40h with bytes, to a file, not a
+ * device). Their paths are as the
  * program gave them: one with a drive and a full path marks the watches of
  * its directory; any other (relative, or a handle's) marks every watch,
  * which costs the watcher a look at a directory that may not have changed.
@@ -15,6 +16,7 @@
 
 #define GLOS_KERNEL
 #include "glos/api.h"
+#include "agent.h"
 #include "app.h"
 #include "io.h"
 #include "kprintf.h"
@@ -31,7 +33,8 @@ static struct {
     u8 due;
 } w[WATCHES];
 static u32 next_id = 1, last_told;
-static u8 any_due, wrote;
+static u32 written;                             /* handles below 32 written to, of files: their close is a change */
+static u8 any_due;
 
 static char up(char c) { return c >= 'a' && c <= 'z' ? (char)(c - 32) : c == '/' ? '\\' : c; }
 
@@ -123,15 +126,15 @@ void watch_int21(u16 ax, u16 bx, u16 cx, u32 dx_lin, u32 si_lin)
 {
     u32 ah = ax >> 8, i, lin = dx_lin;
     char p[80];
-    (void)bx;
+    int info;
     switch (ah) {
-    case 0x40:
-        if (cx)
-            wrote = 1;                          /* (a write: the close after it is a change) */
+    case 0x40:                                  /* a write to a file (not a device: an app's stdout is no change, */
+        if (cx && bx < 32 && ((info = agent_vm_handle_info(bx)) < 0 || !(info & 0x80)))  /* or its watcher */
+            written |= 1u << bx;                /* would be told of its own printf, and print, and be told...) */
         return;
     case 0x3E:
-        if (wrote) {
-            wrote = 0;
+        if (bx < 32 && (written >> bx & 1)) {
+            written &= ~(1u << bx);
             watch_path(NULL);
         }
         return;

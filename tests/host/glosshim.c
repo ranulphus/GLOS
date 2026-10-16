@@ -505,6 +505,7 @@ int glos_job_read(unsigned id, char *out, unsigned room, unsigned w, unsigned *s
 int glos_job_type(unsigned id, const unsigned short *k, unsigned n) { (void)id, (void)k, (void)n; return -1; }
 int glos_job_kill(unsigned id) { (void)id; return -1; }
 int glos_job_forget(unsigned id) { (void)id; return -1; }
+int glos_job_keys(unsigned id, unsigned short *out, unsigned room) { (void)id, (void)out, (void)room; return -1; }
 int glos_shell(int on) { (void)on; return 0; }
 
 /* The machine's figures (GLOS_FN_STAT; MONITOR's tests): made up, from the script's clock, the same each run.
@@ -689,6 +690,23 @@ static void key_spec(const char *spec)
         e.window = H.focus;
         e.time = H.clock;
         push(&e);
+        H.clock += 50;
+        return;
+    }
+    if (mods == GLOS_MOD_ALT && key == 0x0F) {  /* Alt+Tab too: the focus to the next window by its id (wm_next) */
+        unsigned next = 0, first = 0;
+        int i;
+        for (i = 0; i < MAXWIN; i++) {
+            const struct hwin *v = &H.win[i];
+            if (!v->used || !v->shown || (v->flags & (GLOS_WIN_POPUP | GLOS_WIN_DESKTOP)))
+                continue;
+            if (!first || v->id < first)
+                first = v->id;
+            if (v->id > H.focus && (!next || v->id < next))
+                next = v->id;
+        }
+        if (next || first)
+            set_focus(next ? next : first);
         H.clock += 50;
         return;
     }
@@ -878,7 +896,7 @@ static int step(void)
                 key_spec(a);
             return 1;
         } else if (!strcmp(cmd, "type")) {
-            if (*p == ' ')
+            while (*p == ' ')                   /* (as Loop A's driver and glos type take it: no leading spaces) */
                 p++;
             type_text(p);
             return 1;

@@ -883,14 +883,20 @@ void shell_poll(void)
             term_write(buf, n);
         job_state = st;
         if (st == GLOS_JOB_DONE || st == GLOS_JOB_APP) {
+            unsigned short left[64];
+            int nleft = 0;
             if (n == (int)sizeof buf)
                 continue;                       /* (more of its output first) */
             errorlevel = st == GLOS_JOB_DONE ? (int)code : 0;
             if (st == GLOS_JOB_APP)
                 glos_job_forget((unsigned)job); /* (a GLOS app goes on beside: nothing of it is ours) */
+            else
+                nleft = glos_job_keys((unsigned)job, left, 64);     /* (typed ahead, unread: ours again) */
             job = -1;
             term_title("");
             next_command();
+            if (nleft > 0)
+                term_keys(left, nleft);
             return;
         }
         if (n < (int)sizeof buf)

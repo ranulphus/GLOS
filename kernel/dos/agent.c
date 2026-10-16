@@ -95,6 +95,8 @@ struct agent_job {
     char env[512];                              /* NAME=VALUE strings, a NUL after each and one more: its own */
     u16 keys[64];                               /* typed by its app, on their way into the BIOS's buffer */
     volatile u32 kh, kt;
+    u16 left[64];                               /* typed, but not read by the time it ended: its app's again */
+    u8 nleft;
     struct waitq readq;                         /* its app, waiting for output */
 };
 
@@ -151,6 +153,7 @@ int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, cons
     j->dir[0] = 0;
     j->env[0] = j->env[1] = 0;
     j->kh = j->kt = 0;
+    j->nleft = 0;
     f = irq_save();
     j->seq = next_seq++;
     j->state = J_QUEUED;
@@ -232,6 +235,7 @@ int agent_post_app(void *app, const struct glos_run *r, u32 *seq)
     j->told = 0xFF;
     j->app_owner = j->detach ? NULL : app;
     j->kh = j->kt = 0;
+    j->nleft = 0;
     f = irq_save();
     j->seq = next_seq++;
     j->state = J_QUEUED;
@@ -289,6 +293,31 @@ static void feed(struct agent_job *j)
     irq_restore(f);
 }
 
+/* A console job has ended (the VM thread): what is left in the BIOS's buffer (unless it had the screen, when the
+   keyboard there was its own), then its app's keys not yet fed, are its app's again; the buffer is emptied. */
+static void keys_left(struct agent_job *j)
+{
+    u32 f = irq_save();
+    u16 head = vm_rd16(0x41A), tail = vm_rd16(0x41C), start = vm_rd16(0x480), end = vm_rd16(0x482);
+    if (start < 0x1E || end > 0x100 || start >= end)
+        start = 0x1E, end = 0x3E;
+    j->nleft = 0;
+    while (!j->full && head != tail && j->nleft < 64) {
+        j->left[j->nleft++] = vm_rd16(0x400u + head);
+        head = (u16)(head + 2);
+        if (head >= end)
+            head = start;
+    }
+    if (!j->full) {
+        vm_wr8(0x41A, (u8)tail);
+        vm_wr8(0x41B, (u8)(tail >> 8));
+    }
+    while (j->kh != j->kt && j->nleft < 64)
+        j->left[j->nleft++] = j->keys[j->kh++ % 64];
+    j->kh = j->kt;
+    irq_restore(f);
+}
+
 int agent_app_read(void *app, u32 seq, u8 *out, u32 room, u32 wait_ticks, u32 *state, u32 *code)
 {
     struct agent_job *j = app_job(app, seq);
@@ -315,7 +344,7 @@ int agent_app_read(void *app, u32 seq, u8 *out, u32 room, u32 wait_ticks, u32 *s
     }
     *state = app_state(j);
     *code = code_of(j);
-    if (j->state == J_DONE && n < room && !ring_used(&j->out[0]) && !ring_used(&j->out[1])) {
+    if (j->state == J_DONE && n < room && !ring_used(&j->out[0]) && !ring_used(&j->out[1]) && !j->nleft) {
         f = irq_save();                         /* (its end told, with room to spare: the slot is free again) */
         j->app_owner = NULL;
         j->state = J_FREE;
@@ -335,6 +364,28 @@ int agent_app_type(void *app, u32 seq, const u16 *keys, u32 n)
     feed(j);
     vm_kick();
     return (int)i;
+}
+
+/* A console job that has ended: the keys typed into it that it didn't read (type-ahead, for its app's own prompt
+   or next job, as DOS's BIOS buffer keeps them): their number. The job is gone after, if its output is too. */
+int agent_app_keys(void *app, u32 seq, u16 *out, u32 room)
+{
+    struct agent_job *j = app_job(app, seq);
+    u32 n, f;
+    if (!j)
+        return -1;
+    if (j->state != J_DONE)
+        return 0;
+    f = irq_save();
+    n = j->nleft < room ? j->nleft : room;
+    memcpy(out, j->left, n * sizeof *out);
+    j->nleft = 0;
+    if (!ring_used(&j->out[0]) && !ring_used(&j->out[1])) {
+        j->app_owner = NULL;
+        j->state = J_FREE;
+    }
+    irq_restore(f);
+    return (int)n;
 }
 
 int agent_app_kill(void *app, u32 seq)
@@ -674,6 +725,8 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
             goto exec;
         }
         j->result = result;
+        if (j->console)
+            keys_left(j);
         j->state = J_DONE;
         kprintf("GLOS-AGENT done seq=%u code=%u via=%s%s\n", j->seq, result & 0xFF, j->shell ? "comspec" : j->path,
                 (result & 0x10000) ? " cannot-run" : "");
@@ -830,33 +883,40 @@ static u32 far_lin(u32 fp) { return ((fp >> 16) << 4) + (fp & 0xFFFF); }
    device information has bit 7 (a character device) and bit 1 (the console
    output device). Without the List of Lists, handles 1 and 2 are taken on
    trust. */
-static int is_console(u16 h)
+int agent_vm_handle_info(u16 h)
 {
     u16 psp = vm_current_psp(), n, count;
     u32 p, sft, hops = 0;
     u8 idx;
     if (!psp || !vm.bi->lol)
-        return h == 1 || h == 2;
+        return -1;
     p = (u32)psp << 4;
     n = vm_rd16(p + 0x32);
     if (h >= n)
-        return 0;
+        return -1;
     idx = vm_rd8(far_lin(vm_rd32(p + 0x34)) + h);
     if (idx == 0xFF)
-        return 0;
+        return -1;
     sft = far_lin(vm_rd32(vm.bi->lol + 4));
     while (hops++ < 16 && sft < 0x110000) {
         count = vm_rd16(sft + 4);
-        if (idx < count) {
-            u16 info = vm_rd16(sft + 6 + (u32)idx * SFT_SIZE + 5);
-            return (info & 0x80) && (info & 0x02);
-        }
+        if (idx < count)
+            return vm_rd16(sft + 6 + (u32)idx * SFT_SIZE + 5);
         idx = (u8)(idx - count);
         if ((vm_rd32(sft) & 0xFFFF) == 0xFFFF)
             break;
         sft = far_lin(vm_rd32(sft));
     }
-    return 0;
+    return -1;
+}
+
+static int is_console(u16 h)
+{
+    int info;
+    if (!vm_current_psp() || !vm.bi->lol)
+        return h == 1 || h == 2;
+    info = agent_vm_handle_info(h);
+    return info >= 0 && (info & 0x80) && (info & 0x02);
 }
 
 void agent_vm_int21(const struct trapframe *tf)

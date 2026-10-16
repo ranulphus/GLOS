@@ -3880,6 +3880,8 @@ def console_case(profile, vcard, card, bits):
         check("keys-char", "CHAR xy" in text, repr(o[-300:]))
         text, st, code, o = run("C:\\TEST\\CONIN.EXE code 5")
         check("code", code == 5, repr(o[-200:]))
+        text, st, code, o = run('--now --type xyz C:\\TEST\\CONIN.EXE wait 3')  # (typed, never read: the app's again)
+        check("type-ahead", re.search(r"^LEFT xyz$", o, re.M) is not None, repr(o[-200:]))
         text, st, code, o = run("C:\\TEST\\CONIN.EXE tty HELLO")
         check("teletype", "HELLO" in text and 2 not in st, repr(o[-200:]))
         text, st, code, o = run("C:\\TEST\\CONIN.EXE cls")

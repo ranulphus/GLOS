@@ -4,6 +4,7 @@ run MONITOR.EXE
 wait "Monitor"
 run NOTEPAD.EXE
 wait "Untitled - Notepad"
+key alt+tab
 pause 2500
 shot mon-programs "Monitor" 14 55 459 214 0 312 500 18
 key ctrl+tab

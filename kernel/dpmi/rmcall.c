@@ -56,6 +56,24 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
         return app_rm_call(from, r, kind, vec, words, nwords);
     if (depth >= NEST_MAX || (!dctx && !r->ss && !r->sp))
         return -1;                              /* (without a client, the caller gives a stack: sessions) */
+    if (vec == 0x21 && kind != RM_FAR) {        /* the hooks first, on a frame in this function's own: below */
+        struct trapframe t;                     /* `here` is the nested frame's place, 256 bytes down, which a */
+        memset(&t, 0, sizeof t);                /* call made after would overwrite (the watches' did, M9) */
+        t.v86_ds = r->ds;
+        t.v86_es = r->es;
+        t.eax = r->eax;
+        t.ebx = r->ebx;
+        t.ecx = r->ecx;
+        t.edx = r->edx;
+        t.esi = r->esi;
+        t.edi = r->edi;
+        agent_vm_int21(&t);                     /* a client's DOS output, for an agent job's capture (§17.4) */
+    }
+    if (vec == 0x10 && kind != RM_FAR) {
+        shot_int10_begin();                     /* (shot_int10 at its return, below) */
+        if (!((ax >> 8) & 0xFF) || (ax & 0xFFFF) == 0x4F02)
+            session_video();                    /* a mode set: the program is a session for sure (session.c) */
+    }
     __asm__ volatile("movl %%esp, %0" : "=r"(here));
     f = (struct trapframe *)((here - 256 - sizeof *f) & ~15u);
     memset(f, 0, sizeof *f);
@@ -102,14 +120,6 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
     f->esi = r->esi;
     f->edi = r->edi;
     f->ebp = r->ebp;
-    if (vec == 0x21 && kind != RM_FAR)
-        agent_vm_int21(f);                      /* a client's DOS output, for an agent job's capture (§17.4) */
-
-    if (vec == 0x10 && kind != RM_FAR) {
-        shot_int10_begin();                     /* (shot_int10 at its return, below) */
-        if (!((ax >> 8) & 0xFF) || (ax & 0xFFFF) == 0x4F02)
-            session_video();                    /* a mode set: the program is a session for sure (session.c) */
-    }
     nests[depth].f = f;
     nests[depth].from = from && !(from->eflags & FL_VM) ? from : 0;
     depth++;

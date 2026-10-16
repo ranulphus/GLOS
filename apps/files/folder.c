@@ -120,8 +120,10 @@ static void go(struct view *v, const char *dir)
     v->watch = glos_watch(v->dir);
     retitle(v);
     fill(v);
-    if (gui_list_count(v->list))
+    if (gui_list_count(v->list)) {
         gui_list_set(v->list, 0);
+        status_text(v);                         /* (the first chosen: as a refresh would say it) */
+    }
 }
 
 void folder_changed(unsigned watch)
