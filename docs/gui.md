@@ -166,3 +166,17 @@ one of the apps can be ended. Neither runs programs.
 The Control Panel's every setting is changed by keys in the `control` suite: it reads the schema from
 `sdk/config/cfg.c`, writes a script that changes each setting from its default (Alt and the label's letter, the
 value typed or chosen), plays it, and checks `glos config get` and the file the kernel wrote.
+
+## 3. The apps (`apps/`)
+
+Each is one DJGPP EXE beside GLOS.EXE, on the toolkit, with a script in `tests/gui` (its goldens and effects):
+
+| App | What it does | Script |
+|---|---|---|
+| `FILES.EXE` | The desktop's shell (PRD D55): drive, app and program icons, the launcher, a window for each folder (spatial; places in FOLDERS.CFG), the browser (`-browse`, a tree and a list), copy, move, delete, rename, new folders, opening by `[open]`, watching | `files`, `files-browse` |
+| `NOTEPAD.EXE` | Text files of a megabyte: find, go to, wrap, undo, the clipboard, DOS's CR LF kept | `notepad` |
+| `CALC.EXE` | A calculator: keys and presses, memory, square root, errors | `calc` |
+| `IMAGES.EXE` | PNG, JPEG, BMP, GIF, TGA, PNM (stb_image) and PCX; fitted, zoomed, the next in the folder; dithered at 8 bits | `images` |
+| `TERM.EXE` | GLOS's shell (D50) in a terminal: history, completion, `&&`, `\|\|`, redirection; DOS programs as console jobs (D51, supervisor.md §17.10), type-ahead kept; redraws only the rows that changed | `term`, `term-run` |
+| `MONITOR.EXE` | Programs (End), performance (the processor over a minute, memory, the network), the system, GLOS's log; `-tasks` for Ctrl-Alt-Del | `monitor` (its figures masked) |
+| `CONTROL.EXE` | The Control Panel, drawn from the settings' schema (D53): a page per section, programs' profiles, kinds of file; everything checked before anything is set; a new screen mode tried for fifteen seconds | `control`; every setting by keys: the `control` suite |

@@ -571,3 +571,24 @@ passed through to apps; their writes to COM1 reach GLOS's log line by line (a vi
 - `make loopa-glwin` (DOSGL_DIR): DOS-GL's 27 conformance programs full-screen on plain DOS and windowed on GLOS,
   every frame the same bytes. `make loopa-sdlwin`: DOS-GL's SDL examples windowed. `make loopa-games`
   (FIFTHWHEEL_DIR too): Fifth Wheel and PrBoom-plus's GL timedemo windowed, as on DOS, with no underrun.
+
+## 8. The desktop's shell, pop-ups and the clipboard (M9)
+
+The apps (docs/gui.md) need four things more of the window system, all in API 1.2:
+
+- **Pop-ups** (`GLOS_WIN_POPUP`: menus, lists that drop down): bare, above every framed window (`WF_TOPMOST`),
+  no task-bar button. One takes the keyboard while it is shown; a press anywhere outside it, even on the task
+  bar or the bare desktop where no window would take the focus, takes the focus from it, and its app, told,
+  closes it (`deskin.c`).
+- **The desktop window** (`GLOS_WIN_DESKTOP`): bare and fixed, the screen less the task bar, always at the
+  bottom of the stack (`wm.c`), one at a time; the file manager's icons. Windows placed "anywhere" stay on the
+  screen: a cascade that would leave it starts again from the top.
+- **The shell** (`GLOS_FN_SHELL`): the app that says it is (the file manager) is sent `GLOS_EV_LAUNCH` for
+  GLOS's mark on the task bar, Ctrl-Esc and the Windows key, with the launcher's place (the task bar's top
+  left), and `GLOS_EV_SYSKEY` for Ctrl-Alt-Del (it starts the monitor's task list). Without a shell those do
+  nothing; the task bar stays the kernel's, so that the desktop outlives any app (PRD D55).
+- **The clipboard** (`GLOS_FN_CLIP`, `kernel/core/clip.c`): one text of up to 64 KB, the kernel's, shared by
+  every app; `glos clip` reads and sets it over SSH.
+
+Input to apps keeps its order and isn't lost: each app has a queue of 256 events, and keys injected over SSH
+(`glos key`, `glos type`) wait while the app with the keyboard is far behind (supervisor.md §17.8).
