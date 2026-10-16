@@ -293,8 +293,9 @@ static void feed(struct agent_job *j)
     irq_restore(f);
 }
 
-/* A console job has ended (the VM thread): what is left in the BIOS's buffer (unless it had the screen, when the
-   keyboard there was its own), then its app's keys not yet fed, are its app's again; the buffer is emptied. */
+/* A console job has ended (the VM thread): what is left in the BIOS's buffer (typed in its window, or on the
+   keyboard while it had the screen), then its app's keys not yet fed, are its app's again; the buffer is
+   emptied. */
 static void keys_left(struct agent_job *j)
 {
     u32 f = irq_save();
@@ -302,16 +303,14 @@ static void keys_left(struct agent_job *j)
     if (start < 0x1E || end > 0x100 || start >= end)
         start = 0x1E, end = 0x3E;
     j->nleft = 0;
-    while (!j->full && head != tail && j->nleft < 64) {
+    while (head != tail && j->nleft < 64) {
         j->left[j->nleft++] = vm_rd16(0x400u + head);
         head = (u16)(head + 2);
         if (head >= end)
             head = start;
     }
-    if (!j->full) {
-        vm_wr8(0x41A, (u8)tail);
-        vm_wr8(0x41B, (u8)(tail >> 8));
-    }
+    vm_wr8(0x41A, (u8)tail);
+    vm_wr8(0x41B, (u8)(tail >> 8));
     while (j->kh != j->kt && j->nleft < 64)
         j->left[j->nleft++] = j->keys[j->kh++ % 64];
     j->kh = j->kt;
@@ -359,6 +358,13 @@ int agent_app_type(void *app, u32 seq, const u16 *keys, u32 n)
     u32 i;
     if (!j)
         return -1;
+    if (j->state == J_DONE) {                   /* (typed after its end, before its app has seen that: type-ahead) */
+        u32 f = irq_save();
+        for (i = 0; i < n && j->nleft < 64; i++)
+            j->left[j->nleft++] = keys[i];
+        irq_restore(f);
+        return (int)i;
+    }
     for (i = 0; i < n && j->kt - j->kh < 64; i++)
         j->keys[j->kt++ % 64] = keys[i];
     feed(j);
@@ -744,6 +750,11 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
     if (j) {
         j->state = J_RUNNING;
         running = j;
+        if (j->console) {                       /* its keyboard is its app's from now: what the BIOS's buffer */
+            u16 tail = vm_rd16(0x41C);          /* held before (the harness's F1) isn't typed into it */
+            vm_wr8(0x41A, (u8)tail);
+            vm_wr8(0x41B, (u8)(tail >> 8));
+        }
         kprintf("GLOS-AGENT run seq=%u cmd=\"%s\"%s%s%s%s%s\n", j->seq, j->cmd, j->direct ? " direct=1" : "",
                 j->profile[0] ? " profile=" : "", j->profile, j->dir[0] ? " dir=" : "", j->dir);
         tell(j);

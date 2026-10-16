@@ -212,8 +212,10 @@ static void drain(void)
     while (((s = inb(0x64)) & 1) && ++n < 32) {
         b = inb(0x60);
         trace('k', b, s);
-        if ((s & 0x20) && desk_acks && b == 0xFA) {
-            desk_acks--;                        /* (the mouse's answer to the desktop's own command) */
+        if ((s & 0x20) && desk_acks && (b == 0xFA || b == 0xFE)) {
+            desk_acks--;                        /* (the mouse's answer to the desktop's own command, an ACK or a
+                                                   NAK: unread before a program whose IRQ 12 is masked, a NAK
+                                                   held every key behind it, M9) */
         } else if (!(s & 0x20) && kbd_acks && b == 0xFA) {
             kbd_acks--;                         /* (the keyboard's, to the desktop's key repeat) */
         } else if (s & 0x20) {
@@ -507,7 +509,7 @@ int vkbc_key(u32 code, int down)
 {
     u32 f = irq_save();
     int r = -1;
-    if (vkbc_room() >= 2) {
+    if (vkbc_room() >= 2 && !(desk_on && desk_in_busy())) {    /* (-1: glos type tries again in a moment) */
         if (code & 0x100)
             inject(0xE0, 0);
         r = inject((u8)((code & 0x7F) | (down ? 0 : 0x80)), 0);

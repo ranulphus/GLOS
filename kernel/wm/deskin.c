@@ -91,6 +91,14 @@ void desk_in(int what, int a, int b, int c)
     desk_kick();
 }
 
+/* An injected key waits (glos key and glos type, through vkbc_key) while input waits here or the app with the
+   keyboard has a quarter of its queue of events unread: it keeps 32, and a slow app (on a 486) lost keys. */
+int desk_in_busy(void)
+{
+    struct app *a = foc_app;
+    return rt != rh || (a && app_event_backlog(a) >= 8);
+}
+
 /* ---- events to apps */
 
 static u32 mods_now(void)

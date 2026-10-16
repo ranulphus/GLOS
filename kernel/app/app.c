@@ -419,6 +419,8 @@ void app_event(struct app *a, const struct glos_event *e)
         *last = *e;                             /* (a movement after a movement: the newer one) */
     } else if (a->evt - a->evh < n) {
         a->evq[a->evt++ % n] = *e;
+    } else {
+        a->ndrop++;                             /* (told at its end: GLOS-APP drops) */
     }
     if (e->type == GLOS_EV_KEY)
         appdev_key(a, e->key, (int)e->down, e->ch, e->mods);
@@ -441,6 +443,7 @@ int app_event_get(struct app *a, struct glos_event *e)
 }
 
 int app_event_waiting(const struct app *a) { return a->evt != a->evh; }
+u32 app_event_backlog(const struct app *a) { return a->evt - a->evh; }
 
 /* Its HLT: until an interrupt of its own. */
 void app_idle(struct app *a)
@@ -648,6 +651,8 @@ static void serve(struct app *a)
         r.eax = 0x4D00;
         a->code = dos21(&r) == 0 ? r.eax & 0xFFFF : 0xFF;
         last_code = a->code;
+        if (a->ndrop)
+            kprintf("GLOS-APP drops id=%u events=%u\n", a->id, a->ndrop);
         kprintf("GLOS-APP end id=%u prog=%s code=%u how=%u calls=%u ticks=%u t=%u irq0=%u irq13=%u\n", a->id, a->prog,
                 a->code & 0xFF, a->code >> 8, a->ncalls, a->thread->ticks, timer_ticks() - a->t0, a->nirq[0],
                 a->nirq[13]);

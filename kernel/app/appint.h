@@ -74,6 +74,7 @@ struct app {
     u8 gui;
     struct glos_event evq[32];                  /* events, for the API */
     u32 evh, evt;
+    u32 ndrop;                                  /* events lost to a full queue */
     struct {
         u8 byte;                                /* a scan code, for port 60h ... */
         u16 key;                                /* ... and with a key's last byte, the key as the BIOS keeps it (0: none) */

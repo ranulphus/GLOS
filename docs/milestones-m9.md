@@ -198,5 +198,11 @@ Each step ends with its tests passing; the regression and the gate run at the en
   - console jobs: an app's calls into the system VM are made while the job waits for keys (INT 28h; INT 16h
     with the BIOS's buffer empty), or an app that types a job's keys while it writes to stdout deadlocks with it
     (supervisor.md §17.10); a console job's INT 29h output stops at the capture;
+  - `[desktop] start` is empty by default, not `FILES.EXE` (PRD D53): the bootable image's GLOS.CFG will name it,
+    and a file without it keeps the bare desktop every earlier suite expects;
+  - a console job's unread keys are its app's again when it ends (type-ahead; `GLOS_FN_JOB` EBX 4), and the
+    file manager's watches count a close only for a file written to (an app's printf told its own watch);
+  - `rm_call()`'s hooks run before it builds its nested frame below its stack pointer (supervisor.md invariant
+    19): the watches' buffers had overwritten it, and the file manager's first Loop A run panicked the kernel;
   - the loader copies the kernel to extended memory in 32 KB pieces (it had grown past what low memory holds),
     with A20 on again after INT 15h 87h, and aligns its XMS block to a page.

@@ -635,7 +635,10 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
     driver finds none and there is nothing to inject into.
 - **While the desktop has the screen** (M6; `vkbc_desk()`) every byte from the keyboard and the mouse, real
   or injected, goes to the desktop and not to the queue: [graphics.md](graphics.md) §4.1. The kill hotkey is
-  then the desktop's to carry out, on the app in front.
+  then the desktop's to carry out, on the app in front. The desktop turns a mouse no program has on, on for
+  itself (F4h) and off again when a program takes the screen (F5h); the mouse's answers to those, ACK or NAK,
+  are dropped (M9: a NAK, with the AUX port's timeout, was put before a program whose IRQ 12 is masked, never
+  read, and held every key behind it, as a real 8042 would).
 - **The network cards** (`kernel/drv/nic.c` chooses; one driver each):
   - **NE2000** (`ne2k.c`, M3): the card's own 16 KB through its data port; nothing in the PC's memory.
   - **RTL8139** (`rtl8139.c`, M5; 86Box's RTL8139C+ answers to it): the mode the whole family has. The card
@@ -1530,7 +1533,10 @@ and GLOS's:
   `\n` is Enter, `\t` Tab, `\e` Esc, `\b` Backspace, `\\` a backslash.
 - `glos mouse DX DY [BUTTONS]`: one move, now.
 - Status 2 and a line on stderr for a list or a character that makes no sense; status 1 for a mouse no
-  program has on. When the queue is full (64 bytes) the next event waits for the program to read.
+  program has on. When the queue is full (64 bytes) the next event waits for the program to read. On the
+  desktop (M6), a key waits too while the desktop has input of its own to hand out or the app with the
+  keyboard has 8 events or more unread (M9: its queue keeps 32, and a slow app, on a 486, lost keys of a
+  `glos type` that came faster than it read them).
 - The events are a stream (§17.6): the ssh thread wakes at each one's time. It is a bulk thread, so under
   load an event can be some milliseconds late; their order holds.
 
@@ -1572,7 +1578,9 @@ and GLOS's:
   full-screen session there and then (`session_console_full()`), with the call or access done for real.
 - **Its keys** are the app's: `GLOS_FN_JOB` puts them in a queue that each tick moves into the BIOS's buffer at
   40:1E as it has room, where INT 16h and DOS find them. Ctrl-C is 2E03h; the app's Ctrl-Break kills the job.
-  When the job ends, what it didn't read (the BIOS's buffer, unless it had the screen, then the queue) is kept,
+  The BIOS's buffer is emptied as the job starts (what it held was typed for someone else: Loop A's F1, as a
+  rule). When the job ends, what it didn't read (the BIOS's buffer, typed in the window or, while it had the
+  screen, on the keyboard; then the queue; keys its app types after its end and before it has heard of it) is kept,
   and the buffer emptied: `GLOS_FN_JOB` EBX 4 gives it back, so that keys typed ahead reach the terminal's prompt
   or its next program, as DOS's buffer would have kept them for COMMAND.COM.
 - **Watches** (`GLOS_FN_WATCH`, `kernel/dos/watch.c`) see the DOS calls that change a directory before DOS makes

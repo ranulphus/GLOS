@@ -174,6 +174,9 @@ static int run(int argc, char **argv)
             printf("LEFT ");
             for (i = 0; i < nl; i++)
                 putchar(left[i] & 0xFF);
+            printf("\nLEFT-WORDS");
+            for (i = 0; i < nl; i++)
+                printf(" %04x", left[i]);
             printf("\n");
         }
     }

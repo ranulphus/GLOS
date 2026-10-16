@@ -17,6 +17,7 @@ void desk_note(const char *note);       /* the task bar's note: a remote session
    held is forgotten). */
 enum { DESK_KEY, DESK_AUX, DESK_MOUSE, DESK_KILL, DESK_RESET, DESK_SYSKEY };
 void desk_in(int what, int a, int b, int c);
+int desk_in_busy(void);                         /* injected keys should wait: the focused app is behind */
 /* Apps' windows (wm/deskapp.c), for the API (app/api.c), on the app's own
    thread: 0, or a GLOS_E_ code. */
 struct app;

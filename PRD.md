@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | Status | v0.7 — M9's apps: the toolkit, the shell and the terminal's DOS programs, the SSH client to M10 (2026-10-16), after v0.6 (M8's windowed DOS-GL, SDL3 and the mixer, 2026-10-15), v0.5 (M7's Matrox 2D, 2026-10-14), v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
-| Last updated | 2026-10-15 |
+| Last updated | 2026-10-16 |
 | Supersedes | v0.1. Changes are listed in Appendices D to H |
 | Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md), [docs/milestones-m6.md](docs/milestones-m6.md), [docs/milestones-m7.md](docs/milestones-m7.md) and [docs/milestones-m8.md](docs/milestones-m8.md) (work breakdown) |
 | Licence | MIT |
@@ -181,6 +181,11 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D50** | **GLOS's shell is DOS, modernised:** COMMAND.COM's command names and syntax (`DIR`, `COPY`, `CD`, `SET`, `%VAR%`, redirection and pipes) with line editing, history, Tab completion, `&&`, `\|\|` and colour. Batch files go to `COMMAND.COM /C` (D40). (User, Q18, 2026-10-16) | Familiar to everyone who will use GLOS; nothing new to learn for DOS's own tools; no second batch language to keep compatible. | M9 |
 | **D51** | **A DOS program started from the terminal runs in the terminal's window until it wants the screen:** what it writes through DOS or the BIOS's teletype goes into the window and it reads the terminal's keys; its first mode set, or touch of the text or graphics screen, makes it a full-screen session for the rest of its run. (User, 2026-10-16) | Command-line tools (compilers, `MEM`, `CHKDSK`, `DIR`) stay in the window, beside the other apps; programs that draw the screen themselves get it, as D5 and D31 have it for v1. | M9 |
 | **D52** | **The terminal's SSH client comes in M10, with the HTTPS client.** (User, 2026-10-16) | Both need ring-3 crypto, entropy and host-key handling; built once, there. M9's terminal is the shell only. | M10 |
+| **D53** | **One schema of GLOS.CFG's settings** (`include/glos/config.h`, `sdk/config/cfg.c`): each setting's section, key, kind, range or choices, default, label, description and when a change takes effect, shared by the loader, the kernel, the apps and the host tests. The kernel keeps the file and writes it back with its comments and order (`glos config`, `GLOS_FN_CONFIG`) and applies at once what it can; the Control Panel is drawn from the schema. `[desktop] start` is empty by default: the bootable image's GLOS.CFG will name `FILES.EXE` (D32, before release), and a file without it keeps the bare desktop M6-M8 had. (Proposed in docs/milestones-m9.md; built 2026-10-16) | One description checked the same everywhere; nothing to keep in step between the loader, `glos config` and the Control Panel; every setting reachable from both, as §19 asks. | M9 |
+| **D54** | **Console jobs** (supervisor.md §17.10): a program an app starts in its console writes into the app (INT 29h; INT 10h's teletype outside DOS) and reads the app's keys from the BIOS's buffer; anything else on the screen makes it a full-screen session. The apps' calls into DOS are made while it waits for keys (INT 28h; INT 16h with the buffer empty), and keys it didn't read are the app's again when it ends. (Built 2026-10-16) | D51's terminal: line-by-line programs beside the other apps without an emulated screen; no deadlock between a job waiting for keys and the app that types them; type-ahead as on DOS. | M9 |
+| **D55** | **The file manager is the desktop's shell** (`FILES.EXE`, `GLOS_FN_SHELL`): the desktop's icons, the launcher and the folders' windows are an app's, the task bar stays the kernel's; folders open spatially, one window each, and the browser is a window of the same program. (Proposed in docs/milestones-m9.md; built 2026-10-16) | The kernel keeps only what must outlive any app; the shell can be restarted, replaced, and tested like any app. | M9 |
+| **D56** | **Images through stb_image** (PNG, JPEG, BMP, GIF's first frame, TGA, PNM; public domain or MIT; in ring 3, as D19 wants parsers) **and PCX of our own**, dithered to the palette at 8 bits. (Built 2026-10-16) | One small, widely used decoder in the app, not the kernel; PCX is DOS's own format and simple. | M9 |
+| **D57** | **The apps are tested by their pictures:** each app builds for the host too, on a host libglos (`tests/host/glosshim.c`) that plays a script of keys and presses and writes the windows' client areas as goldens (8, 16, 32 bits); Loop A plays the same script on a GLOS desktop over SSH and compares, byte for byte, outside masked live areas; effects (files, settings, output) are checked as such (docs/gui.md §2). (Built 2026-10-16) | The same code draws both, so equality is exact; a regression anywhere between the toolkit and the composer shows. | M9 |
 
 ---
 
@@ -1268,3 +1273,8 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
 - **D51** (user): DOS programs started from the terminal run in its window until they want the screen.
 - **D52** (user): the terminal's SSH client moves to M10, with HTTPS (§10.6, §19).
 - §18: the SDK's libraries are in `sdk/`. docs/milestones-m9.md has the plan.
+- **D53-D57** (M9, as built): the settings' schema and `[desktop] start`'s empty default; console jobs, with
+  the apps' DOS calls made while a job waits for keys and type-ahead; the file manager as the desktop's shell;
+  images through stb_image and PCX; the apps tested by their pictures, host against Loop A.
+- API 1.2 as built: `GLOS_FN_CONFIG` EBX 4 (a section's lines), `GLOS_FN_JOB` EBX 4 (a done console job's unread
+  keys); a job's last read is the one that says it is done with bytes to spare.

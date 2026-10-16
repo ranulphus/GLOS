@@ -51,6 +51,7 @@ struct glos_event;
 void app_event(struct app *a, const struct glos_event *e);
 int app_event_get(struct app *a, struct glos_event *e);         /* 1 and the oldest, or 0 */
 int app_event_waiting(const struct app *a);
+u32 app_event_backlog(const struct app *a);     /* its events not yet read */
 
 /* From interrupts. */
 void app_tick(void);                    /* every kernel tick */
