@@ -1097,6 +1097,14 @@ def png_pixels(data):
     return w, h, hashlib.sha256(zlib.decompress(idat)).hexdigest()
 
 
+def api_version():
+    """GLOS_API_VERSION as include/glos/api.h has it now ((major << 16) | minor)."""
+    src = open(os.path.join(ROOT, "include", "glos", "api.h")).read()
+    major = int(re.search(r"#define GLOS_API_MAJOR\s+(\d+)", src).group(1))
+    minor = int(re.search(r"#define GLOS_API_MINOR\s+(\d+)", src).group(1))
+    return major << 16 | minor
+
+
 def golden(name, value):
     """value against tests/loopa/golden.txt; GLOS_GOLDEN=update records it instead."""
     lines = dict(l.split() for l in open(GOLDEN) if l.strip()) if os.path.exists(GOLDEN) else {}
@@ -3221,7 +3229,7 @@ def apps_case(profile, card):
         checks["ver"] = agent.ssh("glos ver")[0] == 0
         checks["alone"] = ran(agent.ssh(app + "run A 3", timeout=600), "A", 3)
         rc, out, _ = agent.ssh(app + "plain")
-        checks["plain"] = rc == 7 and "APP-PLAIN version=10001" in out    # (API 1.1: M8)
+        checks["plain"] = rc == 7 and "APP-PLAIN version=%x" % api_version() in out
         rc, out, _ = agent.ssh("glos run --exclusive " + app + "exit 5")
         checks["exclusive"] = rc == 3 and "APP-REFUSED error=5 reason=5" in out
         rc, out, _ = agent.ssh("glos run --app " + app + "exit 6")     # (an app before it asks: step B)
