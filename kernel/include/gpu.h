@@ -18,6 +18,7 @@ struct gpu_app {
     u8 granting;                                /* (its turn is being begun: not to be ended meanwhile) */
 };
 
+void gpu_watchdog(u32 watchdog_ms);     /* [display] gpu_watchdog changed (0: none) */
 void gpu_init(u32 watchdog_ms);                 /* 0 ms: no watchdog */
 
 /* Kernel threads. The engine is one owner's at a time; a kernel thread

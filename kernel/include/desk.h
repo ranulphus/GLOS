@@ -15,7 +15,7 @@ void desk_note(const char *note);       /* the task bar's note: a remote session
    wheel's); a movement already told apart (dx, dy, the buttons now); the
    kill hotkey; or word that the keyboard has changed hands (whatever was
    held is forgotten). */
-enum { DESK_KEY, DESK_AUX, DESK_MOUSE, DESK_KILL, DESK_RESET };
+enum { DESK_KEY, DESK_AUX, DESK_MOUSE, DESK_KILL, DESK_RESET, DESK_SYSKEY };
 void desk_in(int what, int a, int b, int c);
 /* Apps' windows (wm/deskapp.c), for the API (app/api.c), on the app's own
    thread: 0, or a GLOS_E_ code. */
@@ -37,5 +37,10 @@ void desk_screen(struct glos_window *g);
 void desk_app_gone(struct app *a);      /* an app has ended (on its thread): its windows go */
 int desk_demo(int on);                  /* glos desk demo|clear: wm/demo.c's windows; -1: no memory */
 u32 desk_stat(char *buf, u32 max);      /* glos desk: its windows, a line each */
+
+void deskin_pointer_speed(int speed);   /* [input] pointer_speed (M9) */
+struct app;
+void desk_shell(struct app *a, int on);
+u32 desk_windows(const void *owner);    /* an app's windows (NULL: every one): GLOS_FN_STAT's */        /* the desktop's shell: the launcher's and the task list's (M9) */
 
 #endif

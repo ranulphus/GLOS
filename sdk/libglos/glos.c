@@ -135,6 +135,142 @@ int glos_screen(struct glos_window *w)
     return call3(GLOS_FN_SCREEN, (unsigned)w, 0, 0);
 }
 
+int glos_clip_set(const char *text, unsigned n) { return call3(GLOS_FN_CLIP, 0, (unsigned)text, n); }
+
+int glos_clip_get(char *out, unsigned room, unsigned *n)
+{
+    unsigned a, b = 1;
+    if (call4(GLOS_FN_CLIP, &a, &b, (unsigned)out, room) != 0)
+        return -1;
+    *n = a;
+    return 0;
+}
+
+/* "SECTION\0KEY\0[VALUE\0]" into buf: its length, or 0 if it doesn't fit. */
+static unsigned pack(char *buf, unsigned room, const char *a, const char *b, const char *c)
+{
+    unsigned n = 0;
+    const char *parts[3];
+    int i;
+    parts[0] = a, parts[1] = b, parts[2] = c;
+    for (i = 0; i < 3 && parts[i]; i++) {
+        const char *p = parts[i];
+        do {
+            if (n >= room)
+                return 0;
+            buf[n++] = *p;
+        } while (*p++);
+    }
+    return n;
+}
+
+int glos_config_get(const char *section, const char *key, char *out, unsigned room)
+{
+    char req[128];
+    unsigned a, b = 0;
+    if (!pack(req, sizeof req, section, key, 0) || call5(GLOS_FN_CONFIG, &a, &b, (unsigned)req, (unsigned)out, room) != 0)
+        return -1;
+    return (int)b;
+}
+
+int glos_config_set(const char *section, const char *key, const char *value, char *why, unsigned room)
+{
+    char req[600];
+    unsigned a, b = 1;
+    if (!pack(req, sizeof req, section, key, value)) {
+        if (why && room)
+            why[0] = 0;
+        return -1;
+    }
+    if (why && room)
+        why[0] = 0;
+    if (call5(GLOS_FN_CONFIG, &a, &b, (unsigned)req, (unsigned)why, why ? room : 0) != 0)
+        return -1;
+    return (int)a;
+}
+
+int glos_config_unset(const char *section, const char *key)
+{
+    char req[128];
+    unsigned a, b = 2;
+    if (!pack(req, sizeof req, section, key, 0))
+        return -1;
+    return call5(GLOS_FN_CONFIG, &a, &b, (unsigned)req, 0, 0);
+}
+
+int glos_config_sections(char *out, unsigned room)
+{
+    unsigned a, b = 3;
+    if (call5(GLOS_FN_CONFIG, &a, &b, 0, (unsigned)out, room) != 0)
+        return -1;
+    return (int)a;
+}
+
+int glos_run(const struct glos_run *r)
+{
+    unsigned a, b = (unsigned)r;
+    ((struct glos_run *)r)->size = sizeof *r;
+    return call(GLOS_FN_RUN, &a, &b) == 0 ? (int)a : -1;
+}
+
+int glos_job_read(unsigned id, char *out, unsigned room, unsigned wait_ms, unsigned *state, unsigned *code)
+{
+    unsigned char failed;
+    unsigned a = GLOS_FN_JOB, b = 0, c = id, d = (unsigned)out, si = room, di = wait_ms;
+    if (find() < 0)
+        return -1;
+    __asm__ __volatile__("lcall *%[e]\n\tsetc %[f]"
+                         : "+a"(a), "+b"(b), "+c"(c), "+d"(d), "+S"(si), "+D"(di), [f] "=m"(failed)
+                         : [e] "m"(entry)
+                         : "cc", "memory");
+    if (failed) {
+        error = (int)a;
+        return -1;
+    }
+    if (state)
+        *state = b;
+    if (code)
+        *code = c;
+    return (int)a;
+}
+
+int glos_job_type(unsigned id, const unsigned short *keys, unsigned n)
+{
+    unsigned char failed;
+    unsigned a = GLOS_FN_JOB, b = 1, c = id, d = (unsigned)keys, si = n, di = 2;
+    if (find() < 0)
+        return -1;
+    __asm__ __volatile__("lcall *%[e]\n\tsetc %[f]"
+                         : "+a"(a), "+b"(b), "+c"(c), "+d"(d), "+S"(si), "+D"(di), [f] "=m"(failed)
+                         : [e] "m"(entry)
+                         : "cc", "memory");
+    if (failed) {
+        error = (int)a;
+        return -1;
+    }
+    return (int)a;
+}
+
+int glos_job_kill(unsigned id) { return call3(GLOS_FN_JOB, 2, id, 0); }
+int glos_job_forget(unsigned id) { return call3(GLOS_FN_JOB, 3, id, 0); }
+int glos_shell(int on) { return call3(GLOS_FN_SHELL, on != 0, 0, 0); }
+
+int glos_stat(unsigned what, void *out, unsigned room)
+{
+    unsigned a, b = what;
+    return call4(GLOS_FN_STAT, &a, &b, (unsigned)out, room) == 0 ? (int)a : -1;
+}
+
+int glos_kill(unsigned kind, unsigned id) { return call3(GLOS_FN_KILL, kind, id, 0); }
+
+int glos_watch(const char *dir)
+{
+    unsigned a, b = 0;
+    return call4(GLOS_FN_WATCH, &a, &b, (unsigned)dir, 0) == 0 ? (int)a : -1;
+}
+
+int glos_unwatch(unsigned id) { return call3(GLOS_FN_WATCH, 1, id, 0); }
+
 unsigned glos_caps(void)
 {
     unsigned a, b = 0;

@@ -35,6 +35,7 @@
 #include "app.h"
 #include "deskint.h"
 #include "io.h"
+#include "keymap.h"
 #include "kprintf.h"
 #include "timer.h"
 #include "vm.h"
@@ -110,6 +111,31 @@ static void send_key(struct app *a, u32 id, u32 key, int down, u32 ch, u32 mods)
     app_event(a, &e);
 }
 
+/* ---- the shell (GLOS_FN_SHELL, M9): the launcher and the task list are its */
+
+static struct app *shell;
+
+void desk_shell(struct app *a, int on)
+{
+    if (on)
+        shell = a;
+    else if (shell == a)
+        shell = 0;
+}
+
+static int to_shell(struct wm *m, unsigned type)
+{
+    struct glos_event e;
+    if (!shell)
+        return 0;
+    memset(&e, 0, sizeof e);
+    e.type = type;
+    e.x = 0;
+    e.y = m->bar ? m->bar->frame.y : m->h;      /* (the launcher's bottom left: the task bar's top) */
+    app_event(shell, &e);
+    return 1;
+}
+
 static void send_focus(struct app *a, u32 id, int got)
 {
     struct glos_event e;
@@ -158,7 +184,7 @@ void desk_refocus(struct wm *m)
     if (m->focus)
         return;
     for (w = m->top; w; w = w->below)
-        if ((w->flags & WF_SHOWN) && !(w->flags & WF_NOFOCUS)) {
+        if ((w->flags & WF_SHOWN) && !(w->flags & (WF_NOFOCUS | WF_POPUP))) {
             wm_set_focus(m, w);
             return;
         }
@@ -251,44 +277,7 @@ static void drag_key(struct wm *m, u32 key)
 
 static u32 key_char(u32 key)
 {
-    static const char plain[0x3A] = {
-        0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 8, 9,
-        'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', 13, 0, 'a', 's',
-        'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`', 0, '\\', 'z', 'x', 'c', 'v',
-        'b', 'n', 'm', ',', '.', '/', 0, '*', 0, ' ' };
-    static const char shifted[0x3A] = {
-        0, 27, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', 8, 9,
-        'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', 13, 0, 'A', 'S',
-        'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~', 0, '|', 'Z', 'X', 'C', 'V',
-        'B', 'N', 'M', '<', '>', '?', 0, '*', 0, ' ' };
-    static const char pad[] = "789-456+1230.";
-    int shift = (kmods & KM_SHIFT) != 0;
-    u32 c = 0;
-    if (key < 0x3A) {
-        c = (u8)plain[key];
-        if (c >= 'a' && c <= 'z')
-            c -= (shift != (caps != 0)) ? 32u : 0u;
-        else if (shift)
-            c = (u8)shifted[key];
-    } else if (key >= 0x47 && key <= 0x53) {    /* the number pad: digits with Num Lock, or Shift without */
-        c = (u8)pad[key - 0x47];
-        if (c != '-' && c != '+' && shift == (num != 0))
-            c = 0;
-    } else if (key == 0x11C) {
-        c = 13;
-    } else if (key == 0x135) {
-        c = '/';
-    }
-    if (kmods & KM_ALT)
-        return 0;
-    if (kmods & KM_CTRL) {
-        if (c >= 'a' && c <= 'z')
-            return c - 0x60;
-        if (c >= 0x40 && c < 0x60)
-            return c - 0x40;
-        return c == 13 ? 10 : c == 8 ? 127 : c == ' ' || c == 27 ? c : 0;
-    }
-    return c;
+    return keymap_char(key, (kmods & KM_SHIFT) != 0, (kmods & KM_CTRL) != 0, (kmods & KM_ALT) != 0, caps != 0, num != 0);
 }
 
 static void key_event(struct wm *m, u32 key, int down)
@@ -315,6 +304,9 @@ static void key_event(struct wm *m, u32 key, int down)
         drag_key(m, key);
         return;
     }
+    if (down && !again && ((key == 0x01 && (kmods & KM_CTRL) && !(kmods & KM_ALT)) || key == 0x15B)
+        && to_shell(m, GLOS_EV_LAUNCH))
+        return;                                 /* Ctrl-Esc, the Windows key: the launcher (the shell's, M9) */
     if (down && (kmods & KM_ALT) && !(kmods & KM_CTRL)) {
         switch (key) {
         case 0x0F:
@@ -421,11 +413,19 @@ static void button(struct wm *m, u32 bit, int down)
         send_mouse(m, w, 0, 0, bit, 1);
         return;
     }
-    if (!(w = wm_hit(m, m->px, m->py, &part)))
+    w = wm_hit(m, m->px, m->py, &part);
+    if (m->focus && m->focus->flags & WF_POPUP && w != m->focus && (!w || w == m->bar)) {
+        wm_set_focus(m, 0);                     /* a press outside a pop-up: it loses the keyboard (its app takes it */
+        desk_refocus(m);                        /* away), even where no window would take the focus instead */
+        deskin_focus(m);
+    }
+    if (!w)
         return;
     if (w == m->bar) {
         if ((v = wm_bar_hit(m, m->px, m->py)) != 0)
             wm_set_focus(m, v);
+        else if (bit == 1 && wm_bar_mark(m, m->px, m->py))
+            to_shell(m, GLOS_EV_LAUNCH);        /* GLOS's mark: the launcher (M9) */
         return;
     }
     wm_set_focus(m, w);
@@ -443,11 +443,17 @@ static void button(struct wm *m, u32 bit, int down)
 }
 
 /* The mouse moved by dx, dy (down and right positive); its buttons now. */
+static s32 speed = 1;                           /* [input] pointer_speed (M9) */
+
+void deskin_pointer_speed(int s) { speed = s >= 1 && s <= 3 ? s : 1; }
+
 static void mouse(struct wm *m, s32 dx, s32 dy, u32 now)
 {
     struct wm_window *w;
     u32 was = buttons, bit;
     s32 x0 = m->px, y0 = m->py;
+
+    dx *= speed, dy *= speed;
 
     wm_pointer(m, m->px + dx, m->py + dy, 1);
     buttons = (u8)now;
@@ -536,6 +542,7 @@ void deskin_turn(struct wm *m)
         case DESK_AUX: aux_byte(m, (u8)e.a, e.b); break;
         case DESK_MOUSE: mouse(m, e.a, e.b, e.c); break;
         case DESK_RESET: forget(m); break;
+        case DESK_SYSKEY: to_shell(m, GLOS_EV_SYSKEY); break;
         }
     }
     if (drag && !wm_find(m, drag_id))           /* (the window went while it was being moved) */

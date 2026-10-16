@@ -8,6 +8,7 @@
 #include "display.h"
 #include "gdb.h"
 #include "io.h"
+#include "kcfg.h"
 #include "kprintf.h"
 #include "mixer.h"
 #include "mm.h"
@@ -111,6 +112,7 @@ void kmain(struct bootinfo *loader_bi)
         vm_start(bi);
         mixer_init(bi);                         /* (it plays once the desktop is up: display.c) */
         desk_init();
+        kcfg_init(bi);                          /* GLOS.CFG, read and kept by the kernel (M9) */
         pci_scan();
         if (nic_probe() == 0) {
             sshd_start(bi);                     /* before the net thread, which listens for it */

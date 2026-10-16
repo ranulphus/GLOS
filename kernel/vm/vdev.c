@@ -10,6 +10,7 @@
  * vif-stuck watchdog. */
 #include "agent.h"
 #include "app.h"
+#include "display.h"
 #include "io.h"
 #include "gdbprog.h"
 #include "kprintf.h"
@@ -227,6 +228,7 @@ u32 vdev_in(u16 port, int width)
     int i;
     if (port >= 0xCF8 && port <= 0xCFF)
         return pci_in(port, width);
+    display_vga_port(port);                     /* (a console job's program at the VGA: full-screen first, M9) */
     for (i = 0; i < width; i++)
         v |= (u32)dev_inb((u16)(port + i)) << (8 * i);
     return v;
@@ -239,6 +241,7 @@ void vdev_out(u16 port, u32 val, int width)
         pci_out(port, val, width);
         return;
     }
+    display_vga_port(port);                     /* (a console job's program at the VGA: full-screen first, M9) */
     for (i = 0; i < width; i++)
         dev_outb((u16)(port + i), (u8)(val >> (8 * i)));
 }

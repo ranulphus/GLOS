@@ -28,6 +28,10 @@ int display_vram_free(void *p);                 /* 1 if p was such, now free */
 const struct gfx_dev *display_vram_dev(const void *p);  /* the engine at such pixels, or NULL */
 void display_vram_limit(u32 bytes);             /* at most this much of it for them from now on (0: no limit) */
 void display_leave(void);                       /* GLOS is leaving: text mode */
+void display_counts(u32 *w, u32 *h, u32 *bpp, u32 *accel, u32 *vram_kb);     /* GLOS_FN_STAT's (M9) */
+void display_console_trap(int on);      /* a console job runs in its window: the VGA out of reach (M9) */
+int display_vga_fault(u32 linear);       /* 1: a console job touched the VGA's memory (now full-screen) */
+int display_vga_port(u32 port);         /* 1: ... or its port */
 int display_quiet(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, int app);    /* a program's INT 10h while the desktop
                                                    has the screen: 1 if answered here, not by the BIOS */
 

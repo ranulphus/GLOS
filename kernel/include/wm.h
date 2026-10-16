@@ -15,6 +15,9 @@
 #define WF_FIXED   0x0004               /* its size is not the user's to change */
 #define WF_TOPMOST 0x0008               /* above every window that isn't (the task bar) */
 #define WF_NOFOCUS 0x0010               /* never the focus (the task bar) */
+#define WF_POPUP   0x0020               /* an app's menu (GLOS_WIN_POPUP): topmost and bare; never given the focus
+                                           when another window's goes, and a press outside it takes it away */
+#define WF_DESKTOP 0x0040               /* the shell's desktop (GLOS_WIN_DESKTOP): under every other window, always */
 
 /* Where a point is in a window (wm_hit). */
 enum { WH_NONE, WH_CLIENT, WH_TITLE, WH_CLOSE, WH_GROW, WH_BORDER };
@@ -109,6 +112,7 @@ void wm_pointer_masks(u8 and_mask[512], u8 xor_mask[512]);     /* the pointer as
 void wm_ghost(struct wm *m, const struct gfx_rect *r);  /* the outline, two pixels wide; NULL: none */
 void wm_bar(struct wm *m, int on);                      /* the task bar: made, or taken away */
 void wm_bar_text(struct wm *m, const char *clock, const char *note);
+int wm_bar_mark(const struct wm *m, s32 x, s32 y);     /* GLOS's mark at the task bar's start (the launcher) */
 struct wm_window *wm_bar_hit(const struct wm *m, s32 x, s32 y); /* the window whose button is at a point of the bar */
 
 void wm_damage_all(struct wm *m);

@@ -146,6 +146,7 @@ void vkbc_tick(void);
 u8 vkbc_cmd(void);
 void vkbc_restore(u8 cmd);
 void vkbc_direct(int on);                       /* a direct-mode session begins (1) or ends (0) */
+void vkbc_typematic(u32 delay_ms, u32 rate);   /* the keyboard's repeat while the desktop has it (M9) */
 void vkbc_desk(int on);                         /* the desktop has the keyboard and the mouse (1), or the VM again (0) */
 void vkbc_leave(void);
 void vkbc_trace(void);                          /* GLOS-KBC lines: its last 64 events (with a vif-stuck warning) */

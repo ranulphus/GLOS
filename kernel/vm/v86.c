@@ -631,6 +631,25 @@ static void vm_agent_next(struct trapframe *tf, u32 result)
         result = 0xFFFFFFFFu;
     }
     r = agent_vm_next(result, vm.bi->comspec, &x);
+    if (r == 3) {                               /* a job's drive or folder, before its EXEC (M9) */
+        u32 sd = (u32)vm.loader_cs << 4, regs = sd + __builtin_offsetof(struct stub_data, dregs), i;
+        u16 v[8];
+        if (x.dos_path) {                       /* (in the stub's path buffer, which its EXEC fills after) */
+            for (i = 0; x.dos_path[i] && i < 79; i++)
+                vm_wr8(sd + __builtin_offsetof(struct stub_data, path) + i, (u8)x.dos_path[i]);
+            vm_wr8(sd + __builtin_offsetof(struct stub_data, path) + i, 0);
+            x.dos.ds = vm.loader_cs;
+            x.dos.dx = (u16)__builtin_offsetof(struct stub_data, path);
+        }
+        v[0] = x.dos.ax, v[1] = x.dos.bx, v[2] = x.dos.cx, v[3] = x.dos.dx;
+        v[4] = x.dos.si, v[5] = x.dos.di, v[6] = x.dos.ds, v[7] = x.dos.es;
+        for (i = 0; i < 8; i++) {
+            vm_wr8(regs + i * 2, (u8)v[i]);
+            vm_wr8(regs + i * 2 + 1, (u8)(v[i] >> 8));
+        }
+        tf->eax = 3;
+        return;
+    }
     if (vm.vme)
         cpu_int_redirect(0x29, !agent_vm_capturing());
     if (r < 0 && app_count()) {                 /* glos exit: the apps end first */
@@ -987,6 +1006,10 @@ void vm_exception(struct trapframe *tf)
     case 13:
         vm_gp(tf);
         return;
+    case 14:
+        if (display_vga_fault(read_cr2()))
+            return;                             /* the VGA's memory, a console job's program's: full-screen (M9) */
+        panic("v86-exception", tf);
     case 6:
         if (tf->cs == vm.loader_cs && ip == vm.bi->bp_call_off) {
             vm_call(tf);

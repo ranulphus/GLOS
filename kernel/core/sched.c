@@ -539,3 +539,16 @@ void sched_report(void)
         kprintf(" %s=%u", t->name, t->ticks);
     kprintf("\n");
 }
+
+/* For GLOS_FN_STAT (M9): the idle thread's ticks (the processor halted), and how many threads there are. */
+u32 sched_idle_ticks(void) { return idle_thread.ticks; }
+
+u32 sched_threads(void)
+{
+    const struct thread *t;
+    u32 n = 0, f = irq_save();
+    for (t = all_threads; t; t = t->all)
+        n++;
+    irq_restore(f);
+    return n;
+}

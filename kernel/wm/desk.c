@@ -232,7 +232,9 @@ u32 desk_stat(char *buf, u32 max)
                        m->count, m->focus ? m->focus->id : 0, m->px, m->py, m->pointer ? "" : " hidden", vram, bytes >> 10);
     for (w = m->top; w && n < max; w = w->below)
         n += (u32)ksnprintf(buf + n, max - n, "window %u %s%s at %d,%d %dx%d \"%s\"\n", w->id,
-                            w->flags & WF_SHOWN ? "shown" : "hidden", w == m->bar ? " bar" : w->owner ? " app" : "", w->frame.x,
+                            w->flags & WF_SHOWN ? "shown" : "hidden", w == m->bar ? " bar" : w->flags & WF_POPUP ? " popup"
+                            : w->flags & WF_DESKTOP ? " desktop"
+                            : !(w->flags & WF_FRAME) ? " bare" : w->owner ? " app" : "", w->frame.x,
                             w->frame.y, w->store.w, w->store.h, w->title);
     desk_unlock();
     return n < max ? n : max;
@@ -251,4 +253,17 @@ void desk_init(void)
     display_painter(painter);
     display_evicter(evict);
     thread_create("desk", PRIO_NORMAL, desk_thread, NULL);
+}
+
+/* For GLOS_FN_STAT (M9): the windows an app has (owner NULL: every window). */
+u32 desk_windows(const void *owner)
+{
+    struct wm *m = desk_lock();
+    const struct wm_window *w;
+    u32 n = 0;
+    for (w = m->top; w; w = w->below)
+        if (!owner || w->owner == owner)
+            n++;
+    desk_unlock();
+    return n;
 }

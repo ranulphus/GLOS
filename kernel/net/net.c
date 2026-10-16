@@ -303,6 +303,22 @@ u32 net_stat(char *buf, u32 max, int json)
                           ip, mask, gw, nic0->rx_frames, nic0->tx_frames, nic0->rx_errors, nic0->overruns);
 }
 
+/* For GLOS_FN_STAT (M9): the address, the frames each way, the card's name; 0, or -1 without a card. */
+int net_counts(u8 ip[4], u32 *rx, u32 *tx, char *card, u32 room)
+{
+    u32 a, i;
+    if (!nic0)
+        return -1;
+    a = ip4_addr_get_u32(netif_ip4_addr(&nif));
+    ip[0] = (u8)a, ip[1] = (u8)(a >> 8), ip[2] = (u8)(a >> 16), ip[3] = (u8)(a >> 24);
+    *rx = nic0->rx_frames;
+    *tx = nic0->tx_frames;
+    for (i = 0; nic0->name[i] && i < room - 1; i++)
+        card[i] = nic0->name[i];
+    card[i] = 0;
+    return 0;
+}
+
 void net_start(int st)
 {
     selftest = st;

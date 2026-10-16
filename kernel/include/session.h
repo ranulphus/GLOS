@@ -13,6 +13,8 @@ const char *session_prog(void);                 /* the session's program's file 
 const u32 *session_ivt(void);                   /* the real-mode vectors as the session found them */
 int session_exclusive(void);                    /* glos run --exclusive: it stays a session (app.c) */
 int session_app(void);                          /* glos run --app: its program is to be an app without asking */
+int session_console(void);                      /* a console job's program runs in its window (M9) */
+void session_console_full(void);                /* ... and wants the screen */
 void session_video(void);                       /* the program in front set a video mode */
 int session_pauses(void);                       /* GLOS apps wait for it (not for a program marked as an app, while
                                                    it starts; its end's work) */

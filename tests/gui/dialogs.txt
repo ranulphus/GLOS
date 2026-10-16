@@ -1,0 +1,32 @@
+# The toolkit's dialogs (GUITEST dialogs): a question, a line typed, the file dialog going into a folder.
+run GUITEST.EXE dialogs
+wait "GUITEST Dialogs"
+shot dialogs "GUITEST Dialogs"
+key alt+m
+wait "Question"
+shot question "Question"
+key alt+n
+gone "Question"
+key alt+a
+wait "Ask"
+type NEWDIR
+shot ask "Ask"
+key enter
+gone "Ask"
+key alt+s
+wait "Save As"
+shot save-as "Save As"
+key shift+tab down
+shot save-as-list "Save As"
+key enter
+shot save-as-sub "Save As"
+key alt+n
+type NEW.TXT\n
+gone "Save As"
+shot dialogs-done "GUITEST Dialogs"
+key alt+f4
+gone "GUITEST Dialogs"
+expect GUI message no
+expect GUI ask NEWDIR
+expect GUI save as C:\GUI\SUB\NEW.TXT
+expect GUI end

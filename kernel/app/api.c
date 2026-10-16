@@ -5,10 +5,17 @@
  * becomes an app. 2: the call is to be made again from the same HLT, when a
  * handler of the app's has run (a sleep an interrupt of its own cut short). */
 #include "appint.h"
+#include "agent.h"
+#include "clip.h"
+#include "stat.h"
+#include "watch.h"
+#include "kcfg.h"
 #include "desk.h"
 #include "display.h"
 #include "dpmi.h"
 #include "gpu.h"
+#include "io.h"
+#include "sched.h"
 #include "kprintf.h"
 #include "mgadisp.h"
 #include "mixer.h"
@@ -62,6 +69,129 @@ static u32 caps(void)
 }
 
 static int app_fn(struct app *a, struct trapframe *tf, u32 fn);
+
+/* A packed request's NUL-ended strings, up to n of them (GLOS_FN_CONFIG): their count. */
+static int strings(struct trapframe *tf, u32 at, char *buf, u32 room, const char **s, int n)
+{
+    u32 i = 0;
+    int k = 0;
+    while (k < n && i < room) {
+        s[k] = buf + i;
+        for (;;) {
+            if (i >= room || user_rd((u16)tf->ds, at + i, &buf[i], 1) != 0)
+                return -1;
+            if (!buf[i++])
+                break;
+        }
+        k++;
+    }
+    return k;
+}
+
+/* GLOS_FN_JOB: a job's output read (waiting in pieces, so that a kill is seen), keys typed, ended, let go. */
+static int job_fn(struct app *a, struct trapframe *tf)
+{
+    static u8 buf[4096];
+    static u16 keys[64];
+    u32 st, code, waited = 0, want, i;
+    int n;
+    switch (tf->ebx) {
+    case 0:
+        want = tf->edi == 0xFFFFFFFFu ? 0xFFFFFFFFu : ticks_of(tf->edi);
+        for (;;) {                              /* (one app at a time in buf: an app's thread is the only reader */
+            u32 step = want - waited < 64 ? want - waited : 64;        /* of its own jobs, and these are copied out
+                                                   before it waits again) */
+            n = agent_app_read(a, tf->ecx, buf, tf->esi < sizeof buf ? tf->esi : sizeof buf, step, &st, &code);
+            if (n < 0)
+                return fail(tf, GLOS_E_ARGUMENT);
+            if (n > 0 && user_wr((u16)tf->ds, tf->edx, buf, (u32)n) != 0)
+                return fail(tf, GLOS_E_ARGUMENT);
+            if (n > 0 || st == GLOS_JOB_DONE || a->kill || waited >= want || app_event_waiting(a))
+                break;
+            waited += step;
+        }
+        tf->eax = (u32)n;
+        tf->ebx = st;
+        tf->ecx = code;
+        return 0;
+    case 1:
+        for (i = 0; i < tf->esi && i < 64; i++) {
+            if (tf->edi == 2) {
+                if (user_rd((u16)tf->ds, tf->edx + i * 2, &keys[i], 2) != 0)
+                    return fail(tf, GLOS_E_ARGUMENT);
+            } else {
+                u8 c;
+                if (user_rd((u16)tf->ds, tf->edx + i, &c, 1) != 0)
+                    return fail(tf, GLOS_E_ARGUMENT);
+                keys[i] = c;
+            }
+        }
+        if ((n = agent_app_type(a, tf->ecx, keys, i)) < 0)
+            return fail(tf, GLOS_E_ARGUMENT);
+        tf->eax = (u32)n;
+        return 0;
+    case 2:
+        return done(tf, agent_app_kill(a, tf->ecx) == 0 ? 0 : GLOS_E_ARGUMENT);
+    case 3:
+        return done(tf, agent_app_forget(a, tf->ecx) == 0 ? 0 : GLOS_E_ARGUMENT);
+    }
+    return fail(tf, GLOS_E_ARGUMENT);
+}
+
+static int config_fn(struct trapframe *tf)
+{
+    static char req[600], out[1024];          /* (one at a time: they are used under no lock of their own) */
+    static struct waitq q;
+    static struct thread *owner;
+    const char *s[3];
+    int r, n;
+    u32 f = irq_save(), len;
+    while (owner && owner != current)
+        thread_block(&q);
+    owner = current;
+    irq_restore(f);
+    switch (tf->ebx) {
+    case 0:
+        if ((n = strings(tf, tf->ecx, req, sizeof req, s, 2)) != 2) {
+            r = -1;
+            break;
+        }
+        r = kcfg_get(s[0], s[1], out, sizeof out);
+        len = strlen(out);
+        if (r >= 0 && tf->esi && user_wr((u16)tf->ds, tf->edx, out, len + 1 <= tf->esi ? len + 1 : tf->esi) != 0)
+            r = -1;
+        if (r >= 0) {
+            tf->eax = len;
+            tf->ebx = (u32)r;
+        }
+        break;
+    case 1:
+    case 2:
+        if ((n = strings(tf, tf->ecx, req, sizeof req, s, tf->ebx == 1 ? 3 : 2)) != (tf->ebx == 1 ? 3 : 2)) {
+            r = -1;
+            break;
+        }
+        out[0] = 0;
+        r = kcfg_set(s[0], s[1], tf->ebx == 1 ? s[2] : 0, out, sizeof out);
+        if (r >= 0)
+            tf->eax = (u32)r;
+        else if (tf->esi)
+            user_wr((u16)tf->ds, tf->edx, out, strlen(out) + 1 <= tf->esi ? strlen(out) + 1 : tf->esi);
+        break;
+    case 3:
+        len = kcfg_sections(out, sizeof out);
+        r = tf->esi && user_wr((u16)tf->ds, tf->edx, out, len <= tf->esi ? len : tf->esi) != 0 ? -1 : 0;
+        tf->eax = len;
+        break;
+    default:
+        r = -1;
+    }
+    f = irq_save();
+    owner = 0;
+    thread_wake(&q);
+    irq_restore(f);
+    return r < 0 ? fail(tf, GLOS_E_CONFIG) : 0;
+}
 
 int glos_api(struct trapframe *tf)
 {
@@ -235,6 +365,87 @@ static int app_fn(struct app *a, struct trapframe *tf, u32 fn)
             return fail(tf, (u32)r);
         tf->eax = off;                          /* (its id) */
         tf->ebx = bytes;                        /* (its header's address in the app) */
+        return 0;
+    case GLOS_FN_CONFIG:
+        return config_fn(tf);
+    case GLOS_FN_RUN: {
+        struct glos_run run;
+        u32 seq;
+        if (get(tf, tf->ebx, &run, sizeof run) != 0)
+            return fail(tf, GLOS_E_ARGUMENT);
+        run.command[sizeof run.command - 1] = 0;
+        run.dir[sizeof run.dir - 1] = 0;
+        if ((r = agent_post_app(a, &run, &seq)) != 0)
+            return fail(tf, (u32)r);
+        tf->eax = seq;
+        return 0;
+    }
+    case GLOS_FN_JOB:
+        return job_fn(a, tf);
+    case GLOS_FN_SHELL:
+        desk_shell(a, tf->ebx != 0);
+        return done(tf, 0);
+    case GLOS_FN_STAT: {
+        static u8 buf[2048];                    /* (one app's call at a time: the lock below) */
+        static struct waitq q;
+        static struct thread *owner;
+        u32 n = 0, f = irq_save();
+        while (owner && owner != current)
+            thread_block(&q);
+        owner = current;
+        irq_restore(f);
+        if (tf->ebx == GLOS_STAT_SYSTEM)
+            n = stat_system(buf, sizeof buf);
+        else if (tf->ebx == GLOS_STAT_APPS)
+            n = stat_apps(buf, sizeof buf);
+        else if (tf->ebx == GLOS_STAT_LOG)
+            n = klog_read((char *)buf, sizeof buf);
+        if (n > tf->edx)
+            n = tf->edx;
+        r = n && user_wr((u16)tf->ds, tf->ecx, buf, n) != 0;
+        f = irq_save();
+        owner = 0;
+        thread_wake(&q);
+        irq_restore(f);
+        if (r || tf->ebx > GLOS_STAT_LOG)
+            return fail(tf, GLOS_E_ARGUMENT);
+        tf->eax = n;
+        return 0;
+    }
+    case GLOS_FN_KILL:
+        if (tf->ebx == 0)
+            app_kill_id(tf->ecx, "monitor");
+        else if (tf->ebx == 1)
+            return done(tf, agent_kill_seq(tf->ecx) == 0 ? 0 : GLOS_E_ARGUMENT);
+        else if (tf->ebx == 2)
+            return done(tf, agent_kill() == 0 ? 0 : GLOS_E_ARGUMENT);
+        else
+            return fail(tf, GLOS_E_ARGUMENT);
+        return done(tf, 0);
+    case GLOS_FN_WATCH: {
+        char dir[80];
+        u32 i, id;
+        if (tf->ebx == 1)
+            return done(tf, watch_remove(a, tf->ecx));
+        for (i = 0; i < sizeof dir - 1; i++)
+            if (user_rd((u16)tf->ds, tf->ecx + i, &dir[i], 1) != 0)
+                return fail(tf, GLOS_E_ARGUMENT);
+            else if (!dir[i])
+                break;
+        dir[i] = 0;
+        if ((r = watch_add(a, dir, &id)) != 0)
+            return fail(tf, (u32)r);
+        tf->eax = id;
+        return 0;
+    }
+    case GLOS_FN_CLIP:
+        if (tf->ebx == 0)
+            return done(tf, clip_set_user((u16)tf->ds, tf->ecx, tf->edx) == 0 ? 0 : GLOS_E_ARGUMENT);
+        if (tf->ebx != 1)
+            return fail(tf, GLOS_E_ARGUMENT);
+        if (clip_get_user((u16)tf->ds, tf->ecx, tf->edx, &bytes) != 0)
+            return fail(tf, GLOS_E_ARGUMENT);
+        tf->eax = bytes;
         return 0;
     }
     return 0;

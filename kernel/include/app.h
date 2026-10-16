@@ -65,6 +65,7 @@ void app_kill_job(void *job);           /* the app that agent job began, if it s
 void app_kill_all(const char *why);
 void app_session_end(void);             /* a session has ended: paused apps run on */
 u32 app_count(void);
+u32 app_stat_list(void *out, u32 room);         /* struct glos_stat_app for each (M9) */
 u32 app_last_code(void);                /* how the last app to end did: INT 21h 4Dh's AX */
 u32 app_ps(char *buf, u32 max);         /* glos ps: "app ID PROGRAM ..." lines */
 u32 app_stat(char *buf, u32 max);       /* glos stat: a JSON array */

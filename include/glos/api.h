@@ -20,7 +20,7 @@
 #define GLOS_API_H
 
 #define GLOS_API_MAJOR   1
-#define GLOS_API_MINOR   1
+#define GLOS_API_MINOR   2
 #define GLOS_API_VERSION ((GLOS_API_MAJOR << 16) | GLOS_API_MINOR)
 
 /* Functions (EAX). */
@@ -44,7 +44,8 @@
                                    in new memory (GLOS_FN_PIXELS again) */
 #define GLOS_FN_TITLE    11     /* EBX id, DS:ECX the title (ASCIIZ, UTF-8) */
 #define GLOS_FN_PIXELS   12     /* EBX id, DS:ECX a struct glos_window -> filled in: where its pixels are now, their
-                                   size and format */
+                                   size and format; from 1.2 its x and y too: the client area's corner on the
+                                   screen */
 #define GLOS_FN_PRESENT  13     /* EBX id, DS:ECX a struct glos_rect of its client area the app has drawn in (ECX 0:
                                    all of it): the screen follows */
 #define GLOS_FN_FOCUS    14     /* EBX id: the focus, and above the other windows */
@@ -74,7 +75,37 @@
                                    4096 to 65536) -> EAX its id, EBX the linear address of its struct glos_stream,
                                    which the ring follows. EBX 1: ECX a stream's id: closed. EBX 2: ECX id, EDX its
                                    volume (0-256). The app's streams go with it. */
-#define GLOS_FN_COUNT    22
+/* 1.2 (M9): what the toolkit and the native apps need. */
+#define GLOS_FN_CLIP     22     /* the clipboard, the system's: text (UTF-8), 64 KB at most. EBX 0: DS:ECX the text,
+                                   EDX its bytes: the clipboard's now. EBX 1: DS:ECX room for EDX bytes -> EAX the
+                                   clipboard's bytes (as many as fit copied, no NUL added) */
+#define GLOS_FN_CONFIG   23     /* GLOS.CFG's settings (include/glos/config.h). EBX 0: DS:ECX "SECTION\0KEY\0"
+                                   ("program NAME.EXT" a program's section), DS:EDX room for ESI bytes -> EAX the
+                                   value's bytes (env: its lines, LF between), the value (NUL-ended) copied, EBX 1
+                                   if the file sets it, 0 if it is the default. EBX 1: DS:ECX "SECTION\0KEY\0VALUE\0"
+                                   set (env: lines between ';'), DS:EDX room for ESI bytes of why it was refused
+                                   -> EAX when it takes effect (CFG_NOW ...). EBX 2: DS:ECX "SECTION\0KEY\0" unset
+                                   (the default again). EBX 3: DS:EDX room for ESI bytes -> EAX the bytes of the
+                                   file's sections' names, a line each. Refused: GLOS_E_CONFIG */
+#define GLOS_FN_RUN      24     /* DS:EBX a struct glos_run -> EAX the job's id: a program, or a line for COMMAND.COM,
+                                   started as the agent starts jobs (one at a time, by GLOS's stub, in the system VM):
+                                   a GLOS app runs beside the others, any other program as a session, or, with
+                                   GLOS_RUN_CONSOLE, in the app's console (docs/milestones-m9.md, "Console jobs") */
+#define GLOS_FN_JOB      25     /* EBX 0: ECX a job's id, DS:EDX room for ESI bytes, EDI how long to wait for some
+                                   (ms; FFFFFFFFh for ever) -> EAX the bytes of its console's output copied, EBX its
+                                   GLOS_JOB_ state, ECX its exit code once done. EBX 1: ECX id, DS:EDX ESI characters
+                                   typed into its console (CP437 bytes; a key's scan code in the high byte of a word
+                                   with EDI 2: words) -> EAX those taken. EBX 2: ECX id: ended (as glos kill).
+                                   EBX 3: ECX id: forgotten (a running job runs on, detached) */
+#define GLOS_FN_SHELL    26     /* the app is the desktop's shell (the file manager): it is sent GLOS_EV_LAUNCH and
+                                   GLOS_EV_SYSKEY; EBX 0: no longer */
+#define GLOS_FN_STAT     27     /* EBX GLOS_STAT_, DS:ECX room for EDX bytes -> EAX the bytes copied (structures that
+                                   start with their size; GLOS_STAT_LOG: text) */
+#define GLOS_FN_KILL     28     /* EBX 0: ECX an app's id; 1: ECX a job's id; 2: the session in front -> ended */
+#define GLOS_FN_WATCH    29     /* EBX 0: DS:ECX a directory ("C:\\GAMES") -> EAX a watch's id: GLOS_EV_FILES
+                                   whenever a file there is made, removed, renamed or written (by any program, the
+                                   agent, SFTP); EBX 1: ECX id: no more. The app's go with it */
+#define GLOS_FN_COUNT    30
 
 /* Errors (EAX, with the carry flag). */
 #define GLOS_E_FUNCTION  1      /* no such function */
@@ -86,6 +117,8 @@
 #define GLOS_E_MEMORY    7      /* no memory for it */
 #define GLOS_E_NO_GPU    8      /* no drawing engine for apps: not a Matrox card, the engine off, no desktop */
 #define GLOS_E_NO_AUDIO  9      /* no mixer: no Sound Blaster 16 (BLASTER), or [sound] mixer = off */
+#define GLOS_E_CONFIG    10     /* GLOS_FN_CONFIG: no such setting, a value the schema refuses (why given), or
+                                   GLOS.CFG not read (yet) */
 
 /* Capabilities (GLOS_FN_VERSION's EBX): what the machine can do now. */
 #define GLOS_CAP_GPU     1      /* GLOS_FN_GPU: a Matrox card's engine draws the desktop */
@@ -103,6 +136,12 @@
                                    and height now; what was there is kept from the top left), or the screen has
                                    another format (every window: cleared) */
 #define GLOS_EV_CLOSE    5      /* the user asked for the window to be closed (its box, Alt-F4) */
+/* (1.2) events of the app's own, window 0 */
+#define GLOS_EV_LAUNCH   6      /* (the shell's) the launcher asked for: the task bar's mark pressed, Ctrl-Esc or the
+                                   Windows key; x, y: where the menu's bottom left goes */
+#define GLOS_EV_SYSKEY   7      /* (the shell's) Ctrl-Alt-Del: the task list */
+#define GLOS_EV_JOB      8      /* a job of the app's moved on: key its id, x its GLOS_JOB_ state, y its exit code */
+#define GLOS_EV_FILES    9      /* a watched directory changed: key the watch's id */
 
 #define GLOS_MOD_SHIFT   1
 #define GLOS_MOD_CTRL    2
@@ -126,6 +165,11 @@ struct glos_event {
 #define GLOS_WIN_FIXED   1      /* its size is not the user's to change */
 #define GLOS_WIN_BARE    2      /* no title bar or border */
 #define GLOS_WIN_ANYWHERE 4     /* GLOS_FN_WINDOW: where it goes is GLOS's to choose (x and y are not looked at) */
+#define GLOS_WIN_POPUP   8      /* (1.2) a menu's, a list's that drops down: bare, above every other window, no
+                                   button on the task bar, the keyboard's while it is shown. A press anywhere else
+                                   takes the keyboard from it (GLOS_EV_FOCUS, down 0): the app takes it away then. */
+#define GLOS_WIN_DESKTOP 16     /* (1.2, the shell's) bare, under every other window, the screen less the task bar
+                                   (x, y, w and h are not looked at), no button; one at a time */
 
 struct glos_rect {
     int x, y, w, h;
@@ -189,6 +233,52 @@ struct glos_stream {
     unsigned ring;              /* the ring's offset from the start of this header */
 };
 
+/* Programs started by apps (GLOS_FN_RUN, GLOS_FN_JOB). */
+#define GLOS_RUN_CONSOLE 1      /* the program's console is the app's: its output read with GLOS_FN_JOB, its keys
+                                   written there; the screen stays the desktop's until the program wants it (a mode
+                                   set, the text or graphics screen touched), when it runs full-screen to its end */
+#define GLOS_RUN_DETACH  2      /* nothing of it is the app's: no output kept, it runs on when the app ends */
+#define GLOS_RUN_FULL    4      /* (with GLOS_RUN_CONSOLE) full-screen from the start: [program] screen = full */
+
+struct glos_run {
+    unsigned size;              /* of this structure, set by the caller */
+    unsigned flags;             /* GLOS_RUN_ */
+    char command[256];          /* a program and its arguments, or a line for COMMAND.COM (a batch file, an
+                                   internal command, a redirection), as glos run takes them */
+    char dir[80];               /* the drive and folder it starts in ("" : the system's) */
+};
+
+enum { GLOS_JOB_QUEUED, GLOS_JOB_RUNNING, GLOS_JOB_FULL, GLOS_JOB_APP, GLOS_JOB_DONE };
+/* RUNNING: in the console; FULL: full-screen, as a session; APP: it became a GLOS app; DONE: ended */
+
+/* What the system is doing (GLOS_FN_STAT). */
+#define GLOS_STAT_SYSTEM 0      /* a struct glos_stat_system */
+#define GLOS_STAT_APPS   1      /* a struct glos_stat_app for each app, each job and the session in front */
+#define GLOS_STAT_LOG    2      /* the log's last lines (text) */
+
+struct glos_stat_system {
+    unsigned size;
+    unsigned version, uptime_ms;
+    unsigned busy_ms, idle_ms;  /* the processor's time since GLOS started: working, and halted */
+    unsigned cpu_family, mem_kb, mem_free_kb, heap_kb;
+    unsigned threads, apps, windows;
+    unsigned net_rx, net_tx;    /* frames, each way */
+    unsigned char ip[4];
+    unsigned screen_w, screen_h, screen_bpp, accel, vram_kb, vram_free_kb;
+    unsigned mixer_rate, streams, underruns;
+    char card[24], nic[16], hostname[16], session[16];  /* session: the program that has the machine, or "" */
+};
+
+struct glos_stat_app {
+    unsigned size;
+    unsigned kind;              /* 0 an app, 1 a job, 2 the session */
+    unsigned id;                /* an app's id or a job's */
+    unsigned busy_ms;           /* the processor's time it has had */
+    unsigned mem_kb, windows;
+    unsigned state;             /* an app: 0 running, 1 paused (a session has the machine); a job: GLOS_JOB_ */
+    char name[16];
+};
+
 /* Why GLOS_FN_INIT was refused (EBX). */
 #define GLOS_INIT_ALREADY   1   /* it is an app already */
 #define GLOS_INIT_NESTED    2   /* called by a program another program started, or from a handler or a callback */
@@ -221,6 +311,25 @@ int glos_pixels(unsigned id, struct glos_window *w);    /* where the window's pi
 int glos_present(unsigned id, const struct glos_rect *r);       /* NULL: all of it */
 int glos_focus(unsigned id);
 int glos_screen(struct glos_window *w);
+int glos_clip_set(const char *text, unsigned n);       /* (1.2) the clipboard's text now: 0, or -1 */
+int glos_clip_get(char *out, unsigned room, unsigned *n);       /* its bytes in *n, as many as fit in out: 0, or -1 */
+int glos_config_get(const char *section, const char *key, char *out, unsigned room);   /* 1 set, 0 the default; -1 */
+int glos_config_set(const char *section, const char *key, const char *value, char *why, unsigned room);
+                                        /* when it takes effect (CFG_NOW ...), or -1 and why */
+int glos_config_unset(const char *section, const char *key);
+int glos_config_sections(char *out, unsigned room);    /* the bytes: a line a section; -1 */
+int glos_run(const struct glos_run *r);                 /* the job's id, or -1 */
+int glos_job_read(unsigned id, char *out, unsigned room, unsigned wait_ms, unsigned *state, unsigned *code);
+                                        /* the bytes read, or -1 */
+int glos_job_type(unsigned id, const unsigned short *keys, unsigned n);        /* keys: a character in the low byte,
+                                           its scan code in the high; the keys taken, or -1 */
+int glos_job_kill(unsigned id);
+int glos_job_forget(unsigned id);
+int glos_shell(int on);
+int glos_stat(unsigned what, void *out, unsigned room);        /* the bytes, or -1 */
+int glos_kill(unsigned kind, unsigned id);
+int glos_watch(const char *dir);        /* the watch's id, or -1 */
+int glos_unwatch(unsigned id);
 struct gfx_surface;
 int glos_surface(const struct glos_window *w, struct gfx_surface *s);   /* the window's pixels as a surface of the 2D
                                            library (glos/gfx.h), to draw in; -1: they can't be reached */

@@ -89,4 +89,7 @@ void sched_panic_report(void);          /* GLOS-PANIC thread= lines */
 u32 sched_ps(char *buf, u32 max);       /* glos ps: a line per thread */
 u32 sched_stat(char *buf, u32 max);     /* glos stat: "NAME":ticks for each thread */
 
+u32 sched_idle_ticks(void);             /* ticks the processor was halted (M9) */
+u32 sched_threads(void);
+
 #endif

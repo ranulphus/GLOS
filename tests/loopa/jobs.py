@@ -103,6 +103,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MGA = os.environ.get("MGA_GLIDE", os.path.expanduser("~/MGA-Glide"))
@@ -3415,6 +3416,606 @@ def exit_case(profile, vcard):
                                "" if not bad else " failed: " + " ".join(bad), info), not bad
 
 
+# ---- the toolkit and the native apps (M9): test scripts played over ssh against the host's goldens
+
+GUI_KEYS = {"esc": 0x01, "backspace": 0x0E, "tab": 0x0F, "enter": 0x1C, "space": 0x39, "f1": 0x3B, "f2": 0x3C,
+            "f3": 0x3D, "f4": 0x3E, "f5": 0x3F, "f6": 0x40, "f7": 0x41, "f8": 0x42, "f9": 0x43, "f10": 0x44,
+            "f11": 0x57, "f12": 0x58, "home": 0x147, "up": 0x148, "pgup": 0x149, "left": 0x14B, "right": 0x14D,
+            "end": 0x14F, "down": 0x150, "pgdn": 0x151, "ins": 0x152, "del": 0x153, "win": 0x15B}
+GUI_ROW = "\0\0" "1234567890-=" "\0\0" "qwertyuiop[]" "\0\0" "asdfghjkl;'`" "\0\\" "zxcvbnm,./"
+GUI_MODS = {"ctrl": 0x1D, "alt": 0x38, "shift": 0x2A}
+
+
+def gui_key_list(specs):
+    """glos key's list for the scripts' key specs (ctrl+s, alt+f, shift+tab, down...), as the host's shim types them."""
+    items, t = [], 0.0
+    for spec in specs:
+        parts = spec.split("+")
+        name, mods = parts[-1], parts[:-1]
+        code = GUI_KEYS.get(name) or (GUI_ROW.index(name) if len(name) == 1 and name in GUI_ROW else 0)
+        if not code or any(m not in GUI_MODS for m in mods):
+            raise ValueError("key " + spec)
+        for m in mods:
+            items.append("%.2f:0x%x:down" % (t, GUI_MODS[m]))
+            t += 0.03
+        items.append("%.2f:0x%x" % (t, code))
+        t += 0.09
+        for m in reversed(mods):
+            items.append("%.2f:0x%x:up" % (t, GUI_MODS[m]))
+            t += 0.03
+        t += 0.03
+    return ",".join(items)
+
+
+def gui_words(line):
+    """A script line's words, a title in quotes one word."""
+    out, i = [], 0
+    while i < len(line):
+        if line[i] in " \t":
+            i += 1
+        elif line[i] == '"':
+            j = line.index('"', i + 1)
+            out.append(line[i + 1:j])
+            i = j + 1
+        else:
+            j = i
+            while j < len(line) and line[j] not in " \t":
+                j += 1
+            out.append(line[i:j])
+            i = j
+    return out
+
+
+class GuiDriver:
+    """A test script (tests/gui/NAME.txt; tests/host/glosshim.c has the commands) played on a GLOS desktop over
+    ssh: the app started, keys and the mouse put in, each shot's window cut from glos shot and compared with the
+    host's golden (build/host/gui/NAME-BITS.png). Failures as words in .bad, what went wrong in .notes."""
+
+    def __init__(self, agent, out, bits, dac6, appdir="C:\\TEST\\"):
+        self.agent, self.out, self.bits, self.dac6, self.appdir = agent, out, bits, dac6, appdir
+        self.bad, self.notes, self.procs, self.expects = [], [], [], []
+
+    def desk(self):
+        text = self.agent.ssh("glos desk")[1].replace("\r", "")
+        m = re.search(r"focus=(\d+) pointer=(-?\d+),(-?\d+)", text)
+        d = {"focus": int(m.group(1)) if m else -1, "ptr": (int(m.group(2)), int(m.group(3))) if m else (0, 0),
+             "win": []}
+        for w in re.finditer(r'^window (\d+) (\w+)(?: (\w+))? at (-?\d+),(-?\d+) (\d+)x(\d+) "(.*)"$', text, re.M):
+            kind = w.group(3) or ""
+            fx, fy = int(w.group(4)), int(w.group(5))
+            framed = kind not in ("popup", "bare", "bar", "desktop")
+            d["win"].append({"id": int(w.group(1)), "shown": w.group(2) == "shown", "kind": kind, "title": w.group(8),
+                             "x": fx + (1 if framed else 0), "y": fy + (20 if framed else 0),
+                             "w": int(w.group(6)), "h": int(w.group(7))})
+        return d
+
+    def window(self, title, d=None):            # the topmost shown window by that title (glos desk lists the top first)
+        for w in (d or self.desk())["win"]:
+            if w["shown"] and w["title"] == title and w["kind"] != "bar":
+                return w
+        return None
+
+    def until(self, test, limit=30):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            d = self.desk()
+            if test(d):
+                return d
+            time.sleep(0.3)
+        return None
+
+    def golden(self, name):
+        path = os.path.join(ROOT, "build", "host", "gui", "%s-%d.png" % (name, self.bits))
+        if not os.path.exists(path):
+            return None
+        w, h, rgb = png_rgb(open(path, "rb").read())
+        if self.bits == 8 and self.dac6:
+            rgb = bytes((((v >> 2) << 2) | (v >> 6)) for v in rgb)
+        return w, h, rgb
+
+    def shot(self, name, title, tries=10):
+        want = self.golden(name)
+        if not want:
+            self.bad.append("golden-" + name)
+            return
+        got = None
+        self.park()
+        for i in range(tries):
+            w = self.window(title)
+            p = subprocess.run(self.agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=300)
+            pic = png_rgb(p.stdout) if p.returncode == 0 else None
+            if w and pic:
+                sw = pic[0]
+                rows = [pic[2][((w["y"] + y) * sw + w["x"]) * 3:((w["y"] + y) * sw + w["x"] + w["w"]) * 3]
+                        for y in range(w["h"])]
+                got = (w["w"], w["h"], b"".join(rows))
+                if got == want:
+                    return
+                if i == tries - 1:
+                    open(os.path.join(self.out, "%s-%d.png" % (name, self.bits)), "wb").write(p.stdout)
+            time.sleep(0.6)
+        if not got:
+            self.notes.append("%s: no window \"%s\"" % (name, title))
+        elif got[:2] != want[:2]:
+            self.notes.append("%s: %dx%d, the golden %dx%d" % (name, got[0], got[1], want[0], want[1]))
+        else:
+            bad = [i // 3 for i in range(0, len(want[2]), 3) if got[2][i:i + 3] != want[2][i:i + 3]]
+            self.notes.append("%s: %d pixels differ, the first at %d,%d: %s for %s" % (
+                name, len(bad), bad[0] % want[0], bad[0] // want[0], got[2][bad[0] * 3:bad[0] * 3 + 3].hex(),
+                want[2][bad[0] * 3:bad[0] * 3 + 3].hex()))
+        self.bad.append("shot-" + name)
+
+    def park(self):                             # the pointer in the screen's corner, on the task bar: out of the shots
+        text = self.agent.ssh("glos desk")[1]
+        m = re.search(r"^desk (\d+)x(\d+)x\d+ .*pointer=(-?\d+),(-?\d+)", text, re.M)
+        if m and (int(m.group(3)), int(m.group(4))) != (int(m.group(1)) - 1, int(m.group(2)) - 1):
+            self.agent.ssh("glos mouse %d %d" % (int(m.group(1)) - 1 - int(m.group(3)), int(m.group(2)) - 1 - int(m.group(4))))
+
+    def point(self, x, y):
+        px, py = self.desk()["ptr"]
+        if (x, y) != (px, py):
+            self.agent.ssh("glos mouse %d %d" % (x - px, y - py))
+
+    def play(self, script):
+        for n, line in enumerate(open(os.path.join(ROOT, script)), 1):
+            words = gui_words(line.rstrip("\n"))
+            if not words or words[0].startswith("#"):
+                continue
+            cmd, args = words[0], words[1:]
+            if cmd == "run":
+                prog = self.appdir + args[0] + "".join(" " + a for a in args[1:])
+                self.procs.append(subprocess.Popen(self.agent.opts + ["glos@127.0.0.1", prog],
+                                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+            elif cmd == "wait":
+                if not self.until(lambda d: self.window(args[0], d) is not None, 120):
+                    self.bad.append("wait-%d" % n)
+            elif cmd == "gone":
+                if not self.until(lambda d: self.window(args[0], d) is None, 60):
+                    self.bad.append("gone-%d" % n)
+            elif cmd == "key":
+                self.agent.ssh("glos key " + gui_key_list(args))
+            elif cmd == "type":
+                text = line.split(None, 1)[1].rstrip("\n") if len(line.split(None, 1)) > 1 else ""
+                self.agent.ssh("glos type " + text)
+            elif cmd in ("click", "drag"):
+                w = self.until(lambda d: self.window(args[0], d) is not None, 30)
+                w = w and self.window(args[0], w)
+                if not w:
+                    self.bad.append("%s-%d" % (cmd, n))
+                    continue
+                button = 2 if "right" in args else 1
+                self.point(w["x"] + int(args[1]), w["y"] + int(args[2]))
+                if cmd == "drag":
+                    dx, dy = int(args[3]) - int(args[1]), int(args[4]) - int(args[2])
+                    self.agent.ssh("glos key 0:mouse:0:0:%d,0.1:mouse:%d:%d:%d,0.2:mouse:0:0:0" % (button, dx, dy, button))
+                elif "double" in args:
+                    self.agent.ssh("glos key 0:mouse:0:0:%d,0.05:mouse:0:0:0,0.15:mouse:0:0:%d,0.2:mouse:0:0:0"
+                                   % (button, button))
+                else:
+                    self.agent.ssh("glos key 0:mouse:0:0:%d,0.05:mouse:0:0:0" % button)
+            elif cmd == "pause":
+                time.sleep(int(args[0]) / 1000.0)
+            elif cmd == "clip":
+                self.agent.ssh("glos clip " + line.split(None, 1)[1].rstrip("\n"))
+            elif cmd == "shot":
+                self.shot(args[0], args[1])
+            elif cmd == "expect":
+                self.expects.append(line.split(None, 1)[1].rstrip("\n"))
+            else:
+                self.bad.append("script-%d" % n)
+
+    def finish(self, limit=120):
+        """The apps' ends and their output: each expected line there."""
+        text = ""
+        for p in self.procs:
+            try:
+                o, _ = p.communicate(timeout=limit)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                o, _ = p.communicate()
+                self.bad.append("app-end")
+            text += o.decode("latin-1").replace("\r", "")
+        lines = text.split("\n")
+        for e in self.expects:
+            if e not in lines:
+                self.bad.append("expect")
+                self.notes.append("no line %r" % e)
+        return text
+
+
+# ---- the settings (M9 step B): GLOS.CFG kept and written by the kernel, glos config
+
+CONFIG_FILE = """; GLOS.CFG for the config suite: comments, blank lines and an unknown section must all stay.
+[display]
+; no desktop at first
+accel = on
+
+[unknown]
+colour = blue
+
+[program COMMAND.COM]
+env = GLOSCFG=one
+"""
+
+# (section, key, a value other than the default, how to see it in effect now: None, or a test of (agent, log))
+CONFIG_SETS = [
+    ("display", "mode", "640x480x16", "display"), ("display", "accel", "off", None),
+    ("display", "gpu_watchdog", "750", "GLOS-GPU watchdog-limit ms=750"),
+    ("input", "repeat_delay", "750", "GLOS-KBC typematic=4"), ("input", "repeat_rate", "20", "GLOS-KBC typematic=44"),
+    ("input", "pointer_speed", "2", "pointer"), ("input", "double_click", "400", None),
+    ("sound", "rate", "44100", "GLOS-AUDIO rate=44100"), ("sound", "mixer", "off", "GLOS-AUDIO mixer off"),
+    ("sound", "blaster", "A220 I5 D1 H5 T6", None), ("net", "hostname", "cfgtest", None),
+    ("desktop", "start", "NOTEPAD.EXE", None), ("shell", "comspec", "C:\\COMMAND.COM", None),
+    ("shell", "autoexec", "C:\\AUTOEXEC.BAT", None), ("shell", "console", "C:\\KIOSK.BAT", None),
+    ("shell", "envsize", "2048", None), ("shell", "options", "/NOVME", None),
+    ("open", ".TXT", "NOTEPAD.EXE", None),
+    ("program:FWHEEL.EXE", "title", "Fifth Wheel", None), ("program:FWHEEL.EXE", "args", "-fixed", None),
+    ("program:FWHEEL.EXE", "dir", "C:\\FW", None), ("program:FWHEEL.EXE", "icon", "game", None),
+    ("program:FWHEEL.EXE", "menu", "1", None), ("program:FWHEEL.EXE", "desktop", "1", None),
+    ("program:FWHEEL.EXE", "screen", "full", None), ("program:FWHEEL.EXE", "direct", "1", None),
+    ("program:FWHEEL.EXE", "memory", "16384", None), ("program:FWHEEL.EXE", "env", "A=1;B=2", None),
+]
+CONFIG_CASES = [("bf6", "g200", "ne2kpci")]
+
+
+def config_case(profile, vcard, card):
+    """GLOS.CFG's settings (M9 step B; include/glos/config.h, kernel/core/config.c): every setting the schema has
+    set over ssh (glos config set) to a value other than its default, read back, in the file afterwards with the
+    file's comments, blank lines and unknown section where they were, and in effect at once where it can be (the
+    desktop's mode, the watchdog, the key repeat, the pointer's speed, the mixer's rate and the mixer); a wrong
+    value refused with the rule it broke; a program's env in its next run; and after glos exit and a new start the
+    loader and the kernel reading the changed file."""
+    tag = "%s-%s" % (profile, vcard)
+    out = os.path.join(ROOT, "out", "config-" + tag)
+    os.makedirs(out, exist_ok=True)
+    cfg = os.path.join(ROOT, "out", "config-%s.cfg" % tag)
+    open(cfg, "w").write(CONFIG_FILE.replace("\n", "\r\n"))
+    agent = Agent("config-" + tag, profile, card, ["--card", vcard, "--sound", "sb16",
+        "--pre", "SET BLASTER=A220 I5 D1 H5 T6", "--file", "%s=/TEST/GLOS.CFG" % os.path.relpath(cfg, ROOT),
+        "--cmd", "SERSAY HX-START config", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-AGAIN",
+        "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
+    checks, notes = {"listen": agent.listening()}, []
+
+    def loaded(limit=60):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            if agent.ssh("glos config")[1].startswith("config loaded"):
+                return True
+            time.sleep(0.5)
+        return False
+
+    def get(sec, key):
+        rc, o, _ = agent.ssh("glos config get %s %s" % (sec, key))
+        return o.rstrip("\r\n") if rc == 0 else None
+
+    try:
+        checks["loaded"] = loaded()
+        lst = agent.ssh("glos config")[1]
+        checks["list"] = "[display] accel = on\n" in lst.replace("\r", "") and "[display] mode = none (default)" in lst \
+            and "[program COMMAND.COM] env = GLOSCFG=one" in lst
+        # A program's env, from the file the loader read and the kernel keeps.
+        checks["env-file"] = "GLOSCFG=one" in agent.ssh("ECHO GLOSCFG=%GLOSCFG%")[1]
+        for sec, key, val, effect in CONFIG_SETS:
+            mark = len(agent.log())
+            if effect == "pointer":
+                agent.ssh("glos mouse -2000 -2000")
+            rc, o, e = agent.ssh("glos config set %s %s %s" % (sec, key, val))
+            ok = rc == 0 and o.startswith("ok ") and get(sec, key) == val.replace(";", "\n")
+            if ok and effect == "display":
+                t0 = time.time()
+                while time.time() - t0 < 60 and " 640x480x16 " not in agent.ssh("glos display")[1]:
+                    time.sleep(0.5)
+                ok = " 640x480x16 " in agent.ssh("glos display")[1]
+            elif ok and effect == "pointer":
+                agent.ssh("glos mouse 10 5")
+                m = re.search(r"pointer=(-?\d+),(-?\d+)", agent.ssh("glos desk")[1])
+                ok = bool(m) and (int(m.group(1)), int(m.group(2))) == (20, 10)
+                agent.ssh("glos config set input pointer_speed 1")
+            elif ok and effect:
+                t0 = time.time()
+                while time.time() - t0 < 10 and effect not in agent.log()[mark:]:
+                    time.sleep(0.3)
+                ok = effect in agent.log()[mark:]
+            checks["%s.%s" % (sec.split(":")[0], key)] = ok
+            if not ok:
+                notes.append("set %s %s %s: rc=%d %r %r" % (sec, key, val, rc, o.strip(), e.strip()))
+        rc, o, e = agent.ssh("glos config set display mode 800x600x24")
+        checks["refused"] = rc == 1 and "WIDTHxHEIGHTxBITS" in e
+        rc, o, e = agent.ssh("glos config set display colour red")
+        checks["unknown"] = rc == 2
+        agent.ssh("glos config set sound mixer on")
+        agent.ssh("glos config set program:COMMAND.COM env GLOSCFG=two")
+        checks["env-set"] = "GLOSCFG=two" in agent.ssh("ECHO GLOSCFG=%GLOSCFG%")[1]
+        # The file as the kernel wrote it: the suite's lines all there, the old ones where they were.
+        t0 = time.time()
+        while time.time() - t0 < 30 and " pending" in agent.ssh("glos config")[1].split("\n")[0]:
+            time.sleep(0.5)
+        p = subprocess.run(agent.opts + ["-o", "LogLevel=ERROR"] + ["glos@127.0.0.1", "glos config"],
+                           capture_output=True, timeout=60)
+        f = subprocess.run(["scp", "-P", str(agent.port), "-i", agent.key, "-o", "IdentitiesOnly=yes", "-o",
+                            "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                            "-o", "LogLevel=ERROR", "glos@127.0.0.1:/C/TEST/GLOS.CFG", os.path.join(out, "GLOS.CFG")],
+                           capture_output=True, timeout=120)
+        text = open(os.path.join(out, "GLOS.CFG"), "rb").read().decode("latin-1") if f.returncode == 0 else ""
+        lines = text.replace("\r\n", "\n").split("\n")
+        first = CONFIG_FILE.split("\n")
+        checks["file-kept"] = lines[:2] == first[:2] and "[unknown]" in lines and "colour = blue" in lines \
+            and lines[lines.index("[unknown]") + 1] == "colour = blue" and "; no desktop at first" in lines
+        checks["file-set"] = all(("%s = %s" % (k, v.split(";")[0])) in lines for _, k, v, _ in CONFIG_SETS
+                                 if k not in ("mixer", "pointer_speed"))
+        checks["file-crlf"] = text.count("\r\n") == text.count("\n") and text.endswith("\r\n")
+        if not (checks["file-kept"] and checks["file-set"]):
+            notes.append("the file: %r" % text[:600])
+        # Put back what would get in the second start's way, then a new start reads the file.
+        for sec, key in (("shell", "comspec"), ("shell", "autoexec"), ("shell", "console"), ("shell", "options"),
+                         ("desktop", "start"), ("display", "accel")):
+            agent.ssh("glos config unset %s %s" % (sec, key))
+        agent.ssh("glos config set display mode 800x600x16")
+        t0 = time.time()
+        while time.time() - t0 < 30 and " pending" in agent.ssh("glos config")[1].split("\n")[0]:
+            time.sleep(0.5)
+        checks["exit-1"] = agent.ssh("glos exit")[0] == 0
+        checks["listen-2"] = agent.listening()
+        checks["loaded-2"] = loaded()
+        t0 = time.time()
+        while time.time() - t0 < 60 and " 800x600x16 " not in agent.ssh("glos display")[1]:
+            time.sleep(0.5)
+        checks["mode-at-start"] = " 800x600x16 " in agent.ssh("glos display")[1]
+        checks["kept-2"] = get("program:FWHEEL.EXE", "memory") == "16384" and get("net", "hostname") == "cfgtest"
+        checks["exit-2"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = text.count("GLOS-EXIT code=0") == 2 and "HX-DONE 0" in text
+    for n in notes:
+        print("    config-%s %s" % (tag, n))
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("config-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+# ---- programs started by apps, console jobs, the shell's events, stats, watches (M9 step C)
+
+CONSOLE_CASES = [("bf6", "g200", "ne2kpci", 16), ("486dx2", "vbe", "ne2k", 8)]
+
+
+def console_case(profile, vcard, card, bits):
+    """Programs an app starts (GLOS_FN_RUN, GLOS_FN_JOB; tests/dos/runtest.c, conin.c, pmvga.c): a console job's
+    output by every way DOS and the BIOS write it, its exit code, keys typed into it three ways (a DOS line, INT
+    16h, DOS characters) and Ctrl-C, CLS kept in its window; a mode set, a write to B800h from real mode and from
+    protected mode and a touch of the VGA's ports each taking it full-screen, the desktop back after; its folder;
+    a batch file; an app running beside it; watched directories told of changes by a job, the agent and SFTP;
+    GLOS_FN_STAT's figures; the shell sent the launcher (Ctrl-Esc, the Windows key, GLOS's mark) and Ctrl-Alt-Del,
+    with its desktop window at the bottom; an app ended by another."""
+    tag = "%s-%s-%d" % (profile, vcard, bits)
+    out = os.path.join(ROOT, "out", "console-" + tag)
+    os.makedirs(out, exist_ok=True)
+    bat = os.path.join(out, "T.BAT")
+    open(bat, "w").write("@ECHO batch %1 %2\r\n@C:\\TEST\\CONIN.EXE code 4\r\n@IF ERRORLEVEL 4 ECHO level 4\r\n")
+    agent = Agent("console-" + tag, profile, card, ["--card", vcard,
+        "--file", "build/dj/RUNTEST.EXE=/TEST/RUNTEST.EXE", "--file", "build/dj/PMVGA.EXE=/TEST/PMVGA.EXE",
+        "--file", "build/ow/dos/CONIN.EXE=/TEST/CONIN.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+        "--file", "%s=/TEST/T.BAT" % os.path.relpath(bat, ROOT),
+        "--cmd", "SERSAY HX-START console", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"],
+        timeout=3600)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    checks, notes = {"listen": agent.listening()}, []
+    rt = "C:\\TEST\\RUNTEST.EXE "
+
+    def run(args, timeout=300):
+        rc, o, e = agent.ssh(rt + "run " + args, timeout=timeout)
+        o = o.replace("\r", "")
+        text = "".join(re.sub(r"\\x([0-9a-f]{2})", lambda m: chr(int(m.group(1), 16)), l[4:])
+                       .replace("\\n", "\n").replace("\\r", "").replace("\\\\", "\\")
+                       for l in o.split("\n") if l.startswith("OUT "))
+        states = [int(x) for x in re.findall(r"^STATE (\d+)$", o, re.M)]
+        m = re.search(r"^DONE code=(\d+)$", o, re.M)
+        return text, states, int(m.group(1)) if m else None, o
+
+    def desktop_back(limit=60):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            if agent.ssh("glos display")[1].startswith("display on mode="):
+                return True
+            time.sleep(0.5)
+        return False
+
+    def check(name, ok, why=""):
+        checks[name] = bool(ok)
+        if not ok:
+            notes.append("%s: %s" % (name, why))
+
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x%d" % bits)[0] == 0 and desktop_back()
+        text, st, code, o = run("C:\\TEST\\ECHOARGS.EXE one two")
+        check("output", "one two" in text and "nine two six int29" in text and code == 7 and 2 not in st,
+              repr(o[-400:]))
+        text, st, code, o = run('--type "hello\\n" C:\\TEST\\CONIN.EXE line')
+        check("keys-line", "LINE hello" in text and "hello" in text.split("LINE")[0], repr(o[-300:]))
+        text, st, code, o = run('--type abc C:\\TEST\\CONIN.EXE bios 3')
+        check("keys-bios", "BIOS 61 62 63" in text, repr(o[-300:]))
+        text, st, code, o = run('--type xy C:\\TEST\\CONIN.EXE char 2')
+        check("keys-char", "CHAR xy" in text, repr(o[-300:]))
+        text, st, code, o = run("C:\\TEST\\CONIN.EXE code 5")
+        check("code", code == 5, repr(o[-200:]))
+        text, st, code, o = run("C:\\TEST\\CONIN.EXE tty HELLO")
+        check("teletype", "HELLO" in text and 2 not in st, repr(o[-200:]))
+        text, st, code, o = run("C:\\TEST\\CONIN.EXE cls")
+        check("cls", "\f" in text and "CLS done" in text and 2 not in st, repr(o[-200:]))
+        text, st, code, o = run('--type "\\c" C:\\TEST\\CONIN.EXE line')
+        check("ctrl-c", "^C" in text and code is not None, repr(o[-200:]))
+        for what in ("mode", "b800", "port"):
+            mark = len(agent.log())
+            text, st, code, o = run("C:\\TEST\\CONIN.EXE " + what)
+            check("full-" + what, 2 in st and ("%s done" % what.upper()) in text and "GLOS-SESSION full" in agent.log()[mark:]
+                  and desktop_back(), repr(o[-300:]))
+        text, st, code, o = run("C:\\TEST\\PMVGA.EXE")
+        check("full-pm", 2 in st and "PMVGA done" in text and desktop_back(), repr(o[-300:]))
+        text, st, code, o = run("--full C:\\TEST\\CONIN.EXE code 1")
+        check("full-asked", st[:2] in ([2], [0, 2], [1, 2]) or (2 in st and 1 not in st), repr(st))
+        text, st, code, o = run("--dir C:\\TEST CONIN.EXE code 3")
+        check("dir", code == 3, repr(o[-200:]))
+        text, st, code, o = run("C:\\TEST\\T.BAT one two")
+        check("batch", "batch one two" in text and "level 4" in text, repr(o[-300:]))
+        # An app beside a console job: it runs on (a session would pause it).
+        side = subprocess.Popen(agent.opts + ["glos@127.0.0.1", rt + "beside 6"], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        text, st, code, o = run("C:\\TEST\\CONIN.EXE wait 4")
+        so = side.communicate(timeout=120)[0].decode("latin-1")
+        m = re.search(r"BESIDE (\d+)", so)
+        check("beside", "WAIT done" in text and m and int(m.group(1)) > 0, so[-200:])
+        # Watches: a job's file, the agent's, SFTP's.
+        w = subprocess.Popen(agent.opts + ["glos@127.0.0.1", rt + "watch C:\\TEST 40"], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        time.sleep(4)
+        n0 = 0
+        run("C:\\COMMAND.COM /C ECHO job> C:\\TEST\\W1.TXT")
+        time.sleep(2)
+        agent.ssh("ECHO agent> C:\\TEST\\W2.TXT")
+        time.sleep(2)
+        src = os.path.join(out, "W3.TXT")
+        open(src, "w").write("sftp\r\n")
+        subprocess.run(["scp", "-P", str(agent.port), "-i", agent.key, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
+                        "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
+                        src, "glos@127.0.0.1:/C/TEST/W3.TXT"], capture_output=True, timeout=120)
+        wo = w.communicate(timeout=120)[0].decode("latin-1")
+        n0 = wo.count("FILES ")
+        check("watch", n0 >= 3, wo[-300:])
+        # Figures.
+        so = agent.ssh(rt + "stat")[1]
+        m = re.search(r"^SYS .*screen=(\d+)x(\d+)x(\d+) accel=(\d+)", so, re.M)
+        check("stat", m and (m.group(1), m.group(2), m.group(3)) == ("640", "480", str(bits))
+              and (m.group(4) == "1") == (vcard in MATROX_CARDS) and "name=RUNTEST" in so
+              and re.search(r"threads=[1-9]", so) and re.search(r"LOG bytes=[1-9]", so), so[-500:])
+        # The shell: the launcher three ways, Ctrl-Alt-Del, its desktop at the bottom.
+        sh = subprocess.Popen(agent.opts + ["glos@127.0.0.1", rt + "shell 30"], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
+        t0 = time.time()
+        while time.time() - t0 < 60 and '"RUNTEST Desktop"' not in agent.ssh("glos desk")[1]:
+            time.sleep(0.5)
+        desk = agent.ssh("glos desk")[1]
+        check("desktop", re.search(r'^window \d+ shown desktop at 0,0 640x460 "RUNTEST Desktop"$', desk.replace("\r", ""),
+                                   re.M), desk[-400:])
+        agent.ssh("glos key 0x1D:down,0.05:0x01,0.2:0x1D:up")
+        time.sleep(1)
+        agent.ssh("glos key 0x15B")
+        time.sleep(1)
+        m = re.search(r"pointer=(-?\d+),(-?\d+)", agent.ssh("glos desk")[1])
+        if m:
+            agent.ssh("glos mouse %d %d" % (5 - int(m.group(1)), 470 - int(m.group(2))))
+            agent.ssh("glos key 0:mouse:0:0:1,0.05:mouse:0:0:0")
+        time.sleep(1)
+        agent.ssh("glos key 0x1D:down,0.05:0x38:down,0.1:0x153,0.25:0x38:up,0.3:0x1D:up")
+        so = sh.communicate(timeout=120)[0].decode("latin-1")
+        check("launch", so.count("LAUNCH 0 460") == 3, so[-300:])
+        check("syskey", "SYSKEY" in so, so[-300:])
+        # One app ending another.
+        b = subprocess.Popen(agent.opts + ["glos@127.0.0.1", rt + "beside 60"], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        time.sleep(4)
+        m = re.search(r"^app (\d+) RUNTEST", agent.ssh("glos ps")[1].replace("\r", ""), re.M)
+        kill_o = agent.ssh(rt + "kill %s" % (m.group(1) if m else "0"))[1]
+        b.communicate(timeout=60)
+        check("kill", m and "KILLED" in kill_o and "reason=monitor" in agent.log(), kill_o)
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    for n in notes:
+        print("    console-%s %s" % (tag, n))
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("console-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+# (machine, video card, network card, bits a pixel)
+GUI_CASES = [("bf6", "vbe", "ne2kpci", 8), ("bf6", "g200", "ne2kpci", 16), ("bf6", "g400", "ne2kpci", 32),
+             ("486dx2", "vbe", "ne2k", 8)]
+
+
+def gui_case(profile, vcard, card, bits, scripts=None, files=None, tag_prefix="gui", appdir="C:\\TEST\\"):
+    """The toolkit (M9 step A): GUITEST's gallery, dialogs and clipboard driven by the scripts in tests/gui on a
+    640x480 desktop, each shot equal to the host's (make gui-goldens); its output lines as expected; then two
+    GUITESTs copying and pasting between them through the clipboard, and glos clip."""
+    import time
+    tag = "%s-%s-%d" % (profile, vcard, bits)
+    files = files or ["build/dj/GUITEST.EXE=/TEST/GUITEST.EXE"]
+    extra = []
+    for f in files:
+        extra += ["--file", f]
+    for root, _, names in os.walk(os.path.join(ROOT, "tests", "gui", "drives", "C")):
+        for nm in names:
+            src = os.path.join(root, nm)
+            extra += ["--file", "%s=/%s" % (os.path.relpath(src, ROOT), os.path.relpath(src, os.path.join(
+                ROOT, "tests", "gui", "drives", "C")).replace(os.sep, "/"))]
+    agent = Agent("%s-%s" % (tag_prefix, tag), profile, card, ["--card", vcard] + extra + [
+        "--cmd", "SERSAY HX-START gui", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"],
+        timeout=3600)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    out = os.path.join(ROOT, "out", "%s-%s" % (tag_prefix, tag))
+    os.makedirs(out, exist_ok=True)
+    checks, info, notes = {"listen": agent.listening()}, "", []
+    try:
+        checks["ver"] = agent.ssh("glos ver")[0] == 0
+        checks["on"] = agent.ssh("glos display on 640x480x%d" % bits)[0] == 0
+        line = ""
+        t0 = time.time()
+        while time.time() - t0 < 60 and not line.startswith("display on mode="):
+            line = agent.ssh("glos display")[1]
+            time.sleep(0.5)
+        checks["mode"] = (" 640x480x%d " % bits) in line
+        for script in scripts or sorted(f for f in os.listdir(os.path.join(ROOT, "tests", "gui"))
+                                        if f.endswith(".txt") and open(os.path.join(ROOT, "tests", "gui", f)).readline()
+                                        and "GUITEST" in open(os.path.join(ROOT, "tests", "gui", f)).read()):
+            g = GuiDriver(agent, out, bits, " dac=6" in line, appdir)
+            name = os.path.splitext(os.path.basename(script))[0]
+            g.play(os.path.join("tests", "gui", os.path.basename(script)))
+            g.finish()
+            checks[name] = not g.bad
+            if g.bad:
+                notes.append("%s: %s" % (name, " ".join(g.bad)))
+            notes += ["%s: %s" % (name, x) for x in g.notes]
+        if tag_prefix == "gui":
+            # The clipboard: one GUITEST's Ctrl+C, another's Ctrl+V, and glos clip between.
+            g = GuiDriver(agent, out, bits, " dac=6" in line, appdir)
+            a = subprocess.Popen(agent.opts + ["glos@127.0.0.1", appdir + "GUITEST.EXE clip one"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            g.until(lambda d: g.window("GUITEST Clip", d) is not None, 120)
+            agent.ssh("glos key " + gui_key_list(["ctrl+a", "ctrl+c"]))
+            time.sleep(1)
+            checks["clip-copied"] = agent.ssh("glos clip")[1] == "one"
+            agent.ssh("glos key " + gui_key_list(["alt+f4"]))
+            b = subprocess.Popen(agent.opts + ["glos@127.0.0.1", appdir + "GUITEST.EXE clip two"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            time.sleep(1)
+            g.until(lambda d: g.window("GUITEST Clip", d) is not None, 120)
+            agent.ssh("glos key " + gui_key_list(["end", "ctrl+v"]))
+            agent.ssh("glos clip three\\tand\\\\four")
+            agent.ssh("glos key " + gui_key_list(["ctrl+v", "alt+f4"]))
+            ob = b.communicate(timeout=120)[0].decode("latin-1").replace("\r", "")
+            a.communicate(timeout=60)
+            checks["clip-pasted"] = "GUI text twoone" in ob.split("\n")
+            checks["clip-set"] = "GUI text twoonethree\tand\\four" in ob.split("\n")
+            if not checks["clip-set"]:
+                notes.append("clip: %r" % ob[-300:])
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    for n in notes:
+        print("    %s-%s %s" % (tag_prefix, tag, n))
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("%s-%s" % (tag_prefix, tag), "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def matrix(fn, combos, jobs):
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
         results = list(ex.map(lambda pb: fn(*pb), combos))
@@ -3426,7 +4027,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -3452,6 +4053,17 @@ def main():
         cases = [(win_case,) + c for c in WIN_CASES if not a.profile or c[0] in a.profile] \
             + [(win_phys_case,) + c for c in WIN_PHYS_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(lambda fn, *c: fn(*c), cases, a.jobs)) else 1
+    if a.suite == "config":
+        cases = [c for c in CONFIG_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(config_case, cases, a.jobs)) else 1
+    if a.suite == "console":
+        cases = [c for c in CONSOLE_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(console_case, cases, a.jobs)) else 1
+    if a.suite == "gui":
+        cases = [c for c in GUI_CASES if not a.profile or c[0] in a.profile]
+        if os.environ.get("GUI_ONLY"):          # e.g. GUI_ONLY=g200
+            cases = [c for c in cases if c[1] in os.environ["GUI_ONLY"].split(",")]
+        return 0 if all(r[1] for r in matrix(gui_case, cases, a.jobs)) else 1
     if a.suite == "games":
         cases = [c for c in GAMES_CASES if not a.profile or c[0] in a.profile]
         if os.environ.get("GAMES_ONLY"):

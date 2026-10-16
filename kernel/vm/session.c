@@ -35,6 +35,8 @@
 #include <string.h>
 
 #include "glos/bootinfo.h"
+#include "kcfg.h"
+#include "agent.h"
 #include "app.h"
 #include "display.h"
 #include "dpmi.h"
@@ -56,12 +58,15 @@ static struct session {
     u32 ivt[256];
     u32 dangle[256];                            /* what the program left pointing into its own memory, or 0 */
     const struct bi_profile *prof;              /* its profile, or 0 */
+    struct bi_profile prof_copy;                /* ... read from GLOS.CFG as the kernel has it (M9) */
     u8 direct;                                  /* glos run --direct */
     u8 exclusive;                               /* glos run --exclusive: not to become an app */
     u8 app;                                     /* glos run --app: an app without asking */
     u8 hint;                                    /* its file is marked as a GLOS app's, or glos run --app */
     u8 grab;                                    /* it set a video mode: a session for sure */
     u8 ending;                                  /* its end's work is under way */
+    u8 console;                                 /* a console job's (M9): in its app's window, the desktop up ... */
+    u8 full;                                    /* ... until it wanted the screen */
     u32 bios0;                                  /* the BIOS's tick count when it began */
     u32 irq0;                                   /* the PC's timer's interrupts until then */
     u16 env_seg, env_old;                       /* the environment GLOS made, and the EXEC block's own */
@@ -236,6 +241,9 @@ static void end(const char *why)
 
     gdbp_program_end(0);                        /* (glos gdb: its program has gone) */
     shot_session_end();
+    if (ses.console && !ses.full)
+        display_console_trap(0);                /* (a console job's, still in its window: the desktop's as it was) */
+    ses.console = ses.full = 0;
     ses.active = 0;
     ses.ending = 1;                             /* (apps wait on until this is done) */
     vm_direct(0);                               /* (before the BIOS calls: they run at IOPL 0) */
@@ -287,15 +295,16 @@ static void end(const char *why)
 }
 
 /* glos run's options for the session the stub's next EXEC begins (E4). */
-static struct { u8 direct, exclusive, app; char profile[16]; } job;
+static struct { u8 direct, exclusive, app, console; char profile[16]; } job;
 
-/* how: 0 as the program asks, 1 --exclusive, 2 --app. */
+/* how: 0 as the program asks, 1 --exclusive, 2 --app, 3 a console job's, 4 ... full-screen from the start. */
 void session_job(int direct, int how, const char *profile)
 {
     u32 i;
     job.direct = (u8)(direct != 0);
     job.exclusive = (u8)(how == 1);
     job.app = (u8)(how == 2);
+    job.console = (u8)(how == 3);
     for (i = 0; profile[i] && i < sizeof job.profile - 1; i++)
         job.profile[i] = profile[i] >= 'a' && profile[i] <= 'z' ? (char)(profile[i] - 32) : profile[i];
     job.profile[i] = 0;
@@ -303,10 +312,15 @@ void session_job(int direct, int how, const char *profile)
 
 /* The profile for program file name prog (upper case): the same NAME.EXT,
    or the same NAME when either has no extension. */
-static const struct bi_profile *profile_for(const char *prog)
+static const struct bi_profile *profile_for(const char *prog, struct bi_profile *copy)
 {
     const struct bi_profile *p;
     u32 n, m;
+    int r = kcfg_profile(prog, copy);           /* (M9: GLOS.CFG as the kernel has it, once it has read it) */
+    if (r == 0)
+        return copy;
+    if (r == -1)
+        return 0;
     for (n = 0; prog[n] && prog[n] != '.'; n++) ;
     for (p = vm.bi->profiles; p < vm.bi->profiles + BI_PROFILES; p++) {
         for (m = 0; p->name[m] && p->name[m] != '.'; m++) ;
@@ -442,10 +456,14 @@ void session_exec(const struct trapframe *tf)
     hint = (psp == vm.loader_psp && job.app) || marked(tf);
     ses.t0 = timer_ticks() | 1;
     ses.hint = (u8)hint;
+    ses.console = (u8)(psp == vm.loader_psp && job.console && !hint && display_desktop_bpp());
+    ses.full = 0;
     ses.active = 1;
     ses.parent = psp;
     memset(ses.dangle, 0, sizeof ses.dangle);
-    if (!ses.hint)
+    if (ses.console)
+        display_console_trap(1);                /* in its app's window until it wants the screen (M9) */
+    else if (!ses.hint)
         display_session(1);                     /* the screen is the session's: text mode (gfx/display.c) */
     ses.mode = vm_rd8(0x449);
     ses.leds = vm_rd8(0x417) & 0x70;
@@ -459,7 +477,7 @@ void session_exec(const struct trapframe *tf)
     ses.irq0 = cpu_irq_count(0);
     ses.grab = 0;
     ses.n++;
-    ses.prof = profile_for(psp == vm.loader_psp && job.profile[0] ? job.profile : ses.prog);
+    ses.prof = profile_for(psp == vm.loader_psp && job.profile[0] ? job.profile : ses.prog, &ses.prof_copy);
     ses.direct = psp == vm.loader_psp && job.direct;
     ses.exclusive = psp == vm.loader_psp && job.exclusive;
     ses.app = psp == vm.loader_psp && job.app;
@@ -514,6 +532,21 @@ int session_exclusive(void) { return ses.active && ses.exclusive; }
 
 int session_app(void) { return ses.active && ses.app; }
 
+/* A console job's program runs in its window (M9). */
+int session_console(void) { return ses.active && ses.console && !ses.full; }
+
+/* ... and wants the screen (a mode set, a drawing BIOS call, the VGA touched): it is a session from here. */
+void session_console_full(void)
+{
+    if (!session_console())
+        return;
+    ses.full = 1;
+    display_console_trap(0);
+    display_session(1);
+    agent_vm_console_full();
+    kprintf("GLOS-SESSION full prog=%s\n", ses.prog);
+}
+
 /* The session's program set a video mode (rmcall.c): it is no app. */
 void session_video(void)
 {
@@ -527,6 +560,8 @@ int session_pauses(void)
 {
     if (ses.ending)
         return 1;
+    if (ses.active && ses.console && !ses.full)
+        return 0;                               /* (a console job's, in its window: no screen, no keyboard) */
     return ses.active && (!ses.hint || ses.exclusive || vm.direct || ses.grab || timer_ticks() - ses.t0 >= 2048);
 }
 
@@ -545,7 +580,10 @@ int session_profile_known(const char *name)
     for (i = 0; name[i] && i < sizeof up - 1; i++)
         up[i] = name[i] >= 'a' && name[i] <= 'z' ? (char)(name[i] - 32) : name[i];
     up[i] = 0;
-    return profile_for(up) != 0;
+    {
+        struct bi_profile tmp;
+        return profile_for(up, &tmp) != 0;
+    }
 }
 
 /* glos stat: the session as a JSON object, or null. */

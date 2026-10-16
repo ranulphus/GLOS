@@ -39,6 +39,10 @@
  * app's until the app ends: its output while the VM thread makes its DOS
  * calls, its exit code, its kill. The stub is free meanwhile, and the next
  * job runs. */
+#include <string.h>
+
+#define GLOS_KERNEL
+#include "glos/api.h"
 #include "glos/bootinfo.h"
 #include "agent.h"
 #include "app.h"
@@ -49,8 +53,9 @@
 #include "sched.h"
 #include "timer.h"
 #include "vm.h"
+#include "watch.h"
 
-#define NJOBS    4
+#define NJOBS    16                             /* (the ssh's and the apps': a launched app's lasts as long as it) */
 #define RING     0x4000u                        /* a power of two */
 #define SFT_SIZE 0x3B                           /* an SFT entry, DOS 4 and later */
 
@@ -78,6 +83,18 @@ struct agent_job {
     const char *args;                           /* the rest, from the separator on */
     char path[80];                              /* what the stub is EXECing */
     struct ring out[2];                         /* stdout, stderr */
+    /* M9: an app's job (GLOS_FN_RUN) */
+    u8 from_app;                                /* its output is its app's to read, its keys the app's to type */
+    u8 console;                                 /* GLOS_RUN_CONSOLE: its program writes into the app's window */
+    u8 full;                                    /* ... until it wanted the screen (or GLOS_RUN_FULL) */
+    u8 detach;                                  /* GLOS_RUN_DETACH: nobody's; no output kept */
+    u8 dir_step;                                /* starting in dir: 1 its drive set, 2 its folder, 0 done */
+    u8 told;                                    /* the GLOS_JOB_ state its app last heard of, FFh none */
+    void *app_owner;                            /* its app (struct app), or NULL */
+    char dir[80];
+    u16 keys[64];                               /* typed by its app, on their way into the BIOS's buffer */
+    volatile u32 kh, kt;
+    struct waitq readq;                         /* its app, waiting for output */
 };
 
 static struct agent_job jobs[NJOBS];
@@ -127,12 +144,239 @@ int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, cons
         j->profile[i] = profile[i];
     j->profile[i] = 0;
     j->out[0].head = j->out[0].tail = j->out[1].head = j->out[1].tail = 0;
+    j->from_app = j->console = j->full = j->detach = j->dir_step = 0;
+    j->told = 0xFF;
+    j->app_owner = NULL;
+    j->dir[0] = 0;
+    j->kh = j->kt = 0;
     f = irq_save();
     j->seq = next_seq++;
     j->state = J_QUEUED;
     vm_kick();                                  /* the stub may be halted, waiting */
     irq_restore(f);
     return 0;
+}
+
+/* ---- apps' jobs (GLOS_FN_RUN, GLOS_FN_JOB; M9 step C), on the app's thread */
+
+static u32 app_state(const struct agent_job *j)
+{
+    if (j->state == J_QUEUED)
+        return GLOS_JOB_QUEUED;
+    if (j->state == J_DONE)
+        return GLOS_JOB_DONE;
+    return j->app ? GLOS_JOB_APP : j->full || !j->console ? GLOS_JOB_FULL : GLOS_JOB_RUNNING;
+}
+
+static u32 code_of(const struct agent_job *j) { return (j->result & 0x10000) ? 126 : (j->result & 0xFF); }
+
+/* Its app told it has moved on (interrupts off or on: app_event is safe in either). */
+static void tell(struct agent_job *j)
+{
+    struct glos_event e;
+    u32 st = app_state(j);
+    thread_wake(&j->readq);
+    if (!j->app_owner || st == j->told)
+        return;
+    j->told = (u8)st;
+    memset(&e, 0, sizeof e);
+    e.type = GLOS_EV_JOB;
+    e.key = j->seq;
+    e.x = (int)st;
+    e.y = (int)code_of(j);
+    app_event(j->app_owner, &e);
+}
+
+int agent_post_app(void *app, const struct glos_run *r, u32 *seq)
+{
+    struct agent_job *j = NULL;
+    u32 f, i;
+    const char *cmd = r->command;
+    for (i = 0; i < NJOBS; i++)
+        if (jobs[i].state == J_FREE) {
+            j = &jobs[i];
+            break;
+        }
+    if (!j)
+        return GLOS_E_MEMORY;
+    while (*cmd == ' ' || *cmd == '\t')
+        cmd++;
+    if (!*cmd)
+        return GLOS_E_ARGUMENT;
+    for (i = 0; cmd[i] && i < sizeof j->cmd - 1; i++)
+        j->cmd[i] = cmd[i];
+    j->cmd[i] = 0;
+    for (i = 0; r->dir[i] && i < sizeof j->dir - 1; i++)
+        j->dir[i] = r->dir[i];
+    j->dir[i] = 0;
+    j->owner = NULL;
+    j->result = 0;
+    j->cand = j->shell = 0;
+    j->kill = 0;
+    j->app = 0;
+    j->direct = 0;
+    j->exclusive = 0;
+    j->profile[0] = 0;
+    j->out[0].head = j->out[0].tail = j->out[1].head = j->out[1].tail = 0;
+    j->detach = (u8)((r->flags & GLOS_RUN_DETACH) != 0);
+    j->from_app = (u8)!j->detach;
+    j->console = (u8)(!j->detach && (r->flags & GLOS_RUN_CONSOLE));
+    j->full = (u8)(j->console && (r->flags & GLOS_RUN_FULL));
+    j->dir_step = 0;
+    j->told = 0xFF;
+    j->app_owner = j->detach ? NULL : app;
+    j->kh = j->kt = 0;
+    f = irq_save();
+    j->seq = next_seq++;
+    j->state = J_QUEUED;
+    *seq = j->seq;
+    vm_kick();
+    irq_restore(f);
+    kprintf("GLOS-AGENT post seq=%u app=%u%s%s%s cmd=\"%s\"\n", j->seq, app_id(app), j->console ? " console=1" : "",
+            j->full ? " full=1" : "", j->detach ? " detach=1" : "", j->cmd);
+    return 0;
+}
+
+static struct agent_job *app_job(void *app, u32 seq)
+{
+    u32 i;
+    for (i = 0; i < NJOBS; i++)
+        if (jobs[i].state != J_FREE && jobs[i].seq == seq && jobs[i].app_owner == app && app)
+            return &jobs[i];
+    return NULL;
+}
+
+/* The BIOS's keyboard buffer (40:1A head, 40:1C tail, 40:80 and 40:82 its bounds): a console job's typed keys go
+   in while there is room (interrupts off: the VM thread's tick and the app's call both feed it). */
+static void feed(struct agent_job *j)
+{
+    u32 f = irq_save();
+    while (j->kh != j->kt && j->state == J_RUNNING && j->console && !j->full) {
+        u16 head = vm_rd16(0x41A), tail = vm_rd16(0x41C), start = vm_rd16(0x480), end = vm_rd16(0x482), next;
+        if (start < 0x1E || end > 0x100 || start >= end)
+            start = 0x1E, end = 0x3E;
+        next = (u16)(tail + 2);
+        if (next >= end)
+            next = start;
+        if (next == head)
+            break;                              /* full: the next tick */
+        vm_wr8(0x400u + tail, (u8)j->keys[j->kh % 64]);
+        vm_wr8(0x400u + tail + 1, (u8)(j->keys[j->kh % 64] >> 8));
+        vm_wr8(0x41C, (u8)next);
+        vm_wr8(0x41D, (u8)(next >> 8));
+        j->kh++;
+    }
+    irq_restore(f);
+}
+
+int agent_app_read(void *app, u32 seq, u8 *out, u32 room, u32 wait_ticks, u32 *state, u32 *code)
+{
+    struct agent_job *j = app_job(app, seq);
+    u32 n = 0, s, until = timer_ticks() + wait_ticks, f;
+    if (!j)
+        return -1;
+    for (;;) {
+        for (s = 0; s < 2 && n < room; s++) {
+            struct ring *r = &j->out[s];
+            while (ring_used(r) && n < room) {
+                out[n++] = r->buf[r->tail & (RING - 1)];
+                __asm__ volatile("" ::: "memory");
+                r->tail++;
+            }
+        }
+        if (n || j->state == J_DONE || !wait_ticks || (wait_ticks != 0xFFFFFFFFu && (s32)(timer_ticks() - until) >= 0))
+            break;
+        thread_wait(&j->readq, wait_ticks == 0xFFFFFFFFu ? timer_ticks() + 1024 : until);
+    }
+    if (n) {
+        f = irq_save();
+        thread_wake(&roomq);
+        irq_restore(f);
+    }
+    *state = app_state(j);
+    *code = code_of(j);
+    if (j->state == J_DONE && !ring_used(&j->out[0]) && !ring_used(&j->out[1])) {
+        f = irq_save();                         /* (its end told: the slot is free again) */
+        j->app_owner = NULL;
+        j->state = J_FREE;
+        irq_restore(f);
+    }
+    return (int)n;
+}
+
+int agent_app_type(void *app, u32 seq, const u16 *keys, u32 n)
+{
+    struct agent_job *j = app_job(app, seq);
+    u32 i;
+    if (!j)
+        return -1;
+    for (i = 0; i < n && j->kt - j->kh < 64; i++)
+        j->keys[j->kt++ % 64] = keys[i];
+    feed(j);
+    vm_kick();
+    return (int)i;
+}
+
+int agent_app_kill(void *app, u32 seq)
+{
+    struct agent_job *j = app_job(app, seq);
+    return j ? agent_kill_seq(seq) : -1;
+}
+
+int agent_app_forget(void *app, u32 seq)
+{
+    struct agent_job *j = app_job(app, seq);
+    u32 f;
+    if (!j)
+        return -1;
+    f = irq_save();
+    j->app_owner = NULL;
+    j->detach = 1;
+    if (j->state == J_DONE || j->state == J_QUEUED)
+        j->state = J_FREE;
+    irq_restore(f);
+    return 0;
+}
+
+void agent_app_gone(void *app)
+{
+    u32 i;
+    for (i = 0; i < NJOBS; i++) {
+        struct agent_job *j = &jobs[i];
+        if (j->state == J_FREE || j->app_owner != app || !app)
+            continue;
+        if (j->state == J_RUNNING && !j->app)
+            agent_kill_seq(j->seq);             /* (its console's window has gone) */
+        {
+            u32 f = irq_save();
+            j->app_owner = NULL;
+            j->detach = 1;
+            if (j->state == J_DONE || j->state == J_QUEUED)
+                j->state = J_FREE;
+            irq_restore(f);
+        }
+    }
+}
+
+u32 agent_jobs_stat(void *out, u32 room)
+{
+    u32 n = 0, i;
+    for (i = 0; i < NJOBS && n + sizeof(struct glos_stat_app) <= room; i++) {
+        const struct agent_job *j = &jobs[i];
+        struct glos_stat_app *a = (struct glos_stat_app *)((u8 *)out + n);
+        u32 k;
+        if (j->state != J_QUEUED && j->state != J_RUNNING)
+            continue;
+        memset(a, 0, sizeof *a);
+        a->size = sizeof *a;
+        a->kind = 1;
+        a->id = j->seq;
+        a->state = app_state(j);
+        for (k = 0; j->cmd[k] && j->cmd[k] != ' ' && k < sizeof a->name - 1; k++)
+            a->name[k] = j->cmd[k];
+        n += sizeof *a;
+    }
+    return n;
 }
 
 void agent_drop(void *owner)
@@ -159,7 +403,7 @@ void agent_service(u32 (*write)(void *owner, int stream, const u8 *d, u32 n), vo
     for (i = 0; i < NJOBS; i++) {
         struct agent_job *j = &jobs[i];
         int moved = 0;
-        if (j->state != J_RUNNING && j->state != J_DONE)
+        if ((j->state != J_RUNNING && j->state != J_DONE) || j->from_app || j->detach)
             continue;
         for (s = 0; s < 2; s++) {
             struct ring *r = &j->out[s];
@@ -356,16 +600,49 @@ static int candidate(struct agent_job *j, u32 k)
     return 1;
 }
 
+/* The DOS call that sets a job's drive (1) or folder (2) before its EXEC. */
+static int dir_call(struct agent_job *j, struct agent_exec *x)
+{
+    memset(&x->dos, 0, sizeof x->dos);
+    x->dos_path = NULL;
+    if (j->dir_step == 1) {
+        char d = upper(j->dir[0]);
+        if (j->dir[1] != ':' || d < 'A' || d > 'Z') {
+            j->dir_step = 2;
+            return dir_call(j, x);
+        }
+        x->dos.ax = 0x0E00;
+        x->dos.dx = (u16)(d - 'A');
+        return 3;
+    }
+    if (j->dir_step == 2 && j->dir[j->dir[1] == ':' ? 2 : 0]) {
+        x->dos.ax = 0x3B00;
+        x->dos_path = j->dir;
+        return 3;
+    }
+    j->dir_step = 0;
+    return 0;
+}
+
 int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
 {
     struct agent_job *j = running;
     u32 i;
+    x->dos_path = NULL;
+    if (j && j->dir_step && result == 0xFFFFFFFEu) {    /* its drive or folder set: the next, or its EXEC */
+        j->dir_step++;
+        if (j->dir_step <= 2 && dir_call(j, x) == 3)
+            return 3;
+        j->dir_step = 0;
+        goto start;
+    }
     if (j && result == NEXT_DETACHED) {         /* its program is an app now: the job goes with it */
         j->app = 1;
         kprintf("GLOS-AGENT app seq=%u via=%s\n", j->seq, j->shell ? "comspec" : j->path);
         running = NULL;
         if (j->kill)
             app_kill_job(j);
+        tell(j);
         j = NULL;
     }
     if (j) {
@@ -381,6 +658,9 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
         kprintf("GLOS-AGENT done seq=%u code=%u via=%s%s\n", j->seq, result & 0xFF, j->shell ? "comspec" : j->path,
                 (result & 0x10000) ? " cannot-run" : "");
         running = NULL;
+        tell(j);
+        if (j->detach)
+            j->state = J_FREE;                  /* (nobody to tell) */
         if (kick_ssh)
             kick_ssh();
     }
@@ -391,20 +671,29 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
     if (j) {
         j->state = J_RUNNING;
         running = j;
-        kprintf("GLOS-AGENT run seq=%u cmd=\"%s\"%s%s%s\n", j->seq, j->cmd, j->direct ? " direct=1" : "",
-                j->profile[0] ? " profile=" : "", j->profile);
-        j->shell = (u8)split(j);
-        if (!j->shell && !candidate(j, 0))
-            j->shell = 1;
-        goto exec;
+        kprintf("GLOS-AGENT run seq=%u cmd=\"%s\"%s%s%s%s%s\n", j->seq, j->cmd, j->direct ? " direct=1" : "",
+                j->profile[0] ? " profile=" : "", j->profile, j->dir[0] ? " dir=" : "", j->dir);
+        tell(j);
+        if (j->dir[0]) {                        /* its drive and folder first (the system VM's: DOS has one) */
+            j->dir_step = 1;
+            if (dir_call(j, x) == 3)
+                return 3;
+        }
+        goto start;
     }
     session_job(0, 0, "");
     if (exit_req && (s32)(timer_ticks() - exit_at) >= 0)
         return -1;
     return 0;
+start:
+    j = running;
+    j->shell = (u8)split(j);
+    if (!j->shell && !candidate(j, 0))
+        j->shell = 1;
 exec:
     j = running;
-    session_job(j->direct, j->exclusive, j->profile);  /* for the session this EXEC begins */
+    session_job(j->direct, j->console ? (j->full ? 4 : 3) : j->exclusive, j->profile);     /* for the session this
+                                                   EXEC begins (3: a console job's, 4: full-screen from the start) */
     if (j->shell) {
         x->path = comspec;
         x->t1 = " /C ";
@@ -451,6 +740,9 @@ void agent_app_done(void *job, u32 result)
     j->result = result;
     j->state = J_DONE;
     kprintf("GLOS-AGENT done seq=%u code=%u via=app\n", j->seq, result & 0xFF);
+    tell(j);
+    if (j->detach)
+        j->state = J_FREE;
     if (kick_ssh)
         kick_ssh();
 }
@@ -458,6 +750,9 @@ void agent_app_done(void *job, u32 result)
 /* Every tick (interrupts off): a job being killed gets the next kill. */
 void agent_vm_tick(u32 now)
 {
+    watch_tick(now);
+    if (running && running->kh != running->kt)
+        feed(running);                          /* (a console job's keys, as its BIOS buffer empties) */
     if (running && !running->app && running->kill && !vm.kill_req && now - last_kill >= 512) {     /* (an app's
                                                    kill is app.c's: one request, in the call under way) */
         last_kill = now;
@@ -471,16 +766,30 @@ void agent_vm_tick(u32 now)
 static void put(int stream, u8 c)
 {
     struct ring *r = &running->out[stream];
+    if (running->detach)
+        return;
     while (ring_used(r) == RING) {
-        if (!running->owner || running->kill || vm.kill_req)
+        if ((!running->owner && !running->app_owner) || running->kill || vm.kill_req)
             return;                             /* nobody reads it: dropped */
         if (kick_ssh)
             kick_ssh();
+        thread_wake(&running->readq);
         thread_wait(&roomq, timer_ticks() + 256);
     }
     r->buf[r->head & (RING - 1)] = c;
     __asm__ volatile("" ::: "memory");
     r->head++;
+    if (running->from_app && (c == '\n' || ring_used(r) > RING / 2))
+        thread_wake(&running->readq);           /* (the app reads a line at a time, or a lot) */
+    if (running->from_app && running->app_owner && ring_used(r) == 1 && !ring_used(&running->out[!stream])) {
+        struct glos_event e;                    /* output where there was none: its app is told (once until it
+                                                   has read it all) */
+        memset(&e, 0, sizeof e);
+        e.type = GLOS_EV_JOB;
+        e.key = running->seq;
+        e.x = (int)app_state(running);
+        app_event(running->app_owner, &e);
+    }
 }
 
 static u32 far_lin(u32 fp) { return ((fp >> 16) << 4) + (fp & 0xFFFF); }
@@ -521,7 +830,9 @@ static int is_console(u16 h)
 void agent_vm_int21(const struct trapframe *tf)
 {
     u32 ah = (tf->eax >> 8) & 0xFF, i, n;
-    if (!running)
+    watch_int21((u16)tf->eax, (u16)tf->ebx, (u16)tf->ecx, vm_lin(tf->v86_ds, tf->edx),
+                vm_lin(tf->v86_ds, tf->esi));  /* (a directory's watchers, M9) */
+    if (!running || running->console)           /* (a console job's: all of it through INT 29h, echo too) */
         return;
     if (ah == 0x02 || (ah == 0x06 && (tf->edx & 0xFF) != 0xFF)) {
         if (is_console(1))
@@ -543,6 +854,27 @@ void agent_vm_int21(const struct trapframe *tf)
 
 void agent_vm_int29(const struct trapframe *tf)
 {
-    if (running && (!vm.indos || !vm_rd8(vm.indos)))
+    if (running && (running->console || !vm.indos || !vm_rd8(vm.indos)))
         put(0, (u8)tf->eax);
+}
+
+/* ---- console jobs (M9; the VM thread's) */
+
+int agent_vm_console(void) { return running && running->console && !running->full && !running->app; }
+
+static void tell(struct agent_job *j);
+
+void agent_vm_console_full(void)
+{
+    if (!agent_vm_console())
+        return;
+    running->full = 1;
+    kprintf("GLOS-AGENT full seq=%u\n", running->seq);
+    tell(running);
+}
+
+void agent_vm_console_char(u8 c)
+{
+    if (agent_vm_console())
+        put(0, c);
 }

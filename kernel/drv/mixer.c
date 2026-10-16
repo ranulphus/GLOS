@@ -54,19 +54,64 @@ static struct strm {
 static struct {
     u8 on;                                      /* the card found and the mixer wanted */
     u8 out;                                     /* a session has the card */
+    u8 found;                                   /* the card is there (sb16_init) */
+    u8 desk;                                    /* the desktop wants it playing (mixer_desktop) */
+    const struct bootinfo *bi;
     u32 rate, next_id, periods;
     s32 acc[PERIOD * 2];
 } mx;
+
+static void fill(s16 *out, u32 frames, const struct trapframe *tf);
 
 int mixer_init(const struct bootinfo *bi)
 {
     mx.rate = bi->sound_rate ? bi->sound_rate : 22050;
     mx.next_id = 1;
     mx.out = 1;                                 /* (until the desktop is up) */
+    mx.bi = bi;
     if ((bi->sound_flags & BI_SOUND_OFF) || sb16_init(bi) != 0)
         return -1;
-    mx.on = 1;
+    mx.found = mx.on = 1;
     return 0;
+}
+
+/* [sound] mixer changed (M9): the card found now if it wasn't looked for, and played if the desktop has it. */
+void mixer_enable(int on)
+{
+    if (on && !mx.on) {
+        if (!mx.found && sb16_init(mx.bi) != 0)
+            return;
+        mx.found = mx.on = 1;
+        kprintf("GLOS-AUDIO mixer on\n");
+        if (mx.desk)
+            mixer_desktop(1);
+    } else if (!on && mx.on) {
+        sb16_stop();
+        mx.out = 1;
+        mx.on = 0;
+        kprintf("GLOS-AUDIO mixer off\n");
+    }
+}
+
+/* [sound] rate changed (M9): the card started again at the new rate, every stream's step made anew. */
+void mixer_set_rate(u32 rate)
+{
+    u32 i, f, playing = sb16_running();
+    if (rate < 4000 || rate > 48000 || rate == mx.rate)
+        return;
+    if (playing)
+        sb16_stop();
+    f = irq_save();
+    mx.rate = rate;
+    for (i = 0; i < STREAMS; i++)
+        if (st[i].a) {
+            st[i].step = (st[i].h->rate << 16) / rate;
+            st[i].h->mixer_rate = rate;
+        }
+    irq_restore(f);
+    kprintf("GLOS-AUDIO rate=%u\n", rate);
+    if (playing && sb16_start(mx.rate, PERIOD, fill) != 0)
+        mx.on = 0;
 }
 
 int mixer_on(void) { return mx.on && !mx.out; }
@@ -146,6 +191,7 @@ static void fill(s16 *out, u32 frames, const struct trapframe *tf)
    a session (or no desktop) has the card. */
 void mixer_desktop(int on)
 {
+    mx.desk = (u8)(on != 0);
     if (!mx.on)
         return;
     if (on) {
@@ -261,4 +307,18 @@ u32 mixer_stat(char *buf, u32 max)
                                 st[i].id, app_id(st[i].a), st[i].h->rate, st[i].h->channels, st[i].h->periods,
                                 st[i].h->underruns);
     return n;
+}
+
+/* For GLOS_FN_STAT (M9): the rate, the streams open, and their underruns all told. */
+void mixer_counts(u32 *rate, u32 *streams, u32 *underruns)
+{
+    u32 i, f = irq_save();
+    *rate = mx.on ? mx.rate : 0;
+    *streams = *underruns = 0;
+    for (i = 0; i < STREAMS; i++)
+        if (st[i].a) {
+            (*streams)++;
+            *underruns += st[i].h->underruns;
+        }
+    irq_restore(f);
 }

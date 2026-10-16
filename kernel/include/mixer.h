@@ -7,6 +7,9 @@
 struct app;
 struct bootinfo;
 
+void mixer_counts(u32 *rate, u32 *streams, u32 *underruns);     /* GLOS_FN_STAT's (M9) */
+void mixer_enable(int on);              /* [sound] mixer (M9) */
+void mixer_set_rate(u32 rate);          /* [sound] rate (M9) */
 int mixer_init(const struct bootinfo *bi);      /* 0 when there is an SB16 to mix into (and [sound] mixer isn't off) */
 int mixer_on(void);                             /* it plays now (no session has the card) */
 int mixer_found(void);                          /* it has a card (a session may have it now) */

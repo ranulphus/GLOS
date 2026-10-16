@@ -104,11 +104,16 @@ static void describe(const struct wm *m, const struct wm_window *w, u32 lin, str
         return;
     }
     g->id = w->id;
-    g->x = w->frame.x;
-    g->y = w->frame.y;
+    {                                           /* (1.2: the client area's corner) */
+        struct gfx_rect c;
+        wm_client(m, w, &c);
+        g->x = c.x;
+        g->y = c.y;
+    }
     g->w = w->store.w;
     g->h = w->store.h;
-    g->flags = (w->flags & WF_FIXED ? GLOS_WIN_FIXED : 0u) | (w->flags & WF_FRAME ? 0u : GLOS_WIN_BARE);
+    g->flags = (w->flags & WF_FIXED ? GLOS_WIN_FIXED : 0u) | (w->flags & WF_FRAME ? 0u : GLOS_WIN_BARE)
+             | (w->flags & WF_POPUP ? GLOS_WIN_POPUP : 0u) | (w->flags & WF_DESKTOP ? GLOS_WIN_DESKTOP : 0u);
     memcpy(g->title, w->title, sizeof g->title < sizeof w->title ? sizeof g->title : sizeof w->title);
     g->title[sizeof g->title - 1] = 0;
     g->pixels = lin;
@@ -121,7 +126,9 @@ int desk_win_create(struct app *a, struct glos_window *g)
 {
     struct wm *m;
     struct wm_window *w;
-    u32 lin, flags = (g->flags & GLOS_WIN_BARE ? 0u : WF_FRAME) | (g->flags & GLOS_WIN_FIXED ? WF_FIXED : 0u);
+    u32 lin, flags = (g->flags & (GLOS_WIN_BARE | GLOS_WIN_POPUP | GLOS_WIN_DESKTOP) ? 0u : WF_FRAME)
+                   | (g->flags & GLOS_WIN_FIXED ? WF_FIXED : 0u) | (g->flags & GLOS_WIN_POPUP ? WF_POPUP | WF_TOPMOST : 0u)
+                   | (g->flags & GLOS_WIN_DESKTOP ? WF_DESKTOP | WF_FIXED : 0u);
     s32 x = g->x, y = g->y;
     int r;
     if (g->w < 1 || g->h < 1 || g->w > 4096 || g->h > 4096)
@@ -129,9 +136,26 @@ int desk_win_create(struct app *a, struct glos_window *g)
     g->title[sizeof g->title - 1] = 0;
     m = desk_lock();
     let_go(a);
-    if (g->flags & GLOS_WIN_ANYWHERE) {         /* down and right of the last, a few times, then from the top again */
+    if (g->flags & GLOS_WIN_DESKTOP) {          /* the shell's desktop (M9): the screen less the task bar, one */
+        struct wm_window *o;
+        for (o = m->top; o; o = o->below)
+            if (o->flags & WF_DESKTOP) {
+                desk_unlock();
+                return GLOS_E_ARGUMENT;
+            }
+        x = 0, y = 0;
+        g->w = m->w;
+        g->h = m->h - (m->bar ? m->bar->frame.h : 0);
+    } else if (g->flags & GLOS_WIN_ANYWHERE) {         /* down and right of the last, a few times, then from the top again; */
+        s32 fw = g->w + (flags & WF_FRAME ? 2 * m->look.border : 0);    /* up and left as far as it takes to be */
+        s32 fh = g->h + (flags & WF_FRAME ? 3 * m->look.border + m->look.title_h : 0);     /* on the screen (M9) */
+        s32 room = m->h - (m->bar ? m->bar->frame.h : 0);
         x = 24 + (s32)(m->next_id % 8) * 24;
         y = 16 + (s32)(m->next_id % 8) * 24;
+        if (x + fw > m->w)
+            x = m->w - fw > 0 ? m->w - fw : 0;
+        if (y + fh > room)
+            y = room - fh > 0 ? room - fh : 0;
     }
     if (!(w = wm_create(m, x, y, g->w, g->h, g->title, flags, a))) {
         desk_unlock();

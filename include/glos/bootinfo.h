@@ -125,6 +125,7 @@ struct bootinfo {
     bi_u32 sb_irq, sb_dma8, sb_dma16;           /* M8: BLASTER's (or [sound] blaster's) I, D and H; FFh: not given */
     bi_u32 sound_rate;                          /* M8: [sound] rate = HZ (0: 22050) */
     bi_u32 sound_flags;                         /* M8: BI_SOUND_ */
+    char cfg_path[80];                          /* M9: GLOS.CFG (beside GLOS.EXE), which the kernel keeps and writes */
 };
 #define BI_SOUND_OFF 1u                         /* [sound] mixer = off: GLOS leaves the Sound Blaster to programs */
 #define BI_DISPLAY_NOACCEL 1u                   /* [display] accel = off: the CPU draws the desktop, on a Matrox card too */

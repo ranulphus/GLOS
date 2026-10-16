@@ -284,7 +284,10 @@ void mm_vga_hide(int on)
     if (on && !spare)
         spare = pmm_take(&pmm);
     for (i = 0xA0; i < 0xC0; i++) {
-        kpt_low[i] = (kpt_low[i] & 0xFFF) | (on && spare ? spare : i << 12);
+        if (on == 2)                            /* not there at all: a touch faults (a console job's, M9) */
+            kpt_low[i] = (kpt_low[i] & 0xFFF & ~PTE_P) | (i << 12);
+        else
+            kpt_low[i] = ((kpt_low[i] & 0xFFF) | PTE_P) | (on && spare ? spare : i << 12);
         invlpg(i << 12);
     }
     irq_restore(f);

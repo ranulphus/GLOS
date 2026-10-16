@@ -37,6 +37,9 @@
 #include "display.h"
 #include "gpu.h"
 #include "dpmi.h"
+#include "arch.h"
+#include "session.h"
+#include "agent.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mgadisp.h"
@@ -58,7 +61,11 @@ static struct {
     void (*paint)(struct gfx_surface *fb);      /* who draws the whole screen now ... */
     void (*home)(struct gfx_surface *fb);       /* ... and when it isn't the test card's */
     void (*evict)(void);                        /* ... and whose pixels are to leave the card's memory first */
+    u8 trap;                                    /* a console job runs in a window: the VGA out of reach (M9) */
 } d;
+
+/* The VGA's memory as the desktop leaves it: hidden behind a spare frame, or not there (a console job's). */
+static int hidden(void) { return d.on && !d.held ? (d.trap ? 2 : 1) : 0; }
 
 static u32 le16(const u8 *p) { return p[0] | (u32)p[1] << 8; }
 static u32 le32(const u8 *p) { return le16(p) | le16(p + 2) << 16; }
@@ -73,7 +80,7 @@ static int vbe(struct rmregs *r)
     r->flags = 2;
     mm_vga_hide(0);
     ok = rm_call(0, r, RM_INT, 0x10, 0, 0) == 0 && (r->eax & 0xFFFF) == 0x004F;
-    mm_vga_hide(d.on && !d.held);
+    mm_vga_hide(hidden());
     return ok;
 }
 
@@ -229,7 +236,7 @@ static int mode_set(void)
     if (mga_display_up(d.fb.pix, d.phys, pitch, f.bpp, d.h))
         d.fb.dev = &mga_dev;                    /* (the engine draws on it: M7 step D) */
     d.on = 1;
-    mm_vga_hide(!d.held);
+    mm_vga_hide(hidden());
     vkbc_desk(!d.held);
     kprintf("GLOS-DISPLAY on mode=%x %ux%ux%u pitch=%u lfb=%08x rgb=%u.%u.%u dac=%u\n", d.mode, d.w, d.h, d.bpp, pitch,
             d.phys, f.rsize, f.gsize, f.bsize, f.bpp == 8 ? d.dac : 0);
@@ -355,6 +362,45 @@ void display_session(int begin)
     }
 }
 
+/* A console job's program runs in its window (M9; vm/session.c): the VGA's memory not there, its ports
+   trapped, so that a touch of either makes it full-screen (display_vga_fault, display_vga_port). */
+void display_console_trap(int on)
+{
+    u32 p;
+    if (d.trap == (on != 0))
+        return;
+    d.trap = (u8)(on != 0);
+    if (d.on && !d.held)
+        mm_vga_hide(hidden());
+    for (p = 0x3B0; p < 0x3E0; p++)
+        cpu_io_trap(p, on);
+}
+
+/* A page fault at linear address a: 1 if it was the VGA's memory a console job touched, now in reach. */
+int display_vga_fault(u32 a)
+{
+    if (a < 0xA0000 || a >= 0xC0000 || !d.trap)
+        return 0;
+    if (session_console())
+        session_console_full();                 /* (the session's now: text mode, the memory the VGA's again) */
+    else
+        display_console_trap(0);
+    return 1;
+}
+
+/* A trapped VGA port touched (vdev.c): 1 if it was a console job's, which is full-screen now; the access is then
+   made for real. */
+int display_vga_port(u32 port)
+{
+    if (!d.trap || port < 0x3B0 || port >= 0x3E0)
+        return 0;
+    if (session_console())
+        session_console_full();
+    else
+        display_console_trap(0);
+    return 1;
+}
+
 void display_leave(void)
 {
     int was = d.on && !d.held;
@@ -377,6 +423,25 @@ int display_quiet(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, int app)
     u32 ax = *eax & 0xFFFF, ah = ax >> 8;
     if (!d.on || d.held)
         return 0;
+    if (!app && session_console()) {            /* a console job's program (M9): what a line-by-line one needs */
+        switch (ah) {
+        case 0x0E:                              /* the teletype: into its window */
+            agent_vm_console_char((u8)ax);
+            return 1;
+        case 0x06:
+        case 0x07:                              /* the whole screen scrolled away: CLS */
+            if (!(ax & 0xFF) && !(*ecx & 0xFFFF) && (*edx & 0xFF) >= 79 && ((*edx >> 8) & 0xFF) >= 24) {
+                agent_vm_console_char('\f');
+                return 1;
+            }
+            break;
+        case 0x02: case 0x01: case 0x03: case 0x05: case 0x08: case 0x0F: case 0x11: case 0x12: case 0x1A: case 0x1B:
+            goto quiet;                         /* (the cursor, the mode, what the card is: answered as below) */
+        }
+        session_console_full();                 /* anything else draws: the screen is the program's from here */
+        return 0;
+    }
+quiet:
     if (!ah || ax == 0x4F02) {                  /* a mode set */
         if (!app) {
             display_session(1);
@@ -424,4 +489,15 @@ u32 display_stat(char *buf, u32 max)
     if (n < max && mga_display_on())
         n += gpu_stat(buf + n, max - n);
     return n;
+}
+
+/* For GLOS_FN_STAT (M9): the desktop's mode (0 without one), whether a card's engine draws it, its memory. */
+void display_counts(u32 *w, u32 *h, u32 *bpp, u32 *accel, u32 *vram_kb)
+{
+    int on = d.on && !d.held;
+    *w = on ? d.w : 0;
+    *h = on ? d.h : 0;
+    *bpp = on ? d.bpp : 0;
+    *accel = on && mga_desktop_card();
+    *vram_kb = mga_desktop_card() ? mga_vram_size() >> 10 : 0;
 }

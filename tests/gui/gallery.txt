@@ -1,0 +1,55 @@
+# The toolkit's gallery (GUITEST gallery; docs/milestones-m9.md step A): each tab of widgets, by keys alone and
+# by the mouse; the menus; the About box.
+run GUITEST.EXE gallery
+wait "GUITEST Gallery"
+shot buttons "GUITEST Gallery"
+key ctrl+tab
+shot text "GUITEST Gallery"
+key ctrl+tab
+shot lists "GUITEST Gallery"
+key ctrl+tab
+key tab tab
+shot buttons-focus "GUITEST Gallery"
+key alt+i space
+key alt+m
+key down down
+key alt+o down
+shot buttons-changed "GUITEST Gallery"
+click "GUITEST Gallery" 40 67
+click "GUITEST Gallery" 120 270
+shot buttons-mouse "GUITEST Gallery"
+key alt+f
+shot menu-file ""
+key right
+shot menu-edit ""
+key esc
+key f1
+shot about "About GUITEST"
+key enter
+gone "About GUITEST"
+key ctrl+tab
+key tab
+type Hello, world
+key tab tab
+key ctrl+end
+type More text: typed.
+key shift+home
+shot text-typed "GUITEST Gallery"
+key alt+v
+key w
+shot text-wrapped "GUITEST Gallery"
+key ctrl+tab
+key tab
+type r
+key down
+shot list-keys "GUITEST Gallery"
+key tab down right
+shot tree-open "GUITEST Gallery"
+key alt+f4
+gone "GUITEST Gallery"
+expect GUI change 11
+expect GUI change 22
+expect GUI about done
+expect GUI wrap on
+expect GUI select row 10
+expect GUI end

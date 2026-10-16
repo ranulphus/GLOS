@@ -45,6 +45,7 @@
 #include "glos/bootinfo.h"
 #include "app.h"
 #include "arch.h"
+#include "display.h"
 #include "dpmi.h"
 #include "gdbprog.h"
 #include "io.h"
@@ -681,6 +682,8 @@ void dpmi_trap(struct trapframe *tf)
     }
     if (v == 14 && lin_fault(read_cr2()))
         return;                                 /* a page of its memory backed on its first touch */
+    if (v == 14 && display_vga_fault(read_cr2()))
+        return;                                 /* the VGA's memory, a console job's program's: full-screen now (M9) */
     if (v == 14 && app_cur() && gpu_fault(app_cur(), read_cr2()))
         return;                                 /* the card's registers or its VRAM (M8): its own now, and again */
     if (v == 14)

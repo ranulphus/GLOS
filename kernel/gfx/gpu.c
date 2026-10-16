@@ -58,6 +58,12 @@ static struct {
     struct app *open[16];                       /* the apps that asked for the card (GLOS_FN_GPU) */
 } g;
 
+void gpu_watchdog(u32 watchdog_ms)
+{
+    g.limit = watchdog_ms ? watchdog_ms + (watchdog_ms * 24 + 999) / 1000 : 0;
+    kprintf("GLOS-GPU watchdog-limit ms=%u\n", watchdog_ms);
+}
+
 void gpu_init(u32 watchdog_ms)
 {
     g.limit = watchdog_ms ? watchdog_ms + (watchdog_ms * 24 + 999) / 1000 : 0;

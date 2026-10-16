@@ -59,7 +59,8 @@ void *dma_alloc(u32 frames, u32 *phys); /* contiguous, zeroed, mapped for good: 
 void *mm_win_alloc(u32 bytes);          /* a window's pixels: whole pages at WIN_BASE, zeroed; NULL if none */
 void mm_win_free(void *mem, u32 bytes);
 u32 mm_win_frame(const void *p);        /* the frame behind a page of them */
-void mm_vga_hide(int on);                /* A0000h-BFFFFh: a spare frame's (1), or the VGA's again (0) */
+void mm_vga_hide(int on);                /* A0000h-BFFFFh: a spare frame's (1), the VGA's again (0), or not
+                                           present (2: a console job's, whose touch makes it full-screen) */
 void *mm_fb_map(u32 phys, u32 bytes);   /* a framebuffer's memory at FB_BASE (in place of the last); 0 if too big */
 void *mm_dev_map(u32 phys, u32 bytes);  /* a device's physical range, uncached, at DEV_BASE for good; 0 if no room */
 void mm_dev_unmap(void *p, u32 bytes);

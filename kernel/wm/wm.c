@@ -136,7 +136,9 @@ static void unlink(struct wm *m, struct wm_window *w)
 static void link_top(struct wm *m, struct wm_window *w)
 {
     struct wm_window *over = 0, *under = m->top;        /* w goes between `under` and `over` */
-    if (!(w->flags & WF_TOPMOST))
+    if (w->flags & WF_DESKTOP)                  /* (the desktop's: at the bottom) */
+        over = m->bottom, under = 0;
+    else if (!(w->flags & WF_TOPMOST))
         while (under && (under->flags & WF_TOPMOST)) {
             over = under;
             under = under->below;
@@ -225,6 +227,11 @@ static void bar_stale(struct wm *m)
 {
     if (m->bar)
         bar_paint(m);
+}
+
+int wm_bar_mark(const struct wm *m, s32 x, s32 y)
+{
+    return m->bar && y >= m->bar->frame.y && x < BAR_NAME;
 }
 
 struct wm_window *wm_bar_hit(const struct wm *m, s32 x, s32 y)
@@ -414,8 +421,8 @@ int wm_resize(struct wm *m, struct wm_window *w, s32 cw, s32 ch)
 void wm_raise(struct wm *m, struct wm_window *w)
 {
     struct wm_window *over = w->above;
-    if (!over || (!(w->flags & WF_TOPMOST) && (over->flags & WF_TOPMOST)))
-        return;                                 /* as high as it goes already */
+    if (!over || (!(w->flags & WF_TOPMOST) && (over->flags & WF_TOPMOST)) || (w->flags & WF_DESKTOP))
+        return;                                 /* as high as it goes already (the desktop's: never above) */
     unlink(m, w);
     link_top(m, w);
     if (shown(w))

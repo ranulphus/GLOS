@@ -15,6 +15,9 @@
 
 #include "glos/bootinfo.h"
 #include "agent.h"
+#include "clip.h"
+#include "glos/config.h"
+#include "kcfg.h"
 #include "app.h"
 #include "arch.h"
 #include "desk.h"
@@ -549,6 +552,90 @@ static const char *type_parse(struct input *in, const char *p)
     return 0;
 }
 
+/* glos config [get SECTION KEY | set SECTION KEY VALUE | unset SECTION KEY | describe SECTION KEY | sections]
+   (M9; docs/milestones-m9.md step B): GLOS.CFG's settings as the kernel keeps them. A program's section is
+   program:NAME.EXT. With no word: where the file stands, then every setting. */
+static void config_cmd(struct ssh_chan *ch, const char *arg)
+{
+    static const char *const when[] = { "now", "restart", "program", "desktop", "app" };
+    char sec[48], key[32], *b = kmalloc(0x6000), why[160];
+    const char *p = arg, *val;
+    u32 i, n;
+    int r;
+    if (!b) {
+        say(ch, 1, "glos: no memory\n");
+        ssh_chan_exit(ch, 1);
+        return;
+    }
+    while (*p == ' ')
+        p++;
+    if (!*p) {
+        n = kcfg_stat(b, 0x6000);
+        n += kcfg_list(b + n, 0x6000 - n);
+        ssh_chan_write(ch, 0, (const uint8_t *)b, n);
+        ssh_chan_exit(ch, 0);
+        kfree(b);
+        return;
+    }
+    if (!strcmp(p, "sections")) {
+        ssh_chan_write(ch, 0, (const uint8_t *)b, kcfg_sections(b, 0x6000));
+        ssh_chan_exit(ch, 0);
+        kfree(b);
+        return;
+    }
+    {                                           /* WORD SECTION KEY [VALUE] */
+        const char *w = p;
+        while (*p && *p != ' ')
+            p++;
+        n = (u32)(p - w);
+        while (*p == ' ')
+            p++;
+        for (i = 0; *p && *p != ' ' && i < sizeof sec - 1; p++)
+            sec[i++] = *p == ':' ? ' ' : *p;
+        sec[i] = 0;
+        while (*p == ' ')
+            p++;
+        for (i = 0; *p && *p != ' ' && i < sizeof key - 1; p++)
+            key[i++] = *p;
+        key[i] = 0;
+        while (*p == ' ')
+            p++;
+        val = p;
+        if (!sec[0] || !key[0] || !cfg_find(sec, key)) {
+            say(ch, 1, "glos config: no such setting\n");
+            ssh_chan_exit(ch, 2);
+        } else if (n == 3 && !strncmp(w, "get", 3)) {
+            kcfg_get(sec, key, b, 0x6000);
+            n = strlen(b);
+            b[n++] = '\n';
+            ssh_chan_write(ch, 0, (const uint8_t *)b, n);
+            ssh_chan_exit(ch, 0);
+        } else if ((n == 3 && !strncmp(w, "set", 3)) || (n == 5 && !strncmp(w, "unset", 5))) {
+            r = kcfg_set(sec, key, w[0] == 's' ? val : 0, why, sizeof why);
+            if (r < 0) {
+                ksnprintf(b, 0x6000, "glos config: %s\n", why);
+                say(ch, 1, b);
+                ssh_chan_exit(ch, 1);
+            } else {
+                ksnprintf(b, 0x6000, "ok %s\n", when[r]);
+                say(ch, 0, b);
+                ssh_chan_exit(ch, 0);
+            }
+        } else if (n == 8 && !strncmp(w, "describe", 8)) {
+            const struct cfg_key *k = cfg_find(sec, key);
+            static const char *const kind[] = { "?", "choice", "number", "text", "mode", "path", "blaster", "env" };
+            n = (u32)ksnprintf(b, 0x6000, "[%s] %s: %s; %s%s%s; default \"%s\"; takes effect %s\n", sec, key, k->desc,
+                               kind[k->type], k->choices ? " " : "", k->choices ? k->choices : "", k->def, when[k->when]);
+            ssh_chan_write(ch, 0, (const uint8_t *)b, n);
+            ssh_chan_exit(ch, 0);
+        } else {
+            say(ch, 1, "glos config: usage: glos config [get|set|unset|describe SECTION KEY [VALUE] | sections]\n");
+            ssh_chan_exit(ch, 2);
+        }
+    }
+    kfree(b);
+}
+
 /* glos key LIST, glos type TEXT, glos mouse DX DY [BUTTONS]. */
 static void input_cmd(struct ssh_chan *ch, const char *cmd)
 {
@@ -813,6 +900,34 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             say(ch, 1, "glos display: busy\n");
             ssh_chan_exit(ch, 1);
         } else {
+            ssh_chan_exit(ch, 0);
+        }
+    } else if (!strcmp(cmd, "glos config") || !strncmp(cmd, "glos config ", 12)) {
+        config_cmd(ch, cmd + 11);
+    } else if (!strcmp(cmd, "glos clip") || !strncmp(cmd, "glos clip ", 10)) {
+        /* glos clip [TEXT]: the clipboard's text shown (its first 28 KB), or set (\n, \t, \\ as glos type has
+           them) (M9) */
+        char *b = kmalloc(0x7000);
+        if (!b) {
+            say(ch, 1, "glos: no memory\n");
+            ssh_chan_exit(ch, 1);
+        } else if (cmd[9]) {
+            const char *p = cmd + 10;
+            u32 n = 0;
+            for (; *p && n < 0x7000; p++) {
+                char c = *p;
+                if (c == '\\' && p[1]) {
+                    p++;
+                    c = *p == 'n' ? '\n' : *p == 't' ? '\t' : *p == 'r' ? '\r' : *p;
+                }
+                b[n++] = c;
+            }
+            ssh_chan_exit(ch, clip_set(b, n) == 0 ? 0 : 1);
+            kfree(b);
+        } else {
+            u32 n = clip_get(b, 0x7000);
+            ssh_chan_write(ch, 0, (const uint8_t *)b, n < 0x7000 ? n : 0x7000);
+            kfree(b);
             ssh_chan_exit(ch, 0);
         }
     } else if (!strcmp(cmd, "glos audio")) {

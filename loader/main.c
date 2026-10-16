@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "glos/bootinfo.h"
+#include "glos/config.h"
 
 #ifndef GLOS_BUILD
 #define GLOS_BUILD "unknown"
@@ -223,6 +224,47 @@ static int xms_block(unsigned kb, unsigned long *phys)
     if (xms_ax != 1) return -1;
     *phys = ((unsigned long)xms_dx << 16) | xms_bx;
     return 0;
+}
+
+#define KCHUNK 32768UL                          /* the kernel image goes up this much at a time */
+
+/* bytes (even) of the buffer at seg:0 to the kernel's place in extended memory, at off: 0, or -1. */
+static int kernel_up(unsigned seg, unsigned long off, unsigned long bytes)
+{
+    if (bi.mode == BI_MODE_XMS) {               /* the XMS driver's move (0Bh), into the kernel's block (handle 0) */
+        static struct { unsigned long len; unsigned sh; unsigned long so; unsigned dh; unsigned long doff; } m;
+        unsigned a, mp = (unsigned)&m;
+        m.len = bytes;
+        m.sh = 0;
+        m.so = (unsigned long)seg << 16;
+        m.dh = xms_handles[0];
+        m.doff = off;
+        _asm {
+            mov ah, 0Bh
+            mov si, mp
+            call dword ptr xms
+            mov a, ax
+        }
+        return a == 1 ? 0 : -1;
+    } else {                                    /* INT 15h 87h: the BIOS's block move, a descriptor each way */
+        static unsigned char g[48];
+        unsigned long src = (unsigned long)seg << 4, dst = bi.kernel_phys + off;
+        union REGS r;
+        struct SREGS sr;
+        memset(g, 0, sizeof g);
+        g[16] = g[24] = 0xFF, g[17] = g[25] = 0xFF;             /* limits */
+        g[18] = (unsigned char)src, g[19] = (unsigned char)(src >> 8), g[20] = (unsigned char)(src >> 16);
+        g[26] = (unsigned char)dst, g[27] = (unsigned char)(dst >> 8), g[28] = (unsigned char)(dst >> 16);
+        g[31] = (unsigned char)(dst >> 24);
+        g[21] = g[29] = 0x93;                   /* data, writable, present */
+        segread(&sr);
+        sr.es = sr.ds;
+        r.h.ah = 0x87;
+        r.x.cx = (unsigned)(bytes >> 1);
+        r.x.si = (unsigned)g;
+        int86x(0x15, &r, &r, &sr);
+        return r.x.cflag || r.h.ah ? -1 : 0;
+    }
 }
 
 static void xms_release(void)
@@ -425,19 +467,9 @@ static int glos_main(int argc, char **argv)
     f = fopen(path, "rb");
     if (!f || fread(&hdr, sizeof hdr, 1, f) != 1 || hdr.magic != KERNEL_MAGIC)
         return refuse("no-kernel");
-    if (_dos_allocmem((unsigned)((hdr.file_size + 15) >> 4), &buf_seg) != 0)
+    if (_dos_allocmem(KCHUNK >> 4, &buf_seg) != 0)     /* (the image goes up a piece at a time, below) */
         return refuse("no-low-memory");
     buf_phys = (unsigned long)buf_seg << 4;
-    fseek(f, 0, SEEK_SET);
-    for (a = 0; a < hdr.file_size; ) {
-        static unsigned char chunk[2048];
-        unsigned n = (unsigned)(hdr.file_size - a > sizeof chunk ? sizeof chunk : hdr.file_size - a);
-        if (fread(chunk, 1, n, f) != n) break;
-        _fmemcpy(phys(buf_phys + a), chunk, n);
-        a += n;
-    }
-    fclose(f);
-    if (a != hdr.file_size) return refuse("short-kernel");
     bi.kernel_size = hdr.file_size;
     bi.kernel_total = (hdr.total + 0xFFF) & ~0xFFFUL;
     say("GLOS-BOOT step=kernel file=%lu total=%lu", hdr.file_size, bi.kernel_total);
@@ -484,6 +516,28 @@ static int glos_main(int argc, char **argv)
         if (!a20_on()) return refuse("a20");
         say("GLOS-BOOT step=a20 initial=%lu now=1", bi.a20_initial);
     }
+
+    /* The image into its place in extended memory, 32 KB at a time through a buffer in low memory (by the
+       XMS driver's move, or INT 15h 87h): the kernel outgrew the low memory a copy of it whole needed (M9). */
+    fseek(f, 0, SEEK_SET);
+    for (a = 0; a < hdr.file_size; ) {
+        static unsigned char chunk[2048];
+        unsigned long piece = hdr.file_size - a > KCHUNK ? KCHUNK : hdr.file_size - a, b;
+        for (b = 0; b < piece; ) {
+            unsigned n = (unsigned)(piece - b > sizeof chunk ? sizeof chunk : piece - b);
+            if (fread(chunk, 1, n, f) != n) break;
+            _fmemcpy(phys(buf_phys + b), chunk, n);
+            b += n;
+        }
+        if (b != piece) break;
+        if (kernel_up(buf_seg, a, (piece + 1) & ~1UL) != 0) {
+            fclose(f);
+            return refuse("kernel-copy");
+        }
+        a += piece;
+    }
+    fclose(f);
+    if (a != hdr.file_size) return refuse("short-kernel");
 
     /* Page directory, the 0-4 MB table (0-10FFFFh identity) and the kernel's
        table at 0xC0000000 (supervisor.md §4). */
@@ -559,9 +613,9 @@ static int glos_main(int argc, char **argv)
     gdtr.base = bi.ds_base + (unsigned)gdt;
     say("GLOS-BOOT step=enter entry=%08lx", KERNEL_LINK + hdr.entry);
 
-    ret = pm_enter((unsigned)&gdtr, bi.pd_phys, buf_phys, KERNEL_LINK, (hdr.file_size + 3) >> 2,
+    ret = pm_enter((unsigned)&gdtr, bi.pd_phys, buf_phys, KERNEL_LINK + ((hdr.file_size + 3) & ~3UL), 0,
                    (bi.kernel_total - ((hdr.file_size + 3) & ~3UL)) >> 2, KERNEL_LINK + hdr.entry,
-                   bi.ds_base + (unsigned)&bi);
+                   bi.ds_base + (unsigned)&bi);     /* (the image is there already: only its bss to clear) */
     if (ret == 0x10000UL) {
         /* Running in the system VM (V86 mode) under the kernel. The image and
            the first page tables go back to DOS, and so does the rest of
@@ -660,10 +714,13 @@ static void read_cfg(const char *argv0, int shell_keys)
     size_t n = slash ? (size_t)(slash - argv0 + 1) : 0;
     int in_shell = 0, in_net = 0, in_display = 0, in_sound = 0;
     struct bi_profile *prof = NULL;
+    char sec[24], why[64];
+    const struct cfg_key *ck;
     FILE *f;
 
     memcpy(path, argv0, n);
     strcpy(path + n, "GLOS.CFG");
+    strncpy(bi.cfg_path, path, sizeof bi.cfg_path - 1);        /* (M9: the kernel keeps and writes it) */
     if (!(f = fopen(path, "r")))
         return;
     while (fgets(line, sizeof line, f)) {
@@ -671,6 +728,10 @@ static void read_cfg(const char *argv0, int shell_keys)
         if (*k == ';' || *k == '#' || !*k)
             continue;
         if (*k == '[') {
+            for (v = k + 1, n = 0; *v && *v != ']' && n < sizeof sec - 1; v++)
+                if (*v != ' ' || (n && sec[n - 1] != ' '))
+                    sec[n++] = *v;
+            sec[n] = 0;
             in_shell = shell_keys && !strnicmp(k, "[shell]", 7);
             in_net = !strnicmp(k, "[net]", 5);
             in_display = !strnicmp(k, "[display]", 9);
@@ -691,11 +752,17 @@ static void read_cfg(const char *argv0, int shell_keys)
         for (v++; *v == ' ' || *v == '\t'; v++) ;
         for (e = v + strlen(v); e > v && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' '); e--) ;
         *e = 0;
+        if (!(ck = cfg_find(sec, k)) || cfg_check(ck, v, why, sizeof why) != 0) {      /* (the schema's rules: M9) */
+            say("GLOS-WARN cfg-key section=%s key=%s%s%s", sec, k, ck ? " why=" : "", ck ? why : "");
+            continue;
+        }
         if (in_display) {                       /* mode = WIDTHxHEIGHTxBITS: the desktop's (M6); none: text mode */
             unsigned w, h, b;                   /* accel = on | off: a Matrox card's drawing engine (M7) */
                                                 /* gpu_watchdog = MS | off: how long the desktop waits for an app's
                                                    turn with the engine before ending it (M8; 500) */
-            if (!stricmp(k, "mode") && sscanf(v, "%ux%ux%u", &w, &h, &b) == 3 && w >= 320 && w <= 1600 && h >= 200
+            if (!stricmp(k, "mode") && !stricmp(v, "none")) {
+                bi.display_w = bi.display_h = bi.display_bpp = 0;
+            } else if (!stricmp(k, "mode") && sscanf(v, "%ux%ux%u", &w, &h, &b) == 3 && w >= 320 && w <= 1600 && h >= 200
                 && h <= 1200 && (b == 8 || b == 16 || b == 32)) {
                 bi.display_w = w;
                 bi.display_h = h;
@@ -736,7 +803,7 @@ static void read_cfg(const char *argv0, int shell_keys)
                                                              : prof->flags & ~BI_PROF_DIRECT;
             else if (!stricmp(k, "memory")) prof->memory_kb = strtoul(v, NULL, 10);
             else if (!stricmp(k, "env")) profile_env(prof, v);
-            else say("GLOS-WARN cfg-key program=%s key=%s", prof->name, k);
+            /* (the rest are the kernel's and the desktop's: M9, checked against the schema above) */
             continue;
         }
         if (!stricmp(k, "comspec")) opt_str(bi.comspec, sizeof bi.comspec, v);

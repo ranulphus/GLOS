@@ -67,6 +67,7 @@
 #include "session.h"
 #include "timer.h"
 #include "vm.h"
+#include "watch.h"
 
 static struct app *apps, *pending;
 static struct app *callq, *callq_tail;
@@ -268,6 +269,9 @@ static void app_thread_end(struct app *a)
     desk_app_gone(a);                           /* (its windows; none may point at it after this) */
     gpu_app_gone(a);                            /* (the engine, if it had it; its blocks of VRAM) */
     mixer_app_gone(a);                          /* (its streams) */
+    agent_app_gone(a);                          /* (its jobs, M9: those in its console with it) */
+    watch_app_gone(a);
+    desk_shell(a, 0);
     current->user = TU_NONE;
     current->name = "app-gone";
     kfree(a);
@@ -746,6 +750,32 @@ u32 app_ps(char *buf, u32 max)
                             a->thread->ticks, a->nirq[0]);
     irq_restore(f);
     return n < max ? n : max;
+}
+
+/* GLOS_FN_STAT's GLOS_STAT_APPS (M9): a struct glos_stat_app for each app. */
+u32 app_stat_list(void *out, u32 room)
+{
+    struct app *a;
+    const struct app *list[MAX_APPS];
+    u32 n = 0, k = 0, i, f = irq_save();
+    for (a = apps; a && k < MAX_APPS; a = a->next)
+        list[k++] = a;
+    irq_restore(f);
+    for (i = 0; i < k && n + sizeof(struct glos_stat_app) <= room; i++) {
+        struct glos_stat_app *s = (struct glos_stat_app *)((u8 *)out + n);
+        memset(s, 0, sizeof *s);
+        s->size = sizeof *s;
+        s->kind = 0;
+        s->id = list[i]->id;
+        s->busy_ms = (u32)(((unsigned long long)list[i]->thread->ticks * 125) >> 7);
+        s->mem_kb = list[i]->ctx ? list[i]->ctx->frames * 4 : 0;
+        s->windows = desk_windows(list[i]);
+        s->state = session_pauses() ? 1 : 0;
+        memcpy(s->name, list[i]->prog, sizeof list[i]->prog < sizeof s->name ? sizeof list[i]->prog : sizeof s->name);
+        s->name[sizeof s->name - 1] = 0;
+        n += sizeof *s;
+    }
+    return n;
 }
 
 u32 app_stat(char *buf, u32 max)

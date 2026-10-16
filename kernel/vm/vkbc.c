@@ -63,6 +63,8 @@ static u8 aux_on, aux_wheel, aux_rate[3], aux_arg, aux_buttons;        /* the mo
 static u8 desk_on;                              /* the desktop has the keyboard and the mouse */
 static u8 aux_port;                             /* the controller has an AUX port */
 static u8 desk_acks;                            /* the mouse's answers to the desktop's own commands, to drop */
+static u8 kbd_acks;                             /* ... and the keyboard's (the desktop's key repeat, M9) */
+static u8 typematic = 0x2C;                     /* [input] repeat_delay and repeat_rate as F3h's byte: 500 ms, 10.0 */
 
 enum { M_CTRL = 1, M_ALT = 2, M_LSHIFT = 4, M_RSHIFT = 8 };
 
@@ -184,6 +186,8 @@ static int hotkey(u8 b)
     case 0x53:
         if (!brk && (mods & M_CTRL) && (mods & M_ALT)) {
             vm_reset_req("cad");
+            if (desk_on)
+                desk_in(DESK_SYSKEY, 0, 0, 0);  /* the task list: the shell's (M9) */
             if (ext && qt != qh && q[(qt - 1) % QSIZE] == 0xE0)
                 qt--;                           /* the E0 before it */
             swallow = 0xD3;
@@ -210,6 +214,8 @@ static void drain(void)
         trace('k', b, s);
         if ((s & 0x20) && desk_acks && b == 0xFA) {
             desk_acks--;                        /* (the mouse's answer to the desktop's own command) */
+        } else if (!(s & 0x20) && kbd_acks && b == 0xFA) {
+            kbd_acks--;                         /* (the keyboard's, to the desktop's key repeat) */
         } else if (s & 0x20) {
             if (desk_on)
                 desk_in(DESK_AUX, b, aux_wheel, 0);
@@ -585,12 +591,39 @@ void vkbc_tick(void)
    goes into the queue. */
 /* The desktop takes the keyboard and the mouse (1), or gives them back (0:
    a session has the screen, or there is no desktop). Interrupts off. */
+/* The keyboard's repeat (8042 command F3h) while the desktop has it: [input] repeat_delay (ms) and
+   repeat_rate (a second) (M9). Given again whenever the desktop takes the keyboard back. */
+static void send_typematic(void)
+{
+    if (!desk_on)
+        return;
+    chip_data(0xF3);
+    chip_data(typematic);
+    kbd_acks += 2;
+}
+
+void vkbc_typematic(u32 delay_ms, u32 rate)
+{
+    static const u8 cps10[32] = { 255, 255, 240, 218, 200, 185, 171, 160, 150, 133, 120, 109, 100, 92, 86, 80,
+                                  75, 67, 60, 55, 50, 46, 43, 40, 37, 33, 30, 27, 25, 23, 21, 20 };
+    u32 i, best = 0, bd = 1000, want = rate * 10;
+    for (i = 0; i < 32; i++) {                  /* the nearest of the keyboard's rates (30.0 to 2.0 a second) */
+        u32 have = i == 0 ? 300 : i == 1 ? 267 : cps10[i], d = have > want ? have - want : want - have;
+        if (d < bd)
+            bd = d, best = i;
+    }
+    typematic = (u8)(((delay_ms >= 1000 ? 3 : delay_ms >= 750 ? 2 : delay_ms >= 500 ? 1 : 0) << 5) | best);
+    kprintf("GLOS-KBC typematic=%02x delay=%u rate=%u\n", typematic, delay_ms, rate);
+    send_typematic();
+}
+
 void vkbc_desk(int on)
 {
     if ((on != 0) == desk_on)
         return;
     if (on) {
         desk_on = 1;
+        send_typematic();
         if (aux_port && !aux_on) {              /* a mouse nobody has turned on: for the desktop */
             chip_cmd(0xA8);
             write_cmd_byte();
