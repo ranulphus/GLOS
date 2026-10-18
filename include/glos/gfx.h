@@ -68,13 +68,19 @@ struct gfx_glyph {
     signed char left;                   /* the bitmap's left edge from the pen */
 };
 
+struct gfx_range {                      /* (M10) more code points: first .. first + count - 1, from glyph[at] on */
+    unsigned short first, count, at;
+};
+
 struct gfx_font {
     const char *name;
     unsigned char height, ascent;       /* rows; those above the baseline */
-    unsigned short first, count;        /* the code points it has: first .. first + count - 1 */
+    unsigned short first, count;        /* the code points it has: first .. first + count - 1 ... */
     const struct gfx_glyph *glyph;
     const unsigned char *bits;
     unsigned short missing;             /* the glyph for the rest (an index) */
+    const struct gfx_range *more;       /* ... and these (M10: Greek, Cyrillic, box drawing ...), in order */
+    unsigned short nmore;
 };
 
 /* ---- gfx.c */
@@ -114,6 +120,23 @@ unsigned char gfx_pal_dither(unsigned rgb, int x, int y);       /* the cube's co
    (-1: to the NUL). The pen's x afterwards. */
 int gfx_text(struct gfx_surface *s, int x, int y, const struct gfx_font *f, const char *text, int n, unsigned rgb);
 int gfx_text_width(const struct gfx_font *f, const char *text, int n);
+
+/* Smoothed text (M10; the toolkit's, sdk/gui/smooth.c, from sdk/gui/fonts/SMOOTH.DAT: tools/mkfont.py --smooth). A
+   font's glyphs again, in the same order, as 4-bit coverage (rows of (width + 1) / 2 bytes, the high nibble
+   leftmost; 15 is all ink), blended into 16- and 32-bit surfaces in place of the 1-bit ones. The font's own
+   advances still move the pen, so smoothed text takes the same room. At 8 bits text stays 1-bit. */
+struct gfx_aa_glyph {
+    unsigned at;                        /* in bits[] */
+    unsigned char width;
+    signed char left;
+};
+struct gfx_aa {
+    const struct gfx_font *font;        /* the font it smooths: glyph[i] is font->glyph[i] */
+    const struct gfx_aa_glyph *glyph;
+    const unsigned char *bits;
+    const struct gfx_aa *next;
+};
+void gfx_smooth(const struct gfx_aa *list);     /* these fonts smoothed from now on (NULL: none; the kernel's) */
 
 /* ---- region.c: areas as rectangles that don't overlap */
 #define GFX_REGION_MAX 48

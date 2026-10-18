@@ -598,6 +598,12 @@ int glos_random(void *buf, unsigned n)
         fclose(f);
     return ok ? 0 : -1;
 }
+int cp_active(void)
+{
+    const char *e = getenv("GLOSCP");
+    return e && atoi(e) > 0 ? atoi(e) : 437;
+}
+
 int glos_time(unsigned long *utc, int *off)
 {
     if (utc)
@@ -1072,11 +1078,25 @@ int main(int argc, char **argv)
     H.next_id = 0;
     H.clock = 1000;
     H.px = 320, H.py = 240;
-    while (fgets(line, sizeof line, H.script)) {    /* the first command: run ARGS */
+    while (fgets(line, sizeof line, H.script)) {    /* the first command: run ARGS (config lines before it) */
         H.line++;
         p = line;
         if (!word(&p, buf, sizeof buf) || buf[0] == '#')
             continue;
+        if (!strcmp(buf, "config")) {           /* config SECTION KEY VALUE: a setting for this script (M10) */
+            char sec[48], key[48], why[160];
+            cfg_load();
+            if (!word(&p, sec, sizeof sec) || !word(&p, key, sizeof key))
+                fail("config SECTION KEY VALUE");
+            if (!strncmp(sec, "program:", 8))   /* (glos config's spelling of [program NAME.EXT]) */
+                sec[7] = ' ';
+            while (*p == ' ')
+                p++;
+            p[strcspn(p, "\r\n")] = 0;
+            if (glos_config_set(sec, key, p, why, sizeof why) < 0)
+                fail("config: %s", why);
+            continue;
+        }
         if (strcmp(buf, "run"))
             fail("the script begins with run");
         while (n < 31 && word(&p, buf, sizeof buf))
@@ -1086,6 +1106,19 @@ int main(int argc, char **argv)
     args[n] = NULL;
     if (!n)
         fail("no program");
+    {                                           /* (its profile's env, as GLOS gives it at the EXEC: M10's GLOSCP) */
+        char sec[64], env[600], *e, *nl;
+        snprintf(sec, sizeof sec, "program %s", args[0]);
+        if (glos_config_get(sec, "env", env, sizeof env) > 0)
+            for (e = env; *e; e = nl ? nl + 1 : e + strlen(e)) {
+                if ((nl = strchr(e, '\n')) != NULL)
+                    *nl = 0;
+                if (strchr(e, '='))
+                    putenv(strdup(e));
+                if (!nl)
+                    break;
+            }
+    }
     return app_main(n, args);
 }
 #endif

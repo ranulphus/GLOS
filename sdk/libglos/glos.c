@@ -3,9 +3,12 @@
  * another DPMI host) every function fails or does nothing, so a program can
  * call glos_init() and carry on as a plain DOS program when it returns -1. */
 #include <dpmi.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/nearptr.h>
 
 #include <glos/api.h>
+#include <glos/cp.h>
 #include <glos/gfx.h>
 
 static struct {
@@ -397,6 +400,21 @@ int glos_net_state(unsigned id, unsigned *avail, unsigned *state, unsigned *room
     if (room)
         *room = r[2];
     return 0;
+}
+
+/* The code page DOS has (M10 step G; glos/cp.h): GLOSCP in the environment (a profile's env), else INT 21h 6601h's
+   (with COUNTRY.SYS and NLSFUNC; plain FreeDOS says 437), else 437. */
+int cp_active(void)
+{
+    const char *e = getenv("GLOSCP");
+    __dpmi_regs r;
+    if (e && atoi(e) > 0)
+        return atoi(e);
+    memset(&r, 0, sizeof r);
+    r.x.ax = 0x6601;
+    if (__dpmi_int(0x21, &r) == 0 && !(r.x.flags & 1) && r.x.bx)
+        return r.x.bx;
+    return 437;
 }
 
 int glos_time(unsigned long *utc, int *offset)

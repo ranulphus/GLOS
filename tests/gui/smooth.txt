@@ -1,0 +1,9 @@
+# Font smoothing (M10 step G; [display] font_smoothing on, SMOOTH.DAT beside the program): GUITEST's text page with
+# the fonts' coverage blended at 16 and 32 bits, the pens where the 1-bit fonts put them; at 8 bits, crisp.
+config display font_smoothing on
+run GUITEST.EXE text
+wait "GUITEST Text"
+shot smooth "GUITEST Text"
+key alt+f4
+gone "GUITEST Text"
+expect GUI end

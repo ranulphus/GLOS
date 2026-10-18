@@ -1,0 +1,13 @@
+# DOS file names through code page 866 (M10 step G; GUITEST names, GLOSCP from GUITEST's profile): files named
+# in Cyrillic, shown by the file dialog as text; the one chosen comes back as DOS's bytes.
+config program:GUITEST.EXE env GLOSCP=866
+run GUITEST.EXE names C:\GUI\CP866
+wait "Open"
+shot names "Open"
+key shift+tab down down
+shot chosen "Open"
+key enter
+gone "Open"
+expect GUI page 866
+expect GUI chose C:\GUI\CP866\\x90\x8E\x92.TXT
+expect GUI end

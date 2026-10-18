@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <glos/cp.h>
 #include <glos/gui.h>
 
 #include "term.h"
@@ -37,7 +38,8 @@
 #define COLS_MAX 200
 
 struct line {
-    unsigned char ch[COLS_MAX], at[COLS_MAX];
+    unsigned short ch[COLS_MAX];        /* Unicode (M10: DOS's output through its code page) */
+    unsigned char at[COLS_MAX];
     int n;
 };
 
@@ -50,6 +52,7 @@ static int cols = 80, rows = 25, cw, ch;
 static int back;                        /* lines scrolled back from the end (0: the end shows) */
 static int sel_on, sel_a_line, sel_a_col, sel_b_line, sel_b_col, dragging;
 static unsigned char attr_now;
+static int page = 437;                  /* DOS's code page: what a program's bytes and the typed line's are */
 static struct gui_sb sb;
 
 /* the line being typed (the shell's) */
@@ -63,6 +66,21 @@ static const unsigned colours[] = { GUI_LINE, GUI_DARK, 0x993333, GUI_LINE };   
                                            error's red the only other) */
 
 static struct line *line_at(int k) { return &ring[(top + k) % LINES]; }
+
+/* A character as UTF-8 into u: its length. */
+static int utf8_of(unsigned b, char *u)
+{
+    if (b < 0x80) {
+        u[0] = (char)b;
+        return 1;
+    }
+    if (b < 0x800) {
+        u[0] = (char)(0xC0 | (b >> 6)), u[1] = (char)(0x80 | (b & 0x3F));
+        return 2;
+    }
+    u[0] = (char)(0xE0 | (b >> 12)), u[1] = (char)(0x80 | ((b >> 6) & 0x3F)), u[2] = (char)(0x80 | (b & 0x3F));
+    return 3;
+}
 
 static void new_line(void)
 {
@@ -107,7 +125,7 @@ static void damage_from(int line)
 
 void term_attr(int a) { attr_now = (unsigned char)a; }
 
-void term_put(unsigned char c)
+void term_put(unsigned c)
 {
     struct line *l;
     if (!count)
@@ -160,19 +178,34 @@ void term_put(unsigned char c)
     cur_col++;
 }
 
-void term_write(const char *s, int n)
+/* UTF-8 (GLOS's own text, an ssh session's), or with `dos` a DOS program's bytes in its code page. */
+static void write_text(const char *s, int n, int dos)
 {
-    int i, from = count ? count - 1 : 0, was_back = back;
+    int from = count ? count - 1 : 0, was_back = back;
+    const char *end;
     if (n < 0)
         n = (int)strlen(s);
-    for (i = 0; i < n; i++)
-        term_put((unsigned char)s[i]);
+    for (end = s + n; s < end;) {
+        if (dos) {
+            term_put(cp_char(page, (unsigned char)*s++));
+        } else {
+            char one[5] = { 0 };                /* (a character cut by the buffer's end: its bytes as they are) */
+            int k = end - s < 4 ? (int)(end - s) : 4;
+            const char *p = one;
+            memcpy(one, s, (size_t)k);
+            term_put(cp_utf8_next(&p));
+            s += p - one;
+        }
+    }
     back = 0;
     if (was_back)
         damage_all();
     else
         damage_from(from);
 }
+
+void term_write(const char *s, int n) { write_text(s, n, 0); }
+void term_write_dos(const char *s, int n) { write_text(s, n, 1); }
 
 void term_print(const char *s) { term_write(s, -1); }
 
@@ -201,7 +234,7 @@ static void input_show(void)
     in_start_col = cur_col;
     attr_now = T_INPUT;
     for (i = 0; i < in_len && !in_hidden; i++)     /* (a password: nothing shown, as ssh shows it) */
-        term_put((unsigned char)input[i]);
+        term_put(cp_char(page, (unsigned char)input[i]));     /* (the line's bytes are DOS's, in its code page) */
     attr_now = 0;
     in_shown = 1;
     back = 0;
@@ -390,15 +423,12 @@ static void grid_draw(struct gui_widget *w, struct gfx_surface *s)
             int chosen = in_sel(first + k, c);
             char u[3];
             int un;
-            unsigned char b = l->ch[c];
+            unsigned b = l->ch[c];
             if (chosen)
                 gfx_fill(s, x0 + c * cw, y, cw, ch, GUI_DARK);
             if (b == ' ')
                 continue;
-            if (b < 0x80)
-                u[0] = (char)b, un = 1;
-            else
-                u[0] = (char)(0xC0 | (b >> 6)), u[1] = (char)(0x80 | (b & 0x3F)), un = 2;
+            un = utf8_of(b, u);
             gfx_text(s, x0 + c * cw, y, l->at[c] == T_PROMPT ? gui_mono : gui_mono, u, un,
                      chosen ? GUI_FIELD : colours[l->at[c] < 4 ? l->at[c] : 0]);
         }
@@ -483,9 +513,12 @@ static void input_key(struct gui_ev *e)
         return;
     }
     }
-    if (c >= 0x20 && c < 0x100 && c != 0x7F && in_len < (int)sizeof input - 1) {
+    if (c >= 0x20 && c != 0x7F && in_len < (int)sizeof input - 1) {
+        int b = cp_byte(page, c);               /* (as DOS will take it: the code page's byte; one it hasn't got: not) */
+        if (b < 0)
+            return;
         memmove(input + in_pos + 1, input + in_pos, (size_t)(in_len - in_pos + 1));
-        input[in_pos++] = (char)c;
+        input[in_pos++] = (char)b;
         in_len++;
         input_show();
     }
@@ -499,7 +532,10 @@ static void job_key(struct gui_ev *e)
         shell_break();
         return;
     }
-    k = (unsigned short)(((e->key & 0xFF) << 8) | (e->ch & 0xFF));
+    {
+        int b = e->ch ? cp_byte(page, e->ch) : 0;      /* (the character as the program's code page has it) */
+        k = (unsigned short)(((e->key & 0xFF) << 8) | (b > 0 ? (unsigned)b : 0));
+    }
     if (e->key >= 0x100 && !e->ch)
         k = (unsigned short)(((e->key & 0xFF) << 8) | 0xE0);   /* (the grey keys: E0h, as the BIOS's 10h gives) */
     if (e->key == 0x14B || e->key == 0x14D || e->key == 0x148 || e->key == 0x150 || e->key == 0x147
@@ -565,9 +601,12 @@ void term_copy(void)
     for (line = 0; line < count && n < room - 3; line++) {
         const struct line *l = line_at(line);
         int c, any = 0;
-        for (c = 0; c < cols && n < room - 3; c++)
+        for (c = 0; c < cols && n < room - 6; c++)
             if (in_sel(line, c)) {
-                t[n++] = c < l->n ? (char)l->ch[c] : ' ';
+                if (c < l->n)
+                    n += utf8_of(l->ch[c], t + n);
+                else
+                    t[n++] = ' ';
                 any = 1;
             }
         if (any && in_sel(line + 1, 0)) {
@@ -741,6 +780,7 @@ int main(int argc, char **argv)
         argv++, argc--;
     }
     ssh_log_screens(log);
+    page = cp_active();
     ring = calloc(LINES, sizeof *ring);
     if (!ring)
         return 1;
@@ -778,7 +818,11 @@ int main(int argc, char **argv)
     gui_run();
     for (i = 0; log && i < count; i++) {
         const struct line *l = line_at(i);
-        printf("TERM| %.*s\n", l->n, (const char *)l->ch);
+        char u[COLS_MAX * 3 + 1];
+        int c, n = 0;
+        for (c = 0; c < l->n; c++)
+            n += utf8_of(l->ch[c], u + n);
+        printf("TERM| %.*s\n", n, u);
     }
     printf("TERM end\n");
     return gui_exit_code();

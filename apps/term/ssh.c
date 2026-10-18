@@ -51,6 +51,7 @@ static struct {
     uint8_t sk[64], pk[32];
     int have_key, tries;
     int status;
+    int accepted;                       /* (the channel's requests taken when it closed) */
     char sig[32];
     unsigned changed_at;                /* (the log's screen dumps) */
     int dump_due;
@@ -202,8 +203,10 @@ static void on_exit_status(struct sshc_chan *ch, int status, const char *sig)
 
 static void on_closed(struct sshc_chan *ch)
 {
-    if (ch == s.ch)
+    if (ch == s.ch) {
+        s.accepted = sshc_chan_ok(ch) == 1;     /* (a quick command may open, run and close between two polls) */
         s.ch = 0;
+    }
 }
 
 static const struct sshc_ops ops = { net_send, NULL, on_hostkey, on_banner, on_data, NULL, on_exit_status, on_closed };
@@ -273,6 +276,7 @@ static void open_channel(void)
                                  NULL);
     s.stage = S_OPENING;
     s.status = -1;
+    s.accepted = 0;
     s.sig[0] = 0;
     if (!s.ch) {
         err("ssh: no channel\r\n");
@@ -328,7 +332,10 @@ static void step(void)
         }
         break;
     case S_OPENING:
-        if (!s.ch || sshc_chan_ok(s.ch) < 0) {
+        if (!s.ch && s.accepted && !s.sftp) {   /* (opened, run and closed already: its end, as S_RUNNING's) */
+            s.stage = S_RUNNING;
+            step();
+        } else if (!s.ch || sshc_chan_ok(s.ch) < 0) {
             term_printf("ssh: %s: %s refused\r\n", s.host, s.sftp ? "the sftp subsystem" : "the session");
             finish(255);
         } else if (sshc_chan_ok(s.ch) == 1) {

@@ -278,17 +278,102 @@ static void colours(void)
 
 /* ---- text */
 
+/* A code point's glyph by looking at every range (the model of font.c's halving): its index, or the box's. */
+static u32 glyph_of(const struct gfx_font *f, u32 cp)
+{
+    u32 i;
+    if (cp >= f->first && cp - f->first < f->count)
+        return cp - f->first;
+    for (i = 0; i < f->nmore; i++)
+        if (cp >= f->more[i].first && cp - f->more[i].first < f->more[i].count)
+            return f->more[i].at + cp - f->more[i].first;
+    return f->missing;
+}
+
 static void text(void)
 {
     const struct gfx_font *f = &gfx_font_ui;
-    CHECK(f->height >= 12 && f->ascent < f->height && f->first == 0x20 && f->count == 224);
+    static const u32 cps[] = { 0x141, 0x17F, 0x391, 0x3C9, 0x401, 0x44F, 0x2014, 0x2026, 0x20AC, 0x2122, 0x2193 };
+    u32 i;
+    CHECK(f->height >= 12 && f->ascent < f->height && f->first == 0x20 && f->count == 0x180 - 0x20);
+    CHECK(f->nmore > 0 && f->missing == f->more[f->nmore - 1].at + f->more[f->nmore - 1].count);
+    for (i = 1; i < f->nmore; i++)              /* (in order, apart: font.c halves them) */
+        CHECK(f->more[i].first >= f->more[i - 1].first + f->more[i - 1].count);
     CHECK(gfx_text_width(f, "", -1) == 0 && gfx_text_width(f, "abc", 2) == gfx_text_width(f, "ab", -1));
     CHECK(gfx_text_width(f, "\xC3\xA9", -1) == f->glyph[0xE9 - 0x20].advance);         /* U+00E9, two bytes */
     CHECK(gfx_text_width(f, "\xE9", -1) == f->glyph[0xE9 - 0x20].advance);             /* the Latin-1 byte alone */
-    CHECK(gfx_text_width(f, "\xE2\x82\xAC", -1) == f->glyph[f->missing].advance);     /* U+20AC: not in it, the box */
+    CHECK(gfx_text_width(f, "\xE4\xB8\x80", -1) == f->glyph[f->missing].advance);     /* U+4E00: not in it, the box */
     CHECK(gfx_text_width(f, "\xC3", -1) == f->glyph[0xC3 - 0x20].advance);             /* cut short: the byte itself */
+    for (i = 0; i < sizeof cps / sizeof cps[0]; i++) {  /* (M10: Latin Extended-A, Greek, Cyrillic, signs) */
+        char u[4];
+        u32 n = cps[i] < 0x800 ? 2 : 3;
+        if (n == 2)
+            u[0] = (char)(0xC0 | cps[i] >> 6), u[1] = (char)(0x80 | (cps[i] & 0x3F));
+        else
+            u[0] = (char)(0xE0 | cps[i] >> 12), u[1] = (char)(0x80 | ((cps[i] >> 6) & 0x3F)),
+            u[2] = (char)(0x80 | (cps[i] & 0x3F));
+        CHECK(glyph_of(f, cps[i]) != f->missing);
+        CHECK(gfx_text_width(f, u, (s32)n) == f->glyph[glyph_of(f, cps[i])].advance);
+    }
+    CHECK(glyph_of(&gfx_font_mono, 0x2500) != gfx_font_mono.missing && glyph_of(f, 0x2500) == f->missing);
     CHECK(gfx_text_width(&gfx_font_mono, "iiii", -1) == gfx_text_width(&gfx_font_mono, "MMMM", -1));
     CHECK(gfx_text_width(&gfx_font_bold, "GLOS", -1) > gfx_text_width(f, "GLOS", -1));
+}
+
+/* Smoothed text (M10): a made-up coverage for the ui font, every glyph 2 pixels wide, a pixel of each level 0-15
+   on rows 0-7 (row r: levels 2r, 2r + 1). Blended at 16 and 32 bits, as fg over what is there; 1-bit at 8; the
+   pens move as the 1-bit font's advances say; and none of it once smoothing is off again. */
+static void smooth(void)
+{
+    static u8 cov[64];
+    static struct gfx_aa_glyph g[2000];
+    static u32 p32[16 * 40];
+    static u16 p16[16 * 40];
+    static u8 p8[16 * 40];
+    const struct gfx_font *f = &gfx_font_ui;
+    struct gfx_aa aa = { 0, g, cov, 0 };
+    struct gfx_surface sf32, sf16, sf8;
+    u32 i, r, c;
+    s32 pen;
+    CHECK(f->missing < 2000 && f->height * 1u <= sizeof cov);
+    for (r = 0; r < 8; r++)
+        cov[r] = (u8)((2 * r) << 4 | (2 * r + 1));
+    for (i = 0; i <= f->missing; i++)
+        g[i].at = 0, g[i].width = 2, g[i].left = 1;
+    aa.font = f;
+    gfx_init(&sf32, p32, 40, 16, 40 * 4, &gfx_fmt888);
+    gfx_init(&sf16, p16, 40, 16, 40 * 2, &gfx_fmt565);
+    gfx_init(&sf8, p8, 40, 16, 40, &gfx_fmt8);
+    gfx_fill(&sf32, 0, 0, 40, 16, 0xFFFFFF);
+    gfx_fill(&sf16, 0, 0, 40, 16, 0xFFFFFF);
+    gfx_fill(&sf8, 0, 0, 40, 16, 0xFFFFFF);
+    gfx_smooth(&aa);
+    pen = gfx_text(&sf32, 3, 2, f, "A", -1, 0x204060);
+    CHECK(pen == 3 + f->glyph['A' - 0x20].advance);
+    for (r = 0; r < 8; r++)
+        for (c = 0; c < 2; c++) {
+            u32 v = 2 * r + c, want = 0, k;
+            for (k = 0; k < 24; k += 8)
+                want |= ((0xFFu * (15 - v) + ((0x204060u >> k) & 0xFF) * v + 7) / 15) << k;
+            CHECK(gfx_get(&sf32, (s32)(4 + c), (s32)(2 + r)) == want);
+        }
+    CHECK(gfx_get(&sf32, 3, 2) == 0xFFFFFF && gfx_get(&sf32, 6, 5) == 0xFFFFFF);    /* (nothing outside it) */
+    gfx_text(&sf16, 3, 2, f, "A", -1, 0x000000);
+    CHECK(gfx_rgb(&gfx_fmt565, gfx_get(&sf16, 5, 9)) == 0 && gfx_get(&sf16, 4, 2) == 0xFFFF);   /* 15: ink; 0: none */
+    gfx_text(&sf8, 3, 2, f, "A", -1, 0x000000);                  /* (8 bits: the 1-bit glyph, as before) */
+    {
+        static u8 want8[16 * 40];
+        struct gfx_surface w8;
+        gfx_init(&w8, want8, 40, 16, 40, &gfx_fmt8);
+        gfx_fill(&w8, 0, 0, 40, 16, 0xFFFFFF);
+        gfx_smooth(0);
+        gfx_text(&w8, 3, 2, f, "A", -1, 0x000000);
+        CHECK(!memcmp(p8, want8, sizeof p8));
+    }
+    gfx_fill(&sf32, 0, 0, 40, 16, 0xFFFFFF);
+    gfx_text(&sf32, 3, 2, f, "A", -1, 0x000000);                 /* (off again: 1-bit, no grey) */
+    for (i = 0; i < 40 * 16; i++)
+        CHECK((p32[i] & 0xFFFFFF) == 0 || (p32[i] & 0xFFFFFF) == 0xFFFFFF);
 }
 
 /* ---- regions, against a bitmap */
@@ -436,6 +521,7 @@ int main(void)
     printf("gfx engine: %lu operations done\n", qdev_done);
     colours();
     text();
+    smooth();
     regions();
     card(&gfx_fmt8, "8", 640, 480);
     card(&gfx_fmt565, "16", 640, 480);

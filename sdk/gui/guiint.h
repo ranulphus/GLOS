@@ -17,6 +17,7 @@
 /* Classes the toolkit's files share. */
 extern const struct gui_class gui_box_class, gui_label_class, gui_button_class, gui_menubar_class, gui_status_class,
     gui_field_class, gui_tabs_class;
+void gui_smooth_start(const char *argv0);       /* (smooth.c) [display] font_smoothing: SMOOTH.DAT's coverage */
 void gui_field_changed(struct gui_widget *w);          /* its text was set: the caret at its end */
 void gui_tabs_step(struct gui_widget *tabs, int by);
 

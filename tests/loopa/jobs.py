@@ -3484,7 +3484,7 @@ class GuiDriver:
 
     def __init__(self, agent, out, bits, dac6, appdir="C:\\TEST\\"):
         self.agent, self.out, self.bits, self.dac6, self.appdir = agent, out, bits, dac6, appdir
-        self.bad, self.notes, self.procs, self.expects = [], [], [], []
+        self.bad, self.notes, self.procs, self.expects, self.unset = [], [], [], [], []
 
     def desk(self):
         text = self.agent.ssh("glos desk")[1].replace("\r", "")
@@ -3579,7 +3579,10 @@ class GuiDriver:
             if not words or words[0].startswith("#"):
                 continue
             cmd, args = words[0], words[1:]
-            if cmd == "run":
+            if cmd == "config":                 # (before run) a setting for this script, unset when it is done
+                self.agent.ssh("glos config set %s %s %s" % (args[0], args[1], " ".join(args[2:])))
+                self.unset.append((args[0], args[1]))
+            elif cmd == "run":
                 prog = self.appdir + args[0] + "".join(" " + a for a in args[1:])
                 self.procs.append(subprocess.Popen(self.agent.opts + ["glos@127.0.0.1", prog],
                                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE))
@@ -3653,7 +3656,7 @@ class GuiDriver:
                 self.bad.append("script-%d" % n)
 
     def finish(self, limit=120):
-        """The apps' ends and their output: each expected line there."""
+        """The apps' ends and their output: each expected line there; the script's settings unset."""
         text = ""
         for p in self.procs:
             try:
@@ -3663,6 +3666,9 @@ class GuiDriver:
                 o, _ = p.communicate()
                 self.bad.append("app-end")
             text += o.decode("latin-1").replace("\r", "")
+        for sec, key in self.unset:
+            self.agent.ssh("glos config unset %s %s" % (sec, key))
+        self.unset = []
         lines = text.split("\n")
         for e in self.expects:
             if e not in lines:
@@ -3688,11 +3694,13 @@ env = GLOSCFG=one
 # (section, key, a value other than the default, how to see it in effect now: None, or a test of (agent, log))
 CONFIG_SETS = [
     ("display", "mode", "640x480x16", "display"), ("display", "accel", "off", None),
-    ("display", "gpu_watchdog", "750", "GLOS-GPU watchdog-limit ms=750"),
+    ("display", "gpu_watchdog", "750", "GLOS-GPU watchdog-limit ms=750"), ("display", "font_smoothing", "on", None),
     ("input", "repeat_delay", "750", "GLOS-KBC typematic=4"), ("input", "repeat_rate", "20", "GLOS-KBC typematic=44"),
     ("input", "pointer_speed", "2", "pointer"), ("input", "double_click", "400", None),
     ("sound", "rate", "44100", "GLOS-AUDIO rate=44100"), ("sound", "mixer", "off", "GLOS-AUDIO mixer off"),
     ("sound", "blaster", "A220 I5 D1 H5 T6", None), ("net", "hostname", "cfgtest", None),
+    ("time", "sntp", "off", None), ("time", "server", "10.0.2.2:1123", None),
+    ("time", "zone", "GMT0BST,M3.5.0/1,M10.5.0", None), ("time", "interval", "12", None), ("vnc", "enable", "on", None),
     ("desktop", "start", "NOTEPAD.EXE", None), ("shell", "comspec", "C:\\COMMAND.COM", None),
     ("shell", "autoexec", "C:\\AUTOEXEC.BAT", None), ("shell", "console", "C:\\KIOSK.BAT", None),
     ("shell", "envsize", "2048", None), ("shell", "options", "/NOVME", None),
@@ -5284,7 +5292,7 @@ def gui_case(profile, vcard, card, bits, scripts=None, files=None, tag_prefix="g
     GUITESTs copying and pasting between them through the clipboard, and glos clip."""
     import time
     tag = "%s-%s-%d" % (profile, vcard, bits)
-    files = files or ["build/dj/GUITEST.EXE=/TEST/GUITEST.EXE"]
+    files = (files or ["build/dj/GUITEST.EXE=/TEST/GUITEST.EXE"]) + ["sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT"]
     extra = []
     for f in files:
         extra += ["--file", f]

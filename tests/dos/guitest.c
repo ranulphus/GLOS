@@ -7,12 +7,18 @@
  *   GUITEST dialogs     a window with buttons that open each dialog
  *   GUITEST clip TEXT   a window with a field; Ctrl+C there copies, and the
  *                       field shows what Ctrl+V pasted
+ *   GUITEST text        "GUITEST Text": UTF-8 in each font, and code page
+ *                       437's drawing characters (M10 step G)
+ *   GUITEST names DIR   files in DIR named in DOS's code page (GLOSCP), then
+ *                       the file dialog there: the name chosen, as DOS's
+ *                       bytes (M10 step G)
  *
  * What happens is written to stdout too ("GUI ..." lines), for the suite. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <glos/cp.h>
 #include <glos/gui.h>
 
 static struct gui_window *win;
@@ -270,6 +276,62 @@ static void clip(const char *text)
     gui_show(win, 1);
 }
 
+static void text(void)
+{
+    static const char *const lines[] = {        /* (UTF-8) */
+        "Łódź, Žižkov, Œuvre, Ğ ş ı — “quotes” … € 5",
+        "Ελληνικά: Καλημέρα κόσμε, ΑΒΓΔ αβγδ ω",
+        "Кириллица: Привет, мир! ЁЖЯ ёжя",
+        "№ 5, ™, ← ↑ → ↓, ‰, † ‡ •",
+    };
+    const struct gfx_font *fonts[3] = { gui_font, gui_bold, gui_mono };
+    struct gui_widget *box, *l;
+    char bytes[49], drawing[200];
+    int f, i;
+    win = gui_window("GUITEST Text", 0, 0, 0);
+    box = gui_vbox(win->root, -1, -1);
+    for (f = 0; f < 3; f++)
+        for (i = 0; i < (int)(sizeof lines / sizeof lines[0]); i++) {
+            l = gui_label(box, lines[i]);
+            gui_label_style(l, fonts[f], 0, -1);
+        }
+    for (i = 0; i < 48; i++)                    /* (B0h-DFh: shades, lines and blocks, as DOS programs draw) */
+        bytes[i] = (char)(0xB0 + i);
+    bytes[48] = 0;
+    cp_to_utf8(437, bytes, drawing, sizeof drawing);
+    gui_label_style(gui_label(box, drawing), gui_mono, 0, -1);
+    gui_show(win, 1);
+}
+
+/* DOS names in the page DOS has: what M10's suite makes (letters the 437 upper-casing leaves alone). */
+static void names(const char *dir)
+{
+    static const char *const n850[] = { "ÅRHUS.TXT", "ÉTÉ.TXT", "NIÑO.TXT", "ØL.TXT", 0 };
+    static const char *const n866[] = { "ПОРТ.TXT", "РОТ.TXT", "ЮЯ.TXT", 0 };
+    static const char *const n437[] = { "PLAIN.TXT", 0 };
+    const char *const *list = cp_active() == 850 ? n850 : cp_active() == 866 ? n866 : n437;
+    char path[260], dos[64], chosen[260], line[400];
+    int i, o = 0;
+    void *f;
+    gui_mkdir(dir);
+    for (i = 0; list[i]; i++) {
+        gui_text_dos(list[i], dos, sizeof dos);
+        gui_path_join(path, sizeof path, dir, dos);
+        if ((f = gui_fopen(path, "wb")) != NULL)
+            fclose(f);
+    }
+    printf("GUI page %d\n", cp_active());
+    snprintf(chosen, sizeof chosen, "%s", dir);
+    if (!gui_file_dialog(NULL, "Open", 0, chosen, sizeof chosen)) {
+        printf("GUI chose nothing\n");
+        return;
+    }
+    for (i = 0; chosen[i] && o < (int)sizeof line - 5; i++)  /* (DOS's bytes: those above 7Fh as \xNN) */
+        o += snprintf(line + o, sizeof line - (size_t)o, (unsigned char)chosen[i] >= 0x80 ? "\\x%02X" : "%c",
+                      (unsigned char)chosen[i]);
+    printf("GUI chose %s\n", line);
+}
+
 int main(int argc, char **argv)
 {
     const char *what = argc > 1 ? argv[1] : "gallery";
@@ -282,7 +344,13 @@ int main(int argc, char **argv)
         dialogs();
     else if (!strcmp(what, "clip"))
         clip(argc > 2 ? argv[2] : "");
-    else
+    else if (!strcmp(what, "text"))
+        text();
+    else if (!strcmp(what, "names")) {
+        names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
+        printf("GUI end\n");
+        return 0;
+    } else
         gallery();
     gui_run();
     printf("GUI end\n");

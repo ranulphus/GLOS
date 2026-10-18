@@ -20,6 +20,8 @@ const struct cfg_key cfg_schema[] = {
       "A Matrox card's engine draws the desktop (off: the processor does)" },
     { "display", "gpu_watchdog", CFG_NUMBER, CFG_NOW, 50, 60000, "off", "500", "Engine &watchdog (ms)",
       "How long the desktop waits for an app's turn with the engine before ending the app" },
+    { "display", "font_smoothing", CFG_CHOICE, CFG_PROGRAM, 0, 0, "on|off", "off", "Smooth &text",
+      "Programs draw their text smoothed at 16 and 32 bits (the desktop's own stays crisp)" },
     /* [input] (M9) */
     { "input", "repeat_delay", CFG_CHOICE, CFG_NOW, 0, 0, "250|500|750|1000", "500", "Repeat &delay (ms)",
       "How long a key is held before it repeats" },

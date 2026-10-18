@@ -177,7 +177,7 @@ static void size_text(char *out, size_t room, const struct gui_dirent *e)
 static void fd_fill(struct fdlg *d)
 {
     int i;
-    char where[300];
+    char where[400], dir[300];
     free(d->ents);
     d->ents = NULL;
     d->n = gui_dir_read(d->dir, &d->ents);
@@ -192,11 +192,11 @@ static void fd_fill(struct fdlg *d)
         char sz[24];
         const char *cells[2];
         size_text(sz, sizeof sz, &d->ents[i]);
-        cells[0] = d->ents[i].name;
+        cells[0] = d->ents[i].text;
         cells[1] = sz;
         gui_list_add(d->list, cells, NULL, &d->ents[i]);
     }
-    snprintf(where, sizeof where, "Folder: %s", d->dir);
+    snprintf(where, sizeof where, "Folder: %s", gui_dos_text(d->dir, dir, sizeof dir));
     free(d->where->text);
     d->where->text = strdup(where);
     gui_damage(d->where);
@@ -228,12 +228,18 @@ static void fd_done(struct fdlg *d, const char *path)
     gui_end_modal(d->w, GUI_OK);
 }
 
-/* A name typed (or a row chosen): a folder to go into, a path to go to, or the file. */
-static void fd_take(struct fdlg *d, const char *typed)
+/* A name typed (or a row chosen; text, which DOS has as bytes in its code page): a folder to go into, a path to
+   go to, or the file. */
+static void fd_take(struct fdlg *d, const char *text)
 {
-    char path[300];
-    if (!typed[0])
+    char path[300], typed[260];
+    if (!text[0])
         return;
+    if (gui_text_dos(text, typed, sizeof typed) != 0) {
+        gui_message(d->w, d->save ? "Save" : "Open", "DOS's code page hasn't got all of the name's letters.",
+                    GUI_MB_OK);
+        return;
+    }
     if (!strcmp(typed, "..")) {
         strcpy(path, d->dir);
         gui_path_up(path);
@@ -359,8 +365,8 @@ int gui_file_dialog(struct gui_window *owner, const char *title, int save, char 
         char start[260];
         snprintf(start, sizeof start, "%s", path && path[0] ? path : "C:\\");
         if (!gui_is_dir(start)) {
-            const char *nm = gui_path_name(start);
-            gui_set_text(d.name, nm);
+            char nm[128];
+            gui_set_text(d.name, gui_dos_text(gui_path_name(start), nm, sizeof nm));
             gui_path_up(start);
         }
         if (!gui_is_dir(start))

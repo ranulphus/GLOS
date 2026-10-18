@@ -30,11 +30,11 @@ static unsigned dblclick = GUI_DBLCLICK;       /* [input] double_click (M9) */
 int gui_init(int argc, char **argv)
 {
     char v[16];
-    (void)argc, (void)argv;
     if (glos_init() != 0)
         return -1;
     if (glos_config_get("input", "double_click", v, sizeof v) >= 0 && atoi(v) >= 200 && atoi(v) <= 1000)
         dblclick = (unsigned)atoi(v);
+    gui_smooth_start(argc > 0 ? argv[0] : NULL);
     return 0;
 }
 

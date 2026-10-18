@@ -238,3 +238,38 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
     - `glos rec` lost a frame when a `glos shot` held the capture; now the frame stays owed until the capture
       is free.
     - Keys were lost when vncdotool closed straight after sending them; the shared queue fixed that.
+- **Step G done** (2026-10-18): other scripts, DOS's code pages, smoothed text. As built: docs/gui.md §1.10.
+  - The fonts have Latin Extended-A, Greek, Cyrillic, the general punctuation, €, №, ™ and arrows. The
+    monospaced font also has code page 437's drawing characters. `tools/mkfont.py --ranges` makes the glyph table
+    sparse (`struct gfx_range`).
+  - Code pages 437, 850, 852, 866 and 737 (`glos/cp.h`; tables from Python's codecs by `tools/mkcp.py`). The
+    active page is GLOSCP, else INT 21h 6601h's, else 437. DOS's names are shown and typed through it:
+    - the file manager and the file dialog (`gui_dirent.text`, `gui_dos_text`, `gui_text_dos`; a typed name
+      with a letter the page hasn't got is refused);
+    - Notepad's, Images' and the terminal's titles;
+    - the terminal's input line and its DOS programs' output (its cells are Unicode now).
+  - Smoothed text, `[display] font_smoothing` (off; when a program next starts), on the Control Panel's Display
+    page. **A deviation from the plan:** the coverage is made at build time, by FreeType from the same DejaVu
+    files and in the same glyph order, into `SMOOTH.DAT` (129 KB, beside the programs), rather than by
+    stb_truetype in each program. stb_truetype would have needed floating point, which a 486SX hasn't got. It
+    has no hinting, so advances would differ and every layout would move. And it would have meant 1.8 MB of fonts
+    in every program. The 2D library blends the coverage at 16 and 32 bits with integer sums, and the pens move
+    by the 1-bit advances. At 8 bits, and in the kernel's own text, nothing changes.
+  - Tests:
+    - `gfx_test`: the ranges, and the blending against a made-up coverage, smoothing off again after;
+    - `cp_test`: every page's bytes both ways, what a page hasn't got, short buffers, stray UTF-8;
+    - GUITEST's `text` and `names` pages, and the scripts `text`, `smooth` (with `config display font_smoothing
+      on`), `names-850` and `names-866` (`config program:GUITEST.EXE env GLOSCP=...`).
+
+    **The gate passes:** `make loopa-gui`, all four cases. Greek and Cyrillic in every font, and smoothed text
+    at 16 and 32 bits, are the same bytes in Loop A as on the host. FreeDOS keeps the code pages' bytes in the
+    names, and the file dialog shows them and returns the one chosen as DOS's bytes. loopa-native,
+    loopa-control, loopa-config and loopa-sshc pass with it.
+  - Script lines `config SECTION KEY VALUE` before `run` set a setting for that script: the host shim's
+    GLOS.CFG, or `glos config set` and `unset` in Loop A. On the host, a `[program NAME]` section's `env` reaches
+    the program as GLOS gives it at the EXEC. The config suite now also sets the `[time]`, `[vnc]` and
+    `font_smoothing` settings.
+  - Found on the way:
+    - The loader warned about `[display]` keys that aren't its own.
+    - The terminal's ssh took a command that opened, ran and closed between two of its polls (the 486, by
+      password) for a refused session.

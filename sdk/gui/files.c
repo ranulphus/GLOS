@@ -16,6 +16,7 @@
 #include <dos.h>
 #endif
 
+#include "glos/cp.h"
 #include "guiint.h"
 
 /* The path the C library is given. */
@@ -75,6 +76,7 @@ int gui_stat(const char *path, struct gui_dirent *e)
         return -1;
     memset(e, 0, sizeof *e);
     strncpy(e->name, gui_path_name(path), sizeof e->name - 1);
+    gui_dos_text(e->name, e->text, sizeof e->text);
     e->dir = S_ISDIR(st.st_mode) != 0;
     e->size = e->dir ? 0 : (unsigned long)st.st_size;
     dos_time(st.st_mtime, &e->date, &e->time);
@@ -116,6 +118,7 @@ int gui_dir_read(const char *dir, struct gui_dirent **out)
             }
             list = nl;
         }
+        gui_dos_text(e.name, e.text, sizeof e.text);  /* (again: upper case) */
         list[n++] = e;
     }
     closedir(d);
@@ -123,6 +126,25 @@ int gui_dir_read(const char *dir, struct gui_dirent **out)
         qsort(list, (size_t)n, sizeof *list, qcmp);
     *out = list;
     return n;
+}
+
+static int page(void)
+{
+    static int cp;
+    if (!cp)
+        cp = cp_active();
+    return cp;
+}
+
+const char *gui_dos_text(const char *dos, char *out, int room)
+{
+    cp_to_utf8(page(), dos, out, room);
+    return out;
+}
+
+int gui_text_dos(const char *text, char *out, int room)
+{
+    return cp_from_utf8(page(), text, out, room) == 0 ? 0 : -1;
 }
 
 int gui_drives(char *letters)

@@ -18,7 +18,9 @@
  * F10 goes to the menu bar; Enter presses the window's default button and
  * Esc its cancel button.
  *
- * Text is UTF-8 everywhere; the fonts have Latin-1 (U+0020-U+00FF).
+ * Text is UTF-8 everywhere; the fonts have Latin-1 and Latin Extended-A,
+ * Greek, Cyrillic and common signs (M10; docs/gui.md §1.10). DOS's names are
+ * bytes in its code page: gui_dos_text and gui_text_dos convert.
  *
  * The same code builds for the host (tests/host/glosshim.c in place of
  * libglos), where the tests drive it and keep its pictures. */
@@ -325,7 +327,8 @@ int gui_file_dialog(struct gui_window *owner, const char *title, int save, char 
 /* ---- files, by DOS paths ("C:\GLOS\GLOS.CFG"). The host tests map each drive to a directory
    ($GLOS_HOST_DRIVES/C and so on), so an app shows the same names there as on DOS. */
 struct gui_dirent {
-    char name[64];
+    char name[64];                      /* DOS's bytes, for paths */
+    char text[128];                     /* name as text to show (gui_dos_text) */
     unsigned long size;
     unsigned short date, time;          /* DOS's: ((year - 1980) << 9 | month << 5 | day), (h << 11 | m << 5 | s / 2) */
     unsigned char dir, attr;
@@ -344,6 +347,10 @@ int gui_set_time(const char *path, unsigned short date, unsigned short time);
 void gui_path_join(char *out, int room, const char *dir, const char *name);
 void gui_path_up(char *path);           /* "C:\A\B" -> "C:\A"; "C:\A" -> "C:\" */
 const char *gui_path_name(const char *path);    /* the last part */
+/* DOS's names and paths are bytes in its code page (glos/cp.h, cp_active's); the toolkit's text is UTF-8 (M10). */
+const char *gui_dos_text(const char *dos, char *out, int room); /* a name or path DOS has, as text to show: out */
+int gui_text_dos(const char *text, char *out, int room);        /* text typed, as DOS's bytes: 0, or -1 if the
+                                           code page hasn't got one of its characters ('?' there) or out is short */
 
 /* ---- the clipboard (GLOS_FN_CLIP) */
 int gui_clip_set(const char *text, size_t n);

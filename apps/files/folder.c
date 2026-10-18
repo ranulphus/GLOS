@@ -97,7 +97,7 @@ static void fill(struct view *v)
             snprintf(size, sizeof size, "%lu", e->size);
         snprintf(date, sizeof date, "%04u-%02u-%02u %02u:%02u", (e->date >> 9) + 1980, (e->date >> 5) & 15, e->date & 31,
                  e->time >> 11, (e->time >> 5) & 63);
-        cells[0] = e->name, cells[1] = size, cells[2] = date;
+        cells[0] = e->text, cells[1] = size, cells[2] = date;
         gui_list_add(v->list, cells, icon(icon_for_file(e->name, e->dir), v->big), (void *)(size_t)i);
         if (keep_name[0] && !strcmp(keep_name, e->name))
             gui_list_set(v->list, i);
@@ -107,8 +107,8 @@ static void fill(struct view *v)
 
 static void retitle(struct view *v)
 {
-    char t[300];
-    snprintf(t, sizeof t, "%s%s", v->dir, v->browser ? " - Files" : "");
+    char t[400], dir[300];
+    snprintf(t, sizeof t, "%s%s", gui_dos_text(v->dir, dir, sizeof dir), v->browser ? " - Files" : "");
     gui_title(v->win, t);
 }
 
@@ -237,10 +237,22 @@ static void paste(struct view *v)
 
 static void closing(struct gui_window *w);
 
+/* A name typed (text) as DOS's bytes, in place: false, and said, if DOS's code page hasn't got all of it. */
+static int dos_name(struct gui_window *w, char *name)
+{
+    char b[128];
+    if (gui_text_dos(name, b, sizeof b) != 0) {
+        gui_message(w, "Files", "DOS's code page hasn't got all of the name's letters.", GUI_MB_OK);
+        return 0;
+    }
+    strcpy(name, b);
+    return 1;
+}
+
 static void command(struct gui_window *w, int id)
 {
     struct view *v = view_of(w);
-    char name[64], from[260], to[260], t[300];
+    char name[128], from[260], to[260], t[300];
     static char paths[64][260];
     int r, n, i;
     if (!v)
@@ -254,6 +266,8 @@ static void command(struct gui_window *w, int id)
     case C_NEWDIR:
         snprintf(name, sizeof name, "NEWDIR");
         if (gui_ask(w, "New Folder", "The new folder's name:", name, sizeof name) && name[0]) {
+            if (!dos_name(w, name))
+                break;
             gui_path_join(to, sizeof to, v->dir, name);
             if (gui_mkdir(to) != 0)
                 gui_message(w, "Files", "The folder couldn't be made.", GUI_MB_OK);
@@ -265,9 +279,11 @@ static void command(struct gui_window *w, int id)
     case C_RENAME:
         if (r < 0)
             break;
-        snprintf(name, sizeof name, "%s", v->ents[(size_t)gui_list_user(v->list, r)].name);
-        gui_path_join(from, sizeof from, v->dir, name);
+        gui_path_join(from, sizeof from, v->dir, v->ents[(size_t)gui_list_user(v->list, r)].name);
+        snprintf(name, sizeof name, "%s", v->ents[(size_t)gui_list_user(v->list, r)].text);
         if (gui_ask(w, "Rename", "Its new name:", name, sizeof name) && name[0]) {
+            if (!dos_name(w, name))
+                break;
             gui_path_join(to, sizeof to, v->dir, name);
             if (gui_rename(from, to) != 0)
                 gui_message(w, "Files", "It couldn't be renamed.", GUI_MB_OK);
@@ -280,7 +296,7 @@ static void command(struct gui_window *w, int id)
         if (!(n = chosen_paths(v, paths, 64)))
             break;
         if (n == 1)
-            snprintf(t, sizeof t, "Delete %s?", gui_path_name(paths[0]));
+            snprintf(t, sizeof t, "Delete %s?", gui_dos_text(gui_path_name(paths[0]), name, sizeof name));
         else
             snprintf(t, sizeof t, "Delete these %d?", n);
         if (gui_message(w, "Delete", t, GUI_MB_YESNO) == GUI_YES) {
@@ -516,7 +532,7 @@ static void tree_on(struct gui_widget *w, int what)
             if (e[i].dir) {
                 char *p = malloc(260);
                 gui_path_join(p, 260, path, e[i].name);
-                gui_tree_add(w, n, e[i].name, icon(IC_FOLDER, 0), p, 1);
+                gui_tree_add(w, n, e[i].text, icon(IC_FOLDER, 0), p, 1);
             }
         free(e);
     } else if (what == GUI_ON_SELECT && strcmp(v->dir, path)) {

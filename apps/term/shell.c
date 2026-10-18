@@ -59,12 +59,13 @@ static int same(const char *a, const char *b)
     return !*a && !*b;
 }
 
-static void out(const char *s) { term_print(s); }
+/* (the shell's own output is DOS's, as COMMAND.COM's would be: names and files' text in its code page) */
+static void out(const char *s) { term_write_dos(s, -1); }
 
 static void err(const char *s)
 {
     term_attr(T_ERROR);
-    term_print(s);
+    term_write_dos(s, -1);
     term_attr(T_NORMAL);
 }
 
@@ -614,7 +615,10 @@ static int run_program(const char *line, int detach)
         return 0;
     job = id;
     job_state = GLOS_JOB_QUEUED;
-    term_title(gui_path_name(first));
+    {
+        char name[128];
+        term_title(gui_dos_text(gui_path_name(first), name, sizeof name));
+    }
     return 1;
 }
 
@@ -899,7 +903,7 @@ void shell_poll(void)
             break;
         }
         if (n > 0)
-            term_write(buf, n);
+            term_write_dos(buf, n);     /* (a DOS program's bytes, in its code page) */
         job_state = st;
         if (st == GLOS_JOB_DONE || st == GLOS_JOB_APP) {
             unsigned short left[64];
@@ -951,7 +955,7 @@ void shell_prompt(void)
     }
     t[n] = 0;
     term_attr(T_PROMPT);
-    term_print(t);
+    term_write_dos(t, -1);           /* (the folder: DOS's bytes) */
     term_attr(T_NORMAL);
     term_prompt_done();
 }
@@ -1040,7 +1044,7 @@ void shell_complete(void)
                 ;
             if (!pre[k]) {
                 snprintf(full, sizeof full, e[i].dir ? "%s\\  " : "%s  ", e[i].name);
-                term_print(full);
+                term_write_dos(full, -1);
             }
         }
         term_print("\r\n");

@@ -402,6 +402,12 @@ static void command(struct gui_window *w, int id)
         char cmd[200] = "";
         if (gui_ask(desk, "Run", "A program, a folder or a file to open:", cmd, sizeof cmd) && cmd[0]) {
             struct gui_dirent e;
+            char typed[200];
+            snprintf(typed, sizeof typed, "%s", cmd);
+            if (gui_text_dos(typed, cmd, sizeof cmd) != 0) {    /* (DOS's bytes) */
+                gui_message(desk, "Run", "DOS's code page hasn't got all of its letters.", GUI_MB_OK);
+                return;
+            }
             if (gui_is_dir(cmd) || (!strchr(cmd, ' ') && gui_stat(cmd, &e) == 0))
                 files_open(cmd);                /* (a folder or a file there: opened) */
             else

@@ -33,8 +33,9 @@ static void note(const char *fmt, const char *a)
 
 static void title(void)
 {
-    char t[300];
-    snprintf(t, sizeof t, "%s%s - Notepad", gui_editor_modified(ed) ? "*" : "", path[0] ? gui_path_name(path) : "Untitled");
+    char t[300], name[128];
+    snprintf(t, sizeof t, "%s%s - Notepad", gui_editor_modified(ed) ? "*" : "",
+             path[0] ? gui_dos_text(gui_path_name(path), name, sizeof name) : "Untitled");
     gui_title(win, t);
 }
 
@@ -131,11 +132,12 @@ static int save(void) { return path[0] ? save_to(path) : save_as(); }
 /* Changes not saved: kept (0) or not wanted after all (-1: cancelled). */
 static int keep_changes(void)
 {
-    char t[300];
+    char t[300], name[128];
     int r;
     if (!gui_editor_modified(ed))
         return 0;
-    snprintf(t, sizeof t, "Save the changes to %s?", path[0] ? gui_path_name(path) : "Untitled");
+    snprintf(t, sizeof t, "Save the changes to %s?",
+             path[0] ? gui_dos_text(gui_path_name(path), name, sizeof name) : "Untitled");
     r = gui_message(win, "Notepad", t, GUI_MB_YESNOCANCEL);
     if (r == GUI_YES)
         return save();

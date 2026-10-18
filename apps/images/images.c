@@ -175,8 +175,8 @@ static int load(const char *path)
     }
     free(d);
     if (!px) {
-        char t[300];
-        snprintf(t, sizeof t, "%s isn't a picture Images can show.", gui_path_name(path));
+        char t[300], name[128];
+        snprintf(t, sizeof t, "%s isn't a picture Images can show.", gui_dos_text(gui_path_name(path), name, sizeof name));
         gui_message(win, "Images", t, GUI_MB_OK);
         return -1;
     }
@@ -187,8 +187,8 @@ static int load(const char *path)
     scaled = NULL;
     sx = sy = 0;
     {
-        char t[300];
-        snprintf(t, sizeof t, "%s - Images", gui_path_name(path));
+        char t[300], name[128];
+        snprintf(t, sizeof t, "%s - Images", gui_dos_text(gui_path_name(path), name, sizeof name));
         gui_title(win, t);
     }
     printf("IMAGES open %s %dx%d %s\n", path, w, h, pic.kind);
@@ -244,12 +244,13 @@ static int scale_of(void)               /* the size shown, in tenths of a per ce
 
 static void status_line(void)
 {
-    char t[200];
+    char t[200], name[128];
     if (!pic.px) {
         gui_set_text(status, "No picture");
         return;
     }
-    snprintf(t, sizeof t, "%s   %d x %d   %s   %d%%%s", gui_path_name(pic.path), pic.w, pic.h, pic.kind,
+    snprintf(t, sizeof t, "%s   %d x %d   %s   %d%%%s", gui_dos_text(gui_path_name(pic.path), name, sizeof name), pic.w,
+             pic.h, pic.kind,
              (scale_of() + 5) / 10, fit ? " (fitted)" : "");
     gui_set_text(status, t);
 }

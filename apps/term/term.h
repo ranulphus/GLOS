@@ -6,8 +6,9 @@ enum { T_NORMAL, T_PROMPT, T_ERROR, T_INPUT };  /* how text is drawn */
 
 /* term.c: the window */
 void term_attr(int a);
-void term_put(unsigned char c);
-void term_write(const char *s, int n);          /* n -1: to the NUL */
+void term_put(unsigned c);                      /* a character (Unicode) */
+void term_write(const char *s, int n);          /* UTF-8; n -1: to the NUL */
+void term_write_dos(const char *s, int n);      /* a DOS program's bytes, in DOS's code page (M10) */
 void term_print(const char *s);
 void term_clear(void);
 void term_prompt_done(void);                    /* the prompt is out: what is typed goes after it */

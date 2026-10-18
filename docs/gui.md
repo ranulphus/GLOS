@@ -80,8 +80,8 @@ compare, and costs a redraw twice a second for nothing.
 
 ### 1.5 The editor
 
-A file's bytes as they are, shown as Latin-1 (GLOS has no code pages until M10, PRD §11.3), in DejaVu Sans Mono
-by default. The text is a gap buffer; the editor keeps the offset of each line's start and moves, adds or takes
+A file's bytes as they are, shown as Latin-1 (DOS's code pages, M10, are for names and DOS programs' output: a
+file's text is left as Latin-1 so that every byte shows and saves unchanged), in DejaVu Sans Mono by default. The text is a gap buffer; the editor keeps the offset of each line's start and moves, adds or takes
 them at each edit rather than counting lines again, so a megabyte edits as fast as a line. Lines end in LF or CR
 LF, and the caret never stands between the two; Enter writes what the file's first line ends in (CR LF for a new
 file). Tabs reach every eighth space. Wrapping shows a line in as many rows as it needs, broken after a space where
@@ -116,7 +116,8 @@ the screen.
 
 The toolkit's few calls on files (`gui_dir_read`, `gui_drives`, `gui_fopen`, `gui_mkdir`, `gui_rename`...) take DOS
 paths. On DOS they are the C library's. On the host a path's drive is a directory (`$GLOS_HOST_DRIVES/C`), so an
-app shows the same names in the host's tests as on DOS. A folder is read sorted: folders first, then names
+app shows the same names in the host's tests as on DOS. A name or path is DOS's bytes, in its code page (§1.10):
+`gui_dirent`'s `name` is those bytes, for paths, and its `text` is the name to show. A folder is read sorted: folders first, then names
 without regard to case. The drives are those DOS has (INT 21h 4408h; floppies from the BIOS's equipment word, not
 touched to see).
 
@@ -130,6 +131,38 @@ grey (999999h) for what can't be used now and a button held down, a darker grey 
 trough. A button has a shadow a pixel deep. The focus is a dotted line. Orange stays the window manager's. Every
 colour is one of the palette's cube, so a window is the same picture at 8 bits as at 16 and 32 (to the screen's
 own precision).
+
+### 1.10 Other scripts, DOS's code pages and smoothed text (M10 step G)
+
+**The fonts** have Latin-1 and Latin Extended-A (U+0020-U+017F), then Greek and Cyrillic, the general
+punctuation (dashes, quotes, the ellipsis, daggers, the per-mille sign), the euro, № and ™, and arrows. The
+monospaced font also has what code page 437 draws: box drawing, blocks and shades, and the mathematical signs. The
+glyph table is sparse (`struct gfx_range`, `tools/mkfont.py --ranges`), so the kernel's three fonts stay about 80 KB
+each. A code point a font hasn't got is its box.
+
+**DOS's code pages** (`glos/cp.h`, `sdk/config/cp.c`): DOS's names and a DOS program's output are bytes in the
+code page DOS has. That is GLOSCP in the environment (a profile's `env` sets it for one program), else what
+INT 21h 6601h says, else 437. GLOS has tables for 437, 850, 852, 866 and 737 (`tools/mkcp.py`, from Python's
+codecs), and treats another page as 437. The toolkit shows a name through `gui_dos_text` and takes a typed one
+back through `gui_text_dos`. A typed name with a letter the page hasn't got is refused, and not saved with a `?`
+in it. The file manager, the file dialog, Notepad's and Images' titles and the terminal (its input line, its
+programs' output and its title) all go through these. A file's text in Notepad stays Latin-1 (§1.5).
+
+**Smoothed text** (`[display] font_smoothing`, off by default; when a program next starts). With it on,
+`gui_init` reads `SMOOTH.DAT` from the program's folder (on the host, drive C's GLOS folder). Its glyphs are the
+same ones in the same order, made anti-aliased by FreeType from the same DejaVu files when the 1-bit fonts are
+made (`make fonts`, `tools/mkfont.py --smooth`): 4-bit coverage, 129 KB for the three fonts.
+
+`gfx_smooth` hands them to the 2D library, which blends them at 16 and 32 bits (integer sums, the same on host and
+DOS). At 8 bits the text stays 1-bit. Pens still move by the 1-bit font's advances, so smoothed text takes exactly
+the room it took before and nothing moves. The kernel's own text (title bars, the task bar) never smooths. A
+`SMOOTH.DAT` that doesn't match the program's fonts (another build's) is ignored.
+
+The plan (docs/milestones-m10.md) had stb_truetype drawing the TrueType files in each program. Coverage made at
+build time was chosen instead, because the plan's way would have meant:
+- floating point a 486SX hasn't got;
+- no hinting, so other advances and every layout moved;
+- 1.8 MB of fonts and a rasteriser in every program.
 
 ## 2. How the toolkit and the apps are tested
 
@@ -160,7 +193,9 @@ Loop A runs).
 
 The shim stands in for the kernel where an app asks it about the machine: the settings are a GLOS.CFG in memory,
 read from `$GLOS_HOST_DRIVES/C/GLOS/GLOS.CFG` and checked by the same schema (`sdk/config/cfg.c`) as the kernel
-checks them; `GLOS_FN_STAT` gives made-up figures that follow the script's clock (two apps, a job, a log), and
+checks them. A script's `config SECTION KEY VALUE` lines before its `run` change them for that script, and Loop A's
+driver sets them with `glos config set` and unsets them afterwards. A `[program NAME]` section's `env` reaches the
+program's environment on the host as GLOS gives it at the EXEC; `GLOS_FN_STAT` gives made-up figures that follow the script's clock (two apps, a job, a log), and
 one of the apps can be ended. Neither runs programs.
 
 The Control Panel's every setting is changed by keys in the `control` suite: it reads the schema from

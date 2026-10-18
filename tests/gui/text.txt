@@ -1,0 +1,8 @@
+# UTF-8 in the toolkit's fonts (M10 step G; GUITEST text): Latin Extended-A, Greek, Cyrillic and signs in the
+# proportional, bold and monospaced fonts, and code page 437's drawing characters (B0h-DFh) through cp_to_utf8.
+run GUITEST.EXE text
+wait "GUITEST Text"
+shot text "GUITEST Text"
+key alt+f4
+gone "GUITEST Text"
+expect GUI end

@@ -67,6 +67,9 @@ include deps.mk
 
 DEV      := $(MGA_GLIDE)/tools/dev
 CFG_SRCS := sdk/config/cfg.c sdk/config/tz.c   # GLOS.CFG's schema and time zones, shared everywhere
+CP_SRCS := sdk/config/cp.c sdk/config/cp_tables.c       # DOS code pages (M10): libglos's and the host's
+codepages:
+	$(Q)python3 tools/mkcp.py > sdk/config/cp_tables.c
 BUILD_ID := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
 Q ?= @
 
@@ -116,11 +119,13 @@ host-test-run:
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Ikernel/include -Iinclude \
 	  -DGLOSSHIM_NO_MAIN \
 	  -o build/host/gui_test tests/host/gui_test.c tests/host/glosshim.c $(filter-out sdk/gui/field.c,$(GUI_SRCS)) \
-	  $(GFX_SRCS) kernel/lib/png.c $(CFG_SRCS) && build/host/gui_test
+	  $(GFX_SRCS) kernel/lib/png.c $(CFG_SRCS) $(CP_SRCS) && build/host/gui_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Itests/host/kstub -Ikernel/include -Iinclude \
 	  -o build/host/cfg_test tests/host/cfg_test.c $(CFG_SRCS) && build/host/cfg_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iinclude -o build/host/tz_test tests/host/tz_test.c sdk/config/tz.c \
 	  && build/host/tz_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iinclude -o build/host/cp_test tests/host/cp_test.c $(CP_SRCS) \
+	  && build/host/cp_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iapps/term -o build/host/vt_test tests/host/vt_test.c apps/term/vt.c \
 	  && build/host/vt_test
 
@@ -130,22 +135,22 @@ host-test-run:
 GUI_SRCS := $(wildcard sdk/gui/*.c)
 GUI_HOST := $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Ikernel/include -Iinclude
 build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h \
-                    tests/host/glosshim.c kernel/include/keymap.h $(CFG_SRCS) include/glos/config.h include/glos/tz.h
+                    tests/host/glosshim.c kernel/include/keymap.h $(CFG_SRCS) $(CP_SRCS) include/glos/config.h include/glos/tz.h
 	@mkdir -p build/host
 	$(Q)$(GUI_HOST) -Dmain=app_main -c -o build/host/guitest-app.o tests/dos/guitest.c
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
-	  $(CFG_SRCS)
+	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
 APPS := notepad calc images term files monitor control
 APP_LIBS_term := build/sdk/libsshc.a           # (TERM's ssh, sftp and ssh-keygen: M10)
 APP_HOST_FLAGS := -Ithird_party/stb
 define app_host
 build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h tests/host/glosshim.c \
-                 kernel/include/keymap.h $$(CFG_SRCS) include/glos/config.h include/glos/tz.h $$(APP_HOST_LIBS_$(1))
+                 kernel/include/keymap.h $$(CFG_SRCS) $$(CP_SRCS) include/glos/config.h include/glos/tz.h $$(APP_HOST_LIBS_$(1))
 	@mkdir -p build/host
 	$$(Q)$$(GUI_HOST) $$(APP_HOST_FLAGS) -Dmain=app_main -c -o build/host/$(1)-app.o apps/$(1)/$(1).c
 	$$(Q)$$(GUI_HOST) -o $$@ build/host/$(1)-app.o $$(filter-out apps/$(1)/$(1).c,$$(wildcard apps/$(1)/*.c)) \
-	  tests/host/glosshim.c $$(GUI_SRCS) $$(LIBGLOS_GFX) kernel/lib/png.c $$(CFG_SRCS) $$(APP_HOST_LIBS_$(1)) -lm
+	  tests/host/glosshim.c $$(GUI_SRCS) $$(LIBGLOS_GFX) kernel/lib/png.c $$(CFG_SRCS) $$(CP_SRCS) $$(APP_HOST_LIBS_$(1)) -lm
 endef
 # The terminal's ssh (M10): the client for the host too, 32-bit as the rest, its crypto without -Werror.
 APP_HOST_LIBS_term := build/host/libsshc32.a
@@ -166,7 +171,7 @@ gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS))
 	@rm -rf build/host/gui build/host/gui-drives && mkdir -p build/host/gui
 	@set -e; for t in $(GUI_SCRIPTS); do n=$$(basename $$t .txt); prog=$$(awk '$$1=="run"{print tolower($$2); exit}' $$t); \
 	  prog=$${prog%.exe}; mkdir -p build/host/gui/$$n; for b in 8 16 32; do rm -rf build/host/gui-drives; \
-	    cp -r tests/gui/drives build/host/gui-drives; \
+	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT build/host/gui-drives/C/GLOS/; \
 	    mkdir -p build/host/gui-drives/A build/host/gui-drives/C/HX build/host/gui-drives/C/OUT build/host/gui-drives/C/TEST; \
 	    GLOS_HOST_DRIVES=build/host/gui-drives build/host/$$prog $$t build/host/gui/$$n $$b > build/host/gui/$$n-$$b.log \
 	      || { echo "gui-goldens: $$n at $$b bits:"; cat build/host/gui/$$n-$$b.log; exit 1; }; done; \
@@ -176,10 +181,22 @@ gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS))
 
 # (`make fonts` makes kernel/gfx/fonts again from FONT_DIR's TrueType files: on the host, with python3-pil.)
 FONT_DIR ?= /usr/share/fonts/truetype/dejavu
+# (M10 step G: Latin Extended-A, Greek, Cyrillic and the punctuation they need; the monospaced font has what code
+# page 437 draws too, box drawing and blocks for the terminal and DOS programs' output.)
+FONT_TEXT := 0x192,0x2C6-0x2C7,0x2D8-0x2DD,0x370-0x3FF,0x400-0x45F,0x2010-0x2027,0x2030-0x203A
+FONT_SIGNS := 0x20AC,0x2116,0x2122,0x2190-0x2193
+FONT_437 := 0x207F,0x20A7,0x20AC,0x2116,0x2122,0x2190-0x2193,0x2219-0x221A,0x221E,0x2229,0x2248,0x2261,0x2264-0x2265
+FONT_437 := $(FONT_437),0x2310,0x2320-0x2321,0x23BA-0x23BD,0x2500-0x257F,0x2580-0x259F,0x25A0
+# (And the toolkit's font smoothing, M10: the same glyphs anti-aliased, sdk/gui/fonts/SMOOTH.DAT, C:\GLOS's.)
 fonts:
-	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSans.ttf 11 ui > kernel/gfx/fonts/ui.c
-	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSans-Bold.ttf 11 bold > kernel/gfx/fonts/bold.c
-	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSansMono.ttf 11 mono > kernel/gfx/fonts/mono.c
+	@mkdir -p build/fonts sdk/gui/fonts
+	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSans.ttf 11 ui --last 0x17F --ranges $(FONT_TEXT),$(FONT_SIGNS) \
+	  --smooth build/fonts/ui.aa > kernel/gfx/fonts/ui.c
+	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSans-Bold.ttf 11 bold --last 0x17F --ranges $(FONT_TEXT),$(FONT_SIGNS) \
+	  --smooth build/fonts/bold.aa > kernel/gfx/fonts/bold.c
+	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSansMono.ttf 11 mono --last 0x17F --ranges $(FONT_TEXT),$(FONT_437) \
+	  --smooth build/fonts/mono.aa > kernel/gfx/fonts/mono.c
+	$(Q){ printf 'GLOSAA1\n'; cat build/fonts/ui.aa build/fonts/bold.aa build/fonts/mono.aa; } > sdk/gui/fonts/SMOOTH.DAT
 
 # The SSH layer (kernel/ssh) on host sockets against OpenSSH's client
 # (tests/host/sshd_test.sh): native, on the host, which has ssh.
@@ -533,7 +550,7 @@ build/dj/GDBME.EXE: tests/dos/gdbme.c
 LIBGLOS_GFX := kernel/gfx/gfx.c kernel/gfx/pal.c kernel/gfx/font.c kernel/gfx/region.c \
                kernel/gfx/fonts/ui.c kernel/gfx/fonts/bold.c kernel/gfx/fonts/mono.c
 build/sdk/libglos.a: sdk/libglos/glos.c sdk/libglos/socket.c include/glos/api.h include/glos/gfx.h include/glos/net.h \
-                     $(LIBGLOS_GFX) $(CFG_SRCS) include/glos/config.h include/glos/tz.h
+                     $(LIBGLOS_GFX) $(CFG_SRCS) $(CP_SRCS) include/glos/config.h include/glos/tz.h include/glos/cp.h
 	@mkdir -p build/sdk
 	$(Q)echo "  DJCC    $<"
 	$(Q)rm -f $@ build/sdk/*.o
@@ -541,6 +558,8 @@ build/sdk/libglos.a: sdk/libglos/glos.c sdk/libglos/socket.c include/glos/api.h 
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/socket.o sdk/libglos/socket.c
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/cfg.o sdk/config/cfg.c
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/tz.o sdk/config/tz.c
+	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/cp.o sdk/config/cp.c
+	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/cp_tables.o sdk/config/cp_tables.c
 	$(Q)for f in $(LIBGLOS_GFX); do \
 	    $(DJCC) -O2 -Wall -Werror -ffreestanding -Iinclude -Ikernel/include -c -o build/sdk/gfx_$$(basename $$f .c).o $$f || exit 1; \
 	  done

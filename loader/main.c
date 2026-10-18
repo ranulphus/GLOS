@@ -779,9 +779,9 @@ static void read_cfg(const char *argv0, int shell_keys)
                                                       : bi.display_flags & ~BI_DISPLAY_NOACCEL;
             } else if (!stricmp(k, "gpu_watchdog") && (!stricmp(v, "off") || (atol(v) >= 50 && atol(v) <= 60000))) {
                 bi.gpu_watchdog_ms = !stricmp(v, "off") ? 0xFFFFFFFFul : (unsigned long)atol(v);   /* (M8) */
-            } else {
+            } else if (!stricmp(k, "mode") || !stricmp(k, "accel") || !stricmp(k, "gpu_watchdog")) {
                 say("GLOS-WARN cfg-key section=display key=%s", k);
-            }
+            }                                   /* (font_smoothing, M10: the programs', checked above) */
             continue;
         }
         if (in_sound) {                         /* (M8) mixer = on | off: GLOS drives the SB16 and mixes the apps'
