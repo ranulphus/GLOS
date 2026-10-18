@@ -56,6 +56,7 @@
 #   make loopa-https    HTTPS: FETCH, certificates checked, GitHub and a FreeDOS mirror (M10)
 #   make sshc-test      the SSH and SFTP client against OpenSSH's sshd on the host (M10)
 #   make loopa-sshc     the terminal's ssh, sftp, ssh-keygen against OpenSSH in a container (M10)
+#   make loopa-pkg      packages: a signed one installed, upgraded, removed; refusals; FreeDOS's (M10)
 #   make gate           M4e's exit: the baseline matrix under GLOS and with direct mode forced, a kill and
 #                       an ssh probe for every program (tools/gate/run.py; on the host; hours)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
@@ -73,7 +74,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
+.PHONY: sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -438,6 +439,9 @@ loopa-netapp: all build/dj/NETTEST.EXE check-deps
 # M10 step C: HTTPS (FETCH) against servers on the host with a test CA, refusals, GitHub and a FreeDOS mirror.
 loopa-https: all build/apps/FETCH.EXE build/host/mkcerts build/glos/CERTS.DAT check-deps
 	$(Q)python3 tests/loopa/jobs.py https -j $(JOBS)
+# M10 step E: packages from a signed source on the host (tools/pkg), and FreeDOS's.
+loopa-pkg: all build/apps/PKG.EXE build/host/mkcerts build/glos/CERTS.DAT dos-tests check-deps
+	$(Q)python3 tests/loopa/jobs.py pkg -j $(JOBS)
 # M10 step D: the terminal's ssh, sftp and ssh-keygen against OpenSSH in a container (tests/sshd).
 loopa-sshc: all build/apps/TERM.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py sshc -j $(JOBS)
@@ -602,6 +606,16 @@ build/apps/FETCH.EXE: apps/fetch/fetch.c $(NET_LIBS) tools/glosmark.py
 	@mkdir -p build/apps
 	$(Q)echo "  DJCC    apps/fetch"
 	$(Q)$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -Iinclude -Ithird_party/bearssl/inc -o $@ $< $(NET_LIBS)
+	$(Q)python3 tools/glosmark.py $@
+# PKG (apps/pkg; M10 step E): packages from signed sources. Its zips through stb_image's inflater, signatures with
+# TinySSH's Ed25519 (in libsshc), downloads with sdk/http.
+build/apps/PKG.EXE: $(wildcard apps/pkg/*.c apps/pkg/*.h) $(NET_LIBS) build/sdk/libsshc.a build/sdk/libgui.a tools/glosmark.py
+	@mkdir -p build/apps
+	$(Q)echo "  DJCC    apps/pkg"
+	$(Q)$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -Iinclude -Ithird_party/bearssl/inc -Ithird_party/stb \
+	  -Ikernel/ssh -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -o $@ $(wildcard apps/pkg/*.c) \
+	  build/sdk/libhttp.a build/sdk/libtls.a build/sdk/libbearssl.a build/sdk/libsshc.a build/sdk/libgui.a \
+	  build/sdk/libglos.a -lm
 	$(Q)python3 tools/glosmark.py $@
 # C:\GLOS\CERTS.DAT: the trust anchors, from curl's cacert.pem (pinned in tools/setup/versions.mk).
 build/host/mkcerts: tools/certs/mkcerts.c sdk/tls/anchors.c include/glos/tls.h build/host/libbearssl.a

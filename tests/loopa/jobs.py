@@ -4407,6 +4407,252 @@ def sshc_case(profile, vcard, card, bits):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+class RepoServer:
+    """HTTPS on 127.0.0.1 (the guest's 10.0.2.2) with one certificate, serving the files of `root` (which the
+    suite changes between requests: one repository, then another)."""
+
+    def __init__(self, pki, cert, root):
+        import http.server
+        import ssl
+        import threading
+        server = self
+        self.root = root
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                f = os.path.join(server.root, os.path.basename(self.path))
+                if os.path.isfile(f):
+                    data = open(f, "rb").read()
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                else:
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                self.close_connection = True
+
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(os.path.join(pki, cert + ".pem"), os.path.join(pki, cert + ".key"))
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd.socket = ctx.wrap_socket(self.httpd.socket, server_side=True)
+        self.port = self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+
+
+PKG_CASES = [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")]
+PKG_CFG = ("; GLOS.CFG for the pkg suite: a package's profile goes in and comes out again\r\n[time]\r\nsntp = off\r\n\r\n"
+           "[program PKG.EXE]\r\nenv = DOSDIR=C:\\FDTEST\r\n")
+
+
+def pkg_repos(out):
+    """Four repositories made with tools/pkg and the suite's test key: NOTES 1.0; NOTES 1.0 and 1.1; 1.0 with its
+    zip changed after signing; 1.0 with its index changed after signing."""
+    import shutil
+    tool = [sys.executable, os.path.join(ROOT, "tools", "pkg", "pkg.py")]
+    key = os.path.join(out, "TEST")
+    if not os.path.exists(key):
+        subprocess.run(tool + ["keygen", key, "glos-loopa-test"], check=True, stdout=subprocess.DEVNULL)
+    def make(version, readme, extra=None, title="Notes"):
+        src = os.path.join(out, "src-" + version)
+        shutil.rmtree(src, ignore_errors=True)
+        os.makedirs(os.path.join(src, "DOC"))
+        open(os.path.join(src, "GLOSPKG.INI"), "w").write(
+            "[package]\nname = NOTES\nversion = %s\nsummary = A test package\n\n[program NOTES.EXE]\ntitle = %s\n"
+            "menu = 1\n" % (version, title))
+        shutil.copy(os.path.join(ROOT, "build", "ow", "dos", "CLOCKCHK.EXE"), os.path.join(src, "NOTES.EXE"))
+        open(os.path.join(src, "README.TXT"), "wb").write(readme)
+        open(os.path.join(src, "DOC", "NOTES.TXT"), "wb").write(b"the notes' notes\r\n" * 50)
+        if extra:
+            open(os.path.join(src, extra), "wb").write(b"new in 1.1\r\n")
+        zf = os.path.join(out, "NOTES-%s.ZIP" % version.replace(".", ""))
+        subprocess.run(tool + ["make", src, zf], check=True, stdout=subprocess.DEVNULL)
+        return zf
+    z10 = make("1.0", b"version one\r\n")
+    z11 = make("1.1", b"version one point one\r\n", "NEW.TXT", "Notes 1.1")
+    repos = {}
+    for name, zips in (("one", [z10]), ("two", [z10, z11]), ("tampered", [z10]), ("badsig", [z10])):
+        d = os.path.join(out, "repo-" + name)
+        shutil.rmtree(d, ignore_errors=True)
+        os.makedirs(d)
+        for z in zips:
+            shutil.copy(z, d)
+        subprocess.run(tool + ["index", d, key], check=True, stdout=subprocess.DEVNULL)
+        repos[name] = d
+    z = os.path.join(repos["tampered"], os.path.basename(z10))
+    data = bytearray(open(z, "rb").read())
+    data[len(data) // 2] ^= 0x55
+    open(z, "wb").write(bytes(data))
+    t = os.path.join(repos["badsig"], "INDEX.TXT")
+    open(t, "ab").write(b"EVIL\t9.9\t1\t00\tEVIL.ZIP\tnot signed\n")
+    return key + ".PUB", repos
+
+
+def pkg_case(profile, vcard, card):
+    """Packages (M10 step E, PRD D58; apps/pkg, tools/pkg). The gate: a signed package installs and uninstalls
+    cleanly. A source on the host over HTTPS (the test CA), signed with the suite's test key: NOTES listed and
+    installed (its files byte for byte, its profile in GLOS.CFG with a launcher entry, its list); upgraded to 1.1
+    (files changed, added; the profile's title); removed (the files and folders gone, GLOS.CFG byte for byte as it
+    was, the list gone). Refused: a zip changed after signing, an index changed after signing. With the internet,
+    a FreeDOS source listed and one of its packages installed and removed (DOSDIR from PKG's profile). Then PKG's
+    window: NOTES chosen, installed with Alt+I, removed with Alt+R."""
+    tag = "%s-%s" % (profile, card)
+    out = os.path.join(ROOT, "out", "pkg-%s-files" % tag)
+    os.makedirs(out, exist_ok=True)
+    pki = os.path.join(out, "pki")
+    test_pki(pki)
+    certs = os.path.join(out, "CERTS.DAT")
+    subprocess.run([os.path.join(ROOT, "build", "host", "mkcerts"), certs,
+                    os.path.join(os.environ.get("MGA_CACHE", os.path.expanduser("~/.cache/mga-glide")), "dl",
+                                 "cacert-2026-09-25.pem"), os.path.join(pki, "ca.pem")], check=True,
+                   stdout=subprocess.DEVNULL)
+    pub, repos = pkg_repos(out)
+    srv = RepoServer(pki, "good", repos["one"])
+    internet = subprocess.run(["getent", "hosts", "www.ibiblio.org"], capture_output=True).returncode == 0
+    open(os.path.join(out, "SOURCES.TXT"), "w").write(
+        "glos https://test.glos:%d/\r\n" % srv.port
+        + ("freedos https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/\r\n"
+           if internet else ""))
+    open(os.path.join(out, "GLOS.CFG"), "w").write(PKG_CFG)
+    rel = lambda f: os.path.relpath(f, ROOT)
+    agent = Agent("pkg-" + tag, profile, card, ["--card", vcard,
+        "--file", "%s=/TEST/GLOS.CFG" % rel(os.path.join(out, "GLOS.CFG")),
+        "--file", "build/apps/PKG.EXE=/TEST/PKG.EXE", "--file", "%s=/TEST/CERTS.DAT" % rel(certs),
+        "--file", "%s=/TEST/KEYS/PKG/TEST.PUB" % rel(pub),
+        "--file", "%s=/TEST/PKG/SOURCES.TXT" % rel(os.path.join(out, "SOURCES.TXT")),
+        "--cmd", "SERSAY HX-START pkg", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=3600)
+    checks, notes = {"listen": agent.listening()}, []
+
+    def pkg(args, timeout=600):
+        rc, o, e = agent.ssh("C:\\TEST\\PKG.EXE --resolve test.glos:10.0.2.2 " + args, timeout=timeout)
+        o = (o + e).replace("\r", "")
+        open(os.path.join(out, "pkg.log"), "a").write("> PKG %s (rc %d)\n%s\n" % (args, rc, o))
+        return rc, o
+
+    def fetch(path):
+        dst = os.path.join(out, "got")
+        if os.path.exists(dst):
+            os.remove(dst)
+        f = subprocess.run(["scp", "-P", str(agent.port), "-i", agent.key, "-o", "IdentitiesOnly=yes", "-o",
+                            "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                            "-o", "LogLevel=ERROR", "glos@127.0.0.1:/" + path[0] + path[2:].replace("\\", "/"), dst],
+                           capture_output=True, timeout=120)
+        return open(dst, "rb").read() if f.returncode == 0 else None
+
+    def exists(path):
+        return "THERE" in agent.ssh("IF EXIST %s ECHO THERE" % path)[1]
+
+    def src(version, f):
+        return open(os.path.join(out, "src-" + version, f), "rb").read()
+
+    try:
+        t0 = time.time()                        # (GLOS.CFG read: its first copy, to compare at the end)
+        while time.time() - t0 < 60 and not agent.ssh("glos config")[1].startswith("config loaded"):
+            time.sleep(0.5)
+        agent.ssh("glos time set " + time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        before = fetch("C:\\TEST\\GLOS.CFG")
+        rc, o = pkg("LIST")
+        checks["list"] = rc == 0 and re.search(r"^PKG NOTES +1\.0 ", o, re.M) is not None
+        rc, o = pkg("INSTALL NOTES")
+        checks["install"] = rc == 0 and "PKG installed NOTES 1.0 in C:\\APPS\\NOTES: 3 files (signed)" in o
+        checks["files"] = fetch("C:\\APPS\\NOTES\\README.TXT") == src("1.0", "README.TXT") and \
+            fetch("C:\\APPS\\NOTES\\NOTES.EXE") == src("1.0", "NOTES.EXE") and \
+            fetch("C:\\APPS\\NOTES\\DOC\\NOTES.TXT") == src("1.0", os.path.join("DOC", "NOTES.TXT"))
+        checks["profile"] = agent.ssh("glos config get program:NOTES.EXE title")[1].strip() == "Notes" and \
+            agent.ssh("glos config get program:NOTES.EXE menu")[1].strip() == "1"
+        checks["runs"] = "CLOCK dos=" in agent.ssh("C:\\APPS\\NOTES\\NOTES.EXE")[1]
+        rc, o = pkg("LIST -I")
+        checks["installed"] = "PKG installed NOTES    1.0" in o
+        rc, o = pkg("INSTALL NOTES")
+        checks["again-refused"] = rc == 1 and "installed already" in o
+        srv.root = repos["two"]
+        rc, o = pkg("UPGRADE")
+        checks["upgrade"] = rc == 0 and "upgrading NOTES 1.0 to 1.1" in o and "PKG installed NOTES 1.1" in o
+        checks["upgraded"] = fetch("C:\\APPS\\NOTES\\README.TXT") == src("1.1", "README.TXT") and \
+            fetch("C:\\APPS\\NOTES\\NEW.TXT") == src("1.1", "NEW.TXT") and \
+            agent.ssh("glos config get program:NOTES.EXE title")[1].strip() == "Notes 1.1"
+        rc, o = pkg("REMOVE NOTES")
+        checks["remove"] = rc == 0 and "PKG removed NOTES" in o
+        checks["gone"] = not exists("C:\\APPS\\NOTES\\NUL") and not exists("C:\\APPS\\NUL") and \
+            not exists("C:\\TEST\\PKG\\NOTES.LST")
+        t0 = time.time()                        # (the kernel writes GLOS.CFG soon after a change)
+        after = None
+        while time.time() - t0 < 30 and after != before:
+            time.sleep(1)
+            after = fetch("C:\\TEST\\GLOS.CFG")
+        checks["cfg-as-before"] = before is not None and after == before
+        if not checks["cfg-as-before"]:
+            notes.append("GLOS.CFG after: %r" % after)
+        srv.root = repos["tampered"]
+        rc, o = pkg("INSTALL NOTES")
+        checks["tampered"] = rc == 1 and "isn't the signed index's: refused" in o and not exists("C:\\APPS\\NUL")
+        srv.root = repos["badsig"]
+        rc, o = pkg("INSTALL NOTES")
+        checks["bad-signature"] = rc == 1 and "isn't signed by a key" in o and "no source has NOTES" in o
+        if internet:
+            rc, o = pkg("LIST", timeout=900)
+            checks["freedos-list"] = re.search(r"^PKG CHOICE .*\(FreeDOS\)$", o, re.M) is not None
+            rc, o = pkg("INSTALL CHOICE", timeout=900)
+            checks["freedos-install"] = rc == 0 and "in C:\\FDTEST" in o and "unsigned" in o and \
+                exists("C:\\FDTEST\\BIN\\CHOICE.EXE") and not exists("C:\\FDTEST\\SOURCE\\NUL")
+            rc, o = pkg("REMOVE CHOICE")
+            checks["freedos-remove"] = rc == 0 and not exists("C:\\FDTEST\\NUL")
+        else:
+            notes.append("no internet: the FreeDOS source not asked")
+        # the window: NOTES chosen (the signed source's rows come first), installed, removed
+        srv.root = repos["one"]
+        agent.ssh("glos display on 640x480x16")
+        t0 = time.time()
+        while time.time() - t0 < 60 and " 640x480x16 " not in agent.ssh("glos display")[1]:
+            time.sleep(0.5)
+        g = GuiDriver(agent, out, 16, False, "C:\\TEST\\")
+        win = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\PKG.EXE --resolve test.glos:10.0.2.2"],
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        checks["window"] = bool(g.until(lambda d: g.window("Packages", d) is not None, 120))
+        time.sleep(20 if internet else 8)       # (the sources read)
+        agent.ssh("glos key " + gui_key_list(["down", "home"]))
+        agent.ssh("glos key " + gui_key_list(["alt+i"]))
+        t0 = time.time()
+        while time.time() - t0 < 120 and not exists("C:\\APPS\\NOTES\\README.TXT"):
+            time.sleep(2)
+        checks["window-install"] = exists("C:\\APPS\\NOTES\\README.TXT")
+        agent.ssh("glos key " + gui_key_list(["alt+r"]))
+        t0 = time.time()
+        while time.time() - t0 < 60 and exists("C:\\APPS\\NUL"):
+            time.sleep(2)
+        checks["window-remove"] = not exists("C:\\APPS\\NUL")
+        agent.ssh("glos key " + gui_key_list(["alt+f4"]))
+        try:
+            o, _ = win.communicate(timeout=60)
+            checks["window-end"] = b"PKG end" in o
+            open(os.path.join(out, "window.out"), "wb").write(o)
+        except subprocess.TimeoutExpired:
+            win.kill()
+            checks["window-end"] = False
+        checks["sockets"] = "sockets=0" in agent.ssh("glos net")[1]
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    srv.close()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    for n in notes:
+        print("    pkg-%s %s" % (tag, n))
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("pkg-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def config_case(profile, vcard, card):
     """GLOS.CFG's settings (M9 step B; include/glos/config.h, kernel/core/config.c): every setting the schema has
     set over ssh (glos config set) to a value other than its default, read back, in the file afterwards with the
@@ -4964,7 +5210,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -4996,6 +5242,9 @@ def main():
     if a.suite == "time":
         cases = [c for c in TIME_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(time_case, cases, a.jobs)) else 1
+    if a.suite == "pkg":
+        cases = [c for c in PKG_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(pkg_case, cases, a.jobs)) else 1
     if a.suite == "sshc":
         cases = [c for c in SSHC_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(sshc_case, cases, a.jobs)) else 1

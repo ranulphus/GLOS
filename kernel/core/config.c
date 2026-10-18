@@ -375,6 +375,17 @@ int kcfg_set(const char *section, const char *key, const char *value, char *why,
         }
         i++;
     }
+    if (!given && at >= 0) {                    /* (M10) unset: a section with nothing left but blank lines goes, with
+                                                   the blank line before it, as a set made them; a package's profile
+                                                   taken out leaves the file as it was */
+        u32 j;
+        for (j = (u32)at + 1; j < end && !c.line[j][0]; j++) ;
+        if (j == end) {
+            drop((u32)at);
+            if (at > 0 && !c.line[at - 1][0])
+                drop((u32)at - 1);
+        }
+    }
     r = 0;
     if (value) {
         const char *p = value;

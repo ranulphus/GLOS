@@ -193,3 +193,23 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
       486dx2);
     - ssh-keygen's key read by OpenSSH.
   - The terminal's own scripts pass at every depth.
+- **Step E done** (2026-10-18): packages.
+  - `PKG.EXE` (`apps/pkg`) is a command (SOURCES, LIST, INSTALL, REMOVE, UPGRADE) and, without arguments, a
+    window.
+  - `tools/pkg/pkg.py` makes keys, packages and signed indexes on the host.
+  - A GLOS source's `INDEX.SIG` is the Ed25519 signature over `INDEX.TXT`'s bytes, by a key in `KEYS\PKG\*.PUB`.
+    Each zip's size and SHA-256 must be the index's, and its names DOS's own (8.3, relative). Every entry is
+    inflated (stb_image's inflater) and CRC-checked before anything is written.
+  - `PKG\NAME.LST` lists what a package put where, and its profile's keys, and removal takes exactly that away.
+  - The kernel's unset now drops a section left empty, with the blank line before it, so GLOS.CFG is byte for
+    byte as it was.
+  - FreeDOS's repositories (`index.lst`, FD-REPOv1) are a second kind of source: unsigned, trusted through HTTPS
+    and their CRC-32, and said so. Their packages go under DOSDIR, without SOURCE\.
+  - **The gate passes:** `make loopa-pkg` on bf6 and the 486dx2. A source on the host over HTTPS (the test CA),
+    signed with the suite's test key:
+    - NOTES listed and installed: its files byte for byte, its profile with a launcher entry, the program run;
+    - upgraded to 1.1;
+    - removed: files and folders gone, GLOS.CFG byte for byte as before;
+    - refused: a zip changed after signing, an index changed after signing;
+    - FreeDOS 1.4's base listed (57 packages), CHOICE installed under the profile's DOSDIR and removed;
+    - the window installing and removing NOTES.
