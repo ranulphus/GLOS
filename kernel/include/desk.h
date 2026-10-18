@@ -10,12 +10,13 @@ struct wm *desk_lock(void);             /* the manager, for the caller alone unt
 void desk_unlock(void);                 /* ... and the composer told to look */
 void desk_kick(void);                   /* something changed (from anywhere, interrupts on or off) */
 void desk_note(const char *note);       /* the task bar's note: a remote session's (PRD D35), or "" */
+u32 desk_frames(void);                  /* how many composes have drawn something (glos rec: M10) */
 /* Input, from the 8042's code (vm/vkbc.c; interrupts off): a keyboard byte
    (set 1); a byte of the mouse's (b: its packets have a fourth byte, a
    wheel's); a movement already told apart (dx, dy, the buttons now); the
    kill hotkey; or word that the keyboard has changed hands (whatever was
-   held is forgotten). */
-enum { DESK_KEY, DESK_AUX, DESK_MOUSE, DESK_KILL, DESK_RESET, DESK_SYSKEY };
+   held is forgotten). DESK_POINT (M10): the pointer to (a, b), the buttons c: VNC's, absolute. */
+enum { DESK_KEY, DESK_AUX, DESK_MOUSE, DESK_KILL, DESK_RESET, DESK_SYSKEY, DESK_POINT };
 void desk_in(int what, int a, int b, int c);
 int desk_in_busy(void);                         /* injected keys should wait: the focused app is behind */
 const char *desk_focus_line(void);              /* "app=N window=N backlog=N input=N", for the log */

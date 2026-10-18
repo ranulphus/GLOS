@@ -36,5 +36,6 @@ int display_quiet(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, int app);    /* a prog
                                                    has the screen: 1 if answered here, not by the BIOS */
 
 int display_desktop_bpp(void);                  /* the desktop's depth, the screen its or held by a session; 0: none */
+int display_dac_bits(void);                     /* the DAC's bits a colour at 8 bits a pixel: 8, or 6 (VNC: M10) */
 
 #endif

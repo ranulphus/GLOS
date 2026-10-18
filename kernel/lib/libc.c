@@ -39,6 +39,19 @@ char *strchr(const char *s, int c)
     return c ? 0 : (char *)s;
 }
 
+char *strstr(const char *s, const char *t)
+{
+    for (;; s++) {
+        size_t i = 0;
+        while (t[i] && s[i] == t[i])
+            i++;
+        if (!t[i])
+            return (char *)s;
+        if (!*s)
+            return 0;
+    }
+}
+
 int strcmp(const char *a, const char *b)
 {
     while (*a && *a == *b)

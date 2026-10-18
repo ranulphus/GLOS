@@ -37,6 +37,7 @@
 #include "mm.h"
 #include "sched.h"
 #include "timer.h"
+#include "vnc.h"
 
 void wm_demo(struct wm *m);
 
@@ -46,6 +47,9 @@ static struct thread *owner;                    /* who has the manager */
 static volatile u8 changed, repaint;
 static u8 demo;                                 /* the demonstration's windows are up: its clock stands */
 static char note[16];
+static volatile u32 frames;                     /* composes that drew something */
+
+u32 desk_frames(void) { return frames; }
 
 static void *d_alloc(u32 bytes, int kind)
 {
@@ -178,6 +182,9 @@ static void desk_thread(void *arg)
                 wm_damage_all(m);
             }
             bar_text(m);
+            if (m->dirty.n)
+                frames++;                       /* (glos rec's: a frame has changed) */
+            vnc_damage(&m->dirty, fb);          /* (what VNC's viewers are owed: M10) */
             wm_compose(m, fb);
         }
         deskin_focus(m);

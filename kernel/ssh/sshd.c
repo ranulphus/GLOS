@@ -41,6 +41,7 @@
 #include "sshd.h"
 #include "timer.h"
 #include "vm.h"
+#include "vnc.h"
 
 #define NCONN      4
 #define RING       0x10000u                     /* a power of two */
@@ -108,6 +109,12 @@ static void wake_ssh(void)
     if (f & 0x200)
         sti();
 }
+
+void sshd_wake(void) { wake_ssh(); }
+
+static void stream_at(u32 tick);
+
+void sshd_turn_at(u32 tick) { stream_at(tick); }
 
 /* ---- the net thread's side */
 
@@ -351,6 +358,147 @@ static int shot_turn(struct ssh_chan *ch, void *arg)
 }
 
 static void shot_drop(void *arg) { shot_free(arg); }
+
+/* glos rec [--fps N] [--seconds S] (M10 step F, PRD D60): the desktop's frames while they change, at most N a
+   second (10), for S seconds (until the client goes): each one "FRAME n ms bytes" and the PNG, the same bytes as
+   glos shot's of that moment (its capture, its encoder); "END frames" at the end. tools/rec.py writes them out. */
+struct rec {
+    u32 every, until, t0, due, frames_seen, n;
+    struct shot *sh;
+    u8 *png;
+    u32 len, room, at;
+    int phase;                                  /* 0 waiting, 1 shooting, 2 sending */
+};
+
+static int rec_turn(struct ssh_chan *ch, void *arg)
+{
+    static u8 piece[SHOT_PIECE];
+    struct rec *r = arg;
+    u32 now = timer_ticks(), n;
+    char line[64];
+    for (;;) {
+        switch (r->phase) {
+        case 0:
+            if (r->until && (s32)(now - r->until) >= 0) {
+                ksnprintf(line, sizeof line, "END %u\n", r->n);
+                say(ch, 0, line);
+                ssh_chan_exit(ch, 0);
+                return 1;
+            }
+            if ((s32)(now - r->due) < 0 || desk_frames() == r->frames_seen) {
+                stream_at(r->due);              /* (looked at again then) */
+                return 0;
+            }
+            n = desk_frames();
+            if (!(r->sh = shot_new(0, wake_ssh))) {
+                stream_at(now + 8);             /* (another capture under way, glos shot's: again soon, the frame
+                                                   still owed) */
+                return 0;
+            }
+            r->frames_seen = n;
+            r->len = 0;
+            r->phase = 1;
+            break;
+        case 1: {
+            int st = shot_poll(r->sh);
+            if (!st)
+                return 0;
+            if (st < 0) {                       /* (no picture now: the next change) */
+                shot_free(r->sh);
+                r->sh = 0;
+                r->phase = 0;
+                r->due = now + r->every;
+                break;
+            }
+            while ((n = shot_read(r->sh, piece)) != 0) {
+                if (r->len + n > r->room) {
+                    u32 room = (r->len + n) * 2;
+                    u8 *p = kmalloc(room);
+                    if (!p) {
+                        shot_free(r->sh);
+                        r->sh = 0;
+                        say(ch, 1, "glos rec: no memory\n");
+                        ssh_chan_exit(ch, 1);
+                        return 1;
+                    }
+                    if (r->png) {
+                        memcpy(p, r->png, r->len);
+                        kfree(r->png);
+                    }
+                    r->png = p, r->room = room;
+                }
+                memcpy(r->png + r->len, piece, n);
+                r->len += n;
+            }
+            shot_free(r->sh);
+            r->sh = 0;
+            ksnprintf(line, sizeof line, "FRAME %u %u %u\n", ++r->n, (now - r->t0) * 1000 / 1024, r->len);
+            say(ch, 0, line);
+            r->at = 0;
+            r->phase = 2;
+            break;
+        }
+        case 2:
+            while (r->at < r->len && ssh_chan_pending(ch) < ROOM) {
+                n = r->len - r->at < SHOT_PIECE ? r->len - r->at : SHOT_PIECE;
+                ssh_chan_write(ch, 0, r->png + r->at, n);
+                r->at += n;
+            }
+            if (r->at < r->len)
+                return 0;
+            r->phase = 0;
+            r->due += r->every;
+            if ((s32)(now - r->due) > 0)
+                r->due = now;
+            break;
+        }
+    }
+}
+
+static void rec_drop(void *arg)
+{
+    struct rec *r = arg;
+    if (r->sh)
+        shot_free(r->sh);
+    if (r->png)
+        kfree(r->png);
+    kfree(r);
+}
+
+static int number(const char **p, int *v);
+
+static void rec_cmd(struct ssh_chan *ch, const char *args)
+{
+    struct rec *r = kmalloc(sizeof *r);
+    u32 fps = 10, secs = 0;
+    const char *p;
+    int v;
+    if ((p = strstr(args, "--fps ")) != 0) {
+        p += 6;
+        fps = number(&p, &v) == 0 ? (u32)v : 0;
+    }
+    if ((p = strstr(args, "--seconds ")) != 0) {
+        p += 10;
+        secs = number(&p, &v) == 0 ? (u32)v : 0;
+    }
+    if (!r || !fps || fps > 30) {
+        if (r)
+            kfree(r);
+        say(ch, 1, !r ? "glos rec: no memory\n" : "glos rec: --fps 1 to 30\n");
+        ssh_chan_exit(ch, 1);
+        return;
+    }
+    memset(r, 0, sizeof *r);
+    r->every = 1024 / fps;
+    r->t0 = r->due = timer_ticks();
+    r->until = secs ? r->t0 + secs * 1024 : 0;
+    r->frames_seen = desk_frames() - 1;         /* (the first frame at once: what is there now) */
+    if (stream_add(ch, rec_turn, rec_drop, r) != 0) {
+        kfree(r);
+        say(ch, 1, "glos rec: busy\n");
+        ssh_chan_exit(ch, 1);
+    }
+}
 
 /* glos key, type and mouse (PRD §7.6): input into the program in front, as
    from the keyboard and the mouse (kernel/vm/vkbc.c), each event at its
@@ -914,6 +1062,8 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             say(ch, 1, sh ? "glos shot: busy\n" : "glos shot: no memory\n");
             ssh_chan_exit(ch, 1);
         }
+    } else if (!strcmp(cmd, "glos rec") || !strncmp(cmd, "glos rec ", 9)) {
+        rec_cmd(ch, cmd + 8);
     } else if (!strncmp(cmd, "glos key ", 9) || !strncmp(cmd, "glos type ", 10) || !strncmp(cmd, "glos mouse ", 11)) {
         input_cmd(ch, cmd);
     } else if (!strcmp(cmd, "glos log --follow") || !strcmp(cmd, "glos stat --follow")) {
@@ -1189,9 +1339,21 @@ static int k_subsystem(struct ssh_chan *ch, const char *name)
     return 0;
 }
 
-/* A direct-tcpip channel: to glos gdb's port here, once it is armed, and nowhere else. */
+static void vnc_drop(void *arg) { (void)arg; }   /* (its channel's end is vnc_gone's) */
+
+/* A direct-tcpip channel: to glos gdb's port here, once it is armed; to the VNC server's, 5900, when [vnc]
+   enable is on (M10); nowhere else. */
 static int k_tcpip(struct ssh_chan *ch, const char *host, uint32_t port)
 {
+    if (port == 5900 && (!strcmp(host, "localhost") || !strcmp(host, "127.0.0.1"))) {
+        if (vnc_open(ch) != 0 || stream_add(ch, vnc_turn, vnc_drop, 0) != 0) {
+            vnc_gone(ch);
+            kprintf("GLOS-SSH forward to=%s:%u refused\n", host, port);
+            return -1;
+        }
+        kprintf("GLOS-SSH forward to=vnc\n");
+        return 0;
+    }
     if (port != GDBP_PORT || gdb_chan || (strcmp(host, "localhost") && strcmp(host, "127.0.0.1"))
         || gdbp_attach(gdb_send) != 0) {
         kprintf("GLOS-SSH forward to=%s:%u refused\n", host, port);
@@ -1204,6 +1366,10 @@ static int k_tcpip(struct ssh_chan *ch, const char *host, uint32_t port)
 
 static void k_data(struct ssh_chan *ch, const uint8_t *d, uint32_t n)
 {
+    if (vnc_owns(ch)) {
+        vnc_input(ch, d, n);
+        return;
+    }
     if (ch == gdb_chan) {
         gdbp_input(d, n);
         return;
@@ -1214,6 +1380,10 @@ static void k_data(struct ssh_chan *ch, const uint8_t *d, uint32_t n)
 
 static void k_eof(struct ssh_chan *ch)
 {
+    if (vnc_owns(ch)) {                         /* (the viewer has gone: its side closes too) */
+        ssh_chan_close(ch);
+        return;
+    }
     if (ch == gdb_chan) {                       /* gdb has gone: its side closes too, and the program runs on */
         gdbp_detach();
         ssh_chan_close(ch);
@@ -1225,6 +1395,7 @@ static void k_eof(struct ssh_chan *ch)
 
 static void k_gone(struct ssh_chan *ch)
 {
+    vnc_gone(ch);
     if (ch == gdb_chan) {
         gdbp_detach();
         gdb_chan = 0;
@@ -1302,6 +1473,7 @@ static void ssh_main(void *arg)
         agent_service(agent_write, agent_done);
         sftp_turn();
         streams_turn();
+        vnc_keys_turn();                        /* (keys a viewer sent, that the keyboard hadn't room for yet) */
         gdbp_turn();
         if (reboot_at) {
             if ((s32)(timer_ticks() - reboot_at) >= 0) {

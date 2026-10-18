@@ -1673,6 +1673,39 @@ and GLOS's:
   DJGPP's (found by NETTEST: a non-blocking `recv` waited for ever). Headers named as POSIX has them are in
   `include/glos/posix`.
 
+### 17.12 VNC and capture (M10 step F, `kernel/wm/vnc.c`, `glos rec`)
+
+- **The way in.** The VNC server speaks RFB 3.8 (3.3 and 3.7 too), with security type None. It is reached only
+  through the SSH server: a direct-tcpip channel to 127.0.0.1:5900 (`ssh -L`), taken when GLOS.CFG's `[vnc] enable`
+  is on. The agent's key is the lock. Two viewers at once. While one is connected, the task bar's note says `VNC`
+  (`desk_note`, D35).
+- **What a viewer is owed.**
+  - Before each `wm_compose()` the desktop's thread adds the composer's dirty region to each viewer's
+    (`vnc_damage`), under the desktop's lock, and wakes the ssh thread.
+  - A viewer's update is made when it has asked and something is owed: the screen is read from `display_fb()`
+    after `display_sync()`, and the whole update goes into a buffer the stream feeds to the channel as it has room.
+  - The card's cursor is drawn over the pixels, as `glos shot` draws it (`mga_cursor_state`), and its moves are owed.
+    An 8-bit desktop's colours are taken through the DAC's width as a shot reads them back. So a viewer's screen and
+    a shot of it are the same pixels.
+  - While a session has the screen nothing is sent; the desktop's return repaints everything.
+- **Encodings.**
+  - Hextile tiles of one colour, two, coloured subrectangles or raw, whichever is smaller; Raw.
+  - CopyRect for a window moved in front of everything. Only when the two places don't overlap (the move's outline
+    lies on the new place's border, and the viewer has seen it), nothing above covers either, and nothing was owed
+    where it was. The move's compose leaves the new place to the copy, so an app's drawing there in that very
+    compose waits for its next.
+  - Any true-colour pixel format the viewer asks for.
+- **Input.**
+  - Keys arrive as X keysyms, turned into set 1 codes (a US layout, with Shift added for a character that needs it
+    when the viewer holds none). They are queued, and given to `vkbc_key` while the keyboard has room, as `glos key`
+    waits.
+  - The pointer is absolute: `DESK_POINT`, which moves the desktop's pointer there unscaled (`mouse_to`), with the
+    buttons' changes as presses and releases.
+- **`glos rec [--fps N] [--seconds S]`** (D60) streams the desktop's frames while they change (`desk_frames()`
+  counts the composes that drew), at most N a second. Each frame is `FRAME n ms bytes` and a PNG: the same capture
+  and encoder as `glos shot`, so the same bytes for that moment. `tools/rec.py` writes `NNNNN.png` and an
+  `index.txt` in ffmpeg's concat format.
+
 ## 18. Logging
 
 - Lines on COM1 have the form `GLOS-<TAG> key=value …`, one line per event, written synchronously so the last

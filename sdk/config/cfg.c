@@ -8,7 +8,8 @@
 
 /* ---- the schema */
 
-const char *const cfg_sections[] = { "display", "input", "sound", "net", "time", "desktop", "shell", "open", "program",
+const char *const cfg_sections[] = { "display", "input", "sound", "net", "time", "vnc", "desktop", "shell", "open",
+                                     "program",
                                      0 };
 
 const struct cfg_key cfg_schema[] = {
@@ -47,6 +48,9 @@ const struct cfg_key cfg_schema[] = {
       "Where the PC is, as a POSIX TZ string: GMT0BST,M3.5.0/1,M10.5.0 is the United Kingdom's" },
     { "time", "interval", CFG_NUMBER, CFG_NOW, 1, 168, 0, "24", "&Ask again (hours)",
       "How often the time server is asked again" },
+    /* [vnc] (M10 step F) */
+    { "vnc", "enable", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "off", "&Viewers through SSH",
+      "A VNC viewer may see and use the desktop, through an SSH tunnel to port 5900 (ssh -L): whoever may log in" },
     /* [desktop] (M9) */
     { "desktop", "start", CFG_TEXT, CFG_DESKTOP, 0, 120, "line", "", "&Start with the desktop",
       "Programs started when the desktop starts, beside GLOS.EXE (FILES.EXE draws the desktop's icons)" },

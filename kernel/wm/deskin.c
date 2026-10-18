@@ -39,6 +39,7 @@
 #include "kprintf.h"
 #include "timer.h"
 #include "vm.h"
+#include "vnc.h"
 
 struct in {
     u8 what, c;
@@ -261,10 +262,22 @@ static void drag_end(struct wm *m, int make)
     drag_stop(m);
     if (!w || !make)
         return;
-    if (size)
+    if (size) {
         deskapp_resize(m, w, g.w - (w->frame.w - w->store.w), g.h - (w->frame.h - w->store.h));
-    else
+    } else {
+        struct gfx_rect old = w->frame;
+        struct wm_window *o;
+        int clear = old.x + old.w <= g.x || g.x + old.w <= old.x || old.y + old.h <= g.y || g.y + old.h <= old.y;
+        for (o = w->above; o && clear; o = o->above)    /* (VNC's CopyRect: nothing above it at either place) */
+            if ((o->flags & WF_SHOWN) && ((o->frame.x < old.x + old.w && old.x < o->frame.x + o->frame.w && o->frame.y < old.y + old.h
+                              && old.y < o->frame.y + o->frame.h)
+                             || (o->frame.x < g.x + old.w && g.x < o->frame.x + o->frame.w && o->frame.y < g.y + old.h
+                                 && g.y < o->frame.y + o->frame.h)))
+                clear = 0;
+        if (clear && (w->flags & WF_SHOWN))
+            vnc_moved(old.x, old.y, old.w, old.h, g.x - old.x, g.y - old.y);
         wm_move(m, w, g.x, g.y);
+    }
 }
 
 /* A key while the arrows move the outline. */
@@ -467,15 +480,15 @@ static s32 speed = 1;                           /* [input] pointer_speed (M9) */
 
 void deskin_pointer_speed(int s) { speed = s >= 1 && s <= 3 ? s : 1; }
 
-static void mouse(struct wm *m, s32 dx, s32 dy, u32 now)
+/* The pointer to (x, y) with the buttons `now`: a movement and a press or release, as the mouse makes them. */
+static void mouse_to(struct wm *m, s32 x, s32 y, u32 now)
 {
     struct wm_window *w;
     u32 was = buttons, bit;
-    s32 x0 = m->px, y0 = m->py;
+    s32 x0 = m->px, y0 = m->py, dx, dy;
 
-    dx *= speed, dy *= speed;
-
-    wm_pointer(m, m->px + dx, m->py + dy, 1);
+    wm_pointer(m, x, y, 1);
+    dx = m->px - x0, dy = m->py - y0;
     buttons = (u8)now;
     if (drag == D_MOVE || drag == D_SIZE) {
         struct gfx_rect g = m->ghost;
@@ -500,6 +513,8 @@ static void mouse(struct wm *m, s32 dx, s32 dy, u32 now)
         if ((was ^ now) & bit)
             button(m, bit, (now & bit) != 0);
 }
+
+static void mouse(struct wm *m, s32 dx, s32 dy, u32 now) { mouse_to(m, m->px + dx * speed, m->py + dy * speed, now); }
 
 /* A byte from the mouse itself: three make a packet (four with a wheel). */
 static void aux_byte(struct wm *m, u8 b, int wheel)
@@ -561,6 +576,7 @@ void deskin_turn(struct wm *m)
         case DESK_KEY: key_byte(m, (u8)e.a); break;
         case DESK_AUX: aux_byte(m, (u8)e.a, e.b); break;
         case DESK_MOUSE: mouse(m, e.a, e.b, e.c); break;
+        case DESK_POINT: mouse_to(m, e.a, e.b, e.c); break;
         case DESK_RESET: forget(m); break;
         case DESK_SYSKEY: to_shell(m, GLOS_EV_SYSKEY); break;
         }

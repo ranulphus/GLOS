@@ -4653,6 +4653,167 @@ def pkg_case(profile, vcard, card):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+VNC_CASES = [("bf6", "g200", "ne2kpci", 16), ("bf6", "g400", "ne2kpci", 32), ("bf6", "vbe", "ne2kpci", 8)]
+
+
+def vnc_case(profile, vcard, card, bits):
+    """VNC and capture (M10 step F; kernel/wm/vnc.c, glos rec, tools/rec.py). The gates: a stock VNC client
+    (vncdotool, pinned: tests/vnc) views and drives the desktop through an SSH tunnel (ssh -L to 127.0.0.1:5900),
+    and a capture's frames are identical to glos shot. Its screen equal to glos shot's (with a second viewer held
+    on, so that the task bar's mark is the same in both); text typed into Notepad through it and saved, read back;
+    Notepad's close box pressed through it, the window gone; the screen equal again. At 16 bits, glos rec runs
+    meanwhile: each glos shot taken during it is one of its frames, byte for byte."""
+    import socket
+    import threading
+    tag = "%s-%s-%d" % (profile, vcard, bits)
+    out = os.path.join(ROOT, "out", "vnc-%s-files" % tag)
+    os.makedirs(out, exist_ok=True)
+    for f in os.listdir(out):
+        if f.endswith(".png"):
+            os.remove(os.path.join(out, f))
+    open(os.path.join(out, "GLOS.CFG"), "w").write("; GLOS.CFG for the vnc suite\r\n[vnc]\r\nenable = on\r\n")
+    agent = Agent("vnc-" + tag, profile, card, ["--card", vcard,
+        "--file", "%s=/TEST/GLOS.CFG" % os.path.relpath(os.path.join(out, "GLOS.CFG"), ROOT),
+        "--file", "build/apps/NOTEPAD.EXE=/TEST/NOTEPAD.EXE",
+        "--cmd", "SERSAY HX-START vnc", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"],
+        timeout=3600)
+    checks, notes, procs = {"listen": agent.listening()}, [], []
+    hold = "glos-vnc-hold-" + tag
+    g = GuiDriver(agent, out, bits, False, "C:\\TEST\\")
+
+    def vncdo(*args, timeout=180):
+        r = subprocess.run(["docker", "run", "--rm", "--network", "host", "-v", out + ":/out", "glos-vnc:m10",
+                            "timeout", str(timeout), "vncdo", "-s", "127.0.0.1::%d" % port] + list(args),
+                           capture_output=True, text=True, timeout=timeout + 60)
+        if r.returncode:
+            notes.append("vncdo %s: %d %s" % (" ".join(args), r.returncode, (r.stdout + r.stderr)[-200:]))
+        return r.returncode == 0
+
+    def shot():
+        for _ in range(20):                     # (glos rec's capture may have the screen a moment)
+            data = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=180).stdout
+            if data[:8] == b"\x89PNG\r\n\x1a\n":
+                return data
+            time.sleep(0.5)
+        return b""
+
+    def same(name):
+        from PIL import Image
+        for _ in range(3):                      # (a shot either side of the capture: the clock may turn between)
+            before = shot()
+            if not vncdo("capture", "/out/%s.png" % name):
+                return False
+            data = shot()
+            if data == before:
+                break
+        open(os.path.join(out, "%s-shot.png" % name), "wb").write(data)
+        a = png_rgb(data)
+        try:
+            v = Image.open(os.path.join(out, "%s.png" % name)).convert("RGB")
+        except OSError:
+            return False
+        if not a or (a[0], a[1]) != v.size:
+            notes.append("%s: sizes %s %s" % (name, a and (a[0], a[1]), v.size))
+            return False
+        vb = v.tobytes()
+        diff = sum(1 for i in range(0, len(a[2]), 3) if a[2][i:i + 3] != vb[i:i + 3])
+        if diff:
+            notes.append("%s: %d pixels differ" % (name, diff))
+        return diff == 0
+
+    try:
+        subprocess.run(["docker", "build", "-q", "-t", "glos-vnc:m10", os.path.join(ROOT, "tests", "vnc")], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        checks["on"] = agent.ssh("glos display on 640x480x%d" % bits)[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and (" 640x480x%d " % bits) not in agent.ssh("glos display")[1]:
+            time.sleep(0.5)
+        t = socket.socket()
+        t.bind(("127.0.0.1", 0))
+        port = t.getsockname()[1]
+        t.close()
+        tunnel = subprocess.Popen(agent.opts + ["-N", "-L", "%d:127.0.0.1:5900" % port, "glos@127.0.0.1"])
+        procs.append(tunnel)
+        t0 = time.time()
+        while time.time() - t0 < 30:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=2).close()
+                break
+            except OSError:
+                time.sleep(0.5)
+        subprocess.run(["docker", "rm", "-f", hold], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["docker", "run", "-d", "--rm", "--name", hold, "--network", "host", "glos-vnc:m10", "vncdo",
+                        "-s", "127.0.0.1::%d" % port, "pause", "1200"], check=True, stdout=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 60 and "GLOS-VNC init" not in agent.log():
+            time.sleep(0.5)
+        time.sleep(3)
+        rec = None
+        if bits == 16:                          # glos rec meanwhile, into rec/ (tools/rec.py)
+            recout = os.path.join(out, "rec")
+            rec = subprocess.Popen("%s | %s %s %s" % (" ".join(agent.opts + ["glos@127.0.0.1", "'glos rec --fps 5 --seconds 120'"]),
+                                                    sys.executable, os.path.join(ROOT, "tools", "rec.py"), recout),
+                                   shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            time.sleep(3)
+        checks["desk-same"] = same("desk")
+        procs.append(subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\NOTEPAD.EXE C:\\TEST\\VNC.TXT"],
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT))
+        d = g.until(lambda d: any("Notepad" in w["title"] and w["shown"] for w in d["win"]), 90)
+        time.sleep(3)
+        checks["notepad-same"] = same("notepad")
+        vncdo("type", "hello from vnc")
+        vncdo("key", "ctrl-s")
+        t0 = time.time()
+        got = None
+        while time.time() - t0 < 60 and got != b"hello from vnc":
+            time.sleep(2)
+            r = subprocess.run(["scp", "-P", str(agent.port), "-i", agent.key, "-o", "IdentitiesOnly=yes", "-o",
+                                "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                                "-o", "LogLevel=ERROR", "glos@127.0.0.1:/C/TEST/VNC.TXT", os.path.join(out, "VNC.TXT")],
+                               capture_output=True, timeout=120)
+            got = open(os.path.join(out, "VNC.TXT"), "rb").read() if r.returncode == 0 else None
+        checks["keys"] = got == b"hello from vnc"
+        if not checks["keys"]:
+            notes.append("VNC.TXT: %r" % got)
+        time.sleep(2)
+        checks["typed-same"] = same("typed")
+        w = next((w for w in g.desk()["win"] if "Notepad" in w["title"] and w["shown"]), None)
+        if w:                                   # the close box: the title bar's left, 10 from the frame's corner
+            vncdo("move", str(w["x"] + 9), str(w["y"] - 10), "click", "1")
+        checks["button"] = bool(w) and bool(g.until(lambda d: not any("Notepad" in x["title"] and x["shown"]
+                                                                       for x in d["win"]), 60))
+        time.sleep(3)
+        checks["after-same"] = same("after")
+        if rec:
+            o, _ = rec.communicate(timeout=300)
+            frames = {}
+            for f in sorted(os.listdir(recout)) if os.path.isdir(recout) else []:
+                if f.endswith(".png"):
+                    frames[open(os.path.join(recout, f), "rb").read()] = f
+            shots = [open(os.path.join(out, n + "-shot.png"), "rb").read() for n in ("desk", "notepad", "typed", "after")]
+            found = [frames.get(x) for x in shots]
+            checks["rec-frames"] = len(frames) >= 3 and all(found)
+            checks["rec-index"] = os.path.exists(os.path.join(recout, "index.txt"))
+            notes.append("rec: %d frames; the shots were %s; %s" % (len(frames), found, o.decode("latin-1").strip()[-80:]))
+        checks["vnc-log"] = "GLOS-VNC open viewers=2" in agent.log()
+        subprocess.run(["docker", "rm", "-f", hold], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        tunnel.terminate()
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    for p in procs:
+        if p.poll() is None:
+            p.kill()
+    subprocess.run(["docker", "rm", "-f", hold], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    text = agent.wait()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    for n in notes:
+        print("    vnc-%s %s" % (tag, n))
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("vnc-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def config_case(profile, vcard, card):
     """GLOS.CFG's settings (M9 step B; include/glos/config.h, kernel/core/config.c): every setting the schema has
     set over ssh (glos config set) to a value other than its default, read back, in the file afterwards with the
@@ -5210,7 +5371,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -5242,6 +5403,9 @@ def main():
     if a.suite == "time":
         cases = [c for c in TIME_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(time_case, cases, a.jobs)) else 1
+    if a.suite == "vnc":
+        cases = [c for c in VNC_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(vnc_case, cases, a.jobs)) else 1
     if a.suite == "pkg":
         cases = [c for c in PKG_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(pkg_case, cases, a.jobs)) else 1

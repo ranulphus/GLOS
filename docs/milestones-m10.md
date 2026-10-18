@@ -213,3 +213,28 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
     - refused: a zip changed after signing, an index changed after signing;
     - FreeDOS 1.4's base listed (57 packages), CHOICE installed under the profile's DOSDIR and removed;
     - the window installing and removing NOTES.
+- **Step F done** (2026-10-18): VNC and capture. As built: supervisor.md §17.12.
+  - The VNC server (`kernel/wm/vnc.c`) speaks RFB 3.8 without a password of its own: SSH is the way in. A viewer
+    reaches it through a `direct-tcpip` channel to 127.0.0.1:5900 (`ssh -L`) while `[vnc] enable` is on (the
+    Control Panel's "Remote Desktop" page). It takes up to four viewers.
+  - Updates come from the desktop's own damage, before each compose. Encodings: Raw, Hextile, and CopyRect for a
+    window moved where nothing covers it and its old and new places don't overlap. The pixel format is whatever
+    the viewer asks for. The cursor is drawn in as `glos shot` draws it, and an 8-bit screen's 6-bit DAC is
+    widened as `glos shot` widens it, so a viewer's picture and a shot agree.
+  - Keys (X keysyms, US layout) wait in one queue for the keyboard to have room, so a viewer that sends and leaves
+    still delivers them. The pointer is absolute. While a viewer is connected, the task bar says VNC (D35).
+  - `glos rec [--fps N] [--seconds S]` streams the desktop's frames while they change: each one a line of its
+    time and length, then the PNG `glos shot` would give at that moment. `tools/rec.py` writes `NNNNN.png` and an
+    ffmpeg `index.txt`.
+  - **The gate passes:** `make loopa-vnc`, bf6 with the G200 at 16 bits, the G400 at 32 and the VBE card at 8. A
+    stock client, vncdotool 1.2.0 (`tests/vnc`, in a container), works through `ssh -L`:
+    - its screen equals `glos shot`'s on the desktop, with Notepad open, after typing, and after Notepad closed;
+    - text typed through it into Notepad is saved, and the file read back over SFTP has it;
+    - Notepad's close box, pressed through it, closes the window.
+
+    At 16 bits, `glos rec` runs meanwhile, and each of the four shots is one of its frames, byte for byte. It
+    passed twice running after the fixes below.
+  - Found on the way:
+    - `glos rec` lost a frame when a `glos shot` held the capture; now the frame stays owed until the capture
+      is free.
+    - Keys were lost when vncdotool closed straight after sending them; the shared queue fixed that.

@@ -348,6 +348,8 @@ void display_vm_turn(void)
 
 int display_desktop_bpp(void) { return d.on ? d.bpp : 0; }
 
+int display_dac_bits(void) { return d.dac == 8 ? 8 : 6; }
+
 void display_session(int begin)
 {
     if (!d.on)
