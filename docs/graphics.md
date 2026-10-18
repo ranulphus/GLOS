@@ -61,14 +61,20 @@ window's pixels mean the same whoever draws them:
 ### 1.4 Text and fonts
 
 - A font (`struct gfx_font`) is 1-bit glyphs for a run of code points, each with its bitmap's width, its
-  left edge from the pen and the pen's advance; all glyphs are the font's height in rows. A code point the
-  font hasn't got is drawn as its box. Text is UTF-8; a byte that isn't is taken for the Latin-1 character.
+  left edge from the pen and the pen's advance; all glyphs are the font's height in rows. More runs follow in
+  `more` (M10: `struct gfx_range`, in order, found by halving). A code point the font hasn't got is drawn as
+  its box. Text is UTF-8; a byte that isn't is taken for the Latin-1 character.
+- **Smoothed text (M10):** a program's toolkit may hand the library each font's glyphs again as 4-bit coverage
+  (`gfx_smooth`, `struct gfx_aa`; docs/gui.md §1.10), which `gfx_text` then blends at 16 and 32 bits, the pens
+  still moved by the 1-bit advances. The kernel never does, so its own text stays 1-bit.
 - **Fonts are made at build time from TrueType fonts** (PRD D7) by `tools/mkfont.py`: FreeType renders each
   code point without anti-aliasing, with the font's own hinting. It runs on the host (it needs python3-pil),
   so the generated C (`kernel/gfx/fonts/`) is kept in the repository and the kernel's build needs neither;
   `make fonts` makes them again, and each file names its source and that file's SHA-256.
 - **For now:** DejaVu Sans, Sans Bold and Sans Mono at 11 pixels (14 rows), 20h to FFh. They are stand-ins:
-  which fonts GLOS has is part of the look (step G, the owner's choice).
+  which fonts GLOS has is part of the look (step G, the owner's choice). M10 extends them to 17Fh, plus Greek,
+  Cyrillic, punctuation and signs, and, in Sans Mono, code page 437's drawing characters (the Makefile's
+  FONT_TEXT, FONT_SIGNS and FONT_437).
 
 ### 1.5 Regions
 

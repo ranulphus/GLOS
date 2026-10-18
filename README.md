@@ -24,9 +24,16 @@ Minimum: a 486 with any VESA 2.0 card. Matrox G-series cards add 2D acceleration
 
 ## Status
 
-Design stage. [PRD.md](PRD.md) is the full requirements document: decisions, architecture, milestones. The
-build is a 16-bit loader stub that proves the toolchain and the 86Box test loop. The supervisor starts at
-milestone M1.
+Milestones M0 to M10 are built and tested in 86Box (Loop A); the bench, real PCs and real Matrox cards come
+before a release. [PRD.md](PRD.md) is the full requirements document: decisions, architecture, milestones.
+[docs/release-notes.md](docs/release-notes.md) says what each milestone added and which M10 features have
+passed their gates.
+
+- The supervisor: DOS in a V86 machine, a DPMI host (32- and 16-bit clients, DOS/4GW), sessions, profiles.
+- The agent: SSH, SFTP, `glos shot`, `glos rec`, input, logs, gdb.
+- The desktop: VBE and Matrox 2D, windows, DOS-GL and SDL3 in windows, the mixer, the apps and the Control Panel.
+- M10: network time, HTTPS (`FETCH`), the terminal's SSH and SFTP client, packages (`PKG`), VNC through SSH,
+  DOS's code pages and smoothed text.
 
 ## Building
 
@@ -48,7 +55,8 @@ make loopa CARD=g450     # boot 86Box with a G450, run GLOS.EXE: out/loopa-g450/
 
 ## Security
 
-GLOS is meant for trusted LANs. Its SSH server accepts public keys only. Don't expose a GLOS PC to the internet.
+GLOS is meant for trusted LANs. Its SSH server accepts public keys only. VNC is off by default and, when on, is
+reached only through an SSH tunnel. Don't expose a GLOS PC to the internet.
 
 ## Licence
 

@@ -4,10 +4,10 @@
 
 | | |
 |---|---|
-| Status | v0.8 — M10's decisions: packages on GitHub signed by the owner's offline key, Mozilla's roots, PNG recordings, the SSH client with SFTP (2026-10-18), after v0.7 (M9's apps, 2026-10-16), v0.6 (M8's windowed DOS-GL, SDL3 and the mixer, 2026-10-15), v0.5 (M7's Matrox 2D, 2026-10-14), v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
+| Status | v0.8 — M10: the owner's decisions (packages on GitHub signed by the owner's offline key, Mozilla's roots, PNG recordings, the SSH client with SFTP) and its features as built, each past its gate (2026-10-18), after v0.7 (M9's apps, 2026-10-16), v0.6 (M8's windowed DOS-GL, SDL3 and the mixer, 2026-10-15), v0.5 (M7's Matrox 2D, 2026-10-14), v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
 | Last updated | 2026-10-18 |
 | Supersedes | v0.1. Changes are listed in Appendices D to J |
-| Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md), [docs/milestones-m6.md](docs/milestones-m6.md), [docs/milestones-m7.md](docs/milestones-m7.md) and [docs/milestones-m8.md](docs/milestones-m8.md) (work breakdown) |
+| Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md), [docs/milestones-m6.md](docs/milestones-m6.md), [docs/milestones-m7.md](docs/milestones-m7.md), [docs/milestones-m8.md](docs/milestones-m8.md), [docs/milestones-m9.md](docs/milestones-m9.md) and [docs/milestones-m10.md](docs/milestones-m10.md) (work breakdown); [docs/gui.md](docs/gui.md) (toolkit and apps) |
 | Licence | MIT |
 | Companion projects | MGA-Glide (`~/MGA-Glide`: the Loop A/B/C harness and the shared Matrox HAL), DOS-GL (`~/DOSGL`: OpenGL for Matrox cards and the SDL3 bridge), Fifth Wheel and the dgk kit (`~/FifthWheel`), DOSBench (`~/DOSBench`) |
 
@@ -190,6 +190,14 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D59** | **HTTPS trusts Mozilla's root set**, about 150 roots as curl ships them, in a file a package refreshes. (User, 2026-10-18) | Any public HTTPS site works, as on other systems; the roots stay current without a new GLOS. | M10 |
 | **D60** | **`glos rec` records PNG frames and a time index** (Q13): each changed frame the same bytes `glos shot` gives, with the time it was shown. (User, 2026-10-18) | Lossless and simple to check; ffmpeg makes a video of it on the host. | M10 |
 | **D61** | **The terminal's SSH client is a full terminal with SFTP; no port forwarding yet** (refines D52): an xterm-compatible screen, Ed25519 key and password login, host keys checked against a known-hosts file, and an `sftp` client. (User, 2026-10-18) | Remote shells with full-screen programs and file transfer cover what a person does over SSH; tunnels can wait. | M10 |
+| **D62** | **The RTC and DOS keep local time;** `[time] zone` is a POSIX TZ string (default `UTC0`), given to DJGPP programs as `TZ`. SNTP (lwIP's client) asks `[time] server` when the network comes up and every `[time] interval` hours; a step of more than a second sets the RTC, then DOS's date and time. `glos time` shows and sets it by hand. (M10 step A, as built) | DOS and its programs have always read local time from the RTC; one zone string covers summer time without tables. | M10 |
+| **D63** | **API 1.3: TCP clients for apps** (`GLOS_FN_NET`: names, connections, waits a kill ends, `GLOS_EV_NET`), eight a program and closed when it ends; no listening sockets yet. `GLOS_FN_RANDOM` and `GLOS_FN_TIME` (UTC, how the clock was set, the zone's offset). The SDK has BSD sockets on them (`glos/net.h`). (M10 step B, as built) | What HTTPS, the SSH client and packages need, and enough for portable client code to build. | M10 |
+| **D64** | **TLS is BearSSL 0.6 in ring 3, TLS 1.2, client only;** `CERTS.DAT` is made on the build host from curl's `cacert.pem` (pinned by SHA-256), and a certificate is checked only once the clock has been set: before that, HTTPS refuses with "clock not set". HTTP/1.1 GETs with redirects and chunked bodies; `FETCH.EXE`. (M10 step C, as built) | A certificate's dates mean nothing against a clock still at 1980; BearSSL is small, MIT and needs no allocator. | M10 |
+| **D65** | **The SSH client is ours on TinySSH's crypto, in ring 3:** curve25519-sha256, ssh-ed25519 and chacha20-poly1305@openssh.com only (OpenSSH's defaults), a server without them refused with the reason; keys and `KNOWNHST.TXT` in `SSH\` beside TERM.EXE; SFTP 3 with eight requests in flight. (M10 step D, as built) | The kernel's server already has this crypto and wire code; one modern suite keeps the client small and is what every current server offers. | M10 |
+| **D66** | **A package is a zip with `GLOSPKG.INI`; a source is `INDEX.TXT` signed by `INDEX.SIG`** (Ed25519, keys in `KEYS\PKG\`), each zip's size and SHA-256 in the index and every entry inflated and CRC-checked before anything is written; `PKG\NAME.LST` records what was put where, so removal takes exactly that away and leaves GLOS.CFG byte for byte as it was. FreeDOS's repositories are a second, unsigned kind of source, trusted through HTTPS and their CRC-32, and said so. (M10 step E, as built) | Nothing half-installed from a damaged or forged zip; removal needs no guessing. | M10 |
+| **D67** | **VNC is in the kernel, fed by the desktop's damage before each compose:** RFB 3.8, Raw, Hextile and CopyRect (a window moved where nothing covers it), the viewer's pixel format, the cursor and an 8-bit screen's DAC as `glos shot` has them, up to four viewers; keys through one queue as the keyboard has room. `glos rec` sends the PNG `glos shot` would give for each changed frame. (M10 step F, as built) | A viewer's picture and a shot agree, so the same tests check both; no compressor in the kernel. | M10 |
+| **D68** | **DOS's names and DOS programs' text go through the active code page** (437, 850, 852, 866, 737; GLOSCP, else INT 21h 6601h, else 437) in the file manager, the file dialog, the apps' titles and the terminal; a typed letter the page hasn't got is refused. A file's text in Notepad stays Latin-1. The fonts have Latin Extended-A, Greek, Cyrillic, punctuation and signs, and the monospaced one code page 437's drawing characters. (M10 step G, as built) | DOS stores bytes; only the code page says what they are. Notepad keeps every byte of a file as it was. | M10 |
+| **D69** | **Font smoothing uses coverage made at build time** (`SMOOTH.DAT`, by FreeType from the same DejaVu files, in the same glyph order), not stb_truetype at run time as docs/milestones-m10.md planned; blended at 16 and 32 bits with the 1-bit advances, off by default (`[display] font_smoothing`), never in the kernel's own text. (M10 step G, as built) | No floating point on a 486SX, the same hinting and advances as the bitmaps (no layout moves), and 129 KB instead of the TrueType files and a rasteriser in every program. | M10 |
 
 ---
 
@@ -366,7 +374,7 @@ A program calls DPMI 0A00h with "GLOS" (D23). The result is a far entry point pl
 - **Exclusive sessions** get ports 40h–43h and 61h passed through (Screamer Rally and GTA reprogram channel 0 from protected-mode INT 8 handlers); GLOS restores mode 2/FFFFh afterwards.
 - **Virtual PIT for GLOS apps (M6):** latched reads pass through while an app's programming matches the physical PIT; virtual IRQ0 rates are rounded to the tick. Programs that need faster rates (speaker sampling, Covox) run as exclusive sessions.
 - **INT 15h 86h** (BIOS wait) is emulated as a sleep, because AT BIOSes implement it with the RTC periodic interrupt and would switch GLOS's tick off.
-- **DOS time** is re-synchronised from the RTC after each exclusive session, and from SNTP when the network is up (§11.3).
+- **DOS time** is re-synchronised from the RTC after each exclusive session, and from SNTP when the network is up (§11.3). The RTC and DOS keep local time, by `[time] zone` (D62).
 
 ### 6.6 DPMI host
 
@@ -545,8 +553,8 @@ When SSH is down (boot, supervisor panic), the host tools fall back to the seria
 
 ### 8.4 TLS
 
-- BearSSL (TLS 1.2) client, for ring-3 apps only.
-- A CA bundle maintained with the package manager: Mozilla's roots (D59).
+- BearSSL (TLS 1.2) client, for ring-3 apps only (`sdk/tls`; HTTP in `sdk/http`; D64).
+- A CA bundle maintained with the package manager: Mozilla's roots (D59), as `CERTS.DAT`.
 - The clock must be set by SNTP before certificates are checked (§11).
 - A TLS 1.3 client comes after v1.
 
@@ -626,7 +634,7 @@ with no glyph cache.
 
 ### 9.8 Capture and VNC hooks
 
-The display layer can export frames on request (`glos shot`, recording) and changed rectangles (VNC) without stopping the scheduler.
+The display layer can export frames on request (`glos shot`, recording) and changed rectangles (VNC) without stopping the scheduler. As built (D67): the VNC server takes the desktop's damage before each compose, and `glos rec` captures each changed frame as `glos shot` does.
 
 ---
 
@@ -650,7 +658,7 @@ The display layer can export frames on request (`glos shot`, recording) and chan
 | GL surfaces | Bind DOS-GL to a window: VRAM buffers, the GPU lock, present |
 | Audio | Streams into the mixer: format, rate, volume |
 | Files | Through the DOS server, with GLOS paths and change notification |
-| Network | Sockets; TLS (ring-3 library) |
+| Network | Sockets (API 1.3: TCP clients, D63; BSD sockets in the SDK); TLS (ring-3 library, D64) |
 | Other | Clipboard, notifications, configuration, telemetry counters |
 
 ### 10.3 DOS-GL
@@ -686,7 +694,7 @@ Each app keeps SDL's cooperative threads in v1, and GLOS preempts between apps (
   - file manager: spatial folder windows from the desktop, plus a browser app with a tree and list (D33);
   - notepad;
   - calculator;
-  - terminal (GLOS's shell, D50 and D51; its SSH client comes in M10, D52);
+  - terminal (GLOS's shell, D50 and D51; its SSH and SFTP client from M10, D61 and D65);
   - system monitor (the `glos stat` data);
   - image viewer;
   - package manager;
@@ -719,21 +727,23 @@ Each app keeps SDL's cooperative threads in v1, and GLOS preempts between apps (
 - An HTTPS client library (BearSSL) and a package manager. Packages are zip files with a manifest and an Ed25519 signature.
 - Sources: the GLOS repository and the FreeDOS repositories over HTTPS.
 - Hosting and keys (Q4, D58): a packages repository on GitHub with an index signed by the owner's offline Ed25519 key; GLOS ships the public key. FreeDOS's repositories, unsigned, are trusted through HTTPS alone and marked so.
+- As built (D64, D66): `FETCH.EXE` and `PKG.EXE` (a window and a command); the formats and checks in D66.
 
 ### 11.2 VNC and capture
 
 - An RFB 3.8 server driven by the display layer's changed rectangles.
 - Lossless recording of the screen to the build server through the agent (`glos rec`): PNG frames, the same bytes `glos shot` gives, and a time index (D60). Encodings: Raw, CopyRect and Hextile (Q13).
 - In M10 the server is reached only through SSH (`direct-tcpip` to `127.0.0.1:5900`); binding it to the LAN, with VNC's password, comes after.
+- As built: D67; the Control Panel's "Remote Desktop" page turns it on (`[vnc] enable`).
 
 ### 11.3 Small comforts
 
 | Feature | Detail |
 |---|---|
-| SNTP | Sets DOS time and the RTC |
+| SNTP | Sets DOS time and the RTC, in local time by `[time] zone` (D62) |
 | mDNS | Host names on the LAN |
-| UTF-8 | Text in apps and the toolkit, with fonts covering Latin, Greek and Cyrillic. DOS file names are mapped through the active codepage. |
-| Font smoothing | Optional anti-aliased fonts |
+| UTF-8 | Text in apps and the toolkit, with fonts covering Latin, Greek and Cyrillic. DOS file names are mapped through the active codepage: 437, 850, 852, 866 or 737 (D68). |
+| Font smoothing | Optional anti-aliased fonts (`[display] font_smoothing`; coverage made at build time, D69) |
 
 ### 11.4 Native resolutions
 
@@ -932,7 +942,7 @@ GLOS/
     api/         GLOS API dispatcher
     dbg/         gdb stubs, crash reports
   include/glos/  public API headers (SDK-ready, D14)
-  sdk/           ring-3 libraries apps link (libglos, the toolkit gui; TLS in M10)
+  sdk/           ring-3 libraries apps link (libglos, the toolkit gui; from M10 tls, http, sshc, the code pages)
   apps/          native apps, Control Panel, package manager
   third_party/   tinyssh/, lwip/, bearssl/, stb/, mgahal/ (vendored)
   tests/         host/, dos/ (DPMI conformance, hostile suite), goldens/
@@ -999,6 +1009,15 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 - A signed package installs and uninstalls cleanly.
 - A stock VNC client views and drives the desktop through an SSH tunnel.
 - A capture's frames are identical to `glos shot`.
+
+*Status (2026-10-18):* every M10 feature is built and each gate has passed in Loop A (docs/milestones-m10.md):
+- HTTPS from raw.githubusercontent.com and the ibiblio FreeDOS mirror, checked against Mozilla's roots;
+- a package signed with the suite's test key installed, upgraded and removed, with GLOS.CFG byte for byte as
+  before (and FreeDOS's CHOICE from its repository);
+- vncdotool viewing and driving the desktop through `ssh -L` at 8, 16 and 32 bits;
+- every `glos shot` taken during a `glos rec` one of its frames.
+
+The GLOS packages repository and the owner's signing key wait on the owner (D58).
 
 **Release v1.0:** M0–M9 complete, plus each M10 feature that has passed its gate. Bench re-verification passes on every bench card.
 
@@ -1295,3 +1314,15 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
 - **Q13 answered (D60):** `glos rec` records PNG frames and a time index; VNC's encodings are Raw, CopyRect and Hextile.
 - **D61** (user): the terminal's SSH client is a full xterm terminal with SFTP; port forwarding comes later.
 - §11.1, §11.2 and §19 say so; docs/milestones-m10.md has the plan.
+- **D62-D69** (M10, as built):
+  - local time in the RTC and DOS, by a POSIX zone;
+  - API 1.3's TCP clients, random bytes and time;
+  - BearSSL with "clock not set";
+  - the SSH client on TinySSH's crypto;
+  - the packages' format and checks;
+  - VNC from the desktop's damage, and `glos rec`;
+  - DOS's code pages and the fonts' new scripts;
+  - smoothed text from coverage made at build time. This one departs from the plan's stb_truetype, for the
+    reasons D69 gives.
+
+  §6.5, §8.4, §9.8, §10.2, §10.6, §11 and §18 say so; §19 has the gates' results.
