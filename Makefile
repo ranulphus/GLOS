@@ -53,6 +53,7 @@
 #   make loopa-m9       M9's exit: gui, config, console, native and control
 #   make loopa-time     the clock: SNTP, the zone, the RTC and DOS, names (M10)
 #   make loopa-netapp   apps' TCP connections and sockets (NETTEST) against the host (M10)
+#   make loopa-https    HTTPS: FETCH, certificates checked, GitHub and a FreeDOS mirror (M10)
 #   make gate           M4e's exit: the baseline matrix under GLOS and with direct mode forced, a kill and
 #                       an ssh probe for every program (tools/gate/run.py; on the host; hours)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
@@ -70,7 +71,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
+.PHONY: apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -416,6 +417,9 @@ loopa-time: all dos-tests check-deps
 # M10 step B: an app's TCP connections (NETTEST) against an echo server on the host; an app killed with some open.
 loopa-netapp: all build/dj/NETTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py netapp -j $(JOBS)
+# M10 step C: HTTPS (FETCH) against servers on the host with a test CA, refusals, GitHub and a FreeDOS mirror.
+loopa-https: all build/apps/FETCH.EXE build/host/mkcerts build/glos/CERTS.DAT check-deps
+	$(Q)python3 tests/loopa/jobs.py https -j $(JOBS)
 # M9's exit: the toolkit, the settings, console jobs, the apps, the Control Panel.
 loopa-m9: loopa-gui loopa-config loopa-console loopa-native loopa-control
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
@@ -512,6 +516,60 @@ build/sdk/libglos.a: sdk/libglos/glos.c sdk/libglos/socket.c include/glos/api.h 
 	    $(DJCC) -O2 -Wall -Werror -ffreestanding -Iinclude -Ikernel/include -c -o build/sdk/gfx_$$(basename $$f .c).o $$f || exit 1; \
 	  done
 	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/*.o
+# BearSSL 0.6 (third_party/bearssl, MIT; THIRD_PARTY.md; M10 step C): build/sdk/libbearssl.a for DJGPP. Its own
+# guesses at the platform are set aside: no SSE2, AES-NI or RDRAND (a 486 has none, and a Pentium no SSE2), no
+# /dev/urandom or Unix time (the TLS layer seeds it from GLOS_FN_RANDOM and gives it GLOS_FN_TIME's time).
+BEARSSL_SRCS := $(sort $(wildcard third_party/bearssl/src/*/*.c))
+BEARSSL_OBJS := $(patsubst third_party/bearssl/src/%.c,build/sdk/bearssl/%.o,$(BEARSSL_SRCS))
+BEARSSL_FLAGS := -O2 -Ithird_party/bearssl/inc -Ithird_party/bearssl/src -DBR_SSE2=0 -DBR_AES_X86NI=0 -DBR_RDRAND=0 \
+                 -DBR_USE_URANDOM=0 -DBR_USE_UNIX_TIME=0 -DBR_USE_WIN32_RAND=0 -DBR_USE_WIN32_TIME=0 -DBR_POWER8=0
+build/sdk/bearssl/%.o: third_party/bearssl/src/%.c $(wildcard third_party/bearssl/src/*.h third_party/bearssl/inc/*.h)
+	@mkdir -p $(dir $@)
+	$(Q)$(DJCC) $(BEARSSL_FLAGS) -c -o $@ $<
+build/sdk/libbearssl.a: $(BEARSSL_OBJS)
+	$(Q)echo "  AR      $@"
+	$(Q)rm -f $@
+	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ $(BEARSSL_OBJS)
+# ... and for the host (tools/certs/mkcerts, tests/host/tls_test), with its own guesses.
+BEARSSL_HOST_OBJS := $(patsubst third_party/bearssl/src/%.c,build/host/bearssl/%.o,$(BEARSSL_SRCS))
+build/host/bearssl/%.o: third_party/bearssl/src/%.c $(wildcard third_party/bearssl/src/*.h third_party/bearssl/inc/*.h)
+	@mkdir -p $(dir $@)
+	$(Q)$(HOST_CC) -O2 -Ithird_party/bearssl/inc -Ithird_party/bearssl/src -c -o $@ $<
+build/host/libbearssl.a: $(BEARSSL_HOST_OBJS)
+	$(Q)echo "  AR      $@"
+	$(Q)rm -f $@
+	$(Q)ar rcs $@ $(BEARSSL_HOST_OBJS)
+# TLS and HTTP for apps (sdk/tls, sdk/http; include/glos/tls.h, http.h; M10 step C).
+build/sdk/libtls.a: sdk/tls/tls.c sdk/tls/anchors.c include/glos/tls.h include/glos/api.h
+	@mkdir -p build/sdk/tls
+	$(Q)echo "  DJCC    sdk/tls"
+	$(Q)rm -f $@
+	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -Ithird_party/bearssl/inc -c -o build/sdk/tls/tls.o sdk/tls/tls.c
+	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -Ithird_party/bearssl/inc -c -o build/sdk/tls/anchors.o sdk/tls/anchors.c
+	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/tls/tls.o build/sdk/tls/anchors.o
+build/sdk/libhttp.a: sdk/http/http.c include/glos/http.h include/glos/tls.h include/glos/net.h include/glos/api.h
+	@mkdir -p build/sdk/http
+	$(Q)echo "  DJCC    sdk/http"
+	$(Q)rm -f $@
+	$(Q)$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -Iinclude -c -o build/sdk/http/http.o sdk/http/http.c
+	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/http/http.o
+NET_LIBS := build/sdk/libhttp.a build/sdk/libtls.a build/sdk/libbearssl.a build/sdk/libglos.a
+# FETCH (apps/fetch): a file over HTTPS or HTTP, for the terminal and SSH.
+build/apps/FETCH.EXE: apps/fetch/fetch.c $(NET_LIBS) tools/glosmark.py
+	@mkdir -p build/apps
+	$(Q)echo "  DJCC    apps/fetch"
+	$(Q)$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -Iinclude -Ithird_party/bearssl/inc -o $@ $< $(NET_LIBS)
+	$(Q)python3 tools/glosmark.py $@
+# C:\GLOS\CERTS.DAT: the trust anchors, from curl's cacert.pem (pinned in tools/setup/versions.mk).
+build/host/mkcerts: tools/certs/mkcerts.c sdk/tls/anchors.c include/glos/tls.h build/host/libbearssl.a
+	@mkdir -p build/host
+	$(Q)echo "  CC      $@"
+	$(Q)$(HOST_CC) -O2 -Wall -Werror -Iinclude -Ithird_party/bearssl/inc -o $@ tools/certs/mkcerts.c sdk/tls/anchors.c \
+	  build/host/libbearssl.a
+build/glos/CERTS.DAT: build/host/mkcerts tools/setup/versions.mk
+	@mkdir -p build/glos
+	$(Q)tools/setup/fetch.sh $(CACERT_URL) $(CACERT_SHA256) $(MGA_CACHE)/dl/$(notdir $(CACERT_URL))
+	$(Q)build/host/mkcerts $@ $(MGA_CACHE)/dl/$(notdir $(CACERT_URL))
 # The toolkit (sdk/gui, include/glos/gui.h; M9): build/sdk/libgui.a, linked before libglos.a.
 build/sdk/libgui.a: $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h include/glos/gfx.h
 	@mkdir -p build/sdk/gui

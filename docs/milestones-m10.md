@@ -156,3 +156,18 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
   - loopa-net, -ssh, -apps and -console pass with it.
   - Found by NETTEST: DJGPP's `fcntl` passes a file-system extension only the descriptor, so O_NONBLOCK on a
     socket never arrived. `glos/net.h` maps `fcntl` to `glos_fcntl`.
+- **Step C done** (2026-10-18): BearSSL 0.6 for DJGPP (`build/sdk/libbearssl.a`, no SSE2, AES-NI or RDRAND), the
+  TLS layer (`sdk/tls`, `glos/tls.h`), HTTP GETs (`sdk/http`, `glos/http.h`) and FETCH (`apps/fetch`).
+  - `C:\GLOS\CERTS.DAT` holds 121 anchors (80 RSA, 41 EC) in 52 KB. `tools/certs/mkcerts` makes it on the build
+    host from curl's cacert-2026-09-25.pem, with BearSSL's own decoder, and checks it read back.
+  - Certificates are checked against GLOS_FN_TIME's clock, and HTTPS is refused ("clock not set") until it has
+    been set.
+  - **The gate passes:** `make loopa-https` on bf6 and the 486dx2. The local cases use HTTPS servers on the host
+    with a test CA added to the guest's anchors:
+    - the clock not set, refused;
+    - a 256 KB file (2.0 s on bf6, 7.3 s on the 486dx2), absolute and relative redirects, and a chunked body,
+      each with the host's SHA-256;
+    - refused, each with its reason: a name not the certificate's, an expired certificate, a CA nobody trusts, a
+      404, an unknown name.
+    - With the internet, files from raw.githubusercontent.com (ChaCha20-Poly1305) and the ibiblio FreeDOS
+      mirror, checked against Mozilla's roots, with the host's SHA-256.

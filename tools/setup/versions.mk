@@ -24,3 +24,8 @@ HDPMIREG_SHA256 := 1a9c1983f6daa1e86f539f6fe7c016d25d925ea59d898b3ff4c5aabe56b67
 # (jobs.py ecm, M4c); none of it is in GLOS.
 ECMTEST_URL     := https://pushbx.org/ecm/test/20210127.zip
 ECMTEST_SHA256  := 7a2423b608efc9652e2a6642a29a4759ea5976c147bb6df82b9ecd717bf182b8
+
+# Mozilla's root certificates as curl ships them (cacert.pem, MPL-2.0; curl.se/docs/caextract.html, the dated file):
+# made into C:\GLOS\CERTS.DAT, HTTPS's trust anchors (tools/certs/mkcerts.c, M10 step C; PRD D59).
+CACERT_URL    := https://curl.se/ca/cacert-2026-09-25.pem
+CACERT_SHA256 := a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505

@@ -3992,6 +3992,199 @@ def netapp_case(profile, card):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def test_pki(out):
+    """A test CA (RSA 2048) and another nobody trusts, and EC P-256 certificates for HTTPS servers on the host:
+    test.glos (good), other.glos (the wrong name), test.glos expired, test.glos from the untrusted CA. Files in
+    out: ca.pem, and NAME.pem with NAME.key for each server."""
+    import datetime
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec, rsa
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+    os.makedirs(out, exist_ok=True)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    day = datetime.timedelta(days=1)
+
+    def name(cn):
+        return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
+
+    def ca(cn):
+        k = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        c = (x509.CertificateBuilder().subject_name(name(cn)).issuer_name(name(cn)).public_key(k.public_key())
+             .serial_number(x509.random_serial_number()).not_valid_before(now - day).not_valid_after(now + 3650 * day)
+             .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+             .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=False, key_encipherment=False,
+                                          data_encipherment=False, key_agreement=False, key_cert_sign=True,
+                                          crl_sign=True, encipher_only=False, decipher_only=False), critical=True)
+             .sign(k, hashes.SHA256()))
+        return k, c
+
+    def leaf(file, cak, cac, dns, before, after):
+        k = ec.generate_private_key(ec.SECP256R1())
+        c = (x509.CertificateBuilder().subject_name(name(dns)).issuer_name(cac.subject).public_key(k.public_key())
+             .serial_number(x509.random_serial_number()).not_valid_before(before).not_valid_after(after)
+             .add_extension(x509.SubjectAlternativeName([x509.DNSName(dns)]), critical=False)
+             .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+             .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+             .sign(cak, hashes.SHA256()))
+        open(os.path.join(out, file + ".pem"), "wb").write(c.public_bytes(serialization.Encoding.PEM)
+                                                          + cac.public_bytes(serialization.Encoding.PEM))
+        open(os.path.join(out, file + ".key"), "wb").write(k.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+
+    cak, cac = ca("GLOS Loop A test CA")
+    otherk, otherc = ca("Nobody's CA")
+    open(os.path.join(out, "ca.pem"), "wb").write(cac.public_bytes(serialization.Encoding.PEM))
+    leaf("good", cak, cac, "test.glos", now - day, now + 30 * day)
+    leaf("name", cak, cac, "other.glos", now - day, now + 30 * day)
+    leaf("expired", cak, cac, "test.glos", now - 20 * day, now - 10 * day)
+    leaf("untrusted", otherk, otherc, "test.glos", now - day, now + 30 * day)
+
+
+HTTPS_BODY = bytes((i * 7919 + (i >> 8) * 31) & 255 for i in range(262144))     # (/file's 256 KB)
+
+
+class HttpsServer:
+    """An HTTPS server on 127.0.0.1 (the guest's 10.0.2.2) with one certificate: /file (HTTPS_BODY, with its
+    length), /redirect (302 to /file), /relative (302 to "file"), /chunked (the same bytes in chunks), anything
+    else 404. TLS 1.2 (BearSSL's only version)."""
+
+    def __init__(self, pki, cert):
+        import http.server
+        import ssl
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                if self.path == "/file":
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(HTTPS_BODY)))
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(HTTPS_BODY)
+                elif self.path in ("/redirect", "/relative"):
+                    self.send_response(302)
+                    self.send_header("Location", "/file" if self.path == "/redirect" else "file")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                elif self.path == "/chunked":
+                    self.send_response(200)
+                    self.send_header("Transfer-Encoding", "chunked")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    at, n = 0, 1
+                    while at < len(HTTPS_BODY):
+                        part = HTTPS_BODY[at:at + n]
+                        self.wfile.write(b"%x\r\n" % len(part) + part + b"\r\n")
+                        at, n = at + len(part), n * 3 + 1
+                    self.wfile.write(b"0\r\n\r\n")
+                else:
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                self.close_connection = True
+
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(os.path.join(pki, cert + ".pem"), os.path.join(pki, cert + ".key"))
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd.socket = ctx.wrap_socket(self.httpd.socket, server_side=True)
+        self.port = self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+
+
+HTTPS_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
+HTTPS_INTERNET = [("github", "https://raw.githubusercontent.com/curl/curl/curl-8_10_1/COPYING"),
+                  ("freedos", "https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/mem.zip")]
+
+
+def https_case(profile, card):
+    """HTTPS (M10 step C; sdk/tls, sdk/http, FETCH): with the clock not set, refused; set by hand, FETCH from HTTPS
+    servers on the host with a test CA (added to Mozilla's roots in the guest's CERTS.DAT): a file with its length,
+    redirects (absolute and relative), a chunked body, each the host's bytes (SHA-256); refusals for a name that
+    isn't the certificate's, an expired certificate, one from a CA nobody trusts, a 404. With the internet: a file
+    from GitHub and one from a FreeDOS mirror, Mozilla's roots alone, their SHA-256 the host's."""
+    import hashlib
+    import urllib.request
+    tag = "%s-%s" % (profile, card)
+    out = os.path.join(ROOT, "out", "https-%s-files" % tag)  # (beside the run's own out/https-TAG)
+    pki = os.path.join(out, "pki")
+    test_pki(pki)
+    certs = os.path.join(out, "CERTS.DAT")
+    subprocess.run([os.path.join(ROOT, "build", "host", "mkcerts"), certs,
+                    os.path.join(os.environ.get("MGA_CACHE", os.path.expanduser("~/.cache/mga-glide")), "dl",
+                                 "cacert-2026-09-25.pem"), os.path.join(pki, "ca.pem")], check=True,
+                   stdout=subprocess.DEVNULL)
+    servers = {n: HttpsServer(pki, n) for n in ("good", "name", "expired", "untrusted")}
+    cfg = os.path.join(out, "GLOS.CFG")
+    open(cfg, "w").write("; GLOS.CFG for the https suite: the clock set by hand\r\n[time]\r\nsntp = off\r\n")
+    agent = Agent("https-" + tag, profile, card, ["--file", "%s=/TEST/GLOS.CFG" % os.path.relpath(cfg, ROOT),
+        "--file", "build/apps/FETCH.EXE=/TEST/FETCH.EXE", "--file", "%s=/TEST/CERTS.DAT" % os.path.relpath(certs, ROOT),
+        "--cmd", "SERSAY HX-START https", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=3600)
+    checks, notes = {"listen": agent.listening()}, []
+    want = hashlib.sha256(HTTPS_BODY).hexdigest()
+
+    def fetch(name, url, ok_sha=None, why=None, resolve=True, timeout=600):
+        t0 = time.time()
+        rc, o, e = agent.ssh("C:\\TEST\\FETCH.EXE --quiet --certs C:\\TEST\\CERTS.DAT %s%s C:\\TEST\\GOT.BIN"
+                             % ("--resolve test.glos:10.0.2.2 " if resolve else "", url), timeout=timeout)
+        o = (o + e).replace("\r", "").strip()
+        if ok_sha:
+            good = rc == 0 and ("sha256=%s " % ok_sha) in o + " "
+        else:
+            good = rc == 1 and ("FETCH failed: " in o) and why in o
+        checks[name] = good
+        if not good or name in ("file", "github"):
+            notes.append("%s (%.1fs): %s" % (name, time.time() - t0, o[-200:]))
+
+    try:
+        # GLOS_FN_TIME says RTC: certificates can't be checked
+        fetch("clock-not-set", "https://test.glos:%d/file" % servers["good"].port, why="clock not set")
+        checks["set"] = agent.ssh("glos time set " + time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))[0] == 0
+        good = servers["good"].port
+        fetch("file", "https://test.glos:%d/file" % good, ok_sha=want)
+        fetch("redirect", "https://test.glos:%d/redirect" % good, ok_sha=want)
+        fetch("relative", "https://test.glos:%d/relative" % good, ok_sha=want)
+        fetch("chunked", "https://test.glos:%d/chunked" % good, ok_sha=want)
+        fetch("not-found", "https://test.glos:%d/nothing" % good, why="HTTP 404")
+        fetch("wrong-name", "https://test.glos:%d/file" % servers["name"].port, why="wrong name")
+        fetch("expired", "https://test.glos:%d/file" % servers["expired"].port, why="expired")
+        fetch("untrusted", "https://test.glos:%d/file" % servers["untrusted"].port, why="not trusted")
+        fetch("no-such-name", "https://no-such-name.invalid/file", why="no such name", resolve=False)
+        internet = agent.ssh("glos net resolve raw.githubusercontent.com", timeout=30)[0] == 0
+        for name, url in HTTPS_INTERNET if internet else []:
+            try:
+                host_sha = hashlib.sha256(urllib.request.urlopen(url, timeout=60).read()).hexdigest()
+            except OSError as ex:
+                notes.append("%s: the host couldn't fetch it (%s)" % (name, ex))
+                continue
+            fetch(name, url, ok_sha=host_sha, resolve=False, timeout=900)
+        if not internet:
+            notes.append("no internet from the guest: GitHub and the FreeDOS mirror not asked")
+        checks["sockets"] = "sockets=0" in agent.ssh("glos net")[1]
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    for srv in servers.values():
+        srv.close()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    for n in notes:
+        print("    https-%s %s" % (tag, n))
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("https-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def config_case(profile, vcard, card):
     """GLOS.CFG's settings (M9 step B; include/glos/config.h, kernel/core/config.c): every setting the schema has
     set over ssh (glos config set) to a value other than its default, read back, in the file afterwards with the
@@ -4549,7 +4742,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -4581,6 +4774,9 @@ def main():
     if a.suite == "time":
         cases = [c for c in TIME_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(time_case, cases, a.jobs)) else 1
+    if a.suite == "https":
+        cases = [c for c in HTTPS_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(https_case, cases, a.jobs)) else 1
     if a.suite == "netapp":
         cases = [c for c in NETAPP_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(netapp_case, cases, a.jobs)) else 1
