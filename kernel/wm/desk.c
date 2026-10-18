@@ -29,6 +29,7 @@
  * program's own picture. */
 #include <string.h>
 
+#include "clock.h"
 #include "deskint.h"
 #include "display.h"
 #include "io.h"
@@ -160,6 +161,7 @@ static void desk_thread(void *arg)
             thread_wait(&wakeq, timer_ticks() + 5 * 1024);      /* (the clock, at the latest) */
         changed = 0;
         irq_restore(f);
+        clock_second();                         /* (summer time's changes, without a network: M10) */
         m = desk_lock();
         deskin_turn(m);
         fb = display_fb();

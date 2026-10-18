@@ -486,10 +486,22 @@ void session_exec(const struct trapframe *tf)
     ses.exclusive = psp == vm.loader_psp && job.exclusive;
     ses.app = psp == vm.loader_psp && job.app;
     ses.env_seg = 0;
-    {                                           /* the profile's strings, then the job's own (M9) over them */
-        static char add[BI_PROF_ENV + sizeof job.env];
+    {                                           /* TZ (M10), the profile's strings, then the job's own (M9) over */
+        static char add[64 + BI_PROF_ENV + sizeof job.env];         /* them */
         const char *e;
         u32 n = 0, l;
+        if (psp == vm.loader_psp && kcfg_loaded()) {  /* (DJGPP's localtime reads it; DOS keeps local time), */
+            int own = 0;                        /* unless the profile or the job sets one */
+            for (e = ses.prof ? ses.prof->env : ""; *e; e += strlen(e) + 1)
+                own |= same_var(e, "TZ=");
+            for (e = job.env; *e; e += strlen(e) + 1)
+                own |= same_var(e, "TZ=");
+            if (!own) {
+                memcpy(add, "TZ=", 3);
+                kcfg_get("time", "zone", add + 3, 48);
+                n = (u32)strlen(add) + 1;
+            }
+        }
         for (e = ses.prof ? ses.prof->env : ""; *e; e += l) {
             const char *j;
             int keep = 1;

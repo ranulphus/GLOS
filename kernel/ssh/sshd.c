@@ -14,8 +14,10 @@
 #include "lwip/tcp.h"
 
 #include "glos/bootinfo.h"
+#include "glos/tz.h"
 #include "agent.h"
 #include "clip.h"
+#include "clock.h"
 #include "glos/config.h"
 #include "kcfg.h"
 #include "app.h"
@@ -690,6 +692,82 @@ static void input_cmd(struct ssh_chan *ch, const char *cmd)
     }
 }
 
+/* glos net resolve NAME (M10): its address, as GLOS's resolver finds it (DHCP's servers), within 10 s. */
+struct resolve {
+    int look;
+    u32 until;
+};
+
+static int resolve_turn(struct ssh_chan *ch, void *arg)
+{
+    struct resolve *r = arg;
+    char b[48];
+    u8 ip[4];
+    int st = net_lookup_poll(r->look, ip);
+    if (st == 0 && (s32)(timer_ticks() - r->until) < 0) {
+        stream_at(timer_ticks() + 32);
+        return 0;
+    }
+    if (st == 1) {
+        ksnprintf(b, sizeof b, "%u.%u.%u.%u\n", ip[0], ip[1], ip[2], ip[3]);
+        say(ch, 0, b);
+        ssh_chan_exit(ch, 0);
+    } else {
+        if (st == 0)
+            net_lookup_drop(r->look);
+        say(ch, 1, "glos net: no such name\n");
+        ssh_chan_exit(ch, 1);
+    }
+    return 1;
+}
+
+/* glos time sync (M10): SNTP asked again at once; the time once it has answered, within 30 s. */
+struct tsync {
+    u32 sets, until;
+};
+
+static int tsync_turn(struct ssh_chan *ch, void *arg)
+{
+    struct tsync *t = arg;
+    char b[400];
+    if (clock_sets() == t->sets && (s32)(timer_ticks() - t->until) < 0) {
+        stream_at(timer_ticks() + 64);
+        return 0;
+    }
+    if (clock_sets() == t->sets) {
+        say(ch, 1, "glos time: no answer from the time server\n");
+        ssh_chan_exit(ch, 1);
+    } else {
+        clock_text(b, sizeof b);
+        say(ch, 0, b);
+        ssh_chan_exit(ch, 0);
+    }
+    return 1;
+}
+
+/* glos time set YYYY-MM-DDTHH:MM:SS[Z]: UTC with the Z, local time without; 0, or -1. */
+static int time_parse(const char *p, u32 *utc)
+{
+    struct tz_tm tm;
+    int v[6], i;
+    for (i = 0; i < 6; i++) {
+        int n = 0, d = 0;
+        while (*p >= '0' && *p <= '9' && d < 4)
+            n = n * 10 + (*p++ - '0'), d++;
+        if (!d || (i < 5 && *p != "--T::"[i]))
+            return -1;
+        if (i < 5)
+            p++;
+        v[i] = n;
+    }
+    if ((*p && strcmp(p, "Z")) || v[0] < 1980 || v[0] > 2105 || v[1] < 1 || v[1] > 12 || v[2] < 1 || v[2] > 31
+        || v[3] > 23 || v[4] > 59 || v[5] > 59)
+        return -1;
+    tm.year = v[0], tm.mon = v[1], tm.day = v[2], tm.hour = v[3], tm.min = v[4], tm.sec = v[5];
+    *utc = *p ? tz_join(&tm) : clock_from_local(tz_join(&tm));
+    return 0;
+}
+
 /* glos log --follow: the COM1 mirror from its last 16 KB on, until the
    client goes. The log is looked at sixteen times a second. */
 static int follow_turn(struct ssh_chan *ch, void *arg)
@@ -916,6 +994,51 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
     } else if (!strcmp(cmd, "glos config") || !strncmp(cmd, "glos config ", 12)) {
         config_cmd(ch, cmd + 11);
+    } else if (!strcmp(cmd, "glos time")) {
+        char b[400];
+        clock_text(b, sizeof b);
+        say(ch, 0, b);
+        ssh_chan_exit(ch, 0);
+    } else if (!strcmp(cmd, "glos time sync")) {
+        struct tsync *t = kmalloc(sizeof *t);
+        if (t) {
+            t->sets = clock_sets();
+            t->until = timer_ticks() + 30 * 1024;
+        }
+        if (!t || stream_add(ch, tsync_turn, plain_drop, t) != 0) {
+            if (t)
+                kfree(t);
+            say(ch, 1, "glos: busy\n");
+            ssh_chan_exit(ch, 1);
+        } else {
+            net_sntp_restart();
+        }
+    } else if (!strncmp(cmd, "glos time set ", 14)) {
+        u32 t;
+        char b[400];
+        if (time_parse(cmd + 14, &t) != 0) {
+            say(ch, 1, "glos time: YYYY-MM-DDTHH:MM:SS, with a Z for UTC\n");
+            ssh_chan_exit(ch, 2);
+        } else {
+            clock_set(t, "hand");
+            clock_text(b, sizeof b);
+            say(ch, 0, b);
+            ssh_chan_exit(ch, 0);
+        }
+    } else if (!strncmp(cmd, "glos net resolve ", 17)) {
+        struct resolve *r = kmalloc(sizeof *r);
+        if (r) {
+            r->look = net_lookup_start(cmd + 17);
+            r->until = timer_ticks() + 10 * 1024;
+        }
+        if (!r || r->look < 0 || stream_add(ch, resolve_turn, plain_drop, r) != 0) {
+            if (r && r->look >= 0)
+                net_lookup_drop(r->look);
+            if (r)
+                kfree(r);
+            say(ch, 1, "glos net: busy, or no network\n");
+            ssh_chan_exit(ch, 1);
+        }
     } else if (!strcmp(cmd, "glos clip") || !strncmp(cmd, "glos clip ", 10)) {
         /* glos clip [TEXT]: the clipboard's text shown (its first 28 KB), or set (\n, \t, \\ as glos type has
            them) (M9) */

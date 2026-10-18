@@ -3706,6 +3706,153 @@ CONFIG_SETS = [
 CONFIG_CASES = [("bf6", "g200", "ne2kpci")]
 
 
+# ---- the clock (M10 step A): SNTP, the zone, the RTC and DOS
+
+class NtpServer:
+    """An SNTP server on the host, for the time suite: UDP on 127.0.0.1, which the guest reaches as 10.0.2.2
+    through SLiRP, answering with the host's time plus `offset` seconds, the request's transmit time as the
+    originate time (lwIP checks it)."""
+
+    def __init__(self):
+        import socket
+        import threading
+        self.offset, self.asked, self.stop = 0.0, 0, False
+        self.s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.s.bind(("127.0.0.1", 0))
+        self.s.settimeout(0.3)
+        self.port = self.s.getsockname()[1]
+        self.t = threading.Thread(target=self.serve, daemon=True)
+        self.t.start()
+
+    def now(self):
+        return time.time() + self.offset
+
+    def serve(self):
+        import struct
+        while not self.stop:
+            try:
+                data, addr = self.s.recvfrom(512)
+            except OSError:
+                continue
+            if len(data) < 48:
+                continue
+            self.asked += 1
+            t = self.now() + 2208988800             # (NTP counts from 1900)
+            ts = struct.pack("!II", int(t), int((t - int(t)) * 2 ** 32))
+            pkt = bytes([0x24, 1, 6, 0xEC]) + bytes(8) + b"GPS\0" + ts + data[40:48] + ts + ts
+            self.s.sendto(pkt, addr)
+
+    def close(self):
+        self.stop = True
+        self.t.join(1)
+        self.s.close()
+
+
+TIME_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
+
+
+def time_case(profile, card):
+    """The clock (M10 step A; kernel/core/clock.c, PRD §11.3): SNTP sets it from an NTP server on the host, in
+    GLOS.CFG's zone (the United Kingdom's): glos time, the RTC and DOS (CLOCKCHK) agree, in summer time; a step
+    of ten days followed; the end of summer time seen by itself, the RTC and DOS set back an hour; another zone;
+    the time set by hand; a zone refused; TZ in a program's environment; names looked up; and, when the host has
+    the internet, pool.ntp.org through SLiRP agreeing with the host's clock."""
+    import calendar
+    tag = "%s-%s" % (profile, card)
+    ntp = NtpServer()
+    ntp.offset = calendar.timegm((2026, 7, 1, 11, 59, 0, 0, 0, 0)) - time.time()   # (summer: local 12:59 BST)
+    cfg = os.path.join(ROOT, "out", "time-%s.cfg" % tag)
+    open(cfg, "w").write("; GLOS.CFG for the time suite\r\n[time]\r\nserver = 10.0.2.2:%d\r\n"
+                         "zone = GMT0BST,M3.5.0/1,M10.5.0\r\ninterval = 1\r\n" % ntp.port)
+    agent = Agent("time-" + tag, profile, card, ["--file", "%s=/TEST/GLOS.CFG" % os.path.relpath(cfg, ROOT),
+        "--file", "build/ow/dos/CLOCKCHK.EXE=/TEST/CLOCKCHK.EXE",
+        "--cmd", "SERSAY HX-START time", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
+    checks, notes = {"listen": agent.listening()}, []
+
+    def at(s):
+        return calendar.timegm(time.strptime(s, "%Y-%m-%dT%H:%M:%S"))
+
+    def clock():
+        o = agent.ssh("glos time")[1]
+        m = re.search(r"utc=(\S+)Z local=(\S+) (\S+) zone=(\S+)", o)
+        r = re.search(r"rtc=(\S+)", o)
+        c = re.search(r"CLOCK dos=(\S+) rtc=(\S+)", agent.ssh("C:\\TEST\\CLOCKCHK.EXE")[1])
+        if not (m and r and c):
+            notes.append("glos time: %r" % o)
+            return None
+        return {"utc": at(m.group(1)), "local": at(m.group(2)), "name": m.group(3), "rtc": at(r.group(1)),
+                "dos": at(c.group(1)), "bios": at(c.group(2)), "text": o}
+
+    def agree(name, want_utc, off, zone_name, slack=4):
+        c = clock()
+        ok = bool(c) and abs(c["utc"] - want_utc) <= slack and c["local"] - c["utc"] == off and c["name"] == zone_name \
+            and abs(c["rtc"] - c["local"]) <= slack and abs(c["dos"] - c["local"]) <= slack \
+            and abs(c["bios"] - c["local"]) <= slack
+        checks[name] = ok
+        if not ok:
+            notes.append("%s: want utc %d offset %d %s; %r" % (name, want_utc, off, zone_name, c))
+        return ok
+
+    def until_log(text, limit, mark=0):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            if text in agent.log()[mark:]:
+                return True
+            time.sleep(1)
+        return False
+
+    try:
+        checks["synced"] = until_log("GLOS-TIME set by=sntp", 120)
+        agree("summer", ntp.now(), 3600, "BST")
+        checks["tz"] = "GMT0BST,M3.5.0/1,M10.5.0" in agent.ssh("ECHO %TZ%")[1]
+        ntp.offset += 10 * 86400                    # (ten days on)
+        rc, o, _ = agent.ssh("glos time sync", timeout=90)
+        checks["step"] = rc == 0 and re.search(r"step=8640\d{5}ms", o) is not None
+        agree("stepped", ntp.now(), 3600, "BST")
+        ntp.offset = calendar.timegm((2026, 10, 25, 0, 59, 30, 0, 0, 0)) - time.time()   # (BST ends at 01:00 UTC)
+        mark = len(agent.log())
+        agent.ssh("glos time sync", timeout=90)
+        checks["autumn"] = until_log("GLOS-TIME offset=0", 150, mark)
+        agree("winter", ntp.now(), 0, "GMT")
+        mark = len(agent.log())
+        rc, o, _ = agent.ssh("glos config set time zone CET-1CEST,M3.5.0,M10.5.0/3")
+        checks["zone-set"] = rc == 0 and until_log("GLOS-TIME zone=CET-1CEST", 30, mark)
+        agree("paris", ntp.now(), 3600, "CET")
+        rc, o, e = agent.ssh("glos config set time zone NOPE")
+        checks["zone-refused"] = rc == 1 and "POSIX" in e
+        agent.ssh("glos config set time sntp off")
+        rc, o, _ = agent.ssh("glos time set 2030-01-02T03:04:05Z")
+        checks["by-hand"] = rc == 0 and "by=hand" in o
+        agree("hand", at("2030-01-02T03:04:05"), 3600, "CET", slack=8)
+        rc, o, _ = agent.ssh("glos net resolve 10.0.2.2")
+        checks["resolve-dotted"] = rc == 0 and o.strip() == "10.0.2.2"
+        rc, o, _ = agent.ssh("glos net resolve pool.ntp.org", timeout=30)   # (the internet: the name used below)
+        internet = rc == 0 and re.match(r"\d+\.\d+\.\d+\.\d+$", o.strip()) is not None
+        checks["resolve-unknown"] = agent.ssh("glos net resolve no-such-name.invalid", timeout=30)[0] == 1
+        if internet:                                 # (pool.ntp.org through SLiRP: the host's own time)
+            agent.ssh("glos config set time server pool.ntp.org")
+            agent.ssh("glos config set time sntp on")
+            rc, o, _ = agent.ssh("glos time sync", timeout=90)
+            m = re.search(r"utc=(\S+)Z", o)
+            checks["pool"] = rc == 0 and bool(m) and abs(at(m.group(1)) - time.time()) <= 5
+            if not checks["pool"]:
+                notes.append("pool.ntp.org: %r" % o)
+        else:
+            notes.append("no internet from the guest: pool.ntp.org not asked")
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    ntp.close()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    for n in notes:
+        print("    time-%s %s" % (tag, n))
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("time-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def config_case(profile, vcard, card):
     """GLOS.CFG's settings (M9 step B; include/glos/config.h, kernel/core/config.c): every setting the schema has
     set over ssh (glos config set) to a value other than its default, read back, in the file afterwards with the
@@ -4004,13 +4151,20 @@ def native_case(profile, vcard, card, bits):
 # ---- the Control Panel (M9 step G): every setting the schema has, changed by keys alone
 
 CONTROL_CASES = [("bf6", "g200", "ne2kpci")]
-CONTROL_PAGES = ["display", "input", "sound", "net", "desktop", "shell", "open", "program"]   # (cfg_sections)
 CONTROL_NUMBERS = {"gpu_watchdog": "1000", "repeat_rate": "20", "double_click": "400", "envsize": "2048",
-                   "memory": "8192"}
+                   "memory": "8192", "interval": "12"}
 CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\KIOSK.BAT", "options": "/NOVME",
                  "title": "CP Test", "args": "-a -b", "comspec": "C:\\COMMAND.COM",
                  "autoexec": "C:\\AUTOEXEC.BAT", "dir": "C:\\CP", "blaster": "A220 I7 D1 H5",
-                 "env": "CPA=1\nPATH=C:\\A;C:\\B"}
+                 "env": "CPA=1\nPATH=C:\\A;C:\\B", "server": "time.example.org:1230",
+                 "zone": "CET-1CEST,M3.5.0,M10.5.0/3"}
+
+
+def cfg_pages():
+    """cfg_sections as sdk/config/cfg.c has them: the Control Panel's pages, in order."""
+    src = open(os.path.join(ROOT, "sdk", "config", "cfg.c")).read()
+    body = src[src.index("cfg_sections[] = {"):]
+    return re.findall(r'"(\w+)"', body[:body.index("};")])
 
 
 def cfg_schema():
@@ -4036,7 +4190,7 @@ def control_script(schema):
     def to(p):
         nonlocal page
         if p != page:
-            lines.append("quick" + " ctrl+tab" * ((p - page) % len(CONTROL_PAGES)))
+            lines.append("quick" + " ctrl+tab" * ((p - page) % len(cfg_pages())))
             page = p
 
     def value(k):
@@ -4060,13 +4214,13 @@ def control_script(schema):
     for k in schema:
         if k["section"] in ("open", "program") or k["type"] == "CFG_MODE":
             continue
-        to(CONTROL_PAGES.index(k["section"]))
+        to(cfg_pages().index(k["section"]))
         want.append((k["section"], k["key"], value(k)))
-    to(CONTROL_PAGES.index("open"))             # a kind of file
+    to(cfg_pages().index("open"))             # a kind of file
     lines += ["key alt+a", 'wait "Add"', "quick home shift+end", "type .doc\\n", "pause 1500", 'wait "Add"',
               "type NOTEPAD.EXE\\n", 'gone "Add"']
     want.append(("open", ".DOC", "NOTEPAD.EXE"))
-    to(CONTROL_PAGES.index("program"))          # a new program's profile
+    to(cfg_pages().index("program"))          # a new program's profile
     lines += ["key alt+n", 'wait "New Program"', "type cptest.exe\\n", 'gone "New Program"']
     for k in schema:
         if k["section"] == "program":
@@ -4256,7 +4410,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -4285,6 +4439,9 @@ def main():
     if a.suite == "config":
         cases = [c for c in CONFIG_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(config_case, cases, a.jobs)) else 1
+    if a.suite == "time":
+        cases = [c for c in TIME_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(time_case, cases, a.jobs)) else 1
     if a.suite == "control":
         cases = [c for c in CONTROL_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(control_case, cases, a.jobs)) else 1

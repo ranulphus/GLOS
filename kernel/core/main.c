@@ -4,6 +4,7 @@
  * milestones-m0-m4.md M1). */
 #include "glos/bootinfo.h"
 #include "arch.h"
+#include "clock.h"
 #include "desk.h"
 #include "display.h"
 #include "gdb.h"
@@ -110,6 +111,7 @@ void kmain(struct bootinfo *loader_bi)
         random_init(bi);
         display_init(bi);
         vm_start(bi);
+        clock_init();                           /* the RTC's time, until GLOS.CFG's zone and SNTP (M10) */
         mixer_init(bi);                         /* (it plays once the desktop is up: display.c) */
         desk_init();
         kcfg_init(bi);                          /* GLOS.CFG, read and kept by the kernel (M9) */

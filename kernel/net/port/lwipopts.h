@@ -27,8 +27,30 @@
 #define LWIP_NUM_NETIF_CLIENT_DATA  1           /* (the responder's, on the interface) */
 #define LWIP_NETIF_EXT_STATUS_CALLBACK 1        /* (it follows the address DHCP gives) */
 #define MDNS_MAX_SERVICES           1
-#define MEMP_NUM_SYS_TIMEOUT        (LWIP_NUM_SYS_TIMEOUT_INTERNAL + 8)     /* (and its timers) */
-#define LWIP_DNS                    0
+#define MEMP_NUM_SYS_TIMEOUT        (LWIP_NUM_SYS_TIMEOUT_INTERNAL + 12)    /* (and its timers, SNTP's) */
+#define LWIP_DNS                    1           /* (M10) the names DHCP's servers answer for */
+#define DNS_TABLE_SIZE              8
+#define DNS_MAX_NAME_LENGTH         128
+#define DNS_MAX_SERVERS             2
+
+/* SNTP (M10): lwIP's client (third_party/lwip/src/apps/sntp), the time handed to kernel/core/clock.c. The interval
+   is [time] interval's, an hour at least (RFC 4330's 15 seconds kept); the port 123, or the server's as GLOS.CFG
+   gives it (a test's on the host). */
+extern unsigned short clock_sntp_port;
+unsigned int clock_sntp_interval(void);
+void clock_sntp(unsigned int sec, unsigned int us);
+void clock_get_us(unsigned int *sec, unsigned int *us);
+#define SNTP_SERVER_DNS             1
+#define SNTP_MAX_SERVERS            1
+#define SNTP_CHECK_RESPONSE         2
+#define SNTP_COMP_ROUNDTRIP         1
+#define SNTP_STARTUP_DELAY          0
+#define SNTP_SUPPRESS_DELAY_CHECK   1
+#define SNTP_UPDATE_DELAY           clock_sntp_interval()
+#define SNTP_RETRY_TIMEOUT          15000
+#define SNTP_PORT                   clock_sntp_port
+#define SNTP_SET_SYSTEM_TIME_US(sec, us) clock_sntp((unsigned int)(sec), (unsigned int)(us))
+#define SNTP_GET_SYSTEM_TIME(sec, us) do { unsigned int s_, u_; clock_get_us(&s_, &u_); (sec) = s_; (us) = u_; } while (0)
 
 #define LWIP_NETIF_STATUS_CALLBACK  1
 #define LWIP_NETIF_HOSTNAME         1

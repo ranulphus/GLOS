@@ -4,10 +4,12 @@
  * (DJGPP) and the host tests, so it uses nothing of a C library: its own
  * small string helpers only. */
 #include "glos/config.h"
+#include "glos/tz.h"
 
 /* ---- the schema */
 
-const char *const cfg_sections[] = { "display", "input", "sound", "net", "desktop", "shell", "open", "program", 0 };
+const char *const cfg_sections[] = { "display", "input", "sound", "net", "time", "desktop", "shell", "open", "program",
+                                     0 };
 
 const struct cfg_key cfg_schema[] = {
     /* [display] (M6, M7, M8) */
@@ -36,6 +38,15 @@ const struct cfg_key cfg_schema[] = {
     /* [net] (M5) */
     { "net", "hostname", CFG_TEXT, CFG_RESTART, 1, 15, "host", "glos", "&Host name",
       "This machine's name on the network (NAME.local)" },
+    /* [time] (M10): network time, the zone */
+    { "time", "sntp", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "&Network time",
+      "The clock is set from a time server (SNTP) when the network is up, and kept so" },
+    { "time", "server", CFG_TEXT, CFG_NOW, 1, 63, "hostport", "pool.ntp.org", "Time &server",
+      "The SNTP server's name or address, and :port if it isn't 123" },
+    { "time", "zone", CFG_TEXT, CFG_NOW, 1, 47, "tz", "UTC0", "Time &zone",
+      "Where the PC is, as a POSIX TZ string: GMT0BST,M3.5.0/1,M10.5.0 is the United Kingdom's" },
+    { "time", "interval", CFG_NUMBER, CFG_NOW, 1, 168, 0, "24", "&Ask again (hours)",
+      "How often the time server is asked again" },
     /* [desktop] (M9) */
     { "desktop", "start", CFG_TEXT, CFG_DESKTOP, 0, 120, "line", "", "&Start with the desktop",
       "Programs started when the desktop starts, beside GLOS.EXE (FILES.EXE draws the desktop's icons)" },
@@ -209,8 +220,9 @@ static int text_class(const char *cls, const char *v)
 {
     for (; *v; v++) {
         unsigned char c = (unsigned char)*v;
-        if (same(cls, "host")) {
-            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-'))
+        if (same(cls, "host") || same(cls, "hostport")) {
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-'
+                  || (same(cls, "hostport") && (c == '.' || c == ':'))))
                 return 0;
         } else if (c < 0x20 || c == 0x7F) {     /* "line": anything printable */
             return 0;
@@ -254,11 +266,30 @@ int cfg_check(const struct cfg_key *k, const char *v, char *why, int room)
             return say(why, room, "too long", "", "");
         if (vl < k->min)
             return say(why, room, "empty", "", "");
+        if (same(k->choices ? k->choices : "", "tz")) {
+            struct tz z;
+            if (tz_parse(v, &z) != 0)
+                return say(why, room, "not a POSIX time zone (as GMT0BST,M3.5.0/1,M10.5.0 or UTC0)", "", "");
+            return 0;
+        }
         if (!text_class(k->choices ? k->choices : "line", v))
             return say(why, room, same(k->choices ? k->choices : "", "host") ? "letters, digits and hyphens only"
-                                                                               : "a character that isn't printable", "", "");
-        if (same(k->choices ? k->choices : "", "host") && v[0] == '-')
+                              : same(k->choices ? k->choices : "", "hostport") ? "a name or an address, and :port"
+                              : "a character that isn't printable", "", "");
+        if ((same(k->choices ? k->choices : "", "host") || same(k->choices ? k->choices : "", "hostport")) && v[0] == '-')
             return say(why, room, "can't begin with a hyphen", "", "");
+        if (same(k->choices ? k->choices : "", "hostport")) {
+            const char *c = v;
+            long port = 0;
+            while (*c && *c != ':')
+                c++;
+            if (*c == ':') {                    /* (a port: 1-65535, nothing after) */
+                for (c++; *c >= '0' && *c <= '9' && port <= 65535; c++)
+                    port = port * 10 + (*c - '0');
+                if (*c || port < 1 || port > 65535)
+                    return say(why, room, "a port is 1-65535, after the one colon", "", "");
+            }
+        }
         return 0;
     case CFG_MODE: {
         long w = 0, h = 0, b = 0;

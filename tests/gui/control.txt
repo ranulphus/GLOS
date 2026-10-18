@@ -12,6 +12,8 @@ shot cp-sound "Control Panel"
 key ctrl+tab
 shot cp-network "Control Panel"
 key ctrl+tab
+shot cp-time "Control Panel"
+key ctrl+tab
 shot cp-desktop "Control Panel"
 key ctrl+tab
 shot cp-shell "Control Panel"

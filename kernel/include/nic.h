@@ -35,6 +35,12 @@ void net_start(int selftest);           /* the net thread, once a card is claime
 void net_rx(struct nic *n, const u8 *frame, u32 len);
 void net_irq(struct trapframe *tf);     /* the card's IRQ handler */
 void net_report(void);                  /* GLOS-NET counters, at leave */
+int net_run(void (*fn)(void *arg), void *arg, int wait);       /* fn on the net thread (M10): 0, or -1 */
+int net_resolve(const char *name, unsigned char ip[4], u32 ms);  /* a name's IPv4 address: 0, or -1 */
+int net_lookup_start(const char *name);  /* a lookup begun, not waited for: its number, or -1 ... */
+int net_lookup_poll(int i, unsigned char ip[4]);       /* ... 0 asking; 1 found, -1 not (then it is free) ... */
+void net_lookup_drop(int i);            /* ... or given up */
+void net_sntp_restart(void);            /* [time] changed, or glos time sync: SNTP again */
 int net_counts(u8 ip[4], u32 *rx, u32 *tx, char *card, u32 room);     /* GLOS_FN_STAT's (M9) */
 u32 net_stat(char *buf, u32 max, int json);     /* glos net's lines, or glos stat's JSON object */
 

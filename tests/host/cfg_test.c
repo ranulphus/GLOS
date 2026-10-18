@@ -46,6 +46,8 @@ void mixer_enable(int on) { snprintf(applied, sizeof applied, "mixer %d", on); }
 void mixer_set_rate(u32 r) { snprintf(applied, sizeof applied, "rate %u", r); }
 void vkbc_typematic(u32 d, u32 r) { snprintf(applied, sizeof applied, "typematic %u %u", d, r); }
 void deskin_pointer_speed(int s) { snprintf(applied, sizeof applied, "speed %d", s); }
+void clock_zone(const char *tz) { snprintf(applied, sizeof applied, "zone %s", tz); }
+void net_sntp_restart(void) { snprintf(applied, sizeof applied, "sntp again"); }
 int agent_post_detached(const char *cmd, const char *dir) { snprintf(applied, sizeof applied, "start %s", cmd); (void)dir; return 0; }
 
 /* The DOS server, at once, on host files: open, read, create, write, close (dos.c's calls as config.c makes them). */

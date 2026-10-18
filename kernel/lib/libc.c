@@ -21,6 +21,24 @@ char *strcpy(char *d, const char *s)
     return r;
 }
 
+char *strncpy(char *d, const char *s, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n && s[i]; i++)
+        d[i] = s[i];
+    for (; i < n; i++)
+        d[i] = 0;
+    return d;
+}
+
+char *strchr(const char *s, int c)
+{
+    for (; *s; s++)
+        if (*s == (char)c)
+            return (char *)s;
+    return c ? 0 : (char *)s;
+}
+
 int strcmp(const char *a, const char *b)
 {
     while (*a && *a == *b)

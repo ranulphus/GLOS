@@ -51,6 +51,7 @@
 #   make loopa-native   the native apps' scripts on the desktop against the host's goldens (M9)
 #   make loopa-control  every setting changed from the Control Panel by keys (M9)
 #   make loopa-m9       M9's exit: gui, config, console, native and control
+#   make loopa-time     the clock: SNTP, the zone, the RTC and DOS, names (M10)
 #   make gate           M4e's exit: the baseline matrix under GLOS and with direct mode forced, a kill and
 #                       an ssh probe for every program (tools/gate/run.py; on the host; hours)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
@@ -59,6 +60,7 @@ include config.mk
 include deps.mk
 
 DEV      := $(MGA_GLIDE)/tools/dev
+CFG_SRCS := sdk/config/cfg.c sdk/config/tz.c   # GLOS.CFG's schema and time zones, shared everywhere
 BUILD_ID := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
 Q ?= @
 
@@ -67,7 +69,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
+.PHONY: apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -105,9 +107,11 @@ host-test-run:
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Ikernel/include -Iinclude \
 	  -DGLOSSHIM_NO_MAIN \
 	  -o build/host/gui_test tests/host/gui_test.c tests/host/glosshim.c $(filter-out sdk/gui/field.c,$(GUI_SRCS)) \
-	  $(GFX_SRCS) kernel/lib/png.c sdk/config/cfg.c && build/host/gui_test
+	  $(GFX_SRCS) kernel/lib/png.c $(CFG_SRCS) && build/host/gui_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Itests/host/kstub -Ikernel/include -Iinclude \
-	  -o build/host/cfg_test tests/host/cfg_test.c sdk/config/cfg.c && build/host/cfg_test
+	  -o build/host/cfg_test tests/host/cfg_test.c $(CFG_SRCS) && build/host/cfg_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iinclude -o build/host/tz_test tests/host/tz_test.c sdk/config/tz.c \
+	  && build/host/tz_test
 
 # The toolkit (sdk/gui, M9) and the apps on the host, against tests/host/glosshim.c: each test script
 # (tests/gui/NAME.txt) run at 8, 16 and 32 bits, its shots written to build/host/gui/ (the goldens Loop A's
@@ -115,21 +119,21 @@ host-test-run:
 GUI_SRCS := $(wildcard sdk/gui/*.c)
 GUI_HOST := $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Ikernel/include -Iinclude
 build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h \
-                    tests/host/glosshim.c kernel/include/keymap.h sdk/config/cfg.c include/glos/config.h
+                    tests/host/glosshim.c kernel/include/keymap.h $(CFG_SRCS) include/glos/config.h include/glos/tz.h
 	@mkdir -p build/host
 	$(Q)$(GUI_HOST) -Dmain=app_main -c -o build/host/guitest-app.o tests/dos/guitest.c
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
-	  sdk/config/cfg.c
+	  $(CFG_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
 APPS := notepad calc images term files monitor control
 APP_HOST_FLAGS := -Ithird_party/stb
 define app_host
 build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h tests/host/glosshim.c \
-                 kernel/include/keymap.h sdk/config/cfg.c include/glos/config.h
+                 kernel/include/keymap.h $$(CFG_SRCS) include/glos/config.h include/glos/tz.h
 	@mkdir -p build/host
 	$$(Q)$$(GUI_HOST) $$(APP_HOST_FLAGS) -Dmain=app_main -c -o build/host/$(1)-app.o apps/$(1)/$(1).c
 	$$(Q)$$(GUI_HOST) -o $$@ build/host/$(1)-app.o $$(filter-out apps/$(1)/$(1).c,$$(wildcard apps/$(1)/*.c)) \
-	  tests/host/glosshim.c $$(GUI_SRCS) $$(LIBGLOS_GFX) kernel/lib/png.c sdk/config/cfg.c -lm
+	  tests/host/glosshim.c $$(GUI_SRCS) $$(LIBGLOS_GFX) kernel/lib/png.c $$(CFG_SRCS) -lm
 endef
 $(foreach a,$(APPS),$(eval $(call app_host,$(a))))
 GUI_SCRIPTS := $(wildcard tests/gui/*.txt)
@@ -177,14 +181,16 @@ build/ow/obj16/%.obj: loader/%.asm
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WASM    $<"
 	$(Q)$(OWENV) $(OWBIN)/wasm -q -fo=$@ $<
-build/ow/obj16/cfg.obj: sdk/config/cfg.c include/glos/config.h
+build/ow/obj16/cfg.obj build/ow/obj16/tz.obj: build/ow/obj16/%.obj: sdk/config/%.c include/glos/config.h include/glos/tz.h
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WCC16   $<"
 	$(Q)$(WCC16) -bt=dos -ms -3 -os -zq -we -iinclude -fo=$@ $<
-build/ow/GLOS.EXE: build/ow/obj16/main.obj build/ow/obj16/lowlevel.obj build/ow/obj16/stub.obj build/ow/obj16/cfg.obj
+build/ow/GLOS.EXE: build/ow/obj16/main.obj build/ow/obj16/lowlevel.obj build/ow/obj16/stub.obj build/ow/obj16/cfg.obj \
+                   build/ow/obj16/tz.obj
 	$(Q)echo "  WLINK   $@"
 	$(Q)$(WLINK) system dos option quiet option stack=4k option map=build/ow/GLOS.map name $@ \
-	  file build/ow/obj16/main.obj,build/ow/obj16/lowlevel.obj,build/ow/obj16/stub.obj,build/ow/obj16/cfg.obj
+	  file build/ow/obj16/main.obj,build/ow/obj16/lowlevel.obj,build/ow/obj16/stub.obj,build/ow/obj16/cfg.obj \
+	  file build/ow/obj16/tz.obj
 
 # ---- DOS test programs (Open Watcom, small model): tests/dos/name.c -> build/ow/dos/NAME.EXE
 define dos_test
@@ -197,6 +203,7 @@ endef
 $(eval $(call dos_test,HOSTILE,hostile))
 $(eval $(call dos_test,XMSTEST,xmstest))
 $(eval $(call dos_test,ECHOARGS,echoargs))
+$(eval $(call dos_test,CLOCKCHK,clockchk))
 $(eval $(call dos_test,CONIN,conin))
 $(eval $(call dos_test,RUNOUT,runout))
 $(eval $(call dos_test,SESSTEST,sesstest))
@@ -220,7 +227,7 @@ build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
 	  file build/ow/dos/obj/dpmi16.obj,build/ow/dos/obj/dpmi16a.obj
 DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
              build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
-             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE
+             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/CLOCKCHK.EXE
 dos-tests: $(DOS_TESTS)
 
 # The 2D library (kernel/gfx; M6 step C) and its fonts: 1-bit bitmaps made from TrueType fonts by
@@ -248,10 +255,11 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c
-KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS)) build/kernel/sdk_cfg.o
-# GLOS.CFG's schema (sdk/config/cfg.c, include/glos/config.h; M9): shared with the loader and the Control Panel.
-build/kernel/sdk_cfg.o: sdk/config/cfg.c include/glos/config.h
+         kernel/app/app.c kernel/app/api.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c
+KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS)) build/kernel/sdk_cfg.o build/kernel/sdk_tz.o
+# GLOS.CFG's schema (sdk/config/cfg.c, include/glos/config.h; M9) and time zones (sdk/config/tz.c; M10): shared
+# with the loader and the Control Panel.
+build/kernel/sdk_cfg.o build/kernel/sdk_tz.o: build/kernel/sdk_%.o: sdk/config/%.c include/glos/config.h include/glos/tz.h
 	@mkdir -p $(dir $@)
 	$(Q)echo "  KCC     $<"
 	$(Q)$(HOST_CC) $(KCFLAGS) -MMD -MP -c -o $@ $<
@@ -267,7 +275,7 @@ build/mgahal/%.o: $(MGAHAL)/%.c $(wildcard $(MGAHAL)/include/mga/*.h kernel/incl
 # lwIP 2.2.0 (third_party/lwip, BSD-3; THIRD_PARTY.md): its own code, built
 # with the kernel's flags but without -Werror.
 LWIP_SRCS := $(wildcard third_party/lwip/src/core/*.c third_party/lwip/src/core/ipv4/*.c \
-               third_party/lwip/src/apps/mdns/*.c) \
+               third_party/lwip/src/apps/mdns/*.c third_party/lwip/src/apps/sntp/*.c) \
              third_party/lwip/src/netif/ethernet.c
 LWIP_OBJS := $(patsubst third_party/lwip/src/%.c,build/lwip/%.o,$(LWIP_SRCS))
 build/lwip/%.o: third_party/lwip/src/%.c $(wildcard kernel/net/port/*.h kernel/net/port/arch/*.h)
@@ -401,6 +409,9 @@ loopa-console: all dos-tests build/dj/RUNTEST.EXE build/dj/PMVGA.EXE check-deps
 # The Control Panel (M9 step G): every setting changed by keys alone, a screen mode kept and one let go back.
 loopa-control: all apps check-deps
 	$(Q)python3 tests/loopa/jobs.py control -j $(JOBS)
+# The clock (M10 step A): SNTP from an NTP server on the host, the zone, the RTC and DOS, names.
+loopa-time: all dos-tests check-deps
+	$(Q)python3 tests/loopa/jobs.py time -j $(JOBS)
 # M9's exit: the toolkit, the settings, console jobs, the apps, the Control Panel.
 loopa-m9: loopa-gui loopa-config loopa-console loopa-native loopa-control
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
@@ -484,13 +495,14 @@ build/dj/GDBME.EXE: tests/dos/gdbme.c
 # The 2D library in it is the kernel's own code (kernel/gfx), built for the program.
 LIBGLOS_GFX := kernel/gfx/gfx.c kernel/gfx/pal.c kernel/gfx/font.c kernel/gfx/region.c \
                kernel/gfx/fonts/ui.c kernel/gfx/fonts/bold.c kernel/gfx/fonts/mono.c
-build/sdk/libglos.a: sdk/libglos/glos.c include/glos/api.h include/glos/gfx.h $(LIBGLOS_GFX) sdk/config/cfg.c \
-                     include/glos/config.h
+build/sdk/libglos.a: sdk/libglos/glos.c include/glos/api.h include/glos/gfx.h $(LIBGLOS_GFX) $(CFG_SRCS) \
+                     include/glos/config.h include/glos/tz.h
 	@mkdir -p build/sdk
 	$(Q)echo "  DJCC    $<"
 	$(Q)rm -f $@ build/sdk/*.o
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/glos.o $<
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/cfg.o sdk/config/cfg.c
+	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/tz.o sdk/config/tz.c
 	$(Q)for f in $(LIBGLOS_GFX); do \
 	    $(DJCC) -O2 -Wall -Werror -ffreestanding -Iinclude -Ikernel/include -c -o build/sdk/gfx_$$(basename $$f .c).o $$f || exit 1; \
 	  done

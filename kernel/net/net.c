@@ -8,8 +8,15 @@
  * offers its SSH server as a service (_ssh._tcp). Under /SELFTEST a TCP echo
  * service listens on port 7, and the responder is asked for its own name
  * with a query made up here (tests/loopa/jobs.py net: SLiRP carries no
- * multicast, so nothing outside can ask). */
+ * multicast, so nothing outside can ask).
+ *
+ * M10: other threads hand the net thread work (net_run: name lookups, SNTP's
+ * restarts; apps' connections in step B). The clock is set by SNTP (lwIP's
+ * client, kernel/core/clock.c), started once DHCP has given an address and
+ * GLOS.CFG has been read, and started again when [time] changes. */
 #include "lwip/apps/mdns.h"
+#include "lwip/apps/sntp.h"
+#include "lwip/dns.h"
 #include "lwip/dhcp.h"
 #include "lwip/etharp.h"
 #include "lwip/init.h"
@@ -21,7 +28,9 @@
 #include <string.h>
 
 #include "glos/bootinfo.h"
+#include "clock.h"
 #include "io.h"
+#include "kcfg.h"
 #include "kprintf.h"
 #include "nic.h"
 #include "sched.h"
@@ -38,6 +47,18 @@ static const char *hostname = "glos";
 static u32 bound_at;                            /* the tick DHCP gave an address at */
 static u8 mdns_asked, mdns_answered;            /* /SELFTEST's question to the responder */
 static u32 rng;
+static u8 sntp_due = 1;                         /* SNTP to be (re)started when it can be */
+
+/* ---- work for the net thread, from others (lwIP is this thread's alone) */
+
+struct net_work {
+    void (*fn)(void *arg);
+    void *arg;
+    volatile u8 done;
+    struct net_work *next;
+};
+static struct net_work *work_head, *work_tail;
+static struct waitq work_doneq;
 
 /* Another thread has work for this one (the ssh thread's output); from any
    context. */
@@ -49,6 +70,207 @@ static void net_kick(void)
     thread_wake(&netq);
     if (f & 0x200)
         sti();
+}
+
+/* fn(arg) on the net thread; with wait, once it has run (not from the net thread itself). 0, or -1 without a
+   network card. */
+int net_run(void (*fn)(void *arg), void *arg, int wait)
+{
+    static struct net_work pool[16];
+    struct net_work *w = 0;
+    u32 f, i;
+    if (!nic0)
+        return -1;
+    f = irq_save();
+    for (i = 0; i < 16 && !w; i++)
+        if (!pool[i].fn)
+            w = &pool[i];
+    if (!w) {
+        irq_restore(f);
+        return -1;
+    }
+    w->fn = fn, w->arg = arg, w->done = 0, w->next = 0;
+    if (work_tail)
+        work_tail->next = w;
+    else
+        work_head = w;
+    work_tail = w;
+    irq_restore(f);
+    net_kick();
+    if (wait) {
+        f = irq_save();
+        while (!w->done)
+            thread_block(&work_doneq);
+        w->fn = 0;
+        irq_restore(f);
+    }
+    return 0;
+}
+
+static void work_turn(void)
+{
+    for (;;) {
+        struct net_work *w;
+        u32 f = irq_save();
+        if (!(w = work_head)) {
+            irq_restore(f);
+            return;
+        }
+        work_head = w->next;
+        if (!work_head)
+            work_tail = 0;
+        irq_restore(f);
+        w->fn(w->arg);
+        f = irq_save();
+        w->done = 1;
+        thread_wake(&work_doneq);
+        irq_restore(f);
+    }
+}
+
+/* ---- SNTP: [time] sntp, server (NAME or ADDRESS, :PORT), interval */
+
+static u32 atoi_k(const char *p)
+{
+    u32 n = 0;
+    while (*p >= '0' && *p <= '9')
+        n = n * 10 + (u32)(*p++ - '0');
+    return n;
+}
+
+static void sntp_start(void)
+{
+    static char server[64];
+    char v[64], *colon;
+    sntp_stop();
+    sntp_due = 0;
+    kcfg_get("time", "interval", v, sizeof v);
+    clock_set_interval((u32)atoi_k(v));
+    kcfg_get("time", "sntp", v, sizeof v);
+    if (strcmp(v, "on"))
+        return;
+    kcfg_get("time", "server", server, sizeof server);
+    clock_sntp_port = 123;
+    if ((colon = strchr(server, ':')) != 0) {
+        *colon = 0;
+        clock_sntp_port = (u16)atoi_k(colon + 1);
+    }
+    clock_sntp_asked(server);
+    sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    sntp_setservername(0, server);
+    sntp_init();
+    kprintf("GLOS-TIME sntp server=%s port=%u\n", server, clock_sntp_port);
+}
+
+static void sntp_again(void *arg) { (void)arg; sntp_due = 1; }
+
+/* [time] changed, or glos time sync: SNTP starts again (asking at once) when the network is up. */
+void net_sntp_restart(void) { net_run(sntp_again, 0, 0); }
+
+/* ---- names (glos net resolve; apps' in step B). A lookup stays in the pool until lwIP's resolver has done with
+   it (it keeps the pointer until an answer or its own time-out), even when its asker has given up. */
+
+#define NLOOK 8
+static struct lookup {
+    char name[128];
+    ip_addr_t addr;
+    volatile u8 state;                          /* LK_ */
+    volatile u8 abandoned;                      /* nobody waits: free once lwIP has done */
+    struct waitq q;
+} looks[NLOOK];
+enum { LK_FREE, LK_ASKING, LK_FOUND, LK_NOT };
+
+static void found(const char *name, const ip_addr_t *ip, void *arg)
+{
+    struct lookup *l = arg;
+    u32 f = irq_save();
+    (void)name;
+    if (ip)
+        l->addr = *ip;
+    l->state = l->abandoned ? LK_FREE : ip ? LK_FOUND : LK_NOT;
+    thread_wake(&l->q);
+    irq_restore(f);
+}
+
+static void lookup_start(void *arg)
+{
+    struct lookup *l = arg;
+    err_t e = dns_gethostbyname(l->name, &l->addr, found, l);
+    if (e != ERR_INPROGRESS) {
+        u32 f = irq_save();
+        l->state = l->abandoned ? LK_FREE : e == ERR_OK ? LK_FOUND : LK_NOT;
+        thread_wake(&l->q);
+        irq_restore(f);
+    }
+}
+
+/* A lookup of name begun: its number, or -1 (none free, too long, no card). */
+int net_lookup_start(const char *name)
+{
+    u32 f = irq_save(), i;
+    if (!nic0 || strlen(name) >= sizeof looks[0].name) {
+        irq_restore(f);
+        return -1;
+    }
+    for (i = 0; i < NLOOK && looks[i].state != LK_FREE; i++)
+        ;
+    if (i == NLOOK) {
+        irq_restore(f);
+        return -1;
+    }
+    looks[i].state = LK_ASKING;
+    looks[i].abandoned = 0;
+    irq_restore(f);
+    strcpy(looks[i].name, name);
+    if (net_run(lookup_start, &looks[i], 0) != 0) {
+        looks[i].state = LK_FREE;
+        return -1;
+    }
+    return (int)i;
+}
+
+/* 0 still asking; 1 found (ip set) or -1 not, after which the lookup is free. */
+int net_lookup_poll(int i, u8 ip[4])
+{
+    struct lookup *l = &looks[i];
+    u32 a;
+    if (l->state == LK_ASKING)
+        return 0;
+    if (l->state == LK_NOT) {
+        l->state = LK_FREE;
+        return -1;
+    }
+    a = ip4_addr_get_u32(ip_2_ip4(&l->addr));
+    ip[0] = (u8)a, ip[1] = (u8)(a >> 8), ip[2] = (u8)(a >> 16), ip[3] = (u8)(a >> 24);
+    l->state = LK_FREE;
+    return 1;
+}
+
+/* The asker gives up: freed now, or by the resolver when it has done. */
+void net_lookup_drop(int i)
+{
+    u32 f = irq_save();
+    if (looks[i].state == LK_ASKING)
+        looks[i].abandoned = 1;
+    else
+        looks[i].state = LK_FREE;
+    irq_restore(f);
+}
+
+/* name's IPv4 address (a dotted one is taken as it is), waiting `ms` at most: 0 and ip, or -1. */
+int net_resolve(const char *name, u8 ip[4], u32 ms)
+{
+    u32 until = timer_ticks() + ms * 1024 / 1000, f;
+    int i = net_lookup_start(name), r;
+    if (i < 0)
+        return -1;
+    f = irq_save();
+    while ((r = net_lookup_poll(i, ip)) == 0 && (s32)(timer_ticks() - until) < 0)
+        thread_wait(&looks[i].q, until);
+    irq_restore(f);
+    if (r == 0)
+        net_lookup_drop(i);
+    return r == 1 ? 0 : -1;
 }
 
 void net_irq(struct trapframe *tf)
@@ -268,7 +490,11 @@ static void net_thread(void *arg)
         cli();
         vm_kmask(nic0->irq, 0);
         sti();
+        work_turn();
         sys_check_timeouts();
+        if (sntp_due && bound_at && kcfg_loaded())
+            sntp_start();
+        clock_second();
         sshd_net_poll();
         if (selftest && bound_at && !mdns_asked && timer_ticks() - bound_at > 3 * 1024)
             mdns_ask();                         /* (the responder has probed for its name by then) */
@@ -297,10 +523,15 @@ u32 net_stat(char *buf, u32 max, int json)
     if (json)
         return (u32)ksnprintf(buf, max, "{\"card\":\"%s\",\"ip\":\"%s\",\"rx\":%u,\"tx\":%u,\"rx_errors\":%u,\"overruns\":%u}",
                               nic0->name, ip, nic0->rx_frames, nic0->tx_frames, nic0->rx_errors, nic0->overruns);
-    return (u32)ksnprintf(buf, max, "card=%s io=%04x irq=%u mac=%02x:%02x:%02x:%02x:%02x:%02x\n"
-                          "ip=%s mask=%s gw=%s\nrx=%u tx=%u rx_errors=%u overruns=%u\n", nic0->name, nic0->base,
-                          nic0->irq, nic0->mac[0], nic0->mac[1], nic0->mac[2], nic0->mac[3], nic0->mac[4], nic0->mac[5],
-                          ip, mask, gw, nic0->rx_frames, nic0->tx_frames, nic0->rx_errors, nic0->overruns);
+    {
+        char dns[16];
+        ip4addr_ntoa_r(ip_2_ip4(dns_getserver(0)), dns, sizeof dns);
+        return (u32)ksnprintf(buf, max, "card=%s io=%04x irq=%u mac=%02x:%02x:%02x:%02x:%02x:%02x\n"
+                              "ip=%s mask=%s gw=%s dns=%s\nrx=%u tx=%u rx_errors=%u overruns=%u\n", nic0->name,
+                              nic0->base, nic0->irq, nic0->mac[0], nic0->mac[1], nic0->mac[2], nic0->mac[3], nic0->mac[4],
+                              nic0->mac[5], ip, mask, gw, dns, nic0->rx_frames, nic0->tx_frames, nic0->rx_errors,
+                              nic0->overruns);
+    }
 }
 
 /* For GLOS_FN_STAT (M9): the address, the frames each way, the card's name; 0, or -1 without a card. */

@@ -134,3 +134,13 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
 ## Status
 
 - Planned 2026-10-18; the owner answered Q4, the roots, Q13 and the SSH client's scope the same day.
+- **Step A done** (2026-10-18): `make loopa-time` passes on bf6 with the ne2kpci and on the 486dx2 with the ne2k.
+  Covered: SNTP from a server on the host; summer time and its end seen by the kernel itself; a ten-day step; a
+  change of zone; a zone refused; the time set by hand; TZ in a job's environment; names looked up; and
+  pool.ntp.org through SLiRP agreeing with the host's clock. `loopa-config` and `loopa-control` pass with the new
+  `[time]` settings and the Control Panel's "Date and Time" page. As built: supervisor.md §8.4.
+  - It found an 86Box fault. The bf6's BIOS traps port 71h into SMM, and the PIIX4's RTC alias at 74h/75h had an
+    index register of its own in 86Box. So after a change of century (the first SNTP set from 1980), every RTC read
+    returned the century and the kernel's tick stopped. MGA-Glide's local patch 0118 fixes it, with selftest `rtc`.
+    Until 0118 is in MGA-Glide's main and the shared emulator, a bf6 run that sets the clock needs
+    `BOX86_DIR=~/.cache/mga-glide/86box-m10`.

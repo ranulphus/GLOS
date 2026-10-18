@@ -423,6 +423,39 @@ along, and once the client had ended and its LDT was gone, that thread's next tr
   GLOS never lets a BIOS touch the real RTC (§10). These BIOSes don't support INT 15h 2401h (A20) either,
   so the loader uses port 92h, then the keyboard controller.
 
+### 8.4 The wall clock (M10 step A, `kernel/core/clock.c`)
+
+- **UTC is kept as a time at a tick:** `base` at tick `at`, run on by the 1024 Hz tick (§8.1). At the start it
+  is the RTC's time read as local time in `[time] zone`: UTC0 until GLOS.CFG has been read, then read again in
+  the zone it gives. A zone is a POSIX TZ string (`include/glos/tz.h`, `sdk/config/tz.c`: the M, J and plain
+  day rules, offsets to the second, and `<...>` names, the same code in the loader, the kernel, the SDK and the
+  host tests).
+- **Setting it.** SNTP is lwIP's client on the net thread (`kernel/net/net.c`), polling `[time] server` (a name
+  or an address, with an optional `:port`) every `interval` hours, retrying after 15 s. It checks the reply's
+  originate time against its request (`SNTP_CHECK_RESPONSE 2`) and halves the round trip. `glos time set` sets
+  the time by hand (with a Z it is UTC, without one local time), and `glos time sync` asks the server now and
+  waits for the answer. `sntp=off` leaves the time to the RTC and the hand.
+- **A step of a second or more goes to the RTC and to DOS**, both of which keep local time, as DOS always has:
+  - The RTC is written directly, with interrupts off (so the tick's reads of register C can't move the index)
+    and the SET bit held. Register 32h is written too when it holds a century (19 to 21).
+  - DOS is set through the DOS server (INT 21h 2Bh and 2Dh; FreeDOS writes the RTC's date through the BIOS as
+    well). Without a DOS server (`/RUN`, `/SHELL`), the BIOS's ticks since midnight at 40:6Ch are set instead.
+    A set that finds the DOS server still busy with the last waits for the next `clock_second()`.
+- **Summer time:** `clock_second()`, called about once a second by the net thread and the desktop's, notices
+  the zone's offset change and sets the RTC and DOS again (`GLOS-TIME offset=`). A change of zone does the same.
+- **Programs** see the zone as `TZ=` in the environment of the agent's jobs, unless the profile or the job sets
+  one (§17).
+- **`glos time`** shows UTC, local time with the zone's name, how the clock was last set (and when, and the
+  step), and the RTC's own reading. `glos net resolve NAME` asks the DNS client (two servers from DHCP).
+- **The BF6's BIOS traps port 71h into SMM** (PIIX4 device trap 12, found in M10). Every access to the RTC's
+  data port enters its handler, the tick's 1,024 reads of register C a second included (in Loop A since M1).
+  The handler keeps the century in register 32h in step with the year, working through the 74h/75h alias. In
+  86Box the alias had an index register of its own, so after a change of century every read of port 71h
+  returned the century: registers A and B read 20h, register C was never really read, and the tick stopped
+  (any change of century did it, DOS's DATE included). Fixed in 86Box by MGA-Glide's patch 0118 (§20). On
+  silicon this is a cost question only: how long 1,024 SMIs a second take on a machine with such a BIOS is
+  for the bench.
+
 ## 9. V86 monitor
 
 ### 9.1 Mode
@@ -1722,6 +1755,7 @@ gdb -ex 'set architecture i386' -ex 'target remote | ssh -W localhost:2345 pc'
 | IRETD to V86 mode loads EFLAGS[31:16] unmasked (POPFD masks by CPU model), so a 486DX2 keeps ID | An emulated POPFD that set ID made CPUID look present (lDebugX ran it into #UD, M4c) | GLOS's FLAGS image has ID only where the loader found CPUID (§9.2). **Fixed** too: patch 0114 (case X) |
 | Matrox G-series cards are AGP only | 486 profiles can't have a Matrox card | S3 Trio64V2/DX until a PCI-variant patch at M7 |
 | The dynarec (the old one MGA-Glide builds) checks segment limits on stores, never on loads (`MEM_LOAD_ADDR_EA_*`) | DJGPP's Ctrl-C and SIGALRM cut DS's limit to 4 KB in the IRQ handler; a loop that only reads never faults, on any host (found by djtst205's HANG, M4b) | **Fixed:** patch 0112 (MGA-Glide 81c0686; V86TEST case V) |
+| The PIIX4's RTC aliases at 74h–77h had index registers of their own, not 70h–73h's | The BF6 BIOS's SMM handler for port 71h works through 74h/75h: after any change of century (GLOS's SNTP set, DOS's DATE) every read of port 71h returned the century, and the RTC tick stopped (M10) | **Fixed:** patch 0118 (MGA-Glide selftest `rtc`; §8.4) |
 
 ## 21. Invariants checklist (for code review)
 
