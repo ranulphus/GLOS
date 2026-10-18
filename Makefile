@@ -51,6 +51,7 @@
 #   make loopa-native   the native apps' scripts on the desktop against the host's goldens (M9)
 #   make loopa-control  every setting changed from the Control Panel by keys (M9)
 #   make loopa-m9       M9's exit: gui, config, console, native and control
+#   make loopa-m10      M10's exit: time, netapp, https, sshc, pkg, vnc and gui (step G's scripts)
 #   make loopa-time     the clock: SNTP, the zone, the RTC and DOS, names (M10)
 #   make loopa-netapp   apps' TCP connections and sockets (NETTEST) against the host (M10)
 #   make loopa-https    HTTPS: FETCH, certificates checked, GitHub and a FreeDOS mirror (M10)
@@ -78,7 +79,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
+.PHONY: sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -468,6 +469,7 @@ loopa-sshc: all build/apps/TERM.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py sshc -j $(JOBS)
 # M9's exit: the toolkit, the settings, console jobs, the apps, the Control Panel.
 loopa-m9: loopa-gui loopa-config loopa-console loopa-native loopa-control
+loopa-m10: loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-gui
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py input -j $(JOBS)
 # M4a: the DPMI host's checks (DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i).
