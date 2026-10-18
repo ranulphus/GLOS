@@ -7,6 +7,7 @@
 #include "appint.h"
 #include "agent.h"
 #include "clip.h"
+#include "clock.h"
 #include "stat.h"
 #include "watch.h"
 #include "kcfg.h"
@@ -19,6 +20,9 @@
 #include "kprintf.h"
 #include "mgadisp.h"
 #include "mixer.h"
+#include "nic.h"
+#include "randombytes.h"
+#include "sock.h"
 #include "timer.h"
 #include "vm.h"
 
@@ -62,7 +66,7 @@ static int done(struct trapframe *tf, int e)
 static u32 caps(void)
 {
     u32 bpp = (u32)display_desktop_bpp();
-    u32 c = mixer_on() || mixer_found() ? GLOS_CAP_AUDIO : 0u;
+    u32 c = (mixer_on() || mixer_found() ? GLOS_CAP_AUDIO : 0u) | (net_up() ? GLOS_CAP_NET : 0u);
     if (!bpp || !mga_desktop_card())
         return c;
     return c | GLOS_CAP_GPU | (bpp == 16 ? GLOS_CAP_GLWIN : 0u);
@@ -240,6 +244,21 @@ int glos_api(struct trapframe *tf)
         desk_screen(&gw);
         return done(tf, put(tf, tf->ebx, &gw, sizeof gw) != 0 ? GLOS_E_ARGUMENT : 0);
     }
+    if (fn == GLOS_FN_TIME) {                   /* (1.3: for any program) */
+        tf->eax = clock_utc();
+        tf->ebx = (u32)clock_how();
+        tf->ecx = (u32)clock_offset();
+        return 0;
+    }
+    if (fn == GLOS_FN_RANDOM) {                 /* (1.3: for any program) */
+        u8 buf[256];
+        if (tf->ecx > sizeof buf)
+            return fail(tf, GLOS_E_ARGUMENT);
+        randombytes(buf, tf->ecx);
+        r = user_wr((u16)tf->ds, tf->ebx, buf, tf->ecx);
+        memset(buf, 0, sizeof buf);
+        return done(tf, r != 0 ? GLOS_E_ARGUMENT : 0);
+    }
     if (!a)
         return fail(tf, GLOS_E_NOT_APP);
     if (fn == GLOS_FN_GPU_LOCK)                 /* (not a safe point: the lock is being taken, not left) */
@@ -393,6 +412,8 @@ static int app_fn(struct app *a, struct trapframe *tf, u32 fn)
     }
     case GLOS_FN_JOB:
         return job_fn(a, tf);
+    case GLOS_FN_NET:
+        return sock_api(a, tf);
     case GLOS_FN_SHELL:
         desk_shell(a, tf->ebx != 0);
         return done(tf, 0);

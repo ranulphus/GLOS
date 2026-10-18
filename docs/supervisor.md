@@ -1635,6 +1635,44 @@ and GLOS's:
   job's, its context included (a DJGPP program reading a line); DOS's drive and folder are read before and put
   back after. Calls that can't be made then (a console function inside DOS, an EXEC) wait on, in their order.
 
+### 17.11 Apps' connections (M10 step B, `kernel/net/sock.c`)
+
+- **`GLOS_FN_NET`** (API 1.3) gives apps TCP connections through the kernel's lwIP, which stays the net thread's
+  alone (§10, NO_SYS). Its calls are a name looked up (the resolver's pool, §8.4), a connection made, bytes sent
+  and received, a close or a reset, and a connection's state. An app has 8 connections at most, 32 for all apps.
+  No listening.
+- **A connection** is a slot in a table of 32, an lwIP pcb, and two rings of 16 KB, each written by one side and
+  read by the other.
+  - The receive ring is filled by lwIP's callback on the net thread. lwIP is told that bytes have been taken
+    (`tcp_recved`) only when the app has read them, so the window is the room left in the ring: a ring holds
+    more than `TCP_WND`, so lwIP never offers what won't fit.
+  - The send ring is emptied into `tcp_write` on the net thread's turn (`sock_net_poll`, after the SSH
+    server's), which the app's call starts with `net_kick()`.
+  - Nagle's algorithm is off unless `GLOS_NETF_NAGLE` is given.
+- **Waiting.** An app's call waits on its own queue, `a->wq`. The net thread wakes it when its connection opens,
+  fails, receives or makes room, and `app_kill()` wakes it for a kill. A wait ends on its condition, its time,
+  or the kill. It doesn't end for the app's own interrupts or events, so an app with handlers to run uses short
+  waits.
+- **Events** are asked for per connection (`GLOS_NETF_EVENTS`), so a program that never reads events (a console
+  program on the BSD layer) never fills its queue. The receive event comes once for bytes arriving into an empty
+  ring, and the room event once after a send took fewer bytes than it was given, when a quarter of the ring is
+  free.
+- **Giving up a connect.** lwIP retries a SYN for minutes. The app's time is the limit: on expiry the connection
+  is reset and `GLOS_E_NET_TIMEOUT` returned.
+- **Closing** hands the slot to the net thread: what is still to be sent goes, then `tcp_close` (or `tcp_abort`
+  for a reset, or when the connection has failed), the rings are freed, and the slot is free. An app's end does
+  the same for all of its connections (`sock_app_gone`, from the app's reaping beside the watches'). `glos net`
+  shows `sockets=` the table's use, closing slots included.
+- **`GLOS_FN_RANDOM`** gives any program up to 256 bytes from the kernel's `randombytes()` (§17.6's pool).
+  **`GLOS_FN_TIME`** gives any program UTC, how the clock was set (`GLOS_TIME_RTC`, `_SNTP`, `_HAND`; TLS refuses
+  to check a certificate against the RTC's guess) and the zone's offset now.
+- **The SDK** (`sdk/libglos/socket.c`, `include/glos/net.h`) has BSD sockets on these calls for portable code. A
+  socket is a DOS file descriptor (the NUL device's, from DJGPP's `__FSEXT_alloc_fd`), so `read`, `write`, `close`
+  and `select` reach the connection. DJGPP's `fcntl` tells a file-system extension only the descriptor, not the
+  command, so `glos/net.h` maps `fcntl` to `glos_fcntl`, which does O_NONBLOCK for sockets and hands the rest to
+  DJGPP's (found by NETTEST: a non-blocking `recv` waited for ever). Headers named as POSIX has them are in
+  `include/glos/posix`.
+
 ## 18. Logging
 
 - Lines on COM1 have the form `GLOS-<TAG> key=value …`, one line per event, written synchronously so the last

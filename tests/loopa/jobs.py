@@ -3853,6 +3853,145 @@ def time_case(profile, card):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+class EchoServer:
+    """TCP echo on 127.0.0.1, which the guest reaches as 10.0.2.2 through SLiRP: a thread a connection, each
+    giving back what it is sent; one whose first bytes are "bye\n" is closed after they are echoed. `open` the
+    connections open now, `total` all there have been."""
+
+    def __init__(self):
+        import socket
+        import threading
+        self.open = self.total = 0
+        self.lock = threading.Lock()
+        self.s = socket.socket()
+        self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.s.bind(("127.0.0.1", 0))
+        self.s.listen(32)
+        self.port = self.s.getsockname()[1]
+        threading.Thread(target=self.accept, daemon=True).start()
+
+    def accept(self):
+        import threading
+        while True:
+            try:
+                c, _ = self.s.accept()
+            except OSError:
+                return
+            threading.Thread(target=self.serve, args=(c,), daemon=True).start()
+
+    def serve(self, c):
+        with self.lock:
+            self.open += 1
+            self.total += 1
+        first = b""
+        try:
+            while True:
+                d = c.recv(65536)
+                if not d:
+                    break
+                c.sendall(d)
+                if len(first) < 4:
+                    first += d[:4 - len(first)]
+                    if first == b"bye\n":
+                        break
+        except OSError:
+            pass
+        c.close()
+        with self.lock:
+            self.open -= 1
+
+    def close(self):
+        self.s.close()
+
+
+def free_port():
+    """A port on 127.0.0.1 with nothing listening (for a refusal)."""
+    import socket
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+NETAPP_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
+
+
+def netapp_case(profile, card):
+    """An app's TCP connections (M10 step B; GLOS_FN_NET, glos/net.h): NETTEST against an echo server on the
+    host: names looked up and refused, a connection refused and one timed out, 1 MB echoed byte for byte, eight at
+    once and a ninth refused, the far end's close, events, random bytes, and the BSD sockets on it; then an app
+    holding four connections killed: the host sees them close and the kernel's table is empty."""
+    tag = "%s-%s" % (profile, card)
+    echo = EchoServer()
+    closed = free_port()
+    agent = Agent("netapp-" + tag, profile, card, ["--file", "build/dj/NETTEST.EXE=/TEST/NETTEST.EXE",
+        "--cmd", "SERSAY HX-START netapp", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
+    checks, notes = {"listen": agent.listening()}, []
+    try:
+        internet = agent.ssh("glos net resolve pool.ntp.org", timeout=30)[0] == 0
+        t0 = time.time()
+        while internet and time.time() - t0 < 60 and "GLOS-TIME set by=sntp" not in agent.log():
+            time.sleep(1)                       # (the clock set before GLOS_FN_TIME is asked)
+        rc, o, e = agent.ssh("C:\\TEST\\NETTEST.EXE all 10.0.2.2 %d %d%s" % (echo.port, closed,
+                             " pool.ntp.org" if internet else ""), timeout=900)
+        open(os.path.join(ROOT, "out", "netapp-%s.out" % tag), "w").write(o + e)
+        for line in o.replace("\r", "").split("\n"):
+            m = re.match(r"NETTEST (\S+) (ok|FAIL) ?(.*)", line)
+            if m:
+                checks["nt-" + m.group(1)] = m.group(2) == "ok"
+                if m.group(2) != "ok" or m.group(1) == "echo-1m":
+                    notes.append("%s: %s" % (m.group(1), m.group(3)))
+        checks["nt-done"] = rc == 0 and "NETTEST-DONE failures=0" in o
+        m = re.search(r"NETTEST-TIME how=(\d+) utc=(\d+) offset=(-?\d+)", o)
+        # (GLOS_FN_TIME: with the internet, SNTP from pool.ntp.org has set it to the host's time; GLOS.CFG is the
+        # default one: UTC0)
+        checks["fn-time"] = bool(m) and m.group(3) == "0" and (not internet or (m.group(1) == "1"
+                                                                                 and abs(int(m.group(2)) - time.time()) < 60))
+        if not internet:
+            notes.append("no internet from the guest: no name looked up there")
+        checks["table-empty"] = "sockets=0" in agent.ssh("glos net")[1]
+        # an app killed with connections open
+        before = echo.open
+        hold = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\NETTEST.EXE hold 10.0.2.2 %d 4"
+                                              % echo.port], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        t0 = time.time()
+        while time.time() - t0 < 60 and echo.open < before + 4:
+            time.sleep(0.5)
+        checks["held"] = echo.open == before + 4 and "sockets=4" in agent.ssh("glos net")[1]
+        seq = re.findall(r'GLOS-AGENT run seq=(\d+) cmd="C:\\TEST\\NETTEST.EXE hold', agent.log())
+        rc, o, e = agent.ssh("glos kill %s" % (seq[-1] if seq else "?"))   # (an app: by its job's number)
+        checks["kill"] = rc == 0
+        try:
+            hold.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            hold.kill()
+            checks["kill"] = False
+        if not checks["kill"]:
+            notes.append("glos kill: rc=%d %r %r; the held job's ssh: rc=%r %r" % (rc, o, e, hold.returncode,
+                                                                                hold.stdout.read()[-200:]))
+        t0 = time.time()
+        while time.time() - t0 < 30 and echo.open > before:
+            time.sleep(0.5)
+        checks["closed-on-kill"] = echo.open == before
+        t0 = time.time()
+        while time.time() - t0 < 30 and "sockets=0" not in agent.ssh("glos net")[1]:
+            time.sleep(0.5)
+        checks["table-clean"] = "sockets=0" in agent.ssh("glos net")[1]
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    echo.close()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    for n in notes:
+        print("    netapp-%s %s" % (tag, n))
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("netapp-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def config_case(profile, vcard, card):
     """GLOS.CFG's settings (M9 step B; include/glos/config.h, kernel/core/config.c): every setting the schema has
     set over ssh (glos config set) to a value other than its default, read back, in the file afterwards with the
@@ -4410,7 +4549,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -4442,6 +4581,9 @@ def main():
     if a.suite == "time":
         cases = [c for c in TIME_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(time_case, cases, a.jobs)) else 1
+    if a.suite == "netapp":
+        cases = [c for c in NETAPP_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(netapp_case, cases, a.jobs)) else 1
     if a.suite == "control":
         cases = [c for c in CONTROL_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(control_case, cases, a.jobs)) else 1

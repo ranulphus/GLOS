@@ -14,6 +14,8 @@ void clock_zone(const char *tz);        /* [time] zone (on load and when it chan
 void clock_second(void);                /* about once a second (the desktop's thread or the net thread): summer time's
                                            changes; DOS's time when the DOS server was busy */
 int clock_synced(void);                 /* set since GLOS started (SNTP or by hand) */
+int clock_how(void);                    /* GLOS_TIME_: how it was last set (GLOS_FN_TIME) */
+long clock_offset(void);                /* local time's offset now, seconds */
 u32 clock_sets(void);                   /* how many times it has been set */
 u32 clock_from_local(u32 local);        /* a local time in the zone, as UTC */
 u32 clock_text(char *buf, u32 max);     /* glos time */

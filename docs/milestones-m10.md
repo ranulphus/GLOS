@@ -144,3 +144,15 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
     returned the century and the kernel's tick stopped. MGA-Glide's local patch 0118 fixes it, with selftest `rtc`.
     Until 0118 is in MGA-Glide's main and the shared emulator, a bf6 run that sets the clock needs
     `BOX86_DIR=~/.cache/mga-glide/86box-m10`.
+- **Step B done** (2026-10-18): API 1.3. `GLOS_FN_NET` (names, connections, sending and receiving with waits a
+  kill ends, closes, states, `GLOS_EV_NET` asked for per connection), `GLOS_FN_RANDOM` and `GLOS_FN_TIME` (UTC,
+  how the clock was set, the zone's offset; added for step C's certificate checks). The SDK has BSD sockets on
+  them (`glos/net.h`, `include/glos/posix`). As built: supervisor.md §17.11.
+  - `make loopa-netapp` passes on bf6 and the 486dx2, NETTEST against an echo server on the host:
+    - names looked up (a dotted address, an unknown name, pool.ntp.org) and connections refused and timed out;
+    - 1 MB echoed byte for byte (1.5 MB/s on bf6, 0.78 MB/s on the 486dx2: Loop A's figures, not silicon's);
+    - eight connections at once and a ninth refused, the far end's close, events, and the BSD layer;
+    - an app killed holding four connections: the host sees them close, and `glos net` shows `sockets=0`.
+  - loopa-net, -ssh, -apps and -console pass with it.
+  - Found by NETTEST: DJGPP's `fcntl` passes a file-system extension only the descriptor, so O_NONBLOCK on a
+    socket never arrived. `glos/net.h` maps `fcntl` to `glos_fcntl`.

@@ -11,7 +11,7 @@
  * multicast, so nothing outside can ask).
  *
  * M10: other threads hand the net thread work (net_run: name lookups, SNTP's
- * restarts; apps' connections in step B). The clock is set by SNTP (lwIP's
+ * restarts, apps' connections: kernel/net/sock.c). The clock is set by SNTP (lwIP's
  * client, kernel/core/clock.c), started once DHCP has given an address and
  * GLOS.CFG has been read, and started again when [time] changes. */
 #include "lwip/apps/mdns.h"
@@ -34,6 +34,7 @@
 #include "kprintf.h"
 #include "nic.h"
 #include "sched.h"
+#include "sock.h"
 #include "sshd.h"
 #include "timer.h"
 #include "vm.h"
@@ -60,9 +61,8 @@ struct net_work {
 static struct net_work *work_head, *work_tail;
 static struct waitq work_doneq;
 
-/* Another thread has work for this one (the ssh thread's output); from any
-   context. */
-static void net_kick(void)
+/* Another thread has work for this one (the ssh thread's output, an app's connection); from any context. */
+void net_kick(void)
 {
     u32 f;
     __asm__ volatile("pushfl; popl %0; cli" : "=r"(f) :: "memory");
@@ -272,6 +272,9 @@ int net_resolve(const char *name, u8 ip[4], u32 ms)
         net_lookup_drop(i);
     return r == 1 ? 0 : -1;
 }
+
+/* A card, and an address from DHCP. */
+int net_up(void) { return nic0 && bound_at; }
 
 void net_irq(struct trapframe *tf)
 {
@@ -496,6 +499,7 @@ static void net_thread(void *arg)
             sntp_start();
         clock_second();
         sshd_net_poll();
+        sock_net_poll();
         if (selftest && bound_at && !mdns_asked && timer_ticks() - bound_at > 3 * 1024)
             mdns_ask();                         /* (the responder has probed for its name by then) */
     }
@@ -527,10 +531,10 @@ u32 net_stat(char *buf, u32 max, int json)
         char dns[16];
         ip4addr_ntoa_r(ip_2_ip4(dns_getserver(0)), dns, sizeof dns);
         return (u32)ksnprintf(buf, max, "card=%s io=%04x irq=%u mac=%02x:%02x:%02x:%02x:%02x:%02x\n"
-                              "ip=%s mask=%s gw=%s dns=%s\nrx=%u tx=%u rx_errors=%u overruns=%u\n", nic0->name,
-                              nic0->base, nic0->irq, nic0->mac[0], nic0->mac[1], nic0->mac[2], nic0->mac[3], nic0->mac[4],
-                              nic0->mac[5], ip, mask, gw, dns, nic0->rx_frames, nic0->tx_frames, nic0->rx_errors,
-                              nic0->overruns);
+                              "ip=%s mask=%s gw=%s dns=%s\nrx=%u tx=%u rx_errors=%u overruns=%u\nsockets=%u\n",
+                              nic0->name, nic0->base, nic0->irq, nic0->mac[0], nic0->mac[1], nic0->mac[2], nic0->mac[3],
+                              nic0->mac[4], nic0->mac[5], ip, mask, gw, dns, nic0->rx_frames, nic0->tx_frames,
+                              nic0->rx_errors, nic0->overruns, sock_count());
     }
 }
 

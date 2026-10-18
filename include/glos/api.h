@@ -20,7 +20,7 @@
 #define GLOS_API_H
 
 #define GLOS_API_MAJOR   1
-#define GLOS_API_MINOR   2
+#define GLOS_API_MINOR   3
 #define GLOS_API_VERSION ((GLOS_API_MAJOR << 16) | GLOS_API_MINOR)
 
 /* Functions (EAX). */
@@ -110,7 +110,15 @@
 #define GLOS_FN_WATCH    29     /* EBX 0: DS:ECX a directory ("C:\\GAMES") -> EAX a watch's id: GLOS_EV_FILES
                                    whenever a file there is made, removed, renamed or written (by any program, the
                                    agent, SFTP); EBX 1: ECX id: no more. The app's go with it */
-#define GLOS_FN_COUNT    30
+/* (1.3) */
+#define GLOS_FN_NET      30     /* TCP connections through the kernel's network (GLOS_CAP_NET): EBX GLOS_NET_ (below).
+                                   An app has 8 at most; they are closed when it ends */
+#define GLOS_FN_RANDOM   31     /* DS:EBX room for ECX bytes (256 at most) -> random bytes from the kernel's pool
+                                   (the network's timing, the keyboard's, the TSC), fit for keys. For any program */
+#define GLOS_FN_TIME     32     /* -> EAX the time (seconds since 1970-01-01 UTC), EBX GLOS_TIME_ (how it was set),
+                                   ECX local time's offset now (seconds, signed: east of Greenwich positive). For
+                                   any program */
+#define GLOS_FN_COUNT    33
 
 /* Errors (EAX, with the carry flag). */
 #define GLOS_E_FUNCTION  1      /* no such function */
@@ -124,6 +132,12 @@
 #define GLOS_E_NO_AUDIO  9      /* no mixer: no Sound Blaster 16 (BLASTER), or [sound] mixer = off */
 #define GLOS_E_CONFIG    10     /* GLOS_FN_CONFIG: no such setting, a value the schema refuses (why given), or
                                    GLOS.CFG not read (yet) */
+/* (1.3) GLOS_FN_NET */
+#define GLOS_E_NET_DOWN  11     /* no network: no card GLOS can use, or no address from DHCP yet */
+#define GLOS_E_NET_NAME  12     /* no such name (DNS) */
+#define GLOS_E_NET_TIMEOUT 13   /* no answer in the time given (the attempt is given up) */
+#define GLOS_E_NET_REFUSED 14   /* the other end refused the connection */
+#define GLOS_E_NET_RESET 15     /* the connection was reset or broke (no answer to what was sent): it is no more */
 
 /* Capabilities (GLOS_FN_VERSION's EBX): what the machine can do now. */
 #define GLOS_CAP_GPU     1      /* GLOS_FN_GPU: a Matrox card's engine draws the desktop */
@@ -131,6 +145,7 @@
                                    in a window (GLOS_FN_WINVRAM). Without it a GL program runs full-screen, as a
                                    session. */
 #define GLOS_CAP_AUDIO   4      /* GLOS_FN_AUDIO: GLOS's mixer has the Sound Blaster */
+#define GLOS_CAP_NET     8      /* (1.3) GLOS_FN_NET: a network card, and an address */
 
 /* Events (GLOS_FN_EVENT). */
 #define GLOS_EV_KEY      1      /* a key went down or up while a window of the app's had the focus */
@@ -147,6 +162,10 @@
 #define GLOS_EV_SYSKEY   7      /* (the shell's) Ctrl-Alt-Del: the task list */
 #define GLOS_EV_JOB      8      /* a job of the app's moved on: key its id, x its GLOS_JOB_ state, y its exit code */
 #define GLOS_EV_FILES    9      /* a watched directory changed: key the watch's id */
+#define GLOS_EV_NET      10     /* (1.3) a connection opened with GLOS_NETF_EVENTS moved on: key its id, x its
+                                   GLOS_NETS_ state, y the bytes waiting to be read. Sent when it opens or fails,
+                                   when bytes arrive and none were waiting, when there is room again after a
+                                   GLOS_NET_SEND took fewer than it was given, and when it closes */
 
 #define GLOS_MOD_SHIFT   1
 #define GLOS_MOD_CTRL    2
@@ -258,6 +277,42 @@ struct glos_run {
 enum { GLOS_JOB_QUEUED, GLOS_JOB_RUNNING, GLOS_JOB_FULL, GLOS_JOB_APP, GLOS_JOB_DONE };
 /* RUNNING: in the console; FULL: full-screen, as a session; APP: it became a GLOS app; DONE: ended */
 
+/* The network (GLOS_FN_NET, 1.3). Addresses are IPv4, in a 32-bit register as they are in memory: a.b.c.d is
+   a | b << 8 | c << 16 | d << 24. Times are milliseconds to wait (0: not at all; FFFFFFFFh: for ever); a wait ends
+   at once when the app is killed. */
+#define GLOS_NET_RESOLVE 0      /* DS:ECX a name (ASCIIZ, 127 bytes at most; a dotted address is taken as it is),
+                                   EDX the time -> EAX its address */
+#define GLOS_NET_CONNECT 1      /* ECX an address, EDX a port, ESI the time, EDI GLOS_NETF_ -> EAX the connection's
+                                   id, OPEN; with the time 0, CONNECTING (GLOS_NET_STATE, GLOS_EV_NET say when it is
+                                   open or failed). Refused: GLOS_E_NET_REFUSED, _TIMEOUT, _DOWN, GLOS_E_MEMORY
+                                   (the app has 8) */
+#define GLOS_NET_SEND    2      /* ECX id, DS:EDX bytes, ESI how many, EDI the time to wait for room -> EAX those
+                                   taken (fewer when the time ran out). Refused once it is reset: GLOS_E_NET_RESET */
+#define GLOS_NET_RECV    3      /* ECX id, DS:EDX room for ESI bytes, EDI the time to wait for some -> EAX the bytes
+                                   copied, EBX its GLOS_NETS_ state. 0 bytes and CLOSED: the other end has closed
+                                   and everything it sent has been read */
+#define GLOS_NET_CLOSE   4      /* ECX id, EDX 0: what is still to be sent is sent, then the connection is closed;
+                                   1: reset at once. The id is free either way */
+#define GLOS_NET_STATE   5      /* ECX id -> EAX the bytes waiting to be read, EBX its GLOS_NETS_ state, ECX the room
+                                   to send (bytes) */
+
+#define GLOS_NETF_EVENTS 1      /* GLOS_EV_NET for this connection */
+#define GLOS_NETF_NAGLE  2      /* small writes may wait to be sent together (Nagle's algorithm); without it, each
+                                   goes at once */
+
+#define GLOS_NETS_CONNECTING 1
+#define GLOS_NETS_OPEN   2
+#define GLOS_NETS_CLOSED 3      /* the other end has closed its side (what it sent may still be waiting to be read;
+                                   the app may still send) */
+#define GLOS_NETS_FAILED 4      /* refused, timed out or reset: GLOS_NET_RECV gives what was left, then fails with
+                                   the reason */
+
+/* How the clock was set (GLOS_FN_TIME, 1.3). */
+#define GLOS_TIME_RTC    0      /* not since GLOS started: the RTC's, whatever that was (certificates can't be
+                                   checked against it) */
+#define GLOS_TIME_SNTP   1      /* from the network */
+#define GLOS_TIME_HAND   2      /* by hand (glos time set) */
+
 /* What the system is doing (GLOS_FN_STAT). */
 #define GLOS_STAT_SYSTEM 0      /* a struct glos_stat_system */
 #define GLOS_STAT_APPS   1      /* a struct glos_stat_app for each app, each job and the session in front */
@@ -355,6 +410,16 @@ int glos_audio_volume(unsigned id, unsigned volume);
 void *glos_ptr(unsigned linear);        /* a pointer for a linear address GLOS gave (a window's pixels); to be asked
                                            for again when the program has allocated memory since, unless it runs
                                            with _CRT0_FLAG_UNIX_SBRK */
+/* (1.3) The network (GLOS_FN_NET; glos/net.h has sockets on these). Times as GLOS_FN_NET's: 0 no wait, ~0u for
+   ever. */
+int glos_net_resolve(const char *name, unsigned wait_ms, unsigned *addr);      /* 0 and the address, or -1 */
+int glos_net_connect(unsigned addr, unsigned port, unsigned wait_ms, unsigned flags);  /* the id, or -1 */
+int glos_net_send(unsigned id, const void *buf, unsigned n, unsigned wait_ms); /* the bytes taken, or -1 */
+int glos_net_recv(unsigned id, void *buf, unsigned room, unsigned wait_ms, unsigned *state);  /* the bytes, or -1 */
+int glos_net_close(unsigned id, int reset);
+int glos_net_state(unsigned id, unsigned *avail, unsigned *state, unsigned *room);    /* 0, or -1 */
+int glos_random(void *buf, unsigned n); /* 0, or -1 (no GLOS: nothing written) */
+int glos_time(unsigned long *utc, int *offset);        /* GLOS_TIME_ and the time (and local time's offset), or -1 */
 #ifdef __cplusplus
 }
 #endif

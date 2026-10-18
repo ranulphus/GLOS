@@ -52,6 +52,7 @@
 #   make loopa-control  every setting changed from the Control Panel by keys (M9)
 #   make loopa-m9       M9's exit: gui, config, console, native and control
 #   make loopa-time     the clock: SNTP, the zone, the RTC and DOS, names (M10)
+#   make loopa-netapp   apps' TCP connections and sockets (NETTEST) against the host (M10)
 #   make gate           M4e's exit: the baseline matrix under GLOS and with direct mode forced, a kill and
 #                       an ssh probe for every program (tools/gate/run.py; on the host; hours)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
@@ -69,7 +70,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
+.PHONY: apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -246,7 +247,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -Ithird_party/mgahal/hal/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c kernel/core/timer.c \
          kernel/core/sched.c kernel/drv/pci.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
-         kernel/net/net.c kernel/lib/libc.c \
+         kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
          kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
          kernel/ssh/sshd.c \
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c \
@@ -412,6 +413,9 @@ loopa-control: all apps check-deps
 # The clock (M10 step A): SNTP from an NTP server on the host, the zone, the RTC and DOS, names.
 loopa-time: all dos-tests check-deps
 	$(Q)python3 tests/loopa/jobs.py time -j $(JOBS)
+# M10 step B: an app's TCP connections (NETTEST) against an echo server on the host; an app killed with some open.
+loopa-netapp: all build/dj/NETTEST.EXE check-deps
+	$(Q)python3 tests/loopa/jobs.py netapp -j $(JOBS)
 # M9's exit: the toolkit, the settings, console jobs, the apps, the Control Panel.
 loopa-m9: loopa-gui loopa-config loopa-console loopa-native loopa-control
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
@@ -495,12 +499,13 @@ build/dj/GDBME.EXE: tests/dos/gdbme.c
 # The 2D library in it is the kernel's own code (kernel/gfx), built for the program.
 LIBGLOS_GFX := kernel/gfx/gfx.c kernel/gfx/pal.c kernel/gfx/font.c kernel/gfx/region.c \
                kernel/gfx/fonts/ui.c kernel/gfx/fonts/bold.c kernel/gfx/fonts/mono.c
-build/sdk/libglos.a: sdk/libglos/glos.c include/glos/api.h include/glos/gfx.h $(LIBGLOS_GFX) $(CFG_SRCS) \
-                     include/glos/config.h include/glos/tz.h
+build/sdk/libglos.a: sdk/libglos/glos.c sdk/libglos/socket.c include/glos/api.h include/glos/gfx.h include/glos/net.h \
+                     $(LIBGLOS_GFX) $(CFG_SRCS) include/glos/config.h include/glos/tz.h
 	@mkdir -p build/sdk
 	$(Q)echo "  DJCC    $<"
 	$(Q)rm -f $@ build/sdk/*.o
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/glos.o $<
+	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/socket.o sdk/libglos/socket.c
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/cfg.o sdk/config/cfg.c
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/tz.o sdk/config/tz.c
 	$(Q)for f in $(LIBGLOS_GFX); do \
@@ -520,6 +525,12 @@ build/dj/PMVGA.EXE: tests/dos/pmvga.c
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+# NETTEST (tests/dos/nettest.c; M10 step B): an app's connections, and the sockets on them.
+build/dj/NETTEST.EXE: tests/dos/nettest.c build/sdk/libglos.a tools/glosmark.py
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)python3 tools/glosmark.py $@
 build/dj/RUNTEST.EXE: tests/dos/runtest.c build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"

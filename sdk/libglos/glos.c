@@ -327,6 +327,102 @@ int glos_audio(unsigned rate, unsigned channels, unsigned bytes, unsigned *id, s
 int glos_audio_close(unsigned id) { return call3(GLOS_FN_AUDIO, 1, id, 0); }
 int glos_audio_volume(unsigned id, unsigned volume) { return call3(GLOS_FN_AUDIO, 2, id, volume); }
 
+/* ---- the network (1.3) */
+
+/* r: EAX (the function) to EDI in, the same out: 0, or -1 with error set. */
+static int call6(unsigned r[6])
+{
+    unsigned char failed;
+    if (find() < 0) {
+        error = 0;
+        return -1;
+    }
+    __asm__ __volatile__("lcall *%[e]\n\tsetc %[f]"
+                         : "+a"(r[0]), "+b"(r[1]), "+c"(r[2]), "+d"(r[3]), "+S"(r[4]), "+D"(r[5]), [f] "=m"(failed)
+                         : [e] "m"(entry)
+                         : "cc", "memory");
+    if (failed) {
+        error = (int)r[0];
+        return -1;
+    }
+    return 0;
+}
+
+int glos_net_resolve(const char *name, unsigned wait_ms, unsigned *addr)
+{
+    unsigned r[6] = { GLOS_FN_NET, GLOS_NET_RESOLVE, (unsigned)name, wait_ms, 0, 0 };
+    if (call6(r) != 0)
+        return -1;
+    *addr = r[0];
+    return 0;
+}
+
+int glos_net_connect(unsigned addr, unsigned port, unsigned wait_ms, unsigned flags)
+{
+    unsigned r[6] = { GLOS_FN_NET, GLOS_NET_CONNECT, addr, port, wait_ms, flags };
+    return call6(r) == 0 ? (int)r[0] : -1;
+}
+
+int glos_net_send(unsigned id, const void *buf, unsigned n, unsigned wait_ms)
+{
+    unsigned r[6] = { GLOS_FN_NET, GLOS_NET_SEND, id, (unsigned)buf, n, wait_ms };
+    return call6(r) == 0 ? (int)r[0] : -1;
+}
+
+int glos_net_recv(unsigned id, void *buf, unsigned room, unsigned wait_ms, unsigned *state)
+{
+    unsigned r[6] = { GLOS_FN_NET, GLOS_NET_RECV, id, (unsigned)buf, room, wait_ms };
+    if (call6(r) != 0)
+        return -1;
+    if (state)
+        *state = r[1];
+    return (int)r[0];
+}
+
+int glos_net_close(unsigned id, int reset)
+{
+    unsigned r[6] = { GLOS_FN_NET, GLOS_NET_CLOSE, id, reset != 0, 0, 0 };
+    return call6(r);
+}
+
+int glos_net_state(unsigned id, unsigned *avail, unsigned *state, unsigned *room)
+{
+    unsigned r[6] = { GLOS_FN_NET, GLOS_NET_STATE, id, 0, 0, 0 };
+    if (call6(r) != 0)
+        return -1;
+    if (avail)
+        *avail = r[0];
+    if (state)
+        *state = r[1];
+    if (room)
+        *room = r[2];
+    return 0;
+}
+
+int glos_time(unsigned long *utc, int *offset)
+{
+    unsigned r[6] = { GLOS_FN_TIME, 0, 0, 0, 0, 0 };
+    if (call6(r) != 0)
+        return -1;
+    if (utc)
+        *utc = r[0];
+    if (offset)
+        *offset = (int)r[2];
+    return (int)r[1];
+}
+
+int glos_random(void *buf, unsigned n)
+{
+    unsigned char *p = buf;
+    while (n) {
+        unsigned k = n < 256 ? n : 256, r[6] = { GLOS_FN_RANDOM, (unsigned)p, k, 0, 0, 0 };
+        if (call6(r) != 0)
+            return -1;
+        p += k, n -= k;
+    }
+    return 0;
+}
+
 /* A linear address as the program's own pointer: its data segment reaches
    everything from here on (DJGPP's "near pointers"), and the address is
    taken from the segment's base, which moves when the program's memory

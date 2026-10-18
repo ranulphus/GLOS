@@ -13,6 +13,7 @@
  * begins or ends, the RTC and DOS are set again. */
 #include <string.h>
 
+#include "glos/api.h"
 #include "glos/tz.h"
 #include "clock.h"
 #include "dos.h"
@@ -121,6 +122,10 @@ u32 clock_local(void)
 }
 
 int clock_synced(void) { return k.synced; }
+
+int clock_how(void) { return !k.synced ? GLOS_TIME_RTC : !strcmp(k.how, "sntp") ? GLOS_TIME_SNTP : GLOS_TIME_HAND; }
+
+long clock_offset(void) { return tz_offset(&k.z, clock_utc(), 0); }
 u32 clock_sets(void) { return k.sets; }
 
 /* Local time (a zone's) to UTC, for glos time set without a Z. */

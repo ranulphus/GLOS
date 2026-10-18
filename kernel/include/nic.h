@@ -36,6 +36,8 @@ void net_rx(struct nic *n, const u8 *frame, u32 len);
 void net_irq(struct trapframe *tf);     /* the card's IRQ handler */
 void net_report(void);                  /* GLOS-NET counters, at leave */
 int net_run(void (*fn)(void *arg), void *arg, int wait);       /* fn on the net thread (M10): 0, or -1 */
+void net_kick(void);                    /* the net thread to take a turn now (output waiting), from any context */
+int net_up(void);                       /* a card, and an address from DHCP */
 int net_resolve(const char *name, unsigned char ip[4], u32 ms);  /* a name's IPv4 address: 0, or -1 */
 int net_lookup_start(const char *name);  /* a lookup begun, not waited for: its number, or -1 ... */
 int net_lookup_poll(int i, unsigned char ip[4]);       /* ... 0 asking; 1 found, -1 not (then it is free) ... */

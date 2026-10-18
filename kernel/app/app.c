@@ -65,6 +65,7 @@
 #include "mixer.h"
 #include "mm.h"
 #include "session.h"
+#include "sock.h"
 #include "timer.h"
 #include "vm.h"
 #include "watch.h"
@@ -272,6 +273,7 @@ static void app_thread_end(struct app *a)
     mixer_app_gone(a);                          /* (its streams) */
     agent_app_gone(a);                          /* (its jobs, M9: those in its console with it) */
     watch_app_gone(a);
+    sock_app_gone(a);                           /* (its connections: what they had to send still goes) */
     desk_shell(a, 0);
     current->user = TU_NONE;
     current->name = "app-gone";
