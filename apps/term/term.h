@@ -18,6 +18,14 @@ void term_quit(int code);
 void term_copy(void);
 void term_paste(void);
 void term_keys(const unsigned short *k, int n);  /* keys a program left unread: the prompt's or the next one's */
+void term_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+const char *term_home(void);                    /* TERM.EXE's folder (C:\GLOS) */
+void term_input_hidden(int on);                 /* what is typed isn't shown: a password */
+void term_size(int *cols, int *rows);           /* the window's, in characters */
+struct vt;
+void term_screen_on(struct vt *v);              /* an ssh session's xterm screen shows instead (M10) */
+void term_screen_off(void);
+void term_screen_dirty(void);                   /* its changed rows drawn again */
 
 /* shell.c: the shell */
 void shell_start(void);
@@ -29,5 +37,21 @@ int term_busy(void);                            /* a program runs: the keys are 
 void shell_type(const unsigned short *keys, int n);
 void shell_break(void);                         /* Ctrl+Break */
 void shell_poll(void);                          /* the program's output, its end */
+void shell_resume(int code);                    /* a built-in that went on (ssh) has ended with code */
+
+/* ssh.c: ssh, sftp, ssh-keygen (M10) */
+int ssh_command(int argc, char **argv);         /* -2: under way (shell_resume() at its end); or the exit code */
+int sftp_command(int argc, char **argv);
+int keygen_command(int argc, char **argv);
+int ssh_active(void);                           /* a session (ssh or sftp) is open */
+int ssh_screen(void);
+int ssh_asking(void);                           /* the line typed is its: a question's answer, sftp's command */
+void ssh_answer(const char *line);
+void ssh_key(unsigned key, unsigned ch, unsigned mods);
+void ssh_paste(const char *text, int n);
+void ssh_resize(int cols, int rows);
+void ssh_break(void);
+void ssh_poll(void);                            /* its network: on GLOS_EV_NET and the tick */
+void ssh_log_screens(int on);                   /* -log: the screen on stdout when it's still */
 
 #endif

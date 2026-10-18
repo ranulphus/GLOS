@@ -4185,6 +4185,228 @@ def https_case(profile, card):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+class SshdContainer:
+    """OpenSSH's sshd in a container of the suite's own (tests/sshd/Dockerfile: Debian's openssh-server, vi, top),
+    published on two ports of 127.0.0.1 (the guest's 10.0.2.2) with a host key and a client key made for the run:
+    logins by that key or by the user glos's password."""
+
+    PASSWORD = "glos-test-pw"
+
+    def __init__(self, name, out):
+        import socket
+        self.name = "glos-sshd-" + name
+        self.keys = os.path.join(out, "sshd")
+        os.makedirs(self.keys, exist_ok=True)
+        for f in ("hostkey", "hostkey.pub", "client", "client.pub", "other", "other.pub"):
+            if os.path.exists(os.path.join(self.keys, f)):
+                os.remove(os.path.join(self.keys, f))
+        for k, c in (("hostkey", "host"), ("client", "glos@loopa"), ("other", "other")):
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", c, "-f", os.path.join(self.keys, k)],
+                           check=True)
+        open(os.path.join(self.keys, "authorized_keys"), "w").write(open(os.path.join(self.keys, "client.pub")).read())
+        open(os.path.join(self.keys, "sshd_config"), "w").write(
+            "HostKey /keys/hostkey\nAuthorizedKeysFile /keys/authorized_keys\nStrictModes no\n"
+            "PasswordAuthentication yes\nKbdInteractiveAuthentication no\nUsePAM yes\nPermitRootLogin no\n"
+            "Subsystem sftp /usr/lib/openssh/sftp-server\nLogLevel INFO\n")
+        self.ports = []
+        for _ in range(2):
+            t = socket.socket()
+            t.bind(("127.0.0.1", 0))
+            self.ports.append(t.getsockname()[1])
+            t.close()
+        subprocess.run(["docker", "build", "-q", "-t", "glos-sshd:m10", os.path.join(ROOT, "tests", "sshd")],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["docker", "rm", "-f", self.name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["docker", "run", "-d", "--rm", "--name", self.name, "-p", "127.0.0.1:%d:22" % self.ports[0],
+                        "-p", "127.0.0.1:%d:22" % self.ports[1], "-v", "%s:/keys:ro" % self.keys, "glos-sshd:m10"],
+                       check=True, stdout=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 30:
+            try:
+                with socket.create_connection(("127.0.0.1", self.ports[0]), timeout=2) as c:
+                    if c.recv(64).startswith(b"SSH-"):
+                        break
+            except OSError:
+                time.sleep(0.5)
+
+    def pub(self, which):
+        return open(os.path.join(self.keys, which + ".pub")).read().split()[1]
+
+    def run(self, cmd):
+        return subprocess.run(["docker", "exec", "-u", "glos", "-w", "/home/glos", self.name, "sh", "-c", cmd],
+                              capture_output=True, text=True).stdout       # (in the user's home, as the session was)
+
+    def close(self):
+        subprocess.run(["docker", "rm", "-f", self.name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+SSHC_CASES = [("bf6", "g200", "ne2kpci", 16), ("486dx2", "vbe", "ne2k", 8)]
+
+
+def sshc_case(profile, vcard, card, bits):
+    """The terminal's SSH and SFTP client (M10 step D, PRD D61; sdk/sshc, apps/term/ssh.c) against OpenSSH in a
+    container: a new host key asked about and kept; a command's output and its exit status as %ERRORLEVEL%; a login
+    by password after a wrong one; a session with a pty: vi editing a file (read back in the container) and top's
+    screen; a changed host key refused; SFTP put and get of 1 MB (SHA-256 on both sides) and ls; ssh-keygen's key
+    read by OpenSSH's ssh-keygen."""
+    import hashlib
+    import threading
+    tag = "%s-%s" % (profile, vcard)
+    out = os.path.join(ROOT, "out", "sshc-%s-files" % tag)
+    os.makedirs(out, exist_ok=True)
+    srv = SshdContainer(tag, out)
+    p1, p2 = srv.ports
+    open(os.path.join(out, "KNOWNHST.TXT"), "w").write("[10.0.2.2]:%d ssh-ed25519 %s\n" % (p2, srv.pub("other")))
+    mb = bytes((i * 2654435761 >> 13) & 255 for i in range(1 << 20))
+    open(os.path.join(out, "MB.BIN"), "wb").write(mb)
+    rel = lambda f: os.path.relpath(os.path.join(out, f), ROOT)
+    agent = Agent("sshc-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/TERM.EXE=/TEST/TERM.EXE",
+        "--file", "%s=/TEST/SSH/ID_ED25" % rel("sshd/client"), "--file", "%s=/TEST/SSH/KNOWNHST.TXT" % rel("KNOWNHST.TXT"),
+        "--file", "%s=/TEST/MB.BIN" % rel("MB.BIN"),
+        "--cmd", "SERSAY HX-START sshc", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"],
+        timeout=3600)
+    checks, notes, lines = {"listen": agent.listening()}, [], []
+
+    def reader(p):
+        for raw in iter(p.stdout.readline, b""):
+            lines.append(raw.decode("latin-1").rstrip("\r\n"))
+
+    def until(text, limit=120, start=0):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            for i in range(start, len(lines)):
+                if lines[i].startswith(text):
+                    return i + 1
+            time.sleep(0.3)
+        notes.append("waited %ds for %r" % (limit, text))
+        return 0
+
+    def typed(text):
+        agent.ssh("glos type " + text)
+
+    def fetch(path, dst):
+        f = subprocess.run(["scp", "-P", str(agent.port), "-i", agent.key, "-o", "IdentitiesOnly=yes", "-o",
+                            "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                            "-o", "LogLevel=ERROR", "glos@127.0.0.1:/" + path[0] + path[2:].replace("\\", "/"), dst],
+                           capture_output=True, timeout=120)
+        return open(dst, "rb").read() if f.returncode == 0 else None
+
+    term = None
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x%d" % bits)[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and (" 640x480x%d " % bits) not in agent.ssh("glos display")[1]:
+            time.sleep(0.5)
+        term = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\TERM.EXE -log"], stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT)
+        threading.Thread(target=reader, args=(term,), daemon=True).start()
+        time.sleep(8)
+        # a new host key: asked about, kept; a command's output
+        typed("ssh -p %d glos@10.0.2.2 echo hello-over-ssh\\n" % p1)
+        k = until("SSH| ask-host")
+        checks["ask-host"] = bool(k) and ("SHA256:" in lines[k - 1])
+        typed("yes\\n")
+        k = until("SSH| end", start=k)
+        checks["command"] = bool(k) and lines[k - 1] == "SSH| end code=0"
+        # its exit status
+        typed("ssh -p %d glos@10.0.2.2 exit 7 || echo status %%errorlevel%%\\n" % p1)
+        k = until("SSH| end", start=k)
+        checks["status"] = bool(k) and lines[k - 1] == "SSH| end code=7"
+        # by password: a wrong one, then the right one (no key: -i a file that isn't there)
+        typed("ssh -p %d -i C:\\\\TEST\\\\NOKEY glos@10.0.2.2 echo by-password\\n" % p1)
+        k = until("SSH| ask-password", start=k)
+        typed("wrong-password\\n")
+        k2 = until("SSH| ask-password", start=k)
+        checks["wrong-password"] = bool(k2)
+        typed(SshdContainer.PASSWORD + "\\n")
+        k = until("SSH| end", start=k2 or k)
+        checks["password"] = bool(k) and lines[k - 1] == "SSH| end code=0"
+        # a session with a pty: vi, then top
+        typed("ssh -p %d glos@10.0.2.2\\n" % p1)
+        k = until("SSH| logged-in", start=k)
+        time.sleep(4)
+        typed("vi notes.txt\\n")
+        time.sleep(4)
+        typed("ihello from GLOS vi")
+        agent.ssh("glos key " + gui_key_list(["esc"]))
+        time.sleep(1)
+        typed(":wq\\n")
+        time.sleep(3)
+        typed("top -d 3\\n")
+        k3 = until("VT| top - ", 60, start=k)
+        checks["top"] = bool(k3) and any(l.startswith("VT| Tasks:") for l in lines[k3:k3 + 6])
+        typed("q")
+        time.sleep(2)
+        typed("exit\\n")
+        k = until("SSH| end", start=k)
+        checks["session"] = bool(k) and lines[k - 1] == "SSH| end code=0"
+        got = srv.run("cat notes.txt")
+        checks["vi"] = got == "hello from GLOS vi\n"
+        if not checks["vi"]:
+            notes.append("notes.txt: %r" % got)
+        # a changed host key: refused
+        typed("ssh -p %d glos@10.0.2.2 echo nope\\n" % p2)
+        k = until("SSH| end", start=k)
+        checks["changed-key"] = bool(k) and lines[k - 1] == "SSH| end code=255" and \
+            any(l == "SSH| host-key-changed" for l in lines)
+        # SFTP: 1 MB up and down, ls
+        typed("sftp -P %d glos@10.0.2.2\\n" % p1)
+        k = until("SSH| sftp-ready", start=k)
+        t0 = time.time()
+        typed("put C:\\\\TEST\\\\MB.BIN mb.bin\\n")
+        k = until("SSH| sftp-ready", 300, start=k)
+        up = time.time() - t0
+        t0 = time.time()
+        typed("get mb.bin C:\\\\TEST\\\\MB2.BIN\\n")
+        k = until("SSH| sftp-ready", 300, start=k)
+        down = time.time() - t0
+        notes.append("sftp: 1 MB up %.1fs, down %.1fs" % (up, down))
+        typed("ls -l\\n")
+        k = until("SSH| sftp-ready", start=k)
+        typed("exit\\n")
+        k = until("SSH| end", start=k)
+        checks["sftp-up"] = srv.run("sha256sum mb.bin").split()[:1] == [hashlib.sha256(mb).hexdigest()]
+        got = fetch("C:\\TEST\\MB2.BIN", os.path.join(out, "MB2.BIN"))
+        checks["sftp-down"] = got == mb
+        # ssh-keygen: a key OpenSSH reads
+        typed("ssh-keygen -f C:\\\\TEST\\\\NEWKEY -C made-in-glos\\n")
+        time.sleep(15)
+        sk = fetch("C:\\TEST\\NEWKEY", os.path.join(out, "NEWKEY"))
+        pk = fetch("C:\\TEST\\NEWKEY.PUB", os.path.join(out, "NEWKEY.PUB"))
+        if sk and pk:
+            os.chmod(os.path.join(out, "NEWKEY"), 0o600)
+            y = subprocess.run(["ssh-keygen", "-y", "-f", os.path.join(out, "NEWKEY")], capture_output=True,
+                               text=True).stdout.split()[:2]
+            checks["keygen"] = y == pk.decode("latin-1").split()[:2] and y[0] == "ssh-ed25519"
+        else:
+            checks["keygen"] = False
+        typed("exit\\n")
+        term.wait(timeout=120)
+        time.sleep(1)
+        text = "\n".join(lines)
+        for want in ("TERM| hello-over-ssh", "TERM| status 7", "TERM| by-password", "TERM| sftp> ls -l"):
+            if want not in lines:
+                checks["log"] = False
+                notes.append("no line %r" % want)
+        checks.setdefault("log", True)
+        checks["refused-said"] = "REMOTE HOST IDENTIFICATION HAS CHANGED" in text
+        checks["sockets"] = "sockets=0" in agent.ssh("glos net")[1]
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+        if term:
+            term.kill()
+    log = agent.wait()
+    srv.close()
+    open(os.path.join(out, "term.out"), "w").write("\n".join(lines) + "\n")
+    checks["no-panic"] = "GLOS-PANIC" not in log and "GLOS-WARN" not in log
+    for n in notes:
+        print("    sshc-%s %s" % (tag, n))
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("sshc-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def config_case(profile, vcard, card):
     """GLOS.CFG's settings (M9 step B; include/glos/config.h, kernel/core/config.c): every setting the schema has
     set over ssh (glos config set) to a value other than its default, read back, in the file afterwards with the
@@ -4742,7 +4964,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -4774,6 +4996,9 @@ def main():
     if a.suite == "time":
         cases = [c for c in TIME_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(time_case, cases, a.jobs)) else 1
+    if a.suite == "sshc":
+        cases = [c for c in SSHC_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(sshc_case, cases, a.jobs)) else 1
     if a.suite == "https":
         cases = [c for c in HTTPS_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(https_case, cases, a.jobs)) else 1

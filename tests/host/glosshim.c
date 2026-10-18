@@ -583,6 +583,29 @@ int glos_winvram(unsigned id, unsigned off, unsigned pitch) { (void)id, (void)of
 int glos_audio(unsigned r, unsigned c, unsigned b, unsigned *id, struct glos_stream **s) { (void)r, (void)c, (void)b, (void)id, (void)s; return -1; }
 int glos_audio_close(unsigned id) { (void)id; return -1; }
 int glos_audio_volume(unsigned id, unsigned v) { (void)id, (void)v; return -1; }
+/* (1.3) No network on the host: the terminal's ssh says so. Random bytes from /dev/urandom; the clock not set. */
+int glos_net_resolve(const char *n, unsigned w, unsigned *a) { (void)n, (void)w, (void)a; return -1; }
+int glos_net_connect(unsigned a, unsigned p, unsigned w, unsigned f) { (void)a, (void)p, (void)w, (void)f; return -1; }
+int glos_net_send(unsigned id, const void *b, unsigned n, unsigned w) { (void)id, (void)b, (void)n, (void)w; return -1; }
+int glos_net_recv(unsigned id, void *b, unsigned n, unsigned w, unsigned *st) { (void)id, (void)b, (void)n, (void)w, (void)st; return -1; }
+int glos_net_close(unsigned id, int reset) { (void)id, (void)reset; return -1; }
+int glos_net_state(unsigned id, unsigned *a, unsigned *st, unsigned *r) { (void)id, (void)a, (void)st, (void)r; return -1; }
+int glos_random(void *buf, unsigned n)
+{
+    FILE *f = fopen("/dev/urandom", "rb");
+    int ok = f && fread(buf, 1, n, f) == n;
+    if (f)
+        fclose(f);
+    return ok ? 0 : -1;
+}
+int glos_time(unsigned long *utc, int *off)
+{
+    if (utc)
+        *utc = 0;
+    if (off)
+        *off = 0;
+    return GLOS_TIME_RTC;
+}
 
 /* ---- the script */
 

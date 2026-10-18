@@ -171,3 +171,25 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
       404, an unknown name.
     - With the internet, files from raw.githubusercontent.com (ChaCha20-Poly1305) and the ibiblio FreeDOS
       mirror, checked against Mozilla's roots, with the host's SHA-256.
+- **Step D done** (2026-10-18): the SSH and SFTP client.
+  - `sdk/sshc` holds the protocol core (`glos/sshc.h`: bytes in and out, as the kernel's server is), keys and known
+    hosts, and SFTP 3 (`glos/sftpc.h`, 8 requests in flight). It uses TinySSH's crypto and the kernel's wire
+    encoding.
+  - The terminal has an xterm screen (`apps/term/vt.c`) and `ssh`, `sftp` and `ssh-keygen` (`apps/term/ssh.c`).
+    Keys and `KNOWNHST.TXT` are in `SSH\` beside TERM.EXE.
+  - `make sshc-test` passes against OpenSSH 9.6's sshd on the host:
+    - a login by key, a command's output, error and status, a pty's size, two channels at once;
+    - 1 MB each way, an unknown key refused, a host key refused, known hosts;
+    - SFTP put, get, ls, stat, rename, mkdir, rmdir and remove;
+    - a key written that OpenSSH reads.
+  - `vt_test` (in host-test) checks each family of sequences against xterm's screens.
+  - `make loopa-sshc` passes on bf6 (G200, 16 bits) and the 486dx2 (VBE, 8 bits) against Debian's OpenSSH in a
+    container (`tests/sshd`):
+    - a new host key asked about and kept, a command's output and its status as `%ERRORLEVEL%`;
+    - a password login after a wrong one;
+    - vi editing a file (read back in the container) and top's screen;
+    - a changed host key refused;
+    - SFTP of 1 MB with SHA-256 checked on both sides (3.0 s up and 3.4 s down on bf6, 6.5 s and 7.7 s on the
+      486dx2);
+    - ssh-keygen's key read by OpenSSH.
+  - The terminal's own scripts pass at every depth.

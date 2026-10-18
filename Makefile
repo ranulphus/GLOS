@@ -54,6 +54,8 @@
 #   make loopa-time     the clock: SNTP, the zone, the RTC and DOS, names (M10)
 #   make loopa-netapp   apps' TCP connections and sockets (NETTEST) against the host (M10)
 #   make loopa-https    HTTPS: FETCH, certificates checked, GitHub and a FreeDOS mirror (M10)
+#   make sshc-test      the SSH and SFTP client against OpenSSH's sshd on the host (M10)
+#   make loopa-sshc     the terminal's ssh, sftp, ssh-keygen against OpenSSH in a container (M10)
 #   make gate           M4e's exit: the baseline matrix under GLOS and with direct mode forced, a kill and
 #                       an ssh probe for every program (tools/gate/run.py; on the host; hours)
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
@@ -71,7 +73,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
+.PHONY: sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -91,6 +93,9 @@ check-hal:
 # TinySSH's crypto (third_party/tinyssh; THIRD_PARTY.md): the SSH algorithms only.
 TINYSSH_SRCS := $(filter-out %_lib25519.c %_lib1305.c,$(wildcard third_party/tinyssh/*.c)) \
                 $(foreach t,int8 int16 int32 int64 uint8 uint16 uint32 uint64,third_party/tinyssh/cryptoint/$(t)_optblocker.c)
+# The SSH and SFTP client's sources (sdk/sshc; M10 step D; built below for DJGPP and the host).
+SSHC_SRCS := sdk/sshc/sshc.c sdk/sshc/keys.c sdk/sshc/sftpc.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c
+SSHC_FLAGS := -Iinclude -Ikernel/ssh -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint
 HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:kernel/vm/v86dec.c \
               vpic_test:kernel/vm/vpic.c png_test:kernel/lib/png.c
 host-test:
@@ -114,6 +119,8 @@ host-test-run:
 	  -o build/host/cfg_test tests/host/cfg_test.c $(CFG_SRCS) && build/host/cfg_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iinclude -o build/host/tz_test tests/host/tz_test.c sdk/config/tz.c \
 	  && build/host/tz_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iapps/term -o build/host/vt_test tests/host/vt_test.c apps/term/vt.c \
+	  && build/host/vt_test
 
 # The toolkit (sdk/gui, M9) and the apps on the host, against tests/host/glosshim.c: each test script
 # (tests/gui/NAME.txt) run at 8, 16 and 32 bits, its shots written to build/host/gui/ (the goldens Loop A's
@@ -128,15 +135,26 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	  $(CFG_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
 APPS := notepad calc images term files monitor control
+APP_LIBS_term := build/sdk/libsshc.a           # (TERM's ssh, sftp and ssh-keygen: M10)
 APP_HOST_FLAGS := -Ithird_party/stb
 define app_host
 build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h tests/host/glosshim.c \
-                 kernel/include/keymap.h $$(CFG_SRCS) include/glos/config.h include/glos/tz.h
+                 kernel/include/keymap.h $$(CFG_SRCS) include/glos/config.h include/glos/tz.h $$(APP_HOST_LIBS_$(1))
 	@mkdir -p build/host
 	$$(Q)$$(GUI_HOST) $$(APP_HOST_FLAGS) -Dmain=app_main -c -o build/host/$(1)-app.o apps/$(1)/$(1).c
 	$$(Q)$$(GUI_HOST) -o $$@ build/host/$(1)-app.o $$(filter-out apps/$(1)/$(1).c,$$(wildcard apps/$(1)/*.c)) \
-	  tests/host/glosshim.c $$(GUI_SRCS) $$(LIBGLOS_GFX) kernel/lib/png.c $$(CFG_SRCS) -lm
+	  tests/host/glosshim.c $$(GUI_SRCS) $$(LIBGLOS_GFX) kernel/lib/png.c $$(CFG_SRCS) $$(APP_HOST_LIBS_$(1)) -lm
 endef
+# The terminal's ssh (M10): the client for the host too, 32-bit as the rest, its crypto without -Werror.
+APP_HOST_LIBS_term := build/host/libsshc32.a
+build/host/libsshc32.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h
+	@mkdir -p build/host/sshc32
+	$(Q)echo "  CC      $@"
+	$(Q)rm -f $@ build/host/sshc32/*.o
+	$(Q)for f in $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS); do \
+	    $(HOST_CC) -m32 -O1 -g $(SSHC_FLAGS) -c -o build/host/sshc32/$$(basename $$f .c).o $$f || exit 1; \
+	  done
+	$(Q)ar rcs $@ build/host/sshc32/*.o
 $(foreach a,$(APPS),$(eval $(call app_host,$(a))))
 GUI_SCRIPTS := $(wildcard tests/gui/*.txt)
 # (A:, C:\HX, C:\OUT and C:\TEST are the Loop A machine's own, which the file manager's tree shows.)
@@ -420,6 +438,9 @@ loopa-netapp: all build/dj/NETTEST.EXE check-deps
 # M10 step C: HTTPS (FETCH) against servers on the host with a test CA, refusals, GitHub and a FreeDOS mirror.
 loopa-https: all build/apps/FETCH.EXE build/host/mkcerts build/glos/CERTS.DAT check-deps
 	$(Q)python3 tests/loopa/jobs.py https -j $(JOBS)
+# M10 step D: the terminal's ssh, sftp and ssh-keygen against OpenSSH in a container (tests/sshd).
+loopa-sshc: all build/apps/TERM.EXE check-deps
+	$(Q)python3 tests/loopa/jobs.py sshc -j $(JOBS)
 # M9's exit: the toolkit, the settings, console jobs, the apps, the Control Panel.
 loopa-m9: loopa-gui loopa-config loopa-console loopa-native loopa-control
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
@@ -553,6 +574,28 @@ build/sdk/libhttp.a: sdk/http/http.c include/glos/http.h include/glos/tls.h incl
 	$(Q)rm -f $@
 	$(Q)$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -Iinclude -c -o build/sdk/http/http.o sdk/http/http.c
 	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/http/http.o
+# The SSH and SFTP client (sdk/sshc, glos/sshc.h, glos/sftpc.h; M10 step D): its own code, the kernel's wire
+# encoding and key parser (kernel/ssh/sshbuf.c, sshkeys.c), TinySSH's crypto, randombytes() from GLOS_FN_RANDOM.
+build/sdk/libsshc.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h \
+                     kernel/ssh/sshbuf.h include/glos/api.h
+	@mkdir -p build/sdk/sshc
+	$(Q)echo "  DJCC    sdk/sshc"
+	$(Q)rm -f $@ build/sdk/sshc/*.o
+	$(Q)for f in $(SSHC_SRCS) sdk/sshc/random.c; do \
+	    $(DJCC) -O2 -Wall -Werror -Wno-format-truncation $(SSHC_FLAGS) -c -o build/sdk/sshc/$$(basename $$f .c).o $$f || exit 1; \
+	  done
+	$(Q)for f in $(TINYSSH_SRCS); do \
+	    $(DJCC) -O2 $(SSHC_FLAGS) -c -o build/sdk/sshc/ts_$$(basename $$f .c).o $$f || exit 1; \
+	  done
+	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/sshc/*.o
+# ... on the host, against OpenSSH's sshd (one of the user's own, on a free port): make sshc-test.
+build/host/sshc_test: tests/host/sshc_test.c $(SSHC_SRCS) $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h
+	@mkdir -p build/host
+	$(Q)echo "  CC      $@"
+	$(Q)gcc -O2 -g -Wall -Wextra -Wno-format-truncation $(SSHC_FLAGS) -o $@ tests/host/sshc_test.c $(SSHC_SRCS) \
+	  $(TINYSSH_SRCS)
+sshc-test: build/host/sshc_test
+	$(Q)tests/host/sshc_test.sh build/host/sshc_test
 NET_LIBS := build/sdk/libhttp.a build/sdk/libtls.a build/sdk/libbearssl.a build/sdk/libglos.a
 # FETCH (apps/fetch): a file over HTTPS or HTTP, for the terminal and SSH.
 build/apps/FETCH.EXE: apps/fetch/fetch.c $(NET_LIBS) tools/glosmark.py
@@ -602,11 +645,11 @@ build/dj/GUITEST.EXE: tests/dos/guitest.c build/sdk/libgui.a build/sdk/libglos.a
 # The native apps for DOS: build/apps/NAME.EXE.
 APP_EXES := $(foreach a,$(APPS),build/apps/$(shell echo $(a) | tr a-z A-Z).EXE)
 define app_exe
-build/apps/$(1).EXE: $$(wildcard apps/$(2)/*.c apps/$(2)/*.h) build/sdk/libgui.a build/sdk/libglos.a tools/glosmark.py
+build/apps/$(1).EXE: $$(wildcard apps/$(2)/*.c apps/$(2)/*.h) build/sdk/libgui.a build/sdk/libglos.a tools/glosmark.py $$(APP_LIBS_$(2))
 	@mkdir -p build/apps
 	$$(Q)echo "  DJCC    apps/$(2)"
 	$$(Q)$$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -Iinclude -Ithird_party/stb -o $$@ $$(wildcard apps/$(2)/*.c) build/sdk/libgui.a \
-	  build/sdk/libglos.a -lm
+	  $$(APP_LIBS_$(2)) build/sdk/libglos.a -lm
 	$$(Q)python3 tools/glosmark.py $$@
 endef
 $(foreach a,$(APPS),$(eval $(call app_exe,$(shell echo $(a) | tr a-z A-Z),$(a))))

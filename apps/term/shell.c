@@ -502,7 +502,7 @@ static int cmd_set(int argc, char **argv, const char *raw)
 
 static const char *const builtins[] = { "CD", "CHDIR", "DIR", "COPY", "MOVE", "REN", "RENAME", "DEL", "ERASE", "MD",
     "MKDIR", "RD", "RMDIR", "TYPE", "ECHO", "SET", "PATH", "PROMPT", "CLS", "VER", "EXIT", "HISTORY", "HELP", "WHERE",
-    "START", 0 };
+    "START", "SSH", "SFTP", "SSH-KEYGEN", 0 };
 
 static const char *const helps[] = {
     "CD [path]           the folder (of a drive: CD X:); X: changes drive",
@@ -519,6 +519,9 @@ static const char *const helps[] = {
     "HISTORY             the lines typed before (Up and Down)",
     "WHERE program       where it is along PATH",
     "START program       a program started beside the terminal",
+    "SSH [user@]host [command]  a session there (-p port, -i key, -l user)",
+    "SFTP [user@]host    files there and here (help inside lists its commands)",
+    "SSH-KEYGEN          a key of your own (SSH\\ID_ED25) for servers' authorized_keys",
     "VER, HELP, EXIT",
     "Programs run here until they want the screen. a && b: b after a has worked; a || b: b if it hasn't.",
     0 };
@@ -798,6 +801,12 @@ static int run_one(const char *cmd)
         while (*t == ' ')
             t++;
         r = run_program(t, 1) < 0;
+    } else if (same(argv[0], "SSH")) {
+        r = ssh_command(argc, argv);            /* (-2: under way, as a program is) */
+    } else if (same(argv[0], "SFTP")) {
+        r = sftp_command(argc, argv);
+    } else if (same(argv[0], "SSH-KEYGEN")) {
+        r = keygen_command(argc, argv);
     }
     if (redirect) {
         fclose(redirect);
@@ -836,6 +845,10 @@ static void next_command(void)
 void shell_line(const char *line)
 {
     const char *p = line;
+    if (ssh_asking()) {                         /* (a question's answer, a password, sftp's command: not history) */
+        ssh_answer(line);
+        return;
+    }
     while (*p == ' ')
         p++;
     if (*p && (!nhist || strcmp(hist[nhist - 1], p))) {
@@ -853,6 +866,12 @@ void shell_line(const char *line)
 }
 
 /* ---- the running program */
+
+void shell_resume(int code)
+{
+    errorlevel = code;
+    next_command();
+}
 
 void shell_type(const unsigned short *keys, int n)
 {

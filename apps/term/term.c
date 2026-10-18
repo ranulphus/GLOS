@@ -14,10 +14,16 @@
  * move through the scroll-back. The window can be any size: the columns
  * follow its width.
  *
+ * M10: ssh, sftp and ssh-keygen (ssh.c). While an ssh session with a pty
+ * runs, the window shows its xterm screen (vt.c) instead, and every key but
+ * the terminal's own (Shift+Ins, Ctrl+Break) is the session's.
+ *
  *   TERM [-log] [COMMAND]
  *                      a terminal; COMMAND typed into it first. -log: at the
  *                      end, every line of the scroll-back on stdout ("TERM|
- *                      ...": the suite's) */
+ *                      ...": the suite's), and an ssh session's screen
+ *                      ("VT| ...") whenever it has been still for a moment */
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +31,7 @@
 #include <glos/gui.h>
 
 #include "term.h"
+#include "vt.h"
 
 #define LINES    1000
 #define COLS_MAX 200
@@ -47,7 +54,10 @@ static struct gui_sb sb;
 
 /* the line being typed (the shell's) */
 static char input[256];
-static int in_len, in_pos, in_start_line, in_start_col, in_shown;
+static int in_len, in_pos, in_start_line, in_start_col, in_shown, in_hidden;
+static struct vt *screen;               /* an ssh session's xterm screen, while it shows */
+static int screen_cursor_y = -1;        /* the row its cursor was drawn on */
+static char home[260] = "C:\\GLOS";      /* TERM.EXE's folder */
 
 static const unsigned colours[] = { GUI_LINE, GUI_DARK, 0x993333, GUI_LINE };   /* T_ attributes (D7: greys, an
                                            error's red the only other) */
@@ -190,7 +200,7 @@ static void input_show(void)
     in_start_line = count - 1;
     in_start_col = cur_col;
     attr_now = T_INPUT;
-    for (i = 0; i < in_len; i++)
+    for (i = 0; i < in_len && !in_hidden; i++)     /* (a password: nothing shown, as ssh shows it) */
         term_put((unsigned char)input[i]);
     attr_now = 0;
     in_shown = 1;
@@ -219,6 +229,20 @@ void term_input_set(const char *s)
 }
 
 const char *term_input(void) { return input; }
+
+void term_input_hidden(int on) { in_hidden = on; }
+
+void term_printf(const char *fmt, ...)
+{
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    term_write(buf, -1);
+}
+
+const char *term_home(void) { return home; }
 
 /* ---- drawing */
 
@@ -259,11 +283,101 @@ static int in_sel(int line, int col)
     return 1;
 }
 
+/* ---- the xterm screen (an ssh session's) */
+
+void term_size(int *c, int *r)
+{
+    *c = cols < VT_COLS_MAX ? cols : VT_COLS_MAX;
+    *r = rows < VT_ROWS_MAX ? rows : VT_ROWS_MAX;
+}
+
+void term_screen_on(struct vt *v)
+{
+    screen = v;
+    screen_cursor_y = -1;
+    damage_all();
+}
+
+void term_screen_off(void)
+{
+    screen = 0;
+    damage_all();
+}
+
+/* Its rows that changed (and the cursor's, old and new) drawn again. */
+void term_screen_dirty(void)
+{
+    int y;
+    if (!screen || !grid || !ch)
+        return;
+    if (screen_cursor_y >= 0 && screen_cursor_y < screen->rows)
+        screen->dirty[screen_cursor_y] = 1;
+    screen->dirty[screen->y] = 1;
+    for (y = 0; y < screen->rows; y++)
+        if (screen->dirty[y]) {
+            struct gfx_rect r;
+            int n = 1;
+            while (y + n < screen->rows && screen->dirty[y + n])
+                n++;
+            r.x = grid->r.x + 1;
+            r.w = grid->r.w - GUI_SB - 1;
+            r.y = grid->r.y + 2 + y * ch;
+            r.h = n * ch;
+            gui_damage_rect(grid->win, &r);
+            y += n - 1;
+        }
+}
+
+static void screen_draw(struct gui_widget *w, struct gfx_surface *s)
+{
+    struct gfx_rect frame = { w->r.x, w->r.y, w->r.w - GUI_SB + 1, w->r.h };
+    int x0 = w->r.x + 4, y0 = w->r.y + 2, y, x, ymin, ymax;
+    gui_draw_field(s, &frame, 1);
+    ymin = (s->clip.y - y0) / ch;
+    ymax = (s->clip.y + s->clip.h - y0) / ch + 1;
+    for (y = ymin > 0 ? ymin : 0; y < screen->rows && y <= ymax; y++) {
+        for (x = 0; x < screen->cols && x < cols; x++) {
+            const struct vt_cell *c = &screen->cell[y * VT_COLS_MAX + x];
+            int rev = !!(c->attr & VT_REVERSE) ^ screen->reverse_screen;
+            int cur = screen->cursor_on && x == screen->x && y == screen->y && gui_window_active(win);
+            unsigned fg = vt_rgb(rev ? c->bg : c->fg, !rev), bg = vt_rgb(rev ? c->fg : c->bg, rev);
+            char u[3];
+            int un;
+            if (cur) {
+                unsigned t = fg;
+                fg = bg, bg = t;
+            }
+            if ((c->attr & VT_BOLD) && c->fg < 8 && !rev)
+                fg = vt_rgb((unsigned short)(c->fg + 8), 1);     /* (bold as the bright colour, as xterm can) */
+            if (bg != 0xFFFFFF)
+                gfx_fill(s, x0 + x * cw, y0 + y * ch, cw, ch, bg);
+            if (c->ch == ' ' || (c->attr & VT_HIDDEN))
+                continue;
+            if (c->ch < 0x80)
+                u[0] = (char)c->ch, un = 1;
+            else if (c->ch < 0x800)
+                u[0] = (char)(0xC0 | (c->ch >> 6)), u[1] = (char)(0x80 | (c->ch & 0x3F)), un = 2;
+            else
+                u[0] = (char)(0xE0 | (c->ch >> 12)), u[1] = (char)(0x80 | ((c->ch >> 6) & 0x3F)),
+                u[2] = (char)(0x80 | (c->ch & 0x3F)), un = 3;
+            gfx_text(s, x0 + x * cw, y0 + y * ch, gui_mono, u, un, fg);
+            if (c->attr & VT_UNDER)
+                gfx_fill(s, x0 + x * cw, y0 + y * ch + ch - 1, cw, 1, fg);
+        }
+        screen->dirty[y] = 0;
+    }
+    screen_cursor_y = screen->y;
+}
+
 static void grid_draw(struct gui_widget *w, struct gfx_surface *s)
 {
     int k, kmin, kmax, first, x0 = w->r.x + 4, y0 = w->r.y + 2;
     struct gfx_rect frame = { w->r.x, w->r.y, w->r.w - GUI_SB + 1, w->r.h };
     layout_grid();
+    if (screen) {
+        screen_draw(w, s);
+        return;
+    }
     gui_draw_field(s, &frame, 1);
     first = first_shown();
     drawn_first = first, drawn_count = count;
@@ -290,7 +404,8 @@ static void grid_draw(struct gui_widget *w, struct gfx_surface *s)
         }
     }
     if (!back && gui_window_active(win)) {      /* the caret: where typing goes, or the output's column */
-        int line = term_busy() ? count - 1 : in_start_line, col = term_busy() ? cur_col : in_start_col + in_pos;
+        int line = term_busy() ? count - 1 : in_start_line,
+            col = term_busy() ? cur_col : in_start_col + (in_hidden ? 0 : in_pos);
         while (col >= cols) {
             col -= cols;
             line++;
@@ -330,8 +445,8 @@ static void input_key(struct gui_ev *e)
     case GUI_K_RIGHT: if (in_pos < in_len) in_pos++; damage_from(in_start_line); return;
     case GUI_K_HOME: in_pos = 0; damage_from(in_start_line); return;
     case GUI_K_END: in_pos = in_len; damage_from(in_start_line); return;
-    case GUI_K_UP: shell_history(-1); return;
-    case GUI_K_DOWN: shell_history(1); return;
+    case GUI_K_UP: if (!in_hidden) shell_history(-1); return;
+    case GUI_K_DOWN: if (!in_hidden) shell_history(1); return;
     case GUI_K_BACK:
         if (in_pos > 0) {
             memmove(input + in_pos - 1, input + in_pos, (size_t)(in_len - in_pos + 1));
@@ -352,7 +467,8 @@ static void input_key(struct gui_ev *e)
         input_show();
         return;
     case GUI_K_TAB:
-        shell_complete();
+        if (!ssh_asking())
+            shell_complete();
         return;
     case GUI_K_ENTER:
     case GUI_K_KPENTER: {
@@ -363,6 +479,7 @@ static void input_key(struct gui_ev *e)
         in_shown = 0;
         term_print("\r\n");
         shell_line(line);
+        memset(line, 0, sizeof line);           /* (a password, perhaps) */
         return;
     }
     }
@@ -518,8 +635,16 @@ static int grid_event(struct gui_widget *w, struct gui_ev *e)
             damage_all();
         return 1;
     }
-    if ((e->mods & GLOS_MOD_SHIFT && e->key == GUI_K_INS) || (e->mods == GLOS_MOD_CTRL && e->ch == 22)) {
+    if ((e->mods & GLOS_MOD_SHIFT && e->key == GUI_K_INS) || (!screen && e->mods == GLOS_MOD_CTRL && e->ch == 22)) {
         term_paste();
+        return 1;
+    }
+    if (ssh_active() && !ssh_asking()) {        /* (an ssh session's keys, Alt's too) */
+        if (e->key == 0x146 && e->mods & GLOS_MOD_CTRL)
+            ssh_break();
+        else if (!(e->key == 0x2A || e->key == 0x36 || e->key == 0x1D || e->key == 0x38 || e->key == 0x11D
+                   || e->key == 0x138 || e->key == 0x3A || e->key == 0x45))
+            ssh_key(e->key, e->ch, e->mods);
         return 1;
     }
     if (e->mods == (GLOS_MOD_CTRL | GLOS_MOD_SHIFT) && e->key == 0x2E) {
@@ -560,7 +685,11 @@ static void command(struct gui_window *w, int id)
 
 static void resized(struct gui_window *w)
 {
+    int c, r;
     (void)w;
+    layout_grid();
+    term_size(&c, &r);
+    ssh_resize(c, r);
     damage_all();
 }
 
@@ -568,6 +697,7 @@ static void tick(void *arg)
 {
     (void)arg;
     shell_poll();
+    ssh_poll();
 }
 
 void term_title(const char *t)
@@ -583,6 +713,8 @@ static void events(const struct glos_event *ev)
 {
     if (ev->type == GLOS_EV_JOB)
         shell_poll();
+    else if (ev->type == GLOS_EV_NET)
+        ssh_poll();
 }
 
 int main(int argc, char **argv)
@@ -594,10 +726,21 @@ int main(int argc, char **argv)
         printf("TERM no GLOS\n");
         return 1;
     }
+    {
+        char *p;
+        snprintf(home, sizeof home, "%s", argv[0]);     /* (DJGPP gives it with / and its case) */
+        for (p = home; *p; p++)
+            *p = *p == '/' ? '\\' : (*p >= 'a' && *p <= 'z') ? (char)(*p - 32) : *p;
+        if (strrchr(home, '\\'))
+            *strrchr(home, '\\') = 0;
+        else
+            snprintf(home, sizeof home, "C:\\GLOS");
+    }
     if (argc > 1 && !strcmp(argv[1], "-log")) {
         log = 1;
         argv++, argc--;
     }
+    ssh_log_screens(log);
     ring = calloc(LINES, sizeof *ring);
     if (!ring)
         return 1;
