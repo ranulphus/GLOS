@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| Status | v0.7 — M9's apps: the toolkit, the shell and the terminal's DOS programs, the SSH client to M10 (2026-10-16), after v0.6 (M8's windowed DOS-GL, SDL3 and the mixer, 2026-10-15), v0.5 (M7's Matrox 2D, 2026-10-14), v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
+| Status | v0.8 — M10's decisions: packages on GitHub signed by the owner's offline key, Mozilla's roots, PNG recordings, the SSH client with SFTP (2026-10-18), after v0.7 (M9's apps, 2026-10-16), v0.6 (M8's windowed DOS-GL, SDL3 and the mixer, 2026-10-15), v0.5 (M7's Matrox 2D, 2026-10-14), v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
 | Last updated | 2026-10-18 |
-| Supersedes | v0.1. Changes are listed in Appendices D to H |
+| Supersedes | v0.1. Changes are listed in Appendices D to J |
 | Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md), [docs/milestones-m6.md](docs/milestones-m6.md), [docs/milestones-m7.md](docs/milestones-m7.md) and [docs/milestones-m8.md](docs/milestones-m8.md) (work breakdown) |
 | Licence | MIT |
 | Companion projects | MGA-Glide (`~/MGA-Glide`: the Loop A/B/C harness and the shared Matrox HAL), DOS-GL (`~/DOSGL`: OpenGL for Matrox cards and the SDL3 bridge), Fifth Wheel and the dgk kit (`~/FifthWheel`), DOSBench (`~/DOSBench`) |
@@ -186,6 +186,10 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D55** | **The file manager is the desktop's shell** (`FILES.EXE`, `GLOS_FN_SHELL`): the desktop's icons, the launcher and the folders' windows are an app's, the task bar stays the kernel's; folders open spatially, one window each, and the browser is a window of the same program. (Proposed in docs/milestones-m9.md; built 2026-10-16) | The kernel keeps only what must outlive any app; the shell can be restarted, replaced, and tested like any app. | M9 |
 | **D56** | **Images through stb_image** (PNG, JPEG, BMP, GIF's first frame, TGA, PNM; public domain or MIT; in ring 3, as D19 wants parsers) **and PCX of our own**, dithered to the palette at 8 bits. (Built 2026-10-16) | One small, widely used decoder in the app, not the kernel; PCX is DOS's own format and simple. | M9 |
 | **D57** | **The apps are tested by their pictures:** each app builds for the host too, on a host libglos (`tests/host/glosshim.c`) that plays a script of keys and presses and writes the windows' client areas as goldens (8, 16, 32 bits); Loop A plays the same script on a GLOS desktop over SSH and compares, byte for byte, outside masked live areas; effects (files, settings, output) are checked as such (docs/gui.md §2). (Built 2026-10-16) | The same code draws both, so equality is exact; a regression anywhere between the toolkit and the composer shows. | M9 |
+| **D58** | **Packages are hosted on GitHub and signed with the owner's offline key** (Q4). A packages repository holds an index signed with Ed25519 and the packages' zips, fetched over HTTPS; the owner generates the key and keeps it off the build host, and a host tool signs when the owner runs it; GLOS ships the public key. Loop A uses a test key. (User, 2026-10-18) | Free, durable hosting that GLOS's HTTPS client reaches; a key that never sits on a machine that builds or tests. | M10 |
+| **D59** | **HTTPS trusts Mozilla's root set**, about 150 roots as curl ships them, in a file a package refreshes. (User, 2026-10-18) | Any public HTTPS site works, as on other systems; the roots stay current without a new GLOS. | M10 |
+| **D60** | **`glos rec` records PNG frames and a time index** (Q13): each changed frame the same bytes `glos shot` gives, with the time it was shown. (User, 2026-10-18) | Lossless and simple to check; ffmpeg makes a video of it on the host. | M10 |
+| **D61** | **The terminal's SSH client is a full terminal with SFTP; no port forwarding yet** (refines D52): an xterm-compatible screen, Ed25519 key and password login, host keys checked against a known-hosts file, and an `sftp` client. (User, 2026-10-18) | Remote shells with full-screen programs and file transfer cover what a person does over SSH; tunnels can wait. | M10 |
 
 ---
 
@@ -542,7 +546,7 @@ When SSH is down (boot, supervisor panic), the host tools fall back to the seria
 ### 8.4 TLS
 
 - BearSSL (TLS 1.2) client, for ring-3 apps only.
-- A CA bundle maintained with the package manager.
+- A CA bundle maintained with the package manager: Mozilla's roots (D59).
 - The clock must be set by SNTP before certificates are checked (§11).
 - A TLS 1.3 client comes after v1.
 
@@ -714,12 +718,13 @@ Each app keeps SDL's cooperative threads in v1, and GLOS preempts between apps (
 
 - An HTTPS client library (BearSSL) and a package manager. Packages are zip files with a manifest and an Ed25519 signature.
 - Sources: the GLOS repository and the FreeDOS repositories over HTTPS.
-- The package format and hosting are open (Q4).
+- Hosting and keys (Q4, D58): a packages repository on GitHub with an index signed by the owner's offline Ed25519 key; GLOS ships the public key. FreeDOS's repositories, unsigned, are trusted through HTTPS alone and marked so.
 
 ### 11.2 VNC and capture
 
 - An RFB 3.8 server driven by the display layer's changed rectangles.
-- Lossless recording of the screen to the build server through the agent (`glos rec`). Encodings and the recording format are open (Q13).
+- Lossless recording of the screen to the build server through the agent (`glos rec`): PNG frames, the same bytes `glos shot` gives, and a time index (D60). Encodings: Raw, CopyRect and Hextile (Q13).
+- In M10 the server is reached only through SSH (`direct-tcpip` to `127.0.0.1:5900`); binding it to the LAN, with VNC's password, comes after.
 
 ### 11.3 Small comforts
 
@@ -941,7 +946,7 @@ GLOS/
 
 Defined by their exit criteria. All exits are in Loop A unless marked "bench". v1 is M0–M9 plus the M10 gates; each M10 feature ships when it passes its own gate.
 
-The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md); M5's is in [docs/milestones-m5.md](docs/milestones-m5.md), M6's in [docs/milestones-m6.md](docs/milestones-m6.md), M7's in [docs/milestones-m7.md](docs/milestones-m7.md), M8's in [docs/milestones-m8.md](docs/milestones-m8.md), M9's in [docs/milestones-m9.md](docs/milestones-m9.md).
+The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md); M5's is in [docs/milestones-m5.md](docs/milestones-m5.md), M6's in [docs/milestones-m6.md](docs/milestones-m6.md), M7's in [docs/milestones-m7.md](docs/milestones-m7.md), M8's in [docs/milestones-m8.md](docs/milestones-m8.md), M9's in [docs/milestones-m9.md](docs/milestones-m9.md), M10's in [docs/milestones-m10.md](docs/milestones-m10.md).
 
 **M0: harness (in MGA-Glide, with its full regression) and the IOPL-0 survey (GLOS).** H0–H6b from §15; the HDPMI32i survey (§14.3).
 *Exit:* `loopa-cfgcheck`, `loopa-selftest` and the full MGA-Glide regression unchanged. Self-tests pass for the 486 profiles, the VBE card, the network (a NE2000 VM answers on its forwarded port), COM2, the HIMEMX boot and V86TEST on all three profiles, with no known deviation left that a local patch fixes. `docs/survey-iopl0.md` lists every suite's result under HDPMI32i.
@@ -984,7 +989,7 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 **M10: community features (separate gates).**
 - SNTP and mDNS (if not already done in M5).
 - The BearSSL HTTPS client, after SNTP so certificate dates can be checked.
-- The terminal's SSH client (D52), on the same ring-3 crypto.
+- The terminal's SSH client with SFTP (D52, D61), on the same ring-3 crypto.
 - The package manager.
 - VNC and capture.
 - UTF-8 and the optional anti-aliased fonts.
@@ -1027,7 +1032,7 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 | Q1 | Support the 486SX? The core can avoid the FPU; DJGPP programs would need FPU emulation and Matrox paths need an FPU | M1 |
 | Q2 | Enable SSE state (OSFXSR) for programs on Pentium III and later, matching what CWSDPMI and DOS/4GW do? | M4 |
 | Q3 | Which FreeDOS kernel to bundle in the boot image (D32); 2044 and later improve Windows-style hooks GLOS doesn't use | Before release |
-| Q4 | Package format, signing keys and hosting | M10 |
+| Q4 | *Answered (v0.8):* zip files with a manifest and an Ed25519-signed index, hosted on GitHub, signed with the owner's offline key (D58) | — |
 | Q5 | *Answered (v0.4):* the look is "Slate" (D7), chosen by the owner from four rendered candidates. Icons and the desktop metaphor come with the shell (D33) | — |
 | Q6 | A real-mode child process started by a GLOS app: run it as an exclusive session, or hold the DOS lock for its lifetime? | M6 |
 | Q7 | EMS for older games (needs DMA virtualisation once memory isn't identity-mapped) | After v1 |
@@ -1036,7 +1041,7 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 | Q10 | A 486 bench PC, so the minimum spec is measured and not modelled. *User: maybe later; modelled meanwhile.* | M5 |
 | Q11 | *Answered (v0.7):* our own retained-mode toolkit (D49) | — |
 | Q12 | *Answered (v0.6):* SDL keeps its cooperative scheduler inside each app; GLOS preempts between apps | — |
-| Q13 | VNC encodings and the recording format | M10 |
+| Q13 | *Answered (v0.8):* Raw, CopyRect and Hextile (docs/milestones-m10.md); `glos rec` records PNG frames and a time index (D60) | — |
 | Q14 | *Answered (v0.2):* yes, in v1 (D30) | — |
 | Q15 | *Answered (v0.6):* neither: a GL window has a fixed size (`GLOS_WIN_FIXED`); a program changes size with a new context, as on DOS | — |
 | Q16 | *Answered (v0.4):* DejaVu Sans, Sans Bold and Sans Mono at 11 pixels (D37); a DOS program's text is in the VGA's own fonts (D42) | — |
@@ -1282,3 +1287,11 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
   manager and desktop, notepad, calculator, image viewer, terminal, monitor), each tested by its pictures on the
   host and in Loop A (`make loopa-m9`, 12 cases); every setting changed from the Control Panel by keys. The
   regression (34 Loop A suites) and the gate (133 parts) are recorded in docs/milestones-m9.md step H.
+
+## Appendix J: Changes in v0.8 (2026-10-18)
+
+- **Q4 answered by the owner (D58):** packages on GitHub, an index signed with the owner's offline Ed25519 key.
+- **D59** (user): HTTPS trusts Mozilla's root set, refreshed by a package.
+- **Q13 answered (D60):** `glos rec` records PNG frames and a time index; VNC's encodings are Raw, CopyRect and Hextile.
+- **D61** (user): the terminal's SSH client is a full xterm terminal with SFTP; port forwarding comes later.
+- §11.1, §11.2 and §19 say so; docs/milestones-m10.md has the plan.
