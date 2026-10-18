@@ -216,3 +216,29 @@ Each step ends with its tests passing; the regression and the gate run at the en
     19): the watches' buffers had overwritten it, and the file manager's first Loop A run panicked the kernel;
   - the loader copies the kernel to extended memory in 32 KB pieces (it had grown past what low memory holds),
     with A20 on again after INT 15h 87h, and aligns its XMS block to a page.
+- **Step H, the exit** (2026-10-16):
+  - `make loopa-m9` on 3ee930d: 12 cases, none failed: gui (the S3 at 8 bits, the G200 at 16, the G400 at 32,
+    the 486 at 8), config, console (bf6 and the 486), native (every app's script, on the four), control (every
+    setting in GLOS.CFG changed from the Control Panel by keys, and the file and `glos config get` agreeing; a
+    screen mode kept and one let go back).
+  - **The regression** on 3ee930d, alone on the host (other projects' builds ran on it meanwhile): the host
+    tests and 34 Loop A suites (M8's 29 and M9's five). 30 passed outright. Failed: apps' plain check, which
+    still expected API 1.1 (it reads the version from include/glos/api.h now, a1abcc7); console and native,
+    whose machines didn't start in a clean tree, which had no CONIN.EXE (`dos-tests` builds it now, b5284a9);
+    and glwin's T19 on the G200. On b5284a9, apps (5), console (2) and native (4) passed.
+  - **T19 windowed on the G200** (DOS-GL's paletted textures: part of the shared palette changes between two
+    draws) gives another frame now and then: 3 in 30 runs on M9's kernel, 4 in 30 on M8's (ab475ab), one of the
+    wrong CRCs the same in both, a few pixels in a row (7 in the regression's). Not M9's: M8's regression and
+    gate missed it by chance. A race between DOS-GL's palette loads and the desktop's turns with the engine is
+    the likely place; open, with M8's GPU lock (docs/milestones-m8.md) and DOS-GL.
+  - **The gate** on b5284a9, alone among GLOS's runs (16-17 October; other projects' work on the host ran the
+    host out of memory 22 times, killing their browsers): 133 parts, 16 failed. Its six cells with failures
+    again, with fresh baselines (18 October): gta, screamer-rally and dosgl-texcube passed; dpmiconf32 (the
+    first three plain-DOS DPMIMINI runs, not GLOS's), m4c (MGA-Glide's G100 conformance) and dosgl-conform
+    (T01's plain-DOS baseline, which never reached DOS) failed again, each the first thing the gate starts, in
+    its start-up burst, with the host out of memory four times more. Those three cells run one at a time: all
+    passed (2, 2 and 44 parts; T01's baseline ran). Every part of the gate has passed on b5284a9, and no failure
+    was GLOS's.
+- **M9 done** (2026-10-18). Each app's golden images and its SSH-driven tests pass, and every setting in
+  GLOS.CFG can be changed from the Control Panel and over SSH (PRD §19). Left for the bench: the apps on a real
+  486 and a real Matrox card; T19's windowed frame (above) to find with DOS-GL.

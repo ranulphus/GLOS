@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | Status | v0.7 — M9's apps: the toolkit, the shell and the terminal's DOS programs, the SSH client to M10 (2026-10-16), after v0.6 (M8's windowed DOS-GL, SDL3 and the mixer, 2026-10-15), v0.5 (M7's Matrox 2D, 2026-10-14), v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
-| Last updated | 2026-10-16 |
+| Last updated | 2026-10-18 |
 | Supersedes | v0.1. Changes are listed in Appendices D to H |
 | Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md), [docs/milestones-m6.md](docs/milestones-m6.md), [docs/milestones-m7.md](docs/milestones-m7.md) and [docs/milestones-m8.md](docs/milestones-m8.md) (work breakdown) |
 | Licence | MIT |
@@ -1278,3 +1278,7 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
   images through stb_image and PCX; the apps tested by their pictures, host against Loop A.
 - API 1.2 as built: `GLOS_FN_CONFIG` EBX 4 (a section's lines), `GLOS_FN_JOB` EBX 4 (a done console job's unread
   keys); a job's last read is the one that says it is done with bytes to spare.
+- **M9 done** (2026-10-18): the toolkit, the settings and the Control Panel, console jobs, and the apps (file
+  manager and desktop, notepad, calculator, image viewer, terminal, monitor), each tested by its pictures on the
+  host and in Loop A (`make loopa-m9`, 12 cases); every setting changed from the Control Panel by keys. The
+  regression (34 Loop A suites) and the gate (133 parts) are recorded in docs/milestones-m9.md step H.
