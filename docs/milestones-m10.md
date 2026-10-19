@@ -276,3 +276,30 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
     - The loader warned about `[display]` keys that aren't its own.
     - The terminal's ssh took a command that opened, ran and closed between two of its polls (the 486, by
       password) for a refused session.
+- **Step H, the exit** (2026-10-18 to 19):
+  - `make loopa-m10` = the time, netapp, https, sshc, pkg, vnc and gui suites, each of which has passed above.
+  - **The regression** on 8d99e33, from a clean tree, alone on the host: the host tests and 42 Loop A suites
+    (M9's 34 and the time, netapp, https, sshc, pkg and vnc suites). 39 passed. Three failed:
+    - **gpu and audio** failed only the checks of the capability word, which compared the whole word.
+      API 1.3's `GLOS_CAP_NET` changed it. They check their own bits now (`caps_of`).
+    - **vnc**'s rec-frames failed: `glos rec`'s count came before the compose (step F, above). This was fixed in
+      09bdb5f, with VNC's damage handed over after the compose too. Seven runs of the vnc suite since, all
+      passed.
+    - On the reruns, gpu-bf6-g400 and later gpu-bf6-g450 failed "after-session" and "a-right" now and then,
+      in parallel runs. M9's kernel did the same (1 run in 4). GPUTEST had let the engine go and showed its
+      buffer while ECHOARGS's session had the card, and `GLOS_FN_WINVRAM` refused that (`mga_card()` is NULL
+      while the engine doesn't draw the desktop). It asks `mga_desktop_card()` now, as `GLOS_CAP_GLWIN` does
+      (2329ffe). Before the fix it failed in 3 parallel runs of 11; after it, 6 runs (24 cases) all passed.
+  - Rerun in the test tree: on 09bdb5f, audio, vnc, desk and win passed (and gpu, but for the g450 case above);
+    on 2329ffe, gpu, glwin, sdlwin and vnc passed.
+  - **The gate** on 2329ffe (a private GLOS cache and the 86Box build with 0118): 133 parts, all passed.
+    - The full run passed 125 parts. It then stopped in the fifthwheel cell, killed with the session that started
+      it.
+    - The fifthwheel cell alone passed its 8 parts. An earlier rerun failed both direct-mode runs on Fifth
+      Wheel's audio underruns. That rerun overlapped the stopped gate's leftover runs, and the next M10 run
+      passed, as did M9's on the same emulator. Load, as this cell's audio has shown before.
+- **M10 done** (2026-10-19). Every feature's gate has passed in Loop A (PRD §19), as have the regression and the
+  gate. Waiting on the owner:
+  - 86Box patch 0118 into MGA-Glide's main and the shared emulator; GLOS's pin follows it before m10 merges;
+  - the GLOS packages repository and the offline signing key (D58);
+  - on the bench, VNC, the SSH client and HTTPS on a real 486 and a real NIC.

@@ -39,6 +39,11 @@ Still to come from the owner: the GLOS packages repository on GitHub and the off
 PKG's default GLOS source (`ranulphus/glos-packages`) doesn't exist yet, and GLOS ships no key for it.
 FreeDOS's base and util repositories, PKG's other default sources, work now.
 
+The regression (the host tests and 42 Loop A suites) and the gate (133 parts) pass on M10's last commit. They
+found two older races, now fixed:
+- `glos rec` or a VNC viewer could keep a half-drawn frame;
+- an app's `GLOS_FN_WINVRAM` was refused while another program's session had the screen.
+
 Needs MGA-Glide's 86Box patch 0118 (the PIIX4 RTC alias). Without it, the bf6 machine's clock stops after
 SNTP's first change of century.
 

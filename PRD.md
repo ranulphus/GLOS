@@ -1326,3 +1326,10 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
     reasons D69 gives.
 
   §6.5, §8.4, §9.8, §10.2, §10.6, §11 and §18 say so; §19 has the gates' results.
+- **M10 done** (2026-10-19):
+  - each feature's gate passed (§19);
+  - the regression (42 Loop A suites) and the gate (133 parts) are recorded in docs/milestones-m10.md step H.
+
+  Two older races, found by the regression, were fixed on the way:
+  - `glos rec`'s and VNC's damage now come after the compose;
+  - `GLOS_FN_WINVRAM` now works while another program's session has the screen (M8's).
