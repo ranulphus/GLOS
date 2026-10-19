@@ -142,8 +142,8 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
   - It found an 86Box fault. The bf6's BIOS traps port 71h into SMM, and the PIIX4's RTC alias at 74h/75h had an
     index register of its own in 86Box. So after a change of century (the first SNTP set from 1980), every RTC read
     returned the century and the kernel's tick stopped. MGA-Glide's local patch 0118 fixes it, with selftest `rtc`.
-    Until 0118 is in MGA-Glide's main and the shared emulator, a bf6 run that sets the clock needs
-    `BOX86_DIR=~/.cache/mga-glide/86box-m10`.
+    0118 is in MGA-Glide's main (ec03889, pushed 2026-10-19, the owner's OK) and the shared emulator; GLOS's
+    pin is ec03889. (Until then a bf6 run that set the clock needed a private 86Box build.)
 - **Step B done** (2026-10-18): API 1.3. `GLOS_FN_NET` (names, connections, sending and receiving with waits a
   kill ends, closes, states, `GLOS_EV_NET` asked for per connection), `GLOS_FN_RANDOM` and `GLOS_FN_TIME` (UTC,
   how the clock was set, the zone's offset; added for step C's certificate checks). The SDK has BSD sockets on
@@ -299,7 +299,7 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
       Wheel's audio underruns. That rerun overlapped the stopped gate's leftover runs, and the next M10 run
       passed, as did M9's on the same emulator. Load, as this cell's audio has shown before.
 - **M10 done** (2026-10-19). Every feature's gate has passed in Loop A (PRD §19), as have the regression and the
-  gate. Waiting on the owner:
-  - 86Box patch 0118 into MGA-Glide's main and the shared emulator; GLOS's pin follows it before m10 merges;
+  gate. 0118 went into MGA-Glide's main with the owner's OK, and GLOS's pin moved to it (2026-10-19). Waiting on
+  the owner:
   - the GLOS packages repository and the offline signing key (D58);
   - on the bench, VNC, the SSH client and HTTPS on a real 486 and a real NIC.
