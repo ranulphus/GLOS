@@ -273,8 +273,9 @@ int desk_win_vram(struct app *a, u32 id, u32 off, u32 pitch)
         r = GLOS_E_WINDOW;
     } else if (off == 0xFFFFFFFFu) {
         wm_ext(m, w, 0);
-    } else if (m->fmt.bpp != 16 || m->fmt.gsize != 6 || !mga_card()) {
-        r = GLOS_E_NO_GPU;                      /* (GLOS_CAP_GLWIN: the app's pixels are RGB565) */
+    } else if (m->fmt.bpp != 16 || m->fmt.gsize != 6 || !mga_desktop_card()) {
+        r = GLOS_E_NO_GPU;                      /* (GLOS_CAP_GLWIN: the app's pixels are RGB565; the desktop's card,
+                                                   also while another program's session has it, as the capability) */
     } else if ((off & 63) || (pitch & 63) || pitch < (u32)w->store.w * bpp_b
                || !mga_app_block(app_id(a), off, pitch * (u32)(w->store.h - 1) + (u32)w->store.w * bpp_b, 0, 0)) {
         r = GLOS_E_ARGUMENT;                    /* (only its own blocks) */
