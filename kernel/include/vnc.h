@@ -14,7 +14,7 @@ void vnc_input(struct ssh_chan *ch, const u8 *d, u32 n);
 int vnc_turn(struct ssh_chan *ch, void *arg);   /* sshd's stream turn: an update when asked and due */
 void vnc_gone(struct ssh_chan *ch);
 int vnc_owns(const struct ssh_chan *ch);
-/* The desktop's thread, before each compose (the desktop locked): what is about to change. */
+/* The desktop's thread, after each compose (the desktop locked): what it drew. */
 void vnc_damage(const struct gfx_region *dirty, const struct gfx_surface *fb);
 /* A window moved, in front of everything (deskin.c): its frame from src to (dx, dy) on. */
 void vnc_moved(s32 x, s32 y, s32 w, s32 h, s32 dx, s32 dy);

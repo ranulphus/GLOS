@@ -1677,11 +1677,12 @@ and GLOS's:
 
 - **The way in.** The VNC server speaks RFB 3.8 (3.3 and 3.7 too), with security type None. It is reached only
   through the SSH server: a direct-tcpip channel to 127.0.0.1:5900 (`ssh -L`), taken when GLOS.CFG's `[vnc] enable`
-  is on. The agent's key is the lock. Two viewers at once. While one is connected, the task bar's note says `VNC`
+  is on. The agent's key is the lock. Up to four viewers at once. While one is connected, the task bar's note says `VNC`
   (`desk_note`, D35).
 - **What a viewer is owed.**
-  - Before each `wm_compose()` the desktop's thread adds the composer's dirty region to each viewer's
-    (`vnc_damage`), under the desktop's lock, and wakes the ssh thread.
+  - After each `wm_compose()` the desktop's thread adds what the composer drew (its dirty region, kept from
+    before) to each viewer's (`vnc_damage`), under the desktop's lock, and wakes the ssh thread. After, not
+    before: an update read while a compose was drawing is made again once it has drawn.
   - A viewer's update is made when it has asked and something is owed: the screen is read from `display_fb()`
     after `display_sync()`, and the whole update goes into a buffer the stream feeds to the channel as it has room.
   - The card's cursor is drawn over the pixels, as `glos shot` draws it (`mga_cursor_state`), and its moves are owed.
@@ -1697,12 +1698,13 @@ and GLOS's:
   - Any true-colour pixel format the viewer asks for.
 - **Input.**
   - Keys arrive as X keysyms, turned into set 1 codes (a US layout, with Shift added for a character that needs it
-    when the viewer holds none). They are queued, and given to `vkbc_key` while the keyboard has room, as `glos key`
-    waits.
+    when the viewer holds none). They go into one queue for all viewers, and to `vkbc_key` while the keyboard
+    has room, as `glos key` waits; a viewer that sends keys and leaves at once still delivers them.
   - The pointer is absolute: `DESK_POINT`, which moves the desktop's pointer there unscaled (`mouse_to`), with the
     buttons' changes as presses and releases.
 - **`glos rec [--fps N] [--seconds S]`** (D60) streams the desktop's frames while they change (`desk_frames()`
-  counts the composes that drew), at most N a second. Each frame is `FRAME n ms bytes` and a PNG: the same capture
+  counts the composes that drew, once each has drawn, so a capture taken during one is taken again), at most N a
+  second. A capture that fails (busy past its timeout) is retried, the frame still owed (`GLOS-REC retry`). Each frame is `FRAME n ms bytes` and a PNG: the same capture
   and encoder as `glos shot`, so the same bytes for that moment. `tools/rec.py` writes `NNNNN.png` and an
   `index.txt` in ffmpeg's concat format.
 

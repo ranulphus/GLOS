@@ -391,8 +391,7 @@ static int rec_turn(struct ssh_chan *ch, void *arg)
             }
             n = desk_frames();
             if (!(r->sh = shot_new(0, wake_ssh))) {
-                stream_at(now + 8);             /* (another capture under way, glos shot's: again soon, the frame
-                                                   still owed) */
+                stream_at(now + 8);             /* (no memory now: again soon, the frame still owed) */
                 return 0;
             }
             r->frames_seen = n;
@@ -403,10 +402,13 @@ static int rec_turn(struct ssh_chan *ch, void *arg)
             int st = shot_poll(r->sh);
             if (!st)
                 return 0;
-            if (st < 0) {                       /* (no picture now: the next change) */
+            if (st < 0) {                       /* (no picture now: glos shot's captures held the VM thread past the
+                                                   timeout, say; the frame still owed, at the next due) */
+                kprintf("GLOS-REC retry frame=%u why=\"%s\"\n", r->n + 1, shot_why(r->sh));
                 shot_free(r->sh);
                 r->sh = 0;
                 r->phase = 0;
+                r->frames_seen = desk_frames() - 1;
                 r->due = now + r->every;
                 break;
             }

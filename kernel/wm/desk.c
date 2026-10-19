@@ -158,6 +158,8 @@ static void desk_thread(void *arg)
     struct gfx_surface *fb;
     struct wm *m;
     u32 f;
+    int dirty, vnc;
+    static struct gfx_region drawn;             /* (the desktop's thread's alone) */
     (void)arg;
     for (;;) {
         f = irq_save();
@@ -182,10 +184,16 @@ static void desk_thread(void *arg)
                 wm_damage_all(m);
             }
             bar_text(m);
-            if (m->dirty.n)
-                frames++;                       /* (glos rec's: a frame has changed) */
-            vnc_damage(&m->dirty, fb);          /* (what VNC's viewers are owed: M10) */
+            dirty = m->dirty.n != 0;
+            if ((vnc = vnc_viewers() != 0))
+                drawn = m->dirty;
             wm_compose(m, fb);
+            /* What changed, once it is drawn (M10): VNC's viewers are owed it, and glos rec counts a frame. After the
+               compose, so that a viewer's update or a capture read while it was being drawn is made again. */
+            if (vnc)
+                vnc_damage(&drawn, fb);
+            if (dirty)
+                frames++;
         }
         deskin_focus(m);
         f = irq_save();                         /* (not desk_unlock(): that would wake this thread again) */

@@ -3,10 +3,11 @@
  * SSH's direct-tcpip to 127.0.0.1:5900 (the agent's key is the lock), and
  * only when GLOS.CFG's [vnc] enable is on.
  *
- * Updates come from the composer's damage: before each wm_compose() the
- * desktop's thread hands each viewer what is about to be drawn, and the
- * viewer's next update sends that part of the screen, read from the
- * framebuffer after the drawing engine has finished (display_sync). An
+ * Updates come from the composer's damage: after each wm_compose() the
+ * desktop's thread hands each viewer what it drew (so that an update read
+ * while that was being drawn is made again), and the viewer's next update
+ * sends that part of the screen, read from the framebuffer after the
+ * drawing engine has finished (display_sync). An
  * update is made whole into a buffer, then given to the channel as it has
  * room. Encodings: Hextile (16 by 16 tiles: one colour, two, coloured
  * rectangles, or raw, whichever is smaller), Raw, and CopyRect for a window

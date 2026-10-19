@@ -1620,6 +1620,13 @@ SHOT_CASES = [("bf6", "g200", "ne2kpci", "SHOTTEST"), ("bf6", "vbe", "ne2kpci", 
               ("bf6", "vbe", "ne2kpci", "SHOTDJ")]
 
 
+def caps_of(text):
+    """The capability bits an app's "caps=X" line says, in hex (0 if none): tests check their own bits, as API 1.3
+    added GLOS_CAP_NET to every run with a network."""
+    m = re.search(r"caps=([0-9a-fA-F]+)\b", text)
+    return int(m.group(1), 16) if m else 0
+
+
 def png_rgb(data):
     """(width, height, RGB bytes) of one of glos shot's PNGs (indexed or RGB, no scanline filter), or None."""
     import struct
@@ -2607,7 +2614,7 @@ def gpu_case(profile, vcard, card):
     try:
         checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0 and " 640x480x16 " in state("display on mode=")
         rc, o, _ = agent.ssh(app + "info")
-        checks["info"] = rc == 0 and "caps=3" in o and re.search(r"GPU-INFO device=05(20|21|25) ", o) is not None
+        checks["info"] = rc == 0 and caps_of(o) & 3 == 3 and re.search(r"GPU-INFO device=05(20|21|25) ", o) is not None
         checks["stat"] = "gpu owner=" in display()
         free0 = free_kb()
 
@@ -2661,7 +2668,7 @@ def gpu_case(profile, vcard, card):
         # 8 bits: no windowed GL, and no window shows VRAM.
         checks["on-8"] = agent.ssh("glos display on 640x480x8")[0] == 0 and " 640x480x8 " in state("display on mode=")
         rc, o, _ = agent.ssh(app + "info")
-        checks["info-8"] = rc == 0 and "caps=1" in o
+        checks["info-8"] = rc == 0 and caps_of(o) & 3 == 1
         rc, o, _ = agent.ssh(app + "draw A 3")
         checks["refused-8"] = rc == 45 and "GPU-ERR A winvram error=8" in o
         checks["exit"] = agent.ssh("glos exit")[0] == 0
@@ -2719,7 +2726,7 @@ def audio_case(profile, vcard, card):
             time.sleep(0.5)
         checks["mixer"] = agent.ssh("glos audio")[1].startswith("audio on rate=22050 ")
         rc, o, _ = agent.ssh(app + "info")
-        checks["caps"] = rc == 0 and re.search(r"caps=[4-7]\b", o) is not None
+        checks["caps"] = rc == 0 and caps_of(o) & 4 == 4
         ok, n = played(finish(start(app + "tone A 440 6")), "A")
         checks["one"] = ok
         b, c = start(app + "tone B 1000 6 44100 2 32768"), start(app + "tone C 784 6 11025 1 8192")
@@ -4803,6 +4810,7 @@ def vnc_case(profile, vcard, card, bits):
             checks["rec-frames"] = len(frames) >= 3 and all(found)
             checks["rec-index"] = os.path.exists(os.path.join(recout, "index.txt"))
             notes.append("rec: %d frames; the shots were %s; %s" % (len(frames), found, o.decode("latin-1").strip()[-80:]))
+            notes += [l for l in agent.log().splitlines() if l.startswith("GLOS-REC")]    # (captures it retried)
         checks["vnc-log"] = "GLOS-VNC open viewers=2" in agent.log()
         subprocess.run(["docker", "rm", "-f", hold], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         tunnel.terminate()

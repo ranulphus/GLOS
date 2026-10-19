@@ -217,7 +217,7 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
   - The VNC server (`kernel/wm/vnc.c`) speaks RFB 3.8 without a password of its own: SSH is the way in. A viewer
     reaches it through a `direct-tcpip` channel to 127.0.0.1:5900 (`ssh -L`) while `[vnc] enable` is on (the
     Control Panel's "Remote Desktop" page). It takes up to four viewers.
-  - Updates come from the desktop's own damage, before each compose. Encodings: Raw, Hextile, and CopyRect for a
+  - Updates come from the desktop's own damage, handed over after each compose. Encodings: Raw, Hextile, and CopyRect for a
     window moved where nothing covers it and its old and new places don't overlap. The pixel format is whatever
     the viewer asks for. The cursor is drawn in as `glos shot` draws it, and an 8-bit screen's 6-bit DAC is
     widened as `glos shot` widens it, so a viewer's picture and a shot agree.
@@ -235,8 +235,11 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
     At 16 bits, `glos rec` runs meanwhile, and each of the four shots is one of its frames, byte for byte. It
     passed twice running after the fixes below.
   - Found on the way:
-    - `glos rec` lost a frame when a `glos shot` held the capture; now the frame stays owed until the capture
-      is free.
+    - `glos rec` lost a frame now and then (2 runs in 7, one of them the regression). The desktop counted a frame
+      before composing it, so a capture taken during the compose (a window half drawn, rec's frame 2) stood
+      for a frame that was then finished and never sent. The count now moves once the compose is done. A
+      capture that fails (busy past its timeout) leaves the frame owed, with a `GLOS-REC retry` line. An
+      earlier guess, a refusal from `shot_new`, was a path that never happens.
     - Keys were lost when vncdotool closed straight after sending them; the shared queue fixed that.
 - **Step G done** (2026-10-18): other scripts, DOS's code pages, smoothed text. As built: docs/gui.md §1.10.
   - The fonts have Latin Extended-A, Greek, Cyrillic, the general punctuation, €, №, ™ and arrows. The
