@@ -116,8 +116,12 @@ def cmd_index(repo, key):
 def cmd_verify(repo, pub):
     ed25519, _ = keys()
     pk = ed25519.Ed25519PublicKey.from_public_bytes(base64.b64decode(open(pub).read().split()[1]))
+    from cryptography.exceptions import InvalidSignature
     text = open(os.path.join(repo, "INDEX.TXT"), "rb").read()
-    pk.verify(base64.b64decode(open(os.path.join(repo, "INDEX.SIG")).read().split()[1]), text)
+    try:
+        pk.verify(base64.b64decode(open(os.path.join(repo, "INDEX.SIG")).read().split()[1]), text)
+    except InvalidSignature:
+        raise SystemExit("pkg: %s: INDEX.SIG isn't the signature of this INDEX.TXT by %s" % (repo, pub))
     for line in text.decode("latin-1").splitlines()[1:]:
         name, version, size, sha, f = line.split("\t")[:5]
         data = open(os.path.join(repo, f), "rb").read()

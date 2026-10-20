@@ -462,7 +462,8 @@ loopa-https: all build/apps/FETCH.EXE build/host/mkcerts build/glos/CERTS.DAT ch
 loopa-vnc: all apps check-deps
 	$(Q)python3 tests/loopa/jobs.py vnc -j $(JOBS)
 # M10 step E: packages from a signed source on the host (tools/pkg), and FreeDOS's.
-loopa-pkg: all build/apps/PKG.EXE build/host/mkcerts build/glos/CERTS.DAT dos-tests check-deps
+loopa-pkg: all build/apps/PKG.EXE build/host/mkcerts build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB dos-tests \
+           check-deps
 	$(Q)python3 tests/loopa/jobs.py pkg -j $(JOBS)
 # M10 step D: the terminal's ssh, sftp and ssh-keygen against OpenSSH in a container (tests/sshd).
 loopa-sshc: all build/apps/TERM.EXE check-deps

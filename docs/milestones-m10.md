@@ -303,5 +303,7 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
   the owner:
   - ~~the GLOS packages repository and the offline signing key (D58)~~: the owner made both on 2026-10-20
     (`ranulphus/glos-packages`, MIT; the key's public half is `tools/pkg/GLOS.PUB`, staged as
-    `build/glos/KEYS/PKG/GLOS.PUB`). The repository's first signed index is to come;
+    `build/glos/KEYS/PKG/GLOS.PUB`). The first signed index (no packages yet) went up on 2026-10-20, with a
+    README and the public key. `make loopa-pkg` now reads PKG's default sources from the internet as well: the
+    owner's on GitHub, signed by the shipped key. It passes on bf6 and the 486dx2;
   - on the bench, VNC, the SSH client and HTTPS on a real 486 and a real NIC.

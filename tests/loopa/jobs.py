@@ -4519,7 +4519,8 @@ def pkg_case(profile, vcard, card):
     installed (its files byte for byte, its profile in GLOS.CFG with a launcher entry, its list); upgraded to 1.1
     (files changed, added; the profile's title); removed (the files and folders gone, GLOS.CFG byte for byte as it
     was, the list gone). Refused: a zip changed after signing, an index changed after signing. With the internet,
-    a FreeDOS source listed and one of its packages installed and removed (DOSDIR from PKG's profile). Then PKG's
+    a FreeDOS source listed and one of its packages installed and removed (DOSDIR from PKG's profile), and PKG's
+    default sources read: the owner's on GitHub signed by the key GLOS ships (tools/pkg/GLOS.PUB). Then PKG's
     window: NOTES chosen, installed with Alt+I, removed with Alt+R."""
     tag = "%s-%s" % (profile, card)
     out = os.path.join(ROOT, "out", "pkg-%s-files" % tag)
@@ -4543,7 +4544,7 @@ def pkg_case(profile, vcard, card):
     agent = Agent("pkg-" + tag, profile, card, ["--card", vcard,
         "--file", "%s=/TEST/GLOS.CFG" % rel(os.path.join(out, "GLOS.CFG")),
         "--file", "build/apps/PKG.EXE=/TEST/PKG.EXE", "--file", "%s=/TEST/CERTS.DAT" % rel(certs),
-        "--file", "%s=/TEST/KEYS/PKG/TEST.PUB" % rel(pub),
+        "--file", "%s=/TEST/KEYS/PKG/TEST.PUB" % rel(pub), "--file", "build/glos/KEYS/PKG/GLOS.PUB=/TEST/KEYS/PKG/GLOS.PUB",
         "--file", "%s=/TEST/PKG/SOURCES.TXT" % rel(os.path.join(out, "SOURCES.TXT")),
         "--cmd", "SERSAY HX-START pkg", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=3600)
     checks, notes = {"listen": agent.listening()}, []
@@ -4566,6 +4567,12 @@ def pkg_case(profile, vcard, card):
 
     def exists(path):
         return "THERE" in agent.ssh("IF EXIST %s ECHO THERE" % path)[1]
+
+    def put(src_path, path):
+        return subprocess.run(["scp", "-P", str(agent.port), "-i", agent.key, "-o", "IdentitiesOnly=yes", "-o",
+                               "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                               "-o", "LogLevel=ERROR", src_path, "glos@127.0.0.1:/" + path[0] + path[2:].replace("\\", "/")],
+                              capture_output=True, timeout=120).returncode == 0
 
     def src(version, f):
         return open(os.path.join(out, "src-" + version, f), "rb").read()
@@ -4622,6 +4629,13 @@ def pkg_case(profile, vcard, card):
                 exists("C:\\FDTEST\\BIN\\CHOICE.EXE") and not exists("C:\\FDTEST\\SOURCE\\NUL")
             rc, o = pkg("REMOVE CHOICE")
             checks["freedos-remove"] = rc == 0 and not exists("C:\\FDTEST\\NUL")
+            # The owner's source on GitHub (D58): PKG's own default sources, its index signed by the key GLOS ships.
+            agent.ssh("DEL C:\\TEST\\PKG\\SOURCES.TXT")
+            rc, o = pkg("SOURCES", timeout=900)
+            checks["github-signed"] = rc == 0 and re.search(
+                r"^PKG source glos https://raw\.githubusercontent\.com/ranulphus/glos-packages/main/ signed by GLOS packages$",
+                o, re.M) is not None
+            checks["sources-back"] = put(os.path.join(out, "SOURCES.TXT"), "C:\\TEST\\PKG\\SOURCES.TXT")
         else:
             notes.append("no internet: the FreeDOS source not asked")
         # the window: NOTES chosen (the signed source's rows come first), installed, removed

@@ -37,8 +37,9 @@ Each feature ships when its own gate passes (PRD D13). All of them have.
 
 The GLOS packages repository is [ranulphus/glos-packages](https://github.com/ranulphus/glos-packages) (MIT). It is
 signed with the owner's offline Ed25519 key, made 2026-10-20; GLOS ships its public half as
-`C:\GLOS\KEYS\PKG\GLOS.PUB` (`tools/pkg/GLOS.PUB`). Its first signed index is still to come. FreeDOS's base and
-util repositories, PKG's other default sources, work now.
+`C:\GLOS\KEYS\PKG\GLOS.PUB` (`tools/pkg/GLOS.PUB`). Its first signed index, with no packages yet, was published
+on 2026-10-20, and PKG reads it as signed (`make loopa-pkg`). FreeDOS's base and util repositories are PKG's other
+default sources.
 
 The regression (the host tests and 42 Loop A suites) and the gate (133 parts) pass on M10's last commit. They
 found two older races, now fixed:

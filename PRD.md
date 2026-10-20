@@ -1018,7 +1018,8 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 - every `glos shot` taken during a `glos rec` one of its frames.
 
 The owner made the GLOS packages repository (`ranulphus/glos-packages`, MIT) and the offline signing key on
-2026-10-20. GLOS ships the key's public half (D58); the repository's first signed index is to come.
+2026-10-20. GLOS ships the key's public half (D58). The repository's first signed index (no packages yet) went up
+the same day, and PKG reads it as signed in Loop A.
 
 **Release v1.0:** M0–M9 complete, plus each M10 feature that has passed its gate. Bench re-verification passes on every bench card.
 
