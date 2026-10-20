@@ -301,5 +301,7 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
 - **M10 done** (2026-10-19). Every feature's gate has passed in Loop A (PRD §19), as have the regression and the
   gate. 0118 went into MGA-Glide's main with the owner's OK, and GLOS's pin moved to it (2026-10-19). Waiting on
   the owner:
-  - the GLOS packages repository and the offline signing key (D58);
+  - ~~the GLOS packages repository and the offline signing key (D58)~~: the owner made both on 2026-10-20
+    (`ranulphus/glos-packages`, MIT; the key's public half is `tools/pkg/GLOS.PUB`, staged as
+    `build/glos/KEYS/PKG/GLOS.PUB`). The repository's first signed index is to come;
   - on the bench, VNC, the SSH client and HTTPS on a real 486 and a real NIC.

@@ -35,9 +35,10 @@ Each feature ships when its own gate passes (PRD D13). All of them have.
   programs' output go through code page 437, 850, 852, 866 or 737 (GLOSCP, or what DOS says). Smoothed text is
   `[display] font_smoothing`, at 16 and 32 bits.
 
-Still to come from the owner: the GLOS packages repository on GitHub and the offline signing key (PRD D58).
-PKG's default GLOS source (`ranulphus/glos-packages`) doesn't exist yet, and GLOS ships no key for it.
-FreeDOS's base and util repositories, PKG's other default sources, work now.
+The GLOS packages repository is [ranulphus/glos-packages](https://github.com/ranulphus/glos-packages) (MIT). It is
+signed with the owner's offline Ed25519 key, made 2026-10-20; GLOS ships its public half as
+`C:\GLOS\KEYS\PKG\GLOS.PUB` (`tools/pkg/GLOS.PUB`). Its first signed index is still to come. FreeDOS's base and
+util repositories, PKG's other default sources, work now.
 
 The regression (the host tests and 42 Loop A suites) and the gate (133 parts) pass on M10's last commit. They
 found two older races, now fixed:

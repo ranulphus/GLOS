@@ -1017,7 +1017,8 @@ The task-level breakdown of M0–M4 (files, tests, exit commands) is in [docs/mi
 - vncdotool viewing and driving the desktop through `ssh -L` at 8, 16 and 32 bits;
 - every `glos shot` taken during a `glos rec` one of its frames.
 
-The GLOS packages repository and the owner's signing key wait on the owner (D58).
+The owner made the GLOS packages repository (`ranulphus/glos-packages`, MIT) and the offline signing key on
+2026-10-20. GLOS ships the key's public half (D58); the repository's first signed index is to come.
 
 **Release v1.0:** M0–M9 complete, plus each M10 feature that has passed its gate. Bench re-verification passes on every bench card.
 

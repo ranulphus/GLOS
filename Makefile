@@ -652,6 +652,13 @@ build/glos/CERTS.DAT: build/host/mkcerts tools/setup/versions.mk
 	@mkdir -p build/glos
 	$(Q)tools/setup/fetch.sh $(CACERT_URL) $(CACERT_SHA256) $(MGA_CACHE)/dl/$(notdir $(CACERT_URL))
 	$(Q)build/host/mkcerts $@ $(MGA_CACHE)/dl/$(notdir $(CACERT_URL))
+# C:\GLOS\KEYS\PKG\GLOS.PUB: the owner's package key (PRD D58; made offline with tools/pkg/pkg.py keygen, the
+# private half never on a build host), which the GLOS source's INDEX.SIG must be signed by.
+build/glos/KEYS/PKG/GLOS.PUB: tools/pkg/GLOS.PUB
+	@mkdir -p build/glos/KEYS/PKG
+	$(Q)python3 -c "import base64,sys; w=open(sys.argv[1]).read().split(); \
+	  sys.exit(0 if w[0] == 'glos-pkg-ed25519' and len(base64.b64decode(w[1], validate=True)) == 32 else 'bad key')" $<
+	$(Q)cp $< $@
 # The toolkit (sdk/gui, include/glos/gui.h; M9): build/sdk/libgui.a, linked before libglos.a.
 build/sdk/libgui.a: $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h include/glos/gfx.h
 	@mkdir -p build/sdk/gui
