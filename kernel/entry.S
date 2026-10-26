@@ -10,8 +10,10 @@ _start:
         .long   __file_end - _start
         .long   __kernel_end - _start
 entry:
-        cld
         movl    $boot_stack_top, %esp
+        pushl   $2                      /* EFLAGS clean: as DOS left them they may have NT and IOPL 3 set (MS-DOS */
+        popfl                           /* 7.1's IO.SYS does, from its CPU test), and every thread inherits the */
+        cld                             /* boot thread's; with NT an IRET is a task return, #TS (the bench, M10) */
         pushl   %esi
         call    kmain                   /* does not return: leave_to_loader() */
 1:      cli
