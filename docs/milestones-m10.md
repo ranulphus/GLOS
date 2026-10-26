@@ -310,7 +310,7 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
 
 ## On the bench (2026-10-26)
 
-The first real PC: bench-g400. It's an IBM PC 300PL: Pentium II-300, 448 MB, 440BX, onboard Intel PRO/100, a
+The first real PC: bench-g400. It's an IBM PC 300PL: Pentium II at 400 MHz (398 by its TSC), 448 MB, 440BX, onboard Intel PRO/100, a
 Matrox G400 on AGP, and MS-DOS 7.1 from Windows 98 SE on a FAT32 C:. GLOS boots from a DOS menu item in agent mode,
 `C:\GLOS\GLOS.EXE /VERBOSE`, and Windows 98 stays bootable. The setup is in MGA-Glide's docs/bench.md, the scripts
 in tests/bench.
@@ -334,6 +334,15 @@ in tests/bench.
 | UTF-8, code pages, smoothing | GUITEST's text page plain and smoothed, at 16 and 32 bits, byte for byte the host's goldens; names through 850 and 866 on MS-DOS 7.1's FAT32 | passed (`bench_gui.py`) |
 
 So the desktop on the real G400, drawn by its engine, gives the same bytes as the host's software rendering.
+
+**M8 (windowed DOS-GL) on the same card** (`bench_glwin.py --hang`, 2026-10-26): passed.
+- DOS-GL's 27 conformance programs (DOS-GL 6fd0969) ran full-screen and then each in a window on an 800x600x16
+  desktop. All 28 frames were the same bytes both ways, and every program ran as an app (229 turns at the engine).
+- TEXCUBE `--hang` was ended by the GPU watchdog after 500 ms (exit 255, `reason=gpu-watchdog`). The engine was
+  reset, and the next program's frames were the same as before.
+- The display's `faults=1` dates from the first run; no GLOS-WARN or GLOS-PANIC.
+- What the same jobs found in DOS-GL and MGA-Glide (the texture cache, texel centres, the DAC ramp's layout) is in
+  their docs.
 
 **Open, from the bench:**
 - With GLOS as the shell (`SHELL=`) under MS-DOS 7.1, the kernel never loads GLOS.CFG, and DJGPP programs that

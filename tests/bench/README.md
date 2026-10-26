@@ -10,6 +10,7 @@ without one `GLOS.EXE /VERBOSE` shows the kernel's log on the text screen.
 | `bench_gui.py SCRIPT...` | GUI test scripts (tests/gui) on the real desktop, each shot byte for byte against the host's goldens (`make gui-goldens`) | the gui suite |
 | `bench_vnc.py` | vncdotool through `ssh -L`: its screen equal to `glos shot`'s, keys into Notepad, a press on its close box; `glos rec`'s frames | the vnc suite |
 | `bench_sshc.py` | The terminal's ssh (a command, its status, vi and top over a pty) and sftp (1 MB each way) against OpenSSH in a container on this host, key logins only | the sshc suite |
+| `bench_glwin.py [--hang] [TEST...]` | DOS-GL's conformance programs (`DOSGL_DIR`'s build) full-screen and then each in a window on the desktop (`GLOS_BENCH_DESK`, default 800x600x16): every frame the same bytes, each an app with turns at the engine; `--hang`: TEXCUBE's forced GL hang ended by the watchdog, then drawing right | the glwin suite |
 | `bench_pkg.py` | A signed test source on this host over HTTPS: install, upgrade, remove (GLOS.CFG byte for byte as before), a changed zip and a changed index refused. PKG runs from its own base, `C:\PKGTEST`, so the PC's own trust and keys are untouched | the pkg suite |
 
 The PC, set in the environment:
