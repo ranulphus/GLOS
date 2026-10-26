@@ -56,8 +56,10 @@ static void add(u32 bus, u32 dev, u32 fn)
     d->class = (u8)(cls >> 24);
     d->subclass = (u8)(cls >> 16);
     d->progif = (u8)(cls >> 8);
-    d->irq = (u8)pci_read32(bus, dev, fn, 0x3C);
-    d->owned = 0;
+    i = pci_read32(bus, dev, fn, 0x3C);
+    d->irq = (u8)i;
+    d->pin = (u8)(i >> 8);
+    d->keeper = DEV_DOS;
     for (i = 0; i < 6; i++)
         d->bar[i] = pci_read32(bus, dev, fn, 0x10 + i * 4);
 }
@@ -93,28 +95,25 @@ struct pci_dev *pci_at(int i) { return i >= 0 && i < ndevs ? &devs[i] : NULL; }
 
 void pci_claim(struct pci_dev *d)
 {
-    d->owned = 1;
+    d->keeper = DEV_GLOS;
     kprintf("GLOS-PCI claim=%02x:%02x.%u id=%04x:%04x irq=%u\n", d->bus, d->dev, d->fn, d->vendor, d->device,
             d->irq);
 }
 
-int pci_owned_addr(u32 cf8)
+struct pci_dev *pci_by_addr(u32 cf8)
 {
     int i;
     u32 bus = (cf8 >> 16) & 0xFF, dev = (cf8 >> 11) & 0x1F, fn = (cf8 >> 8) & 7;
     for (i = 0; i < ndevs; i++)
-        if (devs[i].owned && devs[i].bus == bus && devs[i].dev == dev && devs[i].fn == fn)
-            return 1;
-    return 0;
+        if (devs[i].bus == bus && devs[i].dev == dev && devs[i].fn == fn)
+            return &devs[i];
+    return NULL;
 }
 
-int pci_irq_shared(const struct pci_dev *d)
+int pci_owned_addr(u32 cf8)
 {
-    int i;
-    if (d->irq == 0 || d->irq >= 16)
-        return 0;
-    for (i = 0; i < ndevs; i++)
-        if (&devs[i] != d && devs[i].irq == d->irq)
-            return 1;
-    return 0;
+    struct pci_dev *d = pci_by_addr(cf8);
+    return d && d->keeper == DEV_GLOS;
 }
+
+int pci_uses_line(const struct pci_dev *d) { return d->pin >= 1 && d->pin <= 4 && d->irq >= 1 && d->irq < 16; }

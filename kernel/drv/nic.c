@@ -2,8 +2,10 @@
  * 8255x and an NE2000 that is there and can be had.
  *
  * None is taken when a packet driver is loaded (it owns the card). A PCI
- * card is refused when its interrupt line is shared with another function
- * (the IRQ would no longer reach the VM's device) or has none. */
+ * card is refused when it has no interrupt line, or when another function
+ * shares the line and can't be made quiet (kernel/drv/dev.c: the IRQ would
+ * no longer reach the device's DOS driver; docs/devices.md). */
+#include "dev.h"
 #include "io.h"
 #include "kprintf.h"
 #include "nic.h"
@@ -27,12 +29,13 @@ static int packet_driver(void)
 
 int nic_pci(struct pci_dev *d, const char *name)
 {
+    char with[12];
     if (d->irq == 0 || d->irq == 2 || d->irq >= 16) {
         kprintf("GLOS-NET refuse card=%s reason=no-irq irq=%u\n", name, d->irq);
         return -1;
     }
-    if (pci_irq_shared(d)) {
-        kprintf("GLOS-NET refuse card=%s reason=shared-irq irq=%u\n", name, d->irq);
+    if (dev_take_line(d, with, sizeof with) != 0) {     /* (others on its line: quiet, or it's refused) */
+        kprintf("GLOS-NET refuse card=%s reason=shared-irq irq=%u with=%s\n", name, d->irq, with);
         return -1;
     }
     return 0;

@@ -198,6 +198,7 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D67** | **VNC is in the kernel, fed by the desktop's damage after each compose:** RFB 3.8, Raw, Hextile and CopyRect (a window moved where nothing covers it), the viewer's pixel format, the cursor and an 8-bit screen's DAC as `glos shot` has them, up to four viewers; keys through one queue as the keyboard has room. `glos rec` sends the PNG `glos shot` would give for each changed frame. (M10 step F, as built) | A viewer's picture and a shot agree, so the same tests check both; no compressor in the kernel. | M10 |
 | **D68** | **DOS's names and DOS programs' text go through the active code page** (437, 850, 852, 866, 737; GLOSCP, else INT 21h 6601h, else 437) in the file manager, the file dialog, the apps' titles and the terminal; a typed letter the page hasn't got is refused. A file's text in Notepad stays Latin-1. The fonts have Latin Extended-A, Greek, Cyrillic, punctuation and signs, and the monospaced one code page 437's drawing characters. (M10 step G, as built) | DOS stores bytes; only the code page says what they are. Notepad keeps every byte of a file as it was. | M10 |
 | **D69** | **Font smoothing uses coverage made at build time** (`SMOOTH.DAT`, by FreeType from the same DejaVu files, in the same glyph order), not stb_truetype at run time as docs/milestones-m10.md planned; blended at 16 and 32 bits with the 1-bit advances, off by default (`[display] font_smoothing`), never in the kernel's own text. (M10 step G, as built) | No floating point on a 486SX, the same hinting and advances as the bitmaps (no layout moves), and 129 KB instead of the TrueType files and a rasteriser in every program. | M10 |
+| **D70** | **Every device has a keeper: one of GLOS's drivers, *quiet* (nobody drives it, so GLOS keeps its interrupts off), or DOS; GLOS grows its own drivers for common hardware a class at a time** (docs/devices.md). Steps:<br>• D1 (built): quiet drivers make shared PCI lines usable, UHCI first.<br>• D2: chained handlers, with what no GLOS driver claims passed on to DOS.<br>• D3: ISA PnP configuration, as UNISOUND does for sound cards.<br>• Later: full drivers where GLOS gains something (USB input and storage, IDE, PCI sound).<br>(Owner, 2026-10-26, after the first bench PC's network card shared IRQ 11 with USB) | GLOS shares the machine with DOS's drivers, which it can't ask "was it yours?"; owning every device would cost DOS programs their direct access to hardware. A quiet driver is a few lines per device class. | bench |
 
 ---
 
@@ -1331,6 +1332,14 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
 - **M10 done** (2026-10-19):
   - each feature's gate passed (§19);
   - the regression (42 Loop A suites) and the gate (133 parts) are recorded in docs/milestones-m10.md step H.
+
+  The first bench PC (2026-10-26; an IBM PC 300PL: Pentium II, 440BX, G400 AGP, MS-DOS 7.1 from Windows 98 SE)
+  found three things, all fixed:
+  - the kernel inherited NT and IOPL 3 from MS-DOS 7.1's FLAGS, and its first IRET into the VM raised #TS; EFLAGS
+    is now cleared at entry;
+  - no serial cable: `/VERBOSE` puts the kernel's log on the text screen, and `GLOS_FN_STAT` is open to any
+    program (`GLOSLOG`);
+  - its network card shared IRQ 11 with USB: D70, devices' keepers, with UHCI's quiet driver.
 
   Two older races, found by the regression, were fixed on the way:
   - `glos rec`'s and VNC's damage now come after the compose;

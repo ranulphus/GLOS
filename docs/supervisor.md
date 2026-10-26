@@ -625,7 +625,7 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 | 80h, E80h | Passed through | Passed through | POST code and the 86Box unit tester (the harness) |
 | 3F8h–3FFh (COM1) | Passed through; output mirrored to the log ring | Passed through | Programs reprogram the UART (Xash, PrBoom, Fifth Wheel [census]) |
 | 2F8h–2FFh (COM2) | Owned by the gdb stub when `/GDB` is given, otherwise passed through | Same | |
-| GLOS-owned NIC | Trapped; reads return FFh, writes dropped; its PCI function reads as absent | Trapped | One card, the first found of: an RTL8139 (M5), an Intel 8255x (M5), an NE2000 (M3: the RTL8029 on PCI, or ISA at 300h, 280h, 320h, 340h, 360h). Its IRQ is the kernel's: the VM never sees it. Refused (`GLOS-NET refuse`) under a packet driver or on a PCI IRQ line another function shares. See "The network cards" below. |
+| GLOS-owned NIC | Trapped; reads return FFh, writes dropped; its PCI function reads as absent | Trapped | One card, the first found of: an RTL8139 (M5), an Intel 8255x (M5), an NE2000 (M3: the RTL8029 on PCI, or ISA at 300h, 280h, 320h, 340h, 360h). Its IRQ is the kernel's: the VM never sees it. Refused (`GLOS-NET refuse`) under a packet driver, or on a PCI IRQ line another function shares unless that function can be made quiet (docs/devices.md: a UHCI controller nobody drives, say). See "The network cards" below. |
 | 3F8h (COM1 data) | Trapped for output, passed through | Same | M3: tells the kernel when a program is part-way through a line, so the kernel's lines wait for it (§18) |
 | VGA 3B0h–3DFh, SB, GUS, DMA 00h–0Fh/80h–8Fh/C0h–DFh, 201h, F0h | Passed through | Passed through | Live 8237 count reads, GUS GF1/CODEC, UniVBE chipset probes and the IRQ13 acknowledge at F0h all need real hardware [census] |
 
@@ -1734,6 +1734,7 @@ and GLOS's:
 | VM | The system VM: `run=`, `dos indos= sda= psp=`, `resident psp= stub= freed=`, `leave code= ticks= gp= int= irq= spurious=`, `indos=reset was=` (InDOS left set by a program killed inside DOS, cleared at the stub's NEXT; M6) |
 | SCHED | At leave: context switches, contended ticks per class, and each thread's ticks |
 | PCI | The number of functions found; each one GLOS claims |
+| DEV | Devices' keepers (docs/devices.md): `quiet ADDR id= class= irq= how=` (a device on a line GLOS takes, made quiet), `keep ... why=` (one that couldn't be), `given-back ADDR id= to=dos irq=` (DOS wrote a quiet device's configuration) |
 | NET | The card GLOS took (or why not), DHCP's address, and counters at leave |
 | LWIP | lwIP's own diagnostics and assertions |
 | RANDOM | At start: the seed's length and whether there is a TSC |

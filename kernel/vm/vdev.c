@@ -10,6 +10,7 @@
  * vif-stuck watchdog. */
 #include "agent.h"
 #include "app.h"
+#include "dev.h"
 #include "display.h"
 #include "io.h"
 #include "gdbprog.h"
@@ -158,6 +159,7 @@ static void pci_out(u16 port, u32 v, int w)
     if (port >= 0xCFC) {
         if (!(vm.pci_addr & 0x80000000u) || pci_owned_addr(vm.pci_addr))
             return;
+        dev_dos_wrote(vm.pci_addr);             /* (a quiet device DOS writes to is DOS's again: drv/dev.c) */
         outl(0xCF8, vm.pci_addr);
     }
     if (w == 4)

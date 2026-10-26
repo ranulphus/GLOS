@@ -127,6 +127,8 @@ host-test-run:
 	  && build/host/tz_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iinclude -o build/host/cp_test tests/host/cp_test.c $(CP_SRCS) \
 	  && build/host/cp_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Itests/host/devstub -Ikernel/include -Iinclude -o build/host/dev_test \
+	  tests/host/dev_test.c kernel/drv/dev.c && build/host/dev_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iapps/term -o build/host/vt_test tests/host/vt_test.c apps/term/vt.c \
 	  && build/host/vt_test
 
@@ -285,7 +287,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh \
            -Ithird_party/mgahal/hal/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c kernel/core/timer.c \
-         kernel/core/sched.c kernel/drv/pci.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
+         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
          kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
          kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
          kernel/ssh/sshd.c \
