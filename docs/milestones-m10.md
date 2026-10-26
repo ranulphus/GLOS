@@ -307,3 +307,35 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
     README and the public key. `make loopa-pkg` now reads PKG's default sources from the internet as well: the
     owner's on GitHub, signed by the shipped key. It passes on bf6 and the 486dx2;
   - on the bench, VNC, the SSH client and HTTPS on a real 486 and a real NIC.
+
+## On the bench (2026-10-26)
+
+The first real PC: bench-g400. It's an IBM PC 300PL: Pentium II-300, 448 MB, 440BX, onboard Intel PRO/100, a
+Matrox G400 on AGP, and MS-DOS 7.1 from Windows 98 SE on a FAT32 C:. GLOS boots from a DOS menu item in agent mode,
+`C:\GLOS\GLOS.EXE /VERBOSE`, and Windows 98 stays bootable. The setup is in MGA-Glide's docs/bench.md, the scripts
+in tests/bench.
+
+**What it found, all fixed:**
+- EFLAGS at the kernel's entry: MS-DOS 7.1 leaves NT and IOPL 3 set, and the first IRET into the VM raised #TS.
+- No way to read the log without a serial cable: `/VERBOSE`, and `GLOSLOG` (with `GLOS_FN_STAT` for any program).
+- The network card refused for sharing IRQ 11 with USB: devices' keepers (PRD D70, docs/devices.md D1).
+
+**M10's checks on the real hardware:**
+
+| Feature | Check | Result |
+|---|---|---|
+| Time | SNTP from pool.ntp.org, the UK zone | passed (a 159 ms step) |
+| HTTPS | GitHub with certificate checks (TLS 1.2, ChaCha20-Poly1305) | passed |
+| HTTPS | the ibiblio FreeDOS mirror | not yet: ibiblio answered 503 all afternoon (FETCH and PKG reported it) |
+| SSH client | a command and its status; vi and top over a pty; SFTP 1 MB each way, checksums equal (2.5 s up, 2.6 s down) | passed (`bench_sshc.py`) |
+| Packages | GLOS's own source on GitHub signed by the owner's key; a signed test source: install, upgrade, remove (GLOS.CFG byte for byte), a changed zip and index refused | passed (`bench_pkg.py`) |
+| VNC | vncdotool through `ssh -L` equal to `glos shot` (4 screens), keys into Notepad, its close box pressed; at 16 and 32 bits | passed (`bench_vnc.py`) |
+| Capture | every shot one of `glos rec`'s frames, at 16 and 32 bits | passed |
+| UTF-8, code pages, smoothing | GUITEST's text page plain and smoothed, at 16 and 32 bits, byte for byte the host's goldens; names through 850 and 866 on MS-DOS 7.1's FAT32 | passed (`bench_gui.py`) |
+
+So the desktop on the real G400, drawn by its engine, gives the same bytes as the host's software rendering.
+
+**Open, from the bench:**
+- With GLOS as the shell (`SHELL=`) under MS-DOS 7.1, the kernel never loads GLOS.CFG, and DJGPP programs that
+  AUTOEXEC.BAT runs stall. The bench uses agent mode meanwhile.
+- `glos ver` says "GLOS M3".

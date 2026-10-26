@@ -46,6 +46,13 @@ found two older races, now fixed:
 - `glos rec` or a VNC viewer could keep a half-drawn frame;
 - an app's `GLOS_FN_WINVRAM` was refused while another program's session had the screen.
 
+On real hardware (2026-10-26; bench-g400, an IBM PC 300PL with a G400 under MS-DOS 7.1), every M10 check has
+passed except the FreeDOS mirror, which was down: time, HTTPS from GitHub, the SSH client and SFTP, packages,
+VNC and capture at 16 and 32 bits, and the fonts, smoothing and code pages byte for byte against the host's
+pictures. The bench found three bugs, fixed the same day: the kernel's entry flags under MS-DOS 7.1, no log
+without a serial cable (`/VERBOSE`, `GLOSLOG`), and a network card refused for sharing its IRQ (devices'
+keepers, docs/devices.md). See docs/milestones-m10.md, "On the bench".
+
 Needs MGA-Glide's 86Box patch 0118 (the PIIX4 RTC alias). Without it, the bf6 machine's clock stops after
 SNTP's first change of century.
 
