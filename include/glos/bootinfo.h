@@ -40,6 +40,7 @@ typedef unsigned int   bi_u32;
 #define BI_F_AGENT       0x0040                 /* headless: SSH commands run in DOS (no mode option, or /AGENT) */
 #define BI_F_DPMITRACE   0x0080                 /* /DPMITRACE: every INT 31h call and its result on COM1 */
 #define BI_F_DIRECT      0x0100                 /* /DIRECT: every session in direct mode (M4e: the gate's runs) */
+#define BI_F_VERBOSE     0x0200                 /* /VERBOSE: the kernel's log lines on the text screen too */
 
 /* glos_call() functions (the ARPL at bp_call_off, AX = fn, EBX = arg). */
 #define GLOS_CALL_LEAVE  1                      /* stop the VM, back to real mode; arg = exit code */

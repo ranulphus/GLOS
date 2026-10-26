@@ -105,7 +105,7 @@
 #define GLOS_FN_SHELL    26     /* the app is the desktop's shell (the file manager): it is sent GLOS_EV_LAUNCH and
                                    GLOS_EV_SYSKEY; EBX 0: no longer */
 #define GLOS_FN_STAT     27     /* EBX GLOS_STAT_, DS:ECX room for EDX bytes -> EAX the bytes copied (structures that
-                                   start with their size; GLOS_STAT_LOG: text) */
+                                   start with their size; GLOS_STAT_LOG: text). For any program, an app or not */
 #define GLOS_FN_KILL     28     /* EBX 0: ECX an app's id; 1: ECX a job's id; 2: the session in front -> ended */
 #define GLOS_FN_WATCH    29     /* EBX 0: DS:ECX a directory ("C:\\GAMES") -> EAX a watch's id: GLOS_EV_FILES
                                    whenever a file there is made, removed, renamed or written (by any program, the

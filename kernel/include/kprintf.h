@@ -12,6 +12,8 @@ int serial_getc(u16 port);              /* -1 when nothing is waiting */
 void kprintf(const char *fmt, ...);     /* to COM1: %s %c %d %u %x %p, width and 0 flag */
 int ksnprintf(char *buf, size_t n, const char *fmt, ...);
 void kvprintf(const char *fmt, __builtin_va_list ap);
+extern void (*kprintf_screen)(const char *s, u32 n);    /* /VERBOSE: lines on the text screen too (vm/vcon.c) */
+void vcon_start(void);
 extern int (*kprintf_hold)(void);       /* 1 while a program's COM1 line is unfinished (vm/vdev.c) */
 void kprintf_flush(int force);
 void kprintf_direct(void);              /* a panic: no more holding */

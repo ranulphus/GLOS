@@ -61,6 +61,38 @@ static int done(struct trapframe *tf, int e)
     return 0;
 }
 
+/* GLOS_FN_STAT, for any program (what glos stat and glos log say: a DOS program on a bench PC with no serial
+   cable or network reads the log so, tests/dos/gloslog.c). */
+static int stat_call(struct trapframe *tf)
+{
+    int r;
+    static u8 buf[2048];                    /* (one call at a time: the lock below) */
+    static struct waitq q;
+    static struct thread *owner;
+    u32 n = 0, f = irq_save();
+    while (owner && owner != current)
+        thread_block(&q);
+    owner = current;
+    irq_restore(f);
+    if (tf->ebx == GLOS_STAT_SYSTEM)
+        n = stat_system(buf, sizeof buf);
+    else if (tf->ebx == GLOS_STAT_APPS)
+        n = stat_apps(buf, sizeof buf);
+    else if (tf->ebx == GLOS_STAT_LOG)
+        n = klog_read((char *)buf, sizeof buf);
+    if (n > tf->edx)
+        n = tf->edx;
+    r = n && user_wr((u16)tf->ds, tf->ecx, buf, n) != 0;
+    f = irq_save();
+    owner = 0;
+    thread_wake(&q);
+    irq_restore(f);
+    if (r || tf->ebx > GLOS_STAT_LOG)
+        return fail(tf, GLOS_E_ARGUMENT);
+    tf->eax = n;
+    return 0;
+}
+
 /* What the machine can do (GLOS_FN_VERSION's EBX): the desktop's, even while a session has the screen (a program
    asking is often that session, and has the desktop again once it is an app). */
 static u32 caps(void)
@@ -259,6 +291,8 @@ int glos_api(struct trapframe *tf)
         memset(buf, 0, sizeof buf);
         return done(tf, r != 0 ? GLOS_E_ARGUMENT : 0);
     }
+    if (fn == GLOS_FN_STAT)                     /* (for any program, as GLOS_FN_TIME) */
+        return stat_call(tf);
     if (!a)
         return fail(tf, GLOS_E_NOT_APP);
     if (fn == GLOS_FN_GPU_LOCK)                 /* (not a safe point: the lock is being taken, not left) */
@@ -417,33 +451,6 @@ static int app_fn(struct app *a, struct trapframe *tf, u32 fn)
     case GLOS_FN_SHELL:
         desk_shell(a, tf->ebx != 0);
         return done(tf, 0);
-    case GLOS_FN_STAT: {
-        static u8 buf[2048];                    /* (one app's call at a time: the lock below) */
-        static struct waitq q;
-        static struct thread *owner;
-        u32 n = 0, f = irq_save();
-        while (owner && owner != current)
-            thread_block(&q);
-        owner = current;
-        irq_restore(f);
-        if (tf->ebx == GLOS_STAT_SYSTEM)
-            n = stat_system(buf, sizeof buf);
-        else if (tf->ebx == GLOS_STAT_APPS)
-            n = stat_apps(buf, sizeof buf);
-        else if (tf->ebx == GLOS_STAT_LOG)
-            n = klog_read((char *)buf, sizeof buf);
-        if (n > tf->edx)
-            n = tf->edx;
-        r = n && user_wr((u16)tf->ds, tf->ecx, buf, n) != 0;
-        f = irq_save();
-        owner = 0;
-        thread_wake(&q);
-        irq_restore(f);
-        if (r || tf->ebx > GLOS_STAT_LOG)
-            return fail(tf, GLOS_E_ARGUMENT);
-        tf->eax = n;
-        return 0;
-    }
     case GLOS_FN_KILL:
         if (tf->ebx == 0)
             app_kill_id(tf->ecx, "monitor");

@@ -1142,6 +1142,8 @@ void vm_start(struct bootinfo *bi)
             tf->ss, tf->esp, vm.a20, vpic_imr(&vm.pic), vkbc_cmd(), bi->mode == BI_MODE_XMS ? "takeover" : "raw",
             vm.vme);
     kprintf("GLOS-VM dos indos=%05x sda=%05x psp=%04x\n", vm.indos, vm.sda, vm_current_psp());
+    if (bi->flags & BI_F_VERBOSE)
+        vcon_start();                           /* (the log's lines on the text screen from here: vm/vcon.c) */
     vm.thread = thread_new("vm", PRIO_NORMAL, vm_thread_main, NULL, TU_VM);    /* (its virtual IF off: pm_enter's */
     if (!vm.thread)                             /* CLI; _vm_resume's POPF sets it) */
         panic("vm-thread", NULL);

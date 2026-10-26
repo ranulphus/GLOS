@@ -148,7 +148,7 @@ to COM1 at each step:
     console  = C:\KIOSK.BAT
     ; the master environment, in bytes (default 1024)
     envsize  = 2048
-    ; GLOS.EXE's flags: /DPMITRACE, /NOVME, /GDB (M4c), /DIRECT (M4e)
+    ; GLOS.EXE's flags: /DPMITRACE, /NOVME, /GDB (M4c), /DIRECT (M4e), /VERBOSE (the bench, 2026-10-26)
     options  = /DPMITRACE
     ```
 
@@ -1716,6 +1716,12 @@ and GLOS's:
   one is part-way through a line, the kernel holds its own lines and writes them when that line ends, or after
   100 ticks at the latest (M3). A panic is written at once.
 - **No periodic output, ever:** Loop A detects hangs by serial silence.
+- **The text screen too, with `/VERBOSE`** (`kernel/vm/vcon.c`), for a PC with no serial cable. GLOS.EXE's flag, or
+  `[shell] options`. Every kernel line goes to the screen as well, where the BIOS's cursor is, as Linux's console
+  shows its messages. From when the VM starts, the lines logged before it come first. Only while the screen is in
+  a text mode and the desktop doesn't have it.
+- **From DOS:** `GLOS_FN_STAT` is open to any program (not only apps), so `GLOSLOG` (`tests/dos/gloslog.c`) prints
+  the log's last lines at the DOS prompt.
 - Tags:
 
 | Tag | Emitted for |

@@ -392,6 +392,7 @@ static int flag_arg(const char *a)
     else if (!stricmp(a, "/AGENT")) bi.flags |= BI_F_AGENT;
     else if (!stricmp(a, "/DPMITRACE")) bi.flags |= BI_F_DPMITRACE;
     else if (!stricmp(a, "/DIRECT")) bi.flags |= BI_F_DIRECT;
+    else if (!stricmp(a, "/VERBOSE")) bi.flags |= BI_F_VERBOSE;
     else return 0;
     return 1;
 }
