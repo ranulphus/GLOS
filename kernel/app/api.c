@@ -240,6 +240,25 @@ static int config_fn(struct trapframe *tf)
     return r < 0 ? fail(tf, GLOS_E_CONFIG) : 0;
 }
 
+/* GLOS_FN_CACHE: the range within one of the program's own DOS blocks. */
+static int cache_call(struct trapframe *tf)
+{
+    const struct dosblk *d;
+    u32 lin = tf->ebx, end = tf->ebx + tf->ecx;
+    int r;
+    if (!dctx)
+        return fail(tf, GLOS_E_ARGUMENT);
+    for (d = dctx->dosblks; d; d = d->next) {
+        u32 b = (u32)d->seg << 4, e = b + ((u32)vm_rd16(((u32)d->seg - 1) << 4 | 3) << 4);   /* (its MCB's size) */
+        if (lin >= b && end <= e && end > lin)
+            break;
+    }
+    if (!d)
+        return fail(tf, GLOS_E_ARGUMENT);
+    r = mtrr_set(dctx, lin, tf->ecx, tf->edx);
+    return r == -1 ? fail(tf, GLOS_E_FUNCTION) : r ? fail(tf, GLOS_E_ARGUMENT) : done(tf, 0);
+}
+
 int glos_api(struct trapframe *tf)
 {
     static const char *const why[] = { "?", "already", "nested", "16-bit", "parent", "exclusive", "memory" };
@@ -293,6 +312,8 @@ int glos_api(struct trapframe *tf)
     }
     if (fn == GLOS_FN_STAT)                     /* (for any program, as GLOS_FN_TIME) */
         return stat_call(tf);
+    if (fn == GLOS_FN_CACHE)                    /* (1.4: for any program) */
+        return cache_call(tf);
     if (!a)
         return fail(tf, GLOS_E_NOT_APP);
     if (fn == GLOS_FN_GPU_LOCK)                 /* (not a safe point: the lock is being taken, not left) */

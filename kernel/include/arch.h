@@ -56,6 +56,14 @@ void vm_return(struct trapframe *tf);
 extern u32 cpu_cr4_bits;        /* CR4 bits that stick (0 without CR4) */
 extern int cpu_has_cr4;
 
+/* arch/mtrr.c: memory types by the MTRRs (GLOS_FN_CACHE) */
+#define MTRR_WC 1
+#define MTRR_WB 6
+struct dpmi_ctx;
+void mtrr_init(u32 cpuid_edx);
+int mtrr_set(struct dpmi_ctx *c, u32 lin, u32 bytes, u32 type);    /* 0; -1 the CPU can't; -2 a bad range */
+void mtrr_release(struct dpmi_ctx *c);  /* its changes undone */
+
 /* kernel/dpmi: traps from a DPMI client (ring 3), and the way back to it */
 void dpmi_trap(struct trapframe *tf);
 int lin_fault(u32 lin);                         /* kernel/dpmi/mem.c: a client page backed on its first touch */

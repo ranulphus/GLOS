@@ -300,6 +300,7 @@ static void ctx_destroy(int psp)
     }
     wp_clear_level(1);
     rmcb_free_ctx(c);
+    mtrr_release(c);
     current->ctx = 0;
     dpmi_ctx_load(0);
     mm_space_free(c->cr3);

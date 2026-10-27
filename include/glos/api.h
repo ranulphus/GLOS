@@ -20,7 +20,7 @@
 #define GLOS_API_H
 
 #define GLOS_API_MAJOR   1
-#define GLOS_API_MINOR   3
+#define GLOS_API_MINOR   4
 #define GLOS_API_VERSION ((GLOS_API_MAJOR << 16) | GLOS_API_MINOR)
 
 /* Functions (EAX). */
@@ -118,7 +118,17 @@
 #define GLOS_FN_TIME     32     /* -> EAX the time (seconds since 1970-01-01 UTC), EBX GLOS_TIME_ (how it was set),
                                    ECX local time's offset now (seconds, signed: east of Greenwich positive). For
                                    any program */
-#define GLOS_FN_COUNT    33
+/* (1.4) */
+#define GLOS_FN_CACHE    33     /* EBX the linear address (its real-mode segment times 16) of conventional memory the
+                                   program has from DOS (DPMI 0100h), ECX bytes, EDX GLOS_CACHE_: how the CPU caches it.
+                                   GLOS_CACHE_WC for memory a device fetches without snooping the CPU's caches (a
+                                   G400's DMA by AGP cycles): the CPU's writes reach memory by the time it writes to
+                                   the device's registers (a write to uncached memory drains the write-combining
+                                   buffers), never later; its reads are not cached. Only whole units of the fixed MTRRs:
+                                   64 KB below 80000h, 16 KB from there to A0000h. Given back (GLOS_CACHE_WB) when
+                                   the program ends. Refused with GLOS_E_FUNCTION when the CPU can't (no MTRRs, no
+                                   write-combining), GLOS_E_ARGUMENT for any other range. For any program */
+#define GLOS_FN_COUNT    34
 
 /* Errors (EAX, with the carry flag). */
 #define GLOS_E_FUNCTION  1      /* no such function */
@@ -307,6 +317,10 @@ enum { GLOS_JOB_QUEUED, GLOS_JOB_RUNNING, GLOS_JOB_FULL, GLOS_JOB_APP, GLOS_JOB_
 #define GLOS_NETS_FAILED 4      /* refused, timed out or reset: GLOS_NET_RECV gives what was left, then fails with
                                    the reason */
 
+/* How the CPU caches memory (GLOS_FN_CACHE, 1.4): the MTRRs' types. */
+#define GLOS_CACHE_WC    1      /* write-combining */
+#define GLOS_CACHE_WB    6      /* write-back: as at boot */
+
 /* How the clock was set (GLOS_FN_TIME, 1.3). */
 #define GLOS_TIME_RTC    0      /* not since GLOS started: the RTC's, whatever that was (certificates can't be
                                    checked against it) */
@@ -420,6 +434,7 @@ int glos_net_close(unsigned id, int reset);
 int glos_net_state(unsigned id, unsigned *avail, unsigned *state, unsigned *room);    /* 0, or -1 */
 int glos_random(void *buf, unsigned n); /* 0, or -1 (no GLOS: nothing written) */
 int glos_time(unsigned long *utc, int *offset);        /* GLOS_TIME_ and the time (and local time's offset), or -1 */
+int glos_cache(unsigned lin, unsigned bytes, unsigned type);  /* (1.4) GLOS_FN_CACHE: 0, or -1 (glos_error()) */
 #ifdef __cplusplus
 }
 #endif

@@ -429,6 +429,12 @@ int glos_time(unsigned long *utc, int *offset)
     return (int)r[1];
 }
 
+int glos_cache(unsigned lin, unsigned bytes, unsigned type)
+{
+    unsigned r[6] = { GLOS_FN_CACHE, lin, bytes, type, 0, 0 };
+    return call6(r) != 0 ? -1 : 0;
+}
+
 int glos_random(void *buf, unsigned n)
 {
     unsigned char *p = buf;

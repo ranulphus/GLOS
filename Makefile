@@ -286,7 +286,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -isystem $(shell $(HOST_CC) -m32 -print-file-name=include) -Ikernel/include/libc -Ikernel/net/port \
            -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh \
            -Ithird_party/mgahal/hal/include
-KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/core/main.c kernel/core/timer.c \
+KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c kernel/core/main.c kernel/core/timer.c \
          kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
          kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
          kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
@@ -476,7 +476,7 @@ loopa-m10: loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc lo
 loopa-input: all dos-tests build/dj/DIRTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py input -j $(JOBS)
 # M4a: the DPMI host's checks (DPMIMINI, DPMICONF-32 against CWSDPMI and HDPMI32i).
-loopa-dpmi: all dos-tests build/dj/DPMICONF.EXE build/dj/LAZYCHK.EXE check-deps
+loopa-dpmi: all dos-tests build/dj/DPMICONF.EXE build/dj/LAZYCHK.EXE build/dj/CACHEWC.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py dpmi -j $(JOBS)
 loopa-m4a: loopa-dpmi
 # M4b: DJGPP 2.05's tests and CRASHME against CWSDPMI; MGA-Glide's STACKPG, MOUSETST, JOYTEST, SBBEEP.
@@ -532,6 +532,12 @@ build/dj/PROFCHK.EXE: tests/dos/profchk.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+# CACHEWC (tests/dos/cachewc.c): GLOS_FN_CACHE, write-combining conventional memory (API 1.4).
+build/dj/CACHEWC.EXE: tests/dos/cachewc.c build/sdk/libglos.a tools/glosmark.py
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)python3 tools/glosmark.py $@
 # LAZYCHK (tests/dos/lazychk.c): DPMI memory backed when first touched (M4e).
 build/dj/LAZYCHK.EXE: tests/dos/lazychk.c
 	@mkdir -p $(dir $@)

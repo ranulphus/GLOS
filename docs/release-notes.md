@@ -4,6 +4,13 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## API 1.4 (2026-10-27)
+
+- **Write-combining memory.** `GLOS_FN_CACHE` (for any program) makes whole 64 KB units of the program's own
+  conventional memory write-combining, by the fixed MTRRs, and GLOS gives them back when the program ends (D71).
+  MGA-Glide's HAL uses it for the G400's DMA rings, which the card then fetches by AGP cycles. GLOS logs the
+  MTRRs at boot (`GLOS-MTRR`). Tested by CACHEWC in `make loopa-dpmi`.
+
 ## M10: community features (2026-10-18)
 
 Each feature ships when its own gate passes (PRD D13). All of them have.

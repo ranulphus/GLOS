@@ -645,6 +645,30 @@ def lazy(profile, boot):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def cachewc(profile, boot):
+    """CACHEWC (API 1.4): GLOS_FN_CACHE. On the Pentium II (bf6: MTRRs with write-combining) a 64 KB unit of the
+    program's DOS memory is made write-combining and reads back what was written, and GLOS gives it back when the
+    program ends (GLOS-MTRR restored); a quarter unit, a unit's middle, DOS's own memory and write-through are
+    refused (GLOS_E_ARGUMENT). On a 486 (no MTRRs) GLOS_E_FUNCTION or GLOS_E_ARGUMENT, and no change."""
+    tag = "%s-%s" % (profile, boot)
+    st, gl = run("cachewc-" + tag, ["--machine", profile, "--boot-cfg", boot, "--file",
+                                    "build/dj/CACHEWC.EXE=/TEST/CACHEWC.EXE", "--timeout", "300",
+                                    "--cmd", "SERSAY HX-START cachewc"] + GLOS_FILES + [
+        "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\CACHEWC.EXE", "--cmd", "SERSAY HX-DONE 0"])
+    m = re.search(r"HX-CACHE wc=(\d+) unit16=(\d+) part=(\d+) foreign=(\d+) type=(\d+) kept=(\d)", gl)
+    mtrr = profile == "bf6"
+    want = ("0", "3", "3", "3", "3", "1") if mtrr else None
+    checks = {"status": st == "PASS", "line": bool(m),
+              "calls": bool(m) and (m.groups() == want if mtrr else
+                                    m.group(1) in ("1", "3") and m.group(6) == "1"),
+              "set": ("GLOS-MTRR set" in gl) == mtrr,
+              "restored": ("GLOS-MTRR restored" in gl) == mtrr,
+              "clean": "GLOS-PANIC" not in gl and "GLOS-CRASH" not in gl and "GLOS-WARN" not in gl}
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s %s%s" % ("cachewc-" + tag, "PASS" if not bad else "FAIL", m.group(0)[9:] if m else "",
+                                "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def dpmi(profile, boot):
     """DPMIMINI (tests/dos/dpmimini.asm): with no host; as a 32-bit client
     under HDPMI32i, which proves the test; and under GLOS as a 16-bit and a
@@ -5517,6 +5541,7 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "dpmi":
         res = matrix(dpmi, combos, a.jobs) + matrix(dpmiconf, combos, a.jobs) + matrix(lazy, combos, a.jobs)
+        res += matrix(cachewc, combos, a.jobs)
         res += matrix(dpmi_hello, [(b,) for b in a.boot or BOOTS], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "tpx":

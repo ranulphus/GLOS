@@ -93,6 +93,7 @@ void kmain(struct bootinfo *loader_bi)
             bi->mode == BI_MODE_XMS ? "xms" : "raw", bi->kernel_phys, bi->n_ranges, bi->flags);
     cpu_init(bi->cs_base, bi->ds_base, bi->ret_off);
     cpu_features();
+    mtrr_init(bi->cpuid_edx);
     mm_init(bi);
     cpu_set_df_cr3(mm_cr3());
     probe = kmalloc(1000);
