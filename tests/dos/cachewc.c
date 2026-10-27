@@ -46,7 +46,7 @@ int main(void)
     wc = try(al, 0x10000, GLOS_CACHE_WC);
     u16 = try(al, 0x4000, GLOS_CACHE_WC);               /* (a quarter of a 64 KB unit) */
     part = try(al + 0x1000, 0x10000, GLOS_CACHE_WC);    /* (not on a unit's start) */
-    foreign = try(0x10000, 0x10000, GLOS_CACHE_WC);     /* (DOS's own memory, not the program's) */
+    foreign = try(0, 0x10000, GLOS_CACHE_WC);           /* (the vectors and DOS's data: never the program's) */
     type = try(al, 0x10000, 4);                         /* (write-through: not offered) */
     for (i = 0; i < sizeof pat; i++)
         pat[i] = (unsigned char)(i * 7 + 3);
