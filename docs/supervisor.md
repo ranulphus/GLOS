@@ -1405,7 +1405,7 @@ place where nothing else is in DOS by construction.
 - A full ring holds the program until the ssh thread makes room (the client's window); once the client has
   gone, output is dropped.
 - Text written straight to the screen isn't captured (`glos shot` shows it). 8.3 file names only (no LFN API
-  in v1).
+  in v1; using the API when an LFN driver provides it is a recorded follow-up, PRD §7.3).
 
 ### 17.5 Critical errors and Ctrl-Break
 

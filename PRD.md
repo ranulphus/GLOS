@@ -473,6 +473,14 @@ Each command is an SSH exec request. `ssh <pc> <command>` runs a DOS command lin
 
 - SFTP (protocol version 3) runs on the DOS server. That gives `scp` and `sftp`, and `sshfs` mounts on the build server. (Planned as a port of OpenSSH's `sftp-server.c`; built in M3 as GLOS's own, since the port's Unix half would all have been replaced.)
 - Paths: `/C/TEST/FW.EXE` maps to `C:\TEST\FW.EXE`. Long names are refused in v1, because DOS gives no long-name API without LFN support.
+- **Follow-up: long file names (owner, 2026-10-28).** When the drive has the long-name API (INT 21h 71xxh; 71A0h
+  answers for the drive), SFTP and the agent use it, so long and lower-case names can be written, listed, renamed and
+  deleted. The API comes from an LFN driver such as DOSLFN in plain DOS, or from Windows 9x. Without it, long names
+  are still refused. Calls stay on the DOS server, which already serialises DOS. DOSLFN writes directory sectors
+  itself (Appendix A.4), so its own disk access must be tested under GLOS.
+  - Why: Half-Life's data (`spraypaint.wad`, `listenserver.cfg` and others) couldn't be copied to bench-g400 under
+    GLOS. The PC had to reboot into its Ubuntu to write the files.
+  - Until then: copy long-named files from another OS, or pack them and unpack them on the PC under an LFN driver.
 
 ### 7.4 Program output
 
