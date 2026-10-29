@@ -5348,7 +5348,7 @@ def native_case(profile, vcard, card, bits):
 
 CONTROL_CASES = [("bf6", "g200", "ne2kpci")]
 CONTROL_NUMBERS = {"gpu_watchdog": "1000", "repeat_rate": "20", "double_click": "400", "envsize": "2048",
-                   "memory": "8192", "interval": "12"}
+                   "memory": "8192", "interval": "12", "size": "16"}
 CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\KIOSK.BAT", "options": "/NOVME",
                  "title": "CP Test", "args": "-a -b", "comspec": "C:\\COMMAND.COM",
                  "autoexec": "C:\\AUTOEXEC.BAT", "dir": "C:\\CP", "blaster": "A220 I7 D1 H5",
