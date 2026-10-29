@@ -1052,6 +1052,7 @@ int main(int argc, char **argv)
     outp(0x3FB, 0x80); outp(0x3F8, 1); outp(0x3F9, 0); outp(0x3FB, 0x03);
     outp(0x3FA, 0xC7); outp(0x3FC, 0x03);
     say("GLOS-BOOT step=start build=" GLOS_BUILD);
+    bi.cache_mode = BI_CACHE_ON;                /* the disk cache is on unless GLOS.CFG or /CACHE= says (D72) */
     shell_setup(argc, argv);
     if (shell) {
         char tail[64];

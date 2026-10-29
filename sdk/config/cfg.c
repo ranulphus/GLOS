@@ -51,7 +51,7 @@ const struct cfg_key cfg_schema[] = {
     { "time", "interval", CFG_NUMBER, CFG_NOW, 1, 168, 0, "24", "&Ask again (hours)",
       "How often the time server is asked again" },
     /* [cache]: the disk cache (docs/disk-cache.md) */
-    { "cache", "enabled", CFG_CHOICE, CFG_NOW, 0, 0, "on|off|verify|count", "off", "&Disk cache",
+    { "cache", "enabled", CFG_CHOICE, CFG_NOW, 0, 0, "on|off|verify|count", "on", "&Disk cache",
       "GLOS keeps what DOS reads from the hard disks in spare memory; verify also reads the disk and compares, count "
       "keeps nothing and counts. Its 4 KB block buffer comes with GLOS's next start" },
     { "cache", "size", CFG_NUMBER, CFG_NOW, 1, 2048, "auto", "auto", "Cache &size (MB)",

@@ -239,7 +239,7 @@ two stay coherent.
 
 - **GLOS.CFG `[cache]`,** a new section in the schema (sdk/config/cfg.c), so the Control Panel gets a tab for it.
   The Control Panel's goldens (D57) are made again.
-  - `enabled = on|off|verify|count`, default `on` (D72; `off` until C4 passes). `verify` reads every hit from the
+  - `enabled = on|off|verify|count`, default `on` (D72; it was `off` until C4 passed). `verify` reads every hit from the
     disk as well and compares; `count` caches nothing and counts. It changes at once, applied when no INT 13h is in
     progress; the block buffer comes only with a start.
   - `size = auto|N` (MB, 1–2048), default `auto`, shrinking at once.
