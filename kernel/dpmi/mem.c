@@ -85,7 +85,7 @@ static int commit(u32 lin, u32 from, u32 to)
 {
     u32 i;
     for (i = from; i < to; i++) {
-        u32 f = pmm_free_frames() > RESERVE / 2 && (!dctx->frame_cap || dctx->frames + dctx->lazy < dctx->frame_cap)
+        u32 f = mm_avail_frames() > RESERVE / 2 && (!dctx->frame_cap || dctx->frames + dctx->lazy < dctx->frame_cap)
                     ? pmm_alloc() : 0;
         if (!f || mm_map(lin + (i << 12), f, MM_W | MM_U) != 0) {
             if (f)
@@ -111,7 +111,7 @@ static int reserve(u32 lin, u32 from, u32 to)
     u32 i;
     if (dctx->frame_cap && dctx->frames + dctx->lazy + (to - from) > dctx->frame_cap)
         return -1;
-    if (dctx->frames + dctx->lazy + (to - from) > 3 * (dctx->frames + pmm_free_frames()))
+    if (dctx->frames + dctx->lazy + (to - from) > 3 * (dctx->frames + mm_avail_frames()))
         return -1;
     for (i = from; i < to; i++) {
         if (mm_lazy(lin + (i << 12)) != 0) {
@@ -147,7 +147,7 @@ int lin_fault(u32 lin)
     if (!dctx || lin < USER_BASE || lin >= USER_END)
         return 0;
     pte = mm_lookup(lin);
-    if ((pte & 1) || !(pte & MM_LAZY) || pmm_free_frames() <= RESERVE / 4 || !(f = pmm_alloc()))
+    if ((pte & 1) || !(pte & MM_LAZY) || mm_avail_frames() <= RESERVE / 4 || !(f = pmm_alloc()))
         return 0;
     if (mm_map(lin & ~0xFFFu, f, MM_W | MM_U) != 0) {
         pmm_free(f);
@@ -334,7 +334,7 @@ void lin_free_level(u32 level)
 
 void lin_info(u32 *o)
 {
-    u32 avail = pmm_free_frames(), lin_free = 0, at = USER_BASE, largest = 0, gap;
+    u32 avail = mm_avail_frames(), lin_free = 0, at = USER_BASE, largest = 0, gap;
     struct block *b;
     for (b = dctx->blocks; b; b = b->next) {    /* the user region's free pages, and its largest gap */
         if (b->lin >= PHYS_WINDOW)

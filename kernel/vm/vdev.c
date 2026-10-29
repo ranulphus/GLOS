@@ -10,6 +10,7 @@
  * vif-stuck watchdog. */
 #include "agent.h"
 #include "app.h"
+#include "cache.h"
 #include "dev.h"
 #include "display.h"
 #include "io.h"
@@ -219,6 +220,7 @@ static void dev_outb(u16 port, u8 v)
         com1_out(v);
         return;
     default:
+        cache_port_out(port, v);                /* an IDE command the disk cache must see (when it watches) */
         if (!is_hidden(port))
             outb(port, v);
     }

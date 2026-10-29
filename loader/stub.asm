@@ -60,7 +60,7 @@ sd_resident     db      0               ; set once resident: _pm_ret then exits
 sd_nxms         db      0
 sd_shell        db      0               ; GLOS is the DOS shell: it never ends
 sd_realmode     db      0               ; no kernel: EXEC path/tail again and again
-                db      0, 0
+sd_extra        dw      0               ; paragraphs kept after the stub (the disk cache's block buffer)
 sd_xms          dd      0               ; the XMS driver's entry
 sd_handles      dw      4 dup (0)
 sd_env_src      dd      0               ; the master environment the C code staged
@@ -316,6 +316,7 @@ resident:
         sti
         mov     es, cs:psp_seg          ; the PSP and the stub; the rest goes back to DOS
         mov     bx, (_stub_end - stub_start + 15) / 16 + 10h
+        add     bx, cs:sd_extra         ; and the disk cache's block buffer after it
         mov     ah, 4Ah
         int     21h
         mov     cs:sd_resident, 1

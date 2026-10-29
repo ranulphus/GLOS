@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 4
+#define BOOTINFO_VERSION 5
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -67,6 +67,23 @@ struct bi_profile {
     bi_u32 memory_kb;                           /* memory = KB: the cap on a DPMI context's memory; 0 none */
     char env[BI_PROF_ENV];                      /* env = NAME=VALUE lines: each string NUL-ended, then a NUL */
 };
+
+/* Version 5: a hard disk as the BIOS describes it (INT 13h 08h, 41h, 48h), for the disk cache. */
+#define BI_DISKS         4
+#define BI_DISK_EDD      0x0001                 /* 41h: the extended calls (42h-44h, 47h, 48h) */
+#define BI_DISK_REMOVE   0x0002                 /* 48h: removable media */
+#define BI_DISK_PARAMS   0x0004                 /* 48h answered: sectors and bps are its */
+struct bi_disk {
+    bi_u32 dl, flags;                           /* 80h, 81h, ...; BI_DISK_* */
+    bi_u32 cyls, heads, spt;                    /* 08h's geometry (cylinders counted, not the last one's number) */
+    bi_u32 sectors_lo, sectors_hi;              /* 48h's count; else cyls x heads x spt */
+    bi_u32 bps;                                 /* 48h's bytes a sector; else 512 */
+};
+#define BI_CACHE_OFF     0
+#define BI_CACHE_ON      1
+#define BI_CACHE_VERIFY  2                      /* every hit read from the disk as well and compared */
+#define BI_CACHE_COUNT   3                      /* nothing kept: INT 13h counted (the plan's C0) */
+#define BI_CACHE_PARAS   257                    /* 4,096 bytes for a block, 16 for its DAP */
 
 struct bootinfo {
     bi_u32 magic, version, size;
@@ -127,6 +144,13 @@ struct bootinfo {
     bi_u32 sound_rate;                          /* M8: [sound] rate = HZ (0: 22050) */
     bi_u32 sound_flags;                         /* M8: BI_SOUND_ */
     char cfg_path[80];                          /* M9: GLOS.CFG (beside GLOS.EXE), which the kernel keeps and writes */
+    /* version 5: the disk cache (docs/disk-cache.md) */
+    bi_u32 cache_mode;                          /* BI_CACHE_*: [cache] enabled, or /CACHE= */
+    bi_u32 cache_size_mb;                       /* [cache] size: 0 auto */
+    bi_u32 cache_paras;                         /* paragraphs kept after the resident stub: the block buffer */
+    bi_u32 smartdrv;                            /* 1 if SMARTDRV answered INT 2Fh 4A10h when GLOS started */
+    bi_u32 n_disks;
+    struct bi_disk disks[BI_DISKS];             /* the BIOS's hard disks, 80h on, as INT 13h describes them */
 };
 #define BI_SOUND_OFF 1u                         /* [sound] mixer = off: GLOS leaves the Sound Blaster to programs */
 #define BI_DISPLAY_NOACCEL 1u                   /* [display] accel = off: the CPU draws the desktop, on a Matrox card too */
@@ -135,7 +159,8 @@ struct bootinfo {
    Byte arrays and naturally aligned fields only: no compiler pads it. */
 struct stub_data {
     unsigned char mode, a20init, resident, nxms;        /* mode 1: XMS */
-    unsigned char shell, realmode, pad[2];              /* realmode: no kernel, EXEC path/tail forever */
+    unsigned char shell, realmode;                      /* realmode: no kernel, EXEC path/tail forever */
+    unsigned short extra_paras;                 /* kept after the stub when it goes resident (the cache's buffer) */
     bi_u32 xms;                                 /* far pointer: the XMS driver's entry */
     unsigned short handles[4];
     bi_u32 env_src;                             /* far pointer: the master environment to install */

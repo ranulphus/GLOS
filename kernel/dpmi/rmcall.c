@@ -19,6 +19,7 @@
 #include "agent.h"
 #include "app.h"
 #include "arch.h"
+#include "cache.h"
 #include "display.h"
 #include "dpmi.h"
 #include "kprintf.h"
@@ -56,6 +57,8 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
         return app_rm_call(from, r, kind, vec, words, nwords);
     if (depth >= NEST_MAX || (!dctx && !r->ss && !r->sp))
         return -1;                              /* (without a client, the caller gives a stack: sessions) */
+    if (vec == 0x13 && kind != RM_FAR && cache_int13(from, r, kind))
+        return 0;                               /* the disk cache's (0300h, a client's INT 13h reflected) */
     if (vec == 0x21 && kind != RM_FAR) {        /* the hooks first, on a frame in this function's own: below */
         struct trapframe t;                     /* `here` is the nested frame's place, 256 bytes down, which a */
         memset(&t, 0, sizeof t);                /* call made after would overwrite (the watches' did, M9) */
@@ -161,6 +164,7 @@ struct trapframe *rm_nest_frame(int d) { return d >= 1 && d <= depth ? nests[d -
    the call the VM thread made for it, app.c). */
 void rm_nest_end(int d)
 {
+    cache_nest_ended(d);                        /* (a disk cache call among them: the BIOS is free again) */
     depth = d;
     nest_leave(nests[d - 1].save, 2);
 }

@@ -132,3 +132,48 @@ u32 pmm_largest_run(const struct pmm *p)
     }
     return best;
 }
+
+/* The highest free frame (the disk cache's: its frames stay out of the way
+   of the runs taken from the bottom); 0 if none. */
+u32 pmm_take_high(struct pmm *p)
+{
+    u32 f = p->frames;
+    while (f--) {
+        if (!((f + 1) & 31) && p->bits[f / 32] == 0xFFFFFFFFu) {       /* a whole word in use */
+            f -= 31;
+            continue;
+        }
+        if (!is_used(p, f)) {
+            mark(p, f, 1, 1);
+            return f << 12;
+        }
+    }
+    return 0;
+}
+
+/* The lowest window of n frames that are free or, by also(), the disk
+   cache's to give back: its first frame's number, or FFFFFFFFh. */
+u32 pmm_window(const struct pmm *p, u32 n, int (*also)(u32 frame, void *arg), void *arg)
+{
+    u32 f, len = 0;
+    if (!n)
+        return 0xFFFFFFFFu;
+    for (f = 0; f < p->frames; f++) {
+        len = (!is_used(p, f) || also(f, arg)) ? len + 1 : 0;
+        if (len == n)
+            return f + 1 - n;
+    }
+    return 0xFFFFFFFFu;
+}
+
+/* The longest run of frames free or, by also(), the cache's to give back. */
+u32 pmm_longest(const struct pmm *p, int (*also)(u32 frame, void *arg), void *arg)
+{
+    u32 f, len = 0, best = 0;
+    for (f = 0; f < p->frames; f++) {
+        len = (!is_used(p, f) || also(f, arg)) ? len + 1 : 0;
+        if (len > best)
+            best = len;
+    }
+    return best;
+}

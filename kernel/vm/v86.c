@@ -15,6 +15,7 @@
 #include "glos/bootinfo.h"
 #include "agent.h"
 #include "app.h"
+#include "cache.h"
 #include "display.h"
 #include "dos.h"
 #include "dpmi.h"
@@ -147,7 +148,8 @@ int vm_unpost(struct vm_work *w)
 int vm_work_due(void)
 {
     struct vm_work *w = work;
-    return w && w->state == VW_POSTED && (vm.thread->vif || timer_ticks() - w->posted >= w->patience);
+    return w && w->state == VW_POSTED && (vm.thread->vif || timer_ticks() - w->posted >= w->patience)
+           && !cache_busy();                    /* (not inside an INT 13h the disk cache makes: §17.2) */
 }
 
 int vm_work_running(void) { return work && work->state == VW_RUNNING; }
@@ -266,6 +268,7 @@ void vm_direct(int on)
     }
     vm.direct = (u8)on;
     vm.pic.auto_eoi = (u8)on;
+    cache_direct(on);                           /* (its protected-mode code reaches the IDE ports untrapped) */
     vkbc_direct(on);
     vm_sync_mask();
 }
@@ -468,7 +471,8 @@ void vm_return(struct trapframe *tf)
     int vec;
     if (fpu_msw_dos != ~0u)
         fpu_msw_set(fpu_msw_dos);               /* a client's 0E01h EM is its own */
-    if (vm.kill_req && !vm_work_running())      /* (not into the work's real-mode call: it would never return) */
+    if (vm.kill_req && !vm_work_running() && !cache_busy())    /* (not into the work's real-mode call: it would never
+                                                   return; nor into the BIOS in the middle of a disk write) */
         vm_try_kill(tf, 0);
     if (work)
         vm_work_turn(tf);
@@ -511,6 +515,7 @@ static void vm_leave(u32 code)
         cpu_set_cr4(0, 1);
     sched_report();
     net_report();
+    cache_end();
     if (vm.bi->flags & BI_F_SELFTEST)
         selftest_report();
     kprintf("GLOS-VM leave code=%u ticks=%u gp=%u int=%u irq=%u spurious=%u\n", code, timer_ticks(), vm.n_gp,
@@ -544,8 +549,10 @@ static void vm_resident(u16 seg)
     vm.loader_psp = psp;
     vm.bi->cs_base = (u32)seg << 4;
     cpu_set_code16_base(vm.bi->cs_base);
-    kprintf("GLOS-VM resident psp=%04x stub=%u freed=%u\n", psp, (vm.bi->stub_paras + 0x10) * 16,
-            (end - psp - vm.bi->stub_paras - 0x10) * 16);
+    kprintf("GLOS-VM resident psp=%04x stub=%u freed=%u%s\n", psp, (vm.bi->stub_paras + 0x10) * 16,
+            (end - psp - vm.bi->stub_paras - vm.bi->cache_paras - 0x10) * 16, vm.bi->cache_paras ? " buffer=4112" : "");
+    if (vm.bi->cache_paras)                     /* the disk cache's block buffer, kept after the stub */
+        cache_resident(lo);
 }
 
 /* The stub's EXEC buffers (struct stub_data at offset 0 of its segment):
@@ -863,6 +870,28 @@ static int vbe_set(struct trapframe *tf, u32 next)
 /* A console job's program waits for a key at INT 16h (AH 0 or 10h) with none in the BIOS's buffer: apps' calls
    into the system VM are made meanwhile (M9; outside DOS, any but an EXEC or an end), and the INT is done again
    after a moment, so that the VM idles instead of spinning in the BIOS. 1 if so. */
+/* INT 13h, the disk cache's while it is on (kernel/drv/cache.c): made as vbe_set makes a mode set, on the
+   program's stack; 1 if the cache made it. */
+static int int13(struct trapframe *tf, u32 next)
+{
+    struct rmregs r;
+    memset(&r, 0, sizeof r);
+    r.eax = tf->eax, r.ebx = tf->ebx, r.ecx = tf->ecx, r.edx = tf->edx;
+    r.esi = tf->esi, r.edi = tf->edi, r.ebp = tf->ebp;
+    r.ds = (u16)tf->v86_ds, r.es = (u16)tf->v86_es, r.fs = (u16)tf->v86_fs, r.gs = (u16)tf->v86_gs;
+    r.ss = (u16)tf->ss;
+    r.sp = (u16)tf->esp;
+    r.flags = (u16)flags_image(tf);
+    if (!cache_int13(0, &r, RM_INT))
+        return 0;
+    tf->eax = r.eax, tf->ebx = r.ebx, tf->ecx = r.ecx, tf->edx = r.edx;
+    tf->esi = r.esi, tf->edi = r.edi, tf->ebp = r.ebp;
+    tf->v86_ds = r.ds, tf->v86_es = r.es;
+    tf->eflags = (tf->eflags & ~FL_ARITH) | (r.flags & FL_ARITH);
+    tf->eip = next;
+    return 1;
+}
+
 static int key_wait(struct trapframe *tf, u32 at)
 {
     u32 ah = (tf->eax >> 8) & 0xFF;
@@ -900,6 +929,10 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next, u32 at)
         break;
     case 0x15:
         if (vm_int15(tf, next))
+            return;
+        break;
+    case 0x13:
+        if (int13(tf, next))
             return;
         break;
     case 0x29:

@@ -79,7 +79,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
+.PHONY: loopa-cache sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -103,6 +103,7 @@ TINYSSH_SRCS := $(filter-out %_lib25519.c %_lib1305.c,$(wildcard third_party/tin
 SSHC_SRCS := sdk/sshc/sshc.c sdk/sshc/keys.c sdk/sshc/sftpc.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c
 SSHC_FLAGS := -Iinclude -Ikernel/ssh -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint
 HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:kernel/vm/v86dec.c \
+              cache_test:kernel/drv/cstore.c \
               vpic_test:kernel/vm/vpic.c png_test:kernel/lib/png.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
@@ -244,6 +245,7 @@ build/ow/dos/$(1).EXE: tests/dos/$(2).c
 endef
 $(eval $(call dos_test,HOSTILE,hostile))
 $(eval $(call dos_test,XMSTEST,xmstest))
+$(eval $(call dos_test,XMSBIG,xmsbig))
 $(eval $(call dos_test,ECHOARGS,echoargs))
 $(eval $(call dos_test,CLOCKCHK,clockchk))
 $(eval $(call dos_test,CONIN,conin))
@@ -267,7 +269,7 @@ build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
 	$(Q)$(OWENV) $(OWBIN)/wasm -q -fpi87 -fo=build/ow/dos/obj/dpmi16a.obj tests/dos/dpmi16/dpmi16a.asm
 	$(Q)$(WLINK) system dos option quiet option stack=4k name $@ \
 	  file build/ow/dos/obj/dpmi16.obj,build/ow/dos/obj/dpmi16a.obj
-DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
+DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/XMSBIG.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
              build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
              build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/CLOCKCHK.EXE
 dos-tests: $(DOS_TESTS)
@@ -287,7 +289,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh \
            -Ithird_party/mgahal/hal/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c kernel/core/main.c kernel/core/timer.c \
-         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
+         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
          kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
          kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
          kernel/ssh/sshd.c \
@@ -371,6 +373,9 @@ loopa-sched: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py sched -j $(JOBS)
 loopa-mem: all check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py mem -j $(JOBS)
+# The disk cache (docs/disk-cache.md C3): needs MGA-Glide's run.py --scratch-hdd.
+loopa-cache: all dos-tests build/dj/DSKTORT.EXE build/dj/DISKRD.EXE build/dj/LAZYCHK.EXE check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py cache -j $(JOBS)
 loopa-shell: all check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py shell -j $(JOBS)
 loopa-net: all check-deps
@@ -741,6 +746,16 @@ build/dj/AUDTEST.EXE: tests/dos/audtest.c build/sdk/libglos.a tools/glosmark.py
 	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a -lm
 	$(Q)python3 tools/glosmark.py $@
 build/dj/DIRTEST.EXE: tests/dos/dirtest.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+# How fast a DJGPP program reads the disk (docs/disk-cache.md: the bench's numbers, the cache suite).
+build/dj/DISKRD.EXE: tests/dos/diskrd.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O2 -Wall -Werror -o $@ $<
+# The disk cache's torture test (docs/disk-cache.md C3), on run.py --scratch-hdd's blank disk.
+build/dj/DSKTORT.EXE: tests/dos/dsktort.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<

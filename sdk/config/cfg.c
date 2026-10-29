@@ -8,7 +8,7 @@
 
 /* ---- the schema */
 
-const char *const cfg_sections[] = { "display", "input", "sound", "net", "time", "vnc", "desktop", "shell", "open",
+const char *const cfg_sections[] = { "display", "input", "sound", "net", "time", "cache", "vnc", "desktop", "shell", "open",
                                      "program",
                                      0 };
 
@@ -50,6 +50,12 @@ const struct cfg_key cfg_schema[] = {
       "Where the PC is, as a POSIX TZ string: GMT0BST,M3.5.0/1,M10.5.0 is the United Kingdom's" },
     { "time", "interval", CFG_NUMBER, CFG_NOW, 1, 168, 0, "24", "&Ask again (hours)",
       "How often the time server is asked again" },
+    /* [cache]: the disk cache (docs/disk-cache.md) */
+    { "cache", "enabled", CFG_CHOICE, CFG_NOW, 0, 0, "on|off|verify|count", "off", "&Disk cache",
+      "GLOS keeps what DOS reads from the hard disks in spare memory; verify also reads the disk and compares, count "
+      "keeps nothing and counts. Its 4 KB block buffer comes with GLOS's next start" },
+    { "cache", "size", CFG_NUMBER, CFG_NOW, 1, 2048, "auto", "auto", "Cache &size (MB)",
+      "At most this much memory; auto: all that is spare, given back the moment anything needs it" },
     /* [vnc] (M10 step F) */
     { "vnc", "enable", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "off", "&Viewers through SSH",
       "A VNC viewer may see and use the desktop, through an SSH tunnel to port 5900 (ssh -L): whoever may log in" },

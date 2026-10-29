@@ -4,6 +4,7 @@
  * milestones-m0-m4.md M1). */
 #include "glos/bootinfo.h"
 #include "arch.h"
+#include "cache.h"
 #include "clock.h"
 #include "desk.h"
 #include "display.h"
@@ -117,6 +118,7 @@ void kmain(struct bootinfo *loader_bi)
         desk_init();
         kcfg_init(bi);                          /* GLOS.CFG, read and kept by the kernel (M9) */
         pci_scan();
+        cache_init(bi);                         /* the disk cache: its drives, the IDE ports it watches */
         if (nic_probe() == 0) {
             sshd_start(bi);                     /* before the net thread, which listens for it */
             net_start(bi->flags & BI_F_SELFTEST);

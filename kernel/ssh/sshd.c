@@ -16,6 +16,7 @@
 #include "glos/bootinfo.h"
 #include "glos/tz.h"
 #include "agent.h"
+#include "cache.h"
 #include "clip.h"
 #include "clock.h"
 #include "glos/config.h"
@@ -940,8 +941,8 @@ static u32 stat_line(char *b, u32 max)
     n += (u32)ksnprintf(b + n, max - n, "{\"ticks\":%u,\"hz\":1024,\"caught_up\":%u,\"threads\":{", timer_ticks(),
                         timer_caught_up());
     n += sched_stat(b + n, max - n);
-    n += (u32)ksnprintf(b + n, max - n, "},\"mem\":{\"total_kb\":%u,\"free_kb\":%u,\"heap_kb\":%u},\"irq\":[",
-                        pmm_total_frames() * 4, pmm_free_frames() * 4, kheap_bytes() / 1024);
+    n += (u32)ksnprintf(b + n, max - n, "},\"mem\":{\"total_kb\":%u,\"free_kb\":%u,\"heap_kb\":%u,\"cache_kb\":%u},"
+                        "\"irq\":[", pmm_total_frames() * 4, mm_avail_frames() * 4, kheap_bytes() / 1024, cache_kb());
     for (i = 0; i < 16; i++)
         n += (u32)ksnprintf(b + n, max - n, "%s%u", i ? "," : "", cpu_irq_count((int)i));
     n += (u32)ksnprintf(b + n, max - n, "],\"vm\":{\"gp\":%u,\"int\":%u,\"irq\":%u},\"net\":", vm.n_gp, vm.n_int, vm.n_irq);
@@ -1092,11 +1093,11 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             n = net_stat(b, 4096, 0);
         } else {                                /* glos mem: where the memory GLOS has is */
             n = (u32)ksnprintf(b, 4096, "memory total_kb=%u free_kb=%u\nkernel image_kb=%u heap_kb=%u heap_max_kb=%u\n",
-                               pmm_total_frames() * 4, pmm_free_frames() * 4, kernel_bytes() / 1024, kheap_bytes() / 1024,
-                               HEAP_MAX / 1024);
+                               pmm_total_frames() * 4, mm_avail_frames() * 4, kernel_bytes() / 1024, kheap_bytes() / 1024,
+                               HEAP_MAX / 1024);       /* (free: what can be had, the disk cache's frames too) */
             n += (u32)ksnprintf(b + n, 4096 - n, "dpmi ");
             n += dpmi_stat(b + n, 4096 - n);
-            n += (u32)ksnprintf(b + n, 4096 - n, "\n");
+            n += (u32)ksnprintf(b + n, 4096 - n, "\ncache kb=%u\n", cache_kb());
         }
         ssh_chan_write(ch, 0, (const uint8_t *)b, n);
         kfree(b);
@@ -1146,6 +1147,20 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
     } else if (!strcmp(cmd, "glos config") || !strncmp(cmd, "glos config ", 12)) {
         config_cmd(ch, cmd + 11);
+    } else if (!strcmp(cmd, "glos cache") || !strcmp(cmd, "glos cache drop") || !strcmp(cmd, "glos cache lbas")) {
+        char *b = kmalloc(8192);                /* the disk cache (kernel/drv/cache.c): its numbers as a line of JSON; */
+        u32 n;                                  /* drop: every block first (cold timings without a reboot); lbas: */
+        if (!b) {                               /* count mode's sectors */
+            say(ch, 1, "glos: no memory\n");
+            ssh_chan_exit(ch, 1);
+            return 0;
+        }
+        if (cmd[10] == ' ' && cmd[11] == 'd')
+            cache_drop("command");
+        n = cmd[10] == ' ' && cmd[11] == 'l' ? cache_lbas(b, 8192) : cache_stat(b, 8192);
+        ssh_chan_write(ch, 0, (const uint8_t *)b, n);
+        kfree(b);
+        ssh_chan_exit(ch, 0);
     } else if (!strcmp(cmd, "glos time")) {
         char b[400];
         clock_text(b, sizeof b);

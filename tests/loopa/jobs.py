@@ -381,6 +381,155 @@ def mem(profile, boot):
         "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+
+CACHE_FILES = ["--file", "build/dj/DSKTORT.EXE=/TEST/DSKTORT.EXE", "--file", "build/dj/DISKRD.EXE=/TEST/DISKRD.EXE",
+               "--file", "build/dj/LAZYCHK.EXE=/TEST/LAZYCHK.EXE", "--file", "build/ow/dos/XMSBIG.EXE=/TEST/XMSBIG.EXE"]
+
+
+def cache(profile, boot):
+    """The disk cache (docs/disk-cache.md C3), on a blank scratch disk (MGA-Glide run.py --scratch-hdd):
+    DSKTORT (random reads and writes by CHS and LBA, from V86 code and from protected mode, sectors written
+    through the IDE ports behind the BIOS's back, DOS files, a C: file read raw through FAT16) under plain
+    DOS and under GLOS with the cache off, on and verifying: every run right, the same digest of what each call
+    returned, no mismatch; again with a 1 MB cache (evictions); the cache filled, then LAZYCHK (DPMI memory
+    touched page by page) and XMSBIG (XMS's largest block, a run) get their memory back from it; a direct-mode
+    session (its ports untrapped) bypasses it and drops it at its end; P7 with the cache on (8 KB); and in agent
+    mode glos cache, glos stat and glos mem, and the mode changed live by glos config."""
+    import json
+    import time
+    tag = "%s-%s" % (profile, boot)
+    ops = 2000 if profile == "bf6" else 600
+    t = "C:\\TEST\\DSKTORT.EXE 81 %d %d 170"
+    g = "C:\\TEST\\GLOS.EXE "
+    common = ["--machine", profile, "--boot-cfg", boot, "--scratch-hdd", "64", "--timeout", "2400", "--idle", "900"] \
+        + GLOS_FILES + CACHE_FILES
+    checks = {}
+
+    def files(name):
+        d = os.path.join(ROOT, "out", name, "files")
+        return {f: open(os.path.join(d, f), "rb").read().decode("latin-1").replace("\r", "")
+                for f in (os.listdir(d) if os.path.isdir(d) else [])}
+
+    def tort(text):
+        m = re.search(r"DSKTORT ops=(\d+) bad=(\d+) pio=(\d+) files=(\d+) cross=(\w+) digest=(\w+) ok=(\d)", text)
+        return m.groups() if m else None
+
+    # Four ways, one seed: plain DOS, GLOS with the cache off, on, verifying.
+    st, serial = run("cache-tort-" + tag, common + [
+        "--cmd", "VECCHK save", "--cmd", (t % (1, ops)) + " > C:\\OUT\\P.TXT",
+        "--cmd", g + "/CACHE=OFF /RUN " + (t % (1, ops)) + " > C:\\OUT\\OFF.TXT",
+        "--cmd", g + "/CACHE=ON /RUN " + (t % (1, ops)) + " > C:\\OUT\\ON.TXT",
+        "--cmd", g + "/CACHE=VERIFY /RUN " + (t % (1, ops)) + " > C:\\OUT\\VER.TXT",
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"])
+    f = files("cache-tort-" + tag)
+    r = {k: tort(f.get(k + ".TXT", "")) for k in ("P", "OFF", "ON", "VER")}
+    ends = re.findall(r"GLOS-CACHE end mode=(\w+) hits=(\d+) .* drops=(\d+) reclaims=\d+ mismatches=(\d+)", serial)
+    checks["tort"] = st == "PASS" and all(v and v[6] == "1" and v[4] == "ok" for v in r.values())
+    checks["digest"] = all(r.values()) and len({v[5] for v in r.values()}) == 1
+    checks["tort-cache"] = [e[0] for e in ends] == ["on", "verify"] and all(int(e[1]) > 0 and int(e[2]) > 0
+                                                                            and e[3] == "0" for e in ends)
+    checks["tort-clean"] = serial.count("GLOS-EXIT code=0") == 3 and "GLOS-PANIC" not in serial \
+        and "GLOS-WARN" not in serial and "HX-VECCHK ok" in serial
+
+    # A 1 MB cache: blocks evicted all the time, nothing wrong; then the cache filled, and given back.
+    cfg = batfile("cache-mem-%s/GLOS.CFG" % tag, ["; jobs.py cache", "[cache]", "size = 1"])
+    st2, s2 = run("cache-small-" + tag, common + ["--file", cfg + "=/TEST/GLOS.CFG",
+        "--cmd", g + "/CACHE=ON /RUN " + ("C:\\TEST\\DSKTORT.EXE 81 2 %d 0" % ops) + " > C:\\OUT\\SM.TXT",
+        "--cmd", "DEL C:\\TEST\\GLOS.CFG",
+        "--cmd", g + "/CACHE=OFF /RUN " + ("C:\\TEST\\DSKTORT.EXE 81 2 %d 0" % ops) + " > C:\\OUT\\SMOFF.TXT",
+        "--cmd", "SERSAY HX-DONE 0"])
+    f2 = files("cache-small-" + tag)
+    a, b = tort(f2.get("SM.TXT", "")), tort(f2.get("SMOFF.TXT", ""))
+    e2 = re.search(r"GLOS-CACHE end mode=on .* kb=(\d+)", s2)
+    checks["small"] = st2 == "PASS" and bool(a and b) and a[6] == "1" and b[6] == "1" and a[5] == b[5] \
+        and bool(e2) and int(e2.group(1)) <= 1024 and "kb_max=1024" in s2
+    fill = batfile("cache-mem-%s/FILL.BAT" % tag, ["@ECHO OFF"] + [
+        "C:\\TEST\\DISKRD.EXE C:\\TEST\\GLOSK.BIN %d > C:\\OUT\\R%d.TXT" % (lba, i)
+        for i, lba in enumerate((0, 32768, 65536))] + ["C:\\TEST\\LAZYCHK.EXE", "C:\\TEST\\XMSBIG.EXE"])
+    st3, s3 = run("cache-mem-" + tag, common + ["--file", fill + "=/TEST/FILL.BAT",
+        "--cmd", g + "/CACHE=ON /RUN %COMSPEC% /C C:\\TEST\\FILL.BAT", "--cmd", "SERSAY HX-DONE 0"])
+    m = re.search(r"HX-LAZY largest=(\d+) first=(\d) second=(\d) zero=(\d) kept=(\d) huge=(\d)", s3)
+    x = re.search(r"HX-XMSBIG largest=(\d+) total=(\d+) alloc=(\S+) moved=(\w+)", s3)
+    e3 = re.search(r"GLOS-CACHE end mode=on .* reclaims=(\d+) mismatches=0", s3)
+    checks["memory"] = st3 == "PASS" and bool(m) and m.groups()[1:] == ("1", "1", "1", "1", "0") \
+        and int(m.group(1)) > 32768 and bool(x) and x.group(3) == "ok" and x.group(4) == "ok" \
+        and bool(e3) and int(e3.group(1)) > 0 and "GLOS-PANIC" not in s3
+
+    # A direct-mode session: the cache stands aside, and drops everything when it ends.
+    dcfg = batfile("cache-direct-%s/GLOS.CFG" % tag, ["; jobs.py cache", "[cache]", "enabled = on",
+                                                      "[program DSKTORT.EXE]", "direct = 1"])
+    st4, s4 = run("cache-direct-" + tag, common + ["--file", dcfg + "=/TEST/GLOS.CFG",
+        "--cmd", g + "/RUN " + ("C:\\TEST\\DSKTORT.EXE 81 3 %d 170" % (ops // 4)) + " > C:\\OUT\\D.TXT",
+        "--cmd", "SERSAY HX-DONE 0"])
+    d = tort(files("cache-direct-" + tag).get("D.TXT", ""))
+    checks["direct"] = st4 == "PASS" and bool(d) and d[6] == "1" and "GLOS-CACHE drop reason=direct" in s4 \
+        and "GLOS-CACHE start mode=on" in s4
+
+    # P7 with the cache on: GLOS's own memory, block buffer included, 8 KB or less.
+    st5, s5 = run("cache-p7-" + tag, ["--machine", profile, "--boot-cfg", boot] + GLOS_FILES + [
+        "--cmd", "MEM /C > C:\\OUT\\BASE.TXT", "--cmd", g + "/CACHE=ON /RUN MEM /C > C:\\OUT\\GLOS.TXT",
+        "--cmd", "SERSAY HX-DONE 0"])
+    f5 = files("cache-p7-" + tag)
+    own = re.search(r"^\s*GLOS\s+([\d,]+)", f5.get("GLOS.TXT", ""), re.M)
+    own = int(own.group(1).replace(",", "")) if own else -1
+
+    def largest(text):
+        q = re.search(r"Largest executable program size\s+\d+K \(([\d,]+) bytes\)", text)
+        return int(q.group(1).replace(",", "")) if q else -1
+    lb, lg = largest(f5.get("BASE.TXT", "")), largest(f5.get("GLOS.TXT", ""))
+    checks["p7"] = st5 == "PASS" and 4096 < own <= 8192 and lb > 0 and lg > 0 and lb - lg <= 8192 \
+        and "buffer=4112" in s5
+
+    # Agent mode: the commands, and the mode changed live.
+    acfg = batfile("cache-agent-%s/GLOS.CFG" % tag, ["; jobs.py cache", "[cache]", "enabled = on", "[time]",
+                                                     "sntp = off"])
+    agent = Agent("cache-agent-" + tag, profile, "ne2kpci" if profile == "bf6" else "ne2k", [
+        "--boot-cfg", boot, "--scratch-hdd", "64", "--file", acfg + "=/TEST/GLOS.CFG"] + CACHE_FILES + [
+        "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1500)
+
+    def js():
+        rc, out, _ = agent.ssh("glos cache")
+        try:
+            return json.loads(out) if rc == 0 else {}
+        except ValueError:
+            return {}
+    try:
+        if agent.listening():
+            j0 = js()
+            agent.ssh("C:\\TEST\\DISKRD.EXE C:\\TEST\\GLOSK.BIN 0")
+            agent.ssh("C:\\TEST\\DISKRD.EXE C:\\TEST\\GLOSK.BIN 0")
+            j1 = js()
+            rc, st_out, _ = agent.ssh("glos stat")
+            rc2, mem_out, _ = agent.ssh("glos mem")
+            checks["agent-on"] = j0.get("mode") == "on" and j0.get("buffer") == 4096 and j1.get("hits", 0) > 0 \
+                and json.loads(st_out)["mem"]["cache_kb"] > 0 and re.search(r"\ncache kb=[1-9]", mem_out) is not None
+            agent.ssh("glos config set cache enabled verify")
+            agent.ssh("C:\\TEST\\DISKRD.EXE C:\\TEST\\GLOSK.BIN 0")
+            j2 = js()
+            agent.ssh("glos config set cache enabled count")
+            agent.ssh("C:\\TEST\\DISKRD.EXE C:\\TEST\\GLOSK.BIN 0")
+            rc, lbas, _ = agent.ssh("glos cache lbas")
+            agent.ssh("glos config set cache enabled off")
+            j3 = js()
+            agent.ssh("glos config set cache enabled on")
+            rc4, _, _ = agent.ssh("glos cache drop")
+            j4 = js()
+            rc5, mem7, _ = agent.ssh("MEM /C")
+            own7 = re.search(r"^\s*GLOS\s+([\d,]+)", mem7, re.M)
+            checks["agent-modes"] = j2.get("mode") == "verify" and j2.get("mismatches") == 0 \
+                and re.match(r"sectors=[1-9]\d* distinct=[1-9]", lbas) is not None and j3.get("mode") == "off" \
+                and rc4 == 0 and j4.get("mode") == "on" and j4.get("blocks") == 0
+            checks["agent-p7"] = bool(own7) and int(own7.group(1).replace(",", "")) <= 8192
+        agent.ssh("glos exit")
+    except (subprocess.TimeoutExpired, KeyError, ValueError):
+        checks["agent"] = False
+    text = agent.wait()
+    checks["agent-clean"] = "GLOS-EXIT code=0" in text and "GLOS-PANIC" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s digest=%s ops=%d%s" % ("cache-" + tag, "PASS" if not bad else "FAIL",
+                                             r["ON"][5] if r.get("ON") else "-", ops,
+                                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
 SHCON = ["@ECHO OFF", "SERSAY HX-SHELL console var=%GLOSVAR% comspec=%COMSPEC%", "MEM /C > C:\\OUT\\SHELL.TXT",
          "SERSAY HX-DONE 0", "UTEXIT 0"]
 
@@ -5455,7 +5604,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -5592,6 +5741,9 @@ def main():
         return 0 if all(r[1] for r in matrix(shell, combos, a.jobs)) else 1
     if a.suite == "mem":
         return 0 if all(r[1] for r in matrix(mem, combos, a.jobs)) else 1
+    if a.suite == "cache":                      # (bf6 with HIMEMX and the 486 raw, unless asked)
+        cc = combos if (a.profile or a.boot) else [("bf6", "himemx"), ("486dx2", "default")]
+        return 0 if all(r[1] for r in matrix(cache, cc, a.jobs)) else 1
     if a.suite == "sched":
         return 0 if all(r[1] for r in matrix(lambda p, b: m2(p, b, True), combos, a.jobs)) else 1
     if a.suite == "hostile":

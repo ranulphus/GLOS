@@ -104,7 +104,7 @@ int phys_copy(u32 dst, u32 src, u32 len)
 
 static u32 free_frames(void)
 {
-    u32 f = pmm_free_frames();
+    u32 f = mm_avail_frames();                  /* (the disk cache's frames too: it gives them back) */
     return f > RESERVE ? f - RESERVE : 0;
 }
 

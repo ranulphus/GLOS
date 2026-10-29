@@ -381,8 +381,19 @@ static void kernel_path(char *out, const char *argv0)
     strcpy(out + n, "GLOSK.BIN");
 }
 
+/* [cache] enabled's words, and /CACHE='s: BI_CACHE_*, or -1. */
+static int cache_word(const char *v)
+{
+    if (!stricmp(v, "off")) return BI_CACHE_OFF;
+    if (!stricmp(v, "on")) return BI_CACHE_ON;
+    if (!stricmp(v, "verify")) return BI_CACHE_VERIFY;
+    if (!stricmp(v, "count")) return BI_CACHE_COUNT;
+    return -1;
+}
+
 /* A flag that only sets a bootinfo bit: from the command line, or GLOS.CFG's
-   [shell] options (a SHELL= line has no room for them). */
+   [shell] options (a SHELL= line has no room for them). /CACHE=ON|OFF|VERIFY|COUNT
+   overrides [cache] enabled (the tests' runs with the cache on and off). */
 static int flag_arg(const char *a)
 {
     if (!stricmp(a, "/ROUNDTRIP")) bi.flags |= BI_F_ROUNDTRIP;
@@ -393,6 +404,7 @@ static int flag_arg(const char *a)
     else if (!stricmp(a, "/DPMITRACE")) bi.flags |= BI_F_DPMITRACE;
     else if (!stricmp(a, "/DIRECT")) bi.flags |= BI_F_DIRECT;
     else if (!stricmp(a, "/VERBOSE")) bi.flags |= BI_F_VERBOSE;
+    else if (!strnicmp(a, "/CACHE=", 7) && cache_word(a + 7) >= 0) bi.cache_mode = (unsigned long)cache_word(a + 7);
     else return 0;
     return 1;
 }
@@ -400,6 +412,69 @@ static int flag_arg(const char *a)
 static void opt_str(char *dst, unsigned n, const char *v);
 
 static char cfg_blaster[48];                    /* [sound] blaster = ..., in place of the environment's BLASTER */
+
+/* The BIOS's hard disks (INT 13h 08h, 41h, 48h; the count at 0040:0075) and
+   whether SMARTDRV is there (INT 2Fh 4A10h): the disk cache's (bootinfo v5).
+   Read only; ES:DI zero for 08h, as some BIOSes want. */
+static void disks_probe(void)
+{
+    static unsigned char p48[30];
+    union REGS r;
+    struct SREGS sr;
+    unsigned n = *(unsigned char __far *)MK_FP(0x40, 0x75), i, fl;
+    struct bi_disk *d;
+
+    memset(&r, 0, sizeof r);
+    r.x.ax = 0x4A10;
+    int86(0x2F, &r, &r);
+    bi.smartdrv = r.x.ax == 0xBABE;
+    for (i = 0; i < n && bi.n_disks < BI_DISKS; i++) {
+        d = &bi.disks[bi.n_disks];
+        segread(&sr);
+        memset(&r, 0, sizeof r);
+        sr.es = 0;
+        r.h.ah = 0x08;
+        r.h.dl = (unsigned char)(0x80 + i);
+        int86x(0x13, &r, &r, &sr);
+        if (r.x.cflag || !(r.h.cl & 63))
+            continue;
+        d->dl = 0x80 + i;
+        d->cyls = (unsigned long)(r.h.ch | ((r.h.cl & 0xC0) << 2)) + 1;
+        d->heads = (unsigned long)r.h.dh + 1;
+        d->spt = r.h.cl & 63;
+        d->sectors_lo = d->cyls * d->heads * d->spt;
+        d->sectors_hi = 0;
+        d->bps = 512;
+        d->flags = 0;
+        memset(&r, 0, sizeof r);
+        r.h.ah = 0x41;
+        r.x.bx = 0x55AA;
+        r.h.dl = (unsigned char)d->dl;
+        int86(0x13, &r, &r);
+        if (!r.x.cflag && r.x.bx == 0xAA55 && (r.x.cx & 1)) {
+            d->flags |= BI_DISK_EDD;
+            memset(p48, 0, sizeof p48);
+            *(unsigned *)p48 = 0x1A;
+            segread(&sr);
+            memset(&r, 0, sizeof r);
+            r.h.ah = 0x48;
+            r.h.dl = (unsigned char)d->dl;
+            sr.ds = FP_SEG((void __far *)p48);
+            r.x.si = FP_OFF((void __far *)p48);
+            int86x(0x13, &r, &r, &sr);
+            fl = *(unsigned *)(p48 + 2);
+            if (!r.x.cflag && (*(unsigned long *)(p48 + 16) || *(unsigned long *)(p48 + 20))) {
+                d->flags |= BI_DISK_PARAMS | ((fl & 4) ? BI_DISK_REMOVE : 0);
+                d->sectors_lo = *(unsigned long *)(p48 + 16);
+                d->sectors_hi = *(unsigned long *)(p48 + 20);
+                d->bps = *(unsigned *)(p48 + 24);
+            }
+        }
+        say("GLOS-BOOT disk dl=%02lx chs=%lu/%lu/%lu sectors=%lu bps=%lu flags=%lx", d->dl, d->cyls, d->heads, d->spt,
+            d->sectors_lo, d->bps, d->flags);
+        bi.n_disks++;
+    }
+}
 
 static int glos_main(int argc, char **argv)
 {
@@ -607,6 +682,10 @@ static int glos_main(int argc, char **argv)
     bi.int2f_off = stub_off(glos_int2f);
     bi.detached_off = stub_off(glos_detached);
     bi.stub_paras = (stub_off(stub_end) + 15) >> 4;
+    disks_probe();                              /* the disk cache's block buffer (4 KB and its DAP) is kept after */
+    bi.cache_paras = (bi.cache_mode == BI_CACHE_ON || bi.cache_mode == BI_CACHE_VERIFY) && !bi.smartdrv
+                     && bi.n_disks ? BI_CACHE_PARAS : 0;        /* the stub when it goes resident (P7: 8 KB) */
+    stub_data.extra_paras = (unsigned short)bi.cache_paras;
     stub_data.mode = bi.mode == BI_MODE_XMS;
     stub_data.a20init = (unsigned char)bi.a20_initial;
     stub_data.xms = far_addr((const void __far *)xms);
@@ -720,7 +799,7 @@ static void read_cfg(const char *argv0, int shell_keys)
     char line[160], path[128], *k, *v, *e;
     const char *slash = strrchr(argv0, '\\');
     size_t n = slash ? (size_t)(slash - argv0 + 1) : 0;
-    int in_shell = 0, in_net = 0, in_display = 0, in_sound = 0;
+    int in_shell = 0, in_net = 0, in_display = 0, in_sound = 0, in_cache = 0;
     struct bi_profile *prof = NULL;
     char sec[24], why[64];
     const struct cfg_key *ck;
@@ -744,6 +823,7 @@ static void read_cfg(const char *argv0, int shell_keys)
             in_net = !strnicmp(k, "[net]", 5);
             in_display = !strnicmp(k, "[display]", 9);
             in_sound = !strnicmp(k, "[sound]", 7);
+            in_cache = !strnicmp(k, "[cache]", 7);
             prof = NULL;
             if (!strnicmp(k, "[program", 8) && (e = strchr(k, ']')) != NULL) {
                 *e = 0;
@@ -753,7 +833,7 @@ static void read_cfg(const char *argv0, int shell_keys)
             }
             continue;
         }
-        if ((!in_shell && !prof && !in_net && !in_display && !in_sound) || !(v = strchr(k, '=')))
+        if ((!in_shell && !prof && !in_net && !in_display && !in_sound && !in_cache) || !(v = strchr(k, '=')))
             continue;
         for (e = v; e > k && (e[-1] == ' ' || e[-1] == '\t'); e--) ;
         *e = 0;
@@ -795,6 +875,16 @@ static void read_cfg(const char *argv0, int shell_keys)
                 strcpy(cfg_blaster, v);
             else
                 say("GLOS-WARN cfg-key section=sound key=%s", k);
+            continue;
+        }
+        if (in_cache) {                         /* enabled = on | off | verify | count; size = auto | MB (the disk
+                                                   cache, docs/disk-cache.md: the block buffer is kept at start) */
+            if (!stricmp(k, "enabled") && cache_word(v) >= 0)
+                bi.cache_mode = (unsigned long)cache_word(v);
+            else if (!stricmp(k, "size"))
+                bi.cache_size_mb = !stricmp(v, "auto") ? 0 : (unsigned long)atol(v);
+            else
+                say("GLOS-WARN cfg-key section=cache key=%s", k);
             continue;
         }
         if (in_net) {                           /* hostname = NAME: for mDNS (NAME.local) and DHCP */

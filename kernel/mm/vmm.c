@@ -10,6 +10,7 @@
 #include "glos/bootinfo.h"
 #include "io.h"
 #include "kprintf.h"
+#include "cache.h"
 #include "mm.h"
 
 #define PTE_P 1u
@@ -28,6 +29,7 @@ static u32 kpt_dma[1024] __attribute__((aligned(4096)));
 static u32 kpt_fb[FB_MAX >> 22][1024] __attribute__((aligned(4096)));
 static u32 kpt_win[WIN_MAX >> 22][1024] __attribute__((aligned(4096)));
 static u32 kpt_dev[DEV_MAX >> 22][1024] __attribute__((aligned(4096)));
+static u32 kpt_cache[CACHE_MAX >> 22][1024] __attribute__((aligned(4096)));
 static u32 win_used[(WIN_MAX >> 12) / 32];      /* a bit a page of the windows' region */
 static u32 frame_bits[MAX_FRAMES / 32];
 static struct pmm pmm;
@@ -44,16 +46,52 @@ u32 mm_cr3(void) { return kernel_phys(kpd); }
 #define LOCKED(type, expr) do { u32 f_ = irq_save(); type r_ = (expr); irq_restore(f_); return r_; } while (0)
 #define LOCKED_V(stmt) do { u32 f_ = irq_save(); stmt; irq_restore(f_); } while (0)
 
-u32 pmm_alloc(void) { LOCKED(u32, pmm_take(&pmm)); }
+/* The disk cache holds frames nobody else wants and gives them back the
+   moment anything needs one (docs/disk-cache.md): a single frame, its
+   coldest block's; a run, the blocks in the lowest window that would make
+   one. With interrupts off, as everything here. */
+static u32 take1(void)
+{
+    u32 r = pmm_take(&pmm);
+    if (!r && cache_reclaim(1))
+        r = pmm_take(&pmm);
+    return r;
+}
+
+static u32 take_run(u32 n)
+{
+    u32 r = pmm_take_run(&pmm, n), w;
+    if (!r && n && cache_frames() && (w = pmm_window(&pmm, n, cache_frame_evictable, 0)) != 0xFFFFFFFFu) {
+        cache_evict_frames(w, n);
+        r = pmm_take_run(&pmm, n);
+    }
+    return r;
+}
+
+static int take_at(u32 phys, u32 n)
+{
+    u32 f = phys >> 12, i;
+    if (pmm_take_at(&pmm, phys, n) == 0)
+        return 0;
+    for (i = 0; i < n && f + i < pmm.frames; i++)
+        if (cache_frame_evictable(f + i, 0))
+            cache_evict_frames(f + i, 1);
+    return pmm_take_at(&pmm, phys, n);
+}
+
+u32 pmm_alloc(void) { LOCKED(u32, take1()); }
 void pmm_free(u32 phys) { LOCKED_V(pmm_give(&pmm, phys)); }
 u32 pmm_free_frames(void) { return pmm.free; }
+u32 mm_avail_frames(void) { return pmm.free + cache_frames(); }
+u32 pmm_frames(void) { return pmm.frames; }
+u32 pmm_alloc_high(u32 keep) { LOCKED(u32, pmm.free > keep ? pmm_take_high(&pmm) : 0); }
 u32 pmm_total_frames(void) { return given; }
 u32 kheap_bytes(void) { return kheap.size; }
 u32 kernel_bytes(void) { return (u32)__kernel_end - (u32)__kernel_start; }
-u32 pmm_alloc_run(u32 n) { LOCKED(u32, pmm_take_run(&pmm, n)); }
-int pmm_claim(u32 phys, u32 n) { LOCKED(int, pmm_take_at(&pmm, phys, n)); }
+u32 pmm_alloc_run(u32 n) { LOCKED(u32, take_run(n)); }
+int pmm_claim(u32 phys, u32 n) { LOCKED(int, take_at(phys, n)); }
 void pmm_free_run(u32 phys, u32 n) { LOCKED_V(pmm_give_run(&pmm, phys, n)); }
-u32 pmm_largest(void) { LOCKED(u32, pmm_largest_run(&pmm)); }
+u32 pmm_largest(void) { LOCKED(u32, cache_frames() ? pmm_longest(&pmm, cache_frame_evictable, 0) : pmm_largest_run(&pmm)); }
 
 /* V86 code runs at CPL 3: the identity map of 0-10FFFFh becomes user pages
    (supervisor.md §4). Nothing of the kernel's is in them. */
@@ -243,10 +281,10 @@ void *mm_win_alloc(u32 bytes)
         else if (!run++)
             first = i;
     }
-    if (n && run == n && pmm.free > n + 64) {   /* (never the last frames: the kernel's own needs come first) */
+    if (n && run == n && mm_avail_frames() > n + 64) {   /* (never the last frames: the kernel's own needs first) */
         for (i = first; i < first + n; i++) {
             win_used[i >> 5] |= 1u << (i & 31);
-            kpt_win[i >> 10][i & 1023] = pmm_take(&pmm) | PTE_P | PTE_W;
+            kpt_win[i >> 10][i & 1023] = take1() | PTE_P | PTE_W;
             invlpg(WIN_BASE + (i << 12));
         }
         p = (u8 *)(WIN_BASE + (first << 12));
@@ -269,6 +307,26 @@ void mm_win_free(void *mem, u32 bytes)
     irq_restore(f);
 }
 
+/* The disk cache's tables (its blocks' descriptors, hash chains, count
+   mode's sectors): bytes of zeroed pages at CACHE_BASE + off, mapped where
+   they aren't yet; NULL without room or memory. */
+void *mm_cache_map(u32 off, u32 bytes)
+{
+    u32 first = off >> 12, last = (off + bytes + 0xFFF) >> 12, i, f, ok;
+    if (last > CACHE_MAX >> 12 || last <= first)
+        return 0;
+    f = irq_save();
+    ok = pmm.free > (last - first) + 256;
+    for (i = first; ok && i < last; i++)
+        if (!(kpt_cache[i >> 10][i & 1023] & PTE_P)) {
+            kpt_cache[i >> 10][i & 1023] = take1() | PTE_P | PTE_W;
+            invlpg(CACHE_BASE + (i << 12));
+            memset((void *)(CACHE_BASE + (i << 12)), 0, PAGE_SIZE);
+        }
+    irq_restore(f);
+    return ok ? (void *)(CACHE_BASE + off) : 0;
+}
+
 /* The frame behind a page of a window's pixels. */
 u32 mm_win_frame(const void *p) { u32 i = ((u32)p - WIN_BASE) >> 12; return kpt_win[i >> 10][i & 1023] & ~0xFFFu; }
 
@@ -282,7 +340,7 @@ void mm_vga_hide(int on)
     static u32 spare;
     u32 i, f = irq_save();
     if (on && !spare)
-        spare = pmm_take(&pmm);
+        spare = take1();
     for (i = 0xA0; i < 0xC0; i++) {
         if (on == 2)                            /* not there at all: a touch faults (a console job's, M9) */
             kpt_low[i] = (kpt_low[i] & 0xFFF & ~PTE_P) | (i << 12);
@@ -348,7 +406,7 @@ void *dma_alloc(u32 n, u32 *phys)
 {
     u32 f = irq_save(), base = 0, i;
     u8 *p = 0;
-    if (n && dma_next + n <= 1024 && (base = pmm_take_run(&pmm, n)) != 0) {
+    if (n && dma_next + n <= 1024 && (base = take_run(n)) != 0) {
         for (i = 0; i < n; i++)
             kpt_dma[dma_next + i] = (base + (i << 12)) | PTE_P | PTE_W;
         p = (u8 *)(DMA_BASE + (dma_next << 12));
@@ -386,6 +444,8 @@ void mm_init(struct bootinfo *bi)
         kpd[(WIN_BASE >> 22) + i] = kernel_phys(kpt_win[i]) | PTE_P | PTE_W;
     for (i = 0; i < DEV_MAX >> 22; i++)
         kpd[(DEV_BASE >> 22) + i] = kernel_phys(kpt_dev[i]) | PTE_P | PTE_W;
+    for (i = 0; i < CACHE_MAX >> 22; i++)
+        kpd[(CACHE_BASE >> 22) + i] = kernel_phys(kpt_cache[i]) | PTE_P | PTE_W;
     kpd[1023] = kernel_phys(kpd) | PTE_P | PTE_W;
     write_cr3(mm_cr3());
 

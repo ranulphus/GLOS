@@ -6,6 +6,9 @@ static u32 bits[1024];
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)
 
+static u32 cache_like;                          /* frames from here up are "the cache's" (0: none) */
+static int also(u32 frame, void *arg) { (void)arg; return cache_like && frame >= cache_like; }
+
 int main(void)
 {
     struct pmm p;
@@ -50,6 +53,33 @@ int main(void)
     CHECK(pmm_take_at(&p, 0x100000, 1) == -1);          /* already used */
     CHECK(pmm_take_at(&p, 0x301000, 2) == 0);           /* just after the 1 MB run */
     CHECK(pmm_take_run(&p, 0) == 0);
+
+    /* The disk cache's: frames from the top, and runs that count its frames as free (docs/disk-cache.md). */
+    {
+        static u32 b2[64];
+        struct pmm q;
+        u32 top;
+        pmm_setup(&q, b2, 2048);                        /* 8 MB */
+        pmm_add_free(&q, 0x100000, 0x700000);
+        top = pmm_take_high(&q);
+        CHECK(top == 0x7FF000 && pmm_take_high(&q) == 0x7FE000);
+        for (i = 0; i < 30; i++)                        /* across a whole word in use */
+            pmm_take_high(&q);
+        CHECK(pmm_take_high(&q) == 0x7DF000);          /* (7E0h-7FFh: a whole word, skipped) */
+        CHECK(pmm_take_run(&q, 4) == 0x100000);         /* runs still come from the bottom */
+        cache_like = 0x7DF;                             /* frames 7DFh-7FFh (taken) "the cache's" */
+        CHECK(pmm_window(&q, 33, also, 0) == 0x104);    /* plenty free low down */
+        pmm_reserve(&q, 0x104000, 0x6D9000);            /* only 7DDh and the cache's left */
+        CHECK(pmm_window(&q, 33, also, 0) == 0x7DD);
+        CHECK(pmm_window(&q, 36, also, 0) == 0xFFFFFFFFu);
+        CHECK(pmm_longest(&q, also, 0) == 35);          /* 7DDh and 7DEh free, then the cache's 33 */
+        cache_like = 0;
+        CHECK(pmm_longest(&q, also, 0) == pmm_largest_run(&q));
+        CHECK(pmm_window(&q, 0, also, 0) == 0xFFFFFFFFu);
+        while (pmm_take_high(&q))
+            ;
+        CHECK(q.free == 0 && pmm_take_high(&q) == 0);
+    }
     printf("pmm_test: %d failures\n", fails);
     return fails != 0;
 }

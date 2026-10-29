@@ -34,7 +34,7 @@ u32 stat_system(void *out, u32 room)
     s.busy_ms = s.uptime_ms > s.idle_ms ? s.uptime_ms - s.idle_ms : 0;
     s.cpu_family = vm.bi->cpu_family;
     s.mem_kb = pmm_total_frames() * 4;
-    s.mem_free_kb = pmm_free_frames() * 4;
+    s.mem_free_kb = mm_avail_frames() * 4;            /* (the disk cache's too: it gives them back) */
     s.heap_kb = kheap_bytes() / 1024;
     s.threads = sched_threads();
     s.apps = app_count();

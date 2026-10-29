@@ -141,7 +141,7 @@ static int cap_alloc(struct shot *s, u32 len)
 {
     u32 n = (len + 0xFFF) >> 12, i;
     s->why = "no memory";
-    if (!len || len > SHOT_MAX || pmm_free_frames() < n + SPARE || !(s->frames = kmalloc(n * 4)))
+    if (!len || len > SHOT_MAX || mm_avail_frames() < n + SPARE || !(s->frames = kmalloc(n * 4)))
         return -1;
     for (i = 0; i < n; i++)
         if (!(s->frames[i] = pmm_alloc())) {

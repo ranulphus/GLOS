@@ -15,6 +15,8 @@ struct bootinfo;
 #define WIN_MAX     0x02000000u         /* 32 MB of addresses (32 KB of page tables, there from the start) */
 #define DEV_BASE    0xC4000000u         /* mm_dev_map's region: devices' registers and memory (the Matrox card's) */
 #define DEV_MAX     0x02800000u         /* 40 MB: a G450's 32 MB and its registers */
+#define CACHE_BASE  0xC6800000u         /* mm_cache_map's: the disk cache's tables (after DEV_BASE's 40 MB) */
+#define CACHE_MAX   0x01000000u         /* 16 MB of addresses: 20 bytes a frame, for up to 3 GB */
 #define RECURSIVE   0xFFC00000u         /* PDE 1023 maps the page directory itself */
 
 void mm_init(struct bootinfo *bi);
@@ -24,6 +26,10 @@ u32 kernel_phys(const void *p);         /* physical address of a kernel image/bs
 u32 pmm_alloc(void);                    /* a free frame, 0 when none */
 void pmm_free(u32 phys);
 u32 pmm_free_frames(void);
+u32 mm_avail_frames(void);              /* free, and the disk cache's to give back: what can be had */
+u32 pmm_frames(void);                   /* frames the bitmap covers (the highest frame number + 1) */
+u32 pmm_alloc_high(u32 keep);           /* the disk cache's: the highest free frame while more than keep are free */
+void *mm_cache_map(u32 off, u32 bytes);  /* the disk cache's tables at CACHE_BASE + off; NULL if no room */
 u32 pmm_total_frames(void);             /* frames the loader gave GLOS (in XMS mode, its pool) */
 u32 kheap_bytes(void);                  /* the heap's size now */
 u32 kernel_bytes(void);                 /* the image and its bss */
@@ -95,5 +101,9 @@ u32 pmm_take_run(struct pmm *p, u32 n);         /* n contiguous frames, lowest f
 int pmm_take_at(struct pmm *p, u32 phys, u32 n);        /* exactly these frames if all free; 0 or -1 */
 void pmm_give_run(struct pmm *p, u32 phys, u32 n);
 u32 pmm_largest_run(const struct pmm *p);       /* in frames */
+u32 pmm_take_high(struct pmm *p);               /* the highest free frame (the disk cache's), 0 if none */
+u32 pmm_window(const struct pmm *p, u32 n, int (*also)(u32 frame, void *arg), void *arg);
+                                                /* the lowest n frames free or also(): the first, or FFFFFFFFh */
+u32 pmm_longest(const struct pmm *p, int (*also)(u32 frame, void *arg), void *arg);  /* the longest such run */
 
 #endif

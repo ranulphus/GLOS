@@ -1,7 +1,7 @@
 # GLOS disk cache: a plan
 
-**Status: plan v2 (2026-10-29), checked against the code and by probes, with the owner's answers to its four
-questions ([Decisions](#decisions)). Nothing is built yet.**
+**Status: plan v2 (2026-10-29), checked against the code and by probes, with the owner's answers
+([Decisions](#decisions)); built on branch `cache` (see [As built](#as-built)).**
 
 PRD §2.3 lists "GLOS's own 32-bit FAT driver and disk cache" after v1. This plan takes the cache alone, now, and
 leaves the FAT driver where it is. PRD sections: §4.5 (storage), §6.2 (memory), §6.8 (the DOS server), §7.2
@@ -90,10 +90,13 @@ back the moment anything else needs it. Programs still see all the memory they s
 
 ### The busy flag
 
-`vm.int13` counts trapped INT 13h calls in progress. While it is non-zero, `vm_work_due()` is false and
-`vm_return` makes no unforced kill, as it already does for posted work's own call. This is supervisor.md §17.2's
-rule, made real. `rm_call` gains a result for an ended call (nest_enter's value 2). For a read, nothing from that
-call is kept; for a write, its range is dropped. Existing callers keep their behaviour.
+While the cache's own BIOS call is in progress, `vm_work_due()` is false and `vm_return` makes no unforced kill, as
+it already does for posted work's own call. This is supervisor.md §17.2's rule, made real.
+
+The flag is the `rm_nesting()` depth of that call, valid only while the nesting still reaches it. A call that
+`rm_nest_end` ends never returns to the code that made it: its kernel frames are discarded. So `rm_nest_end`
+tells the cache (`cache_nest_ended`), which clears the flag and traps the ports again. Nothing else needs undoing,
+because a write drops its range before the BIOS call and a read keeps nothing until its call has returned.
 
 ### Which drives
 
@@ -137,8 +140,10 @@ that.
 
 - **Hit** (every sector asked for is cached): the sectors are copied into the caller's buffer through the VM's view
   of memory. That is `seg*16+off`, wrapped when A20 is off as the BIOS would see it, since DOS may keep buffers in
-  the HMA. The cache sets AH=0, CF clear, AL (CHS) to the count, and the BDA's last-status byte (0040:0074) to 0;
-  the DAP is left as it was.
+  the HMA. The cache sets AH=0, CF clear, and the BDA's last-status byte (0040:0074) to 0; the DAP is left as it
+  was. For CHS, AL is what that drive's BIOS puts there after a read that worked: the count, as specified, or 0,
+  as 86Box's Award BIOS does (DSKTORT's digest showed it). It is learnt from the BIOS's own answers, and until
+  it is, a CHS read goes to the BIOS.
 - **A small read with a miss** (fewer than 8 sectors): each aligned 4 KB block it touches that isn't wholly cached
   is read whole, one BIOS call per block, into the block buffer (below), clipped at the drive's end. The block is
   kept, and the requested sectors are copied out. DOS reads the FAT a sector at a time, so a cold walk of a chain
@@ -157,14 +162,16 @@ that.
 
 ### The block buffer
 
-- **4 KB of conventional memory** in GLOS.EXE's resident block, beside the stub, plus a 16-byte DAP in the stub.
-  It is kept only when `[cache] enabled` isn't `off` as GLOS starts; GLOS.EXE reads that through the schema, as it
-  reads its other settings. With the cache on, the resident part is at most 8 KB (P7, amended by D72).
-- **Placed so it doesn't cross a 64 KB boundary:** before the stub's code or after it, whichever fits. In the rare
-  case neither does, it crosses. If a BIOS ever answers a block read with AH=09h (DMA boundary), that drive's small
-  reads go straight to the caller's buffer from then on, with no block fills.
-- **Its address goes in bootinfo v5.** A read into it goes through `rm_call` like any other, with AH=42h and the
-  stub's DAP, or AH=02h with registers when the drive has no extensions.
+- **4,112 bytes of conventional memory** (`BI_CACHE_PARAS`, 257 paragraphs): 4,096 for a block, then its 16-byte
+  DAP. They are kept after the stub when it goes resident (`stub_data.extra_paras`; the stub's `AH=4Ah` keeps
+  them). This happens only when `[cache] enabled` is `on` or `verify` as GLOS starts; GLOS.EXE reads that through
+  the schema, as it reads its other settings. With the cache on, GLOS's own memory is 7,184 bytes in MEM /C
+  (P7, amended by D72: 8 KB).
+- **Where it lands:** right after the stub (`GLOS_CALL_RESIDENT` tells the kernel). About one start in sixteen it
+  crosses a 64 KB boundary. If a BIOS then answers a block read with AH=09h (DMA boundary), that drive's small
+  reads go straight to the caller's buffer from then on, with no block fills (`GLOS-CACHE nofill`).
+- **A read into it** goes through `rm_call` like any other, with AH=42h and its DAP, or AH=02h with registers when
+  the drive has no extensions.
 - **No buffer, no block fills:** when the cache is turned on after GLOS started, small reads also go straight to the
   caller's buffer.
 
@@ -197,8 +204,7 @@ that.
   window of n frames made only of free and unpinned cache frames, evicts the blocks in it, and the allocation is
   tried again. `pmm_largest()`, which is XMS's largest block, counts unpinned cache frames as free.
 - **Reporting:** `glos stat`'s `mem.free_kb` and the API's `mem_free_kb` (the System Monitor) mean *available*,
-  free plus cache; `glos stat` adds `mem.cache_kb`, and `glos mem` adds a line `cache kb=.. blocks=..
-  protected=..`. The existing tests' memory checks keep their meaning (what can be had), and the API struct
+  free plus cache; `glos stat` adds `mem.cache_kb`, and `glos mem` adds a line `cache kb=N`. The existing tests' memory checks keep their meaning (what can be had), and the API struct
   doesn't change.
 
 ### The port watch
@@ -242,7 +248,8 @@ two stay coherent.
     "hits":..,"misses":..,"hit_sectors":..,"miss_sectors":..,"write_sectors":..,"drops":..,"reclaims":..,
     "mismatches":..,"drives":[{"dl":128,"sectors":..,"lba":1}]}`;
   - `glos cache drop`, for cold timings without a reboot;
-  - `glos cache lbas`: in count mode, `dl lba reads` lines, most-read first, up to 100,000.
+  - `glos cache lbas`: count mode's summary (`sectors= distinct= reread= lost=`; reread is what a perfect cache
+    would have served), then up to 200 of the most-read sectors as `dl lba reads` lines.
 - **Log grammar:**
   - `GLOS-CACHE start mode= drives=80:lba:SECTORS kb_max= ports=1f7,177`;
   - `GLOS-CACHE off reason=config|smartdrv|controller`;
@@ -274,8 +281,8 @@ Each step ends with its tests passing. Development in `~/wt-glos-m5` (branch `ca
   - branch bench-hdd (`run.py --hdd`: bench-g400's own disk booted in 86Box), brought up to main;
   - `run.py --scratch-hdd MB`: a blank sparse disk on IDE 1:0 that DOS leaves alone, for DSKTORT.
 - **C0. Measure, caching nothing.**
-  - The trap points, `rm_call`'s ended result, the busy flag, bootinfo v5 from the loader (the block buffer
-    included), and `enabled = count`.
+  - The trap points, the busy flag, bootinfo v5 from the loader (the block buffer included), and
+    `enabled = count`.
   - The port watch logs commands that arrive outside the cache's calls but drops nothing.
   - Runs: Loop A (FreeDOS); bench-g400's MS-DOS 7.1 copy in 86Box;
     bench-g400 itself, each with DISKRD, Q2D1 and HLD1. (bench-hdd: step H.) On the bench, the counting build goes in C:\GLOS with the

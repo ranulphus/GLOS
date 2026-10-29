@@ -19,6 +19,7 @@
 #include "glos/config.h"
 #include "kcfg.h"
 #include "agent.h"
+#include "cache.h"
 #include "clock.h"
 #include "display.h"
 #include "gpu.h"
@@ -466,6 +467,8 @@ void kcfg_apply(const char *section, const char *key, const char *v)
         clock_zone(v);
     } else if (same(section, "time")) {         /* (sntp, server, interval: asked again, now) */
         net_sntp_restart();
+    } else if (same(section, "cache")) {        /* enabled, size: the disk cache (kernel/drv/cache.c) */
+        cache_apply(key, v);
     }
 }
 
