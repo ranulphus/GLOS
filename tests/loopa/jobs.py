@@ -340,11 +340,12 @@ def mem(profile, boot):
     own = re.search(r"^\s*GLOS\s+([\d,]+)", glos, re.M)
     own = int(own.group(1).replace(",", "")) if own else -1
     lb, lg = largest(base), largest(glos)
+    limit = 8192 if "buffer=4112" in serial else 4096         # (P7: 8 KB with the disk cache's block buffer)
     checks = {
         "status": st == "PASS" and "GLOS-EXIT code=0" in serial,
         "resident": "GLOS-VM resident" in serial and "GLOS-WARN" not in serial,
-        "own<=4K": 0 < own <= 4096,
-        "largest": lb > 0 and lg > 0 and lb - lg <= 4096,
+        "own<=4K": 0 < own <= limit,
+        "largest": lb > 0 and lg > 0 and lb - lg <= limit,
     }
     # Agent mode, as bench-g400 runs: MEM /C as an SSH job after the settings writer has read GLOS.CFG and written
     # it once (until 2026-10-29 it held the DOS server's 32 KB transfer buffer for good: 35 KB in MEM).
@@ -372,8 +373,9 @@ def mem(profile, boot):
     aown = int(aown.group(1).replace(",", "")) if aown else -1
     alb, alg = largest(abase), largest(ag)
     checks["agent-cfg"] = "GLOS-CFG loaded" in text and "GLOS-CFG written" in text
-    checks["agent-own<=4K"] = 0 < aown <= 4096
-    checks["agent-largest"] = alb > 0 and alg > 0 and alb - alg <= 4096
+    alimit = 8192 if "buffer=4112" in text else 4096
+    checks["agent-own<=4K"] = 0 < aown <= alimit
+    checks["agent-largest"] = alb > 0 and alg > 0 and alb - alg <= alimit
     checks["agent-exit"] = "GLOS-EXIT code=0" in text and "GLOS-PANIC" not in text
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s glos=%d largest=%d/%d agent glos=%d largest=%d/%d%s" % (
