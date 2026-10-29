@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| Status | v0.8 — M10: the owner's decisions (packages on GitHub signed by the owner's offline key, Mozilla's roots, PNG recordings, the SSH client with SFTP) and its features as built, each past its gate (2026-10-18), after v0.7 (M9's apps, 2026-10-16), v0.6 (M8's windowed DOS-GL, SDL3 and the mixer, 2026-10-15), v0.5 (M7's Matrox 2D, 2026-10-14), v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
+| Status | v0.9 — the disk cache (D72, docs/disk-cache.md) and P7 in agent mode (2026-10-29), after v0.8 — M10: the owner's decisions (packages on GitHub signed by the owner's offline key, Mozilla's roots, PNG recordings, the SSH client with SFTP) and its features as built, each past its gate (2026-10-18), after v0.7 (M9's apps, 2026-10-16), v0.6 (M8's windowed DOS-GL, SDL3 and the mixer, 2026-10-15), v0.5 (M7's Matrox 2D, 2026-10-14), v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
 | Last updated | 2026-10-18 |
 | Supersedes | v0.1. Changes are listed in Appendices D to J |
 | Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md), [docs/milestones-m6.md](docs/milestones-m6.md), [docs/milestones-m7.md](docs/milestones-m7.md), [docs/milestones-m8.md](docs/milestones-m8.md), [docs/milestones-m9.md](docs/milestones-m9.md) and [docs/milestones-m10.md](docs/milestones-m10.md) (work breakdown); [docs/gui.md](docs/gui.md) (toolkit and apps) |
@@ -115,7 +115,7 @@ GLOS also brings things to retro PCs that their owners lack today:
 - **Later:**
   - windowed DOS boxes (virtual VGA, PIT, keyboard, DMA, Sound Blaster);
   - G400/G450 DualHead and multi-card displays (needs CRTC2 in 86Box or bench-only tests);
-  - GLOS's own 32-bit FAT driver and disk cache;
+  - GLOS's own 32-bit FAT driver (the disk cache came first: D72);
   - EMS for older games;
   - more NICs;
   - other vendors' 2D/3D drivers;
@@ -200,6 +200,7 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D69** | **Font smoothing uses coverage made at build time** (`SMOOTH.DAT`, by FreeType from the same DejaVu files, in the same glyph order), not stb_truetype at run time as docs/milestones-m10.md planned; blended at 16 and 32 bits with the 1-bit advances, off by default (`[display] font_smoothing`), never in the kernel's own text. (M10 step G, as built) | No floating point on a 486SX, the same hinting and advances as the bitmaps (no layout moves), and 129 KB instead of the TrueType files and a rasteriser in every program. | M10 |
 | **D70** | **Every device has a keeper: one of GLOS's drivers, *quiet* (nobody drives it, so GLOS keeps its interrupts off), or DOS; GLOS grows its own drivers for common hardware a class at a time** (docs/devices.md). Steps:<br>• D1 (built): quiet drivers make shared PCI lines usable, UHCI first.<br>• D2: chained handlers, with what no GLOS driver claims passed on to DOS.<br>• D3: ISA PnP configuration, as UNISOUND does for sound cards.<br>• Later: full drivers where GLOS gains something (USB input and storage, IDE, PCI sound).<br>(Owner, 2026-10-26, after the first bench PC's network card shared IRQ 11 with USB) | GLOS shares the machine with DOS's drivers, which it can't ask "was it yours?"; owning every device would cost DOS programs their direct access to hardware. A quiet driver is a few lines per device class. | bench |
 | **D71** | **API 1.4: `GLOS_FN_CACHE` makes a program's own conventional memory write-combining, through the fixed MTRRs (64 KB units below 80000h, 16 KB to A0000h), for any program; given back when it ends.** Only the fixed ranges: below 1 MB they take precedence over the variable ones, so the change never overlaps the BIOS's write-back ranges over RAM (WC over WB is undefined). GLOS logs the MTRRs at boot (`GLOS-MTRR`). (Owner's go-ahead for AGP, 2026-10-27: "I'm not worried about hangs") | A G400 fetching by AGP cycles doesn't snoop the CPU's caches (bench-g400): its DMA rings must be write-combining, which needs ring 0. AGP fetches about three times as fast as PCI there. | bench |
+| **D72** | **A disk cache in the kernel, in front of the BIOS (INT 13h) for hard disks, write-through, in spare memory given back on demand; on by default** (docs/disk-cache.md). Every INT 13h is trapped and made by GLOS through `rm_call`. Small reads fill whole 4 KB blocks through a 4 KB buffer kept after the resident stub (P7: 8 KB with the cache on). A segmented LRU keeps what DOS reads again (the FAT) ahead of streaming reads. The IDE command registers are watched outside GLOS's own calls; direct-mode sessions bypass the cache. Verify and count modes; `glos cache`. (Owner, 2026-10-29: on by default once the bench's verify gate passes, all spare memory, 4 KB of conventional memory acceptable) | bench-g400, 2026-10-29: Half-Life's load took 431 s under GLOS and 87 s with SMARTDRV; SMARTDRV can't ship with GLOS and costs more per hit under it. The FAT driver can wait: the cache is the gain. | bench |
 
 ---
 
@@ -241,7 +242,8 @@ GLOS refuses a NIC whose IRQ is shared with another active device, and a NIC alr
 
 - **Sound:** SB16 (auto-init DMA) for the GLOS mixer. In exclusive sessions any card is passed through.
 - **Input:** PS/2 keyboard and mouse through a full virtual 8042; gameport passed through. Serial mice come after v1.
-- **Storage:** through DOS and the BIOS (INT 13h).
+- **Storage:** through DOS and the BIOS (INT 13h), with GLOS's disk cache in front of the BIOS for hard disks
+  (D72).
 
 ### 4.6 DOS
 
@@ -340,6 +342,8 @@ A program calls DPMI 0A00h with "GLOS" (D23). The result is a far entry point pl
 - Physical mappings (0800h/0801h) in the caller's address space.
 - Page locking (0600h/0601h) is accepted and recorded; GLOS doesn't page to disk in v1.
 - DOS memory (0100h–0102h) is allocated in the system VM under the DOS lock.
+- The disk cache (D72) holds frames nobody else uses, from the top of memory, and gives each back the moment
+  anything needs it. What can be had (0500h, XMS, the statistics) counts them as free.
 
 ### 6.3 CPU modes and protection
 
@@ -467,6 +471,7 @@ Each command is an SSH exec request. `ssh <pc> <command>` runs a DOS command lin
 | `glos log [--follow]` | The COM1 mirror (HX-, DGL-, MGL- and GLOS- lines) and the supervisor log. |
 | `glos gdb <pid>` | Starts the gdb stub for a process; reached with `ssh -L`. (M5 built `glos gdb` for the one program in front, [docs/supervisor.md](docs/supervisor.md) §19.2; the pid comes with GLOS apps, M6.) |
 | `glos config get/set`, `glos net`, `glos mem` | Configuration, network state, memory map. |
+| `glos cache [drop\|lbas]` | The disk cache's numbers as a line of JSON; `drop` empties it first (cold timings without a reboot); `lbas` gives count mode's sectors (D72). |
 | `glos exit`, `glos reboot` | Unload GLOS back to DOS; controlled reboot. |
 
 ### 7.3 Files
@@ -723,6 +728,7 @@ Each app keeps SDL's cooperative threads in v1, and GLOS preempts between apps (
 | Sound | Mixer, per-app volume, card resources |
 | Network | NIC, IP or DHCP, host name, mDNS, SNTP server, SSH keys, VNC |
 | Date and time | Time zone, SNTP |
+| Disk cache | `[cache] enabled` (on, off, verify, count) and `size` (auto: all spare memory, given back on demand) (D72) |
 | Programs | Per-program profiles (D36): icon, command line, environment, memory, sound settings, `direct` mode (D20), start-up commands |
 | Packages | Package sources |
 | Start-up | Start-up behaviour |
@@ -788,7 +794,8 @@ Targets are measured on silicon or derived from CPU models, never from 86Box spe
 | P4 | The desktop is usable at 640×480×8 (VBE) | 486DX2-66 (model; Q10) |
 | P5 | An SSH handshake takes under 0.1 s and SFTP reaches 1 MB/s or more on the reference; under 1 s and 0.3 MB/s on a 486DX2-66 | Pentium II 266 + RTL8139 (measured); 486DX2-66 (modelled until a 486 bench PC exists) |
 | P6 | Mixer refill latency under 20 ms; zero underruns in Fifth Wheel windowed | Pentium II + SB16 |
-| P7 | GLOS's resident stub is 4 KB or less (MEM /C), so MEM's largest program size under GLOS is within 4 KB of plain DOS from the same boot (D41) | Loop A, HIMEMX boot (measured) |
+| P7 | GLOS's resident stub is 4 KB or less (MEM /C), so MEM's largest program size under GLOS is within 4 KB of plain DOS from the same boot (D41); 8 KB with the disk cache on, for its block buffer (D72). Under `/RUN` and in agent mode, between jobs | Loop A, HIMEMX boot (measured) |
+| P8 | With the disk cache on: DISKRD's repeated 32 KB reads take 0.4 ms or less; Half-Life's hlbench1 (DOSBench HLD1) loads no slower than with SMARTDRV on its first run (87 s) and faster on its second (85 s); game frame rates unchanged (D72) | bench-g400 |
 
 **Levers:**
 - VME/PVI;
@@ -1353,3 +1360,11 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
   Two older races, found by the regression, were fixed on the way:
   - `glos rec`'s and VNC's damage now come after the compose;
   - `GLOS_FN_WINVRAM` now works while another program's session has the screen (M8's).
+
+## Appendix K: Changes in v0.9 (2026-10-29)
+
+- **D72** (owner): the disk cache, docs/disk-cache.md's plan as approved; §2.3, §4.5, §6.2, §7.2, §10.7 and §13
+  (P7 amended, P8 new) say so.
+- **P7 in agent mode:** the settings writer had held the DOS server's 32 KB transfer buffer since M9, so GLOS took
+  35 KB of conventional memory on bench-g400. It now holds it only while it reads or writes GLOS.CFG, and P7's
+  test measures agent mode too.

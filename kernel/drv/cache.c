@@ -131,8 +131,14 @@ static void drop_all(void)
 
 void cache_drop(const char *why)
 {
-    u32 had = c.frames;
+    u32 had = c.frames, f;
     drop_all();
+    if (c.hist && !strcmp(why, "command")) {    /* glos cache drop: count mode starts again too */
+        f = irq_save();
+        memset(c.hist, 0, sizeof(struct hent) << HIST_BITS);
+        c.hist_sectors = c.hist_distinct = c.hist_lost = 0;
+        irq_restore(f);
+    }
     c.drops++;
     kprintf("GLOS-CACHE drop reason=%s blocks=%u\n", why, had);
 }
@@ -209,15 +215,19 @@ static void forget_drive(u32 di)
     irq_restore(fl);
 }
 
-/* Is sector lba of drive di here? */
+/* Is sector lba of drive di here? (Only a hint: another thread wanting memory may take its block back before
+   give() copies it, which give() then says.) */
 static int have(u32 di, u32 lba)
 {
-    u32 f = c.ready ? cs_find(&c.s, CS_KEY(di, lba)) : CS_NIL;
-    return f != CS_NIL && (c.s.b[f].valid >> (lba & 7) & 1);
+    u32 fl = irq_save(), f = c.ready ? cs_find(&c.s, CS_KEY(di, lba)) : CS_NIL;
+    int r = f != CS_NIL && (c.s.b[f].valid >> (lba & 7) & 1);
+    irq_restore(fl);
+    return r;
 }
 
-/* Sectors [lba, lba + n), all here, to linear dst; promote: they were here before this request. */
-static void give(u32 di, u32 lba, u32 n, u32 dst, int promote)
+/* Sectors [lba, lba + n) to linear dst; promote: they were here before this request. 0, or -1 if one of them
+   has gone meanwhile (reclaimed): the caller reads them from the disk instead. */
+static int give(u32 di, u32 lba, u32 n, u32 dst, int promote)
 {
     u32 last = CS_NIL;
     while (n) {
@@ -227,6 +237,10 @@ static void give(u32 di, u32 lba, u32 n, u32 dst, int promote)
             k = n;
         fl = irq_save();
         f = cs_find(&c.s, CS_KEY(di, lba));
+        if (f == CS_NIL || (c.s.b[f].valid & bits(first, k)) != bits(first, k)) {
+            irq_restore(fl);
+            return -1;
+        }
         p = kmap(f << 12);
         memcpy(vm_ptr(dst), p + first * 512, k * 512);
         kunmap(p);
@@ -238,6 +252,7 @@ static void give(u32 di, u32 lba, u32 n, u32 dst, int promote)
         n -= k;
         dst += k * 512;
     }
+    return 0;
 }
 
 /* ---- the BIOS calls */
@@ -457,8 +472,7 @@ static u32 do_read(const struct call *k, const struct req *q, struct rmregs *cr,
             forget(di, q->lba + i, 1);
         all = 0;
     }
-    if (all) {
-        give(di, q->lba, q->n, q->buf, 1);
+    if (all && give(di, q->lba, q->n, q->buf, 1) == 0) {
         c.hits++;
         c.hit_sectors += q->n;
         *done = q->n;
@@ -480,7 +494,10 @@ static u32 do_read(const struct call *k, const struct req *q, struct rmregs *cr,
                 *done = 0;
                 return 0x10000;
             }
-        give(di, q->lba, q->n, q->buf, 0);
+        if (give(di, q->lba, q->n, q->buf, 0) != 0) {
+            *done = 0;
+            return 0x10000;                     /* (taken back meanwhile: the caller's own call) */
+        }
         *done = q->n;
         return 0;
     }
@@ -490,11 +507,13 @@ static u32 do_read(const struct call *k, const struct req *q, struct rmregs *cr,
     for (i = 0, e = 0; i < q->n && !e;) {
         if (have(di, q->lba + i)) {
             for (j = i; j < q->n && have(di, q->lba + j); j++) ;
-            give(di, q->lba + i, j - i, q->buf + i * 512, 1);
-            i = j;
-            continue;
+            if (give(di, q->lba + i, j - i, q->buf + i * 512, 1) == 0) {
+                i = j;
+                continue;
+            }                                   /* (some taken back meanwhile: these from the disk) */
+        } else {
+            for (j = i; j < q->n && !have(di, q->lba + j); j++) ;
         }
-        for (j = i; j < q->n && !have(di, q->lba + j); j++) ;
         e = read_to(k, q, cr, q->lba + i, j - i, q->buf + i * 512, &got);
         if (!e) {
             keep(di, q->lba + i, j - i, q->buf + i * 512, gen);

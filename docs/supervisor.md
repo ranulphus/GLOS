@@ -230,7 +230,7 @@ program looks for it.
 | 0000_0000–0010_FFFF | Identity map of physical 0–10FFFFh (conventional memory, UMA, HMA). Shared page table for PDE 0 in every address space. |
 | 0011_0000–003F_FFFF | Unused, so no client data shares PDE 0's page table |
 | 0040_0000–BFFF_FFFF | User region of the current DPMI context. DPMI blocks are handed out **ascending from 4 MB** (§12.3). |
-| C000_0000–DFFF_FFFF | Kernel: image at C010_0000, heap at C040_0000, devices' own memory at C080_0000 (`dma_alloc`, M5), the screen's framebuffer at C0C0_0000 and windows' pixels at C200_0000 (M6), devices' registers and memory at C400_0000 (`mm_dev_map`: the Matrox card's, M7), kmap window at DFC0_0000 |
+| C000_0000–DFFF_FFFF | Kernel: image at C010_0000, heap at C040_0000, devices' own memory at C080_0000 (`dma_alloc`, M5), the screen's framebuffer at C0C0_0000 and windows' pixels at C200_0000 (M6), devices' registers and memory at C400_0000 (`mm_dev_map`: the Matrox card's, M7), the disk cache's tables at C680_0000 (`mm_cache_map`, 16 MB of addresses; §9.8), kmap window at DFC0_0000 |
 | E000_0000–FFBF_FFFF | Reserved, so 0800h can return **linear = physical** for PCI BARs (§12.4) |
 | FFC0_0000–FFFF_FFFF | Recursive mapping of the current page directory |
 
@@ -609,6 +609,31 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
   at IOPL 3 leaves nothing behind. Forced direct mode: `GLOS_SET=/DIRECT` for jobs.py's suites run on the host
   (it adds `SET GLOS=/DIRECT` to RUN.BAT) and `M4C_DIRECT=1` for tools/m4c-games.sh.
 
+### 9.8 The disk cache (INT 13h; docs/disk-cache.md)
+
+While `[cache] enabled` is on, verify or count, INT 13h joins the trapped software interrupts, from V86 code
+(`soft_int`) and from protected mode (`rm_call` with vector 13h: 0300h, and a client's own INT 13h reflected).
+`kernel/drv/cache.c` makes every one of them itself, through `rm_call` on the caller's stack as `vbe_set` does a
+mode set, so it knows when the BIOS is busy (§17.2).
+
+- **Hard disks only:** those the BIOS reported at start (bootinfo v5's `disks`, from INT 13h 08h, 41h and 48h in
+  GLOS.EXE), with 512-byte sectors, not removable, behind IDE controllers whose ports can be watched (§10).
+- **Hits** are copied in ring 0 into the caller's buffer, through the VM's view of memory (the HMA and A20 as
+  the BIOS would see them).
+- **Misses:** a read of fewer than 8 sectors fills each 4 KB block it touches through the block buffer, 4,112
+  bytes kept after the resident stub (`stub_data.extra_paras`, `GLOS_CALL_RESIDENT`). A bigger one reads its
+  missing runs into the caller's buffer, rewriting the caller's DAP for each and putting it back.
+- **Writes** drop their range before the BIOS call and keep it from the caller's buffer once it has worked: the
+  cache is write-through.
+- **The store** (`kernel/drv/cstore.c`): a descriptor per physical frame at `CACHE_BASE` (§4), hash chains, and
+  a segmented LRU.
+- **Memory:** frames come from the top (`pmm_take_high`). `pmm_alloc` takes back the coldest block when
+  nothing is free; `pmm_alloc_run`, `dma_alloc` and XMS take the lowest window of free and cache frames
+  (`pmm_window`). `mm_avail_frames()` (free plus the cache's) is what XMS, 0500h, lazy pages and the statistics
+  count.
+- **A direct-mode session** (§9.7) bypasses the cache, whose port watch it can't feel, and everything is dropped
+  when it ends.
+
 ## 10. Virtual devices
 
 | Ports | System VM / GLOS apps | Exclusive session | Notes |
@@ -627,6 +652,7 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 | 2F8h–2FFh (COM2) | Owned by the gdb stub when `/GDB` is given, otherwise passed through | Same | |
 | GLOS-owned NIC | Trapped; reads return FFh, writes dropped; its PCI function reads as absent | Trapped | One card, the first found of: an RTL8139 (M5), an Intel 8255x (M5), an NE2000 (M3: the RTL8029 on PCI, or ISA at 300h, 280h, 320h, 340h, 360h). Its IRQ is the kernel's: the VM never sees it. Refused (`GLOS-NET refuse`) under a packet driver, or on a PCI IRQ line another function shares unless that function can be made quiet (docs/devices.md: a UHCI controller nobody drives, say). See "The network cards" below. |
 | 3F8h (COM1 data) | Trapped for output, passed through | Same | M3: tells the kernel when a program is part-way through a line, so the kernel's lines wait for it (§18) |
+| 1F7h, 177h (IDE command registers; a native-mode controller's BAR+7) | Trapped while the disk cache is on (§9.8), except during its own BIOS calls; passed through | Trapped (a direct-mode session's protected-mode code isn't: the cache stands aside) | A command that may write a disk, from anything but the cache's own calls, drops every block (`GLOS-CACHE drop reason=port`); count mode logs it. Reads (status polling) pass through. |
 | VGA 3B0h–3DFh, SB, GUS, DMA 00h–0Fh/80h–8Fh/C0h–DFh, 201h, F0h | Passed through | Passed through | Live 8237 count reads, GUS GF1/CODEC, UniVBE chipset probes and the IRQ13 acknowledge at F0h all need real hardware [census] |
 
 **M2 status:**
@@ -1341,7 +1367,9 @@ saved when the protected-mode handler was hooked, so the IRQ doesn't loop.
 
 A posted call (an agent file operation; later, DOS calls from GLOS apps) runs only when all of these hold:
 - InDOS is 0 and the critical-error flag is clear;
-- no INT 13h or INT 10h is in progress (GLOS hooks both and keeps a busy flag);
+- no INT 13h or INT 10h is in progress (GLOS hooks both and keeps a busy flag; as built, INT 13h's is the disk
+  cache's, §9.8, while it is on: `cache_busy()` holds back posted work and unforced kills until the cache's BIOS
+  call returns, and `rm_nest_end` clears it if that call is ended. With the cache off INT 13h isn't trapped);
 - the virtual PIC has no IRQ in service;
 - the VM is at an instruction boundary with the virtual IF on.
 
@@ -1354,7 +1382,9 @@ place where nothing else is in DOS by construction.
 - The kernel hands the stub the registers through NEXT's answer 3 (`stub_data.dregs`); the stub makes the call
   and asks again.
 - The transfer buffer is a DOS block of up to 32 KB that the stub allocates on the first request (so it belongs
-  to GLOS.EXE) and frees when the last user (an SFTP session) lets go: conventional memory only while in use.
+  to GLOS.EXE) and frees when the last user (an SFTP session, or the settings writer while it reads or writes
+  GLOS.CFG) lets go: conventional memory only while in use. (From M9 until 2026-10-29 the settings writer held it
+  for good, which cost programs 32 KB in agent mode: P7's test now measures agent mode too.)
 - A running job holds requests back until it ends. The conditions above (InDOS, INT 13h/10h, IRQs in service)
   come with posted calls during programs, which `/RUN` and `/SHELL` need.
 - **GLOS apps' calls (M6)** use the same safe point: every NEXT begins with the calls apps wait with
@@ -1747,6 +1777,7 @@ and GLOS's:
 | SESSION | A session (§11.1): `begin n= prog= parent= mode= [profile=] [direct=1]`, `direct-end imr= rtc=` (§9.7), `end n= prog= why=exit\|next-exec\|stub mode= [remode=1] vectors= ticks= t= irq=` (`mode=` the mode it ended in, `vectors=` those put back, `ticks=` the BIOS tick count set from the RTC, `t=` its length in kernel ticks, `irq=` `ok` when IRQ 0, 1, 5, 7 and 12's vectors and mask bits are as the session found them, as VECCHK compares, else which aren't) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
 | DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... if= -> cf= ax=` (`if=` the virtual IF at the call), `raw to=rm|pm`, `dosx ax= ... -> cf=`, `vendor name=`, `v86-int21` (a client's real-mode DOS calls), `exception-code` (the code bytes and registers at a fault),, `deliver irq=|passup=|exception=|rmcb= to= from= at= err= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |
+| CACHE | The disk cache (§9.8): `start mode= drives=DL:lba\|chs:SECTORS kb_max= ports= [buffer=4096]`, `off reason=config\|smartdrv\|controller\|no-disk\|memory`, `mode=` (changed live), `drop reason=port\|direct\|command blocks=` (with `port= cmd=` for a port), `port port= cmd= [writes=1]` (count mode: a command outside its calls), `mismatch dl= lba=` (verify mode), `nofill dl= why=dma-boundary`, `end mode= hits= misses= hit_sectors= miss_sectors= write_sectors= fills= drops= reclaims= mismatches= kb=` |
 | CRASH | A client the host ends (§19): `why= vec= err= prog= psp= bits= mode=`, `cs:eip= ss:esp= eflags= cr2=`, the general registers, `code=` (16 bytes at CS:EIP), `stack=`, a `seg` line per segment register, `handlers= lstack= nesting=`, `file=` |
 | DPMI-UNIMPL | An unimplemented call |
 | PANIC | A panic: registers and CR2. A double fault adds the interrupted context from the TSS, ESP0 and its page-table entry, any IDT gate or GDT descriptor that changed since start-up, and a `thread=` line per thread (stack, saved ESP, canary) |
