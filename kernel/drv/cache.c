@@ -465,13 +465,12 @@ static void result(const struct req *q, struct rmregs *cr, u32 e, u32 done)
 static u32 do_read(const struct call *k, const struct req *q, struct rmregs *cr, u32 gen, u32 *done)
 {
     u32 i, j, e, got, di = q->d->idx, blk, all = 1, save[4] = { 0 };
+    if (!q->dap && !q->d->al_known) {           /* a CHS read before the BIOS's AL is known: its own answer */
+        *done = 0;
+        return 0x10000;
+    }
     for (i = 0; i < q->n && all; i++)
         all = have(di, q->lba + i);
-    if (all && !q->dap && !q->d->al_known) {    /* a CHS read: the BIOS's AL learnt first (the runs below) */
-        for (i = 0; i < q->n; i++)
-            forget(di, q->lba + i, 1);
-        all = 0;
-    }
     if (all && give(di, q->lba, q->n, q->buf, 1) == 0) {
         c.hits++;
         c.hit_sectors += q->n;
@@ -602,9 +601,16 @@ int cache_int13(struct trapframe *from, struct rmregs *cr, int kind)
         return 1;
     }
     e = do_read(&k, &q, cr, gen, &done);
-    if (e & 0x10000) {                          /* a block fill failed: the caller's call as it was */
-        if (original(&k, cr) == 0x1FF)
+    if (e & 0x10000) {                          /* the caller's call as it was (a block fill failed, a block was
+                                                   taken back, or a CHS read before AL is learnt): kept if it worked */
+        e = original(&k, cr);
+        if (e == 0x1FF)
             return 0;
+        if (!e) {
+            if (q.ah == 0x02)
+                learn(q.d, cr->eax & 0xFF, q.n);
+            keep(q.d->idx, q.lba, q.n, q.buf, gen);
+        }
         return 1;
     }
     if (e == 0x1FF)
