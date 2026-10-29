@@ -346,9 +346,39 @@ def mem(profile, boot):
         "own<=4K": 0 < own <= 4096,
         "largest": lb > 0 and lg > 0 and lb - lg <= 4096,
     }
+    # Agent mode, as bench-g400 runs: MEM /C as an SSH job after the settings writer has read GLOS.CFG and written
+    # it once (until 2026-10-29 it held the DOS server's 32 KB transfer buffer for good: 35 KB in MEM).
+    import time
+    cfg = batfile("memag-%s/GLOS.CFG" % tag, ["; jobs.py mem, agent mode", "[time]", "sntp = off"])
+    agent = Agent("memag-" + tag, profile, "ne2kpci" if profile == "bf6" else "ne2k", [
+        "--boot-cfg", boot, "--file", cfg + "=/TEST/GLOS.CFG", "--cmd", "SERSAY HX-START memag",
+        "--cmd", "MEM /C > C:\\OUT\\BASE.TXT", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"])
+    ag = ""
+    try:
+        if agent.listening():
+            agent.ssh("glos config set time zone UTC0")       # a line added: one write
+            t0 = time.time()
+            while time.time() - t0 < 120 and "GLOS-CFG written" not in agent.log():
+                time.sleep(1)
+            agent.ssh("WAITSEC 2")                      # the stub idle once more: the buffer given back
+            rc, ag, _ = agent.ssh("MEM /C")
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        pass
+    text = agent.wait()
+    abase = os.path.join(ROOT, "out", "memag-" + tag, "files", "BASE.TXT")
+    abase = open(abase, "rb").read().decode("latin-1") if os.path.exists(abase) else ""
+    aown = re.search(r"^\s*GLOS\s+([\d,]+)", ag, re.M)
+    aown = int(aown.group(1).replace(",", "")) if aown else -1
+    alb, alg = largest(abase), largest(ag)
+    checks["agent-cfg"] = "GLOS-CFG loaded" in text and "GLOS-CFG written" in text
+    checks["agent-own<=4K"] = 0 < aown <= 4096
+    checks["agent-largest"] = alb > 0 and alg > 0 and alb - alg <= 4096
+    checks["agent-exit"] = "GLOS-EXIT code=0" in text and "GLOS-PANIC" not in text
     bad = [k for k, v in checks.items() if not v]
-    return "  %-22s %s glos=%d largest=%d/%d%s" % ("mem-" + tag, "PASS" if not bad else "FAIL", own, lg, lb,
-                                                   "" if not bad else " failed: " + " ".join(bad)), not bad
+    return "  %-22s %s glos=%d largest=%d/%d agent glos=%d largest=%d/%d%s" % (
+        "mem-" + tag, "PASS" if not bad else "FAIL", own, lg, lb, aown, alg, alb,
+        "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
 SHCON = ["@ECHO OFF", "SERSAY HX-SHELL console var=%GLOSVAR% comspec=%COMSPEC%", "MEM /C > C:\\OUT\\SHELL.TXT",

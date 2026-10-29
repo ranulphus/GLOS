@@ -714,16 +714,21 @@ static int save(void)
 
 static void writer(void *arg)
 {
+    int r;
     (void)arg;
-    dos_hold();                                 /* (the transfer buffer stays while GLOS runs: a small price) */
-    load();
+    dos_hold();                                 /* the DOS server's 32 KB transfer buffer only while the file is */
+    load();                                     /* read or written: kept for good, it cost programs 32 KB of */
+    dos_release();                              /* conventional memory in agent mode (P7) */
     for (;;) {
         u32 f = irq_save();
         while (!c.dirty)
             thread_block(&c.q);
         c.writing = 1;
         irq_restore(f);
-        if (save() == 0) {
+        dos_hold();
+        r = save();
+        dos_release();
+        if (r == 0) {
             c.writes++;
             kprintf("GLOS-CFG written lines=%u\n", c.n);
         } else {
