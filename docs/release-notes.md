@@ -4,6 +4,29 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The disk cache (2026-10-29)
+
+- **GLOS keeps what DOS reads from the hard disks in spare memory** (D72, docs/disk-cache.md). On bench-g400,
+  Half-Life's level took 431 s to load under GLOS without a cache and 87 s with SMARTDRV; GLOS's own cache
+  RESULTS_PENDING.
+- **Write-through:** a write goes to the disk before GLOS keeps it, so a reset or `glos reboot` never loses data.
+- **Its memory is given back** the moment a program, XMS or the kernel needs it: programs see all the memory
+  they saw before.
+- **Safe against writes it can't see:** the IDE command registers are watched outside its own calls, a
+  direct-mode session bypasses it and empties it when it ends, and with SMARTDRV loaded first it stays off.
+- **`[cache] enabled`** (on, off, verify, count) and **`size`**, in the Control Panel's "Disk Cache" page;
+  `glos cache`, `glos cache drop` and `glos cache lbas` over SSH.
+- **Conventional memory:** 7 KB with the cache on (its 4 KB block buffer), 3 KB with it off.
+- Tested by `make loopa-cache`: DSKTORT, a torture test of random reads and writes by CHS and LBA, from V86 code
+  and protected mode, with sectors written behind the BIOS's back, gives the same answers with the cache on, off
+  and verifying, and on plain DOS.
+
+## P7 in agent mode (2026-10-29)
+
+- **GLOS took 35 KB of conventional memory in agent mode,** not P7's 4 KB: since M9 the settings writer held the
+  DOS server's 32 KB transfer buffer for good. It now holds it only while it reads or writes GLOS.CFG (3 KB), and
+  `make loopa-mem` measures agent mode too.
+
 ## API 1.4 (2026-10-27)
 
 - **Write-combining memory.** `GLOS_FN_CACHE` (for any program) makes whole 64 KB units of the program's own

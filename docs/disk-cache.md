@@ -385,3 +385,39 @@ The owner's answers (2026-10-29):
 
   The cache's block buffer and the DOS server's buffer stay in conventional memory either way, since a BIOS that
   uses DMA (bus master or ISA) writes to the physical address, which a page GLOS remaps doesn't have.
+
+## As built
+
+Branch `cache` in `~/wt-glos-m5`, from main 42ff95c (step R). Files: `kernel/drv/cstore.c` (the store),
+`kernel/drv/cache.c` (the rest), `kernel/include/cache.h`, `cstore.h`; the hooks in `kernel/vm/v86.c`,
+`kernel/dpmi/rmcall.c`, `kernel/vm/vdev.c`, `kernel/mm/vmm.c`, `kernel/mm/pmm.c`; bootinfo v5 and the stub's
+`extra_paras`; tests `tests/host/cache_test.c`, `tests/dos/dsktort.c`, `diskrd.c`, `xmsbig.c`, `jobs.py cache`.
+
+Departures from the design above, each found while building:
+- **A call `rm_nest_end` ends never returns** to the code that made it, so "rm_call reports an ended call"
+  couldn't work. The busy flag is a nesting depth that `cache_nest_ended` clears, and a write drops its range
+  before its BIOS call (The busy flag, above).
+- **AL after a CHS read:** 86Box's Award BIOS answers 0, not the count. DSKTORT's digest showed the difference.
+  The cache learns each drive's habit from the BIOS's own answers (Hits, misses and writes, above).
+- **A block can be taken back between the check and the copy** (another thread wanting a frame, while the VM
+  thread has interrupts on). The copy says so, and those sectors come from the disk.
+- **Count mode watches the ports too,** logging what it sees outside its own calls (C0's port log) and dropping
+  nothing.
+
+### C0 on bench-g400 (2026-10-29)
+
+The cache build in count mode, every INT 13h made through `rm_call` and counted, each workload from zero:
+
+| Workload | Sector reads | Distinct sectors | Re-reads (a perfect cache's hits) | Time |
+|---|---|---|---|---|
+| DISKRD (Quake 2's PAK0) | 110,776 | 65,759 | 45,017 (41%) | 23 s |
+| Q2D1 | 103,698 | 18,876 | 84,822 (82%) | 106 s (106 s before) |
+| HLD1 | 1,134,379 | 33,718 | 1,100,661 (97%) | 437 s (431 s before) |
+
+- **Half-Life reads the same 16.5 MB about 34 times over.** Two sectors (LBA 548896 and 2469504, directory
+  clusters on the path to the games, read on every open) were read about 50,750 times each. FAT sectors (around
+  LBA 1300) were read about 63 times each.
+- **No port log:** nothing on the bench gives the disk a command outside INT 13h. C0's exit is met.
+- **Trapping every INT 13h costs about 1%.**
+- The bench's BIOS (a read-only probe first, then GLOS.EXE's own): one disk, CHS 1022/255/63, extensions 2.1,
+  33,867,188 sectors; AH=48h's flags bit 0, so the BIOS itself handles transfers across a 64 KB boundary.
