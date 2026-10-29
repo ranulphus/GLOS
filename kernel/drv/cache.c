@@ -866,8 +866,9 @@ void cache_end(void)
     if (c.mode == BI_CACHE_OFF && !c.hits && !c.misses)
         return;
     kprintf("GLOS-CACHE end mode=%s hits=%u misses=%u hit_sectors=%u miss_sectors=%u write_sectors=%u fills=%u "
-            "drops=%u reclaims=%u mismatches=%u kb=%u\n", mode_name[c.mode], c.hits, c.misses, c.hit_sectors,
-            c.miss_sectors, c.write_sectors, c.fills, c.drops, c.reclaims, c.mismatches, c.frames * 4);
+            "drops=%u reclaims=%u mismatches=%u kb=%u counted=%u distinct=%u\n", mode_name[c.mode], c.hits, c.misses,
+            c.hit_sectors, c.miss_sectors, c.write_sectors, c.fills, c.drops, c.reclaims, c.mismatches, c.frames * 4,
+            c.hist_sectors, c.hist_distinct);
 }
 
 /* ---- memory (kernel/mm/vmm.c, interrupts off) */
