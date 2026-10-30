@@ -9,6 +9,7 @@
 static mga_target cur;
 uint32_t engine_resets, engine_timeouts;
 unsigned setup_valid;                   /* (setup.h) */
+int setup_stale, setup_wrote_texsize;   /* (setup.h) */
 
 void setup_invalidate(void) { setup_valid = 0; }
 void setup_forget_dwgctl(void) { setup_valid &= ~SETUP_VALID_DWG; }
@@ -16,8 +17,35 @@ const mga_target *engine_target = &cur;
 static uint32_t cur_maccess;
 static int cur_ydstorg_px;
 static int clip_x0, clip_y0, clip_x1 = 0x7FFF, clip_y1 = 0x7FFF;
-static int opmode_blit;            /* OPMODE set for ILOAD through the DMA window */
+int mga_dma_pending;                    /* vertices buffered or in flight by DMA (warp.c; hal.h) */
+int mga_warp_pending;                   /* WARP triangles since the engine was last idle (hal.h) */
+uint32_t mga_warp_dwgctl;               /* the DWGCTL they were drawn with (setup_dwgctl; hal.h) */
+void (*mga_dma_flush)(void);            /* sends and waits for them: register writes come after */
+void (*mga_reset_hook)(void);
+int mga_cmd_open;                       /* the DMA command stream is taking register writes (mmio.h) */
+int (*mga_cmd_route)(uint32_t off, uint32_t v);
+uint32_t mga_opmode = MGA_OPMODE_UNKNOWN;   /* what OPMODE holds (ILOAD here, vertices in warp.c) */
 static int pitch_reg = -1;         /* the value in PITCH: targets may differ in pitch */
+
+/* Before a register write that triangles the WARPs are still setting up
+ * would see (on a real G400 the next clip cut them): two zero-length draws,
+ * as Linux's mga DRM puts before every clip on a G400 (mga_emit_clip_rect),
+ * with the triangles' own DWGCTL as the DRM's are: the draws reach them too
+ * (an untextured DWGCTL here spoiled GLQuake's on bench-g400; 86Box 0124
+ * reports it). */
+static void warp_barrier(void)
+{
+    const uint32_t dwg = mga_warp_dwgctl ? mga_warp_dwgctl
+                                         : DWG_OPCOD_TRAP | DWG_ATYPE_I | DWG_ZMODE_NOZCMP | DWG_SHFTZERO | DWG_BOP_COPY;
+    if (!mga_warp_pending)
+        return;
+    fifo_reserve(4);
+    MGA_WR32(MGAREG_DWGCTL, dwg);
+    MGA_WR32(MGAREG_LEN + MGAREG_EXEC, 0x80000000u);
+    MGA_WR32(MGAREG_DWGCTL, dwg);
+    MGA_WR32(MGAREG_LEN + MGAREG_EXEC, 0x80000000u);
+    setup_forget_dwgctl();
+}
 
 static void emit_clip(void)
 {
@@ -26,6 +54,7 @@ static void emit_clip(void)
     if (x1 <= x0 || y1 <= y0) {
         x0 = 0; x1 = 0; y0 = 1; y1 = 0;      /* empty: nothing passes */
     }
+    warp_barrier();
     fifo_reserve(3);
     MGA_WR32(MGAREG_CXBNDRY, ((uint32_t)(x1 - 1) << 16) | (uint32_t)x0);
     MGA_WR32(MGAREG_YTOP, (uint32_t)y0 * (uint32_t)cur.pitch_px + base);
@@ -82,19 +111,101 @@ void engine_init(int pitch_px, int bpp)
     cur.zbits = 16;
     cur.color_off = cur.z_off = 0;
     cur_ydstorg_px = 0;
-    opmode_blit = 0;
+    mga_opmode = MGA_OPMODE_UNKNOWN;
+}
+
+/* WARP triangles the drawing engine may not have had yet: the WARPs set
+ * them up after the bus FIFO has emptied, and STATUS can read idle before
+ * they are drawn (on a real G400 a framebuffer read after them found the
+ * frame still clear). A fence: DWGSYNC takes the value written to it only
+ * once the drawing engine has finished the primitives sent before it. */
+static uint32_t fence_tag;
+static int fence_out;
+uint32_t engine_timeout_diag[8];        /* the first timeout: STATUS, FIFOSTATUS, DWGSYNC, the tag awaited,
+                                           PRIMADDRESS, PRIMEND, WIADDRNB, WIADDRNB1 */
+
+/* The tags DWGSYNC is given, the fence's and the WARP's DMA kicks' (warp.c)
+ * alike: one sequence, so a later tag passes an earlier one. */
+uint32_t mga_dwgsync_next(void)
+{
+    fence_tag += 4u;
+    return fence_tag;
+}
+
+uint32_t mga_dwgsync_last(void)
+{
+    return fence_tag;
+}
+
+static void warp_fence(void)
+{
+    if (!mga_warp_pending || !mga.has_dwgsync || fence_out)
+        return;
+    fifo_reserve(1);
+    MGA_WR32(MGAREG_DWGSYNC, mga_dwgsync_next());
+    fence_out = 1;
+}
+
+/* On bench-g400 a DWGSYNC write after WARP vertices is now and then never
+ * taken: it keeps the tag before for good, with the bus FIFO empty, the
+ * drawing engine idle and the DMA ended (docs/g400-warp.md). A fence still
+ * not taken once all of that has held for FENCE_GRACE_US is let go
+ * (engine_fence_stuck counts them) rather than timing out into a reset. */
+#define FENCE_GRACE_US 20000u
+#define FENCE_GRACE_POLLS 4096u         /* (and as many looks: some ports' clocks tick every 55 ms) */
+uint32_t engine_fence_stuck;
+static uint32_t stuck_since, stuck_polls;
+static int stuck_timing;
+
+static int fence_passed(void)
+{
+    uint32_t st;
+    if (!fence_out || (int32_t)(MGA_RD32(MGAREG_DWGSYNC) - fence_tag) >= 0) {
+        stuck_timing = 0;
+        return 1;
+    }
+    st = MGA_RD32(MGAREG_STATUS);
+    if (!(MGA_RD32(MGAREG_FIFOSTATUS) & (1u << 9)) || (st & STATUS_DWGENGSTS) || !(st & (1u << 17))) {
+        stuck_timing = 0;               /* (something is still going on) */
+        return 0;
+    }
+    if (!stuck_timing) {
+        stuck_timing = 1;
+        stuck_since = sys_time_us();
+        stuck_polls = 0;
+        return 0;
+    }
+    if (++stuck_polls < FENCE_GRACE_POLLS || (uint32_t)(sys_time_us() - stuck_since) < FENCE_GRACE_US)
+        return 0;
+    stuck_timing = 0;
+    engine_fence_stuck++;
+    return 1;
 }
 
 int engine_sync(uint32_t timeout_us)
 {
+    warp_fence();
+    if (mga_dma_pending && mga_dma_flush)
+        mga_dma_flush();
     if (timeout_us < 120000u)
         timeout_us = 120000u;          /* at least two BIOS ticks */
     uint32_t start = sys_time_us(), polls = 0;
     /* Idle means the bus FIFO is empty (FIFOSTATUS.bempty, bit 9) and the
      * drawing engine is not busy; commands can still be queued while the
      * engine reports idle. */
-    while (!(MGA_RD32(MGAREG_FIFOSTATUS) & (1u << 9)) || (MGA_RD32(MGAREG_STATUS) & STATUS_DWGENGSTS)) {
+    while (!(MGA_RD32(MGAREG_FIFOSTATUS) & (1u << 9)) || (MGA_RD32(MGAREG_STATUS) & STATUS_DWGENGSTS) ||
+           !fence_passed()) {
         if ((++polls & 1023) == 0 && (uint32_t)(sys_time_us() - start) > timeout_us) {
+            if (!engine_timeouts) {     /* the first one's state, for the log */
+                engine_timeout_diag[0] = MGA_RD32(MGAREG_STATUS);
+                engine_timeout_diag[1] = MGA_RD32(MGAREG_FIFOSTATUS);
+                engine_timeout_diag[2] = MGA_RD32(MGAREG_DWGSYNC);
+                engine_timeout_diag[3] = fence_out ? fence_tag : 0;
+                engine_timeout_diag[4] = MGA_RD32(MGAREG_PRIMADDRESS);
+                engine_timeout_diag[5] = MGA_RD32(MGAREG_PRIMEND);
+                engine_timeout_diag[6] = MGA_RD32(MGAREG_WIADDRNB);
+                engine_timeout_diag[7] = MGA_RD32(MGAREG_WIADDRNB1);
+            }
             engine_timeouts++;
             engine_reset();
             return -1;
@@ -104,6 +215,8 @@ int engine_sync(uint32_t timeout_us)
      * index register is the documented way). */
     MGA_WR8(MGAREG_CRTC_INDEX, 0);
     fifo_reset();
+    mga_warp_pending = 0;
+    fence_out = 0;
     return 0;
 }
 
@@ -112,7 +225,36 @@ int engine_sync(uint32_t timeout_us)
  * they wait (DOS-GL's swap, which lets a program's audio thread run). */
 int engine_idle(void)
 {
-    return (MGA_RD32(MGAREG_FIFOSTATUS) & (1u << 9)) && !(MGA_RD32(MGAREG_STATUS) & STATUS_DWGENGSTS);
+    warp_fence();
+    if (mga_dma_pending && mga_dma_flush)
+        mga_dma_flush();
+    if ((MGA_RD32(MGAREG_FIFOSTATUS) & (1u << 9)) && !(MGA_RD32(MGAREG_STATUS) & STATUS_DWGENGSTS) && fence_passed()) {
+        mga_warp_pending = 0;
+        fence_out = 0;
+        return 1;
+    }
+    return 0;
+}
+
+/* The engine from another owner (GLOS's GPU lock changing hands): WARP
+ * triangles its copy of the HAL sent may still be in flight, which this
+ * copy's mga_warp_pending knows nothing of, and STATUS can read idle before
+ * they are drawn (a program's in a GLOS window landed on GLOS's target on
+ * bench-g400). On the G400 family, once the other owner's DMA has ended
+ * (STATUS<17>, as the DRM's idle test) and the bus FIFO is empty: a fence
+ * with a tag far from any the other owner gave DWGSYNC. Then as engine_sync. */
+int engine_take(uint32_t timeout_us)
+{
+    if (mga.family == MGA_FAMILY_G400 && mga.has_dwgsync) {
+        uint32_t start = sys_time_us(), polls = 0;
+        while (!(MGA_RD32(MGAREG_STATUS) & (1u << 17)) || !(MGA_RD32(MGAREG_FIFOSTATUS) & (1u << 9)))
+            if ((++polls & 1023) == 0 && (uint32_t)(sys_time_us() - start) > timeout_us)
+                break;                  /* (engine_sync times out too, and resets) */
+        fence_tag = (MGA_RD32(MGAREG_DWGSYNC) & ~3u) + 0x40000000u;
+        fence_out = 0;
+        mga_warp_pending = 1;
+    }
+    return engine_sync(timeout_us);
 }
 
 /* Another program has had the engine (GLOS's GPU lock changing hands):
@@ -124,7 +266,7 @@ void engine_resync(void)
 {
     fifo_reset();
     setup_invalidate();
-    opmode_blit = 0;
+    mga_opmode = MGA_OPMODE_UNKNOWN;
     pitch_reg = -1;
     fifo_reserve(1);
     MGA_WR32(MGAREG_PLNWT, 0xFFFFFFFFu);    /* (every HAL path writes all planes) */
@@ -134,12 +276,21 @@ void engine_resync(void)
 
 void engine_reset(void)
 {
+    mga_engine_state s;
     engine_resets++;
+    engine_save(&s);
     MGA_WR32(MGAREG_RST, 1);
     sys_delay_us(20);
     MGA_WR32(MGAREG_RST, 0);
     fifo_reset();
+    fence_out = 0;                      /* (nothing drawn is waited for any more) */
+    stuck_timing = 0;
+    mga_warp_pending = 0;
+    if (mga_reset_hook)
+        mga_reset_hook();
     engine_init(cur.pitch_px ? cur.pitch_px : 1024, cur.bpp ? cur.bpp : 16);
+    if (s.t.pitch_px && s.t.bpp)
+        engine_restore(&s);             /* (engine_init leaves the target at offset 0) */
 }
 
 static void write_origin(uint32_t color_off, int bpp, uint32_t z_off, int zbits)
@@ -214,10 +365,28 @@ void engine_set_clip(int x0, int y0, int x1, int y1)
     emit_clip();
 }
 
+/* Before a draw the host starts (fills, blits, loads), and before the state
+ * it writes for one, while WARP triangles may still be in flight: two
+ * DWGSYNC writes, as Linux's mga DRM puts before its clears, blits and
+ * loads (mga_dma_dispatch_clear, _blit), with tags from the fence's
+ * sequence. Not warp_barrier: on bench-g400 its zero-length draws' DWGCTL
+ * reached triangles the WARPs were still setting up (GLQuake -mtex, frame
+ * 600 of demo1: 1,056 pixels of a pillar unlike DGL_TEXMOVE=0's), while
+ * with the DWGSYNC writes alone every frame matched. */
+void engine_warp_order(void)
+{
+    if (!mga_warp_pending || !mga.has_dwgsync)
+        return;
+    fifo_reserve(2);
+    MGA_WR32(MGAREG_DWGSYNC, mga_dwgsync_next());
+    MGA_WR32(MGAREG_DWGSYNC, mga_dwgsync_next());
+}
+
 static void solid_fill(int x, int y, int w, int h, uint32_t fcol)
 {
     if (w <= 0 || h <= 0)
         return;
+    engine_warp_order();
     fifo_reserve(4);
     setup_forget_dwgctl();
     MGA_WR32(MGAREG_DWGCTL, DWG_OPCOD_TRAP | DWG_ATYPE_RSTR | DWG_SOLID | DWG_ARZERO |
@@ -293,6 +462,7 @@ void engine_tlut_load(uint32_t off, int first, int count)
     uint32_t src = off / 2;
     if (count <= 0)
         return;
+    engine_warp_order();
     fifo_reserve(9);
     MGA_WR32(MGAREG_MACCESS, MACCESS_PW16 | MACCESS_TLUTLOAD);
     MGA_WR32(MGAREG_PITCH, 1024);
@@ -324,10 +494,13 @@ static uint32_t dmawin_pos;
 
 static void dma_blit_mode(void)
 {
-    if (!opmode_blit) {
-        engine_sync(200000);                         /* OPMODE is not queued behind drawing */
+    if (mga_opmode != OPMODE_DMAMOD_BLIT) {
+        /* OPMODE is not queued behind drawing, and on a G400 it may not
+         * leave general purpose while the WARPs still work: after the list
+         * had only been fetched, the loads came out as without iload_done. */
+        engine_sync(200000);
         MGA_WR32(MGAREG_OPMODE, OPMODE_DMAMOD_BLIT);
-        opmode_blit = 1;
+        mga_opmode = OPMODE_DMAMOD_BLIT;
     }
 }
 
@@ -337,16 +510,43 @@ static void dma_blit_mode(void)
  * the AR registers while the last DWGCTL's arzero is set (a fill's is). */
 static void iload_go(uint32_t dwgctl, int xl, int xr, int y, int h, uint32_t ar0, int row_dw)
 {
+    /* The load starts by direct writes, never from the WARP's DMA list
+     * (warp.c): the list carries DMAPAD packets after it, and a real G400
+     * takes a DMAPAD written during an ILOAD as the load's data, as 86Box
+     * does (DOS-GL's t29 on bench-g400: the texels landed shifted). The
+     * list is sent first, and the data would have waited for that anyway. */
+    if (mga_dma_pending && mga_dma_flush)
+        mga_dma_flush();
     fifo_reserve(6);
     setup_forget_dwgctl();
-    MGA_WR32(MGAREG_DWGCTL, dwgctl);
-    MGA_WR32(MGAREG_AR0, ar0);
-    MGA_WR32(MGAREG_AR3, 0);
-    MGA_WR32(MGAREG_AR5, 0);
-    MGA_WR32(MGAREG_FXBNDRY, ((uint32_t)xr << 16) | ((uint32_t)xl & 0xFFFFu));
-    MGA_WR32(MGAREG_YDSTLEN + MGAREG_EXEC, ((uint32_t)y << 16) | (uint32_t)h);
+    MGA_WR32_DIRECT(MGAREG_DWGCTL, dwgctl);
+    MGA_WR32_DIRECT(MGAREG_AR0, ar0);
+    MGA_WR32_DIRECT(MGAREG_AR3, 0);
+    MGA_WR32_DIRECT(MGAREG_AR5, 0);
+    MGA_WR32_DIRECT(MGAREG_FXBNDRY, ((uint32_t)xr << 16) | ((uint32_t)xl & 0xFFFFu));
+    MGA_WR32_DIRECT(MGAREG_YDSTLEN + MGAREG_EXEC, ((uint32_t)y << 16) | (uint32_t)h);
     iload_row_dw = row_dw;
     iload_rows = h;
+}
+
+/* After a load, with the WARPs' DMA stream open (warp.c): OPMODE back to
+ * general purpose, which the stream's DMA assumes (warp_select sets it once
+ * at a pipe's start). On bench-g400, loads that left it in blit mode among
+ * the WARPs' DMA spoiled GLQuake's lightmap updates (demo1: rows of wrong
+ * texels, more as the demo went on, then triangles across the screen).
+ * Waiting for the engine before or after each load changed nothing; with
+ * OPMODE put back, every frame matched the CPU's writes (DGL_ILOAD=0).
+ * 86Box reads OPMODE for the DMA window only. The next load sets blit mode
+ * again (dma_blit_mode). Going back needed no wait on the card (none, or
+ * the bus FIFO empty: frames exact, no faster); the sync stays, as for any
+ * OPMODE write. */
+static void iload_done(void)
+{
+    if (mga_cmd_open && mga_opmode != 0) {
+        engine_sync(200000);                         /* OPMODE is not queued behind drawing */
+        MGA_WR32(MGAREG_OPMODE, 0);
+        mga_opmode = 0;
+    }
 }
 
 #define ILOAD_FULL (DWG_OPCOD_ILOAD | DWG_ATYPE_RSTR | DWG_SGNZERO | DWG_SHFTZERO | DWG_BOP_COPY | DWG_BLTMOD_BFCOL)
@@ -416,6 +616,7 @@ void engine_mono(int x, int y, int w, int h, const uint8_t *bits, int stride, ui
             engine_iload_row(row);
         }
     }
+    iload_done();
     emit_clip();
 }
 
@@ -439,6 +640,83 @@ void engine_iload_end(void)
 {
     while (iload_rows > 0)
         engine_iload_row(NULL);
+    iload_done();
+    fifo_reserve(1);
+    MGA_WR32(MGAREG_PITCH, (uint32_t)cur.pitch_px);
+    pitch_reg = cur.pitch_px;
+    engine_set_target(&cur);                        /* DSTORG, ZORG, MACCESS */
+    emit_clip();
+}
+
+/* Copies from one surface in VRAM to another, queued like draws (G200+):
+ * DOS-GL changes a texture that queued draws still read in a new block,
+ * the CPU writing the new texels there and these copies the rest from the
+ * old block, with no wait for the engine. A copy's rows are pitch_px pixels
+ * apart in both surfaces; dst and src are its first pixel's byte addresses.
+ * DSTORG and SRCORG are rounded down to 64 bytes (the G400's units) and the
+ * rest goes in the columns and AR3. Between the first copy and
+ * engine_vram_copy_end the registers hold the copies' surface;
+ * engine_vram_copy_end writes the target back (PITCH, origins, MACCESS,
+ * the clip). PLNWT is left all ones. */
+static int vcopy_open;
+
+int engine_vram_copy(uint32_t dst, uint32_t src, int pitch_px, int bpp, int w, int h)
+{
+    uint32_t b = (uint32_t)bpp / 8, sp = (uint32_t)pitch_px, W = (uint32_t)w - 1, x0 = (dst & 63u) / b,
+             room = mga.family == MGA_FAMILY_G400 ? (1u << 21) - 1 : (1u << 17) - 1;   /* what AR0 can hold */
+    int band, done, n;
+    if (!mga.has_dstorg || (bpp != 8 && bpp != 16 && bpp != 32) || pitch_px <= 0 || pitch_px > 4096 ||
+        ((uint32_t)pitch_px * b) & 63u || dst % b || src % b || w > 4096 - (int)x0)
+        return 0;
+    if (w <= 0 || h <= 0)
+        return 1;
+    if (!vcopy_open) {
+        engine_warp_order();                    /* (DSTORG, PITCH, MACCESS and DWGCTL change) */
+        fifo_reserve(4);
+        MGA_WR32(MGAREG_PLNWT, 0xFFFFFFFFu);
+        MGA_WR32(MGAREG_CXBNDRY, 0x0FFF0000u);      /* (for chips that ignore clipdis) */
+        MGA_WR32(MGAREG_YTOP, 0);
+        MGA_WR32(MGAREG_YBOT, 0x00FFFFFFu);
+        vcopy_open = 1;
+    }
+    fifo_reserve(6);
+    setup_forget_dwgctl();
+    MGA_WR32(MGAREG_DWGCTL, DWG_OPCOD_BITBLT | DWG_ATYPE_RSTR | DWG_SGNZERO | DWG_SHFTZERO | DWG_BOP_COPY |
+                            DWG_BLTMOD_BFCOL | DWG_CLIPDIS);
+    MGA_WR32(MGAREG_MACCESS, b == 4 ? MACCESS_PW32 : b == 2 ? MACCESS_PW16 : MACCESS_PW8);
+    MGA_WR32(MGAREG_PITCH, sp);
+    pitch_reg = pitch_px;
+    MGA_WR32(MGAREG_DSTORG, dst & ~63u);
+    MGA_WR32(MGAREG_AR5, sp);
+    MGA_WR32(MGAREG_FXBNDRY, ((x0 + W) << 16) | x0);
+    band = (int)((room - 63 / b - W) / sp) + 1;     /* rows whose addresses fit AR0 (blit.c) */
+    for (done = 0; done < h; done += n) {
+        uint32_t at = src + (uint32_t)done * sp * b, first = (at & 63u) / b;
+        n = h - done < band ? h - done : band;
+        fifo_reserve(4);
+        MGA_WR32(MGAREG_SRCORG, at & ~63u);
+        MGA_WR32(MGAREG_AR0, first + W);
+        MGA_WR32(MGAREG_AR3, first);
+        MGA_WR32(MGAREG_YDSTLEN + MGAREG_EXEC, ((uint32_t)done << 16) | (uint32_t)n);
+    }
+    return 1;
+}
+
+/* bytes bytes from src to dst (not overlapping), as rows of 32 pixels (64
+ * at 8 bits) of the widest pixel the addresses and the length allow. */
+int engine_vram_move(uint32_t dst, uint32_t src, uint32_t bytes)
+{
+    uint32_t a = dst | src | bytes, b = !(a & 3u) ? 4u : !(a & 1u) ? 2u : 1u, px = b == 1 ? 64u : 32u,
+             row = px * b, rows = bytes / row, rest = bytes % row;
+    return engine_vram_copy(dst, src, (int)px, (int)b * 8, (int)px, (int)rows) &&
+           engine_vram_copy(dst + rows * row, src + rows * row, (int)px, (int)b * 8, (int)(rest / b), 1);
+}
+
+void engine_vram_copy_end(void)
+{
+    if (!vcopy_open)
+        return;
+    vcopy_open = 0;
     fifo_reserve(1);
     MGA_WR32(MGAREG_PITCH, (uint32_t)cur.pitch_px);
     pitch_reg = cur.pitch_px;
