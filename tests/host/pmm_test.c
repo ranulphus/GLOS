@@ -16,8 +16,10 @@ int main(void)
     pmm_setup(&p, bits, 32768);                         /* 128 MB */
     CHECK(p.free == 0);
     CHECK(pmm_take(&p) == 0);
+    CHECK(p.top == 0);
     pmm_add_free(&p, 0x100000, 0x7F00000);              /* 1 MB to 128 MB */
     CHECK(p.free == (0x8000000 - 0x100000) / 4096);
+    CHECK(p.top == 0x8000000 / 4096);                   /* the RAM's end, not the bitmap's */
     pmm_reserve(&p, 0, 0x110000);                       /* low memory and the HMA */
     pmm_reserve(&p, 0x110000, 0x1B000);                 /* a kernel */
     CHECK(p.free == (0x8000000 - 0x110000 - 0x1B000) / 4096);

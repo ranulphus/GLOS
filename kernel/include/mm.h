@@ -27,7 +27,7 @@ u32 pmm_alloc(void);                    /* a free frame, 0 when none */
 void pmm_free(u32 phys);
 u32 pmm_free_frames(void);
 u32 mm_avail_frames(void);              /* free, and the disk cache's to give back: what can be had */
-u32 pmm_frames(void);                   /* frames the bitmap covers (the highest frame number + 1) */
+u32 pmm_frames(void);                   /* one past the highest frame of RAM (not the bitmap's 1 GB) */
 u32 pmm_alloc_high(u32 keep);           /* the disk cache's: the highest free frame while more than keep are free */
 void *mm_cache_map(u32 off, u32 bytes);  /* the disk cache's tables at CACHE_BASE + off; NULL if no room */
 u32 pmm_total_frames(void);             /* frames the loader gave GLOS (in XMS mode, its pool) */
@@ -91,6 +91,7 @@ struct pmm {
     u32 frames;
     u32 free;
     u32 next;
+    u32 top;                            /* one past the highest frame ever made free (the RAM's end) */
 };
 void pmm_setup(struct pmm *p, u32 *bits, u32 frames);
 void pmm_add_free(struct pmm *p, u32 base, u32 length);

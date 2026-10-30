@@ -115,18 +115,17 @@ static void release(u32 f)                      /* interrupts off */
     c.frames--;
 }
 
+/* Both walk the segments' lists, not the tables: with interrupts off, as long
+   as the blocks held, not the frames there are. */
 static void drop_all(void)
 {
-    u32 f, fl = irq_save(), n = 0;
+    u32 fl = irq_save(), seg;
     c.gen++;
     if (c.ready)
-        for (f = 0; f < c.s.nframes; f++)
-            if (c.s.b[f].flags & CB_USED) {
-                release(f);
-                n++;
-            }
+        for (seg = 0; seg < 2; seg++)
+            while (c.s.tail[seg] != CS_NIL)
+                release(c.s.tail[seg]);
     irq_restore(fl);
-    (void)n;
 }
 
 void cache_drop(const char *why)
@@ -146,10 +145,12 @@ void cache_drop(const char *why)
 /* A frame for a new block: a spare one while under the cap, else the coldest block's. Interrupts off. */
 static u32 new_block(u32 key)
 {
-    u32 f = CS_NIL, p;
-    if (c.frames < c.cap && (p = pmm_alloc_high(KEEP_FREE)) != 0) {
+    u32 f = CS_NIL, p = 0;
+    if (c.frames < c.cap && (p = pmm_alloc_high(KEEP_FREE)) != 0 && (p >> 12) < c.s.nframes) {
         f = p >> 12;
         c.frames++;
+    } else if (p && (p >> 12) >= c.s.nframes) {
+        pmm_free(p);                            /* (past the RAM's end the tables cover: never, as frames go) */
     } else if ((f = cs_victim(&c.s)) != CS_NIL) {
         cs_remove(&c.s, f);
     }
@@ -207,11 +208,14 @@ static void forget(u32 di, u32 lba, u32 n)
 
 static void forget_drive(u32 di)
 {
-    u32 f, fl = irq_save();
+    u32 f, prev, fl = irq_save(), seg;
     if (c.ready)
-        for (f = 0; f < c.s.nframes; f++)
-            if ((c.s.b[f].flags & CB_USED) && CS_DRIVE(c.s.b[f].key) == di)
-                release(f);
+        for (seg = 0; seg < 2; seg++)
+            for (f = c.s.tail[seg]; f != CS_NIL; f = prev) {
+                prev = c.s.b[f].prev;
+                if (CS_DRIVE(c.s.b[f].key) == di)
+                    release(f);
+            }
     irq_restore(fl);
 }
 

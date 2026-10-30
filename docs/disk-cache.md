@@ -403,6 +403,20 @@ Departures from the design above, each found while building:
   thread has interrupts on). The copy says so, and those sectors come from the disk.
 - **Count mode watches the ports too,** logging what it sees outside its own calls (C0's port log) and dropping
   nothing.
+- **The tables were sized for the frame bitmap's 1 GB, not the RAM** (2026-10-30, the cache-on regression).
+  `pmm_frames()` gave the bitmap's size, so the descriptors and hash took 5.5 MB on every machine: 1,409 frames
+  of Loop A's 64 MB. GLQuake takes all the memory 0500h offers, so `glos shot` then found 320 frames where it
+  needs 406 (the gate's probe). Loops over the tables and the bitmap (`drop_all`, `forget_drive`, and XMS's
+  largest block counting the cache's frames) walked 262,144 frames with interrupts off: `vif-stuck` at the end of
+  a direct-mode session (10 of 20 runs). `pmm_frames()` is now the RAM's end (`pmm.top`, the highest free range
+  the loader gave), the bitmap's scans stop there, and the drops walk the segments' lists: 89 frames in Loop A.
+- **Open: GTA's `vif-stuck` with the cache on** (same day; reported by the gate, not failed; GTA's frames are the
+  same). Each comes from GTA's Sound Blaster probe in real mode, inside a DOS call, with its interrupts off: it
+  resets the DSP at 220h and polls base+0Eh/0Ah up to 65,536 times for AAh, and reads FFh, so the loop runs out
+  and an IRQ waits over 50 ms. With the cache off no such stretch passes 20 ms. Not the cause: block fills (off,
+  the same), hits not letting interrupts in, VIP at `rm_call`'s entry, the port watch (only 1F7h and 177h trap),
+  GLOS's mixer (it never touched the SB16). With the cache on GTA loads 4 KB higher (PSP 13FFh, not 12FEh: the
+  block buffer), which is what is left to look at.
 
 ### C0 on bench-g400 (2026-10-29)
 

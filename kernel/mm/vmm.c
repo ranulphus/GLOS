@@ -83,7 +83,7 @@ u32 pmm_alloc(void) { LOCKED(u32, take1()); }
 void pmm_free(u32 phys) { LOCKED_V(pmm_give(&pmm, phys)); }
 u32 pmm_free_frames(void) { return pmm.free; }
 u32 mm_avail_frames(void) { return pmm.free + cache_frames(); }
-u32 pmm_frames(void) { return pmm.frames; }
+u32 pmm_frames(void) { return pmm.top; }
 u32 pmm_alloc_high(u32 keep) { LOCKED(u32, pmm.free > keep ? pmm_take_high(&pmm) : 0); }
 u32 pmm_total_frames(void) { return given; }
 u32 kheap_bytes(void) { return kheap.size; }

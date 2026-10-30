@@ -12,6 +12,7 @@ void pmm_setup(struct pmm *p, u32 *bits, u32 frames)
     p->frames = frames;
     p->free = 0;
     p->next = 0;
+    p->top = 0;
     for (i = 0; i < (frames + 31) / 32; i++)
         bits[i] = 0xFFFFFFFFu;
 }
@@ -29,6 +30,8 @@ static void set_range(struct pmm *p, u32 base, u32 length, int used)
     } else {
         f = FRAME(base + 0xFFF);
         last = FRAME(end);
+        if (f < last && last > p->top)
+            p->top = last < p->frames ? last : p->frames;
     }
     for (; f < last && f < p->frames; f++) {
         u32 w = f / 32, b = 1u << (f % 32);
@@ -40,11 +43,13 @@ static void set_range(struct pmm *p, u32 base, u32 length, int used)
 void pmm_add_free(struct pmm *p, u32 base, u32 length) { set_range(p, base, length, 0); }
 void pmm_reserve(struct pmm *p, u32 base, u32 length) { set_range(p, base, length, 1); }
 
+/* The scans stop at p->top: no frame past the RAM's end is ever free (the
+   bitmap covers 1 GB, a machine in Loop A 64 MB). */
 u32 pmm_take(struct pmm *p)
 {
     u32 n, f;
-    for (n = 0; n < p->frames; n++) {
-        f = (p->next + n) % p->frames;
+    for (n = 0; n < p->top; n++) {
+        f = (p->next + n) % p->top;
         if (!(p->bits[f / 32] & (1u << (f % 32)))) {
             p->bits[f / 32] |= 1u << (f % 32);
             p->free--;
@@ -81,7 +86,7 @@ u32 pmm_take_run(struct pmm *p, u32 n)
     u32 f = 0, len = 0;
     if (!n)
         return 0;
-    while (f < p->frames) {
+    while (f < p->top) {
         if (!(f & 31) && p->bits[f / 32] == 0xFFFFFFFFu) {     /* a whole word in use */
             len = 0;
             f += 32;
@@ -119,7 +124,7 @@ void pmm_give_run(struct pmm *p, u32 phys, u32 n)
 u32 pmm_largest_run(const struct pmm *p)
 {
     u32 f = 0, len = 0, best = 0;
-    while (f < p->frames) {
+    while (f < p->top) {
         if (!(f & 31) && p->bits[f / 32] == 0xFFFFFFFFu) {
             len = 0;
             f += 32;
@@ -137,7 +142,7 @@ u32 pmm_largest_run(const struct pmm *p)
    of the runs taken from the bottom); 0 if none. */
 u32 pmm_take_high(struct pmm *p)
 {
-    u32 f = p->frames;
+    u32 f = p->top;
     while (f--) {
         if (!((f + 1) & 31) && p->bits[f / 32] == 0xFFFFFFFFu) {       /* a whole word in use */
             f -= 31;
@@ -158,7 +163,7 @@ u32 pmm_window(const struct pmm *p, u32 n, int (*also)(u32 frame, void *arg), vo
     u32 f, len = 0;
     if (!n)
         return 0xFFFFFFFFu;
-    for (f = 0; f < p->frames; f++) {
+    for (f = 0; f < p->top; f++) {
         len = (!is_used(p, f) || also(f, arg)) ? len + 1 : 0;
         if (len == n)
             return f + 1 - n;
@@ -170,7 +175,7 @@ u32 pmm_window(const struct pmm *p, u32 n, int (*also)(u32 frame, void *arg), vo
 u32 pmm_longest(const struct pmm *p, int (*also)(u32 frame, void *arg), void *arg)
 {
     u32 f, len = 0, best = 0;
-    for (f = 0; f < p->frames; f++) {
+    for (f = 0; f < p->top; f++) {
         len = (!is_used(p, f) || also(f, arg)) ? len + 1 : 0;
         if (len > best)
             best = len;

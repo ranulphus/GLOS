@@ -40,6 +40,7 @@
 #include "glos/bootinfo.h"
 #include "dpmi.h"
 #include "io.h"
+#include "cache.h"
 #include "display.h"
 #include "kprintf.h"
 #include "mgadisp.h"
@@ -704,7 +705,9 @@ static int capture(struct vm_work *w, struct trapframe *tf)
     if (r > 0) {                                /* what GLOS took the screen for */
         static const char *const kinds[] = { "text", "cga", "planar", "unchained", "packed", "direct" };
         kprintf("GLOS-SHOT kind=%s size=%ux%u vbe=%04x\n", kinds[s->kind], s->w, s->h, vbe.mode);
-    }
+    } else                                      /* (memory's state: "no memory" with the disk cache's to give) */
+        kprintf("GLOS-SHOT failed why=\"%s\" free=%u cache=%u heap=%u\n", shot_why(s), pmm_free_frames(),
+                cache_frames(), kheap_bytes() / 1024);
     return 0;
 }
 
@@ -760,8 +763,11 @@ int shot_poll(struct shot *s)
         s->src = kmalloc(s->rowlen * planes + 4);
         s->pix = kmalloc(s->w + 4);
         s->lines = kmalloc(s->group * row);
-        if (!s->src || !s->pix || !s->lines)
+        if (!s->src || !s->pix || !s->lines) {
+            kprintf("GLOS-SHOT failed why=\"no memory\" for=buffers free=%u cache=%u heap=%u\n", pmm_free_frames(),
+                    cache_frames(), kheap_bytes() / 1024);
             return fail(s, "no memory");
+        }
         s->phase = P_HEAD;
         return 1;
     case P_FAILED:
