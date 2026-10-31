@@ -119,10 +119,11 @@ to COM1 at each step:
 
 - **The stub** (`loader/stub.asm`, done in M3). Once the kernel is running, `GLOS.EXE` keeps only a resident
   stub of 4 KB or less (P7) and frees the rest of its memory block (INT 21h 4Ah), like a TSR. The stub holds
-  the mode switch, the kernel-call and XMS entry points, the kill stub, its stacks (the real-mode stacks of
-  §9.5 join them in M4) and the EXEC loop. Everything else (finding programs, the agent, later the desktop)
-  runs in the kernel, which tells the stub what to EXEC (NEXT, §2.1). INT 2Fh 1687h will report no real-mode
-  memory needed per DPMI client.
+  the mode switch, the kernel-call and XMS entry points, the kill stub, its two stacks (the kill stack and its
+  own) and the EXEC loop. Everything else (finding programs, the agent, later the desktop) runs in the kernel,
+  which tells the stub what to EXEC (NEXT, §2.1). INT 2Fh 1687h asks each DPMI client for 2 KB of its own
+  memory, the host's real-mode stack (§12.1a); docs/upper-memory.md's U3 moves those stacks into GLOS's
+  upper-memory page when the stub goes there.
 - **Going resident.** Open Watcom puts its runtime's code at the start of the image, so the stub is written to
   run from any segment (data through CS, no segment fixups) and is copied down to the paragraph after the
   PSP. The copy tells the kernel (RESIDENT), which moves selector 38h and the call sites to it and checks
@@ -176,9 +177,10 @@ to COM1 at each step:
     environment). While a batch file runs, the largest program is 577,600 bytes on the raw boot (plain DOS:
     511,152, because COMMAND.COM swaps itself into GLOS's XMS) and 628,272 on the HIMEMX boot (plain DOS:
     631,488).
-- **Later (opt-in, M9):** the stub moves into an unused upper-memory page that GLOS maps for the system VM,
-  leaving the PSP and environment (about 0.5 KB) below 640K. A page qualifies only when it reads back as
-  open bus (FFh), holds no option ROM signature and isn't claimed by any PCI BAR.
+- **Later (opt-in; docs/upper-memory.md, Part A, with the owner's answers of 2026-10-31):** the stub moves into
+  an unused upper-memory page that GLOS maps for the system VM, leaving the PSP and environment (about 0.5 KB)
+  below 640K. A page qualifies only when it reads back as open bus (FFh), holds no option ROM signature and
+  isn't claimed by any PCI BAR. The stub is copied back down before the kernel leaves.
 
 ## 3. CPU tables [fixed]
 
@@ -518,7 +520,8 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 
 - Only the system VM thread runs V86 code. DPMI 0300h–0302h calls, interrupt reflections and the agent's DOS
   calls nest on that thread, up to 16 levels. Each level saves the V86 state and uses its own host real-mode
-  stack in the resident stub.
+  stack: the caller's SS:SP when it gives one, else 512 bytes per level of the DPMI client's 1687h block
+  (§12.1a; `kernel/dpmi/rmcall.c`).
 - Requests from other threads are **posted** and run at the next safe point (§17.2). That serialises DOS and
   the BIOS by construction.
 - **Work posted to the VM thread** (M5, `vm_post()` in `kernel/vm/v86.c`): a function another thread hands

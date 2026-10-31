@@ -1,7 +1,7 @@
 # GLOS upper memory: a plan
 
-**Status: plan v1 (2026-10-31), for the owner's review ([Questions](#questions-for-the-owner)). Written for the
-disk cache's Q6 (docs/disk-cache.md, Decisions).**
+**Status: plan v1 (2026-10-31), with the owner's answers ([Decisions](#decisions)). Written for the disk cache's
+Q6 (docs/disk-cache.md, Decisions). Not started.**
 
 Two parts:
 - **Part A** is D41's opt-in setting, owed since M9. GLOS moves its resident stub into an upper-memory page it maps
@@ -65,11 +65,11 @@ because a page that looks free may belong to an adapter that isn't awake yet.
   Rally call INT 4Bh through 0300h (PRD Appendix A) and get whatever the IVT holds, as on plain DOS.
 - **No record of which UMA pages are free** on any test machine. GLOS reads no ROM signatures and no PCI
   expansion-ROM BARs (`kernel/drv/pci.c:64` reads the BARs from 10h only).
-- **The docs and the code disagree on 1687h.** D41 and supervisor.md §2.2 say the DPMI host needs no real-mode
-  memory per client; §12.1a describes what was built. The code answers SI = 80h (`kernel/include/dpmi.h:23`): every DPMI client allocates 2 KB of
-  its own conventional memory for GLOS's real-mode stack. MEM's largest-program figure can't see it, since it
-  belongs to the program, but a program short of conventional memory loses it. The docs are corrected either way
-  (Q3).
+- **The docs and the code disagreed on 1687h.** D41 and supervisor.md §2.2 said the DPMI host needs no
+  real-mode memory per client (§12.1a had what was built). The code answers SI = 80h
+  (`kernel/include/dpmi.h:23`): every DPMI client allocates 2 KB of its own conventional memory for GLOS's
+  real-mode stack. MEM's largest-program figure can't see it, since it belongs to the program, but a program
+  short of conventional memory loses it. The docs are corrected now (Q3).
 
 ## Part A: the stub in an upper-memory page
 
@@ -191,12 +191,12 @@ Development in `~/wt-glos-m5`, long runs in `~/wt-glos-test`, as for the cache.
   - T: with a small TSR loaded after GLOS (the AH=48h path); and with no 2.6 KB anywhere (refused, GLOS still
     answering).
   - T: shell mode, `glos exit`, then a program run by the fallback shell.
-- **U3. The host's real-mode stacks in the page** (if Q3 says so). T: `loopa-dpmi`, `djtst`, `ecm`, `hdpmireg`
+- **U3. The host's real-mode stacks in the page** (Q3: yes). T: `loopa-dpmi`, `djtst`, `ecm`, `hdpmireg`
   and `m4c-games` with SI = 0, and with the slots used up.
 - **U4. The gate.** The whole GLOS regression with `stub_page = auto` on bf6 and 486dx2, raw and HIMEMX boots:
   every DPMI suite goes through the moved ARPLs, callbacks and raw switch. Then with it off: unchanged.
 - **U5. The bench.** U0's probe result first; then the setting on: MEM /C, DOSBench's game set, `glos exit`.
-- **B1. The chipset check** (if Q4 says so). bf6 in 86Box is a 440BX, which UMBPCI supports (whether 86Box's
+- **B1. The chipset check** (Q4: yes). bf6 in 86Box is a 440BX, which UMBPCI supports (whether 86Box's
   shadow RAM behaves as silicon's is part of the check):
   - GLOS started with drivers loaded high (DOS=UMB, DEVICEHIGH, LOADHIGH);
   - and `LOADHIGH GLOS.EXE`: the stub and block buffer in a UMB, and DSKTORT with the block buffer there (DMA into
@@ -207,18 +207,20 @@ Development in `~/wt-glos-m5`, long runs in `~/wt-glos-test`, as for the cache.
 Then the docs: PRD (D41 as built; P7 with the page; D25's note from Part B), supervisor.md §2.2 (the stub,
 1687h), §4 (the first MB's one remapped page), §12.1a, the release notes.
 
-## Questions for the owner
+## Decisions
 
-- **Q1. The setting:** off by default, with `auto` and a named segment, as D41 says? *Recommended:* yes. A page
+The owner's answers (2026-10-31), each the recommendation:
+
+- **Q1. The setting:** off by default, with `auto` and a named segment, as D41 says? **Yes.** A page
   that looks free can still belong to a sleeping ISA card, and a named page lets the owner decide.
 - **Q2. The way out:** copy the stub back down at `glos exit` (2.6 KB of DOS memory needed at that moment, or the
-  exit is refused)? Or keep a real-mode exit part below 640K for good? *Recommended:* the copy. Most of the stub
+  exit is refused)? Or keep a real-mode exit part below 640K for good? **The copy.** Most of the stub
   runs again in real mode at exit (the cleanup, the shell fallback, the EXEC loop), so a resident exit part
   would save little.
 - **Q3. 1687h's 2 KB per DPMI client:** move the host's real-mode stacks into GLOS's pages with the setting on
-  (U3)? Or only correct the docs? *Recommended:* correct the docs now and move the stacks with the setting. It is
-  one more page and a fallback, and it makes D41 true.
-- **Q4. Part B:** leave GLOS-made UMBs after v1 (D25), and do the chipset check (B1) instead? *Recommended:* yes.
+  (U3)? Or only correct the docs? **Correct the docs now (done: D41, supervisor.md §2.2 and §9.5) and move the
+  stacks with the setting.** It is one more page and a fallback, and it makes D41 true.
+- **Q4. Part B:** leave GLOS-made UMBs after v1 (D25), and do the chipset check (B1) instead? **Yes.**
   GLOS-made UMBs help only programs started under GLOS, need VDS and a DOS-specific arena hack, and no census
   program is short of conventional memory. Chipset UMBs help everything, GLOS included, for the cost of a test.
 
