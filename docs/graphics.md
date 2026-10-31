@@ -501,10 +501,13 @@ everybody's sound into the Sound Blaster.
   its drawing.
 - **Hand-overs:** the engine is drained between two owners (a second at most; then the HAL resets it, and an app
   that left it hung is ended: `gpu-hang`), and the kernel's HAL resynchronises when it gets the engine back from an
-  app. On the G400 family the drain is the HAL's `engine_take`: once the old owner's DMA has ended, a DWGSYNC fence,
-  because STATUS can read idle while the WARPs still hold an app's triangles (on bench-g400 they landed on GLOS's
-  target). The hardware cursor and the display start are the RAMDAC's and the CRTC's registers, not the engine's: they
-  are written with interrupts off for a moment, whoever has the engine, so the pointer moves through a long frame.
+  app. On the G400 family the drain is the HAL's `engine_take`: once the old owner's DMA has ended, a DWGSYNC fence
+  for any WARP triangles still being drawn. GLOS can only wait for what the chip has been given: an app's work still
+  in its own DMA list when its turn ends would run after GLOS's drawing, with GLOS's target. An app therefore hands
+  over everything before a safe point; DOS-GL sends the WARP's vertices by the CPU in windows (DOS-GL 6caeb3e: its
+  windows had used the DMA stream, and conformance t27 copied an empty frame). The hardware cursor and the display
+  start are the RAMDAC's and the CRTC's registers, not the engine's: they are written with interrupts off for a
+  moment, whoever has the engine, so the pointer moves through a long frame.
 - **The watchdog:** a thread that has waited longer than the limit (`[display] gpu_watchdog`, 500 ms; `off`) for
   an app outside a safe point ends that app (`GLOS-GPU watchdog`, `GLOS-APP kill reason=gpu-watchdog`) and resets
   the engine. Nobody waiting, nothing to recover.
