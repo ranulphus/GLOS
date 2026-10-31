@@ -2936,10 +2936,12 @@ def sdlwin_case(profile, vcard, card, desk):
                 "[program SDLGLX.EXE]\nenv = DGL_EXIT_AFTER=30\n")
     checks, info = {"inputs": all(os.path.exists(os.path.join(src, e + ".EXE")) for e in exes)}, ""
     blaster = "SET BLASTER=A220 I5 D1 H5 T6"
-    # TEXCUBE full-screen on plain DOS: the reference frame.
+    # TEXCUBE full-screen on plain DOS: the reference frame, with the CPU's setup (DGL_WARP=0), as in a window
+    # (glwin_case).
     name = "sdlwin-dos-" + tag
     run(name, ["--machine", profile, "--card", vcard, "--timeout", "900", "--idle", "120",
                "--file", "%s=/TEST/TEXCUBE.EXE" % os.path.join(src, "TEXCUBE.EXE"), "--pre", "SET DGL_SNAP=150",
+               "--pre", "SET DGL_WARP=0",
                "--cmd", "SERSAY HX-START sdlwin", "--cmd", "C:\\TEST\\TEXCUBE.EXE --frames 150 --noexit",
                "--cmd", "SERSAY HX-DONE 0"])
     ref = os.path.join(ROOT, "out", name, "files", "F00150.PPM")
@@ -3077,12 +3079,12 @@ def games_case(profile, vcard, card, desk):
 
     only = os.environ.get("GAMES_GAME", "")            # fw or doom: that one alone (investigations)
     fw_on, doom_on = only in ("", "fw"), only in ("", "doom")
-    # Full-screen, on plain DOS.
+    # Full-screen, on plain DOS, with the CPU's setup (DGL_WARP=0), as in a window (glwin_case).
     name = "games-dos-" + tag
     run(name, ["--machine", profile, "--card", vcard, "--sound", "sb16", "--pre", blaster, "--mem", "64",
                "--timeout", "3600", "--idle", "300", "--file", os.path.join(g, "FWHEEL.EXE") + "=/TEST/FWHEEL.EXE",
                "--file", os.path.join(g, "WORLD.PAK") + "=/TEST/WORLD.PAK", "--pre", "SET DOOM_SERIAL=1",
-               "--pre", "SET LFN=n"] + doom_files + ["--cmd", "SERSAY HX-START games"]
+               "--pre", "SET LFN=n", "--pre", "SET DGL_WARP=0"] + doom_files + ["--cmd", "SERSAY HX-START games"]
         + (["--cmd", "C:\\TEST\\FWHEEL.EXE " + fw_args] if fw_on else []) + (["--cmd", doom] if doom_on else [])
         + ["--cmd", "SERSAY HX-DONE 0"])
     dos = open(os.path.join(ROOT, "out", name, "serial.log"), "rb").read().decode("latin-1").replace("\r", "") \
