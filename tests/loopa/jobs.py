@@ -2816,9 +2816,9 @@ GLWIN_CASES = [("bf6", "g200", "ne2kpci", "800x600x16"), ("bf6", "g400", "ne2kpc
 
 def glwin_case(profile, vcard, card, desk):
     """Windowed DOS-GL (M8 step D; DOS-GL's src/dgl/glos.c, kernel/gfx/gpu.c): DOS-GL's conformance programs
-    (build/dosgl/conform, from DOSGL_DIR: make dosgl-inputs), the same EXEs, run full-screen on plain DOS and then
-    each in a window on a GLOS desktop, which it opens itself; every frame each writes (glReadPixels of its own
-    buffer) identical between the two. Under GLOS each is an app with a window and its turns with the engine. Then
+    (build/dosgl/conform, from DOSGL_DIR: make dosgl-inputs), the same EXEs, run full-screen on plain DOS (with
+    DGL_SEQ=0, as in a window) and then each in a window on a GLOS desktop, which it opens itself; every frame each
+    writes (glReadPixels of its own buffer) identical between the two. Under GLOS each is an app with a window and its turns with the engine. Then
     a forced GL hang: TEXCUBE --hang keeps the engine in the middle of a frame until the watchdog ends it, and the
     next program draws right."""
     import time
@@ -2832,13 +2832,15 @@ def glwin_case(profile, vcard, card, desk):
         files += ["--file", "%s=/TEST/%s" % (os.path.join(src, t), t)]
     checks, info = {"tests": bool(tests)}, " tests=%d" % len(tests)
     texcube = os.path.join(ROOT, "build/dosgl/sdl/TEXCUBE.EXE")
-    # Full-screen, on plain DOS.
+    # Full-screen, on plain DOS, without the WARP's sequences (DGL_SEQ=0): in a window DOS-GL sends the WARP's
+    # vertices by the CPU (DOS-GL 6caeb3e), and a sequence needs the DMA stream, so a strip or fan goes as
+    # triangles there, whose shared edges the WARP draws a little differently (t28-t31). The stream stays on.
     dos = []
     for t in tests:
         dos += ["--cmd", "C:\\TEST\\%s --noexit" % t]
     name = "glwin-dos-" + tag
-    run(name, ["--machine", profile, "--card", vcard, "--timeout", "2400", "--idle", "240"] + files
-        + ["--cmd", "SERSAY HX-START glwin"] + dos + ["--cmd", "SERSAY HX-DONE 0"])
+    run(name, ["--machine", profile, "--card", vcard, "--timeout", "2400", "--idle", "240", "--pre", "SET DGL_SEQ=0"]
+        + files + ["--cmd", "SERSAY HX-START glwin"] + dos + ["--cmd", "SERSAY HX-DONE 0"])
     dos_log = open(os.path.join(ROOT, "out", name, "serial.log"), "rb").read().decode("latin-1") \
         if os.path.exists(os.path.join(ROOT, "out", name, "serial.log")) else ""
     checks["dos-ran"] = dos_log.count("HX-DONE 0") == len(tests) + 1

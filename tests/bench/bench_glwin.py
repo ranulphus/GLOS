@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """bench_glwin.py [--hang] [TEST...]: M8's windowed DOS-GL on the bench PC, as jobs.py's glwin case does it in 86Box.
-DOS-GL's conformance programs (DOSGL_DIR's build/exe/conform, default ~/DOSGL) run full-screen with the desktop off,
-then each in a window on the real desktop (GLOS_BENCH_DESK, default 800x600x16), and every frame each writes
+DOS-GL's conformance programs (DOSGL_DIR's build/exe/conform, default ~/DOSGL) run full-screen with the desktop off
+(DGL_SEQ=0, as in a window: FULL.BAT), then each in a window on the real desktop (GLOS_BENCH_DESK, default 800x600x16), and every frame each writes
 (glReadPixels of its own buffer, C:\\OUT) must be the same bytes both ways. Under the desktop each is an app with
 its turns at the engine (glos display's turns). --hang adds the forced GL hang: TEXCUBE --hang keeps the engine in
 a frame until GLOS's watchdog ends it and resets the engine, and the first test draws right after. Files go to
@@ -75,10 +75,19 @@ def main():
         checks["files-in"] = all(put(os.path.join(src, t), "/C/GLWIN/" + t) for t in tests)
         if hang:
             checks["files-in"] &= put(os.path.join(DOSGL, "build", "exe", "TEXCUBE.EXE"), "/C/GLWIN/TEXCUBE.EXE")
-        # Full-screen: the desktop off.
+        # Full-screen: the desktop off, and without the WARP's sequences (DGL_SEQ=0), as in a window, where DOS-GL
+        # sends the WARP's vertices by the CPU and a strip or fan goes as triangles (jobs.py's glwin case too).
+        full_bat = os.path.join(out, "FULL.BAT")
+        os.makedirs(out, exist_ok=True)
+        with open(full_bat, "w", newline="\r\n") as f:
+            f.write("@ECHO OFF\nSET DGL_SEQ=0\n" + "".join("C:\\GLWIN\\%s --noexit\n" % t for t in tests))
+        checks["files-in"] &= put(full_bat, "/C/GLWIN/FULL.BAT")
         agent.ssh("glos display off")
         time.sleep(3)
-        checks["full-ran"] = run_all("full-screen")
+        rc = agent.ssh("C:\\GLWIN\\FULL.BAT", timeout=900 * len(tests))[0]
+        checks["full-ran"] = rc == 0
+        if rc != 0:
+            notes.append("full-screen: FULL.BAT:%d" % rc)
         full = frames(os.path.join(out, "full"))
         # Windowed.
         checks["on"] = agent.ssh("glos display on " + DESK)[0] == 0
@@ -95,7 +104,7 @@ def main():
         checks["apps"] = sum(1 for l in lines[mark:] if "GLOS-APP start id=" in l) >= len(tests)
         win = frames(os.path.join(out, "win"))
         differ = [f for f in full if f not in win or open(os.path.join(out, "full", f), "rb").read()
-                  != open(os.path.join(out, "win", f), "rb").read()]
+                  != open(os.path.join(out, "win", f), "rb").read()] + [f for f in win if f not in full]
         checks["frames"] = bool(full) and not differ
         notes.append("frames: %d full-screen, %d windowed%s" % (len(full), len(win),
                                                                   ", differ: " + " ".join(differ) if differ else ""))

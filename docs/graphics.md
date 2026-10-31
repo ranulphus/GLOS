@@ -580,7 +580,9 @@ passed through to apps; their writes to COM1 reach GLOS's log line by line (a vi
 - `make loopa-audio` (AUDTEST): tones through streams at three rates, two at once, one beside a session; recorded by
   86Box and found; no underrun while fed.
 - `make loopa-glwin` (DOSGL_DIR): DOS-GL's 27 conformance programs full-screen on plain DOS and windowed on GLOS,
-  every frame the same bytes. `make loopa-sdlwin`: DOS-GL's SDL examples windowed. `make loopa-games`
+  every frame the same bytes. The full-screen runs set `DGL_SEQ=0`: in a window the WARP's vertices go by the CPU,
+  so a strip or fan goes as triangles, without the WARP's sequences, which draw shared edges a little differently
+  (t28-t31 on the G400 and G450). `tests/bench/bench_glwin.py` does the same on the bench. `make loopa-sdlwin`: DOS-GL's SDL examples windowed. `make loopa-games`
   (FIFTHWHEEL_DIR too): Fifth Wheel and PrBoom-plus's GL timedemo windowed, as on DOS, with no underrun.
 
 ## 8. The desktop's shell, pop-ups and the clipboard (M9)
