@@ -1054,7 +1054,9 @@ def djtst(profile, boot):
             diff = [l for l in dj_key(name, g[0]) if l not in dj_key(name, c[0])][:2]
             why = "output: " + " | ".join(diff or ["(lines missing)"])
         else:
-            why = dj_own(name, g[0]) or dj_own(name, c[0])
+            why = dj_own(name, g[0])
+            if not why and dj_own(name, c[0]):   # the baseline's own (UCLOCK's race, wider in 86Box): not GLOS's
+                info += " %s: baseline only, %s;" % (name, dj_own(name, c[0]))
         checks[name.lower()] = why is None
         if why:
             info += " %s: %s;" % (name, why)

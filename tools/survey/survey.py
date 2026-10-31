@@ -93,10 +93,12 @@ SUITES = {
     "prboom": dict(kind="script", cwd=DOSGL, cmd=["tools/doom/run.sh", "timedemo", "g450"]),
     "halflife": dict(kind="script", cwd=DOSGL, cmd=["tools/halflife/run.sh", "timedemo", "g450"]),
     # Retail: GTA (3dfx build, DOS/4GW) through its menus into the game. Enter until well after the menu
-    # appears (about 34 s in; a few seconds later under GLOS, which the 35 s press missed, M4c).
+    # appears (about 34 s in; a few seconds later under GLOS, which the 35 s press missed, M4c). With the Sound
+    # Blaster its DIG.INI names (220h, IRQ 5, DMA 1): without a card, Miles' SBLASTER.DIG probes for it with
+    # interrupts off for 55 ms a call, past the vif-stuck watchdog (docs/disk-cache.md, As built).
     "gta": dict(kind="run", cwd=MGA, args=["--game", "gta", "--ovl", "build/ow/GLIDE2X.OVL", "--card", "g450",
                                            "--keys", "25:0x1c,30:0x1c,35:0x1c,45:0x1c,55:0x1c,65:0x1c", "--pre", "SET MGAGLIDE=exit_after=600",
-                                           "--timeout", "1500", "--idle", "600"]),
+                                           "--sound", "sb16", "--pre", BLASTER, "--timeout", "1500", "--idle", "600"]),
     # A retail game with DOS/4GW 1.97 and MGA-Glide in its attract mode.
     "screamer-rally": dict(kind="run", cwd=MGA, args=["--game", "sr", "--ovl", "build/ow/GLIDE2X.OVL", "--card",
                                                       "g450", "--pre", "SET MGAGLIDE=exit_after=400",

@@ -426,6 +426,8 @@ Departures from the design above, each found while building:
   out on the way: block fills, hits not letting interrupts in, VIP at `rm_call`'s entry, the port watch, GLOS's
   mixer, the 4 KB shift (count mode has none and warns). A diagnostic note: a kernel line on COM1 is about 10 ms
   of busy CPU at 115,200 baud, so per-tick diagnostics that print starve the VM (and made one warning of their own).
+  Since then the gate's GTA cell has the SB16 that `DIG.INI` names (`--sound sb16` and the survey's `BLASTER`,
+  the owner's choice), so it runs GTA as configured; the probe without a card is the hostile case it is.
 
 ### C0 on bench-g400 (2026-10-29)
 
