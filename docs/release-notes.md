@@ -4,11 +4,12 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
-## The disk cache (2026-10-29)
+## The disk cache (2026-10-31)
 
-- **GLOS keeps what DOS reads from the hard disks in spare memory** (D72, docs/disk-cache.md). On bench-g400,
-  Half-Life's level took 431 s to load under GLOS without a cache and 87 s with SMARTDRV; GLOS's own cache
-  RESULTS_PENDING.
+- **GLOS keeps what DOS reads from the hard disks in spare memory** (D72, docs/disk-cache.md), on by default. On
+  bench-g400, DOSBench's Half-Life run (HLD1) took 431 s under GLOS without a cache and 87 s with SMARTDRV; with
+  GLOS's own cache it takes 71 s, or 65 s when the level was read before. Quake 2's (Q2D1) takes 37 s, down from
+  106 s. Frame rates are as before, apart from Half-Life's 5-second first frame, which is gone.
 - **Write-through:** a write goes to the disk before GLOS keeps it, so a reset or `glos reboot` never loses data.
 - **Its memory is given back** the moment a program, XMS or the kernel needs it: programs see all the memory
   they saw before.
@@ -19,7 +20,8 @@ in its `docs/milestones-*.md`.
 - **Conventional memory:** 7 KB with the cache on (its 4 KB block buffer), 3 KB with it off.
 - Tested by `make loopa-cache`: DSKTORT, a torture test of random reads and writes by CHS and LBA, from V86 code
   and protected mode, with sectors written behind the BIOS's back, gives the same answers with the cache on, off
-  and verifying, and on plain DOS.
+  and verifying, and on plain DOS. On bench-g400, verify mode compared 2.9 million hits with the disk over the
+  DOSBench game set and found no difference.
 
 ## P7 in agent mode (2026-10-29)
 

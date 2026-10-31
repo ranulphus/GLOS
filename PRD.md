@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | Status | v0.9 — the disk cache (D72, docs/disk-cache.md) and P7 in agent mode (2026-10-29), after v0.8 — M10: the owner's decisions (packages on GitHub signed by the owner's offline key, Mozilla's roots, PNG recordings, the SSH client with SFTP) and its features as built, each past its gate (2026-10-18), after v0.7 (M9's apps, 2026-10-16), v0.6 (M8's windowed DOS-GL, SDL3 and the mixer, 2026-10-15), v0.5 (M7's Matrox 2D, 2026-10-14), v0.4 (the look, the fonts and DOS text in windows, 2026-10-13), v0.3 (start modes and conventional memory, 2026-10-02) and the v0.2 deep dive (2026-10-01) |
-| Last updated | 2026-10-18 |
+| Last updated | 2026-10-31 |
 | Supersedes | v0.1. Changes are listed in Appendices D to J |
 | Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md), [docs/milestones-m6.md](docs/milestones-m6.md), [docs/milestones-m7.md](docs/milestones-m7.md), [docs/milestones-m8.md](docs/milestones-m8.md), [docs/milestones-m9.md](docs/milestones-m9.md) and [docs/milestones-m10.md](docs/milestones-m10.md) (work breakdown); [docs/gui.md](docs/gui.md) (toolkit and apps) |
 | Licence | MIT |
@@ -795,7 +795,7 @@ Targets are measured on silicon or derived from CPU models, never from 86Box spe
 | P5 | An SSH handshake takes under 0.1 s and SFTP reaches 1 MB/s or more on the reference; under 1 s and 0.3 MB/s on a 486DX2-66 | Pentium II 266 + RTL8139 (measured); 486DX2-66 (modelled until a 486 bench PC exists) |
 | P6 | Mixer refill latency under 20 ms; zero underruns in Fifth Wheel windowed | Pentium II + SB16 |
 | P7 | GLOS's resident stub is 4 KB or less (MEM /C), so MEM's largest program size under GLOS is within 4 KB of plain DOS from the same boot (D41); 8 KB with the disk cache on, for its block buffer (D72). Under `/RUN` and in agent mode, between jobs | Loop A, HIMEMX boot (measured) |
-| P8 | With the disk cache on: DISKRD's repeated 32 KB reads take 0.4 ms or less; Half-Life's hlbench1 (DOSBench HLD1) loads no slower than with SMARTDRV on its first run (87 s) and faster on its second (85 s); game frame rates unchanged (D72) | bench-g400 |
+| P8 | With the disk cache on: DISKRD's repeated 32 KB reads are no slower than with SMARTDRV on plain DOS (0.45 ms); Half-Life's hlbench1 (DOSBench HLD1) loads no slower than with SMARTDRV on its first run (87 s) and faster on its second (85 s); game frame rates unchanged (D72). Met on 2026-10-31: 0.41 ms, HLD1 71 s and 65 s (docs/disk-cache.md, C4) | bench-g400 |
 
 **Levers:**
 - VME/PVI;
@@ -1368,3 +1368,8 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
 - **P7 in agent mode:** the settings writer had held the DOS server's 32 KB transfer buffer since M9, so GLOS took
   35 KB of conventional memory on bench-g400. It now holds it only while it reads or writes GLOS.CFG, and P7's
   test measures agent mode too.
+- **C4 on bench-g400 (2026-10-31):** verify mode found no mismatch in 2.9 million hits, and `fsck.vfat -n` found
+  nothing new. P8's first figure is restated (the owner's choice): DISKRD's repeated 32 KB reads were to take
+  0.4 ms or less, a figure set before measuring, and took 0.41 ms. That is about two memory copies on this PC
+  (into DOS's buffer, then the program's), which no cache avoids. P8 now asks for no slower than SMARTDRV on plain
+  DOS (0.45 ms), the comparison 0.4 ms stood for. The cache is on by default.

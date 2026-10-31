@@ -1,7 +1,8 @@
 # GLOS disk cache: a plan
 
 **Status: plan v2 (2026-10-29), checked against the code and by probes, with the owner's answers
-([Decisions](#decisions)); built on branch `cache` (see [As built](#as-built)).**
+([Decisions](#decisions)); built (see [As built](#as-built)) and past C4 on bench-g400 (2026-10-31); on by
+default.**
 
 PRD §2.3 lists "GLOS's own 32-bit FAT driver and disk cache" after v1. This plan takes the cache alone, now, and
 leaves the FAT driver where it is. PRD sections: §4.5 (storage), §6.2 (memory), §6.8 (the DOS server), §7.2
@@ -331,10 +332,12 @@ Then the docs:
 
 DOSBench needs no change: it measures frame rates, not loads. The bench's results note whether the cache was on.
 
-## P8 (proposed)
+## P8
 
 On bench-g400:
-- DISKRD's repeated 32 KB reads take 0.4 ms or less (SMARTDRV under GLOS: 0.74–0.84 ms);
+- DISKRD's repeated 32 KB reads are no slower than with SMARTDRV on plain DOS: 0.45 ms (under GLOS, SMARTDRV took
+  0.74–0.84 ms). The plan first said 0.4 ms or less, a figure set before measuring; C4 found 0.41 ms, which is
+  about two memory copies on that PC, and the owner chose to restate it (2026-10-31);
 - HLD1's second run is faster than with SMARTDRV (85 s);
 - DOSBench's game frame rates are unchanged within run-to-run noise.
 
@@ -446,3 +449,45 @@ The cache build in count mode, every INT 13h made through `rm_call` and counted,
 - **Trapping every INT 13h costs about 1%.**
 - The bench's BIOS (a read-only probe first, then GLOS.EXE's own): one disk, CHS 1022/255/63, extensions 2.1,
   33,867,188 sectors; AH=48h's flags bit 0, so the BIOS itself handles transfers across a 64 KB boundary.
+
+### C4 on bench-g400 (2026-10-31)
+
+The cache build (GLOS main 800a99d merged into `cache`, 8b15509) in C:\GLOS, with the release build put back
+afterwards. The 2026-10-26 backup was there first.
+
+**Verify mode** (every hit read from the disk as well and compared), DISKRD and the DOSBench game set (Q1D1, Q1D1M,
+Q1D1P, Q2D1, Q2D1M, Q2D1P, Q2D2, HLD1, HLD2, HLD1V, HLD2V) twice from one boot:
+
+| | Hits (calls) | Sectors from the cache | Sectors from the disk | Blocks filled | Mismatches |
+|---|---|---|---|---|---|
+| First pass | 1,423,456 | 5,514,855 | 152,561 | 3,003 | 0 |
+| Second pass | 1,439,257 | 5,693,908 | 40 | 5 | 0 |
+
+- Every game exited with 0. The second pass read 40 sectors from the disk in all; the cache held 91 MB.
+- No port drops and no `nofill` lines: nothing gave the disk a command behind the cache.
+- `fsck.vfat -n` from Ubuntu before and after: the same 2 lost clusters as the baseline, and nothing new. The
+  free count moved by 16 clusters and the file count by one: C4's own DISKRD.EXE (13 clusters), the larger
+  GLOSK.BIN (2) and a game's file that grew.
+
+**On** (the default), timed from the host, cold after `glos cache drop` and warm straight after. The 2026-10-29
+DISKRD figures are each setup's second run. DISKRD's tests after its first (seq32) read sectors seq32 has just read, so
+they are hits even cold; its int13 test reads sectors further out:
+
+| | No cache (2026-10-29) | SMARTDRV before GLOS (2026-10-29) | GLOS's cache, cold | GLOS's cache, warm |
+|---|---|---|---|---|
+| DISKRD's repeated 32 KB read | 6.7 ms | 0.74–0.84 ms | 0.41 ms | 0.41 ms |
+| DISKRD's 512-byte read call | 0.46 ms | 0.06–0.09 ms | 0.038 ms | 0.038 ms |
+| DISKRD's random 4 KB read | 9.7 ms | 0.60 ms | 0.51 ms | 0.51 ms |
+| DISKRD's 32 KB INT 13h read | 6.0 ms | 6.0 ms | 6.1 ms (sectors not yet read) | 0.21 ms |
+| Q2D1, wall time | 106 s | 38 s | 37 s | 32 s |
+| HLD1, wall time | 431 s | 87 s (85 s second) | 71 s | 65 s |
+| Q2D1, fps | 29.2 | 29.2 | 29.2 | 29.4 |
+| HLD1, fps (its longest frame) | 33.1 (5.1 s) | 38.6 (0.53 s) | 38.8 (0.36 s) | 39.0 (0.34 s) |
+
+- P8 is met. DISKRD's repeated 32 KB read is within 3% of 0.4 ms, the figure first proposed. A raw 32 KB INT 13h
+  hit takes 0.21 ms, about one memory copy on this PC, and a DOS read through DJGPP's transfer buffer copies
+  every byte twice.
+- Frame rates are as before. Half-Life's first frame, 5.1 s with no cache, is gone.
+- The three drops are the three `glos cache drop` commands.
+
+At the end of C4 the cache is on by default (116f5cb, on `cache` since 2026-10-29).
