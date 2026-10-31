@@ -97,7 +97,7 @@ TINYSSH_SRCS := $(filter-out %_lib25519.c %_lib1305.c,$(wildcard third_party/tin
 SSHC_SRCS := sdk/sshc/sshc.c sdk/sshc/keys.c sdk/sshc/sftpc.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c
 SSHC_FLAGS := -Iinclude -Ikernel/ssh -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint
 HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:kernel/vm/v86dec.c \
-              cache_test:kernel/drv/cstore.c \
+              cache_test:kernel/drv/cstore.c umapage_test:kernel/mm/umapage.c \
               vpic_test:kernel/vm/vpic.c png_test:kernel/lib/png.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
@@ -761,6 +761,11 @@ build/dj/DISKRD.EXE: tests/dos/diskrd.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O2 -Wall -Werror -o $@ $<
+# What is in the upper memory area, read-only (docs/upper-memory.md U0).
+build/dj/UMAPROBE.EXE: tests/dos/umaprobe.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 # The disk cache's torture test (docs/disk-cache.md C3), on run.py --scratch-hdd's blank disk.
 build/dj/DSKTORT.EXE: tests/dos/dsktort.c
 	@mkdir -p $(dir $@)
