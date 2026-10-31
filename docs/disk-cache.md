@@ -410,13 +410,22 @@ Departures from the design above, each found while building:
   largest block counting the cache's frames) walked 262,144 frames with interrupts off: `vif-stuck` at the end of
   a direct-mode session (10 of 20 runs). `pmm_frames()` is now the RAM's end (`pmm.top`, the highest free range
   the loader gave), the bitmap's scans stop there, and the drops walk the segments' lists: 89 frames in Loop A.
-- **Open: GTA's `vif-stuck` with the cache on** (same day; reported by the gate, not failed; GTA's frames are the
-  same). Each comes from GTA's Sound Blaster probe in real mode, inside a DOS call, with its interrupts off: it
-  resets the DSP at 220h and polls base+0Eh/0Ah up to 65,536 times for AAh, and reads FFh, so the loop runs out
-  and an IRQ waits over 50 ms. With the cache off no such stretch passes 20 ms. Not the cause: block fills (off,
-  the same), hits not letting interrupts in, VIP at `rm_call`'s entry, the port watch (only 1F7h and 177h trap),
-  GLOS's mixer (it never touched the SB16). With the cache on GTA loads 4 KB higher (PSP 13FFh, not 12FEh: the
-  block buffer), which is what is left to look at.
+- **GTA's `vif-stuck` with the cache on: GTA's own, the cache only moves when it shows** (2026-10-31; reported by
+  the gate, not failed; GTA's frames are the same). GTA's `DIG.INI` names a Sound Blaster at 220h (Miles Sound
+  System 3.50, `SBLASTER.DIG`); the gate's machine has none. At three points in its start-up GTA calls the
+  driver's detect seven times in a row. Each call resets the DSP and polls base+0Eh/0Ah 65,536 times for AAh
+  with its interrupts off (`SBLASTER.DIG` 067Dh), reads FFh, and runs out: 54.8 ms of guest time in 86Box, an
+  episode of seven 381 ms. GTA turns its interrupts on between calls, so a waiting IRQ is delivered there. The
+  watchdog warns after 51 ticks, so a call warns only when an IRQ arrives in its first 3 ms or so; the call is
+  as long as the timer's period (54.9 ms), so the phase hardly moves within an episode, and whether an episode
+  warns is set by when it starts, which the disk's speed decides. Sampled on every tick under each mode (the
+  GTA cell, its three runs each): on, 2-3 warnings a run; off, none; count (no blocks kept, the cache-off layout),
+  1 in two of three runs; verify, none, and no mismatch in any hit. So the cache's data is the disk's, and the
+  warning comes without the cache too. It is a true report: GTA keeps its interrupts off for 55 ms with an IRQ
+  waiting, and on silicon (two empty ISA ports at about 1 us each a poll) a call would take about 130 ms. Ruled
+  out on the way: block fills, hits not letting interrupts in, VIP at `rm_call`'s entry, the port watch, GLOS's
+  mixer, the 4 KB shift (count mode has none and warns). A diagnostic note: a kernel line on COM1 is about 10 ms
+  of busy CPU at 115,200 baud, so per-tick diagnostics that print starve the VM (and made one warning of their own).
 
 ### C0 on bench-g400 (2026-10-29)
 
