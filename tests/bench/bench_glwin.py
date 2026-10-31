@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """bench_glwin.py [--hang] [TEST...]: M8's windowed DOS-GL on the bench PC, as jobs.py's glwin case does it in 86Box.
 DOS-GL's conformance programs (DOSGL_DIR's build/exe/conform, default ~/DOSGL) run full-screen with the desktop off
-(DGL_SEQ=0, as in a window: FULL.BAT), then each in a window on the real desktop (GLOS_BENCH_DESK, default 800x600x16), and every frame each writes
+(DGL_WARP=0, as in a window: FULL.BAT), then each in a window on the real desktop (GLOS_BENCH_DESK, default 800x600x16), and every frame each writes
 (glReadPixels of its own buffer, C:\\OUT) must be the same bytes both ways. Under the desktop each is an app with
 its turns at the engine (glos display's turns). --hang adds the forced GL hang: TEXCUBE --hang keeps the engine in
 a frame until GLOS's watchdog ends it and resets the engine, and the first test draws right after. Files go to
@@ -75,12 +75,12 @@ def main():
         checks["files-in"] = all(put(os.path.join(src, t), "/C/GLWIN/" + t) for t in tests)
         if hang:
             checks["files-in"] &= put(os.path.join(DOSGL, "build", "exe", "TEXCUBE.EXE"), "/C/GLWIN/TEXCUBE.EXE")
-        # Full-screen: the desktop off, and without the WARP's sequences (DGL_SEQ=0), as in a window, where DOS-GL
-        # sends the WARP's vertices by the CPU and a strip or fan goes as triangles (jobs.py's glwin case too).
+        # Full-screen: the desktop off, and with the CPU's setup (DGL_WARP=0), as in a window, where DOS-GL never
+        # uses the WARP (jobs.py's glwin case too).
         full_bat = os.path.join(out, "FULL.BAT")
         os.makedirs(out, exist_ok=True)
         with open(full_bat, "w", newline="\r\n") as f:
-            f.write("@ECHO OFF\nSET DGL_SEQ=0\n" + "".join("C:\\GLWIN\\%s --noexit\n" % t for t in tests))
+            f.write("@ECHO OFF\nSET DGL_WARP=0\n" + "".join("C:\\GLWIN\\%s --noexit\n" % t for t in tests))
         checks["files-in"] &= put(full_bat, "/C/GLWIN/FULL.BAT")
         agent.ssh("glos display off")
         time.sleep(3)
