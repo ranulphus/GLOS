@@ -501,8 +501,14 @@ everybody's sound into the Sound Blaster.
   its drawing.
 - **Hand-overs:** the engine is drained between two owners (a second at most; then the HAL resets it, and an app
   that left it hung is ended: `gpu-hang`), and the kernel's HAL resynchronises when it gets the engine back from an
-  app. The hardware cursor and the display start are the RAMDAC's and the CRTC's registers, not the engine's: they
-  are written with interrupts off for a moment, whoever has the engine, so the pointer moves through a long frame.
+  app. On the G400 family the drain is the HAL's `engine_take`: once the old owner's DMA has ended, a DWGSYNC fence
+  for any WARP triangles still being drawn. GLOS can only wait for what the chip has been given: an app's work still
+  in its own DMA list when its turn ends would run after GLOS's drawing, with GLOS's target. An app therefore hands
+  over everything before a safe point. DOS-GL doesn't use the WARP in windows at all: with the DMA stream,
+  conformance t27 copied an empty frame (2026-10-31, Loop A), and with the WARP's vertices by the CPU, DOSBench's
+  scenes on bench-g400 held the engine past the GPU watchdog, slower per triangle than the CPU's setup anyway. The hardware cursor and the display
+  start are the RAMDAC's and the CRTC's registers, not the engine's: they are written with interrupts off for a
+  moment, whoever has the engine, so the pointer moves through a long frame.
 - **The watchdog:** a thread that has waited longer than the limit (`[display] gpu_watchdog`, 500 ms; `off`) for
   an app outside a safe point ends that app (`GLOS-GPU watchdog`, `GLOS-APP kill reason=gpu-watchdog`) and resets
   the engine. Nobody waiting, nothing to recover.
@@ -575,7 +581,9 @@ passed through to apps; their writes to COM1 reach GLOS's log line by line (a vi
 - `make loopa-audio` (AUDTEST): tones through streams at three rates, two at once, one beside a session; recorded by
   86Box and found; no underrun while fed.
 - `make loopa-glwin` (DOSGL_DIR): DOS-GL's 27 conformance programs full-screen on plain DOS and windowed on GLOS,
-  every frame the same bytes. `make loopa-sdlwin`: DOS-GL's SDL examples windowed. `make loopa-games`
+  every frame the same bytes. The full-screen runs set `DGL_WARP=0`: in a window DOS-GL sets triangles up by the
+  CPU, never by the G400's WARP, which draws some edges a little differently (t10, t28-t31 on the G400 and G450).
+  `tests/bench/bench_glwin.py` does the same on the bench. `make loopa-sdlwin`: DOS-GL's SDL examples windowed. `make loopa-games`
   (FIFTHWHEEL_DIR too): Fifth Wheel and PrBoom-plus's GL timedemo windowed, as on DOS, with no underrun.
 
 ## 8. The desktop's shell, pop-ups and the clipboard (M9)

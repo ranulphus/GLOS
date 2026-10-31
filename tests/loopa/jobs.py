@@ -2969,9 +2969,9 @@ GLWIN_CASES = [("bf6", "g200", "ne2kpci", "800x600x16"), ("bf6", "g400", "ne2kpc
 
 def glwin_case(profile, vcard, card, desk):
     """Windowed DOS-GL (M8 step D; DOS-GL's src/dgl/glos.c, kernel/gfx/gpu.c): DOS-GL's conformance programs
-    (build/dosgl/conform, from DOSGL_DIR: make dosgl-inputs), the same EXEs, run full-screen on plain DOS and then
-    each in a window on a GLOS desktop, which it opens itself; every frame each writes (glReadPixels of its own
-    buffer) identical between the two. Under GLOS each is an app with a window and its turns with the engine. Then
+    (build/dosgl/conform, from DOSGL_DIR: make dosgl-inputs), the same EXEs, run full-screen on plain DOS (with
+    DGL_WARP=0, as in a window) and then each in a window on a GLOS desktop, which it opens itself; every frame each
+    writes (glReadPixels of its own buffer) identical between the two. Under GLOS each is an app with a window and its turns with the engine. Then
     a forced GL hang: TEXCUBE --hang keeps the engine in the middle of a frame until the watchdog ends it, and the
     next program draws right."""
     import time
@@ -2985,13 +2985,14 @@ def glwin_case(profile, vcard, card, desk):
         files += ["--file", "%s=/TEST/%s" % (os.path.join(src, t), t)]
     checks, info = {"tests": bool(tests)}, " tests=%d" % len(tests)
     texcube = os.path.join(ROOT, "build/dosgl/sdl/TEXCUBE.EXE")
-    # Full-screen, on plain DOS.
+    # Full-screen, on plain DOS, with the CPU's setup (DGL_WARP=0), as in a window, where DOS-GL never uses the
+    # G400's WARP (its src/dgl/glos.c): the WARP draws some edges a little differently (t10, t28-t31).
     dos = []
     for t in tests:
         dos += ["--cmd", "C:\\TEST\\%s --noexit" % t]
     name = "glwin-dos-" + tag
-    run(name, ["--machine", profile, "--card", vcard, "--timeout", "2400", "--idle", "240"] + files
-        + ["--cmd", "SERSAY HX-START glwin"] + dos + ["--cmd", "SERSAY HX-DONE 0"])
+    run(name, ["--machine", profile, "--card", vcard, "--timeout", "2400", "--idle", "240", "--pre", "SET DGL_WARP=0"]
+        + files + ["--cmd", "SERSAY HX-START glwin"] + dos + ["--cmd", "SERSAY HX-DONE 0"])
     dos_log = open(os.path.join(ROOT, "out", name, "serial.log"), "rb").read().decode("latin-1") \
         if os.path.exists(os.path.join(ROOT, "out", name, "serial.log")) else ""
     checks["dos-ran"] = dos_log.count("HX-DONE 0") == len(tests) + 1
@@ -3088,10 +3089,12 @@ def sdlwin_case(profile, vcard, card, desk):
                 "[program SDLGLX.EXE]\nenv = DGL_EXIT_AFTER=30\n")
     checks, info = {"inputs": all(os.path.exists(os.path.join(src, e + ".EXE")) for e in exes)}, ""
     blaster = "SET BLASTER=A220 I5 D1 H5 T6"
-    # TEXCUBE full-screen on plain DOS: the reference frame.
+    # TEXCUBE full-screen on plain DOS: the reference frame, with the CPU's setup (DGL_WARP=0), as in a window
+    # (glwin_case).
     name = "sdlwin-dos-" + tag
     run(name, ["--machine", profile, "--card", vcard, "--timeout", "900", "--idle", "120",
                "--file", "%s=/TEST/TEXCUBE.EXE" % os.path.join(src, "TEXCUBE.EXE"), "--pre", "SET DGL_SNAP=150",
+               "--pre", "SET DGL_WARP=0",
                "--cmd", "SERSAY HX-START sdlwin", "--cmd", "C:\\TEST\\TEXCUBE.EXE --frames 150 --noexit",
                "--cmd", "SERSAY HX-DONE 0"])
     ref = os.path.join(ROOT, "out", name, "files", "F00150.PPM")
@@ -3229,12 +3232,12 @@ def games_case(profile, vcard, card, desk):
 
     only = os.environ.get("GAMES_GAME", "")            # fw or doom: that one alone (investigations)
     fw_on, doom_on = only in ("", "fw"), only in ("", "doom")
-    # Full-screen, on plain DOS.
+    # Full-screen, on plain DOS, with the CPU's setup (DGL_WARP=0), as in a window (glwin_case).
     name = "games-dos-" + tag
     run(name, ["--machine", profile, "--card", vcard, "--sound", "sb16", "--pre", blaster, "--mem", "64",
                "--timeout", "3600", "--idle", "300", "--file", os.path.join(g, "FWHEEL.EXE") + "=/TEST/FWHEEL.EXE",
                "--file", os.path.join(g, "WORLD.PAK") + "=/TEST/WORLD.PAK", "--pre", "SET DOOM_SERIAL=1",
-               "--pre", "SET LFN=n"] + doom_files + ["--cmd", "SERSAY HX-START games"]
+               "--pre", "SET LFN=n", "--pre", "SET DGL_WARP=0"] + doom_files + ["--cmd", "SERSAY HX-START games"]
         + (["--cmd", "C:\\TEST\\FWHEEL.EXE " + fw_args] if fw_on else []) + (["--cmd", doom] if doom_on else [])
         + ["--cmd", "SERSAY HX-DONE 0"])
     dos = open(os.path.join(ROOT, "out", name, "serial.log"), "rb").read().decode("latin-1").replace("\r", "") \

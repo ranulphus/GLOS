@@ -43,6 +43,19 @@ static struct {
 
 typedef char sh_dwg_is_bit_0[SH_DWG == SETUP_VALID_DWG ? 1 : -1];   /* (setup_forget_dwgctl, in engine.c) */
 
+/* DWGCTL for a draw that doesn't come through setup_triangle (the WARP's),
+ * under the same shadow and the same rule for bits that act when written. */
+void setup_dwgctl(uint32_t dwgctl)
+{
+    mga_warp_dwgctl = dwgctl;          /* (the barrier's, engine.c) */
+    if ((setup_valid & SH_DWG) && sh.dwgctl == dwgctl && !(dwgctl & DWG_WRITE_TIME))
+        return;
+    fifo_reserve(1);
+    MGA_WR32(MGAREG_DWGCTL, dwgctl);
+    sh.dwgctl = dwgctl;
+    setup_valid |= SH_DWG;
+}
+
 static int same(const uint32_t *a, const uint32_t *b, int n)
 {
     int i;
@@ -325,6 +338,10 @@ static void split4(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, cons
 
 SETUP_TRI(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, const mga_tri_ctx *ctx)
 {
+    if (setup_stale) {                 /* the WARP wrote the registers since */
+        setup_valid = 0;
+        setup_stale = 0;
+    }
     const mga_svtx *v[3], *t;
     int64_t area2, cross;
     int mid_right;
@@ -333,7 +350,7 @@ SETUP_TRI(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, const mga_tri
     geom g;
     int64_t d_long = 0;
     double K = 1.0;
-    int k = 0, k1 = 0, map1_sizes = 1;
+    int map1_sizes = 1;
     int32_t y_top, y_mid, y_bot, part;
     int reduce;
     uint32_t flags = ctx->flags;
@@ -419,7 +436,7 @@ SETUP_TRI(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, const mga_tri
             if (at > ms) ms = at;
             if (v[i]->q > mq) mq = v[i]->q;
         }
-        k = prescale(ms, mq, &K);
+        prescale(ms, mq, &K);
         make_plane(&ps, &g, v[0]->s * K, v[1]->s * K, v[2]->s * K);
         make_plane(&pt, &g, v[0]->t * K, v[1]->t * K, v[2]->t * K);
         make_plane(&pq, &g, v[0]->q * K, v[1]->q * K, v[2]->q * K);
@@ -435,7 +452,7 @@ SETUP_TRI(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, const mga_tri
             if (at > ms) ms = at;
             if (v[i]->q > mq) mq = v[i]->q;
         }
-        k1 = prescale(ms, mq, &K1);
+        prescale(ms, mq, &K1);
         make_plane(&ps1, &g, v[0]->s1 * K1, v[1]->s1 * K1, v[2]->s1 * K1);
         make_plane(&pt1, &g, v[0]->t1 * K1, v[1]->t1 * K1, v[2]->t1 * K1);
         make_plane(&pq1, &g, v[0]->q * K1, v[1]->q * K1, v[2]->q * K1);
@@ -494,9 +511,16 @@ SETUP_TRI(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, const mga_tri
             w_s = !(setup_valid & SH_SPEC) || !same(sh.spec, si, 6);
         }
         if (flags & MGA_S_TEX) {
+            /* rfw = 8 - log2(size), whatever the prescale: the
+             * specification's 8 - log2 - (q fraction bits - 16) would take
+             * k off, but on a real G400 that misplaced the texels of
+             * prescaled triangles in perspective (bilinear lightmaps by
+             * whole faces; DOS-GL TEXEXP part 2, 2026-10-27), and with
+             * 8 - log2 they match the WARP's, Mesa's and 86Box's (which
+             * ignores rfw). The sizes then change only with the texture. */
             int tw = ctx->tex_tw, th = ctx->tex_th;
-            wh[0] = TEXWH(tw, 8 - tw - k, (1u << tw) - 1);
-            wh[1] = TEXWH(th, 8 - th - k, (1u << th) - 1);
+            wh[0] = TEXWH(tw, 8 - tw, (1u << tw) - 1);
+            wh[1] = TEXWH(th, 8 - th, (1u << th) - 1);
             tm[0] = (uint32_t)fx(ps.dx, 1048576.0);
             tm[1] = (uint32_t)fx(ps.dy, 1048576.0);
             tm[2] = (uint32_t)fx(pt.dx, 1048576.0);
@@ -559,6 +583,7 @@ SETUP_TRI(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, const mga_tri
             setup_valid |= SH_SPEC;
         }
         if (w_wh) {                     /* tmap0dis is clear here: both maps */
+            setup_wrote_texsize = 1;
             WR(MGAREG_TEXWIDTH, wh[0]);
             WR(MGAREG_TEXHEIGHT, wh[1]);
             keep(sh.wh[0], wh, 2);
@@ -683,8 +708,8 @@ SETUP_TRI(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, const mga_tri
             if (map1_sizes) {
                 uint32_t wh1[2], tm1[6];
                 int w_wh1, w_tm1;
-                wh1[0] = TEXWH(tw, 8 - tw - k1, (1u << tw) - 1);
-                wh1[1] = TEXWH(th, 8 - th - k1, (1u << th) - 1);
+                wh1[0] = TEXWH(tw, 8 - tw, (1u << tw) - 1);      /* (rfw as map 0's) */
+                wh1[1] = TEXWH(th, 8 - th, (1u << th) - 1);
                 tm1[0] = (uint32_t)fx(ps1.dx, 1048576.0);
                 tm1[1] = (uint32_t)fx(ps1.dy, 1048576.0);
                 tm1[2] = (uint32_t)fx(pt1.dx, 1048576.0);
@@ -694,6 +719,7 @@ SETUP_TRI(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, const mga_tri
                 w_wh1 = !(setup_valid & SH_WH1) || !same(sh.wh[1], wh1, 2);
                 w_tm1 = !(setup_valid & SH_TM1) || !same(sh.tm[1], tm1, 6);
                 if (w_wh1) {            /* map 1 only */
+                    setup_wrote_texsize = 1;
                     WR(MGAREG_TEXWIDTH, wh1[0]);
                     WR(MGAREG_TEXHEIGHT, wh1[1]);
                     keep(sh.wh[1], wh1, 2);

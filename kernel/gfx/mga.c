@@ -423,7 +423,7 @@ int mga_handover(int kernel, int reset)
         return 0;
     if (reset) {
         engine_reset();                         /* (the watchdog's: an app had it, stuck) */
-    } else if (engine_sync(1000000) != 0) {
+    } else if (engine_take(1000000) != 0) {     /* (an app's WARP triangles fenced too: its HAL's, not ours) */
         kprintf("GLOS-WARN mga-reset when=handover resets=%u\n", engine_resets);
         r = -1;
     }
