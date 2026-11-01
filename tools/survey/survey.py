@@ -85,10 +85,12 @@ SUITES = {
                                                     "--file", "build/cc/default.zip=/TEST/TEXPACKS/DEFAULT.ZIP",
                                                     "--pre", "SET DGL_EXIT_AFTER=300", "--pre", "SET DGL_STATS=1",
                                                     "--timeout", "1500", "--idle", "300"]),
+    # Fifth Wheel's fixed lap: 2,250-2,380 s on plain DOS until DOS-GL f399e73's WARP path, which 86Box takes
+    # about a fifth longer to emulate (31,320 of its 37,004 frames in 2,400 s; the same state hashes).
     "fifthwheel": dict(kind="run", cwd=FW, args=["--exe", "build/dos/FWHEEL.EXE", "--file", "build/data/WORLD.PAK",
                                                  "--args=-test -fixed -autopilot -laps 1 -hash", "--card", "g450",
                                                  "--sound", "sb16", "--pre", BLASTER, "--idle", "300",
-                                                 "--timeout", "2400"]),
+                                                 "--timeout", "3600"]),
     "quake": dict(kind="script", cwd=DOSGL, cmd=["tools/quake/run.sh", "quake", "g450"]),
     "prboom": dict(kind="script", cwd=DOSGL, cmd=["tools/doom/run.sh", "timedemo", "g450"]),
     "halflife": dict(kind="script", cwd=DOSGL, cmd=["tools/halflife/run.sh", "timedemo", "g450"]),

@@ -246,7 +246,7 @@ def base_key(job, spec, boot):
 
 def slack(spec):
     """run.py's --timeout for a GLOS run: half as long again as the program's own, which is sized for its run
-    without GLOS (Fifth Wheel's takes 2,379 of its 2,400 s; GLOS and a gate's load add a few per cent)."""
+    without GLOS (Fifth Wheel's takes about 2,840 of its 3,600 s; GLOS and a gate's load add a few per cent)."""
     a = spec.get("args", [])
     if spec["kind"] != "run":                   # (a script sets its own, which LOOPA_EXTRA_ARGS would override)
         return []
