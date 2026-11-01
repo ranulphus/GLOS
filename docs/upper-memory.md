@@ -94,6 +94,22 @@ conventional memory. GLOS starts either way.
 What the rules can't see: an ISA card whose memory appears only when its driver wakes it. That is why the
 setting is opt-in, and why it accepts a named page.
 
+### What U0 found (2026-11-01)
+
+UMAPROBE on plain DOS and under GLOS gave the same pages on every Loop A machine (`make loopa-umaprobe`, 7 of 7).
+86Box answers FFh for memory nothing maps, as silicon does. No machine has a PCI memory or expansion-ROM BAR
+below 1 MB.
+
+| Machine | Option ROMs | Not open from C800h | Free pages | `auto` |
+|---|---|---|---|---|
+| bf6, G200 / G400 / VBE | C000h, 32 KB | E000h–E7FFh BIOS data | 32: C800h–DFFFh, E800h–EFFFh | C800h |
+| bf6, G450 | C000h, 34 KB | C800h (the ROM's end); C900h–CBFFh zero (the BIOS's shadow RAM, 16 KB steps); E000h–E7FFh data | 28 | CC00h |
+| 486dx2, VBE / G200 PCI | C000h, 32 KB | E000h–EBFFh data or zero | 28: C800h–DFFFh, EC00h–EFFFh | C800h |
+| 486dx2, G450 PCI | C000h, 34 KB | C800h (the ROM's end); E000h–EBFFh | 27 | C900h |
+| bench-g400 (under GLOS) | C000h, 32 KB | E000h–EFFFh BIOS data (E820 reserves E0000h–FFFFFh) | 24: C800h–DFFFh | C800h |
+
+The G450's shadow RAM is why a page reading 00h is never taken: it is RAM, but the BIOS write-protects it.
+
 ### Going resident
 
 As today, the stub copies itself to PSP+10h and tells the kernel (RESIDENT). With a page, the kernel then:
