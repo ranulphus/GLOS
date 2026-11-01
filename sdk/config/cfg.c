@@ -8,8 +8,8 @@
 
 /* ---- the schema */
 
-const char *const cfg_sections[] = { "display", "input", "sound", "net", "time", "cache", "vnc", "desktop", "shell", "open",
-                                     "program",
+const char *const cfg_sections[] = { "display", "input", "sound", "net", "time", "cache", "memory", "vnc", "desktop",
+                                     "shell", "open", "program",
                                      0 };
 
 const struct cfg_key cfg_schema[] = {
@@ -56,6 +56,10 @@ const struct cfg_key cfg_schema[] = {
       "keeps nothing and counts. Its 4 KB block buffer comes with GLOS's next start" },
     { "cache", "size", CFG_NUMBER, CFG_NOW, 1, 2048, "auto", "auto", "Cache &size (MB)",
       "At most this much memory; auto: all that is spare, given back the moment anything needs it" },
+    /* [memory]: upper memory (docs/upper-memory.md) */
+    { "memory", "stub_page", CFG_TEXT, CFG_RESTART, 3, 4, "page", "off", "&Upper memory page",
+      "GLOS's resident part (2.6 KB) in a free 4 KB page above 640 KB: auto finds one from C800, or name it (D800). "
+      "A page a card or ROM uses is refused" },
     /* [vnc] (M10 step F) */
     { "vnc", "enable", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "off", "&Viewers through SSH",
       "A VNC viewer may see and use the desktop, through an SSH tunnel to port 5900 (ssh -L): whoever may log in" },
@@ -188,6 +192,26 @@ void cfg_kind(const char *section, char *out, int room)
     out[i] = 0;
 }
 
+long cfg_page(const char *v)
+{
+    long seg = 0;
+    int i;
+    if (same(v, "off"))
+        return 0;
+    if (same(v, "auto"))
+        return 1;
+    for (i = 0; i < 4; i++) {
+        int c = lower((unsigned char)v[i]);
+        if (c >= '0' && c <= '9')
+            seg = seg * 16 + (c - '0');
+        else if (c >= 'a' && c <= 'f')
+            seg = seg * 16 + (c - 'a' + 10);
+        else
+            return -1;
+    }
+    return !v[4] && !(seg & 0xFF) && seg >= 0xC800 && seg <= 0xEF00 ? seg : -1;
+}
+
 int cfg_section_ok(const char *section)
 {
     char kind[16];
@@ -278,6 +302,11 @@ int cfg_check(const struct cfg_key *k, const char *v, char *why, int room)
             return say(why, room, "too long", "", "");
         if (vl < k->min)
             return say(why, room, "empty", "", "");
+        if (same(k->choices ? k->choices : "", "page")) {
+            if (cfg_page(v) < 0)
+                return say(why, room, "off, auto, or a page's segment from C800 to EF00 (D800)", "", "");
+            return 0;
+        }
         if (same(k->choices ? k->choices : "", "tz")) {
             struct tz z;
             if (tz_parse(v, &z) != 0)

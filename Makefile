@@ -11,6 +11,8 @@
 #   make loopa-hostile  M2's exit: hostile programs killed with the hotkey
 #   make loopa-sched    the scheduler's self-test threads beside the VM (M3)
 #   make loopa-mem      conventional memory under GLOS against plain DOS (PRD P7)
+#   make loopa-mem-page the resident stub in a page of upper memory (docs/upper-memory.md)
+#   make loopa-umaprobe what is in each Loop A machine's upper memory area (U0, read-only)
 #   make loopa-shell    GLOS as the DOS shell: SHELL= boots, AUTOEXEC.BAT, the fallback
 #   make loopa-net      the NE2000s: DHCP, TCP echo, refused under a packet driver
 #   make loopa-ssh      ssh from the host into GLOS in Loop A (runs on the host)
@@ -76,7 +78,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: loopa-int2f loopa-cache sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -249,6 +251,7 @@ $(eval $(call dos_test,TIMECHK,timechk))
 $(eval $(call dos_test,SHOTTEST,shottest))
 $(eval $(call dos_test,TYPEIN,typein))
 $(eval $(call dos_test,I2FTSR,i2ftsr))
+$(eval $(call dos_test,STUBTSR,stubtsr))
 # DPMIMINI.COM: the smallest DPMI client, in assembly (M4a).
 build/ow/dos/DPMIMINI.COM: tests/dos/dpmimini.asm
 	@mkdir -p build/ow/dos/obj
@@ -267,7 +270,7 @@ build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
 DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/XMSBIG.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
              build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
              build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/CLOCKCHK.EXE \
-             build/ow/dos/I2FTSR.EXE
+             build/ow/dos/I2FTSR.EXE build/ow/dos/STUBTSR.EXE
 dos-tests: $(DOS_TESTS)
 
 # The 2D library (kernel/gfx; M6 step C) and its fonts: 1-bit bitmaps made from TrueType fonts by
@@ -289,7 +292,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
          kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
          kernel/ssh/sshd.c \
-         kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c \
+         kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c kernel/mm/umapage.c \
          kernel/dbg/gdbstub.c kernel/dbg/gdbprog.c kernel/vm/v86.c kernel/vm/session.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c kernel/vm/vcon.c \
          kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
@@ -370,8 +373,13 @@ loopa-hostile: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py hostile -j $(JOBS)
 loopa-sched: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py sched -j $(JOBS)
-loopa-mem: all build/ow/dos/I2FTSR.EXE check-deps
+loopa-mem: all dos-tests build/dj/UMAPROBE.EXE build/ow/dos/I2FTSR.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py mem -j $(JOBS)
+# The stub in a page of upper memory (docs/upper-memory.md U1, U2; in loopa-mem too), and U0's probe.
+loopa-mem-page: all dos-tests build/dj/UMAPROBE.EXE check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py mem-page -j $(JOBS)
+loopa-umaprobe: all build/dj/UMAPROBE.EXE check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py umaprobe -j $(JOBS)
 # GLOS leaving with INT 2Fh hooked over by a TSR (in loopa-mem too).
 loopa-int2f: all build/ow/dos/I2FTSR.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py int2f -j $(JOBS)

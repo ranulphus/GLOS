@@ -25,9 +25,11 @@
 #include "mixer.h"
 #include "mm.h"
 #include "nic.h"
+#include "pci.h"
 #include "sched.h"
 #include "shot.h"
 #include "timer.h"
+#include "umapage.h"
 #include "v86dec.h"
 #include "vm.h"
 
@@ -525,15 +527,58 @@ static void vm_leave(u32 code)
     leave_to_loader(code, mm_cr3());
 }
 
-/* GLOS.EXE's stub moved to seg:0, just above its PSP; the rest of GLOS.EXE
-   goes back to DOS. A vector the C runtime hooked would be left pointing at
-   free memory: the ones a runtime hooks are checked (others may hold any
-   value, and some do, by chance inside that range). */
-static void vm_resident(u16 seg)
+static void uma_read(u32 phys, u8 *out, u32 n) { memcpy(out, vm_ptr(phys), n); }
+
+/* The page of upper memory [memory] stub_page names, or auto's (docs/upper-
+   memory.md, Which page): a frame of GLOS's is mapped there and the stub
+   copied in from seg:0. Its segment, or 0 when the stub stays after the PSP
+   (off, or refused: GLOS starts either way). */
+static u16 stub_page(u16 seg)
+{
+    u32 claims[32], at, f;
+    int r;
+    struct upage_env e = { uma_read, claims, 0 };
+    if (vm.bi->stub_page == BI_PAGE_OFF)
+        return 0;
+    e.nclaims = pci_low_claims(claims, 32);
+    if (vm.bi->stub_page == BI_PAGE_AUTO) {
+        at = upage_auto(&e);
+        r = at ? UP_OK : -1;
+    } else {
+        at = vm.bi->stub_page << 4;
+        r = upage_check(&e, at);
+    }
+    if (r == UP_OK && !(f = pmm_alloc()))
+        r = -2;
+    if (r != UP_OK) {
+        char named[8];
+        ksnprintf(named, sizeof named, vm.bi->stub_page == BI_PAGE_AUTO ? "auto" : "%04x", vm.bi->stub_page);
+        kprintf("GLOS-VM stub-page refused reason=%s segment=%s\n", r == -1 ? "none" : r == -2 ? "memory"
+                : upage_why(r), named);
+        return 0;
+    }
+    mm_low_page(at, f);
+    memcpy(vm_ptr(at), vm_ptr((u32)seg << 4), vm.bi->stub_paras * 16);
+    memset(vm_ptr(at + vm.bi->stub_paras * 16), 0, 4096 - vm.bi->stub_paras * 16);
+    vm.page_seg = (u16)(at >> 4);
+    vm.page_frame = f;
+    return vm.page_seg;
+}
+
+/* GLOS.EXE's stub moved to seg:0, just above its PSP, and from there to its
+   page of upper memory if it has one (EAX back: the page's segment, where it
+   goes on; or 0); the rest of GLOS.EXE goes back to DOS, and with a page the
+   copy after the PSP too, the block buffer taking its place. A vector the C
+   runtime hooked would be left pointing at free memory: the ones a runtime
+   hooks are checked (others may hold any value, and some do, by chance
+   inside that range). */
+static u32 vm_resident(u16 seg)
 {
     static const u8 hooked[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x1B, 0x23, 0x24 };
-    u16 psp = (u16)(seg - 0x10);
-    u32 end = psp + vm_rd16(((u32)psp - 1) * 16 + 3), lo = (u32)(seg + vm.bi->stub_paras) << 4, i, v, x, lin;
+    u16 psp = (u16)(seg - 0x10), page = stub_page(seg);
+    u32 keep = page ? 0 : vm.bi->stub_paras;    /* the stub's paragraphs after the PSP */
+    u32 end = psp + vm_rd16(((u32)psp - 1) * 16 + 3), lo = (u32)(seg + keep) << 4, i, v, x, lin;
+    char at[8];
 
     for (i = 0; i < sizeof hooked; i++) {
         v = hooked[i];
@@ -542,14 +587,49 @@ static void vm_resident(u16 seg)
         if (lin >= lo && lin < end * 16)
             kprintf("GLOS-WARN ivt-into-loader vec=%02x at=%04x:%04x\n", v, x >> 16, x & 0xFFFF);
     }
-    vm.loader_cs = seg;
+    vm.loader_cs = page ? page : seg;           /* (INT 2Fh's entry is in the PSP: it stays) */
     vm.loader_psp = psp;
+    vm.bi->cs_base = (u32)vm.loader_cs << 4;
+    cpu_set_code16_base(vm.bi->cs_base);
+    ksnprintf(at, sizeof at, page ? "%04x" : "none", page);
+    kprintf("GLOS-VM resident psp=%04x stub=%u freed=%u page=%s%s\n", psp, (keep + 0x10) * 16,
+            (end - psp - keep - vm.bi->cache_paras - 0x10) * 16, at, vm.bi->cache_paras ? " buffer=4112" : "");
+    if (vm.bi->cache_paras)                     /* the disk cache's block buffer, kept after the stub (or PSP) */
+        cache_resident(lo);
+    return page;
+}
+
+/* Leave with code: at once, or, with the stub in a page, once it has copied
+   itself down (NEXT 4, then DOWN). /RUN's GLOS stays if DOS had no room. */
+static void vm_go(struct trapframe *tf, u32 code)
+{
+    if (!vm.page_seg)
+        vm_leave(code);
+    vm.leave_code = code;
+    tf->eax = vm.down_refused ? 2 : 4;
+}
+
+/* DOWN: the stub copied itself back to seg:0 in conventional memory, where
+   _pm_ret goes on once paging is off (docs/upper-memory.md, The way out);
+   everything that follows the stub moves there, the page is DOS's again, and
+   GLOS leaves. seg 0: DOS had nowhere for it, and GLOS stays. */
+static void vm_down(struct trapframe *tf, u16 seg)
+{
+    if (!seg) {
+        kprintf("GLOS-EXIT refused reason=stub-memory bytes=%u\n", vm.bi->stub_paras * 16);
+        vm.down_refused = !(vm.bi->flags & BI_F_AGENT);         /* (the agent's next glos exit tries again) */
+        agent_exit_cancel();
+        tf->eax = 0;
+        return;
+    }
+    vm.loader_cs = seg;                         /* (INT 2Fh's entry is in the PSP: nothing to move) */
     vm.bi->cs_base = (u32)seg << 4;
     cpu_set_code16_base(vm.bi->cs_base);
-    kprintf("GLOS-VM resident psp=%04x stub=%u freed=%u%s\n", psp, (vm.bi->stub_paras + 0x10) * 16,
-            (end - psp - vm.bi->stub_paras - vm.bi->cache_paras - 0x10) * 16, vm.bi->cache_paras ? " buffer=4112" : "");
-    if (vm.bi->cache_paras)                     /* the disk cache's block buffer, kept after the stub */
-        cache_resident(lo);
+    mm_low_page((u32)vm.page_seg << 4, 0);
+    pmm_free(vm.page_frame);
+    kprintf("GLOS-VM stub-down seg=%04x page=%04x\n", seg, vm.page_seg);
+    vm.page_seg = 0;
+    vm_leave(vm.leave_code);
 }
 
 /* The stub's EXEC buffers (struct stub_data at offset 0 of its segment):
@@ -660,8 +740,10 @@ static void vm_agent_next(struct trapframe *tf, u32 result)
         app_kill_all("exit");
         r = 0;
     }
-    if (r < 0)
-        vm_leave(0);
+    if (r < 0) {
+        vm_go(tf, 0);
+        return;
+    }
     if (r > 0)
         stub_exec(x.path, x.t1, x.t2);
     tf->eax = r > 0 ? 1 : 2;
@@ -696,9 +778,10 @@ static void vm_next(struct trapframe *tf, u32 result)
     }
     if (result & 0x10000) {
         kprintf("GLOS-VM error=cannot-run dos_error=%u\n", result & 0xFFFF);
-        vm_leave(126);
+        vm_go(tf, 126);
+        return;
     }
-    vm_leave(result & 0xFF);
+    vm_go(tf, result & 0xFF);
 }
 
 static void vm_call(struct trapframe *tf)
@@ -713,8 +796,10 @@ static void vm_call(struct trapframe *tf)
         tf->eax = 0;
         break;
     case GLOS_CALL_RESIDENT:
-        vm_resident((u16)arg);
-        tf->eax = 0;
+        tf->eax = vm_resident((u16)arg);
+        break;
+    case GLOS_CALL_DOWN:
+        vm_down(tf, (u16)arg);
         break;
     case GLOS_CALL_NEXT:
         if (vm.indos && vm_rd8(vm.indos)) {     /* nothing is in DOS when the stub asks. A program killed inside */

@@ -112,6 +112,10 @@ static const struct { const char *sec, *key, *val; int ok; } values[] = {
     { "shell", "comspec", "C:\\A|B", 0 }, { "program FWHEEL.EXE", "env", "DOOMWADDIR=D:\\DOOM", 1 },
     { "program FWHEEL.EXE", "env", "NOEQUALS", 0 }, { "program FWHEEL.EXE", "memory", "16384", 1 },
     { "program FWHEEL.EXE", "screen", "full", 1 }, { "open", ".TXT", "NOTEPAD.EXE", 1 },
+    { "memory", "stub_page", "off", 1 }, { "memory", "stub_page", "AUTO", 1 }, { "memory", "stub_page", "d800", 1 },
+    { "memory", "stub_page", "C800", 1 }, { "memory", "stub_page", "EF00", 1 }, { "memory", "stub_page", "C000", 0 },
+    { "memory", "stub_page", "F000", 0 }, { "memory", "stub_page", "D880", 0 }, { "memory", "stub_page", "D8000", 0 },
+    { "memory", "stub_page", "on", 0 },
 };
 
 static const char *const before[] = {
@@ -152,6 +156,8 @@ int main(void)
           "cfg_find's sections");
     CHECK(cfg_section_ok("program FWHEEL.EXE") && !cfg_section_ok("program A B") && !cfg_section_ok("nonsense"),
           "cfg_section_ok");
+    CHECK(cfg_page("off") == 0 && cfg_page("auto") == 1 && cfg_page("D800") == 0xD800 && cfg_page("D8") < 0
+          && cfg_page("CF00") == 0xCF00 && cfg_page("G800") < 0, "cfg_page");
 
     f = fopen(path, "wb");
     for (i = 0; i < sizeof before / sizeof *before; i++)

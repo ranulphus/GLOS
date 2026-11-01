@@ -8,6 +8,8 @@ through MGA-Glide's harness:
   jobs.py hostile [--profile P ...] [--boot B ...] [-j N]
   jobs.py sched [--profile P ...] [--boot B ...] [-j N]
   jobs.py mem [--profile P ...] [--boot B ...] [-j N]
+  jobs.py mem-page [--profile P ...] [--boot B ...] [-j N]   (in mem too)
+  jobs.py umaprobe [--profile P ...] [-j N]
   jobs.py shell [--profile P ...] [-j N]      (MGA_GLIDE must have the glosshell boots)
   jobs.py net [-j N]
   jobs.py ssh [-j N]                          (on the host: it needs ssh, and runs Loop A through tools/dev)
@@ -414,6 +416,124 @@ def mem(profile, boot):
         "mem-" + tag, "PASS" if not bad else "FAIL", own, lg, lb, aown, alg, alb,
         "" if not bad else " failed: " + " ".join(bad)), not bad
 
+
+
+# The upper memory area (docs/upper-memory.md).
+UMA_FILES = ["--file", "build/dj/UMAPROBE.EXE=/TEST/UMAPROBE.EXE", "--file", "build/ow/dos/STUBTSR.EXE=/TEST/STUBTSR.EXE"]
+UMA_CASES = [("bf6", "g200"), ("bf6", "g400"), ("bf6", "g450"), ("bf6", "vbe"), ("486dx2", "vbe"),
+             ("486dx2", "g200pci"), ("486dx2", "g450pci")]
+
+
+def out_file(name, f):
+    p = os.path.join(ROOT, "out", name, "files", f)
+    return open(p, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(p) else ""
+
+
+def umaprobe(profile, card):
+    """U0: UMAPROBE on plain DOS, then under GLOS /RUN: what is in C0000h-EFFFFh, which pages are free and the
+    page auto would take; the two the same (GLOS maps nothing there unless asked)."""
+    name = "umaprobe-%s-%s" % (profile, card)
+    st, serial = run(name, ["--machine", profile, "--card", card] + GLOS_FILES + UMA_FILES + [
+        "--cmd", "SERSAY HX-START umaprobe", "--cmd", "C:\\TEST\\UMAPROBE.EXE > C:\\OUT\\DOS.TXT",
+        "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\UMAPROBE.EXE > C:\\OUT\\GLOS.TXT", "--cmd", "SERSAY HX-DONE 0",
+        "--timeout", "600"])
+    dos, glos = out_file(name, "DOS.TXT"), out_file(name, "GLOS.TXT")
+    end = re.search(r"UMAPROBE free=(\d+) first=(\w+) auto=(\w+)", dos)
+    pages = lambda t: re.findall(r"UMAPROBE page=\w+ kind=\w+.*", t)
+    checks = {"status": st == "PASS" and "GLOS-EXIT code=0" in serial, "probe": bool(end),
+              "same": bool(end) and pages(dos) == pages(glos) and end.group(0) in glos}
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-24s %s %s%s" % (name, "PASS" if not bad else "FAIL", end.group(0)[9:] if end else "",
+                                "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+def mempage(profile, boot):
+    """U1, U2: the stub in a page of upper memory. Under /RUN with /STUBPAGE=AUTO, the cache off and on: the page
+    UMAPROBE's rule picks, MEM /C with GLOS at 1 KB or less (5 KB with the block buffer) and the largest program
+    within the same of plain DOS; the way out through the copy-down (stub-down), VECCHK clean, MEM as before.
+    In agent mode ([memory] stub_page = auto): MEM /C as a job; STUBTSR after GLOS's block, so that the copy-down
+    takes a block anywhere (AH=48h); then, GLOS started again, STUBTSR ALL holding DOS's memory: glos exit refused
+    and GLOS still answering, then, the memory back, glos exit."""
+    import time
+    tag = "%s-%s" % (profile, boot)
+    g = "C:\\TEST\\GLOS.EXE /STUBPAGE=AUTO "
+    st, serial = run("mempage-" + tag, ["--machine", profile, "--boot-cfg", boot] + GLOS_FILES + UMA_FILES + [
+        "--cmd", "SERSAY HX-START mempage", "--cmd", "C:\\TEST\\UMAPROBE.EXE > C:\\OUT\\UMA.TXT",
+        "--cmd", "VECCHK save", "--cmd", "MEM /C > C:\\OUT\\BASE.TXT",
+        "--cmd", g + "/CACHE=OFF /RUN MEM /C > C:\\OUT\\OFF.TXT", "--cmd", "VECCHK check",
+        "--cmd", "MEM /C > C:\\OUT\\AFTER1.TXT",
+        "--cmd", g + "/CACHE=ON /RUN MEM /C > C:\\OUT\\ON.TXT", "--cmd", "VECCHK check",
+        "--cmd", "MEM /C > C:\\OUT\\AFTER2.TXT", "--cmd", "SERSAY HX-DONE 0", "--timeout", "900"])
+    f = lambda n: out_file("mempage-" + tag, n)
+
+    def largest(t):
+        m = re.search(r"Largest executable program size\s+\d+K \(([\d,]+) bytes\)", t)
+        return int(m.group(1).replace(",", "")) if m else -1
+
+    def own(t):
+        m = re.search(r"^\s*GLOS\s+([\d,]+)", t, re.M)
+        return int(m.group(1).replace(",", "")) if m else -1
+    auto = re.search(r"UMAPROBE free=\d+ first=\w+ auto=(\w+)", f("UMA.TXT"))
+    res = re.findall(r"GLOS-VM resident psp=(\w+) stub=\d+ freed=\d+ page=(\w+)( buffer=4112)?", serial)
+    base = largest(f("BASE.TXT"))
+    checks = {
+        "status": st == "PASS" and serial.count("GLOS-EXIT code=0") == 2,
+        "page": len(res) == 2 and bool(auto) and all(r[1].lower() == auto.group(1).lower() for r in res),
+        "own": 0 < own(f("OFF.TXT")) <= 1024 and 0 < own(f("ON.TXT")) <= 5120,
+        "largest": base > 0 and 0 <= base - largest(f("OFF.TXT")) <= 1024 and 0 <= base - largest(f("ON.TXT")) <= 5120,
+        "down": serial.count("GLOS-VM stub-down") == 2,
+        "after": base > 0 and largest(f("AFTER1.TXT")) == base and largest(f("AFTER2.TXT")) == base,
+        "vecchk": serial.count("HX-VECCHK ok") == 2,
+        "clean": "GLOS-WARN" not in serial and "GLOS-PANIC" not in serial and "refused" not in serial,
+    }
+    cfg = batfile("mempage-ag-%s/GLOS.CFG" % tag, ["; jobs.py mem-page, agent mode", "[time]", "sntp = off",
+                                                  "[memory]", "stub_page = auto"])
+    agent = Agent("mempage-ag-" + tag, profile, "ne2kpci" if profile == "bf6" else "ne2k", [
+        "--boot-cfg", boot, "--file", cfg + "=/TEST/GLOS.CFG"] + UMA_FILES + [
+        "--cmd", "SERSAY HX-START mempage-ag", "--cmd", "VECCHK save", "--cmd", "MEM /C > C:\\OUT\\BASE.TXT",
+        "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VECCHK check", "--cmd", "MEM /C > C:\\OUT\\AFTER.TXT",
+        "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=1200)
+    ag, tsr, ver, refused = "", "", "", False
+
+    def until(what, limit):
+        t0 = time.time()
+        while time.time() - t0 < limit and what not in agent.log():
+            time.sleep(1)
+        return what in agent.log()
+    try:
+        if agent.listening():
+            _, ag, _ = agent.ssh("MEM /C")
+            agent.ssh("C:\\TEST\\STUBTSR.EXE")
+            agent.ssh("glos exit")
+            if agent.listening(after="GLOS-EXIT code=0"):
+                _, tsr, _ = agent.ssh("C:\\TEST\\STUBTSR.EXE ALL 60")
+                agent.ssh("glos exit")
+                refused = until("GLOS-EXIT refused", 60)
+                rc, ver, _ = agent.ssh("glos ver")
+                ver = ver if rc == 0 else ""
+                until("HX-STUBTSR freed", 300)
+                agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        pass
+    text = agent.wait()
+    ares = re.findall(r"GLOS-VM resident psp=(\w+) stub=\d+ freed=\d+ page=(\w+)( buffer=4112)?", text)
+    downs = re.findall(r"GLOS-VM stub-down seg=(\w+)", text)
+    abase = largest(out_file("mempage-ag-" + tag, "BASE.TXT"))
+    alimit = 5120 if ares and ares[0][2] else 1024
+    other = re.search(r"HX-STUBTSR psp=\w+ kept=\d+ other=(\d+)", tsr)
+    checks["ag-page"] = len(ares) == 2 and all(r[1] != "none" for r in ares)
+    checks["ag-own"] = 0 < own(ag) <= alimit
+    checks["ag-largest"] = abase > 0 and 0 <= abase - largest(ag) <= alimit
+    checks["ag-48h"] = len(downs) >= 1 and len(ares) >= 1 and \
+        int(downs[0], 16) != int(ares[0][0], 16) + 0x10 + (0x101 if ares[0][2] else 0)
+    checks["ag-refused"] = refused and bool(other) and int(other.group(1)) < 2744 and bool(ver.startswith("GLOS "))
+    checks["ag-exit"] = len(downs) == 2 and text.count("GLOS-EXIT code=0") == 2 and text.count("HX-VECCHK ok") == 2
+    checks["ag-after"] = abase > 0 and 0 <= abase - largest(out_file("mempage-ag-" + tag, "AFTER.TXT")) <= 1024
+    checks["ag-clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s page=%s glos=%d/%d agent glos=%d%s" % (
+        "mempage-" + tag, "PASS" if not bad else "FAIL", res[0][1] if res else "?", own(f("OFF.TXT")),
+        own(f("ON.TXT")), own(ag), "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
 CACHE_FILES = ["--file", "build/dj/DSKTORT.EXE=/TEST/DSKTORT.EXE", "--file", "build/dj/DISKRD.EXE=/TEST/DISKRD.EXE",
@@ -5668,7 +5788,8 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache", "int2f"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache",
+                                      "umaprobe", "mem-page", "int2f"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -5806,8 +5927,13 @@ def main():
     if a.suite == "int2f":
         return 0 if all(r[1] for r in matrix(int2f_exit, combos, a.jobs)) else 1
     if a.suite == "mem":
-        res = matrix(mem, combos, a.jobs) + matrix(int2f_exit, combos, a.jobs)
+        res = matrix(mem, combos, a.jobs) + matrix(int2f_exit, combos, a.jobs) + matrix(mempage, combos, a.jobs)
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "mem-page":
+        return 0 if all(r[1] for r in matrix(mempage, combos, a.jobs)) else 1
+    if a.suite == "umaprobe":
+        cases = [c for c in UMA_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(umaprobe, cases, a.jobs)) else 1
     if a.suite == "cache":                      # (bf6 with HIMEMX and the 486 raw, unless asked)
         cc = combos if (a.profile or a.boot) else [("bf6", "himemx"), ("486dx2", "default")]
         return 0 if all(r[1] for r in matrix(cache, cc, a.jobs)) else 1

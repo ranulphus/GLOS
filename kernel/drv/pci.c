@@ -116,4 +116,34 @@ int pci_owned_addr(u32 cf8)
     return d && d->keeper == DEV_GLOS;
 }
 
+/* Where PCI memory BARs and enabled expansion-ROM BARs start below 1 MB, for
+   the stub's page of upper memory (docs/upper-memory.md, Which page). Read
+   only: a BAR isn't sized (that takes a write), so it claims the page it
+   starts in. A 64-bit BAR's upper half must be 0. */
+u32 pci_low_claims(u32 *out, u32 max)
+{
+    u32 n = 0, k, v, type, nbar;
+    int i;
+    for (i = 0; i < ndevs; i++) {
+        struct pci_dev *d = &devs[i];
+        type = (pci_read32(d->bus, d->dev, d->fn, 0x0C) >> 16) & 0x7F;
+        nbar = type == 0 ? 6 : type == 1 ? 2 : 0;
+        for (k = 0; k < nbar; k++) {
+            v = pci_read32(d->bus, d->dev, d->fn, 0x10 + k * 4);
+            if (v & 1)                          /* I/O */
+                continue;
+            if ((v & 6) == 4 && pci_read32(d->bus, d->dev, d->fn, 0x10 + ++k * 4))
+                continue;                       /* 64-bit, above 4 GB */
+            if ((v & ~0xFu) && (v & ~0xFu) < 0x100000u && n < max)
+                out[n++] = v & ~0xFu;
+        }
+        if (nbar) {
+            v = pci_read32(d->bus, d->dev, d->fn, type == 0 ? 0x30 : 0x38);
+            if ((v & 1) && (v & ~0x7FFu) < 0x100000u && n < max)
+                out[n++] = v & ~0x7FFu;
+        }
+    }
+    return n;
+}
+
 int pci_uses_line(const struct pci_dev *d) { return d->pin >= 1 && d->pin <= 4 && d->irq >= 1 && d->irq < 16; }

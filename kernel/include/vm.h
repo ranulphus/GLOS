@@ -73,6 +73,11 @@ struct vm {
     u8 waiting;
     u8 idle_agent;                      /* the halt is the stub's: an agent command ends it too */
     u8 shell_state;                     /* as the shell: 0 start, 1 AUTOEXEC.BAT running, 2 the console */
+    /* the stub in a page of upper memory (docs/upper-memory.md) */
+    u16 page_seg;                       /* its segment, 0: the stub is after the PSP */
+    u32 page_frame;                     /* the frame mapped there */
+    u32 leave_code;                     /* what GLOS leaves with once the stub is down (NEXT 4) */
+    u8 down_refused;                    /* DOS had no room for it: /RUN's GLOS stays */
 };
 
 extern struct vm vm;

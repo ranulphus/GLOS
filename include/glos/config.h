@@ -56,4 +56,8 @@ void cfg_kind(const char *section, char *out, int room);
 /* A section name as written: "display", "program FWHEEL.EXE" (the name upper case). */
 int cfg_section_ok(const char *section);
 
+/* [memory] stub_page's value (docs/upper-memory.md): 0 off, 1 auto, the segment of a 4 KB page from C800h to
+   EF00h written as four hex digits (D800), or -1. */
+long cfg_page(const char *value);
+
 #endif

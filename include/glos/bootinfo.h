@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 5
+#define BOOTINFO_VERSION 6
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -51,9 +51,15 @@ typedef unsigned int   bi_u32;
                                                    FFFFFFFFh: nothing ran); EAX = 1: EXEC the stub's
                                                    path/tail; 2: halt until an interrupt, then ask again;
                                                    3: INT 21h with stub_data.dregs, then ask again with
-                                                   FFFFFFFEh. FFFFFFFDh (M6): the program runs on as a
+                                                   FFFFFFFEh; 4: GLOS leaves, copy the stub down and say
+                                                   where (DOWN). FFFFFFFDh (M6): the program runs on as a
                                                    GLOS app, and the kernel sent the stub to detached_off */
-#define GLOS_CALL_RESIDENT 5                    /* the stub moves to arg:0, right after GLOS.EXE's PSP */
+#define GLOS_CALL_RESIDENT 5                    /* the stub moves to arg:0, right after GLOS.EXE's PSP; EAX = 0,
+                                                   or the segment of the upper-memory page the kernel copied it
+                                                   to (docs/upper-memory.md), where it goes on */
+#define GLOS_CALL_DOWN   6                      /* after NEXT's EAX = 4 (GLOS leaves, the stub is in a page):
+                                                   the stub copied itself to arg:0 in conventional memory, or
+                                                   found no room (arg = 0: GLOS stays) */
 
 struct bi_range { bi_u32 base, length, type; };
 
@@ -152,8 +158,13 @@ struct bootinfo {
     bi_u32 smartdrv;                            /* 1 if SMARTDRV answered INT 2Fh 4A10h when GLOS started */
     bi_u32 n_disks;
     struct bi_disk disks[BI_DISKS];             /* the BIOS's hard disks, 80h on, as INT 13h describes them */
+    /* version 6: upper memory (docs/upper-memory.md) */
+    bi_u32 stub_page;                           /* [memory] stub_page or /STUBPAGE=: BI_PAGE_OFF, BI_PAGE_AUTO, or
+                                                   the segment named (C800h-EF00h) */
 };
 #define BI_INT2F_PSP 0x5Cu                     /* PSP:5Ch, the FCB area, which GLOS's own PSP doesn't use */
+#define BI_PAGE_OFF  0u
+#define BI_PAGE_AUTO 1u
 #define BI_SOUND_OFF 1u                         /* [sound] mixer = off: GLOS leaves the Sound Blaster to programs */
 #define BI_DISPLAY_NOACCEL 1u                   /* [display] accel = off: the CPU draws the desktop, on a Matrox card too */
 

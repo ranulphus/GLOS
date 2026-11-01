@@ -27,6 +27,7 @@ struct pci_dev *pci_at(int i);          /* NULL past the end */
 void pci_claim(struct pci_dev *d);      /* its keeper is GLOS */
 int pci_owned_addr(u32 cf8);            /* 1 if a CF8h address selects a device GLOS keeps */
 struct pci_dev *pci_by_addr(u32 cf8);   /* the function a CF8h address selects, or NULL */
+u32 pci_low_claims(u32 *out, u32 max);  /* where memory and expansion-ROM BARs start below 1 MB; how many */
 int pci_uses_line(const struct pci_dev *d);     /* 1 if it drives an IRQ line (a pin, and a line 1-15) */
 
 #endif

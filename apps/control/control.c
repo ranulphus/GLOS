@@ -60,7 +60,7 @@ static const char *const modes[] = { "none", "640x480x8", "640x480x16", "640x480
 static char mode_extra[24];                     /* the file's mode, if it isn't one of these */
 
 static const char *const titles[] = { "Display", "Input", "Sound", "Network", "Date and Time", "Disk Cache",
-                                      "Remote Desktop", "Desktop", "Shell", "File Types", "Programs" };
+                                      "Memory", "Remote Desktop", "Desktop", "Shell", "File Types", "Programs" };
                                                 /* (cfg_sections' order) */
 
 static char *dup(const char *s) { return s ? strcpy(malloc(strlen(s) + 1), s) : NULL; }

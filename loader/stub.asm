@@ -42,6 +42,7 @@
 
 GLOS_CALL_NEXT     equ 4
 GLOS_CALL_RESIDENT equ 5
+GLOS_CALL_DOWN     equ 6
 
 GLOSSTUB segment para public 'STUB' use16
         assume  cs:GLOSSTUB, ds:nothing, es:nothing, ss:nothing
@@ -300,6 +301,9 @@ _stub_resident proc far
         mov     ax, GLOS_CALL_RESIDENT  ; from here, where the kernel knows the stub
         movzx   ebx, bx
         call    kcall
+        or      ax, ax                  ; or the page of upper memory it copied
+        jz      moved                   ; the copy to (docs/upper-memory.md)
+        mov     cs:new_seg, ax
 moved:  push    cs:new_seg
         push    offset resident
         retf
@@ -315,8 +319,13 @@ resident:
         mov     cs:rm_cs_imm, ax
         sti
         mov     es, cs:psp_seg          ; the PSP and the stub; the rest goes back to DOS
+        mov     bx, ax
+        sub     bx, cs:psp_seg
+        cmp     bx, 10h
         mov     bx, (_stub_end - stub_start + 15) / 16 + 10h
-        add     bx, cs:sd_extra         ; and the disk cache's block buffer after it
+        je      keep
+        mov     bx, 10h                 ; in a page of upper memory: the PSP alone
+keep:   add     bx, cs:sd_extra         ; and the disk cache's block buffer after it
         mov     ah, 4Ah
         int     21h
         mov     cs:sd_resident, 1
@@ -332,6 +341,8 @@ next:
         call    kcall                   ; EAX = 1: EXEC sd_path with sd_tail
         cmp     eax, 3
         je      dcall
+        cmp     eax, 4
+        je      down
         cmp     eax, 2                  ; 2: nothing yet (the agent): halt until an
         jne     exec                    ; interrupt or a command, then ask again
         sti
@@ -365,6 +376,44 @@ dcall:  push    ds
         pop     es
         pop     ds
         mov     ebx, 0FFFFFFFEh         ; a DOS call ran
+        jmp     next
+; NEXT 4: GLOS leaves, and the stub is in a page of upper memory, which is
+; gone once paging is off (docs/upper-memory.md, The way out). It copies
+; itself back to conventional memory: after the PSP and the block buffer,
+; GLOS's block grown again, or else a block anywhere (ours: 4Ch frees it).
+; DOWN with the copy's segment leaves from there; with 0, GLOS stays.
+down:   mov     es, cs:psp_seg
+        mov     bx, (_stub_end - stub_start + 15) / 16 + 10h
+        add     bx, cs:sd_extra
+        mov     ah, 4Ah
+        int     21h
+        jc      d_any
+        mov     ax, cs:psp_seg
+        add     ax, 10h
+        add     ax, cs:sd_extra
+        jmp     short d_copy
+d_any:  mov     bx, (_stub_end - stub_start + 15) / 16
+        mov     ah, 48h
+        int     21h
+        jnc     d_copy
+        xor     ax, ax
+        jmp     short d_tell
+d_copy: push    ds
+        mov     es, ax
+        push    cs
+        pop     ds
+        xor     si, si
+        xor     di, di
+        mov     cx, offset _stub_end
+        cld
+        rep     movsb
+        pop     ds
+        mov     es:rm_cs_imm, ax        ; _pm_ret's far jump lands in the copy
+        mov     es:new_seg, ax
+d_tell: movzx   ebx, ax
+        mov     ax, GLOS_CALL_DOWN      ; doesn't come back unless GLOS stays
+        call    kcall
+        mov     ebx, 0FFFFFFFFh
         jmp     next
 exec:   push    cs
         pop     ds

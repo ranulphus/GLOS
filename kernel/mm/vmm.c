@@ -330,6 +330,17 @@ void *mm_cache_map(u32 off, u32 bytes)
 /* The frame behind a page of a window's pixels. */
 u32 mm_win_frame(const void *p) { u32 i = ((u32)p - WIN_BASE) >> 12; return kpt_win[i >> 10][i & 1023] & ~0xFFFu; }
 
+/* A page of the first MB backed by a frame of GLOS's (frame), or by what is
+   there again (0): the resident stub's page of upper memory (docs/upper-
+   memory.md). In every address space, as mm_vga_hide's. */
+void mm_low_page(u32 lin, u32 frame)
+{
+    u32 i = lin >> 12, f = irq_save();
+    kpt_low[i] = (kpt_low[i] & 0xFFF) | PTE_P | (frame ? frame : i << 12);
+    invlpg(lin);
+    irq_restore(f);
+}
+
 /* The VGA's memory at A0000h-BFFFFh out of reach (1) or back (0): while the
    desktop has the screen, a program that writes text there (straight to
    B8000h, as DOS programs do) must not hit the card, whose window onto the

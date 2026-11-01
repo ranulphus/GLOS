@@ -577,6 +577,10 @@ void agent_exit(u32 delay_ticks)
     irq_restore(f);
 }
 
+/* glos exit refused (the stub had nowhere to go, docs/upper-memory.md): GLOS
+   stays, and a later glos exit asks again. */
+void agent_exit_cancel(void) { exit_req = 0; }
+
 /* ---- the VM thread's side (trap context) */
 
 static const char *const internal[] = {

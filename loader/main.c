@@ -392,7 +392,8 @@ static int cache_word(const char *v)
 
 /* A flag that only sets a bootinfo bit: from the command line, or GLOS.CFG's
    [shell] options (a SHELL= line has no room for them). /CACHE=ON|OFF|VERIFY|COUNT
-   overrides [cache] enabled (the tests' runs with the cache on and off). */
+   overrides [cache] enabled (the tests' runs with the cache on and off), and
+   /STUBPAGE=OFF|AUTO|SEGMENT [memory] stub_page (docs/upper-memory.md). */
 static int flag_arg(const char *a)
 {
     if (!stricmp(a, "/ROUNDTRIP")) bi.flags |= BI_F_ROUNDTRIP;
@@ -404,6 +405,7 @@ static int flag_arg(const char *a)
     else if (!stricmp(a, "/DIRECT")) bi.flags |= BI_F_DIRECT;
     else if (!stricmp(a, "/VERBOSE")) bi.flags |= BI_F_VERBOSE;
     else if (!strnicmp(a, "/CACHE=", 7) && cache_word(a + 7) >= 0) bi.cache_mode = (unsigned long)cache_word(a + 7);
+    else if (!strnicmp(a, "/STUBPAGE=", 10) && cfg_page(a + 10) >= 0) bi.stub_page = (unsigned long)cfg_page(a + 10);
     else return 0;
     return 1;
 }
@@ -798,7 +800,7 @@ static void read_cfg(const char *argv0, int shell_keys)
     char line[160], path[128], *k, *v, *e;
     const char *slash = strrchr(argv0, '\\');
     size_t n = slash ? (size_t)(slash - argv0 + 1) : 0;
-    int in_shell = 0, in_net = 0, in_display = 0, in_sound = 0, in_cache = 0;
+    int in_shell = 0, in_net = 0, in_display = 0, in_sound = 0, in_cache = 0, in_memory = 0;
     struct bi_profile *prof = NULL;
     char sec[24], why[64];
     const struct cfg_key *ck;
@@ -823,6 +825,7 @@ static void read_cfg(const char *argv0, int shell_keys)
             in_display = !strnicmp(k, "[display]", 9);
             in_sound = !strnicmp(k, "[sound]", 7);
             in_cache = !strnicmp(k, "[cache]", 7);
+            in_memory = !strnicmp(k, "[memory]", 8);
             prof = NULL;
             if (!strnicmp(k, "[program", 8) && (e = strchr(k, ']')) != NULL) {
                 *e = 0;
@@ -832,7 +835,8 @@ static void read_cfg(const char *argv0, int shell_keys)
             }
             continue;
         }
-        if ((!in_shell && !prof && !in_net && !in_display && !in_sound && !in_cache) || !(v = strchr(k, '=')))
+        if ((!in_shell && !prof && !in_net && !in_display && !in_sound && !in_cache && !in_memory)
+            || !(v = strchr(k, '=')))
             continue;
         for (e = v; e > k && (e[-1] == ' ' || e[-1] == '\t'); e--) ;
         *e = 0;
@@ -884,6 +888,14 @@ static void read_cfg(const char *argv0, int shell_keys)
                 bi.cache_size_mb = !stricmp(v, "auto") ? 0 : (unsigned long)atol(v);
             else
                 say("GLOS-WARN cfg-key section=cache key=%s", k);
+            continue;
+        }
+        if (in_memory) {                        /* stub_page = off | auto | SEGMENT: the stub in a page of upper
+                                                   memory (docs/upper-memory.md); checked by the schema above */
+            if (!stricmp(k, "stub_page"))
+                bi.stub_page = (unsigned long)cfg_page(v);
+            else
+                say("GLOS-WARN cfg-key section=memory key=%s", k);
             continue;
         }
         if (in_net) {                           /* hostname = NAME: for mDNS (NAME.local) and DHCP */
