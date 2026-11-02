@@ -9,6 +9,9 @@
  *                       field shows what Ctrl+V pasted
  *   GUITEST text        "GUITEST Text": UTF-8 in each font, and code page
  *                       437's drawing characters (M10 step G)
+ *   GUITEST tabs        "GUITEST Tabs": ten pages in tabs too many for a row,
+ *                       and buttons that change their style (rows, scroll,
+ *                       list) and the window's width
  *   GUITEST names DIR   files in DIR named in DOS's code page (GLOSCP), then
  *                       the file dialog there: the name chosen, as DOS's
  *                       bytes (M10 step G)
@@ -303,6 +306,60 @@ static void text(void)
     gui_show(win, 1);
 }
 
+/* Tabs too many for a row, in each style, in a window made wider and narrower. */
+static struct gui_widget *tabs_demo;
+
+static void tabs_click(struct gui_widget *w, int what)
+{
+    static const char *const styles[] = { "rows", "scroll", "list" };
+    int id = w->id;
+    if (what != GUI_ON_CLICK)
+        return;
+    if (id < 3) {
+        gui_tabs_style(tabs_demo, id);
+        say("tabs style %s", styles[id], 0);
+    } else {
+        int width = id == 3 ? 620 : 420;
+        gui_resize(win, width, 240);
+        say("tabs width %s%d", "", width);
+    }
+}
+
+static void tabs_select(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_SELECT)
+        say("tabs page %s%d", "", gui_tabs_get(w));
+}
+
+static void tabs(void)
+{
+    static const char *const titles[] = { "Display", "Input", "Sound", "Network", "Date and Time", "Disk Cache",
+                                          "Memory", "Remote Desktop", "Desktop", "Shell" };
+    struct gui_widget *box, *row, *page;
+    char line[64];
+    int i;
+    win = gui_window("GUITEST Tabs", 420, 240, 0);
+    box = gui_vbox(win->root, -1, -1);
+    gui_grow(box, 1);
+    tabs_demo = gui_tabs(box);
+    gui_grow(tabs_demo, 1);
+    for (i = 0; i < 10; i++) {
+        page = gui_tab(tabs_demo, titles[i]);
+        snprintf(line, sizeof line, "Page %d: %s", i + 1, titles[i]);
+        gui_label(page, line);
+    }
+    gui_on(tabs_demo, tabs_select, 0);
+    row = gui_hbox(box, -1, 0);
+    gui_button(row, "&Rows", tabs_click, 0);
+    gui_button(row, "&Scroll", tabs_click, 1);
+    gui_button(row, "&List", tabs_click, 2);
+    gui_button(row, "&Wider", tabs_click, 3);
+    gui_button(row, "&Narrower", tabs_click, 4);
+    status = gui_status(win);
+    gui_set_text(status, "Ready");
+    gui_show(win, 1);
+}
+
 /* DOS names in the page DOS has: what M10's suite makes (letters the 437 upper-casing leaves alone). */
 static void names(const char *dir)
 {
@@ -346,6 +403,8 @@ int main(int argc, char **argv)
         clip(argc > 2 ? argv[2] : "");
     else if (!strcmp(what, "text"))
         text();
+    else if (!strcmp(what, "tabs"))
+        tabs();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

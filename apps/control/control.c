@@ -660,10 +660,11 @@ int main(int argc, char **argv)
         printf("CONTROL no GLOS\n");
         return 1;
     }
-    win = gui_window("Control Panel", 600, 420, 0);
+    win = gui_window("Control Panel", 600, 440, 0);   /* (as tall as 640x480 allows: the pages' titles take two rows) */
     box = gui_vbox(win->root, 6, 8);
     gui_grow(box, 1);
     tabs = gui_tabs(box);
+    gui_tabs_style(tabs, GUI_TABS_ROWS);        /* (every page's title in view, in as many rows as the width needs) */
     gui_grow(tabs, 1);
     for (s = 0; cfg_sections[s]; s++) {
         const char *sec = cfg_sections[s];

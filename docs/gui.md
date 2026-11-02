@@ -30,7 +30,12 @@ caught between the two; from a back buffer it never is. A window's pixels are fo
 Containers place their children: boxes (`gui_vbox`, `gui_hbox`: children along the box, each its measured size,
 what is left shared by their `grow` weights, all as wide or as tall as the box across), forms (rows of a label and
 a box, the labels in a column as wide as the widest), groups (a frame with a title), tabs (one page shown),
-the scrolling area (a box taller than the room it has, and a bar). Every widget measures the size it wants from
+the scrolling area (a box taller than the room it has, and a bar). Tabs whose titles don't fit in a row
+(`gui_tabs_style`) go into more rows (`GUI_TABS_ROWS`, the default; the rows keep their order, the chosen title
+bold), stay in one row with two arrows that scroll it (`GUI_TABS_SCROLL`), or become a list down the left with a
+scroll bar when it is taller than its room (`GUI_TABS_LIST`). Each is laid out for the width the tabs have at the
+time, so a window made wider takes fewer rows; with every title in one row the three look the same, but for the
+list. The Control Panel uses rows (`GUITEST tabs` shows all three, `tests/gui/tabs.txt`). Every widget measures the size it wants from
 the fonts; `gui_size` sets one instead. A dialog's window is the size its widgets want (`GUI_W_DIALOG`), so
 every dialog fits 640×480 (PRD D34) by construction.
 
@@ -42,7 +47,7 @@ changes a size; `gui_relayout`) and before it is drawn; then the whole window is
 Keyboard-first (PRD D34):
 - **Tab** and **Shift+Tab** move the focus through the widgets that take it, in the order they were made
   (radio buttons: the chosen one of a group; arrows move within it); **Ctrl+Tab**, **Ctrl+PgUp** and
-  **Ctrl+PgDn** change tabs;
+  **Ctrl+PgDn** change tabs (with the tabs' focus, Left and Right too; Up and Down in a list of them);
 - **"&" before a letter** in a label, button, check box or menu marks **Alt** and that letter (it is drawn
   underlined; "&&" is an ampersand): a button is pressed, a label gives the focus to the widget after it;
 - **F10** goes to the menu bar, Alt and a title's letter opens that menu; in a menu, Up, Down, Home, End, Enter,

@@ -218,6 +218,11 @@ struct gui_widget *gui_tabs(struct gui_widget *parent);
 struct gui_widget *gui_tab(struct gui_widget *tabs, const char *title);        /* the page: a vbox */
 int gui_tabs_get(struct gui_widget *tabs);
 void gui_tabs_set(struct gui_widget *tabs, int page);
+enum { GUI_TABS_ROWS, GUI_TABS_SCROLL, GUI_TABS_LIST };
+void gui_tabs_style(struct gui_widget *tabs, int style);       /* titles that don't fit in a row: in more rows
+                                           (GUI_TABS_ROWS, the default), one row with arrows that scroll it
+                                           (GUI_TABS_SCROLL), or a list down the left (GUI_TABS_LIST); each laid out
+                                           for the width the tabs have, so a wider window takes fewer rows */
 
 /* ---- simple widgets */
 struct gui_widget *gui_label(struct gui_widget *parent, const char *text);

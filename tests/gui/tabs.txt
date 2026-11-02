@@ -1,0 +1,38 @@
+# The tabs' three styles (sdk/gui/basic.c; GUITEST tabs): ten titles too many for a row, in more rows, in one row
+# that scrolls, and as a list; each laid out again for the window made wider and narrower.
+run GUITEST.EXE tabs
+wait "GUITEST Tabs"
+shot rows "GUITEST Tabs"
+key ctrl+tab ctrl+tab ctrl+tab ctrl+tab ctrl+tab ctrl+tab
+shot rows-memory "GUITEST Tabs"
+key alt+w
+shot rows-wide "GUITEST Tabs"
+key alt+n alt+s
+shot scroll "GUITEST Tabs"
+key ctrl+tab ctrl+tab ctrl+tab
+shot scroll-shell "GUITEST Tabs"
+key ctrl+tab
+shot scroll-first "GUITEST Tabs"
+key alt+w
+shot scroll-wide "GUITEST Tabs"
+key alt+n alt+l
+shot list "GUITEST Tabs"
+click "GUITEST Tabs" 30 75
+shot list-click "GUITEST Tabs"
+key alt+w
+shot list-wide "GUITEST Tabs"
+key alt+r
+shot rows-again "GUITEST Tabs"
+click "GUITEST Tabs" 60 30
+shot rows-click "GUITEST Tabs"
+key alt+f4
+gone "GUITEST Tabs"
+expect GUI tabs page 6
+expect GUI tabs style scroll
+expect GUI tabs page 9
+expect GUI tabs page 0
+expect GUI tabs style list
+expect GUI tabs width 620
+expect GUI tabs width 420
+expect GUI tabs style rows
+expect GUI end

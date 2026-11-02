@@ -714,20 +714,79 @@ void gui_set_value(struct gui_widget *w, int value)
         gui_choice_value(w, 1, value);
 }
 
-/* ---- tabs: a row of titles, and the chosen one's page under them */
+/* ---- tabs: titles, and the chosen one's page under them (or beside them). Titles that don't fit in a row go
+ * into more rows (GUI_TABS_ROWS, the default: in their order, the rows fixed), stay in one row with two arrows
+ * that scroll it (GUI_TABS_SCROLL), or are a list down the left (GUI_TABS_LIST). Each is laid out for the width
+ * the tabs have, so a wider window takes fewer rows or scrolls less. */
 
 struct tabs {
     struct gui_widget w;
     int at;
+    int style;
+    int first;                          /* GUI_TABS_SCROLL, GUI_TABS_LIST: the first title shown */
+    struct gui_sb sb;                   /* GUI_TABS_LIST taller than its room: its scroll bar */
 };
 
-#define TAB_H 22
+#define TAB_H    22
+#define TAB_LINE (TAB_H - 1)            /* GUI_TABS_LIST: a title's height in the list */
+#define TABS_MAX 64                     /* titles placed (more are neither drawn nor clicked) */
+
+static int tab_w(struct gui_widget *c) { return gui_text_w(gui_font, gui_get_text(c)) + 16; }
+
+/* GUI_TABS_SCROLL with more than fits: the arrows' room at the strip's right. */
+static int tabs_arrows(struct tabs *t, int gw)
+{
+    struct gui_widget *c;
+    int x = 0;
+    if (t->style != GUI_TABS_SCROLL)
+        return 0;
+    for (c = t->w.first; c; c = c->next)
+        x += tab_w(c) - 1;
+    return x + 1 > gw ? 2 * GUI_SB : 0;
+}
+
+/* Each title's place for tabs at gx, gy, gw wide and gh high, into r[] (w 0: not shown), and the room the titles
+ * take: the strip's height above the page, or GUI_TABS_LIST's width beside it (with its scroll bar, if any). */
+static int tabs_geom(struct tabs *t, int gx, int gy, int gw, int gh, struct gfx_rect *r)
+{
+    struct gui_widget *c;
+    int i = 0, x = 0, row = 0, room = gw - tabs_arrows(t, gw), first = room < gw ? t->first : 0, lw = 0, n = 0, fit;
+    if (t->style == GUI_TABS_LIST) {
+        for (c = t->w.first; c; c = c->next, n++)
+            if (tab_w(c) > lw)
+                lw = tab_w(c);
+        fit = gh > TAB_H ? (gh - 1) / TAB_LINE : 1;
+        first = n > fit ? t->first : 0;
+        for (c = t->w.first; c && i < TABS_MAX; c = c->next, i++) {
+            r[i].x = gx, r[i].y = gy + (i - first) * TAB_LINE, r[i].w = lw, r[i].h = TAB_H;
+            if (i < first || i - first >= fit)
+                r[i].w = 0;                     /* (scrolled out of the list) */
+        }
+        return lw + (n > fit ? GUI_SB : 0);
+    }
+    for (c = t->w.first; c && i < TABS_MAX; c = c->next, i++) {
+        int tw = tab_w(c);
+        r[i].w = 0;
+        if (t->style == GUI_TABS_SCROLL) {
+            if (i < first || (i > first && x + tw > room))
+                continue;                       /* (scrolled out of the strip; the first shown even if too wide) */
+        } else if (x > 0 && x + tw > gw) {
+            row++;                              /* GUI_TABS_ROWS: the next row */
+            x = 0;
+        }
+        r[i].x = gx + x, r[i].y = gy + row * TAB_H, r[i].w = i == first && tw > room ? room : tw, r[i].h = TAB_H;
+        x += tw - 1;
+    }
+    return (row + 1) * TAB_H;
+}
 
 static void tabs_measure(struct gui_widget *w, int *pw, int *ph)
 {
+    struct tabs *t = (struct tabs *)w;
+    struct gfx_rect r[TABS_MAX];
     struct gui_widget *c;
-    int mw = 0, mh = 0, a, b, titles = 0;
-    for (c = w->first; c; c = c->next) {
+    int mw = 0, mh = 0, a, b, widest = 0, n = 0, room;
+    for (c = w->first; c; c = c->next, n++) {
         int saved = c->flags;
         c->flags &= ~GUI_HIDDEN;                /* (the biggest page decides) */
         gui_measure(c, &a, &b);
@@ -736,56 +795,140 @@ static void tabs_measure(struct gui_widget *w, int *pw, int *ph)
             mw = a;
         if (b > mh)
             mh = b;
-        titles += gui_text_w(gui_font, gui_get_text(c)) + 16;
+        if (tab_w(c) > widest)
+            widest = tab_w(c);
     }
-    *pw = (mw > titles ? mw : titles) + 2;
-    *ph = mh + TAB_H + 2;
+    if (t->style == GUI_TABS_LIST) {
+        room = tabs_geom(t, 0, 0, 0, 1 << 20, r);
+        *pw = room + GUI_GAP + mw + 2;
+        *ph = (mh + 2 > n * TAB_LINE + 1 ? mh + 2 : n * TAB_LINE + 1);
+        return;
+    }
+    if (t->style == GUI_TABS_SCROLL)
+        widest += 2 * GUI_SB;
+    *pw = (mw > widest ? mw : widest) + 2;      /* (the pages' width: the titles wrap or scroll in it) */
+    *ph = mh + tabs_geom(t, 0, 0, *pw, 0, r) + 2;
+}
+
+/* GUI_TABS_SCROLL, GUI_TABS_LIST: the chosen title in the strip or the list. */
+static void tabs_show(struct tabs *t)
+{
+    struct gfx_rect r[TABS_MAX];
+    if (t->at < t->first)
+        t->first = t->at;
+    for (;;) {
+        tabs_geom(t, t->w.r.x, t->w.r.y, t->w.r.w, t->w.r.h, r);
+        if (t->at >= TABS_MAX || r[t->at].w || t->first >= t->at)
+            break;
+        t->first++;
+    }
 }
 
 static void tabs_layout(struct gui_widget *w)
 {
     struct tabs *t = (struct tabs *)w;
+    struct gfx_rect r[TABS_MAX];
     struct gui_widget *c;
-    int i = 0;
+    int i = 0, room, n = 0;
+    if (t->style != GUI_TABS_ROWS)
+        tabs_show(t);
+    room = tabs_geom(t, w->r.x, w->r.y, w->r.w, w->r.h, r);
+    t->sb.r.w = 0;
+    for (c = w->first; c; c = c->next)
+        n++;
+    if (t->style == GUI_TABS_LIST && n > (w->r.h - 1) / TAB_LINE) {
+        t->sb.total = n, t->sb.page = (w->r.h - 1) / TAB_LINE, t->sb.pos = t->first;
+        t->sb.r.x = w->r.x + room - GUI_SB, t->sb.r.y = w->r.y, t->sb.r.w = GUI_SB, t->sb.r.h = w->r.h;
+    }
     for (c = w->first; c; c = c->next, i++) {
         c->flags = i == t->at ? c->flags & ~GUI_HIDDEN : c->flags | GUI_HIDDEN;
-        if (i == t->at)
-            gui_place(c, w->r.x + 1, w->r.y + TAB_H + 1, w->r.w - 2, w->r.h - TAB_H - 2);
+        if (i != t->at)
+            continue;
+        if (t->style == GUI_TABS_LIST)
+            gui_place(c, w->r.x + room + GUI_GAP + 1, w->r.y + 1, w->r.w - room - GUI_GAP - 2, w->r.h - 2);
+        else
+            gui_place(c, w->r.x + 1, w->r.y + room + 1, w->r.w - 2, w->r.h - room - 2);
     }
 }
 
 static void tabs_draw(struct gui_widget *w, struct gfx_surface *s)
 {
     struct tabs *t = (struct tabs *)w;
+    struct gfx_rect r[TABS_MAX], sel = { 0, 0, 0, 0 };
     struct gui_widget *c;
-    int x = w->r.x, i = 0, sel_x = 0, sel_w = 0;
-    gfx_fill(s, w->r.x, w->r.y, w->r.w, TAB_H, GUI_FACE);
-    gfx_frame(s, w->r.x, w->r.y + TAB_H - 1, w->r.w, w->r.h - TAB_H + 1, GUI_LINE);
-    for (c = w->first; c; c = c->next, i++) {
-        int tw = gui_text_w(gui_font, gui_get_text(c)) + 16, on = i == t->at;
-        int y = w->r.y + (on ? 0 : 3);
-        gfx_fill(s, x, y, tw, TAB_H - (y - w->r.y), on ? GUI_FACE : GUI_FACE);
-        gfx_frame(s, x, y, tw, TAB_H - (y - w->r.y) + (on ? 0 : 0), GUI_LINE);
-        gui_draw_text(s, x + 8, y + (TAB_H - (y - w->r.y) - gui_font->height) / 2, on ? gui_bold : gui_font,
-                      gui_get_text(c), GUI_LINE);
-        if (on)
-            sel_x = x, sel_w = tw;
-        x += tw - 1;
+    int i = 0, room = tabs_geom(t, w->r.x, w->r.y, w->r.w, w->r.h, r), arrows = tabs_arrows(t, w->r.w), n = 0;
+    if (t->style == GUI_TABS_LIST) {
+        struct gfx_rect l = { w->r.x, w->r.y, room - t->sb.r.w + (t->sb.r.w ? 1 : 0), w->r.h };
+        int px = w->r.x + room + GUI_GAP;
+        gui_draw_field(s, &l, 1);
+        if (t->sb.r.w)
+            gui_sb_draw(s, &t->sb, 1);
+        gfx_fill(s, l.x + l.w, w->r.y, GUI_GAP, w->r.h, GUI_FACE);
+        gfx_frame(s, px, w->r.y, w->r.w - (px - w->r.x), w->r.h, GUI_LINE);
+        for (c = w->first; c && i < TABS_MAX; c = c->next, i++) {
+            int on = i == t->at;
+            struct gfx_rect a = { r[i].x + 1, r[i].y + 1, r[i].w - 2, TAB_LINE - 1 };
+            if (!r[i].w)
+                continue;
+            if (on) {
+                gfx_fill(s, a.x, a.y, a.w, a.h, GUI_DARK);
+                sel = a;
+            }
+            gui_draw_text(s, a.x + 7, a.y + (a.h - gui_font->height) / 2, on ? gui_bold : gui_font, gui_get_text(c),
+                          on ? GUI_FIELD : GUI_LINE);
+        }
+        if (gui_is_focus(w) && sel.w) {
+            struct gfx_rect f = { sel.x + 1, sel.y + 1, sel.w - 2, sel.h - 2 };
+            gui_draw_focus(s, &f);
+        }
+        return;
     }
-    if (sel_w)                                  /* (the chosen one opens into its page) */
-        gfx_fill(s, sel_x + 1, w->r.y + TAB_H - 1, sel_w - 2, 1, GUI_FACE);
-    if (gui_is_focus(w) && sel_w) {
-        struct gfx_rect f = { sel_x + 3, w->r.y + 3, sel_w - 6, TAB_H - 6 };
+    gfx_fill(s, w->r.x, w->r.y, w->r.w, room, GUI_FACE);
+    gfx_frame(s, w->r.x, w->r.y + room - 1, w->r.w, w->r.h - room + 1, GUI_LINE);
+    for (c = w->first; c && i < TABS_MAX; c = c->next, i++) {
+        int on = i == t->at, y = r[i].y + (on ? 0 : 3);
+        if (!r[i].w)
+            continue;
+        n = i;
+        gfx_fill(s, r[i].x, y, r[i].w, r[i].y + TAB_H - y, GUI_FACE);
+        gfx_frame(s, r[i].x, y, r[i].w, r[i].y + TAB_H - y, GUI_LINE);
+        if (r[i].w < tab_w(c))                  /* (GUI_TABS_SCROLL's one title wider than the strip) */
+            gui_text_fit(s, r[i].x + 8, y + (r[i].y + TAB_H - y - gui_font->height) / 2, r[i].w - 12,
+                         on ? gui_bold : gui_font, gui_get_text(c), GUI_LINE);
+        else
+            gui_draw_text(s, r[i].x + 8, y + (r[i].y + TAB_H - y - gui_font->height) / 2, on ? gui_bold : gui_font,
+                          gui_get_text(c), GUI_LINE);
+        if (on)
+            sel = r[i];
+    }
+    if (sel.w && sel.y + TAB_H == w->r.y + room)        /* (the chosen one in the last row opens into its page) */
+        gfx_fill(s, sel.x + 1, sel.y + TAB_H - 1, sel.w - 2, 1, GUI_FACE);
+    if (arrows) {                               /* GUI_TABS_SCROLL: left and right, dim at either end */
+        struct gfx_rect a = { w->r.x + w->r.w - 2 * GUI_SB, w->r.y + 3, GUI_SB, TAB_H - 4 };
+        struct gfx_rect b = { a.x + GUI_SB, a.y, GUI_SB, a.h };
+        gui_draw_box(s, &a, GUI_FACE, 0);
+        gui_draw_box(s, &b, GUI_FACE, 0);
+        gui_draw_arrow(s, a.x + a.w / 2, a.y + a.h / 2, 2, t->first > 0 ? GUI_LINE : GUI_DIM);
+        gui_draw_arrow(s, b.x + b.w / 2, b.y + b.h / 2, 3, c || (n + 1 < TABS_MAX && n + 1 < i) ? GUI_LINE : GUI_DIM);
+    }
+    if (gui_is_focus(w) && sel.w) {
+        struct gfx_rect f = { sel.x + 3, sel.y + 3, sel.w - 6, TAB_H - 6 };
         gui_draw_focus(s, &f);
     }
 }
 
-static void tabs_go(struct tabs *t, int at)
+static int tabs_count(struct tabs *t)
 {
-    int n = 0;
     struct gui_widget *c;
+    int n = 0;
     for (c = t->w.first; c; c = c->next)
         n++;
+    return n;
+}
+
+static void tabs_go(struct tabs *t, int at)
+{
+    int n = tabs_count(t);
     if (!n || at < 0 || at >= n || at == t->at)
         return;
     t->at = at;
@@ -804,10 +947,7 @@ static void tabs_go(struct tabs *t, int at)
 void gui_tabs_step(struct gui_widget *w, int by)
 {
     struct tabs *t = (struct tabs *)w;
-    int n = 0;
-    struct gui_widget *c;
-    for (c = w->first; c; c = c->next)
-        n++;
+    int n = tabs_count(t);
     if (n)
         tabs_go(t, (t->at + by + n) % n);
 }
@@ -816,28 +956,49 @@ static int tabs_event(struct gui_widget *w, struct gui_ev *e)
 {
     struct tabs *t = (struct tabs *)w;
     if (e->type == GUI_EV_KEY && !(e->mods & (GLOS_MOD_CTRL | GLOS_MOD_ALT))) {
-        if (e->key == GUI_K_LEFT) {
+        int list = t->style == GUI_TABS_LIST;
+        if (e->key == GUI_K_LEFT || (list && e->key == GUI_K_UP)) {
             if (t->at > 0)
                 tabs_go(t, t->at - 1);
             return 1;
         }
-        if (e->key == GUI_K_RIGHT) {
+        if (e->key == GUI_K_RIGHT || (list && e->key == GUI_K_DOWN)) {
             tabs_go(t, t->at + 1);
             return 1;
         }
         return 0;
     }
-    if (e->type == GUI_EV_PRESS && e->button == 1 && e->y < w->r.y + TAB_H) {
-        struct gui_widget *c;
-        int x = w->r.x, i = 0;
-        for (c = w->first; c; c = c->next, i++) {
-            int tw = gui_text_w(gui_font, gui_get_text(c)) + 16;
-            if (e->x >= x && e->x < x + tw) {
+    if (t->style == GUI_TABS_LIST && t->sb.r.w && gui_sb_event(w, &t->sb, e, 1)) {
+        if (t->sb.pos != t->first) {
+            t->first = t->sb.pos;
+            gui_damage(w);
+        }
+        return 1;
+    }
+    if (e->type == GUI_EV_PRESS && e->button == 1) {
+        struct gfx_rect r[TABS_MAX];
+        int i, n = tabs_count(t), room = tabs_geom(t, w->r.x, w->r.y, w->r.w, w->r.h, r);
+        int arrows = tabs_arrows(t, w->r.w);
+        if (t->style == GUI_TABS_LIST ? e->x >= w->r.x + room : e->y >= w->r.y + room)
+            return 0;                           /* (the page's) */
+        if (arrows && e->x >= w->r.x + w->r.w - arrows) {
+            if (e->x < w->r.x + w->r.w - GUI_SB) {
+                if (t->first > 0)
+                    t->first--;
+            } else {
+                for (i = n < TABS_MAX ? n : TABS_MAX; i > 0 && !r[i - 1].w; i--)
+                    ;
+                if (i < n && t->first < n - 1)
+                    t->first++;                 /* (a title after the last shown: one more along) */
+            }
+            gui_damage(w);
+            return 1;
+        }
+        for (i = 0; i < n && i < TABS_MAX; i++)
+            if (r[i].w && e->x >= r[i].x && e->x < r[i].x + r[i].w && e->y >= r[i].y && e->y < r[i].y + TAB_H) {
                 tabs_go(t, i);
                 break;
             }
-            x += tw - 1;
-        }
         return 1;
     }
     return 0;
@@ -859,6 +1020,16 @@ struct gui_widget *gui_tab(struct gui_widget *tabs, const char *title)
 
 int gui_tabs_get(struct gui_widget *tabs) { return ((struct tabs *)tabs)->at; }
 void gui_tabs_set(struct gui_widget *tabs, int page) { tabs_go((struct tabs *)tabs, page); }
+
+void gui_tabs_style(struct gui_widget *tabs, int style)
+{
+    struct tabs *t = (struct tabs *)tabs;
+    t->style = style;
+    t->first = 0;
+    gui_damage(tabs);
+    if (tabs->win)
+        gui_relayout(tabs->win);
+}
 
 /* ---- the scrolling area: a vbox taller than the room it has, a bar at its right */
 
