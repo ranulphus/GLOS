@@ -1,7 +1,8 @@
 # GLOS upper memory: a plan
 
-**Status: plan v1 (2026-10-31), with the owner's answers ([Decisions](#decisions)). Written for the disk cache's
-Q6 (docs/disk-cache.md, Decisions). Not started.**
+**Status (2026-11-02): U0–U3 built and passing in Loop A (branch `upper`); U4, the whole regression with the page
+on and off, running; U5 (the bench) and B1 (UMBPCI) to come. Plan v1 (2026-10-31), with the owner's answers
+([Decisions](#decisions)), written for the disk cache's Q6 (docs/disk-cache.md, Decisions).**
 
 Two parts:
 - **Part A** is D41's opt-in setting, owed since M9. GLOS moves its resident stub into an upper-memory page it maps
@@ -189,6 +190,18 @@ census needs it.
 ## The steps
 
 Development in `~/wt-glos-m5`, long runs in `~/wt-glos-test`, as for the cache.
+
+**Where they stand (2026-11-02):**
+- **U0 done:** Loop A 7 of 7 and bench-g400 ([What U0 found](#what-u0-found-2026-11-01)).
+- **U1, U2 done in Loop A:** `jobs.py mem-page` 6 of 6 (bf6, 486dx2, 486dx4; raw and HIMEMX). The page is
+  UMAPROBE's; GLOS keeps 448 bytes (4,560 with the cache's buffer); the copy-down through 4Ah, and through 48h
+  when STUBTSR stays after GLOS; `glos exit` refused while STUBTSR ALL holds every free block, GLOS still
+  answering, then leaving once the memory is back; DOS's memory as before. The shell-mode case U2 lists is moot:
+  shell mode never leaves (`glos exit` is refused there), so its stub never comes down.
+- **U3 done in Loop A:** the stacks' page is the next that qualifies (C900h on every Loop A machine, two slots);
+  NESTRM three levels deep runs the first two on the page and the third on its own memory, and a new client
+  then has a slot again.
+- **U4 running:** the whole regression on a test build that defaults to `auto`, then on `upper` itself (off).
 
 - **U0. Probe, changing nothing.** UMAPROBE (`tests/dos/umaprobe.c`, DJGPP, read-only), on plain DOS:
   - each 4 KB page from C0000h to EFFFFh: open bus, option ROM (its signature and length) or data;

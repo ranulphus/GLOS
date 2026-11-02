@@ -125,8 +125,7 @@ to COM1 at each step:
   the mode switch, the kernel-call and XMS entry points, the kill stub, its two stacks (the kill stack and its
   own) and the EXEC loop. Everything else (finding programs, the agent, later the desktop) runs in the kernel,
   which tells the stub what to EXEC (NEXT, §2.1). INT 2Fh 1687h asks each DPMI client for 4 KB of its own
-  memory, the host's real-mode stack (§12.1a); docs/upper-memory.md's U3 moves those stacks into GLOS's
-  upper-memory page when the stub goes there.
+  memory, the host's real-mode stack (§12.1a), unless GLOS has upper-memory pages for those stacks (below).
 - **Going resident.** Open Watcom puts its runtime's code at the start of the image, so the stub is written to
   run from any segment (data through CS, no segment fixups) and is copied down to the paragraph after the
   PSP. The copy tells the kernel (RESIDENT), which moves selector 38h and the call sites to it and checks
@@ -136,6 +135,23 @@ to COM1 at each step:
 - **Measured (M4a, with the agent's wait, the DOS server's call and the DPMI host's ARPLs):** the stub is 2,556
   bytes. With the PSP and the environment, MEM /C shows GLOS at 3,008 bytes, and the largest program is 3,008
   bytes smaller than under plain DOS.
+- **In a page of upper memory** (`[memory] stub_page = off | auto | SEGMENT`, or `/STUBPAGE=`; off by default;
+  docs/upper-memory.md, PRD D41). At RESIDENT the kernel takes a 4 KB page from C8000h to EFFFFh that reads FFh
+  throughout, twice, and that no option ROM or PCI BAR reaches (`kernel/mm/umapage.c`; `auto` the first from
+  C8000h, below E0000h), maps a frame of its own there (`mm_low_page`, §4) and copies the stub in. RESIDENT's
+  answer is the page's segment: the stub goes on from there and shrinks GLOS.EXE's block to the PSP alone (the
+  disk cache's block buffer after it, §9.8), and the kernel points selector 38h and its call sites there. A page
+  that fails is logged (`GLOS-VM stub-page refused reason=rom|bar|data|none|memory segment=`) and the stub stays
+  after the PSP. With the stub's page GLOS maps a second, the next that qualifies, for the DPMI host's real-mode
+  stacks (§12.1a; `GLOS-VM rm-stacks page= slots=`).
+  - **The way out.** The stub's last steps run with paging off, where only DOS's memory is real, so at the
+    leave NEXT answers 4 instead of halting: the stub grows its block back (4Ah), or takes one anywhere (48h,
+    when a program stayed resident after GLOS), copies itself there and tells the kernel (DOWN, call 6), which
+    moves 38h, unmaps both pages and leaves (`GLOS-VM stub-down seg= page=`). With no 2.7 KB anywhere, `glos
+    exit` is refused (`GLOS-EXIT refused reason=stub-memory bytes=`) and GLOS goes on; `glos exit` has
+    answered by then, so the refusal is in the log. Shell mode never leaves, so it never copies down.
+  - **Measured (U1, Loop A, 2026-11-02):** MEM /C shows GLOS at 448 bytes (the PSP and the environment), 4,560
+    with the disk cache's block buffer, against 7,312 with the stub after the PSP.
 - **From a prompt or AUTOEXEC.BAT:** COMMAND.COM stays the shell; `glos exit` returns to it.
 - **As the shell (`SHELL=C:\GLOS\GLOS.EXE /SHELL` in CONFIG.SYS; done in M3):**
   - `/SHELL` says so; so does a PSP that is its own parent (MS-DOS's shell). FreeDOS doesn't make its shell its
@@ -232,7 +248,7 @@ program looks for it.
 
 | Range | Use |
 |---|---|
-| 0000_0000–0010_FFFF | Identity map of physical 0–10FFFFh (conventional memory, UMA, HMA). Shared page table for PDE 0 in every address space. |
+| 0000_0000–0010_FFFF | Identity map of physical 0–10FFFFh (conventional memory, UMA, HMA). Shared page table for PDE 0 in every address space. With `[memory] stub_page`, up to two UMA pages map frames of GLOS's instead (the stub's and the host's real-mode stacks', §2.2), until GLOS leaves. |
 | 0011_0000–003F_FFFF | Unused, so no client data shares PDE 0's page table |
 | 0040_0000–BFFF_FFFF | User region of the current DPMI context. DPMI blocks are handed out **ascending from 4 MB** (§12.3). |
 | C000_0000–DFFF_FFFF | Kernel: image at C010_0000, heap at C040_0000, devices' own memory at C080_0000 (`dma_alloc`, M5), the screen's framebuffer at C0C0_0000 and windows' pixels at C200_0000 (M6), devices' registers and memory at C400_0000 (`mm_dev_map`: the Matrox card's, M7), the disk cache's tables at C680_0000 (`mm_cache_map`, 16 MB of addresses; §9.8), kmap window at DFC0_0000 |
@@ -881,6 +897,12 @@ direct = 1
   refused. (Until 2026-11-03 the block was 2 KB: a fifth nested call, an IRQ's INT 1Ch reflected while MGA-Glide's
   DOS/4GW tests drew, wrapped SP to FFxxh and wrote 62 KB past the block. RMDEEP, in `make loopa-dpmi`, nests eight
   calls and checks each level's SS:SP.)
+  - **In upper memory (U3):** with the stub in a page of upper memory, the stacks have pages of their own: two
+    slots, a 4 KB page each. 1687h reserves a slot for the program asking and answers SI = 0, so it gives no
+    memory; its mode switch takes the slot, and its level's end (or its context's) gives it back. A reservation
+    holds while its program lives (DOS's block at its PSP is still its own), so the program between 1687h and its
+    switch keeps the stack it was promised; once it has gone, the slot is anyone's. With no slot free, SI = 100h
+    and the client's own block, as before. `GLOS-DPMI start ... rm=page|own` says which.
 - **The trampoline page** (SEL_TRAMP, at 3FF000h in PDE 0's shared table) holds HLTs: the default handler for
   each vector (offset = vector), 0306h's protected-to-real switch, 0305h's save/restore (nothing to save), and
   the "GLOS" vendor entry. A HLT at ring 3 is a #GP, so the host sees which one.
@@ -1266,7 +1288,7 @@ Statuses:
 
 | Call | Behaviour |
 |---|---|
-| 1687h | The DPMI host, with SI = private paragraphs |
+| 1687h | The DPMI host, with SI = private paragraphs (0 while a slot of GLOS's upper-memory page is free, §12.1a) |
 | 1686h | AX=0 in protected mode |
 | 168Ah | 1.0 vendor API in protected mode: "GLOS" as 0A00h, and Windows' "MS-DOS" (0100h: a read-only selector for the LDT; §12.1d). Others: AL as it was |
 | 1680h | **A real yield** in either mode (`uclock`'s start-up spin and `usleep` call it [census]). AL stays 80h ("not supported"), as on plain DOS: DJGPP's `uclock()` takes AL=0 for Windows 9x and waits for a BIOS tick, which never comes when it is first called with interrupts off (JOYTEST hung, M4c) |
@@ -1774,9 +1796,9 @@ and GLOS's:
 | BOOT | Each loader step |
 | REFUSE | A refusal |
 | RING0 | Ring-0 entry |
-| EXIT | Exit |
+| EXIT | Exit: `code= a20=`; `refused reason=stub-memory bytes=` (no DOS memory for the stub to come down to, §2.2) |
 | WARN | e.g. `vif-stuck` |
-| VM | The system VM: `run=`, `dos indos= sda= psp=`, `resident psp= stub= freed=`, `leave code= ticks= gp= int= irq= spurious=`, `indos=reset was=` (InDOS left set by a program killed inside DOS, cleared at the stub's NEXT; M6) |
+| VM | The system VM: `run=`, `dos indos= sda= psp=`, `resident psp= stub= freed= page=SEG\|none [buffer=4112]`, `stub-page refused reason= segment=`, `rm-stacks page= slots=`, `stub-down seg= page=` (§2.2), `leave code= ticks= gp= int= irq= spurious=`, `indos=reset was=` (InDOS left set by a program killed inside DOS, cleared at the stub's NEXT; M6) |
 | SCHED | At leave: context switches, contended ticks per class, and each thread's ticks |
 | PCI | The number of functions found; each one GLOS claims |
 | DEV | Devices' keepers (docs/devices.md): `quiet ADDR id= class= irq= how=` (a device on a line GLOS takes, made quiet), `keep ... why=` (one that couldn't be), `given-back ADDR id= to=dos irq=` (DOS wrote a quiet device's configuration) |
@@ -1791,7 +1813,7 @@ and GLOS's:
 | KILL | A kill (§9.6): `psp= at= ticks= reason=hotkey\|agent\|priv\|crash` |
 | SESSION | A session (§11.1): `begin n= prog= parent= mode= [profile=] [direct=1]`, `direct-end imr= rtc=` (§9.7), `end n= prog= why=exit\|next-exec\|stub mode= [remode=1] vectors= ticks= t= irq=` (`mode=` the mode it ended in, `vectors=` those put back, `ticks=` the BIOS tick count set from the RTC, `t=` its length in kernel ticks, `irq=` `ok` when IRQ 0, 1, 5, 7 and 12's vectors and mask bits are as the session found them, as VECCHK compares, else which aren't) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
-| DPMI | The DPMI host: `start bits= psp= cs= ds= ss=`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... if= -> cf= ax=` (`if=` the virtual IF at the call), `raw to=rm|pm`, `dosx ax= ... -> cf=`, `vendor name=`, `v86-int21` (a client's real-mode DOS calls), `exception-code` (the code bytes and registers at a fault),, `deliver irq=|passup=|exception=|rmcb= to= from= at= err= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |
+| DPMI | The DPMI host: `start bits= psp= cs= ds= ss= level= term= parent= rm=page\|own`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... if= -> cf= ax=` (`if=` the virtual IF at the call), `raw to=rm|pm`, `dosx ax= ... -> cf=`, `vendor name=`, `v86-int21` (a client's real-mode DOS calls), `exception-code` (the code bytes and registers at a fault),, `deliver irq=|passup=|exception=|rmcb= to= from= at= err= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |
 | CACHE | The disk cache (§9.8): `start mode= drives=DL:lba\|chs:SECTORS kb_max= ports= [buffer=4096]`, `off reason=config\|smartdrv\|controller\|no-disk\|memory`, `mode=` (changed live), `drop reason=port\|direct\|command blocks=` (with `port= cmd=` for a port), `port port= cmd= [writes=1]` (count mode: a command outside its calls), `mismatch dl= lba=` (verify mode), `nofill dl= why=dma-boundary`, `end mode= hits= misses= hit_sectors= miss_sectors= write_sectors= fills= drops= reclaims= mismatches= kb= counted= distinct=` |
 | CRASH | A client the host ends (§19): `why= vec= err= prog= psp= bits= mode=`, `cs:eip= ss:esp= eflags= cr2=`, the general registers, `code=` (16 bytes at CS:EIP), `stack=`, a `seg` line per segment register, `handlers= lstack= nesting=`, `file=` |
 | DPMI-UNIMPL | An unimplemented call |
