@@ -320,6 +320,8 @@ static void tabs_click(struct gui_widget *w, int what)
         say("tabs style %s", styles[id], 0);
     } else {
         int width = id == 3 ? 620 : 420;
+        if (id == 3)
+            glos_move(win->id, 0, 0);           /* (room for 620 pixels on a 640x480 desktop wherever it was) */
         gui_resize(win, width, 240);
         say("tabs width %s%d", "", width);
     }
