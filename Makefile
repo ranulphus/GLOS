@@ -2,9 +2,7 @@
 #
 #   make                build/ow/GLOS.EXE (16-bit loader) and build/kernel/GLOSK.BIN (the kernel)
 #   make loopa [CARD=g450]   run GLOS.EXE in 86Box through MGA-Glide's Loop A: out/loopa-CARD/
-#   make check-deps     MGA-Glide at or after deps.mk's pin
-#   make sync-hal       third_party/mgahal from $(MGA_GLIDE) (the HAL; tools/sync-hal.sh)
-#   make check-hal      the vendored HAL against its MANIFEST
+#   make check-deps     MGA-Glide's checkout is there (MGA_GLIDE: its harness and HAL, built from its main)
 #   make host-test      kernel code's host tests (in the dev container)
 #   make ssh-test       the SSH layer on host sockets against OpenSSH's ssh (M3)
 #   make loopa-m1       M1's exit matrix in Loop A (tests/loopa/jobs.py)
@@ -24,7 +22,7 @@
 #   make loopa-m4c      loopa-m4b, HDPMI's regression tests against HDPMI32i (loopa-hdpmireg),
 #                       lDebugX on ecm's dpmimini (loopa-ecm), and MGA-Glide's conform and replays,
 #                       GTA, Screamer Rally and DOSBench under GLOS as the shell (loopa-m4c-games,
-#                       tools/m4c-games.sh; M4C_MGA= an MGA-Glide tree at deps.mk's pin)
+#                       tools/m4c-games.sh; M4C_MGA= another MGA-Glide tree)
 #   make loopa-m4d      loopa-m4c, DPMICONF-16 against HDPMI16/16i (loopa-dpmi16), and TPX on RTM
 #                       compiling and running a program (loopa-tpx; BORLAND_DIR, make m4d-inputs)
 #   make loopa-sess     exclusive sessions: what SESSTEST leaves behind, natively and under
@@ -64,7 +62,6 @@
 #   make survey-tools   build/dj/IFTEST.EXE (DJGPP) for tools/survey/survey.py
 include config.mk
 -include config.local.mk
-include deps.mk
 
 DEV      := $(MGA_GLIDE)/tools/dev
 CFG_SRCS := sdk/config/cfg.c sdk/config/tz.c   # GLOS.CFG's schema and time zones, shared everywhere
@@ -79,20 +76,17 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: loopa-cache sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps sync-hal check-hal clean help survey-tools
+.PHONY: loopa-cache sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
 	@sed -n '3,/^[^#]/p' Makefile | grep '^#' | sed 's/^# //'
 
+# MGA-Glide's checkout beside this one: its harness and HAL, used from its main as they are (no pin, no copy:
+# the owner's decision 2026-11-02, before alpha everything is on main trunk; PRD D27).
 check-deps:
-	@git -C "$(MGA_GLIDE)" merge-base --is-ancestor "$(MGA_GLIDE_PIN)" HEAD 2>/dev/null \
-	  || { echo "$(MGA_GLIDE) is not at or after $(MGA_GLIDE_PIN) (deps.mk)"; exit 1; }
-
-sync-hal:
-	tools/sync-hal.sh $(MGA_GLIDE)
-check-hal:
-	tools/sync-hal.sh --check
+	@[ -f "$(MGA_GLIDE)/hal/include/mga/hal.h" ] && [ -x "$(MGA_GLIDE)/tools/dev" ] \
+	  || { echo "No MGA-Glide checkout at MGA_GLIDE=$(MGA_GLIDE): clone github.com/ranulphus/MGA-Glide there"; exit 1; }
 
 # ---- Host tests: kernel code built 32-bit for Linux (in the dev container,
 # which has the 32-bit C library) --------------------------------------------
@@ -287,7 +281,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -O2 -g -Wall -Wextra -Werror -nostdinc -Iinclude -Ikernel/include \
            -isystem $(shell $(HOST_CC) -m32 -print-file-name=include) -Ikernel/include/libc -Ikernel/net/port \
            -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh \
-           -Ithird_party/mgahal/hal/include
+           -I$(MGA_GLIDE)/hal/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c kernel/core/main.c kernel/core/timer.c \
          kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
          kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
@@ -307,9 +301,9 @@ build/kernel/sdk_cfg.o build/kernel/sdk_tz.o: build/kernel/sdk_%.o: sdk/config/%
 	@mkdir -p $(dir $@)
 	$(Q)echo "  KCC     $<"
 	$(Q)$(HOST_CC) $(KCFLAGS) -MMD -MP -c -o $@ $<
-# The Matrox HAL (third_party/mgahal: MGA-Glide's, make sync-hal), the part
-# without FPU code, with its port for this kernel (docs/milestones-m7.md step C).
-MGAHAL := third_party/mgahal/hal
+# The Matrox HAL (MGA-Glide's checkout, MGA_GLIDE), the part without FPU code, with its port for this
+# kernel (docs/milestones-m7.md step C). Its objects are built here; MGA-Glide's tree is only read.
+MGAHAL := $(MGA_GLIDE)/hal
 HAL_SRCS := $(addprefix $(MGAHAL)/src/,pci.c chip.c fifo.c engine.c blit.c cursor.c vram.c) $(MGAHAL)/port/glos.c
 HAL_OBJS := $(patsubst $(MGAHAL)/%.c,build/mgahal/%.o,$(HAL_SRCS))
 build/mgahal/%.o: $(MGAHAL)/%.c $(wildcard $(MGAHAL)/include/mga/*.h kernel/include/*.h)

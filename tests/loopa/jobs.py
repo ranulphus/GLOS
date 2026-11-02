@@ -898,7 +898,7 @@ DJTST = [("FAULT", []), ("NULL", []), ("FPU", []), ("RAISE", []), ("INFOBLK", []
          ("SIGNALS", ["2:0x39", "10:0x10"]), ("CRASHME", []), ("CRASHGP", [])]
 # DJGPP turns a key or the timer into a signal by cutting DS's limit to 4 KB
 # in the IRQ handler, so the next data access faults: HANG, CTRLC and
-# SIGNALS need MGA-Glide's 86Box patch 0112 (pinned in deps.mk), without
+# SIGNALS need MGA-Glide's 86Box patch 0112 (in MGA-Glide since 2026-10-04), without
 # which the dynarec checked no limit on loads.
 EXC_LINE = re.compile(r"^(.*?) at eip=([0-9a-f]+)")
 

@@ -155,7 +155,7 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D24** | **GPU ownership is enforced by page faults.** A program's Matrox MMIO pages stay unmapped until it holds the GPU lock. The HAL gains `engine_resync()` for every change of owner, and a watchdog resets the engine and kills an app that holds the lock too long. *Worked out in M8: D44.* | Every owner change is visible to the supervisor, and stale HAL state can't overflow the FIFO. | M8 |
 | **D25** | **No EMS, VCPI or UMBs in v1.** GLOS provides its own XMS 3.0 server, and the first MB is identity-mapped in every address space. | Matches the HIMEM-only baselines. SDL's Sound Blaster driver assumes linear = physical below 1 MB for its DMA buffer. | After v1 |
 | **D26** | **Provenance: write from specifications.** Code under GPL, Artistic or no licence (Jemm, HDPMI, CWSDPMI, DPMIONE, 386MAX, the FreeDOS kernel, Watt-32, mTCP) is reference and test baseline only, never copied. Leaked Microsoft source is never consulted. | An MIT licence that holds up (§17). | — |
-| **D27** | **Changes to the shared HAL and harness go into MGA-Glide first, with its full regression.** GLOS pins MGA-Glide in `deps.mk` and vendors the HAL with `sync-hal` once the kernel needs it. | The project-wide rule that DOS-GL and DOSBench already follow. | — |
+| **D27** | **Changes to the shared HAL and harness go into MGA-Glide first, with its full regression.** GLOS builds the HAL and runs the harness from MGA-Glide's checkout beside it (`MGA_GLIDE`), from its main as it is: no pin and no copy (the owner's decision 2026-11-02: before alpha everything is on main trunk). | The project-wide rule. A change to MGA-Glide reaches GLOS at its next build, so MGA-Glide's regressions consider GLOS too. | — |
 | **D28** | **Performance budgets come from silicon and CPU models, not 86Box speed.** | 86Box on the build host runs far below real hardware, and the emulated Matrox FIFO thread runs in host time. | — |
 | **D29** | **SSH accepts public keys only.** Host keys are generated on first boot from IRQ-timing entropy; Loop A images carry a fixed test key; VNC is off by default and meant to be tunnelled over SSH. | Remote code execution must be authenticated. VNC's own authentication is weak. | M3 |
 | **D30** | **16-bit DPMI clients are hosted in v1.** (User) Acceptance: Borland's 16-bit DPMI (TPX.EXE on RTM.EXE + DPMI16BI.OVL from Turbo Pascal 7, kept privately in `~/BORLAND`) plus our own Open Watcom 16-bit conformance suite. | Borland protected-mode tools and other 16-bit extended programs then run under GLOS too. | M4d |
@@ -905,9 +905,9 @@ The bench runs the gate's suites through GLOS's agent (M5 on).
 | Loader | Open Watcom v2 (`wcc -bt=dos -ms -0`, `wlink system dos`) → `GLOS.EXE` |
 | Supervisor | Host gcc `-m32 -march=i486 -ffreestanding -fno-pic`, GNU as, `ld` with a linker script → ELF, then `objcopy` to a flat image the loader reads (D18) |
 | GLOS libraries and apps | DJGPP gcc 12.2 (`i586-pc-msdosdjgpp-gcc`), as for DOS-GL |
-| Shared HAL | Vendored from MGA-Glide (`hal-export`/`sync-hal`) once the kernel needs it, with a `hal/port/glos.c` port in MGA-Glide (Appendix B) |
+| Shared HAL | Built from MGA-Glide's checkout (`MGA_GLIDE`), with a `hal/port/glos.c` port in MGA-Glide (Appendix B) |
 | Host tests | Native gcc on Linux |
-| Loop A | `$(MGA_GLIDE)/tools/dev` + `tools/loopa/run.py`, pinned in `deps.mk` (`make check-deps`) |
+| Loop A | `$(MGA_GLIDE)/tools/dev` + `tools/loopa/run.py`, from MGA-Glide's main (`make check-deps`: the checkout is there) |
 | Build system | Makefile, with `config.mk` and an uncommitted `config.local.mk` |
 | CI | GitHub Actions: host tests, the build, Loop A smoke jobs (`MGA_NO_DOCKER=1`, as in the sibling repos) |
 
@@ -944,7 +944,7 @@ GLOS doesn't use Microsoft, IBM or Apple marks or trade dress (D7).
 ```
 GLOS/
   PRD.md  README.md  LICENSE  THIRD_PARTY.md (from M3)
-  Makefile  config.mk  deps.mk        config.local.mk is not committed
+  Makefile  config.mk               config.local.mk is not committed
   loader/        GLOS.EXE (16-bit, Open Watcom)
   kernel/        supervisor (gcc -m32)
     arch/        GDT/IDT/TSS, paging, FPU, CPU features
@@ -1059,7 +1059,7 @@ the same day, and PKG reads it as signed in Loop A.
 | R9 | Hardware variety on real PCs: shared IRQs, BIOS and VBE quirks | Medium | Conservative defaults; a quirks table; refusal with a clear message; the bench |
 | R10 | Behaviour differences between FreeDOS and MS-DOS | Medium | Loop A on FreeDOS, the bench on MS-DOS 6.22/7.1; GLOS relies on no undocumented DOS internals beyond InDOS, the critical-error flag and the open-file table |
 | R11 | Supervisor bugs look like Loop A hangs | Medium | COM1 discipline (§7.7), the gdb stub, panic dumps |
-| R12 | Several sessions changing shared checkouts | Medium | GLOS pins MGA-Glide (`deps.mk`); cross-repo work on branches in worktrees |
+| R12 | Several sessions changing shared checkouts | Medium | Cross-repo work on branches in worktrees (MGA_GLIDE= another checkout); MGA-Glide's main changes only after its regression |
 
 ---
 
@@ -1200,7 +1200,7 @@ The gate's game runs mostly use `-nosound -nocdaudio -nolan`; Half-Life's Loop A
 | MGA-Glide | Loop A H0–H7 and 86Box patches 0106–0108 (§15) | M0, M3 | Full MGA-Glide regression (conform 27 × 4, replays, `loopa-selftest`) |
 | MGA-Glide | Loop B SSH transport (H8) | M5 | The same, plus a vbench dry run |
 | MGA-Glide (86Box) | PCI variants of the Matrox devices (H10, D38) | M7 | The full regression; the 486 profiles with a Matrox card |
-| MGA-Glide (HAL) | `hal/port/glos.c` (`sys_rm_int` becomes a nested V86 call under the DOS lock; physical mapping through GLOS) | M7 | The same; `make sync-hal` into DOS-GL and GLOS afterwards |
+| MGA-Glide (HAL) | `hal/port/glos.c` (`sys_rm_int` becomes a nested V86 call under the DOS lock; physical mapping through GLOS) | M7 | The same; DOS-GL and GLOS build it from MGA-Glide's checkout |
 | MGA-Glide (HAL) | Screen-to-screen BITBLT, mono expansion, hardware cursor, a shared VRAM allocator, `engine_resync()`, display start through the CRTC | M7 | The same, plus new conformance tests for each primitive |
 | DOS-GL | The GLOS path in `src/dgl/context.c`: 0A00h detection, VRAM from GLOS, swap as present, the GPU lock, no VBE calls | M8 | DOS-GL conformance on G200, G400 and G450 on plain DOS (unchanged), and windowed under GLOS |
 | DOS-GL (SDL patches) | 0007 onward: GLOS video, audio and input in SDL's DOS port | M8 | `loopa-sdl` on plain DOS, and windowed under GLOS |

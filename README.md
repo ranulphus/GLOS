@@ -42,7 +42,7 @@ runs GLOS in 86Box. Paths are set in `config.mk`; override them in `config.local
 
 ```
 make                     # build/ow/GLOS.EXE
-make check-deps          # MGA-Glide at or after the commit pinned in deps.mk
+make check-deps          # MGA-Glide's checkout beside this one (MGA_GLIDE, default ~/MGA-Glide)
 make loopa CARD=g450     # boot 86Box with a G450, run GLOS.EXE: out/loopa-g450/ (status, serial.log)
 ```
 

@@ -13,9 +13,10 @@ strip = [
     # Fifth Wheel's audio check counts the chunks it played, as many as the run took time.
     ' of \d+ chunks',
     # DOS-GL's WARP report at exit: the ring its host gave it (GLOS's AGP memory, write-combined since API 1.4;
-    # nothing like it under CWSDPMI) and counts that follow the frames a timed run drew. Its failures, resets,
-    # timeouts and stuck fences are still compared.
-    '\b(tris|kicks|ring|wc|seqs)=\S+',
+    # nothing like it under CWSDPMI), counts that follow the frames a timed run drew, and the times uclock()
+    # stepped back and the HAL held its clock (as many as chance gives). Its failures, resets, timeouts and
+    # stuck fences are still compared.
+    '\b(tris|kicks|ring|wc|seqs|clock_backs)=\S+',
 ]
 # Lines dropped altogether: statistics and timing reports.
 drop = ['^HX-STAT', '^DGL-STAT', '^MGL-STAT', '^DGL-PERF', '^MGL-PERF', '^DGL-TIME', '^MGL-TIME']

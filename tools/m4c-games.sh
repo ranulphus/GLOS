@@ -9,7 +9,7 @@
 #
 #   tools/m4c-games.sh [PART ...]          (default: all four)
 #
-# M4C_MGA is an MGA-Glide tree at deps.mk's pin with its runtime built
+# M4C_MGA is an MGA-Glide tree with its runtime built
 # (default $MGA_GLIDE); its out/ takes the runs. The replays and the games
 # need the owner's traces and fixtures in ~/.cache/mga-glide (skipped, and
 # reported, without them). `make glos-cache` (a prerequisite of make

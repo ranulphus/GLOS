@@ -1,5 +1,5 @@
 /* The Matrox card's drawing engine (PRD §9.1; docs/milestones-m7.md step
- * C): MGA-Glide's HAL (third_party/mgahal, its FPU-free part, with the
+ * C): MGA-Glide's HAL (its checkout, MGA_GLIDE: the FPU-free part, with the
  * port hal/port/glos.c), brought up on the desktop's mode.
  *
  * The mode is still set through the video BIOS, as on any card

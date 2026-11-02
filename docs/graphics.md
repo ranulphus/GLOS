@@ -385,7 +385,7 @@ keyboard there are no keys for it (a terminal is M9's; DOS programs in windows c
 - INT 33h has no handler calls (0Ch, 14h), no ranges and no cursor of its own.
 - The pointer has one shape and no acceleration.
 
-## 6. The Matrox card (M7: `kernel/gfx/mga.c`, `third_party/mgahal`)
+## 6. The Matrox card (M7: `kernel/gfx/mga.c`, MGA-Glide's `hal/`)
 
 On a G100, G200, G400 or G450 the desktop is drawn by the card's drawing engine, through MGA-Glide's HAL. The
 mode is still set through the video BIOS (§2.1); what the engine draws is, pixel for pixel, what the 2D
@@ -393,9 +393,8 @@ library's software draws (the M7 exit).
 
 ### 6.1 The HAL in the kernel
 
-- **A vendored copy** of MGA-Glide's HAL in `third_party/mgahal` (its `hal/`, licence and 2D reference),
-  refreshed with `make sync-hal` from the pinned MGA-Glide and checked by `make check-hal` against its
-  MANIFEST. It is never edited here: changes are made in MGA-Glide (PRD D27).
+- **MGA-Glide's HAL from its checkout** beside GLOS (`MGA_GLIDE`, its `hal/`), built from MGA-Glide's main as
+  it is (until 2026-11-02 a vendored copy in `third_party/mgahal`). Changes are made in MGA-Glide (PRD D27).
 - **The kernel builds the part with no FPU code** (it is built `-mgeneral-regs-only`): PCI, the chips'
   capabilities, the FIFO, the engine, 2D drawing, the cursor and display start, the VRAM allocator. Not the 3D
   set-up, the texture code, `engine_present` or the VBE code.
