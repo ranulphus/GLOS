@@ -76,6 +76,8 @@ struct vm {
     /* the stub in a page of upper memory (docs/upper-memory.md) */
     u16 page_seg;                       /* its segment, 0: the stub is after the PSP */
     u32 page_frame;                     /* the frame mapped there */
+    u16 stk_seg;                        /* the DPMI host's real-mode stacks' page (U3), 0: none */
+    u32 stk_frame;
     u32 leave_code;                     /* what GLOS leaves with once the stub is down (NEXT 4) */
     u8 down_refused;                    /* DOS had no room for it: /RUN's GLOS stays */
 };

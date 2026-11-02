@@ -419,7 +419,8 @@ def mem(profile, boot):
 
 
 # The upper memory area (docs/upper-memory.md).
-UMA_FILES = ["--file", "build/dj/UMAPROBE.EXE=/TEST/UMAPROBE.EXE", "--file", "build/ow/dos/STUBTSR.EXE=/TEST/STUBTSR.EXE"]
+UMA_FILES = ["--file", "build/dj/UMAPROBE.EXE=/TEST/UMAPROBE.EXE", "--file", "build/ow/dos/STUBTSR.EXE=/TEST/STUBTSR.EXE",
+             "--file", "build/dj/NESTRM.EXE=/TEST/NESTRM.EXE"]
 UMA_CASES = [("bf6", "g200"), ("bf6", "g400"), ("bf6", "g450"), ("bf6", "vbe"), ("486dx2", "vbe"),
              ("486dx2", "g200pci"), ("486dx2", "g450pci")]
 
@@ -453,17 +454,24 @@ def mempage(profile, boot):
     within the same of plain DOS; the way out through the copy-down (stub-down), VECCHK clean, MEM as before.
     In agent mode ([memory] stub_page = auto): MEM /C as a job; STUBTSR after GLOS's block, so that the copy-down
     takes a block anywhere (AH=48h); then, GLOS started again, STUBTSR ALL holding DOS's memory: glos exit refused
-    and GLOS still answering, then, the memory back, glos exit."""
+    and GLOS still answering, then, the memory back, glos exit.
+    U3: the DPMI host's real-mode stacks in a second page (rm-stacks, two slots): NESTRM three levels deep, the
+    first two levels on the page's slots and the third on its own memory, then one level on a slot again."""
     import time
     tag = "%s-%s" % (profile, boot)
     g = "C:\\TEST\\GLOS.EXE /STUBPAGE=AUTO "
+    nest = batfile("mempage-%s/NEST.BAT" % tag, ["@ECHO OFF", "C:\\TEST\\NESTRM.EXE 3 > C:\\OUT\\NEST1.TXT",
+                                                 "C:\\TEST\\NESTRM.EXE 1 > C:\\OUT\\NEST2.TXT"])
     st, serial = run("mempage-" + tag, ["--machine", profile, "--boot-cfg", boot] + GLOS_FILES + UMA_FILES + [
+        "--file", nest + "=/TEST/NEST.BAT",
         "--cmd", "SERSAY HX-START mempage", "--cmd", "C:\\TEST\\UMAPROBE.EXE > C:\\OUT\\UMA.TXT",
         "--cmd", "VECCHK save", "--cmd", "MEM /C > C:\\OUT\\BASE.TXT",
         "--cmd", g + "/CACHE=OFF /RUN MEM /C > C:\\OUT\\OFF.TXT", "--cmd", "VECCHK check",
         "--cmd", "MEM /C > C:\\OUT\\AFTER1.TXT",
         "--cmd", g + "/CACHE=ON /RUN MEM /C > C:\\OUT\\ON.TXT", "--cmd", "VECCHK check",
-        "--cmd", "MEM /C > C:\\OUT\\AFTER2.TXT", "--cmd", "SERSAY HX-DONE 0", "--timeout", "900"])
+        "--cmd", "MEM /C > C:\\OUT\\AFTER2.TXT",
+        "--cmd", g + "/RUN %COMSPEC% /C C:\\TEST\\NEST.BAT", "--cmd", "VECCHK check",
+        "--cmd", "SERSAY HX-DONE 0", "--timeout", "1200"])
     f = lambda n: out_file("mempage-" + tag, n)
 
     def largest(t):
@@ -480,14 +488,19 @@ def mempage(profile, boot):
     auto = re.search(r"UMAPROBE free=\d+ first=\w+ auto=(\w+)", f("UMA.TXT"))
     res = re.findall(r"GLOS-VM resident psp=(\w+) stub=\d+ freed=\d+ page=(\w+)( buffer=4112)?", serial)
     base = largest(f("BASE.TXT"))
+    starts = re.findall(r"GLOS-DPMI start .*? level=(\d+) .*? rm=(\w+)", serial)
+    nested = re.findall(r"HX-NESTRM depth=(\d+) version=(-?\d+)", f("NEST1.TXT") + f("NEST2.TXT"))
     checks = {
-        "status": st == "PASS" and serial.count("GLOS-EXIT code=0") == 2,
-        "page": len(res) == 2 and bool(auto) and all(r[1].lower() == auto.group(1).lower() for r in res),
+        "status": st == "PASS" and serial.count("GLOS-EXIT code=0") == 3,
+        "page": len(res) == 3 and bool(auto) and all(r[1].lower() == auto.group(1).lower() for r in res),
+        "rm-stacks": len(re.findall(r"GLOS-VM rm-stacks page=[0-9a-f]+ slots=2", serial)) == 3,
+        "rm-slots": starts == [("1", "page"), ("2", "page"), ("3", "own"), ("1", "page")],
+        "nestrm": [d for d, v in nested] == ["1", "2", "3", "1"] and all(int(v) > 0 for d, v in nested),
         "own": 0 < own(f("OFF.TXT")) <= 1024 and 0 < own(f("ON.TXT")) <= 5120,
         "largest": base > 0 and 0 <= base - largest(f("OFF.TXT")) <= 1024 and 0 <= base - largest(f("ON.TXT")) <= 5120,
-        "down": serial.count("GLOS-VM stub-down") == 2,
+        "down": serial.count("GLOS-VM stub-down") == 3,
         "after": base > 0 and largest(f("AFTER1.TXT")) == base and largest(f("AFTER2.TXT")) == base,
-        "vecchk": serial.count("HX-VECCHK ok") == 2,
+        "vecchk": serial.count("HX-VECCHK ok") == 3,
         "clean": "GLOS-WARN" not in serial and "GLOS-PANIC" not in serial and "refused" not in serial,
     }
     cfg = batfile("mempage-ag-%s/GLOS.CFG" % tag, ["; jobs.py mem-page, agent mode", "[time]", "sntp = off",

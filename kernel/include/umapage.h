@@ -19,6 +19,7 @@ struct upage_env {
 
 int upage_check(const struct upage_env *e, u32 phys);  /* UP_OK, or why the page at phys can't be had */
 u32 upage_auto(const struct upage_env *e);              /* the page `auto` takes, or 0 */
+u32 upage_next(const struct upage_env *e, u32 from, u32 end);  /* the first that qualifies in [from, end), or 0 */
 const char *upage_why(int r);                           /* "rom", "bar", "data", "range" */
 
 #endif

@@ -122,6 +122,7 @@ void level_pop(int psp)
     memcpy(dctx->vidt, l->vidt, sizeof l->vidt);
     memcpy(dctx->exc, l->exc, sizeof l->exc);
     memcpy(dctx->exc10, l->exc10, sizeof l->exc10);
+    dpmi_rm_slot_free(dctx->rm_seg);            /* (its real-mode stack, if a slot of GLOS's page) */
     dctx->nlv--;
     load_fields(&dctx->lv[dctx->nlv - 1]);
     dctx->ending = 0;

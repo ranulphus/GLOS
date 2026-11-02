@@ -529,6 +529,24 @@ static void vm_leave(u32 code)
 
 static void uma_read(u32 phys, u8 *out, u32 n) { memcpy(out, vm_ptr(phys), n); }
 
+/* With the stub's page, a second for the DPMI host's real-mode stacks (docs/upper-memory.md U3): the next page
+   after it that qualifies by the same rules, below E0000h unless the stub's own is above. Without one, clients
+   give their own memory for it (1687h's SI), as before. */
+static void stack_page(const struct upage_env *e, u32 stub_at)
+{
+    u32 at = upage_next(e, stub_at + 4096, stub_at < UP_AUTO_END ? UP_AUTO_END : UP_END), f = at ? pmm_alloc() : 0;
+    if (!f) {
+        kprintf("GLOS-VM rm-stacks page=none slots=0\n");
+        return;
+    }
+    mm_low_page(at, f);
+    memset(vm_ptr(at), 0, 4096);
+    vm.stk_seg = (u16)(at >> 4);
+    vm.stk_frame = f;
+    dpmi_rm_slots(vm.stk_seg, 4096 / (RM_STACK_PARAS * 16));
+    kprintf("GLOS-VM rm-stacks page=%04x slots=%u\n", vm.stk_seg, 4096 / (RM_STACK_PARAS * 16));
+}
+
 /* The page of upper memory [memory] stub_page names, or auto's (docs/upper-
    memory.md, Which page): a frame of GLOS's is mapped there and the stub
    copied in from seg:0. Its segment, or 0 when the stub stays after the PSP
@@ -562,6 +580,7 @@ static u16 stub_page(u16 seg)
     memset(vm_ptr(at + vm.bi->stub_paras * 16), 0, 4096 - vm.bi->stub_paras * 16);
     vm.page_seg = (u16)(at >> 4);
     vm.page_frame = f;
+    stack_page(&e, at);
     return vm.page_seg;
 }
 
@@ -627,6 +646,11 @@ static void vm_down(struct trapframe *tf, u16 seg)
     cpu_set_code16_base(vm.bi->cs_base);
     mm_low_page((u32)vm.page_seg << 4, 0);
     pmm_free(vm.page_frame);
+    if (vm.stk_seg) {                           /* (no client is left to use a stack) */
+        dpmi_rm_slots(0, 0);
+        mm_low_page((u32)vm.stk_seg << 4, 0);
+        pmm_free(vm.stk_frame);
+    }
     kprintf("GLOS-VM stub-down seg=%04x page=%04x\n", seg, vm.page_seg);
     vm.page_seg = 0;
     vm_leave(vm.leave_code);

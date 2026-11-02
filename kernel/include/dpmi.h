@@ -23,6 +23,7 @@
 #define RM_STACK_PARAS 0x100            /* 1687h's SI: the host's real-mode stack, 4 KB of the client's: an
                                            RM_SLICE for each of the real-mode calls that can nest (rmcall.c) */
 #define RM_SLICE       512
+#define RM_SLOTS       2                /* such stacks in pages of GLOS's in upper memory, one a page (docs/upper-memory.md U3) */
 #define NRMCB          32               /* the stub's ARPLs: for every context together (M6) */
 #define NSEGSEL        64               /* 0002h's selectors */
 #define USER_BASE      0x00400000u      /* the user region (supervisor.md §4) */
@@ -158,6 +159,8 @@ u32 dpmi_stat(char *buf, u32 max);      /* glos stat: the context as a JSON obje
 /* host.c */
 void dpmi_init(void);
 void dpmi_1687(struct trapframe *tf);   /* INT 2Fh AX=1687h from V86 mode */
+void dpmi_rm_slots(u16 seg, u32 n);     /* the host's real-mode stacks: n slots of RM_STACK_PARAS from seg (0, 0: none) */
+void dpmi_rm_slot_free(u16 seg);        /* a level's stack back, if it was a slot */
 int dpmi_v86_bp(struct trapframe *tf);  /* #UD at one of the stub's ARPLs: 1 if it was the host's */
 void dpmi_dos_exit(struct trapframe *tf, u8 n, u32 next);       /* V86 INT 21h 4Ch/00h: a client's program may be ending */
 void dpmi_to_pm(struct trapframe *tf, u16 cs, u32 eip, u16 ss, u32 esp, u16 ds, u16 es);

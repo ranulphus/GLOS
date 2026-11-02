@@ -1,6 +1,7 @@
 /* Host test for the upper-memory page rules (kernel/mm/umapage.c; docs/upper-memory.md, Which page): open
  * bus, option ROMs that reach into a page from below, a page whose bytes change between reads, PCI claims,
- * the range a setting may name, and auto's order (C8000h up, E0000h-EFFFFh only by name). */
+ * the range a setting may name, auto's order (C8000h up, E0000h-EFFFFh only by name), and the next page after
+ * one (the DPMI host's stacks, U3). */
 #include <stdio.h>
 #include <string.h>
 #include "umapage.h"
@@ -38,6 +39,10 @@ int main(void)
     CHECK(upage_check(&e, 0xC8800) == UP_RANGE);        /* not a page's start */
     CHECK(upage_check(&e, 0xF0000) == UP_RANGE);
     CHECK(upage_check(&e, 0xEF000) == UP_OK);           /* by name */
+    CHECK(upage_next(&e, 0xC9000, UP_AUTO_END) == 0xC9000);  /* the stacks' page: the next after the stub's */
+    CHECK(upage_next(&e, 0xC8800, UP_AUTO_END) == 0xC9000);  /* (from a page's start) */
+    CHECK(upage_next(&e, 0xE0000, UP_AUTO_END) == 0);        /* none left below E0000h */
+    CHECK(upage_next(&e, 0xEF000 + 4096, UP_END) == 0);      /* none above the last */
 
     rom(0xC8000, 2);                            /* 2 KB at C8000h: the whole page is out */
     CHECK(upage_check(&e, 0xC8000) == UP_ROM);

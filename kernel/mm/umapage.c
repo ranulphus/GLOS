@@ -41,14 +41,16 @@ int upage_check(const struct upage_env *e, u32 phys)
     return UP_OK;
 }
 
-u32 upage_auto(const struct upage_env *e)
+u32 upage_next(const struct upage_env *e, u32 from, u32 end)
 {
     u32 p;
-    for (p = UP_FIRST; p < UP_AUTO_END; p += 4096)
+    for (p = from < UP_FIRST ? UP_FIRST : (from + 4095) & ~4095u; p < end && p < UP_END; p += 4096)
         if (upage_check(e, p) == UP_OK)
             return p;
     return 0;
 }
+
+u32 upage_auto(const struct upage_env *e) { return upage_next(e, UP_FIRST, UP_AUTO_END); }
 
 const char *upage_why(int r)
 {

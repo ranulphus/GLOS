@@ -292,6 +292,7 @@ static void ctx_destroy(int psp)
         vm_wr8(c->psp * 16u + 0x2C, (u8)c->env_seg);   /* PSP:2Ch as it was */
         vm_wr8(c->psp * 16u + 0x2D, (u8)(c->env_seg >> 8));
     }
+    dpmi_rm_slot_free(c->rm_seg);
     lin_free_all(c);
     while (c->dosblks) {                        /* DOS frees the blocks with the program */
         struct dosblk *d = c->dosblks;
@@ -319,11 +320,13 @@ static void switch_fail(struct trapframe *tf, u32 ret_cs, u32 ret_ip, u32 err)
 
 /* The far call to the mode-switch entry, from V86 mode: a new context, or,
    from a program a client started, a new level in that client's (M4c). */
+static u16 rm_slot_get(u16 psp, int take);
+
 static void mode_switch(struct trapframe *tf)
 {
     struct dpmi_ctx *c = dctx;
     u32 sp = tf->esp & 0xFFFF, ret_ip, ret_cs, env_size, e;
-    u16 ds = (u16)tf->v86_ds, ss = (u16)tf->ss, cs_sel, ds_sel, ss_sel;
+    u16 ds = (u16)tf->v86_ds, ss = (u16)tf->ss, cs_sel, ds_sel, ss_sel, rm;
     u8 data_flags;
     int child = dctx != 0;
 
@@ -365,7 +368,8 @@ static void mode_switch(struct trapframe *tf)
     }
     c->psp = vm_current_psp();
     c->env_seg = vm_rd16(c->psp * 16u + 0x2C);
-    c->rm_seg = (u16)tf->v86_es;
+    rm = rm_slot_get(c->psp, 1);                /* (its reservation; else ES, its own block) */
+    c->rm_seg = rm ? rm : (u16)tf->v86_es;
     c->rm_sp = RM_STACK_PARAS * 16;
 
     data_flags = c->bits32 ? 0x40 : 0x00;       /* Big for a 32-bit client */
@@ -394,8 +398,57 @@ static void mode_switch(struct trapframe *tf)
 
     dpmi_to_pm(tf, cs_sel, ret_ip, ss_sel, sp + 4, ds_sel, c->psp_sel);
     tf->eflags &= ~FL_CF;
-    kprintf("GLOS-DPMI start bits=%u psp=%04x cs=%04x ds=%04x ss=%04x level=%u term=%08x parent=%04x\n",
-            c->bits32 ? 32 : 16, c->psp, cs_sel, ds_sel, ss_sel, c->nlv, c->term_vec, vm_rd16(c->psp * 16u + 0x16));
+    kprintf("GLOS-DPMI start bits=%u psp=%04x cs=%04x ds=%04x ss=%04x level=%u term=%08x parent=%04x rm=%s\n",
+            c->bits32 ? 32 : 16, c->psp, cs_sel, ds_sel, ss_sel, c->nlv, c->term_vec, vm_rd16(c->psp * 16u + 0x16),
+            rm ? "page" : "own");
+}
+
+/* ---- the host's real-mode stacks in upper memory (docs/upper-memory.md U3): RM_SLOTS of RM_STACK_PARAS each,
+   in a page of GLOS's beside the stub's. 1687h reserves one for the program asking, and answers SI = 0: it
+   gives none of its own. Its mode switch takes the slot, and its level's end gives it back. A reservation is
+   anyone's once its program has gone (DOS's block at its PSP is no longer its own); while it lives, it holds
+   the slot, so a program between 1687h and its switch never loses the stack it was promised. With no slot,
+   SI = RM_STACK_PARAS: the client's own memory, as without the page. */
+
+enum { SLOT_FREE, SLOT_RESERVED, SLOT_USED };
+static struct { u16 seg, psp; u8 state; } rm_slot[RM_SLOTS];
+static u32 rm_nslots;
+
+void dpmi_rm_slots(u16 seg, u32 n)
+{
+    u32 i;
+    rm_nslots = n < RM_SLOTS ? n : RM_SLOTS;
+    for (i = 0; i < rm_nslots; i++) {
+        rm_slot[i].seg = (u16)(seg + i * RM_STACK_PARAS);
+        rm_slot[i].state = SLOT_FREE;
+    }
+}
+
+static int psp_alive(u16 psp) { return psp && vm_rd16(((u32)psp - 1) * 16 + 1) == psp; }
+
+/* A slot for psp: its own reservation, or one free (or whose program has gone). take: in use from now. */
+static u16 rm_slot_get(u16 psp, int take)
+{
+    u32 i;
+    for (i = 0; i < rm_nslots; i++)
+        if (rm_slot[i].state == SLOT_RESERVED && rm_slot[i].psp == psp)
+            goto got;
+    for (i = 0; i < rm_nslots; i++)
+        if (rm_slot[i].state == SLOT_FREE || (rm_slot[i].state == SLOT_RESERVED && !psp_alive(rm_slot[i].psp)))
+            goto got;
+    return 0;
+got:
+    rm_slot[i].psp = psp;
+    rm_slot[i].state = take ? SLOT_USED : SLOT_RESERVED;
+    return rm_slot[i].seg;
+}
+
+void dpmi_rm_slot_free(u16 seg)
+{
+    u32 i;
+    for (i = 0; i < rm_nslots; i++)
+        if (rm_slot[i].state == SLOT_USED && rm_slot[i].seg == seg)
+            rm_slot[i].state = SLOT_FREE;
 }
 
 void dpmi_1687(struct trapframe *tf)
@@ -405,7 +458,7 @@ void dpmi_1687(struct trapframe *tf)
     SET16(tf->ebx, 1);                          /* 32-bit programs too */
     SETLO(tf->ecx, cpu);
     SET16(tf->edx, 0x005A);                     /* 0.90 */
-    SET16(tf->esi, RM_STACK_PARAS);
+    SET16(tf->esi, rm_slot_get(vm_current_psp(), 0) ? 0 : RM_STACK_PARAS);
     tf->v86_es = vm.loader_cs;
     SET16(tf->edi, vm.bi->bp_dpmi_off);
 }

@@ -373,10 +373,10 @@ loopa-hostile: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py hostile -j $(JOBS)
 loopa-sched: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py sched -j $(JOBS)
-loopa-mem: all dos-tests build/dj/UMAPROBE.EXE build/ow/dos/I2FTSR.EXE check-deps
+loopa-mem: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE build/ow/dos/I2FTSR.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py mem -j $(JOBS)
 # The stub in a page of upper memory (docs/upper-memory.md U1, U2; in loopa-mem too), and U0's probe.
-loopa-mem-page: all dos-tests build/dj/UMAPROBE.EXE check-deps
+loopa-mem-page: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py mem-page -j $(JOBS)
 loopa-umaprobe: all build/dj/UMAPROBE.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py umaprobe -j $(JOBS)
@@ -553,6 +553,11 @@ build/dj/CACHEWC.EXE: tests/dos/cachewc.c build/sdk/libglos.a tools/glosmark.py
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
 	$(Q)python3 tools/glosmark.py $@
+# NESTRM (tests/dos/nestrm.c): a client three levels deep, for the host's real-mode stacks in upper memory (U3).
+build/dj/NESTRM.EXE: tests/dos/nestrm.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 # RMDEEP (tests/dos/rmdeep.c): real-mode calls nested eight deep on the host's own real-mode stack.
 build/dj/RMDEEP.EXE: tests/dos/rmdeep.c
 	@mkdir -p $(dir $@)
