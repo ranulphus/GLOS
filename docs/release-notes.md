@@ -4,6 +4,15 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Tabs that don't fit in a row (2026-11-02)
+
+- **Every page's title is in view now.** The Control Panel's titles had run off the window's right edge (File
+  Types and Programs were never seen); they now wrap into two rows, and into fewer as the window grows. The
+  window is 440 pixels tall, as 640x480 allows, so the pages keep their room.
+- **For any program** (`gui_tabs_style`, docs/gui.md): titles that don't fit go into more rows (the default), stay
+  in one row with arrows that scroll it, or become a list down the left with a scroll bar. Tabs whose titles fit
+  in a row look as before.
+
 ## The disk cache (2026-10-31)
 
 - **GLOS keeps what DOS reads from the hard disks in spare memory** (D72, docs/disk-cache.md), on by default. On
