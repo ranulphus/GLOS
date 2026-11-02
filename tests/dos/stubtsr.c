@@ -2,8 +2,9 @@
  * memory, has to look elsewhere when GLOS leaves:
  *     STUBTSR          stays resident with its PSP alone (256 bytes), right after GLOS's block: the stub can't
  *                      grow that block back (AH=4Ah) and takes one anywhere (AH=48h)
- *     STUBTSR ALL S    stays resident with all of DOS's memory for S seconds (glos exit is refused meanwhile),
- *                      then gives it back from INT 1Ch, unhooked again, with no DOS call
+ *     STUBTSR ALL S    stays resident with all of DOS's memory for S seconds (glos exit is refused meanwhile):
+ *                      its own block as large as it goes, and every other free block (AH=48h) too; then gives
+ *                      them back from INT 1Ch, unhooked again, with no DOS call
  * Before going resident:
  *     HX-STUBTSR psp=SSSS kept=BYTES other=BYTES
  * other: the largest free block left anywhere else; once ALL's memory is back, HX-STUBTSR freed on COM1.
@@ -84,6 +85,17 @@ int main(int argc, char **argv)
         keep = r.x.bx;
         r.h.ah = 0x4A;
         intdosx(&r, &r, &s);
+        for (;;) {                              /* and the rest: holes an earlier program left */
+            r.h.ah = 0x48;
+            r.x.bx = 0xFFFF;
+            intdos(&r, &r);                     /* (refused: BX the largest there is) */
+            if (!r.x.bx)
+                break;
+            r.h.ah = 0x48;
+            intdos(&r, &r);
+            if (r.x.cflag)
+                break;
+        }
         ticks = (unsigned)(atoi(argv[2]) * 182L / 10);
         old1c = _dos_getvect(0x1C);
         _dos_setvect(0x1C, tick);

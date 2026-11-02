@@ -470,8 +470,12 @@ def mempage(profile, boot):
         m = re.search(r"Largest executable program size\s+\d+K \(([\d,]+) bytes\)", t)
         return int(m.group(1).replace(",", "")) if m else -1
 
-    def own(t):
-        m = re.search(r"^\s*GLOS\s+([\d,]+)", t, re.M)
+    def own(t, name="GLOS"):
+        m = re.search(r"^\s*%s\s+([\d,]+)" % name, t, re.M)
+        return int(m.group(1).replace(",", "")) if m else -1
+
+    def free(t):
+        m = re.search(r"^\s*Free\s+([\d,]+)", t, re.M)
         return int(m.group(1).replace(",", "")) if m else -1
     auto = re.search(r"UMAPROBE free=\d+ first=\w+ auto=(\w+)", f("UMA.TXT"))
     res = re.findall(r"GLOS-VM resident psp=(\w+) stub=\d+ freed=\d+ page=(\w+)( buffer=4112)?", serial)
@@ -528,7 +532,10 @@ def mempage(profile, boot):
         int(downs[0], 16) != int(ares[0][0], 16) + 0x10 + (0x101 if ares[0][2] else 0)
     checks["ag-refused"] = refused and bool(other) and int(other.group(1)) < 2744 and bool(ver.startswith("GLOS "))
     checks["ag-exit"] = len(downs) == 2 and text.count("GLOS-EXIT code=0") == 2 and text.count("HX-VECCHK ok") == 2
-    checks["ag-after"] = abase > 0 and 0 <= abase - largest(out_file("mempage-ag-" + tag, "AFTER.TXT")) <= 1024
+    # (the first STUBTSR stays, where the first GLOS was: free memory is DOS's before less its block, in two
+    # pieces, and no block is GLOS's)
+    after, before = out_file("mempage-ag-" + tag, "AFTER.TXT"), out_file("mempage-ag-" + tag, "BASE.TXT")
+    checks["ag-after"] = free(before) > 0 and free(before) - free(after) == own(after, "STUBTSR") and own(after) < 0
     checks["ag-clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "HX-DONE 0" in text
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s page=%s glos=%d/%d agent glos=%d%s" % (
