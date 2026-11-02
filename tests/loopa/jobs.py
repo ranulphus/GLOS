@@ -5535,7 +5535,7 @@ CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\K
                  "title": "CP Test", "args": "-a -b", "comspec": "C:\\COMMAND.COM",
                  "autoexec": "C:\\AUTOEXEC.BAT", "dir": "C:\\CP", "blaster": "A220 I7 D1 H5",
                  "env": "CPA=1\nPATH=C:\\A;C:\\B", "server": "time.example.org:1230",
-                 "zone": "CET-1CEST,M3.5.0,M10.5.0/3"}
+                 "zone": "CET-1CEST,M3.5.0,M10.5.0/3", "stub_page": "D800"}
 
 
 def cfg_pages():
