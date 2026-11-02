@@ -4,6 +4,20 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Upper memory (2026-11-02; not yet in a release: the bench and B1 to come)
+
+- **`[memory] stub_page = off | auto | SEGMENT`** (or `/STUBPAGE=`; the Control Panel's "Memory" page; off by
+  default): GLOS's resident stub moves into a free 4 KB page above 640 KB that GLOS maps itself, and DOS keeps only
+  its PSP and environment. MEM /C shows GLOS at 448 bytes, or 4,560 with the disk cache's buffer, against 7,312.
+- **Which page:** one that reads as nothing there (FFh throughout, twice), that no adapter ROM reaches and no PCI
+  card claims; `auto` takes the first from C8000h, below E0000h. A refused page is logged and GLOS starts anyway.
+  A card whose memory appears only when its driver wakes it can't be seen, hence opt-in and a page by name.
+- **DPMI programs give up their 4 KB too:** with the page, the DPMI host's real-mode stacks live in pages of GLOS's
+  (two at once, a page each; a third program gives its own, as before).
+- **`glos exit`** copies the stub back into DOS's memory first; if a program has taken every byte, the exit is
+  refused (in the log) and GLOS carries on until memory is free.
+- **UMAPROBE** (`tests/dos/umaprobe.c`) lists what is in C0000h-EFFFFh, read-only, on plain DOS or GLOS.
+
 ## glos exit after a resident program hooked INT 2Fh (2026-11-05)
 
 - **`glos exit` works when a program loaded under GLOS stays resident on INT 2Fh** (DOSLFN, which DOSBench's
