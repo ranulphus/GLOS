@@ -325,6 +325,9 @@ build/kernel/%.o: kernel/% $(wildcard kernel/include/*.h include/glos/*.h)
 	$(Q)echo "  KCC     $<"
 	$(Q)$(HOST_CC) $(KCFLAGS) -MMD -MP -c -o $@ $<
 # (each object's headers, local ones too: kernel/app/appint.h, kernel/wm/deskint.h, the HAL's)
+# Dependency files from before 2026-11-02 name the vendored HAL that went (third_party/mgahal): they and their
+# objects are dropped once, so the next build makes them afresh from MGA-Glide's checkout.
+$(foreach d,$(shell grep -rl 'third_party/mgahal/' build --include='*.d' 2>/dev/null),$(shell rm -f $(d) $(d:.d=.o)))
 -include $(KOBJS:.o=.d) $(HAL_OBJS:.o=.d)
 TINYSSH_OBJS := $(patsubst third_party/tinyssh/%.c,build/tinyssh/%.o,$(TINYSSH_SRCS))
 build/tinyssh/%.o: third_party/tinyssh/%.c
