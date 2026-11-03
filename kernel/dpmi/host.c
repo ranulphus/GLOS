@@ -403,8 +403,8 @@ static void mode_switch(struct trapframe *tf)
             rm ? "page" : "own");
 }
 
-/* ---- the host's real-mode stacks in upper memory (docs/upper-memory.md U3): RM_SLOTS of RM_STACK_PARAS each,
-   in a page of GLOS's beside the stub's. 1687h reserves one for the program asking, and answers SI = 0: it
+/* ---- the host's real-mode stacks in upper memory (docs/upper-memory.md U3): RM_SLOTS of RM_STACK_PARAS (4 KB)
+   each, a page of GLOS's apiece beside the stub's. 1687h reserves one for the program asking, and answers SI = 0: it
    gives none of its own. Its mode switch takes the slot, and its level's end gives it back. A reservation is
    anyone's once its program has gone (DOS's block at its PSP is no longer its own); while it lives, it holds
    the slot, so a program between 1687h and its switch never loses the stack it was promised. With no slot,
@@ -414,15 +414,15 @@ enum { SLOT_FREE, SLOT_RESERVED, SLOT_USED };
 static struct { u16 seg, psp; u8 state; } rm_slot[RM_SLOTS];
 static u32 rm_nslots;
 
-void dpmi_rm_slots(u16 seg, u32 n)
+void dpmi_rm_slot_add(u16 seg)
 {
-    u32 i;
-    rm_nslots = n < RM_SLOTS ? n : RM_SLOTS;
-    for (i = 0; i < rm_nslots; i++) {
-        rm_slot[i].seg = (u16)(seg + i * RM_STACK_PARAS);
-        rm_slot[i].state = SLOT_FREE;
+    if (rm_nslots < RM_SLOTS) {
+        rm_slot[rm_nslots].seg = seg;
+        rm_slot[rm_nslots++].state = SLOT_FREE;
     }
 }
+
+void dpmi_rm_slots_clear(void) { rm_nslots = 0; }
 
 static int psp_alive(u16 psp) { return psp && vm_rd16(((u32)psp - 1) * 16 + 1) == psp; }
 

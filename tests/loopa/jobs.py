@@ -455,7 +455,7 @@ def mempage(profile, boot):
     In agent mode ([memory] stub_page = auto): MEM /C as a job; STUBTSR after GLOS's block, so that the copy-down
     takes a block anywhere (AH=48h); then, GLOS started again, STUBTSR ALL holding DOS's memory: glos exit refused
     and GLOS still answering, then, the memory back, glos exit.
-    U3: the DPMI host's real-mode stacks in a second page (rm-stacks, two slots): NESTRM three levels deep, the
+    U3: the DPMI host's real-mode stacks in pages of GLOS's (rm-stacks, two slots, a 4 KB page each): NESTRM three levels deep, the
     first two levels on the page's slots and the third on its own memory, then one level on a slot again."""
     import time
     tag = "%s-%s" % (profile, boot)
@@ -493,7 +493,7 @@ def mempage(profile, boot):
     checks = {
         "status": st == "PASS" and serial.count("GLOS-EXIT code=0") == 3,
         "page": len(res) == 3 and bool(auto) and all(r[1].lower() == auto.group(1).lower() for r in res),
-        "rm-stacks": len(re.findall(r"GLOS-VM rm-stacks page=[0-9a-f]+ slots=2", serial)) == 3,
+        "rm-stacks": len(re.findall(r"GLOS-VM rm-stacks pages=[0-9a-f]+,[0-9a-f]+ slots=2", serial)) == 3,
         "rm-slots": starts == [("1", "page"), ("2", "page"), ("3", "own"), ("1", "page")],
         "nestrm": [d for d, v in nested] == ["1", "2", "3", "1"] and all(int(v) > 0 for d, v in nested),
         "own": 0 < own(f("OFF.TXT")) <= 1024 and 0 < own(f("ON.TXT")) <= 5120,
@@ -1326,8 +1326,10 @@ def dpmi_tools(boot):
 # own internals or privileges (DISPGDT, DISPIDT, PRVILEG0, SETCR0, SETCR4,
 # SETMSR, EXC0ER0, I3102103 fault inside HDPMI, I4B8105 its VDS), a speed
 # test (INTSPEED), EMUHLT, IRQ1EXC and IRQ12EXC (they wait for keys or the mouse under HDPMI32i too), and
-# GETCLMZ (EXEC2D's helper).
-HR_SKIP = {"EMUHLT", "IRQ1EXC", "IRQ12EXC", "WAITKEY", "MOUEVNT1", "MOUEVNT2", "MOUEVNT3", "NEWCLMZ", "DISPGDT", "DISPIDT", "PRVILEG0", "SETCR0",
+# GETCLMZ (EXEC2D's helper). EXC0E2 prints with AH=09h through a 32-bit pointer, which HDPMI translates and a plain
+# host passes to DOS as DS:DX, DS the host's real-mode stack: with that stack in upper memory (docs/upper-memory.md
+# U3) no '$' ever comes and DOS prints for good (2026-11-03).
+HR_SKIP = {"EXC0E2", "EMUHLT", "IRQ1EXC", "IRQ12EXC", "WAITKEY", "MOUEVNT1", "MOUEVNT2", "MOUEVNT3", "NEWCLMZ", "DISPGDT", "DISPIDT", "PRVILEG0", "SETCR0",
            "SETCR4", "SETMSR", "EXC0ER0", "I3102103", "I4B8105", "INTSPEED", "GETCLMZ"}
 
 
@@ -1338,7 +1340,7 @@ HR_SKIP = {"EMUHLT", "IRQ1EXC", "IRQ12EXC", "WAITKEY", "MOUEVNT1", "MOUEVNT2", "
 HR_KNOWN = {
     # HDPMI's own INT 21h translation for 32-bit clients (EXEC, 55h, AH=09h
     # from a 32-bit DS:EDX), which a plain DPMI host doesn't do.
-    "EXEC2C": "hx-api", "EXEC2D": "hx-api", "INT2155": "hx-api", "EXC0E2": "hx-api",
+    "EXEC2C": "hx-api", "EXEC2D": "hx-api", "INT2155": "hx-api",
     # An unhandled exception: the same exit code, but HDPMI prints its dump on
     # the program's output and GLOS writes GLOS-CRASH to the log (§19).
     "EXC00": "dump", "EXC05": "dump", "EXC06": "dump", "EXC07": "dump", "EXC0B": "dump", "EXC0C": "dump",

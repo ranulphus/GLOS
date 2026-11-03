@@ -142,8 +142,8 @@ to COM1 at each step:
   answer is the page's segment: the stub goes on from there and shrinks GLOS.EXE's block to the PSP alone (the
   disk cache's block buffer after it, §9.8), and the kernel points selector 38h and its call sites there. A page
   that fails is logged (`GLOS-VM stub-page refused reason=rom|bar|data|none|memory segment=`) and the stub stays
-  after the PSP. With the stub's page GLOS maps a second, the next that qualifies, for the DPMI host's real-mode
-  stacks (§12.1a; `GLOS-VM rm-stacks page= slots=`).
+  after the PSP. With the stub's page GLOS maps two more, the next that qualify, for the DPMI host's real-mode
+  stacks, a 4 KB page each (§12.1a; `GLOS-VM rm-stacks pages= slots=`).
   - **The way out.** The stub's last steps run with paging off, where only DOS's memory is real, so at the
     leave NEXT answers 4 instead of halting: the stub grows its block back (4Ah), or takes one anywhere (48h,
     when a program stayed resident after GLOS), copies itself there and tells the kernel (DOWN, call 6), which
@@ -1798,7 +1798,7 @@ and GLOS's:
 | RING0 | Ring-0 entry |
 | EXIT | Exit: `code= a20=`; `refused reason=stub-memory bytes=` (no DOS memory for the stub to come down to, §2.2) |
 | WARN | e.g. `vif-stuck` |
-| VM | The system VM: `run=`, `dos indos= sda= psp=`, `resident psp= stub= freed= page=SEG\|none [buffer=4112]`, `stub-page refused reason= segment=`, `rm-stacks page= slots=`, `stub-down seg= page=` (§2.2), `leave code= ticks= gp= int= irq= spurious=`, `indos=reset was=` (InDOS left set by a program killed inside DOS, cleared at the stub's NEXT; M6) |
+| VM | The system VM: `run=`, `dos indos= sda= psp=`, `resident psp= stub= freed= page=SEG\|none [buffer=4112]`, `stub-page refused reason= segment=`, `rm-stacks pages= slots=`, `stub-down seg= page=` (§2.2), `leave code= ticks= gp= int= irq= spurious=`, `indos=reset was=` (InDOS left set by a program killed inside DOS, cleared at the stub's NEXT; M6) |
 | SCHED | At leave: context switches, contended ticks per class, and each thread's ticks |
 | PCI | The number of functions found; each one GLOS claims |
 | DEV | Devices' keepers (docs/devices.md): `quiet ADDR id= class= irq= how=` (a device on a line GLOS takes, made quiet), `keep ... why=` (one that couldn't be), `given-back ADDR id= to=dos irq=` (DOS wrote a quiet device's configuration) |

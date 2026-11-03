@@ -198,9 +198,15 @@ Development in `~/wt-glos-m5`, long runs in `~/wt-glos-test`, as for the cache.
   when STUBTSR stays after GLOS; `glos exit` refused while STUBTSR ALL holds every free block, GLOS still
   answering, then leaving once the memory is back; DOS's memory as before. The shell-mode case U2 lists is moot:
   shell mode never leaves (`glos exit` is refused there), so its stub never comes down.
-- **U3 done in Loop A:** the stacks' page is the next that qualifies (C900h on every Loop A machine, two slots);
-  NESTRM three levels deep runs the first two on the page and the third on its own memory, and a new client
-  then has a slot again.
+- **U3 done in Loop A:** the stacks' pages are the next two that qualify (C900h and CA00h, or CD00h and CE00h
+  with the G450's longer ROM), a 4 KB stack each; NESTRM three levels deep runs the first two in them and the
+  third on its own memory, and a new client then has a slot again.
+- **U4's first run (2026-11-03) found a bug in the DPMI host, on main too:** it gave each nested real-mode call a
+  512-byte slice of a 2 KB stack, and calls nest eight deep. A fifth one (an IRQ's INT 1Ch, four deep under
+  MGA-Glide's DOS/4GW conformance tests) wrapped SP: on main into conventional memory 62 KB past the client's
+  block, unnoticed; in a page of upper memory into nothing, and the PC hung. The owner chose 4 KB stacks (eight
+  slices): 1687h asks for 4 KB without the page, and with it each slot is a page (GLOS main, branch `rmstack`,
+  RMDEEP). HDPMI's EXC0E2 hung too (AH=09h through DS = the host's stack, in a page with no `$`): skipped.
 - **U4 running:** the whole regression on a test build that defaults to `auto`, then on `upper` itself (off).
 
 - **U0. Probe, changing nothing.** UMAPROBE (`tests/dos/umaprobe.c`, DJGPP, read-only), on plain DOS:
