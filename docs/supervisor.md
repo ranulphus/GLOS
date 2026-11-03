@@ -519,7 +519,7 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 ### 9.5 Nested execution
 
 - Only the system VM thread runs V86 code. DPMI 0300h–0302h calls, interrupt reflections and the agent's DOS
-  calls nest on that thread, up to 16 levels. Each level saves the V86 state and uses its own host real-mode
+  calls nest on that thread, up to eight levels. Each level saves the V86 state and uses its own host real-mode
   stack: the caller's SS:SP when it gives one, else 512 bytes per level of the DPMI client's 1687h block (4 KB: the eight levels calls can nest)
   (§12.1a; `kernel/dpmi/rmcall.c`).
 - Requests from other threads are **posted** and run at the next safe point (§17.2). That serialises DOS and
