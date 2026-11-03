@@ -9,7 +9,10 @@
  *
  * The real-mode stack, when the caller gives none (SS:SP 0), is the host's:
  * the block the client handed over at the mode switch (1687h's SI), one
- * 512-byte slice per nesting level.
+ * RM_SLICE per nesting level, NEST_MAX of them. (Until 2026-11-03 the block
+ * was 2 KB, four slices: a fifth nested call, an IRQ's INT 1Ch under
+ * DOS/4GW, wrapped SP and wrote 62 KB past the block.) A call with no slice
+ * left is refused, never wrapped.
  *
  * The raw switches (0306h) change the VM thread's mode at the top level:
  * the stub's raw ARPL goes to protected mode, SEL_TRAMP:TR_RAW back. */
@@ -28,7 +31,7 @@
 #include "shot.h"
 #include "vm.h"
 
-#define NEST_MAX 8
+#define NEST_MAX (RM_STACK_PARAS * 16 / RM_SLICE)
 
 static struct {
     u32 save;                                   /* nest_enter's stack, for nest_leave */
@@ -84,8 +87,10 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
         ss = r->ss;
         sp = r->sp;
     } else {
+        if ((u32)(depth + 1) * RM_SLICE > dctx->rm_sp)
+            return -1;                          /* (no slice left) */
         ss = dctx->rm_seg;
-        sp = (dctx->rm_sp - (u32)depth * 512) & 0xFFFF;
+        sp = dctx->rm_sp - (u32)depth * RM_SLICE;
     }
     for (i = nwords; i-- > 0;)                  /* the caller's words: words[0] on top */
         push16(ss, &sp, words[i]);

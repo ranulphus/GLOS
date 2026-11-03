@@ -20,7 +20,9 @@
 
 #define LDT_ENTRIES    8192
 #define SEL_FIRST      16               /* 0000h's first index: selectors 04h-7Ch stay free for 000Dh */
-#define RM_STACK_PARAS 0x80             /* 1687h's SI: the host's real-mode stack, 2 KB of the client's */
+#define RM_STACK_PARAS 0x100            /* 1687h's SI: the host's real-mode stack, 4 KB of the client's: an
+                                           RM_SLICE for each of the real-mode calls that can nest (rmcall.c) */
+#define RM_SLICE       512
 #define NRMCB          32               /* the stub's ARPLs: for every context together (M6) */
 #define NSEGSEL        64               /* 0002h's selectors */
 #define USER_BASE      0x00400000u      /* the user region (supervisor.md §4) */

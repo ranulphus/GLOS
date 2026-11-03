@@ -826,6 +826,31 @@ def lazy(profile, boot):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def rmdeep(profile, boot):
+    """RMDEEP: real-mode calls nested eight deep on the DPMI host's own real-mode stack (0301h with SS:SP 0, back
+    into protected mode through a callback each time). Under GLOS: all eight levels, on one segment (the block
+    1687h asked for), each SP a slice (512 bytes) below the last, none past the block's 4 KB. Until 2026-11-03 the
+    block was 2 KB and the fifth level's SP wrapped to FFxxh. CWSDPMI's line is shown, not judged."""
+    tag = "%s-%s" % (profile, boot)
+    common = ["--machine", profile, "--boot-cfg", boot, "--file", "build/dj/RMDEEP.EXE=/TEST/RMDEEP.EXE",
+              "--timeout", "300", "--cmd", "SERSAY HX-START rmdeep"]
+    end = ["--cmd", "SERSAY HX-DONE 0"]
+    st0, cws = run("rmdeep-cws-" + tag, common + ["--cmd", "C:\\TEST\\RMDEEP.EXE"] + end)
+    st1, gl = run("rmdeep-glos-" + tag, common + GLOS_FILES + [
+        "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\RMDEEP.EXE"] + end)
+    m = re.search(r"HX-RMDEEP levels=(\d+) ss=([0-9a-f,]+) sp=([0-9a-f,]+)", gl)
+    c = re.search(r"HX-RMDEEP .*", cws)
+    sps = [int(x, 16) for x in m.group(3).split(",")] if m else []
+    checks = {"status": st1 == "PASS", "levels": bool(m) and m.group(1) == "8",
+              "one-ss": bool(m) and len(set(m.group(2).split(","))) == 1,
+              "slices": len(sps) == 8 and all(0 < sps[i + 1] < sps[i] <= 0x1000 for i in range(7)),
+              "clean": "GLOS-PANIC" not in gl and "GLOS-CRASH" not in gl and "GLOS-WARN" not in gl}
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s sp=%s%s%s" % ("rmdeep-" + tag, "PASS" if not bad else "FAIL", m.group(3) if m else "?",
+                                     " cwsdpmi: %s" % (c.group(0)[10:] if c else st0),
+                                     "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def cachewc(profile, boot):
     """CACHEWC (API 1.4): GLOS_FN_CACHE. On the Pentium II (bf6: MTRRs with write-combining) a 64 KB unit of the
     program's DOS memory is made write-combining and reads back what was written, and GLOS gives it back when the
@@ -5727,7 +5752,7 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "dpmi":
         res = matrix(dpmi, combos, a.jobs) + matrix(dpmiconf, combos, a.jobs) + matrix(lazy, combos, a.jobs)
-        res += matrix(cachewc, combos, a.jobs)
+        res += matrix(cachewc, combos, a.jobs) + matrix(rmdeep, combos, a.jobs)
         res += matrix(dpmi_hello, [(b,) for b in a.boot or BOOTS], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "tpx":

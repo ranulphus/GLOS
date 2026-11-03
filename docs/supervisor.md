@@ -121,7 +121,7 @@ to COM1 at each step:
   stub of 4 KB or less (P7) and frees the rest of its memory block (INT 21h 4Ah), like a TSR. The stub holds
   the mode switch, the kernel-call and XMS entry points, the kill stub, its two stacks (the kill stack and its
   own) and the EXEC loop. Everything else (finding programs, the agent, later the desktop) runs in the kernel,
-  which tells the stub what to EXEC (NEXT, §2.1). INT 2Fh 1687h asks each DPMI client for 2 KB of its own
+  which tells the stub what to EXEC (NEXT, §2.1). INT 2Fh 1687h asks each DPMI client for 4 KB of its own
   memory, the host's real-mode stack (§12.1a); docs/upper-memory.md's U3 moves those stacks into GLOS's
   upper-memory page when the stub goes there.
 - **Going resident.** Open Watcom puts its runtime's code at the start of the image, so the stub is written to
@@ -520,7 +520,7 @@ ARPL (#UD in V86) is the breakpoint instruction for host stubs in the resident s
 
 - Only the system VM thread runs V86 code. DPMI 0300h–0302h calls, interrupt reflections and the agent's DOS
   calls nest on that thread, up to 16 levels. Each level saves the V86 state and uses its own host real-mode
-  stack: the caller's SS:SP when it gives one, else 512 bytes per level of the DPMI client's 1687h block
+  stack: the caller's SS:SP when it gives one, else 512 bytes per level of the DPMI client's 1687h block (4 KB: the eight levels calls can nest)
   (§12.1a; `kernel/dpmi/rmcall.c`).
 - Requests from other threads are **posted** and run at the next safe point (§17.2). That serialises DOS and
   the BIOS by construction.
@@ -873,8 +873,11 @@ direct = 1
 - **Nested real-mode calls** (0300h–0302h, reflected INTs, IRQs) build a V86 frame below the caller's kernel
   stack and enter it. The stub's nest ARPL returns longjmp-style (`kernel/dpmi/rmcall.c`). A program that ends
   inside one leaves its nested levels behind: the V86 frame moves to the top and carries on.
-- **The host's real-mode stack** is the block of 1687h's SI paragraphs (80h: 2 KB) that the client allocates
-  and passes in ES at the mode switch, 512 bytes per nesting level.
+- **The host's real-mode stack** is the block of 1687h's SI paragraphs (100h: 4 KB) that the client allocates
+  and passes in ES at the mode switch, 512 bytes per nesting level, eight levels deep. A call with no slice left is
+  refused. (Until 2026-11-03 the block was 2 KB: a fifth nested call, an IRQ's INT 1Ch reflected while MGA-Glide's
+  DOS/4GW tests drew, wrapped SP to FFxxh and wrote 62 KB past the block. RMDEEP, in `make loopa-dpmi`, nests eight
+  calls and checks each level's SS:SP.)
 - **The trampoline page** (SEL_TRAMP, at 3FF000h in PDE 0's shared table) holds HLTs: the default handler for
   each vector (offset = vector), 0306h's protected-to-real switch, 0305h's save/restore (nothing to save), and
   the "GLOS" vendor entry. A HLT at ring 3 is a #GP, so the host sees which one.

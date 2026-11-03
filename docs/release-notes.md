@@ -4,6 +4,14 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The DPMI host's real-mode stack (2026-11-03)
+
+- **A fix for DOS/4GW programs and others that nest real-mode calls.** The DPMI host ran each nested real-mode
+  call (a program's 0300h, a reflected interrupt) on a 512-byte slice of a 2 KB stack, so a fifth one in a row
+  wrapped round and wrote 62 KB past the stack, into whatever conventional memory lay there. Seen with MGA-Glide's
+  DOS/4GW tests (an INT 1Ch reflected four deep). The stack is 4 KB now, eight slices, and a call with none left is
+  refused: each DPMI program gives 2 KB more of its own conventional memory for it (1687h).
+
 ## Tabs that don't fit in a row (2026-11-02)
 
 - **Every page's title is in view now.** The Control Panel's titles had run off the window's right edge (File
