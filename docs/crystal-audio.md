@@ -1,12 +1,12 @@
 # GLOS on Crystal audio: a plan
 
-**Status (2026-11-05): plan v1, C1 under way (branch `crystal`). The owner chose GLOS's own driver over UNISOUND,
-after upper memory (merged 2026-11-05), and answered the four questions ([Decisions](#decisions)). C0's look at
-bench-g400 is done ([The chip](#the-chip)).**
+**Status (2026-11-05): C0–C4 done (branch `crystal`). The owner chose GLOS's own driver over UNISOUND, after
+upper memory, and answered the four questions ([Decisions](#decisions)); PRD D73. In Loop A on 86Box's CS4232,
+CS4235 and CS4236B; on bench-g400 by ear ([Results](#results)).**
 
-GLOS's mixer plays only a Sound Blaster 16 (D47, `kernel/drv/sb16.c`: DSP version 4, 16-bit DMA). bench-g400, an
-IBM PC 300PL, has onboard Crystal audio, which no DOS driver sets up, so it stays silent under GLOS and plain DOS
-alike. This plan gives GLOS a driver of its own for the Crystal CS423x family:
+Until this plan, GLOS's mixer played only a Sound Blaster 16 (D47, `kernel/drv/sb16.c`: DSP version 4, 16-bit DMA).
+bench-g400, an IBM PC 300PL, has onboard Crystal audio, which no DOS driver sets up, so it stayed silent under GLOS and plain DOS
+alike. This plan gave GLOS a driver of its own for the Crystal CS423x family:
 - **it sets the chip up itself**, by the Crystal Key and the datasheet's SLAM method, with no DOS driver;
 - **GLOS's mixer plays through the chip's Windows Sound System codec**, 16-bit stereo;
 - **DOS programs in sessions get the chip's Sound Blaster Pro and FM sides**, as on any SB Pro.
@@ -78,6 +78,20 @@ forms), including the Crystal Key, SLAM, ISA PnP and the EEPROM, so the driver c
 - **C4. bench-g400** (the owner's OK for each run): GLOS's apps through the mixer, DOSBench's games in sessions
   with sound, and plain DOS after `glos exit`.
 - **C5. Docs:** PRD §4.5, §10.5, D47 (the mixer's cards), supervisor.md, devices.md, the release notes.
+
+## Results
+
+- **Loop A** (`make loopa-audio`; 86Box's Crystal cards need MGA-Glide's `sound/crystal` ROMs, 885ac0e): GLOS
+  sets each up, plays four tones through its mixer (every one in 86Box's recording), hands the card to a session
+  and back, gives the session BLASTER, and leaves the DMA stopped. The two SB16 cases pass as before.
+- **bench-g400:** the set-up works on the IBM's chip (`GLOS-SOUND crystal ... id=8a ver=03`: its Crystal Key is not
+  disabled). The first tones crackled lightly; 86Box's recording showed why (the codec's first count after the
+  set-up came a sample in, and the driver filled the half the DMA was reading, a click every half). Since then the
+  driver fills the half the 8237 isn't in, and the owner heard the same tones clean. Quake's first demo, with sound,
+  in a session through the chip's SB Pro: clean; the owner noticed under 100 ms between picture and sound, which is
+  Quake's own mix-ahead (`_snd_mixahead`, 0.1 s by default, the same on any Sound Blaster).
+- **Not checked yet on silicon:** the FM synthesiser (a game's music), the game port (no joystick on the bench).
+- **The codec's sample errors** (R2's SER) are counted (`glos audio errors=`): none on the bench.
 
 ## Decisions
 

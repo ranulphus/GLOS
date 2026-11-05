@@ -201,6 +201,7 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D70** | **Every device has a keeper: one of GLOS's drivers, *quiet* (nobody drives it, so GLOS keeps its interrupts off), or DOS; GLOS grows its own drivers for common hardware a class at a time** (docs/devices.md). Steps:<br>• D1 (built): quiet drivers make shared PCI lines usable, UHCI first.<br>• D2: chained handlers, with what no GLOS driver claims passed on to DOS.<br>• D3: ISA PnP configuration, as UNISOUND does for sound cards.<br>• Later: full drivers where GLOS gains something (USB input and storage, IDE, PCI sound).<br>(Owner, 2026-10-26, after the first bench PC's network card shared IRQ 11 with USB) | GLOS shares the machine with DOS's drivers, which it can't ask "was it yours?"; owning every device would cost DOS programs their direct access to hardware. A quiet driver is a few lines per device class. | bench |
 | **D71** | **API 1.4: `GLOS_FN_CACHE` makes a program's own conventional memory write-combining, through the fixed MTRRs (64 KB units below 80000h, 16 KB to A0000h), for any program; given back when it ends.** Only the fixed ranges: below 1 MB they take precedence over the variable ones, so the change never overlaps the BIOS's write-back ranges over RAM (WC over WB is undefined). GLOS logs the MTRRs at boot (`GLOS-MTRR`). (Owner's go-ahead for AGP, 2026-10-27: "I'm not worried about hangs") | A G400 fetching by AGP cycles doesn't snoop the CPU's caches (bench-g400): its DMA rings must be write-combining, which needs ring 0. AGP fetches about three times as fast as PCI there. | bench |
 | **D72** | **A disk cache in the kernel, in front of the BIOS (INT 13h) for hard disks, write-through, in spare memory given back on demand; on by default** (docs/disk-cache.md). Every INT 13h is trapped and made by GLOS through `rm_call`. Small reads fill whole 4 KB blocks through a 4 KB buffer kept after the resident stub (P7: 8 KB with the cache on). A segmented LRU keeps what DOS reads again (the FAT) ahead of streaming reads. The IDE command registers are watched outside GLOS's own calls; direct-mode sessions bypass the cache. Verify and count modes; `glos cache`. (Owner, 2026-10-29: on by default once the bench's verify gate passes, all spare memory, 4 KB of conventional memory acceptable) | bench-g400, 2026-10-29: Half-Life's load took 431 s under GLOS and 87 s with SMARTDRV; SMARTDRV can't ship with GLOS and costs more per hit under it. The FAT driver can wait: the cache is the gain. | bench |
+| **D73** | **GLOS sets up a Crystal CS423x chip itself and plays its mixer through the chip's WSS codec** (docs/crystal-audio.md), when there is no SB16: the Crystal Key and the data sheet's SLAM method at 279h, at `[sound] crystal`'s resources (the data sheet's by default: WSS 534h, FM 388h, SB Pro 220h, IRQ 5, DMA 1, capture DMA 0, game port 200h, control 120h), refused when a PCI function has the IRQ or ports; MODE 2, 16-bit stereo, an interrupt a half, the half the DMA isn't reading refilled. Sessions get BLASTER for its SB Pro. Left set up when GLOS leaves. One driver for the family (CS4232 to CS4238B). (Owner, 2026-11-05: GLOS's own driver over UNISOUND; the data sheet's resources; left active after `glos exit`; the family; the game port too.) | bench-g400's onboard chip (an IBM PC 300PL's) is left disabled by its BIOS and has no DOS driver; UNISOUND is closed freeware, and GLOS's mixer played only an SB16. Checked in 86Box (CS4232, CS4235, CS4236B) and on bench-g400 by ear. | bench |
 
 ---
 
@@ -240,7 +241,8 @@ GLOS refuses a NIC whose IRQ is shared with another active device, and a NIC alr
 
 ### 4.5 Sound, input and storage
 
-- **Sound:** SB16 (auto-init DMA) for the GLOS mixer. In exclusive sessions any card is passed through.
+- **Sound:** SB16 (auto-init DMA) for the GLOS mixer, or the WSS codec of a Crystal CS423x that GLOS sets up itself
+  (D73). In exclusive sessions any card is passed through.
 - **Input:** PS/2 keyboard and mouse through a full virtual 8042; gameport passed through. Serial mice come after v1.
 - **Storage:** through DOS and the BIOS (INT 13h), with GLOS's disk cache in front of the BIOS for hard disks
   (D72).
@@ -369,6 +371,7 @@ A program calls DPMI 0A00h with "GLOS" (D23). The result is a far entry point pl
 | NIC owned by GLOS | Its I/O range | Always trapped; programs see no device. |
 | VGA, VBE, Matrox | 3B0h–3DFh, MMIO | Passed through in exclusive sessions. For GLOS apps, only through the API, plus the GPU lock (§9.6). |
 | Sound Blaster | 2x0h, DMA 0–7, its IRQ | Passed through in exclusive sessions; owned by the mixer otherwise. |
+| Crystal CS423x (D73) | 534h (WSS), 388h, 220h, 200h, 120h; IRQ 5, DMA 1 and 0 | Set up by GLOS at start (279h), then as a Sound Blaster: passed through in exclusive sessions, owned by the mixer otherwise; left set up when GLOS leaves. |
 | Gameport | 201h | Always passed through: trapping it breaks axis timing. Loop A injects the joystick through 86Box. |
 | COM1 | 3F8h–3FFh | Passed through. Writes are mirrored into agent telemetry (§7.7). |
 
@@ -698,7 +701,7 @@ Each app keeps SDL's cooperative threads in v1, and GLOS preempts between apps (
 
 ### 10.5 Audio mixer
 
-- The SB16 runs in auto-init DMA, and the mixer refills from the Sound Blaster interrupt. Refilling never depends on when apps yield.
+- The card (an SB16, or a Crystal CS423x's codec, D73) runs in auto-init DMA, and the mixer refills from its interrupt. Refilling never depends on when apps yield.
 - Apps queue samples into their streams. The mixer converts rates and applies per-app volumes.
 - Exclusive sessions get the card directly: the mixer stops it when a session takes the screen (D47).
 

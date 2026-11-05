@@ -465,7 +465,8 @@ along, and once the client had ended and its LDT was gone, that thread's next tr
 - **Summer time:** `clock_second()`, called about once a second by the net thread and the desktop's, notices
   the zone's offset change and sets the RTC and DOS again (`GLOS-TIME offset=`). A change of zone does the same.
 - **Programs** see the zone as `TZ=` in the environment of the agent's jobs, unless the profile or the job sets
-  one (§17).
+  one (§17). When GLOS set a Crystal chip up (PRD D73) they also see `BLASTER=A220 I5 D1 T4` (its resources),
+  unless their environment, the profile or the job has a BLASTER.
 - **`glos time`** shows UTC, local time with the zone's name, how the clock was last set (and when, and the
   step), and the RTC's own reading. `glos net resolve NAME` asks the DNS client (two servers from DHCP).
 - **The BF6's BIOS traps port 71h into SMM** (PIIX4 device trap 12, found in M10). Every access to the RTC's
@@ -800,7 +801,8 @@ mode set, so it knows when the BIOS is busy (§17.2).
   - the virtual PIC masks, the virtual RTC's A and B (and so the periodic rate), the 8042 command byte and the
     lock bits;
   - Sound Blaster DMA stopped: 8237 channels 1, 3, 5, 6 and 7 masked, and the DSP reset at BLASTER's `A`
-    address (the loader puts it in bootinfo's `sb_port`);
+    address (the loader puts it in bootinfo's `sb_port`), or at the SB Pro of a Crystal chip GLOS set up
+    (PRD D73);
   - every vector the session changed that now points into a free DOS block, or that still holds the value it
     had when a program in the session ended pointing into that program's own memory (INT 20h, INT 21h 4Ch/00h
     from V86 code). The second rule matters with GLOS as the shell: COMMAND.COM may have put something in the

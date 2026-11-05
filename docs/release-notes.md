@@ -4,6 +4,15 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Sound on Crystal chips (2026-11-05)
+
+- **GLOS plays sound on a Crystal CS423x** (CS4232 to CS4238B), as on bench-g400's onboard audio, which no DOS
+  driver set up before. GLOS sets the chip up itself when it starts (docs/crystal-audio.md): its apps play
+  through GLOS's mixer, and DOS programs in sessions find a Sound Blaster Pro at 220h, with BLASTER set for
+  them (Quake's demo played its sound on bench-g400). The chip stays set up after `glos exit`.
+- `[sound] crystal = off` leaves the chip alone; `[sound] crystal = wss=534 sb=220 fm=388 irq=5 dma=1 cap=0 game=200
+  ctrl=120` (in hex) picks other resources. `glos audio` names the card and counts the codec's sample errors.
+
 ## glos restart (2026-11-05)
 
 - **`glos restart`** ends GLOS as `glos exit` does, but with ERRORLEVEL 200, so that a line in AUTOEXEC.BAT
