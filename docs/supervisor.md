@@ -1394,7 +1394,12 @@ saved when the protected-mode handler was hooked, so the IRQ doesn't loop.
   - 88h, E801h and E820h report no free extended memory (E820h: CF set).
   - 86h and 83h are sleeps.
   - 24xxh drives the virtual A20.
+  - 84h is the joystick, while the game port is GLOS's (§10, D74).
   - C2xxh is the PS/2 mouse BIOS, passed to the BIOS against the virtual 8042.
+  - A DPMI client's simulated INT 15h (0300h, or one reflected to real mode) gets the same answers, all but 86h's
+    sleep, which needs V86 code to run the INT again and goes to the BIOS (against the VM's virtual RTC). Until
+    2026-11-05 a client's went to the BIOS whole: its 87h ran LGDT in V86 and GLOS killed the program, and 88h,
+    E801h and E820h reported the memory GLOS owns (DPMICONF's glos-int15 check).
 
 ## 17. DOS server and agent shell
 

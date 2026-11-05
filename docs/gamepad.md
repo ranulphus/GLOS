@@ -265,8 +265,8 @@ Order: J1 needs nothing else and is the part every machine gets. J2-J6 are bench
   - **One fault found and fixed:** the TSC's rate had been measured a second at a time, and once read 381 MHz for
     398 (a tick late at a window's end), so the stick read 4% short. It is now measured from GLOS's first tick on.
 - **Found on the way:** a client's simulated INT 15h (0300h, or a reflected one) went straight to the BIOS,
-  bypassing GLOS's INT 15h layer (int15.c). J1 routes AH=84h. The other functions there are still bypassed this
-  way: A20, 87h's guard, 88h and E801h's sizes, 86h's wait. That is to be fixed separately.
+  bypassing GLOS's INT 15h layer (int15.c). J1 routed AH=84h; the rest followed the same day (GLOS main: all of
+  int15.c but 86h's sleep; a DPMI program's block move had been killed for the BIOS's LGDT in V86).
 - **An app's own timing is coarse:** an app's PIT steps in kernel ticks (976 µs) while a session runs, as the agent's
   jobs are. So the suite checks apps for order, buttons and the BIOS's answer only.
 

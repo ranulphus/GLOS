@@ -672,6 +672,81 @@ static void t_nest(const char *self)
 __attribute__((noinline)) static int watch_target(int x) { return x + 1; }
 extern volatile unsigned long exc_or_flags;     /* (volatile: the call between its two stores reads it, unseen) */
 
+/* GLOS's INT 15h (kernel/vm/int15.c, supervisor.md §16) reaches a client's simulated INT 15h (0300h) as it reaches
+   V86 code's: no extended memory reported (88h, E801h; E820h refused), A20's queries, protected mode refused (89h),
+   and the block move (87h) made by GLOS, here between two buffers in conventional memory. (Until 2026-11-05 these
+   went to the BIOS, whose own 87h switches to protected mode itself.) A20 isn't switched: DOS may be in the HMA. */
+static void t_int15(void)
+{
+    __dpmi_regs r;
+    unsigned char gdt[48], buf[32];
+    unsigned long a, b;
+    int seg, sel, i, e88, e801, e820, a20, kinds, p89, moved;
+
+    memset(&r, 0, sizeof r);
+    r.h.ah = 0x88;
+    __dpmi_int(0x15, &r);
+    e88 = !(r.x.flags & 1) && r.x.ax == 0;
+    memset(&r, 0, sizeof r);
+    r.x.ax = 0xE801;
+    __dpmi_int(0x15, &r);
+    e801 = !(r.x.flags & 1) && !r.x.ax && !r.x.bx && !r.x.cx && !r.x.dx;
+    memset(&r, 0, sizeof r);
+    r.d.eax = 0xE820;
+    r.d.edx = 0x534D4150UL;
+    r.d.ecx = 20;
+    r.x.es = __tb >> 4;
+    r.x.di = __tb & 15;
+    __dpmi_int(0x15, &r);
+    e820 = (r.x.flags & 1) != 0;
+    memset(&r, 0, sizeof r);
+    r.x.ax = 0x2402;
+    __dpmi_int(0x15, &r);
+    a20 = !(r.x.flags & 1) && r.h.ah == 0 && r.h.al <= 1;
+    memset(&r, 0, sizeof r);
+    r.x.ax = 0x2403;
+    __dpmi_int(0x15, &r);
+    kinds = !(r.x.flags & 1) && r.h.ah == 0 && r.x.bx == 3;
+    memset(&r, 0, sizeof r);
+    r.h.ah = 0x89;
+    __dpmi_int(0x15, &r);
+    p89 = (r.x.flags & 1) && r.h.ah == 0xFF;
+    moved = 0;
+    if ((seg = __dpmi_allocate_dos_memory(8, &sel)) > 0) {      /* 128 bytes: the GDT at 0, from 64, to 96 */
+        a = (unsigned long)seg * 16 + 64;
+        b = (unsigned long)seg * 16 + 96;
+        memset(gdt, 0, sizeof gdt);
+        for (i = 0; i < 2; i++) {               /* descriptors 2 (source) and 3 (destination) */
+            unsigned long at = i ? b : a;
+            unsigned char *d = gdt + 0x10 + i * 8;
+            d[0] = d[1] = 0xFF;
+            d[2] = (unsigned char)at, d[3] = (unsigned char)(at >> 8), d[4] = (unsigned char)(at >> 16);
+            d[5] = 0x93;
+            d[7] = (unsigned char)(at >> 24);
+        }
+        for (i = 0; i < 32; i++)
+            buf[i] = (unsigned char)(0xA0 + i);
+        dosmemput(gdt, sizeof gdt, (unsigned long)seg * 16);
+        dosmemput(buf, 32, a);
+        memset(buf, 0, 32);
+        dosmemput(buf, 32, b);
+        memset(&r, 0, sizeof r);
+        r.h.ah = 0x87;
+        r.x.cx = 16;                            /* words */
+        r.x.es = seg;
+        r.x.si = 0;
+        __dpmi_int(0x15, &r);
+        dosmemget(b, 32, buf);
+        moved = !(r.x.flags & 1) && r.h.ah == 0;
+        for (i = 0; i < 32; i++)
+            moved &= buf[i] == 0xA0 + i;
+        __dpmi_free_dos_memory(sel);
+    }
+    say("glos-int15", e88 && e801 && e820 && a20 && kinds && p89 && moved,
+        "88h=%d e801h=%d e820h-refused=%d 2402h=%d 2403h=%d 89h-refused=%d 87h=%d", e88, e801, e820, a20, kinds,
+        p89, moved);
+}
+
 static void t_extras(void)
 {
     unsigned char caps[128];
@@ -799,6 +874,8 @@ int main(int argc, char **argv)
     t_irq();
     t_rmcb();
     t_extras();
+    if (is_glos)
+        t_int15();
     t_nest(argv[0]);
     if (dos_seg > 0)
         __dpmi_free_dos_memory(dos_sel);

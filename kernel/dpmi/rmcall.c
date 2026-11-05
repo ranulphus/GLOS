@@ -24,7 +24,6 @@
 #include "arch.h"
 #include "cache.h"
 #include "display.h"
-#include "joy.h"
 #include "dpmi.h"
 #include "kprintf.h"
 #include "sched.h"
@@ -57,18 +56,20 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
     struct trapframe *f;
     u32 here, ss, sp, i, flags, ivt, vif = current->vif, ax = r->eax, bx = r->ebx;
 
-    if (vec == 0x15 && kind == RM_INT && (u8)(r->eax >> 8) == 0x84) {  /* the joystick, while the game port is */
-        struct trapframe t;                     /* GLOS's (vjoy.c): as a V86 INT 15h gets it (int15.c), which */
-        memset(&t, 0, sizeof t);                /* a client's simulated one doesn't pass through */
-        t.eax = r->eax, t.ebx = r->ebx, t.ecx = r->ecx, t.edx = r->edx, t.eflags = r->flags;
-        if (joy_int15(&t, 0)) {
-            r->eax = t.eax, r->ebx = t.ebx, r->ecx = t.ecx, r->edx = t.edx;
-            r->flags = (u16)((r->flags & ~FL_CF) | (t.eflags & FL_CF));
+    if (current != vm.thread)                   /* an app's: the VM thread makes it, when the system VM is idle */
+        return app_rm_call(from, r, kind, vec, words, nwords);
+    if (vec == 0x15 && kind == RM_INT && (u8)(r->eax >> 8) != 0x86) {   /* GLOS's INT 15h (int15.c: A20, the */
+        struct trapframe t;                     /* block move's guard, no extended memory to report, the joystick), */
+        memset(&t, 0, sizeof t);                /* as a V86 INT 15h gets it; a client's simulated one went to the */
+        t.eax = r->eax, t.ebx = r->ebx, t.ecx = r->ecx, t.edx = r->edx;     /* BIOS until 2026-11-05. (86h's wait */
+        t.esi = r->esi, t.edi = r->edi, t.v86_es = r->es, t.v86_ds = r->ds; /* runs the INT again until its */
+        t.eflags = r->flags;                    /* deadline, in V86: the BIOS's, on the VM's virtual RTC) */
+        if (vm_int15(&t, 0)) {
+            r->eax = t.eax, r->ebx = t.ebx, r->ecx = t.ecx, r->edx = t.edx, r->esi = t.esi, r->edi = t.edi;
+            r->flags = (u16)((r->flags & ~(FL_CF | FL_ZF)) | (t.eflags & (FL_CF | FL_ZF)));
             return 0;
         }
     }
-    if (current != vm.thread)                   /* an app's: the VM thread makes it, when the system VM is idle */
-        return app_rm_call(from, r, kind, vec, words, nwords);
     if (depth >= NEST_MAX || (!dctx && !r->ss && !r->sp))
         return -1;                              /* (without a client, the caller gives a stack: sessions) */
     if (vec == 0x13 && kind != RM_FAR && cache_int13(from, r, kind))

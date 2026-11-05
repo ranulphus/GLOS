@@ -4,6 +4,13 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Fixed: INT 15h from DPMI programs (2026-11-05)
+
+- **A DPMI program's INT 15h now gets GLOS's answers**, as a real-mode program's always did: block moves (87h) made
+  by GLOS and kept out of its memory, no free extended memory reported (88h, E801h, E820h), the virtual A20. Before,
+  such calls went to the BIOS: a DPMI program asking for a block move was killed (the BIOS's own switches to
+  protected mode), and the memory sizes were the PC's, which GLOS owns.
+
 ## A virtual game port (2026-11-05)
 
 - **`glos joy a=X,Y b=X,Y buttons=NNNN`** (axes 0-255, 128 the centre; `none` for a stick that isn't there;
