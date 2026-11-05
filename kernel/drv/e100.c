@@ -152,6 +152,21 @@ static u32 ee_width(void)
     return bits >= 12 ? 6 : bits;
 }
 
+/* A selective reset first: it idles both units and takes the card off the
+ * bus, which a software reset of a card at work (one GLOS left running, or
+ * another driver's) may not do safely; Linux's e100 does the same. Then the
+ * software reset, and interrupts masked: a reset leaves them on. */
+static void reset(void)
+{
+    outl((u16)(e.base + PORT), 2);              /* selective reset */
+    pause(20);
+    outl((u16)(e.base + PORT), 0);              /* software reset */
+    pause(100);
+    outb((u16)(e.base + SCB_MASK), 1);
+}
+
+static void e100_stop(struct nic *c) { (void)c; reset(); }
+
 /* ---- */
 
 static void rx_start(void)
@@ -169,9 +184,7 @@ static int start(void)
     struct block *b = (struct block *)cb;
     u32 i;
 
-    outl((u16)(e.base + PORT), 0);              /* reset */
-    pause(100);
-    outb((u16)(e.base + SCB_MASK), 1);
+    reset();
     scb(CU_BASE, 0);
     scb(RU_BASE, 0);
 
@@ -276,13 +289,11 @@ int e100_probe(void)
         kprintf("GLOS-NET refuse card=i8255x reason=no-memory\n");
         return -1;
     }
-    pci_write32(d->bus, d->dev, d->fn, 4, pci_read32(d->bus, d->dev, d->fn, 4) | 0x05);  /* I/O, bus master */
     e.name = "i8255x";
     e.base = (u16)(d->bar[1] & ~3u);
     e.irq = d->irq;
-    outl((u16)(e.base + PORT), 0);
-    pause(100);
-    outb((u16)(e.base + SCB_MASK), 1);
+    nic_pci_on(d);
+    reset();
     bits = ee_width();
     for (i = 0; i < 3; i++) {
         u16 w = ee_read(i, bits);
@@ -295,6 +306,7 @@ int e100_probe(void)
     }
     e.send = e100_send;
     e.service = e100_service;
+    e.stop = e100_stop;
     vdev_hide(e.base, 0x40);
     nic_claimed(&e, d);
     return 0;

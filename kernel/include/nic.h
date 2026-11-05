@@ -20,6 +20,7 @@ struct nic {
     u8 irq;
     int (*send)(struct nic *n, const void *frame, u32 len);    /* 0, or -1 if the card is busy or broken */
     void (*service)(struct nic *n);     /* the net thread: interrupts acknowledged, frames to net_rx() */
+    void (*stop)(struct nic *n);        /* at leave: the card quiet, no more DMA or interrupts */
     u32 rx_frames, tx_frames, rx_errors, overruns;
 };
 
@@ -28,6 +29,8 @@ extern struct nic *nic0;
 int nic_probe(void);                    /* finds, refuses or claims a card (kernel/drv/nic.c); sets nic0 */
 int nic_pci(struct pci_dev *d, const char *name);       /* a PCI card may be taken: 0, or -1 with the refusal said */
 void nic_claimed(struct nic *n, struct pci_dev *d);     /* its IRQ and PCI function are the kernel's; the card line */
+void nic_pci_on(struct pci_dev *d);     /* I/O and bus mastering on: as found again at nic_leave */
+void nic_leave(void);                   /* GLOS leaving: the card stopped, its PCI command as found */
 int ne2k_probe(void);                   /* each: 0 once it has claimed its card */
 int rtl8139_probe(void);
 int e100_probe(void);

@@ -149,6 +149,14 @@ static int setup(void)
     return 0;
 }
 
+/* At leave: stopped, no remote DMA, no interrupts. */
+static void ne_stop(struct nic *n)
+{
+    (void)n;
+    wr(CR, 0x21);
+    wr(IMR, 0);
+}
+
 static int ne_send(struct nic *n, const void *f, u32 len)
 {
     u32 spin;
@@ -314,6 +322,7 @@ static int claim(const char *name, u16 base, int irq, struct pci_dev *d)
     ne.irq = (u8)irq;
     ne.send = ne_send;
     ne.service = ne_service;
+    ne.stop = ne_stop;
     vdev_hide(base, 0x20);
     nic_claimed(&ne, d);
     return 0;

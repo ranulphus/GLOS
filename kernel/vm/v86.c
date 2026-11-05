@@ -515,6 +515,7 @@ static void vm_leave(u32 code)
         cpu_set_cr4(0, 1);
     sched_report();
     net_report();
+    nic_leave();
     cache_end();
     if (vm.bi->flags & BI_F_SELFTEST)
         selftest_report();

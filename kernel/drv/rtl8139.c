@@ -90,6 +90,17 @@ static int start(void)
     return 0;
 }
 
+/* At leave: a reset, which turns receive and transmit off; the card writes
+   no more into the ring, and its interrupts are masked. */
+static void rtl_stop(struct nic *c)
+{
+    u32 n;
+    (void)c;
+    wr16(IMR, 0);
+    wr8(CR, CR_RST);
+    for (n = 0; n < 100000 && (rd8(CR) & CR_RST); n++) ;
+}
+
 static int rtl_send(struct nic *c, const void *frame, u32 len)
 {
     u32 n = len < 60 ? 60 : len, i;
@@ -151,7 +162,7 @@ int rtl8139_probe(void)
         kprintf("GLOS-NET refuse card=rtl8139 reason=no-memory\n");
         return -1;
     }
-    pci_write32(d->bus, d->dev, d->fn, 4, pci_read32(d->bus, d->dev, d->fn, 4) | 0x05);  /* I/O, bus master */
+    nic_pci_on(d);
     rtl.name = "rtl8139";
     rtl.base = (u16)(d->bar[0] & ~3u);
     rtl.irq = d->irq;
@@ -163,6 +174,7 @@ int rtl8139_probe(void)
         rtl.mac[i] = rd8(IDR0 + i);
     rtl.send = rtl_send;
     rtl.service = rtl_service;
+    rtl.stop = rtl_stop;
     vdev_hide(rtl.base, 0x100);
     nic_claimed(&rtl, d);
     return 0;

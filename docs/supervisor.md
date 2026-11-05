@@ -86,6 +86,9 @@ to COM1 at each step:
    - the kernel restores the PIC (to the virtual PIC's ICW2 and mask, which are 08h/70h and the original
      masks unless a program changed them), RTC registers A/B (as the program last set them), PIT channel 0
      (mode 3 count 0, as the BIOS sets it at POST), the 8042's command byte, and A20 as found;
+   - it stops the network card it took (nic_leave: an 8255x by a selective then a software reset, an RTL8139
+     by its reset, an NE2000 stopped), so it writes no more frames into memory that is DOS's again and
+     raises no interrupt, and puts the card's PCI command register back as found;
    - it switches back through the 16-bit CS/DS selectors (§3). The IVT isn't reloaded: DOS owned it
      throughout, and a kill puts back each killed program's vectors (§9.6);
    - the resident stub returns to DOS with the requested exit code.

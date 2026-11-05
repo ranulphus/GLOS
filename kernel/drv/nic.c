@@ -13,6 +13,8 @@
 #include "vm.h"
 
 struct nic *nic0;
+static struct pci_dev *pdev;            /* the PCI card nic_pci_on set going, and its command register before */
+static u32 pcmd;
 
 /* A packet driver's signature at any of the vectors they use: the vector. */
 static int packet_driver(void)
@@ -49,6 +51,27 @@ void nic_claimed(struct nic *n, struct pci_dev *d)
     nic0 = n;
     kprintf("GLOS-NET card=%s base=%x irq=%u mac=%02x:%02x:%02x:%02x:%02x:%02x\n", n->name, n->base, n->irq, n->mac[0],
             n->mac[1], n->mac[2], n->mac[3], n->mac[4], n->mac[5]);
+}
+
+void nic_pci_on(struct pci_dev *d)
+{
+    pdev = d;
+    pcmd = pci_read32(d->bus, d->dev, d->fn, 4) & 0xFFFF;
+    pci_write32(d->bus, d->dev, d->fn, 4, pcmd | 0x05);    /* I/O, bus master */
+}
+
+/* The card stopped before GLOS goes: left running, a PCI card went on writing
+   the frames it received into GLOS's memory, DOS's again by then, and an
+   Intel 8255x still at work may hang on the next driver's reset (the likely
+   reason a GLOS started again seconds after glos exit never answered on
+   bench-g400). Its PCI command register goes back as it was; the status
+   half written as 0 clears nothing. */
+void nic_leave(void)
+{
+    if (nic0 && nic0->stop)
+        nic0->stop(nic0);
+    if (pdev)
+        pci_write32(pdev->bus, pdev->dev, pdev->fn, 4, pcmd);
 }
 
 int nic_probe(void)
