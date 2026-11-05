@@ -1313,17 +1313,17 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         } else {
             ssh_chan_exit(ch, 0);
         }
-    } else if (!strcmp(cmd, "glos exit")) {
+    } else if (!strcmp(cmd, "glos exit") || !strcmp(cmd, "glos restart")) {
         if (!agent_mode) {
-            say(ch, 1, "glos: exit needs GLOS started without /RUN or /SHELL\n");
+            say(ch, 1, "glos: exit and restart need GLOS started without /RUN or /SHELL\n");
             ssh_chan_exit(ch, 1);
-        } else {
-            ssh_chan_exit(ch, 0);
-            agent_exit(512);                    /* half a second for the reply to leave */
+        } else {                                /* (restart: GLOS leaves with ERRORLEVEL 200, which AUTOEXEC.BAT */
+            ssh_chan_exit(ch, 0);               /* can loop on to start GLOS.EXE again, new files and all) */
+            agent_exit(512, strcmp(cmd, "glos restart") ? 0 : AGENT_RESTART);  /* half a second for the reply */
         }
     } else {
         say(ch, 1, "glos: no such command (glos ver, echo, run, shot, key, type, mouse, log, stat, ps, mem, net, tick, "
-                   "kill, gdb, exit, reboot)\n");
+                   "kill, gdb, exit, restart, reboot)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;

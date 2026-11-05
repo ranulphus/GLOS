@@ -106,7 +106,7 @@ static u32 next_seq;
 static struct waitq roomq;                      /* the VM thread, waiting for ring space */
 static u32 last_kill;
 static volatile u32 exit_at;
-static volatile u8 exit_req;
+static volatile u8 exit_req, exit_code;
 static void (*kick_ssh)(void);
 
 static u32 ring_used(const struct ring *r) { return r->head - r->tail; }
@@ -568,10 +568,11 @@ u32 agent_ps(char *buf, u32 max)
     return n < max ? n : max;
 }
 
-void agent_exit(u32 delay_ticks)
+void agent_exit(u32 delay_ticks, u8 code)
 {
     u32 f = irq_save();
     exit_at = timer_ticks() + delay_ticks;
+    exit_code = code;
     exit_req = 1;
     vm_kick();
     irq_restore(f);
@@ -580,6 +581,8 @@ void agent_exit(u32 delay_ticks)
 /* glos exit refused (the stub had nowhere to go, docs/upper-memory.md): GLOS
    stays, and a later glos exit asks again. */
 void agent_exit_cancel(void) { exit_req = 0; }
+
+u8 agent_exit_code(void) { return exit_code; }
 
 /* ---- the VM thread's side (trap context) */
 

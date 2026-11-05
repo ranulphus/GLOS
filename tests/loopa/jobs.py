@@ -1676,6 +1676,39 @@ def reboot_case(profile, card):
         not bad
 
 
+def restart_case(profile, card):
+    """glos restart: GLOS leaves with ERRORLEVEL 200 (AGENT_RESTART), and RUN.BAT, as bench-g400's AUTOEXEC.BAT does,
+    loops back on it to start GLOS.EXE again: no reset, GLOS answering again in seconds; then glos exit (0) falls
+    through. VECCHK clean after both."""
+    import time
+    tag = "restart-%s-%s" % (profile, card)
+    agent = Agent("ssh-" + tag, profile, card, ["--cmd", "SERSAY HX-START restart", "--cmd", "VECCHK save",
+                                                "--cmd", ":again", "--cmd", "C:\\TEST\\GLOS.EXE",
+                                                "--cmd", "IF ERRORLEVEL 200 GOTO again", "--cmd", "VECCHK check",
+                                                "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks = {"listen": agent.listening()}
+    try:
+        checks["restart"] = agent.ssh("glos restart")[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 300 and (agent.log().count("GLOS-SSH listen") < 2
+                                          or agent.log().count("GLOS-NET dhcp") < 2):
+            time.sleep(1)
+        checks["seconds"] = time.time() - t0 < 120
+        rc, out, _ = agent.ssh("glos ver")
+        checks["again"] = rc == 0 and out.startswith("GLOS ")
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["codes"] = text.count("GLOS-EXIT code=200") == 1 and text.count("GLOS-EXIT code=0") == 1
+    checks["no-reset"] = text.count("HX-START restart") == 1
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "HX-VECCHK ok" in text
+    checks["done"] = "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
+        not bad
+
+
 def ssh_case(profile, card):
     import time
     tag = "%s-%s%s" % (profile, card, os.environ.get("SSH_TAG", ""))
@@ -5893,6 +5926,7 @@ def main():
         res = matrix(ssh_case, SSH_CASES, a.jobs)
         if not os.environ.get("SSH_ONE") and not os.environ.get("SSH_ONLY"):
             res += matrix(reboot_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
+            res += matrix(restart_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]

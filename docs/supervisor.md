@@ -1443,6 +1443,9 @@ place where nothing else is in DOS by construction.
   - The exit status is INT 21h 4Dh's code; 126 when not even COMSPEC could be run.
 - DOS is never re-entered behind a running program's back: the stub only EXECs from its own NEXT loop.
 - `glos exit` (headless only, for now) leaves at the next idle NEXT, half a second after it replies.
+  `glos restart` leaves the same way with ERRORLEVEL 200 (AGENT_RESTART), for AUTOEXEC.BAT to start GLOS
+  again on (`:glos` / `C:\GLOS\GLOS.EXE` / `IF ERRORLEVEL 200 GOTO glos`): new GLOS files copied over SFTP
+  take effect in seconds, with no reset (bench-g400, 2026-11-05).
 - **`glos run [--exclusive|--app] [--direct] [--profile NAME] COMMAND`** (M4e) posts COMMAND as a job whose
   session (§11) runs in direct mode (§9.7) or takes GLOS.CFG's `[program NAME]` profile instead of its program's
   own. That works for a batch file too, whose session's program is COMMAND.COM. A program becomes a GLOS app
@@ -1503,7 +1506,7 @@ place where nothing else is in DOS by construction.
 - **Built-in commands:** `glos ver`, `glos echo …`, `glos run …` (M4e, §17.3), `glos shot`, `glos key`,
   `glos type`, `glos mouse`, `glos log`, `glos stat`, `glos ps`, `glos mem`, `glos net`, `glos tick` (M4e:
   `ticks=N hz=1024`, the kernel's clock, for the gate's probe), `glos kill`, `glos gdb`, `glos exit`,
-  `glos reboot`;
+  `glos restart`, `glos reboot`;
   anything else starting `glos` gives status 127.
   - `glos shot [--raw]`: the screen as a PNG on stdout, in any mode (§17.7).
   - `glos key`, `glos type`, `glos mouse`: input into the program in front (§17.8).

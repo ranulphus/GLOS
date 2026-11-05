@@ -17,7 +17,10 @@ int agent_post_run(void *owner, const char *cmd, int direct, int how, const char
 void agent_drop(void *owner);                   /* the channel has gone */
 void agent_service(u32 (*write)(void *owner, int stream, const u8 *d, u32 n),
                    void (*done)(void *owner, u32 code));       /* code: the exit status */
-void agent_exit(u32 delay_ticks);               /* glos exit: leave once idle, this many ticks on */
+#define AGENT_RESTART 200                       /* glos restart's exit code: AUTOEXEC.BAT starts GLOS again on it */
+void agent_exit(u32 delay_ticks, u8 code);      /* glos exit (code 0), glos restart (AGENT_RESTART): leave once
+                                                   idle, this many ticks on, DOS's ERRORLEVEL the code */
+u8 agent_exit_code(void);
 void agent_exit_cancel(void);                   /* that leave refused: GLOS stays (docs/upper-memory.md) */
 int agent_kill(void);                           /* glos kill: end the running job; -1 if none */
 int agent_kill_seq(u32 seq);                    /* glos kill SEQ: that job, running or waiting; -1 if none */

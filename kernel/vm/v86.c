@@ -770,7 +770,7 @@ static void vm_agent_next(struct trapframe *tf, u32 result)
         r = 0;
     }
     if (r < 0) {
-        vm_go(tf, 0);
+        vm_go(tf, agent_exit_code());           /* (glos restart: AGENT_RESTART, for AUTOEXEC.BAT to start GLOS again) */
         return;
     }
     if (r > 0)

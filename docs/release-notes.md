@@ -4,6 +4,12 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## glos restart (2026-11-05)
+
+- **`glos restart`** ends GLOS as `glos exit` does, but with ERRORLEVEL 200, so that a line in AUTOEXEC.BAT
+  can start it again: `:glos`, then `C:\GLOS\GLOS.EXE`, then `IF ERRORLEVEL 200 GOTO glos`. A new GLOS copied
+  over SFTP then runs within seconds, with no reboot.
+
 ## Upper memory (2026-11-05)
 
 - **`[memory] stub_page = off | auto | SEGMENT`** (or `/STUBPAGE=`; the Control Panel's "Memory" page; off by
