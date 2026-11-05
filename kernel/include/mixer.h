@@ -1,5 +1,6 @@
-/* GLOS's mixer and the Sound Blaster 16 under it (kernel/drv/mixer.c, sb16.c;
- * PRD §10.5; docs/milestones-m8.md step E). */
+/* GLOS's mixer and the cards under it (kernel/drv/mixer.c; sb16.c, the Sound
+ * Blaster 16; crystal.c, a Crystal CS423x's codec; PRD §10.5;
+ * docs/milestones-m8.md step E, docs/crystal-audio.md). */
 #ifndef K_MIXER_H
 #define K_MIXER_H
 #include "types.h"
@@ -21,12 +22,21 @@ int mixer_volume(struct app *a, u32 id, u32 volume);
 void mixer_app_gone(struct app *a);
 u32 mixer_stat(char *buf, u32 max);             /* glos audio */
 
-int sb16_init(const struct bootinfo *bi);       /* the DSP found, version 4 or later: 0 */
 struct trapframe;
-int sb16_start(u32 rate, u32 frames, void (*fill)(s16 *out, u32 frames, const struct trapframe *tf));
-                                                /* (tf: what the card's interrupt broke into) */      /* two halves of `frames` */
-void sb16_stop(void);
-int sb16_running(void);
-u32 sb16_irqs(void);
+typedef void (*mixer_fill)(s16 *out, u32 frames, const struct trapframe *tf);  /* (tf: what the card's interrupt
+                                                                                     broke into) */
+struct sound_card {                             /* what the mixer plays through */
+    const char *name;
+    int (*start)(u32 rate, u32 frames, mixer_fill fill);        /* two halves of `frames`: 0 */
+    void (*stop)(void);
+    int (*running)(void);
+    u32 (*irqs)(void);
+};
+extern const struct sound_card sb16_card, crystal_card;
+void mixer_late(void);                          /* GLOS.CFG read: a Crystal chip set up when there's no SB16 */
+int crystal_init(const char *cfg);              /* [sound] crystal (auto, off, or resources): the part set up: 0 */
+u16 crystal_sb(void);                           /* its SB Pro's port, 0 if none set up */
+const char *crystal_blaster(void);              /* BLASTER for programs (A220 I5 D1 T4), 0 if none set up */
+int sb16_init(const struct bootinfo *bi);       /* the DSP found, version 4 or later: 0 */
 
 #endif

@@ -482,6 +482,7 @@ static void apply_read(void)
     kcfg_apply("input", "repeat_rate", "");
     kcfg_get("time", "zone", z, sizeof z);      /* (M10: SNTP starts by itself once the file is read) */
     clock_zone(z);
+    mixer_late();                               /* a Crystal chip, with no SB16 ([sound] crystal) */
 }
 
 /* The desktop has come on (display.c, the VM thread): [desktop] start's programs, beside GLOS.EXE when they have
@@ -644,6 +645,7 @@ static void load(void)
             kprintf("GLOS-CFG error=open dos=%u path=%s\n", q.error, c.path);
         }
         kfree(buf);
+        mixer_late();                           /* (the defaults: [sound] crystal = auto) */
         return;
     }
     h = q.r[0].ax;
@@ -656,6 +658,7 @@ static void load(void)
         c.failed = 1;
         kprintf("GLOS-CFG error=read dos=%u\n", q.error);
         kfree(buf);
+        mixer_late();
         return;
     }
     got = q.r[0].ax;

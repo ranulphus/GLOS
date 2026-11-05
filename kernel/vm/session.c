@@ -138,20 +138,21 @@ static int remode_to(u8 mode)
 }
 
 /* Sound Blaster DMA stopped: channels 1 and 3, 5 to 7 masked, and the DSP
-   reset at BLASTER's A. */
+   reset at BLASTER's A, or at the SB Pro of a Crystal chip GLOS set up. */
 static void sb_stop(void)
 {
+    u16 port = vm.bi->sb_port ? (u16)vm.bi->sb_port : crystal_sb();
     outb(0x0A, 0x05);
     outb(0x0A, 0x07);
     outb(0xD4, 0x05);
     outb(0xD4, 0x06);
     outb(0xD4, 0x07);
-    if (vm.bi->sb_port) {
+    if (port) {
         u32 i;
-        outb((u16)(vm.bi->sb_port + 6), 1);
+        outb((u16)(port + 6), 1);
         for (i = 0; i < 100; i++)
             inb(0x80);
-        outb((u16)(vm.bi->sb_port + 6), 0);
+        outb((u16)(port + 6), 0);
     }
 }
 
@@ -344,6 +345,18 @@ static int same_var(const char *a, const char *b)
     return *a == '=' && *b == '=';
 }
 
+/* The environment the EXEC at tf gives its program (its parameter block's, or the parent's) has var ("NAME="). */
+static int env_has(const struct trapframe *tf, u16 psp, const char *var)
+{
+    u32 pb = vm_lin(tf->v86_es, tf->ebx), src, i;
+    u16 seg = vm_rd16(pb);
+    src = (u32)(seg ? seg : vm_rd16(psp * 16u + 0x2C)) << 4;
+    for (i = 0; src && i < 32768 && vm_rd8(src + i); i += (u32)strlen((const char *)vm_ptr(src + i)) + 1)
+        if (same_var((const char *)vm_ptr(src + i), var))
+            return 1;
+    return 0;
+}
+
 /* The profile's env lines into the environment the EXEC at tf gives the
    program: a copy of the one it names (or the parent's), without the
    variables the profile sets, then the profile's lines. */
@@ -487,7 +500,7 @@ void session_exec(const struct trapframe *tf)
     ses.app = psp == vm.loader_psp && job.app;
     ses.env_seg = 0;
     {                                           /* TZ (M10), the profile's strings, then the job's own (M9) over */
-        static char add[64 + BI_PROF_ENV + sizeof job.env];         /* them */
+        static char add[96 + BI_PROF_ENV + sizeof job.env];         /* them */
         const char *e;
         u32 n = 0, l;
         if (psp == vm.loader_psp && kcfg_loaded()) {  /* (DJGPP's localtime reads it; DOS keeps local time), */
@@ -500,6 +513,18 @@ void session_exec(const struct trapframe *tf)
                 memcpy(add, "TZ=", 3);
                 kcfg_get("time", "zone", add + 3, 48);
                 n = (u32)strlen(add) + 1;
+            }
+        }
+        if (psp == vm.loader_psp && crystal_blaster() && !env_has(tf, psp, "BLASTER=")) {
+            int own = 0;                        /* a Crystal chip GLOS set up: BLASTER for its SB Pro, unless the */
+            for (e = ses.prof ? ses.prof->env : ""; *e; e += strlen(e) + 1)     /* program's environment, the */
+                own |= same_var(e, "BLASTER=");                                 /* profile or the job has one */
+            for (e = job.env; *e; e += strlen(e) + 1)
+                own |= same_var(e, "BLASTER=");
+            if (!own) {
+                memcpy(add + n, "BLASTER=", 8);
+                memcpy(add + n + 8, crystal_blaster(), strlen(crystal_blaster()) + 1);
+                n += 8 + (u32)strlen(crystal_blaster()) + 1;
             }
         }
         for (e = ses.prof ? ses.prof->env : ""; *e; e += l) {

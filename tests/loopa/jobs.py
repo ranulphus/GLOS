@@ -3187,21 +3187,29 @@ def gpu_case(profile, vcard, card):
 
 
 # (machine, video card, network card): GLOS's mixer (M8 step E); it is the desktop's, on any card
-AUDIO_CASES = [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")]
+AUDIO_CASES = [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k"),
+               ("bf6", "g200", "ne2kpci", "cs4236b"), ("bf6", "g200", "ne2kpci", "cs4232"),
+               ("bf6", "g200", "ne2kpci", "cs4235")]      # (docs/crystal-audio.md: GLOS sets the chip up; 86Box
+#   offers these three Crystal cards, given MGA-Glide's sound/crystal ROMs)
 
 
-def audio_case(profile, vcard, card):
+def audio_case(profile, vcard, card, sound="sb16"):
     """GLOS's mixer (M8 step E; kernel/drv/mixer.c, sb16.c, tests/dos/audtest.c): with the desktop up GLOS plays
     the SB16 itself; AUDTEST's tone through a stream, then two streams of other rates and channels at once, then
     one while a session (a DOS program) has the card: no underrun in any while it was fed, the card given to the
-    session and taken back, every tone in 86Box's recording, the card stopped when GLOS leaves (SBCHK)."""
+    session and taken back, every tone in 86Box's recording, the card stopped when GLOS leaves (SBCHK).
+    A Crystal CS423x (crystal.c, docs/crystal-audio.md) instead of the SB16: no BLASTER, GLOS sets the chip up by
+    itself (the data sheet's resources), plays through its codec, and gives sessions BLASTER for its SB Pro."""
     import time
-    tag = "%s-%s" % (profile, vcard)
-    agent = Agent("audio-" + tag, profile, card, ["--card", vcard, "--sound", "sb16", "--wav",
-        "--pre", "SET BLASTER=A220 I5 D1 H5 T6",
+    crystal = sound != "sb16"
+    tag = "%s-%s" % (profile, vcard) + ("-" + sound if crystal else "")
+    blaster = "A220 I5 D1 T4" if crystal else "A220 I5 D1 H5 T6"
+    agent = Agent("audio-" + tag, profile, card, ["--card", vcard, "--sound", sound, "--wav"]
+        + ([] if crystal else ["--pre", "SET BLASTER=" + blaster]) + [
         "--file", "build/dj/AUDTEST.EXE=/TEST/AUDTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
         "--cmd", "SERSAY HX-START audio", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
-        "--cmd", "VECCHK check", "--cmd", "SBCHK", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
+        "--cmd", "VECCHK check"] + (["--cmd", "SET BLASTER=" + blaster] if crystal else []) + [
+        "--cmd", "SBCHK", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
                    "-o", "ControlPersist=600"]
     app = "C:\\TEST\\AUDTEST.EXE "
@@ -3223,6 +3231,9 @@ def audio_case(profile, vcard, card):
 
     try:
         checks["idle"] = agent.ssh("glos audio")[1].startswith("audio idle ")
+        if crystal:                             # (GLOS set it up: the data sheet's resources, BLASTER for sessions)
+            checks["setup"] = "GLOS-SOUND crystal wss=534 sb=220 fm=388 irq=5 dma=1 " in agent.log()
+            checks["blaster"] = "BLASTER=" + blaster in agent.ssh("SET")[1]
         checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
         t0 = time.time()
         while time.time() - t0 < 60 and not agent.ssh("glos audio")[1].startswith("audio on "):
@@ -3240,7 +3251,8 @@ def audio_case(profile, vcard, card):
         checks["session"] = rc == 7
         checks["after-session"] = played(finish(d), "D")[0]
         log = agent.log()
-        checks["handed-over"] = log.count("GLOS-SB start") >= 2 and "GLOS-SB stop" in log
+        on, off = ("GLOS-SOUND start", "GLOS-SOUND stop") if crystal else ("GLOS-SB start", "GLOS-SB stop")
+        checks["handed-over"] = log.count(on) >= 2 and off in log
         info += " periods=%d" % n
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
@@ -5989,6 +6001,8 @@ def main():
         return 0 if all(r[1] for r in matrix(glwin_case, cases, a.jobs)) else 1
     if a.suite == "audio":
         cases = [c for c in AUDIO_CASES if not a.profile or c[0] in a.profile]
+        if os.environ.get("LOOPA_AUDIO_SOUND"):    # e.g. LOOPA_AUDIO_SOUND=cs4236b,cs4232
+            cases = [c for c in cases if (c[3] if len(c) > 3 else "sb16") in os.environ["LOOPA_AUDIO_SOUND"].split(",")]
         return 0 if all(r[1] for r in matrix(audio_case, cases, a.jobs)) else 1
     if a.suite == "gpu":
         cases = [c for c in GPU_CASES if not a.profile or c[0] in a.profile]

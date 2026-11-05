@@ -32,7 +32,7 @@ static struct {
     u32 frames;                                 /* a half's */
     u32 half;                                   /* the half the card plays next */
     u32 irqs;
-    void (*fill)(s16 *out, u32 frames, const struct trapframe *tf);
+    mixer_fill fill;
 } sb;
 
 static const u8 page_port[4] = { 0, 0x8B, 0x89, 0x8A };        /* channels 5, 6, 7 (4 is the cascade) */
@@ -104,7 +104,7 @@ static void irq(struct trapframe *tf)
 
 static void dma_stop(void) { outb(0xD4, (u8)(4 | (sb.dma & 3))); }
 
-int sb16_start(u32 rate, u32 frames, void (*fill)(s16 *out, u32 frames, const struct trapframe *tf))
+static int sb16_start(u32 rate, u32 frames, mixer_fill fill)
 {
     u32 words = frames * 2 * 2, ch = sb.dma & 3, addr;
     if (!sb.found)
@@ -150,7 +150,7 @@ int sb16_start(u32 rate, u32 frames, void (*fill)(s16 *out, u32 frames, const st
     return 0;
 }
 
-void sb16_stop(void)
+static void sb16_stop(void)
 {
     if (!sb.running)
         return;
@@ -163,5 +163,7 @@ void sb16_stop(void)
     kprintf("GLOS-SB stop irqs=%u\n", sb.irqs);
 }
 
-int sb16_running(void) { return sb.running; }
-u32 sb16_irqs(void) { return sb.irqs; }
+static int sb16_running(void) { return sb.running; }
+static u32 sb16_irqs(void) { return sb.irqs; }
+
+const struct sound_card sb16_card = { "sb16", sb16_start, sb16_stop, sb16_running, sb16_irqs };

@@ -1,5 +1,7 @@
 /* GLOS's mixer (PRD §10.5; docs/milestones-m8.md step E): the apps' streams
- * of sound into the Sound Blaster 16 (sb16.c).
+ * of sound into the card: a Sound Blaster 16 (sb16.c), found at the start
+ * from BLASTER, or else a Crystal CS423x's codec (crystal.c), which GLOS sets
+ * up once GLOS.CFG has been read ([sound] crystal; docs/crystal-audio.md).
  *
  * A stream is a ring of signed 16-bit samples in pages shared with its app
  * (struct glos_stream, include/glos/api.h): the app writes, the mixer reads,
@@ -29,6 +31,7 @@
 #include "arch.h"
 #include "dpmi.h"
 #include "io.h"
+#include "kcfg.h"
 #include "kprintf.h"
 #include "mixer.h"
 #include "mm.h"
@@ -54,9 +57,10 @@ static struct strm {
 static struct {
     u8 on;                                      /* the card found and the mixer wanted */
     u8 out;                                     /* a session has the card */
-    u8 found;                                   /* the card is there (sb16_init) */
+    u8 found;                                   /* the card is there (sb16_init, crystal_init) */
     u8 desk;                                    /* the desktop wants it playing (mixer_desktop) */
     const struct bootinfo *bi;
+    const struct sound_card *card;
     u32 rate, next_id, periods;
     s32 acc[PERIOD * 2];
 } mx;
@@ -71,22 +75,44 @@ int mixer_init(const struct bootinfo *bi)
     mx.bi = bi;
     if ((bi->sound_flags & BI_SOUND_OFF) || sb16_init(bi) != 0)
         return -1;
+    mx.card = &sb16_card;
     mx.found = mx.on = 1;
     return 0;
+}
+
+/* GLOS.CFG read (config.c): with no SB16, a Crystal chip set up ([sound] crystal), even with the mixer off, so
+   that programs find its SB Pro; the mixer plays through its codec when it is on. */
+void mixer_late(void)
+{
+    char v[96];
+    if (mx.card)
+        return;
+    kcfg_get("sound", "crystal", v, sizeof v);
+    if (crystal_init(v) != 0)
+        return;
+    mx.card = &crystal_card;
+    if (mx.bi->sound_flags & BI_SOUND_OFF)
+        return;
+    mx.found = mx.on = 1;
+    if (mx.desk)
+        mixer_desktop(1);
 }
 
 /* [sound] mixer changed (M9): the card found now if it wasn't looked for, and played if the desktop has it. */
 void mixer_enable(int on)
 {
     if (on && !mx.on) {
-        if (!mx.found && sb16_init(mx.bi) != 0)
-            return;
+        if (!mx.found && !mx.card) {
+            if (sb16_init(mx.bi) != 0)
+                return;
+            mx.card = &sb16_card;
+        }
         mx.found = mx.on = 1;
         kprintf("GLOS-AUDIO mixer on\n");
         if (mx.desk)
             mixer_desktop(1);
     } else if (!on && mx.on) {
-        sb16_stop();
+        mx.card->stop();
         mx.out = 1;
         mx.on = 0;
         kprintf("GLOS-AUDIO mixer off\n");
@@ -96,11 +122,11 @@ void mixer_enable(int on)
 /* [sound] rate changed (M9): the card started again at the new rate, every stream's step made anew. */
 void mixer_set_rate(u32 rate)
 {
-    u32 i, f, playing = sb16_running();
+    u32 i, f, playing = mx.card && mx.card->running();
     if (rate < 4000 || rate > 48000 || rate == mx.rate)
         return;
     if (playing)
-        sb16_stop();
+        mx.card->stop();
     f = irq_save();
     mx.rate = rate;
     for (i = 0; i < STREAMS; i++)
@@ -110,7 +136,7 @@ void mixer_set_rate(u32 rate)
         }
     irq_restore(f);
     kprintf("GLOS-AUDIO rate=%u\n", rate);
-    if (playing && sb16_start(mx.rate, PERIOD, fill) != 0)
+    if (playing && mx.card->start(mx.rate, PERIOD, fill) != 0)
         mx.on = 0;
 }
 
@@ -196,10 +222,10 @@ void mixer_desktop(int on)
         return;
     if (on) {
         mx.out = 0;
-        if (!sb16_running() && sb16_start(mx.rate, PERIOD, fill) != 0)
+        if (!mx.card->running() && mx.card->start(mx.rate, PERIOD, fill) != 0)
             mx.on = 0;
     } else {
-        sb16_stop();
+        mx.card->stop();
         mx.out = 1;
     }
 }
@@ -299,8 +325,8 @@ u32 mixer_stat(char *buf, u32 max)
     u32 n, i;
     if (!mx.on)
         return (u32)ksnprintf(buf, max, "audio off\n");
-    n = (u32)ksnprintf(buf, max, "audio %s rate=%u period=%u periods=%u irqs=%u\n", mx.out ? "idle" : "on", mx.rate,
-                       PERIOD, mx.periods, sb16_irqs());
+    n = (u32)ksnprintf(buf, max, "audio %s rate=%u period=%u periods=%u irqs=%u card=%s\n", mx.out ? "idle" : "on",
+                       mx.rate, PERIOD, mx.periods, mx.card->irqs(), mx.card->name);
     for (i = 0; i < STREAMS && n < max; i++)
         if (st[i].a)
             n += (u32)ksnprintf(buf + n, max - n, "stream %u app=%u rate=%u channels=%u periods=%u underruns=%u\n",
