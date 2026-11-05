@@ -12,7 +12,7 @@
  * Otherwise 201h is passed through as before (PRD §6.4, D48): the PC's own game port.
  *
  * The time since the write, at each read:
- *   TSC              on a Pentium and later: its rate measured against the kernel's tick every second
+ *   TSC              on a Pentium and later: its rate measured against the kernel's tick, from the first tick on
  *   PIT channel 0    without a TSC, while the PIT is as GLOS keeps it (mode 2, count FFFFh: its read-back status,
  *                    and IRQ 0 at 18.2 a second): latched in the program's own trapped access, never from an
  *                    interrupt, so a program part-way through its own reads of the PIT is never disturbed
@@ -46,7 +46,9 @@ static struct {
     int tsc;                            /* the CPU has one (-1 until the first tick) */
     u32 tsc_mult;                       /* µs = (cycles * tsc_mult) >> 32; 0 until measured */
     u32 tsc_mhz;
-    u32 cal_tick, cal_tsc, cal_irq0;
+    u32 cal_tick, cal_irq0;             /* IRQ 0's rate: a window a second */
+    u32 base_tick;                      /* the TSC's rate: measured from the first tick on, so that a tick late or */
+    unsigned long long base_tsc;        /* caught up at a window's end costs less the longer GLOS runs */
     int pit_rate_ok;                    /* IRQ 0 came at 18.2 a second over the last second (GLOS set it so at
                                            the VM's start: true until a second says otherwise) */
     u32 us_per_read;                    /* a trapped read's cost, in 1/16 µs, measured while the PIT was readable */
@@ -220,38 +222,37 @@ int joy_int15(struct trapframe *tf, u32 ret_ip)
     return 1;
 }
 
-/* ---- every kernel tick: once a second, the TSC's rate and IRQ 0's (no port is touched here) */
+/* ---- every kernel tick: once a second, the TSC's rate (since the first tick) and IRQ 0's (over the second); no
+   port is touched here */
 
 void joy_tick(u32 now)
 {
-    u32 t, irq0;
-    if (j.tsc < 0) {                            /* the first tick: the first window starts here */
+    u32 irq0, n, span;
+    if (j.tsc < 0) {                            /* the first tick: the windows start here */
         j.tsc = vm.bi && (vm.bi->cpuid_edx & 0x10);
-        j.cal_tick = now;
-        j.cal_tsc = j.tsc ? (u32)rdtsc() : 0;
+        j.cal_tick = j.base_tick = now;
+        j.base_tsc = j.tsc ? rdtsc() : 0;
         j.cal_irq0 = cpu_irq_count(0);
         return;
     }
     if (now - j.cal_tick < 1024)
         return;
-    t = j.tsc ? (u32)rdtsc() : 0;
     irq0 = cpu_irq_count(0);
-    {
-        u32 secs_1024 = now - j.cal_tick;               /* (1024 a second) */
-        u32 n = irq0 - j.cal_irq0;
-        j.pit_rate_ok = n * 1024 >= secs_1024 * 17 && n * 1024 <= secs_1024 * 20;
-        if (j.tsc) {
-            u32 d = t - j.cal_tsc;                      /* cycles * 1024 / ticks: below 2^32 a second at 4 GHz */
-            u32 per_sec = d >> 22 < secs_1024 ? div64_32(d >> 22, d << 10, secs_1024) : 0;
-            if (per_sec > 1000000u) {
-                j.tsc_mult = div64_32(1000000u, 0, per_sec);  /* 2^32 * 10^6 / per_sec */
-                j.tsc_mhz = (per_sec + 500000u) / 1000000u;
-            }
+    n = irq0 - j.cal_irq0;
+    span = now - j.cal_tick;                    /* (1024 a second) */
+    j.pit_rate_ok = n * 1024 >= span * 17 && n * 1024 <= span * 20;
+    j.cal_tick = now;
+    j.cal_irq0 = irq0;
+    if (j.tsc) {                                /* cycles * 1024 / ticks since the first tick: the quotient is */
+        unsigned long long d = rdtsc() - j.base_tsc;  /* below 2^32 for a TSC slower than 4 GHz */
+        u32 hi = (u32)(d >> 22), lo = (u32)(d << 10), per_sec;
+        span = now - j.base_tick;
+        per_sec = hi < span ? div64_32(hi, lo, span) : 0;
+        if (per_sec > 1000000u) {
+            j.tsc_mult = div64_32(1000000u, 0, per_sec);  /* 2^32 * 10^6 / per_sec */
+            j.tsc_mhz = (per_sec + 500000u) / 1000000u;
         }
     }
-    j.cal_tick = now;
-    j.cal_tsc = t;
-    j.cal_irq0 = irq0;
 }
 
 /* ---- glos joy */
