@@ -1382,4 +1382,5 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
   through its buffer there gives plain DOS's digest. U5 on bench-g400 ran the page and DOSBench's games, then
   hung at `glos exit`: DOSLFN, which the Quake 2 and Half-Life runs load, stayed resident on INT 2Fh, and its
   chain ran into GLOS's page once paging was off (main had the same in freed memory). Fixed on main: GLOS's
-  INT 2Fh entry is in its PSP, and becomes a pass-through left resident when hooked over. U5 runs again.
+  INT 2Fh entry is in its PSP, and becomes a pass-through left resident when hooked over. U5 again: the games
+  ok, `glos exit` with DOSLFN resident ok, GLOS 4,864 bytes of conventional memory with the page (7,680 off).

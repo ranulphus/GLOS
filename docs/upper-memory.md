@@ -1,9 +1,8 @@
 # GLOS upper memory: a plan
 
-**Status (2026-11-05): U0–U4 pass in Loop A (branch `upper`; U4 the whole regression with the page on and off).
-U5 on bench-g400: the page and DOSBench's games work, but `glos exit` hung: DOSLFN (loaded by the Quake 2 and
-Half-Life runs) stayed resident on INT 2Fh, chained to GLOS's entry in the page, gone once paging was off. Fixed
-on main (GLOS's INT 2Fh entry is in its PSP, a pass-through when hooked over); U5 runs again. B1 passes in Loop A (`make loopa-umb`, with MGA-Glide's `umbpci` boot). Plan v1 (2026-10-31), with the
+**Status (2026-11-05): U0–U5 done (branch `upper`): U4 is the whole Loop A regression with the page on and off,
+U5 bench-g400 ([U5's results](#u5s-results-bench-g400-2026-11-05)). B1 passes in Loop A (`make loopa-umb`, with
+MGA-Glide's `umbpci` boot); on the bench it needs the owner's OK (CONFIG.SYS). Plan v1 (2026-10-31), with the
 owner's answers ([Decisions](#decisions)), written for the disk cache's Q6 (docs/disk-cache.md, Decisions).**
 
 Two parts:
@@ -234,6 +233,22 @@ Development in `~/wt-glos-m5`, long runs in `~/wt-glos-test`, as for the cache.
 - **U4. The gate.** The whole GLOS regression with `stub_page = auto` on bf6 and 486dx2, raw and HIMEMX boots:
   every DPMI suite goes through the moved ARPLs, callbacks and raw switch. Then with it off: unchanged.
 - **U5. The bench.** U0's probe result first; then the setting on: MEM /C, DOSBench's game set, `glos exit`.
+
+  ### U5's results (bench-g400, 2026-11-05)
+
+  The release build (2026-10-27) off C:\GLOS, `upper` (4d8a4f7) on with `stub_page = auto`, the release build back
+  after, every file checked by sha1. AUTOEXEC.BAT ran MEM /C before GLOS and, after `glos exit`, MEM /C again and
+  GLOS once more, both from a CALLed batch.
+  - **The page:** C800h, the real-mode stacks at C900h and CA00h, as U0 found. GLOS's own conventional memory:
+    36,160 bytes for the release build, 7,680 for `upper` with the page off (the stub and the cache's block
+    buffer), 4,864 with it on; the largest program 573K, 600K and 603K.
+  - **DOSBench's games**, eleven runs of Quake, Quake 2 and Half-Life, all `ok` (Quake 25–40 fps, Half-Life
+    31–40), every DPMI client on the page's stacks (`rm=page`).
+  - **`glos exit`:** the first try hung the PC. DOSLFN, which the Quake 2 and Half-Life runs load, stayed resident
+    on INT 2Fh above GLOS, and its chain led into the page once paging was off (the owner's photo of the screen:
+    `int2f-hooked-over`, then nothing). Fixed on main (GLOS's INT 2Fh entry in its PSP, a pass-through when
+    hooked over, `make loopa-int2f`). Again: GLOS left its pass-through, AFTER.BAT's MEM ran and GLOS answered
+    again 5 s later; MEM after the exit shows GLOS at 272 bytes and DOSLFN at 11,520, as expected.
 - **B1. The chipset check** (Q4: yes). bf6 in 86Box is a 440BX, which UMBPCI supports (whether 86Box's
   shadow RAM behaves as silicon's is part of the check):
   - GLOS started with drivers loaded high (DOS=UMB, DEVICEHIGH, LOADHIGH);
