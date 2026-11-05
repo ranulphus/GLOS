@@ -1,9 +1,9 @@
 # GLOS upper memory: a plan
 
 **Status (2026-11-05): U0–U4 pass in Loop A (branch `upper`; U4 the whole regression with the page on and off).
-U5 on bench-g400: the page and DOSBench's games work, but GLOS started again seconds after `glos exit` never
-answered; the likely cause, the network card left running (main too), is fixed on main, and U5 runs again once the PC
-is reset. B1 passes in Loop A (`make loopa-umb`, with MGA-Glide's `umbpci` boot). Plan v1 (2026-10-31), with the
+U5 on bench-g400: the page and DOSBench's games work, but `glos exit` hung: DOSLFN (loaded by the Quake 2 and
+Half-Life runs) stayed resident on INT 2Fh, chained to GLOS's entry in the page, gone once paging was off. Fixed
+on main (GLOS's INT 2Fh entry is in its PSP, a pass-through when hooked over); U5 runs again. B1 passes in Loop A (`make loopa-umb`, with MGA-Glide's `umbpci` boot). Plan v1 (2026-10-31), with the
 owner's answers ([Decisions](#decisions)), written for the disk cache's Q6 (docs/disk-cache.md, Decisions).**
 
 Two parts:
