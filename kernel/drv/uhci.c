@@ -100,8 +100,16 @@ static int started;
 
 /* ---- registers, waits */
 
+static int leaving;                     /* glos exit: the kernel's tick has stopped, so nothing may sleep */
+
 static void wait_ms(u32 ms)
 {
+    if (leaving) {                              /* (a port read takes about a microsecond, as e100.c's pause) */
+        u32 n = ms * 1000;
+        while (n--)
+            inb(0x80);
+        return;
+    }
     thread_sleep_until(timer_ticks() + (ms * 1024 + 999) / 1000 + 1);
 }
 
@@ -602,6 +610,7 @@ void usb_late(void)
 void usb_leave(void)
 {
     int i;
+    leaving = 1;                                /* (86Box's HCRESET never clears: reset() waits its 10 ms) */
     for (i = 0; i < nhc; i++) {
         struct hc *h = &hc[i];
         stop(h);
