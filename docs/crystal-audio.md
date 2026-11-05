@@ -90,7 +90,11 @@ forms), including the Crystal Key, SLAM, ISA PnP and the EEPROM, so the driver c
   driver fills the half the 8237 isn't in, and the owner heard the same tones clean. Quake's first demo, with sound,
   in a session through the chip's SB Pro: clean; the owner noticed under 100 ms between picture and sound, which is
   Quake's own mix-ahead (`_snd_mixahead`, 0.1 s by default, the same on any Sound Blaster).
-- **Not checked yet on silicon:** the FM synthesiser (a game's music), the game port (no joystick on the bench).
+- **The FM synthesiser** (FMTEST, `tests/dos/fmtest.c`: found by its timer, then near-sine notes on one voice):
+  in Loop A both notes in the recording, through the AdLib ports (388h) and the SB Pro's (220h); on bench-g400 the
+  owner heard a C-major arpeggio through each. Once the very last note seemed quieter; repeated in the other
+  order, every note was even. (86Box: the first FM notes after power-on come out faint, whichever port.)
+- **Not checked yet on silicon:** the game port (no joystick on the bench).
 - **The codec's sample errors** (R2's SER) are counted (`glos audio errors=`): none on the bench.
 
 ## Decisions

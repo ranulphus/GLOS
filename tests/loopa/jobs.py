@@ -3207,6 +3207,7 @@ def audio_case(profile, vcard, card, sound="sb16"):
     agent = Agent("audio-" + tag, profile, card, ["--card", vcard, "--sound", sound, "--wav"]
         + ([] if crystal else ["--pre", "SET BLASTER=" + blaster]) + [
         "--file", "build/dj/AUDTEST.EXE=/TEST/AUDTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+        "--file", "build/ow/dos/FMTEST.EXE=/TEST/FMTEST.EXE",
         "--cmd", "SERSAY HX-START audio", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
         "--cmd", "VECCHK check"] + (["--cmd", "SET BLASTER=" + blaster] if crystal else []) + [
         "--cmd", "SBCHK", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
@@ -3250,6 +3251,11 @@ def audio_case(profile, vcard, card, sound="sb16"):
         rc, o, _ = agent.ssh("C:\\TEST\\ECHOARGS.EXE beside the mixer")
         checks["session"] = rc == 7
         checks["after-session"] = played(finish(d), "D")[0]
+        if crystal:                             # the FM synthesiser in a session, at the AdLib's ports and the SB Pro's
+            agent.ssh("C:\\TEST\\FMTEST.EXE 388 330 400")          # (86Box: the first notes after power-on are faint)
+            rc1, o1, _ = agent.ssh("C:\\TEST\\FMTEST.EXE 388 330 1500")
+            rc2, o2, _ = agent.ssh("C:\\TEST\\FMTEST.EXE 220 659 1500")
+            checks["fm"] = rc1 == 0 and rc2 == 0 and "found=1 notes=1" in o1 and "found=1 notes=1" in o2
         log = agent.log()
         on, off = ("GLOS-SOUND start", "GLOS-SOUND stop") if crystal else ("GLOS-SB start", "GLOS-SB stop")
         checks["handed-over"] = log.count(on) >= 2 and off in log
@@ -3261,7 +3267,8 @@ def audio_case(profile, vcard, card, sound="sb16"):
     wav = os.path.join(ROOT, "out", "audio-" + tag, "audio.wav")
     checks["recorded"] = os.path.exists(wav) and subprocess.run(
         [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440", "--tone", "1000",
-         "--tone", "784", "--tone", "523"], capture_output=True).returncode == 0
+         "--tone", "784", "--tone", "523"] + (["--tone", "330", "--tone", "659"] if crystal else []),
+        capture_output=True).returncode == 0
     checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
