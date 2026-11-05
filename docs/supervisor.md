@@ -981,11 +981,17 @@ direct = 1
     CWSDPMI. CWSDPMI keeps a child's hook after the child ends; GLOS and HDPMI32i put the parent's back.
 - **The terminate address** (PSP:0Ah) of each level points at the stub's term ARPL, and a pending-end stack
   matches each DOS end to its level, so an abort that bypassed 4Ch (§12.1b) ends the right level.
-- **INT 2Fh in V86 mode is a chain.** GLOS hooks INT 2Fh at the bottom of the IVT chain (the stub's int2f ARPL)
-  instead of trapping the vector, so a TSR or debugger loaded under GLOS can hook 1687h itself: ecm's lDebugX
-  does, to follow its program into protected mode ("DPMI entry cannot be hooked!" otherwise). GLOS answers
-  1687h, 4300h/4310h (§16), 1680h, 1600h and 160Ah, and passes the rest to the previous vector. At the end it
-  unhooks, with `GLOS-WARN int2f-hooked-over` if something hooked above it and stayed.
+- **INT 2Fh in V86 mode is a chain.** GLOS hooks INT 2Fh at the bottom of the IVT chain instead of trapping the
+  vector, so a TSR or debugger loaded under GLOS can hook 1687h itself: ecm's lDebugX does, to follow its program
+  into protected mode ("DPMI entry cannot be hooked!" otherwise). GLOS answers 1687h, 4300h/4310h (§16), 1680h,
+  1600h and 160Ah, and passes the rest to the previous vector. Its entry is an ARPL at 5Ch of GLOS.EXE's own
+  PSP (its FCB area, which GLOS doesn't use; bootinfo `int2f_entry`), not in the stub: the PSP stays where it is
+  below 640K, wherever the stub goes. At the end it unhooks. If something hooked above it and is still there (a
+  TSR loaded under GLOS, DOSLFN on bench-g400), the hooker will go on calling PSP:5Ch: GLOS writes a JMP FAR to
+  the previous vector there (`GLOS-VM int2f pass-through`), and the stub ends with INT 21h 31h, the PSP alone
+  kept (256 bytes; its files closed, its environment and the rest of its memory freed), not 4Ch. Until
+  2026-11-05 GLOS only warned, and the hooker's chain ran into memory DOS had back, or with the stub in a page
+  of upper memory into nothing: bench-g400 hung at its first INT 2Fh after `glos exit`.
 - **INT 2Fh 1680h** in either mode yields the VM thread to the kernel's (`uclock`, `usleep`), and leaves AL at
   80h as plain DOS does (§13).
 - **INT 41h** from protected mode does nothing: it is the Windows debugger interface, and HDPMI's I310508A calls

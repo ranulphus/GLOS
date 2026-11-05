@@ -58,7 +58,6 @@ extern void __cdecl __far glos_retf(void);
 extern void __cdecl __far glos_int21(void);
 extern void __cdecl __far glos_rmcb(void);
 extern void __cdecl __far glos_bp_term(void);
-extern void __cdecl __far glos_int2f(void);
 extern void __cdecl __far glos_detached(void);
 extern void __cdecl __far stub_end(void);
 
@@ -679,7 +678,7 @@ static int glos_main(int argc, char **argv)
     bi.int21_off = stub_off(glos_int21);
     bi.rmcb_off = stub_off(glos_rmcb);
     bi.bp_term_off = stub_off(glos_bp_term);
-    bi.int2f_off = stub_off(glos_int2f);
+    bi.int2f_entry = (unsigned long)_psp << 16 | BI_INT2F_PSP;       /* (not in the stub: it moves, or leaves) */
     bi.detached_off = stub_off(glos_detached);
     bi.stub_paras = (stub_off(stub_end) + 15) >> 4;
     disks_probe();                              /* the disk cache's block buffer (4 KB and its DAP) is kept after */

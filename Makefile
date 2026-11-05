@@ -76,7 +76,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: loopa-cache sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: loopa-int2f loopa-cache sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -248,6 +248,7 @@ $(eval $(call dos_test,SESSTEST,sesstest))
 $(eval $(call dos_test,TIMECHK,timechk))
 $(eval $(call dos_test,SHOTTEST,shottest))
 $(eval $(call dos_test,TYPEIN,typein))
+$(eval $(call dos_test,I2FTSR,i2ftsr))
 # DPMIMINI.COM: the smallest DPMI client, in assembly (M4a).
 build/ow/dos/DPMIMINI.COM: tests/dos/dpmimini.asm
 	@mkdir -p build/ow/dos/obj
@@ -265,7 +266,8 @@ build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
 	  file build/ow/dos/obj/dpmi16.obj,build/ow/dos/obj/dpmi16a.obj
 DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/XMSBIG.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
              build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
-             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/CLOCKCHK.EXE
+             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/CLOCKCHK.EXE \
+             build/ow/dos/I2FTSR.EXE
 dos-tests: $(DOS_TESTS)
 
 # The 2D library (kernel/gfx; M6 step C) and its fonts: 1-bit bitmaps made from TrueType fonts by
@@ -368,8 +370,11 @@ loopa-hostile: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py hostile -j $(JOBS)
 loopa-sched: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py sched -j $(JOBS)
-loopa-mem: all check-deps
+loopa-mem: all build/ow/dos/I2FTSR.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py mem -j $(JOBS)
+# GLOS leaving with INT 2Fh hooked over by a TSR (in loopa-mem too).
+loopa-int2f: all build/ow/dos/I2FTSR.EXE check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py int2f -j $(JOBS)
 # The disk cache (docs/disk-cache.md C3): needs MGA-Glide's run.py --scratch-hdd.
 loopa-cache: all dos-tests build/dj/DSKTORT.EXE build/dj/DISKRD.EXE build/dj/LAZYCHK.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py cache -j $(JOBS)

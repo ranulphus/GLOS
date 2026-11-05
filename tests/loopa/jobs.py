@@ -322,6 +322,38 @@ def hostile(profile, boot):
                                       "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def int2f_exit(profile, boot):
+    """GLOS leaving with INT 2Fh hooked over (kernel/vm/v86.c int2f_unhook): I2FTSR, run by GLOS /RUN, hooks INT
+    2Fh after GLOS and stays resident, as DOSLFN did on bench-g400 (2026-11-05, a hang). GLOS's entry in its PSP
+    becomes a JMP FAR on down the chain and the PSP stays (256 bytes); then on plain DOS INT 2Fh still reaches the
+    TSR and, beyond it, the XMS driver (or nothing, raw); GLOS starts again on top of the chain and leaves clean."""
+    tag = "%s-%s" % (profile, boot)
+    g = "C:\\TEST\\GLOS.EXE /RUN "
+    st, serial = run("i2f-" + tag, ["--machine", profile, "--boot-cfg", boot] + GLOS_FILES + [
+        "--file", "build/ow/dos/I2FTSR.EXE=/TEST/I2FTSR.EXE",
+        "--cmd", "SERSAY HX-START i2f", "--cmd", "MEM /C > C:\\OUT\\BASE.TXT",
+        "--cmd", g + "C:\\TEST\\I2FTSR.EXE", "--cmd", "C:\\TEST\\I2FTSR.EXE CHECK",
+        "--cmd", "MEM /C > C:\\OUT\\AFTER.TXT", "--cmd", g + "C:\\TEST\\I2FTSR.EXE CHECK",
+        "--cmd", "SERSAY HX-DONE 0"])
+    p = os.path.join(ROOT, "out", "i2f-" + tag, "files", "AFTER.TXT")
+    after = open(p, "rb").read().decode("latin-1") if os.path.exists(p) else ""
+    own = re.search(r"^\s*GLOS\s+([\d,]+)", after, re.M)
+    tsr = re.search(r"HX-I2FTSR psp=(\w+) prev=(\w+):(\w+)", serial)
+    checks_ = re.findall(r"HX-I2F tsr=(\d) xms=(\w+) vec=(\w+):(\w+)", serial)
+    xms = "80" if boot == "himemx" else "00"
+    checks = {
+        "status": st == "PASS" and serial.count("GLOS-EXIT code=0") == 2,
+        "pass-through": serial.count("GLOS-VM int2f pass-through") == 1 and bool(tsr),
+        "dos": len(checks_) == 2 and checks_[0][:2] == ("1", xms),
+        "kept": bool(own) and int(own.group(1).replace(",", "")) in (256, 272),   # (the PSP; FreeDOS counts its MCB)
+        "again": len(checks_) == 2 and checks_[1][:2] == ("1", "80"),
+        "clean": "GLOS-WARN" not in serial and "GLOS-PANIC" not in serial,
+    }
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("i2f-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def mem(profile, boot):
     tag = "%s-%s" % (profile, boot)
     st, serial = run("mem-" + tag, ["--machine", profile, "--boot-cfg", boot] + GLOS_FILES + [
@@ -5636,7 +5668,7 @@ def matrix(fn, combos, jobs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
-                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache"])
+                                      "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache", "int2f"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -5771,8 +5803,11 @@ def main():
         return 0 if all(r[1] for r in matrix(net, NET_CASES, a.jobs)) else 1
     if a.suite == "shell":
         return 0 if all(r[1] for r in matrix(shell, combos, a.jobs)) else 1
+    if a.suite == "int2f":
+        return 0 if all(r[1] for r in matrix(int2f_exit, combos, a.jobs)) else 1
     if a.suite == "mem":
-        return 0 if all(r[1] for r in matrix(mem, combos, a.jobs)) else 1
+        res = matrix(mem, combos, a.jobs) + matrix(int2f_exit, combos, a.jobs)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "cache":                      # (bf6 with HIMEMX and the 486 raw, unless asked)
         cc = combos if (a.profile or a.boot) else [("bf6", "himemx"), ("486dx2", "default")]
         return 0 if all(r[1] for r in matrix(cache, cc, a.jobs)) else 1

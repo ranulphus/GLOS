@@ -27,7 +27,8 @@
 ;       program in stub_data, report how it ended, ask again; or, headless
 ;       with nothing to run, halt until an interrupt and ask again. When the
 ;       kernel leaves, _pm_ret ends here too: A20 and XMS as found, the
-;       GLOS-EXIT line on COM1, INT 21h 4Ch with the kernel's code; as the
+;       GLOS-EXIT line on COM1, INT 21h 4Ch with the kernel's code (31h,
+;       the PSP kept, when a program hooked INT 2Fh over GLOS); as the
 ;       shell, COMSPEC with the fallback tail instead, again and again.
 ;       With realmode set there is no kernel at all: the same, without the
 ;       kernel calls (the shell's fallback when GLOS can't start).
@@ -48,7 +49,7 @@ GLOSSTUB segment para public 'STUB' use16
         public  _stub_data, _pm_enter, _pm_ret, _vm_resume, _vm_state, _glos_call, _glos_bp_call
         public  _glos_xms_entry, _glos_bp_xms, _glos_kill, _glos_kill_top, _stub_resident, _stub_end
         public  _glos_bp_dpmi, _glos_bp_nest, _glos_bp_raw, _glos_retf, _glos_int21, _glos_rmcb, _glos_bp_term
-        public  _glos_int2f, _glos_detached
+        public  _glos_detached
 
 stub_start:
 
@@ -71,6 +72,7 @@ sd_tail         db      128 dup (0)     ; EXEC: length, text, CR
 sd_comspec      db      80 dup (0)      ; the shell's fallback: COMSPEC ...
 sd_fbtail       db      64 dup (0)      ; ... with this tail
 sd_dregs        dw      9 dup (0)       ; NEXT 3: AX BX CX DX SI DI DS ES in, the same and FLAGS out
+sd_keep_psp     dw      0               ; leaving with INT 2Fh hooked over: the PSP stays, its 5Ch a JMP FAR
 
 ; ---- the stub's own data
 _vm_state label word                    ; the kernel reads these three to resume
@@ -276,8 +278,6 @@ _glos_int21 label near                  ; a client's INT 21h 4Ch, as the program
 _glos_rmcb label near                   ; 0303h: real-mode callbacks, two bytes each
         db      32 dup (63h, 0C0h)
 _glos_bp_term label near                ; a client's terminate address (PSP:0Ah): DOS ended it (M4b)
-        db      63h, 0C0h
-_glos_int2f label near                  ; GLOS's INT 2Fh, at the bottom of the chain: DPMI, XMS (M4c)
         db      63h, 0C0h
 
 ; ---- going resident
@@ -526,8 +526,41 @@ a20_put:
         call    puts
         cmp     sd_shell, 0
         jne     shell_on
+        cmp     sd_keep_psp, 0          ; INT 2Fh hooked over GLOS: PSP:5Ch is a JMP FAR on down the
+        jne     keep_psp                ; chain now, and the hooker still calls it
         mov     al, exit_code
         mov     ah, 4Ch
+        int     21h
+keep_psp:                               ; so the PSP alone stays resident: its files closed (a TSR's stay
+        mov     bx, 5                   ; open), the environment and the stub given back
+close_next:
+        mov     ah, 3Eh
+        int     21h                     ; (a handle that isn't open: an error, nothing more)
+        inc     bx
+        cmp     bx, 20
+        jb      close_next
+        mov     es, psp_seg
+        xor     ax, ax
+        xchg    ax, es:[2Ch]
+        or      ax, ax
+        jz      env_done
+        mov     es, ax
+        mov     ah, 49h
+        int     21h
+env_done:
+        mov     ax, cs
+        mov     bx, psp_seg
+        add     bx, 10h
+        cmp     ax, bx
+        je      keep_now                ; the stub follows the PSP in its block: 31h gives it back
+        push    cs
+        pop     es
+        mov     ah, 49h                 ; a block of its own (the stub copied down through 48h): unused
+        int     21h                     ; from here to the 31h
+keep_now:
+        mov     dx, 10h                 ; 256 bytes, the PSP
+        mov     al, exit_code
+        mov     ah, 31h
         int     21h
 shell_on:                               ; the shell never ends: COMMAND.COM from now on
         push    cs

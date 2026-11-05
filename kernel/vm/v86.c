@@ -500,7 +500,7 @@ void vm_return(struct trapframe *tf)
 
 /* ---- GLOS.EXE's calls and leaving */
 
-static void int2f_hook(u16 old_cs);
+static void int2f_hook(void);
 static void int2f_unhook(void);
 static void vm_leave(u32 code) __attribute__((noreturn));
 static void vm_leave(u32 code)
@@ -542,11 +542,7 @@ static void vm_resident(u16 seg)
         if (lin >= lo && lin < end * 16)
             kprintf("GLOS-WARN ivt-into-loader vec=%02x at=%04x:%04x\n", v, x >> 16, x & 0xFFFF);
     }
-    {
-        u16 old = vm.loader_cs;
-        vm.loader_cs = seg;
-        int2f_hook(old);
-    }
+    vm.loader_cs = seg;
     vm.loader_psp = psp;
     vm.bi->cs_base = (u32)seg << 4;
     cpu_set_code16_base(vm.bi->cs_base);
@@ -788,34 +784,46 @@ static void string_io(struct trapframe *tf, const struct v86insn *in)
    4310h, a real yield for 1680h, and never Windows (1600h, 160Ah), answered
    at the bottom of the IVT's chain, as a DPMI host or an XMS driver that is
    a TSR answers them. A program that hooks INT 2Fh after GLOS started (a
-   debugger wrapping the DPMI entry, lDebugX) sees these calls first, as it
-   would under HDPMI or CWSDPMI; anything else goes on down the chain. The
-   vector points at the stub's int2f ARPL, and follows the stub when it
-   moves (vm_resident); the leave puts the old one back. */
-static void int2f_hook(u16 old_cs)
+   debugger wrapping the DPMI entry, lDebugX; DOSLFN) sees these calls first,
+   as it would under HDPMI or CWSDPMI; anything else goes on down the chain.
+   The vector points at an ARPL in GLOS's own PSP (BI_INT2F_PSP), which stays
+   where it is below 640K whether or not the stub moves into a page of upper
+   memory, and the leave puts the old vector back. */
+static u32 int2f_lin(void) { return (vm.bi->int2f_entry >> 16) * 16 + (vm.bi->int2f_entry & 0xFFFF); }
+
+static void int2f_hook(void)
 {
-    u32 ours = (u32)vm.loader_cs << 16 | vm.bi->int2f_off, cur = vm_rd32(0x2F * 4);
-    if (!vm.int2f_prev)
-        vm.int2f_prev = cur;
-    else if (cur != ((u32)old_cs << 16 | vm.bi->int2f_off))
-        return;                                 /* hooked over by now: the chain still reaches the old ARPL */
-    vm_wr8(0x2F * 4, (u8)ours);
-    vm_wr8(0x2F * 4 + 1, (u8)(ours >> 8));
-    vm_wr8(0x2F * 4 + 2, (u8)(ours >> 16));
-    vm_wr8(0x2F * 4 + 3, (u8)(ours >> 24));
+    u32 i;
+    vm.int2f_prev = vm_rd32(0x2F * 4);
+    vm_wr8(int2f_lin(), 0x63);                  /* ARPL: #UD in V86 mode, the kernel's trap */
+    vm_wr8(int2f_lin() + 1, 0xC0);
+    for (i = 0; i < 4; i++)
+        vm_wr8(0x2F * 4 + i, (u8)(vm.bi->int2f_entry >> (i * 8)));
 }
 
+/* Hooked over and still so at the leave (DOSLFN, loaded under GLOS and
+   resident): the hooker chains to PSP:5Ch, and calls INT 2Fh's old handler
+   through it from then on. So the ARPL becomes a JMP FAR to that handler,
+   and the stub ends with the PSP kept resident (stub_data.keep_psp: 31h),
+   rather than leave the chain running into freed memory, or into a page of
+   upper memory that no longer exists once paging is off (bench-g400 hung
+   so, 2026-11-05). */
 static void int2f_unhook(void)
 {
-    u32 ours = (u32)vm.loader_cs << 16 | vm.bi->int2f_off, v = vm.int2f_prev;
-    if (vm_rd32(0x2F * 4) != ours) {
-        kprintf("GLOS-WARN int2f-hooked-over vec=%08x\n", vm_rd32(0x2F * 4));
+    u32 ours = vm.bi->int2f_entry, v = vm.int2f_prev, cur = vm_rd32(0x2F * 4), at = int2f_lin(), i;
+    if (!v)
+        return;                                 /* (never hooked: GLOS left before RESIDENT) */
+    if (cur == ours) {
+        for (i = 0; i < 4; i++)
+            vm_wr8(0x2F * 4 + i, (u8)(v >> (i * 8)));
         return;
     }
-    vm_wr8(0x2F * 4, (u8)v);
-    vm_wr8(0x2F * 4 + 1, (u8)(v >> 8));
-    vm_wr8(0x2F * 4 + 2, (u8)(v >> 16));
-    vm_wr8(0x2F * 4 + 3, (u8)(v >> 24));
+    vm_wr8(at, 0xEA);
+    for (i = 0; i < 4; i++)
+        vm_wr8(at + 1 + i, (u8)(v >> (i * 8)));
+    vm_wr8(((u32)vm.loader_cs << 4) + __builtin_offsetof(struct stub_data, keep_psp), 1);
+    kprintf("GLOS-VM int2f pass-through vec=%04x:%04x psp=%04x prev=%04x:%04x\n", cur >> 16, cur & 0xFFFF,
+            ours >> 16, v >> 16, v & 0xFFFF);
 }
 
 static void vm_int2f(struct trapframe *tf)
@@ -1082,7 +1090,7 @@ void vm_exception(struct trapframe *tf)
             tf->eip = (ip + 2) & 0xFFFF;
             return;
         }
-        if (tf->cs == vm.loader_cs && ip == vm.bi->int2f_off) {
+        if (tf->cs == vm.bi->int2f_entry >> 16 && ip == (vm.bi->int2f_entry & 0xFFFF)) {
             vm_int2f(tf);
             return;
         }
@@ -1142,7 +1150,7 @@ void vm_start(struct bootinfo *bi)
         cpu_io_trap(trapped_ports[i], 1);
 
     dpmi_init();
-    int2f_hook(vm.loader_cs);
+    int2f_hook();
     vpic_reset(&vm.pic, 0x08, 0x70, (u16)bi->pic_mask);
     for (i = 0; i < 16; i++)
         if (!(kernel_lines & (1u << i)))

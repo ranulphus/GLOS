@@ -4,14 +4,21 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## glos exit after a resident program hooked INT 2Fh (2026-11-05)
+
+- **`glos exit` works when a program loaded under GLOS stays resident on INT 2Fh** (DOSLFN, which DOSBench's
+  Quake 2 and Half-Life runs load). GLOS's INT 2Fh handler was at the bottom of the chain, and the program
+  still called it after GLOS had gone: the first INT 2Fh in DOS afterwards ran into memory GLOS had given
+  back, and bench-g400 hung. GLOS now leaves 256 bytes resident in that case only, which pass the program's
+  calls on to DOS's own handler: MEM shows them as GLOS. The program keeps working, and GLOS can start again.
+
 ## The network card at glos exit (2026-11-05)
 
 - **GLOS stops its network card when it leaves.** It had left the card running, so a PCI card went on
   writing the frames it received into memory GLOS had given back to DOS, for whatever ran next to find.
   The card is reset now and its PCI settings are put back as GLOS found them. An Intel 8255x gets a
   selective reset before its software reset, at GLOS's start too, as Linux's driver does for a card that
-  may be at work: a GLOS started again seconds after `glos exit` on bench-g400 (an Intel PRO/100) never
-  answered, and this is the likely reason (to be confirmed on the PC).
+  may be at work.
 
 ## The DPMI host's real-mode stack (2026-11-03)
 

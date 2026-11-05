@@ -62,10 +62,9 @@ void nic_pci_on(struct pci_dev *d)
 
 /* The card stopped before GLOS goes: left running, a PCI card went on writing
    the frames it received into GLOS's memory, DOS's again by then, and an
-   Intel 8255x still at work may hang on the next driver's reset (the likely
-   reason a GLOS started again seconds after glos exit never answered on
-   bench-g400). Its PCI command register goes back as it was; the status
-   half written as 0 clears nothing. */
+   Intel 8255x still at work may hang on the next driver's reset. Its PCI
+   command register goes back as it was; the status half written as 0
+   clears nothing. */
 void nic_leave(void)
 {
     if (nic0 && nic0->stop)

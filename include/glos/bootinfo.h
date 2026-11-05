@@ -120,7 +120,8 @@ struct bootinfo {
     bi_u32 bp_dpmi_off, bp_nest_off, bp_raw_off;        /* mode switch, nested-call return, raw switch */
     bi_u32 retf_off, int21_off, rmcb_off;               /* a RETF, INT 21h, 32 callback ARPLs */
     bi_u32 bp_term_off;                         /* M4b: a client's terminate address (PSP:0Ah) */
-    bi_u32 int2f_off;                           /* M4c: GLOS's INT 2Fh handler, in the IVT's chain */
+    bi_u32 int2f_entry;                         /* M4c: GLOS's INT 2Fh entry, in the IVT's chain: a far pointer,
+                                                   PSP:BI_INT2F_PSP in GLOS's PSP, which stays put below 640K */
     bi_u32 stub_paras;                          /* the resident stub's size, in paragraphs */
     bi_u32 sb_port;                             /* M4e: BLASTER's A (a session's end resets the DSP), 0 none */
     /* M3: GLOS as the shell (BI_F_SHELL) */
@@ -152,6 +153,7 @@ struct bootinfo {
     bi_u32 n_disks;
     struct bi_disk disks[BI_DISKS];             /* the BIOS's hard disks, 80h on, as INT 13h describes them */
 };
+#define BI_INT2F_PSP 0x5Cu                     /* PSP:5Ch, the FCB area, which GLOS's own PSP doesn't use */
 #define BI_SOUND_OFF 1u                         /* [sound] mixer = off: GLOS leaves the Sound Blaster to programs */
 #define BI_DISPLAY_NOACCEL 1u                   /* [display] accel = off: the CPU draws the desktop, on a Matrox card too */
 
@@ -171,6 +173,8 @@ struct stub_data {
     unsigned char fbtail[64];                   /* ... with this tail (length, text, CR) */
     unsigned short dregs[9];                    /* NEXT 3: INT 21h with AX BX CX DX SI DI DS ES; then
                                                    what came back, and FLAGS (the DOS server) */
+    unsigned short keep_psp;                    /* leaving: INT 2Fh hooked over, so the PSP stays (31h) with
+                                                   the pass-through at PSP:5Ch (kernel/vm/v86.c int2f_unhook) */
 };
 
 #endif
