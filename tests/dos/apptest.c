@@ -159,11 +159,14 @@ static int run(const char *name, int seconds)
 
 static int uclk(int seconds)
 {
-    uclock_t u0, u, last;
+    uclock_t u0, u1, u, last;
     unsigned t0, t, n = 0, back = 0, ms, ms2;
 
-    last = u0 = uclock();
-    t0 = glos_ticks();
+    u0 = uclock();                              /* GLOS's clock between two readings at the start as at the end: */
+    t0 = glos_ticks();                          /* the app may lose its turn between any two (three others' turns */
+    last = u1 = uclock();                       /* at once: 60 ms, past the allowance) */
+    if (u1 < u0)
+        back++;
     while (glos_ticks() - t0 < (unsigned)seconds * 1000) {
         u = uclock();
         if (u < last)
@@ -172,10 +175,10 @@ static int uclk(int seconds)
         if (!(++n & 255))
             glos_yield();
     }
-    u = uclock();                               /* GLOS's clock between two readings: other apps may run anywhere */
+    u = uclock();
     t = glos_ticks() - t0;
-    ms = (unsigned)((u - u0) * 1000 / UCLOCKS_PER_SEC);
-    ms2 = (unsigned)((uclock() - u0) * 1000 / UCLOCKS_PER_SEC);
+    ms = (unsigned)((u - u1) * 1000 / UCLOCKS_PER_SEC);        /* the least of GLOS's span uclock() can have seen */
+    ms2 = (unsigned)((uclock() - u0) * 1000 / UCLOCKS_PER_SEC);     /* and the most */
     if (back || u < last || t + 60 < ms || t > ms2 + 60)       /* (60 ms: a BIOS tick, and the ms's rounding) */
         fails++;
     printf("%s ms=%u..%u clock=%u reads=%u back=%u\n", fails ? "APP-UCLOCK-FAIL" : "APP-UCLOCK-OK", ms, ms2, t, n, back);
