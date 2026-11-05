@@ -19,7 +19,8 @@ in its `docs/milestones-*.md`.
 - **UMAPROBE** (`tests/dos/umaprobe.c`) lists what is in C0000h-EFFFFh, read-only, on plain DOS or GLOS.
 - **Chipset UMBs** (UMBPCI's, made before GLOS starts) are DOS's own memory, and GLOS runs among them:
   `LOADHIGH GLOS.EXE` puts all of GLOS in one, 7,312 bytes with the cache's buffer, none of them conventional.
-  `stub_page = auto` takes no page there (they read as RAM). Checked in 86Box (`make loopa-umb`).
+  `stub_page = auto` takes no page there (they read as RAM). Checked in 86Box (`make loopa-umb`) and on bench-g400,
+  where MS-DOS 7.1 leaves too small a block for GLOS to load high (it runs low among them).
 - **On bench-g400** (an IBM PC 300PL, a G400): the page at C800h; GLOS's conventional memory 4,864 bytes with the
   disk cache, against 36,160 for the build before the cache and the page; DOSBench's games run as before.
 

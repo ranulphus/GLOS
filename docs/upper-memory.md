@@ -1,8 +1,8 @@
 # GLOS upper memory: a plan
 
 **Status (2026-11-05): U0–U5 done (branch `upper`): U4 is the whole Loop A regression with the page on and off,
-U5 bench-g400 ([U5's results](#u5s-results-bench-g400-2026-11-05)). B1 passes in Loop A (`make loopa-umb`, with
-MGA-Glide's `umbpci` boot); on the bench it needs the owner's OK (CONFIG.SYS). Plan v1 (2026-10-31), with the
+U5 bench-g400 ([U5's results](#u5s-results-bench-g400-2026-11-05)). B1 done: Loop A (`make loopa-umb`, with
+MGA-Glide's `umbpci` boot) and bench-g400 (below, under B1). Plan v1 (2026-10-31), with the
 owner's answers ([Decisions](#decisions)), written for the disk cache's Q6 (docs/disk-cache.md, Decisions).**
 
 Two parts:
@@ -265,6 +265,21 @@ Development in `~/wt-glos-m5`, long runs in `~/wt-glos-test`, as for the cache.
   and of GLOS loaded low. `/STUBPAGE=AUTO` takes no page (the UMBs read as RAM) and says so (`stub-page refused
   reason=none`). VECCHK clean each time. In 86Box the BIOS's disk reads reach the buffer by the CPU; whether a
   bus master's DMA reaches shadow RAM on silicon is for the bench.
+
+  **bench-g400 (2026-11-05, the owner's OK; CONFIG.SYS's [GLOS] block with HIMEM.SYS, then UMBPCI.SYS
+  /I=C800-DFFF, the range U0 found free, and `DOS=HIGH,UMB`; everything put back and checked by sha1 after):**
+  - UMBPCI finds the 440BX (8086:7190) and gives 98,320 bytes. MS-DOS 7.1 puts parts of itself, COMMAND.COM's
+    resident part and IFSHLP there (17,712 bytes), and the largest block left is 72,400: too small for GLOS.EXE,
+    which needs about 77 KB until it goes resident, so `LH GLOS.EXE` loads it low on this PC. It runs low among
+    the UMBs, its cache verifying: Quake's PAK0.PAK (18.7 MB) fetched twice by SFTP gives its sha256 both times,
+    688 hits, no mismatch, no warning.
+  - **UMBRD** (`tests/dos/umbrd.c`, read-only): 256 reads of 8 KB by INT 13h into a UMB, each the same as into
+    conventional memory. The BIOS's disk reads do reach shadow RAM here, so the cache's block buffer would be
+    safe in a UMB on this PC, were there room.
+  - **ISA DMA does not:** UMBPCI's DMACHK finds every block from C800h to EFFFh writable and none that ISA DMA
+    reaches, though 86Box's 440BX passes them all (an 86Box deviation). A program whose 8237 DMA buffer lands in
+    a UMB (a floppy cache, a Sound Blaster driver loaded high) fails on this PC. GLOS's own DMA buffers are in
+    extended memory below 16 MB, never in a UMB.
 
 Then the docs: PRD (D41 as built; P7 with the page; D25's note from Part B), supervisor.md §2.2 (the stub,
 1687h), §4 (the first MB's one remapped page), §12.1a, the release notes.
