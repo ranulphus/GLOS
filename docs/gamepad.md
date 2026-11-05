@@ -1,22 +1,36 @@
-# GLOS gamepads: USB pads as the PC's game-port joystick, a plan
+# GLOS gamepads and USB input: a plan
 
-**Status (2026-11-05): plan v0, nothing built (branch `gamepad`). The owner asked for it after the Crystal work:
-there is no game-port joystick to hand, but there are USB gamepads, "Xbox-style" and generic HID, and "it would be
-great if they could somehow emulate a gameport joystick through GLOS". The owner chose to plan both halves (a virtual
-game port, and USB pads to drive it), with the work starting after the Crystal merge (GLOS main 2c8787e). Three
-questions are open ([Decisions](#decisions)).**
+**Status (2026-11-05): plan v1, nothing built (branch `gamepad`).**
+- **The ask:** after the Crystal work, the owner said there is no game-port joystick to hand, but there are USB
+  gamepads, "Xbox-style" and generic HID, and "it would be great if they could somehow emulate a gameport joystick
+  through GLOS".
+- **The owner's choices:** both halves planned (a virtual game port, and USB pads to drive it), starting after the
+  Crystal merge (GLOS main 2c8787e).
+- **v0's questions, answered:** GLOS takes the USB controller over outright, with its own drivers for gamepads,
+  keyboards, mice and hubs, and flash drives later. No 86Box USB model for now, no keypad joystick
+  ([Decisions](#decisions)).
+- **J0 (the look at the owner's pads) is under way.**
 
-DOS games read a joystick through the PC's game port at 201h, or through the BIOS. No DOS game knows USB.
-- **A virtual game port in GLOS**: port 201h answered by GLOS in DOS sessions, in DOS programs' protected mode
-  and in GLOS apps, from whatever source drives it, plus the BIOS's joystick call (INT 15h AH=84h).
-- **USB pads as its source**: GLOS's own UHCI driver for the bench's PIIX4, enumeration, HID gamepads, and Xbox
-  pads (which aren't HID).
-- **A scripted source** (`glos joy` over SSH), so Loop A tests everything but the USB half, and the bench can be
-  tested without anyone holding a pad.
+DOS games read a joystick through the PC's game port at 201h, or through the BIOS. No DOS game knows USB, and DOS
+knows USB keyboards and mice only through the BIOS's emulation. This plan gives GLOS:
+- **a virtual game port**: port 201h answered by GLOS in DOS sessions, in DOS programs' protected mode and in GLOS
+  apps, from whatever source drives it, plus the BIOS's joystick call (INT 15h AH=84h);
+- **a USB stack of its own for input**: UHCI, hubs, HID keyboards, mice and gamepads, and Xbox pads (which aren't
+  HID). Keys and mouse movement enter GLOS where the PS/2 ports' bytes do, so the desktop, apps and DOS sessions all
+  get them. Pads drive the virtual game port;
+- **a scripted joystick source** (`glos joy` over SSH), so Loop A tests everything but the USB half, and the bench
+  can be tested without anyone holding a pad.
 
-PRD sections touched: the non-goals (USB stacks), §4.5 (input), §6.4's port table (201h "always passed through"),
-§7.6 ("the gameport isn't injectable on silicon"), D48 (apps' gameport), D70 (devices' keepers). Docs to change at
-the end: PRD, supervisor.md §10, docs/devices.md, the release notes.
+USB flash drives (mass storage as a BIOS disk) come later, in a plan of their own.
+
+PRD sections touched:
+- the non-goals (USB stacks; USB keyboards only through the BIOS);
+- §4.5 (input);
+- §6.4's port table (201h "always passed through");
+- §7.6 ("the gameport isn't injectable on silicon");
+- D48 (apps' gameport); D70 (devices' keepers).
+
+Docs to change at the end: PRD, supervisor.md §10, docs/devices.md, the release notes.
 
 ## What a DOS program sees
 
@@ -60,7 +74,7 @@ GLOS's, and counts reads, scaled by the trap's measured cost, while an exclusive
 A source sets up to four axes (0-255, 128 the centre) and four buttons:
 - **`glos joy`** over SSH: `glos joy a=128,128 b=0,255 buttons=1010`, or `glos joy` alone to print the live
   state. Loop A's source, and the bench's when nobody holds a pad.
-- **USB pads** (J2-J5).
+- **USB pads** (J4-J6).
 
 The default mapping, overridable with `[joystick] map=`:
 - **One pad drives the whole port.** Left stick and D-pad → joystick A's X/Y; right stick → B's X/Y (where four-axis
@@ -75,62 +89,105 @@ outside this plan.
 
 ## The USB half
 
-**The controller.** bench-g400's PIIX4 UHCI (00:02.2, 8086:7112, I/O at BAR 4, IRQ 11 shared with the e100).
-GLOS made it *quiet* at boot (D70 D1: `USBPIRQDEN` off, `kernel/drv/dev.c`). The driver keeps it that way:
+### The controller
+
+bench-g400's PIIX4 UHCI (00:02.2, 8086:7112, I/O at BAR 4, IRQ 11 shared with the e100). Today GLOS makes it
+*quiet* at boot (D70 D1: `USBPIRQDEN` off, `kernel/drv/dev.c`). The driver keeps it that way:
 - **No interrupt at all.** GLOS's 1 ms tick checks the active bits of the few transfer descriptors (TDs) it has
-  queued, and queues work for a thread when one has finished. Pads report every 1-10 ms. IRQ 11 stays the e100's
-  alone, so D2 (chained handlers) isn't needed.
-- **Taking it from the BIOS**:
-  - through the legacy support register (config C0h): the SMI enables off, the controller stopped and reset;
-  - only as [Decisions](#decisions) Q1 allows, because a BIOS-emulated USB keyboard stops working once GLOS has
-    the controller (bench-g400's keyboard and mouse are PS/2);
-  - at `glos exit` the controller is reset and its registers (legacy support, frame list base, `USBINTR`) put back
-    as found, for the BIOS or a DOS driver.
+  queued, and queues work for a thread when one has finished. HID devices report every 1-10 ms. IRQ 11 stays the
+  e100's alone, so D2 (chained handlers) isn't needed.
+- **GLOS takes every UHCI it finds** (the owner's answer to Q1), unless `[usb] off` (an escape hatch for a PC where
+  it goes wrong):
+  - through the legacy support register (config C0h): the BIOS's SMI enables off, the controller stopped and
+    reset;
+  - its keeper (D70) becomes GLOS;
+  - the BIOS's USB keyboard and mouse emulation stops, and GLOS's own drivers take over at once (J4), so a PC with
+    only USB input keeps it.
+- **At `glos exit`**: the controller is reset, and its registers (legacy support, frame list base, `USBINTR`) are
+  put back as found, for the BIOS or a DOS driver. Whether a BIOS's emulation picks up again after that is checked
+  on a PC that has it on (J0 shows whether bench-g400's BIOS does). If not, the release notes say so.
 - **Clean-room sources:**
   - Intel's *Universal Host Controller Interface Design Guide* rev 1.1 (1996): registers 00h-13h, a 1024-entry
     frame list (4 KB aligned), queue heads and TDs;
   - the PIIX4 datasheet for the legacy support register;
-  - the USB 1.1 specification for port reset and timing.
+  - the USB 1.1 specification for port reset, hubs and timing.
 
-**Steps on the wire:**
+### Steps on the wire
+
 - **Root ports:** two on a PIIX4. A connect is seen in `PORTSC`; then the port is reset (50 ms), enabled, and its
   speed read (low or full).
 - **Enumeration**, by control transfers on a queue head: the device descriptor (8 bytes, for the control
   endpoint's packet size), `SET_ADDRESS`, the full device and configuration descriptors, `SET_CONFIGURATION`.
-- **No hubs in v1**: pads go into the root ports. A hub is logged and left alone.
-- **Interrupt IN**: one queue head per pad, at its endpoint's interval. Each TD is re-armed with the data toggle
-  flipped. Unplugging is seen in `PORTSC` and frees the pad's slot.
-- Log lines: `GLOS-USB port=1 speed=full id=045e:028e class=ff/5d/01 pad=xbox360`; `GLOS-USB port=2 gone`.
+- **Hubs** (class 09h, USB 1.1 chapter 11):
+  - the hub descriptor; each port powered;
+  - the status-change endpoint polled; ports reset, enabled and enumerated as root ports are;
+  - low-speed devices behind a full-speed hub get UHCI's low-speed TDs, with the preamble the controller adds;
+  - hubs nest up to the specification's limit.
+- **Interrupt IN**: one queue head per device, at its endpoint's interval. Each TD is re-armed with the data
+  toggle flipped. Unplugging is seen in `PORTSC` or a hub's port status, and frees the device.
+- **Log lines:** `GLOS-USB port=1 speed=full id=045e:028e class=ff/5d/01 is=xbox360`; `GLOS-USB port=1.3
+  speed=low id=... is=keyboard`; `GLOS-USB port=1 gone`.
 
-**HID pads** (class 03h). From the *Device Class Definition for HID* 1.11 and the *HID Usage Tables*:
-- **The report descriptor** (`GET_DESCRIPTOR`, type 22h) is parsed for a Joystick (04h) or Game Pad (05h)
-  collection, the Generic Desktop page's X, Y, Z, Rx, Ry, Rz and Hat switch, and the Button page.
-- **Each value is scaled** from its logical range to 0-255.
-- **Report IDs are honoured.** `SET_IDLE(0)` is sent, ignoring a stall.
-- **Host tests** run the parser on J0's descriptors and on hand-built ones from the spec's examples.
+### HID devices (class 03h)
 
-**Xbox pads** aren't HID; they use vendor classes:
+From the *Device Class Definition for HID* 1.11 and the *HID Usage Tables*:
+- **Keyboards:**
+  - **Protocol:** boot protocol (`SET_PROTOCOL` 0): an 8-byte report of modifier bits and up to six keys held.
+  - **Turning reports into keystrokes:** each report is compared with the last; keys pressed and released become
+    scan code set 1 make and break codes, fed in where the PS/2 keyboard's bytes are (the virtual 8042's input,
+    `kernel/vm/vkbc.c`). The desktop and every DOS program see them as a PS/2 keyboard's.
+  - **Repeat and LEDs:** typematic repeat is GLOS's, because USB keyboards don't repeat; the rate and delay come
+    from the virtual 8042's F3h command. The LEDs follow its EDh command, by `SET_REPORT`.
+- **Mice:**
+  - **Protocol:** boot protocol: buttons and X/Y movement. The wheel comes in report protocol, where the
+    descriptor has one.
+  - **Delivery:** fed in where the PS/2 mouse's packets are, so the desktop, INT 33h drivers and the PS/2 BIOS
+    (INT 15h C2xxh, Quake's) see a PS/2 mouse.
+- **Gamepads and joysticks:**
+  - **The report descriptor** (`GET_DESCRIPTOR`, type 22h) is parsed for a Joystick (04h) or Game Pad (05h)
+    collection, the Generic Desktop page's X, Y, Z, Rx, Ry, Rz and Hat switch, and the Button page.
+  - **Each value is scaled** from its logical range to 0-255. Report IDs are honoured. `SET_IDLE(0)` is sent,
+    ignoring a stall.
+- **Host tests** run the parser and the keyboard's report-to-scan-code step on J0's descriptors and on hand-built
+  ones from the spec's examples.
+- **The limit is the same as for the game port:** a direct-mode program's protected-mode code reads the real 8042
+  (60h/64h aren't trapped there), so it sees only PS/2 input.
+
+### Xbox pads
+
+These aren't HID; they use vendor classes:
 - **Xbox 360 wired** (interface FFh/5Dh/01h): a 20-byte input report with the buttons, two 8-bit triggers and four
   16-bit stick axes; an LED command on the OUT endpoint.
 - **Xbox One and Series wired** (FFh/47h/D0h, "GIP"): silent until a start packet is sent; then input reports of
   type 20h.
-- **Sources:** public protocol notes, checked against the owner's pads in J0. Linux's `xpad.c` is GPL: behaviour
-  reference only, as for every driver here.
+- **Sources:** public protocol notes, checked against the owner's pads in J0 (their descriptors, and Linux's
+  traffic to them captured with usbmon). Linux's `xpad.c` is GPL: behaviour reference only, as for every driver
+  here.
 - **Out of scope:** wireless receivers. The Xbox Wireless Adapter is a Wi-Fi device, not USB HID; the 360's
   receiver could come later.
 
-**86Box can't test this half.** Its USB (`src/usb.c`) is registers with no devices. So UHCI, HID and Xbox pads
-are tested by host tests and on the bench, unless an 86Box UHCI and gamepad model joins MGA-Glide's patch series
-(Q2).
+### Other controllers
+
+Not on bench-g400; each comes with the PC that needs it:
+- **EHCI (USB 2.0, ICH4 and later):** GLOS takes it from the BIOS (the EHCI's own legacy support capability) and
+  clears its configure flag, so every port falls back to the UHCI companions. GLOS's input devices are all low and
+  full speed. This is likely on bench #2 (Pentium 4, G450), depending on its chipset.
+- **OHCI (SiS, ALi, VIA's later chipsets, NEC cards):** a second host controller driver under the same hub and
+  device layers.
+
+**86Box can't test this half.** Its USB (`src/usb.c`) is registers with no devices. So UHCI, hubs, HID and Xbox
+pads are tested by host tests and on the bench (the owner chose that over an 86Box model, Q2).
 
 ## The steps
 
 - **J0, look (read-only):**
-  - **On the bench under Ubuntu, with the owner's pads plugged in:** `lsusb -v` and each pad's HID report
-    descriptor (`/sys/bus/usb/devices/*/…/report_descriptor`) are kept under docs/gamepad-j0/. The pads' vendor,
-    product, interface classes, endpoints and intervals decide J4's order (360 or GIP first).
-  - **Under DOS:** the UHCI's state before GLOS starts: `USBCMD.RS` and the legacy support register, which show
-    whether the IBM BIOS's USB legacy emulation is on.
+  - **On the bench under Ubuntu, with the owner's pads plugged in:** `lsusb -v`; each HID device's report
+    descriptor (`/sys/bus/hid/devices/*/report_descriptor`); and a usbmon capture of Linux enumerating them and
+    starting the Xbox pad, then of each pad's reports while the owner moves each stick and presses each button as
+    asked. These are kept under docs/gamepad-j0/. The pads' vendor, product, interface classes, endpoints and
+    intervals decide J5's order (360 or GIP first).
+  - **Under DOS (GLOS's agent):** the UHCI's state before GLOS takes it: `USBCMD.RS` and the legacy support
+    register, which show whether the IBM BIOS's USB emulation is on.
 - **J1, the virtual game port:**
   - **The port:** 201h trapped when a source is on, in the system VM, sessions, DPMI clients and apps, plus INT 15h
     AH=84h.
@@ -144,46 +201,61 @@ are tested by host tests and on the bench, unless an 86Box UHCI and gamepad mode
   - take-over and hand-back; the frame list, queue heads and TDs in GLOS's own memory (the controller reaches all
     of the first 4 GB), polled from the tick; the root ports; control transfers and enumeration with its log lines;
   - **Tests:** host tests for the schedule builder; on the bench, the owner plugs and unplugs as asked.
-- **J3, HID pads:** the parser (host tests on J0's descriptors), interrupt IN, the pad as a source. On the bench:
-  the owner moves each stick and presses each button as asked, and `glos joy` shows the result.
-- **J4, Xbox pads:** 360 and GIP, whichever J0 shows first. Bench as J3.
-- **J5, mapping and two pads:** `[joystick] map=` and `range=`, two pads at once, hot-plug.
-- **J6, acceptance and docs:**
+- **J3, hubs:** the hub driver; devices behind a hub, low speed among them. Bench: a hub the owner has, with a pad
+  or keyboard behind it.
+- **J4, HID:**
+  - the parser; keyboards and mice into the PS/2 path; HID pads as a source. Host tests on J0's descriptors;
+  - **On the bench:**
+    - a USB keyboard typing at a DOS prompt and in the desktop, with repeat and LEDs; a USB mouse in the desktop
+      and in a DOS program;
+    - each pad's sticks and buttons as asked, shown by `glos joy`.
+- **J5, Xbox pads:** 360 and GIP, whichever J0 shows first. Bench as J4.
+- **J6, mapping and two pads:** `[joystick] map=` and `range=`, two pads at once, hot-plug.
+- **J7, acceptance and docs:**
   - **On the bench:** a DOS game with joystick support played with a pad: one of ours, or one of the owner's that
     the owner names (C:\GAMES is the owner's, used read-only).
-  - **Docs:** PRD (D74, the non-goal narrowed, §4.5, §6.4, §7.6, D48), supervisor.md §10, devices.md (the UHCI's
-    keeper becomes GLOS while pads are on), release notes.
+  - **Docs:** PRD (D74, the non-goals, §4.5, §6.4, §7.6, D48), supervisor.md §10, devices.md (the UHCI's keeper
+    is GLOS), release notes.
+- **Later, each with its PC:** EHCI hand-off and OHCI (above). USB flash drives, in a plan of their own.
 
-Order: J1 needs nothing else and is the part every machine gets. J2-J5 are bench-only work.
+Order: J1 needs nothing else and is the part every machine gets. J2-J6 are bench-only work.
 
 ## The PRD change (proposed)
 
-- **Non-goals:** "USB stacks … are out of scope" becomes "out of scope **except a UHCI driver for gamepads**
-  (D74)". The note on USB keyboards stays, plus: "while GLOS has a UHCI controller, the BIOS's emulation on it stops".
-- **D74** (once Q1-Q3 are answered):
-  - **The decision:** "GLOS answers port 201h and INT 15h AH=84h itself while a joystick source is on: USB
-    gamepads (HID, Xbox 360, Xbox One) through its own UHCI driver, polled with no interrupt, or `glos joy`. The
-    one-shots are timed from the time of the write. Otherwise 201h is passed through as before."
-  - **Why:** "The owner has USB pads and no game-port joystick; DOS games know only the game port."
+- **Non-goals:** "USB stacks … are out of scope. USB keyboards work only through BIOS legacy emulation in exclusive
+  sessions." becomes "USB storage and USB 2.0 speeds are out of scope for now. GLOS has its own USB input stack
+  (D74): UHCI, hubs, HID keyboards, mice and gamepads, Xbox pads."
+- **D74:**
+  - **The decision:** "GLOS has its own USB input stack: every UHCI is taken from the BIOS, polled from the tick
+    with no interrupt; hubs; HID keyboards and mice fed in as PS/2 ones; HID and Xbox pads drive a virtual game
+    port. GLOS answers port 201h and INT 15h AH=84h itself while a joystick source is on (a pad, or `glos joy`),
+    timing the one-shots from the time of the write. Otherwise 201h is passed through as before. (Owner,
+    2026-11-05: USB pads as a game-port joystick; take USB over, with keyboards, mice and hubs too; flash drives
+    later; no 86Box model for now.)"
+  - **Why:** "The owner has USB pads and no game-port joystick. DOS games know only the game port, and DOS knows
+    USB input only through the BIOS's emulation."
 
 ## Decisions
 
-Open, for the owner:
-- **Q1. When does GLOS take the USB controller from the BIOS?** Recommended: only when GLOS.CFG says so
-  (`[usb] pads = on`), because a BIOS-emulated USB keyboard stops working when GLOS takes the controller.
-  bench-g400's GLOS.CFG would say so. The alternatives: whenever a UHCI is found; or only when the BIOS isn't using
-  it (`USBCMD.RS` off at start).
-- **Q2. An 86Box UHCI and gamepad model in MGA-Glide's patch series?** Recommended: not now; host tests and the
-  bench, now that `glos restart` makes a bench update take seconds. Revisit if J2-J4 go slowly. A model is a
-  sizeable patch (a UHCI schedule walker and a HID device) that only GLOS would use.
-- **Q3. A keyboard-to-joystick source** (the numeric keypad as a stick)? Recommended: no. The owner has pads, and
-  `glos joy` covers testing.
+The owner, 2026-11-05 (the question tool):
+- **Q1, when GLOS takes the USB controller from the BIOS.** The question offered: only when GLOS.CFG says so
+  (recommended); whenever a UHCI is found; or only when the BIOS isn't using it. The owner chose neither, and
+  wrote: "Can't we just take over USB and add drivers for gamepads, keyboards and mice (and USB hubs)? We could
+  add flash drives at a later date." So:
+  - GLOS takes every UHCI (`[usb] off` the escape hatch);
+  - keyboards, mice and hubs join the plan (J3, J4);
+  - flash drives come later.
+- **Q2, an 86Box UHCI and gamepad model:** not now (the recommendation). Host tests and the bench; revisit if J2-J5
+  go slowly.
+- **Q3, the numeric keypad as a joystick source:** no (the recommendation).
+- **J0:** now. The owner plugs the pads into bench-g400 under Ubuntu.
 
 ## Provenance
 
 - **Clean-room sources:** IBM's technical reference (game control adapter, INT 15h AH=84h); Intel's UHCI design
-  guide and the PIIX4 datasheet; usb.org's USB 1.1, HID 1.11 and HID Usage Tables; public Xbox protocol notes.
-- **Behaviour reference only:** Linux's `uhci-hcd`, `usbhid` and `xpad`, and FreeBSD's equivalents. No code from
-  them.
-- **What goes in the repo:** J0's descriptor captures are facts about the hardware, so they go in the repo
-  (docs/gamepad-j0/). Screenshots and traces of the owner's games stay local.
+  guide and the PIIX4 datasheet; usb.org's USB 1.1, HID 1.11 and HID Usage Tables; public Xbox protocol notes;
+  usbmon captures of the owner's pads.
+- **Behaviour reference only:** Linux's `uhci-hcd`, `hub`, `usbhid` and `xpad`, and FreeBSD's equivalents. No
+  code from them.
+- **What goes in the repo:** J0's descriptor captures and pad traffic are facts about the hardware, so they go in
+  the repo (docs/gamepad-j0/). Screenshots and traces of the owner's games stay local.
