@@ -69,6 +69,8 @@ include config.mk
 DEV      := $(MGA_GLIDE)/tools/dev
 CFG_SRCS := sdk/config/cfg.c sdk/config/tz.c   # GLOS.CFG's schema and time zones, shared everywhere
 CP_SRCS := sdk/config/cp.c sdk/config/cp_tables.c       # DOS code pages (M10): libglos's and the host's
+.DEFAULT_GOAL := all
+
 codepages:
 	$(Q)python3 tools/mkcp.py > sdk/config/cp_tables.c
 BUILD_ID := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
