@@ -1,8 +1,8 @@
 # GLOS on Crystal audio: a plan
 
-**Status (2026-11-05): plan v0, not started. The owner chose GLOS's own driver over UNISOUND, to start after upper
-memory merges (docs/upper-memory.md). Written for bench-g400's onboard Crystal chip; the chip itself is still to
-be confirmed on the PC (C0).**
+**Status (2026-11-05): plan v1, C1 under way (branch `crystal`). The owner chose GLOS's own driver over UNISOUND,
+after upper memory (merged 2026-11-05), and answered the four questions ([Decisions](#decisions)). C0's look at
+bench-g400 is done ([The chip](#the-chip)).**
 
 GLOS's mixer plays only a Sound Blaster 16 (D47, `kernel/drv/sb16.c`: DSP version 4, 16-bit DMA). bench-g400, an
 IBM PC 300PL, has onboard Crystal audio, which no DOS driver sets up, so it stays silent under GLOS and plain DOS
@@ -43,6 +43,11 @@ From Crystal's CS4236B datasheet (DS212PP4, 1997), the clean-room source for eve
 - **The WSS codec** is CS4231A-class (MODE 2): 16-bit stereo, rates up to 48 kHz, playback by 8-bit DMA
   (count by byte), a playback count and an interrupt (DS139PP2, the CS4231A datasheet).
 
+**On bench-g400** (C0, from Ubuntu, 2026-11-05): an ISA Plug and Play card, `CSCe825` "Crystal Audio" (Linux's
+entry for the IBM PC 300PL's onboard audio), with three logical devices: `CSC0100` (WSS, FM and SB Pro: the
+datasheet's defaults on offer, 534h, 388h, 220h, IRQ 5, DMA 1 and 0 or 3), `CSC010F` and `CSC0110` (control,
+120h–FE0h). All three disabled: the BIOS leaves the chip off, and Linux binds no driver. No MPU-401 device.
+
 86Box emulates the family (`snd_cs423x.c`: CS4232, CS4235, CS4236, CS4236B, CS4237B, CS4238B, on-board and card
 forms), including the Crystal Key, SLAM, ISA PnP and the EEPROM, so the driver can be built and tested in Loop A
 (MGA-Glide `run.py --sound cs4236b`, an ISA card in the bf6) before the bench.
@@ -74,15 +79,18 @@ forms), including the Crystal Key, SLAM, ISA PnP and the EEPROM, so the driver c
   with sound, and plain DOS after `glos exit`.
 - **C5. Docs:** PRD §4.5, §10.5, D47 (the mixer's cards), supervisor.md, devices.md, the release notes.
 
-## Questions for the owner (before C1)
+## Decisions
 
-1. **Resources when GLOS sets the chip up itself:** the datasheet's defaults (WSS 534h, SB 220h, IRQ 5, DMA 1),
-   or only what `[sound] crystal` names?
-2. **After `glos exit`:** leave the chip set up and active, so plain DOS keeps its SB Pro, or deactivate it as
-   found?
-3. **Scope:** the CS4236B and CS4237B on the bench only, or the whole CS423x family 86Box models (CS4232 to
-   CS4238B)?
-4. **MPU-401 and the game port** (logical devices 1 and 3): set up for sessions too, or left alone?
+The owner's answers (2026-11-05), each the recommendation:
+1. **Resources:** the datasheet's defaults (WSS 534h, FM 388h, SB 220h, IRQ 5, DMA 1 for playback and 0 for
+   capture, game port 200h, control 120h), which `[sound] crystal` in GLOS.CFG can override; GLOS refuses any that
+   a device it knows already uses.
+2. **After `glos exit`:** the chip's DMA stopped, but the chip left set up and active, so DOS programs after GLOS
+   still find an SB Pro at 220h.
+3. **Scope:** the CS423x family (CS4232 to CS4238B: one set-up method, one codec), tested on bench-g400's chip and
+   on 86Box's CS4232 and CS4237B.
+4. **The game port** (logical device 1) set up too, at 200h, when the chip has one and nothing else answers there;
+   MPU-401 only where a chip exposes it (not on bench-g400).
 
 ## Provenance
 
