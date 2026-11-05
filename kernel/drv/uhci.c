@@ -37,6 +37,7 @@
 #include "timer.h"
 #include "usb.h"
 #include "vm.h"
+#include "xpad.h"
 
 #define USBCMD          0x00
 #define USBSTS          0x02
@@ -331,20 +332,48 @@ static void pipes_poll(struct hc *h)
             d->reports++;
             d->toggle ^= 1;
             if (d->pad && (len != last_len[i] || memcmp(r, last_report[i], len))) {
+                struct joy_pad jp;
                 memcpy(last_report[i], r, len);
                 last_len[i] = (u8)len;
-                pad_report(d, r, len);
+                if (!d->kind)
+                    pad_report(d, r, len);
+                else if (xpad_read(d->kind, r, len, &jp) == 0)
+                    joy_pad(d->pad - 1, &jp);
             }
         }
         pipe_arm(h, d);
     }
 }
 
+/* A joystick pad and a pipe slot for a device: 0, or -1 if either is short. */
+static int pad_take(struct usb_dev *d)
+{
+    int k, n, i, taken;
+    for (k = 0; k < JOY_PADS && pad_used[k]; k++) ;
+    if (k == JOY_PADS)
+        return -1;
+    for (n = 0; n < NPIPE; n++) {
+        for (taken = 0, i = 0; i < MAX_DEV; i++)
+            if (dev[i].used && dev[i].pipe == n + 1)
+                taken = 1;
+        if (!taken)
+            break;
+    }
+    if (n == NPIPE)
+        return -1;
+    pad_used[k] = 1;
+    last_len[d - dev] = 0xFF;                   /* (the first report always goes on) */
+    d->pad = (u8)(k + 1);
+    d->pipe = (u8)(n + 1);
+    d->toggle = 0;
+    return 0;
+}
+
 /* A HID device that is a joystick or gamepad: its report descriptor read and parsed, its pipe started. */
 static void hid_start(struct hc *h, struct usb_dev *d, int p)
 {
     u8 idle[8] = { 0x21, 0x0A, 0, 0, 0, 0, 0, 0 }, get[8] = { 0x81, 6, 0, 0x22, 0, 0, 0, 0 }, *buf;
-    u32 got = 0, status = 0, k;
+    u32 got = 0, status = 0;
     int n;
     if (!d->ep_in || !d->hid_rlen || d->hid_rlen > 1024)
         return;
@@ -361,27 +390,45 @@ static void hid_start(struct hc *h, struct usb_dev *d, int p)
     }
     n = hid_pad_parse(buf, got, &pads[d - dev]);
     kfree(buf);
-    if (n != 0)
+    if (n != 0 || pad_take(d) != 0)
         return;
-    for (k = 0; k < JOY_PADS && pad_used[k]; k++) ;
-    if (k == JOY_PADS)
-        return;
-    for (n = 0; n < NPIPE; n++) {               /* a free pipe slot */
-        int i, taken = 0;
-        for (i = 0; i < MAX_DEV; i++)
-            if (dev[i].used && dev[i].pipe == n + 1)
-                taken = 1;
-        if (!taken)
-            break;
-    }
-    if (n == NPIPE)
-        return;
-    pad_used[k] = 1;
-    last_len[d - dev] = 0xFF;                   /* (the first report always goes on) */
-    d->pad = (u8)(k + 1);
-    d->pipe = (u8)(n + 1);
-    d->toggle = 0;
     d->is = "hid-pad";
+    pipe_arm(h, d);
+}
+
+/* An Xbox pad: GIP's are silent until the power-on packet (docs/gamepad-j0/: 05 20 00 01 00) goes to their
+   interrupt OUT endpoint; a 360's report at once. */
+static void xbox_start(struct hc *h, struct usb_dev *d, int p)
+{
+    static const u8 power_on[5] = { 0x05, 0x20, 0x00, 0x01, 0x00 };
+    d->kind = (u8)(d->iproto == 0xD0 ? XPAD_GIP : XPAD_360);
+    if (!d->ep_in || pad_take(d) != 0)
+        return;
+    if (d->kind == XPAD_GIP) {
+        struct uhci_td *t = &h->td_int[d->pipe - 1];
+        u32 t0 = timer_ticks();
+        if (!d->ep_out) {
+            pipe_stop(h, d);
+            return;
+        }
+        memcpy(h->int_buf + (d->pipe - 1) * 64, power_on, sizeof power_on);
+        t->link = UHCI_LP_T;
+        t->buf = PHYS(h, h->int_buf + (d->pipe - 1) * 64);
+        t->token = USB_PID_OUT | (u32)d->addr << 8 | (u32)(d->ep_out & 0xF) << 15 | (u32)(d->toggle_out & 1) << 19
+                   | (u32)(sizeof power_on - 1) << 21;
+        t->ctrl = UHCI_TD_ACTIVE | UHCI_TD_CERR3;
+        h->qh_int[d->pipe - 1].elem = PHYS(h, t);
+        while ((t->ctrl & UHCI_TD_ACTIVE) && timer_ticks() - t0 < 100)
+            thread_sleep_until(timer_ticks() + 1);
+        h->qh_int[d->pipe - 1].elem = UHCI_LP_T;
+        if ((t->ctrl & (UHCI_TD_ACTIVE | UHCI_TD_ERRORS))) {
+            fail(p + 1, "power-on", t->ctrl);
+            pipe_stop(h, d);
+            return;
+        }
+        d->toggle_out ^= 1;
+    }
+    d->is = d->kind == XPAD_GIP ? "xbox-gip-pad" : "xbox360-pad";
     pipe_arm(h, d);
 }
 
@@ -472,6 +519,8 @@ static void attach(struct hc *h, int p)
     h->port_dev[p] = (u8)(i + 1);
     if (d->iclass == 0x03)
         hid_start(h, d, p);
+    else if (d->iclass == 0xFF && ((d->isub == 0x47 && d->iproto == 0xD0) || (d->isub == 0x5D && d->iproto == 0x01)))
+        xbox_start(h, d, p);
     if (d->ep_in)
         kprintf("GLOS-USB port=%d speed=%s id=%04x:%04x class=%02x/%02x/%02x if=%02x/%02x/%02x in=%02x/%u/%u%s is=%s\n",
                 p + 1, low ? "low" : "full", d->vendor, d->product, d->dclass, d->dsub, d->dproto, d->iclass,

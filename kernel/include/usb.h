@@ -56,6 +56,7 @@ struct usb_dev {
     const char *is;                     /* hid-keyboard, hid-mouse, hid, xbox360, xbox-gip, hub, other */
     /* an interrupt IN pipe (a pad's: J4) */
     u8 pipe, toggle, pad;               /* pipe: its slot + 1 (0 none); pad: the joystick pad it is + 1 */
+    u8 kind, toggle_out;                /* kind: 0 HID, else XPAD_360 or XPAD_GIP (xpad.h) */
     u32 reports, errors;
 };
 
