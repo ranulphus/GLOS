@@ -257,6 +257,13 @@ Order: J1 needs nothing else and is the part every machine gets. J2-J6 are bench
 - **Resolution:** the reads across the range a counting program gets: about 170 on bf6, 26 on the 486 in real mode
   and 18 as a DPMI client. These are 86Box's costs: silicon's come with the bench run.
 - **INT 15h AH=84h** answers 6, 281, 144, 75 (4 µs units) in real mode and through a DPMI client's 0300h alike.
+- **On bench-g400** (Pentium II, 398 MHz by the TSC; the Crystal chip's real game port, nothing plugged in, reads as
+  nothing connected): the same sequence by hand.
+  - **Real mode:** 32-33, 1129-1132, 581-588, 310 µs over six runs, at 6 µs a read: 186 reads across the range.
+  - **As a DPMI client:** 33, 1138, 587, 308, at 7.5 µs a read.
+  - **INT 15h, the app, `b=none`, a 100 Hz PIT, `glos joy off`:** as in Loop A.
+  - **One fault found and fixed:** the TSC's rate had been measured a second at a time, and once read 381 MHz for
+    398 (a tick late at a window's end), so the stick read 4% short. It is now measured from GLOS's first tick on.
 - **Found on the way:** a client's simulated INT 15h (0300h, or a reflected one) went straight to the BIOS,
   bypassing GLOS's INT 15h layer (int15.c). J1 routes AH=84h. The other functions there are still bypassed this
   way: A20, 87h's guard, 88h and E801h's sizes, 86h's wait. That is to be fixed separately.
