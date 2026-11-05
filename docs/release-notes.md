@@ -17,6 +17,9 @@ in its `docs/milestones-*.md`.
 - **`glos exit`** copies the stub back into DOS's memory first; if a program has taken every byte, the exit is
   refused (in the log) and GLOS carries on until memory is free.
 - **UMAPROBE** (`tests/dos/umaprobe.c`) lists what is in C0000h-EFFFFh, read-only, on plain DOS or GLOS.
+- **Chipset UMBs** (UMBPCI's, made before GLOS starts) are DOS's own memory, and GLOS runs among them:
+  `LOADHIGH GLOS.EXE` puts all of GLOS in one, 7,312 bytes with the cache's buffer, none of them conventional.
+  `stub_page = auto` takes no page there (they read as RAM). Checked in 86Box (`make loopa-umb`); the bench to come.
 
 ## glos exit after a resident program hooked INT 2Fh (2026-11-05)
 

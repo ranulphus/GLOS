@@ -101,7 +101,7 @@ GLOS also brings things to retro PCs that their owners lack today:
 | DOS programs in windows | After v1 (D5). v1 runs unmodified DOS programs full-screen as exclusive sessions (§6.9). |
 | Replacing DOS | GLOS runs on an existing DOS (D16); it doesn't modify or ship a patched kernel. |
 | Win16/Win32 programs | Not supported. |
-| EMS, VCPI and UMBs for programs | Not in v1 (D25). Running under EMM386, QEMM or JemmEx is refused. |
+| EMS, VCPI and UMBs for programs | Not in v1 (D25). Running under EMM386, QEMM or JemmEx is refused. UMBs a chipset driver such as UMBPCI makes before GLOS starts are DOS's own memory: GLOS runs among them, and `LOADHIGH GLOS.EXE` puts all of GLOS in one (docs/upper-memory.md B1). |
 | Modern PCs | UEFI-only machines (no CSM), USB stacks and AHCI/NVMe drivers are out of scope. USB keyboards work only through BIOS legacy emulation in exclusive sessions. |
 | CPUs below a 486 | Not supported. 486SX support is open (Q1). |
 | Multi-monitor | After v1 (D15). The v1 display layer handles N screens. |
@@ -153,7 +153,7 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D22** | **The DOS server:** one lock covers the whole system VM (every real-mode call, every BIOS and VBE call). Per-app DOS state is swapped on each call. Agent file operations wait until DOS is idle. | DOS isn't re-entrant and its per-process state is global (§6.8). | M6 |
 | **D23** | **GLOS is detected through DPMI function 0A00h with the vendor string "GLOS"**, which returns a versioned entry point. GLOS never answers INT 2Fh 1600h and never broadcasts 1605h. | This is the standard DPMI vendor-extension mechanism. Claiming to be Windows would make TSRs and programs expect Windows behaviour. | M6 |
 | **D24** | **GPU ownership is enforced by page faults.** A program's Matrox MMIO pages stay unmapped until it holds the GPU lock. The HAL gains `engine_resync()` for every change of owner, and a watchdog resets the engine and kills an app that holds the lock too long. *Worked out in M8: D44.* | Every owner change is visible to the supervisor, and stale HAL state can't overflow the FIFO. | M8 |
-| **D25** | **No EMS, VCPI or UMBs in v1.** GLOS provides its own XMS 3.0 server, and the first MB is identity-mapped in every address space. | Matches the HIMEM-only baselines. SDL's Sound Blaster driver assumes linear = physical below 1 MB for its DMA buffer. | After v1 |
+| **D25** | **No EMS, VCPI or UMBs in v1.** GLOS provides its own XMS 3.0 server, and the first MB is identity-mapped in every address space. | Matches the HIMEM-only baselines. SDL's Sound Blaster driver assumes linear = physical below 1 MB for its DMA buffer. docs/upper-memory.md Part B (2026-10-31) weighed GLOS-made UMBs (DOS's arena linked by hand, XMS 10h, VDS, exits refused while one is owned) against what they give, and kept this; UMBs from the chipset at boot (UMBPCI) work instead (B1, Loop A 2026-11-05). | After v1 |
 | **D26** | **Provenance: write from specifications.** Code under GPL, Artistic or no licence (Jemm, HDPMI, CWSDPMI, DPMIONE, 386MAX, the FreeDOS kernel, Watt-32, mTCP) is reference and test baseline only, never copied. Leaked Microsoft source is never consulted. | An MIT licence that holds up (§17). | — |
 | **D27** | **Changes to the shared HAL and harness go into MGA-Glide first, with its full regression.** GLOS builds the HAL and runs the harness from MGA-Glide's checkout beside it (`MGA_GLIDE`), from its main as it is: no pin and no copy (the owner's decision 2026-11-02: before alpha everything is on main trunk). | The project-wide rule. A change to MGA-Glide reaches GLOS at its next build, so MGA-Glide's regressions consider GLOS too. | — |
 | **D28** | **Performance budgets come from silicon and CPU models, not 86Box speed.** | 86Box on the build host runs far below real hardware, and the emulated Matrox FIFO thread runs in host time. | — |
@@ -1377,3 +1377,8 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
   stub_page = off | auto | SEGMENT`), copied back down before the kernel leaves, with the DPMI host's real-mode
   stacks in GLOS's page too. D41's text is corrected: 1687h asks each DPMI client for 2 KB. D25 stands; GLOS is
   to be checked on a DOS with chipset UMBs (the owner's answers, 2026-10-31).
+- **Upper memory, 2026-11-05:** U4 (the whole regression, the page on and off) passes. B1 passes in Loop A
+  (`make loopa-umb`, MGA-Glide's UMBPCI boot): GLOS runs among chipset UMBs, loads high whole, and DSKTORT
+  through its buffer there gives plain DOS's digest. U5 on bench-g400 ran the page and DOSBench's games, but a
+  GLOS started again seconds after `glos exit` never answered; GLOS left its network card running (main too,
+  fixed), and U5 runs again once the PC is reset.

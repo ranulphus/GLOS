@@ -193,7 +193,8 @@ census needs it.
 
 Development in `~/wt-glos-m5`, long runs in `~/wt-glos-test`, as for the cache.
 
-**Where they stand (2026-11-02):**
+**Where they stand (2026-11-05):** U0–U4 done in Loop A; U5's first bench run and B1 in Loop A are in
+[the status](#glos-upper-memory-a-plan) above and under B1. As of 2026-11-02:
 - **U0 done:** Loop A 7 of 7 and bench-g400 ([What U0 found](#what-u0-found-2026-11-01)).
 - **U1, U2 done in Loop A:** `jobs.py mem-page` 6 of 6 (bf6, 486dx2, 486dx4; raw and HIMEMX). The page is
   UMAPROBE's; GLOS keeps 448 bytes (4,560 with the cache's buffer); the copy-down through 4Ah, and through 48h
