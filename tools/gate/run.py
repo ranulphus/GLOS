@@ -337,6 +337,7 @@ class Probe:
     probes share one connection (OpenSSH's ControlMaster), so each measures the agent's answer, not a key
     exchange at the 30% CPU budget bulk work gets beside a game (a fresh connection per probe put
     Screamer Rally's worst gap at 2.07 s)."""
+    SHOT_AT = (5, 25, 100, 200, 300, 400)
 
     def __init__(self, port):
         self.port, self.replies, self.fails, self.shots = port, [], [], []
@@ -372,7 +373,7 @@ class Probe:
             m = re.match(rb"ticks=(\d+)", o)
             if rc == 0 and m:
                 self.replies.append((w, time.time(), int(m.group(1))))
-                if len(self.replies) in (5, 25, 100, 200, 300, 400):
+                if len(self.replies) in self.SHOT_AT:
                     rc2, o2, e2 = self.call("glos shot", timeout=90)
                     good = rc2 == 0 and o2[:8] == b"\x89PNG\r\n\x1a\n" and o2[12:16] == b"IHDR" \
                         and o2[-8:-4] == b"IEND"
@@ -393,17 +394,25 @@ class Probe:
 
     def judge(self):
         """(ok, what): every probe answered, none later than 2 s of guest time, and every screenshot taken was a
-        whole PNG (at least one: a run too short for the first has no probe to speak of)."""
+        whole PNG (at least one: a run too short for the first has no probe to speak of).
+        Two probes with a `glos shot` between them aren't timed (shown as shot=): the shot is bulk work, and
+        the first comes at the start, when 86Box runs the guest 3-5 times faster than the run's average rate,
+        so far too little is taken off for the time between them. That pair alone came to 1.7-2.5 s in
+        Fifth Wheel's runs on 2026-11-05, with every other gap under 1.0 s."""
         if len(self.replies) < 3:
             return False, "%d replies" % len(self.replies)
         (w0, _, k0), (w1, _, k1) = self.replies[0], self.replies[-1]
         rate = (k1 - k0) / 1024.0 / max(w1 - w0, 1e-3)      # guest seconds per wall second
-        worst = 0.0
-        for (wa, ra, ka), (wb, rb, kb) in zip(self.replies, self.replies[1:]):
-            worst = max(worst, (kb - ka) / 1024.0 - rate * max(wb - ra, 0))     # less the time between probes
+        worst = shot = 0.0
+        for n, ((wa, ra, ka), (wb, rb, kb)) in enumerate(zip(self.replies, self.replies[1:]), 1):
+            late = (kb - ka) / 1024.0 - rate * max(wb - ra, 0)     # less the time between probes
+            if n in self.SHOT_AT:
+                shot = max(shot, late)
+            else:
+                worst = max(worst, late)
         ok = not self.fails and worst <= 2.0 and bool(self.shots) and all(s[0] for s in self.shots)
-        what = "replies=%d worst=%.2fs rate=%.2f fails=%d shots=%s" % (
-            len(self.replies), worst, rate, len(self.fails), ",".join(s[1] for s in self.shots) or "none")
+        what = "replies=%d worst=%.2fs shot=%.2fs rate=%.2f fails=%d shots=%s" % (
+            len(self.replies), worst, shot, rate, len(self.fails), ",".join(s[1] for s in self.shots) or "none")
         return ok, what
 
 

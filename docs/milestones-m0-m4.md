@@ -663,7 +663,8 @@ The suites the gate doesn't run (m1, refuse, shell, sched, net, ssh) pass on the
     `reason=hotkey`, then text mode) and a **probe** run with an RTL8029. It sends `glos tick` over ssh about
     once a second while the program runs. The probes share one connection (OpenSSH's ControlMaster), so each
     measures the agent's answer, not a key exchange at the 30% bulk budget. Every probe must answer, none later
-    than 2 s of guest time once the time between probes is taken off. One `glos shot` must answer (from M5:
+    than 2 s of guest time once the time between probes is taken off (not timed: two probes with a `glos shot`
+    between them, since the shot is bulk work; 2026-11-05). One `glos shot` must answer (from M5:
     up to six, after the 5th, 25th and each 100th probe, each a whole PNG of the screen in whatever mode the
     program has set, kept as `probe-shot-N.png`), and the program must still end as in the baseline.
   - GLOS runs get one and a half times the program's own run.py timeout. It was sized for the baseline:
