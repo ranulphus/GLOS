@@ -11,6 +11,11 @@
  *                    (0 for an axis with nothing connected)
  * Otherwise 201h is passed through as before (PRD §6.4, D48): the PC's own game port.
  *
+ * The sources: glos joy's state as it is set (it overrides the pads while it is on), else the USB pads, mapped as
+ * docs/gamepad.md says: one pad drives the whole port (its left stick joystick A's X and Y, its right stick B's,
+ * buttons 1-4 A1, A2, B1, B2); with two, the second is joystick B (its left stick B's axes, its buttons 1 and 2 B1
+ * and B2) and the first keeps A's.
+ *
  * The time since the write, at each read:
  *   TSC              on a Pentium and later: its rate measured against the kernel's tick, from the first tick on
  *   PIT channel 0    without a TSC, while the PIT is as GLOS keeps it (mode 2, count FFFFh: its read-back status,
@@ -36,6 +41,8 @@ static struct {
     int on;                             /* 201h trapped and answered here */
     int have[JOY_SOURCES];
     struct joy_state src[JOY_SOURCES], cur;
+    int have_pad[JOY_PADS];
+    struct joy_pad pad[JOY_PADS];
     /* the one-shots */
     int fired;
     u32 fire_tick, fire_tsc, fire_reads;
@@ -58,16 +65,40 @@ static struct {
 
 static const char *const how_name[] = { "tsc", "pit", "reads" };
 
+/* The USB pads onto the port. */
+static void from_pads(struct joy_state *s)
+{
+    const struct joy_pad *a = j.have_pad[0] ? &j.pad[0] : &j.pad[1], *b = j.have_pad[0] && j.have_pad[1] ? &j.pad[1] : 0;
+    s->axis[0] = a->lx, s->axis[1] = a->ly;
+    s->present = 0x3;
+    if (b) {
+        s->axis[2] = b->lx, s->axis[3] = b->ly;
+        s->present |= 0xC;
+        s->buttons = (u8)((a->buttons & 3) | (b->buttons & 3) << 2);
+    } else {
+        s->axis[2] = a->rx, s->axis[3] = a->ry;
+        if (a->right)
+            s->present |= 0xC;
+        s->buttons = (u8)(a->buttons & 0xF);
+    }
+}
+
 static void update(void)
 {
     int i, any = 0, on;
+    u32 f = irq_save();                         /* (a pad's report comes on the usb thread; reads on the VM's) */
     memset(&j.cur, 0, sizeof j.cur);
+    if (j.have_pad[0] || j.have_pad[1]) {
+        from_pads(&j.cur);
+        any = 1;
+    }
     for (i = 0; i < JOY_SOURCES; i++)
         if (j.have[i]) {
-            j.cur = j.src[i];                   /* (one source in J1; J6 maps several pads onto the port) */
+            j.cur = j.src[i];                   /* (glos joy: over the pads while it is on) */
             any = 1;
         }
     on = j.cfg_port == 1 || (j.cfg_port == 0 && any);
+    irq_restore(f);
     if (on != j.on) {
         cpu_io_trap(0x201, on);
         j.on = on;
@@ -102,6 +133,16 @@ void joy_source(int src, const struct joy_state *s)
     j.have[src] = s != 0;
     if (s)
         j.src[src] = *s;
+    update();
+}
+
+void joy_pad(int n, const struct joy_pad *p)
+{
+    if (n < 0 || n >= JOY_PADS)
+        return;
+    j.have_pad[n] = p != 0;
+    if (p)
+        j.pad[n] = *p;
     update();
 }
 
@@ -268,7 +309,8 @@ int joy_stat(char *b, u32 room)
             strcpy(ax[i], "-");
     return ksnprintf(b, room, "joy port=%s source=%s a=%s,%s b=%s,%s buttons=%u%u%u%u range=%u time=%s mhz=%u "
                      "read_us=%u.%u writes=%u reads=%u\n", j.on ? "virtual" : "real",
-                     j.have[JOY_SRC_SSH] ? "ssh" : "none", ax[0], ax[1], ax[2], ax[3], j.cur.buttons & 1,
+                     j.have[JOY_SRC_SSH] ? "ssh" : j.have_pad[0] || j.have_pad[1] ? "usb" : "none", ax[0], ax[1],
+                     ax[2], ax[3], j.cur.buttons & 1,
                      j.cur.buttons >> 1 & 1, j.cur.buttons >> 2 & 1, j.cur.buttons >> 3 & 1, 24 + j.range_us,
                      j.writes ? how_name[j.how] : (j.tsc && j.tsc_mult ? "tsc" : j.pit_rate_ok ? "pit" : "reads"),
                      j.tsc_mhz, j.us_per_read / 16, (j.us_per_read % 16) * 10 / 16, j.writes, j.reads);

@@ -15,6 +15,16 @@ struct joy_state {
     u8 buttons;                         /* bits 0-3: A1, A2, B1, B2, 1 while pressed */
 };
 
+/* A USB pad's state (kernel/drv/uhci.c): its sticks (the D-pad folded into the left one) and buttons. */
+struct joy_pad {
+    u8 lx, ly, rx, ry;                  /* 0-255, 128 the centre */
+    u8 right;                           /* it has a right stick */
+    u16 buttons;                        /* bit n: button n + 1 */
+};
+
+#define JOY_PADS        2
+
+void joy_pad(int n, const struct joy_pad *p);   /* USB pad n (0, 1); NULL: unplugged */
 void joy_config(void);                  /* [joystick] port and range, from GLOS.CFG */
 void joy_source(int src, const struct joy_state *s);     /* a source's state; NULL: the source is gone */
 int joy_virtual(void);                  /* 201h is GLOS's now (else the PC's own, passed through) */

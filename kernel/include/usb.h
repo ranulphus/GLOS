@@ -51,7 +51,12 @@ struct usb_dev {
     u8 iclass, isub, iproto;            /* its first interface's */
     u8 ep_in, ep_in_maxp, ep_in_ival;   /* its first interrupt IN endpoint (0: none) */
     u8 ep_out, ep_out_maxp;
+    u8 ifnum;                           /* its first interface's number */
+    u16 hid_rlen;                       /* a HID interface's report descriptor's length (0: none) */
     const char *is;                     /* hid-keyboard, hid-mouse, hid, xbox360, xbox-gip, hub, other */
+    /* an interrupt IN pipe (a pad's: J4) */
+    u8 pipe, toggle, pad;               /* pipe: its slot + 1 (0 none); pad: the joystick pad it is + 1 */
+    u32 reports, errors;
 };
 
 void usb_late(void);                    /* after GLOS.CFG: [usb] enabled, every UHCI taken */

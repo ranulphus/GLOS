@@ -103,7 +103,8 @@ SSHC_SRCS := sdk/sshc/sshc.c sdk/sshc/keys.c sdk/sshc/sftpc.c kernel/ssh/sshbuf.
 SSHC_FLAGS := -Iinclude -Ikernel/ssh -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint
 HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:kernel/vm/v86dec.c \
               cache_test:kernel/drv/cstore.c umapage_test:kernel/mm/umapage.c \
-              vpic_test:kernel/vm/vpic.c png_test:kernel/lib/png.c uhci_test:kernel/drv/uhcitd.c
+              vpic_test:kernel/vm/vpic.c png_test:kernel/lib/png.c uhci_test:kernel/drv/uhcitd.c \
+              hid_test:kernel/drv/hidparse.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
 host-test-run:
@@ -301,7 +302,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/ssh/sshd.c \
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c kernel/mm/umapage.c \
          kernel/dbg/gdbstub.c kernel/dbg/gdbprog.c kernel/vm/v86.c kernel/vm/session.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c kernel/vm/vcon.c \
-         kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/vjoy.c kernel/drv/uhci.c kernel/drv/uhcitd.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
+         kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/vjoy.c kernel/drv/uhci.c kernel/drv/uhcitd.c kernel/drv/hidparse.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \

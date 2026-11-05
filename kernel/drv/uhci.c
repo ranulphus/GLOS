@@ -26,7 +26,9 @@
  *     GLOS-USB port=2 error=STEP status=XXXXXXXX           (a transfer that failed: the step, the TD's status) */
 #include <string.h>
 #include "glos/bootinfo.h"
+#include "hid.h"
 #include "io.h"
+#include "joy.h"
 #include "kcfg.h"
 #include "kprintf.h"
 #include "mm.h"
@@ -66,6 +68,7 @@
 #define MAX_HC          2
 #define MAX_DEV         8
 #define NTD             40
+#define NPIPE           8               /* interrupt IN pipes, a controller */
 
 struct hc {
     struct pci_dev *pci;
@@ -75,9 +78,9 @@ struct hc {
     u32 frames_phys;
     u8 *pool;                           /* a page: the control QH, the TDs, the setup packet and a data buffer */
     u32 pool_phys;
-    struct uhci_qh *qh_ctrl;
-    struct uhci_td *td;
-    u8 *setup, *data;
+    struct uhci_qh *qh_ctrl, *qh_int;   /* the control QH; the pipes' QHs (NPIPE), in the frames' chain first */
+    struct uhci_td *td, *td_int;        /* a control transfer's TDs; a TD a pipe */
+    u8 *setup, *data, *int_buf;         /* the setup packet, a control transfer's data, 64 bytes a pipe */
     u8 ports, slow_reset;
     u8 port_dev[2];                     /* the device on each root port: its index + 1, 0 none */
     u8 tries[2];                        /* attempts at the device there since it connected (3 at most) */
@@ -86,6 +89,10 @@ struct hc {
 static struct hc hc[MAX_HC];
 static int nhc;
 static struct usb_dev dev[MAX_DEV];
+static struct hid_pad pads[MAX_DEV];    /* a pad's report layout, by its device's index */
+static u8 pad_used[JOY_PADS];
+static u8 last_report[MAX_DEV][64];     /* a pipe's last report, so that only a change goes on (some pads, the */
+static u8 last_len[MAX_DEV];            /* owner's 081f:e401 among them, answer every poll despite SET_IDLE(0)) */
 static u8 next_addr = 1;
 static int started;
 
@@ -215,9 +222,12 @@ static void parse_config(struct usb_dev *d, const u8 *c, u32 len)
         if (c[at + 1] == 2 && c[at] >= 9) {                         /* configuration */
             d->config = c[at + 5];
         } else if (c[at + 1] == 4 && c[at] >= 9) {                  /* interface */
-            if (!ifaces++ || (!d->iclass && c[at + 3] != 0xFF)) {
+            if (!ifaces++) {
                 d->iclass = c[at + 5], d->isub = c[at + 6], d->iproto = c[at + 7];
+                d->ifnum = c[at + 2];
             }
+        } else if (c[at + 1] == 0x21 && c[at] >= 9 && ifaces == 1 && c[at + 6] == 0x22) {   /* HID: its report */
+            d->hid_rlen = (u16)(c[at + 7] | c[at + 8] << 8);
         } else if (c[at + 1] == 5 && c[at] >= 7 && ifaces == 1 && (c[at + 3] & 3) == 3) {     /* endpoint: interrupt */
             if (c[at + 2] & 0x80) {
                 if (!d->ep_in)
@@ -229,6 +239,142 @@ static void parse_config(struct usb_dev *d, const u8 *c, u32 len)
         at += c[at];
     }
     d->nif = (u8)ifaces;
+}
+
+static void fail(int port, const char *step, u32 status);
+
+/* ---- interrupt IN pipes: one TD a pipe, hung from its QH, which every frame passes (the controller retries a
+   NAKed TD each frame, so a device is asked every millisecond however long its interval); re-armed with the data
+   toggle flipped each time it has brought a report */
+
+static void pipe_arm(struct hc *h, struct usb_dev *d)
+{
+    u32 k = d->pipe - 1u;
+    struct uhci_td *t = &h->td_int[k];
+    t->link = UHCI_LP_T;
+    t->buf = PHYS(h, h->int_buf + k * 64);
+    t->token = USB_PID_IN | (u32)d->addr << 8 | (u32)(d->ep_in & 0xF) << 15 | (u32)(d->toggle & 1) << 19
+               | ((u32)(d->ep_in_maxp ? d->ep_in_maxp - 1 : 0x7FF) & 0x7FF) << 21;
+    t->ctrl = UHCI_TD_ACTIVE | UHCI_TD_CERR3 | (d->low ? UHCI_TD_LS : 0);
+    h->qh_int[k].elem = PHYS(h, t);
+}
+
+static void pipe_stop(struct hc *h, struct usb_dev *d)
+{
+    if (d->pipe) {
+        h->qh_int[d->pipe - 1].elem = UHCI_LP_T;
+        d->pipe = 0;
+    }
+    if (d->pad) {
+        pad_used[d->pad - 1] = 0;
+        joy_pad(d->pad - 1, 0);
+        d->pad = 0;
+    }
+}
+
+/* A pad's report to the virtual game port: X and Y the left stick, the hat folded in; Z and Rz, else Rx and Ry,
+   the right. */
+static void pad_report(struct usb_dev *d, const u8 *r, u32 len)
+{
+    struct hid_pad_state s;
+    struct joy_pad jp;
+    const struct hid_pad *hp = &pads[d - dev];
+    static const signed char hx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 }, hy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
+    if (hid_pad_read(hp, r, len, &s) != 0)
+        return;
+    jp.lx = s.axis[0], jp.ly = s.axis[1];
+    if (s.hat < 8) {
+        if (hx[s.hat])
+            jp.lx = hx[s.hat] < 0 ? 0 : 255;
+        if (hy[s.hat])
+            jp.ly = hy[s.hat] < 0 ? 0 : 255;
+    }
+    if ((hp->axes & 0x24) == 0x24)              /* Z and Rz */
+        jp.rx = s.axis[2], jp.ry = s.axis[5], jp.right = 1;
+    else if ((hp->axes & 0x18) == 0x18)         /* Rx and Ry */
+        jp.rx = s.axis[3], jp.ry = s.axis[4], jp.right = 1;
+    else
+        jp.rx = jp.ry = 128, jp.right = 0;
+    jp.buttons = s.buttons;
+    joy_pad(d->pad - 1, &jp);
+}
+
+static void pipes_poll(struct hc *h)
+{
+    int i;
+    for (i = 0; i < MAX_DEV; i++) {
+        struct usb_dev *d = &dev[i];
+        u32 c;
+        if (!d->used || !d->pipe || h->port_dev[d->port - 1] != i + 1)
+            continue;
+        c = h->td_int[d->pipe - 1].ctrl;
+        if (c & UHCI_TD_ACTIVE)
+            continue;
+        if (c & UHCI_TD_ERRORS) {               /* (unplugged, or a stall: the port's change will tell) */
+            if (++d->errors == 1)
+                kprintf("GLOS-USB port=%u pipe-error status=%08x\n", d->port, c);
+            if (d->errors > 20) {
+                pipe_stop(h, d);
+                continue;
+            }
+        } else {
+            const u8 *r = h->int_buf + (d->pipe - 1) * 64;
+            u32 len = UHCI_TD_ACTLEN(c);
+            d->reports++;
+            d->toggle ^= 1;
+            if (d->pad && (len != last_len[i] || memcmp(r, last_report[i], len))) {
+                memcpy(last_report[i], r, len);
+                last_len[i] = (u8)len;
+                pad_report(d, r, len);
+            }
+        }
+        pipe_arm(h, d);
+    }
+}
+
+/* A HID device that is a joystick or gamepad: its report descriptor read and parsed, its pipe started. */
+static void hid_start(struct hc *h, struct usb_dev *d, int p)
+{
+    u8 idle[8] = { 0x21, 0x0A, 0, 0, 0, 0, 0, 0 }, get[8] = { 0x81, 6, 0, 0x22, 0, 0, 0, 0 }, *buf;
+    u32 got = 0, status = 0, k;
+    int n;
+    if (!d->ep_in || !d->hid_rlen || d->hid_rlen > 1024)
+        return;
+    idle[4] = d->ifnum;                         /* SET_IDLE(0): reports on a change only (a stall is fine) */
+    control(h, d->addr, d->maxp0, d->low, idle, 0, 0, &status);
+    get[4] = d->ifnum;
+    get[6] = (u8)d->hid_rlen, get[7] = (u8)(d->hid_rlen >> 8);
+    if (!(buf = kmalloc(1024)))
+        return;
+    if (control(h, d->addr, d->maxp0, d->low, get, buf, &got, &status) != 0) {
+        kfree(buf);
+        fail(p + 1, "report-descriptor", status);
+        return;
+    }
+    n = hid_pad_parse(buf, got, &pads[d - dev]);
+    kfree(buf);
+    if (n != 0)
+        return;
+    for (k = 0; k < JOY_PADS && pad_used[k]; k++) ;
+    if (k == JOY_PADS)
+        return;
+    for (n = 0; n < NPIPE; n++) {               /* a free pipe slot */
+        int i, taken = 0;
+        for (i = 0; i < MAX_DEV; i++)
+            if (dev[i].used && dev[i].pipe == n + 1)
+                taken = 1;
+        if (!taken)
+            break;
+    }
+    if (n == NPIPE)
+        return;
+    pad_used[k] = 1;
+    last_len[d - dev] = 0xFF;                   /* (the first report always goes on) */
+    d->pad = (u8)(k + 1);
+    d->pipe = (u8)(n + 1);
+    d->toggle = 0;
+    d->is = "hid-pad";
+    pipe_arm(h, d);
 }
 
 static void fail(int port, const char *step, u32 status)
@@ -316,6 +462,8 @@ static void attach(struct hc *h, int p)
     d->is = what(d);
     d->used = 1;
     h->port_dev[p] = (u8)(i + 1);
+    if (d->iclass == 0x03)
+        hid_start(h, d, p);
     if (d->ep_in)
         kprintf("GLOS-USB port=%d speed=%s id=%04x:%04x class=%02x/%02x/%02x if=%02x/%02x/%02x in=%02x/%u/%u%s is=%s\n",
                 p + 1, low ? "low" : "full", d->vendor, d->product, d->dclass, d->dsub, d->dproto, d->iclass,
@@ -329,6 +477,7 @@ static void attach(struct hc *h, int p)
 static void detach(struct hc *h, int p)
 {
     if (h->port_dev[p]) {
+        pipe_stop(h, &dev[h->port_dev[p] - 1]);
         dev[h->port_dev[p] - 1].used = 0;
         h->port_dev[p] = 0;
         kprintf("GLOS-USB port=%d gone\n", p + 1);
@@ -338,8 +487,16 @@ static void detach(struct hc *h, int p)
 static void usb_thread(void *arg)
 {
     int i, p;
+    u32 last_scan = timer_ticks() - 1024;
     (void)arg;
     for (;;) {
+        for (i = 0; i < nhc; i++)
+            pipes_poll(&hc[i]);
+        if (timer_ticks() - last_scan < 102) {  /* (the pipes every 2 ms; the root ports every 100) */
+            thread_sleep_until(timer_ticks() + 2);
+            continue;
+        }
+        last_scan = timer_ticks();
         for (i = 0; i < nhc; i++)
             for (p = 0; p < hc[i].ports; p++) {
                 u16 v = port_read(&hc[i], p);
@@ -354,7 +511,6 @@ static void usb_thread(void *arg)
                     attach(&hc[i], p);
                 }
             }
-        wait_ms(100);
     }
 }
 
@@ -378,14 +534,21 @@ static int take(struct pci_dev *pd)
     }
     if (!(h->frames = dma_alloc(1, &h->frames_phys)) || !(h->pool = dma_alloc(1, &h->pool_phys)))
         return -1;
-    h->qh_ctrl = (struct uhci_qh *)h->pool;
-    h->td = (struct uhci_td *)(h->pool + 256);
-    h->setup = h->pool + 256 + NTD * sizeof(struct uhci_td);
+    h->qh_ctrl = (struct uhci_qh *)h->pool;     /* the page: the control QH at 0, the pipes' QHs at 16-143, the */
+    h->qh_int = (struct uhci_qh *)(h->pool + 16);      /* control TDs at 256, the setup packet at 1536, the */
+    h->td = (struct uhci_td *)(h->pool + 256);         /* pipes' TDs at 1600, their buffers at 2048, a control */
+    h->setup = h->pool + 1536;                         /* transfer's data at 3072 */
+    h->td_int = (struct uhci_td *)(h->pool + 1600);
+    h->int_buf = h->pool + 2048;
     h->data = h->pool + 3072;
     h->qh_ctrl->head = UHCI_LP_T;
     h->qh_ctrl->elem = UHCI_LP_T;
+    for (p = 0; p < NPIPE; p++) {               /* each frame: the pipes' QHs in turn, then the control QH */
+        h->qh_int[p].head = (p + 1 < NPIPE ? PHYS(h, &h->qh_int[p + 1]) : PHYS(h, h->qh_ctrl)) | UHCI_LP_Q;
+        h->qh_int[p].elem = UHCI_LP_T;
+    }
     for (p = 0; p < 1024; p++)
-        h->frames[p] = h->pool_phys | UHCI_LP_Q;
+        h->frames[p] = PHYS(h, &h->qh_int[0]) | UHCI_LP_Q;
     if (pd->vendor == 0x8086)                   /* no SMI, no PCI interrupt, its status cleared */
         pci_write32(pd->bus, pd->dev, pd->fn, UHCI_LEGSUP, LEGSUP_CLEAR);
     cmd = pci_read32(pd->bus, pd->dev, pd->fn, 0x04);
@@ -461,7 +624,9 @@ int usb_stat(char *b, u32 room)
                             inw((u16)(hc[i].io + FRNUM)) & 0x7FF);
     for (i = 0; i < MAX_DEV && n < room; i++)
         if (dev[i].used)
-            n += (u32)ksnprintf(b + n, room - n, "port=%u addr=%u speed=%s id=%04x:%04x is=%s\n", dev[i].port,
-                                dev[i].addr, dev[i].low ? "low" : "full", dev[i].vendor, dev[i].product, dev[i].is);
+            n += (u32)ksnprintf(b + n, room - n, "port=%u addr=%u speed=%s id=%04x:%04x is=%s%s reports=%u errors=%u\n",
+                                dev[i].port, dev[i].addr, dev[i].low ? "low" : "full", dev[i].vendor, dev[i].product,
+                                dev[i].is, dev[i].pad ? (dev[i].pad == 1 ? " pad=1" : " pad=2") : "", dev[i].reports,
+                                dev[i].errors);
     return (int)n;
 }
