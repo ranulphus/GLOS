@@ -1,6 +1,8 @@
 # GLOS gamepads and USB input: a plan
 
-**Status (2026-11-05): plan v1, nothing built (branch `gamepad`).**
+**Status (2026-11-05): J0-J6 built and checked on bench-g400 with the owner's pads, keyboard, mouse and hub;
+J7's docs done. Owed: the Xbox 360 pad (2026-11-06), keyboards' lock lights, devices' second interfaces, EHCI and
+OHCI with the PCs that need them.**
 - **The ask:** after the Crystal work, the owner said there is no game-port joystick to hand, but there are USB
   gamepads, "Xbox-style" and generic HID, and "it would be great if they could somehow emulate a gameport joystick
   through GLOS".
@@ -11,7 +13,10 @@
   ([Decisions](#decisions)).
 - **J0 is done** ([Results](#results)), except the owner's Xbox 360 pad, which is at home (due 2026-11-06).
 - **J1 is built** (the virtual game port, `glos joy`, `[joystick]`; `make loopa-joy` passes on bf6 and the 486):
-  PRD D74. J2 (UHCI) is next.
+  PRD D74.
+- **J2-J6 are built** (GLOS's UHCI driver, hubs, HID keyboards, mice and pads, Xbox pads, two pads at once,
+  hot-plug), in the order J2, J4's pads, J5, J3, J4's keyboards and mice: the owner's pads were plugged in first,
+  the hub, keyboard and mouse came later. Each checked by hand on bench-g400 ([Results](#results)).
 
 DOS games read a joystick through the PC's game port at 201h, or through the BIOS. No DOS game knows USB, and DOS
 knows USB keyboards and mice only through the BIOS's emulation. This plan gives GLOS:
@@ -269,6 +274,39 @@ Order: J1 needs nothing else and is the part every machine gets. J2-J6 are bench
   int15.c but 86h's sleep; a DPMI program's block move had been killed for the BIOS's LGDT in V86).
 - **An app's own timing is coarse:** an app's PIT steps in kernel ticks (976 µs) while a session runs, as the agent's
   jobs are. So the suite checks apps for order, buttons and the BIOS's answer only.
+
+**J2 (2026-11-05, bench-g400; 86Box's machines show no UHCI, so Loop A checks only that nothing else broke):**
+
+    GLOS-PCI claim=00:02.2 id=8086:7112 irq=11
+    GLOS-USB uhci 00:02.2 io=ff00 ports=2 legsup=0000
+    GLOS-USB port=1 speed=low id=081f:e401 class=00/00/00 if=03/00/00 in=81/8/10 is=hid
+    GLOS-USB port=2 speed=full id=20d6:200c class=ff/47/d0 if=ff/47/d0 in=81/64/4 out=yes is=xbox-gip
+
+- **Enumeration:** both pads addressed and configured, at the first attempt; their descriptors as Linux read them
+  in J0.
+- **Shared IRQ 11:** the e100 on it is unaffected, since GLOS polls the UHCI. These SSH sessions run over the e100.
+- **Hand-back:** `glos restart` hands the controller back (stopped, reset, its legacy register put back) and takes
+  it again.
+- **Frame counter:** runs (`glos usb`).
+- **Host test:** `tests/host/uhci_test.c` checks the TDs of three control transfers.
+
+**J3-J6 (2026-11-05, bench-g400, by hand with the owner):**
+- **HID pad (the SNES-style 081f:e401):** its report descriptor parsed (`hidparse.c`, host test on its own 98
+  bytes); the pad drives the virtual game port: at rest JOYTEST reads 579 µs (127/255 of the range), the D-pad
+  0/127/255 on each axis, buttons 1 and 2 as A1 and A2. It answers every poll (ignoring SET_IDLE 0), so only a
+  changed report goes on.
+- **Xbox Series pad (PowerA 20d6:200c, GIP):** woken by the power-on packet on its interrupt OUT endpoint; its
+  reports (`xpad.c`, host test on J0's captured reports) as joystick B with the SNES pad as A: the left stick and
+  D-pad to 0 and 255 each way, A and B as B1 and B2. JOYTEST read all four axes at rest: 581, 581, 588, 588 µs.
+- **Hot-plug:** the SNES pad unplugged: gone within a second, the Xbox pad the whole port; plugged back: found again
+  (a new address) and joystick A again.
+- **Hub (Genesys Logic 05e3:0608, four ports, full speed):** the Xbox pad, a keyboard (0603:00f2) and a mouse
+  (15ca:00c3), both low speed, found behind it as `port=2.1` to `2.3`.
+- **Keyboard:** TYPEIN read `Hello GLOS 123xxxxxxxxxxxxx` (Shift's capitals; x held two seconds: GLOS's repeat).
+- **Mouse:** the desktop's pointer into all four corners (1,683 reports, no errors); "seemed perfect" (the owner).
+- **Loop A:** 86Box's bf6 has a PIIX4 UHCI with nothing on it; the take-over and hand-back run on every boot and
+  `glos exit` there. That found a double fault: `usb_leave` slept after the kernel's tick had stopped (86Box's
+  HCRESET never clears). It now busy-waits there.
 
 ## The PRD change (made with J1)
 

@@ -57,7 +57,8 @@ to switch a device's interrupts off, and (from D2) whether it is asserting.
     ES1868/1869, Yamaha OPL3-SAx, Analog Devices AD1816, and Creative's SB16/AWE PnP.
   - Each card is then the SB16 mixer's (keeper GLOS) or DOS's.
 - **Later.** Full GLOS drivers, a class at a time, where GLOS gains something: USB keyboard, mouse and storage
-  (OHCI, UHCI, EHCI), IDE, PCI sound. More quiet drivers as bench PCs need them: OHCI, AC'97, HDA, bus-master IDE,
+  (OHCI, UHCI, EHCI), IDE, PCI sound. The first is under way: **UHCI** (docs/gamepad.md J2, D74), after which a
+  UHCI's keeper is GLOS (its quiet driver only holds it until GLOS.CFG is read). More quiet drivers as bench PCs need them: OHCI, AC'97, HDA, bus-master IDE,
   SMBus.
 
 ## What each step logs
@@ -82,3 +83,19 @@ The IBM PC 300PL, under MS-DOS 7.1 with GLOS in agent mode:
 
 `tests/host/dev_test.c` checks the rule and the UHCI driver against made-up functions and ports (in `make
 host-test`). Loop A's 86Box machines don't share these lines, so there the ssh suite only shows nothing broke.
+
+## UHCI's keeper becomes GLOS (docs/gamepad.md J2, 2026-11-05)
+
+Once GLOS.CFG is read (`[usb] enabled`, on by default), `kernel/drv/uhci.c` takes each UHCI: its legacy support
+register cleared (no SMI, no PCI line), the controller stopped, reset, and run with GLOS's own schedule, which GLOS
+polls, so the shared line stays the other device's; `pci_claim` and `vdev_hide` then hide it from DOS. bench-g400:
+
+    GLOS-DEV quiet 00:02.2 id=8086:7112 class=uhci irq=11 how=pirq
+    GLOS-PCI claim=00:02.2 id=8086:7112 irq=11
+    GLOS-USB uhci 00:02.2 io=ff00 ports=2 legsup=0000
+
+A UHCI whose BIOS is emulating a USB keyboard on it (the legacy register's SMI enable) is taken too: GLOS's own USB
+keyboard and mouse drivers (J4) stand in for the emulation while GLOS runs. At `glos exit` the register is put back
+as found; whether a BIOS's emulation then picks up again is still to be seen on a PC that has it on (bench-g400's
+BIOS doesn't use USB).
+

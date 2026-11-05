@@ -8,9 +8,10 @@
  * The take-over: the legacy support register cleared (no SMI, no PCI interrupt line, its status bits cleared), the
  * controller stopped, globally reset (the bus too) and reset, then run with GLOS's frame list. No interrupt is ever
  * enabled: GLOS polls what it queued, so the line the controller shares (bench-g400: IRQ 11, the e100's) stays the
- * other device's. Its PCI function and ports then read as absent to DOS (pci_claim, vdev_hide). Until GLOS's own
- * keyboard and mouse drivers (J4), a controller the BIOS is using for its USB keyboard emulation (the register's
- * SMI enable) is left to the BIOS. At glos exit (usb_leave) each is stopped and reset, and the register put back.
+ * other device's. Its PCI function and ports then read as absent to DOS (pci_claim, vdev_hide). A controller the
+ * BIOS was using for its USB keyboard emulation (the register's SMI enable) is taken too: GLOS's own keyboard and
+ * mouse drivers stand in. At glos exit (usb_leave) each is stopped and reset, and the register put back as found
+ * (whether a BIOS's emulation then picks up again is to be seen on a PC that has it on).
  *
  * The schedule: every frame of the 1024 points at the same chain of queue heads, interrupt pipes' first (J4) and
  * the control QH last. A control transfer's TDs hang from the control QH; the "usb" thread waits for them a tick
@@ -20,7 +21,6 @@
  * read; then at address 0 the first 8 bytes of its device descriptor (the control endpoint's packet size), its
  * address, its whole device descriptor, its configuration with interfaces and endpoints, and SET_CONFIGURATION.
  *     GLOS-USB uhci 00:02.2 io=ff00 ports=2 legsup=0000 [reset=slow]
- *     GLOS-USB uhci 00:02.2 left reason=bios-legacy       (the BIOS's keyboard emulation is on)
  *     GLOS-USB port=1 speed=low id=081f:e401 class=00/00/00 if=03/00/00 in=81/8/10 out=- is=hid
  *     GLOS-USB port=1 gone
  *     GLOS-USB port=2 error=STEP status=XXXXXXXX           (a transfer that failed: the step, the TD's status) */
@@ -824,11 +824,6 @@ static int take(struct pci_dev *pd)
     if (!h->io)
         return -1;
     h->legsup = pd->vendor == 0x8086 ? pci_read32(pd->bus, pd->dev, pd->fn, UHCI_LEGSUP) & 0xFFFF : 0;
-    if (h->legsup & LEGSUP_SMIEN) {             /* (until J4: the BIOS's USB keyboard may be the PC's only one) */
-        kprintf("GLOS-USB uhci %02x:%02x.%u left reason=bios-legacy legsup=%04x\n", pd->bus, pd->dev, pd->fn,
-                h->legsup);
-        return -1;
-    }
     if (!(h->frames = dma_alloc(1, &h->frames_phys)) || !(h->pool = dma_alloc(1, &h->pool_phys)))
         return -1;
     h->qh_ctrl = (struct uhci_qh *)h->pool;     /* the page: the control QH at 0, the pipes' QHs at 16-143, the */
