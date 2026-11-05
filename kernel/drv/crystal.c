@@ -53,6 +53,7 @@ static struct {
     u8 found, running, game_on;
     u8 *buf;                                    /* the DMA buffer: two halves */
     u32 phys, frames, half, irqs;
+    u32 errors;                                 /* halves in which the codec reported a sample error (SER) */
     mixer_fill fill;
     char blaster[32];
 } cs = { .wss = 0x534, .syn = 0x388, .sb = 0x220, .game = 0x200, .ctrl = 0x120, .irq = 5, .dma = 1, .cap = 0 };
@@ -232,6 +233,22 @@ const char *crystal_blaster(void) { return cs.found ? cs.blaster : 0; }
 
 /* ---- the codec under the mixer */
 
+/* How far the 8237 has read into the buffer this lap, in bytes (its count
+   reads one less than the bytes left). */
+static u32 dma_pos(void)
+{
+    u32 lo, hi;
+    outb(0x0C, 0);                              /* the flip-flop */
+    lo = inb((u16)(cs.dma * 2 + 1));
+    hi = inb((u16)(cs.dma * 2 + 1));
+    return (cs.frames * 8 - (((hi << 8) | lo) + 1) % (cs.frames * 8)) % (cs.frames * 8);
+}
+
+/* The half the DMA isn't reading is filled: the codec's count runs on its
+   own, and the first after a set-up came one sample in (86Box: the halves
+   filled one behind from then on, a click every half, until a session's
+   stop and start put them right; heard on bench-g400 as a light crackle).
+   Where the DMA is says which half is free whatever the count did. */
 static void irq(struct trapframe *tf)
 {
     u8 st = inb((u16)(cs.wss + 2));
@@ -239,8 +256,10 @@ static void irq(struct trapframe *tf)
     if (!(st & 1) || !cs.running)
         return;
     cs.irqs++;
+    if (st & 0x10)                              /* SER: an underrun (I11's PUR) since R2 was last read: the DAC */
+        cs.errors++;                            /* held its last sample (DACZ 0) */
+    cs.half = dma_pos() < cs.frames * 4 ? 1 : 0;
     cs.fill((s16 *)(cs.buf + cs.half * cs.frames * 4), cs.frames, tf);
-    cs.half ^= 1;
 }
 
 static const u8 page_port[4] = { 0x87, 0x83, 0x81, 0x82 };
@@ -329,10 +348,12 @@ static void crystal_stop(void)
     outb((u16)(cs.wss + 2), 0);
     cs.running = 0;
     vm_unclaim_irq(cs.irq);
-    kprintf("GLOS-SOUND stop irqs=%u\n", cs.irqs);
+    kprintf("GLOS-SOUND stop irqs=%u errors=%u\n", cs.irqs, cs.errors);
 }
 
 static int crystal_running(void) { return cs.running; }
 static u32 crystal_irqs(void) { return cs.irqs; }
+static u32 crystal_errors(void) { return cs.errors; }
 
-const struct sound_card crystal_card = { "crystal", crystal_start, crystal_stop, crystal_running, crystal_irqs };
+const struct sound_card crystal_card = { "crystal", crystal_start, crystal_stop, crystal_running, crystal_irqs,
+                                         crystal_errors };

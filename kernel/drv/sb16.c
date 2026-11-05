@@ -166,4 +166,6 @@ static void sb16_stop(void)
 static int sb16_running(void) { return sb.running; }
 static u32 sb16_irqs(void) { return sb.irqs; }
 
-const struct sound_card sb16_card = { "sb16", sb16_start, sb16_stop, sb16_running, sb16_irqs };
+static u32 sb16_errors(void) { return 0; }
+
+const struct sound_card sb16_card = { "sb16", sb16_start, sb16_stop, sb16_running, sb16_irqs, sb16_errors };

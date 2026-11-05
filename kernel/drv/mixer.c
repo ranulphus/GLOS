@@ -325,8 +325,9 @@ u32 mixer_stat(char *buf, u32 max)
     u32 n, i;
     if (!mx.on)
         return (u32)ksnprintf(buf, max, "audio off\n");
-    n = (u32)ksnprintf(buf, max, "audio %s rate=%u period=%u periods=%u irqs=%u card=%s\n", mx.out ? "idle" : "on",
-                       mx.rate, PERIOD, mx.periods, mx.card->irqs(), mx.card->name);
+    n = (u32)ksnprintf(buf, max, "audio %s rate=%u period=%u periods=%u irqs=%u card=%s errors=%u\n",
+                       mx.out ? "idle" : "on", mx.rate, PERIOD, mx.periods, mx.card->irqs(), mx.card->name,
+                       mx.card->errors());
     for (i = 0; i < STREAMS && n < max; i++)
         if (st[i].a)
             n += (u32)ksnprintf(buf + n, max - n, "stream %u app=%u rate=%u channels=%u periods=%u underruns=%u\n",

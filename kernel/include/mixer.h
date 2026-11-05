@@ -31,6 +31,7 @@ struct sound_card {                             /* what the mixer plays through 
     void (*stop)(void);
     int (*running)(void);
     u32 (*irqs)(void);
+    u32 (*errors)(void);                        /* periods the card reported an underrun in (0: it can't tell) */
 };
 extern const struct sound_card sb16_card, crystal_card;
 void mixer_late(void);                          /* GLOS.CFG read: a Crystal chip set up when there's no SB16 */
