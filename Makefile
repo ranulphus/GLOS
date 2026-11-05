@@ -253,6 +253,7 @@ $(eval $(call dos_test,SHOTTEST,shottest))
 $(eval $(call dos_test,TYPEIN,typein))
 $(eval $(call dos_test,I2FTSR,i2ftsr))
 $(eval $(call dos_test,STUBTSR,stubtsr))
+$(eval $(call dos_test,UMBRD,umbrd))
 # DPMIMINI.COM: the smallest DPMI client, in assembly (M4a).
 build/ow/dos/DPMIMINI.COM: tests/dos/dpmimini.asm
 	@mkdir -p build/ow/dos/obj
@@ -271,7 +272,7 @@ build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
 DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/XMSBIG.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
              build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
              build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/CLOCKCHK.EXE \
-             build/ow/dos/I2FTSR.EXE build/ow/dos/STUBTSR.EXE
+             build/ow/dos/I2FTSR.EXE build/ow/dos/STUBTSR.EXE build/ow/dos/UMBRD.EXE
 dos-tests: $(DOS_TESTS)
 
 # The 2D library (kernel/gfx; M6 step C) and its fonts: 1-bit bitmaps made from TrueType fonts by
