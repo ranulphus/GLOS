@@ -1,8 +1,10 @@
 # GLOS upper memory: a plan
 
-**Status (2026-11-02): U0–U3 built and passing in Loop A (branch `upper`); U4, the whole regression with the page
-on and off, running; U5 (the bench) and B1 (UMBPCI) to come. Plan v1 (2026-10-31), with the owner's answers
-([Decisions](#decisions)), written for the disk cache's Q6 (docs/disk-cache.md, Decisions).**
+**Status (2026-11-05): U0–U4 pass in Loop A (branch `upper`; U4 the whole regression with the page on and off).
+U5 on bench-g400: the page and DOSBench's games work, but GLOS started again seconds after `glos exit` never
+answered; the likely cause, the network card left running (main too), is fixed on main, and U5 runs again once the PC
+is reset. B1 passes in Loop A (`make loopa-umb`, with MGA-Glide's `umbpci` boot). Plan v1 (2026-10-31), with the
+owner's answers ([Decisions](#decisions)), written for the disk cache's Q6 (docs/disk-cache.md, Decisions).**
 
 Two parts:
 - **Part A** is D41's opt-in setting, owed since M9. GLOS moves its resident stub into an upper-memory page it maps
@@ -238,6 +240,15 @@ Development in `~/wt-glos-m5`, long runs in `~/wt-glos-test`, as for the cache.
     shadow RAM).
 
   On bench-g400 only with the owner's OK, since it changes CONFIG.SYS. Then the PRD says what works.
+
+  **Loop A (2026-11-05, `make loopa-umb`; MGA-Glide's `--boot-cfg umbpci`: HIMEMX, then UMBPCI 3.90, which hands
+  DOS its blocks through the XMS driver loaded before it, and `DOS=HIGH,UMB`):** UMBPCI finds the 440BX and gives
+  C800h–DFFFh and E800h–EFFFh, five blocks, 128,944 bytes. A TSR loaded high (STUBTSR at C80Ch) stays as it was
+  through four GLOS runs. `LH GLOS.EXE` puts all of GLOS in a UMB (PSP C828h; MEM /C: 7,312 bytes, none of them
+  conventional); DSKTORT through the cache's block buffer there, on the scratch disk, gives the digest of plain DOS
+  and of GLOS loaded low. `/STUBPAGE=AUTO` takes no page (the UMBs read as RAM) and says so (`stub-page refused
+  reason=none`). VECCHK clean each time. In 86Box the BIOS's disk reads reach the buffer by the CPU; whether a
+  bus master's DMA reaches shadow RAM on silicon is for the bench.
 
 Then the docs: PRD (D41 as built; P7 with the page; D25's note from Part B), supervisor.md §2.2 (the stub,
 1687h), §4 (the first MB's one remapped page), §12.1a, the release notes.

@@ -556,6 +556,70 @@ def mempage(profile, boot):
         own(f("ON.TXT")), own(ag), "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+UMB_FILES = ["--file", os.path.join(MGA, "build/ow/dos/UMBINFO.COM") + "=/HX/UMBINFO.COM"]
+
+
+def umb(profile, boot):
+    """B1 (docs/upper-memory.md): GLOS among UMBs DOS has from the chipset's shadow RAM (MGA-Glide's umbpci boot:
+    HIMEMX, UMBPCI.SYS, DOS=HIGH,UMB; the bf6's 440BX). A TSR loaded high first (STUBTSR), then: GLOS loaded high
+    (LH GLOS.EXE: its PSP, stub and the disk cache's block buffer in a UMB) under MEM /C and under DSKTORT, which
+    reads and writes the scratch disk through that buffer; GLOS low with the cache on, and plain DOS, for DSKTORT's
+    digest; GLOS with /STUBPAGE=AUTO, which leaves the UMBs alone (they read as RAM: no page qualifies). Every run
+    ends clean, VECCHK each time, and the UMBs at the end as the TSR left them."""
+    tag = "%s-%s" % (profile, boot)
+    t = "C:\\TEST\\DSKTORT.EXE 81 1 600 170"
+    g = "C:\\TEST\\GLOS.EXE "
+    st, serial = run("umb-" + tag, ["--machine", profile, "--boot-cfg", boot, "--scratch-hdd", "64", "--timeout",
+                                    "1800", "--idle", "600"] + GLOS_FILES + UMA_FILES + CACHE_FILES + UMB_FILES + [
+        "--cmd", "SERSAY HX-START umb", "--cmd", "UMBINFO",
+        "--cmd", "LH C:\\TEST\\STUBTSR.EXE > C:\\OUT\\TSR.TXT", "--cmd", "UMBINFO", "--cmd", "VECCHK save",
+        "--cmd", t + " > C:\\OUT\\P.TXT",
+        "--cmd", "LH " + g + "/CACHE=ON /RUN MEM /C > C:\\OUT\\LH.TXT", "--cmd", "VECCHK check",
+        "--cmd", "LH " + g + "/CACHE=ON /RUN " + t + " > C:\\OUT\\LHT.TXT", "--cmd", "VECCHK check",
+        "--cmd", g + "/CACHE=ON /RUN " + t + " > C:\\OUT\\LOWT.TXT", "--cmd", "VECCHK check",
+        "--cmd", g + "/STUBPAGE=AUTO /RUN MEM /C > C:\\OUT\\PAGE.TXT", "--cmd", "VECCHK check",
+        "--cmd", "C:\\TEST\\UMAPROBE.EXE > C:\\OUT\\UMA.TXT", "--cmd", "UMBINFO", "--cmd", "SERSAY HX-DONE 0"])
+    f = lambda n: out_file("umb-" + tag, n)
+
+    def row(text, name="GLOS"):                 # MEM /C: total, conventional, upper
+        m = re.search(r"^\s*%s\s+([\d,]+)\s+\(\s*\d+K\)\s+([\d,]+)\s+\(\s*\d+K\)\s+([\d,]+)" % name, text, re.M)
+        return tuple(int(x.replace(",", "")) for x in m.groups()) if m else None
+
+    def tort(text):
+        m = re.search(r"DSKTORT ops=(\d+) bad=(\d+) pio=(\d+) files=(\d+) cross=(\w+) digest=(\w+) ok=(\d)", text)
+        return m.groups() if m else None
+    umbs = [dict(kv.split("=") for kv in line.split()[1:]) for line in re.findall(r"^HX-UMB .*$", serial, re.M)]
+    tsr = re.search(r"HX-STUBTSR psp=(\w+)", f("TSR.TXT") + serial)
+    res = re.findall(r"GLOS-VM resident psp=(\w+) stub=\d+ freed=\d+ page=(\w+)( buffer=4112)?", serial)
+    tr = {k: tort(f(k + ".TXT")) for k in ("P", "LHT", "LOWT")}
+    ends = re.findall(r"GLOS-CACHE end mode=(\w+) hits=(\d+) .* mismatches=(\d+)", serial)
+    lh = row(f("LH.TXT"))
+    auto = re.search(r"UMAPROBE free=\d+ first=\w+ auto=(\w+)", f("UMA.TXT"))
+    checks = {
+        "status": st == "PASS" and serial.count("GLOS-EXIT code=0") == 4,
+        "umbs": len(umbs) == 3 and int(umbs[0].get("free", "0")) > 32768,
+        "tsr-high": bool(tsr) and int(tsr.group(1), 16) >= 0xA000 and len(umbs) == 3
+        and int(umbs[1]["free"]) < int(umbs[0]["free"]),
+        "lh": len(res) == 4 and int(res[0][0], 16) >= 0xA000 and int(res[1][0], 16) >= 0xA000 and res[0][2] != ""
+        and bool(lh) and lh[1] == 0 and lh[2] > 0,
+        "low": len(res) == 4 and int(res[2][0], 16) < 0xA000,
+        "tort": all(v and v[6] == "1" and v[4] == "ok" for v in tr.values()) and len({v[5] for v in tr.values() if v}) == 1,
+        "tort-cache": len(ends) == 4 and all(e[0] == "on" and e[2] == "0" for e in ends)     # (on in every run;
+        and int(ends[1][1]) > 0 and int(ends[2][1]) > 0,                                 #  hits under DSKTORT)
+        "page": len(res) == 4 and res[3][1] == "none" and bool(auto) and auto.group(1) == "none",
+        # (as the TSR left them, but for free neighbours DOS has joined since: an arena header back each time)
+        "umbs-after": len(umbs) == 3 and int(umbs[2]["blocks"]) <= int(umbs[1]["blocks"])
+        and int(umbs[2]["free"]) - int(umbs[1]["free"]) == 16 * (int(umbs[1]["blocks"]) - int(umbs[2]["blocks"])),
+        "vecchk": serial.count("HX-VECCHK ok") == 4,
+        "clean": "GLOS-WARN" not in serial and "GLOS-PANIC" not in serial,
+    }
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s umb=%s lh=%s glos=%s" % (
+        "umb-" + tag, "PASS" if not bad else "FAIL", umbs[0].get("free", "?") if umbs else "?",
+        res[0][0] if res else "?", "/".join(str(x) for x in lh) if lh else "?") \
+        + ("" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 CACHE_FILES = ["--file", "build/dj/DSKTORT.EXE=/TEST/DSKTORT.EXE", "--file", "build/dj/DISKRD.EXE=/TEST/DISKRD.EXE",
                "--file", "build/dj/LAZYCHK.EXE=/TEST/LAZYCHK.EXE", "--file", "build/ow/dos/XMSBIG.EXE=/TEST/XMSBIG.EXE"]
 
@@ -5811,7 +5875,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
                                       "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache",
-                                      "umaprobe", "mem-page", "int2f"])
+                                      "umaprobe", "mem-page", "int2f", "umb"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -5953,6 +6017,8 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "mem-page":
         return 0 if all(r[1] for r in matrix(mempage, combos, a.jobs)) else 1
+    if a.suite == "umb":                        # (the bf6: a 440BX, which UMBPCI knows; MGA-Glide's umbpci boot)
+        return 0 if all(r[1] for r in matrix(umb, [("bf6", "umbpci")], a.jobs)) else 1
     if a.suite == "umaprobe":
         cases = [c for c in UMA_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(umaprobe, cases, a.jobs)) else 1

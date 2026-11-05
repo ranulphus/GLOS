@@ -13,6 +13,7 @@
 #   make loopa-mem      conventional memory under GLOS against plain DOS (PRD P7)
 #   make loopa-mem-page the resident stub in a page of upper memory (docs/upper-memory.md)
 #   make loopa-umaprobe what is in each Loop A machine's upper memory area (U0, read-only)
+#   make loopa-umb      GLOS among UMBs from the chipset (B1: MGA-Glide's umbpci boot)
 #   make loopa-shell    GLOS as the DOS shell: SHELL= boots, AUTOEXEC.BAT, the fallback
 #   make loopa-net      the NE2000s: DHCP, TCP echo, refused under a packet driver
 #   make loopa-ssh      ssh from the host into GLOS in Loop A (runs on the host)
@@ -78,7 +79,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -378,6 +379,9 @@ loopa-mem: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE build/ow/dos/
 # The stub in a page of upper memory (docs/upper-memory.md U1, U2; in loopa-mem too), and U0's probe.
 loopa-mem-page: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py mem-page -j $(JOBS)
+# B1: GLOS among UMBs from the chipset's shadow RAM (docs/upper-memory.md); needs MGA-Glide's umbpci boot.
+loopa-umb: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE build/dj/DSKTORT.EXE build/dj/DISKRD.EXE build/dj/LAZYCHK.EXE check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py umb -j $(JOBS)
 loopa-umaprobe: all build/dj/UMAPROBE.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py umaprobe -j $(JOBS)
 # GLOS leaving with INT 2Fh hooked over by a TSR (in loopa-mem too).
