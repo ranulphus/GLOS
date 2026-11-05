@@ -3277,8 +3277,37 @@ def audio_case(profile, vcard, card, sound="sb16"):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def crystal_off_case(profile, vcard, card):
+    """[sound] crystal = off (docs/crystal-audio.md): with 86Box's CS4236B there, GLOS leaves the chip alone and has
+    no sound card; `glos config set` takes the key's other values (the schema has it: before 2026-11-05 it didn't,
+    and the driver read whatever its buffer held)."""
+    tag = "%s-%s-crystal-off" % (profile, vcard)
+    cfg = batfile("audio-%s/GLOS.CFG" % tag, ["; jobs.py audio, [sound] crystal = off", "[time]", "sntp = off",
+                                              "[sound]", "crystal = off"])
+    agent = Agent("audio-" + tag, profile, card, ["--card", vcard, "--sound", "cs4236b",
+        "--file", cfg + "=/TEST/GLOS.CFG", "--cmd", "SERSAY HX-START audio", "--cmd", "VECCHK save",
+        "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks = {"listen": agent.listening()}
+    try:
+        checks["off"] = "GLOS-SOUND crystal off\n" in agent.log() and "GLOS-SOUND crystal wss=" not in agent.log()
+        checks["no-card"] = " card=crystal " not in agent.ssh("glos audio")[1]
+        checks["get"] = agent.ssh("glos config get sound crystal")[1].strip() == "off"
+        checks["set"] = all(agent.ssh("glos config set sound crystal " + v)[0] == 0
+                            for v in ("auto", "wss=534 irq=5 dma=1", "off"))
+        checks["refused"] = agent.ssh("glos config set sound crystal " + "x" * 96)[0] != 0     # (too long)
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("audio-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 # (machine, video card, network card, desktop): windowed DOS-GL (M8 step D)
-GLWIN_CASES = [("bf6", "g200", "ne2kpci", "800x600x16"), ("bf6", "g400", "ne2kpci", "1024x768x16"),
+GLWIN_CASES =[("bf6", "g200", "ne2kpci", "800x600x16"), ("bf6", "g400", "ne2kpci", "1024x768x16"),
                ("bf6", "g450", "ne2kpci", "1024x768x16")]
 
 
@@ -6010,7 +6039,11 @@ def main():
         cases = [c for c in AUDIO_CASES if not a.profile or c[0] in a.profile]
         if os.environ.get("LOOPA_AUDIO_SOUND"):    # e.g. LOOPA_AUDIO_SOUND=cs4236b,cs4232
             cases = [c for c in cases if (c[3] if len(c) > 3 else "sb16") in os.environ["LOOPA_AUDIO_SOUND"].split(",")]
-        return 0 if all(r[1] for r in matrix(audio_case, cases, a.jobs)) else 1
+        res = matrix(audio_case, cases, a.jobs)
+        if not os.environ.get("LOOPA_AUDIO_SOUND") or "off" in os.environ["LOOPA_AUDIO_SOUND"].split(","):
+            res += matrix(crystal_off_case, [c[:3] for c in AUDIO_CASES if len(c) > 3
+                                             and (not a.profile or c[0] in a.profile)][:1], a.jobs)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "gpu":
         cases = [c for c in GPU_CASES if not a.profile or c[0] in a.profile]
         if os.environ.get("GPU_ONLY"):          # e.g. GPU_ONLY=g200

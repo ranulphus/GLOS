@@ -44,6 +44,7 @@ int display_ask(int what, u32 w, u32 h, u32 b) { snprintf(applied, sizeof applie
 void gpu_watchdog(u32 ms) { snprintf(applied, sizeof applied, "watchdog %u", ms); }
 void mixer_enable(int on) { snprintf(applied, sizeof applied, "mixer %d", on); }
 void mixer_set_rate(u32 r) { snprintf(applied, sizeof applied, "rate %u", r); }
+void mixer_late(void) { }                  /* (a Crystal chip: none on the host) */
 void vkbc_typematic(u32 d, u32 r) { snprintf(applied, sizeof applied, "typematic %u %u", d, r); }
 void deskin_pointer_speed(int s) { snprintf(applied, sizeof applied, "speed %d", s); }
 void clock_zone(const char *tz) { snprintf(applied, sizeof applied, "zone %s", tz); }
@@ -106,7 +107,9 @@ static const struct { const char *sec, *key, *val; int ok; } values[] = {
     { "display", "accel", "maybe", 0 }, { "display", "gpu_watchdog", "500", 1 }, { "display", "gpu_watchdog", "off", 1 },
     { "display", "gpu_watchdog", "49", 0 }, { "display", "gpu_watchdog", "5x", 0 }, { "sound", "rate", "44100", 1 },
     { "sound", "rate", "48000", 0 }, { "sound", "blaster", "A220 I5 D1 H5 T6", 1 }, { "sound", "blaster", "I5 D1", 0 },
-    { "sound", "blaster", "A220 I", 0 }, { "net", "hostname", "retro-486", 1 }, { "net", "hostname", "-x", 0 },
+    { "sound", "blaster", "A220 I", 0 },
+    { "sound", "crystal", "off", 1 }, { "sound", "crystal", "wss=534 irq=5 dma=1", 1 }, { "sound", "crystal", "", 0 },
+    { "net", "hostname", "retro-486", 1 }, { "net", "hostname", "-x", 0 },
     { "net", "hostname", "a.b", 0 }, { "net", "hostname", "abcdefghijklmnop", 0 }, { "input", "repeat_rate", "30", 1 },
     { "input", "repeat_rate", "31", 0 }, { "input", "pointer_speed", "2", 1 }, { "shell", "comspec", "C:\\COMMAND.COM", 1 },
     { "shell", "comspec", "C:\\A|B", 0 }, { "program FWHEEL.EXE", "env", "DOOMWADDIR=D:\\DOOM", 1 },

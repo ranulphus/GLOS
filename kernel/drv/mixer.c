@@ -87,6 +87,7 @@ void mixer_late(void)
     char v[96];
     if (mx.card)
         return;
+    v[0] = 0;                                   /* (kcfg_get leaves it alone for a key the schema lacks) */
     kcfg_get("sound", "crystal", v, sizeof v);
     if (crystal_init(v) != 0)
         return;

@@ -876,9 +876,9 @@ static void read_cfg(const char *argv0, int shell_keys)
                 bi.sound_rate = (unsigned long)atol(v);
             else if (!stricmp(k, "blaster") && strlen(v) < sizeof cfg_blaster)
                 strcpy(cfg_blaster, v);
-            else
+            else if (!stricmp(k, "mixer") || !stricmp(k, "rate") || !stricmp(k, "blaster"))
                 say("GLOS-WARN cfg-key section=sound key=%s", k);
-            continue;
+            continue;                           /* (crystal: the kernel's, crystal.c) */
         }
         if (in_cache) {                         /* enabled = on | off | verify | count; size = auto | MB (the disk
                                                    cache, docs/disk-cache.md: the block buffer is kept at start) */
