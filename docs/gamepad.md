@@ -9,7 +9,8 @@
 - **v0's questions, answered:** GLOS takes the USB controller over outright, with its own drivers for gamepads,
   keyboards, mice and hubs, and flash drives later. No 86Box USB model for now, no keypad joystick
   ([Decisions](#decisions)).
-- **J0 (the look at the owner's pads) is under way.**
+- **J0 is done** ([Results](#results)), except the owner's Xbox 360 pad, which is at home (due 2026-11-06). J1 is
+  next.
 
 DOS games read a joystick through the PC's game port at 201h, or through the BIOS. No DOS game knows USB, and DOS
 knows USB keyboards and mice only through the BIOS's emulation. This plan gives GLOS:
@@ -219,6 +220,27 @@ pads are tested by host tests and on the bench (the owner chose that over an 86B
 - **Later, each with its PC:** EHCI hand-off and OHCI (above). USB flash drives, in a plan of their own.
 
 Order: J1 needs nothing else and is the part every machine gets. J2-J6 are bench-only work.
+
+## Results
+
+**J0 (2026-11-05, bench-g400; details and captures in [gamepad-j0/](gamepad-j0/README.md)):**
+- **The HID pad: 081f:e401 "USB gamepad"**, an SNES-style pad.
+  - **USB:** low speed, an 8-byte report every 10 ms.
+  - **Controls:** the D-pad is X/Y (0, 127, 255); X, A, B, Y are buttons 1-4; L and R are 5 and 6; Select and
+    Start are 9 and 10.
+  - **For GLOS:** a plain case for the HID parser, and the low-speed case for UHCI.
+- **The Xbox pad: 20d6:200c, PowerA "Xbox Series X EnWired"**, a GIP pad at full speed.
+  - **Start-up:** silent until the power-on packet `05 20 00 01 00`; then a 36-byte input report (type 20h) on
+    every change, and a status message every 19.5 s.
+  - **Report layout:** confirmed control by control. Sticks are signed 16-bit, triggers 0-1023, sticks rest up to
+    about ±7,000 off centre (so a dead zone).
+  - **The Xbox button sent nothing** with only the power-on packet: it needs more of GIP's start-up, not needed for
+    the game port.
+  - **So J5 starts with GIP.** The 360 pad follows when it is here.
+- **bench-g400's UHCI:** the IBM BIOS leaves it stopped, with no legacy support (no SMI, no 60h/64h traps).
+  - **On this PC:** nothing to take over or hand back. Both root ports have a pad, neither port enabled.
+  - **Still to check:** take-over from an active BIOS, and hand-back at `glos exit`, need a PC whose BIOS has USB
+    legacy support on: bench #2, perhaps.
 
 ## The PRD change (proposed)
 

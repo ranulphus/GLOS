@@ -787,6 +787,11 @@ build/dj/UMAPROBE.EXE: tests/dos/umaprobe.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+# Every UHCI USB controller's state as the BIOS left it, read-only (docs/gamepad.md J0).
+build/dj/USBPEEK.EXE: tests/dos/usbpeek.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 # The disk cache's torture test (docs/disk-cache.md C3), on run.py --scratch-hdd's blank disk.
 build/dj/DSKTORT.EXE: tests/dos/dsktort.c
 	@mkdir -p $(dir $@)
