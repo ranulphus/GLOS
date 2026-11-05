@@ -8,8 +8,8 @@
 
 /* ---- the schema */
 
-const char *const cfg_sections[] = { "display", "input", "joystick", "sound", "net", "time", "cache", "memory", "vnc",
-                                     "desktop", "shell", "open", "program",
+const char *const cfg_sections[] = { "display", "input", "joystick", "usb", "sound", "net", "time", "cache", "memory",
+                                     "vnc", "desktop", "shell", "open", "program",
                                      0 };
 
 const struct cfg_key cfg_schema[] = {
@@ -37,6 +37,10 @@ const struct cfg_key cfg_schema[] = {
       "is used otherwise; virtual: always GLOS's; off: always the PC's" },
     { "joystick", "range", CFG_NUMBER, CFG_NOW, 100, 10000, 0, "1124", "Axis &range (microseconds)",
       "How long an axis's one-shot runs at its far end (24 at the near end): 1124 as a 100 kΩ stick" },
+    /* [usb]: GLOS's own USB stack (docs/gamepad.md) */
+    { "usb", "enabled", CFG_CHOICE, CFG_RESTART, 0, 0, "on|off", "on", "&USB",
+      "GLOS drives the PC's USB controllers itself (UHCI) and finds what is plugged in; off: they are left to the "
+      "BIOS and DOS" },
     /* [sound] (M8) */
     { "sound", "mixer", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "&Mixer",
       "GLOS plays the Sound Blaster 16 and mixes the apps' sound (off: programs have the card)" },

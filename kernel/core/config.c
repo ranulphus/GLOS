@@ -24,6 +24,7 @@
 #include "display.h"
 #include "gpu.h"
 #include "joy.h"
+#include "usb.h"
 #include "mixer.h"
 #include "nic.h"
 #include "vm.h"
@@ -487,6 +488,7 @@ static void apply_read(void)
     clock_zone(z);
     mixer_late();                               /* a Crystal chip, with no SB16 ([sound] crystal) */
     joy_config();                               /* [joystick] port and range */
+    usb_late();                                 /* [usb] enabled: GLOS's USB controllers */
 }
 
 /* The desktop has come on (display.c, the VM thread): [desktop] start's programs, beside GLOS.EXE when they have
@@ -651,6 +653,7 @@ static void load(void)
         kfree(buf);
         mixer_late();                           /* (the defaults: [sound] crystal = auto) */
         joy_config();
+        usb_late();
         return;
     }
     h = q.r[0].ax;
@@ -665,6 +668,7 @@ static void load(void)
         kfree(buf);
         mixer_late();
         joy_config();
+        usb_late();
         return;
     }
     got = q.r[0].ax;

@@ -25,6 +25,7 @@
 #include "mixer.h"
 #include "mm.h"
 #include "nic.h"
+#include "usb.h"
 #include "pci.h"
 #include "sched.h"
 #include "shot.h"
@@ -518,6 +519,7 @@ static void vm_leave(u32 code)
     sched_report();
     net_report();
     nic_leave();
+    usb_leave();                                /* (its controllers stopped, reset, given back) */
     cache_end();
     if (vm.bi->flags & BI_F_SELFTEST)
         selftest_report();

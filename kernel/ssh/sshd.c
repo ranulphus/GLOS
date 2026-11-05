@@ -27,6 +27,7 @@
 #include "display.h"
 #include "io.h"
 #include "joy.h"
+#include "usb.h"
 #include "kprintf.h"
 #include "mixer.h"
 #include "mm.h"
@@ -1245,6 +1246,11 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             ssh_chan_write(ch, 0, (const uint8_t *)b, (u32)joy_stat(b, sizeof b));
             ssh_chan_exit(ch, 0);
         }
+    } else if (!strcmp(cmd, "glos usb")) {
+        /* glos usb: GLOS's USB controllers and the devices on them (kernel/drv/uhci.c, docs/gamepad.md) */
+        char b[1024];
+        ssh_chan_write(ch, 0, (const uint8_t *)b, (u32)usb_stat(b, sizeof b));
+        ssh_chan_exit(ch, 0);
     } else if (!strcmp(cmd, "glos audio")) {
         /* glos audio: the mixer and its streams (M8) */
         char b[512];
@@ -1336,7 +1342,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
     } else {
         say(ch, 1, "glos: no such command (glos ver, echo, run, shot, key, type, mouse, log, stat, ps, mem, net, tick, "
-                   "joy, kill, gdb, exit, restart, reboot)\n");
+                   "joy, usb, kill, gdb, exit, restart, reboot)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;

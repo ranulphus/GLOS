@@ -46,6 +46,7 @@ void mixer_enable(int on) { snprintf(applied, sizeof applied, "mixer %d", on); }
 void mixer_set_rate(u32 r) { snprintf(applied, sizeof applied, "rate %u", r); }
 void mixer_late(void) { }                  /* (a Crystal chip: none on the host) */
 void joy_config(void) { snprintf(applied, sizeof applied, "joystick"); }
+void usb_late(void) { }
 void vkbc_typematic(u32 d, u32 r) { snprintf(applied, sizeof applied, "typematic %u %u", d, r); }
 void deskin_pointer_speed(int s) { snprintf(applied, sizeof applied, "speed %d", s); }
 void clock_zone(const char *tz) { snprintf(applied, sizeof applied, "zone %s", tz); }
@@ -110,7 +111,8 @@ static const struct { const char *sec, *key, *val; int ok; } values[] = {
     { "sound", "rate", "48000", 0 }, { "sound", "blaster", "A220 I5 D1 H5 T6", 1 }, { "sound", "blaster", "I5 D1", 0 },
     { "sound", "blaster", "A220 I", 0 },
     { "joystick", "port", "virtual", 1 }, { "joystick", "port", "on", 0 }, { "joystick", "range", "2000", 1 },
-    { "joystick", "range", "99", 0 }, { "joystick", "range", "10001", 0 },
+    { "joystick", "range", "99", 0 }, { "joystick", "range", "10001", 0 }, { "usb", "enabled", "off", 1 },
+    { "usb", "enabled", "maybe", 0 },
     { "sound", "crystal", "off", 1 }, { "sound", "crystal", "wss=534 irq=5 dma=1", 1 }, { "sound", "crystal", "", 0 },
     { "net", "hostname", "retro-486", 1 }, { "net", "hostname", "-x", 0 },
     { "net", "hostname", "a.b", 0 }, { "net", "hostname", "abcdefghijklmnop", 0 }, { "input", "repeat_rate", "30", 1 },

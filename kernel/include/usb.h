@@ -1,0 +1,61 @@
+/* GLOS's USB stack (docs/gamepad.md J2-J6, PRD D74): UHCI host controllers, the devices on their root ports, and
+ * (later) hubs, HID keyboards, mice and pads, and Xbox pads. */
+#ifndef K_USB_H
+#define K_USB_H
+#include "types.h"
+
+/* UHCI transfer descriptors and queue heads, as the controller reads them (Intel's UHCI design guide rev 1.1, §3). */
+struct uhci_td {
+    volatile u32 link;                  /* the next TD or QH (physical), | T, Q, Vf */
+    volatile u32 ctrl;                  /* status, actual length, LS, C_ERR, IOC, SPD */
+    volatile u32 token;                 /* PID, device address, endpoint, data toggle, maximum length */
+    volatile u32 buf;                   /* the buffer (physical) */
+    u32 sw[4];                          /* (software's: 32 bytes a TD) */
+};
+
+struct uhci_qh {
+    volatile u32 head;                  /* the next QH (physical), | T, Q */
+    volatile u32 elem;                  /* its first TD (physical), | T */
+    u32 sw[2];
+};
+
+#define UHCI_LP_T       0x1u            /* link pointers: terminate */
+#define UHCI_LP_Q       0x2u            /* ... a QH, not a TD */
+#define UHCI_LP_VF      0x4u            /* ... depth first */
+
+#define UHCI_TD_SPD     (1u << 29)      /* ctrl: short packet detect */
+#define UHCI_TD_CERR3   (3u << 27)      /* ... three errors before the TD stops */
+#define UHCI_TD_LS      (1u << 26)      /* ... a low-speed device */
+#define UHCI_TD_IOC     (1u << 24)
+#define UHCI_TD_ACTIVE  (1u << 23)
+#define UHCI_TD_STALLED (1u << 22)
+#define UHCI_TD_ERRORS  (0x7Eu << 16)   /* stalled, data buffer, babble, NAK, CRC/timeout, bitstuff */
+#define UHCI_TD_ACTLEN(c) (((c) + 1) & 0x7FFu)   /* bytes moved (the field holds n - 1; 7FFh: none) */
+
+#define USB_PID_SETUP   0x2Du
+#define USB_PID_IN      0x69u
+#define USB_PID_OUT     0xE1u
+
+/* A control transfer's TDs, built into td[] (at most max of them, td_phys the first's physical address, each 32
+   bytes on): SETUP from setup_phys, the data stage in packets of maxp at data_phys (IN when setup[0] bit 7), and
+   the status stage the other way, all linked depth first. Returns how many, or 0 if max is too few. (No I/O: host
+   tested.) */
+u32 uhci_control_tds(struct uhci_td *td, u32 max, u32 td_phys, const u8 setup[8], u32 setup_phys, u32 data_phys,
+                     u32 addr, u32 maxp, int low);
+
+struct usb_dev {
+    u8 used, addr, port, low;
+    u8 maxp0, config, nif;
+    u16 vendor, product, release;
+    u8 dclass, dsub, dproto;            /* the device descriptor's */
+    u8 iclass, isub, iproto;            /* its first interface's */
+    u8 ep_in, ep_in_maxp, ep_in_ival;   /* its first interrupt IN endpoint (0: none) */
+    u8 ep_out, ep_out_maxp;
+    const char *is;                     /* hid-keyboard, hid-mouse, hid, xbox360, xbox-gip, hub, other */
+};
+
+void usb_late(void);                    /* after GLOS.CFG: [usb] enabled, every UHCI taken */
+void usb_leave(void);                   /* glos exit: each controller stopped, reset and its registers given back */
+int usb_stat(char *b, u32 room);        /* glos usb */
+
+#endif

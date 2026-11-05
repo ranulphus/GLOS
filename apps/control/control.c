@@ -59,7 +59,7 @@ static const char *const modes[] = { "none", "640x480x8", "640x480x16", "640x480
                                      "1280x1024x16", "1280x1024x32" };
 static char mode_extra[24];                     /* the file's mode, if it isn't one of these */
 
-static const char *const titles[] = { "Display", "Input", "Joystick", "Sound", "Network", "Date and Time",
+static const char *const titles[] = { "Display", "Input", "Joystick", "USB", "Sound", "Network", "Date and Time",
                                       "Disk Cache", "Memory", "Remote Desktop", "Desktop", "Shell", "File Types",
                                       "Programs" };
                                                 /* (cfg_sections' order) */
