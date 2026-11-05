@@ -57,6 +57,11 @@ struct usb_dev {
     /* an interrupt IN pipe (a pad's: J4) */
     u8 pipe, toggle, pad;               /* pipe: its slot + 1 (0 none); pad: the joystick pad it is + 1 */
     u8 kind, toggle_out;                /* kind: 0 HID, else XPAD_360 or XPAD_GIP (xpad.h) */
+    /* where it is: on a root port (port, parent 0), or on port hport of the hub that is device parent - 1 */
+    u8 hc_i, parent, hport;
+    /* a hub's (J3) */
+    u8 nports, hub_dirty;               /* its ports (8 at most); a change came on its status pipe */
+    u8 child[8], ctries[8];             /* the device on each of its ports (index + 1), attempts at it */
     u32 reports, errors;
 };
 

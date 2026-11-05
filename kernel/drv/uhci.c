@@ -67,7 +67,7 @@
 #define LEGSUP_CLEAR    0x8F00          /* its status bits: a 1 clears them */
 
 #define MAX_HC          2
-#define MAX_DEV         8
+#define MAX_DEV         16
 #define NTD             40
 #define NPIPE           8               /* interrupt IN pipes, a controller */
 
@@ -250,7 +250,8 @@ static void parse_config(struct usb_dev *d, const u8 *c, u32 len)
     d->nif = (u8)ifaces;
 }
 
-static void fail(int port, const char *step, u32 status);
+static void fail(const struct usb_dev *d, const char *step, u32 status);
+static char *loc(const struct usb_dev *d, char *b);
 
 /* ---- interrupt IN pipes: one TD a pipe, hung from its QH, which every frame passes (the controller retries a
    NAKed TD each frame, so a device is asked every millisecond however long its interval); re-armed with the data
@@ -314,14 +315,15 @@ static void pipes_poll(struct hc *h)
     for (i = 0; i < MAX_DEV; i++) {
         struct usb_dev *d = &dev[i];
         u32 c;
-        if (!d->used || !d->pipe || h->port_dev[d->port - 1] != i + 1)
+        if (!d->used || !d->pipe || &hc[d->hc_i] != h)
             continue;
         c = h->td_int[d->pipe - 1].ctrl;
         if (c & UHCI_TD_ACTIVE)
             continue;
         if (c & UHCI_TD_ERRORS) {               /* (unplugged, or a stall: the port's change will tell) */
+            char b[16];
             if (++d->errors == 1)
-                kprintf("GLOS-USB port=%u pipe-error status=%08x\n", d->port, c);
+                kprintf("GLOS-USB port=%s pipe-error status=%08x\n", loc(d, b), c);
             if (d->errors > 20) {
                 pipe_stop(h, d);
                 continue;
@@ -331,6 +333,8 @@ static void pipes_poll(struct hc *h)
             u32 len = UHCI_TD_ACTLEN(c);
             d->reports++;
             d->toggle ^= 1;
+            if (d->nports && len)               /* a hub's status pipe: a bit for each port that changed */
+                d->hub_dirty = 1;
             if (d->pad && (len != last_len[i] || memcmp(r, last_report[i], len))) {
                 struct joy_pad jp;
                 memcpy(last_report[i], r, len);
@@ -345,32 +349,39 @@ static void pipes_poll(struct hc *h)
     }
 }
 
-/* A joystick pad and a pipe slot for a device: 0, or -1 if either is short. */
-static int pad_take(struct usb_dev *d)
+/* A pipe slot on the device's controller: 0, or -1 if none is free. */
+static int pipe_slot(struct usb_dev *d)
 {
-    int k, n, i, taken;
-    for (k = 0; k < JOY_PADS && pad_used[k]; k++) ;
-    if (k == JOY_PADS)
-        return -1;
+    int n, i, taken;
     for (n = 0; n < NPIPE; n++) {
         for (taken = 0, i = 0; i < MAX_DEV; i++)
-            if (dev[i].used && dev[i].pipe == n + 1)
+            if (dev[i].used && dev[i].hc_i == d->hc_i && dev[i].pipe == n + 1 && &dev[i] != d)
                 taken = 1;
         if (!taken)
             break;
     }
     if (n == NPIPE)
         return -1;
-    pad_used[k] = 1;
-    last_len[d - dev] = 0xFF;                   /* (the first report always goes on) */
-    d->pad = (u8)(k + 1);
     d->pipe = (u8)(n + 1);
     d->toggle = 0;
+    last_len[d - dev] = 0xFF;                   /* (the first report always goes on) */
+    return 0;
+}
+
+/* A joystick pad and a pipe slot for a device: 0, or -1 if either is short. */
+static int pad_take(struct usb_dev *d)
+{
+    int k;
+    for (k = 0; k < JOY_PADS && pad_used[k]; k++) ;
+    if (k == JOY_PADS || pipe_slot(d) != 0)
+        return -1;
+    pad_used[k] = 1;
+    d->pad = (u8)(k + 1);
     return 0;
 }
 
 /* A HID device that is a joystick or gamepad: its report descriptor read and parsed, its pipe started. */
-static void hid_start(struct hc *h, struct usb_dev *d, int p)
+static void hid_start(struct hc *h, struct usb_dev *d)
 {
     u8 idle[8] = { 0x21, 0x0A, 0, 0, 0, 0, 0, 0 }, get[8] = { 0x81, 6, 0, 0x22, 0, 0, 0, 0 }, *buf;
     u32 got = 0, status = 0;
@@ -385,7 +396,7 @@ static void hid_start(struct hc *h, struct usb_dev *d, int p)
         return;
     if (control(h, d->addr, d->maxp0, d->low, get, buf, &got, &status) != 0) {
         kfree(buf);
-        fail(p + 1, "report-descriptor", status);
+        fail(d, "report-descriptor", status);
         return;
     }
     n = hid_pad_parse(buf, got, &pads[d - dev]);
@@ -398,7 +409,7 @@ static void hid_start(struct hc *h, struct usb_dev *d, int p)
 
 /* An Xbox pad: GIP's are silent until the power-on packet (docs/gamepad-j0/: 05 20 00 01 00) goes to their
    interrupt OUT endpoint; a 360's report at once. */
-static void xbox_start(struct hc *h, struct usb_dev *d, int p)
+static void xbox_start(struct hc *h, struct usb_dev *d)
 {
     static const u8 power_on[5] = { 0x05, 0x20, 0x00, 0x01, 0x00 };
     d->kind = (u8)(d->iproto == 0xD0 ? XPAD_GIP : XPAD_360);
@@ -422,7 +433,7 @@ static void xbox_start(struct hc *h, struct usb_dev *d, int p)
             thread_sleep_until(timer_ticks() + 1);
         h->qh_int[d->pipe - 1].elem = UHCI_LP_T;
         if ((t->ctrl & (UHCI_TD_ACTIVE | UHCI_TD_ERRORS))) {
-            fail(p + 1, "power-on", t->ctrl);
+            fail(d, "power-on", t->ctrl);
             pipe_stop(h, d);
             return;
         }
@@ -432,20 +443,136 @@ static void xbox_start(struct hc *h, struct usb_dev *d, int p)
     pipe_arm(h, d);
 }
 
-static void fail(int port, const char *step, u32 status)
+static void fail(const struct usb_dev *d, const char *step, u32 status)
 {
-    kprintf("GLOS-USB port=%d error=%s status=%08x\n", port, step, status);
+    char b[16];
+    kprintf("GLOS-USB port=%s error=%s status=%08x\n", loc(d, b), step, status);
 }
+
+/* Where a device is: its root port, then each hub port on the way ("2.3"). b: 16 bytes. */
+static char *loc(const struct usb_dev *d, char *b)
+{
+    u32 n;
+    if (d->parent && d->parent <= MAX_DEV) {
+        loc(&dev[d->parent - 1], b);
+        n = (u32)strlen(b);
+        if (n < 13)
+            ksnprintf(b + n, 16 - n, ".%u", d->hport);
+    } else {
+        ksnprintf(b, 16, "%u", d->port);
+    }
+    return b;
+}
+
+static void hub_start(struct hc *h, struct usb_dev *d);
+
+/* A device just reset on a port (a root port, or port hport of the hub parent - 1): its address, descriptors and
+   configuration; then what it is gets started. Its index, or -1. */
+static int enumerate(struct hc *h, int root, int parent, int hport, int low)
+{
+    struct usb_dev *d;
+    u8 buf[256];
+    u32 got = 0, status = 0, total;
+    int i;
+    char b[16];
+    u8 s_addr[8] = { 0x00, 5, 0, 0, 0, 0, 0, 0 }, s_conf[8] = { 0x00, 9, 0, 0, 0, 0, 0, 0 };
+
+    for (i = 0; i < MAX_DEV && dev[i].used; i++) ;
+    if (i == MAX_DEV) {
+        kprintf("GLOS-USB port=%d error=devices status=%08x\n", root + 1, MAX_DEV);
+        return -1;
+    }
+    d = &dev[i];
+    memset(d, 0, sizeof *d);
+    d->hc_i = (u8)(h - hc);
+    d->port = (u8)(root + 1);
+    d->parent = (u8)parent;
+    d->hport = (u8)hport;
+    d->low = (u8)low;
+    if (get_desc(h, 0, 8, low, 1, 0, 8, buf, &got, &status) != 0 || got < 8) {
+        fail(d, "device8", status);
+        return -1;
+    }
+    d->maxp0 = buf[7] ? buf[7] : 8;
+    d->addr = next_addr;
+    next_addr = (u8)(next_addr % 127 + 1);
+    s_addr[2] = d->addr;
+    if (control(h, 0, d->maxp0, low, s_addr, 0, 0, &status) != 0) {
+        fail(d, "address", status);
+        return -1;
+    }
+    wait_ms(2);                                 /* (SET_ADDRESS's recovery: 2 ms) */
+    if (get_desc(h, d->addr, d->maxp0, low, 1, 0, 18, buf, &got, &status) != 0 || got < 18) {
+        fail(d, "device", status);
+        return -1;
+    }
+    d->vendor = (u16)(buf[8] | buf[9] << 8);
+    d->product = (u16)(buf[10] | buf[11] << 8);
+    d->release = (u16)(buf[12] | buf[13] << 8);
+    d->dclass = buf[4], d->dsub = buf[5], d->dproto = buf[6];
+    if (get_desc(h, d->addr, d->maxp0, low, 2, 0, 9, buf, &got, &status) != 0 || got < 9) {
+        fail(d, "config9", status);
+        return -1;
+    }
+    total = buf[2] | (u32)buf[3] << 8;
+    if (total > sizeof buf)
+        total = sizeof buf;
+    if (get_desc(h, d->addr, d->maxp0, low, 2, 0, (u16)total, buf, &got, &status) != 0) {
+        fail(d, "config", status);
+        return -1;
+    }
+    parse_config(d, buf, got);
+    s_conf[2] = d->config;
+    if (control(h, d->addr, d->maxp0, low, s_conf, 0, 0, &status) != 0) {
+        fail(d, "configure", status);
+        return -1;
+    }
+    d->is = what(d);
+    d->used = 1;
+    if (d->dclass == 0x09 || d->iclass == 0x09)
+        hub_start(h, d);
+    else if (d->iclass == 0x03)
+        hid_start(h, d);
+    else if (d->iclass == 0xFF && ((d->isub == 0x47 && d->iproto == 0xD0) || (d->isub == 0x5D && d->iproto == 0x01)))
+        xbox_start(h, d);
+    if (d->nports)
+        kprintf("GLOS-USB port=%s speed=%s id=%04x:%04x is=hub ports=%u\n", loc(d, b), low ? "low" : "full",
+                d->vendor, d->product, d->nports);
+    else if (d->ep_in)
+        kprintf("GLOS-USB port=%s speed=%s id=%04x:%04x class=%02x/%02x/%02x if=%02x/%02x/%02x in=%02x/%u/%u%s is=%s\n",
+                loc(d, b), low ? "low" : "full", d->vendor, d->product, d->dclass, d->dsub, d->dproto, d->iclass,
+                d->isub, d->iproto, d->ep_in, d->ep_in_maxp, d->ep_in_ival, d->ep_out ? " out=yes" : "", d->is);
+    else
+        kprintf("GLOS-USB port=%s speed=%s id=%04x:%04x class=%02x/%02x/%02x if=%02x/%02x/%02x is=%s\n", loc(d, b),
+                low ? "low" : "full", d->vendor, d->product, d->dclass, d->dsub, d->dproto, d->iclass, d->isub,
+                d->iproto, d->is);
+    return i;
+}
+
+/* A device gone, and everything behind it if it is a hub. */
+static void detach_dev(struct hc *h, int i)
+{
+    struct usb_dev *d = &dev[i];
+    char b[16];
+    int k;
+    if (!d->used)
+        return;
+    for (k = 0; k < MAX_DEV; k++)
+        if (dev[k].used && dev[k].parent == i + 1)
+            detach_dev(h, k);
+    pipe_stop(h, d);
+    kprintf("GLOS-USB port=%s gone\n", loc(d, b));
+    if (d->parent && d->hport >= 1 && d->hport <= 8)
+        dev[d->parent - 1].child[d->hport - 1] = 0;
+    d->used = 0;
+}
+
+/* ---- root ports */
 
 static void attach(struct hc *h, int p)
 {
-    struct usb_dev *d = 0;
-    u8 buf[256];
-    u32 got = 0, status = 0, total;
     u16 v;
     int i, low;
-    u8 s_addr[8] = { 0x00, 5, 0, 0, 0, 0, 0, 0 }, s_conf[8] = { 0x00, 9, 0, 0, 0, 0, 0, 0 };
-
     v = port_read(h, p);                        /* the port reset: 50 ms (USB 1.1 §7.1.7.3, a root port's 50) */
     port_write(h, p, (u16)((v & PS_RW & ~PS_PE) | PS_PR));
     wait_ms(50);
@@ -461,94 +588,135 @@ static void attach(struct hc *h, int p)
         wait_ms(10);
     }
     if (!(port_read(h, p) & PS_PE)) {
-        fail(p + 1, "enable", port_read(h, p));
+        kprintf("GLOS-USB port=%d error=enable status=%08x\n", p + 1, port_read(h, p));
         return;
     }
     port_write(h, p, (u16)((port_read(h, p) & PS_RW) | PS_CSC | PS_PEC));
     low = (port_read(h, p) & PS_LSDA) != 0;
     wait_ms(10);                                /* (the recovery a reset is owed) */
-    for (i = 0; i < MAX_DEV && dev[i].used; i++) ;
-    if (i == MAX_DEV) {
-        fail(p + 1, "devices", MAX_DEV);
-        return;
-    }
-    d = &dev[i];
-    memset(d, 0, sizeof *d);
-    d->port = (u8)(p + 1);
-    d->low = (u8)low;
-    if (get_desc(h, 0, 8, low, 1, 0, 8, buf, &got, &status) != 0 || got < 8) {
-        fail(p + 1, "device8", status);
-        return;
-    }
-    d->maxp0 = buf[7] ? buf[7] : 8;
-    d->addr = next_addr;
-    next_addr = (u8)(next_addr % 127 + 1);
-    s_addr[2] = d->addr;
-    if (control(h, 0, d->maxp0, low, s_addr, 0, 0, &status) != 0) {
-        fail(p + 1, "address", status);
-        return;
-    }
-    wait_ms(2);                                 /* (SET_ADDRESS's recovery: 2 ms) */
-    if (get_desc(h, d->addr, d->maxp0, low, 1, 0, 18, buf, &got, &status) != 0 || got < 18) {
-        fail(p + 1, "device", status);
-        return;
-    }
-    d->vendor = (u16)(buf[8] | buf[9] << 8);
-    d->product = (u16)(buf[10] | buf[11] << 8);
-    d->release = (u16)(buf[12] | buf[13] << 8);
-    d->dclass = buf[4], d->dsub = buf[5], d->dproto = buf[6];
-    if (get_desc(h, d->addr, d->maxp0, low, 2, 0, 9, buf, &got, &status) != 0 || got < 9) {
-        fail(p + 1, "config9", status);
-        return;
-    }
-    total = buf[2] | (u32)buf[3] << 8;
-    if (total > sizeof buf)
-        total = sizeof buf;
-    if (get_desc(h, d->addr, d->maxp0, low, 2, 0, (u16)total, buf, &got, &status) != 0) {
-        fail(p + 1, "config", status);
-        return;
-    }
-    parse_config(d, buf, got);
-    s_conf[2] = d->config;
-    if (control(h, d->addr, d->maxp0, low, s_conf, 0, 0, &status) != 0) {
-        fail(p + 1, "configure", status);
-        return;
-    }
-    d->is = what(d);
-    d->used = 1;
-    h->port_dev[p] = (u8)(i + 1);
-    if (d->iclass == 0x03)
-        hid_start(h, d, p);
-    else if (d->iclass == 0xFF && ((d->isub == 0x47 && d->iproto == 0xD0) || (d->isub == 0x5D && d->iproto == 0x01)))
-        xbox_start(h, d, p);
-    if (d->ep_in)
-        kprintf("GLOS-USB port=%d speed=%s id=%04x:%04x class=%02x/%02x/%02x if=%02x/%02x/%02x in=%02x/%u/%u%s is=%s\n",
-                p + 1, low ? "low" : "full", d->vendor, d->product, d->dclass, d->dsub, d->dproto, d->iclass,
-                d->isub, d->iproto, d->ep_in, d->ep_in_maxp, d->ep_in_ival, d->ep_out ? " out=yes" : "", d->is);
-    else
-        kprintf("GLOS-USB port=%d speed=%s id=%04x:%04x class=%02x/%02x/%02x if=%02x/%02x/%02x is=%s\n", p + 1,
-                low ? "low" : "full", d->vendor, d->product, d->dclass, d->dsub, d->dproto, d->iclass, d->isub,
-                d->iproto, d->is);
+    if ((i = enumerate(h, p, 0, 0, low)) >= 0)
+        h->port_dev[p] = (u8)(i + 1);
 }
 
 static void detach(struct hc *h, int p)
 {
     if (h->port_dev[p]) {
-        pipe_stop(h, &dev[h->port_dev[p] - 1]);
-        dev[h->port_dev[p] - 1].used = 0;
+        detach_dev(h, h->port_dev[p] - 1);
         h->port_dev[p] = 0;
-        kprintf("GLOS-USB port=%d gone\n", p + 1);
+    }
+}
+
+/* ---- hubs (USB 1.1 chapter 11): the hub descriptor (29h), each port powered (SET_FEATURE PORT_POWER), the status
+   pipe (a bit for each port that changed) on one of the controller's pipes; on a change, each port's status
+   (GET_STATUS: wPortStatus, wPortChange): a connect cleared and looked at, a reset (SET_FEATURE PORT_RESET, until
+   C_PORT_RESET) and the device enumerated as a root port's is. A low-speed device behind a full-speed hub: UHCI's
+   LS bit, and the controller sends the preamble. */
+
+#define HUB_PORT_CONNECTION     0x0001
+#define HUB_PORT_ENABLE         0x0002
+#define HUB_PORT_LOW_SPEED      0x0200
+#define HUB_C_CONNECTION        0x0001
+#define HUB_C_ENABLE            0x0002
+#define HUB_C_OVER_CURRENT      0x0008
+#define HUB_C_RESET             0x0010
+#define FEAT_PORT_RESET         4
+#define FEAT_PORT_POWER         8
+#define FEAT_C_PORT_CONNECTION  16
+#define FEAT_C_PORT_ENABLE      17
+#define FEAT_C_PORT_OVER_CURRENT 19
+#define FEAT_C_PORT_RESET       20
+
+static int hub_feature(struct hc *h, struct usb_dev *d, int set, u32 feature, u32 port)
+{
+    u8 s[8] = { 0x23, (u8)(set ? 3 : 1), (u8)feature, 0, (u8)port, 0, 0, 0 };
+    u32 st;
+    return control(h, d->addr, d->maxp0, d->low, s, 0, 0, &st);
+}
+
+static int hub_status(struct hc *h, struct usb_dev *d, u32 port, u16 *status, u16 *change)
+{
+    u8 s[8] = { 0xA3, 0, 0, 0, (u8)port, 0, 4, 0 }, b[4];
+    u32 got = 0, st;
+    if (control(h, d->addr, d->maxp0, d->low, s, b, &got, &st) != 0 || got < 4)
+        return -1;
+    *status = (u16)(b[0] | b[1] << 8);
+    *change = (u16)(b[2] | b[3] << 8);
+    return 0;
+}
+
+static void hub_start(struct hc *h, struct usb_dev *d)
+{
+    u8 get[8] = { 0xA0, 6, 0, 0x29, 0, 0, 8, 0 }, buf[8];
+    u32 got = 0, status = 0, k;
+    if (control(h, d->addr, d->maxp0, d->low, get, buf, &got, &status) != 0 || got < 7) {
+        fail(d, "hub-descriptor", status);
+        return;
+    }
+    d->nports = (u8)(buf[2] > 8 ? 8 : buf[2]);
+    for (k = 1; k <= d->nports; k++)
+        hub_feature(h, d, 1, FEAT_PORT_POWER, k);
+    wait_ms(buf[5] * 2u + 100);                 /* (bPwrOn2PwrGood, in 2 ms, then a connect's 100 ms) */
+    d->is = "hub";
+    d->hub_dirty = 1;                           /* (its ports looked at once, then on its status pipe's word) */
+    if (d->ep_in && pipe_slot(d) == 0)
+        pipe_arm(h, d);
+}
+
+static void hub_poll(struct hc *h, int hi)
+{
+    struct usb_dev *hub = &dev[hi];
+    u32 p;
+    int k, c;
+    hub->hub_dirty = 0;
+    for (p = 1; p <= hub->nports; p++) {
+        u16 st, ch;
+        if (hub_status(h, hub, p, &st, &ch) != 0)
+            return;                             /* (the hub gone: its own port's change will say) */
+        if (ch & HUB_C_CONNECTION) {
+            hub_feature(h, hub, 0, FEAT_C_PORT_CONNECTION, p);
+            if (hub->child[p - 1])
+                detach_dev(h, hub->child[p - 1] - 1);
+            hub->ctries[p - 1] = 0;
+        }
+        if (ch & HUB_C_ENABLE)
+            hub_feature(h, hub, 0, FEAT_C_PORT_ENABLE, p);
+        if (ch & HUB_C_OVER_CURRENT)
+            hub_feature(h, hub, 0, FEAT_C_PORT_OVER_CURRENT, p);
+        if (!(st & HUB_PORT_CONNECTION) || hub->child[p - 1] || hub->ctries[p - 1] >= 3)
+            continue;
+        hub->ctries[p - 1]++;
+        wait_ms(100);                           /* (USB 1.1 §7.1.7.3: 100 ms for the power to settle) */
+        hub_feature(h, hub, 1, FEAT_PORT_RESET, p);
+        for (k = 0; k < 20; k++) {
+            wait_ms(10);
+            if (hub_status(h, hub, p, &st, &ch) == 0 && (ch & HUB_C_RESET))
+                break;
+        }
+        hub_feature(h, hub, 0, FEAT_C_PORT_RESET, p);
+        if (hub_status(h, hub, p, &st, &ch) != 0 || !(st & HUB_PORT_ENABLE)) {
+            char b[16];
+            kprintf("GLOS-USB port=%s.%u error=hub-reset status=%04x%04x\n", loc(hub, b), p, ch, st);
+            continue;
+        }
+        wait_ms(10);
+        if ((c = enumerate(h, hub->port - 1, hi + 1, (int)p, (st & HUB_PORT_LOW_SPEED) != 0)) >= 0)
+            hub->child[p - 1] = (u8)(c + 1);
     }
 }
 
 static void usb_thread(void *arg)
 {
     int i, p;
-    u32 last_scan = timer_ticks() - 1024;
+    u32 last_scan = timer_ticks() - 1024, last_hubs = timer_ticks();
     (void)arg;
     for (;;) {
         for (i = 0; i < nhc; i++)
             pipes_poll(&hc[i]);
+        for (i = 0; i < MAX_DEV; i++)           /* a hub whose status pipe spoke (or, a second on, any hub) */
+            if (dev[i].used && dev[i].nports && (dev[i].hub_dirty || timer_ticks() - last_hubs > 1024))
+                hub_poll(&hc[dev[i].hc_i], i);
+        if (timer_ticks() - last_hubs > 1024)
+            last_hubs = timer_ticks();
         if (timer_ticks() - last_scan < 102) {  /* (the pipes every 2 ms; the root ports every 100) */
             thread_sleep_until(timer_ticks() + 2);
             continue;
@@ -681,10 +849,12 @@ int usb_stat(char *b, u32 room)
                             hc[i].pci->dev, hc[i].pci->fn, hc[i].io, hc[i].ports,
                             inw((u16)(hc[i].io + FRNUM)) & 0x7FF);
     for (i = 0; i < MAX_DEV && n < room; i++)
-        if (dev[i].used)
-            n += (u32)ksnprintf(b + n, room - n, "port=%u addr=%u speed=%s id=%04x:%04x is=%s%s reports=%u errors=%u\n",
-                                dev[i].port, dev[i].addr, dev[i].low ? "low" : "full", dev[i].vendor, dev[i].product,
-                                dev[i].is, dev[i].pad ? (dev[i].pad == 1 ? " pad=1" : " pad=2") : "", dev[i].reports,
-                                dev[i].errors);
+        if (dev[i].used) {
+            char w[16];
+            n += (u32)ksnprintf(b + n, room - n, "port=%s addr=%u speed=%s id=%04x:%04x is=%s%s reports=%u errors=%u\n",
+                                loc(&dev[i], w), dev[i].addr, dev[i].low ? "low" : "full", dev[i].vendor,
+                                dev[i].product, dev[i].is, dev[i].pad ? (dev[i].pad == 1 ? " pad=1" : " pad=2") : "",
+                                dev[i].reports, dev[i].errors);
+        }
     return (int)n;
 }
