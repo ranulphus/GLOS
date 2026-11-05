@@ -3,6 +3,7 @@
  *   70h/71h            the RTC: a virtual index and NMI bit, virtual registers
  *                      A, B and C; the time and CMOS bytes from the chip
  *   92h                A20 (virtual) and the fast reset (a reset request)
+ *   201h               the game port, while a joystick source is on (vjoy.c)
  *   CF8h-CFFh          PCI mechanism 1 with a shadow address latch; CF9h's
  *                      reset bit is a reset request
  * Wider accesses to byte devices are split into bytes. Each kernel tick also
@@ -14,6 +15,7 @@
 #include "dev.h"
 #include "display.h"
 #include "io.h"
+#include "joy.h"
 #include "gdbprog.h"
 #include "kprintf.h"
 #include "pci.h"
@@ -189,6 +191,8 @@ static u8 dev_inb(u16 port)
         return rtc_in();
     case 0x92:
         return (u8)((inb(0x92) & ~3u) | (vm.a20 << 1));
+    case 0x201:                                 /* the game port: GLOS's while a joystick source is on (vjoy.c) */
+        return joy_virtual() ? joy_in() : inb(0x201);
     default:
         return is_hidden(port) ? 0xFF : inb(port);
     }
@@ -218,6 +222,12 @@ static void dev_outb(u16 port, u8 v)
         return;
     case 0x3F8:
         com1_out(v);
+        return;
+    case 0x201:
+        if (joy_virtual())
+            joy_out();
+        else
+            outb(0x201, v);
         return;
     default:
         cache_port_out(port, v);                /* an IDE command the disk cache must see (when it watches) */
@@ -314,6 +324,7 @@ void vdev_tick(struct trapframe *tf, u8 c)
     rtc_tick(c);
     vkbc_tick();
     vm_int15_tick(now);
+    joy_tick(now);
     agent_vm_tick(now);
     app_tick();
     if (vm.waiting && ((vm.wait_deadline && (s32)(now - vm.wait_deadline) >= 0) || vm_work_due()))

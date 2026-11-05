@@ -3277,6 +3277,112 @@ def audio_case(profile, vcard, card, sound="sb16"):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+# (machine, video card, network card): the virtual game port (docs/gamepad.md J1): the TSC times it on bf6, PIT
+# channel 0 on the 486 (no TSC), and counted reads once a program has set the PIT to another rate
+JOY_CASES = [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")]
+JOY_SET = (0, 255, 128, 64)                      # a=0,255 b=128,64
+
+
+def joy_line(out):
+    """HX-JOY's fields: buttons, count and us (lists, None for "-"), bios ((buttons, axes) or None for CF)."""
+    m = re.search(r"HX-JOY buttons=(\d{4}) count=(\S+) us=(\S+) bios=(\S+) reads=(\d+)", out)
+    if not m:
+        return None
+    nums = lambda s: [None if x == "-" else int(x) for x in s.split(",")]
+    b = m.group(4).split(":")
+    return {"buttons": m.group(1), "count": nums(m.group(2)), "us": nums(m.group(3)),
+            "bios": None if b[0] == "cf" else (b[1], [int(x) for x in b[2].split(",")])}
+
+
+def joy_case(profile, vcard, card):
+    """The virtual game port (docs/gamepad.md J1, kernel/vm/vjoy.c): with no source 201h is the PC's own (86Box has
+    no joystick here: every axis times out); glos joy a=0,255 b=128,64 buttons=1010 makes it GLOS's, read by
+    JOYTEST in real mode, as a DPMI client and as an app: each axis's one-shot as long as 24 + 1100 * v / 255 µs by
+    the PIT, the reads it takes in the axes' order, the buttons, and INT 15h AH=84h's buttons and axes (in 4 µs);
+    b=none unplugs joystick B; a program that sets the PIT to 100 Hz gets counted reads (time=reads), still in the
+    axes' order and near their lengths; glos joy off gives the port back; [joystick] port = virtual with no source:
+    nothing connected."""
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("joy-" + tag, profile, card, ["--card", vcard,
+        "--file", "build/ow/dos/JOYTEST.EXE=/TEST/JOYTEST.EXE", "--file", "build/dj/JOYTEST.EXE=/TEST/JOYDJ.EXE",
+        "--cmd", "SERSAY HX-START joy", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=1800)
+    checks, info = {"listen": agent.listening()}, []
+    want = [24 + 1100 * v // 255 for v in JOY_SET]
+    order = sorted(range(4), key=lambda i: JOY_SET[i])
+
+    def run(cmd):
+        rc, o, _ = agent.ssh(cmd)
+        j = joy_line(o)
+        if j is None:
+            print("    %s %s: rc=%d %r" % (tag, cmd, rc, o[-300:]))
+        return j
+
+    def near(j, frac, axes=range(4)):
+        """Each axis as long as it should be: a bit is seen to drop at the read after it did, so up to a read's
+        interval longer (that interval measured from the reading itself: its longest axis's time by its reads)."""
+        if j is None or any(j["us"][i] is None or j["count"][i] is None for i in axes):
+            return False
+        step = max(j["us"][i] / j["count"][i] for i in axes)
+        return all(want[i] * (1 - frac) - 10 <= j["us"][i] <= want[i] * (1 + frac) + 1.5 * step + 20 for i in axes)
+
+    def ordered(j, axes):
+        c = [j["count"][i] for i in order if i in axes] if j else [None]
+        return None not in c and all(c[k] < c[k + 1] for k in range(len(c) - 1))
+
+    try:
+        checks["real-first"] = agent.ssh("glos joy")[1].startswith("joy port=real source=none ")
+        j = run("C:\\TEST\\JOYTEST.EXE 3")
+        checks["real-none"] = j is not None and j["count"] == [None] * 4 and j["buttons"] == "0000"
+        checks["set"] = agent.ssh("glos joy a=0,255 b=128,64 buttons=1010")[0] == 0
+        st = agent.ssh("glos joy")[1]
+        checks["virtual"] = st.startswith("joy port=virtual source=ssh a=0,255 b=128,64 buttons=1010 ")
+        bios = ("1010", [w // 4 for w in want])
+        for name, cmd in (("v86", "C:\\TEST\\JOYTEST.EXE"), ("dpmi", "C:\\TEST\\JOYDJ.EXE"),
+                          ("app", "C:\\TEST\\JOYDJ.EXE 5 app")):
+            j = run(cmd)                        # (an app's PIT goes in kernel ticks of 976 µs: no lengths there)
+            checks[name] = (name == "app" or near(j, 0.05)) and ordered(j, range(4)) and j["buttons"] == "1010" \
+                and j["bios"] == bios
+            info.append("%s us=%s count=%s" % (name, j and ",".join(map(str, j["us"])),
+                                               j and ",".join(map(str, j["count"]))))
+        how = re.search(r" time=(\w+) ", agent.ssh("glos joy")[1])
+        checks["time"] = bool(how) and how.group(1) == ("pit" if profile.startswith("486") else "tsc")
+        checks["unplug"] = agent.ssh("glos joy b=none")[0] == 0
+        j = run("C:\\TEST\\JOYTEST.EXE 3")
+        checks["b-none"] = near(j, 0.05, (0, 1)) and j["count"][2:] == [None, None] \
+            and j["bios"] is not None and j["bios"][1][2:] == [0, 0]
+        agent.ssh("glos joy b=128,64")
+        j = run("C:\\TEST\\JOYTEST.EXE 5 pit 11932")
+        st = agent.ssh("glos joy")[1]
+        how = re.search(r" time=(\w+) .* read_us=([\d.]+) ", st)
+        info.append("pit us=%s count=%s read_us=%s" % (j and ",".join(map(str, j["us"])),
+                                                       j and ",".join(map(str, j["count"])), how and how.group(2)))
+        if profile.startswith("486"):           # (no TSC: the reads, counted)
+            checks["counted"] = bool(how) and how.group(1) == "reads" and near(j, 0.5) and ordered(j, range(4))
+        else:
+            checks["counted"] = bool(how) and how.group(1) == "tsc" and near(j, 0.05)
+        checks["off"] = agent.ssh("glos joy off")[0] == 0 and agent.ssh("glos joy")[1].startswith("joy port=real ")
+        j = run("C:\\TEST\\JOYTEST.EXE 3")
+        checks["real-again"] = j is not None and j["count"] == [None] * 4
+        checks["cfg-virtual"] = agent.ssh("glos config set joystick port virtual")[0] == 0 \
+            and agent.ssh("glos joy")[1].startswith("joy port=virtual source=none ")
+        j = run("C:\\TEST\\JOYTEST.EXE 3")
+        checks["nothing"] = j is not None and j["count"] == [None] * 4 and j["bios"] == ("0000", [0, 0, 0, 0])
+        checks["cfg-auto"] = agent.ssh("glos config set joystick port auto")[0] == 0 \
+            and agent.ssh("glos joy")[1].startswith("joy port=real ")
+        checks["bad"] = agent.ssh("glos joy a=300,1")[0] == 2 and agent.ssh("glos joy buttons=12")[0] == 2
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    print("    joy-%s: %s" % (tag, "; ".join(info)))
+    return "  %-22s %s%s" % ("joy-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def crystal_off_case(profile, vcard, card):
     """[sound] crystal = off (docs/crystal-audio.md): with 86Box's CS4236B there, GLOS leaves the chip alone and has
     no sound card; `glos config set` takes the key's other values (the schema has it: before 2026-11-05 it didn't,
@@ -5697,7 +5803,7 @@ def native_case(profile, vcard, card, bits):
 
 CONTROL_CASES = [("bf6", "g200", "ne2kpci")]
 CONTROL_NUMBERS = {"gpu_watchdog": "1000", "repeat_rate": "20", "double_click": "400", "envsize": "2048",
-                   "memory": "8192", "interval": "12", "size": "16"}
+                   "memory": "8192", "interval": "12", "size": "16", "range": "2000"}
 CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\KIOSK.BAT", "options": "/NOVME",
                  "title": "CP Test", "args": "-a -b", "comspec": "C:\\COMMAND.COM",
                  "autoexec": "C:\\AUTOEXEC.BAT", "dir": "C:\\CP", "blaster": "A220 I7 D1 H5",
@@ -5956,7 +6062,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
                                       "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache",
-                                      "umaprobe", "mem-page", "int2f", "umb"])
+                                      "umaprobe", "mem-page", "int2f", "umb", "joy"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -6044,6 +6150,9 @@ def main():
             res += matrix(crystal_off_case, [c[:3] for c in AUDIO_CASES if len(c) > 3
                                              and (not a.profile or c[0] in a.profile)][:1], a.jobs)
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "joy":
+        cases = [c for c in JOY_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(joy_case, cases, a.jobs)) else 1
     if a.suite == "gpu":
         cases = [c for c in GPU_CASES if not a.profile or c[0] in a.profile]
         if os.environ.get("GPU_ONLY"):          # e.g. GPU_ONLY=g200

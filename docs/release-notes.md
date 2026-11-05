@@ -4,6 +4,20 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## A virtual game port (2026-11-05)
+
+- **`glos joy a=X,Y b=X,Y buttons=NNNN`** (axes 0-255, 128 the centre; `none` for a stick that isn't there;
+  buttons A1 A2 B1 B2, 1 pressed) sets a joystick that DOS programs read at the game port, 201h, and through INT
+  15h AH=84h, in real mode, as DPMI programs and as GLOS apps alike. `glos joy` alone shows it, `glos joy off`
+  gives the PC's own game port back. This is the first step of USB gamepads under GLOS (docs/gamepad.md): the pads
+  will drive the same port.
+- **Timing as a real stick's:** each axis's one-shot runs 24 µs plus up to 1,100 µs (`[joystick] range`), timed from
+  the program's write by the processor's time-stamp counter, or PIT channel 0 on a 486. A program that counts its
+  reads sees fewer of them than on a real port, because each read is answered by GLOS; its calibration screen
+  scales them as usual.
+- **`[joystick] port = auto | virtual | off`** (the Control Panel's new "Joystick" page): auto, the default,
+  answers 201h only while a source is on. A direct-mode program's protected-mode code still reads the PC's own port.
+
 ## Sound on Crystal chips (2026-11-05)
 
 - **GLOS plays sound on a Crystal CS423x** (CS4232 to CS4238B), as on bench-g400's onboard audio, which no DOS
@@ -16,7 +30,8 @@ in its `docs/milestones-*.md`.
 ## glos restart (2026-11-05)
 
 - **`glos restart`** ends GLOS as `glos exit` does, but with ERRORLEVEL 200, so that a line in AUTOEXEC.BAT
-  can start it again: `:glos`, then `C:\GLOS\GLOS.EXE`, then `IF ERRORLEVEL 200 GOTO glos`. A new GLOS copied
+  can start it again: `:glosrun`, then `C:\GLOS\GLOS.EXE`, then `IF ERRORLEVEL 200 GOTO glosrun` (not `:glos`,
+  where CONFIG.SYS's menu has a GLOS entry: DOS labels ignore case). A new GLOS copied
   over SFTP then runs within seconds, with no reboot.
 
 ## Upper memory (2026-11-05)

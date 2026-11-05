@@ -8,8 +8,8 @@
 
 /* ---- the schema */
 
-const char *const cfg_sections[] = { "display", "input", "sound", "net", "time", "cache", "memory", "vnc", "desktop",
-                                     "shell", "open", "program",
+const char *const cfg_sections[] = { "display", "input", "joystick", "sound", "net", "time", "cache", "memory", "vnc",
+                                     "desktop", "shell", "open", "program",
                                      0 };
 
 const struct cfg_key cfg_schema[] = {
@@ -31,6 +31,12 @@ const struct cfg_key cfg_schema[] = {
       "How far the pointer moves for the mouse's movement: 1, 2 or 3 times" },
     { "input", "double_click", CFG_NUMBER, CFG_APP, 200, 1000, 0, "500", "Dou&ble click (ms)",
       "The longest time between the presses of a double click" },
+    /* [joystick]: the virtual game port (docs/gamepad.md) */
+    { "joystick", "port", CFG_CHOICE, CFG_NOW, 0, 0, "auto|virtual|off", "auto", "&Game port",
+      "auto: GLOS answers port 201h while a joystick source (a USB pad, glos joy) is on, and the PC's own game port "
+      "is used otherwise; virtual: always GLOS's; off: always the PC's" },
+    { "joystick", "range", CFG_NUMBER, CFG_NOW, 100, 10000, 0, "1124", "Axis &range (microseconds)",
+      "How long an axis's one-shot runs at its far end (24 at the near end): 1124 as a 100 kΩ stick" },
     /* [sound] (M8) */
     { "sound", "mixer", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "&Mixer",
       "GLOS plays the Sound Blaster 16 and mixes the apps' sound (off: programs have the card)" },

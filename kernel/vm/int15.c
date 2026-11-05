@@ -3,9 +3,10 @@
  *   24xxh   A20 (virtual)                  86h   wait CX:DX µs on the kernel clock
  *   83h     event wait (flag byte bit 7)   87h   block move, never into GLOS's memory
  *   88h, E801h   no extended memory        E820h, E881h   unsupported (CF)
- *   89h     protected mode: refused
+ *   89h     protected mode: refused        84h   the joystick, while the game port is GLOS's (vjoy.c)
  * Everything else goes to the BIOS. The BIOSes' own 86h would program the
  * RTC (V86TEST case R), which is the kernel's. */
+#include "joy.h"
 #include "kprintf.h"
 #include "timer.h"
 #include "vm.h"
@@ -62,6 +63,10 @@ int vm_int15(struct trapframe *tf, u32 ret_ip)
         vm.event_until = now + us_ticks(us);
         return done(tf, ret_ip, 0);
 
+    case 0x84:
+        if (joy_int15(tf, ret_ip))
+            return 1;
+        break;
     case 0x86:
         /* The INT runs again until the deadline, so the IRQs that come in
            the meantime are delivered in front of it. */

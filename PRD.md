@@ -102,7 +102,7 @@ GLOS also brings things to retro PCs that their owners lack today:
 | Replacing DOS | GLOS runs on an existing DOS (D16); it doesn't modify or ship a patched kernel. |
 | Win16/Win32 programs | Not supported. |
 | EMS, VCPI and UMBs for programs | Not in v1 (D25). Running under EMM386, QEMM or JemmEx is refused. UMBs a chipset driver such as UMBPCI makes before GLOS starts are DOS's own memory: GLOS runs among them, and `LOADHIGH GLOS.EXE` puts all of GLOS in one (docs/upper-memory.md B1). |
-| Modern PCs | UEFI-only machines (no CSM), USB stacks and AHCI/NVMe drivers are out of scope. USB keyboards work only through BIOS legacy emulation in exclusive sessions. |
+| Modern PCs | UEFI-only machines (no CSM), USB storage, USB 2.0 speeds and AHCI/NVMe drivers are out of scope for now. GLOS's own USB stack is for input only (D74, docs/gamepad.md): UHCI, hubs, HID keyboards, mice and gamepads, Xbox pads; until it is built, USB keyboards work only through BIOS legacy emulation in exclusive sessions. |
 | CPUs below a 486 | Not supported. 486SX support is open (Q1). |
 | Multi-monitor | After v1 (D15). The v1 display layer handles N screens. |
 | SDK packaging | v2 (D14). The v1 API is versioned and frozen per version. |
@@ -176,7 +176,7 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D45** | **Apps get blocks of VRAM from the top of the card's memory, at offsets that stay theirs, and see only those** (a view in which each is at its own offset); before a session or another mode they are copied into the system's memory and back to the same offsets after, and an app whose blocks can't come back is ended. A window can show part of a block of its app's (`GLOS_FN_WINVRAM`): a GL swap is that call with the other buffer. Apps can't map the card's apertures themselves (0800h). (M8 step C) | The engine's addresses can't be virtualised: an app's offsets must not move under it. Showing the app's own buffer costs no copy by the CPU, and the composer already copies VRAM windows with the engine (D43). | M8 |
 | **D46** | **Windowed GL needs a Matrox card drawing a 16-bit RGB565 desktop** (`GLOS_CAP_GLWIN`); elsewhere (8 or 32 bits, VBE cards) DOS-GL and SDL programs run full-screen as sessions, exactly as on DOS. Capabilities describe the desktop a program will have, also while its own session has the screen. (M8 step D) | DOS-GL draws RGB565 and the engine's copies don't convert. 32 bits can come later by presenting into a 32-bit window with `engine_present` (refines §9.2). | M8 |
 | **D47** | **The mixer is the desktop's:** GLOS plays the SB16 while the desktop has the screen (16-bit stereo, 22050 Hz by default, `[sound] rate`), mixing the apps' streams from the card's interrupt; a session that takes the screen gets the card and its line, and `[sound] mixer = off` leaves it to programs. Underruns are counted per stream; SDL's `glos` driver logs them as patch 0005 does. (M8 step E) | Refilling never waits for an app (§10.5); sessions keep the card they expect. 22050 Hz is what the games ask for and keeps a 486's mixing cheap. | M8 |
-| **D48** | **Apps' writes to COM1 reach GLOS's log line by line, and the gameport is theirs.** A virtual UART per app takes what it writes there (DOS-GL's and the tests' lines); port 201h passes through. (M8) | The serial lines DOS-GL and the test shims write are how Loop A sees a program; the joystick is timed by its own reads. | M8 |
+| **D48** | **Apps' writes to COM1 reach GLOS's log line by line, and the gameport is theirs.** A virtual UART per app takes what it writes there (DOS-GL's and the tests' lines); port 201h passes through (or is GLOS's virtual game port while a joystick source is on, D74). (M8) | The serial lines DOS-GL and the test shims write are how Loop A sees a program; the joystick is timed by its own reads. | M8 |
 | **D49** | **Our own retained-mode toolkit** (`sdk/gui`): widgets that keep their state and redraw only what changed, on the 2D library, in the Slate look and the DejaVu fonts, keyboard-first. (User, Q11, 2026-10-16) | Windows keep their pixels (M6), so redrawing only what changed is cheap on a 486; microui and Nuklear are immediate-mode, repainting on every event, and their looks and input models would need bending to D7 and D34. | M9 |
 | **D50** | **GLOS's shell is DOS, modernised:** COMMAND.COM's command names and syntax (`DIR`, `COPY`, `CD`, `SET`, `%VAR%`, redirection and pipes) with line editing, history, Tab completion, `&&`, `\|\|` and colour. Batch files go to `COMMAND.COM /C` (D40). (User, Q18, 2026-10-16) | Familiar to everyone who will use GLOS; nothing new to learn for DOS's own tools; no second batch language to keep compatible. | M9 |
 | **D51** | **A DOS program started from the terminal runs in the terminal's window until it wants the screen:** what it writes through DOS or the BIOS's teletype goes into the window and it reads the terminal's keys; its first mode set, or touch of the text or graphics screen, makes it a full-screen session for the rest of its run. (User, 2026-10-16) | Command-line tools (compilers, `MEM`, `CHKDSK`, `DIR`) stay in the window, beside the other apps; programs that draw the screen themselves get it, as D5 and D31 have it for v1. | M9 |
@@ -202,6 +202,7 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D71** | **API 1.4: `GLOS_FN_CACHE` makes a program's own conventional memory write-combining, through the fixed MTRRs (64 KB units below 80000h, 16 KB to A0000h), for any program; given back when it ends.** Only the fixed ranges: below 1 MB they take precedence over the variable ones, so the change never overlaps the BIOS's write-back ranges over RAM (WC over WB is undefined). GLOS logs the MTRRs at boot (`GLOS-MTRR`). (Owner's go-ahead for AGP, 2026-10-27: "I'm not worried about hangs") | A G400 fetching by AGP cycles doesn't snoop the CPU's caches (bench-g400): its DMA rings must be write-combining, which needs ring 0. AGP fetches about three times as fast as PCI there. | bench |
 | **D72** | **A disk cache in the kernel, in front of the BIOS (INT 13h) for hard disks, write-through, in spare memory given back on demand; on by default** (docs/disk-cache.md). Every INT 13h is trapped and made by GLOS through `rm_call`. Small reads fill whole 4 KB blocks through a 4 KB buffer kept after the resident stub (P7: 8 KB with the cache on). A segmented LRU keeps what DOS reads again (the FAT) ahead of streaming reads. The IDE command registers are watched outside GLOS's own calls; direct-mode sessions bypass the cache. Verify and count modes; `glos cache`. (Owner, 2026-10-29: on by default once the bench's verify gate passes, all spare memory, 4 KB of conventional memory acceptable) | bench-g400, 2026-10-29: Half-Life's load took 431 s under GLOS and 87 s with SMARTDRV; SMARTDRV can't ship with GLOS and costs more per hit under it. The FAT driver can wait: the cache is the gain. | bench |
 | **D73** | **GLOS sets up a Crystal CS423x chip itself and plays its mixer through the chip's WSS codec** (docs/crystal-audio.md), when there is no SB16: the Crystal Key and the data sheet's SLAM method at 279h, at `[sound] crystal`'s resources (the data sheet's by default: WSS 534h, FM 388h, SB Pro 220h, IRQ 5, DMA 1, capture DMA 0, game port 200h, control 120h), refused when a PCI function has the IRQ or ports; MODE 2, 16-bit stereo, an interrupt a half, the half the DMA isn't reading refilled. Sessions get BLASTER for its SB Pro. Left set up when GLOS leaves. One driver for the family (CS4232 to CS4238B). (Owner, 2026-11-05: GLOS's own driver over UNISOUND; the data sheet's resources; left active after `glos exit`; the family; the game port too.) | bench-g400's onboard chip (an IBM PC 300PL's) is left disabled by its BIOS and has no DOS driver; UNISOUND is closed freeware, and GLOS's mixer played only an SB16. Checked in 86Box (CS4232, CS4235, CS4236B) and on bench-g400 by ear. | bench |
+| **D74** | **GLOS answers the game port itself while a joystick source is on, and gets its own USB input stack to drive it** (docs/gamepad.md): port 201h and INT 15h AH=84h, each axis's one-shot timed from the write (24 µs + `[joystick] range` µs × axis / 255; the TSC, else PIT channel 0 while it is as GLOS keeps it, else counted reads); sources `glos joy` (J1, built) and USB pads (J2-J6); otherwise 201h is passed through as before. The USB stack: every UHCI taken from the BIOS (`[usb] off` the escape hatch), polled from the tick with no interrupt; hubs; HID keyboards and mice fed in as PS/2 ones; HID and Xbox (360, GIP) pads. (Owner, 2026-11-05: USB pads as a game-port joystick; "just take over USB and add drivers for gamepads, keyboards and mice (and USB hubs)"; flash drives later; no 86Box USB model for now; no keypad joystick.) | The owner has USB pads and no game-port joystick; DOS games know only the game port, and DOS knows USB input only through the BIOS's emulation. A virtual port has no real one-shot to run out during a trap. | bench |
 
 ---
 
@@ -243,7 +244,7 @@ GLOS refuses a NIC whose IRQ is shared with another active device, and a NIC alr
 
 - **Sound:** SB16 (auto-init DMA) for the GLOS mixer, or the WSS codec of a Crystal CS423x that GLOS sets up itself
   (D73). In exclusive sessions any card is passed through.
-- **Input:** PS/2 keyboard and mouse through a full virtual 8042; gameport passed through. Serial mice come after v1.
+- **Input:** PS/2 keyboard and mouse through a full virtual 8042; gameport passed through, or GLOS's virtual one while a joystick source is on (D74). Serial mice come after v1.
 - **Storage:** through DOS and the BIOS (INT 13h), with GLOS's disk cache in front of the BIOS for hard disks
   (D72).
 
@@ -372,7 +373,7 @@ A program calls DPMI 0A00h with "GLOS" (D23). The result is a far entry point pl
 | VGA, VBE, Matrox | 3B0h–3DFh, MMIO | Passed through in exclusive sessions. For GLOS apps, only through the API, plus the GPU lock (§9.6). |
 | Sound Blaster | 2x0h, DMA 0–7, its IRQ | Passed through in exclusive sessions; owned by the mixer otherwise. |
 | Crystal CS423x (D73) | 534h (WSS), 388h, 220h, 200h, 120h; IRQ 5, DMA 1 and 0 | Set up by GLOS at start (279h), then as a Sound Blaster: passed through in exclusive sessions, owned by the mixer otherwise; left set up when GLOS leaves. |
-| Gameport | 201h | Always passed through: trapping it breaks axis timing. Loop A injects the joystick through 86Box. |
+| Gameport | 201h | Passed through, except while a joystick source is on (D74): then GLOS answers it, timing each axis from the write (the TSC, PIT channel 0 or counted reads), so a trap costs a counting program resolution, not accuracy. `glos joy` injects the joystick, in Loop A and on silicon. |
 | COM1 | 3F8h–3FFh | Passed through. Writes are mirrored into agent telemetry (§7.7). |
 
 ### 6.5 Time
@@ -507,7 +508,7 @@ Each command is an SSH exec request. `ssh <pc> <command>` runs a DOS command lin
 
 - Keyboard and mouse bytes go through the virtual 8042, with the keyboard interrupt (IRQ1) or mouse interrupt (IRQ12) raised for the target.
 - In a GLOS app, events go straight into the app's queue.
-- The gameport isn't injectable on silicon (§6.4).
+- The gameport is injected by `glos joy` through GLOS's virtual game port (D74, §6.4), on silicon too.
 
 ### 7.7 Telemetry
 
@@ -804,7 +805,7 @@ Targets are measured on silicon or derived from CPU models, never from 86Box spe
 - VME/PVI;
 - global kernel pages;
 - fast paths for the most frequent traps (the PIC's end-of-interrupt write, CLI/STI);
-- never trapping hot ports such as the gameport and the framebuffer;
+- never trapping hot ports such as the framebuffer (the gameport only while GLOS answers it, D74);
 - MTRR write-combining for framebuffers;
 - crypto split into chunks on a 486.
 
@@ -1387,3 +1388,9 @@ Licences as researched on 2026-10-01; each is re-checked at import (§17.2).
   chain ran into GLOS's page once paging was off (main had the same in freed memory). Fixed on main: GLOS's
   INT 2Fh entry is in its PSP, and becomes a pass-through left resident when hooked over. U5 again: the games
   ok, `glos exit` with DOSLFN resident ok, GLOS 4,864 bytes of conventional memory with the page (7,680 off).
+- **D73** (owner, 2026-11-05): GLOS's own Crystal CS423x driver (docs/crystal-audio.md); §4.5 and §10.5 say so.
+  `[sound] crystal` joined GLOS.CFG's schema after the merge: the driver had read the key from a buffer the schema
+  didn't fill, and the loader refused `crystal = off`.
+- **D74** (owner, 2026-11-05): the virtual game port and a USB input stack (docs/gamepad.md). §6.4's gameport row,
+  §7.6, §13's hot ports, §4.5's input line, D48 and the non-goals say so. J1, the virtual port with `glos joy`, is
+  built; the USB steps follow.

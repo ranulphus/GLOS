@@ -9,8 +9,9 @@
 - **v0's questions, answered:** GLOS takes the USB controller over outright, with its own drivers for gamepads,
   keyboards, mice and hubs, and flash drives later. No 86Box USB model for now, no keypad joystick
   ([Decisions](#decisions)).
-- **J0 is done** ([Results](#results)), except the owner's Xbox 360 pad, which is at home (due 2026-11-06). J1 is
-  next.
+- **J0 is done** ([Results](#results)), except the owner's Xbox 360 pad, which is at home (due 2026-11-06).
+- **J1 is built** (the virtual game port, `glos joy`, `[joystick]`; `make loopa-joy` passes on bf6 and the 486):
+  PRD D74. J2 (UHCI) is next.
 
 DOS games read a joystick through the PC's game port at 201h, or through the BIOS. No DOS game knows USB, and DOS
 knows USB keyboards and mice only through the BIOS's emulation. This plan gives GLOS:
@@ -242,12 +243,32 @@ Order: J1 needs nothing else and is the part every machine gets. J2-J6 are bench
   - **Still to check:** take-over from an active BIOS, and hand-back at `glos exit`, need a PC whose BIOS has USB
     legacy support on: bench #2, perhaps.
 
-## The PRD change (proposed)
+**J1 (2026-11-05, Loop A, `make loopa-joy`):** `glos joy a=0,255 b=128,64 buttons=1010`, so one-shots of 24, 1124,
+576 and 300 µs, as JOYTEST measured them by the PIT (the median of five readings):
+
+| | bf6 (TSC) | 486DX2 (PIT channel 0) |
+|---|---|---|
+| Real mode (V86) | 36, 1142, 589, 312: 6.6 µs a read | 74, 1187, 626, 377: 45 µs a read |
+| DPMI client (DJGPP) | 38, 1143, 592, 315: 8.5 µs a read | 116, 1247, 677, 372: 69 µs a read |
+| The PIT set to 100 Hz first | 36, 1132, 583, 309 (still the TSC) | 65, 1086, 579, 302 (counted reads at 43.3 µs) |
+
+- **Accuracy:** each length is the true one plus at most one read's interval, which is what a program polling the
+  port can see.
+- **Resolution:** the reads across the range a counting program gets: about 170 on bf6, 26 on the 486 in real mode
+  and 18 as a DPMI client. These are 86Box's costs: silicon's come with the bench run.
+- **INT 15h AH=84h** answers 6, 281, 144, 75 (4 µs units) in real mode and through a DPMI client's 0300h alike.
+- **Found on the way:** a client's simulated INT 15h (0300h, or a reflected one) went straight to the BIOS,
+  bypassing GLOS's INT 15h layer (int15.c). J1 routes AH=84h. The other functions there are still bypassed this
+  way: A20, 87h's guard, 88h and E801h's sizes, 86h's wait. That is to be fixed separately.
+- **An app's own timing is coarse:** an app's PIT steps in kernel ticks (976 µs) while a session runs, as the agent's
+  jobs are. So the suite checks apps for order, buttons and the BIOS's answer only.
+
+## The PRD change (made with J1)
 
 - **Non-goals:** "USB stacks … are out of scope. USB keyboards work only through BIOS legacy emulation in exclusive
   sessions." becomes "USB storage and USB 2.0 speeds are out of scope for now. GLOS has its own USB input stack
   (D74): UHCI, hubs, HID keyboards, mice and gamepads, Xbox pads."
-- **D74:**
+- **D74** (now in the PRD):
   - **The decision:** "GLOS has its own USB input stack: every UHCI is taken from the BIOS, polled from the tick
     with no interrupt; hubs; HID keyboards and mice fed in as PS/2 ones; HID and Xbox pads drive a virtual game
     port. GLOS answers port 201h and INT 15h AH=84h itself while a joystick source is on (a pad, or `glos joy`),

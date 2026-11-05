@@ -26,6 +26,7 @@
 #include "desk.h"
 #include "display.h"
 #include "io.h"
+#include "joy.h"
 #include "kprintf.h"
 #include "mixer.h"
 #include "mm.h"
@@ -1232,6 +1233,18 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             kfree(b);
             ssh_chan_exit(ch, 0);
         }
+    } else if (!strcmp(cmd, "glos joy") || !strncmp(cmd, "glos joy ", 9)) {
+        /* glos joy [a=X,Y|none] [b=X,Y|none] [buttons=NNNN] | off: the virtual game port's source, and its state
+           (kernel/vm/vjoy.c, docs/gamepad.md) */
+        char b[320], why[120];
+        if (cmd[8] && joy_command(cmd + 9, why, sizeof why) != 0) {
+            ksnprintf(b, sizeof b, "glos joy: %s\n", why);
+            say(ch, 1, b);
+            ssh_chan_exit(ch, 2);
+        } else {
+            ssh_chan_write(ch, 0, (const uint8_t *)b, (u32)joy_stat(b, sizeof b));
+            ssh_chan_exit(ch, 0);
+        }
     } else if (!strcmp(cmd, "glos audio")) {
         /* glos audio: the mixer and its streams (M8) */
         char b[512];
@@ -1323,7 +1336,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
     } else {
         say(ch, 1, "glos: no such command (glos ver, echo, run, shot, key, type, mouse, log, stat, ps, mem, net, tick, "
-                   "kill, gdb, exit, restart, reboot)\n");
+                   "joy, kill, gdb, exit, restart, reboot)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;

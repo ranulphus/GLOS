@@ -1,0 +1,28 @@
+/* The virtual game port (docs/gamepad.md J1): port 201h and INT 15h AH=84h answered by GLOS while a joystick
+ * source is on. */
+#ifndef K_JOY_H
+#define K_JOY_H
+#include "types.h"
+
+struct trapframe;
+
+#define JOY_SRC_SSH     0               /* glos joy */
+#define JOY_SOURCES     1               /* (USB pads join in J4-J6) */
+
+struct joy_state {
+    u8 axis[4];                         /* joystick A's X, Y, then B's: 0-255, 128 the centre */
+    u8 present;                         /* bit n: axis n is connected */
+    u8 buttons;                         /* bits 0-3: A1, A2, B1, B2, 1 while pressed */
+};
+
+void joy_config(void);                  /* [joystick] port and range, from GLOS.CFG */
+void joy_source(int src, const struct joy_state *s);     /* a source's state; NULL: the source is gone */
+int joy_virtual(void);                  /* 201h is GLOS's now (else the PC's own, passed through) */
+u8 joy_in(void);                        /* a read of 201h */
+void joy_out(void);                     /* a write: the one-shots fire */
+int joy_int15(struct trapframe *tf, u32 ret_ip);         /* INT 15h AH=84h; 0: the BIOS's */
+void joy_tick(u32 now);                 /* every kernel tick: the TSC's rate, IRQ 0's */
+int joy_stat(char *b, u32 room);        /* glos joy */
+int joy_command(const char *args, char *why, u32 room);  /* glos joy a=X,Y b=X,Y buttons=NNNN | off */
+
+#endif

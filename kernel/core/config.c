@@ -23,6 +23,7 @@
 #include "clock.h"
 #include "display.h"
 #include "gpu.h"
+#include "joy.h"
 #include "mixer.h"
 #include "nic.h"
 #include "vm.h"
@@ -469,6 +470,8 @@ void kcfg_apply(const char *section, const char *key, const char *v)
         net_sntp_restart();
     } else if (same(section, "cache")) {        /* enabled, size: the disk cache (kernel/drv/cache.c) */
         cache_apply(key, v);
+    } else if (same(section, "joystick")) {     /* port, range: the virtual game port (kernel/vm/vjoy.c) */
+        joy_config();
     }
 }
 
@@ -483,6 +486,7 @@ static void apply_read(void)
     kcfg_get("time", "zone", z, sizeof z);      /* (M10: SNTP starts by itself once the file is read) */
     clock_zone(z);
     mixer_late();                               /* a Crystal chip, with no SB16 ([sound] crystal) */
+    joy_config();                               /* [joystick] port and range */
 }
 
 /* The desktop has come on (display.c, the VM thread): [desktop] start's programs, beside GLOS.EXE when they have
@@ -646,6 +650,7 @@ static void load(void)
         }
         kfree(buf);
         mixer_late();                           /* (the defaults: [sound] crystal = auto) */
+        joy_config();
         return;
     }
     h = q.r[0].ax;
@@ -659,6 +664,7 @@ static void load(void)
         kprintf("GLOS-CFG error=read dos=%u\n", q.error);
         kfree(buf);
         mixer_late();
+        joy_config();
         return;
     }
     got = q.r[0].ax;

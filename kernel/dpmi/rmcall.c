@@ -24,6 +24,7 @@
 #include "arch.h"
 #include "cache.h"
 #include "display.h"
+#include "joy.h"
 #include "dpmi.h"
 #include "kprintf.h"
 #include "sched.h"
@@ -56,6 +57,16 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
     struct trapframe *f;
     u32 here, ss, sp, i, flags, ivt, vif = current->vif, ax = r->eax, bx = r->ebx;
 
+    if (vec == 0x15 && kind == RM_INT && (u8)(r->eax >> 8) == 0x84) {  /* the joystick, while the game port is */
+        struct trapframe t;                     /* GLOS's (vjoy.c): as a V86 INT 15h gets it (int15.c), which */
+        memset(&t, 0, sizeof t);                /* a client's simulated one doesn't pass through */
+        t.eax = r->eax, t.ebx = r->ebx, t.ecx = r->ecx, t.edx = r->edx, t.eflags = r->flags;
+        if (joy_int15(&t, 0)) {
+            r->eax = t.eax, r->ebx = t.ebx, r->ecx = t.ecx, r->edx = t.edx;
+            r->flags = (u16)((r->flags & ~FL_CF) | (t.eflags & FL_CF));
+            return 0;
+        }
+    }
     if (current != vm.thread)                   /* an app's: the VM thread makes it, when the system VM is idle */
         return app_rm_call(from, r, kind, vec, words, nwords);
     if (depth >= NEST_MAX || (!dctx && !r->ss && !r->sp))

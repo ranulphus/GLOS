@@ -676,7 +676,8 @@ mode set, so it knows when the BIOS is busy (§17.2).
 | GLOS-owned NIC | Trapped; reads return FFh, writes dropped; its PCI function reads as absent | Trapped | One card, the first found of: an RTL8139 (M5), an Intel 8255x (M5), an NE2000 (M3: the RTL8029 on PCI, or ISA at 300h, 280h, 320h, 340h, 360h). Its IRQ is the kernel's: the VM never sees it. Refused (`GLOS-NET refuse`) under a packet driver, or on a PCI IRQ line another function shares unless that function can be made quiet (docs/devices.md: a UHCI controller nobody drives, say). See "The network cards" below. |
 | 3F8h (COM1 data) | Trapped for output, passed through | Same | M3: tells the kernel when a program is part-way through a line, so the kernel's lines wait for it (§18) |
 | 1F7h, 177h (IDE command registers; a native-mode controller's BAR+7) | Trapped while the disk cache is on (§9.8), except during its own BIOS calls; passed through | Trapped (a direct-mode session's protected-mode code isn't: the cache stands aside) | A command that may write a disk, from anything but the cache's own calls, drops every block (`GLOS-CACHE drop reason=port`); count mode logs it. Reads (status polling) pass through. |
-| VGA 3B0h–3DFh, SB, GUS, DMA 00h–0Fh/80h–8Fh/C0h–DFh, 201h, F0h | Passed through | Passed through | Live 8237 count reads, GUS GF1/CODEC, UniVBE chipset probes and the IRQ13 acknowledge at F0h all need real hardware [census] |
+| 201h (game port) | Passed through; trapped while a joystick source is on (`glos joy`; USB pads later): GLOS's virtual game port, `kernel/vm/vjoy.c` | Same | The one-shots timed from the write: the TSC, else PIT channel 0 (latched only in the program's own trapped access, while it is mode 2, count FFFFh and IRQ 0 comes at 18.2 a second), else counted reads. INT 15h AH=84h answered too, in V86 and through a client's 0300h. A direct-mode session's protected-mode code reads the PC's own (docs/gamepad.md, D74) |
+| VGA 3B0h–3DFh, SB, GUS, DMA 00h–0Fh/80h–8Fh/C0h–DFh, F0h | Passed through | Passed through | Live 8237 count reads, GUS GF1/CODEC, UniVBE chipset probes and the IRQ13 acknowledge at F0h all need real hardware [census] |
 
 **M2 status:**
 - **Implemented:** the PIC, RTC, 8042, 92h, CF8h–CFFh and CF9h rows (`kernel/vm/vdev.c`, `vkbc.c`, `vpic.c`).
@@ -1225,7 +1226,8 @@ direct = 1
 
 - **COM1** is a UART of the app's own: always ready to send, receiving nothing; every line it writes there goes
   into GLOS's log as it is (DOS-GL's `DGL-` lines and the test shims' `HX-` lines reach Loop A so).
-- **The gameport** (201h) is the PC's own, read and written through (SDL's joystick times its one-shots there).
+- **The gameport** (201h) is the PC's own, read and written through (SDL's joystick times its one-shots there), or
+  GLOS's virtual one while a joystick source is on (§10, D74).
 - **The SB16** is GLOS's mixer's while the desktop has the screen: its line is claimed from the system VM
   (`vm_claim_irq`) and given back to it when a session takes the screen (`vm_unclaim_irq`); apps reach it only
   through `GLOS_FN_AUDIO` streams (graphics.md §7.4).

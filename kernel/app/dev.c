@@ -44,6 +44,7 @@
  * counter began again. */
 #include "appint.h"
 #include "io.h"
+#include "joy.h"
 #include "kprintf.h"
 #include "session.h"
 #include "timer.h"
@@ -418,8 +419,8 @@ static u8 in8(struct app *a, u16 port)
     if (port >= 0x3F8 && port <= 0x3FF)
         return com_in(a, port);
     switch (port) {
-    case 0x201:                                 /* the gameport: the PC's own (M8: SDL's joystick) */
-        return inb(0x201);
+    case 0x201:                                 /* the gameport: the PC's own (M8: SDL's joystick), or GLOS's */
+        return joy_virtual() ? joy_in() : inb(0x201);       /* while a joystick source is on (vjoy.c) */
     case 0x3DA:                                 /* the VGA's status (M8): a retrace a millisecond long 70 times
                                                    a second, so a program's wait for one ends as on a card (each
                                                    read here is a trap: millions of them took minutes) */
@@ -453,7 +454,10 @@ static void out8(struct app *a, u16 port, u8 v)
     }
     switch (port) {
     case 0x201:
-        outb(0x201, v);
+        if (joy_virtual())
+            joy_out();
+        else
+            outb(0x201, v);
         break;
     case 0x20: case 0x21: case 0xA0: case 0xA1:
         vpic_write(&a->pic, port, v);
