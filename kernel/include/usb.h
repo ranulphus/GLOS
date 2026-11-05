@@ -56,7 +56,7 @@ struct usb_dev {
     const char *is;                     /* hid-keyboard, hid-mouse, hid, xbox360, xbox-gip, hub, other */
     /* an interrupt IN pipe (a pad's: J4) */
     u8 pipe, toggle, pad;               /* pipe: its slot + 1 (0 none); pad: the joystick pad it is + 1 */
-    u8 kind, toggle_out;                /* kind: 0 HID, else XPAD_360 or XPAD_GIP (xpad.h) */
+    u8 kind, toggle_out;                /* kind: 0 a HID pad, XPAD_360 or XPAD_GIP (xpad.h), or USB_KIND_ */
     /* where it is: on a root port (port, parent 0), or on port hport of the hub that is device parent - 1 */
     u8 hc_i, parent, hport;
     /* a hub's (J3) */
@@ -64,6 +64,9 @@ struct usb_dev {
     u8 child[8], ctries[8];             /* the device on each of its ports (index + 1), attempts at it */
     u32 reports, errors;
 };
+
+#define USB_KIND_KBD    3               /* a boot keyboard: its keys as PS/2 ones (usbkbd.c) */
+#define USB_KIND_MOUSE  4               /* a boot mouse: as a PS/2 one */
 
 void usb_late(void);                    /* after GLOS.CFG: [usb] enabled, every UHCI taken */
 void usb_leave(void);                   /* glos exit: each controller stopped, reset and its registers given back */

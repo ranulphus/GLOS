@@ -36,6 +36,7 @@
 #include "sched.h"
 #include "timer.h"
 #include "usb.h"
+#include "usbkbd.h"
 #include "vm.h"
 #include "xpad.h"
 
@@ -95,6 +96,7 @@ static u8 pad_used[JOY_PADS];
 static u8 last_report[MAX_DEV][64];     /* a pipe's last report, so that only a change goes on (some pads, the */
 static u8 last_len[MAX_DEV];            /* owner's 081f:e401 among them, answer every poll despite SET_IDLE(0)) */
 static u8 next_addr = 1;
+static u32 rep_code, rep_next, rep_delay = 512, rep_every = 102;      /* a USB keyboard's repeat (GLOS's: in ticks) */
 static int started;
 
 #define PHYS(h, p) ((h)->pool_phys + (u32)((const u8 *)(p) - (h)->pool))
@@ -335,7 +337,19 @@ static void pipes_poll(struct hc *h)
             d->toggle ^= 1;
             if (d->nports && len)               /* a hub's status pipe: a bit for each port that changed */
                 d->hub_dirty = 1;
-            if (d->pad && (len != last_len[i] || memcmp(r, last_report[i], len))) {
+            if (d->kind == USB_KIND_MOUSE && len >= 3) {        /* (every report counts: no comparing) */
+                vkbc_mouse((signed char)r[1], (signed char)r[2], r[0] & 7);
+            } else if (d->kind == USB_KIND_KBD && len >= 8 && memcmp(r, last_report[i], 8)) {
+                struct usbkbd_event ev[16];
+                u32 k, n, rep = rep_code;
+                n = usbkbd_diff(last_report[i], r, ev, 16, &rep);
+                for (k = 0; k < n; k++)
+                    vkbc_key(ev[k].code, ev[k].down);
+                if (rep != rep_code)
+                    rep_next = timer_ticks() + rep_delay;
+                rep_code = rep;
+                memcpy(last_report[i], r, 8);
+            } else if (d->pad && (len != last_len[i] || memcmp(r, last_report[i], len))) {
                 struct joy_pad jp;
                 memcpy(last_report[i], r, len);
                 last_len[i] = (u8)len;
@@ -380,12 +394,56 @@ static int pad_take(struct usb_dev *d)
     return 0;
 }
 
+/* A boot keyboard or mouse (HID subclass 1): the boot protocol (SET_PROTOCOL 0: the reports of HID 1.11 appendix
+   B), reports on a change only (SET_IDLE 0); a keyboard starts with nothing held, and repeats as [input] says. */
+static void boot_start(struct hc *h, struct usb_dev *d)
+{
+    u8 proto[8] = { 0x21, 0x0B, 0, 0, 0, 0, 0, 0 }, idle[8] = { 0x21, 0x0A, 0, 0, 0, 0, 0, 0 };
+    char v[16];
+    u32 status = 0;
+    if (!d->ep_in || pipe_slot(d) != 0)
+        return;
+    proto[4] = idle[4] = d->ifnum;
+    control(h, d->addr, d->maxp0, d->low, proto, 0, 0, &status);
+    control(h, d->addr, d->maxp0, d->low, idle, 0, 0, &status);
+    d->kind = (u8)(d->iproto == 1 ? USB_KIND_KBD : USB_KIND_MOUSE);
+    d->is = d->kind == USB_KIND_KBD ? "hid-keyboard" : "hid-mouse";
+    if (d->kind == USB_KIND_KBD) {
+        memset(last_report[d - dev], 0, 8);
+        last_len[d - dev] = 8;
+        v[0] = 0;
+        kcfg_get("input", "repeat_delay", v, sizeof v);
+        if (v[0] >= '1' && v[0] <= '9') {
+            u32 ms = 0;
+            const char *c;
+            for (c = v; *c >= '0' && *c <= '9'; c++)
+                ms = ms * 10 + (u32)(*c - '0');
+            rep_delay = ms * 1024 / 1000;
+        }
+        v[0] = 0;
+        kcfg_get("input", "repeat_rate", v, sizeof v);
+        if (v[0] >= '1' && v[0] <= '9') {
+            u32 hz = 0;
+            const char *c;
+            for (c = v; *c >= '0' && *c <= '9'; c++)
+                hz = hz * 10 + (u32)(*c - '0');
+            if (hz)
+                rep_every = 1024 / hz;
+        }
+    }
+    pipe_arm(h, d);
+}
+
 /* A HID device that is a joystick or gamepad: its report descriptor read and parsed, its pipe started. */
 static void hid_start(struct hc *h, struct usb_dev *d)
 {
     u8 idle[8] = { 0x21, 0x0A, 0, 0, 0, 0, 0, 0 }, get[8] = { 0x81, 6, 0, 0x22, 0, 0, 0, 0 }, *buf;
     u32 got = 0, status = 0;
     int n;
+    if (d->isub == 1 && (d->iproto == 1 || d->iproto == 2)) {
+        boot_start(h, d);
+        return;
+    }
     if (!d->ep_in || !d->hid_rlen || d->hid_rlen > 1024)
         return;
     idle[4] = d->ifnum;                         /* SET_IDLE(0): reports on a change only (a stall is fine) */
@@ -561,6 +619,14 @@ static void detach_dev(struct hc *h, int i)
         if (dev[k].used && dev[k].parent == i + 1)
             detach_dev(h, k);
     pipe_stop(h, d);
+    if (d->kind == USB_KIND_KBD) {              /* (its keys let go, so nothing stays held) */
+        static const u8 none[8];
+        struct usbkbd_event ev[16];
+        u32 k, n = usbkbd_diff(last_report[i], none, ev, 16, 0);
+        for (k = 0; k < n; k++)
+            vkbc_key(ev[k].code, 0);
+        rep_code = 0;
+    }
     kprintf("GLOS-USB port=%s gone\n", loc(d, b));
     if (d->parent && d->hport >= 1 && d->hport <= 8)
         dev[d->parent - 1].child[d->hport - 1] = 0;
@@ -712,6 +778,12 @@ static void usb_thread(void *arg)
     for (;;) {
         for (i = 0; i < nhc; i++)
             pipes_poll(&hc[i]);
+        if (rep_code && (s32)(timer_ticks() - rep_next) >= 0) {     /* a USB keyboard's held key repeats */
+            vkbc_key(rep_code, 1);
+            rep_next += rep_every;
+            if ((s32)(timer_ticks() - rep_next) > 0)
+                rep_next = timer_ticks() + rep_every;
+        }
         for (i = 0; i < MAX_DEV; i++)           /* a hub whose status pipe spoke (or, a second on, any hub) */
             if (dev[i].used && dev[i].nports && (dev[i].hub_dirty || timer_ticks() - last_hubs > 1024))
                 hub_poll(&hc[dev[i].hc_i], i);
