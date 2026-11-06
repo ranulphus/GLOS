@@ -1,6 +1,7 @@
 # GLOS v1: the route
 
-**Status (2026-11-06): plan v0, for the owner's review. Nothing in it is built yet.**
+**Status (2026-11-06): plan v1, for the owner's review: the open questions answered (below). Nothing in it is
+built yet.**
 
 GLOS's milestones M0–M10 are done in Loop A, and much has been added since: the disk cache, upper memory, Crystal
 audio, USB input and the virtual game port, the mouse wheel. The native side is still thin, though. The apps are
@@ -26,6 +27,27 @@ richer shell, and modern apps for old PCs. This plan is the route to that v1.
   Claude Code built in, for writing GLOS apps on GLOS itself. It is a follow-up project with its own repository,
   not part of this work. **API 2.0 and toolkit 2 must already cover what it needs**
   ([Designed for the IDE](#designed-for-the-ide-a-follow-up)).
+
+**The answers to plan v0's open questions (2026-11-06):**
+- **1.x compatibility: none.** DOS-GL (in MGA-Glide once merged), the SDL3 bridge and the HAL move to 2.0 in phase B
+  with the kernel, each merged with the owner's approval. No compatibility table.
+- **Archives:** ZIP read and written. TAR, GZ, LZH/LHA, ARJ and 7z read. (RAR is out: its decoder's licence isn't
+  permissive.)
+- **PDF:** GLOS's own renderer, scoped:
+  - a permissive parser (PDFio, Apache-2.0, a candidate), stb_truetype for fonts, stb_image for images;
+  - manuals and papers drawn properly;
+  - exotic PDFs (Type 3 fonts, transparency groups, forms) best effort.
+- **MIDI input:** MPU-401 ports where a card has one, and USB MIDI keyboards (a USB MIDI class driver on GLOS's
+  stack).
+- **Screensavers, and DOS-GL, on any card:** the owner's answer is a software renderer in DOS-GL. Every PC then
+  gets the DOS-GL screensavers, and windowed DOS-GL apps run on any VBE card. It ties into the work on other
+  vendors' cards (the Riva TNT2, ATI's Rage 128 and Radeon). It is built in DOS-GL's code, which is to merge into
+  MGA-Glide ([The DOS-GL software renderer](#the-dos-gl-software-renderer)).
+- **Language:** English in v1, with every string in resources so translations can come later without code changes.
+  Regional formats for dates, times and numbers.
+- **The IDE's needs: all of them in API 2.0,** built in phase B and used by GLOS's own tools: Term streams a job's
+  output, and Files uses long names.
+- **Order:** Files and Notepad first, as they exercise the toolkit most. Then Paint and the audio apps, then the rest.
 
 ## Principles
 
@@ -55,10 +77,9 @@ richer shell, and modern apps for old PCs. This plan is the route to that v1.
     - TinySoundFont (a General MIDI software synth);
     - a PDF parser.
   - Copyleft code (MuPDF, libxmp, Linux's drivers) stays behaviour reference at most.
-- **Sibling projects move with the API.** DOS-GL's windowed path, the SDL3 bridge (Fifth Wheel, PrBoom-plus,
-  Half-Life) and MGA-Glide's HAL port call the GLOS API. Two ways through, chosen in phase A:
-  - they move to 2.0 in phase B, merged and pushed in those repositories with the owner's approval;
-  - or the kernel keeps a 1.x compatibility table until they have moved.
+- **Sibling projects move with the API, in phase B.** DOS-GL's windowed path, the SDL3 bridge (Fifth Wheel,
+  PrBoom-plus, Half-Life) and MGA-Glide's HAL port call the GLOS API, and move to 2.0 with the kernel. Each is merged
+  and pushed in its own repository with the owner's approval. There is no 1.x compatibility table.
 
 ## Phases
 
@@ -99,10 +120,19 @@ A comes first; B and C run side by side; D builds on B and C; E and F come in wa
 - **The desktop:** idle time for screensavers, and an event when a setting changes (theme, colours, region,
   mouse).
 - **Windowed and full-screen DOS-GL:** for screensavers.
+- **The IDE's list, in full:**
+  - builds as jobs with their output streamed and cancel;
+  - a debug channel to programs the caller started (gdb's protocol);
+  - window capture and input for programs the caller started;
+  - long file names (LFN);
+  - a secrets store;
+  - local-trust package installs;
+  - shared modules (DXE3), if phase A's design keeps them.
+- **The siblings moved to 2.0:** DOS-GL (in MGA-Glide once merged), the SDL3 bridge, the HAL's GLOS port.
 - **Tests:**
   - every existing suite on 2.0;
   - an API conformance suite, which starts host-side and runs in Loop A;
-  - DOS-GL, SDL3 and the HAL either moved or covered by the compatibility table.
+  - the siblings' own suites on 2.0.
 
 ### C. Toolkit 2 (`sdk/gui`)
 
@@ -135,9 +165,9 @@ A comes first; B and C run side by side; D builds on B and C; E and F come in wa
   - left: recent and pinned programs, then every app, with search as you type;
   - right: tiles to pin;
   - power and settings at the bottom.
-- **Screensavers on DOS-GL,** after Windows 98's OpenGL ones: a starfield, pipes, a 3D maze, flying objects.
-  Matrox cards draw them; a simpler software set serves the rest. An idle timeout, and a preview in the Control
-  Panel.
+- **Screensavers on DOS-GL,** after Windows 98's OpenGL ones: a starfield, pipes, a 3D maze, flying objects. A
+  Matrox card draws them, and DOS-GL's software renderer draws them on any other card. An idle timeout, and a
+  preview in the Control Panel.
 - **Appearance:** wallpapers and themes, and notifications for the system's own news (a pad plugged in, the network
   up).
 - **The Control Panel, grown:**
@@ -155,7 +185,7 @@ A comes first; B and C run side by side; D builds on B and C; E and F come in wa
   - icon, list and detail views;
   - folders listed as they load, not all at once;
   - thumbnails, search, properties;
-  - archives opened as folders: ZIP read and written; TAR and GZ read; others (LZH, ARJ, 7z) to be settled in A.
+  - archives opened as folders: ZIP read and written; TAR, GZ, LZH/LHA, ARJ and 7z read.
 - **Notepad,** after Notepad++:
   - tabs, sessions kept;
   - find and replace, line numbers;
@@ -182,9 +212,12 @@ A comes first; B and C run side by side; D builds on B and C; E and F come in wa
 - **MIDI Studio** (GarageBand for MIDI files):
   - tracks and a piano roll; instruments as OPL3 patches or General MIDI (the synth);
   - .MID in and out;
-  - a MIDI keyboard as input where the hardware allows (to be settled in A).
-- **PDF Viewer:** pages, zoom, search, text selection, a page cache. A Pentium at least. The library choice in A is
-  the risk.
+  - a MIDI keyboard as input: an MPU-401 port where a card has one, and USB MIDI keyboards (the USB MIDI class on
+    GLOS's stack).
+- **PDF Viewer:** pages, zoom, search, text selection, a page cache. A Pentium at least. GLOS's own renderer:
+  - a permissive parser;
+  - stb_truetype for fonts, stb_image for images;
+  - manuals and papers properly, exotic PDFs best effort.
 - **Games Library:**
   - DOS games found (C:\GAMES and wherever the owner says), with box art and details;
   - each game's profile (GLOS.CFG's `[program]` sections, like Windows' PIFs) and its pad mapping;
@@ -262,6 +295,18 @@ plan is meant to avoid.
 - its languages (C first; Pascal?);
 - its repository's name.
 
+## The DOS-GL software renderer
+
+The owner's answer for screensavers on non-Matrox cards. It reaches further than screensavers:
+- **What it gives:** a software rasteriser behind DOS-GL's existing interface, so that DOS-GL programs run on any
+  VBE card: the screensavers, windowed DOS-GL apps under GLOS, and DOS-GL games full-screen, slower than on a
+  Matrox card.
+- **What it shapes:** a DOS-GL with more than one back end. That is the shape the other vendors' cards need: the
+  Riva TNT2 next, then ATI's Rage 128 and Radeon (the owner's vendor study).
+- **Where it is built:** in DOS-GL's code, which the owner has chosen to merge into MGA-Glide. So it is planned
+  there, with that repository's regressions and the owner's approval for merges, and coordinated with the merge.
+  GLOS's phase D waits on it for screensavers on other cards.
+
 ## Testing, throughout
 
 - **Loop A:** each app's GUI scripts with goldens at 8, 16 and 32 bits, and its SSH-driven tests, at its CPU floor.
@@ -269,17 +314,7 @@ plan is meant to avoid.
 - **On the bench, by hand with the owner:** sound, MIDI, USB, screensavers on a real Matrox card.
 - **The full regression before each merge into main,** as now; the gate before the release.
 
-## Open questions, for phase A
+## Open questions
 
-1. **1.x compatibility:** do DOS-GL, the SDL3 bridge and the HAL move to 2.0 in phase B, or does the kernel keep a
-   1.x table for a while?
-2. **Archive formats** beyond ZIP, TAR and GZ: LZH, ARJ and 7z read? Written?
-3. **The PDF library:** which permissive parser, and how fonts are drawn.
-4. **MIDI input:** an MPU-401 (bench-g400's Crystal chip shows none), a USB MIDI keyboard (another USB class), or
-   none in v1.
-5. **Screensavers on non-Matrox cards:** software versions, or Matrox only.
-6. **The UI's language:** English only in v1, with formats by region, or translations too?
-7. **The IDE's needs** (above): which of them API 2.0 carries in full, and which only as a way in (shared modules
-   especially).
-8. **The order inside E and F:** which apps first. Proposal: Files and Notepad (they exercise the toolkit most),
-   then Paint and the audio apps, then the rest.
+Plan v0's eight are answered (above). One remains, about the DOS-GL software renderer: who builds it and when,
+against GLOS v1's schedule.
