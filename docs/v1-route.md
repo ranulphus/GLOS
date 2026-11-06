@@ -264,6 +264,20 @@ before that.
     marked DL10030, with a Davicom PHY) and the network built into VIA-chipset motherboards.
   - 86Box has no Rhine model. Whether it is tested on the bench only, or 86Box gets a model as an MGA-Glide patch,
     is settled in H's plan.
+- **Known so far: C-Media's CM8738 (CMI8738), the Pentium III bench's sound.**
+  - **A native driver for GLOS's mixer**, so the desktop and GLOS's apps have sound on it: PCI, bus-master DMA,
+    from C-Media's datasheet.
+  - **Its MPU-401 UART and game port:** the MPU-401 also gives MIDI Studio a bench to test MIDI on.
+  - **Its FM synthesiser,** reported to be a hardware OPL3 except on some later chips (marked SX or LX). It is to
+    be checked on the bench's chip.
+  - **DOS games in sessions:** these talk to the card directly. Its Sound Blaster Pro mode needs the motherboard's
+    distributed DMA (DDMA), which many boards lack. FM music and the MPU-401 work without it.
+- **A candidate the CM8738 raises: a virtual Sound Blaster for DOS sessions.**
+  - GLOS already traps ports for its virtual devices. It could answer a Sound Blaster's ports itself and play the
+    sound through its mixer, on any card it has a native driver for.
+  - That would give DOS games sound on PCI cards whose own DOS support is weak, as the SBEMU project does in pure
+    DOS.
+  - A large piece; the audit weighs it.
 - **The audit:** what GLOS drives today against what the benches have and what the period's PCs commonly had.
   - **Today:**
     - network: NE2000 (ISA, and the RTL8029), RTL8139, Intel 8255x;

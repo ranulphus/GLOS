@@ -105,5 +105,5 @@ programs can play.
 
 - **USB MIDI:** the owner's MIDI keyboard(s), to capture their descriptors (as the pads' J0) before the USB MIDI
   driver is written.
-- **An MPU-401:** which card would provide one at the bench (bench-g400's Crystal chip shows none; an SB16 or a
-  wavetable card in the P4?).
+- **An MPU-401:** the Pentium III bench's C-Media CM8738 has an MPU-401 UART (route, phase H). bench-g400's
+  Crystal chip shows none.
