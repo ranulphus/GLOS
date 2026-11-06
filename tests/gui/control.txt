@@ -8,6 +8,10 @@ shot cp-display "Control Panel"
 key ctrl+tab alt+s
 shot cp-input "Control Panel"
 key ctrl+tab
+shot cp-joystick "Control Panel"
+key ctrl+tab
+shot cp-usb "Control Panel"
+key ctrl+tab
 shot cp-sound "Control Panel"
 key ctrl+tab
 shot cp-network "Control Panel"
