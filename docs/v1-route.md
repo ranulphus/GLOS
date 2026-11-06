@@ -22,6 +22,10 @@ richer shell, and modern apps for old PCs. This plan is the route to that v1.
     PC, MP3 saying it needs a Pentium.
 - **Extra apps:** a games library, chat and a web reader, disk and backup tools.
 - **The ISA DMA limit** (docs/upper-memory.md B1) stays documented, with nothing more done about it.
+- **An AI-powered IDE, later and separately:** a GLOS IDE in the spirit of Visual C++ or Delphi, with AI agents like
+  Claude Code built in, for writing GLOS apps on GLOS itself. It is a follow-up project with its own repository,
+  not part of this work. **API 2.0 and toolkit 2 must already cover what it needs**
+  ([Designed for the IDE](#designed-for-the-ide-a-follow-up)).
 
 ## Principles
 
@@ -70,9 +74,11 @@ A comes first; B and C run side by side; D builds on B and C; E and F come in wa
   - screensavers;
   - themes and wallpapers;
   - the Control Panel's new pages.
-- **docs/api-2.md:** API 2.0 in full, from those plans. Its tables, structures, events and errors; how programs
-  find it; and the decision on 1.x compatibility.
-- **docs/toolkit-2.md:** the toolkit's new widgets and services.
+- **The IDE's needs, as if it were one more app:** a page like the apps', from [Designed for the
+  IDE](#designed-for-the-ide-a-follow-up), so that API 2.0 needs nothing new when that project starts.
+- **docs/api-2.md:** API 2.0 in full, from those plans and the IDE's page. Its tables, structures, events and errors;
+  how programs find it; and the decision on 1.x compatibility.
+- **docs/toolkit-2.md:** the toolkit's new widgets and services, the IDE's included.
 - **Exit:** the owner approves api-2.md and the plans. Nothing in B–F starts before then.
 
 ### B. API 2.0 and the window system (the kernel)
@@ -208,6 +214,54 @@ A comes first; B and C run side by side; D builds on B and C; E and F come in wa
 - **The docs:** the user guide (the Help app's), the PRD, release notes.
 - **API 2.0 frozen as GLOS's v1 API:** v1.0.
 
+## Designed for the IDE (a follow-up)
+
+The IDE is built after v1, in its own repository. Most of it is an app's own business:
+- **The model:** an AI model's API reached over HTTPS from the app, with GLOS's network and the BearSSL client the M10
+  apps already use. No model runs on these PCs.
+- **The rest:** the code editor, project files, the agents' loop.
+
+What it needs from GLOS, though, has to be in API 2.0 and toolkit 2, or it would force the piecemeal additions this
+plan is meant to avoid.
+
+**From API 2.0:**
+- **Builds with live output:** a compiler (DJGPP's, Open Watcom's) run as a job with its output streamed as it
+  comes, input given, its own environment and working folder, and a way to cancel it. GLOS_FN_RUN and GLOS_FN_JOB
+  are the start.
+- **Debugging the app being built:** attach to an app or job the IDE started; breakpoints, stepping, registers,
+  memory, the exception that stopped it. GLOS already speaks gdb's remote protocol (`kernel/dbg`), so a local
+  channel to that, for programs the caller started, may be all it takes.
+- **An agent that sees and drives the app under test:**
+  - a window's pixels, and keys and mouse into it, as `glos shot` and `glos key` do over SSH;
+  - only for programs the caller started, so it doesn't become a general way to watch or drive other apps.
+- **Long file names** (the LFN follow-up, PRD §7.3): modern projects and toolchains expect them.
+- **A store for secrets** (an AI service's API key), kept apart from GLOS.CFG.
+- **Apps built locally, installed:** the package manager trusts only the owner's signing key today. A local trust
+  level is needed, for the IDE's builds and for others' apps.
+- **Background threads** (B), **file watching** (GLOS_FN_WATCH, kept), and **the clipboard with formats** (B).
+- **Possibly shared modules** (DJGPP's DXE3): the IDE's plug-ins, and the toolkit shared between apps. Phase A says
+  whether 2.0 has them.
+
+**From toolkit 2:**
+- **Panes:** dockable panes and splitters, with tabbed documents.
+- **A code editor component:**
+  - syntax highlighting and folding;
+  - completion and signature pop-ups;
+  - error markers from the compiler's output.
+- **Other widgets:** a property grid (an inspector for the form designer), and an output pane (Term's VT as a
+  widget).
+- **Windows and dialogs from a file:** windows and dialogs described in a resource file and loaded at run time,
+  and widgets that can be listed with their properties. This is what lets a Delphi-like form designer make an
+  app's windows, and it is the hardest to retrofit.
+- **The SDK on GLOS itself:** headers, libglos and the toolkit as packages (D14's SDK), so that apps can be built
+  without a modern PC.
+
+**For the IDE's own plan, not this one:**
+- which models and services it uses, and whether through a relay on a modern PC;
+- the agents' permissions (what they may run, write and send, and what needs the user's yes);
+- its languages (C first; Pascal?);
+- its repository's name.
+
 ## Testing, throughout
 
 - **Loop A:** each app's GUI scripts with goldens at 8, 16 and 32 bits, and its SSH-driven tests, at its CPU floor.
@@ -225,5 +279,7 @@ A comes first; B and C run side by side; D builds on B and C; E and F come in wa
    none in v1.
 5. **Screensavers on non-Matrox cards:** software versions, or Matrox only.
 6. **The UI's language:** English only in v1, with formats by region, or translations too?
-7. **The order inside E and F:** which apps first. Proposal: Files and Notepad (they exercise the toolkit most),
+7. **The IDE's needs** (above): which of them API 2.0 carries in full, and which only as a way in (shared modules
+   especially).
+8. **The order inside E and F:** which apps first. Proposal: Files and Notepad (they exercise the toolkit most),
    then Paint and the audio apps, then the rest.
