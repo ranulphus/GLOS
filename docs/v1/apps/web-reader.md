@@ -64,6 +64,7 @@ and the retro-computing web usable.
   posted, a download.
 - **The P4:** real sites at the owner's say-so.
 
-## Open points
+## Settled at the owner's review (2026-11-06)
 
-- **Which search engine** to offer by default (one that works without JavaScript and allows it).
+- **The default search engine:** DuckDuckGo Lite (lite.duckduckgo.com, plain HTML). Wiby, FrogFind and Mojeek are
+  in the list too; the user can change it.

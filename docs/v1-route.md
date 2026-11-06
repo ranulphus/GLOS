@@ -65,7 +65,8 @@ richer shell, and modern apps for old PCs. This plan is the route to that v1.
   - Disk Tools writes images to hard disks and CF cards, never to GLOS's own disk;
   - the Games Library's pictures are the user's own and screenshots (nothing fetched);
   - Notepad prints text to LPT and has no spelling checker in v1;
-  - Images stays the viewer beside a new Paint.
+  - Images stays the viewer beside a new Paint;
+  - the Web Reader searches DuckDuckGo Lite by default.
 - **DOS-GL's B0** (DOS-GL `docs/backend-interface.md`):
   - the back-end interface in clip space (today's seam);
   - stencil in the software renderer from B2's start.
