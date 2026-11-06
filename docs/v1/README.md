@@ -7,11 +7,11 @@ choice, 2026-11-06), and approved before any code of phases B–F.
 
 | Document | What it is | Status |
 |---|---|---|
-| `apps/*.md` | A plan for each app: what it does in v1, how it looks, what it needs from toolkit 2 and API 2.0, its libraries, its CPU floor, its tests | Being written |
-| `shell.md` | The task bar, the notification area, notifications, the Start menu, screensavers, themes and wallpapers | Being written |
-| `ide.md` | The follow-up IDE's needs, as if it were one more app | Being written |
-| `api-2.md` | API 2.0 in full, from the plans | After the plans |
-| `toolkit-2.md` | Toolkit 2's widgets and services, from the plans | After the plans |
+| `apps/*.md` | A plan for each app: what it does in v1, how it looks, what it needs from toolkit 2 and API 2.0, its libraries, its CPU floor, its tests | Written |
+| `shell.md` | The task bar, the notification area, notifications, the Start menu, screensavers, themes and wallpapers | Written |
+| `ide.md` | The follow-up IDE's needs, as if it were one more app | Written |
+| `api-2.md` | API 2.0 in full, from the plans | Written |
+| `toolkit-2.md` | Toolkit 2's widgets and services, from the plans | Written |
 | DOS-GL `docs/backend-interface.md` | Step B0 of DOS-GL's software renderer plan (DOS-GL `docs/backends.md`) | After the plans |
 
 ## The API's areas
