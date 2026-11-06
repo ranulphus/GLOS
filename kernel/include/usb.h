@@ -59,6 +59,9 @@ struct usb_dev {
     u8 kind, toggle_out;                /* kind: 0 a HID pad, XPAD_360 or XPAD_GIP (xpad.h), or USB_KIND_ */
     /* where it is: on a root port (port, parent 0), or on port hport of the hub that is device parent - 1 */
     u8 hc_i, parent, hport;
+    u8 mouse_desc;                      /* a mouse read by its report descriptor (else its boot reports) */
+    u8 owner;                           /* another of the interfaces of the device that is dev[owner - 1] (a
+                                           combined keyboard and mouse's mouse, say); 0: the device itself */
     /* a hub's (J3) */
     u8 nports, hub_dirty;               /* its ports (8 at most); a change came on its status pipe */
     u8 child[8], ctries[8];             /* the device on each of its ports (index + 1), attempts at it */
@@ -68,6 +71,7 @@ struct usb_dev {
 #define USB_KIND_KBD    3               /* a boot keyboard: its keys as PS/2 ones (usbkbd.c) */
 #define USB_KIND_MOUSE  4               /* a boot mouse: as a PS/2 one */
 
+void usb_kbd_leds(u8 ps2);              /* the LEDs a program set (EDh's byte: 1 Scroll, 2 Num, 4 Caps Lock) */
 void usb_late(void);                    /* after GLOS.CFG: [usb] enabled, every UHCI taken */
 void usb_leave(void);                   /* glos exit: each controller stopped, reset and its registers given back */
 int usb_stat(char *b, u32 room);        /* glos usb */

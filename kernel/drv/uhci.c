@@ -97,6 +97,24 @@ static u8 last_report[MAX_DEV][64];     /* a pipe's last report, so that only a 
 static u8 last_len[MAX_DEV];            /* owner's 081f:e401 among them, answer every poll despite SET_IDLE(0)) */
 static u8 next_addr = 1;
 static u32 rep_code, rep_next, rep_delay = 512, rep_every = 102;      /* a USB keyboard's repeat (GLOS's: in ticks) */
+static volatile u8 leds_want, leds_due;  /* the LEDs (HID's bits: 1 Num, 2 Caps, 4 Scroll), to be sent */
+
+/* A program set the keyboard's LEDs (the byte after EDh: 1 Scroll, 2 Num, 4 Caps Lock): USB keyboards' follow. */
+void usb_kbd_leds(u8 ps2)
+{
+    leds_want = (u8)((ps2 >> 1 & 1) | (ps2 >> 2 & 1) << 1 | (ps2 & 1) << 2);
+    leds_due = 1;
+}
+
+static int control(struct hc *h, u32 addr, u32 maxp, int low, const u8 setup[8], void *data, u32 *got, u32 *status);
+
+/* SET_REPORT: a keyboard's LED output report (HID 1.11 §7.2.2; the boot keyboard's report, appendix B.1). */
+static void kbd_leds(struct hc *h, struct usb_dev *d, u8 leds)
+{
+    u8 s[8] = { 0x21, 0x09, 0x00, 0x02, d->ifnum, 0, 1, 0 };
+    u32 status;
+    control(h, d->addr, d->maxp0, d->low, s, &leds, 0, &status);
+}
 static int started;
 
 #define PHYS(h, p) ((h)->pool_phys + (u32)((const u8 *)(p) - (h)->pool))
@@ -225,21 +243,28 @@ static const char *what(const struct usb_dev *d)
     return "other";
 }
 
-/* The configuration's interfaces and endpoints: the first interface's class, its first interrupt IN and OUT. */
-static void parse_config(struct usb_dev *d, const u8 *c, u32 len)
+/* The configuration's interface number `want` (counting each interface's alternate setting 0 only, from 0): its
+   class, a HID one's report length, its first interrupt IN and OUT endpoints; and how many interfaces there are. */
+static void parse_config(struct usb_dev *d, const u8 *c, u32 len, u32 want)
 {
     u32 at = 0, ifaces = 0;
+    int mine = 0;
     while (at + 2 <= len && c[at] >= 2 && at + c[at] <= len) {
         if (c[at + 1] == 2 && c[at] >= 9) {                         /* configuration */
             d->config = c[at + 5];
         } else if (c[at + 1] == 4 && c[at] >= 9) {                  /* interface */
-            if (!ifaces++) {
-                d->iclass = c[at + 5], d->isub = c[at + 6], d->iproto = c[at + 7];
-                d->ifnum = c[at + 2];
+            mine = 0;
+            if (c[at + 3] == 0) {                                   /* (alternate setting 0) */
+                if (ifaces == want) {
+                    d->iclass = c[at + 5], d->isub = c[at + 6], d->iproto = c[at + 7];
+                    d->ifnum = c[at + 2];
+                    mine = 1;
+                }
+                ifaces++;
             }
-        } else if (c[at + 1] == 0x21 && c[at] >= 9 && ifaces == 1 && c[at + 6] == 0x22) {   /* HID: its report */
+        } else if (c[at + 1] == 0x21 && c[at] >= 9 && mine && c[at + 6] == 0x22) {   /* HID: its report */
             d->hid_rlen = (u16)(c[at + 7] | c[at + 8] << 8);
-        } else if (c[at + 1] == 5 && c[at] >= 7 && ifaces == 1 && (c[at + 3] & 3) == 3) {     /* endpoint: interrupt */
+        } else if (c[at + 1] == 5 && c[at] >= 7 && mine && (c[at + 3] & 3) == 3) {     /* endpoint: interrupt */
             if (c[at + 2] & 0x80) {
                 if (!d->ep_in)
                     d->ep_in = c[at + 2], d->ep_in_maxp = c[at + 4], d->ep_in_ival = c[at + 6];
@@ -337,8 +362,15 @@ static void pipes_poll(struct hc *h)
             d->toggle ^= 1;
             if (d->nports && len)               /* a hub's status pipe: a bit for each port that changed */
                 d->hub_dirty = 1;
-            if (d->kind == USB_KIND_MOUSE && len >= 3) {        /* (every report counts: no comparing) */
-                vkbc_mouse((signed char)r[1], (signed char)r[2], r[0] & 7);
+            if (d->kind == USB_KIND_MOUSE && len) {             /* (every report counts: no comparing) */
+                int dx, dy, wh;
+                u16 bt;
+                if (d->mouse_desc) {
+                    if (hid_mouse_read(&pads[i], r, len, &dx, &dy, &wh, &bt) == 0)
+                        vkbc_mouse(dx, dy, bt & 7);
+                } else if (len >= 3) {
+                    vkbc_mouse((signed char)r[1], (signed char)r[2], r[0] & 7);
+                }
             } else if (d->kind == USB_KIND_KBD && len >= 8 && memcmp(r, last_report[i], 8)) {
                 struct usbkbd_event ev[16];
                 u32 k, n, rep = rep_code;
@@ -394,21 +426,40 @@ static int pad_take(struct usb_dev *d)
     return 0;
 }
 
-/* A boot keyboard or mouse (HID subclass 1): the boot protocol (SET_PROTOCOL 0: the reports of HID 1.11 appendix
-   B), reports on a change only (SET_IDLE 0); a keyboard starts with nothing held, and repeats as [input] says. */
+/* A boot keyboard or mouse (HID subclass 1). A keyboard: the boot protocol (SET_PROTOCOL 0: HID 1.11 appendix B's
+   report), starting with nothing held, repeating as [input] says. A mouse: read by its report descriptor in the
+   report protocol where it has one GLOS can read (a combined receiver's touchpad ignored SET_PROTOCOL 0 and kept its
+   report ID first), else by its boot reports. Reports on a change only (SET_IDLE 0). */
 static void boot_start(struct hc *h, struct usb_dev *d)
 {
     u8 proto[8] = { 0x21, 0x0B, 0, 0, 0, 0, 0, 0 }, idle[8] = { 0x21, 0x0A, 0, 0, 0, 0, 0, 0 };
+    u8 get[8] = { 0x81, 6, 0, 0x22, 0, 0, 0, 0 }, *buf;
     char v[16];
-    u32 status = 0;
+    u32 status = 0, got = 0;
     if (!d->ep_in || pipe_slot(d) != 0)
         return;
-    proto[4] = idle[4] = d->ifnum;
+    proto[4] = idle[4] = get[4] = d->ifnum;
+    d->kind = (u8)(d->iproto == 1 ? USB_KIND_KBD : USB_KIND_MOUSE);
+    if (d->kind == USB_KIND_MOUSE && d->hid_rlen && d->hid_rlen <= 1024 && (buf = kmalloc(1024)) != 0) {
+        get[6] = (u8)d->hid_rlen, get[7] = (u8)(d->hid_rlen >> 8);
+        if (control(h, d->addr, d->maxp0, d->low, get, buf, &got, &status) == 0
+            && hid_parse(buf, got, HID_WANT_MOUSE, &pads[d - dev]) == 0 && (pads[d - dev].axes & 3) == 3) {
+            const struct hid_pad *m = &pads[d - dev];
+            char b[16];
+            d->mouse_desc = 1;
+            proto[2] = 1;                       /* (the report protocol: the one its descriptor describes) */
+            kprintf("GLOS-USB port=%s mouse report=%u x=%u/%u y=%u/%u wheel=%u/%u buttons=%x\n", loc(d, b),
+                    m->report_id, m->axis[0].bit, m->axis[0].bits, m->axis[1].bit, m->axis[1].bits, m->wheel.bit,
+                    m->wheel.bits, m->button_mask);
+        }
+        kfree(buf);
+    }
     control(h, d->addr, d->maxp0, d->low, proto, 0, 0, &status);
     control(h, d->addr, d->maxp0, d->low, idle, 0, 0, &status);
-    d->kind = (u8)(d->iproto == 1 ? USB_KIND_KBD : USB_KIND_MOUSE);
     d->is = d->kind == USB_KIND_KBD ? "hid-keyboard" : "hid-mouse";
     if (d->kind == USB_KIND_KBD) {
+        u8 b = vm_rd8(0x417);                   /* the BIOS's locks as they are: 10h Scroll, 20h Num, 40h Caps */
+        kbd_leds(h, d, (u8)((b >> 5 & 1) | (b >> 6 & 1) << 1 | (b >> 4 & 1) << 2));
         memset(last_report[d - dev], 0, 8);
         last_len[d - dev] = 8;
         v[0] = 0;
@@ -511,7 +562,12 @@ static void fail(const struct usb_dev *d, const char *step, u32 status)
 static char *loc(const struct usb_dev *d, char *b)
 {
     u32 n;
-    if (d->parent && d->parent <= MAX_DEV) {
+    if (d->owner && d->owner <= MAX_DEV) {      /* another interface: its device's place, then :its number */
+        loc(&dev[d->owner - 1], b);
+        n = (u32)strlen(b);
+        if (n < 13)
+            ksnprintf(b + n, 16 - n, ":%u", d->ifnum);
+    } else if (d->parent && d->parent <= MAX_DEV) {
         loc(&dev[d->parent - 1], b);
         n = (u32)strlen(b);
         if (n < 13)
@@ -523,6 +579,40 @@ static char *loc(const struct usb_dev *d, char *b)
 }
 
 static void hub_start(struct hc *h, struct usb_dev *d);
+static void hid_start(struct hc *h, struct usb_dev *d);
+
+/* A device's HID interfaces after its first (the configuration in c): each an entry of its own, which shares the
+   device's address and goes when it does, with a pipe of its own (a keyboard's, a mouse's, a pad's). */
+static void more_interfaces(struct hc *h, int owner, const u8 *c, u32 len)
+{
+    u32 k;
+    int i;
+    char b[16];
+    for (k = 1; k < dev[owner].nif && k < 4; k++) {
+        struct usb_dev *e;
+        for (i = 0; i < MAX_DEV && dev[i].used; i++) ;
+        if (i == MAX_DEV)
+            return;
+        e = &dev[i];
+        memset(e, 0, sizeof *e);
+        e->hc_i = dev[owner].hc_i, e->port = dev[owner].port, e->parent = dev[owner].parent;
+        e->hport = dev[owner].hport, e->low = dev[owner].low, e->addr = dev[owner].addr;
+        e->maxp0 = dev[owner].maxp0, e->vendor = dev[owner].vendor, e->product = dev[owner].product;
+        e->owner = (u8)(owner + 1);
+        parse_config(e, c, len, k);
+        if (e->iclass != 0x03)
+            continue;
+        e->is = what(e);
+        e->used = 1;
+        hid_start(h, e);
+        if (!e->pipe) {                         /* (nothing GLOS uses: a vendor's or a media keys' interface) */
+            e->used = 0;
+            continue;
+        }
+        kprintf("GLOS-USB port=%s if=%02x/%02x/%02x in=%02x/%u/%u is=%s\n", loc(e, b), e->iclass, e->isub,
+                e->iproto, e->ep_in, e->ep_in_maxp, e->ep_in_ival, e->is);
+    }
+}
 
 /* A device just reset on a port (a root port, or port hport of the hub parent - 1): its address, descriptors and
    configuration; then what it is gets started. Its index, or -1. */
@@ -579,7 +669,7 @@ static int enumerate(struct hc *h, int root, int parent, int hport, int low)
         fail(d, "config", status);
         return -1;
     }
-    parse_config(d, buf, got);
+    parse_config(d, buf, got, 0);
     s_conf[2] = d->config;
     if (control(h, d->addr, d->maxp0, low, s_conf, 0, 0, &status) != 0) {
         fail(d, "configure", status);
@@ -604,6 +694,8 @@ static int enumerate(struct hc *h, int root, int parent, int hport, int low)
         kprintf("GLOS-USB port=%s speed=%s id=%04x:%04x class=%02x/%02x/%02x if=%02x/%02x/%02x is=%s\n", loc(d, b),
                 low ? "low" : "full", d->vendor, d->product, d->dclass, d->dsub, d->dproto, d->iclass, d->isub,
                 d->iproto, d->is);
+    if (d->nif > 1 && !d->nports)               /* a combined keyboard and mouse's other interfaces: an entry each */
+        more_interfaces(h, i, buf, got);
     return i;
 }
 
@@ -616,7 +708,7 @@ static void detach_dev(struct hc *h, int i)
     if (!d->used)
         return;
     for (k = 0; k < MAX_DEV; k++)
-        if (dev[k].used && dev[k].parent == i + 1)
+        if (dev[k].used && (dev[k].parent == i + 1 || dev[k].owner == i + 1))
             detach_dev(h, k);
     pipe_stop(h, d);
     if (d->kind == USB_KIND_KBD) {              /* (its keys let go, so nothing stays held) */
@@ -628,7 +720,7 @@ static void detach_dev(struct hc *h, int i)
         rep_code = 0;
     }
     kprintf("GLOS-USB port=%s gone\n", loc(d, b));
-    if (d->parent && d->hport >= 1 && d->hport <= 8)
+    if (d->parent && !d->owner && d->hport >= 1 && d->hport <= 8)
         dev[d->parent - 1].child[d->hport - 1] = 0;
     d->used = 0;
 }
@@ -778,6 +870,12 @@ static void usb_thread(void *arg)
     for (;;) {
         for (i = 0; i < nhc; i++)
             pipes_poll(&hc[i]);
+        if (leds_due) {                         /* the LEDs a program set, to every USB keyboard */
+            leds_due = 0;
+            for (i = 0; i < MAX_DEV; i++)
+                if (dev[i].used && dev[i].kind == USB_KIND_KBD)
+                    kbd_leds(&hc[dev[i].hc_i], &dev[i], leds_want);
+        }
         if (rep_code && (s32)(timer_ticks() - rep_next) >= 0) {     /* a USB keyboard's held key repeats */
             vkbc_key(rep_code, 1);
             rep_next += rep_every;

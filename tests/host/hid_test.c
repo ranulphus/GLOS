@@ -25,6 +25,11 @@ static const u8 pad[] = {       /* a Game Pad: report 1, X Y Z Rz signed -127..1
 static const u8 ff[] = {        /* a Joystick whose X is 0..FFh written in one byte (25 FF: -1 as a signed byte) */
     0x05, 0x01, 0x09, 0x04, 0xA1, 0x01, 0x09, 0x30, 0x15, 0x00, 0x25, 0xFF, 0x75, 0x08, 0x95, 0x01, 0x81, 0x02, 0xC0 };
 
+static const u8 combo[] = {     /* a combined receiver's mouse: report 2, three buttons, X Y and wheel -127..127 */
+    0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x85, 0x02, 0x09, 0x01, 0xA1, 0x00, 0x05, 0x09, 0x19, 0x01, 0x29, 0x03,
+    0x15, 0x00, 0x25, 0x01, 0x95, 0x03, 0x75, 0x01, 0x81, 0x02, 0x95, 0x01, 0x75, 0x05, 0x81, 0x03, 0x05, 0x01,
+    0x09, 0x30, 0x09, 0x31, 0x09, 0x38, 0x15, 0x81, 0x25, 0x7F, 0x75, 0x08, 0x95, 0x03, 0x81, 0x06, 0xC0, 0xC0 };
+
 static const u8 mouse[] = {     /* a mouse (Generic Desktop 02h): not a pad */
     0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x09, 0x30, 0x15, 0x81, 0x25, 0x7F, 0x75, 0x08, 0x95, 0x01, 0x81, 0x06, 0xC0 };
 
@@ -60,6 +65,21 @@ int main(void)
 
     CHECK(hid_pad_parse(ff, sizeof ff, &p) == 0 && p.axis[0].max == 255 && !p.axis[0].is_signed);
     CHECK(hid_pad_parse(mouse, sizeof mouse, &p) == -1);
+
+    {   /* mice: the combined receiver's as the bench's touchpad behaved (report ID, then buttons, X, Y) */
+        static const u8 m1[] = { 0x02, 0x01, 0x05, 0xFD, 0x00 }, m2[] = { 0x02, 0x02, 0x00, 0x00, 0xFF };
+        static const u8 m3[] = { 0x01, 0x01, 0x05, 0x05, 0x00 };
+        int dx, dy, wh;
+        u16 b;
+        CHECK(hid_parse(combo, sizeof combo, HID_WANT_MOUSE, &p) == 0);
+        CHECK(p.report_id == 2 && p.axes == 3 && p.button_mask == 7 && p.wheel.bits == 8);
+        CHECK(p.button_bit[0] == 0 && p.axis[0].bit == 8 && p.axis[1].bit == 16 && p.wheel.bit == 24);
+        CHECK(hid_mouse_read(&p, m1, sizeof m1, &dx, &dy, &wh, &b) == 0 && dx == 5 && dy == -3 && !wh && b == 1);
+        CHECK(hid_mouse_read(&p, m2, sizeof m2, &dx, &dy, &wh, &b) == 0 && !dx && !dy && wh == -1 && b == 2);
+        CHECK(hid_mouse_read(&p, m3, sizeof m3, &dx, &dy, &wh, &b) == -1);     /* the keyboard's report */
+        CHECK(hid_parse(mouse, sizeof mouse, HID_WANT_MOUSE, &p) == 0 && p.report_id == 0 && p.axes == 1);
+        CHECK(hid_parse(pad, sizeof pad, HID_WANT_MOUSE, &p) == -1);   /* a pad isn't a mouse */
+    }
 
     printf("hid_test: %d failures\n", fails);
     return fails != 0;

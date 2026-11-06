@@ -10,6 +10,7 @@
 
 #define GD_X            0x00010030u
 #define GD_HAT          0x00010039u
+#define GD_WHEEL        0x00010038u
 #define PAGE_BUTTON     0x0009u
 
 static s32 sval(const u8 *p, u32 n)            /* an item's data, sign-extended */
@@ -28,7 +29,7 @@ static u32 uval(const u8 *p, u32 n)
     return n == 1 ? p[0] : n == 2 ? (u32)(p[0] | p[1] << 8) : n == 4 ? (p[0] | p[1] << 8 | p[2] << 16 | (u32)p[3] << 24) : 0;
 }
 
-int hid_pad_parse(const u8 *d, u32 len, struct hid_pad *pad)
+int hid_parse(const u8 *d, u32 len, int want, struct hid_pad *pad)
 {
     u32 at = 0, page = 0, rsize = 0, rcount = 0, rid = 0, usage[16], nusage = 0, umin = 0, umax = 0, depth = 0;
     u32 i, appdepth = 0, lmax_raw = 0;
@@ -56,7 +57,9 @@ int hid_pad_parse(const u8 *d, u32 len, struct hid_pad *pad)
             if (tag == 0xA) {                   /* Collection */
                 u32 kind = n ? d[at + 1] : 0, u = nusage ? usage[0] : 0;
                 depth++;
-                if (kind == 1 && !in_app && !found && (u == 0x00010004u || u == 0x00010005u || u == 0x00010008u)) {
+                if (kind == 1 && !in_app && !found
+                    && (want == HID_WANT_MOUSE ? u == 0x00010002u
+                                               : (u == 0x00010004u || u == 0x00010005u || u == 0x00010008u))) {
                     in_app = 1;
                     appdepth = depth;
                 }
@@ -90,6 +93,9 @@ int hid_pad_parse(const u8 *d, u32 len, struct hid_pad *pad)
                             f->bit = (u16)p, f->bits = (u8)rsize, f->min = lmin, f->max = max, f->is_signed = (u8)signed_;
                             pad->axes |= (u8)(1u << (u - GD_X));
                         }
+                    } else if (u == GD_WHEEL && rsize <= 32 && !pad->wheel.bits) {
+                        pad->wheel.bit = (u16)p, pad->wheel.bits = (u8)rsize, pad->wheel.min = lmin;
+                        pad->wheel.max = max, pad->wheel.is_signed = (u8)signed_;
                     } else if (u == GD_HAT && rsize <= 8 && !pad->hat.bits) {
                         pad->hat.bit = (u16)p, pad->hat.bits = (u8)rsize, pad->hat.min = lmin, pad->hat.max = max;
                     } else if ((u >> 16) == PAGE_BUTTON && rsize == 1 && (u & 0xFFFF) >= 1 && (u & 0xFFFF) <= 16) {
@@ -128,6 +134,8 @@ int hid_pad_parse(const u8 *d, u32 len, struct hid_pad *pad)
     }
     return found && (pad->axes || pad->button_mask) ? 0 : -1;
 }
+
+int hid_pad_parse(const u8 *d, u32 len, struct hid_pad *pad) { return hid_parse(d, len, HID_WANT_PAD, pad); }
 
 static u32 bits_at(const u8 *r, u32 len, u32 bit, u32 n)
 {
@@ -176,5 +184,32 @@ int hid_pad_read(const struct hid_pad *pad, const u8 *r, u32 len, struct hid_pad
         if (v >= 0 && v < 8 && pad->hat.max - pad->hat.min == 7)
             s->hat = (u8)v;
     }
+    return 0;
+}
+
+/* A field's value as reported: sign-extended when its logical minimum is below 0. */
+static s32 raw(const struct hid_field *f, const u8 *r, u32 len)
+{
+    s32 v = (s32)bits_at(r, len, f->bit, f->bits);
+    if (f->bits && f->bits < 32 && (f->is_signed || f->min < 0) && (v >> (f->bits - 1) & 1))
+        v -= (s32)(1u << f->bits);
+    return v;
+}
+
+int hid_mouse_read(const struct hid_pad *pad, const u8 *r, u32 len, int *dx, int *dy, int *wheel, u16 *buttons)
+{
+    u32 i;
+    if (pad->report_id) {
+        if (!len || r[0] != pad->report_id)
+            return -1;
+        r++, len--;
+    }
+    *dx = pad->axes & 1 ? raw(&pad->axis[0], r, len) : 0;
+    *dy = pad->axes & 2 ? raw(&pad->axis[1], r, len) : 0;
+    *wheel = pad->wheel.bits ? raw(&pad->wheel, r, len) : 0;
+    *buttons = 0;
+    for (i = 0; i < 16; i++)
+        if ((pad->button_mask >> i & 1) && bits_at(r, len, pad->button_bit[i], 1))
+            *buttons |= (u16)(1u << i);
     return 0;
 }

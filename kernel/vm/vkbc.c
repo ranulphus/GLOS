@@ -39,6 +39,7 @@
 #include "io.h"
 #include "kprintf.h"
 #include "timer.h"
+#include "usb.h"
 #include "vm.h"
 
 #define QSIZE 64                                /* a power of two: the indices wrap */
@@ -397,6 +398,8 @@ u8 vkbc_in(u16 port)
     }
 }
 
+static u8 kbd_last;                     /* the last byte to the keyboard: after EDh, its LEDs come */
+
 void vkbc_out(u16 port, u8 v)
 {
     u8 p = pending;
@@ -431,6 +434,9 @@ void vkbc_out(u16 port, u8 v)
             if (replies < 4)                    /* the ACK; 86Box's kbc_at does the same), and the answer */
                 replies++;                      /* comes before any key (refill) */
             reply_since = timer_ticks();
+            if (kbd_last == 0xED)               /* (the LEDs: USB keyboards' follow, docs/gamepad.md) */
+                usb_kbd_leds(v);
+            kbd_last = kbd_last == 0xED ? 0 : v;
         } else {
             aux_seen(v);
         }
