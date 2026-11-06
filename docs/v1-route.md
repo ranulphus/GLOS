@@ -105,7 +105,8 @@ richer shell, and modern apps for old PCs. This plan is the route to that v1.
 
 ## Phases
 
-A comes first; B and C run side by side; D builds on B and C; E and F come in waves; G is the release.
+A comes first; B and C run side by side; D builds on B and C; E and F come in waves; G is the release. H, hardware
+compatibility, is planned after an audit and finishes before G.
 
 ### A. Design (documents only)
 
@@ -251,6 +252,37 @@ A comes first; B and C run side by side; D builds on B and C; E and F come in wa
 - **Disk Tools:** floppy images read and written (IMG/IMA), disks formatted, a disk's image to a file, backup to and
   restore from an SFTP server.
 - **Help and a welcome tour:** GLOS's user guide in a viewer, and a first-start tour.
+
+### H. Hardware compatibility (to be planned after an audit)
+
+**The owner's decision (2026-11-06):** a phase for the hardware GLOS drives. It holds the drivers the benches and
+typical PCs of the period need. Its contents are settled after a hardware compatibility audit, and nothing is built
+before that.
+
+- **Known so far: a VIA Rhine network driver.**
+  - VIA Rhine I, II and III, from VIA's public datasheet. It covers the Pentium III bench's D-Link DFE-530TX (a Rhine
+    marked DL10030, with a Davicom PHY) and the network built into VIA-chipset motherboards.
+  - 86Box has no Rhine model. Whether it is tested on the bench only, or 86Box gets a model as an MGA-Glide patch,
+    is settled in H's plan.
+- **The audit:** what GLOS drives today against what the benches have and what the period's PCs commonly had.
+  - **Today:**
+    - network: NE2000 (ISA, and the RTL8029), RTL8139, Intel 8255x;
+    - sound: the SB16 and Crystal's CS423x;
+    - USB: UHCI only;
+    - video: Matrox G100-G450, and other cards through VBE and DOS-GL's software renderer.
+  - **Candidates to check, among others:**
+    - USB's OHCI (SiS, ALi and many PCI USB cards);
+    - more network chips (3Com's 3c905 family; Tulip clones such as Davicom's and ADMtek's);
+    - more sound chips;
+    - the G400's AGP rings on chipsets other than the 440BX.
+  - **The benches as its first inputs:**
+    - bench-g400 (440BX, Intel PRO/100, Crystal);
+    - the Pentium 4 (G450);
+    - the Pentium III (the Rhine);
+    - the 486 (an ISA AT/LANTIC, an NE2000 clone).
+
+    Their full details are still owed.
+- **Its plan:** written after the audit, and approved by the owner like phase A's documents.
 
 ### G. The release
 
