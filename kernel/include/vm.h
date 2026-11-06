@@ -163,6 +163,7 @@ void vkbc_trace(void);                          /* GLOS-KBC lines: its last 64 e
 int vkbc_key(u32 code, int down);               /* injected: a set 1 code (100h up: with E0); 0, or -1: no room */
 int vkbc_key_busy(void);                        /* the app the keys go to is behind: they should wait a moment */
 int vkbc_mouse(int dx, int dy, int buttons);    /* injected: 0; -1: no room; -2: no program has the mouse on */
+int vkbc_mouse_wheel(int dx, int dy, int wheel, int buttons);   /* ... and the wheel's notches (+: away, up) */
 int vkbc_room(void);                            /* bytes the input queue still takes */
 
 /* int15.c, xms.c */

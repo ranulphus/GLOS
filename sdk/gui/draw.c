@@ -335,6 +335,11 @@ int gui_sb_event(struct gui_widget *w, struct gui_sb *b, struct gui_ev *e, int l
         gui_timer(w, 0);
         gui_damage(w);
         return 1;
+    case GUI_EV_WHEEL:                          /* three lines a notch, up for a turn away */
+        if (!vertical)
+            return 0;
+        b->pos -= e->wheel * 3 * line;
+        break;
     case GUI_EV_TIMER:
         if (!b->held)
             return 0;

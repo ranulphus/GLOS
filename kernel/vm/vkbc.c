@@ -530,15 +530,23 @@ int vkbc_key(u32 code, int down)
 
 /* The mouse moved by dx, dy (down and right positive, as on the screen),
    its buttons now `buttons` (bit 0 left, 1 right, 2 middle; -1: as they
-   were): 0; -1 without room; -2 when no program has the mouse enabled. */
-int vkbc_mouse(int dx, int dy, int buttons)
+   were), its wheel by `wheel` notches (positive away from the user): 0; -1
+   without room; -2 when no program has the mouse enabled. A program that
+   turned the wheel on (200, 100, 80) gets it in each packet's fourth byte,
+   as a wheel mouse's Z (negative away, -8 to 7); the desktop, as it is. */
+int vkbc_mouse(int dx, int dy, int buttons) { return vkbc_mouse_wheel(dx, dy, 0, buttons); }
+
+int vkbc_mouse_wheel(int dx, int dy, int wheel, int buttons)
 {
     u32 f = irq_save();
     int r = 0;
     if (buttons >= 0)
         aux_buttons = (u8)(buttons & 7);
     if (desk_on) {                              /* (no packets: the desktop takes it as it is) */
-        desk_in(DESK_MOUSE, dx, dy, aux_buttons);
+        if (dx || dy || buttons >= 0)
+            desk_in(DESK_MOUSE, dx, dy, aux_buttons);
+        if (wheel)
+            desk_in(DESK_WHEEL, wheel, 0, 0);
     } else if (!aux_on || (cmd & 0x20)) {
         r = -2;
     } else {
@@ -554,8 +562,11 @@ int vkbc_mouse(int dx, int dy, int buttons)
             inject((u8)(0x08 | aux_buttons | (x < 0 ? 0x10 : 0) | (y < 0 ? 0x20 : 0)), 1);
             inject((u8)x, 1);
             inject((u8)y, 1);
-            if (aux_wheel)
-                inject(0, 1);
+            if (aux_wheel) {                    /* (the wheel's turn in the first packet only) */
+                int z = -wheel < -8 ? -8 : -wheel > 7 ? 7 : -wheel;
+                inject((u8)(z & 0xFF), 1);
+            }
+            wheel = 0;                          /* (and to a program without the wheel on: nothing) */
         } while (dx || dy);
     }
     irq_restore(f);
@@ -716,6 +727,32 @@ void vkbc_init(void)
         for (n = 0; !(inb(0x64) & 1) && ++n < 200000;) ;
         on = (inb(0x64) & 1) ? inb(0x60) : 0x20;
         aux_port = (off & 0x20) && !(on & 0x20);
+        if (aux_port) {                         /* nobody's mouse (the desktop's, when it turns it on): its wheel
+                                                   on, if it has one (the knock: rates 200, 100, 80; then its
+                                                   ID 3 or 4), and the rate back to 100. A program's reset (FFh)
+                                                   turns it off again, and its own knock on (aux_seen) */
+            static const u8 knock[8] = { 0xF3, 200, 0xF3, 100, 0xF3, 80, 0xF3, 100 };
+            int k, id = -1;
+            for (k = 0; k < 6; k++) {
+                chip_cmd(0xD4);
+                chip_data(knock[k]);
+                if (aux_byte() != 0xFA)
+                    break;
+            }
+            if (k == 6) {
+                chip_cmd(0xD4);
+                chip_data(0xF2);
+                if (aux_byte() == 0xFA)
+                    id = aux_byte();
+                for (k = 6; k < 8; k++) {
+                    chip_cmd(0xD4);
+                    chip_data(knock[k]);
+                    aux_byte();
+                }
+            }
+            aux_wheel = id >= 3;
+            kprintf("GLOS-KBC mouse id=%d wheel=%d\n", id, aux_wheel);
+        }
         if (cmd & 0x20)
             chip_cmd(0xA7);                     /* off, as it was */
         chip_byte = 0x100;                      /* (whatever those did to the byte: written again below) */

@@ -29,6 +29,7 @@ struct app {
     struct trapframe start;                     /* where its thread begins: the return of its init call */
     void *job;                                  /* the agent's job it began as, or 0 */
     u16 psp;
+    u16 api_minor;                              /* the API's minor version it was built for (GLOS_FN_INIT's EBX) */
     u32 dta;
     struct cwd cwd;
     u32 ivt[256];                               /* the real-mode vectors it changed ... */

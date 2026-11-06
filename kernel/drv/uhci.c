@@ -367,7 +367,7 @@ static void pipes_poll(struct hc *h)
                 u16 bt;
                 if (d->mouse_desc) {
                     if (hid_mouse_read(&pads[i], r, len, &dx, &dy, &wh, &bt) == 0)
-                        vkbc_mouse(dx, dy, bt & 7);
+                        vkbc_mouse_wheel(dx, dy, wh, bt & 7);       /* (HID's wheel: positive away, up) */
                 } else if (len >= 3) {
                     vkbc_mouse((signed char)r[1], (signed char)r[2], r[0] & 7);
                 }

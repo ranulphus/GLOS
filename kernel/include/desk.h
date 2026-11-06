@@ -15,8 +15,9 @@ u32 desk_frames(void);                  /* how many composes have drawn somethin
    (set 1); a byte of the mouse's (b: its packets have a fourth byte, a
    wheel's); a movement already told apart (dx, dy, the buttons now); the
    kill hotkey; or word that the keyboard has changed hands (whatever was
-   held is forgotten). DESK_POINT (M10): the pointer to (a, b), the buttons c: VNC's, absolute. */
-enum { DESK_KEY, DESK_AUX, DESK_MOUSE, DESK_KILL, DESK_RESET, DESK_SYSKEY, DESK_POINT };
+   held is forgotten). DESK_POINT (M10): the pointer to (a, b), the buttons c: VNC's, absolute. DESK_WHEEL: the
+   wheel turned a notches (positive away from the user: up). */
+enum { DESK_KEY, DESK_AUX, DESK_MOUSE, DESK_KILL, DESK_RESET, DESK_SYSKEY, DESK_POINT, DESK_WHEEL };
 void desk_in(int what, int a, int b, int c);
 int desk_in_busy(void);                         /* injected keys should wait: the focused app is behind */
 const char *desk_focus_line(void);              /* "app=N window=N backlog=N input=N", for the log */

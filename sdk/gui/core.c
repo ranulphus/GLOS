@@ -1013,6 +1013,19 @@ static void dispatch(const struct glos_event *ev)
         }
         mouse(w, ev);
         break;
+    case GLOS_EV_WHEEL:                         /* (1.5) to the widget under the pointer, then its parents */
+        if (!deaf(w)) {
+            struct gui_ev e;
+            struct gui_widget *t;
+            memset(&e, 0, sizeof e);
+            e.type = GUI_EV_WHEEL;
+            e.x = ev->x, e.y = ev->y, e.buttons = ev->buttons, e.time = ev->time, e.mods = ev->mods;
+            e.wheel = (int)ev->key;
+            for (t = gui_hit(w->root, ev->x, ev->y); t; t = t->parent)
+                if (usable(t) && t->cls->event && t->cls->event(t, &e))
+                    break;
+        }
+        break;
     case GLOS_EV_FOCUS:
         w->active = ev->down != 0;
         if (w->focus)

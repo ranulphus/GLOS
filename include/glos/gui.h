@@ -52,7 +52,9 @@ enum {
     GUI_EV_LEAVE,                       /* the pointer left it */
     GUI_EV_FOCUS,                       /* it has the keyboard */
     GUI_EV_BLUR,                        /* ... and no longer */
-    GUI_EV_TIMER                        /* its timer (gui_timer) */
+    GUI_EV_TIMER,                       /* its timer (gui_timer) */
+    GUI_EV_WHEEL                        /* the mouse's wheel turned over it: x, y, wheel (to it, then its parents
+                                           until one takes it; a scroll bar's widget scrolls) */
 };
 
 struct gui_ev {
@@ -63,6 +65,7 @@ struct gui_ev {
     unsigned clicks;                    /* PRESS: 1, or 2 for the second of a double click */
     unsigned key, ch, mods;             /* KEY: as struct glos_event has them */
     unsigned time;                      /* milliseconds (glos_ticks) */
+    int wheel;                          /* WHEEL: notches, positive away from the user (up) */
 };
 
 /* Keys (struct glos_event's `key`: set 1 make codes, 100h added for an E0 prefix). */

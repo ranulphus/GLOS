@@ -20,7 +20,7 @@
 #define GLOS_API_H
 
 #define GLOS_API_MAJOR   1
-#define GLOS_API_MINOR   4
+#define GLOS_API_MINOR   5
 #define GLOS_API_VERSION ((GLOS_API_MAJOR << 16) | GLOS_API_MINOR)
 
 /* Functions (EAX). */
@@ -176,6 +176,9 @@
                                    GLOS_NETS_ state, y the bytes waiting to be read. Sent when it opens or fails,
                                    when bytes arrive and none were waiting, when there is room again after a
                                    GLOS_NET_SEND took fewer than it was given, and when it closes */
+#define GLOS_EV_WHEEL    11     /* (1.5) the mouse's wheel turned over a window's client area (focused or not): x, y
+                                   the pointer there; key the notches, as a signed number: positive away from the
+                                   user (up), negative towards. Sent only to apps built for 1.5 or later */
 
 #define GLOS_MOD_SHIFT   1
 #define GLOS_MOD_CTRL    2

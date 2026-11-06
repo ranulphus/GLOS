@@ -197,6 +197,7 @@ int app_init(struct trapframe *tf, u32 *id)
     }
     a->ctx = c;
     a->psp = psp;
+    a->api_minor = (u16)tf->ebx;
     for (i = 0; i < sizeof a->prog - 1 && session_prog()[i]; i++)
         a->prog[i] = session_prog()[i];
     pending = a;
@@ -414,8 +415,12 @@ u32 app_sleep(struct app *a, u32 ticks)
 
 void app_event(struct app *a, const struct glos_event *e)
 {
-    u32 f = irq_save(), n = ARRAY_SIZE(a->evq);
-    struct glos_event *last = a->evt != a->evh ? &a->evq[(a->evt - 1) % n] : 0;
+    u32 f, n = ARRAY_SIZE(a->evq);
+    struct glos_event *last;
+    if (e->type == GLOS_EV_WHEEL && a->api_minor < 5)
+        return;                                 /* (an app built before 1.5 knows no such event) */
+    f = irq_save();
+    last = a->evt != a->evh ? &a->evq[(a->evt - 1) % n] : 0;
     if (last && e->type == GLOS_EV_MOUSE && !e->key && last->type == GLOS_EV_MOUSE && !last->key
         && last->window == e->window) {
         *last = *e;                             /* (a movement after a movement: the newer one) */

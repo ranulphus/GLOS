@@ -516,8 +516,31 @@ static void mouse_to(struct wm *m, s32 x, s32 y, u32 now)
 
 static void mouse(struct wm *m, s32 dx, s32 dy, u32 now) { mouse_to(m, m->px + dx * speed, m->py + dy * speed, now); }
 
+/* The wheel turned: the window under the pointer hears of it, whether it has the focus or not (GLOS_EV_WHEEL, API
+   1.5; notches positive away from the user). */
+static void wheel(struct wm *m, int notches)
+{
+    struct wm_window *w;
+    struct glos_event e;
+    struct gfx_rect c;
+    int part;
+    if (!notches || !(w = wm_hit(m, m->px, m->py, &part)) || part != WH_CLIENT || !w->owner)
+        return;
+    wm_client(m, w, &c);
+    memset(&e, 0, sizeof e);
+    e.type = GLOS_EV_WHEEL;
+    e.window = w->id;
+    e.time = timer_ticks() * 1000 / 1024;
+    e.x = m->px - c.x;
+    e.y = m->py - c.y;
+    e.buttons = buttons;
+    e.key = (unsigned)notches;
+    e.mods = mods_now();
+    app_event(w->owner, &e);
+}
+
 /* A byte from the mouse itself: three make a packet (four with a wheel). */
-static void aux_byte(struct wm *m, u8 b, int wheel)
+static void aux_byte(struct wm *m, u8 b, int wheel_mouse)
 {
     u32 now = timer_ticks();
     if (npkt && now - pkt_at > 100)             /* (half a packet, long ago: lost) */
@@ -526,12 +549,14 @@ static void aux_byte(struct wm *m, u8 b, int wheel)
         return;
     pkt[npkt++] = b;
     pkt_at = now;
-    if (npkt < (wheel ? 4 : 3))
+    if (npkt < (wheel_mouse ? 4 : 3))
         return;
     npkt = 0;
     if (pkt[0] & 0xC0)                          /* (it overflowed: a movement that means nothing) */
         return;
     mouse(m, (s32)pkt[1] - (pkt[0] & 0x10 ? 256 : 0), -((s32)pkt[2] - (pkt[0] & 0x20 ? 256 : 0)), pkt[0] & 7u);
+    if (wheel_mouse && (pkt[3] & 0x0F))         /* (the fourth byte's Z: 4 bits, negative for a turn away) */
+        wheel(m, -((int)(pkt[3] & 0x0F) - ((pkt[3] & 0x08) ? 16 : 0)));
 }
 
 /* The keyboard and the mouse have changed hands (a session took them, or
@@ -577,6 +602,7 @@ void deskin_turn(struct wm *m)
         case DESK_AUX: aux_byte(m, (u8)e.a, e.b); break;
         case DESK_MOUSE: mouse(m, e.a, e.b, e.c); break;
         case DESK_POINT: mouse_to(m, e.a, e.b, e.c); break;
+        case DESK_WHEEL: wheel(m, e.a); break;
         case DESK_RESET: forget(m); break;
         case DESK_SYSKEY: to_shell(m, GLOS_EV_SYSKEY); break;
         }

@@ -72,6 +72,28 @@ static void big(struct editor *e)
     CHECK(lines == e->nl, "the megabyte's lines: %d, want %d", e->nl, lines);
 }
 
+/* The wheel (API 1.5, docs/gamepad.md): three rows a notch through the scroll bar, down for a turn towards
+   the user, up away, never past either end. */
+static void wheel(struct editor *e)
+{
+    struct gui_ev ev;
+    int top0;
+    gui_place(&e->w, 0, 0, 300, 200);
+    e->top = 0;
+    memset(&ev, 0, sizeof ev);
+    ev.type = GUI_EV_WHEEL;
+    ev.x = 100, ev.y = 100;
+    ev.wheel = -2;                          /* two notches towards the user */
+    CHECK(editor_event(&e->w, &ev) == 1 && e->top == 6, "wheel down: top %d, want 6", e->top);
+    ev.wheel = 1;
+    CHECK(editor_event(&e->w, &ev) == 1 && e->top == 3, "wheel up: top %d, want 3", e->top);
+    ev.wheel = 50;
+    CHECK(editor_event(&e->w, &ev) == 1 && e->top == 0, "wheel past the start: top %d", e->top);
+    e->top = top0 = e_total_rows(e) - e_rows_shown(e);
+    ev.wheel = -5;
+    CHECK(editor_event(&e->w, &ev) == 1 && e->top == top0, "wheel past the end: top %d, want %d", e->top, top0);
+}
+
 int main(void)
 {
     static const char *const bits[] = { "a", "word ", "\r\n", "\n", "\t", "long line of text that wraps ", "x" };
@@ -122,6 +144,7 @@ int main(void)
         check(e, step);
     }
     big(e);
+    wheel(e);
     printf("gui_test: %d failures (%d edits)\n", fails, step);
     return fails != 0;
 }
