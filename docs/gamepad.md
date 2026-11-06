@@ -1,8 +1,9 @@
 # GLOS gamepads and USB input: a plan
 
 **Status (2026-11-06): J0-J6 built and checked on bench-g400 with the owner's pads, keyboards, mice, a combined
-keyboard and touchpad, and a hub; J7's docs done; on GLOS main. Owed: the Xbox 360 pad (written, untested), mice's
-wheels, EHCI and OHCI with the PCs that need them, and the hand-back to a BIOS that used USB.**
+keyboard and touchpad, and a hub, and the mouse wheel; J7's docs done; on GLOS main. Owed: the Xbox 360 pad
+(written, untested), a wheel-aware DOS program's check, EHCI and OHCI with the PCs that need them, and the hand-back
+to a BIOS that used USB.**
 - **The ask:** after the Crystal work, the owner said there is no game-port joystick to hand, but there are USB
   gamepads, "Xbox-style" and generic HID, and "it would be great if they could somehow emulate a gameport joystick
   through GLOS".
@@ -313,6 +314,9 @@ Order: J1 needs nothing else and is the part every machine gets. J2-J6 are bench
   click nudged it right (the button byte as X). Mice are now read by their report descriptors in the report
   protocol (`GLOS-USB port=2.4:1 mouse report=1 x=8/8 y=16/8 wheel=24/8 buttons=1f`), the boot reports a fallback:
   the touchpad "worked well", the other mouse still fine.
+- **The wheel (2026-11-06, PRD D75):** the USB mouse's wheel scrolls Notepad three rows a notch (API 1.5's
+  `GLOS_EV_WHEEL`, the toolkit's scroll bars); the bench's PS/2 mouse's too, once GLOS turned its wheel mode on at
+  start (no DOS driver had: `GLOS-KBC mouse id=3 wheel=1`). "Both wheels are working now" (the owner).
 - **Loop A:** 86Box's bf6 has a PIIX4 UHCI with nothing on it; the take-over and hand-back run on every boot and
   `glos exit` there. That found a double fault: `usb_leave` slept after the kernel's tick had stopped (86Box's
   HCRESET never clears). It now busy-waits there.

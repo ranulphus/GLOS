@@ -135,6 +135,16 @@ in its `docs/milestones-*.md`.
   DOS server's 32 KB transfer buffer for good. It now holds it only while it reads or writes GLOS.CFG (3 KB), and
   `make loopa-mem` measures agent mode too.
 
+## API 1.5: the mouse wheel (2026-11-06)
+
+- **Scrolling with the wheel.** A USB or PS/2 mouse's wheel scrolls the window under the pointer, focused or not:
+  three rows a notch in the toolkit's lists, the editor (Notepad) and Term. Apps hear of it as `GLOS_EV_WHEEL`
+  (key: the notches, positive away from the user), sent only to apps built for API 1.5 or later (D75).
+- **DOS programs** that turn their PS/2 mouse's wheel on get a USB mouse's wheel in the fourth byte, as from a PS/2
+  wheel mouse.
+- **A PS/2 wheel mouse no DOS driver has set up** is put in its wheel mode when GLOS starts (`GLOS-KBC mouse id=3
+  wheel=1`), for the desktop; a DOS program's reset of the mouse puts it back.
+
 ## API 1.4 (2026-10-27)
 
 - **Write-combining memory.** `GLOS_FN_CACHE` (for any program) makes whole 64 KB units of the program's own
