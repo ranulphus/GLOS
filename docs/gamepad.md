@@ -1,8 +1,8 @@
 # GLOS gamepads and USB input: a plan
 
-**Status (2026-11-05): J0-J6 built and checked on bench-g400 with the owner's pads, keyboard, mouse and hub;
-J7's docs done. Owed: the Xbox 360 pad (2026-11-06), keyboards' lock lights, devices' second interfaces, EHCI and
-OHCI with the PCs that need them.**
+**Status (2026-11-06): J0-J6 built and checked on bench-g400 with the owner's pads, keyboards, mice, a combined
+keyboard and touchpad, and a hub; J7's docs done; on GLOS main. Owed: the Xbox 360 pad (written, untested), mice's
+wheels, EHCI and OHCI with the PCs that need them, and the hand-back to a BIOS that used USB.**
 - **The ask:** after the Crystal work, the owner said there is no game-port joystick to hand, but there are USB
   gamepads, "Xbox-style" and generic HID, and "it would be great if they could somehow emulate a gameport joystick
   through GLOS".
@@ -304,6 +304,15 @@ Order: J1 needs nothing else and is the part every machine gets. J2-J6 are bench
   (15ca:00c3), both low speed, found behind it as `port=2.1` to `2.3`.
 - **Keyboard:** TYPEIN read `Hello GLOS 123xxxxxxxxxxxxx` (Shift's capitals; x held two seconds: GLOS's repeat).
 - **Mouse:** the desktop's pointer into all four corners (1,683 reports, no errors); "seemed perfect" (the owner).
+- **Lock lights (2026-11-06):** the byte after a program's EDh (the BIOS's INT 09h on a lock key) goes to every USB
+  keyboard as its LED output report, and a keyboard plugged in gets the BIOS's locks at once: Caps, Num and Scroll
+  Lock "worked perfectly" (the owner).
+- **A combined keyboard and touchpad (05a4:1700, full speed, interfaces 0 and 1):** each interface an entry and a
+  pipe of its own (`port=2.4`, `2.4:1`). Its keyboard typed `Combo test 456`. Its touchpad ignored SET_PROTOCOL 0
+  and kept the report ID first, so read as a boot mouse a left-right swipe moved the pointer up and down and each
+  click nudged it right (the button byte as X). Mice are now read by their report descriptors in the report
+  protocol (`GLOS-USB port=2.4:1 mouse report=1 x=8/8 y=16/8 wheel=24/8 buttons=1f`), the boot reports a fallback:
+  the touchpad "worked well", the other mouse still fine.
 - **Loop A:** 86Box's bf6 has a PIIX4 UHCI with nothing on it; the take-over and hand-back run on every boot and
   `glos exit` there. That found a double fault: `usb_leave` slept after the kernel's tick had stopped (86Box's
   HCRESET never clears). It now busy-waits there.

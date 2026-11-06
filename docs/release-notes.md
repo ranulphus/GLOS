@@ -9,13 +9,14 @@ in its `docs/milestones-*.md`.
 - **GLOS drives the PC's UHCI USB controllers itself** (Intel's PIIX and ICH, VIA's), and `glos usb` lists the
   controllers and what is on them (docs/gamepad.md, PRD D74):
   - **USB keyboards** type as a PS/2 keyboard does, at a DOS prompt, in programs and in the desktop, with GLOS's
-    own key repeat (`[input]`'s delay and rate). Their lock lights don't follow yet.
-  - **USB mice** move the desktop's pointer and a DOS program's mouse as a PS/2 mouse does.
+    own key repeat (`[input]`'s delay and rate), and their lock lights follow the PC's.
+  - **USB mice and touchpads** move the desktop's pointer and a DOS program's mouse as a PS/2 mouse does, read by
+    their own report descriptors (the wheel isn't passed on yet).
+  - **Combined keyboards and mice** on one receiver: both halves.
   - **USB gamepads drive the game port** (the virtual one below): HID pads, and Xbox pads (Xbox 360; Xbox One and
     Series, woken by GLOS). One pad is the whole port (its left stick joystick A, its right stick B, four
     buttons); a second pad becomes joystick B.
   - **Hubs**, with low-speed devices behind them. Plugging and unplugging is followed.
-- Only a device's first interface is used for now (a keyboard and mouse sharing one receiver: the keyboard).
 - `[usb] enabled = off` (the Control Panel's "USB" page) leaves the controllers to the BIOS and DOS. At `glos exit`
   GLOS gives each controller back stopped; a BIOS that emulated a USB keyboard may not resume it until a restart.
 
