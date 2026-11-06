@@ -17,8 +17,8 @@ and backups over the network to an SFTP server.
 - **Hard disks and CF cards:**
   - **A disk's image to a file:** read through INT 13h, written in pieces (to another disk or over SFTP, since the
     file may be bigger than DOS allows: split into 2 GB parts).
-  - **An image back to a disk:** with two confirmations and the disk named by size and model, never the disk GLOS
-    is on unless the user insists.
+  - **An image back to a disk:** with two confirmations and the disk named by size and model. The disk GLOS
+    booted from is refused outright, with no override (the owner's choice).
   - **Partitions:** listed (MBR) with their types and sizes. Changing partitions isn't planned.
 - **Backups over SFTP:**
   - folders backed up to an SFTP server: full, or only what changed since the last (by size and date), as ZIPs or
@@ -68,5 +68,6 @@ A 486DX2: floppy and disk jobs are slow for the drives' sake. SFTP backups on a 
 
 ## Open points
 
-- **Raw disk writes:** writing a whole disk is the most dangerous thing any GLOS app can do. Should Disk Tools offer
-  it at all in v1, or only reading disks to images?
+Settled at the owner's review (2026-11-06):
+- **Raw disk writes:** allowed for hard disks and CF cards, with the guards above; never the disk GLOS booted
+  from.

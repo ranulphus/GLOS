@@ -1,15 +1,19 @@
-# Paint (Images, grown): plan (GLOS v1, phase A)
+# Images and Paint: plan (GLOS v1, phase A)
 
 **Today: Images, a viewer.**
 - **Formats:** PNG, JPEG, BMP, GIF (its first frame), TGA, PNM (stb_image), PCX (its own).
 - **Viewing:** fitted or at a zoom, the folder's next and previous picture, dithered on an 8-bit desktop.
 
-**In v1:** the viewer kept, and an editor after Paint.NET: layers, tools, adjustments, effects, undo. One program,
-opening in the viewer and switching to editing with a key or a button.
+**In v1 (the owner's choice, 2026-11-06): two programs.**
+- **Images stays the viewer:** light and quick to open, grown as below.
+- **Paint is a new editor** after Paint.NET: layers, tools, adjustments, effects, undo. Images opens the picture in
+  it with Edit (E, or a toolbar button); Paint can also be started on its own or from Files' "Edit".
+- **They share their code:** the decoders, the tiled image, the filmstrip and the view are one library in both, so
+  a picture looks the same in each.
 
 ## What it does
 
-- **The viewer, as today and more:**
+- **Images, the viewer, as today and more:**
   - full screen and a slideshow;
   - rotate by 90 degrees without loss (JPEG too, by re-encoding at the same quality, or a lossless path where the
     decoder allows: settled in C);
@@ -107,5 +111,4 @@ opening in the viewer and switching to editing with a key or a button.
 
 ## Open points
 
-- **Name:** "Paint" for the program, with the viewer opening first for pictures? (Today's Images becomes Paint.)
 - **Tablets:** none planned; a serial or USB tablet would be a later device class.

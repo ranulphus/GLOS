@@ -94,8 +94,7 @@ It is built in phase C, after API 2.0 (phase B). The apps move to it in phases E
   the same time).
 - **8-bit desktops:** a theme's colours must be in the palette's cube there, as D7 has them today. A theme with
   others is shown with the nearest; the Control Panel warns.
-- **The built-in themes** (shell.md): Slate, and others the Appearance page offers (a dark one; a high-contrast
-  one).
+- **The built-in themes** (shell.md): Slate, a dark one and a high-contrast one.
 
 ### 6. Fonts (grown)
 
@@ -104,7 +103,8 @@ It is built in phase C, after API 2.0 (phase B). The apps move to it in phases E
   - now in several sizes (small, normal, large: the theme's UI size), each with its smoothed version.
 - **The font dialog:** the fonts there are and their sizes, for:
   - Term's and Notepad's font;
-  - Paint's text tool (open question 1: whether that needs fonts at any size).
+  - Paint's text tool, which also draws TrueType files at any size (stb_truetype, Paint's plan; the PDF Viewer
+    has the same).
 - **Measured, never assumed:** every widget measures with the font it has. Layout follows a bigger font.
 
 ### 7. Docking, splitters and panes (new)
@@ -129,8 +129,18 @@ It is built in phase C, after API 2.0 (phase B). The apps move to it in phases E
 - **A resource file describes a window or dialog:** its widgets in their tree, each with its class and the
   properties that aren't the defaults, and the commands. It is loaded by any app at run time
   (`gui_load("SETTINGS.GRS")`) and widgets are found by name.
-- **Text, so it diffs and merges well:** a small format of nested blocks, as Delphi's DFM text form (open question
-  2).
+- **Text, so it diffs and merges well:** a small format of nested blocks, as Delphi's DFM text form:
+
+  ```
+  object Settings: Dialog
+    Title = "Settings"
+    object Ok: Button
+      Text = "&OK"
+      Default = true
+      Command = cmd_ok
+    end
+  end
+  ```
 - **Who uses it:**
   - the IDE's form designer edits these;
   - the property grid uses the same description;
@@ -242,12 +252,10 @@ New (N) and grown (G). The users named are the app plans that need each.
   only by the theme's metrics), before phases E and F add their features.
 - **The toolkit's API is frozen with API 2.0 at GLOS v1:** the SDK publishes it, and after v1 it only grows.
 
-## Open questions, for the owner
+## Settled at the owner's review (2026-11-06)
 
-1. **Fonts at any size:** Paint's text tool, the PDF Viewer's fonts and a large UI size all want TrueType drawn at
-   any size. Should v1 have a scalable font rasteriser (integer arithmetic, no FPU: our own, or stb_truetype made
-   fixed-point) shared by the toolkit, Paint and the PDF Viewer? Or the bitmap sizes only, with Paint's text tool
-   limited to them?
-2. **The resource format:** a DFM-like text of nested blocks (readable, diffs well), or INI sections (GLOS.CFG's
-   reader already exists), or JSON (well known, more to type)?
-3. **The built-in themes:** Slate, a dark one and a high-contrast one in v1. Any others?
+1. **Fonts:** the UI's fonts stay bitmaps made at build time, in three sizes (small, normal, large), each with its
+   smoothed version. Paint's text tool and the PDF Viewer draw TrueType at any size with stb_truetype, as their
+   plans say.
+2. **Resource files:** a text of nested blocks, like Delphi's DFM text form.
+3. **Built-in themes:** Slate, a dark theme and a high-contrast one, all within the 8-bit palette's cube.

@@ -49,6 +49,27 @@ richer shell, and modern apps for old PCs. This plan is the route to that v1.
   output, and Files uses long names.
 - **Order:** Files and Notepad first, as they exercise the toolkit most. Then Paint and the audio apps, then the rest.
 
+**Phase A's review (2026-11-06):** the owner's answers, each written into its document:
+- **API 2.0** (`v1/api-2.md`):
+  - long file names through DOS's LFN API, with FreeDOS's DOSLFN loaded by GLOS's boot image;
+  - a lock in libglos around DJGPP's C library for threads;
+  - modules per app in v1;
+  - notifications, the tray and Alt+Tab drawn by the kernel;
+  - secrets scrambled, with an optional master password.
+- **Toolkit 2** (`v1/toolkit-2.md`):
+  - the UI's bitmap fonts in three sizes (stb_truetype for Paint's text and the PDF Viewer);
+  - resource files in a DFM-like text;
+  - Slate, dark and high-contrast themes.
+- **The apps:**
+  - Files' Recycle folder on, capped at 10% of a drive;
+  - Disk Tools writes images to hard disks and CF cards, never to GLOS's own disk;
+  - the Games Library's pictures are the user's own and screenshots (nothing fetched);
+  - Notepad prints text to LPT and has no spelling checker in v1;
+  - Images stays the viewer beside a new Paint.
+- **DOS-GL's B0** (DOS-GL `docs/backend-interface.md`):
+  - the back-end interface in clip space (today's seam);
+  - stencil in the software renderer from B2's start.
+
 ## Principles
 
 - **The API is designed once, from the app plans.** Phase A writes every app's and the shell's plan first. API 2.0
@@ -192,8 +213,8 @@ A comes first; B and C run side by side; D builds on B and C; E and F come in wa
   - syntax highlighting (C, assembly, batch, INI, Pascal, HTML);
   - code pages and UTF-8;
   - large files.
-- **Paint (Images, grown),** after Paint.NET:
-  - the viewer kept;
+- **Images and Paint** (two programs, the owner's choice at phase A's review), Paint after Paint.NET:
+  - Images stays the viewer, and opens a picture in Paint with Edit;
   - tools: brush, line, shapes, fill, text, selection, crop, resize, rotate;
   - layers, adjustments and filters, undo;
   - BMP, PCX, PNG, GIF and JPEG in (stb_image); BMP, PCX and PNG out;

@@ -101,5 +101,6 @@ enough to open at once on a 486.
 
 ## Open points
 
-- **Printing:** text to LPT1 only, or also through a printer driver for PCL/PostScript printers (bigger)?
-- **Spell checking:** not planned; worth it?
+Settled at the owner's review (2026-11-06):
+- **Printing:** plain text (page breaks, margins, a header) to LPT1-3 or a file. No PCL or PostScript in v1.
+- **Spell checking:** not in v1.

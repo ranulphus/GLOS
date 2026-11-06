@@ -3,6 +3,9 @@
 Phase A of the route (`docs/v1-route.md`): documents only, reviewed by the owner together at the end (the owner's
 choice, 2026-11-06), and approved before any code of phases B–F.
 
+**Reviewed with the owner on 2026-11-06:** the documents' open questions answered and written in (the route's
+"Phase A's review" lists them).
+
 ## The documents
 
 | Document | What it is | Status |

@@ -241,8 +241,9 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 | WATCH | A folder or a file watched for changes, as 1.x's GLOS_FN_WATCH (new: a file, for Notepad's "changed on disk") |
 | SECTORS | A disk's sectors read or written through INT 13h, the disk cache told (new: Disk Tools) |
 
-- **Long file names:** where DOS has an LFN API (an LFN driver such as DOSLFN), GLOS's calls and DOS's own take
-  long names. GLOS answering the LFN API itself is the route's LFN question; see the open questions below.
+- **Long file names:** through DOS's LFN API (INT 21h 71xxh), which GLOS passes through. GLOS's boot image loads
+  FreeDOS's DOSLFN by default, so every GLOS install has it. GLOS's calls (LIST, INFO, WATCH) and DOS's own take
+  long names. Where no driver is loaded (a user's own boot), names are 8.3 and FEATURES says so.
 - **Ordinary file I/O:** stays the C library's, through DOS (GLOS's DOS server), as in 1.x.
 
 ### 0Ah AUDIO
@@ -341,15 +342,18 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 | PUT, GET, REMOVE | A secret by name, for this app (by its program's name), or shared under a name the user allowed (new) |
 
 - **Where:** in their own file, apart from GLOS.CFG and any project.
-- **Honestly:** DOS has no users and no protected storage. The file is scrambled with a key on the same disk. That
-  keeps secrets out of files people share and back up, but it doesn't stop someone with the disk. The Control
-  Panel says so.
+- **By default, scrambled, and said so:** DOS has no users and no protected storage. The file is scrambled with a
+  key on the same disk. That keeps secrets out of files people share and back up, but it doesn't stop someone with
+  the disk. The Control Panel says so.
+- **With a master password** (set in the Control Panel): secrets are encrypted with ChaCha20-Poly1305 (TinySSH's),
+  under a key derived from the password. GLOS asks for it at the first GET after each start, in a dialog of the
+  kernel's, so no app sees the password. Forgetting it loses the secrets, and the Control Panel says that too.
 
 ### 12h MODULES
 
 | Call | What it does |
 |---|---|
-| (none in 2.0) | DXE3 modules are loaded by the program itself (DJGPP's `dlopen`): plug-ins for the IDE, codecs for the Audio Player. GLOS needs no call for that. Sharing a module's code between apps, to save memory, needs GLOS's help: an open question |
+| (none in 2.0) | DXE3 modules are loaded by the program itself (DJGPP's `dlopen`): plug-ins for the IDE, codecs for the Audio Player. GLOS needs no call for that. Each app loads its own; GLOS doesn't share modules' code between apps in v1 (the owner's choice). The area's number is kept for that later |
 
 ## Events
 
@@ -397,15 +401,13 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   CORE).
 - **Approvals:** each moved and merged in its own repository with the owner's approval.
 
-## Open questions, for the owner
+## Settled at the owner's review (2026-11-06)
 
-1. **Long file names:** pass DOS's LFN API through where a driver gives it (DOSLFN), and use 8.3 otherwise? Or should
-   GLOS answer the LFN API itself (a large piece: VFAT's long entries written correctly), so every PC has long
-   names?
-2. **Shared modules:** load DXE3s per app (simple, no GLOS help), or have GLOS share modules' code pages between apps
-   (saves memory, more work in the kernel)?
-3. **The secrets file's honesty:** the scrambling is no protection against someone with the disk. Acceptable for v1?
-4. **Threads and the C library:** a global lock in libglos around DJGPP's C library (simple, slower when threads
-   contend), or a thread-safe C library (a fork of DJGPP's: more work)?
-5. **Notifications and the task bar drawn by GLOS:** the kernel draws them (they never wait on an app, as today's
-   task bar), or a shell app draws them (easier to change)?
+1. **Long file names:** GLOS passes DOS's LFN API through, and GLOS's boot image loads FreeDOS's DOSLFN by default,
+   so every GLOS install has long names. GLOS doesn't answer the LFN API itself. Without a driver, programs fall
+   back to 8.3.
+2. **Shared modules:** per app in v1. Each app loads its own DXE3s; the toolkit stays a static library.
+3. **The secrets store:** scrambled by default, and said so, with an optional master password. With a password set,
+   secrets are encrypted, and GLOS asks for the password at the first use after each start.
+4. **Threads and the C library:** a lock in libglos around DJGPP's C library.
+5. **Notifications, the task bar, the tray and Alt+Tab:** drawn by the kernel, as today's task bar.

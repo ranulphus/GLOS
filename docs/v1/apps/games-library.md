@@ -14,9 +14,9 @@ with the right settings and controllers.
   - a grid of box art (or a list), grouped and filtered (genre, year, publisher, played recently, favourites),
     searched as you type;
   - a game's page: its picture, its details, its notes, when it was last played and for how long.
-- **Box art and details:** pictures the user adds (any format Paint reads), or found online where the user allows
-  it, from a source whose terms permit it (to be chosen; none is assumed). Kept beside the library's data, never
-  in the game's folder.
+- **Box art and details:** pictures the user adds (dropped onto a game, any format Images reads), the game's own
+  icons, and screenshots GLOS takes while it runs (the owner's choice: nothing fetched online in v1). Kept beside
+  the library's data, never in the game's folder.
 - **Settings for each game:**
   - its profile (GLOS.CFG's `[program]` section: exclusive or windowed, direct mode, memory, environment, its
     BLASTER, the screen mode for windowed DOS-GL games), edited here as a form;
@@ -44,7 +44,6 @@ with the right settings and controllers.
   ran.
 - **SETTINGS:** the profiles (`[program]` sections), read and written.
 - **INPUT:** the pads and their mapping (the game port's configuration, J6), and a test.
-- **NET:** fetching box art, where the user allows.
 - **SHELL:** the Start menu's Games group and its tiles; jump lists of recent games.
 - **THREAD:** the scan and the pictures' loading.
 
@@ -66,7 +65,7 @@ A 486DX2 (the grid's pictures load in the background; on a 486 slowly).
   session, and its time counted when it ends.
 - **The P4:** C:\GAMES-like folders of real games (the owner's, read only), DOSBench from the page.
 
-## Open points
+## Settled at the owner's review (2026-11-06)
 
-- **Box art online:** whether to fetch it at all, and from where. A source whose terms allow it, or the user's own
-  pictures only.
+- **Box art:** the user's own pictures, the games' icons and screenshots; no online source in v1. Fetching can come
+  later, from a source whose terms allow it.

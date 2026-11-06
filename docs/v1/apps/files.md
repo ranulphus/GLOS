@@ -119,6 +119,8 @@ A folder is read whole before anything is shown. No toolbar, no archives, 8.3 na
 
 ## Open points
 
-- **The Recycle folder:** on by default, or off (DOS programs delete for real either way)?
-- **LFN:** only where an LFN driver (DOSLFN) is loaded, or does GLOS provide the LFN API to DOS itself? That is the
-  route's LFN follow-up (PRD §7.3); `api-2.md` decides.
+Settled at the owner's review (2026-11-06):
+- **The Recycle folder:** on by default, capped at 10% of each drive (the oldest emptied first); Shift+Del deletes
+  for real. DOS programs delete for real either way.
+- **Long file names:** through DOS's LFN API, with GLOS's boot image loading FreeDOS's DOSLFN by default
+  (`api-2.md`, FS).
