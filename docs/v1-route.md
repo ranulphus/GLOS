@@ -272,12 +272,33 @@ before that.
     be checked on the bench's chip.
   - **DOS games in sessions:** these talk to the card directly. Its Sound Blaster Pro mode needs the motherboard's
     distributed DMA (DDMA), which many boards lack. FM music and the MPU-401 work without it.
-- **A candidate the CM8738 raises: a virtual Sound Blaster for DOS sessions.**
-  - GLOS already traps ports for its virtual devices. It could answer a Sound Blaster's ports itself and play the
-    sound through its mixer, on any card it has a native driver for.
-  - That would give DOS games sound on PCI cards whose own DOS support is weak, as the SBEMU project does in pure
-    DOS.
-  - A large piece; the audit weighs it.
+- **Decided (the owner, 2026-11-06): a virtual Sound Blaster for DOS sessions.**
+  - **The idea:** GLOS answers a Sound Blaster's ports itself and plays the sound through its mixer, on any card it
+    has a native driver for, as the SBEMU project does in pure DOS. Every sound card GLOS gains a native driver for
+    then gives DOS games Sound Blaster sound. The owner's reason: support for a lot of sound cards that way.
+  - **What it is:**
+    - a Sound Blaster 16 (the DSP's version 4: 8 and 16 bits, mono and stereo, single-cycle and auto-initialised
+      DMA, the mixer chip), with the Pro's and the 2.0's behaviour below it;
+    - the 8237 DMA controller's channels, virtual, reading the game's buffer from its memory, and the count it
+      polls advancing with time;
+    - its interrupt through the virtual PIC;
+    - `BLASTER` set in the session's environment.
+  - **FM music:** passed through to a real OPL3 where the card has one (the SB16, Crystal's chips, the CM8738 if its
+    FM is there). Otherwise GLOS synthesises it with a permissive OPL3 emulator, on a Pentium or better:
+    - ymfm, BSD-3-Clause, is the first candidate;
+    - it is C++17, so it is ported to C or run outside the kernel, settled in H's plan.
+  - **MIDI:** the MPU-401's UART at 330h, passed to a real MPU-401 where there is one, or to GLOS's own MIDI out.
+  - **Where it works:**
+    - every session, real-mode and protected-mode programs alike, since GLOS's V86 monitor and DPMI host trap
+      their ports already;
+    - not in direct mode (IOPL 3), where a program's I/O isn't trapped. Those programs keep using the real card.
+  - **References:** SBEMU (GPL) and DOSBox (GPL) for behaviour only, never their code (the route's licence
+    principle). Creative's own documentation for the DSP and the mixer.
+  - **Its plan:** in H's plan, with:
+    - the cards' native drivers the audit picks;
+    - the games' sound as acceptance tests: the owner's games, whose sound libraries (DMX, HMI, Miles and others)
+      each drive a Sound Blaster their own way;
+    - tests in the three tiers, the virtual DSP and DMA tested on the host first.
 - **The audit:** what GLOS drives today against what the benches have and what the period's PCs commonly had.
   - **Today:**
     - network: NE2000 (ISA, and the RTL8029), RTL8139, Intel 8255x;
