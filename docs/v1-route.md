@@ -307,12 +307,21 @@ The owner's answer for screensavers on non-Matrox cards. It reaches further than
   there, with that repository's regressions and the owner's approval for merges, and coordinated with the merge.
   GLOS's phase D waits on it for screensavers on other cards.
 
-## Testing, throughout
+## Testing, throughout: three tiers
 
-- **Loop A:** each app's GUI scripts with goldens at 8, 16 and 32 bits, and its SSH-driven tests, at its CPU floor.
-- **Host tests:** parsers, codecs, archive formats, the toolkit's widgets.
-- **On the bench, by hand with the owner:** sound, MIDI, USB, screensavers on a real Matrox card.
-- **The full regression before each merge into main,** as now; the gate before the release.
+The owner's choices (2026-11-06): 86Box's speed must not make suites hours long, so tests go host first, with a
+short Loop A smoke, and the Pentium 4 bench as the silicon tier.
+
+| Tier | What runs there | When | Time |
+|---|---|---|---|
+| **1. The host** | The toolkit's widgets and the apps' GUI scripts on the host shim (as `gui-goldens` already runs); parsers, codecs, archive formats, the PDF renderer, the HID, MIDI and audio code; DOS-GL's GL layer and software renderer against OSMesa | On every change | Seconds to a few minutes |
+| **2. 86Box (Loop A)** | A short smoke for each area: the DOS and GLOS integration (an app's window, a job, a device), the goldens compared with the host's, the kernel's suites | Unattended, on each change that touches the kernel or a device; the full matrix only before merges | About 10 minutes for a change's loop; about 90 for a merge's regression |
+| **3. The Pentium 4 bench (G450)** | Real speed and real hardware: DOS-GL's full conformance (the software renderer with MMX, and the G450), the apps' suites over SSH, sound and USB by hand, the CPU floors' timings | Before merges and in batches, through the Loop B tools; power-cycled by a network-switched plug, so unattended | Minutes |
+
+- **The budgets are tracked:** each suite's time is logged, and a suite that outgrows its budget is split or moved
+  down a tier, not left to grow.
+- **bench-g400** stays the G400's bench and the place for by-hand checks with the owner.
+- **The gate before the release** runs every tier.
 
 ## Open questions
 
