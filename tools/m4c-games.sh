@@ -9,8 +9,8 @@
 #
 #   tools/m4c-games.sh [PART ...]          (default: all four)
 #
-# M4C_MGA is an MGA-Glide tree with its runtime built
-# (default $MGA_GLIDE); its out/ takes the runs. The replays and the games
+# M4C_MGA is a RetroGPU tree with Glide's runtime built
+# (default $RETROGPU); its out/ takes the runs. The replays and the games
 # need the owner's traces and fixtures in ~/.cache/mga-glide (skipped, and
 # reported, without them). `make glos-cache` (a prerequisite of make
 # loopa-m4c) puts GLOS.EXE and GLOSK.BIN where the runs take them from.
@@ -20,7 +20,7 @@
 set -u
 GLOS=$(cd "$(dirname "$0")/.." && pwd)
 CACHE=${MGA_CACHE:-$HOME/.cache/mga-glide}
-MGA_TREE=${M4C_MGA:-${MGA_GLIDE:-$HOME/MGA-Glide}}
+MGA_TREE=${M4C_MGA:-${RETROGPU:-$HOME/RetroGPU}}
 DOSBENCH=${DOSBENCH:-$HOME/DOSBench}
 BIN=${GLOS_BIN:-$CACHE/glos/bin}       # make glos-cache's (GLOS_CACHE=)
 export LOOPA_EXTRA_ARGS="--boot-cfg glosshell --file $BIN/GLOS.EXE=/TEST/GLOS.EXE --file $BIN/GLOSK.BIN=/TEST/GLOSK.BIN"
@@ -45,7 +45,7 @@ part_conform() {
     local c log pass bad
     for c in g100 g200 g400 g450; do
         log=$MGA_TREE/out/conform-glos-$c.log
-        (cd "$MGA_TREE" && MGA_CARD=$c timeout 3300 tools/dev python3 tools/conform/run.py check > "$log" 2>&1)
+        (cd "$MGA_TREE" && MGA_CARD=$c timeout 3300 tools/dev python3 glide/tools/conform/run.py check > "$log" 2>&1)
         local st=$?
         pass=$(grep -c ' PASS ' "$log")
         bad=$(glos_trouble "$MGA_TREE"/out/conform/t*/serial.log)
@@ -76,9 +76,9 @@ part_replay() {
 # exit_after) as well as match the other.
 part_survey() {
     local out j bad=""
-    env -u LOOPA_EXTRA_ARGS MGA_GLIDE=$MGA_TREE python3 "$GLOS/tools/survey/survey.py" run --suite gta \
+    env -u LOOPA_EXTRA_ARGS RETROGPU=$MGA_TREE python3 "$GLOS/tools/survey/survey.py" run --suite gta \
         --suite screamer-rally --variant base --variant $VARIANT
-    out=$(env -u LOOPA_EXTRA_ARGS MGA_GLIDE=$MGA_TREE python3 "$GLOS/tools/survey/survey.py" diff --suite gta \
+    out=$(env -u LOOPA_EXTRA_ARGS RETROGPU=$MGA_TREE python3 "$GLOS/tools/survey/survey.py" diff --suite gta \
         --suite screamer-rally --variant $VARIANT)
     local st=$?
     echo "$out"

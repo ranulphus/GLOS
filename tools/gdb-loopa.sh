@@ -6,7 +6,7 @@
 # kernel then finished its round trip. Output: out/m1-gdb/ and gdb.log there.
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
-mga=${MGA_GLIDE:-$HOME/MGA-Glide}
+mga=${RETROGPU:-$HOME/RetroGPU}
 out=$root/out/m1-gdb
 cd "$root"
 rm -rf "$out"

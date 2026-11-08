@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """GLOS Loop A jobs (milestones-m0-m4.md). Runs inside the dev container
-through MGA-Glide's harness:
+through RetroGPU's harness:
 
   jobs.py m1 [--profile P ...] [--boot B ...]
   jobs.py refuse
@@ -10,7 +10,7 @@ through MGA-Glide's harness:
   jobs.py mem [--profile P ...] [--boot B ...] [-j N]
   jobs.py mem-page [--profile P ...] [--boot B ...] [-j N]   (in mem too)
   jobs.py umaprobe [--profile P ...] [-j N]
-  jobs.py shell [--profile P ...] [-j N]      (MGA_GLIDE must have the glosshell boots)
+  jobs.py shell [--profile P ...] [-j N]      (RETROGPU must have the glosshell boots)
   jobs.py net [-j N]
   jobs.py ssh [-j N]                          (on the host: it needs ssh, and runs Loop A through tools/dev)
   jobs.py sess [--profile P ...] [--boot B ...] [-j N]   (on the host, as ssh)
@@ -108,7 +108,7 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-MGA = os.environ.get("MGA_GLIDE", os.path.expanduser("~/MGA-Glide"))
+MGA = os.environ.get("RETROGPU", os.path.expanduser("~/RetroGPU"))     # the HAL and Loop A (MGA-Glide's until 2026-11-08)
 PROFILES = ["bf6", "486dx2", "486dx4"]
 BOOTS = ["default", "himemx"]
 EXPECT, TOL = 1012, 0.02

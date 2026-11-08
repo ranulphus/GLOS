@@ -393,12 +393,13 @@ library's software draws (the M7 exit).
 
 ### 6.1 The HAL in the kernel
 
-- **MGA-Glide's HAL from its checkout** beside GLOS (`MGA_GLIDE`, its `hal/`), built from MGA-Glide's main as
-  it is (until 2026-11-02 a vendored copy in `third_party/mgahal`). Changes are made in MGA-Glide (PRD D27).
+- **RetroGPU's HAL from its checkout** beside GLOS (`RETROGPU`, its `hal/`), built from RetroGPU's main as
+  it is (MGA-Glide's until 2026-11-08; until 2026-11-02 a vendored copy in `third_party/mgahal`). Changes are made
+  in RetroGPU (PRD D27).
 - **The kernel builds the part with no FPU code** (it is built `-mgeneral-regs-only`): PCI, the chips'
   capabilities, the FIFO, the engine, 2D drawing, the cursor and display start, the VRAM allocator. Not the 3D
   set-up, the texture code, `engine_present` or the VBE code.
-- **The port** is MGA-Glide's `hal/port/glos.c`: port I/O, physical ranges mapped with `mm_dev_map` (the
+- **The port** is RetroGPU's `hal/port/glos.c`: port I/O, physical ranges mapped with `mm_dev_map` (the
   kernel's device region at C4000000h, 40 MB, uncached: a G450's 32 MB and its registers), the kernel's 1024 Hz
   clock (the HAL asks only for timeouts), `kmalloc`. No real-mode calls: GLOS sets modes itself.
 

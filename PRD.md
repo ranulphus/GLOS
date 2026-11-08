@@ -9,7 +9,7 @@
 | Supersedes | v0.1. Changes are listed in Appendices D to J |
 | Design docs | [docs/supervisor.md](docs/supervisor.md) (supervisor design), [docs/graphics.md](docs/graphics.md) (2D library, display, window system), [docs/milestones-m0-m4.md](docs/milestones-m0-m4.md) [docs/milestones-m5.md](docs/milestones-m5.md), [docs/milestones-m6.md](docs/milestones-m6.md), [docs/milestones-m7.md](docs/milestones-m7.md), [docs/milestones-m8.md](docs/milestones-m8.md), [docs/milestones-m9.md](docs/milestones-m9.md) and [docs/milestones-m10.md](docs/milestones-m10.md) (work breakdown); [docs/gui.md](docs/gui.md) (toolkit and apps) |
 | Licence | MIT |
-| Companion projects | MGA-Glide (`~/MGA-Glide`: the Loop A/B/C harness and the shared Matrox HAL), DOS-GL (`~/DOSGL`: OpenGL for Matrox cards and the SDL3 bridge), Fifth Wheel and the dgk kit (`~/FifthWheel`), DOSBench (`~/DOSBench`) |
+| Companion projects | RetroGPU (`~/RetroGPU`: the shared HAL and the Loop A/B/C harness at its root, DOS-GL in `gl/`: OpenGL and the SDL3 bridge, Glide in `glide/`; MGA-Glide and DOS-GL until 2026-11-08), Fifth Wheel and the dgk kit (`~/FifthWheel`), DOSBench (`~/DOSBench`) |
 
 > MS-DOS, Windows and OS/2 are trademarks of their respective owners. GLOS is an independent project. It contains no code from MS-DOS 5 or later, Windows or OS/2, and its developers never consult leaked Microsoft source (D26).
 
@@ -62,7 +62,7 @@ GLOS also brings things to retro PCs that their owners lack today:
   - OpenSSH's ISC-licensed `sftp-server.c`;
   - stb, FreeType and EtherDFS.
 - **86Box emulates the hardware.** That covers the Matrox cards, NE2000, RTL8139 and Intel 8255x network cards, the SB16, PS/2 devices and a gameport. Its SLiRP networking can forward ports into the guest, so SSH reaches an emulated PC with no patch.
-- **The bench exists in design** (`~/MGA-Glide/docs/bench.md`): serial lines, a capture device and a reset relay give an out-of-band path when GLOS itself is down.
+- **The bench exists in design** (`~/RetroGPU/docs/bench.md`): serial lines, a capture device and a reset relay give an out-of-band path when GLOS itself is down.
 
 ### What makes this hard
 
@@ -155,7 +155,7 @@ Decisions are recorded with their rationale so they are changed deliberately, no
 | **D24** | **GPU ownership is enforced by page faults.** A program's Matrox MMIO pages stay unmapped until it holds the GPU lock. The HAL gains `engine_resync()` for every change of owner, and a watchdog resets the engine and kills an app that holds the lock too long. *Worked out in M8: D44.* | Every owner change is visible to the supervisor, and stale HAL state can't overflow the FIFO. | M8 |
 | **D25** | **No EMS, VCPI or UMBs in v1.** GLOS provides its own XMS 3.0 server, and the first MB is identity-mapped in every address space. | Matches the HIMEM-only baselines. SDL's Sound Blaster driver assumes linear = physical below 1 MB for its DMA buffer. docs/upper-memory.md Part B (2026-10-31) weighed GLOS-made UMBs (DOS's arena linked by hand, XMS 10h, VDS, exits refused while one is owned) against what they give, and kept this; UMBs from the chipset at boot (UMBPCI) work instead (B1: Loop A and bench-g400, 2026-11-05; on its 440BX ISA DMA doesn't reach them, though the BIOS's disk reads do). | After v1 |
 | **D26** | **Provenance: write from specifications.** Code under GPL, Artistic or no licence (Jemm, HDPMI, CWSDPMI, DPMIONE, 386MAX, the FreeDOS kernel, Watt-32, mTCP) is reference and test baseline only, never copied. Leaked Microsoft source is never consulted. | An MIT licence that holds up (§17). | — |
-| **D27** | **Changes to the shared HAL and harness go into MGA-Glide first, with its full regression.** GLOS builds the HAL and runs the harness from MGA-Glide's checkout beside it (`MGA_GLIDE`), from its main as it is: no pin and no copy (the owner's decision 2026-11-02: before alpha everything is on main trunk). | The project-wide rule. A change to MGA-Glide reaches GLOS at its next build, so MGA-Glide's regressions consider GLOS too. | — |
+| **D27** | **Changes to the shared HAL and harness go into RetroGPU first (MGA-Glide until 2026-11-08), with its full regression.** GLOS builds the HAL and runs the harness from RetroGPU's checkout beside it (`RETROGPU`), from its main as it is: no pin and no copy (the owner's decision 2026-11-02: before alpha everything is on main trunk). | The project-wide rule. A change to RetroGPU reaches GLOS at its next build, so RetroGPU's regressions consider GLOS too. | — |
 | **D28** | **Performance budgets come from silicon and CPU models, not 86Box speed.** | 86Box on the build host runs far below real hardware, and the emulated Matrox FIFO thread runs in host time. | — |
 | **D29** | **SSH accepts public keys only.** Host keys are generated on first boot from IRQ-timing entropy; Loop A images carry a fixed test key; VNC is off by default and meant to be tunnelled over SSH. | Remote code execution must be authenticated. VNC's own authentication is weak. | M3 |
 | **D30** | **16-bit DPMI clients are hosted in v1.** (User) Acceptance: Borland's 16-bit DPMI (TPX.EXE on RTM.EXE + DPMI16BI.OVL from Turbo Pascal 7, kept privately in `~/BORLAND`) plus our own Open Watcom 16-bit conformance suite. | Borland protected-mode tools and other 16-bit extended programs then run under GLOS too. | M4d |
@@ -694,7 +694,7 @@ On plain DOS nothing changes.
 
 ### 10.4 SDL3
 
-SDL patches 0008 and 0009 (in `~/DOSGL/tools/sdl/patches`) add a GLOS backend to SDL's DOS port:
+SDL patches 0008 and 0009 (in `~/RetroGPU/gl/tools/sdl/patches`) add a GLOS backend to SDL's DOS port:
 - **video:** windows; OpenGL through DOS-GL's GLOS path;
 - **audio:** GLOS mixer streams;
 - **input:** GLOS events.
@@ -910,9 +910,9 @@ The bench runs the gate's suites through GLOS's agent (M5 on).
 | Loader | Open Watcom v2 (`wcc -bt=dos -ms -0`, `wlink system dos`) → `GLOS.EXE` |
 | Supervisor | Host gcc `-m32 -march=i486 -ffreestanding -fno-pic`, GNU as, `ld` with a linker script → ELF, then `objcopy` to a flat image the loader reads (D18) |
 | GLOS libraries and apps | DJGPP gcc 12.2 (`i586-pc-msdosdjgpp-gcc`), as for DOS-GL |
-| Shared HAL | Built from MGA-Glide's checkout (`MGA_GLIDE`), with a `hal/port/glos.c` port in MGA-Glide (Appendix B) |
+| Shared HAL | Built from RetroGPU's checkout (`RETROGPU`), with a `hal/port/glos.c` port in RetroGPU (Appendix B) |
 | Host tests | Native gcc on Linux |
-| Loop A | `$(MGA_GLIDE)/tools/dev` + `tools/loopa/run.py`, from MGA-Glide's main (`make check-deps`: the checkout is there) |
+| Loop A | `$(RETROGPU)/tools/dev` + `tools/loopa/run.py`, from RetroGPU's main (`make check-deps`: the checkout is there) |
 | Build system | Makefile, with `config.mk` and an uncommitted `config.local.mk` |
 | CI | GitHub Actions: host tests, the build, Loop A smoke jobs (`MGA_NO_DOCKER=1`, as in the sibling repos) |
 
@@ -1064,7 +1064,7 @@ the same day, and PKG reads it as signed in Loop A.
 | R9 | Hardware variety on real PCs: shared IRQs, BIOS and VBE quirks | Medium | Conservative defaults; a quirks table; refusal with a clear message; the bench |
 | R10 | Behaviour differences between FreeDOS and MS-DOS | Medium | Loop A on FreeDOS, the bench on MS-DOS 6.22/7.1; GLOS relies on no undocumented DOS internals beyond InDOS, the critical-error flag and the open-file table |
 | R11 | Supervisor bugs look like Loop A hangs | Medium | COM1 discipline (§7.7), the gdb stub, panic dumps |
-| R12 | Several sessions changing shared checkouts | Medium | Cross-repo work on branches in worktrees (MGA_GLIDE= another checkout); MGA-Glide's main changes only after its regression |
+| R12 | Several sessions changing shared checkouts | Medium | Cross-repo work on branches in worktrees (RETROGPU= another checkout); RetroGPU's main changes only after its regression |
 
 ---
 

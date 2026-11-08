@@ -1,8 +1,8 @@
 # GLOS (Graphics Library Operating System, for DOS). See PRD.md.
 #
 #   make                build/ow/GLOS.EXE (16-bit loader) and build/kernel/GLOSK.BIN (the kernel)
-#   make loopa [CARD=g450]   run GLOS.EXE in 86Box through MGA-Glide's Loop A: out/loopa-CARD/
-#   make check-deps     MGA-Glide's checkout is there (MGA_GLIDE: its harness and HAL, built from its main)
+#   make loopa [CARD=g450]   run GLOS.EXE in 86Box through RetroGPU's Loop A: out/loopa-CARD/
+#   make check-deps     RetroGPU's checkout is there (RETROGPU: its harness and HAL, built from its main)
 #   make host-test      kernel code's host tests (in the dev container)
 #   make ssh-test       the SSH layer on host sockets against OpenSSH's ssh (M3)
 #   make loopa-m1       M1's exit matrix in Loop A (tests/loopa/jobs.py)
@@ -66,7 +66,7 @@
 include config.mk
 -include config.local.mk
 
-DEV      := $(MGA_GLIDE)/tools/dev
+DEV      := $(RETROGPU)/tools/dev
 CFG_SRCS := sdk/config/cfg.c sdk/config/tz.c   # GLOS.CFG's schema and time zones, shared everywhere
 CP_SRCS := sdk/config/cp.c sdk/config/cp_tables.c       # DOS code pages (M10): libglos's and the host's
 .DEFAULT_GOAL := all
@@ -87,11 +87,12 @@ all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 help:
 	@sed -n '3,/^[^#]/p' Makefile | grep '^#' | sed 's/^# //'
 
-# MGA-Glide's checkout beside this one: its harness and HAL, used from its main as they are (no pin, no copy:
-# the owner's decision 2026-11-02, before alpha everything is on main trunk; PRD D27).
+# RetroGPU's checkout beside this one: its harness and HAL, used from its main as they are (no pin, no copy:
+# the owner's decision 2026-11-02, before alpha everything is on main trunk; PRD D27). Until 2026-11-08 they were
+# MGA-Glide's, and DOS-GL a checkout of its own.
 check-deps:
-	@[ -f "$(MGA_GLIDE)/hal/include/mga/hal.h" ] && [ -x "$(MGA_GLIDE)/tools/dev" ] \
-	  || { echo "No MGA-Glide checkout at MGA_GLIDE=$(MGA_GLIDE): clone github.com/ranulphus/MGA-Glide there"; exit 1; }
+	@[ -f "$(RETROGPU)/hal/include/mga/hal.h" ] && [ -x "$(RETROGPU)/tools/dev" ] \
+	  || { echo "No RetroGPU checkout at RETROGPU=$(RETROGPU): clone github.com/ranulphus/RetroGPU there"; exit 1; }
 
 # ---- Host tests: kernel code built 32-bit for Linux (in the dev container,
 # which has the 32-bit C library) --------------------------------------------
@@ -295,7 +296,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -O2 -g -Wall -Wextra -Werror -nostdinc -Iinclude -Ikernel/include \
            -isystem $(shell $(HOST_CC) -m32 -print-file-name=include) -Ikernel/include/libc -Ikernel/net/port \
            -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh \
-           -I$(MGA_GLIDE)/hal/include
+           -I$(RETROGPU)/hal/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c kernel/core/main.c kernel/core/timer.c \
          kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
          kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
@@ -315,9 +316,9 @@ build/kernel/sdk_cfg.o build/kernel/sdk_tz.o: build/kernel/sdk_%.o: sdk/config/%
 	@mkdir -p $(dir $@)
 	$(Q)echo "  KCC     $<"
 	$(Q)$(HOST_CC) $(KCFLAGS) -MMD -MP -c -o $@ $<
-# The Matrox HAL (MGA-Glide's checkout, MGA_GLIDE), the part without FPU code, with its port for this
-# kernel (docs/milestones-m7.md step C). Its objects are built here; MGA-Glide's tree is only read.
-MGAHAL := $(MGA_GLIDE)/hal
+# The Matrox HAL (RetroGPU's checkout, RETROGPU), the part without FPU code, with its port for this
+# kernel (docs/milestones-m7.md step C). Its objects are built here; RetroGPU's tree is only read.
+MGAHAL := $(RETROGPU)/hal
 HAL_SRCS := $(addprefix $(MGAHAL)/src/,pci.c chip.c fifo.c engine.c blit.c cursor.c vram.c) $(MGAHAL)/port/glos.c
 HAL_OBJS := $(patsubst $(MGAHAL)/%.c,build/mgahal/%.o,$(HAL_SRCS))
 build/mgahal/%.o: $(MGAHAL)/%.c $(wildcard $(MGAHAL)/include/mga/*.h kernel/include/*.h)
@@ -339,9 +340,11 @@ build/kernel/%.o: kernel/% $(wildcard kernel/include/*.h include/glos/*.h)
 	$(Q)echo "  KCC     $<"
 	$(Q)$(HOST_CC) $(KCFLAGS) -MMD -MP -c -o $@ $<
 # (each object's headers, local ones too: kernel/app/appint.h, kernel/wm/deskint.h, the HAL's)
-# Dependency files from before 2026-11-02 name the vendored HAL that went (third_party/mgahal): they and their
-# objects are dropped once, so the next build makes them afresh from MGA-Glide's checkout.
-$(foreach d,$(shell grep -rl 'third_party/mgahal/' build --include='*.d' 2>/dev/null),$(shell rm -f $(d) $(d:.d=.o)))
+# Dependency files that name a HAL other than MGAHAL's (the vendored third_party/mgahal that went on 2026-11-02,
+# MGA-Glide's checkout until 2026-11-08, or another RETROGPU): they and their objects are dropped once, so the next
+# build makes them afresh from this one.
+$(foreach d,$(shell grep -rlE 'third_party/mgahal/|/hal/include/mga/' build --include='*.d' 2>/dev/null \
+  | xargs -r grep -L '$(MGAHAL)/include/mga/' 2>/dev/null),$(shell rm -f $(d) $(d:.d=.o)))
 -include $(KOBJS:.o=.d) $(HAL_OBJS:.o=.d)
 TINYSSH_OBJS := $(patsubst third_party/tinyssh/%.c,build/tinyssh/%.o,$(TINYSSH_SRCS))
 build/tinyssh/%.o: third_party/tinyssh/%.c
@@ -365,7 +368,7 @@ FORCE:
 .PHONY: FORCE
 
 loopa: all check-deps
-	$(Q)$(DEV) python3 $(MGA_GLIDE)/tools/loopa/run.py --name glos --card $(CARD) \
+	$(Q)$(DEV) python3 $(RETROGPU)/tools/loopa/run.py --name glos --card $(CARD) \
 	  --exe build/ow/GLOS.EXE --file build/kernel/GLOSK.BIN --args /ROUNDTRIP \
 	  --out $(CURDIR)/out/loopa-$(CARD) --timeout $(LOOPA_TIMEOUT); cat out/loopa-$(CARD)/status
 

@@ -20,7 +20,7 @@ What it is for:
   network names, UTF-8.
 
 Minimum: a 486 with any VESA 2.0 card. Matrox G-series cards add 2D acceleration and windowed OpenGL through
-[DOS-GL](https://github.com/ranulphus/DOSGL).
+DOS-GL (in [RetroGPU](https://github.com/ranulphus/RetroGPU)).
 
 ## Status
 
@@ -37,20 +37,20 @@ passed their gates.
 
 ## Building
 
-Needs Open Watcom v2 and a checkout of [MGA-Glide](https://github.com/ranulphus/MGA-Glide), whose Loop A harness
-runs GLOS in 86Box. Paths are set in `config.mk`; override them in `config.local.mk`.
+Needs Open Watcom v2 and a checkout of [RetroGPU](https://github.com/ranulphus/RetroGPU), whose HAL GLOS builds
+and whose Loop A harness runs GLOS in 86Box. Paths are set in `config.mk`; override them in `config.local.mk`.
 
 ```
 make                     # build/ow/GLOS.EXE
-make check-deps          # MGA-Glide's checkout beside this one (MGA_GLIDE, default ~/MGA-Glide)
+make check-deps          # RetroGPU's checkout beside this one (RETROGPU, default ~/RetroGPU)
 make loopa CARD=g450     # boot 86Box with a G450, run GLOS.EXE: out/loopa-g450/ (status, serial.log)
 ```
 
 ## Sibling projects
 
-- [MGA-Glide](https://github.com/ranulphus/MGA-Glide): Glide 2 for Matrox cards; the shared Matrox HAL and the
-  Loop A/B/C test harness.
-- [DOS-GL](https://github.com/ranulphus/DOSGL): OpenGL 1.1 for Matrox cards on DOS, and the SDL3 bridge.
+- [RetroGPU](https://github.com/ranulphus/RetroGPU): the shared HAL and the Loop A/B/C test harness at its root,
+  DOS-GL (OpenGL 1.1 on DOS, and the SDL3 bridge) in `gl/`, the Glide 2 runtime in `glide/`. It replaced MGA-Glide
+  and DOS-GL on 2026-11-08.
 - [Fifth Wheel](https://github.com/ranulphus/FifthWheel): a DOS-GL game and the dgk kit.
 
 ## Security

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """bench_glwin.py [--hang] [TEST...]: M8's windowed DOS-GL on the bench PC, as jobs.py's glwin case does it in 86Box.
-DOS-GL's conformance programs (DOSGL_DIR's build/exe/conform, default ~/DOSGL) run full-screen with the desktop off
+DOS-GL's conformance programs (DOSGL_DIR's build/exe/conform, default ~/RetroGPU/gl) run full-screen with the desktop off
 (DGL_WARP=0, as in a window: FULL.BAT), then each in a window on the real desktop (GLOS_BENCH_DESK, default 800x600x16), and every frame each writes
 (glReadPixels of its own buffer, C:\\OUT) must be the same bytes both ways. Under the desktop each is an app with
 its turns at the engine (glos display's turns). --hang adds the forced GL hang: TEXCUBE --hang keeps the engine in
@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bench_gui  # noqa: E402
 
 ROOT = bench_gui.ROOT
-DOSGL = os.environ.get("DOSGL_DIR", os.path.expanduser("~/DOSGL"))
+DOSGL = os.environ.get("DOSGL_DIR", os.path.join(os.environ.get("RETROGPU", os.path.expanduser("~/RetroGPU")), "gl"))
 DESK = os.environ.get("GLOS_BENCH_DESK", "800x600x16")
 
 

@@ -18,10 +18,10 @@ differences; hdpmi32i against hdpmi32 isolates IOPL 0.
   survey.py diff [--suite S ...] [--variant V ...]  each job's variants against base, printed
   survey.py list
 
-Jobs run through MGA-Glide's Loop A harness ($MGA_GLIDE, default
-~/MGA-Glide): directly with
-its run.py, or through DOS-GL's own runners with MGAHAL_DIR pointing at
-it and LOOPA_EXTRA_ARGS carrying the host. HDPMI is run as a behavioural
+Jobs run through RetroGPU's Loop A harness ($RETROGPU, default
+~/RetroGPU; MGA-Glide's until 2026-11-08): directly with
+its run.py, or through DOS-GL's own runners (RetroGPU's gl/, which take
+the HAL from their parent) with LOOPA_EXTRA_ARGS carrying the host. HDPMI is run as a behavioural
 baseline only (PRD D26). Set BOX86_DIR to choose the 86Box build."""
 import argparse
 import json
@@ -36,8 +36,8 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 HOME = os.path.expanduser("~")
-MGA = os.environ.get("MGA_GLIDE", os.path.join(HOME, "MGA-Glide"))
-DOSGL = os.environ.get("DOSGL", os.path.join(HOME, "DOSGL"))
+MGA = os.environ.get("RETROGPU", os.path.join(HOME, "RetroGPU"))
+DOSGL = os.environ.get("DOSGL", os.path.join(MGA, "gl"))
 FW = os.environ.get("FIFTHWHEEL", os.path.join(HOME, "FifthWheel"))
 CACHE = os.environ.get("MGA_CACHE", os.path.join(HOME, ".cache", "mga-glide"))
 HX = os.path.join(CACHE, "glos", "hx")           # inside the cache the dev container mounts
@@ -151,7 +151,7 @@ def run_job(name, spec, variant):
                "--name", jobname, "--out", out] + spec["args"] + VARIANTS[variant]
     else:
         out = os.path.join(spec["cwd"], "out", jobname)
-        env.update(MGAHAL_DIR=MGA, NAME=jobname, LOOPA_EXTRA_ARGS=" ".join(shlex.quote(a) for a in VARIANTS[variant]))
+        env.update(RETROGPU=MGA, NAME=jobname, LOOPA_EXTRA_ARGS=" ".join(shlex.quote(a) for a in VARIANTS[variant]))
         cmd = spec["cmd"]
     subprocess.run(cmd, cwd=spec["cwd"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.makedirs(dest, exist_ok=True)
