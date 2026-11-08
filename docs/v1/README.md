@@ -15,7 +15,7 @@ choice, 2026-11-06), and approved before any code of phases B–F.
 | `ide.md` | The follow-up IDE's needs, as if it were one more app | Written |
 | `api-2.md` | API 2.0 in full, from the plans | Written |
 | `toolkit-2.md` | Toolkit 2's widgets and services, from the plans | Written |
-| DOS-GL `docs/backend-interface.md` | Step B0 of DOS-GL's software renderer plan (DOS-GL `docs/backends.md`) | Written (DOS-GL branch backends-b0) |
+| RetroGPU `gl/docs/backend-interface.md` | Step B0 of DOS-GL's software renderer plan (`gl/docs/backends.md`) | Written (RetroGPU branch b0-docs) |
 
 ## The API's areas
 

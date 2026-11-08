@@ -393,13 +393,14 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 ## Moving to 2.0 (phase B)
 
 - **GLOS's own apps:** they move with the kernel.
-- **DOS-GL's windowed path:** `src/dgl/glos.c`; GPU, VRAM, WINVRAM, the lock and PIXELS move to DRAW. Its software
+- **DOS-GL's windowed path:** RetroGPU's `gl/src/dgl/glos.c`; GPU, VRAM, WINVRAM, the lock and PIXELS move to DRAW. Its software
   renderer uses SOFT.
 - **The SDL3 bridge** (Fifth Wheel, PrBoom-plus, Half-Life): windows, events, sound streams and the clipboard move to
   WIN, CORE's EVENT, AUDIO's OUT and CLIP.
-- **MGA-Glide's HAL port:** `hal/port/glos.c`, the GPU lock and the cache call (1.4's GLOS_FN_CACHE, kept in DRAW or
+- **The HAL's GLOS port:** RetroGPU's `hal/port/glos.c`, the GPU lock and the cache call (1.4's GLOS_FN_CACHE, kept in DRAW or
   CORE).
-- **Approvals:** each moved and merged in its own repository with the owner's approval.
+- **Approvals:** GLOS's side and RetroGPU's side (DOS-GL, the SDL3 bridge, the HAL's port) each merged with the
+  owner's approval, after each repository's regression. Fifth Wheel and the ports rebuild against RetroGPU.
 
 ## Settled at the owner's review (2026-11-06)
 

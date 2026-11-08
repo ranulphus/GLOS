@@ -29,7 +29,7 @@ richer shell, and modern apps for old PCs. This plan is the route to that v1.
   ([Designed for the IDE](#designed-for-the-ide-a-follow-up)).
 
 **The answers to plan v0's open questions (2026-11-06):**
-- **1.x compatibility: none.** DOS-GL (in MGA-Glide once merged), the SDL3 bridge and the HAL move to 2.0 in phase B
+- **1.x compatibility: none.** DOS-GL, the SDL3 bridge and the HAL (all three in RetroGPU since 2026-11-08) move to 2.0 in phase B
   with the kernel, each merged with the owner's approval. No compatibility table.
 - **Archives:** ZIP read and written. TAR, GZ, LZH/LHA, ARJ and 7z read. (RAR is out: its decoder's licence isn't
   permissive.)
@@ -41,8 +41,8 @@ richer shell, and modern apps for old PCs. This plan is the route to that v1.
   stack).
 - **Screensavers, and DOS-GL, on any card:** the owner's answer is a software renderer in DOS-GL. Every PC then
   gets the DOS-GL screensavers, and windowed DOS-GL apps run on any VBE card. It ties into the work on other
-  vendors' cards (the Riva TNT2, ATI's Rage 128 and Radeon). It is built in DOS-GL's code, which is to merge into
-  MGA-Glide ([The DOS-GL software renderer](#the-dos-gl-software-renderer)).
+  vendors' cards (the Riva TNT2, ATI's Rage 128 and Radeon). It is built in DOS-GL's code, in RetroGPU's
+  `gl/` since the merge ([The DOS-GL software renderer](#the-dos-gl-software-renderer)).
 - **Language:** English in v1, with every string in resources so translations can come later without code changes.
   Regional formats for dates, times and numbers.
 - **The IDE's needs: all of them in API 2.0,** built in phase B and used by GLOS's own tools: Term streams a job's
@@ -67,7 +67,7 @@ richer shell, and modern apps for old PCs. This plan is the route to that v1.
   - Notepad prints text to LPT and has no spelling checker in v1;
   - Images stays the viewer beside a new Paint;
   - the Web Reader searches DuckDuckGo Lite by default.
-- **DOS-GL's B0** (DOS-GL `docs/backend-interface.md`):
+- **DOS-GL's B0** (RetroGPU `gl/docs/backend-interface.md`):
   - the back-end interface in clip space (today's seam);
   - stencil in the software renderer from B2's start.
 
@@ -100,7 +100,8 @@ richer shell, and modern apps for old PCs. This plan is the route to that v1.
     - a PDF parser.
   - Copyleft code (MuPDF, libxmp, Linux's drivers) stays behaviour reference at most.
 - **Sibling projects move with the API, in phase B.** DOS-GL's windowed path, the SDL3 bridge (Fifth Wheel,
-  PrBoom-plus, Half-Life) and MGA-Glide's HAL port call the GLOS API, and move to 2.0 with the kernel. Each is merged
+  PrBoom-plus, Half-Life) and the HAL's GLOS port call the GLOS API, and move to 2.0 with the kernel. All three are
+  in RetroGPU (`gl/src/dgl/glos.c`, `gl/tools/sdl`, `hal/port/glos.c`). Each is merged
   and pushed in its own repository with the owner's approval. There is no 1.x compatibility table.
 
 ## Phases
@@ -151,7 +152,7 @@ compatibility, is planned after an audit and finishes before G.
   - a secrets store;
   - local-trust package installs;
   - shared modules (DXE3), if phase A's design keeps them.
-- **The siblings moved to 2.0:** DOS-GL (in MGA-Glide once merged), the SDL3 bridge, the HAL's GLOS port.
+- **The siblings moved to 2.0:** in RetroGPU, DOS-GL, the SDL3 bridge and the HAL's GLOS port.
 - **Tests:**
   - every existing suite on 2.0;
   - an API conformance suite, which starts host-side and runs in Loop A;
@@ -262,7 +263,7 @@ before that.
 - **Known so far: a VIA Rhine network driver.**
   - VIA Rhine I, II and III, from VIA's public datasheet. It covers the Pentium III bench's D-Link DFE-530TX (a Rhine
     marked DL10030, with a Davicom PHY) and the network built into VIA-chipset motherboards.
-  - 86Box has no Rhine model. Whether it is tested on the bench only, or 86Box gets a model as an MGA-Glide patch,
+  - 86Box has no Rhine model. Whether it is tested on the bench only, or 86Box gets a model as a RetroGPU patch,
     is settled in H's plan.
 - **Known so far: C-Media's CM8738 (CMI8738), the Pentium III bench's sound.**
   - **A native driver for GLOS's mixer**, so the desktop and GLOS's apps have sound on it: PCI, bus-master DMA,
@@ -392,8 +393,8 @@ The owner's answer for screensavers on non-Matrox cards. It reaches further than
   Matrox card.
 - **What it shapes:** a DOS-GL with more than one back end. That is the shape the other vendors' cards need: the
   Riva TNT2 next, then ATI's Rage 128 and Radeon (the owner's vendor study).
-- **Where it is built:** in DOS-GL's code, which the owner has chosen to merge into MGA-Glide. So it is planned
-  there, with that repository's regressions and the owner's approval for merges, and coordinated with the merge.
+- **Where it is built:** in DOS-GL's code, in RetroGPU's `gl/` since the merge (2026-11-08). So it is planned
+  there, with RetroGPU's regressions and the owner's approval for merges.
   GLOS's phase D waits on it for screensavers on other cards.
 
 ## Testing, throughout: three tiers
