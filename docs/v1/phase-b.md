@@ -1,6 +1,7 @@
 # Phase B: API 2.0 and the window system, the step plan
 
-**Status (2026-11-09): plan v1, the owner's answers to its four questions written in.**
+**Status (2026-11-09): plan v1, approved.** The owner's answers to its four questions are written in. Their other
+changes (period profiles, cable networks, the hardware ceiling) went to phase H.
 
 Phase B of the route (`docs/v1-route.md`) builds API 2.0 as `api-2.md` designs it, in the kernel and in libglos.
 It also covers:
@@ -66,7 +67,9 @@ Phase C (toolkit 2) runs beside it from step 6.
 After that:
 - 7 and 8, for Files and Notepad (the route's first apps);
 - then the rest in the table's order;
-- 14 when DOS-GL's B1 has landed in RetroGPU, so the windowed path moves once (B0's order).
+- 14 without waiting for DOS-GL's B1, which now comes after phase B (the owner's answer, 2026-11-09). The windowed
+  path moves to 2.0 here, and into B0's back end later. SOFT is tested by APITEST alone until the software
+  renderer's B3 uses it.
 
 ### 1. The frame (CORE)
 
@@ -259,7 +262,8 @@ After that:
 ### 11. NET
 
 - **LISTEN and ACCEPT.**
-- **STATE:** the card, the link, the address, the DHCP lease, DNS, the gateway, the counters, and its change event.
+- **STATE:** every interface (a network card, and phase H's serial and parallel cables), each with its link, its
+  address, the DHCP lease, DNS, the gateway and its counters, and a change event.
 - **Tests:** Loop A: an APITEST server reached from the host through SLiRP's forwarding; `loopa-netapp` unchanged.
 
 ### 12. DEBUG and CAPTURE

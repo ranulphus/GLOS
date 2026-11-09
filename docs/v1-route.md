@@ -304,6 +304,42 @@ before that.
     - the games' sound as acceptance tests: the owner's games, whose sound libraries (DMX, HMI, Miles and others)
       each drive a Sound Blaster their own way;
     - tests in the three tiers, the virtual DSP and DMA tested on the host first.
+- **Decided (the owner, 2026-11-09): the ceiling is Intel's 4th and 5th generations (Haswell, Broadwell).**
+  - They are the last mainstream PCs where DOS is still at home: the firmware's legacy BIOS (CSM), disks through
+    INT 13h even in AHCI mode, often PS/2 ports, and EHCI beside xHCI. From Skylake on, EHCI is gone and the
+    legacy BIOS starts to go.
+  - That tier needs drivers GLOS hasn't got:
+    - EHCI, since Intel's chipsets have had no UHCI since the 5-series (2009);
+    - Intel HD Audio, under the virtual Sound Blaster;
+    - Intel's and Realtek's gigabit chips (the e1000/e1000e and RTL8111/8168 families);
+    - the BIOS's USB hand-off;
+    - what the cards' VBE offers (some only 32-bit modes).
+  - **The audit sizes the tier and splits it** between v1 and a release after it.
+  - Testing it needs a Haswell or Broadwell bench.
+- **Decided (the owner, 2026-11-09): period profiles, in v1.** A program's profile can make a fast PC look like
+  a period one to it:
+  - **CPU speed** ("speed: Pentium 133", "486DX2-66"), calibrated by measurement, from three means:
+    - the CPU's clock modulation (Pentium 4 onwards, steps of 12.5% or finer);
+    - GLOS's scheduler idling the session for part of each tick;
+    - the caches off, for 386 and 486 targets.
+
+    For games timed by delay loops: already too fast on a Pentium 4.
+  - **Memory** (the owner's request, 2026-11-09):
+    - a limit for all of GLOS (`[memory]` in GLOS.CFG), for trying a period machine's size;
+    - a limit for one program, in its profile (what DPMI and XMS report to it and give it), for games that
+      misbehave with more memory than they expect.
+- **Decided (the owner's idea, 2026-11-09): networks over serial and parallel cables.**
+  - **What it is:** in the spirit of INTERLNK/INTERSVR and Windows 98's Direct Cable Connection, a PC without a
+    network card GLOS drives joins a network through a serial or parallel cable:
+    - SLIP or PPP on a serial port with a null-modem cable;
+    - PLIP on a parallel port with a LapLink cable, Crynwr's protocol, so the other end can also be plain DOS
+      with Crynwr's PLIP packet driver, or Linux.
+  - **Which ports:** any not already the log's or the debugger's (COM1 and COM2 by default).
+  - **Bridging:** a GLOS PC with both a network card and a cable puts the cable's PC on the network, as Direct
+    Cable Connection with Internet sharing did. Whether by routing with proxy ARP or by NAT is settled in H's
+    plan.
+  - **Testing:** 86Box has a PLIP network device and serial passthrough, so Loop A can test both.
+  - NET's STATE (phase B, step 11) lists every interface, the cables' too.
 - **The audit:** what GLOS drives today against what the benches have and what the period's PCs commonly had.
   - **Today:**
     - network: NE2000 (ISA, and the RTL8029), RTL8139, Intel 8255x;
@@ -399,7 +435,15 @@ The owner's answer for screensavers on non-Matrox cards. It reaches further than
   Riva TNT2 next, then ATI's Rage 128 and Radeon (the owner's vendor study).
 - **Where it is built:** in DOS-GL's code, in RetroGPU's `gl/` since the merge (2026-11-08). So it is planned
   there, with RetroGPU's regressions and the owner's approval for merges.
-  GLOS's phase D waits on it for screensavers on other cards.
+- **Who and when (the owner, 2026-11-09):** this work's own session, after GLOS's phase B.
+  - GLOS's phase D's screensavers on cards other than Matrox wait for it, so they come at D's end or just after.
+  - Phase B's step 14 moves DOS-GL's windowed path without waiting for it.
+- **For Glide too, and for more cores later (the owner, 2026-11-09):**
+  - one rasteriser core whose state covers GL's environments and Glide's combiners, fog table, chroma key and
+    W-buffer; GL's back end first, Glide's next, both on B0's two levels;
+  - rendering in screen tiles, so other cores can be used later; multi-core isn't in v1.
+- **What it opens:** 3D games on the CPU alone, on a PC with no card GLOS drives. A Haswell-class CPU's single core
+  with SSE2 should play the 1997-2000 games at 640x480, which the route's new ceiling (phase H) takes in.
 
 ## Testing, throughout: three tiers
 
@@ -419,5 +463,5 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
 
 ## Open questions
 
-Plan v0's eight are answered (above). One remains, about the DOS-GL software renderer: who builds it and when,
-against GLOS v1's schedule.
+Plan v0's eight are answered (above), and the last, who builds DOS-GL's software renderer and when, was answered on
+2026-11-09 (this work's session, after phase B). None remain.
