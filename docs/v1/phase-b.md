@@ -92,6 +92,38 @@ After that:
   - every existing suite unchanged (1.x untouched).
 - **Exit:** CORE's cases pass on the host and in Loop A, and the full gate is green.
 
+**Step 1 as built (2026-11-09, GLOS main):**
+- **Files:**
+  - `include/glos/api2.h`, the API's header during phase B (`glos/api.h` once step 15 removes 1.x);
+  - `kernel/app/api2.c`: the dispatcher, CORE, events, timers and properties;
+  - `kernel/app/handle.c`: the handle tables;
+  - libglos 2.0 in `sdk/libglos2` (`glos/glos2.h`);
+  - APITEST in `tests/api`, run by `make loopa-api`;
+  - `tests/host/handle_test.c`.
+- **Where it differs from `api-2.md`** (to be folded into it):
+  1. **Function numbers carry the major version:** 20000h + the area times 256 + the function. `api-2.md` had the
+     area times 256 + the function. While 1.x is answered, 2.0's calls never meet 1.x's (0-33), and every call says
+     which API it is.
+  2. **ECX and EDX are 0 in a call.** GLOS uses them to finish a wait that an interrupt of the app's own cut short,
+     as 1.x used ECX, so that the caller's structure is never changed.
+  3. **INIT takes the app's name, Help page and Start menu group, not its icon:** an icon is a window's (WIN) and a
+     Start entry's (SHELL).
+  4. **TICKS gives its milliseconds in EAX** (no structure), and VERSION its version there when EBX is 0, so that
+     a program can check cheaply.
+  5. **Errors:** 1.x's numbers kept where the meaning is the same. 6 is now HANDLE (1.x's WINDOW); 16-19 are new
+     (KIND, PROPERTY, ROOM, REFUSED).
+  6. **TIME's offset is in seconds,** the clock's own unit.
+- **Tests:**
+  - **Host:** `handle_test`. The dispatcher's size rules and the property table are tested by APITEST in Loop A
+    rather than on the host: they need too much of the kernel around them.
+  - **Loop A:** APITEST's 40 cases on bf6 (raw) and the 486 (HIMEMX), all passing.
+  - **The 1.x suites the change touches** (`app_init`, `app_sleep`, `app_event`), all green: m1, apps, win, gpu,
+    audio, console, config, gui, native, netapp.
+- **Left for later steps:**
+  - the host shim's 2.0 side, with the toolkit's move (phase C);
+  - POST from an app's other threads (step 4);
+  - the END event's sender (step 9's kill, step 15's shutdown).
+
 ### 2. WIN and DRAW
 
 - **Window kinds:** normal, dialog (owned, optionally modal), tool window, popup, the desktop, full screen.
