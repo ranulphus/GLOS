@@ -1,6 +1,6 @@
 # Phase B: API 2.0 and the window system, the step plan
 
-**Status (2026-11-09): plan v0, for the owner's review before any code.**
+**Status (2026-11-09): plan v1, the owner's answers to its four questions written in.**
 
 Phase B of the route (`docs/v1-route.md`) builds API 2.0 as `api-2.md` designs it, in the kernel and in libglos.
 It also covers:
@@ -19,7 +19,7 @@ Phase C (toolkit 2) runs beside it from step 6.
 
 ## How it is built
 
-- **1.x stays answered until B's last step** (question 1).
+- **1.x stays answered until B's last step** (the owner's answer).
   - INIT tells the two apart by the major version it is given (1.x's INIT already checks it). Each app keeps its own
     major, and the dispatcher chooses its table by it.
   - VERSION answers both kinds of caller.
@@ -215,7 +215,8 @@ After that:
 - **The rest:**
   - HELP;
   - POINT (where the task bar's parts are);
-  - SCHEDULE (question 4);
+  - SCHEDULE, kept and run by the kernel, so scheduled commands run even when Files isn't running (the owner's
+    answer);
   - DESKTOP (1.x's SHELL).
 - **Tests:**
   - host: notifications' layout and lifetimes, ASSOC's rules;
@@ -243,11 +244,12 @@ After that:
   codec).
 - **LEVELS, DEVICES.**
 - **MIDI_OUT:**
-  - the OPL3 through GLOS's own FM driver, with a General MIDI bank (question 3);
+  - the OPL3 through GLOS's own FM driver, with Freedoom's GENMIDI bank as its General MIDI instruments (the
+    owner's answer; Freedoom is BSD-3-Clause, and the bank's licence is checked at import);
   - an MPU-401;
   - messages with times, played on the kernel's tick.
 - **MIDI_IN** from an MPU-401's UART.
-  - USB MIDI is phase F's, with MIDI Studio and the owner's keyboard (question 2).
+  - USB MIDI is phase F's, with MIDI Studio and the owner's keyboard's descriptors (the owner's answer).
 - **Tests:**
   - host: the mixer's levels, MIDI timing against the tick;
   - Loop A: recorded output with `wavcheck` (as `loopa-audio`), capture from 86Box's input where it allows, the
@@ -314,14 +316,9 @@ After that:
 | Phase B is long, and phase C waits on it | Steps 1-6 first; phase C starts after 6 |
 | 86Box can't test capture or USB MIDI | Capture checked on bench-g400 by hand; USB MIDI in phase F with the owner's keyboard |
 
-## Questions, for the owner
+## The owner's answers (2026-11-09)
 
-1. **The transition:** keep 1.x answered beside 2.0 until step 15 (recommended: every suite stays green
-   throughout, and v1 still ships 2.0 only), or switch at once (the siblings' suites fail until step 14)?
-2. **USB MIDI input:** in phase F with MIDI Studio, once the owner's keyboard's descriptors are captured
-   (recommended), or in step 10?
-3. **The OPL3's General MIDI bank:** it must be permissively licensed. Freedoom's GENMIDI (Freedoom is BSD-3-Clause)
-   is the first candidate, its licence checked at import. Or should GLOS make its own bank (more work, and a matter
-   of taste)?
-4. **SCHEDULE:** kept and run by the kernel, so backups run even when Files isn't running (recommended), or by
-   Files?
+1. **The transition:** 1.x answered beside 2.0 until step 15, which removes it. v1 ships 2.0 only.
+2. **USB MIDI input:** phase F's, with MIDI Studio.
+3. **The OPL3's General MIDI bank:** Freedoom's GENMIDI, its licence checked at import.
+4. **SCHEDULE:** kept and run by the kernel.
