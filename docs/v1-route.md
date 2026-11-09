@@ -69,7 +69,11 @@ richer shell, and modern apps for old PCs. This plan is the route to that v1.
   - the Web Reader searches DuckDuckGo Lite by default.
 - **DOS-GL's B0** (RetroGPU `gl/docs/backend-interface.md`):
   - the back-end interface in clip space (today's seam);
-  - stencil in the software renderer from B2's start.
+  - stencil in the software renderer from B2's start;
+  - after the merge into RetroGPU (2026-11-09), two levels: a device beside the HAL (cards, modes, surfaces,
+    present, memory, 2D, the cursor, GLOS's GPU lock) for GL, Glide and GLOS's desktop, and GL's drawing back end
+    in `gl/` on top. GLOS's desktop moves onto the device in its own plan, when a second vendor's card makes it
+    worth it.
 
 ## Principles
 
