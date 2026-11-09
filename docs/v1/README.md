@@ -16,6 +16,7 @@ choice, 2026-11-06), and approved before any code of phases B–F.
 | `api-2.md` | API 2.0 in full, from the plans | Written |
 | `toolkit-2.md` | Toolkit 2's widgets and services, from the plans | Written |
 | RetroGPU `gl/docs/backend-interface.md` | Step B0 of DOS-GL's software renderer plan (`gl/docs/backends.md`) | Written (RetroGPU branch b0-docs) |
+| `phase-b.md` | Phase B's step plan: API 2.0 and the window system in 15 steps, with their tests | Plan v0, for review |
 
 ## The API's areas
 
