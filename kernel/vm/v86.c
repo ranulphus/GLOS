@@ -21,6 +21,7 @@
 #include "dpmi.h"
 #include "session.h"
 #include "io.h"
+#include "kcfg.h"
 #include "kprintf.h"
 #include "mixer.h"
 #include "mm.h"
@@ -744,6 +745,20 @@ static void vm_agent_next(struct trapframe *tf, u32 result)
             return;
         }
         result = 0xFFFFFFFFu;
+        /* No job before GLOS.CFG's first read is over: the DOS server's transfer buffer is still DOS's block
+           till then, and a program started meanwhile loads 32 KB higher; a TSR among them is left above a
+           32 KB hole once the buffer goes (mempage's ag-refused, 2026-11-09, under host load). The settings
+           thread's release kicks the stub, which frees the buffer above (dos_vm_next) before the job. At
+           most 10 s after the start, in case DOS never answers. */
+        if (!kcfg_settled()) {
+            static u8 warned;
+            if (timer_ticks() < 10240u) {          /* (10 s of the 1024 Hz tick) */
+                tf->eax = 2;
+                return;
+            }
+            if (!warned++)
+                kprintf("GLOS-WARN agent-start cfg=unsettled\n");
+        }
     }
     r = agent_vm_next(result, vm.bi->comspec, &x);
     if (r == 3) {                               /* a job's drive or folder, before its EXEC (M9) */

@@ -44,6 +44,7 @@ static struct {
     u32 n;
     char path[80];
     u8 loaded, failed, dirty, writing;
+    volatile u8 settled;                        /* the first read is over and the DOS server let go */
     u32 writes, write_errors, changes;
     struct waitq q, lockq;
     struct thread *owner;
@@ -180,6 +181,7 @@ static int find_section(const char *section, u32 *end)
 /* ---- reading */
 
 int kcfg_loaded(void) { return c.loaded; }
+int kcfg_settled(void) { return c.settled; }
 
 int kcfg_get(const char *section, const char *key, char *out, u32 room)
 {
@@ -734,7 +736,8 @@ static void writer(void *arg)
     (void)arg;
     dos_hold();                                 /* the DOS server's 32 KB transfer buffer only while the file is */
     load();                                     /* read or written: kept for good, it cost programs 32 KB of */
-    dos_release();                              /* conventional memory in agent mode (P7) */
+    c.settled = 1;                              /* conventional memory in agent mode (P7) */
+    dos_release();                              /* (and the agent's first job waits for this: kcfg_settled) */
     for (;;) {
         u32 f = irq_save();
         while (!c.dirty)

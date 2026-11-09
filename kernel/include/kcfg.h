@@ -8,6 +8,7 @@ struct bi_profile;
 
 void kcfg_init(const struct bootinfo *bi);
 int kcfg_loaded(void);
+int kcfg_settled(void);              /* GLOS.CFG's first read is over: the agent may start jobs */
 int kcfg_get(const char *section, const char *key, char *out, u32 room);   /* 1 set, 0 the default, -1 no such */
 int kcfg_set(const char *section, const char *key, const char *value, char *why, u32 room);    /* CFG_ when, or -1;
                                            value NULL: unset */
