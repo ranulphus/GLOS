@@ -16,7 +16,7 @@
 #define PTE_P 1u
 #define PTE_W 2u
 #define PTE_U 4u
-#define MAX_FRAMES (1u << 18)                   /* 1 GB of physical memory tracked */
+#define MAX_FRAMES (1u << 20)                   /* 4 GB of physical memory tracked (1 GB until 2026-11-09) */
 
 extern char __kernel_start[], __kernel_end[];
 

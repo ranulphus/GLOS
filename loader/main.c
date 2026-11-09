@@ -120,6 +120,28 @@ static void xms_call(unsigned fn, unsigned arg)
     xms_ax = a; xms_bx = b; xms_dx = d;
 }
 
+/* XMS 3.0's own calls (88h, 89h): sizes in kilobytes in 32 bits, where 2.0's (08h, 09h) have 16 and so stop at
+   65535 KB a block. HIMEMX and MS-DOS 7.1's HIMEM have them. */
+static unsigned long xms_eax, xms_edx;
+static unsigned char xms_bl;
+static int xms3;                                        /* the driver speaks XMS 3.0 and 88h answered */
+
+static void xms_call32(unsigned fn, unsigned long arg)
+{
+    unsigned long a, d;
+    unsigned b;
+    _asm {
+        mov ax, fn
+        mov edx, arg
+        call dword ptr xms
+        mov a, eax
+        mov b, bx
+        mov d, edx
+    }
+    xms_eax = a; xms_bl = (unsigned char)b; xms_edx = d;
+    xms_ax = (unsigned)a; xms_dx = (unsigned)d;
+}
+
 /* ---- A20 */
 
 static int a20_on(void)
@@ -211,12 +233,16 @@ static int raw_memory(void)
 }
 
 /* XMS mode: a locked block for the kernel, and up to three for GLOS's own
-   memory (the stub keeps four handles): XMS 2.0's calls count kilobytes in
-   16 bits, so a block is at most 65535 KB, and a 128 MB machine needs two
-   (M4e: Half-Life ran out of memory on the HIMEMX boot). */
-static int xms_block(unsigned kb, unsigned long *phys)
+   memory (the stub keeps four handles). With XMS 3.0's 89h a block can be
+   any size, so the first holds everything. With 2.0's 09h a block is at most
+   65535 KB, so three of them stopped GLOS at 192 MB (bench-g400's 448 MB,
+   2026-11-09; M4e: a 128 MB machine already needed two). */
+static int xms_block(unsigned long kb, unsigned long *phys)
 {
-    xms_call(0x0900, kb);
+    if (xms3)
+        xms_call32(0x8900, kb);
+    else
+        xms_call(0x0900, (unsigned)kb);
     if (xms_ax != 1) return -1;
     xms_handles[n_xms++] = xms_dx;
     xms_call(0x0C00, xms_dx);
@@ -563,6 +589,11 @@ static int glos_main(int argc, char **argv)
         r.x.ax = 0x4310; int86x(0x2F, &r, &r, &sr);
         xms = (void (far *)(void))MK_FP(sr.es, r.x.bx);
         bi.mode = BI_MODE_XMS;
+        xms_call(0x0000, 0);                    /* the version: 3.0's 88h and 89h where it has them */
+        if (xms_ax >= 0x0300) {
+            xms_call32(0x8800, 0);
+            xms3 = xms_bl == 0 && xms_eax != 0;
+        }
         if (xms_block((unsigned)(bi.kernel_total >> 10) + 4, &xms_kernel_block) != 0) {
             xms_release();
             return refuse("xms-kernel");
@@ -570,10 +601,19 @@ static int glos_main(int argc, char **argv)
         bi.kernel_phys = (xms_kernel_block + 0xFFFUL) & ~0xFFFUL;     /* (a page's boundary: the page tables map
                                                    it from there; the block need not begin on one) */
         while (n_xms < 4) {                     /* the largest free block, KB, again and again; 64 KB */
-            unsigned kb;                        /* left for others */
-            xms_call(0x0800, 0);
-            kb = xms_ax == 0xFFFF ? 0xFFFF : xms_ax - 64;
-            if (xms_ax <= 64 || xms_block(kb, &pool) != 0)
+            unsigned long kb, largest;          /* left for others */
+            if (xms3) {
+                xms_call32(0x8800, 0);
+                largest = xms_bl == 0 ? xms_eax : 0;
+                if (largest > 4190208UL)        /* (4092 MB: its length in bytes still fits 32 bits) */
+                    largest = 4190208UL + 64;
+                kb = largest - 64;
+            } else {
+                xms_call(0x0800, 0);
+                largest = xms_ax;
+                kb = xms_ax == 0xFFFF ? 0xFFFF : xms_ax - 64;
+            }
+            if (largest <= 64 || xms_block(kb, &pool) != 0)
                 break;
             add_range(pool, (unsigned long)kb * 1024UL, BI_MEM_FREE);
             pool_kb += kb;
@@ -586,8 +626,8 @@ static int glos_main(int argc, char **argv)
         r.x.ax = 0x4309; int86x(0x2F, &r, &r, &sr);     /* the handle table, for handles made before GLOS */
         if (r.h.al == 0x43) bi.xms_table = ((unsigned long)sr.es << 4) + r.x.bx;
         xms_call(0x0500, 0);                    /* local A20 enable */
-        say("GLOS-BOOT step=memory mode=xms kernel=%08lx pool_kb=%lu blocks=%u ver=%04lx hma_used=%lu table=%05lx",
-            bi.kernel_phys, pool_kb, n_xms - 1, bi.xms_ver, bi.hma_used, bi.xms_table);
+        say("GLOS-BOOT step=memory mode=xms kernel=%08lx pool_kb=%lu blocks=%u ver=%04lx xms3=%d hma_used=%lu table=%05lx",
+            bi.kernel_phys, pool_kb, n_xms - 1, bi.xms_ver, xms3, bi.hma_used, bi.xms_table);
     } else {
         bi.mode = BI_MODE_RAW;
         if (raw_memory() != 0) return refuse("no-memory-map");
