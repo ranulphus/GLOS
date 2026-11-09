@@ -388,6 +388,10 @@ loopa-sched: all dos-tests check-deps
 loopa-mem: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE build/ow/dos/I2FTSR.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py mem -j $(JOBS)
 # The stub in a page of upper memory (docs/upper-memory.md U1, U2; in loopa-mem too), and U0's probe.
+# The DOS server's 32 KB transfer buffer at the top of conventional memory: a TSR started during an SFTP session
+# goes below it (no hole when it goes), and DOS's allocation strategy is its own again.
+loopa-xfer: all dos-tests check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py xfer -j $(JOBS)
 loopa-mem-page: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py mem-page -j $(JOBS)
 # B1: GLOS among UMBs from the chipset's shadow RAM (docs/upper-memory.md); needs MGA-Glide's umbpci boot.

@@ -8,7 +8,12 @@
  * first call and out of it after the last. The buffer is a DOS memory block
  * (up to 32 KB) that the stub allocates on the first request, so it belongs
  * to GLOS.EXE and costs conventional memory only while someone (an SFTP
- * session) holds the server; it is freed when the last one lets go.
+ * session) holds the server; it is freed when the last one lets go. It is
+ * allocated last fit, at the top of conventional memory (DOS's strategy 02h
+ * for the one call, then DOS's own again), so a TSR started while it is
+ * held loads below it and no hole is left when it goes. Not in an upper
+ * memory block: under GLOS those are UMBPCI's shadow RAM, which the 440BX's
+ * ISA DMA (the floppy's) can't reach (docs/upper-memory.md B1).
  *
  * The ssh thread posts requests and polls their state; the VM thread runs
  * them (trap context, interrupts off). Posting and letting go happen with
@@ -21,12 +26,14 @@
 
 #define XFER_PARAS 2048u                        /* 32 KB */
 
-enum { ST_NONE, ST_ALLOC, ST_CALLS, ST_FREE };
+enum { ST_NONE, ST_ALLOC, ST_CALLS, ST_FREE, ST_STRAT_GET, ST_STRAT_SET, ST_STRAT_BACK };
 
 static struct dos_req *head, *tail, *cur;
 static u32 step, users, xfer_paras;
 static u16 xfer_seg;
 static u8 state, alloc_failed;
+static u16 strategy;                            /* DOS's allocation strategy, put back after the buffer's allocation */
+static u8 strategy_saved;
 static void (*kick)(void);
 
 /* ---- the ssh thread's side */
@@ -113,6 +120,21 @@ int dos_vm_next(int ran, u32 regs_lin)
     struct dos_regs r;
     if (ran) {                                  /* the call made last time came back */
         get_regs(regs_lin, &r);
+        if (state == ST_STRAT_GET) {            /* DOS's strategy: kept, and last fit (low memory) for ours */
+            if (r.flags & 1)
+                goto alloc;                     /* (a DOS without strategies: first fit, as before) */
+            strategy = r.ax;
+            strategy_saved = 1;
+            r.ax = 0x5801;
+            r.bx = 0x0002;
+            r.cx = r.dx = r.si = r.di = 0;
+            r.ds = r.es = 0;
+            put_regs(regs_lin, &r);
+            state = ST_STRAT_SET;
+            return 1;
+        }
+        if (state == ST_STRAT_SET)
+            goto alloc;
         if (state == ST_ALLOC) {
             if (!(r.flags & 1)) {
                 xfer_seg = r.ax;
@@ -123,6 +145,16 @@ int dos_vm_next(int ran, u32 regs_lin)
             } else {
                 alloc_failed = 1;
                 kprintf("GLOS-DOS error=no-low-memory\n");
+            }
+            if (strategy_saved) {               /* DOS's strategy back */
+                strategy_saved = 0;
+                r.ax = 0x5801;
+                r.bx = strategy;
+                r.cx = r.dx = r.si = r.di = 0;
+                r.ds = r.es = 0;
+                put_regs(regs_lin, &r);
+                state = ST_STRAT_BACK;
+                return 1;
             }
         } else if (state == ST_FREE) {
             xfer_seg = 0;
@@ -143,7 +175,12 @@ int dos_vm_next(int ran, u32 regs_lin)
     if (!cur && head) {                         /* the next request */
         if (!xfer_seg && !alloc_failed) {
             xfer_paras = XFER_PARAS;
-            goto alloc;
+            r.ax = 0x5800;                      /* DOS's strategy first (ST_STRAT_GET) */
+            r.bx = r.cx = r.dx = r.si = r.di = 0;
+            r.ds = r.es = 0;
+            put_regs(regs_lin, &r);
+            state = ST_STRAT_GET;
+            return 1;
         }
         cur = head;
         head = head->next;

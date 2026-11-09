@@ -6,7 +6,7 @@
  *                      its own block as large as it goes, and every other free block (AH=48h) too; then gives
  *                      them back from INT 1Ch, unhooked again, with no DOS call
  * Before going resident:
- *     HX-STUBTSR psp=SSSS kept=BYTES other=BYTES
+ *     HX-STUBTSR psp=SSSS kept=BYTES other=BYTES strat=N
  * other: the largest free block left anywhere else; once ALL's memory is back, HX-STUBTSR freed on COM1.
  * Open Watcom, real mode. */
 #include <conio.h>
@@ -100,7 +100,10 @@ int main(int argc, char **argv)
         old1c = _dos_getvect(0x1C);
         _dos_setvect(0x1C, tick);
     }
-    sprintf(line, "HX-STUBTSR psp=%04X kept=%lu other=%lu\r\n", psp, (unsigned long)keep * 16, other_free());
+    r.x.ax = 0x5800;                            /* DOS's allocation strategy (GLOS's DOS server sets and restores it) */
+    intdos(&r, &r);
+    sprintf(line, "HX-STUBTSR psp=%04X kept=%lu other=%lu strat=%u\r\n", psp, (unsigned long)keep * 16, other_free(),
+            r.x.cflag ? 0xFFFFu : r.x.ax);
     ser(line);
     fputs(line, stdout);
     fflush(stdout);

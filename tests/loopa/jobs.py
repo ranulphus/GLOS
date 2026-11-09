@@ -1639,6 +1639,70 @@ class Agent:
         return self.log()
 
 
+def mem_largest(text):
+    """MEM /C's largest executable program size in bytes, or -1."""
+    m = re.search(r"Largest executable program size\s+\d+K \(([\d,]+) bytes\)", text)
+    return int(m.group(1).replace(",", "")) if m else -1
+
+
+def xfer_case(profile, boot):
+    """The DOS server's transfer buffer at the top of conventional memory (kernel/dos/dos.c, 2026-11-09): an SFTP
+    session open (the server held, so its 32 KB buffer is a DOS block), STUBTSR started as a job goes resident
+    below the buffer, not above it, and DOS's allocation strategy is its own again (first fit); the session closed,
+    the buffer is freed at the next job and leaves no hole under the TSR."""
+    import time
+    tag = "%s-%s" % (profile, boot)
+    cfg = batfile("xfer-%s/GLOS.CFG" % tag, ["; jobs.py xfer", "[time]", "sntp = off"])
+    agent = Agent("xfer-" + tag, profile, "ne2kpci" if profile == "bf6" else "ne2k", [
+        "--boot-cfg", boot, "--file", cfg + "=/TEST/GLOS.CFG", "--file", "build/ow/dos/STUBTSR.EXE=/TEST/STUBTSR.EXE",
+        "--cmd", "SERSAY HX-START xfer", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks = {"up": False, "held": False, "tsr": False, "below": False, "strategy": False, "nohole": False}
+    info, sftp = "", None
+
+    def until(what, limit, start=0):
+        t0 = time.time()
+        while time.time() - t0 < limit and what not in agent.log()[start:]:
+            time.sleep(1)
+        return what in agent.log()[start:]
+    try:
+        checks["up"] = agent.listening()
+        if checks["up"]:
+            _, before, _ = agent.ssh("MEM /C")                 # (GLOS.CFG's buffer freed by then: the agent waits)
+            mark = len(agent.log())
+            sftp = subprocess.Popen(["sftp", "-P", str(agent.port)] + agent.base[3:] + ["-i", agent.key, "-b", "-",
+                                    "glos@127.0.0.1"], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+            sftp.stdin.write(b"ls /C/\n")
+            sftp.stdin.flush()
+            checks["held"] = until("GLOS-DOS xfer seg=", 120, mark)
+            _, out, _ = agent.ssh("C:\\TEST\\STUBTSR.EXE")
+            m = re.search(r"HX-STUBTSR psp=(\w+) kept=\d+ other=\d+ strat=(\d+)", out)
+            x = re.findall(r"GLOS-DOS xfer seg=(\w+)", agent.log()[mark:])
+            checks["tsr"] = bool(m)
+            if m and x:
+                info += " tsr=%s xfer=%s strat=%s" % (m.group(1).lower(), x[-1], m.group(2))
+                checks["below"] = int(m.group(1), 16) < int(x[-1], 16)
+                checks["strategy"] = m.group(2) == "0"
+            sftp.stdin.write(b"quit\n")
+            sftp.stdin.close()
+            sftp.wait(timeout=60)
+            sftp = None
+            _, after, _ = agent.ssh("MEM /C")                  # (a job: the stub frees the unheld buffer first)
+            b, a = mem_largest(before), mem_largest(after)
+            info += " largest=%d->%d" % (b, a)
+            checks["nohole"] = b > 0 and 0 <= b - a <= 1024     # (the TSR's 256 bytes and its block's header)
+            agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        info += " timeout"
+    finally:
+        if sftp:
+            sftp.kill()
+    text = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("xfer-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
 def reboot_case(profile, card):
     """glos reboot (M5 A5): refused while a job runs, then the machine resets, comes up and starts GLOS again
     (Loop A's boot runs the same RUN.BAT), which answers and leaves."""
@@ -6062,7 +6126,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
                                       "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache",
-                                      "umaprobe", "mem-page", "int2f", "umb", "joy"])
+                                      "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -6212,6 +6276,9 @@ def main():
     if a.suite == "mem":
         res = matrix(mem, combos, a.jobs) + matrix(int2f_exit, combos, a.jobs) + matrix(mempage, combos, a.jobs)
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "xfer":                       # (the DOS server's buffer at the top: bf6 raw, the 486 with HIMEMX)
+        cases = combos if (a.profile or a.boot) else [("bf6", "default"), ("486dx2", "himemx")]
+        return 0 if all(r[1] for r in matrix(xfer_case, cases, a.jobs)) else 1
     if a.suite == "mem-page":
         return 0 if all(r[1] for r in matrix(mempage, combos, a.jobs)) else 1
     if a.suite == "umb":                        # (the bf6: a 440BX, which UMBPCI knows; MGA-Glide's umbpci boot)
