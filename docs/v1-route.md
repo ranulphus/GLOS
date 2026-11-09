@@ -326,8 +326,9 @@ before that.
     For games timed by delay loops: already too fast on a Pentium 4.
   - **Memory** (the owner's request, 2026-11-09):
     - a limit for all of GLOS (`[memory]` in GLOS.CFG), for trying a period machine's size;
-    - a limit for one program, in its profile (what DPMI and XMS report to it and give it), for games that
-      misbehave with more memory than they expect.
+    - a limit for one program, in its profile, for games that misbehave with more memory than they expect.
+      A profile's `memory = KB` already caps a DPMI program's memory and what DPMI reports to it (M4e). v1
+      extends it to XMS, for real-mode programs.
 - **Decided (the owner's idea, 2026-11-09): networks over serial and parallel cables.**
   - **What it is:** in the spirit of INTERLNK/INTERSVR and Windows 98's Direct Cable Connection, a PC without a
     network card GLOS drives joins a network through a serial or parallel cable:
