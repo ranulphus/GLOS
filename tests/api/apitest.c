@@ -169,8 +169,8 @@ static void timers(void)
     check("timer-rate", got >= 15 && got <= 22, "events=%u count=%u", got, last);
     r = glos_get(h, GLOS_PROP_TIMER_COUNT, &v);
     check("prop-count", r == 0 && (unsigned)v >= last, "r=%d count=%d", r, v);
-    check("prop-ms", glos_set(h, GLOS_PROP_TIMER_MS, 20) == 0 && glos_get(h, GLOS_PROP_TIMER_MS, &v) == 0 && v == 20,
-          "ms=%d", v);
+    r = glos_set(h, GLOS_PROP_TIMER_MS, 20) || glos_get(h, GLOS_PROP_TIMER_MS, &v);
+    check("prop-ms", r == 0 && v == 20, "r=%d ms=%d", r, v);
     check("prop-ro", glos_set(h, GLOS_PROP_TIMER_COUNT, 5) == GLOS_E_PROPERTY, 0);
     check("prop-none", glos_get(h, GLOS_PROP(GLOS_HK_TIMER, 99), &v) == GLOS_E_PROPERTY, 0);
     r = glos_set_text(h, GLOS_PROP_TIMER_NAME, "ticker") || glos_get_text(h, GLOS_PROP_TIMER_NAME, name, sizeof name);

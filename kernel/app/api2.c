@@ -36,6 +36,7 @@
 
 struct timer2 {
     u32 handle;
+    u32 ms;                             /* the period as the app gave it (GET gives this back) */
     u32 period, next;                   /* ticks (1024 to the second): the period, and when it fires next */
     u32 count, missed;
     u8 repeat, pending, live;           /* pending: an event of its is queued, not yet taken */
@@ -237,7 +238,7 @@ struct propdef {
     int (*set)(void *obj, s32 v, const char *text, u32 len);
 };
 
-static int t_ms_get(void *o, s32 *v, char *x, u32 *l) { (void)x; (void)l; *v = (s32)ms_of(((struct timer2 *)o)->period); return 0; }
+static int t_ms_get(void *o, s32 *v, char *x, u32 *l) { (void)x; (void)l; *v = (s32)((struct timer2 *)o)->ms; return 0; }
 static int t_ms_set(void *o, s32 v, const char *x, u32 l)
 {
     struct timer2 *t = o;
@@ -246,6 +247,7 @@ static int t_ms_set(void *o, s32 v, const char *x, u32 l)
     if (v < 1)
         return GLOS_E_ARGUMENT;
     f = irq_save();
+    t->ms = (u32)v;
     t->period = ticks_of((u32)v);
     t->next = timer_ticks() + t->period;
     irq_restore(f);
@@ -534,6 +536,7 @@ static int timer_call(struct app *a, struct trapframe *tf)
         kfree(t);
         return fail(tf, GLOS_E_MEMORY);
     }
+    t->ms = q.ms;
     t->period = ticks_of(q.ms);
     t->repeat = q.repeat != 0;
     f = irq_save();
