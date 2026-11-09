@@ -89,6 +89,7 @@ static struct {                                 /* the system VM's own, while th
 } sys;
 
 struct app *app_cur(void) { return current->user == TU_APP ? current->arg : 0; }
+struct app *app_pending(void) { return pending; }
 
 static void wr16(u32 lin, u32 v)
 {
@@ -168,7 +169,7 @@ static void cwd_want(const struct cwd *w)
 
 static void app_main(void *arg);
 
-int app_init(struct trapframe *tf, u32 *id)
+int app_init(struct trapframe *tf, u32 major, u32 minor, u32 *id)
 {
     struct dpmi_ctx *c = dctx;
     struct app *a;
@@ -189,15 +190,22 @@ int app_init(struct trapframe *tf, u32 *id)
     if (napps >= MAX_APPS || !(a = kmalloc(sizeof *a)))
         return GLOS_INIT_MEMORY;
     memset(a, 0, sizeof *a);
+    if (major == 2 && api2_app_new(a) != 0) {   /* (its handles and events first: a thread can't be taken back) */
+        kfree(a);
+        return GLOS_INIT_MEMORY;
+    }
     a->id = next_id++;
     ksnprintf(a->tname, sizeof a->tname, "app%u", a->id);
     if (!(a->thread = thread_new(a->tname, PRIO_NORMAL, app_main, a, TU_APP))) {
+        if (a->v2)
+            api2_app_gone(a);
         kfree(a);
         return GLOS_INIT_MEMORY;
     }
     a->ctx = c;
     a->psp = psp;
-    a->api_minor = (u16)tf->ebx;
+    a->api_major = (u8)major;
+    a->api_minor = (u16)minor;
     for (i = 0; i < sizeof a->prog - 1 && session_prog()[i]; i++)
         a->prog[i] = session_prog()[i];
     pending = a;
@@ -276,6 +284,8 @@ static void app_thread_end(struct app *a)
     watch_app_gone(a);
     sock_app_gone(a);                           /* (its connections: what they had to send still goes) */
     desk_shell(a, 0);
+    if (a->v2)
+        api2_app_gone(a);                       /* (its handles and events, API 2.0) */
     current->user = TU_NONE;
     current->name = "app-gone";
     kfree(a);
@@ -402,11 +412,11 @@ static int irq_due(const struct app *a) { return current->vif && vpic_pending(&a
    then (0: slept them all). */
 u32 app_sleep(struct app *a, u32 ticks)
 {
-    u32 until = timer_ticks() + ticks, ev = a->evt, key = a->kb_kt;
+    u32 until = timer_ticks() + ticks, ev = a->wake, key = a->kb_kt;
     s32 left;
     if (!until)
         until = 1;
-    while ((left = (s32)(until - timer_ticks())) > 0 && !a->kill && !irq_due(a) && a->evt == ev && a->kb_kt == key)
+    while ((left = (s32)(until - timer_ticks())) > 0 && !a->kill && !irq_due(a) && a->wake == ev && a->kb_kt == key)
         thread_wait(&a->wq, until);
     return left > 0 ? (u32)left : 0;
 }
@@ -417,6 +427,10 @@ void app_event(struct app *a, const struct glos_event *e)
 {
     u32 f, n = ARRAY_SIZE(a->evq);
     struct glos_event *last;
+    if (a->api_major == 2) {                    /* (2.0's own queue: api2.c) */
+        api2_event_1x(a, e);
+        return;
+    }
     if (e->type == GLOS_EV_WHEEL && a->api_minor < 5)
         return;                                 /* (an app built before 1.5 knows no such event) */
     f = irq_save();
@@ -435,6 +449,7 @@ void app_event(struct app *a, const struct glos_event *e)
         appdev_mouse(a, e->x, e->y, (s32)e->size, (s32)e->time, e->buttons);    /* (the desktop's: dx, dy there) */
     a->evq[(a->evt - 1) % n].size = sizeof *e;
     a->evq[(a->evt - 1) % n].time = (u32)(((unsigned long long)timer_ticks() * 125) >> 7);
+    a->wake++;
     thread_wake(&a->wq);
     irq_restore(f);
 }
@@ -470,8 +485,11 @@ void app_tick(void)
     if (!apps || paused())
         return;
     for (a = apps; a; a = a->next)
-        if (a->ctx)
+        if (a->ctx) {
             appdev_tick(a);
+            if (a->v2)
+                api2_tick(a);
+        }
 }
 
 void app_irq0(void)
@@ -494,7 +512,7 @@ int app_force(struct trapframe *tf)
     int r;
     if (!session_app() || !dctx || dctx->app || dctx->no_app)
         return 0;
-    if ((r = app_init(tf, &id)) == GLOS_INIT_NESTED)
+    if ((r = app_init(tf, 1, (u16)tf->ebx, &id)) == GLOS_INIT_NESTED)
         return 0;                               /* not here: at a later return */
     if (r) {
         dctx->no_app = 1;

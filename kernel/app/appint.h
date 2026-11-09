@@ -29,7 +29,10 @@ struct app {
     struct trapframe start;                     /* where its thread begins: the return of its init call */
     void *job;                                  /* the agent's job it began as, or 0 */
     u16 psp;
-    u16 api_minor;                              /* the API's minor version it was built for (GLOS_FN_INIT's EBX) */
+    u16 api_minor;                              /* the API's minor version it was built for (INIT's) */
+    u8 api_major;                               /* 1 (glos/api.h) or 2 (glos/api2.h): the calls it may make */
+    u32 wake;                                   /* counts every event given it, of either API (app_sleep's) */
+    struct api2 *v2;                            /* API 2.0's: its handles, timers and events (api2.c) */
     u32 dta;
     struct cwd cwd;
     u32 ivt[256];                               /* the real-mode vectors it changed ... */
@@ -94,6 +97,13 @@ struct app {
         u8 len, lcr, ier, mcr, scr;
     } com;
 };
+
+/* api2.c: API 2.0 (include/glos/api2.h) beside 1.x (phase B, docs/v1/phase-b.md). */
+int api2_call(struct trapframe *tf);            /* a 2.0 call (EAX's major 2): glos_api's answer */
+int api2_app_new(struct app *a);                /* a 2.0 app's state, before its thread runs: 0, or -1 */
+void api2_app_gone(struct app *a);              /* its handles closed, its state freed (its thread, at its end) */
+void api2_tick(struct app *a);                  /* its timers, every kernel tick (interrupts off) */
+void api2_event_1x(struct app *a, const struct glos_event *e);  /* the desktop's events for a 2.0 app */
 
 /* dev.c: its keyboard and mouse as a DOS program reads them. */
 void appdev_key(struct app *a, u32 key, int down, u32 ch, u32 mods);

@@ -3896,6 +3896,30 @@ def apps_run(profile, boot):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def api_case(profile, boot):
+    """API 2.0's conformance (tests/api/apitest.c, grown each step of phase B): GLOS.EXE /RUN APITEST.EXE: the
+    calls any program may make before INIT, then, an app, every case of each area built so far. Every case
+    ok, the app's end with code 0, GLOS's with it, the vectors as they were."""
+    tag = "%s-%s" % (profile, boot)
+    args = ["--machine", profile, "--boot-cfg", boot, "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE"] + GLOS_FILES
+    for c in ["SERSAY HX-START api", "VECCHK save", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\APITEST.EXE",
+              "VECCHK check", "SERSAY HX-DONE 0"]:
+        args += ["--cmd", c]
+    st, serial = run("api-" + tag, args)
+    cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)", serial)
+    done = re.search(r"HX-APITEST done pass=(\d+) fail=(\d+)", serial)
+    bad_cases = [c for c, k in cases if k != "1"]
+    checks = {"status": st == "PASS", "done": bool(done) and done.group(2) == "0", "cases": len(cases) >= 40,
+              "app": bool(re.search(r"GLOS-APP start id=1 prog=APITEST.EXE", serial)),
+              "end": bool(re.search(r"GLOS-APP end id=1 prog=APITEST.EXE code=0 ", serial)),
+              "exit": "GLOS-EXIT code=0" in serial, "vectors": "HX-VECCHK ok" in serial,
+              "no-panic": "GLOS-PANIC" not in serial and "GLOS-CRASH" not in serial}
+    bad = [k for k, v in checks.items() if not v]
+    info = " cases=%d" % len(cases) + (" failed-cases=" + ",".join(bad_cases) if bad_cases else "")
+    return "  %-22s %s%s" % ("api-" + tag, "PASS" if not bad else "FAIL",
+                             info + ("" if not bad else " failed: " + " ".join(bad))), not bad
+
+
 def apps_case(profile, card):
     """GLOS apps (M6 step A): APPTEST becomes an app (its own thread) and runs for some seconds in its own
     directory, checking between sleeps that its directory, its directory search (its DTA), its file's bytes,
@@ -6126,7 +6150,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
                                       "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache",
-                                      "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer"])
+                                      "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer", "api"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -6279,6 +6303,9 @@ def main():
     if a.suite == "xfer":                       # (the DOS server's buffer at the top: bf6 raw, the 486 with HIMEMX)
         cases = combos if (a.profile or a.boot) else [("bf6", "default"), ("486dx2", "himemx")]
         return 0 if all(r[1] for r in matrix(xfer_case, cases, a.jobs)) else 1
+    if a.suite == "api":                        # (API 2.0: bf6 raw, the 486 with HIMEMX)
+        cases = combos if (a.profile or a.boot) else [("bf6", "default"), ("486dx2", "himemx")]
+        return 0 if all(r[1] for r in matrix(api_case, cases, a.jobs)) else 1
     if a.suite == "mem-page":
         return 0 if all(r[1] for r in matrix(mempage, combos, a.jobs)) else 1
     if a.suite == "umb":                        # (the bf6: a 440BX, which UMBPCI knows; MGA-Glide's umbpci boot)

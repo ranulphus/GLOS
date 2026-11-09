@@ -11,13 +11,15 @@ struct rmregs;
 
 /* The running thread's app, or 0 (the VM thread, a kernel thread). */
 struct app *app_cur(void);
+struct app *app_pending(void);          /* the app app_init made, until its program's call returns */
 
 /* api.c: the entry behind DPMI 0A00h "GLOS". 1: the program becomes an app
    (app_detach() once its far call has returned). */
 int glos_api(struct trapframe *tf);
 
 /* On the VM thread, from the program's trap. */
-int app_init(struct trapframe *tf, u32 *id);    /* the checks and the memory: 0, or a GLOS_INIT_ reason */
+int app_init(struct trapframe *tf, u32 major, u32 minor, u32 *id);      /* the checks and the memory: 0, or a
+                                           GLOS_INIT_ reason (the same numbers as 2.0's GLOS_WHY_) */
 void app_detach(struct trapframe *tf);  /* the frame goes to the app's thread; this one to the stub */
 int app_force(struct trapframe *tf);    /* glos run --app: at a return to the session's client; 1: it is an app now */
 

@@ -11,6 +11,7 @@
 #   make loopa-hostile  M2's exit: hostile programs killed with the hotkey
 #   make loopa-sched    the scheduler's self-test threads beside the VM (M3)
 #   make loopa-mem      conventional memory under GLOS against plain DOS (PRD P7)
+#   make loopa-api      API 2.0's conformance: APITEST's cases (tests/api; phase B, docs/v1/phase-b.md)
 #   make loopa-mem-page the resident stub in a page of upper memory (docs/upper-memory.md)
 #   make loopa-umaprobe what is in each Loop A machine's upper memory area (U0, read-only)
 #   make loopa-umb      GLOS among UMBs from the chipset (B1: MGA-Glide's umbpci boot)
@@ -106,7 +107,7 @@ HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:ke
               cache_test:kernel/drv/cstore.c umapage_test:kernel/mm/umapage.c \
               vpic_test:kernel/vm/vpic.c png_test:kernel/lib/png.c uhci_test:kernel/drv/uhcitd.c \
               hid_test:kernel/drv/hidparse.c xpad_test:kernel/drv/xpad.c \
-              usbkbd_test:kernel/drv/usbkbd.c
+              usbkbd_test:kernel/drv/usbkbd.c handle_test:kernel/app/handle.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
 host-test-run:
@@ -308,7 +309,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
+         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS)) build/kernel/sdk_cfg.o build/kernel/sdk_tz.o
 # GLOS.CFG's schema (sdk/config/cfg.c, include/glos/config.h; M9) and time zones (sdk/config/tz.c; M10): shared
 # with the loader and the Control Panel.
@@ -335,6 +336,9 @@ build/lwip/%.o: third_party/lwip/src/%.c $(wildcard kernel/net/port/*.h kernel/n
 	@mkdir -p $(dir $@)
 	$(Q)echo "  LWIP    $<"
 	$(Q)$(HOST_CC) $(filter-out -Werror -Wextra,$(KCFLAGS)) -c -o $@ $<
+# API 2.0's VERSION names the build (git describe): its object made again when that changes (build/build_id).
+build/kernel/app/api2.c.o: build/build_id
+build/kernel/app/api2.c.o: KCFLAGS += -DGLOS_BUILD='"$(BUILD_ID)"'
 build/kernel/%.o: kernel/% $(wildcard kernel/include/*.h include/glos/*.h)
 	@mkdir -p $(dir $@)
 	$(Q)echo "  KCC     $<"
@@ -392,6 +396,9 @@ loopa-mem: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE build/ow/dos/
 # goes below it (no hole when it goes), and DOS's allocation strategy is its own again.
 loopa-xfer: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py xfer -j $(JOBS)
+# API 2.0's conformance (phase B): APITEST as GLOS.EXE /RUN's app, every case of the areas built so far.
+loopa-api: all build/dj/APITEST.EXE check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py api -j $(JOBS)
 loopa-mem-page: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py mem-page -j $(JOBS)
 # B1: GLOS among UMBs from the chipset's shadow RAM (docs/upper-memory.md); needs MGA-Glide's umbpci boot.
@@ -622,6 +629,19 @@ build/sdk/libglos.a: sdk/libglos/glos.c sdk/libglos/socket.c include/glos/api.h 
 	    $(DJCC) -O2 -Wall -Werror -ffreestanding -Iinclude -Ikernel/include -c -o build/sdk/gfx_$$(basename $$f .c).o $$f || exit 1; \
 	  done
 	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/*.o
+# libglos 2.0 (sdk/libglos2, include/glos/glos2.h and api2.h): API 2.0 for DJGPP programs (phase B), beside libglos
+# 1.x until phase B's step 15; and APITEST, API 2.0's conformance suite (tests/api, make loopa-api).
+build/sdk/libglos2.a: sdk/libglos2/glos2.c include/glos/glos2.h include/glos/api2.h
+	@mkdir -p build/sdk/v2
+	$(Q)echo "  DJCC    $<"
+	$(Q)rm -f $@
+	$(Q)$(DJCC) -O2 -Wall -Wextra -Werror -Iinclude -c -o build/sdk/v2/glos2.o $<
+	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/v2/glos2.o
+build/dj/APITEST.EXE: tests/api/apitest.c build/sdk/libglos2.a tools/glosmark.py
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Wextra -Werror -Iinclude -o $@ $< build/sdk/libglos2.a
+	$(Q)python3 tools/glosmark.py $@
 # BearSSL 0.6 (third_party/bearssl, MIT; THIRD_PARTY.md; M10 step C): build/sdk/libbearssl.a for DJGPP. Its own
 # guesses at the platform are set aside: no SSE2, AES-NI or RDRAND (a 486 has none, and a Pentium no SSE2), no
 # /dev/urandom or Unix time (the TLS layer seeds it from GLOS_FN_RANDOM and gives it GLOS_FN_TIME's time).

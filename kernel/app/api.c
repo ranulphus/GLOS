@@ -267,6 +267,10 @@ int glos_api(struct trapframe *tf)
     int r;
 
     tf->eflags &= ~FL_CF;
+    if ((fn >> 16) == 2)                        /* API 2.0's (api2.c) */
+        return api2_call(tf);
+    if (a && a->api_major == 2)                 /* (a 2.0 app makes 2.0's calls only) */
+        return fail(tf, GLOS_E_VERSION);
     if (fn == GLOS_FN_VERSION) {
         tf->eax = GLOS_API_VERSION;
         tf->ebx = caps();
@@ -276,7 +280,7 @@ int glos_api(struct trapframe *tf)
     if (fn == GLOS_FN_INIT) {
         if ((tf->ebx >> 16) != GLOS_API_MAJOR)
             return fail(tf, GLOS_E_VERSION);
-        if ((r = app_init(tf, &id)) != 0) {
+        if ((r = app_init(tf, 1, (u16)tf->ebx, &id)) != 0) {
             kprintf("GLOS-APP refuse psp=%04x why=%s\n", dctx->psp, why[r]);
             tf->ebx = (u32)r;
             return fail(tf, GLOS_E_INIT);
