@@ -49,6 +49,7 @@ void joy_config(void) { snprintf(applied, sizeof applied, "joystick"); }
 void usb_late(void) { }
 void vkbc_typematic(u32 d, u32 r) { snprintf(applied, sizeof applied, "typematic %u %u", d, r); }
 void deskin_pointer_speed(int s) { snprintf(applied, sizeof applied, "speed %d", s); }
+void deskin_double_click(u32 ms) { (void)ms; }
 void clock_zone(const char *tz) { snprintf(applied, sizeof applied, "zone %s", tz); }
 void net_sntp_restart(void) { snprintf(applied, sizeof applied, "sntp again"); }
 void cache_apply(const char *k, const char *v) { snprintf(applied, sizeof applied, "cache %s=%s", k, v); }
