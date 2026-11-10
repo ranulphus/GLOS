@@ -1233,6 +1233,119 @@ direct = 1
   (`vm_claim_irq`) and given back to it when a session takes the screen (`vm_unclaim_irq`); apps reach it only
   through `GLOS_FN_AUDIO` streams (graphics.md §7.4).
 
+### 12.7 An app's own threads (v1, phase B step 4: design, for the owner's review; nothing built)
+
+API 2.0's THREAD (`docs/v1/api-2.md`, `docs/v1/phase-b.md` step 4): an app makes threads of its own, so that it
+can load, decode or search without stopping its window. This is the design. It is reviewed with the owner before
+any of it is built.
+
+**What a thread of an app's is**
+
+- **A kernel thread like the app's first** (`thread_new`, the normal class, `TU_APP`), in the same DPMI context:
+  the same address space and LDT (`thread.ctx`), so it sees all of the app's memory. `app_cur()` is the app for
+  every one of them.
+- **Its own:**
+  - a kernel stack (16 KB) and the frame a trap from its code leaves there;
+  - its registers and its stack in the app's memory, which the app gives (libglos allocates it with the C
+    library's `malloc`: the kernel makes no memory for it);
+  - the FPU's state (`fpu_fork` at its start: the making thread's as it is);
+  - a virtual interrupt flag (`thread.vif`: its own CLI and STI are its own business).
+- **It starts** at an entry the app gives, with one argument on its stack and the making thread's segment
+  registers, and ends by a call (EXIT), which libglos makes when the entry returns.
+- **The scheduler treats it as any thread of its class:** by the time it has run (§7). An app with three busy
+  threads gets three shares. A thread may be made in the bulk class (`PRIO_BULK`: it runs when no normal thread
+  wants to, with the bulk class's budget), for work that must not slow the desktop (question 4).
+- **At most 16 an app** (17 with its first), each costing 16 KB of kernel memory.
+
+**What stays the first thread's**
+
+The DPMI host keeps one of each of these a context, and each is used only where the context's program is
+interrupted or called back (§12.2, §14): the locked stack, the stack of entries made on it (`pe[]`), the
+exception depth, the real-mode stack. They aren't made per thread. So:
+
+- **The app's interrupts** (its virtual PIC: its timer's handler, its keyboard handler) are given only at the
+  first thread's returns to its code, as today.
+- **Real-mode callbacks, and the handlers DPMI calls** (Ctrl-C, critical errors), run on the first thread.
+- **The GPU** (DRAW's GPU calls, the card's registers and VRAM touched): the first thread's alone. Another
+  thread's call is refused (`GLOS_E_REFUSED`), and its touch of the card's memory is a fault like any other.
+
+**An exception in another thread ends the app** (question 1)
+
+- **A page of the app's memory touched for the first time** (lazy backing, `lin_fault`) is backed for whichever
+  thread touches it: that is no exception to the app.
+- **A real fault** (a null pointer, a divide by zero, an FPU error) in a thread other than the first isn't given
+  to the app's own handler (0203h): that handler would run on the context's one locked stack while the first
+  thread may be on it. The app is ended, with the crash report GLOS writes for any program (§19), which names
+  the thread.
+- **In the first thread** nothing changes: its exceptions go to the app's handlers as today (DJGPP's signals).
+
+**DOS and real mode: one call an app at a time**
+
+- **An app's DOS or BIOS call** (INT 21h, DPMI 0300h and the rest) is made for it by the VM thread, one a turn
+  (§12.5): the app has one slot for the call under way. With threads there is a lock an app around that slot (the
+  DOS lock): a second thread's call waits until the first's has come back. DOS is one at a time anyway.
+- **A thread waiting in DOS** (a key in a console window, a long read) keeps only that lock: the app's other
+  threads run on, and make every GLOS call that isn't DOS's.
+- **DJGPP's C library isn't safe for threads** (its transfer buffer, `malloc`, stdio, `errno`). libglos 2.0 wraps
+  it in one recursive lock (the owner's choice, phase A's review): the kernel's DOS lock makes the kernel safe;
+  libglos's makes the program's data safe.
+
+**GLOS's own calls from any thread**
+
+- **An app's calls run one at a time** (a lock an app, the API lock), except those that wait, which don't hold
+  it while they wait: EVENT, SLEEP, THREAD's WAIT, JOIN and LOCK, and later a JOB's READ and a connection's
+  waits. Every module behind the API was written for one thread an app; the lock keeps that true without an
+  audit of each (question 2).
+- **Any thread may wait on the app's event queue and post to it** (CORE's EVENT and POST): the queue is safe
+  with interrupts off already.
+- **The toolkit is used from one thread** (the window's): a toolkit rule, not the kernel's.
+
+**THREAD's calls**
+
+| Call | What it does |
+|---|---|
+| CREATE | A thread: its entry, its argument, its stack's top (the app's memory), its class (normal or background). A handle (`GLOS_HK_THREAD`) |
+| EXIT | The calling thread ends, with a code. (The first thread's EXIT ends the app, as its program's end does) |
+| JOIN | Wait for a thread to end (a timeout): its code. Closing its handle doesn't end it |
+| LOCK | A lock (`GLOS_HK_LOCK`): made; taken (a timeout) and given by properties' calls of its own (TAKE, GIVE). Recursive for its holder |
+| SIGNAL | A signal (`GLOS_HK_SIGNAL`): set, cleared, waited for; one that stays set until cleared, or wakes one waiter and clears |
+| WAIT | Wait for any of up to 8 handles (threads ended, signals set, timers fired; later jobs and connections), or a timeout: which one |
+
+**The end**
+
+- **A kill, or the first thread's end** (its program's exit, a crash): the app's flag is set, every other thread
+  of it is woken and leaves at its next return to its code or from its wait (within a tick), and the first
+  thread waits for them all to be gone before the context is freed (§12.5's end, unchanged after that).
+- **A session takes the machine:** every thread of every app waits, as apps' threads do today (`app_return`).
+
+**What is tested** (the plan's step 4)
+
+- **Host:** the scheduler with several threads a context (they are ordinary threads to it); locks and signals
+  (pure code); libglos's wrapping, by a check of the program's map file that every wrapped C library symbol goes
+  through the lock.
+- **Loop A:** THRTEST, a DJGPP program on libglos 2.0:
+  - threads that compute, allocate and do file I/O at once, with sums that must come out right;
+  - a lock contended, a signal passed round, JOIN and WAIT with timeouts;
+  - a thread waiting in DOS while another posts events the first thread takes;
+  - an exception in a second thread: the app ended, a crash report naming the thread;
+  - the app killed mid-run; ten runs after which the kernel has the memory it had;
+  - on bf6 and the 486, and beside a session.
+- **Unchanged:** `loopa-apps`, `hostile`, the gate's DPMI suites (no thread is made by them: the paths they take
+  are the first thread's, as before).
+
+**Questions, for the owner**
+
+1. **An exception in a thread other than the first:** end the app with a crash report (recommended: simple and
+   safe, and DJGPP's signal handlers aren't made for threads anyway), or give it to the app's handler on that
+   thread (a locked stack and an entry stack a thread: a larger change to the DPMI host, with more to go wrong)?
+2. **GLOS's calls from other threads:** all of them, one at a time an app (recommended: apps and the IDE's
+   agents can call anything from a worker), or only CORE's and THREAD's from other threads (smaller, but every
+   worker must hand its other calls to the first thread)?
+3. **Interrupt handlers and callbacks only on the first thread:** accepted? (A game with its own timer interrupt
+   and a worker thread keeps the handler on its first thread.)
+4. **A background class for workers** (they run only when no app's ordinary thread or the system VM wants the
+   CPU): in v1 (recommended: a thumbnail or search thread can't slow typing), or every thread equal?
+
 ## 13. INT 31h function table
 
 Statuses:
