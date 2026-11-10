@@ -27,6 +27,8 @@ int glos_get(glos_handle h, unsigned prop, int *value);
 int glos_set(glos_handle h, unsigned prop, int value);
 int glos_get_text(glos_handle h, unsigned prop, char *buf, unsigned room);     /* GLOS_E_ROOM: cut */
 int glos_set_text(glos_handle h, unsigned prop, const char *text);
+int glos_get_data(glos_handle h, unsigned prop, void *buf, unsigned room, unsigned *length);   /* GLOS_E_ROOM: cut */
+int glos_set_data(glos_handle h, unsigned prop, const void *data, unsigned length);
 
 /* The next event (areas: a bit an area, 0 all), waiting at most ms (0 a look, GLOS_FOREVER): its size, 0 if
    none came, or minus a GLOS_E_ code (-GLOS_E_ROOM: room too small, the event stays). */
@@ -53,6 +55,10 @@ int glos_drag(glos_handle w, unsigned part);            /* GLOS_DRAG_ */
 int glos_pixels(glos_handle w, struct glos_pixels *p);  /* where its pixels are now (after every GLOS_EV_SIZE) */
 int glos_present(glos_handle w, int x, int y, int cw, int ch);  /* drawn there (cw 0: everywhere): to the screen */
 int glos_screen(struct glos_screen *s);
+/* Pixels of the app's own (8, 16 or 32 bits in `format`; an 8-bit picture's 256 colours in palette, 0x00RRGGBB,
+   or NULL: GLOS's palette) into the window's client area at (x, y), and to the screen. */
+int glos_blit(glos_handle w, int x, int y, const void *pixels, int pw, int ph, unsigned pitch, const struct glos_format *format,
+              const unsigned *palette);
 /* A linear address GLOS gave (a window's pixels) as a pointer; NULL if the program can't have near pointers. It
    moves when the program's memory grows: asked for again after anything that may have allocated (or the program
    starts with _CRT0_FLAG_UNIX_SBRK, and it stays). */

@@ -3994,10 +3994,11 @@ def api_win_case(profile, vcard, card):
         text = agent.ssh("glos desk")[1].replace("\r", "")
         m = re.search(r"focus=(\d+) pointer=(-?\d+),(-?\d+)", text)
         d = {"focus": int(m.group(1)) if m else -1, "ptr": (int(m.group(2)), int(m.group(3))) if m else (0, 0), "win": None}
-        w = re.search(r'^window (\d+) (\w+)(?: \w+)? at (-?\d+),(-?\d+) (\d+)x(\d+) "APITEST W"$', text, re.M)
+        w = re.search(r'^window (\d+) (\w+)(?: (\w+))? at (-?\d+),(-?\d+) (\d+)x(\d+) "APITEST W"$', text, re.M)
         if w:
-            d["win"] = (int(w.group(3)), int(w.group(4)), int(w.group(5)), int(w.group(6)), w.group(2) == "shown")
+            d["win"] = (int(w.group(4)), int(w.group(5)), int(w.group(6)), int(w.group(7)), w.group(2) == "shown")
             d["id"] = int(w.group(1))
+            d["hung"] = w.group(3) == "hung"
         return d
 
     def until(test, limit=30):
@@ -4040,13 +4041,18 @@ def api_win_case(profile, vcard, card):
         checks["min"] = until(at(20, 40, 220, 120, False))
         click(62 + 10, 470)                             # its button on the task bar
         checks["unmin"] = until(lambda d: d["win"] == (20, 40, 220, 120, True) and d["focus"] == d.get("id"))
+        agent.ssh("glos key 0x23")                      # h: the app takes no event for 8 seconds ...
+        agent.ssh("glos key 0x1E")                      # ... while one waits for it: "not answering", then answering
+        checks["hung"] = until(lambda d: d.get("hung"), 20)
+        checks["answering"] = until(lambda d: d["win"] is not None and not d.get("hung"), 30)
         click(20 + 220 + B - 9, 40 + B + 9)             # its close box
         o, e = p.communicate(timeout=120)
         out = o.decode("latin-1").replace("\r", "").split("\n")
         want = ["EV focus 1", "EV key 01E ch=97 down=1 mods=0", "EV key 01E ch=0 down=0 mods=0",
                 "EV mouse 50,30 buttons=1 button=1 down=1", "EV mouse 50,30 buttons=0 button=1 down=0", "EV size 220x120",
                 "EV size 638x439", "EV state 3", "EV size 220x120", "EV state 1", "EV state 2", "EV focus 0", "EV state 1",
-                "EV focus 1", "EV close", "WIN-OK closed"]
+                "EV focus 1", "EV key 023 ch=104 down=1 mods=0", "EV woke", "EV key 01E ch=97 down=1 mods=0", "EV close",
+                "WIN-OK closed"]
         k = 0
         for line in out:                        # each wanted line, in this order (others may lie between)
             if k < len(want) and line == want[k]:

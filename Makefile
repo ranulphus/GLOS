@@ -289,6 +289,7 @@ dos-tests: $(DOS_TESTS)
 # neither. `make fonts` makes them again from FONT_DIR's files.
 WM_SRCS := kernel/wm/wm.c kernel/wm/demo.c
 GFX_SRCS := kernel/gfx/gfx.c kernel/gfx/pal.c kernel/gfx/font.c kernel/gfx/region.c kernel/gfx/testcard.c \
+            kernel/gfx/convert.c \
             kernel/gfx/fonts/ui.c kernel/gfx/fonts/bold.c kernel/gfx/fonts/mono.c
 
 # ---- GLOSK.BIN: the kernel (host gcc -m32, linked at C0100000h) -------------

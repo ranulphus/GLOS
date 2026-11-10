@@ -112,6 +112,12 @@ void gfx_image(struct gfx_surface *s, int x, int y, const unsigned *rgb, int w, 
 
 /* ---- pal.c: the palette of every 8-bit surface */
 extern const unsigned char gfx_palette[256][3];         /* red, green, blue */
+/* convert.c (v1, phase B): n pixels of a row from format sf into df's (8, 16 or 32 bits each: gfx_fmt_ok). An 8-bit
+   source's indices go through lut (256 pixels in df's format), or with lut NULL are GLOS's palette's. To 8 bits,
+   16- and 32-bit pixels are dithered: x, y is where the row's first pixel lies. */
+int gfx_fmt_ok(const struct gfx_fmt *f);
+void gfx_convert(const struct gfx_fmt *df, unsigned char *dst, const struct gfx_fmt *sf, const unsigned char *src, int n,
+                 const unsigned *lut, int x, int y);
 unsigned char gfx_pal_nearest(unsigned rgb);
 unsigned char gfx_pal_dither(unsigned rgb, int x, int y);       /* the cube's colour for this pixel of a dithered picture */
 

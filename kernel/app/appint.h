@@ -32,6 +32,8 @@ struct app {
     u16 api_minor;                              /* the API's minor version it was built for (INIT's) */
     u8 api_major;                               /* 1 (glos/api.h) or 2 (glos/api2.h): the calls it may make */
     u32 wake;                                   /* counts every event given it, of either API (app_sleep's) */
+    u32 ev_since;                               /* the tick its queue last got its first event, or it last took one */
+    u8 ev_taken;                                /* it has taken an event at least once (it reads its queue) */
     struct api2 *v2;                            /* API 2.0's: its handles, timers and events (api2.c) */
     u32 dta;
     struct cwd cwd;
@@ -104,6 +106,7 @@ int api2_app_new(struct app *a);                /* a 2.0 app's state, before its
 void api2_app_gone(struct app *a);              /* its handles closed, its state freed (its thread, at its end) */
 void api2_tick(struct app *a);                  /* its timers, every kernel tick (interrupts off) */
 void api2_event_1x(struct app *a, const struct glos_event *e);  /* the desktop's events for a 2.0 app */
+int api2_pending(const struct app *a);          /* events wait in its 2.0 queue */
 
 /* dev.c: its keyboard and mouse as a DOS program reads them. */
 void appdev_key(struct app *a, u32 key, int down, u32 ch, u32 mods);

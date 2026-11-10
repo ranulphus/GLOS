@@ -52,6 +52,7 @@ struct api2 {
 #define P_NUM  1
 #define P_TEXT 2
 #define P_RO   4
+#define P_DATA 8                        /* bytes, up to 1039 (text: up to 255 and a NUL) */
 struct propdef {
     u32 prop;
     u32 flags;

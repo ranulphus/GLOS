@@ -467,6 +467,8 @@ void kcfg_apply(const char *section, const char *key, const char *v)
         vkbc_typematic(num(d), num(r));
     } else if (same(section, "input") && same(key, "pointer_speed")) {
         deskin_pointer_speed((int)num(v));
+    } else if (same(section, "input") && same(key, "double_click")) {
+        deskin_double_click(num(v));
     } else if (same(section, "time") && same(key, "zone")) {
         clock_zone(v);
     } else if (same(section, "time")) {         /* (sntp, server, interval: asked again, now) */
@@ -485,6 +487,8 @@ static void apply_read(void)
     char z[48];
     kcfg_get("input", "pointer_speed", v, sizeof v);
     kcfg_apply("input", "pointer_speed", v);
+    kcfg_get("input", "double_click", v, sizeof v);
+    kcfg_apply("input", "double_click", v);
     kcfg_apply("input", "repeat_rate", "");
     kcfg_get("time", "zone", z, sizeof z);      /* (M10: SNTP starts by itself once the file is read) */
     clock_zone(z);

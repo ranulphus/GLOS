@@ -24,6 +24,7 @@
 #include "kprintf.h"
 #include "mgadisp.h"
 #include "mm.h"
+#include "timer.h"
 
 /* Pixels an app has mapped. */
 struct pin {
@@ -490,6 +491,9 @@ static void info(const struct wm *m, const struct wm_window *w, struct desk_info
     o->cx = c.x, o->cy = c.y;
     o->min_w = w->min_w, o->min_h = w->min_h, o->max_w = w->max_w, o->max_h = w->max_h;
     o->cursor = w->cursor;
+    o->flash = w->flash;
+    o->progress = w->progress ? w->progress - 1 : -1;
+    memcpy(o->help, w->help, sizeof o->help);
     memcpy(o->title, w->title, sizeof o->title);
 }
 
@@ -540,13 +544,80 @@ int desk_win_cursor(struct app *a, u32 id, int shape)
 {
     struct wm *m;
     struct wm_window *w;
-    if (shape < 0 || shape >= WC_COUNT)
+    if (shape < 0 || shape > WC_CUSTOM)
         return GLOS_E_ARGUMENT;
     m = desk_lock();
-    if ((w = own(m, a, id)) != 0)
+    if ((w = own(m, a, id)) != 0) {
+        if (shape == WC_CUSTOM && !w->cursor_img.w) {   /* (no picture of its own given yet) */
+            desk_unlock();
+            return GLOS_E_ARGUMENT;
+        }
         w->cursor = (u8)shape;
+    }
     desk_unlock();                              /* (the composer's turn gives the pointer its shape) */
     return w ? 0 : GLOS_E_WINDOW;
+}
+
+int desk_win_set(struct app *a, u32 id, int what, s32 v, const void *data, u32 len)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *w = own(m, a, id);
+    int r = w ? 0 : GLOS_E_WINDOW;
+    if (!w) {
+        ;
+    } else if (what == DW_TOPMOST) {
+        wm_topmost(m, w, v != 0);
+    } else if (what == DW_TASKBAR) {
+        w->flags = v ? w->flags & ~(u32)WF_NOBAR : w->flags | WF_NOBAR;
+        wm_bar_again(m);
+    } else if (what == DW_FLASH) {
+        w->flash = v && w != m->focus;          /* (the one with the focus has the attention) */
+        wm_bar_again(m);
+    } else if (what == DW_PROGRESS) {
+        if (v < -1 || v > 100)
+            r = GLOS_E_ARGUMENT;
+        else {
+            w->progress = (u8)(v + 1);
+            wm_bar_again(m);
+        }
+    } else if (what == DW_ICON) {
+        if (len != 0 && len != sizeof w->icon)
+            r = GLOS_E_ARGUMENT;
+        else {
+            w->has_icon = len != 0;
+            if (len)
+                memcpy(w->icon, data, sizeof w->icon);
+            wm_frame_again(m, w);
+        }
+    } else if (what == DW_CURSOR_IMG) {
+        const struct wm_cursor *c = data;
+        if (len != sizeof *c || !c->w || !c->h || c->w > 32 || c->h > 32 || c->hx >= c->w || c->hy >= c->h)
+            r = GLOS_E_ARGUMENT;
+        else {
+            w->cursor_img = *c;
+            w->cursor = WC_CUSTOM;
+        }
+    } else if (what == DW_HELP) {
+        if (len >= sizeof w->help)
+            r = GLOS_E_ARGUMENT;
+        else {
+            memcpy(w->help, data, len);
+            w->help[len] = 0;
+        }
+    }
+    desk_unlock();
+    return r;
+}
+
+int desk_win_icon(struct app *a, u32 id, u32 *out)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *w = own(m, a, id);
+    int r = !w ? -1 : w->has_icon;
+    if (r > 0)
+        memcpy(out, w->icon, sizeof w->icon);
+    desk_unlock();
+    return r;
 }
 
 int desk_win_focus_id(u32 id)
@@ -619,4 +690,76 @@ void desk_app_gone(struct app *a)
     }
     desk_refocus(m);
     desk_unlock();
+}
+
+/* Each turn of the desktop's thread: the windows of an app that isn't taking its events say so (their title bars,
+   the pointer over them), and no longer when it does again. Not while apps are held (a session has the machine),
+   nor for 5 seconds after. */
+void deskapp_hung(struct wm *m)
+{
+    static u32 held_at;
+    struct wm_window *w;
+    u32 now = timer_ticks();
+    int quiet = apps_paused();
+    if (quiet)
+        held_at = now ? now : 1;
+    else if (held_at && now - held_at < 5 * 1024u)
+        quiet = 1;
+    for (w = m->bottom; w; w = w->above) {
+        int hung = w->owner && !quiet && app_stalled(w->owner);
+        if (hung != ((w->flags & WF_HUNG) != 0)) {
+            w->flags ^= WF_HUNG;
+            wm_frame_again(m, w);
+        }
+    }
+}
+
+/* API 2.0's DRAW BLIT: the app's pixels, in a format of its own, into the window's (the screen's format) and to
+   the screen. On the app's thread: its memory is read a row at a time. */
+int desk_win_blit(struct app *a, u32 id, const struct desk_blit *b)
+{
+    static u8 row[4096 * 4];                    /* (the manager's lock is held: one at a time) */
+    static u32 pal[256], lut[256];
+    struct wm *m;
+    struct wm_window *w;
+    struct gfx_rect part;
+    s32 x0 = b->x, y0 = b->y, sx = 0, sy = 0, cw = b->w, ch = b->h, y;
+    u32 sb = b->fmt.bpp / 8u, i;
+    int r = 0;
+    if (!gfx_fmt_ok(&b->fmt) || b->w < 1 || b->h < 1 || b->w > 4096 || b->h > 4096 || b->pitch < (u32)b->w * sb)
+        return GLOS_E_ARGUMENT;
+    m = desk_lock();
+    if (!(w = own(m, a, id))) {
+        desk_unlock();
+        return GLOS_E_WINDOW;
+    }
+    if (x0 < 0) sx = -x0, cw += x0, x0 = 0;     /* what of it lies in the client area */
+    if (y0 < 0) sy = -y0, ch += y0, y0 = 0;
+    if (x0 + cw > w->store.w) cw = w->store.w - x0;
+    if (y0 + ch > w->store.h) ch = w->store.h - y0;
+    if (cw > 0 && ch > 0) {
+        const u32 *table = 0;
+        if (b->fmt.bpp == 8 && b->palette) {    /* its own colours: each one's pixel on this screen */
+            if (user_rd(b->ds, b->palette, pal, sizeof pal) != 0)
+                r = GLOS_E_ARGUMENT;
+            for (i = 0; i < 256 && !r; i++)
+                lut[i] = m->fmt.bpp == 8 ? gfx_pal_nearest(pal[i] & 0xFFFFFF) : gfx_px(&m->fmt, pal[i] & 0xFFFFFF);
+            table = lut;
+        }
+        if (w->store.dev)
+            w->store.dev->sync(&w->store);      /* (an engine's work on these pixels done first) */
+        for (y = 0; y < ch && !r; y++) {
+            if (user_rd(b->ds, b->src + (u32)(sy + y) * b->pitch + (u32)sx * sb, row, (u32)cw * sb) != 0) {
+                r = GLOS_E_ARGUMENT;
+                break;
+            }
+            gfx_convert(&m->fmt, w->store.pix + (u32)(y0 + y) * w->store.pitch + (u32)x0 * (m->fmt.bpp / 8u), &b->fmt, row,
+                        cw, table, x0, y0 + y);
+        }
+        part.x = x0, part.y = y0, part.w = cw, part.h = y;
+        if (y > 0)
+            wm_damage(m, w, &part);
+    }
+    desk_unlock();
+    return r;
 }

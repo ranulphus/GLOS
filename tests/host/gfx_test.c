@@ -507,8 +507,53 @@ static void card(const struct gfx_fmt *f, const char *name, s32 w, s32 h)
     free(pix), free(rgb), free(out);
 }
 
+/* gfx_convert: every format into every other, against the library's own gfx_px and gfx_rgb. */
+static void convert(void)
+{
+    static const struct gfx_fmt *fmts[] = { &gfx_fmt8, &gfx_fmt555, &gfx_fmt565, &gfx_fmt888 };
+    static const struct gfx_fmt bgr = { 32, 0, 8, 8, 8, 16, 8 }, bad24 = { 24, 16, 8, 8, 8, 0, 8 }, wide = { 16, 11, 6, 5, 6, 0, 5 };
+    u8 src[64 * 4], dst[64 * 4 + 4], want[64 * 4];
+    unsigned lut[256];
+    u32 rgb[64];
+    int s, d, i;
+    for (i = 0; i < 64; i++)                    /* colours of the palette's cube: exact in every format, undithered */
+        rgb[i] = (u32)(i % 6 * 0x33) << 16 | (u32)(i / 6 % 6 * 0x33) << 8 | (u32)(i / 36 % 6 * 0x33);
+    for (s = 0; s < 4; s++)
+        for (d = 0; d < 4; d++) {
+            int sb = fmts[s]->bpp / 8, db = fmts[d]->bpp / 8;
+            for (i = 0; i < 64; i++) {
+                u32 p = gfx_px(fmts[s], rgb[i]), q = gfx_px(fmts[d], gfx_rgb(fmts[s], p));
+                memcpy(src + i * sb, &p, (size_t)sb);
+                if (fmts[d]->bpp == 8 && fmts[s]->bpp != 8)
+                    q = gfx_pal_dither(gfx_rgb(fmts[s], p), 3 + i, 5);
+                memcpy(want + i * db, &q, (size_t)db);
+            }
+            memset(dst, 0xEE, sizeof dst);
+            gfx_convert(fmts[d], dst, fmts[s], src, 64, 0, 3, 5);
+            if (memcmp(dst, want, (size_t)(64 * db))) {
+                printf("FAIL gfx_convert %d -> %d bits\n", fmts[s]->bpp, fmts[d]->bpp);
+                fails++;
+            }
+            CHECK(dst[64 * db] == 0xEE);        /* (nothing past the row) */
+        }
+    for (i = 0; i < 256; i++)                   /* indices through a table of the app's own */
+        lut[i] = gfx_px(&gfx_fmt565, (u32)i << 16 | (u32)(255 - i) << 8 | 0x80);
+    for (i = 0; i < 64; i++)
+        src[i] = (u8)(i * 4);
+    gfx_convert(&gfx_fmt565, dst, &gfx_fmt8, src, 64, lut, 0, 0);
+    for (i = 0; i < 64; i++)
+        CHECK((unsigned)(dst[i * 2] | dst[i * 2 + 1] << 8) == lut[i * 4]);
+    {                                           /* red and blue the other way round: bytes swapped */
+        u32 p = 0x00112233, q = 0;
+        gfx_convert(&gfx_fmt888, (u8 *)&q, &bgr, (const u8 *)&p, 1, 0, 0, 0);
+        CHECK(q == 0x00332211);
+    }
+    CHECK(gfx_fmt_ok(&gfx_fmt8) && gfx_fmt_ok(&gfx_fmt565) && gfx_fmt_ok(&bgr) && !gfx_fmt_ok(&bad24) && !gfx_fmt_ok(&wide));
+}
+
 int main(void)
 {
+    convert();
     fuzz(&gfx_fmt8, "8", 0);
     fuzz(&gfx_fmt555, "15", 0);
     fuzz(&gfx_fmt565, "16", 0);

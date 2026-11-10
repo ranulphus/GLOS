@@ -383,6 +383,19 @@ static struct wm_window *bar_button(const struct wm *m, u32 k, s32 *width)
     return best;
 }
 
+/* A window's picture, 16 by 16, its pixels with alpha of 80h or more. */
+static void draw_icon(struct gfx_surface *s, s32 x, s32 y, const u32 *icon)
+{
+    s32 i, j, run;
+    for (j = 0; j < 16; j++)
+        for (i = 0; i < 16; i += run) {         /* (runs of one colour at a time) */
+            u32 c = icon[j * 16 + i];
+            for (run = 1; i + run < 16 && icon[j * 16 + i + run] == c; run++) ;
+            if (c >> 24 >= 0x80)
+                gfx_fill(s, x + i, y + j, run, 1, c & 0xFFFFFF);
+        }
+}
+
 static void bar_paint(struct wm *m)
 {
     const struct wm_look *l = &m->look;
@@ -405,11 +418,20 @@ static void bar_paint(struct wm *m)
         if (w == m->focus)
             gfx_fill(s, x, 3, bw - 2, s->h - 5, l->bar_on);
         else
-            gfx_frame(s, x, 3, bw - 2, s->h - 5, l->edge);
+            gfx_frame(s, x, 3, bw - 2, s->h - 5, w->flash && l->mark != GFX_NONE ? l->mark : l->edge);
+        if (w->flash && w != m->focus && l->mark != GFX_NONE)
+            ink = l->mark;                      /* it asks for attention: the mark's colour */
+        if (w->progress)                        /* how far its work is: along the button's bottom */
+            gfx_fill(s, x + 1, s->h - 4, (bw - 4) * (s32)(w->progress - 1) / 100, 2, w == m->focus ? l->bar_on_text : l->mark);
         clip.x += 4, clip.w -= 8;
         gfx_clip(s, &clip);
-        gfx_mono(s, x + 5, (BAR_H - 9) / 2 + 1, &ico_win[0][0], ICON_W, 9, 2, ink, GFX_NONE);
-        gfx_text(s, x + 5 + ICON_W + 4, ty, l->font, w->title, -1, ink);
+        if (w->has_icon) {
+            draw_icon(s, x + 3, (BAR_H - 16) / 2 + 1, w->icon);
+            gfx_text(s, x + 3 + 16 + 4, ty, l->font, w->title, -1, ink);
+        } else {
+            gfx_mono(s, x + 5, (BAR_H - 9) / 2 + 1, &ico_win[0][0], ICON_W, 9, 2, ink, GFX_NONE);
+            gfx_text(s, x + 5 + ICON_W + 4, ty, l->font, w->title, -1, ink);
+        }
     }
     gfx_clip(s, 0);
     tw = gfx_text_width(l->font, m->clock, -1);
@@ -563,6 +585,12 @@ void wm_destroy(struct wm *m, struct wm_window *w)
         m->focus = 0;
     if (m->bar == w)
         m->bar = 0;
+    {
+        struct wm_window *v;
+        for (v = m->bottom; v; v = v->above)
+            if (v->parent == w->id)
+                v->parent = 0;                  /* (its own now) */
+    }
     if (w->store.dev)
         w->store.dev->sync(&w->store);
     store_free(m, w);
@@ -574,6 +602,7 @@ void wm_destroy(struct wm *m, struct wm_window *w)
 
 void wm_show(struct wm *m, struct wm_window *w, int on)
 {
+    w->flags &= ~(u32)WF_WITH;                  /* (its owner's own word now) */
     if (w->flags & WF_MIN) {                    /* (minimised: shown again as it was, or hidden for good) */
         w->flags &= ~(u32)WF_MIN;
         if (!on) {
@@ -637,15 +666,28 @@ int wm_state(struct wm *m, struct wm_window *w, int state)
     u32 was = w->flags, place;
     struct gfx_rect f;
     if (state == WS_MIN) {
+        struct wm_window *v;
         if (!shown(w))
             return 0;                           /* (minimised already, or hidden: nothing to take away) */
+        for (v = m->bottom; v; v = v->above)    /* what belongs to it goes with it */
+            if (v->parent == w->id && v != w && shown(v)) {
+                wm_show(m, v, 0);
+                v->flags |= WF_WITH;
+            }
         wm_show(m, w, 0);
         w->flags |= WF_MIN;
         bar_stale(m);
         return 0;
     }
-    if (w->flags & WF_MIN)                      /* any other state brings it back */
+    if (w->flags & WF_MIN) {                    /* any other state brings it back, and what went with it */
+        struct wm_window *v;
         wm_show(m, w, 1);
+        for (v = m->bottom; v; v = v->above)
+            if (v->parent == w->id && (v->flags & WF_WITH)) {
+                v->flags &= ~(u32)WF_WITH;
+                wm_show(m, v, 1);
+            }
+    }
     if (state == WS_UNMIN)
         return 0;
     place = state == WS_MAX ? WF_MAX : state == WS_FULL ? WF_FULL : state == WS_SNAP_L ? WF_SNAP_L
@@ -704,7 +746,7 @@ int wm_resize(struct wm *m, struct wm_window *w, s32 cw, s32 ch)
     return 0;
 }
 
-void wm_raise(struct wm *m, struct wm_window *w)
+static void raise_one(struct wm *m, struct wm_window *w)
 {
     struct wm_window *over = w->above;
     if (!over || (!(w->flags & WF_TOPMOST) && (over->flags & WF_TOPMOST)) || (w->flags & WF_DESKTOP))
@@ -715,11 +757,70 @@ void wm_raise(struct wm *m, struct wm_window *w)
         damage(m, &w->frame);
 }
 
+/* w, then the windows that belong to it, in the order they were in: each in front of its parent. */
+static void raise_tree(struct wm *m, struct wm_window *w, int depth)
+{
+    struct wm_window *v, *kids[16];
+    u32 n = 0, i;
+    raise_one(m, w);
+    for (v = m->bottom; v && n < 16; v = v->above)
+        if (v->parent == w->id && v != w)
+            kids[n++] = v;
+    for (i = 0; i < n && depth < 4; i++)
+        raise_tree(m, kids[i], depth + 1);
+}
+
+void wm_raise(struct wm *m, struct wm_window *w)
+{
+    struct wm_window *root = w, *p;
+    int i;
+    for (i = 0; i < 4 && root->parent && (p = wm_find(m, root->parent)) != 0 && p != root; i++)
+        root = p;                               /* its family comes with it, the eldest first ... */
+    if (root != w)
+        raise_tree(m, root, 0);
+    raise_tree(m, w, 0);                        /* ... and it in front of its sisters */
+}
+
+struct wm_window *wm_modal_for(const struct wm *m, const struct wm_window *w)
+{
+    struct wm_window *v, *deeper;
+    for (v = m->top; v; v = v->below)
+        if (v->parent == w->id && v != w && shown(v) && (v->flags & WF_MODAL))
+            return (deeper = wm_modal_for(m, v)) != 0 ? deeper : v;
+    return 0;
+}
+
+void wm_topmost(struct wm *m, struct wm_window *w, int on)
+{
+    if (((w->flags & WF_TOPMOST) != 0) == (on != 0) || (w->flags & (WF_DESKTOP | WF_POPUP)) || w == m->bar)
+        return;
+    w->flags ^= WF_TOPMOST;
+    unlink(m, w);
+    link_top(m, w);
+    if (shown(w))
+        damage(m, &w->frame);
+}
+
+void wm_bar_again(struct wm *m) { bar_stale(m); }
+
+void wm_frame_again(struct wm *m, struct wm_window *w)
+{
+    if (shown(w))
+        damage(m, &w->frame);
+    bar_stale(m);
+}
+
 void wm_set_focus(struct wm *m, struct wm_window *w)
 {
-    struct wm_window *was = m->focus;
+    struct wm_window *was = m->focus, *modal;
+    if (w && (modal = wm_modal_for(m, w)) != 0)
+        w = modal;                              /* (a modal window of its own has it instead) */
     if (w && (!shown(w) || (w->flags & WF_NOFOCUS)))
         return;
+    if (w && w->flash) {
+        w->flash = 0;                           /* (it has the attention it asked for) */
+        bar_stale(m);
+    }
     if (w)
         wm_raise(m, w);
     if (was == w)
@@ -811,7 +912,7 @@ int wm_cursor_for(const struct wm_window *w, int part)
 {
     int d = part & 15;
     if (part == WH_CLIENT)
-        return w->cursor;
+        return w->flags & WF_HUNG ? WC_BUSY : w->cursor;
     if (!(part & WH_SIZE))
         return WC_ARROW;
     if (d == WD_N || d == WD_S)
@@ -837,9 +938,14 @@ struct wm_window *wm_next(const struct wm *m, const struct wm_window *w)
     return next ? next : first;
 }
 
+static const struct wm_cursor *cur_now(const struct wm *m)
+{
+    return m->cursor == WC_CUSTOM ? &m->custom : &cursors[m->cursor];
+}
+
 static void ptr_rect(const struct wm *m, struct gfx_rect *r)
 {
-    const struct wm_cursor *c = &cursors[m->cursor];
+    const struct wm_cursor *c = cur_now(m);
     r->x = m->px - c->hx, r->y = m->py - c->hy, r->w = c->w, r->h = c->h;
 }
 
@@ -859,16 +965,24 @@ void wm_pointer(struct wm *m, s32 x, s32 y, int on)
         damage(m, &r);
 }
 
-void wm_cursor(struct wm *m, int shape)
+void wm_cursor(struct wm *m, int shape, const struct wm_cursor *custom)
 {
     struct gfx_rect r;
-    if (shape < 0 || shape >= WC_COUNT)
+    u32 i;
+    if (shape < 0 || shape > WC_CUSTOM || (shape == WC_CUSTOM && !custom))
         shape = WC_ARROW;
-    if (shape == m->cursor)
-        return;
+    if (shape == m->cursor) {
+        if (shape != WC_CUSTOM)
+            return;
+        for (i = 0; i < sizeof *custom && ((const u8 *)custom)[i] == ((const u8 *)&m->custom)[i]; i++) ;
+        if (i == sizeof *custom)
+            return;                             /* (the same picture) */
+    }
     ptr_rect(m, &r);
     if (m->pointer && !m->hw_pointer)
         damage(m, &r);
+    if (shape == WC_CUSTOM)
+        m->custom = *custom;
     m->cursor = (u8)shape;
     m->cursor_gen++;
     ptr_rect(m, &r);
@@ -891,7 +1005,7 @@ void wm_hw_pointer(struct wm *m, int on)
    screen (AND 1, XOR 0): as draw_pointer() draws it, its top left corner the cursor's. */
 void wm_pointer_masks(const struct wm *m, u8 and_mask[512], u8 xor_mask[512], s32 *hx, s32 *hy)
 {
-    const struct wm_cursor *c = &cursors[m->cursor];
+    const struct wm_cursor *c = cur_now(m);
     s32 x, y;
     for (y = 0; y < 64 * 8; y++)
         and_mask[y] = 0xFF, xor_mask[y] = 0;
@@ -1024,9 +1138,16 @@ static void draw_window(const struct wm *m, struct gfx_surface *scr, const struc
             r = bar;
             r.x = x + b, r.w = left - r.x - 2;
             if (r.w > 0 && gfx_rect_cut(&r, &bar)) {
+                s32 tx = x + b + 6, ty = y + b + (l->title_h - l->bold->height) / 2 + 1;
+                const struct gfx_font *f = focus ? l->bold : l->font;
                 gfx_clip(scr, &r);
-                gfx_text(scr, x + b + 6, y + b + (l->title_h - l->bold->height) / 2 + 1, focus ? l->bold : l->font, w->title, -1,
-                         ink);
+                if (w->has_icon) {
+                    draw_icon(scr, x + b + 2, y + b + (l->title_h - 16) / 2, w->icon);
+                    tx = x + b + 2 + 16 + 4;
+                }
+                tx = gfx_text(scr, tx, ty, f, w->title, -1, w->flags & WF_HUNG ? l->text_off : ink);
+                if (w->flags & WF_HUNG)         /* its owner isn't answering */
+                    gfx_text(scr, tx, ty, f, " (not answering)", -1, l->text_off);
             }
             gfx_clip(scr, &keep);
         }
@@ -1045,7 +1166,7 @@ static void draw_pointer(const struct wm *m, struct gfx_surface *scr)
     if (!m->pointer || m->hw_pointer)
         return;
     {
-        const struct wm_cursor *c = &cursors[m->cursor];
+        const struct wm_cursor *c = cur_now(m);
         gfx_mono(scr, m->px - c->hx, m->py - c->hy, &c->fill[0][0], c->w, c->h, 4, 0xFFFFFF, GFX_NONE);
         gfx_mono(scr, m->px - c->hx, m->py - c->hy, &c->edge[0][0], c->w, c->h, 4, 0x000000, GFX_NONE);
     }

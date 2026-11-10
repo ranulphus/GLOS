@@ -26,6 +26,9 @@
 #define WF_SNAP_R  0x0800               /* ... or its right */
 #define WF_NOBAR   0x1000               /* no button on the task bar (a tool window) */
 #define WF_NOMIN   0x2000               /* no minimise button (a dialog) */
+#define WF_MODAL   0x4000               /* while it is shown, its parent takes no input and no focus */
+#define WF_WITH    0x8000               /* hidden because its parent was minimised: back with it */
+#define WF_HUNG    0x10000              /* its owner isn't taking its events (the kernel's side says) */
 #define WF_PLACED  (WF_MAX | WF_FULL | WF_SNAP_L | WF_SNAP_R)   /* its place is the manager's, not its own */
 
 /* A window's state (wm_state). */
@@ -43,7 +46,7 @@ enum { WH_NONE, WH_CLIENT, WH_TITLE, WH_CLOSE, WH_BORDER, WH_MIN, WH_MAX, WH_SIZ
 
 /* The pointer's shapes (wm_cursor). */
 enum { WC_ARROW, WC_BUSY, WC_TEXT, WC_HAND, WC_CROSS, WC_SIZE_NS, WC_SIZE_EW, WC_SIZE_NWSE, WC_SIZE_NESW, WC_MOVE,
-       WC_COUNT };
+       WC_COUNT, WC_CUSTOM = WC_COUNT };        /* WC_CUSTOM: a window's own picture (its cursor_img) */
 struct wm_cursor {
     u8 w, h, hx, hy;                    /* its size (32 by 32 at most) and its hot spot */
     u8 edge[32][4], fill[32][4];        /* a bit a pixel: black, and white; neither: the screen shows through */
@@ -59,7 +62,14 @@ struct wm_window {
     s32 min_w, min_h, max_w, max_h;     /* the client area's limits for the user (0: the manager's) */
     u8 cursor;                          /* WC_: the pointer's shape over its client area */
     u32 tag;                            /* its owner's own word for it (the API's kind and flags) */
-    u32 parent;                         /* the window it belongs to (a dialog's owner), by id; 0: none */
+    u32 parent;                         /* the window it belongs to (a dialog's owner), by id; 0: none. It stays
+                                           in front of its parent, and is minimised and brought back with it */
+    u8 flash;                           /* its task-bar button asks for attention until it has the focus */
+    u8 progress;                        /* 1 to 101: a bar along its task-bar button, 0 to 100 in a hundred; 0: none */
+    u8 has_icon;
+    u32 icon[16 * 16];                  /* its picture, 16 by 16: 0xAARRGGBB, drawn where AA is 80h or more */
+    struct wm_cursor cursor_img;        /* its own pointer (cursor == WC_CUSTOM) */
+    char help[32];                      /* its owner's page in Help */
     struct gfx_surface store;           /* the client area's pixels, in the screen's format */
     void *mem;                          /* ... and their memory, from wm_host.alloc */
     struct gfx_surface ext;             /* what it shows instead, if has_ext: pixels that aren't the manager's (an
@@ -103,6 +113,7 @@ struct wm {
     struct gfx_region dirty;            /* what of the screen is to be drawn again */
     s32 px, py;                         /* the pointer's hot spot */
     u8 cursor;                          /* WC_: its shape now */
+    struct wm_cursor custom;            /* ... WC_CUSTOM's picture */
     u32 cursor_gen;                     /* counts its changes of shape (the card's cursor is loaded again) */
     u8 pointer;                         /* shown */
     u8 hw_pointer;                      /* the card shows it (its hardware cursor): not drawn here */
@@ -145,7 +156,13 @@ int wm_state_of(const struct wm_window *w);     /* WS_MIN while minimised, else 
 void wm_work(const struct wm *m, struct gfx_rect *out);         /* the screen less the task bar */
 void wm_limits(const struct wm *m, const struct wm_window *w, s32 *min_w, s32 *min_h, s32 *max_w, s32 *max_h);
 int wm_can(const struct wm_window *w, int part);        /* it has that box or edge: WH_MIN, WH_MAX, WH_SIZE */
-void wm_cursor(struct wm *m, int shape);                /* the pointer's shape: WC_ */
+void wm_cursor(struct wm *m, int shape, const struct wm_cursor *custom);        /* the pointer's shape: WC_ (custom:
+                                                                                    WC_CUSTOM's picture) */
+struct wm_window *wm_modal_for(const struct wm *m, const struct wm_window *w);  /* the shown modal window that keeps
+                                                   w from input (its child, or a child's), or NULL */
+void wm_bar_again(struct wm *m);                /* a window's button changed (flash, progress, icon): drawn again */
+void wm_frame_again(struct wm *m, struct wm_window *w); /* its title bar changed (icon, WF_HUNG): drawn again */
+void wm_topmost(struct wm *m, struct wm_window *w, int on);     /* above the ordinary windows, or one of them again */
 int wm_cursor_for(const struct wm_window *w, int part); /* the shape for a part of a window (wm_hit's) */
 const struct wm_cursor *wm_cursor_shape(int shape);
 

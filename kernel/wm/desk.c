@@ -180,6 +180,7 @@ static void desk_thread(void *arg)
         irq_restore(f);
         clock_second();                         /* (summer time's changes, without a network: M10) */
         m = desk_lock();
+        deskapp_hung(m);
         deskin_turn(m);
         fb = display_fb();
         if (cursor_gen != m->cursor_gen)
@@ -264,7 +265,7 @@ u32 desk_stat(char *buf, u32 max)
         n += (u32)ksnprintf(buf + n, max - n, "window %u %s%s at %d,%d %dx%d \"%s\"\n", w->id,
                             w->flags & WF_SHOWN ? "shown" : "hidden", w == m->bar ? " bar" : w->flags & WF_POPUP ? " popup"
                             : w->flags & WF_DESKTOP ? " desktop"
-                            : !(w->flags & WF_FRAME) ? " bare" : w->owner ? " app" : "", w->frame.x,
+                            : !(w->flags & WF_FRAME) ? " bare" : w->flags & WF_HUNG ? " hung" : w->owner ? " app" : "", w->frame.x,
                             w->frame.y, w->store.w, w->store.h, w->title);
     desk_unlock();
     return n < max ? n : max;

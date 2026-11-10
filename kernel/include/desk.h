@@ -57,6 +57,8 @@ struct desk_info {
     s32 cx, cy;                         /* the client area's corner on the screen */
     s32 min_w, min_h, max_w, max_h;
     int cursor;
+    int flash, progress;                /* progress: 0 to 100, or -1 */
+    char help[32];
     char title[WM_TITLE_MAX];
 };
 int desk_win_new(struct app *a, const struct desk_new *n, u32 *id);
@@ -68,14 +70,26 @@ u32 desk_win_list(struct desk_info *out, u32 max);      /* every window but the 
 int desk_win_limit(struct app *a, u32 id, int which, s32 v);   /* 0 min_w, 1 min_h, 2 max_w, 3 max_h */
 int desk_win_cursor(struct app *a, u32 id, int shape);
 int desk_win_focus_id(u32 id);          /* any window, by its id */
+enum { DW_TOPMOST, DW_TASKBAR, DW_FLASH, DW_PROGRESS, DW_ICON, DW_CURSOR_IMG, DW_HELP };
+int desk_win_set(struct app *a, u32 id, int what, s32 v, const void *data, u32 len);
+int desk_win_icon(struct app *a, u32 id, u32 *out);     /* its picture (256 pixels): 1 if it has one, 0, or -1 */
 int desk_win_drag(struct app *a, u32 id, int part);     /* the user moves or sizes it from here on (a button is down) */
 void desk_work(s32 *x, s32 *y, s32 *w, s32 *h);         /* the screen less the task bar */
+struct desk_blit {
+    u16 ds;                             /* the app's data selector: where src and palette are */
+    u32 src, pitch;                     /* the source's top left pixel, and its rows' distance */
+    struct gfx_fmt fmt;                 /* its format */
+    s32 w, h, x, y;                     /* its size; where it goes in the client area */
+    u32 palette;                        /* an 8-bit source's 256 colours (0x00RRGGBB), or 0: GLOS's palette */
+};
+int desk_win_blit(struct app *a, u32 id, const struct desk_blit *b);    /* (API 2.0's DRAW BLIT) */
 #define DESK_E_REFUSED 19               /* (API 2.0's GLOS_E_REFUSED; its GLOS_E_HANDLE is 1.x's GLOS_E_WINDOW, 6) */
 #define DESK_EV_STATE 100               /* (to app_event, for API 2.0's apps alone) a window's state changed: key WS_ */
 int desk_demo(int on);                  /* glos desk demo|clear: wm/demo.c's windows; -1: no memory */
 u32 desk_stat(char *buf, u32 max);      /* glos desk: its windows, a line each */
 
 void deskin_pointer_speed(int speed);   /* [input] pointer_speed (M9) */
+void deskin_double_click(u32 ms);       /* [input] double_click: the title bar's (the toolkit has its own) */
 void deskin_snap(int on);               /* a window dragged to the screen's edge snaps there ([desktop] snap) */
 struct app;
 void desk_shell(struct app *a, int on);

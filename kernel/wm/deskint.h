@@ -12,6 +12,7 @@ void deskin_turn(struct wm *m);         /* what has come in since the last turn 
 void deskin_focus(struct wm *m);        /* the focus may have changed: its old owner and its new one are told */
 void deskin_gone(struct app *a);        /* an app has ended: nothing more for it */
 void deskin_init(void);
+void deskapp_hung(struct wm *m);        /* who isn't answering, each turn: their windows say so */
 int deskin_drag(struct wm *m, struct wm_window *w, int part);  /* the outline from now, for a window whose app asks
                                                                    (WH_TITLE, or WH_SIZE with WD_): -1 if no button is down */
 

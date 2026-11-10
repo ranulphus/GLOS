@@ -137,6 +137,34 @@ int glos_set_text(glos_handle h, unsigned prop, const char *text)
     return raw(GLOS_CORE_SET, &p, 0);
 }
 
+int glos_get_data(glos_handle h, unsigned prop, void *buf, unsigned room, unsigned *length)
+{
+    struct glos_prop p;
+    int r;
+    memset(&p, 0, sizeof p);
+    p.size = sizeof p;
+    p.handle = h;
+    p.prop = prop;
+    p.data = (unsigned)buf;
+    p.room = room;
+    r = raw(GLOS_CORE_GET, &p, 0);
+    if (length)
+        *length = p.length;
+    return r;
+}
+
+int glos_set_data(glos_handle h, unsigned prop, const void *data, unsigned length)
+{
+    struct glos_prop p;
+    memset(&p, 0, sizeof p);
+    p.size = sizeof p;
+    p.handle = h;
+    p.prop = prop;
+    p.data = (unsigned)data;
+    p.room = length;
+    return raw(GLOS_CORE_SET, &p, 0);
+}
+
 int glos_event(void *buf, unsigned room, unsigned ms, unsigned areas)
 {
     struct glos_wait w;
@@ -269,6 +297,20 @@ int glos_screen(struct glos_screen *s)
     memset(s, 0, sizeof *s);
     s->size = sizeof *s;
     return raw(GLOS_DRAW_SCREEN, s, 0);
+}
+
+int glos_blit(glos_handle w, int x, int y, const void *pixels, int pw, int ph, unsigned pitch, const struct glos_format *format,
+              const unsigned *palette)
+{
+    struct glos_blit q;
+    memset(&q, 0, sizeof q);
+    q.size = sizeof q;
+    q.handle = w;
+    q.pixels = (unsigned)pixels, q.pitch = pitch;
+    q.format = *format;
+    q.w = pw, q.h = ph, q.x = x, q.y = y;
+    q.palette = (unsigned)palette;
+    return raw(GLOS_DRAW_BLIT, &q, 0);
 }
 
 void *glos_ptr(unsigned linear)

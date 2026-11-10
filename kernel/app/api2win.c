@@ -9,6 +9,8 @@
  * with interrupts off where a window's handle is made or closed. */
 #include "api2int.h"
 #include "desk.h"
+#include "gpu.h"
+#include "mgadisp.h"
 #include "io.h"
 #include "kprintf.h"
 #include "wm.h"
@@ -131,6 +133,11 @@ static int create(struct app *a, struct trapframe *tf)
         if (q.kind == GLOS_WK_DIALOG || q.kind == GLOS_WK_TOOL)
             n.wf |= WF_NOBAR | WF_NOMIN;
     }
+    if (q.flags & GLOS_WF_MODAL) {              /* (a dialog with an owner) */
+        if (q.kind != GLOS_WK_DIALOG || !q.owner)
+            return a2_fail(tf, GLOS_E_ARGUMENT);
+        n.wf |= WF_MODAL;
+    }
     if (q.owner && !(n.parent = win_id(a, q.owner)))
         return not_window(a, tf, q.owner);
     if ((r = desk_win_new(a, &n, &id)) != 0)
@@ -207,6 +214,8 @@ static void describe(const struct desk_info *d, struct glos_win_info *o)
         o->kind = d->wf & WF_DESKTOP ? GLOS_WK_DESKTOP : d->wf & WF_POPUP ? GLOS_WK_POPUP : GLOS_WK_NORMAL;
         o->flags = (d->wf & WF_FIXED ? GLOS_WF_FIXED : 0u) | (d->wf & WF_FRAME ? 0u : GLOS_WF_BARE);
     }
+    if (d->wf & WF_HUNG)
+        o->flags |= GLOS_WF_HUNG;
     o->state = state_of(d->state);
     o->focus = (unsigned)d->focus;
     o->x = d->x, o->y = d->y, o->w = d->w, o->h = d->h;
@@ -314,14 +323,51 @@ static int w_num(struct app *a, void *o, s32 *v, int which)
         return GLOS_E_HANDLE;
     *v = which == 0 ? (s32)state_of(d.state) : which == 1 ? d.cx : which == 2 ? d.cy : which == 3 ? d.w : which == 4 ? d.h
        : which == 5 ? d.min_w : which == 6 ? d.min_h : which == 7 ? d.max_w : which == 8 ? d.max_h : which == 9 ? d.cursor
-       : (s32)d.id;
+       : which == 10 ? (s32)d.id : which == 11 ? (d.wf & WF_TOPMOST) != 0 : which == 12 ? !(d.wf & WF_NOBAR)
+       : which == 13 ? d.flash : d.progress;
     return 0;
 }
 #define W_GET(name, which) \
     static int name(struct app *a, void *o, s32 *v, char *x, u32 *l) { (void)x; (void)l; return w_num(a, o, v, which); }
 W_GET(w_state_get, 0) W_GET(w_x_get, 1) W_GET(w_y_get, 2) W_GET(w_w_get, 3) W_GET(w_h_get, 4)
 W_GET(w_minw_get, 5) W_GET(w_minh_get, 6) W_GET(w_maxw_get, 7) W_GET(w_maxh_get, 8) W_GET(w_cursor_get, 9)
-W_GET(w_id_get, 10)
+W_GET(w_id_get, 10) W_GET(w_top_get, 11) W_GET(w_bar_get, 12) W_GET(w_flash_get, 13) W_GET(w_prog_get, 14)
+#define W_SET(name, what) \
+    static int name(struct app *a, void *o, s32 v, const char *x, u32 l) \
+    { (void)x; (void)l; return desk_win_set(a, (u32)o, what, v, 0, 0); }
+W_SET(w_top_set, DW_TOPMOST) W_SET(w_bar_set, DW_TASKBAR) W_SET(w_flash_set, DW_FLASH) W_SET(w_prog_set, DW_PROGRESS)
+#define W_PUT(name, what) \
+    static int name(struct app *a, void *o, s32 v, const char *x, u32 l) \
+    { (void)v; return desk_win_set(a, (u32)o, what, 0, x, l); }
+W_PUT(w_icon_set, DW_ICON) W_PUT(w_pointer_set, DW_CURSOR_IMG) W_PUT(w_help_set, DW_HELP)
+
+static int w_icon_get(struct app *a, void *o, s32 *v, char *x, u32 *l)
+{
+    int r = desk_win_icon(a, (u32)o, (u32 *)(void *)x);
+    (void)v;
+    if (r < 0)
+        return GLOS_E_HANDLE;
+    *l = r ? 1024 : 0;
+    return 0;
+}
+
+static int w_pointer_get(struct app *a, void *o, s32 *v, char *x, u32 *l)
+{
+    (void)a; (void)o; (void)v; (void)x;
+    *l = 0;                                     /* (write only: nothing comes back) */
+    return 0;
+}
+
+static int w_help_get(struct app *a, void *o, s32 *v, char *x, u32 *l)
+{
+    struct desk_info d;
+    (void)v;
+    if (desk_win_info(a, (u32)o, &d) != 0)
+        return GLOS_E_HANDLE;
+    *l = (u32)strlen(d.help);
+    memcpy(x, d.help, *l);
+    return 0;
+}
 #define W_LIMIT(name, which) \
     static int name(struct app *a, void *o, s32 v, const char *x, u32 l) \
     { (void)x; (void)l; return desk_win_limit(a, (u32)o, which, v); }
@@ -346,6 +392,13 @@ const struct propdef api2_win_props[] = {
     { GLOS_PROP_WIN_MAX_H, P_NUM, w_maxh_get, w_maxh_set },
     { GLOS_PROP_WIN_CURSOR, P_NUM, w_cursor_get, w_cursor_set },
     { GLOS_PROP_WIN_ID, P_NUM | P_RO, w_id_get, 0 },
+    { GLOS_PROP_WIN_TOPMOST, P_NUM, w_top_get, w_top_set },
+    { GLOS_PROP_WIN_TASKBAR, P_NUM, w_bar_get, w_bar_set },
+    { GLOS_PROP_WIN_FLASH, P_NUM, w_flash_get, w_flash_set },
+    { GLOS_PROP_WIN_PROGRESS, P_NUM, w_prog_get, w_prog_set },
+    { GLOS_PROP_WIN_ICON, P_DATA, w_icon_get, w_icon_set },
+    { GLOS_PROP_WIN_POINTER, P_DATA, w_pointer_get, w_pointer_set },
+    { GLOS_PROP_WIN_HELP, P_TEXT, w_help_get, w_help_set },
 };
 const u32 api2_win_nprops = ARRAY_SIZE(api2_win_props);
 
@@ -406,12 +459,87 @@ int api2_screen(struct trapframe *tf)
     return a2_wr(tf, &q, sizeof q, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 }
 
+static int blit(struct app *a, struct trapframe *tf)
+{
+    struct glos_blit q;
+    struct desk_blit b;
+    u32 size, id;
+    int r;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.format.bpp > 32)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (!(id = win_id(a, q.handle)))
+        return not_window(a, tf, q.handle);
+    b.ds = (u16)tf->ds;
+    b.src = q.pixels, b.pitch = q.pitch;
+    b.fmt.bpp = (u8)q.format.bpp;
+    b.fmt.rpos = q.format.rpos, b.fmt.rsize = q.format.rsize, b.fmt.gpos = q.format.gpos, b.fmt.gsize = q.format.gsize;
+    b.fmt.bpos = q.format.bpos, b.fmt.bsize = q.format.bsize;
+    b.w = q.w, b.h = q.h, b.x = q.x, b.y = q.y;
+    b.palette = q.palette;
+    r = desk_win_blit(a, id, &b);
+    return r ? a2_fail(tf, (u32)r) : a2_ok(tf, 0);
+}
+
+/* The Matrox card for an app with a HAL of its own, as API 1.x had it (kernel/gfx/gpu.c). */
+static int gpu(struct app *a, struct trapframe *tf)
+{
+    struct glos_gpu g;
+    u32 size;
+    int r;
+    if (a2_rd(tf, &g, sizeof g, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if ((r = gpu_app_open(a, &g)) != 0)
+        return a2_fail(tf, (u32)r);
+    return a2_wr(tf, &g, sizeof g, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
+}
+
+static int vram(struct app *a, struct trapframe *tf)
+{
+    struct glos_vram q;
+    u32 size, off, bytes;
+    int r;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.op > 1)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (q.op == 1) {
+        if (mga_app_block(app_id(a), q.offset, 1, &off, &bytes) && off == q.offset)
+            desk_app_vram_gone(a, off, bytes);  /* (no window may show it after) */
+        return (r = gpu_vram_free(a, q.offset)) != 0 ? a2_fail(tf, (u32)r) : a2_ok(tf, 0);
+    }
+    if ((r = gpu_vram_alloc(a, q.least, q.most, q.align, &off, &bytes)) != 0)
+        return a2_fail(tf, (u32)r);
+    q.offset = off, q.bytes = bytes;
+    if (a2_wr(tf, &q, sizeof q, size) != 0) {
+        gpu_vram_free(a, off);
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    }
+    return a2_ok(tf, 0);
+}
+
+static int winvram(struct app *a, struct trapframe *tf)
+{
+    struct glos_winvram q;
+    u32 size, id;
+    int r;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (!(id = win_id(a, q.handle)))
+        return not_window(a, tf, q.handle);
+    return (r = desk_win_vram(a, id, q.offset, q.pitch)) != 0 ? a2_fail(tf, (u32)r) : a2_ok(tf, 0);
+}
+
 int api2_draw(struct app *a, struct trapframe *tf, u32 n)
 {
     switch (n) {
     case GLOS_DRAW_PIXELS & 0xFF: return pixels(a, tf);
     case GLOS_DRAW_PRESENT & 0xFF: return present(a, tf);
     case GLOS_DRAW_SCREEN & 0xFF: return api2_screen(tf);
+    case GLOS_DRAW_GPU & 0xFF: return gpu(a, tf);
+    case GLOS_DRAW_GPU_UNLOCK & 0xFF:
+        gpu_app_unlock(a);
+        return a2_ok(tf, 0);
+    case GLOS_DRAW_VRAM & 0xFF: return vram(a, tf);
+    case GLOS_DRAW_WINVRAM & 0xFF: return winvram(a, tf);
+    case GLOS_DRAW_BLIT & 0xFF: return blit(a, tf);
     }
     return a2_fail(tf, GLOS_E_FUNCTION);
 }

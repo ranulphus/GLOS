@@ -42,9 +42,21 @@ void wm_demo(struct wm *m)
                  (const char *[]){ "ID PROGRAM     STATE    KB", " 1 EDIT.EXE    running 184", " 2 PAINT.EXE   waiting 412",
                                    " 3 CALC.EXE    running  96", "   desk        thread", "   vm          thread" }[i], -1,
                  i ? 0xCCCCCC : 0xFFFFFF);
+    for (y = 0; y < 16; y++)                    /* a picture for b's title bar and button: a framed landscape */
+        for (x = 0; x < 16; x++) {
+            int edge = x == 1 || x == 14 || y == 2 || y == 13, in = x > 1 && x < 14 && y > 2 && y < 13;
+            b->icon[y * 16 + x] = edge && x >= 1 && x <= 14 && y >= 2 && y <= 13 ? 0xFFFFFFFFu
+                                : in ? (y > 4 + (x > 7 ? 14 - x : x) / 2 + 2 ? 0xFF339933u : 0xFF3399FFu) : 0;
+        }
+    b->has_icon = 1;
+    a->flash = 1;                               /* a's button asks for attention; c's shows work two thirds done */
+    c->progress = 1 + 66;
     wm_show(m, a, 1);
     wm_show(m, b, 1);
     wm_show(m, c, 1);
+    wm_set_focus(m, a);                         /* (the focus takes a's flash away: set again after) */
     wm_set_focus(m, b);
+    a->flash = 1;
+    wm_bar_again(m);
     wm_pointer(m, 300, 130, 1);
 }

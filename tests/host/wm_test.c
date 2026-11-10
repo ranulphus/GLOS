@@ -190,7 +190,7 @@ static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rou
             break;
         case 13:
             if (framed)
-                wm_cursor(mp, (int)(rnd() % WC_COUNT));
+                wm_cursor(mp, (int)(rnd() % WC_COUNT), 0);
             break;
         case 10:
             if (framed && (rnd() & 1)) {
@@ -344,6 +344,71 @@ static void places(void)
         wm_limits(&m, a, &lw, &lh, &hw, &hh);
         CHECK(lw == 120 && hh == 40);           /* (never below the least) */
     }
+    /* Families: a window in front of the one it belongs to, raised and minimised with it; a modal one keeps its
+       parent from the focus. */
+    {
+        struct wm_window *d = wm_create(&m, 30, 30, 60, 40, "D", WF_FRAME | WF_NOBAR | WF_NOMIN, 0), *v;
+        int da = 0, seen_a = 0;
+        d->parent = a->id;
+        wm_show(&m, d, 1);
+        wm_set_focus(&m, b);
+        wm_set_focus(&m, a);                    /* a comes to the front: d with it, in front of a */
+        for (v = m.bottom; v; v = v->above) {
+            if (v == a) seen_a = 1;
+            if (v == d) da = seen_a;
+        }
+        CHECK(da && m.focus == a && d->above == m.bar);
+        CHECK(wm_modal_for(&m, a) == 0);
+        d->flags |= WF_MODAL;
+        CHECK(wm_modal_for(&m, a) == d && wm_modal_for(&m, b) == 0);
+        wm_set_focus(&m, b);
+        wm_set_focus(&m, a);                    /* the focus asked for a: d has it */
+        CHECK(m.focus == d);
+        wm_raise(&m, d);                        /* (d's family: a under it, both over b) */
+        for (v = m.bottom, seen_a = da = 0; v; v = v->above) {
+            if (v == b) da = seen_a;            /* (b seen after a: wrong) */
+            if (v == a) seen_a = 1;
+        }
+        CHECK(!da);
+        CHECK(wm_state(&m, a, WS_MIN) == 0 && !(d->flags & WF_SHOWN) && (d->flags & WF_WITH) && !wm_modal_for(&m, a));
+        CHECK(wm_state(&m, a, WS_UNMIN) == 0 && (d->flags & WF_SHOWN) && !(d->flags & WF_WITH));
+        CHECK(wm_state(&m, a, WS_MIN) == 0);
+        wm_show(&m, d, 1);                      /* shown by its owner meanwhile: not hidden-with any more */
+        CHECK(wm_state(&m, a, WS_UNMIN) == 0 && (d->flags & WF_SHOWN));
+        wm_destroy(&m, d);
+        d = wm_create(&m, 30, 30, 60, 40, "D", WF_FRAME, 0);
+        d->parent = a->id;
+        wm_destroy(&m, a);                      /* the parent gone: its own */
+        CHECK(d->parent == 0);
+        a = d;
+        wm_show(&m, a, 1);
+    }
+    /* On top: above the ordinary ones, and back among them. */
+    wm_topmost(&m, c, 1);
+    wm_raise(&m, a);
+    CHECK(c->above == 0 || (c->above->flags & WF_TOPMOST));
+    {
+        struct wm_window *v;
+        int over = 0;
+        for (v = a->above; v; v = v->above)
+            over |= v == c;
+        CHECK(over);
+        wm_topmost(&m, c, 0);
+        wm_raise(&m, a);
+        for (v = a->above, over = 0; v; v = v->above)
+            over |= v == c;
+        CHECK(!over);
+    }
+    /* A button that asks for attention, until its window has the focus. */
+    wm_set_focus(&m, b);
+    a->flash = 1, a->progress = 51;
+    wm_bar_again(&m);
+    wm_set_focus(&m, a);
+    CHECK(!a->flash && a->progress == 51);
+    CHECK(wm_cursor_for(a, WH_CLIENT) == WC_ARROW);
+    a->flags |= WF_HUNG;
+    CHECK(wm_cursor_for(a, WH_CLIENT) == WC_BUSY);
+    a->flags &= ~(u32)WF_HUNG;
     t = wm_create(&m, 0, 0, 20, 20, "T", WF_TOPMOST, 0);
     wm_show(&m, t, 1);
     wm_raise(&m, a);
@@ -422,7 +487,7 @@ static void cursor_masks(const struct gfx_fmt *f, const char *name)
         const struct wm_cursor *c = wm_cursor_shape(shape);
         u32 gen = m.cursor_gen;
         wm_hw_pointer(&m, 0);
-        wm_cursor(&m, shape);
+        wm_cursor(&m, shape, 0);
         CHECK(shape == WC_ARROW || m.cursor_gen == gen + 1);
         CHECK(c->w > 0 && c->h > 0 && c->w <= 32 && c->h <= 32 && c->hx < c->w && c->hy < c->h);
         wm_pointer(&m, SW / 3 + shape, SH / 4, 1);
@@ -446,6 +511,22 @@ static void cursor_masks(const struct gfx_fmt *f, const char *name)
             printf("FAIL wm %s: cursor %d's masks are not the pointer drawn\n", name, shape);
             fails++;
         }
+    }
+    {                                           /* a window's own picture: drawn, and in the masks */
+        struct wm_cursor mine;
+        memset(&mine, 0, sizeof mine);
+        mine.w = 5, mine.h = 3, mine.hx = 2, mine.hy = 1;
+        mine.edge[0][0] = 0xF8, mine.edge[2][0] = 0xF8, mine.edge[1][0] = 0x88, mine.fill[1][0] = 0x70;
+        wm_hw_pointer(&m, 0);
+        wm_cursor(&m, WC_CUSTOM, &mine);
+        wm_damage_all(&m);
+        wm_compose(&m, &a);
+        CHECK(gfx_rgb(f, gfx_get(&a, m.px, m.py)) == gfx_rgb(f, gfx_px(f, 0xFFFFFF)));        /* its hot spot: white */
+        CHECK(gfx_rgb(f, gfx_get(&a, m.px - 2, m.py - 1)) == 0);                              /* its corner: black */
+        wm_pointer_masks(&m, and_mask, xor_mask, &hx, &hy);
+        CHECK(hx == 2 && hy == 1 && and_mask[0] == 0x07 && xor_mask[8] == 0x70);
+        wm_cursor(&m, WC_CUSTOM, 0);            /* (none given: the arrow) */
+        CHECK(m.cursor == WC_ARROW);
     }
     {                                           /* the made shapes: point-symmetric, mirrored, turned */
         const struct wm_cursor *ew = wm_cursor_shape(WC_SIZE_EW), *ns = wm_cursor_shape(WC_SIZE_NS);

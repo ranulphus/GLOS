@@ -447,6 +447,8 @@ void app_event(struct app *a, const struct glos_event *e)
         && last->window == e->window) {
         *last = *e;                             /* (a movement after a movement: the newer one) */
     } else if (a->evt - a->evh < n) {
+        if (a->evt == a->evh)
+            a->ev_since = timer_ticks();        /* (waiting from now: app_stalled) */
         a->evq[a->evt++ % n] = *e;
     } else {
         a->ndrop++;                             /* (told at its end: GLOS-APP drops) */
@@ -466,13 +468,24 @@ int app_event_get(struct app *a, struct glos_event *e)
 {
     u32 f = irq_save();
     int got = a->evt != a->evh;
-    if (got)
+    if (got) {
         *e = a->evq[a->evh++ % ARRAY_SIZE(a->evq)];
+        a->ev_taken = 1;
+        a->ev_since = timer_ticks();
+    }
     irq_restore(f);
     return got;
 }
 
 int app_event_waiting(const struct app *a) { return a->evt != a->evh; }
+
+/* "Not answering": an app that reads its events (it has taken one) has had some waiting for 5 seconds. One that
+   never reads them (it reads the keyboard another way) is never said to be. */
+int app_stalled(const struct app *a)
+{
+    int waiting = a->api_major == 2 ? api2_pending(a) : a->evt != a->evh;
+    return a->ev_taken && waiting && !a->kill && timer_ticks() - a->ev_since > 5 * 1024u;
+}
 u32 app_event_backlog(const struct app *a) { return a->evt - a->evh; }
 
 /* Its HLT: until an interrupt of its own. */

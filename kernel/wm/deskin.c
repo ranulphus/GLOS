@@ -86,8 +86,10 @@ static u32 drag_id;
 static s32 drag_x, drag_y;                      /* D_MOVE: the pointer from the outline's corner; D_SIZE: where it began */
 static struct gfx_rect drag_from;               /* the outline when it began */
 
-#define DOUBLE_TICKS 410                        /* two presses this close are a double click (400 ms) ... */
+static u32 double_ticks = 512;                  /* two presses this close are a double click ([input] double_click) ... */
 #define DOUBLE_PX    4                          /* ... and this near */
+
+void deskin_double_click(u32 ms) { double_ticks = ms >= 100 && ms <= 2000 ? ms + ms * 24 / 1000 : 512; }
 
 void deskin_snap(int on) { snap = on != 0; }
 
@@ -597,6 +599,11 @@ static void button(struct wm *m, u32 bit, int down)
     }
     if (!w)
         return;
+    if ((v = wm_modal_for(m, w)) != 0) {        /* a modal window of its own is up: that one, and nothing else */
+        wm_set_focus(m, v);
+        deskin_focus(m);
+        return;
+    }
     if (w == m->bar) {
         if ((v = wm_bar_hit(m, m->px, m->py)) != 0) {
             if (bit != 1) {
@@ -616,7 +623,7 @@ static void button(struct wm *m, u32 bit, int down)
     if (bit == 1 && part == WH_TITLE) {
         u32 now = timer_ticks();
         s32 dx = m->px - click_x, dy = m->py - click_y;
-        if (click_id == w->id && now - click_at < DOUBLE_TICKS && dx >= -DOUBLE_PX && dx <= DOUBLE_PX && dy >= -DOUBLE_PX
+        if (click_id == w->id && now - click_at < double_ticks && dx >= -DOUBLE_PX && dx <= DOUBLE_PX && dy >= -DOUBLE_PX
             && dy <= DOUBLE_PX) {
             click_id = 0;                       /* the second press of two: maximised, or back */
             toggle_max(m, w);
@@ -781,7 +788,7 @@ int deskin_drag(struct wm *m, struct wm_window *w, int part)
    own over its client area (and while a button pressed there is held), the arrow elsewhere. */
 static void pointer_shape(struct wm *m)
 {
-    struct wm_window *w;
+    struct wm_window *w = 0;
     int part, shape = WC_ARROW;
     if (drag == D_SIZE)
         shape = wm_cursor_for(0, WH_SIZE | drag_dir);
@@ -790,8 +797,8 @@ static void pointer_shape(struct wm *m)
     else if (grab_id && (w = wm_find(m, grab_id)) != 0)
         shape = w->cursor;
     else if ((w = wm_hit(m, m->px, m->py, &part)) != 0)
-        shape = wm_cursor_for(w, part);
-    wm_cursor(m, shape);
+        shape = wm_modal_for(m, w) ? WC_ARROW : wm_cursor_for(w, part);
+    wm_cursor(m, shape, shape == WC_CUSTOM && w ? &w->cursor_img : 0);
 }
 
 void deskin_init(void)

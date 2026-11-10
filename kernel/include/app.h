@@ -11,6 +11,7 @@ struct rmregs;
 
 /* The running thread's app, or 0 (the VM thread, a kernel thread). */
 struct app *app_cur(void);
+int app_stalled(const struct app *a);    /* events have waited 5 seconds for an app that reads its queue */
 struct app *app_pending(void);          /* the app app_init made, until its program's call returns */
 
 /* api.c: the entry behind DPMI 0A00h "GLOS". 1: the program becomes an app

@@ -281,6 +281,7 @@ struct glos_random {
 #define GLOS_WF_BARE     2      /* no title bar or border: the app draws its own (GLOS_WIN_DRAG) */
 #define GLOS_WF_ANYWHERE 4      /* GLOS chooses the place: x and y are not looked at */
 #define GLOS_WF_MODAL    8      /* a dialog's: its owner takes no input while it is up */
+#define GLOS_WF_HUNG     0x100  /* (ENUM tells) its app isn't taking its events: "not answering" */
 
 struct glos_win_create {
     unsigned size;
@@ -371,6 +372,17 @@ struct glos_win_drag {
 #define GLOS_PROP_WIN_MAX_H    GLOS_PROP(GLOS_HK_WINDOW, 9)
 #define GLOS_PROP_WIN_CURSOR   GLOS_PROP(GLOS_HK_WINDOW, 10) /* GLOS_CURSOR_: the pointer's shape over the client area */
 #define GLOS_PROP_WIN_ID       GLOS_PROP(GLOS_HK_WINDOW, 11) /* its number for everyone (read) */
+#define GLOS_PROP_WIN_TOPMOST  GLOS_PROP(GLOS_HK_WINDOW, 12) /* 1: in front of the ordinary windows, always */
+#define GLOS_PROP_WIN_TASKBAR  GLOS_PROP(GLOS_HK_WINDOW, 13) /* 1: it has a button on the task bar */
+#define GLOS_PROP_WIN_FLASH    GLOS_PROP(GLOS_HK_WINDOW, 14) /* 1: its button asks for attention, until it has the focus */
+#define GLOS_PROP_WIN_PROGRESS GLOS_PROP(GLOS_HK_WINDOW, 15) /* 0 to 100: a bar along its button; -1: none */
+#define GLOS_PROP_WIN_ICON     GLOS_PROP(GLOS_HK_WINDOW, 16) /* data: its picture for the title bar and the task bar,
+                                                                16 by 16 pixels of 4 bytes (blue, green, red, alpha:
+                                                                drawn where alpha is 80h or more), 1024 bytes; none:
+                                                                taken away */
+#define GLOS_PROP_WIN_POINTER  GLOS_PROP(GLOS_HK_WINDOW, 17) /* data: struct glos_cursor, a pointer of the app's own;
+                                                                CURSOR becomes GLOS_CURSOR_CUSTOM */
+#define GLOS_PROP_WIN_HELP     GLOS_PROP(GLOS_HK_WINDOW, 18) /* text, at most 31 bytes: its page in Help */
 
 /* The pointer's shapes. */
 #define GLOS_CURSOR_ARROW  0
@@ -383,6 +395,13 @@ struct glos_win_drag {
 #define GLOS_CURSOR_NWSE   7    /* the slants */
 #define GLOS_CURSOR_NESW   8
 #define GLOS_CURSOR_MOVE   9
+#define GLOS_CURSOR_CUSTOM 10   /* the window's own (GLOS_PROP_WIN_POINTER) */
+struct glos_cursor {
+    unsigned char w, h;         /* at most 32 by 32 */
+    unsigned char hot_x, hot_y; /* the pixel of it that points */
+    unsigned char black[32][4]; /* a bit a pixel, a row's first pixel its first byte's top bit: black ... */
+    unsigned char white[32][4]; /* ... and white; neither: the screen shows through */
+};
 
 /* A window's events (the window's handle in each). */
 #define GLOS_EV_FOCUS  GLOS_EV(GLOS_AREA_WIN, 1)        /* struct glos_ev_focus: it got the focus, or lost it */
@@ -408,6 +427,15 @@ struct glos_ev_state {
 #define GLOS_DRAW_PIXELS  GLOS_FN(GLOS_AREA_DRAW, 0)    /* struct glos_pixels: where a window's pixels are */
 #define GLOS_DRAW_PRESENT GLOS_FN(GLOS_AREA_DRAW, 1)    /* struct glos_present: the app drew there: to the screen */
 #define GLOS_DRAW_SCREEN  GLOS_FN(GLOS_AREA_DRAW, 2)    /* struct glos_screen: the desktop's screen; any program */
+#define GLOS_DRAW_GPU     GLOS_FN(GLOS_AREA_DRAW, 3)    /* struct glos_gpu: the Matrox card's drawing engine, for
+                                                           programs with a HAL of their own (DOS-GL) */
+#define GLOS_DRAW_GPU_LOCK   GLOS_FN(GLOS_AREA_DRAW, 4) /* (EBX 0) the engine the app's own (it waits for it) */
+#define GLOS_DRAW_GPU_UNLOCK GLOS_FN(GLOS_AREA_DRAW, 5) /* (EBX 0) ... and no longer */
+#define GLOS_DRAW_VRAM    GLOS_FN(GLOS_AREA_DRAW, 6)    /* struct glos_vram: a block of the card's memory */
+#define GLOS_DRAW_WINVRAM GLOS_FN(GLOS_AREA_DRAW, 7)    /* struct glos_winvram: a window shows pixels in such a block */
+#define GLOS_DRAW_BLIT    GLOS_FN(GLOS_AREA_DRAW, 8)    /* struct glos_blit: pixels in a format of the app's own into
+                                                           a window's (DOS-GL's software renderer; pictures) */
+/* (9: MODES, with the display's settings in step 5) */
 
 /* A pixel format: bits a pixel, and where each colour's bits are in one (at 8 bits: GLOS's palette, the 6x6x6
    cube and greys of glos/gfx.h). */
@@ -435,6 +463,71 @@ struct glos_screen {
     struct glos_format format;
     int work_x, work_y, work_w, work_h;         /* -> the screen less the task bar */
 };
+
+/* BLIT: a rectangle of pixels the app has, in any format of 8, 16 or 32 bits, into the window's client area at
+   (x, y), in the screen's format (16- and 32-bit pixels dithered on an 8-bit screen), and to the screen: no
+   PRESENT is needed. What falls outside the client area is left out. */
+struct glos_blit {
+    unsigned size;
+    glos_handle handle;
+    unsigned pixels;            /* the source's top left pixel: an offset in DS */
+    unsigned pitch;             /* bytes from a row of it to the next */
+    struct glos_format format;
+    int w, h;                   /* its size */
+    int x, y;                   /* where it goes in the client area */
+    unsigned palette;           /* an 8-bit source's colours: 256 of 0x00RRGGBB (an offset in DS); 0: its bytes are
+                                   GLOS's palette's */
+};
+
+/* The Matrox card for programs with a HAL of their own (DOS-GL's windowed path): as API 1.x had it. The engine is
+   one owner's at a time: the app's once it has the lock, until someone else needs the engine while the app is in
+   a GLOS or DOS call (never in the middle of its own drawing). Its registers are mapped into the app only while
+   it has the lock: a touch without it waits for the lock and takes it. Refused (GLOS_E_NO_GPU) without a Matrox
+   card whose engine draws the desktop (VERSION's GLOS_MACHINE_GPU). */
+#define GLOS_E_NO_GPU 8
+#ifndef GLOS_API_H              /* (during phase B, API 1.x's header has these two structures, the same) */
+struct glos_gpu {
+    unsigned size;
+    unsigned device, revision;  /* the chip: its PCI device ID and revision (0525h with revision 80h or above: G450) */
+    unsigned vram;              /* bytes of memory on the card */
+    unsigned regs;              /* the linear address of its registers (16 KB), mapped while the app has the lock */
+    unsigned base;              /* the linear address of the card's memory as the app sees it: its own blocks
+                                   (VRAM), each at its offset from here; nothing else */
+    unsigned share;             /* the linear address of the struct glos_gpu_share GLOS keeps for the app */
+    unsigned bpp;               /* the screen's bits a pixel */
+    unsigned fb_phys, regs_phys;        /* the card's apertures (physical; to describe the chip, not to map) */
+    unsigned option, subsys;    /* the chip's OPTION word and subsystem IDs */
+};
+/* GLOS writes it; the app reads it before each piece of work with the engine: it clears `quiet`, then if `held`
+   is 0 it calls GPU_LOCK, and if `lost` is not what it was the last time, someone else has had the engine since,
+   and whatever the app's HAL believes of the registers is to be forgotten. The lock never leaves the app between
+   that look and its drawing: only in a GLOS or DOS call, or while `quiet` is set. */
+struct glos_gpu_share {
+    unsigned size;
+    volatile unsigned held;     /* 1: the engine is the app's (its registers are mapped) */
+    volatile unsigned lost;     /* the times it was given the engine after someone else had it */
+    volatile unsigned want;     /* someone waits for the engine while the app has it */
+    volatile unsigned quiet;    /* (the app's) 1: it isn't using the engine now; its turn may end at any moment */
+};
+#endif
+struct glos_vram {
+    unsigned size;
+    unsigned op;                /* 0: a block; 1: the block at `offset` freed */
+    unsigned least, most;       /* bytes at least and at most (0: `least`) */
+    unsigned align;             /* a power of two, at least 4096 */
+    unsigned offset;            /* -> the block's offset in the card's memory, mapped at that offset from
+                                   glos_gpu's base (op 1: the block to free) */
+    unsigned bytes;             /* -> its size */
+};
+struct glos_winvram {
+    unsigned size;
+    glos_handle handle;
+    unsigned offset;            /* pixels in a block of the app's, in the screen's format and the window's size:
+                                   the window shows them from now on (a swap: the other buffer). GLOS_OWN_PIXELS:
+                                   its own pixels again */
+    unsigned pitch;             /* bytes from one of their rows to the next (a multiple of 64) */
+};
+#define GLOS_OWN_PIXELS 0xFFFFFFFFu
 
 /* ================================================================== INPUT (03h): keys, the mouse
  * (Phase B's step 3 adds the keyboard's state, raw keys, text, the mouse's capture, double clicks and pads.) */

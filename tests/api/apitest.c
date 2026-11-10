@@ -354,10 +354,127 @@ static void windows(void)
     r = glos_windows(0, list, 0, &count);
     check("win-enum-room", r == GLOS_E_ROOM && count == 1, "r=%d count=%u", r, count);
 
+    {                                           /* its other properties */
+        static unsigned icon[256], back[256];
+        struct glos_cursor cur;
+        unsigned len = 99, i;
+        check("win-topmost", prop(w, GLOS_PROP_WIN_TOPMOST) == 0 && glos_set(w, GLOS_PROP_WIN_TOPMOST, 1) == 0
+              && prop(w, GLOS_PROP_WIN_TOPMOST) == 1 && glos_set(w, GLOS_PROP_WIN_TOPMOST, 0) == 0
+              && prop(w, GLOS_PROP_WIN_TOPMOST) == 0, 0);
+        check("win-progress", prop(w, GLOS_PROP_WIN_PROGRESS) == -1 && glos_set(w, GLOS_PROP_WIN_PROGRESS, 50) == 0
+              && prop(w, GLOS_PROP_WIN_PROGRESS) == 50 && glos_set(w, GLOS_PROP_WIN_PROGRESS, 101) == GLOS_E_ARGUMENT
+              && glos_set(w, GLOS_PROP_WIN_PROGRESS, -1) == 0 && prop(w, GLOS_PROP_WIN_PROGRESS) == -1, 0);
+        check("win-taskbar", prop(w, GLOS_PROP_WIN_TASKBAR) == 1 && glos_set(w, GLOS_PROP_WIN_TASKBAR, 0) == 0
+              && prop(w, GLOS_PROP_WIN_TASKBAR) == 0 && glos_set(w, GLOS_PROP_WIN_TASKBAR, 1) == 0, 0);
+        check("win-flash-focus", glos_set(w, GLOS_PROP_WIN_FLASH, 1) == 0 && prop(w, GLOS_PROP_WIN_FLASH) == 0, 0);
+        for (i = 0; i < 256; i++)
+            icon[i] = 0xFF000000u | (i * 0x010203u);
+        r = glos_get_data(w, GLOS_PROP_WIN_ICON, back, sizeof back, &len);
+        check("win-icon-none", r == 0 && len == 0, "r=%d len=%u", r, len);
+        r = glos_set_data(w, GLOS_PROP_WIN_ICON, icon, sizeof icon);
+        n = glos_get_data(w, GLOS_PROP_WIN_ICON, back, sizeof back, &len);
+        check("win-icon", r == 0 && n == 0 && len == 1024 && !memcmp(icon, back, sizeof icon)
+              && glos_set_data(w, GLOS_PROP_WIN_ICON, icon, 100) == GLOS_E_ARGUMENT
+              && glos_get_data(w, GLOS_PROP_WIN_ICON, back, 16, &len) == GLOS_E_ROOM && len == 1024, "r=%d n=%d len=%u", r, n, len);
+        r = glos_set_data(w, GLOS_PROP_WIN_ICON, icon, 0);
+        check("win-icon-off", r == 0 && glos_get_data(w, GLOS_PROP_WIN_ICON, back, sizeof back, &len) == 0 && len == 0, "r=%d", r);
+        check("win-pointer-none", glos_set(w, GLOS_PROP_WIN_CURSOR, GLOS_CURSOR_CUSTOM) == GLOS_E_ARGUMENT, 0);
+        memset(&cur, 0, sizeof cur);
+        cur.w = 8, cur.h = 8, cur.hot_x = 4, cur.hot_y = 4;
+        for (i = 0; i < 8; i++)
+            cur.black[i][0] = (unsigned char)(0x80 >> i), cur.white[i][0] = (unsigned char)(0x01 << i);
+        r = glos_set_data(w, GLOS_PROP_WIN_POINTER, &cur, sizeof cur);
+        check("win-pointer", r == 0 && prop(w, GLOS_PROP_WIN_CURSOR) == GLOS_CURSOR_CUSTOM, "r=%d", r);
+        cur.hot_x = 8;
+        check("win-pointer-bad", glos_set_data(w, GLOS_PROP_WIN_POINTER, &cur, sizeof cur) == GLOS_E_ARGUMENT
+              && glos_set_data(w, GLOS_PROP_WIN_POINTER, &cur, 10) == GLOS_E_ARGUMENT
+              && glos_set(w, GLOS_PROP_WIN_CURSOR, GLOS_CURSOR_ARROW) == 0, 0);
+        r = glos_set_text(w, GLOS_PROP_WIN_HELP, "apitest/windows");
+        check("win-help", r == 0 && glos_get_text(w, GLOS_PROP_WIN_HELP, title, sizeof title) == 0
+              && !strcmp(title, "apitest/windows"), "r=%d %s", r, title);
+    }
+
+    {                                           /* BLIT: the app's own formats into the window's */
+        static const struct glos_format f32 = { 32, 16, 8, 8, 8, 0, 8, { 0, 0 } }, f8 = { 8, 0, 0, 0, 0, 0, 0, { 0, 0 } };
+        static const struct glos_format f24 = { 24, 16, 8, 8, 8, 0, 8, { 0, 0 } };
+        static const unsigned cols[6] = { 0xFF0000, 0x00FF00, 0x0000FF, 0xFFFFFF, 0x000000, 0x333333 };
+        static unsigned src32[6 * 3], pal[256];
+        static unsigned char src8[6 * 3], own[6 * 4 * 3];
+        unsigned bytes, i;
+        struct glos_version v;
+        for (i = 0; i < 18; i++)
+            src32[i] = cols[i % 6], src8[i] = (unsigned char)(10 + i % 6);
+        for (i = 0; i < 6; i++)
+            pal[10 + i] = cols[i];
+        fill(w, 0x11);
+        glos_pixels(w, &p);
+        pix = glos_ptr(p.pixels);
+        bytes = p.format.bpp / 8;
+        r = glos_blit(w, 4, 2, src32, 6, 3, 6 * 4, &f32, 0);
+        n = glos_blit(w, 4, 20, src8, 6, 3, 6, &f8, pal);
+        check("blit", r == 0 && n == 0 && pix && !memcmp(pix + 2 * p.pitch + 4 * bytes, pix + 20 * p.pitch + 4 * bytes, 6 * bytes)
+              && memcmp(pix + 2 * p.pitch + 4 * bytes, pix + 2 * p.pitch + 5 * bytes, bytes)
+              && pix[2 * p.pitch + 3 * bytes] == 0x11 && pix[2 * p.pitch + 10 * bytes] == 0x11 && pix[5 * p.pitch + 4 * bytes] == 0x11,
+              "r=%d n=%d", r, n);
+        if (pix)                                /* the screen's own format: as they are */
+            for (i = 0; i < 3; i++)
+                memcpy(own + i * 6 * bytes, pix + (2 + i) * p.pitch + 4 * bytes, 6 * bytes);
+        r = glos_blit(w, 30, 40, own, 6, 3, 6 * bytes, &p.format, 0);
+        check("blit-same", r == 0 && pix && !memcmp(pix + 40 * p.pitch + 30 * bytes, pix + 2 * p.pitch + 4 * bytes, 6 * bytes)
+              && !memcmp(pix + 42 * p.pitch + 30 * bytes, pix + 4 * p.pitch + 4 * bytes, 6 * bytes), "r=%d", r);
+        r = glos_blit(w, -2, -1, src32, 6, 3, 6 * 4, &f32, 0);          /* partly outside: what is inside drawn */
+        n = glos_blit(w, p.w - 3, p.h - 2, src32, 6, 3, 6 * 4, &f32, 0);
+        check("blit-clip", r == 0 && n == 0 && pix && !memcmp(pix, pix + 3 * p.pitch + 6 * bytes, 4 * bytes)
+              && glos_blit(w, 5000, 5000, src32, 6, 3, 6 * 4, &f32, 0) == 0, "r=%d n=%d", r, n);
+        check("blit-bad", glos_blit(w, 0, 0, src32, 6, 3, 6 * 4, &f24, 0) == GLOS_E_ARGUMENT
+              && glos_blit(w, 0, 0, src32, 6, 3, 8, &f32, 0) == GLOS_E_ARGUMENT
+              && glos_blit(w, 0, 0, (void *)0xFFFFFF00u, 6, 3, 24, &f32, 0) == GLOS_E_ARGUMENT
+              && glos_blit(w, 0, 0, src32, 0, 3, 24, &f32, 0) == GLOS_E_ARGUMENT, 0);
+        memset(&v, 0, sizeof v);
+        v.size = sizeof v;
+        glos_version(&v);
+        if (!(v.machine & GLOS_MACHINE_GPU)) {  /* no Matrox engine on this desktop: its calls say so */
+            struct glos_gpu g;
+            struct glos_vram vr;
+            memset(&g, 0, sizeof g);
+            g.size = sizeof g;
+            memset(&vr, 0, sizeof vr);
+            vr.size = sizeof vr, vr.least = 65536, vr.align = 4096;
+            check("gpu-none", glos_call(GLOS_DRAW_GPU, &g) == GLOS_E_NO_GPU && glos_call(GLOS_DRAW_VRAM, &vr) != 0, 0);
+        }
+    }
+
     d = glos_window("A dialog", 0, 0, 120, 60, GLOS_WK_DIALOG, GLOS_WF_ANYWHERE, w);
     r = glos_windows(0, list, 8, &count);
     check("win-dialog", d && r == 0 && count == 2 && (list[0].kind == GLOS_WK_DIALOG || list[1].kind == GLOS_WK_DIALOG)
           && prop(d, GLOS_PROP_WIN_STATE) == GLOS_WS_HIDDEN, "d=%x r=%d count=%u err=%d", d, r, count, glos_error());
+    check("win-dialog-props", prop(d, GLOS_PROP_WIN_TASKBAR) == 0 && glos_set(d, GLOS_PROP_WIN_FLASH, 1) == 0
+          && prop(d, GLOS_PROP_WIN_FLASH) == 1, 0);
+    {                                           /* a modal dialog: the focus asked for its owner goes to it */
+        glos_handle md = glos_window("Modal", 0, 0, 100, 50, GLOS_WK_DIALOG, GLOS_WF_ANYWHERE | GLOS_WF_MODAL, w);
+        int got_d = 0, lost_w = 0, k;
+        r = md ? glos_show(md, GLOS_WS_NORMAL) : -1;
+        for (k = 0; k < 20 && !(got_d && lost_w); k++)
+            if (glos_event(ev, sizeof ev, 200, 1u << GLOS_AREA_WIN) > 0 && fo->ev.kind == GLOS_EV_FOCUS) {
+                got_d |= fo->ev.handle == md && fo->got == 1;
+                lost_w |= fo->ev.handle == w && fo->got == 0;
+            }
+        check("win-modal", md && r == 0 && got_d && lost_w, "md=%x r=%d got=%d lost=%d", md, r, got_d, lost_w);
+        r = glos_focus(w);
+        memset(list, 0, sizeof list);
+        glos_windows(0, list, 8, &count);
+        for (k = 0, n = -1; k < (int)count && k < 8; k++)
+            if (list[k].focus)
+                n = k;
+        check("win-modal-keeps", r == 0 && n >= 0 && !strcmp(list[n].title, "Modal") && (list[n].flags & GLOS_WF_MODAL)
+              && glos_event(ev, sizeof ev, 100, 1u << GLOS_AREA_WIN) == 0, "r=%d focus=%s", r, n >= 0 ? list[n].title : "?");
+        check("win-modal-owner", !glos_window("x", 0, 0, 50, 50, GLOS_WK_DIALOG, GLOS_WF_MODAL, 0)
+              && glos_error() == GLOS_E_ARGUMENT, "err=%d", glos_error());
+        r = glos_close(md);
+        n = await(GLOS_EV_FOCUS, w, ev, 2000);
+        check("win-modal-gone", r == 0 && n && fo->got == 1, "r=%d n=%d", r, n);
+    }
+    r = glos_windows(0, list, 8, &count);
     t = glos_timer(5000, 0);
     check("win-owner-kind", !glos_window("x", 0, 0, 50, 50, GLOS_WK_DIALOG, 0, t) && glos_error() == GLOS_E_KIND, "err=%d",
           glos_error());
@@ -398,6 +515,12 @@ static int interactive(void)
         if (e->kind == GLOS_EV_KEY) {
             struct glos_ev_key *k = (struct glos_ev_key *)ev;
             printf("EV key %03X ch=%u down=%u mods=%u\n", k->key, k->ch, k->down, k->mods);
+            if (k->key == 0x23 && !k->down) {   /* h let go: 8 seconds without taking an event ("not answering") */
+                unsigned t0 = glos_ticks();
+                while (glos_ticks() - t0 < 8000)
+                    ;
+                printf("EV woke\n");
+            }
         } else if (e->kind == GLOS_EV_MOUSE) {
             struct glos_ev_mouse *m = (struct glos_ev_mouse *)ev;
             if (m->button)
