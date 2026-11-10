@@ -414,27 +414,36 @@ static void info_batch(struct app *a, void *arg)
 
 static int info(struct app *a, struct trapframe *tf)
 {
-    static char paths[INFO_MAX * 80];   /* (under the app's lock) */
+    char *paths;                        /* (the app's own: another app may be in this call while the batch waits) */
+    u32 paths_room = INFO_MAX * 80;
     struct glos_fs_info q;
     struct info_job j;
     u32 size, i, at = 0, off;
     int n, bad;
     if (a2_rd(tf, &q, sizeof q, &size) != 0 || !q.count || q.count > INFO_MAX || !q.paths)
         return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (!(paths = kmalloc(paths_room)))
+        return a2_fail(tf, GLOS_E_MEMORY);
     for (i = 0, off = q.paths; i < q.count; i++) {
         char one[PATH_MAX_];
         u32 len = 0;
-        char c;
-        if ((n = path_in(tf, off, one, sizeof one)) < 0 || at + (u32)n + 1 > sizeof paths)
-            return a2_fail(tf, GLOS_E_ARGUMENT);
+        char c = 0;
+        if ((n = path_in(tf, off, one, sizeof one)) < 0 || at + (u32)n + 1 > paths_room)
+            break;
         memcpy(paths + at, one, (u32)n + 1);
         at += (u32)n + 1;
         do {                            /* (past it in the app's memory: its UTF-8 length may differ) */
             if (user_rd((u16)tf->ds, off + len, &c, 1) != 0)
-                return a2_fail(tf, GLOS_E_ARGUMENT);
+                break;
             len++;
         } while (c);
+        if (c)
+            break;
         off += len;
+    }
+    if (i < q.count) {
+        kfree(paths);
+        return a2_fail(tf, GLOS_E_ARGUMENT);
     }
     memset(&j, 0, sizeof j);
     j.paths = paths;
@@ -444,8 +453,10 @@ static int info(struct app *a, struct trapframe *tf)
     if (!(j.out = kmalloc(j.room ? j.room : 1)) || app_batch(a, info_batch, &j, 0) != 0 || j.error) {
         if (j.out)
             kfree(j.out);
+        kfree(paths);
         return a2_fail(tf, j.error ? (u32)j.error : GLOS_E_MEMORY);
     }
+    kfree(paths);
     q.length = j.used;
     q.given = j.given;
     bad = (j.used && user_wr((u16)tf->ds, q.buffer, j.out, j.used) != 0) || a2_wr(tf, &q, sizeof q, size) != 0;
@@ -453,6 +464,59 @@ static int info(struct app *a, struct trapframe *tf)
     if (bad)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     return j.given < q.count ? a2_fail(tf, GLOS_E_ROOM) : a2_ok(tf, 0);
+}
+
+/* ---- for SHELL's OPEN and HELP (api2shell.c) */
+
+int api2_fs_path(struct trapframe *tf, u32 off, char *out, u32 room) { return path_in(tf, off, out, room); }
+
+struct exists_job {
+    const char *path;                   /* in DOS's code page */
+    int what;
+};
+
+static void exists_batch(struct app *a, void *arg)
+{
+    struct exists_job *j = arg;
+    struct fs_found f;
+    u32 seg, old, handle = 0, n = (u32)strlen(j->path);
+    int lfn;
+    (void)a;
+    ask_page();
+    if (n >= 2 && n <= 3 && j->path[1] == ':') {        /* (a drive's root: a folder) */
+        j->what = 2;
+        return;
+    }
+    if (!(seg = low_get(LOW_PARAS)))
+        return;
+    old = dta_get();
+    dta_set(seg << 16);
+    low_str(seg, LOW_PATH, j->path);
+    lfn = long_names(seg, j->path);
+    memset(&f, 0, sizeof f);
+    if (find(seg, lfn, 1, &handle, 0x37) == 0) {
+        found(seg, lfn, 0, &f);
+        if (lfn)
+            find_close(handle);
+        j->what = f.attr & 0x10 ? 2 : 1;
+    }
+    dta_set(old);
+    low_put(seg);
+}
+
+/* Is there such a file (1) or folder (2)? 0: no (or its name has wildcards); -1: the app is ending. */
+int api2_fs_exists(struct app *a, const char *path)
+{
+    struct exists_job j;
+    u32 i;
+    for (i = 0; path[i]; i++)
+        if (path[i] == '*' || path[i] == '?')
+            return 0;
+    if (!i)
+        return 0;
+    j.path = path;
+    j.what = 0;
+    return app_batch(a, exists_batch, &j, 0) != 0 ? -1 : j.what;
 }
 
 /* ---- DRIVES */
