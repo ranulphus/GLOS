@@ -50,6 +50,10 @@ void usb_late(void) { }
 void vkbc_typematic(u32 d, u32 r) { snprintf(applied, sizeof applied, "typematic %u %u", d, r); }
 void deskin_pointer_speed(int s) { snprintf(applied, sizeof applied, "speed %d", s); }
 void deskin_double_click(u32 ms) { (void)ms; }
+void deskin_snap(int on) { snprintf(applied, sizeof applied, "snap %d", on); }
+int desk_theme_set(const char *name) { snprintf(applied, sizeof applied, "theme %s", name); return 0; }
+void desk_kick(void) { }
+void idle_config(void) { snprintf(applied, sizeof applied, "saver"); }
 void clock_zone(const char *tz) { snprintf(applied, sizeof applied, "zone %s", tz); }
 void net_sntp_restart(void) { snprintf(applied, sizeof applied, "sntp again"); }
 void cache_apply(const char *k, const char *v) { snprintf(applied, sizeof applied, "cache %s=%s", k, v); }

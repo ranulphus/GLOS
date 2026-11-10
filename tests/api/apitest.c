@@ -521,6 +521,194 @@ static void windows(void)
 }
 
 /* APITEST win: the events of a window, a line each, until it is closed. */
+/* SETTINGS, DRAW's MODES and IDLE (step 5): what can be asked without changing anything. (The changes, their
+   events, the theme's change and the saver are APITEST set's, under the agent: /RUN has no GLOS.CFG to write.) */
+static void settings(void)
+{
+    static struct glos_mode modes[64];
+    static char buf[1024];
+    struct glos_schema sc;
+    struct glos_theme th;
+    struct glos_region rg;
+    struct glos_time tm;
+    struct glos_screen scr;
+    struct glos_saver sv;
+    struct glos_power pw;
+    glos_handle h, h2;
+    unsigned i, count = 0, found = 0, sorted = 1, texts = 1, n;
+    int set = -1, r, e;
+
+    r = glos_setting_get("input", "double_click", buf, sizeof buf, &set);
+    check("setting-get", r == 0 && !strcmp(buf, "500") && set == 0, "r=%d value=%s set=%d", r, buf, set);
+    r = glos_setting_get("Display", "ACCEL", buf, sizeof buf, &set);    /* (names in any case) */
+    check("setting-case", r == 0 && !strcmp(buf, "on"), "r=%d value=%s", r, buf);
+    memset(buf, 'x', 8);
+    r = glos_setting_get("time", "server", buf, 5, &set);
+    check("setting-room", r == GLOS_E_ROOM && !strcmp(buf, "pool"), "r=%d value=%.8s", r, buf);
+    check("setting-none", glos_setting_get("input", "nothing", buf, sizeof buf, 0) == GLOS_E_SETTING
+          && glos_setting_get("nowhere", "mode", buf, sizeof buf, 0) == GLOS_E_SETTING
+          && glos_setting_get(0, "mode", buf, sizeof buf, 0) == GLOS_E_ARGUMENT, 0);
+
+    r = glos_schema(0, &sc, buf, sizeof buf);
+    count = sc.count;
+    for (i = 0; r == 0 && i < count; i++) {
+        const char *sec, *key, *choices, *def, *label, *desc;
+        if (glos_schema(i, &sc, buf, sizeof buf) != 0 || sc.count != count) {
+            texts = 0;
+            break;
+        }
+        sec = buf, key = sec + strlen(sec) + 1, choices = key + strlen(key) + 1, def = choices + strlen(choices) + 1;
+        label = def + strlen(def) + 1, desc = label + strlen(label) + 1;
+        texts &= sec[0] && key[0] && label[0] && desc[0] && (unsigned)(desc + strlen(desc) + 1 - buf) == sc.length
+                 && sc.kind >= GLOS_SK_CHOICE && sc.kind <= GLOS_SK_ENV && sc.when <= GLOS_SET_APP;
+        if (!strcmp(sec, "desktop") && !strcmp(key, "theme"))
+            found += sc.kind == GLOS_SK_CHOICE && sc.when == GLOS_SET_NOW && !strcmp(choices, "slate|dark|contrast")
+                     && !strcmp(def, "slate") && strchr(label, '&') != 0;
+        if (!strcmp(sec, "saver") && !strcmp(key, "wait"))
+            found += sc.kind == GLOS_SK_NUMBER && sc.min == 1 && sc.max == 240 && !strcmp(choices, "off");
+    }
+    check("schema", r == 0 && count >= 50 && texts && found == 2, "r=%d count=%u texts=%u found=%u", r, count, texts, found);
+    e = glos_schema(count, &sc, buf, sizeof buf);
+    r = glos_schema(0, &sc, buf, 4);
+    check("schema-ends", e == GLOS_E_ARGUMENT && sc.count == count && r == GLOS_E_ROOM && sc.length > 4, "e=%d r=%d", e, r);
+
+    for (i = 0, r = 0; i < GLOS_WATCH_MAX; i++) {       /* as many sections as may be watched, and no more */
+        char name[8] = "s0";
+        name[1] = (char)('0' + i);
+        r |= glos_setting_watch(name, 1);
+    }
+    e = glos_setting_watch("ninth", 1);
+    check("watch", r == 0 && e == GLOS_E_MEMORY && glos_setting_watch("s3", 1) == 0 && glos_setting_watch("s3", 0) == 0
+          && glos_setting_watch("ninth", 1) == 0 && glos_setting_watch(0, 0) == 0, "r=%d e=%d", r, e);
+
+    r = glos_theme(&th);
+    check("theme", r == 0 && !strcmp(th.name, "slate") && th.flags == 0 && th.roles == GLOS_ROLES
+          && th.colour[GLOS_ROLE_FACE] == 0xCCCCCC && th.colour[GLOS_ROLE_MARK] == 0xCC6633
+          && th.colour[GLOS_ROLE_TITLE] == 0x333333 && th.border == 1 && th.title == 18 && th.bar == 20 && th.text == 1,
+          "r=%d name=%s face=%06x title=%d", r, th.name, th.colour[GLOS_ROLE_FACE], th.title);
+    memset(&tm, 0, sizeof tm);
+    tm.size = sizeof tm;
+    glos_time(&tm);
+    r = glos_region(&rg);
+    check("region", r == 0 && rg.date == GLOS_DATE_YMD && rg.date_sep == '-' && rg.clock12 == 0 && rg.decimal == '.'
+          && rg.thousands == ',' && rg.first_day == 1 && rg.codepage == 0 && !strcmp(rg.layout, "us")
+          && !strcmp(rg.language, "en") && rg.offset == tm.offset,
+          "r=%d date=%u%c clock12=%u offset=%d", r, rg.date, rg.date_sep, rg.clock12, rg.offset);
+
+    memset(&scr, 0, sizeof scr);
+    scr.size = sizeof scr;
+    glos_screen(&scr);
+    r = glos_modes(modes, 64, &count);
+    for (i = 0, found = 0; r == 0 && i < count && i < 64; i++) {
+        found |= modes[i].w == scr.w && modes[i].h == scr.h && modes[i].bits == scr.format.bpp;
+        if (i && (modes[i].w < modes[i - 1].w || (modes[i].w == modes[i - 1].w && modes[i].h < modes[i - 1].h)))
+            sorted = 0;
+    }
+    check("modes", r == 0 && count >= 3 && found && sorted, "r=%d count=%u screen=%dx%dx%u found=%u sorted=%u", r, count,
+          scr.w, scr.h, scr.format.bpp, found, sorted);
+    n = 0;
+    r = glos_modes(modes, 1, &n);
+    check("modes-room", r == GLOS_E_ROOM && n == count, "r=%d count=%u", r, n);
+
+    n = glos_idle();
+    glos_sleep(300);
+    i = glos_idle();
+    check("idle", i >= n + 250 && i < n + 2000, "before=%u after=%u", n, i);
+    h = glos_awake();
+    h2 = glos_awake();
+    r = glos_saver(GLOS_SAVER_STATE, &sv);
+    e = (int)sv.awake;
+    glos_close(h);
+    glos_saver(GLOS_SAVER_STATE, &sv);
+    check("awake", h && h2 && h != h2 && r == 0 && e == 2 && sv.awake == 1 && sv.on == 0 && sv.wait == 0
+          && glos_close(h2) == 0 && glos_close(h2) == GLOS_E_HANDLE && glos_saver(7, 0) == GLOS_E_ARGUMENT,
+          "r=%d awake=%d then=%u on=%u wait=%u", r, e, sv.awake, sv.on, sv.wait);
+    r = glos_power(0, 0, &pw);
+    e = pw.can & (1u << GLOS_POWER_OFF) ? 0 : glos_power(1, GLOS_POWER_OFF, 0);     /* (never turned off here) */
+    check("power", r == 0 && pw.state == GLOS_POWER_ON && (pw.can == 0 || (pw.can & 1)) && (e == 0 || e == GLOS_E_REFUSED)
+          && glos_power(1, 9, 0) == GLOS_E_ARGUMENT, "r=%d state=%u can=%x off=%d", r, pw.state, pw.can, e);
+}
+
+/* APITEST set: the settings' changes and their events, the theme's change, and the saver, under the agent
+   (tests/loopa/jobs.py api_set_case drives it with glos config, glos idle and keys). It writes what it is told
+   on stdout: EV setting SECTION KEY (it watches desktop and region), EV theme NAME, EV region ..., EV saver N,
+   EV key ...; s runs the set and unset cases (SET ok=N); a takes or closes an AWAKE handle; q ends it (41). */
+static int setting_cases(void)
+{
+    char buf[256], why[120];
+    unsigned when = 99;
+    int set = -1, ok = 1, r;
+    r = glos_setting_set("input", "double_click", "400", &when, why, sizeof why);
+    ok &= r == 0 && when == GLOS_SET_APP;
+    ok &= glos_setting_get("input", "double_click", buf, sizeof buf, &set) == 0 && !strcmp(buf, "400") && set == 1;
+    ok &= glos_setting_keys("input", buf, sizeof buf) == 0 && strstr(buf, "double_click = 400") != 0;
+    ok &= glos_setting_sections(buf, sizeof buf) == 0 && strstr(buf, "input") != 0;
+    ok &= glos_setting_set("input", "double_click", 0, &when, 0, 0) == 0;
+    ok &= glos_setting_get("input", "double_click", buf, sizeof buf, &set) == 0 && !strcmp(buf, "500") && set == 0;
+    r = glos_setting_set("input", "double_click", "5", 0, why, sizeof why);
+    ok &= r == GLOS_E_SETTING && why[0];
+    printf("SET refused r=%d why=%s\n", r, why);
+    ok &= glos_setting_set("input", "nothing", "1", 0, why, sizeof why) == GLOS_E_SETTING;
+    ok &= glos_setting_set("program APITEST.EXE", "title", "Api Test", &when, 0, 0) == 0 && when == GLOS_SET_NOW;
+    ok &= glos_setting_get("program apitest.exe", "title", buf, sizeof buf, &set) == 0 && !strcmp(buf, "Api Test") && set == 1;
+    ok &= glos_setting_set("program APITEST.EXE", "title", 0, 0, 0, 0) == 0;
+    return ok;
+}
+
+static int setting_mode(void)
+{
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_ev *e = (struct glos_ev *)ev;
+    struct glos_theme th;
+    struct glos_region rg;
+    glos_handle w, awake = 0;
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 1;
+    w = glos_window("APITEST S", 40, 40, 200, 120, GLOS_WK_NORMAL, 0, 0);
+    if (!w || glos_show(w, GLOS_WS_NORMAL) != 0)
+        return 2;
+    fill(w, 0x2A);
+    printf("SET watch r=%d\n", glos_setting_watch("desktop", 1) | glos_setting_watch("region", 1));
+    fflush(stdout);
+    for (;;) {
+        int n = glos_event(ev, sizeof ev, GLOS_FOREVER, 0);
+        if (n <= 0)
+            continue;
+        if (e->kind == GLOS_EV_KEY) {
+            struct glos_ev_key *k = (struct glos_ev_key *)ev;
+            printf("EV key %03X down=%u\n", k->key, k->down);
+            if (k->key == 0x1F && !k->down)     /* s let go */
+                printf("SET ok=%d\n", setting_cases());
+            if (k->key == 0x1E && !k->down) {   /* a let go: an AWAKE handle taken, or closed */
+                if (awake) {
+                    printf("EV awake 0 r=%d\n", glos_close(awake));
+                    awake = 0;
+                } else {
+                    awake = glos_awake();
+                    printf("EV awake 1 r=%d\n", awake != 0);
+                }
+            }
+            if (k->key == 0x10 && !k->down) {   /* q let go */
+                printf("SET-OK end\n");
+                fflush(stdout);
+                return 41;
+            }
+        } else if (e->kind == GLOS_EV_SETTING) {
+            struct glos_ev_setting *s = (struct glos_ev_setting *)ev;
+            printf("EV setting %s %s\n", s->section, s->key);
+            if (!strcmp(s->section, "region") && glos_region(&rg) == 0)
+                printf("EV region date=%u%c clock12=%u decimal=%c thousands=%u first=%u cp=%u\n", rg.date, rg.date_sep,
+                       rg.clock12, rg.decimal, rg.thousands, rg.first_day, rg.codepage);
+        } else if (e->kind == GLOS_EV_THEME) {
+            if (glos_theme(&th) == 0)
+                printf("EV theme %s flags=%u face=%06x\n", th.name, th.flags, th.colour[GLOS_ROLE_FACE]);
+        } else if (e->kind == GLOS_EV_SAVER) {
+            printf("EV saver %u\n", ((struct glos_ev_saver *)ev)->on);
+        }
+        fflush(stdout);
+    }
+}
+
 static int interactive(void)
 {
     unsigned char ev[GLOS_EV_MAX];
@@ -593,6 +781,8 @@ int main(int argc, char **argv)
     char line[64];
     if (argc > 1 && !strcmp(argv[1], "win"))
         return interactive();
+    if (argc > 1 && !strcmp(argv[1], "set"))
+        return setting_mode();
     before();
     init();
     if (glos_app()) {
@@ -600,6 +790,7 @@ int main(int argc, char **argv)
         events();
         timers();
         windows();
+        settings();
     }
     snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
     com1(line);

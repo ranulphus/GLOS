@@ -66,6 +66,27 @@ int glos_pads(struct glos_pads *p, int events);         /* the pads as they are;
 int glos_gameport(struct glos_gameport *g);
 int glos_input_mode(unsigned flags);                    /* GLOS_INPUT_ */
 
+/* ---- settings (SETTINGS), the screen's modes (DRAW) and idle time (IDLE) */
+/* A setting's value (a NUL always; GLOS_E_ROOM: cut); *set 1 if the file sets it, 0 if this is its default.
+   GLOS_E_SETTING: no such setting. */
+int glos_setting_get(const char *section, const char *key, char *value, unsigned room, int *set);
+/* Changes a setting (value NULL: takes it out of the file). *when: GLOS_SET_, when the change takes effect.
+   GLOS_E_SETTING: refused, and why (room bytes) says why in words. when and why may be NULL. */
+int glos_setting_set(const char *section, const char *key, const char *value, unsigned *when, char *why, unsigned room);
+int glos_setting_sections(char *buf, unsigned room);    /* the file's sections, a name a line */
+int glos_setting_keys(const char *section, char *buf, unsigned room);  /* "key = value" a line */
+/* The schema's entry `index` (s->count: how many there are): its texts in buf, each ended by a NUL: section,
+   key, choices, default, label, description. */
+int glos_schema(unsigned index, struct glos_schema *s, char *buf, unsigned room);
+int glos_setting_watch(const char *section, int on);    /* GLOS_EV_SETTING for it from now ("" or NULL: all) */
+int glos_theme(struct glos_theme *t);                   /* the theme now (again at GLOS_EV_THEME) */
+int glos_region(struct glos_region *r);                 /* the region's formats now */
+int glos_modes(struct glos_mode *out, unsigned room, unsigned *count);  /* the screen modes the card has */
+unsigned glos_idle(void);                               /* milliseconds since the last key, movement or press */
+glos_handle glos_awake(void);                           /* the screen stays on until this is closed; 0 if refused */
+int glos_saver(unsigned what, struct glos_saver *state);        /* GLOS_SAVER_; state may be NULL */
+int glos_power(int set, unsigned state, struct glos_power *now);        /* the screen's power told (set 0) or set */
+
 /* ---- threads (THREAD; docs/supervisor.md 12.7)
  *
  * A thread of the app's own runs fn(arg) on a stack libglos allocates (stack bytes: 0 for 64 KB, at least 16 KB),

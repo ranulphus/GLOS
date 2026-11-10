@@ -32,10 +32,14 @@
 #include "clock.h"
 #include "deskint.h"
 #include "display.h"
+#include "glos/region.h"
+#include "idle.h"
 #include "io.h"
+#include "kcfg.h"
 #include "kprintf.h"
 #include "mm.h"
 #include "sched.h"
+#include "theme.h"
 #include "timer.h"
 #include "vnc.h"
 
@@ -152,16 +156,42 @@ static void painter(struct gfx_surface *fb)
 
 static u32 bcd(u8 v) { return (v >> 4) * 10u + (v & 15); }
 
-/* The task bar's clock and note, when either has changed. */
+/* The task bar's clock (as the region writes a time: [region] clock) and note, when either has changed. */
 static void bar_text(struct wm *m)
 {
-    char t[8];
+    char t[sizeof m->clock];
     u32 f = irq_save(), h = bcd(rtc_read(4) & 0x7F), min = bcd(rtc_read(2));
     irq_restore(f);
-    t[0] = (char)('0' + h / 10 % 10), t[1] = (char)('0' + h % 10), t[2] = ':';
-    t[3] = (char)('0' + min / 10 % 10), t[4] = (char)('0' + min % 10), t[5] = 0;
-    if (!demo && (memcmp(t, m->clock, 6) || strcmp(note, m->note)))
+    region_time(kcfg_region(), t, sizeof t, (int)h, (int)min, -1);
+    if (!demo && (strcmp(t, m->clock) || strcmp(note, m->note)))
         wm_bar_text(m, t, note);
+}
+
+/* ---- the theme ([desktop] theme; kernel/wm/theme.c) */
+
+static const struct theme *theme_now = &themes[0], *theme_shown = &themes[0];
+
+const struct theme *desk_theme(void) { return theme_now; }
+
+/* From anywhere: the theme of that name from now on (the desktop's thread draws it). 0, or -1: no such theme. */
+int desk_theme_set(const char *name)
+{
+    const struct theme *t = theme_find(name);
+    if (!t)
+        return -1;
+    theme_now = t;
+    desk_kick();
+    return 0;
+}
+
+static void theme_show(struct wm *m, const struct theme *t)
+{
+    struct wm_look *l = &m->look;
+    struct theme_look c;
+    theme_look(t, &c);
+    l->desk = c.desk, l->edge = c.edge, l->face = c.face, l->text = c.text, l->face_off = c.face_off;
+    l->text_off = c.text_off, l->mark = c.mark, l->bar = c.bar, l->bar_text = c.bar_text, l->bar_on = c.bar_on;
+    l->bar_on_text = c.bar_on_text;
 }
 
 static void desk_thread(void *arg)
@@ -171,6 +201,7 @@ static void desk_thread(void *arg)
     u32 f;
     int dirty, vnc;
     static struct gfx_region drawn;             /* (the desktop's thread's alone) */
+    static u8 saved;                            /* the saver's black screen is drawn */
     (void)arg;
     for (;;) {
         f = irq_save();
@@ -183,9 +214,36 @@ static void desk_thread(void *arg)
         deskapp_hung(m);
         deskin_turn(m);
         fb = display_fb();
+        if (theme_shown != theme_now) {         /* a new theme: the frames, the bar and the desktop drawn again */
+            theme_shown = theme_now;
+            theme_show(m, theme_now);
+            kprintf("GLOS-DESK theme=%s\n", theme_now->name);
+            wm_bar_again(m);
+            repaint = 1;
+        }
+        /* The saver (kernel/wm/idle.c): a black screen in place of the windows, which are as they were under it. */
+        if (idle_turn(fb != 0, m->focus && (m->focus->flags & WF_FULL))) {
+            if (!saved) {
+                saved = 1;
+                display_cursor(0, 0, 0);
+                wm_hw_pointer(m, 1);
+                gfx_fill(fb, 0, 0, fb->w, fb->h, 0x000000);
+                display_sync();
+                if (vnc_viewers()) {
+                    drawn.n = 1;
+                    drawn.r[0].x = drawn.r[0].y = 0, drawn.r[0].w = fb->w, drawn.r[0].h = fb->h;
+                    vnc_damage(&drawn, fb);
+                }
+            }
+            fb = 0;                             /* (nothing is composed meanwhile) */
+        } else if (saved) {
+            saved = 0;
+            repaint = 1;
+        }
         if (cursor_gen != m->cursor_gen)
             cursor_image(m);
-        wm_hw_pointer(m, fb && display_cursor(m->pointer, m->px - cursor_hx, m->py - cursor_hy));  /* (M7 step F) */
+        if (!saved)
+            wm_hw_pointer(m, fb && display_cursor(m->pointer, m->px - cursor_hx, m->py - cursor_hy));  /* (M7 step F) */
         if (fb) {
             int fmt = fb->fmt.bpp != m->fmt.bpp || fb->fmt.gsize != m->fmt.gsize || fb->fmt.rpos != m->fmt.rpos;
             if (repaint || fmt || fb->w != m->w || fb->h != m->h) {

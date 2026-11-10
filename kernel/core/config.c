@@ -30,6 +30,8 @@
 #include "vm.h"
 #include "desk.h"
 #include "dos.h"
+#include "glos/region.h"
+#include "idle.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
@@ -440,6 +442,11 @@ static u32 num(const char *s)
     return v;
 }
 
+/* [region] as it is now: the schema's defaults until the file is read. */
+static struct region region = { REGION_YMD, '-', 0, '.', ',', 1, 0, "us", "en" };
+
+const struct region *kcfg_region(void) { return &region; }
+
 void kcfg_apply(const char *section, const char *key, const char *v)
 {
     if (same(section, "display") && same(key, "mode")) {
@@ -477,6 +484,17 @@ void kcfg_apply(const char *section, const char *key, const char *v)
         cache_apply(key, v);
     } else if (same(section, "joystick")) {     /* port, range: the virtual game port (kernel/vm/vjoy.c) */
         joy_config();
+    } else if (same(section, "desktop") && same(key, "snap")) {
+        deskin_snap(same(v, "on"));
+    } else if (same(section, "desktop") && same(key, "theme")) {
+        desk_theme_set(v);
+    } else if (same(section, "region")) {       /* (the task bar's clock is written again) */
+        u32 f = irq_save();
+        region_set(&region, key, v);
+        irq_restore(f);
+        desk_kick();
+    } else if (same(section, "saver")) {        /* wait, saver, power (kernel/wm/idle.c) */
+        idle_config();
     }
 }
 
@@ -492,6 +510,20 @@ static void apply_read(void)
     kcfg_apply("input", "repeat_rate", "");
     kcfg_get("time", "zone", z, sizeof z);      /* (M10: SNTP starts by itself once the file is read) */
     clock_zone(z);
+    {                                           /* (API 2.0 step 5's: the desktop's, the region's, the saver's) */
+        static const char *const keys[] = { "date", "clock", "decimal", "thousands", "first_day", "codepage", "layout",
+                                            "language" };
+        u32 i;
+        kcfg_get("desktop", "snap", v, sizeof v);
+        kcfg_apply("desktop", "snap", v);
+        kcfg_get("desktop", "theme", v, sizeof v);
+        kcfg_apply("desktop", "theme", v);
+        for (i = 0; i < ARRAY_SIZE(keys); i++) {
+            kcfg_get("region", keys[i], v, sizeof v);
+            kcfg_apply("region", keys[i], v);
+        }
+        idle_config();
+    }
     mixer_late();                               /* a Crystal chip, with no SB16 ([sound] crystal) */
     joy_config();                               /* [joystick] port and range */
     usb_late();                                 /* [usb] enabled: GLOS's USB controllers */

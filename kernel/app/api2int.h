@@ -44,6 +44,8 @@ struct api2 {
     u32 last_at;                        /* where the event put last begins ... */
     u8 last_merge;                      /* ... and whether one like it may take its place (a mouse's movement) */
     u32 in_flags;                       /* GLOS_INPUT_: how it takes its keys (INPUT's MODE) */
+    char watch[GLOS_WATCH_MAX][32];     /* the sections whose changes it is told of (SETTINGS' WATCH) ... */
+    u8 nwatch, watch_all;               /* ... or every section's */
     u8 pads_events;                     /* it asked for GLOS_EV_PAD */
     struct glos_pad pad[GLOS_PADS];     /* each pad as it was last told of it */
     u32 ndrop, ndrop1x;                 /* events lost to a full queue; 1.x events with no 2.0 form yet */
@@ -90,6 +92,11 @@ extern const struct propdef api2_thr_props[];
 extern const u32 api2_thr_nprops;
 int api2_thread(struct app *a, struct trapframe *tf, u32 n);    /* THREAD's calls */
 void api2_thread_close(struct app *a, int kind, void *obj);     /* CLOSE of a thread's, a lock's or a signal's handle */
+
+/* api2set.c */
+int api2_settings(struct app *a, struct trapframe *tf, u32 n); /* SETTINGS' calls */
+int api2_idle(struct app *a, struct trapframe *tf, u32 n);     /* IDLE's */
+void api2_settings_init(void);                                  /* (once: changes' and the saver's news from now) */
 
 /* api2in.c */
 int api2_input(struct app *a, struct trapframe *tf, u32 n);     /* INPUT's calls */

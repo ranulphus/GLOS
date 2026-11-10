@@ -318,6 +318,55 @@ After that:
 - **Tests:** host: themes by role and the region's formats; Loop A: APITEST, and `loopa-config` and `loopa-control`
   unchanged.
 
+**Step 5 as built** (2026-11-10):
+
+- **SETTINGS' calls** (`kernel/app/api2set.c`): GET, SET, SECTIONS, KEYS, SCHEMA, WATCH, THEME, REGION. Events:
+  `GLOS_EV_SETTING` (a watched section's setting changed, whoever changed it) and `GLOS_EV_THEME` (to every app).
+- **IDLE's calls:** TIME (the idle time), AWAKE (a handle), SAVER (its state, start, end), POWER. Event:
+  `GLOS_EV_SAVER`, to every app.
+- **DRAW's MODES:** the card's modes with a linear framebuffer at 8, 16 or 32 bits, listed once by the VM thread.
+- **New settings** (`sdk/config/cfg.c`; the 1.x Control Panel shows them, since it is built from the schema):
+  - `[desktop] snap` (on) and `theme` (slate, dark, contrast);
+  - `[region]`: `date`, `clock`, `decimal`, `thousands`, `first_day`, `codepage`, `layout`, `language`;
+  - `[saver]`: `wait`, `saver`, `power`.
+- **Themes** (`kernel/wm/theme.c`): Slate, dark and high contrast, 32 colours by role each, all in the 8-bit
+  palette. The window manager's frames, task bar and desktop follow the theme at once. The sizes are the same
+  in all three for now.
+- **The region's formats** (`sdk/config/region.c`, shared with the kernel): the task bar's clock follows
+  `[region] clock`. Dates and numbers are for toolkit 2 to use.
+- **Where it differs from the plan and from `api-2.md`:**
+  1. **The saver is GLOS's own black screen for now,** drawn in the desktop's surface in place of the windows:
+     no window, focus or app is touched. The DOS-GL savers and how they are run are phase D's (the plan said
+     "settled in B": what B settles is that the built-in one is drawn by the desktop itself).
+  2. **The saver is off unless `[saver] wait` is set.** A default wait would use up the first key of every
+     test that waits, and GLOS has no saver worth looking at until phase D. The default is for phase D.
+  3. **The saver's preview comes with EMBED** (step 12).
+  4. **The key or movement that ends the saver is used up:** the app with the focus never sees it, nor a
+     button's release that follows.
+  5. **What keeps the screen on:** an AWAKE handle of any app's, a full-screen window with the focus, and a
+     session having the screen. An app holding the GPU does not, by itself: DOS-GL takes an AWAKE handle when
+     it moves to 2.0 (step 14).
+  6. **POWER is VBE/PM** (INT 10h 4F10h), asked of the card the first time. A card without it answers with no
+     states, and a set is refused.
+  7. **The code page setting is `dos` by default** (what DOS says). A named page reaches GLOS's programs as
+     GLOSCP in their environment.
+  8. **One keyboard layout (`us`) and one language (`en`)** are in the schema. More layouts need a keymap each
+     (`kernel/include/keymap.h`); they come with the Control Panel's keyboard page (phase E).
+  9. **The region's defaults** are ISO dates (2026-11-10), a 24-hour clock, 1,234.5 and Monday first: for the
+     owner to change if GLOS's defaults should be another region's.
+  10. **Texts are passed by address** (a section, a key, a value), not in fixed fields.
+  11. **A theme's sizes can't differ yet:** a theme with a wider border needs every window laid out again,
+      which comes with toolkit 2.
+- **For tests:** `glos idle` (the idle time, the saver, the screen), `glos idle +SECONDS` (as if nobody had
+  touched anything for so long more), `glos idle saver` and `glos idle wake`.
+- **Tests:**
+  - **Host:** `region_test` (every date pattern, both clocks, the marks, room), `theme_test` (every colour in
+    the palette; text readable on its ground: 3 to 1 at least, 7 to 1 for high contrast), `cfg_test`.
+  - **Loop A:** APITEST's settings, modes and idle cases; `APITEST set` under the agent (the app's own sets;
+    a watched change told and an unwatched one not; the theme to dark and back; the region; the saver after
+    its wait, ended by a key nobody sees, held off by AWAKE, by hand; the screen's power); `loopa-config` and
+    `loopa-control` with the new settings.
+
 ### 6. CLIP and DND
 
 - **CLIP:**

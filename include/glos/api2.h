@@ -441,7 +441,8 @@ struct glos_ev_state {
 #define GLOS_DRAW_WINVRAM GLOS_FN(GLOS_AREA_DRAW, 7)    /* struct glos_winvram: a window shows pixels in such a block */
 #define GLOS_DRAW_BLIT    GLOS_FN(GLOS_AREA_DRAW, 8)    /* struct glos_blit: pixels in a format of the app's own into
                                                            a window's (DOS-GL's software renderer; pictures) */
-/* (9: MODES, with the display's settings in step 5) */
+#define GLOS_DRAW_MODES   GLOS_FN(GLOS_AREA_DRAW, 9)    /* struct glos_modes: the screen modes the card has (for the
+                                                           Control Panel; the mode itself is [display] mode) */
 
 /* A pixel format: bits a pixel, and where each colour's bits are in one (at 8 bits: GLOS's palette, the 6x6x6
    cube and greys of glos/gfx.h). */
@@ -468,6 +469,18 @@ struct glos_screen {
     int w, h;                   /* -> the screen */
     struct glos_format format;
     int work_x, work_y, work_w, work_h;         /* -> the screen less the task bar */
+};
+
+struct glos_mode {
+    int w, h;
+    unsigned bits;              /* 8, 16 or 32 */
+};
+struct glos_modes {
+    unsigned size;
+    unsigned buffer;            /* where the modes go: struct glos_mode each, by size then depth */
+    unsigned room;              /* how many there is room for */
+    unsigned count;             /* -> how many the card has (GLOS_E_ROOM: more than fit; those that fit given). 0:
+                                   no card GLOS can put in a graphics mode */
 };
 
 /* BLIT: a rectangle of pixels the app has, in any format of 8, 16 or 32 bits, into the window's client area at
@@ -659,6 +672,206 @@ struct glos_ev_wheel {
     int x, y;
     int notches;                /* positive: away from the user (up) */
     unsigned buttons, mods;
+};
+
+/* ================================================================== SETTINGS (0Ch): GLOS.CFG, the theme, the region
+ *
+ * A setting is a section, a key and a value, all text (GLOS.CFG's "[section]" and "key = value"). The schema
+ * says which there are, each one's kind, range, default and words for the Control Panel. Texts are passed by
+ * address (offsets in DS); those GLOS writes take a room and give a length, as a property's. */
+#define GLOS_SETTINGS_GET      GLOS_FN(GLOS_AREA_SETTINGS, 0)  /* struct glos_setting: a setting's value now */
+#define GLOS_SETTINGS_SET      GLOS_FN(GLOS_AREA_SETTINGS, 1)  /* struct glos_setting: change it, or take it out */
+#define GLOS_SETTINGS_SECTIONS GLOS_FN(GLOS_AREA_SETTINGS, 2)  /* struct glos_setting_list: the file's sections */
+#define GLOS_SETTINGS_KEYS     GLOS_FN(GLOS_AREA_SETTINGS, 3)  /* struct glos_setting_list: a section's settings */
+#define GLOS_SETTINGS_SCHEMA   GLOS_FN(GLOS_AREA_SETTINGS, 4)  /* struct glos_schema: one of the schema's entries */
+#define GLOS_SETTINGS_WATCH    GLOS_FN(GLOS_AREA_SETTINGS, 5)  /* struct glos_setting_watch: GLOS_EV_SETTING from now */
+#define GLOS_SETTINGS_THEME    GLOS_FN(GLOS_AREA_SETTINGS, 6)  /* struct glos_theme: the theme now */
+#define GLOS_SETTINGS_REGION   GLOS_FN(GLOS_AREA_SETTINGS, 7)  /* struct glos_region: the region's formats now */
+
+#define GLOS_E_SETTING 10       /* no such setting, or the value is not one it can have (SET: why, in words) */
+
+struct glos_setting {
+    unsigned size;
+    unsigned section;           /* its section's name ("display"; "program NAME.EXE" for a program's profile) */
+    unsigned key;               /* its key ("mode") */
+    unsigned value;             /* GET: where its value goes. SET: its new value, or 0 to take the setting out of
+                                   the file (its default again) */
+    unsigned room;              /* GET: the room there */
+    unsigned length;            /* -> GET: the value's whole length (GLOS_E_ROOM: cut) */
+    unsigned set;               /* -> GET: 1 the file sets it, 0 this is its default */
+    unsigned when;              /* -> SET: GLOS_SET_: when the change takes effect */
+    unsigned why;               /* SET: where the reason goes if it is refused (0: not wanted) ... */
+    unsigned why_room;          /* ... and the room there */
+};
+#define GLOS_SET_NOW     0      /* at once */
+#define GLOS_SET_RESTART 1      /* when GLOS next starts */
+#define GLOS_SET_PROGRAM 2      /* for programs started from now on */
+#define GLOS_SET_DESKTOP 3      /* when the desktop next starts */
+#define GLOS_SET_APP     4      /* for apps started from now on */
+
+struct glos_setting_list {
+    unsigned size;
+    unsigned section;           /* KEYS: the section (SECTIONS: not used) */
+    unsigned buffer;            /* where the list goes: SECTIONS: a name a line; KEYS: "key = value" a line, those
+                                   the file sets */
+    unsigned room;
+    unsigned length;            /* -> the list's whole length (GLOS_E_ROOM: cut) */
+};
+
+struct glos_schema {
+    unsigned size;
+    unsigned index;             /* which entry: 0 to count - 1 (GLOS_E_ARGUMENT past the last) */
+    unsigned count;             /* -> how many entries there are */
+    unsigned kind;              /* -> GLOS_SK_ */
+    unsigned when;              /* -> GLOS_SET_: when a change takes effect */
+    int min, max;               /* -> a number's range; a text's shortest and longest */
+    unsigned buffer;            /* where its texts go, each ended by a NUL: the section, the key ("*": any), the
+                                   choices ("a|b|c": a choice's values, a number's words, a text's class), the
+                                   default, the label (its letter after "&") and the description */
+    unsigned room;
+    unsigned length;            /* -> their whole length (GLOS_E_ROOM: cut) */
+};
+#define GLOS_SK_CHOICE  1       /* one of its choices */
+#define GLOS_SK_NUMBER  2       /* a number in its range, or one of its words */
+#define GLOS_SK_TEXT    3       /* text of its class (line, host, hostport, tz, page) */
+#define GLOS_SK_MODE    4       /* a screen mode: WxHxBITS, or none */
+#define GLOS_SK_PATH    5       /* a DOS path */
+#define GLOS_SK_BLASTER 6       /* a BLASTER string */
+#define GLOS_SK_ENV     7       /* NAME=VALUE lines */
+
+struct glos_setting_watch {
+    unsigned size;
+    unsigned section;           /* the section to be told of ("" or 0: every section) */
+    unsigned on;                /* 1 from now on, 0 no more */
+};
+#define GLOS_WATCH_MAX 8        /* sections an app may watch at once (or all of them) */
+
+/* The theme: colours by what they are for (0x00RRGGBB), and sizes. An app draws with these and nothing of its
+   own, and asks again at GLOS_EV_THEME. Every colour of a built-in theme is in the 8-bit desktop's palette. */
+#define GLOS_ROLE_FACE            0     /* a window's and a control's surface ... */
+#define GLOS_ROLE_FACE_TEXT       1     /* ... and text on it */
+#define GLOS_ROLE_FIELD           2     /* where text is typed and lists are: its ground ... */
+#define GLOS_ROLE_FIELD_TEXT      3
+#define GLOS_ROLE_LINE            4     /* outlines and rules */
+#define GLOS_ROLE_DIM             5     /* text and marks of what can't be used now */
+#define GLOS_ROLE_SHADE           6     /* a control's shaded side, a scroll bar's trough */
+#define GLOS_ROLE_DARK            7     /* strong fills: a header, a pressed button */
+#define GLOS_ROLE_MARK            8     /* the accent: the default button, the focus's mark ... */
+#define GLOS_ROLE_MARK_TEXT       9
+#define GLOS_ROLE_CHOSEN          10    /* what is selected: its ground ... */
+#define GLOS_ROLE_CHOSEN_TEXT     11
+#define GLOS_ROLE_LINK            12    /* a link's text, on a field */
+#define GLOS_ROLE_DESK            13    /* the desktop */
+#define GLOS_ROLE_FRAME           14    /* a window's border */
+#define GLOS_ROLE_TITLE           15    /* the title bar of the window with the focus ... */
+#define GLOS_ROLE_TITLE_TEXT      16
+#define GLOS_ROLE_TITLE_OFF       17    /* ... and of the others */
+#define GLOS_ROLE_TITLE_OFF_TEXT  18
+#define GLOS_ROLE_CLOSE           19    /* the focus's close box */
+#define GLOS_ROLE_BAR             20    /* the task bar ... */
+#define GLOS_ROLE_BAR_TEXT        21
+#define GLOS_ROLE_BAR_ON          22    /* ... and its button for the window with the focus */
+#define GLOS_ROLE_BAR_ON_TEXT     23
+#define GLOS_ROLE_CODE_KEYWORD    24    /* an editor's syntax colours, on a field */
+#define GLOS_ROLE_CODE_STRING     25
+#define GLOS_ROLE_CODE_COMMENT    26
+#define GLOS_ROLE_CODE_NUMBER     27
+#define GLOS_ROLE_CODE_TYPE       28
+#define GLOS_ROLE_CODE_DIRECTIVE  29
+#define GLOS_ROLE_ERROR           30    /* what went wrong, on a field */
+#define GLOS_ROLE_GOOD            31    /* what went right */
+#define GLOS_ROLES                32
+
+struct glos_theme {
+    unsigned size;
+    char name[16];              /* -> "slate", "dark", "contrast" ([desktop] theme) */
+    unsigned flags;             /* -> GLOS_THEME_ */
+    unsigned roles;             /* -> how many colours follow that GLOS knows (GLOS_ROLES today) */
+    unsigned colour[GLOS_ROLES];        /* -> by GLOS_ROLE_ */
+    int border;                 /* -> a window's border, in pixels */
+    int title;                  /* -> its title bar's height */
+    int bar;                    /* -> the task bar's height */
+    int scroll;                 /* -> a scroll bar's width */
+    int icon;                   /* -> a toolbar icon's side */
+    int text;                   /* -> the UI font's size: 0 small, 1 normal, 2 large */
+};
+#define GLOS_THEME_DARK     1   /* light text on dark grounds */
+#define GLOS_THEME_CONTRAST 2   /* made for the strongest contrast */
+
+struct glos_region {
+    unsigned size;
+    unsigned date;              /* -> the order of a date's parts: GLOS_DATE_ */
+    unsigned date_sep;          /* -> the character between them */
+    unsigned clock12;           /* -> 1: twelve hours with AM and PM */
+    unsigned decimal;           /* -> a number's decimal mark */
+    unsigned thousands;         /* -> the character between groups of three digits, 0 none */
+    unsigned first_day;         /* -> the week's first day: 0 Sunday, 1 Monday */
+    unsigned codepage;          /* -> the code page of file names and DOS programs' text; 0: what DOS says
+                                   (INT 21h 6601h) */
+    char layout[8];             /* -> the keyboard's layout ("us") */
+    char language[8];           /* -> the language of GLOS's own words ("en") */
+    int offset;                 /* -> local time's seconds east of UTC now (as TIME's) */
+};
+#define GLOS_DATE_YMD 0
+#define GLOS_DATE_DMY 1
+#define GLOS_DATE_MDY 2
+
+/* SETTINGS' events. */
+#define GLOS_EV_SETTING GLOS_EV(GLOS_AREA_SETTINGS, 1)  /* struct glos_ev_setting: a setting of a watched section
+                                                           changed (whoever changed it) */
+#define GLOS_EV_THEME   GLOS_EV(GLOS_AREA_SETTINGS, 2)  /* (the header alone) the theme changed: THEME again, and
+                                                           everything drawn again. To every app */
+struct glos_ev_setting {
+    struct glos_ev ev;
+    char section[32];
+    char key[32];
+};
+
+/* ================================================================== IDLE (0Dh): idle time, the saver, the screen's power
+ *
+ * GLOS starts the screen saver when nobody has touched the keyboard, the mouse or a pad for [saver] wait
+ * minutes, and turns the screen's power off [saver] power minutes after that (where the card can). Not while a
+ * full-screen program has the screen, an app holds the GPU, or any app has an AWAKE handle open. The first key
+ * or movement ends it (and is used up). */
+#define GLOS_IDLE_TIME  GLOS_FN(GLOS_AREA_IDLE, 0)      /* (EBX 0) -> EAX milliseconds since the last input */
+#define GLOS_IDLE_AWAKE GLOS_FN(GLOS_AREA_IDLE, 1)      /* struct glos_awake: the screen stays on while the handle
+                                                           (GLOS_HK_AWAKE) is open: a video, a game, a slide show */
+#define GLOS_IDLE_SAVER GLOS_FN(GLOS_AREA_IDLE, 2)      /* struct glos_saver: the saver's state; start it; end it */
+#define GLOS_IDLE_POWER GLOS_FN(GLOS_AREA_IDLE, 3)      /* struct glos_power: the screen's power */
+
+struct glos_awake {
+    unsigned size;
+    glos_handle handle;         /* -> until CLOSE */
+};
+
+struct glos_saver {
+    unsigned size;
+    unsigned what;              /* GLOS_SAVER_ */
+    unsigned on;                /* -> 1 the saver is on the screen now */
+    unsigned wait;              /* -> [saver] wait in seconds, 0 never */
+    unsigned awake;             /* -> how many AWAKE handles are open (any app's) */
+};
+#define GLOS_SAVER_STATE 0      /* only tell */
+#define GLOS_SAVER_START 1      /* now, whatever the idle time (GLOS_E_REFUSED: no desktop on the screen) */
+#define GLOS_SAVER_END   2
+
+struct glos_power {
+    unsigned size;
+    unsigned what;              /* 0 tell, 1 set */
+    unsigned state;             /* set: GLOS_POWER_; -> the state now */
+    unsigned can;               /* -> the states the card can be put in: a bit each (1 << GLOS_POWER_), 0 none (a
+                                   set is then GLOS_E_REFUSED) */
+};
+#define GLOS_POWER_ON      0
+#define GLOS_POWER_STANDBY 1
+#define GLOS_POWER_SUSPEND 2
+#define GLOS_POWER_OFF     3
+
+/* IDLE's events: to every app. */
+#define GLOS_EV_SAVER GLOS_EV(GLOS_AREA_IDLE, 1)        /* struct glos_ev_saver: the saver came on or went off */
+struct glos_ev_saver {
+    struct glos_ev ev;
+    unsigned on;
 };
 
 /* ================================================================== THREAD (07h): an app's own threads

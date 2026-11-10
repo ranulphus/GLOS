@@ -46,6 +46,8 @@
 #include "mgadisp.h"
 #include "mixer.h"
 #include "mm.h"
+#include "sched.h"
+#include "timer.h"
 #include "vm.h"
 
 void gfx_testcard(struct gfx_surface *s);
@@ -63,6 +65,12 @@ static struct {
     void (*home)(struct gfx_surface *fb);       /* ... and when it isn't the test card's */
     void (*evict)(void);                        /* ... and whose pixels are to leave the card's memory first */
     u8 trap;                                    /* a console job runs in a window: the VGA out of reach (M9) */
+    u8 list_ask, listed;                        /* the modes: to be listed by the VM thread; listed */
+    u8 power_ask;                               /* 1 + the DPMS state the VM thread is to set */
+    u8 power, power_can, power_known;           /* the screen's power now (DISPLAY_POWER_); what the card can; asked */
+    u32 nmodes;
+    struct display_mode modes[DISPLAY_MODES];
+    struct waitq asked;                         /* whoever waits for the list or the power */
 } d;
 
 /* The VGA's memory as the desktop leaves it: hidden behind a spare frame, or not there (a console job's). */
@@ -123,16 +131,13 @@ static int fits(const u8 *m)
     return bpp == d.bpp ? 2 : 0;
 }
 
-/* The mode for d.w x d.h x d.bpp, its description in info: its number, or 0. */
-static u32 find(u8 *info)
+/* The BIOS's list of its modes' numbers (4F00h wants 512 bytes, DOS's for a moment): how many, 0 if it gives
+   none (the VESA numbers 100h to 1FFh are then tried). */
+static u32 bios_modes(u16 *list, u32 max)
 {
-    u16 list[128];
-    u8 m[64];
     struct rmregs r;
-    u32 n = 0, i, best = 0, seg;
-    int score = 0, s;
-
-    memset(&r, 0, sizeof r);                    /* the BIOS's own list: 4F00h wants 512 bytes, DOS's for a moment */
+    u32 n = 0, seg;
+    memset(&r, 0, sizeof r);
     r.eax = 0x4800;
     r.ebx = 0x20;
     r.ss = vm.loader_cs;
@@ -149,7 +154,7 @@ static u32 find(u8 *info)
         r.es = (u16)seg;
         if (vbe(&r)) {
             u32 p = vm_lin(le16(vm_ptr(lin + 0x10)), le16(vm_ptr(lin + 0x0E)));
-            for (; n < ARRAY_SIZE(list) && p < 0x10FFFE && vm_rd16(p) != 0xFFFF; p += 2)
+            for (; n < max && p < 0x10FFFE && vm_rd16(p) != 0xFFFF; p += 2)
                 list[n++] = vm_rd16(p);
         }
         memset(&r, 0, sizeof r);
@@ -160,6 +165,16 @@ static u32 find(u8 *info)
         r.flags = 2;
         rm_call(0, &r, RM_INT, 0x21, 0, 0);
     }
+    return n;
+}
+
+/* The mode for d.w x d.h x d.bpp, its description in info: its number, or 0. */
+static u32 find(u8 *info)
+{
+    u16 list[128];
+    u8 m[64];
+    u32 n = bios_modes(list, ARRAY_SIZE(list)), i, best = 0;
+    int score = 0, s;
     for (i = 0; i < (n ? n : 0x100); i++) {
         u32 mode = n ? list[i] : 0x100 + i;
         if (describe(mode, m) && (s = fits(m)) > score) {
@@ -171,9 +186,72 @@ static u32 find(u8 *info)
     return best;
 }
 
+/* Every mode the desktop could have (the VM thread, once): graphics with a linear framebuffer, 8, 16 or 32
+   bits (5-5-5 counts as 16, as fits() takes it), within what [display] mode allows; by size, then depth. */
+static void list_modes(void)
+{
+    u16 list[128];
+    u8 m[64];
+    u32 n = bios_modes(list, ARRAY_SIZE(list)), i, k;
+    d.nmodes = 0;
+    for (i = 0; i < (n ? n : 0x100); i++) {
+        struct display_mode v, t;
+        u32 attr, bpp, model;
+        if (!describe(n ? list[i] : 0x100 + i, m))
+            continue;
+        attr = le16(m), bpp = m[0x19], model = m[0x1B];
+        if ((attr & 0x91) != 0x91 || m[0x18] != 1 || !le32(m + 0x28))
+            continue;
+        if (!(bpp == 8 && model == 4) && !((model == 6 || model == 4) && (bpp == 15 || bpp == 16 || bpp == 32)))
+            continue;
+        v.w = (u16)le16(m + 0x12), v.h = (u16)le16(m + 0x14), v.bits = bpp == 15 ? 16 : (u16)bpp;
+        if (v.w < 320 || v.w > 1600 || v.h < 200 || v.h > 1200)
+            continue;
+        for (k = 0; k < d.nmodes && (d.modes[k].w != v.w || d.modes[k].h != v.h || d.modes[k].bits != v.bits); k++) ;
+        if (k < d.nmodes || d.nmodes == DISPLAY_MODES)
+            continue;                           /* (16 bits twice: 5-5-5 and 5-6-5) */
+        for (k = d.nmodes++; k && (d.modes[k - 1].w > v.w || (d.modes[k - 1].w == v.w && (d.modes[k - 1].h > v.h
+             || (d.modes[k - 1].h == v.h && d.modes[k - 1].bits > v.bits)))); k--) {
+            t = d.modes[k - 1];
+            d.modes[k] = t;
+        }
+        d.modes[k] = v;
+    }
+    d.listed = 1;
+    kprintf("GLOS-DISPLAY modes=%u\n", d.nmodes);
+}
+
+/* The screen's power (VBE/PM, 4F10h; the VM thread): what the card can do, asked once; then the state. */
+static void power_set(int state)
+{
+    static const u8 dpms[4] = { 0x00, 0x01, 0x02, 0x04 };       /* on, stand-by, suspend, off */
+    struct rmregs r;
+    if (!d.power_known) {
+        d.power_known = 1;
+        memset(&r, 0, sizeof r);
+        r.eax = 0x4F10;
+        if (vbe(&r)) {
+            u32 bh = (r.ebx >> 8) & 0xFF;
+            d.power_can = (u8)(1u << DISPLAY_POWER_ON | (bh & 1 ? 1u << DISPLAY_POWER_STANDBY : 0)
+                               | (bh & 2 ? 1u << DISPLAY_POWER_SUSPEND : 0) | (bh & 4 ? 1u << DISPLAY_POWER_OFF : 0));
+        }
+        kprintf("GLOS-DISPLAY power can=%x\n", d.power_can);
+    }
+    if (state < 0 || !(d.power_can >> state & 1) || state == d.power)
+        return;
+    memset(&r, 0, sizeof r);
+    r.eax = 0x4F10;
+    r.ebx = 0x01 | (u32)dpms[state] << 8;
+    if (vbe(&r)) {
+        d.power = (u8)state;
+        kprintf("GLOS-DISPLAY power=%u\n", (u32)state);
+    }
+}
+
 static void text_mode(void)
 {
     struct rmregs r;
+    d.power = DISPLAY_POWER_ON;                 /* (a mode set turns the screen on) */
     memset(&r, 0, sizeof r);
     r.eax = 0x0003;
     vbe(&r);
@@ -198,6 +276,7 @@ static void palette(void)
 /* The desktop's mode set: 0, or -1 with why in the log. */
 static int mode_set(void)
 {
+    d.power = DISPLAY_POWER_ON;                 /* (a mode set turns the screen on) */
     struct gfx_fmt f;
     struct rmregs r;
     u8 m[64];
@@ -303,11 +382,72 @@ int display_ask(int what, u32 w, u32 h, u32 bpp)
     return r;
 }
 
-int display_vm_pending(void) { return d.ask != 0; }
+int display_vm_pending(void) { return d.ask || d.list_ask || d.power_ask; }
+
+/* The modes the card has, for DRAW's MODES (any thread that may wait): listed by the VM thread the first time,
+   which is waited for (ten seconds at most: a session may have the VM). How many there are (out: the first max
+   of them), or -1 if they aren't known yet. */
+int display_modes(struct display_mode *out, u32 max)
+{
+    u32 f = irq_save(), until = timer_ticks() + 10 * 1024u, i;
+    int n = -1;
+    if (!d.listed) {
+        d.list_ask = 1;
+        vm_kick();
+        while (!d.listed && thread_wait(&d.asked, until))
+            ;
+    }
+    if (d.listed) {
+        for (i = 0; i < d.nmodes && i < max; i++)
+            out[i] = d.modes[i];
+        n = (int)d.nmodes;
+    }
+    irq_restore(f);
+    return n;
+}
+
+/* The screen's power: asked of the VM thread, and waited for (two seconds at most). state -1: only ask what the
+   card can. The state now; *can the states the card has (a bit each), 0 if it has no such thing. */
+int display_power(int state, u32 *can)
+{
+    u32 f = irq_save(), until = timer_ticks() + 2 * 1024u;
+    if (!d.power_known || (state >= 0 && state != d.power && (d.power_can >> state & 1))) {
+        d.power_ask = (u8)(2 + state);
+        vm_kick();
+        while (d.power_ask && thread_wait(&d.asked, until))
+            ;
+    }
+    if (can)
+        *can = d.power_can;
+    irq_restore(f);
+    return d.power;
+}
+
+int display_power_now(void) { return d.power; }
+
+/* ... asked for without waiting (the desktop's thread, for the saver). */
+void display_power_post(int state)
+{
+    u32 f = irq_save();
+    d.power_ask = (u8)(2 + state);
+    vm_kick();
+    irq_restore(f);
+}
 
 void display_vm_turn(void)
 {
     int what = d.ask - 1;
+    if (d.list_ask || d.power_ask) {
+        u32 f;
+        if (d.list_ask)
+            list_modes();
+        if (d.power_ask)
+            power_set((int)d.power_ask - 2);
+        f = irq_save();
+        d.list_ask = d.power_ask = 0;
+        thread_wake(&d.asked);
+        irq_restore(f);
+    }
     if (!d.ask)
         return;
     d.ask = 0;

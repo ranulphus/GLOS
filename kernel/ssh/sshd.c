@@ -26,6 +26,7 @@
 #include "desk.h"
 #include "display.h"
 #include "io.h"
+#include "idle.h"
 #include "joy.h"
 #include "usb.h"
 #include "kprintf.h"
@@ -1234,6 +1235,31 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             kfree(b);
             ssh_chan_exit(ch, 0);
         }
+    } else if (!strcmp(cmd, "glos idle") || !strncmp(cmd, "glos idle ", 10)) {
+        /* The idle time, the saver and the screen's power (kernel/wm/idle.c). For tests: "+SECONDS" as if nobody
+           had touched anything for so long more; "saver" and "wake" start and end the saver now. */
+        char b[120];
+        const char *arg = cmd[9] ? cmd + 10 : "";
+        int bad = 0;
+        if (arg[0] == '+') {
+            u32 n = 0;
+            for (arg++; *arg >= '0' && *arg <= '9'; arg++)
+                n = n * 10 + (u32)(*arg - '0');
+            idle_pretend(n);
+        } else if (!strcmp(arg, "saver") || !strcmp(arg, "wake")) {
+            if (idle_saver_ask(arg[0] == 's') != 0) {
+                say(ch, 1, "glos idle: no desktop on the screen\n");
+                bad = 1;
+            }
+        } else if (arg[0]) {
+            say(ch, 1, "glos idle: usage: glos idle [+SECONDS | saver | wake]\n");
+            bad = 2;
+        }
+        if (!bad) {
+            idle_stat(b, sizeof b);
+            say(ch, 0, b);
+        }
+        ssh_chan_exit(ch, (u32)bad);
     } else if (!strcmp(cmd, "glos joy") || !strncmp(cmd, "glos joy ", 9)) {
         /* glos joy [a=X,Y|none] [b=X,Y|none] [buttons=NNNN] | off: the virtual game port's source, and its state
            (kernel/vm/vjoy.c, docs/gamepad.md) */

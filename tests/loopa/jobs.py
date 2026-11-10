@@ -4100,6 +4100,134 @@ def api_win_case(profile, vcard, card):
     return "  %-22s %s%s" % ("apiwin-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
+def api_set_case(profile, vcard, card):
+    """API 2.0's settings, theme, region and saver as they change (APITEST set; phase B step 5), under the agent:
+    the app sets and unsets settings itself (s); a watched section's change made over ssh is told (and one of a
+    section it doesn't watch is not); the theme changed to dark and back, told to the app and drawn by the
+    desktop; the region's clock; the saver: after its wait without input (glos idle +SECONDS pretends the time),
+    ended by a key that the app never sees, not started while the app holds an AWAKE handle (a), started and
+    ended by hand; then the screen's power off after its further wait where the card can, and on again."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("apiset-" + tag, profile, card, ["--card", vcard, "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
+        "--cmd", "SERSAY HX-START apiset", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1200)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    checks, info, p, out = {"listen": agent.listening()}, "", None, []
+
+    def said(word, limit=60):                   # a line the app wrote (all it has written is kept in `out`)
+        import select
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            if any(l == word or (word.endswith("*") and l.startswith(word[:-1])) for l in out):
+                return True
+            if select.select([p.stdout], [], [], 0.5)[0]:
+                data = os.read(p.stdout.fileno(), 4096).decode("latin-1").replace("\r", "")
+                if not data:
+                    return False
+                said.rest += data
+                *lines, said.rest = said.rest.split("\n")
+                out.extend(lines)
+        return False
+    said.rest = ""
+
+    def idle(arg=""):
+        m = re.search(r"saver=(\w+) wait=(\d+) power=(\d+) awake=(\d+) screen=(\w+)", agent.ssh("glos idle" + arg)[1])
+        return m.groups() if m else ()
+
+    def saver(want, limit=20):
+        t0 = time.time()
+        while time.time() - t0 < limit and idle()[:1] != (want,):
+            time.sleep(0.3)
+        return idle()[:1] == (want,)
+
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\APITEST.EXE set"], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        checks["watch"] = said("SET watch r=0", 240)
+        t0 = time.time()                        # (its window, with the keyboard)
+        while time.time() - t0 < 30 and '"APITEST S"' not in agent.ssh("glos desk")[1]:
+            time.sleep(0.3)
+        agent.ssh("glos key 0x1F")              # s: the app's own sets and unsets
+        checks["app-sets"] = said("SET ok=1") and said("SET refused r=10 why=*")
+        # A watched section's change, and one of a section it doesn't watch.
+        checks["theme-set"] = agent.ssh("glos config set desktop theme dark")[0] == 0
+        checks["theme-told"] = said("EV setting desktop theme") and said("EV theme dark flags=1 face=333333")
+        agent.ssh("glos config set input pointer_speed 2")
+        agent.ssh("glos config set desktop snap off")
+        checks["snap-told"] = said("EV setting desktop snap")
+        checks["unwatched"] = not any(l.startswith("EV setting input") for l in out)
+        agent.ssh("glos config unset input pointer_speed")
+        agent.ssh("glos config unset desktop snap")
+        agent.ssh("glos config unset desktop theme")
+        checks["theme-back"] = said("EV theme slate flags=0 face=cccccc")
+        checks["theme-bad"] = agent.ssh("glos config set desktop theme pink")[0] != 0
+        agent.ssh("glos config set region clock 12")
+        agent.ssh("glos config set region date dd/mm/yyyy")
+        agent.ssh("glos config set region decimal comma")
+        checks["region-told"] = said("EV setting region clock") and said("EV region date=1/ clock12=1 decimal=, thousands=44 first=1 cp=0")
+        for k in ("clock", "date", "decimal"):
+            agent.ssh("glos config unset region " + k)
+        checks["region-back"] = said("EV region date=0- clock12=0 decimal=. thousands=44 first=1 cp=0")
+        # The saver: after its wait; ended by a key nobody sees; kept off by an AWAKE handle; by hand.
+        checks["idle-off"] = idle()[:2] == ("off", "0")
+        agent.ssh("glos config set saver wait 1")
+        checks["not-yet"] = idle(" +30")[:2] == ("off", "60")
+        agent.ssh("glos idle +40")
+        checks["saver-on"] = saver("on") and said("EV saver 1")
+        n = len(out)
+        agent.ssh("glos key 0x30")              # b: it ends the saver, and is nobody's
+        checks["saver-off"] = saver("off") and said("EV saver 0")
+        agent.ssh("glos key 0x2E")              # c: the app's
+        checks["key-after"] = said("EV key 02E down=1")
+        checks["key-used-up"] = not any(l.startswith("EV key 030") for l in out[n:])
+        agent.ssh("glos key 0x1E")              # a: an AWAKE handle
+        checks["awake"] = said("EV awake 1 r=1")
+        agent.ssh("glos idle +200")
+        time.sleep(2)
+        checks["awake-holds"] = idle()[:1] == ("off",) and idle()[3:4] == ("1",)
+        agent.ssh("glos key 0x1E")
+        checks["awake-closed"] = said("EV awake 0 r=0")
+        agent.ssh("glos idle +200")
+        checks["saver-again"] = saver("on")
+        checks["wake"] = agent.ssh("glos idle wake")[0] == 0 and saver("off")
+        checks["by-hand"] = agent.ssh("glos idle saver")[0] == 0 and saver("on")
+        # The screen's power: off [saver] power minutes after the saver came on, where the card can; on with its end.
+        agent.ssh("glos config set saver power 1")
+        agent.ssh("glos idle +90")
+        t0 = time.time()
+        while time.time() - t0 < 30 and "GLOS-DISPLAY power can=" not in agent.log():
+            time.sleep(0.5)
+        m = re.search(r"GLOS-DISPLAY power can=(\w+)", agent.log())
+        can = int(m.group(1), 16) if m else -1
+        info += " power-can=%x" % can if m else " power-can=?"
+        time.sleep(2)
+        checks["screen-off"] = bool(m) and idle()[4:5] == (("off",) if can & 8 else ("on",))
+        agent.ssh("glos key 0x2E")
+        checks["screen-on"] = saver("off") and idle()[4:5] == ("on",)
+        agent.ssh("glos config unset saver power")
+        agent.ssh("glos config unset saver wait")
+        checks["wait-off"] = idle()[1:2] == ("0",)
+        agent.ssh("glos key 0x10")              # q
+        checks["end"] = said("SET-OK end") and p.wait(timeout=120) == 41
+        p = None
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        info += " timeout"
+    finally:
+        if p:
+            p.kill()
+    text = agent.wait()
+    checks["drawn"] = "GLOS-DESK theme=dark" in text and "GLOS-DESK theme=slate" in text
+    checks["saver-log"] = text.count("GLOS-IDLE saver on") == 3 and text.count("GLOS-IDLE saver off") == 3
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    bad = [k for k, v in checks.items() if not v]
+    if bad:
+        info += " last=%r" % out[-12:]
+    return "  %-22s %s%s" % ("apiset-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
 def thr_case(profile, card):
     """An app's own threads (API 2.0's THREAD, phase B step 4; tests/api/thrtest.c, docs/supervisor.md 12.7),
     THRTEST through the agent: every case of its own (threads computing, allocating and doing file I/O at once; a
@@ -4750,7 +4878,12 @@ CONFIG_SETS = [
     ("sound", "blaster", "A220 I5 D1 H5 T6", None), ("net", "hostname", "cfgtest", None),
     ("time", "sntp", "off", None), ("time", "server", "10.0.2.2:1123", None),
     ("time", "zone", "GMT0BST,M3.5.0/1,M10.5.0", None), ("time", "interval", "12", None), ("vnc", "enable", "on", None),
-    ("desktop", "start", "NOTEPAD.EXE", None), ("shell", "comspec", "C:\\COMMAND.COM", None),
+    ("desktop", "start", "NOTEPAD.EXE", None), ("desktop", "snap", "off", None),
+    ("desktop", "theme", "dark", "GLOS-DESK theme=dark"),
+    ("region", "date", "dd/mm/yyyy", None), ("region", "clock", "12", None), ("region", "decimal", "comma", None),
+    ("region", "thousands", "point", None), ("region", "first_day", "sunday", None), ("region", "codepage", "850", None),
+    ("saver", "wait", "240", None), ("saver", "power", "240", None),
+    ("shell", "comspec", "C:\\COMMAND.COM", None),
     ("shell", "autoexec", "C:\\AUTOEXEC.BAT", None), ("shell", "console", "C:\\KIOSK.BAT", None),
     ("shell", "envsize", "2048", None), ("shell", "options", "/NOVME", None),
     ("open", ".TXT", "NOTEPAD.EXE", None),
@@ -6185,7 +6318,7 @@ def native_case(profile, vcard, card, bits):
 
 CONTROL_CASES = [("bf6", "g200", "ne2kpci")]
 CONTROL_NUMBERS = {"gpu_watchdog": "1000", "repeat_rate": "20", "double_click": "400", "envsize": "2048",
-                   "memory": "8192", "interval": "12", "size": "16", "range": "2000"}
+                   "memory": "8192", "interval": "12", "size": "16", "range": "2000", "wait": "240", "power": "240"}
 CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\KIOSK.BAT", "options": "/NOVME",
                  "title": "CP Test", "args": "-a -b", "comspec": "C:\\COMMAND.COM",
                  "autoexec": "C:\\AUTOEXEC.BAT", "dir": "C:\\CP", "blaster": "A220 I7 D1 H5",
@@ -6247,6 +6380,8 @@ def control_script(schema):
     for k in schema:
         if k["section"] in ("open", "program") or k["type"] == "CFG_MODE":
             continue
+        if k["type"] == "CFG_CHOICE" and len(k["choices"]) == 1:
+            continue                            # (one choice: nothing to change it to)
         to(cfg_pages().index(k["section"]))
         want.append((k["section"], k["key"], value(k)))
     to(cfg_pages().index("open"))             # a kind of file
@@ -6603,6 +6738,7 @@ def main():
         if not a.boot:                          # ... and its windows under the user's hands, on a Matrox card and VBE
             wins = [c for c in [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")] if not a.profile or c[0] in a.profile]
             res += matrix(api_win_case, wins, a.jobs)
+            res += matrix(api_set_case, wins, a.jobs)   # ... and its settings, theme and saver as they change
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

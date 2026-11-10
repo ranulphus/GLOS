@@ -42,6 +42,7 @@
 #include "glos/api.h"
 #include "app.h"
 #include "deskint.h"
+#include "idle.h"
 #include "io.h"
 #include "keymap.h"
 #include "kprintf.h"
@@ -106,6 +107,8 @@ void desk_in(int what, int a, int b, int c)
             app_kill(foc_app, "hotkey");
     } else if (rt - rh < ARRAY_SIZE(ring)) {
         struct in *e = &ring[rt++ % ARRAY_SIZE(ring)];
+        if (what != DESK_RESET)
+            idle_touch();                       /* (somebody is there: kernel/wm/idle.c) */
         e->what = (u8)what;
         e->a = (short)a;
         e->b = (short)b;
@@ -452,11 +455,25 @@ static u32 key_char(u32 key)
     return keymap_char(key, (kmods & KM_SHIFT) != 0, (kmods & KM_CTRL) != 0, (kmods & KM_ALT) != 0, caps != 0, num != 0);
 }
 
+/* The saver is on the screen (idle.c): the input that ends it is used up here, so that the key that wakes the
+   screen types nothing and the press that wakes it presses nothing. A key that went down then is nobody's until
+   it has come up, and the mouse's buttons until they are all up. */
+static u8 asleep;                               /* this turn began with the saver on */
+static u8 woke_key[0x200 / 8];                  /* keys whose press was used up so */
+static u8 woke_buttons;                         /* ... and the mouse's buttons */
+
 static void key_event(struct wm *m, u32 key, int down)
 {
     struct wm_window *w = m->focus;
     u8 bit = (u8)(1u << (key & 7)), mod = 0;
-    int again = down && (isdown[key >> 3] & bit);       /* the keyboard repeating a key held down */
+    int again;
+
+    if (asleep || (woke_key[key >> 3] & bit)) {
+        woke_key[key >> 3] = (u8)(down && (asleep || (woke_key[key >> 3] & bit)) ? woke_key[key >> 3] | bit
+                                                                                  : woke_key[key >> 3] & ~bit);
+        return;
+    }
+    again = down && (isdown[key >> 3] & bit);           /* the keyboard repeating a key held down */
 
     isdown[key >> 3] = (u8)(down ? isdown[key >> 3] | bit : isdown[key >> 3] & ~bit);
     switch (key) {
@@ -687,6 +704,16 @@ static void mouse_to(struct wm *m, s32 x, s32 y, u32 now)
     u32 was = buttons, bit;
     s32 x0 = m->px, y0 = m->py, dx, dy;
 
+    if (asleep) {                               /* (the movement or press that ended the saver) */
+        woke_buttons = now != 0;
+        return;
+    }
+    if (woke_buttons) {
+        if (now)
+            return;
+        woke_buttons = 0;
+    }
+
     wm_pointer(m, x, y, 1);
     dx = m->px - x0, dy = m->py - y0;
     buttons = (u8)now;
@@ -719,7 +746,7 @@ static void wheel(struct wm *m, int notches)
     struct glos_event e;
     struct gfx_rect c;
     int part;
-    if (!notches || !(w = wm_hit(m, m->px, m->py, &part)) || part != WH_CLIENT || !w->owner)
+    if (asleep || !notches || !(w = wm_hit(m, m->px, m->py, &part)) || part != WH_CLIENT || !w->owner)
         return;
     wm_client(m, w, &c);
     memset(&e, 0, sizeof e);
@@ -784,6 +811,7 @@ void deskin_turn(struct wm *m)
 {
     struct in e;
     u32 f;
+    asleep = idle_saver() != 0;
     for (;;) {
         f = irq_save();
         if (rh == rt) {
@@ -799,9 +827,13 @@ void deskin_turn(struct wm *m)
         case DESK_POINT: mouse_to(m, e.a, e.b, e.c); break;
         case DESK_WHEEL: wheel(m, e.a); break;
         case DESK_RESET: forget(m); break;
-        case DESK_SYSKEY: to_shell(m, GLOS_EV_SYSKEY); break;
+        case DESK_SYSKEY:
+            if (!asleep)
+                to_shell(m, GLOS_EV_SYSKEY);
+            break;
         }
     }
+    asleep = 0;
     if (drag && !wm_find(m, drag_id))           /* (the window went while it was being moved) */
         drag_stop(m);
     pointer_shape(m);

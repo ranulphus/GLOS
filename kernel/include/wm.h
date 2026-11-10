@@ -120,7 +120,7 @@ struct wm {
     u8 ghost_on;
     struct gfx_rect ghost;              /* an outline above every window: where one is being moved or sized to */
     u32 next_id, count;
-    char clock[8], note[16];            /* the task bar's right end: the time, and a note (a remote session's, D35) */
+    char clock[12], note[16];            /* the task bar's right end: the time, and a note (a remote session's, D35) */
 };
 
 extern const struct wm_look wm_look_default;

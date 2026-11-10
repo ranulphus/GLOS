@@ -57,9 +57,11 @@ static inline unsigned swap(volatile unsigned *p, unsigned v)
      there. */
 void __glos_lock_start(void)
 {
-    unsigned long limit = 0xFFFFFFFFul - (unsigned long)__djgpp_base_address;
-    if (__dpmi_set_segment_limit(_my_cs(), limit) == 0 && __dpmi_set_segment_limit(__djgpp_app_DS, limit) == 0
-        && __dpmi_set_segment_limit(__djgpp_ds_alias, limit) == 0)
+    unsigned long limit = 0xFFFFFFFFul - (unsigned long)__djgpp_base_address, data = limit;
+    if (__dpmi_get_segment_limit(_my_ds()) > data)
+        data = 0xFFFFFFFFul;            /* (near pointers are on, glos_ptr's: the data selectors reach everywhere) */
+    if (__dpmi_set_segment_limit(_my_cs(), limit) == 0 && __dpmi_set_segment_limit(__djgpp_app_DS, data) == 0
+        && __dpmi_set_segment_limit(__djgpp_ds_alias, data) == 0)
         __djgpp_selector_limit = (int)limit;
     sig = glos_signal(GLOS_SIGNAL_ONE);
     __glos_threaded = 1;

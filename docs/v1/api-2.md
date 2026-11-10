@@ -345,6 +345,11 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 | REGION | The region's formats: dates, times, numbers, the first day of the week, the code page and the keyboard layout (new) |
 
 - **Events:** a setting changed; the theme changed.
+- **As built (step 5):**
+  - SECTIONS and KEYS list what the file sets, as 1.x's CONFIG did.
+  - Built-in themes: Slate, dark, high contrast; 32 colours by role; one set of sizes for now.
+  - The region's defaults: ISO dates, a 24-hour clock, 1,234.5, Monday first; one layout (us) and one language
+    (en) so far.
 
 ### 0Dh IDLE
 
@@ -356,6 +361,11 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 | POWER | The screen's power (DPMS through VBE where the card has it) (new) |
 
 - **Events:** the saver started or ended.
+- **As built (step 5):**
+  - The saver is GLOS's own black screen until phase D's savers; it is off unless `[saver] wait` is set.
+  - Its preview comes with EMBED (step 12).
+  - The input that ends the saver is used up.
+  - POWER is VBE/PM where the card answers it.
 
 ### 0Eh SYS
 

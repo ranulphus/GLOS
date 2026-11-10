@@ -27,6 +27,7 @@
 #include "glos/bootinfo.h"
 #include "arch.h"
 #include "io.h"
+#include "idle.h"
 #include "joy.h"
 #include "kcfg.h"
 #include "kprintf.h"
@@ -148,6 +149,7 @@ void joy_pad(int n, const struct joy_pad *p)
     if (p)
         j.pad[n] = *p;
     update();
+    idle_touch();                               /* (somebody is there: kernel/wm/idle.c) */
     if (pad_hook)
         pad_hook(n, p);
 }

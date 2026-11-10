@@ -35,6 +35,18 @@ int display_vga_port(u32 port);         /* 1: ... or its port */
 int display_quiet(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, int app);    /* a program's INT 10h while the desktop
                                                    has the screen: 1 if answered here, not by the BIOS */
 
+#define DISPLAY_MODES 64
+struct display_mode {
+    u16 w, h, bits;
+};
+int display_modes(struct display_mode *out, u32 max);   /* the modes the card has (listed by the VM thread the first
+                                                   time: may wait); how many, or -1 if not known yet */
+enum { DISPLAY_POWER_ON, DISPLAY_POWER_STANDBY, DISPLAY_POWER_SUSPEND, DISPLAY_POWER_OFF };
+int display_power(int state, u32 *can);         /* the screen's power (VBE/PM) set (-1: only asked); the state now, and
+                                                   in *can the states the card has, a bit each (0: none). May wait */
+void display_power_post(int state);             /* ... asked for without waiting */
+int display_power_now(void);                    /* ... as it is */
+
 int display_desktop_bpp(void);                  /* the desktop's depth, the screen its or held by a session; 0: none */
 int display_dac_bits(void);                     /* the DAC's bits a colour at 8 bits a pixel: 8, or 6 (VNC: M10) */
 

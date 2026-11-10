@@ -69,7 +69,7 @@ include config.mk
 -include config.local.mk
 
 DEV      := $(RETROGPU)/tools/dev
-CFG_SRCS := sdk/config/cfg.c sdk/config/tz.c   # GLOS.CFG's schema and time zones, shared everywhere
+CFG_SRCS := sdk/config/cfg.c sdk/config/tz.c sdk/config/region.c   # GLOS.CFG's schema, time zones and the region's formats, shared everywhere
 CP_SRCS := sdk/config/cp.c sdk/config/cp_tables.c       # DOS code pages (M10): libglos's and the host's
 .DEFAULT_GOAL := all
 
@@ -109,7 +109,7 @@ HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:ke
               vpic_test:kernel/vm/vpic.c png_test:kernel/lib/png.c uhci_test:kernel/drv/uhcitd.c \
               hid_test:kernel/drv/hidparse.c xpad_test:kernel/drv/xpad.c \
               usbkbd_test:kernel/drv/usbkbd.c handle_test:kernel/app/handle.c \
-              tsync_test:kernel/app/tsync.c
+              tsync_test:kernel/app/tsync.c region_test:sdk/config/region.c theme_test:kernel/wm/theme.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
 host-test-run:
@@ -312,11 +312,11 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/api2win.c kernel/app/api2in.c kernel/app/api2thr.c kernel/app/tsync.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
-KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS)) build/kernel/sdk_cfg.o build/kernel/sdk_tz.o
+         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/api2win.c kernel/app/api2in.c kernel/app/api2thr.c kernel/app/api2set.c kernel/app/tsync.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/theme.c kernel/wm/idle.c kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
+KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS)) build/kernel/sdk_cfg.o build/kernel/sdk_tz.o build/kernel/sdk_region.o
 # GLOS.CFG's schema (sdk/config/cfg.c, include/glos/config.h; M9) and time zones (sdk/config/tz.c; M10): shared
 # with the loader and the Control Panel.
-build/kernel/sdk_cfg.o build/kernel/sdk_tz.o: build/kernel/sdk_%.o: sdk/config/%.c include/glos/config.h include/glos/tz.h
+build/kernel/sdk_cfg.o build/kernel/sdk_tz.o build/kernel/sdk_region.o: build/kernel/sdk_%.o: sdk/config/%.c include/glos/config.h include/glos/tz.h include/glos/region.h
 	@mkdir -p $(dir $@)
 	$(Q)echo "  KCC     $<"
 	$(Q)$(HOST_CC) $(KCFLAGS) -MMD -MP -c -o $@ $<

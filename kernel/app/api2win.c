@@ -8,6 +8,7 @@
  * happens on the desktop's thread, so the app's table of handles changes
  * with interrupts off where a window's handle is made or closed. */
 #include "api2int.h"
+#include "display.h"
 #include "desk.h"
 #include "gpu.h"
 #include "mgadisp.h"
@@ -541,6 +542,29 @@ static int winvram(struct app *a, struct trapframe *tf)
     return (r = desk_win_vram(a, id, q.offset, q.pitch)) != 0 ? a2_fail(tf, (u32)r) : a2_ok(tf, 0);
 }
 
+/* MODES: the screen modes the card has (the display lists them once, by the VM thread: this may wait for it). */
+static int modes(struct trapframe *tf)
+{
+    static struct display_mode list[DISPLAY_MODES];     /* (under the app's lock, and filled in one piece) */
+    struct glos_modes q;
+    u32 size, i, give;
+    int n;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if ((n = display_modes(list, DISPLAY_MODES)) < 0)
+        return a2_fail(tf, GLOS_E_REFUSED);     /* (the system VM is busy: again later) */
+    q.count = (u32)n;
+    give = q.room < (u32)n ? q.room : (u32)n;
+    for (i = 0; i < give; i++) {
+        struct glos_mode m = { list[i].w, list[i].h, list[i].bits };
+        if (user_wr((u16)tf->ds, q.buffer + i * sizeof m, &m, sizeof m) != 0)
+            return a2_fail(tf, GLOS_E_ARGUMENT);
+    }
+    if (a2_wr(tf, &q, sizeof q, size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    return q.room < (u32)n ? a2_fail(tf, GLOS_E_ROOM) : a2_ok(tf, 0);
+}
+
 int api2_draw(struct app *a, struct trapframe *tf, u32 n)
 {
     switch (n) {
@@ -554,6 +578,7 @@ int api2_draw(struct app *a, struct trapframe *tf, u32 n)
     case GLOS_DRAW_VRAM & 0xFF: return vram(a, tf);
     case GLOS_DRAW_WINVRAM & 0xFF: return winvram(a, tf);
     case GLOS_DRAW_BLIT & 0xFF: return blit(a, tf);
+    case GLOS_DRAW_MODES & 0xFF: return modes(tf);
     }
     return a2_fail(tf, GLOS_E_FUNCTION);
 }

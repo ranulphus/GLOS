@@ -3,6 +3,7 @@
  * DJGPP's flat model), ECX and EDX 0 (glos/api2.h). */
 #include <dpmi.h>
 #include <string.h>
+#include <sys/exceptn.h>
 #include <sys/nearptr.h>
 
 #include <glos/glos2.h>
@@ -362,7 +363,146 @@ int glos_input_mode(unsigned flags)
 void *glos_ptr(unsigned linear)
 {
     static int on;
-    if (!linear || (!on && !(on = __djgpp_nearptr_enable())))
+    if (!linear)
         return 0;
+    if (!on) {
+        if (!(on = __djgpp_nearptr_enable()))
+            return 0;
+        /* (near pointers reach everywhere through the data segment's limit; the threads a program makes run on
+           DJGPP's second data selector, which gets the same limit: glos2wrap.c) */
+        __dpmi_set_segment_limit(__djgpp_ds_alias, 0xFFFFFFFFul);
+    }
     return (void *)(linear + __djgpp_conventional_base);
+}
+
+/* ---- settings, the screen's modes, idle time */
+
+int glos_setting_get(const char *section, const char *key, char *value, unsigned room, int *set)
+{
+    struct glos_setting q;
+    int r;
+    memset(&q, 0, sizeof q);
+    q.size = sizeof q;
+    q.section = (unsigned)section;
+    q.key = (unsigned)key;
+    q.value = (unsigned)value;
+    q.room = room;
+    r = raw(GLOS_SETTINGS_GET, &q, 0);
+    if ((!r || r == GLOS_E_ROOM) && set)
+        *set = (int)q.set;
+    return r;
+}
+
+int glos_setting_set(const char *section, const char *key, const char *value, unsigned *when, char *why, unsigned room)
+{
+    struct glos_setting q;
+    int r;
+    memset(&q, 0, sizeof q);
+    q.size = sizeof q;
+    q.section = (unsigned)section;
+    q.key = (unsigned)key;
+    q.value = (unsigned)value;
+    q.why = (unsigned)why;
+    q.why_room = why ? room : 0;
+    if (why && room)
+        why[0] = 0;
+    r = raw(GLOS_SETTINGS_SET, &q, 0);
+    if (!r && when)
+        *when = q.when;
+    return r;
+}
+
+static int list(unsigned fn, const char *section, char *buf, unsigned room)
+{
+    struct glos_setting_list q;
+    memset(&q, 0, sizeof q);
+    q.size = sizeof q;
+    q.section = (unsigned)section;
+    q.buffer = (unsigned)buf;
+    q.room = room;
+    return raw(fn, &q, 0);
+}
+
+int glos_setting_sections(char *buf, unsigned room) { return list(GLOS_SETTINGS_SECTIONS, 0, buf, room); }
+int glos_setting_keys(const char *section, char *buf, unsigned room) { return list(GLOS_SETTINGS_KEYS, section, buf, room); }
+
+int glos_schema(unsigned index, struct glos_schema *s, char *buf, unsigned room)
+{
+    memset(s, 0, sizeof *s);
+    s->size = sizeof *s;
+    s->index = index;
+    s->buffer = (unsigned)buf;
+    s->room = room;
+    return raw(GLOS_SETTINGS_SCHEMA, s, 0);
+}
+
+int glos_setting_watch(const char *section, int on)
+{
+    struct glos_setting_watch q = { sizeof q, (unsigned)section, on != 0 };
+    return raw(GLOS_SETTINGS_WATCH, &q, 0);
+}
+
+int glos_theme(struct glos_theme *t)
+{
+    memset(t, 0, sizeof *t);
+    t->size = sizeof *t;
+    return raw(GLOS_SETTINGS_THEME, t, 0);
+}
+
+int glos_region(struct glos_region *r)
+{
+    memset(r, 0, sizeof *r);
+    r->size = sizeof *r;
+    return raw(GLOS_SETTINGS_REGION, r, 0);
+}
+
+int glos_modes(struct glos_mode *out, unsigned room, unsigned *count)
+{
+    struct glos_modes q = { sizeof q, (unsigned)out, room, 0 };
+    int r = raw(GLOS_DRAW_MODES, &q, 0);
+    if (count)
+        *count = q.count;
+    return r;
+}
+
+unsigned glos_idle(void)
+{
+    unsigned v = 0;
+    return raw(GLOS_IDLE_TIME, 0, &v) == 0 ? v : 0;
+}
+
+glos_handle glos_awake(void)
+{
+    struct glos_awake q = { sizeof q, 0 };
+    int r = raw(GLOS_IDLE_AWAKE, &q, 0);
+    if (r)
+        last_error = r;
+    return r ? 0 : q.handle;
+}
+
+int glos_saver(unsigned what, struct glos_saver *state)
+{
+    struct glos_saver q;
+    int r;
+    memset(&q, 0, sizeof q);
+    q.size = sizeof q;
+    q.what = what;
+    r = raw(GLOS_IDLE_SAVER, &q, 0);
+    if (!r && state)
+        *state = q;
+    return r;
+}
+
+int glos_power(int set, unsigned state, struct glos_power *now)
+{
+    struct glos_power q;
+    int r;
+    memset(&q, 0, sizeof q);
+    q.size = sizeof q;
+    q.what = set != 0;
+    q.state = state;
+    r = raw(GLOS_IDLE_POWER, &q, 0);
+    if (now)
+        *now = q;
+    return r;
 }

@@ -500,7 +500,7 @@ void session_exec(const struct trapframe *tf)
     ses.app = psp == vm.loader_psp && job.app;
     ses.env_seg = 0;
     {                                           /* TZ (M10), the profile's strings, then the job's own (M9) over */
-        static char add[96 + BI_PROF_ENV + sizeof job.env];         /* them */
+        static char add[128 + BI_PROF_ENV + sizeof job.env];         /* them */
         const char *e;
         u32 n = 0, l;
         if (psp == vm.loader_psp && kcfg_loaded()) {  /* (DJGPP's localtime reads it; DOS keeps local time), */
@@ -513,6 +513,19 @@ void session_exec(const struct trapframe *tf)
                 memcpy(add, "TZ=", 3);
                 kcfg_get("time", "zone", add + 3, 48);
                 n = (u32)strlen(add) + 1;
+            }
+        }
+        if (psp == vm.loader_psp && kcfg_loaded()) {   /* [region] codepage, when it names one: GLOSCP, which GLOS's */
+            char cp[8];                         /* programs read before they ask DOS (glos/cp.h) */
+            int own = 0;
+            for (e = ses.prof ? ses.prof->env : ""; *e; e += strlen(e) + 1)
+                own |= same_var(e, "GLOSCP=");
+            for (e = job.env; *e; e += strlen(e) + 1)
+                own |= same_var(e, "GLOSCP=");
+            if (!own && kcfg_get("region", "codepage", cp, sizeof cp) == 1 && cp[0] >= '0' && cp[0] <= '9') {
+                memcpy(add + n, "GLOSCP=", 7);
+                memcpy(add + n + 7, cp, strlen(cp) + 1);
+                n += 7 + (u32)strlen(cp) + 1;
             }
         }
         if (psp == vm.loader_psp && crystal_blaster() && !env_has(tf, psp, "BLASTER=")) {

@@ -93,6 +93,9 @@ u32 desk_stat(char *buf, u32 max);      /* glos desk: its windows, a line each *
 
 void deskin_pointer_speed(int speed);   /* [input] pointer_speed (M9) */
 void deskin_double_click(u32 ms);       /* [input] double_click: the title bar's (the toolkit has its own) */
+struct theme;
+const struct theme *desk_theme(void);   /* the theme in force (kernel/wm/theme.c) */
+int desk_theme_set(const char *name);   /* [desktop] theme: 0, or -1 no such theme */
 void deskin_snap(int on);               /* a window dragged to the screen's edge snaps there ([desktop] snap) */
 struct app;
 void desk_shell(struct app *a, int on);

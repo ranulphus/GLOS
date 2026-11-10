@@ -21,4 +21,7 @@ void kcfg_apply(const char *section, const char *key, const char *value);   /* a
 void kcfg_desktop_started(void);        /* [desktop] start's programs started */
 void kcfg_on_change(void (*apply)(const char *section, const char *key, const char *value));
 
+struct region;
+const struct region *kcfg_region(void); /* [region] as it is now (include/glos/region.h) */
+
 #endif

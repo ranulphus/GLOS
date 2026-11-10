@@ -8,8 +8,8 @@
 
 /* ---- the schema */
 
-const char *const cfg_sections[] = { "display", "input", "joystick", "usb", "sound", "net", "time", "cache", "memory",
-                                     "vnc", "desktop", "shell", "open", "program",
+const char *const cfg_sections[] = { "display", "input", "joystick", "usb", "sound", "net", "time", "region", "cache",
+                                     "memory", "vnc", "desktop", "saver", "shell", "open", "program",
                                      0 };
 
 const struct cfg_key cfg_schema[] = {
@@ -63,6 +63,23 @@ const struct cfg_key cfg_schema[] = {
       "Where the PC is, as a POSIX TZ string: GMT0BST,M3.5.0/1,M10.5.0 is the United Kingdom's" },
     { "time", "interval", CFG_NUMBER, CFG_NOW, 1, 168, 0, "24", "&Ask again (hours)",
       "How often the time server is asked again" },
+    /* [region]: how dates, times and numbers are written (API 2.0 step 5; include/glos/region.h) */
+    { "region", "date", CFG_CHOICE, CFG_NOW, 0, 0, "yyyy-mm-dd|dd/mm/yyyy|dd.mm.yyyy|dd-mm-yyyy|mm/dd/yyyy", "yyyy-mm-dd",
+      "&Date", "How a date is written: the order of the year, the month and the day, and what is between them" },
+    { "region", "clock", CFG_CHOICE, CFG_NOW, 0, 0, "24|12", "24", "&Clock (hours)",
+      "The time on a clock of 24 hours, or of 12 with AM and PM" },
+    { "region", "decimal", CFG_CHOICE, CFG_NOW, 0, 0, "point|comma", "point", "Decimal &mark",
+      "What is written between a number's whole part and the rest" },
+    { "region", "thousands", CFG_CHOICE, CFG_NOW, 0, 0, "comma|point|space|none", "comma", "&Thousands mark",
+      "What is written between a number's groups of three digits" },
+    { "region", "first_day", CFG_CHOICE, CFG_NOW, 0, 0, "monday|sunday", "monday", "&Week starts on",
+      "The first day of the week in a calendar" },
+    { "region", "codepage", CFG_CHOICE, CFG_PROGRAM, 0, 0, "dos|437|850|852|866|737", "dos", "Code pa&ge",
+      "The characters of file names and of DOS programs' text: what DOS says its code page is, or one named here" },
+    { "region", "layout", CFG_CHOICE, CFG_NOW, 0, 0, "us", "us", "&Keyboard layout",
+      "Which character each key types" },
+    { "region", "language", CFG_CHOICE, CFG_APP, 0, 0, "en", "en", "&Language",
+      "The language of GLOS's own words" },
     /* [cache]: the disk cache (docs/disk-cache.md) */
     { "cache", "enabled", CFG_CHOICE, CFG_NOW, 0, 0, "on|off|verify|count", "on", "&Disk cache",
       "GLOS keeps what DOS reads from the hard disks in spare memory; verify also reads the disk and compares, count "
@@ -79,6 +96,17 @@ const struct cfg_key cfg_schema[] = {
     /* [desktop] (M9) */
     { "desktop", "start", CFG_TEXT, CFG_DESKTOP, 0, 120, "line", "", "&Start with the desktop",
       "Programs started when the desktop starts, beside GLOS.EXE (FILES.EXE draws the desktop's icons)" },
+    { "desktop", "snap", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "S&nap windows at the screen's edges",
+      "A window dragged to the screen's top fills it; dragged to a side, it fills that half" },
+    { "desktop", "theme", CFG_CHOICE, CFG_NOW, 0, 0, "slate|dark|contrast", "slate", "&Theme",
+      "The desktop's colours: Slate, a dark one, or one of the strongest contrast" },
+    /* [saver]: the screen saver and the screen's power (API 2.0 step 5; kernel/wm/idle.c) */
+    { "saver", "wait", CFG_NUMBER, CFG_NOW, 1, 240, "off", "off", "&Wait (minutes)",
+      "The saver comes on when nobody has touched the keyboard or the mouse for so long (off: never)" },
+    { "saver", "saver", CFG_CHOICE, CFG_NOW, 0, 0, "blank", "blank", "&Saver",
+      "What the saver shows: blank, a black screen" },
+    { "saver", "power", CFG_NUMBER, CFG_NOW, 1, 240, "off", "off", "Screen &off after (minutes more)",
+      "The screen's power is turned off so long after the saver came on, where the card can (off: never)" },
     /* [shell] (M3, M4e) */
     { "shell", "comspec", CFG_PATH, CFG_RESTART, 0, 79, 0, "", "&COMMAND.COM",
       "The command interpreter for batch files and the console (empty: COMSPEC, or found)" },

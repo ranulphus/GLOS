@@ -21,7 +21,7 @@
 #include <glos/gui.h>
 
 #define MAXVAL 256
-#define MAXCTL 48
+#define MAXCTL 96                       /* (the schema's settings: 53 with API 2.0 step 5's) */
 #define MAXPROG 64
 #define TRY_SECONDS 15
 
@@ -60,8 +60,8 @@ static const char *const modes[] = { "none", "640x480x8", "640x480x16", "640x480
 static char mode_extra[24];                     /* the file's mode, if it isn't one of these */
 
 static const char *const titles[] = { "Display", "Input", "Joystick", "USB", "Sound", "Network", "Date and Time",
-                                      "Disk Cache", "Memory", "Remote Desktop", "Desktop", "Shell", "File Types",
-                                      "Programs" };
+                                      "Region", "Disk Cache", "Memory", "Remote Desktop", "Desktop", "Saver", "Shell",
+                                      "File Types", "Programs" };
                                                 /* (cfg_sections' order) */
 
 static char *dup(const char *s) { return s ? strcpy(malloc(strlen(s) + 1), s) : NULL; }
