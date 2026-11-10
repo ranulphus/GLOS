@@ -375,6 +375,101 @@ void *glos_ptr(unsigned linear)
     return (void *)(linear + __djgpp_conventional_base);
 }
 
+/* ---- the clipboard, drag and drop */
+
+glos_handle glos_clip_open(int write)
+{
+    struct glos_clip_open q = { sizeof q, write != 0, 0, 0 };
+    int r = raw(GLOS_CLIP_OPEN, &q, 0);
+    if (r)
+        last_error = r;
+    return r ? 0 : q.handle;
+}
+
+int glos_clip_add(glos_handle t, unsigned format, const void *data, unsigned length)
+{
+    struct glos_clip_data q = { sizeof q, t, format, (unsigned)data, length, 0, 0 };
+    return raw(GLOS_CLIP_PUT, &q, 0);
+}
+
+int glos_clip_read(glos_handle t, unsigned format, void *buf, unsigned room, unsigned offset, unsigned *total)
+{
+    struct glos_clip_data q = { sizeof q, t, format, (unsigned)buf, room, offset, 0 };
+    unsigned n = 0;
+    int r = raw(GLOS_CLIP_GET, &q, &n);
+    if (!r && total)
+        *total = q.total;
+    return r ? -r : (int)n;
+}
+
+int glos_clip_formats(glos_handle t, struct glos_clip_formats *f)
+{
+    memset(f, 0, sizeof *f);
+    f->size = sizeof *f;
+    f->handle = t;
+    return raw(GLOS_CLIP_FORMATS, f, 0);
+}
+
+unsigned glos_clip_format(const char *name)
+{
+    struct glos_clip_format q = { sizeof q, (unsigned)name, 0 };
+    int r = raw(GLOS_CLIP_FORMAT, &q, 0);
+    if (r)
+        last_error = r;
+    return r ? 0 : q.format;
+}
+
+int glos_clip_put(unsigned format, const void *data, unsigned length)
+{
+    glos_handle t = glos_clip_open(1);
+    int r;
+    if (!t)
+        return last_error;
+    if ((r = glos_clip_add(t, format, data, length)) != 0)
+        glos_set(t, GLOS_PROP_CLIP_COMMIT, 0);
+    glos_close(t);
+    return r;
+}
+
+int glos_clip_get(unsigned format, void *buf, unsigned room, unsigned *length)
+{
+    glos_handle t = glos_clip_open(0);
+    unsigned total = 0;
+    int n;
+    if (!t)
+        return last_error;
+    n = glos_clip_read(t, format, buf, room, 0, &total);
+    glos_close(t);
+    if (length)
+        *length = n < 0 ? 0 : total;
+    return n < 0 ? -n : total > room ? GLOS_E_ROOM : 0;
+}
+
+int glos_dnd(glos_handle w, glos_handle data, unsigned effects, const unsigned *picture, unsigned pw, unsigned ph)
+{
+    struct glos_dnd q = { sizeof q, w, data, effects, (unsigned)picture, pw, ph };
+    return raw(GLOS_DND_DRAG, &q, 0);
+}
+
+int glos_dnd_target(glos_handle w, unsigned effects, const unsigned *formats, unsigned count)
+{
+    struct glos_dnd_target q;
+    memset(&q, 0, sizeof q);
+    q.size = sizeof q;
+    q.window = w;
+    q.effects = effects;
+    q.count = count <= GLOS_CLIP_ITEMS ? count : GLOS_CLIP_ITEMS + 1;
+    if (formats && count <= GLOS_CLIP_ITEMS)
+        memcpy(q.format, formats, count * sizeof *formats);
+    return raw(GLOS_DND_TARGET, &q, 0);
+}
+
+int glos_dnd_answer(glos_handle w, unsigned effect)
+{
+    struct glos_dnd_answer q = { sizeof q, w, effect };
+    return raw(GLOS_DND_ANSWER, &q, 0);
+}
+
 /* ---- settings, the screen's modes, idle time */
 
 int glos_setting_get(const char *section, const char *key, char *value, unsigned room, int *set)

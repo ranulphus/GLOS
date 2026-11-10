@@ -226,6 +226,10 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   - rich text (the toolkit's styled runs, for Notepad's highlighted copies).
 - **No limit but memory.** The data is held by GLOS, so it stays when the app that put it ends.
 - **Events:** the clipboard changed.
+- **As built (step 6):**
+  - What a transaction put becomes the clipboard at its CLOSE, all at once.
+  - GET reads from an offset; one format's data is 16 MB at most.
+  - Up to 8 formats at once; up to 64 private formats.
 
 ### 06h DND (drag and drop)
 
@@ -239,6 +243,11 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   - for the target: enter, over (place), leave, drop (with the data);
   - for the source: the effect done.
 - **Who takes part:** apps, and GLOS's own desktop (files dropped on the desktop go to the shell app).
+- **As built (step 6):**
+  - DRAG takes a writing clipboard transaction as the drag's data; a promise of data at the drop isn't built.
+  - A target is a whole window; its app answers by the pointer's place.
+  - The drop gives the target a reading transaction on the data.
+  - The picture is opaque and goes beside the pointer, whose shape says what a drop would do.
 
 ### 07h THREAD
 

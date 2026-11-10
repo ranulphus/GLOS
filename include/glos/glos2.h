@@ -87,6 +87,28 @@ glos_handle glos_awake(void);                           /* the screen stays on u
 int glos_saver(unsigned what, struct glos_saver *state);        /* GLOS_SAVER_; state may be NULL */
 int glos_power(int set, unsigned state, struct glos_power *now);        /* the screen's power told (set 0) or set */
 
+/* ---- the clipboard (CLIP) and drag and drop (DND) */
+/* The whole clipboard in one format, the simple way: put (it becomes the clipboard, alone), and get (into buf;
+   *length its whole length: more than room, it was cut and the answer is GLOS_E_ROOM; GLOS_E_ARGUMENT: the
+   clipboard has nothing in that format). */
+int glos_clip_put(unsigned format, const void *data, unsigned length);
+int glos_clip_get(unsigned format, void *buf, unsigned room, unsigned *length);
+/* Transactions, for several formats at once and for large data. */
+glos_handle glos_clip_open(int write);                  /* 0 if refused; glos_close() ends it (a writing one's data
+                                                           becomes the clipboard then) */
+int glos_clip_add(glos_handle t, unsigned format, const void *data, unsigned length);
+/* Up to room bytes of a format from byte `offset` on: how many were read (0 at its end), or minus a GLOS_E_ code.
+   *total (if not NULL): its whole length. */
+int glos_clip_read(glos_handle t, unsigned format, void *buf, unsigned room, unsigned offset, unsigned *total);
+int glos_clip_formats(glos_handle t, struct glos_clip_formats *f);     /* t 0: the clipboard as it is now */
+unsigned glos_clip_format(const char *name);            /* a private format's number, 0 if refused */
+/* Starts a drag from window w, where a button is down: data a writing transaction with what is offered (closed
+   by this call), effects GLOS_DND_ bits, picture pw by ph pixels of 0xAARRGGBB or NULL. */
+int glos_dnd(glos_handle w, glos_handle data, unsigned effects, const unsigned *picture, unsigned pw, unsigned ph);
+/* Window w (0: the bare desktop) takes drops of these formats with these effects (effects 0: no more). */
+int glos_dnd_target(glos_handle w, unsigned effects, const unsigned *formats, unsigned count);
+int glos_dnd_answer(glos_handle w, unsigned effect);   /* what a drop where the pointer is would do (0: nothing) */
+
 /* ---- threads (THREAD; docs/supervisor.md 12.7)
  *
  * A thread of the app's own runs fn(arg) on a stack libglos allocates (stack bytes: 0 for 64 KB, at least 16 KB),

@@ -874,6 +874,138 @@ struct glos_ev_saver {
     unsigned on;
 };
 
+/* ================================================================== CLIP (05h): the clipboard
+ *
+ * The clipboard holds one thing in up to GLOS_CLIP_ITEMS formats at once. GLOS keeps it, so it stays when the
+ * app that put it there ends. It is read and written through a transaction (a handle, GLOS_HK_CLIP):
+ *   - to write: OPEN for writing, PUT each format, CLOSE. At CLOSE what was put becomes the clipboard, all at
+ *     once (a transaction with no PUT changes nothing);
+ *   - to read: OPEN for reading, FORMATS, GET, CLOSE. The transaction sees the clipboard as it was at OPEN,
+ *     whatever is put meanwhile.
+ * There is no limit to the data's size but memory. */
+#define GLOS_CLIP_OPEN    GLOS_FN(GLOS_AREA_CLIP, 0)    /* struct glos_clip_open: a transaction */
+#define GLOS_CLIP_PUT     GLOS_FN(GLOS_AREA_CLIP, 1)    /* struct glos_clip_data: a format's data into a writing one */
+#define GLOS_CLIP_GET     GLOS_FN(GLOS_AREA_CLIP, 2)    /* struct glos_clip_data: a format's data from a reading one */
+#define GLOS_CLIP_FORMATS GLOS_FN(GLOS_AREA_CLIP, 3)    /* struct glos_clip_formats: the formats there are */
+#define GLOS_CLIP_FORMAT  GLOS_FN(GLOS_AREA_CLIP, 4)    /* struct glos_clip_format: a private format's number */
+
+/* The formats every program knows. A private format is a number GLOS gives a name (FORMAT). */
+#define GLOS_CLIP_TEXT    1     /* text, UTF-8, no NUL at its end */
+#define GLOS_CLIP_IMAGE   2     /* a picture: struct glos_clip_image, then h rows of w pixels, 0xAARRGGBB each */
+#define GLOS_CLIP_FILES   3     /* files and folders: each one's full DOS path and a NUL */
+#define GLOS_CLIP_RICH    4     /* styled text: the toolkit's runs (docs/v1/toolkit-2.md) */
+#define GLOS_CLIP_PRIVATE 0x100 /* private formats' numbers are from here up */
+#define GLOS_CLIP_ITEMS   8     /* formats at once */
+
+struct glos_clip_image {
+    unsigned w, h;
+};
+
+struct glos_clip_open {
+    unsigned size;
+    unsigned write;             /* 0 to read, 1 to write */
+    glos_handle handle;         /* -> the transaction, until CLOSE */
+    unsigned serial;            /* -> how many times the clipboard has been changed since GLOS started */
+};
+
+struct glos_clip_data {
+    unsigned size;
+    glos_handle handle;
+    unsigned format;
+    unsigned data;              /* PUT: the data. GET: where it goes */
+    unsigned length;            /* PUT: its length. GET: the room there */
+    unsigned offset;            /* GET: from this byte of the data on (large data, a piece at a time) */
+    unsigned total;             /* -> GET: the data's whole length (what was read: the lesser of length and
+                                   total - offset) */
+};
+
+struct glos_clip_formats {
+    unsigned size;
+    glos_handle handle;         /* a transaction; or 0: the clipboard as it is now */
+    unsigned count;             /* -> how many formats it has (0: empty) */
+    unsigned format[GLOS_CLIP_ITEMS];   /* -> each ... */
+    unsigned length[GLOS_CLIP_ITEMS];   /* -> ... and its data's length */
+    unsigned serial;            /* -> the clipboard's count of changes when this was it (0: never the clipboard) */
+};
+
+struct glos_clip_format {
+    unsigned size;
+    unsigned name;              /* the format's name: up to 47 printable characters without spaces
+                                   ("glos.gui.widgets"). The same name is the same number for every program,
+                                   until GLOS ends */
+    unsigned format;            /* -> its number */
+};
+
+/* A transaction's properties. */
+#define GLOS_PROP_CLIP_COMMIT GLOS_PROP(GLOS_HK_CLIP, 0)       /* a writing one: 1 (as it starts) what was put
+                                                                   becomes the clipboard at CLOSE, 0 it is dropped */
+
+/* CLIP's event: to every app. */
+#define GLOS_EV_CLIP GLOS_EV(GLOS_AREA_CLIP, 1)         /* struct glos_ev_clip: the clipboard changed */
+struct glos_ev_clip {
+    struct glos_ev ev;
+    unsigned serial;
+};
+
+/* ================================================================== DND (06h): drag and drop
+ *
+ * The source, with a mouse button down in a window of its own, puts what it offers in a writing clipboard
+ * transaction and calls DRAG with it: the data is the drag's, not the clipboard's. From then until the button
+ * is let go the pointer is the drag's: the source gets no mouse events, and windows that are targets (TARGET)
+ * for a format offered get ENTER, OVER and LEAVE as the pointer crosses them. A target may say what a drop
+ * where the pointer is would do (ANSWER); until it does, it is the first effect it takes of those the source
+ * allows (copy, then move, then link). At the button's release over a target whose answer is an effect, the
+ * target gets DROP with the data (a reading transaction: GET, then CLOSE), and the source DONE with the effect;
+ * anywhere else, or at Esc, the source gets DONE with no effect. */
+#define GLOS_DND_DRAG   GLOS_FN(GLOS_AREA_DND, 0)       /* struct glos_dnd: start dragging */
+#define GLOS_DND_TARGET GLOS_FN(GLOS_AREA_DND, 1)       /* struct glos_dnd_target: a window takes drops */
+#define GLOS_DND_ANSWER GLOS_FN(GLOS_AREA_DND, 2)       /* struct glos_dnd_answer: what a drop here would do */
+
+#define GLOS_DND_COPY 1         /* the effects: a bit each */
+#define GLOS_DND_MOVE 2
+#define GLOS_DND_LINK 4
+#define GLOS_DND_PICTURE 64     /* a drag's picture is at most so many pixels each way */
+
+struct glos_dnd {
+    unsigned size;
+    glos_handle window;         /* the source's window, in which a button is down (GLOS_E_REFUSED otherwise) */
+    glos_handle data;           /* a writing clipboard transaction with what is offered: the drag's from now (the
+                                   handle is closed by this call, done or refused) */
+    unsigned effects;           /* GLOS_DND_: what the source allows */
+    unsigned picture;           /* a picture to go with the pointer: pw by ph pixels, 0xAARRGGBB (alpha 0: clear,
+                                   anything else: solid); 0: none */
+    unsigned pw, ph;
+};
+
+struct glos_dnd_target {
+    unsigned size;
+    glos_handle window;         /* a window of the app's; 0: the desktop itself, where no window is (the shell's) */
+    unsigned effects;           /* GLOS_DND_: what it takes; 0: it is a target no more */
+    unsigned count;             /* how many formats it takes: 1 to GLOS_CLIP_ITEMS */
+    unsigned format[GLOS_CLIP_ITEMS];
+};
+
+struct glos_dnd_answer {
+    unsigned size;
+    glos_handle window;         /* the target the drag is over (GLOS_E_REFUSED: it isn't) */
+    unsigned effect;            /* one GLOS_DND_ effect it takes and the source allows, or 0: no drop here */
+};
+
+/* DND's events. */
+#define GLOS_EV_DND_ENTER GLOS_EV(GLOS_AREA_DND, 1)    /* struct glos_ev_dnd: a drag came over the target */
+#define GLOS_EV_DND_OVER  GLOS_EV(GLOS_AREA_DND, 2)    /* ... moved over it */
+#define GLOS_EV_DND_LEAVE GLOS_EV(GLOS_AREA_DND, 3)    /* ... left it, or was given up */
+#define GLOS_EV_DND_DROP  GLOS_EV(GLOS_AREA_DND, 4)    /* ... was dropped on it: `data` */
+#define GLOS_EV_DND_DONE  GLOS_EV(GLOS_AREA_DND, 5)    /* (to the source) the drag is over: `effects` what was done */
+struct glos_ev_dnd {
+    struct glos_ev ev;          /* (handle: the window; 0 for the desktop) */
+    int x, y;                   /* the pointer in the window's client area (the desktop: on the screen) */
+    unsigned effects;           /* ENTER, OVER: what the source allows. DROP, DONE: the effect done (DONE 0: none) */
+    unsigned count;             /* ENTER, DROP: the formats offered ... */
+    unsigned format[GLOS_CLIP_ITEMS];
+    glos_handle data;           /* DROP: the data, a reading clipboard transaction of the target's: GET, CLOSE */
+};
+
 /* ================================================================== THREAD (07h): an app's own threads
  *
  * An app's threads share its memory. Each has a stack the app gives it, and is scheduled as a thread of GLOS's

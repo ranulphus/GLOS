@@ -385,6 +385,41 @@ After that:
   `glos mouse`, the clipboard across an app's end.
 - **Phase C starts** once this is merged.
 
+**Step 6 as built** (2026-11-10):
+
+- **CLIP's calls** (`kernel/app/api2clip.c`, over `clip.c` and `clipstore.c`): OPEN, PUT, GET, FORMATS, FORMAT.
+  A transaction is a handle (`GLOS_HK_CLIP`); CLOSE of a writing one makes what was put the clipboard, all at
+  once. Event: `GLOS_EV_CLIP`, to every app.
+- **DND's calls:** DRAG, TARGET, ANSWER. Events: `GLOS_EV_DND_ENTER`, `OVER`, `LEAVE` and `DROP` for the target,
+  `DONE` for the source.
+- **The store:** a content is data in up to 8 formats, counted by who holds it. The clipboard, every reading
+  transaction and a drag each hold one, so a reader sees the clipboard whole as it was at its OPEN. Small data
+  is the kernel heap's, data over a page the windows' region's.
+- **1.x and the agent** (`GLOS_FN_CLIP`, `glos clip`) read and write the same clipboard's text.
+- **Where it differs from the plan and from `api-2.md`:**
+  1. **PUT replaces at CLOSE,** not at the transaction's first PUT: the clipboard is never seen half written.
+     A transaction with no PUT, or with its COMMIT property set to 0, changes nothing.
+  2. **A drag's data is a writing transaction** given to DRAG, which takes it: no second way to say what is
+     offered. Its data is given when the drag starts. A promise to give it at the drop isn't built.
+  3. **GET reads from an offset,** so large data can be read a piece at a time.
+  4. **One format's data is 16 MB at most,** and all of it together what the windows' region has (32 MB of
+     addresses, shared with the windows' pixels). "No limit but memory" otherwise.
+  5. **A target is a whole window,** not a part of one: the app answers by where the pointer is (ANSWER).
+  6. **The picture is opaque,** on a plain ground with a line round it, beside the pointer rather than under it,
+     and 64 by 64 at most. The pointer itself says what a drop would do (copy, move, link, or nothing).
+  7. **The source gets no mouse events during its drag,** nor the release that ends it: DONE says it is over.
+  8. **The bare desktop's drops** go to whichever app asked for them (TARGET with window 0). Until SHELL (step
+     8) keeps that to the shell, any app may ask.
+  9. **Esc gives a drag up;** so does a session taking the keyboard.
+  10. **1.x apps take no part in drags.**
+- **Tests:**
+  - **Host:** `clip_test` (contents, readers, formats, memory given back), `dnd_test` (every state: targets
+    entered and left, answers, drops taken and refused, give-ups, apps and windows going).
+  - **Loop A:** APITEST's clipboard cases and DND's refusals; `APITEST dnd` twice under the agent
+    (`api_dnd_case`): a drag from one to the other dropped as a move, one dropped on the bare desktop, one given
+    up with Esc, the clipboard across an app's end, and the agent's `glos clip` on the same clipboard.
+- **Phase C may start** once this is merged.
+
 ### 7. FS
 
 - **LIST:**

@@ -101,4 +101,17 @@ struct app;
 void desk_shell(struct app *a, int on);
 u32 desk_windows(const void *owner);    /* an app's windows (NULL: every one): GLOS_FN_STAT's */        /* the desktop's shell: the launcher's and the task list's (M9) */
 
+/* Drag and drop (API 2.0's DND). The desktop's input gives the pointer to a drag (deskin.c) and tells the API
+   where it is (kernel/app/api2clip.c, which knows the targets and sends the events). */
+struct app;
+int desk_dnd_begin(struct app *a, u32 win_id, const u32 *picture, u32 pw, u32 ph);  /* DRAG: a button is down in
+                                                   that window of a's: the pointer is the drag's from now, with a
+                                                   picture (0xAARRGGBB, or NULL). 0, or -1: no button is down there */
+void desk_dnd_stop(void);               /* the drag is over for another reason than the pointer's (its source went) */
+/* api2clip.c: the pointer is at sx, sy over the client area of owner's window win (its corner at ox, oy), or over
+   the bare desktop (owner NULL, win 0), or over nothing that could be a target (win ~0). */
+void api2_dnd_at(struct app *owner, u32 win, s32 sx, s32 sy, s32 ox, s32 oy);
+void api2_dnd_end(int drop);            /* the button was let go (1), or the drag given up (0: Esc, a session) */
+int api2_dnd_effect(void);              /* the effect a drop would have now (GLOS_DND_: 1, 2, 4), 0 none */
+
 #endif

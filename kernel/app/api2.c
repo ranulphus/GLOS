@@ -290,6 +290,9 @@ static int prop_call(struct app *a, struct trapframe *tf, int set)
     for (i = 0; i < api2_thr_nprops; i++)
         if (api2_thr_props[i].prop == p.prop)
             d = &api2_thr_props[i];
+    for (i = 0; i < api2_clip_nprops; i++)
+        if (api2_clip_props[i].prop == p.prop)
+            d = &api2_clip_props[i];
     if (!d || (p.prop >> 8) != (u32)kind || (set && (d->flags & P_RO)))
         return a2_fail(tf, (p.prop >> 8) != (u32)kind && d ? GLOS_E_KIND : GLOS_E_PROPERTY);
     obj = handle_obj(&a->v2->h, p.handle, (u8)kind);
@@ -342,6 +345,7 @@ int api2_app_new(struct app *a)
             hooked = 1;
             api2_input_init();
             api2_settings_init();
+            api2_clip_init();
         }
     }
     return 0;
@@ -354,11 +358,14 @@ void api2_app_gone(struct app *a)
     void *obj;
     if (!s)
         return;
+    api2_dnd_gone(a, 0);                        /* (a drag of its, or over it) */
     s->ntimers = 0;                             /* (the tick looks at these no more) */
     while (handle_next(&s->h, &i, &h, &obj) == 0) {
         handle_close(&s->h, h);
         if (GLOS_HANDLE_KIND(h) == GLOS_HK_AWAKE)
             idle_awake(-1);                     /* (the screen need stay on for it no more) */
+        if (GLOS_HANDLE_KIND(h) == GLOS_HK_CLIP)
+            api2_clip_close(a, obj, 0);         /* (what it was writing is dropped) */
         if (GLOS_HANDLE_KIND(h) == GLOS_HK_TIMER || GLOS_HANDLE_KIND(h) == GLOS_HK_LOCK
             || GLOS_HANDLE_KIND(h) == GLOS_HK_SIGNAL)
             kfree(obj);                         /* (a window's is its number: the desktop took the windows away; a
@@ -399,6 +406,8 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_WIN][0] = 0x5F;               /* CREATE, SHOW, PLACE, FOCUS, ENUM, DRAG */
     v.functions[GLOS_AREA_DRAW][0] = 0x3FF;             /* PIXELS, PRESENT, SCREEN, the GPU's five, BLIT, MODES */
     v.functions[GLOS_AREA_INPUT][0] = 0x1F;             /* KEYS, CAPTURE, PADS, GAMEPORT, MODE */
+    v.functions[GLOS_AREA_CLIP][0] = 0x1F;              /* OPEN, PUT, GET, FORMATS, FORMAT */
+    v.functions[GLOS_AREA_DND][0] = 0x07;               /* DRAG, TARGET, ANSWER */
     v.functions[GLOS_AREA_THREAD][0] = 0x3FF;           /* CREATE to SELF */
     v.functions[GLOS_AREA_SETTINGS][0] = 0xFF;          /* GET, SET, SECTIONS, KEYS, SCHEMA, WATCH, THEME, REGION */
     v.functions[GLOS_AREA_IDLE][0] = 0x0F;              /* TIME, AWAKE, SAVER, POWER */
@@ -582,12 +591,16 @@ static int close_call(struct app *a, struct trapframe *tf)
     }
     if (kind == GLOS_HK_TIMER)
         kfree(obj);
-    else if (kind == GLOS_HK_WINDOW)
+    else if (kind == GLOS_HK_WINDOW) {
+        api2_dnd_gone(a, (u32)obj);             /* (a drag from it or over it; its being a target) */
         api2_win_close(a, (u32)obj);
+    }
     else if (kind == GLOS_HK_THREAD || kind == GLOS_HK_LOCK || kind == GLOS_HK_SIGNAL)
         api2_thread_close(a, kind, obj);
     else if (kind == GLOS_HK_AWAKE)
         idle_awake(-1);
+    else if (kind == GLOS_HK_CLIP)
+        api2_clip_close(a, obj, 1);
     return a2_ok(tf, 0);
 }
 
@@ -662,7 +675,8 @@ int api2_call(struct trapframe *tf)
         return a2_fail(tf, GLOS_E_NOT_APP);
     if (a->api_major != 2 || !a->v2)
         return a2_fail(tf, GLOS_E_VERSION);       /* (a 1.x app makes 1.x's calls only) */
-    if (area > GLOS_AREA_INPUT && area != GLOS_AREA_THREAD && area != GLOS_AREA_SETTINGS && area != GLOS_AREA_IDLE)
+    if (area > GLOS_AREA_INPUT && area != GLOS_AREA_THREAD && area != GLOS_AREA_SETTINGS && area != GLOS_AREA_IDLE
+        && area != GLOS_AREA_CLIP && area != GLOS_AREA_DND)
         return a2_fail(tf, GLOS_E_FUNCTION);       /* (the other areas come with phase B's later steps) */
     first = app_first();
     if (!first && area == GLOS_AREA_DRAW && n >= (GLOS_DRAW_GPU & 0xFF) && n <= (GLOS_DRAW_WINVRAM & 0xFF))
@@ -689,7 +703,7 @@ int api2_call(struct trapframe *tf)
     r = area == GLOS_AREA_WIN ? api2_win(a, tf, n) : area == GLOS_AREA_DRAW ? api2_draw(a, tf, n)
       : area == GLOS_AREA_INPUT ? api2_input(a, tf, n) : area == GLOS_AREA_THREAD ? api2_thread(a, tf, n)
       : area == GLOS_AREA_SETTINGS ? api2_settings(a, tf, n) : area == GLOS_AREA_IDLE ? api2_idle(a, tf, n)
-      : core(a, tf, n);
+      : area == GLOS_AREA_CLIP ? api2_clip(a, tf, n) : area == GLOS_AREA_DND ? api2_dnd(a, tf, n) : core(a, tf, n);
     if (first)
         gpu_safe_end(a);
     app_api_unlock(a);

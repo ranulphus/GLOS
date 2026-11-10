@@ -20,6 +20,7 @@
 #include <pc.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <glos/glos2.h>
@@ -459,9 +460,12 @@ static void windows(void)
               && glos_call(GLOS_INPUT_MODE, &im) == 0 && im.flags == GLOS_INPUT_RAW && glos_input_mode(8) == GLOS_E_ARGUMENT
               && glos_input_mode(0) == 0, "r=%d flags=%u", r, im.flags);
         r = glos_pads(&pads, 1);
-        check("input-pads", r == 0 && !pads.pad[0].present && !pads.pad[1].present && glos_pads(&pads, 0) == 0, "r=%d", r);
+        /* (Loop A's PCs have no pad; a bench may: whichever, the game port's pads are those there are) */
+        any = pads.pad[0].present | pads.pad[1].present;
+        check("input-pads", r == 0 && pads.pad[0].present <= 1 && pads.pad[1].present <= 1 && glos_pads(&pads, 0) == 0,
+              "r=%d present=%u,%u", r, pads.pad[0].present, pads.pad[1].present);
         r = glos_gameport(&gp);
-        check("input-gameport", r == 0 && gp.mode <= 2 && gp.range >= 100 && gp.pads == 0, "r=%d on=%u mode=%u range=%u", r,
+        check("input-gameport", r == 0 && gp.mode <= 2 && gp.range >= 100 && (gp.pads != 0) == (any != 0), "r=%d on=%u mode=%u range=%u", r,
               gp.virtual_on, gp.mode, gp.range);
         r = glos_capture(w, 1);
         check("input-capture", r == 0 && glos_capture(w, 0) == 0 && glos_capture(w, 0) == 0, "r=%d", r);
@@ -629,6 +633,198 @@ static void settings(void)
           && glos_power(1, 9, 0) == GLOS_E_ARGUMENT, "r=%d state=%u can=%x off=%d", r, pw.state, pw.can, e);
 }
 
+/* CLIP (step 6): the clipboard in one format and in several, read whole while it is changed, private formats,
+   large data in pieces, transactions dropped, its event; and DND's refusals (a drag itself needs the mouse:
+   APITEST dnd, under the agent). */
+static void clipboard(void)
+{
+    static unsigned char big[300000], back[300000];
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_clip_formats f;
+    struct { struct glos_clip_image h; unsigned px[6]; } img = { { 3, 2 }, { 1, 2, 3, 4, 5, 6 } }, img2;
+    char buf[64];
+    glos_handle w, r, r2;
+    unsigned len = 0, serial, priv, priv2, i, total = 0, sum = 0, sum2 = 0, text[1] = { GLOS_CLIP_TEXT };
+    int e, n, ok;
+
+    while (glos_event(ev, sizeof ev, 0, 0) > 0)         /* (the cases before: their events out of the way) */
+        ;
+    glos_clip_formats(0, &f);
+    serial = f.serial;
+    e = glos_clip_put(GLOS_CLIP_TEXT, "hello, clipboard", 16);
+    n = await(GLOS_EV_CLIP, 0, ev, 2000);
+    memset(buf, 0, sizeof buf);
+    ok = e == 0 && n == (int)sizeof(struct glos_ev_clip) && glos_clip_get(GLOS_CLIP_TEXT, buf, sizeof buf, &len) == 0
+         && len == 16 && !strcmp(buf, "hello, clipboard") && glos_clip_formats(0, &f) == 0 && f.count == 1
+         && f.format[0] == GLOS_CLIP_TEXT && f.length[0] == 16 && f.serial > serial
+         && ((struct glos_ev_clip *)ev)->serial == f.serial;
+    check("clip-text", ok, "e=%d ev=%d len=%u text=%s count=%u serial=%u", e, n, len, buf, f.count, f.serial);
+    memset(buf, 'x', sizeof buf);
+    e = glos_clip_get(GLOS_CLIP_TEXT, buf, 5, &len);
+    check("clip-room", e == GLOS_E_ROOM && len == 16 && !memcmp(buf, "hellox", 6)
+          && glos_clip_get(GLOS_CLIP_IMAGE, buf, sizeof buf, &len) == GLOS_E_ARGUMENT, "e=%d len=%u", e, len);
+
+    priv = glos_clip_format("glos.test.one");
+    priv2 = glos_clip_format("glos.test.two");
+    check("clip-private", priv >= GLOS_CLIP_PRIVATE && priv2 >= GLOS_CLIP_PRIVATE && priv != priv2
+          && glos_clip_format("glos.test.one") == priv && glos_clip_format("") == 0 && glos_clip_format("two words") == 0,
+          "one=%x two=%x", priv, priv2);
+
+    /* Several formats at once; a reader keeps the clipboard it opened whatever is put meanwhile. */
+    w = glos_clip_open(1);
+    e = glos_clip_add(w, GLOS_CLIP_TEXT, "first", 5) | glos_clip_add(w, GLOS_CLIP_IMAGE, &img, sizeof img)
+        | glos_clip_add(w, priv, "private!", 8) | glos_clip_add(w, GLOS_CLIP_TEXT, "three formats", 13);
+    glos_clip_get(GLOS_CLIP_TEXT, buf, sizeof buf, &len);       /* (not yet the clipboard: until its CLOSE) */
+    ok = e == 0 && len == 16 && glos_close(w) == 0;
+    r = glos_clip_open(0);
+    e = glos_clip_put(GLOS_CLIP_TEXT, "newer", 5);
+    memset(buf, 0, sizeof buf);
+    memset(&img2, 0, sizeof img2);
+    ok &= e == 0 && glos_clip_formats(r, &f) == 0 && f.count == 3 && glos_clip_read(r, GLOS_CLIP_TEXT, buf, sizeof buf, 0, &total) == 13
+          && total == 13 && !strcmp(buf, "three formats") && glos_clip_read(r, GLOS_CLIP_IMAGE, &img2, sizeof img2, 0, 0) == (int)sizeof img
+          && !memcmp(&img, &img2, sizeof img) && glos_clip_read(r, priv, buf, sizeof buf, 0, 0) == 8 && !memcmp(buf, "private!", 8)
+          && glos_clip_read(r, priv2, buf, sizeof buf, 0, 0) == -GLOS_E_ARGUMENT;
+    r2 = glos_clip_open(0);
+    memset(buf, 0, sizeof buf);
+    ok &= glos_clip_read(r2, GLOS_CLIP_TEXT, buf, sizeof buf, 0, 0) == 5 && !strcmp(buf, "newer") && glos_clip_formats(r2, &f) == 0
+          && f.count == 1 && glos_close(r) == 0 && glos_close(r2) == 0 && glos_close(r2) == GLOS_E_HANDLE;
+    check("clip-transactions", ok, "e=%d count=%u total=%u text=%s", e, f.count, total, buf);
+
+    /* Transactions that change nothing: no PUT; COMMIT set to 0; and what a transaction refuses. */
+    w = glos_clip_open(1);
+    glos_close(w);
+    w = glos_clip_open(1);
+    glos_clip_add(w, GLOS_CLIP_TEXT, "dropped", 7);
+    e = glos_set(w, GLOS_PROP_CLIP_COMMIT, 0);
+    glos_close(w);
+    memset(buf, 0, sizeof buf);
+    glos_clip_get(GLOS_CLIP_TEXT, buf, sizeof buf, &len);
+    r = glos_clip_open(0);
+    w = glos_clip_open(1);
+    ok = e == 0 && !strcmp(buf, "newer") && glos_clip_add(r, GLOS_CLIP_TEXT, "x", 1) == GLOS_E_REFUSED
+         && glos_set(r, GLOS_PROP_CLIP_COMMIT, 0) == GLOS_E_REFUSED && glos_clip_add(w, 0, "x", 1) == GLOS_E_ARGUMENT
+         && glos_clip_add(w, 77, "x", 1) == GLOS_E_ARGUMENT && glos_clip_add(w, GLOS_CLIP_TEXT, (void *)0xFFFFFF00u, 64) == GLOS_E_ARGUMENT
+         && glos_clip_add(0x0D000077u, GLOS_CLIP_TEXT, "x", 1) == GLOS_E_HANDLE && glos_clip_read(w, GLOS_CLIP_TEXT, buf, 4, 0, 0) == 0;
+    glos_close(r);
+    glos_close(w);                                      /* (its only PUTs failed: nothing to commit) */
+    check("clip-dropped", ok, "e=%d text=%s", e, buf);
+
+    /* Large data, read back a piece at a time. */
+    for (i = 0; i < sizeof big; i++) {
+        big[i] = (unsigned char)(i * 7 + (i >> 9));
+        sum += big[i];
+    }
+    e = glos_clip_put(priv, big, sizeof big);
+    r = glos_clip_open(0);
+    for (i = 0; i < sizeof back; i += (unsigned)n)
+        if ((n = glos_clip_read(r, priv, back + i, 70001, i, &total)) <= 0)
+            break;
+    for (len = 0; len < sizeof back; len++)
+        sum2 += back[len];
+    check("clip-large", e == 0 && i == sizeof big && total == sizeof big && sum == sum2 && !memcmp(big, back, sizeof big)
+          && glos_clip_read(r, priv, back, 10, sizeof big, 0) == 0, "e=%d read=%u total=%u", e, i, total);
+    glos_close(r);
+    glos_clip_put(GLOS_CLIP_TEXT, "left by APITEST", 15);       /* (it stays when the app has ended) */
+
+    /* DND without the mouse: every way a drag is refused. */
+    w = glos_clip_open(1);
+    glos_clip_add(w, GLOS_CLIP_TEXT, "drag", 4);
+    r = glos_window("APITEST D", 300, 300, 80, 60, GLOS_WK_NORMAL, 0, 0);
+    glos_show(r, GLOS_WS_NORMAL);
+    e = glos_dnd(r, w, GLOS_DND_COPY, 0, 0, 0);                 /* no button is down in it */
+    ok = e == GLOS_E_REFUSED && glos_close(w) == GLOS_E_HANDLE;  /* (the call closed the transaction) */
+    w = glos_clip_open(1);
+    e = glos_dnd(r, w, GLOS_DND_COPY, 0, 0, 0);                 /* nothing was put in it */
+    ok &= e == GLOS_E_ARGUMENT && glos_dnd(r, 0, GLOS_DND_COPY, 0, 0, 0) == GLOS_E_ARGUMENT;
+    ok &= glos_dnd_target(r, GLOS_DND_COPY | GLOS_DND_MOVE, text, 1) == 0 && glos_dnd_target(r, GLOS_DND_COPY, text, 0) == GLOS_E_ARGUMENT
+          && glos_dnd_target(r, 8, text, 1) == GLOS_E_ARGUMENT && glos_dnd_target(0x02000077u, GLOS_DND_COPY, text, 1) == GLOS_E_HANDLE
+          && glos_dnd_answer(r, GLOS_DND_COPY) == GLOS_E_REFUSED && glos_dnd_target(r, 0, 0, 0) == 0
+          && glos_dnd_target(0, GLOS_DND_COPY, text, 1) == 0 && glos_dnd_target(0, 0, 0, 0) == 0;
+    glos_close(r);
+    check("dnd-refused", ok, "e=%d", e);
+}
+
+/* APITEST dnd NAME X: drag and drop between two of these, under the agent (tests/loopa/jobs.py api_dnd_case moves
+   the mouse). A window at X,60 that takes text (copy or move) and whose left half answers copy, its right half
+   move; a press in it starts a drag of the text "from NAME" with a picture. What it is told goes to stdout:
+   DND enter/over/leave/drop/done ...; p puts "clip NAME" on the clipboard, g says what the clipboard's text is,
+   q ends it (42). */
+static int dnd_mode(const char *name, int x)
+{
+    static unsigned picture[16 * 12];
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_ev *e = (struct glos_ev *)ev;
+    unsigned text[1] = { GLOS_CLIP_TEXT }, i, overs = 0;
+    char title[24], buf[64];
+    glos_handle w, t;
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 1;
+    snprintf(title, sizeof title, "APITEST %s", name);
+    w = glos_window(title, x, 60, 160, 100, GLOS_WK_NORMAL, 0, 0);
+    if (!w || glos_show(w, GLOS_WS_NORMAL) != 0)
+        return 2;
+    fill(w, 0x2A);
+    for (i = 0; i < sizeof picture / sizeof picture[0]; i++)
+        picture[i] = (i % 16 + i / 16) % 3 ? 0xFF3366CCu : 0;
+    printf("DND %s target r=%d\n", name, glos_dnd_target(w, GLOS_DND_COPY | GLOS_DND_MOVE, text, 1));
+    fflush(stdout);
+    for (;;) {
+        int n = glos_event(ev, sizeof ev, GLOS_FOREVER, 0);
+        if (n <= 0)
+            continue;
+        if (e->kind == GLOS_EV_MOUSE) {
+            struct glos_ev_mouse *m = (struct glos_ev_mouse *)ev;
+            if (m->button == 1 && m->down) {    /* a press: what it has is dragged from here */
+                snprintf(buf, sizeof buf, "from %s", name);
+                t = glos_clip_open(1);
+                glos_clip_add(t, GLOS_CLIP_TEXT, buf, strlen(buf));
+                printf("DND %s drag r=%d\n", name, glos_dnd(w, t, GLOS_DND_COPY | GLOS_DND_MOVE, picture, 16, 12));
+            } else if (m->button) {
+                printf("DND %s button-up\n", name);        /* (never during its own drag) */
+            }
+        } else if (e->kind == GLOS_EV_DND_ENTER || e->kind == GLOS_EV_DND_OVER) {
+            struct glos_ev_dnd *d = (struct glos_ev_dnd *)ev;
+            int r = glos_dnd_answer(w, d->x < 80 ? GLOS_DND_COPY : GLOS_DND_MOVE);
+            if (e->kind == GLOS_EV_DND_ENTER)
+                printf("DND %s enter at=%d,%d allowed=%u formats=%u:%u answer=%d\n", name, d->x, d->y, d->effects, d->count,
+                       d->format[0], r);
+            else
+                overs++;
+        } else if (e->kind == GLOS_EV_DND_LEAVE) {
+            printf("DND %s leave overs=%u\n", name, overs > 0);
+            overs = 0;
+        } else if (e->kind == GLOS_EV_DND_DROP) {
+            struct glos_ev_dnd *d = (struct glos_ev_dnd *)ev;
+            int got;
+            memset(buf, 0, sizeof buf);
+            got = glos_clip_read(d->data, GLOS_CLIP_TEXT, buf, sizeof buf - 1, 0, 0);
+            printf("DND %s drop at=%d,%d effect=%u overs=%u text=%s got=%d close=%d\n", name, d->x, d->y, d->effects, overs > 0,
+                   buf, got, glos_close(d->data));
+            overs = 0;
+        } else if (e->kind == GLOS_EV_DND_DONE) {
+            printf("DND %s done effect=%u\n", name, ((struct glos_ev_dnd *)ev)->effects);
+        } else if (e->kind == GLOS_EV_CLIP) {
+            printf("DND %s clip-changed\n", name);
+        } else if (e->kind == GLOS_EV_KEY && !((struct glos_ev_key *)ev)->down) {
+            unsigned key = ((struct glos_ev_key *)ev)->key, len = 0;
+            if (key == 0x19) {                  /* p */
+                snprintf(buf, sizeof buf, "clip %s", name);
+                printf("DND %s put r=%d\n", name, glos_clip_put(GLOS_CLIP_TEXT, buf, strlen(buf)));
+            } else if (key == 0x22) {           /* g */
+                int r;
+                memset(buf, 0, sizeof buf);
+                r = glos_clip_get(GLOS_CLIP_TEXT, buf, sizeof buf - 1, &len);
+                printf("DND %s got r=%d text=%s\n", name, r, buf);
+            } else if (key == 0x10) {           /* q */
+                printf("DND %s end\n", name);
+                fflush(stdout);
+                return 42;
+            }
+        }
+        fflush(stdout);
+    }
+}
+
 /* APITEST set: the settings' changes and their events, the theme's change, and the saver, under the agent
    (tests/loopa/jobs.py api_set_case drives it with glos config, glos idle and keys). It writes what it is told
    on stdout: EV setting SECTION KEY (it watches desktop and region), EV theme NAME, EV region ..., EV saver N,
@@ -783,6 +979,8 @@ int main(int argc, char **argv)
         return interactive();
     if (argc > 1 && !strcmp(argv[1], "set"))
         return setting_mode();
+    if (argc > 3 && !strcmp(argv[1], "dnd"))
+        return dnd_mode(argv[2], atoi(argv[3]));
     before();
     init();
     if (glos_app()) {
@@ -791,6 +989,7 @@ int main(int argc, char **argv)
         timers();
         windows();
         settings();
+        clipboard();
     }
     snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
     com1(line);

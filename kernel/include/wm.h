@@ -46,7 +46,9 @@ enum { WH_NONE, WH_CLIENT, WH_TITLE, WH_CLOSE, WH_BORDER, WH_MIN, WH_MAX, WH_SIZ
 
 /* The pointer's shapes (wm_cursor). */
 enum { WC_ARROW, WC_BUSY, WC_TEXT, WC_HAND, WC_CROSS, WC_SIZE_NS, WC_SIZE_EW, WC_SIZE_NWSE, WC_SIZE_NESW, WC_MOVE,
-       WC_COUNT, WC_CUSTOM = WC_COUNT };        /* WC_CUSTOM: a window's own picture (its cursor_img) */
+       WC_COUNT, WC_CUSTOM = WC_COUNT,          /* WC_CUSTOM: a window's own picture (its cursor_img) */
+       WC_DROP_COPY, WC_DROP_MOVE, WC_DROP_LINK, WC_DROP_NONE,  /* a drag's (the desktop's own: no window asks for them) */
+       WC_ALL };
 struct wm_cursor {
     u8 w, h, hx, hy;                    /* its size (32 by 32 at most) and its hot spot */
     u8 edge[32][4], fill[32][4];        /* a bit a pixel: black, and white; neither: the screen shows through */

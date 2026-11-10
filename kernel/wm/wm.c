@@ -112,7 +112,7 @@ static const char *const art_nwse[] = {
     "         oXXXXo", "        oXXXXXo", "        ooooooo",
 };
 
-static struct wm_cursor cursors[WC_COUNT];
+static struct wm_cursor cursors[WC_ALL];
 static u8 cursors_made;
 
 static void cur_set(struct wm_cursor *c, int x, int y, int ch)
@@ -145,6 +145,33 @@ static void cur_art(struct wm_cursor *c, const char *const *rows, int n, int hx,
         for (x = 0; rows[y][x]; x++)
             cur_set(c, x, y, rows[y][x]);
     c->hx = (u8)hx, c->hy = (u8)hy;
+}
+
+/* A drag's pointers: the arrow with a mark below and to its right (a plus: copied; an arrow: moved; a chain's
+   link: linked), and a barred circle where nothing can be dropped. */
+static const char *const art_plus[] = {
+    "XXXXXXXXX", "XoooooooX", "XoooXoooX", "XoooXoooX", "XoXXXXXoX", "XoooXoooX", "XoooXoooX", "XoooooooX", "XXXXXXXXX",
+};
+static const char *const art_to[] = {
+    "XXXXXXXXX", "XoooooooX", "XoooXoooX", "XooooXooX", "XoXXXXXoX", "XooooXooX", "XoooXoooX", "XoooooooX", "XXXXXXXXX",
+};
+static const char *const art_link[] = {
+    "XXXXXXXXX", "XoooooooX", "XooXXXXoX", "XooooXXoX", "XoooXoXoX", "XooXooXoX", "XoXoooooX", "XoooooooX", "XXXXXXXXX",
+};
+static const char *const art_none[] = {
+    "     XXXXXXX     ", "   XXoooooooXX   ", "  XooXXXXXXXooX  ", " XoXX       XooX ", " XoX       XoooX ",
+    "XoX       XooXXoX", "XoX      XooX XoX", "XoX     XooX  XoX", "XoX    XooX   XoX", "XoX   XooX    XoX",
+    "XoX  XooX     XoX", "XoX XooX      XoX", " XoooX       XoX ", " XooX       XXoX ", "  XooXXXXXXXooX  ",
+    "   XXoooooooXX   ", "     XXXXXXX     ",
+};
+
+static void cur_marked(struct wm_cursor *c, const char *const *mark)
+{
+    int x, y;
+    *c = cursors[WC_ARROW];
+    for (y = 0; y < 9; y++)
+        for (x = 0; x < 9; x++)
+            cur_set(c, 12 + x, 14 + y, mark[y][x]);
 }
 
 static void cursors_make(void)
@@ -184,6 +211,10 @@ static void cursors_make(void)
             cur_set(c, x, y, ch);
         }
     c->hx = 8, c->hy = 8;
+    cur_marked(&cursors[WC_DROP_COPY], art_plus);
+    cur_marked(&cursors[WC_DROP_MOVE], art_to);
+    cur_marked(&cursors[WC_DROP_LINK], art_link);
+    cur_art(&cursors[WC_DROP_NONE], art_none, 17, 8, 8);
 }
 
 const struct wm_cursor *wm_cursor_shape(int shape)
@@ -969,7 +1000,7 @@ void wm_cursor(struct wm *m, int shape, const struct wm_cursor *custom)
 {
     struct gfx_rect r;
     u32 i;
-    if (shape < 0 || shape > WC_CUSTOM || (shape == WC_CUSTOM && !custom))
+    if (shape < 0 || shape >= WC_ALL || (shape == WC_CUSTOM && !custom))
         shape = WC_ARROW;
     if (shape == m->cursor) {
         if (shape != WC_CUSTOM)

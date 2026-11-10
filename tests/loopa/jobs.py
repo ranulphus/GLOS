@@ -4230,6 +4230,141 @@ def api_set_case(profile, vcard, card):
     return "  %-22s %s%s" % ("apiset-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
+def api_dnd_case(profile, vcard, card):
+    """API 2.0's drag and drop and its clipboard between apps (APITEST dnd; phase B step 6), under the agent: two
+    APITESTs with a window each. A press in A's window starts a drag of A's text with a picture; moved over B it
+    is told to B (enter, over), which answers copy in its left half and move in its right; dropped there, B
+    reads the text and A is told the effect. A drag dropped on the bare desktop, and one given up with Esc, do
+    nothing and tell the source so. The clipboard: A puts text and ends; B reads it after; the agent's glos clip
+    reads and writes the same clipboard."""
+    import select
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("apidnd-" + tag, profile, card, ["--card", vcard, "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
+        "--cmd", "SERSAY HX-START apidnd", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1200)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    checks, info, procs = {"listen": agent.listening()}, "", {}
+    B, T = 1, 18                                # the look's border and title bar
+    AX, BX, Y = 40, 300, 60                     # the windows' corners
+    CY = Y + B + T + B                          # their client areas' top
+
+    class App:
+        def __init__(self, name, x):
+            self.p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\APITEST.EXE dnd %s %d" % (name, x)],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.out, self.rest, self.name = [], "", name
+
+        def said(self, word, limit=60, after=0):
+            word = "DND %s %s" % (self.name, word)
+            t0 = time.time()
+            while time.time() - t0 < limit:
+                if any(l == word or (word.endswith("*") and l.startswith(word[:-1])) for l in self.out[after:]):
+                    return True
+                if select.select([self.p.stdout], [], [], 0.5)[0]:
+                    data = os.read(self.p.stdout.fileno(), 4096).decode("latin-1").replace("\r", "")
+                    if not data:
+                        return False
+                    self.rest += data
+                    *lines, self.rest = self.rest.split("\n")
+                    self.out.extend(lines)
+            return False
+
+    def desk():
+        return agent.ssh("glos desk")[1].replace("\r", "")
+
+    def point(x, y):
+        m = re.search(r"pointer=(-?\d+),(-?\d+)", desk())
+        px, py = int(m.group(1)), int(m.group(2))
+        agent.ssh("glos mouse %d %d" % (x - px, y - py))
+
+    def press():
+        agent.ssh("glos mouse 0 0 1")
+
+    def release():
+        agent.ssh("glos mouse 0 0 0")
+
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        a = procs["a"] = App("A", AX)
+        checks["a-up"] = a.said("target r=0", 240)
+        b = procs["b"] = App("B", BX)
+        checks["b-up"] = b.said("target r=0", 240)
+        t0 = time.time()
+        while time.time() - t0 < 30 and not ('"APITEST A"' in desk() and '"APITEST B"' in desk()):
+            time.sleep(0.3)
+        # A's text dragged to B's right half and dropped: moved.
+        point(AX + B + 30, CY + 40)
+        press()
+        checks["drag"] = a.said("drag r=0") and a.said("enter at=30,40 allowed=3 formats=1:1 answer=0")
+        checks["picture"] = bool(re.search(r'^window \d+ shown bare at \d+,\d+ 18x14 ""$', desk(), re.M))
+        agent.ssh("glos mouse 130 0")
+        agent.ssh("glos mouse 130 0")           # (over B's left half now: client 30,40)
+        checks["leave-a"] = a.said("leave overs=*")
+        checks["enter-b"] = b.said("enter at=30,40 allowed=3 formats=1:1 answer=0")
+        agent.ssh("glos mouse 35 0")
+        agent.ssh("glos mouse 35 0")            # (its right half: it answers move)
+        release()
+        checks["drop"] = b.said("drop at=100,40 effect=2 overs=1 text=from A got=6 close=0")
+        checks["done"] = a.said("done effect=2")
+        checks["picture-gone"] = not re.search(r'^window \d+ shown bare at \d+,\d+ 18x14 ""$', desk(), re.M)
+        # B's text dropped on the bare desktop: nothing done. (B is a target itself: the drag enters it first.)
+        nb = len(b.out)
+        point(BX + B + 20, CY + 20)
+        press()
+        checks["drag-b"] = b.said("drag r=0", after=nb) and b.said("enter at=20,20 allowed=3 formats=1:1 answer=0", after=nb)
+        point(560, 400)
+        checks["leave-b"] = b.said("leave overs=*", after=nb)
+        release()
+        checks["nowhere"] = b.said("done effect=0", after=nb)
+        # A's text over B, given up with Esc; the button's release afterwards is nobody's.
+        na, nb = len(a.out), len(b.out)
+        point(AX + B + 30, CY + 40)
+        press()
+        checks["drag-again"] = a.said("drag r=0", after=na)
+        agent.ssh("glos mouse 130 0")
+        agent.ssh("glos mouse 130 0")
+        checks["enter-again"] = b.said("enter at=30,40 allowed=3 formats=1:1 answer=0", after=nb)
+        agent.ssh("glos key 0x01")              # Esc
+        checks["given-up"] = b.said("leave overs=*", after=nb) and a.said("done effect=0", after=na)
+        release()
+        point(560, 400)
+        # The clipboard: A puts and ends; B reads it after; the agent reads and writes the same clipboard.
+        point(AX + 60, Y + B + 9)               # A's title bar: the keyboard is A's
+        press()
+        release()
+        agent.ssh("glos key 0x19")              # p
+        checks["put"] = a.said("put r=0") and a.said("clip-changed") and b.said("clip-changed")
+        agent.ssh("glos key 0x10")              # q
+        checks["a-ended"] = a.said("end") and a.p.wait(timeout=120) == 42
+        checks["agent-reads"] = agent.ssh("glos clip")[1] == "clip A"
+        point(BX + 60, Y + B + 9)               # B's title bar
+        press()
+        release()
+        agent.ssh("glos key 0x22")              # g
+        checks["after-end"] = b.said("got r=0 text=clip A")
+        nb = len(b.out)
+        checks["agent-writes"] = agent.ssh("glos clip from-the-agent")[0] == 0 and b.said("clip-changed", after=nb)
+        agent.ssh("glos key 0x22")
+        checks["agent-text"] = b.said("got r=0 text=from-the-agent", after=nb)
+        agent.ssh("glos key 0x10")
+        checks["b-ended"] = b.said("end") and b.p.wait(timeout=120) == 42
+        checks["no-stray"] = not any("button-up" in l for l in a.out + b.out)
+        if not all(checks.values()):
+            info += " A=%r B=%r" % (a.out[-10:], b.out[-10:])
+        procs = {}
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        info += " timeout"
+    finally:
+        for x in procs.values():
+            x.p.kill()
+    text = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("apidnd-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
 def thr_case(profile, card):
     """An app's own threads (API 2.0's THREAD, phase B step 4; tests/api/thrtest.c, docs/supervisor.md 12.7),
     THRTEST through the agent: every case of its own (threads computing, allocating and doing file I/O at once; a
@@ -6741,6 +6876,7 @@ def main():
             wins = [c for c in [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")] if not a.profile or c[0] in a.profile]
             res += matrix(api_win_case, wins, a.jobs)
             res += matrix(api_set_case, wins, a.jobs)   # ... and its settings, theme and saver as they change
+            res += matrix(api_dnd_case, wins, a.jobs)   # ... and two of them dragging and dropping, and the clipboard
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

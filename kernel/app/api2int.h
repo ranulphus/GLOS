@@ -24,6 +24,7 @@ enum {
 
 #define A2_QBYTES  16384u               /* an app's queued events */
 #define A2_TIMERS  32                   /* an app's timers at once */
+#define A2_TARGETS 16                   /* an app's windows that take drops at once */
 
 struct timer2 {
     u32 handle;
@@ -46,6 +47,12 @@ struct api2 {
     u32 in_flags;                       /* GLOS_INPUT_: how it takes its keys (INPUT's MODE) */
     char watch[GLOS_WATCH_MAX][32];     /* the sections whose changes it is told of (SETTINGS' WATCH) ... */
     u8 nwatch, watch_all;               /* ... or every section's */
+    struct {                            /* its windows that take drops (DND's TARGET) */
+        u32 win;                        /* the window's number; 0: the bare desktop */
+        u32 effects, n;
+        u32 format[GLOS_CLIP_ITEMS];
+    } target[A2_TARGETS];
+    u32 ntargets;
     u8 pads_events;                     /* it asked for GLOS_EV_PAD */
     struct glos_pad pad[GLOS_PADS];     /* each pad as it was last told of it */
     u32 ndrop, ndrop1x;                 /* events lost to a full queue; 1.x events with no 2.0 form yet */
@@ -92,6 +99,15 @@ extern const struct propdef api2_thr_props[];
 extern const u32 api2_thr_nprops;
 int api2_thread(struct app *a, struct trapframe *tf, u32 n);    /* THREAD's calls */
 void api2_thread_close(struct app *a, int kind, void *obj);     /* CLOSE of a thread's, a lock's or a signal's handle */
+
+/* api2clip.c */
+extern const struct propdef api2_clip_props[];
+extern const u32 api2_clip_nprops;
+int api2_clip(struct app *a, struct trapframe *tf, u32 n);     /* CLIP's calls */
+int api2_dnd(struct app *a, struct trapframe *tf, u32 n);      /* DND's */
+void api2_clip_close(struct app *a, void *obj, int commit);    /* CLOSE of a transaction's handle */
+void api2_dnd_gone(struct app *a, u32 win);                     /* an app (win 0), or a window of its, is no more */
+void api2_clip_init(void);                                      /* (once: the clipboard's changes told from now) */
 
 /* api2set.c */
 int api2_settings(struct app *a, struct trapframe *tf, u32 n); /* SETTINGS' calls */

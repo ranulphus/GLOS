@@ -246,6 +246,7 @@ void desk_refocus(struct wm *m)
 }
 
 static void pointer_shape(struct wm *m);
+static void dnd_finish(struct wm *m, int drop);
 static void toggle_max(struct wm *m, struct wm_window *w);
 static void activate(struct wm *m, struct wm_window *w);
 
@@ -458,6 +459,11 @@ static u32 key_char(u32 key)
 /* The saver is on the screen (idle.c): the input that ends it is used up here, so that the key that wakes the
    screen types nothing and the press that wakes it presses nothing. A key that went down then is nobody's until
    it has come up, and the mouse's buttons until they are all up. */
+static u8 dnd_on;                               /* an app's drag has the pointer (API 2.0's DND) */
+static u32 dnd_pic;                             /* ... and this window is its picture (0: none) */
+#define DND_PX 14                               /* the picture's corner from the pointer's point: never under it */
+#define DND_PY 20
+
 static u8 asleep;                               /* this turn began with the saver on */
 static u8 woke_key[0x200 / 8];                  /* keys whose press was used up so */
 static u8 woke_buttons;                         /* ... and the mouse's buttons */
@@ -471,6 +477,11 @@ static void key_event(struct wm *m, u32 key, int down)
     if (asleep || (woke_key[key >> 3] & bit)) {
         woke_key[key >> 3] = (u8)(down && (asleep || (woke_key[key >> 3] & bit)) ? woke_key[key >> 3] | bit
                                                                                   : woke_key[key >> 3] & ~bit);
+        return;
+    }
+    if (dnd_on && key == 0x01 && down) {        /* Esc: the drag is given up (and the key is nobody's) */
+        woke_key[key >> 3] |= bit;
+        dnd_finish(m, 0);
         return;
     }
     again = down && (isdown[key >> 3] & bit);           /* the keyboard repeating a key held down */
@@ -698,6 +709,86 @@ static s32 speed = 1;                           /* [input] pointer_speed (M9) */
 void deskin_pointer_speed(int s) { speed = s >= 1 && s <= 3 ? s : 1; }
 
 /* The pointer to (x, y) with the buttons `now`: a movement and a press or release, as the mouse makes them. */
+/* ---- an app's drag (API 2.0's DND; the states are kernel/wm/dnd.c's, the events kernel/app/api2clip.c's) */
+
+/* Where the pointer is, for the drag: over an app's window's client area, the bare desktop, or neither. Its
+   picture goes with it. */
+static void dnd_point(struct wm *m)
+{
+    struct wm_window *w, *pic = dnd_pic ? wm_find(m, dnd_pic) : 0;
+    struct gfx_rect c;
+    int part;
+    if (pic)
+        wm_move(m, pic, m->px + DND_PX, m->py + DND_PY);
+    w = wm_hit(m, m->px, m->py, &part);
+    if (w && w->owner && part == WH_CLIENT) {
+        wm_client(m, w, &c);
+        api2_dnd_at(w->owner, w->id, m->px, m->py, c.x, c.y);
+    } else if (!w || (w->flags & WF_DESKTOP)) {
+        api2_dnd_at(0, 0, m->px, m->py, 0, 0);
+    } else {
+        api2_dnd_at(0, ~0u, m->px, m->py, 0, 0);
+    }
+}
+
+static void dnd_clear(struct wm *m)
+{
+    struct wm_window *pic = dnd_pic ? wm_find(m, dnd_pic) : 0;
+    if (pic)
+        wm_destroy(m, pic);
+    dnd_pic = 0;
+    dnd_on = 0;
+}
+
+static void dnd_finish(struct wm *m, int drop)
+{
+    if (!dnd_on)
+        return;
+    dnd_clear(m);
+    if (buttons) {                              /* given up with the button still down: its release is nobody's */
+        buttons = 0;
+        woke_buttons = 1;
+    }
+    api2_dnd_end(drop);
+}
+
+int desk_dnd_begin(struct app *a, u32 win_id, const u32 *picture, u32 pw, u32 ph)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *w = wm_find(m, win_id), *pic;
+    if (!w || w->owner != a || !buttons || grab_id != win_id || drag || dnd_on) {
+        desk_unlock();
+        return -1;
+    }
+    grab_id = 0;                                /* (the hold is the drag's now: the app hears no more of it) */
+    dnd_on = 1;
+    dnd_pic = 0;
+    if (picture && pw && ph && (pic = wm_create(m, m->px + DND_PX, m->py + DND_PY, (s32)pw + 2, (s32)ph + 2, "",
+                                                 WF_TOPMOST | WF_NOFOCUS | WF_NOBAR, 0)) != 0) {
+        u32 x, y;                               /* a line round it; where the picture is clear, the field's colour */
+        gfx_fill(&pic->store, 0, 0, (s32)pw + 2, (s32)ph + 2, 0x000000);
+        gfx_fill(&pic->store, 1, 1, (s32)pw, (s32)ph, 0xFFFFFF);
+        for (y = 0; y < ph; y++)
+            for (x = 0; x < pw; x++)
+                if (picture[y * pw + x] >> 24)
+                    gfx_fill(&pic->store, 1 + (s32)x, 1 + (s32)y, 1, 1, picture[y * pw + x] & 0xFFFFFF);
+        wm_show(m, pic, 1);
+        dnd_pic = pic->id;
+    }
+    dnd_point(m);
+    pointer_shape(m);
+    desk_unlock();
+    return 0;
+}
+
+void desk_dnd_stop(void)
+{
+    struct wm *m = desk_lock();
+    dnd_clear(m);
+    pointer_shape(m);
+    desk_unlock();
+}
+
 static void mouse_to(struct wm *m, s32 x, s32 y, u32 now)
 {
     struct wm_window *w;
@@ -708,15 +799,23 @@ static void mouse_to(struct wm *m, s32 x, s32 y, u32 now)
         woke_buttons = now != 0;
         return;
     }
-    if (woke_buttons) {
-        if (now)
+    if (woke_buttons) {                         /* (the pointer still moves: nothing is told of it) */
+        if (now) {
+            wm_pointer(m, x, y, 1);
             return;
+        }
         woke_buttons = 0;
     }
 
     wm_pointer(m, x, y, 1);
     dx = m->px - x0, dy = m->py - y0;
     buttons = (u8)now;
+    if (dnd_on) {                               /* an app's drag: the pointer is its until every button is up */
+        dnd_point(m);
+        if (!now)
+            dnd_finish(m, 1);
+        return;
+    }
     if (drag == D_MOVE || drag == D_SIZE) {
         if (!(w = wm_find(m, drag_id))) {
             drag_stop(m);
@@ -788,6 +887,7 @@ static void forget(struct wm *m)
 {
     struct wm_window *w;
     u32 k, bit;
+    dnd_finish(m, 0);
     if (drag)
         drag_end(m, 0);
     if (foc_app)
@@ -877,7 +977,10 @@ static void pointer_shape(struct wm *m)
 {
     struct wm_window *w = 0;
     int part, shape = WC_ARROW;
-    if (drag == D_SIZE)
+    if (dnd_on) {                               /* a drag: what a drop here would do */
+        int e = api2_dnd_effect();
+        shape = e == 1 ? WC_DROP_COPY : e == 2 ? WC_DROP_MOVE : e == 4 ? WC_DROP_LINK : WC_DROP_NONE;
+    } else if (drag == D_SIZE)
         shape = wm_cursor_for(0, WH_SIZE | drag_dir);
     else if (drag)
         shape = WC_ARROW;
