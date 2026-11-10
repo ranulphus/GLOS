@@ -468,6 +468,8 @@ static int target_call(struct app *a, struct trapframe *tf)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     if (q.window && !(win = (u32)handle_obj(&s->h, q.window, GLOS_HK_WINDOW)))
         return a2_fail(tf, handle_kind(&s->h, q.window) ? GLOS_E_KIND : GLOS_E_HANDLE);
+    if (!q.window && q.effects && desk_shell_app() != a)
+        return a2_fail(tf, GLOS_E_REFUSED);     /* (the bare desktop's drops are the shell's: SHELL's DESKTOP) */
     for (i = 0; i < s->ntargets && s->target[i].win != win; i++) ;
     if (!q.effects) {
         if (i < s->ntargets)

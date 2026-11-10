@@ -113,7 +113,23 @@ void api2_clip_init(void);                                      /* (once: the cl
 int api2_fs(struct app *a, struct trapframe *tf, u32 n);       /* FS's calls */
 void api2_fs_close(struct app *a, int kind, void *obj, int ending);    /* CLOSE of a listing's or a watch's handle */
 
+/* api2shell.c */
+extern const struct propdef api2_shell_props[];
+extern const u32 api2_shell_nprops;
+int api2_shell(struct app *a, struct trapframe *tf, u32 n);    /* SHELL's calls */
+void api2_shell_close(struct app *a, int kind, void *obj);     /* CLOSE of a tray icon's or a notification's handle */
+void api2_shell_gone(struct app *a);                            /* the app is no more: its icons, its notifications */
+void api2_shell_1x(struct app *a, u32 type, int x, int y);     /* the desktop's launcher and task-list events */
+/* api2fs.c, for it */
+int api2_fs_path(struct trapframe *tf, u32 off, char *out, u32 room);  /* a path of the app's as DOS's bytes: its
+                                                                           length, or -1 */
+int api2_fs_exists(struct app *a, const char *path);            /* 1 a file, 2 a folder, 0 neither, -1 the app ends */
+
 /* api2set.c */
+int a2_text_in(struct trapframe *tf, u32 off, char *buf, u32 room);    /* a text of the app's, its NUL kept: its
+                                                                           length, or -1 (none, unreadable, too long) */
+int a2_text_out(struct trapframe *tf, u32 off, u32 room, const char *text, u32 len);   /* 0, GLOS_E_ROOM (cut), or
+                                                                                           GLOS_E_ARGUMENT */
 int api2_settings(struct app *a, struct trapframe *tf, u32 n); /* SETTINGS' calls */
 int api2_idle(struct app *a, struct trapframe *tf, u32 n);     /* IDLE's */
 void api2_settings_init(void);                                  /* (once: changes' and the saver's news from now) */

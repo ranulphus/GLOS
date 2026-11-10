@@ -3967,7 +3967,7 @@ def api_case(profile, boot):
     cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", serial)
     done = re.search(r"HX-APITEST done pass=(\d+) fail=(\d+)", serial)
     bad_cases = [c + w.rstrip() for c, k, w in cases if k != "1"]
-    checks = {"status": st == "PASS", "done": bool(done) and done.group(2) == "0", "cases": len(cases) >= 130,
+    checks = {"status": st == "PASS", "done": bool(done) and done.group(2) == "0", "cases": len(cases) >= 150,
               "app": bool(re.search(r"GLOS-APP start id=1 prog=APITEST.EXE", serial)),
               "end": bool(re.search(r"GLOS-APP end id=1 prog=APITEST.EXE code=0 ", serial)),
               "exit": "GLOS-EXIT code=0" in serial, "vectors": "HX-VECCHK ok" in serial,
@@ -4395,6 +4395,172 @@ def api_dnd_case(profile, vcard, card):
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("apidnd-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
+def api_shell_case(profile, vcard, card):
+    """API 2.0's SHELL under the user's hands (APITEST shell; phase B step 8), under the agent. An APITEST from
+    another folder is not GLOS's own: it may not be the shell, nor give the keyboard to another's window; one from
+    GLOS's folder may. Each has an icon in the tray. The shell's icon: a press, two presses (a double click), its
+    tooltip after the pointer has rested on it, the right button (its menu asked for: the test's next
+    notification). Notifications: the second of two actions pressed, the one action of the next, one whose time
+    runs out, one pressed away. The shell's events: the launcher (the Windows key, GLOS's mark), another app's
+    window not answering and answering again, the task list (Ctrl-Alt-Del), at which it ends."""
+    import select
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("apishell-" + tag, profile, card, ["--card", vcard, "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
+        "--file", "build/dj/APITEST.EXE=/OTHER/APITEST.EXE",
+        "--cmd", "SERSAY HX-START apishell", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1200)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    checks, info, procs = {"listen": agent.listening()}, "", {}
+
+    class App:
+        def __init__(self, command):
+            self.p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.out, self.rest = [], ""
+
+        def said(self, word, limit=60, after=0):
+            word = "SHELL " + word
+            t0 = time.time()
+            while time.time() - t0 < limit:
+                for l in self.out[after:]:
+                    if l == word or (word.endswith("*") and l.startswith(word[:-1])):
+                        return l
+                if select.select([self.p.stdout], [], [], 0.5)[0]:
+                    data = os.read(self.p.stdout.fileno(), 4096).decode("latin-1").replace("\r", "")
+                    if not data:
+                        return None
+                    self.rest += data
+                    *lines, self.rest = self.rest.split("\n")
+                    self.out.extend(lines)
+            return None
+
+    def desk():
+        return agent.ssh("glos desk")[1].replace("\r", "")
+
+    def bare():                                 # the desktop's own small windows: a tooltip, a notification
+        return [tuple(int(v) for v in m) for m in
+                re.findall(r'^window \d+ shown bare at (-?\d+),(-?\d+) (\d+)x(\d+) ""$', desk(), re.M)]
+
+    def bare_when(test, limit=20):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            b = bare()
+            if test(b):
+                return b
+            time.sleep(0.3)
+        return None
+
+    def point(x, y):
+        m = re.search(r"pointer=(-?\d+),(-?\d+)", desk())
+        agent.ssh("glos mouse %d %d" % (x - int(m.group(1)), y - int(m.group(2))))
+
+    def click(x, y, button=1):
+        point(x, y)
+        agent.ssh("glos key 0:mouse:0:0:%d,0.05:mouse:0:0:0" % button)
+
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        checks["double"] = agent.ssh("glos config set input double_click 1000")[0] == 0
+        other = procs["other"] = App("C:\\OTHER\\APITEST.EXE shell")
+        checks["not-own"] = bool(other.said("ready shell=19 focus=19 tray=*", 240))
+        a = procs["a"] = App("C:\\TEST\\APITEST.EXE shell")
+        ready = a.said("ready shell=0 focus=3 tray=*", 240)
+        checks["own"] = bool(ready)
+        tx, ty, tw, th = [int(v) for v in re.search(r"tray=(-?\d+),(-?\d+),(\d+),(\d+)", ready or "tray=0,0,0,0").groups()]
+        checks["two-icons"] = tw == 40
+        # Which of the two icons is the shell's: the one whose press it hears of.
+        slot = None
+        for k in (0, 1):
+            click(tx + 2 + k * 20 + 8, ty + th // 2)
+            if a.said("tray what=1 mine=1 at=*", 5):
+                slot = k
+                break
+        checks["press"] = slot is not None
+        ix, iy = tx + 2 + (slot or 0) * 20 + 8, ty + th // 2
+        checks["others"] = bool(other.said("tray what=1 mine=1 at=*", 5)) == (slot == 1)
+        time.sleep(1.5)                         # (the next press is no double click's second)
+        na = len(a.out)
+        agent.ssh("glos key 0:mouse:0:0:1,0.05:mouse:0:0:0,0.2:mouse:0:0:1,0.25:mouse:0:0:0")
+        checks["double-click"] = bool(a.said("tray what=1 mine=1 at=*", 10, na)) and bool(a.said("tray what=2 mine=1 at=*", 10, na))
+        # Its tooltip, once the pointer has rested there; gone when it leaves.
+        point(300, 200)
+        checks["no-tip"] = bare_when(lambda b: not b) is not None
+        point(ix, iy)
+        tip = bare_when(lambda b: len(b) == 1)
+        checks["tip"] = bool(tip) and tip[0][1] + tip[0][3] <= ty and tip[0][3] < 24 and abs(tip[0][0] + tip[0][2] // 2 - ix) < 60
+        point(300, 200)
+        checks["tip-gone"] = bare_when(lambda b: not b) is not None
+
+        def note(number):                       # the right button on the icon: the test's next notification
+            click(ix, iy, 2)
+            ok = bool(a.said("note %d r=0" % number, 10))
+            point(300, 200)                     # (the tooltip is not in the way)
+            b = bare_when(lambda b: len(b) == 1 and b[0][2] == 240)
+            return b[0] if ok and b else None
+
+        # Two actions: the second pressed (the rightmost, at the bottom).
+        n = note(1)
+        checks["note-1"] = bool(n) and n[0] + n[2] <= 640 and n[1] + n[3] <= ty and n[0] > 320
+        if n:
+            click(n[0] + n[2] - 14, n[1] + n[3] - 14)
+        checks["action-2"] = bool(a.said("notify what=2 mine=1", 10)) and bare_when(lambda b: not b) is not None
+        # One action: pressed.
+        n = note(2)
+        checks["note-2"] = bool(n)
+        if n:
+            click(n[0] + n[2] - 14, n[1] + n[3] - 14)
+        checks["action-1"] = bool(a.said("notify what=1 mine=1", 10))
+        # Its time runs out.
+        n = note(3)
+        checks["note-3"] = bool(n)
+        checks["timeout"] = bool(a.said("notify what=4 mine=1", 15)) and bare_when(lambda b: not b) is not None
+        # Pressed away.
+        n = note(4)
+        checks["note-4"] = bool(n)
+        if n:
+            click(n[0] + 60, n[1] + 14)
+        na = len(a.out)
+        checks["dismissed"] = bool(a.said("notify what=3 mine=1", 10))
+        # The launcher: the Windows key, GLOS's mark.
+        agent.ssh("glos key 0x15B")
+        checks["launch-key"] = bool(a.said("shell what=1 at=0,%d window=0 app=0" % ty, 10, na))
+        na = len(a.out)
+        click(5, ty + 8)
+        checks["launch-mark"] = bool(a.said("shell what=1 at=0,%d window=0 app=0" % ty, 10, na))
+        # Another app's window not answering, and answering again.
+        w = procs["w"] = App("C:\\TEST\\APITEST.EXE win")
+        t0 = time.time()
+        while time.time() - t0 < 240 and '"APITEST W"' not in desk():
+            time.sleep(0.5)
+        agent.ssh("glos key 0x23")              # h: it takes no event for 8 seconds ...
+        agent.ssh("glos key 0x1E")              # ... while one waits for it
+        hung = a.said("shell what=3 at=0,0 window=*", 30)
+        checks["hung"] = bool(hung)
+        checks["answers"] = bool(hung) and bool(a.said(hung.replace("what=3", "what=4")[6:], 30))
+        agent.ssh("glos key " + ALT_F4)
+        w.p.wait(timeout=120)
+        # The task list: the shell's, which ends at it.
+        agent.ssh("glos key 0x1D:down,0.05:0x38:down,0.1:0x153,0.25:0x38:up,0.3:0x1D:up")
+        checks["tasks"] = bool(a.said("shell what=2 at=*", 10)) and bool(a.said("end", 10)) and a.p.wait(timeout=120) == 42
+        # With the shell gone another may be it; the one left is asked to end with GLOS.
+        again = procs["again"] = App("C:\\TEST\\APITEST.EXE shell")
+        checks["shell-again"] = bool(again.said("ready shell=0 focus=3 tray=*", 240))
+        if not all(checks.values()):
+            info += " A=%r OTHER=%r" % (a.out[-12:], other.out[-6:])
+        agent.ssh("glos exit")
+        checks["ended"] = bool(other.said("end", 60)) and bool(again.said("end", 60))
+        procs = {}
+    except subprocess.TimeoutExpired:
+        info += " timeout"
+    finally:
+        for x in procs.values():
+            x.p.kill()
+    text = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("apishell-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
 def thr_case(profile, card):
@@ -6910,6 +7076,7 @@ def main():
             res += matrix(api_win_case, wins, a.jobs)
             res += matrix(api_set_case, wins, a.jobs)   # ... and its settings, theme and saver as they change
             res += matrix(api_dnd_case, wins, a.jobs)   # ... and two of them dragging and dropping, and the clipboard
+            res += matrix(api_shell_case, wins, a.jobs) # ... and the shell: the tray, notifications, its events
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

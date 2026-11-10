@@ -123,6 +123,24 @@ glos_handle glos_fs_watch(const char *path);            /* GLOS_EV_FS when the f
                                                            refused */
 int glos_fs_sectors(struct glos_fs_sectors *s);         /* (size set here) */
 
+/* SHELL */
+int glos_shell(int on);                                 /* the app is the shell (GLOS_EV_SHELL), or no longer */
+glos_handle glos_tray(const unsigned *icon, const char *tip);   /* an icon in the tray (16 by 16 pixels); 0 if
+                                                                   refused (glos_error()). Changed with glos_set_data
+                                                                   (GLOS_PROP_TRAY_ICON) and glos_set_text (_TIP) */
+/* A notification: text, the two actions and the icon may be 0; seconds 0 for the usual. 0 if refused. */
+glos_handle glos_notify(const char *title, const char *text, const char *action1, const char *action2,
+                        const unsigned *icon, unsigned seconds);
+int glos_point(unsigned what, struct glos_point *out);  /* where a part of the shell is (GLOS_POINT_) */
+int glos_help(const char *page);                        /* Help at a page (0: the app's own) */
+/* A file or a link opened: with (a program) and verb (a verb's label of that program's) may be 0. The job's
+   number, or -1 (glos_error()). */
+int glos_open(const char *path, const char *with, const char *verb);
+int glos_assoc_get(const char *kind, char *program, unsigned room);    /* the program that opens a kind ("" none) */
+int glos_assoc_set(const char *kind, const char *program);             /* (0: none) */
+int glos_assoc_verbs(const char *kind, char *list, unsigned room, unsigned *length);    /* "Label\tPROGRAM ARGS" a line */
+int glos_assoc_verb(const char *kind, const char *label, const char *args);    /* the app's own (args 0: taken away) */
+
 /* ---- threads (THREAD; docs/supervisor.md 12.7)
  *
  * A thread of the app's own runs fn(arg) on a stack libglos allocates (stack bytes: 0 for 64 KB, at least 16 KB),

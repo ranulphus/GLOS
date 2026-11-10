@@ -202,11 +202,16 @@ static void desk_thread(void *arg)
     int dirty, vnc;
     static struct gfx_region drawn;             /* (the desktop's thread's alone) */
     static u8 saved;                            /* the saver's black screen is drawn */
+    static u32 wake_at;                         /* the tick the next turn must come by (0: the usual five seconds) */
     (void)arg;
     for (;;) {
         f = irq_save();
-        if (!changed)
-            thread_wait(&wakeq, timer_ticks() + 5 * 1024);      /* (the clock, at the latest) */
+        if (!changed) {                         /* (the clock, at the latest; sooner for a notification's time) */
+            u32 at = timer_ticks() + 5 * 1024;
+            if (wake_at && (s32)(wake_at - at) < 0)
+                at = (s32)(wake_at - timer_ticks()) > 0 ? wake_at : timer_ticks() + 1;
+            thread_wait(&wakeq, at);
+        }
         changed = 0;
         irq_restore(f);
         clock_second();                         /* (summer time's changes, without a network: M10) */
@@ -240,6 +245,8 @@ static void desk_thread(void *arg)
             saved = 0;
             repaint = 1;
         }
+        if (!fb)
+            wake_at = deskshell_turn(m, 0);     /* (notifications' time stands still while nothing is composed) */
         if (cursor_gen != m->cursor_gen)
             cursor_image(m);
         if (!saved)
@@ -256,6 +263,7 @@ static void desk_thread(void *arg)
                 wm_damage_all(m);
             }
             bar_text(m);
+            wake_at = deskshell_turn(m, 1);     /* the tray's tooltip, the notification shown (deskshell.c) */
             dirty = m->dirty.n != 0;
             if ((vnc = vnc_viewers() != 0))
                 drawn = m->dirty;

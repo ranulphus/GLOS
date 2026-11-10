@@ -46,6 +46,7 @@ struct app {
     u16 psp;
     u16 api_minor;                              /* the API's minor version it was built for (INIT's) */
     u8 api_major;                               /* 1 (glos/api.h) or 2 (glos/api2.h): the calls it may make */
+    u8 own;                                     /* its program is in GLOS's own folder: it may be the shell */
     u32 wake;                                   /* counts every event given it, of either API (app_sleep's) */
     u32 ev_since;                               /* the tick its queue last got its first event, or it last took one */
     u8 ev_taken;                                /* it has taken an event at least once (it reads its queue) */

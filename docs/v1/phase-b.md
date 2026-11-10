@@ -495,6 +495,46 @@ After that:
   - host: notifications' layout and lifetimes, ASSOC's rules;
   - Loop A: APITEST, and a scheduled command run at its time (the clock moved in 86Box).
 
+**Step 8, first part, as built** (2026-11-10; ENTRY, RECENT and SCHEDULE are the second part):
+
+- **SHELL's calls** (`kernel/app/api2shell.c`): DESKTOP, TRAY, NOTIFY, POINT, HELP, OPEN, ASSOC. Handles: a tray
+  icon (`GLOS_HK_TRAY`) and a notification (`GLOS_HK_NOTIFY`). Events: `GLOS_EV_TRAY`, `GLOS_EV_NOTIFY`,
+  `GLOS_EV_SHELL`. A new error, `GLOS_E_NOT_FOUND` (21).
+- **GLOS's own programs:** a program whose file is in the folder GLOS.EXE is in (`app_own`, found at INIT from
+  the program's path). Only such a program may:
+  - be the shell (DESKTOP; one at a time; it gets `GLOS_EV_SHELL`: the launcher, the task list, another app's
+    window not answering and answering again);
+  - give the keyboard to another app's window (WIN's FOCUS by a window's number).
+
+  Only the shell may take the bare desktop's drops (DND's TARGET with window 0). This default is to be put to
+  the owner.
+- **The tray** (`kernel/wm/wm.c`, `kernel/wm/deskshell.c`): up to 12 icons of 16 by 16 pixels left of the clock,
+  drawn by the desktop. A press of the left button is CLICK, a second within the double-click time
+  (`[input] double_click`) DOUBLE, the right button MENU; each event has the icon's place on the screen. The
+  tooltip is a small window of the desktop's own above the icon, shown once the pointer has rested there 0.6 s.
+- **Notifications** (`kernel/wm/notes.c`, drawn by `deskshell.c` from the theme): one shown at a time above the
+  task bar's right end, up to 8 shown and waiting. A title, up to three lines of text, an icon, up to two
+  actions. Shown 6 s unless it says (2 to 60); it stays while the pointer is on it; it is hidden, its time
+  stopped, while a full-screen program has the screen. Its app is told ACTION1, ACTION2, CLOSED or TIMEOUT.
+  CLOSE takes it away, shown or waiting.
+- **POINT:** the Start button, the task bar, the tray, the clock, the work area.
+- **ASSOC:** GET and SET are `[open]`; verbs are kept in each program's profile (`[program NAME] verbs`, a new
+  setting: `.KIND:Label=ARGUMENTS;...`). VERBS lists every program's verbs for a kind; VERB sets or takes away
+  one of the calling program's own. The rules are `sdk/config/assoc.c`'s.
+- **OPEN:** a program is run itself; a file by its kind's program, by a program named ("open with"), or by a
+  verb of a program's; a link (`http://`, `https://`) is the kind `.URL`. A file must be there (one batch asks
+  DOS). The program is started as a job of nobody's: it runs on when the app that opened it ends. The job's
+  number is given back; JOB's calls for it come with step 9.
+- **HELP** runs HELP.EXE in GLOS's folder with the page, and is refused (`GLOS_E_NOT_FOUND`) until Help is
+  there (phase E).
+- **Not done here:** a folder has no kind, so OPEN of a folder needs a program named (Files registers itself in
+  phase D). With no desktop a notification waits for one.
+- **Fixed on the way:** FS's INFO kept its paths in one buffer for every app, across a wait for the VM thread;
+  two apps asking at once could read each other's. Each call has its own now.
+- **Tests:** host `notes_test` (lifetimes, the queue, the layout) and `assoc_test`; APITEST's SHELL cases (20)
+  in `loopa-api`; `api_shell_case` under the agent (the tray's presses and tooltip, four notifications, the
+  shell's events, a program from another folder refused).
+
 ### 9. JOB and SYS
 
 - **RUN:**

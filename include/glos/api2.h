@@ -96,6 +96,7 @@
 #define GLOS_E_REFUSED     19   /* not this app's to do */
 #define GLOS_E_AGAIN       20   /* a wait cut short for an interrupt of the program's own: the call again, with ECX
                                    and EDX as they came back */
+#define GLOS_E_NOT_FOUND   21   /* no such file, program or page; or nothing is set to open that kind of file */
 /* (8-15 are the areas' own, numbered as 1.x numbered them: 8 no GPU, 9 no audio, 10 a setting refused,
     11-15 the network's) */
 
@@ -981,6 +982,123 @@ struct glos_ev_saver {
     struct glos_ev ev;
     unsigned on;
 };
+
+/* ================================================================== SHELL (04h): the tray, notifications, opening files
+ *
+ * GLOS draws the task bar, the notification area (the tray) and notifications itself, so they never wait for an
+ * app. Any app may have tray icons and send notifications, open files and ask where the shell's parts are. One
+ * app is the desktop's shell (DESKTOP): it draws the Start menu and the desktop's icons, and is told when the
+ * launcher or the task list is asked for and when an app stops answering.
+ *
+ * Programs in GLOS's own folder are GLOS's own. Only they may be the shell, bring another app's window to the
+ * front (WIN's FOCUS by a window's number) and take the bare desktop's drops (DND's TARGET with no window). */
+#define GLOS_SHELL_DESKTOP GLOS_FN(GLOS_AREA_SHELL, 0)  /* struct glos_shell_desktop: the app is the shell, or no longer */
+#define GLOS_SHELL_TRAY    GLOS_FN(GLOS_AREA_SHELL, 1)  /* struct glos_tray: an icon in the tray (GLOS_HK_TRAY) */
+#define GLOS_SHELL_NOTIFY  GLOS_FN(GLOS_AREA_SHELL, 2)  /* struct glos_notify: a notification (GLOS_HK_NOTIFY) */
+#define GLOS_SHELL_POINT   GLOS_FN(GLOS_AREA_SHELL, 3)  /* struct glos_point: where a part of the shell is */
+#define GLOS_SHELL_HELP    GLOS_FN(GLOS_AREA_SHELL, 4)  /* struct glos_help: Help, at a page */
+#define GLOS_SHELL_OPEN    GLOS_FN(GLOS_AREA_SHELL, 5)  /* struct glos_open: a file or a link opened */
+#define GLOS_SHELL_ASSOC   GLOS_FN(GLOS_AREA_SHELL, 6)  /* struct glos_assoc: kinds of file, their apps, verbs */
+
+struct glos_shell_desktop {
+    unsigned size;
+    unsigned on;                /* 1: the app is the shell (GLOS_E_REFUSED: another is, or it isn't GLOS's own); 0: no
+                                   longer */
+};
+
+struct glos_tray {
+    unsigned size;
+    unsigned icon;              /* its picture: 16 by 16 pixels of 4 bytes, as a window's icon (1024 bytes) */
+    unsigned tip;               /* its tooltip: text, at most 63 bytes (0: none) */
+    glos_handle handle;         /* -> the icon, until CLOSE */
+};
+#define GLOS_PROP_TRAY_ICON GLOS_PROP(GLOS_HK_TRAY, 0)  /* data: its picture, 1024 bytes (write) */
+#define GLOS_PROP_TRAY_TIP  GLOS_PROP(GLOS_HK_TRAY, 1)  /* text, at most 63 bytes */
+#define GLOS_TRAY_MAX 12        /* icons in the tray at once, everybody's */
+
+struct glos_notify {
+    unsigned size;
+    unsigned title;             /* text, at most 47 bytes */
+    unsigned text;              /* text, at most 127 bytes (0: none): up to three lines, broken where it must be
+                                   (or at a line feed) */
+    unsigned action[2];         /* up to two buttons' labels, at most 15 bytes each (0: none) */
+    unsigned icon;              /* a picture as a tray icon's (0: none) */
+    unsigned seconds;           /* how long it is shown: 2 to 60; 0: the usual (6) */
+    glos_handle handle;         /* -> the notification (GLOS_HK_NOTIFY), until CLOSE (which takes it away, shown or
+                                   waiting). GLOS_E_MEMORY: too many are waiting */
+};
+
+struct glos_point {
+    unsigned size;
+    unsigned what;              /* GLOS_POINT_ */
+    int x, y, w, h;             /* -> where it is on the screen (w 0: it isn't there now) */
+};
+#define GLOS_POINT_START 1      /* the Start button (GLOS's mark at the task bar's left) */
+#define GLOS_POINT_BAR   2      /* the task bar */
+#define GLOS_POINT_TRAY  3      /* the notification area */
+#define GLOS_POINT_CLOCK 4      /* the clock */
+#define GLOS_POINT_WORK  5      /* the work area: the screen less the task bar */
+
+struct glos_help {
+    unsigned size;
+    unsigned page;              /* the page (text, at most 31 bytes); 0: the app's own (INIT's) */
+};
+
+struct glos_open {
+    unsigned size;
+    unsigned path;              /* a file ("C:\\DOCS\\A.TXT"), a program, or a link ("http://...") */
+    unsigned with;              /* "open with": a program to open it with (0: the one its kind has) */
+    unsigned verb;              /* a verb's label ("Add to ZIP": `with` is then the program whose verb it is) */
+    unsigned job;               /* -> the job's number (for JOB's calls) */
+};
+
+struct glos_assoc {
+    unsigned size;
+    unsigned what;              /* GLOS_ASSOC_ */
+    unsigned kind;              /* a kind of file: a path, a name or an extension ("A.TXT", ".TXT") */
+    unsigned text;              /* SET: the program (0: none). VERB: the verb's label */
+    unsigned args;              /* VERB: its arguments ("" for none; 0: the verb is taken away) */
+    unsigned buffer;            /* GET: where the program goes. VERBS: where the list goes: a line each,
+                                   "Label", a tab, the program and its arguments */
+    unsigned room;
+    unsigned length;            /* -> the whole length (GLOS_E_ROOM: cut) */
+};
+#define GLOS_ASSOC_GET   0      /* the program that opens the kind ("" if none) */
+#define GLOS_ASSOC_SET   1      /* ... set (GLOS.CFG's [open]) */
+#define GLOS_ASSOC_VERBS 2      /* what programs offer for the kind beside opening it */
+#define GLOS_ASSOC_VERB  3      /* a verb of the calling app's own for the kind, set or taken away (kept in the
+                                   app's profile, GLOS.CFG's [program NAME] verbs) */
+
+/* SHELL's events. */
+#define GLOS_EV_TRAY   GLOS_EV(GLOS_AREA_SHELL, 1)      /* struct glos_ev_tray: a tray icon was pressed */
+#define GLOS_EV_NOTIFY GLOS_EV(GLOS_AREA_SHELL, 2)      /* struct glos_ev_notify: what became of a notification */
+#define GLOS_EV_SHELL  GLOS_EV(GLOS_AREA_SHELL, 3)      /* struct glos_ev_shell: (the shell's) something is asked */
+struct glos_ev_tray {
+    struct glos_ev ev;          /* (handle: the icon) */
+    unsigned what;              /* GLOS_TRAY_ */
+    int x, y, w, h;             /* where the icon is on the screen (a menu opens above it) */
+};
+#define GLOS_TRAY_CLICK  1      /* the left button, once */
+#define GLOS_TRAY_DOUBLE 2      /* ... twice */
+#define GLOS_TRAY_MENU   3      /* the right button: its menu is asked for */
+struct glos_ev_notify {
+    struct glos_ev ev;          /* (handle: the notification) */
+    unsigned what;              /* GLOS_NOTIFY_ */
+};
+#define GLOS_NOTIFY_ACTION1 1   /* its first button was pressed */
+#define GLOS_NOTIFY_ACTION2 2
+#define GLOS_NOTIFY_CLOSED  3   /* it was pressed elsewhere, or its close box was */
+#define GLOS_NOTIFY_TIMEOUT 4   /* its time ran out */
+struct glos_ev_shell {
+    struct glos_ev ev;
+    unsigned what;              /* GLOS_SHELL_ */
+    int x, y;                   /* LAUNCH: where the menu's bottom left goes */
+    unsigned window, app;       /* HUNG, ANSWERS: the window's number and its app's id */
+};
+#define GLOS_SHELL_LAUNCH  1    /* the launcher: the Start button, the Windows key or Ctrl+Esc */
+#define GLOS_SHELL_TASKS   2    /* the task list: Ctrl+Alt+Del */
+#define GLOS_SHELL_HUNG    3    /* a window's app stopped taking its events ("not answering") */
+#define GLOS_SHELL_ANSWERS 4    /* ... and takes them again */
 
 /* ================================================================== CLIP (05h): the clipboard
  *

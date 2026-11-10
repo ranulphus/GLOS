@@ -44,6 +44,7 @@ const struct wm_look wm_look_default = {
 #define BAR_BTN   120                   /* a button's width at most */
 #define BAR_RIGHT 110                   /* room for the note and the clock */
 #define ICON_W    11
+#define TRAY_W    20                    /* a tray icon's place: its 16 pixels and the gap */
 
 /* The task bar's pictures, one bit a pixel: GLOS's mark (two windows), a
    window (a button's), and a line in use (beside the note). */
@@ -396,7 +397,7 @@ static struct wm_window *bar_button(const struct wm *m, u32 k, s32 *width)
 {
     struct wm_window *w, *best;
     u32 n = 0, last = 0, i;
-    s32 room = m->w - BAR_NAME - BAR_RIGHT;
+    s32 room = m->w - BAR_NAME - BAR_RIGHT - (s32)m->ntray * TRAY_W;
     for (w = m->bottom; w; w = w->above)
         n += on_bar(w);
     *width = n && room / (s32)n < BAR_BTN ? room / (s32)n : BAR_BTN;
@@ -425,6 +426,16 @@ static void draw_icon(struct gfx_surface *s, s32 x, s32 y, const u32 *icon)
             if (c >> 24 >= 0x80)
                 gfx_fill(s, x + i, y + j, run, 1, c & 0xFFFFFF);
         }
+}
+
+/* Where the k-th tray icon is in the bar: they end 8 pixels left of the note, or of the clock. */
+static s32 tray_x(const struct wm *m, u32 k)
+{
+    const struct wm_look *l = &m->look;
+    s32 right = m->w - 6 - gfx_text_width(l->font, m->clock, -1) - 8;
+    if (m->note[0])
+        right -= 8 + gfx_text_width(l->bold, m->note, -1) + ICON_W + 4;
+    return right - (s32)(m->ntray - k) * TRAY_W + (TRAY_W - 16);
 }
 
 static void bar_paint(struct wm *m)
@@ -472,6 +483,8 @@ static void bar_paint(struct wm *m)
         gfx_text(s, x, ty, l->bold, m->note, -1, l->bar_text);
         gfx_mono(s, x - ICON_W - 4, (BAR_H - 7) / 2 + 1, &ico_link[0][0], ICON_W, 7, 2, l->bar_text, GFX_NONE);
     }
+    for (k = 0; k < m->ntray; k++)              /* the tray's icons, left of those */
+        draw_icon(s, tray_x(m, k), (BAR_H - 16) / 2 + 1, m->tray[k].icon);
     damage(m, &m->bar->frame);
 }
 
@@ -494,6 +507,97 @@ struct wm_window *wm_bar_hit(const struct wm *m, s32 x, s32 y)
     if (!bar_button(m, 0, &bw))
         return 0;
     return (x - BAR_NAME) % bw < bw - 2 ? bar_button(m, (u32)((x - BAR_NAME) / bw), &bw) : 0;
+}
+
+u32 wm_tray_add(struct wm *m, const u32 *icon)
+{
+    u32 i;
+    if (m->ntray == WM_TRAY)
+        return 0;
+    if (!++m->tray_next)
+        m->tray_next = 1;
+    m->tray[m->ntray].id = m->tray_next;
+    for (i = 0; i < 256; i++)
+        m->tray[m->ntray].icon[i] = icon ? icon[i] : 0;
+    m->ntray++;
+    bar_stale(m);
+    return m->tray_next;
+}
+
+void wm_tray_icon(struct wm *m, u32 id, const u32 *icon)
+{
+    u32 k, i;
+    for (k = 0; k < m->ntray; k++)
+        if (m->tray[k].id == id) {
+            for (i = 0; i < 256; i++)
+                m->tray[k].icon[i] = icon[i];
+            bar_stale(m);
+        }
+}
+
+void wm_tray_remove(struct wm *m, u32 id)
+{
+    u32 k;
+    for (k = 0; k < m->ntray && m->tray[k].id != id; k++) ;
+    if (k == m->ntray)
+        return;
+    for (; k + 1 < m->ntray; k++)
+        m->tray[k] = m->tray[k + 1];
+    m->ntray--;
+    bar_stale(m);
+}
+
+u32 wm_tray_hit(const struct wm *m, s32 x, s32 y)
+{
+    u32 k;
+    if (!m->bar || !(m->bar->flags & WF_SHOWN) || y < m->bar->frame.y)
+        return 0;
+    for (k = 0; k < m->ntray; k++)
+        if (x >= tray_x(m, k) - 2 && x < tray_x(m, k) + 18)
+            return m->tray[k].id;
+    return 0;
+}
+
+int wm_bar_part(const struct wm *m, int part, u32 tray_id, struct gfx_rect *r)
+{
+    s32 tw = gfx_text_width(m->look.font, m->clock, -1);
+    u32 k;
+    r->x = r->y = r->w = r->h = 0;
+    if (part == WB_WORK) {
+        wm_work(m, r);
+        return 1;
+    }
+    if (!m->bar || !(m->bar->flags & WF_SHOWN))
+        return 0;
+    r->y = m->bar->frame.y;
+    r->h = BAR_H;
+    switch (part) {
+    case WB_START:
+        r->x = 0, r->w = BAR_NAME;
+        return 1;
+    case WB_BAR:
+        r->x = 0, r->w = m->w;
+        return 1;
+    case WB_CLOCK:
+        r->x = m->w - 6 - tw - 2, r->w = tw + 8;
+        return 1;
+    case WB_TRAY:
+        if (!m->ntray)
+            break;
+        if (!tray_id) {
+            r->x = tray_x(m, 0) - 2, r->w = (s32)m->ntray * TRAY_W;
+            return 1;
+        }
+        for (k = 0; k < m->ntray; k++)
+            if (m->tray[k].id == tray_id) {
+                r->x = tray_x(m, k), r->w = 16;
+                r->y += (BAR_H - 16) / 2 + 1, r->h = 16;
+                return 1;
+            }
+        break;
+    }
+    r->y = r->h = 0;
+    return 0;
 }
 
 void wm_bar_text(struct wm *m, const char *clock, const char *note)

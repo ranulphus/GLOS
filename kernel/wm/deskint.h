@@ -31,4 +31,10 @@ void deskapp_close(struct wm *m, struct wm_window *w);  /* the user wants it clo
 void deskapp_screen(struct wm *m);      /* the screen has another format: every app's pixels are elsewhere */
 void desk_refocus(struct wm *m);        /* no window has the focus: the topmost that can */
 
+u32 deskin_double_ticks(void);          /* two presses this close are a double click ([input] double_click) */
+
+/* deskshell.c: the tray and notifications. */
+u32 deskshell_turn(struct wm *m, int screen);   /* each turn: the tick to wake at, at the latest (0: whenever) */
+int deskshell_press(struct wm *m, u32 bit);     /* a button went down: 1 if on the tray or a notification (used up) */
+
 #endif

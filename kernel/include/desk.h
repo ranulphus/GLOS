@@ -114,4 +114,23 @@ void api2_dnd_at(struct app *owner, u32 win, s32 sx, s32 sy, s32 ox, s32 oy);
 void api2_dnd_end(int drop);            /* the button was let go (1), or the drag given up (0: Esc, a session) */
 int api2_dnd_effect(void);              /* the effect a drop would have now (GLOS_DND_: 1, 2, 4), 0 none */
 
+/* The tray and notifications (API 2.0's SHELL; kernel/wm/deskshell.c). */
+struct note;
+struct note_news;
+struct gfx_rect;
+u32 desk_tray_add(struct app *a, const u32 *icon, const char *tip);    /* an icon of a's: its id, 0 if the tray is full */
+void desk_tray_set(u32 id, const u32 *icon, const char *tip);   /* its picture or its tooltip changed (NULL: as it is) */
+int desk_tray_tip(u32 id, char *out, u32 room);         /* its tooltip: its length, -1 no such icon */
+void desk_tray_remove(struct app *a, u32 id);           /* gone (id 0: every one of a's) */
+u32 desk_notify_add(struct app *a, const struct note *n);       /* a notification of a's: its id, 0 if too many wait */
+void desk_notify_remove(struct app *a, u32 id);         /* taken away, shown or waiting (id 0: every one of a's) */
+int desk_point(int what, struct gfx_rect *r);           /* where a part of the task bar is (wm.h's WB_): 1, or 0 */
+struct app *desk_shell_app(void);       /* the desktop's shell, or NULL */
+int desk_shell_set(struct app *a, int on);      /* a is the shell (0), or no longer; -1: another app is */
+/* kernel/app/api2shell.c: what the desktop tells apps (the desktop's thread). what: 1 a press, 2 the second of two,
+   3 the right button. */
+void api2_tray_event(struct app *a, u32 tray, int what, const struct gfx_rect *r);
+void api2_note_event(const struct note_news *n);
+void api2_shell_hung(struct app *shell, u32 window, struct app *owner, int hung);
+
 #endif

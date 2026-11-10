@@ -138,6 +138,8 @@ const struct cfg_key cfg_schema[] = {
       "It runs at IOPL 3 with the PC's ports (PRD D20)" },
     { "program", "memory", CFG_NUMBER, CFG_PROGRAM, 0, 1048576, 0, "0", "&Memory (KB)",
       "The most DPMI memory it is given (0: no limit)" },
+    { "program", "verbs", CFG_TEXT, CFG_NOW, 0, 191, "line", "", "&Verbs",
+      "What it offers for kinds of file beside opening them: .KIND:Label=ARGUMENTS;..." },
     { "program", "env", CFG_ENV, CFG_PROGRAM, 0, 190, 0, "", "&Environment",
       "NAME=VALUE lines added to its environment" },
 };

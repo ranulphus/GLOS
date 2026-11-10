@@ -70,7 +70,8 @@ static void before(void)
     check("version", glos_version(&v) == 0 && v.major == 2 && v.minor == 0 && v.build[0]
           && v.functions[GLOS_AREA_CORE][0] == 0x1FFFu && GLOS_HAS(&v, GLOS_CORE_RANDOM)
           && GLOS_HAS(&v, GLOS_WIN_CREATE) && GLOS_HAS(&v, GLOS_DRAW_SCREEN) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_WIN, 5))
-          && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 0)),
+          && GLOS_HAS(&v, GLOS_SHELL_ASSOC) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 7))
+          && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_JOB, 0)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
     small.v.size = 12;                                  /* (size, major, minor: an older program's) */
@@ -108,7 +109,7 @@ static void calls(void)
     r = glos_call(2, 0);                                /* (1.x's YIELD: a 2.0 app makes 2.0's calls) */
     check("1x-refused", r == GLOS_E_VERSION, "r=%d", r);
     check("unknown-core", glos_call(GLOS_FN(GLOS_AREA_CORE, 200), 0) == GLOS_E_FUNCTION, 0);
-    check("unknown-area", glos_call(GLOS_FN(GLOS_AREA_SHELL, 0), 0) == GLOS_E_FUNCTION, 0);
+    check("unknown-area", glos_call(GLOS_FN(GLOS_AREA_JOB, 0), 0) == GLOS_E_FUNCTION, 0);
     check("unknown-win", glos_call(GLOS_FN(GLOS_AREA_WIN, 5), 0) == GLOS_E_FUNCTION, 0);
     check("yield", glos_yield() == 0, 0);
     memset(&t, 0, sizeof t);
@@ -742,7 +743,8 @@ static void clipboard(void)
     ok &= glos_dnd_target(r, GLOS_DND_COPY | GLOS_DND_MOVE, text, 1) == 0 && glos_dnd_target(r, GLOS_DND_COPY, text, 0) == GLOS_E_ARGUMENT
           && glos_dnd_target(r, 8, text, 1) == GLOS_E_ARGUMENT && glos_dnd_target(0x02000077u, GLOS_DND_COPY, text, 1) == GLOS_E_HANDLE
           && glos_dnd_answer(r, GLOS_DND_COPY) == GLOS_E_REFUSED && glos_dnd_target(r, 0, 0, 0) == 0
-          && glos_dnd_target(0, GLOS_DND_COPY, text, 1) == 0 && glos_dnd_target(0, 0, 0, 0) == 0;
+          && glos_dnd_target(0, GLOS_DND_COPY, text, 1) == GLOS_E_REFUSED      /* (the bare desktop's are the shell's) */
+          && glos_dnd_target(0, 0, 0, 0) == 0;
     glos_close(r);
     check("dnd-refused", ok, "e=%d", e);
 }
@@ -1223,9 +1225,262 @@ static int interactive(void)
     }
 }
 
+/* SHELL (step 8): the shell's identity, where the task bar's parts are, the tray, notifications, kinds of file
+   and their programs and verbs, OPEN, HELP. What the user's hands do to an icon and a notification is the shell
+   mode's (shell_mode, under the agent). */
+#define OPENED "C:\\TEST\\OPENED.TXT"
+
+static int opened_is(const char *want, unsigned ms)    /* the program OPEN started has said what it was given */
+{
+    unsigned t0 = glos_ticks();
+    char got[200];
+    for (;;) {
+        FILE *f = fopen(OPENED, "r");
+        got[0] = 0;
+        if (f) {
+            if (!fgets(got, sizeof got, f))
+                got[0] = 0;
+            fclose(f);
+            if (strchr(got, '\n')) {                    /* (written whole) */
+                *strchr(got, '\n') = 0;
+                remove(OPENED);
+                if (strcmp(got, want))
+                    printf("opened: got \"%s\" want \"%s\"\n", got, want);
+                return !strcmp(got, want);
+            }
+        }
+        if (glos_ticks() - t0 >= ms)
+            return 0;
+        glos_sleep(200);
+    }
+}
+
+static void shell(void)
+{
+    static unsigned icon[256];
+    static char list[512], longtip[80], longtitle[60];
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_ev_notify *ne = (struct glos_ev_notify *)ev;
+    struct glos_point bar, work, start, clock, tray;
+    struct glos_screen scr;
+    unsigned text[1] = { GLOS_CLIP_TEXT }, len = 0, t0, took, i;
+    glos_handle t, n, n2, many[16];
+    char buf[128];
+    int r, e, ok, job;
+    FILE *f;
+
+    for (i = 0; i < 256; i++)
+        icon[i] = 0xFF2060C0u;
+    memset(longtip, 'x', sizeof longtip - 1);
+    memset(longtitle, 'y', sizeof longtitle - 1);
+    glos_screen(&scr);
+
+    /* The shell: one of GLOS's own programs (this one is in GLOS's folder); the bare desktop's drops are its. */
+    r = glos_shell(1);
+    e = glos_shell(1);
+    ok = r == 0 && e == 0 && glos_dnd_target(0, GLOS_DND_COPY, text, 1) == 0 && glos_dnd_target(0, 0, 0, 0) == 0;
+    check("shell-on", ok, "r=%d e=%d", r, e);
+    r = glos_shell(0);
+    check("shell-off", r == 0 && glos_dnd_target(0, GLOS_DND_COPY, text, 1) == GLOS_E_REFUSED, "r=%d", r);
+
+    /* Where the task bar's parts are. */
+    r = glos_point(GLOS_POINT_BAR, &bar);
+    r |= glos_point(GLOS_POINT_WORK, &work) | glos_point(GLOS_POINT_START, &start) | glos_point(GLOS_POINT_CLOCK, &clock);
+    e = glos_point(GLOS_POINT_TRAY, &tray);
+    ok = r == 0 && bar.x == 0 && bar.w == scr.w && bar.y + bar.h == scr.h && work.x == 0 && work.y == 0 && work.w == scr.w
+         && work.h == bar.y && start.x == 0 && start.y == bar.y && start.w > 8 && start.w < 100 && clock.y == bar.y
+         && clock.x > scr.w / 2 && clock.x + clock.w <= scr.w && clock.w > 8 && e == 0 && tray.w == 0;
+    check("point", ok, "r=%d bar=%d,%d %dx%d work=%dx%d start=%d clock=%d,%d tray=%d", r, bar.x, bar.y, bar.w, bar.h, work.w,
+          work.h, start.w, clock.x, clock.w, tray.w);
+    check("point-bad", glos_point(0, &bar) == GLOS_E_ARGUMENT && glos_point(6, &bar) == GLOS_E_ARGUMENT, 0);
+
+    /* The tray. */
+    t = glos_tray(icon, "APITEST's icon");
+    r = glos_point(GLOS_POINT_TRAY, &tray);
+    buf[0] = 0;
+    e = glos_get_text(t, GLOS_PROP_TRAY_TIP, buf, sizeof buf);
+    ok = t && GLOS_HANDLE_KIND(t) == GLOS_HK_TRAY && r == 0 && tray.w >= 16 && tray.w <= 24 && tray.y == bar.y
+         && tray.x + tray.w <= clock.x + 2 && e >= 0 && !strcmp(buf, "APITEST's icon");
+    check("tray", ok, "t=%x err=%d at=%d,%d w=%d clock=%d e=%d tip=%s", t, glos_error(), tray.x, tray.y, tray.w, clock.x, e, buf);
+    r = glos_set_text(t, GLOS_PROP_TRAY_TIP, "Another");
+    glos_get_text(t, GLOS_PROP_TRAY_TIP, buf, sizeof buf);
+    e = glos_set_data(t, GLOS_PROP_TRAY_ICON, icon, sizeof icon);
+    ok = r == 0 && !strcmp(buf, "Another") && e == 0 && glos_set_data(t, GLOS_PROP_TRAY_ICON, icon, 100) == GLOS_E_ARGUMENT
+         && glos_set_text(t, GLOS_PROP_TRAY_TIP, longtip) == GLOS_E_ARGUMENT && glos_set_text(t, GLOS_PROP_TRAY_TIP, "") == 0;
+    check("tray-props", ok, "r=%d e=%d tip=%s", r, e, buf);
+    ok = glos_tray(0, 0) == 0 && glos_error() == GLOS_E_ARGUMENT && glos_tray(icon, longtip) == 0
+         && glos_error() == GLOS_E_ARGUMENT;
+    for (i = 0; i < GLOS_TRAY_MAX - 1; i++)
+        ok &= (many[i] = glos_tray(icon, 0)) != 0;
+    glos_point(GLOS_POINT_TRAY, &tray);
+    ok &= glos_tray(icon, 0) == 0 && glos_error() == GLOS_E_MEMORY && tray.w >= 16 * GLOS_TRAY_MAX;
+    for (i = 0; i < GLOS_TRAY_MAX - 1; i++)
+        ok &= glos_close(many[i]) == 0;
+    ok &= glos_close(t) == 0 && glos_close(t) == GLOS_E_HANDLE && glos_point(GLOS_POINT_TRAY, &tray) == 0 && tray.w == 0;
+    check("tray-full", ok, "w=%d err=%d", tray.w, glos_error());
+
+    /* Notifications: one shown for its time; closed while shown or waiting; too many. */
+    while (glos_event(ev, sizeof ev, 0, 0) > 0) ;
+    t0 = glos_ticks();
+    n = glos_notify("APITEST", "A notification of the test's.\nIts second line.", "Yes", "No", icon, 2);
+    r = await(GLOS_EV_NOTIFY, n, ev, 6000);
+    took = glos_ticks() - t0;
+    check("notify-timeout", n && GLOS_HANDLE_KIND(n) == GLOS_HK_NOTIFY && r > 0 && ne->what == GLOS_NOTIFY_TIMEOUT
+          && took >= 1900 && took < 4000 && glos_close(n) == 0, "n=%x err=%d r=%d what=%u took=%u", n, glos_error(), r,
+          r > 0 ? ne->what : 0, took);
+    n = glos_notify("Shown", 0, 0, 0, 0, 0);
+    n2 = glos_notify("Waiting", "It never has its turn.", 0, 0, 0, 3);
+    glos_sleep(300);
+    ok = n && n2 && glos_close(n) == 0 && glos_close(n2) == 0 && glos_event(ev, sizeof ev, 500, 1u << GLOS_AREA_SHELL) == 0;
+    check("notify-closed", ok, "n=%x n2=%x", n, n2);
+    ok = glos_notify(0, "x", 0, 0, 0, 0) == 0 && glos_error() == GLOS_E_ARGUMENT && glos_notify("", 0, 0, 0, 0, 0) == 0
+         && glos_notify("t", 0, 0, 0, 0, 1) == 0 && glos_error() == GLOS_E_ARGUMENT && glos_notify("t", 0, 0, 0, 0, 61) == 0
+         && glos_notify("t", 0, 0, "No", 0, 0) == 0 && glos_notify(longtitle, 0, 0, 0, 0, 0) == 0
+         && glos_notify("t", 0, "A label too long by far", 0, 0, 0) == 0 && glos_error() == GLOS_E_ARGUMENT;
+    check("notify-bad", ok, "err=%d", glos_error());
+    ok = 1;
+    for (i = 0; i < 8; i++)
+        ok &= (many[i] = glos_notify("Many", 0, 0, 0, 0, 60)) != 0;
+    ok &= glos_notify("One too many", 0, 0, 0, 0, 0) == 0 && glos_error() == GLOS_E_MEMORY;
+    for (i = 0; i < 8; i++)
+        ok &= glos_close(many[i]) == 0;
+    check("notify-many", ok && (n = glos_notify("Room again", 0, 0, 0, 0, 0)) != 0 && glos_close(n) == 0, "err=%d", glos_error());
+
+    /* Kinds of file and their programs. */
+    r = glos_assoc_set(".ZZT", "APITEST.EXE");
+    buf[0] = 'x';
+    e = glos_assoc_get("C:\\DOCS\\Letter.zzt", buf, sizeof buf);
+    ok = r == 0 && e == 0 && !strcmp(buf, "APITEST.EXE") && glos_assoc_get("zzt", buf, 4) == GLOS_E_ROOM
+         && glos_assoc_get("NOKIND", buf, sizeof buf) == GLOS_E_ARGUMENT && glos_assoc_get(".LONGER", buf, sizeof buf) == GLOS_E_ARGUMENT;
+    check("assoc", ok, "r=%d e=%d program=%s", r, e, buf);
+
+    /* Verbs: this program's own, in its profile. */
+    r = glos_assoc_verb(".ZZT", "Say it", "said");
+    e = glos_assoc_verb("zzt", "Show", "");
+    glos_assoc_verb(".ZZU", "Other kind", "x");
+    list[0] = 0;
+    ok = r == 0 && e == 0 && glos_assoc_verbs("A.ZZT", list, sizeof list, &len) == 0 && len == strlen(list)
+         && strstr(list, "Say it\tAPITEST.EXE said\n") && strstr(list, "Show\tAPITEST.EXE\n") && !strstr(list, "Other")
+         && glos_assoc_verbs(".ZZT", list, 8, &len) == GLOS_E_ROOM && len > 8
+         && glos_assoc_verb(".ZZT", "Bad;label", "x") == GLOS_E_ARGUMENT && glos_assoc_verb(".ZZT", "Bad", "a;b") == GLOS_E_ARGUMENT;
+    check("verbs", ok, "r=%d e=%d len=%u list=%s", r, e, len, list);
+
+    /* OPEN: by the kind's program, by a verb, with a program named; a link; what can't be opened. */
+    remove(OPENED);
+    if ((f = fopen("C:\\TEST\\OPENME.ZZT", "w")) != 0) {
+        fputs("open me\n", f);
+        fclose(f);
+    }
+    job = glos_open("C:\\TEST\\OPENME.ZZT", 0, 0);
+    check("open-kind", job > 0 && opened_is("C:\\TEST\\OPENME.ZZT", 60000), "job=%d err=%d", job, glos_error());
+    job = glos_open("C:/TEST/openme.zzt", "APITEST.EXE", "say it");
+    check("open-verb", job > 0 && opened_is("said C:\\TEST\\openme.zzt", 60000), "job=%d err=%d", job, glos_error());
+    job = glos_open("C:\\TEST\\OPENME.ZZT", "C:\\TEST\\APITEST.EXE with", 0);
+    check("open-with", job > 0 && opened_is("with C:\\TEST\\OPENME.ZZT", 60000), "job=%d err=%d", job, glos_error());
+    r = glos_open("http://example.com/a.zzt", 0, 0);
+    e = glos_error();
+    glos_assoc_set(".URL", "APITEST.EXE");
+    job = glos_open("http://example.com/a.zzt", 0, 0);
+    check("open-link", r == -1 && e == GLOS_E_NOT_FOUND && job > 0 && opened_is("http://example.com/a.zzt", 60000),
+          "r=%d e=%d job=%d err=%d", r, e, job, glos_error());
+    glos_assoc_set(".URL", 0);
+    ok = glos_open("C:\\TEST\\NOSUCH.ZZT", 0, 0) == -1 && glos_error() == GLOS_E_NOT_FOUND
+         && glos_open("C:\\TEST\\*.ZZT", 0, 0) == -1 && glos_error() == GLOS_E_NOT_FOUND
+         && glos_open("C:\\TEST\\OPENME.ZZT", "APITEST.EXE", "No such verb") == -1 && glos_error() == GLOS_E_NOT_FOUND
+         && glos_open("C:\\TEST\\OPENME.ZZT", 0, "Say it") == -1 && glos_error() == GLOS_E_ARGUMENT
+         && glos_open(0, 0, 0) == -1 && glos_error() == GLOS_E_ARGUMENT;
+    r = glos_assoc_set(".ZZT", 0);
+    buf[0] = 'x';
+    e = glos_assoc_get(".ZZT", buf, sizeof buf);
+    ok &= r == 0 && e == 0 && !buf[0] && glos_open("C:\\TEST\\OPENME.ZZT", 0, 0) == -1 && glos_error() == GLOS_E_NOT_FOUND;
+    check("open-refused", ok, "r=%d e=%d err=%d program=%s", r, e, glos_error(), buf);
+    remove("C:\\TEST\\OPENME.ZZT");
+
+    /* The verbs taken away again: the profile is as it was. */
+    r = glos_assoc_verb(".ZZT", "Say it", 0);
+    ok = r == 0 && glos_assoc_verb(".ZZT", "Say it", 0) == GLOS_E_NOT_FOUND && glos_assoc_verb(".ZZT", "show", 0) == 0
+         && glos_assoc_verb(".ZZU", "Other kind", 0) == 0 && glos_assoc_verbs(".ZZT", list, sizeof list, &len) == 0 && len == 0;
+    check("verbs-gone", ok, "r=%d len=%u list=%s", r, len, list);
+
+    /* Help is an app of phase E's: not there yet. */
+    r = glos_help("windows");
+    check("help", r == GLOS_E_NOT_FOUND && glos_help(0) == GLOS_E_NOT_FOUND, "r=%d", r);
+}
+
+/* A program OPEN started (not an app): what it was given, for the test that opened it. */
+static int opened_mode(int argc, char **argv)
+{
+    FILE *f = fopen(OPENED, "w");
+    int i;
+    if (!f)
+        return 1;
+    for (i = 1; i < argc; i++)
+        fprintf(f, i > 1 ? " %s" : "%s", argv[i]);
+    fputc('\n', f);
+    fclose(f);
+    return 0;
+}
+
+/* The shell under the user's hands (the agent's): the shell's events, a tray icon's presses, what becomes of
+   notifications. Each is said on the standard output. */
+static int shell_mode(void)
+{
+    static unsigned icon[256];
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_ev *e = (struct glos_ev *)ev;
+    struct glos_point tray;
+    glos_handle t, n = 0;
+    unsigned i, notes = 0;
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 1;
+    for (i = 0; i < 256; i++)
+        icon[i] = 0xFFC02040u;
+    struct glos_win_focus fq = { sizeof fq, 0, 99999 };  /* (any window by its number: GLOS's own programs') */
+    t = glos_tray(icon, "The test's icon");
+    glos_point(GLOS_POINT_TRAY, &tray);
+    printf("SHELL ready shell=%d focus=%d tray=%d,%d,%d,%d\n", glos_shell(1), glos_call(GLOS_WIN_FOCUS, &fq), tray.x, tray.y,
+           tray.w, tray.h);
+    fflush(stdout);
+    for (;;) {
+        if (glos_event(ev, sizeof ev, GLOS_FOREVER, 0) <= 0)
+            continue;
+        if (e->kind == GLOS_EV_TRAY) {
+            struct glos_ev_tray *te = (struct glos_ev_tray *)ev;
+            printf("SHELL tray what=%u mine=%d at=%d,%d %dx%d\n", te->what, te->ev.handle == t, te->x, te->y, te->w, te->h);
+            if (te->what == GLOS_TRAY_MENU) {           /* its menu asked for: the next notification */
+                if (n)
+                    glos_close(n);
+                notes++;
+                n = notes == 1 ? glos_notify("First", "Two actions.", "Yes", "No", icon, 60)
+                  : notes == 2 ? glos_notify("Second", "One action, and a text long enough to be broken into lines.", "Fine", 0, 0, 60)
+                  : notes == 3 ? glos_notify("Third", 0, 0, 0, 0, 2) : glos_notify("Fourth", "Pressed away.", 0, 0, icon, 60);
+                printf("SHELL note %u r=%d\n", notes, n ? 0 : glos_error());
+            }
+        } else if (e->kind == GLOS_EV_NOTIFY) {
+            struct glos_ev_notify *ne = (struct glos_ev_notify *)ev;
+            printf("SHELL notify what=%u mine=%d\n", ne->what, ne->ev.handle == n);
+        } else if (e->kind == GLOS_EV_SHELL) {
+            struct glos_ev_shell *se = (struct glos_ev_shell *)ev;
+            printf("SHELL shell what=%u at=%d,%d window=%u app=%u\n", se->what, se->x, se->y, se->window, se->app);
+            if (se->what == GLOS_SHELL_TASKS)
+                break;
+        } else if (e->kind == GLOS_EV_END) {
+            break;
+        }
+        fflush(stdout);
+    }
+    printf("SHELL end\n");
+    fflush(stdout);
+    return 42;
+}
+
 int main(int argc, char **argv)
 {
     char line[64];
+    if (argc > 1 && !strcmp(argv[1], "shell"))
+        return shell_mode();
+    if (argc > 1 && (strstr(argv[1], ".ZZT") || strstr(argv[1], ".zzt") || !strcmp(argv[1], "said") || !strcmp(argv[1], "with")))
+        return opened_mode(argc, argv);
     if (argc > 1 && !strcmp(argv[1], "win"))
         return interactive();
     if (argc > 1 && !strcmp(argv[1], "set"))
@@ -1244,6 +1499,7 @@ int main(int argc, char **argv)
         settings();
         clipboard();
         files(argc > 2 && !strcmp(argv[1], "many") ? (unsigned)atoi(argv[2]) : 300);
+        shell();
     }
     snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
     com1(line);

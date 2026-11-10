@@ -94,6 +94,7 @@ static struct gfx_rect drag_from;               /* the outline when it began */
 static u32 double_ticks = 512;                  /* two presses this close are a double click ([input] double_click) ... */
 #define DOUBLE_PX    4                          /* ... and this near */
 
+u32 deskin_double_ticks(void) { return double_ticks; }
 void deskin_double_click(u32 ms) { double_ticks = ms >= 100 && ms <= 2000 ? ms + ms * 24 / 1000 : 512; }
 
 void deskin_snap(int on) { snap = on != 0; }
@@ -171,6 +172,17 @@ void desk_shell(struct app *a, int on)
         shell = a;
     else if (shell == a)
         shell = 0;
+}
+
+struct app *desk_shell_app(void) { return shell; }
+
+/* API 2.0's DESKTOP: one shell at a time. */
+int desk_shell_set(struct app *a, int on)
+{
+    if (on && shell && shell != a)
+        return -1;
+    desk_shell(a, on);
+    return 0;
 }
 
 static int to_shell(struct wm *m, unsigned type)
@@ -657,6 +669,8 @@ static void button(struct wm *m, u32 bit, int down)
         desk_refocus(m);                        /* away), even where no window would take the focus instead */
         deskin_focus(m);
     }
+    if (deskshell_press(m, bit))                /* a tray icon's, or a notification's */
+        return;
     if (!w)
         return;
     if ((v = wm_modal_for(m, w)) != 0) {        /* a modal window of its own is up: that one, and nothing else */

@@ -76,6 +76,10 @@ void api2_event_1x(struct app *a, const struct glos_event *e)
         return;
     }
     irq_restore(f);
+    if (a->v2 && (e->type == GLOS_EV_LAUNCH || e->type == GLOS_EV_SYSKEY)) {    /* the shell's: SHELL's event */
+        api2_shell_1x(a, e->type, e->x, e->y);
+        return;
+    }
     if (!h) {                                   /* (not a window's, or one whose handle is closed already) */
         if (a->v2)
             a->v2->ndrop1x++;
@@ -227,8 +231,11 @@ static int focus(struct app *a, struct trapframe *tf)
     int r;
     if (a2_rd(tf, &q, sizeof q, &size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
-    if (!q.handle)                              /* (any window: the shell's and Task Manager's; SHELL's step says who) */
+    if (!q.handle) {                            /* any window: for GLOS's own programs (the shell, Task Manager) */
+        if (!app_own(a))
+            return a2_fail(tf, GLOS_E_REFUSED);
         return (r = desk_win_focus_id(q.id)) != 0 ? a2_fail(tf, (u32)r) : a2_ok(tf, 0);
+    }
     if (!(id = win_id(a, q.handle)))
         return not_window(a, tf, q.handle);
     return (r = desk_win_focus(a, id)) != 0 ? a2_fail(tf, (u32)r) : a2_ok(tf, 0);

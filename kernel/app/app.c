@@ -458,6 +458,35 @@ static void cwd_want(const struct cwd *w)
 
 static void app_main(void *arg);
 
+/* Is the program one of GLOS's own: its file in the folder GLOS.EXE is in (where GLOS.CFG is)? Its path is after
+   its environment's strings. Such programs may be the shell and act on other apps' windows (SHELL, WIN). */
+static int own_program(const struct dpmi_ctx *c)
+{
+    const char *cfg = vm.bi->cfg_path;
+    u32 a, end, i, n = 0;
+    for (i = 0; cfg[i]; i++)
+        if (cfg[i] == '\\')
+            n = i + 1;                          /* the folder's length, with its last backslash */
+    if (!n || !c->env_seg)
+        return 0;
+    a = c->env_seg * 16u;
+    end = a + 0x8000;
+    while (a + 1 < end && (vm_rd8(a) || vm_rd8(a + 1)))
+        a++;
+    if (a + 1 >= end || vm_rd16(a + 2) == 0)
+        return 0;
+    a += 4;
+    for (i = 0; i < n; i++)
+        if ((vm_rd8(a + i) & ~0x20) != (cfg[i] & ~0x20) && vm_rd8(a + i) != (u8)cfg[i])
+            return 0;
+    for (; vm_rd8(a + i); i++)                  /* (in the folder itself, not one below it) */
+        if (vm_rd8(a + i) == '\\' || vm_rd8(a + i) == '/')
+            return 0;
+    return 1;
+}
+
+int app_own(const struct app *a) { return a->own; }
+
 int app_init(struct trapframe *tf, u32 major, u32 minor, u32 *id)
 {
     struct dpmi_ctx *c = dctx;
@@ -495,6 +524,7 @@ int app_init(struct trapframe *tf, u32 major, u32 minor, u32 *id)
     a->psp = psp;
     a->api_major = (u8)major;
     a->api_minor = (u16)minor;
+    a->own = (u8)own_program(c);
     for (i = 0; i < sizeof a->prog - 1 && session_prog()[i]; i++)
         a->prog[i] = session_prog()[i];
     pending = a;
@@ -1198,6 +1228,15 @@ void app_kill(struct app *a, const char *why)
 }
 
 u32 app_id(const struct app *a) { return a->id; }
+
+struct app *app_by_id(u32 id)                   /* (interrupts off) the live app with this id, or NULL */
+{
+    struct app *a;
+    for (a = apps; a; a = a->next)
+        if (a->id == id && a->ctx && !a->kill)
+            return a;
+    return 0;
+}
 
 void app_kill_id(u32 id, const char *why)
 {

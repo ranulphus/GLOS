@@ -659,3 +659,88 @@ int glos_power(int set, unsigned state, struct glos_power *now)
         *now = q;
     return r;
 }
+
+/* ---- SHELL */
+
+int glos_shell(int on)
+{
+    struct glos_shell_desktop q = { sizeof q, (unsigned)on };
+    return raw(GLOS_SHELL_DESKTOP, &q, 0);
+}
+
+glos_handle glos_tray(const unsigned *icon, const char *tip)
+{
+    struct glos_tray q = { sizeof q, (unsigned)icon, (unsigned)tip, 0 };
+    int r = raw(GLOS_SHELL_TRAY, &q, 0);
+    if (r)
+        last_error = r;
+    return r ? 0 : q.handle;
+}
+
+glos_handle glos_notify(const char *title, const char *text, const char *action1, const char *action2,
+                        const unsigned *icon, unsigned seconds)
+{
+    struct glos_notify q;
+    int r;
+    memset(&q, 0, sizeof q);
+    q.size = sizeof q;
+    q.title = (unsigned)title;
+    q.text = (unsigned)text;
+    q.action[0] = (unsigned)action1;
+    q.action[1] = (unsigned)action2;
+    q.icon = (unsigned)icon;
+    q.seconds = seconds;
+    if ((r = raw(GLOS_SHELL_NOTIFY, &q, 0)) != 0)
+        last_error = r;
+    return r ? 0 : q.handle;
+}
+
+int glos_point(unsigned what, struct glos_point *out)
+{
+    memset(out, 0, sizeof *out);
+    out->size = sizeof *out;
+    out->what = what;
+    return raw(GLOS_SHELL_POINT, out, 0);
+}
+
+int glos_help(const char *page)
+{
+    struct glos_help q = { sizeof q, (unsigned)page };
+    return raw(GLOS_SHELL_HELP, &q, 0);
+}
+
+int glos_open(const char *path, const char *with, const char *verb)
+{
+    struct glos_open q = { sizeof q, (unsigned)path, (unsigned)with, (unsigned)verb, 0 };
+    int r = raw(GLOS_SHELL_OPEN, &q, 0);
+    if (r)
+        last_error = r;
+    return r ? -1 : (int)q.job;
+}
+
+static int assoc(unsigned what, const char *kind, const char *text, const char *args, char *buf, unsigned room,
+                 unsigned *length)
+{
+    struct glos_assoc q = { sizeof q, what, (unsigned)kind, (unsigned)text, (unsigned)args, (unsigned)buf, room, 0 };
+    int r = raw(GLOS_SHELL_ASSOC, &q, 0);
+    if (length)
+        *length = q.length;
+    return r;
+}
+
+int glos_assoc_get(const char *kind, char *program, unsigned room)
+{
+    return assoc(GLOS_ASSOC_GET, kind, 0, 0, program, room, 0);
+}
+
+int glos_assoc_set(const char *kind, const char *program) { return assoc(GLOS_ASSOC_SET, kind, program, 0, 0, 0, 0); }
+
+int glos_assoc_verbs(const char *kind, char *list, unsigned room, unsigned *length)
+{
+    return assoc(GLOS_ASSOC_VERBS, kind, 0, 0, list, room, length);
+}
+
+int glos_assoc_verb(const char *kind, const char *label, const char *args)
+{
+    return assoc(GLOS_ASSOC_VERB, kind, label, args, 0, 0, 0);
+}

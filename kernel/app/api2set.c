@@ -23,7 +23,7 @@
 
 /* A text of the app's at DS:off into buf (room bytes, its NUL kept): its length, or -1 (none, unreadable, or
    too long). */
-static int text_in(struct trapframe *tf, u32 off, char *buf, u32 room)
+int a2_text_in(struct trapframe *tf, u32 off, char *buf, u32 room)
 {
     u32 i;
     if (!off)
@@ -39,7 +39,7 @@ static int text_in(struct trapframe *tf, u32 off, char *buf, u32 room)
 
 /* len bytes of text to DS:off with a NUL, as many as there is room for: 0, GLOS_E_ROOM if cut, GLOS_E_ARGUMENT
    if it can't be written. */
-static int text_out(struct trapframe *tf, u32 off, u32 room, const char *text, u32 len)
+int a2_text_out(struct trapframe *tf, u32 off, u32 room, const char *text, u32 len)
 {
     u32 n = len < room ? len : room ? room - 1 : 0;
     char nul = 0;
@@ -65,15 +65,15 @@ static int get(struct trapframe *tf)
     char sec[64], key[64], out[1024];
     u32 size;
     int r, e;
-    if (a2_rd(tf, &q, sizeof q, &size) != 0 || text_in(tf, q.section, sec, sizeof sec) < 0
-        || text_in(tf, q.key, key, sizeof key) < 0)
+    if (a2_rd(tf, &q, sizeof q, &size) != 0 || a2_text_in(tf, q.section, sec, sizeof sec) < 0
+        || a2_text_in(tf, q.key, key, sizeof key) < 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     out[0] = 0;
     if ((r = kcfg_get(sec, key, out, sizeof out)) < 0)
         return a2_fail(tf, GLOS_E_SETTING);
     q.length = (u32)strlen(out);
     q.set = (u32)r;
-    e = text_out(tf, q.value, q.room, out, q.length);
+    e = a2_text_out(tf, q.value, q.room, out, q.length);
     if (e == GLOS_E_ARGUMENT || a2_wr(tf, &q, sizeof q, size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     return e ? a2_fail(tf, (u32)e) : a2_ok(tf, 0);
@@ -85,13 +85,13 @@ static int set(struct trapframe *tf)
     char sec[64], key[64], value[800], why[160];
     u32 size;
     int r;
-    if (a2_rd(tf, &q, sizeof q, &size) != 0 || text_in(tf, q.section, sec, sizeof sec) < 0
-        || text_in(tf, q.key, key, sizeof key) < 0 || (q.value && text_in(tf, q.value, value, sizeof value) < 0))
+    if (a2_rd(tf, &q, sizeof q, &size) != 0 || a2_text_in(tf, q.section, sec, sizeof sec) < 0
+        || a2_text_in(tf, q.key, key, sizeof key) < 0 || (q.value && a2_text_in(tf, q.value, value, sizeof value) < 0))
         return a2_fail(tf, GLOS_E_ARGUMENT);
     why[0] = 0;
     if ((r = kcfg_set(sec, key, q.value ? value : 0, why, sizeof why)) < 0) {
         if (q.why)
-            text_out(tf, q.why, q.why_room, why, (u32)strlen(why));
+            a2_text_out(tf, q.why, q.why_room, why, (u32)strlen(why));
         return a2_fail(tf, GLOS_E_SETTING);
     }
     q.when = (u32)r;
@@ -104,13 +104,13 @@ static int list(struct trapframe *tf, int keys)
     char sec[64], out[1024];
     u32 size;
     int e;
-    if (a2_rd(tf, &q, sizeof q, &size) != 0 || (keys && text_in(tf, q.section, sec, sizeof sec) < 0))
+    if (a2_rd(tf, &q, sizeof q, &size) != 0 || (keys && a2_text_in(tf, q.section, sec, sizeof sec) < 0))
         return a2_fail(tf, GLOS_E_ARGUMENT);
     out[0] = 0;
     q.length = keys ? kcfg_keys(sec, out, sizeof out) : kcfg_sections(out, sizeof out);
     if (q.length >= sizeof out)
         q.length = sizeof out - 1;
-    e = text_out(tf, q.buffer, q.room, out, q.length);
+    e = a2_text_out(tf, q.buffer, q.room, out, q.length);
     if (e == GLOS_E_ARGUMENT || a2_wr(tf, &q, sizeof q, size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     return e ? a2_fail(tf, (u32)e) : a2_ok(tf, 0);
@@ -166,7 +166,7 @@ static int watch(struct app *a, struct trapframe *tf)
     if (a2_rd(tf, &q, sizeof q, &size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     sec[0] = 0;
-    if (q.section && text_in(tf, q.section, sec, sizeof sec) < 0)
+    if (q.section && a2_text_in(tf, q.section, sec, sizeof sec) < 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     f = irq_save();                             /* (a change's news reads these from another thread) */
     if (!sec[0]) {

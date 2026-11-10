@@ -8,6 +8,7 @@
 #include "gfx.h"
 
 #define WM_TITLE_MAX 64
+#define WM_TRAY 12                      /* icons in the task bar's tray at once */
 
 /* A window's flags. */
 #define WF_SHOWN   0x0001               /* on the screen (when nothing covers it) */
@@ -123,6 +124,11 @@ struct wm {
     struct gfx_rect ghost;              /* an outline above every window: where one is being moved or sized to */
     u32 next_id, count;
     char clock[12], note[16];            /* the task bar's right end: the time, and a note (a remote session's, D35) */
+    struct {                            /* ... and the tray's icons, left of them (API 2.0's SHELL TRAY) */
+        u32 id;
+        u32 icon[16 * 16];              /* 0xAARRGGBB, drawn where AA is 80h or more */
+    } tray[WM_TRAY];
+    u32 ntray, tray_next;
 };
 
 extern const struct wm_look wm_look_default;
@@ -180,6 +186,15 @@ void wm_bar(struct wm *m, int on);                      /* the task bar: made, o
 void wm_bar_text(struct wm *m, const char *clock, const char *note);
 int wm_bar_mark(const struct wm *m, s32 x, s32 y);     /* GLOS's mark at the task bar's start (the launcher) */
 struct wm_window *wm_bar_hit(const struct wm *m, s32 x, s32 y); /* the window whose button is at a point of the bar */
+/* The tray: icons at the task bar's right, left of the note and the clock, in the order they came. */
+u32 wm_tray_add(struct wm *m, const u32 *icon);         /* its id, or 0: the tray is full */
+void wm_tray_icon(struct wm *m, u32 id, const u32 *icon);
+void wm_tray_remove(struct wm *m, u32 id);
+u32 wm_tray_hit(const struct wm *m, s32 x, s32 y);      /* the icon at a point of the screen, 0 none */
+enum { WB_START = 1, WB_BAR, WB_TRAY, WB_CLOCK, WB_WORK };
+int wm_bar_part(const struct wm *m, int part, u32 tray_id, struct gfx_rect *r);  /* where a part of the bar is on the
+                                                           screen (WB_; WB_TRAY with an id: that icon): 1, or 0 if
+                                                           it isn't there */
 
 void wm_damage_all(struct wm *m);
 int wm_compose(struct wm *m, struct gfx_surface *screen);       /* what is dirty, drawn; 1 if anything was */
