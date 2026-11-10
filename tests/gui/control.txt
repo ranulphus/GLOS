@@ -18,6 +18,8 @@ shot cp-network "Control Panel"
 key ctrl+tab
 shot cp-time "Control Panel"
 key ctrl+tab
+shot cp-region "Control Panel"
+key ctrl+tab
 shot cp-cache "Control Panel"
 key ctrl+tab
 shot cp-memory "Control Panel"
@@ -25,6 +27,8 @@ key ctrl+tab
 shot cp-vnc "Control Panel"
 key ctrl+tab
 shot cp-desktop "Control Panel"
+key ctrl+tab
+shot cp-saver "Control Panel"
 key ctrl+tab
 shot cp-shell "Control Panel"
 key ctrl+tab
