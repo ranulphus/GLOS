@@ -3967,7 +3967,7 @@ def api_case(profile, boot):
     cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", serial)
     done = re.search(r"HX-APITEST done pass=(\d+) fail=(\d+)", serial)
     bad_cases = [c + w.rstrip() for c, k, w in cases if k != "1"]
-    checks = {"status": st == "PASS", "done": bool(done) and done.group(2) == "0", "cases": len(cases) >= 150,
+    checks = {"status": st == "PASS", "done": bool(done) and done.group(2) == "0", "cases": len(cases) >= 140,
               "app": bool(re.search(r"GLOS-APP start id=1 prog=APITEST.EXE", serial)),
               "end": bool(re.search(r"GLOS-APP end id=1 prog=APITEST.EXE code=0 ", serial)),
               "exit": "GLOS-EXIT code=0" in serial, "vectors": "HX-VECCHK ok" in serial,
@@ -4463,6 +4463,8 @@ def api_shell_case(profile, vcard, card):
     try:
         checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
         checks["double"] = agent.ssh("glos config set input double_click 1000")[0] == 0
+        # What SHELL keeps and starts: kinds of file, verbs, OPEN, the recent documents, entries, the schedule.
+        checks["store"] = agent.ssh("C:\\TEST\\APITEST.EXE store", timeout=900)[0] == 0
         other = procs["other"] = App("C:\\OTHER\\APITEST.EXE shell")
         checks["not-own"] = bool(other.said("ready shell=19 focus=19 tray=*", 240))
         a = procs["a"] = App("C:\\TEST\\APITEST.EXE shell")
@@ -4558,9 +4560,85 @@ def api_shell_case(profile, vcard, card):
         for x in procs.values():
             x.p.kill()
     text = agent.wait()
+    cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", text)
+    checks["store-cases"] = len(cases) >= 20 and all(k == "1" for c, k, w in cases)
+    if not checks["store-cases"]:
+        info += " cases=%d failed-cases=%s" % (len(cases), ";".join(c + w.rstrip() for c, k, w in cases if k != "1"))
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("apishell-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
+def api_sched_case(profile, card):
+    """API 2.0's schedule run by the kernel (SHELL SCHEDULE; phase B step 8), over two starts of GLOS under the
+    agent. In the first, APITEST schedules a command at each start and one daily at 03:00, and GLOS is told to
+    exit at once: GLOS.DAT is written before it leaves. In the second, the start's command has run (nobody asked);
+    the clock put years on, the daily one runs once for the times missed; set to just before 03:00, it runs at its
+    time, once; set days on, once more for all the times missed. The schedule cleared, nothing runs."""
+    import time
+    tag = profile
+    agent = Agent("apisched-" + tag, profile, card, ["--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
+        "--cmd", "SERSAY HX-START apisched", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-AGAIN",
+        "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1200)
+    checks, info = {"listen": agent.listening()}, ""
+
+    def runs(name, text=None):
+        return len(re.findall(r"GLOS-SCHED run name=%s " % name, text if text is not None else agent.log()))
+
+    def wait_runs(name, n, limit=90):
+        t0 = time.time()
+        while time.time() - t0 < limit and runs(name) < n:
+            time.sleep(1)
+        return runs(name) == n
+
+    def opened(want, limit=120):               # what the scheduled program was given, once it has run
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            rc, out, _ = agent.ssh("type C:\\TEST\\OPENED.TXT")
+            if rc == 0 and out.strip() == want:
+                agent.ssh("del C:\\TEST\\OPENED.TXT")
+                return True
+            time.sleep(2)
+        return False
+
+    try:
+        agent.ssh("glos config set time sntp off")      # (the clock is the test's)
+        rc, out, _ = agent.ssh("C:\\TEST\\APITEST.EXE sched set", timeout=300)
+        checks["set"] = rc == 0 and "SCHED set r=0 e=0" in out
+        agent.ssh("glos exit")                          # at once: what was set is written before GLOS leaves
+        checks["again"] = agent.listening(after="HX-AGAIN")
+        first = agent.log()
+        first = first[:first.index("HX-AGAIN")] if "HX-AGAIN" in first else first
+        checks["written"] = "GLOS-DATA written records=2" in first and runs("boot", first) == 0
+        checks["loaded"] = "GLOS-DATA loaded records=2" in agent.log()
+        checks["start"] = wait_runs("boot", 1) and opened("said started")
+        checks["not-yet"] = runs("nightly") == 0
+        # The clock put years on: its times since it was set were missed, and are made up for by one run.
+        checks["clock"] = agent.ssh("glos time set 2030-01-01T02:00:00")[0] == 0
+        checks["missed"] = wait_runs("nightly", 1) and opened("said nightly")
+        # Just before its time: not yet; then at its time, once.
+        agent.ssh("glos time set 2030-01-01T02:59:35")
+        time.sleep(12)
+        checks["before"] = runs("nightly") == 1
+        checks["daily"] = wait_runs("nightly", 2) and opened("said nightly")
+        time.sleep(40)
+        checks["once"] = runs("nightly") == 2 and runs("boot") == 1
+        agent.ssh("glos time set 2030-01-05T12:00:00")  # four more of its times missed: one run
+        checks["missed-days"] = wait_runs("nightly", 3) and opened("said nightly")
+        time.sleep(40)
+        checks["missed-once"] = runs("nightly") == 3
+        rc, out, _ = agent.ssh("C:\\TEST\\APITEST.EXE sched clear", timeout=300)
+        checks["clear"] = rc == 0 and "SCHED clear r=0 e=0" in out
+        agent.ssh("glos time set 2030-01-06T02:59:50")
+        time.sleep(40)
+        checks["cleared"] = runs("nightly") == 3
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        info += " timeout"
+    text = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("apisched-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
 def thr_case(profile, card):
@@ -7077,6 +7155,7 @@ def main():
             res += matrix(api_set_case, wins, a.jobs)   # ... and its settings, theme and saver as they change
             res += matrix(api_dnd_case, wins, a.jobs)   # ... and two of them dragging and dropping, and the clipboard
             res += matrix(api_shell_case, wins, a.jobs) # ... and the shell: the tray, notifications, its events
+            res += matrix(api_sched_case, [(c[0], c[2]) for c in wins], a.jobs)    # ... and the schedule, run by the kernel
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

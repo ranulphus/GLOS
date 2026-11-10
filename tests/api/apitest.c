@@ -70,7 +70,7 @@ static void before(void)
     check("version", glos_version(&v) == 0 && v.major == 2 && v.minor == 0 && v.build[0]
           && v.functions[GLOS_AREA_CORE][0] == 0x1FFFu && GLOS_HAS(&v, GLOS_CORE_RANDOM)
           && GLOS_HAS(&v, GLOS_WIN_CREATE) && GLOS_HAS(&v, GLOS_DRAW_SCREEN) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_WIN, 5))
-          && GLOS_HAS(&v, GLOS_SHELL_ASSOC) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 7))
+          && GLOS_HAS(&v, GLOS_SHELL_SCHEDULE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 10))
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_JOB, 0)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
@@ -1258,16 +1258,15 @@ static int opened_is(const char *want, unsigned ms)    /* the program OPEN start
 static void shell(void)
 {
     static unsigned icon[256];
-    static char list[512], longtip[80], longtitle[60];
+    static char longtip[80], longtitle[60];
     unsigned char ev[GLOS_EV_MAX];
     struct glos_ev_notify *ne = (struct glos_ev_notify *)ev;
     struct glos_point bar, work, start, clock, tray;
     struct glos_screen scr;
-    unsigned text[1] = { GLOS_CLIP_TEXT }, len = 0, t0, took, i;
+    unsigned text[1] = { GLOS_CLIP_TEXT }, t0, took, i;
     glos_handle t, n, n2, many[16];
     char buf[128];
     int r, e, ok, job;
-    FILE *f;
 
     for (i = 0; i < 256; i++)
         icon[i] = 0xFF2060C0u;
@@ -1346,6 +1345,28 @@ static void shell(void)
         ok &= glos_close(many[i]) == 0;
     check("notify-many", ok && (n = glos_notify("Room again", 0, 0, 0, 0, 0)) != 0 && glos_close(n) == 0, "err=%d", glos_error());
 
+    /* Under GLOS /RUN no setting is kept and nothing can be started (the store mode has these, under the agent). */
+    r = glos_assoc_set(".ZZT", "APITEST.EXE");
+    job = glos_open("C:\\TEST\\APITEST.EXE", 0, 0);
+    e = glos_schedule_set("never", "start", "C:\\TEST\\APITEST.EXE said never");
+    check("run-refused", r == GLOS_E_SETTING && job == -1 && glos_error() == GLOS_E_REFUSED && e == GLOS_E_REFUSED
+          && glos_entry_set("APITEST", 0, 0, 0) == GLOS_E_SETTING, "r=%d job=%d err=%d e=%d", r, job, glos_error(), e);
+
+    /* Help is an app of phase E's: not there yet. */
+    r = glos_help("windows");
+    check("help", r == GLOS_E_NOT_FOUND && glos_help(0) == GLOS_E_NOT_FOUND, "r=%d", r);
+}
+
+/* SHELL's calls that keep settings and start programs (under the agent): kinds of file, verbs, OPEN. */
+static int store_mode(void)
+{
+    static char list[512];
+    unsigned len = 0;
+    char buf[128], line[64];
+    int r, e, ok, job;
+    FILE *f;
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 98;
     /* Kinds of file and their programs. */
     r = glos_assoc_set(".ZZT", "APITEST.EXE");
     buf[0] = 'x';
@@ -1402,9 +1423,107 @@ static void shell(void)
          && glos_assoc_verb(".ZZU", "Other kind", 0) == 0 && glos_assoc_verbs(".ZZT", list, sizeof list, &len) == 0 && len == 0;
     check("verbs-gone", ok, "r=%d len=%u list=%s", r, len, list);
 
-    /* Help is an app of phase E's: not there yet. */
-    r = glos_help("windows");
-    check("help", r == GLOS_E_NOT_FOUND && glos_help(0) == GLOS_E_NOT_FOUND, "r=%d", r);
+    /* The recent documents: OPEN's (the three files' opens above, the newest first, each path once), the app's
+       own, by program, forgotten. */
+    list[0] = 0;
+    r = glos_recent_list(0, list, sizeof list, &len);
+    check("recent-open", r == 0 && len == strlen(list) && !strncmp(list, "C:\\TEST\\OPENME.ZZT\tAPITEST.EXE\n", 31)
+          && strstr(list, "C:/TEST/openme.zzt\tAPITEST.EXE\n") && !strstr(list, "http:"), "r=%d len=%u list=%s", r, len, list);
+    glos_recent_clear(0);
+    r = glos_recent_add("C:\\DOCS\\One.txt");
+    glos_recent_add("C:\\DOCS\\Two.txt");
+    e = glos_recent_add("c:\\docs\\ONE.TXT");            /* (the same file: its place changes, and its spelling) */
+    list[0] = 0;
+    ok = r == 0 && e == 0 && glos_recent_list(0, list, sizeof list, &len) == 0
+         && !strcmp(list, "c:\\docs\\ONE.TXT\tAPITEST.EXE\nC:\\DOCS\\Two.txt\tAPITEST.EXE\n")
+         && glos_recent_list("apitest.exe", list, sizeof list, &len) == 0 && len == 56
+         && glos_recent_list("OTHER.EXE", list, sizeof list, &len) == 0 && len == 0
+         && glos_recent_list(0, list, 10, &len) == GLOS_E_ROOM && len == 56
+         && glos_recent_add("") == GLOS_E_ARGUMENT && glos_recent_add("a\tb") == GLOS_E_ARGUMENT;
+    check("recent", ok, "r=%d e=%d len=%u list=%s", r, e, len, list);
+    for (r = 0; r < GLOS_RECENT_MAX + 5; r++) {         /* more than it keeps: the oldest go */
+        snprintf(buf, sizeof buf, "C:\\DOCS\\F%d.TXT", r);
+        glos_recent_add(buf);
+    }
+    {
+        static char all[4096];
+        int lines = 0;
+        char *c;
+        e = glos_recent_list(0, all, sizeof all, &len);
+        for (c = all; *c; c++)
+            lines += *c == '\n';
+        ok = e == 0 && lines == GLOS_RECENT_MAX && !strncmp(all, "C:\\DOCS\\F36.TXT\t", 16) && !strstr(all, "F4.TXT")
+             && strstr(all, "F5.TXT") && !strstr(all, "Two.txt");
+        check("recent-most", ok, "e=%d lines=%d len=%u", e, lines, len);
+    }
+    r = glos_recent_clear("C:\\DOCS\\F36.TXT");
+    e = glos_recent_clear("C:\\DOCS\\F36.TXT");
+    glos_recent_list(0, list, sizeof list, &len);
+    ok = r == 0 && e == GLOS_E_NOT_FOUND && !strncmp(list, "C:\\DOCS\\F35.TXT\t", 16) && glos_recent_clear(0) == 0
+         && glos_recent_list(0, list, sizeof list, &len) == 0 && len == 0;
+    check("recent-clear", ok, "r=%d e=%d len=%u", r, e, len);
+
+    /* The Start menu's entry: this program's, its tasks; every entry listed. */
+    r = glos_entry_set("API test", 0, "tool", "shell");
+    list[0] = 0;
+    e = glos_entry_list(list, sizeof list, &len);
+    ok = r == 0 && e == 0 && len == strlen(list) && strstr(list, "APITEST.EXE\tAPI test\tTests\ttool\tC:\\TEST\tshell\t\n");
+    check("entry", ok, "r=%d e=%d len=%u list=%s", r, e, len, list);
+    r = glos_entry_task("New window", "win");
+    e = glos_entry_task("Plain", "");
+    glos_entry_set(0, "Tools", 0, 0);
+    glos_entry_list(list, sizeof list, &len);
+    ok = r == 0 && e == 0 && strstr(list, "APITEST.EXE\tAPI test\tTools\ttool\tC:\\TEST\tshell\tNew window=win;Plain=\n")
+         && glos_entry_task("new WINDOW", 0) == 0 && glos_entry_task("New window", 0) == GLOS_E_NOT_FOUND
+         && glos_entry_task("Plain", 0) == 0 && glos_entry_task("a=b", "x") == GLOS_E_ARGUMENT
+         && glos_entry_set(0, 0, "no such picture", 0) == GLOS_E_SETTING && glos_entry_list(list, 4, &len) == GLOS_E_ROOM && len > 4;
+    check("entry-tasks", ok, "r=%d e=%d list=%s", r, e, list);
+    r = glos_entry_remove();
+    e = glos_entry_list(list, sizeof list, &len);
+    check("entry-removed", r == 0 && e == 0 && !strstr(list, "APITEST.EXE"), "r=%d e=%d list=%s", r, e, list);
+
+    /* The schedule: set, changed, listed, removed; what it refuses. (Its running is the schedule case's.) */
+    r = glos_schedule_set("nightly", "Daily 3:00", "C:\\TEST\\APITEST.EXE said nightly");
+    e = glos_schedule_set("boot", "start", "C:\\TEST\\APITEST.EXE said started");
+    list[0] = 0;
+    ok = r == 0 && e == 0 && glos_schedule_list(list, sizeof list, &len) == 0 && len == strlen(list)
+         && !strcmp(list, "nightly\tdaily 03:00\tC:\\TEST\\APITEST.EXE said nightly\t0\t0\n"
+                          "boot\tstart\tC:\\TEST\\APITEST.EXE said started\t0\t0\n");
+    check("schedule", ok, "r=%d e=%d len=%u list=%s", r, e, len, list);
+    r = glos_schedule_set("NIGHTLY", "weekly sat 23:30", "C:\\X.BAT");
+    glos_schedule_list(list, sizeof list, &len);
+    ok = r == 0 && !strncmp(list, "NIGHTLY\tweekly sat 23:30\tC:\\X.BAT\t0\t0\nboot\t", 43)
+         && glos_schedule_set("two words", "start", "x") == GLOS_E_ARGUMENT && glos_schedule_set("x", "hourly", "x") == GLOS_E_ARGUMENT
+         && glos_schedule_set("x", "daily 25:00", "x") == GLOS_E_ARGUMENT && glos_schedule_set("x", "start", "") == GLOS_E_ARGUMENT
+         && glos_schedule_set("x", "start", "a\tb") == GLOS_E_ARGUMENT && glos_schedule_remove("nosuch") == GLOS_E_NOT_FOUND
+         && glos_schedule_list(list, 8, &len) == GLOS_E_ROOM && len > 8;
+    check("schedule-change", ok, "r=%d list=%s", r, list);
+    r = glos_schedule_remove("nightly");
+    e = glos_schedule_remove("boot");
+    check("schedule-remove", r == 0 && e == 0 && glos_schedule_list(list, sizeof list, &len) == 0 && len == 0, "r=%d e=%d len=%u",
+          r, e, len);
+
+    snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+    com1(line);
+    return fails > 90 ? 90 : fails;
+}
+
+/* The schedule's running (under the agent, over two starts of GLOS): "set" schedules a command at each start and
+   one daily at 03:00; "clear" takes them away. */
+static int sched_mode(const char *what)
+{
+    int r, e;
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 98;
+    if (!strcmp(what, "set")) {
+        r = glos_schedule_set("boot", "start", "C:\\TEST\\APITEST.EXE said started");
+        e = glos_schedule_set("nightly", "daily 03:00", "C:\\TEST\\APITEST.EXE said nightly");
+    } else {
+        r = glos_schedule_remove("boot");
+        e = glos_schedule_remove("nightly");
+    }
+    printf("SCHED %s r=%d e=%d\n", what, r, e);
+    return r || e;
 }
 
 /* A program OPEN started (not an app): what it was given, for the test that opened it. */
@@ -1479,6 +1598,10 @@ int main(int argc, char **argv)
     char line[64];
     if (argc > 1 && !strcmp(argv[1], "shell"))
         return shell_mode();
+    if (argc > 1 && !strcmp(argv[1], "store"))
+        return store_mode();
+    if (argc > 2 && !strcmp(argv[1], "sched"))
+        return sched_mode(argv[2]);
     if (argc > 1 && (strstr(argv[1], ".ZZT") || strstr(argv[1], ".zzt") || !strcmp(argv[1], "said") || !strcmp(argv[1], "with")))
         return opened_mode(argc, argv);
     if (argc > 1 && !strcmp(argv[1], "win"))

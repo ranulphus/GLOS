@@ -744,3 +744,68 @@ int glos_assoc_verb(const char *kind, const char *label, const char *args)
 {
     return assoc(GLOS_ASSOC_VERB, kind, label, args, 0, 0, 0);
 }
+
+static int entry(unsigned what, const char *title, const char *group, const char *icon, const char *args, const char *label,
+                 char *buf, unsigned room, unsigned *length)
+{
+    struct glos_entry q = { sizeof q, what, (unsigned)title, (unsigned)group, (unsigned)icon, (unsigned)args, (unsigned)label,
+                            (unsigned)buf, room, 0 };
+    int r = raw(GLOS_SHELL_ENTRY, &q, 0);
+    if (length)
+        *length = q.length;
+    return r;
+}
+
+int glos_entry_set(const char *title, const char *group, const char *icon, const char *args)
+{
+    return entry(GLOS_ENTRY_SET, title, group, icon, args, 0, 0, 0, 0);
+}
+
+int glos_entry_remove(void) { return entry(GLOS_ENTRY_REMOVE, 0, 0, 0, 0, 0, 0, 0, 0); }
+
+int glos_entry_task(const char *label, const char *args) { return entry(GLOS_ENTRY_TASK, 0, 0, 0, args, label, 0, 0, 0); }
+
+int glos_entry_list(char *list, unsigned room, unsigned *length)
+{
+    return entry(GLOS_ENTRY_LIST, 0, 0, 0, 0, 0, list, room, length);
+}
+
+static int recent(unsigned what, const char *path, const char *program, char *buf, unsigned room, unsigned *length)
+{
+    struct glos_recent q = { sizeof q, what, (unsigned)path, (unsigned)program, (unsigned)buf, room, 0 };
+    int r = raw(GLOS_SHELL_RECENT, &q, 0);
+    if (length)
+        *length = q.length;
+    return r;
+}
+
+int glos_recent_add(const char *path) { return recent(GLOS_RECENT_ADD, path, 0, 0, 0, 0); }
+
+int glos_recent_list(const char *program, char *list, unsigned room, unsigned *length)
+{
+    return recent(GLOS_RECENT_LIST, 0, program, list, room, length);
+}
+
+int glos_recent_clear(const char *path) { return recent(GLOS_RECENT_CLEAR, path, 0, 0, 0, 0); }
+
+static int sched(unsigned what, const char *name, const char *when, const char *command, char *buf, unsigned room,
+                 unsigned *length)
+{
+    struct glos_schedule q = { sizeof q, what, (unsigned)name, (unsigned)when, (unsigned)command, (unsigned)buf, room, 0 };
+    int r = raw(GLOS_SHELL_SCHEDULE, &q, 0);
+    if (length)
+        *length = q.length;
+    return r;
+}
+
+int glos_schedule_set(const char *name, const char *when, const char *command)
+{
+    return sched(GLOS_SCHEDULE_SET, name, when, command, 0, 0, 0);
+}
+
+int glos_schedule_remove(const char *name) { return sched(GLOS_SCHEDULE_REMOVE, name, 0, 0, 0, 0, 0); }
+
+int glos_schedule_list(char *list, unsigned room, unsigned *length)
+{
+    return sched(GLOS_SCHEDULE_LIST, 0, 0, 0, list, room, length);
+}

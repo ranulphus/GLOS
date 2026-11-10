@@ -460,14 +460,15 @@ static void app_main(void *arg);
 
 /* Is the program one of GLOS's own: its file in the folder GLOS.EXE is in (where GLOS.CFG is)? Its path is after
    its environment's strings. Such programs may be the shell and act on other apps' windows (SHELL, WIN). */
-static int own_program(const struct dpmi_ctx *c)
+static int own_program(const struct dpmi_ctx *c, char *folder, u32 room)
 {
     const char *cfg = vm.bi->cfg_path;
-    u32 a, end, i, n = 0;
+    u32 a, end, i, n = 0, k = 0;
+    folder[0] = 0;
     for (i = 0; cfg[i]; i++)
         if (cfg[i] == '\\')
             n = i + 1;                          /* the folder's length, with its last backslash */
-    if (!n || !c->env_seg)
+    if (!c->env_seg)
         return 0;
     a = c->env_seg * 16u;
     end = a + 0x8000;
@@ -476,6 +477,14 @@ static int own_program(const struct dpmi_ctx *c)
     if (a + 1 >= end || vm_rd16(a + 2) == 0)
         return 0;
     a += 4;
+    for (i = 0; vm_rd8(a + i); i++)             /* its folder, without the last backslash (the Start menu's entry) */
+        if (vm_rd8(a + i) == '\\' || vm_rd8(a + i) == '/')
+            k = i;
+    for (i = 0; i < k && i < room - 1; i++)
+        folder[i] = (char)vm_rd8(a + i);
+    folder[i] = 0;
+    if (!n)
+        return 0;
     for (i = 0; i < n; i++)
         if ((vm_rd8(a + i) & ~0x20) != (cfg[i] & ~0x20) && vm_rd8(a + i) != (u8)cfg[i])
             return 0;
@@ -524,7 +533,7 @@ int app_init(struct trapframe *tf, u32 major, u32 minor, u32 *id)
     a->psp = psp;
     a->api_major = (u8)major;
     a->api_minor = (u16)minor;
-    a->own = (u8)own_program(c);
+    a->own = (u8)own_program(c, a->folder, sizeof a->folder);
     for (i = 0; i < sizeof a->prog - 1 && session_prog()[i]; i++)
         a->prog[i] = session_prog()[i];
     pending = a;

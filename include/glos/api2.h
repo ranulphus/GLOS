@@ -999,6 +999,9 @@ struct glos_ev_saver {
 #define GLOS_SHELL_HELP    GLOS_FN(GLOS_AREA_SHELL, 4)  /* struct glos_help: Help, at a page */
 #define GLOS_SHELL_OPEN    GLOS_FN(GLOS_AREA_SHELL, 5)  /* struct glos_open: a file or a link opened */
 #define GLOS_SHELL_ASSOC   GLOS_FN(GLOS_AREA_SHELL, 6)  /* struct glos_assoc: kinds of file, their apps, verbs */
+#define GLOS_SHELL_ENTRY    GLOS_FN(GLOS_AREA_SHELL, 7) /* struct glos_entry: the Start menu's entries, their tasks */
+#define GLOS_SHELL_RECENT   GLOS_FN(GLOS_AREA_SHELL, 8) /* struct glos_recent: the documents opened lately */
+#define GLOS_SHELL_SCHEDULE GLOS_FN(GLOS_AREA_SHELL, 9) /* struct glos_schedule: commands GLOS runs at times */
 
 struct glos_shell_desktop {
     unsigned size;
@@ -1069,6 +1072,64 @@ struct glos_assoc {
 #define GLOS_ASSOC_VERB  3      /* a verb of the calling app's own for the kind, set or taken away (kept in the
                                    app's profile, GLOS.CFG's [program NAME] verbs) */
 
+/* The Start menu's entries are programs' profiles (GLOS.CFG's [program NAME.EXE]: menu, title, group, icon, path,
+   args, tasks). A program sets its own; the shell reads them all and draws the menu. */
+struct glos_entry {
+    unsigned size;
+    unsigned what;              /* GLOS_ENTRY_ */
+    unsigned title;             /* SET: its name in the menu, at most 40 bytes (0: as it is; the file's name if none) */
+    unsigned group;             /* SET: its group there, at most 31 bytes (0: the one INIT gave) */
+    unsigned icon;              /* SET: its picture: one of GLOS's kinds ("program", "game", "tool", "text", "picture",
+                                   "sound", "network"; 0: as it is) */
+    unsigned args;              /* SET: what the menu starts it with (0: as it is). TASK: the task's arguments ("" for
+                                   none; 0: the task is taken away) */
+    unsigned label;             /* TASK: the task's label, at most 31 bytes */
+    unsigned buffer;            /* LIST: where the list goes: a line an entry, tabs between its file's name, title,
+                                   group, icon, folder, arguments and tasks ("Label=ARGUMENTS;...") */
+    unsigned room;
+    unsigned length;            /* -> LIST: the whole length (GLOS_E_ROOM: cut) */
+};
+#define GLOS_ENTRY_SET    0     /* the calling program is in the Start menu, so described */
+#define GLOS_ENTRY_REMOVE 1     /* ... and no longer */
+#define GLOS_ENTRY_LIST   2     /* every entry */
+#define GLOS_ENTRY_TASK   3     /* a task of the calling program's entry ("New window"): set or taken away */
+
+/* The documents opened lately: at most GLOS_RECENT_MAX, the newest first, each with the program that opened it.
+   OPEN adds what it opens; a program adds what it opens itself. Kept in GLOS.DAT. */
+struct glos_recent {
+    unsigned size;
+    unsigned what;              /* GLOS_RECENT_ */
+    unsigned path;              /* ADD: the document (a full path, at most 199 bytes). CLEAR: one to forget (0: all) */
+    unsigned program;           /* LIST: only those this program opened ("NOTEPAD.EXE"; 0: every one) */
+    unsigned buffer;            /* LIST: a line each: the path, a tab, the program */
+    unsigned room;
+    unsigned length;            /* -> LIST: the whole length (GLOS_E_ROOM: cut) */
+};
+#define GLOS_RECENT_ADD   0
+#define GLOS_RECENT_LIST  1
+#define GLOS_RECENT_CLEAR 2
+#define GLOS_RECENT_MAX   32
+
+/* Commands GLOS runs at times, whatever apps are running (Disk Tools' backups): kept in GLOS.DAT and run by the
+   kernel, as a program of nobody's. A time that passed while GLOS was not running is made up for once, when it
+   next runs. A command waits for a full-screen program to end. */
+struct glos_schedule {
+    unsigned size;
+    unsigned what;              /* GLOS_SCHEDULE_ */
+    unsigned name;              /* its name: 1 to 23 letters, digits, '-' and '_' */
+    unsigned when;              /* SET: "start" (each time GLOS starts), "daily HH:MM", "weekly DAY HH:MM" (sun to
+                                   sat); the region's local time */
+    unsigned command;           /* SET: the command, as RUN takes one: at most 160 bytes */
+    unsigned buffer;            /* LIST: a line each: tabs between the name, its times, its command, how many times
+                                   it has run, and when it last did (seconds since 1970, UTC; 0: never) */
+    unsigned room;
+    unsigned length;            /* -> LIST: the whole length (GLOS_E_ROOM: cut) */
+};
+#define GLOS_SCHEDULE_SET    0  /* a command scheduled, or its times or command changed */
+#define GLOS_SCHEDULE_REMOVE 1  /* (GLOS_E_NOT_FOUND: no such name) */
+#define GLOS_SCHEDULE_LIST   2
+#define GLOS_SCHEDULE_MAX    16
+
 /* SHELL's events. */
 #define GLOS_EV_TRAY   GLOS_EV(GLOS_AREA_SHELL, 1)      /* struct glos_ev_tray: a tray icon was pressed */
 #define GLOS_EV_NOTIFY GLOS_EV(GLOS_AREA_SHELL, 2)      /* struct glos_ev_notify: what became of a notification */
@@ -1099,6 +1160,8 @@ struct glos_ev_shell {
 #define GLOS_SHELL_TASKS   2    /* the task list: Ctrl+Alt+Del */
 #define GLOS_SHELL_HUNG    3    /* a window's app stopped taking its events ("not answering") */
 #define GLOS_SHELL_ANSWERS 4    /* ... and takes them again */
+#define GLOS_SHELL_ENTRIES 5    /* a program's profile changed: the Start menu's entries may have */
+#define GLOS_SHELL_RECENTS 6    /* the recent documents changed */
 
 /* ================================================================== CLIP (05h): the clipboard
  *

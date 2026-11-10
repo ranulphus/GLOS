@@ -64,6 +64,11 @@ static FILE *handle[8];
 static u8 xfer[32768];
 u32 dos_xfer_size(void) { return sizeof xfer; }
 void dos_hold(void) {}
+void kdata_init(const char *cfg_path) { (void)cfg_path; }    /* (GLOS.DAT: the kernel's alone) */
+void kdata_load(void) {}
+int kdata_dirty(void) { return 0; }
+int kdata_save(void) { return 0; }
+void vm_kick(void) {}
 int dos_post(struct dos_req *q)
 {
     u32 i;

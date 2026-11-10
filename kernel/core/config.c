@@ -33,6 +33,7 @@
 #include "glos/region.h"
 #include "idle.h"
 #include "io.h"
+#include "kdata.h"
 #include "kprintf.h"
 #include "mm.h"
 #include "sched.h"
@@ -772,27 +773,44 @@ static void writer(void *arg)
     (void)arg;
     dos_hold();                                 /* the DOS server's 32 KB transfer buffer only while the file is */
     load();                                     /* read or written: kept for good, it cost programs 32 KB of */
+    kdata_load();
     c.settled = 1;                              /* conventional memory in agent mode (P7) */
     dos_release();                              /* (and the agent's first job waits for this: kcfg_settled) */
     for (;;) {
         u32 f = irq_save();
-        while (!c.dirty)
+        int cfg;
+        while (!c.dirty && !kdata_dirty())
             thread_block(&c.q);
+        cfg = c.dirty;
         c.writing = 1;
         irq_restore(f);
         dos_hold();
-        r = save();
-        dos_release();
-        if (r == 0) {
-            c.writes++;
-            kprintf("GLOS-CFG written lines=%u\n", c.n);
-        } else {
-            c.write_errors++;
-            kprintf("GLOS-CFG error=write\n");
+        if (cfg) {
+            r = save();
+            if (r == 0) {
+                c.writes++;
+                kprintf("GLOS-CFG written lines=%u\n", c.n);
+            } else {
+                c.write_errors++;
+                kprintf("GLOS-CFG error=write\n");
+            }
         }
+        if (kdata_dirty())                      /* GLOS.DAT beside it (kernel/core/kdata.c) */
+            kdata_save();
+        dos_release();
         c.writing = 0;
+        vm_kick();                              /* (glos exit waits for what was to be written: agent.c) */
     }
 }
+
+void kcfg_writer_kick(void)
+{
+    u32 f = irq_save();
+    thread_wake(&c.q);
+    irq_restore(f);
+}
+
+int kcfg_pending(void) { return c.dirty || c.writing || kdata_dirty(); }
 
 void kcfg_init(const struct bootinfo *bi)
 {
@@ -802,5 +820,6 @@ void kcfg_init(const struct bootinfo *bi)
         c.failed = 1;
         return;
     }
+    kdata_init(c.path);
     thread_create("config", PRIO_BULK, writer, 0);
 }

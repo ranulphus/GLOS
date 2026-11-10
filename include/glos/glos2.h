@@ -140,6 +140,20 @@ int glos_assoc_get(const char *kind, char *program, unsigned room);    /* the pr
 int glos_assoc_set(const char *kind, const char *program);             /* (0: none) */
 int glos_assoc_verbs(const char *kind, char *list, unsigned room, unsigned *length);    /* "Label\tPROGRAM ARGS" a line */
 int glos_assoc_verb(const char *kind, const char *label, const char *args);    /* the app's own (args 0: taken away) */
+/* The app's Start menu entry (each 0: as it is; icon: "program", "game", "tool", "text", "picture", "sound",
+   "network"), and its end. */
+int glos_entry_set(const char *title, const char *group, const char *icon, const char *args);
+int glos_entry_remove(void);
+int glos_entry_task(const char *label, const char *args);              /* a task of its entry (args 0: taken away) */
+int glos_entry_list(char *list, unsigned room, unsigned *length);      /* a line an entry: name, title, group, icon,
+                                                                           folder, arguments, tasks; tabs between */
+int glos_recent_add(const char *path);                                  /* a document the app opened */
+int glos_recent_list(const char *program, char *list, unsigned room, unsigned *length);    /* "PATH\tPROGRAM" lines */
+int glos_recent_clear(const char *path);                                /* (0: all of them) */
+int glos_schedule_set(const char *name, const char *when, const char *command);    /* "start", "daily HH:MM",
+                                                                                       "weekly DAY HH:MM" */
+int glos_schedule_remove(const char *name);
+int glos_schedule_list(char *list, unsigned room, unsigned *length);   /* name, times, command, runs, last run */
 
 /* ---- threads (THREAD; docs/supervisor.md 12.7)
  *

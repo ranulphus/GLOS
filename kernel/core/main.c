@@ -117,6 +117,7 @@ void kmain(struct bootinfo *loader_bi)
         mixer_init(bi);                         /* (it plays once the desktop is up: display.c) */
         desk_init();
         kcfg_init(bi);                          /* GLOS.CFG, read and kept by the kernel (M9) */
+        schedule_init(bi);                      /* the commands GLOS runs at times (GLOS.DAT; kernel/core/schedule.c) */
         pci_scan();
         cache_init(bi);                         /* the disk cache: its drives, the IDE ports it watches */
         if (nic_probe() == 0) {

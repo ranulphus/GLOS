@@ -295,6 +295,7 @@ static void changed(const char *section, const char *key, const char *value)
     struct news n = { section, key, same(section, "desktop") && same(key, "theme") };
     (void)value;
     app_each(tell, &n);
+    api2_shell_changed(section);                /* (a program's profile: the Start menu's entries, the shell's) */
 }
 
 /* ---- IDLE */

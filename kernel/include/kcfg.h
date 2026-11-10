@@ -8,6 +8,7 @@ struct bi_profile;
 
 void kcfg_init(const struct bootinfo *bi);
 int kcfg_loaded(void);
+int kcfg_pending(void);              /* something is still to be written (GLOS.CFG or GLOS.DAT): glos exit waits */
 int kcfg_settled(void);              /* GLOS.CFG's first read is over: the agent may start jobs */
 int kcfg_get(const char *section, const char *key, char *out, u32 room);   /* 1 set, 0 the default, -1 no such */
 int kcfg_set(const char *section, const char *key, const char *value, char *why, u32 room);    /* CFG_ when, or -1;
@@ -23,5 +24,7 @@ void kcfg_on_change(void (*apply)(const char *section, const char *key, const ch
 
 struct region;
 const struct region *kcfg_region(void); /* [region] as it is now (include/glos/region.h) */
+
+void schedule_init(const struct bootinfo *bi);  /* kernel/core/schedule.c: the schedule's runner (agent mode) */
 
 #endif

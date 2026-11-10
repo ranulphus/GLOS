@@ -49,6 +49,7 @@
 #include "dos.h"
 #include "session.h"
 #include "io.h"
+#include "kcfg.h"
 #include "kprintf.h"
 #include "sched.h"
 #include "timer.h"
@@ -773,8 +774,11 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
         goto start;
     }
     session_job(0, 0, "", "");
-    if (exit_req && (s32)(timer_ticks() - exit_at) >= 0)
+    if (exit_req && (s32)(timer_ticks() - exit_at) >= 0) {
+        if (kcfg_pending() && (s32)(timer_ticks() - exit_at) < 5 * 1024)
+            return 0;                           /* (a setting or GLOS.DAT is being written: the writer wakes this) */
         return -1;
+    }
     return 0;
 start:
     j = running;

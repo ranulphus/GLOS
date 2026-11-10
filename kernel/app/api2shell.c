@@ -277,6 +277,26 @@ void api2_shell_1x(struct app *a, u32 type, int x, int y)       /* (1.x's LAUNCH
     shell_event(a, type == GLOS_EV_LAUNCH ? GLOS_SHELL_LAUNCH : GLOS_SHELL_TASKS, x, y, 0, 0);
 }
 
+void api2_shell_news(struct app *shell, unsigned what)  /* (ENTRIES, RECENTS: one waiting stands for the next) */
+{
+    struct glos_ev_shell e;
+    if (!shell->v2)
+        return;
+    memset(&e, 0, sizeof e);
+    e.ev.size = sizeof e;
+    e.ev.kind = GLOS_EV_SHELL;
+    e.ev.handle = what;                         /* (so that only one of its kind is merged with) */
+    e.what = what;
+    a2_post(shell, &e.ev, 1);
+}
+
+void api2_shell_changed(const char *section)    /* (api2set.c's: a setting changed) */
+{
+    struct app *shell = desk_shell_app();
+    if (shell && !strncmp(section, "program ", 8))
+        api2_shell_news(shell, GLOS_SHELL_ENTRIES);
+}
+
 void api2_shell_hung(struct app *shell, u32 window, struct app *owner, int hung)
 {
     shell_event(shell, hung ? GLOS_SHELL_HUNG : GLOS_SHELL_ANSWERS, 0, 0, window, owner ? app_id(owner) : 0);
@@ -304,6 +324,8 @@ static int start(struct trapframe *tf, const char *command, u32 *job)
 {
     static struct glos_run run;                 /* (no wait between filling it and its post) */
     int r;
+    if (!(vm.bi->flags & BI_F_AGENT))           /* (GLOS /RUN: there is nobody to start it) */
+        return a2_fail(tf, GLOS_E_REFUSED);
     memset(&run, 0, sizeof run);
     run.size = sizeof run;
     run.flags = GLOS_RUN_DETACH;
@@ -339,14 +361,15 @@ static int open_call(struct app *a, struct trapframe *tf)
 {
     struct glos_open q;
     char path[200], with[80], label[ASSOC_LABEL], name[ASSOC_LABEL], kind[ASSOC_EXT], prog[224], cmd[256], dir[80];
-    char section[96], verbs[ASSOC_VERBS], vname[ASSOC_LABEL], args[128];
+    char section[96], verbs[ASSOC_VERBS], vname[ASSOC_LABEL], args[128], given[200], opener[16];
     u32 size;
-    int have_kind, e, i, n;
+    int have_kind, e, i, n, file;
     if (a2_rd(tf, &q, sizeof q, &size) != 0 || a2_text_in(tf, q.path, path, sizeof path) <= 0
         || (q.with && a2_text_in(tf, q.with, with, sizeof with) <= 0)
         || (q.verb && (!q.with || a2_text_in(tf, q.verb, label, sizeof label) <= 0)))
         return a2_fail(tf, GLOS_E_ARGUMENT);
-    if (!assoc_link(path)) {                    /* a file: in DOS's bytes, and there */
+    memcpy(given, path, sizeof given);          /* (as the app wrote it: the recent documents') */
+    if ((file = !assoc_link(path)) != 0) {      /* a file: in DOS's bytes, and there */
         if (api2_fs_path(tf, q.path, path, sizeof path) < 0)
             return a2_fail(tf, GLOS_E_ARGUMENT);
         if ((e = api2_fs_exists(a, path)) <= 0)
@@ -378,6 +401,19 @@ static int open_call(struct app *a, struct trapframe *tf)
     }
     if (assoc_command(prog, path, dir, cmd, sizeof cmd) < 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (start(tf, cmd, &q.job))
+        return 0;
+    if (file) {                                 /* a document: among the recent ones, with the program that has it */
+        const char *b = prog;
+        for (i = 0; prog[i] && prog[i] != ' '; i++)
+            if (prog[i] == '\\' || prog[i] == '/' || prog[i] == ':')
+                b = prog + i + 1;
+        for (i = 0; b[i] && b[i] != ' ' && i < (int)sizeof opener - 1; i++)
+            opener[i] = b[i] >= 'a' && b[i] <= 'z' ? (char)(b[i] - 32) : b[i];
+        opener[i] = 0;
+        api2_recent_add(opener, given);
+    }
+    return a2_wr(tf, &q, sizeof q, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 run:
     if (start(tf, cmd, &q.job))
         return 0;
@@ -493,6 +529,10 @@ int api2_shell(struct app *a, struct trapframe *tf, u32 n)
         return open_call(a, tf);
     case GLOS_SHELL_ASSOC:
         return assoc(a, tf);
+    case GLOS_SHELL_ENTRY:
+    case GLOS_SHELL_RECENT:
+    case GLOS_SHELL_SCHEDULE:
+        return api2_start(a, tf, GLOS_FN(GLOS_AREA_SHELL, n));
     }
     return a2_fail(tf, GLOS_E_FUNCTION);
 }

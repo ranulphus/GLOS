@@ -209,14 +209,18 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   - the notifications';
   - for the shell app: launcher asked, task list asked, an entry added.
 
-- **As built (step 8, first part):** DESKTOP, TRAY, NOTIFY, POINT, HELP, OPEN and ASSOC; ENTRY, RECENT and
-  SCHEDULE follow.
+- **As built (step 8):** all ten calls.
   - The shell is one of GLOS's own programs (its file is in GLOS's folder), one at a time.
   - A tray icon's tooltip is drawn by GLOS; its menu is the app's own window, opened at MENU's event.
   - A notification has no progress bar or input field: a title, text, an icon, two actions.
   - Verbs are kept in the program's profile, not in a section of their own.
   - OPEN gives a job's number; the program runs on when the caller ends.
   - Error 21, NOT_FOUND, is new: no such file, no program for its kind, no such verb, no Help.
+  - An entry is the program's profile in GLOS.CFG; its icon is one of GLOS's named kinds until phase C. The jump
+    list's recent items are RECENT's, by program; its tasks are ENTRY's TASK.
+  - The recent documents and the schedule are kept in GLOS.DAT beside GLOS.CFG.
+  - SCHEDULE is kept and run by the kernel, not by the shell: `start`, `daily HH:MM`, `weekly DAY HH:MM`; missed
+    times are made up for by one run.
 
 ### 05h CLIP (the clipboard)
 

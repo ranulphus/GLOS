@@ -412,7 +412,8 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_WIN][0] = 0x5F;               /* CREATE, SHOW, PLACE, FOCUS, ENUM, DRAG */
     v.functions[GLOS_AREA_DRAW][0] = 0x3FF;             /* PIXELS, PRESENT, SCREEN, the GPU's five, BLIT, MODES */
     v.functions[GLOS_AREA_INPUT][0] = 0x1F;             /* KEYS, CAPTURE, PADS, GAMEPORT, MODE */
-    v.functions[GLOS_AREA_SHELL][0] = 0x7F;             /* DESKTOP, TRAY, NOTIFY, POINT, HELP, OPEN, ASSOC */
+    v.functions[GLOS_AREA_SHELL][0] = 0x3FF;            /* DESKTOP, TRAY, NOTIFY, POINT, HELP, OPEN, ASSOC, ENTRY,
+                                                           RECENT, SCHEDULE */
     v.functions[GLOS_AREA_CLIP][0] = 0x1F;              /* OPEN, PUT, GET, FORMATS, FORMAT */
     v.functions[GLOS_AREA_DND][0] = 0x07;               /* DRAG, TARGET, ANSWER */
     v.functions[GLOS_AREA_THREAD][0] = 0x3FF;           /* CREATE to SELF */

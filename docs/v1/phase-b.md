@@ -495,7 +495,7 @@ After that:
   - host: notifications' layout and lifetimes, ASSOC's rules;
   - Loop A: APITEST, and a scheduled command run at its time (the clock moved in 86Box).
 
-**Step 8, first part, as built** (2026-11-10; ENTRY, RECENT and SCHEDULE are the second part):
+**Step 8, first part, as built** (2026-11-10):
 
 - **SHELL's calls** (`kernel/app/api2shell.c`): DESKTOP, TRAY, NOTIFY, POINT, HELP, OPEN, ASSOC. Handles: a tray
   icon (`GLOS_HK_TRAY`) and a notification (`GLOS_HK_NOTIFY`). Events: `GLOS_EV_TRAY`, `GLOS_EV_NOTIFY`,
@@ -531,9 +531,38 @@ After that:
   phase D). With no desktop a notification waits for one.
 - **Fixed on the way:** FS's INFO kept its paths in one buffer for every app, across a wait for the VM thread;
   two apps asking at once could read each other's. Each call has its own now.
-- **Tests:** host `notes_test` (lifetimes, the queue, the layout) and `assoc_test`; APITEST's SHELL cases (20)
-  in `loopa-api`; `api_shell_case` under the agent (the tray's presses and tooltip, four notifications, the
-  shell's events, a program from another folder refused).
+- **Tests:** host `notes_test` (lifetimes, the queue, the layout) and `assoc_test`; APITEST's SHELL cases (13)
+  in `loopa-api`'s default run; `api_shell_case` under the agent (the tray's presses and tooltip, four
+  notifications, the shell's events, a program from another folder refused).
+
+**Step 8, second part, as built** (2026-11-10):
+
+- **ENTRY, RECENT, SCHEDULE** (`kernel/app/api2start.c`). The shell is told of changes by `GLOS_EV_SHELL`
+  (ENTRIES, RECENTS).
+- **Where each is kept** (to be put to the owner):
+  - a Start menu entry is the program's profile in GLOS.CFG (`[program NAME.EXE]`: `menu`, `title`, `icon`, `args`,
+    and the new `group`, `path` and `tasks`), so the Control Panel's Programs page shows and edits it;
+  - the recent documents and the schedule are records in **GLOS.DAT**, a text file beside GLOS.CFG
+    (`kernel/core/kdata.c`): up to 64 lines, written by the settings' writer thread through the DOS server.
+    Agent mode only, as GLOS.CFG is.
+- **ENTRY:** SET puts the calling program in the menu (its folder is found at INIT; its group is INIT's unless
+  given); REMOVE; TASK sets or takes away a task of its jump list; LIST gives every entry, a line each. An
+  entry's icon is one of GLOS's named kinds until the toolkit has icon resources (phase C).
+- **RECENT:** up to 32, the newest first, each path once (letters in either case), each with the program that
+  opened it. OPEN adds the files it opens; a program adds its own. LIST by program or all; CLEAR one or all.
+- **SCHEDULE:** up to 16 named commands, each `start`, `daily HH:MM` or `weekly DAY HH:MM` in local time
+  (`sdk/config/sched.c` has the rules). The runner (`kernel/core/schedule.c`) is a kernel thread that looks
+  every 15 seconds and starts what is due as a program of nobody's, through the agent's queue.
+  - A time missed while GLOS was not running (or passed over by the clock being set) is made up for by one
+    run, however many were missed. This default is to be put to the owner.
+  - A command's times count from when it was set: one set at 14:00 for 03:00 first runs the next night.
+- **glos exit waits** (up to 5 s) for GLOS.CFG and GLOS.DAT to be written: a setting made just before it was
+  lost before.
+- **Under GLOS /RUN** (no agent) no setting is kept and nothing can be started: OPEN, HELP and SCHEDULE's SET
+  are refused, ASSOC's and ENTRY's sets fail with `GLOS_E_SETTING`.
+- **Tests:** host `sched_test` and `kdata_test`; APITEST's store mode (20 cases: kinds, verbs, OPEN, recents,
+  entries, the schedule's calls) run by `api_shell_case`; `api_sched_case` (two starts of GLOS: a command at
+  start, a daily one at its time, missed times made up for once, the clock set by `glos time set`).
 
 ### 9. JOB and SYS
 
