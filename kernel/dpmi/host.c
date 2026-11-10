@@ -260,24 +260,25 @@ static void iret_frame(struct trapframe *tf, int keep, int b32)
 void dpmi_iret(struct trapframe *tf) { iret_frame(tf, 0, dctx->bits32); }
 
 /* A far return (RETF), for the trampolines that are far-called. */
-static void retf(struct trapframe *tf)
+static int retf(struct trapframe *tf)            /* 0, or -1: the return address can't be read */
 {
     u32 sp = sp_of(tf);
     if (dctx->bits32) {
         u32 v[2];
-        if (user_rd((u16)tf->ss, sp, v, 8) == 0) {
-            tf->eip = v[0];
-            tf->cs = v[1] & 0xFFFF;
-            set_sp(tf, sp + 8);
-        }
+        if (user_rd((u16)tf->ss, sp, v, 8) != 0)
+            return -1;
+        tf->eip = v[0];
+        tf->cs = v[1] & 0xFFFF;
+        set_sp(tf, sp + 8);
     } else {
         u16 v[2];
-        if (user_rd((u16)tf->ss, sp, v, 4) == 0) {
-            tf->eip = v[0];
-            tf->cs = v[1];
-            set_sp(tf, sp + 4);
-        }
+        if (user_rd((u16)tf->ss, sp, v, 4) != 0)
+            return -1;
+        tf->eip = v[0];
+        tf->cs = v[1];
+        set_sp(tf, sp + 4);
     }
+    return 0;
 }
 
 /* ---- contexts */
@@ -478,6 +479,8 @@ static void end_level(int psp, int seen, int *depth, struct trapframe **f)
         app_vm_base(depth, f);
     if (seen && nterm < NLEVEL)
         term_pend[nterm++] = app ? TERM_APP : dctx->term_vec;
+    if (app)
+        app_ctx_ending(dctx->app);              /* (threads the app made: out of the context before it goes) */
     if (dctx->nlv > 1)
         level_pop(psp);
     else
@@ -493,9 +496,12 @@ void dpmi_end(struct trapframe *tf, u8 code, int killed)
     struct trapframe *f;
     struct app *a = app_cur();
     int d, app = dctx->app && dctx->nlv == 1;
+    if (a && !app_first())                      /* a thread the app made: its first ends the app */
+        app_end_from_thread(a, code, killed);
     kprintf("GLOS-DPMI exit code=%u%s level=%u\n", code, killed ? " killed" : "", dctx->nlv);
     if (a) {                                    /* an app, on its own thread: the context goes here, and the */
-        end_level(1, 0, &d, &f);                /* VM thread has DOS end the process when it next can */
+        app_stop_threads(a);                    /* VM thread has DOS end the process when it next can */
+        end_level(1, 0, &d, &f);
         app_end(a, code);
     }
     end_level(1, 1, &d, &f);
@@ -648,6 +654,19 @@ static void trampoline(struct trapframe *tf, u32 off)
         retf(tf);
         return;
     case TR_VENDOR:                             /* the GLOS API (kernel/app/api.c) */
+        {
+            u32 ret[2];                         /* The far call's return address can't be read: the stack fault the
+                                                   call itself would have been. (A wait of 1.x's that an interrupt
+                                                   cut short is made again straight from the handler; DJGPP's
+                                                   handlers shrink the data segment to raise a signal, and its
+                                                   exception handler puts it right from this fault) */
+            if (user_rd((u16)tf->ss, sp_of(tf), ret, dctx->bits32 ? 8 : 4) != 0) {
+                tf->vec = 12;
+                tf->err = 0;
+                dpmi_exception(tf);
+                return;
+            }
+        }
         switch (glos_api(tf)) {
         case 1:                                 /* the program becomes an app: on in a thread of its own, */
             retf(tf);                           /* from its call's return; this one back to the stub */
@@ -656,7 +675,8 @@ static void trampoline(struct trapframe *tf, u32 off)
         case 2:                                 /* an interrupt of the app's is due: its handler first, */
             break;                              /* then this call again, from the same instruction */
         default:
-            retf(tf);
+            if (retf(tf) != 0)                  /* (its stack is gone: the call would be made again for ever) */
+                crash_report(tf, "api-return");
         }
         return;
     default:
@@ -738,7 +758,7 @@ void dpmi_trap(struct trapframe *tf)
         return;                                 /* a page of its memory backed on its first touch */
     if (v == 14 && display_vga_fault(read_cr2()))
         return;                                 /* the VGA's memory, a console job's program's: full-screen now (M9) */
-    if (v == 14 && app_cur() && gpu_fault(app_cur(), read_cr2()))
+    if (v == 14 && app_first() && gpu_fault(app_cur(), read_cr2()))
         return;                                 /* the card's registers or its VRAM (M8): its own now, and again */
     if (v == 14)
         dctx->cr2 = read_cr2();                 /* before anything else can fault */

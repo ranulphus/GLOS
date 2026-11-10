@@ -32,20 +32,31 @@ static int find(void)
 /* The call: 0, or GLOS's error (the carry flag set), or -1 without GLOS; *eax what EAX came back as. */
 static int raw(unsigned fn, void *s, unsigned *eax)
 {
-    unsigned a = fn, b = (unsigned)s, c = 0, d = 0;
+    unsigned a, b, c = 0, d = 0;
     unsigned char failed;
     if (find() < 0)
         return -1;
-    __asm__ __volatile__("lcall *%[e]\n\tsetc %[f]"
-                         : "+a"(a), "+b"(b), "+c"(c), "+d"(d), [f] "=m"(failed)
-                         : [e] "m"(entry)
-                         : "esi", "edi", "cc", "memory");
+    do {                                /* (again while a wait was cut short for an interrupt of the program's
+                                           own: with ECX and EDX as GLOS left them, for the rest of the wait) */
+        a = fn;
+        b = (unsigned)s;
+        __asm__ __volatile__("lcall *%[e]\n\tsetc %[f]"
+                             : "+a"(a), "+b"(b), "+c"(c), "+d"(d), [f] "=m"(failed)
+                             : [e] "m"(entry)
+                             : "esi", "edi", "cc", "memory");
+    } while (failed && a == GLOS_E_AGAIN);
     if (eax)
         *eax = a;
     return failed ? (int)a : 0;
 }
 
 int glos_call(unsigned fn, void *s) { return raw(fn, s, 0); }
+
+unsigned __glos_call_eax(unsigned fn)   /* (glos2thr.c's) */
+{
+    unsigned v = 0;
+    return raw(fn, 0, &v) == 0 ? v : 0;
+}
 
 int glos_running(void)
 {
@@ -225,6 +236,7 @@ int glos_random(void *buf, unsigned n)
 static int last_error;
 
 int glos_error(void) { return last_error; }
+void __glos_error_set(int e) { last_error = e; }       /* (glos2thr.c's) */
 
 glos_handle glos_window(const char *title, int x, int y, int w, int h, unsigned kind, unsigned flags, glos_handle owner)
 {

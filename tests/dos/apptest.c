@@ -51,11 +51,13 @@
 #include <fcntl.h>
 #include <io.h>
 #include <process.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/exceptn.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <glos/api.h>
@@ -240,6 +242,39 @@ static int timer(int hz, int seconds, int slack)
     return fails ? 1 : 0;
 }
 
+/* DJGPP's own timer signals while the app waits in GLOS (2026-11-10): SIGALRM every tick of the PC's (18.2 a
+   second) for `seconds`, the app asleep in GLOS_FN_SLEEP a second at a time. DJGPP raises a signal from an
+   interrupt by shrinking the data segment's limit in its handler; a sleep cut short for that interrupt is made
+   again straight from the handler, with the segment still shrunk, and must end and return all the same. */
+static volatile unsigned alarm_n;
+
+static void on_alarm(int sig)
+{
+    (void)sig;
+    alarm_n++;
+}
+
+static int alarms(int seconds)
+{
+    struct itimerval it, off;
+    unsigned t0 = glos_ticks(), ms;
+    int i, ok;
+    memset(&it, 0, sizeof it);
+    memset(&off, 0, sizeof off);
+    signal(SIGALRM, on_alarm);
+    it.it_interval.tv_usec = it.it_value.tv_usec = 55000;
+    setitimer(ITIMER_REAL, &it, 0);
+    for (i = 0; i < seconds; i++)
+        glos_sleep(1000);
+    setitimer(ITIMER_REAL, &off, 0);
+    signal(SIGALRM, SIG_DFL);
+    ms = glos_ticks() - t0;
+    ok = alarm_n >= (unsigned)seconds * 12 && alarm_n <= (unsigned)seconds * 22 && ms >= (unsigned)seconds * 950
+         && ms < (unsigned)seconds * 1500;
+    printf("%s alarms=%u ms=%u\n", ok ? "APP-ALARM-OK" : "APP-ALARM-FAIL", alarm_n, ms);
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
     const char *mode = argc > 1 ? argv[1] : "";
@@ -303,6 +338,8 @@ int main(int argc, char **argv)
         printf("APP-CHILD-BACK r=%d ticks=%u\n", r, glos_ticks() != 0);
         return r;
     }
+    if (!strcmp(mode, "alarm") && argc > 2)
+        return alarms(atoi(argv[2]));
     if (!strcmp(mode, "uclock") && argc > 2)
         return uclk(atoi(argv[2]));
     if (!strcmp(mode, "timer") && argc > 3)

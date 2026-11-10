@@ -28,7 +28,7 @@
 #define GLOS_BUILD "unknown"
 #endif
 
-#define RESUME  0x52455355u             /* EDX: a wait cut short by an interrupt of the app's, ECX its ms left */
+#define RESUME  A2_RESUME
 
 /* ---- helpers */
 
@@ -45,14 +45,16 @@ int a2_ok(struct trapframe *tf, u32 v)
     return 0;
 }
 
-static u32 ticks_of(u32 ms)             /* milliseconds as ticks, 1024 to the second (as api.c) */
+u32 a2_ticks_of(u32 ms)                 /* milliseconds as ticks, 1024 to the second (as api.c) */
 {
     if (ms > 0x03FFFFFFu)
         ms = 0x03FFFFFFu;
     return ms + (ms * 24 + 999) / 1000;
 }
 
-static u32 ms_of(u32 ticks) { return (u32)(((unsigned long long)ticks * 125 + 127) >> 7); }
+u32 a2_ms_of(u32 ticks) { return (u32)(((unsigned long long)ticks * 125 + 127) >> 7); }
+#define ticks_of a2_ticks_of
+#define ms_of    a2_ms_of
 static u32 now_ms(void) { return (u32)(((unsigned long long)timer_ticks() * 125) >> 7); }
 
 /* The call's structure at DS:EBX: what GLOS knows of it read (n bytes at most), the rest zero; *size the
@@ -186,6 +188,8 @@ void api2_tick(struct app *a)
         if (!t->live || (s32)(now - t->next) < 0)
             continue;
         t->count++;
+        t->fired = 1;                           /* (for THREAD's WAIT) */
+        thread_wake(&a->wq);
         if (t->pending) {
             t->missed++;                        /* (the one queued stands for this one too) */
         } else {
@@ -282,6 +286,9 @@ static int prop_call(struct app *a, struct trapframe *tf, int set)
     for (i = 0; i < api2_win_nprops; i++)
         if (api2_win_props[i].prop == p.prop)
             d = &api2_win_props[i];
+    for (i = 0; i < api2_thr_nprops; i++)
+        if (api2_thr_props[i].prop == p.prop)
+            d = &api2_thr_props[i];
     if (!d || (p.prop >> 8) != (u32)kind || (set && (d->flags & P_RO)))
         return a2_fail(tf, (p.prop >> 8) != (u32)kind && d ? GLOS_E_KIND : GLOS_E_PROPERTY);
     obj = handle_obj(&a->v2->h, p.handle, (u8)kind);
@@ -348,8 +355,10 @@ void api2_app_gone(struct app *a)
     s->ntimers = 0;                             /* (the tick looks at these no more) */
     while (handle_next(&s->h, &i, &h, &obj) == 0) {
         handle_close(&s->h, h);
-        if (GLOS_HANDLE_KIND(h) == GLOS_HK_TIMER)
-            kfree(obj);                         /* (a window's is its number: the desktop took the windows away) */
+        if (GLOS_HANDLE_KIND(h) == GLOS_HK_TIMER || GLOS_HANDLE_KIND(h) == GLOS_HK_LOCK
+            || GLOS_HANDLE_KIND(h) == GLOS_HK_SIGNAL)
+            kfree(obj);                         /* (a window's is its number: the desktop took the windows away; a
+                                                   thread's is its record in the app) */
     }
     if (s->ndrop || s->ndrop1x)
         kprintf("GLOS-API2 app=%u drops=%u unmapped=%u\n", a->id, s->ndrop, s->ndrop1x);
@@ -386,6 +395,7 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_WIN][0] = 0x5F;               /* CREATE, SHOW, PLACE, FOCUS, ENUM, DRAG */
     v.functions[GLOS_AREA_DRAW][0] = 0x1FF;             /* PIXELS, PRESENT, SCREEN, the GPU's five, BLIT */
     v.functions[GLOS_AREA_INPUT][0] = 0x1F;             /* KEYS, CAPTURE, PADS, GAMEPORT, MODE */
+    v.functions[GLOS_AREA_THREAD][0] = 0x3FF;           /* CREATE to SELF */
     return a2_wr(tf, &v, sizeof v, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, (GLOS_MAJOR << 16) | GLOS_MINOR);
 }
 
@@ -447,7 +457,7 @@ static int random_call(struct trapframe *tf)
 
 /* A wait's milliseconds: the structure's, or, made again after an interrupt of the app's cut it short, what
    was left then (ECX, with EDX the mark). */
-static u32 wait_ms(struct trapframe *tf, u32 ms)
+u32 a2_wait_ms(struct trapframe *tf, u32 ms)
 {
     if (tf->edx == RESUME) {
         tf->edx = 0;
@@ -464,7 +474,7 @@ static int event_call(struct app *a, struct trapframe *tf)
     int r;
     if (a2_rd(tf, &w, sizeof w, &size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
-    ms = wait_ms(tf, w.ms);
+    ms = a2_wait_ms(tf, w.ms);
     for (;;) {
         r = take(a, w.areas, ev, w.room, &need);
         if (r)
@@ -507,7 +517,7 @@ static int sleep_call(struct app *a, struct trapframe *tf)
     u32 size, ms, left;
     if (a2_rd(tf, &q, sizeof q, &size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
-    ms = wait_ms(tf, q.ms);
+    ms = a2_wait_ms(tf, q.ms);
     left = app_sleep(a, ticks_of(ms));
     if (left && !a->kill) {
         tf->ecx = ms_of(left);
@@ -568,6 +578,8 @@ static int close_call(struct app *a, struct trapframe *tf)
         kfree(obj);
     else if (kind == GLOS_HK_WINDOW)
         api2_win_close(a, (u32)obj);
+    else if (kind == GLOS_HK_THREAD || kind == GLOS_HK_LOCK || kind == GLOS_HK_SIGNAL)
+        api2_thread_close(a, kind, obj);
     return a2_ok(tf, 0);
 }
 
@@ -612,11 +624,20 @@ static int core(struct app *a, struct trapframe *tf, u32 n)
     return a2_fail(tf, GLOS_E_FUNCTION);
 }
 
+/* The calls that wait (for an event, a time, another thread): made without the app's lock, so that its other
+   threads' calls go on meanwhile. What they touch they touch in one piece (no wait between), or look up again
+   after their wait. */
+static int waits(u32 fn)
+{
+    return fn == GLOS_CORE_EVENT || fn == GLOS_CORE_SLEEP || fn == GLOS_CORE_YIELD || fn == GLOS_THREAD_EXIT
+           || fn == GLOS_THREAD_JOIN || fn == GLOS_THREAD_TAKE || fn == GLOS_THREAD_WAIT;
+}
+
 int api2_call(struct trapframe *tf)
 {
     struct app *a = app_cur();
     u32 fn = tf->eax, area = GLOS_FN_AREA(fn), n = fn & 0xFFu;
-    int r;
+    int r, first;
     if (fn == GLOS_CORE_VERSION)                /* (for any program, as the others below) */
         return version(tf);
     if (fn == GLOS_CORE_INIT)
@@ -633,13 +654,34 @@ int api2_call(struct trapframe *tf)
         return a2_fail(tf, GLOS_E_NOT_APP);
     if (a->api_major != 2 || !a->v2)
         return a2_fail(tf, GLOS_E_VERSION);       /* (a 1.x app makes 1.x's calls only) */
-    if (area > GLOS_AREA_INPUT)
+    if (area > GLOS_AREA_INPUT && area != GLOS_AREA_THREAD)
         return a2_fail(tf, GLOS_E_FUNCTION);       /* (the other areas come with phase B's later steps) */
+    first = app_first();
+    if (!first && area == GLOS_AREA_DRAW && n >= (GLOS_DRAW_GPU & 0xFF) && n <= (GLOS_DRAW_WINVRAM & 0xFF))
+        return a2_fail(tf, GLOS_E_REFUSED);        /* (the GPU is the first thread's alone: supervisor.md 12.7) */
     if (fn == GLOS_DRAW_GPU_LOCK)               /* (not a safe point: the lock is being taken, not left) */
         return gpu_app_lock(a) == 0 ? a2_ok(tf, 0) : a2_fail(tf, GLOS_E_NO_GPU);
-    gpu_safe_begin(a);                          /* (as api.c: the app's turn with the engine may end in a wait) */
+    if (waits(fn)) {                            /* (a call that waits: beside the app's others) */
+        r = area == GLOS_AREA_THREAD ? api2_thread(a, tf, n) : core(a, tf, n);
+        if (r == 2) {                           /* cut short for an interrupt of the app's: back to its code, where
+                                                   the handler runs; the caller makes the call again (ECX, EDX).
+                                                   (Not straight back into the call from the handler: DJGPP's
+                                                   handlers shrink the data segment to raise a signal, which only a
+                                                   touch of memory in the program's own code puts right) */
+            tf->eax = GLOS_E_AGAIN;
+            tf->eflags |= FL_CF;
+            r = 0;
+        }
+        return r;
+    }
+    if (app_api_lock(a) != 0)                   /* the app's calls one at a time: each was written for one thread */
+        return a2_fail(tf, GLOS_E_REFUSED);     /* (the app is ending) */
+    if (first)
+        gpu_safe_begin(a);                      /* (as api.c: the app's turn with the engine may end in a wait) */
     r = area == GLOS_AREA_WIN ? api2_win(a, tf, n) : area == GLOS_AREA_DRAW ? api2_draw(a, tf, n)
-      : area == GLOS_AREA_INPUT ? api2_input(a, tf, n) : core(a, tf, n);
-    gpu_safe_end(a);
+      : area == GLOS_AREA_INPUT ? api2_input(a, tf, n) : area == GLOS_AREA_THREAD ? api2_thread(a, tf, n) : core(a, tf, n);
+    if (first)
+        gpu_safe_end(a);
+    app_api_unlock(a);
     return r;
 }

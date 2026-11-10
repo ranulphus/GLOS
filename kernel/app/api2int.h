@@ -31,6 +31,7 @@ struct timer2 {
     u32 period, next;                   /* ticks (1024 to the second): the period, and when it fires next */
     u32 count, missed;
     u8 repeat, pending, live;           /* pending: an event of its is queued, not yet taken */
+    u8 fired;                           /* it has fired since THREAD's WAIT last looked at it */
     char name[32];
 };
 
@@ -64,6 +65,10 @@ struct propdef {
 };
 
 /* api2.c */
+#define A2_RESUME 0x52455355u           /* EDX: a wait cut short by an interrupt of the app's, ECX its ms left */
+u32 a2_ticks_of(u32 ms);                                        /* milliseconds as ticks (1024 to the second) */
+u32 a2_ms_of(u32 ticks);
+u32 a2_wait_ms(struct trapframe *tf, u32 ms);                   /* a wait's time: the structure's, or what was left */
 int a2_fail(struct trapframe *tf, u32 e);                       /* the call's answer: refused */
 int a2_ok(struct trapframe *tf, u32 v);                         /* ... done, EAX v */
 int a2_rd(struct trapframe *tf, void *s, u32 n, u32 *size);     /* the call's structure, as far as GLOS knows it */
@@ -80,9 +85,15 @@ int api2_win(struct app *a, struct trapframe *tf, u32 n);       /* WIN's calls *
 int api2_draw(struct app *a, struct trapframe *tf, u32 n);      /* DRAW's */
 int api2_screen(struct trapframe *tf);
 
+/* api2thr.c */
+extern const struct propdef api2_thr_props[];
+extern const u32 api2_thr_nprops;
+int api2_thread(struct app *a, struct trapframe *tf, u32 n);    /* THREAD's calls */
+void api2_thread_close(struct app *a, int kind, void *obj);     /* CLOSE of a thread's, a lock's or a signal's handle */
+
 /* api2in.c */
 int api2_input(struct app *a, struct trapframe *tf, u32 n);     /* INPUT's calls */
-void api2_input_init(void);                                     /* (once: the pads' news comes from now on) */                          /* DRAW's SCREEN, for any program */
+void api2_input_init(void);                                     /* (once: the pads' news comes from now on) */
 int api2_win_close(struct app *a, u32 id);                      /* CLOSE of a window's handle */
 
 #endif

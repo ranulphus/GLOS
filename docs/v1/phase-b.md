@@ -105,7 +105,8 @@ After that:
      area times 256 + the function. While 1.x is answered, 2.0's calls never meet 1.x's (0-33), and every call says
      which API it is.
   2. **ECX and EDX are 0 in a call.** GLOS uses them to finish a wait that an interrupt of the app's own cut short,
-     as 1.x used ECX, so that the caller's structure is never changed.
+     as 1.x used ECX, so that the caller's structure is never changed. (Step 4 changed how: the call returns
+     `GLOS_E_AGAIN` and the caller makes it again; see "Step 4 as built".)
   3. **INIT takes the app's name, Help page and Start menu group, not its icon:** an icon is a window's (WIN) and a
      Start entry's (SHELL).
   4. **TICKS gives its milliseconds in EAX** (no structure), and VERSION its version there when EBX is 0, so that
@@ -257,6 +258,52 @@ After that:
   - Loop A: THRTEST (DJGPP), with threads computing, allocating and doing file I/O at once, a lock contended, the
     app killed mid-run, an exception in a second thread; `loopa-apps` and `hostile` unchanged.
 - **The phase's largest risk,** so it comes early.
+
+**Step 4 as built** (2026-11-10; the design and the owner's four answers are `docs/supervisor.md` §12.7):
+
+- **THREAD's calls** (`include/glos/api2.h`): CREATE, EXIT, JOIN, LOCK, TAKE, GIVE, SIGNAL, SET, WAIT, SELF.
+  Handles `GLOS_HK_THREAD`, `GLOS_HK_LOCK`, `GLOS_HK_SIGNAL`, with read-only properties (a thread's number,
+  whether it has ended, its code, its class, the time it has run; a lock's holder; whether a signal is set).
+- **Different from the plan's text:**
+  - **An exception in a thread the app made ends the app** with a crash report naming the thread (the owner's
+    answer), where the plan said "delivered to the thread that caused them".
+  - **TAKE and GIVE, and SET, are calls of their own,** not properties.
+  - **CREATE takes the stack's top, not a size:** the stack is the app's own memory (libglos allocates it).
+  - **CREATE takes a data selector** for the thread's DS, ES and SS. DJGPP's signals shrink the program's data
+    segment for a moment, which a thread sharing the selector feels; libglos passes DJGPP's second selector.
+  - **A thread's class can't be changed after CREATE** (the property is read-only).
+  - **At most 16 threads beside the first,** counted until each has ended and its handle is closed.
+- **A wait cut short returns to the app** (a change to step 1's calling shape, found here). When an interrupt
+  of the app's own is due during a wait, the call now returns `GLOS_E_AGAIN` with ECX and EDX set, the handler
+  runs on the app's own code, and libglos makes the call again for the rest. Before, the kernel re-entered the
+  call straight from the handler. DJGPP's handlers shrink the data segment to raise a signal, and only a touch
+  of memory in the program's own code puts it right: re-entered without one, the call could not read the
+  stack to return, and repeated for ever. 1.x's calls still restart the old way (they go with 1.x in step 15).
+- **A GLOS call whose return address can't be read** is a crash report (`api-return`), not a silent loop.
+- **`glos ps` lists an app's threads** when it has made any: where each is in its code, or which GLOS call it
+  is in and from where; which holds the DOS lock.
+- **The kernel** (`kernel/app/app.c`, `api2thr.c`, `tsync.c`):
+  - a record a thread in the app; each a kernel thread in the app's context with its own FPU state;
+  - the DOS lock round the one call the VM thread serves an app; the API lock round calls that may wait midway;
+  - handlers and another thread's DOS call kept apart; the first thread let in ahead of the next call;
+  - the ends: a thread's `exit()` or crash, the first thread's end, a kill, DOS ending the program inside a
+    call (the VM thread waits for the other threads to be out of the context).
+  - An app that makes no thread takes none of the new paths.
+- **libglos 2.0** (`sdk/libglos2/glos2thr.c`, `glos2wrap.c`, `wrap.list`):
+  - `glos_thread`, `glos_thread_exit`, `glos_join`, `glos_detach`, `glos_self`, `glos_lock`, `glos_take`,
+    `glos_give`, `glos_signal`, `glos_signal_set`, `glos_wait`, `glos_libc_lock`, `glos_libc_unlock`;
+  - **the C library's lock:** 68 functions wrapped at link time (`@build/sdk/glos2wrap.opt`); the lock costs no
+    call to GLOS unless two threads want it at once; nothing is locked until the program makes a thread;
+  - a program that uses `glos_thread` without the linker's options fails to link;
+  - **a threaded program's exit ends through GLOS:** DJGPP's last step of exit frees the selector the other
+    threads run on, so libglos takes that step over (`__exit`, wrapped too) and ends the program by DOS's
+    function at once; GLOS stops the threads and drops the context;
+  - what stays unsafe is listed in `include/glos/glos2.h` (the `getc` and `putc` macros, functions with
+    memory of their own such as `strtok` and `localtime`, `errno`, the program's own use of `__tb`).
+- **Tests:**
+  - host: `tsync_test` (locks and signals); `tools/wrapcheck.py` on THRTEST's link map (every wrapped function
+    reached only through the lock, from the C library's own files too);
+  - Loop A: `make loopa-thr` (THRTEST through the agent, on the bf6 and the 486).
 
 ### 5. SETTINGS and IDLE
 

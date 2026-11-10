@@ -12,6 +12,7 @@
 #   make loopa-sched    the scheduler's self-test threads beside the VM (M3)
 #   make loopa-mem      conventional memory under GLOS against plain DOS (PRD P7)
 #   make loopa-api      API 2.0's conformance: APITEST's cases (tests/api; phase B, docs/v1/phase-b.md)
+#   make loopa-thr      an app's own threads: THRTEST (tests/api/thrtest.c; phase B step 4)
 #   make loopa-mem-page the resident stub in a page of upper memory (docs/upper-memory.md)
 #   make loopa-umaprobe what is in each Loop A machine's upper memory area (U0, read-only)
 #   make loopa-umb      GLOS among UMBs from the chipset (B1: MGA-Glide's umbpci boot)
@@ -107,7 +108,8 @@ HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:ke
               cache_test:kernel/drv/cstore.c umapage_test:kernel/mm/umapage.c \
               vpic_test:kernel/vm/vpic.c png_test:kernel/lib/png.c uhci_test:kernel/drv/uhcitd.c \
               hid_test:kernel/drv/hidparse.c xpad_test:kernel/drv/xpad.c \
-              usbkbd_test:kernel/drv/usbkbd.c handle_test:kernel/app/handle.c
+              usbkbd_test:kernel/drv/usbkbd.c handle_test:kernel/app/handle.c \
+              tsync_test:kernel/app/tsync.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
 host-test-run:
@@ -310,7 +312,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/api2win.c kernel/app/api2in.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
+         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/api2win.c kernel/app/api2in.c kernel/app/api2thr.c kernel/app/tsync.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS)) build/kernel/sdk_cfg.o build/kernel/sdk_tz.o
 # GLOS.CFG's schema (sdk/config/cfg.c, include/glos/config.h; M9) and time zones (sdk/config/tz.c; M10): shared
 # with the loader and the Control Panel.
@@ -400,6 +402,9 @@ loopa-xfer: all dos-tests check-deps
 # API 2.0's conformance (phase B): APITEST as GLOS.EXE /RUN's app, every case of the areas built so far.
 loopa-api: all build/dj/APITEST.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py api -j $(JOBS)
+# An app's own threads (phase B step 4): THRTEST through the agent.
+loopa-thr: all dos-tests build/dj/THRTEST.EXE check-deps
+	$(Q)$(DEV) python3 tests/loopa/jobs.py thr -j $(JOBS)
 loopa-mem-page: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py mem-page -j $(JOBS)
 # B1: GLOS among UMBs from the chipset's shadow RAM (docs/upper-memory.md); needs MGA-Glide's umbpci boot.
@@ -632,16 +637,31 @@ build/sdk/libglos.a: sdk/libglos/glos.c sdk/libglos/socket.c include/glos/api.h 
 	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/*.o
 # libglos 2.0 (sdk/libglos2, include/glos/glos2.h and api2.h): API 2.0 for DJGPP programs (phase B), beside libglos
 # 1.x until phase B's step 15; and APITEST, API 2.0's conformance suite (tests/api, make loopa-api).
-build/sdk/libglos2.a: sdk/libglos2/glos2.c include/glos/glos2.h include/glos/api2.h
+LIBGLOS2_SRCS := sdk/libglos2/glos2.c sdk/libglos2/glos2thr.c sdk/libglos2/glos2wrap.c
+build/sdk/libglos2.a: $(LIBGLOS2_SRCS) include/glos/glos2.h include/glos/api2.h
 	@mkdir -p build/sdk/v2
-	$(Q)echo "  DJCC    $<"
 	$(Q)rm -f $@
-	$(Q)$(DJCC) -O2 -Wall -Wextra -Werror -Iinclude -c -o build/sdk/v2/glos2.o $<
-	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/v2/glos2.o
+	$(Q)set -e; for f in $(LIBGLOS2_SRCS); do echo "  DJCC    $$f"; \
+	  $(DJCC) -O2 -Wall -Wextra -Werror -Iinclude -c -o build/sdk/v2/$$(basename $$f .c).o $$f; done
+	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ $(patsubst sdk/libglos2/%.c,build/sdk/v2/%.o,$(LIBGLOS2_SRCS))
+# The linker's options for a program with threads (glos_thread: include/glos/glos2.h): --wrap for each of the C
+# library's functions libglos 2.0 puts its lock round (sdk/libglos2/wrap.list). Used as @build/sdk/glos2wrap.opt.
+build/sdk/glos2wrap.opt: sdk/libglos2/wrap.list
+	@mkdir -p build/sdk
+	$(Q)grep -v '^#' $< | sed 's/^/-Wl,--wrap=/' > $@
 build/dj/APITEST.EXE: tests/api/apitest.c build/sdk/libglos2.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Wextra -Werror -Iinclude -o $@ $< build/sdk/libglos2.a
+	$(Q)python3 tools/glosmark.py $@
+# THRTEST (tests/api/thrtest.c; phase B step 4): an app's own threads. Its link map is checked: every wrapped C
+# library function is reached through libglos 2.0's lock, from the library's own files too (tools/wrapcheck.py).
+build/dj/THRTEST.EXE: tests/api/thrtest.c build/sdk/libglos2.a build/sdk/glos2wrap.opt tools/glosmark.py tools/wrapcheck.py
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Wextra -Werror -Iinclude -o $@ $< build/sdk/libglos2.a @build/sdk/glos2wrap.opt \
+	  -Wl,-Map,build/dj/THRTEST.map -Wl,--cref
+	$(Q)python3 tools/wrapcheck.py sdk/libglos2/wrap.list build/dj/THRTEST.map
 	$(Q)python3 tools/glosmark.py $@
 # BearSSL 0.6 (third_party/bearssl, MIT; THIRD_PARTY.md; M10 step C): build/sdk/libbearssl.a for DJGPP. Its own
 # guesses at the platform are set aside: no SSE2, AES-NI or RDRAND (a 486 has none, and a Pentium no SSE2), no

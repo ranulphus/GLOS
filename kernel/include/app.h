@@ -31,6 +31,14 @@ int app_rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, cons
 void app_end(struct app *a, u32 code) __attribute__((noreturn));
                                         /* its context has gone: DOS ends the process, the thread ends */
 void app_return(struct app *a, struct trapframe *tf);   /* before every return to its code */
+/* An app's own threads (API 2.0's THREAD; supervisor.md 12.7). */
+int app_first(void);                    /* the running thread is an app's first (not one the app made) */
+u32 app_thread_number(void);            /* the running thread's number in its app: 0 the first (or no app's) */
+int app_exception(struct trapframe *tf);        /* an exception with a handler of the app's: 1 to give it now */
+void app_stop_threads(struct app *a);   /* its first thread, before its context goes: the others leave */
+void app_ctx_ending(struct app *a);     /* its context is about to be freed (the VM thread: the others out first) */
+void app_end_from_thread(struct app *a, u8 code, int killed) __attribute__((noreturn));
+                                        /* a thread the app made ends the app (its first thread does), and is gone */
 u32 app_sleep(struct app *a, u32 ticks); /* the ticks left if an interrupt of its own (or a kill) ended it early */
 void app_idle(struct app *a);           /* its HLT: until an interrupt of its own */
 int app_irq_default(struct app *a, u8 vec);     /* an interrupt of its own nobody took: ended; 0: not one's vector */

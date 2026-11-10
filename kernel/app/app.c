@@ -101,6 +101,285 @@ void app_each(void (*fn)(struct app *a, void *arg), void *arg)
     irq_restore(f);
 }
 
+/* ---- an app's own threads (supervisor.md 12.7)
+ *
+ * Threads the app made (API 2.0's THREAD) are kernel threads in its context, as its first is: app_cur() is the
+ * app for each. Kernel work for an app's thread is never preempted (a trap's path runs with interrupts off), so
+ * its threads are in the kernel one at a time unless one waits. Two waits need a lock an app: a DOS or BIOS call
+ * (the one slot the VM thread serves: dos_lock), and a GLOS call that waits midway (app_api_lock). What the DPMI
+ * host keeps one of a context (the locked stack, its handlers' entries) is the first thread's, or the VM
+ * thread's while it makes a call for the app: the first thread is given no interrupt and no exception while
+ * another's call is under way, and another's call waits while a handler of the first's runs.
+ *
+ * The end: `kill` is set whatever ends the app, every wait of its threads ends on it, and each thread but the
+ * first leaves at its next return to its code (app_return). The context is freed only when they have: by the
+ * first thread (app_stop_threads), or by the VM thread, in a call it made for one of them (DOS ended the program:
+ * app_ctx_ending), with every other thread gone and the first parked. */
+
+int app_first(void) { return current->user == TU_APP && ((struct app *)current->arg)->thread == current; }
+
+struct app_thr *app_thr_cur(struct app *a)
+{
+    u32 i;
+    if (current == a->thread)
+        return 0;
+    for (i = 0; i < APP_THREADS; i++)
+        if (a->thr[i].live && a->thr[i].t == current)
+            return &a->thr[i];
+    return 0;
+}
+
+u32 app_thr_number(struct app *a)
+{
+    struct app_thr *r = app_thr_cur(a);
+    return r ? (u32)(r - a->thr) + 1 : 0;
+}
+
+u32 app_thread_number(void)
+{
+    struct app *a = app_cur();
+    return a ? app_thr_number(a) : 0;
+}
+
+static void wake_all(struct app *a)
+{
+    thread_wake(&a->wq);
+    thread_wake(&a->tq);
+    thread_wake(&pauseq);
+}
+
+/* The running thread, one the app made, ends (interrupts off from here). */
+void app_thread_exit(struct app *a, u32 code)
+{
+    struct app_thr *r;
+    cli();
+    r = app_thr_cur(a);
+    if (!r)
+        panic("app-thread-exit", NULL);
+    r->code = code;
+    r->ticks = current->ticks;
+    r->live = 0;
+    r->t = 0;
+    if (!r->handle)
+        r->used = 0;                            /* (its handle was closed while it ran) */
+    if (a->dos_owner == current)
+        a->dos_owner = 0;
+    if (a->api_owner == current)
+        a->api_owner = 0;
+    if (a->v2)
+        api2_thread_gone(a, (u32)(r - a->thr) + 1);
+    fpu_drop(current);
+    current->ctx = 0;
+    current->user = TU_NONE;
+    current->name = "app-thread-gone";          /* (its own name is the app's memory) */
+    dpmi_ctx_load(0);
+    a->nthr--;
+    wake_all(a);                                /* (whoever joins it; the app's end, waiting for it) */
+    thread_exit();
+}
+
+static void thr_main(void *arg)
+{
+    struct app *a = arg;
+    struct app_thr *r = app_thr_cur(a);
+    cli();
+    current->esp0 = current->stack_top - 16;
+    cpu_set_esp0(current->esp0);
+    dpmi_return(&r->start);                     /* (its wait for a session; the app's end, if that came first) */
+    frame_start(&r->start, current->stack_top);
+}
+
+int app_thread_start(struct app *a, struct app_thr *r, const struct trapframe *from, u32 cs, u32 data, u32 entry,
+                     u32 arg, u32 stack, int bulk)
+{
+    u32 w[2] = { 0, arg }, n = (u32)(r - a->thr) + 1, ss = data ? data : from->ss;
+    struct thread *t;
+    if (a->kill || !a->ctx)
+        return -3;
+    if (stack < 8 || user_wr((u16)ss, stack - 8, w, 8) != 0)   /* (no return address, and its argument) */
+        return -2;
+    ksnprintf(r->name, sizeof r->name, "app%u.%u", a->id, n);
+    if (!(t = thread_new(r->name, bulk ? PRIO_BULK : PRIO_NORMAL, thr_main, a, TU_APP)))
+        return -1;
+    r->start = *from;
+    r->start.eax = r->start.ebx = r->start.ecx = r->start.edx = 0;
+    r->start.esi = r->start.edi = r->start.ebp = 0;
+    r->start.cs = cs;
+    if (data)
+        r->start.ds = r->start.es = r->start.ss = data;
+    r->start.eip = entry;
+    r->start.esp = stack - 8;
+    r->start.eflags &= ~(FL_CF | 0x400u);       /* (the direction flag clear, as C has it) */
+    r->code = 0;
+    r->ticks = 0;
+    r->fpu_err = 0;
+    r->bulk = bulk != 0;
+    r->t = t;
+    t->vif = 1;
+    t->ctx = a->ctx;
+    fpu_fork(t);
+    r->live = 1;
+    a->nthr++;
+    thread_go(t);
+    return 0;
+}
+
+/* A thread's wait for another's doing (api2thr.c): on the app's queue, which every change wakes. */
+int app_thread_wait(struct app *a, u32 until)
+{
+    if (a->kill)
+        return 2;
+    if (current == a->thread && current->vif && vpic_pending(&a->pic) && !(a->dos_owner && a->dos_owner != current))
+        return 3;
+    if (until && (s32)(until - timer_ticks()) <= 0)
+        return 1;
+    thread_wait(&a->wq, until);
+    return 0;
+}
+
+void app_thread_news(struct app *a) { thread_wake(&a->wq); }
+
+/* The app's GLOS calls one at a time (api2.c), but for those that wait. */
+int app_api_lock(struct app *a)
+{
+    while (a->api_owner && !a->kill)
+        thread_block(&a->tq);
+    if (a->api_owner)
+        return -1;
+    a->api_owner = current;
+    return 0;
+}
+
+void app_api_unlock(struct app *a)
+{
+    if (a->api_owner == current) {
+        a->api_owner = 0;
+        if (a->tq.head)
+            thread_wake(&a->tq);
+    }
+}
+
+/* The app's DOS and BIOS calls one at a time: the VM thread serves one call an app. Not while a handler of the
+   first thread's runs (the context's one stack for handlers may be wanted by the call's callbacks; a handler's
+   return wakes nobody, so that is looked at again every other tick). -1: the app is ending. */
+static int dos_lock(struct app *a)
+{
+    int first = current == a->thread;
+    while (!a->kill && (a->dos_owner || (!first && a->ctx && (a->ctx->npe || (a->first_wants
+           && timer_ticks() - a->first_wants < 64)))))
+        thread_wait(&a->tq, timer_ticks() + 2);
+    if (a->dos_owner || !a->ctx || (a->kill && !first))
+        return -1;
+    a->dos_owner = current;
+    return 0;
+}
+
+static void dos_unlock(struct app *a)
+{
+    a->dos_owner = 0;
+    thread_wake(&a->tq);
+    if (vpic_pending(&a->pic))
+        thread_wake(&a->wq);                    /* (the first thread's interrupts waited for the call) */
+}
+
+/* Another thread's DOS call is under way: the first thread stays out of handlers. */
+static int dos_busy(const struct app *a) { return a->dos_owner && a->dos_owner != current; }
+
+/* The first thread is kept from a handler by another thread's DOS call: no other is begun until it has had its
+   turn (for a sixteenth of a second at most: a first thread that never comes for it holds nobody up). */
+static void first_waits(struct app *a)
+{
+    if (!a->first_wants)
+        a->first_wants = timer_ticks() | 1;
+}
+
+static void first_goes(struct app *a)
+{
+    if (a->first_wants) {
+        a->first_wants = 0;
+        thread_wake(&a->tq);
+    }
+}
+
+/* An exception in an app's code, with a handler of the app's to go to (deliver.c): 1 to give it. In a thread the
+   app made it is the app's end (a crash report: no return). In the first, not while another thread's DOS call
+   is under way; 0 if the app is ending. */
+int app_exception(struct trapframe *tf)
+{
+    struct app *a = app_cur();
+    if (current != a->thread) {
+        crash_report(tf, "thread-exception");
+        return 0;
+    }
+    while (!a->kill && dos_busy(a)) {
+        first_waits(a);
+        thread_wait(&a->tq, timer_ticks() + 2);
+    }
+    first_goes(a);
+    return !a->kill;
+}
+
+/* The first thread, before its context goes (its exit, its kill, a crash): every other thread leaves. One in a
+   DOS call that doesn't come back (a key waited for) has it ended as a kill ends it, after two seconds. If DOS
+   ended the program in that call, the VM thread freed the context (app_ctx_ending): the thread ends here. */
+static void app_thread_end(struct app *a) __attribute__((noreturn));
+void app_stop_threads(struct app *a)
+{
+    u32 f, t0 = timer_ticks();
+    if (!a->nthr && !a->dead)
+        return;                                 /* (it made none, or they have all ended) */
+    f = irq_save();
+    a->kill = 1;
+    a->parked = 1;
+    wake_all(a);
+    while (a->nthr) {
+        if (a->adopted && !a->dead && !vm.kill_req && timer_ticks() - t0 > 2 * 1024u) {
+            vm.kill_req = 1;
+            vm.kill_reason = "app-end";
+            vm.kill_since = timer_ticks();
+            vm_kick();
+        }
+        thread_wait(&a->tq, timer_ticks() + 32);
+    }
+    irq_restore(f);
+    if (a->dead)
+        app_thread_end(a);
+}
+
+/* The first thread, where the VM thread is about to free the context under another thread's call. */
+static void app_park(struct app *a) __attribute__((noreturn));
+static void app_park(struct app *a)
+{
+    cli();
+    a->parked = 1;
+    current->ctx = 0;
+    dpmi_ctx_load(0);
+    thread_wake(&a->tq);
+    while (!a->dead || a->nthr)
+        thread_block(&a->tq);
+    app_thread_end(a);
+}
+
+/* An app's context is about to be freed (host.c). By the VM thread, in the call it is making for one of the
+   app's threads: every other thread of the app's must be out of it first. */
+void app_ctx_ending(struct app *a)
+{
+    if (current != vm.thread)
+        return;                                 /* (its first thread's own end: app_stop_threads saw to it) */
+    for (;;) {
+        u32 n = a->nthr;
+        int first_calls = !a->dos_owner || a->dos_owner == a->thread;
+        if (!first_calls)
+            n--;                                /* (the thread whose call this is waits for it) */
+        if (!n && (first_calls || a->parked))
+            break;
+        a->kill = 1;
+        a->parking = 1;
+        wake_all(a);
+        thread_wait(&a->tq, timer_ticks() + 32);
+    }
+}
+
 static void wr16(u32 lin, u32 v)
 {
     vm_wr8(lin, (u8)v);
@@ -278,7 +557,6 @@ static void app_main(void *arg)
 
 /* ---- on the app's thread */
 
-static void app_thread_end(struct app *a) __attribute__((noreturn));
 static void app_thread_end(struct app *a)
 {
     struct app **pp;
@@ -316,8 +594,13 @@ static int app_wait(struct app *a, int what)
     vm_kick();
     while (a->call)
         thread_block(&a->wq);
-    if (a->dead)
+    if (a->dead) {                              /* DOS ended the program in the call: the context is gone */
+        if (current != a->thread)
+            app_thread_exit(a, 0xFF);           /* (the first thread, parked, ends the app) */
+        while (a->nthr)
+            thread_block(&a->tq);
         app_thread_end(a);
+    }
     return a->result;
 }
 
@@ -330,6 +613,8 @@ int app_rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, cons
     int res;
     if (!a)
         return -1;                              /* (a kernel thread: only the VM's and apps' make them) */
+    if (current != a->thread)                   /* (the engine is the first thread's alone) */
+        return rm_call_app(a, from, r, kind, vec, words, nwords);
     gpu_safe_begin(a);                          /* (a DOS or BIOS call: its turn with the engine may end) */
     res = rm_call_app(a, from, r, kind, vec, words, nwords);
     gpu_safe_end(a);
@@ -363,18 +648,25 @@ static int rm_call_app(struct app *a, struct trapframe *from, struct rmregs *r, 
         r->flags &= (u16)~FL_CF;
         return 0;
     }
+    if (dos_lock(a) != 0)
+        return -1;
     a->c.from = from;
     a->c.r = r;
     a->c.kind = kind;
     a->c.vec = vec;
     a->c.words = words;
     a->c.nwords = nwords;
-    return app_wait(a, AC_RM);
+    {
+        int res = app_wait(a, AC_RM);
+        dos_unlock(a);
+        return res;
+    }
 }
 
 void app_end(struct app *a, u32 code)
 {
     gpu_app_unlock(a);                          /* (its turn with the engine ends with it: nobody waits for an end) */
+    a->dos_owner = current;
     a->ctx = 0;
     a->code = code;
     app_wait(a, AC_END);
@@ -389,19 +681,42 @@ int apps_paused(void) { return paused(); }
 
 void app_return(struct app *a, struct trapframe *tf)
 {
+    int first = current == a->thread;
     for (;;) {
         u32 f = irq_save();                     /* (looked at and waited for in one piece: the session's end clears
                                                    it and wakes whoever waits, once) */
-        int wait = !a->kill && paused() && !gpu_app_holds(a);  /* (with the engine: on to its next GLOS or DOS
-                                                   call, where its turn ends: gpu.c) */
+        int wait = !a->kill && paused() && !(first && gpu_app_holds(a));   /* (with the engine: on to its next GLOS
+                                                   or DOS call, where its turn ends: gpu.c) */
         if (wait)
             thread_block(&pauseq);              /* a session has the machine */
         irq_restore(f);
-        if (a->kill)
-            dpmi_end(tf, 0xFF, 1);              /* (doesn't come back) */
+        if (!first) {                           /* a thread the app made: it leaves when the app ends */
+            struct app_thr *r = app_thr_cur(a);
+            if (r->fpu_err && !a->kill) {
+                r->fpu_err = 0;
+                tf->vec = 16;
+                tf->err = 0;
+                crash_report(tf, "thread-fpu"); /* (doesn't come back) */
+            }
+            if (a->kill)
+                app_thread_exit(a, 0xFF);
+        } else {
+            if (a->parking)
+                app_park(a);                    /* (doesn't come back) */
+            if (a->kill)                        /* (doesn't come back) */
+                dpmi_end(tf, a->end_asked ? a->end_code : 0xFF, a->end_asked ? a->end_killed : 1);
+        }
         if (!wait)
             break;
     }
+    if (!first)
+        return;                                 /* (interrupts are the first thread's) */
+    if (dos_busy(a)) {                          /* ... and wait for another thread's call to end */
+        if (current->vif && vpic_pending(&a->pic))
+            first_waits(a);
+        return;
+    }
+    first_goes(a);
     while (current->vif && vpic_pending(&a->pic)) {     /* its own interrupts: to its handlers */
         int vec = vpic_ack(&a->pic);
         if (vec < 0)
@@ -414,8 +729,33 @@ void app_return(struct app *a, struct trapframe *tf)
     }
 }
 
+/* The app's end asked for by a thread it made (its exit(), its crash: dpmi_end there): the first thread ends the
+   app at its next return to its code, and this one is gone. */
+void app_end_from_thread(struct app *a, u8 code, int killed)
+{
+    u32 f = irq_save();
+    if (!a->kill) {
+        a->end_asked = 1;
+        a->end_code = code;
+        a->end_killed = killed != 0;
+        a->kill = 1;
+    }
+    if (a->adopted && killed && a->dos_owner != current) {     /* (the first thread's call: cut short, as a kill's) */
+        vm.kill_req = 1;
+        vm.kill_reason = "thread-crash";
+        vm.kill_since = timer_ticks();
+        vm_kick();
+    }
+    wake_all(a);
+    irq_restore(f);
+    app_thread_exit(a, code);
+}
+
 /* An interrupt of its own that could be given to it now. */
-static int irq_due(const struct app *a) { return current->vif && vpic_pending(&a->pic); }
+static int irq_due(const struct app *a)
+{
+    return current == a->thread && current->vif && vpic_pending(&a->pic) && !dos_busy(a);
+}
 
 /* Sleeps `ticks`, or until something is there for it: an interrupt of its
    own that is due, an event, a key for INT 16h, its kill. The ticks left
@@ -501,6 +841,10 @@ u32 app_event_backlog(const struct app *a) { return a->evt - a->evh; }
 /* Its HLT: until an interrupt of its own. */
 void app_idle(struct app *a)
 {
+    if (current != a->thread) {                 /* (no interrupt comes to a thread the app made: a tick's rest) */
+        thread_sleep_until(timer_ticks() + 1);
+        return;
+    }
     gpu_safe_begin(a);
     while (!a->kill && !vpic_pending(&a->pic))
         thread_block(&a->wq);
@@ -591,9 +935,14 @@ void app_vm_base(int *depth, struct trapframe **f)
    the call under way or one nested in it: that call is over. */
 void app_vm_ended(struct trapframe *tf)
 {
+    u32 i;
     (void)tf;
     adopted->dead = 1;
     adopted->ctx = 0;
+    adopted->thread->ctx = 0;                   /* (freed: no thread of the app's loads it again) */
+    for (i = 0; i < APP_THREADS; i++)
+        if (adopted->thr[i].live)
+            adopted->thr[i].t->ctx = 0;
     rm_nest_end(base);
 }
 
@@ -621,7 +970,7 @@ static void adopt(struct app *a)
     wr32(vm.sda + 0x0C, a->dta);
     memset(vm_ptr(((u32)vm.loader_cs << 4) + spare), 0, 48);
     wr32(lp + 0x2E, (u32)vm.loader_cs << 16 | spare);
-    current->vif = a->ctx ? a->thread->vif : 1;
+    current->vif = a->ctx ? (a->dos_owner ? a->dos_owner : a->thread)->vif : 1;     /* (the calling thread's) */
     current->ctx = a->ctx;
     dpmi_ctx_load(a->ctx);
     base = rm_nesting() + 1;
@@ -640,7 +989,7 @@ static void unadopt(struct app *a, int cwd)
     agent_vm_as(sys.job);
     if (!a->dead) {
         a->dta = vm_rd32(vm.sda + 0x0C);
-        a->thread->vif = current->vif;
+        (a->dos_owner ? a->dos_owner : a->thread)->vif = current->vif;
         for (v = 0; v < 256; v++) {
             u32 cur = vm_rd32(v * 4);
             if (cur != sys.ivt[v]) {
@@ -717,6 +1066,7 @@ static void serve(struct app *a)
     }
     a->call = AC_NONE;
     thread_wake(&a->wq);
+    thread_wake(&a->tq);                        /* (its end: its first thread may be waiting there for it) */
 }
 
 void app_vm_turn(void)
@@ -855,14 +1205,46 @@ static const char *state_of(const struct app *a)
     return !a->ctx ? "ending" : a->adopted ? "in-dos" : a->call ? "waiting" : a->kill ? "killed" : "running";
 }
 
+/* Where a thread of an app's is in its code: the frame its last trap left at the top of its kernel stack (a
+   ring-3 frame ends 16 bytes below a V86 one's: arch/cpu.c). 0:0 before it has run. */
+static const struct trapframe *user_frame(const struct thread *t)
+{
+    return (const struct trapframe *)(t->stack_top - sizeof(struct trapframe));
+}
+
+/* A line for one thread of an app's: where it is in its code, or, inside a GLOS call (the frame is at the API's
+   entry), the call's number and where it was made from. */
+static u32 thread_line(char *buf, u32 max, const struct app *a, u32 number, const struct thread *t, const char *more)
+{
+    const struct trapframe *f = user_frame(t);
+    char in[48] = "";
+    if ((f->cs & 0xFFFF) == SEL_TRAMP && a->ctx) {
+        struct dpmi_ctx *was = dctx;
+        u32 ret[2] = { 0, 0 };
+        dpmi_ctx_load(a->ctx);                  /* (its stack is its context's memory) */
+        user_rd((u16)f->ss, f->esp, ret, 8);
+        dpmi_ctx_load(was);
+        ksnprintf(in, sizeof in, " call=%x from=%04x:%08x", f->eax, ret[1] & 0xFFFF, ret[0]);
+    }
+    return (u32)ksnprintf(buf, max, "app-thread %u.%u %s at=%04x:%08x%s%s%s%s\n", a->id, number, t->name, f->cs & 0xFFFF,
+                          f->eip, in, more, a->dos_owner == t ? " dos" : "", a->api_owner == t ? " api" : "");
+}
+
 u32 app_ps(char *buf, u32 max)
 {
     const struct app *a;
-    u32 n = 0, f = irq_save();
-    for (a = apps; a && n < max; a = a->next)
+    u32 n = 0, i, f = irq_save();
+    for (a = apps; a && n < max; a = a->next) {
         n += (u32)ksnprintf(buf + n, max - n, "app %u %s %s psp=%04x thread=%s held_kb=%u calls=%u ticks=%u irq0=%u\n",
                             a->id, a->prog, state_of(a), a->psp, a->tname, a->ctx ? a->ctx->frames * 4 : 0, a->ncalls,
                             a->thread->ticks, a->nirq[0]);
+        if (!a->nthr || n >= max)
+            continue;                           /* (its own threads, and its first among them: where each is) */
+        n += thread_line(buf + n, max - n, a, 0, a->thread, "");
+        for (i = 0; i < APP_THREADS && n < max; i++)
+            if (a->thr[i].live)
+                n += thread_line(buf + n, max - n, a, i + 1, a->thr[i].t, a->thr[i].bulk ? " background" : "");
+    }
     irq_restore(f);
     return n < max ? n : max;
 }

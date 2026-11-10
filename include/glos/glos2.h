@@ -66,6 +66,44 @@ int glos_pads(struct glos_pads *p, int events);         /* the pads as they are;
 int glos_gameport(struct glos_gameport *g);
 int glos_input_mode(unsigned flags);                    /* GLOS_INPUT_ */
 
+/* ---- threads (THREAD; docs/supervisor.md 12.7)
+ *
+ * A thread of the app's own runs fn(arg) on a stack libglos allocates (stack bytes: 0 for 64 KB, at least 16 KB),
+ * and ends when fn returns or by glos_thread_exit(). What only the program's first thread may do: have signals,
+ * interrupt handlers and real-mode callbacks, and use the GPU. A fault in another thread ends the program.
+ *
+ * DJGPP's C library is not safe for threads. A program that calls glos_thread() must be linked with
+ * @glos2wrap.opt (the SDK's file of linker options: without it the link fails), which puts one lock round the C
+ * library's memory, stdio and file functions, those listed in sdk/libglos2/wrap.list. What stays unsafe from
+ * two threads at once, and is the program's to keep to one thread or to put between glos_libc_lock() and
+ * glos_libc_unlock():
+ *   - the macros getc, putc, getchar and putchar (fgetc and fputc are locked);
+ *   - functions that keep their answer in memory of their own: strtok, localtime, gmtime, ctime, asctime,
+ *     strerror, tmpnam(NULL), and errno itself (one for the program);
+ *   - the program's own use of the transfer buffer (__tb) and of __dpmi_int with it;
+ *   - exit() while another thread is inside the C library waits for that thread.
+ * exit() from any thread ends the program, with its code. Once the program has made a thread, DJGPP's own last
+ * step of exit (its selectors and memory freed) is left to GLOS, which ends the other threads and frees it all. */
+glos_handle glos_thread(void (*fn)(void *arg), void *arg, unsigned stack, unsigned flags);     /* GLOS_THREAD_; 0 if
+                                                           refused (glos_error()) */
+void glos_thread_exit(unsigned code) __attribute__((noreturn));        /* the calling thread (not the first) */
+/* Waits at most ms for a thread's end: 1 it has ended (*code its code; its handle is closed and its stack freed),
+   0 not yet, or minus a GLOS_E_ code. */
+int glos_join(glos_handle t, unsigned ms, unsigned *code);
+int glos_detach(glos_handle t);                         /* never joined: its stack is freed once it has ended */
+unsigned glos_self(void);                               /* the calling thread's number: 0 the first */
+glos_handle glos_lock(void);                            /* a lock, free; 0 if refused */
+int glos_take(glos_handle lock, unsigned ms);           /* 1 taken (again, if the caller held it), 0 not in that time,
+                                                           or minus a GLOS_E_ code */
+int glos_give(glos_handle lock);
+glos_handle glos_signal(unsigned flags);                /* GLOS_SIGNAL_; 0 if refused */
+int glos_signal_set(glos_handle signal, int set);
+/* Waits at most ms for the first of n handles (threads, signals, timers; at most GLOS_WAIT_MAX) to be ready:
+   *which its index, or -1 if none was in that time. */
+int glos_wait(const glos_handle *handles, unsigned n, unsigned ms, int *which);
+void glos_libc_lock(void);                              /* the C library's lock: the caller's (as often as it likes) */
+void glos_libc_unlock(void);
+
 /* A linear address GLOS gave (a window's pixels) as a pointer; NULL if the program can't have near pointers. It
    moves when the program's memory grows: asked for again after anything that may have allocated (or the program
    starts with _CRT0_FLAG_UNIX_SBRK, and it stays). */

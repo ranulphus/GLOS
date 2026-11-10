@@ -190,6 +190,8 @@ void crash_report(struct trapframe *tf, const char *why)
     prog_path(path, sizeof path);
     line("why=%s vec=%02x err=%04x prog=%s psp=%04x bits=%u mode=%s", why, tf->vec & 0xFF, tf->err & 0xFFFF,
          path[0] ? path : "?", dctx->psp, wide ? 32 : 16, (tf->eflags & FL_VM) ? "v86" : "pm");
+    if (app_thread_number())                    /* (a thread the app made: which) */
+        line("thread=%u name=%s", app_thread_number(), current->name);
     line("cs:eip=%04x:%08x ss:esp=%04x:%08x eflags=%08x cr2=%08x", tf->cs & 0xFFFF, tf->eip, tf->ss & 0xFFFF,
          tf->esp, (tf->eflags & ~(FL_IF | FL_VIF | FL_VIP)) | (current->vif ? FL_IF : 0), tf->vec == 14 ? dctx->cr2 : 0);
     line("eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x", tf->eax, tf->ebx, tf->ecx, tf->edx,

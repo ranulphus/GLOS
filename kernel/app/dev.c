@@ -118,8 +118,12 @@ void appdev_tick(struct app *a)
    clear): its own line 13, the latch cleared as the BIOS's handler would. */
 void app_fpu_irq(struct app *a)
 {
+    struct app_thr *r = app_thr_cur(a);
     outb(0xF0, 0);
-    raise(a, 13);
+    if (r)
+        r->fpu_err = 1;                         /* (a thread the app made: the app's end, at its return: app.c) */
+    else
+        raise(a, 13);
 }
 
 /* The counter now. */

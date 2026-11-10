@@ -4100,6 +4100,116 @@ def api_win_case(profile, vcard, card):
     return "  %-22s %s%s" % ("apiwin-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
+def thr_case(profile, card):
+    """An app's own threads (API 2.0's THREAD, phase B step 4; tests/api/thrtest.c, docs/supervisor.md 12.7),
+    THRTEST through the agent: every case of its own (threads computing, allocating and doing file I/O at once; a
+    lock contended; a signal passed round; JOIN and WAIT; events posted by one thread while another is in DOS;
+    the first thread's signals from its timer meanwhile; the background class; what is refused). Then the ends:
+    a second thread's exit(); a second thread's fault (the app ended, a crash report naming the thread); the
+    first thread's return with others running; kills, of one whose threads spin and of one with a thread waiting
+    for a key in DOS; beside a session; ten runs after which the kernel has the memory it had; glos exit with
+    threads running."""
+    import time
+    tag = "%s-%s" % (profile, card)
+    agent = Agent("thr-" + tag, profile, card, [
+        "--file", "build/dj/THRTEST.EXE=/TEST/THRTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+        "--cmd", "SERSAY HX-START thr", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    app = "C:\\TEST\\THRTEST.EXE"
+    checks, info = {"listen": agent.listening()}, ""
+
+    def start(cmd):
+        return subprocess.Popen(agent.opts + ["glos@127.0.0.1", cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def started(n, limit=240):                  # n apps have started since GLOS did
+        t0 = time.time()
+        while time.time() - t0 < limit and agent.log().count("GLOS-APP start ") < n:
+            time.sleep(0.3)
+        return agent.log().count("GLOS-APP start ") >= n
+
+    def said(p, word, limit=240):               # the app's first line on stdout
+        import select
+        t0, got = time.time(), b""
+        while time.time() - t0 < limit and word.encode() not in got and p.poll() is None:
+            if select.select([p.stdout], [], [], 0.5)[0]:
+                got += os.read(p.stdout.fileno(), 256)
+        return word.encode() in got
+
+    def kill(pattern, p):                       # the job whose command ends so, by its number
+        m = re.search(r"^job (\d+) running app \S+ %s$" % pattern, agent.ssh("glos ps")[1].replace("\r", ""), re.M)
+        return bool(m) and agent.ssh("glos kill " + m.group(1))[0] == 0 and p.wait(timeout=300) == 255
+
+    def mem():
+        m = re.search(r"free_kb=(\d+)\n.*heap_kb=(\d+)", agent.ssh("glos mem")[1])
+        return (int(m.group(1)), int(m.group(2))) if m else None
+
+    def threads():                              # the kernel's threads that are an app's own
+        return len(re.findall(r"^thread app\d+\.\d+ ", agent.ssh("glos ps")[1].replace("\r", ""), re.M))
+
+    try:
+        checks["ver"] = agent.ssh("glos ver")[0] == 0
+        rc, out, _ = agent.ssh(app, timeout=1500)
+        cases = re.findall(r"^THR case=(\S+) ok=(\d)(.*)$", out.replace("\r", ""), re.M)
+        done = re.search(r"^THR done pass=(\d+) fail=(\d+)", out, re.M)
+        failed = [c + w for c, k, w in cases if k != "1"]
+        checks["cases"] = rc == 0 and bool(done) and done.group(2) == "0" and len(cases) >= 35
+        info += " cases=%d" % len(cases) + (" failed-cases=" + ";".join(failed) if failed else "")
+        if not checks["cases"]:
+            print("    %s all: rc=%d out=%r" % (tag, rc, out[-1500:]))
+        checks["no-threads-left"] = threads() == 0
+
+        checks["thread-exit"] = agent.ssh(app + " exit 23", timeout=600)[0] == 23      # exit() in a second thread
+        rc, out, _ = agent.ssh(app + " crash", timeout=600)                              # a fault in a second thread
+        checks["thread-crash"] = rc == 255 and "THR crashing" in out
+        checks["leave"] = agent.ssh(app + " leave", timeout=600)[0] == 3                # main() returns, others spin
+        rc, out, _ = agent.ssh(app + " quick", timeout=600)
+        checks["quick"] = rc == 0 and "THR quick ok=1" in out
+
+        n0 = agent.log().count("GLOS-APP start ")
+        spin = start(app + " spin")             # threads that never end, beside a session and the agent
+        checks["spin-started"] = started(n0 + 1) and said(spin, "THR spinning")
+        time.sleep(2)
+        checks["spin-threads"] = threads() == 3
+        t = time.time()
+        rc, out, err = agent.ssh("C:\\TEST\\ECHOARGS.EXE x y")
+        checks["session"] = rc == 7 and out == "x y\r\nnine two six int29\r\n"
+        rc, out, _ = agent.ssh(app + " quick", timeout=600)                              # another app with threads beside it
+        checks["beside"] = rc == 0 and "THR quick ok=1" in out
+        checks["kill-spin"] = kill("spin", spin)
+        key = start(app + " dos")               # a second thread in DOS for good: the system VM's kill
+        checks["dos-started"] = started(n0 + 3) and said(key, "THR waiting")
+        time.sleep(2)
+        checks["kill-in-dos"] = kill("dos", key)
+        checks["none-left"] = not re.search(r"^app ", agent.ssh("glos ps")[1], re.M) and threads() == 0
+        rc, out, err = agent.ssh("C:\\TEST\\ECHOARGS.EXE after kills")     # (DOS as it was)
+        checks["dos-after-kill"] = rc == 7 and out == "after kills\r\nnine two six int29\r\n"
+        m0 = mem()
+        for i in range(10):
+            checks["again-%d" % i] = agent.ssh(app + (" quick" if i % 2 else " leave"), timeout=600)[0] == (0 if i % 2 else 3)
+        m1 = mem()
+        checks["memory-back"] = bool(m0) and m0 == m1
+        if not checks["memory-back"]:
+            info += " mem=%r->%r" % (m0, m1)
+        last = start(app + " spin")             # glos exit ends it first
+        checks["last-started"] = said(last, "THR spinning")
+        checks["exit"] = agent.ssh("glos exit")[0] == 0 and last.wait(timeout=300) == 255
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["balanced"] = text.count("GLOS-APP start ") == text.count("GLOS-APP end ") == 19
+    checks["crash-report"] = bool(re.search(r"GLOS-CRASH why=thread-exception vec=0e .*prog=C:\\TEST\\THRTEST.EXE", text)) \
+        and bool(re.search(r"GLOS-CRASH thread=\d+ name=app\d+\.\d+", text)) \
+        and bool(re.search(r"GLOS-CRASH file=C:\\GLOS\\CRASH\\CRASH\d+\.TXT", text))
+    checks["one-crash"] = len(re.findall(r"GLOS-CRASH why=", text)) == 1
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-APP error" not in text and "GLOS-APP warn" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("thr-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def apps_case(profile, card):
     """GLOS apps (M6 step A): APPTEST becomes an app (its own thread) and runs for some seconds in its own
     directory, checking between sleeps that its directory, its directory search (its DTA), its file's bytes,
@@ -4227,6 +4337,10 @@ def apps_case(profile, card):
         checks["timer"] = rc == 0 and "APP-TIMER-OK" in out2
         if not checks["uclock"] or not checks["timer"]:
             print("    %s uclock=%r timer=%r" % (tag, out, out2))
+        rc, out, _ = agent.ssh(app + "alarm 3", timeout=600)    # DJGPP's own signals through GLOS's sleep (2026-11-10)
+        checks["alarm"] = rc == 0 and "APP-ALARM-OK" in out
+        if not checks["alarm"]:
+            print("    %s alarm: rc=%d out=%r" % (tag, rc, out))
         kill_spin = kill("spin", spin)          # (four jobs at once at most: the spinner makes room)
         # (other programs start meanwhile: the kernel writes its log a line at a time, 9 ms for a hundred
         # characters, and only urgent threads run until a line is out, which costs a 250 Hz timer an interrupt)
@@ -4277,7 +4391,7 @@ def apps_case(profile, card):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["balanced"] = text.count("GLOS-APP start ") == text.count("GLOS-APP end ") == 33
+    checks["balanced"] = text.count("GLOS-APP start ") == text.count("GLOS-APP end ") == 34
     checks["killed-in-dos"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=agent", text))
     checks["refused"] = len(re.findall(r"GLOS-APP refuse psp=\w+ why=(exclusive|already|parent)", text)) == 4
     checks["crash-report"] = bool(re.search(r"GLOS-CRASH why=exception vec=0e .*prog=C:\\TEST\\APPTEST.EXE", text)) \
@@ -6330,7 +6444,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
                                       "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache",
-                                      "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer", "api"])
+                                      "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer", "api", "thr"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -6490,6 +6604,9 @@ def main():
             wins = [c for c in [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")] if not a.profile or c[0] in a.profile]
             res += matrix(api_win_case, wins, a.jobs)
         return 0 if all(r[1] for r in res) else 1
+    if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
+        cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(thr_case, cases, a.jobs)) else 1
     if a.suite == "mem-page":
         return 0 if all(r[1] for r in matrix(mempage, combos, a.jobs)) else 1
     if a.suite == "umb":                        # (the bf6: a 440BX, which UMBPCI knows; MGA-Glide's umbpci boot)

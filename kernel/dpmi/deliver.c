@@ -218,6 +218,8 @@ void dpmi_exception(struct trapframe *tf)
         dpmi_exc_unhandled(tf, v, tf->err);
         return;
     }
+    if (app_cur() && !app_exception(tf))        /* (a thread the app made: the app's end. Its first: not while */
+        return;                                 /* another's DOS call is under way, nor when the app is ending) */
     if (dctx->exc_depth >= EXC_NEST_MAX) {
         crash_report(tf, "nested-exceptions");
         return;

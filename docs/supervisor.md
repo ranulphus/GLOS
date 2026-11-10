@@ -1267,6 +1267,12 @@ exception depth, the real-mode stack. They aren't made per thread. So:
 - **Real-mode callbacks, and the handlers DPMI calls** (Ctrl-C, critical errors), run on the first thread.
 - **The GPU** (DRAW's GPU calls, the card's registers and VRAM touched): the first thread's alone. Another
   thread's call is refused (`GLOS_E_REFUSED`), and its touch of the card's memory is a fault like any other.
+- **Handlers and another thread's DOS call don't overlap** (as built). While the VM thread makes a DOS or BIOS
+  call for a thread the app made, the call's callbacks may use the context's one stack for handlers. So for
+  that long the first thread is given no interrupt (they wait, pending) and an exception of its waits; and such
+  a call waits while a handler of the first thread's runs. While the first thread waits so, no other thread's
+  call is begun (for a sixteenth of a second at most), so two threads busy in DOS can't keep it out. A handler
+  that never returns (a `longjmp` out of an interrupt handler) keeps the other threads out of DOS.
 
 **An exception in another thread ends the app**
 
@@ -1277,6 +1283,34 @@ exception depth, the real-mode stack. They aren't made per thread. So:
   thread may be on it. The app is ended, with the crash report GLOS writes for any program (§19), which names
   the thread.
 - **In the first thread** nothing changes: its exceptions go to the app's handlers as today (DJGPP's signals).
+- **DJGPP's signals from interrupts** (as built). DJGPP turns an interrupt (its timer's `SIGALRM`, Ctrl-C) into
+  a signal by shrinking the limit of the program's data segment inside its interrupt handler: the next touch
+  of memory faults, and its exception handler puts the limit back and raises the signal. A thread sharing that
+  selector takes the fault instead whenever the first thread loses the processor between the two, and a call
+  it has under way in the kernel fails on the limit. (THRTEST's first run found it: a second thread ended the
+  app with #GP and a 4 KB data segment.) So a thread need not share it:
+  - **CREATE takes a selector** for the new thread's DS, ES and SS (a writable 32-bit data segment of the
+    app's at the caller's base; 0 for the caller's own).
+  - **libglos gives DJGPP's second data selector** (`__djgpp_ds_alias`, which DJGPP keeps for its interrupt
+    handlers and never shrinks).
+  - **libglos opens the limits once,** when the program makes its first thread: the code segment's and both
+    data selectors', as far as they go, and tells DJGPP's `sbrk` so (`__djgpp_selector_limit`). `sbrk` raises
+    the limits of the selectors of the thread it runs in and of no other; now it never has to. A stray pointer
+    is still a fault, since no page is there.
+- **A wait cut short by an interrupt** (as built; it is the first thread's matter, and older than threads).
+  An interrupt of the app's that comes due during a GLOS wait ends the wait early, so that its handler runs.
+  The kernel used to enter the handler from the call's own entry and go straight back into the call. With
+  DJGPP's signals that fails: the handler has shrunk the data segment, no code of the program's runs to take
+  the fault that puts it right, and the call can then not read its return address from the stack; it repeated
+  for ever. Now:
+  - **API 2.0:** the call returns `GLOS_E_AGAIN` to the program (ECX the time left, EDX a mark), the handler
+    runs on the program's own code, and libglos makes the call again;
+  - **either API:** a call whose return address can't be read at its entry is given the stack fault (#SS) a
+    far call would have taken, which DJGPP's exception handler answers by putting the limit back and raising
+    its signal; the call is then made again. (1.x's waits still restart from the handler, and rely on this.)
+  - A return address that can't be read when the call is done is a crash report (`api-return`).
+- **An FPU error** in a thread the app made (IRQ 13, or #MF) is the app's end too, at that thread's next
+  return to its code.
 
 **DOS and real mode: one call an app at a time**
 
@@ -1295,6 +1329,12 @@ exception depth, the real-mode stack. They aren't made per thread. So:
   it while they wait: EVENT, SLEEP, THREAD's WAIT, JOIN and LOCK, and later a JOB's READ and a connection's
   waits. Every module behind the API was written for one thread an app; the lock keeps that true without an
   audit of each.
+- **As built:** kernel work for an app's thread is never preempted (a trap's path runs with interrupts off,
+  §7), so two threads of an app are in the kernel at once only when one of them waits. The API lock is
+  therefore held by calls that may wait midway (for the desktop's lock, say); the calls that are waits
+  themselves (EVENT, SLEEP, YIELD, JOIN, TAKE, WAIT, EXIT) take no lock: each does its work in one piece, and
+  looks its handles up again after every sleep, since another thread may have closed them. DPMI's own
+  services (INT 31h: memory, descriptors) need no lock for the same reason.
 - **Any thread may wait on the app's event queue and post to it** (CORE's EVENT and POST): the queue is safe
   with interrupts off already.
 - **The toolkit is used from one thread** (the window's): a toolkit rule, not the kernel's.
@@ -1304,17 +1344,28 @@ exception depth, the real-mode stack. They aren't made per thread. So:
 | Call | What it does |
 |---|---|
 | CREATE | A thread: its entry, its argument, its stack's top (the app's memory), its class (normal or background). A handle (`GLOS_HK_THREAD`) |
-| EXIT | The calling thread ends, with a code. (The first thread's EXIT ends the app, as its program's end does) |
+| EXIT | The calling thread ends, with a code. (Refused for the first thread: its end is the program's) |
 | JOIN | Wait for a thread to end (a timeout): its code. Closing its handle doesn't end it |
-| LOCK | A lock (`GLOS_HK_LOCK`): made; taken (a timeout) and given by properties' calls of its own (TAKE, GIVE). Recursive for its holder |
-| SIGNAL | A signal (`GLOS_HK_SIGNAL`): set, cleared, waited for; one that stays set until cleared, or wakes one waiter and clears |
+| LOCK, TAKE, GIVE | A lock (`GLOS_HK_LOCK`): made; taken (a timeout) and given. Its holder may take it again. Free when its holder ends |
+| SIGNAL, SET | A signal (`GLOS_HK_SIGNAL`): set, cleared; one that stays set until cleared, or one that a wait clears (each set lets one waiter go) |
 | WAIT | Wait for any of up to 8 handles (threads ended, signals set, timers fired; later jobs and connections), or a timeout: which one |
+| SELF | The calling thread's number: 0 the first, 1 to 16 |
 
 **The end**
 
 - **A kill, or the first thread's end** (its program's exit, a crash): the app's flag is set, every other thread
   of it is woken and leaves at its next return to its code or from its wait (within a tick), and the first
   thread waits for them all to be gone before the context is freed (§12.5's end, unchanged after that).
+- **As built:**
+  - **`exit()` or a crash in a thread the app made** asks the first thread to end the app (with that code, or
+    as a kill) and the asking thread is gone; the first thread ends the app at its next return to its code.
+  - **A thread in a DOS call that doesn't come back** (a key waited for) when the app ends: after two seconds
+    the call is ended as a kill ends one (the system VM's kill, §12.5).
+  - **DOS ends the program inside a call** (that kill, a critical error's Abort): the VM thread frees the
+    context there, as before. First it waits for every other thread of the app to be out of it: those the app
+    made leave, and the first, unless the call is its own, parks where it touches the context no more. The
+    thread whose call it was ends when the call's answer comes; the first thread ends the app last.
+  - **An app that made no thread** takes none of these paths: its end is as it was.
 - **A session takes the machine:** every thread of every app waits, as apps' threads do today (`app_return`).
 
 **What is tested** (the plan's step 4)

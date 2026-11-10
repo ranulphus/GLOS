@@ -11,11 +11,15 @@
  * Plain DOS and other DPMI hosts have no such name.
  *
  * A call: EAX the function's number, EBX the offset in DS of the call's
- * structure (0 for the few calls that take none), ECX and EDX 0 (GLOS uses
- * them to finish a wait an interrupt of the program's own cut short: the call
- * is made again after its handler, with them set). The carry flag clear:
- * done, EAX 0 or what the call says it returns; the carry flag set: refused,
- * EAX a GLOS_E_ code.
+ * structure (0 for the few calls that take none), ECX and EDX 0. The carry
+ * flag clear: done, EAX 0 or what the call says it returns; the carry flag
+ * set: refused, EAX a GLOS_E_ code.
+ *
+ * A call that waits may come back early with GLOS_E_AGAIN: an interrupt of
+ * the program's own is due, and its handler runs as the call returns. The
+ * call is then made again with ECX and EDX as they came back (the time left,
+ * and a mark that says so): it goes on waiting for the rest. libglos does
+ * this; the caller's structure is not changed meanwhile.
  *
  * Numbers: GLOS_FN(area, n), 20000h + the area times 256 + the function in
  * the area. The major version is in the number, so 2.0's calls never meet
@@ -90,6 +94,8 @@
 #define GLOS_E_PROPERTY    17   /* no such property for that kind, or it can't be set */
 #define GLOS_E_ROOM        18   /* the room given is too small; what was needed is in the structure */
 #define GLOS_E_REFUSED     19   /* not this app's to do */
+#define GLOS_E_AGAIN       20   /* a wait cut short for an interrupt of the program's own: the call again, with ECX
+                                   and EDX as they came back */
 /* (8-15 are the areas' own, numbered as 1.x numbered them: 8 no GPU, 9 no audio, 10 a setting refused,
     11-15 the network's) */
 
@@ -654,5 +660,114 @@ struct glos_ev_wheel {
     int notches;                /* positive: away from the user (up) */
     unsigned buttons, mods;
 };
+
+/* ================================================================== THREAD (07h): an app's own threads
+ *
+ * An app's threads share its memory. Each has a stack the app gives it, and is scheduled as a thread of GLOS's
+ * (docs/supervisor.md 12.7). What only the app's first thread may do: have the app's interrupts and callbacks
+ * (they are never run on another), touch the GPU (DRAW's GPU calls: GLOS_E_REFUSED from another), and have an
+ * exception handled (one in another thread ends the app, with a crash report). Every GLOS call may be made from
+ * any thread; the app's calls are made one at a time, except those that wait (EVENT, SLEEP, JOIN, TAKE, WAIT).
+ * DJGPP's C library is not safe for threads: libglos 2.0 has a lock round it (glos/glos2.h). */
+#define GLOS_THREAD_CREATE GLOS_FN(GLOS_AREA_THREAD, 0) /* struct glos_thread: a thread, running from now */
+#define GLOS_THREAD_EXIT   GLOS_FN(GLOS_AREA_THREAD, 1) /* struct glos_thread_exit: the calling thread ends (no return;
+                                                           from the first thread: GLOS_E_REFUSED, its end is the
+                                                           program's) */
+#define GLOS_THREAD_JOIN   GLOS_FN(GLOS_AREA_THREAD, 2) /* struct glos_thread_join: wait for a thread's end */
+#define GLOS_THREAD_LOCK   GLOS_FN(GLOS_AREA_THREAD, 3) /* struct glos_lock: a lock (GLOS_HK_LOCK), free */
+#define GLOS_THREAD_TAKE   GLOS_FN(GLOS_AREA_THREAD, 4) /* struct glos_take: the lock is the calling thread's */
+#define GLOS_THREAD_GIVE   GLOS_FN(GLOS_AREA_THREAD, 5) /* struct glos_give: ... and free again */
+#define GLOS_THREAD_SIGNAL GLOS_FN(GLOS_AREA_THREAD, 6) /* struct glos_signal: a signal (GLOS_HK_SIGNAL), not set */
+#define GLOS_THREAD_SET    GLOS_FN(GLOS_AREA_THREAD, 7) /* struct glos_signal_set: set it, or clear it */
+#define GLOS_THREAD_WAIT   GLOS_FN(GLOS_AREA_THREAD, 8) /* struct glos_wait_any: until one of several handles is
+                                                           ready */
+#define GLOS_THREAD_SELF   GLOS_FN(GLOS_AREA_THREAD, 9) /* (EBX 0) -> EAX the calling thread's number: 0 the app's
+                                                           first, 1 to 16 the ones it made */
+
+#define GLOS_THREADS 16         /* threads an app may have made and not yet closed, beside its first */
+
+struct glos_thread {
+    unsigned size;
+    unsigned entry;             /* where it starts (an offset in the caller's code segment): void entry(void *arg),
+                                   C's calling convention. It must not return: it ends by EXIT */
+    unsigned arg;               /* its argument */
+    unsigned stack;             /* the top of its stack (an offset in the caller's stack segment): memory of the
+                                   app's own, which must stay until the thread has ended */
+    unsigned flags;             /* GLOS_THREAD_ */
+    glos_handle handle;         /* -> the thread (GLOS_HK_THREAD). CLOSE doesn't end it */
+    unsigned number;            /* -> its number, as SELF gives it there */
+    unsigned data;              /* the selector its DS, ES and SS are to be: a writable data segment of the app's
+                                   with the base of the caller's. 0: the caller's own DS, ES and SS. (A DJGPP
+                                   program's data segment is shrunk for a moment by each of its signals, which
+                                   every thread using that selector would feel: libglos gives DJGPP's second
+                                   one here) */
+};
+#define GLOS_THREAD_BACKGROUND 1 /* it runs when nothing else of the desktop's wants to (and a share besides): for
+                                   work that must not slow what the user sees */
+
+struct glos_thread_exit {
+    unsigned size;
+    unsigned code;              /* what JOIN gives */
+};
+
+struct glos_thread_join {
+    unsigned size;
+    glos_handle handle;
+    unsigned ms;                /* the longest wait: 0 a look, GLOS_FOREVER */
+    unsigned ended;             /* -> 1 it has ended, 0 not yet */
+    unsigned code;              /* -> its EXIT's code */
+};
+
+struct glos_lock {
+    unsigned size;
+    glos_handle handle;         /* -> the lock */
+};
+
+struct glos_take {
+    unsigned size;
+    glos_handle handle;
+    unsigned ms;                /* the longest wait: 0 a try, GLOS_FOREVER */
+    unsigned taken;             /* -> 1 it is the caller's (once more, if it was already: GIVE as many times), 0 not */
+};
+
+struct glos_give {
+    unsigned size;
+    glos_handle handle;         /* (GLOS_E_REFUSED: the caller doesn't hold it) */
+};
+
+struct glos_signal {
+    unsigned size;
+    unsigned flags;             /* GLOS_SIGNAL_ */
+    glos_handle handle;         /* -> the signal */
+};
+#define GLOS_SIGNAL_ONE 1       /* a wait that finds it set clears it: each SET lets one waiter go on. Without:
+                                   set, it stays set for every waiter until it is cleared */
+
+struct glos_signal_set {
+    unsigned size;
+    glos_handle handle;
+    unsigned set;               /* 1 set, 0 clear */
+};
+
+#define GLOS_WAIT_MAX 8
+struct glos_wait_any {
+    unsigned size;
+    unsigned count;             /* how many handles: 1 to GLOS_WAIT_MAX */
+    glos_handle handles[GLOS_WAIT_MAX];  /* threads (ready once ended), signals (set), timers (they have fired
+                                   since they were last waited for here) */
+    unsigned ms;                /* the longest wait: 0 a look, GLOS_FOREVER */
+    int which;                  /* -> the first that is ready (its index), -1 none in that time */
+};
+
+/* A thread's properties. */
+#define GLOS_PROP_THREAD_NUMBER GLOS_PROP(GLOS_HK_THREAD, 0)    /* its number (read) */
+#define GLOS_PROP_THREAD_ENDED  GLOS_PROP(GLOS_HK_THREAD, 1)    /* 1 once it has ended (read) */
+#define GLOS_PROP_THREAD_CODE   GLOS_PROP(GLOS_HK_THREAD, 2)    /* its EXIT's code (read) */
+#define GLOS_PROP_THREAD_FLAGS  GLOS_PROP(GLOS_HK_THREAD, 3)    /* GLOS_THREAD_ (read) */
+#define GLOS_PROP_THREAD_MS     GLOS_PROP(GLOS_HK_THREAD, 4)    /* the processor's time it has had, in ms (read) */
+/* A lock's and a signal's. */
+#define GLOS_PROP_LOCK_HELD     GLOS_PROP(GLOS_HK_LOCK, 0)      /* 0 free, or the number of the thread holding it
+                                                                   plus 1 (read) */
+#define GLOS_PROP_SIGNAL_SET    GLOS_PROP(GLOS_HK_SIGNAL, 0)    /* 1 set (read) */
 
 #endif
