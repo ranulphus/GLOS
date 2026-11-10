@@ -100,7 +100,7 @@ After that:
   - libglos 2.0 in `sdk/libglos2` (`glos/glos2.h`);
   - APITEST in `tests/api`, run by `make loopa-api`;
   - `tests/host/handle_test.c`.
-- **Where it differs from `api-2.md`** (to be folded into it):
+- **Where it differs from `api-2.md`** (folded into it 2026-11-10, with steps 2 to 4's):
   1. **Function numbers carry the major version:** 20000h + the area times 256 + the function. `api-2.md` had the
      area times 256 + the function. While 1.x is answered, 2.0's calls never meet 1.x's (0-33), and every call says
      which API it is.

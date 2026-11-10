@@ -1,6 +1,9 @@
 # GLOS API 2.0: design (GLOS v1, phase A)
 
-**Status (2026-11-06): design v0, for the owner's review with the rest of phase A.**
+**Status:** approved at the owner's review (2026-11-06). Phase B builds it a step at a time
+(`docs/v1/phase-b.md`). Areas already built (CORE, WIN, DRAW, INPUT, THREAD as of 2026-11-10) have an
+"As built" list below where they differ from the design. The exact structures and numbers are
+`include/glos/api2.h`, which is the reference from there on.
 
 API 2.0 replaces API 1.x outright: the owner's choice of a clean 2.0, with no 1.x compatibility. It is designed
 from phase A's plans:
@@ -34,6 +37,11 @@ design. The exact structures and numbers are written in `include/glos/api.h` in 
    - This is the main defence against "API v37". A call grows without a new function or a new version.
 2. **Numbers by area.** A function's number is its area's number times 256, plus its number in the area. Each area
    grows at its own end, and none runs into another.
+   - **As built:** the number also carries the major version: 20000h + the area times 256 + the function. 2.0's
+     calls never meet 1.x's (0-33), and every call says which API it is.
+   - **As built:** ECX and EDX are 0 in a call. A call that waits may return `GLOS_E_AGAIN` when an interrupt of
+     the program's own is due: its handler runs, and the caller makes the call again with ECX and EDX as they
+     came back, for the rest of the wait (libglos does this).
 3. **Handles.** Everything an app makes is a handle, a 32-bit number whose top byte says its kind:
    - windows, threads, locks, timers, jobs, streams, connections, watches, tray icons, notifications, debug
      channels, clipboard transactions.
@@ -72,6 +80,14 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 | TICKS, SLEEP, YIELD | As in 1.x |
 | TIME | UTC and how it was set, as in 1.x; and the region's offset (new) |
 | RANDOM | As in 1.x |
+
+- **As built (step 1):**
+  - INIT takes the app's name, Help page and Start menu group, not its icon: an icon is a window's (WIN) and a
+    Start entry's (SHELL).
+  - TICKS gives its milliseconds in EAX (no structure); VERSION gives its version there when EBX is 0.
+  - TIME's offset is in seconds.
+  - Errors keep 1.x's numbers where the meaning is the same. 6 is HANDLE; 16 to 20 are new (KIND, PROPERTY,
+    ROOM, REFUSED, AGAIN).
 
 ### 01h WIN (windows)
 
@@ -114,6 +130,18 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   An app with a bare window (BARE) draws its own and asks GLOS to move or resize it (a call for "the user is
   dragging my title" and "the user is dragging my edge", as Windows' hit-test does).
 
+- **As built (step 2):**
+  - The title bar's boxes are at its right (minimise, maximise or restore, close), the title and the window's
+    icon at its left.
+  - An edge is caught from 3 pixels outside the frame.
+  - EMBED comes with CAPTURE (step 12): both are for programs the caller started.
+  - F1 is a key like any other: the toolkit opens Help at the window's HELP property.
+  - A task-bar button is there or not; grouping under another window's button isn't built.
+  - A window's icon is 16 by 16; the 32 by 32 one comes with Alt+Tab (phase D).
+  - "Not answering" is told by ENUM, the window's title and the pointer; the event to the shell comes with
+    SHELL (step 8).
+  - FOCUS by another app's window number is anyone's until step 8 keeps it to the shell and Task Manager.
+
 ### 02h DRAW (pixels, the screen, the GPU)
 
 | Call | What it does |
@@ -125,6 +153,11 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 | SOFT | DOS-GL's software renderer's path: a window's pixels in a format DOS-GL draws into, and PRESENT (new: replaces GPU on other cards) |
 
 - **Events:** the pixels moved (after a resize or a mode change, as 1.x's RESIZE).
+- **As built (step 2):**
+  - SOFT is BLIT: pixels in any format of 8, 16 or 32 bits (a palette of the app's own for 8) into the window.
+    A renderer whose format is the screen's draws straight into PIXELS.
+  - The display's modes are a call of their own (MODES), built with step 5's display settings.
+  - The GPU's calls are the app's first thread's alone (step 4).
 
 ### 03h INPUT
 
@@ -142,6 +175,16 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   - **The mouse:** moved, a button, the wheel's notches (1.5's), double-click marked by GLOS from the settings'
     time.
   - **Pads:** a pad connected or gone; a pad's state changed (new).
+- **As built (step 3):**
+  - Raw keys are a mode of the app (MODE, a call the design didn't have), not a flag on each event: no repeats
+    and no TEXT while it is on.
+  - TEXT comes for every character typed (20h and above), after the key's KEY event.
+  - CAPTURE is the mouse without a button held (for menus and drop-down lists): a window already has the mouse
+    from a press in it until every button is up.
+  - Presses are counted (`clicks`: 1, 2, 3) rather than a double click marked.
+  - Pads are as the kernel has them today: two, a left stick with the direction buttons folded in, a right
+    stick where there is one, up to 16 buttons. More comes with the drivers' work (phase H).
+  - GAMEPORT only reads; `[joystick] port` and `range` are settings.
 
 ### 04h SHELL
 
@@ -210,6 +253,17 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 - **The C library:** DJGPP's isn't safe for threads. libglos 2.0 gives a lock around the C library's calls (malloc,
   stdio, file I/O) and documents which are safe. The toolkit is used from one thread (the window's), with work
   handed to others and results posted back as events.
+- **As built (step 4; the design in full is `docs/supervisor.md` §12.7):**
+  - The calls are CREATE, EXIT, JOIN, LOCK, TAKE, GIVE, SIGNAL, SET, WAIT, SELF.
+  - CREATE takes the top of a stack the app gives (libglos allocates it), a class (normal or background), and a
+    selector for the thread's data segments (libglos gives DJGPP's second one, which its signals don't shrink).
+  - At most 16 threads beside the first.
+  - The first thread alone has the app's interrupts, callbacks and exception handlers, and the GPU. An
+    exception in another thread ends the app, with a crash report naming the thread.
+  - Every GLOS call may be made from any thread; an app's calls run one at a time, except those that wait.
+  - WAIT takes threads, signals and timers today; jobs and connections join it with their steps.
+  - A threaded program is linked with libglos's file of linker options (`glos2wrap.opt`), which puts the lock
+    round 68 C library functions.
 
 ### 08h JOB (running programs)
 
