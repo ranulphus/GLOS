@@ -253,4 +253,224 @@ struct glos_random {
     unsigned buffer, length;    /* the offset in DS, and how many bytes (at most 256 a call) */
 };
 
+/* ================================================================== WIN (01h): windows
+ *
+ * A window is a handle (GLOS_HK_WINDOW). GLOS draws its frame: the title bar with its boxes (minimise, maximise or
+ * restore, close) and the border, by which the user moves and sizes it; the app draws the client area, in pixels
+ * of the screen's own format that GLOS keeps (DRAW). The user's doings come as events: the window's handle in
+ * each. Closing the handle (CORE's CLOSE) takes the window away. */
+#define GLOS_WIN_CREATE  GLOS_FN(GLOS_AREA_WIN, 0)  /* struct glos_win_create: a window, hidden until SHOW */
+#define GLOS_WIN_SHOW    GLOS_FN(GLOS_AREA_WIN, 1)  /* struct glos_win_show: its state */
+#define GLOS_WIN_PLACE   GLOS_FN(GLOS_AREA_WIN, 2)  /* struct glos_win_place: where it is and how large */
+#define GLOS_WIN_FOCUS   GLOS_FN(GLOS_AREA_WIN, 3)  /* struct glos_win_focus: the keyboard to it, and in front */
+#define GLOS_WIN_ENUM    GLOS_FN(GLOS_AREA_WIN, 4)  /* struct glos_win_enum: the windows there are */
+#define GLOS_WIN_DRAG    GLOS_FN(GLOS_AREA_WIN, 6)  /* struct glos_win_drag: the user is moving or sizing it by a
+                                                       part the app drew itself (a bare window's own title bar) */
+/* (5: EMBED, with phase B's step 2d) */
+
+/* A window's kind. */
+#define GLOS_WK_NORMAL   0      /* a framed window with a button on the task bar */
+#define GLOS_WK_DIALOG   1      /* framed, in front of its owner, no button of its own and no minimise box */
+#define GLOS_WK_TOOL     2      /* framed, in front of its owner, no button of its own (a palette) */
+#define GLOS_WK_POPUP    3      /* bare and above everything: a menu, a drop-down list. It never gets the focus when
+                                   another window's goes, and a press outside it takes the keyboard from it */
+#define GLOS_WK_DESKTOP  4      /* (the shell's) under every other window, the screen less the task bar; one */
+
+/* Its flags. */
+#define GLOS_WF_FIXED    1      /* its size is not the user's to change (no maximise box) */
+#define GLOS_WF_BARE     2      /* no title bar or border: the app draws its own (GLOS_WIN_DRAG) */
+#define GLOS_WF_ANYWHERE 4      /* GLOS chooses the place: x and y are not looked at */
+#define GLOS_WF_MODAL    8      /* a dialog's: its owner takes no input while it is up */
+
+struct glos_win_create {
+    unsigned size;
+    unsigned kind;              /* GLOS_WK_ */
+    unsigned flags;             /* GLOS_WF_ */
+    int x, y;                   /* the frame's top left corner on the screen */
+    int w, h;                   /* the client area */
+    glos_handle owner;          /* the window it belongs to (a dialog's, a tool window's, a pop-up's), or 0 */
+    char title[64];             /* UTF-8, NUL-ended */
+    glos_handle handle;         /* -> the window */
+};
+
+/* A window's state. */
+#define GLOS_WS_HIDDEN   0
+#define GLOS_WS_NORMAL   1      /* shown, where and as large as PLACE (or the user) put it */
+#define GLOS_WS_MIN      2      /* minimised: only its button on the task bar */
+#define GLOS_WS_MAX      3      /* maximised: the screen less the task bar */
+#define GLOS_WS_FULL     4      /* full screen: no frame, the whole screen, the task bar gone while it has the focus */
+#define GLOS_WS_SHOWN    5      /* (SHOW) shown as it last was: maximised still, if it was */
+#define GLOS_WS_LEFT     6      /* (read) snapped to the left half of the work area by the user ... */
+#define GLOS_WS_RIGHT    7      /* ... or the right */
+
+struct glos_win_show {
+    unsigned size;
+    glos_handle handle;
+    unsigned state;             /* GLOS_WS_ (not LEFT or RIGHT) */
+    unsigned flags;             /* GLOS_SHOW_ */
+};
+#define GLOS_SHOW_NOFOCUS 1     /* shown without taking the focus */
+
+struct glos_win_place {
+    unsigned size;
+    glos_handle handle;
+    unsigned what;              /* GLOS_PLACE_: which of these to change */
+    int x, y;                   /* the frame's corner */
+    int w, h;                   /* the client area (new pixels: GLOS_EV_SIZE comes) */
+};
+#define GLOS_PLACE_MOVE 1
+#define GLOS_PLACE_SIZE 2
+
+struct glos_win_focus {
+    unsigned size;
+    glos_handle handle;         /* a window of the app's own; or 0, and ... */
+    unsigned id;                /* ... any window by its id (ENUM's): the shell's and Task Manager's to do */
+};
+
+/* ENUM: one of these a window, front to back. */
+struct glos_win_info {
+    unsigned size;              /* (of this record: more may follow in later versions) */
+    unsigned id;                /* the window's number for everyone (a handle is its owner's alone) */
+    unsigned app;               /* its app's id (0: GLOS's own) */
+    unsigned kind, flags;       /* GLOS_WK_, GLOS_WF_ */
+    unsigned state;             /* GLOS_WS_ */
+    unsigned focus;             /* 1: it has the focus */
+    int x, y, w, h;             /* its frame's corner; its client area's size */
+    char title[64];
+};
+struct glos_win_enum {
+    unsigned size;
+    unsigned app;               /* 0: the caller's own; an app's id; GLOS_ENUM_ALL */
+    unsigned buffer, room;      /* where the records go (offset in DS), and how many bytes there are */
+    unsigned count;             /* -> how many windows there are (GLOS_E_ROOM: more than fit; those that fit given) */
+};
+#define GLOS_ENUM_ALL 0xFFFFFFFFu
+
+struct glos_win_drag {
+    unsigned size;
+    glos_handle handle;
+    unsigned part;              /* GLOS_DRAG_MOVE, or GLOS_DRAG_SIZE with the edges that follow the pointer */
+};
+#define GLOS_DRAG_MOVE  0
+#define GLOS_DRAG_SIZE  16
+#define GLOS_DRAG_N     1
+#define GLOS_DRAG_S     2
+#define GLOS_DRAG_W     4
+#define GLOS_DRAG_E     8
+
+/* A window's properties (CORE's GET and SET). */
+#define GLOS_PROP_WIN_TITLE    GLOS_PROP(GLOS_HK_WINDOW, 0)  /* text, at most 63 bytes */
+#define GLOS_PROP_WIN_STATE    GLOS_PROP(GLOS_HK_WINDOW, 1)  /* GLOS_WS_ (read: SHOW sets it) */
+#define GLOS_PROP_WIN_X        GLOS_PROP(GLOS_HK_WINDOW, 2)  /* the client area's corner on the screen (read) */
+#define GLOS_PROP_WIN_Y        GLOS_PROP(GLOS_HK_WINDOW, 3)
+#define GLOS_PROP_WIN_W        GLOS_PROP(GLOS_HK_WINDOW, 4)  /* ... and its size (read) */
+#define GLOS_PROP_WIN_H        GLOS_PROP(GLOS_HK_WINDOW, 5)
+#define GLOS_PROP_WIN_MIN_W    GLOS_PROP(GLOS_HK_WINDOW, 6)  /* the least and the most the user can make the client */
+#define GLOS_PROP_WIN_MIN_H    GLOS_PROP(GLOS_HK_WINDOW, 7)  /* area (0: GLOS's own limits) */
+#define GLOS_PROP_WIN_MAX_W    GLOS_PROP(GLOS_HK_WINDOW, 8)
+#define GLOS_PROP_WIN_MAX_H    GLOS_PROP(GLOS_HK_WINDOW, 9)
+#define GLOS_PROP_WIN_CURSOR   GLOS_PROP(GLOS_HK_WINDOW, 10) /* GLOS_CURSOR_: the pointer's shape over the client area */
+#define GLOS_PROP_WIN_ID       GLOS_PROP(GLOS_HK_WINDOW, 11) /* its number for everyone (read) */
+
+/* The pointer's shapes. */
+#define GLOS_CURSOR_ARROW  0
+#define GLOS_CURSOR_BUSY   1
+#define GLOS_CURSOR_TEXT   2
+#define GLOS_CURSOR_HAND   3
+#define GLOS_CURSOR_CROSS  4
+#define GLOS_CURSOR_NS     5    /* sizing: up and down */
+#define GLOS_CURSOR_EW     6    /* left and right */
+#define GLOS_CURSOR_NWSE   7    /* the slants */
+#define GLOS_CURSOR_NESW   8
+#define GLOS_CURSOR_MOVE   9
+
+/* A window's events (the window's handle in each). */
+#define GLOS_EV_FOCUS  GLOS_EV(GLOS_AREA_WIN, 1)        /* struct glos_ev_focus: it got the focus, or lost it */
+#define GLOS_EV_SIZE   GLOS_EV(GLOS_AREA_WIN, 2)        /* struct glos_ev_size: its client area has another size
+                                                           (the user's doing, its state's, the screen's): its pixels
+                                                           are elsewhere (DRAW's PIXELS) and to be drawn again */
+#define GLOS_EV_STATE  GLOS_EV(GLOS_AREA_WIN, 3)        /* struct glos_ev_state: its state changed */
+#define GLOS_EV_CLOSE  GLOS_EV(GLOS_AREA_WIN, 4)        /* (the header alone) the user asked for it to be closed */
+struct glos_ev_focus {
+    struct glos_ev ev;
+    unsigned got;               /* 1 got, 0 lost */
+};
+struct glos_ev_size {
+    struct glos_ev ev;
+    int w, h;
+};
+struct glos_ev_state {
+    struct glos_ev ev;
+    unsigned state;             /* GLOS_WS_ */
+};
+
+/* ================================================================== DRAW (02h): pixels and the screen */
+#define GLOS_DRAW_PIXELS  GLOS_FN(GLOS_AREA_DRAW, 0)    /* struct glos_pixels: where a window's pixels are */
+#define GLOS_DRAW_PRESENT GLOS_FN(GLOS_AREA_DRAW, 1)    /* struct glos_present: the app drew there: to the screen */
+#define GLOS_DRAW_SCREEN  GLOS_FN(GLOS_AREA_DRAW, 2)    /* struct glos_screen: the desktop's screen; any program */
+
+/* A pixel format: bits a pixel, and where each colour's bits are in one (at 8 bits: GLOS's palette, the 6x6x6
+   cube and greys of glos/gfx.h). */
+struct glos_format {
+    unsigned bpp;
+    unsigned char rpos, rsize, gpos, gsize, bpos, bsize, pad[2];
+};
+struct glos_pixels {
+    unsigned size;
+    glos_handle handle;
+    unsigned pixels;            /* -> where they are: the linear address, in the app's address space, of the client
+                                   area's top left pixel (libglos's glos_ptr() makes a pointer of it) */
+    unsigned pitch;             /* -> bytes from a row to the next */
+    int w, h;                   /* -> the client area's size */
+    struct glos_format format;  /* -> the screen's */
+};
+struct glos_present {
+    unsigned size;
+    glos_handle handle;
+    int x, y, w, h;             /* the rectangle drawn, in the client area (w 0: all of it) */
+};
+struct glos_screen {
+    unsigned size;
+    int w, h;                   /* -> the screen */
+    struct glos_format format;
+    int work_x, work_y, work_w, work_h;         /* -> the screen less the task bar */
+};
+
+/* ================================================================== INPUT (03h): keys, the mouse
+ * (Phase B's step 3 adds the keyboard's state, raw keys, text, the mouse's capture, double clicks and pads.) */
+#define GLOS_EV_KEY    GLOS_EV(GLOS_AREA_INPUT, 1)      /* struct glos_ev_key: a key went down or up while the window
+                                                           had the focus */
+#define GLOS_EV_MOUSE  GLOS_EV(GLOS_AREA_INPUT, 2)      /* struct glos_ev_mouse: the pointer moved in the window's
+                                                           client area, or a button changed there; from a press
+                                                           until every button is up, wherever the pointer goes */
+#define GLOS_EV_WHEEL  GLOS_EV(GLOS_AREA_INPUT, 3)      /* struct glos_ev_wheel: the wheel turned over the window's
+                                                           client area, whether it has the focus or not */
+#ifndef GLOS_MOD_SHIFT
+#define GLOS_MOD_SHIFT   1
+#define GLOS_MOD_CTRL    2
+#define GLOS_MOD_ALT     4
+#endif
+struct glos_ev_key {
+    struct glos_ev ev;
+    unsigned key;               /* the key: a set 1 scan code, 100h added for those with an E0 prefix */
+    unsigned ch;                /* its character (Unicode) when it went down, 0 if it has none */
+    unsigned mods;              /* GLOS_MOD_: what was held */
+    unsigned down;              /* 1 pressed (again and again while it is held), 0 let go */
+};
+struct glos_ev_mouse {
+    struct glos_ev ev;
+    int x, y;                   /* the pointer in the client area */
+    int dx, dy;                 /* how far it moved */
+    unsigned buttons;           /* those down now: 1 left, 2 right, 4 middle */
+    unsigned button;            /* the one that changed, 0 for a movement */
+    unsigned down;              /* ... pressed (1) or let go (0) */
+    unsigned mods;
+};
+struct glos_ev_wheel {
+    struct glos_ev ev;
+    int x, y;
+    int notches;                /* positive: away from the user (up) */
+    unsigned buttons, mods;
+};
+
 #endif

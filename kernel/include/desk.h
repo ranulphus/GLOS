@@ -39,10 +39,44 @@ void desk_app_vram_gone(struct app *a, u32 off, u32 bytes);     /* its windows s
 int desk_win_focus(struct app *a, u32 id);
 void desk_screen(struct glos_window *g);
 void desk_app_gone(struct app *a);      /* an app has ended (on its thread): its windows go */
+/* ... and for API 2.0 (app/api2win.c). */
+struct desk_new {
+    s32 x, y, w, h;                     /* the frame's corner, the client area's size */
+    u32 wf;                             /* WF_ */
+    u8 anywhere, desktop;               /* the desktop chooses the place; the shell's desktop window */
+    u32 parent;                         /* the window it belongs to, by id, or 0 */
+    u32 tag;
+    const char *title;
+};
+struct desk_info {
+    u32 id, tag, wf, parent;
+    struct app *owner;
+    int state;                          /* WS_, or -1: hidden */
+    int focus;
+    s32 x, y, w, h;                     /* the frame's corner; the client area's size */
+    s32 cx, cy;                         /* the client area's corner on the screen */
+    s32 min_w, min_h, max_w, max_h;
+    int cursor;
+    char title[WM_TITLE_MAX];
+};
+int desk_win_new(struct app *a, const struct desk_new *n, u32 *id);
+int desk_win_state(struct app *a, u32 id, int state, int focus);       /* WS_; -1: hidden; -2: shown as it last was */
+int desk_win_place(struct app *a, u32 id, int move, s32 x, s32 y, int size, s32 w, s32 h);
+int desk_win_info(struct app *a, u32 id, struct desk_info *out);
+u32 desk_win_list(struct desk_info *out, u32 max);      /* every window but the task bar, front to back: how many
+                                                           there are (as many as fit given) */
+int desk_win_limit(struct app *a, u32 id, int which, s32 v);   /* 0 min_w, 1 min_h, 2 max_w, 3 max_h */
+int desk_win_cursor(struct app *a, u32 id, int shape);
+int desk_win_focus_id(u32 id);          /* any window, by its id */
+int desk_win_drag(struct app *a, u32 id, int part);     /* the user moves or sizes it from here on (a button is down) */
+void desk_work(s32 *x, s32 *y, s32 *w, s32 *h);         /* the screen less the task bar */
+#define DESK_E_REFUSED 19               /* (API 2.0's GLOS_E_REFUSED; its GLOS_E_HANDLE is 1.x's GLOS_E_WINDOW, 6) */
+#define DESK_EV_STATE 100               /* (to app_event, for API 2.0's apps alone) a window's state changed: key WS_ */
 int desk_demo(int on);                  /* glos desk demo|clear: wm/demo.c's windows; -1: no memory */
 u32 desk_stat(char *buf, u32 max);      /* glos desk: its windows, a line each */
 
 void deskin_pointer_speed(int speed);   /* [input] pointer_speed (M9) */
+void deskin_snap(int on);               /* a window dragged to the screen's edge snaps there ([desktop] snap) */
 struct app;
 void desk_shell(struct app *a, int on);
 u32 desk_windows(const void *owner);    /* an app's windows (NULL: every one): GLOS_FN_STAT's */        /* the desktop's shell: the launcher's and the task list's (M9) */

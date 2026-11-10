@@ -8,7 +8,15 @@
  * most 99).
  * Step 1: CORE (VERSION, INIT, CLOSE, GET, SET, EVENT, POST, TIMER, TICKS,
  * SLEEP, YIELD, TIME, RANDOM), with their errors, structures smaller than
- * GLOS's, and handles closed or never made. */
+ * GLOS's, and handles closed or never made.
+ * Step 2: WIN and DRAW: a window made, shown, placed, maximised, minimised,
+ * full screen and back, each with its events; its pixels and properties;
+ * the list of windows; a dialog; the errors.
+ *
+ *   APITEST win    becomes an app with a window "APITEST W" and writes each
+ *                  event it is sent as a line on stdout (the test drives the
+ *                  desktop with glos key and glos mouse), until the window
+ *                  is closed: WIN-OK closed, exit code 40. */
 #include <pc.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -52,12 +60,13 @@ static void before(void)
     struct glos_post p = { sizeof p, 1, 0, 0, 0 };
     unsigned t;
 
-    check("present", glos_present(), 0);
+    check("present", glos_running(), 0);
     memset(&v, 0, sizeof v);
     v.size = sizeof v;
     check("version", glos_version(&v) == 0 && v.major == 2 && v.minor == 0 && v.build[0]
           && v.functions[GLOS_AREA_CORE][0] == 0x1FFFu && GLOS_HAS(&v, GLOS_CORE_RANDOM)
-          && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_WIN, 0)),
+          && GLOS_HAS(&v, GLOS_WIN_CREATE) && GLOS_HAS(&v, GLOS_DRAW_SCREEN) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_WIN, 5))
+          && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 0)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
     small.v.size = 12;                                  /* (size, major, minor: an older program's) */
@@ -95,7 +104,8 @@ static void calls(void)
     r = glos_call(2, 0);                                /* (1.x's YIELD: a 2.0 app makes 2.0's calls) */
     check("1x-refused", r == GLOS_E_VERSION, "r=%d", r);
     check("unknown-core", glos_call(GLOS_FN(GLOS_AREA_CORE, 200), 0) == GLOS_E_FUNCTION, 0);
-    check("unknown-area", glos_call(GLOS_FN(GLOS_AREA_WIN, 0), 0) == GLOS_E_FUNCTION, 0);
+    check("unknown-area", glos_call(GLOS_FN(GLOS_AREA_SHELL, 0), 0) == GLOS_E_FUNCTION, 0);
+    check("unknown-win", glos_call(GLOS_FN(GLOS_AREA_WIN, 5), 0) == GLOS_E_FUNCTION, 0);
     check("yield", glos_yield() == 0, 0);
     memset(&t, 0, sizeof t);
     t.size = sizeof t;
@@ -211,15 +221,219 @@ static void timers(void)
     check("sleep", r == 0 && ms >= 190 && ms <= 300, "ms=%u", ms);
 }
 
-int main(void)
+/* The next event of that kind (for that handle, if one is given) within ms; those before it are let go. */
+static int await(unsigned kind, glos_handle h, void *ev, unsigned ms)
+{
+    unsigned t0 = glos_ticks();
+    for (;;) {
+        unsigned waited = glos_ticks() - t0;
+        struct glos_ev *e = ev;
+        int n = glos_event(ev, GLOS_EV_MAX, waited < ms ? ms - waited : 0, 0);
+        if (n > 0 && e->kind == kind && (!h || e->handle == h))
+            return n;
+        if (n <= 0 && glos_ticks() - t0 >= ms)
+            return 0;
+    }
+}
+
+static int prop(glos_handle h, unsigned p)
+{
+    int v = -12345;
+    return glos_get(h, p, &v) == 0 ? v : -12345;
+}
+
+static void fill(glos_handle w, unsigned char byte)
+{
+    struct glos_pixels p;
+    unsigned char *pix;
+    if (glos_pixels(w, &p) == 0 && (pix = glos_ptr(p.pixels)) != 0) {
+        memset(pix, byte, p.pitch * (unsigned)p.h);
+        glos_present(w, 0, 0, 0, 0);
+    }
+}
+
+static void windows(void)
+{
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_ev_focus *fo = (struct glos_ev_focus *)ev;
+    struct glos_ev_size *sz = (struct glos_ev_size *)ev;
+    struct glos_ev_state *st = (struct glos_ev_state *)ev;
+    struct glos_screen scr;
+    struct glos_pixels p;
+    struct glos_win_info list[8];
+    struct glos_win_create bad;
+    glos_handle w, d, t;
+    unsigned count = 99;
+    unsigned char *pix;
+    char title[64];
+    int r, n, maxw, maxh;
+
+    r = glos_screen(&scr);
+    check("screen", r == 0 && scr.w >= 320 && scr.h >= 200 && (scr.format.bpp == 8 || scr.format.bpp == 16 || scr.format.bpp == 32)
+          && scr.work_w == scr.w && scr.work_h > 0 && scr.work_h <= scr.h, "r=%d %dx%dx%u work=%dx%d", r, scr.w, scr.h,
+          scr.format.bpp, scr.work_w, scr.work_h);
+    maxw = scr.work_w - 2, maxh = scr.work_h - 21;
+
+    w = glos_window("APITEST W", 40, 50, 200, 120, GLOS_WK_NORMAL, 0, 0);
+    check("win-create", w && GLOS_HANDLE_KIND(w) == GLOS_HK_WINDOW && prop(w, GLOS_PROP_WIN_STATE) == GLOS_WS_HIDDEN
+          && prop(w, GLOS_PROP_WIN_ID) > 0, "h=%x err=%d", w, glos_error());
+    r = glos_show(w, GLOS_WS_NORMAL);
+    n = await(GLOS_EV_FOCUS, w, ev, 2000);
+    check("win-show", r == 0 && n == (int)sizeof *fo && fo->got == 1 && prop(w, GLOS_PROP_WIN_STATE) == GLOS_WS_NORMAL,
+          "r=%d n=%d", r, n);
+    check("win-where", prop(w, GLOS_PROP_WIN_X) == 41 && prop(w, GLOS_PROP_WIN_Y) == 70 && prop(w, GLOS_PROP_WIN_W) == 200
+          && prop(w, GLOS_PROP_WIN_H) == 120, "%d,%d %dx%d", prop(w, GLOS_PROP_WIN_X), prop(w, GLOS_PROP_WIN_Y),
+          prop(w, GLOS_PROP_WIN_W), prop(w, GLOS_PROP_WIN_H));
+    r = glos_pixels(w, &p);
+    pix = r ? 0 : glos_ptr(p.pixels);
+    check("win-pixels", r == 0 && pix && p.w == 200 && p.h == 120 && p.pitch >= 200 * scr.format.bpp / 8
+          && p.format.bpp == scr.format.bpp, "r=%d %dx%d pitch=%u bpp=%u", r, p.w, p.h, p.pitch, p.format.bpp);
+    if (pix) {
+        memset(pix, 0x55, p.pitch * (unsigned)p.h);
+        pix[0] = 1, pix[p.pitch * (unsigned)p.h - 1] = 2;
+    }
+    check("win-present", glos_present(w, 0, 0, 0, 0) == 0 && glos_present(w, 10, 10, 50, 20) == 0
+          && glos_present(w, 0, 0, -1, 5) == GLOS_E_ARGUMENT, 0);
+    r = glos_get_text(w, GLOS_PROP_WIN_TITLE, title, sizeof title);
+    check("win-title", r == 0 && !strcmp(title, "APITEST W") && glos_set_text(w, GLOS_PROP_WIN_TITLE, "Renamed") == 0
+          && glos_get_text(w, GLOS_PROP_WIN_TITLE, title, sizeof title) == 0 && !strcmp(title, "Renamed"), "r=%d %s", r, title);
+    check("win-limits", glos_set(w, GLOS_PROP_WIN_MIN_W, 120) == 0 && prop(w, GLOS_PROP_WIN_MIN_W) == 120
+          && glos_set(w, GLOS_PROP_WIN_MAX_H, -1) == GLOS_E_ARGUMENT && glos_set(w, GLOS_PROP_WIN_W, 5) == GLOS_E_PROPERTY, 0);
+    check("win-cursor", glos_set(w, GLOS_PROP_WIN_CURSOR, GLOS_CURSOR_HAND) == 0
+          && prop(w, GLOS_PROP_WIN_CURSOR) == GLOS_CURSOR_HAND && glos_set(w, GLOS_PROP_WIN_CURSOR, 99) == GLOS_E_ARGUMENT, 0);
+
+    r = glos_move(w, 60, 70);
+    check("win-move", r == 0 && prop(w, GLOS_PROP_WIN_X) == 61 && prop(w, GLOS_PROP_WIN_Y) == 90, "r=%d", r);
+    r = glos_resize(w, 240, 150);
+    n = await(GLOS_EV_SIZE, w, ev, 2000);
+    check("win-resize", r == 0 && n == (int)sizeof *sz && sz->w == 240 && sz->h == 150 && prop(w, GLOS_PROP_WIN_W) == 240
+          && glos_pixels(w, &p) == 0 && p.w == 240 && p.h == 150, "r=%d n=%d", r, n);
+    fill(w, 0x33);
+
+    r = glos_show(w, GLOS_WS_MAX);
+    n = await(GLOS_EV_SIZE, w, ev, 2000);
+    check("win-max-size", r == 0 && n && sz->w == maxw && sz->h == maxh, "r=%d %dx%d want %dx%d", r, n ? sz->w : 0,
+          n ? sz->h : 0, maxw, maxh);
+    n = await(GLOS_EV_STATE, w, ev, 2000);
+    check("win-max-state", n == (int)sizeof *st && st->state == GLOS_WS_MAX && prop(w, GLOS_PROP_WIN_STATE) == GLOS_WS_MAX
+          && prop(w, GLOS_PROP_WIN_X) == 1 && prop(w, GLOS_PROP_WIN_Y) == 20, "n=%d", n);
+    fill(w, 0x44);
+    r = glos_resize(w, 180, 100);               /* while maximised: the size it goes back to */
+    check("win-max-place", r == 0 && prop(w, GLOS_PROP_WIN_W) == maxw && glos_event(ev, sizeof ev, 100, 1u << GLOS_AREA_WIN) == 0,
+          "r=%d", r);
+    r = glos_show(w, GLOS_WS_NORMAL);
+    n = await(GLOS_EV_SIZE, w, ev, 2000);
+    check("win-restore", r == 0 && n && sz->w == 180 && sz->h == 100 && prop(w, GLOS_PROP_WIN_X) == 61
+          && await(GLOS_EV_STATE, w, ev, 2000) && st->state == GLOS_WS_NORMAL, "r=%d", r);
+
+    r = glos_show(w, GLOS_WS_MIN);
+    n = await(GLOS_EV_STATE, w, ev, 2000);
+    check("win-min", r == 0 && n && st->state == GLOS_WS_MIN && prop(w, GLOS_PROP_WIN_STATE) == GLOS_WS_MIN
+          && await(GLOS_EV_FOCUS, w, ev, 2000) && fo->got == 0, "r=%d n=%d", r, n);
+    r = glos_show(w, GLOS_WS_SHOWN);
+    n = await(GLOS_EV_STATE, w, ev, 2000);
+    check("win-unmin", r == 0 && n && st->state == GLOS_WS_NORMAL && await(GLOS_EV_FOCUS, w, ev, 2000) && fo->got == 1,
+          "r=%d n=%d", r, n);
+
+    r = glos_show(w, GLOS_WS_FULL);
+    n = await(GLOS_EV_SIZE, w, ev, 2000);
+    check("win-full", r == 0 && n && sz->w == scr.w && sz->h == scr.h && await(GLOS_EV_STATE, w, ev, 2000)
+          && st->state == GLOS_WS_FULL && prop(w, GLOS_PROP_WIN_X) == 0 && prop(w, GLOS_PROP_WIN_Y) == 0, "r=%d", r);
+    fill(w, 0x66);
+    r = glos_show(w, GLOS_WS_NORMAL);
+    n = await(GLOS_EV_SIZE, w, ev, 2000);
+    check("win-unfull", r == 0 && n && sz->w == 180 && sz->h == 100 && prop(w, GLOS_PROP_WIN_Y) == 90, "r=%d", r);
+
+    memset(list, 0, sizeof list);
+    r = glos_windows(0, list, 8, &count);
+    check("win-enum", r == 0 && count == 1 && list[0].size == sizeof list[0] && !strcmp(list[0].title, "Renamed")
+          && list[0].focus == 1 && list[0].kind == GLOS_WK_NORMAL && list[0].state == GLOS_WS_NORMAL && list[0].w == 180
+          && list[0].app == glos_app() && list[0].id == (unsigned)prop(w, GLOS_PROP_WIN_ID), "r=%d count=%u", r, count);
+    r = glos_windows(GLOS_ENUM_ALL, list, 8, &count);
+    check("win-enum-all", (r == 0 || r == GLOS_E_ROOM) && count >= 1, "r=%d count=%u", r, count);
+    r = glos_windows(0, list, 0, &count);
+    check("win-enum-room", r == GLOS_E_ROOM && count == 1, "r=%d count=%u", r, count);
+
+    d = glos_window("A dialog", 0, 0, 120, 60, GLOS_WK_DIALOG, GLOS_WF_ANYWHERE, w);
+    r = glos_windows(0, list, 8, &count);
+    check("win-dialog", d && r == 0 && count == 2 && (list[0].kind == GLOS_WK_DIALOG || list[1].kind == GLOS_WK_DIALOG)
+          && prop(d, GLOS_PROP_WIN_STATE) == GLOS_WS_HIDDEN, "d=%x r=%d count=%u err=%d", d, r, count, glos_error());
+    t = glos_timer(5000, 0);
+    check("win-owner-kind", !glos_window("x", 0, 0, 50, 50, GLOS_WK_DIALOG, 0, t) && glos_error() == GLOS_E_KIND, "err=%d",
+          glos_error());
+    check("win-owner-none", !glos_window("x", 0, 0, 50, 50, GLOS_WK_DIALOG, 0, 0x02000077u) && glos_error() == GLOS_E_HANDLE,
+          "err=%d", glos_error());
+    memset(&bad, 0, sizeof bad);
+    bad.size = sizeof bad, bad.kind = 9, bad.w = bad.h = 50;
+    check("win-kind", glos_call(GLOS_WIN_CREATE, &bad) == GLOS_E_ARGUMENT, 0);
+    bad.kind = 0, bad.w = 0;
+    check("win-empty", glos_call(GLOS_WIN_CREATE, &bad) == GLOS_E_ARGUMENT, 0);
+    check("win-not-window", glos_show(t, GLOS_WS_NORMAL) == GLOS_E_KIND && glos_pixels(t, &p) == GLOS_E_KIND
+          && glos_show(w, 9) == GLOS_E_ARGUMENT, 0);
+    check("win-drag-refused", glos_drag(w, GLOS_DRAG_MOVE) == GLOS_E_REFUSED, 0);
+    glos_close(t);
+    r = glos_close(d) || glos_close(w);
+    check("win-close", r == 0 && glos_get(w, GLOS_PROP_WIN_STATE, &n) == GLOS_E_HANDLE && glos_pixels(w, &p) == GLOS_E_HANDLE
+          && glos_windows(0, list, 8, &count) == 0 && count == 0, "r=%d count=%u", r, count);
+    while (glos_event(ev, sizeof ev, 0, 0) > 0)
+        ;
+}
+
+/* APITEST win: the events of a window, a line each, until it is closed. */
+static int interactive(void)
+{
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_ev *e = (struct glos_ev *)ev;
+    glos_handle w;
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 1;
+    w = glos_window("APITEST W", 40, 40, 200, 120, GLOS_WK_NORMAL, 0, 0);
+    if (!w || glos_show(w, GLOS_WS_NORMAL) != 0)
+        return 2;
+    fill(w, 0x2A);
+    for (;;) {
+        int n = glos_event(ev, sizeof ev, GLOS_FOREVER, 0);
+        if (n <= 0)
+            continue;
+        if (e->kind == GLOS_EV_KEY) {
+            struct glos_ev_key *k = (struct glos_ev_key *)ev;
+            printf("EV key %03X ch=%u down=%u mods=%u\n", k->key, k->ch, k->down, k->mods);
+        } else if (e->kind == GLOS_EV_MOUSE) {
+            struct glos_ev_mouse *m = (struct glos_ev_mouse *)ev;
+            if (m->button)
+                printf("EV mouse %d,%d buttons=%u button=%u down=%u\n", m->x, m->y, m->buttons, m->button, m->down);
+        } else if (e->kind == GLOS_EV_WHEEL) {
+            printf("EV wheel %d\n", ((struct glos_ev_wheel *)ev)->notches);
+        } else if (e->kind == GLOS_EV_FOCUS) {
+            printf("EV focus %u\n", ((struct glos_ev_focus *)ev)->got);
+        } else if (e->kind == GLOS_EV_SIZE) {
+            printf("EV size %dx%d\n", ((struct glos_ev_size *)ev)->w, ((struct glos_ev_size *)ev)->h);
+            fill(w, 0x2A);
+        } else if (e->kind == GLOS_EV_STATE) {
+            printf("EV state %u\n", ((struct glos_ev_state *)ev)->state);
+        } else if (e->kind == GLOS_EV_CLOSE) {
+            printf("EV close\n");
+            glos_close(w);
+            printf("WIN-OK closed\n");
+            fflush(stdout);
+            return 40;
+        }
+        fflush(stdout);
+    }
+}
+
+int main(int argc, char **argv)
 {
     char line[64];
+    if (argc > 1 && !strcmp(argv[1], "win"))
+        return interactive();
     before();
     init();
     if (glos_app()) {
         calls();
         events();
         timers();
+        windows();
     }
     snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
     com1(line);

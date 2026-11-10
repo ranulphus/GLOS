@@ -8,9 +8,7 @@
  * EVENT that filters by area can take one from the middle (the ones queued
  * before it move up). The app's thread and the kernel's tick (interrupts
  * off) share it, so changes are made with interrupts off. */
-#include "glos/api2.h"
-#include "appint.h"
-#include "handle.h"
+#include "api2int.h"
 #include "clock.h"
 #include "display.h"
 #include "dpmi.h"
@@ -30,41 +28,18 @@
 #define GLOS_BUILD "unknown"
 #endif
 
-#define QBYTES  16384u                  /* an app's queued events */
-#define TIMERS  32                      /* an app's timers at once */
 #define RESUME  0x52455355u             /* EDX: a wait cut short by an interrupt of the app's, ECX its ms left */
-
-struct timer2 {
-    u32 handle;
-    u32 ms;                             /* the period as the app gave it (GET gives this back) */
-    u32 period, next;                   /* ticks (1024 to the second): the period, and when it fires next */
-    u32 count, missed;
-    u8 repeat, pending, live;           /* pending: an event of its is queued, not yet taken */
-    char name[32];
-};
-
-struct api2 {
-    struct htab h;
-    struct timer2 *timers[TIMERS];
-    u32 ntimers;
-    u8 q[QBYTES];
-    u32 qh, qt;                         /* bytes taken and bytes put, ever growing (the ring's offsets mod QBYTES) */
-    u32 ndrop, ndrop1x;                 /* events lost to a full queue; 1.x events with no 2.0 form yet */
-    char name[32];                      /* INIT's */
-    char help[32];
-    char category[32];
-};
 
 /* ---- helpers */
 
-static int fail(struct trapframe *tf, u32 e)
+int a2_fail(struct trapframe *tf, u32 e)
 {
     tf->eax = e;
     tf->eflags |= FL_CF;
     return 0;
 }
 
-static int ok(struct trapframe *tf, u32 v)
+int a2_ok(struct trapframe *tf, u32 v)
 {
     tf->eax = v;
     return 0;
@@ -82,7 +57,7 @@ static u32 now_ms(void) { return (u32)(((unsigned long long)timer_ticks() * 125)
 
 /* The call's structure at DS:EBX: what GLOS knows of it read (n bytes at most), the rest zero; *size the
    caller's size. -1 if there is none, or its size can't even hold itself. */
-static int rd(struct trapframe *tf, void *s, u32 n, u32 *size)
+int a2_rd(struct trapframe *tf, void *s, u32 n, u32 *size)
 {
     u32 sz;
     memset(s, 0, n);
@@ -95,7 +70,7 @@ static int rd(struct trapframe *tf, void *s, u32 n, u32 *size)
 }
 
 /* ... and back: no more than the caller's size. */
-static int wr(struct trapframe *tf, const void *s, u32 n, u32 size)
+int a2_wr(struct trapframe *tf, const void *s, u32 n, u32 size)
 {
     return user_wr((u16)tf->ds, tf->ebx, s, size < n ? size : n);
 }
@@ -107,7 +82,7 @@ static void qput(struct api2 *s, u32 at, const void *src, u32 n)
     const u8 *p = src;
     u32 i;
     for (i = 0; i < n; i++)
-        s->q[(at + i) % QBYTES] = p[i];
+        s->q[(at + i) % A2_QBYTES] = p[i];
 }
 
 static void qget(const struct api2 *s, u32 at, void *dst, u32 n)
@@ -115,18 +90,29 @@ static void qget(const struct api2 *s, u32 at, void *dst, u32 n)
     u8 *p = dst;
     u32 i;
     for (i = 0; i < n; i++)
-        p[i] = s->q[(at + i) % QBYTES];
+        p[i] = s->q[(at + i) % A2_QBYTES];
 }
 
 /* An event for the app (any thread, or the tick): its time set here. 0, or -1 if the queue is full. */
-static int post(struct app *a, struct glos_ev *ev)
+int a2_post(struct app *a, struct glos_ev *ev, int merge)
 {
     struct api2 *s = a->v2;
     u32 f = irq_save();
     int r = -1;
     ev->time = now_ms();
-    if (ev->size >= sizeof *ev && ev->size <= GLOS_EV_MAX && s->qt - s->qh + ev->size <= QBYTES) {
+    if (merge && s->last_merge && s->qt != s->qh) {     /* (a movement after a movement: the newer one) */
+        struct glos_ev last;
+        qget(s, s->last_at, &last, sizeof last);
+        if (last.kind == ev->kind && last.handle == ev->handle && last.size == ev->size) {
+            qput(s, s->last_at, ev, ev->size);
+            irq_restore(f);
+            return 0;
+        }
+    }
+    if (ev->size >= sizeof *ev && ev->size <= GLOS_EV_MAX && s->qt - s->qh + ev->size <= A2_QBYTES) {
         qput(s, s->qt, ev, ev->size);
+        s->last_at = s->qt;
+        s->last_merge = merge != 0;
         s->qt += ev->size;
         a->wake++;
         thread_wake(&a->wq);
@@ -159,8 +145,10 @@ static int take(struct app *a, u32 areas, void *ev, u32 room, u32 *need)
             r = -1;
         } else {
             qget(s, at, ev, size);
+            if (at == s->last_at)
+                s->last_merge = 0;              /* (the one put last is gone: nothing takes its place) */
             for (i = at; i != s->qh; i--)       /* (those before it move up into its place) */
-                s->q[(i - 1 + size) % QBYTES] = s->q[(i - 1) % QBYTES];
+                s->q[(i - 1 + size) % A2_QBYTES] = s->q[(i - 1) % A2_QBYTES];
             s->qh += size;
             *need = size;
             r = 1;
@@ -168,15 +156,6 @@ static int take(struct app *a, u32 areas, void *ev, u32 room, u32 *need)
     }
     irq_restore(f);
     return r;
-}
-
-/* The desktop's 1.x events for a 2.0 app: none has a 2.0 form until its area is built (WIN, INPUT: steps 2
-   and 3), so they are counted, and told at the app's end. */
-void api2_event_1x(struct app *a, const struct glos_event *e)
-{
-    (void)e;
-    if (a->v2)
-        a->v2->ndrop1x++;
 }
 
 /* ---- timers */
@@ -211,7 +190,7 @@ void api2_tick(struct app *a)
             ev.ev.handle = t->handle;
             ev.count = t->count;
             ev.missed = t->missed;
-            if (post(a, &ev.ev) == 0) {
+            if (a2_post(a, &ev.ev, 0) == 0) {
                 t->pending = 1;
                 t->missed = 0;
             }
@@ -227,23 +206,12 @@ void api2_tick(struct app *a)
 
 /* ---- properties: by number, for each kind of handle */
 
-#define P_NUM  1
-#define P_TEXT 2
-#define P_RO   4
-
-struct propdef {
-    u32 prop;
-    u32 flags;
-    int (*get)(void *obj, s32 *v, char *text, u32 *len);         /* text: up to 256 bytes */
-    int (*set)(void *obj, s32 v, const char *text, u32 len);
-};
-
-static int t_ms_get(void *o, s32 *v, char *x, u32 *l) { (void)x; (void)l; *v = (s32)((struct timer2 *)o)->ms; return 0; }
-static int t_ms_set(void *o, s32 v, const char *x, u32 l)
+static int t_ms_get(struct app *a, void *o, s32 *v, char *x, u32 *l) { (void)a; (void)x; (void)l; *v = (s32)((struct timer2 *)o)->ms; return 0; }
+static int t_ms_set(struct app *a, void *o, s32 v, const char *x, u32 l)
 {
     struct timer2 *t = o;
     u32 f;
-    (void)x; (void)l;
+    (void)a; (void)x; (void)l;
     if (v < 1)
         return GLOS_E_ARGUMENT;
     f = irq_save();
@@ -253,27 +221,27 @@ static int t_ms_set(void *o, s32 v, const char *x, u32 l)
     irq_restore(f);
     return 0;
 }
-static int t_rep_get(void *o, s32 *v, char *x, u32 *l) { (void)x; (void)l; *v = ((struct timer2 *)o)->repeat; return 0; }
-static int t_rep_set(void *o, s32 v, const char *x, u32 l)
+static int t_rep_get(struct app *a, void *o, s32 *v, char *x, u32 *l) { (void)a; (void)x; (void)l; *v = ((struct timer2 *)o)->repeat; return 0; }
+static int t_rep_set(struct app *a, void *o, s32 v, const char *x, u32 l)
 {
     struct timer2 *t = o;
-    (void)x; (void)l;
+    (void)a; (void)x; (void)l;
     t->repeat = v != 0;
     return 0;
 }
-static int t_count_get(void *o, s32 *v, char *x, u32 *l) { (void)x; (void)l; *v = (s32)((struct timer2 *)o)->count; return 0; }
-static int t_name_get(void *o, s32 *v, char *x, u32 *l)
+static int t_count_get(struct app *a, void *o, s32 *v, char *x, u32 *l) { (void)a; (void)x; (void)l; *v = (s32)((struct timer2 *)o)->count; return 0; }
+static int t_name_get(struct app *a, void *o, s32 *v, char *x, u32 *l)
 {
     struct timer2 *t = o;
-    (void)v;
+    (void)a; (void)v;
     *l = (u32)strlen(t->name);
     memcpy(x, t->name, *l);
     return 0;
 }
-static int t_name_set(void *o, s32 v, const char *x, u32 l)
+static int t_name_set(struct app *a, void *o, s32 v, const char *x, u32 l)
 {
     struct timer2 *t = o;
-    (void)v;
+    (void)a; (void)v;
     if (l >= sizeof t->name)
         return GLOS_E_ARGUMENT;
     memcpy(t->name, x, l);
@@ -296,40 +264,43 @@ static int prop_call(struct app *a, struct trapframe *tf, int set)
     u32 size, i, len = 0;
     int kind, e;
     void *obj;
-    if (rd(tf, &p, sizeof p, &size) != 0)
-        return fail(tf, GLOS_E_ARGUMENT);
+    if (a2_rd(tf, &p, sizeof p, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
     kind = handle_kind(&a->v2->h, p.handle);
     if (!kind)
-        return fail(tf, GLOS_E_HANDLE);
+        return a2_fail(tf, GLOS_E_HANDLE);
     for (i = 0; i < ARRAY_SIZE(props); i++)
         if (props[i].prop == p.prop)
             d = &props[i];
+    for (i = 0; i < api2_win_nprops; i++)
+        if (api2_win_props[i].prop == p.prop)
+            d = &api2_win_props[i];
     if (!d || (p.prop >> 8) != (u32)kind || (set && (d->flags & P_RO)))
-        return fail(tf, (p.prop >> 8) != (u32)kind && d ? GLOS_E_KIND : GLOS_E_PROPERTY);
+        return a2_fail(tf, (p.prop >> 8) != (u32)kind && d ? GLOS_E_KIND : GLOS_E_PROPERTY);
     obj = handle_obj(&a->v2->h, p.handle, (u8)kind);
     if (set) {
         if (d->flags & P_TEXT) {
             if (p.room > sizeof text || (p.room && user_rd((u16)tf->ds, p.data, text, p.room) != 0))
-                return fail(tf, GLOS_E_ARGUMENT);
+                return a2_fail(tf, GLOS_E_ARGUMENT);
             len = p.room;
         }
-        e = d->set(obj, p.value, text, len);
-        return e ? fail(tf, (u32)e) : ok(tf, 0);
+        e = d->set(a, obj, p.value, text, len);
+        return e ? a2_fail(tf, (u32)e) : a2_ok(tf, 0);
     }
-    e = d->get(obj, &p.value, text, &len);
+    e = d->get(a, obj, &p.value, text, &len);
     if (e)
-        return fail(tf, (u32)e);
+        return a2_fail(tf, (u32)e);
     if (d->flags & P_TEXT) {
         u32 n = len + 1 <= p.room ? len + 1 : p.room;     /* (its NUL too, where there is room for it) */
         text[len] = 0;
         p.length = len;
         if (n && user_wr((u16)tf->ds, p.data, text, n) != 0)
-            return fail(tf, GLOS_E_ARGUMENT);
-        if (wr(tf, &p, sizeof p, size) != 0)
-            return fail(tf, GLOS_E_ARGUMENT);
-        return p.room <= len ? fail(tf, GLOS_E_ROOM) : ok(tf, 0);
+            return a2_fail(tf, GLOS_E_ARGUMENT);
+        if (a2_wr(tf, &p, sizeof p, size) != 0)
+            return a2_fail(tf, GLOS_E_ARGUMENT);
+        return p.room <= len ? a2_fail(tf, GLOS_E_ROOM) : a2_ok(tf, 0);
     }
-    return wr(tf, &p, sizeof p, size) != 0 ? fail(tf, GLOS_E_ARGUMENT) : ok(tf, 0);
+    return a2_wr(tf, &p, sizeof p, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 }
 
 /* ---- the app's state */
@@ -355,7 +326,8 @@ void api2_app_gone(struct app *a)
     s->ntimers = 0;                             /* (the tick looks at these no more) */
     while (handle_next(&s->h, &i, &h, &obj) == 0) {
         handle_close(&s->h, h);
-        kfree(obj);                             /* (timers only, in step 1: each kmalloc'd) */
+        if (GLOS_HANDLE_KIND(h) == GLOS_HK_TIMER)
+            kfree(obj);                         /* (a window's is its number: the desktop took the windows away) */
     }
     if (s->ndrop || s->ndrop1x)
         kprintf("GLOS-API2 app=%u drops=%u unmapped=%u\n", a->id, s->ndrop, s->ndrop1x);
@@ -379,9 +351,9 @@ static int version(struct trapframe *tf)
     struct glos_version v;
     u32 size;
     if (!tf->ebx)
-        return ok(tf, (GLOS_MAJOR << 16) | GLOS_MINOR);
-    if (rd(tf, &v, sizeof v, &size) != 0)
-        return fail(tf, GLOS_E_ARGUMENT);
+        return a2_ok(tf, (GLOS_MAJOR << 16) | GLOS_MINOR);
+    if (a2_rd(tf, &v, sizeof v, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
     v.major = GLOS_MAJOR;
     v.minor = GLOS_MINOR;
     v.machine = machine();
@@ -389,7 +361,9 @@ static int version(struct trapframe *tf)
     memcpy(v.build, GLOS_BUILD, strlen(GLOS_BUILD) < sizeof v.build ? strlen(GLOS_BUILD) : sizeof v.build - 1);
     memset(v.functions, 0, sizeof v.functions);
     v.functions[GLOS_AREA_CORE][0] = (1u << 13) - 1;    /* VERSION to RANDOM */
-    return wr(tf, &v, sizeof v, size) != 0 ? fail(tf, GLOS_E_ARGUMENT) : ok(tf, (GLOS_MAJOR << 16) | GLOS_MINOR);
+    v.functions[GLOS_AREA_WIN][0] = 0x5F;               /* CREATE, SHOW, PLACE, FOCUS, ENUM, DRAG */
+    v.functions[GLOS_AREA_DRAW][0] = 0x07;              /* PIXELS, PRESENT, SCREEN */
+    return a2_wr(tf, &v, sizeof v, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, (GLOS_MAJOR << 16) | GLOS_MINOR);
 }
 
 static int init(struct trapframe *tf)
@@ -398,15 +372,15 @@ static int init(struct trapframe *tf)
     struct app *a;
     u32 size, id;
     int r;
-    if (rd(tf, &in, sizeof in, &size) != 0)
-        return fail(tf, GLOS_E_ARGUMENT);
+    if (a2_rd(tf, &in, sizeof in, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
     if (in.major != GLOS_MAJOR)
-        return fail(tf, GLOS_E_VERSION);
+        return a2_fail(tf, GLOS_E_VERSION);
     if ((r = app_init(tf, GLOS_MAJOR, in.minor, &id)) != 0) {
         kprintf("GLOS-APP refuse api=2 psp=%04x why=%d\n", dctx ? dctx->psp : 0, r);
         in.why = (u32)r;
-        wr(tf, &in, sizeof in, size);
-        return fail(tf, GLOS_E_INIT);
+        a2_wr(tf, &in, sizeof in, size);
+        return a2_fail(tf, GLOS_E_INIT);
     }
     a = app_pending();                          /* (its name, Help page and Start menu group, for later steps) */
     if (a && a->v2) {
@@ -417,7 +391,7 @@ static int init(struct trapframe *tf)
     }
     in.app = id;
     in.why = 0;
-    wr(tf, &in, sizeof in, size);
+    a2_wr(tf, &in, sizeof in, size);
     tf->eax = 0;
     return 1;                                   /* (the program is an app from its return: api.c, app.c) */
 }
@@ -426,12 +400,12 @@ static int time_call(struct trapframe *tf)
 {
     struct glos_time t;
     u32 size;
-    if (rd(tf, &t, sizeof t, &size) != 0)
-        return fail(tf, GLOS_E_ARGUMENT);
+    if (a2_rd(tf, &t, sizeof t, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
     t.utc = clock_utc();
     t.how = (u32)clock_how();
     t.offset = (int)clock_offset();
-    return wr(tf, &t, sizeof t, size) != 0 ? fail(tf, GLOS_E_ARGUMENT) : ok(tf, 0);
+    return a2_wr(tf, &t, sizeof t, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 }
 
 static int random_call(struct trapframe *tf)
@@ -440,12 +414,12 @@ static int random_call(struct trapframe *tf)
     u8 buf[256];
     u32 size;
     int r;
-    if (rd(tf, &q, sizeof q, &size) != 0 || q.length > sizeof buf)
-        return fail(tf, GLOS_E_ARGUMENT);
+    if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.length > sizeof buf)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
     randombytes(buf, q.length);
     r = q.length && user_wr((u16)tf->ds, q.buffer, buf, q.length) != 0;
     memset(buf, 0, sizeof buf);
-    return r ? fail(tf, GLOS_E_ARGUMENT) : ok(tf, 0);
+    return r ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 }
 
 /* A wait's milliseconds: the structure's, or, made again after an interrupt of the app's cut it short, what
@@ -465,8 +439,8 @@ static int event_call(struct app *a, struct trapframe *tf)
     u8 ev[GLOS_EV_MAX];
     u32 size, need = 0, ms, left;
     int r;
-    if (rd(tf, &w, sizeof w, &size) != 0)
-        return fail(tf, GLOS_E_ARGUMENT);
+    if (a2_rd(tf, &w, sizeof w, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
     ms = wait_ms(tf, w.ms);
     for (;;) {
         r = take(a, w.areas, ev, w.room, &need);
@@ -474,7 +448,7 @@ static int event_call(struct app *a, struct trapframe *tf)
             break;
         if (!ms) {
             w.length = 0;
-            return wr(tf, &w, sizeof w, size) != 0 ? fail(tf, GLOS_E_ARGUMENT) : ok(tf, 0);
+            return a2_wr(tf, &w, sizeof w, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
         }
         left = app_sleep(a, ms == GLOS_FOREVER ? 0x7FFFFFFFu : ticks_of(ms));
         if (a->v2->qt != a->v2->qh)
@@ -484,32 +458,32 @@ static int event_call(struct app *a, struct trapframe *tf)
             continue;
         }
         if (a->kill)
-            return ok(tf, 0);
+            return a2_ok(tf, 0);
         tf->ecx = ms == GLOS_FOREVER ? GLOS_FOREVER : ms_of(left);     /* an interrupt of its own: again after */
         tf->edx = RESUME;                                               /* its handler, for the rest */
         return 2;
     }
     w.length = need;
     if (r < 0) {
-        wr(tf, &w, sizeof w, size);
-        return fail(tf, GLOS_E_ROOM);
+        a2_wr(tf, &w, sizeof w, size);
+        return a2_fail(tf, GLOS_E_ROOM);
     }
     if (((struct glos_ev *)ev)->kind == GLOS_EV_TIMER) {          /* its timer may queue another now */
         struct timer2 *t = handle_obj(&a->v2->h, ((struct glos_ev *)ev)->handle, GLOS_HK_TIMER);
         if (t)
             t->pending = 0;
     }
-    if (user_wr((u16)tf->ds, w.buffer, ev, need) != 0 || wr(tf, &w, sizeof w, size) != 0)
-        return fail(tf, GLOS_E_ARGUMENT);
-    return ok(tf, 1);
+    if (user_wr((u16)tf->ds, w.buffer, ev, need) != 0 || a2_wr(tf, &w, sizeof w, size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    return a2_ok(tf, 1);
 }
 
 static int sleep_call(struct app *a, struct trapframe *tf)
 {
     struct glos_sleep q;
     u32 size, ms, left;
-    if (rd(tf, &q, sizeof q, &size) != 0)
-        return fail(tf, GLOS_E_ARGUMENT);
+    if (a2_rd(tf, &q, sizeof q, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
     ms = wait_ms(tf, q.ms);
     left = app_sleep(a, ticks_of(ms));
     if (left && !a->kill) {
@@ -518,7 +492,7 @@ static int sleep_call(struct app *a, struct trapframe *tf)
         return 2;
     }
     q.left = 0;
-    return wr(tf, &q, sizeof q, size) != 0 ? fail(tf, GLOS_E_ARGUMENT) : ok(tf, 0);
+    return a2_wr(tf, &q, sizeof q, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 }
 
 static int timer_call(struct app *a, struct trapframe *tf)
@@ -527,14 +501,14 @@ static int timer_call(struct app *a, struct trapframe *tf)
     struct glos_timer q;
     struct timer2 *t;
     u32 size, f;
-    if (rd(tf, &q, sizeof q, &size) != 0 || !q.ms)
-        return fail(tf, GLOS_E_ARGUMENT);
-    if (s->ntimers >= TIMERS || !(t = kmalloc(sizeof *t)))
-        return fail(tf, GLOS_E_MEMORY);
+    if (a2_rd(tf, &q, sizeof q, &size) != 0 || !q.ms)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (s->ntimers >= A2_TIMERS || !(t = kmalloc(sizeof *t)))
+        return a2_fail(tf, GLOS_E_MEMORY);
     memset(t, 0, sizeof *t);
     if (!(t->handle = handle_new(&s->h, GLOS_HK_TIMER, t))) {
         kfree(t);
-        return fail(tf, GLOS_E_MEMORY);
+        return a2_fail(tf, GLOS_E_MEMORY);
     }
     t->ms = q.ms;
     t->period = ticks_of(q.ms);
@@ -545,7 +519,7 @@ static int timer_call(struct app *a, struct trapframe *tf)
     s->timers[s->ntimers++] = t;
     irq_restore(f);
     q.handle = t->handle;
-    return wr(tf, &q, sizeof q, size) != 0 ? fail(tf, GLOS_E_ARGUMENT) : ok(tf, 0);
+    return a2_wr(tf, &q, sizeof q, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 }
 
 static int close_call(struct app *a, struct trapframe *tf)
@@ -555,16 +529,23 @@ static int close_call(struct app *a, struct trapframe *tf)
     u32 size;
     void *obj;
     int kind;
-    if (rd(tf, &q, sizeof q, &size) != 0)
-        return fail(tf, GLOS_E_ARGUMENT);
+    if (a2_rd(tf, &q, sizeof q, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
     kind = handle_kind(&s->h, q.handle);
     if (!kind)
-        return fail(tf, GLOS_E_HANDLE);
+        return a2_fail(tf, GLOS_E_HANDLE);
     if (kind == GLOS_HK_TIMER)
         timer_drop(s, handle_obj(&s->h, q.handle, GLOS_HK_TIMER));
-    obj = handle_close(&s->h, q.handle);
-    kfree(obj);
-    return ok(tf, 0);
+    {
+        u32 f = irq_save();                     /* (the desktop's thread looks windows' handles up for its events) */
+        obj = handle_close(&s->h, q.handle);
+        irq_restore(f);
+    }
+    if (kind == GLOS_HK_TIMER)
+        kfree(obj);
+    else if (kind == GLOS_HK_WINDOW)
+        api2_win_close(a, (u32)obj);
+    return a2_ok(tf, 0);
 }
 
 static int post_call(struct app *a, struct trapframe *tf)
@@ -572,8 +553,8 @@ static int post_call(struct app *a, struct trapframe *tf)
     struct glos_post q;
     struct glos_ev_post ev;
     u32 size;
-    if (rd(tf, &q, sizeof q, &size) != 0)
-        return fail(tf, GLOS_E_ARGUMENT);
+    if (a2_rd(tf, &q, sizeof q, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
     memset(&ev, 0, sizeof ev);
     ev.ev.size = sizeof ev;
     ev.ev.kind = GLOS_EV_POST;
@@ -581,7 +562,7 @@ static int post_call(struct app *a, struct trapframe *tf)
     ev.a = q.a;
     ev.b = q.b;
     ev.c = q.c;
-    return post(a, &ev.ev) != 0 ? fail(tf, GLOS_E_MEMORY) : ok(tf, 0);
+    return a2_post(a, &ev.ev, 0) != 0 ? a2_fail(tf, GLOS_E_MEMORY) : a2_ok(tf, 0);
 }
 
 static int core(struct app *a, struct trapframe *tf, u32 n)
@@ -603,9 +584,9 @@ static int core(struct app *a, struct trapframe *tf, u32 n)
         return sleep_call(a, tf);
     case GLOS_CORE_YIELD & 0xFF:
         thread_yield();
-        return ok(tf, 0);
+        return a2_ok(tf, 0);
     }
-    return fail(tf, GLOS_E_FUNCTION);
+    return a2_fail(tf, GLOS_E_FUNCTION);
 }
 
 int api2_call(struct trapframe *tf)
@@ -618,19 +599,21 @@ int api2_call(struct trapframe *tf)
     if (fn == GLOS_CORE_INIT)
         return init(tf);
     if (fn == GLOS_CORE_TICKS)
-        return ok(tf, now_ms());
+        return a2_ok(tf, now_ms());
     if (fn == GLOS_CORE_TIME)
         return time_call(tf);
     if (fn == GLOS_CORE_RANDOM)
         return random_call(tf);
+    if (fn == GLOS_DRAW_SCREEN)
+        return api2_screen(tf);
     if (!a)
-        return fail(tf, GLOS_E_NOT_APP);
+        return a2_fail(tf, GLOS_E_NOT_APP);
     if (a->api_major != 2 || !a->v2)
-        return fail(tf, GLOS_E_VERSION);       /* (a 1.x app makes 1.x's calls only) */
-    if (area != GLOS_AREA_CORE)
-        return fail(tf, GLOS_E_FUNCTION);       /* (the other areas come with phase B's later steps) */
+        return a2_fail(tf, GLOS_E_VERSION);       /* (a 1.x app makes 1.x's calls only) */
+    if (area > GLOS_AREA_DRAW)
+        return a2_fail(tf, GLOS_E_FUNCTION);       /* (the other areas come with phase B's later steps) */
     gpu_safe_begin(a);                          /* (as api.c: the app's turn with the engine may end in a wait) */
-    r = core(a, tf, n);
+    r = area == GLOS_AREA_WIN ? api2_win(a, tf, n) : area == GLOS_AREA_DRAW ? api2_draw(a, tf, n) : core(a, tf, n);
     gpu_safe_end(a);
     return r;
 }

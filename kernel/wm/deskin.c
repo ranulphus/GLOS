@@ -11,17 +11,25 @@
  * to the app whose window has the focus, as an event (and as the keyboard
  * a DOS program reads: kernel/app/dev.c), with its character by the US
  * layout. The manager keeps a few for itself, with Alt:
- *     Alt-Tab   the focus to the next window
+ *     Alt-Tab   the focus to the next window (a minimised one comes back)
  *     Alt-F4    the window is asked to close
  *     Alt-F7    the window is moved with the arrow keys
  *     Alt-F8    ... or given another size
- * In the last two an outline follows the arrows (eight pixels a step, one
- * with Shift), Enter makes it so and Esc leaves things alone. The mouse
- * does the same by the title bar and the bottom right corner, with the
- * same outline: a window's pixels are not moved until the button is let
- * go, which a 486 would be slow at. A press anywhere on a window gives it
- * the focus; the close box closes when the button is let go on it; a
- * button on the task bar gives its window the focus.
+ *     Alt-F9    the window is minimised
+ *     Alt-F10   ... maximised, or put back
+ * In Alt-F7 and Alt-F8 an outline follows the arrows (eight pixels a step,
+ * one with Shift), Enter makes it so and Esc leaves things alone. The mouse
+ * does the same by the title bar, and by any edge or corner (the pointer
+ * shows which way), with the same outline: a window's pixels are not moved
+ * until the button is let go, which a 486 would be slow at. A press
+ * anywhere on a window gives it the focus; the title bar's boxes (minimise,
+ * maximise or restore, close) act when the button is let go on the one it
+ * went down on; a double click on the title bar maximises or restores. A
+ * window dragged by its title to the screen's left or right edge takes that
+ * half of the work area, and to the top all of it (the outline shows it);
+ * dragged away again it has its own size back. A button on the task bar
+ * gives its window the focus, brings a minimised one back, and minimises
+ * the one that has the focus.
  *
  * An app gets the keys that went down while it had the focus, and the up
  * of each, whatever happens between: when the focus leaves, the keys still
@@ -64,15 +72,24 @@ static u8 buttons;
 static u32 foc_id;                              /* the window the focus's owner was last told of */
 static struct app *volatile foc_app;
 static u32 grab_id;                             /* the window the mouse's events go to while a button is down */
-static u32 close_id;                            /* the window whose close box the button went down on */
+static u32 box_id;                              /* the window whose title-bar box the button went down on ... */
+static u8 box_part;                             /* ... and which (WH_CLOSE, WH_MIN, WH_MAX) */
+static u32 click_at, click_id;                  /* the last press on a title bar: when, and whose */
+static s32 click_x, click_y;
 
 enum { D_NONE, D_MOVE, D_SIZE, D_KEY_MOVE, D_KEY_SIZE };
 static u8 drag;
+static u8 drag_dir;                             /* D_SIZE: the edges that follow the pointer (WD_) */
+static u8 drag_snap;                            /* D_MOVE: the state the outline shows now (WS_; 0: its own place) */
+static u8 snap = 1;                             /* dragging to an edge snaps ([desktop] snap) */
 static u32 drag_id;
-static s32 drag_x, drag_y;                      /* the pointer from the outline's corner (D_SIZE: its far corner) */
+static s32 drag_x, drag_y;                      /* D_MOVE: the pointer from the outline's corner; D_SIZE: where it began */
+static struct gfx_rect drag_from;               /* the outline when it began */
 
-#define MIN_W 80                                /* the smallest client area the user can make */
-#define MIN_H 40
+#define DOUBLE_TICKS 410                        /* two presses this close are a double click (400 ms) ... */
+#define DOUBLE_PX    4                          /* ... and this near */
+
+void deskin_snap(int on) { snap = on != 0; }
 
 /* From the 8042's code, interrupts off. */
 void desk_in(int what, int a, int b, int c)
@@ -211,6 +228,10 @@ void desk_refocus(struct wm *m)
         }
 }
 
+static void pointer_shape(struct wm *m);
+static void toggle_max(struct wm *m, struct wm_window *w);
+static void activate(struct wm *m, struct wm_window *w);
+
 /* ---- moving and sizing: the outline */
 
 static void drag_stop(struct wm *m)
@@ -219,38 +240,115 @@ static void drag_stop(struct wm *m)
     drag = D_NONE;
 }
 
-/* The outline kept to what a window may be: no smaller than the least, no
-   larger than the screen, its title bar never out of reach. */
-static void outline(struct wm *m, const struct wm_window *w, struct gfx_rect g)
+/* The outline kept to what a window may be: within its limits and the
+   screen, its title bar never out of reach. dir: the edges being dragged
+   (WD_; 0: it is being moved), which give way; the others stay. */
+static void outline(struct wm *m, const struct wm_window *w, struct gfx_rect g, int dir)
 {
     s32 ew = w->frame.w - w->store.w, eh = w->frame.h - w->store.h;     /* the frame's own part */
     s32 floor = m->h - (m->bar ? m->bar->frame.h : 0) - m->look.title_h;
-    if (g.w < MIN_W + ew)
-        g.w = MIN_W + ew;
-    if (g.h < MIN_H + eh)
-        g.h = MIN_H + eh;
-    if (g.w > m->w)
-        g.w = m->w;
-    if (g.h > m->h)
-        g.h = m->h;
-    if (g.y < 0)
+    s32 right = g.x + g.w, bottom = g.y + g.h, lw, lh, hw, hh;
+    wm_limits(m, w, &lw, &lh, &hw, &hh);
+    if (hw + ew > m->w)
+        hw = m->w - ew;
+    if (hh + eh > m->h)
+        hh = m->h - eh;
+    if (g.w < lw + ew)
+        g.w = lw + ew;
+    if (g.h < lh + eh)
+        g.h = lh + eh;
+    if (g.w > hw + ew && hw >= lw)
+        g.w = hw + ew;
+    if (g.h > hh + eh && hh >= lh)
+        g.h = hh + eh;
+    if (dir & WD_W)
+        g.x = right - g.w;
+    if (dir & WD_N)
+        g.y = bottom - g.h;
+    if (g.y < 0) {
+        if (dir & WD_N)
+            g.h = bottom > lh + eh ? bottom : lh + eh;
         g.y = 0;
-    if (g.y > floor)
-        g.y = floor;
-    if (g.x > m->w - 40)
-        g.x = m->w - 40;
-    if (g.x < 40 - g.w)
-        g.x = 40 - g.w;
+    }
+    if (!dir) {
+        if (g.y > floor)
+            g.y = floor;
+        if (g.x > m->w - 40)
+            g.x = m->w - 40;
+        if (g.x < 40 - g.w)
+            g.x = 40 - g.w;
+    }
     wm_ghost(m, &g);
 }
 
-static void drag_start(struct wm *m, struct wm_window *w, int how)
+/* The frame the window would have in its own place. */
+static void normal_frame(const struct wm_window *w, struct gfx_rect *f)
 {
+    *f = w->frame;
+    if (w->flags & WF_PLACED) {
+        f->w = w->normal.w + (w->frame.w - w->store.w);
+        f->h = w->normal.h + (w->frame.h - w->store.h);
+    }
+}
+
+static void drag_start(struct wm *m, struct wm_window *w, int how, int dir)
+{
+    struct gfx_rect g = w->frame;
     drag = (u8)how;
     drag_id = w->id;
-    drag_x = how == D_SIZE ? w->frame.x + w->frame.w - m->px : m->px - w->frame.x;
-    drag_y = how == D_SIZE ? w->frame.y + w->frame.h - m->py : m->py - w->frame.y;
-    outline(m, w, w->frame);
+    drag_dir = (u8)dir;
+    drag_snap = 0;
+    if (how == D_MOVE || how == D_KEY_MOVE) {
+        if (w->flags & (WF_MAX | WF_SNAP_L | WF_SNAP_R)) {      /* dragged out of its place: its own size again, */
+            normal_frame(w, &g);                                /* under the pointer where the pointer was in it */
+            g.x = m->px - (m->px - w->frame.x) * g.w / (w->frame.w > 0 ? w->frame.w : 1);
+        }
+        drag_x = m->px - g.x;
+        drag_y = m->py - g.y;
+    } else {
+        drag_x = m->px;
+        drag_y = m->py;
+    }
+    drag_from = g;
+    outline(m, w, g, dir);
+}
+
+/* Where the pointer is at an edge of the screen with a window being moved: the state it would snap to. */
+static int snap_at(const struct wm *m, const struct wm_window *w)
+{
+    if (!snap || !wm_can(w, WH_MAX))
+        return 0;
+    return m->py <= 0 ? WS_MAX : m->px <= 0 ? WS_SNAP_L : m->px >= m->w - 1 ? WS_SNAP_R : 0;
+}
+
+/* The outline follows the pointer. */
+static void drag_to(struct wm *m, struct wm_window *w)
+{
+    struct gfx_rect g = drag_from;
+    if (drag == D_MOVE) {
+        drag_snap = (u8)snap_at(m, w);
+        if (drag_snap) {
+            wm_work(m, &g);
+            if (drag_snap == WS_SNAP_L)
+                g.w /= 2;
+            else if (drag_snap == WS_SNAP_R)
+                g.x = g.w / 2, g.w -= g.x;
+            wm_ghost(m, &g);
+            return;
+        }
+        g.x = m->px - drag_x, g.y = m->py - drag_y;
+    } else {
+        s32 dx = m->px - drag_x, dy = m->py - drag_y;
+        if (drag_dir & WD_E)
+            g.w += dx;
+        if (drag_dir & WD_W)
+            g.x += dx, g.w -= dx;
+        if (drag_dir & WD_S)
+            g.h += dy;
+        if (drag_dir & WD_N)
+            g.y += dy, g.h -= dy;
+    }
+    outline(m, w, g, drag == D_MOVE ? 0 : drag_dir);
 }
 
 /* The move or the new size is made (or not). */
@@ -258,16 +356,27 @@ static void drag_end(struct wm *m, int make)
 {
     struct wm_window *w = wm_find(m, drag_id);
     struct gfx_rect g = m->ghost;
-    int size = drag == D_SIZE || drag == D_KEY_SIZE;
+    int size = drag == D_SIZE || drag == D_KEY_SIZE, to = drag_snap;
     drag_stop(m);
+    drag_snap = 0;
     if (!w || !make)
         return;
     if (size) {
+        w->flags &= ~(u32)(WF_SNAP_L | WF_SNAP_R);     /* (a snapped one sized by hand is in a place of its own) */
         deskapp_resize(m, w, g.w - (w->frame.w - w->store.w), g.h - (w->frame.h - w->store.h));
+        wm_move(m, w, g.x, g.y);
+    } else if (to) {
+        deskapp_state(m, w, to);
     } else {
         struct gfx_rect old = w->frame;
         struct wm_window *o;
-        int clear = old.x + old.w <= g.x || g.x + old.w <= old.x || old.y + old.h <= g.y || g.y + old.h <= old.y;
+        int clear;
+        if (w->flags & WF_PLACED) {             /* out of its place: its own size, where the outline is */
+            deskapp_state(m, w, WS_NORMAL);
+            wm_move(m, w, g.x, g.y);
+            return;
+        }
+        clear = old.x + old.w <= g.x || g.x + old.w <= old.x || old.y + old.h <= g.y || g.y + old.h <= old.y;
         for (o = w->above; o && clear; o = o->above)    /* (VNC's CopyRect: nothing above it at either place) */
             if ((o->flags & WF_SHOWN) && ((o->frame.x < old.x + old.w && old.x < o->frame.x + o->frame.w && o->frame.y < old.y + old.h
                               && old.y < o->frame.y + o->frame.h)
@@ -303,7 +412,23 @@ static void drag_key(struct wm *m, u32 key)
         g.x += dx, g.y += dy;
     else
         g.w += dx, g.h += dy;
-    outline(m, w, g);
+    outline(m, w, g, drag == D_KEY_MOVE ? 0 : WD_S | WD_E);
+}
+
+/* ---- what the title bar's boxes, the task bar's buttons and their keys do */
+
+static void toggle_max(struct wm *m, struct wm_window *w)
+{
+    if (wm_can(w, WH_MAX))
+        deskapp_state(m, w, w->flags & (WF_MAX | WF_SNAP_L | WF_SNAP_R) ? WS_NORMAL : WS_MAX);
+}
+
+/* The focus to w: a minimised one comes back first. */
+static void activate(struct wm *m, struct wm_window *w)
+{
+    if (w && (w->flags & WF_MIN))
+        deskapp_state(m, w, WS_UNMIN);
+    wm_set_focus(m, w);
 }
 
 /* ---- the keyboard */
@@ -343,15 +468,25 @@ static void key_event(struct wm *m, u32 key, int down)
     if (down && (kmods & KM_ALT) && !(kmods & KM_CTRL)) {
         switch (key) {
         case 0x0F:
-            wm_set_focus(m, wm_next(m, w));
+            activate(m, wm_next(m, w));
             return;
         case 0x3E:
             if (w && !again)
                 deskapp_close(m, w);
             return;
         case 0x41: case 0x42:
-            if (w && !again && !drag && !(key == 0x42 && (w->flags & WF_FIXED)))
-                drag_start(m, w, key == 0x41 ? D_KEY_MOVE : D_KEY_SIZE);
+            if (w && !again && !drag && !(w->flags & WF_FULL) && !(key == 0x42 && !wm_can(w, WH_SIZE)))
+                drag_start(m, w, key == 0x41 ? D_KEY_MOVE : D_KEY_SIZE, key == 0x41 ? 0 : WD_S | WD_E);
+            return;
+        case 0x43:                              /* Alt-F9: minimised */
+            if (w && !again && !drag && wm_can(w, WH_MIN)) {
+                deskapp_state(m, w, WS_MIN);
+                desk_refocus(m);
+            }
+            return;
+        case 0x44:                              /* Alt-F10: maximised, or back */
+            if (w && !again && !drag)
+                toggle_max(m, w);
             return;
         }
     }
@@ -430,11 +565,19 @@ static void button(struct wm *m, u32 bit, int down)
     struct wm_window *w, *v;
     int part;
     if (!down) {
-        if (bit == 1 && close_id) {             /* let go on the close box it went down on */
+        if (bit == 1 && box_id) {               /* let go on the box it went down on */
             w = wm_hit(m, m->px, m->py, &part);
-            if (w && w->id == close_id && part == WH_CLOSE)
-                deskapp_close(m, w);
-            close_id = 0;
+            if (w && w->id == box_id && part == box_part) {
+                if (part == WH_CLOSE) {
+                    deskapp_close(m, w);
+                } else if (part == WH_MAX) {
+                    toggle_max(m, w);
+                } else {
+                    deskapp_state(m, w, WS_MIN);
+                    desk_refocus(m);
+                }
+            }
+            box_id = 0;
         } else if ((w = mouse_for(m)) != 0) {
             send_mouse(m, w, 0, 0, bit, 0);
         }
@@ -455,20 +598,38 @@ static void button(struct wm *m, u32 bit, int down)
     if (!w)
         return;
     if (w == m->bar) {
-        if ((v = wm_bar_hit(m, m->px, m->py)) != 0)
-            wm_set_focus(m, v);
-        else if (bit == 1 && wm_bar_mark(m, m->px, m->py))
+        if ((v = wm_bar_hit(m, m->px, m->py)) != 0) {
+            if (bit != 1) {
+                ;
+            } else if (v == m->focus && wm_can(v, WH_MIN)) {    /* the one in front: out of the way */
+                deskapp_state(m, v, WS_MIN);
+                desk_refocus(m);
+            } else {
+                activate(m, v);
+            }
+        } else if (bit == 1 && wm_bar_mark(m, m->px, m->py))
             to_shell(m, GLOS_EV_LAUNCH);        /* GLOS's mark: the launcher (M9) */
         return;
     }
     wm_set_focus(m, w);
     deskin_focus(m);                            /* (its owner hears of the focus before the press) */
     if (bit == 1 && part == WH_TITLE) {
-        drag_start(m, w, D_MOVE);
-    } else if (bit == 1 && part == WH_GROW) {
-        drag_start(m, w, D_SIZE);
-    } else if (bit == 1 && part == WH_CLOSE) {
-        close_id = w->id;
+        u32 now = timer_ticks();
+        s32 dx = m->px - click_x, dy = m->py - click_y;
+        if (click_id == w->id && now - click_at < DOUBLE_TICKS && dx >= -DOUBLE_PX && dx <= DOUBLE_PX && dy >= -DOUBLE_PX
+            && dy <= DOUBLE_PX) {
+            click_id = 0;                       /* the second press of two: maximised, or back */
+            toggle_max(m, w);
+        } else {
+            click_id = w->id, click_at = now, click_x = m->px, click_y = m->py;
+            if (!(w->flags & WF_FULL))
+                drag_start(m, w, D_MOVE, 0);
+        }
+    } else if (bit == 1 && (part & WH_SIZE)) {
+        drag_start(m, w, D_SIZE, part & 15);
+    } else if (bit == 1 && (part == WH_CLOSE || part == WH_MIN || part == WH_MAX)) {
+        box_id = w->id;
+        box_part = (u8)part;
     } else if (part == WH_CLIENT && w->owner && w == m->focus) {
         grab_id = w->id;
         send_mouse(m, w, 0, 0, bit, 1);
@@ -491,15 +652,10 @@ static void mouse_to(struct wm *m, s32 x, s32 y, u32 now)
     dx = m->px - x0, dy = m->py - y0;
     buttons = (u8)now;
     if (drag == D_MOVE || drag == D_SIZE) {
-        struct gfx_rect g = m->ghost;
         if (!(w = wm_find(m, drag_id))) {
             drag_stop(m);
         } else {
-            if (drag == D_MOVE)
-                g.x = m->px - drag_x, g.y = m->py - drag_y;
-            else
-                g.w = m->px + drag_x - g.x, g.h = m->py + drag_y - g.y;
-            outline(m, w, g);
+            drag_to(m, w);
             if (!(now & 1))
                 drag_end(m, 1);
         }
@@ -581,7 +737,7 @@ static void forget(struct wm *m)
     memset(held, 0, sizeof held);
     memset(isdown, 0, sizeof isdown);
     kmods = e0 = e1 = npkt = buttons = 0;
-    grab_id = close_id = 0;
+    grab_id = box_id = click_id = 0;
     deskin_init();
 }
 
@@ -609,6 +765,33 @@ void deskin_turn(struct wm *m)
     }
     if (drag && !wm_find(m, drag_id))           /* (the window went while it was being moved) */
         drag_stop(m);
+    pointer_shape(m);
+}
+
+int deskin_drag(struct wm *m, struct wm_window *w, int part)
+{
+    if (!(buttons & 1) || drag || (w->flags & WF_FULL))
+        return -1;
+    grab_id = 0;                                /* (the hold is the manager's now: the app hears no more of it) */
+    drag_start(m, w, part & WH_SIZE ? D_SIZE : D_MOVE, part & 15);
+    return 0;
+}
+
+/* The pointer's shape for where it is and what it is doing: the edge a window is being sized by, the window's
+   own over its client area (and while a button pressed there is held), the arrow elsewhere. */
+static void pointer_shape(struct wm *m)
+{
+    struct wm_window *w;
+    int part, shape = WC_ARROW;
+    if (drag == D_SIZE)
+        shape = wm_cursor_for(0, WH_SIZE | drag_dir);
+    else if (drag)
+        shape = WC_ARROW;
+    else if (grab_id && (w = wm_find(m, grab_id)) != 0)
+        shape = w->cursor;
+    else if ((w = wm_hit(m, m->px, m->py, &part)) != 0)
+        shape = wm_cursor_for(w, part);
+    wm_cursor(m, shape);
 }
 
 void deskin_init(void)

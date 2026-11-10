@@ -144,7 +144,7 @@ static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rou
     if (framed)
         wm_bar(mp, 1);
     for (n = 0; n < rounds && bad < 5; n++) {
-        u32 k = rnd() % 12, op = rnd() % 12;
+        u32 k = rnd() % 12, op = rnd() % 14;
         struct wm_window *w = win[k];
         if (!w) {
             u32 flags = framed ? (rnd() & 1 ? WF_FRAME : 0) | (rnd() % 4 ? 0 : WF_FIXED) | (rnd() % 9 ? 0 : WF_TOPMOST) : 0;
@@ -184,6 +184,13 @@ static void churn(const struct gfx_fmt *f, const char *name, int framed, u32 rou
         case 9:
             if (framed)
                 wm_title(mp, w, rnd() & 1 ? "Another name for it" : "x");
+            break;
+        case 12:                                /* its state: minimised, maximised, full screen, snapped, back */
+            CHECK(wm_state(mp, w, (int)(rnd() % 7)) == 0);
+            break;
+        case 13:
+            if (framed)
+                wm_cursor(mp, (int)(rnd() % WC_COUNT));
             break;
         case 10:
             if (framed && (rnd() & 1)) {
@@ -257,8 +264,18 @@ static void places(void)
     CHECK(wm_hit(&m, 5, 5, &part) == 0 && part == WH_NONE);
     CHECK(wm_hit(&m, 12, 32, &part) == a && part == WH_CLIENT);
     CHECK(wm_hit(&m, 50, 15, &part) == a && part == WH_TITLE);
-    CHECK(wm_hit(&m, 17, 17, &part) == a && part == WH_CLOSE);
-    CHECK(wm_hit(&m, 10, 50, &part) == a && part == WH_BORDER);
+    CHECK(wm_hit(&m, 100, 20, &part) == a && part == WH_CLOSE);         /* its boxes, from the right */
+    CHECK(wm_hit(&m, 80, 20, &part) == a && part == WH_MAX);
+    CHECK(wm_hit(&m, 60, 20, &part) == a && part == WH_MIN);
+    CHECK(wm_hit(&m, 10, 50, &part) == a && part == (WH_SIZE | WD_W));  /* its edges, and 3 pixels outside them */
+    CHECK(wm_hit(&m, 7, 50, &part) == a && part == (WH_SIZE | WD_W) && wm_hit(&m, 6, 50, &part) == 0);
+    CHECK(wm_hit(&m, 10, 10, &part) == a && part == (WH_SIZE | WD_N | WD_W));
+    CHECK(wm_hit(&m, 50, 12, &part) == a && part == (WH_SIZE | WD_N) && wm_hit(&m, 50, 13, &part) == a && part == WH_TITLE);
+    CHECK(wm_hit(&m, 40, 92, &part) == a && part == (WH_SIZE | WD_S));
+    CHECK(wm_cursor_for(a, WH_SIZE | WD_W) == WC_SIZE_EW && wm_cursor_for(a, WH_SIZE | WD_N) == WC_SIZE_NS
+          && wm_cursor_for(a, WH_SIZE | WD_N | WD_W) == WC_SIZE_NWSE && wm_cursor_for(a, WH_GROW) == WC_SIZE_NWSE
+          && wm_cursor_for(a, WH_SIZE | WD_N | WD_E) == WC_SIZE_NESW && wm_cursor_for(a, WH_TITLE) == WC_ARROW
+          && wm_cursor_for(a, WH_CLIENT) == WC_ARROW);
     CHECK(wm_hit(&m, 100, 50, &part) == b && part == WH_TITLE);         /* b is above a there */
     CHECK(wm_hit(&m, 70, 59, &part) == b && part == WH_BORDER);         /* (the line under its title) */
     CHECK(wm_hit(&m, 62, 70, &part) == b && part == WH_CLIENT);
@@ -266,6 +283,9 @@ static void places(void)
     CHECK(wm_hit(&m, 70, 60, &part) == a && part == WH_CLIENT);
     CHECK(wm_hit(&m, 110, 89, &part) == a && part == WH_GROW);
     CHECK(wm_hit(&m, 158, 118, &part) == b && part != WH_GROW);         /* b's size is fixed */
+    CHECK(wm_hit(&m, 161, 100, &part) == b && part == WH_BORDER && wm_hit(&m, 163, 100, &part) == 0);
+    CHECK(wm_hit(&m, 150, 50, &part) == b && part == WH_CLOSE);         /* (no box to maximise it by) */
+    CHECK(wm_hit(&m, 130, 50, &part) == b && part == WH_MIN && !wm_can(b, WH_MAX) && wm_can(a, WH_MAX));
     CHECK(wm_hit(&m, 210, 20, &part) == c && part == WH_CLIENT);
     CHECK(wm_hit(&m, 100, 230, &part) == m.bar && part == WH_CLIENT);
     wm_set_focus(&m, a);                        /* the focus goes round in the order they were made */
@@ -278,6 +298,52 @@ static void places(void)
     /* (two buttons from 62, 74 wide here; c has no frame: no button) */
     CHECK(wm_bar_hit(&m, 70, 230) == a && wm_bar_hit(&m, 70 + 74, 230) == b && wm_bar_hit(&m, 20, 230) == 0
           && wm_bar_hit(&m, 70 + 148, 230) == 0 && wm_bar_hit(&m, 70, 100) == 0);
+    /* States. Maximised: the work area, no edges to size it by; back where and as it was. */
+    CHECK(wm_state(&m, a, WS_MAX) == 0 && wm_state_of(a) == WS_MAX);
+    CHECK(a->frame.x == 0 && a->frame.y == 0 && a->frame.w == 320 && a->frame.h == 220 && a->store.w == 318
+          && a->store.h == 220 - 20 - 1 && !wm_can(a, WH_SIZE));
+    CHECK(wm_hit(&m, 0, 100, &part) == a && part == WH_BORDER);
+    CHECK(wm_state(&m, a, WS_NORMAL) == 0 && a->frame.x == 10 && a->frame.y == 10 && a->store.w == 100 && a->store.h == 60);
+    /* Minimised: off the screen, its button still there; the focus's order still has it; back as it was. */
+    wm_set_focus(&m, a);
+    CHECK(wm_state(&m, a, WS_MAX) == 0 && wm_state(&m, a, WS_MIN) == 0 && wm_state_of(a) == WS_MIN);
+    CHECK(!(a->flags & WF_SHOWN) && m.focus == 0 && wm_bar_hit(&m, 70, 230) == a && wm_next(&m, c) == a);
+    wm_set_focus(&m, a);
+    CHECK(m.focus == 0);                        /* (not while it is minimised) */
+    CHECK(wm_state(&m, a, WS_UNMIN) == 0 && wm_state_of(a) == WS_MAX && (a->flags & WF_SHOWN) && a->frame.w == 320);
+    CHECK(wm_state(&m, a, WS_MIN) == 0);
+    wm_show(&m, a, 0);                          /* hidden while minimised: no button either */
+    CHECK(wm_bar_hit(&m, 70, 230) == b && wm_state_of(a) == WS_MAX);
+    wm_show(&m, a, 1);
+    /* Snapped: half the work area. */
+    CHECK(wm_state(&m, a, WS_SNAP_L) == 0 && a->frame.x == 0 && a->frame.w == 160 && a->frame.h == 220);
+    CHECK(wm_state(&m, a, WS_SNAP_R) == 0 && a->frame.x == 160 && a->frame.w == 160 && wm_can(a, WH_SIZE));
+    /* Full screen: the whole screen, no frame; the bar goes while it has the focus, or another of its owner's. */
+    a->owner = &m, c->owner = &m;
+    wm_set_focus(&m, b);
+    CHECK(wm_state(&m, a, WS_FULL) == 0 && a->frame.w == 320 && a->frame.h == 240 && a->store.w == 320 && a->store.h == 240);
+    CHECK((m.bar->flags & WF_SHOWN) && wm_hit(&m, 100, 230, &part) == m.bar);
+    wm_set_focus(&m, a);
+    CHECK(!(m.bar->flags & WF_SHOWN) && wm_hit(&m, 100, 230, &part) == a && part == WH_CLIENT && !wm_bar_hit(&m, 70, 230));
+    wm_set_focus(&m, c);
+    CHECK(!(m.bar->flags & WF_SHOWN));
+    wm_set_focus(&m, b);
+    CHECK(m.bar->flags & WF_SHOWN);
+    wm_set_focus(&m, a);
+    wm_screen(&m, 400, 300, &gfx_fmt8);         /* another screen: it fills that one */
+    CHECK(a->frame.w == 400 && a->store.h == 300 && !(m.bar->flags & WF_SHOWN));
+    wm_screen(&m, 320, 240, &gfx_fmt8);
+    CHECK(wm_state(&m, a, WS_NORMAL) == 0 && a->frame.x == 10 && a->store.w == 100 && (m.bar->flags & WF_SHOWN));
+    a->owner = 0, c->owner = 0;
+    /* Limits. */
+    {
+        s32 lw, lh, hw, hh;
+        wm_limits(&m, a, &lw, &lh, &hw, &hh);
+        CHECK(lw == 80 && lh == 40 && hw == 4096 && hh == 4096);
+        a->min_w = 120, a->max_h = 30;
+        wm_limits(&m, a, &lw, &lh, &hw, &hh);
+        CHECK(lw == 120 && hh == 40);           /* (never below the least) */
+    }
     t = wm_create(&m, 0, 0, 20, 20, "T", WF_TOPMOST, 0);
     wm_show(&m, t, 1);
     wm_raise(&m, a);
@@ -346,29 +412,51 @@ static void cursor_masks(const struct gfx_fmt *f, const char *name)
     struct gfx_surface a, b;
     struct wm m;
     u8 and_mask[512], xor_mask[512];
-    s32 x, y, px, py;
+    s32 x, y, px, py, hx, hy;
+    int shape;
     screen_new(&a, f, SW, SH);
     screen_new(&b, f, SW, SH);
     wm_init(&m, &host, SW, SH, f);
     wm_bar(&m, 1);
-    wm_pointer(&m, SW / 3, SH / 4, 1);
-    wm_compose(&m, &a);
-    wm_hw_pointer(&m, 1);
-    wm_damage_all(&m);
-    wm_compose(&m, &b);
-    CHECK(!screens_same(&a, &b));               /* (the pointer is gone from it) */
-    wm_pointer_masks(and_mask, xor_mask);
-    px = m.px, py = m.py;
-    for (y = 0; y < 64; y++)
-        for (x = 0; x < 64; x++) {
-            u8 bit = (u8)(0x80 >> (x & 7));
-            if (!(and_mask[y * 8 + x / 8] & bit) && px + x < SW && py + y < SH)
-                gfx_fill(&b, px + x, py + y, 1, 1, xor_mask[y * 8 + x / 8] & bit ? 0xFFFFFF : 0x000000);
-            CHECK(!(and_mask[y * 8 + x / 8] & bit) || !(xor_mask[y * 8 + x / 8] & bit));     /* (none inverted) */
+    for (shape = 0; shape < WC_COUNT; shape++) {
+        const struct wm_cursor *c = wm_cursor_shape(shape);
+        u32 gen = m.cursor_gen;
+        wm_hw_pointer(&m, 0);
+        wm_cursor(&m, shape);
+        CHECK(shape == WC_ARROW || m.cursor_gen == gen + 1);
+        CHECK(c->w > 0 && c->h > 0 && c->w <= 32 && c->h <= 32 && c->hx < c->w && c->hy < c->h);
+        wm_pointer(&m, SW / 3 + shape, SH / 4, 1);
+        wm_damage_all(&m);
+        wm_compose(&m, &a);
+        wm_hw_pointer(&m, 1);
+        wm_damage_all(&m);
+        wm_compose(&m, &b);
+        CHECK(!screens_same(&a, &b));           /* (the pointer is gone from it) */
+        wm_pointer_masks(&m, and_mask, xor_mask, &hx, &hy);
+        CHECK(hx == c->hx && hy == c->hy);
+        px = m.px - hx, py = m.py - hy;
+        for (y = 0; y < 64; y++)
+            for (x = 0; x < 64; x++) {
+                u8 bit = (u8)(0x80 >> (x & 7));
+                if (!(and_mask[y * 8 + x / 8] & bit) && px + x < SW && py + y < SH)
+                    gfx_fill(&b, px + x, py + y, 1, 1, xor_mask[y * 8 + x / 8] & bit ? 0xFFFFFF : 0x000000);
+                CHECK(!(and_mask[y * 8 + x / 8] & bit) || !(xor_mask[y * 8 + x / 8] & bit));     /* (none inverted) */
+            }
+        if (!screens_same(&a, &b)) {
+            printf("FAIL wm %s: cursor %d's masks are not the pointer drawn\n", name, shape);
+            fails++;
         }
-    if (!screens_same(&a, &b)) {
-        printf("FAIL wm %s: the cursor's masks are not the pointer drawn\n", name);
-        fails++;
+    }
+    {                                           /* the made shapes: point-symmetric, mirrored, turned */
+        const struct wm_cursor *ew = wm_cursor_shape(WC_SIZE_EW), *ns = wm_cursor_shape(WC_SIZE_NS);
+        const struct wm_cursor *d1 = wm_cursor_shape(WC_SIZE_NWSE), *d2 = wm_cursor_shape(WC_SIZE_NESW);
+        CHECK(ew->w == 17 && ew->h == 9 && ns->w == 9 && ns->h == 17 && d1->w == 15 && d1->h == 15 && d2->w == 15);
+        for (y = 0; y < 15; y++)
+            for (x = 0; x < 15; x++) {
+                u8 bit = (u8)(0x80 >> (x & 7)), rbit = (u8)(0x80 >> ((14 - x) & 7));
+                CHECK(!(d1->edge[y][x / 8] & bit) == !(d1->edge[14 - y][(14 - x) / 8] & rbit));
+                CHECK(!(d1->edge[y][x / 8] & bit) == !(d2->edge[y][(14 - x) / 8] & rbit));
+            }
     }
     wm_bar(&m, 0);
     free(a.pix), free(b.pix);

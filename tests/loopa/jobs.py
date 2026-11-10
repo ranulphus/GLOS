@@ -2836,7 +2836,7 @@ def win_case(profile, vcard, card, bits, bits2):
         d = {"focus": int(m.group(1)) if m else -1, "ptr": (int(m.group(2)), int(m.group(3))) if m else (0, 0), "win": {}}
         for w in re.finditer(r'^window (\d+) (\w+)(?: \w+)? at (-?\d+),(-?\d+) (\d+)x(\d+) "(.*)"$', text, re.M):
             d["win"][w.group(7)] = {"id": int(w.group(1)), "x": int(w.group(3)), "y": int(w.group(4)),
-                                    "w": int(w.group(5)), "h": int(w.group(6))}
+                                    "w": int(w.group(5)), "h": int(w.group(6)), "shown": w.group(2) == "shown"}
         return d
 
     def until(test, limit=30):                  # the desktop once `test` holds for it (the composer and the apps
@@ -2929,11 +2929,67 @@ def win_case(profile, vcard, card, bits, bits2):
         agent.ssh("glos mouse 0 0 0")
         d = until(lambda d: has("A")(d) and (d["win"]["WINTEST A"]["w"], d["win"]["WINTEST A"]["h"]) == (230, 140))
         checks["sized"] = bool(d) and picture("A")
+
+        # A's states (v1, phase B step 2): its maximise box and back; a double click on its title and back; dragged
+        # by its title to the left edge (the left half of the work area) and out again (its own size); minimised by
+        # its box (no window, its button still on the bar) and back by the button; sized by its left edge; Alt-F10.
+        def win_a():
+            return desk()["win"].get("WINTEST A")
+
+        def box(w, k):                          # the title bar's boxes from the right: 0 close, 1 maximise, 2 minimise
+            return w["x"] + w["w"] + BORDER - 9 - 18 * k, w["y"] + BORDER + 9
+
+        def a_is(x, y, w, h, shown=True):
+            return lambda d: has("A")(d) and tuple(d["win"]["WINTEST A"][k] for k in ("x", "y", "w", "h", "shown")) \
+                == (x, y, w, h, shown)
+        MAXED = (0, 0, 640 - 2 * BORDER, 480 - 20 - TITLE - 3 * BORDER)
+        click(*box(win_a(), 1))
+        checks["maximised"] = bool(until(a_is(*MAXED))) and picture("A")
+        click(*box(win_a(), 1))
+        checks["restored"] = bool(until(a_is(140, 190, 230, 140)))
+        point(140 + 60, 190 + BORDER + 9)
+        agent.ssh("glos key mouse:0:0:1,mouse:0:0:0,mouse:0:0:1,mouse:0:0:0")
+        checks["double-click"] = bool(until(a_is(*MAXED)))
+        agent.ssh("glos key 0x38:down,0x44,0x38:up")            # Alt-F10: back
+        checks["alt-f10"] = bool(until(a_is(140, 190, 230, 140)))
+        point(140 + 60, 190 + BORDER + 9)
+        agent.ssh("glos mouse 0 0 1")
+        agent.ssh("glos mouse -300 40")                         # (to the screen's left edge)
+        agent.ssh("glos mouse 0 0 0")
+        checks["snapped"] = bool(until(a_is(0, 0, 320 - 2 * BORDER, 480 - 20 - TITLE - 3 * BORDER)))
+        point(100, BORDER + 9)
+        agent.ssh("glos mouse 0 0 1")
+        agent.ssh("glos mouse 150 100")
+        agent.ssh("glos mouse 0 0 0")
+        d = until(lambda d: has("A")(d) and (d["win"]["WINTEST A"]["w"], d["win"]["WINTEST A"]["h"]) == (230, 140))
+        checks["unsnapped"] = bool(d) and d["win"]["WINTEST A"]["y"] == 100
+        wa = win_a()
+        point(wa["x"] - 2, wa["y"] + 80)                        # its left edge, from just outside the frame
+        agent.ssh("glos mouse 0 0 1")
+        agent.ssh("glos mouse -20 0")
+        agent.ssh("glos mouse 0 0 0")
+        checks["left-edge"] = bool(until(a_is(wa["x"] - 20, wa["y"], 250, 140))) and picture("A")
+        wa = win_a()
+        click(*box(wa, 2))
+        checks["minimised"] = bool(until(a_is(wa["x"], wa["y"], 250, 140, False))) and bool(until(focus("B")))
+        ids = sorted(w["id"] for t, w in desk()["win"].items() if t.startswith("WINTEST"))
+        click(62 + 120 * ids.index(wa["id"]) + 10, 470)        # its button on the bar: back, with the focus
+        checks["unminimised"] = bool(until(a_is(wa["x"], wa["y"], 250, 140))) and bool(until(focus("A")))
+        point(wa["x"] + 252, wa["y"] + 80)                      # (its right edge, back to 230 wide, for what follows)
+        agent.ssh("glos mouse 0 0 1")
+        agent.ssh("glos mouse -20 0")
+        agent.ssh("glos mouse 0 0 0")
+        checks["right-edge"] = bool(until(a_is(wa["x"], wa["y"], 230, 140)))
+        point(wa["x"] + 60, wa["y"] + BORDER + 9)               # ... and to where it was, by its title
+        agent.ssh("glos mouse 0 0 1")
+        agent.ssh("glos mouse %d %d" % (140 - wa["x"], 190 - wa["y"]))
+        agent.ssh("glos mouse 0 0 0")
+        checks["back"] = bool(until(a_is(140, 190, 230, 140)))
         ids = sorted(w["id"] for t, w in desk()["win"].items() if t.startswith("WINTEST"))
         click(62 + 120 * ids.index(wb["id"]) + 10, 470)        # (the bar's buttons: from 62, 120 wide)
         checks["bar-button"] = bool(until(focus("B")))
         click(wb["x"] + BORDER + 50, wb["y"] + BORDER + TITLE + BORDER + 30)
-        click(wb["x"] + BORDER + 4 + 5, wb["y"] + BORDER + 4 + 5)
+        click(wb["x"] + wb["w"] + BORDER - 9, wb["y"] + BORDER + 9)    # (its close box: the title bar's right end)
         rb = finish(b)
         checks["close-box"] = said(rb, 40, "EV B key 01E ch=97 down=1 mods=0", "EV B key 01E ch=0 down=0 mods=0",
                                    "EV B mouse 50,30 buttons=1 button=1 down=1", "EV B mouse 50,30 buttons=0 button=1 down=0",
@@ -3918,6 +3974,98 @@ def api_case(profile, boot):
     info = " cases=%d" % len(cases) + (" failed-cases=" + ",".join(bad_cases) if bad_cases else "")
     return "  %-22s %s%s" % ("api-" + tag, "PASS" if not bad else "FAIL",
                              info + ("" if not bad else " failed: " + " ".join(bad))), not bad
+
+
+def api_win_case(profile, vcard, card):
+    """API 2.0's windows under the user's hands (APITEST win; phase B step 2): the app's window on the real screen,
+    and each thing done to it told as an event: a key; a press and release in its client area; its left edge
+    dragged (a new size); its maximise box (the work area, the state) and again (back); Alt-F9 (minimised, the
+    focus lost) and its task-bar button (back, the focus); its close box. The app closes its window and ends."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("apiwin-" + tag, profile, card, ["--card", vcard, "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
+        "--cmd", "SERSAY HX-START apiwin", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1200)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    checks, info, p = {"listen": agent.listening()}, "", None
+    B, T = 1, 18                                # the look's border and title bar (kernel/wm/wm.c)
+
+    def desk():
+        text = agent.ssh("glos desk")[1].replace("\r", "")
+        m = re.search(r"focus=(\d+) pointer=(-?\d+),(-?\d+)", text)
+        d = {"focus": int(m.group(1)) if m else -1, "ptr": (int(m.group(2)), int(m.group(3))) if m else (0, 0), "win": None}
+        w = re.search(r'^window (\d+) (\w+)(?: \w+)? at (-?\d+),(-?\d+) (\d+)x(\d+) "APITEST W"$', text, re.M)
+        if w:
+            d["win"] = (int(w.group(3)), int(w.group(4)), int(w.group(5)), int(w.group(6)), w.group(2) == "shown")
+            d["id"] = int(w.group(1))
+        return d
+
+    def until(test, limit=30):
+        t0 = time.time()
+        d = desk()
+        while not test(d) and time.time() - t0 < limit:
+            time.sleep(0.3)
+            d = desk()
+        return test(d)
+
+    def at(*want):
+        return lambda d: d["win"] == want
+
+    def point(x, y):
+        px, py = desk()["ptr"]
+        agent.ssh("glos mouse %d %d" % (x - px, y - py))
+
+    def click(x, y):
+        point(x, y)
+        agent.ssh("glos mouse 0 0 1")
+        agent.ssh("glos mouse 0 0 0")
+
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\APITEST.EXE win"], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        checks["up"] = until(lambda d: d["win"] == (40, 40, 200, 120, True) and d["focus"] == d.get("id"))
+        agent.ssh("glos key 0x1E")
+        click(40 + B + 50, 40 + B + T + B + 30)
+        point(40 - 2, 100)                      # its left edge, from just outside the frame
+        agent.ssh("glos mouse 0 0 1")
+        agent.ssh("glos mouse -20 0")
+        agent.ssh("glos mouse 0 0 0")
+        checks["edge"] = until(at(20, 40, 220, 120, True))
+        click(20 + 220 + B - 9 - 18, 40 + B + 9)        # its maximise box
+        checks["max"] = until(at(0, 0, 638, 439, True))
+        click(638 + B - 9 - 18, B + 9)
+        checks["back"] = until(at(20, 40, 220, 120, True))
+        agent.ssh("glos key 0x38:down,0x43,0x38:up")    # Alt-F9
+        checks["min"] = until(at(20, 40, 220, 120, False))
+        click(62 + 10, 470)                             # its button on the task bar
+        checks["unmin"] = until(lambda d: d["win"] == (20, 40, 220, 120, True) and d["focus"] == d.get("id"))
+        click(20 + 220 + B - 9, 40 + B + 9)             # its close box
+        o, e = p.communicate(timeout=120)
+        out = o.decode("latin-1").replace("\r", "").split("\n")
+        want = ["EV focus 1", "EV key 01E ch=97 down=1 mods=0", "EV key 01E ch=0 down=0 mods=0",
+                "EV mouse 50,30 buttons=1 button=1 down=1", "EV mouse 50,30 buttons=0 button=1 down=0", "EV size 220x120",
+                "EV size 638x439", "EV state 3", "EV size 220x120", "EV state 1", "EV state 2", "EV focus 0", "EV state 1",
+                "EV focus 1", "EV close", "WIN-OK closed"]
+        k = 0
+        for line in out:                        # each wanted line, in this order (others may lie between)
+            if k < len(want) and line == want[k]:
+                k += 1
+        checks["events"] = p.returncode == 40 and k == len(want)
+        if not checks["events"]:
+            info += " rc=%s got %d of %d: %r" % (p.returncode, k, len(want), out[-24:])
+        p = None
+        checks["gone"] = until(lambda d: d["win"] is None)
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        info += " timeout"
+    finally:
+        if p:
+            p.kill()
+    text = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("apiwin-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
 def apps_case(profile, card):
@@ -5555,8 +5703,8 @@ def vnc_case(profile, vcard, card, bits):
         time.sleep(2)
         checks["typed-same"] = same("typed")
         w = next((w for w in g.desk()["win"] if "Notepad" in w["title"] and w["shown"]), None)
-        if w:                                   # the close box: the title bar's left, 10 from the frame's corner
-            vncdo("move", str(w["x"] + 9), str(w["y"] - 10), "click", "1")
+        if w:                                   # the close box: the title bar's right end
+            vncdo("move", str(w["x"] + w["w"] - 9), str(w["y"] - 10), "click", "1")
         checks["button"] = bool(w) and bool(g.until(lambda d: not any("Notepad" in x["title"] and x["shown"]
                                                                        for x in d["win"]), 60))
         time.sleep(3)
@@ -6305,7 +6453,11 @@ def main():
         return 0 if all(r[1] for r in matrix(xfer_case, cases, a.jobs)) else 1
     if a.suite == "api":                        # (API 2.0: bf6 raw, the 486 with HIMEMX)
         cases = combos if (a.profile or a.boot) else [("bf6", "default"), ("486dx2", "himemx")]
-        return 0 if all(r[1] for r in matrix(api_case, cases, a.jobs)) else 1
+        res = matrix(api_case, cases, a.jobs)
+        if not a.boot:                          # ... and its windows under the user's hands, on a Matrox card and VBE
+            wins = [c for c in [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")] if not a.profile or c[0] in a.profile]
+            res += matrix(api_win_case, wins, a.jobs)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "mem-page":
         return 0 if all(r[1] for r in matrix(mempage, combos, a.jobs)) else 1
     if a.suite == "umb":                        # (the bf6: a 440BX, which UMBPCI knows; MGA-Glide's umbpci boot)

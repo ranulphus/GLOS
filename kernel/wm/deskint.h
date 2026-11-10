@@ -12,12 +12,16 @@ void deskin_turn(struct wm *m);         /* what has come in since the last turn 
 void deskin_focus(struct wm *m);        /* the focus may have changed: its old owner and its new one are told */
 void deskin_gone(struct app *a);        /* an app has ended: nothing more for it */
 void deskin_init(void);
+int deskin_drag(struct wm *m, struct wm_window *w, int part);  /* the outline from now, for a window whose app asks
+                                                                   (WH_TITLE, or WH_SIZE with WD_): -1 if no button is down */
 
 /* deskapp.c: apps' windows. */
 int deskapp_keep(void *mem);            /* a window's pixels being freed: 1 if an app still has them mapped (they
                                            are freed when it has let go) */
 int deskapp_resize(struct wm *m, struct wm_window *w, s32 cw, s32 ch); /* the user's new size for a window: its
                                                                            owner is told; -1: no memory */
+int deskapp_state(struct wm *m, struct wm_window *w, int state);        /* the user's new state for it (WS_): its
+                                                                           owner is told of a new size; -1: no memory */
 void deskapp_close(struct wm *m, struct wm_window *w);  /* the user wants it closed: its owner is asked (the
                                                            kernel's own just goes) */
 void deskapp_screen(struct wm *m);      /* the screen has another format: every app's pixels are elsewhere */

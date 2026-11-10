@@ -48,6 +48,17 @@ static volatile u8 changed, repaint;
 static u8 demo;                                 /* the demonstration's windows are up: its clock stands */
 static char note[16];
 static volatile u32 frames;                     /* composes that drew something */
+static u32 cursor_gen;                          /* the pointer's shape the card's cursor has (wm's cursor_gen) */
+static s32 cursor_hx, cursor_hy;                /* ... and its hot spot */
+
+/* The pointer's shape now into the card's cursor. */
+static void cursor_image(struct wm *m)
+{
+    u8 and_mask[512], xor_mask[512];
+    wm_pointer_masks(m, and_mask, xor_mask, &cursor_hx, &cursor_hy);
+    display_cursor_image(and_mask, xor_mask);
+    cursor_gen = m->cursor_gen;
+}
 
 u32 desk_frames(void) { return frames; }
 
@@ -171,7 +182,9 @@ static void desk_thread(void *arg)
         m = desk_lock();
         deskin_turn(m);
         fb = display_fb();
-        wm_hw_pointer(m, fb && display_cursor(m->pointer, m->px, m->py));     /* (M7 step F) */
+        if (cursor_gen != m->cursor_gen)
+            cursor_image(m);
+        wm_hw_pointer(m, fb && display_cursor(m->pointer, m->px - cursor_hx, m->py - cursor_hy));  /* (M7 step F) */
         if (fb) {
             int fmt = fb->fmt.bpp != m->fmt.bpp || fb->fmt.gsize != m->fmt.gsize || fb->fmt.rpos != m->fmt.rpos;
             if (repaint || fmt || fb->w != m->w || fb->h != m->h) {
@@ -262,11 +275,7 @@ void desk_init(void)
     wm_init(&desk, &host, 640, 480, &gfx_fmt8); /* (the screen's own size and format when there is one) */
     wm_bar(&desk, 1);
     deskin_init();
-    {
-        u8 and_mask[512], xor_mask[512];
-        wm_pointer_masks(and_mask, xor_mask);
-        display_cursor_image(and_mask, xor_mask);
-    }
+    cursor_image(&desk);
     display_painter(painter);
     display_evicter(evict);
     thread_create("desk", PRIO_NORMAL, desk_thread, NULL);

@@ -60,6 +60,8 @@ static struct {
        into VRAM on each desktop mode. */
     u8 cur_and[512], cur_xor[512];
     u8 cur_have, cur_loaded, cur_shown;
+    u8 cur_placed;                              /* its image has its place in VRAM (cur_off) in this mode */
+    u32 cur_off;
     s32 cur_x, cur_y;
 } m;
 static u32 row_buf[4096];                       /* an image's row, padded to dwords */
@@ -222,7 +224,7 @@ static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes)
     vram_reserve(&m.heap, m.screen.color_off, bytes, OWN_SCREEN);
     apps_in();
     m.cur = m.screen;
-    m.cur_loaded = m.cur_shown = 0;             /* (the image again, in this mode's VRAM) */
+    m.cur_loaded = m.cur_shown = m.cur_placed = 0;      /* (the image again, in this mode's VRAM) */
     m.screen_pix = pix;
     m.screen_bytes = bytes;
     m.busy = 0;
@@ -250,7 +252,7 @@ void mga_display_down(void)
         apps_out();
         if (m.cur_shown)
             cursor_show(0);
-        m.up = m.busy = m.cur_shown = m.cur_loaded = 0;
+        m.up = m.busy = m.cur_shown = m.cur_loaded = m.cur_placed = 0;
         kprintf("GLOS-MGA down\n");
     }
     gpu_give();
@@ -273,6 +275,8 @@ void mga_cursor_image(const u8 *and_mask, const u8 *xor_mask)
 static int cursor_place(void)
 {
     u32 reach = mga.family == MGA_FAMILY_G100 ? 8u << 20 : 16u << 20, off;
+    if (m.cur_placed)                           /* (another shape: into the place it has) */
+        return cursor_load(m.cur_off, m.cur_and, m.cur_xor) != 0 ? -1 : 0;
     if (vram_alloc(&m.heap, MGA_CURSOR_BYTES, 1024, MGA_VRAM_TOP, OWN_CURSOR, &off) != 0)
         return -1;
     if (off + MGA_CURSOR_BYTES > reach) {
@@ -284,6 +288,8 @@ static int cursor_place(void)
     if (cursor_load(off, m.cur_and, m.cur_xor) != 0)
         return -1;
     cursor_colours(0x000000, 0xFFFFFF);
+    m.cur_off = off;
+    m.cur_placed = 1;
     kprintf("GLOS-MGA cursor at=%x\n", off);
     return 0;
 }

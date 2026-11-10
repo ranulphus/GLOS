@@ -16,7 +16,7 @@ extern "C" {
 #endif
 
 int glos_call(unsigned fn, void *s);                    /* any call: s its structure (or 0) */
-int glos_present(void);                                 /* 1 if GLOS 2.0 answers */
+int glos_running(void);                                 /* 1 if GLOS 2.0 answers */
 
 int glos_version(struct glos_version *v);               /* v->size set by the caller */
 int glos_init(const char *name, const char *help, const char *category);      /* the program becomes an app */
@@ -39,6 +39,24 @@ int glos_sleep(unsigned ms);
 int glos_yield(void);
 int glos_time(struct glos_time *t);                     /* t->size set by the caller */
 int glos_random(void *buf, unsigned n);                 /* n at most 256 */
+
+/* ---- windows (WIN) and their pixels (DRAW) */
+glos_handle glos_window(const char *title, int x, int y, int w, int h, unsigned kind, unsigned flags, glos_handle owner);
+                                                        /* hidden until glos_show(); 0 if refused (glos_error()) */
+int glos_error(void);                                   /* why the last call that gives a handle gave 0 */
+int glos_show(glos_handle w, unsigned state);           /* GLOS_WS_ */
+int glos_move(glos_handle w, int x, int y);             /* its frame's corner */
+int glos_resize(glos_handle w, int cw, int ch);         /* its client area: GLOS_EV_SIZE comes, its pixels are new */
+int glos_focus(glos_handle w);
+int glos_windows(unsigned app, struct glos_win_info *out, unsigned max, unsigned *count);      /* GLOS_E_ROOM: more */
+int glos_drag(glos_handle w, unsigned part);            /* GLOS_DRAG_ */
+int glos_pixels(glos_handle w, struct glos_pixels *p);  /* where its pixels are now (after every GLOS_EV_SIZE) */
+int glos_present(glos_handle w, int x, int y, int cw, int ch);  /* drawn there (cw 0: everywhere): to the screen */
+int glos_screen(struct glos_screen *s);
+/* A linear address GLOS gave (a window's pixels) as a pointer; NULL if the program can't have near pointers. It
+   moves when the program's memory grows: asked for again after anything that may have allocated (or the program
+   starts with _CRT0_FLAG_UNIX_SBRK, and it stays). */
+void *glos_ptr(unsigned linear);
 
 #ifdef __cplusplus
 }

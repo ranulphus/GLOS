@@ -427,10 +427,18 @@ void app_event(struct app *a, const struct glos_event *e)
 {
     u32 f, n = ARRAY_SIZE(a->evq);
     struct glos_event *last;
-    if (a->api_major == 2) {                    /* (2.0's own queue: api2.c) */
+    if (a->api_major == 2) {                    /* (2.0's own queue: api2win.c; its keyboard and mouse as a DOS */
+        f = irq_save();                         /* program reads them the same) */
+        if (e->type == GLOS_EV_KEY)
+            appdev_key(a, e->key, (int)e->down, e->ch, e->mods);
+        else if (e->type == GLOS_EV_MOUSE)
+            appdev_mouse(a, e->x, e->y, (s32)e->size, (s32)e->time, e->buttons);
+        irq_restore(f);
         api2_event_1x(a, e);
         return;
     }
+    if (e->type >= DESK_EV_STATE)
+        return;                                 /* (the desktop's news for 2.0's apps alone) */
     if (e->type == GLOS_EV_WHEEL && a->api_minor < 5)
         return;                                 /* (an app built before 1.5 knows no such event) */
     f = irq_save();

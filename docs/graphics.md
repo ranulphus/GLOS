@@ -158,14 +158,28 @@ Pure code on surfaces, like the 2D library, and tested on the host the same way.
   window draws there, with the 2D library or straight into the memory, and says where it drew (`wm_damage`).
   Nobody is ever asked to draw again because something else moved: a window uncovered is copied from its own
   pixels, and after a session the whole desktop is.
-- **The manager draws the frame**: a framed window (`WF_FRAME`) has a border, a title bar with a close box and
-  its title, and a line under the bar, drawn straight onto the screen from the look (`struct wm_look`:
-  widths, colours, fonts; §3.6). The frame's pixels are nobody's to keep.
+- **The manager draws the frame**: a framed window (`WF_FRAME`) has a border, a title bar and a line under the
+  bar, drawn straight onto the screen from the look (`struct wm_look`: widths, colours, fonts; §3.6). The frame's
+  pixels are nobody's to keep. The title bar has the title at its left and its boxes at its right (v1, phase B):
+  minimise (unless `WF_NOMIN`), maximise or restore (unless `WF_FIXED`), close.
+- **A window's state** (`wm_state`, v1 phase B):
+  - **its place:** its own (`WS_NORMAL`), maximised (`WF_MAX`: the work area, the screen less the task bar),
+    full screen (`WF_FULL`: the whole screen, no frame), or snapped to the work area's left or right half. The
+    manager keeps the place to go back to (`normal`), and gives the window pixels of the new size;
+  - **minimised** (`WF_MIN`) on top of that: off the screen, its button still on the task bar, its place kept.
+  - The task bar goes while a full-screen window, or another window of the same owner's, has the focus.
+  - Another screen (`wm_screen`) fits maximised, full-screen and snapped windows again.
 - **The order** is one list from the bottom up. Topmost windows (`WF_TOPMOST`: the task bar) stay above the
   rest; `wm_raise` puts a window at the top of its kind. **The focus** is one shown window or none; its title
   bar and its task-bar button show it; `wm_next` gives the next in the order windows were made (Alt-Tab).
-- **Where a point is** (`wm_hit`): the topmost shown window there, and the part: client, title bar, close
-  box, the bottom right corner (12 pixels, where a window that may be resized is dragged to do it), border.
+- **Where a point is** (`wm_hit`): the topmost shown window there, and the part: client, title bar, one of its
+  boxes, border, or an edge or corner it is sized by (`WH_SIZE` with `WD_` bits). The edges are the border and
+  the title bar's top two rows, and reach 3 pixels outside the frame, so that a border a pixel wide can be
+  caught; within 12 pixels of a corner an edge sizes both ways. The bottom right corner's 12 pixels inside the
+  frame size it too, as before. A window that is fixed or maximised has no such edges.
+- **The pointer's shape** (`wm_cursor`): the arrow, an hourglass, a text beam, a hand, a cross, four sizing
+  arrows and a four-way one, each two bit planes (black, white) of at most 32 by 32 with a hot spot. A window has
+  a shape for its client area; `wm_cursor_for` gives the shape for a part.
 - **The outline** (`wm_ghost`): one rectangle's outline above every window, two pixels wide, black outside and
   white inside so that it shows on anything. It is where a window being moved or sized will be (§4.3).
 
@@ -276,9 +290,11 @@ characters; none with Alt). The locks start as the BIOS has them (40:17h). Other
 | Alt-F4 | the window is asked to close |
 | Alt-F7 | the window is moved with the arrow keys |
 | Alt-F8 | ... or given another size |
+| Alt-F9 | the window is minimised |
+| Alt-F10 | the window is maximised, or put back |
 | Ctrl-Alt-Shift-Esc | the app with the focus is ended |
 
-In the last two an outline follows the arrows, eight pixels a step, one with Shift; Enter makes it so, Esc
+Alt-Tab brings a minimised window back. In Alt-F7 and Alt-F8 an outline follows the arrows, eight pixels a step, one with Shift; Enter makes it so, Esc
 leaves the window alone (PRD D34: everything the mouse does here, the keys do).
 
 **Everything else** goes to the app whose window has the focus (§5.4). An app gets the keys that went down
@@ -287,12 +303,19 @@ has down are let go for it first. The up of a key it never saw go down is not pa
 
 ### 4.3 The mouse
 
-- A press on a window gives it the focus (and raises it); on a task-bar button, that button's window.
-- **The title bar** moves the window, **the bottom right corner** sizes it. An outline follows the pointer
-  and the window is moved or sized when the button is let go: nothing is copied meanwhile, which a 486
-  would be slow at. The outline stays where a window may be: a client area of at least 80 by 40, no larger
-  than the screen, the title bar always in reach.
-- **The close box** closes when the button is let go on it.
+- A press on a window gives it the focus (and raises it).
+- **A task-bar button** gives its window the focus, brings a minimised one back, and minimises the one that has
+  the focus.
+- **The title bar** moves the window; **any edge or corner** sizes it, the pointer showing which way. An
+  outline follows the pointer and the window is moved or sized when the button is let go: nothing is copied
+  meanwhile, which a 486 would be slow at. The outline stays where a window may be: within the window's limits
+  (a client area of at least 80 by 40 unless its owner says otherwise), no larger than the screen, the title bar
+  always in reach. The edges not being dragged stay where they are.
+- **Snapping:** a window dragged by its title to the screen's left or right edge takes that half of the work
+  area, and to the top edge all of it; the outline shows it. Dragged away again, it has its own size back.
+- **The title bar's boxes** act when the button is let go on the one it went down on: minimise, maximise or
+  restore, close. **A double click on the title bar** (two presses within 400 ms and 4 pixels) maximises or
+  restores.
 - **The client area** of the focus's window is the app's: movements over it, and from a button's press there
   everything until all buttons are up again, wherever the pointer goes (so a drag can leave the window). The
   press that gives a window the focus is passed on too.
@@ -435,8 +458,8 @@ library's software draws (the M7 exit).
 ### 6.4 The pointer: the hardware cursor
 
 - While the engine is up the pointer is the card's cursor (the HAL's, in XGA mode): `wm_pointer_masks` gives
-  the arrow as 64 x 64 AND/XOR masks (colour 0 black, colour 1 white), loaded into VRAM below 16 MB on each
-  desktop mode. The composer's thread moves it after input (`display_cursor`) and the composer no longer draws
+  the pointer's shape as 64 x 64 AND/XOR masks (colour 0 black, colour 1 white) and its hot spot, loaded into
+  VRAM below 16 MB on each desktop mode, and again in the same place whenever the shape changes. The composer's thread moves it after input (`display_cursor`) and the composer no longer draws
   the pointer (`wm_hw_pointer`); when the card can't show it, the pointer is drawn again.
 - `glos shot` draws it into its picture with the cursor's masks: white and black at 16 and 32 bits, the palette's
   nearest at 8, as the composer would have drawn the pointer.

@@ -309,7 +309,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
+         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/api2win.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS)) build/kernel/sdk_cfg.o build/kernel/sdk_tz.o
 # GLOS.CFG's schema (sdk/config/cfg.c, include/glos/config.h; M9) and time zones (sdk/config/tz.c; M10): shared
 # with the loader and the Control Panel.

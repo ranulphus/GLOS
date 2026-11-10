@@ -3,6 +3,7 @@
  * DJGPP's flat model), ECX and EDX 0 (glos/api2.h). */
 #include <dpmi.h>
 #include <string.h>
+#include <sys/nearptr.h>
 
 #include <glos/glos2.h>
 
@@ -46,7 +47,7 @@ static int raw(unsigned fn, void *s, unsigned *eax)
 
 int glos_call(unsigned fn, void *s) { return raw(fn, s, 0); }
 
-int glos_present(void)
+int glos_running(void)
 {
     unsigned v = 0;
     return raw(GLOS_CORE_VERSION, 0, &v) == 0 && (v >> 16) == GLOS_MAJOR;
@@ -189,4 +190,91 @@ int glos_random(void *buf, unsigned n)
 {
     struct glos_random q = { sizeof q, (unsigned)buf, n };
     return raw(GLOS_CORE_RANDOM, &q, 0);
+}
+
+/* ---- windows and their pixels */
+
+static int last_error;
+
+int glos_error(void) { return last_error; }
+
+glos_handle glos_window(const char *title, int x, int y, int w, int h, unsigned kind, unsigned flags, glos_handle owner)
+{
+    struct glos_win_create q;
+    memset(&q, 0, sizeof q);
+    q.size = sizeof q;
+    q.kind = kind, q.flags = flags;
+    q.x = x, q.y = y, q.w = w, q.h = h;
+    q.owner = owner;
+    copy(q.title, title, sizeof q.title);
+    last_error = raw(GLOS_WIN_CREATE, &q, 0);
+    return last_error ? 0 : q.handle;
+}
+
+int glos_show(glos_handle w, unsigned state)
+{
+    struct glos_win_show q = { sizeof q, w, state, 0 };
+    return raw(GLOS_WIN_SHOW, &q, 0);
+}
+
+int glos_move(glos_handle w, int x, int y)
+{
+    struct glos_win_place q = { sizeof q, w, GLOS_PLACE_MOVE, x, y, 0, 0 };
+    return raw(GLOS_WIN_PLACE, &q, 0);
+}
+
+int glos_resize(glos_handle w, int cw, int ch)
+{
+    struct glos_win_place q = { sizeof q, w, GLOS_PLACE_SIZE, 0, 0, cw, ch };
+    return raw(GLOS_WIN_PLACE, &q, 0);
+}
+
+int glos_focus(glos_handle w)
+{
+    struct glos_win_focus q = { sizeof q, w, 0 };
+    return raw(GLOS_WIN_FOCUS, &q, 0);
+}
+
+int glos_windows(unsigned app_id, struct glos_win_info *out, unsigned max, unsigned *count)
+{
+    struct glos_win_enum q = { sizeof q, app_id, (unsigned)out, max * sizeof *out, 0 };
+    int r = raw(GLOS_WIN_ENUM, &q, 0);
+    if (count)
+        *count = q.count;
+    return r;
+}
+
+int glos_drag(glos_handle w, unsigned part)
+{
+    struct glos_win_drag q = { sizeof q, w, part };
+    return raw(GLOS_WIN_DRAG, &q, 0);
+}
+
+int glos_pixels(glos_handle w, struct glos_pixels *p)
+{
+    memset(p, 0, sizeof *p);
+    p->size = sizeof *p;
+    p->handle = w;
+    return raw(GLOS_DRAW_PIXELS, p, 0);
+}
+
+int glos_present(glos_handle w, int x, int y, int cw, int ch)
+{
+    struct glos_present q = { sizeof q, w, x, y, cw, ch };
+    return raw(GLOS_DRAW_PRESENT, &q, 0);
+}
+
+int glos_screen(struct glos_screen *s)
+{
+    memset(s, 0, sizeof *s);
+    s->size = sizeof *s;
+    return raw(GLOS_DRAW_SCREEN, s, 0);
+}
+
+void *glos_ptr(unsigned linear)
+{
+    static int on;
+    if (!linear || (!on && !(on = __djgpp_nearptr_enable())))
+        return 0;
+    return (void *)(linear + __djgpp_conventional_base);
 }
