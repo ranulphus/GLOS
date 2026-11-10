@@ -506,8 +506,8 @@ After that:
     window not answering and answering again);
   - give the keyboard to another app's window (WIN's FOCUS by a window's number).
 
-  Only the shell may take the bare desktop's drops (DND's TARGET with window 0). This default is to be put to
-  the owner.
+  Only the shell may take the bare desktop's drops (DND's TARGET with window 0). The owner's answer
+  (2026-11-10): GLOS's own folder is the rule.
 - **The tray** (`kernel/wm/wm.c`, `kernel/wm/deskshell.c`): up to 12 icons of 16 by 16 pixels left of the clock,
   drawn by the desktop. A press of the left button is CLICK, a second within the double-click time
   (`[input] double_click`) DOUBLE, the right button MENU; each event has the icon's place on the screen. The
@@ -539,7 +539,7 @@ After that:
 
 - **ENTRY, RECENT, SCHEDULE** (`kernel/app/api2start.c`). The shell is told of changes by `GLOS_EV_SHELL`
   (ENTRIES, RECENTS).
-- **Where each is kept** (to be put to the owner):
+- **Where each is kept** (the owner's answer, 2026-11-10):
   - a Start menu entry is the program's profile in GLOS.CFG (`[program NAME.EXE]`: `menu`, `title`, `icon`, `args`,
     and the new `group`, `path` and `tasks`), so the Control Panel's Programs page shows and edits it;
   - the recent documents and the schedule are records in **GLOS.DAT**, a text file beside GLOS.CFG
@@ -554,7 +554,7 @@ After that:
   (`sdk/config/sched.c` has the rules). The runner (`kernel/core/schedule.c`) is a kernel thread that looks
   every 15 seconds and starts what is due as a program of nobody's, through the agent's queue.
   - A time missed while GLOS was not running (or passed over by the clock being set) is made up for by one
-    run, however many were missed. This default is to be put to the owner.
+    run, however many were missed (the owner's answer, 2026-11-10).
   - A command's times count from when it was set: one set at 14:00 for 03:00 first runs the next night.
 - **glos exit waits** (up to 5 s) for GLOS.CFG and GLOS.DAT to be written: a setting made just before it was
   lost before.
