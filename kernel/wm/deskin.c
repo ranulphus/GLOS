@@ -72,6 +72,10 @@ static u8 buttons;
 static u32 foc_id;                              /* the window the focus's owner was last told of */
 static struct app *volatile foc_app;
 static u32 grab_id;                             /* the window the mouse's events go to while a button is down */
+static u32 cap_id;                              /* the window that has captured the mouse (API 2.0's CAPTURE) */
+static u32 press_at, press_id, press_bit, press_n;      /* the last press in a client area: when, whose, which
+                                                           button, and how many in a row (a double click's 2) */
+static s32 press_x, press_y;
 static u32 box_id;                              /* the window whose title-bar box the button went down on ... */
 static u8 box_part;                             /* ... and which (WH_CLOSE, WH_MIN, WH_MAX) */
 static u32 click_at, click_id;                  /* the last press on a title bar: when, and whose */
@@ -138,18 +142,21 @@ static u32 mods_now(void)
     return (kmods & KM_SHIFT ? GLOS_MOD_SHIFT : 0u) | (kmods & KM_CTRL ? GLOS_MOD_CTRL : 0u) | (kmods & KM_ALT ? GLOS_MOD_ALT : 0u);
 }
 
-static void send_key(struct app *a, u32 id, u32 key, int down, u32 ch, u32 mods)
+static void send_key2(struct app *a, u32 id, u32 key, int down, u32 ch, u32 mods, int again)
 {
     struct glos_event e;
     memset(&e, 0, sizeof e);
     e.type = GLOS_EV_KEY;
     e.window = id;
+    e.buttons = (unsigned)again;                /* (for API 2.0's apps: the keyboard repeating a held key) */
     e.key = key;
     e.ch = ch;
     e.mods = mods;
     e.down = (unsigned)down;
     app_event(a, &e);
 }
+
+static void send_key(struct app *a, u32 id, u32 key, int down, u32 ch, u32 mods) { send_key2(a, id, key, down, ch, mods, 0); }
 
 /* ---- the shell (GLOS_FN_SHELL, M9): the launcher and the task list are its */
 
@@ -203,6 +210,11 @@ void deskin_focus(struct wm *m)
     foc_id = id;
     foc_app = w ? w->owner : 0;
     irq_restore(f);
+    if (cap_id) {                               /* the focus has left the app that captured the mouse: let go */
+        struct wm_window *c = wm_find(m, cap_id);
+        if (!c || c->owner != foc_app)
+            cap_id = 0;
+    }
     if (foc_app)
         send_focus(foc_app, id, 1);
 }
@@ -499,7 +511,7 @@ static void key_event(struct wm *m, u32 key, int down)
     if (!down && !(held[key >> 3] & bit))       /* (the up of a key it never saw go down) */
         return;
     held[key >> 3] = (u8)(down ? held[key >> 3] | bit : held[key >> 3] & ~bit);
-    send_key(foc_app, foc_id, key, down, down ? key_char(key) : 0, mods_now());
+    send_key2(foc_app, foc_id, key, down, down ? key_char(key) : 0, mods_now(), again);
 }
 
 static void key_byte(struct wm *m, u8 b)
@@ -537,6 +549,17 @@ static void send_mouse(struct wm *m, struct wm_window *w, s32 dx, s32 dy, u32 bu
     memset(&e, 0, sizeof e);
     e.type = GLOS_EV_MOUSE;
     e.window = w->id;
+    if (button && down) {                       /* presses in a row, close in time and place (for API 2.0's apps) */
+        u32 now = timer_ticks();
+        s32 ax = m->px - press_x, ay = m->py - press_y;
+        if (press_id == w->id && press_bit == button && now - press_at < double_ticks && ax >= -DOUBLE_PX && ax <= DOUBLE_PX
+            && ay >= -DOUBLE_PX && ay <= DOUBLE_PX && press_n < 3)
+            press_n++;
+        else
+            press_n = 1;
+        press_id = w->id, press_bit = button, press_at = now, press_x = m->px, press_y = m->py;
+        e.ch = press_n;
+    }
     e.size = (unsigned)dx;                      /* (how far it moved: app_event() takes these two out) */
     e.time = (unsigned)dy;
     e.x = m->px - c.x;
@@ -553,6 +576,11 @@ static struct wm_window *mouse_for(struct wm *m)
 {
     struct wm_window *w;
     int part;
+    if (cap_id) {                               /* captured: that window's, wherever the pointer is */
+        if ((w = wm_find(m, cap_id)) != 0 && w->owner && (w->flags & WF_SHOWN))
+            return w;
+        cap_id = 0;
+    }
     if (grab_id) {
         if ((w = wm_find(m, grab_id)) != 0 && w->owner)
             return w;
@@ -566,6 +594,10 @@ static void button(struct wm *m, u32 bit, int down)
 {
     struct wm_window *w, *v;
     int part;
+    if (cap_id && (w = mouse_for(m)) != 0 && cap_id) {  /* captured: every button is that window's, and nothing else */
+        send_mouse(m, w, 0, 0, bit, down);
+        return;
+    }
     if (!down) {
         if (bit == 1 && box_id) {               /* let go on the box it went down on */
             w = wm_hit(m, m->px, m->py, &part);
@@ -744,7 +776,7 @@ static void forget(struct wm *m)
     memset(held, 0, sizeof held);
     memset(isdown, 0, sizeof isdown);
     kmods = e0 = e1 = npkt = buttons = 0;
-    grab_id = box_id = click_id = 0;
+    grab_id = box_id = click_id = cap_id = press_id = 0;
     deskin_init();
 }
 
@@ -775,6 +807,29 @@ void deskin_turn(struct wm *m)
     pointer_shape(m);
 }
 
+int deskin_capture(struct wm *m, struct wm_window *w, int on)
+{
+    (void)m;
+    if (!on) {
+        if (cap_id == w->id)
+            cap_id = 0;
+        return 0;
+    }
+    if (!(w->flags & WF_SHOWN) || drag)
+        return -1;
+    cap_id = w->id;
+    return 0;
+}
+
+void deskin_keys(u8 down[64], u32 *mods, u32 *locks)
+{
+    memcpy(down, isdown, 64);
+    *mods = mods_now();
+    *locks = (caps ? 1u : 0u) | (num ? 2u : 0u);
+}
+
+struct app *deskin_focus_app(void) { return foc_app; }
+
 int deskin_drag(struct wm *m, struct wm_window *w, int part)
 {
     if (!(buttons & 1) || drag || (w->flags & WF_FULL))
@@ -794,7 +849,7 @@ static void pointer_shape(struct wm *m)
         shape = wm_cursor_for(0, WH_SIZE | drag_dir);
     else if (drag)
         shape = WC_ARROW;
-    else if (grab_id && (w = wm_find(m, grab_id)) != 0)
+    else if ((cap_id && (w = wm_find(m, cap_id)) != 0) || (grab_id && (w = wm_find(m, grab_id)) != 0))
         shape = w->cursor;
     else if ((w = wm_hit(m, m->px, m->py, &part)) != 0)
         shape = wm_modal_for(m, w) ? WC_ARROW : wm_cursor_for(w, part);

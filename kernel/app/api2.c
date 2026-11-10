@@ -328,6 +328,13 @@ int api2_app_new(struct app *a)
     memset(s, 0, sizeof *s);
     htab_init(&s->h);
     a->v2 = s;
+    {
+        static u8 hooked;
+        if (!hooked) {
+            hooked = 1;
+            api2_input_init();
+        }
+    }
     return 0;
 }
 
@@ -378,6 +385,7 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_CORE][0] = (1u << 13) - 1;    /* VERSION to RANDOM */
     v.functions[GLOS_AREA_WIN][0] = 0x5F;               /* CREATE, SHOW, PLACE, FOCUS, ENUM, DRAG */
     v.functions[GLOS_AREA_DRAW][0] = 0x1FF;             /* PIXELS, PRESENT, SCREEN, the GPU's five, BLIT */
+    v.functions[GLOS_AREA_INPUT][0] = 0x1F;             /* KEYS, CAPTURE, PADS, GAMEPORT, MODE */
     return a2_wr(tf, &v, sizeof v, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, (GLOS_MAJOR << 16) | GLOS_MINOR);
 }
 
@@ -625,12 +633,13 @@ int api2_call(struct trapframe *tf)
         return a2_fail(tf, GLOS_E_NOT_APP);
     if (a->api_major != 2 || !a->v2)
         return a2_fail(tf, GLOS_E_VERSION);       /* (a 1.x app makes 1.x's calls only) */
-    if (area > GLOS_AREA_DRAW)
+    if (area > GLOS_AREA_INPUT)
         return a2_fail(tf, GLOS_E_FUNCTION);       /* (the other areas come with phase B's later steps) */
     if (fn == GLOS_DRAW_GPU_LOCK)               /* (not a safe point: the lock is being taken, not left) */
         return gpu_app_lock(a) == 0 ? a2_ok(tf, 0) : a2_fail(tf, GLOS_E_NO_GPU);
     gpu_safe_begin(a);                          /* (as api.c: the app's turn with the engine may end in a wait) */
-    r = area == GLOS_AREA_WIN ? api2_win(a, tf, n) : area == GLOS_AREA_DRAW ? api2_draw(a, tf, n) : core(a, tf, n);
+    r = area == GLOS_AREA_WIN ? api2_win(a, tf, n) : area == GLOS_AREA_DRAW ? api2_draw(a, tf, n)
+      : area == GLOS_AREA_INPUT ? api2_input(a, tf, n) : core(a, tf, n);
     gpu_safe_end(a);
     return r;
 }

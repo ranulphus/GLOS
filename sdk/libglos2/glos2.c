@@ -313,6 +313,40 @@ int glos_blit(glos_handle w, int x, int y, const void *pixels, int pw, int ph, u
     return raw(GLOS_DRAW_BLIT, &q, 0);
 }
 
+int glos_keys(struct glos_keys *k)
+{
+    memset(k, 0, sizeof *k);
+    k->size = sizeof *k;
+    return raw(GLOS_INPUT_KEYS, k, 0);
+}
+
+int glos_capture(glos_handle w, int on)
+{
+    struct glos_capture q = { sizeof q, w, on != 0 };
+    return raw(GLOS_INPUT_CAPTURE, &q, 0);
+}
+
+int glos_pads(struct glos_pads *p, int events)
+{
+    memset(p, 0, sizeof *p);
+    p->size = sizeof *p;
+    p->flags = events ? GLOS_PADS_EVENTS : 0;
+    return raw(GLOS_INPUT_PADS, p, 0);
+}
+
+int glos_gameport(struct glos_gameport *g)
+{
+    memset(g, 0, sizeof *g);
+    g->size = sizeof *g;
+    return raw(GLOS_INPUT_GAMEPORT, g, 0);
+}
+
+int glos_input_mode(unsigned flags)
+{
+    struct glos_input_mode q = { sizeof q, 1, flags };
+    return raw(GLOS_INPUT_MODE, &q, 0);
+}
+
 void *glos_ptr(unsigned linear)
 {
     static int on;

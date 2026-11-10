@@ -70,12 +70,26 @@ void api2_event_1x(struct app *a, const struct glos_event *e)
     case V1_EV_KEY:
         u.ev.size = sizeof u.key, u.ev.kind = GLOS_EV_KEY;
         u.key.key = e->key, u.key.ch = e->ch, u.key.mods = e->mods, u.key.down = e->down;
+        u.key.repeat = e->buttons;              /* (the desktop's: the keyboard repeating a held key, deskin.c) */
+        if (a->v2->in_flags & GLOS_INPUT_RAW) {
+            if (u.key.repeat)
+                return;                         /* (raw: only what the key itself did) */
+        } else if (e->down && e->ch >= 0x20 && e->ch != 0x7F) {
+            struct glos_ev_text t;              /* what it typed, after the key */
+            a2_post(a, &u.ev, 0);
+            memset(&t, 0, sizeof t);
+            t.ev.size = sizeof t, t.ev.kind = GLOS_EV_TEXT, t.ev.handle = h;
+            t.ch = e->ch, t.mods = e->mods;
+            a2_post(a, &t.ev, 0);
+            return;
+        }
         break;
     case V1_EV_MOUSE:
         u.ev.size = sizeof u.mouse, u.ev.kind = GLOS_EV_MOUSE;
         u.mouse.x = e->x, u.mouse.y = e->y;
         u.mouse.dx = (s32)e->size, u.mouse.dy = (s32)e->time;   /* (the desktop's: how far it moved, deskin.c) */
         u.mouse.buttons = e->buttons, u.mouse.button = e->key, u.mouse.down = e->down, u.mouse.mods = e->mods;
+        u.mouse.clicks = e->ch;                 /* (the desktop's count of presses in a row) */
         merge = !e->key;
         break;
     case V1_EV_WHEEL:

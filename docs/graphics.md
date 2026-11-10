@@ -327,6 +327,11 @@ has down are let go for it first. The up of a key it never saw go down is not pa
 - **The client area** of the focus's window is the app's: movements over it, and from a button's press there
   everything until all buttons are up again, wherever the pointer goes (so a drag can leave the window). The
   press that gives a window the focus is passed on too.
+- **Capture** (API 2.0's INPUT, v1 phase B): a window that has captured the mouse gets every movement and
+  press wherever the pointer is, and a press elsewhere changes no focus and starts no drag, until it lets go,
+  is hidden, or the focus leaves its app.
+- **Presses are counted** for API 2.0's apps: the second and third in a row on one window, with one button,
+  within `[input] double_click`'s time and 4 pixels, say so.
 - The pointer is hidden until the mouse first moves.
 
 A window of an app is sized by the manager, at once; the app is told afterwards (§5.2). A window asked to

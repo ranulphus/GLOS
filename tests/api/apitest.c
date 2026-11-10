@@ -444,10 +444,34 @@ static void windows(void)
         }
     }
 
+    {                                           /* INPUT: the keyboard, the mode, pads, the game port, capture */
+        struct glos_keys k;
+        struct glos_pads pads;
+        struct glos_gameport gp;
+        struct glos_input_mode im = { sizeof im, 0, 99 };
+        unsigned i, any = 0;
+        r = glos_keys(&k);
+        for (i = 0; i < sizeof k.down; i++)
+            any |= k.down[i];
+        check("input-keys", r == 0 && !any && k.mods == 0 && !GLOS_KEY_DOWN(&k, 0x1E), "r=%d any=%u mods=%u", r, any, k.mods);
+        r = glos_call(GLOS_INPUT_MODE, &im);
+        check("input-mode", r == 0 && im.flags == 0 && glos_input_mode(GLOS_INPUT_RAW) == 0
+              && glos_call(GLOS_INPUT_MODE, &im) == 0 && im.flags == GLOS_INPUT_RAW && glos_input_mode(8) == GLOS_E_ARGUMENT
+              && glos_input_mode(0) == 0, "r=%d flags=%u", r, im.flags);
+        r = glos_pads(&pads, 1);
+        check("input-pads", r == 0 && !pads.pad[0].present && !pads.pad[1].present && glos_pads(&pads, 0) == 0, "r=%d", r);
+        r = glos_gameport(&gp);
+        check("input-gameport", r == 0 && gp.mode <= 2 && gp.range >= 100 && gp.pads == 0, "r=%d on=%u mode=%u range=%u", r,
+              gp.virtual_on, gp.mode, gp.range);
+        r = glos_capture(w, 1);
+        check("input-capture", r == 0 && glos_capture(w, 0) == 0 && glos_capture(w, 0) == 0, "r=%d", r);
+    }
+
     d = glos_window("A dialog", 0, 0, 120, 60, GLOS_WK_DIALOG, GLOS_WF_ANYWHERE, w);
     r = glos_windows(0, list, 8, &count);
     check("win-dialog", d && r == 0 && count == 2 && (list[0].kind == GLOS_WK_DIALOG || list[1].kind == GLOS_WK_DIALOG)
           && prop(d, GLOS_PROP_WIN_STATE) == GLOS_WS_HIDDEN, "d=%x r=%d count=%u err=%d", d, r, count, glos_error());
+    check("input-capture-hidden", glos_capture(d, 1) == GLOS_E_REFUSED, 0);
     check("win-dialog-props", prop(d, GLOS_PROP_WIN_TASKBAR) == 0 && glos_set(d, GLOS_PROP_WIN_FLASH, 1) == 0
           && prop(d, GLOS_PROP_WIN_FLASH) == 1, 0);
     {                                           /* a modal dialog: the focus asked for its owner goes to it */
@@ -486,7 +510,7 @@ static void windows(void)
     bad.kind = 0, bad.w = 0;
     check("win-empty", glos_call(GLOS_WIN_CREATE, &bad) == GLOS_E_ARGUMENT, 0);
     check("win-not-window", glos_show(t, GLOS_WS_NORMAL) == GLOS_E_KIND && glos_pixels(t, &p) == GLOS_E_KIND
-          && glos_show(w, 9) == GLOS_E_ARGUMENT, 0);
+          && glos_show(w, 9) == GLOS_E_ARGUMENT && glos_capture(t, 1) == GLOS_E_KIND, 0);
     check("win-drag-refused", glos_drag(w, GLOS_DRAG_MOVE) == GLOS_E_REFUSED, 0);
     glos_close(t);
     r = glos_close(d) || glos_close(w);
@@ -504,10 +528,13 @@ static int interactive(void)
     glos_handle w;
     if (glos_init("API test", "apitest", "Tests") != 0)
         return 1;
+    struct glos_pads pads;
+    int raw_mode = 0, captured = 0;
     w = glos_window("APITEST W", 40, 40, 200, 120, GLOS_WK_NORMAL, 0, 0);
     if (!w || glos_show(w, GLOS_WS_NORMAL) != 0)
         return 2;
     fill(w, 0x2A);
+    glos_pads(&pads, 1);
     for (;;) {
         int n = glos_event(ev, sizeof ev, GLOS_FOREVER, 0);
         if (n <= 0)
@@ -515,6 +542,14 @@ static int interactive(void)
         if (e->kind == GLOS_EV_KEY) {
             struct glos_ev_key *k = (struct glos_ev_key *)ev;
             printf("EV key %03X ch=%u down=%u mods=%u\n", k->key, k->ch, k->down, k->mods);
+            if (k->key == 0x13 && !k->down) {   /* r let go: raw keys, or no longer */
+                raw_mode = !raw_mode;
+                printf("EV raw %d r=%d\n", raw_mode, glos_input_mode(raw_mode ? GLOS_INPUT_RAW : 0));
+            }
+            if (k->key == 0x2E && !k->down) {   /* c let go: the mouse captured, or let go */
+                captured = !captured;
+                printf("EV capture %d r=%d\n", captured, glos_capture(w, captured));
+            }
             if (k->key == 0x23 && !k->down) {   /* h let go: 8 seconds without taking an event ("not answering") */
                 unsigned t0 = glos_ticks();
                 while (glos_ticks() - t0 < 8000)
@@ -523,8 +558,16 @@ static int interactive(void)
             }
         } else if (e->kind == GLOS_EV_MOUSE) {
             struct glos_ev_mouse *m = (struct glos_ev_mouse *)ev;
-            if (m->button)
-                printf("EV mouse %d,%d buttons=%u button=%u down=%u\n", m->x, m->y, m->buttons, m->button, m->down);
+            if (m->button && m->down)
+                printf("EV mouse %d,%d buttons=%u button=%u down=1 clicks=%u\n", m->x, m->y, m->buttons, m->button, m->clicks);
+            else if (m->button)
+                printf("EV mouse %d,%d buttons=%u button=%u down=0\n", m->x, m->y, m->buttons, m->button);
+        } else if (e->kind == GLOS_EV_TEXT) {
+            printf("EV text %u\n", ((struct glos_ev_text *)ev)->ch);
+        } else if (e->kind == GLOS_EV_PAD) {
+            struct glos_ev_pad *pe = (struct glos_ev_pad *)ev;
+            printf("EV pad %u present=%u lx=%d buttons=%x changed=%x\n", pe->index, pe->pad.present, pe->pad.lx,
+                   pe->pad.buttons, pe->changed);
         } else if (e->kind == GLOS_EV_WHEEL) {
             printf("EV wheel %d\n", ((struct glos_ev_wheel *)ev)->notches);
         } else if (e->kind == GLOS_EV_FOCUS) {

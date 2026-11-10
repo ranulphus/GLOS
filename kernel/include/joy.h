@@ -25,6 +25,9 @@ struct joy_pad {
 #define JOY_PADS        2
 
 void joy_pad(int n, const struct joy_pad *p);   /* USB pad n (0, 1); NULL: unplugged */
+int joy_pad_get(int n, struct joy_pad *out);    /* pad n as it is now: 1, or 0 if there is none */
+void joy_pad_hook(void (*fn)(int n, const struct joy_pad *p)); /* told of every joy_pad() (API 2.0's INPUT) */
+void joy_info(int *on, int *mode, u32 *range_us, u32 *pads);    /* for API 2.0's GAMEPORT */
 void joy_config(void);                  /* [joystick] port and range, from GLOS.CFG */
 void joy_source(int src, const struct joy_state *s);     /* a source's state; NULL: the source is gone */
 int joy_virtual(void);                  /* 201h is GLOS's now (else the PC's own, passed through) */

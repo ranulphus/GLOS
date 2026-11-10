@@ -207,6 +207,37 @@ After that:
   - Loop A: APITEST with `--keys` and the mouse.
   - Pads are host-tested (`hid_test`, `xpad_test`), and checked on bench-g400 by hand at the step's merge.
 
+**Step 3 as built (2026-11-10):**
+- **Files:** `kernel/app/api2in.c` (INPUT's calls, the pads' news); the desktop's input (`kernel/wm/deskin.c`:
+  repeats told, presses counted, the capture); the game port (`kernel/vm/vjoy.c`: pads readable and told of).
+- **The calls:** KEYS, CAPTURE, PADS, GAMEPORT, and MODE (new: how the app takes its keys).
+- **The events:** KEY has `repeat`; MOUSE has `clicks`; TEXT and PAD are new.
+- **Where it differs from `api-2.md` and from this plan:**
+  1. **Raw keys are a mode of the app** (MODE's `GLOS_INPUT_RAW`), not a flag on each event: no repeats and no
+     TEXT while it is on.
+  2. **TEXT comes for every character typed** (20h and above) unless the app is in raw mode, after the key's KEY
+     event, which still carries the character.
+  3. **CAPTURE is the mouse without a button held:** a window already has the mouse from a press in it until every
+     button is up. CAPTURE gives a window every movement and press wherever the pointer is, until it lets go, for
+     menus and drop-down lists. A press elsewhere then changes no focus.
+  4. **Presses are counted** (`clicks`: 1, 2, 3) by `[input] double_click`'s time and 4 pixels.
+  5. **Pads are as the kernel has them today:** two, each with a left stick (the direction buttons folded into
+     it), a right stick where it has one, and up to 16 buttons; axes -127 to 127. Triggers as axes, the direction
+     buttons apart and more pads come with the drivers' work (phase H). A pad's coming and going is told to every
+     app that asked; its changes to the app with the focus.
+  6. **GAMEPORT only reads.** Which pad feeds which joystick is fixed (the gamepad plan's J6); `[joystick] port` and
+     `range` are settings, set through SETTINGS (step 5).
+  7. **The locks told are Caps and Num.**
+- **For tests:** `glos joy pad=N,LX,LY,RX,RY,BUTTONS` (or `pad=N,off`) gives the kernel a pad's state as USB would,
+  since Loop A's PCs have no USB pads.
+- **Tests:**
+  - **Loop A:** APITEST's INPUT cases (the keyboard's state, the mode, pads, the game port, capture and its
+    refusals); `APITEST win` under the keys and mouse: a double click, raw keys with no text, the mouse captured
+    (a press far outside is the window's and moves no focus), a pad plugged in, changed and taken out.
+  - **The suites the change touches,** all green: joy, win, desk, apps, gui, native, console, vnc.
+  - **By hand, at the bench:** a real pad's events, with the owner (the kernel's part is as the gamepad plan
+    tested it).
+
 ### 4. THREAD
 
 - **What:**

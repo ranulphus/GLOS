@@ -136,6 +136,10 @@ void joy_source(int src, const struct joy_state *s)
     update();
 }
 
+static void (*pad_hook)(int n, const struct joy_pad *p);
+
+void joy_pad_hook(void (*fn)(int n, const struct joy_pad *p)) { pad_hook = fn; }
+
 void joy_pad(int n, const struct joy_pad *p)
 {
     if (n < 0 || n >= JOY_PADS)
@@ -144,6 +148,26 @@ void joy_pad(int n, const struct joy_pad *p)
     if (p)
         j.pad[n] = *p;
     update();
+    if (pad_hook)
+        pad_hook(n, p);
+}
+
+int joy_pad_get(int n, struct joy_pad *out)
+{
+    u32 f = irq_save();
+    int have = n >= 0 && n < JOY_PADS && j.have_pad[n];
+    if (have)
+        *out = j.pad[n];
+    irq_restore(f);
+    return have;
+}
+
+void joy_info(int *on, int *mode, u32 *range_us, u32 *pads)
+{
+    *on = j.on;
+    *mode = j.cfg_port;
+    *range_us = j.range_us;
+    *pads = (j.have_pad[0] ? 1u : 0u) | (j.have_pad[1] ? 2u : 0u);
 }
 
 int joy_virtual(void) { return j.on; }
@@ -352,6 +376,35 @@ int joy_command(const char *args, char *why, u32 room)
         p++;
     if (!strcmp(p, "off")) {
         joy_source(JOY_SRC_SSH, 0);
+        return 0;
+    }
+    if (!strncmp(p, "pad=", 4)) {               /* a pad as USB would give it (for tests: Loop A has no USB pads): */
+        struct joy_pad jp;                      /* pad=N,LX,LY,RX,RY,BUTTONS (buttons in hex) or pad=N,off */
+        u32 v[6] = { 0 }, n = 0;
+        p += 4;
+        if (*p >= '0' && *p < '0' + JOY_PADS && !strcmp(p + 1, ",off")) {
+            joy_pad(*p - '0', 0);
+            return 0;
+        }
+        while (n < 6) {
+            u32 x = 0, digits = 0;
+            for (; (*p >= '0' && *p <= '9') || (n == 5 && ((*p | 32) >= 'a' && (*p | 32) <= 'f')); p++, digits++)
+                x = x * (n == 5 ? 16 : 10) + (u32)(*p <= '9' ? *p - '0' : (*p | 32) - 'a' + 10);
+            if (!digits)
+                break;
+            v[n++] = x;
+            if (*p != ',')
+                break;
+            p++;
+        }
+        if (n != 6 || *p || v[0] >= JOY_PADS || v[1] > 255 || v[2] > 255 || v[3] > 255 || v[4] > 255 || v[5] > 0xFFFF) {
+            ksnprintf(why, room, "pad= takes N,LX,LY,RX,RY,BUTTONS (0-1, four of 0-255, hex) or N,off");
+            return -1;
+        }
+        jp.lx = (u8)v[1], jp.ly = (u8)v[2], jp.rx = (u8)v[3], jp.ry = (u8)v[4];
+        jp.right = 1;
+        jp.buttons = (u16)v[5];
+        joy_pad((int)v[0], &jp);
         return 0;
     }
     while (*p) {

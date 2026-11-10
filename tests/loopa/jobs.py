@@ -4028,6 +4028,20 @@ def api_win_case(profile, vcard, card):
         checks["up"] = until(lambda d: d["win"] == (40, 40, 200, 120, True) and d["focus"] == d.get("id"))
         agent.ssh("glos key 0x1E")
         click(40 + B + 50, 40 + B + T + B + 30)
+        # INPUT (step 3): a double click; raw keys (no text); the mouse captured (a press far outside is the
+        # window's, and moves no focus) and let go; a pad plugged in, changed, taken out (glos joy pad=).
+        point(40 + B + 80, 40 + B + T + B + 50)         # (elsewhere: not a third press of the click above)
+        agent.ssh("glos key mouse:0:0:1,mouse:0:0:0,mouse:0:0:1,mouse:0:0:0")
+        agent.ssh("glos key 0x13")              # r: raw
+        agent.ssh("glos key 0x1E")
+        agent.ssh("glos key 0x13")              # r: not raw
+        agent.ssh("glos key 0x2E")              # c: captured
+        click(500, 300)
+        checks["capture-focus"] = until(lambda d: d["focus"] == d.get("id"), 5)
+        agent.ssh("glos key 0x2E")              # c: let go
+        agent.ssh("glos joy pad=0,128,128,128,128,0")
+        agent.ssh("glos joy pad=0,255,128,128,128,1")
+        agent.ssh("glos joy pad=0,off")
         point(40 - 2, 100)                      # its left edge, from just outside the frame
         agent.ssh("glos mouse 0 0 1")
         agent.ssh("glos mouse -20 0")
@@ -4048,8 +4062,16 @@ def api_win_case(profile, vcard, card):
         click(20 + 220 + B - 9, 40 + B + 9)             # its close box
         o, e = p.communicate(timeout=120)
         out = o.decode("latin-1").replace("\r", "").split("\n")
-        want = ["EV focus 1", "EV key 01E ch=97 down=1 mods=0", "EV key 01E ch=0 down=0 mods=0",
-                "EV mouse 50,30 buttons=1 button=1 down=1", "EV mouse 50,30 buttons=0 button=1 down=0", "EV size 220x120",
+        want = ["EV focus 1", "EV key 01E ch=97 down=1 mods=0", "EV text 97", "EV key 01E ch=0 down=0 mods=0",
+                "EV mouse 50,30 buttons=1 button=1 down=1 clicks=1", "EV mouse 50,30 buttons=0 button=1 down=0",
+                "EV mouse 80,50 buttons=1 button=1 down=1 clicks=1", "EV mouse 80,50 buttons=0 button=1 down=0",
+                "EV mouse 80,50 buttons=1 button=1 down=1 clicks=2", "EV mouse 80,50 buttons=0 button=1 down=0",
+                "EV text 114", "EV raw 1 r=0", "EV key 01E ch=97 down=1 mods=0", "EV key 01E ch=0 down=0 mods=0",
+                "EV key 013 ch=114 down=1 mods=0", "EV raw 0 r=0", "EV text 99", "EV capture 1 r=0",
+                "EV mouse %d,%d buttons=1 button=1 down=1 clicks=1" % (500 - 41, 300 - 60),
+                "EV mouse %d,%d buttons=0 button=1 down=0" % (500 - 41, 300 - 60), "EV capture 0 r=0",
+                "EV pad 0 present=1 lx=0 buttons=0 changed=0", "EV pad 0 present=1 lx=127 buttons=1 changed=1",
+                "EV pad 0 present=0 lx=0 buttons=0 changed=1", "EV size 220x120",
                 "EV size 638x439", "EV state 3", "EV size 220x120", "EV state 1", "EV state 2", "EV focus 0", "EV state 1",
                 "EV focus 1", "EV key 023 ch=104 down=1 mods=0", "EV woke", "EV key 01E ch=97 down=1 mods=0", "EV close",
                 "WIN-OK closed"]
@@ -4057,7 +4079,11 @@ def api_win_case(profile, vcard, card):
         for line in out:                        # each wanted line, in this order (others may lie between)
             if k < len(want) and line == want[k]:
                 k += 1
+        texts = [l for l in out if l.startswith("EV text")]
         checks["events"] = p.returncode == 40 and k == len(want)
+        checks["texts"] = texts == ["EV text 97", "EV text 114", "EV text 99", "EV text 99", "EV text 104", "EV text 97"]
+        if not checks["texts"]:
+            info += " texts=%r" % texts
         if not checks["events"]:
             info += " rc=%s got %d of %d: %r" % (p.returncode, k, len(want), out[-24:])
         p = None

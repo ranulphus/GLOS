@@ -42,6 +42,9 @@ struct api2 {
     u32 qh, qt;                         /* bytes taken and bytes put, ever growing (the ring's offsets mod A2_QBYTES) */
     u32 last_at;                        /* where the event put last begins ... */
     u8 last_merge;                      /* ... and whether one like it may take its place (a mouse's movement) */
+    u32 in_flags;                       /* GLOS_INPUT_: how it takes its keys (INPUT's MODE) */
+    u8 pads_events;                     /* it asked for GLOS_EV_PAD */
+    struct glos_pad pad[GLOS_PADS];     /* each pad as it was last told of it */
     u32 ndrop, ndrop1x;                 /* events lost to a full queue; 1.x events with no 2.0 form yet */
     char name[32];                      /* INIT's */
     char help[32];
@@ -75,7 +78,11 @@ extern const struct propdef api2_win_props[];
 extern const u32 api2_win_nprops;
 int api2_win(struct app *a, struct trapframe *tf, u32 n);       /* WIN's calls */
 int api2_draw(struct app *a, struct trapframe *tf, u32 n);      /* DRAW's */
-int api2_screen(struct trapframe *tf);                          /* DRAW's SCREEN, for any program */
+int api2_screen(struct trapframe *tf);
+
+/* api2in.c */
+int api2_input(struct app *a, struct trapframe *tf, u32 n);     /* INPUT's calls */
+void api2_input_init(void);                                     /* (once: the pads' news comes from now on) */                          /* DRAW's SCREEN, for any program */
 int api2_win_close(struct app *a, u32 id);                      /* CLOSE of a window's handle */
 
 #endif

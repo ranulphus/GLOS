@@ -82,6 +82,9 @@ struct desk_blit {
     s32 w, h, x, y;                     /* its size; where it goes in the client area */
     u32 palette;                        /* an 8-bit source's 256 colours (0x00RRGGBB), or 0: GLOS's palette */
 };
+int desk_win_capture(struct app *a, u32 id, int on);    /* (API 2.0's INPUT CAPTURE) */
+void desk_keys(u8 down[64], u32 *mods, u32 *locks);     /* the keyboard as the desktop has it: GLOS_MOD_, GLOS_LOCK_ */
+struct app *deskin_focus_app(void);     /* the app whose window has the focus, or 0 (any thread: a look) */
 int desk_win_blit(struct app *a, u32 id, const struct desk_blit *b);    /* (API 2.0's DRAW BLIT) */
 #define DESK_E_REFUSED 19               /* (API 2.0's GLOS_E_REFUSED; its GLOS_E_HANDLE is 1.x's GLOS_E_WINDOW, 6) */
 #define DESK_EV_STATE 100               /* (to app_event, for API 2.0's apps alone) a window's state changed: key WS_ */

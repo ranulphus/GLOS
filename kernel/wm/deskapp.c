@@ -714,6 +714,22 @@ void deskapp_hung(struct wm *m)
     }
 }
 
+int desk_win_capture(struct app *a, u32 id, int on)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *w = own(m, a, id);
+    int r = !w ? GLOS_E_WINDOW : deskin_capture(m, w, on) != 0 ? DESK_E_REFUSED : 0;
+    desk_unlock();
+    return r;
+}
+
+void desk_keys(u8 down[64], u32 *mods, u32 *locks)
+{
+    desk_lock();
+    deskin_keys(down, mods, locks);
+    desk_unlock();
+}
+
 /* API 2.0's DRAW BLIT: the app's pixels, in a format of its own, into the window's (the screen's format) and to
    the screen. On the app's thread: its memory is read a row at a time. */
 int desk_win_blit(struct app *a, u32 id, const struct desk_blit *b)

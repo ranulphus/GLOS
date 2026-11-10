@@ -82,6 +82,9 @@ GLOS's, and counts reads, scaled by the trap's measured cost, while an exclusive
 A source sets up to four axes (0-255, 128 the centre) and four buttons:
 - **`glos joy`** over SSH: `glos joy a=128,128 b=0,255 buttons=1010`, or `glos joy` alone to print the live
   state. Loop A's source, and the bench's when nobody holds a pad.
+  `glos joy pad=N,LX,LY,RX,RY,BUTTONS` (axes 0-255, buttons in hex) and `pad=N,off` give the kernel a USB pad's
+  state as the USB stack would (v1, phase B step 3): Loop A's way to try what follows a pad, API 2.0's pad
+  events among it.
 - **USB pads** (J4-J6).
 
 The default mapping, overridable with `[joystick] map=`:

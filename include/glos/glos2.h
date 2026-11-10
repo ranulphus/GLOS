@@ -59,6 +59,13 @@ int glos_screen(struct glos_screen *s);
    or NULL: GLOS's palette) into the window's client area at (x, y), and to the screen. */
 int glos_blit(glos_handle w, int x, int y, const void *pixels, int pw, int ph, unsigned pitch, const struct glos_format *format,
               const unsigned *palette);
+/* ---- input (INPUT) */
+int glos_keys(struct glos_keys *k);                     /* the keyboard as it is now */
+int glos_capture(glos_handle w, int on);                /* the mouse to w, wherever the pointer is; or let go */
+int glos_pads(struct glos_pads *p, int events);         /* the pads as they are; events: GLOS_EV_PAD from now on */
+int glos_gameport(struct glos_gameport *g);
+int glos_input_mode(unsigned flags);                    /* GLOS_INPUT_ */
+
 /* A linear address GLOS gave (a window's pixels) as a pointer; NULL if the program can't have near pointers. It
    moves when the program's memory grows: asked for again after anything that may have allocated (or the program
    starts with _CRT0_FLAG_UNIX_SBRK, and it stays). */

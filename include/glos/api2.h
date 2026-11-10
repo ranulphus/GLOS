@@ -529,8 +529,76 @@ struct glos_winvram {
 };
 #define GLOS_OWN_PIXELS 0xFFFFFFFFu
 
-/* ================================================================== INPUT (03h): keys, the mouse
- * (Phase B's step 3 adds the keyboard's state, raw keys, text, the mouse's capture, double clicks and pads.) */
+/* ================================================================== INPUT (03h): keys, text, the mouse, pads */
+#define GLOS_INPUT_KEYS     GLOS_FN(GLOS_AREA_INPUT, 0) /* struct glos_keys: the keyboard as it is now */
+#define GLOS_INPUT_CAPTURE  GLOS_FN(GLOS_AREA_INPUT, 1) /* struct glos_capture: the mouse to one window, wherever
+                                                           the pointer is */
+#define GLOS_INPUT_PADS     GLOS_FN(GLOS_AREA_INPUT, 2) /* struct glos_pads: the pads there are, as they are now */
+#define GLOS_INPUT_GAMEPORT GLOS_FN(GLOS_AREA_INPUT, 3) /* struct glos_gameport: the game port DOS programs see */
+#define GLOS_INPUT_MODE     GLOS_FN(GLOS_AREA_INPUT, 4) /* struct glos_input_mode: how the app takes its input */
+
+/* KEYS: which keys are down, by their codes (a set 1 scan code, 100h added for those with an E0 prefix). */
+struct glos_keys {
+    unsigned size;
+    unsigned char down[64];     /* bit (code & 7) of byte (code >> 3): that key is down */
+    unsigned mods;              /* GLOS_MOD_: what is held */
+    unsigned locks;             /* GLOS_LOCK_: what is on */
+};
+#define GLOS_LOCK_CAPS 1
+#define GLOS_LOCK_NUM  2
+#define GLOS_KEY_DOWN(k, code) (((k)->down[(code) >> 3] >> ((code) & 7)) & 1)
+
+/* CAPTURE: from now until it is let go, every movement and button of the mouse is this window's, wherever the
+   pointer is (x and y still count from its client area's corner, and may lie outside it), and a press elsewhere
+   changes no focus and moves no window: for a menu or a list dropped down, which closes on a press outside itself.
+   It is let go by on 0, when the window goes or is hidden, and when the focus leaves the app. (Without it, a
+   window has the mouse from a press in its client area until every button is up, as always.) */
+struct glos_capture {
+    unsigned size;
+    glos_handle handle;
+    unsigned on;                /* 1 capture, 0 let go */
+};
+
+/* PADS: game pads and joysticks (USB's; phase H adds kinds). */
+struct glos_pad {
+    unsigned present;           /* 1: one is plugged in here */
+    unsigned flags;             /* GLOS_PAD_ */
+    int lx, ly;                 /* the left stick, -127 to 127: right and down positive, 0 its rest. A pad's
+                                   direction buttons move it too */
+    int rx, ry;                 /* the right stick, if it has one */
+    unsigned buttons;           /* bit n: its button n + 1 is down. An Xbox pad's: 1 A, 2 B, 3 X, 4 Y, 5 LB, 6 RB,
+                                   7 View or Back, 8 Menu or Start, 9 and 10 the sticks' clicks; others: as the
+                                   pad numbers them */
+};
+#define GLOS_PAD_RIGHT 1        /* it has a right stick */
+#define GLOS_PADS 2
+struct glos_pads {
+    unsigned size;
+    unsigned flags;             /* GLOS_PADS_EVENTS: GLOS_EV_PAD from now on (0: no longer) */
+    struct glos_pad pad[GLOS_PADS];     /* -> */
+};
+#define GLOS_PADS_EVENTS 1
+
+/* GAMEPORT: the joystick port (201h) DOS programs read: GLOS's own while a pad is plugged in or [joystick] port
+   says so (SETTINGS), else the PC's. A lone pad is the whole port; of two, each is one joystick. */
+struct glos_gameport {
+    unsigned size;
+    unsigned virtual_on;        /* -> 1: GLOS answers the port now */
+    unsigned mode;              /* -> [joystick] port: 0 auto, 1 virtual, 2 off */
+    unsigned range;             /* -> [joystick] range: microseconds an axis's one-shot runs at its far end */
+    unsigned pads;              /* -> bit n: pad n feeds it */
+};
+
+/* MODE: how the app takes its keys. */
+struct glos_input_mode {
+    unsigned size;
+    unsigned set;               /* 1: `flags` are set; 0: only read */
+    unsigned flags;             /* GLOS_INPUT_ */
+};
+#define GLOS_INPUT_RAW 1        /* keys as they go down and up: no repeats while one is held, and no GLOS_EV_TEXT
+                                   (a piano's keys, a game's) */
+
+/* INPUT's events. */
 #define GLOS_EV_KEY    GLOS_EV(GLOS_AREA_INPUT, 1)      /* struct glos_ev_key: a key went down or up while the window
                                                            had the focus */
 #define GLOS_EV_MOUSE  GLOS_EV(GLOS_AREA_INPUT, 2)      /* struct glos_ev_mouse: the pointer moved in the window's
@@ -538,6 +606,13 @@ struct glos_winvram {
                                                            until every button is up, wherever the pointer goes */
 #define GLOS_EV_WHEEL  GLOS_EV(GLOS_AREA_INPUT, 3)      /* struct glos_ev_wheel: the wheel turned over the window's
                                                            client area, whether it has the focus or not */
+#define GLOS_EV_TEXT   GLOS_EV(GLOS_AREA_INPUT, 4)      /* struct glos_ev_text: a character was typed in the window
+                                                           (after the key's GLOS_EV_KEY): what a field takes as
+                                                           text, whatever keys made it */
+#define GLOS_EV_PAD    GLOS_EV(GLOS_AREA_INPUT, 5)      /* struct glos_ev_pad (no window: handle 0): a pad was
+                                                           plugged in or taken out (to every app that asked,
+                                                           GLOS_PADS_EVENTS), or changed (to the one with the
+                                                           focus) */
 #ifndef GLOS_MOD_SHIFT
 #define GLOS_MOD_SHIFT   1
 #define GLOS_MOD_CTRL    2
@@ -549,6 +624,18 @@ struct glos_ev_key {
     unsigned ch;                /* its character (Unicode) when it went down, 0 if it has none */
     unsigned mods;              /* GLOS_MOD_: what was held */
     unsigned down;              /* 1 pressed (again and again while it is held), 0 let go */
+    unsigned repeat;            /* 1: the keyboard repeating a key that is held */
+};
+struct glos_ev_text {
+    struct glos_ev ev;
+    unsigned ch;                /* the character (Unicode), 20h or above */
+    unsigned mods;
+};
+struct glos_ev_pad {
+    struct glos_ev ev;
+    unsigned index;             /* which: 0 or 1 */
+    struct glos_pad pad;        /* as it is now */
+    unsigned changed;           /* its buttons that went down or up */
 };
 struct glos_ev_mouse {
     struct glos_ev ev;
@@ -558,6 +645,8 @@ struct glos_ev_mouse {
     unsigned button;            /* the one that changed, 0 for a movement */
     unsigned down;              /* ... pressed (1) or let go (0) */
     unsigned mods;
+    unsigned clicks;            /* a press: 1, or 2 for the second of a double click, 3 for the third of three
+                                   ([input] double_click's time, 4 pixels) */
 };
 struct glos_ev_wheel {
     struct glos_ev ev;

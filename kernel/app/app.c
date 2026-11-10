@@ -91,6 +91,16 @@ static struct {                                 /* the system VM's own, while th
 struct app *app_cur(void) { return current->user == TU_APP ? current->arg : 0; }
 struct app *app_pending(void) { return pending; }
 
+void app_each(void (*fn)(struct app *a, void *arg), void *arg)
+{
+    u32 f = irq_save();
+    struct app *a;
+    for (a = apps; a; a = a->next)
+        if (a->ctx && !a->kill)
+            fn(a, arg);
+    irq_restore(f);
+}
+
 static void wr16(u32 lin, u32 v)
 {
     vm_wr8(lin, (u8)v);
