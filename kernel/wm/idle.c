@@ -91,6 +91,10 @@ int idle_turn(int screen, int busy)
     ask = 0;
     if (on && (!screen || want == 2 || (s32)(last_input - since) > 0)) {
         on = 0;
+        if (want == 2) {                /* (ended by hand: the wait starts again, as after a key) */
+            last_input = now;
+            pretend = 0;
+        }
         if (off_screen) {
             off_screen = 0;
             display_power_post(DISPLAY_POWER_ON);

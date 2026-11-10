@@ -4192,6 +4192,8 @@ def api_set_case(profile, vcard, card):
         agent.ssh("glos idle +200")
         checks["saver-again"] = saver("on")
         checks["wake"] = agent.ssh("glos idle wake")[0] == 0 and saver("off")
+        time.sleep(3)                           # (ended by hand, it stays off: its wait starts again)
+        checks["stays-off"] = idle()[:1] == ("off",)
         checks["by-hand"] = agent.ssh("glos idle saver")[0] == 0 and saver("on")
         # The screen's power: off [saver] power minutes after the saver came on, where the card can; on with its end.
         agent.ssh("glos config set saver power 1")
