@@ -29,3 +29,9 @@ ECMTEST_SHA256  := 7a2423b608efc9652e2a6642a29a4759ea5976c147bb6df82b9ecd717bf18
 # made into C:\GLOS\CERTS.DAT, HTTPS's trust anchors (tools/certs/mkcerts.c, M10 step C; PRD D59).
 CACERT_URL    := https://curl.se/ca/cacert-2026-09-25.pem
 CACERT_SHA256 := a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
+
+# DOSLFN 0.41f (Henrik Haftmann, Jason Hood; freeware with sources; FreeDOS 1.3's package): the long-name driver
+# Loop A's long-name tests load before GLOS (jobs.py api_lfn_case, phase B step 7). A DOS program beside GLOS, as
+# a user's own would be; none of it is in GLOS.
+DOSLFN_URL    := https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.3/drivers/doslfn.zip
+DOSLFN_SHA256 := b96e93bb21c1cb4d9b6e37e76f96174345c027ce354aae9c09b38713e7114377

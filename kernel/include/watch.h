@@ -4,6 +4,8 @@
 #include "types.h"
 
 int watch_add(void *app, const char *dir, u32 *id);    /* 0, or a GLOS_E_ */
+int watch_add_file(void *app, const char *dir, const char *file, u32 *id);   /* ... or of one file in it ("": all) */
+void watch_drive(char letter);                  /* a change somewhere on that drive (0: on any) */
 int watch_remove(void *app, u32 id);
 void watch_app_gone(void *app);
 void watch_path(const char *path);              /* a change there (NULL: somewhere) */

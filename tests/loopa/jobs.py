@@ -3957,15 +3957,17 @@ def api_case(profile, boot):
     calls any program may make before INIT, then, an app, every case of each area built so far. Every case
     ok, the app's end with code 0, GLOS's with it, the vectors as they were."""
     tag = "%s-%s" % (profile, boot)
-    args = ["--machine", profile, "--boot-cfg", boot, "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE"] + GLOS_FILES
-    for c in ["SERSAY HX-START api", "VECCHK save", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\APITEST.EXE",
+    # (step 7: a folder of 2,000 files made and listed; a scratch disk, the second, for the sectors written)
+    args = ["--machine", profile, "--boot-cfg", boot, "--scratch-hdd", "16", "--timeout", "1500",
+            "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE"] + GLOS_FILES
+    for c in ["SERSAY HX-START api", "VECCHK save", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\APITEST.EXE many 2000",
               "VECCHK check", "SERSAY HX-DONE 0"]:
         args += ["--cmd", c]
     st, serial = run("api-" + tag, args)
-    cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)", serial)
+    cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", serial)
     done = re.search(r"HX-APITEST done pass=(\d+) fail=(\d+)", serial)
-    bad_cases = [c for c, k in cases if k != "1"]
-    checks = {"status": st == "PASS", "done": bool(done) and done.group(2) == "0", "cases": len(cases) >= 40,
+    bad_cases = [c + w.rstrip() for c, k, w in cases if k != "1"]
+    checks = {"status": st == "PASS", "done": bool(done) and done.group(2) == "0", "cases": len(cases) >= 130,
               "app": bool(re.search(r"GLOS-APP start id=1 prog=APITEST.EXE", serial)),
               "end": bool(re.search(r"GLOS-APP end id=1 prog=APITEST.EXE code=0 ", serial)),
               "exit": "GLOS-EXIT code=0" in serial, "vectors": "HX-VECCHK ok" in serial,
@@ -3973,6 +3975,36 @@ def api_case(profile, boot):
     bad = [k for k, v in checks.items() if not v]
     info = " cases=%d" % len(cases) + (" failed-cases=" + ",".join(bad_cases) if bad_cases else "")
     return "  %-22s %s%s" % ("api-" + tag, "PASS" if not bad else "FAIL",
+                             info + ("" if not bad else " failed: " + " ".join(bad))), not bad
+
+
+LFN = os.path.join(os.environ.get("MGA_CACHE", os.path.expanduser("~/.cache/mga-glide")), "glos", "doslfn")
+
+
+def api_lfn_case(profile, boot):
+    """Long file names through FS (APITEST lfn; phase B step 7): DOSLFN 0.41f (FreeDOS's package, pinned) loaded
+    before GLOS, as a user's own boot would have it. GLOS passes DOS's long-name calls through: the drive says it
+    has them; a folder and files made by their long names are listed with both names, and by their 8.3 names
+    when asked; INFO takes long paths; a watch of the long-named folder is told of a file made there. DOSLFN
+    stays resident under GLOS and after it (its interrupts hooked after GLOS's are passed on when GLOS leaves)."""
+    tag = "%s-%s" % (profile, boot)
+    args = ["--machine", profile, "--boot-cfg", boot, "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
+            "--file", os.path.join(LFN, "DOSLFN.COM") + "=/TEST/DOSLFN.COM",
+            "--file", os.path.join(LFN, "CP437UNI.TBL") + "=/TEST/CP437UNI.TBL"] + GLOS_FILES
+    for c in ["SERSAY HX-START apilfn", "C:\\TEST\\DOSLFN.COM", "VECCHK save", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\APITEST.EXE lfn",
+              "VECCHK check", "SERSAY HX-DONE 0"]:
+        args += ["--cmd", c]
+    st, serial = run("apilfn-" + tag, args)
+    cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", serial)
+    done = re.search(r"HX-APITEST done pass=(\d+) fail=(\d+)", serial)
+    bad_cases = [c + w.rstrip() for c, k, w in cases if k != "1"]
+    checks = {"status": st == "PASS", "done": bool(done) and done.group(2) == "0", "cases": len(cases) == 5,
+              "end": bool(re.search(r"GLOS-APP end id=1 prog=APITEST.EXE code=0 ", serial)),
+              "exit": "GLOS-EXIT code=0" in serial, "vectors": "HX-VECCHK ok" in serial,
+              "no-panic": "GLOS-PANIC" not in serial and "GLOS-CRASH" not in serial}
+    bad = [k for k, v in checks.items() if not v]
+    info = " cases=%d" % len(cases) + (" failed-cases=" + ";".join(bad_cases) if bad_cases else "")
+    return "  %-22s %s%s" % ("apilfn-" + tag, "PASS" if not bad else "FAIL",
                              info + ("" if not bad else " failed: " + " ".join(bad))), not bad
 
 
@@ -6872,6 +6904,7 @@ def main():
     if a.suite == "api":                        # (API 2.0: bf6 raw, the 486 with HIMEMX)
         cases = combos if (a.profile or a.boot) else [("bf6", "default"), ("486dx2", "himemx")]
         res = matrix(api_case, cases, a.jobs)
+        res += matrix(api_lfn_case, cases, a.jobs)      # ... and long names, with DOSLFN loaded before GLOS
         if not a.boot:                          # ... and its windows under the user's hands, on a Matrox card and VBE
             wins = [c for c in [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")] if not a.profile or c[0] in a.profile]
             res += matrix(api_win_case, wins, a.jobs)

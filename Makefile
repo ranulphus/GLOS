@@ -130,6 +130,8 @@ host-test-run:
 	  $(GFX_SRCS) kernel/lib/png.c $(CFG_SRCS) $(CP_SRCS) && build/host/gui_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Itests/host/kstub -Ikernel/include -Iinclude \
 	  -o build/host/cfg_test tests/host/cfg_test.c $(CFG_SRCS) && build/host/cfg_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/fslist_test \
+	  tests/host/fslist_test.c kernel/app/fslist.c $(CP_SRCS) && build/host/fslist_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iinclude -o build/host/tz_test tests/host/tz_test.c sdk/config/tz.c \
 	  && build/host/tz_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iinclude -o build/host/cp_test tests/host/cp_test.c $(CP_SRCS) \
@@ -313,11 +315,11 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/api2win.c kernel/app/api2in.c kernel/app/api2thr.c kernel/app/api2set.c kernel/app/api2clip.c kernel/app/clipstore.c kernel/app/tsync.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/theme.c kernel/wm/idle.c kernel/wm/dnd.c kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
-KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS)) build/kernel/sdk_cfg.o build/kernel/sdk_tz.o build/kernel/sdk_region.o
+         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/api2win.c kernel/app/api2in.c kernel/app/api2thr.c kernel/app/api2set.c kernel/app/api2clip.c kernel/app/api2fs.c kernel/app/fslist.c kernel/app/clipstore.c kernel/app/tsync.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/theme.c kernel/wm/idle.c kernel/wm/dnd.c kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
+KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS)) build/kernel/sdk_cfg.o build/kernel/sdk_tz.o build/kernel/sdk_region.o build/kernel/sdk_cp.o build/kernel/sdk_cp_tables.o
 # GLOS.CFG's schema (sdk/config/cfg.c, include/glos/config.h; M9) and time zones (sdk/config/tz.c; M10): shared
 # with the loader and the Control Panel.
-build/kernel/sdk_cfg.o build/kernel/sdk_tz.o build/kernel/sdk_region.o: build/kernel/sdk_%.o: sdk/config/%.c include/glos/config.h include/glos/tz.h include/glos/region.h
+build/kernel/sdk_cfg.o build/kernel/sdk_tz.o build/kernel/sdk_region.o build/kernel/sdk_cp.o build/kernel/sdk_cp_tables.o: build/kernel/sdk_%.o: sdk/config/%.c include/glos/config.h include/glos/tz.h include/glos/region.h include/glos/cp.h
 	@mkdir -p $(dir $@)
 	$(Q)echo "  KCC     $<"
 	$(Q)$(HOST_CC) $(KCFLAGS) -MMD -MP -c -o $@ $<
@@ -401,7 +403,7 @@ loopa-mem: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE build/ow/dos/
 loopa-xfer: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py xfer -j $(JOBS)
 # API 2.0's conformance (phase B): APITEST as GLOS.EXE /RUN's app, every case of the areas built so far.
-loopa-api: all build/dj/APITEST.EXE check-deps
+loopa-api: all build/dj/APITEST.EXE doslfn check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py api -j $(JOBS)
 # An app's own threads (phase B step 4): THRTEST through the agent.
 loopa-thr: all dos-tests build/dj/THRTEST.EXE check-deps
@@ -906,6 +908,16 @@ $(GLOS_HX)/.hdpmi16: tools/setup/versions.mk
 	$(Q)tools/setup/fetch.sh $(HXRT_URL) $(HXRT_SHA256) $(MGA_CACHE)/dl/HXRT223.zip
 	$(Q)unzip -p $(MGA_CACHE)/dl/HXRT223.zip BIN/HDPMI16.EXE > $(GLOS_HX)/HDPMI16.EXE
 	$(Q)unzip -p $(MGA_CACHE)/dl/HXRT223.zip BIN/HDPMI16i.EXE > $(GLOS_HX)/HDPMI16I.EXE
+	$(Q)touch $@
+# DOSLFN and its code page table, from FreeDOS's pinned package (phase B step 7's long-name tests).
+GLOS_LFN := $(MGA_CACHE)/glos/doslfn
+.PHONY: doslfn
+doslfn: $(GLOS_LFN)/.unpacked
+$(GLOS_LFN)/.unpacked: tools/setup/versions.mk
+	@mkdir -p $(GLOS_LFN)
+	$(Q)tools/setup/fetch.sh $(DOSLFN_URL) $(DOSLFN_SHA256) $(MGA_CACHE)/dl/doslfn-041f.zip
+	$(Q)unzip -p $(MGA_CACHE)/dl/doslfn-041f.zip BIN/DOSLFN.COM > $(GLOS_LFN)/DOSLFN.COM
+	$(Q)unzip -p $(MGA_CACHE)/dl/doslfn-041f.zip BIN/CP437UNI.TBL > $(GLOS_LFN)/CP437UNI.TBL
 	$(Q)touch $@
 # TPX (Turbo Pascal 7's protected-mode IDE) and its RTM, from $(BORLAND_DIR) (private: copied into the
 # cache, which the dev container mounts, and never into the repository).

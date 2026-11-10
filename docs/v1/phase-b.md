@@ -440,6 +440,44 @@ After that:
     DOSLFN, a watched file changed, sectors read on a scratch disk;
   - `loopa-console` unchanged.
 
+**Step 7 as built** (2026-11-10):
+
+- **FS's calls** (`kernel/app/api2fs.c`): LIST, INFO, DRIVES, WATCH, SECTORS. Handles: a listing
+  (`GLOS_HK_LIST`, new) and a watch (`GLOS_HK_WATCH`). Event: `GLOS_EV_FS`.
+- **A batch** (`app_batch`, `kernel/app/app.c`): the VM thread makes all of a call's DOS and BIOS calls in one
+  turn, in the app's own DOS context. A batch borrows 1 KB of DOS's memory for as long.
+- **LIST** gives entries one after another in the app's buffer (a record each: attributes, size, date and time,
+  the 8.3 name, the name), 512 a batch at most. A listing is gone at the folder's last batch.
+- **Names are UTF-8** through the region's code page (`sdk/config/cp.c`, now the kernel's too).
+- **Long names** where INT 21h 71A0h answers for the drive: LIST and INFO use DOS's long-name finds and give
+  both names. GLOS answers none of those calls itself.
+- **WATCH** takes a file too; changes made through DOS's long-name calls are seen (they mark every watch on
+  the drive: the path may name the folder another way than the watcher did).
+- **SECTORS** goes through INT 13h on the VM thread, where the disk cache sees every call. One sector a call
+  to the BIOS, 32 a call to GLOS.
+- **Where it differs from the plan and from `api-2.md`:**
+  1. **DOSLFN is loaded by the test itself** (`C:\TEST\DOSLFN.COM` before GLOS, as a user's own boot would
+     have it), from FreeDOS 1.3's package, pinned in `tools/setup/versions.mk`. No boot variant in RetroGPU's
+     harness was needed, so nothing changes there.
+  2. **FEATURES doesn't say whether long names are there:** a drive does (`GLOS_DRIVE_LONG`), since a driver
+     answers a drive at a time, and LIST says of each listing.
+  3. **A missing folder** is `GLOS_E_ARGUMENT`; an empty one is no entries.
+  4. **Dates are DOS's own** (a packed date and time, local), not seconds.
+  5. **DRIVES asks a floppy or a CD for nothing** unless that drive is asked for by its letter: listing the
+     drives never spins one. A changed floppy is told by its serial number, which the app compares.
+  6. **A RAM disk is known by its label** (MS-RAMDRIVE, RAMDISK, RDV, XMSDSK, VDISK, SRDISK): DOS has no
+     better way to say.
+  7. **Writes to GLOS's own disk are refused:** the first hard disk, and the floppy GLOS was started from.
+     Which BIOS disk a DOS drive is on is not worked out more finely than that.
+  8. **INFO takes 64 paths at most.**
+- **Tests:**
+  - **Host:** `fslist_test` (both of DOS's find records, the packing into batches, names through the code
+    pages).
+  - **Loop A:** APITEST's FS cases (a folder of 2,000 files made and listed in small and in large batches;
+    a listing closed early; several files' details; the drives; a folder's and a file's watch; sectors read
+    from the first disk, refused for writing there, written and read back on a scratch disk); `APITEST lfn`
+    with DOSLFN loaded (`api_lfn_case`).
+
 ### 8. SHELL
 
 - **The tray and notifications:**

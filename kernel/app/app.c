@@ -663,6 +663,26 @@ static int rm_call_app(struct app *a, struct trapframe *from, struct rmregs *r, 
     }
 }
 
+int app_batch(struct app *a, void (*fn)(struct app *a, void *arg), void *arg, int bios)
+{
+    int first = current == a->thread;
+    if (first)
+        gpu_safe_begin(a);                      /* (as a DOS call: its turn with the engine may end) */
+    if (dos_lock(a) != 0) {
+        if (first)
+            gpu_safe_end(a);
+        return -1;
+    }
+    a->c.batch = fn;
+    a->c.batch_arg = arg;
+    a->c.bios = bios != 0;
+    app_wait(a, AC_BATCH);
+    dos_unlock(a);
+    if (first)
+        gpu_safe_end(a);
+    return 0;
+}
+
 void app_end(struct app *a, u32 code)
 {
     gpu_app_unlock(a);                          /* (its turn with the engine ends with it: nobody waits for an end) */
@@ -1039,6 +1059,10 @@ static void serve(struct app *a)
                 }
             }
         }
+    } else if (a->call == AC_BATCH) {           /* many calls in this one turn (app_batch) */
+        a->ncalls++;
+        a->c.batch(a, a->c.batch_arg);
+        a->result = 0;
     } else {                                    /* its end: INT 21h 4Ch as the program; DOS doesn't come back, */
         memset(&r, 0, sizeof r);                /* terminated() ends the call */
         r.eax = 0x4C00 | (a->code & 0xFF);
@@ -1069,6 +1093,17 @@ static void serve(struct app *a)
     thread_wake(&a->tq);                        /* (its end: its first thread may be waiting there for it) */
 }
 
+/* In a batch (the VM thread, the app adopted): one real-mode interrupt, on the stub's spare stack. */
+int app_batch_int(u8 vec, struct rmregs *r)
+{
+    if (!adopted || adopted->dead || current != vm.thread)
+        return -1;
+    r->ss = vm.loader_cs;
+    r->sp = (u16)vm.bi->kill_sp;
+    r->flags = 2;
+    return rm_call(0, r, RM_INT, vec, 0, 0);
+}
+
 void app_vm_turn(void)
 {
     u32 t0 = timer_ticks(), n = 0;
@@ -1092,9 +1127,12 @@ void app_vm_turn(void)
    one that runs a program or ends one. Apps whose calls can't be made now wait on, in their order. */
 static int idle_safe(const struct app *a, int in_dos)
 {
-    u32 ah = (a->c.r->eax >> 8) & 0xFF;
+    u32 ah;
+    if (a->call == AC_BATCH)                    /* (a batch's DOS calls are all above 0Ch; its BIOS calls wait) */
+        return !in_dos || !a->c.bios;
     if (a->call != AC_RM)
         return 0;
+    ah = (a->c.r->eax >> 8) & 0xFF;
     if (a->c.vec == 0x21 && a->c.kind != RM_FAR)
         return ah != 0x00 && ah != 0x26 && ah != 0x31 && ah != 0x4B && ah != 0x4C && (!in_dos || ah > 0x0C);
     if (!in_dos)

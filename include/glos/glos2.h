@@ -109,6 +109,20 @@ int glos_dnd(glos_handle w, glos_handle data, unsigned effects, const unsigned *
 int glos_dnd_target(glos_handle w, unsigned effects, const unsigned *formats, unsigned count);
 int glos_dnd_answer(glos_handle w, unsigned effect);   /* what a drop where the pointer is would do (0: nothing) */
 
+/* ---- files and disks (FS) */
+#define GLOS_FS_NEXT(e) ((struct glos_fs_entry *)((char *)(e) + (e)->size))    /* the entry after e in a batch */
+/* A batch of a folder's entries into buf (room 1024 at least): *listing 0 to begin with path; it comes back as
+   the listing to go on with, or 0 after the folder's last batch. *count entries, one after another. A listing
+   not read to its end is closed with glos_close(). GLOS_E_ARGUMENT: no such folder. */
+int glos_fs_list(glos_handle *listing, const char *path, void *buf, unsigned room, unsigned *count, unsigned flags);
+/* count files' and folders' details at once: paths each ended by a NUL, an entry each in buf in their order
+   (attr GLOS_FA_NONE: no such file). */
+int glos_fs_info(const char *paths, unsigned count, void *buf, unsigned room, unsigned flags);
+int glos_fs_drives(unsigned drive, struct glos_fs_drive *out, unsigned room, unsigned *count);  /* drive 0: all */
+glos_handle glos_fs_watch(const char *path);            /* GLOS_EV_FS when the folder or the file changes; 0 if
+                                                           refused */
+int glos_fs_sectors(struct glos_fs_sectors *s);         /* (size set here) */
+
 /* ---- threads (THREAD; docs/supervisor.md 12.7)
  *
  * A thread of the app's own runs fn(arg) on a stack libglos allocates (stack bytes: 0 for 64 KB, at least 16 KB),

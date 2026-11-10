@@ -109,6 +109,10 @@ void api2_clip_close(struct app *a, void *obj, int commit);    /* CLOSE of a tra
 void api2_dnd_gone(struct app *a, u32 win);                     /* an app (win 0), or a window of its, is no more */
 void api2_clip_init(void);                                      /* (once: the clipboard's changes told from now) */
 
+/* api2fs.c */
+int api2_fs(struct app *a, struct trapframe *tf, u32 n);       /* FS's calls */
+void api2_fs_close(struct app *a, int kind, void *obj, int ending);    /* CLOSE of a listing's or a watch's handle */
+
 /* api2set.c */
 int api2_settings(struct app *a, struct trapframe *tf, u32 n); /* SETTINGS' calls */
 int api2_idle(struct app *a, struct trapframe *tf, u32 n);     /* IDLE's */

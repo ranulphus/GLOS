@@ -59,6 +59,22 @@ void api2_event_1x(struct app *a, const struct glos_event *e)
     } u;
     u32 f = irq_save(), h = a->v2 ? win_handle(a, e->window) : 0;
     int merge = 0;
+    if (a->v2 && e->type == GLOS_EV_FILES) {    /* a watch's (kernel/dos/watch.c): FS's event, for its handle */
+        u32 i = 0, wh;
+        void *obj;
+        struct glos_ev ev;
+        memset(&ev, 0, sizeof ev);
+        while (handle_next(&a->v2->h, &i, &wh, &obj) == 0)
+            if (GLOS_HANDLE_KIND(wh) == GLOS_HK_WATCH && (u32)obj == e->key)
+                ev.handle = wh;
+        irq_restore(f);
+        if (ev.handle) {
+            ev.size = sizeof ev;
+            ev.kind = GLOS_EV_FS;
+            a2_post(a, &ev, 1);                 /* (one waiting already stands for this change too) */
+        }
+        return;
+    }
     irq_restore(f);
     if (!h) {                                   /* (not a window's, or one whose handle is closed already) */
         if (a->v2)

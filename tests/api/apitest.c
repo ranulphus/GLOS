@@ -17,7 +17,10 @@
  *                  event it is sent as a line on stdout (the test drives the
  *                  desktop with glos key and glos mouse), until the window
  *                  is closed: WIN-OK closed, exit code 40. */
+#include <io.h>
 #include <pc.h>
+#include <unistd.h>
+#include <sys/stat.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -744,6 +747,254 @@ static void clipboard(void)
     check("dnd-refused", ok, "e=%d", e);
 }
 
+/* FS (step 7): a folder's entries in batches, several files' details, the drives, watches, a disk's sectors. The
+   folder of many files is made here (C:\OUT\MANY: `many` files; 2,000 in Loop A). */
+static struct glos_fs_entry *entry_named(void *buf, unsigned count, const char *name)
+{
+    struct glos_fs_entry *e = buf;
+    unsigned i;
+    for (i = 0; i < count; i++, e = GLOS_FS_NEXT(e))
+        if (!strcmp(e->name, name))
+            return e;
+    return 0;
+}
+
+static void files(unsigned many)
+{
+    static unsigned char buf[16384], seen[4096 / 8];
+    static unsigned char sec[4 * 512], back[4 * 512];
+    static struct glos_fs_drive dr[26];
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_fs_entry *e;
+    struct glos_fs_sectors q;
+    glos_handle l = 0, w, w2;
+    unsigned count = 0, total = 0, batches = 0, i, n, t0, first_ms = 0, dups = 0, c = 0, a = 0, x;
+    char name[64];
+    int r, ok, fd;
+
+    /* A small folder in one batch: what DOS says of a file. */
+    r = glos_fs_list(&l, "C:\\TEST", buf, sizeof buf, &count, 0);
+    e = entry_named(buf, count, "APITEST.EXE");
+    ok = r == 0 && l == 0 && count >= 3 && e && e->bytes_lo > 100000 && e->bytes_hi == 0 && !(e->attr & GLOS_FA_FOLDER)
+         && (e->mtime >> 25) + 1980 >= 2026 && !e->short_name[0] && !(e->size & 3) && entry_named(buf, count, "GLOSK.BIN")
+         && !entry_named(buf, count, ".") && !entry_named(buf, count, "..");
+    check("fs-list", ok, "r=%d count=%u bytes=%u attr=%x year=%u", r, count, e ? e->bytes_lo : 0, e ? e->attr : 0,
+          e ? (e->mtime >> 25) + 1980 : 0);
+    r = glos_fs_list(&l, "C:\\NOSUCH.DIR", buf, sizeof buf, &count, 0);
+    mkdir("C:\\OUT\\EMPTY", 0777);
+    ok = r == GLOS_E_ARGUMENT && glos_fs_list(&l, "C:\\OUT\\EMPTY", buf, sizeof buf, &count, 0) == 0 && count == 0 && l == 0
+         && glos_fs_list(&l, "C:/TEST/", buf, sizeof buf, &count, 0) == 0 && count >= 3      /* (slashes either way) */
+         && glos_fs_list(&l, "C:\\TEST", buf, 512, &count, 0) == GLOS_E_ARGUMENT              /* (too little room) */
+         && glos_fs_list(&l, 0, buf, sizeof buf, &count, 0) == GLOS_E_ARGUMENT;
+    rmdir("C:\\OUT\\EMPTY");
+    check("fs-list-none", ok, "r=%d count=%u", r, count);
+
+    /* A folder of many files, a small batch at a time: every name once; then in large batches; a listing closed
+       before its end. */
+    mkdir("C:\\OUT\\MANY", 0777);
+    for (i = 0; i < many; i++) {
+        snprintf(name, sizeof name, "C:\\OUT\\MANY\\F%04u.TMP", i);
+        if ((fd = _creat(name, 0)) < 0)
+            break;
+        _close(fd);
+        if (i % 200 == 199)
+            com1("HX-APITEST making\r\n");             /* (Loop A takes a long silence for a hang) */
+    }
+    n = i;
+    memset(seen, 0, sizeof seen);
+    t0 = glos_ticks();
+    l = 0;
+    do {
+        if ((r = glos_fs_list(&l, "C:\\OUT\\MANY", buf, 2048, &count, 0)) != 0)
+            break;
+        if (!batches++)
+            first_ms = glos_ticks() - t0;
+        for (i = 0, e = (struct glos_fs_entry *)buf; i < count; i++, e = GLOS_FS_NEXT(e)) {
+            if (sscanf(e->name, "F%u.TMP", &x) == 1 && x < many && strlen(e->name) == 9) {
+                dups += seen[x / 8] >> (x % 8) & 1;
+                seen[x / 8] |= (unsigned char)(1u << (x % 8));
+            } else {
+                dups += 1000;
+            }
+        }
+        total += count;
+    } while (l);
+    t0 = glos_ticks() - t0;
+    check("fs-list-many", r == 0 && n == many && total == many && !dups && batches > many / 60 && !l,
+          "r=%d made=%u listed=%u dups=%u batches=%u first=%ums all=%ums", r, n, total, dups, batches, first_ms, t0);
+    total = batches = 0;
+    t0 = glos_ticks();
+    do {
+        if ((r = glos_fs_list(&l, "C:\\OUT\\MANY", buf, sizeof buf, &count, 0)) != 0)
+            break;
+        batches++;
+        total += count;
+    } while (l);
+    t0 = glos_ticks() - t0;
+    check("fs-list-large", r == 0 && total == many && batches >= 1 && batches <= many / 250 + 2, "r=%d listed=%u batches=%u all=%ums",
+          r, total, batches, t0);
+    l = 0;
+    r = glos_fs_list(&l, "C:\\OUT\\MANY", buf, 1024, &count, 0);
+    w = l;
+    ok = r == 0 && l && count && glos_close(l) == 0 && glos_fs_list(&w, 0, buf, 1024, &count, 0) == GLOS_E_HANDLE;
+    check("fs-list-closed", ok, "r=%d count=%u", r, count);
+    for (i = 0; i < many; i++) {
+        snprintf(name, sizeof name, "C:\\OUT\\MANY\\F%04u.TMP", i);
+        remove(name);
+        if (i % 200 == 199)
+            com1("HX-APITEST removing\r\n");
+    }
+    rmdir("C:\\OUT\\MANY");
+
+    /* Several files' details at once: a file, a folder, a drive's root, one that isn't there. */
+    r = glos_fs_info("C:\\TEST\\APITEST.EXE\0C:\\TEST\0C:\\\0C:\\TEST\\NOPE.XXX\0", 4, buf, sizeof buf, 0);
+    e = (struct glos_fs_entry *)buf;
+    ok = r == 0 && !strcmp(e->name, "APITEST.EXE") && e->bytes_lo > 100000 && !(e->attr & GLOS_FA_FOLDER);
+    e = GLOS_FS_NEXT(e);
+    ok = ok && (e->attr & GLOS_FA_FOLDER) && !strcmp(e->name, "TEST");
+    e = GLOS_FS_NEXT(e);
+    ok = ok && (e->attr & GLOS_FA_FOLDER) && e->attr != GLOS_FA_NONE;
+    e = GLOS_FS_NEXT(e);
+    ok = ok && e->attr == GLOS_FA_NONE && (e->bytes_lo == 2 || e->bytes_lo == 18);
+    check("fs-info", ok && glos_fs_info("C:\\TEST\0", 1, buf, 8, 0) == GLOS_E_ROOM && glos_fs_info("X\0", 0, buf, 64, 0) == GLOS_E_ARGUMENT,
+          "r=%d none=%x error=%u", r, e->attr, e->bytes_lo);
+
+    /* The drives: C is a hard disk with its details; a drive asked for by its letter; one that isn't there. */
+    r = glos_fs_drives(0, dr, 26, &count);
+    for (i = 0; i < count; i++) {
+        if (dr[i].letter == 'C')
+            c = i + 1;
+        if (dr[i].letter == 'A')
+            a = i + 1;
+    }
+    ok = r == 0 && c && dr[c - 1].kind == GLOS_DRIVE_HARD && (dr[c - 1].flags & GLOS_DRIVE_DETAILS) && dr[c - 1].total_kb > 1000
+         && dr[c - 1].free_kb <= dr[c - 1].total_kb && !strncmp(dr[c - 1].system, "FAT", 3)
+         && (!a || (dr[a - 1].kind == GLOS_DRIVE_FLOPPY && !(dr[a - 1].flags & GLOS_DRIVE_DETAILS)));
+    check("fs-drives", ok, "r=%d count=%u C=%u kind=%u flags=%x total=%uK free=%uK system=%s label=%s", r, count, c,
+          c ? dr[c - 1].kind : 0, c ? dr[c - 1].flags : 0, c ? dr[c - 1].total_kb : 0, c ? dr[c - 1].free_kb : 0,
+          c ? dr[c - 1].system : "", c ? dr[c - 1].label : "");
+    r = glos_fs_drives('c', dr, 1, &n);
+    ok = r == 0 && n == 1 && dr[0].letter == 'C' && (dr[0].flags & GLOS_DRIVE_DETAILS) && glos_fs_drives('Q', dr, 1, &n) == 0 && n == 0
+         && glos_fs_drives('1', dr, 1, &n) == GLOS_E_ARGUMENT && glos_fs_drives(0, dr, 0, &n) == GLOS_E_ROOM && n == count;
+    check("fs-drive-one", ok, "r=%d n=%u long=%u", r, n, (dr[0].flags & GLOS_DRIVE_LONG) != 0);
+
+    /* Watches: a folder (a file made in it), a file (another file made beside it is not its change; it is). */
+    while (glos_event(ev, sizeof ev, 0, 0) > 0)
+        ;
+    w = glos_fs_watch("C:\\OUT");
+    w2 = glos_fs_watch("C:\\OUT\\WATCHED.TXT");
+    fd = _creat("C:\\OUT\\OTHER.TXT", 0);
+    _close(fd);
+    n = (unsigned)await(GLOS_EV_FS, w, ev, 3000);
+    x = (unsigned)await(GLOS_EV_FS, w2, ev, 700);        /* (the file's watch: not told of the other file) */
+    fd = _creat("C:\\OUT\\WATCHED.TXT", 0);
+    _close(fd);
+    i = (unsigned)await(GLOS_EV_FS, w2, ev, 3000);
+    ok = w && w2 && n == sizeof(struct glos_ev) && !x && i == sizeof(struct glos_ev) && glos_close(w) == 0 && glos_close(w2) == 0;
+    remove("C:\\OUT\\OTHER.TXT");
+    remove("C:\\OUT\\WATCHED.TXT");
+    while (glos_event(ev, sizeof ev, 300, 1u << GLOS_AREA_FS) > 0)
+        x += 100;                                       /* (closed: told no more) */
+    check("fs-watch", ok && x == 0 && !glos_fs_watch("OUT") && !glos_fs_watch(0) && glos_close(w) == GLOS_E_HANDLE,
+          "folder=%u other=%u file=%u", n, x, i);
+
+    /* Sectors: the first hard disk read, never written; the scratch disk (the second) written and read back. */
+    memset(&q, 0, sizeof q);
+    q.disk = 0x80;
+    q.count = 1;
+    q.buffer = (unsigned)sec;
+    r = glos_fs_sectors(&q);
+    ok = r == 0 && q.bytes == 512 && q.total_lo > 1000 && sec[510] == 0x55 && sec[511] == 0xAA;
+    q.write = 1;
+    ok = ok && glos_fs_sectors(&q) == GLOS_E_REFUSED;   /* (GLOS's own disk) */
+    q.write = 0;
+    q.count = 33;
+    ok = ok && glos_fs_sectors(&q) == GLOS_E_ARGUMENT;
+    q.count = 1;
+    q.disk = 0x8F;                                      /* no such disk: the BIOS says so */
+    x = (unsigned)glos_fs_sectors(&q);
+    check("fs-sectors", ok && x == GLOS_E_REFUSED && q.error, "r=%d total=%u sig=%02x%02x none=%u error=%x", r, q.total_lo, sec[510],
+          sec[511], x, q.error);
+    memset(&q, 0, sizeof q);
+    q.disk = 0x81;
+    r = glos_fs_sectors(&q);                            /* (count 0: only its size) */
+    n = q.total_lo;
+    for (i = 0; i < sizeof sec; i++)
+        sec[i] = (unsigned char)(i * 13 + 7);
+    q.write = 1;
+    q.lba_lo = 100;
+    q.count = 4;
+    q.buffer = (unsigned)sec;
+    ok = r == 0 && n > 1000 && glos_fs_sectors(&q) == 0;
+    q.write = 0;
+    q.buffer = (unsigned)back;
+    ok = ok && glos_fs_sectors(&q) == 0 && !memcmp(sec, back, sizeof sec);
+    q.lba_lo = n;                                       /* past its end */
+    q.count = 1;
+    x = (unsigned)glos_fs_sectors(&q);
+    check("fs-sectors-write", ok && x == GLOS_E_REFUSED, "r=%d total=%u past=%u", r, n, x);
+}
+
+/* APITEST lfn: long file names where DOS has them (a driver loaded before GLOS: DOSLFN; tests/loopa/jobs.py
+   api_lfn_case). The C library makes the files by their long names; LIST and INFO give both names. */
+static int lfn_mode(void)
+{
+    static unsigned char buf[8192];
+    static struct glos_fs_drive dr[1];
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_fs_entry *e;
+    glos_handle l = 0, w;
+    unsigned count = 0, n = 0;
+    FILE *f;
+    int r, ok;
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 1;
+    mkdir("C:\\OUT\\Long folder name", 0777);
+    f = fopen("C:\\OUT\\Long folder name\\A long file name.text", "w");
+    if (f) {
+        fputs("long", f);
+        fclose(f);
+    }
+    f = fopen("C:\\OUT\\Long folder name\\SHORT.TXT", "w");
+    if (f)
+        fclose(f);
+    r = glos_fs_drives('C', dr, 1, &n);
+    check("lfn-drive", r == 0 && n == 1 && (dr[0].flags & GLOS_DRIVE_LONG), "r=%d flags=%x", r, dr[0].flags);
+    r = glos_fs_list(&l, "C:\\OUT\\Long folder name", buf, sizeof buf, &count, 0);
+    e = entry_named(buf, count, "A long file name.text");
+    ok = r == 0 && l == 0 && count == 2 && e && e->bytes_lo == 4 && !strncmp(e->short_name, "ALONGF~1.TEX", 12);
+    e = entry_named(buf, count, "SHORT.TXT");
+    check("lfn-list", ok && e, "r=%d count=%u short=%s", r, count, entry_named(buf, count, "A long file name.text")
+          ? entry_named(buf, count, "A long file name.text")->short_name : "?");
+    r = glos_fs_list(&l, "C:\\OUT\\Long folder name", buf, sizeof buf, &count, GLOS_FS_SHORT);
+    check("lfn-short", r == 0 && count == 2 && entry_named(buf, count, "ALONGF~1.TEX") && !entry_named(buf, count, "A long file name.text"),
+          "r=%d count=%u", r, count);
+    r = glos_fs_info("C:\\OUT\\Long folder name\\A long file name.text\0C:\\OUT\\Long folder name\0", 2, buf, sizeof buf, 0);
+    e = (struct glos_fs_entry *)buf;
+    ok = r == 0 && !strcmp(e->name, "A long file name.text") && e->bytes_lo == 4;
+    e = GLOS_FS_NEXT(e);
+    check("lfn-info", ok && (e->attr & GLOS_FA_FOLDER) && !strcmp(e->name, "Long folder name"), "r=%d name=%s", r, e->name);
+    while (glos_event(ev, sizeof ev, 0, 0) > 0)
+        ;
+    w = glos_fs_watch("C:\\OUT\\Long folder name");
+    f = fopen("C:\\OUT\\Long folder name\\Another long name.text", "w");
+    if (f)
+        fclose(f);
+    n = (unsigned)await(GLOS_EV_FS, w, ev, 3000);
+    check("lfn-watch", w && n == sizeof(struct glos_ev), "w=%x ev=%u", w, n);
+    glos_close(w);
+    remove("C:\\OUT\\Long folder name\\Another long name.text");
+    remove("C:\\OUT\\Long folder name\\A long file name.text");
+    remove("C:\\OUT\\Long folder name\\SHORT.TXT");
+    rmdir("C:\\OUT\\Long folder name");
+    {
+        char line[64];
+        snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+        com1(line);
+    }
+    return fails > 99 ? 99 : fails;
+}
+
 /* APITEST dnd NAME X: drag and drop between two of these, under the agent (tests/loopa/jobs.py api_dnd_case moves
    the mouse). A window at X,60 that takes text (copy or move) and whose left half answers copy, its right half
    move; a press in it starts a drag of the text "from NAME" with a picture. What it is told goes to stdout:
@@ -981,6 +1232,8 @@ int main(int argc, char **argv)
         return setting_mode();
     if (argc > 3 && !strcmp(argv[1], "dnd"))
         return dnd_mode(argv[2], atoi(argv[3]));
+    if (argc > 1 && !strcmp(argv[1], "lfn"))
+        return lfn_mode();
     before();
     init();
     if (glos_app()) {
@@ -990,6 +1243,7 @@ int main(int argc, char **argv)
         windows();
         settings();
         clipboard();
+        files(argc > 2 && !strcmp(argv[1], "many") ? (unsigned)atoi(argv[2]) : 300);
     }
     snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
     com1(line);

@@ -470,6 +470,64 @@ int glos_dnd_answer(glos_handle w, unsigned effect)
     return raw(GLOS_DND_ANSWER, &q, 0);
 }
 
+/* ---- files and disks */
+
+int glos_fs_list(glos_handle *listing, const char *path, void *buf, unsigned room, unsigned *count, unsigned flags)
+{
+    struct glos_fs_list q;
+    int r;
+    memset(&q, 0, sizeof q);
+    q.size = sizeof q;
+    q.handle = *listing;
+    q.path = (unsigned)path;
+    q.flags = flags;
+    q.buffer = (unsigned)buf;
+    q.room = room;
+    r = raw(GLOS_FS_LIST, &q, 0);
+    if (count)
+        *count = r ? 0 : q.count;
+    if (!r)
+        *listing = q.handle;
+    return r;
+}
+
+int glos_fs_info(const char *paths, unsigned count, void *buf, unsigned room, unsigned flags)
+{
+    struct glos_fs_info q;
+    memset(&q, 0, sizeof q);
+    q.size = sizeof q;
+    q.paths = (unsigned)paths;
+    q.count = count;
+    q.flags = flags;
+    q.buffer = (unsigned)buf;
+    q.room = room;
+    return raw(GLOS_FS_INFO, &q, 0);
+}
+
+int glos_fs_drives(unsigned drive, struct glos_fs_drive *out, unsigned room, unsigned *count)
+{
+    struct glos_fs_drives q = { sizeof q, drive, (unsigned)out, room, 0 };
+    int r = raw(GLOS_FS_DRIVES, &q, 0);
+    if (count)
+        *count = q.count;
+    return r;
+}
+
+glos_handle glos_fs_watch(const char *path)
+{
+    struct glos_fs_watch q = { sizeof q, (unsigned)path, 0 };
+    int r = raw(GLOS_FS_WATCH, &q, 0);
+    if (r)
+        last_error = r;
+    return r ? 0 : q.handle;
+}
+
+int glos_fs_sectors(struct glos_fs_sectors *s)
+{
+    s->size = sizeof *s;
+    return raw(GLOS_FS_SECTORS, s, 0);
+}
+
 /* ---- settings, the screen's modes, idle time */
 
 int glos_setting_get(const char *section, const char *key, char *value, unsigned room, int *set)

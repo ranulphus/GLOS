@@ -308,6 +308,12 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   FreeDOS's DOSLFN by default, so every GLOS install has it. GLOS's calls (LIST, INFO, WATCH) and DOS's own take
   long names. Where no driver is loaded (a user's own boot), names are 8.3 and FEATURES says so.
 - **Ordinary file I/O:** stays the C library's, through DOS (GLOS's DOS server), as in 1.x.
+- **As built (step 7):**
+  - LIST gives records in the caller's buffer, a batch a call, through a listing's handle.
+  - Names and paths are UTF-8; dates are DOS's packed date and time.
+  - A drive says whether it has long names (`GLOS_DRIVE_LONG`); FEATURES doesn't.
+  - DRIVES never spins a floppy or a CD unless that drive is asked for.
+  - SECTORS refuses writes to the disk GLOS runs from.
 
 ### 0Ah AUDIO
 

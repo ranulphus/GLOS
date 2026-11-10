@@ -116,6 +116,7 @@ typedef unsigned glos_handle;
 #define GLOS_HK_DEBUG      12
 #define GLOS_HK_CLIP       13
 #define GLOS_HK_AWAKE      14
+#define GLOS_HK_LIST       15
 
 /* ---- CORE's functions */
 #define GLOS_CORE_VERSION  GLOS_FN(GLOS_AREA_CORE, 0)  /* struct glos_version, for any program */
@@ -673,6 +674,113 @@ struct glos_ev_wheel {
     int notches;                /* positive: away from the user (up) */
     unsigned buttons, mods;
 };
+
+/* ================================================================== FS (09h): files and disks
+ *
+ * What costs a program many of DOS's calls, in one of GLOS's: a folder's entries a batch at a time, several
+ * files' details at once, the drives there are. Ordinary file I/O stays the C library's, through DOS.
+ * Paths and names are UTF-8 here; DOS has them in its code page, and GLOS converts (REGION's).
+ * Long file names are DOS's to give (its long-name calls, INT 21h 71xxh, from a driver such as DOSLFN): where a
+ * drive has them, LIST and INFO take and give long names, and a drive's GLOS_DRIVE_LONG says so. */
+#define GLOS_FS_LIST    GLOS_FN(GLOS_AREA_FS, 0)        /* struct glos_fs_list: a folder's entries, a batch a call */
+#define GLOS_FS_INFO    GLOS_FN(GLOS_AREA_FS, 1)        /* struct glos_fs_info: several files' details at once */
+#define GLOS_FS_DRIVES  GLOS_FN(GLOS_AREA_FS, 2)        /* struct glos_fs_drives: the drives */
+#define GLOS_FS_WATCH   GLOS_FN(GLOS_AREA_FS, 3)        /* struct glos_fs_watch: a folder or a file watched */
+#define GLOS_FS_SECTORS GLOS_FN(GLOS_AREA_FS, 4)        /* struct glos_fs_sectors: a disk's sectors read or written */
+
+/* An entry: a file or a folder. They lie one after another in the buffer, each `size` bytes (a multiple of 4). */
+struct glos_fs_entry {
+    unsigned size;              /* this record's, its name and all */
+    unsigned attr;              /* GLOS_FA_ */
+    unsigned bytes_lo, bytes_hi;        /* the file's size */
+    unsigned mtime;             /* when it was last written: DOS's date in the high word (years from 1980 in bits
+                                   9-15, the month in 5-8, the day in 0-4) and time in the low (hours in bits
+                                   11-15, minutes in 5-10, seconds halved in 0-4); local time */
+    char short_name[16];        /* its 8.3 name, where the name below is a long one ("" otherwise) */
+    char name[4];               /* its name, a NUL after it (as long as it is) */
+};
+#define GLOS_FA_READONLY 0x01
+#define GLOS_FA_HIDDEN   0x02
+#define GLOS_FA_SYSTEM   0x04
+#define GLOS_FA_FOLDER   0x10
+#define GLOS_FA_ARCHIVE  0x20
+#define GLOS_FA_NONE     0x80000000u    /* INFO: there is no such file (bytes_lo: DOS's error) */
+
+struct glos_fs_list {
+    unsigned size;
+    glos_handle handle;         /* 0: begin a folder (`path`). -> a listing (GLOS_HK_LIST) to go on with in the next
+                                   call, or 0: that was the folder's last batch (nothing to close) */
+    unsigned path;              /* the folder ("C:\\GAMES"), to begin */
+    unsigned flags;             /* GLOS_FS_ */
+    unsigned buffer;            /* where the entries go ... */
+    unsigned room;              /* ... and the room there (512 bytes at least) */
+    unsigned count;             /* -> how many entries were given ("." and ".." never are) */
+    unsigned length;            /* -> the bytes they take */
+    unsigned long_names;        /* -> 1: the names are long ones (the drive has DOS's long-name calls) */
+};
+#define GLOS_FS_SHORT 1         /* 8.3 names only, even where the drive has long ones */
+
+struct glos_fs_info {
+    unsigned size;
+    unsigned paths;             /* the files' and folders' paths, each ended by a NUL */
+    unsigned count;             /* how many: 1 to 64 */
+    unsigned flags;             /* GLOS_FS_ */
+    unsigned buffer;            /* where their entries go, in the paths' order (GLOS_FA_NONE: no such file) */
+    unsigned room;
+    unsigned length;            /* -> the bytes they take (GLOS_E_ROOM: more than room; `given` fit) */
+    unsigned given;             /* -> how many entries were given */
+};
+
+struct glos_fs_drive {
+    unsigned letter;            /* 'A' to 'Z' */
+    unsigned kind;              /* GLOS_DRIVE_ */
+    unsigned flags;             /* GLOS_DRIVE_ flags */
+    unsigned serial;            /* the volume's serial number (another disk in the drive has another); 0: none */
+    unsigned total_kb, free_kb; /* its size and what is free (FFFFFFFFh: more than fits) */
+    char label[12];             /* the volume's label */
+    char system[12];            /* its file system as DOS names it ("FAT16") */
+};
+#define GLOS_DRIVE_FLOPPY 1
+#define GLOS_DRIVE_HARD   2     /* a hard disk, a CF card, anything fixed */
+#define GLOS_DRIVE_CD     3     /* a CD-ROM (MSCDEX's) */
+#define GLOS_DRIVE_NET    4     /* a network drive */
+#define GLOS_DRIVE_RAM    5     /* a RAM disk */
+#define GLOS_DRIVE_REMOVABLE 1  /* flags: its disk can be taken out */
+#define GLOS_DRIVE_LONG      2  /* DOS's long-name calls answer for it */
+#define GLOS_DRIVE_DETAILS   4  /* serial, sizes, label and system were asked for and are there */
+
+struct glos_fs_drives {
+    unsigned size;
+    unsigned drive;             /* 0: every drive (the details of hard disks and RAM disks only: a floppy or a CD
+                                   is not made to spin); 'A' to 'Z': that one, with its details (no disk in it:
+                                   GLOS_DRIVE_DETAILS clear) */
+    unsigned buffer;            /* where they go: struct glos_fs_drive each */
+    unsigned room;              /* how many there is room for */
+    unsigned count;             /* -> how many there are (GLOS_E_ROOM: more than room) */
+};
+
+struct glos_fs_watch {
+    unsigned size;
+    unsigned path;              /* a folder ("C:\\DOCS": anything made, removed, renamed or written in it), or a
+                                   file ("C:\\DOCS\\A.TXT": that file written, removed or renamed) */
+    glos_handle handle;         /* -> the watch (GLOS_HK_WATCH), until CLOSE */
+};
+
+struct glos_fs_sectors {
+    unsigned size;
+    unsigned disk;              /* the BIOS's number: 0 and 1 the floppy drives, 80h up the hard disks */
+    unsigned write;             /* 0 read, 1 write (GLOS_E_REFUSED: the disk GLOS itself runs from is never written) */
+    unsigned lba_lo, lba_hi;    /* the first sector */
+    unsigned count;             /* how many: 0 (only the disk's size is asked) to 32 */
+    unsigned buffer;            /* count sectors' bytes */
+    unsigned bytes;             /* -> a sector's size (512) */
+    unsigned total_lo, total_hi;        /* -> how many sectors the disk has */
+    unsigned error;             /* -> the BIOS's error code when it refused (GLOS_E_REFUSED) */
+};
+
+/* FS's events. */
+#define GLOS_EV_FS GLOS_EV(GLOS_AREA_FS, 1)     /* (the header alone; handle: the watch) what is watched changed.
+                                                   Changes close together are told once */
 
 /* ================================================================== SETTINGS (0Ch): GLOS.CFG, the theme, the region
  *

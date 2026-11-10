@@ -30,6 +30,7 @@ static struct {
     void *app;                                  /* 0: free */
     u32 id;
     char dir[68];                               /* upper case, "C:\GAMES" (a root: "C:\") */
+    char file[13];                              /* "": everything in dir; or the one file there that is watched */
     u8 due;
 } w[WATCHES];
 static u32 next_id = 1, last_told;
@@ -49,11 +50,15 @@ static void norm(const char *in, char *out, u32 room)
     out[n] = 0;
 }
 
-int watch_add(void *app, const char *dir, u32 *id)
+int watch_add(void *app, const char *dir, u32 *id) { return watch_add_file(app, dir, "", id); }
+
+/* ... or of one file in it (API 2.0's WATCH: "" every file). */
+int watch_add_file(void *app, const char *dir, const char *file, u32 *id)
 {
     u32 i, f;
-    char d[68];
+    char d[68], n[13];
     norm(dir, d, sizeof d);
+    norm(file, n, sizeof n);
     if (d[0] < 'A' || d[0] > 'Z' || d[1] != ':' || d[2] != '\\')
         return GLOS_E_ARGUMENT;
     f = irq_save();
@@ -62,6 +67,7 @@ int watch_add(void *app, const char *dir, u32 *id)
             w[i].app = app;
             w[i].id = next_id++;
             memcpy(w[i].dir, d, sizeof d);
+            memcpy(w[i].file, n, sizeof n);
             w[i].due = 0;
             *id = w[i].id;
             irq_restore(f);
@@ -94,27 +100,45 @@ void watch_app_gone(void *app)
 }
 
 /* A change at path (NULL: somewhere unknown). */
+/* Every watch on a drive (0: on any). A change made through DOS's long-name calls: its path may name the folder
+   another way than the watcher did. */
+void watch_drive(char letter)
+{
+    u32 i, f = irq_save();
+    letter = up(letter);
+    for (i = 0; i < WATCHES; i++)
+        if (w[i].app && (!letter || w[i].dir[0] == letter)) {
+            w[i].due = 1;
+            any_due = 1;
+        }
+    irq_restore(f);
+}
+
 void watch_path(const char *path)
 {
-    char p[80], *slash;
+    char p[80], name[80], *slash;
     u32 i, f;
     int all = !path;
+    name[0] = 0;
     if (path) {
         norm(path, p, sizeof p);
         slash = 0;
         for (i = 0; p[i]; i++)
             if (p[i] == '\\')
                 slash = &p[i];
-        if (p[0] < 'A' || p[0] > 'Z' || p[1] != ':' || p[2] != '\\' || !slash)
+        if (p[0] < 'A' || p[0] > 'Z' || p[1] != ':' || p[2] != '\\' || !slash) {
             all = 1;
-        else if (slash == &p[2])
-            p[3] = 0;                           /* (in the root) */
-        else
-            *slash = 0;
+        } else {
+            strcpy(name, slash + 1);
+            if (slash == &p[2])
+                p[3] = 0;                       /* (in the root) */
+            else
+                *slash = 0;
+        }
     }
     f = irq_save();
     for (i = 0; i < WATCHES; i++)
-        if (w[i].app && (all || !strcmp(w[i].dir, p))) {
+        if (w[i].app && (all || (!strcmp(w[i].dir, p) && (!w[i].file[0] || !strcmp(w[i].file, name))))) {
             w[i].due = 1;
             any_due = 1;
         }
@@ -153,6 +177,26 @@ void watch_int21(u16 ax, u16 bx, u16 cx, u16 dx, u32 dx_lin, u32 si_lin)
         return;
     case 0x39: case 0x3A: case 0x3C: case 0x41: case 0x5B:
         break;
+    case 0x71: {                                /* DOS's long-name calls: the same changes, by their AL. The path
+                                                   may be a long one, the watcher's a short one (or the other way
+                                                   about): every watch on its drive is marked */
+        u32 al = ax & 0xFF;
+        char d = 0;
+        if (al == 0x6C) {
+            if ((dx & 0x0F) != 2 && (dx & 0xF0) != 0x10)
+                return;
+            lin = si_lin;
+        } else if (al == 0x43) {
+            if ((bx & 0xFF) != 1)
+                return;
+        } else if (al != 0x39 && al != 0x3A && al != 0x41 && al != 0x56) {
+            return;
+        }
+        if (al != 0x56 && vm_rd8(lin) && vm_rd8(lin + 1) == ':')
+            d = (char)vm_rd8(lin);
+        watch_drive(d);
+        return;
+    }
     default:
         return;
     }

@@ -12,7 +12,7 @@
 #define APP_THREADS 16                          /* threads an app may make beside its first (GLOS_THREADS) */
 #define SPARE    160u                           /* the spare parent frame: this far below the kill stack's top */
 
-enum { AC_NONE, AC_RM, AC_END };
+enum { AC_NONE, AC_RM, AC_END, AC_BATCH };
 
 struct cwd {
     u8 known, drive;
@@ -65,6 +65,9 @@ struct app {
         u8 vec;
         const u16 *words;
         u32 nwords;
+        void (*batch)(struct app *a, void *arg);        /* AC_BATCH: what the VM thread runs for it ... */
+        void *batch_arg;
+        u8 bios;                                /* ... which makes BIOS calls too, not DOS's alone */
     } c;
     int result;
     u8 child_have;                              /* a program it ran has ended: INT 21h 4Dh's answer is kept for it */
@@ -148,6 +151,14 @@ int app_thread_wait(struct app *a, u32 until);  /* a wait for another thread's d
                                                    `until` came (0: none), 2 the app is ending, 3 an interrupt of
                                                    the first thread's is due */
 void app_thread_news(struct app *a);            /* ... which this wakes: a lock given, a signal set, a handle closed */
+/* A batch: DOS and BIOS calls made for the app by the VM thread in one turn, in the app's own DOS context (its
+   PSP, its drive and directory), so that a call of GLOS's that needs many of DOS's costs one turn of the VM
+   thread, not one each (FS's LIST: api2fs.c). On one of the app's threads: fn has run when this returns 0; -1:
+   the app is ending. bios: fn makes BIOS calls too (it then waits for a moment when DOS isn't in its idle call). */
+int app_batch(struct app *a, void (*fn)(struct app *a, void *arg), void *arg, int bios);
+struct rmregs;
+int app_batch_int(u8 vec, struct rmregs *r);    /* in fn: a real-mode interrupt (r: in and out). 0, or -1: not made
+                                                   (DOS has ended the program meanwhile: fn stops) */
 int app_api_lock(struct app *a);                /* the app's calls one at a time: 0, or -1 (it is ending) */
 void app_api_unlock(struct app *a);
 void api2_thread_gone(struct app *a, u32 number);       /* api2thr.c: a thread has ended: the locks it held are free */
