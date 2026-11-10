@@ -745,7 +745,7 @@ int glos_assoc_verb(const char *kind, const char *label, const char *args)
     return assoc(GLOS_ASSOC_VERB, kind, label, args, 0, 0, 0);
 }
 
-static int entry(unsigned what, const char *title, const char *group, const char *icon, const char *args, const char *label,
+static int entry_call(unsigned what, const char *title, const char *group, const char *icon, const char *args, const char *label,
                  char *buf, unsigned room, unsigned *length)
 {
     struct glos_entry q = { sizeof q, what, (unsigned)title, (unsigned)group, (unsigned)icon, (unsigned)args, (unsigned)label,
@@ -758,16 +758,16 @@ static int entry(unsigned what, const char *title, const char *group, const char
 
 int glos_entry_set(const char *title, const char *group, const char *icon, const char *args)
 {
-    return entry(GLOS_ENTRY_SET, title, group, icon, args, 0, 0, 0, 0);
+    return entry_call(GLOS_ENTRY_SET, title, group, icon, args, 0, 0, 0, 0);
 }
 
-int glos_entry_remove(void) { return entry(GLOS_ENTRY_REMOVE, 0, 0, 0, 0, 0, 0, 0, 0); }
+int glos_entry_remove(void) { return entry_call(GLOS_ENTRY_REMOVE, 0, 0, 0, 0, 0, 0, 0, 0); }
 
-int glos_entry_task(const char *label, const char *args) { return entry(GLOS_ENTRY_TASK, 0, 0, 0, args, label, 0, 0, 0); }
+int glos_entry_task(const char *label, const char *args) { return entry_call(GLOS_ENTRY_TASK, 0, 0, 0, args, label, 0, 0, 0); }
 
 int glos_entry_list(char *list, unsigned room, unsigned *length)
 {
-    return entry(GLOS_ENTRY_LIST, 0, 0, 0, 0, 0, list, room, length);
+    return entry_call(GLOS_ENTRY_LIST, 0, 0, 0, 0, 0, list, room, length);
 }
 
 static int recent(unsigned what, const char *path, const char *program, char *buf, unsigned room, unsigned *length)

@@ -120,7 +120,7 @@ int api2_shell(struct app *a, struct trapframe *tf, u32 n);    /* SHELL's calls 
 void api2_shell_close(struct app *a, int kind, void *obj);     /* CLOSE of a tray icon's or a notification's handle */
 void api2_shell_gone(struct app *a);                            /* the app is no more: its icons, its notifications */
 void api2_shell_1x(struct app *a, u32 type, int x, int y);     /* the desktop's launcher and task-list events */
-void api2_shell_news(struct app *shell, unsigned what);         /* GLOS_EV_SHELL: the entries or the recents changed */
+void api2_shell_news(unsigned what);                            /* GLOS_EV_SHELL to the shell: entries, recents */
 void api2_shell_changed(const char *section);                   /* a setting changed: the shell may be told */
 /* api2start.c: the Start menu's data and the schedule */
 int api2_start(struct app *a, struct trapframe *tf, u32 fn);   /* ENTRY, RECENT, SCHEDULE */

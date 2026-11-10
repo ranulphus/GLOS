@@ -149,12 +149,7 @@ static int entry(struct app *a, struct trapframe *tf)
 
 /* ---- RECENT */
 
-static void recents_changed(void)
-{
-    struct app *shell = desk_shell_app();
-    if (shell)
-        api2_shell_news(shell, GLOS_SHELL_RECENTS);
-}
+static void recents_changed(void) { api2_shell_news(GLOS_SHELL_RECENTS); }
 
 /* A record's two parts: the program in prog, the path's start returned. */
 static const char *recent_parts(const char *rec, char *prog, u32 room)

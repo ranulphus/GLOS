@@ -798,8 +798,10 @@ static void writer(void *arg)
         if (kdata_dirty())                      /* GLOS.DAT beside it (kernel/core/kdata.c) */
             kdata_save();
         dos_release();
+        f = irq_save();
         c.writing = 0;
         vm_kick();                              /* (glos exit waits for what was to be written: agent.c) */
+        irq_restore(f);
     }
 }
 

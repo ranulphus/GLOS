@@ -277,24 +277,26 @@ void api2_shell_1x(struct app *a, u32 type, int x, int y)       /* (1.x's LAUNCH
     shell_event(a, type == GLOS_EV_LAUNCH ? GLOS_SHELL_LAUNCH : GLOS_SHELL_TASKS, x, y, 0, 0);
 }
 
-void api2_shell_news(struct app *shell, unsigned what)  /* (ENTRIES, RECENTS: one waiting stands for the next) */
+void api2_shell_news(unsigned what)             /* (ENTRIES, RECENTS: one waiting stands for the next; any thread) */
 {
     struct glos_ev_shell e;
-    if (!shell->v2)
-        return;
-    memset(&e, 0, sizeof e);
-    e.ev.size = sizeof e;
-    e.ev.kind = GLOS_EV_SHELL;
-    e.ev.handle = what;                         /* (so that only one of its kind is merged with) */
-    e.what = what;
-    a2_post(shell, &e.ev, 1);
+    struct app *shell;
+    u32 f = irq_save();                         /* (the shell may be ending on its own thread) */
+    if ((shell = desk_shell_app()) != 0 && shell->v2 && !shell->kill) {
+        memset(&e, 0, sizeof e);
+        e.ev.size = sizeof e;
+        e.ev.kind = GLOS_EV_SHELL;
+        e.ev.handle = what;                     /* (so that only one of its kind is merged with) */
+        e.what = what;
+        a2_post(shell, &e.ev, 1);
+    }
+    irq_restore(f);
 }
 
 void api2_shell_changed(const char *section)    /* (api2set.c's: a setting changed) */
 {
-    struct app *shell = desk_shell_app();
-    if (shell && !strncmp(section, "program ", 8))
-        api2_shell_news(shell, GLOS_SHELL_ENTRIES);
+    if (!strncmp(section, "program ", 8))
+        api2_shell_news(GLOS_SHELL_ENTRIES);
 }
 
 void api2_shell_hung(struct app *shell, u32 window, struct app *owner, int hung)
@@ -320,19 +322,16 @@ static int point(struct trapframe *tf)
 
 /* ---- OPEN and HELP */
 
-static int start(struct trapframe *tf, const char *command, u32 *job)
+static int start(const char *command, u32 *job)        /* 0, or GLOS_E_ */
 {
     static struct glos_run run;                 /* (no wait between filling it and its post) */
-    int r;
     if (!(vm.bi->flags & BI_F_AGENT))           /* (GLOS /RUN: there is nobody to start it) */
-        return a2_fail(tf, GLOS_E_REFUSED);
+        return GLOS_E_REFUSED;
     memset(&run, 0, sizeof run);
     run.size = sizeof run;
     run.flags = GLOS_RUN_DETACH;
     strncpy(run.command, command, sizeof run.command - 1);
-    if ((r = agent_post_app(0, &run, job)) != 0)
-        return a2_fail(tf, (u32)r);
-    return 0;
+    return agent_post_app(0, &run, job);
 }
 
 static int help(struct app *a, struct trapframe *tf)
@@ -354,7 +353,7 @@ static int help(struct app *a, struct trapframe *tf)
     if ((e = api2_fs_exists(a, prog)) != 1)     /* (Help is an app: phase E's) */
         return a2_fail(tf, e < 0 ? GLOS_E_REFUSED : GLOS_E_NOT_FOUND);
     ksnprintf(cmd, sizeof cmd, page[0] ? "%s %s" : "%s", prog, page);
-    return start(tf, cmd, &job) ? 0 : a2_ok(tf, 0);
+    return (e = start(cmd, &job)) != 0 ? a2_fail(tf, (u32)e) : a2_ok(tf, 0);
 }
 
 static int open_call(struct app *a, struct trapframe *tf)
@@ -401,8 +400,8 @@ static int open_call(struct app *a, struct trapframe *tf)
     }
     if (assoc_command(prog, path, dir, cmd, sizeof cmd) < 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
-    if (start(tf, cmd, &q.job))
-        return 0;
+    if ((e = start(cmd, &q.job)) != 0)
+        return a2_fail(tf, (u32)e);
     if (file) {                                 /* a document: among the recent ones, with the program that has it */
         const char *b = prog;
         for (i = 0; prog[i] && prog[i] != ' '; i++)
@@ -415,8 +414,8 @@ static int open_call(struct app *a, struct trapframe *tf)
     }
     return a2_wr(tf, &q, sizeof q, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 run:
-    if (start(tf, cmd, &q.job))
-        return 0;
+    if ((e = start(cmd, &q.job)) != 0)
+        return a2_fail(tf, (u32)e);
     return a2_wr(tf, &q, sizeof q, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 }
 

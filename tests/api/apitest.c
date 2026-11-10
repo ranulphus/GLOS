@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <stdarg.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +38,22 @@ static void com1(const char *s)
             ;
         outportb(0x3F8, (unsigned char)*s);
     }
+}
+
+static char home[80] = "C:\\TEST", home_slash[84] = "C:/TEST/";   /* the folder the test is in (GLOS's own) */
+
+static void find_home(const char *argv0)
+{
+    const char *end = strrchr(argv0, '/') > strrchr(argv0, '\\') ? strrchr(argv0, '/') : strrchr(argv0, '\\');
+    unsigned i, n = end ? (unsigned)(end - argv0) : 0;
+    if (n < 3 || n >= sizeof home || argv0[1] != ':')
+        return;
+    for (i = 0; i < n; i++) {
+        home[i] = argv0[i] == '/' ? '\\' : (char)toupper((unsigned char)argv0[i]);
+        home_slash[i] = argv0[i] == '\\' ? '/' : argv0[i];
+    }
+    home[n] = 0;
+    home_slash[n] = '/', home_slash[n + 1] = 0;
 }
 
 static void check(const char *name, int ok, const char *fmt, ...)
@@ -774,8 +791,8 @@ static void files(unsigned many)
     char name[64];
     int r, ok, fd;
 
-    /* A small folder in one batch: what DOS says of a file. */
-    r = glos_fs_list(&l, "C:\\TEST", buf, sizeof buf, &count, 0);
+    /* A small folder in one batch (the test's own: GLOS's folder): what DOS says of a file. */
+    r = glos_fs_list(&l, home, buf, sizeof buf, &count, 0);
     e = entry_named(buf, count, "APITEST.EXE");
     ok = r == 0 && l == 0 && count >= 3 && e && e->bytes_lo > 100000 && e->bytes_hi == 0 && !(e->attr & GLOS_FA_FOLDER)
          && (e->mtime >> 25) + 1980 >= 2026 && !e->short_name[0] && !(e->size & 3) && entry_named(buf, count, "GLOSK.BIN")
@@ -785,8 +802,8 @@ static void files(unsigned many)
     r = glos_fs_list(&l, "C:\\NOSUCH.DIR", buf, sizeof buf, &count, 0);
     mkdir("C:\\OUT\\EMPTY", 0777);
     ok = r == GLOS_E_ARGUMENT && glos_fs_list(&l, "C:\\OUT\\EMPTY", buf, sizeof buf, &count, 0) == 0 && count == 0 && l == 0
-         && glos_fs_list(&l, "C:/TEST/", buf, sizeof buf, &count, 0) == 0 && count >= 3      /* (slashes either way) */
-         && glos_fs_list(&l, "C:\\TEST", buf, 512, &count, 0) == GLOS_E_ARGUMENT              /* (too little room) */
+         && glos_fs_list(&l, home_slash, buf, sizeof buf, &count, 0) == 0 && count >= 3      /* (slashes either way) */
+         && glos_fs_list(&l, home, buf, 512, &count, 0) == GLOS_E_ARGUMENT                    /* (too little room) */
          && glos_fs_list(&l, 0, buf, sizeof buf, &count, 0) == GLOS_E_ARGUMENT;
     rmdir("C:\\OUT\\EMPTY");
     check("fs-list-none", ok, "r=%d count=%u", r, count);
@@ -849,16 +866,25 @@ static void files(unsigned many)
     rmdir("C:\\OUT\\MANY");
 
     /* Several files' details at once: a file, a folder, a drive's root, one that isn't there. */
-    r = glos_fs_info("C:\\TEST\\APITEST.EXE\0C:\\TEST\0C:\\\0C:\\TEST\\NOPE.XXX\0", 4, buf, sizeof buf, 0);
+    {
+        static char paths[400];
+        int k = 0;
+        k += snprintf(paths + k, sizeof paths - k, "%s\\APITEST.EXE", home) + 1;
+        k += snprintf(paths + k, sizeof paths - k, "%s", home) + 1;
+        k += snprintf(paths + k, sizeof paths - k, "C:\\") + 1;
+        k += snprintf(paths + k, sizeof paths - k, "%s\\NOPE.XXX", home) + 1;
+        paths[k] = 0;
+        r = glos_fs_info(paths, 4, buf, sizeof buf, 0);
+    }
     e = (struct glos_fs_entry *)buf;
     ok = r == 0 && !strcmp(e->name, "APITEST.EXE") && e->bytes_lo > 100000 && !(e->attr & GLOS_FA_FOLDER);
     e = GLOS_FS_NEXT(e);
-    ok = ok && (e->attr & GLOS_FA_FOLDER) && !strcmp(e->name, "TEST");
+    ok = ok && (e->attr & GLOS_FA_FOLDER) && !strcasecmp(e->name, strrchr(home, '\\') + 1);
     e = GLOS_FS_NEXT(e);
     ok = ok && (e->attr & GLOS_FA_FOLDER) && e->attr != GLOS_FA_NONE;
     e = GLOS_FS_NEXT(e);
     ok = ok && e->attr == GLOS_FA_NONE && (e->bytes_lo == 2 || e->bytes_lo == 18);
-    check("fs-info", ok && glos_fs_info("C:\\TEST\0", 1, buf, 8, 0) == GLOS_E_ROOM && glos_fs_info("X\0", 0, buf, 64, 0) == GLOS_E_ARGUMENT,
+    check("fs-info", ok && glos_fs_info(home, 1, buf, 8, 0) == GLOS_E_ROOM && glos_fs_info("X\0", 0, buf, 64, 0) == GLOS_E_ARGUMENT,
           "r=%d none=%x error=%u", r, e->attr, e->bytes_lo);
 
     /* The drives: C is a hard disk with its details; a drive asked for by its letter; one that isn't there. */
@@ -927,6 +953,12 @@ static void files(unsigned many)
     q.lba_lo = 100;
     q.count = 4;
     q.buffer = (unsigned)sec;
+    if (r != 0) {                                       /* no second disk (a bench PC): only that GLOS's own is */
+        q.disk = 0x80;                                  /* never written */
+        x = (unsigned)glos_fs_sectors(&q);
+        check("fs-sectors-write", x == GLOS_E_REFUSED, "r=%d own=%u (no second disk)", r, x);
+        return;
+    }
     ok = r == 0 && n > 1000 && glos_fs_sectors(&q) == 0;
     q.write = 0;
     q.buffer = (unsigned)back;
@@ -1260,10 +1292,8 @@ static void shell(void)
     static unsigned icon[256];
     static char longtip[80], longtitle[60];
     unsigned char ev[GLOS_EV_MAX];
-    struct glos_ev_notify *ne = (struct glos_ev_notify *)ev;
-    struct glos_point bar, work, start, clock, tray;
-    struct glos_screen scr;
-    unsigned text[1] = { GLOS_CLIP_TEXT }, t0, took, i;
+    struct glos_point bar;
+    unsigned text[1] = { GLOS_CLIP_TEXT }, i;
     glos_handle t, n, n2, many[16];
     char buf[128];
     int r, e, ok, job;
@@ -1272,7 +1302,6 @@ static void shell(void)
         icon[i] = 0xFF2060C0u;
     memset(longtip, 'x', sizeof longtip - 1);
     memset(longtitle, 'y', sizeof longtitle - 1);
-    glos_screen(&scr);
 
     /* The shell: one of GLOS's own programs (this one is in GLOS's folder); the bare desktop's drops are its. */
     r = glos_shell(1);
@@ -1282,25 +1311,14 @@ static void shell(void)
     r = glos_shell(0);
     check("shell-off", r == 0 && glos_dnd_target(0, GLOS_DND_COPY, text, 1) == GLOS_E_REFUSED, "r=%d", r);
 
-    /* Where the task bar's parts are. */
-    r = glos_point(GLOS_POINT_BAR, &bar);
-    r |= glos_point(GLOS_POINT_WORK, &work) | glos_point(GLOS_POINT_START, &start) | glos_point(GLOS_POINT_CLOCK, &clock);
-    e = glos_point(GLOS_POINT_TRAY, &tray);
-    ok = r == 0 && bar.x == 0 && bar.w == scr.w && bar.y + bar.h == scr.h && work.x == 0 && work.y == 0 && work.w == scr.w
-         && work.h == bar.y && start.x == 0 && start.y == bar.y && start.w > 8 && start.w < 100 && clock.y == bar.y
-         && clock.x > scr.w / 2 && clock.x + clock.w <= scr.w && clock.w > 8 && e == 0 && tray.w == 0;
-    check("point", ok, "r=%d bar=%d,%d %dx%d work=%dx%d start=%d clock=%d,%d tray=%d", r, bar.x, bar.y, bar.w, bar.h, work.w,
-          work.h, start.w, clock.x, clock.w, tray.w);
     check("point-bad", glos_point(0, &bar) == GLOS_E_ARGUMENT && glos_point(6, &bar) == GLOS_E_ARGUMENT, 0);
 
-    /* The tray. */
+    /* The tray (GLOS /RUN has no screen: where an icon is, and a notification's time, are the store mode's). */
     t = glos_tray(icon, "APITEST's icon");
-    r = glos_point(GLOS_POINT_TRAY, &tray);
     buf[0] = 0;
     e = glos_get_text(t, GLOS_PROP_TRAY_TIP, buf, sizeof buf);
-    ok = t && GLOS_HANDLE_KIND(t) == GLOS_HK_TRAY && r == 0 && tray.w >= 16 && tray.w <= 24 && tray.y == bar.y
-         && tray.x + tray.w <= clock.x + 2 && e >= 0 && !strcmp(buf, "APITEST's icon");
-    check("tray", ok, "t=%x err=%d at=%d,%d w=%d clock=%d e=%d tip=%s", t, glos_error(), tray.x, tray.y, tray.w, clock.x, e, buf);
+    ok = t && GLOS_HANDLE_KIND(t) == GLOS_HK_TRAY && e >= 0 && !strcmp(buf, "APITEST's icon");
+    check("tray", ok, "t=%x e=%d tip=%s", t, e, buf);
     r = glos_set_text(t, GLOS_PROP_TRAY_TIP, "Another");
     glos_get_text(t, GLOS_PROP_TRAY_TIP, buf, sizeof buf);
     e = glos_set_data(t, GLOS_PROP_TRAY_ICON, icon, sizeof icon);
@@ -1311,22 +1329,14 @@ static void shell(void)
          && glos_error() == GLOS_E_ARGUMENT;
     for (i = 0; i < GLOS_TRAY_MAX - 1; i++)
         ok &= (many[i] = glos_tray(icon, 0)) != 0;
-    glos_point(GLOS_POINT_TRAY, &tray);
-    ok &= glos_tray(icon, 0) == 0 && glos_error() == GLOS_E_MEMORY && tray.w >= 16 * GLOS_TRAY_MAX;
+    ok &= glos_tray(icon, 0) == 0 && glos_error() == GLOS_E_MEMORY;
     for (i = 0; i < GLOS_TRAY_MAX - 1; i++)
         ok &= glos_close(many[i]) == 0;
-    ok &= glos_close(t) == 0 && glos_close(t) == GLOS_E_HANDLE && glos_point(GLOS_POINT_TRAY, &tray) == 0 && tray.w == 0;
-    check("tray-full", ok, "w=%d err=%d", tray.w, glos_error());
+    ok &= glos_close(t) == 0 && glos_close(t) == GLOS_E_HANDLE;
+    check("tray-full", ok, "err=%d", glos_error());
 
-    /* Notifications: one shown for its time; closed while shown or waiting; too many. */
+    /* Notifications: closed while shown or waiting; what one may not be; too many. */
     while (glos_event(ev, sizeof ev, 0, 0) > 0) ;
-    t0 = glos_ticks();
-    n = glos_notify("APITEST", "A notification of the test's.\nIts second line.", "Yes", "No", icon, 2);
-    r = await(GLOS_EV_NOTIFY, n, ev, 6000);
-    took = glos_ticks() - t0;
-    check("notify-timeout", n && GLOS_HANDLE_KIND(n) == GLOS_HK_NOTIFY && r > 0 && ne->what == GLOS_NOTIFY_TIMEOUT
-          && took >= 1900 && took < 4000 && glos_close(n) == 0, "n=%x err=%d r=%d what=%u took=%u", n, glos_error(), r,
-          r > 0 ? ne->what : 0, took);
     n = glos_notify("Shown", 0, 0, 0, 0, 0);
     n2 = glos_notify("Waiting", "It never has its turn.", 0, 0, 0, 3);
     glos_sleep(300);
@@ -1357,6 +1367,47 @@ static void shell(void)
     check("help", r == GLOS_E_NOT_FOUND && glos_help(0) == GLOS_E_NOT_FOUND, "r=%d", r);
 }
 
+/* SHELL on a screen (under the agent, the display on): where the task bar's parts and a tray icon are, a
+   notification shown for its time. */
+static void on_screen(void)
+{
+    static unsigned icon[256];
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_ev_notify *ne = (struct glos_ev_notify *)ev;
+    struct glos_point bar, work, start, clock, tray;
+    struct glos_screen scr;
+    unsigned t0, took, i;
+    glos_handle t, n;
+    int r, e, ok;
+    for (i = 0; i < 256; i++)
+        icon[i] = 0xFF2060C0u;
+    glos_screen(&scr);
+    /* Where the task bar's parts are. */
+    r = glos_point(GLOS_POINT_BAR, &bar);
+    r |= glos_point(GLOS_POINT_WORK, &work) | glos_point(GLOS_POINT_START, &start) | glos_point(GLOS_POINT_CLOCK, &clock);
+    e = glos_point(GLOS_POINT_TRAY, &tray);
+    ok = r == 0 && bar.x == 0 && bar.w == scr.w && bar.y + bar.h == scr.h && work.x == 0 && work.y == 0 && work.w == scr.w
+         && work.h == bar.y && start.x == 0 && start.y == bar.y && start.w > 8 && start.w < 100 && clock.y == bar.y
+         && clock.x > scr.w / 2 && clock.x + clock.w <= scr.w && clock.w > 8 && e == 0 && tray.w == 0;
+    check("point", ok, "r=%d bar=%d,%d %dx%d work=%dx%d start=%d clock=%d,%d tray=%d", r, bar.x, bar.y, bar.w, bar.h, work.w,
+          work.h, start.w, clock.x, clock.w, tray.w);
+    t = glos_tray(icon, "APITEST's icon");
+    r = glos_point(GLOS_POINT_TRAY, &tray);
+    ok = t && r == 0 && tray.w >= 16 && tray.w <= 24 && tray.y == bar.y && tray.x + tray.w <= clock.x + 2;
+    glos_close(t);
+    ok = ok && glos_point(GLOS_POINT_TRAY, &bar) == 0 && bar.w == 0;
+    check("tray-place", ok, "t=%x r=%d at=%d,%d w=%d clock=%d after=%d", t, r, tray.x, tray.y, tray.w, clock.x, bar.w);
+    /* A notification shown for its time. */
+    while (glos_event(ev, sizeof ev, 0, 0) > 0) ;
+    t0 = glos_ticks();
+    n = glos_notify("APITEST", "A notification of the test's.\nIts second line.", "Yes", "No", icon, 2);
+    r = await(GLOS_EV_NOTIFY, n, ev, 6000);
+    took = glos_ticks() - t0;
+    check("notify-timeout", n && GLOS_HANDLE_KIND(n) == GLOS_HK_NOTIFY && r > 0 && ne->what == GLOS_NOTIFY_TIMEOUT
+          && took >= 1900 && took < 4000 && glos_close(n) == 0, "n=%x err=%d r=%d what=%u took=%u", n, glos_error(), r,
+          r > 0 ? ne->what : 0, took);
+}
+
 /* SHELL's calls that keep settings and start programs (under the agent): kinds of file, verbs, OPEN. */
 static int store_mode(void)
 {
@@ -1367,6 +1418,7 @@ static int store_mode(void)
     FILE *f;
     if (glos_init("API test", "apitest", "Tests") != 0)
         return 98;
+    on_screen();
     /* Kinds of file and their programs. */
     r = glos_assoc_set(".ZZT", "APITEST.EXE");
     buf[0] = 'x';
@@ -1596,6 +1648,7 @@ static int shell_mode(void)
 int main(int argc, char **argv)
 {
     char line[64];
+    find_home(argv[0]);
     if (argc > 1 && !strcmp(argv[1], "shell"))
         return shell_mode();
     if (argc > 1 && !strcmp(argv[1], "store"))
