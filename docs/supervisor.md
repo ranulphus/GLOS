@@ -1233,11 +1233,10 @@ direct = 1
   (`vm_claim_irq`) and given back to it when a session takes the screen (`vm_unclaim_irq`); apps reach it only
   through `GLOS_FN_AUDIO` streams (graphics.md §7.4).
 
-### 12.7 An app's own threads (v1, phase B step 4: design, for the owner's review; nothing built)
+### 12.7 An app's own threads (v1, phase B step 4: the design, approved by the owner 2026-11-10)
 
 API 2.0's THREAD (`docs/v1/api-2.md`, `docs/v1/phase-b.md` step 4): an app makes threads of its own, so that it
-can load, decode or search without stopping its window. This is the design. It is reviewed with the owner before
-any of it is built.
+can load, decode or search without stopping its window.
 
 **What a thread of an app's is**
 
@@ -1254,7 +1253,7 @@ any of it is built.
   registers, and ends by a call (EXIT), which libglos makes when the entry returns.
 - **The scheduler treats it as any thread of its class:** by the time it has run (§7). An app with three busy
   threads gets three shares. A thread may be made in the bulk class (`PRIO_BULK`: it runs when no normal thread
-  wants to, with the bulk class's budget), for work that must not slow the desktop (question 4).
+  wants to, with the bulk class's budget), for work that must not slow the desktop.
 - **At most 16 an app** (17 with its first), each costing 16 KB of kernel memory.
 
 **What stays the first thread's**
@@ -1269,7 +1268,7 @@ exception depth, the real-mode stack. They aren't made per thread. So:
 - **The GPU** (DRAW's GPU calls, the card's registers and VRAM touched): the first thread's alone. Another
   thread's call is refused (`GLOS_E_REFUSED`), and its touch of the card's memory is a fault like any other.
 
-**An exception in another thread ends the app** (question 1)
+**An exception in another thread ends the app**
 
 - **A page of the app's memory touched for the first time** (lazy backing, `lin_fault`) is backed for whichever
   thread touches it: that is no exception to the app.
@@ -1295,7 +1294,7 @@ exception depth, the real-mode stack. They aren't made per thread. So:
 - **An app's calls run one at a time** (a lock an app, the API lock), except those that wait, which don't hold
   it while they wait: EVENT, SLEEP, THREAD's WAIT, JOIN and LOCK, and later a JOB's READ and a connection's
   waits. Every module behind the API was written for one thread an app; the lock keeps that true without an
-  audit of each (question 2).
+  audit of each.
 - **Any thread may wait on the app's event queue and post to it** (CORE's EVENT and POST): the queue is safe
   with interrupts off already.
 - **The toolkit is used from one thread** (the window's): a toolkit rule, not the kernel's.
@@ -1333,18 +1332,12 @@ exception depth, the real-mode stack. They aren't made per thread. So:
 - **Unchanged:** `loopa-apps`, `hostile`, the gate's DPMI suites (no thread is made by them: the paths they take
   are the first thread's, as before).
 
-**Questions, for the owner**
+**The owner's answers (2026-11-10)**
 
-1. **An exception in a thread other than the first:** end the app with a crash report (recommended: simple and
-   safe, and DJGPP's signal handlers aren't made for threads anyway), or give it to the app's handler on that
-   thread (a locked stack and an entry stack a thread: a larger change to the DPMI host, with more to go wrong)?
-2. **GLOS's calls from other threads:** all of them, one at a time an app (recommended: apps and the IDE's
-   agents can call anything from a worker), or only CORE's and THREAD's from other threads (smaller, but every
-   worker must hand its other calls to the first thread)?
-3. **Interrupt handlers and callbacks only on the first thread:** accepted? (A game with its own timer interrupt
-   and a worker thread keeps the handler on its first thread.)
-4. **A background class for workers** (they run only when no app's ordinary thread or the system VM wants the
-   CPU): in v1 (recommended: a thumbnail or search thread can't slow typing), or every thread equal?
+1. **An exception in a thread other than the first ends the app,** with a crash report naming the thread.
+2. **Every GLOS call may be made from any thread,** one at a time an app.
+3. **Interrupt handlers, callbacks and the GPU are the first thread's only.**
+4. **A background class for workers, in v1.**
 
 ## 13. INT 31h function table
 
