@@ -169,6 +169,14 @@ Pure code on surfaces, like the 2D library, and tested on the host the same way.
   - **minimised** (`WF_MIN`) on top of that: off the screen, its button still on the task bar, its place kept.
   - The task bar goes while a full-screen window, or another window of the same owner's, has the focus.
   - Another screen (`wm_screen`) fits maximised, full-screen and snapped windows again.
+- **Families** (v1, phase B): a window may belong to another (`parent`: a dialog's owner). It stays in front of
+  its parent, is raised with it, and is minimised and brought back with it. A modal one (`WF_MODAL`) keeps its
+  parent from the focus and from the mouse while it is shown.
+- **What a window shows on the task bar and its title bar:** a picture of 16 by 16 (`icon`); a button that asks
+  for attention until the window has the focus (`flash`); a bar of progress along the button (`progress`).
+- **Not answering** (`WF_HUNG`, set by the kernel's side: `deskapp_hung`): the title greyed, "(not answering)"
+  after it, and the hourglass over the window. Said of an app that reads its events and has had some waiting for
+  5 seconds; never of one that doesn't read them, nor while apps are held by a session.
 - **The order** is one list from the bottom up. Topmost windows (`WF_TOPMOST`: the task bar) stay above the
   rest; `wm_raise` puts a window at the top of its kind. **The focus** is one shown window or none; its title
   bar and its task-bar button show it; `wm_next` gives the next in the order windows were made (Alt-Tab).

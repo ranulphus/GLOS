@@ -154,6 +154,44 @@ After that:
   - Loop A: APITEST's WIN cases; a script that minimises, maximises, restores and resizes a test app from each edge
     with `glos mouse`; `loopa-win` and `loopa-apps` unchanged.
 
+**Step 2 as built (2026-11-10):**
+- **Files:**
+  - the window manager's core, `kernel/wm/wm.c` (states, boxes, edges, families, cursors, icons);
+  - the desktop's input, `kernel/wm/deskin.c`, and apps' windows, `kernel/wm/deskapp.c`;
+  - `kernel/app/api2win.c` (WIN, DRAW, the desktop's events) and `kernel/app/api2int.h`;
+  - `kernel/gfx/convert.c` (BLIT's formats);
+  - libglos 2.0's window calls; APITEST's window cases and `APITEST win`.
+- **For every app, 1.x's too:** the states, the title bar's boxes, sizing by any edge, snapping, the pointer's
+  shapes and the task bar's new buttons are the window manager's, so today's apps have them at once.
+- **Where it differs from `api-2.md` and from this plan:**
+  1. **The title bar's boxes are at its right** (minimise, maximise or restore, close), and the title at its left
+     with the window's icon. Slate's close box was at the left. The focus's close box keeps the orange.
+  2. **An edge is caught from 3 pixels outside the frame,** since Slate's border is a pixel wide.
+  3. **EMBED moves to step 12,** with CAPTURE: both are for programs the caller started, which 2.0's JOB (step 9)
+     says.
+  4. **The display's modes (MODES) move to step 5,** with the display's settings.
+  5. **F1 is a key like any other.** The kernel sends no "help asked" event: the toolkit opens Help (SHELL's HELP,
+     step 8) at the window's HELP property.
+  6. **A task-bar button is there or not** (TASKBAR 1 or 0). Grouping one window's button under another's isn't
+     built.
+  7. **Snapping is on;** its setting (`[desktop] snap`) comes with step 5's settings. The title bar's double click
+     follows `[input] double_click`, which exists.
+  8. **A window's icon is 16 by 16.** The 32 by 32 one comes with Alt+Tab (phase D).
+  9. **"Not answering"** is told by ENUM (`GLOS_WF_HUNG`), the window's title and the pointer. The event to the shell
+     comes with SHELL (step 8). It is said only of an app that reads its events at all.
+  10. **SOFT is BLIT:** pixels in any format of 8, 16 or 32 bits, with a palette of the app's own for 8, into the
+      window. A renderer whose format is the screen's draws straight into PIXELS instead.
+  11. **FOCUS by a window's number** (another app's window) is anyone's until step 8, which keeps it to the shell
+      and Task Manager.
+  12. **Key, mouse and wheel events come already** (they are INPUT's): a window without them can't be tried. Step 3
+      adds the rest of INPUT.
+- **Tests:**
+  - **Host:** `wm_test` (270,000 random operations with states and cursors against a full repaint; places, boxes,
+    edges, states, families, modal, on top, every cursor's masks); `gfx_test` (every format into every other).
+  - **Loop A:** `loopa-desk` (the demonstration with an icon, a flash and progress, on every card); `loopa-win`
+    (1.x's WINTEST through the boxes, a double click, snapping, edges, minimise and the task bar); `loopa-api`
+    (APITEST's cases, and `APITEST win` under the mouse and keys: events, states, not answering).
+
 ### 3. INPUT
 
 - **KEYS:** the keyboard's state now.
