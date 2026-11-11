@@ -58,6 +58,7 @@ static u8 reinjected;                           /* direct mode: the chip holds a
 static u8 replies;                              /* bytes the program sent the keyboard, still to be answered */
 static u32 reply_since;
 static u32 acks_made;                           /* ACKs GLOS gave for a keyboard that didn't */
+static u32 made_at;                             /* ... and the tick of the last one (0: none yet) */
 static u16 inj[QSIZE];                          /* direct mode: injected bytes waiting for the chip */
 static u32 injh, injt;
 static u8 aux_on, aux_wheel, aux_rate[3], aux_arg, aux_buttons;        /* the mouse, as the program set it */
@@ -622,11 +623,20 @@ void vkbc_tick(void)
        86Box's keyboard does this now and then when a key is on its way as
        the command comes (the kill hotkey's Esc, then the BIOS's LED update:
        one sess-kill run in 20 on a busy host). A real ACK that still comes
-       is then one more byte for INT 09h, which takes it for what it is. */
-    if (replies && timer_ticks() - reply_since > 20) {
+       is then one more byte for INT 09h, which takes it for what it is.
+       A keyboard that has just failed to answer one command is given 5 ms
+       for the next: the LED update is two bytes, and two waits of 20 ms were
+       most of the 50 ms a vif-stuck warning allows. (At the end of a
+       direct-mode session on the 486 both go unanswered every time, and the
+       warning came in every other gate, 2026-11-11: this makes it rarer, not
+       gone. The kernel's tick is 50 ms behind there too, GLOS-TIMER check=off:
+       real interrupts are off for that long at a direct session's end, which
+       is the thing to find.) */
+    if (replies && timer_ticks() - reply_since > (made_at && timer_ticks() - made_at < 200 ? 5u : 20u)) {
         trace('x', replies, 0);
         replies--;
         reply_since = timer_ticks();
+        made_at = timer_ticks() | 1;
         if (qt - qh < QSIZE)
             q[--qh % QSIZE] = (u16)(0xFA | REPLY);
         kprintf("GLOS-KBC ack=made-up n=%u\n", ++acks_made);       /* (the keyboard gave none in 20 ms) */

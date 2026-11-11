@@ -627,7 +627,7 @@ After that:
   - LOG: the log from a place on; with `follow`, `GLOS_EV_LOG` once when it has more.
   - KILL: an app, a job, the session in front: for GLOS's own programs (the trust rule of step 8). ASK is
     anybody's: the app gets `GLOS_EV_END`.
-- **GLOS_EV_END** is sent now: at `glos exit` and `glos restart` API 2.0's apps are asked to end and given three
+- **GLOS_EV_END** is sent now: at `glos exit` and `glos restart` API 2.0's apps are asked to end and given five
   seconds; those left are then ended (1.x's apps at once, as before).
 - **Tests:** APITEST's SYS cases (7, in the default run), `sys-kill-job`, `job-files`, `job-files-none` and
   `job-long` in the job mode; `api_shell_case` expects the apps left at `glos exit` to end by themselves.

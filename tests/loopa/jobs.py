@@ -4535,8 +4535,14 @@ def api_shell_case(profile, vcard, card):
         # Another app's window not answering, and answering again.
         w = procs["w"] = App("C:\\TEST\\APITEST.EXE win")
         t0 = time.time()
-        while time.time() - t0 < 240 and '"APITEST W"' not in desk():
+        while time.time() - t0 < 240:           # (its window up, and the keyboard its: the keys below are for it)
+            d = desk()
+            m = re.search(r'^window (\d+) shown\b.* "APITEST W"$', d, re.M)
+            f = re.search(r"focus=(\d+)", d)
+            if m and f and m.group(1) == f.group(1):
+                break
             time.sleep(0.5)
+        checks["w-up"] = time.time() - t0 < 240
         agent.ssh("glos key 0x23")              # h: it takes no event for 8 seconds ...
         agent.ssh("glos key 0x1E")              # ... while one waits for it
         hung = a.said("shell what=3 at=0,0 window=*", 30)

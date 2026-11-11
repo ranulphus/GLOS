@@ -1268,7 +1268,8 @@ int app_ask_end(u32 id)
 }
 
 /* glos exit with apps running (the VM thread, each time it looks): API 2.0's apps are asked to end and given
-   three seconds to; those left then, and 1.x's apps at once, are ended. */
+   five seconds to begin to (three were too few for two apps on a busy 486); those that have not by then, and
+   1.x's apps at once, are ended. */
 void app_exit_turn(void)
 {
     static u32 asked_at;
@@ -1289,7 +1290,7 @@ void app_exit_turn(void)
             else
                 app_kill(a, "exit");
         }
-    } else if (!n2 || timer_ticks() - asked_at >= 3 * 1024) {
+    } else if (!n2 || timer_ticks() - asked_at >= 5 * 1024) {
         asked_at = 0;
         for (a = apps; a; a = a->next)
             if (a->ctx && !a->kill)             /* (not one that is leaving by itself: its exit code is its own) */
