@@ -2426,6 +2426,170 @@ static int midi_mode(int mpu)
     return fails > 90 ? 90 : fails;
 }
 
+/* APITEST net HOST ECHO CLOSED PORT: API 2.0's NET (phase B step 11), under the agent with a network. HOST is
+   the test's host as the PC sees it (dotted), ECHO a port there that echoes, CLOSED one where nothing listens,
+   PORT the port this PC listens on, which the test reaches from outside. The network's state; a name; a
+   connection out, echoed through; what is refused; events; then a server: the test's host connects to PORT (told
+   when by lines on COM1) once, then twice at once, then once more for a connection nobody takes. */
+static unsigned char net_buf[8192], net_back[8192];
+
+static int net_all(glos_handle h, const unsigned char *b, unsigned n)        /* all of it sent: 1 */
+{
+    unsigned done = 0;
+    while (done < n) {
+        int k = glos_net_send(h, b + done, n - done, 20000);
+        if (k <= 0)
+            return 0;
+        done += (unsigned)k;
+    }
+    return 1;
+}
+
+static int net_line(glos_handle h, char *line, unsigned room)   /* what comes within 10 s, as text: its length */
+{
+    unsigned state = 0;
+    int n = glos_net_receive(h, line, room - 1, 10000, &state);
+    line[n > 0 ? n : 0] = 0;
+    return n;
+}
+
+static int net_mode(int argc, char **argv)
+{
+    static struct glos_net_if nif[2];
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_ev_net *e = (struct glos_ev_net *)ev;
+    glos_handle c, c2, l, s, s2;
+    unsigned host = 0, echo, closed, port, count = 0, state = 0, addr = 0, from = 0, i, sent, got, bad, x = 0;
+    int ok, r, n, v = 0;
+    char line[96], text[64];
+    if (argc < 6 || glos_init("API test", "apitest", "Tests") != 0)
+        return 98;
+    echo = (unsigned)atoi(argv[3]), closed = (unsigned)atoi(argv[4]), port = (unsigned)atoi(argv[5]);
+
+    /* The network's state: one interface, up, its address from DHCP. */
+    r = glos_net_state(nif, sizeof nif, &count);
+    ok = r == 0 && count == 1 && nif[0].size == sizeof nif[0] && nif[0].kind == GLOS_NETIF_ETHERNET
+         && (nif[0].flags & (GLOS_NETIF_UP | GLOS_NETIF_DHCP)) == (GLOS_NETIF_UP | GLOS_NETIF_DHCP) && nif[0].address
+         && nif[0].mask && nif[0].gateway && nif[0].dns[0] && nif[0].lease && nif[0].lease_left <= nif[0].lease
+         && nif[0].lease_left && nif[0].card[0] && nif[0].host[0] && nif[0].rx_frames && nif[0].tx_frames
+         && (nif[0].mac[0] | nif[0].mac[1] | nif[0].mac[2] | nif[0].mac[3] | nif[0].mac[4] | nif[0].mac[5])
+         && glos_net_state(nif, 8, &count) == GLOS_E_ROOM && count == 0;
+    check("net-state", ok, "r=%d card=%s host=%s flags=%x ip=%08x gw=%08x dns=%08x lease=%u left=%u rx=%u tx=%u", r, nif[0].card,
+          nif[0].host, nif[0].flags, nif[0].address, nif[0].gateway, nif[0].dns[0], nif[0].lease, nif[0].lease_left,
+          nif[0].rx_frames, nif[0].tx_frames);
+
+    /* A name: a dotted address is taken as it is; an empty one is refused; one that can't be is no name (or,
+       with no name server to say so, no answer). */
+    r = glos_net_resolve(argv[2], 5000, &host);
+    n = glos_net_resolve("no-such-host.invalid", 4000, &x);
+    ok = r == 0 && host && glos_net_resolve("", 1000, &x) == GLOS_E_ARGUMENT && (n == GLOS_E_NET_NAME || n == GLOS_E_NET_TIMEOUT);
+    check("net-resolve", ok, "r=%d host=%08x invalid=%d", r, host, n);
+
+    /* A connection out: open, its properties; 100,000 bytes echoed through it, the same bytes back. */
+    c = glos_net_connect(host, echo, 10000, 0);
+    ok = c && GLOS_HANDLE_KIND(c) == GLOS_HK_CONNECTION && prop(c, GLOS_PROP_NET_STATE) == GLOS_NETS_OPEN
+         && prop(c, GLOS_PROP_NET_ADDRESS) == (int)host && prop(c, GLOS_PROP_NET_PORT) == (int)echo
+         && prop(c, GLOS_PROP_NET_ROOM) == 16384 && prop(c, GLOS_PROP_NET_WAITING) == 0 && prop(c, GLOS_PROP_NET_RESET) == 0;
+    check("net-connect", ok, "c=%x err=%d state=%d", c, glos_error(), prop(c, GLOS_PROP_NET_STATE));
+    for (sent = got = bad = 0; c && got < 100000 && !bad; ) {
+        if (sent < 100000) {
+            unsigned k = 100000 - sent < sizeof net_buf ? 100000 - sent : sizeof net_buf;
+            for (i = 0; i < k; i++)
+                net_buf[i] = (unsigned char)((sent + i) * 7 + ((sent + i) >> 8));
+            n = glos_net_send(c, net_buf, k, 0);       /* (what there is room for: the rest next time round) */
+            if (n < 0)
+                bad = 1;
+            else
+                sent += (unsigned)n;
+        }
+        n = glos_net_receive(c, net_back, sizeof net_back, sent < 100000 ? 10 : 10000, &state);
+        if (n < 0 || (n == 0 && sent == 100000))
+            bad = 2;
+        for (i = 0; n > 0 && i < (unsigned)n; i++)
+            if (net_back[i] != (unsigned char)((got + i) * 7 + ((got + i) >> 8)))
+                bad = 3;
+        got += n > 0 ? (unsigned)n : 0;
+    }
+    check("net-echo", c && !bad && got == 100000, "sent=%u got=%u bad=%u state=%u", sent, got, bad, state);
+
+    /* Refused: a port nothing listens on; port 0; a handle that is none, or another kind's; a property a
+       connection hasn't. Closed with its RESET set: gone at once. */
+    c2 = glos_net_connect(host, closed, 10000, 0);
+    r = glos_error();
+    ok = !c2 && r == GLOS_E_NET_REFUSED && !glos_net_connect(host, 0, 1000, 0) && glos_error() == GLOS_E_ARGUMENT
+         && glos_net_send(0x12345678, "x", 1, 0) == -GLOS_E_HANDLE && glos_net_receive(0, net_back, 1, 0, 0) == -GLOS_E_HANDLE
+         && glos_set(c, GLOS_PROP_NET_STATE, 1) == GLOS_E_PROPERTY && glos_set(c, GLOS_PROP_NET_RESET, 2) == GLOS_E_ARGUMENT
+         && glos_set(c, GLOS_PROP_NET_RESET, 1) == 0 && prop(c, GLOS_PROP_NET_RESET) == 1 && glos_close(c) == 0
+         && glos_get(c, GLOS_PROP_NET_STATE, &v) == GLOS_E_HANDLE;
+    check("net-refused", ok, "c2=%x err=%d now=%d", c2, r, glos_error());
+
+    /* Events: a connection begun without waiting says when it is open; what comes back says so once. */
+    while (glos_event(ev, sizeof ev, 0, 0) > 0) ;
+    c = glos_net_connect(host, echo, 0, GLOS_NETF_EVENTS);
+    n = c ? await(GLOS_EV_NET, c, ev, 10000) : 0;
+    ok = c && n == (int)sizeof *e && e->state == GLOS_NETS_OPEN && e->ev.handle == c;
+    r = glos_net_send(c, "ping", 4, 1000);
+    n = await(GLOS_EV_NET, c, ev, 10000);
+    ok = ok && r == 4 && n > 0 && e->waiting >= 1 && e->state == GLOS_NETS_OPEN && net_line(c, text, sizeof text) == 4
+         && !strcmp(text, "ping") && glos_close(c) == 0;
+    check("net-events", ok, "c=%x n=%d state=%u waiting=%u text=%s", c, n, e->state, e->waiting, text);
+
+    /* A port listened on: its properties; the same port again is refused, and GLOS's own (22); nothing waits
+       yet. Then the test's host connects: the event, the connection, where it came from; a line each way; all
+       it sends echoed until it closes its side. */
+    l = glos_net_listen(port, 2, GLOS_NETF_EVENTS);
+    ok = l && GLOS_HANDLE_KIND(l) == GLOS_HK_CONNECTION && prop(l, GLOS_PROP_NET_STATE) == GLOS_NETS_LISTENING
+         && prop(l, GLOS_PROP_NET_PORT) == (int)port && prop(l, GLOS_PROP_NET_WAITING) == 0
+         && glos_get(l, GLOS_PROP_NET_ROOM, &v) == GLOS_E_PROPERTY && !glos_net_listen(port, 2, 0) && glos_error() == GLOS_E_NET_REFUSED
+         && !glos_net_listen(22, 2, 0) && glos_error() == GLOS_E_NET_REFUSED && !glos_net_listen(port + 1, 9, 0)
+         && glos_error() == GLOS_E_ARGUMENT && !glos_net_accept(l, 0, 0, 0, 0) && glos_error() == GLOS_E_NET_TIMEOUT
+         && !glos_net_accept(l, 200, 0, 0, 0) && glos_error() == GLOS_E_NET_TIMEOUT && glos_net_send(l, "x", 1, 0) == -GLOS_E_ARGUMENT;
+    check("net-listen", ok, "l=%x err=%d state=%d port=%d", l, glos_error(), prop(l, GLOS_PROP_NET_STATE), prop(l, GLOS_PROP_NET_PORT));
+    while (glos_event(ev, sizeof ev, 0, 0) > 0) ;
+    com1("HX-APITEST net-listening\r\n");
+    n = await(GLOS_EV_NET, l, ev, 120000);
+    s = glos_net_accept(l, 5000, 0, &addr, &from);
+    ok = n > 0 && e->state == GLOS_NETS_LISTENING && e->waiting == 1 && s && s != l && addr == host && from
+         && prop(s, GLOS_PROP_NET_STATE) == GLOS_NETS_OPEN && prop(s, GLOS_PROP_NET_ADDRESS) == (int)addr
+         && prop(s, GLOS_PROP_NET_PORT) == (int)from;
+    r = net_line(s, text, sizeof text);
+    ok = ok && r > 0 && !strcmp(text, "hello GLOS\n") && net_all(s, (const unsigned char *)"hello host\n", 11);
+    for (got = 0, state = 0; s; ) {             /* its bytes back until it has closed its side */
+        n = glos_net_receive(s, net_back, sizeof net_back, 20000, &state);
+        if (n <= 0 || !net_all(s, net_back, (unsigned)n))
+            break;
+        got += (unsigned)n;
+    }
+    ok = ok && n == 0 && state == GLOS_NETS_CLOSED && got == 200000 && glos_close(s) == 0;
+    check("net-accept", ok, "s=%x err=%d from=%08x:%u line=%d echoed=%u last=%d state=%u", s, glos_error(), addr, from, r, got, n, state);
+
+    /* Two at once: both wait (what each sent with it), taken in the order they came; each told its turn. */
+    com1("HX-APITEST net-two\r\n");
+    for (i = 0; i < 600 && prop(l, GLOS_PROP_NET_WAITING) < 2; i++)
+        glos_sleep(100);
+    ok = prop(l, GLOS_PROP_NET_WAITING) == 2;
+    s = glos_net_accept(l, 0, 0, 0, 0);
+    s2 = glos_net_accept(l, 0, 0, 0, 0);
+    ok = ok && s && s2 && s != s2 && prop(l, GLOS_PROP_NET_WAITING) == 0 && net_line(s, text, sizeof text) == 1 && text[0] == 'A'
+         && net_line(s2, line, sizeof line) == 1 && line[0] == 'B' && net_all(s, (const unsigned char *)"1", 1)
+         && net_all(s2, (const unsigned char *)"2", 1) && glos_close(s) == 0 && glos_close(s2) == 0;
+    check("net-two", ok, "s=%x s2=%x first=%s second=%s", s, s2, text, line);
+
+    /* One nobody takes: the port closed, it is reset (the test's host sees that); the port is free again. */
+    com1("HX-APITEST net-last\r\n");
+    for (i = 0; i < 600 && prop(l, GLOS_PROP_NET_WAITING) < 1; i++)
+        glos_sleep(100);
+    ok = prop(l, GLOS_PROP_NET_WAITING) == 1 && glos_close(l) == 0 && !glos_net_accept(l, 0, 0, 0, 0) && glos_error() == GLOS_E_HANDLE;
+    glos_sleep(500);
+    l = glos_net_listen(port, 1, 0);
+    ok = ok && l && glos_close(l) == 0 && glos_net_state(nif, sizeof nif, &count) == 0;
+    check("net-closed", ok, "l=%x err=%d connections=%u", l, glos_error(), nif[0].connections);
+
+    snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+    com1(line);
+    return fails > 90 ? 90 : fails;
+}
+
 /* What a run of the test may have left on a PC that is kept (a bench): taken away. */
 static int clean_mode(void)
 {
@@ -2524,6 +2688,8 @@ int main(int argc, char **argv)
         return job_mode();
     if (argc > 1 && !strcmp(argv[1], "audio"))
         return audio_mode(argc > 2 && !strcmp(argv[2], "loop"));
+    if (argc > 1 && !strcmp(argv[1], "net"))
+        return net_mode(argc, argv);
     if (argc > 1 && !strcmp(argv[1], "midi"))
         return midi_mode(argc > 2 && !strcmp(argv[2], "mpu"));
     if (argc > 2 && !strcmp(argv[1], "sched"))

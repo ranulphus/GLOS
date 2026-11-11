@@ -22,6 +22,24 @@ enum {
 #undef GLOS_EV_RESIZE
 #undef GLOS_EV_CLOSE
 #undef GLOS_EV_WHEEL
+#undef GLOS_NET_RESOLVE                 /* (1.x's GLOS_FN_NET is sock.c's alone: none of its names are wanted here) */
+#undef GLOS_NET_CONNECT
+#undef GLOS_NET_SEND
+#undef GLOS_NET_RECV
+#undef GLOS_NET_CLOSE
+#undef GLOS_NET_STATE
+#undef GLOS_EV_NET
+#undef GLOS_E_NET_DOWN
+#undef GLOS_E_NET_NAME
+#undef GLOS_E_NET_TIMEOUT
+#undef GLOS_E_NET_REFUSED
+#undef GLOS_E_NET_RESET
+#undef GLOS_NETF_EVENTS
+#undef GLOS_NETF_NAGLE
+#undef GLOS_NETS_CONNECTING
+#undef GLOS_NETS_OPEN
+#undef GLOS_NETS_CLOSED
+#undef GLOS_NETS_FAILED
 #include "glos/api2.h"
 #include "handle.h"
 
@@ -143,6 +161,11 @@ extern const u32 api2_audio_nprops;
 int api2_audio(struct app *a, struct trapframe *tf, u32 n);    /* AUDIO's calls */
 void api2_audio_close(struct app *a, void *obj);                /* CLOSE of a stream's handle */
 void api2_midi_close(struct app *a, void *obj);                 /* ... of a MIDI port's */
+/* api2net.c */
+extern const struct propdef api2_net_props[];
+extern const u32 api2_net_nprops;
+int api2_net(struct app *a, struct trapframe *tf, u32 n);       /* NET's calls (made without the app's lock) */
+void api2_net_close(struct app *a, void *obj);                  /* CLOSE of a connection's handle, or a port's */
 void api2_audio_tick(struct app *a);                            /* each tick: a stream below its NOTIFY */
 
 /* api2sys.c */

@@ -11,6 +11,7 @@ struct rmregs;
 
 /* The running thread's app, or 0 (the VM thread, a kernel thread). */
 struct app *app_cur(void);
+void api2_net_changed(void);            /* (api2net.c) the network's state changed: API 2.0's apps are told */
 void app_each(void (*fn)(struct app *a, void *arg), void *arg); /* every app that runs, interrupts off: fn is brief */
 int app_stalled(const struct app *a);    /* events have waited 5 seconds for an app that reads its queue */
 struct app *app_pending(void);          /* the app app_init made, until its program's call returns */

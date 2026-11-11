@@ -4641,6 +4641,104 @@ def api_audio_case(profile, vcard, card, sound="sb16"):
     return "  %-22s %s%s" % ("apiaudio-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
+def api_net_case(profile, vcard, card):
+    """API 2.0's NET (APITEST net; phase B step 11), under the agent: the network's state; a name; a connection
+    out to an echo server on the host, 100,000 bytes through it; what is refused; events. Then APITEST listens on
+    a port that SLiRP forwards from the host: the host connects, a line goes each way, 200,000 bytes come back
+    as sent until the host closes its side; two connections at once are taken in the order they came; one that
+    nobody takes is dropped when the port is closed. Every case ok, and no connection left in the kernel's table."""
+    import socket
+    import threading
+    import time
+    tag = "%s-%s" % (profile, card)
+    echo, closed, fwd = EchoServer(), free_port(), free_port()
+    agent = Agent("apinet-" + tag, profile, card, ["--card", vcard, "--net-fwd", "%d:7777" % fwd,
+        "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
+        "--cmd", "SERSAY HX-START apinet", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1500)
+    checks, info, p = {"listen": agent.listening()}, "", None
+
+    def said(word, limit=300):                  # a line of APITEST's on COM1: the host's turn
+        t0 = time.time()
+        while time.time() - t0 < limit and word not in agent.log() and (p is None or p.poll() is None):
+            time.sleep(0.5)
+        return word in agent.log()
+
+    def dial():
+        c = socket.create_connection(("127.0.0.1", fwd), timeout=60)
+        c.settimeout(180)
+        return c
+
+    def read(c, n=None):                        # n bytes, or all there is until the other end closes
+        got = b""
+        try:
+            while n is None or len(got) < n:
+                d = c.recv(65536 if n is None else n - len(got))
+                if not d:
+                    break
+                got += d
+        except (socket.timeout, ConnectionResetError):
+            pass
+        return got
+
+    try:
+        p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\APITEST.EXE net 10.0.2.2 %d %d 7777"
+                                           % (echo.port, closed)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        checks["listening"] = said("HX-APITEST net-listening", 600)
+        c = dial()
+        c.sendall(b"hello GLOS\n")
+        checks["hello"] = read(c, 11) == b"hello host\n"
+        data = bytes((i * 13 + (i >> 7)) & 255 for i in range(200000))
+
+        def send():
+            try:
+                c.sendall(data)
+                c.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+        threading.Thread(target=send, daemon=True).start()
+        back = read(c)
+        checks["echoed"] = back == data
+        if not checks["echoed"]:
+            info += " echoed=%d" % len(back)
+        c.close()
+        checks["two-asked"] = said("HX-APITEST net-two")
+        a = dial()
+        a.sendall(b"A")
+        time.sleep(1)
+        b = dial()
+        b.sendall(b"B")
+        ra, rb = read(a, 1), read(b, 1)
+        checks["two"] = ra == b"1" and rb == b"2"
+        a.close()
+        b.close()
+        checks["last-asked"] = said("HX-APITEST net-last")
+        d = dial()
+        d.sendall(b"Z")
+        d.settimeout(60)
+        try:
+            checks["dropped"] = d.recv(16) == b""
+        except ConnectionResetError:
+            checks["dropped"] = True
+        except socket.timeout:
+            checks["dropped"] = False
+        d.close()
+        checks["run"] = p.wait(timeout=600) == 0
+        checks["table-empty"] = "sockets=0" in agent.ssh("glos net")[1]
+        agent.ssh("glos exit")
+    except (subprocess.TimeoutExpired, OSError) as e:
+        info += " %s" % type(e).__name__
+        if p and p.poll() is None:
+            p.kill()
+    text = agent.wait()
+    cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", text)
+    checks["cases"] = len(cases) >= 10 and all(k == "1" for c, k, w in cases)
+    if not checks["cases"]:
+        info += " cases=%d failed-cases=%s" % (len(cases), ";".join(c + w.rstrip() for c, k, w in cases if k != "1"))
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text and "GLOS-WARN" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("apinet-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
 def api_midi_case(profile, vcard, card, sound="sb16"):
     """API 2.0's MIDI ports (APITEST midi; phase B step 10), under the agent with the desktop on and a sound card:
     GLOS finds the FM chip and the MPU-401 (BLASTER's P, or the Crystal chip's); the FM port's notes play at their
@@ -7299,6 +7397,7 @@ def main():
             res += matrix(api_job_case, wins, a.jobs)   # ... and programs run for the app: JOB
             res += matrix(api_audio_case, wins + [w + ("cs4236b",) for w in wins[:1]], a.jobs)    # ... and sound
             res += matrix(api_midi_case, wins + [w + ("cs4236b",) for w in wins[:1]], a.jobs)     # ... and MIDI
+            res += matrix(api_net_case, wins, a.jobs)   # ... and the network
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

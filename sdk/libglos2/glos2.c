@@ -1028,6 +1028,71 @@ int glos_midi_raw(glos_handle h, const void *bytes, unsigned count)
     return raw(GLOS_AUDIO_MIDI_OUT, &q, 0);
 }
 
+int glos_net_resolve(const char *name, unsigned ms, unsigned *address)
+{
+    struct glos_net_resolve q = { sizeof q, (unsigned)name, ms, 0 };
+    int r = raw(GLOS_NET_RESOLVE, &q, 0);
+    if (address)
+        *address = q.address;
+    return r;
+}
+
+glos_handle glos_net_connect(unsigned address, unsigned port, unsigned ms, unsigned flags)
+{
+    struct glos_net_connect q = { sizeof q, address, port, ms, flags, 0, 0 };
+    int r = raw(GLOS_NET_CONNECT, &q, 0);
+    last_error = r;
+    return r ? 0 : q.handle;
+}
+
+static int net_io(unsigned fn, glos_handle h, const void *buffer, unsigned count, unsigned ms, unsigned *state)
+{
+    struct glos_net_io q = { sizeof q, h, (unsigned)buffer, count, ms, 0, 0 };
+    int r = raw(fn, &q, 0);
+    if (state)
+        *state = q.state;
+    return r ? -r : (int)q.done;
+}
+
+int glos_net_send(glos_handle h, const void *bytes, unsigned count, unsigned ms)
+{
+    return net_io(GLOS_NET_SEND, h, bytes, count, ms, 0);
+}
+
+int glos_net_receive(glos_handle h, void *buffer, unsigned room, unsigned ms, unsigned *state)
+{
+    return net_io(GLOS_NET_RECEIVE, h, buffer, room, ms, state);
+}
+
+glos_handle glos_net_listen(unsigned port, unsigned backlog, unsigned flags)
+{
+    struct glos_net_listen q = { sizeof q, port, backlog, flags, 0 };
+    int r = raw(GLOS_NET_LISTEN, &q, 0);
+    last_error = r;
+    return r ? 0 : q.handle;
+}
+
+glos_handle glos_net_accept(glos_handle listener, unsigned ms, unsigned flags, unsigned *address, unsigned *port)
+{
+    struct glos_net_accept q = { sizeof q, listener, ms, flags, 0, 0, 0 };
+    int r = raw(GLOS_NET_ACCEPT, &q, 0);
+    last_error = r;
+    if (address)
+        *address = q.address;
+    if (port)
+        *port = q.port;
+    return r ? 0 : q.handle;
+}
+
+int glos_net_state(struct glos_net_if *out, unsigned room, unsigned *count)
+{
+    struct glos_sys_stat q = { sizeof q, 0, (unsigned)out, room, 0, 0 };
+    int r = raw(GLOS_NET_STATE, &q, 0);
+    if (count)
+        *count = q.count;
+    return r;
+}
+
 int glos_audio_devices(struct glos_audio_device *out, unsigned room, unsigned *count)
 {
     struct glos_sys_stat q = { sizeof q, 0, (unsigned)out, room, 0, 0 };

@@ -53,6 +53,7 @@ void clock_get_us(unsigned int *sec, unsigned int *us);
 #define SNTP_GET_SYSTEM_TIME(sec, us) do { unsigned int s_, u_; clock_get_us(&s_, &u_); (sec) = s_; (us) = u_; } while (0)
 
 #define LWIP_NETIF_STATUS_CALLBACK  1
+#define SO_REUSE                    1       /* (a port an app listens on again while its old connections wind down: sock.c) */
 #define LWIP_NETIF_HOSTNAME         1
 #define LWIP_STATS                  0
 
@@ -61,8 +62,8 @@ void clock_get_us(unsigned int *sec, unsigned int *us);
 #define MEM_ALIGNMENT               4
 #define MEM_SIZE                    (128 * 1024)
 #define MEMP_NUM_PBUF               32
-#define MEMP_NUM_TCP_PCB            16
-#define MEMP_NUM_TCP_PCB_LISTEN     4
+#define MEMP_NUM_TCP_PCB            40      /* (apps' connections, 32 in all, and GLOS's own) */
+#define MEMP_NUM_TCP_PCB_LISTEN     8       /* (GLOS's own, and the ports apps listen on) */
 #define MEMP_NUM_TCP_SEG            64
 #define PBUF_POOL_SIZE              48
 

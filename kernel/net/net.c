@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "glos/bootinfo.h"
+#include "app.h"
 #include "clock.h"
 #include "io.h"
 #include "kcfg.h"
@@ -375,8 +376,11 @@ void net_rx(struct nic *c, const u8 *f, u32 len)
 static void status_cb(struct netif *n)
 {
     char ip[16], gw[16], mask[16];
-    if (ip4_addr_isany_val(*netif_ip4_addr(n)))
+    api2_net_changed();                         /* (API 2.0's apps: the network's state is another now) */
+    if (ip4_addr_isany_val(*netif_ip4_addr(n))) {
+        bound_at = 0;                           /* (the address went: the lease ran out) */
         return;
+    }
     ip4addr_ntoa_r(netif_ip4_addr(n), ip, sizeof ip);
     ip4addr_ntoa_r(netif_ip4_gw(n), gw, sizeof gw);
     ip4addr_ntoa_r(netif_ip4_netmask(n), mask, sizeof mask);
@@ -536,6 +540,35 @@ u32 net_stat(char *buf, u32 max, int json)
                               nic0->mac[4], nic0->mac[5], ip, mask, gw, dns, nic0->rx_frames, nic0->tx_frames,
                               nic0->rx_errors, nic0->overruns, sock_count());
     }
+}
+
+/* API 2.0's NET STATE. Read from an app's thread: a word at a time, as glos net reads them. */
+int net_if_info(struct net_if *o)
+{
+    const struct dhcp *d;
+    u32 i;
+    if (!nic0)
+        return -1;
+    memset(o, 0, sizeof *o);
+    for (i = 0; nic0->name[i] && i < sizeof o->card - 1; i++)
+        o->card[i] = nic0->name[i];
+    for (i = 0; hostname[i] && i < sizeof o->host - 1; i++)
+        o->host[i] = hostname[i];
+    memcpy(o->mac, nic0->mac, 6);
+    o->up = bound_at != 0;
+    o->ip = ip4_addr_get_u32(netif_ip4_addr(&nif));
+    o->mask = ip4_addr_get_u32(netif_ip4_netmask(&nif));
+    o->gw = ip4_addr_get_u32(netif_ip4_gw(&nif));
+    o->dns[0] = ip4_addr_get_u32(ip_2_ip4(dns_getserver(0)));
+    o->dns[1] = ip4_addr_get_u32(ip_2_ip4(dns_getserver(1)));
+    if ((d = netif_dhcp_data(&nif)) != 0 && o->up) {
+        u32 used = (u32)d->lease_used * DHCP_COARSE_TIMER_SECS;
+        o->dhcp = 1;
+        o->lease = d->offered_t0_lease;
+        o->lease_left = used < o->lease ? o->lease - used : 0;
+    }
+    o->rx = nic0->rx_frames, o->tx = nic0->tx_frames, o->rx_errors = nic0->rx_errors, o->overruns = nic0->overruns;
+    return 0;
 }
 
 /* For GLOS_FN_STAT (M9): the address, the frames each way, the card's name; 0, or -1 without a card. */

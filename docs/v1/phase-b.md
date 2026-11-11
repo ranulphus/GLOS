@@ -762,6 +762,33 @@ After that:
   address, the DHCP lease, DNS, the gateway and its counters, and a change event.
 - **Tests:** Loop A: an APITEST server reached from the host through SLiRP's forwarding; `loopa-netapp` unchanged.
 
+**Step 11 as built** (2026-11-11):
+
+- **NET's calls** (`kernel/app/api2net.c`): RESOLVE, CONNECT, SEND, RECEIVE, LISTEN, ACCEPT, STATE. A connection,
+  and a port listened on, is a handle (`GLOS_HK_CONNECTION`); CLOSE sends what is left first, unless its RESET
+  property is set.
+- **One socket layer for both APIs:** `kernel/net/sock.c`'s calls now take plain arguments (`sock_connect`,
+  `sock_send`, ...); 1.x's `GLOS_FN_NET` is a thin front on them, unchanged for its apps (8 connections an app);
+  a 2.0 app has 16.
+- **They don't hold the app's lock:** NET's calls wait for the network, so they are made beside the app's other
+  threads' calls. One thread reads a connection at a time, and one writes it.
+- **Listening:** lwIP's listening pcb in a slot with no rings. A connection that comes in gets its slot and
+  rings in the net thread and waits, with what the other end sends, until ACCEPT takes it: the one that came
+  first. At most `backlog` (1 to 8) wait; more are refused. Closing the port resets those nobody took. A port
+  may be listened on again while its old connections wind down (lwIP's address reuse, for these ports only); a
+  port something listens on is refused (`GLOS_E_NET_REFUSED`): GLOS's own (22), or another app's.
+- **Properties:** STATE, WAITING (bytes to read; a port: connections waiting), ROOM, ADDRESS, PORT, RESET.
+- **Events:** `GLOS_EV_NET` (the connection's state, bytes waiting, room; a port: a connection came in), for
+  connections opened with `GLOS_NETF_EVENTS`; `GLOS_EV_NETWORK` to every 2.0 app when the interface's address
+  comes or goes.
+- **STATE:** one interface: the card's driver, the MAC, the address, mask, gateway, name servers, DHCP's lease
+  and what is left of it, frames each way, errors, the connections open, GLOS's name.
+- **Not done:** the link (no card's driver reads it yet: `GLOS_NETIF_LINK_KNOWN` is never set; phase H's
+  hardware work); bytes counted (the drivers count frames); UDP; `GLOS_EV_NETWORK` has no test (nothing in
+  Loop A takes the address away); BSD sockets on 2.0 (`glos/net.h` is 1.x's until step 15).
+- **Tests:** APITEST's net mode in `api_net_case` (both PCs): the client side against an echo server on the
+  host, and the server side reached from the host through SLiRP's forwarding.
+
 ### 12. DEBUG and CAPTURE
 
 - **DEBUG:** ATTACH gives a handle carrying gdb's remote protocol to a program the caller started, served by

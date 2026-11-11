@@ -1062,6 +1062,131 @@ struct glos_ev_midi {
     unsigned char status, data1, data2, pad;
 };
 
+/* ================================================================== NET (0Bh): the network
+ *
+ * TCP over IPv4 through GLOS's own network (a card GLOS drives, an address from DHCP). An address is 32 bits as
+ * it is in memory: a.b.c.d is a | b << 8 | c << 16 | d << 24. Times are milliseconds to wait (0: not at all;
+ * GLOS_FOREVER); a wait ends at once when the app is asked to end. A connection, and a port listened on, is a
+ * handle (GLOS_HK_CONNECTION) until CLOSE: what is still to be sent is sent first, unless its RESET is set.
+ * An app has 16 at most; one thread at a time reads a connection, and one writes it. These calls don't hold
+ * up the app's other threads' calls. */
+#define GLOS_NET_RESOLVE GLOS_FN(GLOS_AREA_NET, 0)      /* struct glos_net_resolve: a name's address (DNS) */
+#define GLOS_NET_CONNECT GLOS_FN(GLOS_AREA_NET, 1)      /* struct glos_net_connect: a connection out */
+#define GLOS_NET_SEND    GLOS_FN(GLOS_AREA_NET, 2)      /* struct glos_net_io */
+#define GLOS_NET_RECEIVE GLOS_FN(GLOS_AREA_NET, 3)      /* struct glos_net_io */
+#define GLOS_NET_LISTEN  GLOS_FN(GLOS_AREA_NET, 4)      /* struct glos_net_listen: a port to accept connections on */
+#define GLOS_NET_ACCEPT  GLOS_FN(GLOS_AREA_NET, 5)      /* struct glos_net_accept: the next connection that came in */
+#define GLOS_NET_STATE   GLOS_FN(GLOS_AREA_NET, 6)      /* struct glos_sys_stat: a struct glos_net_if for each
+                                                           interface (kind: not used) */
+
+#define GLOS_E_NET_DOWN    11   /* no network: no card GLOS can use, or no address yet */
+#define GLOS_E_NET_NAME    12   /* no such name (DNS) */
+#define GLOS_E_NET_TIMEOUT 13   /* no answer in the time given (the attempt is given up); ACCEPT: none came in */
+#define GLOS_E_NET_REFUSED 14   /* the other end refused the connection; LISTEN: the port is taken */
+#define GLOS_E_NET_RESET   15   /* the connection was reset or broke: it is no more */
+
+#define GLOS_NETF_EVENTS 1      /* GLOS_EV_NET for this connection (or port) */
+#define GLOS_NETF_NAGLE  2      /* small writes may wait to be sent together; without it, each goes at once */
+
+#define GLOS_NETS_CONNECTING 1
+#define GLOS_NETS_OPEN       2
+#define GLOS_NETS_CLOSED     3  /* the other end has closed its side (what it sent may still wait to be read; the
+                                   app may still send) */
+#define GLOS_NETS_FAILED     4  /* refused, timed out or reset: RECEIVE gives what was left, then the reason */
+#define GLOS_NETS_LISTENING  5  /* a port listened on */
+
+struct glos_net_resolve {
+    unsigned size;
+    unsigned name;              /* the name's offset in DS (NUL-ended, 127 bytes at most; a dotted address is
+                                   taken as it is) */
+    unsigned ms;
+    unsigned address;           /* -> */
+};
+
+struct glos_net_connect {
+    unsigned size;
+    unsigned address, port;
+    unsigned ms;                /* 0: the call comes back at once, the connection CONNECTING (GLOS_EV_NET and its
+                                   STATE say when it is open or failed) */
+    unsigned flags;             /* GLOS_NETF_ */
+    glos_handle handle;         /* -> */
+    unsigned state;             /* -> GLOS_NETS_ */
+};
+
+struct glos_net_io {
+    unsigned size;
+    glos_handle handle;
+    unsigned buffer, count;     /* SEND: the bytes. RECEIVE: the room */
+    unsigned ms;                /* SEND: the wait for room. RECEIVE: the wait for the first bytes */
+    unsigned done;              /* -> SEND: bytes taken (fewer when the time ran out: GLOS_EV_NET when there is
+                                   room again). RECEIVE: bytes copied; 0 and CLOSED: the other end has closed and
+                                   everything it sent has been read */
+    unsigned state;             /* -> GLOS_NETS_ */
+};
+
+struct glos_net_listen {
+    unsigned size;
+    unsigned port;              /* 1 to 65535; 0: any free one (its PORT property says which) */
+    unsigned backlog;           /* connections that may wait for ACCEPT at once: 1 to 8 (more are refused) */
+    unsigned flags;             /* GLOS_NETF_EVENTS: GLOS_EV_NET when one comes in */
+    glos_handle handle;         /* -> the port, until CLOSE (connections nobody accepted are reset) */
+};
+
+struct glos_net_accept {
+    unsigned size;
+    glos_handle listener;
+    unsigned ms;                /* the wait for one to come in (none: GLOS_E_NET_TIMEOUT) */
+    unsigned flags;             /* GLOS_NETF_, the new connection's */
+    glos_handle handle;         /* -> the connection, OPEN */
+    unsigned address, port;     /* -> the other end's */
+};
+
+/* A connection's properties (a port listened on has STATE, WAITING and PORT). */
+#define GLOS_PROP_NET_STATE   GLOS_PROP(GLOS_HK_CONNECTION, 0)  /* GLOS_NETS_ (read) */
+#define GLOS_PROP_NET_WAITING GLOS_PROP(GLOS_HK_CONNECTION, 1)  /* bytes waiting to be read; a port: connections
+                                                                   waiting for ACCEPT (read) */
+#define GLOS_PROP_NET_ROOM    GLOS_PROP(GLOS_HK_CONNECTION, 2)  /* bytes SEND would take now (read) */
+#define GLOS_PROP_NET_ADDRESS GLOS_PROP(GLOS_HK_CONNECTION, 3)  /* the other end's address (read) */
+#define GLOS_PROP_NET_PORT    GLOS_PROP(GLOS_HK_CONNECTION, 4)  /* the other end's port; a port listened on: its
+                                                                   own (read) */
+#define GLOS_PROP_NET_RESET   GLOS_PROP(GLOS_HK_CONNECTION, 5)  /* 1: CLOSE resets it at once, and what waits to
+                                                                   be sent is dropped */
+
+/* The network's state: one interface today (the card GLOS drives). */
+struct glos_net_if {
+    unsigned size;
+    unsigned kind;              /* GLOS_NETIF_ETHERNET */
+    unsigned flags;             /* GLOS_NETIF_ */
+    unsigned char mac[6], pad[2];
+    unsigned address, mask, gateway;
+    unsigned dns[2];            /* the name servers (0: none) */
+    unsigned lease, lease_left; /* DHCP's lease and what is left of it, in seconds (0: none) */
+    unsigned rx_frames, tx_frames, rx_errors, overruns;
+    unsigned connections;       /* apps' connections and ports open, all told */
+    char card[16];              /* the card's driver: "ne2k", "rtl8139", "e100" */
+    char host[16];              /* GLOS's name on the network (HOST.local) */
+};
+#define GLOS_NETIF_ETHERNET 0
+#define GLOS_NETIF_UP       1   /* it has an address */
+#define GLOS_NETIF_DHCP     2   /* ... from DHCP */
+#define GLOS_NETIF_LINK_KNOWN 4 /* the card's driver can tell whether its cable is in (none can yet) ... */
+#define GLOS_NETIF_LINK     8   /* ... and it is */
+
+/* NET's events. */
+#define GLOS_EV_NET     GLOS_EV(GLOS_AREA_NET, 1)       /* struct glos_ev_net: a connection opened with
+                                                           GLOS_NETF_EVENTS moved on: it opened or failed, the
+                                                           first bytes wait to be read, the other end closed,
+                                                           there is room again after a short SEND; a port: a
+                                                           connection came in */
+#define GLOS_EV_NETWORK GLOS_EV(GLOS_AREA_NET, 2)       /* (the header alone) the network's state changed: an
+                                                           address came or went. STATE says what it is now */
+struct glos_ev_net {
+    struct glos_ev ev;          /* (handle: the connection, or the port) */
+    unsigned state;             /* GLOS_NETS_ */
+    unsigned waiting;           /* bytes waiting to be read; a port: connections waiting */
+    unsigned room;              /* bytes SEND would take */
+};
+
 /* ================================================================== SETTINGS (0Ch): GLOS.CFG, the theme, the region
  *
  * A setting is a section, a key and a value, all text (GLOS.CFG's "[section]" and "key = value"). The schema

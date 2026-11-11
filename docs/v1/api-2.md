@@ -385,6 +385,13 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   - a connection's state, bytes waiting, room to send (as 1.3's GLOS_EV_NET);
   - the network's state changed (new).
 
+- **As built (step 11):** all of the table.
+  - A connection and a listening port are handles; their state, what waits, the room, the other end's address
+    and port are properties. CLOSE is CORE's; a RESET property makes it abrupt.
+  - ACCEPT takes the connection that came first; up to `backlog` wait, with what they sent.
+  - STATE lists interfaces as structures (one today). The link isn't known yet.
+  - NET's calls don't hold up the app's other threads.
+
 ### 0Ch SETTINGS
 
 | Call | What it does |

@@ -48,5 +48,13 @@ void net_lookup_drop(int i);            /* ... or given up */
 void net_sntp_restart(void);            /* [time] changed, or glos time sync: SNTP again */
 int net_counts(u8 ip[4], u32 *rx, u32 *tx, char *card, u32 room);     /* GLOS_FN_STAT's (M9) */
 u32 net_stat(char *buf, u32 max, int json);     /* glos net's lines, or glos stat's JSON object */
+struct net_if {                         /* API 2.0's NET STATE: the interface as it is now */
+    char card[16], host[16];
+    u8 mac[6], up, dhcp;
+    u32 ip, mask, gw, dns[2];           /* (as they are in memory) */
+    u32 lease, lease_left;              /* seconds */
+    u32 rx, tx, rx_errors, overruns;
+};
+int net_if_info(struct net_if *o);      /* 0, or -1 without a card */
 
 #endif

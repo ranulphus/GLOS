@@ -191,6 +191,16 @@ int glos_midi_send(glos_handle h, const struct glos_midi_msg *m, unsigned count,
 int glos_midi_flush(glos_handle h);
 int glos_midi_raw(glos_handle h, const void *bytes, unsigned count);
 
+/* NET: TCP. Addresses as GLOS has them (a.b.c.d: a | b << 8 | c << 16 | d << 24); times in milliseconds. */
+int glos_net_resolve(const char *name, unsigned ms, unsigned *address);
+glos_handle glos_net_connect(unsigned address, unsigned port, unsigned ms, unsigned flags);    /* 0: glos_error() */
+int glos_net_send(glos_handle h, const void *bytes, unsigned count, unsigned ms);      /* the bytes taken, or -GLOS_E_ */
+int glos_net_receive(glos_handle h, void *buffer, unsigned room, unsigned ms, unsigned *state); /* the bytes copied
+                                                           (0 and *state CLOSED: the other end is done), or -GLOS_E_ */
+glos_handle glos_net_listen(unsigned port, unsigned backlog, unsigned flags);
+glos_handle glos_net_accept(glos_handle listener, unsigned ms, unsigned flags, unsigned *address, unsigned *port);
+int glos_net_state(struct glos_net_if *out, unsigned room, unsigned *count);
+
 /* ---- the system (SYS) */
 /* Figures of one kind (GLOS_STAT_) into buf: structures, each with its size first, or text. *length the bytes
    there are, *count the structures given (either may be 0). GLOS_E_ROOM: cut. */

@@ -317,6 +317,9 @@ static int prop_call(struct app *a, struct trapframe *tf, int set)
     for (i = 0; i < api2_audio_nprops; i++)
         if (api2_audio_props[i].prop == p.prop)
             d = &api2_audio_props[i];
+    for (i = 0; i < api2_net_nprops; i++)
+        if (api2_net_props[i].prop == p.prop)
+            d = &api2_net_props[i];
     if (!d || (p.prop >> 8) != (u32)kind || (set && (d->flags & P_RO)))
         return a2_fail(tf, (p.prop >> 8) != (u32)kind && d ? GLOS_E_KIND : GLOS_E_PROPERTY);
     obj = handle_obj(&a->v2->h, p.handle, (u8)kind);
@@ -441,6 +444,7 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_JOB][0] = 0x1F;               /* RUN, READ, WRITE, SIGNAL, STATUS */
     v.functions[GLOS_AREA_FS][0] = 0x1F;                /* LIST, INFO, DRIVES, WATCH, SECTORS */
     v.functions[GLOS_AREA_AUDIO][0] = 0x7F;             /* OUT, IN, MIXER, LEVELS, MIDI_OUT, MIDI_IN, DEVICES */
+    v.functions[GLOS_AREA_NET][0] = 0x7F;               /* RESOLVE, CONNECT, SEND, RECEIVE, LISTEN, ACCEPT, STATE */
     v.functions[GLOS_AREA_SYS][0] = 0x0F;               /* STAT, KILL, LOG, PROGRAMS */
     v.functions[GLOS_AREA_SETTINGS][0] = 0xFF;          /* GET, SET, SECTIONS, KEYS, SCHEMA, WATCH, THEME, REGION */
     v.functions[GLOS_AREA_IDLE][0] = 0x0F;              /* TIME, AWAKE, SAVER, POWER */
@@ -644,6 +648,8 @@ static int close_call(struct app *a, struct trapframe *tf)
         api2_audio_close(a, obj);
     else if (kind == GLOS_HK_MIDI)
         api2_midi_close(a, obj);
+    else if (kind == GLOS_HK_CONNECTION)
+        api2_net_close(a, obj);
     return a2_ok(tf, 0);
 }
 
@@ -720,13 +726,23 @@ int api2_call(struct trapframe *tf)
         return a2_fail(tf, GLOS_E_VERSION);       /* (a 1.x app makes 1.x's calls only) */
     if (area > GLOS_AREA_SHELL && area != GLOS_AREA_THREAD && area != GLOS_AREA_SETTINGS && area != GLOS_AREA_IDLE
         && area != GLOS_AREA_CLIP && area != GLOS_AREA_DND && area != GLOS_AREA_FS && area != GLOS_AREA_JOB
-        && area != GLOS_AREA_SYS && area != GLOS_AREA_AUDIO)
+        && area != GLOS_AREA_SYS && area != GLOS_AREA_AUDIO && area != GLOS_AREA_NET)
         return a2_fail(tf, GLOS_E_FUNCTION);       /* (the other areas come with phase B's later steps) */
     first = app_first();
     if (!first && area == GLOS_AREA_DRAW && n >= (GLOS_DRAW_GPU & 0xFF) && n <= (GLOS_DRAW_WINVRAM & 0xFF))
         return a2_fail(tf, GLOS_E_REFUSED);        /* (the GPU is the first thread's alone: supervisor.md 12.7) */
     if (fn == GLOS_DRAW_GPU_LOCK)               /* (not a safe point: the lock is being taken, not left) */
         return gpu_app_lock(a) == 0 ? a2_ok(tf, 0) : a2_fail(tf, GLOS_E_NO_GPU);
+    if (area == GLOS_AREA_NET) {                /* (NET's calls wait for the network: beside the app's others,
+                                                   and, as api.c, at a point where its turn with the engine may
+                                                   end) */
+        if (first)
+            gpu_safe_begin(a);
+        r = api2_net(a, tf, n);
+        if (first)
+            gpu_safe_end(a);
+        return r;
+    }
     if (waits(fn)) {                            /* (a call that waits: beside the app's others) */
         r = area == GLOS_AREA_THREAD ? api2_thread(a, tf, n) : core(a, tf, n);
         if (r == 2) {                           /* cut short for an interrupt of the app's: back to its code, where
