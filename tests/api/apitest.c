@@ -50,11 +50,23 @@ static void find_home(const char *argv0)
         return;
     for (i = 0; i < n; i++) {
         home[i] = argv0[i] == '/' ? '\\' : (char)toupper((unsigned char)argv0[i]);
-        home_slash[i] = argv0[i] == '\\' ? '/' : argv0[i];
+        home_slash[i] = home[i] == '\\' ? '/' : home[i];
     }
     home[n] = 0;
     home_slash[n] = '/', home_slash[n + 1] = 0;
 }
+
+/* A path in the test's folder: fmt with one %s for it (hp: backslashes; hps: slashes, one at its end). */
+static const char *hp_of(const char *fmt, const char *dir)
+{
+    static char b[8][200];
+    static int i;
+    i = (i + 1) & 7;
+    snprintf(b[i], sizeof b[i], fmt, dir);
+    return b[i];
+}
+#define hp(fmt)  hp_of(fmt, home)
+#define hps(fmt) hp_of(fmt, home_slash)
 
 static void check(const char *name, int ok, const char *fmt, ...)
 {
@@ -1260,7 +1272,7 @@ static int interactive(void)
 /* SHELL (step 8): the shell's identity, where the task bar's parts are, the tray, notifications, kinds of file
    and their programs and verbs, OPEN, HELP. What the user's hands do to an icon and a notification is the shell
    mode's (shell_mode, under the agent). */
-#define OPENED "C:\\TEST\\OPENED.TXT"
+#define OPENED hp("%s\\OPENED.TXT")
 
 static int opened_is(const char *want, unsigned ms)    /* the program OPEN started has said what it was given */
 {
@@ -1355,16 +1367,31 @@ static void shell(void)
         ok &= glos_close(many[i]) == 0;
     check("notify-many", ok && (n = glos_notify("Room again", 0, 0, 0, 0, 0)) != 0 && glos_close(n) == 0, "err=%d", glos_error());
 
-    /* Under GLOS /RUN no setting is kept and nothing can be started (the store mode has these, under the agent). */
+    /* Under GLOS /RUN no setting is kept and nothing can be started (the store mode has these, under the agent).
+       Under the agent (a bench PC's run) the first set succeeds: it is undone, and the rest is not tried. */
     r = glos_assoc_set(".ZZT", "APITEST.EXE");
-    job = glos_open("C:\\TEST\\APITEST.EXE", 0, 0);
-    e = glos_schedule_set("never", "start", "C:\\TEST\\APITEST.EXE said never");
-    check("run-refused", r == GLOS_E_SETTING && job == -1 && glos_error() == GLOS_E_REFUSED && e == GLOS_E_REFUSED
-          && glos_entry_set("APITEST", 0, 0, 0) == GLOS_E_SETTING, "r=%d job=%d err=%d e=%d", r, job, glos_error(), e);
+    if (r == 0) {
+        check("run-refused", glos_assoc_set(".ZZT", 0) == 0, "(the agent's: settings are kept)");
+    } else {
+        job = glos_open(hp("%s\\APITEST.EXE"), 0, 0);
+        e = glos_schedule_set("never", "start", "C:\\NEVER.BAT");
+        check("run-refused", r == GLOS_E_SETTING && job == -1 && glos_error() == GLOS_E_REFUSED && e == GLOS_E_REFUSED
+              && glos_entry_set("APITEST", 0, 0, 0) == GLOS_E_SETTING, "r=%d job=%d err=%d e=%d", r, job, glos_error(), e);
+    }
 
     /* Help is an app of phase E's: not there yet. */
     r = glos_help("windows");
     check("help", r == GLOS_E_NOT_FOUND && glos_help(0) == GLOS_E_NOT_FOUND, "r=%d", r);
+}
+
+/* The test's own profile, as the entry's cases leave it: out of GLOS.CFG. */
+static void forget_profile(void)
+{
+    static const char *const key[] = { "title", "group", "icon", "args", "path", "tasks", "verbs", "menu" };
+    char why[80];
+    unsigned i;
+    for (i = 0; i < sizeof key / sizeof key[0]; i++)
+        glos_setting_set("program APITEST.EXE", key[i], 0, 0, why, sizeof why);
 }
 
 /* SHELL on a screen (under the agent, the display on): where the task bar's parts and a tray icon are, a
@@ -1440,16 +1467,16 @@ static int store_mode(void)
 
     /* OPEN: by the kind's program, by a verb, with a program named; a link; what can't be opened. */
     remove(OPENED);
-    if ((f = fopen("C:\\TEST\\OPENME.ZZT", "w")) != 0) {
+    if ((f = fopen(hp("%s\\OPENME.ZZT"), "w")) != 0) {
         fputs("open me\n", f);
         fclose(f);
     }
-    job = glos_open("C:\\TEST\\OPENME.ZZT", 0, 0);
-    check("open-kind", job > 0 && opened_is("C:\\TEST\\OPENME.ZZT", 60000), "job=%d err=%d", job, glos_error());
-    job = glos_open("C:/TEST/openme.zzt", "APITEST.EXE", "say it");
-    check("open-verb", job > 0 && opened_is("said C:\\TEST\\openme.zzt", 60000), "job=%d err=%d", job, glos_error());
-    job = glos_open("C:\\TEST\\OPENME.ZZT", "C:\\TEST\\APITEST.EXE with", 0);
-    check("open-with", job > 0 && opened_is("with C:\\TEST\\OPENME.ZZT", 60000), "job=%d err=%d", job, glos_error());
+    job = glos_open(hp("%s\\OPENME.ZZT"), 0, 0);
+    check("open-kind", job > 0 && opened_is(hp("%s\\OPENME.ZZT"), 60000), "job=%d err=%d", job, glos_error());
+    job = glos_open(hps("%sopenme.zzt"), "APITEST.EXE", "say it");
+    check("open-verb", job > 0 && opened_is(hp("said %s\\openme.zzt"), 60000), "job=%d err=%d", job, glos_error());
+    job = glos_open(hp("%s\\OPENME.ZZT"), hp("%s\\APITEST.EXE with"), 0);
+    check("open-with", job > 0 && opened_is(hp("with %s\\OPENME.ZZT"), 60000), "job=%d err=%d", job, glos_error());
     r = glos_open("http://example.com/a.zzt", 0, 0);
     e = glos_error();
     glos_assoc_set(".URL", "APITEST.EXE");
@@ -1457,17 +1484,17 @@ static int store_mode(void)
     check("open-link", r == -1 && e == GLOS_E_NOT_FOUND && job > 0 && opened_is("http://example.com/a.zzt", 60000),
           "r=%d e=%d job=%d err=%d", r, e, job, glos_error());
     glos_assoc_set(".URL", 0);
-    ok = glos_open("C:\\TEST\\NOSUCH.ZZT", 0, 0) == -1 && glos_error() == GLOS_E_NOT_FOUND
-         && glos_open("C:\\TEST\\*.ZZT", 0, 0) == -1 && glos_error() == GLOS_E_NOT_FOUND
-         && glos_open("C:\\TEST\\OPENME.ZZT", "APITEST.EXE", "No such verb") == -1 && glos_error() == GLOS_E_NOT_FOUND
-         && glos_open("C:\\TEST\\OPENME.ZZT", 0, "Say it") == -1 && glos_error() == GLOS_E_ARGUMENT
+    ok = glos_open(hp("%s\\NOSUCH.ZZT"), 0, 0) == -1 && glos_error() == GLOS_E_NOT_FOUND
+         && glos_open(hp("%s\\*.ZZT"), 0, 0) == -1 && glos_error() == GLOS_E_NOT_FOUND
+         && glos_open(hp("%s\\OPENME.ZZT"), "APITEST.EXE", "No such verb") == -1 && glos_error() == GLOS_E_NOT_FOUND
+         && glos_open(hp("%s\\OPENME.ZZT"), 0, "Say it") == -1 && glos_error() == GLOS_E_ARGUMENT
          && glos_open(0, 0, 0) == -1 && glos_error() == GLOS_E_ARGUMENT;
     r = glos_assoc_set(".ZZT", 0);
     buf[0] = 'x';
     e = glos_assoc_get(".ZZT", buf, sizeof buf);
-    ok &= r == 0 && e == 0 && !buf[0] && glos_open("C:\\TEST\\OPENME.ZZT", 0, 0) == -1 && glos_error() == GLOS_E_NOT_FOUND;
+    ok &= r == 0 && e == 0 && !buf[0] && glos_open(hp("%s\\OPENME.ZZT"), 0, 0) == -1 && glos_error() == GLOS_E_NOT_FOUND;
     check("open-refused", ok, "r=%d e=%d err=%d program=%s", r, e, glos_error(), buf);
-    remove("C:\\TEST\\OPENME.ZZT");
+    remove(hp("%s\\OPENME.ZZT"));
 
     /* The verbs taken away again: the profile is as it was. */
     r = glos_assoc_verb(".ZZT", "Say it", 0);
@@ -1479,8 +1506,8 @@ static int store_mode(void)
        own, by program, forgotten. */
     list[0] = 0;
     r = glos_recent_list(0, list, sizeof list, &len);
-    check("recent-open", r == 0 && len == strlen(list) && !strncmp(list, "C:\\TEST\\OPENME.ZZT\tAPITEST.EXE\n", 31)
-          && strstr(list, "C:/TEST/openme.zzt\tAPITEST.EXE\n") && !strstr(list, "http:"), "r=%d len=%u list=%s", r, len, list);
+    check("recent-open", r == 0 && len == strlen(list) && strstr(list, hp("%s\\OPENME.ZZT\tAPITEST.EXE\n")) == list
+          && strstr(list, hps("%sopenme.zzt\tAPITEST.EXE\n")) && !strstr(list, "http:"), "r=%d len=%u list=%s", r, len, list);
     glos_recent_clear(0);
     r = glos_recent_add("C:\\DOCS\\One.txt");
     glos_recent_add("C:\\DOCS\\Two.txt");
@@ -1519,13 +1546,13 @@ static int store_mode(void)
     r = glos_entry_set("API test", 0, "tool", "shell");
     list[0] = 0;
     e = glos_entry_list(list, sizeof list, &len);
-    ok = r == 0 && e == 0 && len == strlen(list) && strstr(list, "APITEST.EXE\tAPI test\tTests\ttool\tC:\\TEST\tshell\t\n");
+    ok = r == 0 && e == 0 && len == strlen(list) && strstr(list, hp("APITEST.EXE\tAPI test\tTests\ttool\t%s\tshell\t\n"));
     check("entry", ok, "r=%d e=%d len=%u list=%s", r, e, len, list);
     r = glos_entry_task("New window", "win");
     e = glos_entry_task("Plain", "");
     glos_entry_set(0, "Tools", 0, 0);
     glos_entry_list(list, sizeof list, &len);
-    ok = r == 0 && e == 0 && strstr(list, "APITEST.EXE\tAPI test\tTools\ttool\tC:\\TEST\tshell\tNew window=win;Plain=\n")
+    ok = r == 0 && e == 0 && strstr(list, hp("APITEST.EXE\tAPI test\tTools\ttool\t%s\tshell\tNew window=win;Plain=\n"))
          && glos_entry_task("new WINDOW", 0) == 0 && glos_entry_task("New window", 0) == GLOS_E_NOT_FOUND
          && glos_entry_task("Plain", 0) == 0 && glos_entry_task("a=b", "x") == GLOS_E_ARGUMENT
          && glos_entry_set(0, 0, "no such picture", 0) == GLOS_E_SETTING && glos_entry_list(list, 4, &len) == GLOS_E_ROOM && len > 4;
@@ -1533,6 +1560,7 @@ static int store_mode(void)
     r = glos_entry_remove();
     e = glos_entry_list(list, sizeof list, &len);
     check("entry-removed", r == 0 && e == 0 && !strstr(list, "APITEST.EXE"), "r=%d e=%d list=%s", r, e, list);
+    forget_profile();                                   /* (nothing of the test's is left in GLOS.CFG) */
 
     /* The schedule: set, changed, listed, removed; what it refuses. (Its running is the schedule case's.) */
     r = glos_schedule_set("nightly", "Daily 3:00", "C:\\TEST\\APITEST.EXE said nightly");
@@ -1568,14 +1596,31 @@ static int sched_mode(const char *what)
     if (glos_init("API test", "apitest", "Tests") != 0)
         return 98;
     if (!strcmp(what, "set")) {
-        r = glos_schedule_set("boot", "start", "C:\\TEST\\APITEST.EXE said started");
-        e = glos_schedule_set("nightly", "daily 03:00", "C:\\TEST\\APITEST.EXE said nightly");
+        r = glos_schedule_set("boot", "start", hp("%s\\APITEST.EXE said started"));
+        e = glos_schedule_set("nightly", "daily 03:00", hp("%s\\APITEST.EXE said nightly"));
     } else {
         r = glos_schedule_remove("boot");
         e = glos_schedule_remove("nightly");
     }
     printf("SCHED %s r=%d e=%d\n", what, r, e);
     return r || e;
+}
+
+/* What a run of the test may have left on a PC that is kept (a bench): taken away. */
+static int clean_mode(void)
+{
+    int a, b, c, d, e;
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 98;
+    a = glos_assoc_set(".ZZT", 0);
+    b = glos_assoc_set(".URL", 0);
+    c = glos_schedule_remove("never");
+    d = glos_schedule_remove("boot");
+    e = glos_schedule_remove("nightly");
+    glos_entry_remove();
+    forget_profile();
+    printf("CLEAN zzt=%d url=%d never=%d boot=%d nightly=%d\n", a, b, c, d, e);
+    return 0;
 }
 
 /* A program OPEN started (not an app): what it was given, for the test that opened it. */
@@ -1653,6 +1698,8 @@ int main(int argc, char **argv)
         return shell_mode();
     if (argc > 1 && !strcmp(argv[1], "store"))
         return store_mode();
+    if (argc > 1 && !strcmp(argv[1], "clean"))
+        return clean_mode();
     if (argc > 2 && !strcmp(argv[1], "sched"))
         return sched_mode(argv[2]);
     if (argc > 1 && (strstr(argv[1], ".ZZT") || strstr(argv[1], ".zzt") || !strcmp(argv[1], "said") || !strcmp(argv[1], "with")))
