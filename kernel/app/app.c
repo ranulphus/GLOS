@@ -1282,6 +1282,8 @@ void app_exit_turn(void)
     if (!asked_at && n2) {
         asked_at = timer_ticks() | 1;
         for (a = apps; a; a = a->next) {
+            if (!a->ctx || a->kill)
+                continue;                       /* (ending already) */
             if (a->v2)
                 api2_end_event(a);
             else
@@ -1290,7 +1292,8 @@ void app_exit_turn(void)
     } else if (!n2 || timer_ticks() - asked_at >= 3 * 1024) {
         asked_at = 0;
         for (a = apps; a; a = a->next)
-            app_kill(a, "exit");
+            if (a->ctx && !a->kill)             /* (not one that is leaving by itself: its exit code is its own) */
+                app_kill(a, "exit");
     }
     irq_restore(f);
 }

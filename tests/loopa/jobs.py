@@ -4639,7 +4639,11 @@ def api_sched_case(profile, card):
         first = agent.log()
         first = first[:first.index("HX-AGAIN")] if "HX-AGAIN" in first else first
         checks["written"] = "GLOS-DATA written records=2" in first and runs("boot", first) == 0
-        checks["loaded"] = "GLOS-DATA loaded records=2" in agent.log()
+        t0 = time.time()                                # (GLOS.DAT is read after GLOS.CFG, by a thread of low priority:
+        while time.time() - t0 < 60 and "HX-AGAIN" in agent.log() \
+                and "GLOS-DATA loaded records=2" not in agent.log().split("HX-AGAIN")[-1]:     # SSH may listen first)
+            time.sleep(1)
+        checks["loaded"] = "GLOS-DATA loaded records=2" in agent.log().split("HX-AGAIN")[-1]
         checks["start"] = wait_runs("boot", 1) and opened("said started")
         checks["not-yet"] = runs("nightly") == 0
         # The clock put years on: its times since it was set were missed, and are made up for by one run.
