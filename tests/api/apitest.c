@@ -2059,7 +2059,7 @@ static int audio_mode(int loop)
 {
     static struct glos_audio_stream streams[8];
     static struct glos_audio_channel chans[8];
-    static struct glos_audio_device devs[4];
+    static struct glos_audio_device devs[8];        /* (the card out and in, and the MIDI ports) */
     unsigned char ev[GLOS_EV_MAX];
     struct glos_ev *e = (struct glos_ev *)ev;
     struct glos_audio_ring *ring = 0, *ring2 = 0;
@@ -2221,7 +2221,7 @@ static int audio_mode(int loop)
 
     /* The devices. */
     n = glos_audio_devices(devs, sizeof devs, &count);
-    ok = n == 0 && count >= 1 && count <= 2 && devs[0].size == sizeof devs[0] && devs[0].kind == GLOS_AUDIO_DEV_OUT && devs[0].name[0]
+    ok = n == 0 && count >= 1 && count <= 7 && devs[0].size == sizeof devs[0] && devs[0].kind == GLOS_AUDIO_DEV_OUT && devs[0].name[0]
          && devs[0].rate == ring->mixer_rate && devs[0].streams == 1;
     check("audio-devices", ok, "n=%d count=%u name=%s rate=%u streams=%u", n, count, devs[0].name, devs[0].rate, devs[0].streams);
 
@@ -2243,15 +2243,18 @@ static int audio_mode(int loop)
             glos_set(si, GLOS_PROP_STREAM_NOTIFY, 2048);
             feed(ring, 600, &phase);                    /* (the tone plays meanwhile) */
             n = await(GLOS_EV_AUDIO, si, ev, 2000);
+            while (glos_audio_read(in, rec, sizeof rec) != 0) ;         /* (emptied: a full ring takes no more) */
             before = prop(si, GLOS_PROP_STREAM_POSITION);
-            feed(ring, 500, &phase);
-            after = prop(si, GLOS_PROP_STREAM_POSITION);
-            while ((k = glos_audio_read(in, rec, sizeof rec)) != 0) {
-                for (i = 0; i < k / 2; i++)
-                    if ((unsigned)abs(rec[i]) > peak)
-                        peak = (unsigned)abs(rec[i]);
-                got += k;
+            for (count = 0; count < 5; count++) {       /* half a second, read as it comes */
+                feed(ring, 100, &phase);
+                while ((k = glos_audio_read(in, rec, sizeof rec)) != 0) {
+                    for (i = 0; i < k / 2; i++)
+                        if ((unsigned)abs(rec[i]) > peak)
+                            peak = (unsigned)abs(rec[i]);
+                    got += k;
+                }
             }
+            after = prop(si, GLOS_PROP_STREAM_POSITION);
             glos_audio_levels(GLOS_LEVELS_INPUT, &l, &r);
             ok = si && in && in->rate == 11025 && in->channels == 1 && n > 0 && after - before > 11025 * 4 / 10
                  && after - before < 11025 * 7 / 10 && got >= 2048 && prop(si, GLOS_PROP_STREAM_QUEUED) < 2048
@@ -2260,11 +2263,12 @@ static int audio_mode(int loop)
             check("audio-in", ok, "si=%x err=%d n=%d frames=%d read=%u peak=%u level=%u,%u%s", si, glos_error(), n, after - before,
                   got, peak, l, r, loop ? " loop" : "");
             feed(ring, 1200, &phase);                   /* nobody reads: the ring fills, and the rest is lost */
-            ok = in->underruns > 0 && prop(si, GLOS_PROP_STREAM_QUEUED) > 8192 - 64
-                 && glos_audio_devices(devs, sizeof devs, &count) == 0 && count == 2 && devs[1].kind == GLOS_AUDIO_DEV_IN
+            k = in->underruns, v = prop(si, GLOS_PROP_STREAM_QUEUED);  /* (the ring is gone with the stream) */
+            ok = k > 0 && v > 8192 - 64
+                 && glos_audio_devices(devs, sizeof devs, &count) == 0 && count >= 2 && devs[1].kind == GLOS_AUDIO_DEV_IN
                  && devs[1].streams == 1 && glos_close(si) == 0 && glos_audio_levels(in_id, &l, &r) == GLOS_E_NOT_FOUND
                  && glos_audio_levels(GLOS_LEVELS_INPUT, &l, &r) == 0 && l == 0;
-            check("audio-in-lost", ok, "lost=%u queued=%d devices=%u", in->underruns, prop(si, GLOS_PROP_STREAM_QUEUED), count);
+            check("audio-in-lost", ok, "lost=%u queued=%d devices=%u", k, v, count);
         }
     }
 

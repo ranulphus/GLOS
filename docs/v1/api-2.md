@@ -362,6 +362,10 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   - A stream's volume, balance, mute and pause are properties; so are its position and what is queued.
   - The master is GLOS's own (software), kept in GLOS.CFG; the chip's master is one of the chip's channels.
   - No event yet for a stream started or ended.
+- **As built (step 10, second part):** IN.
+  - A stream in is OUT's structure and ring the other way round. "A block filled" is `GLOS_EV_AUDIO` when its
+    NOTIFY's bytes wait.
+  - The card records what MIXER's input says, at the mixer's rate; GLOS converts to the stream's.
 - **As built (step 10, third part):** MIDI_OUT and MIDI_IN.
   - One structure for both, its `what` OPEN, SEND, FLUSH or RAW; a port is a handle.
   - Ports: the FM chip (an OPL3 or OPL2; GLOS's driver, Freedoom's General MIDI instruments) and an MPU-401.

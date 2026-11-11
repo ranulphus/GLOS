@@ -699,6 +699,26 @@ After that:
 - **Tests:** host `mixgain_test`; APITEST's audio mode (11 cases: a tone of a known peak, so levels are checked
   as numbers) in `api_audio_case`, with an SB16 on both PCs and a Crystal CS4236B.
 
+**Step 10, second part, as built** (2026-11-11): IN, recording.
+
+- **A stream in is a stream out the other way round:** IN takes OUT's structure; the mixer writes the ring
+  and moves `write`, the app reads and moves `read`. Of the properties it has POSITION (frames recorded),
+  QUEUED (bytes waiting), NOTIFY ("a block filled": `GLOS_EV_AUDIO` when that many bytes wait) and ID.
+- **The card records at the rate it plays at,** while a stream in is open and the mixer plays: each half
+  recorded goes, in the card's interrupt, into every stream in at its own rate and channels. A stream whose
+  ring is full loses what came, counted in its header.
+- **The SB16:** 8-bit stereo input on the low DMA channel (BLASTER's D) beside the 16-bit output on the high
+  one; the card's one interrupt is told apart by its mixer's register 82h.
+- **The Crystal codec:** its capture side on its own DMA channel (`cap`), 16-bit; its interrupt told apart
+  by I24.
+- **Refused** (`GLOS_E_NO_AUDIO`) where the card can't record beside playing: no 8-bit channel in BLASTER,
+  no capture channel.
+- **MIXER's input** chooses what is recorded; LEVELS gives the input's peaks; DEVICES lists the recording
+  side.
+- **Tests:** APITEST's audio mode: `audio-in` (frames at the stream's rate, the event, what was read) and
+  `audio-in-lost`. 86Box records silence, so the samples themselves are checked on bench-g400 by hand:
+  `APITEST audio loop` records the codec's own output (input MIX) and wants the tone it plays.
+
 **Step 10, third part, as built** (2026-11-11): MIDI.
 
 - **MIDI_OUT and MIDI_IN** (`kernel/app/api2audio.c`, over `kernel/drv/midi.c`): one structure, `what` saying
