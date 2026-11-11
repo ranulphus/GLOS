@@ -62,6 +62,7 @@
 #include "dpmi.h"
 #include "io.h"
 #include "kprintf.h"
+#include "midi.h"
 #include "mixer.h"
 #include "mm.h"
 #include "session.h"
@@ -607,6 +608,7 @@ static void app_thread_end(struct app *a)
     desk_app_gone(a);                           /* (its windows; none may point at it after this) */
     gpu_app_gone(a);                            /* (the engine, if it had it; its blocks of VRAM) */
     mixer_app_gone(a);                          /* (its streams) */
+    midi_app_gone(a);                           /* (its MIDI ports) */
     agent_app_gone(a);                          /* (its jobs, M9: those in its console with it) */
     watch_app_gone(a);
     sock_app_gone(a);                           /* (its connections: what they had to send still goes) */

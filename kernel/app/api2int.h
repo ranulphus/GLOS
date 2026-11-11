@@ -91,6 +91,8 @@ int a2_post(struct app *a, struct glos_ev *ev, int merge);      /* an event for 
                                            or off): 0, or -1 (its queue is full). merge: it takes the place of the
                                            event queued last, if that was one of its kind for the same handle
                                            posted so too */
+int a2_post_at(struct app *a, struct glos_ev *ev, u32 time);    /* ... with its own time, never merged */
+u32 a2_now_ms(void);                                            /* GLOS's clock, as CORE TICKS gives it */
 
 /* api2win.c */
 extern const struct propdef api2_win_props[];
@@ -140,6 +142,7 @@ extern const struct propdef api2_audio_props[];
 extern const u32 api2_audio_nprops;
 int api2_audio(struct app *a, struct trapframe *tf, u32 n);    /* AUDIO's calls */
 void api2_audio_close(struct app *a, void *obj);                /* CLOSE of a stream's handle */
+void api2_midi_close(struct app *a, void *obj);                 /* ... of a MIDI port's */
 void api2_audio_tick(struct app *a);                            /* each tick: a stream below its NOTIFY */
 
 /* api2sys.c */

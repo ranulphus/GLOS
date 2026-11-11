@@ -112,7 +112,7 @@ HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:ke
               tsync_test:kernel/app/tsync.c region_test:sdk/config/region.c theme_test:kernel/wm/theme.c \
               clip_test:kernel/app/clipstore.c dnd_test:kernel/wm/dnd.c notes_test:kernel/wm/notes.c \
               assoc_test:sdk/config/assoc.c sched_test:sdk/config/sched.c kdata_test:kernel/core/kdata.c \
-              mixgain_test:kernel/drv/mixgain.c
+              mixgain_test:kernel/drv/mixgain.c fm_test:kernel/drv/fm.c midiq_test:kernel/drv/midiq.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
 host-test-run:
@@ -202,6 +202,11 @@ FONT_SIGNS := 0x20AC,0x2116,0x2122,0x2190-0x2193
 FONT_437 := 0x207F,0x20A7,0x20AC,0x2116,0x2122,0x2190-0x2193,0x2219-0x221A,0x221E,0x2229,0x2248,0x2261,0x2264-0x2265
 FONT_437 := $(FONT_437),0x2310,0x2320-0x2321,0x23BA-0x23BD,0x2500-0x257F,0x2580-0x259F,0x25A0
 # (And the toolkit's font smoothing, M10: the same glyphs anti-aliased, sdk/gui/fonts/SMOOTH.DAT, C:\GLOS's.)
+# The FM driver's instruments and tables (kernel/drv/fmbank.c) again, from Freedoom's pinned release
+# (tools/setup/versions.mk; tools/mkfmbank.py). Kept in the repository: the kernel's build needs no download.
+fmbank:
+	$(Q)tools/setup/fetch.sh $(FREEDOOM_URL) $(FREEDOOM_SHA256) $(MGA_CACHE)/dl/$(notdir $(FREEDOOM_URL))
+	$(Q)python3 -I tools/mkfmbank.py $(MGA_CACHE)/dl/$(notdir $(FREEDOOM_URL)) kernel/drv/fmbank.c
 fonts:
 	@mkdir -p build/fonts sdk/gui/fonts
 	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSans.ttf 11 ui --last 0x17F --ranges $(FONT_TEXT),$(FONT_SIGNS) \
@@ -317,7 +322,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/api2win.c kernel/app/api2in.c kernel/app/api2thr.c kernel/app/api2set.c kernel/app/api2clip.c kernel/app/api2fs.c kernel/app/api2shell.c kernel/app/api2start.c kernel/app/api2job.c kernel/app/api2sys.c kernel/app/api2audio.c kernel/app/fslist.c kernel/app/clipstore.c kernel/app/tsync.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/kdata.c kernel/core/schedule.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c kernel/drv/mixgain.c $(WM_SRCS) kernel/wm/theme.c kernel/wm/idle.c kernel/wm/dnd.c kernel/wm/notes.c kernel/wm/deskshell.c kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
+         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/api2win.c kernel/app/api2in.c kernel/app/api2thr.c kernel/app/api2set.c kernel/app/api2clip.c kernel/app/api2fs.c kernel/app/api2shell.c kernel/app/api2start.c kernel/app/api2job.c kernel/app/api2sys.c kernel/app/api2audio.c kernel/app/fslist.c kernel/app/clipstore.c kernel/app/tsync.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/kdata.c kernel/core/schedule.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c kernel/drv/mixgain.c kernel/drv/midi.c kernel/drv/midiq.c kernel/drv/fm.c kernel/drv/fmbank.c $(WM_SRCS) kernel/wm/theme.c kernel/wm/idle.c kernel/wm/dnd.c kernel/wm/notes.c kernel/wm/deskshell.c kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS)) build/kernel/sdk_cfg.o build/kernel/sdk_tz.o build/kernel/sdk_region.o build/kernel/sdk_cp.o build/kernel/sdk_cp_tables.o build/kernel/sdk_assoc.o build/kernel/sdk_sched.o
 # GLOS.CFG's schema (sdk/config/cfg.c, include/glos/config.h; M9) and time zones (sdk/config/tz.c; M10): shared
 # with the loader and the Control Panel.

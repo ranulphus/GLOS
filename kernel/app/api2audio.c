@@ -12,6 +12,7 @@
 #include "io.h"
 #include "kcfg.h"
 #include "kprintf.h"
+#include "midi.h"
 #include "mixer.h"
 #include "mixgain.h"
 #include "mm.h"
@@ -101,12 +102,110 @@ const struct propdef api2_audio_props[] = {
 };
 const u32 api2_audio_nprops = ARRAY_SIZE(api2_audio_props);
 
-/* Each tick, for an app: a stream of its that fell below its NOTIFY is told of, once. */
+/* ---- MIDI: a port's handle has the port's number and its direction (MIDI_OBJ) */
+
+#define MIDI_OBJ(port, in) ((void *)((port) + 1 + ((in) ? 0x100u : 0u)))
+#define MIDI_PORT(obj)     (((u32)(obj) & 0xFFu) - 1)
+#define MIDI_IN(obj)       (((u32)(obj) & 0x100u) != 0)
+
+void api2_midi_close(struct app *a, void *obj) { midi_close(a, MIDI_PORT(obj), MIDI_IN(obj)); }
+
+static u32 midi_error(int r)
+{
+    return r == MIDI_E_NONE ? GLOS_E_NOT_FOUND : r == MIDI_E_BUSY ? GLOS_E_REFUSED : r == MIDI_E_AWAY ? GLOS_E_NO_AUDIO
+         : r == MIDI_E_ROOM ? GLOS_E_ROOM : r == MIDI_E_MESSAGE ? GLOS_E_ARGUMENT : GLOS_E_HANDLE;
+}
+
+static int midi_call(struct app *a, struct trapframe *tf, int in)
+{
+    struct glos_midi q;
+    struct midi_msg m[32];
+    u8 raw[64];
+    u32 size, f, port, done, taken;
+    void *obj;
+    int r = 0;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (q.what == GLOS_MIDI_OPEN) {
+        if ((r = midi_open(a, q.port, in)) != 0)
+            return a2_fail(tf, midi_error(r));
+        f = irq_save();
+        q.handle = handle_new(&a->v2->h, GLOS_HK_MIDI, MIDI_OBJ(q.port, in));
+        irq_restore(f);
+        q.queued = 0;
+        q.now = a2_now_ms();
+        if (!q.handle || a2_wr(tf, &q, sizeof q, size) != 0) {
+            if (q.handle) {
+                f = irq_save();
+                handle_close(&a->v2->h, q.handle);
+                irq_restore(f);
+            }
+            midi_close(a, q.port, in);
+            return a2_fail(tf, q.handle ? GLOS_E_ARGUMENT : GLOS_E_MEMORY);
+        }
+        return a2_ok(tf, 0);
+    }
+    f = irq_save();
+    obj = handle_obj(&a->v2->h, q.handle, GLOS_HK_MIDI);
+    irq_restore(f);
+    if (!obj)
+        return a2_fail(tf, GLOS_E_HANDLE);
+    if (in || MIDI_IN(obj))                     /* (a port in has no calls but OPEN and CLOSE) */
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    port = MIDI_PORT(obj);
+    switch (q.what) {
+    case GLOS_MIDI_SEND:
+        for (done = 0; done < q.count; ) {      /* (a stackful at a time) */
+            u32 n = q.count - done < ARRAY_SIZE(m) ? q.count - done : ARRAY_SIZE(m);
+            if (user_rd((u16)tf->ds, q.buffer + done * sizeof m[0], m, n * sizeof m[0]) != 0)
+                return a2_fail(tf, GLOS_E_ARGUMENT);
+            r = midi_send(a, port, m, n, &taken);
+            done += taken;
+            if (r != 0 || taken < n)            /* (one that is no channel message; or the queue is full) */
+                break;
+        }
+        q.count = done;
+        break;
+    case GLOS_MIDI_FLUSH:
+        r = midi_flush(a, port);
+        break;
+    case GLOS_MIDI_RAW:
+        if (port != MIDI_MPU)
+            return a2_fail(tf, GLOS_E_REFUSED);
+        if (q.count > sizeof raw || user_rd((u16)tf->ds, q.buffer, raw, q.count) != 0)
+            return a2_fail(tf, GLOS_E_ARGUMENT);
+        r = midi_raw(a, port, raw, q.count);
+        break;
+    default:
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    }
+    q.queued = midi_queued(port);
+    q.now = a2_now_ms();
+    if (a2_wr(tf, &q, sizeof q, size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    return r ? a2_fail(tf, midi_error(r)) : a2_ok(tf, 0);
+}
+
+/* Each tick, for an app: a stream of its that fell below its NOTIFY is told of, once; what its MIDI port in
+   received, a message an event. */
 void api2_audio_tick(struct app *a)
 {
     struct glos_ev ev;
+    struct glos_ev_midi me;
+    struct midi_msg mm;
     u32 id, i = 0, h;
     void *obj;
+    while (midi_in_next(a, &mm)) {
+        memset(&me, 0, sizeof me);
+        while (handle_next(&a->v2->h, &i, &h, &obj) == 0)
+            if (GLOS_HANDLE_KIND(h) == GLOS_HK_MIDI && MIDI_IN(obj))
+                me.ev.handle = h;
+        i = 0;
+        me.ev.size = sizeof me;
+        me.ev.kind = GLOS_EV_MIDI;
+        me.status = mm.status, me.data1 = mm.d1, me.data2 = mm.d2;
+        a2_post_at(a, &me.ev, mm.time);
+    }
     if (!mixer_wants(a, &id))
         return;
     memset(&ev, 0, sizeof ev);
@@ -266,8 +365,9 @@ static int levels(struct trapframe *tf)
 static int devices(struct trapframe *tf)
 {
     struct glos_sys_stat q;
-    struct glos_audio_device d[2];
-    u32 size, n = 0, x, give;
+    struct glos_audio_device d[2 + 2 * MIDI_PORTS];
+    const char *name;
+    u32 size, n = 0, x, give, port, outs, ins;
     if (a2_rd(tf, &q, sizeof q, &size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     memset(d, 0, sizeof d);
@@ -282,6 +382,22 @@ static int devices(struct trapframe *tf)
             d[1].kind = GLOS_AUDIO_DEV_IN;
             d[1].streams = mixer_streams_in();
             n = 2;
+        }
+    }
+    for (port = 0; port < MIDI_PORTS; port++) { /* the MIDI ports: one out each; an MPU-401's in too */
+        if (midi_port(port, &name, &outs, &ins) != 0)
+            continue;
+        d[n].size = sizeof d[0];
+        d[n].kind = GLOS_AUDIO_DEV_MIDI_OUT;
+        d[n].rate = port;
+        d[n].streams = outs;
+        strncpy(d[n].name, name, sizeof d[n].name - 1);
+        n++;
+        if (ins != 0xFFFFFFFFu) {
+            d[n] = d[n - 1];
+            d[n].kind = GLOS_AUDIO_DEV_MIDI_IN;
+            d[n].streams = ins;
+            n++;
         }
     }
     q.length = n * sizeof d[0];
@@ -303,6 +419,10 @@ int api2_audio(struct app *a, struct trapframe *tf, u32 n)
         return mixer_call(a, tf);
     case GLOS_AUDIO_LEVELS:
         return levels(tf);
+    case GLOS_AUDIO_MIDI_OUT:
+        return midi_call(a, tf, 0);
+    case GLOS_AUDIO_MIDI_IN:
+        return midi_call(a, tf, 1);
     case GLOS_AUDIO_DEVICES:
         return devices(tf);
     }

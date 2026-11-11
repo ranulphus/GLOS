@@ -699,6 +699,42 @@ After that:
 - **Tests:** host `mixgain_test`; APITEST's audio mode (11 cases: a tone of a known peak, so levels are checked
   as numbers) in `api_audio_case`, with an SB16 on both PCs and a Crystal CS4236B.
 
+**Step 10, third part, as built** (2026-11-11): MIDI.
+
+- **MIDI_OUT and MIDI_IN** (`kernel/app/api2audio.c`, over `kernel/drv/midi.c`): one structure, `what` saying
+  OPEN, SEND, FLUSH or RAW. A port is a handle (`GLOS_HK_MIDI`); one app has a port at a time.
+- **The ports:** FM (the card's OPL3 or OPL2) and MPU (an MPU-401's UART). DEVICES lists them, with the chip's
+  name.
+- **The FM chip** is found by its timer at 388h (or where a Crystal chip has it), an OPL3 by its status. GLOS's
+  own driver plays it (`kernel/drv/fm.c`): 18 two-operator voices on an OPL3 (9 on an OPL2); notes, velocity,
+  programs, the channel's volume, expression, pan (left, both, right), the pedal, the bend and its range, all
+  notes off; percussion on channel 10. A voice free the longest is taken first; with none free, the oldest
+  note's.
+- **The instruments** are Freedoom's GENMIDI lump (BSD-3-Clause; `THIRD_PARTY.md`), kept as a generated table
+  (`kernel/drv/fmbank.c`, `make fmbank`, the release pinned in `tools/setup/versions.mk`). The driver was written
+  from the format's documentation and the chips' data sheets; no player's code was read into it.
+- **The MPU-401:** its port is BLASTER's `P` (the loader passes it on: boot contract version 7), or the Crystal
+  chip's own MPU-401, which GLOS now sets up at 330h when nothing answers there (`[sound] crystal`'s `mpu=`;
+  programs get `P330` in BLASTER). It is in UART mode only while an app has it. It is not probed at 330h
+  unasked: other cards live there.
+- **Times:** a message's time is in milliseconds on GLOS's clock (CORE TICKS). The queue (512 messages,
+  `kernel/drv/midiq.c`) is kept in time's order; the kernel's tick (1024 a second) plays what is due, in the
+  interrupt, whatever the app is doing. At most 8 messages a port a tick; an MPU-401's bytes go as fast as its
+  UART takes them (with the running status).
+- **MIDI_IN:** the MPU-401's bytes are read on the tick (and in the SB16's interrupt, which it shares: the
+  card's mixer register 82h says whose it is), parsed, and given as `GLOS_EV_MIDI` events with the time they
+  came. System messages are dropped.
+- **Sessions:** while one has the machine the chips are its programs': what waited is dropped, the notes end,
+  the FM chip is an OPL2 again and the MPU-401 back in its first mode. The handles stay good and play again
+  after.
+- **Not done:** system exclusive messages in; MIDI clock and the other real-time messages; an event when a
+  queue runs low (a player sends ahead on a timer); USB MIDI (phase F). MIDI_IN has no test with bytes coming
+  in: 86Box gives the MPU-401 none, and nothing is plugged into the bench's.
+- **Tests:** host `fm_test` (register values for notes, levels, pan, bend, the pedal, two-voice patches,
+  percussion, voices taken) and `midiq_test` (the queue against a clock, the parser); APITEST's midi mode in
+  `api_midi_case` (an SB16 on both PCs, a Crystal CS4236B): the notes found in 86Box's recording by frequency,
+  none late, the MPU-401's ports, and a session's program playing the FM chip in the middle.
+
 ### 11. NET
 
 - **LISTEN and ACCEPT.**

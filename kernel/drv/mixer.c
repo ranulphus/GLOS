@@ -33,6 +33,7 @@
 #include "io.h"
 #include "kcfg.h"
 #include "kprintf.h"
+#include "midi.h"
 #include "mixer.h"
 #include "mixgain.h"
 #include "mm.h"
@@ -114,7 +115,14 @@ int mixer_init(const struct bootinfo *bi)
 
 /* GLOS.CFG read (config.c): with no SB16, a Crystal chip set up ([sound] crystal), even with the mixer off, so
    that programs find its SB Pro; the mixer plays through its codec when it is on. */
+static void late(void);
 void mixer_late(void)
+{
+    late();
+    midi_late();                                /* (a Crystal chip's FM chip and MPU-401: midi.c) */
+}
+
+static void late(void)
 {
     char v[96];
     if (mx.card)
@@ -280,6 +288,7 @@ static void fill(s16 *out, u32 frames, const struct trapframe *tf)
 void mixer_desktop(int on)
 {
     mx.desk = (u8)(on != 0);
+    midi_desktop(on);                           /* (the MIDI ports, with or without a mixer) */
     if (!mx.on)
         return;
     if (on) {
@@ -542,8 +551,10 @@ void mixer_app_gone(struct app *a)
 u32 mixer_stat(char *buf, u32 max)
 {
     u32 n, i;
-    if (!mx.on)
-        return (u32)ksnprintf(buf, max, "audio off\n");
+    if (!mx.on) {
+        n = (u32)ksnprintf(buf, max, "audio off\n");
+        return n + midi_stat(buf + n, max - n);
+    }
     n = (u32)ksnprintf(buf, max, "audio %s rate=%u period=%u periods=%u irqs=%u card=%s errors=%u\n",
                        mx.out ? "idle" : "on", mx.rate, PERIOD, mx.periods, mx.card->irqs(), mx.card->name,
                        mx.card->errors());
@@ -552,7 +563,7 @@ u32 mixer_stat(char *buf, u32 max)
             n += (u32)ksnprintf(buf + n, max - n, "stream %u app=%u rate=%u channels=%u periods=%u underruns=%u\n",
                                 st[i].id, app_id(st[i].a), st[i].h->rate, st[i].h->channels, st[i].h->periods,
                                 st[i].h->underruns);
-    return n;
+    return n + midi_stat(buf + n, n < max ? max - n : 0);
 }
 
 /* For GLOS_FN_STAT (M9): the rate, the streams open, and their underruns all told. */

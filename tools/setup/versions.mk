@@ -35,3 +35,9 @@ CACERT_SHA256 := a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d0050
 # a user's own would be; none of it is in GLOS.
 DOSLFN_URL    := https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.3/drivers/doslfn.zip
 DOSLFN_SHA256 := b96e93bb21c1cb4d9b6e37e76f96174345c027ce354aae9c09b38713e7114377
+
+# Freedoom 0.13.0 (the Freedoom project; BSD-3-Clause, COPYING.txt in the archive): its GENMIDI lump, 175 OPL
+# instruments, is what GLOS's FM driver plays General MIDI with (kernel/drv/fmbank.c, made by `make fmbank` and
+# kept in the repository; THIRD_PARTY.md). Nothing else of it is used.
+FREEDOOM_URL    := https://github.com/freedoom/freedoom/releases/download/v0.13.0/freedoom-0.13.0.zip
+FREEDOOM_SHA256 := 3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59

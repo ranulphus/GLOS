@@ -18,6 +18,7 @@
 #include "arch.h"
 #include "io.h"
 #include "kprintf.h"
+#include "midi.h"
 #include "mixer.h"
 #include "mm.h"
 #include "timer.h"
@@ -35,6 +36,7 @@ static struct {
     mixer_fill fill;
     /* recording (API 2.0's AUDIO IN): 8 bits on the low DMA channel, beside the 16-bit output on the high one */
     u8 dma8, rec;
+    u8 midi;                                    /* the card's MPU-401 is GLOS's (midi.c): its interrupts come here */
     u8 *rbuf;                                   /* two halves of unsigned 8-bit stereo */
     u32 rphys, rframes, rhalf, rirqs;
     mixer_got got;
@@ -100,16 +102,18 @@ int sb16_init(const struct bootinfo *bi)
 
 static void rec_half(void);
 
-/* The card's one interrupt is the 16-bit output's and the 8-bit input's: its mixer's register 82h says which
-   (bit 1 the 16-bit, bit 0 the 8-bit); each is acknowledged by reading its own port. With nothing recording it
-   is the output's, as before. */
+/* The card's one interrupt is the 16-bit output's, the 8-bit input's and the MPU-401's: its mixer's register 82h
+   says which (bit 1 the 16-bit, bit 0 the 8-bit, bit 2 the MPU-401); each is acknowledged by reading its own
+   port. With nothing recording and the MPU-401 not GLOS's it is the output's, as before. */
 static void irq(struct trapframe *tf)
 {
     u8 st = 2;
-    if (sb.rec) {
+    if (sb.rec || sb.midi) {
         outb((u16)(sb.base + 4), 0x82);
-        st = inb((u16)(sb.base + 5)) & 3;
+        st = inb((u16)(sb.base + 5)) & 7;
     }
+    if (st & 4)                                 /* (the MPU-401's: over once its bytes are read) */
+        midi_mpu_drain();
     if (st & 1) {
         inb((u16)(sb.base + 0x0E));             /* (the 8-bit interrupt acknowledged) */
         if (sb.rec)
@@ -124,6 +128,8 @@ static void irq(struct trapframe *tf)
     sb.fill((s16 *)(sb.buf + sb.half * sb.frames * 4), sb.frames, tf);
     sb.half ^= 1;
 }
+
+void sb16_midi(int on) { sb.midi = (u8)(on != 0); }
 
 static void dma_stop(void) { outb(0xD4, (u8)(4 | (sb.dma & 3))); }
 

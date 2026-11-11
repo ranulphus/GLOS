@@ -49,8 +49,10 @@ static const u8 crystal_key[32] = {
 
 static struct {
     u16 wss, syn, sb, game, ctrl;               /* the resources: the data sheet's defaults unless [sound] crystal */
+    u16 mpu;                                    /* the MPU-401's port (no interrupt of its own: midi.c reads it on the tick) */
     u8 irq, dma, cap;
     u8 found, running, game_on;
+    u8 mpu_on, mpu_given;                       /* it is set up there; [sound] crystal names its port */
     u8 *buf;                                    /* the DMA buffer: two halves */
     u32 phys, frames, half, irqs;
     u32 errors;                                 /* halves in which the codec reported a sample error (SER) */
@@ -61,7 +63,8 @@ static struct {
     u32 rphys, rframes, rirqs;
     mixer_got got;
     char blaster[32];
-} cs = { .wss = 0x534, .syn = 0x388, .sb = 0x220, .game = 0x200, .ctrl = 0x120, .irq = 5, .dma = 1, .cap = 0 };
+} cs = { .wss = 0x534, .syn = 0x388, .sb = 0x220, .game = 0x200, .ctrl = 0x120, .mpu = 0x330, .irq = 5, .dma = 1,
+         .cap = 0 };
 
 static void pause(u32 n)
 {
@@ -109,8 +112,8 @@ static int hex(const char *s, u32 *v)
 }
 
 /* [sound] crystal: "auto" (or empty), "off", or resources in hex, as
-   "wss=534 sb=220 fm=388 irq=5 dma=1 cap=0 game=200 ctrl=120" (game=0: no
-   game port). -1 for off or a value that doesn't parse. */
+   "wss=534 sb=220 fm=388 irq=5 dma=1 cap=0 game=200 ctrl=120 mpu=330" (game=0:
+   no game port; mpu=0: no MPU-401). -1 for off or a value that doesn't parse. */
 static int parse(const char *v)
 {
     if (!strcmp(v, "off"))
@@ -133,6 +136,7 @@ static int parse(const char *v)
         else if (!strncmp(k, "cap=", 4)) cs.cap = (u8)x;
         else if (!strncmp(k, "game=", 5)) cs.game = (u16)x;
         else if (!strncmp(k, "ctrl=", 5)) cs.ctrl = (u16)x;
+        else if (!strncmp(k, "mpu=", 4)) cs.mpu = (u16)x, cs.mpu_given = 1;
         else return -1;
         while (*v && *v != ' ')
             v++;
@@ -146,7 +150,7 @@ static int parse(const char *v)
 static const char *conflict(void)
 {
     static char why[24];
-    const u16 base[] = { cs.wss, cs.syn, cs.sb, cs.ctrl, cs.game }, len[] = { 4, 4, 16, 8, 8 };
+    const u16 base[] = { cs.wss, cs.syn, cs.sb, cs.ctrl, cs.game, cs.mpu }, len[] = { 4, 4, 16, 8, 8, 2 };
     struct pci_dev *d;
     int i, b, k;
     for (i = 0; (d = pci_at(i)) != 0; i++) {
@@ -159,7 +163,7 @@ static const char *conflict(void)
             if (!(d->bar[b] & 1) || !(lo = d->bar[b] & ~3u))
                 continue;
             sz = 0x100;                         /* (an I/O BAR is 256 bytes at most) */
-            for (k = 0; k < 5; k++)
+            for (k = 0; k < 6; k++)
                 if (base[k] && base[k] < lo + sz && base[k] + len[k] > lo) {
                     ksnprintf(why, sizeof why, "port %04x:%04x", d->vendor, d->device);
                     return why;
@@ -214,6 +218,9 @@ int crystal_init(const char *cfg)
         slam(0x47, cs.game, 2);
         slam(0x33, 1, 1);
     }
+    slam(0x15, 3, 1);                           /* 3: the MPU-401: off for now (below) */
+    slam(0x22, 0, 1);
+    slam(0x33, 0, 1);
     slam(0x15, 2, 1);                           /* 2: the control port */
     slam(0x47, cs.ctrl, 2);
     slam(0x33, 1, 1);
@@ -223,17 +230,37 @@ int crystal_init(const char *cfg)
         kprintf("GLOS-SOUND crystal none wss=%x\n", cs.wss);
         return -1;
     }
+    /* The MPU-401 at its port, with no interrupt (midi.c reads it on the tick), when nothing else answers there
+       now that the chip's own is off (a Plug and Play BIOS may have had it on, there or elsewhere), or when
+       [sound] crystal names the port. */
+    cs.mpu_on = cs.mpu && (cs.mpu_given || inb((u16)(cs.mpu + 1)) == 0xFF);
+    if (cs.mpu_on) {
+        key();
+        slam(0x06, 0x01, 1);
+        slam(0x15, 3, 1);
+        slam(0x47, cs.mpu, 2);
+        slam(0x22, 0, 1);
+        slam(0x33, 1, 1);
+        outb(PNP_ADDR, 0x79);
+        pause(1000);
+    }
     id = rd(0x0C);
     wr(0x0C, 0x40);                             /* MODE 2: I16-I31 (I25, the version) */
     ver = rd(0x19);
     cs.found = 1;
-    ksnprintf(cs.blaster, sizeof cs.blaster, "A%x I%u D%u T4", cs.sb, cs.irq, cs.dma);
-    kprintf("GLOS-SOUND crystal wss=%x sb=%x fm=%x irq=%u dma=%u cap=%u game=%x ctrl=%x id=%02x ver=%02x\n", cs.wss,
-            cs.sb, cs.syn, cs.irq, cs.dma, cs.cap, cs.game_on ? cs.game : 0, cs.ctrl, id, ver);
+    if (cs.mpu_on)
+        ksnprintf(cs.blaster, sizeof cs.blaster, "A%x I%u D%u T4 P%x", cs.sb, cs.irq, cs.dma, cs.mpu);
+    else
+        ksnprintf(cs.blaster, sizeof cs.blaster, "A%x I%u D%u T4", cs.sb, cs.irq, cs.dma);
+    kprintf("GLOS-SOUND crystal wss=%x sb=%x fm=%x irq=%u dma=%u cap=%u game=%x ctrl=%x id=%02x ver=%02x mpu=%x\n",
+            cs.wss, cs.sb, cs.syn, cs.irq, cs.dma, cs.cap, cs.game_on ? cs.game : 0, cs.ctrl, id, ver,
+            cs.mpu_on ? cs.mpu : 0);
     return 0;
 }
 
 u16 crystal_sb(void) { return cs.found ? cs.sb : 0; }
+u16 crystal_fm(void) { return cs.found ? cs.syn : 0; }
+u16 crystal_mpu(void) { return cs.found && cs.mpu_on ? cs.mpu : 0; }
 const char *crystal_blaster(void) { return cs.found ? cs.blaster : 0; }
 
 /* ---- the codec under the mixer */

@@ -183,6 +183,13 @@ unsigned glos_audio_write(struct glos_audio_ring *r, const void *samples, unsign
 int glos_mixer(struct glos_audio_mixer *m);             /* MIXER (size set here) */
 int glos_audio_levels(unsigned id, unsigned *left, unsigned *right);   /* a stream's, or the output's (0) */
 int glos_audio_devices(struct glos_audio_device *out, unsigned room, unsigned *count);
+/* MIDI: a port out or in (GLOS_MIDI_PORT_), 0 with glos_error(); messages with their times on glos_ticks()'s
+   clock (0: now); every note off; an MPU-401's bytes as they are. */
+glos_handle glos_midi_out(unsigned port);
+glos_handle glos_midi_in(unsigned port);               /* (its messages come as GLOS_EV_MIDI events) */
+int glos_midi_send(glos_handle h, const struct glos_midi_msg *m, unsigned count, unsigned *taken, unsigned *queued);
+int glos_midi_flush(glos_handle h);
+int glos_midi_raw(glos_handle h, const void *bytes, unsigned count);
 
 /* ---- the system (SYS) */
 /* Figures of one kind (GLOS_STAT_) into buf: structures, each with its size first, or text. *length the bytes

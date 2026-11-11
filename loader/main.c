@@ -710,6 +710,7 @@ static int glos_main(int argc, char **argv)
                 case 'I': case 'i': bi.sb_irq = strtoul(b + 1, 0, 10); break;
                 case 'D': case 'd': bi.sb_dma8 = strtoul(b + 1, 0, 10); break;
                 case 'H': case 'h': bi.sb_dma16 = strtoul(b + 1, 0, 10); break;
+                case 'P': case 'p': bi.sb_mpu = strtoul(b + 1, 0, 16); break;
                 }
             }
     }

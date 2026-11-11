@@ -4641,6 +4641,69 @@ def api_audio_case(profile, vcard, card, sound="sb16"):
     return "  %-22s %s%s" % ("apiaudio-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
+def api_midi_case(profile, vcard, card, sound="sb16"):
+    """API 2.0's MIDI ports (APITEST midi; phase B step 10), under the agent with the desktop on and a sound card:
+    GLOS finds the FM chip and the MPU-401 (BLASTER's P, or the Crystal chip's); the FM port's notes play at their
+    times while the app sleeps (an A, then an E, in 86Box's recording), late by a few milliseconds at most; the
+    queue fills and is flushed; the MPU-401's ports out and in open, take notes and a system exclusive message,
+    and close. Then the app plays a C twice a second while a session's program plays the FM chip itself
+    (FMTEST's 330 Hz, as on any PC: the chip is an OPL2 for it); after it the port plays again (a G). Every case
+    ok."""
+    import time
+    crystal = sound != "sb16"
+    tag = "%s-%s" % (profile, vcard) + ("-" + sound if crystal else "")
+    agent = Agent("apimidi-" + tag, profile, card, ["--card", vcard, "--sound", sound, "--wav"]
+        + ([] if crystal else ["--pre", "SET BLASTER=A220 I5 D1 H5 P330 T6"]) + [
+        "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE", "--file", "build/ow/dos/FMTEST.EXE=/TEST/FMTEST.EXE",
+        "--cmd", "SERSAY HX-START apimidi", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1500)
+    checks, info, p = {"listen": agent.listening()}, "", None
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        t0 = time.time()                        # (a Crystal chip is set up once GLOS.CFG is read)
+        while time.time() - t0 < 60 and "GLOS-MIDI mpu port=330" not in agent.log():
+            time.sleep(1)
+        checks["found"] = "GLOS-MIDI fm port=388 chip=opl3" in agent.log() and "GLOS-MIDI mpu port=330" in agent.log()
+        checks["stat"] = "midi fm=opl3@388 mpu=330\n" in agent.ssh("glos audio")[1].replace("\r", "")
+        p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\APITEST.EXE midi mpu"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        t0 = time.time()
+        while time.time() - t0 < 600 and "HX-APITEST midi-player" not in agent.log() and p.poll() is None:
+            time.sleep(0.5)
+        time.sleep(3)                           # (some Cs first)
+        st = agent.ssh("glos audio")[1]
+        checks["playing"] = re.search(r"midi out port=fm app=\d+ queued=\d+ played=\d+ late=\d+ voices=\d+", st) is not None
+        rc, o, _ = agent.ssh("C:\\TEST\\FMTEST.EXE 388 330 1500")      # a session: the chip is its program's
+        checks["session"] = rc == 0 and "found=1 notes=1" in o
+        checks["run"] = p.wait(timeout=600) == 0
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        info += " timeout"
+        if p and p.poll() is None:
+            p.kill()
+    text = agent.wait()
+    cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", text)
+    checks["cases"] = len(cases) >= 7 and all(k == "1" for c, k, w in cases)
+    if not checks["cases"]:
+        info += " cases=%d failed-cases=%s" % (len(cases), ";".join(c + w.rstrip() for c, k, w in cases if k != "1"))
+    checks["stood"] = re.search(r"HX-APITEST done pass=\d+ fail=0 stood=[1-9]", text) is not None
+    m = re.search(r"GLOS-MIDI close app=\d+ port=fm dir=out played=(\d+) late=(\d+)", text)
+    info += " played=%s late=%s" % (m.groups() if m else ("-", "-"))
+    checks["played"] = bool(m) and int(m.group(1)) >= 30 and int(m.group(2)) <= 20
+    m = re.search(r"GLOS-MIDI close app=\d+ port=mpu dir=out played=(\d+) late=(\d+)", text)
+    checks["mpu-played"] = bool(m) and m.group(1) == "40" and int(m.group(2)) <= 20
+    checks["mpu-in"] = re.search(r"GLOS-MIDI close app=\d+ port=mpu dir=in received=0 lost=0", text) is not None
+    wav = os.path.join(ROOT, "out", "apimidi-" + tag, "audio.wav")
+    res = subprocess.run([sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440", "--tone", "659",
+                          "--tone", "523", "--tone", "330", "--tone", "784"], capture_output=True, text=True) \
+        if os.path.exists(wav) else None
+    checks["recorded"] = res is not None and res.returncode == 0
+    if not checks["recorded"] and res is not None:
+        info += " wav=" + ";".join(l.split("tone ")[1] for l in res.stdout.split("\n") if "missing" in l)
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text and "GLOS-WARN" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("apimidi-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
 def api_sched_case(profile, card):
     """API 2.0's schedule run by the kernel (SHELL SCHEDULE; phase B step 8), over two starts of GLOS under the
     agent. In the first, APITEST schedules a command at each start and one daily at 03:00, and GLOS is told to
@@ -7235,6 +7298,7 @@ def main():
             res += matrix(api_sched_case, [(c[0], c[2]) for c in wins], a.jobs)    # ... and the schedule, run by the kernel
             res += matrix(api_job_case, wins, a.jobs)   # ... and programs run for the app: JOB
             res += matrix(api_audio_case, wins + [w + ("cs4236b",) for w in wins[:1]], a.jobs)    # ... and sound
+            res += matrix(api_midi_case, wins + [w + ("cs4236b",) for w in wins[:1]], a.jobs)     # ... and MIDI
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

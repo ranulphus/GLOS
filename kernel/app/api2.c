@@ -96,13 +96,29 @@ static void qget(const struct api2 *s, u32 at, void *dst, u32 n)
         p[i] = s->q[(at + i) % A2_QBYTES];
 }
 
+u32 a2_now_ms(void) { return now_ms(); }
+
+static int post(struct app *a, struct glos_ev *ev, int merge);
+
 /* An event for the app (any thread, or the tick): its time set here. 0, or -1 if the queue is full. */
 int a2_post(struct app *a, struct glos_ev *ev, int merge)
+{
+    ev->time = now_ms();
+    return post(a, ev, merge);
+}
+
+/* ... with a time of its own (a MIDI message's, when it came). */
+int a2_post_at(struct app *a, struct glos_ev *ev, u32 time)
+{
+    ev->time = time;
+    return post(a, ev, 0);
+}
+
+static int post(struct app *a, struct glos_ev *ev, int merge)
 {
     struct api2 *s = a->v2;
     u32 f = irq_save();
     int r = -1;
-    ev->time = now_ms();
     if (merge && s->last_merge && s->qt != s->qh) {     /* (a movement after a movement: the newer one) */
         struct glos_ev last;
         qget(s, s->last_at, &last, sizeof last);
@@ -424,7 +440,7 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_THREAD][0] = 0x3FF;           /* CREATE to SELF */
     v.functions[GLOS_AREA_JOB][0] = 0x1F;               /* RUN, READ, WRITE, SIGNAL, STATUS */
     v.functions[GLOS_AREA_FS][0] = 0x1F;                /* LIST, INFO, DRIVES, WATCH, SECTORS */
-    v.functions[GLOS_AREA_AUDIO][0] = 0x4F;             /* OUT, IN, MIXER, LEVELS, DEVICES */
+    v.functions[GLOS_AREA_AUDIO][0] = 0x7F;             /* OUT, IN, MIXER, LEVELS, MIDI_OUT, MIDI_IN, DEVICES */
     v.functions[GLOS_AREA_SYS][0] = 0x0F;               /* STAT, KILL, LOG, PROGRAMS */
     v.functions[GLOS_AREA_SETTINGS][0] = 0xFF;          /* GET, SET, SECTIONS, KEYS, SCHEMA, WATCH, THEME, REGION */
     v.functions[GLOS_AREA_IDLE][0] = 0x0F;              /* TIME, AWAKE, SAVER, POWER */
@@ -626,6 +642,8 @@ static int close_call(struct app *a, struct trapframe *tf)
         api2_job_close(a, obj);
     else if (kind == GLOS_HK_STREAM)
         api2_audio_close(a, obj);
+    else if (kind == GLOS_HK_MIDI)
+        api2_midi_close(a, obj);
     return a2_ok(tf, 0);
 }
 

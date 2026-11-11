@@ -2287,6 +2287,140 @@ static int audio_mode(int loop)
     return fails > 90 ? 90 : fails;
 }
 
+/* APITEST midi [mpu]: API 2.0's MIDI ports (phase B step 10), under the agent with the desktop on and a sound
+   card. The FM port: the devices, what is refused, notes at their times (an A, then an E: the recording has
+   them), the queue full and flushed; then a C again and again for 12 seconds, sent a little ahead, which becomes
+   a G once the app has stood still for a second or more (a session had the machine: the test starts one, whose
+   program plays the FM chip itself). With "mpu": the MPU-401's port out and in. */
+static struct glos_midi_msg midi_m[600];
+
+static void midi_note(struct glos_midi_msg *m, unsigned on, unsigned off, unsigned key)
+{
+    m[0].time = on, m[0].status = 0x90, m[0].data1 = (unsigned char)key, m[0].data2 = 127, m[0].pad = 0;
+    m[1].time = off, m[1].status = 0x80, m[1].data1 = (unsigned char)key, m[1].data2 = 0, m[1].pad = 0;
+}
+
+static int midi_mode(int mpu)
+{
+    static struct glos_audio_device devs[8];
+    static const unsigned char gm_on[] = { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 };
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_midi_msg *m = midi_m;
+    glos_handle fm, out, in;
+    unsigned count = 0, taken = 0, queued = 0, i, t, fm_at = 99, mpu_out = 99, mpu_in = 99, last, key = 72, stood = 0;
+    int ok, r, r2;
+    char line[64];
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 98;
+
+    r = glos_audio_devices(devs, sizeof devs, &count);
+    for (i = 0; i < count; i++) {
+        if (devs[i].kind == GLOS_AUDIO_DEV_MIDI_OUT && devs[i].rate == GLOS_MIDI_PORT_FM)
+            fm_at = i;
+        if (devs[i].kind == GLOS_AUDIO_DEV_MIDI_OUT && devs[i].rate == GLOS_MIDI_PORT_MPU)
+            mpu_out = i;
+        if (devs[i].kind == GLOS_AUDIO_DEV_MIDI_IN && devs[i].rate == GLOS_MIDI_PORT_MPU)
+            mpu_in = i;
+    }
+    ok = r == 0 && fm_at != 99 && !strncmp(devs[fm_at].name, "opl", 3) && devs[fm_at].streams == 0
+         && (!mpu || (mpu_out != 99 && mpu_in != 99 && !strcmp(devs[mpu_out].name, "mpu401")));
+    check("midi-devices", ok, "r=%d count=%u fm=%s mpu=%u,%u", r, count, fm_at != 99 ? devs[fm_at].name : "-", mpu_out, mpu_in);
+
+    fm = glos_midi_out(GLOS_MIDI_PORT_FM);
+    ok = fm && GLOS_HANDLE_KIND(fm) == GLOS_HK_MIDI && glos_midi_out(GLOS_MIDI_PORT_FM) == 0 && glos_error() == GLOS_E_REFUSED
+         && glos_audio_devices(devs, sizeof devs, &count) == 0 && devs[fm_at].streams == 1;
+    check("midi-open", ok, "fm=%x err=%d", fm, glos_error());
+    if (!fm) {
+        snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+        com1(line);
+        return fails;
+    }
+
+    /* Refused: a port there isn't, the FM chip as a port in, bytes as they are to it, a message that is none
+       (those before it are taken), another handle's kind. */
+    m[0].time = 0, m[0].status = 0xC0, m[0].data1 = 73, m[0].data2 = 0;         /* (a flute, for all that follows) */
+    m[1].time = 0, m[1].status = 0xF8, m[1].data1 = 0, m[1].data2 = 0;
+    m[2].time = 0, m[2].status = 0xC0, m[2].data1 = 1, m[2].data2 = 0;
+    r = glos_midi_send(fm, m, 3, &taken, &queued);
+    ok = glos_midi_out(7) == 0 && glos_error() == GLOS_E_NOT_FOUND && glos_midi_in(GLOS_MIDI_PORT_FM) == 0
+         && glos_error() == GLOS_E_NOT_FOUND && glos_midi_raw(fm, gm_on, sizeof gm_on) == GLOS_E_REFUSED
+         && r == GLOS_E_ARGUMENT && taken == 1 && glos_midi_send(0x12345678, m, 1, 0, 0) == GLOS_E_HANDLE;
+    check("midi-refused", ok, "err=%d r=%d taken=%u", glos_error(), r, taken);
+
+    /* Notes at their times: a short one first (86Box's first FM note after power-on is faint), then an A for a
+       second and a half, then an E: all sent at once, played by GLOS while the app sleeps. Sent out of order:
+       GLOS sorts them. */
+    t = glos_ticks();
+    midi_note(m + 0, t + 3300, t + 4800, 76);
+    midi_note(m + 2, t + 1500, t + 3000, 69);
+    midi_note(m + 4, t + 100, t + 900, 57);
+    r = glos_midi_send(fm, m, 6, &taken, &queued);
+    ok = r == 0 && taken == 6 && queued == 6;
+    glos_sleep(2000);
+    r = glos_midi_send(fm, m, 0, &taken, &i);           /* (nothing sent: how many wait) */
+    ok = ok && r == 0 && i == 3;
+    glos_sleep(3200);
+    r2 = glos_midi_send(fm, m, 0, &taken, &last);
+    ok = ok && r2 == 0 && last == 0;
+    check("midi-timed", ok, "r=%d taken=%u queued=%u then=%u at-end=%u", r, taken, queued, i, last);
+
+    /* The queue: full at GLOS_MIDI_QUEUE; flushed, nothing waits (and nothing of it is heard). */
+    t = glos_ticks();
+    for (i = 0; i < 300; i++)
+        midi_note(m + 2 * i, t + 60000 + i, t + 60500 + i, 40 + i % 40);
+    r = glos_midi_send(fm, m, 600, &taken, &queued);
+    ok = r == 0 && taken == GLOS_MIDI_QUEUE && queued == GLOS_MIDI_QUEUE;
+    midi_note(m, 0, t + 60000, 100);                    /* (one more isn't taken) */
+    r = glos_midi_send(fm, m, 1, &taken, &i);
+    ok = ok && r == 0 && taken == 0 && glos_midi_flush(fm) == 0 && glos_midi_send(fm, m, 0, 0, &i) == 0 && i == 0;
+    check("midi-queue", ok, "r=%d taken=%u queued=%u after-flush=%u", r, taken, queued, i);
+
+    /* The MPU-401: notes and a system exclusive message out (nothing is heard: nothing is plugged in); its port
+       in gives no event with nothing playing into it; both closed. */
+    if (mpu) {
+        out = glos_midi_out(GLOS_MIDI_PORT_MPU);
+        in = glos_midi_in(GLOS_MIDI_PORT_MPU);
+        ok = out && in && out != in && glos_midi_in(GLOS_MIDI_PORT_MPU) == 0 && glos_error() == GLOS_E_REFUSED
+             && glos_midi_raw(out, gm_on, sizeof gm_on) == 0;
+        t = glos_ticks();
+        for (i = 0; i < 20; i++)
+            midi_note(m + 2 * i, t + 50 + 20 * i, t + 60 + 20 * i, 60 + i);
+        r = glos_midi_send(out, m, 40, &taken, &queued);
+        ok = ok && r == 0 && taken == 40 && glos_midi_send(in, m, 1, 0, 0) == GLOS_E_ARGUMENT;
+        glos_sleep(1000);
+        r2 = glos_midi_send(out, m, 0, 0, &last);
+        ok = ok && r2 == 0 && last == 0 && glos_event(ev, sizeof ev, 0, 1u << GLOS_AREA_AUDIO) == 0 && glos_close(out) == 0 && glos_close(in) == 0
+             && glos_midi_flush(out) == GLOS_E_HANDLE;
+        check("midi-mpu", ok, "out=%x in=%x err=%d r=%d taken=%u left=%u", out, in, glos_error(), r, taken, last);
+    }
+
+    /* A player: a C every half second, each sent 300 ms ahead, for 12 seconds. A session meanwhile takes the
+       chip: what waited is dropped, and after it the port plays again (a G from then on). */
+    com1("HX-APITEST midi-player\r\n");
+    t = last = glos_ticks();
+    for (i = 0; i < 24; i++) {
+        unsigned now;
+        midi_note(m, t + 500 * i + 300, t + 500 * i + 700, key);
+        r = glos_midi_send(fm, m, 2, &taken, 0);
+        while ((int)((now = glos_ticks()) - (t + 500 * (i + 1))) < 0) {
+            if (now - last >= 1000) {                   /* (stood still: a session had the machine) */
+                stood++, key = 79;
+                t += now - last;
+            }
+            last = now;
+            glos_sleep(20);
+        }
+    }
+    glos_sleep(800);
+    ok = glos_close(fm) == 0 && glos_midi_flush(fm) == GLOS_E_HANDLE && glos_audio_devices(devs, sizeof devs, &count) == 0
+         && devs[fm_at].streams == 0;
+    check("midi-player", ok, "stood=%u err=%d", stood, glos_error());
+
+    snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d stood=%u\r\n", pass, fails, stood);
+    com1(line);
+    return fails > 90 ? 90 : fails;
+}
+
 /* What a run of the test may have left on a PC that is kept (a bench): taken away. */
 static int clean_mode(void)
 {
@@ -2385,6 +2519,8 @@ int main(int argc, char **argv)
         return job_mode();
     if (argc > 1 && !strcmp(argv[1], "audio"))
         return audio_mode(argc > 2 && !strcmp(argv[2], "loop"));
+    if (argc > 1 && !strcmp(argv[1], "midi"))
+        return midi_mode(argc > 2 && !strcmp(argv[2], "mpu"));
     if (argc > 2 && !strcmp(argv[1], "sched"))
         return sched_mode(argv[2]);
     if (argc > 1 && (strstr(argv[1], ".ZZT") || strstr(argv[1], ".zzt") || !strcmp(argv[1], "said") || !strcmp(argv[1], "with")))

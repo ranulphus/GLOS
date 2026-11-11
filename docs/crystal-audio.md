@@ -107,8 +107,11 @@ The owner's answers (2026-11-05), each the recommendation:
    still find an SB Pro at 220h.
 3. **Scope:** the CS423x family (CS4232 to CS4238B: one set-up method, one codec), tested on bench-g400's chip and
    on 86Box's CS4232 and CS4237B.
-4. **The game port** (logical device 1) set up too, at 200h, when the chip has one and nothing else answers there;
-   MPU-401 only where a chip exposes it (not on bench-g400).
+4. **The game port** (logical device 1) set up too, at 200h, when the chip has one and nothing else answers there.
+5. **The MPU-401** (logical device 3; phase B step 10, for API 2.0's MIDI ports): GLOS turns the chip's own off,
+   and sets it up at 330h with no interrupt when nothing else then answers there (`[sound] crystal`'s `mpu=`
+   names another port, or 0 for none). GLOS's MIDI layer uses it only if it then answers a reset; programs get
+   `P330` in BLASTER. bench-g400's chip lists no MPU-401 device: what it does there is to be seen.
 
 ## Provenance
 

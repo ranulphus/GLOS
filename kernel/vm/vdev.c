@@ -18,6 +18,7 @@
 #include "joy.h"
 #include "gdbprog.h"
 #include "kprintf.h"
+#include "midi.h"
 #include "pci.h"
 #include "timer.h"
 #include "vm.h"
@@ -329,6 +330,7 @@ void vdev_tick(struct trapframe *tf, u8 c)
     vm_int15_tick(now);
     joy_tick(now);
     agent_vm_tick(now);
+    midi_tick();
     app_tick();
     if (vm.waiting && ((vm.wait_deadline && (s32)(now - vm.wait_deadline) >= 0) || vm_work_due()))
         vm_kick();

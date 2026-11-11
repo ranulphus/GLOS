@@ -12,6 +12,7 @@
 #include "io.h"
 #include "kcfg.h"
 #include "kprintf.h"
+#include "midi.h"
 #include "mixer.h"
 #include "mm.h"
 #include "nic.h"
@@ -115,6 +116,7 @@ void kmain(struct bootinfo *loader_bi)
         vm_start(bi);
         clock_init();                           /* the RTC's time, until GLOS.CFG's zone and SNTP (M10) */
         mixer_init(bi);                         /* (it plays once the desktop is up: display.c) */
+        midi_init(bi);                          /* the FM chip and an MPU-401, for API 2.0's MIDI ports */
         desk_init();
         kcfg_init(bi);                          /* GLOS.CFG, read and kept by the kernel (M9) */
         schedule_init(bi);                      /* the commands GLOS runs at times (GLOS.DAT; kernel/core/schedule.c) */

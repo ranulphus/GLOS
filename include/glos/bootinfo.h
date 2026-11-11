@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 6
+#define BOOTINFO_VERSION 7
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -161,6 +161,8 @@ struct bootinfo {
     /* version 6: upper memory (docs/upper-memory.md) */
     bi_u32 stub_page;                           /* [memory] stub_page or /STUBPAGE=: BI_PAGE_OFF, BI_PAGE_AUTO, or
                                                    the segment named (C800h-EF00h) */
+    /* version 7: MIDI (docs/v1/phase-b.md step 10) */
+    bi_u32 sb_mpu;                              /* BLASTER's (or [sound] blaster's) P: the MPU-401's port; 0: not given */
 };
 #define BI_INT2F_PSP 0x5Cu                     /* PSP:5Ch, the FCB area, which GLOS's own PSP doesn't use */
 #define BI_PAGE_OFF  0u

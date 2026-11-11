@@ -994,6 +994,40 @@ int glos_audio_levels(unsigned id, unsigned *left, unsigned *right)
     return r;
 }
 
+static glos_handle midi_open(unsigned fn, unsigned port)
+{
+    struct glos_midi q = { sizeof q, GLOS_MIDI_OPEN, port, 0, 0, 0, 0, 0 };
+    int r = raw(fn, &q, 0);
+    last_error = r;
+    return r ? 0 : q.handle;
+}
+
+glos_handle glos_midi_out(unsigned port) { return midi_open(GLOS_AUDIO_MIDI_OUT, port); }
+glos_handle glos_midi_in(unsigned port) { return midi_open(GLOS_AUDIO_MIDI_IN, port); }
+
+int glos_midi_send(glos_handle h, const struct glos_midi_msg *m, unsigned count, unsigned *taken, unsigned *queued)
+{
+    struct glos_midi q = { sizeof q, GLOS_MIDI_SEND, 0, h, (unsigned)m, count, 0, 0 };
+    int r = raw(GLOS_AUDIO_MIDI_OUT, &q, 0);
+    if (taken)
+        *taken = q.count;
+    if (queued)
+        *queued = q.queued;
+    return r;
+}
+
+int glos_midi_flush(glos_handle h)
+{
+    struct glos_midi q = { sizeof q, GLOS_MIDI_FLUSH, 0, h, 0, 0, 0, 0 };
+    return raw(GLOS_AUDIO_MIDI_OUT, &q, 0);
+}
+
+int glos_midi_raw(glos_handle h, const void *bytes, unsigned count)
+{
+    struct glos_midi q = { sizeof q, GLOS_MIDI_RAW, 0, h, (unsigned)bytes, count, 0, 0 };
+    return raw(GLOS_AUDIO_MIDI_OUT, &q, 0);
+}
+
 int glos_audio_devices(struct glos_audio_device *out, unsigned room, unsigned *count)
 {
     struct glos_sys_stat q = { sizeof q, 0, (unsigned)out, room, 0, 0 };

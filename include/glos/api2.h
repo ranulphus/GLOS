@@ -118,6 +118,7 @@ typedef unsigned glos_handle;
 #define GLOS_HK_CLIP       13
 #define GLOS_HK_AWAKE      14
 #define GLOS_HK_LIST       15
+#define GLOS_HK_MIDI       16
 
 /* ---- CORE's functions */
 #define GLOS_CORE_VERSION  GLOS_FN(GLOS_AREA_CORE, 0)  /* struct glos_version, for any program */
@@ -886,8 +887,9 @@ struct glos_fs_sectors {
 #define GLOS_AUDIO_IN      GLOS_FN(GLOS_AREA_AUDIO, 1)  /* struct glos_audio_out: a stream in: what the card records */
 #define GLOS_AUDIO_MIXER   GLOS_FN(GLOS_AREA_AUDIO, 2)  /* struct glos_audio_mixer: the master, the streams, the chip */
 #define GLOS_AUDIO_LEVELS  GLOS_FN(GLOS_AREA_AUDIO, 3)  /* struct glos_audio_levels: how loud it is now, for meters */
+#define GLOS_AUDIO_MIDI_OUT GLOS_FN(GLOS_AREA_AUDIO, 4) /* struct glos_midi: a MIDI port out (GLOS_HK_MIDI) */
+#define GLOS_AUDIO_MIDI_IN GLOS_FN(GLOS_AREA_AUDIO, 5)  /* struct glos_midi: a MIDI port in */
 #define GLOS_AUDIO_DEVICES GLOS_FN(GLOS_AREA_AUDIO, 6)  /* struct glos_sys_stat: a struct glos_audio_device each */
-/* (4 MIDI_OUT, 5 MIDI_IN: with phase B's step 10's last part) */
 
 /* A stream in is a stream out the other way round: the same structure asks for it, and its ring is GLOS's to
    write (`write`) and the app's to read (the app moves `read`). The card records what MIXER's input says, at the
@@ -1006,10 +1008,59 @@ struct glos_audio_device {
 };
 #define GLOS_AUDIO_DEV_OUT 0    /* the card GLOS's mixer plays */
 #define GLOS_AUDIO_DEV_IN  1    /* ... and records from (rate: what it records at; streams: those in) */
+#define GLOS_AUDIO_DEV_MIDI_OUT 2       /* a MIDI port out (rate: its GLOS_MIDI_PORT_; streams: 1 while an app has
+                                           it; name: "opl3", "opl2", "mpu401") */
+#define GLOS_AUDIO_DEV_MIDI_IN  3       /* a MIDI port in */
+
+/* MIDI. A port out is the card's FM chip (GLOS_MIDI_PORT_FM: an OPL3 or an OPL2, which GLOS's own driver plays
+   with General MIDI's instruments and percussion on channel 10) or an MPU-401 (GLOS_MIDI_PORT_MPU: whatever is
+   plugged into it). One app has a port at a time (GLOS_E_REFUSED for another); where there is no such port,
+   GLOS_E_NOT_FOUND; where the desktop hasn't the screen, GLOS_E_NO_AUDIO.
+
+   SEND takes channel messages (status 80h to EFh) with their times, in milliseconds on GLOS's clock (CORE
+   TICKS). GLOS plays each when its time comes, on its own tick, to the millisecond, whatever the app is doing
+   meanwhile: a player sends a stretch ahead and sleeps. A time of 0, or one gone by, is now. The queue holds
+   GLOS_MIDI_QUEUE messages: `count` comes back as how many were taken, `queued` as how many wait. A message
+   that isn't a channel message ends the call (GLOS_E_ARGUMENT; `count`: those before it).
+   FLUSH drops what waits and ends every note. RAW sends bytes as they are to an MPU-401, after what is being
+   sent (a system exclusive message; at most 256 waiting: GLOS_E_ROOM); the FM port refuses it.
+
+   A port in (MIDI_IN, OPEN alone; an MPU-401) gives every channel message received as a GLOS_EV_MIDI event,
+   its time when it came. System messages are dropped.
+
+   While a session has the machine the ports are its programs': what waited is dropped, the notes end. The
+   handles stay good. */
+struct glos_midi {
+    unsigned size;
+    unsigned what;              /* GLOS_MIDI_ */
+    unsigned port;              /* OPEN: GLOS_MIDI_PORT_ */
+    glos_handle handle;         /* OPEN: -> the port, until CLOSE. The others: the port */
+    unsigned buffer;            /* SEND: a struct glos_midi_msg each. RAW: the bytes */
+    unsigned count;             /* SEND: how many messages; -> how many were taken. RAW: how many bytes */
+    unsigned queued;            /* -> messages waiting for their time */
+    unsigned now;               /* -> GLOS's clock, in milliseconds (as CORE TICKS) */
+};
+#define GLOS_MIDI_OPEN  0
+#define GLOS_MIDI_SEND  1
+#define GLOS_MIDI_FLUSH 2
+#define GLOS_MIDI_RAW   3
+#define GLOS_MIDI_PORT_FM  0
+#define GLOS_MIDI_PORT_MPU 1
+#define GLOS_MIDI_QUEUE 512
+
+struct glos_midi_msg {
+    unsigned time;              /* when: milliseconds on GLOS's clock (0: now) */
+    unsigned char status, data1, data2, pad;    /* (data2: 0 for a program change or a channel pressure) */
+};
 
 /* AUDIO's event. */
 #define GLOS_EV_AUDIO GLOS_EV(GLOS_AREA_AUDIO, 1)       /* (the header alone; handle: the stream) it has fewer bytes
                                                            queued than its NOTIFY: write more */
+#define GLOS_EV_MIDI  GLOS_EV(GLOS_AREA_AUDIO, 2)       /* struct glos_ev_midi: a port in received a message */
+struct glos_ev_midi {
+    struct glos_ev ev;          /* (handle: the port; time: when it came) */
+    unsigned char status, data1, data2, pad;
+};
 
 /* ================================================================== SETTINGS (0Ch): GLOS.CFG, the theme, the region
  *
