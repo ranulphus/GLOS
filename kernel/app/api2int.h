@@ -57,6 +57,8 @@ struct api2 {
     } target[A2_TARGETS];
     u32 ntargets;
     u8 pads_events;                     /* it asked for GLOS_EV_PAD */
+    u8 log_follow;                      /* it follows the log (SYS's LOG): GLOS_EV_LOG when it has more ... */
+    u32 log_told;                       /* ... than this place, the last it read to or was told of */
     struct glos_pad pad[GLOS_PADS];     /* each pad as it was last told of it */
     u32 ndrop, ndrop1x;                 /* events lost to a full queue; 1.x events with no 2.0 form yet */
     char name[32];                      /* INIT's */
@@ -132,6 +134,11 @@ void api2_recent_add(const char *prog, const char *path);       /* a document op
 int api2_fs_path(struct trapframe *tf, u32 off, char *out, u32 room);  /* a path of the app's as DOS's bytes: its
                                                                            length, or -1 */
 int api2_fs_exists(struct app *a, const char *path);            /* 1 a file, 2 a folder, 0 neither, -1 the app ends */
+
+/* api2sys.c */
+int api2_sys(struct app *a, struct trapframe *tf, u32 n);      /* SYS's calls */
+void api2_sys_tick(struct app *a);                              /* each tick: the log's followers */
+void api2_end_event(struct app *a);                             /* GLOS_EV_END: the app is asked to end */
 
 /* api2job.c */
 int api2_job(struct app *a, struct trapframe *tf, u32 n);      /* JOB's calls */

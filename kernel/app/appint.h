@@ -138,6 +138,7 @@ int api2_call(struct trapframe *tf);            /* a 2.0 call (EAX's major 2): g
 int api2_app_new(struct app *a);                /* a 2.0 app's state, before its thread runs: 0, or -1 */
 void api2_app_gone(struct app *a);              /* its handles closed, its state freed (its thread, at its end) */
 void api2_tick(struct app *a);                  /* its timers, every kernel tick (interrupts off) */
+void api2_end_event(struct app *a);             /* (api2sys.c) GLOS_EV_END: the app is asked to end */
 void api2_event_1x(struct app *a, const struct glos_event *e);  /* the desktop's events for a 2.0 app */
 int api2_pending(const struct app *a);          /* events wait in its 2.0 queue */
 

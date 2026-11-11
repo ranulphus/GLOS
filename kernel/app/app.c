@@ -1238,6 +1238,63 @@ void app_kill(struct app *a, const char *why)
 
 u32 app_id(const struct app *a) { return a->id; }
 
+int app_alive(u32 id)
+{
+    u32 f = irq_save();
+    int r = app_by_id(id) != 0;
+    irq_restore(f);
+    return r;
+}
+
+u32 app_began_as(u32 id)                        /* the agent's job an app began as (its number), or 0 */
+{
+    u32 f = irq_save();
+    struct app *a = app_by_id(id);
+    u32 seq = a && a->job ? agent_job_seq(a->job) : 0;
+    irq_restore(f);
+    return seq;
+}
+
+/* An app is asked to end (API 2.0's GLOS_EV_END): 0, or -1 (no such app, or a 1.x one: it has no such event). */
+int app_ask_end(u32 id)
+{
+    u32 f = irq_save();
+    struct app *a = app_by_id(id);
+    int r = a && a->v2 ? 0 : -1;
+    if (r == 0)
+        api2_end_event(a);
+    irq_restore(f);
+    return r;
+}
+
+/* glos exit with apps running (the VM thread, each time it looks): API 2.0's apps are asked to end and given
+   three seconds to; those left then, and 1.x's apps at once, are ended. */
+void app_exit_turn(void)
+{
+    static u32 asked_at;
+    struct app *a;
+    u32 f = irq_save(), n2 = 0;
+    for (a = apps; a; a = a->next)
+        if (a->ctx && !a->kill && a->v2)
+            n2++;
+    if (asked_at && timer_ticks() - asked_at > 30 * 1024)
+        asked_at = 0;                           /* (an exit of long ago that was given up: this is another) */
+    if (!asked_at && n2) {
+        asked_at = timer_ticks() | 1;
+        for (a = apps; a; a = a->next) {
+            if (a->v2)
+                api2_end_event(a);
+            else
+                app_kill(a, "exit");
+        }
+    } else if (!n2 || timer_ticks() - asked_at >= 3 * 1024) {
+        asked_at = 0;
+        for (a = apps; a; a = a->next)
+            app_kill(a, "exit");
+    }
+    irq_restore(f);
+}
+
 struct app *app_by_id(u32 id)                   /* (interrupts off) the live app with this id, or NULL */
 {
     struct app *a;

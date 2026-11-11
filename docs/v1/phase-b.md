@@ -578,8 +578,7 @@ After that:
     building a small program as a job (the IDE's case);
   - `loopa-console` unchanged.
 
-**Step 9, first part, as built** (2026-11-11; files for the three streams, long command lines, SYS and the END
-event are the second part):
+**Step 9, first part, as built** (2026-11-11):
 
 - **JOB's calls** (`kernel/app/api2job.c`, over the agent, `kernel/dos/agent.c`): RUN, READ, WRITE, SIGNAL,
   STATUS. A job is a handle (`GLOS_HK_JOB`) until CLOSE; `GLOS_EV_JOB` says when it moves on and when it writes
@@ -606,6 +605,34 @@ event are the second part):
 - **CLOSE** of a running job's handle lets it run on, nobody's.
 - **Only under the agent:** GLOS /RUN refuses RUN.
 - **Tests:** `tests/api/jobtool.c` (a plain DOS program) and APITEST's job mode (15 cases) in `api_job_case`.
+
+**Step 9, second part, as built** (2026-11-11):
+
+- **Files for a job's streams** (RUN's `in`, `out`, `err`; `kernel/dos/agent.c`): each is opened by a DOS call
+  the stub makes before the job's EXEC, and the stub's handle 0, 1 or 2 is pointed at it (its PSP's handle
+  table), so the program inherits the file. After the job the handles are put back and the files closed. Output
+  can be added to (APPEND flags); the same file for output and error is opened once. What goes to a file is not
+  kept for READ. A file that can't be opened ends the job with code 126. COMMAND.COM's redirection is not used:
+  MS-DOS's loses the exit code.
+- **Long command lines:** a command of up to 1,023 bytes. Past the 126 that DOS passes, the tail's length byte
+  says 127 and the whole line is in the program's environment as `CMDLINE` (Windows 9x's way, which DJGPP's
+  start-up code reads; checked in its source, `src/libc/crt0/c1args.c`). A line for COMMAND.COM stays 126.
+- **Response files** are the app's to write: DJGPP's programs expand `@file` themselves, so the kernel has no
+  call for it (the plan had one).
+- **SYS** (`kernel/app/api2sys.c`): STAT, KILL, LOG, PROGRAMS.
+  - STAT's structures: SYSTEM, MEMORY, PCI (each function with its keeper). Its other kinds are text, the lines
+    GLOS's own commands print (NET, AUDIO, USB, DISPLAY, CACHE, THREADS). Structures for those wait for System
+    Monitor (phase E) to say what it needs; the plan had them all as structures.
+  - PROGRAMS: apps and jobs, each with the app that started it and, for an app, the job it began as.
+  - LOG: the log from a place on; with `follow`, `GLOS_EV_LOG` once when it has more.
+  - KILL: an app, a job, the session in front: for GLOS's own programs (the trust rule of step 8). ASK is
+    anybody's: the app gets `GLOS_EV_END`.
+- **GLOS_EV_END** is sent now: at `glos exit` and `glos restart` API 2.0's apps are asked to end and given three
+  seconds; those left are then ended (1.x's apps at once, as before).
+- **Tests:** APITEST's SYS cases (7, in the default run), `sys-kill-job`, `job-files`, `job-files-none` and
+  `job-long` in the job mode; `api_shell_case` expects the apps left at `glos exit` to end by themselves.
+- **Not done:** DJGPP's own GCC run as a job (the plan's IDE case) needs the DOS compiler in the test image; it
+  goes with the IDE (phase E), where the long line and the streams it needs are these.
 
 ### 10. AUDIO
 

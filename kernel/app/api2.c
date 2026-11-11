@@ -184,6 +184,7 @@ void api2_tick(struct app *a)
 {
     struct api2 *s = a->v2;
     u32 now = timer_ticks(), i;
+    api2_sys_tick(a);
     for (i = 0; i < s->ntimers; i++) {
         struct timer2 *t = s->timers[i];
         if (!t->live || (s32)(now - t->next) < 0)
@@ -419,6 +420,7 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_THREAD][0] = 0x3FF;           /* CREATE to SELF */
     v.functions[GLOS_AREA_JOB][0] = 0x1F;               /* RUN, READ, WRITE, SIGNAL, STATUS */
     v.functions[GLOS_AREA_FS][0] = 0x1F;                /* LIST, INFO, DRIVES, WATCH, SECTORS */
+    v.functions[GLOS_AREA_SYS][0] = 0x0F;               /* STAT, KILL, LOG, PROGRAMS */
     v.functions[GLOS_AREA_SETTINGS][0] = 0xFF;          /* GET, SET, SECTIONS, KEYS, SCHEMA, WATCH, THEME, REGION */
     v.functions[GLOS_AREA_IDLE][0] = 0x0F;              /* TIME, AWAKE, SAVER, POWER */
     return a2_wr(tf, &v, sizeof v, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, (GLOS_MAJOR << 16) | GLOS_MINOR);
@@ -692,7 +694,8 @@ int api2_call(struct trapframe *tf)
     if (a->api_major != 2 || !a->v2)
         return a2_fail(tf, GLOS_E_VERSION);       /* (a 1.x app makes 1.x's calls only) */
     if (area > GLOS_AREA_SHELL && area != GLOS_AREA_THREAD && area != GLOS_AREA_SETTINGS && area != GLOS_AREA_IDLE
-        && area != GLOS_AREA_CLIP && area != GLOS_AREA_DND && area != GLOS_AREA_FS && area != GLOS_AREA_JOB)
+        && area != GLOS_AREA_CLIP && area != GLOS_AREA_DND && area != GLOS_AREA_FS && area != GLOS_AREA_JOB
+        && area != GLOS_AREA_SYS)
         return a2_fail(tf, GLOS_E_FUNCTION);       /* (the other areas come with phase B's later steps) */
     first = app_first();
     if (!first && area == GLOS_AREA_DRAW && n >= (GLOS_DRAW_GPU & 0xFF) && n <= (GLOS_DRAW_WINVRAM & 0xFF))
@@ -721,7 +724,7 @@ int api2_call(struct trapframe *tf)
       : area == GLOS_AREA_SETTINGS ? api2_settings(a, tf, n) : area == GLOS_AREA_IDLE ? api2_idle(a, tf, n)
       : area == GLOS_AREA_CLIP ? api2_clip(a, tf, n) : area == GLOS_AREA_DND ? api2_dnd(a, tf, n)
       : area == GLOS_AREA_FS ? api2_fs(a, tf, n) : area == GLOS_AREA_SHELL ? api2_shell(a, tf, n)
-      : area == GLOS_AREA_JOB ? api2_job(a, tf, n) : core(a, tf, n);
+      : area == GLOS_AREA_JOB ? api2_job(a, tf, n) : area == GLOS_AREA_SYS ? api2_sys(a, tf, n) : core(a, tf, n);
     if (first)
         gpu_safe_end(a);
     app_api_unlock(a);

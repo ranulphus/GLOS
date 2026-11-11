@@ -691,14 +691,20 @@ struct glos_ev_wheel {
 
 struct glos_job_run {
     unsigned size;
-    unsigned command;           /* text: a program and its arguments, or a line for COMMAND.COM (a batch file, an
-                                   internal command), at most 255 bytes */
+    unsigned command;           /* text: a program and its arguments, at most 1023 bytes: past the 126 that DOS
+                                   passes, the whole line is in the program's environment too (CMDLINE, where a
+                                   DJGPP program looks); or a line for COMMAND.COM (a batch file, an internal
+                                   command), 126 at most */
     unsigned dir;               /* text: the drive and folder it starts in, at most 79 bytes (0: the system's) */
     unsigned env;               /* NAME=VALUE strings, a NUL after each and one more: added to its environment, at
                                    most 511 bytes (0: none) */
     unsigned how;               /* GLOS_RUN_ */
     unsigned flags;             /* GLOS_RUNF_ */
     unsigned profile;           /* text: the profile it runs with, a program's name (0: its own) */
+    unsigned in, out, err;      /* text: files for its standard input, output and error, at most 79 bytes each
+                                   (0: none: the keyboard or WRITE; READ). A path with no folder is in `dir`. The
+                                   same file for out and err is written through one place. What goes to a file is
+                                   not kept for READ. A file that can't be opened: the job ends, code 126 */
     glos_handle handle;         /* -> the job (no handle with GLOS_RUNF_DETACH) */
     unsigned id;                /* -> its number (SYS's) */
 };
@@ -712,6 +718,8 @@ struct glos_job_run {
 #define GLOS_RUNF_DETACH 1      /* nothing of it is the app's: no handle, no output kept, it runs on when the app ends */
 #define GLOS_RUNF_STDIN  2      /* its standard input is the app's WRITEs (else the keyboard's, when it has it) */
 #define GLOS_RUNF_DIRECT 4      /* direct mode (the PC's ports are its own: PRD D20) */
+#define GLOS_RUNF_APPEND_OUT 8  /* `out`'s file is added to, not made anew */
+#define GLOS_RUNF_APPEND_ERR 16 /* ... and `err`'s */
 
 struct glos_job_io {
     unsigned size;
@@ -1488,5 +1496,108 @@ struct glos_wait_any {
 #define GLOS_PROP_LOCK_HELD     GLOS_PROP(GLOS_HK_LOCK, 0)      /* 0 free, or the number of the thread holding it
                                                                    plus 1 (read) */
 #define GLOS_PROP_SIGNAL_SET    GLOS_PROP(GLOS_HK_SIGNAL, 0)    /* 1 set (read) */
+
+/* ================================================================== SYS (0Eh): what GLOS knows of the system
+ *
+ * For System Monitor, Task Manager and anything that shows the machine's state. STAT, LOG and PROGRAMS are for
+ * every app; KILL is for GLOS's own programs (those in GLOS.EXE's folder), but that an app is asked to end
+ * (GLOS_KILL_ASK) by anybody. */
+#define GLOS_SYS_STAT     GLOS_FN(GLOS_AREA_SYS, 0)     /* struct glos_sys_stat: figures, a kind at a time */
+#define GLOS_SYS_KILL     GLOS_FN(GLOS_AREA_SYS, 1)     /* struct glos_sys_kill: a program ended */
+#define GLOS_SYS_LOG      GLOS_FN(GLOS_AREA_SYS, 2)     /* struct glos_sys_log: GLOS's log, from a place on */
+#define GLOS_SYS_PROGRAMS GLOS_FN(GLOS_AREA_SYS, 3)     /* struct glos_sys_stat: struct glos_program for each */
+
+struct glos_sys_stat {
+    unsigned size;
+    unsigned kind;              /* GLOS_STAT_ (PROGRAMS: not used) */
+    unsigned buffer;            /* where it goes: structures one after another, each with its size first; or text */
+    unsigned room;
+    unsigned length;            /* -> the bytes there are (GLOS_E_ROOM: cut, at a structure's end) */
+    unsigned count;             /* -> how many structures were given (text: 0) */
+};
+/* Kinds that are structures. */
+#define GLOS_STAT_SYSTEM  0     /* one struct glos_sys_system */
+#define GLOS_STAT_MEMORY  1     /* one struct glos_sys_memory */
+#define GLOS_STAT_PCI     2     /* a struct glos_sys_pci for each PCI function */
+/* Kinds that are text: the lines GLOS's own commands print, for people and logs (their layout may change). */
+#define GLOS_STAT_NET     16    /* glos net */
+#define GLOS_STAT_AUDIO   17    /* glos audio */
+#define GLOS_STAT_USB     18    /* glos usb */
+#define GLOS_STAT_DISPLAY 19    /* glos display */
+#define GLOS_STAT_CACHE   20    /* glos cache */
+#define GLOS_STAT_THREADS 21    /* the kernel's threads and their time */
+
+struct glos_sys_system {
+    unsigned size;
+    unsigned uptime_ms;
+    unsigned busy_ms, idle_ms;  /* the processor's time since GLOS started: working, and halted */
+    unsigned cpu_family;
+    unsigned threads, apps, windows;
+    unsigned net_rx, net_tx;    /* frames, each way */
+    unsigned char ip[4];
+    unsigned screen_w, screen_h, screen_bpp, accel;
+    unsigned mixer_rate, streams, underruns;
+    unsigned agent;             /* 1: GLOS runs with its agent (jobs, settings, SSH); 0: GLOS /RUN */
+    char card[24], nic[16], hostname[16];
+    char session[16];           /* the program that has the machine (a full-screen session), or "" */
+};
+
+struct glos_sys_memory {
+    unsigned size;
+    unsigned total_kb, free_kb; /* the PC's memory GLOS has, and what can be had of it (the disk cache gives its
+                                   own back) */
+    unsigned kernel_kb;         /* GLOS's own image */
+    unsigned heap_kb, heap_max_kb;      /* the kernel's heap, and the most it may be */
+    unsigned cache_kb;          /* the disk cache */
+    unsigned vram_kb;           /* the card's memory */
+};
+
+struct glos_sys_pci {
+    unsigned size;
+    unsigned char bus, dev, fn, irq;    /* irq: FFh none */
+    unsigned short vendor, device;
+    unsigned char class_code, subclass, progif;
+    unsigned char keeper;       /* GLOS_KEEPER_ */
+};
+#define GLOS_KEEPER_DOS   0     /* left as the BIOS set it up, for DOS's drivers and programs */
+#define GLOS_KEEPER_GLOS  1     /* one of GLOS's drivers has it */
+#define GLOS_KEEPER_QUIET 2     /* nobody drives it: its interrupts are kept off */
+
+struct glos_program {
+    unsigned size;
+    unsigned kind;              /* GLOS_PROG_ */
+    unsigned id;                /* an app's id; a job's number */
+    unsigned by;                /* the app that started it (its id); 0: GLOS itself (the agent, SSH, the schedule) */
+    unsigned job;               /* an app: the job it began as (its number), 0 if none */
+    unsigned state;             /* an app: 0 running, 1 paused (a session has the machine); a job: GLOS_JS_ */
+    unsigned busy_ms;           /* an app: the processor's time it has had */
+    unsigned mem_kb, windows;   /* an app's */
+    char name[16];              /* its program's file */
+};
+#define GLOS_PROG_APP 0
+#define GLOS_PROG_JOB 1
+
+struct glos_sys_kill {
+    unsigned size;
+    unsigned what;              /* GLOS_KILL_ */
+    unsigned id;                /* an app's id, a job's number (SESSION: not used) */
+};
+#define GLOS_KILL_APP     0     /* an app, ended whatever it is doing */
+#define GLOS_KILL_JOB     1     /* a job, running or waiting */
+#define GLOS_KILL_SESSION 2     /* the program that has the machine */
+#define GLOS_KILL_ASK     3     /* an app is asked to end (GLOS_EV_END): it saves what it must and leaves by itself */
+
+struct glos_sys_log {
+    unsigned size;
+    unsigned pos;               /* where to read from: a place LOG gave (`next`); 0: the oldest line kept */
+    unsigned buffer;
+    unsigned room;
+    unsigned length;            /* -> the bytes given (text, lines ended by a line feed; the last may be cut) */
+    unsigned next;              /* -> where to go on from */
+    unsigned follow;            /* 1: GLOS_EV_LOG when there is more than this call gave; 0: no more of those */
+};
+
+/* SYS's event. */
+#define GLOS_EV_LOG GLOS_EV(GLOS_AREA_SYS, 1)           /* (the header alone) the log has more: LOG again */
 
 #endif

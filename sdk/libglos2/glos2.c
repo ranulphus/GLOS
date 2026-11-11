@@ -815,10 +815,24 @@ int glos_schedule_list(char *list, unsigned room, unsigned *length)
 glos_handle glos_job_run(const char *command, const char *dir, const char *env, unsigned how, unsigned flags,
                          const char *profile)
 {
-    struct glos_job_run q = { sizeof q, (unsigned)command, (unsigned)dir, (unsigned)env, how, flags, (unsigned)profile, 0, 0 };
-    int r = raw(GLOS_JOB_RUN, &q, 0);
+    struct glos_job_run q;
+    memset(&q, 0, sizeof q);
+    q.command = (unsigned)command;
+    q.dir = (unsigned)dir;
+    q.env = (unsigned)env;
+    q.how = how;
+    q.flags = flags;
+    q.profile = (unsigned)profile;
+    return glos_job_start(&q);
+}
+
+glos_handle glos_job_start(struct glos_job_run *run)
+{
+    int r;
+    run->size = sizeof *run;
+    r = raw(GLOS_JOB_RUN, run, 0);
     last_error = r;
-    return r ? 0 : q.handle;
+    return r ? 0 : run->handle;
 }
 
 static int job_io(unsigned fn, glos_handle job, unsigned stream, const void *buf, unsigned length)
@@ -860,4 +874,43 @@ int glos_job_status(glos_handle job, struct glos_job_status *out)
     out->size = sizeof *out;
     out->handle = job;
     return raw(GLOS_JOB_STATUS, out, 0);
+}
+
+/* ---- SYS */
+
+int glos_sys_stat(unsigned kind, void *buf, unsigned room, unsigned *length, unsigned *count)
+{
+    struct glos_sys_stat q = { sizeof q, kind, (unsigned)buf, room, 0, 0 };
+    int r = raw(GLOS_SYS_STAT, &q, 0);
+    if (length)
+        *length = q.length;
+    if (count)
+        *count = q.count;
+    return r;
+}
+
+int glos_programs(struct glos_program *out, unsigned room, unsigned *count)
+{
+    struct glos_sys_stat q = { sizeof q, 0, (unsigned)out, room, 0, 0 };
+    int r = raw(GLOS_SYS_PROGRAMS, &q, 0);
+    if (count)
+        *count = q.count;
+    return r;
+}
+
+int glos_sys_kill(unsigned what, unsigned id)
+{
+    struct glos_sys_kill q = { sizeof q, what, id };
+    return raw(GLOS_SYS_KILL, &q, 0);
+}
+
+int glos_sys_log(unsigned pos, char *buf, unsigned room, unsigned *next, int follow)
+{
+    struct glos_sys_log q = { sizeof q, pos, (unsigned)buf, room, 0, 0, (unsigned)follow };
+    int r = raw(GLOS_SYS_LOG, &q, 0);
+    if (next)
+        *next = q.next;
+    if (r)
+        last_error = r;
+    return r ? -1 : (int)q.length;
 }

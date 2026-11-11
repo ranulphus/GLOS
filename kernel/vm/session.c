@@ -296,7 +296,7 @@ static void end(const char *why)
 }
 
 /* glos run's options for the session the stub's next EXEC begins (E4). */
-static struct { u8 direct, exclusive, app, console; char profile[16]; char env[512]; } job;
+static struct { u8 direct, exclusive, app, console; char profile[16]; char env[1536]; } job;
 
 /* how: 0 as the program asks, 1 --exclusive, 2 --app, 3 a console job's, 4 ... full-screen from the start. */
 void session_job(int direct, int how, const char *profile, const char *env)
@@ -376,7 +376,7 @@ static void profile_env(const struct trapframe *tf, u16 psp, const char *add)
         for (e = add; *e && keep; e += strlen(e) + 1)
             keep = !same_var(s, e);
         if (keep) {
-            if (n + len > sizeof buf - BI_PROF_ENV - 2) {
+            if (n + len > sizeof buf - (128 + BI_PROF_ENV + sizeof job.env) - 2) {
                 kprintf("GLOS-WARN session-env prog=%s why=too-big\n", ses.prog);
                 return;
             }

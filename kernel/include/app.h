@@ -84,6 +84,10 @@ u32 app_last_code(void);                /* how the last app to end did: INT 21h 
 u32 app_ps(char *buf, u32 max);         /* glos ps: "app ID PROGRAM ..." lines */
 u32 app_stat(char *buf, u32 max);       /* glos stat: a JSON array */
 
+int app_alive(u32 id);                  /* there is a live app with this id */
+u32 app_began_as(u32 id);               /* the agent's job an app began as (its number), or 0 */
+int app_ask_end(u32 id);                /* API 2.0's GLOS_EV_END to an app: 0, or -1 */
+void app_exit_turn(void);               /* glos exit with apps running: asked to end, then ended (the VM thread) */
 struct app *app_by_id(u32 id);          /* (interrupts off) the live app with this id, or NULL */
 int app_own(const struct app *a);       /* its program is one of GLOS's own (in GLOS.EXE's folder) */
 

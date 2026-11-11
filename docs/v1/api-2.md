@@ -311,7 +311,8 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   - A hidden job runs beside the desktop; its standard input can be the app's (WRITE), its two outputs are read
     apart. A window's job is typed to with WRITE's keys.
   - No call waits: `GLOS_EV_JOB` tells the app when to READ.
-  - Files for the three streams and long command lines follow in the second part.
+  - Files for the three streams (opened by GLOS before the program starts, not by COMMAND.COM); command lines
+    up to 1,023 bytes (`CMDLINE`). Response files are the app's own to write.
 
 ### 09h FS (files and disks)
 
@@ -411,6 +412,10 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 | PROGRAMS | The programs, apps and jobs, with who started each (new) |
 
 - **Events:** a log line (for those following), a device came or went.
+
+- **As built (step 9):** STAT (SYSTEM, MEMORY and PCI as structures; the other kinds as the text GLOS's commands
+  print), PROGRAMS, LOG with `GLOS_EV_LOG`, KILL (GLOS's own programs; ASK, which sends `GLOS_EV_END`, is
+  anybody's). No "a device came or went" event yet: it comes with the drivers' work (phase H).
 
 ### 0Fh DEBUG
 

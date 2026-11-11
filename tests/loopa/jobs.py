@@ -3967,7 +3967,7 @@ def api_case(profile, boot):
     cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", serial)
     done = re.search(r"HX-APITEST done pass=(\d+) fail=(\d+)", serial)
     bad_cases = [c + w.rstrip() for c, k, w in cases if k != "1"]
-    checks = {"status": st == "PASS", "done": bool(done) and done.group(2) == "0", "cases": len(cases) >= 141,
+    checks = {"status": st == "PASS", "done": bool(done) and done.group(2) == "0", "cases": len(cases) >= 148,
               "app": bool(re.search(r"GLOS-APP start id=1 prog=APITEST.EXE", serial)),
               "end": bool(re.search(r"GLOS-APP end id=1 prog=APITEST.EXE code=0 ", serial)),
               "exit": "GLOS-EXIT code=0" in serial, "vectors": "HX-VECCHK ok" in serial,
@@ -4404,8 +4404,8 @@ def api_shell_case(profile, vcard, card):
     tooltip after the pointer has rested on it, the right button (its menu asked for: the test's next
     notification). Notifications: the second of two actions pressed, the one action of the next, one whose time
     runs out, one pressed away. The shell's events: the launcher (the Windows key, GLOS's mark), another app's
-    window not answering and answering again, the task list (Ctrl-Alt-Del), at which it ends. glos exit ends the
-    apps that are left."""
+    window not answering and answering again, the task list (Ctrl-Alt-Del), at which it ends. At glos exit the
+    apps that are left are asked to end (GLOS_EV_END), and do."""
     import select
     import time
     tag = "%s-%s" % (profile, vcard)
@@ -4552,8 +4552,9 @@ def api_shell_case(profile, vcard, card):
         checks["shell-again"] = bool(again.said("ready shell=0 focus=3 tray=*", 240))
         if not all(checks.values()):
             info += " A=%r OTHER=%r" % (a.out[-12:], other.out[-6:])
-        agent.ssh("glos exit")                  # (the apps left are ended by it)
-        checks["ended"] = other.p.wait(timeout=120) == 255 and again.p.wait(timeout=120) == 255
+        agent.ssh("glos exit")                  # (the apps left are asked to end: they say so and leave)
+        checks["ended"] = bool(other.said("end", 60)) and bool(again.said("end", 60)) \
+            and other.p.wait(timeout=120) == 42 and again.p.wait(timeout=120) == 42
         procs = {}
     except subprocess.TimeoutExpired:
         info += " timeout"
@@ -4589,7 +4590,7 @@ def api_job_case(profile, vcard, card):
         info += " timeout"
     text = agent.wait()
     cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", text)
-    checks["cases"] = len(cases) >= 15 and all(k == "1" for c, k, w in cases)
+    checks["cases"] = len(cases) >= 19 and all(k == "1" for c, k, w in cases)
     if not checks["cases"]:
         info += " cases=%d failed-cases=%s" % (len(cases), ";".join(c + w.rstrip() for c, k, w in cases if k != "1"))
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text

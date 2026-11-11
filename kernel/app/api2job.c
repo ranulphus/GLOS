@@ -26,13 +26,15 @@ static u32 seq_of(struct app *a, struct trapframe *tf, u32 h, int *fail)
 static int run(struct app *a, struct trapframe *tf)
 {
     static struct glos_run r;                   /* (1.x's structure is what the agent takes; no wait while it is used) */
+    static char cmd[1024];                      /* (a command line may be longer than that structure's) */
     struct glos_job_run q;
     struct agent_opts o;
-    char profile[16];
-    u32 size, seq, i, f;
+    char profile[16], file[3][80];
+    u32 size, seq, i, f, off[3];
     int e, detach;
     if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.how > GLOS_RUN_APP
-        || (q.flags & ~(u32)(GLOS_RUNF_DETACH | GLOS_RUNF_STDIN | GLOS_RUNF_DIRECT)))
+        || (q.flags & ~(u32)(GLOS_RUNF_DETACH | GLOS_RUNF_STDIN | GLOS_RUNF_DIRECT | GLOS_RUNF_APPEND_OUT | GLOS_RUNF_APPEND_ERR))
+        || ((q.flags & GLOS_RUNF_STDIN) && q.in))
         return a2_fail(tf, GLOS_E_ARGUMENT);
     detach = (q.flags & GLOS_RUNF_DETACH) != 0;
     if ((q.flags & GLOS_RUNF_STDIN) && (detach || q.how != GLOS_RUN_HIDDEN))
@@ -41,7 +43,7 @@ static int run(struct app *a, struct trapframe *tf)
     memset(&r, 0, sizeof r);
     memset(&o, 0, sizeof o);
     r.size = sizeof r;
-    if (a2_text_in(tf, q.command, r.command, sizeof r.command) <= 0 || (q.dir && a2_text_in(tf, q.dir, r.dir, sizeof r.dir) < 0)
+    if (a2_text_in(tf, q.command, cmd, sizeof cmd) <= 0 || (q.dir && a2_text_in(tf, q.dir, r.dir, sizeof r.dir) < 0)
         || (q.profile && a2_text_in(tf, q.profile, profile, sizeof profile) <= 0))
         return a2_fail(tf, GLOS_E_ARGUMENT);
     for (i = 0; q.env && i < sizeof r.env - 1; i++) {   /* its strings, to the NUL after the last one's */
@@ -61,7 +63,15 @@ static int run(struct app *a, struct trapframe *tf)
     o.exclusive = q.how == GLOS_RUN_EXCLUSIVE ? 1 : q.how == GLOS_RUN_APP ? 2 : 0;
     o.stdin_pipe = (q.flags & GLOS_RUNF_STDIN) != 0;
     o.keep = (u8)!detach;
+    o.command = cmd;
     o.profile = q.profile ? profile : 0;
+    off[0] = q.in, off[1] = q.out, off[2] = q.err;
+    for (i = 0; i < 3; i++) {                   /* (in DOS's bytes: the stub opens them) */
+        if (off[i] && api2_fs_path(tf, off[i], file[i], sizeof file[i]) <= 0)
+            return a2_fail(tf, GLOS_E_ARGUMENT);
+        o.file[i] = off[i] ? file[i] : 0;
+    }
+    o.append = (u8)((q.flags & GLOS_RUNF_APPEND_OUT ? 2 : 0) | (q.flags & GLOS_RUNF_APPEND_ERR ? 4 : 0));
     if ((e = agent_post_job(detach ? 0 : a, &r, &o, &seq)) != 0)
         return a2_fail(tf, (u32)e);
     q.id = seq;

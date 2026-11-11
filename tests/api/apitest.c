@@ -101,6 +101,7 @@ static void before(void)
           && GLOS_HAS(&v, GLOS_WIN_CREATE) && GLOS_HAS(&v, GLOS_DRAW_SCREEN) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_WIN, 5))
           && GLOS_HAS(&v, GLOS_SHELL_SCHEDULE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 10))
           && GLOS_HAS(&v, GLOS_JOB_STATUS) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_JOB, 5))
+          && GLOS_HAS(&v, GLOS_SYS_PROGRAMS) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SYS, 4))
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 0)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
@@ -1270,6 +1271,88 @@ static int interactive(void)
     }
 }
 
+/* SYS (step 9): the system's figures, the programs, the log, an app asked to end; what KILL refuses. (A job
+   ended by KILL is the job mode's.) */
+static void sys(void)
+{
+    static struct glos_sys_pci pci[40];
+    static struct glos_program progs[16];
+    static char text[4096];
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_ev *e = (struct glos_ev *)ev;
+    struct glos_sys_system st;
+    struct glos_sys_memory mem;
+    struct glos_init again;
+    unsigned len = 0, count = 0, next = 0, i, me = 99;
+    int r, n, ok;
+
+    r = glos_sys_stat(GLOS_STAT_SYSTEM, &st, sizeof st, &len, &count);
+    ok = r == 0 && len == sizeof st && count == 1 && st.size == sizeof st && st.uptime_ms > 0 && st.busy_ms <= st.uptime_ms
+         && st.cpu_family >= 4 && st.threads > 3 && st.apps >= 1 && st.hostname[0] && st.agent <= 1;
+    check("sys-system", ok, "r=%d len=%u up=%u busy=%u cpu=%u threads=%u apps=%u windows=%u host=%s agent=%u", r, len,
+          st.uptime_ms, st.busy_ms, st.cpu_family, st.threads, st.apps, st.windows, st.hostname, st.agent);
+    r = glos_sys_stat(GLOS_STAT_MEMORY, &mem, sizeof mem, &len, &count);
+    ok = r == 0 && count == 1 && mem.size == sizeof mem && mem.total_kb >= 4096 && mem.free_kb > 0 && mem.free_kb < mem.total_kb
+         && mem.kernel_kb > 100 && mem.heap_kb <= mem.heap_max_kb && glos_sys_stat(GLOS_STAT_MEMORY, &mem, 8, &len, &count) == GLOS_E_ROOM
+         && len == sizeof mem && count == 0;
+    check("sys-memory", ok, "r=%d total=%uK free=%uK kernel=%uK heap=%uK cache=%uK vram=%uK", r, mem.total_kb, mem.free_kb,
+          mem.kernel_kb, mem.heap_kb, mem.cache_kb, mem.vram_kb);
+    r = glos_sys_stat(GLOS_STAT_PCI, pci, sizeof pci, &len, &count);
+    ok = r == 0 && count >= 3 && len == count * sizeof pci[0];
+    for (i = 0; i < count; i++)
+        ok = ok && pci[i].size == sizeof pci[0] && pci[i].vendor != 0xFFFF && pci[i].vendor && pci[i].keeper <= GLOS_KEEPER_QUIET;
+    n = glos_sys_stat(GLOS_STAT_PCI, pci, sizeof pci[0] * 2 + 5, &len, &i);
+    check("sys-pci", ok && n == GLOS_E_ROOM && i == 2 && len == count * sizeof pci[0], "r=%d count=%u first=%04x:%04x n=%d given=%u",
+          r, count, pci[0].vendor, pci[0].device, n, i);
+    ok = 1;
+    for (i = GLOS_STAT_NET; i <= GLOS_STAT_THREADS; i++) {
+        text[0] = 0;
+        r = glos_sys_stat(i, text, sizeof text - 1, &len, &count);
+        ok = ok && (r == 0 || r == GLOS_E_ROOM) && count == 0 && len < 8192;
+    }
+    ok = ok && len > 10 && glos_sys_stat(9, text, sizeof text, &len, &count) == GLOS_E_ARGUMENT
+         && glos_sys_stat(GLOS_STAT_SYSTEM, (void *)0xFFFFFF00u, 4096, &len, &count) == GLOS_E_ARGUMENT;
+    check("sys-text", ok, "r=%d threads=%u bytes", r, len);
+
+    /* The programs: this one among them. */
+    r = glos_programs(progs, sizeof progs, &count);
+    for (i = 0; i < count; i++)
+        if (progs[i].kind == GLOS_PROG_APP && !strcmp(progs[i].name, "APITEST.EXE"))
+            me = i;
+    ok = r == 0 && count >= 1 && me < count && progs[me].size == sizeof progs[0] && progs[me].id > 0 && progs[me].mem_kb > 100
+         && progs[me].state == 0;
+    check("sys-programs", ok, "r=%d count=%u id=%u by=%u job=%u mem=%uK windows=%u", r, count, me < count ? progs[me].id : 0,
+          me < count ? progs[me].by : 0, me < count ? progs[me].job : 0, me < count ? progs[me].mem_kb : 0,
+          me < count ? progs[me].windows : 0);
+
+    /* The log: from its oldest line; then followed, a line of the test's own making. */
+    n = glos_sys_log(0, text, sizeof text - 1, &next, 0);
+    text[n > 0 ? n : 0] = 0;
+    ok = n > 20 && strstr(text, "GLOS-") && next >= (unsigned)n;
+    while (n > 0)                                       /* (to its end) */
+        n = glos_sys_log(next, text, sizeof text - 1, &next, 1);
+    while (glos_event(ev, sizeof ev, 0, 1u << GLOS_AREA_SYS) > 0) ;
+    memset(&again, 0, sizeof again);
+    again.size = sizeof again;
+    again.major = 2;
+    glos_call(GLOS_CORE_INIT, &again);                  /* (refused: the kernel says so in its log) */
+    r = await(GLOS_EV_LOG, 0, ev, 3000);
+    n = glos_sys_log(next, text, sizeof text - 1, &next, 0);
+    text[n > 0 ? n : 0] = 0;
+    glos_call(GLOS_CORE_INIT, &again);                  /* (no longer followed: no event) */
+    check("sys-log", ok && r > 0 && n > 0 && strstr(text, "GLOS-APP refuse") && glos_event(ev, sizeof ev, 300, 1u << GLOS_AREA_SYS) == 0
+          && glos_sys_log(0, (char *)0xFFFFFF00u, 100, &next, 0) == -1, "ok=%d r=%d n=%d", ok, r, n);
+
+    /* Asked to end: the event; what KILL refuses. */
+    while (glos_event(ev, sizeof ev, 0, 0) > 0) ;
+    r = glos_sys_kill(GLOS_KILL_ASK, progs[me < count ? me : 0].id);
+    n = glos_event(ev, sizeof ev, 1000, 1u << GLOS_AREA_CORE);
+    ok = r == 0 && n > 0 && e->kind == GLOS_EV_END && glos_sys_kill(GLOS_KILL_ASK, 9999) == GLOS_E_NOT_FOUND
+         && glos_sys_kill(GLOS_KILL_APP, 9999) == GLOS_E_NOT_FOUND && glos_sys_kill(GLOS_KILL_JOB, 9999) == GLOS_E_NOT_FOUND
+         && glos_sys_kill(7, 1) == GLOS_E_ARGUMENT;
+    check("sys-kill", ok, "r=%d n=%d kind=%x", r, n, n > 0 ? e->kind : 0);
+}
+
 /* SHELL (step 8): the shell's identity, where the task bar's parts are, the tray, notifications, kinds of file
    and their programs and verbs, OPEN, HELP. What the user's hands do to an icon and a notification is the shell
    mode's (shell_mode, under the agent). */
@@ -1621,6 +1704,21 @@ static void no_cr(char *t)
 
 /* What the job has written is added to out and err (text, their rooms); 1 once it has ended and all is read, or
    once `until` is in out; 0 when the time is up. */
+static int file_is(const char *path, const char *want)  /* a text file's whole contents are these */
+{
+    static char got[1024];
+    FILE *f = fopen(path, "r");
+    size_t n;
+    if (!f)
+        return 0;
+    n = fread(got, 1, sizeof got - 1, f);
+    got[n] = 0;
+    fclose(f);
+    if (strcmp(got, want))
+        printf("file_is %s: got \"%s\"\n", path, got);
+    return !strcmp(got, want);
+}
+
 static unsigned job_events, job_last;           /* the job's events seen while waiting, and the last one's state */
 
 static int job_take(glos_handle j, char *out, unsigned room, char *err, unsigned eroom, const char *until, unsigned ms,
@@ -1764,6 +1862,95 @@ static int job_mode(void)
           "e=%d out=%s", e, out);
     glos_close(j);
     glos_close(j2);
+
+    /* A command line longer than DOS passes: all of its arguments arrive. */
+    {
+        static char longcmd[1024], want[1024];
+        int k, at = snprintf(longcmd, sizeof longcmd, "%s\\JOBTOOL.EXE args", home), w = snprintf(want, sizeof want, "61 [args]");
+        for (k = 0; k < 60; k++) {
+            at += snprintf(longcmd + at, sizeof longcmd - at, " arg%02d", k);
+            w += snprintf(want + w, sizeof want - w, " [arg%02d]", k);
+        }
+        snprintf(want + w, sizeof want - w, "\n");
+        out[0] = 0;
+        j = glos_job_run(longcmd, 0, "JT=kept\0", GLOS_RUN_HIDDEN, 0, 0);
+        r = job_take(j, out, sizeof out, 0, 0, 0, 60000, &st);
+        no_cr(out);
+        check("job-long", j && r && !strcmp(out, want) && st.code == 0, "j=%x err=%d r=%d len=%d code=%u out=%.60s", j, glos_error(),
+              r, at, st.code, out);
+        glos_close(j);
+    }
+
+    /* Files for its streams: its input from one, its output made and then added to, its error to a file of its
+       own; output and error into one file; a file that isn't there. */
+    {
+        struct glos_job_run q;
+        char in[100], o1[100], o2[100];
+        snprintf(in, sizeof in, "%s\\JOBIN.TXT", home);
+        snprintf(o1, sizeof o1, "%s\\JOBOUT.TXT", home);
+        snprintf(o2, sizeof o2, "%s\\JOBERR.TXT", home);
+        if ((f = fopen(in, "w")) != 0) {
+            fputs("alpha\n!beta\n", f);
+            fclose(f);
+        }
+        remove(o1), remove(o2);
+        memset(&q, 0, sizeof q);
+        q.command = (unsigned)TOOL("echo");
+        q.in = (unsigned)in, q.out = (unsigned)o1, q.err = (unsigned)o2;
+        out[0] = err[0] = 0;
+        j = glos_job_start(&q);
+        r = job_take(j, out, sizeof out, err, sizeof err, 0, 60000, &st);
+        glos_close(j);
+        ok = j && r && st.code == 2 && !out[0] && !err[0] && file_is(o1, "ALPHA\n!BETA\nend 2\n") && file_is(o2, "!BETA\n");
+        memset(&q, 0, sizeof q);                        /* added to; and one file for both, in the job's folder */
+        q.command = (unsigned)TOOL("both");
+        q.dir = (unsigned)home;
+        q.out = (unsigned)"JOBOUT.TXT", q.err = (unsigned)"jobout.txt";
+        q.flags = GLOS_RUNF_APPEND_OUT;
+        j = glos_job_start(&q);
+        r = job_take(j, out, sizeof out, err, sizeof err, 0, 60000, &st);
+        glos_close(j);
+        check("job-files", ok && j && r && st.code == 3 && !out[0] && !err[0]
+              && file_is(o1, "ALPHA\n!BETA\nend 2\nto out\nto err\n"), "ok=%d j=%x r=%d code=%u out=%s err=%s", ok, j, r,
+              st.code, out, err);
+        memset(&q, 0, sizeof q);
+        q.command = (unsigned)TOOL("echo");
+        q.in = (unsigned)"C:\\NOSUCH\\INPUT.TXT";
+        j = glos_job_start(&q);
+        r = job_take(j, out, sizeof out, 0, 0, 0, 60000, &st);
+        glos_close(j);
+        ok = j && r && st.code == 126;
+        q.in = (unsigned)in;                            /* (a file and the app's writes both: no) */
+        q.flags = GLOS_RUNF_STDIN;
+        ok = ok && glos_job_start(&q) == 0 && glos_error() == GLOS_E_ARGUMENT;
+        out[0] = 0;                                     /* (the console's handles are the stub's own again) */
+        j = glos_job_run(TOOL("args back"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+        r = job_take(j, out, sizeof out, 0, 0, 0, 60000, &st);
+        glos_close(j);
+        check("job-files-none", ok && r && strstr(out, "[back]"), "ok=%d r=%d code=%u out=%s", ok, r, st.code, out);
+        remove(in), remove(o1), remove(o2);
+    }
+
+    /* SYS: a running job among the programs, with who started it; ended by KILL. */
+    {
+        static struct glos_program progs[16];
+        unsigned count = 0, i, mine = 0, by = 0, self = 0;
+        out[0] = 0;
+        j = glos_job_run(TOOL("stream 100000"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+        ok = job_take(j, out, sizeof out, 0, 0, "line 3\r", 60000, &st);
+        r = glos_programs(progs, sizeof progs, &count);
+        for (i = 0; i < count; i++) {
+            if (progs[i].kind == GLOS_PROG_APP && !strcmp(progs[i].name, "APITEST.EXE"))
+                self = progs[i].id;
+            if (progs[i].kind == GLOS_PROG_JOB && progs[i].id == st.id)
+                mine = 1, by = progs[i].by;
+        }
+        e = glos_sys_kill(GLOS_KILL_JOB, st.id);
+        n = job_take(j, out, sizeof out, 0, 0, 0, 30000, &st);
+        check("sys-kill-job", ok && r == 0 && mine && self && by == self && e == 0 && n && st.state == GLOS_JS_DONE,
+              "ok=%d r=%d mine=%u by=%u self=%u e=%d n=%d code=%u", ok, r, mine, by, self, e, n, st.code);
+        glos_close(j);
+    }
 
     /* What is refused. */
     j = glos_job_run(TOOL("both"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
@@ -1952,6 +2139,7 @@ int main(int argc, char **argv)
         clipboard();
         files(argc > 2 && !strcmp(argv[1], "many") ? (unsigned)atoi(argv[2]) : 300);
         shell();
+        sys();
     }
     snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
     com1(line);

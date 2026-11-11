@@ -58,6 +58,8 @@
 
 #define NJOBS    16                             /* (the ssh's and the apps': a launched app's lasts as long as it) */
 #define RING     0x4000u                        /* a power of two */
+#define JOB_CMD  1024
+#define JOB_ENV  1536                           /* (a job's own strings, 511 at most, and CMDLINE for a long line) */
 #define IN_RING  0x1000u                        /* a job's standard input from its app: a power of two */
 #define SFT_SIZE 0x3B                           /* an SFT entry, DOS 4 and later */
 
@@ -80,7 +82,8 @@ struct agent_job {
     u32 seq;
     u32 result;                                 /* INT 21h 4Dh's AX, or 10000h + the EXEC error */
     void *owner;                                /* the ssh side's channel; NULL once it has gone */
-    char cmd[256];                              /* (a program's path, up to 79, and a tail of up to 126) */
+    char cmd[JOB_CMD];                          /* (a program's path, up to 79, and its arguments: past DOS's 126 for
+                                                   an app's job, which are then given in CMDLINE too) */
     char prog[80];                              /* the command's first word */
     const char *args;                           /* the rest, from the separator on */
     char path[80];                              /* what the stub is EXECing */
@@ -94,7 +97,7 @@ struct agent_job {
     u8 told;                                    /* the GLOS_JOB_ state its app last heard of, FFh none */
     void *app_owner;                            /* its app (struct app), or NULL */
     char dir[80];
-    char env[512];                              /* NAME=VALUE strings, a NUL after each and one more: its own */
+    char env[JOB_ENV];                          /* NAME=VALUE strings, a NUL after each and one more: its own */
     u16 keys[64];                               /* typed by its app, on their way into the BIOS's buffer */
     volatile u32 kh, kt;
     u16 left[64];                               /* typed, but not read by the time it ended: its app's again */
@@ -109,6 +112,12 @@ struct agent_job {
     volatile u8 in_eof;                         /* ... and the app has written its last */
     u8 in[IN_RING];
     volatile u32 ih, it;
+    char file[3][80];                           /* files for its standard input, output and error ("": none) */
+    u8 fappend;                                 /* bit s: stream s's file is added to, not made anew */
+    u8 fstep, fs;                               /* FS_: where the opening (or closing) of them is; at which stream */
+    u8 fset;                                    /* bit s: the stub's handle s is the file's for now ... */
+    u8 fold[3];                                 /* ... and was this entry of the stub's handle table */
+    u16 fh[3];                                  /* the handles DOS gave for the files (FFFFh: another stream's) */
     u32 t_start, t_end;                         /* the ticks it began to run and ended at */
 };
 
@@ -116,6 +125,10 @@ static struct agent_job jobs[NJOBS];
 static struct agent_job *running;
 static u32 next_seq;
 static struct waitq roomq;                      /* the VM thread, waiting for ring space */
+static struct agent_job *closer;                /* the job whose streams' files are being closed */
+static u16 ans_ax;                              /* what DOS answered the call made last for a job ... */
+static u8 ans_cf;                               /* ... and whether it refused */
+enum { FS_NONE, FS_OPEN, FS_CREATE, FS_SEEK, FS_CLOSE };
 static u32 last_kill;
 static u8 sig_left, sig_brk;                    /* a job's Ctrl+C or Ctrl+Break on its way: the keys still to go */
 static u32 sig_at;
@@ -169,6 +182,8 @@ int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, cons
     j->kh = j->kt = 0;
     j->nleft = 0;
     j->keep = j->in_pipe = j->in_eof = j->hidden = 0;
+    j->file[0][0] = j->file[1][0] = j->file[2][0] = 0;
+    j->fappend = j->fstep = j->fs = j->fset = 0;
     j->ih = j->it = 0;
     j->t_start = j->t_end = 0;
     f = irq_save();
@@ -216,7 +231,7 @@ int agent_post_job(void *app, const struct glos_run *r, const struct agent_opts 
 {
     struct agent_job *j = NULL;
     u32 f, i;
-    const char *cmd = r->command;
+    const char *cmd = o && o->command ? o->command : r->command;
     for (i = 0; i < NJOBS; i++)
         if (jobs[i].state == J_FREE) {
             j = &jobs[i];
@@ -249,6 +264,14 @@ int agent_post_job(void *app, const struct glos_run *r, const struct agent_opts 
         j->profile[i] = o->profile[i];
     j->profile[i] = 0;
     j->keep = (u8)(o && o->keep);
+    j->fappend = (u8)(o ? o->append : 0);
+    j->fstep = j->fs = j->fset = 0;
+    for (i = 0; i < 3; i++) {
+        u32 k = 0;
+        for (; o && o->file[i] && o->file[i][k] && k < sizeof j->file[i] - 1; k++)
+            j->file[i][k] = o->file[i][k];
+        j->file[i][k] = 0;
+    }
     j->hidden = (u8)(o && o->hidden);
     j->in_pipe = (u8)(o && o->stdin_pipe);
     j->in_eof = 0;
@@ -544,6 +567,18 @@ void agent_app_gone(void *app)
     }
 }
 
+u32 agent_job_seq(const void *job) { return ((const struct agent_job *)job)->seq; }
+
+u32 agent_job_by(u32 seq)                       /* the app that started a job (its id), or 0 */
+{
+    u32 i, f = irq_save(), id = 0;
+    for (i = 0; i < NJOBS; i++)
+        if (jobs[i].state != J_FREE && jobs[i].seq == seq && jobs[i].app_owner)
+            id = app_id(jobs[i].app_owner);
+    irq_restore(f);
+    return id;
+}
+
 u32 agent_jobs_stat(void *out, u32 room)
 {
     u32 n = 0, i;
@@ -794,6 +829,173 @@ static int candidate(struct agent_job *j, u32 k)
 }
 
 /* The DOS call that sets a job's drive (1) or folder (2) before its EXEC. */
+/* ---- files for a job's standard input, output and error (API 2.0's JOB)
+ *
+ * Each is opened by a DOS call the stub makes before the job's EXEC (after its drive and folder are set, so a
+ * relative path is the job's own), and the stub's handle 0, 1 or 2 is pointed at it: the entry of the stub's
+ * handle table (in its PSP) is given the file's. DOS gives the program the stub's handles, so it reads and writes
+ * the file; nothing of it is the console's, so nothing is kept for READ. After the job the entries are put back
+ * and the files closed, a call each. The same file for output and error is opened once: both write through one
+ * place in it. */
+static u32 jft_lin(void)
+{
+    u32 p = (u32)vm.loader_psp << 4;
+    u32 fp = vm_rd32(p + 0x34);
+    return ((fp >> 16) << 4) + (fp & 0xFFFF);
+}
+
+static int same_file(const char *a, const char *b)
+{
+    while (*a && upper(*a) == upper(*b))
+        a++, b++;
+    return !*a && !*b;
+}
+
+/* The next call to make for its files: 3 and the call in x, or 0 when all are open. */
+static int file_call(struct agent_job *j, struct agent_exec *x)
+{
+    while (j->fs < 3) {
+        if (!j->file[j->fs][0]) {
+            j->fs++;
+            continue;
+        }
+        if (j->fs == 2 && (j->fset & 2) && same_file(j->file[2], j->file[1])) {     /* (one file for both) */
+            u32 t = jft_lin();
+            j->fold[2] = vm_rd8(t + 2);
+            vm_wr8(t + 2, vm_rd8(t + 1));
+            j->fh[2] = 0xFFFF;
+            j->fset |= 4;
+            j->fs++;
+            continue;
+        }
+        break;
+    }
+    if (j->fs >= 3) {
+        j->fstep = FS_NONE;
+        return 0;
+    }
+    memset(&x->dos, 0, sizeof x->dos);
+    x->dos_path = j->file[j->fs];
+    if (j->fstep == FS_SEEK) {                  /* (to its end: what is written is added) */
+        x->dos.ax = 0x4202;
+        x->dos.bx = j->fh[j->fs];
+        x->dos_path = NULL;
+    } else if (j->fs == 0) {
+        j->fstep = FS_OPEN;
+        x->dos.ax = 0x3D00;                     /* its input: read */
+    } else if (j->fstep != FS_CREATE && (j->fappend >> j->fs & 1)) {
+        j->fstep = FS_OPEN;
+        x->dos.ax = 0x3D01;                     /* added to: opened to write, if it is there */
+    } else {
+        j->fstep = FS_CREATE;
+        x->dos.ax = 0x3C00;                     /* made, or emptied */
+    }
+    return 3;
+}
+
+/* DOS's answer to that call: 0 to go on, -1 if the file can't be had. */
+static int file_answer(struct agent_job *j, u16 ax, int refused)
+{
+    u32 s = j->fs, t = jft_lin();
+    if (j->fstep == FS_SEEK) {
+        j->fs++;
+        j->fstep = FS_OPEN;
+        return 0;
+    }
+    if (refused) {
+        if (j->fstep == FS_OPEN && s > 0) {     /* nothing there to add to: made */
+            j->fstep = FS_CREATE;
+            return 0;
+        }
+        kprintf("GLOS-AGENT file seq=%u stream=%u error=%u path=%s\n", j->seq, s, ax, j->file[s]);
+        return -1;
+    }
+    if (ax >= vm_rd16(((u32)vm.loader_psp << 4) + 0x32))
+        return -1;
+    j->fh[s] = ax;
+    j->fold[s] = vm_rd8(t + s);
+    vm_wr8(t + s, vm_rd8(t + ax));              /* the stub's handle s is the file from now */
+    j->fset |= (u8)(1u << s);
+    if (j->fstep == FS_OPEN && s > 0) {
+        j->fstep = FS_SEEK;
+        return 0;
+    }
+    j->fs++;
+    j->fstep = FS_OPEN;
+    return 0;
+}
+
+/* After the job: the stub's handles as they were, and the files closed: 3 and a close in x, or 0 when done. */
+static int files_close(struct agent_job *j, struct agent_exec *x)
+{
+    u32 s;
+    for (s = 0; s < 3; s++)
+        if (j->fset >> s & 1) {
+            vm_wr8(jft_lin() + s, j->fold[s]);
+            j->fset &= (u8)~(1u << s);
+            if (j->fh[s] == 0xFFFF)
+                continue;
+            memset(&x->dos, 0, sizeof x->dos);
+            x->dos_path = NULL;
+            x->dos.ax = 0x3E00;
+            x->dos.bx = j->fh[s];
+            j->fstep = FS_CLOSE;
+            return 3;
+        }
+    j->fstep = FS_NONE;
+    return 0;
+}
+
+/* A command line past the 126 characters DOS's EXEC passes (an app's job: the IDE's compiler): the whole line
+   in the environment's CMDLINE too, where a DJGPP program looks when its tail's length says 127 (Windows 9x's
+   way). The program's path first, as it is being run. */
+static void long_line(struct agent_job *j)
+{
+    u32 n = 0, k, need;
+    if (strlen(j->args) <= 126)
+        return;
+    while (j->env[n])                           /* past its own strings, and a CMDLINE of an earlier try */
+        n += (u32)strlen(j->env + n) + 1;
+    for (k = 0; k < n; k += (u32)strlen(j->env + k) + 1)
+        if (!strncmp(j->env + k, "CMDLINE=", 8)) {
+            n = k;
+            break;
+        }
+    need = 8 + (u32)strlen(j->path) + (u32)strlen(j->args) + 2;
+    if (n + need > sizeof j->env) {
+        kprintf("GLOS-WARN agent-cmdline seq=%u why=too-long\n", j->seq);
+        j->env[n] = 0;
+        return;
+    }
+    n += (u32)ksnprintf(j->env + n, sizeof j->env - n, "CMDLINE=%s%s", j->path, j->args) + 1;
+    j->env[n] = 0;
+}
+
+void agent_vm_answer(u16 ax, int refused)
+{
+    ans_ax = ax;
+    ans_cf = (u8)(refused != 0);
+}
+
+/* A job has ended (its files closed): its app and the SSH side are told. */
+static void finish(struct agent_job *j)
+{
+    u32 result = j->result;
+    if (j->console)
+        keys_left(j);
+    j->t_end = timer_ticks();
+    j->state = J_DONE;
+    kprintf("GLOS-AGENT done seq=%u code=%u via=%s%s\n", j->seq, result & 0xFF, j->shell ? "comspec" : j->path,
+            (result & 0x10000) ? " cannot-run" : "");
+    if (running == j)
+        running = NULL;
+    tell(j);
+    if (j->detach)
+        j->state = J_FREE;                      /* (nobody to tell) */
+    if (kick_ssh)
+        kick_ssh();
+}
+
 static int dir_call(struct agent_job *j, struct agent_exec *x)
 {
     memset(&x->dos, 0, sizeof x->dos);
@@ -822,12 +1024,24 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
     struct agent_job *j = running;
     u32 i;
     x->dos_path = NULL;
-    if (j && j->dir_step && result == 0xFFFFFFFEu) {    /* its drive or folder set: the next, or its EXEC */
+    if (closer && result == 0xFFFFFFFEu) {      /* a stream's file closed: the next, or the job's end is told */
+        struct agent_job *c = closer;
+        if (files_close(c, x) == 3)
+            return 3;
+        closer = NULL;
+        if (!c->app)
+            finish(c);
+        j = running;                            /* (NULL: the next job) */
+    } else if (j && j->dir_step && result == 0xFFFFFFFEu) {     /* its drive or folder set: the next, or its EXEC */
         j->dir_step++;
         if (j->dir_step <= 2 && dir_call(j, x) == 3)
             return 3;
         j->dir_step = 0;
-        goto start;
+        goto files;
+    } else if (j && j->fstep && result == 0xFFFFFFFEu) {        /* a stream's file opened, or not */
+        if (file_answer(j, ans_ax, ans_cf) == 0)
+            goto files;
+        result = 0x1001F;                       /* (it can't be had: the job could not be run) */
     }
     if (j && result == NEXT_DETACHED) {         /* its program is an app now: the job goes with it */
         j->app = 1;
@@ -836,6 +1050,10 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
         if (j->kill)
             app_kill_job(j);
         tell(j);
+        closer = j;                             /* (the stub's handles are its own again; the app has the files) */
+        if (files_close(j, x) == 3)
+            return 3;
+        closer = NULL;
         j = NULL;
     }
     if (j) {
@@ -849,18 +1067,11 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
             }                                   /* (API 2.0's: its app is told it could not be run, code 126) */
         }
         j->result = result;
-        if (j->console)
-            keys_left(j);
-        j->t_end = timer_ticks();
-        j->state = J_DONE;
-        kprintf("GLOS-AGENT done seq=%u code=%u via=%s%s\n", j->seq, result & 0xFF, j->shell ? "comspec" : j->path,
-                (result & 0x10000) ? " cannot-run" : "");
-        running = NULL;
-        tell(j);
-        if (j->detach)
-            j->state = J_FREE;                  /* (nobody to tell) */
-        if (kick_ssh)
-            kick_ssh();
+        closer = j;                             /* its streams' files closed first, a call each */
+        if (files_close(j, x) == 3)
+            return 3;
+        closer = NULL;
+        finish(j);
     }
     j = 0;
     for (i = 0; i < NJOBS; i++)
@@ -878,12 +1089,14 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
         kprintf("GLOS-AGENT run seq=%u cmd=\"%s\"%s%s%s%s%s\n", j->seq, j->cmd, j->direct ? " direct=1" : "",
                 j->profile[0] ? " profile=" : "", j->profile, j->dir[0] ? " dir=" : "", j->dir);
         tell(j);
+        j->fs = 0;
+        j->fstep = FS_OPEN;
         if (j->dir[0]) {                        /* its drive and folder first (the system VM's: DOS has one) */
             j->dir_step = 1;
             if (dir_call(j, x) == 3)
                 return 3;
         }
-        goto start;
+        goto files;
     }
     session_job(0, 0, "", "");
     if (exit_req && (s32)(timer_ticks() - exit_at) >= 0) {
@@ -892,7 +1105,10 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
         return -1;
     }
     return 0;
-start:
+files:                                          /* its streams' files, a call each; then its EXEC */
+    j = running;
+    if (file_call(j, x) == 3)
+        return 3;
     j = running;
     j->shell = (u8)split(j);
     if (!j->shell && !candidate(j, 0)) {
@@ -902,9 +1118,12 @@ start:
     }
 exec:
     j = running;
+    if (!j->shell)
+        long_line(j);
     session_job(j->direct, j->console ? (j->full ? 4 : 3) : j->exclusive, j->profile, j->env);     /* for the
                                                    session this EXEC begins (3: a console job's, 4: full-screen from
                                                    the start), with its own environment's strings */
+    x->longtail = 0;
     if (j->shell) {
         x->path = comspec;
         x->t1 = " /C ";
@@ -913,6 +1132,7 @@ exec:
         x->path = j->path;
         x->t1 = j->args;
         x->t2 = "";
+        x->longtail = (u8)(strlen(j->args) > 126);      /* (CMDLINE has all of it: long_line()) */
     }
     return 1;
 }
@@ -928,7 +1148,7 @@ int agent_vm_wake_pending(void)
     return 0;
 }
 
-int agent_vm_capturing(void) { return running != 0; }
+int agent_vm_capturing(void) { return running != 0 || closer != 0; }
 
 /* The job whose program runs now (it may become an app's). */
 void *agent_vm_job(void) { return running; }

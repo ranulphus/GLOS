@@ -160,12 +160,24 @@ int glos_schedule_list(char *list, unsigned room, unsigned *length);   /* name, 
    (glos_error()). With GLOS_RUNF_DETACH there is no job to have: 0, and glos_error() 0 if it was started. */
 glos_handle glos_job_run(const char *command, const char *dir, const char *env, unsigned how, unsigned flags,
                          const char *profile);
+/* ... with every detail (size is set here): files for its streams among them. */
+glos_handle glos_job_start(struct glos_job_run *run);
 int glos_job_read(glos_handle job, unsigned stream, void *buf, unsigned room);     /* the bytes, or -1 */
 int glos_job_write(glos_handle job, const void *data, unsigned length);            /* its input: those taken, or -1 */
 int glos_job_eof(glos_handle job);                                                 /* its input's end */
 int glos_job_keys(glos_handle job, const unsigned short *keys, unsigned count);    /* a window's job: those taken */
 int glos_job_signal(glos_handle job, unsigned what);                               /* GLOS_SIGNAL_ */
 int glos_job_status(glos_handle job, struct glos_job_status *out);
+
+/* ---- the system (SYS) */
+/* Figures of one kind (GLOS_STAT_) into buf: structures, each with its size first, or text. *length the bytes
+   there are, *count the structures given (either may be 0). GLOS_E_ROOM: cut. */
+int glos_sys_stat(unsigned kind, void *buf, unsigned room, unsigned *length, unsigned *count);
+int glos_programs(struct glos_program *out, unsigned room, unsigned *count);   /* (room in bytes) */
+int glos_sys_kill(unsigned what, unsigned id);          /* GLOS_KILL_ */
+/* GLOS's log from pos on (0: the oldest kept): the bytes read, or -1; *next where to go on. follow 1:
+   GLOS_EV_LOG when there is more. */
+int glos_sys_log(unsigned pos, char *buf, unsigned room, unsigned *next, int follow);
 
 /* ---- threads (THREAD; docs/supervisor.md 12.7)
  *

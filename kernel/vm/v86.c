@@ -666,7 +666,7 @@ static void vm_down(struct trapframe *tf, u16 seg)
 
 /* The stub's EXEC buffers (struct stub_data at offset 0 of its segment):
    path, and the tail t1 t2 as length, text, CR. */
-static void stub_exec(const char *path, const char *t1, const char *t2)
+static void stub_exec(const char *path, const char *t1, const char *t2, int longtail)
 {
     u32 p = ((u32)vm.loader_cs << 4) + __builtin_offsetof(struct stub_data, path);
     u32 t = ((u32)vm.loader_cs << 4) + __builtin_offsetof(struct stub_data, tail), i, n = 0;
@@ -677,7 +677,7 @@ static void stub_exec(const char *path, const char *t1, const char *t2)
         vm_wr8(t + 1 + n++, (u8)t1[i]);
     for (i = 0; t2[i] && n < 126; i++)
         vm_wr8(t + 1 + n++, (u8)t2[i]);
-    vm_wr8(t, (u8)n);
+    vm_wr8(t, (u8)(longtail ? 127 : n));        /* (127: the rest is in the environment's CMDLINE, agent.c) */
     vm_wr8(t + 1 + n, 0x0D);
 }
 
@@ -691,10 +691,10 @@ static void vm_shell_next(struct trapframe *tf, u32 result)
                 (result & 0x10000) ? " cannot-run" : "");
     if (vm.shell_state == 0 && bi->autoexec[0]) {
         vm.shell_state = 1;
-        stub_exec(bi->comspec, " /C ", bi->autoexec);
+        stub_exec(bi->comspec, " /C ", bi->autoexec, 0);
     } else {
         vm.shell_state = 2;
-        stub_exec(bi->comspec, bi->console[0] ? " /C " : "", bi->console);
+        stub_exec(bi->comspec, bi->console[0] ? " /C " : "", bi->console, 0);
     }
     tf->eax = 1;
 }
@@ -760,6 +760,10 @@ static void vm_agent_next(struct trapframe *tf, u32 result)
                 kprintf("GLOS-WARN agent-start cfg=unsettled\n");
         }
     }
+    if (result == 0xFFFFFFFEu) {                /* (a call the agent asked for: what DOS said) */
+        u32 regs = ((u32)vm.loader_cs << 4) + __builtin_offsetof(struct stub_data, dregs);
+        agent_vm_answer(vm_rd16(regs), vm_rd16(regs + 16) & 1);
+    }
     r = agent_vm_next(result, vm.bi->comspec, &x);
     if (r == 3) {                               /* a job's drive or folder, before its EXEC (M9) */
         u32 sd = (u32)vm.loader_cs << 4, regs = sd + __builtin_offsetof(struct stub_data, dregs), i;
@@ -782,8 +786,8 @@ static void vm_agent_next(struct trapframe *tf, u32 result)
     }
     if (vm.vme)
         agent_vm_traps();
-    if (r < 0 && app_count()) {                 /* glos exit: the apps end first */
-        app_kill_all("exit");
+    if (r < 0 && app_count()) {                 /* glos exit: the apps end first (asked to, then ended: app.c) */
+        app_exit_turn();
         r = 0;
     }
     if (r < 0) {
@@ -791,7 +795,7 @@ static void vm_agent_next(struct trapframe *tf, u32 result)
         return;
     }
     if (r > 0)
-        stub_exec(x.path, x.t1, x.t2);
+        stub_exec(x.path, x.t1, x.t2, x.longtail);
     tf->eax = r > 0 ? 1 : 2;
 }
 

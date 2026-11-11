@@ -37,6 +37,8 @@ int agent_app_kill(void *app, u32 seq);
 int agent_app_forget(void *app, u32 seq);
 void agent_app_gone(void *app);                 /* the app has ended: its jobs killed (or let go, if apps now) */
 u32 agent_jobs_stat(void *out, u32 room);       /* struct glos_stat_app for each job */
+u32 agent_job_seq(const void *job);             /* a job's number */
+u32 agent_job_by(u32 seq);                      /* the app that started it (its id), or 0 */
 /* API 2.0's JOB (kernel/app/api2job.c). */
 struct agent_opts {
     u8 direct;                                  /* direct mode */
@@ -46,6 +48,10 @@ struct agent_opts {
     u8 hidden;                                  /* (with GLOS_RUN_CONSOLE) no window: beside the desktop, its output
                                                    kept by stream */
     const char *profile;                        /* the profile it runs with, or NULL */
+    const char *command;                        /* its command line when longer than 1.x's structure holds (NULL:
+                                                   the structure's) */
+    const char *file[3];                        /* files for its standard input, output and error (NULL: none) */
+    u8 append;                                  /* bit 1, bit 2: the output's, the error's file is added to */
 };
 int agent_post_job(void *app, const struct glos_run *r, const struct agent_opts *o, u32 *seq);
 int agent_app_read1(void *app, u32 seq, int stream, u8 *out, u32 room);        /* one stream's bytes; -1 no such job */
@@ -56,6 +62,7 @@ int agent_app_signal(void *app, u32 seq, int brk);     /* Ctrl+C or Ctrl+Break: 
 /* The VM thread's side (trap context). */
 struct agent_exec {
     const char *path, *t1, *t2;                 /* for the stub: EXEC path with the tail t1 t2 */
+    u8 longtail;                                /* the tail is longer than DOS passes: its length says 127 */
     struct dos_regs dos;                        /* or an INT 21h call to make first (a job's drive and folder) */
     const char *dos_path;                       /* ... with this string at DS:DX (the stub's path buffer) */
 };
@@ -71,6 +78,7 @@ void *agent_vm_as(void *job);                   /* output is this job's from now
 void agent_app_done(void *job, u32 result);     /* the app that job became has ended */
 void agent_vm_tick(u32 now);                    /* every kernel tick: the kills of a job being ended */
 void agent_vm_int21(const struct trapframe *tf);
+void agent_vm_answer(u16 ax, int refused);      /* DOS's answer to the call agent_vm_next() asked for (3) */
 int agent_vm_stdin(struct trapframe *tf);       /* a job's console input from its app: 0 DOS's call, 1 answered here,
                                                    2 nothing yet (wait, and the INT again) */
 void agent_vm_traps(void);
