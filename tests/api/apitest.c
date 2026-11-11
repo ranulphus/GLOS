@@ -104,7 +104,8 @@ static void before(void)
           && GLOS_HAS(&v, GLOS_SYS_PROGRAMS) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SYS, 4))
           && GLOS_HAS(&v, GLOS_AUDIO_IN) && GLOS_HAS(&v, GLOS_AUDIO_MIDI_OUT) && GLOS_HAS(&v, GLOS_AUDIO_DEVICES)
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 7))
-          && GLOS_HAS(&v, GLOS_NET_STATE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_NET, 7)),
+          && GLOS_HAS(&v, GLOS_NET_STATE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_NET, 7))
+          && GLOS_HAS(&v, GLOS_CAPTURE_MOUSE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_CAPTURE, 3)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
     small.v.size = 12;                                  /* (size, major, minor: an older program's) */
@@ -2590,6 +2591,181 @@ static int net_mode(int argc, char **argv)
     return fails > 90 ? 90 : fails;
 }
 
+/* APITEST capchild: a window of 120 by 80 that CAPTURE's test looks at and drives: three bands (red, green,
+   blue); white once a w is typed; black once the left button is pressed at 33, 44 with nothing else held (purple
+   for any other press); a q ends it, with exit code 33. */
+static unsigned cap_row[120];
+
+static void cap_paint(glos_handle w, unsigned top, unsigned mid, unsigned bottom)
+{
+    static const struct glos_format f32 = { 32, 16, 8, 8, 8, 0, 8, { 0, 0 } };
+    int x, y;
+    for (y = 0; y < 80; y++) {
+        for (x = 0; x < 120; x++)
+            cap_row[x] = y < 27 ? top : y < 54 ? mid : bottom;
+        glos_blit(w, 0, y, cap_row, 120, 1, 120 * 4, &f32, 0);
+    }
+}
+
+static int capchild_mode(void)
+{
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_ev *e = (struct glos_ev *)ev;
+    glos_handle w;
+    if (glos_init("Capture child", "apitest", "Tests") != 0)
+        return 98;
+    w = glos_window("CAPCHILD", 200, 120, 120, 80, GLOS_WK_NORMAL, 0, 0);
+    if (!w)
+        return 97;
+    glos_show(w, GLOS_WS_NORMAL);
+    cap_paint(w, 0xFF0000, 0x00FF00, 0x0000FF);
+    for (;;) {
+        if (glos_event(ev, sizeof ev, 60000, 0) <= 0)
+            return 96;                          /* (nobody came) */
+        if (e->kind == GLOS_EV_END || e->kind == GLOS_EV_CLOSE)
+            return 95;
+        if (e->kind == GLOS_EV_KEY) {
+            struct glos_ev_key *k = (struct glos_ev_key *)ev;
+            if (k->down && k->key == 0x11 && k->ch == 'w' && e->handle == w)
+                cap_paint(w, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF);
+            if (k->down && k->key == 0x10 && k->ch == 'Q' && (k->mods & GLOS_MOD_SHIFT))
+                return 33;
+        }
+        if (e->kind == GLOS_EV_MOUSE) {
+            struct glos_ev_mouse *m = (struct glos_ev_mouse *)ev;
+            if (m->button == 1 && m->down) {
+                unsigned c = m->x == 33 && m->y == 44 && m->buttons == 1 && m->clicks == 2 ? 0x000000 : 0xFF00FF;
+                cap_paint(w, c, c, c);
+            }
+        }
+    }
+}
+
+/* APITEST cap: API 2.0's CAPTURE (phase B step 12), under the agent with the desktop on, and another app's
+   window on it (the test starts an APITEST win first). It runs APITEST capchild as a job of its own, finds the
+   app that became and its window, and then: the window's picture as RGBA; a key typed into it and the mouse
+   pressed in it, seen in its picture; the picture as a PNG, written to CAP.PNG beside the test (and the window
+   left alone for some seconds: the test takes glos shot's picture of the screen to compare); other apps'
+   windows refused. */
+static unsigned char cap_pix[120 * 80 * 4 + 64], cap_png[120 * 80 * 3 + 2048];
+
+static int cap_near(const unsigned char *p, unsigned rgb)       /* (a 16-bit screen keeps 5 or 6 bits of each) */
+{
+    int r = p[0] - (int)(rgb >> 16), g = p[1] - (int)((rgb >> 8) & 255), b = p[2] - (int)(rgb & 255);
+    return r > -9 && r < 9 && g > -9 && g < 9 && b > -9 && b < 9 && p[3] == 0xFF;
+}
+
+static int cap_mode(void)
+{
+    static struct glos_program progs[16];
+    static struct glos_win_info wins[16];
+    struct glos_job_status st;
+    struct glos_capture_key keys[2];
+    struct glos_capture_mouse ms[2];
+    glos_handle job;
+    unsigned count = 0, i, child = 0, win = 0, other = 0, len = 0, w = 0, h = 0, len2 = 0;
+    int ok, r, r2, r3, tries;
+    char line[96];
+    FILE *f;
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 98;
+    memset(&st, 0, sizeof st);
+
+    /* The child, and what it became. */
+    job = glos_job_run(hp("%s\\APITEST.EXE capchild"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+    for (tries = 0; job && tries < 300 && !win; tries++) {
+        glos_sleep(100);
+        if (glos_job_status(job, &st) != 0 || glos_programs(progs, sizeof progs, &count) != 0)
+            continue;
+        for (i = 0, child = 0; i < count; i++)
+            if (progs[i].kind == GLOS_PROG_APP && progs[i].job == st.id && st.id)
+                child = progs[i].id;
+        if (child && glos_windows(child, wins, 16, &count) == 0 && count == 1)
+            win = wins[0].id;
+    }
+    glos_sleep(500);                            /* (its first picture drawn) */
+    check("cap-child", job && child && win, "job=%x err=%d id=%u app=%u window=%u", job, glos_error(), st.id, child, win);
+    if (!win) {
+        snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+        com1(line);
+        return fails;
+    }
+
+    /* Its picture: the size, the three bands; too little room says how much there is. */
+    r = glos_capture_pixels(win, GLOS_CAPTURE_RGBA, cap_pix, sizeof cap_pix, &len, &w, &h);
+    ok = r == 0 && w == 120 && h == 80 && len == 120 * 80 * 4 && cap_near(cap_pix + (5 * 120 + 5) * 4, 0xFF0000)
+         && cap_near(cap_pix + (40 * 120 + 60) * 4, 0x00FF00) && cap_near(cap_pix + (79 * 120 + 119) * 4, 0x0000FF)
+         && cap_near(cap_pix + (26 * 120) * 4, 0xFF0000) && cap_near(cap_pix + (27 * 120) * 4, 0x00FF00);
+    r2 = glos_capture_pixels(win, GLOS_CAPTURE_RGBA, cap_pix, 100, &len2, 0, 0);
+    ok = ok && r2 == GLOS_E_ROOM && len2 == 120 * 80 * 4 && glos_capture_pixels(win, 7, cap_pix, sizeof cap_pix, 0, 0, 0) == GLOS_E_ARGUMENT;
+    check("cap-pixels", ok, "r=%d %ux%u len=%u first=%02x%02x%02x small=%d,%u", r, w, h, len, cap_pix[0], cap_pix[1], cap_pix[2], r2, len2);
+
+    /* A key typed into it: it turns white. The mouse pressed in it (a second click at 33, 44): black. */
+    keys[0].key = 0x11, keys[0].down = 1, keys[0].mods = 0;
+    keys[1].key = 0x11, keys[1].down = 0, keys[1].mods = 0;
+    r = glos_capture_keys(win, keys, 2);
+    glos_sleep(700);
+    r2 = glos_capture_pixels(win, GLOS_CAPTURE_RGBA, cap_pix, sizeof cap_pix, &len, 0, 0);
+    ok = r == 0 && r2 == 0 && cap_near(cap_pix, 0xFFFFFF) && cap_near(cap_pix + (79 * 120 + 119) * 4, 0xFFFFFF);
+    check("cap-keys", ok, "r=%d r2=%d first=%02x%02x%02x", r, r2, cap_pix[0], cap_pix[1], cap_pix[2]);
+    memset(ms, 0, sizeof ms);
+    ms[0].x = 33, ms[0].y = 44, ms[0].buttons = 1, ms[0].button = 1, ms[0].down = 1, ms[0].clicks = 2;
+    ms[1].x = 33, ms[1].y = 44, ms[1].buttons = 0, ms[1].button = 1, ms[1].down = 0;
+    r = glos_capture_mouse(win, ms, 2);
+    glos_sleep(700);
+    r2 = glos_capture_pixels(win, GLOS_CAPTURE_RGBA, cap_pix, sizeof cap_pix, &len, 0, 0);
+    ok = r == 0 && r2 == 0 && cap_near(cap_pix, 0x000000) && cap_near(cap_pix + (40 * 120 + 60) * 4, 0x000000);
+    check("cap-mouse", ok, "r=%d r2=%d first=%02x%02x%02x", r, r2, cap_pix[0], cap_pix[1], cap_pix[2]);
+
+    /* As a PNG: a file's signature, its size in the header; kept for the test to compare with the screen's. */
+    keys[0].key = 0x11, keys[0].down = 1;       /* (white again: something to compare) */
+    glos_capture_keys(win, keys, 1);
+    glos_sleep(700);
+    r = glos_capture_pixels(win, GLOS_CAPTURE_PNG, cap_png, sizeof cap_png, &len, &w, &h);
+    ok = r == 0 && len > 120 * 80 * 3 && len < sizeof cap_png && !memcmp(cap_png, "\x89PNG\r\n\x1a\n", 8)
+         && cap_png[19] == 120 && cap_png[23] == 80 && cap_png[24] == 8 && cap_png[25] == 2
+         && glos_capture_pixels(win, GLOS_CAPTURE_PNG, cap_png, 500, &len2, 0, 0) == GLOS_E_ROOM && len2 == len;
+    if ((f = fopen(hp("%s\\CAP.PNG"), "wb")) != 0) {
+        ok = ok && fwrite(cap_png, 1, len, f) == len;
+        fclose(f);
+    } else {
+        ok = 0;
+    }
+    check("cap-png", ok, "r=%d len=%u %ux%u", r, len, w, h);
+    snprintf(line, sizeof line, "HX-APITEST cap-shot window=%u\r\n", win);
+    com1(line);
+    glos_sleep(12000);
+
+    /* Refused: a window of an app this one didn't start; GLOS's own; none at all. */
+    r = glos_windows(GLOS_ENUM_ALL, wins, 16, &count);
+    for (i = 0; i < count && i < 16; i++)
+        if (wins[i].app && wins[i].app != child && strcmp(wins[i].title, "CAPCHILD") && !other)
+            other = wins[i].id;
+    r = glos_capture_pixels(other, GLOS_CAPTURE_RGBA, cap_pix, sizeof cap_pix, &len, 0, 0);
+    r2 = glos_capture_keys(other, keys, 1);
+    r3 = glos_capture_mouse(other, ms, 1);
+    ok = other && r == GLOS_E_REFUSED && r2 == GLOS_E_REFUSED && r3 == GLOS_E_REFUSED
+         && glos_capture_pixels(999999, GLOS_CAPTURE_RGBA, cap_pix, sizeof cap_pix, 0, 0, 0) == GLOS_E_NOT_FOUND
+         && glos_capture_keys(999999, keys, 1) == GLOS_E_NOT_FOUND && glos_capture_keys(win, keys, 65) == GLOS_E_ARGUMENT;
+    check("cap-refused", ok, "other=%u r=%d r2=%d r3=%d", other, r, r2, r3);
+
+    /* A capital Q ends the child: the job is done, with its code; its window is no more. */
+    keys[0].key = 0x10, keys[0].down = 1, keys[0].mods = GLOS_MOD_SHIFT;
+    r = glos_capture_keys(win, keys, 1);
+    for (tries = 0; tries < 100; tries++) {
+        glos_sleep(100);
+        if (glos_job_status(job, &st) == 0 && st.state == GLOS_JS_DONE)
+            break;
+    }
+    ok = r == 0 && st.state == GLOS_JS_DONE && st.code == 33
+         && glos_capture_pixels(win, GLOS_CAPTURE_RGBA, cap_pix, sizeof cap_pix, 0, 0, 0) == GLOS_E_NOT_FOUND && glos_close(job) == 0;
+    check("cap-ended", ok, "r=%d state=%u code=%u", r, st.state, st.code);
+
+    snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+    com1(line);
+    return fails > 90 ? 90 : fails;
+}
+
 /* What a run of the test may have left on a PC that is kept (a bench): taken away. */
 static int clean_mode(void)
 {
@@ -2688,6 +2864,10 @@ int main(int argc, char **argv)
         return job_mode();
     if (argc > 1 && !strcmp(argv[1], "audio"))
         return audio_mode(argc > 2 && !strcmp(argv[2], "loop"));
+    if (argc > 1 && !strcmp(argv[1], "capchild"))
+        return capchild_mode();
+    if (argc > 1 && !strcmp(argv[1], "cap"))
+        return cap_mode();
     if (argc > 1 && !strcmp(argv[1], "net"))
         return net_mode(argc, argv);
     if (argc > 1 && !strcmp(argv[1], "midi"))

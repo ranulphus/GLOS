@@ -86,6 +86,14 @@ int desk_win_capture(struct app *a, u32 id, int on);    /* (API 2.0's INPUT CAPT
 void desk_keys(u8 down[64], u32 *mods, u32 *locks);     /* the keyboard as the desktop has it: GLOS_MOD_, GLOS_LOCK_ */
 struct app *deskin_focus_app(void);     /* the app whose window has the focus, or 0 (any thread: a look) */
 int desk_win_blit(struct app *a, u32 id, const struct desk_blit *b);    /* (API 2.0's DRAW BLIT) */
+/* API 2.0's CAPTURE (kernel/app/api2cap.c): any window by its number. */
+int desk_win_who(u32 id, u32 *owner, s32 *w, s32 *h);   /* whose it is (the app's id; 0: GLOS's own) and its client
+                                                            area's size: 0, or GLOS_E_WINDOW */
+int desk_win_rows(u32 id, s32 y, s32 n, s32 w, u8 *rgb);        /* n rows of its client area from row y, as R, G, B
+                                                                   bytes (w pixels a row): the rows given; -1: it
+                                                                   is gone, or no longer w wide */
+int desk_win_key(u32 id, u32 key, int down, u32 mods);          /* a key into it, as if typed there: 0, GLOS_E_WINDOW */
+int desk_win_mouse(u32 id, s32 x, s32 y, u32 buttons, u32 button, int down, u32 clicks);       /* ... the mouse */
 #define DESK_E_REFUSED 19               /* (API 2.0's GLOS_E_REFUSED; its GLOS_E_HANDLE is 1.x's GLOS_E_WINDOW, 6) */
 #define DESK_EV_STATE 100               /* (to app_event, for API 2.0's apps alone) a window's state changed: key WS_ */
 int desk_demo(int on);                  /* glos desk demo|clear: wm/demo.c's windows; -1: no memory */

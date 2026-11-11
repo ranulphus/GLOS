@@ -1093,6 +1093,32 @@ int glos_net_state(struct glos_net_if *out, unsigned room, unsigned *count)
     return r;
 }
 
+int glos_capture_pixels(unsigned window, unsigned format, void *buffer, unsigned room, unsigned *length, unsigned *w,
+                        unsigned *h)
+{
+    struct glos_capture_pixels q = { sizeof q, window, format, (unsigned)buffer, room, 0, 0, 0 };
+    int r = raw(GLOS_CAPTURE_PIXELS, &q, 0);
+    if (length)
+        *length = q.length;
+    if (w)
+        *w = q.w;
+    if (h)
+        *h = q.h;
+    return r;
+}
+
+int glos_capture_keys(unsigned window, const struct glos_capture_key *keys, unsigned count)
+{
+    struct glos_capture_input q = { sizeof q, window, (unsigned)keys, count };
+    return raw(GLOS_CAPTURE_KEYS, &q, 0);
+}
+
+int glos_capture_mouse(unsigned window, const struct glos_capture_mouse *events, unsigned count)
+{
+    struct glos_capture_input q = { sizeof q, window, (unsigned)events, count };
+    return raw(GLOS_CAPTURE_MOUSE, &q, 0);
+}
+
 int glos_audio_devices(struct glos_audio_device *out, unsigned room, unsigned *count)
 {
     struct glos_sys_stat q = { sizeof q, 0, (unsigned)out, room, 0, 0 };

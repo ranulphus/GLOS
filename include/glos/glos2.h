@@ -201,6 +201,13 @@ glos_handle glos_net_listen(unsigned port, unsigned backlog, unsigned flags);
 glos_handle glos_net_accept(glos_handle listener, unsigned ms, unsigned flags, unsigned *address, unsigned *port);
 int glos_net_state(struct glos_net_if *out, unsigned room, unsigned *count);
 
+/* CAPTURE: a window of a program this one started (or its own), by the window's number: its picture
+   (GLOS_CAPTURE_RGBA or _PNG; *length the bytes there are), keys and mouse events into it. */
+int glos_capture_pixels(unsigned window, unsigned format, void *buffer, unsigned room, unsigned *length, unsigned *w,
+                        unsigned *h);
+int glos_capture_keys(unsigned window, const struct glos_capture_key *keys, unsigned count);
+int glos_capture_mouse(unsigned window, const struct glos_capture_mouse *events, unsigned count);
+
 /* ---- the system (SYS) */
 /* Figures of one kind (GLOS_STAT_) into buf: structures, each with its size first, or text. *length the bytes
    there are, *count the structures given (either may be 0). GLOS_E_ROOM: cut. */

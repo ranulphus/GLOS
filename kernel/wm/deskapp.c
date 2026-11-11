@@ -21,6 +21,7 @@
 #include "dpmi.h"
 #include "io.h"
 #include "display.h"
+#include "keymap.h"
 #include "kprintf.h"
 #include "mgadisp.h"
 #include "mm.h"
@@ -779,6 +780,86 @@ int desk_win_blit(struct app *a, u32 id, const struct desk_blit *b)
         part.x = x0, part.y = y0, part.w = cw, part.h = y;
         if (y > 0)
             wm_damage(m, w, &part);
+    }
+    desk_unlock();
+    return r;
+}
+
+/* ---- API 2.0's CAPTURE: a window seen and driven from outside (api2cap.c says who may) */
+
+int desk_win_who(u32 id, u32 *owner, s32 *w, s32 *h)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *win = wm_find(m, id);
+    int r = win ? 0 : GLOS_E_WINDOW;
+    if (win)
+        *owner = win->owner ? app_id(win->owner) : 0, *w = win->store.w, *h = win->store.h;
+    desk_unlock();
+    return r;
+}
+
+int desk_win_rows(u32 id, s32 y, s32 n, s32 w, u8 *rgb)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *win = wm_find(m, id);
+    const struct gfx_surface *s;
+    s32 x, got = 0;
+    u32 bytes = m->fmt.bpp / 8u;
+    if (!win || win->store.w != w) {
+        desk_unlock();
+        return -1;
+    }
+    s = win->has_ext ? &win->ext : &win->store;        /* (what it shows: an app's own pixels in the card's memory) */
+    if (s->dev)
+        s->dev->sync((struct gfx_surface *)s);          /* (an engine's work on them done first) */
+    for (; got < n && y + got < s->h; got++) {
+        const u8 *p = s->pix + (u32)(y + got) * s->pitch;
+        for (x = 0; x < w; x++, p += bytes) {
+            u32 px = bytes == 1 ? p[0] : bytes == 2 ? (u32)(p[0] | p[1] << 8) : (u32)(p[0] | p[1] << 8 | p[2] << 16 | (u32)p[3] << 24);
+            u32 c = gfx_rgb(&m->fmt, px);
+            *rgb++ = (u8)(c >> 16), *rgb++ = (u8)(c >> 8), *rgb++ = (u8)c;
+        }
+    }
+    desk_unlock();
+    return got;
+}
+
+int desk_win_key(u32 id, u32 key, int down, u32 mods)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *win = wm_find(m, id);
+    struct glos_event e;
+    int r = win && win->owner ? 0 : GLOS_E_WINDOW;
+    if (!r) {
+        memset(&e, 0, sizeof e);
+        e.type = GLOS_EV_KEY;
+        e.window = id;
+        e.key = key;
+        e.ch = down ? keymap_char(key, (mods & GLOS_MOD_SHIFT) != 0, (mods & GLOS_MOD_CTRL) != 0, (mods & GLOS_MOD_ALT) != 0, 0, 0) : 0;
+        e.mods = mods;
+        e.down = (unsigned)(down != 0);
+        app_event(win->owner, &e);
+    }
+    desk_unlock();
+    return r;
+}
+
+int desk_win_mouse(u32 id, s32 x, s32 y, u32 buttons, u32 button, int down, u32 clicks)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *win = wm_find(m, id);
+    struct glos_event e;
+    int r = win && win->owner ? 0 : GLOS_E_WINDOW;
+    if (!r) {
+        memset(&e, 0, sizeof e);
+        e.type = GLOS_EV_MOUSE;
+        e.window = id;
+        e.x = x, e.y = y;
+        e.buttons = buttons;
+        e.key = button;
+        e.down = (unsigned)(down != 0);
+        e.ch = button && down ? (clicks ? clicks : 1) : 0;
+        app_event(win->owner, &e);
     }
     desk_unlock();
     return r;

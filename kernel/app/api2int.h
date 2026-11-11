@@ -161,6 +161,8 @@ extern const u32 api2_audio_nprops;
 int api2_audio(struct app *a, struct trapframe *tf, u32 n);    /* AUDIO's calls */
 void api2_audio_close(struct app *a, void *obj);                /* CLOSE of a stream's handle */
 void api2_midi_close(struct app *a, void *obj);                 /* ... of a MIDI port's */
+/* api2cap.c */
+int api2_capture(struct app *a, struct trapframe *tf, u32 n);   /* CAPTURE's calls */
 /* api2net.c */
 extern const struct propdef api2_net_props[];
 extern const u32 api2_net_nprops;

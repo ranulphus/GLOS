@@ -1187,6 +1187,46 @@ struct glos_ev_net {
     unsigned room;              /* bytes SEND would take */
 };
 
+/* ================================================================== CAPTURE (10h): a child's window, seen and driven
+ *
+ * For the windows of a program the caller started (JOB's RUN, while the caller has the job's handle), and the
+ * caller's own: what one shows, and keys and the mouse into it as if typed and clicked there. A window is named
+ * by its number (WIN's ENUM; SYS's PROGRAMS says which app a job became). Any other app's window is refused
+ * (GLOS_E_REFUSED): this is no way to watch or drive what the caller didn't start. No such window:
+ * GLOS_E_NOT_FOUND. */
+#define GLOS_CAPTURE_PIXELS GLOS_FN(GLOS_AREA_CAPTURE, 0)       /* struct glos_capture_pixels */
+#define GLOS_CAPTURE_KEYS   GLOS_FN(GLOS_AREA_CAPTURE, 1)       /* struct glos_capture_input: struct glos_capture_key */
+#define GLOS_CAPTURE_MOUSE  GLOS_FN(GLOS_AREA_CAPTURE, 2)       /* struct glos_capture_input: struct glos_capture_mouse */
+
+struct glos_capture_pixels {
+    unsigned size;
+    unsigned window;            /* the window's number */
+    unsigned format;            /* GLOS_CAPTURE_ */
+    unsigned buffer, room;      /* where the picture goes */
+    unsigned length;            /* -> the picture's bytes (more than room: GLOS_E_ROOM, and nothing of use written) */
+    unsigned w, h;              /* -> its client area's size */
+};
+#define GLOS_CAPTURE_RGBA 0     /* w * h * 4 bytes: red, green, blue, FFh; rows from the top */
+#define GLOS_CAPTURE_PNG  1     /* a PNG file (24-bit colour, not compressed) */
+
+struct glos_capture_input {
+    unsigned size;
+    unsigned window;
+    unsigned buffer, count;     /* the keys or mouse events, in order: 64 at most */
+};
+struct glos_capture_key {
+    unsigned key;               /* the key's set 1 code (100h and the code: an extended key), as GLOS_EV_KEY gives it */
+    unsigned down;              /* 1 pressed, 0 released */
+    unsigned mods;              /* GLOS_MOD_: what is held with it (the character it makes follows from these) */
+};
+struct glos_capture_mouse {
+    int x, y;                   /* where, in the window's client area */
+    unsigned buttons;           /* the buttons held after it */
+    unsigned button;            /* the one pressed or released (its bit), 0: it only moved */
+    unsigned down;
+    unsigned clicks;            /* a press: 1, or 2 or 3 for a double or triple click */
+};
+
 /* ================================================================== SETTINGS (0Ch): GLOS.CFG, the theme, the region
  *
  * A setting is a section, a key and a value, all text (GLOS.CFG's "[section]" and "key = value"). The schema

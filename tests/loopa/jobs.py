@@ -4641,6 +4641,82 @@ def api_audio_case(profile, vcard, card, sound="sb16"):
     return "  %-22s %s%s" % ("apiaudio-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
+def api_cap_case(profile, vcard, card):
+    """API 2.0's CAPTURE (APITEST cap; phase B step 12), under the agent with the desktop on and another app's
+    window on it: APITEST runs a child as its job, sees its window's picture, types a key and presses the mouse
+    in it and sees what it did, and is refused the other app's window. Its PNG of the child's window is the
+    same picture as that part of glos shot's (to the 16-bit screen's precision). Every case ok."""
+    import time
+    BORDER, TITLE = 1, 18                       # the look's sizes (kernel/wm/wm.c)
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("apicap-" + tag, profile, card, ["--card", vcard, "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
+        "--cmd", "SERSAY HX-START apicap", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1500)
+    checks, info, p, other = {"listen": agent.listening()}, "", None, None
+    out = os.path.join(ROOT, "out", "apicap-" + tag)
+
+    def desk():
+        return agent.ssh("glos desk")[1].replace("\r", "")
+
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        other = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\APITEST.EXE win"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        t0 = time.time()
+        while time.time() - t0 < 240 and '"APITEST W"' not in desk():
+            time.sleep(1)
+        checks["other-up"] = '"APITEST W"' in desk()
+        p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\APITEST.EXE cap"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        t0, m = time.time(), None
+        while time.time() - t0 < 600 and not m and p.poll() is None:
+            m = re.search(r"HX-APITEST cap-shot window=(\d+)", agent.log())
+            time.sleep(0.5)
+        checks["png-made"] = bool(m)
+        if m:                                   # the screen now, and the child's window on it
+            d = re.search(r'^window %s shown\b.* at (-?\d+),(-?\d+) (\d+)x(\d+) "CAPCHILD"$' % m.group(1), desk(), re.M)
+            pointer = re.search(r"pointer=(-?\d+),(-?\d+)", desk())
+            if pointer:                         # (the pointer out of the picture)
+                agent.ssh("glos mouse %d %d" % (600 - int(pointer.group(1)), 440 - int(pointer.group(2))))
+            shot = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=180)
+            open(os.path.join(out, "shot.png"), "wb").write(shot.stdout)
+            got = os.path.join(out, "CAP.PNG")
+            batch = os.path.join(out, "batch")
+            open(batch, "w").write("get /C/TEST/CAP.PNG %s\n" % got)
+            subprocess.run(["sftp", "-P", str(agent.port)] + agent.base[3:] + ["-i", agent.key, "-b", batch, "glos@127.0.0.1"],
+                           capture_output=True, timeout=300)
+            cap = png_rgb(open(got, "rb").read()) if os.path.exists(got) else None
+            scr = png_rgb(shot.stdout)
+            checks["png"] = bool(cap) and cap[:2] == (120, 80)
+            same = False
+            if d and cap and scr and cap[:2] == (120, 80):
+                x0, y0 = int(d.group(1)) + BORDER, int(d.group(2)) + BORDER + TITLE
+                worst = 0
+                for y in range(80):
+                    a = cap[2][y * 360:(y + 1) * 360]
+                    b = scr[2][((y0 + y) * scr[0] + x0) * 3:((y0 + y) * scr[0] + x0 + 120) * 3]
+                    worst = max([worst] + [abs(u - v) for u, v in zip(a, b)]) if len(b) == 360 else 255
+                same = worst <= 8
+                info += " worst=%d" % worst
+            checks["as-the-screen"] = same
+        checks["run"] = p.wait(timeout=600) == 0
+        agent.ssh("glos key 0x10")              # q: the other app ends
+        other.wait(timeout=120)
+        agent.ssh("glos exit")
+    except (subprocess.TimeoutExpired, OSError) as e:
+        info += " %s" % type(e).__name__
+        for q in (p, other):
+            if q and q.poll() is None:
+                q.kill()
+    text = agent.wait()
+    cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", text)
+    checks["cases"] = len(cases) >= 7 and all(k == "1" for c, k, w in cases)
+    if not checks["cases"]:
+        info += " cases=%d failed-cases=%s" % (len(cases), ";".join(c + w.rstrip() for c, k, w in cases if k != "1"))
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text and "GLOS-WARN" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("apicap-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
 def api_net_case(profile, vcard, card):
     """API 2.0's NET (APITEST net; phase B step 11), under the agent: the network's state; a name; a connection
     out to an echo server on the host, 100,000 bytes through it; what is refused; events. Then APITEST listens on
@@ -7398,6 +7474,7 @@ def main():
             res += matrix(api_audio_case, wins + [w + ("cs4236b",) for w in wins[:1]], a.jobs)    # ... and sound
             res += matrix(api_midi_case, wins + [w + ("cs4236b",) for w in wins[:1]], a.jobs)     # ... and MIDI
             res += matrix(api_net_case, wins, a.jobs)   # ... and the network
+            res += matrix(api_cap_case, wins, a.jobs)   # ... and a child's window seen and driven
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

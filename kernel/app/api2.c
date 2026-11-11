@@ -444,6 +444,7 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_JOB][0] = 0x1F;               /* RUN, READ, WRITE, SIGNAL, STATUS */
     v.functions[GLOS_AREA_FS][0] = 0x1F;                /* LIST, INFO, DRIVES, WATCH, SECTORS */
     v.functions[GLOS_AREA_AUDIO][0] = 0x7F;             /* OUT, IN, MIXER, LEVELS, MIDI_OUT, MIDI_IN, DEVICES */
+    v.functions[GLOS_AREA_CAPTURE][0] = 0x07;           /* PIXELS, KEYS, MOUSE */
     v.functions[GLOS_AREA_NET][0] = 0x7F;               /* RESOLVE, CONNECT, SEND, RECEIVE, LISTEN, ACCEPT, STATE */
     v.functions[GLOS_AREA_SYS][0] = 0x0F;               /* STAT, KILL, LOG, PROGRAMS */
     v.functions[GLOS_AREA_SETTINGS][0] = 0xFF;          /* GET, SET, SECTIONS, KEYS, SCHEMA, WATCH, THEME, REGION */
@@ -726,7 +727,7 @@ int api2_call(struct trapframe *tf)
         return a2_fail(tf, GLOS_E_VERSION);       /* (a 1.x app makes 1.x's calls only) */
     if (area > GLOS_AREA_SHELL && area != GLOS_AREA_THREAD && area != GLOS_AREA_SETTINGS && area != GLOS_AREA_IDLE
         && area != GLOS_AREA_CLIP && area != GLOS_AREA_DND && area != GLOS_AREA_FS && area != GLOS_AREA_JOB
-        && area != GLOS_AREA_SYS && area != GLOS_AREA_AUDIO && area != GLOS_AREA_NET)
+        && area != GLOS_AREA_SYS && area != GLOS_AREA_AUDIO && area != GLOS_AREA_NET && area != GLOS_AREA_CAPTURE)
         return a2_fail(tf, GLOS_E_FUNCTION);       /* (the other areas come with phase B's later steps) */
     first = app_first();
     if (!first && area == GLOS_AREA_DRAW && n >= (GLOS_DRAW_GPU & 0xFF) && n <= (GLOS_DRAW_WINVRAM & 0xFF))
@@ -766,7 +767,8 @@ int api2_call(struct trapframe *tf)
       : area == GLOS_AREA_CLIP ? api2_clip(a, tf, n) : area == GLOS_AREA_DND ? api2_dnd(a, tf, n)
       : area == GLOS_AREA_FS ? api2_fs(a, tf, n) : area == GLOS_AREA_SHELL ? api2_shell(a, tf, n)
       : area == GLOS_AREA_JOB ? api2_job(a, tf, n) : area == GLOS_AREA_SYS ? api2_sys(a, tf, n)
-      : area == GLOS_AREA_AUDIO ? api2_audio(a, tf, n) : core(a, tf, n);
+      : area == GLOS_AREA_AUDIO ? api2_audio(a, tf, n) : area == GLOS_AREA_CAPTURE ? api2_capture(a, tf, n)
+      : core(a, tf, n);
     if (first)
         gpu_safe_end(a);
     app_api_unlock(a);
