@@ -6669,6 +6669,35 @@ def pkg_case(profile, vcard, card):
         checks["cfg-as-before"] = before is not None and after == before
         if not checks["cfg-as-before"]:
             notes.append("GLOS.CFG after: %r" % after)
+        # A local package (phase B step 13): a zip put on the PC and installed from the file: said to be local
+        # in what PKG prints and in its list; not upgraded from a source that has a newer one; removed as any.
+        readme = "C:\\APPS\\NOTES\\README.TXT"
+        checks["local-put"] = put(os.path.join(out, "NOTES-10.ZIP"), "C:\\TEST\\MYNOTES.ZIP")
+        rc, o = pkg("INSTALL C:\\TEST\\MYNOTES.ZIP")
+        checks["local-install"] = rc == 0 and \
+            "PKG installed NOTES 1.0 in C:\\APPS\\NOTES: 3 files (local: from a file on this PC, not signed)" in o
+        checks["local-files"] = fetch(readme) == src("1.0", "README.TXT") and \
+            agent.ssh("glos config get program:NOTES.EXE title")[1].strip() == "Notes"
+        checks["local-listed"] = "PKG installed NOTES    1.0 (local)" in pkg("LIST -I")[1]
+        lst = fetch("C:\\TEST\\PKG\\NOTES.LST")
+        checks["local-list"] = lst is not None and b"source local C:\\TEST\\MYNOTES.ZIP" in lst
+        rc, o = pkg("UPGRADE")
+        checks["local-kept"] = "NOTES is a local package: not upgraded from a source" in o and \
+            fetch(readme) == src("1.0", "README.TXT")
+        rc, o = pkg("INSTALL C:\\TEST\\MYNOTES.ZIP")
+        checks["local-again"] = rc == 1 and "installed already (PKG REMOVE it first)" in o
+        rc, o = pkg("INSTALL C:\\TEST\\NOSUCH.ZIP")
+        rc2, o2 = pkg("INSTALL C:\\TEST\\PKG.EXE")
+        checks["local-refused"] = rc == 1 and "no such file" in o and rc2 == 1 and "PKG installed" not in o2
+        rc, o = pkg("REMOVE NOTES")
+        checks["local-remove"] = rc == 0 and "PKG removed NOTES" in o and not exists("C:\\APPS\\NUL") and \
+            not exists("C:\\TEST\\PKG\\NOTES.LST")
+        agent.ssh("DEL C:\\TEST\\MYNOTES.ZIP")
+        t0, after = time.time(), None
+        while time.time() - t0 < 30 and after != before:
+            time.sleep(1)
+            after = fetch("C:\\TEST\\GLOS.CFG")
+        checks["local-cfg-as-before"] = before is not None and after == before
         srv.root = repos["tampered"]
         rc, o = pkg("INSTALL NOTES")
         checks["tampered"] = rc == 1 and "isn't the signed index's: refused" in o and not exists("C:\\APPS\\NUL")

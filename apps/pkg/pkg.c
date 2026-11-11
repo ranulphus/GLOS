@@ -67,6 +67,7 @@ struct src {
     char url[300];
     int signed_by;                      /* (GLOS: the index checked) */
     char key[64];
+    int local;                          /* a file on this PC (PKG INSTALL PATH): no index, no signature */
 };
 
 struct avail {
@@ -356,20 +357,25 @@ static void list_path(char *out, size_t room, const char *name)
     snprintf(out, room, "%s\\PKG\\%s.LST", base, name);
 }
 
-/* The installed version into out: 1, or 0 if it isn't installed. */
+/* The installed version into out: 1, or 0 if it isn't installed; 2 if it came from a file on this PC (a
+   "local" package: its list says so). */
 static int installed(const char *name, char *version, size_t room)
 {
     char path[300], line[300];
     FILE *f;
+    int local = 0;
     list_path(path, sizeof path, name);
     if (!(f = fopen(path, "r")))
         return 0;
     version[0] = 0;
-    while (fgets(line, sizeof line, f))
+    while (fgets(line, sizeof line, f)) {
         if (!strncmp(line, "version ", 8))
             snprintf(version, room, "%.*s", (int)strcspn(line + 8, "\r\n"), line + 8);
+        if (!strncmp(line, "source local ", 13))
+            local = 1;
+    }
     fclose(f);
-    return 1;
+    return local ? 2 : 1;
 }
 
 static void mkdirs(const char *path)          /* each folder of path (a file's) made */
@@ -494,25 +500,131 @@ static int apply_manifest(const char *ini, char *dir, size_t room, FILE *lst, in
     return 0;
 }
 
+/* A "local" package: one built on this PC and installed from its file (PKG INSTALL C:\\WORK\\NOTES.ZIP), with no
+   source's index and no signature: it is trusted because the user named the file, and its list says "local".
+   What names a file and not a package: a drive, a folder, or .ZIP. */
+static struct src local_src;
+static struct avail local_av;
+
+static int is_file(const char *s)
+{
+    size_t l = strlen(s);
+    return strpbrk(s, ":\\/") != NULL || (l > 4 && !strcasecmp(s + l - 4, ".ZIP"));
+}
+
+/* The file read, and its package's name and version from its GLOSPKG.INI: the package (and its bytes, the
+   caller's to free), or NULL with why. */
+static const struct avail *local_pkg(const char *path, unsigned char **zip, size_t *n, char *why, size_t room)
+{
+    static struct zip z;
+    const struct zip_entry *e;
+    char *ini, *line, section[64] = "";
+    unsigned char *data;
+    const char *file = path;
+    FILE *f;
+    long size;
+    size_t i;
+    if (!(f = fopen(path, "rb"))) {
+        snprintf(why, room, "%s: no such file", path);
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size <= 0 || size > 16L * 1024 * 1024 || !(data = malloc((size_t)size)) || fread(data, 1, (size_t)size, f) != (size_t)size) {
+        fclose(f);
+        snprintf(why, room, "%s: can't be read (16 MB at most)", path);
+        return NULL;
+    }
+    fclose(f);
+    if (zip_open(&z, data, (size_t)size, why, room) != 0) {
+        free(data);
+        return NULL;
+    }
+    if (!(e = zip_find(&z, "GLOSPKG.INI")) || !(ini = (char *)zip_read(&z, e, why, room))) {
+        if (!e)
+            snprintf(why, room, "%s: no GLOSPKG.INI: not a GLOS package", path);
+        free(data);
+        return NULL;
+    }
+    ini = realloc(ini, e->usize + 1);
+    ini[e->usize] = 0;
+    memset(&local_av, 0, sizeof local_av);
+    for (line = strtok(ini, "\n"); line; line = strtok(NULL, "\n")) {
+        char *eq, *k, *v, *end;
+        line[strcspn(line, "\r")] = 0;
+        while (*line == ' ' || *line == '\t')
+            line++;
+        if (*line == '[') {
+            snprintf(section, sizeof section, "%.*s", (int)strcspn(line + 1, "]"), line + 1);
+            continue;
+        }
+        if (strcasecmp(section, "package") || !(eq = strchr(line, '=')))
+            continue;
+        *eq = 0;
+        k = line, v = eq + 1;
+        for (end = k + strlen(k); end > k && (end[-1] == ' ' || end[-1] == '\t'); end--) ;
+        *end = 0;
+        while (*v == ' ' || *v == '\t')
+            v++;
+        if (!strcasecmp(k, "name"))
+            snprintf(local_av.name, sizeof local_av.name, "%s", v);
+        else if (!strcasecmp(k, "version"))
+            snprintf(local_av.version, sizeof local_av.version, "%s", v);
+        else if (!strcasecmp(k, "summary"))
+            snprintf(local_av.summary, sizeof local_av.summary, "%s", v);
+    }
+    free(ini);
+    for (i = 0; local_av.name[i]; i++) {
+        local_av.name[i] = (char)toupper((unsigned char)local_av.name[i]);
+        if (!isalnum((unsigned char)local_av.name[i]) && local_av.name[i] != '_')
+            local_av.name[0] = 0;
+    }
+    if (!local_av.name[0] || strlen(local_av.name) > 8 || !local_av.version[0]) {
+        snprintf(why, room, "%s: its GLOSPKG.INI wants a name of 8 letters or digits, and a version", path);
+        free(data);
+        return NULL;
+    }
+    for (i = 0; path[i]; i++)
+        if (path[i] == '\\' || path[i] == '/' || path[i] == ':')
+            file = path + i + 1;
+    snprintf(local_av.file, sizeof local_av.file, "%s", file);
+    memset(&local_src, 0, sizeof local_src);
+    local_src.local = 1;
+    snprintf(local_src.url, sizeof local_src.url, "%s", path);
+    for (i = 0; local_src.url[i]; i++)
+        local_src.url[i] = local_src.url[i] == '/' ? '\\' : (char)toupper((unsigned char)local_src.url[i]);
+    local_av.src = &local_src;
+    local_av.size = (unsigned long)size;
+    *zip = data;
+    *n = (size_t)size;
+    return &local_av;
+}
+
 static int install(const char *name, int quiet)
 {
-    const struct avail *a = best(name);
     char why[300], ver[32], dir[260] = "", lpath[300], *ini = 0;
-    unsigned char *zip;
-    size_t n;
+    unsigned char *zip = 0;
+    size_t n = 0;
+    int local = is_file(name);
+    const struct avail *a = local ? local_pkg(name, &zip, &n, why, sizeof why) : best(name);
     static struct zip z;
     FILE *lst;
     int i, files = 0;
     if (!a) {
-        pkg_say("PKG: no source has %s\n", name);
+        if (local)
+            pkg_say("PKG: %s\n", why);
+        else
+            pkg_say("PKG: no source has %s\n", name);
         return 1;
     }
     if (installed(a->name, ver, sizeof ver)) {
         pkg_say("PKG: %s %s is installed already%s\n", a->name, ver,
-               vcmp(a->version, ver) > 0 ? " (PKG UPGRADE for the newer one)" : "");
+               local ? " (PKG REMOVE it first)" : vcmp(a->version, ver) > 0 ? " (PKG UPGRADE for the newer one)" : "");
+        free(zip);
         return 1;
     }
-    if (!(zip = fetch_zip(a, &n, why, sizeof why))) {
+    if (!local && !(zip = fetch_zip(a, &n, why, sizeof why))) {
         pkg_say("PKG: %s\n", why);
         return 1;
     }
@@ -558,7 +670,7 @@ static int install(const char *name, int quiet)
         return 1;
     }
     fprintf(lst, "GLOS-PKG-LIST 1\nname %s\nversion %s\nsource %s %s\n", a->name, a->version,
-            a->src->freedos ? "freedos" : "glos", a->src->url);
+            a->src->local ? "local" : a->src->freedos ? "freedos" : "glos", a->src->url);
     {
         char p[300], made[64][260];
         int nm = 0, j;
@@ -616,7 +728,8 @@ static int install(const char *name, int quiet)
     free(ini);
     if (!quiet)
         pkg_say("PKG installed %s %s in %s: %d files (%s)\n", a->name, a->version, dir, files,
-               a->src->freedos ? "FreeDOS's, unsigned: trusted through HTTPS" : "signed");
+               a->src->local ? "local: from a file on this PC, not signed" : a->src->freedos
+               ? "FreeDOS's, unsigned: trusted through HTTPS" : "signed");
     return 0;
 }
 
@@ -628,10 +741,11 @@ void pkg_row(int i, const char **cells, char *inst, size_t room)
 {
     cells[0] = av[i].name;
     cells[1] = av[i].version;
-    if (!installed(av[i].name, inst, room))
+    int how = installed(av[i].name, inst, room);
+    if (!how)
         inst[0] = 0;
     cells[2] = inst;
-    cells[3] = av[i].src->freedos ? "FreeDOS" : "signed";
+    cells[3] = how == 2 ? "local" : av[i].src->freedos ? "FreeDOS" : "signed";      /* (a local one installed: said so) */
     cells[4] = av[i].summary;
 }
 
@@ -645,8 +759,13 @@ int pkg_upgrade_all(void)
     int i, rc = 0, any = 0;
     for (i = 0; i < nav; i++) {
         const struct avail *b;
-        if (!installed(av[i].name, ver, sizeof ver) || (b = best(av[i].name)) != &av[i] || vcmp(b->version, ver) <= 0)
+        int how = installed(av[i].name, ver, sizeof ver);
+        if (!how || (b = best(av[i].name)) != &av[i] || vcmp(b->version, ver) <= 0)
             continue;
+        if (how == 2) {                         /* (the user's own build stays until the user takes it away) */
+            pkg_say("PKG %s is a local package: not upgraded from a source (PKG REMOVE it first)\n", av[i].name);
+            continue;
+        }
         pkg_say("PKG upgrading %s %s to %s\n", b->name, ver, b->version);
         if (remove_pkg(b->name, 1) != 0 || install(b->name, 0) != 0)
             rc = 1;
@@ -676,8 +795,9 @@ static int cmd_list(int inst_only)
                 snprintf(name, sizeof name, "%.*s", (int)(l - 4), de->d_name);
                 for (i = 0; name[i]; i++)
                     name[i] = (char)toupper((unsigned char)name[i]);
-                if (installed(name, ver, sizeof ver)) {
-                    pkg_say("PKG installed %-8s %s\n", name, ver);
+                int how = installed(name, ver, sizeof ver);
+                if (how) {
+                    pkg_say("PKG installed %-8s %s%s\n", name, ver, how == 2 ? " (local)" : "");
                     n++;
                 }
             }
@@ -740,7 +860,9 @@ int main(int argc, char **argv)
     } else if (!strcmp(argv[1], "LIST")) {
         rc = cmd_list(argc > 2 && !strcasecmp(argv[2], "-I"));
     } else if (!strcmp(argv[1], "INSTALL") && argc > 2) {
-        load_indexes(1);
+        for (i = 2; i < argc && is_file(argv[i]); i++) ;        /* (files alone: no source is asked) */
+        if (i < argc)
+            load_indexes(1);
         for (i = 2; i < argc; i++)
             rc |= install(argv[i], 0);
     } else if (!strcmp(argv[1], "REMOVE") && argc > 2) {
@@ -755,9 +877,14 @@ int main(int argc, char **argv)
             const struct avail *b;
             for (j = 2; j < argc; j++)
                 wanted |= !strcasecmp(argv[j], av[i].name);
-            if (!wanted || !installed(av[i].name, ver, sizeof ver) || (b = best(av[i].name)) != &av[i]
+            int how;
+            if (!wanted || !(how = installed(av[i].name, ver, sizeof ver)) || (b = best(av[i].name)) != &av[i]
                 || vcmp(b->version, ver) <= 0)
                 continue;
+            if (how == 2) {
+                pkg_say("PKG %s is a local package: not upgraded from a source (PKG REMOVE it first)\n", av[i].name);
+                continue;
+            }
             pkg_say("PKG upgrading %s %s to %s\n", b->name, ver, b->version);
             if (remove_pkg(b->name, 1) != 0 || install(b->name, 0) != 0)
                 rc = 1;
