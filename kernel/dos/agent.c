@@ -1440,6 +1440,11 @@ void agent_vm_console_full(void)
 
 void agent_vm_console_char(u8 c)
 {
-    if (agent_vm_console())
-        put(0, c);
+    if (!agent_vm_console())
+        return;
+    if (running->hidden && vm.indos && vm_rd8(vm.indos))
+        return;                                 /* (a hidden job's through DOS was kept by its handle already: MS-DOS's
+                                                   console driver writes with the BIOS's teletype, not INT 29h, and
+                                                   every character came twice on bench-g400) */
+    put(0, c);
 }

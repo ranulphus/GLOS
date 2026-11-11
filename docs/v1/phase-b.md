@@ -634,6 +634,25 @@ After that:
 - **Not done:** DJGPP's own GCC run as a job (the plan's IDE case) needs the DOS compiler in the test image; it
   goes with the IDE (phase E), where the long line and the streams it needs are these.
 
+**Step 9 on MS-DOS 7.1** (bench-g400, 2026-11-11; Loop A's DOS is FreeDOS, which showed none of this):
+
+- **A console job's INT 10h vector is GLOS's while it runs** (`vm_int10_hook`, `kernel/vm/v86.c`). MS-DOS 7.1's
+  console driver, once a DJGPP program's terminal layer has put the console in raw mode (at its first read),
+  writes each character with PUSHF and a far call through the vector at 0040h. No INT trap sees that: the
+  character went to the G400's BIOS, which in the desktop's VESA mode reads a sequencer register for the
+  teletype, and the port access made the job full-screen (its app paused, its input never written). The vector
+  now points at `INT 10h`, `IRET` in the stub's segment; the INT traps and is answered as any console job's.
+  This holds for a window's job (the Terminal's) as for a hidden one.
+- **The wait for input runs no BIOS code:** STI, HLT, RETF in the stub's segment, where the program's
+  interrupts are taken.
+- **A hidden job's output is kept once:** MS-DOS's console driver also writes through the BIOS's teletype,
+  which was kept a second time.
+- **The log says why a job wanted the screen:** `GLOS-SESSION wants-screen int10=`, `vga=` or `port=` with the
+  instruction's address.
+- On bench-g400: APITEST's job mode 19 of 19 (Ctrl+C through the real 8042 in 48 ms).
+- **Not done:** `glos kill` of a program that waits in DOS for a key only completes when a key comes (seen
+  while this was being found; as before step 9).
+
 ### 10. AUDIO
 
 - **OUT** grown: position, pause, volume, balance and mute.

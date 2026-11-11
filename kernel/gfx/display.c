@@ -518,6 +518,8 @@ void display_console_trap(int on)
     if (d.trap == (on != 0))
         return;
     d.trap = (u8)(on != 0);
+    if (!on)
+        vm_int10_hook(0);                       /* (the INT 10h vector as it was: v86.c) */
     if (d.on && !d.held)
         mm_vga_hide(hidden());
     for (p = 0x3B0; p < 0x3E0; p++)
@@ -529,8 +531,10 @@ int display_vga_fault(u32 a)
 {
     if (a < 0xA0000 || a >= 0xC0000 || !d.trap)
         return 0;
-    if (session_console())
+    if (session_console()) {
+        kprintf("GLOS-SESSION wants-screen vga=%05x\n", a);
         session_console_full();                 /* (the session's now: text mode, the memory the VGA's again) */
+    }
     else
         display_console_trap(0);
     return 1;
@@ -542,10 +546,13 @@ int display_vga_port(u32 port)
 {
     if (!d.trap || port < 0x3B0 || port >= 0x3E0)
         return 0;
-    if (session_console())
+    if (session_console()) {
+        kprintf("GLOS-SESSION wants-screen port=%03x at=%04x:%08x %s\n", port, vdev_from ? vdev_from->cs & 0xFFFF : 0,
+                vdev_from ? vdev_from->eip : 0, vdev_from && (vdev_from->eflags & FL_VM) ? "v86" : "pm");
         session_console_full();
-    else
+    } else {
         display_console_trap(0);
+    }
     return 1;
 }
 
@@ -586,6 +593,7 @@ int display_quiet(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, int app)
         case 0x02: case 0x01: case 0x03: case 0x05: case 0x08: case 0x0F: case 0x11: case 0x12: case 0x1A: case 0x1B:
             goto quiet;                         /* (the cursor, the mode, what the card is: answered as below) */
         }
+        kprintf("GLOS-SESSION wants-screen int10=%04x\n", ax);
         session_console_full();                 /* anything else draws: the screen is the program's from here */
         return 0;
     }

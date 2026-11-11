@@ -1036,6 +1036,37 @@ static int int13(struct trapframe *tf, u32 next)
     return 1;
 }
 
+/* A console job's INT 10h, however it is called (session.c arms it, display_console_trap() takes it away).
+   MS-DOS 7.1's console driver writes with PUSHF, CALL FAR through the vector at 0040h, which no INT trap sees:
+   the character went to the card's BIOS, whose look at the VGA made the job full-screen (bench-g400, the G400's
+   BIOS in a VESA mode: 2026-11-11). While such a job runs the vector is GLOS's: INT 10h, IRET in the stub's own
+   segment (the end of its COMSPEC buffer). The INT traps there like any other, is answered as the program's
+   own would be (soft_int), or goes on to the handler the vector had. */
+#define STUB_INT10 ((u32)__builtin_offsetof(struct stub_data, comspec) + 72)
+static u32 int10_old;                           /* the vector as it was; 0: not hooked */
+
+void vm_int10_hook(int on)
+{
+    u32 sd = (u32)vm.loader_cs << 4, ours = (u32)vm.loader_cs << 16 | STUB_INT10, i;
+    if (on && !int10_old) {
+        for (i = 0; i < 72 && vm_rd8(sd + __builtin_offsetof(struct stub_data, comspec) + i); i++)
+            ;
+        if (i >= 70)
+            return;                             /* (a COMSPEC so long that the buffer has no room: not hooked) */
+        vm_wr8(sd + STUB_INT10, 0xCD);
+        vm_wr8(sd + STUB_INT10 + 1, 0x10);
+        vm_wr8(sd + STUB_INT10 + 2, 0xCF);
+        int10_old = vm_rd32(0x40);
+        for (i = 0; i < 4; i++)
+            vm_wr8(0x40 + i, (u8)(ours >> (8 * i)));
+    } else if (!on && int10_old) {
+        if (vm_rd32(0x40) == ours)              /* (a program that hooked it over GLOS's has put GLOS's back) */
+            for (i = 0; i < 4; i++)
+                vm_wr8(0x40 + i, (u8)(int10_old >> (8 * i)));
+        int10_old = 0;
+    }
+}
+
 static int key_wait(struct trapframe *tf, u32 at)
 {
     u32 ah = (tf->eax >> 8) & 0xFF;
@@ -1070,6 +1101,16 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next, u32 at)
         }                                       /* a mode set, for glos shot (kernel/dos/shot.c): made for the */
         if ((ax == 0x4F02 || !(ax >> 8)) && vbe_set(tf, next))  /* program, so that its end and its answer */
             return;                             /* are seen */
+        if (int10_old) {                        /* (a console job's: on to the handler the vector had, not through */
+            push16(tf, flags_image(tf));        /* the vector, which is GLOS's stub: vm_int10_hook) */
+            push16(tf, tf->cs);
+            push16(tf, next);
+            current->vif = 0;
+            tf->eflags &= ~(FL_TF | FL_AC);
+            tf->cs = int10_old >> 16;
+            tf->eip = int10_old & 0xFFFF;
+            return;
+        }
         break;
     case 0x15:
         if (vm_int15(tf, next))
@@ -1186,6 +1227,7 @@ static void vm_gp(struct trapframe *tf)
         soft_int(tf, in.imm, next, ip);
         return;
     case V86_IN:
+        vdev_from = tf;
         v = vdev_in((u16)port, in.width);
         if (in.width == 1)
             SETLO(tf->eax, v);
@@ -1195,6 +1237,7 @@ static void vm_gp(struct trapframe *tf)
             tf->eax = v;
         break;
     case V86_OUT:
+        vdev_from = tf;
         v = in.width == 1 ? (tf->eax & 0xFF) : in.width == 2 ? (tf->eax & 0xFFFF) : tf->eax;
         vdev_out((u16)port, v, in.width);
         break;

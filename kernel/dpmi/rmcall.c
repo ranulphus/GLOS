@@ -99,11 +99,19 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
                 break;
             if (!vm.indos || !vm_rd8(vm.indos))
                 app_vm_idle_turn(0);            /* (apps' own DOS calls meanwhile) */
-            k = *r;                             /* nothing written yet: a moment in real mode (the BIOS's "is there a */
-            k.eax = 0x0100;                     /* key?"), where the program's interrupts are taken (its timer, */
-            if (rm_call(from, &k, RM_INT, 0x16, 0, 0) != 0)     /* Ctrl+C from the keyboard), then a wait */
-                break;
-            vm_idle(timer_ticks() + 8);
+            {                                   /* nothing written yet: a wait in real mode, where the program's */
+                u32 off = __builtin_offsetof(struct stub_data, comspec) + 76;  /* interrupts are taken (its timer, */
+                u32 code = ((u32)vm.loader_cs << 4) + off;      /* Ctrl+C from the keyboard): STI, HLT, RETF in the */
+                vm_wr8(code, 0xFB);             /* stub's own segment (the end of its COMSPEC buffer, past the */
+                vm_wr8(code + 1, 0xF4);         /* INT 10h stub of v86.c). No BIOS call: nothing of the PC's own */
+                vm_wr8(code + 2, 0xCB);         /* runs for the wait */
+                k = *r;
+                k.cs = vm.loader_cs;
+                k.ip = (u16)off;
+                k.ss = k.sp = 0;
+                if (rm_call(from, &k, RM_FAR, 0, 0, 0) != 0)
+                    break;
+            }
         }
         agent_vm_int21(&t);                     /* a client's DOS output, for an agent job's capture (§17.4) */
     }

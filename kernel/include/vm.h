@@ -175,4 +175,7 @@ void xms_call(struct trapframe *tf);
 int phys_copy(u32 dst, u32 src, u32 len);       /* physical addresses, any overlap */
 int phys_owned(u32 base, u32 len);              /* 1 if GLOS owns any of it */
 
+void vm_int10_hook(int on);             /* (v86.c) a console job's INT 10h vector is GLOS's stub, or as it was again */
+extern const struct trapframe *vdev_from;      /* (vdev.c) the instruction making the port access under way */
+
 #endif

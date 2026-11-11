@@ -236,6 +236,9 @@ static void dev_outb(u16 port, u8 v)
     }
 }
 
+const struct trapframe *vdev_from;      /* the frame of the instruction that made the port access under way (for
+                                           the log's "wants-screen": who touched the VGA) */
+
 u32 vdev_in(u16 port, int width)
 {
     u32 v = 0;

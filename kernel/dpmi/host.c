@@ -730,12 +730,14 @@ static void general_protection(struct trapframe *tf)
             vm_idle(0);
         return;
     case V86_IN:
+        vdev_from = tf;
         v = app_cur() ? app_in(app_cur(), (u16)port, in.width) : vdev_in((u16)port, in.width);
         if (in.width == 1) SETLO(tf->eax, v);
         else if (in.width == 2) SET16(tf->eax, v);
         else tf->eax = v;
         break;
     case V86_OUT:
+        vdev_from = tf;
         if (app_cur())
             app_out(app_cur(), (u16)port, tf->eax, in.width);
         else

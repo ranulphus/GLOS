@@ -490,6 +490,8 @@ void session_exec(const struct trapframe *tf)
     ses.rtc_b = vm.rtc_b;
     ses.kbc_cmd = vkbc_cmd();
     memcpy(ses.ivt, vm_ptr(0), sizeof ses.ivt);
+    if (ses.console)
+        vm_int10_hook(1);                       /* (after the vectors are noted: the session's end finds them as they were) */
     ses.bios0 = vm_rd32(0x46C);
     ses.irq0 = cpu_irq_count(0);
     ses.grab = 0;
