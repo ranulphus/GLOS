@@ -138,7 +138,7 @@ const struct cfg_key cfg_schema[] = {
       "It runs at IOPL 3 with the PC's ports (PRD D20)" },
     { "program", "memory", CFG_NUMBER, CFG_PROGRAM, 0, 1048576, 0, "0", "&Memory (KB)",
       "The most DPMI memory it is given (0: no limit)" },
-    { "program", "group", CFG_TEXT, CFG_NOW, 0, 31, "line", "", "&Group",
+    { "program", "group", CFG_TEXT, CFG_NOW, 0, 31, "line", "", "Gro&up",
       "Its group in the Start menu" },
     { "program", "path", CFG_PATH, CFG_NOW, 0, 79, 0, "", "Pat&h",
       "The folder its file is in (empty: GLOS's own, or DOS's PATH)" },
