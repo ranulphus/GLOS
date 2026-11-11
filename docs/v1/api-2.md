@@ -483,6 +483,12 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   under a key derived from the password. GLOS asks for it at the first GET after each start, in a dialog of the
   kernel's, so no app sees the password. Forgetting it loses the secrets, and the Control Panel says that too.
 
+- **As built (step 13):** PUT, GET, REMOVE, with a flag for a shared secret.
+  - The file is always encrypted and authenticated; "scrambled" means its key is a file on the same disk.
+  - The master password is set and the shared names allowed with `glos secrets` until the Control Panel has
+    its page (phase D). GLOS's own dialog asks for the password; a call with no desktop to ask on is refused.
+  - The key from a password: PBKDF2-HMAC-SHA-256, the rounds measured on the PC.
+
 ### 12h MODULES
 
 | Call | What it does |

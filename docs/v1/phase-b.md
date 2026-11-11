@@ -847,6 +847,38 @@ After that:
   - Loop A: secrets kept across a restart; the password dialog by keys; a local package installed and removed;
     `loopa-pkg` unchanged.
 
+**Step 13 as built** (2026-11-11):
+
+- **SECRETS' calls** (`kernel/app/api2sec.c`): PUT, GET, REMOVE. A secret is a name (63 bytes) and a value (1024
+  bytes); an app's are kept under its program's file name; a shared one (`GLOS_SECRET_SHARED`) is for GLOS's own
+  programs and those the user allowed that name.
+- **The store** (`kernel/core/secrets.c`, `secstore.c`): `SECRETS.DAT` beside GLOS.CFG, 16 KB of records at
+  most, read and written on the config thread (so in agent mode only). The file is always ChaCha20 with a
+  Poly1305 tag over its header and contents (TinySSH's, used as OpenSSH uses them for a packet), a new nonce
+  each writing; a writing goes to `SECRETS.NEW` first, which then takes the file's place.
+- **Its key by default** is the PC's: 32 random bytes in `KEYS\SECRETS.KEY`, made with the first secret
+  (nothing wrote the KEYS folder before). That is the "scrambled": whoever has the disk has the key.
+- **With a master password** the key is PBKDF2-HMAC-SHA-256 of it (built here on TinySSH's SHA-256; a salt of
+  16 random bytes; as many rounds as this PC does in about half a second when the password is set, 4096 at
+  least, kept in the file's header). The store is then locked at each start.
+- **The dialog** (`kernel/wm/deskpass.c`): the first call that needs a locked store puts up a window of the
+  desktop's own and waits; its keys go to the kernel, never to an app; Enter tries the password (wrong: it asks
+  again), Esc refuses the call. With no desktop on the screen the call is refused at once. SECRETS' calls are
+  made without the app's lock.
+- **`glos secrets`** (SSH): the store's state; `unlock PASSWORD`; `password OLD NEW` (`-` for none) sets,
+  changes or removes the master password; `allow` and `deny PROGRAM NAME` for a shared secret. Its words are
+  kept out of the log.
+- **PKG's local source** (`apps/pkg/pkg.c`): `PKG INSTALL C:\PATH\X.ZIP` installs from a file on this PC
+  (its name and version from its GLOSPKG.INI), with no index and no signature. Its list says `source local
+  PATH`; PKG says "local" when it installs and in `LIST -I`; `UPGRADE` leaves a local package alone.
+- **Not done:** the Control Panel's page (phase D): until then the master password and the shared names are
+  set with `glos secrets`; a consent dialog when a program first asks for a shared secret; a local package
+  that no source has is not in PKG's window (only in `LIST -I`); the store's size is fixed (16 KB).
+- **Tests:** host `secstore_test` (HMAC's and PBKDF2's known answers, the records, the file sealed, opened
+  and refused when changed); `api_sec_case` (three starts of GLOS: kept across a restart, nothing in the clear
+  in the file, a program outside GLOS's folder and the shared secret, the password's dialog by keys);
+  `loopa-pkg` with a local package installed, kept at an upgrade, and removed.
+
 ### 14. RetroGPU's GLOS paths on 2.0
 
 - **DOS-GL's windowed path** (`gl/src/dgl/glos.c`): DRAW's calls, the lock, and SOFT for the software renderer
