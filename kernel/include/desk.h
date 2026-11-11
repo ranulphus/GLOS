@@ -86,6 +86,9 @@ int desk_win_capture(struct app *a, u32 id, int on);    /* (API 2.0's INPUT CAPT
 void desk_keys(u8 down[64], u32 *mods, u32 *locks);     /* the keyboard as the desktop has it: GLOS_MOD_, GLOS_LOCK_ */
 struct app *deskin_focus_app(void);     /* the app whose window has the focus, or 0 (any thread: a look) */
 int desk_win_blit(struct app *a, u32 id, const struct desk_blit *b);    /* (API 2.0's DRAW BLIT) */
+int desk_win_embed(struct app *a, u32 host, u32 child, const struct gfx_rect *at);     /* (API 2.0's WIN EMBED) the
+                                                   window `child` shown inside a's window `host` (at NULL: let go):
+                                                   0, GLOS_E_WINDOW, DESK_E_REFUSED */
 /* API 2.0's CAPTURE (kernel/app/api2cap.c): any window by its number. */
 int desk_win_who(u32 id, u32 *owner, s32 *w, s32 *h);   /* whose it is (the app's id; 0: GLOS's own) and its client
                                                             area's size: 0, or GLOS_E_WINDOW */

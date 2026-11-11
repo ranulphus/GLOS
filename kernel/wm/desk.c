@@ -218,6 +218,7 @@ static void desk_thread(void *arg)
         m = desk_lock();
         deskapp_hung(m);
         deskin_turn(m);
+        deskapp_embeds(m);
         fb = display_fb();
         if (theme_shown != theme_now) {         /* a new theme: the frames, the bar and the desktop drawn again */
             theme_shown = theme_now;

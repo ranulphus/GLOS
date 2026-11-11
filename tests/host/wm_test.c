@@ -543,6 +543,63 @@ static void cursor_masks(const struct gfx_fmt *f, const char *name)
     free(a.pix), free(b.pix);
 }
 
+/* A window shown inside another (wm_embed, API 2.0's EMBED): bare and the host's, where the host's client area
+   has it; what the desk's side is told to make of it as the host moves and changes; let go, it is as it was. */
+static void embeds(void)
+{
+    struct wm m;
+    struct wm_window *h, *c, *o;
+    struct gfx_rect at = { 10, 5, 80, 50 }, r;
+    long before = held;
+    s32 cw = 0, ch = 0;
+    int part, hs = 0;
+    wm_init(&m, &host, 320, 240, &gfx_fmt8);
+    h = wm_create(&m, 20, 20, 200, 120, "H", WF_FRAME, 0);
+    c = wm_create(&m, 150, 100, 60, 40, "C", WF_FRAME, 0);
+    o = wm_create(&m, 5, 5, 30, 30, "O", WF_FRAME, 0);
+    CHECK(h && c && o);
+    wm_show(&m, h, 1), wm_show(&m, c, 1), wm_show(&m, o, 1);
+    CHECK(!wm_embed_where(&m, c, &r, &hs));
+    CHECK(wm_embed(&m, c, c, &at) == -1 && wm_embed(&m, c, h, &at) == 0);
+    CHECK((c->flags & (WF_EMBED | WF_FRAME | WF_NOBAR | WF_FIXED)) == (WF_EMBED | WF_NOBAR | WF_FIXED) && c->parent == h->id);
+    CHECK(c->frame.w == 60 && c->frame.h == 40);        /* (no frame of its own) */
+    CHECK(wm_embed_where(&m, c, &r, &hs) && r.x == 21 + 10 && r.y == 20 + 20 + 5 && r.w == 80 && r.h == 50 && hs);
+    wm_move(&m, c, r.x, r.y);
+    CHECK(wm_resize(&m, c, r.w, r.h) == 0);
+    CHECK(wm_hit(&m, r.x + 1, r.y + 1, &part) == c && part == WH_CLIENT);       /* in front of its host */
+    CHECK(wm_hit(&m, 22, 41, &part) == h);
+    CHECK(wm_next(&m, h) != c && wm_next(&m, o) != c);  /* (not one of Alt-Tab's) */
+    CHECK(wm_embed(&m, h, o, &at) == -1 && wm_embed(&m, o, c, &at) == -1);     /* a host with one inside; into one inside */
+    wm_set_focus(&m, o);                                /* another in front of both; the host raised: it comes too */
+    wm_move(&m, o, r.x - 5, r.y - 5);
+    CHECK(wm_hit(&m, r.x + 1, r.y + 1, &part) == o);
+    wm_raise(&m, h);
+    CHECK(wm_hit(&m, r.x + 1, r.y + 1, &part) == c);
+    list_check(&m);
+    wm_move(&m, h, 50, 60);                             /* the host moved, then smaller: what is left of the rectangle */
+    CHECK(wm_embed_where(&m, c, &r, &hs) && r.x == 51 + 10 && r.y == 60 + 20 + 5 && r.w == 80 && r.h == 50);
+    CHECK(wm_resize(&m, h, 60, 30) == 0);
+    CHECK(wm_embed_where(&m, c, &r, &hs) && r.w == 50 && r.h == 25);
+    at.x = 500;                                         /* (outside it: a pixel at its edge) */
+    CHECK(wm_embed(&m, c, h, &at) == 0 && wm_embed_where(&m, c, &r, &hs) && r.x == 51 + 59 && r.w == 1);
+    CHECK(wm_state(&m, h, WS_MIN) == 0 && !(c->flags & WF_SHOWN) && (c->flags & WF_WITH));
+    CHECK(wm_embed_where(&m, c, &r, &hs) && !hs);
+    CHECK(wm_state(&m, h, WS_UNMIN) == 0 && (c->flags & WF_SHOWN) && !(c->flags & WF_WITH));
+    wm_unembed(&m, c, &cw, &ch);                        /* let go: as it was, its old size the caller's to give */
+    CHECK(cw == 60 && ch == 40 && (c->flags & (WF_EMBED | WF_FRAME | WF_NOBAR | WF_FIXED)) == WF_FRAME && !c->parent);
+    CHECK(c->frame.x == 150 && c->frame.y == 100 && wm_resize(&m, c, cw, ch) == 0 && c->frame.w == 62);
+    at.x = 10;
+    CHECK(wm_embed(&m, c, h, &at) == 0);                /* the host closed: no host */
+    wm_destroy(&m, h);
+    CHECK(!wm_embed_where(&m, c, &r, &hs));
+    wm_unembed(&m, c, &cw, &ch);
+    CHECK(cw == 60 && ch == 40 && (c->flags & WF_FRAME) && !(c->flags & WF_EMBED));
+    list_check(&m);
+    wm_destroy(&m, c);
+    wm_destroy(&m, o);
+    CHECK(m.count == 0 && m.focus == 0 && held == before);
+}
+
 int main(void)
 {
     churn(&gfx_fmt8, "8", 0, 30000, 0);
@@ -557,6 +614,7 @@ int main(void)
     churn(&gfx_fmt888, "32", 1, 20000, 1);
     churn(&gfx_fmt565, "16", 0, 20000, 1);
     places();
+    embeds();
     cursor_masks(&gfx_fmt8, "8");
     cursor_masks(&gfx_fmt565, "16");
     cursor_masks(&gfx_fmt888, "32");

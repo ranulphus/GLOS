@@ -207,6 +207,9 @@ int glos_capture_pixels(unsigned window, unsigned format, void *buffer, unsigned
                         unsigned *h);
 int glos_capture_keys(unsigned window, const struct glos_capture_key *keys, unsigned count);
 int glos_capture_mouse(unsigned window, const struct glos_capture_mouse *events, unsigned count);
+/* EMBED: a window (by its number) of a program this one started, shown inside w at a rectangle of its client
+   area; cw 0: let go. */
+int glos_embed(glos_handle w, unsigned window, int x, int y, int cw, int ch);
 
 /* ---- the system (SYS) */
 /* Figures of one kind (GLOS_STAT_) into buf: structures, each with its size first, or text. *length the bytes

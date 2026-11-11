@@ -30,6 +30,8 @@
 #define WF_MODAL   0x4000               /* while it is shown, its parent takes no input and no focus */
 #define WF_WITH    0x8000               /* hidden because its parent was minimised: back with it */
 #define WF_HUNG    0x10000              /* its owner isn't taking its events (the kernel's side says) */
+#define WF_EMBED   0x20000              /* shown inside its parent's client area (wm_embed): bare, with no button of
+                                           its own, where and as large as its parent has it */
 #define WF_PLACED  (WF_MAX | WF_FULL | WF_SNAP_L | WF_SNAP_R)   /* its place is the manager's, not its own */
 
 /* A window's state (wm_state). */
@@ -78,6 +80,9 @@ struct wm_window {
     struct gfx_surface ext;             /* what it shows instead, if has_ext: pixels that aren't the manager's (an
                                            app's in the card's memory, M8), of the client area's size and format */
     u8 has_ext;
+    struct gfx_rect embed_at;           /* WF_EMBED: where in its parent's client area */
+    u32 embed_flags;                    /* ... and what it was before: its flags, its corner, its client's size */
+    s32 embed_x, embed_y, embed_w, embed_h;
     char title[WM_TITLE_MAX];
 };
 
@@ -152,6 +157,16 @@ void wm_ext(struct wm *m, struct wm_window *w, const struct gfx_surface *s);   /
 void wm_damage(struct wm *m, struct wm_window *w, const struct gfx_rect *r);    /* its owner drew there (client
                                                                                     coordinates; NULL: all of it) */
 void wm_client(const struct wm *m, const struct wm_window *w, struct gfx_rect *out);    /* its client area on the screen */
+/* A window shown inside another's client area (API 2.0's EMBED): it loses its frame and its button, belongs to
+   the host (in front of it, minimised with it), and is never the user's to move or size. -1: not these two (one
+   is the other, the host is embedded itself, w has windows of its own or a place of the manager's). The caller
+   then puts it where wm_embed_where says, and again whenever the host has moved or changed size. */
+int wm_embed(struct wm *m, struct wm_window *w, struct wm_window *host, const struct gfx_rect *at);
+void wm_unembed(struct wm *m, struct wm_window *w, s32 *cw, s32 *ch);   /* its own window again, at its old corner;
+                                                   *cw, *ch: its old size, the caller's to give it back */
+int wm_embed_where(const struct wm *m, const struct wm_window *w, struct gfx_rect *out, int *host_shown); /* 1: its
+                                                   corner on the screen and its size now (what of its rectangle
+                                                   lies in the host's client area; a pixel at least); 0: no host */
 struct wm_window *wm_find(const struct wm *m, u32 id);
 struct wm_window *wm_hit(const struct wm *m, s32 x, s32 y, int *part);  /* the window at a point, and where in it */
 struct wm_window *wm_next(const struct wm *m, const struct wm_window *w);       /* the next to give the focus (Alt-Tab) */

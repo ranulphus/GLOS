@@ -433,7 +433,7 @@ static int version(struct trapframe *tf)
     memcpy(v.build, GLOS_BUILD, strlen(GLOS_BUILD) < sizeof v.build ? strlen(GLOS_BUILD) : sizeof v.build - 1);
     memset(v.functions, 0, sizeof v.functions);
     v.functions[GLOS_AREA_CORE][0] = (1u << 13) - 1;    /* VERSION to RANDOM */
-    v.functions[GLOS_AREA_WIN][0] = 0x5F;               /* CREATE, SHOW, PLACE, FOCUS, ENUM, DRAG */
+    v.functions[GLOS_AREA_WIN][0] = 0x7F;               /* CREATE, SHOW, PLACE, FOCUS, ENUM, EMBED, DRAG */
     v.functions[GLOS_AREA_DRAW][0] = 0x3FF;             /* PIXELS, PRESENT, SCREEN, the GPU's five, BLIT, MODES */
     v.functions[GLOS_AREA_INPUT][0] = 0x1F;             /* KEYS, CAPTURE, PADS, GAMEPORT, MODE */
     v.functions[GLOS_AREA_SHELL][0] = 0x3FF;            /* DESKTOP, TRAY, NOTIFY, POINT, HELP, OPEN, ASSOC, ENTRY,

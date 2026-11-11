@@ -16,6 +16,7 @@ int deskin_capture(struct wm *m, struct wm_window *w, int on);  /* the mouse to 
                                                                    can't have it (hidden, a window is being moved) */
 void deskin_keys(u8 down[64], u32 *mods, u32 *locks);   /* the keyboard as it is */
 void deskapp_hung(struct wm *m);        /* who isn't answering, each turn: their windows say so */
+void deskapp_embeds(struct wm *m);      /* each turn: windows shown inside others go where their hosts are now */
 int deskin_drag(struct wm *m, struct wm_window *w, int part);  /* the outline from now, for a window whose app asks
                                                                    (WH_TITLE, or WH_SIZE with WD_): -1 if no button is down */
 

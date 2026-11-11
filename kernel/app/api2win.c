@@ -320,6 +320,23 @@ static int drag(struct app *a, struct trapframe *tf)
     return r ? a2_fail(tf, (u32)r) : a2_ok(tf, 0);
 }
 
+static int embed(struct app *a, struct trapframe *tf)
+{
+    struct glos_win_embed q;
+    struct gfx_rect at;
+    u32 size, id;
+    int r;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.w < 0 || q.h < 0 || q.w > 4096 || q.h > 4096 || (q.w && !q.h))
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (!(id = win_id(a, q.handle)))
+        return not_window(a, tf, q.handle);
+    if ((r = api2_started_window(a, q.window)) != 0)    /* (its own, or a program's it started: CAPTURE's rule) */
+        return a2_fail(tf, (u32)r);
+    at.x = q.x, at.y = q.y, at.w = q.w, at.h = q.h;
+    r = desk_win_embed(a, id, q.window, q.w ? &at : 0);
+    return r ? a2_fail(tf, r == DESK_E_REFUSED ? GLOS_E_REFUSED : GLOS_E_NOT_FOUND) : a2_ok(tf, 0);
+}
+
 int api2_win(struct app *a, struct trapframe *tf, u32 n)
 {
     switch (n) {
@@ -329,6 +346,7 @@ int api2_win(struct app *a, struct trapframe *tf, u32 n)
     case GLOS_WIN_FOCUS & 0xFF: return focus(a, tf);
     case GLOS_WIN_ENUM & 0xFF: return enumerate(a, tf);
     case GLOS_WIN_DRAG & 0xFF: return drag(a, tf);
+    case GLOS_WIN_EMBED & 0xFF: return embed(a, tf);
     }
     return a2_fail(tf, GLOS_E_FUNCTION);
 }

@@ -881,6 +881,75 @@ int wm_resize(struct wm *m, struct wm_window *w, s32 cw, s32 ch)
     return 0;
 }
 
+/* ---- a window inside another (API 2.0's EMBED) */
+
+#define EMBED_BITS (WF_FRAME | WF_TOPMOST | WF_NOBAR | WF_NOMIN | WF_FIXED)
+
+int wm_embed(struct wm *m, struct wm_window *w, struct wm_window *host, const struct gfx_rect *at)
+{
+    struct wm_window *v;
+    if (w == host || at->w < 1 || at->h < 1 || (host->flags & (WF_EMBED | WF_DESKTOP | WF_POPUP | WF_NOFOCUS))
+        || (w->flags & (WF_DESKTOP | WF_POPUP | WF_NOFOCUS | WF_PLACED | WF_MIN)))
+        return -1;
+    for (v = m->bottom; v; v = v->above)
+        if (v->parent == w->id && v != w)
+            return -1;                          /* (it has windows of its own) */
+    if (!(w->flags & WF_EMBED)) {
+        w->embed_flags = w->flags;
+        w->embed_x = w->frame.x, w->embed_y = w->frame.y;
+        w->embed_w = w->store.w, w->embed_h = w->store.h;
+    }
+    if (shown(w))
+        damage(m, &w->frame);
+    w->flags = (w->flags & ~(u32)EMBED_BITS) | WF_EMBED | WF_NOBAR | WF_NOMIN | WF_FIXED;
+    w->parent = host->id;
+    w->embed_at = *at;
+    set_frame(m, w, w->frame.x, w->frame.y);
+    if (shown(w))
+        damage(m, &w->frame);
+    bar_stale(m);
+    bar_fit(m);
+    wm_raise(m, host);                          /* (the host's family in order: it in front of the host) */
+    return 0;
+}
+
+void wm_unembed(struct wm *m, struct wm_window *w, s32 *cw, s32 *ch)
+{
+    *cw = w->store.w, *ch = w->store.h;
+    if (!(w->flags & WF_EMBED))
+        return;
+    if (shown(w))
+        damage(m, &w->frame);
+    if (w->flags & WF_WITH)                     /* (hidden with its host: its own to show again) */
+        w->flags |= WF_SHOWN;
+    w->flags = (w->flags & ~(u32)(EMBED_BITS | WF_EMBED | WF_WITH)) | (w->embed_flags & EMBED_BITS);
+    w->parent = 0;
+    set_frame(m, w, w->embed_x, w->embed_y);
+    *cw = w->embed_w, *ch = w->embed_h;
+    if (shown(w))
+        damage(m, &w->frame);
+    bar_stale(m);
+    bar_fit(m);
+}
+
+int wm_embed_where(const struct wm *m, const struct wm_window *w, struct gfx_rect *out, int *host_shown)
+{
+    const struct wm_window *h = (w->flags & WF_EMBED) && w->parent ? wm_find(m, w->parent) : 0;
+    struct gfx_rect c;
+    s32 x0, y0, x1, y1;
+    if (!h)
+        return 0;
+    wm_client(m, h, &c);
+    x0 = w->embed_at.x < 0 ? 0 : w->embed_at.x >= c.w ? c.w - 1 : w->embed_at.x;
+    y0 = w->embed_at.y < 0 ? 0 : w->embed_at.y >= c.h ? c.h - 1 : w->embed_at.y;
+    x1 = w->embed_at.x + w->embed_at.w > c.w ? c.w : w->embed_at.x + w->embed_at.w;
+    y1 = w->embed_at.y + w->embed_at.h > c.h ? c.h : w->embed_at.y + w->embed_at.h;
+    out->x = c.x + x0, out->y = c.y + y0;
+    out->w = x1 > x0 ? x1 - x0 : 1, out->h = y1 > y0 ? y1 - y0 : 1;
+    *host_shown = shown(h);
+    return 1;
+}
+
 static void raise_one(struct wm *m, struct wm_window *w)
 {
     struct wm_window *over = w->above;
@@ -1063,8 +1132,9 @@ struct wm_window *wm_next(const struct wm *m, const struct wm_window *w)
 {
     struct wm_window *v, *next = 0, *first = 0;
     for (v = m->bottom; v; v = v->above) {
-        if ((!shown(v) && !(v->flags & WF_MIN)) || (v->flags & WF_NOFOCUS))
-            continue;                           /* (a minimised one too: whoever gives it the focus brings it back) */
+        if ((!shown(v) && !(v->flags & WF_MIN)) || (v->flags & (WF_NOFOCUS | WF_EMBED)))
+            continue;                           /* (a minimised one too: whoever gives it the focus brings it back;
+                                                   not one shown inside another: its host is the one in the list) */
         if (!first || v->id < first->id)
             first = v;
         if (w && v->id > w->id && (!next || v->id < next->id))
@@ -1233,7 +1303,8 @@ static void draw_window(const struct wm *m, struct gfx_surface *scr, const struc
 {
     const struct wm_look *l = &m->look;
     struct gfx_rect c, in = scr->clip, bar, keep = scr->clip;
-    int focus = w == m->focus;
+    int focus = w == m->focus || (m->focus && (m->focus->flags & WF_EMBED) && m->focus->parent == w->id);   /* (or a
+                                                   window shown inside it has it) */
 
     wm_client(m, w, &c);
     if (framed(w) && !(in.x >= c.x && in.y >= c.y && in.x + in.w <= c.x + c.w && in.y + in.h <= c.y + c.h)) {

@@ -163,6 +163,8 @@ void api2_audio_close(struct app *a, void *obj);                /* CLOSE of a st
 void api2_midi_close(struct app *a, void *obj);                 /* ... of a MIDI port's */
 /* api2cap.c */
 int api2_capture(struct app *a, struct trapframe *tf, u32 n);   /* CAPTURE's calls */
+int api2_started_window(struct app *a, u32 window);             /* the window with that number is a's, or a program's
+                                                                   that a started: 0; else GLOS_E_NOT_FOUND, _REFUSED */
 /* api2net.c */
 extern const struct propdef api2_net_props[];
 extern const u32 api2_net_nprops;

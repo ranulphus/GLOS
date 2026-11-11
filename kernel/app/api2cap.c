@@ -32,6 +32,12 @@ static int window(struct app *a, u32 id, s32 *w, s32 *h)
     return by && by == app_id(a) ? 0 : GLOS_E_REFUSED;
 }
 
+int api2_started_window(struct app *a, u32 id)
+{
+    s32 w, h;
+    return window(a, id, &w, &h);
+}
+
 static int pixels(struct app *a, struct trapframe *tf)
 {
     struct glos_capture_pixels q;

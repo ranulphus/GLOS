@@ -864,3 +864,62 @@ int desk_win_mouse(u32 id, s32 x, s32 y, u32 buttons, u32 button, int down, u32 
     desk_unlock();
     return r;
 }
+
+/* ---- API 2.0's EMBED: a window shown inside another app's (api2win.c says who may) */
+
+/* One such window put where its host has it now, its app told of a new size; hidden while its host is, and its
+   own window again once its host is gone. */
+static void embed_fit(struct wm *m, struct wm_window *w)
+{
+    struct gfx_rect r;
+    s32 cw, ch;
+    int host_shown = 0;
+    if (!wm_embed_where(m, w, &r, &host_shown)) {
+        wm_unembed(m, w, &cw, &ch);
+        deskapp_resize(m, w, cw, ch);
+        return;
+    }
+    wm_move(m, w, r.x, r.y);
+    deskapp_resize(m, w, r.w, r.h);
+    if (!host_shown && (w->flags & WF_SHOWN)) {
+        wm_show(m, w, 0);
+        w->flags |= WF_WITH;
+    } else if (host_shown && (w->flags & WF_WITH) && !(w->flags & WF_SHOWN)) {
+        wm_show(m, w, 1);
+    }
+}
+
+void deskapp_embeds(struct wm *m)
+{
+    struct wm_window *w;
+    u32 ids[16], n = 0, i;
+    for (w = m->bottom; w && n < 16; w = w->above)     /* (their numbers first: showing one changes the order) */
+        if (w->flags & WF_EMBED)
+            ids[n++] = w->id;
+    for (i = 0; i < n; i++)
+        if ((w = wm_find(m, ids[i])) != 0)
+            embed_fit(m, w);
+}
+
+int desk_win_embed(struct app *a, u32 host, u32 child, const struct gfx_rect *at)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *h = own(m, a, host), *w = wm_find(m, child);
+    s32 cw, ch;
+    int r = 0;
+    if (!h || !w || !w->owner) {
+        r = GLOS_E_WINDOW;
+    } else if (at) {
+        if (wm_embed(m, w, h, at) != 0)
+            r = DESK_E_REFUSED;
+        else
+            embed_fit(m, w);
+    } else if ((w->flags & WF_EMBED) && w->parent == h->id) {
+        wm_unembed(m, w, &cw, &ch);
+        deskapp_resize(m, w, cw, ch);
+    } else {
+        r = DESK_E_REFUSED;                     /* (not one of this window's) */
+    }
+    desk_unlock();
+    return r;
+}

@@ -275,7 +275,8 @@ struct glos_random {
 #define GLOS_WIN_ENUM    GLOS_FN(GLOS_AREA_WIN, 4)  /* struct glos_win_enum: the windows there are */
 #define GLOS_WIN_DRAG    GLOS_FN(GLOS_AREA_WIN, 6)  /* struct glos_win_drag: the user is moving or sizing it by a
                                                        part the app drew itself (a bare window's own title bar) */
-/* (5: EMBED, with phase B's step 2d) */
+#define GLOS_WIN_EMBED   GLOS_FN(GLOS_AREA_WIN, 5)  /* struct glos_win_embed: a window of a program the caller
+                                                       started, shown inside one of the caller's */
 
 /* A window's kind. */
 #define GLOS_WK_NORMAL   0      /* a framed window with a button on the task bar */
@@ -355,6 +356,21 @@ struct glos_win_enum {
     unsigned count;             /* -> how many windows there are (GLOS_E_ROOM: more than fit; those that fit given) */
 };
 #define GLOS_ENUM_ALL 0xFFFFFFFFu
+
+/* EMBED: the window `window` (its number; one of a program the caller started with JOB's RUN and still has the
+   handle of, or one of the caller's own) is shown inside the caller's window `handle`, at a rectangle of its
+   client area: without a frame or a button on the task bar, in front of the host and going where the host goes,
+   minimised and hidden with it. It is made the rectangle's size (what of it lies in the host: its app gets
+   GLOS_EV_SIZE, as for any change of size) and is not the user's to move. The mouse over it and, once it is
+   pressed there, the keyboard are its app's as for any window. With w 0 it is let go: its own window again, where
+   and as large as it was; so too when the host is closed. Refused (GLOS_E_REFUSED): another app's window, one
+   that is maximised, minimised or full screen, one with windows of its own, a host that is itself embedded. */
+struct glos_win_embed {
+    unsigned size;
+    glos_handle handle;         /* the caller's window that takes it in */
+    unsigned window;            /* the window's number */
+    int x, y, w, h;             /* where in the host's client area; w 0: let go */
+};
 
 struct glos_win_drag {
     unsigned size;

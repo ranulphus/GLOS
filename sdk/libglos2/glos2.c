@@ -1107,6 +1107,12 @@ int glos_capture_pixels(unsigned window, unsigned format, void *buffer, unsigned
     return r;
 }
 
+int glos_embed(glos_handle w, unsigned window, int x, int y, int cw, int ch)
+{
+    struct glos_win_embed q = { sizeof q, w, window, x, y, cw, ch };
+    return raw(GLOS_WIN_EMBED, &q, 0);
+}
+
 int glos_capture_keys(unsigned window, const struct glos_capture_key *keys, unsigned count)
 {
     struct glos_capture_input q = { sizeof q, window, (unsigned)keys, count };
