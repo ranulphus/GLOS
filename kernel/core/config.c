@@ -26,6 +26,7 @@
 #include "joy.h"
 #include "usb.h"
 #include "mixer.h"
+#include "mixgain.h"
 #include "nic.h"
 #include "vm.h"
 #include "desk.h"
@@ -468,6 +469,13 @@ void kcfg_apply(const char *section, const char *key, const char *v)
         mixer_enable(same(v, "on"));
     } else if (same(section, "sound") && same(key, "rate")) {
         mixer_set_rate(num(v));
+    } else if (same(section, "sound") && (same(key, "volume") || same(key, "mute"))) {
+        char vol[8], mu[8];                     /* (the two together are the master: API 2.0's AUDIO MIXER) */
+        if (kcfg_get("sound", "volume", vol, sizeof vol) < 0)
+            ksnprintf(vol, sizeof vol, "100");
+        if (kcfg_get("sound", "mute", mu, sizeof mu) < 0)
+            mu[0] = 0;
+        mixer_master_set(mix_from_percent(same(key, "volume") ? num(v) : num(vol)), same(key, "mute") ? same(v, "on") : same(mu, "on"));
     } else if (same(section, "input") && (same(key, "repeat_delay") || same(key, "repeat_rate"))) {
         char d[16], r[16];
         kcfg_get("input", "repeat_delay", d, sizeof d);

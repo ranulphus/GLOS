@@ -356,6 +356,13 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   - MIDI in;
   - a device came or went.
 
+- **As built (step 10, first part):** OUT, MIXER, LEVELS, DEVICES.
+  - OUT keeps 1.x's shared ring: nothing is called to write a block. "A block wanted" is `GLOS_EV_AUDIO` when
+    the ring falls below the stream's NOTIFY.
+  - A stream's volume, balance, mute and pause are properties; so are its position and what is queued.
+  - The master is GLOS's own (software), kept in GLOS.CFG; the chip's master is one of the chip's channels.
+  - No event yet for a stream started or ended.
+
 ### 0Bh NET
 
 | Call | What it does |

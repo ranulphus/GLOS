@@ -914,3 +914,61 @@ int glos_sys_log(unsigned pos, char *buf, unsigned room, unsigned *next, int fol
         last_error = r;
     return r ? -1 : (int)q.length;
 }
+
+/* ---- AUDIO */
+
+glos_handle glos_audio_out(unsigned rate, unsigned channels, unsigned bytes, struct glos_audio_ring **ring, unsigned *id)
+{
+    struct glos_audio_out q = { sizeof q, rate, channels, bytes, 0, 0, 0 };
+    int r = raw(GLOS_AUDIO_OUT, &q, 0);
+    last_error = r;
+    if (r)
+        return 0;
+    if (ring)
+        *ring = (struct glos_audio_ring *)glos_ptr(q.ring);
+    if (id)
+        *id = q.id;
+    return q.handle;
+}
+
+unsigned glos_audio_room(const struct glos_audio_ring *r) { return r->bytes - (r->write - r->read); }
+
+unsigned glos_audio_write(struct glos_audio_ring *r, const void *samples, unsigned bytes)
+{
+    unsigned room = glos_audio_room(r), at = r->write & (r->bytes - 1), first;
+    char *base = (char *)r + r->ring;
+    if (bytes > room)
+        bytes = room;
+    bytes &= ~(r->channels * 2 - 1);            /* (whole frames) */
+    first = bytes < r->bytes - at ? bytes : r->bytes - at;
+    memcpy(base + at, samples, first);
+    memcpy(base, (const char *)samples + first, bytes - first);
+    r->write += bytes;
+    return bytes;
+}
+
+int glos_mixer(struct glos_audio_mixer *m)
+{
+    m->size = sizeof *m;
+    return raw(GLOS_AUDIO_MIXER, m, 0);
+}
+
+int glos_audio_levels(unsigned id, unsigned *left, unsigned *right)
+{
+    struct glos_audio_levels q = { sizeof q, id, 0, 0 };
+    int r = raw(GLOS_AUDIO_LEVELS, &q, 0);
+    if (left)
+        *left = q.left;
+    if (right)
+        *right = q.right;
+    return r;
+}
+
+int glos_audio_devices(struct glos_audio_device *out, unsigned room, unsigned *count)
+{
+    struct glos_sys_stat q = { sizeof q, 0, (unsigned)out, room, 0, 0 };
+    int r = raw(GLOS_AUDIO_DEVICES, &q, 0);
+    if (count)
+        *count = q.count;
+    return r;
+}

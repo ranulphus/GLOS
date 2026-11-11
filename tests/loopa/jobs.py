@@ -4604,6 +4604,36 @@ def api_job_case(profile, vcard, card):
     return "  %-22s %s%s" % ("apijob-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
+def api_audio_case(profile, vcard, card, sound="sb16"):
+    """API 2.0's AUDIO (APITEST audio; phase B step 10), under the agent with the desktop on and a sound card (an
+    SB16, or a Crystal chip GLOS sets up): a stream out played at its rate with nothing short; its volume, balance,
+    mute and pause seen in its level and position; told when it runs low; the master halved and muted; a second
+    stream beside it and the mixer's list; the chip's channels and input; the devices. Every case ok."""
+    crystal = sound != "sb16"
+    tag = "%s-%s" % (profile, vcard) + ("-" + sound if crystal else "")
+    agent = Agent("apiaudio-" + tag, profile, card, ["--card", vcard, "--sound", sound]
+        + ([] if crystal else ["--pre", "SET BLASTER=A220 I5 D1 H5 T6"]) + [
+        "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
+        "--cmd", "SERSAY HX-START apiaudio", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1500)
+    checks, info = {"listen": agent.listening()}, ""
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        checks["run"] = agent.ssh("C:\\TEST\\APITEST.EXE audio", timeout=900)[0] == 0
+        cfg = agent.ssh("type C:\\TEST\\GLOS.CFG")[1].replace("\r", "")       # (the master is kept there: as the test left it)
+        checks["kept"] = "volume = 50" not in cfg and "mute = on" not in cfg
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        info += " timeout"
+    text = agent.wait()
+    cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", text)
+    checks["cases"] = len(cases) >= 11 and all(k == "1" for c, k, w in cases)
+    if not checks["cases"]:
+        info += " cases=%d failed-cases=%s" % (len(cases), ";".join(c + w.rstrip() for c, k, w in cases if k != "1"))
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("apiaudio-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
 def api_sched_case(profile, card):
     """API 2.0's schedule run by the kernel (SHELL SCHEDULE; phase B step 8), over two starts of GLOS under the
     agent. In the first, APITEST schedules a command at each start and one daily at 03:00, and GLOS is told to
@@ -6770,7 +6800,8 @@ def native_case(profile, vcard, card, bits):
 
 CONTROL_CASES = [("bf6", "g200", "ne2kpci")]
 CONTROL_NUMBERS = {"gpu_watchdog": "1000", "repeat_rate": "20", "double_click": "400", "envsize": "2048",
-                   "memory": "8192", "interval": "12", "size": "16", "range": "2000", "wait": "240", "power": "240"}
+                   "memory": "8192", "interval": "12", "size": "16", "range": "2000", "wait": "240", "power": "240",
+                   "volume": "70"}
 CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\KIOSK.BAT", "options": "/NOVME",
                  "title": "CP Test", "args": "-a -b", "comspec": "C:\\COMMAND.COM",
                  "autoexec": "C:\\AUTOEXEC.BAT", "dir": "C:\\CP", "blaster": "A220 I7 D1 H5",
@@ -7196,6 +7227,7 @@ def main():
             res += matrix(api_shell_case, wins, a.jobs) # ... and the shell: the tray, notifications, its events
             res += matrix(api_sched_case, [(c[0], c[2]) for c in wins], a.jobs)    # ... and the schedule, run by the kernel
             res += matrix(api_job_case, wins, a.jobs)   # ... and programs run for the app: JOB
+            res += matrix(api_audio_case, wins + [w + ("cs4236b",) for w in wins[:1]], a.jobs)    # ... and sound
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

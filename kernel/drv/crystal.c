@@ -355,5 +355,51 @@ static int crystal_running(void) { return cs.running; }
 static u32 crystal_irqs(void) { return cs.irqs; }
 static u32 crystal_errors(void) { return cs.errors; }
 
+/* The codec's own mixer (CS4231-compatible registers, from Crystal's data sheet): the DAC's output I6/I7 (bit 7
+   mute, six bits of attenuation: 0 the loudest); AUX1 I2/I3, AUX2 I4/I5 and the line input I18/I19 (bit 7 mute,
+   five bits: 0 the loudest). On these cards AUX1 is the FM chip's line and AUX2 the CD's. The input recorded:
+   I0/I1's top two bits (0 the line, 1 AUX1, 2 the microphone, 3 the mixer's output). There is no master and no
+   level for the microphone here. */
+static int crystal_chan(int chan, int set, u8 *left, u8 *right, u8 *mute)
+{
+    static const u8 reg[MX_CHANNELS] = { 0, 6, 2, 4, 18, 0 };
+    u32 f, bits = chan == MX_CH_WAVE ? 63 : 31;
+    u8 a, b;
+    if (!cs.found || chan < 0 || chan >= MX_CHANNELS || !reg[chan])
+        return -1;
+    f = irq_save();
+    if (set) {
+        wr(reg[chan], (u8)((*mute ? 0x80 : 0) | (bits - *left * bits / 255)));
+        wr((u8)(reg[chan] + 1), (u8)((*mute ? 0x80 : 0) | (bits - *right * bits / 255)));
+    }
+    a = rd(reg[chan]), b = rd((u8)(reg[chan] + 1));
+    *left = (u8)((bits - (a & bits)) * 255 / bits);
+    *right = (u8)((bits - (b & bits)) * 255 / bits);
+    *mute = (u8)((a & 0x80) != 0);
+    irq_restore(f);
+    return 0;
+}
+
+static int crystal_input(int set, int *input)
+{
+    static const u8 src[4] = { 2, 0, 0xFF, 3 }; /* mic, line, (no CD), the mixer's output */
+    u32 f, i;
+    u8 a;
+    if (!cs.found || (set && (*input < 0 || *input > MX_IN_MIX || src[*input] == 0xFF)))
+        return -1;
+    f = irq_save();
+    if (set) {
+        wr(0, (u8)((rd(0) & 0x3F) | (src[*input] << 6)));
+        wr(1, (u8)((rd(1) & 0x3F) | (src[*input] << 6)));
+    }
+    a = rd(0) >> 6;
+    *input = MX_IN_LINE;
+    for (i = 0; i < 4; i++)
+        if (src[i] == a)
+            *input = (int)i;
+    irq_restore(f);
+    return 0;
+}
+
 const struct sound_card crystal_card = { "crystal", crystal_start, crystal_stop, crystal_running, crystal_irqs,
-                                         crystal_errors };
+                                         crystal_errors, crystal_chan, crystal_input };

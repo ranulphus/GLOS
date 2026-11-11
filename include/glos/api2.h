@@ -876,6 +876,128 @@ struct glos_fs_sectors {
 #define GLOS_EV_FS GLOS_EV(GLOS_AREA_FS, 1)     /* (the header alone; handle: the watch) what is watched changed.
                                                    Changes close together are told once */
 
+/* ================================================================== AUDIO (0Ah): sound
+ *
+ * GLOS's mixer plays every app's streams through the PC's sound card (a Sound Blaster 16, or a Crystal CS423x's
+ * codec) while the desktop has the screen. A stream out is a ring of signed 16-bit samples in memory the app
+ * and GLOS share: the app writes samples and moves `write` on, GLOS plays them at its own pace and moves `read`.
+ * Refused (GLOS_E_NO_AUDIO) where there is no card GLOS can play, or [sound] mixer is off. */
+#define GLOS_AUDIO_OUT     GLOS_FN(GLOS_AREA_AUDIO, 0)  /* struct glos_audio_out: a stream out (GLOS_HK_STREAM) */
+#define GLOS_AUDIO_MIXER   GLOS_FN(GLOS_AREA_AUDIO, 2)  /* struct glos_audio_mixer: the master, the streams, the chip */
+#define GLOS_AUDIO_LEVELS  GLOS_FN(GLOS_AREA_AUDIO, 3)  /* struct glos_audio_levels: how loud it is now, for meters */
+#define GLOS_AUDIO_DEVICES GLOS_FN(GLOS_AREA_AUDIO, 6)  /* struct glos_sys_stat: a struct glos_audio_device each */
+/* (1 IN, 4 MIDI_OUT, 5 MIDI_IN: with phase B's step 10's later parts) */
+#define GLOS_E_NO_AUDIO 9
+
+struct glos_audio_out {
+    unsigned size;
+    unsigned rate;              /* samples a second, 4000 to 48000: GLOS converts to the mixer's own */
+    unsigned channels;          /* 1 or 2 */
+    unsigned bytes;             /* the ring's size: a power of two, 4096 to 65536 */
+    glos_handle handle;         /* -> the stream, until CLOSE */
+    unsigned ring;              /* -> where its struct glos_audio_ring is, in the app's memory */
+    unsigned id;                /* -> its number (MIXER's, LEVELS') */
+};
+
+/* The ring's header; the samples follow it at `ring` bytes from its start (interleaved when there are two
+   channels). `write` and `read` count bytes from the stream's start and only grow; a sample's place is the count
+   modulo `bytes`. A period of the mixer's in which a stream that has begun has too few samples is an underrun:
+   what there is is played, then silence. */
+struct glos_audio_ring {
+    unsigned size;
+    unsigned rate, channels;
+    unsigned bytes;
+    volatile unsigned write;    /* bytes the app has written, all told (the app's to move) */
+    volatile unsigned read;     /* bytes GLOS has played */
+    volatile unsigned periods;  /* the mixer's periods since the stream began */
+    volatile unsigned underruns;        /* ... in which it ran short */
+    unsigned mixer_rate, period_frames; /* the mixer's own: samples a second, and a period's */
+    volatile unsigned volume;   /* (GLOS_PROP_STREAM_VOLUME) */
+    unsigned ring;              /* the samples' offset from the start of this header */
+};
+
+/* A stream's properties. */
+#define GLOS_PROP_STREAM_VOLUME   GLOS_PROP(GLOS_HK_STREAM, 0)  /* 0 to 256 (256: as it is) */
+#define GLOS_PROP_STREAM_BALANCE  GLOS_PROP(GLOS_HK_STREAM, 1)  /* -256 all left to 256 all right; 0 */
+#define GLOS_PROP_STREAM_MUTE     GLOS_PROP(GLOS_HK_STREAM, 2)  /* 1: silent (its samples are still used up) */
+#define GLOS_PROP_STREAM_PAUSED   GLOS_PROP(GLOS_HK_STREAM, 3)  /* 1: it stands still; what is in the ring waits */
+#define GLOS_PROP_STREAM_POSITION GLOS_PROP(GLOS_HK_STREAM, 4)  /* frames played since it began (read) */
+#define GLOS_PROP_STREAM_QUEUED   GLOS_PROP(GLOS_HK_STREAM, 5)  /* bytes written and not yet played (read) */
+#define GLOS_PROP_STREAM_NOTIFY   GLOS_PROP(GLOS_HK_STREAM, 6)  /* bytes: GLOS_EV_AUDIO when fewer are queued, once
+                                                                   each time it falls below (0: never) */
+#define GLOS_PROP_STREAM_ID       GLOS_PROP(GLOS_HK_STREAM, 7)  /* its number (read) */
+
+/* The mixer. Reading is anybody's; setting the master, another app's stream, the chip's channels or the input
+   recorded is for GLOS's own programs (the Mixer, the shell's volume icon). */
+struct glos_audio_mixer {
+    unsigned size;
+    unsigned what;              /* GLOS_MIXER_ */
+    unsigned id;                /* STREAM_SET: the stream's number. CHANNEL_SET: GLOS_CHANNEL_. INPUT_SET: GLOS_INPUT_ */
+    int volume;                 /* MASTER: 0 to 100 (percent). STREAM_SET: 0 to 256. CHANNEL_SET: the left, 0 to 255.
+                                   -1: as it is */
+    int balance;                /* STREAM_SET: -256 to 256. CHANNEL_SET: the right, 0 to 255. -1000: as it is */
+    int mute;                   /* 0 or 1; -1: as it is */
+    unsigned buffer;            /* STREAMS, CHANNELS: where the structures go */
+    unsigned room;
+    unsigned length;            /* -> the bytes there are (GLOS_E_ROOM: cut) */
+    unsigned count;             /* -> how many were given */
+};
+#define GLOS_MIXER_MASTER      0        /* -> the master's volume and mute */
+#define GLOS_MIXER_MASTER_SET  1        /* (kept in GLOS.CFG's [sound] volume and mute) */
+#define GLOS_MIXER_STREAMS     2        /* a struct glos_audio_stream for each stream, every app's */
+#define GLOS_MIXER_STREAM_SET  3
+#define GLOS_MIXER_CHANNELS    4        /* a struct glos_audio_channel for each of the chip's channels */
+#define GLOS_MIXER_CHANNEL_SET 5
+#define GLOS_MIXER_INPUT       6        /* -> id: the input recorded (GLOS_INPUT_) */
+#define GLOS_MIXER_INPUT_SET   7
+
+struct glos_audio_stream {
+    unsigned size;
+    unsigned id, app;           /* its number; its app's id */
+    unsigned rate, channels;
+    unsigned volume;            /* 0 to 256 */
+    int balance;
+    unsigned mute, paused;
+    unsigned left, right;       /* its level now: peaks of the period played last, 0 to 32767 */
+};
+
+struct glos_audio_channel {
+    unsigned size;
+    unsigned id;                /* GLOS_CHANNEL_ */
+    unsigned left, right;       /* 0 to 255 */
+    unsigned mute;
+    char name[12];              /* "Master", "Wave", "FM", "CD", "Line", "Mic" */
+};
+#define GLOS_CHANNEL_MASTER 0   /* the chip's own master (not GLOS's: that is MASTER) */
+#define GLOS_CHANNEL_WAVE   1   /* what GLOS's mixer plays */
+#define GLOS_CHANNEL_FM     2   /* the FM chip (MIDI) */
+#define GLOS_CHANNEL_CD     3   /* the CD's line */
+#define GLOS_CHANNEL_LINE   4
+#define GLOS_CHANNEL_MIC    5
+#define GLOS_INPUT_MIC  0
+#define GLOS_INPUT_LINE 1
+#define GLOS_INPUT_CD   2
+#define GLOS_INPUT_MIX  3       /* all of them (an SB16), or what the chip plays (a Crystal codec) */
+
+struct glos_audio_levels {
+    unsigned size;
+    unsigned id;                /* a stream's number; 0: the output, after the master */
+    unsigned left, right;       /* -> peaks of the period played last, 0 to 32767 (0 while nothing plays) */
+};
+
+struct glos_audio_device {
+    unsigned size;
+    unsigned kind;              /* GLOS_AUDIO_DEV_ */
+    unsigned rate;              /* OUT: the mixer's rate now */
+    unsigned streams;           /* OUT: how many streams are open */
+    char name[24];              /* "sb16", "crystal" */
+};
+#define GLOS_AUDIO_DEV_OUT 0    /* the card GLOS's mixer plays */
+
+/* AUDIO's event. */
+#define GLOS_EV_AUDIO GLOS_EV(GLOS_AREA_AUDIO, 1)       /* (the header alone; handle: the stream) it has fewer bytes
+                                                           queued than its NOTIFY: write more */
+
 /* ================================================================== SETTINGS (0Ch): GLOS.CFG, the theme, the region
  *
  * A setting is a section, a key and a value, all text (GLOS.CFG's "[section]" and "key = value"). The schema

@@ -32,7 +32,30 @@ struct sound_card {                             /* what the mixer plays through 
     int (*running)(void);
     u32 (*irqs)(void);
     u32 (*errors)(void);                        /* periods the card reported an underrun in (0: it can't tell) */
+    /* The chip's own mixer (API 2.0's AUDIO MIXER): a channel's levels (0 to 255) and mute read or set; the
+       input that is recorded. 0, or -1: the chip has no such channel. NULL: none at all. */
+    int (*chan)(int chan, int set, u8 *left, u8 *right, u8 *mute);
+    int (*input)(int set, int *input);
 };
+enum { MX_CH_MASTER, MX_CH_WAVE, MX_CH_FM, MX_CH_CD, MX_CH_LINE, MX_CH_MIC, MX_CHANNELS };
+enum { MX_IN_MIC, MX_IN_LINE, MX_IN_CD, MX_IN_MIX };
+enum { MX_VOLUME, MX_BALANCE, MX_MUTE, MX_PAUSE, MX_THRESHOLD, MX_POSITION, MX_QUEUED };
+struct mixer_stream {
+    u32 id, app, rate, channels, volume;
+    s32 balance;
+    u8 mute, paused;
+    u16 level[2];
+};
+int mixer_get(struct app *a, u32 id, int what, s32 *v);         /* a stream's (a NULL: any app's): 0, or -1 */
+int mixer_set(struct app *a, u32 id, int what, s32 v);
+u32 mixer_streams(struct mixer_stream *out, u32 max);
+void mixer_master_get(u32 *volume, int *mute);                  /* 0 to 256 */
+void mixer_master_set(u32 volume, int mute);
+int mixer_levels(u32 id, u16 *left, u16 *right);                /* the output's (id 0) or a stream's peaks */
+int mixer_wants(struct app *a, u32 *id);                        /* a stream of a's is below its threshold: once */
+const char *mixer_card(void);                                   /* the card the mixer plays through, or NULL */
+int mixer_chan(int chan, int set, u8 *left, u8 *right, u8 *mute);
+int mixer_input(int set, int *input);
 extern const struct sound_card sb16_card, crystal_card;
 void mixer_late(void);                          /* GLOS.CFG read: a Crystal chip set up when there's no SB16 */
 int crystal_init(const char *cfg);              /* [sound] crystal (auto, off, or resources): the part set up: 0 */

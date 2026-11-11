@@ -44,6 +44,10 @@ const struct cfg_key cfg_schema[] = {
     /* [sound] (M8) */
     { "sound", "mixer", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "&Mixer",
       "GLOS plays the Sound Blaster 16 and mixes the apps' sound (off: programs have the card)" },
+    { "sound", "volume", CFG_NUMBER, CFG_NOW, 0, 100, 0, "100", "&Volume",
+      "The master volume of what GLOS's mixer plays, in percent" },
+    { "sound", "mute", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "off", "M&ute",
+      "GLOS's mixer plays nothing" },
     { "sound", "rate", CFG_CHOICE, CFG_NOW, 0, 0, "11025|22050|44100", "22050", "Mixing &rate (Hz)",
       "Samples a second the mixer plays" },
     { "sound", "blaster", CFG_BLASTER, CFG_RESTART, 0, 40, 0, "", "&Card (BLASTER)",

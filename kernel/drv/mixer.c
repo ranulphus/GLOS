@@ -34,6 +34,7 @@
 #include "kcfg.h"
 #include "kprintf.h"
 #include "mixer.h"
+#include "mixgain.h"
 #include "mm.h"
 #include "sched.h"
 #include "timer.h"
@@ -52,6 +53,12 @@ static struct strm {
     u8 begun, frame_bytes;
     u32 lin;                                    /* where its app has it */
     u32 short_run, bursts;                      /* underruns in a row now; bursts logged */
+    /* API 2.0's (AUDIO's OUT and MIXER) */
+    s16 balance;                                /* -256 all left to 256 all right */
+    u8 mute, paused;
+    u8 want;                                    /* it has fallen below its threshold: its app is to be told, once */
+    u16 level[2];                               /* its peaks in the period played last, as it went into the sum */
+    u32 threshold;                              /* bytes queued below which its app wants to know (0: it doesn't) */
 } st[STREAMS];
 
 static struct {
@@ -63,6 +70,9 @@ static struct {
     const struct sound_card *card;
     u32 rate, next_id, periods;
     s32 acc[PERIOD * 2];
+    u32 master;                                 /* the master's gain, 0 to MIX_UNITY ([sound] volume) ... */
+    u8 mute;                                    /* ... and its mute ([sound] mute) */
+    u16 level[2];                               /* the output's peaks in the period played last */
 } mx;
 
 static void fill(s16 *out, u32 frames, const struct trapframe *tf);
@@ -71,6 +81,7 @@ int mixer_init(const struct bootinfo *bi)
 {
     mx.rate = bi->sound_rate ? bi->sound_rate : 22050;
     mx.next_id = 1;
+    mx.master = MIX_UNITY;
     mx.out = 1;                                 /* (until the desktop is up) */
     mx.bi = bi;
     if ((bi->sound_flags & BI_SOUND_OFF) || sb16_init(bi) != 0)
@@ -151,8 +162,12 @@ int mixer_found(void) { return mx.on; }
 static void take(struct strm *s, u32 frames, const struct trapframe *tf)
 {
     struct glos_stream *h = s->h;
-    u32 have = (h->write - h->read) / s->frame_bytes, need, i, vol = h->volume, mask = h->bytes - 1;
-    u32 pos = h->read, frac = s->frac;
+    u32 have = (h->write - h->read) / s->frame_bytes, need, i, mask = h->bytes - 1, gl, gr;
+    u32 pos = h->read, frac = s->frac, pl = 0, pr = 0;
+    s->level[0] = s->level[1] = 0;
+    if (s->paused)
+        return;                                 /* (what it has waits; no period of its own goes by) */
+    mix_gains(h->volume, s->balance, s->mute, &gl, &gr);
     if (!s->begun) {
         if (!have)
             return;
@@ -190,15 +205,27 @@ static void take(struct strm *s, u32 frames, const struct trapframe *tf)
             l = al + (((bl - al) * (s32)f) >> 16);
             r = ar + (((br - ar) * (s32)f) >> 16);
         }
-        mx.acc[i * 2] += (l * (s32)vol) >> 8;
-        mx.acc[i * 2 + 1] += (r * (s32)vol) >> 8;
+        l = (l * (s32)gl) >> 8;
+        r = (r * (s32)gr) >> 8;
+        mx.acc[i * 2] += l;
+        mx.acc[i * 2 + 1] += r;
+        if ((u32)(l < 0 ? -l : l) > pl)
+            pl = (u32)(l < 0 ? -l : l);
+        if ((u32)(r < 0 ? -r : r) > pr)
+            pr = (u32)(r < 0 ? -r : r);
         frac += s->step;
     }
+    s->level[0] = (u16)(pl > 32767 ? 32767 : pl);
+    s->level[1] = (u16)(pr > 32767 ? 32767 : pr);
     i = frac >> 16;                             /* frames used up */
     if (i > have)
         i = have;
     h->read = pos + i * s->frame_bytes;
     s->frac = frac & 0xFFFF;
+    if (s->threshold && h->write - h->read < s->threshold)
+        s->want |= 1;                           /* (told from the app's tick: mixer_wants) */
+    else
+        s->want = 0;
 }
 
 /* The card's interrupt: a half to fill (16-bit stereo). */
@@ -209,8 +236,11 @@ static void fill(s16 *out, u32 frames, const struct trapframe *tf)
     for (i = 0; i < STREAMS && !apps_paused(); i++)    /* (paused apps' streams wait with them) */
         if (st[i].a)
             take(&st[i], frames, tf);
-    for (i = 0; i < frames * 2; i++)
-        out[i] = (s16)(mx.acc[i] > 32767 ? 32767 : mx.acc[i] < -32768 ? -32768 : mx.acc[i]);
+    {
+        u16 peak[2] = { 0, 0 };
+        mix_master(mx.acc, out, frames, mx.master, mx.mute, peak);
+        mx.level[0] = peak[0], mx.level[1] = peak[1];
+    }
     mx.periods++;
 }
 
@@ -269,6 +299,10 @@ int mixer_open(struct app *a, u32 rate, u32 channels, u32 bytes, u32 *id, u32 *l
     s->begun = 0;
     s->frame_bytes = (u8)(channels * 2);
     s->short_run = s->bursts = 0;
+    s->balance = 0;
+    s->mute = s->paused = s->want = 0;
+    s->level[0] = s->level[1] = 0;
+    s->threshold = 0;
     s->id = mx.next_id++;
     s->lin = *lin;
     s->a = a;
@@ -349,4 +383,138 @@ void mixer_counts(u32 *rate, u32 *streams, u32 *underruns)
             *underruns += st[i].h->underruns;
         }
     irq_restore(f);
+}
+
+/* ---- API 2.0's AUDIO (kernel/app/api2audio.c): a stream's properties, the master, the streams, levels, the
+   chip's channels. a: the app that asks for a stream of its own; NULL: any app's (the Mixer's). */
+
+static struct strm *find(struct app *a, u32 id)
+{
+    u32 i;
+    for (i = 0; i < STREAMS; i++)
+        if (st[i].a && st[i].id == id && (!a || st[i].a == a))
+            return &st[i];
+    return 0;
+}
+
+int mixer_get(struct app *a, u32 id, int what, s32 *v)
+{
+    u32 f = irq_save();
+    struct strm *s = find(a, id);
+    int r = 0;
+    if (!s) {
+        irq_restore(f);
+        return -1;
+    }
+    switch (what) {
+    case MX_VOLUME: *v = (s32)s->h->volume; break;
+    case MX_BALANCE: *v = s->balance; break;
+    case MX_MUTE: *v = s->mute; break;
+    case MX_PAUSE: *v = s->paused; break;
+    case MX_THRESHOLD: *v = (s32)s->threshold; break;
+    case MX_POSITION: *v = (s32)(s->h->read / s->frame_bytes); break;
+    case MX_QUEUED: *v = (s32)(s->h->write - s->h->read); break;
+    default: r = -1;
+    }
+    irq_restore(f);
+    return r;
+}
+
+int mixer_set(struct app *a, u32 id, int what, s32 v)
+{
+    u32 f = irq_save();
+    struct strm *s = find(a, id);
+    int r = 0;
+    if (!s) {
+        irq_restore(f);
+        return -1;
+    }
+    switch (what) {
+    case MX_VOLUME: s->h->volume = v < 0 ? 0 : v > 256 ? 256 : (u32)v; break;
+    case MX_BALANCE: s->balance = (s16)(v < -256 ? -256 : v > 256 ? 256 : v); break;
+    case MX_MUTE: s->mute = (u8)(v != 0); break;
+    case MX_PAUSE: s->paused = (u8)(v != 0); break;
+    case MX_THRESHOLD: s->threshold = v < 0 ? 0 : (u32)v > s->h->bytes ? s->h->bytes : (u32)v; s->want = 0; break;
+    default: r = -1;
+    }
+    irq_restore(f);
+    return r;
+}
+
+u32 mixer_streams(struct mixer_stream *out, u32 max)
+{
+    u32 i, n = 0, f = irq_save();
+    for (i = 0; i < STREAMS && n < max; i++)
+        if (st[i].a) {
+            out[n].id = st[i].id;
+            out[n].app = app_id(st[i].a);
+            out[n].rate = st[i].h->rate;
+            out[n].channels = st[i].h->channels;
+            out[n].volume = st[i].h->volume;
+            out[n].balance = st[i].balance;
+            out[n].mute = st[i].mute;
+            out[n].paused = st[i].paused;
+            out[n].level[0] = st[i].level[0], out[n].level[1] = st[i].level[1];
+            n++;
+        }
+    irq_restore(f);
+    return n;
+}
+
+void mixer_master_get(u32 *volume, int *mute)
+{
+    *volume = mx.master;
+    *mute = mx.mute;
+}
+
+void mixer_master_set(u32 volume, int mute)
+{
+    mx.master = volume > MIX_UNITY ? MIX_UNITY : volume;
+    mx.mute = (u8)(mute != 0);
+}
+
+/* The peaks of the period played last: the output's (id 0) or a stream's. 0, or -1: no such stream. */
+int mixer_levels(u32 id, u16 *left, u16 *right)
+{
+    u32 f = irq_save();
+    struct strm *s = id ? find(0, id) : 0;
+    int playing = mx.on && !mx.out && mx.card && mx.card->running();
+    if (id && !s) {
+        irq_restore(f);
+        return -1;
+    }
+    *left = !playing ? 0 : s ? s->level[0] : mx.level[0];
+    *right = !playing ? 0 : s ? s->level[1] : mx.level[1];
+    irq_restore(f);
+    return 0;
+}
+
+/* A stream of a's has fallen below its threshold since its app was last told: 1 and its id (once each time). */
+int mixer_wants(struct app *a, u32 *id)
+{
+    u32 i;
+    for (i = 0; i < STREAMS; i++)
+        if (st[i].a == a && st[i].want == 1) {
+            st[i].want = 3;                     /* (told: not again until it has been above and fallen once more) */
+            *id = st[i].id;
+            return 1;
+        }
+    return 0;
+}
+
+const char *mixer_card(void) { return mx.on && mx.card ? mx.card->name : 0; }
+
+/* The chip's own channels (MX_CH_), through the card's driver: only while the mixer has the card. 0, or -1. */
+int mixer_chan(int chan, int set, u8 *left, u8 *right, u8 *mute)
+{
+    if (!mx.on || mx.out || !mx.card || !mx.card->chan)
+        return -1;
+    return mx.card->chan(chan, set, left, right, mute);
+}
+
+int mixer_input(int set, int *input)
+{
+    if (!mx.on || mx.out || !mx.card || !mx.card->input)
+        return -1;
+    return mx.card->input(set, input);
 }

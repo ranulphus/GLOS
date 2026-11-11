@@ -135,6 +135,13 @@ int api2_fs_path(struct trapframe *tf, u32 off, char *out, u32 room);  /* a path
                                                                            length, or -1 */
 int api2_fs_exists(struct app *a, const char *path);            /* 1 a file, 2 a folder, 0 neither, -1 the app ends */
 
+/* api2audio.c */
+extern const struct propdef api2_audio_props[];
+extern const u32 api2_audio_nprops;
+int api2_audio(struct app *a, struct trapframe *tf, u32 n);    /* AUDIO's calls */
+void api2_audio_close(struct app *a, void *obj);                /* CLOSE of a stream's handle */
+void api2_audio_tick(struct app *a);                            /* each tick: a stream below its NOTIFY */
+
 /* api2sys.c */
 int api2_sys(struct app *a, struct trapframe *tf, u32 n);      /* SYS's calls */
 void api2_sys_tick(struct app *a);                              /* each tick: the log's followers */

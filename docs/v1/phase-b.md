@@ -673,6 +673,32 @@ After that:
     OPL3's notes recorded;
   - `loopa-audio` and `loopa-sdlwin`'s sound unchanged.
 
+**Step 10, first part, as built** (2026-11-11; IN and MIDI are its later parts):
+
+- **AUDIO's calls** (`kernel/app/api2audio.c`, over the mixer, `kernel/drv/mixer.c`): OUT, MIXER, LEVELS,
+  DEVICES. A stream out is a handle (`GLOS_HK_STREAM`).
+- **A stream** is 1.x's: a ring of signed 16-bit samples in pages the app and the mixer share
+  (`struct glos_audio_ring`); the app writes and moves `write`, the mixer plays and moves `read`. No call is made
+  to play a block.
+- **Its properties:** volume (0 to 256), balance (the far side is turned down, the near side not turned up),
+  mute (silent, and still used up), paused (it stands still and what it has waits), position (frames played),
+  queued, and NOTIFY: a number of bytes below which the app gets `GLOS_EV_AUDIO`, once each time it falls there
+  ("a block wanted").
+- **The master** is the mixer's own, in software: a volume in percent and a mute over the sum, before the clip.
+  It is kept in GLOS.CFG (`[sound] volume`, `mute`, new), so the Control Panel has it and watchers are told.
+- **MIXER:** the master read and set; every app's streams listed (with their levels) and set; the chip's own
+  channels behind one description (Master, Wave, FM, CD, Line, Mic: the SB16's mixer chip; the Crystal codec's
+  DAC, AUX1, AUX2 and line registers, which have no master and no microphone level); the input recorded.
+  Reading is anybody's; setting is for GLOS's own programs (step 8's rule).
+- **LEVELS:** the peaks of the period played last, of a stream as it went into the sum and of the output after
+  the master: 0 to 32767.
+- **DEVICES:** the card the mixer plays.
+- **The arithmetic** is `kernel/drv/mixgain.c`, tested on the host.
+- **Not done here:** an event when a stream starts or ends (the Mixer app asks on its timer); recordings of the
+  output checked with `wavcheck` are `loopa-audio`'s still, unchanged.
+- **Tests:** host `mixgain_test`; APITEST's audio mode (11 cases: a tone of a known peak, so levels are checked
+  as numbers) in `api_audio_case`, with an SB16 on both PCs and a Crystal CS4236B.
+
 ### 11. NET
 
 - **LISTEN and ACCEPT.**

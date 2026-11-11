@@ -102,7 +102,8 @@ static void before(void)
           && GLOS_HAS(&v, GLOS_SHELL_SCHEDULE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 10))
           && GLOS_HAS(&v, GLOS_JOB_STATUS) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_JOB, 5))
           && GLOS_HAS(&v, GLOS_SYS_PROGRAMS) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SYS, 4))
-          && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 0)),
+          && GLOS_HAS(&v, GLOS_AUDIO_OUT) && GLOS_HAS(&v, GLOS_AUDIO_DEVICES) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 1))
+          && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_NET, 0)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
     small.v.size = 12;                                  /* (size, major, minor: an older program's) */
@@ -140,7 +141,7 @@ static void calls(void)
     r = glos_call(2, 0);                                /* (1.x's YIELD: a 2.0 app makes 2.0's calls) */
     check("1x-refused", r == GLOS_E_VERSION, "r=%d", r);
     check("unknown-core", glos_call(GLOS_FN(GLOS_AREA_CORE, 200), 0) == GLOS_E_FUNCTION, 0);
-    check("unknown-area", glos_call(GLOS_FN(GLOS_AREA_AUDIO, 0), 0) == GLOS_E_FUNCTION, 0);
+    check("unknown-area", glos_call(GLOS_FN(GLOS_AREA_NET, 0), 0) == GLOS_E_FUNCTION, 0);
     check("unknown-win", glos_call(GLOS_FN(GLOS_AREA_WIN, 5), 0) == GLOS_E_FUNCTION, 0);
     check("yield", glos_yield() == 0, 0);
     memset(&t, 0, sizeof t);
@@ -2020,6 +2021,228 @@ static int job_mode(void)
     return fails > 90 ? 90 : fails;
 }
 
+/* AUDIO (step 10), under the agent with the desktop on and a sound card: a stream out and its properties, levels,
+   the mixer (the master, the streams, the chip's channels and input), the devices. The tone is a triangle of
+   a known peak, so levels can be checked against it. */
+#define TONE_PEAK 16000
+
+static void tone(short *out, unsigned frames, unsigned channels, unsigned *phase)
+{
+    unsigned i, c;
+    for (i = 0; i < frames; i++) {
+        unsigned p = (*phase)++ % 50;                   /* 441 Hz at 22050 */
+        int v = p < 25 ? -TONE_PEAK + (int)p * (2 * TONE_PEAK / 25) : TONE_PEAK - (int)(p - 25) * (2 * TONE_PEAK / 25);
+        for (c = 0; c < channels; c++)
+            out[i * channels + c] = (short)v;
+    }
+}
+
+/* The stream fed for ms milliseconds (its ring kept about half full), then left with what it has. */
+static void feed(struct glos_audio_ring *r, unsigned ms, unsigned *phase)
+{
+    static short buf[2048];
+    unsigned t0 = glos_ticks();
+    while (glos_ticks() - t0 < ms) {
+        while (r->write - r->read < r->bytes / 2) {
+            unsigned frames = sizeof buf / 2 / r->channels;
+            tone(buf, frames, r->channels, phase);
+            glos_audio_write(r, buf, frames * r->channels * 2);
+        }
+        glos_sleep(10);
+    }
+}
+
+static int near(unsigned v, unsigned want, unsigned slack) { return v + slack >= want && v <= want + slack; }
+
+static int audio_mode(void)
+{
+    static struct glos_audio_stream streams[8];
+    static struct glos_audio_channel chans[8];
+    static struct glos_audio_device devs[4];
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_ev *e = (struct glos_ev *)ev;
+    struct glos_audio_ring *ring = 0, *ring2 = 0;
+    struct glos_audio_mixer m;
+    glos_handle s, s2, more[8];
+    unsigned id = 0, id2 = 0, phase = 0, phase2 = 0, l = 0, r = 0, ol = 0, orr = 0, count = 0, i, wave = 99;
+    int v = 0, before, after, ok, n;
+    char line[64];
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 98;
+
+    s = glos_audio_out(22050, 2, 16384, &ring, &id);
+    ok = s && GLOS_HANDLE_KIND(s) == GLOS_HK_STREAM && ring && ring->size == sizeof *ring && ring->rate == 22050
+         && ring->channels == 2 && ring->bytes == 16384 && ring->ring >= sizeof *ring && ring->mixer_rate >= 8000 && id
+         && prop(s, GLOS_PROP_STREAM_ID) == (int)id && prop(s, GLOS_PROP_STREAM_VOLUME) == 256
+         && prop(s, GLOS_PROP_STREAM_BALANCE) == 0 && prop(s, GLOS_PROP_STREAM_POSITION) == 0;
+    check("audio-open", ok, "s=%x err=%d id=%u mixer=%u", s, glos_error(), id, ring ? ring->mixer_rate : 0);
+    if (!s) {                                           /* (no card: nothing more to try) */
+        snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+        com1(line);
+        return fails;
+    }
+
+    /* Played: its position moves at its rate, nothing runs short, its level is the tone's, and the output's. */
+    feed(ring, 300, &phase);
+    before = prop(s, GLOS_PROP_STREAM_POSITION);
+    feed(ring, 1000, &phase);
+    after = prop(s, GLOS_PROP_STREAM_POSITION);
+    glos_audio_levels(id, &l, &r);
+    n = glos_audio_levels(0, &ol, &orr);
+    ok = after - before > 22050 * 8 / 10 && after - before < 22050 * 12 / 10 && ring->underruns == 0
+         && near(l, TONE_PEAK, 1500) && near(r, TONE_PEAK, 1500) && n == 0 && near(ol, TONE_PEAK, 1500) && near(orr, TONE_PEAK, 1500);
+    check("audio-plays", ok, "frames=%d underruns=%u level=%u,%u out=%u,%u periods=%u", after - before, ring->underruns, l, r, ol,
+          orr, ring->periods);
+
+    /* Its volume, its balance, its mute. */
+    glos_set(s, GLOS_PROP_STREAM_VOLUME, 128);
+    feed(ring, 250, &phase);
+    glos_audio_levels(id, &l, &r);
+    ok = near(l, TONE_PEAK / 2, 1000) && near(r, TONE_PEAK / 2, 1000);
+    glos_set(s, GLOS_PROP_STREAM_BALANCE, 256);
+    feed(ring, 250, &phase);
+    glos_audio_levels(id, &ol, &orr);
+    ok = ok && ol < 200 && near(orr, TONE_PEAK / 2, 1000);
+    glos_set(s, GLOS_PROP_STREAM_BALANCE, -128);
+    feed(ring, 250, &phase);
+    glos_audio_levels(id, &ol, &orr);
+    ok = ok && near(ol, TONE_PEAK / 2, 1000) && near(orr, TONE_PEAK / 4, 800);
+    check("audio-volume", ok, "half=%u,%u left-half=%u,%u", l, r, ol, orr);
+    glos_set(s, GLOS_PROP_STREAM_BALANCE, 0);
+    glos_set(s, GLOS_PROP_STREAM_VOLUME, 256);
+    glos_set(s, GLOS_PROP_STREAM_MUTE, 1);
+    before = prop(s, GLOS_PROP_STREAM_POSITION);
+    feed(ring, 250, &phase);
+    glos_audio_levels(id, &l, &r);
+    after = prop(s, GLOS_PROP_STREAM_POSITION);
+    ok = l == 0 && r == 0 && after - before > 3000 && prop(s, GLOS_PROP_STREAM_MUTE) == 1;        /* (silent, and still used up) */
+    glos_set(s, GLOS_PROP_STREAM_MUTE, 0);
+    check("audio-mute", ok, "level=%u,%u frames=%d", l, r, after - before);
+
+    /* Paused: it stands still, and what it has waits. */
+    feed(ring, 100, &phase);
+    glos_set(s, GLOS_PROP_STREAM_PAUSED, 1);
+    glos_sleep(50);
+    before = prop(s, GLOS_PROP_STREAM_POSITION);
+    v = prop(s, GLOS_PROP_STREAM_QUEUED);
+    glos_sleep(300);
+    after = prop(s, GLOS_PROP_STREAM_POSITION);
+    glos_audio_levels(id, &l, &r);
+    ok = after == before && prop(s, GLOS_PROP_STREAM_QUEUED) == v && v > 0 && l == 0 && ring->underruns == 0;
+    glos_set(s, GLOS_PROP_STREAM_PAUSED, 0);
+    feed(ring, 200, &phase);
+    check("audio-pause", ok && prop(s, GLOS_PROP_STREAM_POSITION) > after + 2000, "held=%d queued=%d then=%d", after - before, v,
+          prop(s, GLOS_PROP_STREAM_POSITION) - after);
+
+    /* NOTIFY: told when it has little left, once. */
+    while (glos_event(ev, sizeof ev, 0, 0) > 0) ;
+    feed(ring, 100, &phase);
+    glos_set(s, GLOS_PROP_STREAM_NOTIFY, 4096);
+    n = await(GLOS_EV_AUDIO, s, ev, 3000);
+    v = prop(s, GLOS_PROP_STREAM_QUEUED);
+    ok = n > 0 && e->handle == s && v < 4096 && glos_event(ev, sizeof ev, 300, 1u << GLOS_AREA_AUDIO) == 0;
+    glos_set(s, GLOS_PROP_STREAM_NOTIFY, 0);
+    check("audio-notify", ok, "n=%d queued=%d", n, v);
+
+    /* The master (this program is one of GLOS's own): half, mute, back. */
+    memset(&m, 0, sizeof m);
+    m.what = GLOS_MIXER_MASTER;
+    n = glos_mixer(&m);
+    ok = n == 0 && m.volume == 100 && m.mute == 0;
+    m.what = GLOS_MIXER_MASTER_SET, m.volume = 50, m.mute = -1;
+    n = glos_mixer(&m);
+    feed(ring, 300, &phase);
+    glos_audio_levels(id, &l, &r);
+    glos_audio_levels(0, &ol, &orr);
+    ok = ok && n == 0 && near(l, TONE_PEAK, 1500) && near(ol, TONE_PEAK / 2, 1000);
+    m.what = GLOS_MIXER_MASTER_SET, m.volume = -1, m.mute = 1;
+    glos_mixer(&m);
+    feed(ring, 300, &phase);
+    glos_audio_levels(0, &i, &count);
+    ok = ok && i == 0 && count == 0;
+    m.what = GLOS_MIXER_MASTER;
+    glos_mixer(&m);
+    ok = ok && m.volume == 50 && m.mute == 1;
+    m.what = GLOS_MIXER_MASTER_SET, m.volume = 100, m.mute = 0;
+    glos_mixer(&m);
+    m.what = GLOS_MIXER_MASTER_SET, m.volume = 101, m.mute = 0;
+    check("audio-master", ok && glos_mixer(&m) == GLOS_E_ARGUMENT, "n=%d stream=%u out=%u muted=%u vol=%d mute=%d", n, l, ol, i,
+          m.volume, m.mute);
+
+    /* A second stream of another rate and shape beside it; the mixer lists both and sets one. */
+    s2 = glos_audio_out(11025, 1, 8192, &ring2, &id2);
+    feed(ring, 100, &phase);                            /* (it ran dry for NOTIFY: full again before the count is taken) */
+    before = (int)ring->underruns;
+    for (i = 0; i < 40; i++) {
+        feed(ring, 15, &phase);
+        feed(ring2, 15, &phase2);
+    }
+    memset(&m, 0, sizeof m);
+    m.what = GLOS_MIXER_STREAMS, m.buffer = (unsigned)streams, m.room = sizeof streams;
+    n = glos_mixer(&m);
+    ok = s2 && n == 0 && m.count == 2 && (int)ring->underruns == before && ring2->underruns == 0;
+    for (i = 0; i < m.count; i++)
+        ok = ok && streams[i].size == sizeof streams[0] && (streams[i].id == id || streams[i].id == id2)
+             && streams[i].rate == (streams[i].id == id ? 22050u : 11025u) && streams[i].channels == (streams[i].id == id ? 2u : 1u)
+             && streams[i].volume == 256 && streams[i].left > 1000;
+    m.what = GLOS_MIXER_STREAM_SET, m.id = id2, m.volume = 64, m.balance = -1000, m.mute = -1;
+    n = glos_mixer(&m);
+    ok = ok && n == 0 && prop(s2, GLOS_PROP_STREAM_VOLUME) == 64 && prop(s2, GLOS_PROP_STREAM_BALANCE) == 0;
+    m.id = 9999;
+    check("audio-streams", ok && glos_mixer(&m) == GLOS_E_NOT_FOUND, "s2=%x n=%d count=%u under=%u,%u", s2, n, m.count,
+          ring->underruns - (unsigned)before, ring2 ? ring2->underruns : 99);
+    glos_close(s2);
+
+    /* The chip's own channels and the input recorded. */
+    memset(&m, 0, sizeof m);
+    m.what = GLOS_MIXER_CHANNELS, m.buffer = (unsigned)chans, m.room = sizeof chans;
+    n = glos_mixer(&m);
+    for (i = 0; i < m.count; i++)
+        if (chans[i].id == GLOS_CHANNEL_WAVE && !strcmp(chans[i].name, "Wave"))
+            wave = i;
+    ok = n == 0 && m.count >= 3 && wave < m.count && chans[wave].left <= 255;
+    count = m.count;
+    m.what = GLOS_MIXER_CHANNEL_SET, m.id = GLOS_CHANNEL_WAVE, m.volume = 128, m.balance = 64, m.mute = -1;
+    n = glos_mixer(&m);
+    ok = ok && n == 0 && near((unsigned)m.volume, 128, 9) && near((unsigned)m.balance, 64, 9);
+    l = (unsigned)m.volume, r = (unsigned)m.balance;
+    m.what = GLOS_MIXER_CHANNEL_SET, m.id = GLOS_CHANNEL_WAVE, m.volume = (int)chans[wave < 8 ? wave : 0].left,
+        m.balance = (int)chans[wave < 8 ? wave : 0].right, m.mute = -1;
+    glos_mixer(&m);                                     /* (as it was) */
+    m.what = GLOS_MIXER_INPUT_SET, m.id = GLOS_INPUT_LINE;
+    n = glos_mixer(&m);
+    m.what = GLOS_MIXER_INPUT, m.id = 99;
+    v = glos_mixer(&m);
+    ok = ok && n == 0 && v == 0 && m.id == GLOS_INPUT_LINE;
+    m.what = GLOS_MIXER_CHANNEL_SET, m.id = 17, m.volume = 1, m.balance = 1, m.mute = 0;
+    check("audio-chip", ok && glos_mixer(&m) == GLOS_E_ARGUMENT, "n=%d channels=%u wave=%u set=%u,%u input=%u", n, count, wave, l, r,
+          m.id);
+
+    /* The devices. */
+    n = glos_audio_devices(devs, sizeof devs, &count);
+    ok = n == 0 && count == 1 && devs[0].size == sizeof devs[0] && devs[0].kind == GLOS_AUDIO_DEV_OUT && devs[0].name[0]
+         && devs[0].rate == ring->mixer_rate && devs[0].streams == 1;
+    check("audio-devices", ok, "n=%d count=%u name=%s rate=%u streams=%u", n, count, devs[0].name, devs[0].rate, devs[0].streams);
+
+    /* What is refused; as many streams as there are; closed. */
+    ok = glos_audio_out(100, 2, 16384, 0, 0) == 0 && glos_error() == GLOS_E_ARGUMENT
+         && glos_audio_out(22050, 3, 16384, 0, 0) == 0 && glos_audio_out(22050, 2, 5000, 0, 0) == 0 && glos_error() == GLOS_E_ARGUMENT
+         && glos_set(s, GLOS_PROP_STREAM_VOLUME, 257) == GLOS_E_ARGUMENT && glos_set(s, GLOS_PROP_STREAM_BALANCE, -300) == GLOS_E_ARGUMENT
+         && glos_set(s, GLOS_PROP_STREAM_POSITION, 1) == GLOS_E_PROPERTY && glos_audio_levels(9999, &l, &r) == GLOS_E_NOT_FOUND;
+    for (i = 0; i < 7; i++)
+        ok = ok && (more[i] = glos_audio_out(8000, 1, 4096, 0, 0)) != 0;
+    ok = ok && glos_audio_out(8000, 1, 4096, 0, 0) == 0 && glos_error() == GLOS_E_MEMORY;
+    for (i = 0; i < 7; i++)
+        ok = ok && glos_close(more[i]) == 0;
+    ok = ok && glos_close(s) == 0 && glos_get(s, GLOS_PROP_STREAM_VOLUME, &v) == GLOS_E_HANDLE
+         && glos_audio_devices(devs, sizeof devs, &count) == 0 && devs[0].streams == 0;
+    check("audio-refused", ok, "err=%d streams=%u", glos_error(), devs[0].streams);
+
+    snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+    com1(line);
+    return fails > 90 ? 90 : fails;
+}
+
 /* What a run of the test may have left on a PC that is kept (a bench): taken away. */
 static int clean_mode(void)
 {
@@ -2116,6 +2339,8 @@ int main(int argc, char **argv)
         return clean_mode();
     if (argc > 1 && !strcmp(argv[1], "job"))
         return job_mode();
+    if (argc > 1 && !strcmp(argv[1], "audio"))
+        return audio_mode();
     if (argc > 2 && !strcmp(argv[1], "sched"))
         return sched_mode(argv[2]);
     if (argc > 1 && (strstr(argv[1], ".ZZT") || strstr(argv[1], ".zzt") || !strcmp(argv[1], "said") || !strcmp(argv[1], "with")))

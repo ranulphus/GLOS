@@ -168,4 +168,69 @@ static u32 sb16_irqs(void) { return sb.irqs; }
 
 static u32 sb16_errors(void) { return 0; }
 
-const struct sound_card sb16_card = { "sb16", sb16_start, sb16_stop, sb16_running, sb16_irqs, sb16_errors };
+/* The card's mixer chip (CT1745), at base+4 (the register) and base+5 (its value). Levels are five bits, in
+   bits 7 to 3, a register each side: the master 30h/31h, the voice 32h/33h, MIDI (the FM chip) 34h/35h, the CD
+   36h/37h, the line 38h/39h; the microphone 3Ah, one for both. The output switches (3Ch): bit 0 the microphone,
+   2 and 1 the CD's left and right, 4 and 3 the line's. The input switches, left 3Dh and right 3Eh: bit 0 the
+   microphone, 2/1 the CD, 4/3 the line, 6/5 MIDI. From Creative's hardware programming guide. */
+static u8 mix_rd(u8 reg)
+{
+    outb((u16)(sb.base + 4), reg);
+    return inb((u16)(sb.base + 5));
+}
+
+static void mix_wr(u8 reg, u8 v)
+{
+    outb((u16)(sb.base + 4), reg);
+    outb((u16)(sb.base + 5), v);
+}
+
+static u8 from5(u8 reg) { return (u8)((reg & 0xF8) | (reg >> 5)); }     /* five bits as 0 to 255 */
+
+static int sb16_chan(int chan, int set, u8 *left, u8 *right, u8 *mute)
+{
+    static const u8 reg[MX_CHANNELS] = { 0x30, 0x32, 0x34, 0x36, 0x38, 0x3A };
+    static const u8 sw[MX_CHANNELS] = { 0, 0, 0, 0x06, 0x18, 0x01 };   /* its bits in the output switches */
+    u32 f;
+    u8 s;
+    if (!sb.found || chan < 0 || chan >= MX_CHANNELS)
+        return -1;
+    f = irq_save();
+    s = mix_rd(0x3C);
+    if (set) {
+        mix_wr(reg[chan], (u8)(*left & 0xF8));
+        if (chan != MX_CH_MIC)
+            mix_wr((u8)(reg[chan] + 1), (u8)(*right & 0xF8));
+        if (sw[chan])
+            mix_wr(0x3C, (u8)(*mute ? s & ~sw[chan] : s | sw[chan]));
+    }
+    *left = from5(mix_rd(reg[chan]));
+    *right = chan == MX_CH_MIC ? *left : from5(mix_rd((u8)(reg[chan] + 1)));
+    *mute = (u8)(sw[chan] && !(mix_rd(0x3C) & sw[chan]));      /* (no switch: it can't be muted, only turned down) */
+    irq_restore(f);
+    return 0;
+}
+
+static int sb16_input(int set, int *input)
+{
+    static const u8 l[4] = { 0x01, 0x10, 0x04, 0x55 }, r[4] = { 0x01, 0x08, 0x02, 0x2B };      /* mic, line, CD, all */
+    u32 f, i;
+    u8 a, b;
+    if (!sb.found || (set && (*input < 0 || *input > MX_IN_MIX)))
+        return -1;
+    f = irq_save();
+    if (set) {
+        mix_wr(0x3D, l[*input]);
+        mix_wr(0x3E, r[*input]);
+    }
+    a = mix_rd(0x3D) & 0x7F, b = mix_rd(0x3E) & 0x7F;
+    *input = MX_IN_MIX;
+    for (i = 0; i < 3; i++)
+        if (a == l[i] && b == r[i])
+            *input = (int)i;
+    irq_restore(f);
+    return 0;
+}
+
+const struct sound_card sb16_card = { "sb16", sb16_start, sb16_stop, sb16_running, sb16_irqs, sb16_errors, sb16_chan,
+                                      sb16_input };

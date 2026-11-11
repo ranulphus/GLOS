@@ -44,6 +44,8 @@ int display_ask(int what, u32 w, u32 h, u32 b) { snprintf(applied, sizeof applie
 void gpu_watchdog(u32 ms) { snprintf(applied, sizeof applied, "watchdog %u", ms); }
 void mixer_enable(int on) { snprintf(applied, sizeof applied, "mixer %d", on); }
 void mixer_set_rate(u32 r) { snprintf(applied, sizeof applied, "rate %u", r); }
+void mixer_master_set(u32 volume, int mute) { snprintf(applied, sizeof applied, "master %u %d", volume, mute); }
+u32 mix_from_percent(u32 percent) { return percent * 256 / 100; }
 void mixer_late(void) { }                  /* (a Crystal chip: none on the host) */
 void joy_config(void) { snprintf(applied, sizeof applied, "joystick"); }
 void usb_late(void) { }

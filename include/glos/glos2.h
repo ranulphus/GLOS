@@ -169,6 +169,18 @@ int glos_job_keys(glos_handle job, const unsigned short *keys, unsigned count); 
 int glos_job_signal(glos_handle job, unsigned what);                               /* GLOS_SIGNAL_ */
 int glos_job_status(glos_handle job, struct glos_job_status *out);
 
+/* ---- sound (AUDIO) */
+/* A stream out: rate samples a second, 1 or 2 channels of signed 16 bits, a ring of bytes (a power of two, 4096
+   to 65536). *ring is its header (the samples follow at ring->ring), *id its number; either may be NULL. 0 if
+   refused (glos_error(): GLOS_E_NO_AUDIO without a card). Its volume, balance, mute, pause, position and NOTIFY
+   are properties (glos_get, glos_set). */
+glos_handle glos_audio_out(unsigned rate, unsigned channels, unsigned bytes, struct glos_audio_ring **ring, unsigned *id);
+unsigned glos_audio_room(const struct glos_audio_ring *r);     /* bytes that can be written now */
+unsigned glos_audio_write(struct glos_audio_ring *r, const void *samples, unsigned bytes);     /* those that fitted */
+int glos_mixer(struct glos_audio_mixer *m);             /* MIXER (size set here) */
+int glos_audio_levels(unsigned id, unsigned *left, unsigned *right);   /* a stream's, or the output's (0) */
+int glos_audio_devices(struct glos_audio_device *out, unsigned room, unsigned *count);
+
 /* ---- the system (SYS) */
 /* Figures of one kind (GLOS_STAT_) into buf: structures, each with its size first, or text. *length the bytes
    there are, *count the structures given (either may be 0). GLOS_E_ROOM: cut. */
