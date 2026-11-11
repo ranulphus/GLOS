@@ -710,6 +710,8 @@ void deskapp_hung(struct wm *m)
         if (hung != ((w->flags & WF_HUNG) != 0)) {
             w->flags ^= WF_HUNG;
             wm_frame_again(m, w);
+            kprintf("GLOS-DESK window=%u app=%u %s\n", w->id, w->owner ? app_id(w->owner) : 0,
+                    hung ? "not-answering" : "answering");
             if (desk_shell_app() && desk_shell_app() != w->owner)       /* (the shell is told: SHELL's event) */
                 api2_shell_hung(desk_shell_app(), w->id, w->owner, hung);
         }

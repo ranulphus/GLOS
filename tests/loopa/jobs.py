@@ -4087,11 +4087,16 @@ def api_win_case(profile, vcard, card):
         checks["min"] = until(at(20, 40, 220, 120, False))
         click(62 + 10, 470)                             # its button on the task bar
         checks["unmin"] = until(lambda d: d["win"] == (20, 40, 220, 120, True) and d["focus"] == d.get("id"))
-        agent.ssh("glos key 0:0x23,0.3:0x1E")             # h: the app takes no event for 8 seconds, while one (a) waits
+        agent.ssh("glos key 0:0x23,0.3:0x1E")             # h: the app takes no event for 14 seconds, while one (a) waits
                                                         # for it: "not answering", then answering. (One command: with two,
                                                         # a slow second one left less than the 3 seconds the flag is up)
-        checks["hung"] = until(lambda d: d.get("hung"), 20)
-        checks["answering"] = until(lambda d: d["win"] is not None and not d.get("hung"), 30)
+        def logged(word, limit):                # (the kernel's log says it: the desktop's listing, asked for over
+            t0 = time.time()                    # SSH, was too slow to catch it on a busy host)
+            while time.time() - t0 < limit and word not in agent.log():
+                time.sleep(0.5)
+            return word in agent.log()
+        checks["hung"] = logged(" not-answering", 30)
+        checks["answering"] = logged(" answering", 150) and until(lambda d: d["win"] is not None and not d.get("hung"), 30)
         click(20 + 220 + B - 9, 40 + B + 9)             # its close box
         o, e = p.communicate(timeout=120)
         out = o.decode("latin-1").replace("\r", "").split("\n")
@@ -4544,10 +4549,11 @@ def api_shell_case(profile, vcard, card):
                 break
             time.sleep(0.5)
         checks["w-up"] = time.time() - t0 < 240
-        agent.ssh("glos key 0:0x23,0.3:0x1E")     # h: it takes no event for 8 seconds, while one (a) waits for it
+        agent.ssh("glos key 0:0x23,0.3:0x1E")     # h: it takes no event for 14 seconds, while one (a) waits for it
         hung = a.said("shell what=3 at=0,0 window=*", 30)
         checks["hung"] = bool(hung)
-        checks["answers"] = bool(hung) and bool(a.said(hung.replace("what=3", "what=4")[6:], 30))
+        # (9 seconds of the guest's time on: a loaded host runs it several times slower, so the wait is long)
+        checks["answers"] = bool(hung) and bool(a.said(hung.replace("what=3", "what=4")[6:], 150))
         agent.ssh("glos key 0x38:down,0x3E,0x38:up")
         w.p.wait(timeout=120)
         # The task list: the shell's, which ends at it.

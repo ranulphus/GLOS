@@ -1234,9 +1234,10 @@ static int interactive(void)
                 captured = !captured;
                 printf("EV capture %d r=%d\n", captured, glos_capture(w, captured));
             }
-            if (k->key == 0x23 && !k->down) {   /* h let go: 8 seconds without taking an event ("not answering") */
+            if (k->key == 0x23 && !k->down) {   /* h let go: 14 seconds without taking an event ("not answering":
+                                                   said after 5, so there for 9: 3 were too few for a busy host to see) */
                 unsigned t0 = glos_ticks();
-                while (glos_ticks() - t0 < 8000)
+                while (glos_ticks() - t0 < 14000)
                     ;
                 printf("EV woke\n");
             }
