@@ -160,8 +160,14 @@ void secrets_load(void)
     lock();
     s.can = 1;
     s.state = SEC_OPEN;                         /* (no file: an empty store, written when it has something) */
-    if (file_read(s.key_path, s.pc_key, 33) == 32)
-        s.have_pc_key = 1;
+    {
+        u8 k[40];                               /* (a byte more than a key: a longer file isn't one) */
+        if (file_read(s.key_path, k, 33) == 32) {
+            memcpy(s.pc_key, k, 32);
+            s.have_pc_key = 1;
+        }
+        memset(k, 0, sizeof k);
+    }
     n = file_read(s.path, s.file, sizeof s.file);
     if (n < 0)
         n = file_read(s.tmp, s.file, sizeof s.file);    /* (a writing that didn't get as far as the name) */
