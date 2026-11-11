@@ -1100,8 +1100,19 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
     }
     session_job(0, 0, "", "");
     if (exit_req && (s32)(timer_ticks() - exit_at) >= 0) {
+        static u32 settle;                      /* the tick SSH's last news of a job will have gone out by */
         if (kcfg_pending() && (s32)(timer_ticks() - exit_at) < 5 * 1024)
             return 0;                           /* (a setting or GLOS.DAT is being written: the writer wakes this) */
+        for (i = 0; i < NJOBS; i++)             /* a job's end that SSH has still to tell its client (an app that */
+            if (jobs[i].state == J_DONE && jobs[i].owner && (s32)(timer_ticks() - exit_at) < 10 * 1024) {
+                settle = (timer_ticks() + 300) | 1;     /* left when asked to at this exit: its last line and its */
+                if (kick_ssh)                   /* exit code were lost on a busy 486) */
+                    kick_ssh();
+                return 0;
+            }
+        if (settle && (s32)(timer_ticks() - settle) < 0)
+            return 0;
+        settle = 0;
         return -1;
     }
     return 0;

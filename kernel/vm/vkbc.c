@@ -255,6 +255,13 @@ static void refill(void)
     e = q[qh % QSIZE];
     if (!(e & AUX) && !(e & REPLY) && ((cmd & 0x10) || replies))
         return;
+    if (!(e & AUX) && !(e & REPLY) && (vm.pic.p[0].isr & 0x02))
+        return;                                 /* the interrupt for the byte before is still being served: a real
+                                                   keyboard's next byte is a millisecond or two away, and the chip
+                                                   gives the same byte to every reader until then. A program's own
+                                                   handler reads the port and then the BIOS's does: on a slow PC the
+                                                   BIOS got the byte after (E0 46 of Ctrl+Break seen as Scroll Lock,
+                                                   Ctrl missed before C: the 486, 2026-11-11) */
     qh++;
     out = (u8)e;
     out_aux = (e & AUX) != 0;
