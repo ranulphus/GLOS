@@ -102,7 +102,8 @@ static void before(void)
           && GLOS_HAS(&v, GLOS_SHELL_SCHEDULE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 10))
           && GLOS_HAS(&v, GLOS_JOB_STATUS) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_JOB, 5))
           && GLOS_HAS(&v, GLOS_SYS_PROGRAMS) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SYS, 4))
-          && GLOS_HAS(&v, GLOS_AUDIO_IN) && GLOS_HAS(&v, GLOS_AUDIO_DEVICES) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 4))
+          && GLOS_HAS(&v, GLOS_AUDIO_IN) && GLOS_HAS(&v, GLOS_AUDIO_MIDI_OUT) && GLOS_HAS(&v, GLOS_AUDIO_DEVICES)
+          && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 7))
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_NET, 0)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
