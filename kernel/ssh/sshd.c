@@ -39,6 +39,7 @@
 #include "sched.h"
 #include "session.h"
 #include "sftp.h"
+#include "secrets.h"
 #include "shot.h"
 #include "ssh.h"
 #include "sshbuf.h"
@@ -988,7 +989,8 @@ static void gdb_send(const u8 *d, u32 n)
 static int k_exec(struct ssh_chan *ch, const char *cmd)
 {
     static const char ver[] = "GLOS M3 (" __DATE__ ")\n";
-    kprintf("GLOS-SSH exec=\"%s\"\n", cmd);
+    kprintf("GLOS-SSH exec=\"%s\"\n", !strncmp(cmd, "glos secrets ", 13) ? "glos secrets ..." : cmd);   /* (its words
+                                                   may be a password: not for the log) */
     if (strncmp(cmd, "glos ", 5) && strcmp(cmd, "glos")) {
         if (!agent_mode) {
             say(ch, 1, "glos: DOS commands need GLOS started without /RUN or /SHELL\n");
@@ -1277,6 +1279,41 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         char b[1024];
         ssh_chan_write(ch, 0, (const uint8_t *)b, (u32)usb_stat(b, sizeof b));
         ssh_chan_exit(ch, 0);
+    } else if (!strcmp(cmd, "glos secrets") || !strncmp(cmd, "glos secrets ", 13)) {
+        /* glos secrets: the store's state. glos secrets unlock PASSWORD: opened for this run. glos secrets
+           password OLD NEW: the master password set, changed or taken away (- for none). glos secrets allow|deny
+           PROGRAM NAME: a program may use a shared secret, or no more. */
+        char b[200], w[4][64];
+        const char *p = cmd + 12;
+        u32 nw = 0, k;
+        int r = 0;
+        memset(w, 0, sizeof w);
+        while (*p && nw < 4) {
+            while (*p == ' ')
+                p++;
+            for (k = 0; *p && *p != ' ' && k < 63; k++)
+                w[nw][k] = *p++;
+            if (k)
+                nw++;
+        }
+        if (nw == 2 && !strcmp(w[0], "unlock"))
+            r = secrets_unlock(w[1]);
+        else if (nw == 3 && !strcmp(w[0], "password"))
+            r = secrets_password(strcmp(w[1], "-") ? w[1] : "", strcmp(w[2], "-") ? w[2] : "");
+        else if (nw == 3 && (!strcmp(w[0], "allow") || !strcmp(w[0], "deny")))
+            r = secrets_grant(w[1], w[2], w[0][0] == 'a');
+        else if (nw)
+            r = 1;
+        memset(w, 0, sizeof w);
+        if (r == 1)
+            k = (u32)ksnprintf(b, sizeof b, "glos secrets [unlock PASSWORD | password OLD NEW | allow PROGRAM NAME | deny PROGRAM NAME]\n");
+        else if (r)
+            k = (u32)ksnprintf(b, sizeof b, "glos secrets: %s\n", r == SEC_E_WRONG ? "wrong password" : r == SEC_E_LOCKED ? "locked"
+                               : r == SEC_E_NONE ? "nothing to do" : "refused");
+        else
+            k = secrets_stat(b, sizeof b);
+        ssh_chan_write(ch, 0, (const uint8_t *)b, k);
+        ssh_chan_exit(ch, r ? 1 : 0);
     } else if (!strcmp(cmd, "glos audio")) {
         /* glos audio: the mixer and its streams (M8) */
         char b[512];

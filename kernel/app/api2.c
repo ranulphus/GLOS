@@ -448,6 +448,7 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_AUDIO][0] = 0x7F;             /* OUT, IN, MIXER, LEVELS, MIDI_OUT, MIDI_IN, DEVICES */
     v.functions[GLOS_AREA_CAPTURE][0] = 0x07;           /* PIXELS, KEYS, MOUSE */
     v.functions[GLOS_AREA_DEBUG][0] = 0x07;             /* ATTACH, READ, WRITE */
+    v.functions[GLOS_AREA_SECRETS][0] = 0x07;           /* PUT, GET, REMOVE */
     v.functions[GLOS_AREA_NET][0] = 0x7F;               /* RESOLVE, CONNECT, SEND, RECEIVE, LISTEN, ACCEPT, STATE */
     v.functions[GLOS_AREA_SYS][0] = 0x0F;               /* STAT, KILL, LOG, PROGRAMS */
     v.functions[GLOS_AREA_SETTINGS][0] = 0xFF;          /* GET, SET, SECTIONS, KEYS, SCHEMA, WATCH, THEME, REGION */
@@ -733,19 +734,20 @@ int api2_call(struct trapframe *tf)
     if (area > GLOS_AREA_SHELL && area != GLOS_AREA_THREAD && area != GLOS_AREA_SETTINGS && area != GLOS_AREA_IDLE
         && area != GLOS_AREA_CLIP && area != GLOS_AREA_DND && area != GLOS_AREA_FS && area != GLOS_AREA_JOB
         && area != GLOS_AREA_SYS && area != GLOS_AREA_AUDIO && area != GLOS_AREA_NET && area != GLOS_AREA_CAPTURE
-        && area != GLOS_AREA_DEBUG)
+        && area != GLOS_AREA_DEBUG && area != GLOS_AREA_SECRETS)
         return a2_fail(tf, GLOS_E_FUNCTION);       /* (the other areas come with phase B's later steps) */
     first = app_first();
     if (!first && area == GLOS_AREA_DRAW && n >= (GLOS_DRAW_GPU & 0xFF) && n <= (GLOS_DRAW_WINVRAM & 0xFF))
         return a2_fail(tf, GLOS_E_REFUSED);        /* (the GPU is the first thread's alone: supervisor.md 12.7) */
     if (fn == GLOS_DRAW_GPU_LOCK)               /* (not a safe point: the lock is being taken, not left) */
         return gpu_app_lock(a) == 0 ? a2_ok(tf, 0) : a2_fail(tf, GLOS_E_NO_GPU);
-    if (area == GLOS_AREA_NET || area == GLOS_AREA_DEBUG) {     /* (NET's calls wait for the network, DEBUG's
-                                                   for the program debugged: beside the app's others, and, as
+    if (area == GLOS_AREA_NET || area == GLOS_AREA_DEBUG || area == GLOS_AREA_SECRETS) {   /* (NET's calls wait
+                                                   for the network, DEBUG's for the program debugged, SECRETS'
+                                                   for the user's password: beside the app's others, and, as
                                                    api.c, at a point where its turn with the engine may end) */
         if (first)
             gpu_safe_begin(a);
-        r = area == GLOS_AREA_NET ? api2_net(a, tf, n) : api2_debug(a, tf, n);
+        r = area == GLOS_AREA_NET ? api2_net(a, tf, n) : area == GLOS_AREA_DEBUG ? api2_debug(a, tf, n) : api2_secrets(a, tf, n);
         if (first)
             gpu_safe_end(a);
         return r;

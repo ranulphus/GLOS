@@ -1107,6 +1107,27 @@ int glos_capture_pixels(unsigned window, unsigned format, void *buffer, unsigned
     return r;
 }
 
+int glos_secret_put(const char *name, const void *value, unsigned length, unsigned flags)
+{
+    struct glos_secret q = { sizeof q, (unsigned)name, flags, (unsigned)value, length, 0 };
+    return raw(GLOS_SECRETS_PUT, &q, 0);
+}
+
+int glos_secret_get(const char *name, void *buffer, unsigned room, unsigned *length, unsigned flags)
+{
+    struct glos_secret q = { sizeof q, (unsigned)name, flags, (unsigned)buffer, room, 0 };
+    int r = raw(GLOS_SECRETS_GET, &q, 0);
+    if (length)
+        *length = q.length;
+    return r;
+}
+
+int glos_secret_remove(const char *name, unsigned flags)
+{
+    struct glos_secret q = { sizeof q, (unsigned)name, flags, 0, 0, 0 };
+    return raw(GLOS_SECRETS_REMOVE, &q, 0);
+}
+
 glos_handle glos_debug_attach(glos_handle job)
 {
     struct glos_debug_attach q = { sizeof q, job, 0 };

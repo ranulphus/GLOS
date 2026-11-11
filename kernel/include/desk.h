@@ -89,6 +89,10 @@ int desk_win_blit(struct app *a, u32 id, const struct desk_blit *b);    /* (API 
 int desk_win_embed(struct app *a, u32 host, u32 child, const struct gfx_rect *at);     /* (API 2.0's WIN EMBED) the
                                                    window `child` shown inside a's window `host` (at NULL: let go):
                                                    0, GLOS_E_WINDOW, DESK_E_REFUSED */
+int desk_password(struct app *a);       /* (kernel/wm/deskpass.c) the secrets store's master password asked of the
+                                           user in a dialog of the desktop's, the calling app's thread waiting: 0
+                                           once the store is open; -1: no desktop to ask on, the user said no, or
+                                           the app is ending */
 /* API 2.0's CAPTURE (kernel/app/api2cap.c): any window by its number. */
 int desk_win_who(u32 id, u32 *owner, s32 *w, s32 *h);   /* whose it is (the app's id; 0: GLOS's own) and its client
                                                             area's size: 0, or GLOS_E_WINDOW */

@@ -36,6 +36,9 @@ u32 deskin_double_ticks(void);          /* two presses this close are a double c
 
 /* deskshell.c: the tray and notifications. */
 u32 deskshell_turn(struct wm *m, int screen);   /* each turn: the tick to wake at, at the latest (0: whenever) */
+int deskpass_key(struct wm *m, u32 key, int down, u32 ch);      /* (deskpass.c) a key for the focus: 1 if the secrets'
+                                                                   password dialog took it */
+void deskpass_turn(struct wm *m, int again);    /* ... each turn: drawn again when the screen changed under it */
 int deskshell_press(struct wm *m, u32 bit);     /* a button went down: 1 if on the tray or a notification (used up) */
 
 #endif

@@ -207,6 +207,11 @@ int glos_capture_pixels(unsigned window, unsigned format, void *buffer, unsigned
                         unsigned *h);
 int glos_capture_keys(unsigned window, const struct glos_capture_key *keys, unsigned count);
 int glos_capture_mouse(unsigned window, const struct glos_capture_mouse *events, unsigned count);
+/* SECRETS: this app's secrets by name (flags GLOS_SECRET_SHARED: one that programs share, by the user's leave).
+   GLOS may ask the user for the master password first: the call waits for that. */
+int glos_secret_put(const char *name, const void *value, unsigned length, unsigned flags);
+int glos_secret_get(const char *name, void *buffer, unsigned room, unsigned *length, unsigned flags);
+int glos_secret_remove(const char *name, unsigned flags);
 /* DEBUG: a channel to a job of this app's (run with GLOS_RUNF_DEBUG, or running), 0 with glos_error(); gdb's
    remote protocol's bytes to the stub and from it. */
 glos_handle glos_debug_attach(glos_handle job);

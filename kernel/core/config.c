@@ -35,6 +35,7 @@
 #include "idle.h"
 #include "io.h"
 #include "kdata.h"
+#include "secrets.h"
 #include "kprintf.h"
 #include "mm.h"
 #include "sched.h"
@@ -782,12 +783,13 @@ static void writer(void *arg)
     dos_hold();                                 /* the DOS server's 32 KB transfer buffer only while the file is */
     load();                                     /* read or written: kept for good, it cost programs 32 KB of */
     kdata_load();
+    secrets_load();                             /* (SECRETS.DAT beside them: kernel/core/secrets.c) */
     c.settled = 1;                              /* conventional memory in agent mode (P7) */
     dos_release();                              /* (and the agent's first job waits for this: kcfg_settled) */
     for (;;) {
         u32 f = irq_save();
         int cfg;
-        while (!c.dirty && !kdata_dirty())
+        while (!c.dirty && !kdata_dirty() && !secrets_dirty())
             thread_block(&c.q);
         cfg = c.dirty;
         c.writing = 1;
@@ -805,6 +807,8 @@ static void writer(void *arg)
         }
         if (kdata_dirty())                      /* GLOS.DAT beside it (kernel/core/kdata.c) */
             kdata_save();
+        if (secrets_dirty())                    /* ... and SECRETS.DAT (kernel/core/secrets.c) */
+            secrets_save();
         dos_release();
         f = irq_save();
         c.writing = 0;
@@ -820,7 +824,7 @@ void kcfg_writer_kick(void)
     irq_restore(f);
 }
 
-int kcfg_pending(void) { return c.dirty || c.writing || kdata_dirty(); }
+int kcfg_pending(void) { return c.dirty || c.writing || kdata_dirty() || secrets_dirty(); }
 
 void kcfg_init(const struct bootinfo *bi)
 {
@@ -831,5 +835,6 @@ void kcfg_init(const struct bootinfo *bi)
         return;
     }
     kdata_init(c.path);
+    secrets_init(c.path);
     thread_create("config", PRIO_BULK, writer, 0);
 }

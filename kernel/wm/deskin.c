@@ -546,6 +546,8 @@ static void key_event(struct wm *m, u32 key, int down)
     }
     deskin_focus(m);                            /* (a key just before this one may have moved it) */
     w = m->focus;
+    if (deskpass_key(m, key, down, down ? key_char(key) : 0))
+        return;                                 /* (the secrets' password dialog has the keyboard: deskpass.c) */
     if (!w || !w->owner)
         return;
     if (!down && !(held[key >> 3] & bit))       /* (the up of a key it never saw go down) */

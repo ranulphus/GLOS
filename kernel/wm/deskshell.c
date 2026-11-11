@@ -231,6 +231,7 @@ u32 deskshell_turn(struct wm *m, int screen)
         look_w = (u32)m->w, look_h = (u32)m->h, look_bpp = m->fmt.bpp, look_theme = desk_theme();
         note_hide(m);                           /* another screen or theme: both drawn again, where they go now */
         tip_hide(m);
+        deskpass_turn(m, 1);                    /* (and the secrets' password dialog, if it is up) */
         tip_id = 0;
         w = 0;
     }

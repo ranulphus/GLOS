@@ -107,7 +107,8 @@ static void before(void)
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 7))
           && GLOS_HAS(&v, GLOS_NET_STATE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_NET, 7))
           && GLOS_HAS(&v, GLOS_CAPTURE_MOUSE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_CAPTURE, 3))
-          && GLOS_HAS(&v, GLOS_DEBUG_WRITE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_DEBUG, 3)),
+          && GLOS_HAS(&v, GLOS_DEBUG_WRITE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_DEBUG, 3))
+          && GLOS_HAS(&v, GLOS_SECRETS_REMOVE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SECRETS, 3)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
     small.v.size = 12;                                  /* (size, major, minor: an older program's) */
@@ -3006,6 +3007,64 @@ static int dbg_mode(int argc, char **argv)
     return fails > 90 ? 90 : fails;
 }
 
+/* APITEST sec first | second | get | shared | clean: API 2.0's SECRETS (phase B step 13), under the agent, over
+   several starts of GLOS. first: secrets put, got, replaced, removed; what is refused; two left for later (one
+   of the app's own, one shared). second: both are still there after a restart. get: the app's own one, whatever
+   it takes (the master password's dialog, when the store is locked). shared: the shared one, as a program that
+   is not GLOS's own (the test runs a copy from another folder). clean: all of them taken away. */
+static int sec_mode(const char *what)
+{
+    static char big[1100], name64[70];
+    char v[64];
+    unsigned len = 0;
+    int ok, r, r2;
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 98;
+    memset(v, 0, sizeof v);
+    if (!strcmp(what, "first")) {
+        r = glos_secret_put("host1", "hunter2", 7, 0);
+        r2 = glos_secret_get("host1", v, sizeof v, &len, 0);
+        ok = r == 0 && r2 == 0 && len == 7 && !memcmp(v, "hunter2", 7);
+        ok = ok && glos_secret_put("host1", "a longer one, in its place", 26, 0) == 0
+             && glos_secret_get("host1", v, 8, &len, 0) == GLOS_E_ROOM && len == 26 && !memcmp(v, "a longer", 8)
+             && glos_secret_get("host2", v, sizeof v, &len, 0) == GLOS_E_NOT_FOUND
+             && glos_secret_get("host1", v, sizeof v, &len, GLOS_SECRET_SHARED) == GLOS_E_NOT_FOUND;    /* (its own is not the shared one) */
+        check("sec-put", ok, "r=%d r2=%d len=%u", r, r2, len);
+        memset(name64, 'n', 64);
+        ok = glos_secret_put("", "x", 1, 0) == GLOS_E_ARGUMENT && glos_secret_put(name64, "x", 1, 0) == GLOS_E_ARGUMENT
+             && glos_secret_put("big", big, 1025, 0) == GLOS_E_ARGUMENT && glos_secret_put("x", "x", 1, 2) == GLOS_E_ARGUMENT
+             && glos_secret_put("big", big, 1024, 0) == 0 && glos_secret_get("big", big, sizeof big, &len, 0) == 0 && len == 1024
+             && glos_secret_remove("big", 0) == 0 && glos_secret_remove("big", 0) == GLOS_E_NOT_FOUND
+             && glos_secret_put("empty", "", 0, 0) == 0 && glos_secret_get("empty", v, sizeof v, &len, 0) == 0 && len == 0
+             && glos_secret_remove("empty", 0) == 0 && glos_secret_remove("host1", 0) == 0;
+        check("sec-refused", ok, "len=%u", len);
+        ok = glos_secret_put("keep-me", "across a restart", 16, 0) == 0
+             && glos_secret_put("wifi", "shared-value", 12, GLOS_SECRET_SHARED) == 0
+             && glos_secret_get("wifi", v, sizeof v, &len, GLOS_SECRET_SHARED) == 0 && len == 12;
+        check("sec-kept", ok, "len=%u", len);
+    } else if (!strcmp(what, "second")) {
+        r = glos_secret_get("keep-me", v, sizeof v, &len, 0);
+        ok = r == 0 && len == 16 && !memcmp(v, "across a restart", 16);
+        r2 = glos_secret_get("wifi", v, sizeof v, &len, GLOS_SECRET_SHARED);
+        ok = ok && r2 == 0 && len == 12 && !memcmp(v, "shared-value", 12) && glos_secret_get("host1", v, sizeof v, &len, 0) == GLOS_E_NOT_FOUND;
+        check("sec-again", ok, "r=%d r2=%d len=%u", r, r2, len);
+    } else if (!strcmp(what, "get")) {
+        r = glos_secret_get("keep-me", v, sizeof v - 1, &len, 0);
+        check("sec-get", r == 0 && len == 16, "r=%d value=%s", r, r == 0 ? v : "-");
+    } else if (!strcmp(what, "shared")) {
+        r = glos_secret_get("wifi", v, sizeof v - 1, &len, GLOS_SECRET_SHARED);
+        r2 = glos_secret_get("keep-me", v + 32, 16, &len, 0);          /* (the same program's name: its own) */
+        check("sec-shared", r == 0, "r=%d value=%s own=%d", r, r == 0 ? v : "-", r2);
+    } else {
+        r = glos_secret_remove("keep-me", 0);
+        r2 = glos_secret_remove("wifi", GLOS_SECRET_SHARED);
+        check("sec-clean", 1, "r=%d r2=%d", r, r2);
+    }
+    snprintf(big, sizeof big, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+    com1(big);
+    return fails > 90 ? 90 : fails;
+}
+
 /* What a run of the test may have left on a PC that is kept (a bench): taken away. */
 static int clean_mode(void)
 {
@@ -3104,6 +3163,8 @@ int main(int argc, char **argv)
         return job_mode();
     if (argc > 1 && !strcmp(argv[1], "audio"))
         return audio_mode(argc > 2 && !strcmp(argv[2], "loop"));
+    if (argc > 2 && !strcmp(argv[1], "sec"))
+        return sec_mode(argv[2]);
     if (argc > 1 && !strcmp(argv[1], "dbg"))
         return dbg_mode(argc, argv);
     if (argc > 1 && !strcmp(argv[1], "capchild"))

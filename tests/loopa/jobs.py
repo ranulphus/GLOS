@@ -4719,6 +4719,128 @@ def api_cap_case(profile, vcard, card):
     return "  %-22s %s%s" % ("apicap-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
+def api_sec_case(profile, vcard, card):
+    """API 2.0's SECRETS (APITEST sec; phase B step 13), under the agent, over three starts of GLOS. First:
+    secrets put, got, replaced and removed, what is refused; the file is written, and has nothing of them in the
+    clear. Second: they are still there; a copy of APITEST outside GLOS's folder is refused the shared one until
+    `glos secrets allow`, and again after `deny`; a master password is set. Third: the store is locked: with no
+    desktop the app is refused; with one, GLOS's dialog asks: Esc refuses, a wrong password asks again, the right
+    one opens the store and the app has its secret. The password taken away, it is the PC's key again."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("apisec-" + tag, profile, card, ["--card", vcard, "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
+        "--file", "build/dj/APITEST.EXE=/OTHER/APITEST.EXE",
+        "--cmd", "SERSAY HX-START apisec", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-AGAIN",
+        "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-THIRD", "--cmd", "C:\\TEST\\GLOS.EXE",
+        "--cmd", "SERSAY HX-DONE 0"], timeout=1800)
+    checks, info = {"listen": agent.listening()}, ""
+    out = os.path.join(ROOT, "out", "apisec-" + tag)
+    app = "C:\\TEST\\APITEST.EXE sec "
+
+    def ran(mode, where=app):
+        return agent.ssh(where + mode, timeout=300)[0] == 0
+
+    def stat():
+        return agent.ssh("glos secrets")[1].replace("\r", "")
+
+    def logged(word, limit=60):
+        t0 = time.time()
+        while time.time() - t0 < limit and word not in agent.log():
+            time.sleep(0.5)
+        return word in agent.log()
+
+    def case(name, limit=120):                  # APITEST's line for a case, once it has said it
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            m = re.findall(r"HX-APITEST case=%s ok=(\d)(.*)" % name, agent.log())
+            if len(m) > case.seen.get(name, 0):
+                case.seen[name] = len(m)
+                return m[-1][0] + m[-1][1].rstrip()
+            time.sleep(0.5)
+        return ""
+    case.seen = {}
+
+    try:
+        checks["none-yet"] = stat().startswith("secrets open key=pc secrets=0 ")
+        checks["first"] = ran("first")
+        checks["written"] = logged("GLOS-SECRETS written secrets=2")
+        got = os.path.join(out, "SECRETS.DAT")
+        batch = os.path.join(out, "batch")
+        open(batch, "w").write("get /C/TEST/SECRETS.DAT %s\nget /C/TEST/KEYS/SECRETS.KEY %s.key\n" % (got, got))
+        subprocess.run(["sftp", "-P", str(agent.port)] + agent.base[3:] + ["-i", agent.key, "-b", batch, "glos@127.0.0.1"],
+                       capture_output=True, timeout=300)
+        data = open(got, "rb").read() if os.path.exists(got) else b""
+        checks["scrambled"] = data[:8] == b"GLOSSEC1" and len(data) > 60 and b"across a restart" not in data \
+            and b"keep-me" not in data and b"APITEST" not in data and os.path.exists(got + ".key") \
+            and os.path.getsize(got + ".key") == 32
+        agent.ssh("glos exit")
+        checks["again"] = agent.listening(after="HX-AGAIN")
+        checks["loaded"] = logged("GLOS-SECRETS loaded secrets=2")
+        checks["second"] = ran("second")
+        other = "C:\\OTHER\\APITEST.EXE sec "
+        ran("shared", other)                    # a program that isn't GLOS's own: the shared one by leave only
+        first = case("sec-shared")
+        checks["shared-refused"] = first.startswith("0 r=19 ") and first.endswith(" own=0")
+        checks["allow"] = agent.ssh("glos secrets allow APITEST.EXE wifi")[0] == 0 and " grants=1 " in stat()
+        ran("shared", other)
+        checks["shared-allowed"] = case("sec-shared").startswith("1 r=0 value=shared-value")
+        checks["deny"] = agent.ssh("glos secrets deny APITEST.EXE wifi")[0] == 0 and " grants=0 " in stat()
+        ran("shared", other)
+        checks["shared-denied"] = case("sec-shared").startswith("0 r=19 ")
+        n = agent.log().count("GLOS-SECRETS written")
+        rc, o, _ = agent.ssh("glos secrets password - sesame")
+        checks["password"] = rc == 0 and "secrets open key=password " in o and logged("GLOS-SECRETS password set rounds=")
+        t0 = time.time()                        # (the file under its new key before GLOS leaves)
+        while time.time() - t0 < 60 and agent.log().count("GLOS-SECRETS written") <= n:
+            time.sleep(0.5)
+        checks["rewritten"] = agent.log().count("GLOS-SECRETS written") > n
+        agent.ssh("glos exit")
+        checks["third"] = agent.listening(after="HX-THIRD")
+        checks["locked"] = logged("GLOS-SECRETS locked") and stat().startswith("secrets locked key=password ")
+        ran("get")                              # no desktop: nobody to ask
+        checks["no-desk"] = case("sec-get").startswith("0 r=19 ")
+        rc, o, _ = agent.ssh("glos secrets unlock nope")
+        checks["wrong-ssh"] = rc == 1 and "wrong password" in o and stat().startswith("secrets locked ")
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+
+        def asks():                             # the app run, and GLOS's dialog up
+            p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", app + "get"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            t0 = time.time()
+            while time.time() - t0 < 120 and '"Secrets"' not in agent.ssh("glos desk")[1]:
+                time.sleep(0.5)
+            return p
+
+        p = asks()
+        checks["dialog"] = '"Secrets"' in agent.ssh("glos desk")[1]
+        agent.ssh("glos key 0x01")              # Esc: not now
+        checks["esc"] = case("sec-get").startswith("0 r=19 ")
+        p.wait(timeout=120)
+        checks["dialog-gone"] = '"Secrets"' not in agent.ssh("glos desk")[1]
+        p = asks()
+        agent.ssh("glos type wrong\\n")
+        checks["wrong"] = logged("GLOS-SECRETS unlock wrong") and '"Secrets"' in agent.ssh("glos desk")[1]
+        agent.ssh("glos type sesame\\n")
+        checks["right"] = logged("GLOS-SECRETS unlock ok") and case("sec-get").startswith("1 r=0 value=across a restart")
+        p.wait(timeout=120)
+        checks["open"] = stat().startswith("secrets open key=password ") and '"Secrets"' not in agent.ssh("glos desk")[1]
+        ran("get")                              # open for the rest of this run: nothing asked
+        checks["no-more-asked"] = case("sec-get").startswith("1 r=0 ")
+        rc, o, _ = agent.ssh("glos secrets password nope -")
+        rc2, o2, _ = agent.ssh("glos secrets password sesame -")
+        checks["password-off"] = rc == 1 and rc2 == 0 and "secrets open key=pc " in o2
+        ran("clean")
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        info += " timeout"
+    text = agent.wait()
+    checks["no-password-in-log"] = "sesame" not in text
+    if not all(checks.values()):
+        info += " " + " | ".join(re.findall(r"HX-APITEST case=sec-\S+ ok=0.*", text))[:300]
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text and "GLOS-WARN" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("apisec-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
 def api_dbg_case(profile, vcard, card):
     """API 2.0's DEBUG (APITEST dbg; phase B step 12), under the agent with the desktop on: APITEST is a small
     debugger, by gdb's remote protocol over its channel: GDBME run stopped at its start, the debugger's own files
@@ -7507,6 +7629,7 @@ def main():
             res += matrix(api_net_case, wins, a.jobs)   # ... and the network
             res += matrix(api_cap_case, wins, a.jobs)   # ... and a child's window seen and driven
             res += matrix(api_dbg_case, wins, a.jobs)   # ... and a program debugged
+            res += matrix(api_sec_case, wins, a.jobs)   # ... and secrets kept
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

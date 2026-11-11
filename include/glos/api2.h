@@ -1284,6 +1284,36 @@ struct glos_capture_mouse {
     unsigned clicks;            /* a press: 1, or 2 or 3 for a double or triple click */
 };
 
+/* ================================================================== SECRETS (11h): passwords and keys, kept for apps
+ *
+ * A secret is a name and up to 1024 bytes, kept in a file of GLOS's own (SECRETS.DAT), apart from GLOS.CFG and
+ * from anything a user shares. An app's secrets are its own: kept under its program's file name, so another
+ * program doesn't get them by asking. A shared secret (GLOS_SECRET_SHARED: a network's password, say) is for the
+ * programs the user allowed to use that name, and for GLOS's own.
+ *
+ * What the file is worth: DOS has no users and no protected storage. By default the file is scrambled with a
+ * key on the same disk: that keeps secrets out of what gets copied about, and stops nobody who has the disk.
+ * With a master password (the user's choice) it is encrypted under a key made from that password, and GLOS asks
+ * for the password once after each start, itself: no app sees it. Until then the store is locked: a call waits
+ * for the user's answer in GLOS's dialog, or, where there is no desktop to ask on, is refused (GLOS_E_REFUSED).
+ *
+ * GLOS_E_NOT_FOUND: no such secret. GLOS_E_REFUSED: a shared secret this program isn't allowed; the store
+ * locked and nobody to ask (or the user said no); no store here (GLOS wasn't started with its agent).
+ * GLOS_E_ROOM: PUT: the store is full (16 KB in all); GET: the value is longer than the room (what fits is
+ * given, `length` says how long it is). */
+#define GLOS_SECRETS_PUT    GLOS_FN(GLOS_AREA_SECRETS, 0)       /* struct glos_secret */
+#define GLOS_SECRETS_GET    GLOS_FN(GLOS_AREA_SECRETS, 1)       /* struct glos_secret */
+#define GLOS_SECRETS_REMOVE GLOS_FN(GLOS_AREA_SECRETS, 2)       /* struct glos_secret */
+
+struct glos_secret {
+    unsigned size;
+    unsigned name;              /* text: 1 to 63 bytes */
+    unsigned flags;             /* GLOS_SECRET_ */
+    unsigned buffer, count;     /* PUT: the value and its length (1024 at most). GET: the room */
+    unsigned length;            /* -> GET: the value's length */
+};
+#define GLOS_SECRET_SHARED 1    /* one that programs share, by the user's leave */
+
 /* ================================================================== SETTINGS (0Ch): GLOS.CFG, the theme, the region
  *
  * A setting is a section, a key and a value, all text (GLOS.CFG's "[section]" and "key = value"). The schema
