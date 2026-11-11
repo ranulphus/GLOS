@@ -106,7 +106,8 @@ static void before(void)
           && GLOS_HAS(&v, GLOS_AUDIO_IN) && GLOS_HAS(&v, GLOS_AUDIO_MIDI_OUT) && GLOS_HAS(&v, GLOS_AUDIO_DEVICES)
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 7))
           && GLOS_HAS(&v, GLOS_NET_STATE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_NET, 7))
-          && GLOS_HAS(&v, GLOS_CAPTURE_MOUSE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_CAPTURE, 3)),
+          && GLOS_HAS(&v, GLOS_CAPTURE_MOUSE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_CAPTURE, 3))
+          && GLOS_HAS(&v, GLOS_DEBUG_WRITE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_DEBUG, 3)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
     small.v.size = 12;                                  /* (size, major, minor: an older program's) */
@@ -144,8 +145,8 @@ static void calls(void)
     r = glos_call(2, 0);                                /* (1.x's YIELD: a 2.0 app makes 2.0's calls) */
     check("1x-refused", r == GLOS_E_VERSION, "r=%d", r);
     check("unknown-core", glos_call(GLOS_FN(GLOS_AREA_CORE, 200), 0) == GLOS_E_FUNCTION, 0);
-    check("unknown-area", glos_call(GLOS_FN(GLOS_AREA_NET, 0), 0) == GLOS_E_FUNCTION, 0);
-    check("unknown-win", glos_call(GLOS_FN(GLOS_AREA_WIN, 5), 0) == GLOS_E_FUNCTION, 0);
+    check("unknown-area", glos_call(GLOS_FN(GLOS_AREA_MODULES, 0), 0) == GLOS_E_FUNCTION, 0);    /* (an area with no calls) */
+    check("unknown-win", glos_call(GLOS_FN(GLOS_AREA_WIN, 200), 0) == GLOS_E_FUNCTION, 0);
     check("yield", glos_yield() == 0, 0);
     memset(&t, 0, sizeof t);
     t.size = sizeof t;
@@ -2718,6 +2719,43 @@ static int cap_mode(void)
     ok = r == 0 && r2 == 0 && cap_near(cap_pix, 0x000000) && cap_near(cap_pix + (40 * 120 + 60) * 4, 0x000000);
     check("cap-mouse", ok, "r=%d r2=%d first=%02x%02x%02x", r, r2, cap_pix[0], cap_pix[1], cap_pix[2]);
 
+    /* EMBED: the child's window shown inside one of this app's: bare, at the rectangle, of its size; what is
+       refused; let go, it is where and as large as it was; and so again when the host is closed. */
+    {
+        glos_handle hw = glos_window("CAPHOST", 40, 60, 300, 200, GLOS_WK_NORMAL, 0, 0);
+        unsigned hid = 0, n = 0;
+        int in_ok, out_ok = 0, closed_ok = 0;
+        glos_show(hw, GLOS_WS_NORMAL);
+        if (glos_windows(0, wins, 16, &n) == 0)
+            for (i = 0; i < n && i < 16; i++)
+                if (!strcmp(wins[i].title, "CAPHOST"))
+                    hid = wins[i].id;
+        r = glos_embed(hw, win, 20, 30, 100, 60);
+        glos_sleep(700);
+        r2 = glos_windows(child, wins, 16, &n);
+        in_ok = r == 0 && r2 == 0 && n == 1 && wins[0].x == 40 + 1 + 20 && wins[0].y == 60 + 20 + 30 && wins[0].w == 100
+                && wins[0].h == 60 && glos_capture_pixels(win, GLOS_CAPTURE_RGBA, cap_pix, sizeof cap_pix, &len, &w, &h) == 0
+                && w == 100 && h == 60;
+        snprintf(line, sizeof line, "at=%d,%d %dx%d", wins[0].x, wins[0].y, wins[0].w, wins[0].h);
+        r3 = glos_embed(hw, hid, 0, 0, 50, 50);         /* (itself; no such window; not a window of its own to take one in) */
+        ok = in_ok && r3 == GLOS_E_REFUSED && glos_embed(hw, 999999, 0, 0, 50, 50) == GLOS_E_NOT_FOUND
+             && glos_embed(0x12345678, win, 0, 0, 50, 50) != 0 && glos_embed(hw, win, 0, 0, 50, 0) == GLOS_E_ARGUMENT;
+        r = glos_embed(hw, win, 0, 0, 0, 0);
+        glos_sleep(700);
+        if (glos_windows(child, wins, 16, &n) == 0 && n == 1)
+            out_ok = r == 0 && wins[0].x == 200 && wins[0].y == 120 && wins[0].w == 120 && wins[0].h == 80;
+        r2 = glos_embed(hw, win, 5, 5, 60, 40);
+        glos_sleep(700);
+        glos_close(hw);
+        for (tries = 0; tries < 100 && !closed_ok; tries++) {
+            glos_sleep(100);
+            if (glos_windows(child, wins, 16, &n) == 0 && n == 1)
+                closed_ok = r2 == 0 && wins[0].x == 200 && wins[0].y == 120 && wins[0].w == 120 && wins[0].h == 80;
+        }
+        check("cap-embed", ok && out_ok && closed_ok, "host=%u in=%d %s refused=%d out=%d closed=%d", hid, in_ok, line, r3, out_ok,
+              closed_ok);
+    }
+
     /* As a PNG: a file's signature, its size in the header; kept for the test to compare with the screen's. */
     keys[0].key = 0x11, keys[0].down = 1;       /* (white again: something to compare) */
     glos_capture_keys(win, keys, 1);
@@ -2764,6 +2802,207 @@ static int cap_mode(void)
 
     snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
     com1(line);
+    return fails > 90 ? 90 : fails;
+}
+
+/* APITEST dbg MAIN COUNTER: API 2.0's DEBUG (phase B step 12), under the agent with the desktop on. MAIN and
+   COUNTER are the addresses (hex) of GDBME's main and its counter. A small debugger: GDBME (a DOS program) run
+   stopped at its start; its registers; files written and read while it is stopped; a breakpoint at main, run to;
+   a step; its counter read and set; run to its end, which the channel tells with its exit code. Then APITEST
+   capchild, which becomes an app: stopped at its start, let go, interrupted once it is an app, let go again,
+   ended. */
+static glos_handle dbg_h;
+static char dbg_in[1200];
+static unsigned dbg_len;
+
+static void dbg_send(const char *body)
+{
+    char pkt[600];
+    unsigned i, sum = 0;
+    for (i = 0; body[i]; i++)
+        sum += (unsigned char)body[i];
+    snprintf(pkt, sizeof pkt, "$%s#%02x", body, sum & 255);
+    glos_debug_write(dbg_h, pkt, strlen(pkt));
+}
+
+/* The stub's next packet's body (its acknowledgements passed over; ours sent), waited for at most ms: its
+   length, or -1. */
+static int dbg_reply(char *out, unsigned room, unsigned ms)
+{
+    unsigned t0 = glos_ticks();
+    for (;;) {
+        char *s = memchr(dbg_in, '$', dbg_len), *e = s ? memchr(s, '#', dbg_len - (unsigned)(s - dbg_in)) : 0;
+        int n;
+        if (e && (unsigned)(e - dbg_in) + 3 <= dbg_len) {
+            unsigned len = (unsigned)(e - s) - 1, used = (unsigned)(e - dbg_in) + 3;
+            if (len >= room)
+                len = room - 1;
+            memcpy(out, s + 1, len);
+            out[len] = 0;
+            memmove(dbg_in, dbg_in + used, dbg_len - used);
+            dbg_len -= used;
+            glos_debug_write(dbg_h, "+", 1);
+            return (int)len;
+        }
+        if (glos_ticks() - t0 >= ms)
+            return -1;
+        n = glos_debug_read(dbg_h, dbg_in + dbg_len, sizeof dbg_in - dbg_len, 200);
+        if (n < 0)
+            return -1;
+        dbg_len += (unsigned)n;
+    }
+}
+
+static int dbg_cmd(const char *body, char *out, unsigned room)
+{
+    dbg_send(body);
+    return dbg_reply(out, room, 10000);
+}
+
+static unsigned dbg_le(const char *hex)         /* a register as the stub writes it: low byte first */
+{
+    unsigned v = 0, i;
+    for (i = 0; i < 4; i++) {
+        unsigned b = 0;
+        sscanf(hex + 2 * i, "%2x", &b);
+        v |= b << (8 * i);
+    }
+    return v;
+}
+
+static const char *dbg_hex_le(unsigned v)
+{
+    static char s[12];
+    snprintf(s, sizeof s, "%02x%02x%02x%02x", v & 255, (v >> 8) & 255, (v >> 16) & 255, v >> 24);
+    return s;
+}
+
+static int dbg_mode(int argc, char **argv)
+{
+    static struct glos_program progs[16];
+    static struct glos_win_info wins[16];
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_job_status st;
+    struct glos_capture_key key;
+    glos_handle job;
+    unsigned mainp, counterp, eip = 0, eip2 = 0, count = 0, i, child = 0, win = 0;
+    char r[600], r2[600], cmd[64], orig[8] = "";
+    int ok, n, n2, tries;
+    FILE *f;
+    if (argc < 4 || glos_init("API test", "apitest", "Tests") != 0)
+        return 98;
+    mainp = (unsigned)strtoul(argv[2], 0, 16), counterp = (unsigned)strtoul(argv[3], 0, 16);
+    memset(&st, 0, sizeof st);
+
+    /* A DOS program, stopped at its start: the channel; a second is refused, and what is no job. */
+    job = glos_job_run(hp("%s\\GDBME.EXE"), 0, 0, GLOS_RUN_HIDDEN, GLOS_RUNF_DEBUG, 0);
+    dbg_h = glos_debug_attach(job);
+    ok = job && dbg_h && GLOS_HANDLE_KIND(dbg_h) == GLOS_HK_DEBUG && !glos_debug_attach(job) && glos_error() == GLOS_E_REFUSED
+         && !glos_debug_attach(dbg_h) && glos_error() == GLOS_E_HANDLE;
+    dbg_send("?");
+    n = dbg_reply(r, sizeof r, 60000);
+    n2 = dbg_cmd("g", r2, sizeof r2);
+    eip = n2 == 128 ? dbg_le(r2 + 8 * 8) : 0;
+    check("dbg-start", ok && n == 3 && !strcmp(r, "S05") && n2 == 128 && eip, "job=%x h=%x err=%d stop=%s regs=%d eip=%x", job, dbg_h,
+          glos_error(), r, n2, eip);
+
+    /* The debugger's own files while its program is stopped: DOS is this app's to call; the program is as it was. */
+    ok = 0;
+    if ((f = fopen(hp("%s\\DBG.TMP"), "wb")) != 0) {
+        ok = fwrite("stopped all the while", 1, 21, f) == 21;
+        fclose(f);
+        if ((f = fopen(hp("%s\\DBG.TMP"), "rb")) != 0) {
+            ok = ok && fread(r, 1, 21, f) == 21 && !memcmp(r, "stopped all the while", 21);
+            fclose(f);
+        }
+        remove(hp("%s\\DBG.TMP"));
+    }
+    n = dbg_cmd("g", r, sizeof r);
+    check("dbg-files", ok && n == 128 && !strcmp(r, r2), "ok=%d regs=%d same=%d", ok, n, !strcmp(r, r2));
+
+    /* A breakpoint at main (an INT3 the debugger writes): run to it; the event; EIP one past it; put back. */
+    snprintf(cmd, sizeof cmd, "m%x,1", mainp);
+    n = dbg_cmd(cmd, orig, sizeof orig);
+    snprintf(cmd, sizeof cmd, "M%x,1:cc", mainp);
+    n2 = dbg_cmd(cmd, r, sizeof r);
+    ok = n == 2 && n2 == 2 && !strcmp(r, "OK");
+    while (glos_event(ev, sizeof ev, 0, 0) > 0) ;
+    dbg_send("c");
+    n = await(GLOS_EV_DEBUG, dbg_h, ev, 30000);
+    n2 = dbg_reply(r, sizeof r, 5000);
+    ok = ok && n > 0 && n2 == 3 && !strcmp(r, "S05") && dbg_cmd("g", r2, sizeof r2) == 128;
+    eip = dbg_le(r2 + 8 * 8);
+    snprintf(cmd, sizeof cmd, "M%x,1:%s", mainp, orig);
+    ok = ok && eip == mainp + 1 && dbg_cmd(cmd, r, sizeof r) == 2;
+    snprintf(cmd, sizeof cmd, "P8=%s", dbg_hex_le(mainp));
+    ok = ok && dbg_cmd(cmd, r, sizeof r) == 2 && !strcmp(r, "OK");
+    check("dbg-break", ok, "event=%d stop=%s eip=%x main=%x orig=%s", n, n2 == 3 ? r : "-", eip, mainp, orig);
+
+    /* A step: stopped again, further on. Its counter: 42; set to 1000. */
+    dbg_send("s");
+    n = dbg_reply(r, sizeof r, 10000);
+    ok = n == 3 && !strcmp(r, "S05") && dbg_cmd("g", r2, sizeof r2) == 128;
+    eip2 = dbg_le(r2 + 8 * 8);
+    snprintf(cmd, sizeof cmd, "m%x,4", counterp);
+    n = dbg_cmd(cmd, r, sizeof r);
+    ok = ok && eip2 != mainp && eip2 - mainp < 16 && n == 8 && !strcmp(r, "2a000000");
+    snprintf(cmd, sizeof cmd, "M%x,4:e8030000", counterp);
+    ok = ok && dbg_cmd(cmd, r2, sizeof r2) == 2 && !strcmp(r2, "OK");
+    check("dbg-step", ok, "eip=%x counter=%s", eip2, r);
+
+    /* To its end: the channel says so, with its exit code (2001's low seven bits); the job is done with it. */
+    dbg_send("c");
+    n = dbg_reply(r, sizeof r, 30000);
+    for (tries = 0; tries < 100; tries++) {
+        glos_sleep(100);
+        if (glos_job_status(job, &st) == 0 && st.state == GLOS_JS_DONE)
+            break;
+    }
+    ok = glos_close(dbg_h) == 0 && glos_debug_read(dbg_h, r2, sizeof r2, 0) == -GLOS_E_HANDLE && glos_close(job) == 0;
+    ok = ok && n == 3 && !strcmp(r, "W51") && st.state == GLOS_JS_DONE && st.code == 81;
+    check("dbg-end", ok, "reply=%s state=%u code=%u", n > 0 ? r : "-", st.state, st.code);
+
+    /* A program that becomes an app: stopped at its start (a DOS program still), let go; once it is an app, the
+       debugger's interrupt stops it (at its next return to its own code: a key wakes it); its registers and its
+       memory; let go; ended: the channel says so. */
+    dbg_len = 0;
+    job = glos_job_run(hp("%s\\APITEST.EXE capchild"), 0, 0, GLOS_RUN_HIDDEN, GLOS_RUNF_DEBUG, 0);
+    dbg_h = glos_debug_attach(job);
+    dbg_send("?");
+    n = dbg_reply(r, sizeof r, 60000);
+    ok = job && dbg_h && n == 3 && !strcmp(r, "S05");
+    dbg_send("c");
+    for (tries = 0; tries < 300 && !win; tries++) {
+        glos_sleep(100);
+        if (glos_job_status(job, &st) != 0 || glos_programs(progs, sizeof progs, &count) != 0)
+            continue;
+        for (i = 0, child = 0; i < count; i++)
+            if (progs[i].kind == GLOS_PROG_APP && progs[i].job == st.id && st.id)
+                child = progs[i].id;
+        if (child && glos_windows(child, wins, 16, &count) == 0 && count == 1)
+            win = wins[0].id;
+    }
+    glos_sleep(500);
+    glos_debug_write(dbg_h, "\x03", 1);
+    memset(&key, 0, sizeof key);
+    key.key = 0x1E, key.down = 1;               /* (an a: nothing to it, but it comes back from its wait) */
+    glos_capture_keys(win, &key, 1);
+    n = dbg_reply(r, sizeof r, 20000);
+    n2 = dbg_cmd("g", r2, sizeof r2);
+    eip = n2 == 128 ? dbg_le(r2 + 8 * 8) : 0;
+    snprintf(cmd, sizeof cmd, "m%x,4", eip);
+    ok = ok && win && n == 3 && !strcmp(r, "S02") && n2 == 128 && eip && dbg_cmd(cmd, r2, sizeof r2) == 8;
+    check("dbg-app", ok, "app=%u window=%u stop=%s eip=%x mem=%s", child, win, n > 0 ? r : "-", eip, r2);
+    dbg_send("c");
+    key.key = 0x10, key.mods = GLOS_MOD_SHIFT;  /* (Q: it ends, with 33) */
+    glos_capture_keys(win, &key, 1);
+    n = dbg_reply(r, sizeof r, 30000);
+    ok = glos_close(dbg_h) == 0 && glos_close(job) == 0;
+    ok = ok && n == 3 && !strcmp(r, "W21");
+    check("dbg-app-end", ok, "reply=%s", n > 0 ? r : "-");
+
+    snprintf(r, sizeof r, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+    com1(r);
     return fails > 90 ? 90 : fails;
 }
 
@@ -2865,6 +3104,8 @@ int main(int argc, char **argv)
         return job_mode();
     if (argc > 1 && !strcmp(argv[1], "audio"))
         return audio_mode(argc > 2 && !strcmp(argv[2], "loop"));
+    if (argc > 1 && !strcmp(argv[1], "dbg"))
+        return dbg_mode(argc, argv);
     if (argc > 1 && !strcmp(argv[1], "capchild"))
         return capchild_mode();
     if (argc > 1 && !strcmp(argv[1], "cap"))

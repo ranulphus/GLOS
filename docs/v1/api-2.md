@@ -461,6 +461,14 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 
 - **Only for programs the caller started,** as DEBUG. Not a way to watch or drive any app.
 
+- **As built (step 12):** DEBUG's ATTACH, READ and WRITE; CAPTURE's PIXELS, KEYS and MOUSE; WIN's EMBED.
+  - All three are for programs the caller started and still has the job's handle of (CAPTURE and EMBED: the
+    caller's own windows too).
+  - A program to be debugged from its start is run with `GLOS_RUNF_DEBUG`. Stops and the program's end come as
+    `GLOS_EV_DEBUG`, their replies by READ. The debugger's own DOS calls go on while its program is stopped.
+  - CAPTURE names a window by its number; PNG is 24-bit.
+  - EMBED makes the window a bare child of the host's client area; no screensaver preview yet (phase D).
+
 ### 11h SECRETS
 
 | Call | What it does |

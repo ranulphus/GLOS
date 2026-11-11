@@ -4689,7 +4689,7 @@ def api_cap_case(profile, vcard, card):
             checks["png"] = bool(cap) and cap[:2] == (120, 80)
             same = False
             if d and cap and scr and cap[:2] == (120, 80):
-                x0, y0 = int(d.group(1)) + BORDER, int(d.group(2)) + BORDER + TITLE
+                x0, y0 = int(d.group(1)) + BORDER, int(d.group(2)) + 2 * BORDER + TITLE    # (the bar, and its edge)
                 worst = 0
                 for y in range(80):
                     a = cap[2][y * 360:(y + 1) * 360]
@@ -4699,9 +4699,11 @@ def api_cap_case(profile, vcard, card):
                 info += " worst=%d" % worst
             checks["as-the-screen"] = same
         checks["run"] = p.wait(timeout=600) == 0
-        agent.ssh("glos key 0x10")              # q: the other app ends
-        other.wait(timeout=120)
-        agent.ssh("glos exit")
+        agent.ssh("glos exit")                  # (the other app is asked to end with GLOS)
+        try:
+            other.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            other.kill()
     except (subprocess.TimeoutExpired, OSError) as e:
         info += " %s" % type(e).__name__
         for q in (p, other):
@@ -4709,12 +4711,41 @@ def api_cap_case(profile, vcard, card):
                 q.kill()
     text = agent.wait()
     cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", text)
-    checks["cases"] = len(cases) >= 7 and all(k == "1" for c, k, w in cases)
+    checks["cases"] = len(cases) >= 8 and all(k == "1" for c, k, w in cases)
     if not checks["cases"]:
         info += " cases=%d failed-cases=%s" % (len(cases), ";".join(c + w.rstrip() for c, k, w in cases if k != "1"))
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text and "GLOS-WARN" not in text
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s" % ("apicap-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
+def api_dbg_case(profile, vcard, card):
+    """API 2.0's DEBUG (APITEST dbg; phase B step 12), under the agent with the desktop on: APITEST is a small
+    debugger, by gdb's remote protocol over its channel: GDBME run stopped at its start, the debugger's own files
+    written and read meanwhile, a breakpoint at main, a step, its counter read and set, run to its end (it says
+    2001); then a program that becomes an app, interrupted as an app and let go. Every case ok."""
+    tag = "%s-%s" % (profile, vcard)
+    sym = dict((l.split()[2], int(l.split()[0], 16)) for l in open(os.path.join(ROOT, "build/dj/GDBME.sym"))
+               if len(l.split()) == 3)
+    agent = Agent("apidbg-" + tag, profile, card, ["--card", vcard, "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
+        "--file", "build/dj/GDBME.EXE=/TEST/GDBME.EXE",
+        "--cmd", "SERSAY HX-START apidbg", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1500)
+    checks, info = {"listen": agent.listening()}, ""
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        checks["run"] = agent.ssh("C:\\TEST\\APITEST.EXE dbg %x %x" % (sym["_main"], sym["_counter"]), timeout=900)[0] == 0
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        info += " timeout"
+    text = agent.wait()
+    cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", text)
+    checks["cases"] = len(cases) >= 7 and all(k == "1" for c, k, w in cases)
+    if not checks["cases"]:
+        info += " cases=%d failed-cases=%s" % (len(cases), ";".join(c + w.rstrip() for c, k, w in cases if k != "1"))
+    checks["said"] = "HX-GDBME counter=2001" in text
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text and "GLOS-WARN" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("apidbg-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
 def api_net_case(profile, vcard, card):
@@ -7475,6 +7506,7 @@ def main():
             res += matrix(api_midi_case, wins + [w + ("cs4236b",) for w in wins[:1]], a.jobs)     # ... and MIDI
             res += matrix(api_net_case, wins, a.jobs)   # ... and the network
             res += matrix(api_cap_case, wins, a.jobs)   # ... and a child's window seen and driven
+            res += matrix(api_dbg_case, wins, a.jobs)   # ... and a program debugged
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

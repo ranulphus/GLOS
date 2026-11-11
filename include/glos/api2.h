@@ -737,6 +737,10 @@ struct glos_job_run {
 #define GLOS_RUNF_DIRECT 4      /* direct mode (the PC's ports are its own: PRD D20) */
 #define GLOS_RUNF_APPEND_OUT 8  /* `out`'s file is added to, not made anew */
 #define GLOS_RUNF_APPEND_ERR 16 /* ... and `err`'s */
+#define GLOS_RUNF_DEBUG    32   /* its program stops before its first instruction (of its 32-bit code: a DPMI
+                                   program's) and waits for the caller's debugger (DEBUG's ATTACH). Without one, it
+                                   runs on when the job's handle is closed. If the debugger has another program,
+                                   it just runs */
 
 struct glos_job_io {
     unsigned size;
@@ -1202,6 +1206,43 @@ struct glos_ev_net {
     unsigned waiting;           /* bytes waiting to be read; a port: connections waiting */
     unsigned room;              /* bytes SEND would take */
 };
+
+/* ================================================================== DEBUG (0Fh): a debugger's channel to a program
+ *
+ * For a debugger that is a GLOS app. ATTACH gives a channel (GLOS_HK_DEBUG) to a program the caller started
+ * (JOB's RUN: the job's handle; with GLOS_RUNF_DEBUG it is waiting, stopped at its start), whether it is still
+ * a DOS program or has become an app. The channel carries gdb's remote serial protocol, as GLOS's `glos gdb`
+ * does: WRITE gives the stub the debugger's bytes (packets, "$...#cs"; a byte 03h asks a running program to
+ * stop) and READ takes the stub's (acknowledgements and replies). The stub knows 32-bit DPMI programs: the
+ * registers (g, G, P), memory (m, M: addresses are the program's own, as its linker gave them), c and s (with an
+ * address or without), ?, D, k; breakpoints are INT3s the debugger writes itself. A program that has become an
+ * app is stopped on its first thread; its other threads run on.
+ *
+ * While its program is stopped the debugger is as free as ever: its files, its windows, its other jobs.
+ * GLOS_EV_DEBUG says a reply to c, s or ? waits to be READ: the program stopped (S05 a breakpoint or a step,
+ * S02 the debugger's own interrupt) or ended (Wxx, its exit code). CLOSE lets the program go: it runs on.
+ * One program is debugged at a time, GLOS-wide (`glos gdb`'s included): a second ATTACH is refused
+ * (GLOS_E_REFUSED), as is a job that is not the caller's. */
+#define GLOS_DEBUG_ATTACH GLOS_FN(GLOS_AREA_DEBUG, 0)   /* struct glos_debug_attach */
+#define GLOS_DEBUG_READ   GLOS_FN(GLOS_AREA_DEBUG, 1)   /* struct glos_debug_io */
+#define GLOS_DEBUG_WRITE  GLOS_FN(GLOS_AREA_DEBUG, 2)   /* struct glos_debug_io */
+
+struct glos_debug_attach {
+    unsigned size;
+    glos_handle job;            /* the caller's job */
+    glos_handle handle;         /* -> the channel, until CLOSE */
+};
+
+struct glos_debug_io {
+    unsigned size;
+    glos_handle handle;
+    unsigned buffer, count;     /* WRITE: the bytes. READ: the room */
+    unsigned ms;                /* READ: how long to wait for some (0: not at all; GLOS_FOREVER) */
+    unsigned done;              /* -> the bytes taken, or copied */
+};
+
+#define GLOS_EV_DEBUG GLOS_EV(GLOS_AREA_DEBUG, 1)       /* (the header alone; handle: the channel) the program
+                                                           stopped or ended: its reply waits */
 
 /* ================================================================== CAPTURE (10h): a child's window, seen and driven
  *

@@ -52,6 +52,8 @@ struct agent_opts {
                                                    the structure's) */
     const char *file[3];                        /* files for its standard input, output and error (NULL: none) */
     u8 append;                                  /* bit 1, bit 2: the output's, the error's file is added to */
+    u8 debug;                                   /* its program stops at its first 32-bit code, for its app's
+                                                   debugger (API 2.0's DEBUG) */
 };
 int agent_post_job(void *app, const struct glos_run *r, const struct agent_opts *o, u32 *seq);
 int agent_app_read1(void *app, u32 seq, int stream, u8 *out, u32 room);        /* one stream's bytes; -1 no such job */

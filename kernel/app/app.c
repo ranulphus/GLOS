@@ -56,6 +56,7 @@
 #include "glos/api.h"
 #include "glos/bootinfo.h"
 #include "agent.h"
+#include "gdbprog.h"
 #include "app.h"
 #include "appint.h"
 #include "desk.h"
@@ -580,6 +581,7 @@ void app_detach(struct trapframe *tf)
     dpmi_to_v86(tf, vm.loader_cs, vm.bi->detached_off, vm.loader_cs, vm.bi->kill_sp, vm.loader_cs, vm.loader_cs);
     current->vif = 0;
     kprintf("GLOS-APP start id=%u prog=%s psp=%04x thread=%s vectors=%u\n", a->id, a->prog, a->psp, a->tname, nvec);
+    gdbp_became_app(a->thread, a, agent_job_seq(a->job));       /* (its debugger's stops are this thread's now) */
     thread_go(a->thread);
 }
 
@@ -1128,6 +1130,11 @@ static void serve(struct app *a)
                 a->nirq[13]);
         if (a->job)
             agent_app_done(a->job, a->code);
+        {
+            u32 f = irq_save();
+            gdbp_app_end(a, a->code & 0xFF);    /* (its debugger, if it has one: API 2.0's DEBUG) */
+            irq_restore(f);
+        }
     }
     a->call = AC_NONE;
     thread_wake(&a->wq);
@@ -1220,6 +1227,12 @@ void app_vm_idle_turn(int in_dos)
 
 /* ---- from anywhere */
 
+int app_ending(const void *a)
+{
+    const struct app *p = a;
+    return !p || p->kill || p->dead || !p->ctx;
+}
+
 void app_kill(struct app *a, const char *why)
 {
     u32 f = irq_save();
@@ -1299,6 +1312,15 @@ void app_exit_turn(void)
                 app_kill(a, "exit");
     }
     irq_restore(f);
+}
+
+struct app *app_of_job(u32 seq)                 /* (interrupts off) the live app that began as that job, or NULL */
+{
+    struct app *a;
+    for (a = apps; a; a = a->next)
+        if (a->ctx && !a->kill && a->job && agent_job_seq(a->job) == seq)
+            return a;
+    return 0;
 }
 
 struct app *app_by_id(u32 id)                   /* (interrupts off) the live app with this id, or NULL */

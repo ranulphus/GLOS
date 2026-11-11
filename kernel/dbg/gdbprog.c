@@ -22,9 +22,21 @@
  *
  * A stop inside a nested real-mode call can't be shown to gdb as anything
  * it understands, so a stop waits for the program's own 32-bit code: one
- * waiting at a DOS prompt answers when it comes back from DOS. */
+ * waiting at a DOS prompt answers when it comes back from DOS.
+ *
+ * API 2.0's DEBUG (kernel/app/api2dbg.c; phase B step 12) is a second way in, for an app debugging a program it
+ * started. For it:
+ * - The stops are a named program's: a job's (its number), on the VM thread, or the app that job became, on the
+ *   app's first thread (the stub follows it there when it becomes one). An app's thread waits on a queue of the
+ *   stub's own.
+ * - A program stopped on the VM thread has the apps' DOS and BIOS calls made meanwhile (the debugger's own file
+ *   reading, most of all), as a console job's program waiting for a key has (app_vm_idle_turn): it is in its
+ *   own code, not in DOS, so DOS is free. Its registers are a copy kept here while it is stopped, put back when
+ *   it goes on. */
 #include <string.h>
 
+#include "agent.h"
+#include "app.h"
 #include "arch.h"
 #include "dpmi.h"
 #include "gdbprog.h"
@@ -44,9 +56,15 @@ static struct {
     u8 step;                            /* resume for one instruction */
     u8 based;
     u8 gone;                            /* the program ended while gdb was attached: its status */
+    u8 gone_told;
     u8 gone_news;
     int sig;
-    struct trapframe *tf;
+    struct trapframe *tf;               /* the stopped program's registers: `frame`, or 0 */
+    struct trapframe frame;
+    struct thread *thread;              /* whose stops these are; 0: the VM thread's (the program in front) */
+    void *app;                          /* ... the app whose first thread that is, or 0 */
+    u32 job;                            /* only this job's program (its number); 0: whatever runs (glos gdb) */
+    struct waitq wq;                    /* where an app's thread waits, stopped */
     u32 base;
     void (*wake)(void);
     void (*send)(const u8 *d, u32 n);
@@ -76,8 +94,24 @@ static int its_code(const struct trapframe *tf)
         && (cpu_desc_hi(tf->cs) & (1u << 22));
 }
 
+static u32 *reg(struct trapframe *tf, u32 n);
+
+static struct thread *target(void) { return g.thread ? g.thread : vm.thread; }
+
+/* The running thread is the one whose stops are the debugger's: the VM thread with the job named (or any), or
+   the app's first thread. */
+static int mine(void)
+{
+    if (current != target())
+        return 0;
+    return current != vm.thread || !g.job || agent_job_seq(agent_vm_job()) == g.job;
+}
+
 static void stop(struct trapframe *tf, int sig)
 {
+    static const u8 regs[] = { 0, 1, 2, 3, 5, 6, 7, 8 };        /* (what gdb may have set: all but ESP and the flags) */
+    int killed;
+    u32 i;
     g.armed = g.want_stop = 0;
     if (!g.based) {
         g.base = sel_base((u16)tf->cs);
@@ -85,24 +119,43 @@ static void stop(struct trapframe *tf, int sig)
         kprintf("GLOS-GDB stop cs=%04x base=%p eip=%p\n", tf->cs & 0xFFFF, g.base, tf->eip);
     }
     tf->eflags &= ~FL_TF;
-    g.tf = tf;
+    g.frame = *tf;
+    g.tf = &g.frame;
     g.sig = sig;
     g.stopped = 1;
     g.news = 1;
     if (g.wake)
         g.wake();
-    while (g.stopped && !vm.kill_req)           /* (vm_kick wakes this queue: gdb's resume, a kill, any IRQ) */
-        thread_block(&vm.waitq);
+    if (current == vm.thread) {
+        while (g.stopped && !vm.kill_req) {     /* (vm_kick wakes this queue: gdb's resume, a kill, any IRQ, an
+                                                   app's call queued) */
+            if (app_vm_pending())               /* the apps' DOS and BIOS calls: made now, as while a console
+                                                   job's program waits for a key (in DOS, if a handler of the
+                                                   program's was stopped inside a call of DOS's) */
+                app_vm_idle_turn(vm.indos && vm_rd8(vm.indos));
+            if (g.stopped && !vm.kill_req)
+                thread_block(&vm.waitq);
+        }
+        killed = vm.kill_req != 0;
+    } else {
+        while (g.stopped && !app_ending(g.app))
+            thread_block(&g.wq);
+        killed = app_ending(g.app);
+    }
     g.stopped = 0;
     g.tf = 0;
-    if (g.step && !vm.kill_req)
+    for (i = 0; i < sizeof regs; i++)           /* the registers as gdb left them */
+        *reg(tf, regs[i]) = *reg(&g.frame, regs[i]);
+    *reg(tf, 4) = *reg(&g.frame, 4);
+    tf->eflags = (tf->eflags & ~(FL_ARITH | 0x400u)) | (g.frame.eflags & (FL_ARITH | 0x400u));
+    if (g.step && !killed)
         tf->eflags |= FL_TF;
     g.step = 0;
 }
 
 int gdbp_trap(struct trapframe *tf)
 {
-    if (!g.attached && !g.armed)
+    if ((!g.attached && !g.armed) || !mine())
         return 0;
     if (tf->vec == 1 && !(tf->eflags & FL_TF) && !g.attached)
         return 0;
@@ -112,21 +165,55 @@ int gdbp_trap(struct trapframe *tf)
 
 void gdbp_return(struct trapframe *tf)
 {
-    if ((g.armed || g.want_stop) && its_code(tf))
+    if ((g.armed || g.want_stop) && mine() && its_code(tf))
         stop(tf, g.want_stop ? 2 : 5);          /* SIGINT for gdb's interrupt */
 }
 
-int gdbp_stopped(void) { return g.stopped; }
+int gdbp_stopped(void) { return g.stopped && target() == vm.thread; }
 
-void gdbp_program_end(u32 code)
+static void ended(u32 code)
 {
-    if (g.attached) {
+    if (g.attached && !g.gone_told) {
+        g.gone_told = 1;                        /* (once: an app's end is its job's end too) */
         g.gone = (u8)code;
         g.gone_news = 1;
         if (g.wake)
             g.wake();
     }
     g.armed = g.want_stop = g.step = g.based = 0;
+    g.stopped = 0;
+    g.thread = 0;
+    g.app = 0;
+}
+
+void gdbp_program_end(u32 code)
+{
+    if (target() == vm.thread && !g.job)        /* (glos gdb's program; a job's end is told with its code) */
+        ended(code);
+}
+
+/* A job has ended (the agent, with its exit code): the debugger's. */
+void gdbp_job_end(u32 job, u32 code)
+{
+    if (g.job && g.job == job)
+        ended(code);
+}
+
+/* The program on the VM thread has become an app, on a thread of its own: the debugger's stops are that
+   thread's from here (interrupts off; before the thread first runs). */
+void gdbp_became_app(struct thread *t, void *app, u32 job)
+{
+    if (target() == vm.thread && (g.attached || g.armed) && (!g.job || g.job == job) && (g.job || g.attached)) {
+        g.thread = t;
+        g.app = app;
+    }
+}
+
+/* An app has ended (interrupts off): the debugger's, with its exit code. */
+void gdbp_app_end(void *app, u32 code)
+{
+    if (g.app && g.app == app)
+        ended(code);
 }
 
 /* ---- the ssh thread's side */
@@ -194,7 +281,7 @@ static u32 prog_copy(void *dst, const void *src, u32 n)
 {
     u32 f = irq_save(), r;
     struct dpmi_ctx *was = dctx;
-    dpmi_ctx_load(vm.thread->ctx);
+    dpmi_ctx_load(target()->ctx);
     r = ucopy(dst, src, n);
     dpmi_ctx_load(was);
     irq_restore(f);
@@ -241,6 +328,7 @@ static void resume(int step)
     g.news = 0;
     g.stopped = 0;
     vm_kick();
+    thread_wake(&g.wq);
     irq_restore(f);
 }
 
@@ -340,9 +428,13 @@ static void command(char *p)
         gdbp_detach();
         return;
     case 'k':
-        vm.kill_reason = "agent";
-        vm.kill_since = 0;
-        vm.kill_req = 1;
+        if (g.app) {
+            app_kill(g.app, "debugger");
+        } else {
+            vm.kill_reason = "agent";
+            vm.kill_since = 0;
+            vm.kill_req = 1;
+        }
         gdbp_detach();
         return;
     case 'H':
@@ -444,7 +536,7 @@ int gdbp_attach(void (*send)(const u8 *d, u32 n))
         return -1;
     g.send = send;
     g.in_state = 0;
-    g.waiting = g.gone_news = 0;
+    g.waiting = g.gone_news = g.gone_told = 0;
     g.attached = 1;
     return 0;
 }
@@ -455,6 +547,61 @@ void gdbp_detach(void)
     g.attached = g.armed = g.want_stop = g.step = g.waiting = 0;
     g.news = 0;
     g.stopped = 0;                              /* the program runs on */
+    g.wake = 0;
+    g.job = 0;
     vm_kick();
+    thread_wake(&g.wq);
+    g.thread = 0;
+    g.app = 0;
     irq_restore(f);
+}
+
+/* API 2.0's DEBUG. A job is to stop at its program's first 32-bit code (JOB's RUN with GLOS_RUNF_DEBUG, as the
+   job begins: the VM thread, interrupts off): it waits there for its debugger. -1: the debugger has another. */
+int gdbp_arm_job(u32 job)
+{
+    if (g.attached && g.job == job && target() == vm.thread) {  /* (its debugger attached before it began) */
+        g.armed = 1;
+        return 0;
+    }
+    if (g.attached || g.armed || g.stopped)
+        return -1;
+    g.job = job;
+    g.thread = 0;
+    g.app = 0;
+    g.wake = 0;
+    g.based = 0;
+    g.armed = 1;
+    return 0;
+}
+
+/* ... and its debugger attaches: to the job stopped at its start, or to one that runs (then `t` and `app` say
+   whose thread, if it has become an app; it stops when asked to). 0, or -1: the debugger has another. */
+int gdbp_attach_job(u32 job, struct thread *t, void *app, void (*send)(const u8 *d, u32 n), void (*wake)(void))
+{
+    u32 f = irq_save();
+    if (g.attached || ((g.armed || g.stopped) && g.job != job)) {
+        irq_restore(f);
+        return -1;
+    }
+    if (g.job != job) {                         /* (one that runs: nothing was armed for it) */
+        g.job = job;
+        g.thread = t;
+        g.app = app;
+        g.based = 0;
+    }
+    g.send = send;
+    g.wake = wake;
+    g.in_state = 0;
+    g.waiting = g.gone_news = g.gone_told = 0;
+    g.attached = 1;
+    irq_restore(f);
+    return 0;
+}
+
+/* The job's owner has let go of it without attaching (its handle closed, the owner gone): it runs on. */
+void gdbp_forget_job(u32 job)
+{
+    if (g.job == job && !g.attached)
+        gdbp_detach();
 }

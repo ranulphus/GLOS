@@ -50,6 +50,7 @@
 #include "session.h"
 #include "io.h"
 #include "kcfg.h"
+#include "gdbprog.h"
 #include "kprintf.h"
 #include "sched.h"
 #include "timer.h"
@@ -105,6 +106,7 @@ struct agent_job {
     struct waitq readq;                         /* its app, waiting for output */
     /* API 2.0's JOB (kernel/app/api2job.c) */
     u8 keep;                                    /* its slot is its app's until the app lets it go (STATUS after its end) */
+    u8 debug;                                   /* it stops at its start for its app's debugger (gdbprog.c) */
     u8 hidden;                                  /* a console job with no window: it runs beside the desktop as one in
                                                    a window does, but what it writes through DOS is kept by stream,
                                                    and nobody types to it */
@@ -181,7 +183,7 @@ int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, cons
     j->env[0] = j->env[1] = 0;
     j->kh = j->kt = 0;
     j->nleft = 0;
-    j->keep = j->in_pipe = j->in_eof = j->hidden = 0;
+    j->keep = j->in_pipe = j->in_eof = j->hidden = j->debug = 0;
     j->file[0][0] = j->file[1][0] = j->file[2][0] = 0;
     j->fappend = j->fstep = j->fs = j->fset = 0;
     j->ih = j->it = 0;
@@ -273,6 +275,7 @@ int agent_post_job(void *app, const struct glos_run *r, const struct agent_opts 
         j->file[i][k] = 0;
     }
     j->hidden = (u8)(o && o->hidden);
+    j->debug = (u8)(o && o->debug);
     j->in_pipe = (u8)(o && o->stdin_pipe);
     j->in_eof = 0;
     j->ih = j->it = 0;
@@ -541,6 +544,8 @@ int agent_app_forget(void *app, u32 seq)
     f = irq_save();
     j->app_owner = NULL;
     j->detach = 1;
+    if (j->debug)
+        gdbp_forget_job(j->seq);                /* (stopped for a debugger that never came: it runs on) */
     if (j->state == J_DONE || j->state == J_QUEUED)
         j->state = J_FREE;
     irq_restore(f);
@@ -989,6 +994,11 @@ static void finish(struct agent_job *j)
             (result & 0x10000) ? " cannot-run" : "");
     if (running == j)
         running = NULL;
+    if (j->debug) {
+        u32 f = irq_save();
+        gdbp_job_end(j->seq, result & 0xFF);    /* (its debugger hears how it ended) */
+        irq_restore(f);
+    }
     tell(j);
     if (j->detach)
         j->state = J_FREE;                      /* (nobody to tell) */
@@ -1081,6 +1091,8 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
         j->state = J_RUNNING;
         j->t_start = timer_ticks() | 1;
         running = j;
+        if (j->debug && gdbp_arm_job(j->seq) != 0)      /* (the debugger has another program: it just runs) */
+            j->debug = 0;
         if (j->console) {                       /* its keyboard is its app's from now: what the BIOS's buffer */
             u16 tail = vm_rd16(0x41C);          /* held before (the harness's F1) isn't typed into it */
             vm_wr8(0x41A, (u8)tail);

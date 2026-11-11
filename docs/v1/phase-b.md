@@ -800,6 +800,40 @@ After that:
   - CAPTURE's PNG compared with `glos shot`'s;
   - a refusal for another app's program.
 
+**Step 12 as built** (2026-11-11): CAPTURE, EMBED, DEBUG.
+
+- **Who may** (all three): the program is one the caller started with JOB's RUN and still has the handle of
+  (the agent keeps a job's owner until then; SYS's PROGRAMS says which app a job became), or, for CAPTURE and
+  EMBED, a window of the caller's own. Anyone else's is `GLOS_E_REFUSED`.
+- **CAPTURE** (`kernel/app/api2cap.c`): PIXELS gives a window's client area as RGBA or as a PNG file (24-bit,
+  not compressed), read through the desktop a few rows at a time (`desk_win_rows`: a window in the card's
+  memory too); KEYS and MOUSE put events into the window's app as the desktop would (`desk_win_key`,
+  `desk_win_mouse`), whatever has the focus. A window is named by its number.
+- **EMBED** (WIN's fifth call; `wm_embed` in `kernel/wm/wm.c`, `desk_win_embed` and `deskapp_embeds` in
+  `kernel/wm/deskapp.c`): the embedded window becomes a bare window that belongs to its host: in front of it,
+  minimised and hidden with it, with no button and not in Alt-Tab's round, made the size of its rectangle
+  (what of it lies in the host's client area; its app gets the size event). Each turn of the desktop puts it
+  where its host is now. The mouse over it is its app's as for any window, and a press there gives it the
+  keyboard; the host's title bar stays the focus's meanwhile. Let go, or its host closed, it is as it was.
+- **DEBUG** (`kernel/app/api2dbg.c` over `kernel/dbg/gdbprog.c`): ATTACH, READ, WRITE: gdb's remote protocol
+  over a handle, to the stub `glos gdb` uses. One program at a time, GLOS-wide.
+  - JOB's RUN has `GLOS_RUNF_DEBUG`: the program stops at its first 32-bit code and waits for its debugger.
+  - The stub's stops are now a named program's: a job's on the VM thread, or the app it became, on the app's
+    first thread (the stub follows it there; an app's other threads run on).
+  - While a program is stopped on the VM thread, the apps' DOS and BIOS calls are made as they are while a
+    console job waits for a key: the debugger reads its files with its program stopped. (Before, nothing of
+    DOS's moved until the program went on.)
+  - The channel tells a stop (`GLOS_EV_DEBUG`; S05, S02) and the program's end with its exit code (Wxx).
+- **Not done:** the screensaver's preview (the saver is the desktop's own black fill until phase D's saver
+  programs: nothing to show in a window yet); a console job's window can't be captured or embedded (it is the
+  desktop's own, not an app's); stopping every thread of an app, and gdb's thread packets; watchpoints and
+  the FPU's registers in the stub; a PNG with an alpha channel (RGBA is the raw format).
+- **Tests:** host `wm_test` (embedding); APITEST's cap mode in `api_cap_case` (a child's window seen, typed
+  and clicked into, embedded and let go; its PNG against `glos shot`'s picture of the screen; another app's
+  window refused) and its dbg mode in `api_dbg_case` (a small debugger: GDBME stopped at its start, files
+  read meanwhile, a breakpoint at main, a step, its counter set, its end; then a program that becomes an app,
+  interrupted as one), both PCs; `loopa-gdbprog` unchanged.
+
 ### 13. SECRETS, and PKG's "local" source
 
 - **SECRETS:**

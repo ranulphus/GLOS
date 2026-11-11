@@ -396,6 +396,8 @@ void api2_app_gone(struct app *a)
             api2_clip_close(a, obj, 0);         /* (what it was writing is dropped) */
         if (GLOS_HANDLE_KIND(h) == GLOS_HK_LIST)
             api2_fs_close(a, GLOS_HK_LIST, obj, 1);     /* (its watches go with the app: watch_app_gone) */
+        if (GLOS_HANDLE_KIND(h) == GLOS_HK_DEBUG)
+            api2_debug_close(a, obj);           /* (the program it debugged runs on) */
         if (GLOS_HANDLE_KIND(h) == GLOS_HK_TIMER || GLOS_HANDLE_KIND(h) == GLOS_HK_LOCK
             || GLOS_HANDLE_KIND(h) == GLOS_HK_SIGNAL)
             kfree(obj);                         /* (a window's is its number: the desktop took the windows away; a
@@ -445,6 +447,7 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_FS][0] = 0x1F;                /* LIST, INFO, DRIVES, WATCH, SECTORS */
     v.functions[GLOS_AREA_AUDIO][0] = 0x7F;             /* OUT, IN, MIXER, LEVELS, MIDI_OUT, MIDI_IN, DEVICES */
     v.functions[GLOS_AREA_CAPTURE][0] = 0x07;           /* PIXELS, KEYS, MOUSE */
+    v.functions[GLOS_AREA_DEBUG][0] = 0x07;             /* ATTACH, READ, WRITE */
     v.functions[GLOS_AREA_NET][0] = 0x7F;               /* RESOLVE, CONNECT, SEND, RECEIVE, LISTEN, ACCEPT, STATE */
     v.functions[GLOS_AREA_SYS][0] = 0x0F;               /* STAT, KILL, LOG, PROGRAMS */
     v.functions[GLOS_AREA_SETTINGS][0] = 0xFF;          /* GET, SET, SECTIONS, KEYS, SCHEMA, WATCH, THEME, REGION */
@@ -651,6 +654,8 @@ static int close_call(struct app *a, struct trapframe *tf)
         api2_midi_close(a, obj);
     else if (kind == GLOS_HK_CONNECTION)
         api2_net_close(a, obj);
+    else if (kind == GLOS_HK_DEBUG)
+        api2_debug_close(a, obj);
     return a2_ok(tf, 0);
 }
 
@@ -727,19 +732,20 @@ int api2_call(struct trapframe *tf)
         return a2_fail(tf, GLOS_E_VERSION);       /* (a 1.x app makes 1.x's calls only) */
     if (area > GLOS_AREA_SHELL && area != GLOS_AREA_THREAD && area != GLOS_AREA_SETTINGS && area != GLOS_AREA_IDLE
         && area != GLOS_AREA_CLIP && area != GLOS_AREA_DND && area != GLOS_AREA_FS && area != GLOS_AREA_JOB
-        && area != GLOS_AREA_SYS && area != GLOS_AREA_AUDIO && area != GLOS_AREA_NET && area != GLOS_AREA_CAPTURE)
+        && area != GLOS_AREA_SYS && area != GLOS_AREA_AUDIO && area != GLOS_AREA_NET && area != GLOS_AREA_CAPTURE
+        && area != GLOS_AREA_DEBUG)
         return a2_fail(tf, GLOS_E_FUNCTION);       /* (the other areas come with phase B's later steps) */
     first = app_first();
     if (!first && area == GLOS_AREA_DRAW && n >= (GLOS_DRAW_GPU & 0xFF) && n <= (GLOS_DRAW_WINVRAM & 0xFF))
         return a2_fail(tf, GLOS_E_REFUSED);        /* (the GPU is the first thread's alone: supervisor.md 12.7) */
     if (fn == GLOS_DRAW_GPU_LOCK)               /* (not a safe point: the lock is being taken, not left) */
         return gpu_app_lock(a) == 0 ? a2_ok(tf, 0) : a2_fail(tf, GLOS_E_NO_GPU);
-    if (area == GLOS_AREA_NET) {                /* (NET's calls wait for the network: beside the app's others,
-                                                   and, as api.c, at a point where its turn with the engine may
-                                                   end) */
+    if (area == GLOS_AREA_NET || area == GLOS_AREA_DEBUG) {     /* (NET's calls wait for the network, DEBUG's
+                                                   for the program debugged: beside the app's others, and, as
+                                                   api.c, at a point where its turn with the engine may end) */
         if (first)
             gpu_safe_begin(a);
-        r = api2_net(a, tf, n);
+        r = area == GLOS_AREA_NET ? api2_net(a, tf, n) : api2_debug(a, tf, n);
         if (first)
             gpu_safe_end(a);
         return r;

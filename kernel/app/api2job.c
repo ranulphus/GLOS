@@ -33,7 +33,8 @@ static int run(struct app *a, struct trapframe *tf)
     u32 size, seq, i, f, off[3];
     int e, detach;
     if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.how > GLOS_RUN_APP
-        || (q.flags & ~(u32)(GLOS_RUNF_DETACH | GLOS_RUNF_STDIN | GLOS_RUNF_DIRECT | GLOS_RUNF_APPEND_OUT | GLOS_RUNF_APPEND_ERR))
+        || (q.flags & ~(u32)(GLOS_RUNF_DETACH | GLOS_RUNF_STDIN | GLOS_RUNF_DIRECT | GLOS_RUNF_APPEND_OUT | GLOS_RUNF_APPEND_ERR
+                               | GLOS_RUNF_DEBUG))
         || ((q.flags & GLOS_RUNF_STDIN) && q.in))
         return a2_fail(tf, GLOS_E_ARGUMENT);
     detach = (q.flags & GLOS_RUNF_DETACH) != 0;
@@ -62,6 +63,7 @@ static int run(struct app *a, struct trapframe *tf)
     o.direct = (q.flags & GLOS_RUNF_DIRECT) != 0;
     o.exclusive = q.how == GLOS_RUN_EXCLUSIVE ? 1 : q.how == GLOS_RUN_APP ? 2 : 0;
     o.stdin_pipe = (q.flags & GLOS_RUNF_STDIN) != 0;
+    o.debug = (q.flags & GLOS_RUNF_DEBUG) != 0 && !detach;
     o.keep = (u8)!detach;
     o.command = cmd;
     o.profile = q.profile ? profile : 0;

@@ -1107,6 +1107,27 @@ int glos_capture_pixels(unsigned window, unsigned format, void *buffer, unsigned
     return r;
 }
 
+glos_handle glos_debug_attach(glos_handle job)
+{
+    struct glos_debug_attach q = { sizeof q, job, 0 };
+    int r = raw(GLOS_DEBUG_ATTACH, &q, 0);
+    last_error = r;
+    return r ? 0 : q.handle;
+}
+
+int glos_debug_write(glos_handle h, const void *bytes, unsigned count)
+{
+    struct glos_debug_io q = { sizeof q, h, (unsigned)bytes, count, 0, 0 };
+    return raw(GLOS_DEBUG_WRITE, &q, 0);
+}
+
+int glos_debug_read(glos_handle h, void *buffer, unsigned room, unsigned ms)
+{
+    struct glos_debug_io q = { sizeof q, h, (unsigned)buffer, room, ms, 0 };
+    int r = raw(GLOS_DEBUG_READ, &q, 0);
+    return r ? -r : (int)q.done;
+}
+
 int glos_embed(glos_handle w, unsigned window, int x, int y, int cw, int ch)
 {
     struct glos_win_embed q = { sizeof q, w, window, x, y, cw, ch };

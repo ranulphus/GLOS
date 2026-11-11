@@ -766,8 +766,9 @@ void dpmi_trap(struct trapframe *tf)
         dctx->cr2 = read_cr2();                 /* before anything else can fault */
     if (v == 1)
         dpmi_db_hit();                          /* a watchpoint's (0B00h), or a single step */
-    if ((v == 1 || v == 3) && current == vm.thread && gdbp_trap(tf))
-        return;                                 /* glos gdb's step or breakpoint (the session's program) */
+    if ((v == 1 || v == 3) && gdbp_trap(tf))
+        return;                                 /* the debugger's step or breakpoint (glos gdb: the session's
+                                                   program; API 2.0's DEBUG: a job's, or an app's first thread) */
     if (v == 13)
         general_protection(tf);
     else if (v >= 0x20)
@@ -809,6 +810,7 @@ void dpmi_return(struct trapframe *tf)
     struct app *a = app_cur();
     if (a) {
         app_return(a, tf);                      /* its kill, its pause (it has no real mode to return to) */
+        gdbp_return(tf);                        /* (API 2.0's DEBUG: a stop its debugger asked for) */
     } else {
         if (vm.kill_req && !vm_work_running()) {
             dpmi_end(tf, 0xFF, 1);

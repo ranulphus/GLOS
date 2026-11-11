@@ -207,6 +207,11 @@ int glos_capture_pixels(unsigned window, unsigned format, void *buffer, unsigned
                         unsigned *h);
 int glos_capture_keys(unsigned window, const struct glos_capture_key *keys, unsigned count);
 int glos_capture_mouse(unsigned window, const struct glos_capture_mouse *events, unsigned count);
+/* DEBUG: a channel to a job of this app's (run with GLOS_RUNF_DEBUG, or running), 0 with glos_error(); gdb's
+   remote protocol's bytes to the stub and from it. */
+glos_handle glos_debug_attach(glos_handle job);
+int glos_debug_write(glos_handle h, const void *bytes, unsigned count);
+int glos_debug_read(glos_handle h, void *buffer, unsigned room, unsigned ms);  /* the bytes copied, or -GLOS_E_ */
 /* EMBED: a window (by its number) of a program this one started, shown inside w at a rectangle of its client
    area; cw 0: let go. */
 int glos_embed(glos_handle w, unsigned window, int x, int y, int cw, int ch);

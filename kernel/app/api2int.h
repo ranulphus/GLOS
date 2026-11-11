@@ -161,6 +161,9 @@ extern const u32 api2_audio_nprops;
 int api2_audio(struct app *a, struct trapframe *tf, u32 n);    /* AUDIO's calls */
 void api2_audio_close(struct app *a, void *obj);                /* CLOSE of a stream's handle */
 void api2_midi_close(struct app *a, void *obj);                 /* ... of a MIDI port's */
+/* api2dbg.c */
+int api2_debug(struct app *a, struct trapframe *tf, u32 n);     /* DEBUG's calls (made without the app's lock) */
+void api2_debug_close(struct app *a, void *obj);                /* CLOSE of a channel's handle: the program runs on */
 /* api2cap.c */
 int api2_capture(struct app *a, struct trapframe *tf, u32 n);   /* CAPTURE's calls */
 int api2_started_window(struct app *a, u32 window);             /* the window with that number is a's, or a program's
