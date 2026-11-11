@@ -135,6 +135,8 @@ struct app {
 
 /* api2.c: API 2.0 (include/glos/api2.h) beside 1.x (phase B, docs/v1/phase-b.md). */
 int api2_call(struct trapframe *tf);            /* a 2.0 call (EAX's major 2): glos_api's answer */
+u32 glos_cache_range(u32 lin, u32 bytes, u32 type);    /* (api.c) how the CPU caches a range of the program's DOS
+                                                   memory: 0, or a GLOS_E_ number (the same in both APIs) */
 int api2_app_new(struct app *a);                /* a 2.0 app's state, before its thread runs: 0, or -1 */
 void api2_app_gone(struct app *a);              /* its handles closed, its state freed (its thread, at its end) */
 void api2_tick(struct app *a);                  /* its timers, every kernel tick (interrupts off) */

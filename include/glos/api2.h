@@ -462,6 +462,8 @@ struct glos_ev_state {
                                                            a window's (DOS-GL's software renderer; pictures) */
 #define GLOS_DRAW_MODES   GLOS_FN(GLOS_AREA_DRAW, 9)    /* struct glos_modes: the screen modes the card has (for the
                                                            Control Panel; the mode itself is [display] mode) */
+#define GLOS_DRAW_CACHE   GLOS_FN(GLOS_AREA_DRAW, 10)   /* struct glos_cache: how the CPU caches some of the
+                                                           program's DOS memory; for any program (1.4's CACHE) */
 
 /* A pixel format: bits a pixel, and where each colour's bits are in one (at 8 bits: GLOS's palette, the 6x6x6
    cube and greys of glos/gfx.h). */
@@ -505,6 +507,22 @@ struct glos_modes {
 /* BLIT: a rectangle of pixels the app has, in any format of 8, 16 or 32 bits, into the window's client area at
    (x, y), in the screen's format (16- and 32-bit pixels dithered on an 8-bit screen), and to the screen: no
    PRESENT is needed. What falls outside the client area is left out. */
+/* CACHE: a range of conventional memory the program has from DOS (DPMI 0100h) is made write-combining, for
+   memory a device fetches without the CPU's caches in the way (a Matrox card's command buffers), or write-back
+   again (as at boot; so too when the program ends). Whole pages; sizes an MTRR can hold: 64 KB steps below
+   80000h, 16 KB from there to A0000h. For any program, an app or not (a Glide game under DOS/4GW).
+   GLOS_E_ARGUMENT: not such a range, or not a type; GLOS_E_FUNCTION: this CPU has no such registers. */
+struct glos_cache {
+    unsigned size;
+    unsigned address;           /* the linear address: its real-mode segment times 16 */
+    unsigned bytes;
+    unsigned type;              /* GLOS_CACHE_ */
+};
+#ifndef GLOS_CACHE_WC
+#define GLOS_CACHE_WC 1         /* write-combining */
+#define GLOS_CACHE_WB 6         /* write-back */
+#endif
+
 struct glos_blit {
     unsigned size;
     glos_handle handle;

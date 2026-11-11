@@ -436,7 +436,7 @@ static int version(struct trapframe *tf)
     memset(v.functions, 0, sizeof v.functions);
     v.functions[GLOS_AREA_CORE][0] = (1u << 13) - 1;    /* VERSION to RANDOM */
     v.functions[GLOS_AREA_WIN][0] = 0x7F;               /* CREATE, SHOW, PLACE, FOCUS, ENUM, EMBED, DRAG */
-    v.functions[GLOS_AREA_DRAW][0] = 0x3FF;             /* PIXELS, PRESENT, SCREEN, the GPU's five, BLIT, MODES */
+    v.functions[GLOS_AREA_DRAW][0] = 0x7FF;             /* PIXELS, PRESENT, SCREEN, the GPU's five, BLIT, MODES, CACHE */
     v.functions[GLOS_AREA_INPUT][0] = 0x1F;             /* KEYS, CAPTURE, PADS, GAMEPORT, MODE */
     v.functions[GLOS_AREA_SHELL][0] = 0x3FF;            /* DESKTOP, TRAY, NOTIFY, POINT, HELP, OPEN, ASSOC, ENTRY,
                                                            RECENT, SCHEDULE */
@@ -710,6 +710,16 @@ static int waits(u32 fn)
            || fn == GLOS_THREAD_JOIN || fn == GLOS_THREAD_TAKE || fn == GLOS_THREAD_WAIT;
 }
 
+static int cache_call(struct trapframe *tf)     /* DRAW's CACHE: for any program */
+{
+    struct glos_cache q;
+    u32 size, r;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    r = glos_cache_range(q.address, q.bytes, q.type);
+    return r ? a2_fail(tf, r) : a2_ok(tf, 0);
+}
+
 int api2_call(struct trapframe *tf)
 {
     struct app *a = app_cur();
@@ -727,6 +737,10 @@ int api2_call(struct trapframe *tf)
         return random_call(tf);
     if (fn == GLOS_DRAW_SCREEN)
         return api2_screen(tf);
+    if (fn == GLOS_DRAW_CACHE)
+        return cache_call(tf);
+    if (fn == GLOS_SYS_STAT)                    /* (what GLOS knows of itself: GLOSLOG's, and any program's) */
+        return api2_sys_stat(tf);
     if (!a)
         return a2_fail(tf, GLOS_E_NOT_APP);
     if (a->api_major != 2 || !a->v2)
@@ -752,8 +766,15 @@ int api2_call(struct trapframe *tf)
             gpu_safe_end(a);
         return r;
     }
-    if (waits(fn)) {                            /* (a call that waits: beside the app's others) */
+    if (waits(fn)) {                            /* (a call that waits: beside the app's others; and, as 1.x's
+                                                   calls were, a point where the first thread's turn with the
+                                                   engine may end: a DOS-GL program waiting for an event doesn't
+                                                   hold the desktop up) */
+        if (first)
+            gpu_safe_begin(a);
         r = area == GLOS_AREA_THREAD ? api2_thread(a, tf, n) : core(a, tf, n);
+        if (first)
+            gpu_safe_end(a);
         if (r == 2) {                           /* cut short for an interrupt of the app's: back to its code, where
                                                    the handler runs; the caller makes the call again (ECX, EDX).
                                                    (Not straight back into the call from the handler: DJGPP's

@@ -240,23 +240,30 @@ static int config_fn(struct trapframe *tf)
     return r < 0 ? fail(tf, GLOS_E_CONFIG) : 0;
 }
 
-/* GLOS_FN_CACHE: the range within one of the program's own DOS blocks. */
-static int cache_call(struct trapframe *tf)
+/* How the CPU caches a range within one of the running program's own DOS blocks (1.x's GLOS_FN_CACHE, 2.0's
+   DRAW CACHE): 0, GLOS_E_ARGUMENT (not such a range, or not a type), GLOS_E_FUNCTION (this CPU can't). */
+u32 glos_cache_range(u32 lin, u32 bytes, u32 type)
 {
     const struct dosblk *d;
-    u32 lin = tf->ebx, end = tf->ebx + tf->ecx;
+    u32 end = lin + bytes;
     int r;
     if (!dctx)
-        return fail(tf, GLOS_E_ARGUMENT);
+        return GLOS_E_ARGUMENT;
     for (d = dctx->dosblks; d; d = d->next) {
         u32 b = (u32)d->seg << 4, e = b + ((u32)vm_rd16(((u32)d->seg - 1) << 4 | 3) << 4);   /* (its MCB's size) */
         if (lin >= b && end <= e && end > lin)
             break;
     }
     if (!d)
-        return fail(tf, GLOS_E_ARGUMENT);
-    r = mtrr_set(dctx, lin, tf->ecx, tf->edx);
-    return r == -1 ? fail(tf, GLOS_E_FUNCTION) : r ? fail(tf, GLOS_E_ARGUMENT) : done(tf, 0);
+        return GLOS_E_ARGUMENT;
+    r = mtrr_set(dctx, lin, bytes, type);
+    return r == -1 ? GLOS_E_FUNCTION : r ? GLOS_E_ARGUMENT : 0;
+}
+
+static int cache_call(struct trapframe *tf)
+{
+    u32 r = glos_cache_range(tf->ebx, tf->ecx, tf->edx);
+    return r ? fail(tf, r) : done(tf, 0);
 }
 
 int glos_api(struct trapframe *tf)

@@ -212,6 +212,9 @@ int glos_capture_mouse(unsigned window, const struct glos_capture_mouse *events,
 int glos_secret_put(const char *name, const void *value, unsigned length, unsigned flags);
 int glos_secret_get(const char *name, void *buffer, unsigned room, unsigned *length, unsigned flags);
 int glos_secret_remove(const char *name, unsigned flags);
+/* DRAW's CACHE: some of the program's DOS memory write-combining (GLOS_CACHE_WC) or write-back again; for any
+   program. 0, or GLOS_E_. */
+int glos_cache(unsigned address, unsigned bytes, unsigned type);
 /* DEBUG: a channel to a job of this app's (run with GLOS_RUNF_DEBUG, or running), 0 with glos_error(); gdb's
    remote protocol's bytes to the stub and from it. */
 glos_handle glos_debug_attach(glos_handle job);

@@ -1128,6 +1128,12 @@ int glos_secret_remove(const char *name, unsigned flags)
     return raw(GLOS_SECRETS_REMOVE, &q, 0);
 }
 
+int glos_cache(unsigned address, unsigned bytes, unsigned type)
+{
+    struct glos_cache q = { sizeof q, address, bytes, type };
+    return raw(GLOS_DRAW_CACHE, &q, 0);
+}
+
 glos_handle glos_debug_attach(glos_handle job)
 {
     struct glos_debug_attach q = { sizeof q, job, 0 };

@@ -49,7 +49,7 @@ static int give(struct trapframe *tf, struct glos_sys_stat *q, u32 size, const v
     return n < len ? a2_fail(tf, GLOS_E_ROOM) : a2_ok(tf, 0);
 }
 
-static int stat_call(struct trapframe *tf)
+int api2_sys_stat(struct trapframe *tf)         /* (for any program: api2.c) */
 {
     struct glos_sys_stat q;
     u32 size, n = 0, vram = 0, x;
@@ -259,8 +259,8 @@ void api2_end_event(struct app *a)
 int api2_sys(struct app *a, struct trapframe *tf, u32 n)
 {
     switch (GLOS_FN(GLOS_AREA_SYS, n)) {
-    case GLOS_SYS_STAT:
-        return stat_call(tf);
+    case GLOS_SYS_STAT:                         /* (answered before this, in api2_call) */
+        return api2_sys_stat(tf);
     case GLOS_SYS_KILL:
         return kill_call(a, tf);
     case GLOS_SYS_LOG:

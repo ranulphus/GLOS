@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include <stdarg.h>
 #include <ctype.h>
+#include <dpmi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -94,6 +95,23 @@ static void before(void)
     unsigned t;
 
     check("present", glos_running(), 0);
+    {                                           /* CACHE and STAT, for any program: before INIT */
+        struct glos_sys_stat st = { sizeof st, GLOS_STAT_SYSTEM, 0, 0, 0, 0 };
+        int sel = 0, seg = __dpmi_allocate_dos_memory(0x2000, &sel), r1, r2, r3 = -1, r4 = -1;  /* (128 KB of DOS's) */
+        unsigned at = seg > 0 ? (((unsigned)seg << 4) + 0xFFFF) & ~0xFFFFu : 0;         /* (the 64 KB step inside it) */
+        r1 = glos_cache(0xA0000, 4096, GLOS_CACHE_WC);                  /* (the screen's: no block of DOS's) */
+        r2 = at ? glos_cache(at, 0x10000, 99) : GLOS_E_ARGUMENT;        /* (no such type; or no such registers) */
+        if (at && at < 0x80000) {               /* write-combining, and back: done, or this CPU has no such registers */
+            r3 = glos_cache(at, 0x10000, GLOS_CACHE_WC);
+            r4 = glos_cache(at, 0x10000, GLOS_CACHE_WB);
+        }
+        if (seg > 0)
+            __dpmi_free_dos_memory(sel);
+        check("cache-any", r1 == GLOS_E_ARGUMENT && (r2 == GLOS_E_ARGUMENT || r2 == GLOS_E_FUNCTION)
+              && (r3 == 0 || r3 == GLOS_E_FUNCTION || r3 == -1) && r3 == r4, "seg=%x at=%x r=%d,%d,%d,%d", seg, at, r1, r2, r3, r4);
+        r1 = glos_call(GLOS_SYS_STAT, &st);
+        check("stat-any", r1 == GLOS_E_ROOM && st.length > 0, "r=%d length=%u", r1, st.length);
+    }
     memset(&v, 0, sizeof v);
     v.size = sizeof v;
     check("version", glos_version(&v) == 0 && v.major == 2 && v.minor == 0 && v.build[0]
