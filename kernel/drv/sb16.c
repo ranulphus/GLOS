@@ -33,6 +33,11 @@ static struct {
     u32 half;                                   /* the half the card plays next */
     u32 irqs;
     mixer_fill fill;
+    /* recording (API 2.0's AUDIO IN): 8 bits on the low DMA channel, beside the 16-bit output on the high one */
+    u8 dma8, rec;
+    u8 *rbuf;                                   /* two halves of unsigned 8-bit stereo */
+    u32 rphys, rframes, rhalf, rirqs;
+    mixer_got got;
 } sb;
 
 static const u8 page_port[4] = { 0, 0x8B, 0x89, 0x8A };        /* channels 5, 6, 7 (4 is the cascade) */
@@ -78,6 +83,7 @@ int sb16_init(const struct bootinfo *bi)
     sb.base = (u16)bi->sb_port;
     sb.irq = (u8)bi->sb_irq;
     sb.dma = (u8)bi->sb_dma16;
+    sb.dma8 = (u8)(bi->sb_dma8 <= 3 ? bi->sb_dma8 : 0xFF);
     if (dsp_reset() != 0 || dsp_write(0xE1) != 0 || (hi = dsp_read()) < 0 || (lo = dsp_read()) < 0) {
         kprintf("GLOS-SB none port=%x\n", sb.base);
         return -1;
@@ -92,8 +98,25 @@ int sb16_init(const struct bootinfo *bi)
     return 0;
 }
 
+static void rec_half(void);
+
+/* The card's one interrupt is the 16-bit output's and the 8-bit input's: its mixer's register 82h says which
+   (bit 1 the 16-bit, bit 0 the 8-bit); each is acknowledged by reading its own port. With nothing recording it
+   is the output's, as before. */
 static void irq(struct trapframe *tf)
 {
+    u8 st = 2;
+    if (sb.rec) {
+        outb((u16)(sb.base + 4), 0x82);
+        st = inb((u16)(sb.base + 5)) & 3;
+    }
+    if (st & 1) {
+        inb((u16)(sb.base + 0x0E));             /* (the 8-bit interrupt acknowledged) */
+        if (sb.rec)
+            rec_half();
+    }
+    if (!(st & 2))
+        return;
     inb((u16)(sb.base + 0x0F));                 /* (the 16-bit interrupt acknowledged) */
     if (!sb.running)
         return;
@@ -150,10 +173,77 @@ static int sb16_start(u32 rate, u32 frames, mixer_fill fill)
     return 0;
 }
 
+/* ---- recording: DSP command CEh (8-bit input, auto-initialised, FIFO on) with mode 20h (stereo, unsigned) and
+   a half's bytes less one, at the output's rate (42h: the card has one clock for both ways); the 8237's low
+   controller writes the card's bytes to memory (mode 54h + the channel). From Creative's DSP documentation. */
+static const u8 page8[4] = { 0x87, 0x83, 0x81, 0x82 };
+
+static void rec_half(void)
+{
+    static s16 conv[512 * 2];
+    const u8 *src = sb.rbuf + sb.rhalf * sb.rframes * 2;
+    u32 i, n = sb.rframes > 512 ? 512 : sb.rframes;
+    for (i = 0; i < n * 2; i++)
+        conv[i] = (s16)(((int)src[i] - 128) << 8);
+    sb.rhalf ^= 1;
+    sb.rirqs++;
+    sb.got(conv, n);
+}
+
+static int sb16_rec_start(u32 rate, u32 frames, mixer_got got)
+{
+    u32 bytes = frames * 2 * 2, ch = sb.dma8;
+    if (!sb.found || !sb.running || ch > 3 || ch == 2 || frames > 512)
+        return -1;                              /* (no 8-bit channel in BLASTER: no recording) */
+    if (!sb.rbuf) {
+        u32 phys;
+        u8 *p = dma_alloc((bytes + 4095) / 4096, &phys);
+        if (!p || phys + bytes > 0x1000000u || (phys >> 16) != ((phys + bytes - 1) >> 16)) {
+            kprintf("GLOS-SB error=rec-buffer phys=%x\n", phys);
+            return -1;
+        }
+        sb.rbuf = p, sb.rphys = phys;
+    }
+    sb.rframes = frames;
+    sb.rhalf = 0;
+    sb.got = got;
+    outb(0x0A, (u8)(4 | ch));                   /* masked */
+    outb(0x0C, 0);                              /* the flip-flop */
+    outb(0x0B, (u8)(0x54 | ch));                /* single, auto-initialised, the card to memory */
+    outb((u16)(ch * 2), (u8)sb.rphys);
+    outb((u16)(ch * 2), (u8)(sb.rphys >> 8));
+    outb(page8[ch], (u8)(sb.rphys >> 16));
+    outb((u16)(ch * 2 + 1), (u8)(bytes - 1));
+    outb((u16)(ch * 2 + 1), (u8)((bytes - 1) >> 8));
+    outb(0x0A, (u8)ch);                         /* unmasked */
+    sb.rec = 1;
+    dsp_write(0x42);
+    dsp_write((u8)(rate >> 8));
+    dsp_write((u8)rate);
+    dsp_write(0xCE);
+    dsp_write(0x20);
+    dsp_write((u8)(frames * 2 - 1));            /* a half's bytes less one */
+    dsp_write((u8)((frames * 2 - 1) >> 8));
+    kprintf("GLOS-SB record rate=%u frames=%u dma=%u buf=%x\n", rate, frames, ch, sb.rphys);
+    return 0;
+}
+
+static void sb16_rec_stop(void)
+{
+    if (!sb.rec)
+        return;
+    dsp_write(0xD0);                            /* 8-bit DMA paused ... */
+    dsp_write(0xDA);                            /* ... and its auto-initialisation left */
+    outb(0x0A, (u8)(4 | sb.dma8));
+    sb.rec = 0;
+    kprintf("GLOS-SB record-stop halves=%u\n", sb.rirqs);
+}
+
 static void sb16_stop(void)
 {
     if (!sb.running)
         return;
+    sb16_rec_stop();
     dsp_write(0xD5);
     dsp_write(0xD9);
     dma_stop();
@@ -233,4 +323,4 @@ static int sb16_input(int set, int *input)
 }
 
 const struct sound_card sb16_card = { "sb16", sb16_start, sb16_stop, sb16_running, sb16_irqs, sb16_errors, sb16_chan,
-                                      sb16_input };
+                                      sb16_input, sb16_rec_start, sb16_rec_stop };

@@ -25,6 +25,7 @@ u32 mixer_stat(char *buf, u32 max);             /* glos audio */
 struct trapframe;
 typedef void (*mixer_fill)(s16 *out, u32 frames, const struct trapframe *tf);  /* (tf: what the card's interrupt
                                                                                      broke into) */
+typedef void (*mixer_got)(const s16 *in, u32 frames);     /* (a half recorded: 16-bit stereo at the mixer's rate) */
 struct sound_card {                             /* what the mixer plays through */
     const char *name;
     int (*start)(u32 rate, u32 frames, mixer_fill fill);        /* two halves of `frames`: 0 */
@@ -36,6 +37,10 @@ struct sound_card {                             /* what the mixer plays through 
        input that is recorded. 0, or -1: the chip has no such channel. NULL: none at all. */
     int (*chan)(int chan, int set, u8 *left, u8 *right, u8 *mute);
     int (*input)(int set, int *input);
+    /* Recording (API 2.0's AUDIO IN): the card records at the rate it plays at, into two halves of `frames`; at
+       the end of each, `got` has that half as 16-bit stereo. 0, or -1: it can't. NULL: no recording. */
+    int (*rec_start)(u32 rate, u32 frames, mixer_got got);
+    void (*rec_stop)(void);
 };
 enum { MX_CH_MASTER, MX_CH_WAVE, MX_CH_FM, MX_CH_CD, MX_CH_LINE, MX_CH_MIC, MX_CHANNELS };
 enum { MX_IN_MIC, MX_IN_LINE, MX_IN_CD, MX_IN_MIX };
@@ -46,7 +51,11 @@ struct mixer_stream {
     u8 mute, paused;
     u16 level[2];
 };
-int mixer_get(struct app *a, u32 id, int what, s32 *v);         /* a stream's (a NULL: any app's): 0, or -1 */
+int mixer_open_in(struct app *a, u32 rate, u32 channels, u32 bytes, u32 *id, u32 *lin);        /* a stream in: 0, GLOS_E_ */
+u32 mixer_streams_in(void);                                     /* how many streams in are open */
+int mixer_records(void);                                        /* the card can record */
+int mixer_get(struct app *a, u32 id, int what, s32 *v);         /* a stream's (a NULL: any app's): 0; -1 no such
+                                                                   stream; -2 not a thing a stream in has */
 int mixer_set(struct app *a, u32 id, int what, s32 v);
 u32 mixer_streams(struct mixer_stream *out, u32 max);
 void mixer_master_get(u32 *volume, int *mute);                  /* 0 to 256 */

@@ -55,6 +55,11 @@ static struct {
     u32 phys, frames, half, irqs;
     u32 errors;                                 /* halves in which the codec reported a sample error (SER) */
     mixer_fill fill;
+    /* recording (API 2.0's AUDIO IN): the codec's capture side, on its own DMA channel (`cap`) */
+    u8 rec;
+    u8 *rbuf;
+    u32 rphys, rframes, rirqs;
+    mixer_got got;
     char blaster[32];
 } cs = { .wss = 0x534, .syn = 0x388, .sb = 0x220, .game = 0x200, .ctrl = 0x120, .irq = 5, .dma = 1, .cap = 0 };
 
@@ -249,12 +254,28 @@ static u32 dma_pos(void)
    filled one behind from then on, a click every half, until a session's
    stop and start put them right; heard on bench-g400 as a light crackle).
    Where the DMA is says which half is free whatever the count did. */
+static u32 cap_pos(void)
+{
+    u32 lo, hi;
+    outb(0x0C, 0);
+    lo = inb((u16)(cs.cap * 2 + 1));
+    hi = inb((u16)(cs.cap * 2 + 1));
+    return (cs.rframes * 8 - (((hi << 8) | lo) + 1) % (cs.rframes * 8)) % (cs.rframes * 8);
+}
+
 static void irq(struct trapframe *tf)
 {
-    u8 st = inb((u16)(cs.wss + 2));
+    u8 st = inb((u16)(cs.wss + 2)), alt = cs.rec ? rd(0x18) : 0x10;    /* I24: bit 4 the playback's interrupt, 5 the
+                                                                           capture's (MODE 2) */
     outb((u16)(cs.wss + 2), 0);                 /* (INT cleared) */
     if (!(st & 1) || !cs.running)
         return;
+    if (cs.rec && (alt & 0x20)) {               /* a half recorded: the one the DMA is not writing now */
+        cs.rirqs++;
+        cs.got((const s16 *)(cs.rbuf + (cap_pos() < cs.rframes * 4 ? 1 : 0) * cs.rframes * 4), cs.rframes);
+    }
+    if (cs.rec && !(alt & 0x10))
+        return;                                 /* (the capture's alone) */
     cs.irqs++;
     if (st & 0x10)                              /* SER: an underrun (I11's PUR) since R2 was last read: the DAC */
         cs.errors++;                            /* held its last sample (DACZ 0) */
@@ -310,6 +331,8 @@ static int crystal_start(u32 rate, u32 frames, mixer_fill fill)
     fmt = (u8)(0x40 | 0x10 | rate_bits(rate, &got));   /* 16-bit little-endian, stereo */
     outb(cs.wss, 0x40 | 0x08);                  /* MCE: the format and the interface */
     outb((u16)(cs.wss + 1), fmt);
+    outb(cs.wss, 0x40 | 0x1C);                  /* I28: what is recorded has the same format (and the codec's one */
+    outb((u16)(cs.wss + 1), 0x40 | 0x10);       /* clock gives it the same rate) */
     outb(cs.wss, 0x40 | 0x09);
     outb((u16)(cs.wss + 1), 0x00);              /* DMA, two channels, no calibration, playback off */
     outb(cs.wss, 0x00);                         /* MCE off: the codec takes the new rate */
@@ -338,10 +361,57 @@ static int crystal_start(u32 rate, u32 frames, mixer_fill fill)
     return 0;
 }
 
+/* ---- recording: the capture side enabled (I9's CEN) beside the playback, its own count in I30/I31 and its own
+   DMA channel writing to memory; its interrupt is the codec's one, told apart by I24. */
+static int crystal_rec_start(u32 rate, u32 frames, mixer_got got)
+{
+    u32 bytes = frames * 2 * 4;
+    (void)rate;                                 /* (the playback's: one clock) */
+    if (!cs.found || !cs.running || cs.cap > 3 || cs.cap == 2 || cs.cap == cs.dma)
+        return -1;                              /* (no capture channel of its own: no recording) */
+    if (!cs.rbuf) {
+        u32 phys;
+        u8 *p = dma_alloc((bytes + 4095) / 4096, &phys);
+        if (!p || phys + bytes > 0x1000000u || (phys >> 16) != ((phys + bytes - 1) >> 16)) {
+            kprintf("GLOS-SOUND error=rec-buffer phys=%x\n", phys);
+            return -1;
+        }
+        cs.rbuf = p, cs.rphys = phys;
+    }
+    cs.rframes = frames;
+    cs.got = got;
+    wr(0x1E, (u8)((frames - 1) >> 8));          /* a half's frames less one */
+    wr(0x1F, (u8)(frames - 1));
+    outb(0x0A, (u8)(4 | cs.cap));
+    outb(0x0C, 0);
+    outb(0x0B, (u8)(0x54 | cs.cap));            /* single, auto-initialised, the card to memory */
+    outb((u16)(cs.cap * 2), (u8)cs.rphys);
+    outb((u16)(cs.cap * 2), (u8)(cs.rphys >> 8));
+    outb(page_port[cs.cap], (u8)(cs.rphys >> 16));
+    outb((u16)(cs.cap * 2 + 1), (u8)(bytes - 1));
+    outb((u16)(cs.cap * 2 + 1), (u8)((bytes - 1) >> 8));
+    outb(0x0A, cs.cap);
+    cs.rec = 1;
+    wr(0x09, 0x03);                             /* PEN and CEN */
+    kprintf("GLOS-SOUND record frames=%u dma=%u buf=%x\n", frames, cs.cap, cs.rphys);
+    return 0;
+}
+
+static void crystal_rec_stop(void)
+{
+    if (!cs.rec)
+        return;
+    wr(0x09, cs.running ? 0x01 : 0x00);
+    outb(0x0A, (u8)(4 | cs.cap));
+    cs.rec = 0;
+    kprintf("GLOS-SOUND record-stop halves=%u\n", cs.rirqs);
+}
+
 static void crystal_stop(void)
 {
     if (!cs.running)
         return;
+    crystal_rec_stop();
     wr(0x09, 0x00);
     wr(0x0A, 0x00);
     dma_stop();
@@ -402,4 +472,5 @@ static int crystal_input(int set, int *input)
 }
 
 const struct sound_card crystal_card = { "crystal", crystal_start, crystal_stop, crystal_running, crystal_irqs,
-                                         crystal_errors, crystal_chan, crystal_input };
+                                         crystal_errors, crystal_chan, crystal_input, crystal_rec_start,
+                                         crystal_rec_stop };

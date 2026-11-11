@@ -4632,7 +4632,8 @@ def api_audio_case(profile, vcard, card, sound="sb16"):
         info += " timeout"
     text = agent.wait()
     cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", text)
-    checks["cases"] = len(cases) >= 11 and all(k == "1" for c, k, w in cases)
+    checks["cases"] = len(cases) >= 13 and all(k == "1" for c, k, w in cases)
+    checks["recorded"] = ("GLOS-SOUND record " if crystal else "GLOS-SB record ") in text
     if not checks["cases"]:
         info += " cases=%d failed-cases=%s" % (len(cases), ";".join(c + w.rstrip() for c, k, w in cases if k != "1"))
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text

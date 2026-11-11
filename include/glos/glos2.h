@@ -175,6 +175,9 @@ int glos_job_status(glos_handle job, struct glos_job_status *out);
    refused (glos_error(): GLOS_E_NO_AUDIO without a card). Its volume, balance, mute, pause, position and NOTIFY
    are properties (glos_get, glos_set). */
 glos_handle glos_audio_out(unsigned rate, unsigned channels, unsigned bytes, struct glos_audio_ring **ring, unsigned *id);
+/* A stream in, asked for as one out: what the card records, to be read from its ring. */
+glos_handle glos_audio_in(unsigned rate, unsigned channels, unsigned bytes, struct glos_audio_ring **ring, unsigned *id);
+unsigned glos_audio_read(struct glos_audio_ring *r, void *samples, unsigned room);     /* the bytes read */
 unsigned glos_audio_room(const struct glos_audio_ring *r);     /* bytes that can be written now */
 unsigned glos_audio_write(struct glos_audio_ring *r, const void *samples, unsigned bytes);     /* those that fitted */
 int glos_mixer(struct glos_audio_mixer *m);             /* MIXER (size set here) */

@@ -883,10 +883,19 @@ struct glos_fs_sectors {
  * and GLOS share: the app writes samples and moves `write` on, GLOS plays them at its own pace and moves `read`.
  * Refused (GLOS_E_NO_AUDIO) where there is no card GLOS can play, or [sound] mixer is off. */
 #define GLOS_AUDIO_OUT     GLOS_FN(GLOS_AREA_AUDIO, 0)  /* struct glos_audio_out: a stream out (GLOS_HK_STREAM) */
+#define GLOS_AUDIO_IN      GLOS_FN(GLOS_AREA_AUDIO, 1)  /* struct glos_audio_out: a stream in: what the card records */
 #define GLOS_AUDIO_MIXER   GLOS_FN(GLOS_AREA_AUDIO, 2)  /* struct glos_audio_mixer: the master, the streams, the chip */
 #define GLOS_AUDIO_LEVELS  GLOS_FN(GLOS_AREA_AUDIO, 3)  /* struct glos_audio_levels: how loud it is now, for meters */
 #define GLOS_AUDIO_DEVICES GLOS_FN(GLOS_AREA_AUDIO, 6)  /* struct glos_sys_stat: a struct glos_audio_device each */
-/* (1 IN, 4 MIDI_OUT, 5 MIDI_IN: with phase B's step 10's later parts) */
+/* (4 MIDI_OUT, 5 MIDI_IN: with phase B's step 10's last part) */
+
+/* A stream in is a stream out the other way round: the same structure asks for it, and its ring is GLOS's to
+   write (`write`) and the app's to read (the app moves `read`). The card records what MIXER's input says, at the
+   mixer's rate, while a stream in is open; GLOS converts to the stream's rate and channels. A stream whose ring
+   is full loses what came: its `underruns` count those. Of the properties it has POSITION (frames recorded),
+   QUEUED (bytes waiting to be read), NOTIFY (GLOS_EV_AUDIO when that many bytes or more wait, once each time)
+   and ID; the others are refused (GLOS_E_PROPERTY). Refused (GLOS_E_NO_AUDIO) where the card can't record
+   beside playing: an SB16 with no 8-bit DMA channel in BLASTER, a Crystal chip with no capture channel. */
 #define GLOS_E_NO_AUDIO 9
 
 struct glos_audio_out {
@@ -981,9 +990,12 @@ struct glos_audio_channel {
 
 struct glos_audio_levels {
     unsigned size;
-    unsigned id;                /* a stream's number; 0: the output, after the master */
+    unsigned id;                /* a stream's number; 0: the output, after the master; GLOS_LEVELS_INPUT (or a
+                                   stream in's number): what is being recorded */
     unsigned left, right;       /* -> peaks of the period played last, 0 to 32767 (0 while nothing plays) */
 };
+
+#define GLOS_LEVELS_INPUT 0xFFFFFFFFu
 
 struct glos_audio_device {
     unsigned size;
@@ -993,6 +1005,7 @@ struct glos_audio_device {
     char name[24];              /* "sb16", "crystal" */
 };
 #define GLOS_AUDIO_DEV_OUT 0    /* the card GLOS's mixer plays */
+#define GLOS_AUDIO_DEV_IN  1    /* ... and records from (rate: what it records at; streams: those in) */
 
 /* AUDIO's event. */
 #define GLOS_EV_AUDIO GLOS_EV(GLOS_AREA_AUDIO, 1)       /* (the header alone; handle: the stream) it has fewer bytes

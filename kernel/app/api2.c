@@ -424,7 +424,7 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_THREAD][0] = 0x3FF;           /* CREATE to SELF */
     v.functions[GLOS_AREA_JOB][0] = 0x1F;               /* RUN, READ, WRITE, SIGNAL, STATUS */
     v.functions[GLOS_AREA_FS][0] = 0x1F;                /* LIST, INFO, DRIVES, WATCH, SECTORS */
-    v.functions[GLOS_AREA_AUDIO][0] = 0x4D;             /* OUT, MIXER, LEVELS, DEVICES */
+    v.functions[GLOS_AREA_AUDIO][0] = 0x4F;             /* OUT, IN, MIXER, LEVELS, DEVICES */
     v.functions[GLOS_AREA_SYS][0] = 0x0F;               /* STAT, KILL, LOG, PROGRAMS */
     v.functions[GLOS_AREA_SETTINGS][0] = 0xFF;          /* GET, SET, SECTIONS, KEYS, SCHEMA, WATCH, THEME, REGION */
     v.functions[GLOS_AREA_IDLE][0] = 0x0F;              /* TIME, AWAKE, SAVER, POWER */

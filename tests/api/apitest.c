@@ -102,7 +102,7 @@ static void before(void)
           && GLOS_HAS(&v, GLOS_SHELL_SCHEDULE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 10))
           && GLOS_HAS(&v, GLOS_JOB_STATUS) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_JOB, 5))
           && GLOS_HAS(&v, GLOS_SYS_PROGRAMS) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SYS, 4))
-          && GLOS_HAS(&v, GLOS_AUDIO_OUT) && GLOS_HAS(&v, GLOS_AUDIO_DEVICES) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 1))
+          && GLOS_HAS(&v, GLOS_AUDIO_IN) && GLOS_HAS(&v, GLOS_AUDIO_DEVICES) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 4))
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_NET, 0)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
@@ -2055,7 +2055,7 @@ static void feed(struct glos_audio_ring *r, unsigned ms, unsigned *phase)
 
 static int near(unsigned v, unsigned want, unsigned slack) { return v + slack >= want && v <= want + slack; }
 
-static int audio_mode(void)
+static int audio_mode(int loop)
 {
     static struct glos_audio_stream streams[8];
     static struct glos_audio_channel chans[8];
@@ -2221,9 +2221,52 @@ static int audio_mode(void)
 
     /* The devices. */
     n = glos_audio_devices(devs, sizeof devs, &count);
-    ok = n == 0 && count == 1 && devs[0].size == sizeof devs[0] && devs[0].kind == GLOS_AUDIO_DEV_OUT && devs[0].name[0]
+    ok = n == 0 && count >= 1 && count <= 2 && devs[0].size == sizeof devs[0] && devs[0].kind == GLOS_AUDIO_DEV_OUT && devs[0].name[0]
          && devs[0].rate == ring->mixer_rate && devs[0].streams == 1;
     check("audio-devices", ok, "n=%d count=%u name=%s rate=%u streams=%u", n, count, devs[0].name, devs[0].rate, devs[0].streams);
+
+    /* Recording: a stream in fills at its rate; told when it has a block; what is not read is lost; its level.
+       With the input set to what the card plays (argument "loop": a card that can, and a real one), the tone
+       played is the tone recorded. */
+    {
+        static short rec[8192];
+        struct glos_audio_ring *in = 0;
+        unsigned in_id = 0, got = 0, peak = 0, k;
+        glos_handle si = glos_audio_in(11025, 1, 8192, &in, &in_id);
+        if (!si && glos_error() == GLOS_E_NO_AUDIO) {
+            check("audio-in", !loop, "(the card can't record beside playing)");
+        } else {
+            memset(&m, 0, sizeof m);
+            m.what = GLOS_MIXER_INPUT_SET, m.id = GLOS_INPUT_MIX;
+            glos_mixer(&m);
+            while (glos_event(ev, sizeof ev, 0, 0) > 0) ;
+            glos_set(si, GLOS_PROP_STREAM_NOTIFY, 2048);
+            feed(ring, 600, &phase);                    /* (the tone plays meanwhile) */
+            n = await(GLOS_EV_AUDIO, si, ev, 2000);
+            before = prop(si, GLOS_PROP_STREAM_POSITION);
+            feed(ring, 500, &phase);
+            after = prop(si, GLOS_PROP_STREAM_POSITION);
+            while ((k = glos_audio_read(in, rec, sizeof rec)) != 0) {
+                for (i = 0; i < k / 2; i++)
+                    if ((unsigned)abs(rec[i]) > peak)
+                        peak = (unsigned)abs(rec[i]);
+                got += k;
+            }
+            glos_audio_levels(GLOS_LEVELS_INPUT, &l, &r);
+            ok = si && in && in->rate == 11025 && in->channels == 1 && n > 0 && after - before > 11025 * 4 / 10
+                 && after - before < 11025 * 7 / 10 && got >= 2048 && prop(si, GLOS_PROP_STREAM_QUEUED) < 2048
+                 && glos_get(si, GLOS_PROP_STREAM_VOLUME, &v) == GLOS_E_PROPERTY
+                 && glos_set(si, GLOS_PROP_STREAM_PAUSED, 1) == GLOS_E_PROPERTY && (!loop || peak > 1500);
+            check("audio-in", ok, "si=%x err=%d n=%d frames=%d read=%u peak=%u level=%u,%u%s", si, glos_error(), n, after - before,
+                  got, peak, l, r, loop ? " loop" : "");
+            feed(ring, 1200, &phase);                   /* nobody reads: the ring fills, and the rest is lost */
+            ok = in->underruns > 0 && prop(si, GLOS_PROP_STREAM_QUEUED) > 8192 - 64
+                 && glos_audio_devices(devs, sizeof devs, &count) == 0 && count == 2 && devs[1].kind == GLOS_AUDIO_DEV_IN
+                 && devs[1].streams == 1 && glos_close(si) == 0 && glos_audio_levels(in_id, &l, &r) == GLOS_E_NOT_FOUND
+                 && glos_audio_levels(GLOS_LEVELS_INPUT, &l, &r) == 0 && l == 0;
+            check("audio-in-lost", ok, "lost=%u queued=%d devices=%u", in->underruns, prop(si, GLOS_PROP_STREAM_QUEUED), count);
+        }
+    }
 
     /* What is refused; as many streams as there are; closed. */
     ok = glos_audio_out(100, 2, 16384, 0, 0) == 0 && glos_error() == GLOS_E_ARGUMENT
@@ -2341,7 +2384,7 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "job"))
         return job_mode();
     if (argc > 1 && !strcmp(argv[1], "audio"))
-        return audio_mode();
+        return audio_mode(argc > 2 && !strcmp(argv[2], "loop"));
     if (argc > 2 && !strcmp(argv[1], "sched"))
         return sched_mode(argv[2]);
     if (argc > 1 && (strstr(argv[1], ".ZZT") || strstr(argv[1], ".zzt") || !strcmp(argv[1], "said") || !strcmp(argv[1], "with")))

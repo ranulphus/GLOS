@@ -931,6 +931,36 @@ glos_handle glos_audio_out(unsigned rate, unsigned channels, unsigned bytes, str
     return q.handle;
 }
 
+glos_handle glos_audio_in(unsigned rate, unsigned channels, unsigned bytes, struct glos_audio_ring **ring, unsigned *id)
+{
+    struct glos_audio_out q = { sizeof q, rate, channels, bytes, 0, 0, 0 };
+    int r = raw(GLOS_AUDIO_IN, &q, 0);
+    last_error = r;
+    if (r)
+        return 0;
+    if (ring)
+        *ring = (struct glos_audio_ring *)glos_ptr(q.ring);
+    if (id)
+        *id = q.id;
+    return q.handle;
+}
+
+unsigned glos_audio_read(struct glos_audio_ring *r, void *samples, unsigned room)
+{
+    unsigned have = r->write - r->read, at = r->read & (r->bytes - 1), first;
+    const char *base = (const char *)r + r->ring;
+    if (have > r->bytes)
+        have = r->bytes;                        /* (it went round while nobody read: the newest ring's worth) */
+    if (room > have)
+        room = have;
+    room &= ~(r->channels * 2 - 1);
+    first = room < r->bytes - at ? room : r->bytes - at;
+    memcpy(samples, base + at, first);
+    memcpy((char *)samples + first, base, room - first);
+    r->read += room;
+    return room;
+}
+
 unsigned glos_audio_room(const struct glos_audio_ring *r) { return r->bytes - (r->write - r->read); }
 
 unsigned glos_audio_write(struct glos_audio_ring *r, const void *samples, unsigned bytes)

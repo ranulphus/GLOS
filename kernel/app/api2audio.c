@@ -17,14 +17,14 @@
 #include "mm.h"
 #include "vm.h"
 
-static int out_call(struct app *a, struct trapframe *tf)
+static int out_call(struct app *a, struct trapframe *tf, int in)
 {
     struct glos_audio_out q;
     u32 size, id, lin, f;
     int r;
     if (a2_rd(tf, &q, sizeof q, &size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
-    if ((r = mixer_open(a, q.rate, q.channels, q.bytes, &id, &lin)) != 0)
+    if ((r = (in ? mixer_open_in : mixer_open)(a, q.rate, q.channels, q.bytes, &id, &lin)) != 0)
         return a2_fail(tf, (u32)r);             /* (1.x's numbers: NO_AUDIO 9, ARGUMENT 3, MEMORY 7) */
     f = irq_save();
     q.handle = handle_new(&a->v2->h, GLOS_HK_STREAM, (void *)id);
@@ -49,14 +49,17 @@ void api2_audio_close(struct app *a, void *obj) { mixer_close(a, (u32)obj); }
 
 static int s_get(struct app *a, void *obj, s32 *v, int what)
 {
-    return mixer_get(a, (u32)obj, what, v) == 0 ? 0 : GLOS_E_HANDLE;
+    int r = mixer_get(a, (u32)obj, what, v);
+    return r == 0 ? 0 : r == -2 ? GLOS_E_PROPERTY : GLOS_E_HANDLE;     /* (-2: a stream in has no such thing) */
 }
 
 static int s_set(struct app *a, void *obj, s32 v, int what, s32 lo, s32 hi)
 {
+    int r;
     if (v < lo || v > hi)
         return GLOS_E_ARGUMENT;
-    return mixer_set(a, (u32)obj, what, v) == 0 ? 0 : GLOS_E_HANDLE;
+    r = mixer_set(a, (u32)obj, what, v);
+    return r == 0 ? 0 : r == -2 ? GLOS_E_PROPERTY : GLOS_E_HANDLE;
 }
 
 #define GETTER(name, what) \
@@ -263,22 +266,28 @@ static int levels(struct trapframe *tf)
 static int devices(struct trapframe *tf)
 {
     struct glos_sys_stat q;
-    struct glos_audio_device d;
+    struct glos_audio_device d[2];
     u32 size, n = 0, x, give;
     if (a2_rd(tf, &q, sizeof q, &size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
-    memset(&d, 0, sizeof d);
+    memset(d, 0, sizeof d);
     if (mixer_card()) {                         /* (none: an empty list) */
-        d.size = sizeof d;
-        d.kind = GLOS_AUDIO_DEV_OUT;
-        mixer_counts(&d.rate, &d.streams, &x);
-        strncpy(d.name, mixer_card(), sizeof d.name - 1);
+        d[0].size = sizeof d[0];
+        d[0].kind = GLOS_AUDIO_DEV_OUT;
+        mixer_counts(&d[0].rate, &d[0].streams, &x);
+        strncpy(d[0].name, mixer_card(), sizeof d[0].name - 1);
         n = 1;
+        if (mixer_records()) {
+            d[1] = d[0];
+            d[1].kind = GLOS_AUDIO_DEV_IN;
+            d[1].streams = mixer_streams_in();
+            n = 2;
+        }
     }
-    q.length = n * sizeof d;
-    give = q.room >= q.length ? q.length : 0;
-    q.count = give / sizeof d;
-    if ((give && user_wr((u16)tf->ds, q.buffer, &d, give) != 0) || a2_wr(tf, &q, sizeof q, size) != 0)
+    q.length = n * sizeof d[0];
+    give = q.room >= q.length ? q.length : q.room - q.room % sizeof d[0];
+    q.count = give / sizeof d[0];
+    if ((give && user_wr((u16)tf->ds, q.buffer, d, give) != 0) || a2_wr(tf, &q, sizeof q, size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     return give < q.length ? a2_fail(tf, GLOS_E_ROOM) : a2_ok(tf, 0);
 }
@@ -287,7 +296,9 @@ int api2_audio(struct app *a, struct trapframe *tf, u32 n)
 {
     switch (GLOS_FN(GLOS_AREA_AUDIO, n)) {
     case GLOS_AUDIO_OUT:
-        return out_call(a, tf);
+        return out_call(a, tf, 0);
+    case GLOS_AUDIO_IN:
+        return out_call(a, tf, 1);
     case GLOS_AUDIO_MIXER:
         return mixer_call(a, tf);
     case GLOS_AUDIO_LEVELS:

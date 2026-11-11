@@ -77,6 +77,27 @@ static struct {
 
 static void fill(s16 *out, u32 frames, const struct trapframe *tf);
 
+/* Streams in (API 2.0's AUDIO IN): what the card records, into each one's ring at its own rate and shape. The
+   ring is a stream out's the other way round: the mixer writes and moves `write`, the app reads and moves
+   `read`. One with no room loses what came (counted in its header's `underruns`). */
+#define IN_STREAMS 4
+static struct instrm {
+    struct app *a;                              /* 0: free */
+    u32 id;
+    struct glos_stream *h;
+    u32 pages;
+    u8 *ring;
+    u32 step, frac;                             /* 16.16: recorded frames a stream frame */
+    u8 frame_bytes, want;
+    u32 lin, threshold;
+    u16 level[2];
+} in[IN_STREAMS];
+static u8 recording;                            /* the card is recording */
+static u16 in_level[2];                         /* what was recorded last: its peaks */
+
+static void got(const s16 *smp, u32 frames);
+static void rec_update(void);
+
 int mixer_init(const struct bootinfo *bi)
 {
     mx.rate = bi->sound_rate ? bi->sound_rate : 22050;
@@ -137,6 +158,10 @@ void mixer_set_rate(u32 rate)
     u32 i, f, playing = mx.card && mx.card->running();
     if (rate < 4000 || rate > 48000 || rate == mx.rate)
         return;
+    if (recording && mx.card->rec_stop) {
+        mx.card->rec_stop();
+        recording = 0;
+    }
     if (playing)
         mx.card->stop();
     f = irq_save();
@@ -146,10 +171,16 @@ void mixer_set_rate(u32 rate)
             st[i].step = (st[i].h->rate << 16) / rate;
             st[i].h->mixer_rate = rate;
         }
+    for (i = 0; i < IN_STREAMS; i++)
+        if (in[i].a) {
+            in[i].step = (rate << 16) / in[i].h->rate;
+            in[i].h->mixer_rate = rate;
+        }
     irq_restore(f);
     kprintf("GLOS-AUDIO rate=%u\n", rate);
     if (playing && mx.card->start(mx.rate, PERIOD, fill) != 0)
         mx.on = 0;
+    rec_update();
 }
 
 int mixer_on(void) { return mx.on && !mx.out; }
@@ -256,8 +287,82 @@ void mixer_desktop(int on)
         if (!mx.card->running() && mx.card->start(mx.rate, PERIOD, fill) != 0)
             mx.on = 0;
     } else {
+        if (recording && mx.card->rec_stop)
+            mx.card->rec_stop();                /* (a session's from here: both ways) */
+        recording = 0;
         mx.card->stop();
         mx.out = 1;
+    }
+    rec_update();
+}
+
+/* The card records while the mixer plays and a stream in is open. */
+static void rec_update(void)
+{
+    u32 i, n = 0;
+    for (i = 0; i < IN_STREAMS; i++)
+        n += in[i].a != 0;
+    if (!mx.card || !mx.card->rec_start)
+        return;
+    if (n && !recording && mx.on && !mx.out && mx.card->running()) {
+        if (mx.card->rec_start(mx.rate, PERIOD, got) == 0)
+            recording = 1;
+    } else if (recording && (!n || mx.out || !mx.on)) {
+        mx.card->rec_stop();
+        recording = 0;
+        in_level[0] = in_level[1] = 0;
+    }
+}
+
+/* A half recorded (the card's interrupt): into every stream in. */
+static void got(const s16 *smp, u32 frames)
+{
+    u32 i, k, pl = 0, pr = 0;
+    for (k = 0; k < frames; k++) {
+        u32 l = (u32)(smp[k * 2] < 0 ? -smp[k * 2] : smp[k * 2]), r = (u32)(smp[k * 2 + 1] < 0 ? -smp[k * 2 + 1] : smp[k * 2 + 1]);
+        if (l > pl)
+            pl = l;
+        if (r > pr)
+            pr = r;
+    }
+    in_level[0] = (u16)(pl > 32767 ? 32767 : pl);
+    in_level[1] = (u16)(pr > 32767 ? 32767 : pr);
+    for (i = 0; i < IN_STREAMS; i++) {
+        struct instrm *s = &in[i];
+        struct glos_stream *h = s->h;
+        u32 frac, mask, w;
+        if (!s->a)
+            continue;
+        s->level[0] = in_level[0], s->level[1] = in_level[1];
+        frac = s->frac, mask = h->bytes - 1, w = h->write;
+        while ((frac >> 16) < frames) {
+            u32 at = frac >> 16, f = frac & 0xFFFF, nx = at + 1 < frames ? at + 1 : at;
+            s32 l = smp[at * 2] + (((smp[nx * 2] - smp[at * 2]) * (s32)f) >> 16);
+            s32 r = smp[at * 2 + 1] + (((smp[nx * 2 + 1] - smp[at * 2 + 1]) * (s32)f) >> 16);
+            if (h->bytes - (w - h->read) < s->frame_bytes) {
+                h->underruns++;                 /* (no room: the app is behind; what came is lost) */
+                break;
+            }
+            if (s->frame_bytes == 2) {
+                *(s16 *)(s->ring + (w & mask)) = (s16)((l + r) / 2);
+            } else {
+                *(s16 *)(s->ring + (w & mask)) = (s16)l;
+                *(s16 *)(s->ring + ((w + 2) & mask)) = (s16)r;
+            }
+            w += s->frame_bytes;
+            frac += s->step;
+        }
+        if ((frac >> 16) >= frames)
+            frac -= frames << 16;
+        else
+            frac &= 0xFFFF;                     /* (lost: from the next half's start) */
+        s->frac = frac;
+        h->write = w;
+        h->periods++;
+        if (s->threshold && w - h->read >= s->threshold)
+            s->want |= 1;
+        else
+            s->want = 0;
     }
 }
 
@@ -312,6 +417,76 @@ int mixer_open(struct app *a, u32 rate, u32 channels, u32 bytes, u32 *id, u32 *l
     return 0;
 }
 
+int mixer_records(void) { return mx.on && mx.card && mx.card->rec_start != 0; }
+
+u32 mixer_streams_in(void)
+{
+    u32 i, n = 0;
+    for (i = 0; i < IN_STREAMS; i++)
+        n += in[i].a != 0;
+    return n;
+}
+
+int mixer_open_in(struct app *a, u32 rate, u32 channels, u32 bytes, u32 *id, u32 *lin)
+{
+    struct instrm *s = 0;
+    struct glos_stream *h;
+    u32 i, f;
+    if (!mixer_records())
+        return GLOS_E_NO_AUDIO;
+    if (rate < 4000 || rate > 48000 || (channels != 1 && channels != 2) || bytes < 4096 || bytes > 65536
+        || (bytes & (bytes - 1)))
+        return GLOS_E_ARGUMENT;
+    for (i = 0; i < IN_STREAMS && !s; i++)
+        if (!in[i].a)
+            s = &in[i];
+    if (!s || !(h = mm_win_alloc(HEADER + bytes)))
+        return GLOS_E_MEMORY;
+    if (win_map(h, HEADER + bytes, lin) != 0) {
+        mm_win_free(h, HEADER + bytes);
+        return GLOS_E_MEMORY;
+    }
+    h->size = sizeof *h;
+    h->rate = rate;
+    h->channels = channels;
+    h->bytes = bytes;
+    h->mixer_rate = mx.rate;
+    h->period_frames = PERIOD;
+    h->volume = 256;
+    h->ring = HEADER;
+    f = irq_save();
+    s->h = h;
+    s->pages = HEADER + bytes;
+    s->ring = (u8 *)h + HEADER;
+    s->step = (mx.rate << 16) / rate;           /* (recorded frames a stream frame) */
+    s->frac = 0;
+    s->frame_bytes = (u8)(channels * 2);
+    s->want = 0;
+    s->threshold = 0;
+    s->level[0] = s->level[1] = 0;
+    s->id = mx.next_id++;
+    s->lin = *lin;
+    s->a = a;
+    irq_restore(f);
+    *id = s->id;
+    rec_update();
+    kprintf("GLOS-AUDIO open-in app=%u stream=%u rate=%u channels=%u ring=%u recording=%u\n", app_id(a), s->id, rate, channels,
+            bytes, recording);
+    return 0;
+}
+
+static void drop_in(struct instrm *s)
+{
+    u32 f = irq_save();
+    struct glos_stream *h = s->h;
+    u32 pages = s->pages;
+    kprintf("GLOS-AUDIO close-in app=%u stream=%u halves=%u lost=%u\n", app_id(s->a), s->id, h->periods, h->underruns);
+    s->a = 0;
+    irq_restore(f);
+    mm_win_free(h, pages);
+    rec_update();
+}
+
 static void drop(struct strm *s)
 {
     u32 f = irq_save();
@@ -331,6 +506,12 @@ int mixer_close(struct app *a, u32 id)
         if (st[i].a == a && st[i].id == id) {
             phys_unmap(st[i].lin);              /* (its own thread: its own address space) */
             drop(&st[i]);
+            return 0;
+        }
+    for (i = 0; i < IN_STREAMS; i++)
+        if (in[i].a == a && in[i].id == id) {
+            phys_unmap(in[i].lin);
+            drop_in(&in[i]);
             return 0;
         }
     return GLOS_E_ARGUMENT;
@@ -353,6 +534,9 @@ void mixer_app_gone(struct app *a)
     for (i = 0; i < STREAMS; i++)
         if (st[i].a == a)
             drop(&st[i]);
+    for (i = 0; i < IN_STREAMS; i++)
+        if (in[i].a == a)
+            drop_in(&in[i]);
 }
 
 u32 mixer_stat(char *buf, u32 max)
@@ -397,11 +581,33 @@ static struct strm *find(struct app *a, u32 id)
     return 0;
 }
 
+static struct instrm *find_in(struct app *a, u32 id)
+{
+    u32 i;
+    for (i = 0; i < IN_STREAMS; i++)
+        if (in[i].a && in[i].id == id && (!a || in[i].a == a))
+            return &in[i];
+    return 0;
+}
+
 int mixer_get(struct app *a, u32 id, int what, s32 *v)
 {
     u32 f = irq_save();
     struct strm *s = find(a, id);
+    struct instrm *n = s ? 0 : find_in(a, id);
     int r = 0;
+    if (n) {                                    /* a stream in: how much it has recorded, what waits, its threshold */
+        if (what == MX_POSITION)
+            *v = (s32)(n->h->write / n->frame_bytes);
+        else if (what == MX_QUEUED)
+            *v = (s32)(n->h->write - n->h->read);
+        else if (what == MX_THRESHOLD)
+            *v = (s32)n->threshold;
+        else
+            r = -2;
+        irq_restore(f);
+        return r;
+    }
     if (!s) {
         irq_restore(f);
         return -1;
@@ -424,7 +630,18 @@ int mixer_set(struct app *a, u32 id, int what, s32 v)
 {
     u32 f = irq_save();
     struct strm *s = find(a, id);
+    struct instrm *n = s ? 0 : find_in(a, id);
     int r = 0;
+    if (n) {
+        if (what == MX_THRESHOLD) {
+            n->threshold = v < 0 ? 0 : (u32)v > n->h->bytes ? n->h->bytes : (u32)v;
+            n->want = 0;
+        } else {
+            r = -2;
+        }
+        irq_restore(f);
+        return r;
+    }
     if (!s) {
         irq_restore(f);
         return -1;
@@ -479,6 +696,12 @@ int mixer_levels(u32 id, u16 *left, u16 *right)
     u32 f = irq_save();
     struct strm *s = id ? find(0, id) : 0;
     int playing = mx.on && !mx.out && mx.card && mx.card->running();
+    if (id == 0xFFFFFFFFu || (id && !s && find_in(0, id))) {   /* what is recorded (every stream in has the same) */
+        *left = recording ? in_level[0] : 0;
+        *right = recording ? in_level[1] : 0;
+        irq_restore(f);
+        return 0;
+    }
     if (id && !s) {
         irq_restore(f);
         return -1;
@@ -497,6 +720,12 @@ int mixer_wants(struct app *a, u32 *id)
         if (st[i].a == a && st[i].want == 1) {
             st[i].want = 3;                     /* (told: not again until it has been above and fallen once more) */
             *id = st[i].id;
+            return 1;
+        }
+    for (i = 0; i < IN_STREAMS; i++)
+        if (in[i].a == a && in[i].want == 1) {
+            in[i].want = 3;                     /* (a stream in: it has that much to read) */
+            *id = in[i].id;
             return 1;
         }
     return 0;
