@@ -4087,8 +4087,9 @@ def api_win_case(profile, vcard, card):
         checks["min"] = until(at(20, 40, 220, 120, False))
         click(62 + 10, 470)                             # its button on the task bar
         checks["unmin"] = until(lambda d: d["win"] == (20, 40, 220, 120, True) and d["focus"] == d.get("id"))
-        agent.ssh("glos key 0x23")                      # h: the app takes no event for 8 seconds ...
-        agent.ssh("glos key 0x1E")                      # ... while one waits for it: "not answering", then answering
+        agent.ssh("glos key 0:0x23,0.3:0x1E")             # h: the app takes no event for 8 seconds, while one (a) waits
+                                                        # for it: "not answering", then answering. (One command: with two,
+                                                        # a slow second one left less than the 3 seconds the flag is up)
         checks["hung"] = until(lambda d: d.get("hung"), 20)
         checks["answering"] = until(lambda d: d["win"] is not None and not d.get("hung"), 30)
         click(20 + 220 + B - 9, 40 + B + 9)             # its close box
@@ -4543,8 +4544,7 @@ def api_shell_case(profile, vcard, card):
                 break
             time.sleep(0.5)
         checks["w-up"] = time.time() - t0 < 240
-        agent.ssh("glos key 0x23")              # h: it takes no event for 8 seconds ...
-        agent.ssh("glos key 0x1E")              # ... while one waits for it
+        agent.ssh("glos key 0:0x23,0.3:0x1E")     # h: it takes no event for 8 seconds, while one (a) waits for it
         hung = a.said("shell what=3 at=0,0 window=*", 30)
         checks["hung"] = bool(hung)
         checks["answers"] = bool(hung) and bool(a.said(hung.replace("what=3", "what=4")[6:], 30))
