@@ -4833,7 +4833,8 @@ def api_sec_case(profile, vcard, card):
     except subprocess.TimeoutExpired:
         info += " timeout"
     text = agent.wait()
-    checks["no-password-in-log"] = "sesame" not in text
+    # (the password is in the log only where the test itself typed it: glos type's own command line)
+    checks["no-password-in-log"] = not any("sesame" in l and 'exec="glos type ' not in l for l in text.split("\n"))
     if not all(checks.values()):
         info += " " + " | ".join(re.findall(r"HX-APITEST case=sec-\S+ ok=0.*", text))[:300]
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text and "GLOS-WARN" not in text

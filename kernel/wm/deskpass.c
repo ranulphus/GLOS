@@ -63,12 +63,14 @@ int deskpass_key(struct wm *m, u32 key, int down, u32 ch)
         return 0;
     if (!down || pw.entered || pw.cancelled)
         return 1;
-    if (key == 0x1C || key == 0x11C) {
-        pw.entered = 1;
+    if (key == 0x1C || key == 0x11C || key == 0x01) {       /* Enter, or Esc: the waiting thread's to act on */
+        u32 f = irq_save();
+        if (key == 0x01)
+            pw.cancelled = 1;
+        else
+            pw.entered = 1;
         thread_wake(&pw.q);
-    } else if (key == 0x01) {
-        pw.cancelled = 1;
-        thread_wake(&pw.q);
+        irq_restore(f);
     } else if (key == 0x0E) {
         if (pw.len)
             pw.text[--pw.len] = 0;

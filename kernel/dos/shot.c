@@ -41,6 +41,7 @@
 #include "dpmi.h"
 #include "io.h"
 #include "cache.h"
+#include "desk.h"
 #include "display.h"
 #include "kprintf.h"
 #include "mgadisp.h"
@@ -53,6 +54,8 @@
 #include "vm.h"
 
 #define PATIENCE  256u                          /* ticks for the program to take interrupts */
+#define DESK_WAIT 128u                          /* ticks for the desktop to finish a frame (one that is drawn again
+                                                   and again is taken as it is after that) */
 #define BIOS_WAIT 2048u                         /* ticks for the video BIOS to end what it is at: a mode set takes
                                                    a Matrox BIOS more than a quarter of a second, and its
                                                    registers halfway are no mode at all */
@@ -691,6 +694,10 @@ static int capture(struct vm_work *w, struct trapframe *tf)
 
     if ((int10_busy || ((tf->eflags & FL_VM) && cs >= 0xC000 && cs < 0xC800)) && timer_ticks() - w->posted < BIOS_WAIT)
         return 1;                               /* the video BIOS is at work: when it has done */
+    if (desk_drawing() && timer_ticks() - w->posted < DESK_WAIT)
+        return 1;                               /* the desktop is painting, or owes the screen something: the
+                                                   picture is of a whole frame, not of one half drawn (seen: its
+                                                   first frame, the CPU drawing, caught at row 44) */
     vga_read(&v);
     if (vbe.mode)
         r = grab_vbe(s, tf, &v);

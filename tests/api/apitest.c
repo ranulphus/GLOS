@@ -1346,6 +1346,7 @@ static void sys(void)
     r = await(GLOS_EV_LOG, 0, ev, 3000);
     n = glos_sys_log(next, text, sizeof text - 1, &next, 0);
     text[n > 0 ? n : 0] = 0;
+    while (glos_event(ev, sizeof ev, 0, 1u << GLOS_AREA_SYS) > 0) ;     /* (another line's, logged while it still followed) */
     glos_call(GLOS_CORE_INIT, &again);                  /* (no longer followed: no event) */
     check("sys-log", ok && r > 0 && n > 0 && strstr(text, "GLOS-APP refuse") && glos_event(ev, sizeof ev, 300, 1u << GLOS_AREA_SYS) == 0
           && glos_sys_log(0, (char *)0xFFFFFF00u, 100, &next, 0) == -1, "ok=%d r=%d n=%d", ok, r, n);

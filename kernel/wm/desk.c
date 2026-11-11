@@ -116,6 +116,13 @@ static void place(struct wm *m)
         kprintf("GLOS-DESK vram-in windows=%u\n", n);
 }
 
+/* The desktop has the screen and is not done with it: a thread is in the manager (composing, or drawing in a
+   window), or something is damaged and not yet composed. For glos shot (another thread, no lock taken: a look). */
+int desk_drawing(void)
+{
+    return display_fb() && ((owner && owner != current) || desk.dirty.n != 0);
+}
+
 struct wm *desk_lock(void)
 {
     u32 f = irq_save();
