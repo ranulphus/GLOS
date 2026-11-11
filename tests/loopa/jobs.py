@@ -4570,6 +4570,33 @@ def api_shell_case(profile, vcard, card):
     return "  %-22s %s%s" % ("apishell-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
 
 
+def api_job_case(profile, vcard, card):
+    """API 2.0's JOB (APITEST job; phase B step 9), under the agent with the desktop on: programs run for the app
+    (JOBTOOL): arguments, folder and environment; the two outputs apart and the exit code; the standard input
+    written by the app, a line and a character at a time; Ctrl+C and Ctrl+Break half way through a long run; one
+    ended; one waiting behind another; one that isn't there; one that is nobody's; one in the app's window, typed
+    to. Every case ok."""
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("apijob-" + tag, profile, card, ["--card", vcard, "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
+        "--file", "build/dj/JOBTOOL.EXE=/TEST/JOBTOOL.EXE",
+        "--cmd", "SERSAY HX-START apijob", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1500)
+    checks, info = {"listen": agent.listening()}, ""
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        checks["run"] = agent.ssh("C:\\TEST\\APITEST.EXE job", timeout=900)[0] == 0
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        info += " timeout"
+    text = agent.wait()
+    cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", text)
+    checks["cases"] = len(cases) >= 15 and all(k == "1" for c, k, w in cases)
+    if not checks["cases"]:
+        info += " cases=%d failed-cases=%s" % (len(cases), ";".join(c + w.rstrip() for c, k, w in cases if k != "1"))
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("apijob-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
 def api_sched_case(profile, card):
     """API 2.0's schedule run by the kernel (SHELL SCHEDULE; phase B step 8), over two starts of GLOS under the
     agent. In the first, APITEST schedules a command at each start and one daily at 03:00, and GLOS is told to
@@ -7157,6 +7184,7 @@ def main():
             res += matrix(api_dnd_case, wins, a.jobs)   # ... and two of them dragging and dropping, and the clipboard
             res += matrix(api_shell_case, wins, a.jobs) # ... and the shell: the tray, notifications, its events
             res += matrix(api_sched_case, [(c[0], c[2]) for c in wins], a.jobs)    # ... and the schedule, run by the kernel
+            res += matrix(api_job_case, wins, a.jobs)   # ... and programs run for the app: JOB
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "thr":                        # (an app's own threads: the bf6, and the 486)
         cases = [c for c in [("bf6", "ne2kpci"), ("486dx2", "ne2k")] if not a.profile or c[0] in a.profile]

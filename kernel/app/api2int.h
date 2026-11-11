@@ -11,8 +11,11 @@
 
 enum {
     V1_EV_KEY = GLOS_EV_KEY, V1_EV_MOUSE = GLOS_EV_MOUSE, V1_EV_FOCUS = GLOS_EV_FOCUS, V1_EV_RESIZE = GLOS_EV_RESIZE,
-    V1_EV_CLOSE = GLOS_EV_CLOSE, V1_EV_WHEEL = GLOS_EV_WHEEL
+    V1_EV_CLOSE = GLOS_EV_CLOSE, V1_EV_WHEEL = GLOS_EV_WHEEL, V1_EV_JOB = GLOS_EV_JOB,
+    V1_RUN_CONSOLE = GLOS_RUN_CONSOLE, V1_RUN_DETACH = GLOS_RUN_DETACH, V1_RUN_FULL = GLOS_RUN_FULL
 };
+#undef GLOS_EV_JOB
+#undef GLOS_RUN_FULL
 #undef GLOS_EV_KEY
 #undef GLOS_EV_MOUSE
 #undef GLOS_EV_FOCUS
@@ -129,6 +132,11 @@ void api2_recent_add(const char *prog, const char *path);       /* a document op
 int api2_fs_path(struct trapframe *tf, u32 off, char *out, u32 room);  /* a path of the app's as DOS's bytes: its
                                                                            length, or -1 */
 int api2_fs_exists(struct app *a, const char *path);            /* 1 a file, 2 a folder, 0 neither, -1 the app ends */
+
+/* api2job.c */
+int api2_job(struct app *a, struct trapframe *tf, u32 n);      /* JOB's calls */
+void api2_job_close(struct app *a, void *obj);                  /* CLOSE of a job's handle */
+void api2_job_event(struct app *a, u32 seq, u32 state, u32 code);      /* the agent's news of a job */
 
 /* api2set.c */
 int a2_text_in(struct trapframe *tf, u32 off, char *buf, u32 room);    /* a text of the app's, its NUL kept: its

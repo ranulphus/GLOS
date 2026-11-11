@@ -155,6 +155,18 @@ int glos_schedule_set(const char *name, const char *when, const char *command); 
 int glos_schedule_remove(const char *name);
 int glos_schedule_list(char *list, unsigned room, unsigned *length);   /* name, times, command, runs, last run */
 
+/* ---- running programs (JOB) */
+/* A program started (dir, env and profile may be 0; how: GLOS_RUN_; flags: GLOS_RUNF_): the job, 0 if refused
+   (glos_error()). With GLOS_RUNF_DETACH there is no job to have: 0, and glos_error() 0 if it was started. */
+glos_handle glos_job_run(const char *command, const char *dir, const char *env, unsigned how, unsigned flags,
+                         const char *profile);
+int glos_job_read(glos_handle job, unsigned stream, void *buf, unsigned room);     /* the bytes, or -1 */
+int glos_job_write(glos_handle job, const void *data, unsigned length);            /* its input: those taken, or -1 */
+int glos_job_eof(glos_handle job);                                                 /* its input's end */
+int glos_job_keys(glos_handle job, const unsigned short *keys, unsigned count);    /* a window's job: those taken */
+int glos_job_signal(glos_handle job, unsigned what);                               /* GLOS_SIGNAL_ */
+int glos_job_status(glos_handle job, struct glos_job_status *out);
+
 /* ---- threads (THREAD; docs/supervisor.md 12.7)
  *
  * A thread of the app's own runs fn(arg) on a stack libglos allocates (stack bytes: 0 for 64 KB, at least 16 KB),

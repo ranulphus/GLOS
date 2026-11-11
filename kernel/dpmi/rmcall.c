@@ -29,6 +29,7 @@
 #include "sched.h"
 #include "session.h"
 #include "shot.h"
+#include "timer.h"
 #include "vm.h"
 
 #define NEST_MAX (RM_STACK_PARAS * 16 / RM_SLICE)
@@ -85,6 +86,25 @@ int rm_call(struct trapframe *from, struct rmregs *r, int kind, u8 vec, const u1
         t.edx = r->edx;
         t.esi = r->esi;
         t.edi = r->edi;
+        t.eflags = r->flags;
+        for (;;) {                              /* a job's console input from its app (API 2.0's JOB; as v86.c's) */
+            struct rmregs k;
+            int s = agent_vm_stdin(&t);
+            if (s == 1) {                       /* answered: DOS is not asked */
+                r->eax = t.eax;
+                r->flags = (u16)((r->flags & ~(FL_CF | FL_ZF)) | (t.eflags & (FL_CF | FL_ZF)));
+                return 0;
+            }
+            if (s != 2 || vm.kill_req)
+                break;
+            if (!vm.indos || !vm_rd8(vm.indos))
+                app_vm_idle_turn(0);            /* (apps' own DOS calls meanwhile) */
+            k = *r;                             /* nothing written yet: a moment in real mode (the BIOS's "is there a */
+            k.eax = 0x0100;                     /* key?"), where the program's interrupts are taken (its timer, */
+            if (rm_call(from, &k, RM_INT, 0x16, 0, 0) != 0)     /* Ctrl+C from the keyboard), then a wait */
+                break;
+            vm_idle(timer_ticks() + 8);
+        }
         agent_vm_int21(&t);                     /* a client's DOS output, for an agent job's capture (§17.4) */
     }
     if (vec == 0x10 && kind != RM_FAR) {

@@ -37,6 +37,21 @@ int agent_app_kill(void *app, u32 seq);
 int agent_app_forget(void *app, u32 seq);
 void agent_app_gone(void *app);                 /* the app has ended: its jobs killed (or let go, if apps now) */
 u32 agent_jobs_stat(void *out, u32 room);       /* struct glos_stat_app for each job */
+/* API 2.0's JOB (kernel/app/api2job.c). */
+struct agent_opts {
+    u8 direct;                                  /* direct mode */
+    u8 exclusive;                               /* 1 an exclusive session, 2 made an app without asking */
+    u8 stdin_pipe;                              /* its standard input is what its app writes */
+    u8 keep;                                    /* its slot is kept after its end, until agent_app_forget() */
+    u8 hidden;                                  /* (with GLOS_RUN_CONSOLE) no window: beside the desktop, its output
+                                                   kept by stream */
+    const char *profile;                        /* the profile it runs with, or NULL */
+};
+int agent_post_job(void *app, const struct glos_run *r, const struct agent_opts *o, u32 *seq);
+int agent_app_read1(void *app, u32 seq, int stream, u8 *out, u32 room);        /* one stream's bytes; -1 no such job */
+int agent_app_write(void *app, u32 seq, const u8 *d, u32 n, int eof);          /* the bytes taken, or -1 */
+int agent_app_status(void *app, u32 seq, u32 *state, u32 *code, u32 *nout, u32 *nerr, u32 *ticks);
+int agent_app_signal(void *app, u32 seq, int brk);     /* Ctrl+C or Ctrl+Break: 0; -1 no such job; -2 not running */
 
 /* The VM thread's side (trap context). */
 struct agent_exec {
@@ -56,6 +71,8 @@ void *agent_vm_as(void *job);                   /* output is this job's from now
 void agent_app_done(void *job, u32 result);     /* the app that job became has ended */
 void agent_vm_tick(u32 now);                    /* every kernel tick: the kills of a job being ended */
 void agent_vm_int21(const struct trapframe *tf);
+int agent_vm_stdin(struct trapframe *tf);       /* a job's console input from its app: 0 DOS's call, 1 answered here,
+                                                   2 nothing yet (wait, and the INT again) */
 void agent_vm_traps(void);
 int agent_vm_handle_info(u16 h);                /* the program's handle h's device information (SFT), or -1 */                      /* INT 29h, 16h, 28h trapped as the job running needs */
 int agent_vm_int29(const struct trapframe *tf);   /* 1: taken (a console job's), not to be reflected */

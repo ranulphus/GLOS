@@ -76,6 +76,10 @@ void api2_event_1x(struct app *a, const struct glos_event *e)
         return;
     }
     irq_restore(f);
+    if (a->v2 && e->type == V1_EV_JOB) {        /* a job's news (kernel/dos/agent.c): JOB's event */
+        api2_job_event(a, e->key, (u32)e->x, (u32)e->y);
+        return;
+    }
     if (a->v2 && (e->type == GLOS_EV_LAUNCH || e->type == GLOS_EV_SYSKEY)) {    /* the shell's: SHELL's event */
         api2_shell_1x(a, e->type, e->x, e->y);
         return;

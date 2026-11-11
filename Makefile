@@ -316,7 +316,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
-         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/api2win.c kernel/app/api2in.c kernel/app/api2thr.c kernel/app/api2set.c kernel/app/api2clip.c kernel/app/api2fs.c kernel/app/api2shell.c kernel/app/api2start.c kernel/app/fslist.c kernel/app/clipstore.c kernel/app/tsync.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/kdata.c kernel/core/schedule.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/theme.c kernel/wm/idle.c kernel/wm/dnd.c kernel/wm/notes.c kernel/wm/deskshell.c kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
+         kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/api2win.c kernel/app/api2in.c kernel/app/api2thr.c kernel/app/api2set.c kernel/app/api2clip.c kernel/app/api2fs.c kernel/app/api2shell.c kernel/app/api2start.c kernel/app/api2job.c kernel/app/fslist.c kernel/app/clipstore.c kernel/app/tsync.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/kdata.c kernel/core/schedule.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c $(WM_SRCS) kernel/wm/theme.c kernel/wm/idle.c kernel/wm/dnd.c kernel/wm/notes.c kernel/wm/deskshell.c kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
 KOBJS := $(patsubst kernel/%,build/kernel/%.o,$(KSRCS)) build/kernel/sdk_cfg.o build/kernel/sdk_tz.o build/kernel/sdk_region.o build/kernel/sdk_cp.o build/kernel/sdk_cp_tables.o build/kernel/sdk_assoc.o build/kernel/sdk_sched.o
 # GLOS.CFG's schema (sdk/config/cfg.c, include/glos/config.h; M9) and time zones (sdk/config/tz.c; M10): shared
 # with the loader and the Control Panel.
@@ -404,7 +404,7 @@ loopa-mem: all dos-tests build/dj/UMAPROBE.EXE build/dj/NESTRM.EXE build/ow/dos/
 loopa-xfer: all dos-tests check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py xfer -j $(JOBS)
 # API 2.0's conformance (phase B): APITEST as GLOS.EXE /RUN's app, every case of the areas built so far.
-loopa-api: all build/dj/APITEST.EXE doslfn check-deps
+loopa-api: all build/dj/APITEST.EXE build/dj/JOBTOOL.EXE doslfn check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py api -j $(JOBS)
 # An app's own threads (phase B step 4): THRTEST through the agent.
 loopa-thr: all dos-tests build/dj/THRTEST.EXE check-deps
@@ -660,6 +660,10 @@ build/dj/APITEST.EXE: tests/api/apitest.c build/sdk/libglos2.a tools/glosmark.py
 	$(Q)python3 tools/glosmark.py $@
 # THRTEST (tests/api/thrtest.c; phase B step 4): an app's own threads. Its link map is checked: every wrapped C
 # library function is reached through libglos 2.0's lock, from the library's own files too (tools/wrapcheck.py).
+build/dj/JOBTOOL.EXE: tests/api/jobtool.c
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Wextra -Werror -o $@ $<
 build/dj/THRTEST.EXE: tests/api/thrtest.c build/sdk/libglos2.a build/sdk/glos2wrap.opt tools/glosmark.py tools/wrapcheck.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"

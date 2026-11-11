@@ -58,6 +58,7 @@
 
 #define NJOBS    16                             /* (the ssh's and the apps': a launched app's lasts as long as it) */
 #define RING     0x4000u                        /* a power of two */
+#define IN_RING  0x1000u                        /* a job's standard input from its app: a power of two */
 #define SFT_SIZE 0x3B                           /* an SFT entry, DOS 4 and later */
 
 enum { J_FREE, J_QUEUED, J_RUNNING, J_DONE };
@@ -99,6 +100,16 @@ struct agent_job {
     u16 left[64];                               /* typed, but not read by the time it ended: its app's again */
     u8 nleft;
     struct waitq readq;                         /* its app, waiting for output */
+    /* API 2.0's JOB (kernel/app/api2job.c) */
+    u8 keep;                                    /* its slot is its app's until the app lets it go (STATUS after its end) */
+    u8 hidden;                                  /* a console job with no window: it runs beside the desktop as one in
+                                                   a window does, but what it writes through DOS is kept by stream,
+                                                   and nobody types to it */
+    u8 in_pipe;                                 /* its standard input is what its app writes ... */
+    volatile u8 in_eof;                         /* ... and the app has written its last */
+    u8 in[IN_RING];
+    volatile u32 ih, it;
+    u32 t_start, t_end;                         /* the ticks it began to run and ended at */
 };
 
 static struct agent_job jobs[NJOBS];
@@ -106,6 +117,8 @@ static struct agent_job *running;
 static u32 next_seq;
 static struct waitq roomq;                      /* the VM thread, waiting for ring space */
 static u32 last_kill;
+static u8 sig_left, sig_brk;                    /* a job's Ctrl+C or Ctrl+Break on its way: the keys still to go */
+static u32 sig_at;
 static volatile u32 exit_at;
 static volatile u8 exit_req, exit_code;
 static void (*kick_ssh)(void);
@@ -155,6 +168,9 @@ int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, cons
     j->env[0] = j->env[1] = 0;
     j->kh = j->kt = 0;
     j->nleft = 0;
+    j->keep = j->in_pipe = j->in_eof = j->hidden = 0;
+    j->ih = j->it = 0;
+    j->t_start = j->t_end = 0;
     f = irq_save();
     j->seq = next_seq++;
     j->state = J_QUEUED;
@@ -193,7 +209,10 @@ static void tell(struct agent_job *j)
     app_event(j->app_owner, &e);
 }
 
-int agent_post_app(void *app, const struct glos_run *r, u32 *seq)
+int agent_post_app(void *app, const struct glos_run *r, u32 *seq) { return agent_post_job(app, r, 0, seq); }
+
+/* ... and API 2.0's (o: what 1.x's structure has no word for; NULL: none of it). */
+int agent_post_job(void *app, const struct glos_run *r, const struct agent_opts *o, u32 *seq)
 {
     struct agent_job *j = NULL;
     u32 f, i;
@@ -224,9 +243,17 @@ int agent_post_app(void *app, const struct glos_run *r, u32 *seq)
     j->cand = j->shell = 0;
     j->kill = 0;
     j->app = 0;
-    j->direct = 0;
-    j->exclusive = 0;
-    j->profile[0] = 0;
+    j->direct = (u8)(o && o->direct);
+    j->exclusive = (u8)(o ? o->exclusive : 0);
+    for (i = 0; o && o->profile && o->profile[i] && i < sizeof j->profile - 1; i++)
+        j->profile[i] = o->profile[i];
+    j->profile[i] = 0;
+    j->keep = (u8)(o && o->keep);
+    j->hidden = (u8)(o && o->hidden);
+    j->in_pipe = (u8)(o && o->stdin_pipe);
+    j->in_eof = 0;
+    j->ih = j->it = 0;
+    j->t_start = j->t_end = 0;
     j->out[0].head = j->out[0].tail = j->out[1].head = j->out[1].tail = 0;
     j->detach = (u8)((r->flags & GLOS_RUN_DETACH) != 0);
     j->from_app = (u8)!j->detach;
@@ -344,7 +371,7 @@ int agent_app_read(void *app, u32 seq, u8 *out, u32 room, u32 wait_ticks, u32 *s
     }
     *state = app_state(j);
     *code = code_of(j);
-    if (j->state == J_DONE && n < room && !ring_used(&j->out[0]) && !ring_used(&j->out[1]) && !j->nleft) {
+    if (j->state == J_DONE && !j->keep && n < room && !ring_used(&j->out[0]) && !ring_used(&j->out[1]) && !j->nleft) {
         f = irq_save();                         /* (its end told, with room to spare: the slot is free again) */
         j->app_owner = NULL;
         j->state = J_FREE;
@@ -353,12 +380,93 @@ int agent_app_read(void *app, u32 seq, u8 *out, u32 room, u32 wait_ticks, u32 *s
     return (int)n;
 }
 
+/* ---- API 2.0's JOB (kernel/app/api2job.c), on the app's thread */
+
+/* What it has written to one stream, as far as there is room: the bytes, or -1 (no such job of the app's). */
+int agent_app_read1(void *app, u32 seq, int stream, u8 *out, u32 room)
+{
+    struct agent_job *j = app_job(app, seq);
+    struct ring *r;
+    u32 n = 0, f;
+    if (!j || stream < 0 || stream > 1)
+        return -1;
+    r = &j->out[stream];
+    while (ring_used(r) && n < room) {
+        out[n++] = r->buf[r->tail & (RING - 1)];
+        __asm__ volatile("" ::: "memory");
+        r->tail++;
+    }
+    if (n) {
+        f = irq_save();
+        thread_wake(&roomq);                    /* (the VM thread may be waiting for the room) */
+        irq_restore(f);
+    }
+    return (int)n;
+}
+
+/* Its standard input: n bytes more (those taken are the answer; fewer when it is full), or its end (eof). -1: no
+   such job, or its input is not the app's. */
+int agent_app_write(void *app, u32 seq, const u8 *d, u32 n, int eof)
+{
+    struct agent_job *j = app_job(app, seq);
+    u32 k = 0, f;
+    if (!j || !j->in_pipe)
+        return -1;
+    while (k < n && j->it - j->ih < IN_RING && !j->in_eof) {
+        j->in[j->it & (IN_RING - 1)] = d[k++];
+        __asm__ volatile("" ::: "memory");
+        j->it++;
+    }
+    if (eof)
+        j->in_eof = 1;
+    f = irq_save();
+    vm_kick();                                  /* (its program may be waiting to read) */
+    irq_restore(f);
+    return (int)k;
+}
+
+int agent_app_status(void *app, u32 seq, u32 *state, u32 *code, u32 *nout, u32 *nerr, u32 *ticks)
+{
+    struct agent_job *j = app_job(app, seq);
+    if (!j)
+        return -1;
+    *state = app_state(j);
+    *code = code_of(j);
+    *nout = ring_used(&j->out[0]);
+    *nerr = ring_used(&j->out[1]);
+    *ticks = !j->t_start ? 0 : (j->t_end ? j->t_end : timer_ticks()) - j->t_start;
+    return 0;
+}
+
+/* Ctrl+C (brk 0) or Ctrl+Break for the job's program, as from the keyboard: the keys go to the VM's keyboard
+   whatever has the real one. 0; -1: no such job; -2: it is not the one running, or it is an app now. */
+int agent_app_signal(void *app, u32 seq, int brk)
+{
+    struct agent_job *j = app_job(app, seq);
+    u32 f;
+    if (!j)
+        return -1;
+    if (j != running || j->app)
+        return -2;
+    f = irq_save();
+    if (sig_left) {                             /* (one is on its way still) */
+        irq_restore(f);
+        return -2;
+    }
+    sig_brk = (u8)(brk != 0);
+    sig_left = 4;                               /* Ctrl down, the key down and up, Ctrl up: a key every 20 ms, as */
+    sig_at = timer_ticks();                     /* fingers would (agent_vm_tick). All at once, a slow PC's BIOS */
+    irq_restore(f);                             /* missed Ctrl: the program's own handler had read it, and the next */
+    kprintf("GLOS-AGENT signal seq=%u %s\n", seq, brk ? "break" : "int");     /* key was there before the BIOS looked */
+    return 0;
+}
+
 int agent_app_type(void *app, u32 seq, const u16 *keys, u32 n)
 {
     struct agent_job *j = app_job(app, seq);
     u32 i;
-    if (!j)
-        return -1;
+    if (!j || !j->console || j->hidden)
+        return -1;                              /* (only a job in a window of its app's is typed to) */
     if (j->state == J_DONE) {                   /* (typed after its end, before its app has seen that: type-ahead) */
         u32 f = irq_save();
         for (i = 0; i < n && j->nleft < 64; i++)
@@ -735,12 +843,15 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
         if (!j->shell && (result & 0x10000) && (err == 2 || err == 3 || err == 5)) {
             if (candidate(j, ++j->cand))        /* not there: the next place */
                 goto exec;
-            j->shell = 1;                       /* not found anywhere: COMMAND.COM says so */
-            goto exec;
+            if (!j->keep) {
+                j->shell = 1;                   /* not found anywhere: COMMAND.COM says so */
+                goto exec;
+            }                                   /* (API 2.0's: its app is told it could not be run, code 126) */
         }
         j->result = result;
         if (j->console)
             keys_left(j);
+        j->t_end = timer_ticks();
         j->state = J_DONE;
         kprintf("GLOS-AGENT done seq=%u code=%u via=%s%s\n", j->seq, result & 0xFF, j->shell ? "comspec" : j->path,
                 (result & 0x10000) ? " cannot-run" : "");
@@ -757,6 +868,7 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
             j = &jobs[i];
     if (j) {
         j->state = J_RUNNING;
+        j->t_start = timer_ticks() | 1;
         running = j;
         if (j->console) {                       /* its keyboard is its app's from now: what the BIOS's buffer */
             u16 tail = vm_rd16(0x41C);          /* held before (the harness's F1) isn't typed into it */
@@ -783,8 +895,11 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
 start:
     j = running;
     j->shell = (u8)split(j);
-    if (!j->shell && !candidate(j, 0))
+    if (!j->shell && !candidate(j, 0)) {
+        if (j->keep)                            /* (API 2.0's: no such program is an answer, not COMMAND.COM's words) */
+            return agent_vm_next(0x10002, comspec, x);
         j->shell = 1;
+    }
 exec:
     j = running;
     session_job(j->direct, j->console ? (j->full ? 4 : 3) : j->exclusive, j->profile, j->env);     /* for the
@@ -857,6 +972,14 @@ void agent_app_done(void *job, u32 result)
 /* Every tick (interrupts off): a job being killed gets the next kill. */
 void agent_vm_tick(u32 now)
 {
+    if (sig_left && (s32)(now - sig_at) >= 0) { /* a job's Ctrl+C or Ctrl+Break, a key at a time (JOB's SIGNAL) */
+        u32 key = sig_brk ? 0x146 : 0x2E;       /* (Ctrl+Break is E0 46: the BIOS calls INT 1Bh; Ctrl+C a key) */
+        if (!running && sig_left > 1)
+            sig_left = sig_left == 4 ? 0 : 1;   /* (its program has gone: Ctrl is let go, if it went down) */
+        if (sig_left && vkbc_vm_key(sig_left == 4 || sig_left == 1 ? 0x1D : key, sig_left > 2) == 0)
+            sig_left--;
+        sig_at = now + 20;
+    }
     watch_tick(now);
     if (running && running->kh != running->kt)
         feed(running);                          /* (a console job's keys, as its BIOS buffer empties) */
@@ -946,7 +1069,8 @@ void agent_vm_int21(const struct trapframe *tf)
     u32 ah = (tf->eax >> 8) & 0xFF, i, n;
     watch_int21((u16)tf->eax, (u16)tf->ebx, (u16)tf->ecx, (u16)tf->edx, vm_lin(tf->v86_ds, tf->edx),
                 vm_lin(tf->v86_ds, tf->esi));  /* (a directory's watchers, M9) */
-    if (!running || running->console)           /* (a console job's: all of it through INT 29h, echo too) */
+    if (!running || (running->console && !running->hidden))    /* (a window's job: all of it through INT 29h, echo
+                                                                   too; a hidden one's: by its handles, here) */
         return;
     if (ah == 0x02 || (ah == 0x06 && (tf->edx & 0xFF) != 0xFF)) {
         if (is_console(1))
@@ -966,10 +1090,112 @@ void agent_vm_int21(const struct trapframe *tf)
     }
 }
 
+/* A job whose standard input is its app's (API 2.0's JOB, GLOS_RUNF_STDIN): DOS's console input calls on a handle
+   that is the console are answered here, from what the app has written, and never reach DOS. 0: not such a call
+   (DOS has it); 1: answered (the caller goes on after the INT); 2: nothing to give yet (the caller waits and
+   makes the INT again). */
+static u32 in_used(const struct agent_job *j) { return j->it - j->ih; }
+
+static int in_line(const struct agent_job *j)   /* a whole line waits (or the input's end has come) */
+{
+    u32 i;
+    for (i = j->ih; i != j->it; i++)
+        if (j->in[i & (IN_RING - 1)] == '\n')
+            return 1;
+    return j->in_eof || in_used(j) == IN_RING;
+}
+
+static int console_in(u16 h)                    /* the handle is the console's input */
+{
+    int info;
+    if (!vm_current_psp() || !vm.bi->lol)
+        return h == 0;
+    info = agent_vm_handle_info(h);
+    return info >= 0 && (info & 0x80) && (info & 0x01);
+}
+
+int agent_vm_stdin(struct trapframe *tf)
+{
+    struct agent_job *j = running;
+    u32 ah = (tf->eax >> 8) & 0xFF, n, max, i;
+    u8 c;
+    if (!j || !j->in_pipe || !j->hidden || j->full || j->app)
+        return 0;
+    if (ah == 0x0C) {                           /* (flush, then a function: nothing of the app's is thrown away) */
+        ah = tf->eax & 0xFF;
+        if (ah != 0x01 && ah != 0x06 && ah != 0x07 && ah != 0x08 && ah != 0x0A)
+            return 0;
+    }
+    switch (ah) {
+    case 0x3F:                                  /* read: a line at a time, as the console gives it */
+        if (!console_in((u16)tf->ebx))
+            return 0;
+        if (!in_used(j) && !j->in_eof)
+            return 2;
+        max = tf->ecx & 0xFFFF;
+        for (n = 0; n < max && in_used(j); ) {
+            c = j->in[j->ih++ & (IN_RING - 1)];
+            vm_wr8(vm_lin(tf->v86_ds, (tf->edx + n) & 0xFFFF), c);
+            n++;
+            if (c == '\n')
+                break;
+        }
+        tf->eax = (tf->eax & ~0xFFFFu) | n;     /* (0: the end of the file) */
+        tf->eflags &= ~FL_CF;
+        return 1;
+    case 0x0B:                                  /* is there input? */
+        if (!console_in(0))
+            return 0;
+        tf->eax = (tf->eax & ~0xFFu) | (in_used(j) || j->in_eof ? 0xFF : 0);
+        return 1;
+    case 0x06:                                  /* direct console input (DL FFh): none is no wait */
+        if ((tf->edx & 0xFF) != 0xFF || !console_in(0))
+            return 0;
+        if (!in_used(j) && !j->in_eof) {
+            tf->eax &= ~0xFFu;
+            tf->eflags |= FL_ZF;
+            return 1;
+        }
+        tf->eflags &= ~FL_ZF;
+        /* fall through */
+    case 0x01: case 0x07: case 0x08:            /* a character (01h's echo is the app's to do) */
+        if (!console_in(0))
+            return 0;
+        if (!in_used(j) && !j->in_eof)
+            return 2;
+        c = in_used(j) ? j->in[j->ih++ & (IN_RING - 1)] : 0x1A;
+        tf->eax = (tf->eax & ~0xFFu) | c;
+        return 1;
+    case 0x0A:                                  /* a line into DS:DX's buffer: its room, its length, its text, a CR */
+        if (!console_in(0))
+            return 0;
+        if (!in_line(j))
+            return 2;
+        max = vm_rd8(vm_lin(tf->v86_ds, tf->edx & 0xFFFF));
+        for (n = 0; in_used(j); ) {
+            c = j->in[j->ih++ & (IN_RING - 1)];
+            if (c == '\n')
+                break;
+            if (c != '\r' && max && n + 1 < max)
+                vm_wr8(vm_lin(tf->v86_ds, (tf->edx + 2 + n++) & 0xFFFF), c);
+        }
+        if (!n && !in_used(j) && j->in_eof && max > 1)
+            vm_wr8(vm_lin(tf->v86_ds, (tf->edx + 2 + n++) & 0xFFFF), 0x1A);     /* (the input's end: Ctrl+Z) */
+        if (max) {
+            vm_wr8(vm_lin(tf->v86_ds, (tf->edx + 1) & 0xFFFF), (u8)n);
+            vm_wr8(vm_lin(tf->v86_ds, (tf->edx + 2 + n) & 0xFFFF), '\r');
+        }
+        (void)i;
+        return 1;
+    }
+    return 0;
+}
+
 int agent_vm_int29(const struct trapframe *tf)
 {
     if (agent_vm_console()) {                   /* a console job's: its window's only (DOS's console driver */
-        put(0, (u8)tf->eax);                    /* would hand it to INT 10h 0Eh, which takes it again) */
+        if (!running->hidden || !vm.indos || !vm_rd8(vm.indos))    /* would hand it to INT 10h 0Eh, which takes it */
+            put(0, (u8)tf->eax);                /* again). A hidden job's through DOS was kept by its handle already */
         return 1;
     }
     if (running && (running->console || !vm.indos || !vm_rd8(vm.indos)))

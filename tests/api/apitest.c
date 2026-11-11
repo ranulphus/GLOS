@@ -100,7 +100,8 @@ static void before(void)
           && v.functions[GLOS_AREA_CORE][0] == 0x1FFFu && GLOS_HAS(&v, GLOS_CORE_RANDOM)
           && GLOS_HAS(&v, GLOS_WIN_CREATE) && GLOS_HAS(&v, GLOS_DRAW_SCREEN) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_WIN, 5))
           && GLOS_HAS(&v, GLOS_SHELL_SCHEDULE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 10))
-          && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_JOB, 0)),
+          && GLOS_HAS(&v, GLOS_JOB_STATUS) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_JOB, 5))
+          && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 0)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
     small.v.size = 12;                                  /* (size, major, minor: an older program's) */
@@ -138,7 +139,7 @@ static void calls(void)
     r = glos_call(2, 0);                                /* (1.x's YIELD: a 2.0 app makes 2.0's calls) */
     check("1x-refused", r == GLOS_E_VERSION, "r=%d", r);
     check("unknown-core", glos_call(GLOS_FN(GLOS_AREA_CORE, 200), 0) == GLOS_E_FUNCTION, 0);
-    check("unknown-area", glos_call(GLOS_FN(GLOS_AREA_JOB, 0), 0) == GLOS_E_FUNCTION, 0);
+    check("unknown-area", glos_call(GLOS_FN(GLOS_AREA_AUDIO, 0), 0) == GLOS_E_FUNCTION, 0);
     check("unknown-win", glos_call(GLOS_FN(GLOS_AREA_WIN, 5), 0) == GLOS_E_FUNCTION, 0);
     check("yield", glos_yield() == 0, 0);
     memset(&t, 0, sizeof t);
@@ -1375,6 +1376,8 @@ static void shell(void)
     } else {
         job = glos_open(hp("%s\\APITEST.EXE"), 0, 0);
         e = glos_schedule_set("never", "start", "C:\\NEVER.BAT");
+        if (glos_job_run("C:\\NEVER.BAT", 0, 0, GLOS_RUN_HIDDEN, 0, 0) != 0 || glos_error() != GLOS_E_REFUSED)
+            e = -1;
         check("run-refused", r == GLOS_E_SETTING && job == -1 && glos_error() == GLOS_E_REFUSED && e == GLOS_E_REFUSED
               && glos_entry_set("APITEST", 0, 0, 0) == GLOS_E_SETTING, "r=%d job=%d err=%d e=%d", r, job, glos_error(), e);
     }
@@ -1606,6 +1609,230 @@ static int sched_mode(const char *what)
     return r || e;
 }
 
+/* JOB (step 9), under the agent: programs run for the app (tests/api/jobtool.c is the program). */
+static void no_cr(char *t)
+{
+    char *o = t;
+    for (; *t; t++)
+        if (*t != '\r')
+            *o++ = *t;
+    *o = 0;
+}
+
+/* What the job has written is added to out and err (text, their rooms); 1 once it has ended and all is read, or
+   once `until` is in out; 0 when the time is up. */
+static unsigned job_events, job_last;           /* the job's events seen while waiting, and the last one's state */
+
+static int job_take(glos_handle j, char *out, unsigned room, char *err, unsigned eroom, const char *until, unsigned ms,
+                    struct glos_job_status *st)
+{
+    unsigned char ev[GLOS_EV_MAX];
+    unsigned t0 = glos_ticks(), no = strlen(out), ne = err ? strlen(err) : 0;
+    int n;
+    for (;;) {
+        while (no + 1 < room && (n = glos_job_read(j, GLOS_JOB_OUT, out + no, room - 1 - no)) > 0)
+            no += (unsigned)n;
+        while (err && ne + 1 < eroom && (n = glos_job_read(j, GLOS_JOB_ERR, err + ne, eroom - 1 - ne)) > 0)
+            ne += (unsigned)n;
+        out[no] = 0;
+        if (err)
+            err[ne] = 0;
+        if (glos_job_status(j, st) != 0)
+            return 0;
+        if (until ? strstr(out, until) || (err && strstr(err, until)) : st->state == GLOS_JS_DONE && !st->out && (!err || !st->err))
+            return 1;
+        if (until && st->state == GLOS_JS_DONE && !st->out && !st->err)
+            return 0;
+        if (glos_ticks() - t0 > ms)
+            return 0;
+        if (glos_event(ev, sizeof ev, 100, 1u << GLOS_AREA_JOB) > 0 && ((struct glos_ev *)ev)->kind == GLOS_EV_JOB
+            && ((struct glos_ev *)ev)->handle == j) {
+            job_events++;
+            job_last = ((struct glos_ev_job *)ev)->state;
+        }
+    }
+}
+
+static int job_mode(void)
+{
+    static char out[8192], err[2048];
+    unsigned char ev[GLOS_EV_MAX];
+    struct glos_ev_job *je = (struct glos_ev_job *)ev;
+    struct glos_job_status st, st2;
+    struct glos_job_run bad;
+    unsigned short keys[3] = { 0x1E61, 0x3062, 0x342E };        /* a, b, a full stop */
+    glos_handle j, j2;
+    unsigned t0;
+    char line[64];
+    int r, e, ok, n;
+    FILE *f;
+    if (glos_init("API test", "apitest", "Tests") != 0)
+        return 98;
+    job_events = 0;
+#define TOOL(args) hp("%s\\JOBTOOL.EXE " args)
+
+    /* A program with arguments: its output read, its end told, its code. */
+    out[0] = 0;
+    j = glos_job_run(TOOL("args one two"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+    r = job_take(j, out, sizeof out, 0, 0, 0, 60000, &st);
+    no_cr(out);
+    check("job-run", j && GLOS_HANDLE_KIND(j) == GLOS_HK_JOB && r && !strcmp(out, "3 [args] [one] [two]\n") && st.code == 0
+          && st.state == GLOS_JS_DONE && st.id > 0 && st.ms > 0 && st.ms < 60000, "j=%x err=%d r=%d out=%s code=%u ms=%u", j,
+          glos_error(), r, out, st.code, st.ms);
+    n = (int)job_events;                                /* (its events came while it was waited for) */
+    while (glos_event(ev, sizeof ev, 300, 1u << GLOS_AREA_JOB) > 0)
+        n++, job_last = je->state;
+    check("job-events", n >= 2 && job_last == GLOS_JS_DONE && glos_close(j) == 0 && glos_job_status(j, &st) == GLOS_E_HANDLE,
+          "events=%d last=%u", n, job_last);
+
+    /* Its folder and its environment. */
+    out[0] = 0;
+    j = glos_job_run(TOOL("where JT"), "C:\\", "JT=hello\0", GLOS_RUN_HIDDEN, 0, 0);
+    r = job_take(j, out, sizeof out, 0, 0, 0, 60000, &st);
+    check("job-where", r && (strstr(out, "cwd=c:/ ") || strstr(out, "cwd=C:/ ") || strstr(out, "cwd=C:\\ ")) && strstr(out, "JT=hello"),
+          "r=%d out=%s", r, out);
+    glos_close(j);
+
+    /* Its two outputs apart; its exit code. */
+    out[0] = err[0] = 0;
+    j = glos_job_run(TOOL("both"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+    r = job_take(j, out, sizeof out, err, sizeof err, 0, 60000, &st);
+    no_cr(out), no_cr(err);
+    check("job-streams", r && !strcmp(out, "to out\n") && !strcmp(err, "to err\n") && st.code == 3, "r=%d out=%s err=%s code=%u",
+          r, out, err, st.code);
+    glos_close(j);
+
+    /* Its standard input from the app: a line at a time, then its end. */
+    out[0] = err[0] = 0;
+    j = glos_job_run(TOOL("echo"), 0, 0, GLOS_RUN_HIDDEN, GLOS_RUNF_STDIN, 0);
+    r = glos_job_write(j, "one\n", 4);
+    ok = r == 4 && job_take(j, out, sizeof out, err, sizeof err, "ONE", 60000, &st) && st.state != GLOS_JS_DONE;
+    r = glos_job_write(j, "!two\r\nthr", 9);
+    ok = ok && r == 9 && job_take(j, out, sizeof out, err, sizeof err, "!TWO", 30000, &st);
+    r = glos_job_write(j, "ee\n", 3);
+    e = glos_job_eof(j);
+    ok = ok && r == 3 && e == 0 && job_take(j, out, sizeof out, err, sizeof err, 0, 30000, &st);
+    no_cr(out), no_cr(err);
+    check("job-stdin", ok && !strcmp(out, "ONE\n!TWO\nTHREE\nend 3\n") && !strcmp(err, "!TWO\n") && st.code == 3,
+          "ok=%d out=%s err=%s code=%u", ok, out, err, st.code);
+    glos_close(j);
+
+    /* ... and a character at a time, through DOS's console calls. */
+    out[0] = 0;
+    j = glos_job_run(TOOL("chars"), 0, 0, GLOS_RUN_HIDDEN, GLOS_RUNF_STDIN, 0);
+    r = glos_job_write(j, "xy.", 3);
+    ok = job_take(j, out, sizeof out, 0, 0, 0, 60000, &st);
+    no_cr(out);
+    check("job-chars", r == 3 && ok && !strcmp(out, "<x><y>\n") && st.code == 2, "r=%d ok=%d out=%s code=%u", r, ok, out, st.code);
+    glos_close(j);
+
+    /* Ctrl+C and Ctrl+Break, half way through a long run. */
+    out[0] = 0;
+    j = glos_job_run(TOOL("stream 2000"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+    ok = job_take(j, out, sizeof out, 0, 0, "line 5\r", 60000, &st);
+    r = glos_job_signal(j, GLOS_SIGNAL_INT);
+    t0 = glos_ticks();
+    e = job_take(j, out, sizeof out, 0, 0, 0, 30000, &st);
+    check("job-ctrl-c", ok && r == 0 && e && strstr(out, "interrupted") && st.code == 7 && !strstr(out, "line 400"),
+          "ok=%d r=%d e=%d code=%u took=%u tail=%s", ok, r, e, st.code, glos_ticks() - t0, out + (strlen(out) > 30 ? strlen(out) - 30 : 0));
+    glos_close(j);
+    out[0] = 0;
+    j = glos_job_run(TOOL("stream 2000"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+    ok = job_take(j, out, sizeof out, 0, 0, "line 5\r", 60000, &st);
+    r = glos_job_signal(j, GLOS_SIGNAL_BREAK);
+    e = job_take(j, out, sizeof out, 0, 0, 0, 30000, &st);
+    check("job-ctrl-break", ok && r == 0 && e && strstr(out, "interrupted") && st.code == 7, "ok=%d r=%d e=%d code=%u", ok, r, e,
+          st.code);
+    glos_close(j);
+
+    /* Ended, whatever it is doing; and one that waits its turn behind another. */
+    out[0] = 0;
+    j = glos_job_run(TOOL("stream 100000"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+    j2 = glos_job_run(TOOL("args behind"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+    ok = job_take(j, out, sizeof out, 0, 0, "line 3\r", 60000, &st);
+    e = glos_job_status(j2, &st2);
+    ok = ok && e == 0 && st2.state == GLOS_JS_QUEUED && glos_job_signal(j2, GLOS_SIGNAL_INT) == GLOS_E_REFUSED;
+    r = glos_job_signal(j, GLOS_SIGNAL_END);
+    t0 = glos_ticks();
+    e = job_take(j, out, sizeof out, 0, 0, 0, 30000, &st);
+    check("job-end", ok && r == 0 && e && st.state == GLOS_JS_DONE && st.code != 0 && glos_ticks() - t0 < 15000,
+          "ok=%d r=%d e=%d code=%u took=%u", ok, r, e, st.code, glos_ticks() - t0);
+    out[0] = 0;
+    e = job_take(j2, out, sizeof out, 0, 0, 0, 60000, &st2);
+    no_cr(out);
+    check("job-queue", e && !strcmp(out, "2 [args] [behind]\n") && glos_job_signal(j2, GLOS_SIGNAL_INT) == GLOS_E_REFUSED,
+          "e=%d out=%s", e, out);
+    glos_close(j);
+    glos_close(j2);
+
+    /* What is refused. */
+    j = glos_job_run(TOOL("both"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+    ok = j && glos_job_write(j, "x", 1) == -1 && glos_error() == GLOS_E_REFUSED && glos_job_eof(j) == -1
+         && glos_job_read(j, 5, out, 10) == -1 && glos_error() == GLOS_E_ARGUMENT
+         && glos_job_keys(j, keys, 1) == -1 && glos_error() == GLOS_E_REFUSED
+         && glos_job_read(0x08000077u, GLOS_JOB_OUT, out, 10) == -1 && glos_error() == GLOS_E_HANDLE
+         && glos_job_signal(j, 9) == GLOS_E_ARGUMENT;
+    out[0] = 0;
+    job_take(j, out, sizeof out, 0, 0, 0, 60000, &st);
+    glos_close(j);
+    ok = ok && glos_job_run(0, 0, 0, 0, 0, 0) == 0 && glos_error() == GLOS_E_ARGUMENT
+         && glos_job_run("x", 0, 0, 9, 0, 0) == 0 && glos_error() == GLOS_E_ARGUMENT
+         && glos_job_run("x", 0, 0, GLOS_RUN_WINDOW, GLOS_RUNF_STDIN, 0) == 0 && glos_error() == GLOS_E_ARGUMENT
+         && glos_job_run("x", 0, 0, 0, 64, 0) == 0 && glos_error() == GLOS_E_ARGUMENT;
+    memset(&bad, 0, sizeof bad);
+    bad.size = 8;                                       /* (too small to say what to run) */
+    ok = ok && glos_call(GLOS_JOB_RUN, &bad) == GLOS_E_ARGUMENT;
+    check("job-refused", ok, "err=%d", glos_error());
+
+    /* A program that isn't there: the job ends, with a code that says so. */
+    out[0] = err[0] = 0;
+    j = glos_job_run("C:\\NOSUCH\\PROGRAM.EXE now", 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+    r = job_take(j, out, sizeof out, err, sizeof err, 0, 60000, &st);
+    check("job-none", j && r && st.state == GLOS_JS_DONE && st.code == 126, "j=%x r=%d code=%u", j, r, st.code);
+    glos_close(j);
+    out[0] = 0;
+    j = glos_job_run("NOSUCHPG one", 0, 0, GLOS_RUN_HIDDEN, 0, 0);     /* (nor on the PATH) */
+    r = job_take(j, out, sizeof out, 0, 0, 0, 60000, &st);
+    check("job-none-path", j && r && st.code == 126 && !out[0], "j=%x r=%d code=%u out=%s", j, r, st.code, out);
+    glos_close(j);
+
+    /* Nobody's: no handle; it runs. A handle closed while its job runs: the job runs on, and the next after it. */
+    remove(hp("%s\\DET.TXT"));
+    j = glos_job_run(hp("echo detached > %s\\DET.TXT"), 0, 0, GLOS_RUN_HIDDEN, GLOS_RUNF_DETACH, 0);
+    e = glos_error();
+    j2 = glos_job_run(TOOL("stream 20"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+    r = glos_close(j2);
+    out[0] = 0;
+    j2 = glos_job_run(TOOL("args after"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+    ok = job_take(j2, out, sizeof out, 0, 0, 0, 60000, &st);
+    line[0] = 0;
+    if ((f = fopen(hp("%s\\DET.TXT"), "r")) != 0) {
+        if (!fgets(line, sizeof line, f))
+            line[0] = 0;
+        fclose(f);
+    }
+    remove(hp("%s\\DET.TXT"));
+    check("job-detached", j == 0 && e == 0 && r == 0 && ok && strstr(out, "[after]") && !strncmp(line, "detached", 8),
+          "j=%x e=%d r=%d ok=%d line=%s", j, e, r, ok, line);
+    glos_close(j2);
+
+    /* In the app's window: what it writes to the screen is read, its keys are typed. */
+    out[0] = 0;
+    j = glos_job_run(TOOL("chars"), 0, 0, GLOS_RUN_WINDOW, 0, 0);
+    ok = j != 0;
+    glos_sleep(1500);                                   /* (its program is up, waiting for a key) */
+    r = glos_job_keys(j, keys, 3);
+    e = job_take(j, out, sizeof out, 0, 0, 0, 60000, &st);
+    no_cr(out);
+    check("job-window", ok && r == 3 && e && strstr(out, "<a><b>") && st.code == 2, "j=%x err=%d r=%d e=%d out=%s code=%u", j,
+          glos_error(), r, e, out, st.code);
+    glos_close(j);
+
+    snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+    com1(line);
+    return fails > 90 ? 90 : fails;
+}
+
 /* What a run of the test may have left on a PC that is kept (a bench): taken away. */
 static int clean_mode(void)
 {
@@ -1700,6 +1927,8 @@ int main(int argc, char **argv)
         return store_mode();
     if (argc > 1 && !strcmp(argv[1], "clean"))
         return clean_mode();
+    if (argc > 1 && !strcmp(argv[1], "job"))
+        return job_mode();
     if (argc > 2 && !strcmp(argv[1], "sched"))
         return sched_mode(argv[2]);
     if (argc > 1 && (strstr(argv[1], ".ZZT") || strstr(argv[1], ".zzt") || !strcmp(argv[1], "said") || !strcmp(argv[1], "with")))

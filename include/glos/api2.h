@@ -676,6 +676,91 @@ struct glos_ev_wheel {
     unsigned buttons, mods;
 };
 
+/* ================================================================== JOB (08h): running programs
+ *
+ * A job is a program (or a line for COMMAND.COM) that GLOS runs for an app in the DOS session beside it: a handle
+ * (GLOS_HK_JOB), the app's until CLOSE. Jobs run one at a time, in the order they were asked for; while one runs,
+ * the others wait (QUEUED). What the program writes to its standard output and error is kept for the app to READ
+ * (16 KB each: a program that fills one waits for the app); what the app WRITEs is the program's standard input.
+ * Only where GLOS runs with its agent (GLOS_E_REFUSED under GLOS /RUN). */
+#define GLOS_JOB_RUN    GLOS_FN(GLOS_AREA_JOB, 0)       /* struct glos_job_run: a program started */
+#define GLOS_JOB_READ   GLOS_FN(GLOS_AREA_JOB, 1)       /* struct glos_job_io: what it has written, as far as it has */
+#define GLOS_JOB_WRITE  GLOS_FN(GLOS_AREA_JOB, 2)       /* struct glos_job_io: its input */
+#define GLOS_JOB_SIGNAL GLOS_FN(GLOS_AREA_JOB, 3)       /* struct glos_job_signal: Ctrl+C, Ctrl+Break, or its end */
+#define GLOS_JOB_STATUS GLOS_FN(GLOS_AREA_JOB, 4)       /* struct glos_job_status: how it is doing */
+
+struct glos_job_run {
+    unsigned size;
+    unsigned command;           /* text: a program and its arguments, or a line for COMMAND.COM (a batch file, an
+                                   internal command), at most 255 bytes */
+    unsigned dir;               /* text: the drive and folder it starts in, at most 79 bytes (0: the system's) */
+    unsigned env;               /* NAME=VALUE strings, a NUL after each and one more: added to its environment, at
+                                   most 511 bytes (0: none) */
+    unsigned how;               /* GLOS_RUN_ */
+    unsigned flags;             /* GLOS_RUNF_ */
+    unsigned profile;           /* text: the profile it runs with, a program's name (0: its own) */
+    glos_handle handle;         /* -> the job (no handle with GLOS_RUNF_DETACH) */
+    unsigned id;                /* -> its number (SYS's) */
+};
+#define GLOS_RUN_HIDDEN    0    /* beside the desktop: its output kept for READ. If it wants the screen (a mode set,
+                                   the text or graphics screen touched) it has it, full-screen, to its end */
+#define GLOS_RUN_WINDOW    1    /* its console is the app's to show (a text window): what it writes to the screen
+                                   is READ as bytes, WRITE types its keys; full-screen if it wants the screen */
+#define GLOS_RUN_FULL      2    /* as WINDOW, full-screen from the start */
+#define GLOS_RUN_EXCLUSIVE 3    /* an exclusive session: the machine is its alone until it ends */
+#define GLOS_RUN_APP       4    /* it is made an app without asking (a program that never calls INIT) */
+#define GLOS_RUNF_DETACH 1      /* nothing of it is the app's: no handle, no output kept, it runs on when the app ends */
+#define GLOS_RUNF_STDIN  2      /* its standard input is the app's WRITEs (else the keyboard's, when it has it) */
+#define GLOS_RUNF_DIRECT 4      /* direct mode (the PC's ports are its own: PRD D20) */
+
+struct glos_job_io {
+    unsigned size;
+    glos_handle handle;
+    unsigned stream;            /* READ: GLOS_JOB_OUT or GLOS_JOB_ERR. WRITE: GLOS_JOB_IN; GLOS_JOB_KEYS (a WINDOW
+                                   job's keys: 2 bytes each, the scan code above the character) */
+    unsigned buffer;
+    unsigned length;            /* READ: the room. WRITE: how many bytes; 0 with GLOS_JOB_IN: the input's end (the
+                                   program reads no more: end of file) */
+    unsigned done;              /* -> the bytes read, or taken (WRITE: fewer than length when its input is full,
+                                   4 KB: the rest later) */
+};
+#define GLOS_JOB_OUT  0
+#define GLOS_JOB_ERR  1
+#define GLOS_JOB_IN   2
+#define GLOS_JOB_KEYS 3
+
+struct glos_job_signal {
+    unsigned size;
+    glos_handle handle;
+    unsigned what;              /* GLOS_SIGNAL_ */
+};
+#define GLOS_SIGNAL_INT   1     /* Ctrl+C, as from the keyboard */
+#define GLOS_SIGNAL_BREAK 2     /* Ctrl+Break */
+#define GLOS_SIGNAL_END   3     /* it is ended, whatever it is doing (its exit code is then 255) */
+
+struct glos_job_status {
+    unsigned size;
+    glos_handle handle;
+    unsigned state;             /* -> GLOS_JS_ */
+    unsigned code;              /* -> its exit code, once DONE (126: it could not be run) */
+    unsigned out, err;          /* -> the bytes waiting to be READ */
+    unsigned ms;                /* -> how long it has run (or ran) */
+    unsigned id;                /* -> its number */
+};
+#define GLOS_JS_QUEUED  0       /* waiting for the job before it */
+#define GLOS_JS_RUNNING 1       /* running, beside the desktop or in the app's window */
+#define GLOS_JS_FULL    2       /* running full-screen, as a session */
+#define GLOS_JS_APP     3       /* it became an app: no longer a job of DOS's */
+#define GLOS_JS_DONE    4       /* ended */
+
+/* JOB's event: the job moved on (its state), or wrote where it had written nothing (READ it). */
+#define GLOS_EV_JOB GLOS_EV(GLOS_AREA_JOB, 1)           /* struct glos_ev_job */
+struct glos_ev_job {
+    struct glos_ev ev;          /* (handle: the job) */
+    unsigned state;             /* GLOS_JS_ */
+    unsigned code;              /* its exit code, when DONE */
+};
+
 /* ================================================================== FS (09h): files and disks
  *
  * What costs a program many of DOS's calls, in one of GLOS's: a folder's entries a batch at a time, several

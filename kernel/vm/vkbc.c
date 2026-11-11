@@ -528,6 +528,32 @@ int vkbc_key(u32 code, int down)
     return r;
 }
 
+/* A key for the VM's program whatever has the real keyboard (JOB's SIGNAL: Ctrl+C for a job beside the desktop):
+   0, or -1 without room. */
+int vkbc_vm_key(u32 code, int down)
+{
+    u32 f = irq_save();
+    u8 b = (u8)((code & 0x7F) | (down ? 0 : 0x80));
+    int r = -1;
+    if (vm.direct) {
+        if (QSIZE - (injt - injh) >= 2) {
+            if (code & 0x100)
+                inj[injt++ % QSIZE] = 0xE0;
+            inj[injt++ % QSIZE] = b;
+            inject_turn();
+            r = 0;
+        }
+    } else if (QSIZE - (qt - qh) >= 2) {
+        if (code & 0x100)
+            enqueue(0xE0, 0);
+        enqueue(b, 0);
+        refill();
+        r = 0;
+    }
+    irq_restore(f);
+    return r;
+}
+
 /* The mouse moved by dx, dy (down and right positive, as on the screen),
    its buttons now `buttons` (bit 0 left, 1 right, 2 middle; -1: as they
    were), its wheel by `wheel` notches (positive away from the user): 0; -1

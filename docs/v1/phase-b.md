@@ -578,6 +578,35 @@ After that:
     building a small program as a job (the IDE's case);
   - `loopa-console` unchanged.
 
+**Step 9, first part, as built** (2026-11-11; files for the three streams, long command lines, SYS and the END
+event are the second part):
+
+- **JOB's calls** (`kernel/app/api2job.c`, over the agent, `kernel/dos/agent.c`): RUN, READ, WRITE, SIGNAL,
+  STATUS. A job is a handle (`GLOS_HK_JOB`) until CLOSE; `GLOS_EV_JOB` says when it moves on and when it writes
+  where it had written nothing. No call waits: an app reads when it is told.
+- **How a job runs** (RUN's `how`):
+  - HIDDEN: beside the desktop, as a console job with no window. The desktop keeps the screen and the app keeps
+    running. If the program wants the screen it becomes a full-screen session, as a window's job does.
+  - WINDOW and FULL: 1.x's console job (the Terminal's): what it writes to the screen is READ, its keys are
+    WRITE's.
+  - EXCLUSIVE and APP: as `glos run --exclusive` and `--app`.
+  - Flags: DETACH (nobody's: no handle), STDIN, DIRECT; a profile by name.
+- **The two outputs** are kept apart, 16 KB each, from the program's DOS calls on handles that are the console
+  (as the agent always did for SSH). A full one makes the program wait for the app.
+- **The standard input** (STDIN, hidden jobs only): DOS's console input calls on a console handle (3Fh, 01h,
+  06h, 07h, 08h, 0Ah, 0Bh, 0Ch) are answered by the kernel from what the app wrote, a line at a time for 3Fh, and
+  never reach DOS. While the program waits, apps' own DOS calls are made (as at a console job's wait for a key).
+  A protected-mode program's calls come through the DPMI host's real-mode call (`kernel/dpmi/rmcall.c`): the
+  wait there makes a BIOS call each turn, so that the program's interrupts are taken. WRITE of no bytes is the
+  input's end.
+- **SIGNAL:** Ctrl+C and Ctrl+Break are keys put into the VM's virtual keyboard (`vkbc_vm_key`), whatever has
+  the real one: the BIOS, DOS and a DJGPP program's own handlers see them as from the keyboard. END is the
+  agent's kill (exit code 255).
+- **A program that isn't there** ends the job with code 126; COMMAND.COM is not asked to say so.
+- **CLOSE** of a running job's handle lets it run on, nobody's.
+- **Only under the agent:** GLOS /RUN refuses RUN.
+- **Tests:** `tests/api/jobtool.c` (a plain DOS program) and APITEST's job mode (15 cases) in `api_job_case`.
+
 ### 10. AUDIO
 
 - **OUT** grown: position, pause, volume, balance and mute.

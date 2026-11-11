@@ -307,6 +307,12 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 - **Ownership:** a job belongs to the app that ran it. READ, WRITE and SIGNAL are for its owner. Task Manager's
   "end" uses SYS's kill, which is for any program.
 
+- **As built (step 9, first part):** RUN, READ, WRITE, SIGNAL, STATUS.
+  - A hidden job runs beside the desktop; its standard input can be the app's (WRITE), its two outputs are read
+    apart. A window's job is typed to with WRITE's keys.
+  - No call waits: `GLOS_EV_JOB` tells the app when to READ.
+  - Files for the three streams and long command lines follow in the second part.
+
 ### 09h FS (files and disks)
 
 | Call | What it does |

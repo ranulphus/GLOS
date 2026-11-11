@@ -809,3 +809,55 @@ int glos_schedule_list(char *list, unsigned room, unsigned *length)
 {
     return sched(GLOS_SCHEDULE_LIST, 0, 0, 0, list, room, length);
 }
+
+/* ---- JOB */
+
+glos_handle glos_job_run(const char *command, const char *dir, const char *env, unsigned how, unsigned flags,
+                         const char *profile)
+{
+    struct glos_job_run q = { sizeof q, (unsigned)command, (unsigned)dir, (unsigned)env, how, flags, (unsigned)profile, 0, 0 };
+    int r = raw(GLOS_JOB_RUN, &q, 0);
+    last_error = r;
+    return r ? 0 : q.handle;
+}
+
+static int job_io(unsigned fn, glos_handle job, unsigned stream, const void *buf, unsigned length)
+{
+    struct glos_job_io q = { sizeof q, job, stream, (unsigned)buf, length, 0 };
+    int r = raw(fn, &q, 0);
+    if (r)
+        last_error = r;
+    return r ? -1 : (int)q.done;
+}
+
+int glos_job_read(glos_handle job, unsigned stream, void *buf, unsigned room)
+{
+    return job_io(GLOS_JOB_READ, job, stream, buf, room);
+}
+
+int glos_job_write(glos_handle job, const void *data, unsigned length)
+{
+    return length ? job_io(GLOS_JOB_WRITE, job, GLOS_JOB_IN, data, length) : 0;
+}
+
+int glos_job_eof(glos_handle job) { return job_io(GLOS_JOB_WRITE, job, GLOS_JOB_IN, 0, 0); }
+
+int glos_job_keys(glos_handle job, const unsigned short *keys, unsigned count)
+{
+    int n = job_io(GLOS_JOB_WRITE, job, GLOS_JOB_KEYS, keys, count * 2);
+    return n < 0 ? n : n / 2;
+}
+
+int glos_job_signal(glos_handle job, unsigned what)
+{
+    struct glos_job_signal q = { sizeof q, job, what };
+    return raw(GLOS_JOB_SIGNAL, &q, 0);
+}
+
+int glos_job_status(glos_handle job, struct glos_job_status *out)
+{
+    memset(out, 0, sizeof *out);
+    out->size = sizeof *out;
+    out->handle = job;
+    return raw(GLOS_JOB_STATUS, out, 0);
+}

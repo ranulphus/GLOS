@@ -1098,6 +1098,17 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next, u32 at)
                         tf->ebx & 0xFFFF, tf->ecx & 0xFFFF, tf->edx & 0xFFFF, tf->v86_ds & 0xFFFF,
                         tf->v86_es & 0xFFFF, tf->cs & 0xFFFF, tf->eip & 0xFFFF);
         }
+        switch (agent_vm_stdin(tf)) {           /* a job's console input from its app (API 2.0's JOB) */
+        case 1:
+            tf->eip = next;
+            return;
+        case 2:                                 /* nothing written yet: apps' own DOS calls meanwhile, as at a */
+            if (!vm.indos || !vm_rd8(vm.indos)) /* console job's wait for a key */
+                app_vm_idle_turn(0);
+            tf->eip = at;
+            vm_idle(timer_ticks() + 8);
+            return;
+        }
         agent_vm_int21(tf);
         if ((ax >> 8) == 0x31)
             dpmi_tsr_seen();
