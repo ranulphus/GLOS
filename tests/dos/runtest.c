@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 #include <glos/gfx.h>
 
 static void out(const char *what, const char *s, int n)

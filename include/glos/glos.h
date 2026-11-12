@@ -1,4 +1,4 @@
-/* libglos 2.0: API 2.0 (glos/api2.h) for DJGPP programs (sdk/libglos2).
+/* libglos: the GLOS API (2.0: glos/api.h) for DJGPP programs (sdk/libglos).
  * The entry is found once, with DPMI 0A00h "GLOS"; without GLOS (plain DOS,
  * another DPMI host) every call fails with -1, so a program can carry on as a
  * plain DOS program when glos_init() does.
@@ -6,11 +6,12 @@
  * Functions return 0 for done and a GLOS_E_ code when GLOS refused, or -1
  * when there is no GLOS 2.0; those that return something else say so.
  *
- * During phase B this is beside libglos 1.x (glos/api.h, sdk/libglos); a
- * program uses one or the other. */
-#ifndef GLOS_GLOS2_H
-#define GLOS_GLOS2_H
-#include <glos/api2.h>
+ * With it in libglos.a: the 2D library (glos/gfx.h), the settings' schema,
+ * time zones and code pages (glos/config.h, tz.h, cp.h) and BSD sockets
+ * (glos/net.h). The toolkit is libgui.a (glos/gui.h). */
+#ifndef GLOS_GLOS_H
+#define GLOS_GLOS_H
+#include <glos/api.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -61,7 +62,7 @@ int glos_screen(struct glos_screen *s);
 int glos_blit(glos_handle w, int x, int y, const void *pixels, int pw, int ph, unsigned pitch, const struct glos_format *format,
               const unsigned *palette);
 /* The Matrox card's drawing engine, for a program with a HAL of its own (struct glos_gpu and what follows it in
-   glos/api2.h): the card described; the engine the app's (it waits for it) and no longer; a block of the card's
+   glos/api.h): the card described; the engine the app's (it waits for it) and no longer; a block of the card's
    memory (least to most bytes, most 0: least; align a power of two, 4096 at least) and freed; a window showing
    pixels in such a block (GLOS_OWN_PIXELS: its own again). GLOS_E_NO_GPU without such a card. */
 int glos_gpu(struct glos_gpu *g);
@@ -254,8 +255,8 @@ int glos_sys_log(unsigned pos, char *buf, unsigned room, unsigned *next, int fol
  * interrupt handlers and real-mode callbacks, and use the GPU. A fault in another thread ends the program.
  *
  * DJGPP's C library is not safe for threads. A program that calls glos_thread() must be linked with
- * @glos2wrap.opt (the SDK's file of linker options: without it the link fails), which puts one lock round the C
- * library's memory, stdio and file functions, those listed in sdk/libglos2/wrap.list. What stays unsafe from
+ * @gloswrap.opt (the SDK's file of linker options: without it the link fails), which puts one lock round the C
+ * library's memory, stdio and file functions, those listed in sdk/libglos/wrap.list. What stays unsafe from
  * two threads at once, and is the program's to keep to one thread or to put between glos_libc_lock() and
  * glos_libc_unlock():
  *   - the macros getc, putc, getchar and putchar (fgetc and fputc are locked);

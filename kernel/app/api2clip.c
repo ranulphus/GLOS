@@ -1,4 +1,4 @@
-/* API 2.0's CLIP and DND (include/glos/api2.h; docs/v1/phase-b.md step 6).
+/* API 2.0's CLIP and DND (include/glos/api.h; docs/v1/phase-b.md step 6).
  *
  * CLIP: transactions on the kernel's clipboard (clip.c over clipstore.c). A writing transaction fills a content
  * of its own, which becomes the clipboard at its CLOSE; a reading one holds the content that was the clipboard

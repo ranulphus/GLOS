@@ -1,6 +1,6 @@
 /* The API inside the kernel: what api2.c (CORE, the dispatcher, events) and
  * the areas' files (api2win.c: WIN, DRAW and the desktop's events) share.
- * The API's names are glos/api2.h's; the kernel's own (KEV_, struct kevent
+ * The API's names are glos/api.h's; the kernel's own (KEV_, struct kevent
  * and the rest: what the desktop and the agent give) are kapi.h's, which
  * appint.h brings. */
 #ifndef K_API2INT_H

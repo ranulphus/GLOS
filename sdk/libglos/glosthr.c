@@ -1,17 +1,17 @@
-/* libglos 2.0's threads (include/glos/glos2.h; API 2.0's THREAD).
+/* libglos's threads (include/glos/glos.h; API 2.0's THREAD).
  *
  * A thread's stack is the C library's memory, kept in a table here with its
  * handle: freed when the thread is joined, or, detached, once it is found
  * ended (at the next glos_thread() or glos_join()). The table also says
  * which thread is running, by where its stack pointer is: the C library's
- * lock (glos2wrap.c) is taken again by its holder, and has no other way to
+ * lock (gloswrap.c) is taken again by its holder, and has no other way to
  * know who asks. Using this file brings that lock into the program, and
- * with it the need for the linker's options (glos2wrap.opt). */
+ * with it the need for the linker's options (gloswrap.opt). */
 #include <stdlib.h>
 #include <string.h>
 #include <sys/exceptn.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 
 #define STACK_DEFAULT 65536u
 #define STACK_MIN     16384u
@@ -29,8 +29,8 @@ static struct thr thr[GLOS_THREADS];
 int __glos_threaded;                    /* the program has made a thread: the C library's lock is used from now */
 
 void __glos_error_set(int e);
-unsigned __glos_call_eax(unsigned fn);  /* glos2.c: a call with no structure, whose answer is EAX (0 if refused) */
-void __glos_lock_start(void);           /* glos2wrap.c */
+unsigned __glos_call_eax(unsigned fn);  /* glos.c: a call with no structure, whose answer is EAX (0 if refused) */
+void __glos_lock_start(void);           /* gloswrap.c */
 
 /* The running thread: 0 the first, or the table's entry plus 1. */
 unsigned __glos_self(void)
@@ -127,7 +127,7 @@ glos_handle glos_thread(void (*fn)(void *arg), void *arg, unsigned stack, unsign
     q.arg = (unsigned)t;
     q.stack = (((unsigned)mem + stack) & ~15u) - 12;   /* (as a call leaves it: the argument on a 16-byte boundary) */
     q.flags = flags;
-    q.data = __djgpp_ds_alias;          /* not the program's DS, which each of DJGPP's signals shrinks: glos2wrap.c */
+    q.data = __djgpp_ds_alias;          /* not the program's DS, which each of DJGPP's signals shrinks: gloswrap.c */
     if ((r = glos_call(GLOS_THREAD_CREATE, &q)) != 0) {
         glos_libc_lock();
         t->state = 0;

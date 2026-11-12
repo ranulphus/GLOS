@@ -1,4 +1,4 @@
-/* The GLOS API's entry (PRD §5.6, §10; include/glos/api2.h): the far
+/* The GLOS API's entry (PRD §5.6, §10; include/glos/api.h): the far
  * procedure DPMI 0A00h "GLOS" gives a program, a HLT in the host's
  * trampoline page. The function is in EAX; its results go into the frame,
  * and the host's far return follows (kernel/dpmi/host.c). 1: the program

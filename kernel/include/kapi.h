@@ -6,11 +6,11 @@
  * These were API 1.x's structures and numbers (include/glos/api.h) until
  * phase B's step 15 took that API away: the kernel had grown up speaking
  * them, and keeps them as its own. No program sees them. The API's own
- * (errors, states, the events an app is given) are in glos/api2.h, which
+ * (errors, states, the events an app is given) are in glos/api.h, which
  * this brings; kernel/app/api2win.c makes an app's events of these. */
 #ifndef K_KAPI_H
 #define K_KAPI_H
-#include "glos/api2.h"
+#include "glos/api.h"
 
 /* An event, as the desktop (and the agent, the watches) gives it to an app: app_event(). */
 #define KEV_KEY      1          /* a key went down or up while a window of the app's had the focus */

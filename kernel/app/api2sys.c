@@ -1,4 +1,4 @@
-/* API 2.0's SYS (include/glos/api2.h; docs/v1/phase-b.md step 9): what GLOS knows of the system, for System
+/* API 2.0's SYS (include/glos/api.h; docs/v1/phase-b.md step 9): what GLOS knows of the system, for System
  * Monitor and Task Manager: STAT (figures, a kind at a time: structures, or the lines GLOS's own commands
  * print), PROGRAMS (apps and jobs, with who started each), LOG (GLOS's log from a place on, and an event when
  * it has more), KILL. */

@@ -1568,8 +1568,8 @@ def png_pixels(data):
 
 
 def api_version():
-    """The API's version as include/glos/api2.h has it now ((major << 16) | minor)."""
-    src = open(os.path.join(ROOT, "include", "glos", "api2.h")).read()
+    """The API's version as include/glos/api.h has it now ((major << 16) | minor)."""
+    src = open(os.path.join(ROOT, "include", "glos", "api.h")).read()
     major = int(re.search(r"#define GLOS_MAJOR\s+(\d+)", src).group(1))
     minor = int(re.search(r"#define GLOS_MINOR\s+(\d+)", src).group(1))
     return major << 16 | minor

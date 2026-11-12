@@ -32,7 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "glos/glos2.h"
+#include "glos/glos.h"
 #include "glos/config.h"
 #include "glos/gfx.h"
 #include "keymap.h"

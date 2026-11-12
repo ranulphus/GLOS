@@ -60,7 +60,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 
 static int fails;
 static volatile int *volatile null_ptr;

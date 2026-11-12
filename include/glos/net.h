@@ -1,5 +1,5 @@
 /* Sockets for GLOS apps (M10 step B; sdk/libglos/socket.c, DJGPP): a small
- * BSD layer on GLOS's NET (glos/api2.h), for portable code that makes TCP
+ * BSD layer on GLOS's NET (glos/api.h), for portable code that makes TCP
  * connections. IPv4 and TCP only, no listening.
  *
  *   socket, connect, send, recv, shutdown (SHUT_RD only), close, setsockopt

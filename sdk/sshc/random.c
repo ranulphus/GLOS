@@ -4,7 +4,7 @@
 #include <stdlib.h>
 
 #include "randombytes.h"
-#include <glos/glos2.h>
+#include <glos/glos.h>
 
 void randombytes(void *p, long long n)
 {

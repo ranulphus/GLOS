@@ -40,7 +40,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 #include <glos/gfx.h>
 
 int _crt0_startup_flags = _CRT0_FLAG_UNIX_SBRK; /* (memory that grows stays where it is: so do glos_ptr()'s pointers) */

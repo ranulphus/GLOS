@@ -11,7 +11,7 @@
 #include <string.h>
 #include <dpmi.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 
 /* N seconds by GLOS's clock (TIME, for any program), yielding meanwhile: DJGPP's sleep() waits on
    DOS's clock, which doesn't move for a program AUTOEXEC.BAT runs while GLOS starts as the shell. */

@@ -1,5 +1,5 @@
 /* GLOS's toolkit (PRD D49, §10.6; docs/gui.md): widgets for GLOS apps, on
- * the 2D library (glos/gfx.h) and the API (2.0: glos/api2.h, through libglos2's glos/glos2.h), in sdk/gui.
+ * the 2D library (glos/gfx.h) and the API (2.0: glos/api.h, through libglos's glos/glos.h), in sdk/gui.
  *
  * Retained: a window holds a tree of widgets, each of which keeps its own
  * state and draws itself when asked. A change marks the widget's rectangle
@@ -26,7 +26,7 @@
  * libglos), where the tests drive it and keep its pictures. */
 #ifndef GLOS_GUI_H
 #define GLOS_GUI_H
-#include "glos/glos2.h"
+#include "glos/glos.h"
 #include "glos/gfx.h"
 #ifdef __cplusplus
 extern "C" {
@@ -383,7 +383,7 @@ void gui_sb_clamp(struct gui_sb *b);
 
 
 /* ---- GLOS's events that are not a window's keys, mouse, focus, size or close (a job's, a watched folder's, the
-   shell's, a setting's): as GLOS gives them (struct glos_ev and what follows it, glos/api2.h) */
+   shell's, a setting's): as GLOS gives them (struct glos_ev and what follows it, glos/api.h) */
 void gui_on_event(void (*fn)(const struct glos_ev *ev));
 
 /* ---- drawing, for widgets of an app's own */

@@ -1,5 +1,5 @@
-/* libglos 2.0: one lock round DJGPP's C library, for programs with threads
- * (include/glos/glos2.h; docs/supervisor.md 12.7).
+/* libglos: one lock round DJGPP's C library, for programs with threads
+ * (include/glos/glos.h; docs/supervisor.md 12.7).
  *
  * The program is linked with --wrap for each function in wrap.list, so that
  * every call of one, the library's own included, comes here first: the lock
@@ -30,7 +30,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 
 extern int __glos_threaded;
 unsigned __glos_self(void);

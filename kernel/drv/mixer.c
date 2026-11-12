@@ -4,7 +4,7 @@
  * up once GLOS.CFG has been read ([sound] crystal; docs/crystal-audio.md).
  *
  * A stream is a ring of signed 16-bit samples in pages shared with its app
- * (struct glos_audio_ring, include/glos/api2.h): the app writes, the mixer reads,
+ * (struct glos_audio_ring, include/glos/api.h): the app writes, the mixer reads,
  * each moving its own count. The card plays 16-bit stereo at the mixer's
  * rate ([sound] rate, 22050 by default) from two halves of a period each
  * (256 frames); at the end of each half its interrupt has the mixer fill that

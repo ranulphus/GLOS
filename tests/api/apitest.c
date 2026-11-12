@@ -1,5 +1,5 @@
 /* APITEST: API 2.0's conformance suite (docs/v1/phase-b.md: grown a step at
- * a time), on libglos 2.0. Run as GLOS.EXE /RUN APITEST.EXE (tests/loopa/jobs.py
+ * a time), on libglos. Run as GLOS.EXE /RUN APITEST.EXE (tests/loopa/jobs.py
  * api, make loopa-api): before INIT, the calls any program may make; then it
  * becomes an app and runs each area's cases. Each case says on COM1 (an app's
  * lines go into GLOS's log):
@@ -28,7 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 
 static int pass, fails;
 

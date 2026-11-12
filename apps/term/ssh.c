@@ -19,7 +19,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 #include <glos/gui.h>
 #ifdef __DJGPP__
 #include <glos/net.h>

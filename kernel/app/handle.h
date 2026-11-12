@@ -1,4 +1,4 @@
-/* API 2.0's handles (include/glos/api2.h): a table an app, each entry an
+/* API 2.0's handles (include/glos/api.h): a table an app, each entry an
  * object of one kind. A handle is the kind in the top byte, a generation in
  * the next, and the entry's index in the low 16 bits, so a closed handle's
  * number is not a newer object's until its entry has gone round 256 times.

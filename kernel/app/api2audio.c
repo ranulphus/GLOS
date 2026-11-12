@@ -1,4 +1,4 @@
-/* API 2.0's AUDIO (include/glos/api2.h; docs/v1/phase-b.md step 10): streams out through GLOS's mixer
+/* API 2.0's AUDIO (include/glos/api.h; docs/v1/phase-b.md step 10): streams out through GLOS's mixer
  * (kernel/drv/mixer.c), their properties, the mixer for the Mixer app and the shell's volume icon (the master,
  * every app's streams, the chip's own channels), levels for meters, the devices.
  *

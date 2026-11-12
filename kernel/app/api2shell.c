@@ -1,4 +1,4 @@
-/* API 2.0's SHELL (include/glos/api2.h; docs/v1/phase-b.md step 8): the shell's identity and its events, the
+/* API 2.0's SHELL (include/glos/api.h; docs/v1/phase-b.md step 8): the shell's identity and its events, the
  * tray, notifications, where the task bar's parts are, Help, opening a file or a link, kinds of file and their
  * programs and verbs.
  *

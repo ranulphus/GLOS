@@ -42,7 +42,7 @@
 #include <string.h>
 #include <time.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 
 #include "mga/hal.h"
 #include "mga/mmio.h"

@@ -1,4 +1,4 @@
-/* API 2.0's NET (include/glos/api2.h; docs/v1/phase-b.md step 11): TCP connections out, ports listened on and
+/* API 2.0's NET (include/glos/api.h; docs/v1/phase-b.md step 11): TCP connections out, ports listened on and
  * the connections that come in on them, names resolved, the network's state. Over kernel/net/sock.c, which
  * 1.x's GLOS_FN_NET shares, and kernel/net/net.c.
  *

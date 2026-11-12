@@ -1,6 +1,6 @@
 /* The region's formats (GLOS.CFG's [region]; API 2.0's SETTINGS REGION): how dates, times and numbers are
  * written, the week's first day, the code page, the keyboard's layout and the language. One piece of code for
- * the kernel (the task bar's clock), libglos 2.0 and the host's tests (sdk/config/region.c). */
+ * the kernel (the task bar's clock), libglos and the host's tests (sdk/config/region.c). */
 #ifndef GLOS_REGION_H
 #define GLOS_REGION_H
 

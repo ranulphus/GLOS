@@ -1,4 +1,4 @@
-/* API 2.0's DEBUG (include/glos/api2.h; docs/v1/phase-b.md step 12): a debugger app's channel to a program it
+/* API 2.0's DEBUG (include/glos/api.h; docs/v1/phase-b.md step 12): a debugger app's channel to a program it
  * started, carrying gdb's remote protocol to and from GLOS's stub for programs (kernel/dbg/gdbprog.c, which
  * `glos gdb` reaches over SSH).
  *

@@ -11,7 +11,7 @@
 #include <unistd.h>
 #include <sys/fsext.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 #include <glos/net.h>
 
 #undef fcntl                            /* (DJGPP's, below) */

@@ -1,4 +1,4 @@
-/* API 2.0's WIN and DRAW (include/glos/api2.h; docs/v1/phase-b.md, step 2),
+/* API 2.0's WIN and DRAW (include/glos/api.h; docs/v1/phase-b.md, step 2),
  * and the desktop's events for a 2.0 app.
  *
  * A window's handle holds the window's number on the desktop (wm's id), not

@@ -1,4 +1,4 @@
-/* The API's calls (include/glos/api2.h; docs/v1/phase-b.md, step 1: CORE).
+/* The API's calls (include/glos/api.h; docs/v1/phase-b.md, step 1: CORE).
  * glos_api (api.c) hands over every call whose number has major 2.
  *
  * An app's state (struct api2): its handles (handle.c), its timers, and

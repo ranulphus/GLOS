@@ -1,4 +1,4 @@
-/* API 2.0's INPUT (include/glos/api2.h; docs/v1/phase-b.md, step 3): the
+/* API 2.0's INPUT (include/glos/api.h; docs/v1/phase-b.md, step 3): the
  * keyboard's state, the mouse's capture, pads, the game port, and how an
  * app takes its keys. Key, text, mouse and wheel events are the desktop's,
  * given their 2.0 form in api2win.c.

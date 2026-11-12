@@ -1,4 +1,4 @@
-/* API 2.0's THREAD (include/glos/api2.h; docs/v1/phase-b.md step 4;
+/* API 2.0's THREAD (include/glos/api.h; docs/v1/phase-b.md step 4;
  * supervisor.md 12.7): an app's own threads, its locks and signals, and the
  * waits for them.
  *

@@ -1,4 +1,4 @@
-/* API 2.0's SHELL, the Start menu's data and the schedule (include/glos/api2.h; docs/v1/phase-b.md step 8):
+/* API 2.0's SHELL, the Start menu's data and the schedule (include/glos/api.h; docs/v1/phase-b.md step 8):
  * ENTRY, RECENT, SCHEDULE.
  *
  * An entry is a program's profile in GLOS.CFG ([program NAME.EXE]); ENTRY is that profile's keys for the calling

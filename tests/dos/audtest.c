@@ -20,7 +20,7 @@
 #include <string.h>
 #include <time.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 
 int _crt0_startup_flags = _CRT0_FLAG_UNIX_SBRK;
 

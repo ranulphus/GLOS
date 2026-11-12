@@ -1,4 +1,4 @@
-/* API 2.0's CAPTURE (include/glos/api2.h; docs/v1/phase-b.md step 12): the windows of a program the caller
+/* API 2.0's CAPTURE (include/glos/api.h; docs/v1/phase-b.md step 12): the windows of a program the caller
  * started, and the caller's own: what one shows, as RGBA or a PNG file, and keys and the mouse into it.
  *
  * Who may: the window's app is the caller, or began as a job that the caller started and still has the handle

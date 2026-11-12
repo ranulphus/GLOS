@@ -22,7 +22,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 #include <glos/net.h>
 
 static int failures;

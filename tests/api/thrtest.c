@@ -1,5 +1,5 @@
 /* THRTEST: an app's own threads (API 2.0's THREAD; docs/v1/phase-b.md step
- * 4; docs/supervisor.md 12.7), on libglos 2.0 with the C library's lock.
+ * 4; docs/supervisor.md 12.7), on libglos with the C library's lock.
  * Run by tests/loopa/jobs.py's thr cases (make loopa-thr) through the
  * agent; it writes on stdout.
  *
@@ -27,7 +27,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 
 static int pass, fails;
 

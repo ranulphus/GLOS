@@ -1,5 +1,5 @@
-# The C library's functions libglos 2.0 puts its lock round (glos2wrap.c), one a line: the linker's
-# --wrap options are made from this (build/sdk/glos2wrap.opt), and tools/wrapcheck.py checks a linked
+# The C library's functions libglos puts its lock round (gloswrap.c), one a line: the linker's
+# --wrap options are made from this (build/sdk/gloswrap.opt), and tools/wrapcheck.py checks a linked
 # program's map against it.
 malloc
 free
@@ -69,5 +69,5 @@ findfirst
 findnext
 rand
 srand
-# Not locked, but taken over (glos2wrap.c): DJGPP's last step of exit, in a program that has made threads.
+# Not locked, but taken over (gloswrap.c): DJGPP's last step of exit, in a program that has made threads.
 __exit

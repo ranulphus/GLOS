@@ -1,4 +1,4 @@
-/* API 2.0's FS (include/glos/api2.h; docs/v1/phase-b.md step 7): a folder's entries in batches, several files'
+/* API 2.0's FS (include/glos/api.h; docs/v1/phase-b.md step 7): a folder's entries in batches, several files'
  * details at once, the drives, watches of folders and files, a disk's sectors.
  *
  * Each call is one batch (app.c's app_batch): the VM thread makes all of the call's DOS and BIOS calls in one

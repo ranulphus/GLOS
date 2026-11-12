@@ -1,4 +1,4 @@
-/* API 2.0's SECRETS (include/glos/api2.h; docs/v1/phase-b.md step 13): PUT, GET and REMOVE over the store
+/* API 2.0's SECRETS (include/glos/api.h; docs/v1/phase-b.md step 13): PUT, GET and REMOVE over the store
  * (kernel/core/secrets.c).
  *
  * Whose a secret is: the calling app's program's file name ("TERM.EXE"), or, for a shared one, "*": for GLOS's

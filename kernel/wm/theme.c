@@ -2,7 +2,7 @@
  * CC or FF: kernel/gfx/pal.c's cube), so a theme looks the same at every depth. Slate is the look GLOS has had
  * since M7. The sizes are the same in all three for now: a theme with other sizes needs every window laid out
  * again, which comes with toolkit 2 (phase C). */
-#include "glos/api2.h"
+#include "glos/api.h"
 #include "theme.h"
 
 #define SIZES 1, 18, 10, 20, 16, 16, 1  /* border, title, box, bar, scroll, icon, text */

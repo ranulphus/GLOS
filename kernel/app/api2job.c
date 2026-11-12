@@ -1,4 +1,4 @@
-/* API 2.0's JOB (include/glos/api2.h; docs/v1/phase-b.md step 9): programs run for an app by the agent
+/* API 2.0's JOB (include/glos/api.h; docs/v1/phase-b.md step 9): programs run for an app by the agent
  * (kernel/dos/agent.c), each a handle. RUN starts one; READ takes what it has written to its standard output or
  * error (kept by the agent as DOS's console calls bring it); WRITE is its standard input (answered by the agent
  * in place of DOS's console input calls) or, for a job in the app's window, its keys; SIGNAL is Ctrl+C or

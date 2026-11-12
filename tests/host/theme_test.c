@@ -2,7 +2,7 @@
  * is in the 8-bit desktop's palette, and text can be read on its ground. */
 #include <stdio.h>
 #include <string.h>
-#include "glos/api2.h"
+#include "glos/api.h"
 #include "theme.h"
 
 static int fails;

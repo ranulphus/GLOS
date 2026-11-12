@@ -18,7 +18,7 @@
 #ifdef __DJGPP__
 #include <dpmi.h>
 #include <pc.h>
-#include "glos/glos2.h"
+#include "glos/glos.h"
 static int app_error;
 #define INB(p) inportb(p)
 #define OUTB(p, v) outportb(p, v)

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 #include <glos/http.h>
 #include <glos/net.h>
 #include <glos/tls.h>

@@ -14,7 +14,7 @@
 #include <sys/movedata.h>
 #include <go32.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 
 static void ser(const char *s)
 {

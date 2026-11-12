@@ -31,7 +31,7 @@
 #include "bearssl.h"
 #include "crypto_sign_ed25519.h"
 #include "sshbuf.h"
-#include <glos/glos2.h>
+#include <glos/glos.h>
 #include <glos/http.h>
 #include <glos/tls.h>
 

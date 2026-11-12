@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Checks a program's link map against libglos 2.0's list of wrapped C library functions
-(sdk/libglos2/wrap.list): every one is reached through the lock (glos2wrap.c), from the C library's
+"""Checks a program's link map against libglos's list of wrapped C library functions
+(sdk/libglos/wrap.list): every one is reached through the lock (gloswrap.c), from the C library's
 own files too.
 
   wrapcheck.py WRAP.LIST PROGRAM.map      (the map made with -Wl,-Map,... -Wl,--cref)
 
 For each function F in the list, in the map's cross reference table:
-  - __wrap_F is defined by libglos2.a(glos2wrap.o): the lock's wrapper is in the program;
-  - F itself, if the program has it, is referenced by nobody but glos2wrap.o: every other caller's
+  - __wrap_F is defined by libglos.a(gloswrap.o): the lock's wrapper is in the program;
+  - F itself, if the program has it, is referenced by nobody but gloswrap.o: every other caller's
     reference went to the wrapper (the linker's --wrap). A caller listed there bypasses the lock.
 A function nothing in the program calls is in neither place, which is fine."""
 import re
@@ -37,12 +37,12 @@ def main():
         w, f = refs.get("__wrap_" + n), refs.get(n)      # (the table has C's names)
         if w is None and f is None:
             continue                        # (not in this program)
-        if w is None or "glos2wrap.o" not in w[0]:
-            bad.append("%s: no wrapper from glos2wrap.o (%s)" % (n, w[0] if w else "__wrap_%s is not in the program" % n))
+        if w is None or "gloswrap.o" not in w[0]:
+            bad.append("%s: no wrapper from gloswrap.o (%s)" % (n, w[0] if w else "__wrap_%s is not in the program" % n))
             continue
         wrapped += 1
         for user in (f or [])[1:]:
-            if "glos2wrap.o" not in user:
+            if "gloswrap.o" not in user:
                 bad.append("%s: called past the lock by %s" % (n, user))
     for b in bad:
         print("wrapcheck: " + b)

@@ -1,13 +1,13 @@
-/* libglos 2.0 (include/glos/glos2.h): API 2.0 for DJGPP programs. A call is
+/* libglos (include/glos/glos.h): API 2.0 for DJGPP programs. A call is
  * EAX the function, EBX its structure (a near pointer is DS's offset in
- * DJGPP's flat model), ECX and EDX 0 (glos/api2.h). */
+ * DJGPP's flat model), ECX and EDX 0 (glos/api.h). */
 #include <dpmi.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/exceptn.h>
 #include <sys/nearptr.h>
 
-#include <glos/glos2.h>
+#include <glos/glos.h>
 
 static struct {
     unsigned long off;
@@ -54,7 +54,7 @@ static int raw(unsigned fn, void *s, unsigned *eax)
 
 int glos_call(unsigned fn, void *s) { return raw(fn, s, 0); }
 
-unsigned __glos_call_eax(unsigned fn)   /* (glos2thr.c's) */
+unsigned __glos_call_eax(unsigned fn)   /* (glosthr.c's) */
 {
     unsigned v = 0;
     return raw(fn, 0, &v) == 0 ? v : 0;
@@ -240,7 +240,7 @@ int glos_random(void *buf, unsigned n)
 static int last_error;
 
 int glos_error(void) { return last_error; }
-void __glos_error_set(int e) { last_error = e; }       /* (glos2thr.c's) */
+void __glos_error_set(int e) { last_error = e; }       /* (glosthr.c's) */
 
 glos_handle glos_window(const char *title, int x, int y, int w, int h, unsigned kind, unsigned flags, glos_handle owner)
 {
@@ -420,7 +420,7 @@ void *glos_ptr(unsigned linear)
         if (!(on = __djgpp_nearptr_enable()))
             return 0;
         /* (near pointers reach everywhere through the data segment's limit; the threads a program makes run on
-           DJGPP's second data selector, which gets the same limit: glos2wrap.c) */
+           DJGPP's second data selector, which gets the same limit: gloswrap.c) */
         __dpmi_set_segment_limit(__djgpp_ds_alias, 0xFFFFFFFFul);
     }
     return (void *)(linear + __djgpp_conventional_base);

@@ -1,4 +1,4 @@
-/* API 2.0's SETTINGS and IDLE (include/glos/api2.h; docs/v1/phase-b.md step 5).
+/* API 2.0's SETTINGS and IDLE (include/glos/api.h; docs/v1/phase-b.md step 5).
  *
  * SETTINGS is the kernel's settings store (kernel/core/config.c) and its schema (sdk/config/cfg.c) for apps:
  * GET, SET, the file's sections and a section's keys, the schema an entry at a time, a watch on sections (an
