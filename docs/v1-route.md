@@ -215,7 +215,11 @@ two command sets that don't match). Before phase C, because the Terminal is one 
 - **Appearance:** wallpapers and themes, and notifications for the system's own news (a pad plugged in, the network
   up).
 - **The Control Panel, grown:**
-  - Appearance and themes; Screensaver; Display;
+  - Appearance and themes; Screensaver;
+  - Display (the owner, 2026-11-12): the size and the depth, from the card's own modes and not a fixed list;
+    15 bits (5-5-5) a choice of its own, and 24 bits new (a pixel format more through the 2D library, the
+    window system and the cards' engines: a 4 MB card has 1024x768 at 24 bits and not at 32), beside today's
+    8, 16 and 32. No 16-colour desktops. The 24-bit work lands when a second vendor's card can show it;
   - Sound (devices, the mixer, volumes); Network (status, configuration, monitor);
   - Date, time and region (zone, formats, network time); Mouse and keyboard (speed, wheel, repeat);
   - Game controllers (the pads, the mapping, a test and calibration: the gamepad plan's J6);
