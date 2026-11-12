@@ -94,7 +94,7 @@ void kmain(struct bootinfo *loader_bi)
     kprintf("GLOS-RING0 step=entry mode=%s kernel=%p ranges=%u flags=%x\n",
             bi->mode == BI_MODE_XMS ? "xms" : "raw", bi->kernel_phys, bi->n_ranges, bi->flags);
     cpu_init(bi->cs_base, bi->ds_base, bi->ret_off);
-    cpu_features();
+    cpu_features(bi->cpuid_edx);
     mtrr_init(bi->cpuid_edx);
     mm_init(bi);
     cpu_set_df_cr3(mm_cr3());

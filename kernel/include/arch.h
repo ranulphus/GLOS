@@ -32,7 +32,7 @@ struct trapframe {
 };
 
 void cpu_init(u32 cs16_base, u32 ds16_base, u32 ret_off);
-void cpu_features(void);
+void cpu_features(u32 cpuid_edx);
 void set_irq_handler(int irq, void (*fn)(struct trapframe *));
 void cpu_io_trap(u32 port, int trap);
 void cpu_io_reach(int on);               /* the I/O map in reach (the system VM), or every port trapped (an app) */

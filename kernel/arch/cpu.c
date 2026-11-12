@@ -136,10 +136,16 @@ void cpu_set_code16_base(u32 base)
 /* The #DF task must use the kernel's own page directory once there is one. */
 void cpu_set_df_cr3(u32 cr3) { dftss.cr3 = cr3; }
 
-void cpu_features(void)
+/* CR4 and the features it switches on. A processor has CR4 if CPUID names a feature that lives there (VME, DE,
+   PSE, TSC's TSD, PAE, MCE, PGE): only then is it read, and each bit tried. A processor that names none is
+   never asked: the Cyrix 486DX4 (SGS-Thomson's ST486DX4 on the 486 bench, 2026-11-12) has no CR4, yet reading
+   it did not always fault there, GLOS took it for one with VME, and wrote to a register the chip hasn't got. */
+void cpu_features(u32 cpuid_edx)
 {
     static const u32 bits[] = { 0x001, 0x002, 0x004, 0x008, 0x010, 0x040, 0x080, 0x100, 0x200 };
     u32 base, got, i;
+    if (!(cpuid_edx & 0x20DEu))                 /* (bits 1-4, 6, 7 and 13) */
+        return;
     cpu_has_cr4 = try_rd_cr4(&base) == 0;
     if (!cpu_has_cr4)
         return;
