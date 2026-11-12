@@ -111,6 +111,17 @@ static void before(void)
               && (r3 == 0 || r3 == GLOS_E_FUNCTION || r3 == -1) && r3 == r4, "seg=%x at=%x r=%d,%d,%d,%d", seg, at, r1, r2, r3, r4);
         r1 = glos_call(GLOS_SYS_STAT, &st);
         check("stat-any", r1 == GLOS_E_ROOM && st.length > 0, "r=%d length=%u", r1, st.length);
+        {
+            char lb[256];
+            unsigned next = 0;
+            int n = glos_sys_log(0, lb, sizeof lb, &next, 0);   /* (the log: for any program, GLOSLOG's) */
+            int f = glos_sys_log(0, lb, sizeof lb, 0, 1);       /* (following it is an app's) */
+            check("log-any", n > 0 && next > 0 && f == -1 && glos_error() == GLOS_E_NOT_APP, "n=%d next=%u follow=%d error=%d",
+                  n, next, f, glos_error());
+        }
+        r1 = glos_call(0, 0);                   /* (API 1.x's VERSION and INIT: that API is gone) */
+        r2 = glos_call(1, 0);
+        check("1x-gone", r1 == GLOS_E_VERSION && r2 == GLOS_E_VERSION, "r=%d,%d", r1, r2);
     }
     memset(&v, 0, sizeof v);
     v.size = sizeof v;

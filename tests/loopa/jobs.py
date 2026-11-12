@@ -4817,10 +4817,14 @@ def api_sec_case(profile, vcard, card):
         p.wait(timeout=120)
         checks["dialog-gone"] = '"Secrets"' not in agent.ssh("glos desk")[1]
         p = asks()
+        n = agent.log().count("GLOS-SECRETS unlock wrong")     # (one already: the ssh's, above)
         agent.ssh("glos type wrong\\n")
-        checks["wrong"] = logged("GLOS-SECRETS unlock wrong") and '"Secrets"' in agent.ssh("glos desk")[1]
+        t0 = time.time()                        # (the key is made of the password first: seconds on a 486, more
+        while time.time() - t0 < 180 and agent.log().count("GLOS-SECRETS unlock wrong") <= n:  # on a busy host)
+            time.sleep(0.5)
+        checks["wrong"] = agent.log().count("GLOS-SECRETS unlock wrong") > n and '"Secrets"' in agent.ssh("glos desk")[1]
         agent.ssh("glos type sesame\\n")
-        checks["right"] = logged("GLOS-SECRETS unlock ok") and case("sec-get").startswith("1 r=0 value=across a restart")
+        checks["right"] = logged("GLOS-SECRETS unlock ok", 180) and case("sec-get").startswith("1 r=0 value=across a restart")
         p.wait(timeout=120)
         checks["open"] = stat().startswith("secrets open key=password ") and '"Secrets"' not in agent.ssh("glos desk")[1]
         ran("get")                              # open for the rest of this run: nothing asked
