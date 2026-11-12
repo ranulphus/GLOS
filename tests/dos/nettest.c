@@ -276,7 +276,7 @@ static void case_bsd(const char *hosts, unsigned port, unsigned closed)
 static int all(int argc, char **argv)
 {
     unsigned port, closed, a, t0, ms;
-    unsigned char r1[64], r2[64], big[300];
+    unsigned char r1[64], r2[64], big[256];        /* (the most a call gives) */
     int r, i, zero = 1;
     if (argc < 5)
         return 2;

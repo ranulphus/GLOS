@@ -8,9 +8,14 @@
 
 void randombytes(void *p, long long n)
 {
-    if (n < 0 || glos_random(p, (unsigned)n) != 0) {
-        fprintf(stderr, "no random numbers: this needs GLOS\n");
-        exit(3);
+    unsigned char *at = p;
+    while (n > 0) {                             /* (RANDOM gives 256 bytes a call at most) */
+        unsigned k = n > 256 ? 256 : (unsigned)n;
+        if (glos_random(at, k) != 0) {
+            fprintf(stderr, "no random numbers: this needs GLOS\n");
+            exit(3);
+        }
+        at += k, n -= k;
     }
 }
 
