@@ -5955,6 +5955,8 @@ def time_case(profile, card):
         ntp.offset += 10 * 86400                    # (ten days on)
         rc, o, _ = agent.ssh("glos time sync", timeout=90)
         checks["step"] = rc == 0 and re.search(r"step=8640\d{5}ms", o) is not None
+        if not checks["step"]:
+            notes.append("step: rc=%d %r" % (rc, o[-200:]))
         agree("stepped", ntp.now(), 3600, "BST")
         ntp.offset = calendar.timegm((2026, 10, 25, 0, 59, 30, 0, 0, 0)) - time.time()   # (BST ends at 01:00 UTC)
         mark = len(agent.log())

@@ -32,10 +32,13 @@ for s in $LOOPA_SUITES; do
         || { echo "$s: its inputs did not build (build-$s.log)" >> $log/summary.txt; bad=1; }
 done
 
-one() {     # a suite, in a lane
-    local s=$1 s0 rc=0
+one() {     # a suite, in a lane: its own recipe alone. What it depends on was built above and is not made
+            # again here (-o): several of those targets write files the suites share (the toolkit's goldens,
+            # DOS-GL's programs copied in), and a suite in the next lane would find one missing or half written.
+    local s=$1 s0 rc=0 old
     s0=$(date +%s)
-    "$dev" make -s JOBS="$JOBS" "$s" > "$log/$s.log" 2>&1 || rc=$?
+    old=$("$dev" make -s -pn "$s" 2>/dev/null | sed -n "s/^$s: //p" | head -1 | tr ' ' '\n' | sed -n 's/^..*/-o &/p' | tr '\n' ' ')
+    "$dev" make -s JOBS="$JOBS" $old "$s" > "$log/$s.log" 2>&1 || rc=$?
     line "$s" $rc $(( $(date +%s) - s0 )) "$log/$s.log" >> $log/summary.txt
     [ $rc -eq 0 ] || { grep ' FAIL\|^    ' "$log/$s.log" | cut -c1-600 | head -8 >> $log/summary.txt; return 1; }
 }
