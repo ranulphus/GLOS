@@ -60,8 +60,8 @@ u16 app_vm_psp(void);                   /* the PSP of the app the VM thread make
 
 /* Events (app.c): the desktop gives them (e->size and e->time carry the
    pointer's movement for a mouse event on the way in), the API takes them. */
-struct glos_event;
-void app_event(struct app *a, const struct glos_event *e);
+struct kevent;
+void app_event(struct app *a, const struct kevent *e);
 u32 app_event_backlog(const struct app *a);     /* its events not yet read: how full its queue is, 0 to 256 */
 
 /* From interrupts. */
@@ -79,7 +79,7 @@ void app_kill_job(void *job);           /* the app that agent job began, if it s
 void app_kill_all(const char *why);
 void app_session_end(void);             /* a session has ended: paused apps run on */
 u32 app_count(void);
-u32 app_stat_list(void *out, u32 room);         /* struct glos_stat_app for each (M9) */
+u32 app_stat_list(void *out, u32 room);         /* struct kprog for each (M9) */
 u32 app_last_code(void);                /* how the last app to end did: INT 21h 4Dh's AX */
 u32 app_ps(char *buf, u32 max);         /* glos ps: "app ID PROGRAM ..." lines */
 u32 app_stat(char *buf, u32 max);       /* glos stat: a JSON array */

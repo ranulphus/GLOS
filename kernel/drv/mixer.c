@@ -4,7 +4,7 @@
  * up once GLOS.CFG has been read ([sound] crystal; docs/crystal-audio.md).
  *
  * A stream is a ring of signed 16-bit samples in pages shared with its app
- * (struct glos_stream, include/glos/api.h): the app writes, the mixer reads,
+ * (struct glos_audio_ring, include/glos/api2.h): the app writes, the mixer reads,
  * each moving its own count. The card plays 16-bit stereo at the mixer's
  * rate ([sound] rate, 22050 by default) from two halves of a period each
  * (256 frames); at the end of each half its interrupt has the mixer fill that
@@ -24,8 +24,7 @@
  * streams with them. */
 #include <string.h>
 
-#define GLOS_KERNEL
-#include "glos/api.h"
+#include "kapi.h"
 #include "glos/bootinfo.h"
 #include "app.h"
 #include "arch.h"
@@ -47,7 +46,7 @@
 static struct strm {
     struct app *a;                              /* 0: free */
     u32 id;
-    struct glos_stream *h;                      /* the kernel's view (its pages: mm_win_alloc) */
+    struct glos_audio_ring *h;                      /* the kernel's view (its pages: mm_win_alloc) */
     u32 pages;
     u8 *ring;
     u32 step, frac;                             /* 16.16: stream frames a mixer frame */
@@ -85,7 +84,7 @@ static void fill(s16 *out, u32 frames, const struct trapframe *tf);
 static struct instrm {
     struct app *a;                              /* 0: free */
     u32 id;
-    struct glos_stream *h;
+    struct glos_audio_ring *h;
     u32 pages;
     u8 *ring;
     u32 step, frac;                             /* 16.16: recorded frames a stream frame */
@@ -200,7 +199,7 @@ int mixer_found(void) { return mx.on; }
    program keeps its sound waiting). */
 static void take(struct strm *s, u32 frames, const struct trapframe *tf)
 {
-    struct glos_stream *h = s->h;
+    struct glos_audio_ring *h = s->h;
     u32 have = (h->write - h->read) / s->frame_bytes, need, i, mask = h->bytes - 1, gl, gr;
     u32 pos = h->read, frac = s->frac, pl = 0, pr = 0;
     s->level[0] = s->level[1] = 0;
@@ -338,7 +337,7 @@ static void got(const s16 *smp, u32 frames)
     in_level[1] = (u16)(pr > 32767 ? 32767 : pr);
     for (i = 0; i < IN_STREAMS; i++) {
         struct instrm *s = &in[i];
-        struct glos_stream *h = s->h;
+        struct glos_audio_ring *h = s->h;
         u32 frac, mask, w;
         if (!s->a)
             continue;
@@ -380,7 +379,7 @@ static void got(const s16 *smp, u32 frames)
 int mixer_open(struct app *a, u32 rate, u32 channels, u32 bytes, u32 *id, u32 *lin)
 {
     struct strm *s = 0;
-    struct glos_stream *h;
+    struct glos_audio_ring *h;
     u32 i, f;
     if (!mx.on)
         return GLOS_E_NO_AUDIO;
@@ -439,7 +438,7 @@ u32 mixer_streams_in(void)
 int mixer_open_in(struct app *a, u32 rate, u32 channels, u32 bytes, u32 *id, u32 *lin)
 {
     struct instrm *s = 0;
-    struct glos_stream *h;
+    struct glos_audio_ring *h;
     u32 i, f;
     if (!mixer_records())
         return GLOS_E_NO_AUDIO;
@@ -487,7 +486,7 @@ int mixer_open_in(struct app *a, u32 rate, u32 channels, u32 bytes, u32 *id, u32
 static void drop_in(struct instrm *s)
 {
     u32 f = irq_save();
-    struct glos_stream *h = s->h;
+    struct glos_audio_ring *h = s->h;
     u32 pages = s->pages;
     kprintf("GLOS-AUDIO close-in app=%u stream=%u halves=%u lost=%u\n", app_id(s->a), s->id, h->periods, h->underruns);
     s->a = 0;
@@ -499,7 +498,7 @@ static void drop_in(struct instrm *s)
 static void drop(struct strm *s)
 {
     u32 f = irq_save();
-    struct glos_stream *h = s->h;
+    struct glos_audio_ring *h = s->h;
     u32 pages = s->pages;
     kprintf("GLOS-AUDIO close app=%u stream=%u periods=%u underruns=%u%s%u\n", app_id(s->a), s->id, h->periods,
             h->underruns, " short-at-close=", s->short_run);

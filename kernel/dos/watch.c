@@ -14,8 +14,7 @@
  * A watch marked is told once, at most eight times a second. */
 #include <string.h>
 
-#define GLOS_KERNEL
-#include "glos/api.h"
+#include "kapi.h"
 #include "agent.h"
 #include "app.h"
 #include "io.h"
@@ -226,10 +225,10 @@ void watch_tick(u32 now)
     any_due = 0;
     for (i = 0; i < WATCHES; i++)
         if (w[i].app && w[i].due) {
-            struct glos_event e;
+            struct kevent e;
             w[i].due = 0;
             memset(&e, 0, sizeof e);
-            e.type = GLOS_EV_FILES;
+            e.type = KEV_FILES;
             e.key = w[i].id;
             app_event(w[i].app, &e);
         }

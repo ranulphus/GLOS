@@ -1,8 +1,7 @@
 /* GLOS apps: what kernel/app's files share (app.c, dev.c). */
 #ifndef K_APPINT_H
 #define K_APPINT_H
-#define GLOS_KERNEL
-#include "glos/api.h"
+#include "kapi.h"
 #include "app.h"
 #include "dpmi.h"
 #include "gpu.h"
@@ -140,7 +139,7 @@ void api2_end_event(struct app *a);             /* (api2sys.c) GLOS_EV_END: the 
 void api2_net_event(struct app *a, u32 id, u32 state, u32 waiting, u32 room);  /* (api2net.c) GLOS_EV_NET for a
                                                    connection of a 2.0 app's (the net thread; interrupts off) */
 
-void api2_event_1x(struct app *a, const struct glos_event *e);  /* the desktop's events for a 2.0 app */
+void api2_event_1x(struct app *a, const struct kevent *e);  /* the desktop's events for a 2.0 app */
 int api2_pending(const struct app *a);          /* events wait in its queue */
 u32 api2_backlog(const struct app *a);          /* how full its queue is: 0 to 256 */
 

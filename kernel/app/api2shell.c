@@ -274,7 +274,7 @@ static void shell_event(struct app *a, unsigned what, int x, int y, u32 window, 
 
 void api2_shell_1x(struct app *a, u32 type, int x, int y)       /* (1.x's LAUNCH and SYSKEY, from the desktop) */
 {
-    shell_event(a, type == GLOS_EV_LAUNCH ? GLOS_SHELL_LAUNCH : GLOS_SHELL_TASKS, x, y, 0, 0);
+    shell_event(a, type == KEV_LAUNCH ? GLOS_SHELL_LAUNCH : GLOS_SHELL_TASKS, x, y, 0, 0);
 }
 
 void api2_shell_news(unsigned what)             /* (ENTRIES, RECENTS: one waiting stands for the next; any thread) */
@@ -324,12 +324,12 @@ static int point(struct trapframe *tf)
 
 static int start(const char *command, u32 *job)        /* 0, or GLOS_E_ */
 {
-    static struct glos_run run;                 /* (no wait between filling it and its post) */
+    static struct krun run;                 /* (no wait between filling it and its post) */
     if (!(vm.bi->flags & BI_F_AGENT))           /* (GLOS /RUN: there is nobody to start it) */
         return GLOS_E_REFUSED;
     memset(&run, 0, sizeof run);
     run.size = sizeof run;
-    run.flags = GLOS_RUN_DETACH;
+    run.flags = KRUN_DETACH;
     strncpy(run.command, command, sizeof run.command - 1);
     return agent_post_app(0, &run, job);
 }

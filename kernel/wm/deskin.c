@@ -38,8 +38,7 @@
  * there, until every button is up again, wherever the pointer goes. */
 #include <string.h>
 
-#define GLOS_KERNEL
-#include "glos/api.h"
+#include "kapi.h"
 #include "app.h"
 #include "deskint.h"
 #include "idle.h"
@@ -148,9 +147,9 @@ static u32 mods_now(void)
 
 static void send_key2(struct app *a, u32 id, u32 key, int down, u32 ch, u32 mods, int again)
 {
-    struct glos_event e;
+    struct kevent e;
     memset(&e, 0, sizeof e);
-    e.type = GLOS_EV_KEY;
+    e.type = KEV_KEY;
     e.window = id;
     e.buttons = (unsigned)again;                /* (for API 2.0's apps: the keyboard repeating a held key) */
     e.key = key;
@@ -187,7 +186,7 @@ int desk_shell_set(struct app *a, int on)
 
 static int to_shell(struct wm *m, unsigned type)
 {
-    struct glos_event e;
+    struct kevent e;
     if (!shell)
         return 0;
     memset(&e, 0, sizeof e);
@@ -200,9 +199,9 @@ static int to_shell(struct wm *m, unsigned type)
 
 static void send_focus(struct app *a, u32 id, int got)
 {
-    struct glos_event e;
+    struct kevent e;
     memset(&e, 0, sizeof e);
-    e.type = GLOS_EV_FOCUS;
+    e.type = KEV_FOCUS;
     e.window = id;
     e.down = (unsigned)got;
     app_event(a, &e);
@@ -517,7 +516,7 @@ static void key_event(struct wm *m, u32 key, int down)
         return;
     }
     if (down && !again && ((key == 0x01 && (kmods & KM_CTRL) && !(kmods & KM_ALT)) || key == 0x15B)
-        && to_shell(m, GLOS_EV_LAUNCH))
+        && to_shell(m, KEV_LAUNCH))
         return;                                 /* Ctrl-Esc, the Windows key: the launcher (the shell's, M9) */
     if (down && (kmods & KM_ALT) && !(kmods & KM_CTRL)) {
         switch (key) {
@@ -585,11 +584,11 @@ static void key_byte(struct wm *m, u8 b)
 /* A mouse event for the app with window w: the pointer in its client area. */
 static void send_mouse(struct wm *m, struct wm_window *w, s32 dx, s32 dy, u32 button, int down)
 {
-    struct glos_event e;
+    struct kevent e;
     struct gfx_rect c;
     wm_client(m, w, &c);
     memset(&e, 0, sizeof e);
-    e.type = GLOS_EV_MOUSE;
+    e.type = KEV_MOUSE;
     e.window = w->id;
     if (button && down) {                       /* presses in a row, close in time and place (for API 2.0's apps) */
         u32 now = timer_ticks();
@@ -691,7 +690,7 @@ static void button(struct wm *m, u32 bit, int down)
                 activate(m, v);
             }
         } else if (bit == 1 && wm_bar_mark(m, m->px, m->py))
-            to_shell(m, GLOS_EV_LAUNCH);        /* GLOS's mark: the launcher (M9) */
+            to_shell(m, KEV_LAUNCH);        /* GLOS's mark: the launcher (M9) */
         return;
     }
     wm_set_focus(m, w);
@@ -853,19 +852,19 @@ static void mouse_to(struct wm *m, s32 x, s32 y, u32 now)
 
 static void mouse(struct wm *m, s32 dx, s32 dy, u32 now) { mouse_to(m, m->px + dx * speed, m->py + dy * speed, now); }
 
-/* The wheel turned: the window under the pointer hears of it, whether it has the focus or not (GLOS_EV_WHEEL, API
+/* The wheel turned: the window under the pointer hears of it, whether it has the focus or not (KEV_WHEEL, API
    1.5; notches positive away from the user). */
 static void wheel(struct wm *m, int notches)
 {
     struct wm_window *w;
-    struct glos_event e;
+    struct kevent e;
     struct gfx_rect c;
     int part;
     if (asleep || !notches || !(w = wm_hit(m, m->px, m->py, &part)) || part != WH_CLIENT || !w->owner)
         return;
     wm_client(m, w, &c);
     memset(&e, 0, sizeof e);
-    e.type = GLOS_EV_WHEEL;
+    e.type = KEV_WHEEL;
     e.window = w->id;
     e.time = timer_ticks() * 1000 / 1024;
     e.x = m->px - c.x;
@@ -945,7 +944,7 @@ void deskin_turn(struct wm *m)
         case DESK_RESET: forget(m); break;
         case DESK_SYSKEY:
             if (!asleep)
-                to_shell(m, GLOS_EV_SYSKEY);
+                to_shell(m, KEV_SYSKEY);
             break;
         }
     }

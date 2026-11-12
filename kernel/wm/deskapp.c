@@ -1,4 +1,4 @@
-/* Apps' windows (kernel/include/desk.h; PRD §10; include/glos/api.h): the
+/* Apps' windows (kernel/include/desk.h; PRD §10; the API's WIN and DRAW): the
  * window functions of the API, on the app's own thread, and what the
  * desktop does to an app's window.
  *
@@ -7,15 +7,14 @@
  * (GLOS_FN_PRESENT). The mapping is made and undone on the app's thread, in
  * its own address space, and only there. The manager may give a window new
  * pixels behind the app's back: the user gave it another size, the screen
- * got another format. The app is told (GLOS_EV_RESIZE) and asks where they
+ * got another format. The app is told (KEV_RESIZE) and asks where they
  * are now; until it has, it draws in the old ones, which nothing shows any
  * more, but which stay its own to write on: memory an app has mapped is
  * never given to anyone else (`pins`). It lets go of them at its next call
  * here, and at its end. */
 #include <string.h>
 
-#define GLOS_KERNEL
-#include "glos/api.h"
+#include "kapi.h"
 #include "app.h"
 #include "deskint.h"
 #include "dpmi.h"
@@ -92,7 +91,7 @@ static struct wm_window *own(struct wm *m, const struct app *a, u32 id)
     return w && w->owner == a ? w : 0;
 }
 
-static void describe(const struct wm *m, const struct wm_window *w, u32 lin, struct glos_window *g)
+static void describe(const struct wm *m, const struct wm_window *w, u32 lin, struct kwindow *g)
 {
     memset(g, 0, sizeof *g);
     g->size = sizeof *g;
@@ -114,8 +113,8 @@ static void describe(const struct wm *m, const struct wm_window *w, u32 lin, str
     }
     g->w = w->store.w;
     g->h = w->store.h;
-    g->flags = (w->flags & WF_FIXED ? GLOS_WIN_FIXED : 0u) | (w->flags & WF_FRAME ? 0u : GLOS_WIN_BARE)
-             | (w->flags & WF_POPUP ? GLOS_WIN_POPUP : 0u) | (w->flags & WF_DESKTOP ? GLOS_WIN_DESKTOP : 0u);
+    g->flags = (w->flags & WF_FIXED ? KWIN_FIXED : 0u) | (w->flags & WF_FRAME ? 0u : KWIN_BARE)
+             | (w->flags & WF_POPUP ? KWIN_POPUP : 0u) | (w->flags & WF_DESKTOP ? KWIN_DESKTOP : 0u);
     memcpy(g->title, w->title, sizeof g->title < sizeof w->title ? sizeof g->title : sizeof w->title);
     g->title[sizeof g->title - 1] = 0;
     g->pixels = lin;
@@ -124,13 +123,13 @@ static void describe(const struct wm *m, const struct wm_window *w, u32 lin, str
 
 /* ---- the API's functions (app/api.c): 0, or a GLOS_E_ */
 
-int desk_win_create(struct app *a, struct glos_window *g)
+int desk_win_create(struct app *a, struct kwindow *g)
 {
     struct wm *m;
     struct wm_window *w;
-    u32 lin, flags = (g->flags & (GLOS_WIN_BARE | GLOS_WIN_POPUP | GLOS_WIN_DESKTOP) ? 0u : WF_FRAME)
-                   | (g->flags & GLOS_WIN_FIXED ? WF_FIXED : 0u) | (g->flags & GLOS_WIN_POPUP ? WF_POPUP | WF_TOPMOST : 0u)
-                   | (g->flags & GLOS_WIN_DESKTOP ? WF_DESKTOP | WF_FIXED : 0u);
+    u32 lin, flags = (g->flags & (KWIN_BARE | KWIN_POPUP | KWIN_DESKTOP) ? 0u : WF_FRAME)
+                   | (g->flags & KWIN_FIXED ? WF_FIXED : 0u) | (g->flags & KWIN_POPUP ? WF_POPUP | WF_TOPMOST : 0u)
+                   | (g->flags & KWIN_DESKTOP ? WF_DESKTOP | WF_FIXED : 0u);
     s32 x = g->x, y = g->y;
     int r;
     if (g->w < 1 || g->h < 1 || g->w > 4096 || g->h > 4096)
@@ -138,7 +137,7 @@ int desk_win_create(struct app *a, struct glos_window *g)
     g->title[sizeof g->title - 1] = 0;
     m = desk_lock();
     let_go(a);
-    if (g->flags & GLOS_WIN_DESKTOP) {          /* the shell's desktop (M9): the screen less the task bar, one */
+    if (g->flags & KWIN_DESKTOP) {          /* the shell's desktop (M9): the screen less the task bar, one */
         struct wm_window *o;
         for (o = m->top; o; o = o->below)
             if (o->flags & WF_DESKTOP) {
@@ -148,7 +147,7 @@ int desk_win_create(struct app *a, struct glos_window *g)
         x = 0, y = 0;
         g->w = m->w;
         g->h = m->h - (m->bar ? m->bar->frame.h : 0);
-    } else if (g->flags & GLOS_WIN_ANYWHERE) {         /* down and right of the last, a few times, then from the top again; */
+    } else if (g->flags & KWIN_ANYWHERE) {         /* down and right of the last, a few times, then from the top again; */
         s32 fw = g->w + (flags & WF_FRAME ? 2 * m->look.border : 0);    /* up and left as far as it takes to be */
         s32 fh = g->h + (flags & WF_FRAME ? 3 * m->look.border + m->look.title_h : 0);     /* on the screen (M9) */
         s32 room = m->h - (m->bar ? m->bar->frame.h : 0);
@@ -181,7 +180,7 @@ int desk_win_close(struct app *a, u32 id)
     }
     let_go(a);                                  /* (its pixels, which wm_destroy() left to this) */
     desk_unlock();
-    return w ? 0 : GLOS_E_WINDOW;
+    return w ? 0 : GLOS_E_HANDLE;
 }
 
 int desk_win_title(struct app *a, u32 id, const char *title)
@@ -191,15 +190,15 @@ int desk_win_title(struct app *a, u32 id, const char *title)
     if (w)
         wm_title(m, w, title);
     desk_unlock();
-    return w ? 0 : GLOS_E_WINDOW;
+    return w ? 0 : GLOS_E_HANDLE;
 }
 
-int desk_win_pixels(struct app *a, u32 id, struct glos_window *g)
+int desk_win_pixels(struct app *a, u32 id, struct kwindow *g)
 {
     struct wm *m = desk_lock();
     struct wm_window *w = own(m, a, id);
     u32 lin;
-    int r = GLOS_E_WINDOW;
+    int r = GLOS_E_HANDLE;
     let_go(a);
     if (w && (r = map(a, w, &lin)) == 0)
         describe(m, w, lin, g);
@@ -207,7 +206,7 @@ int desk_win_pixels(struct app *a, u32 id, struct glos_window *g)
     return r;
 }
 
-int desk_win_present(struct app *a, u32 id, const struct glos_rect *r)
+int desk_win_present(struct app *a, u32 id, const struct krect *r)
 {
     struct wm *m = desk_lock();
     struct wm_window *w = own(m, a, id);
@@ -219,7 +218,7 @@ int desk_win_present(struct app *a, u32 id, const struct glos_rect *r)
         wm_damage(m, w, 0);
     }
     desk_unlock();
-    return w ? 0 : GLOS_E_WINDOW;
+    return w ? 0 : GLOS_E_HANDLE;
 }
 
 int desk_win_vram(struct app *a, u32 id, u32 off, u32 pitch)
@@ -230,7 +229,7 @@ int desk_win_vram(struct app *a, u32 id, u32 off, u32 pitch)
     u32 bpp_b = m->fmt.bpp / 8u;
     int r = 0;
     if (!w) {
-        r = GLOS_E_WINDOW;
+        r = GLOS_E_HANDLE;
     } else if (off == 0xFFFFFFFFu) {
         wm_ext(m, w, 0);
     } else if (m->fmt.bpp != 16 || m->fmt.gsize != 6 || !mga_desktop_card()) {
@@ -268,10 +267,10 @@ int desk_win_focus(struct app *a, u32 id)
     if (w)
         wm_set_focus(m, w);
     desk_unlock();
-    return w ? 0 : GLOS_E_WINDOW;
+    return w ? 0 : GLOS_E_HANDLE;
 }
 
-void desk_screen(struct glos_window *g)
+void desk_screen(struct kwindow *g)
 {
     struct wm *m = desk_lock();
     describe(m, 0, 0, g);
@@ -282,7 +281,7 @@ void desk_screen(struct glos_window *g)
 
 static void told(struct wm_window *w, u32 type)
 {
-    struct glos_event e;
+    struct kevent e;
     memset(&e, 0, sizeof e);
     e.type = type;
     e.window = w->id;
@@ -298,7 +297,7 @@ int deskapp_resize(struct wm *m, struct wm_window *w, s32 cw, s32 ch)
     if (wm_resize(m, w, cw, ch) != 0)
         return -1;
     if (w->owner)
-        told(w, GLOS_EV_RESIZE);
+        told(w, KEV_RESIZE);
     return 0;
 }
 
@@ -309,9 +308,9 @@ int deskapp_state(struct wm *m, struct wm_window *w, int state)
     if (wm_state(m, w, state) != 0)
         return -1;
     if (w->owner && (cw != w->store.w || ch != w->store.h))
-        told(w, GLOS_EV_RESIZE);
+        told(w, KEV_RESIZE);
     if (w->owner && wm_state_of(w) != was) {
-        struct glos_event e;
+        struct kevent e;
         memset(&e, 0, sizeof e);
         e.type = DESK_EV_STATE;
         e.window = w->id;
@@ -379,7 +378,7 @@ int desk_win_state(struct app *a, u32 id, int state, int focus)
     struct wm_window *w = own(m, a, id);
     int r = 0;
     if (!w) {
-        r = GLOS_E_WINDOW;
+        r = GLOS_E_HANDLE;
     } else if (state == -1) {
         int was = wm_state_of(w);
         wm_show(m, w, 0);
@@ -420,7 +419,7 @@ int desk_win_place(struct app *a, u32 id, int move, s32 x, s32 y, int size, s32 
         return GLOS_E_ARGUMENT;
     m = desk_lock();
     if (!(w = own(m, a, id))) {
-        r = GLOS_E_WINDOW;
+        r = GLOS_E_HANDLE;
     } else if (w->flags & WF_PLACED) {          /* the manager has it somewhere: this is where it goes back to */
         if (move)
             w->normal.x = x, w->normal.y = y;
@@ -463,7 +462,7 @@ int desk_win_info(struct app *a, u32 id, struct desk_info *out)
     if (w)
         info(m, w, out);
     desk_unlock();
-    return w ? 0 : GLOS_E_WINDOW;
+    return w ? 0 : GLOS_E_HANDLE;
 }
 
 u32 desk_win_list(struct desk_info *out, u32 max)
@@ -496,7 +495,7 @@ int desk_win_limit(struct app *a, u32 id, int which, s32 v)
         else w->max_h = v;
     }
     desk_unlock();
-    return w ? 0 : GLOS_E_WINDOW;
+    return w ? 0 : GLOS_E_HANDLE;
 }
 
 int desk_win_cursor(struct app *a, u32 id, int shape)
@@ -514,14 +513,14 @@ int desk_win_cursor(struct app *a, u32 id, int shape)
         w->cursor = (u8)shape;
     }
     desk_unlock();                              /* (the composer's turn gives the pointer its shape) */
-    return w ? 0 : GLOS_E_WINDOW;
+    return w ? 0 : GLOS_E_HANDLE;
 }
 
 int desk_win_set(struct app *a, u32 id, int what, s32 v, const void *data, u32 len)
 {
     struct wm *m = desk_lock();
     struct wm_window *w = own(m, a, id);
-    int r = w ? 0 : GLOS_E_WINDOW;
+    int r = w ? 0 : GLOS_E_HANDLE;
     if (!w) {
         ;
     } else if (what == DW_TOPMOST) {
@@ -596,7 +595,7 @@ int desk_win_drag(struct app *a, u32 id, int part)
 {
     struct wm *m = desk_lock();
     struct wm_window *w = own(m, a, id);
-    int r = !w ? GLOS_E_WINDOW : deskin_drag(m, w, part) != 0 ? DESK_E_REFUSED : 0;
+    int r = !w ? GLOS_E_HANDLE : deskin_drag(m, w, part) != 0 ? DESK_E_REFUSED : 0;
     desk_unlock();
     return r;
 }
@@ -613,7 +612,7 @@ void desk_work(s32 *x, s32 *y, s32 *w, s32 *h)
 void deskapp_close(struct wm *m, struct wm_window *w)
 {
     if (w->owner) {
-        told(w, GLOS_EV_CLOSE);
+        told(w, KEV_CLOSE);
     } else {
         wm_destroy(m, w);
         desk_refocus(m);
@@ -625,7 +624,7 @@ void deskapp_screen(struct wm *m)
     struct wm_window *w;
     for (w = m->bottom; w; w = w->above)
         if (w->owner)
-            told(w, GLOS_EV_RESIZE);
+            told(w, KEV_RESIZE);
 }
 
 /* An app has ended, its address space gone already: its windows go, and
@@ -681,7 +680,7 @@ int desk_win_capture(struct app *a, u32 id, int on)
 {
     struct wm *m = desk_lock();
     struct wm_window *w = own(m, a, id);
-    int r = !w ? GLOS_E_WINDOW : deskin_capture(m, w, on) != 0 ? DESK_E_REFUSED : 0;
+    int r = !w ? GLOS_E_HANDLE : deskin_capture(m, w, on) != 0 ? DESK_E_REFUSED : 0;
     desk_unlock();
     return r;
 }
@@ -710,7 +709,7 @@ int desk_win_blit(struct app *a, u32 id, const struct desk_blit *b)
     m = desk_lock();
     if (!(w = own(m, a, id))) {
         desk_unlock();
-        return GLOS_E_WINDOW;
+        return GLOS_E_HANDLE;
     }
     if (x0 < 0) sx = -x0, cw += x0, x0 = 0;     /* what of it lies in the client area */
     if (y0 < 0) sy = -y0, ch += y0, y0 = 0;
@@ -749,7 +748,7 @@ int desk_win_who(u32 id, u32 *owner, s32 *w, s32 *h)
 {
     struct wm *m = desk_lock();
     struct wm_window *win = wm_find(m, id);
-    int r = win ? 0 : GLOS_E_WINDOW;
+    int r = win ? 0 : GLOS_E_HANDLE;
     if (win)
         *owner = win->owner ? app_id(win->owner) : 0, *w = win->store.w, *h = win->store.h;
     desk_unlock();
@@ -786,11 +785,11 @@ int desk_win_key(u32 id, u32 key, int down, u32 mods)
 {
     struct wm *m = desk_lock();
     struct wm_window *win = wm_find(m, id);
-    struct glos_event e;
-    int r = win && win->owner ? 0 : GLOS_E_WINDOW;
+    struct kevent e;
+    int r = win && win->owner ? 0 : GLOS_E_HANDLE;
     if (!r) {
         memset(&e, 0, sizeof e);
-        e.type = GLOS_EV_KEY;
+        e.type = KEV_KEY;
         e.window = id;
         e.key = key;
         e.ch = down ? keymap_char(key, (mods & GLOS_MOD_SHIFT) != 0, (mods & GLOS_MOD_CTRL) != 0, (mods & GLOS_MOD_ALT) != 0, 0, 0) : 0;
@@ -806,11 +805,11 @@ int desk_win_mouse(u32 id, s32 x, s32 y, u32 buttons, u32 button, int down, u32 
 {
     struct wm *m = desk_lock();
     struct wm_window *win = wm_find(m, id);
-    struct glos_event e;
-    int r = win && win->owner ? 0 : GLOS_E_WINDOW;
+    struct kevent e;
+    int r = win && win->owner ? 0 : GLOS_E_HANDLE;
     if (!r) {
         memset(&e, 0, sizeof e);
-        e.type = GLOS_EV_MOUSE;
+        e.type = KEV_MOUSE;
         e.window = id;
         e.x = x, e.y = y;
         e.buttons = buttons;
@@ -866,7 +865,7 @@ int desk_win_embed(struct app *a, u32 host, u32 child, const struct gfx_rect *at
     s32 cw, ch;
     int r = 0;
     if (!h || !w || !w->owner) {
-        r = GLOS_E_WINDOW;
+        r = GLOS_E_HANDLE;
     } else if (at) {
         if (wm_embed(m, w, h, at) != 0)
             r = DESK_E_REFUSED;

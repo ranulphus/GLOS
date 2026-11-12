@@ -31,8 +31,7 @@
  * whoever has the engine (mga.c). */
 #include <string.h>
 
-#define GLOS_KERNEL
-#include "glos/api.h"
+#include "kapi.h"
 #include "../app/appint.h"
 #include "gpu.h"
 #include "io.h"

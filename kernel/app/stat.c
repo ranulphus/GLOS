@@ -3,8 +3,7 @@
  * for the system monitor. */
 #include <string.h>
 
-#define GLOS_KERNEL
-#include "glos/api.h"
+#include "kapi.h"
 #include "glos/bootinfo.h"
 #include "agent.h"
 #include "app.h"

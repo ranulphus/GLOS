@@ -13,7 +13,7 @@
  * begins or ends, the RTC and DOS are set again. */
 #include <string.h>
 
-#include "glos/api.h"
+#include "kapi.h"
 #include "glos/tz.h"
 #include "clock.h"
 #include "dos.h"

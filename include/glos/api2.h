@@ -518,10 +518,8 @@ struct glos_cache {
     unsigned bytes;
     unsigned type;              /* GLOS_CACHE_ */
 };
-#ifndef GLOS_CACHE_WC
 #define GLOS_CACHE_WC 1         /* write-combining */
 #define GLOS_CACHE_WB 6         /* write-back */
-#endif
 
 struct glos_blit {
     unsigned size;
@@ -541,7 +539,6 @@ struct glos_blit {
    it has the lock: a touch without it waits for the lock and takes it. Refused (GLOS_E_NO_GPU) without a Matrox
    card whose engine draws the desktop (VERSION's GLOS_MACHINE_GPU). */
 #define GLOS_E_NO_GPU 8
-#ifndef GLOS_API_H              /* (during phase B, API 1.x's header has these two structures, the same) */
 struct glos_gpu {
     unsigned size;
     unsigned device, revision;  /* the chip: its PCI device ID and revision (0525h with revision 80h or above: G450) */
@@ -565,7 +562,6 @@ struct glos_gpu_share {
     volatile unsigned want;     /* someone waits for the engine while the app has it */
     volatile unsigned quiet;    /* (the app's) 1: it isn't using the engine now; its turn may end at any moment */
 };
-#endif
 struct glos_vram {
     unsigned size;
     unsigned op;                /* 0: a block; 1: the block at `offset` freed */
@@ -669,11 +665,9 @@ struct glos_input_mode {
                                                            plugged in or taken out (to every app that asked,
                                                            GLOS_PADS_EVENTS), or changed (to the one with the
                                                            focus) */
-#ifndef GLOS_MOD_SHIFT
 #define GLOS_MOD_SHIFT   1
 #define GLOS_MOD_CTRL    2
 #define GLOS_MOD_ALT     4
-#endif
 struct glos_ev_key {
     struct glos_ev ev;
     unsigned key;               /* the key: a set 1 scan code, 100h added for those with an E0 prefix */

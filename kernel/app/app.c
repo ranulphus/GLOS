@@ -53,7 +53,7 @@
  * return to its own protected-mode code where init would be allowed. */
 #include <string.h>
 
-#include "glos/api.h"
+#include "kapi.h"
 #include "glos/bootinfo.h"
 #include "agent.h"
 #include "gdbprog.h"
@@ -506,22 +506,22 @@ int app_init(struct trapframe *tf, int asked, u32 *id)
     u32 i;
     (void)tf;
     if (app_cur() || c->app)
-        return GLOS_INIT_ALREADY;
+        return GLOS_WHY_ALREADY;
     if (c->nlv != 1 || c->npe || c->lstack_use || rm_nesting())
-        return GLOS_INIT_NESTED;                /* a child program's, or from a handler or a callback */
+        return GLOS_WHY_NESTED;                /* a child program's, or from a handler or a callback */
     if (!c->bits32)
-        return GLOS_INIT_16BIT;
+        return GLOS_WHY_16BIT;
     if (session_exclusive() || vm.direct)
-        return GLOS_INIT_EXCLUSIVE;             /* glos run --exclusive or --direct, a direct-mode profile */
+        return GLOS_WHY_EXCLUSIVE;             /* glos run --exclusive or --direct, a direct-mode profile */
     if (!vm.sda || !vm.bi->detached_off || (vm.bi->flags & BI_F_SHELL) || !session_active() || psp != c->psp
         || vm_rd16(psp * 16u + 0x16) != vm.loader_psp)
-        return GLOS_INIT_PARENT;                /* GLOS itself didn't start it (a program's child, a batch file's) */
+        return GLOS_WHY_PARENT;                /* GLOS itself didn't start it (a program's child, a batch file's) */
     if (napps >= MAX_APPS || !(a = kmalloc(sizeof *a)))
-        return GLOS_INIT_MEMORY;
+        return GLOS_WHY_MEMORY;
     memset(a, 0, sizeof *a);
     if (asked && api2_app_new(a) != 0) {        /* (its handles and events first: a thread can't be taken back) */
         kfree(a);
-        return GLOS_INIT_MEMORY;
+        return GLOS_WHY_MEMORY;
     }
     a->id = next_id++;
     ksnprintf(a->tname, sizeof a->tname, "app%u", a->id);
@@ -529,7 +529,7 @@ int app_init(struct trapframe *tf, int asked, u32 *id)
         if (a->v2)
             api2_app_gone(a);
         kfree(a);
-        return GLOS_INIT_MEMORY;
+        return GLOS_WHY_MEMORY;
     }
     a->ctx = c;
     a->psp = psp;
@@ -834,12 +834,12 @@ u32 app_sleep(struct app *a, u32 ticks)
 
 /* ---- events (the desktop gives them, the API takes them) */
 
-void app_event(struct app *a, const struct glos_event *e)
+void app_event(struct app *a, const struct kevent *e)
 {
     u32 f = irq_save();                         /* its keyboard and mouse, as a DOS program reads them */
-    if (e->type == GLOS_EV_KEY)
+    if (e->type == KEV_KEY)
         appdev_key(a, e->key, (int)e->down, e->ch, e->mods);
-    else if (e->type == GLOS_EV_MOUSE)
+    else if (e->type == KEV_MOUSE)
         appdev_mouse(a, e->x, e->y, (s32)e->size, (s32)e->time, e->buttons);    /* (the desktop's: dx, dy there) */
     if (!a->v2 && e->type < DESK_EV_STATE) {    /* (a program made an app without asking has no events: its wait */
         a->wake++;                              /* ends, as for a key of the PC's) */
@@ -907,7 +907,7 @@ int app_force(struct trapframe *tf)
     int r;
     if (!session_app() || !dctx || dctx->app || dctx->no_app)
         return 0;
-    if ((r = app_init(tf, 0, &id)) == GLOS_INIT_NESTED)
+    if ((r = app_init(tf, 0, &id)) == GLOS_WHY_NESTED)
         return 0;                               /* not here: at a later return */
     if (r) {
         dctx->no_app = 1;
@@ -1375,7 +1375,7 @@ u32 app_ps(char *buf, u32 max)
     return n < max ? n : max;
 }
 
-/* GLOS_FN_STAT's GLOS_STAT_APPS (M9): a struct glos_stat_app for each app. */
+/* GLOS_FN_STAT's GLOS_STAT_APPS (M9): a struct kprog for each app. */
 u32 app_stat_list(void *out, u32 room)
 {
     struct app *a;
@@ -1384,8 +1384,8 @@ u32 app_stat_list(void *out, u32 room)
     for (a = apps; a && k < MAX_APPS; a = a->next)
         list[k++] = a;
     irq_restore(f);
-    for (i = 0; i < k && n + sizeof(struct glos_stat_app) <= room; i++) {
-        struct glos_stat_app *s = (struct glos_stat_app *)((u8 *)out + n);
+    for (i = 0; i < k && n + sizeof(struct kprog) <= room; i++) {
+        struct kprog *s = (struct kprog *)((u8 *)out + n);
         memset(s, 0, sizeof *s);
         s->size = sizeof *s;
         s->kind = 0;

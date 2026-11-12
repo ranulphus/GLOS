@@ -1,4 +1,4 @@
-/* Apps' TCP connections (M10 step B, kernel/net/sock.c; include/glos/api.h GLOS_FN_NET). */
+/* Apps' TCP connections (M10 step B, kernel/net/sock.c; the API's NET). */
 #ifndef K_SOCK_H
 #define K_SOCK_H
 #include "types.h"

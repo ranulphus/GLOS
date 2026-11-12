@@ -1,5 +1,5 @@
-/* Apps' TCP connections (M10 step B; GLOS_FN_NET in include/glos/api.h) and, for API 2.0's NET (phase B step
- * 11; kernel/app/api2net.c), ports they listen on.
+/* Apps' TCP connections (M10 step B; the API's NET, phase B step 11: kernel/app/api2net.c) and the ports they
+ * listen on.
  *
  * A connection is a slot here, a pcb of lwIP's (the net thread's alone,
  * NO_SYS) and two rings of 16 KB between the app's thread and the net
@@ -29,7 +29,7 @@
 
 #include <string.h>
 
-#include "glos/api.h"
+#include "kapi.h"
 #include "../app/appint.h"
 #include "dpmi.h"
 #include "io.h"
@@ -99,19 +99,9 @@ static void notify(struct sock *s, int ev)
     u32 f = irq_save();
     struct app *a = s->app;
     if (a) {
-        if (ev && (s->flags & GLOS_NETF_EVENTS) && a->v2) {
+        if (ev && (s->flags & GLOS_NETF_EVENTS) && a->v2)
             api2_net_event(a, id_of(s), s->state, s->listen ? waiting_on(s) : s->rx_in - s->rx_out,
                            s->listen ? 0 : RING - (s->tx_in - s->tx_out));
-        } else if (ev && (s->flags & GLOS_NETF_EVENTS)) {
-            struct glos_event e;
-            memset(&e, 0, sizeof e);
-            e.size = sizeof e;
-            e.type = GLOS_EV_NET;
-            e.key = id_of(s);
-            e.x = s->state;
-            e.y = (int)(s->rx_in - s->rx_out);
-            app_event(a, &e);
-        }
         thread_wake(&a->wq);
     }
     irq_restore(f);

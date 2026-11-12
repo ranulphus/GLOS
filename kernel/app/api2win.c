@@ -46,7 +46,7 @@ static u32 state_of(int ws)                     /* the desktop's WS_ (or -1) as 
 
 /* ---- the desktop's events */
 
-void api2_event_1x(struct app *a, const struct glos_event *e)
+void api2_event_1x(struct app *a, const struct kevent *e)
 {
     union {
         struct glos_ev ev;
@@ -59,7 +59,7 @@ void api2_event_1x(struct app *a, const struct glos_event *e)
     } u;
     u32 f = irq_save(), h = a->v2 ? win_handle(a, e->window) : 0;
     int merge = 0;
-    if (a->v2 && e->type == GLOS_EV_FILES) {    /* a watch's (kernel/dos/watch.c): FS's event, for its handle */
+    if (a->v2 && e->type == KEV_FILES) {    /* a watch's (kernel/dos/watch.c): FS's event, for its handle */
         u32 i = 0, wh;
         void *obj;
         struct glos_ev ev;
@@ -76,11 +76,11 @@ void api2_event_1x(struct app *a, const struct glos_event *e)
         return;
     }
     irq_restore(f);
-    if (a->v2 && e->type == V1_EV_JOB) {        /* a job's news (kernel/dos/agent.c): JOB's event */
+    if (a->v2 && e->type == KEV_JOB) {        /* a job's news (kernel/dos/agent.c): JOB's event */
         api2_job_event(a, e->key, (u32)e->x, (u32)e->y);
         return;
     }
-    if (a->v2 && (e->type == GLOS_EV_LAUNCH || e->type == GLOS_EV_SYSKEY)) {    /* the shell's: SHELL's event */
+    if (a->v2 && (e->type == KEV_LAUNCH || e->type == KEV_SYSKEY)) {    /* the shell's: SHELL's event */
         api2_shell_1x(a, e->type, e->x, e->y);
         return;
     }
@@ -92,7 +92,7 @@ void api2_event_1x(struct app *a, const struct glos_event *e)
     memset(&u, 0, sizeof u);
     u.ev.handle = h;
     switch (e->type) {
-    case V1_EV_KEY:
+    case KEV_KEY:
         u.ev.size = sizeof u.key, u.ev.kind = GLOS_EV_KEY;
         u.key.key = e->key, u.key.ch = e->ch, u.key.mods = e->mods, u.key.down = e->down;
         u.key.repeat = e->buttons;              /* (the desktop's: the keyboard repeating a held key, deskin.c) */
@@ -109,7 +109,7 @@ void api2_event_1x(struct app *a, const struct glos_event *e)
             return;
         }
         break;
-    case V1_EV_MOUSE:
+    case KEV_MOUSE:
         u.ev.size = sizeof u.mouse, u.ev.kind = GLOS_EV_MOUSE;
         u.mouse.x = e->x, u.mouse.y = e->y;
         u.mouse.dx = (s32)e->size, u.mouse.dy = (s32)e->time;   /* (the desktop's: how far it moved, deskin.c) */
@@ -117,20 +117,20 @@ void api2_event_1x(struct app *a, const struct glos_event *e)
         u.mouse.clicks = e->ch;                 /* (the desktop's count of presses in a row) */
         merge = !e->key;
         break;
-    case V1_EV_WHEEL:
+    case KEV_WHEEL:
         u.ev.size = sizeof u.wheel, u.ev.kind = GLOS_EV_WHEEL;
         u.wheel.x = e->x, u.wheel.y = e->y, u.wheel.notches = (s32)e->key;
         u.wheel.buttons = e->buttons, u.wheel.mods = e->mods;
         break;
-    case V1_EV_FOCUS:
+    case KEV_FOCUS:
         u.ev.size = sizeof u.focus, u.ev.kind = GLOS_EV_FOCUS;
         u.focus.got = e->down;
         break;
-    case V1_EV_RESIZE:
+    case KEV_RESIZE:
         u.ev.size = sizeof u.size, u.ev.kind = GLOS_EV_SIZE;
         u.size.w = e->x, u.size.h = e->y;
         break;
-    case V1_EV_CLOSE:
+    case KEV_CLOSE:
         u.ev.size = sizeof u.ev, u.ev.kind = GLOS_EV_CLOSE;
         break;
     case DESK_EV_STATE:
@@ -464,7 +464,7 @@ const u32 api2_win_nprops = ARRAY_SIZE(api2_win_props);
 
 /* ---- DRAW */
 
-static void format_of(const struct glos_window *g, struct glos_format *f)
+static void format_of(const struct kwindow *g, struct glos_format *f)
 {
     f->bpp = g->bpp;
     f->rpos = g->rpos, f->rsize = g->rsize, f->gpos = g->gpos, f->gsize = g->gsize, f->bpos = g->bpos, f->bsize = g->bsize;
@@ -474,7 +474,7 @@ static void format_of(const struct glos_window *g, struct glos_format *f)
 static int pixels(struct app *a, struct trapframe *tf)
 {
     struct glos_pixels q;
-    struct glos_window g;
+    struct kwindow g;
     u32 size, id;
     int r;
     if (a2_rd(tf, &q, sizeof q, &size) != 0)
@@ -491,7 +491,7 @@ static int pixels(struct app *a, struct trapframe *tf)
 static int present(struct app *a, struct trapframe *tf)
 {
     struct glos_present q;
-    struct glos_rect r;
+    struct krect r;
     u32 size, id;
     int e;
     if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.w < 0 || q.h < 0)
@@ -506,7 +506,7 @@ static int present(struct app *a, struct trapframe *tf)
 int api2_screen(struct trapframe *tf)
 {
     struct glos_screen q;
-    struct glos_window g;
+    struct kwindow g;
     u32 size;
     s32 x, y, w, h;
     if (a2_rd(tf, &q, sizeof q, &size) != 0)

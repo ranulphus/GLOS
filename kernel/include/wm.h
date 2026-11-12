@@ -16,9 +16,9 @@
 #define WF_FIXED   0x0004               /* its size is not the user's to change */
 #define WF_TOPMOST 0x0008               /* above every window that isn't (the task bar) */
 #define WF_NOFOCUS 0x0010               /* never the focus (the task bar) */
-#define WF_POPUP   0x0020               /* an app's menu (GLOS_WIN_POPUP): topmost and bare; never given the focus
+#define WF_POPUP   0x0020               /* an app's menu (KWIN_POPUP): topmost and bare; never given the focus
                                            when another window's goes, and a press outside it takes it away */
-#define WF_DESKTOP 0x0040               /* the shell's desktop (GLOS_WIN_DESKTOP): under every other window, always */
+#define WF_DESKTOP 0x0040               /* the shell's desktop (KWIN_DESKTOP): under every other window, always */
 #define WF_MIN     0x0080               /* minimised: off the screen (WF_SHOWN clear), its button still on the task bar */
 #define WF_MAX     0x0100               /* maximised: it fills the work area (the screen less the task bar) */
 #define WF_FULL    0x0200               /* full screen: no frame, the whole screen; the task bar goes while it or

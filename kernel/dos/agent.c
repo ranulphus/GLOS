@@ -41,8 +41,7 @@
  * job runs. */
 #include <string.h>
 
-#define GLOS_KERNEL
-#include "glos/api.h"
+#include "kapi.h"
 #include "glos/bootinfo.h"
 #include "agent.h"
 #include "app.h"
@@ -91,9 +90,9 @@ struct agent_job {
     struct ring out[2];                         /* stdout, stderr */
     /* M9: an app's job (GLOS_FN_RUN) */
     u8 from_app;                                /* its output is its app's to read, its keys the app's to type */
-    u8 console;                                 /* GLOS_RUN_CONSOLE: its program writes into the app's window */
-    u8 full;                                    /* ... until it wanted the screen (or GLOS_RUN_FULL) */
-    u8 detach;                                  /* GLOS_RUN_DETACH: nobody's; no output kept */
+    u8 console;                                 /* KRUN_CONSOLE: its program writes into the app's window */
+    u8 full;                                    /* ... until it wanted the screen (or KRUN_FULL) */
+    u8 detach;                                  /* KRUN_DETACH: nobody's; no output kept */
     u8 dir_step;                                /* starting in dir: 1 its drive set, 2 its folder, 0 done */
     u8 told;                                    /* the GLOS_JOB_ state its app last heard of, FFh none */
     void *app_owner;                            /* its app (struct app), or NULL */
@@ -201,10 +200,10 @@ int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, cons
 static u32 app_state(const struct agent_job *j)
 {
     if (j->state == J_QUEUED)
-        return GLOS_JOB_QUEUED;
+        return GLOS_JS_QUEUED;
     if (j->state == J_DONE)
-        return GLOS_JOB_DONE;
-    return j->app ? GLOS_JOB_APP : j->full || !j->console ? GLOS_JOB_FULL : GLOS_JOB_RUNNING;
+        return GLOS_JS_DONE;
+    return j->app ? GLOS_JS_APP : j->full || !j->console ? GLOS_JS_FULL : GLOS_JS_RUNNING;
 }
 
 static u32 code_of(const struct agent_job *j) { return (j->result & 0x10000) ? 126 : (j->result & 0xFF); }
@@ -212,24 +211,24 @@ static u32 code_of(const struct agent_job *j) { return (j->result & 0x10000) ? 1
 /* Its app told it has moved on (interrupts off or on: app_event is safe in either). */
 static void tell(struct agent_job *j)
 {
-    struct glos_event e;
+    struct kevent e;
     u32 st = app_state(j);
     thread_wake(&j->readq);
     if (!j->app_owner || st == j->told)
         return;
     j->told = (u8)st;
     memset(&e, 0, sizeof e);
-    e.type = GLOS_EV_JOB;
+    e.type = KEV_JOB;
     e.key = j->seq;
     e.x = (int)st;
     e.y = (int)code_of(j);
     app_event(j->app_owner, &e);
 }
 
-int agent_post_app(void *app, const struct glos_run *r, u32 *seq) { return agent_post_job(app, r, 0, seq); }
+int agent_post_app(void *app, const struct krun *r, u32 *seq) { return agent_post_job(app, r, 0, seq); }
 
 /* ... and API 2.0's (o: what 1.x's structure has no word for; NULL: none of it). */
-int agent_post_job(void *app, const struct glos_run *r, const struct agent_opts *o, u32 *seq)
+int agent_post_job(void *app, const struct krun *r, const struct agent_opts *o, u32 *seq)
 {
     struct agent_job *j = NULL;
     u32 f, i;
@@ -281,10 +280,10 @@ int agent_post_job(void *app, const struct glos_run *r, const struct agent_opts 
     j->ih = j->it = 0;
     j->t_start = j->t_end = 0;
     j->out[0].head = j->out[0].tail = j->out[1].head = j->out[1].tail = 0;
-    j->detach = (u8)((r->flags & GLOS_RUN_DETACH) != 0);
+    j->detach = (u8)((r->flags & KRUN_DETACH) != 0);
     j->from_app = (u8)!j->detach;
-    j->console = (u8)(!j->detach && (r->flags & GLOS_RUN_CONSOLE));
-    j->full = (u8)(j->console && (r->flags & GLOS_RUN_FULL));
+    j->console = (u8)(!j->detach && (r->flags & KRUN_CONSOLE));
+    j->full = (u8)(j->console && (r->flags & KRUN_FULL));
     j->dir_step = 0;
     j->told = 0xFF;
     j->app_owner = j->detach ? NULL : app;
@@ -304,14 +303,14 @@ int agent_post_job(void *app, const struct glos_run *r, const struct agent_opts 
 /* A job of nobody's (the kernel's: the desktop's start list): run, its output not kept. */
 int agent_post_detached(const char *cmd, const char *dir)
 {
-    static struct glos_run r;                   /* (the VM thread's alone: no other caller) */
+    static struct krun r;                   /* (the VM thread's alone: no other caller) */
     u32 seq, i;
     memset(&r, 0, sizeof r);
     for (i = 0; cmd[i] && i < sizeof r.command - 1; i++)
         r.command[i] = cmd[i];
     for (i = 0; dir[i] && i < sizeof r.dir - 1; i++)
         r.dir[i] = dir[i];
-    r.flags = GLOS_RUN_DETACH;
+    r.flags = KRUN_DETACH;
     return agent_post_app(0, &r, &seq);
 }
 
@@ -548,9 +547,9 @@ u32 agent_job_by(u32 seq)                       /* the app that started a job (i
 u32 agent_jobs_stat(void *out, u32 room)
 {
     u32 n = 0, i;
-    for (i = 0; i < NJOBS && n + sizeof(struct glos_stat_app) <= room; i++) {
+    for (i = 0; i < NJOBS && n + sizeof(struct kprog) <= room; i++) {
         const struct agent_job *j = &jobs[i];
-        struct glos_stat_app *a = (struct glos_stat_app *)((u8 *)out + n);
+        struct kprog *a = (struct kprog *)((u8 *)out + n);
         u32 k;
         if (j->state != J_QUEUED && j->state != J_RUNNING)
             continue;
@@ -1216,10 +1215,10 @@ static void put(int stream, u8 c)
     if (running->from_app && (c == '\n' || ring_used(r) > RING / 2))
         thread_wake(&running->readq);           /* (the app reads a line at a time, or a lot) */
     if (running->from_app && running->app_owner && ring_used(r) == 1 && !ring_used(&running->out[!stream])) {
-        struct glos_event e;                    /* output where there was none: its app is told (once until it
+        struct kevent e;                    /* output where there was none: its app is told (once until it
                                                    has read it all) */
         memset(&e, 0, sizeof e);
-        e.type = GLOS_EV_JOB;
+        e.type = KEV_JOB;
         e.key = running->seq;
         e.x = (int)app_state(running);
         app_event(running->app_owner, &e);

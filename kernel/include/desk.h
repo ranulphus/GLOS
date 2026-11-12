@@ -24,17 +24,17 @@ const char *desk_focus_line(void);              /* "app=N window=N backlog=N inp
 /* Apps' windows (wm/deskapp.c), for the API (app/api.c), on the app's own
    thread: 0, or a GLOS_E_ code. */
 struct app;
-struct glos_window;
-struct glos_rect;
-int desk_win_create(struct app *a, struct glos_window *g);      /* g: what is asked for, then what it is */
+struct kwindow;
+struct krect;
+int desk_win_create(struct app *a, struct kwindow *g);      /* g: what is asked for, then what it is */
 int desk_win_close(struct app *a, u32 id);
 int desk_win_title(struct app *a, u32 id, const char *title);
-int desk_win_pixels(struct app *a, u32 id, struct glos_window *g);
-int desk_win_present(struct app *a, u32 id, const struct glos_rect *r);        /* NULL: all of it */
+int desk_win_pixels(struct app *a, u32 id, struct kwindow *g);
+int desk_win_present(struct app *a, u32 id, const struct krect *r);        /* NULL: all of it */
 int desk_win_vram(struct app *a, u32 id, u32 off, u32 pitch);         /* GLOS_FN_WINVRAM */
 void desk_app_vram_gone(struct app *a, u32 off, u32 bytes);     /* its windows stop showing that block */
 int desk_win_focus(struct app *a, u32 id);
-void desk_screen(struct glos_window *g);
+void desk_screen(struct kwindow *g);
 void desk_app_gone(struct app *a);      /* an app has ended (on its thread): its windows go */
 /* ... and for API 2.0 (app/api2win.c). */
 struct desk_new {
@@ -85,7 +85,7 @@ struct app *deskin_focus_app(void);     /* the app whose window has the focus, o
 int desk_win_blit(struct app *a, u32 id, const struct desk_blit *b);    /* (API 2.0's DRAW BLIT) */
 int desk_win_embed(struct app *a, u32 host, u32 child, const struct gfx_rect *at);     /* (API 2.0's WIN EMBED) the
                                                    window `child` shown inside a's window `host` (at NULL: let go):
-                                                   0, GLOS_E_WINDOW, DESK_E_REFUSED */
+                                                   0, GLOS_E_HANDLE, DESK_E_REFUSED */
 int desk_drawing(void);                 /* the desktop is painting, or owes the screen something (glos shot waits) */
 int desk_password(struct app *a);       /* (kernel/wm/deskpass.c) the secrets store's master password asked of the
                                            user in a dialog of the desktop's, the calling app's thread waiting: 0
@@ -93,13 +93,13 @@ int desk_password(struct app *a);       /* (kernel/wm/deskpass.c) the secrets st
                                            the app is ending */
 /* API 2.0's CAPTURE (kernel/app/api2cap.c): any window by its number. */
 int desk_win_who(u32 id, u32 *owner, s32 *w, s32 *h);   /* whose it is (the app's id; 0: GLOS's own) and its client
-                                                            area's size: 0, or GLOS_E_WINDOW */
+                                                            area's size: 0, or GLOS_E_HANDLE */
 int desk_win_rows(u32 id, s32 y, s32 n, s32 w, u8 *rgb);        /* n rows of its client area from row y, as R, G, B
                                                                    bytes (w pixels a row): the rows given; -1: it
                                                                    is gone, or no longer w wide */
-int desk_win_key(u32 id, u32 key, int down, u32 mods);          /* a key into it, as if typed there: 0, GLOS_E_WINDOW */
+int desk_win_key(u32 id, u32 key, int down, u32 mods);          /* a key into it, as if typed there: 0, GLOS_E_HANDLE */
 int desk_win_mouse(u32 id, s32 x, s32 y, u32 buttons, u32 button, int down, u32 clicks);       /* ... the mouse */
-#define DESK_E_REFUSED 19               /* (API 2.0's GLOS_E_REFUSED; its GLOS_E_HANDLE is 1.x's GLOS_E_WINDOW, 6) */
+#define DESK_E_REFUSED 19               /* (API 2.0's GLOS_E_REFUSED; its GLOS_E_HANDLE is 1.x's GLOS_E_HANDLE, 6) */
 #define DESK_EV_STATE 100               /* (to app_event, for API 2.0's apps alone) a window's state changed: key WS_ */
 int desk_demo(int on);                  /* glos desk demo|clear: wm/demo.c's windows; -1: no memory */
 u32 desk_stat(char *buf, u32 max);      /* glos desk: its windows, a line each */

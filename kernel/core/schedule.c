@@ -7,7 +7,7 @@
 
 #include "agent.h"
 #include "clock.h"
-#include "glos/api.h"
+#include "kapi.h"
 #include "glos/bootinfo.h"
 #include "glos/sched.h"
 #include "kcfg.h"
@@ -28,7 +28,7 @@ static u32 num(const char *s)
 
 static void turn(int first)
 {
-    static struct glos_run run;         /* (this thread's alone) */
+    static struct krun run;         /* (this thread's alone) */
     char rec[KDATA_TEXT + 1], again[KDATA_TEXT + 1];
     u32 n = kdata_count("sched"), i, k, seq;
     for (i = 0; i < n; i++) {
@@ -53,7 +53,7 @@ static void turn(int first)
             continue;
         memset(&run, 0, sizeof run);
         run.size = sizeof run;
-        run.flags = GLOS_RUN_DETACH;
+        run.flags = KRUN_DETACH;
         strncpy(run.command, f[4], sizeof run.command - 1);
         if (agent_post_app(0, &run, &seq) != 0) {
             kprintf("GLOS-SCHED error=queue name=%s\n", f[0]);

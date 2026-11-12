@@ -1,46 +1,11 @@
-/* API 2.0 inside the kernel: what api2.c (CORE, the dispatcher, events) and
+/* The API inside the kernel: what api2.c (CORE, the dispatcher, events) and
  * the areas' files (api2win.c: WIN, DRAW and the desktop's events) share.
- *
- * Until phase B's step 15 the kernel has API 1.x's header as well (appint.h
- * brings it: an app's queue of 1.x events, the desktop's events). The two
- * give some names different meanings: 1.x's are kept here as V1_, and
- * glos/api2.h's are the ones a file that includes this sees. */
+ * The API's names are glos/api2.h's; the kernel's own (KEV_, struct kevent
+ * and the rest: what the desktop and the agent give) are kapi.h's, which
+ * appint.h brings. */
 #ifndef K_API2INT_H
 #define K_API2INT_H
 #include "appint.h"
-
-enum {
-    V1_EV_KEY = GLOS_EV_KEY, V1_EV_MOUSE = GLOS_EV_MOUSE, V1_EV_FOCUS = GLOS_EV_FOCUS, V1_EV_RESIZE = GLOS_EV_RESIZE,
-    V1_EV_CLOSE = GLOS_EV_CLOSE, V1_EV_WHEEL = GLOS_EV_WHEEL, V1_EV_JOB = GLOS_EV_JOB,
-    V1_RUN_CONSOLE = GLOS_RUN_CONSOLE, V1_RUN_DETACH = GLOS_RUN_DETACH, V1_RUN_FULL = GLOS_RUN_FULL
-};
-#undef GLOS_EV_JOB
-#undef GLOS_RUN_FULL
-#undef GLOS_EV_KEY
-#undef GLOS_EV_MOUSE
-#undef GLOS_EV_FOCUS
-#undef GLOS_EV_RESIZE
-#undef GLOS_EV_CLOSE
-#undef GLOS_EV_WHEEL
-#undef GLOS_NET_RESOLVE                 /* (1.x's GLOS_FN_NET is sock.c's alone: none of its names are wanted here) */
-#undef GLOS_NET_CONNECT
-#undef GLOS_NET_SEND
-#undef GLOS_NET_RECV
-#undef GLOS_NET_CLOSE
-#undef GLOS_NET_STATE
-#undef GLOS_EV_NET
-#undef GLOS_E_NET_DOWN
-#undef GLOS_E_NET_NAME
-#undef GLOS_E_NET_TIMEOUT
-#undef GLOS_E_NET_REFUSED
-#undef GLOS_E_NET_RESET
-#undef GLOS_NETF_EVENTS
-#undef GLOS_NETF_NAGLE
-#undef GLOS_NETS_CONNECTING
-#undef GLOS_NETS_OPEN
-#undef GLOS_NETS_CLOSED
-#undef GLOS_NETS_FAILED
-#include "glos/api2.h"
 #include "handle.h"
 
 #define A2_QBYTES  16384u               /* an app's queued events */

@@ -7,7 +7,7 @@
 #include "dos.h"
 
 struct trapframe;
-struct glos_run;
+struct krun;
 
 /* The ssh thread's side. owner is its channel. */
 void agent_init(void (*kick_ssh)(void));       /* kick_ssh: output or an end is waiting */
@@ -28,14 +28,14 @@ int agent_busy(void);                           /* a job runs or waits */
 u32 agent_ps(char *buf, u32 max);               /* "job SEQ STATE COMMAND" lines */
 
 /* Apps' jobs (GLOS_FN_RUN, GLOS_FN_JOB; M9 step C), on the app's thread. app: its struct app. */
-int agent_post_app(void *app, const struct glos_run *r, u32 *seq);    /* (app may be 0 with GLOS_RUN_DETACH) */
+int agent_post_app(void *app, const struct krun *r, u32 *seq);    /* (app may be 0 with KRUN_DETACH) */
 int agent_post_detached(const char *cmd, const char *dir);     /* the kernel's own: nobody's */    /* 0, or a GLOS_E_ */
 int agent_app_type(void *app, u32 seq, const u16 *keys, u32 n);       /* the keys taken, or -1 */
 int agent_app_keys(void *app, u32 seq, u16 *out, u32 room);    /* an ended console job's unread keys, or -1 */
 int agent_app_kill(void *app, u32 seq);
 int agent_app_forget(void *app, u32 seq);
 void agent_app_gone(void *app);                 /* the app has ended: its jobs killed (or let go, if apps now) */
-u32 agent_jobs_stat(void *out, u32 room);       /* struct glos_stat_app for each job */
+u32 agent_jobs_stat(void *out, u32 room);       /* struct kprog for each job */
 u32 agent_job_seq(const void *job);             /* a job's number */
 u32 agent_job_by(u32 seq);                      /* the app that started it (its id), or 0 */
 /* API 2.0's JOB (kernel/app/api2job.c). */
@@ -44,7 +44,7 @@ struct agent_opts {
     u8 exclusive;                               /* 1 an exclusive session, 2 made an app without asking */
     u8 stdin_pipe;                              /* its standard input is what its app writes */
     u8 keep;                                    /* its slot is kept after its end, until agent_app_forget() */
-    u8 hidden;                                  /* (with GLOS_RUN_CONSOLE) no window: beside the desktop, its output
+    u8 hidden;                                  /* (with KRUN_CONSOLE) no window: beside the desktop, its output
                                                    kept by stream */
     const char *profile;                        /* the profile it runs with, or NULL */
     const char *command;                        /* its command line when longer than 1.x's structure holds (NULL:
@@ -54,7 +54,7 @@ struct agent_opts {
     u8 debug;                                   /* its program stops at its first 32-bit code, for its app's
                                                    debugger (API 2.0's DEBUG) */
 };
-int agent_post_job(void *app, const struct glos_run *r, const struct agent_opts *o, u32 *seq);
+int agent_post_job(void *app, const struct krun *r, const struct agent_opts *o, u32 *seq);
 int agent_app_read1(void *app, u32 seq, int stream, u8 *out, u32 room);        /* one stream's bytes; -1 no such job */
 int agent_app_write(void *app, u32 seq, const u8 *d, u32 n, int eof);          /* the bytes taken, or -1 */
 int agent_app_status(void *app, u32 seq, u32 *state, u32 *code, u32 *nout, u32 *nerr, u32 *ticks);

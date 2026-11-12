@@ -146,7 +146,7 @@ int api2_sys_stat(struct trapframe *tf)         /* (for any program: api2.c) */
 static int programs(struct trapframe *tf)
 {
     struct glos_sys_stat q;
-    struct glos_stat_app *old;                  /* (1.x's records are what the kernel's lists give) */
+    struct kprog *old;                  /* (1.x's records are what the kernel's lists give) */
     struct glos_program *p;
     u32 size, n, i, k;
     char *b;
@@ -155,7 +155,7 @@ static int programs(struct trapframe *tf)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     if (!(b = kmalloc(2 * TEXT_ROOM)))
         return a2_fail(tf, GLOS_E_MEMORY);
-    old = (struct glos_stat_app *)(b + TEXT_ROOM);
+    old = (struct kprog *)(b + TEXT_ROOM);
     n = stat_apps(old, TEXT_ROOM) / sizeof *old;
     p = (struct glos_program *)b;
     for (i = k = 0; i < n && (k + 1) * sizeof *p <= TEXT_ROOM; i++) {

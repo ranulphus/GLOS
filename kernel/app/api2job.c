@@ -25,7 +25,7 @@ static u32 seq_of(struct app *a, struct trapframe *tf, u32 h, int *fail)
 
 static int run(struct app *a, struct trapframe *tf)
 {
-    static struct glos_run r;                   /* (1.x's structure is what the agent takes; no wait while it is used) */
+    static struct krun r;                   /* (1.x's structure is what the agent takes; no wait while it is used) */
     static char cmd[1024];                      /* (a command line may be longer than that structure's) */
     struct glos_job_run q;
     struct agent_opts o;
@@ -57,8 +57,8 @@ static int run(struct app *a, struct trapframe *tf)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     if (!(vm.bi->flags & BI_F_AGENT))           /* (GLOS /RUN: there is nobody to run it) */
         return a2_fail(tf, GLOS_E_REFUSED);
-    r.flags = (detach ? V1_RUN_DETACH : 0u) | (q.how <= GLOS_RUN_FULL ? V1_RUN_CONSOLE : 0u)
-            | (q.how == GLOS_RUN_FULL ? V1_RUN_FULL : 0u);
+    r.flags = (detach ? KRUN_DETACH : 0u) | (q.how <= GLOS_RUN_FULL ? KRUN_CONSOLE : 0u)
+            | (q.how == GLOS_RUN_FULL ? KRUN_FULL : 0u);
     o.hidden = q.how == GLOS_RUN_HIDDEN;        /* (a console job without a window: the desktop stays as it is) */
     o.direct = (q.flags & GLOS_RUNF_DIRECT) != 0;
     o.exclusive = q.how == GLOS_RUN_EXCLUSIVE ? 1 : q.how == GLOS_RUN_APP ? 2 : 0;
