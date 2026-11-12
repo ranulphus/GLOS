@@ -150,7 +150,7 @@ host-test-run:
 # gui suites compare with). `make gui-goldens` (in the dev container).
 GUI_SRCS := $(wildcard sdk/gui/*.c)
 GUI_HOST := $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Ikernel/include -Iinclude
-build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h \
+build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api2.h include/glos/glos2.h \
                     tests/host/glosshim.c kernel/include/keymap.h $(CFG_SRCS) $(CP_SRCS) include/glos/config.h include/glos/tz.h
 	@mkdir -p build/host
 	$(Q)$(GUI_HOST) -Dmain=app_main -c -o build/host/guitest-app.o tests/dos/guitest.c
@@ -161,7 +161,7 @@ APPS := notepad calc images term files monitor control
 APP_LIBS_term := build/sdk/libsshc.a           # (TERM's ssh, sftp and ssh-keygen: M10)
 APP_HOST_FLAGS := -Ithird_party/stb
 define app_host
-build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h tests/host/glosshim.c \
+build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api2.h include/glos/glos2.h tests/host/glosshim.c \
                  kernel/include/keymap.h $$(CFG_SRCS) $$(CP_SRCS) include/glos/config.h include/glos/tz.h $$(APP_HOST_LIBS_$(1))
 	@mkdir -p build/host
 	$$(Q)$$(GUI_HOST) $$(APP_HOST_FLAGS) -Dmain=app_main -c -o build/host/$(1)-app.o apps/$(1)/$(1).c
@@ -595,10 +595,10 @@ build/dj/PROFCHK.EXE: tests/dos/profchk.c
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 # CACHEWC (tests/dos/cachewc.c): GLOS_FN_CACHE, write-combining conventional memory (API 1.4).
-build/dj/CACHEWC.EXE: tests/dos/cachewc.c build/sdk/libglos.a tools/glosmark.py
+build/dj/CACHEWC.EXE: tests/dos/cachewc.c build/sdk/libglos2.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
-	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos2.a
 	$(Q)python3 tools/glosmark.py $@
 # NESTRM (tests/dos/nestrm.c): a client three levels deep, for the host's real-mode stacks in upper memory (U3).
 build/dj/NESTRM.EXE: tests/dos/nestrm.c
@@ -628,34 +628,27 @@ build/dj/GDBME.EXE: tests/dos/gdbme.c
 	$(Q)$(DJCC) -O0 -g -Wall -Werror -o $@ $<
 	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-nm $@ > build/dj/GDBME.sym
 # DIRTEST (tests/dos/dirtest.c): a program at IOPL 3 and what GLOS takes back from it (M4e).
-# libglos (sdk/libglos, include/glos/api.h): the GLOS API for DJGPP programs (M6), and APPTEST, the apps suite's app.
-# The 2D library in it is the kernel's own code (kernel/gfx), built for the program.
+# libglos (sdk/libglos2, include/glos/glos2.h and api2.h): the GLOS API (2.0) for DJGPP programs. With it: the 2D
+# library (the kernel's own code, kernel/gfx, built for the program), the settings' schema, time zones and code
+# pages (sdk/config), and sockets (glos/net.h). And APITEST, the API's conformance suite (tests/api, make loopa-api).
 LIBGLOS_GFX := kernel/gfx/gfx.c kernel/gfx/pal.c kernel/gfx/font.c kernel/gfx/region.c \
                kernel/gfx/fonts/ui.c kernel/gfx/fonts/bold.c kernel/gfx/fonts/mono.c
-build/sdk/libglos.a: sdk/libglos/glos.c sdk/libglos/socket.c include/glos/api.h include/glos/gfx.h include/glos/net.h \
-                     $(LIBGLOS_GFX) $(CFG_SRCS) $(CP_SRCS) include/glos/config.h include/glos/tz.h include/glos/cp.h
-	@mkdir -p build/sdk
-	$(Q)echo "  DJCC    $<"
-	$(Q)rm -f $@ build/sdk/*.o
-	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/glos.o $<
-	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/socket.o sdk/libglos/socket.c
-	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/cfg.o sdk/config/cfg.c
-	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/tz.o sdk/config/tz.c
-	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/cp.o sdk/config/cp.c
-	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/cp_tables.o sdk/config/cp_tables.c
-	$(Q)for f in $(LIBGLOS_GFX); do \
-	    $(DJCC) -O2 -Wall -Werror -ffreestanding -Iinclude -Ikernel/include -c -o build/sdk/gfx_$$(basename $$f .c).o $$f || exit 1; \
-	  done
-	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/*.o
-# libglos 2.0 (sdk/libglos2, include/glos/glos2.h and api2.h): API 2.0 for DJGPP programs (phase B), beside libglos
-# 1.x until phase B's step 15; and APITEST, API 2.0's conformance suite (tests/api, make loopa-api).
-LIBGLOS2_SRCS := sdk/libglos2/glos2.c sdk/libglos2/glos2thr.c sdk/libglos2/glos2wrap.c
-build/sdk/libglos2.a: $(LIBGLOS2_SRCS) include/glos/glos2.h include/glos/api2.h
+LIBGLOS2_SRCS := sdk/libglos2/glos2.c sdk/libglos2/glos2thr.c sdk/libglos2/glos2wrap.c sdk/libglos2/socket.c
+LIBGLOS2_CFG := sdk/config/cfg.c sdk/config/tz.c sdk/config/cp.c sdk/config/cp_tables.c
+LIBGLOS2_OBJS := $(patsubst sdk/libglos2/%.c,build/sdk/v2/%.o,$(LIBGLOS2_SRCS)) \
+                 $(patsubst sdk/config/%.c,build/sdk/v2/%.o,$(LIBGLOS2_CFG)) \
+                 $(foreach f,$(LIBGLOS_GFX),build/sdk/v2/gfx_$(basename $(notdir $(f))).o)
+build/sdk/libglos2.a: $(LIBGLOS2_SRCS) include/glos/glos2.h include/glos/api2.h include/glos/gfx.h include/glos/net.h \
+                      $(LIBGLOS_GFX) $(CFG_SRCS) $(CP_SRCS) include/glos/config.h include/glos/tz.h include/glos/cp.h
 	@mkdir -p build/sdk/v2
 	$(Q)rm -f $@
 	$(Q)set -e; for f in $(LIBGLOS2_SRCS); do echo "  DJCC    $$f"; \
 	  $(DJCC) -O2 -Wall -Wextra -Werror -Iinclude -c -o build/sdk/v2/$$(basename $$f .c).o $$f; done
-	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ $(patsubst sdk/libglos2/%.c,build/sdk/v2/%.o,$(LIBGLOS2_SRCS))
+	$(Q)set -e; for f in $(LIBGLOS2_CFG); do \
+	  $(DJCC) -O2 -Wall -Werror -Iinclude -c -o build/sdk/v2/$$(basename $$f .c).o $$f; done
+	$(Q)set -e; for f in $(LIBGLOS_GFX); do \
+	  $(DJCC) -O2 -Wall -Werror -ffreestanding -Iinclude -Ikernel/include -c -o build/sdk/v2/gfx_$$(basename $$f .c).o $$f; done
+	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ $(LIBGLOS2_OBJS)
 # The linker's options for a program with threads (glos_thread: include/glos/glos2.h): --wrap for each of the C
 # library's functions libglos 2.0 puts its lock round (sdk/libglos2/wrap.list). Used as @build/sdk/glos2wrap.opt.
 build/sdk/glos2wrap.opt: sdk/libglos2/wrap.list
@@ -703,14 +696,14 @@ build/host/libbearssl.a: $(BEARSSL_HOST_OBJS)
 	$(Q)rm -f $@
 	$(Q)ar rcs $@ $(BEARSSL_HOST_OBJS)
 # TLS and HTTP for apps (sdk/tls, sdk/http; include/glos/tls.h, http.h; M10 step C).
-build/sdk/libtls.a: sdk/tls/tls.c sdk/tls/anchors.c include/glos/tls.h include/glos/api.h
+build/sdk/libtls.a: sdk/tls/tls.c sdk/tls/anchors.c include/glos/tls.h include/glos/api2.h include/glos/glos2.h
 	@mkdir -p build/sdk/tls
 	$(Q)echo "  DJCC    sdk/tls"
 	$(Q)rm -f $@
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -Ithird_party/bearssl/inc -c -o build/sdk/tls/tls.o sdk/tls/tls.c
 	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -Ithird_party/bearssl/inc -c -o build/sdk/tls/anchors.o sdk/tls/anchors.c
 	$(Q)$(DJENV) $(DJGPP_PREFIX)/bin/i586-pc-msdosdjgpp-ar rcs $@ build/sdk/tls/tls.o build/sdk/tls/anchors.o
-build/sdk/libhttp.a: sdk/http/http.c include/glos/http.h include/glos/tls.h include/glos/net.h include/glos/api.h
+build/sdk/libhttp.a: sdk/http/http.c include/glos/http.h include/glos/tls.h include/glos/net.h include/glos/api2.h include/glos/glos2.h
 	@mkdir -p build/sdk/http
 	$(Q)echo "  DJCC    sdk/http"
 	$(Q)rm -f $@
@@ -719,7 +712,7 @@ build/sdk/libhttp.a: sdk/http/http.c include/glos/http.h include/glos/tls.h incl
 # The SSH and SFTP client (sdk/sshc, glos/sshc.h, glos/sftpc.h; M10 step D): its own code, the kernel's wire
 # encoding and key parser (kernel/ssh/sshbuf.c, sshkeys.c), TinySSH's crypto, randombytes() from GLOS_FN_RANDOM.
 build/sdk/libsshc.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h \
-                     kernel/ssh/sshbuf.h include/glos/api.h
+                     kernel/ssh/sshbuf.h include/glos/api2.h include/glos/glos2.h
 	@mkdir -p build/sdk/sshc
 	$(Q)echo "  DJCC    sdk/sshc"
 	$(Q)rm -f $@ build/sdk/sshc/*.o
@@ -738,7 +731,7 @@ build/host/sshc_test: tests/host/sshc_test.c $(SSHC_SRCS) $(TINYSSH_SRCS) includ
 	  $(TINYSSH_SRCS)
 sshc-test: build/host/sshc_test
 	$(Q)tests/host/sshc_test.sh build/host/sshc_test
-NET_LIBS := build/sdk/libhttp.a build/sdk/libtls.a build/sdk/libbearssl.a build/sdk/libglos.a
+NET_LIBS := build/sdk/libhttp.a build/sdk/libtls.a build/sdk/libbearssl.a build/sdk/libglos2.a
 # FETCH (apps/fetch): a file over HTTPS or HTTP, for the terminal and SSH.
 build/apps/FETCH.EXE: apps/fetch/fetch.c $(NET_LIBS) tools/glosmark.py
 	@mkdir -p build/apps
@@ -753,7 +746,7 @@ build/apps/PKG.EXE: $(wildcard apps/pkg/*.c apps/pkg/*.h) $(NET_LIBS) build/sdk/
 	$(Q)$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -Iinclude -Ithird_party/bearssl/inc -Ithird_party/stb \
 	  -Ikernel/ssh -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -o $@ $(wildcard apps/pkg/*.c) \
 	  build/sdk/libhttp.a build/sdk/libtls.a build/sdk/libbearssl.a build/sdk/libsshc.a build/sdk/libgui.a \
-	  build/sdk/libglos.a -lm
+	  build/sdk/libglos2.a -lm
 	$(Q)python3 tools/glosmark.py $@
 # C:\GLOS\CERTS.DAT: the trust anchors, from curl's cacert.pem (pinned in tools/setup/versions.mk).
 build/host/mkcerts: tools/certs/mkcerts.c sdk/tls/anchors.c include/glos/tls.h build/host/libbearssl.a
@@ -773,7 +766,7 @@ build/glos/KEYS/PKG/GLOS.PUB: tools/pkg/GLOS.PUB
 	  sys.exit(0 if w[0] == 'glos-pkg-ed25519' and len(base64.b64decode(w[1], validate=True)) == 32 else 'bad key')" $<
 	$(Q)cp $< $@
 # The toolkit (sdk/gui, include/glos/gui.h; M9): build/sdk/libgui.a, linked before libglos.a.
-build/sdk/libgui.a: $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h include/glos/gfx.h
+build/sdk/libgui.a: $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api2.h include/glos/glos2.h include/glos/gfx.h
 	@mkdir -p build/sdk/gui
 	$(Q)echo "  DJCC    sdk/gui"
 	$(Q)rm -f $@ build/sdk/gui/*.o
@@ -786,63 +779,63 @@ build/dj/PMVGA.EXE: tests/dos/pmvga.c
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 # GLOSLOG (tests/dos/gloslog.c): GLOS's log at the DOS prompt, for a bench PC with no serial cable or network.
-build/dj/GLOSLOG.EXE: tests/dos/gloslog.c build/sdk/libglos.a tools/glosmark.py
+build/dj/GLOSLOG.EXE: tests/dos/gloslog.c build/sdk/libglos2.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
-	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos2.a
 	$(Q)python3 tools/glosmark.py $@
 # NETTEST (tests/dos/nettest.c; M10 step B): an app's connections, and the sockets on them.
-build/dj/NETTEST.EXE: tests/dos/nettest.c build/sdk/libglos.a tools/glosmark.py
+build/dj/NETTEST.EXE: tests/dos/nettest.c build/sdk/libglos2.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
-	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos2.a
 	$(Q)python3 tools/glosmark.py $@
-build/dj/RUNTEST.EXE: tests/dos/runtest.c build/sdk/libglos.a tools/glosmark.py
+build/dj/RUNTEST.EXE: tests/dos/runtest.c build/sdk/libglos2.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
-	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos2.a
 	$(Q)python3 tools/glosmark.py $@
-build/dj/GUITEST.EXE: tests/dos/guitest.c build/sdk/libgui.a build/sdk/libglos.a tools/glosmark.py
+build/dj/GUITEST.EXE: tests/dos/guitest.c build/sdk/libgui.a build/sdk/libglos2.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
-	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -o $@ $< build/sdk/libgui.a build/sdk/libglos.a
+	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -o $@ $< build/sdk/libgui.a build/sdk/libglos2.a
 	$(Q)python3 tools/glosmark.py $@
 # The native apps for DOS: build/apps/NAME.EXE.
 APP_EXES := $(foreach a,$(APPS),build/apps/$(shell echo $(a) | tr a-z A-Z).EXE)
 define app_exe
-build/apps/$(1).EXE: $$(wildcard apps/$(2)/*.c apps/$(2)/*.h) build/sdk/libgui.a build/sdk/libglos.a tools/glosmark.py $$(APP_LIBS_$(2))
+build/apps/$(1).EXE: $$(wildcard apps/$(2)/*.c apps/$(2)/*.h) build/sdk/libgui.a build/sdk/libglos2.a tools/glosmark.py $$(APP_LIBS_$(2))
 	@mkdir -p build/apps
 	$$(Q)echo "  DJCC    apps/$(2)"
 	$$(Q)$$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -Iinclude -Ithird_party/stb -o $$@ $$(wildcard apps/$(2)/*.c) build/sdk/libgui.a \
-	  $$(APP_LIBS_$(2)) build/sdk/libglos.a -lm
+	  $$(APP_LIBS_$(2)) build/sdk/libglos2.a -lm
 	$$(Q)python3 tools/glosmark.py $$@
 endef
 $(foreach a,$(APPS),$(eval $(call app_exe,$(shell echo $(a) | tr a-z A-Z),$(a))))
 apps: $(APP_EXES)
-build/dj/APPTEST.EXE: tests/dos/apptest.c build/sdk/libglos.a tools/glosmark.py
+build/dj/APPTEST.EXE: tests/dos/apptest.c build/sdk/libglos2.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
-	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos2.a
 	$(Q)python3 tools/glosmark.py $@
 # WINTEST (tests/dos/wintest.c): an app with a window, for the win suite (M6 steps E and F).
-build/dj/WINTEST.EXE: tests/dos/wintest.c build/sdk/libglos.a tools/glosmark.py
+build/dj/WINTEST.EXE: tests/dos/wintest.c build/sdk/libglos2.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
-	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos2.a
 	$(Q)python3 tools/glosmark.py $@
 # GPUTEST (tests/dos/gputest.c): an app that draws with the Matrox engine from its own copy of the HAL (M8).
 GPUTEST_HAL := $(addprefix $(MGAHAL)/,src/pci.c src/chip.c src/fifo.c src/engine.c src/blit.c src/debug/serial.c \
                port/djgpp.c)
-build/dj/GPUTEST.EXE: tests/dos/gputest.c build/sdk/libglos.a $(GPUTEST_HAL) tools/glosmark.py
+build/dj/GPUTEST.EXE: tests/dos/gputest.c build/sdk/libglos2.a $(GPUTEST_HAL) tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
-	$(Q)$(DJCC) -O1 -Wall -Werror -DMGA_DJGPP=1 -Iinclude -I$(MGAHAL)/include -o $@ $< $(GPUTEST_HAL) build/sdk/libglos.a
+	$(Q)$(DJCC) -O1 -Wall -Werror -DMGA_DJGPP=1 -Iinclude -I$(MGAHAL)/include -o $@ $< $(GPUTEST_HAL) build/sdk/libglos2.a
 	$(Q)python3 tools/glosmark.py $@
 # AUDTEST (tests/dos/audtest.c): a tone through GLOS's mixer (M8 step E).
-build/dj/AUDTEST.EXE: tests/dos/audtest.c build/sdk/libglos.a tools/glosmark.py
+build/dj/AUDTEST.EXE: tests/dos/audtest.c build/sdk/libglos2.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
-	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a -lm
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos2.a -lm
 	$(Q)python3 tools/glosmark.py $@
 build/dj/DIRTEST.EXE: tests/dos/dirtest.c
 	@mkdir -p $(dir $@)
@@ -859,10 +852,10 @@ build/dj/UMAPROBE.EXE: tests/dos/umaprobe.c
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 # The game port as a DOS program sees it, as a DPMI client or an app (docs/gamepad.md J1).
-build/dj/JOYTEST.EXE: tests/dos/joytest.c build/sdk/libglos.a tools/glosmark.py
+build/dj/JOYTEST.EXE: tests/dos/joytest.c build/sdk/libglos2.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
-	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos2.a
 	$(Q)python3 tools/glosmark.py $@
 # Every UHCI USB controller's state as the BIOS left it, read-only (docs/gamepad.md J0).
 build/dj/USBPEEK.EXE: tests/dos/usbpeek.c

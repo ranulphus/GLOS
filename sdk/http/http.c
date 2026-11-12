@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <glos/api.h>
+#include <glos/glos2.h>
 #include <glos/http.h>
 #include <glos/net.h>
 #include <glos/tls.h>
@@ -58,7 +58,7 @@ static int parse(const char *s, struct url *u)
 
 /* A connection: the TLS's or the bare one's. */
 struct conn {
-    int id;
+    glos_handle id;
     struct tls *tls;
     unsigned timeout_ms;
     unsigned char buf[4096];
@@ -76,7 +76,7 @@ static int raw_read(struct conn *c, void *buf, size_t n)
             snprintf(c->why, sizeof c->why, "%s", tls_why(c->tls));
         return r;
     }
-    r = glos_net_recv((unsigned)c->id, buf, (unsigned)n, c->timeout_ms, &st);
+    r = glos_net_receive(c->id, buf, (unsigned)n, c->timeout_ms, &st);
     if (r < 0) {
         snprintf(c->why, sizeof c->why, "connection lost");
         return -1;
@@ -130,7 +130,7 @@ static int send_all(struct conn *c, const char *s, size_t n)
     if (c->tls)
         return tls_write(c->tls, s, n) == (int)n ? 0 : -1;
     while (n) {
-        int r = glos_net_send((unsigned)c->id, s, (unsigned)n, c->timeout_ms);
+        int r = glos_net_send(c->id, s, (unsigned)n, c->timeout_ms);
         if (r <= 0)
             return -1;
         s += r, n -= (size_t)r;
@@ -143,6 +143,7 @@ static int open_conn(struct http_get *g, const struct url *u, struct conn *c)
     unsigned addr;
     const char *at = g->resolve ? strchr(g->resolve, ':') : 0;
     struct in_addr ia;
+    int e;
     memset(c, 0, sizeof *c);
     c->timeout_ms = g->timeout_ms ? g->timeout_ms : 30000;
     if (at && (size_t)(at - g->resolve) == strlen(u->host) && !strncmp(g->resolve, u->host, strlen(u->host))
@@ -150,14 +151,14 @@ static int open_conn(struct http_get *g, const struct url *u, struct conn *c)
         addr = (unsigned)ia.s_addr;
     } else if (inet_aton(u->host, &ia)) {
         addr = (unsigned)ia.s_addr;
-    } else if (glos_net_resolve(u->host, c->timeout_ms, &addr) != 0) {
-        snprintf(g->why, sizeof g->why, glos_error() == GLOS_E_NET_NAME ? "no such name: %s"
-                                        : glos_error() == GLOS_E_NET_DOWN ? "no network (%s)" : "name not found in time: %s",
+    } else if ((e = glos_net_resolve(u->host, c->timeout_ms, &addr)) != 0) {
+        snprintf(g->why, sizeof g->why, e == GLOS_E_NET_NAME ? "no such name: %s"
+                                        : e == GLOS_E_NET_DOWN ? "no network (%s)" : "name not found in time: %s",
                  u->host);
         return -1;
     }
-    if ((c->id = glos_net_connect(addr, u->port, c->timeout_ms, 0)) < 0) {
-        int e = glos_error();
+    if (!(c->id = glos_net_connect(addr, u->port, c->timeout_ms, 0))) {
+        e = glos_error();
         snprintf(g->why, sizeof g->why, "%s:%u: %s", u->host, u->port,
                  e == GLOS_E_NET_REFUSED ? "connection refused" : e == GLOS_E_NET_TIMEOUT ? "connection timed out"
                  : e == GLOS_E_NET_DOWN ? "no network" : "connection failed");
@@ -166,12 +167,14 @@ static int open_conn(struct http_get *g, const struct url *u, struct conn *c)
     if (u->https) {
         char why[64];
         if (!g->anchors) {
-            glos_net_close((unsigned)c->id, 1);
+            glos_net_close(c->id, 1);
+            c->id = 0;
             snprintf(g->why, sizeof g->why, "no trust anchors");
             return -1;
         }
         if (!(c->tls = tls_open(c->id, u->host, g->anchors, c->timeout_ms, why, sizeof why))) {
             snprintf(g->why, sizeof g->why, "%s: %s", u->host, why);
+            c->id = 0;                          /* (the TLS layer closed it) */
             return -1;
         }
         snprintf(g->tls, sizeof g->tls, "%s", tls_version(c->tls));
@@ -183,8 +186,8 @@ static void close_conn(struct conn *c)
 {
     if (c->tls)
         tls_close(c->tls);
-    else if (c->id > 0)
-        glos_net_close((unsigned)c->id, 0);
+    else if (c->id)
+        glos_net_close(c->id, 0);
     c->tls = 0;
     c->id = 0;
 }

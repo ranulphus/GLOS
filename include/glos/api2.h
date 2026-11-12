@@ -763,8 +763,10 @@ struct glos_job_run {
 struct glos_job_io {
     unsigned size;
     glos_handle handle;
-    unsigned stream;            /* READ: GLOS_JOB_OUT or GLOS_JOB_ERR. WRITE: GLOS_JOB_IN; GLOS_JOB_KEYS (a WINDOW
-                                   job's keys: 2 bytes each, the scan code above the character) */
+    unsigned stream;            /* READ: GLOS_JOB_OUT or GLOS_JOB_ERR; GLOS_JOB_KEYS (a WINDOW job that has ended:
+                                   the keys typed to it that it never read, the app's again: 64 at most, once).
+                                   WRITE: GLOS_JOB_IN; GLOS_JOB_KEYS (a WINDOW job's keys: 2 bytes each, the scan
+                                   code above the character) */
     unsigned buffer;
     unsigned length;            /* READ: the room. WRITE: how many bytes; 0 with GLOS_JOB_IN: the input's end (the
                                    program reads no more: end of file) */

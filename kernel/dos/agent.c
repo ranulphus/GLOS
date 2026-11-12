@@ -520,11 +520,7 @@ int agent_app_keys(void *app, u32 seq, u16 *out, u32 room)
     f = irq_save();
     n = j->nleft < room ? j->nleft : room;
     memcpy(out, j->left, n * sizeof *out);
-    j->nleft = 0;
-    if (!ring_used(&j->out[0]) && !ring_used(&j->out[1])) {
-        j->app_owner = NULL;
-        j->state = J_FREE;
-    }
+    j->nleft = 0;                               /* (the job stays the app's until its handle is closed) */
     irq_restore(f);
     return (int)n;
 }

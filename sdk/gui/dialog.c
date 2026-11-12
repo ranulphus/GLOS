@@ -12,17 +12,19 @@
 
 /* ---- the clipboard */
 
-int gui_clip_set(const char *text, size_t n) { return glos_clip_set(text, (unsigned)n); }
+int gui_clip_set(const char *text, size_t n) { return glos_clip_put(GLOS_CLIP_TEXT, text, (unsigned)n) == 0 ? 0 : -1; }
 
 char *gui_clip_get(size_t *n)
 {
     unsigned len = 0, got = 0;
     char *t;
-    if (glos_clip_get(NULL, 0, &len) != 0 || !len)
+    int r = glos_clip_get(GLOS_CLIP_TEXT, NULL, 0, &len);       /* (its length: all of it "cut") */
+    if ((r != 0 && r != GLOS_E_ROOM) || !len)
         return NULL;
     if (!(t = malloc(len + 1)))
         return NULL;
-    if (glos_clip_get(t, len, &got) != 0) {
+    r = glos_clip_get(GLOS_CLIP_TEXT, t, len, &got);
+    if (r != 0 && r != GLOS_E_ROOM) {
         free(t);
         return NULL;
     }

@@ -1,5 +1,5 @@
 /* TLS for GLOS apps (M10 step C; sdk/tls, DJGPP): BearSSL 0.6's TLS 1.2
- * client over a GLOS_FN_NET connection, checking the server's certificate
+ * client over a connection of GLOS's (NET: its handle), checking the server's certificate
  * against trust anchors (Mozilla's roots, as curl ships them, made into
  * C:\GLOS\CERTS.DAT on the build host by tools/certs).
  *
@@ -34,7 +34,7 @@ int tls_anchors_save(const struct tls_anchors *a, const char *path);   /* 0, or 
 void tls_anchors_free(struct tls_anchors *a);
 
 struct tls;
-struct tls *tls_open(int conn, const char *host, const struct tls_anchors *a, unsigned timeout_ms, char *why,
+struct tls *tls_open(unsigned conn, const char *host, const struct tls_anchors *a, unsigned timeout_ms, char *why,
                      size_t room);      /* the handshake done over GLOS connection `conn` (it is the TLS's then),
                                            host the name checked; 0 and why */
 int tls_read(struct tls *t, void *buf, size_t n);     /* bytes; 0 at the end; -1 (tls_why) */

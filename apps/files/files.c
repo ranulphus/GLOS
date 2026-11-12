@@ -53,14 +53,21 @@ static void say(const char *what, const char *a)
 
 /* ---- running and opening */
 
+/* A setting: 1 if the file sets it, 0 if this is its default, -1 if there is no such setting. */
+static int setting(const char *sec, const char *key, char *v, unsigned room)
+{
+    int set = 0, r = glos_setting_get(sec, key, v, room, &set);
+    if (r != 0 && r != GLOS_E_ROOM) {
+        v[0] = 0;
+        return -1;
+    }
+    return set ? 1 : 0;
+}
+
 int files_run(const char *command, const char *dir)
 {
-    struct glos_run r;
-    memset(&r, 0, sizeof r);
-    r.flags = GLOS_RUN_DETACH;
-    snprintf(r.command, sizeof r.command, "%s", command);
-    snprintf(r.dir, sizeof r.dir, "%s", dir && dir[0] ? dir : files_home);
-    if (glos_run(&r) < 0) {
+    glos_job_run(command, dir && dir[0] ? dir : files_home, 0, GLOS_RUN_HIDDEN, GLOS_RUNF_DETACH, 0);
+    if (glos_error() != 0) {
         gui_message(desk, "Files", "GLOS couldn't start it.", GUI_MB_OK);
         return -1;
     }
@@ -108,7 +115,7 @@ int files_open(const char *path)
     gui_path_up(dir);
     if (d) {
         snprintf(ext + 1, sizeof ext - 1, "%s", d + 1);
-        if (glos_config_get("open", ext, prog, sizeof prog) > 0 && prog[0]) {      /* [open] says */
+        if (setting("open", ext, prog, sizeof prog) > 0 && prog[0]) {      /* [open] says */
             char cmd[400];
             if (strchr(prog, '\\') || strchr(prog, ':'))
                 snprintf(cmd, sizeof cmd, "%s %s", prog, path);
@@ -193,20 +200,20 @@ static int programs(const char *key, char names[][40], char titles[][40], int *k
     char secs[2048], v[64];
     char *s;
     int n = 0;
-    if (glos_config_sections(secs, sizeof secs - 1) <= 0)
+    int r = glos_setting_sections(secs, sizeof secs);
+    if (r != 0 && r != GLOS_E_ROOM)
         return 0;
-    secs[sizeof secs - 1] = 0;
     for (s = strtok(secs, "\n"); s && n < room; s = strtok(NULL, "\n")) {
         if (strncmp(s, "program ", 8))
             continue;
-        if (glos_config_get(s, key, v, sizeof v) <= 0 || strcmp(v, "1"))
+        if (setting(s, key, v, sizeof v) <= 0 || strcmp(v, "1"))
             continue;
         snprintf(names[n], 40, "%s", s + 8);
-        if (glos_config_get(s, "title", v, sizeof v) > 0 && v[0])
+        if (setting(s, "title", v, sizeof v) > 0 && v[0])
             snprintf(titles[n], 40, "%s", v);
         else
             snprintf(titles[n], 40, "%s", s + 8);
-        kinds[n] = glos_config_get(s, "icon", v, sizeof v) >= 0 ? icon_by_name(v) : IC_PROGRAM;
+        kinds[n] = setting(s, "icon", v, sizeof v) >= 0 ? icon_by_name(v) : IC_PROGRAM;
         n++;
     }
     return n;
@@ -246,10 +253,8 @@ static void open_item(int i)
     } else if (!strncmp(items[i].what, "program ", 8)) {
         char sec[48], args[200], dir[100], cmd[300];
         snprintf(sec, sizeof sec, "program %s", items[i].what + 8);
-        if (glos_config_get(sec, "args", args, sizeof args) < 0)
-            args[0] = 0;
-        if (glos_config_get(sec, "dir", dir, sizeof dir) < 0)
-            dir[0] = 0;
+        setting(sec, "args", args, sizeof args);
+        setting(sec, "dir", dir, sizeof dir);
         snprintf(cmd, sizeof cmd, "%s%s%s", items[i].what + 8, args[0] ? " " : "", args);
         files_run(cmd, dir);
     } else {
@@ -392,10 +397,8 @@ static void command(struct gui_window *w, int id)
     } else if (id >= L_PROGRAM && id < L_PROGRAM + 16) {
         char sec[48], args[200], dir[100], cmd[300];
         snprintf(sec, sizeof sec, "program %s", lnames[id - L_PROGRAM]);
-        if (glos_config_get(sec, "args", args, sizeof args) < 0)
-            args[0] = 0;
-        if (glos_config_get(sec, "dir", dir, sizeof dir) < 0)
-            dir[0] = 0;
+        setting(sec, "args", args, sizeof args);
+        setting(sec, "dir", dir, sizeof dir);
         snprintf(cmd, sizeof cmd, "%s%s%s", lnames[id - L_PROGRAM], args[0] ? " " : "", args);
         files_run(cmd, dir);
     } else if (id == L_RUN) {
@@ -416,19 +419,21 @@ static void command(struct gui_window *w, int id)
     }
 }
 
-static void app_event(const struct glos_event *ev)
+static void app_event(const struct glos_ev *ev)
 {
-    switch (ev->type) {
-    case GLOS_EV_LAUNCH:
-        say("launcher", "");
-        gui_popup_menu(desk, launcher, ev->x, ev->y);     /* (above the task bar: it goes up to fit) */
+    const struct glos_ev_shell *sh = (const struct glos_ev_shell *)ev;
+    switch (ev->kind) {
+    case GLOS_EV_SHELL:
+        if (sh->what == GLOS_SHELL_LAUNCH) {
+            say("launcher", "");
+            gui_popup_menu(desk, launcher, sh->x, sh->y);       /* (above the task bar: it goes up to fit) */
+        } else if (sh->what == GLOS_SHELL_TASKS) {
+            say("tasks", "");
+            run_app("MONITOR.EXE -tasks", NULL);
+        }
         break;
-    case GLOS_EV_SYSKEY:
-        say("tasks", "");
-        run_app("MONITOR.EXE -tasks", NULL);
-        break;
-    case GLOS_EV_FILES:
-        folder_changed(ev->key);
+    case GLOS_EV_FS:
+        folder_changed(ev->handle);
         break;
     }
 }
@@ -466,12 +471,8 @@ int main(int argc, char **argv)
         desk->on_resize = desk_resized;
         area = gui_canvas(desk->root, 0, 0, area_draw, area_event);
         gui_grow(area, 1);
-        {
-            struct glos_window g;
-            memset(&g, 0, sizeof g);
-            glos_screen(&g);
-            desk->w = g.w, desk->h = g.h - 20;
-        }
+        gui_screen_size(&desk->w, &desk->h);
+        desk->h -= 20;
         gui_show(desk, 1);
         desktop_items();
         build_launcher();

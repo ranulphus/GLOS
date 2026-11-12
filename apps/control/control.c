@@ -8,7 +8,7 @@
  * Remove); the kinds of file and what opens them ([open]). Under the pages,
  * what the setting with the keyboard does and when a change to it takes
  * effect. Apply checks every change against the schema first, then sets them
- * (GLOS_FN_CONFIG, which writes the file); a new screen mode is tried for
+ * (SETTINGS' SET, which writes the file); a new screen mode is tried for
  * fifteen seconds, and goes back unless it is kept. OK applies and closes;
  * Cancel closes.
  *
@@ -79,7 +79,7 @@ static struct val *val_of(const char *sec, const char *key)
 {
     char buf[1024];
     struct val *v;
-    int i;
+    int i, set = 0;
     for (i = 0; i < nvals; i++)
         if (same(vals[i].sec, sec) && same(vals[i].key, key))
             return &vals[i];
@@ -89,7 +89,7 @@ static struct val *val_of(const char *sec, const char *key)
     snprintf(v->sec, sizeof v->sec, "%s", sec);
     snprintf(v->key, sizeof v->key, "%s", key);
     v->k = cfg_find(sec, key);
-    if (glos_config_get(sec, key, buf, sizeof buf) == 1) {
+    if (glos_setting_get(sec, key, buf, sizeof buf, &set) == 0 && set) {
         v->was = dup(buf);
         v->now = dup(buf);
     }
@@ -553,12 +553,13 @@ static int apply(void)
     for (pass = 0; pass < 2; pass++)            /* the screen's mode last, to be tried */
         for (i = 0; i < nvals; i++) {
             struct val *v = &vals[i];
+            unsigned when = 0;
             int r;
             if (!val_changed(v) || (v->k->type == CFG_MODE) != (pass == 1))
                 continue;
             why[0] = 0;
-            r = v->now ? glos_config_set(v->sec, v->key, v->now, why, sizeof why)
-                       : glos_config_unset(v->sec, v->key) == 0 ? v->k->when : -1;
+            r = glos_setting_set(v->sec, v->key, v->now, &when, why, sizeof why) != 0 ? -1
+                : v->now ? (int)when : v->k->when;      /* (v->now NULL: taken out of the file) */
             if (r < 0) {
                 snprintf(msg, sizeof msg, "[%s] %s couldn't be set: %s", v->sec, v->key, why[0] ? why : "GLOS refused it");
                 show_val(v);
@@ -579,10 +580,7 @@ static int apply(void)
         if (try_mode()) {
             printf("CONTROL mode kept %s\n", val_text(mode));
         } else {                                /* the mode before, again */
-            if (old_mode)
-                glos_config_set(mode->sec, mode->key, old_mode, why, sizeof why);
-            else
-                glos_config_unset(mode->sec, mode->key);
+            glos_setting_set(mode->sec, mode->key, old_mode, 0, why, sizeof why);       /* (NULL: out of the file) */
             free(mode->now);
             free(mode->was);
             mode->now = dup(old_mode);
@@ -620,8 +618,10 @@ static void read_file(void)
 {
     char buf[2048], *p, *e;
     int n, i;
-    n = glos_config_sections(buf, sizeof buf - 1);
-    buf[n > 0 ? n : 0] = 0;
+    buf[0] = 0;
+    n = glos_setting_sections(buf, sizeof buf);
+    if (n != 0 && n != GLOS_E_ROOM)
+        buf[0] = 0;
     for (p = buf; *p; p = e) {
         e = strchr(p, '\n');
         if (e)
@@ -635,8 +635,10 @@ static void read_file(void)
                 snprintf(progs[nprogs++], sizeof progs[0], "%s", p + 8);
         }
     }
-    n = glos_config_keys("open", buf, sizeof buf - 1);
-    buf[n > 0 ? n : 0] = 0;
+    buf[0] = 0;
+    n = glos_setting_keys("open", buf, sizeof buf);
+    if (n != 0 && n != GLOS_E_ROOM)
+        buf[0] = 0;
     for (p = buf; *p; p = e) {
         char *eq;
         e = strchr(p, '\n');

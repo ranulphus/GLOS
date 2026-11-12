@@ -2,7 +2,7 @@
  * from it or pop up where the app says, and the choice (a button that drops
  * a list of its items down).
  *
- * An open menu is a pop-up window of its own (GLOS_WIN_POPUP), above every
+ * An open menu is a pop-up window of its own (GLOS_WK_POPUP), above every
  * other, with the keyboard while it is up: Up and Down, Enter, Esc, Left and
  * Right to the menu beside it, an item's letter. A press anywhere else takes
  * the keyboard from it, and it goes. One menu is open at a time. Choosing an

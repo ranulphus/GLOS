@@ -72,7 +72,7 @@ static int load(const char *path)
 void gui_smooth_start(const char *argv0)
 {
     char v[8], path[300], *p;
-    if (glos_config_get("display", "font_smoothing", v, sizeof v) < 0 || strcmp(v, "on"))
+    if (glos_setting_get("display", "font_smoothing", v, sizeof v, 0) != 0 || strcmp(v, "on"))
         return;
     snprintf(path, sizeof path, "%s", argv0 ? argv0 : "");
     for (p = path; *p; p++)

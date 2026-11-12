@@ -25,14 +25,31 @@ static struct {
 
 unsigned gui_now(void) { return glos_ticks(); }
 
+/* GLOS's events of a window, as the toolkit takes them: one record for every kind (os_from fills it). */
+struct os_event {
+    unsigned type, window, time;
+    int x, y;
+    unsigned buttons, key, ch, mods, down;      /* (key: a key's code, a mouse's button, a wheel's notches) */
+};
+enum { OS_KEY = 1, OS_MOUSE, OS_WHEEL, OS_FOCUS, OS_RESIZE, OS_CLOSE };
+
 static unsigned dblclick = GUI_DBLCLICK;       /* [input] double_click (M9) */
 
 int gui_init(int argc, char **argv)
 {
-    char v[16];
-    if (glos_init() != 0)
+    char v[16], name[32] = "App";
+    const char *p = argc > 0 && argv[0] ? argv[0] : "", *q;
+    unsigned i;
+    for (q = p; *q; q++)                        /* the program's name, for GLOS's lists: its file's, less the folder */
+        if (*q == '\\' || *q == '/' || *q == ':')
+            p = q + 1;
+    for (i = 0; i < sizeof name - 1 && p[i] && p[i] != '.'; i++)
+        name[i] = p[i];
+    if (i)
+        name[i] = 0;
+    if (glos_init(name, "", "") != 0)
         return -1;
-    if (glos_config_get("input", "double_click", v, sizeof v) >= 0 && atoi(v) >= 200 && atoi(v) <= 1000)
+    if (glos_setting_get("input", "double_click", v, sizeof v, 0) == 0 && atoi(v) >= 200 && atoi(v) <= 1000)
         dblclick = (unsigned)atoi(v);
     gui_smooth_start(argc > 0 ? argv[0] : NULL);
     return 0;
@@ -40,8 +57,9 @@ int gui_init(int argc, char **argv)
 
 void gui_screen_size(int *w, int *h)
 {
-    struct glos_window s;
+    struct glos_screen s;
     memset(&s, 0, sizeof s);
+    s.size = sizeof s;
     if (glos_screen(&s) != 0)
         s.w = 640, s.h = 480;
     *w = s.w, *h = s.h;
@@ -436,8 +454,14 @@ static void draw_tree(struct gui_widget *w, struct gfx_surface *s, struct gfx_re
 /* The window's pixels and back buffer, found again (an app's memory may have moved: glos_ptr). */
 static int surfaces(struct gui_window *win)
 {
-    if (!win->id || glos_surface(&win->gw, &win->s) != 0)
+    void *pix = win->id ? glos_ptr(win->px.pixels) : 0;
+    if (!pix)
         return -1;
+    {
+        struct gfx_fmt f = { (unsigned char)win->px.format.bpp, win->px.format.rpos, win->px.format.rsize, win->px.format.gpos,
+                             win->px.format.gsize, win->px.format.bpos, win->px.format.bsize };
+        gfx_init(&win->s, pix, win->px.w, win->px.h, win->px.pitch, &f);
+    }
     if (!win->back_mem || win->back.w != win->w || win->back.h != win->h || win->back.fmt.bpp != win->s.fmt.bpp) {
         unsigned pitch = (unsigned)win->w * (win->s.fmt.bpp / 8u);
         free(win->back_mem);
@@ -486,10 +510,9 @@ static void redraw(struct gui_window *win)
     }
     {
         struct gfx_rect b;
-        struct glos_rect g;
         gfx_region_bounds(&win->dirty, &b);
-        g.x = b.x, g.y = b.y, g.w = b.w, g.h = b.h;
-        glos_present(win->id, &g);
+        if (b.w > 0 && b.h > 0)
+            glos_present(win->id, b.x, b.y, b.w, b.h);
     }
     gfx_region_set(&win->dirty, NULL);
 }
@@ -515,7 +538,7 @@ struct gui_window *gui_window_at(const char *title, int x, int y, int w, int h, 
     win->flags = flags;
     win->w = w, win->h = h;
     win->gw.x = x, win->gw.y = y;
-    win->gw.flags = x < 0 && y < 0 ? GLOS_WIN_ANYWHERE : 0;
+    win->gw.flags = x < 0 && y < 0 ? GLOS_WF_ANYWHERE : 0;
     strncpy(win->gw.title, title ? title : "", sizeof win->gw.title - 1);
     window_root(win);
     win->next = G.wins;
@@ -555,31 +578,33 @@ void gui_fit(struct gui_window *w)
 
 void gui_win_realize(struct gui_window *w, int x, int y, int anywhere)
 {
-    struct glos_window gw;
-    unsigned f = 0;
+    unsigned f = 0, kind = GLOS_WK_NORMAL;
+    glos_handle h;
     if (w->id)
         return;
     if (w->flags & GUI_W_DIALOG || w->w <= 0 || w->h <= 0)
         gui_fit(w);
     if (w->flags & (GUI_W_FIXED | GUI_W_DIALOG))
-        f |= GLOS_WIN_FIXED;
+        f |= GLOS_WF_FIXED;
     if (w->flags & GUI_W_POPUP)
-        f |= GLOS_WIN_POPUP;
+        kind = GLOS_WK_POPUP;
     if (w->flags & GUI_W_BARE)
-        f |= GLOS_WIN_BARE;
+        f |= GLOS_WF_BARE;
     if (w->flags & GUI_W_DESKTOP)
-        f |= GLOS_WIN_DESKTOP;
+        kind = GLOS_WK_DESKTOP;
     if (anywhere)
-        f |= GLOS_WIN_ANYWHERE;
-    memset(&gw, 0, sizeof gw);
-    gw.x = x, gw.y = y, gw.w = w->w, gw.h = w->h;
-    gw.flags = f;
-    memcpy(gw.title, w->gw.title, sizeof gw.title);
-    if (glos_window(&gw) != 0)
+        f |= GLOS_WF_ANYWHERE;
+    if (!(h = glos_window(w->gw.title, x, y, w->w, w->h, kind, f, 0)))
         return;
-    w->gw = gw;
-    w->id = gw.id;
-    w->w = gw.w, w->h = gw.h;
+    memset(&w->px, 0, sizeof w->px);
+    w->px.size = sizeof w->px;
+    if (glos_pixels(h, &w->px) != 0) {
+        glos_close(h);
+        return;
+    }
+    w->id = h;
+    w->gw.x = x, w->gw.y = y;
+    w->w = w->px.w, w->h = w->px.h;
     w->relayout = 1;
 }
 
@@ -621,7 +646,7 @@ static struct gui_widget *first_focus(struct gui_widget *w)
 void gui_show(struct gui_window *w, int on)
 {
     if (on && !w->id) {
-        int x = w->gw.x, y = w->gw.y, any = w->gw.flags & GLOS_WIN_ANYWHERE;
+        int x = w->gw.x, y = w->gw.y, any = w->gw.flags & GLOS_WF_ANYWHERE;
         if (w->flags & GUI_W_DIALOG) {
             gui_fit(w);
             place_dialog(w, &x, &y);
@@ -644,7 +669,7 @@ void gui_show(struct gui_window *w, int on)
         redraw(w);                              /* (drawn before it is seen) */
         w->active = 1;
     }
-    glos_show(w->id, on);
+    glos_show(w->id, on ? GLOS_WS_NORMAL : GLOS_WS_HIDDEN);
 }
 
 void gui_title(struct gui_window *w, const char *title)
@@ -652,28 +677,25 @@ void gui_title(struct gui_window *w, const char *title)
     strncpy(w->gw.title, title, sizeof w->gw.title - 1);
     w->gw.title[sizeof w->gw.title - 1] = 0;
     if (w->id)
-        glos_title(w->id, title);
+        glos_set_text(w->id, GLOS_PROP_WIN_TITLE, w->gw.title);
 }
 
 int gui_origin(struct gui_window *w, int *x, int *y)
 {
-    struct glos_window gw;
-    memset(&gw, 0, sizeof gw);
-    if (!w->id || glos_pixels(w->id, &gw) != 0)
+    if (!w->id || glos_get(w->id, GLOS_PROP_WIN_X, x) != 0 || glos_get(w->id, GLOS_PROP_WIN_Y, y) != 0)
         return -1;
-    *x = gw.x, *y = gw.y;
     return 0;
 }
 
 static void new_pixels(struct gui_window *w)
 {
-    struct glos_window gw;
-    memset(&gw, 0, sizeof gw);
-    if (glos_pixels(w->id, &gw) != 0)
+    struct glos_pixels px;
+    memset(&px, 0, sizeof px);
+    px.size = sizeof px;
+    if (glos_pixels(w->id, &px) != 0)
         return;
-    memcpy(gw.title, w->gw.title, sizeof gw.title);
-    w->gw = gw;
-    w->w = gw.w, w->h = gw.h;
+    w->px = px;
+    w->w = px.w, w->h = px.h;
     w->relayout = 1;
     free(w->back_mem);
     w->back_mem = NULL;
@@ -857,7 +879,7 @@ static int deaf(struct gui_window *w)
 
 static void tabs_key(struct gui_window *w, struct gui_ev *e);
 
-static void key(struct gui_window *w, const struct glos_event *ev)
+static void key(struct gui_window *w, const struct os_event *ev)
 {
     struct gui_ev e;
     memset(&e, 0, sizeof e);
@@ -923,7 +945,7 @@ static void send_ev(struct gui_widget *w, struct gui_ev *e)
         w->cls->event(w, e);
 }
 
-static void mouse(struct gui_window *w, const struct glos_event *ev)
+static void mouse(struct gui_window *w, const struct os_event *ev)
 {
     struct gui_ev e;
     struct gui_widget *t;
@@ -986,26 +1008,61 @@ static void resized(struct gui_window *w)
         w->on_resize(w);
 }
 
-static void (*app_events)(const struct glos_event *ev);
+static void (*app_events)(const struct glos_ev *ev);
 
-void gui_on_event(void (*fn)(const struct glos_event *ev)) { app_events = fn; }
+void gui_on_event(void (*fn)(const struct glos_ev *ev)) { app_events = fn; }
 
-static void dispatch(const struct glos_event *ev)
+/* One of GLOS's events as the toolkit's record of it: 1; 0: not one of a window's (the app's own to take: a
+   job's, the shell's); 2: nothing to do (a typed character: its key's event had it). */
+static int os_from(const struct glos_ev *e, struct os_event *o)
+{
+    memset(o, 0, sizeof *o);
+    o->window = e->handle;
+    o->time = e->time;
+    switch (e->kind) {
+    case GLOS_EV_KEY: {
+        const struct glos_ev_key *k = (const struct glos_ev_key *)e;
+        o->type = OS_KEY, o->key = k->key, o->ch = k->ch, o->mods = k->mods, o->down = k->down;
+        return 1;
+    }
+    case GLOS_EV_MOUSE: {
+        const struct glos_ev_mouse *m = (const struct glos_ev_mouse *)e;
+        o->type = OS_MOUSE, o->x = m->x, o->y = m->y, o->buttons = m->buttons, o->key = m->button, o->down = m->down;
+        o->mods = m->mods;
+        return 1;
+    }
+    case GLOS_EV_WHEEL: {
+        const struct glos_ev_wheel *m = (const struct glos_ev_wheel *)e;
+        o->type = OS_WHEEL, o->x = m->x, o->y = m->y, o->buttons = m->buttons, o->key = (unsigned)m->notches, o->mods = m->mods;
+        return 1;
+    }
+    case GLOS_EV_FOCUS:
+        o->type = OS_FOCUS, o->down = ((const struct glos_ev_focus *)e)->got;
+        return 1;
+    case GLOS_EV_SIZE:
+        o->type = OS_RESIZE;
+        return 1;
+    case GLOS_EV_CLOSE:
+        o->type = OS_CLOSE;
+        return 1;
+    case GLOS_EV_TEXT:
+        return 2;
+    }
+    return 0;
+}
+
+static void dispatch(const struct os_event *ev)
 {
     struct gui_window *w = gui_window_of(ev->window);
-    if (!ev->window && app_events) {
-        app_events(ev);
-        return;
-    }
     if (!w)
         return;
     switch (ev->type) {
-    case GLOS_EV_KEY:
+    case OS_KEY:
         if (deaf(w) || !ev->down)
             return;
         key(w, ev);
         break;
-    case GLOS_EV_MOUSE:
+    case OS_MOUSE:
         if (deaf(w)) {
             if (ev->key && ev->down)
                 glos_focus(G.modal->id);
@@ -1013,7 +1070,7 @@ static void dispatch(const struct glos_event *ev)
         }
         mouse(w, ev);
         break;
-    case GLOS_EV_WHEEL:                         /* (1.5) to the widget under the pointer, then its parents */
+    case OS_WHEEL:                              /* to the widget under the pointer, then its parents */
         if (!deaf(w)) {
             struct gui_ev e;
             struct gui_widget *t;
@@ -1026,7 +1083,7 @@ static void dispatch(const struct glos_event *ev)
                     break;
         }
         break;
-    case GLOS_EV_FOCUS:
+    case OS_FOCUS:
         w->active = ev->down != 0;
         if (w->focus)
             gui_damage(w->focus);
@@ -1035,10 +1092,10 @@ static void dispatch(const struct glos_event *ev)
         if (ev->down && deaf(w) && G.modal->id)
             glos_focus(G.modal->id);
         break;
-    case GLOS_EV_RESIZE:
+    case OS_RESIZE:
         resized(w);
         break;
-    case GLOS_EV_CLOSE:
+    case OS_CLOSE:
         if (deaf(w))
             return;
         if (w->on_close)
@@ -1172,7 +1229,7 @@ void gui_close_later(struct gui_window *w)
     if (w && !w->closing) {
         w->closing = 2;
         if (w->id)
-            glos_show(w->id, 0);
+            glos_show(w->id, GLOS_WS_HIDDEN);
     }
 }
 
@@ -1206,14 +1263,24 @@ static void after_event(void)
 int gui_step(unsigned wait_ms)
 {
     struct gui_window *w;
-    struct glos_event ev;
-    int got;
+    static union {
+        struct glos_ev ev;
+        unsigned char room[GLOS_EV_MAX];
+    } u;
+    struct os_event ev;
+    int got, how;
     for (w = G.wins; w; w = w->next)
         redraw(w);
-    memset(&ev, 0, sizeof ev);
-    got = glos_event(&ev, until_due(wait_ms));
-    if (got)
-        dispatch(&ev);
+    got = glos_event(&u, sizeof u, until_due(wait_ms), 0) > 0;
+    if (got) {
+        how = os_from(&u.ev, &ev);
+        if (how == 1)
+            dispatch(&ev);
+        else if (how == 0 && u.ev.kind == GLOS_EV_END)
+            G.quit = 1;                         /* GLOS asks the app to end: its loop ends, as by gui_quit() */
+        else if (how == 0 && app_events)
+            app_events(&u.ev);
+    }
     after_event();
     fire();
     after_event();

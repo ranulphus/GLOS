@@ -1,23 +1,23 @@
 /* TLS 1.2 client connections (include/glos/tls.h; M10 step C): BearSSL's
- * engine run over a GLOS_FN_NET connection. The engine's loop is the one its
+ * engine run over a connection of GLOS's (NET). The engine's loop is the one its
  * br_sslio has, here so that the handshake can be finished in tls_open() and
  * its failure told there; reads and writes wait `timeout_ms` for the network
- * at most. The certificate is checked against GLOS_FN_TIME's clock, and not
+ * at most. The certificate is checked against GLOS's clock (TIME), and not
  * at all before that clock has been set. The engine is seeded with 32 bytes
- * of GLOS_FN_RANDOM. */
+ * of GLOS's RANDOM. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "bearssl.h"
-#include <glos/api.h>
+#include <glos/glos2.h>
 #include <glos/tls.h>
 
 struct tls {
     br_ssl_client_context sc;
     br_x509_minimal_context xc;
     unsigned char buf[BR_SSL_BUFSIZE_BIDI];
-    int conn;
+    glos_handle conn;
     unsigned timeout_ms;
     int lost;                           /* the network failed (or timed out): the engine isn't run again */
     int timed_out;
@@ -30,7 +30,7 @@ struct tls {
 static int low_read(struct tls *t, unsigned char *buf, size_t len)
 {
     unsigned st;
-    int r = glos_net_recv((unsigned)t->conn, buf, (unsigned)len, t->timeout_ms, &st);
+    int r = glos_net_receive(t->conn, buf, (unsigned)len, t->timeout_ms, &st);
     if (r > 0)
         return r;
     if (r == 0 && st == GLOS_NETS_CLOSED) {
@@ -45,7 +45,7 @@ static int low_read(struct tls *t, unsigned char *buf, size_t len)
 
 static int low_write(struct tls *t, const unsigned char *buf, size_t len)
 {
-    int r = glos_net_send((unsigned)t->conn, buf, (unsigned)len, t->timeout_ms);
+    int r = glos_net_send(t->conn, buf, (unsigned)len, t->timeout_ms);
     if (r > 0)
         return r;
     if (r == 0)
@@ -116,26 +116,27 @@ static void reason(struct tls *t)
 
 /* ---- the connection */
 
-struct tls *tls_open(int conn, const char *host, const struct tls_anchors *a, unsigned timeout_ms, char *why,
+struct tls *tls_open(unsigned conn, const char *host, const struct tls_anchors *a, unsigned timeout_ms, char *why,
                      size_t room)
 {
     struct tls *t;
     unsigned char seed[32];
+    struct glos_time now = { sizeof now, 0, 0, 0 };
     unsigned long utc;
-    int how = glos_time(&utc, 0);
-    if (how < 0 || how == GLOS_TIME_RTC) {
+    if (glos_time(&now) != 0 || now.how == GLOS_TIME_RTC) {
         snprintf(why, room, "clock not set");
-        glos_net_close((unsigned)conn, 1);
+        glos_net_close(conn, 1);
         return 0;
     }
     if (!(t = calloc(1, sizeof *t)) || glos_random(seed, sizeof seed) != 0) {
         free(t);
         snprintf(why, room, "%s", t ? "no randomness" : "out of memory");
-        glos_net_close((unsigned)conn, 1);
+        glos_net_close(conn, 1);
         return 0;
     }
     t->conn = conn;
     t->timeout_ms = timeout_ms;
+    utc = now.utc;
     br_ssl_client_init_full(&t->sc, &t->xc, a->ta, a->n);
     br_x509_minimal_set_time(&t->xc, (unsigned)(utc / 86400) + 719528u, (unsigned)(utc % 86400));
     br_ssl_engine_set_buffer(&t->sc.eng, t->buf, sizeof t->buf, 1);
@@ -144,7 +145,7 @@ struct tls *tls_open(int conn, const char *host, const struct tls_anchors *a, un
     if (!br_ssl_client_reset(&t->sc, host, 0) || run_until(t, BR_SSL_SENDAPP) != 0) {
         reason(t);
         snprintf(why, room, "%s", t->why);
-        glos_net_close((unsigned)conn, 1);
+        glos_net_close(conn, 1);
         free(t);
         return 0;
     }
@@ -222,6 +223,6 @@ void tls_close(struct tls *t)
         run_until(t, 0);
         t->timeout_ms = saved;
     }
-    glos_net_close((unsigned)t->conn, 0);
+    glos_net_close(t->conn, 0);
     free(t);
 }

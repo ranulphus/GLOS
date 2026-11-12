@@ -109,7 +109,13 @@ static int io(struct app *a, struct trapframe *tf, int write)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     if (!(seq = seq_of(a, tf, q.handle, &fail)))
         return fail;
-    if (!write) {
+    if (!write && q.stream == GLOS_JOB_KEYS) {  /* what was typed to it and it ended without reading */
+        if ((n = agent_app_keys(a, seq, keys, q.length / 2 < 64 ? q.length / 2 : 64)) < 0)
+            return a2_fail(tf, GLOS_E_REFUSED);
+        if (n && user_wr((u16)tf->ds, q.buffer, keys, (u32)n * 2) != 0)
+            return a2_fail(tf, GLOS_E_ARGUMENT);
+        done = (u32)n * 2;
+    } else if (!write) {
         if (q.stream != GLOS_JOB_OUT && q.stream != GLOS_JOB_ERR)
             return a2_fail(tf, GLOS_E_ARGUMENT);
         while (done < q.length) {

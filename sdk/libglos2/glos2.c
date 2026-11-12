@@ -2,6 +2,7 @@
  * EAX the function, EBX its structure (a near pointer is DS's offset in
  * DJGPP's flat model), ECX and EDX 0 (glos/api2.h). */
 #include <dpmi.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/exceptn.h>
 #include <sys/nearptr.h>
@@ -358,6 +359,21 @@ int glos_input_mode(unsigned flags)
 {
     struct glos_input_mode q = { sizeof q, 1, flags };
     return raw(GLOS_INPUT_MODE, &q, 0);
+}
+
+/* The code page DOS has (glos/cp.h): GLOSCP in the environment (a profile's env), else INT 21h 6601h's (with
+   COUNTRY.SYS and NLSFUNC; plain FreeDOS says 437), else 437. */
+int cp_active(void)
+{
+    const char *e = getenv("GLOSCP");
+    __dpmi_regs r;
+    if (e && atoi(e) > 0)
+        return atoi(e);
+    memset(&r, 0, sizeof r);
+    r.x.ax = 0x6601;
+    if (__dpmi_int(0x21, &r) == 0 && !(r.x.flags & 1) && r.x.bx)
+        return r.x.bx;
+    return 437;
 }
 
 void *glos_ptr(unsigned linear)
@@ -1082,6 +1098,13 @@ glos_handle glos_net_accept(glos_handle listener, unsigned ms, unsigned flags, u
     if (port)
         *port = q.port;
     return r ? 0 : q.handle;
+}
+
+int glos_net_close(glos_handle h, int reset)
+{
+    if (reset)
+        glos_set(h, GLOS_PROP_NET_RESET, 1);
+    return glos_close(h);
 }
 
 int glos_net_state(struct glos_net_if *out, unsigned room, unsigned *count)

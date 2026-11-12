@@ -200,6 +200,8 @@ int glos_net_receive(glos_handle h, void *buffer, unsigned room, unsigned ms, un
 glos_handle glos_net_listen(unsigned port, unsigned backlog, unsigned flags);
 glos_handle glos_net_accept(glos_handle listener, unsigned ms, unsigned flags, unsigned *address, unsigned *port);
 int glos_net_state(struct glos_net_if *out, unsigned room, unsigned *count);
+int glos_net_close(glos_handle h, int reset);           /* closed: what waits to be sent is sent first, or (reset)
+                                                           dropped and the connection reset */
 
 /* CAPTURE: a window of a program this one started (or its own), by the window's number: its picture
    (GLOS_CAPTURE_RGBA or _PNG; *length the bytes there are), keys and mouse events into it. */

@@ -41,14 +41,14 @@ static int nhist, hist_at;
 static int errorlevel;
 
 /* what runs, and what is left of the line */
-static int job = -1;                    /* the program's job, or -1 */
+static glos_handle job;                 /* the program's job, or 0 */
 static unsigned job_state;
 static char rest[512];                  /* the line's commands still to come */
 static int rest_op;                     /* how they follow: 0 none, 1 &&, 2 || */
 
 extern char **environ;
 
-int term_busy(void) { return job >= 0; }
+int term_busy(void) { return job != 0; }
 
 static int upper(int c) { return c >= 'a' && c <= 'z' ? c - 32 : c; }
 
@@ -576,12 +576,13 @@ static int is_builtin(const char *w)
 
 static int run_program(const char *line, int detach)
 {
-    struct glos_run r;
+    char command[1024], env[512];
     char prog[260], first[128], profile[40], screen[16];
     const char *p = line, *args;
     size_t n = 0, e = 0;
-    int i, id;
-    memset(&r, 0, sizeof r);
+    unsigned how = GLOS_RUN_WINDOW;
+    glos_handle h;
+    int i, set = 0;
     while (*p == ' ')
         p++;
     while (*p && *p != ' ' && n < sizeof first - 1)
@@ -589,32 +590,31 @@ static int run_program(const char *line, int detach)
     first[n] = 0;
     args = p;
     if (strpbrk(line, "<>|")) {                 /* a pipe or a redirection: COMMAND.COM's */
-        snprintf(r.command, sizeof r.command, "%s", line);
+        snprintf(command, sizeof command, "%s", line);
     } else if (find_program(first, prog, sizeof prog) == 0) {
-        snprintf(r.command, sizeof r.command, "%s%s", prog, args);
+        snprintf(command, sizeof command, "%s%s", prog, args);
         snprintf(profile, sizeof profile, "program %s", gui_path_name(prog));
-        if (glos_config_get(profile, "screen", screen, sizeof screen) > 0 && same(screen, "full"))
-            r.flags |= GLOS_RUN_FULL;
+        if (glos_setting_get(profile, "screen", screen, sizeof screen, &set) == 0 && set && same(screen, "full"))
+            how = GLOS_RUN_FULL;
     } else {
         err("Bad command or file name\r\n");
         return -1;
     }
-    r.flags |= detach ? GLOS_RUN_DETACH : GLOS_RUN_CONSOLE;
-    snprintf(r.dir, sizeof r.dir, "%s", cwd[drive]);
     for (i = 0; i < nvars; i++)                 /* the variables this shell has set */
-        if (changed[i] && e + strlen(vars[i]) + 2 < sizeof r.env) {
-            strcpy(r.env + e, vars[i]);
+        if (changed[i] && e + strlen(vars[i]) + 2 < sizeof env) {
+            strcpy(env + e, vars[i]);
             e += strlen(vars[i]) + 1;
         }
-    r.env[e] = 0;
-    if ((id = glos_run(&r)) < 0) {
+    env[e] = 0;
+    h = glos_job_run(command, cwd[drive], env, how, detach ? GLOS_RUNF_DETACH : 0, 0);
+    if (detach ? glos_error() != 0 : !h) {
         err("GLOS can't run it here.\r\n");
         return -1;
     }
     if (detach)
         return 0;
-    job = id;
-    job_state = GLOS_JOB_QUEUED;
+    job = h;
+    job_state = GLOS_JS_QUEUED;
     {
         char name[128];
         term_title(gui_dos_text(gui_path_name(first), name, sizeof name));
@@ -823,7 +823,7 @@ static int run_one(const char *cmd)
 
 static void next_command(void)
 {
-    while (rest[0] && job < 0) {
+    while (rest[0] && !job) {
         char cmd[512];
         const char *a = strstr(rest, "&&"), *o = strstr(rest, "||"), *cut = a && (!o || a < o) ? a : o;
         int op = cut == a && a ? 1 : cut ? 2 : 0, run, r;
@@ -840,7 +840,7 @@ static void next_command(void)
             return;                             /* (a program: on when it ends) */
         errorlevel = r;
     }
-    if (job < 0) {
+    if (!job) {
         rest[0] = 0;
         shell_prompt();
     }
@@ -879,14 +879,14 @@ void shell_resume(int code)
 
 void shell_type(const unsigned short *keys, int n)
 {
-    if (job >= 0)
-        glos_job_type((unsigned)job, keys, (unsigned)n);
+    if (job)
+        glos_job_keys(job, keys, (unsigned)n);
 }
 
 void shell_break(void)
 {
-    if (job >= 0) {
-        glos_job_kill((unsigned)job);
+    if (job) {
+        glos_job_signal(job, GLOS_SIGNAL_END);
         err("^Break\r\n");
     }
 }
@@ -894,28 +894,33 @@ void shell_break(void)
 void shell_poll(void)
 {
     char buf[1024];
+    struct glos_job_status js;
     unsigned st, code;
     int n;
-    while (job >= 0) {
-        n = glos_job_read((unsigned)job, buf, sizeof buf, 0, &st, &code);
+    while (job) {
+        if (glos_job_status(job, &js) != 0)     /* (its state first: once it is done, what is read is all of it) */
+            n = -1;
+        else
+            n = glos_job_read(job, GLOS_JOB_OUT, buf, sizeof buf);
         if (n < 0) {
-            job = -1;
+            glos_close(job);
+            job = 0;
             break;
         }
+        st = js.state, code = js.code;
         if (n > 0)
             term_write_dos(buf, n);     /* (a DOS program's bytes, in its code page) */
         job_state = st;
-        if (st == GLOS_JOB_DONE || st == GLOS_JOB_APP) {
+        if (st == GLOS_JS_DONE || st == GLOS_JS_APP) {
             unsigned short left[64];
             int nleft = 0;
             if (n == (int)sizeof buf)
                 continue;                       /* (more of its output first) */
-            errorlevel = st == GLOS_JOB_DONE ? (int)code : 0;
-            if (st == GLOS_JOB_APP)
-                glos_job_forget((unsigned)job); /* (a GLOS app goes on beside: nothing of it is ours) */
-            else
-                nleft = glos_job_keys((unsigned)job, left, 64);     /* (typed ahead, unread: ours again) */
-            job = -1;
+            errorlevel = st == GLOS_JS_DONE ? (int)code : 0;
+            if (st == GLOS_JS_DONE)             /* (typed ahead, unread: ours again) */
+                nleft = glos_job_read(job, GLOS_JOB_KEYS, left, sizeof left) / 2;
+            glos_close(job);                    /* (a GLOS app goes on beside: nothing of it is ours) */
+            job = 0;
             term_title("");
             next_command();
             if (nleft > 0)

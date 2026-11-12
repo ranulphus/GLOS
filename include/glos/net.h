@@ -1,5 +1,5 @@
 /* Sockets for GLOS apps (M10 step B; sdk/libglos/socket.c, DJGPP): a small
- * BSD layer on GLOS_FN_NET (glos/api.h), for portable code that makes TCP
+ * BSD layer on GLOS's NET (glos/api2.h), for portable code that makes TCP
  * connections. IPv4 and TCP only, no listening.
  *
  *   socket, connect, send, recv, shutdown (SHUT_RD only), close, setsockopt
@@ -113,7 +113,7 @@ int shutdown(int fd, int how);
 int setsockopt(int fd, int level, int name, const void *val, socklen_t len);
 int getsockopt(int fd, int level, int name, void *val, socklen_t *len);
 int getpeername(int fd, struct sockaddr *addr, socklen_t *len);
-int glos_socket_id(int fd);             /* the GLOS_FN_NET connection behind a socket, or -1 */
+unsigned glos_socket_handle(int fd);    /* GLOS's connection behind a socket (its handle), 0 before connect() */
 
 /* fcntl with O_NONBLOCK for sockets: DJGPP's fcntl tells a file-system extension only the descriptor, not the
    command. Other descriptors and commands go on to DJGPP's. */

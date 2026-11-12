@@ -7,7 +7,7 @@
  * does: CR to the line's start, LF down a line, BS back a character, tab to
  * the next eighth column, FF a clean page, the line wrapped at the window's
  * edge. While a program runs the keys are its own: typed into its console
- * (GLOS_FN_JOB), Ctrl+C as DOS's Ctrl-C, Ctrl+Break ending it.
+ * (JOB), Ctrl+C as DOS's Ctrl-C, Ctrl+Break ending it.
  *
  * The mouse chooses text, Ctrl+Shift+C or the Edit menu copies it, Ctrl+V
  * or Shift+Ins types the clipboard's text in; Shift+PgUp and Shift+PgDn
@@ -748,11 +748,11 @@ void term_title(const char *t)
 
 void term_quit(int code) { gui_quit(code); }
 
-static void events(const struct glos_event *ev)
+static void events(const struct glos_ev *ev)
 {
-    if (ev->type == GLOS_EV_JOB)
+    if (ev->kind == GLOS_EV_JOB)
         shell_poll();
-    else if (ev->type == GLOS_EV_NET)
+    else if (ev->kind == GLOS_EV_NET)
         ssh_poll();
 }
 

@@ -1,5 +1,5 @@
 /* GLOS's toolkit (PRD D49, §10.6; docs/gui.md): widgets for GLOS apps, on
- * the 2D library (glos/gfx.h) and the API (glos/api.h), in sdk/gui.
+ * the 2D library (glos/gfx.h) and the API (2.0: glos/api2.h, through libglos2's glos/glos2.h), in sdk/gui.
  *
  * Retained: a window holds a tree of widgets, each of which keeps its own
  * state and draws itself when asked. A change marks the widget's rectangle
@@ -26,7 +26,7 @@
  * libglos), where the tests drive it and keep its pictures. */
 #ifndef GLOS_GUI_H
 #define GLOS_GUI_H
-#include "glos/api.h"
+#include "glos/glos2.h"
 #include "glos/gfx.h"
 #ifdef __cplusplus
 extern "C" {
@@ -63,12 +63,12 @@ struct gui_ev {
     unsigned buttons;                   /* the buttons down now (1 left, 2 right, 4 middle) */
     unsigned button;                    /* PRESS, RELEASE: the one that changed */
     unsigned clicks;                    /* PRESS: 1, or 2 for the second of a double click */
-    unsigned key, ch, mods;             /* KEY: as struct glos_event has them */
+    unsigned key, ch, mods;             /* KEY: as GLOS's key event has them */
     unsigned time;                      /* milliseconds (glos_ticks) */
     int wheel;                          /* WHEEL: notches, positive away from the user (up) */
 };
 
-/* Keys (struct glos_event's `key`: set 1 make codes, 100h added for an E0 prefix). */
+/* Keys (GLOS's key codes: set 1 make codes, 100h added for an E0 prefix). */
 #define GUI_K_ESC    0x01
 #define GUI_K_BACK   0x0E
 #define GUI_K_TAB    0x0F
@@ -144,9 +144,14 @@ struct gui_menubar;
 struct gui_window {
     struct gui_window *next;
     struct gui_window *owner;           /* a pop-up's or a dialog's */
-    unsigned id;                        /* GLOS's */
+    unsigned id;                        /* GLOS's: the window's handle */
     unsigned flags;                     /* GUI_W_ */
-    struct glos_window gw;
+    struct {                            /* as it was asked for: where, GLOS_WF_ANYWHERE or not, its title */
+        int x, y;
+        unsigned flags;
+        char title[64];
+    } gw;
+    struct glos_pixels px;              /* where its pixels are (after it is made, and after every change of size) */
     struct gfx_surface s;               /* the window's pixels (found again before each use: glos_ptr) */
     struct gfx_surface back;            /* drawn here first, then copied in whole: the composer never sees half */
     void *back_mem;
@@ -377,8 +382,9 @@ int gui_sb_event(struct gui_widget *w, struct gui_sb *b, struct gui_ev *e, int l
 void gui_sb_clamp(struct gui_sb *b);
 
 
-/* ---- events of the app's own (window 0: GLOS_EV_JOB, GLOS_EV_FILES, GLOS_EV_LAUNCH, GLOS_EV_SYSKEY) */
-void gui_on_event(void (*fn)(const struct glos_event *ev));
+/* ---- GLOS's events that are not a window's keys, mouse, focus, size or close (a job's, a watched folder's, the
+   shell's, a setting's): as GLOS gives them (struct glos_ev and what follows it, glos/api2.h) */
+void gui_on_event(void (*fn)(const struct glos_ev *ev));
 
 /* ---- drawing, for widgets of an app's own */
 void gui_draw_text(struct gfx_surface *s, int x, int y, const struct gfx_font *f, const char *text, unsigned rgb);

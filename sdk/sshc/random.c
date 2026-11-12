@@ -1,10 +1,10 @@
-/* randombytes() for TinySSH's crypto in an app (DJGPP): the kernel's pool, through GLOS_FN_RANDOM. Without GLOS
+/* randombytes() for TinySSH's crypto in an app (DJGPP): the kernel's pool, through GLOS's RANDOM. Without GLOS
    there are no keys to be made or sessions to be had: the program ends. */
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "randombytes.h"
-#include <glos/api.h>
+#include <glos/glos2.h>
 
 void randombytes(void *p, long long n)
 {
@@ -14,4 +14,4 @@ void randombytes(void *p, long long n)
     }
 }
 
-const char *randombytes_source(void) { return "GLOS_FN_RANDOM"; }
+const char *randombytes_source(void) { return "GLOS RANDOM"; }

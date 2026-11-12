@@ -3,7 +3,7 @@
  * and the browser (a tree of the drives' folders beside a list with
  * columns). In both: open, a new folder, rename, delete, cut, copy and
  * paste (folders with all in them), large icons or details, up a folder.
- * Each window watches its folder (GLOS_FN_WATCH): a change made anywhere,
+ * Each window watches its folder (FS's WATCH): a change made anywhere,
  * by any program, the agent or SFTP, shows without a refresh.
  *
  * Where folders' windows were is kept in FOLDERS.CFG beside FILES.EXE. */
@@ -19,7 +19,8 @@ struct view {
     struct gui_widget *list, *tree, *status;
     struct gui_menu *view_menu;
     char dir[260];
-    int browser, big, watch;
+    int browser, big;
+    glos_handle watch;
     struct gui_dirent *ents;
     int n;
 };
@@ -115,9 +116,9 @@ static void retitle(struct view *v)
 static void go(struct view *v, const char *dir)
 {
     snprintf(v->dir, sizeof v->dir, "%s", dir);
-    if (v->watch > 0)
-        glos_unwatch((unsigned)v->watch);
-    v->watch = glos_watch(v->dir);
+    if (v->watch)
+        glos_close(v->watch);
+    v->watch = glos_fs_watch(v->dir);
     retitle(v);
     fill(v);
     if (gui_list_count(v->list)) {
@@ -130,7 +131,7 @@ void folder_changed(unsigned watch)
 {
     struct view *v;
     for (v = views; v; v = v->next)
-        if (v->watch == (int)watch) {
+        if (v->watch == watch) {
             fill(v);
             say("refreshed", v->dir);
         }
@@ -416,8 +417,8 @@ static void closing(struct gui_window *w)
             break;
         }
     if (v) {
-        if (v->watch > 0)
-            glos_unwatch((unsigned)v->watch);
+        if (v->watch)
+            glos_close(v->watch);
         free(v->ents);
         free(v);
     }

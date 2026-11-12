@@ -1,5 +1,5 @@
 /* ssh, sftp and ssh-keygen in the terminal (M10 step D, PRD D61): sdk/sshc
- * over a GLOS_FN_NET connection, the xterm screen (vt.c) for a session with a
+ * over a connection of GLOS's (NET), the xterm screen (vt.c) for a session with a
  * pty, the shell's own line for the questions (a new host key, a password).
  *
  *   ssh [-p PORT] [-i KEY] [-l USER] [USER@]HOST [COMMAND]
@@ -19,7 +19,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <glos/api.h>
+#include <glos/glos2.h>
 #include <glos/gui.h>
 #ifdef __DJGPP__
 #include <glos/net.h>
@@ -37,7 +37,7 @@ enum { S_OFF, S_CONNECTED, S_ASK_HOST, S_ASK_PASSWORD, S_LOGGING_IN, S_OPENING, 
 static struct vt vt;
 static struct {
     int stage;
-    int conn;                           /* the GLOS connection */
+    glos_handle conn;                   /* the GLOS connection */
     struct sshc *c;
     struct sshc_chan *ch;
     struct sftpc *sf;
@@ -102,8 +102,8 @@ static void err(const char *s1)
 static void net_send(void *io, const uint8_t *d, uint32_t n)
 {
     (void)io;
-    while (n && s.conn > 0) {
-        int k = glos_net_send((unsigned)s.conn, d, n, 10000);
+    while (n && s.conn) {
+        int k = glos_net_send(s.conn, d, n, 10000);
         if (k <= 0)
             break;
         d += k, n -= (uint32_t)k;
@@ -116,10 +116,10 @@ static int net_read(unsigned wait_ms)
     uint8_t buf[8192];
     unsigned st;
     int k, first = 1;
-    if (s.conn <= 0 || !s.c)
+    if (!s.conn || !s.c)
         return -1;
     for (;;) {
-        k = glos_net_recv((unsigned)s.conn, buf, sizeof buf, first ? wait_ms : 0, &st);
+        k = glos_net_receive(s.conn, buf, sizeof buf, first ? wait_ms : 0, &st);
         first = 0;
         if (k < 0 || (k == 0 && st == GLOS_NETS_CLOSED))
             return -1;
@@ -238,8 +238,8 @@ static void finish(int code)
         sftpc_free(s.sf);
     if (s.c)
         sshc_free(s.c);
-    if (s.conn > 0)
-        glos_net_close((unsigned)s.conn, 0);
+    if (s.conn)
+        glos_net_close(s.conn, 0);
     memset(s.sk, 0, sizeof s.sk);
     s.sf = 0;
     s.c = 0;
@@ -416,15 +416,16 @@ static int connect_to(void)
 {
     unsigned addr;
     struct in_addr ia;
+    int e;
     if (inet_aton(s.host, &ia)) {
         addr = (unsigned)ia.s_addr;
-    } else if (glos_net_resolve(s.host, 15000, &addr) != 0) {
+    } else if ((e = glos_net_resolve(s.host, 15000, &addr)) != 0) {
         term_printf("ssh: Could not resolve hostname %s: %s\r\n", s.host,
-                    glos_error() == GLOS_E_NET_DOWN ? "no network" : "Name or service not known");
+                    e == GLOS_E_NET_DOWN ? "no network" : "Name or service not known");
         return -1;
     }
-    if ((s.conn = glos_net_connect(addr, s.port, 15000, GLOS_NETF_EVENTS)) < 0) {
-        int e = glos_error();
+    if (!(s.conn = glos_net_connect(addr, s.port, 15000, GLOS_NETF_EVENTS))) {
+        e = glos_error();
         term_printf("ssh: connect to host %s port %u: %s\r\n", s.host, s.port, e == GLOS_E_NET_REFUSED
                     ? "Connection refused" : e == GLOS_E_NET_TIMEOUT ? "Connection timed out" : "No route to host");
         s.conn = 0;
@@ -479,7 +480,7 @@ static int start(int argc, char **argv, int sftp)
         return 255;
     s.c = sshc_new(&ops, 0, NULL);
     if (!s.c) {
-        glos_net_close((unsigned)s.conn, 1);
+        glos_net_close(s.conn, 1);
         s.conn = 0;
         err("ssh: out of memory\r\n");
         return 255;

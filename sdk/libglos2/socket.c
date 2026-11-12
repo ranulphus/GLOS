@@ -1,4 +1,4 @@
-/* Sockets on GLOS_FN_NET (include/glos/net.h; M10 step B). A socket is a
+/* Sockets on GLOS's NET (include/glos/net.h; M10 step B; API 2.0). A socket is a
  * DOS file descriptor (the NUL device's, from __FSEXT_alloc_fd) with this
  * file's function behind it, so DJGPP's read, write, close, fcntl and select
  * reach GLOS's connection. */
@@ -11,7 +11,7 @@
 #include <unistd.h>
 #include <sys/fsext.h>
 
-#include <glos/api.h>
+#include <glos/glos2.h>
 #include <glos/net.h>
 
 #undef fcntl                            /* (DJGPP's, below) */
@@ -19,7 +19,7 @@
 #define CONNECT_MS 60000u               /* a blocking connect's time, unless SO_SNDTIMEO gives one */
 
 struct sk {
-    int id;                             /* GLOS's connection, 0 before connect() */
+    glos_handle id;                     /* GLOS's connection, 0 before connect() */
     int nonblock;
     int err;                            /* SO_ERROR: a non-blocking connect's failure */
     int nagle;                          /* TCP_NODELAY set to 0 before connect() */
@@ -41,6 +41,7 @@ static int err_of(int g)
 {
     switch (g) {
     case 0:
+    case -1:                                    /* (no GLOS) */
         return ENOSYS;
     case GLOS_E_NET_DOWN:
         return ENETDOWN;
@@ -69,9 +70,9 @@ static int sk_recv(struct sk *k, void *buf, size_t n, int dontwait)
         return fail(ENOTCONN);
     if (k->rd_shut)
         return 0;
-    r = glos_net_recv((unsigned)k->id, buf, (unsigned)n, k->nonblock || dontwait ? 0 : k->rcv_ms, &st);
+    r = glos_net_receive(k->id, buf, (unsigned)n, k->nonblock || dontwait ? 0 : k->rcv_ms, &st);
     if (r < 0)
-        return fail(err_of(glos_error()));
+        return fail(err_of(-r));
     if (r == 0 && n && st != GLOS_NETS_CLOSED)
         return fail(st == GLOS_NETS_CONNECTING ? ENOTCONN : EAGAIN);   /* (nothing in the time given) */
     return r;
@@ -82,9 +83,9 @@ static int sk_send(struct sk *k, const void *buf, size_t n, int dontwait)
     int r;
     if (!k->id)
         return fail(ENOTCONN);
-    r = glos_net_send((unsigned)k->id, buf, (unsigned)n, k->nonblock || dontwait ? 0 : k->snd_ms);
+    r = glos_net_send(k->id, buf, (unsigned)n, k->nonblock || dontwait ? 0 : k->snd_ms);
     if (r < 0)
-        return fail(err_of(glos_error()) == EINVAL ? ENOTCONN : err_of(glos_error()));
+        return fail(err_of(-r) == EINVAL ? ENOTCONN : err_of(-r));
     if (r == 0 && n)
         return fail(EAGAIN);
     return r;
@@ -92,11 +93,12 @@ static int sk_send(struct sk *k, const void *buf, size_t n, int dontwait)
 
 static int ready(struct sk *k)
 {
-    unsigned avail, st, room;
+    int avail = 0, st = 0, room = 0;
     int r = 0;
     if (!k->id)
         return __FSEXT_ready_write | __FSEXT_ready_error;
-    if (glos_net_state((unsigned)k->id, &avail, &st, &room) != 0)
+    if (glos_get(k->id, GLOS_PROP_NET_WAITING, &avail) != 0 || glos_get(k->id, GLOS_PROP_NET_STATE, &st) != 0
+        || glos_get(k->id, GLOS_PROP_NET_ROOM, &room) != 0)
         return __FSEXT_ready_read | __FSEXT_ready_write | __FSEXT_ready_error;
     if (avail || st == GLOS_NETS_CLOSED || st == GLOS_NETS_FAILED || k->rd_shut)
         r |= __FSEXT_ready_read;
@@ -131,7 +133,7 @@ static int handler(__FSEXT_Fnumber fn, int *rv, va_list ap)
         return 1;
     case __FSEXT_close:
         if (k->id)
-            glos_net_close((unsigned)k->id, 0);
+            glos_net_close(k->id, 0);
         free(k);
         __FSEXT_set_data(fd, 0);
         __FSEXT_set_function(fd, 0);
@@ -172,22 +174,27 @@ int glos_fcntl(int fd, int cmd, ...)
     return fcntl(fd, cmd, arg);
 }
 
-int glos_socket_id(int fd)
+glos_handle glos_socket_handle(int fd)
 {
     struct sk *k = sk_of(fd);
-    return k && k->id ? k->id : -1;
+    return k ? k->id : 0;
 }
 
 int socket(int domain, int type, int protocol)
 {
+    struct glos_version v;
     struct sk *k;
     int fd;
     if (domain != AF_INET)
         return fail(EAFNOSUPPORT);
     if (type != SOCK_STREAM || (protocol && protocol != IPPROTO_TCP))
         return fail(EPROTONOSUPPORT);
-    if (!(glos_caps() & GLOS_CAP_NET) || !glos_id())
-        return fail(glos_id() ? ENETDOWN : ENOSYS);
+    memset(&v, 0, sizeof v);
+    v.size = sizeof v;
+    if (!glos_app() || glos_version(&v) != 0)
+        return fail(ENOSYS);
+    if (!(v.machine & GLOS_MACHINE_NET))
+        return fail(ENETDOWN);
     if (!(k = calloc(1, sizeof *k)))
         return fail(ENOMEM);
     k->rcv_ms = k->snd_ms = 0xFFFFFFFFu;
@@ -204,7 +211,7 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len)
     struct sk *k = sk_of(fd);
     const struct sockaddr_in *in = (const struct sockaddr_in *)addr;
     unsigned ip, wait;
-    int id;
+    glos_handle id;
     if (!k)
         return fail(ENOTSOCK);
     if (k->id)
@@ -216,13 +223,13 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len)
     ip = (unsigned)in->sin_addr.s_addr;         /* (network order: as GLOS keeps an address) */
     wait = k->nonblock ? 0 : k->snd_ms != 0xFFFFFFFFu ? k->snd_ms : CONNECT_MS;
     id = glos_net_connect(ip, ntohs(in->sin_port), wait, k->nagle ? GLOS_NETF_NAGLE : 0);
-    if (id < 0)
+    if (!id)
         return fail(err_of(glos_error()));
     k->id = id;
     k->peer = *in;
     if (k->nonblock) {
-        unsigned st;
-        glos_net_state((unsigned)id, 0, &st, 0);
+        int st = 0;
+        glos_get(id, GLOS_PROP_NET_STATE, &st);
         if (st == GLOS_NETS_CONNECTING)
             return fail(EINPROGRESS);
     }
@@ -253,7 +260,7 @@ int shutdown(int fd, int how)
     if (!k->id)
         return fail(ENOTCONN);
     if (how != SHUT_RD)
-        return fail(EOPNOTSUPP);                /* (a half-close isn't in GLOS_FN_NET: close() instead) */
+        return fail(EOPNOTSUPP);                /* (a half-close isn't in GLOS's NET: close() instead) */
     k->rd_shut = 1;
     return 0;
 }
@@ -297,12 +304,13 @@ int getsockopt(int fd, int level, int name, void *val, socklen_t *len)
     if (level == SOL_SOCKET && name == SO_TYPE) {
         v = SOCK_STREAM;
     } else if (level == SOL_SOCKET && name == SO_ERROR) {
-        unsigned st;
+        int st = 0;
         v = k->err;
-        if (!v && k->id && glos_net_state((unsigned)k->id, 0, &st, 0) == 0 && st == GLOS_NETS_FAILED) {
+        if (!v && k->id && glos_get(k->id, GLOS_PROP_NET_STATE, &st) == 0 && st == GLOS_NETS_FAILED) {
             char c;
-            if (glos_net_recv((unsigned)k->id, &c, 0, 0, 0) < 0)  /* (the reason, from an empty read) */
-                v = err_of(glos_error());
+            int r = glos_net_receive(k->id, &c, 0, 0, 0);       /* (the reason, from an empty read) */
+            if (r < 0)
+                v = err_of(-r);
         }
         k->err = 0;
     } else {
@@ -403,8 +411,9 @@ static int lookup(const char *name, in_addr_t *a)
         *a = ia.s_addr;
         return 0;
     }
-    if (glos_net_resolve(name, LOOKUP_MS, &ip) != 0)
-        return glos_error();
+    int g = glos_net_resolve(name, LOOKUP_MS, &ip);
+    if (g != 0)
+        return g;
     *a = (in_addr_t)ip;
     return 0;
 }

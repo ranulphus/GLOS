@@ -17,7 +17,7 @@
 #include <string.h>
 
 #include "bearssl.h"
-#include <glos/api.h>
+#include <glos/glos2.h>
 #include <glos/http.h>
 #include <glos/tls.h>
 
@@ -110,8 +110,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: FETCH [--certs FILE] [--resolve NAME:ADDRESS] [--quiet] URL [FILE]\n");
         return 2;
     }
-    if (glos_init() != 0) {
-        printf("FETCH failed: %s\n", glos_version() ? "GLOS refused it as an app" : "this needs GLOS");
+    if (glos_init("FETCH", "", "") != 0) {
+        printf("FETCH failed: %s\n", glos_running() ? "GLOS refused it as an app" : "this needs GLOS");
         return 1;
     }
     need_certs = !strncmp(url, "https://", 8);

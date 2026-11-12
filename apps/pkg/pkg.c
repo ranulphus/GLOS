@@ -31,7 +31,7 @@
 #include "bearssl.h"
 #include "crypto_sign_ed25519.h"
 #include "sshbuf.h"
-#include <glos/api.h>
+#include <glos/glos2.h>
 #include <glos/http.h>
 #include <glos/tls.h>
 
@@ -411,7 +411,7 @@ static int remove_pkg(const char *name, int quiet)
             char *sec = line + 4, *key = strchr(sec, '\t');
             if (key) {
                 *key++ = 0;
-                if (glos_config_unset(sec, key) == 0)
+                if (glos_setting_set(sec, key, 0, 0, 0, 0) == 0)
                     keys++;
             }
         }
@@ -491,7 +491,7 @@ static int apply_manifest(const char *ini, char *dir, size_t room, FILE *lst, in
             snprintf(sec, sizeof sec, "program %s", section + 8);
             for (i = 8; sec[i]; i++)
                 sec[i] = (char)toupper((unsigned char)sec[i]);
-            if (glos_config_set(sec, k, v, why, (unsigned)wroom) < 0) {
+            if (glos_setting_set(sec, k, v, 0, why, (unsigned)wroom) != 0) {
                 return -1;
             }
             fprintf(lst, "cfg %s\t%s\n", sec, k);
@@ -846,7 +846,7 @@ int main(int argc, char **argv)
     }
     for (p = argv[1]; *p; p++)
         *p = (char)toupper((unsigned char)*p);
-    if (glos_init() != 0) {
+    if (glos_init("PKG", "", "") != 0) {
         pkg_say("PKG: this needs GLOS\n");
         return 1;
     }
