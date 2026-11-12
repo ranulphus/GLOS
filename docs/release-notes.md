@@ -4,6 +4,19 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The API is 2.0 alone (2026-11-12)
+
+- **GLOS answers API 2.0 only** (`include/glos/api.h`, `docs/v1/api-2.md`; phase B of `docs/v1-route.md`, its
+  step 15). API 1.x, the API of M6 to M10, is gone: its calls are refused (`GLOS_E_VERSION`).
+- **GLOS's own programs are 2.0's:** the toolkit, Files, the Terminal, Notepad, the Calculator, Images, the
+  Monitor, the Control Panel, PKG and FETCH. They look and behave as before.
+- **A program built for 1.x still runs, as a DOS program:** it finds no API it knows, so it isn't an app: it has
+  the screen to itself, as on plain DOS. To be an app again it is built with `libglos.a` and `<glos/glos.h>`
+  (one library now: the API's functions, the 2D library, the settings' schema, sockets). DOS-GL and the SDL
+  bridge in RetroGPU moved on 2026-11-12: programs linked with an older build of either are rebuilt.
+- **GLOS's kernel and its programs go together:** `GLOS.EXE`, `GLOSK.BIN` and the programs in `C:\GLOS` are
+  updated at the same time.
+
 ## USB keyboards, mice, hubs and gamepads (2026-11-05)
 
 - **GLOS drives the PC's UHCI USB controllers itself** (Intel's PIIX and ICH, VIA's), and `glos usb` lists the
