@@ -7190,7 +7190,7 @@ def console_case(profile, vcard, card, bits):
         m = re.search(r"^app (\d+) RUNTEST", agent.ssh("glos ps")[1].replace("\r", ""), re.M)
         kill_o = agent.ssh(rt + "kill %s" % (m.group(1) if m else "0"))[1]
         b.communicate(timeout=60)
-        check("kill", m and "KILLED" in kill_o and "reason=monitor" in agent.log(), kill_o)
+        check("kill", m and "KILLED" in kill_o and "reason=sys" in agent.log(), kill_o)     # (SYS's KILL)
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
