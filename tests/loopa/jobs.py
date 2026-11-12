@@ -5989,6 +5989,117 @@ def free_port():
 
 
 NETAPP_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
+FLOPPY_CASES = [("486dx4", "ne2k")]
+
+
+def floppy_case(profile, card):
+    """GLOS's setup floppy (docs/floppy.md; tools/floppy): a PC with a blank hard disk boots the floppy (made by
+    the Makefile with the tests' keys: out/floppy-test.img), GLOS answers on the network from it, and
+    tools/floppy/install.py --new-disk partitions and formats the disk, puts FreeDOS on it from the floppy and
+    GLOS's files by SFTP. Then the PC is started from the disk alone: GLOS comes up as the installed system (its
+    name, the same host key), with its programs there and one of them run as an app."""
+    import shutil
+    import socket
+    import tempfile
+    tag = "%s-%s" % (profile, card)
+    disk = os.path.join(ROOT, "out", "floppy-%s-disk.img" % tag)
+    with open(disk, "wb") as f:                 # blank: 200 cylinders of 63 sectors by 16 heads, about 98 MB
+        f.truncate(63 * 16 * 512 * 200)
+    tmp = tempfile.mkdtemp()
+    key, known = os.path.join(tmp, "client"), os.path.join(tmp, "known")
+    shutil.copyfile(os.path.join(ROOT, "tests/keys/client"), key)
+    os.chmod(key, 0o600)
+    done = os.path.join(tmp, "HXDONE.COM")      # "HX-DONE 0" on COM1, by the port: the run's end for the harness
+    open(done, "wb").write(bytes.fromhex("BE1F01AC08C0741288C4BAFD03ECA82074F8BAF80388E0EEEBE9B8004CCD21")
+                           + b"HX-DONE 0\r\n\0")
+    checks, notes = {}, []
+
+    def start(name, extra):
+        s = socket.socket()
+        s.bind(("0.0.0.0", 0))
+        port = s.getsockname()[1]
+        s.close()
+        proc = run(name, ["--machine", profile, "--net", card, "--net-fwd", "%d:22" % port, "--hdd", disk,
+                          "--timeout", "3600", "--idle", "1500"] + extra, background=True)
+        open(known, "w").write("[127.0.0.1]:%d %s" % (port, open(os.path.join(ROOT, "tests/keys/hostkey.pub")).read()))
+        opts = ["-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+                "-o", "UserKnownHostsFile=" + known, "-o", "ConnectTimeout=60", "-o", "LogLevel=ERROR", "-i", key]
+        return proc, port, opts, os.path.join(ROOT, "out", name, "serial.log")
+
+    def log(serial):
+        return open(serial, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(serial) else ""
+
+    def listening(serial, limit=600):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            if "GLOS-NET dhcp" in log(serial) and "GLOS-SSH listen" in log(serial):
+                return True
+            time.sleep(1)
+        return False
+
+    def ssh(port, opts, cmd, timeout=300):
+        p = subprocess.run(["ssh", "-p", str(port)] + opts + ["glos@127.0.0.1", cmd], capture_output=True, timeout=timeout)
+        return p.returncode, (p.stdout + p.stderr).decode("latin-1").replace("\r", "")
+
+    def end(proc, port, opts):                  # HX-DONE from the guest ends the run; the disk stays as it is
+        batch = os.path.join(tmp, "batch")
+        open(batch, "w").write("put %s /C/HXDONE.COM\n" % done)
+        subprocess.run(["sftp", "-P", str(port), "-b", batch] + opts + ["glos@127.0.0.1"], capture_output=True, timeout=300)
+        ssh(port, opts, "C:\\HXDONE.COM")
+        try:
+            proc.wait(timeout=300)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            return False
+        return True
+
+    try:
+        # 1. From the floppy, onto the blank disk.
+        proc, port, opts, serial = start("floppy-" + tag, ["--floppy", os.path.join(ROOT, "out", "floppy-test.img")])
+        checks["floppy-up"] = listening(serial)
+        rc, o = ssh(port, opts, "glos ver")
+        checks["floppy-ssh"] = rc == 0 and "GLOS" in o
+        rc, o = ssh(port, opts, "IF EXIST C:\\NUL ECHO HAS-C")
+        checks["blank"] = "HAS-C" not in o
+        p = subprocess.run([sys.executable, os.path.join(ROOT, "tools/floppy/install.py"), "127.0.0.1", "--port", str(port),
+                            "--key", key, "--keys", os.path.join(ROOT, "out", "floppy-keys")], capture_output=True, timeout=600)
+        checks["refuses-blank"] = p.returncode == 1 and b"--new-disk" in p.stderr       # (nothing done unasked)
+        p = subprocess.run([sys.executable, os.path.join(ROOT, "tools/floppy/install.py"), "127.0.0.1", "--port", str(port),
+                            "--key", key, "--keys", os.path.join(ROOT, "out", "floppy-keys"), "--new-disk", "--name",
+                            "glos486"], capture_output=True, timeout=3000)
+        out = (p.stdout + p.stderr).decode("latin-1")
+        open(os.path.join(ROOT, "out", "floppy-%s-install.txt" % tag), "w").write(out)
+        checks["install"] = p.returncode == 0 and "Done." in out
+        if not checks["install"]:
+            notes.append("install.py: rc=%d %s" % (p.returncode, out[-600:]))
+        rc, o = ssh(port, opts, "DIR C:\\GLOS")
+        checks["files"] = all(n in o.upper() for n in ("GLOS     EXE", "GLOSK    BIN", "FILES    EXE", "CERTS    DAT"))
+        checks["floppy-end"] = end(proc, port, opts)
+        t1 = log(serial)
+        checks["floppy-clean"] = "GLOS-PANIC" not in t1 and "GLOS-CRASH" not in t1
+        # 2. From the disk alone.
+        proc, port, opts, serial = start("floppy-%s-disk" % tag, [])
+        checks["disk-up"] = listening(serial)
+        rc, o = ssh(port, opts, "glos ver")
+        checks["disk-ssh"] = rc == 0 and "GLOS" in o            # (the same host key: ssh checks it)
+        checks["name"] = "GLOS-NET mdns name=glos486.local" in log(serial)
+        rc, o = ssh(port, opts, "C:\\GLOS\\PKG.EXE SOURCES")    # (one of its programs, an app)
+        checks["app"] = rc == 0 and "GLOS-APP start" in log(serial)
+        if not checks["app"]:
+            notes.append("PKG SOURCES: rc=%d %s" % (rc, o[-300:]))
+        rc, o = ssh(port, opts, "TYPE C:\\AUTOEXEC.BAT")
+        checks["autoexec"] = "C:\\GLOS\\GLOS.EXE" in o and "GOTO glosrun" in o
+        checks["disk-end"] = end(proc, port, opts)
+        t2 = log(serial)
+        checks["disk-clean"] = "GLOS-PANIC" not in t2 and "GLOS-CRASH" not in t2 and "GLOS-WARN" not in t2
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    for n in notes:
+        print("    floppy-%s %s" % (tag, n))
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("floppy-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 
 
 def netapp_case(profile, card):
@@ -7493,7 +7604,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("suite", choices=["m1", "refuse", "m2", "hostile", "sched", "mem", "shell", "net", "ssh", "dpmi",
                                       "djtst", "dpmitools", "hdpmireg", "ecm", "dpmi16", "tpx", "sess", "shot", "input", "gdb", "m5exit", "apps", "display", "desk", "win", "gpu", "audio", "glwin", "sdlwin", "games", "gui", "config", "console", "native", "control", "time", "netapp", "https", "sshc", "pkg", "vnc", "cache",
-                                      "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer", "api", "thr"])
+                                      "umaprobe", "mem-page", "int2f", "umb", "joy", "xfer", "api", "thr", "floppy"])
     ap.add_argument("--profile", action="append", choices=PROFILES)
     ap.add_argument("--boot", action="append", choices=BOOTS)
     ap.add_argument("-j", "--jobs", type=int, default=3, help="runs at once (m2, hostile)")
@@ -7538,6 +7649,9 @@ def main():
     if a.suite == "https":
         cases = [c for c in HTTPS_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(https_case, cases, a.jobs)) else 1
+    if a.suite == "floppy":
+        cases = [c for c in FLOPPY_CASES if not a.profile or c[0] in a.profile]
+        return 0 if all(r[1] for r in matrix(floppy_case, cases, a.jobs)) else 1
     if a.suite == "netapp":
         cases = [c for c in NETAPP_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(netapp_case, cases, a.jobs)) else 1

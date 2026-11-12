@@ -41,3 +41,10 @@ DOSLFN_SHA256 := b96e93bb21c1cb4d9b6e37e76f96174345c027ce354aae9c09b38713e711437
 # kept in the repository; THIRD_PARTY.md). Nothing else of it is used.
 FREEDOOM_URL    := https://github.com/freedoom/freedoom/releases/download/v0.13.0/freedoom-0.13.0.zip
 FREEDOOM_SHA256 := 3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59
+
+# FreeDOS 1.4's floppy edition (freedos.org; its programs under their own licences, the GPL for most): its 1.44 MB
+# boot floppy is what GLOS's setup floppy starts from (tools/floppy/mkfloppy.sh; docs/floppy.md), FreeDOS's
+# kernel, shell, FDISK, FORMAT and SYS on it unchanged. None of it is in GLOS. (RetroGPU's Loop A boots the same
+# image: tools/loopa/mkgolden.sh.)
+FREEDOS_FLOPPY_URL    := https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/distributions/1.4/FD14-FloppyEdition.zip
+FREEDOS_FLOPPY_SHA256 := 45b1fa7c52dd996c3bfa5e352ffcd410781b952a6ad629f15a4c9ec4bbaefc5a

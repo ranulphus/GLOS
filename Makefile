@@ -48,6 +48,7 @@
 #   make loopa-games    Fifth Wheel (FIFTHWHEEL_DIR) and PrBoom-plus (DOSGL_DIR) on plain DOS and windowed
 #   make loopa-m8       M8's exit: loopa-gpu, loopa-audio, loopa-glwin, loopa-sdlwin and loopa-games
 #   make gui-goldens    the toolkit's and the apps' pictures, drawn on the host (M9; tests/gui/*.txt)
+#   make floppy         GLOS's setup floppy, build/floppy/glos144.img (docs/floppy.md; tools/floppy/install.py)
 #   make loopa-gui      GUITEST's scripts on the desktop against them (M9)
 #   make loopa-config   GLOS.CFG's settings over ssh, kept and written by the kernel (M9)
 #   make loopa-console  programs started by apps, console jobs, the shell's events, stats, watches (M9)
@@ -83,7 +84,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: floppy loopa-floppy loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
 
 help:
@@ -765,6 +766,32 @@ build/glos/KEYS/PKG/GLOS.PUB: tools/pkg/GLOS.PUB
 	$(Q)python3 -c "import base64,sys; w=open(sys.argv[1]).read().split(); \
 	  sys.exit(0 if w[0] == 'glos-pkg-ed25519' and len(base64.b64decode(w[1], validate=True)) == 32 else 'bad key')" $<
 	$(Q)cp $< $@
+# GLOS's setup floppy (docs/floppy.md; tools/floppy): build/floppy/glos144.img, a 1.44 MB disk that boots FreeDOS and
+# starts GLOS with its network and SSH; tools/floppy/install.py then puts the whole system on the PC's hard disk from
+# this computer. Its host key is made once (build/floppy/keys, kept from one image to the next); who may log in is
+# FLOPPY_AUTHKEYS, an ed25519 public key (or a file of them).
+FLOPPY_HOST ?= glos-setup
+FLOPPY_AUTHKEYS ?= $(firstword $(wildcard $(HOME)/.ssh/glos_bench.pub $(HOME)/.ssh/id_ed25519.pub))
+build/floppy/keys/HOSTKEY:
+	@mkdir -p build/floppy/keys
+	$(Q)ssh-keygen -q -t ed25519 -N "" -C "$(FLOPPY_HOST)" -f $@
+floppy: all build/floppy/keys/HOSTKEY check-deps
+	@[ -n "$(FLOPPY_AUTHKEYS)" ] && grep -q '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" \
+	  || { echo "floppy: FLOPPY_AUTHKEYS=FILE, an ed25519 public key (ssh-keygen -t ed25519): none found"; exit 1; }
+	$(Q)grep '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" > build/floppy/keys/AUTHKEYS
+	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \
+	  tools/floppy/mkfloppy.sh build/floppy/glos144.img build/floppy/keys $(FLOPPY_HOST)
+	@echo "floppy: build/floppy/glos144.img for $(FLOPPY_HOST).local; then: tools/floppy/install.py $(FLOPPY_HOST).local"
+# ... in Loop A (tests/loopa/jobs.py floppy): a 486 with an NE2000 and a blank disk boots the floppy (made here with
+# the tests' keys), install.py --new-disk does its work, and the PC then starts GLOS from the disk alone. It needs
+# RetroGPU's run.py to have --floppy.
+loopa-floppy: all apps build/apps/FETCH.EXE build/apps/PKG.EXE build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB check-deps
+	@mkdir -p out/floppy-keys
+	$(Q)cp tests/keys/hostkey out/floppy-keys/HOSTKEY && cp tests/keys/hostkey.pub out/floppy-keys/HOSTKEY.pub \
+	  && cp tests/keys/AUTHKEYS out/floppy-keys/AUTHKEYS
+	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \
+	  tools/floppy/mkfloppy.sh out/floppy-test.img out/floppy-keys glos-setup
+	$(Q)python3 tests/loopa/jobs.py floppy -j $(JOBS)
 # The toolkit (sdk/gui, include/glos/gui.h; M9): build/sdk/libgui.a, linked before libglos.a.
 build/sdk/libgui.a: $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h include/glos/glos.h include/glos/gfx.h
 	@mkdir -p build/sdk/gui
