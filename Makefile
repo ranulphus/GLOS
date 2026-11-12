@@ -147,6 +147,8 @@ host-test-run:
 	  && build/host/vt_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/inflate_test tests/host/inflate_test.c loader/inflate.c \
 	  && build/host/inflate_test `python3 tests/host/inflate_cases.py build/host/inflate build/kernel/GLOSK.BIN`
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/disk_test tests/host/disk_test.c kernel/disk/mbr.c \
+	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S && tests/host/disk_test.sh build/host/disk_test build/host/disk
 
 # The toolkit (sdk/gui, M9) and the apps on the host, against tests/host/glosshim.c: each test script
 # (tests/gui/NAME.txt) run at 8, 16 and 32 bits, its shots written to build/host/gui/ (the goldens Loop A's
