@@ -385,6 +385,14 @@ static void status_cb(struct netif *n)
     ip4addr_ntoa_r(netif_ip4_gw(n), gw, sizeof gw);
     ip4addr_ntoa_r(netif_ip4_netmask(n), mask, sizeof mask);
     kprintf("GLOS-NET dhcp ip=%s gw=%s mask=%s ticks=%u\n", ip, gw, mask, timer_ticks());
+    if (kprintf_screen) {                       /* /VERBOSE: the address on the PC's own screen too, whenever it
+                                                   comes (the screen has the log's lines only until the threads
+                                                   run: a PC with no serial cable is found by this line) */
+        char line[96];
+        u32 f = irq_save();
+        kprintf_screen(line, (u32)ksnprintf(line, sizeof line, "GLOS-NET dhcp ip=%s (%s.local) ssh port=22\n", ip, hostname));
+        irq_restore(f);
+    }
     bound_at = timer_ticks() | 1;
 }
 

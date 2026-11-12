@@ -4,9 +4,10 @@
  * boots). Written where the BIOS's cursor is and the cursor moved on, so
  * that DOS's own output goes on below; only while the screen is in a text
  * mode and the desktop hasn't got it (a program's graphics are never
- * touched). Lines from the threads come with interrupts on, a character at
- * a time (kprintf_pump): DOS writing at once may mix with them, as on any
- * console. */
+ * touched). The lines are those written until the threads run (the boot's):
+ * after that the screen is DOS's and its programs', and only the network's
+ * address is still shown when it comes (kernel/net/net.c), since a PC with
+ * no serial cable is reached by it. */
 #include "display.h"
 #include "kprintf.h"
 #include "vm.h"
