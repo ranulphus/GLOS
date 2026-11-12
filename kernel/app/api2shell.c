@@ -272,7 +272,7 @@ static void shell_event(struct app *a, unsigned what, int x, int y, u32 window, 
     a2_post(a, &e.ev, 0);
 }
 
-void api2_shell_1x(struct app *a, u32 type, int x, int y)       /* (1.x's LAUNCH and SYSKEY, from the desktop) */
+void api2_shell_1x(struct app *a, u32 type, int x, int y)       /* (KEV_LAUNCH and KEV_SYSKEY, from the desktop) */
 {
     shell_event(a, type == KEV_LAUNCH ? GLOS_SHELL_LAUNCH : GLOS_SHELL_TASKS, x, y, 0, 0);
 }

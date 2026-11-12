@@ -1,6 +1,6 @@
 /* API 2.0's NET (include/glos/api.h; docs/v1/phase-b.md step 11): TCP connections out, ports listened on and
- * the connections that come in on them, names resolved, the network's state. Over kernel/net/sock.c, which
- * 1.x's GLOS_FN_NET shares, and kernel/net/net.c.
+ * the connections that come in on them, names resolved, the network's state. Over kernel/net/sock.c and
+ * kernel/net/net.c.
  *
  * A connection (or a port) is a handle whose object is its number in sock.c's table. These calls are made
  * without the app's lock (api2.c): they wait, and the app's other threads go on. What they touch they look up

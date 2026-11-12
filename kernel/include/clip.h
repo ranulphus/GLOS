@@ -1,10 +1,10 @@
 /* The clipboard (kernel/app/clip.c over kernel/app/clipstore.c): the system's, one for every app and the agent.
- * API 1.x and the agent see its text (GLOS_FN_CLIP, glos clip); API 2.0 every format (CLIP, api2clip.c). */
+ * The agent sees its text (glos clip); apps every format (the API's CLIP, api2clip.c). */
 #ifndef K_CLIP_H
 #define K_CLIP_H
 #include "types.h"
 
-#define CLIP_MAX 65536u                         /* 1.x's and the agent's text at most */
+#define CLIP_MAX 65536u                         /* the agent's text at most */
 #define CLIP_TEXT 1u                            /* (GLOS_CLIP_TEXT) */
 
 int clip_set(const char *text, u32 n);          /* 0, or -1 (too long, no memory) */

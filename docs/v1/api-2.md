@@ -3,7 +3,7 @@
 **Status:** approved at the owner's review (2026-11-06). Phase B builds it a step at a time
 (`docs/v1/phase-b.md`). Areas already built (CORE, WIN, DRAW, INPUT, THREAD as of 2026-11-10) have an
 "As built" list below where they differ from the design. The exact structures and numbers are
-`include/glos/api2.h`, which is the reference from there on.
+`include/glos/api.h`, which is the reference from there on.
 
 API 2.0 replaces API 1.x outright: the owner's choice of a clean 2.0, with no 1.x compatibility. It is designed
 from phase A's plans:
@@ -272,7 +272,7 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 | SIGNAL | An event object, set and waited for, with a timeout |
 | WAIT | Wait for any of several handles (threads, signals, jobs, streams) or a timeout |
 
-- **The C library:** DJGPP's isn't safe for threads. libglos 2.0 gives a lock around the C library's calls (malloc,
+- **The C library:** DJGPP's isn't safe for threads. libglos gives a lock around the C library's calls (malloc,
   stdio, file I/O) and documents which are safe. The toolkit is used from one thread (the window's), with work
   handed to others and results posted back as events.
 - **As built (step 4; the design in full is `docs/supervisor.md` §12.7):**
@@ -515,9 +515,9 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 - **Each area's own** in its range (the network's as 1.x's NET errors).
 - **A call that fails with a reason** (a setting refused by the schema) puts the reason's text in its structure.
 
-## libglos 2.0 and the SDK
+## libglos and the SDK
 
-- **The C side:** libglos 2.0 gives a C function for each call, with the structures, in `include/glos/`.
+- **The C side:** libglos gives a C function for each call, with the structures, in `include/glos/`.
 - **The toolkit** (`toolkit-2.md`) builds on libglos.
 - **Libraries, not calls:** what apps share as code rather than as GLOS's calls, in the SDK beside libglos:
   - TLS (BearSSL);

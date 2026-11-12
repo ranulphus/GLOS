@@ -1225,7 +1225,8 @@ u32 app_began_as(u32 id)                        /* the agent's job an app began 
     return seq;
 }
 
-/* An app is asked to end (API 2.0's GLOS_EV_END): 0, or -1 (no such app, or a 1.x one: it has no such event). */
+/* An app is asked to end (GLOS_EV_END): 0, or -1 (no such app, or one made an app without asking: it takes no
+   events). */
 int app_ask_end(u32 id)
 {
     u32 f = irq_save();
@@ -1237,9 +1238,9 @@ int app_ask_end(u32 id)
     return r;
 }
 
-/* glos exit with apps running (the VM thread, each time it looks): API 2.0's apps are asked to end and given
-   five seconds to begin to (three were too few for two apps on a busy 486); those that have not by then, and
-   1.x's apps at once, are ended. */
+/* glos exit with apps running (the VM thread, each time it looks): the apps are asked to end and given five
+   seconds to begin to (three were too few for two apps on a busy 486); those that have not by then, and
+   programs made apps without asking at once, are ended. */
 void app_exit_turn(void)
 {
     static u32 asked_at;

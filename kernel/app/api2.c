@@ -771,8 +771,8 @@ int api2_call(struct trapframe *tf)
             gpu_safe_end(a);
         return r;
     }
-    if (waits(fn)) {                            /* (a call that waits: beside the app's others; and, as 1.x's
-                                                   calls were, a point where the first thread's turn with the
+    if (waits(fn)) {                            /* (a call that waits: beside the app's others; and
+                                                   a point where the first thread's turn with the
                                                    engine may end: a DOS-GL program waiting for an event doesn't
                                                    hold the desktop up) */
         if (first)

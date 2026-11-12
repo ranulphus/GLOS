@@ -227,7 +227,7 @@ static void tell(struct agent_job *j)
 
 int agent_post_app(void *app, const struct krun *r, u32 *seq) { return agent_post_job(app, r, 0, seq); }
 
-/* ... and API 2.0's (o: what 1.x's structure has no word for; NULL: none of it). */
+/* ... and the API's (o: what struct krun has no word for; NULL: none of it). */
 int agent_post_job(void *app, const struct krun *r, const struct agent_opts *o, u32 *seq)
 {
     struct agent_job *j = NULL;

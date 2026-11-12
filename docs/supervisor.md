@@ -1152,7 +1152,12 @@ direct = 1
 - **Several contexts.** A context is on the heap (about 20 KB, with 72 KB for its LDT and 16 KB for the
   thread's stack when it is an app's). `dctx` is the one loaded, the running thread's own (§7); the session's
   client's is the VM thread's.
-- **An app** is a 32-bit client that called the GLOS API's init (the entry 0A00h "GLOS" gives is a HLT at
+- **The API is 2.0** (`include/glos/api.h`, `docs/v1/api-2.md`) since phase B's step 15 (2026-11-12): the
+  kernel answers it alone, and a call with API 1.x's numbers is refused (`GLOS_E_VERSION`). Sections of this
+  document written for M6 to M10 name 1.x's functions (`GLOS_FN_RUN`, `GLOS_FN_JOB`, `GLOS_FN_NET`,
+  `GLOS_FN_STAT` and the rest): the kernel's code they describe is the same, reached now through 2.0's areas
+  (JOB, NET, SYS, FS's WATCH, DRAW's GPU calls, AUDIO), which `docs/v1/phase-b.md` describes step by step.
+- **An app** is a 32-bit client that called the GLOS API's INIT (the entry 0A00h "GLOS" gives is a HLT at
   `SEL_TRAMP:TR_VENDOR`; the function is in EAX, `include/glos/api.h`). Checked first: the client is the
   session's own program, at its level 1, outside every handler and nested call; the stub EXECed it (its PSP's
   parent is the stub's, and a session is active); the session isn't direct or `--exclusive`. Then:
@@ -1303,11 +1308,11 @@ exception depth, the real-mode stack. They aren't made per thread. So:
   DJGPP's signals that fails: the handler has shrunk the data segment, no code of the program's runs to take
   the fault that puts it right, and the call can then not read its return address from the stack; it repeated
   for ever. Now:
-  - **API 2.0:** the call returns `GLOS_E_AGAIN` to the program (ECX the time left, EDX a mark), the handler
-    runs on the program's own code, and libglos makes the call again;
-  - **either API:** a call whose return address can't be read at its entry is given the stack fault (#SS) a
-    far call would have taken, which DJGPP's exception handler answers by putting the limit back and raising
-    its signal; the call is then made again. (1.x's waits still restart from the handler, and rely on this.)
+  - the call returns `GLOS_E_AGAIN` to the program (ECX the time left, EDX a mark), the handler runs on the
+    program's own code, and libglos makes the call again;
+  - a call whose return address can't be read at its entry is given the stack fault (#SS) a far call would have
+    taken, which DJGPP's exception handler answers by putting the limit back and raising its signal; the call
+    is then made again.
   - A return address that can't be read when the call is done is a crash report (`api-return`).
 - **An FPU error** in a thread the app made (IRQ 13, or #MF) is the app's end too, at that thread's next
   return to its code.
@@ -1319,7 +1324,7 @@ exception depth, the real-mode stack. They aren't made per thread. So:
   DOS lock): a second thread's call waits until the first's has come back. DOS is one at a time anyway.
 - **A thread waiting in DOS** (a key in a console window, a long read) keeps only that lock: the app's other
   threads run on, and make every GLOS call that isn't DOS's.
-- **DJGPP's C library isn't safe for threads** (its transfer buffer, `malloc`, stdio, `errno`). libglos 2.0 wraps
+- **DJGPP's C library isn't safe for threads** (its transfer buffer, `malloc`, stdio, `errno`). libglos wraps
   it in one recursive lock (the owner's choice, phase A's review): the kernel's DOS lock makes the kernel safe;
   libglos's makes the program's data safe.
 
@@ -1373,7 +1378,7 @@ exception depth, the real-mode stack. They aren't made per thread. So:
 - **Host:** the scheduler with several threads a context (they are ordinary threads to it); locks and signals
   (pure code); libglos's wrapping, by a check of the program's map file that every wrapped C library symbol goes
   through the lock.
-- **Loop A:** THRTEST, a DJGPP program on libglos 2.0:
+- **Loop A:** THRTEST, a DJGPP program on libglos:
   - threads that compute, allocate and do file I/O at once, with sums that must come out right;
   - a lock contended, a signal passed round, JOIN and WAIT with timeouts;
   - a thread waiting in DOS while another posts events the first thread takes;

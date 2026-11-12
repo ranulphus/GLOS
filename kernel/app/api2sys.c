@@ -146,7 +146,7 @@ int api2_sys_stat(struct trapframe *tf)         /* (for any program: api2.c) */
 static int programs(struct trapframe *tf)
 {
     struct glos_sys_stat q;
-    struct kprog *old;                  /* (1.x's records are what the kernel's lists give) */
+    struct kprog *old;                  /* (the records the kernel's lists give: stat.c) */
     struct glos_program *p;
     u32 size, n, i, k;
     char *b;

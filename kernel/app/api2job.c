@@ -25,7 +25,7 @@ static u32 seq_of(struct app *a, struct trapframe *tf, u32 h, int *fail)
 
 static int run(struct app *a, struct trapframe *tf)
 {
-    static struct krun r;                   /* (1.x's structure is what the agent takes; no wait while it is used) */
+    static struct krun r;                   /* (what the agent takes; no wait while it is used) */
     static char cmd[1024];                      /* (a command line may be longer than that structure's) */
     struct glos_job_run q;
     struct agent_opts o;
@@ -207,7 +207,7 @@ int api2_job(struct app *a, struct trapframe *tf, u32 n)
    END first ends it). */
 void api2_job_close(struct app *a, void *obj) { agent_app_forget(a, (u32)obj); }
 
-/* 1.x's GLOS_EV_JOB (the agent's tell and put): JOB's event, for the job's handle. */
+/* KEV_JOB (the agent's tell and put): JOB's event, for the job's handle. */
 void api2_job_event(struct app *a, u32 seq, u32 state, u32 code)
 {
     struct glos_ev_job e;
@@ -222,7 +222,7 @@ void api2_job_event(struct app *a, u32 seq, u32 state, u32 code)
         return;
     e.ev.size = sizeof e;
     e.ev.kind = GLOS_EV_JOB;
-    e.state = state;                            /* (GLOS_JS_ are 1.x's GLOS_JOB_) */
+    e.state = state;                            /* (the agent's states are GLOS_JS_) */
     e.code = code;
     a2_post(a, &e.ev, 0);
 }

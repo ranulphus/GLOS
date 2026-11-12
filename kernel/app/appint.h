@@ -128,7 +128,7 @@ struct app {
     } com;
 };
 
-/* api2.c: API 2.0 (include/glos/api.h) beside 1.x (phase B, docs/v1/phase-b.md). */
+/* api2.c: the API (include/glos/api.h; docs/v1/phase-b.md). */
 int api2_call(struct trapframe *tf);            /* a 2.0 call (EAX's major 2): glos_api's answer */
 u32 glos_cache_range(u32 lin, u32 bytes, u32 type);    /* (api.c) how the CPU caches a range of the program's DOS
                                                    memory: 0, or a GLOS_E_ number (the same in both APIs) */

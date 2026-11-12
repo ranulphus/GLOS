@@ -10,7 +10,7 @@ void sock_net_poll(void);               /* the net thread, each turn: output int
 void sock_app_gone(struct app *a);      /* its connections closed (what they had to send still goes) */
 u32 sock_count(void);                   /* connections in the table, closing ones too */
 
-/* The calls themselves (1.x's sock_api and API 2.0's NET, kernel/app/api2net.c): 0, or a GLOS_E_ number.
+/* The calls themselves (the API's NET comes through them, kernel/app/api2net.c): 0, or a GLOS_E_ number.
    Addresses are IPv4 as they are in memory; times are milliseconds (0: no wait; FFFFFFFFh: for ever). */
 int sock_resolve(struct app *a, const char *name, u32 ms, u32 *addr);
 int sock_connect(struct app *a, u32 addr, u32 port, u32 ms, u32 flags, u32 *id);

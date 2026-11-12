@@ -99,7 +99,7 @@ int desk_win_rows(u32 id, s32 y, s32 n, s32 w, u8 *rgb);        /* n rows of its
                                                                    is gone, or no longer w wide */
 int desk_win_key(u32 id, u32 key, int down, u32 mods);          /* a key into it, as if typed there: 0, GLOS_E_HANDLE */
 int desk_win_mouse(u32 id, s32 x, s32 y, u32 buttons, u32 button, int down, u32 clicks);       /* ... the mouse */
-#define DESK_E_REFUSED 19               /* (API 2.0's GLOS_E_REFUSED; its GLOS_E_HANDLE is 1.x's GLOS_E_HANDLE, 6) */
+#define DESK_E_REFUSED 19               /* (the API's GLOS_E_REFUSED) */
 #define DESK_EV_STATE 100               /* (to app_event, for API 2.0's apps alone) a window's state changed: key WS_ */
 int desk_demo(int on);                  /* glos desk demo|clear: wm/demo.c's windows; -1: no memory */
 u32 desk_stat(char *buf, u32 max);      /* glos desk: its windows, a line each */

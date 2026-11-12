@@ -2,7 +2,7 @@
  * (kernel/drv/mixer.c), their properties, the mixer for the Mixer app and the shell's volume icon (the master,
  * every app's streams, the chip's own channels), levels for meters, the devices.
  *
- * A stream is 1.x's: a ring in pages the app and the mixer share. Here it is a handle, whose object is the
+ * A stream is the mixer's (kernel/drv/mixer.c): a ring in pages the app and the mixer share. Here it is a handle, whose object is the
  * stream's number in the mixer. */
 #include <string.h>
 
@@ -26,7 +26,7 @@ static int out_call(struct app *a, struct trapframe *tf, int in)
     if (a2_rd(tf, &q, sizeof q, &size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     if ((r = (in ? mixer_open_in : mixer_open)(a, q.rate, q.channels, q.bytes, &id, &lin)) != 0)
-        return a2_fail(tf, (u32)r);             /* (1.x's numbers: NO_AUDIO 9, ARGUMENT 3, MEMORY 7) */
+        return a2_fail(tf, (u32)r);             /* (the mixer's answers are the API's numbers: NO_AUDIO 9, ARGUMENT 3, MEMORY 7) */
     f = irq_save();
     q.handle = handle_new(&a->v2->h, GLOS_HK_STREAM, (void *)id);
     irq_restore(f);

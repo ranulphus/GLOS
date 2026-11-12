@@ -925,6 +925,46 @@ After that:
   - RetroGPU's suites on 2.0;
   - APITEST on bench-g400 and the P4.
 
+**Step 15 as built** (2026-11-12):
+
+- **The toolkit** (`sdk/gui`): its windows are handles, made with WIN's CREATE (a pop-up and the desktop by
+  kind, the rest by flags) and found again with DRAW's PIXELS; the title is a property; its loop takes CORE's
+  events and makes of each a record of its own for its widgets (a key with its character, the mouse, the wheel,
+  focus, size, close). Events that are no window's (a job's, a watched folder's, the shell's, a connection's)
+  go to the app as 2.0 gives them: `gui_on_event()` takes a `struct glos_ev`. END ends the loop. The toolkit's
+  own double-click timing stays (toolkit 2 is phase C's).
+- **The apps:** Files (SETTINGS, JOB's detached run, FS's WATCH, SHELL's events), the Terminal (JOB: a window
+  job's output, keys and end; NET for its ssh), the Monitor (SYS: STAT's system and memory, PROGRAMS, KILL, LOG
+  read to its end), the Control Panel (SETTINGS), PKG and FETCH (INIT, SETTINGS, NET through `sdk/http` and
+  `sdk/tls`).
+- **The goldens are the same:** the 357 files `make gui-goldens` writes on the host are byte for byte what
+  1.x's toolkit and apps drew. `tests/host/glosshim.c` gives the host libglos's 2.0 functions.
+- **What 2.0 lacked for them:**
+  - JOB's READ with `GLOS_JOB_KEYS`: the keys typed to a window job that ended without reading them (the
+    Terminal's typing ahead; 1.x's `glos_job_keys`).
+  - SYS's LOG for any program, as STAT is (GLOSLOG; following the log stays an app's).
+  - libglos: `glos_why()`, the GPU's calls (`glos_gpu`, `glos_gpu_lock`, `glos_vram`, `glos_winvram`),
+    `glos_net_close()`.
+- **One library:** `libglos.a` (`sdk/libglos`, `glos/glos.h`) has the API's functions, the threads' C-library
+  lock, the 2D library, the settings' schema, time zones and code pages, and the BSD sockets (`glos/net.h`, now
+  on NET; still no listening through them). 1.x's library is deleted.
+- **The names:** the API's header is `glos/api.h` and the library's `glos/glos.h` (they were `api2.h` and
+  `glos2.h` while 1.x stood beside them). `glos/api2.h` remains as one line that includes `api.h`, for RetroGPU's
+  DOS-GL until it asks for the new name.
+- **The test programs** that were 1.x's (APPTEST, WINTEST, GPUTEST, AUDTEST, JOYTEST, NETTEST, RUNTEST, CACHEWC,
+  GLOSLOG) call 2.0; their suites are as they were, but for what 2.0 changed: an app has 16 connections (NETTEST
+  opens 16 and is refused a 17th), and a refused INIT gives its reason in the structure.
+- **1.x is removed from the kernel:** a call whose number has no major 2 is refused with `GLOS_E_VERSION`
+  (`kernel/app/api.c`): a program built for 1.x finds no API it knows and carries on as on plain DOS. Gone:
+  1.x's table, its queue of events in every app, its front for sockets, its figures. What the kernel had taken
+  from 1.x's header for its own use (the desktop's events, a window as the desktop describes it, the agent's run
+  flags) has names of its own in `kernel/include/kapi.h` (`KEV_`, `struct kevent`, `KWIN_`, `KRUN_`); no program
+  sees them, and `include/glos/api.h` is the API alone.
+- **A program made an app without asking** (`glos run --app`, a profile's `app = 1`) has no API state at all:
+  it makes no calls and is given no events, only its keyboard and mouse as a DOS program reads them.
+- **Injected keys wait for a slow app** (`glos key`, `glos type`): by how full the app's 2.0 queue is (they
+  looked at 1.x's queue, which a 2.0 app never used).
+
 ## Risks
 
 | Risk | What is done about it |

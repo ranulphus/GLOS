@@ -43,7 +43,7 @@ struct api2 {
     u8 log_follow;                      /* it follows the log (SYS's LOG): GLOS_EV_LOG when it has more ... */
     u32 log_told;                       /* ... than this place, the last it read to or was told of */
     struct glos_pad pad[GLOS_PADS];     /* each pad as it was last told of it */
-    u32 ndrop, ndrop1x;                 /* events lost to a full queue; 1.x events with no 2.0 form yet */
+    u32 ndrop, ndrop1x;                 /* events lost to a full queue; the kernel's events with no form in the API */
     char name[32];                      /* INIT's */
     char help[32];
     char category[32];

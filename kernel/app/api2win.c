@@ -3,8 +3,8 @@
  *
  * A window's handle holds the window's number on the desktop (wm's id), not
  * memory. The desktop (kernel/wm/deskapp.c) does the work, on the app's own
- * thread; it sends its events as it sends 1.x's (app_event), and they are
- * given their 2.0 form here, the window's handle found by its number. That
+ * thread; it sends its events as the kernel's own (struct kevent, app_event), and they
+ * are given the API's form here, the window's handle found by its number. That
  * happens on the desktop's thread, so the app's table of handles changes
  * with interrupts off where a window's handle is made or closed. */
 #include "api2int.h"

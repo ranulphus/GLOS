@@ -47,7 +47,7 @@ struct agent_opts {
     u8 hidden;                                  /* (with KRUN_CONSOLE) no window: beside the desktop, its output
                                                    kept by stream */
     const char *profile;                        /* the profile it runs with, or NULL */
-    const char *command;                        /* its command line when longer than 1.x's structure holds (NULL:
+    const char *command;                        /* its command line when longer than struct krun holds (NULL:
                                                    the structure's) */
     const char *file[3];                        /* files for its standard input, output and error (NULL: none) */
     u8 append;                                  /* bit 1, bit 2: the output's, the error's file is added to */

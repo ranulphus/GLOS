@@ -656,10 +656,9 @@ static void trampoline(struct trapframe *tf, u32 off)
     case TR_VENDOR:                             /* the GLOS API (kernel/app/api.c) */
         {
             u32 ret[2];                         /* The far call's return address can't be read: the stack fault the
-                                                   call itself would have been. (A wait of 1.x's that an interrupt
-                                                   cut short is made again straight from the handler; DJGPP's
-                                                   handlers shrink the data segment to raise a signal, and its
-                                                   exception handler puts it right from this fault) */
+                                                   call itself would have been. (DJGPP's handlers shrink the data
+                                                   segment to raise a signal: a call made while it is shrunk gets
+                                                   this fault, and its exception handler puts the segment right) */
             if (user_rd((u16)tf->ss, sp_of(tf), ret, dctx->bits32 ? 8 : 4) != 0) {
                 tf->vec = 12;
                 tf->err = 0;

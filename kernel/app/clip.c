@@ -98,7 +98,7 @@ u32 clip_private(const char *name)
 
 void clip_hook(void (*changed)(u32 serial)) { told = changed; }
 
-/* ---- its text, for API 1.x and the agent */
+/* ---- its text, for the agent (glos clip) */
 
 int clip_set(const char *t, u32 n)
 {
