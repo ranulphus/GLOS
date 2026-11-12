@@ -232,17 +232,19 @@ int fat_format(const struct fat_geo *g, fat_write write, void *ctx, struct fat_m
     return 0;
 }
 
-extern const unsigned char fdboot12_code[], fdboot12_end[], fdboot16_code[], fdboot16_end[];
+extern const unsigned char fdboot12_code[], fdboot12_end[], fdboot16_code[], fdboot16_end[], fdboot32_code[],
+    fdboot32_end[];
 
 int fat_boot(unsigned char *s, int fat)
 {
-    const unsigned char *code = fat == 12 ? fdboot12_code : fdboot16_code;
-    unsigned n = (unsigned)((fat == 12 ? fdboot12_end : fdboot16_end) - code), i;
-    if ((fat != 12 && fat != 16) || n > 510 - 62)
+    const unsigned char *code = fat == 12 ? fdboot12_code : fat == 16 ? fdboot16_code : fdboot32_code;
+    unsigned n = (unsigned)((fat == 12 ? fdboot12_end : fat == 16 ? fdboot16_end : fdboot32_end) - code);
+    unsigned at = fat == 32 ? 90 : 62, i;       /* where the volume's parameters end */
+    if ((fat != 12 && fat != 16 && fat != 32) || n > 510 - at)
         return -1;
-    s[0] = 0xEB, s[1] = 0x3C, s[2] = 0x90;
-    for (i = 0; i < 510 - 62; i++)
-        s[62 + i] = i < n ? code[i] : 0;
+    s[0] = 0xEB, s[1] = (unsigned char)(at - 2), s[2] = 0x90;
+    for (i = 0; i < 510 - at; i++)
+        s[at + i] = i < n ? code[i] : 0;
     s[510] = 0x55, s[511] = 0xAA;
     return 0;
 }

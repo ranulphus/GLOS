@@ -1,4 +1,4 @@
-/* GLOS's boot code for a FAT12 or FAT16 volume's first sector (kernel/disk/disk.h: fat_boot): it starts
+/* GLOS's boot code for a FAT12, FAT16 or FAT32 volume's first sector (kernel/disk/disk.h: fat_boot): it starts
    FreeDOS's kernel, as FreeDOS's SYS would have the volume do, so that GLOS makes a disk a PC starts from
    with no tool of the DOS's (docs/v1/shell.md, step S0). Written from what FreeDOS's kernel asks of whatever
    loads it, not from FreeDOS's boot sector:
@@ -12,19 +12,21 @@
    itself and its buffers above; reads by the BIOS's LBA call on a hard disk where there is one, else by
    cylinder, head and sector from the volume's own geometry. 386 code: GLOS needs one.
 
-   One body, assembled once for each kind of FAT; each is the code from offset 62 of the sector (after the
-   volume's parameters, which fatfmt.c writes) to its end. Linked into the kernel as bytes; never run there. */
+   One body, assembled once for each kind of FAT; each is the code from where the volume's parameters end
+   (which fatfmt.c writes: offset 62 of the sector, 90 in FAT32's) to the sector's end. FAT32's root folder is
+   a chain of clusters like a file's, and its volumes are never floppies. Linked into the kernel as bytes;
+   never run there. */
 #define SEG      0x1FE0                 /* where the code runs */
 #define FATSTART 0x7E00                 /* (in SEG) the first FAT's sector on the disk, a long */
 #define DATASTART 0x7E04                /* the sector of cluster 2, a long */
-#define FATHAVE  0x7E08                 /* FAT16: the FAT's sector in FATBUF, a long */
+#define FATHAVE  0x7E08                 /* FAT16, FAT32: the FAT's sector in FATBUF, a long */
 #define DIRBUF   0x8000                 /* a sector of the root folder */
-#define FATBUF   0x8200                 /* FAT12: the whole FAT (12 sectors at most); FAT16: one sector of it */
+#define FATBUF   0x8200                 /* FAT12: the whole FAT (12 sectors at most); else one sector of it */
 
     .section .rodata
     .code16
 
-    .macro bootcode fat
+    .macro bootcode fat, base, drv
 0:  cli
     xorw %ax, %ax
     movw %ax, %ss
@@ -38,12 +40,12 @@
     movw %sp, %di
     movw $256, %cx
     rep movsw
-    ljmp $SEG, $(0x7C00 + 62 + 1f - 0b)
+    ljmp $SEG, $(0x7C00 + \base + 1f - 0b)
 1:  movw %ax, %ds
     movw %ax, %ss
     movw $0x7C00, %sp
     movw %sp, %bp
-    movb %dl, 0x24(%bp)                 /* the disk, where the volume's parameters keep it */
+    movb %dl, \drv(%bp)                 /* the disk, where the volume's parameters keep it */
     movzwl 0x0E(%bp), %eax              /* the reserved sectors ... */
     addl 0x1C(%bp), %eax                /* ... after the sectors before the volume: the first FAT */
     movl %eax, FATSTART
@@ -56,27 +58,39 @@
     loop 2b
     movl FATSTART, %eax
     .else
-    movl %eax, FATHAVE                  /* (no sector of it yet: the first FAT's start is not a FAT sector index) */
-    decl FATHAVE
+    andl $0, FATHAVE                    /* (no sector of the FAT yet: sector 0 is never one) */
     .endif
+    .if \fat == 32
+    movl 0x24(%bp), %edx
+    .else
     movzwl 0x16(%bp), %edx
+    .endif
     movzbl 0x10(%bp), %ecx
     imull %ecx, %edx
-    addl %edx, %eax                     /* the root folder */
+    addl %edx, %eax                     /* after the FATs: the root folder, or FAT32's cluster 2 */
+    .if \fat == 32
+    movl %eax, DATASTART
+    movl 0x2C(%bp), %eax                /* the root folder's first cluster */
+1:  cmpl $0x0FFFFFF8, %eax
+    jae 8f
+    pushl %eax
+    call 10f
+    .else
     movw 0x11(%bp), %cx
     addw $15, %cx
     shrw $4, %cx                        /* its sectors */
     movzwl %cx, %edx
     addl %eax, %edx
     movl %edx, DATASTART
-    movw $DIRBUF, %bx
-2:  call 9f                             /* a sector of it */
+    .endif
+2:  movw $DIRBUF, %bx
+    call 9f                             /* a sector of it */
     movw %bx, %di
 3:  cmpb $0, (%di)
     je 8f                               /* the folder's end: no kernel */
     pushw %cx
     pushw %di
-    movw $(0x7C00 + 62 + 7f - 0b), %si
+    movw $(0x7C00 + \base + 7f - 0b), %si
     movw $11, %cx
     repe cmpsb
     popw %di
@@ -87,11 +101,29 @@
     jb 3b
     incl %eax
     loop 2b
+    .if \fat == 32
+    popl %eax
+    call 11f                            /* the folder's next cluster */
+    jmp 1b
+    .else
     jmp 8f
-4:  movw 0x1A(%di), %ax                 /* its first cluster */
+    .endif
+4:
+    .if \fat == 32
+    movw 0x14(%di), %ax                 /* its first cluster */
+    shll $16, %eax
+    .endif
+    movw 0x1A(%di), %ax
     pushw $0x0060
     popw %es
-5:  cmpw $2, %ax                        /* a cluster of the file, to ES:0 */
+5:                                      /* a cluster of the file, to ES:0 */
+    .if \fat == 32
+    cmpl $0x0FFFFFF8, %eax
+    jae 6f
+    pushl %eax
+    call 10f
+    .else
+    cmpw $2, %ax
     jb 6f
     .if \fat == 12
     cmpw $0x0FF8, %ax
@@ -105,6 +137,7 @@
     movzbl 0x0D(%bp), %ecx
     imull %ecx, %eax
     addl DATASTART, %eax
+    .endif
     xorw %bx, %bx
 2:  call 9f
     incl %eax
@@ -112,8 +145,11 @@
     addw $0x20, %dx
     movw %dx, %es
     loop 2b
+    .if \fat == 32
+    popl %eax
+    call 11f
+    .elseif \fat == 12
     popw %ax
-    .if \fat == 12
     movw %ax, %si                       /* the next: 12 bits at one and a half times the cluster */
     shrw $1, %si
     addw %ax, %si
@@ -124,6 +160,7 @@
 2:  andw $0x0FFF, %dx
     movw %dx, %ax
     .else
+    popw %ax
     pushw %es                           /* the next: 16 bits, from the FAT's sector that holds them */
     pushw %ds
     popw %es
@@ -141,15 +178,44 @@
     popw %es
     .endif
     jmp 5b
-6:  movb 0x24(%bp), %bl                 /* the kernel is in: enter it */
+6:  movb \drv(%bp), %bl                 /* the kernel is in: enter it */
     movb %bl, %dl
     movw $0, -0x14(%bp)
     ljmp $0x0060, $0
 
-7:  .ascii "KERNEL  SYS"
-    .asciz "No DOS here. Press a key.\r\n"
+    .if \fat == 32
+10: subl $2, %eax                       /* cluster EAX: its first sector in EAX, its sectors in CX */
+    movzbl 0x0D(%bp), %ecx
+    imull %ecx, %eax
+    addl DATASTART, %eax
+    ret
+11: pushw %es                           /* cluster EAX: the next in EAX, 28 bits from the FAT's sector that holds them */
+    pushw %ds
+    popw %es
+    movl %eax, %esi
+    shrl $7, %eax
+    addl FATSTART, %eax
+    cmpl FATHAVE, %eax
+    je 2f
+    movl %eax, FATHAVE
+    movw $FATBUF, %bx
+    call 9f
+2:  andw $0x007F, %si
+    shlw $2, %si
+    movl FATBUF(%si), %eax
+    andl $0x0FFFFFFF, %eax
+    popw %es
+    ret
+    .endif
 
-8:  movw $(0x7C00 + 62 + 7b + 11 - 0b), %si     /* no kernel, or the disk can't be read: say so, then start again */
+7:  .ascii "KERNEL  SYS"
+    .if \fat == 32
+    .asciz "No DOS. Press a key\r\n"
+    .else
+    .asciz "No DOS here. Press a key.\r\n"
+    .endif
+
+8:  movw $(0x7C00 + \base + 7b + 11 - 0b), %si     /* no kernel, or the disk can't be read: say so, then start again */
 2:  lodsb
     testb %al, %al
     jz 3f
@@ -163,9 +229,11 @@
 
 /* The disk's sector EAX to ES:BX; every register kept. */
 9:  pushal
-    movb 0x24(%bp), %dl
+    movb \drv(%bp), %dl
+    .if \fat != 32
     testb %dl, %dl
     jns 3f                              /* a floppy: by cylinder, head and sector */
+    .endif
     pushl $0
     pushl %eax
     pushw %es
@@ -179,8 +247,11 @@
     jnc 4f
     popal                               /* no LBA call in this BIOS, or it failed: the other way */
     pushal
-3:  movw $3, %di                        /* (a floppy's motor: three tries) */
+3:
+    .if \fat != 32
+    movw $3, %di                        /* (a floppy's motor: three tries) */
 2:  pushl %eax
+    .endif
     xorl %edx, %edx
     movzwl 0x18(%bp), %ecx
     divl %ecx
@@ -194,9 +265,12 @@
     movb %al, %ch
     shlb $6, %ah
     orb %ah, %cl
-    movb 0x24(%bp), %dl
+    movb \drv(%bp), %dl
     movw $0x0201, %ax
     int $0x13
+    .if \fat == 32
+    jc 8b
+    .else
     popl %eax
     jnc 4f
     pushw %ax
@@ -206,14 +280,18 @@
     decw %di
     jnz 2b
     jmp 8b
+    .endif
 4:  popal
     ret
     .endm
 
-    .globl fdboot12_code, fdboot12_end, fdboot16_code, fdboot16_end
+    .globl fdboot12_code, fdboot12_end, fdboot16_code, fdboot16_end, fdboot32_code, fdboot32_end
 fdboot12_code:
-    bootcode 12
+    bootcode 12, 62, 0x24
 fdboot12_end:
 fdboot16_code:
-    bootcode 16
+    bootcode 16, 62, 0x24
 fdboot16_end:
+fdboot32_code:
+    bootcode 32, 90, 0x40
+fdboot32_end:

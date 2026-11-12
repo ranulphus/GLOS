@@ -6080,16 +6080,16 @@ def mbr_case(profile):
 
 
 def fdboot_case(profile, kind):
-    """GLOS's boot code for a FAT volume (kernel/disk/fdboot.S; the shell's step S0): a floppy (FAT12) and a
-    hard disk's partition (FAT16, behind GLOS's own first-sector code), each formatted by GLOS's code and
+    """GLOS's boot code for a FAT volume (kernel/disk/fdboot.S; the shell's step S0): a floppy (FAT12) and
+    hard disks' partitions (FAT16 and FAT32, behind GLOS's own first-sector code), each formatted by GLOS's code and
     given GLOS's boot sector, with FreeDOS's kernel and COMMAND.COM copied on (tests/loopa/fdboot-volumes.sh;
     KERNEL.SYS in two pieces). The emulated PC starts from it: FreeDOS comes up and its AUTOEXEC.BAT's
     program reports on COM1."""
     import shutil
     tag = "fdboot-%s-%s" % (kind, profile)
     disk = os.path.join(ROOT, "out", "floppy-%s-disk.img" % tag)
-    if kind == "disk":
-        shutil.copyfile(os.path.join(ROOT, "out", "fdboot", "disk.img"), disk)
+    if kind != "floppy":
+        shutil.copyfile(os.path.join(ROOT, "out", "fdboot", kind + ".img"), disk)
         extra = []
     else:
         with open(disk, "wb") as f:             # (a blank disk beside the floppy: the BIOS starts from A:)
@@ -7811,7 +7811,7 @@ def main():
         res = matrix(floppy_case, cases, a.jobs)
         res += matrix(mbr_case, [(p,) for p in ("bf6", "486dx2") if not a.profile or p in a.profile], a.jobs)
         res += matrix(fdboot_case, [(p, k) for p in ("bf6", "486dx2") if not a.profile or p in a.profile
-                                    for k in ("floppy", "disk")], a.jobs)
+                                    for k in ("floppy", "disk", "disk32")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "netapp":
         cases = [c for c in NETAPP_CASES if not a.profile or c[0] in a.profile]

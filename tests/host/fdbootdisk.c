@@ -1,8 +1,9 @@
-/* fdbootdisk floppy|disk OUT, fdbootdisk say OUT.COM: the volumes for the test of GLOS's FAT boot code
+/* fdbootdisk floppy|disk|disk32 OUT, fdbootdisk say OUT.COM: the volumes for the test of GLOS's FAT boot code
  * (kernel/disk/fdboot.S; Loop A's floppy suite, fdboot_case in tests/loopa/jobs.py).
  *   floppy  a 1.44 MB floppy formatted by fat_format (FAT12), GLOS's boot code in its first sector (fat_boot)
  *   disk    a 20 MB disk (16 heads, 63 sectors a track, as Loop A's are): one active partition (mbr_one),
  *           GLOS's code before the table (mbr_boot), the partition formatted (FAT16) with GLOS's boot code
+ *   disk32  the same of 40 MB, its partition FAT32 (type 0Bh)
  *   say     a DOS program that says "HX-START fdboot", "HX-FDBOOT-OK" and "HX-DONE 0" on COM1
  * The Makefile puts FreeDOS's KERNEL.SYS and COMMAND.COM, the program and an AUTOEXEC.BAT that runs it on the
  * volumes with mtools. Prints "fdbootdisk fat=N start=S sectors=M". */
@@ -39,17 +40,18 @@ int main(int argc, char **argv)
     struct mbr_part part;
     unsigned char s[512];
     unsigned long total;
-    int disk;
-    if (argc != 3 || (strcmp(argv[1], "floppy") && strcmp(argv[1], "disk") && strcmp(argv[1], "say"))
-        || !(o.f = fopen(argv[2], "wb"))) {
-        fprintf(stderr, "usage: fdbootdisk floppy|disk OUT, fdbootdisk say OUT.COM\n");
+    int disk, fat32;
+    if (argc != 3 || (strcmp(argv[1], "floppy") && strcmp(argv[1], "disk") && strcmp(argv[1], "disk32")
+                      && strcmp(argv[1], "say")) || !(o.f = fopen(argv[2], "wb"))) {
+        fprintf(stderr, "usage: fdbootdisk floppy|disk|disk32 OUT, fdbootdisk say OUT.COM\n");
         return 2;
     }
     if (!strcmp(argv[1], "say"))
         return fwrite(say, 1, sizeof say, o.f) != sizeof say || fwrite(text, 1, sizeof text, o.f) != sizeof text
                || fclose(o.f) != 0;
-    disk = !strcmp(argv[1], "disk");
-    total = disk ? 63UL * 16 * 40 : 2880;
+    fat32 = !strcmp(argv[1], "disk32");
+    disk = fat32 || !strcmp(argv[1], "disk");
+    total = fat32 ? 63UL * 16 * 80 : disk ? 63UL * 16 * 40 : 2880;
     memset(&g, 0, sizeof g);
     memset(&part, 0, sizeof part);
     o.base = 0;
@@ -58,6 +60,8 @@ int main(int argc, char **argv)
         if (mbr_one(s, total, 16, 63, &part) != 0)
             return 1;
         mbr_boot(s);
+        if (fat32)
+            s[446 + 4] = 0x0B;                  /* (mbr_one names a partition this small FAT16) */
         if (fwrite(s, 1, 512, o.f) != 512)
             return 1;
         o.base = part.start;
@@ -68,7 +72,9 @@ int main(int argc, char **argv)
     g.drive = disk ? 0x80 : 0x00;
     g.serial = 0x474C4F53UL;
     g.label = "GLOSBOOT";
+    g.fat = fat32 ? 32 : 0;
     if (fat_format(&g, put, &o, &made) != 0 || fat_boot(o.first, made.fat) != 0 || put(&o, 0, o.first, 1) != 0
+        || (made.fat == 32 && put(&o, 6, o.first, 1) != 0)
         || fseek(o.f, (long)((total - 1) * 512), SEEK_SET) != 0 || fwrite(zero, 1, 512, o.f) != 512 || fclose(o.f) != 0)
         return 1;
     printf("fdbootdisk fat=%d start=%lu sectors=%lu\n", made.fat, o.base, g.sectors);
