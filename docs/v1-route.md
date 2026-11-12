@@ -162,6 +162,22 @@ compatibility, is planned after an audit and finishes before G.
   - an API conformance suite, which starts host-side and runs in Loop A;
   - the siblings' own suites on 2.0.
 
+### B2. The command shell (`docs/v1/shell.md`)
+
+Added 2026-11-12 (the owner's direction, after the setup floppy showed GLOS leaning on FreeDOS's tools and on
+two command sets that don't match). Before phase C, because the Terminal is one of the apps phase C rebuilds.
+
+- **One command interpreter, in the kernel**, with DOS's syntax and GLOS's extras: what a person types into
+  through the Terminal app or an SSH login (the terminal is only the way in), and GLOS's own COMMAND.COM (batch
+  files, `AUTOEXEC.BAT`, `COMMAND /C` for DOS programs). GLOS stops depending on the DOS's command interpreter.
+- **Tools as its commands:** `DF`, `DU`, `DD`, `DISK` (images, partitions, formatting, boot records), and GLOS's
+  system commands as built-ins too (those whose names clash with DOS's renamed; `GLOS <command>` kept as an
+  alias for the old names).
+- **Steps:** S0 the disk code; S1 the interpreter as a host-tested library; S2 sessions in the kernel, the
+  Terminal app a terminal only, SSH logins; S3 the tools, and the setup floppy without FreeDOS's FDISK and
+  FORMAT; S4 the batch language and GLOS's COMMAND.COM (the floppy with FreeDOS's kernel alone).
+- **Later:** text-mode programs mirrored into an SSH login; GLOS's own DOS services, and then no DOS underneath.
+
 ### C. Toolkit 2 (`sdk/gui`)
 
 - **New widgets:**

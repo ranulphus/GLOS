@@ -101,11 +101,23 @@ prompt holds it, and everything else that needs DOS waits behind it.
 | S4 | The batch language; GLOS's `COMMAND.COM`; `AUTOEXEC.BAT` run by GLOS; the floppy with FreeDOS's kernel alone | Batch files against FreeDOS's COMMAND.COM; `loopa-floppy` |
 | later | GLOS's own DOS services (files, FAT), then no DOS underneath | its own plan |
 
-## Questions for the owner
+## Decided by the owner (2026-11-12)
 
-1. **The kernel or an app** for the shell (above)? I propose the kernel.
-2. **Where in the route** (`docs/v1-route.md`)? S1-S4 are about as large as one of its phases. I propose them as
-   a phase of their own before phase C (the new toolkit), since the Terminal is one of the apps phase C rebuilds.
-3. **Names:** DOS-style (`DF`, `DU`, `DD`, `DISK`, `GLOS PS`), upper or lower case alike, as DOS has it?
-4. **Text programs over SSH** (an editor, a full-screen tool): today they take the PC's screen. Mirroring the
-   text screen into an SSH login is possible; in this piece, or later?
+1. **The shell runs in the kernel**, as SSH and SFTP do.
+2. **Its own phase in the route, before phase C** (`docs/v1-route.md`, phase B2).
+3. **DOS-style names, in either case, and GLOS's system commands are built-ins too.** Those whose names clash
+   with a DOS command or program of another meaning are renamed; `GLOS <command>` stays as an alias for the old
+   names, so scripts and the test suites go on working. Proposed names (the owner's to change):
+
+   | Today | Built-in | Why renamed |
+   |---|---|---|
+   | `glos type TEXT`, `glos key CODES`, `glos mouse ...` | `SENDTEXT`, `SENDKEYS`, `SENDMOUSE` | DOS's `TYPE` shows a file; `MOUSE.COM` is the mouse driver |
+   | `glos exit` | `SHUTDOWN` | `EXIT` leaves the shell |
+   | `glos time` | `CLOCK` | DOS's `TIME` and `DATE` (which the shell has too, setting GLOS's clock) |
+   | `glos mem` | `SYSMEM` | `MEM.EXE` shows DOS's memory |
+   | `glos net` | `NETWORK` | `NET.EXE` is a network client's |
+   | `glos ver`, `glos echo` | `VER` shows GLOS's version and the DOS's; `ECHO` | the same meaning: merged |
+   | `glos ps, kill, log, stat, run, config, display, desk, shot, rec, secrets, usb, joy, clip, restart, reboot` ... | the same word | no clash |
+
+4. **Text-mode programs over SSH: later**, as a follow-up. The first version gives a prompt, line commands and
+   programs; a program that takes the screen takes the PC's.
