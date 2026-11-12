@@ -95,7 +95,7 @@ prompt holds it, and everything else that needs DOS waits behind it.
 
 | Step | What | Shows it works |
 |---|---|---|
-| S0 | The disk code: sectors copied in runs, the partition table read and written, FAT12/16/32 made, boot records (GLOS's own for a disk's first sector and for a FAT12, FAT16 or FAT32 volume that starts FreeDOS's kernel: built and booted in Loop A, 2026-11-12; the copy in runs and the code's place in the kernel still to do) | Host tests against `mtools` and `fsck.fat`; Loop A on a blank disk |
+| S0 | The disk code: sectors copied in runs, the partition table read and written, FAT12/16/32 made, boot records (done, 2026-11-12: `kernel/disk`. Sectors in runs of 32 KB through the BIOS when the stub is idle, the disk cache kept right, `bdisk.c`; the table, `mbr.c`; FAT volumes made, `fatfmt.c`; GLOS's own boot code for a disk's first sector and for a FAT12, FAT16 or FAT32 volume that starts FreeDOS's kernel, `mbrboot.S`, `fdboot.S`. Until S3's commands, `glos disktest` reaches the sectors for the tests) | Host tests against `mtools` and `fsck.fat`; Loop A on a blank disk |
 | S1 | The interpreter as a library, from the Terminal app's shell; the Terminal app uses it, unchanged to the eye | The Terminal's goldens; host tests of the parser and built-ins |
 | S2 | Sessions in the kernel; the console call; the Terminal app a terminal only; SSH logins; `ssh pc COMMAND` through the shell | Loop A: the same script through both ways in gives the same output |
 | S3 | `DF`, `DU`, `DD`, `DISK`; the setup floppy without FreeDOS's FDISK and FORMAT | `loopa-floppy`; the 486 |

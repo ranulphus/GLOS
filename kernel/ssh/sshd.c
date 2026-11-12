@@ -15,6 +15,7 @@
 
 #include "glos/bootinfo.h"
 #include "glos/tz.h"
+#include "bdisk.h"
 #include "agent.h"
 #include "cache.h"
 #include "clip.h"
@@ -1343,6 +1344,14 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             say(ch, 1, "glos kill: no such job (glos ps lists them)\n");
             ssh_chan_exit(ch, 1);
         } else {
+            ssh_chan_exit(ch, 0);
+        }
+    } else if (!strncmp(cmd, "glos disktest ", 14)) {
+        if (bdisk_test(cmd + 14) != 0) {
+            say(ch, 1, "glos disktest: list | lba off|on | sum DISK LBA COUNT | copy DISK LBA COUNT TO LBA (disks in hexadecimal)\n");
+            ssh_chan_exit(ch, 2);
+        } else {
+            say(ch, 0, "glos disktest: started; its lines are in the log (GLOS-DISKTEST)\n");
             ssh_chan_exit(ch, 0);
         }
     } else if (!strcmp(cmd, "glos gdb")) {

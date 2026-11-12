@@ -6084,6 +6084,80 @@ def mbr_case(profile):
                              "" if ok else " status=%s said=%s" % (status, m.group(0) if m else "nothing")), ok
 
 
+def bdisk_case(profile, card):
+    """The BIOS's disks by their sectors (kernel/disk/bdisk.c; the shell's step S0), through `glos disktest`:
+    the disks listed with their sizes and C:'s partition; 3,000 sectors of C: summed, copied to a blank second
+    disk (Loop A's --scratch-hdd) and summed there, the three sums one, and the same as the host's own of
+    what the second disk's image then holds. A copy to the first disk is refused, and one to the second once
+    it has a partition table (C:'s first sector copied to its first). On the Pentium II by the BIOS's LBA
+    calls; on the 486 by cylinder, head and sector (`glos disktest lba off`: its BIOS has the LBA calls too)."""
+    import zlib
+    tag = "bdisk-%s-%s" % (profile, card)
+    agent = Agent("floppy-" + tag, profile, card, ["--scratch-hdd", "8", "--keep-vm", "--cmd", "SERSAY HX-START bdisk",
+                                                   "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks = {"listen": agent.listening()}
+    info = ""
+
+    def lines(pattern, n=1, limit=180):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            found = re.findall(pattern, agent.log())
+            if len(found) >= n:
+                return found
+            time.sleep(0.5)
+        return []
+
+    try:
+        if profile != "bf6":                    # (both BIOSes have the LBA calls: one machine does without)
+            agent.ssh("glos disktest lba off")
+        agent.ssh("glos disktest list")
+        done = lines(r"GLOS-DISKTEST list done disks=(\d+)")
+        log = agent.log()
+        c = re.search(r"GLOS-DISKTEST disk=80 sectors=(\d+) chs=\d+/\d+/\d+ edd=(\d) parts=1\n"
+                      r"GLOS-DISKTEST part disk=80 n=1 type=\w+ active=1 start=63 sectors=\d+\n", log)
+        second = re.search(r"GLOS-DISKTEST disk=81 sectors=(\d+) chs=\d+/\d+/63 edd=\d parts=(-1|0)\n", log)
+        checks["list"] = done == ["2"] and bool(c) and bool(second) and c.group(2) == ("1" if profile == "bf6" else "0")
+        info = " edd=%s" % (c.group(2) if c else "?")
+        agent.ssh("glos disktest sum 80 0 3000")
+        a = lines(r"GLOS-DISKTEST sum disk=80 lba=0 sectors=3000 runs=\d+ adler=(\w+)")
+        agent.ssh("glos disktest copy 80 0 3000 81 100")
+        b = lines(r"GLOS-DISKTEST copy from=80 lba=0 to=81 lba=100 sectors=3000 runs=\d+ adler=(\w+)")
+        agent.ssh("glos disktest sum 81 100 3000")
+        d = lines(r"GLOS-DISKTEST sum disk=81 lba=100 sectors=3000 runs=\d+ adler=(\w+)")
+        checks["copied"] = bool(a) and a == b == d
+        agent.ssh("glos disktest copy 81 0 10 80 0")
+        checks["first-refused"] = bool(lines(r"GLOS-DISKTEST refused to=80 why=not-a-second-disk"))
+        agent.ssh("glos disktest copy 80 0 1 81 0")     # (now the second disk has a partition table: C:'s)
+        lines(r"GLOS-DISKTEST copy from=80 lba=0 to=81 lba=0 sectors=1 ")
+        agent.ssh("glos disktest copy 80 0 10 81 200")
+        checks["table-refused"] = bool(lines(r"GLOS-DISKTEST refused to=81 why=has-partitions"))
+        checks["usage"] = agent.ssh("glos disktest bogus")[0] == 2
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    image = os.path.join(ROOT, "out", "floppy-" + tag, "vm", "scratch.img")
+    try:
+        with open(image, "rb") as f:
+            size = f.seek(0, 2)
+            f.seek(100 * 512)
+            host = "%08x" % (zlib.adler32(f.read(3000 * 512)) & 0xFFFFFFFF)
+            f.seek(200 * 512)
+            untouched = not any(f.read(10 * 512))
+    except OSError:
+        size, host, untouched = 0, "", False
+    import shutil
+    shutil.rmtree(os.path.join(ROOT, "out", "floppy-" + tag, "vm"), ignore_errors=True)    # (--keep-vm, for the image)
+    checks["host-sum"] = bool(a) and a[-1] == host
+    checks["untouched"] = untouched
+    checks["size"] = bool(second) and 0 <= size // 512 - int(second.group(1)) <= 2 * 16 * 63
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-DISKTEST error" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("floppy-" + tag, "PASS" if not bad else "FAIL",
+                             info + ("" if not bad else " failed: " + " ".join(bad))), not bad
+
+
 def fdboot_case(profile, kind):
     """GLOS's boot code for a FAT volume (kernel/disk/fdboot.S; the shell's step S0): a floppy (FAT12) and
     hard disks' partitions (FAT16 and FAT32, behind GLOS's own first-sector code), each formatted by GLOS's code and
@@ -7815,6 +7889,8 @@ def main():
         cases = [c for c in FLOPPY_CASES if not a.profile or c[0] in a.profile]
         res = matrix(floppy_case, cases, a.jobs)
         res += matrix(mbr_case, [(p,) for p in ("bf6", "486dx2") if not a.profile or p in a.profile], a.jobs)
+        res += matrix(bdisk_case, [c for c in (("bf6", "ne2kpci"), ("486dx2", "ne2k")) if not a.profile or c[0] in a.profile],
+                      a.jobs)
         res += matrix(fdboot_case, [(p, k) for p in ("bf6", "486dx2") if not a.profile or p in a.profile
                                     for k in ("floppy", "disk", "disk32")], a.jobs)
         return 0 if all(r[1] for r in res) else 1

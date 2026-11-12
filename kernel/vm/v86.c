@@ -15,6 +15,7 @@
 #include "glos/bootinfo.h"
 #include "agent.h"
 #include "app.h"
+#include "bdisk.h"
 #include "cache.h"
 #include "display.h"
 #include "dos.h"
@@ -184,7 +185,8 @@ void vm_idle(u32 until)
     while (!vm.kill_req && !(current->vif && vpic_pending(&vm.pic)) && !vm_work_due()
            && !(until && (s32)(timer_ticks() - until) >= 0)
            && !(vm.idle_agent && (vm.notice_due || vm.reboot_req))
-           && !(vm.idle_agent && (agent_vm_wake_pending() || app_vm_pending() || display_vm_pending())))
+           && !(vm.idle_agent && (agent_vm_wake_pending() || app_vm_pending() || display_vm_pending()
+                                  || bdisk_vm_pending())))
         thread_block(&vm.waitq);
     vm.waiting = 0;
     vm.wait_deadline = 0;
@@ -816,6 +818,7 @@ static void vm_next(struct trapframe *tf, u32 result)
     static u8 ran;
     display_vm_turn();                          /* the desktop's mode set or given up (gfx/display.c) */
     app_vm_turn();                              /* apps' calls into the system VM, now that it is idle (M6) */
+    bdisk_vm_turn();                            /* disks' sectors read and written (disk/bdisk.c) */
     if (vm.bi->flags & BI_F_AGENT) {
         vm_agent_next(tf, result);
         return;
