@@ -74,6 +74,8 @@ struct vm {
     u32 wait_deadline;
     u8 waiting;
     u8 idle_agent;                      /* the halt is the stub's: an agent command ends it too */
+    u8 notice_due;                      /* the idle screen's notice has something new to say (vcon.c) */
+    u8 reboot_req;                      /* Ctrl-Alt-Del at the idle screen: the PC restarts */
     u8 shell_state;                     /* as the shell: 0 start, 1 AUTOEXEC.BAT running, 2 the console */
     /* the stub in a page of upper memory (docs/upper-memory.md) */
     u16 page_seg;                       /* its segment, 0: the stub is after the PSP */
@@ -124,6 +126,7 @@ void vm_claim_irq(int irq, void (*fn)(struct trapframe *));    /* the line becom
 void vm_unclaim_irq(int irq);                   /* ... and the system VM's again (the SB16's, for a session) */
 void vm_kmask(int irq, int masked);             /* a kernel line masked while its driver works */
 void vm_reset_req(const char *source);
+int vm_idle_headless(void);                     /* the stub waits, nothing runs and no desktop: the idle screen */
 u16 vm_current_psp(void);
 
 /* low memory (identity-mapped, 0-10FFFFh) */

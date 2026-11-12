@@ -5,6 +5,7 @@
 struct bootinfo;
 
 void sshd_start(const struct bootinfo *bi);    /* the ssh thread; nothing without a host key */
+int sshd_on(void);                              /* there is a host key: SSH answers */
 void sshd_net_start(void (*kick)(void));        /* the net thread, after lwIP is up: listen on 22 */
 void sshd_net_poll(void);                       /* the net thread, every turn */
 void sshd_wake(void);                           /* the ssh thread to take a turn (VNC's damage: M10) */

@@ -277,6 +277,15 @@ int net_resolve(const char *name, u8 ip[4], u32 ms)
 /* A card, and an address from DHCP. */
 int net_up(void) { return nic0 && bound_at; }
 
+int net_address(char ip[16], const char **name)
+{
+    if (!net_up())
+        return 0;
+    ip4addr_ntoa_r(netif_ip4_addr(&nif), ip, 16);
+    *name = hostname;
+    return 1;
+}
+
 void net_irq(struct trapframe *tf)
 {
     (void)tf;
@@ -385,15 +394,14 @@ static void status_cb(struct netif *n)
     ip4addr_ntoa_r(netif_ip4_gw(n), gw, sizeof gw);
     ip4addr_ntoa_r(netif_ip4_netmask(n), mask, sizeof mask);
     kprintf("GLOS-NET dhcp ip=%s gw=%s mask=%s ticks=%u\n", ip, gw, mask, timer_ticks());
-    if (kprintf_screen) {                       /* /VERBOSE: the address on the PC's own screen too, whenever it
-                                                   comes (the screen has the log's lines only until the threads
-                                                   run: a PC with no serial cable is found by this line) */
-        char line[96];
+    bound_at = timer_ticks() | 1;
+    {                                           /* the idle screen says the address (vm/vcon.c): a PC with no
+                                                   serial cable is found by it */
         u32 f = irq_save();
-        kprintf_screen(line, (u32)ksnprintf(line, sizeof line, "GLOS-NET dhcp ip=%s (%s.local) ssh port=22\n", ip, hostname));
+        vm.notice_due = 1;
+        vm_kick();
         irq_restore(f);
     }
-    bound_at = timer_ticks() | 1;
 }
 
 /* /SELFTEST: a question for NAME.local's address, as if from the gateway to

@@ -38,6 +38,7 @@ void net_start(int selftest);           /* the net thread, once a card is claime
 void net_rx(struct nic *n, const u8 *frame, u32 len);
 void net_irq(struct trapframe *tf);     /* the card's IRQ handler */
 void net_report(void);                  /* GLOS-NET counters, at leave */
+int net_address(char ip[16], const char **name);        /* 1 with DHCP's address and the PC's name; 0: none yet */
 int net_run(void (*fn)(void *arg), void *arg, int wait);       /* fn on the net thread (M10): 0, or -1 */
 void net_kick(void);                    /* the net thread to take a turn now (output waiting), from any context */
 int net_up(void);                       /* a card, and an address from DHCP */

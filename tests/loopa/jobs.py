@@ -1740,6 +1740,76 @@ def reboot_case(profile, card):
         not bad
 
 
+def idle_case(profile, card):
+    """The idle screen (GLOS with no desktop and nothing running; kernel/vm/vcon.c, v86.c vm_idle_headless): the
+    notice on the PC's own screen, read back by SCRTEXT, said once however often GLOS goes idle; Ctrl-Alt-Del
+    while a job runs only asks (GLOS-RESET-REQ, as before), and at the idle screen restarts the PC, which
+    starts GLOS again (Loop A's boot runs the same RUN.BAT)."""
+    import time
+    tag = "idle-%s-%s" % (profile, card)
+    agent = Agent("ssh-" + tag, profile, card, ["--file", "build/ow/dos/SCRTEXT.EXE=/TEST/SCRTEXT.EXE",
+                                                "--cmd", "SERSAY HX-START idle", "--cmd", "C:\\TEST\\GLOS.EXE",
+                                                "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks = {"listen": agent.listening()}
+    cad = "0.5:0x1D:down,0.6:0x38:down,0.7:0x153,0.9:0x38:up,1:0x1D:up"
+    info = ""
+    try:
+        def screen():                           # (into a file: a job's own output is on the screen too)
+            local = os.path.join(agent.tmp, "scr.txt")
+            agent.ssh("C:\\TEST\\SCRTEXT.EXE > C:\\TEST\\SCR.TXT")
+            p = subprocess.run(["scp", "-q", "-P", str(agent.port)] + agent.opts[agent.opts.index("-o"):] +
+                               ["glos@127.0.0.1:/C/TEST/SCR.TXT", local], capture_output=True, timeout=120)
+            return open(local, "rb").read().decode("latin-1").replace("\r", "") if p.returncode == 0 else ""
+
+        t0, out = time.time(), ""
+        while time.time() - t0 < 90:
+            out = screen()
+            if "its address" in out:
+                break
+            time.sleep(2)
+        out = screen()                          # (GLOS has gone idle several times by now: said once all the same)
+        checks["running"] = "GLOS is running on this PC (no desktop). Ctrl-Alt-Del restarts the PC.\n" in out
+        checks["address"] = "Its name is glos.local, its address 10.0.2.15: reach it with ssh.\n" in out
+        checks["once"] = out.count("GLOS is running") == 1 and out.count("its address") == 1
+        if not (checks["running"] and checks["address"] and checks["once"]):
+            info = " screen: " + " | ".join(l for l in out.split("\n") if l.startswith("SCR "))[:400]
+        slow = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "WAITSEC 100"], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 120 and 'cmd="WAITSEC 100"' not in agent.log():
+            time.sleep(0.5)
+        agent.ssh("glos key " + cad)
+        t0 = time.time()
+        while time.time() - t0 < 30 and "GLOS-RESET-REQ source=cad" not in agent.log():
+            time.sleep(0.5)
+        time.sleep(3)
+        checks["busy"] = "GLOS-RESET-REQ source=cad" in agent.log() and "GLOS-REBOOT" not in agent.log()
+        checks["kill"] = agent.ssh("glos kill")[0] == 0 and slow.wait(timeout=120) == 255
+        time.sleep(2)
+        typed = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "glos key " + cad], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)     # (the PC restarts under it: its reply may never come)
+        t0 = time.time()
+        while time.time() - t0 < 60 and "GLOS-REBOOT source=cad" not in agent.log():
+            time.sleep(0.5)
+        typed.kill()
+        while time.time() - t0 < 400 and agent.log().count("GLOS-SSH listen") < 2:
+            time.sleep(1)
+        while time.time() - t0 < 400 and agent.log().count("GLOS-NET dhcp") < 2:
+            time.sleep(1)
+        rc, out, _ = agent.ssh("glos ver")
+        checks["again"] = rc == 0 and out.startswith("GLOS ")
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["line"] = "GLOS-REBOOT source=cad\n" in text and text.count("HX-START idle") == 2
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad) + info), not bad
+
+
 def restart_case(profile, card):
     """glos restart: GLOS leaves with ERRORLEVEL 200 (AGENT_RESTART), and RUN.BAT, as bench-g400's AUTOEXEC.BAT does,
     loops back on it to start GLOS.EXE again: no reset, GLOS answering again in seconds; then glos exit (0) falls
@@ -7669,6 +7739,7 @@ def main():
         if not os.environ.get("SSH_ONE") and not os.environ.get("SSH_ONLY"):
             res += matrix(reboot_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(restart_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
+            res += matrix(idle_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]

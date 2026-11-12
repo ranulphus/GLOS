@@ -187,7 +187,12 @@ static int hotkey(u8 b)
         return 0;
     case 0x53:
         if (!brk && (mods & M_CTRL) && (mods & M_ALT)) {
-            vm_reset_req("cad");
+            if (!desk_on && vm_idle_headless()) {
+                vm.reboot_req = 1;              /* the idle screen: the PC restarts (v86.c) */
+                vm_kick();
+            } else {
+                vm_reset_req("cad");
+            }
             if (desk_on)
                 desk_in(DESK_SYSKEY, 0, 0, 0);  /* the task list: the shell's (M9) */
             if (ext && qt != qh && q[(qt - 1) % QSIZE] == 0xE0)

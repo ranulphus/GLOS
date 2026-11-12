@@ -1585,6 +1585,10 @@ static void ssh_main(void *arg)
     }
 }
 
+static u8 ssh_is_on;
+
+int sshd_on(void) { return ssh_is_on; }
+
 void sshd_start(const struct bootinfo *bi)
 {
     int i;
@@ -1598,6 +1602,7 @@ void sshd_start(const struct bootinfo *bi)
         kprintf("GLOS-SSH off reason=%s\n", bi->hostkey_len ? "bad-hostkey" : "no-hostkey");
         return;
     }
+    ssh_is_on = 1;
     for (i = 0; i < NCONN; i++) {
         conns[i].rx.buf = kmalloc(RING);
         conns[i].tx.buf = kmalloc(RING);

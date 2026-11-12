@@ -33,8 +33,9 @@ floppy emulator takes the file). Leave the floppy write-enabled: GLOS keeps its 
 ## Using it
 
 1. Start the PC from the floppy, its network cable in. FreeDOS starts GLOS, which shows what it is doing
-   (`/VERBOSE`): the network card it found, the address it was given (`GLOS-NET dhcp ip=...`), `GLOS-SSH listen`.
-   Loading GLOS from a floppy takes most of a minute.
+   (`/VERBOSE`): the network card it found, `GLOS-SSH listen`. Loading GLOS from a floppy takes most of a minute.
+   Then the screen says that GLOS is running, the PC's name and the address it was given, and that
+   Ctrl-Alt-Del restarts the PC (GLOS's idle screen: every GLOS PC with no desktop shows it).
 2. From the other computer, in GLOS's checkout:
 
        tools/floppy/install.py glos-setup.local

@@ -183,6 +183,7 @@ void vm_idle(u32 until)
     vm.waiting = 1;
     while (!vm.kill_req && !(current->vif && vpic_pending(&vm.pic)) && !vm_work_due()
            && !(until && (s32)(timer_ticks() - until) >= 0)
+           && !(vm.idle_agent && (vm.notice_due || vm.reboot_req))
            && !(vm.idle_agent && (agent_vm_wake_pending() || app_vm_pending() || display_vm_pending())))
         thread_block(&vm.waitq);
     vm.waiting = 0;
@@ -338,6 +339,15 @@ void vm_set_a20(int on)
 {
     vm.a20 = on ? 1 : 0;
     mm_set_a20(vm.a20);
+}
+
+/* The idle screen: GLOS with no desktop and nothing running, the stub waiting for a command. The screen says
+   so (vcon_notice) and Ctrl-Alt-Del restarts the PC, as it would under DOS, so that a PC in that state is not
+   taken for one that has stopped (the 486 bench, 2026-11-12). A temporary rule: GLOS's shell has that screen
+   and keyboard from its step S2 (docs/v1/shell.md). */
+int vm_idle_headless(void)
+{
+    return vm.idle_agent && !agent_busy() && !app_count() && !display_desktop_bpp() && !display_fb();
 }
 
 void vm_reset_req(const char *source)
@@ -1248,7 +1258,19 @@ static void vm_gp(struct trapframe *tf)
     case V86_HLT:
         tf->eip = next;
         vm.idle_agent = (tf->cs & 0xFFFF) == vm.loader_cs;     /* the stub, waiting for a command */
+        if (vm_idle_headless()) {
+            vm.notice_due = 0;
+            vcon_notice();
+        }
         vm_idle(0);
+        if (vm.reboot_req) {
+            vm.reboot_req = 0;
+            if (vm_idle_headless()) {           /* (still nothing running) */
+                kprintf("GLOS-REBOOT source=cad\n");
+                kprintf_flush(1);
+                cpu_reboot();
+            }
+        }
         vm.idle_agent = 0;
         return;
     case V86_INT:

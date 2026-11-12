@@ -64,8 +64,9 @@ prompt holds it, and everything else that needs DOS waits behind it.
   shell (`shell.c`) goes, once the kernel's does everything it did (history, completion, colour, `&&`, `||`).
 - **SSH** gets a login: `ssh pc` gives a prompt (the protocol's `shell` and `pty-req` requests, which GLOS
   refuses today). `ssh pc COMMAND` runs the line through the same shell, with no terminal. SFTP is as it is.
-- **The PC's own screen** in text mode, when GLOS runs without its desktop: a session there too (today it shows
-  nothing but the log).
+- **The PC's own screen** in text mode, when GLOS runs without its desktop: a session there too. Until then
+  (2026-11-12, a temporary measure that S2 removes) the screen has a notice: GLOS is running, the PC's name and
+  address, and Ctrl-Alt-Del restarts the PC, which it does while nothing runs (`kernel/vm/vcon.c`).
 
 ### GLOS's COMMAND.COM
 
