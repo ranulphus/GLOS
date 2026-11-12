@@ -4,15 +4,16 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
-## The idle screen, and CR4 on processors without it (2026-11-12)
+## The idle screen, and CR4 asked for only where CPUID names it (2026-11-12)
 
 - A PC that runs GLOS with no desktop and nothing running showed nothing of GLOS's and ignored its keyboard: it
   looked as if it had stopped. Its screen now says that GLOS is running, the PC's name and address (once the
   network has one) and whether SSH answers; and Ctrl-Alt-Del there restarts the PC (`GLOS-REBOOT source=cad`).
   While a program or a job runs, Ctrl-Alt-Del is as before (`GLOS-RESET-REQ source=cad`). A temporary measure:
   GLOS's shell takes that screen and keyboard (docs/v1/shell.md, S2).
-- CR4 is read only on a processor whose CPUID names a feature that lives there. On the 486 bench's ST 486DX4
-  (Cyrix's design: no CR4) the read did not always fault, and GLOS once took the chip for one with VME.
+- CR4 is read only on a processor whose CPUID names a feature that lives there: a 486 that is not Intel's is
+  no longer asked for a register it hasn't got. A precaution, not the fix of a fault seen: the 486 bench's one
+  boot that reported CR4 with VME was probably with an IntelDX4 in the socket, which has both.
 
 ## The API is 2.0 alone (2026-11-12)
 

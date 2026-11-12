@@ -138,8 +138,10 @@ void cpu_set_df_cr3(u32 cr3) { dftss.cr3 = cr3; }
 
 /* CR4 and the features it switches on. A processor has CR4 if CPUID names a feature that lives there (VME, DE,
    PSE, TSC's TSD, PAE, MCE, PGE): only then is it read, and each bit tried. A processor that names none is
-   never asked: the Cyrix 486DX4 (SGS-Thomson's ST486DX4 on the 486 bench, 2026-11-12) has no CR4, yet reading
-   it did not always fault there, GLOS took it for one with VME, and wrote to a register the chip hasn't got. */
+   never asked: reading a register a chip hasn't got is left to fault, and what the 486s that are not Intel's
+   do with that instruction is nobody's promise. (Not a fault seen: the 486 bench's first boot reported CR4
+   with VME and its later ones none, and the likely reason is that an IntelDX4, which has both, was in the
+   socket before the ST 486DX4 that is there now: the owner, 2026-11-12.) */
 void cpu_features(u32 cpuid_edx)
 {
     static const u32 bits[] = { 0x001, 0x002, 0x004, 0x008, 0x010, 0x040, 0x080, 0x100, 0x200 };
