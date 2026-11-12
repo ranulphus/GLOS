@@ -1,163 +1,111 @@
-# The shell: plan (GLOS v1, phase A)
+# GLOS's shell: one command interpreter, reached two ways
 
-**Today:**
-- **The desktop:** Files is the shell (D33). The desktop has icons; folders open in windows.
-- **The task bar:** the launcher's mark (a menu of apps), the time, and a note in a remote session (D35).
-- **No:** window buttons, notification area, notifications or screensavers.
+**Status: a design for the owner's review (2026-11-12). Nothing here is built, and nothing in the Terminal app or
+in SSH changes until it is agreed.** The disk-level code under the new tools (S0 below) is being built meanwhile:
+every version of this design needs it.
 
-**In v1:** a shell after Windows 10 (the owner's choice over 11):
-- a task bar with the windows and a notification area;
-- a Start menu with search and tiles;
-- notifications;
-- screensavers on DOS-GL;
-- themes and wallpapers.
+## What the owner asked for (2026-11-12)
 
-The task bar and the desktop are the kernel's (`kernel/wm/desk.c`). The Start menu and the desktop's icons are Files'
-(the shell app). The split stays: the kernel draws what must never wait for an app; Files draws what is an app's
-business.
+- A shell that is reached **through the Terminal app or through SSH**, the same shell either way. The terminal
+  is only the way in.
+- **GLOS's own COMMAND.COM**: DOS's syntax with GLOS's benefits, so that GLOS doesn't rely on the command
+  interpreter of the DOS underneath. One interpreter in both roles: what a person types into, and what runs batch
+  files and answers `COMMAND /C`.
+- **Tools of GLOS's own** where it leans on FreeDOS's today (FDISK, FORMAT, SYS) and where it has none: `dd`,
+  `df`, `du`, disk images, partitions, formatting.
+- **Eventually no DOS underneath.** Not part of this design, but nothing here may make it harder.
 
-## The task bar
+## What there is today
 
-```
-+--------------------------------------------------------------------------------------+
-| [G] | [Files: C:\GAMES] [Notepad - GLOS.CFG] [Paint]         | ^ (()) [net] [pad]  14:32 |
-+--------------------------------------------------------------------------------------+
-```
+| | SSH | The Terminal app |
+|---|---|---|
+| Interactive | No: one command a connection (`ssh pc COMMAND`) | Yes |
+| A line is run by | the kernel, if it begins `glos`; otherwise the DOS's `COMMAND.COM /C` | the app's own shell (`apps/term/shell.c`, decision D50): its built-ins, or a program; batch files and pipes go to `COMMAND.COM /C` |
+| Commands | `glos ver, run, shot, key, type, log, stat, ps, mem, net, kill, config, display, secrets, exit, restart, reboot` ... and whatever DOS has | `CD, DIR, COPY, MOVE, REN, DEL, MD, RD, TYPE, ECHO, SET, PATH, PROMPT, CLS, VER, EXIT, HISTORY, HELP, WHERE, START, SSH, SFTP, SSH-KEYGEN`, and programs |
+| Where it runs | the kernel (`kernel/ssh/sshd.c`, `kernel/dos/agent.c`) | a GLOS app (ring 3) |
 
-- **The Start button:** the GLOS mark, at the left. A click, the Windows key or Ctrl+Esc opens the Start menu.
-- **Window buttons:**
-  - one for each window that asks for one (WIN), with its icon and title;
-  - clicking restores, focuses or minimises it; a right click gives its menu (restore, minimise, maximise, close);
-  - grouped by app when there are many (a setting), with a menu of the group's windows.
-- **Alt+Tab:** a strip of the windows with their icons, Alt+Tab and Alt+Shift+Tab to move, release to switch.
-- **The notification area:**
-  - icons put there by GLOS and by apps (SHELL), each with a tooltip, a click, a double-click and a menu;
-  - icons beyond a few go into an overflow (the ^);
-  - GLOS's own:
-    - **Volume:** a click gives a slider and mute; a double-click opens the Mixer.
-    - **Network:** the link and address in its tooltip; a click gives status, a double-click opens the Network
-      page.
-    - **USB devices and pads:** what is plugged in; a click lists them; a pad's icon shows which joystick it is.
-    - **A remote session:** today's note, as an icon with its peer in the tooltip.
-- **The clock:** time to the minute; the date in its tooltip; a click gives a month's calendar; a double-click opens
-  "Date, time and region".
-- **Position and size:** the task bar at the bottom (top as a setting); auto-hide (a setting).
+Two half-shells: neither has the other's commands, SSH has no prompt, and both depend on the DOS's COMMAND.COM
+for batch files. The Terminal has its own shell because there is one DOS under GLOS: a COMMAND.COM waiting at a
+prompt holds it, and everything else that needs DOS waits behind it.
 
-## The Start menu
+## The design
 
-```
-+------------------------------+----------------------------------+
-| [search: type to find      ] |  Pinned                          |
-|                              |  [Files] [Notepad] [Paint] [Term]|
-| Recently added               |  [Games] [Music]   [Web]  [Chat] |
-|   MIDI Studio                |                                  |
-| Most used                    |  Games                           |
-|   Notepad, Files, Term       |  [DOOM] [Quake] [Fifth Wheel]    |
-| A                            |                                  |
-|   Audio Player               |                                  |
-| C                            |                                  |
-|   Calculator, Chat, ...      |                                  |
-| [Settings] [Power]           |                                  |
-+------------------------------+----------------------------------+
-```
+### Three things, kept apart
 
-- **The left column:** recently added and most used apps, then every app A to Z (letters jump), from the Start
-  menu's entries (SHELL): the apps beside GLOS.EXE, installed packages' apps, programs with profiles that ask to be
-  listed.
-- **Search as you type:**
-  - apps, Control Panel pages (by their labels and the schema's descriptions), recent documents, files in the user's
-    folders (a quick index of names, built in the background);
-  - Enter opens the first.
-- **Tiles on the right:**
-  - pinned apps and programs, in groups the user names, dragged to reorder;
-  - small or medium tiles;
-  - live tiles not planned (an app's tile could show a count or a picture later).
-- **Jump lists:** an app's recent documents (Notepad's files, Term's connections) by a right click on its entry or
-  tile.
-- **At the bottom:** Settings (the Control Panel), Power (exit GLOS, restart GLOS, reboot), the user's folders.
-- **The keyboard:** the arrows, type to search, Enter, Esc (D7).
+- **A terminal** is a screen of characters and a keyboard: the Terminal app's window, or an SSH connection with
+  a terminal on the other end. It knows nothing of commands.
+- **The shell** is GLOS's command interpreter: one body of code, one command set, one language (DOS's).
+- **A session** is one shell attached to one terminal (or to none: `ssh pc COMMAND`, a batch file, `COMMAND /C`).
 
-## Notifications
+### Where the shell runs: in the kernel, as SSH and SFTP do (proposed)
 
-- **The pop-up:** a small window above the notification area, with an icon, a title, a line or two, and an action
-  or two (buttons). Shown for a few seconds unless hovered, and queued if several come.
-- **Who sends them:** apps (SHELL) and GLOS itself (a pad plugged in, the network up or down, a disk full, a
-  download finished in Fetch or PKG, an app not answering).
-- **Never over a full-screen program:** in an exclusive session they wait, and the task bar's icon shows a count.
-  A "do not disturb" setting holds them.
+- The interpreter is a library in portable C (the parser, the batch language, the built-in commands) that asks
+  for everything it needs through a small interface (files, programs, a terminal). It is tested on the host
+  against that interface, like the toolkit and the window manager.
+- GLOS's kernel has it, a thread a session. Its file work goes through the kernel's DOS server, a call at a
+  time, as SFTP's and the apps' does: so several sessions run side by side, and a session at its prompt holds
+  nothing. Programs are run as jobs, as now (one DOS: they still take turns).
+- **Why the kernel and not an app:**
+  - it is there before anything is installed: on the setup floppy, GLOS's shell and its tools are in `GLOSK.BIN`,
+    and FreeDOS's COMMAND.COM, FDISK and FORMAT (about 190 KB) can go;
+  - an SSH login needs no file on the disk and no free DOS;
+  - a GLOS app is 300-400 KB (it carries the C library): too big for the floppy, and one more program to load
+    for every `COMMAND /C`.
+- **What it costs:** more code in ring 0 (my estimate: 40-60 KB), which reads what people type. It is kept to
+  the interpreter; the tools' heavy parts (FAT, partitions) are the same code the host tests run.
+- **The alternative:** the shell as a GLOS app that the Terminal app and SSH both attach to through a console
+  the kernel provides. Cleaner separation, but none of the three points above, and the setup floppy would keep
+  FreeDOS's tools. I recommend the kernel.
 
-## Screensavers
+### The ways in
 
-- **When:** after the Control Panel's wait without input (IDLE). Never while a full-screen program or exclusive
-  session runs, or while an app asks the screen to stay on (a video, a game).
-- **What:** savers on DOS-GL, after Windows 98's OpenGL ones:
-  - **Starfield:** 3D stars flying past, speed and density.
-  - **Pipes:** 3D pipes growing and turning, with joints of balls or elbows, and textured pipes.
-  - **3D maze:** a textured maze walked through, with the rat and the OpenGL-logo flips of the original's style (our
-    own art).
-  - **Flying objects:** a waving flag or a ribbon, and GLOS's mark in 3D.
-  - **Text:** a 3D line of text that spins.
-  - **And:** a blank screen, and the screen's power off after a further wait (DPMS through VBE where the card has it).
-- **How:**
-  - each saver is a DOS-GL program run full-screen as an exclusive session, or drawn into the desktop's own surface
-    (settled in B: whichever leaves the desktop's state safest);
-  - a Matrox card draws them in hardware, any other card through DOS-GL's software renderer (DOS-GL
-    `docs/backends.md`);
-  - the first key or mouse movement ends it, and the desktop is as it was.
-- **The preview:** the Control Panel's small screen, the saver drawn into a child window.
+- **The Terminal app** becomes a terminal only: its window, its xterm screen (`vt.c`), its keys. It opens a
+  session (a new API call: a console, a handle with bytes each way and a size) and shows what comes. Its own
+  shell (`shell.c`) goes, once the kernel's does everything it did (history, completion, colour, `&&`, `||`).
+- **SSH** gets a login: `ssh pc` gives a prompt (the protocol's `shell` and `pty-req` requests, which GLOS
+  refuses today). `ssh pc COMMAND` runs the line through the same shell, with no terminal. SFTP is as it is.
+- **The PC's own screen** in text mode, when GLOS runs without its desktop: a session there too (today it shows
+  nothing but the log).
 
-## Themes, wallpapers, the look
+### GLOS's COMMAND.COM
 
-- **Themes:**
-  - colours and metrics, as settings (SETTINGS);
-  - the toolkit and the window manager redraw everything when the theme changes;
-  - the built-in ones in the Control Panel's Appearance page.
-- **The wallpaper:** a picture (Paint's decoders, scaled once when set), a colour, or a pattern; on 8-bit desktops
-  dithered to the palette.
-- **Window decorations** (the kernel's, `kernel/wm`):
-  - a title bar with the window's icon, its title, and minimise, maximise/restore and close;
-  - borders to resize from every edge and corner, with the cursor showing which;
-  - a double-click on the title maximises or restores;
-  - Aero-style snapping to half the screen (a setting).
+- **The batch language:** `@`, `ECHO`, `REM`, `SET`, `IF [NOT] EXIST | ERRORLEVEL | ==`, `GOTO` and labels,
+  `CALL`, `FOR`, `SHIFT`, `PAUSE`, `%0`-`%9`, `%NAME%`, redirection and pipes. The shell runs batch files
+  itself. This replaces D50's "batch files go to COMMAND.COM /C".
+- **For DOS programs that shell out** (`COMMAND /C`, the C library's `system()`): a small real-mode
+  `COMMAND.COM` of GLOS's (a few KB) that hands the line to the kernel's shell and runs, as the caller's child,
+  what the shell tells it to. `COMSPEC` points at it.
+- **Starting the PC:** GLOS as DOS's shell (`SHELL=GLOS.EXE /SHELL`, which exists) runs `AUTOEXEC.BAT` itself.
+  A GLOS disk then needs the DOS's kernel and nothing else of it.
+- **Checked against** FreeDOS's and MS-DOS's COMMAND.COM: the same batch files, the same results (host tests on
+  the interpreter; Loop A for the real ones).
 
-## From toolkit 2
+### The tools: commands of the shell
 
-- **The Start menu (Files'):** a list grouped by letter, tiles that drag, a search field with results by kind.
-- **Notifications:** the notification's look (drawn by the kernel? or by Files as an app? Settled in `api-2.md`: the
-  kernel draws notifications, so they show even when Files is busy).
-- **The Control Panel's pages:** above.
+- `DF` (drives, sizes, free space), `DU` (a folder's size), `DD` (a raw copy between a disk, a file and, over
+  SSH, the connection), `DISK` (the disks; a disk's partitions; make and format one; write its boot records;
+  an image to or from a disk).
+- GLOS's own commands (`ps`, `kill`, `log`, `config`, `display` ...) are the shell's too, under `GLOS` as now,
+  so they work in the Terminal app as over SSH.
+- Whatever writes a disk says what it will destroy and wants a plain yes (a flag over SSH), and never the disk
+  GLOS runs from.
 
-## From API 2.0
+## In what order
 
-- **WIN:**
-  - states and decorations: minimise, maximise, restore, full screen;
-  - resizing from every edge; icons; snapping;
-  - "not answering" (a window whose app hasn't taken an event for 5 seconds).
-- **SHELL:**
-  - the task bar's window list (which windows have buttons, their groups);
-  - the notification area (an app's icon, its tooltip, its events);
-  - notifications (send, act on);
-  - the Start menu's entries, its pins and the jump lists;
-  - recent documents; the wallpaper; Alt+Tab's strip.
-- **IDLE:** idle time, the saver's start and end, "keep the screen on", the screen's power.
-- **AUDIO:** the master volume and mute (the volume icon).
-- **NET:** the network's state (the network icon).
-- **SYS:** USB devices and the pads (the USB icon).
-- **SETTINGS:** themes, the clock's formats, and their change event.
-- **DRAW:** DOS-GL full screen for savers, and the preview's child window.
+| Step | What | Shows it works |
+|---|---|---|
+| S0 | The disk code: sectors copied in runs, the partition table read and written, FAT12/16/32 made, boot records | Host tests against `mtools` and `fsck.fat`; Loop A on a blank disk |
+| S1 | The interpreter as a library, from the Terminal app's shell; the Terminal app uses it, unchanged to the eye | The Terminal's goldens; host tests of the parser and built-ins |
+| S2 | Sessions in the kernel; the console call; the Terminal app a terminal only; SSH logins; `ssh pc COMMAND` through the shell | Loop A: the same script through both ways in gives the same output |
+| S3 | `DF`, `DU`, `DD`, `DISK`; the setup floppy without FreeDOS's FDISK and FORMAT | `loopa-floppy`; the 486 |
+| S4 | The batch language; GLOS's `COMMAND.COM`; `AUTOEXEC.BAT` run by GLOS; the floppy with FreeDOS's kernel alone | Batch files against FreeDOS's COMMAND.COM; `loopa-floppy` |
+| later | GLOS's own DOS services (files, FAT), then no DOS underneath | its own plan |
 
-## CPU floor
+## Questions for the owner
 
-- **A 486DX2:** the task bar, the Start menu (its search index built in the background) and notifications.
-- **The savers:** on a Matrox card from a 486 up. Through the software renderer, at a modest size on a 486, at
-  640x480 on a Pentium II.
-
-## Tests
-
-- **Host:** GUI scripts of the Start menu (search, tiles, jump lists), the task bar's buttons and notification area,
-  Alt+Tab, a notification's pop-up; each saver's first frames against references (the software renderer on the host,
-  as DOS-GL's tier 1).
-- **Loop A smoke:** minimise, maximise and restore a window from its buttons and the task bar; the volume icon's
-  slider changes the mixer's master; a saver starts after the wait and ends on a key; a notification while an
-  exclusive session runs waits.
-- **The P4 and bench-g400:** the savers on the G450 and the G400 in hardware and in software, timed.
+1. **The kernel or an app** for the shell (above)? I propose the kernel.
+2. **Where in the route** (`docs/v1-route.md`)? S1-S4 are about as large as one of its phases. I propose them as
+   a phase of their own before phase C (the new toolkit), since the Terminal is one of the apps phase C rebuilds.
+3. **Names:** DOS-style (`DF`, `DU`, `DD`, `DISK`, `GLOS PS`), upper or lower case alike, as DOS has it?
+4. **Text programs over SSH** (an editor, a full-screen tool): today they take the PC's screen. Mirroring the
+   text screen into an SSH login is possible; in this piece, or later?
