@@ -18,7 +18,6 @@ void mixer_desktop(int on);                     /* the desktop has the screen (1
                                                    or nobody has (0: the card stopped, its line the system VM's) */
 int mixer_open(struct app *a, u32 rate, u32 channels, u32 bytes, u32 *id, u32 *lin);   /* GLOS_FN_AUDIO: 0, GLOS_E_ */
 int mixer_close(struct app *a, u32 id);
-int mixer_volume(struct app *a, u32 id, u32 volume);
 void mixer_app_gone(struct app *a);
 u32 mixer_stat(char *buf, u32 max);             /* glos audio */
 

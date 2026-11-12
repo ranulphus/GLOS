@@ -498,7 +498,7 @@ static int own_program(const struct dpmi_ctx *c, char *folder, u32 room)
 
 int app_own(const struct app *a) { return a->own; }
 
-int app_init(struct trapframe *tf, u32 major, u32 minor, u32 *id)
+int app_init(struct trapframe *tf, int asked, u32 *id)
 {
     struct dpmi_ctx *c = dctx;
     struct app *a;
@@ -519,7 +519,7 @@ int app_init(struct trapframe *tf, u32 major, u32 minor, u32 *id)
     if (napps >= MAX_APPS || !(a = kmalloc(sizeof *a)))
         return GLOS_INIT_MEMORY;
     memset(a, 0, sizeof *a);
-    if (major == 2 && api2_app_new(a) != 0) {   /* (its handles and events first: a thread can't be taken back) */
+    if (asked && api2_app_new(a) != 0) {        /* (its handles and events first: a thread can't be taken back) */
         kfree(a);
         return GLOS_INIT_MEMORY;
     }
@@ -533,8 +533,6 @@ int app_init(struct trapframe *tf, u32 major, u32 minor, u32 *id)
     }
     a->ctx = c;
     a->psp = psp;
-    a->api_major = (u8)major;
-    a->api_minor = (u16)minor;
     a->own = (u8)own_program(c, a->folder, sizeof a->folder);
     for (i = 0; i < sizeof a->prog - 1 && session_prog()[i]; i++)
         a->prog[i] = session_prog()[i];
@@ -838,68 +836,27 @@ u32 app_sleep(struct app *a, u32 ticks)
 
 void app_event(struct app *a, const struct glos_event *e)
 {
-    u32 f, n = ARRAY_SIZE(a->evq);
-    struct glos_event *last;
-    if (a->api_major == 2) {                    /* (2.0's own queue: api2win.c; its keyboard and mouse as a DOS */
-        f = irq_save();                         /* program reads them the same) */
-        if (e->type == GLOS_EV_KEY)
-            appdev_key(a, e->key, (int)e->down, e->ch, e->mods);
-        else if (e->type == GLOS_EV_MOUSE)
-            appdev_mouse(a, e->x, e->y, (s32)e->size, (s32)e->time, e->buttons);
-        irq_restore(f);
-        api2_event_1x(a, e);
-        return;
-    }
-    if (e->type >= DESK_EV_STATE)
-        return;                                 /* (the desktop's news for 2.0's apps alone) */
-    if (e->type == GLOS_EV_WHEEL && a->api_minor < 5)
-        return;                                 /* (an app built before 1.5 knows no such event) */
-    f = irq_save();
-    last = a->evt != a->evh ? &a->evq[(a->evt - 1) % n] : 0;
-    if (last && e->type == GLOS_EV_MOUSE && !e->key && last->type == GLOS_EV_MOUSE && !last->key
-        && last->window == e->window) {
-        *last = *e;                             /* (a movement after a movement: the newer one) */
-    } else if (a->evt - a->evh < n) {
-        if (a->evt == a->evh)
-            a->ev_since = timer_ticks();        /* (waiting from now: app_stalled) */
-        a->evq[a->evt++ % n] = *e;
-    } else {
-        a->ndrop++;                             /* (told at its end: GLOS-APP drops) */
-    }
+    u32 f = irq_save();                         /* its keyboard and mouse, as a DOS program reads them */
     if (e->type == GLOS_EV_KEY)
         appdev_key(a, e->key, (int)e->down, e->ch, e->mods);
     else if (e->type == GLOS_EV_MOUSE)
         appdev_mouse(a, e->x, e->y, (s32)e->size, (s32)e->time, e->buttons);    /* (the desktop's: dx, dy there) */
-    a->evq[(a->evt - 1) % n].size = sizeof *e;
-    a->evq[(a->evt - 1) % n].time = (u32)(((unsigned long long)timer_ticks() * 125) >> 7);
-    a->wake++;
-    thread_wake(&a->wq);
-    irq_restore(f);
-}
-
-int app_event_get(struct app *a, struct glos_event *e)
-{
-    u32 f = irq_save();
-    int got = a->evt != a->evh;
-    if (got) {
-        *e = a->evq[a->evh++ % ARRAY_SIZE(a->evq)];
-        a->ev_taken = 1;
-        a->ev_since = timer_ticks();
+    if (!a->v2 && e->type < DESK_EV_STATE) {    /* (a program made an app without asking has no events: its wait */
+        a->wake++;                              /* ends, as for a key of the PC's) */
+        thread_wake(&a->wq);
     }
     irq_restore(f);
-    return got;
+    if (a->v2)
+        api2_event_1x(a, e);                    /* the API's event (api2win.c) */
 }
-
-int app_event_waiting(const struct app *a) { return a->evt != a->evh; }
 
 /* "Not answering": an app that reads its events (it has taken one) has had some waiting for 5 seconds. One that
    never reads them (it reads the keyboard another way) is never said to be. */
 int app_stalled(const struct app *a)
 {
-    int waiting = a->api_major == 2 ? api2_pending(a) : a->evt != a->evh;
-    return a->ev_taken && waiting && !a->kill && timer_ticks() - a->ev_since > 5 * 1024u;
+    return a->ev_taken && api2_pending(a) && !a->kill && timer_ticks() - a->ev_since > 5 * 1024u;
 }
-u32 app_event_backlog(const struct app *a) { return a->evt - a->evh; }
+u32 app_event_backlog(const struct app *a) { return api2_backlog(a); }
 
 /* Its HLT: until an interrupt of its own. */
 void app_idle(struct app *a)
@@ -950,7 +907,7 @@ int app_force(struct trapframe *tf)
     int r;
     if (!session_app() || !dctx || dctx->app || dctx->no_app)
         return 0;
-    if ((r = app_init(tf, 1, (u16)tf->ebx, &id)) == GLOS_INIT_NESTED)
+    if ((r = app_init(tf, 0, &id)) == GLOS_INIT_NESTED)
         return 0;                               /* not here: at a later return */
     if (r) {
         dctx->no_app = 1;
@@ -1123,8 +1080,6 @@ static void serve(struct app *a)
         r.eax = 0x4D00;
         a->code = dos21(&r) == 0 ? r.eax & 0xFFFF : 0xFF;
         last_code = a->code;
-        if (a->ndrop)
-            kprintf("GLOS-APP drops id=%u events=%u\n", a->id, a->ndrop);
         kprintf("GLOS-APP end id=%u prog=%s code=%u how=%u calls=%u ticks=%u t=%u irq0=%u irq13=%u\n", a->id, a->prog,
                 a->code & 0xFF, a->code >> 8, a->ncalls, a->thread->ticks, timer_ticks() - a->t0, a->nirq[0],
                 a->nirq[13]);

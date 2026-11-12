@@ -1,5 +1,5 @@
 /* AUDTEST: a GLOS app that plays a tone through GLOS's mixer (M8 step E; the
- * "audio" suite of tests/loopa/jobs.py). DJGPP, with sdk/libglos.
+ * "audio" suite of tests/loopa/jobs.py). DJGPP, with libglos.
  *
  *   AUDTEST tone NAME HZ SECONDS [RATE CHANNELS RING]
  *                              a sine of HZ for SECONDS through a stream of
@@ -7,7 +7,7 @@
  *                              2; 2) and a ring of RING bytes (16384): the
  *                              ring kept full, the app sleeping 10 ms
  *                              between fills (exit code 41)
- *   AUDTEST info               GLOS_FN_VERSION's capabilities
+ *   AUDTEST info               VERSION: the API's version and what the machine can do
  *
  * Lines: "AUD-START NAME stream=ID", "AUD-OK NAME periods=N underruns=U
  * frames=F" (the counts while the stream was still fed: its end, when the
@@ -20,7 +20,7 @@
 #include <string.h>
 #include <time.h>
 
-#include <glos/api.h>
+#include <glos/glos2.h>
 
 int _crt0_startup_flags = _CRT0_FLAG_UNIX_SBRK;
 
@@ -36,7 +36,9 @@ static void say(const char *fmt, ...)
 
 int main(int argc, char **argv)
 {
-    struct glos_stream *s;
+    struct glos_audio_ring *s;
+    struct glos_version v;
+    glos_handle h;
     unsigned id, rate = 22050, ch = 2, ring = 16384, frames = 0, periods, under;
     const char *name;
     static short wave[1024];                    /* one cycle: a table, so a 486 keeps up at 44.1 kHz */
@@ -45,7 +47,10 @@ int main(int argc, char **argv)
     int secs, k;
     clock_t end;
     if (argc >= 2 && !strcmp(argv[1], "info")) {
-        say("AUD-INFO version=%x caps=%x\n", glos_version(), glos_caps());
+        memset(&v, 0, sizeof v);
+        v.size = sizeof v;
+        glos_version(&v);
+        say("AUD-INFO version=%x caps=%x\n", v.major << 16 | v.minor, v.machine);
         return 0;
     }
     if (argc < 5 || strcmp(argv[1], "tone"))
@@ -55,11 +60,11 @@ int main(int argc, char **argv)
     secs = atoi(argv[4]);
     if (argc >= 8)
         rate = (unsigned)atoi(argv[5]), ch = (unsigned)atoi(argv[6]), ring = (unsigned)atoi(argv[7]);
-    if (glos_init() != 0) {
-        say("AUD-ERR %s init error=%d\n", name, glos_error());
+    if ((k = glos_init("AUDTEST", "", "")) != 0) {
+        say("AUD-ERR %s init error=%d\n", name, k);
         return 44;
     }
-    if (glos_audio(rate, ch, ring, &id, &s) != 0) {
+    if (!(h = glos_audio_out(rate, ch, ring, &s, &id))) {
         say("AUD-ERR %s audio error=%d\n", name, glos_error());
         return 44;
     }
@@ -86,7 +91,7 @@ int main(int argc, char **argv)
     end = clock() + CLOCKS_PER_SEC;             /* (what is in the ring, played: the last frame stays) */
     while (s->write - s->read > ch * 2 && clock() < end)
         glos_sleep(10);
-    glos_audio_close(id);
+    glos_close(h);
     say("AUD-OK %s periods=%u underruns=%u frames=%u\n", name, periods, under, frames);
     return 41;
 }

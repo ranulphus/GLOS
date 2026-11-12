@@ -1,4 +1,4 @@
-/* CACHEWC (API 1.4): GLOS_FN_CACHE, for any program. Conventional memory
+/* CACHEWC: DRAW's CACHE (API 1.4's GLOS_FN_CACHE), for any program. Conventional memory
  * from DOS (DPMI 0100h), a 64 KB unit of it made write-combining, written
  * and read back, and the ranges GLOS must refuse:
  *     HX-CACHE wc=E unit16=E part=E foreign=E type=E kept=K
@@ -14,7 +14,7 @@
 #include <sys/movedata.h>
 #include <go32.h>
 
-#include <glos/api.h>
+#include <glos/glos2.h>
 
 static void ser(const char *s)
 {
@@ -27,7 +27,7 @@ static void ser(const char *s)
 
 static int try(unsigned lin, unsigned bytes, unsigned type)
 {
-    return glos_cache(lin, bytes, type) == 0 ? 0 : glos_error();
+    return glos_cache(lin, bytes, type);        /* (0, or GLOS_E_) */
 }
 
 int main(void)

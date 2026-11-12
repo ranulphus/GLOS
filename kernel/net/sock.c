@@ -21,8 +21,8 @@
  * the other end sends meanwhile waits in its ring. At most `backlog` wait: more are refused by lwIP. Closing
  * the port resets those nobody took.
  *
- * The calls here take their arguments as they are (sock_connect, sock_send, ...): 1.x's GLOS_FN_NET
- * (sock_api, below) and 2.0's NET both come through them. */
+ * The calls here take their arguments as they are (sock_connect, sock_send, ...): the API's NET
+ * (kernel/app/api2net.c) comes through them. */
 #include "lwip/ip_addr.h"
 #include "lwip/pbuf.h"
 #include "lwip/tcp.h"
@@ -43,7 +43,6 @@
 
 #define NSOCK 32
 #define PER_APP 16                              /* an API 2.0 app's (a server's connections count too) ... */
-#define PER_APP_1X 8                            /* ... and a 1.x app's, as 1.x says */
 #define NETS_LISTENING 5                        /* (API 2.0's GLOS_NETS_LISTENING: a port listened on) */
 #define RING 16384u                             /* (a power of two, and more than TCP_WND) */
 
@@ -465,7 +464,7 @@ int sock_resolve(struct app *a, const char *name, u32 ms, u32 *addr)
 }
 
 /* A free slot taken for a (the net thread's poll leaves it be until it has its rings, or is a port), or 0:
-   16 an app (8 a 1.x app), 32 in all. */
+   16 an app, 32 in all. */
 static struct sock *slot(struct app *a)
 {
     struct sock *s = 0;
@@ -476,7 +475,7 @@ static struct sock *slot(struct app *a)
         else if (!socks[i].used && !s)
             s = &socks[i];
     }
-    if (s && mine < (a->v2 ? PER_APP : PER_APP_1X))
+    if (s && mine < PER_APP)
         s->used = 1;
     else
         s = 0;
@@ -714,65 +713,6 @@ int sock_accept(struct app *a, u32 id, u32 ms, u32 flags, u32 *conn, u32 *addr, 
     *addr = ip4_addr_get_u32(ip_2_ip4(&s->ip));
     *port = s->port;
     return 0;
-}
-
-/* ---- 1.x's GLOS_FN_NET: the frame's registers in, its answer out */
-
-static int net_fail(struct trapframe *tf, u32 e)
-{
-    tf->eax = e;
-    tf->eflags |= FL_CF;
-    return 0;
-}
-
-int sock_api(struct app *a, struct trapframe *tf)
-{
-    char name[128];
-    u32 i, x = 0, y = 0, z = 0;
-    int r;
-    switch (tf->ebx) {
-    case GLOS_NET_RESOLVE:
-        for (i = 0; i < sizeof name; i++)
-            if (user_rd((u16)tf->ds, tf->ecx + i, &name[i], 1) != 0)
-                return net_fail(tf, GLOS_E_ARGUMENT);
-            else if (!name[i])
-                break;
-        if (i == sizeof name || !i)
-            return net_fail(tf, GLOS_E_ARGUMENT);
-        if ((r = sock_resolve(a, name, tf->edx, &x)) != 0)
-            return net_fail(tf, (u32)r);
-        tf->eax = x;
-        return 0;
-    case GLOS_NET_CONNECT:
-        if ((r = sock_connect(a, tf->ecx, tf->edx, tf->esi, tf->edi, &x)) != 0)
-            return net_fail(tf, (u32)r);
-        tf->eax = x;
-        return 0;
-    case GLOS_NET_SEND:
-        if ((r = sock_send(a, tf->ecx, (u16)tf->ds, tf->edx, tf->esi, tf->edi, &x)) != 0)
-            return net_fail(tf, (u32)r);
-        tf->eax = x;
-        return 0;
-    case GLOS_NET_RECV:
-        if ((r = sock_recv(a, tf->ecx, (u16)tf->ds, tf->edx, tf->esi, tf->edi, &x, &y)) != 0)
-            return net_fail(tf, (u32)r);
-        tf->eax = x;
-        tf->ebx = y;
-        return 0;
-    case GLOS_NET_CLOSE:
-        if (sock_close(a, tf->ecx, tf->edx != 0) != 0)
-            return net_fail(tf, GLOS_E_ARGUMENT);
-        tf->eax = 0;
-        return 0;
-    case GLOS_NET_STATE:
-        if (sock_state(a, tf->ecx, &x, &y, &z) != 0)
-            return net_fail(tf, GLOS_E_ARGUMENT);
-        tf->eax = x;
-        tf->ebx = y;
-        tf->ecx = z;
-        return 0;
-    }
-    return net_fail(tf, GLOS_E_ARGUMENT);
 }
 
 void sock_app_gone(struct app *a)

@@ -184,48 +184,6 @@ int desk_win_close(struct app *a, u32 id)
     return w ? 0 : GLOS_E_WINDOW;
 }
 
-int desk_win_show(struct app *a, u32 id, int on)
-{
-    struct wm *m = desk_lock();
-    struct wm_window *w = own(m, a, id);
-    if (w) {
-        wm_show(m, w, on);
-        if (on)
-            wm_set_focus(m, w);
-        else
-            desk_refocus(m);
-    }
-    desk_unlock();
-    return w ? 0 : GLOS_E_WINDOW;
-}
-
-int desk_win_move(struct app *a, u32 id, s32 x, s32 y)
-{
-    struct wm *m = desk_lock();
-    struct wm_window *w = own(m, a, id);
-    if (w)
-        wm_move(m, w, x, y);
-    desk_unlock();
-    return w ? 0 : GLOS_E_WINDOW;
-}
-
-int desk_win_resize(struct app *a, u32 id, s32 cw, s32 ch)
-{
-    struct wm *m;
-    struct wm_window *w;
-    int r = 0;
-    if (cw < 1 || ch < 1 || cw > 4096 || ch > 4096)
-        return GLOS_E_ARGUMENT;
-    m = desk_lock();
-    if (!(w = own(m, a, id)))
-        r = GLOS_E_WINDOW;
-    else if (wm_resize(m, w, cw, ch) != 0)
-        r = GLOS_E_MEMORY;
-    let_go(a);                                  /* (the old ones, which wm_resize() left to this) */
-    desk_unlock();
-    return r;
-}
-
 int desk_win_title(struct app *a, u32 id, const char *title)
 {
     struct wm *m = desk_lock();

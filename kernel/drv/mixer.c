@@ -526,17 +526,6 @@ int mixer_close(struct app *a, u32 id)
     return GLOS_E_ARGUMENT;
 }
 
-int mixer_volume(struct app *a, u32 id, u32 volume)
-{
-    u32 i;
-    for (i = 0; i < STREAMS; i++)
-        if (st[i].a == a && st[i].id == id) {
-            st[i].h->volume = volume > 256 ? 256 : volume;
-            return 0;
-        }
-    return GLOS_E_ARGUMENT;
-}
-
 void mixer_app_gone(struct app *a)
 {
     u32 i;

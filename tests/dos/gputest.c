@@ -3,8 +3,8 @@
  * "gpu" suite of tests/loopa/jobs.py). DJGPP, with sdk/libglos and the
  * HAL's DJGPP port.
  *
- *   GPUTEST info               what GLOS says of the card (GLOS_FN_VERSION's
- *                              capabilities, GLOS_FN_GPU)
+ *   GPUTEST info               what GLOS says of the card (VERSION's machine
+ *                              bits, DRAW's GPU)
  *   GPUTEST draw NAME SECONDS [X Y W H]
  *                              a window that shows two buffers of the app's
  *                              own VRAM in turn: in each the engine fills
@@ -13,7 +13,7 @@
  *                              a copy of it below; after each frame the
  *                              pixels are read back through the app's view
  *                              of VRAM and checked, and the window is told
- *                              to show that buffer (GLOS_FN_WINVRAM). 50
+ *                              to show that buffer (DRAW's WINVRAM). 50
  *                              frames a second at most; ends when the
  *                              window is asked to close or SECONDS have
  *                              passed (41)
@@ -42,7 +42,7 @@
 #include <string.h>
 #include <time.h>
 
-#include <glos/api.h>
+#include <glos/glos2.h>
 
 #include "mga/hal.h"
 #include "mga/mmio.h"
@@ -53,7 +53,15 @@ int _crt0_startup_flags = _CRT0_FLAG_UNIX_SBRK; /* (glos_ptr()'s pointers stay w
 static struct glos_gpu gg;
 static volatile struct glos_gpu_share *share;
 static unsigned seen, resyncs;
-static struct glos_window win;
+static struct {
+    glos_handle id;
+    int w, h;
+} win;
+static int last;                                /* the last call's answer, for die() */
+static union {
+    struct glos_ev ev;
+    unsigned char room[GLOS_EV_MAX];
+} ev;
 static const char *name = "?";
 static unsigned buf_off[2], pitch_b;
 
@@ -69,7 +77,7 @@ static void say(const char *fmt, ...)
 
 static void die(int code, const char *what)
 {
-    say("GPU-ERR %s %s error=%d reason=%d\n", name, what, glos_error(), glos_reason());
+    say("GPU-ERR %s %s error=%d reason=%u\n", name, what, last, glos_why());
     exit(code);
 }
 
@@ -88,7 +96,7 @@ static unsigned colour(void)
 /* The engine the app's own, and its HAL told if it wasn't the last owner. */
 static void enter(void)
 {
-    if (!share->held && glos_gpu_lock() != 0)
+    if (!share->held && (last = glos_gpu_lock()) != 0)
         die(43, "lock");
     if (share->lost != seen) {
         seen = share->lost;
@@ -100,7 +108,7 @@ static void enter(void)
 /* The card as GLOS describes it, in the HAL's own terms. */
 static void card(void)
 {
-    if (glos_gpu(&gg) != 0)
+    if ((last = glos_gpu(&gg)) != 0)
         die(44, "gpu");
     memset(&mga, 0, sizeof mga);
     mga.device_id = (uint16_t)gg.device;
@@ -122,8 +130,12 @@ static void card(void)
 
 static void info(void)
 {
-    say("GPU-INFO version=%x caps=%x\n", glos_version(), glos_caps());
-    if (glos_init() != 0)
+    struct glos_version v;
+    memset(&v, 0, sizeof v);
+    v.size = sizeof v;
+    glos_version(&v);
+    say("GPU-INFO version=%x caps=%x\n", v.major << 16 | v.minor, v.machine);
+    if ((last = glos_init("GPUTEST", "", "")) != 0)
         die(44, "init");
     card();
     say("GPU-INFO device=%04x revision=%02x vram=%u regs=%x base=%x share=%x bpp=%u family=%d\n", gg.device,
@@ -135,22 +147,25 @@ static void window(int x, int y, int w, int h)
     unsigned bytes;
     int i;
     char title[48];
-    if (glos_init() != 0)
+    int id = 0;
+    if ((last = glos_init("GPUTEST", "", "")) != 0)
         die(44, "init");
     card();
     memset(&win, 0, sizeof win);
-    win.x = x, win.y = y, win.w = w, win.h = h;
-    win.flags = GLOS_WIN_FIXED;
     sprintf(title, "GPUTEST %s", name);
-    strcpy(win.title, title);
-    if (glos_window(&win) != 0)
+    if (!(win.id = glos_window(title, x, y, w, h, GLOS_WK_NORMAL, GLOS_WF_FIXED, 0))) {
+        last = glos_error();
         die(44, "window");
+    }
+    glos_get(win.id, GLOS_PROP_WIN_W, &win.w);
+    glos_get(win.id, GLOS_PROP_WIN_H, &win.h);
+    glos_get(win.id, GLOS_PROP_WIN_ID, &id);
     pitch_b = ((unsigned)w + 31) / 32 * 32 * 2;
     for (i = 0; i < 2; i++)
-        if (glos_vram(pitch_b * (unsigned)h, 0, 4096, &buf_off[i], &bytes) != 0)
+        if ((last = glos_vram(pitch_b * (unsigned)h, 0, 4096, &buf_off[i], &bytes)) != 0)
             die(44, "vram");
-    glos_show(win.id, 1);
-    say("WIN name=%s id=%u bufs=%x,%x pitch=%u\n", name, win.id, buf_off[0], buf_off[1], pitch_b);
+    glos_show(win.id, GLOS_WS_NORMAL);
+    say("WIN name=%s id=%d bufs=%x,%x pitch=%u\n", name, id, buf_off[0], buf_off[1], pitch_b);
 }
 
 static void target(unsigned off)
@@ -192,7 +207,6 @@ static int run(int argc, char **argv, int spin)
 {
     int secs, x = 40, y = 40, w = 200, h = 120, b = 0, sx = 0, n = 0, bad = 0, worst = 0;
     clock_t end;
-    struct glos_event ev;
     if (argc < 4)
         return 2;
     name = argv[2];
@@ -212,15 +226,15 @@ static int run(int argc, char **argv, int spin)
             if (r > worst)
                 worst = r;
         }
-        if (glos_winvram(win.id, buf_off[b], pitch_b) != 0)
+        if ((last = glos_winvram(win.id, buf_off[b], pitch_b)) != 0)
             die(45, "winvram");
         b ^= 1;
         sx = (sx + 3) % (win.w - win.h / 4);
         n++;
         if (spin)
             continue;
-        while (glos_event(&ev, 0))
-            if (ev.type == GLOS_EV_CLOSE) {
+        while (glos_event(&ev, sizeof ev, 0, 0) > 0)
+            if (ev.ev.kind == GLOS_EV_CLOSE) {
                 say("GPU-OK %s frames=%d bad=%d worst=%d lost=%u resyncs=%u closed\n", name, n, bad, worst,
                     share->lost, resyncs);
                 return 40;
@@ -246,7 +260,7 @@ int main(int argc, char **argv)
     if (!strcmp(argv[1], "raw")) {             /* no lock asked for: the first touch faults and takes it */
         uint32_t st;
         name = "raw";
-        if (glos_init() != 0)
+        if ((last = glos_init("GPUTEST", "", "")) != 0)
             die(44, "init");
         card();
         say("GPU-RAW held=%u\n", share->held);
@@ -267,10 +281,10 @@ int main(int argc, char **argv)
     if (!strcmp(argv[1], "vram") && argc >= 3) {
         unsigned off, bytes, kb = (unsigned)atoi(argv[2]);
         name = "vram";
-        if (glos_init() != 0)
+        if ((last = glos_init("GPUTEST", "", "")) != 0)
             die(44, "init");
         card();
-        if (glos_vram(kb * 1024, 0, 4096, &off, &bytes) != 0)
+        if ((last = glos_vram(kb * 1024, 0, 4096, &off, &bytes)) != 0)
             die(44, "vram");
         *(volatile uint32_t *)(mga_fb + off) = 0x12345678;     /* (its view: the block is the app's to write) */
         say("GPU-VRAM off=%x bytes=%u read=%08lx\n", off, bytes, (unsigned long)*(volatile uint32_t *)(mga_fb + off));

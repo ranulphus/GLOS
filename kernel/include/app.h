@@ -21,7 +21,7 @@ struct app *app_pending(void);          /* the app app_init made, until its prog
 int glos_api(struct trapframe *tf);
 
 /* On the VM thread, from the program's trap. */
-int app_init(struct trapframe *tf, u32 major, u32 minor, u32 *id);      /* the checks and the memory: 0, or a
+int app_init(struct trapframe *tf, int asked, u32 *id);      /* the checks and the memory: 0, or a
                                            GLOS_INIT_ reason (the same numbers as 2.0's GLOS_WHY_) */
 void app_detach(struct trapframe *tf);  /* the frame goes to the app's thread; this one to the stub */
 int app_force(struct trapframe *tf);    /* glos run --app: at a return to the session's client; 1: it is an app now */
@@ -62,9 +62,7 @@ u16 app_vm_psp(void);                   /* the PSP of the app the VM thread make
    pointer's movement for a mouse event on the way in), the API takes them. */
 struct glos_event;
 void app_event(struct app *a, const struct glos_event *e);
-int app_event_get(struct app *a, struct glos_event *e);         /* 1 and the oldest, or 0 */
-int app_event_waiting(const struct app *a);
-u32 app_event_backlog(const struct app *a);     /* its events not yet read */
+u32 app_event_backlog(const struct app *a);     /* its events not yet read: how full its queue is, 0 to 256 */
 
 /* From interrupts. */
 void app_tick(void);                    /* every kernel tick */

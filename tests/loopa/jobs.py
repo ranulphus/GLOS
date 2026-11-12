@@ -1568,10 +1568,10 @@ def png_pixels(data):
 
 
 def api_version():
-    """GLOS_API_VERSION as include/glos/api.h has it now ((major << 16) | minor)."""
-    src = open(os.path.join(ROOT, "include", "glos", "api.h")).read()
-    major = int(re.search(r"#define GLOS_API_MAJOR\s+(\d+)", src).group(1))
-    minor = int(re.search(r"#define GLOS_API_MINOR\s+(\d+)", src).group(1))
+    """The API's version as include/glos/api2.h has it now ((major << 16) | minor)."""
+    src = open(os.path.join(ROOT, "include", "glos", "api2.h")).read()
+    major = int(re.search(r"#define GLOS_MAJOR\s+(\d+)", src).group(1))
+    minor = int(re.search(r"#define GLOS_MINOR\s+(\d+)", src).group(1))
     return major << 16 | minor
 
 
@@ -5288,7 +5288,7 @@ def apps_case(profile, card):
         rc, out, _ = agent.ssh("glos run --app " + app + "exit 6")     # (an app before it asks: step B)
         checks["run-app"] = rc == 3 and "APP-REFUSED error=5 reason=1" in out
         rc, out, _ = agent.ssh(app + "twice")
-        checks["twice"] = rc == 0 and "APP-TWICE r=-1 error=5 reason=1" in out
+        checks["twice"] = rc == 0 and "APP-TWICE r=5 reason=1" in out
         checks["exit-code"] = agent.ssh(app + "exit 23")[0] == 23
         agent.ssh(app + "exit 9 > NUL")         # (through COMMAND.COM: not GLOS's own child; refused, in the log)
         n0 = agent.log().count("GLOS-APP start ")

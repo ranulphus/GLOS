@@ -371,41 +371,6 @@ static void keys_left(struct agent_job *j)
     irq_restore(f);
 }
 
-int agent_app_read(void *app, u32 seq, u8 *out, u32 room, u32 wait_ticks, u32 *state, u32 *code)
-{
-    struct agent_job *j = app_job(app, seq);
-    u32 n = 0, s, until = timer_ticks() + wait_ticks, f;
-    if (!j)
-        return -1;
-    for (;;) {
-        for (s = 0; s < 2 && n < room; s++) {
-            struct ring *r = &j->out[s];
-            while (ring_used(r) && n < room) {
-                out[n++] = r->buf[r->tail & (RING - 1)];
-                __asm__ volatile("" ::: "memory");
-                r->tail++;
-            }
-        }
-        if (n || j->state == J_DONE || !wait_ticks || (wait_ticks != 0xFFFFFFFFu && (s32)(timer_ticks() - until) >= 0))
-            break;
-        thread_wait(&j->readq, wait_ticks == 0xFFFFFFFFu ? timer_ticks() + 1024 : until);
-    }
-    if (n) {
-        f = irq_save();
-        thread_wake(&roomq);
-        irq_restore(f);
-    }
-    *state = app_state(j);
-    *code = code_of(j);
-    if (j->state == J_DONE && !j->keep && n < room && !ring_used(&j->out[0]) && !ring_used(&j->out[1]) && !j->nleft) {
-        f = irq_save();                         /* (its end told, with room to spare: the slot is free again) */
-        j->app_owner = NULL;
-        j->state = J_FREE;
-        irq_restore(f);
-    }
-    return (int)n;
-}
-
 /* ---- API 2.0's JOB (kernel/app/api2job.c), on the app's thread */
 
 /* What it has written to one stream, as far as there is room: the bytes, or -1 (no such job of the app's). */

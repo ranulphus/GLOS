@@ -60,7 +60,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include <glos/api.h>
+#include <glos/glos2.h>
 
 static int fails;
 static volatile int *volatile null_ptr;
@@ -100,7 +100,7 @@ static int run(const char *name, int seconds)
     }
     more = findfirst("F*.*", &ff, 0) == 0;
     t0 = glos_ticks();
-    printf("APP-RUN name=%s id=%u\n", name, glos_id());
+    printf("APP-RUN name=%s id=%u\n", name, glos_app());
     fflush(stdout);
     while (glos_ticks() - t0 < (unsigned)seconds * 1000) {
         t = glos_ticks();
@@ -243,7 +243,7 @@ static int timer(int hz, int seconds, int slack)
 }
 
 /* DJGPP's own timer signals while the app waits in GLOS (2026-11-10): SIGALRM every tick of the PC's (18.2 a
-   second) for `seconds`, the app asleep in GLOS_FN_SLEEP a second at a time. DJGPP raises a signal from an
+   second) for `seconds`, the app asleep in GLOS's SLEEP a second at a time. DJGPP raises a signal from an
    interrupt by shrinking the data segment's limit in its handler; a sleep cut short for that interrupt is made
    again straight from the handler, with the segment still shrunk, and must end and return all the same. */
 static volatile unsigned alarm_n;
@@ -279,6 +279,7 @@ int main(int argc, char **argv)
 {
     const char *mode = argc > 1 ? argv[1] : "";
     volatile unsigned n = 0;
+    int r0;
 
     if (!strcmp(mode, "drain")) {               /* keys left in the BIOS's buffer (the boot's) out of it */
         int n = 0;
@@ -295,44 +296,47 @@ int main(int argc, char **argv)
         return 0;
     }
     if (!strcmp(mode, "plain")) {
-        printf("APP-PLAIN version=%x\n", glos_version());
+        struct glos_version v;
+        memset(&v, 0, sizeof v);
+        v.size = sizeof v;
+        printf("APP-PLAIN version=%x\n", glos_version(&v) == 0 ? v.major << 16 | v.minor : 0);
         return 7;
     }
-    if (glos_init() != 0) {
-        if (!glos_error()) {
+    if ((r0 = glos_init("APPTEST", "", "")) != 0) {
+        if (r0 < 0) {
             printf("APP-NOGLOS\n");
             return 2;
         }
-        printf("APP-REFUSED error=%d reason=%d\n", glos_error(), glos_reason());
+        printf("APP-REFUSED error=%d reason=%u\n", r0, glos_why());
         return 3;
     }
     if (!strcmp(mode, "run") && argc > 3)
         return run(argv[2], atoi(argv[3]));
     if (!strcmp(mode, "spin")) {
-        printf("APP-SPIN id=%u\n", glos_id());
+        printf("APP-SPIN id=%u\n", glos_app());
         fflush(stdout);
         for (;;)
             n++;
     }
     if (!strcmp(mode, "crash")) {
-        printf("APP-CRASH id=%u\n", glos_id());
+        printf("APP-CRASH id=%u\n", glos_app());
         fflush(stdout);
         __djgpp_exception_toggle();             /* its handlers back to the host: the fault is the host's to report */
         *null_ptr = 1;                          /* the page DJGPP's start-up uncommitted: a page fault */
         return 9;
     }
     if (!strcmp(mode, "exit") && argc > 2) {
-        printf("APP-EXIT id=%u\n", glos_id());
+        printf("APP-EXIT id=%u\n", glos_app());
         return atoi(argv[2]);
     }
     if (!strcmp(mode, "twice")) {
-        int r = glos_init();
-        printf("APP-TWICE r=%d error=%d reason=%d\n", r, glos_error(), glos_reason());
-        return r == -1 && glos_error() == GLOS_E_INIT && glos_reason() == GLOS_INIT_ALREADY ? 0 : 1;
+        int r = glos_init("APPTEST", "", "");
+        printf("APP-TWICE r=%d reason=%u\n", r, glos_why());
+        return r == GLOS_E_INIT && glos_why() == GLOS_WHY_ALREADY ? 0 : 1;
     }
     if (!strcmp(mode, "child") && argc > 2) {
         int r;
-        printf("APP-CHILD id=%u\n", glos_id());
+        printf("APP-CHILD id=%u\n", glos_app());
         fflush(stdout);
         r = spawnl(P_WAIT, argv[2], argv[2], "from", "an", "app", (char *)0);
         printf("APP-CHILD-BACK r=%d ticks=%u\n", r, glos_ticks() != 0);
@@ -346,12 +350,12 @@ int main(int argc, char **argv)
         return timer(atoi(argv[2]), atoi(argv[3]), argc > 4 ? atoi(argv[4]) : 3);
     if (!strcmp(mode, "key")) {
         char line[40];
-        printf("APP-KEY id=%u\n", glos_id());
+        printf("APP-KEY id=%u\n", glos_app());
         fflush(stdout);
         return read(0, line, sizeof line) > 0 ? 0 : 1;
     }
     if (!strcmp(mode, "sleep") && argc > 2) {
-        printf("APP-SLEEP id=%u\n", glos_id());
+        printf("APP-SLEEP id=%u\n", glos_app());
         fflush(stdout);
         glos_sleep((unsigned)atoi(argv[2]) * 1000);
         printf("APP-SLEPT\n");

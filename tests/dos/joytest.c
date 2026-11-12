@@ -18,7 +18,8 @@
 #ifdef __DJGPP__
 #include <dpmi.h>
 #include <pc.h>
-#include "glos/api.h"
+#include "glos/glos2.h"
+static int app_error;
 #define INB(p) inportb(p)
 #define OUTB(p, v) outportb(p, v)
 #else
@@ -174,8 +175,8 @@ int main(int argc, char **argv)
         pit_wait(2200);
     }
 #ifdef __DJGPP__
-    if (argc > 2 && !strcmp(argv[2], "app") && glos_init() != 0) {
-        printf("HX-JOY no-app error=%d\n", glos_error());
+    if (argc > 2 && !strcmp(argv[2], "app") && (app_error = glos_init("JOYTEST", "", "")) != 0) {
+        printf("HX-JOY no-app error=%d\n", app_error);
         return 2;
     }
 #endif

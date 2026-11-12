@@ -162,6 +162,7 @@ int api2_audio(struct app *a, struct trapframe *tf, u32 n);    /* AUDIO's calls 
 void api2_audio_close(struct app *a, void *obj);                /* CLOSE of a stream's handle */
 void api2_midi_close(struct app *a, void *obj);                 /* ... of a MIDI port's */
 int api2_sys_stat(struct trapframe *tf);        /* (api2sys.c) SYS's STAT: for any program */
+int api2_sys_log(struct app *a, struct trapframe *tf);  /* ... and LOG (a NULL: a program that is no app) */
 /* api2dbg.c */
 int api2_debug(struct app *a, struct trapframe *tf, u32 n);     /* DEBUG's calls (made without the app's lock) */
 void api2_debug_close(struct app *a, void *obj);                /* CLOSE of a channel's handle: the program runs on */

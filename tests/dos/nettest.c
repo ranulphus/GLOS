@@ -1,4 +1,4 @@
-/* NETTEST (GLOS M10 step B): an app's TCP connections through GLOS_FN_NET
+/* NETTEST (GLOS M10 step B): an app's TCP connections through GLOS's NET
  * and the sockets on it (glos/net.h), against an echo server on the host
  * (tests/loopa/jobs.py net-app). DJGPP, libglos.
  *
@@ -22,7 +22,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <glos/api.h>
+#include <glos/glos2.h>
 #include <glos/net.h>
 
 static int failures;
@@ -61,7 +61,7 @@ static unsigned addr_of(const char *s)
 
 /* Sends `total` bytes of seed's pattern on each of n connections and checks what comes back, all at once. */
 struct flow {
-    int id;
+    glos_handle id;
     unsigned tx_seed, rx_seed;
     unsigned sent, got;
     int bad;
@@ -80,7 +80,7 @@ static int echo_all(struct flow *f, int n, unsigned total, unsigned limit_ms)
             if (f[i].sent < total) {
                 unsigned k = total - f[i].sent < sizeof out ? total - f[i].sent : sizeof out, x = f[i].tx_seed;
                 pattern(&x, out, k);
-                r = glos_net_send((unsigned)f[i].id, out, k, 0);
+                r = glos_net_send(f[i].id, out, k, 0);
                 if (r < 0)
                     return -1;
                 if (r > 0) {
@@ -90,7 +90,7 @@ static int echo_all(struct flow *f, int n, unsigned total, unsigned limit_ms)
                     f[i].sent += (unsigned)r;
                 }
             }
-            r = glos_net_recv((unsigned)f[i].id, in, sizeof in, f[i].sent < total ? 0 : 20, &st);
+            r = glos_net_receive(f[i].id, in, sizeof in, f[i].sent < total ? 0 : 20, &st);
             if (r < 0)
                 return -1;
             if (r > 0) {
@@ -114,7 +114,7 @@ static void case_echo(unsigned port)
     unsigned t0 = glos_ticks(), ms;
     int r;
     f.id = glos_net_connect(host, port, 5000, 0);
-    if (f.id < 0) {
+    if (!f.id) {
         report("echo-1m", 0, "connect: error %d", glos_error());
         return;
     }
@@ -122,81 +122,85 @@ static void case_echo(unsigned port)
     ms = glos_ticks() - t0;
     report("echo-1m", r == 0 && !f.bad && f.got == 1u << 20, "r=%d sent=%u got=%u bad=%d ms=%u kbps=%u", r, f.sent,
            f.got, f.bad, ms, ms ? (unsigned)(2ull * f.got * 1000 / 1024 / ms) : 0);
-    glos_net_close((unsigned)f.id, 0);
+    glos_net_close(f.id, 0);
 }
 
 static void case_many(unsigned port)
 {
-    struct flow f[8];
-    int i, r, ninth, err;
+    struct flow f[16];                          /* (an app has 16 at most) */
+    glos_handle more;
+    int i, r, err;
     memset(f, 0, sizeof f);
-    for (i = 0; i < 8; i++) {
+    for (i = 0; i < 16; i++) {
         f[i].tx_seed = f[i].rx_seed = 0x9E3779B9u * (unsigned)(i + 1);
-        if ((f[i].id = glos_net_connect(host, port, 5000, 0)) < 0) {
+        if (!(f[i].id = glos_net_connect(host, port, 5000, 0))) {
             report("many", 0, "connect %d: error %d", i, glos_error());
             while (i--)
-                glos_net_close((unsigned)f[i].id, 1);
+                glos_net_close(f[i].id, 1);
             return;
         }
     }
-    ninth = glos_net_connect(host, port, 5000, 0);
+    more = glos_net_connect(host, port, 5000, 0);
     err = glos_error();
-    report("ninth-refused", ninth < 0 && err == GLOS_E_MEMORY, "r=%d error=%d", ninth, err);
-    if (ninth >= 0)
-        glos_net_close((unsigned)ninth, 1);
-    r = echo_all(f, 8, 65536, 120000);
-    for (i = 0; i < 8 && r == 0; i++)
-        if (f[i].bad || f[i].got != 65536)
+    report("one-more-refused", !more && err == GLOS_E_MEMORY, "handle=%u error=%d", more, err);
+    if (more)
+        glos_net_close(more, 1);
+    r = echo_all(f, 16, 32768, 120000);
+    for (i = 0; i < 16 && r == 0; i++)
+        if (f[i].bad || f[i].got != 32768)
             r = 10 + i;
     report("many", r == 0, "r=%d", r);
-    for (i = 0; i < 8; i++)
-        glos_net_close((unsigned)f[i].id, 0);
+    for (i = 0; i < 16; i++)
+        glos_net_close(f[i].id, 0);
 }
 
 static void case_closed(unsigned port)
 {
     char buf[64];
     unsigned st = 0;
-    int id = glos_net_connect(host, port, 5000, 0), r, n = 0;
-    if (id < 0) {
+    glos_handle id = glos_net_connect(host, port, 5000, 0);
+    int r, n = 0;
+    if (!id) {
         report("far-close", 0, "connect: error %d", glos_error());
         return;
     }
-    glos_net_send((unsigned)id, "bye\n", 4, 1000);
-    while ((r = glos_net_recv((unsigned)id, buf, sizeof buf, 5000, &st)) > 0)
+    glos_net_send(id, "bye\n", 4, 1000);
+    while ((r = glos_net_receive(id, buf, sizeof buf, 5000, &st)) > 0)
         n += r;
     report("far-close", r == 0 && st == GLOS_NETS_CLOSED && n == 4, "r=%d state=%u echoed=%d", r, st, n);
-    r = glos_net_send((unsigned)id, "x", 1, 0);    /* (half-closed: the app may still send) */
-    glos_net_close((unsigned)id, 0);
-    r = glos_net_recv((unsigned)id, buf, 1, 0, &st);
-    report("closed-id", r < 0 && glos_error() == GLOS_E_ARGUMENT, "r=%d error=%d", r, glos_error());
+    r = glos_net_send(id, "x", 1, 0);           /* (half-closed: the app may still send) */
+    glos_net_close(id, 0);
+    r = glos_net_receive(id, buf, 1, 0, &st);
+    report("closed-id", r == -GLOS_E_HANDLE, "r=%d", r);
 }
 
 static void case_events(unsigned port)
 {
-    struct glos_event ev;
+    union {
+        struct glos_ev ev;
+        struct glos_ev_net net;
+        unsigned char room[GLOS_EV_MAX];
+    } ev;
     char buf[16];
     unsigned st;
-    int id = glos_net_connect(host, port, 0, GLOS_NETF_EVENTS), opened = 0, data = 0, i, r;
-    if (id < 0) {
+    glos_handle id = glos_net_connect(host, port, 0, GLOS_NETF_EVENTS);
+    int opened = 0, data = 0, i, r;
+    if (!id) {
         report("events", 0, "connect: error %d", glos_error());
         return;
     }
-    for (i = 0; i < 50 && !opened; i++) {
-        ev.size = sizeof ev;
-        if (glos_event(&ev, 100) && ev.type == GLOS_EV_NET && ev.key == (unsigned)id && ev.x == GLOS_NETS_OPEN)
+    for (i = 0; i < 50 && !opened; i++)
+        if (glos_event(&ev, sizeof ev, 100, 0) > 0 && ev.ev.kind == GLOS_EV_NET && ev.ev.handle == id
+            && ev.net.state == GLOS_NETS_OPEN)
             opened = 1;
-    }
-    glos_net_send((unsigned)id, "ping\n", 5, 1000);
-    for (i = 0; i < 50 && !data; i++) {
-        ev.size = sizeof ev;
-        if (glos_event(&ev, 100) && ev.type == GLOS_EV_NET && ev.key == (unsigned)id && ev.y > 0)
-            data = ev.y;
-    }
-    r = glos_net_recv((unsigned)id, buf, sizeof buf, 1000, &st);
+    glos_net_send(id, "ping\n", 5, 1000);
+    for (i = 0; i < 50 && !data; i++)
+        if (glos_event(&ev, sizeof ev, 100, 0) > 0 && ev.ev.kind == GLOS_EV_NET && ev.ev.handle == id && ev.net.waiting > 0)
+            data = (int)ev.net.waiting;
+    r = glos_net_receive(id, buf, sizeof buf, 1000, &st);
     report("events", opened && data > 0 && r == 5 && !memcmp(buf, "ping\n", 5), "opened=%d data=%d r=%d", opened,
            data, r);
-    glos_net_close((unsigned)id, 0);
+    glos_net_close(id, 0);
 }
 
 static void case_bsd(const char *hosts, unsigned port, unsigned closed)
@@ -231,8 +235,8 @@ static void case_bsd(const char *hosts, unsigned port, unsigned closed)
         n = read(fd, buf, sizeof buf);
     report("bsd", r == 6 && n == 6 && !memcmp(buf, "hello\n", 6), "write=%d read=%d", r, n);
     close(fd);
-    r = glos_socket_id(fd);
-    report("bsd-close", r == -1, "id=%d", r);
+    r = (int)glos_socket_handle(fd);
+    report("bsd-close", r == 0, "handle=%d", r);
 
     /* a connection refused, as errno */
     {
@@ -279,33 +283,39 @@ static int all(int argc, char **argv)
     host = addr_of(argv[2]);
     port = (unsigned)atoi(argv[3]);
     closed = (unsigned)atoi(argv[4]);
-    report("version", glos_version() >= 0x10003u && (glos_caps() & GLOS_CAP_NET), "version=%x caps=%x",
-           glos_version(), glos_caps());
+    {
+        struct glos_version v;
+        memset(&v, 0, sizeof v);
+        v.size = sizeof v;
+        r = glos_version(&v);
+        report("version", r == 0 && v.major == 2 && (v.machine & GLOS_MACHINE_NET), "version=%u.%u machine=%x", v.major,
+               v.minor, v.machine);
+    }
     r = glos_random(r1, sizeof r1) == 0 && glos_random(r2, sizeof r2) == 0 && glos_random(big, sizeof big) == 0;
     for (i = 0; i < 64; i++)
         zero &= !r1[i];
     report("random", r && !zero && memcmp(r1, r2, sizeof r1), "r=%d zero=%d", r, zero);
 
     {
-        unsigned long utc;
-        int off, how = glos_time(&utc, &off);
-        printf("NETTEST-TIME how=%d utc=%lu offset=%d\n", how, utc, off);  /* (the host compares it with its own) */
-        report("time", how >= 0, "how=%d", how);
+        struct glos_time t = { sizeof t, 0, 0, 0 };
+        r = glos_time(&t);
+        printf("NETTEST-TIME how=%u utc=%u offset=%d\n", t.how, t.utc, t.offset);  /* (the host compares it with its own) */
+        report("time", r == 0, "r=%d how=%u", r, t.how);
     }
     r = glos_net_resolve(argv[2], 1000, &a);
     report("resolve-dotted", r == 0 && a == host, "r=%d addr=%08x", r, a);
     r = glos_net_resolve("no-such-name.invalid", 20000, &a);
-    report("resolve-unknown", r < 0 && glos_error() == GLOS_E_NET_NAME, "r=%d error=%d", r, glos_error());
+    report("resolve-unknown", r == GLOS_E_NET_NAME, "r=%d", r);
     if (argc > 5) {
         r = glos_net_resolve(argv[5], 20000, &a);
-        report("resolve-internet", r == 0 && a, "%s: r=%d error=%d addr=%08x", argv[5], r, glos_error(), a);
+        report("resolve-internet", r == 0 && a, "%s: r=%d addr=%08x", argv[5], r, a);
     }
-    r = glos_net_connect(host, closed, 5000, 0);
-    report("refused", r < 0 && glos_error() == GLOS_E_NET_REFUSED, "r=%d error=%d", r, glos_error());
+    r = (int)glos_net_connect(host, closed, 5000, 0);
+    report("refused", !r && glos_error() == GLOS_E_NET_REFUSED, "handle=%d error=%d", r, glos_error());
     t0 = glos_ticks();
-    r = glos_net_connect(addr_of("10.255.255.1"), 80, 2000, 0);     /* (an address nobody answers for) */
+    r = (int)glos_net_connect(addr_of("10.255.255.1"), 80, 2000, 0);        /* (an address nobody answers for) */
     ms = glos_ticks() - t0;
-    report("timeout", r < 0 && glos_error() == GLOS_E_NET_TIMEOUT && ms >= 1900 && ms < 4000, "r=%d error=%d ms=%u",
+    report("timeout", !r && glos_error() == GLOS_E_NET_TIMEOUT && ms >= 1900 && ms < 4000, "handle=%d error=%d ms=%u",
            r, glos_error(), ms);
     case_echo(port);
     case_many(port);
@@ -324,7 +334,7 @@ static int hold(int argc, char **argv)
     host = addr_of(argv[2]);
     n = atoi(argv[4]);
     for (i = 0; i < n; i++)
-        if (glos_net_connect(host, (unsigned)atoi(argv[3]), 5000, 0) < 0) {
+        if (!glos_net_connect(host, (unsigned)atoi(argv[3]), 5000, 0)) {
             printf("NETTEST hold FAIL connect %d: error %d\n", i, glos_error());
             return 1;
         }
@@ -336,8 +346,9 @@ static int hold(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-    if (glos_init() != 0) {
-        printf("NETTEST no GLOS (error %d)\n", glos_error());
+    int r = glos_init("NETTEST", "", "");
+    if (r != 0) {
+        printf("NETTEST no GLOS (error %d)\n", r);
         return 3;
     }
     if (argc > 1 && !strcmp(argv[1], "all"))

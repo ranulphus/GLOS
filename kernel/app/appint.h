@@ -44,14 +44,13 @@ struct app {
     struct trapframe start;                     /* where its thread begins: the return of its init call */
     void *job;                                  /* the agent's job it began as, or 0 */
     u16 psp;
-    u16 api_minor;                              /* the API's minor version it was built for (INIT's) */
-    u8 api_major;                               /* 1 (glos/api.h) or 2 (glos/api2.h): the calls it may make */
     u8 own;                                     /* its program is in GLOS's own folder: it may be the shell */
     char folder[80];                            /* the folder its file is in ("C:\\GLOS") */
-    u32 wake;                                   /* counts every event given it, of either API (app_sleep's) */
+    u32 wake;                                   /* counts every event given it (app_sleep's) */
     u32 ev_since;                               /* the tick its queue last got its first event, or it last took one */
     u8 ev_taken;                                /* it has taken an event at least once (it reads its queue) */
-    struct api2 *v2;                            /* API 2.0's: its handles, timers and events (api2.c) */
+    struct api2 *v2;                            /* the API's: its handles, timers and events (api2.c); NULL: a program
+                                                   made an app without asking (glos run --app), which makes no calls */
     u32 dta;
     struct cwd cwd;
     u32 ivt[256];                               /* the real-mode vectors it changed ... */
@@ -111,9 +110,6 @@ struct app {
     /* its input (dev.c): what the desktop gave it while a window of its own had the focus. An app that has
        made a window reads this keyboard and this mouse; one that never has reads the PC's, with DOS. */
     u8 gui;
-    struct glos_event evq[256];                 /* events, for the API (32 lost a 486's typed keys, M9) */
-    u32 evh, evt;
-    u32 ndrop;                                  /* events lost to a full queue */
     struct {
         u8 byte;                                /* a scan code, for port 60h ... */
         u16 key;                                /* ... and with a key's last byte, the key as the BIOS keeps it (0: none) */
@@ -145,7 +141,8 @@ void api2_net_event(struct app *a, u32 id, u32 state, u32 waiting, u32 room);  /
                                                    connection of a 2.0 app's (the net thread; interrupts off) */
 
 void api2_event_1x(struct app *a, const struct glos_event *e);  /* the desktop's events for a 2.0 app */
-int api2_pending(const struct app *a);          /* events wait in its 2.0 queue */
+int api2_pending(const struct app *a);          /* events wait in its queue */
+u32 api2_backlog(const struct app *a);          /* how full its queue is: 0 to 256 */
 
 /* app.c: an app's own threads. */
 int app_first(void);                            /* the running thread is an app's first */

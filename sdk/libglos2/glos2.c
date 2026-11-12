@@ -14,7 +14,7 @@ static struct {
     unsigned short sel;
 } entry;
 static int state;                       /* 1: GLOS is there; -1: it isn't */
-static unsigned app;
+static unsigned app, init_why;
 
 static int find(void)
 {
@@ -90,10 +90,12 @@ int glos_init(const char *name, const char *help, const char *category)
     r = raw(GLOS_CORE_INIT, &in, 0);
     if (!r)
         app = in.app;
+    init_why = r == GLOS_E_INIT ? in.why : 0;
     return r;
 }
 
 unsigned glos_app(void) { return app; }
+unsigned glos_why(void) { return init_why; }
 
 int glos_close(glos_handle h)
 {
@@ -359,6 +361,39 @@ int glos_input_mode(unsigned flags)
 {
     struct glos_input_mode q = { sizeof q, 1, flags };
     return raw(GLOS_INPUT_MODE, &q, 0);
+}
+
+int glos_gpu(struct glos_gpu *g)
+{
+    memset(g, 0, sizeof *g);
+    g->size = sizeof *g;
+    return raw(GLOS_DRAW_GPU, g, 0);
+}
+
+int glos_gpu_lock(void) { return raw(GLOS_DRAW_GPU_LOCK, 0, 0); }
+int glos_gpu_unlock(void) { return raw(GLOS_DRAW_GPU_UNLOCK, 0, 0); }
+
+int glos_vram(unsigned least, unsigned most, unsigned align, unsigned *offset, unsigned *bytes)
+{
+    struct glos_vram q = { sizeof q, 0, least, most, align, 0, 0 };
+    int r = raw(GLOS_DRAW_VRAM, &q, 0);
+    if (!r && offset)
+        *offset = q.offset;
+    if (!r && bytes)
+        *bytes = q.bytes;
+    return r;
+}
+
+int glos_vram_free(unsigned offset)
+{
+    struct glos_vram q = { sizeof q, 1, 0, 0, 0, offset, 0 };
+    return raw(GLOS_DRAW_VRAM, &q, 0);
+}
+
+int glos_winvram(glos_handle w, unsigned offset, unsigned pitch)
+{
+    struct glos_winvram q = { sizeof q, w, offset, pitch };
+    return raw(GLOS_DRAW_WINVRAM, &q, 0);
 }
 
 /* The code page DOS has (glos/cp.h): GLOSCP in the environment (a profile's env), else INT 21h 6601h's (with

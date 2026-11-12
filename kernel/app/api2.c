@@ -1,9 +1,7 @@
-/* API 2.0's calls (include/glos/api2.h; docs/v1/phase-b.md, step 1: CORE).
- * glos_api (api.c) hands over every call whose number has major 2. An app is
- * 1.x's or 2.0's by the major version it gave INIT (app.c's api_major), and
- * makes that API's calls only.
+/* The API's calls (include/glos/api2.h; docs/v1/phase-b.md, step 1: CORE).
+ * glos_api (api.c) hands over every call whose number has major 2.
  *
- * An app's 2.0 state (struct api2): its handles (handle.c), its timers, and
+ * An app's state (struct api2): its handles (handle.c), its timers, and
  * its events: a ring of whole events, each with its size first, so that an
  * EVENT that filters by area can take one from the middle (the ones queued
  * before it move up). The app's thread and the kernel's tick (interrupts
@@ -182,6 +180,10 @@ static int take(struct app *a, u32 areas, void *ev, u32 room, u32 *need)
 }
 
 int api2_pending(const struct app *a) { return a->v2 && a->v2->qt != a->v2->qh; }
+
+/* How full its queue is, 0 (empty) to 256 (full): injected keys wait while the app with the keyboard is behind
+   (desk_in_busy). */
+u32 api2_backlog(const struct app *a) { return a->v2 ? (a->v2->qt - a->v2->qh) / (A2_QBYTES / 256) : 0; }
 
 /* ---- timers */
 
@@ -466,8 +468,9 @@ static int init(struct trapframe *tf)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     if (in.major != GLOS_MAJOR)
         return a2_fail(tf, GLOS_E_VERSION);
-    if ((r = app_init(tf, GLOS_MAJOR, in.minor, &id)) != 0) {
-        kprintf("GLOS-APP refuse api=2 psp=%04x why=%d\n", dctx ? dctx->psp : 0, r);
+    if ((r = app_init(tf, 1, &id)) != 0) {
+        static const char *const why[] = { "?", "already", "nested", "16-bit", "parent", "exclusive", "memory" };
+        kprintf("GLOS-APP refuse psp=%04x why=%s\n", dctx ? dctx->psp : 0, why[r >= 0 && r < 7 ? r : 0]);
         in.why = (u32)r;
         a2_wr(tf, &in, sizeof in, size);
         return a2_fail(tf, GLOS_E_INIT);
@@ -741,10 +744,12 @@ int api2_call(struct trapframe *tf)
         return cache_call(tf);
     if (fn == GLOS_SYS_STAT)                    /* (what GLOS knows of itself: GLOSLOG's, and any program's) */
         return api2_sys_stat(tf);
+    if (fn == GLOS_SYS_LOG && (!a || !a->v2))  /* (... and its log, as far as it has got) */
+        return api2_sys_log(0, tf);
     if (!a)
         return a2_fail(tf, GLOS_E_NOT_APP);
-    if (a->api_major != 2 || !a->v2)
-        return a2_fail(tf, GLOS_E_VERSION);       /* (a 1.x app makes 1.x's calls only) */
+    if (!a->v2)
+        return a2_fail(tf, GLOS_E_NOT_APP);        /* (made an app without asking: it has no handles or events) */
     if (area > GLOS_AREA_SHELL && area != GLOS_AREA_THREAD && area != GLOS_AREA_SETTINGS && area != GLOS_AREA_IDLE
         && area != GLOS_AREA_CLIP && area != GLOS_AREA_DND && area != GLOS_AREA_FS && area != GLOS_AREA_JOB
         && area != GLOS_AREA_SYS && area != GLOS_AREA_AUDIO && area != GLOS_AREA_NET && area != GLOS_AREA_CAPTURE

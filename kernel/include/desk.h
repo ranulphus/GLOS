@@ -28,9 +28,6 @@ struct glos_window;
 struct glos_rect;
 int desk_win_create(struct app *a, struct glos_window *g);      /* g: what is asked for, then what it is */
 int desk_win_close(struct app *a, u32 id);
-int desk_win_show(struct app *a, u32 id, int on);
-int desk_win_move(struct app *a, u32 id, s32 x, s32 y);
-int desk_win_resize(struct app *a, u32 id, s32 cw, s32 ch);
 int desk_win_title(struct app *a, u32 id, const char *title);
 int desk_win_pixels(struct app *a, u32 id, struct glos_window *g);
 int desk_win_present(struct app *a, u32 id, const struct glos_rect *r);        /* NULL: all of it */

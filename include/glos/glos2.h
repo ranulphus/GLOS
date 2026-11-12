@@ -21,6 +21,7 @@ int glos_running(void);                                 /* 1 if GLOS 2.0 answers
 int glos_version(struct glos_version *v);               /* v->size set by the caller */
 int glos_init(const char *name, const char *help, const char *category);      /* the program becomes an app */
 unsigned glos_app(void);                                /* its id, once it is one */
+unsigned glos_why(void);                                /* why glos_init() was refused (GLOS_WHY_), after GLOS_E_INIT */
 int glos_close(glos_handle h);
 
 int glos_get(glos_handle h, unsigned prop, int *value);
@@ -59,6 +60,16 @@ int glos_screen(struct glos_screen *s);
    or NULL: GLOS's palette) into the window's client area at (x, y), and to the screen. */
 int glos_blit(glos_handle w, int x, int y, const void *pixels, int pw, int ph, unsigned pitch, const struct glos_format *format,
               const unsigned *palette);
+/* The Matrox card's drawing engine, for a program with a HAL of its own (struct glos_gpu and what follows it in
+   glos/api2.h): the card described; the engine the app's (it waits for it) and no longer; a block of the card's
+   memory (least to most bytes, most 0: least; align a power of two, 4096 at least) and freed; a window showing
+   pixels in such a block (GLOS_OWN_PIXELS: its own again). GLOS_E_NO_GPU without such a card. */
+int glos_gpu(struct glos_gpu *g);
+int glos_gpu_lock(void);
+int glos_gpu_unlock(void);
+int glos_vram(unsigned least, unsigned most, unsigned align, unsigned *offset, unsigned *bytes);
+int glos_vram_free(unsigned offset);
+int glos_winvram(glos_handle w, unsigned offset, unsigned pitch);
 /* ---- input (INPUT) */
 int glos_keys(struct glos_keys *k);                     /* the keyboard as it is now */
 int glos_capture(glos_handle w, int on);                /* the mouse to w, wherever the pointer is; or let go */

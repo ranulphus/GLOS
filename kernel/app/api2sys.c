@@ -204,13 +204,16 @@ static int kill_call(struct app *a, struct trapframe *tf)
     return a2_ok(tf, 0);
 }
 
-static int log_call(struct app *a, struct trapframe *tf)
+/* LOG: for any program (GLOSLOG's: a program a batch file started can't be an app); following it is an app's. */
+int api2_sys_log(struct app *a, struct trapframe *tf)
 {
     struct glos_sys_log q;
     u32 size, pos, n, want;
     char *b;
     if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.follow > 1)
         return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (q.follow && !a)
+        return a2_fail(tf, GLOS_E_NOT_APP);
     want = q.room < TEXT_ROOM ? q.room : TEXT_ROOM;
     if (!(b = kmalloc(TEXT_ROOM)))
         return a2_fail(tf, GLOS_E_MEMORY);
@@ -220,8 +223,10 @@ static int log_call(struct app *a, struct trapframe *tf)
     n = klog_from(&pos, b, want);               /* (a place the log has gone past: from the oldest kept) */
     q.length = n;
     q.next = pos;
-    a->v2->log_follow = (u8)q.follow;
-    a->v2->log_told = pos;                      /* (the event is for what comes after this) */
+    if (a) {
+        a->v2->log_follow = (u8)q.follow;
+        a->v2->log_told = pos;                  /* (the event is for what comes after this) */
+    }
     if ((n && user_wr((u16)tf->ds, q.buffer, b, n) != 0) || a2_wr(tf, &q, sizeof q, size) != 0) {
         kfree(b);
         return a2_fail(tf, GLOS_E_ARGUMENT);
@@ -264,7 +269,7 @@ int api2_sys(struct app *a, struct trapframe *tf, u32 n)
     case GLOS_SYS_KILL:
         return kill_call(a, tf);
     case GLOS_SYS_LOG:
-        return log_call(a, tf);
+        return api2_sys_log(a, tf);
     case GLOS_SYS_PROGRAMS:
         return programs(tf);
     }
