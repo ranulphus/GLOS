@@ -802,8 +802,15 @@ floppy: all build/kernel/GLOSK.PAK build/ow/dos/PARTS.EXE build/floppy/keys/HOST
 # ... in Loop A (tests/loopa/jobs.py floppy): a 486 with an NE2000 and a blank disk boots the floppy (made here with
 # the tests' keys), install.py --new-disk does its work, and the PC then starts GLOS from the disk alone. It needs
 # RetroGPU's run.py to have --floppy.
-loopa-floppy: all build/kernel/GLOSK.PAK build/ow/dos/PARTS.EXE apps build/apps/FETCH.EXE build/apps/PKG.EXE build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB check-deps
+# The disk for the MBR boot code's test (tests/host/mbrdisk.c): made in the dev container, as the host tests are.
+build/host/mbrdisk: tests/host/mbrdisk.c tests/host/mbrstub.S kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/disk.h
+	@mkdir -p build/host
+	$(Q)echo "  HOSTCC  $@"
+	$(Q)$(DEV) $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wl,-z,noexecstack -o $@ tests/host/mbrdisk.c tests/host/mbrstub.S \
+	  kernel/disk/mbr.c kernel/disk/mbrboot.S
+loopa-floppy: all build/kernel/GLOSK.PAK build/ow/dos/PARTS.EXE apps build/apps/FETCH.EXE build/apps/PKG.EXE build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB build/host/mbrdisk check-deps
 	@mkdir -p out/floppy-keys
+	$(Q)$(DEV) build/host/mbrdisk out/floppy-mbr.img 20160
 	$(Q)cp tests/keys/hostkey out/floppy-keys/HOSTKEY && cp tests/keys/hostkey.pub out/floppy-keys/HOSTKEY.pub \
 	  && cp tests/keys/AUTHKEYS out/floppy-keys/AUTHKEYS
 	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \

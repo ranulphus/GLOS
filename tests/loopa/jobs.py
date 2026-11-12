@@ -6062,6 +6062,23 @@ NETAPP_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
 FLOPPY_CASES = [("486dx4", "ne2k", 1440), ("486dx4", "ne2k", 720)]
 
 
+def mbr_case(profile):
+    """GLOS's boot code for a hard disk's first sector (kernel/disk/mbrboot.S; the shell's step S0): the disk
+    the Makefile made with build/host/mbrdisk (one active partition, GLOS's code before the table, and a first
+    sector in the partition that reports on COM1) is started on the emulated PC. The BIOS runs GLOS's code,
+    which finds the partition, reads its first sector and enters it as a DOS boot sector is entered: DL the
+    disk, SI the partition's entry (active, starting at sector 63)."""
+    import shutil
+    tag = "mbr-" + profile
+    disk = os.path.join(ROOT, "out", "floppy-%s-disk.img" % tag)
+    shutil.copyfile(os.path.join(ROOT, "out", "floppy-mbr.img"), disk)
+    status, serial = run("floppy-" + tag, ["--machine", profile, "--hdd", disk, "--timeout", "180"])
+    m = re.search(r"HX-MBR-OK dl=(\w+) active=(\w+) start=(\w+)", serial)
+    ok = status == "PASS" and m is not None and m.groups() == ("80", "80", "003F")
+    return "  %-22s %s%s" % ("floppy-" + tag, "PASS" if ok else "FAIL",
+                             "" if ok else " status=%s said=%s" % (status, m.group(0) if m else "nothing")), ok
+
+
 def floppy_case(profile, card, size):
     """GLOS's setup floppy (docs/floppy.md; tools/floppy): a PC with a blank hard disk boots the floppy (made by
     the Makefile with the tests' keys: out/floppy-test-SIZE.img; the 720 KB one has the kernel packed), GLOS
@@ -7770,7 +7787,9 @@ def main():
         return 0 if all(r[1] for r in matrix(https_case, cases, a.jobs)) else 1
     if a.suite == "floppy":
         cases = [c for c in FLOPPY_CASES if not a.profile or c[0] in a.profile]
-        return 0 if all(r[1] for r in matrix(floppy_case, cases, a.jobs)) else 1
+        res = matrix(floppy_case, cases, a.jobs)
+        res += matrix(mbr_case, [(p,) for p in ("bf6", "486dx2") if not a.profile or p in a.profile], a.jobs)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "netapp":
         cases = [c for c in NETAPP_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(netapp_case, cases, a.jobs)) else 1
