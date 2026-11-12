@@ -889,6 +889,32 @@ After that:
   - RetroGPU's regression, and GLOS's `loopa-glwin`, `loopa-sdlwin` and `loopa-games` on 2.0;
   - merged in RetroGPU with the owner's approval.
 
+**Step 14 as built** (2026-11-12):
+
+- **What 2.0 lacked for it** (GLOS's side, merged first):
+  - DRAW's CACHE (`struct glos_cache`): 1.4's write-combining call, for any program, app or not (a Glide game
+    under DOS/4GW, a full-screen DOS-GL program). The same code as 1.x's (`glos_cache_range`).
+  - SYS's STAT answers any program (GLOSLOG's use of 1.x's).
+  - CORE's EVENT, SLEEP and YIELD and THREAD's waits are points where the first thread's turn with the engine
+    may end, as every 1.x call was: a DOS-GL program waiting for an event doesn't hold the desktop's engine.
+- **DOS-GL's windowed path** (RetroGPU `gl/src/dgl/glos.c`): CORE's VERSION, INIT and CLOSE, WIN's CREATE and
+  SHOW, DRAW's GPU, GPU_LOCK, GPU_UNLOCK, VRAM, WINVRAM and SCREEN, by 2.0's numbers and structures
+  (`<glos/api2.h>`; the calls are made there, not through libglos). The window is a handle
+  (`dglGetGlosWindow` returns it); the sizes a window can have come from the work area.
+- **The SDL bridge** (patches 0008 and 0009): its own copy of the part of 2.0 it uses (`SDL_glos.h`); WIN's
+  CREATE, SHOW, PLACE and FOCUS, the title as a property, DRAW's PIXELS, PRESENT and SCREEN, CORE's EVENT
+  (KEY, TEXT apart from the key, MOUSE, WHEEL, FOCUS, SIZE, CLOSE, and END as a quit), AUDIO's OUT (a stream is
+  a handle). No clipboard yet: it had none on 1.x either.
+- **The HAL** (`hal/port/djgpp.c`, `ow_dos4g.c`): `sys_cache_wc` calls DRAW's CACHE. (The plan named the HAL's
+  port for GLOS, `hal/port/glos.c`, and a lock: that file is the kernel's own port and makes no call; the lock
+  is DOS-GL's, above.)
+- **A program is all 1.x or all 2.0:** DOS-GL's library and SDL moved together; programs linked against both
+  are rebuilt (the SDL examples, PrBoom; Fifth Wheel when RetroGPU's main has this).
+- **SOFT** (DRAW's BLIT for a software renderer) has no user yet: RetroGPU's B2 and B3.
+- **Tests:** GLOS's `loopa-glwin` (3), `loopa-sdlwin` (2) and `loopa-games` (2) with the converted programs;
+  WARPTRI under GLOS on the G400 (the rings write-combining through the 2.0 call); RetroGPU's regression
+  (`tools/regress.sh merge`); APITEST's `cache-any` and `stat-any`.
+
 ### 15. GLOS's apps on 2.0, 1.x removed, B's exit
 
 - **GLOS's apps move to 2.0:** the toolkit (its 1.x calls; toolkit 2 itself is phase C's) and the apps' own calls.
