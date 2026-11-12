@@ -48,7 +48,7 @@
 #   make loopa-games    Fifth Wheel (FIFTHWHEEL_DIR) and PrBoom-plus (DOSGL_DIR) on plain DOS and windowed
 #   make loopa-m8       M8's exit: loopa-gpu, loopa-audio, loopa-glwin, loopa-sdlwin and loopa-games
 #   make gui-goldens    the toolkit's and the apps' pictures, drawn on the host (M9; tests/gui/*.txt)
-#   make floppy         GLOS's setup floppy, build/floppy/glos144.img (docs/floppy.md; tools/floppy/install.py)
+#   make floppy         GLOS's setup floppy, build/floppy/glos1440.img (docs/floppy.md; tools/floppy/install.py)
 #   make loopa-gui      GUITEST's scripts on the desktop against them (M9)
 #   make loopa-config   GLOS.CFG's settings over ssh, kept and written by the kernel (M9)
 #   make loopa-console  programs started by apps, console jobs, the shell's events, stats, watches (M9)
@@ -145,6 +145,8 @@ host-test-run:
 	  tests/host/dev_test.c kernel/drv/dev.c && build/host/dev_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iapps/term -o build/host/vt_test tests/host/vt_test.c apps/term/vt.c \
 	  && build/host/vt_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/inflate_test tests/host/inflate_test.c loader/inflate.c \
+	  && build/host/inflate_test `python3 tests/host/inflate_cases.py build/host/inflate build/kernel/GLOSK.BIN`
 
 # The toolkit (sdk/gui, M9) and the apps on the host, against tests/host/glosshim.c: each test script
 # (tests/gui/NAME.txt) run at 8, 16 and 32 bits, its shots written to build/host/gui/ (the goldens Loop A's
@@ -237,7 +239,7 @@ LOADER_ASM := loader/lowlevel.asm loader/stub.asm
 build/ow/obj16/%.obj: loader/%.c include/glos/bootinfo.h include/glos/config.h build/build_id
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WCC16   $<"
-	$(Q)$(WCC16) -bt=dos -ms -3 -os -zq -we -iinclude -dGLOS_BUILD="\"$(BUILD_ID)\"" -fo=$@ $<
+	$(Q)$(WCC16) -bt=dos -ms -3 -os -zq -we -iinclude -dGLOS_BUILD="\"$(BUILD_ID)\"" -dINFL_FAR=far -fo=$@ $<
 build/ow/obj16/%.obj: loader/%.asm
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WASM    $<"
@@ -246,12 +248,13 @@ build/ow/obj16/cfg.obj build/ow/obj16/tz.obj: build/ow/obj16/%.obj: sdk/config/%
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WCC16   $<"
 	$(Q)$(WCC16) -bt=dos -ms -3 -os -zq -we -iinclude -fo=$@ $<
+build/ow/obj16/main.obj build/ow/obj16/inflate.obj: loader/inflate.h
 build/ow/GLOS.EXE: build/ow/obj16/main.obj build/ow/obj16/lowlevel.obj build/ow/obj16/stub.obj build/ow/obj16/cfg.obj \
-                   build/ow/obj16/tz.obj
+                   build/ow/obj16/tz.obj build/ow/obj16/inflate.obj
 	$(Q)echo "  WLINK   $@"
 	$(Q)$(WLINK) system dos option quiet option stack=4k option map=build/ow/GLOS.map name $@ \
 	  file build/ow/obj16/main.obj,build/ow/obj16/lowlevel.obj,build/ow/obj16/stub.obj,build/ow/obj16/cfg.obj \
-	  file build/ow/obj16/tz.obj
+	  file build/ow/obj16/tz.obj,build/ow/obj16/inflate.obj
 
 # ---- DOS test programs (Open Watcom, small model): tests/dos/name.c -> build/ow/dos/NAME.EXE
 define dos_test
@@ -378,6 +381,9 @@ build/kernel/glosk.elf: $(KOBJS) $(LWIP_OBJS) $(TINYSSH_OBJS) $(HAL_OBJS) kernel
 build/kernel/GLOSK.BIN: build/kernel/glosk.elf
 	$(Q)objcopy -O binary $< $@
 kernel: build/kernel/GLOSK.BIN
+# ... and packed (tools/packkernel.py): half the size, for a small disk. GLOS.EXE takes either as GLOSK.BIN.
+build/kernel/GLOSK.PAK: build/kernel/GLOSK.BIN tools/packkernel.py
+	$(Q)python3 tools/packkernel.py $< $@
 
 # Touched only when the build id (git describe) changes, so the loader is
 # rebuilt with the new id and otherwise left alone.
@@ -766,11 +772,13 @@ build/glos/KEYS/PKG/GLOS.PUB: tools/pkg/GLOS.PUB
 	$(Q)python3 -c "import base64,sys; w=open(sys.argv[1]).read().split(); \
 	  sys.exit(0 if w[0] == 'glos-pkg-ed25519' and len(base64.b64decode(w[1], validate=True)) == 32 else 'bad key')" $<
 	$(Q)cp $< $@
-# GLOS's setup floppy (docs/floppy.md; tools/floppy): build/floppy/glos144.img, a 1.44 MB disk that boots FreeDOS and
+# GLOS's setup floppy (docs/floppy.md; tools/floppy): build/floppy/glos1440.img (FLOPPY_SIZE=1440, 1200 or 720: a
+# 1.44 MB, 1.2 MB or 720 KB disk; the smaller two with the kernel packed), a disk that boots FreeDOS and
 # starts GLOS with its network and SSH; tools/floppy/install.py then puts the whole system on the PC's hard disk from
 # this computer. Its host key is made once (build/floppy/keys, kept from one image to the next); who may log in is
 # FLOPPY_AUTHKEYS, an ed25519 public key (or a file of them).
 FLOPPY_HOST ?= glos-setup
+FLOPPY_SIZE ?= 1440
 # PARTS (tools/floppy/parts.c): the first hard disk's partition table, on the floppy for install.py.
 build/ow/dos/PARTS.EXE: tools/floppy/parts.c
 	@mkdir -p build/ow/dos/obj
@@ -781,22 +789,24 @@ FLOPPY_AUTHKEYS ?= $(firstword $(wildcard $(HOME)/.ssh/glos_bench.pub $(HOME)/.s
 build/floppy/keys/HOSTKEY:
 	@mkdir -p build/floppy/keys
 	$(Q)ssh-keygen -q -t ed25519 -N "" -C "$(FLOPPY_HOST)" -f $@
-floppy: all build/ow/dos/PARTS.EXE build/floppy/keys/HOSTKEY check-deps
+floppy: all build/kernel/GLOSK.PAK build/ow/dos/PARTS.EXE build/floppy/keys/HOSTKEY check-deps
 	@[ -n "$(FLOPPY_AUTHKEYS)" ] && grep -q '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" \
 	  || { echo "floppy: FLOPPY_AUTHKEYS=FILE, an ed25519 public key (ssh-keygen -t ed25519): none found"; exit 1; }
 	$(Q)grep '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" > build/floppy/keys/AUTHKEYS
 	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \
-	  tools/floppy/mkfloppy.sh build/floppy/glos144.img build/floppy/keys $(FLOPPY_HOST)
-	@echo "floppy: build/floppy/glos144.img for $(FLOPPY_HOST).local; then: tools/floppy/install.py $(FLOPPY_HOST).local"
+	  tools/floppy/mkfloppy.sh build/floppy/glos$(FLOPPY_SIZE).img build/floppy/keys $(FLOPPY_HOST) $(FLOPPY_SIZE)
+	@echo "floppy: build/floppy/glos$(FLOPPY_SIZE).img for $(FLOPPY_HOST).local; then: tools/floppy/install.py $(FLOPPY_HOST).local"
 # ... in Loop A (tests/loopa/jobs.py floppy): a 486 with an NE2000 and a blank disk boots the floppy (made here with
 # the tests' keys), install.py --new-disk does its work, and the PC then starts GLOS from the disk alone. It needs
 # RetroGPU's run.py to have --floppy.
-loopa-floppy: all build/ow/dos/PARTS.EXE apps build/apps/FETCH.EXE build/apps/PKG.EXE build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB check-deps
+loopa-floppy: all build/kernel/GLOSK.PAK build/ow/dos/PARTS.EXE apps build/apps/FETCH.EXE build/apps/PKG.EXE build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB check-deps
 	@mkdir -p out/floppy-keys
 	$(Q)cp tests/keys/hostkey out/floppy-keys/HOSTKEY && cp tests/keys/hostkey.pub out/floppy-keys/HOSTKEY.pub \
 	  && cp tests/keys/AUTHKEYS out/floppy-keys/AUTHKEYS
 	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \
-	  tools/floppy/mkfloppy.sh out/floppy-test.img out/floppy-keys glos-setup
+	  tools/floppy/mkfloppy.sh out/floppy-test-1440.img out/floppy-keys glos-setup 1440
+	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \
+	  tools/floppy/mkfloppy.sh out/floppy-test-720.img out/floppy-keys glos-setup 720
 	$(Q)python3 tests/loopa/jobs.py floppy -j $(JOBS)
 # The toolkit (sdk/gui, include/glos/gui.h; M9): build/sdk/libgui.a, linked before libglos.a.
 build/sdk/libgui.a: $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h include/glos/glos.h include/glos/gfx.h

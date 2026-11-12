@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """install.py HOST: GLOS put on a PC's hard disk over the network (docs/floppy.md).
 
-The PC has been started from GLOS's setup floppy (make floppy: build/floppy/glos144.img), so GLOS runs there
+The PC has been started from GLOS's setup floppy (make floppy: build/floppy/glos1440.img), so GLOS runs there
 with its network, SSH and SFTP, and answers as HOST (glos-setup.local, or its address). From this computer:
 
   tools/floppy/install.py glos-setup.local            GLOS into C:\\GLOS of the DOS that is on the disk; what to
@@ -160,7 +160,9 @@ def new_disk(pc, erase):
     print("Formatting C: and putting FreeDOS on it")
     pc.dos("FORMAT C: /Q /U /V:GLOS /Z:SERIOUSLY", "formatting C:", timeout=3600)
     pc.dos("SYS A: C:", "making C: startable")
-    pc.dos("XCOPY A:\\FREEDOS\\BIN C:\\FREEDOS\\BIN\\ /Y", "copying FreeDOS's programs")
+    pc.dos("MD C:\\FREEDOS", "making C:\\FREEDOS")
+    pc.dos("MD C:\\FREEDOS\\BIN", "making C:\\FREEDOS\\BIN")
+    pc.dos("COPY /Y A:\\FREEDOS\\BIN\\*.* C:\\FREEDOS\\BIN", "copying FreeDOS's programs")
     pc.dos("FDISK 1 /IPL", "writing the disk's boot record")
     if not pc.has_c():
         die("C: can't be read after the format")

@@ -5989,19 +5989,20 @@ def free_port():
 
 
 NETAPP_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
-FLOPPY_CASES = [("486dx4", "ne2k")]
+FLOPPY_CASES = [("486dx4", "ne2k", 1440), ("486dx4", "ne2k", 720)]
 
 
-def floppy_case(profile, card):
+def floppy_case(profile, card, size):
     """GLOS's setup floppy (docs/floppy.md; tools/floppy): a PC with a blank hard disk boots the floppy (made by
-    the Makefile with the tests' keys: out/floppy-test.img), GLOS answers on the network from it, and
+    the Makefile with the tests' keys: out/floppy-test-SIZE.img; the 720 KB one has the kernel packed), GLOS
+    answers on the network from it, and
     tools/floppy/install.py --new-disk partitions and formats the disk, puts FreeDOS on it from the floppy and
     GLOS's files by SFTP. Then the PC is started from the disk alone: GLOS comes up as the installed system (its
     name, the same host key), with its programs there and one of them run as an app."""
     import shutil
     import socket
     import tempfile
-    tag = "%s-%s" % (profile, card)
+    tag = "%s-%s-%d" % (profile, card, size)
     disk = os.path.join(ROOT, "out", "floppy-%s-disk.img" % tag)
     with open(disk, "wb") as f:                 # blank: 200 cylinders of 63 sectors by 16 heads, about 98 MB
         f.truncate(63 * 16 * 512 * 200)
@@ -6055,7 +6056,7 @@ def floppy_case(profile, card):
 
     try:
         # 1. From the floppy, onto the blank disk.
-        proc, port, opts, serial = start("floppy-" + tag, ["--floppy", os.path.join(ROOT, "out", "floppy-test.img")])
+        proc, port, opts, serial = start("floppy-" + tag, ["--floppy", os.path.join(ROOT, "out", "floppy-test-%d.img" % size)])
         checks["floppy-up"] = listening(serial)
         rc, o = ssh(port, opts, "glos ver")
         checks["floppy-ssh"] = rc == 0 and "GLOS" in o
@@ -6066,7 +6067,8 @@ def floppy_case(profile, card):
         open(batch, "w").write("get /A/GLOS/GLOSK.BIN %s\n" % got)
         subprocess.run(["sftp", "-P", str(port), "-b", batch] + opts + ["glos@127.0.0.1"], capture_output=True, timeout=900)
         checks["floppy-read"] = os.path.exists(got) and open(got, "rb").read() == \
-            open(os.path.join(ROOT, "build/kernel/GLOSK.BIN"), "rb").read()
+            open(os.path.join(ROOT, "build/kernel/GLOSK.BIN" if size == 1440 else "build/kernel/GLOSK.PAK"), "rb").read()
+        checks["packed"] = ("packed=" in log(serial)) == (size != 1440)
         p = subprocess.run([sys.executable, os.path.join(ROOT, "tools/floppy/install.py"), "127.0.0.1", "--port", str(port),
                             "--key", key, "--keys", os.path.join(ROOT, "out", "floppy-keys")], capture_output=True, timeout=600)
         checks["refuses-blank"] = p.returncode == 1 and b"--new-disk" in p.stderr       # (nothing done unasked)

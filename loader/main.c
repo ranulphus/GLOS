@@ -25,6 +25,7 @@
 #include <string.h>
 #include "glos/bootinfo.h"
 #include "glos/config.h"
+#include "inflate.h"
 
 #ifndef GLOS_BUILD
 #define GLOS_BUILD "unknown"
@@ -252,6 +253,7 @@ static int xms_block(unsigned long kb, unsigned long *phys)
 }
 
 #define KCHUNK 32768UL                          /* the kernel image goes up this much at a time */
+#define KERNEL_PACKED 0x5A4F4C47UL              /* "GLOZ": GLOSK.BIN packed (tools/packkernel.py) */
 static unsigned long xms_kernel_block;          /* XMS mode: where the kernel's block begins */
 
 /* bytes (even) of the buffer at seg:0 to the kernel's place in extended memory, at off: 0, or -1. */
@@ -503,11 +505,50 @@ static void disks_probe(void)
     }
 }
 
+/* A packed GLOSK.BIN (tools/packkernel.py): unpacked through the low buffer, which is the unpacker's window, a
+   buffer's worth at a time on to the image's place in extended memory. */
+static FILE *pk_file;
+static unsigned pk_seg;
+static unsigned long pk_at, pk_left, pk_a = 1, pk_b;       /* (the image's Adler-32 as it goes by) */
+
+static unsigned pk_fill(const unsigned char **p, void *ctx)
+{
+    static unsigned char chunk[2048];
+    unsigned n = pk_left > sizeof chunk ? sizeof chunk : (unsigned)pk_left;
+    (void)ctx;
+    n = (unsigned)fread(chunk, 1, n, pk_file);
+    pk_left -= n;
+    *p = chunk;
+    return n;
+}
+
+static int pk_flush(unsigned n, void *ctx)
+{
+    const unsigned char far *w = MK_FP(pk_seg, 0);
+    unsigned i = 0, k;
+    (void)ctx;
+    while (i < n) {                             /* (5552 bytes at most between the remainders: the sums fit 32 bits) */
+        k = n - i > 5552 ? 5552 : n - i;
+        while (k--) {
+            pk_a += w[i++];
+            pk_b += pk_a;
+        }
+        pk_a %= 65521UL;
+        pk_b %= 65521UL;
+    }
+    if (kernel_up(pk_seg, pk_at, ((unsigned long)n + 1) & ~1UL) != 0)
+        return -1;
+    pk_at += n;
+    return 0;
+}
+
 static int glos_main(int argc, char **argv)
 {
     struct SREGS sr;
     union REGS r;
     struct { unsigned long magic, entry, file_size, total; } hdr;
+    struct { unsigned long length, adler; } packed;
+    int is_packed = 0;
     unsigned long eax_, edx_, buf_phys, tab_phys, a, ret;
     unsigned i, pages;
     char path[128];
@@ -569,14 +610,22 @@ static int glos_main(int argc, char **argv)
     /* The kernel image. */
     kernel_path(path, argv[0]);
     f = fopen(path, "rb");
-    if (!f || fread(&hdr, sizeof hdr, 1, f) != 1 || hdr.magic != KERNEL_MAGIC)
+    if (!f || fread(&hdr, sizeof hdr, 1, f) != 1 || (hdr.magic != KERNEL_MAGIC && hdr.magic != KERNEL_PACKED))
         return refuse("no-kernel");
+    if (hdr.magic == KERNEL_PACKED) {           /* (the image's own header's figures, then the stream's) */
+        if (fread(&packed, sizeof packed, 1, f) != 1)
+            return refuse("no-kernel");
+        is_packed = 1;
+    }
     if (_dos_allocmem(KCHUNK >> 4, &buf_seg) != 0)     /* (the image goes up a piece at a time, below) */
         return refuse("no-low-memory");
     buf_phys = (unsigned long)buf_seg << 4;
     bi.kernel_size = hdr.file_size;
     bi.kernel_total = (hdr.total + 0xFFF) & ~0xFFFUL;
-    say("GLOS-BOOT step=kernel file=%lu total=%lu", hdr.file_size, bi.kernel_total);
+    if (is_packed)
+        say("GLOS-BOOT step=kernel file=%lu total=%lu packed=%lu", hdr.file_size, bi.kernel_total, packed.length);
+    else
+        say("GLOS-BOOT step=kernel file=%lu total=%lu", hdr.file_size, bi.kernel_total);
 
     /* Memory, then A20. */
     r.x.ax = 0x4300; int86(0x2F, &r, &r);
@@ -639,6 +688,17 @@ static int glos_main(int argc, char **argv)
 
     /* The image into its place in extended memory, 32 KB at a time through a buffer in low memory (by the
        XMS driver's move, or INT 15h 87h): the kernel outgrew the low memory a copy of it whole needed (M9). */
+    if (is_packed) {
+        int r;
+        pk_file = f, pk_seg = buf_seg, pk_at = 0, pk_left = packed.length;
+        r = inflate_stream(pk_fill, pk_flush, 0, (unsigned char far *)MK_FP(buf_seg, 0));
+        fclose(f);
+        if (r == -2)
+            return refuse("kernel-copy");
+        if (r != 0 || pk_at != hdr.file_size || ((pk_b << 16) | pk_a) != packed.adler)
+            return refuse("bad-kernel");        /* (the file is damaged: a floppy's read errors, a copy cut short) */
+        a = hdr.file_size;
+    } else {
     fseek(f, 0, SEEK_SET);
     for (a = 0; a < hdr.file_size; ) {
         static unsigned char chunk[2048];
@@ -657,6 +717,7 @@ static int glos_main(int argc, char **argv)
         a += piece;
     }
     fclose(f);
+    }
     if (a != hdr.file_size) return refuse("short-kernel");
     if (bi.mode == BI_MODE_RAW) {               /* (INT 15h 87h leaves A20 off on many BIOSes: on again) */
         a20_set(1);
