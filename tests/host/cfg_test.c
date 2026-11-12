@@ -70,6 +70,10 @@ void kdata_init(const char *cfg_path) { (void)cfg_path; }    /* (GLOS.DAT: the k
 void kdata_load(void) {}
 int kdata_dirty(void) { return 0; }
 int kdata_save(void) { return 0; }
+void secrets_init(const char *cfg_path) { (void)cfg_path; }  /* (SECRETS.DAT: the kernel's alone too) */
+void secrets_load(void) {}
+int secrets_dirty(void) { return 0; }
+int secrets_save(void) { return 0; }
 void vm_kick(void) {}
 int dos_post(struct dos_req *q)
 {
