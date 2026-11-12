@@ -964,6 +964,11 @@ After that:
   it makes no calls and is given no events, only its keyboard and mouse as a DOS program reads them.
 - **Injected keys wait for a slow app** (`glos key`, `glos type`): by how full the app's 2.0 queue is (they
   looked at 1.x's queue, which a 2.0 app never used).
+- **The gate** (2026-11-12, 33 suites, 150 minutes alone on the build host): 31 passed as run. The games suite
+  wanted Fifth Wheel built again for 2.0. The network apps' suite failed on the emulated Pentium II, and not by
+  GLOS's doing: NETTEST's 16 connections at once overran 86Box's SLiRP poll set (16 entries allocated, 128
+  allowed), which left the guest's frames undelivered. RetroGPU's 86Box patch 0127 (main 1c0081b; 86Box's
+  master has the same fix) mends it; both suites pass with it.
 
 ## Risks
 
