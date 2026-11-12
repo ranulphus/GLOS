@@ -1081,6 +1081,29 @@ static int key_wait(struct trapframe *tf, u32 at)
     return 1;
 }
 
+/* DOS's critical error (INT 24h: a disk it can't read, a drive that isn't ready): its shell's handler asks at
+   the PC's keyboard, Abort, Retry or Fail, and all of DOS waits for the answer. Where nobody is there to give
+   one, the answer is Fail, here and at once: in GLOS's own work with DOS (SFTP, the settings' file, a listing:
+   the stub's calls), in an app's DOS calls (its prompt would be under the desktop), and in a job run for SSH
+   with its output kept and no console of its own. A program somebody runs at the PC, full-screen or in a
+   terminal's window, is asked as ever. 1: answered (AL 3), the handler not called. (2026-11-12: an SFTP read of
+   a floppy with a bad sector stopped bench-g400 so; an unformatted partition does the same.) */
+static int critical_error(struct trapframe *tf)
+{
+    u32 ah = (tf->eax >> 8) & 0xFF, al = tf->eax & 0xFF;
+    u16 psp = vm_current_psp();
+    if (psp != vm.loader_psp && !app_vm_psp() && !agent_vm_unattended())
+        return 0;
+    if (!(ah & 0x08)) {                         /* (Fail isn't offered: DOS would make it Abort, the program's end) */
+        kprintf("GLOS-DOS critical ah=%02x al=%02x code=%02x psp=%04x answer=asked\n", ah, al, tf->edi & 0xFF, psp);
+        return 0;
+    }
+    kprintf("GLOS-DOS critical ah=%02x drive=%c code=%02x psp=%04x answer=fail\n", ah, ah & 0x80 ? '-' : (char)('A' + al),
+            tf->edi & 0xFF, psp);
+    tf->eax = (tf->eax & ~0xFFu) | 3;
+    return 1;
+}
+
 static void soft_int(struct trapframe *tf, u8 n, u32 next, u32 at)
 {
     u32 ax = tf->eax & 0xFFFF;
@@ -1126,9 +1149,14 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next, u32 at)
             return;
         }
         break;
+    case 0x24:
+        if (critical_error(tf)) {
+            tf->eip = next;
+            return;
+        }
+        /* fall through */
     case 0x1C:
     case 0x23:
-    case 0x24:
         if (dpmi_passup(tf, n, next))
             return;
         break;

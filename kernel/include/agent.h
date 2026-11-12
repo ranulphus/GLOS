@@ -74,6 +74,7 @@ void agent_vm_console_full(void);               /* ... and wants the screen: it 
 void agent_vm_console_char(u8 c);               /* its BIOS teletype output */
 int agent_vm_wake_pending(void);                /* a job or an exit is waiting for the halted stub */
 int agent_vm_capturing(void);
+int agent_vm_unattended(void);                  /* the running job has nobody at the PC to answer DOS's questions */
 void *agent_vm_job(void);                       /* the running job, or 0 */
 void *agent_vm_as(void *job);                   /* output is this job's from now (an app's); returns the one before */
 void agent_app_done(void *job, u32 result);     /* the app that job became has ended */

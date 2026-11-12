@@ -105,14 +105,17 @@ class Pc:
         return found
 
     def has_c(self):
-        """DOS reads a C: there. (Asked only of a disk whose table has a DOS partition: on one that isn't formatted
-        DOS stops to ask Abort, Retry or Fail, which is answered Abort here.)"""
+        """DOS reads a C: there. (Asked only of a disk whose table has a DOS partition. One that isn't formatted
+        is a disk error to DOS: GLOS answers it Fail and says so in its log; a GLOS from before 2026-11-12 let
+        DOS ask Abort, Retry or Fail at the PC's keyboard, which is answered Abort here.)"""
+        errors = lambda: self.ssh("glos log", timeout=60)[1].count("GLOS-DOS critical")
+        before = errors()
         rc, out = self.ssh("VOL C:", timeout=60)
         if rc == 255 and "no answer" in out:
             self.ssh("glos key 0x1E", timeout=30)
             self.ssh("glos key 0x1E", timeout=30)
             return False
-        return "Volume in drive C" in out
+        return "Volume in drive C" in out and errors() == before
 
     def put_text(self, path, lines):
         """A text file there (DOS's line ends), by SFTP: path as /C/NAME."""

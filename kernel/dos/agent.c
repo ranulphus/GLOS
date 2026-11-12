@@ -1133,6 +1133,10 @@ int agent_vm_wake_pending(void)
 
 int agent_vm_capturing(void) { return running != 0 || closer != 0; }
 
+/* The job that runs has nobody at the PC to answer it: its output is kept for whoever asked (SSH, an app), and
+   it has no console of its own (it isn't a terminal's, nor full-screen). */
+int agent_vm_unattended(void) { return running && !running->console && !running->full; }
+
 /* The job whose program runs now (it may become an app's). */
 void *agent_vm_job(void) { return running; }
 

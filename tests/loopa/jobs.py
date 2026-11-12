@@ -6100,6 +6100,44 @@ def floppy_case(profile, card, size):
         checks["disk-end"] = end(proc, port, opts)
         t2 = log(serial)
         checks["disk-clean"] = "GLOS-PANIC" not in t2 and "GLOS-CRASH" not in t2 and "GLOS-WARN" not in t2
+        # 3. A disk DOS can't read (a partition made and not formatted): GLOS answers DOS's Abort, Retry, Fail
+        # itself where nobody is at the PC, in its own work (SFTP) and in a command run over SSH. Before
+        # 2026-11-12 each of these stopped DOS until a key was pressed at the PC.
+        if size == 1440:
+            with open(disk, "wb") as f:
+                f.truncate(63 * 16 * 512 * 200)
+            proc, port, opts, serial = start("floppy-%s-raw" % tag, ["--floppy", os.path.join(ROOT, "out", "floppy-test-%d.img" % size)])
+            checks["raw-up"] = listening(serial)
+            ssh(port, opts, "FDISK 1 /PRI:MAX")
+            ssh(port, opts, "FDISK 1 /ACTIVATE:1")
+            n0 = log(serial).count("GLOS-SSH listen")
+            ssh(port, opts, "glos reboot --force", timeout=30)
+            t0 = time.time()
+            while time.time() - t0 < 600 and (log(serial).count("GLOS-SSH listen") <= n0 or log(serial).count("GLOS-NET dhcp") <= n0):
+                time.sleep(1)
+            batch = os.path.join(tmp, "batch")
+            open(batch, "w").write("ls /C\n")
+            t0 = time.time()
+            subprocess.run(["sftp", "-P", str(port), "-b", batch] + opts + ["glos@127.0.0.1"], capture_output=True, timeout=300)
+            checks["sftp-answers"] = time.time() - t0 < 60
+            t0 = time.time()
+            rc, o = ssh(port, opts, "VOL C:", timeout=120)
+            checks["job-answers"] = rc != 255 and time.time() - t0 < 60
+            checks["failed"] = len(re.findall(r"GLOS-DOS critical ah=\w+ drive=C code=\w+ psp=\w+ answer=fail", log(serial))) >= 2
+            rc, o = ssh(port, opts, "VER")
+            checks["dos-alive"] = rc == 0 and "FreeCom" in o
+            p = subprocess.run([sys.executable, os.path.join(ROOT, "tools/floppy/install.py"), "127.0.0.1", "--port", str(port),
+                                "--key", key, "--keys", os.path.join(ROOT, "out", "floppy-keys")], capture_output=True, timeout=600)
+            checks["unformatted-refused"] = p.returncode == 1 and b"no C: that DOS can read" in p.stderr
+            batch2 = os.path.join(tmp, "batch2")        # (C: can't hold HXDONE: from the floppy)
+            open(batch2, "w").write("put %s /A/HXDONE.COM\n" % done)
+            subprocess.run(["sftp", "-P", str(port), "-b", batch2] + opts + ["glos@127.0.0.1"], capture_output=True, timeout=300)
+            ssh(port, opts, "A:\\HXDONE.COM")
+            try:
+                proc.wait(timeout=300)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                checks["raw-end"] = False
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     for n in notes:
