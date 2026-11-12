@@ -231,8 +231,15 @@ int glos_time(struct glos_time *t) { return raw(GLOS_CORE_TIME, t, 0); }
 
 int glos_random(void *buf, unsigned n)
 {
-    struct glos_random q = { sizeof q, (unsigned)buf, n };
-    return raw(GLOS_CORE_RANDOM, &q, 0);
+    unsigned char *p = buf;
+    int r = 0;
+    while (n && !r) {                           /* (the call gives 256 bytes at most) */
+        unsigned k = n > 256 ? 256 : n;
+        struct glos_random q = { sizeof q, (unsigned)p, k };
+        r = raw(GLOS_CORE_RANDOM, &q, 0);
+        p += k, n -= k;
+    }
+    return r;
 }
 
 /* ---- windows and their pixels */

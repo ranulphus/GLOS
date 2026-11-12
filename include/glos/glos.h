@@ -42,7 +42,7 @@ unsigned glos_ticks(void);                              /* milliseconds since GL
 int glos_sleep(unsigned ms);
 int glos_yield(void);
 int glos_time(struct glos_time *t);                     /* t->size set by the caller */
-int glos_random(void *buf, unsigned n);                 /* n at most 256 */
+int glos_random(void *buf, unsigned n);                 /* n random bytes (any n: 256 a call underneath) */
 
 /* ---- windows (WIN) and their pixels (DRAW) */
 glos_handle glos_window(const char *title, int x, int y, int w, int h, unsigned kind, unsigned flags, glos_handle owner);
