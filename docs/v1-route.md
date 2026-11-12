@@ -41,8 +41,8 @@ richer shell, and modern apps for old PCs. This plan is the route to that v1.
   stack).
 - **Screensavers, and DOS-GL, on any card:** the owner's answer is a software renderer in DOS-GL. Every PC then
   gets the DOS-GL screensavers, and windowed DOS-GL apps run on any VBE card. It ties into the work on other
-  vendors' cards (the Riva TNT2, ATI's Rage 128 and Radeon). It is built in DOS-GL's code, in RetroGPU's
-  `gl/` since the merge ([The DOS-GL software renderer](#the-dos-gl-software-renderer)).
+  vendors' cards (the S3 ViRGE/DX first, then the Riva TNT2, ATI's Rage 128 and Radeon). It is built in DOS-GL's
+  code, in RetroGPU's `gl/` since the merge ([The DOS-GL software renderer](#the-dos-gl-software-renderer)).
 - **Language:** English in v1, with every string in resources so translations can come later without code changes.
   Regional formats for dates, times and numbers.
 - **The IDE's needs: all of them in API 2.0,** built in phase B and used by GLOS's own tools: Term streams a job's
@@ -449,7 +449,8 @@ The owner's answer for screensavers on non-Matrox cards. It reaches further than
   VBE card: the screensavers, windowed DOS-GL apps under GLOS, and DOS-GL games full-screen, slower than on a
   Matrox card.
 - **What it shapes:** a DOS-GL with more than one back end. That is the shape the other vendors' cards need: the
-  Riva TNT2 next, then ATI's Rage 128 and Radeon (the owner's vendor study).
+  S3 ViRGE/DX first (bench C's card; the owner, 2026-11-12: DOS-GL, GLOS's 2D desktop and Glide on it), then the
+  Riva TNT2, then ATI's Rage 128 and Radeon (the owner's vendor study; RetroGPU `gl/docs/backends.md`).
 - **Where it is built:** in DOS-GL's code, in RetroGPU's `gl/` since the merge (2026-11-08). So it is planned
   there, with RetroGPU's regressions and the owner's approval for merges.
 - **Who and when (the owner, 2026-11-09):** this work's own session, after GLOS's phase B.
