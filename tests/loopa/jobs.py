@@ -6079,6 +6079,27 @@ def mbr_case(profile):
                              "" if ok else " status=%s said=%s" % (status, m.group(0) if m else "nothing")), ok
 
 
+def fdboot_case(profile, kind):
+    """GLOS's boot code for a FAT volume (kernel/disk/fdboot.S; the shell's step S0): a floppy (FAT12) and a
+    hard disk's partition (FAT16, behind GLOS's own first-sector code), each formatted by GLOS's code and
+    given GLOS's boot sector, with FreeDOS's kernel and COMMAND.COM copied on (tests/loopa/fdboot-volumes.sh;
+    KERNEL.SYS in two pieces). The emulated PC starts from it: FreeDOS comes up and its AUTOEXEC.BAT's
+    program reports on COM1."""
+    import shutil
+    tag = "fdboot-%s-%s" % (kind, profile)
+    disk = os.path.join(ROOT, "out", "floppy-%s-disk.img" % tag)
+    if kind == "disk":
+        shutil.copyfile(os.path.join(ROOT, "out", "fdboot", "disk.img"), disk)
+        extra = []
+    else:
+        with open(disk, "wb") as f:             # (a blank disk beside the floppy: the BIOS starts from A:)
+            f.truncate(63 * 16 * 512 * 20)
+        extra = ["--floppy", os.path.join(ROOT, "out", "fdboot", "floppy.img")]
+    status, serial = run("floppy-" + tag, ["--machine", profile, "--hdd", disk, "--timeout", "240"] + extra)
+    ok = status == "PASS" and "HX-FDBOOT-OK" in serial
+    return "  %-22s %s%s" % ("floppy-" + tag, "PASS" if ok else "FAIL", "" if ok else " status=%s" % status), ok
+
+
 def floppy_case(profile, card, size):
     """GLOS's setup floppy (docs/floppy.md; tools/floppy): a PC with a blank hard disk boots the floppy (made by
     the Makefile with the tests' keys: out/floppy-test-SIZE.img; the 720 KB one has the kernel packed), GLOS
@@ -7789,6 +7810,8 @@ def main():
         cases = [c for c in FLOPPY_CASES if not a.profile or c[0] in a.profile]
         res = matrix(floppy_case, cases, a.jobs)
         res += matrix(mbr_case, [(p,) for p in ("bf6", "486dx2") if not a.profile or p in a.profile], a.jobs)
+        res += matrix(fdboot_case, [(p, k) for p in ("bf6", "486dx2") if not a.profile or p in a.profile
+                                    for k in ("floppy", "disk")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "netapp":
         cases = [c for c in NETAPP_CASES if not a.profile or c[0] in a.profile]

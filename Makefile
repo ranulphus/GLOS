@@ -148,7 +148,8 @@ host-test-run:
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/inflate_test tests/host/inflate_test.c loader/inflate.c \
 	  && build/host/inflate_test `python3 tests/host/inflate_cases.py build/host/inflate build/kernel/GLOSK.BIN`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/disk_test tests/host/disk_test.c kernel/disk/mbr.c \
-	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S && tests/host/disk_test.sh build/host/disk_test build/host/disk
+	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
+	  && tests/host/disk_test.sh build/host/disk_test build/host/disk
 
 # The toolkit (sdk/gui, M9) and the apps on the host, against tests/host/glosshim.c: each test script
 # (tests/gui/NAME.txt) run at 8, 16 and 32 bits, its shots written to build/host/gui/ (the goldens Loop A's
@@ -808,8 +809,14 @@ build/host/mbrdisk: tests/host/mbrdisk.c tests/host/mbrstub.S kernel/disk/mbr.c 
 	$(Q)echo "  HOSTCC  $@"
 	$(Q)$(DEV) $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wl,-z,noexecstack -o $@ tests/host/mbrdisk.c tests/host/mbrstub.S \
 	  kernel/disk/mbr.c kernel/disk/mbrboot.S
-loopa-floppy: all build/kernel/GLOSK.PAK build/ow/dos/PARTS.EXE apps build/apps/FETCH.EXE build/apps/PKG.EXE build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB build/host/mbrdisk check-deps
-	@mkdir -p out/floppy-keys
+# The volumes for the test of GLOS's FAT boot code (tests/host/fdbootdisk.c).
+build/host/fdbootdisk: tests/host/fdbootdisk.c kernel/disk/mbr.c kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S kernel/disk/disk.h
+	@mkdir -p build/host
+	$(Q)echo "  HOSTCC  $@"
+	$(Q)$(DEV) $(HOST_CC) -m32 -D_FILE_OFFSET_BITS=64 -O1 -g -Wall -Wextra -Werror -Wl,-z,noexecstack -o $@ tests/host/fdbootdisk.c \
+	  kernel/disk/mbr.c kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S
+loopa-floppy: all build/kernel/GLOSK.PAK build/ow/dos/PARTS.EXE apps build/apps/FETCH.EXE build/apps/PKG.EXE build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB build/host/mbrdisk build/host/fdbootdisk check-deps
+	@mkdir -p out/floppy-keys out/fdboot
 	$(Q)$(DEV) build/host/mbrdisk out/floppy-mbr.img 20160
 	$(Q)cp tests/keys/hostkey out/floppy-keys/HOSTKEY && cp tests/keys/hostkey.pub out/floppy-keys/HOSTKEY.pub \
 	  && cp tests/keys/AUTHKEYS out/floppy-keys/AUTHKEYS
@@ -817,6 +824,7 @@ loopa-floppy: all build/kernel/GLOSK.PAK build/ow/dos/PARTS.EXE apps build/apps/
 	  tools/floppy/mkfloppy.sh out/floppy-test-1440.img out/floppy-keys glos-setup 1440
 	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \
 	  tools/floppy/mkfloppy.sh out/floppy-test-720.img out/floppy-keys glos-setup 720
+	$(Q)$(DEV) tests/loopa/fdboot-volumes.sh out/floppy-test-1440.img out/fdboot
 	$(Q)python3 tests/loopa/jobs.py floppy -j $(JOBS)
 # The toolkit (sdk/gui, include/glos/gui.h; M9): build/sdk/libgui.a, linked before libglos.a.
 build/sdk/libgui.a: $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h include/glos/glos.h include/glos/gfx.h

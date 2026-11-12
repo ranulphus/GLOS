@@ -47,4 +47,9 @@ typedef int (*fat_write)(void *ctx, unsigned long lba, const unsigned char *data
    0; -1: a size no FAT of that kind fits; -2: the write stopped. */
 int fat_format(const struct fat_geo *g, fat_write write, void *ctx, struct fat_made *made);
 
+/* GLOS's boot code that starts FreeDOS's kernel (KERNEL.SYS in the root folder; kernel/disk/fdboot.S) into a
+   FAT12 or FAT16 volume's first sector, its parameters kept: what FreeDOS's SYS does to a volume. 0; -1: no
+   such code for that kind of FAT (FAT32: not yet). */
+int fat_boot(unsigned char *sector, int fat);
+
 #endif
