@@ -6059,8 +6059,14 @@ def floppy_case(profile, card):
         checks["floppy-up"] = listening(serial)
         rc, o = ssh(port, opts, "glos ver")
         checks["floppy-ssh"] = rc == 0 and "GLOS" in o
-        rc, o = ssh(port, opts, "IF EXIST C:\\NUL ECHO HAS-C")
-        checks["blank"] = "HAS-C" not in o
+        rc, o = ssh(port, opts, "A:\\GLOS\\PARTS.EXE")
+        checks["blank"] = rc == 0 and "used=0" in o
+        got = os.path.join(tmp, "GLOSK.BIN")    # a file read from the floppy through GLOS (SFTP): whole
+        batch = os.path.join(tmp, "batch")
+        open(batch, "w").write("get /A/GLOS/GLOSK.BIN %s\n" % got)
+        subprocess.run(["sftp", "-P", str(port), "-b", batch] + opts + ["glos@127.0.0.1"], capture_output=True, timeout=900)
+        checks["floppy-read"] = os.path.exists(got) and open(got, "rb").read() == \
+            open(os.path.join(ROOT, "build/kernel/GLOSK.BIN"), "rb").read()
         p = subprocess.run([sys.executable, os.path.join(ROOT, "tools/floppy/install.py"), "127.0.0.1", "--port", str(port),
                             "--key", key, "--keys", os.path.join(ROOT, "out", "floppy-keys")], capture_output=True, timeout=600)
         checks["refuses-blank"] = p.returncode == 1 and b"--new-disk" in p.stderr       # (nothing done unasked)

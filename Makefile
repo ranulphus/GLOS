@@ -771,11 +771,17 @@ build/glos/KEYS/PKG/GLOS.PUB: tools/pkg/GLOS.PUB
 # this computer. Its host key is made once (build/floppy/keys, kept from one image to the next); who may log in is
 # FLOPPY_AUTHKEYS, an ed25519 public key (or a file of them).
 FLOPPY_HOST ?= glos-setup
+# PARTS (tools/floppy/parts.c): the first hard disk's partition table, on the floppy for install.py.
+build/ow/dos/PARTS.EXE: tools/floppy/parts.c
+	@mkdir -p build/ow/dos/obj
+	$(Q)echo "  WCC16   $<"
+	$(Q)$(WCC16) -bt=dos -ms -3 -os -zq -we -fo=build/ow/dos/obj/parts.obj $<
+	$(Q)$(WLINK) system dos option quiet option stack=4k name $@ file build/ow/dos/obj/parts.obj
 FLOPPY_AUTHKEYS ?= $(firstword $(wildcard $(HOME)/.ssh/glos_bench.pub $(HOME)/.ssh/id_ed25519.pub))
 build/floppy/keys/HOSTKEY:
 	@mkdir -p build/floppy/keys
 	$(Q)ssh-keygen -q -t ed25519 -N "" -C "$(FLOPPY_HOST)" -f $@
-floppy: all build/floppy/keys/HOSTKEY check-deps
+floppy: all build/ow/dos/PARTS.EXE build/floppy/keys/HOSTKEY check-deps
 	@[ -n "$(FLOPPY_AUTHKEYS)" ] && grep -q '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" \
 	  || { echo "floppy: FLOPPY_AUTHKEYS=FILE, an ed25519 public key (ssh-keygen -t ed25519): none found"; exit 1; }
 	$(Q)grep '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" > build/floppy/keys/AUTHKEYS
@@ -785,7 +791,7 @@ floppy: all build/floppy/keys/HOSTKEY check-deps
 # ... in Loop A (tests/loopa/jobs.py floppy): a 486 with an NE2000 and a blank disk boots the floppy (made here with
 # the tests' keys), install.py --new-disk does its work, and the PC then starts GLOS from the disk alone. It needs
 # RetroGPU's run.py to have --floppy.
-loopa-floppy: all apps build/apps/FETCH.EXE build/apps/PKG.EXE build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB check-deps
+loopa-floppy: all build/ow/dos/PARTS.EXE apps build/apps/FETCH.EXE build/apps/PKG.EXE build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB check-deps
 	@mkdir -p out/floppy-keys
 	$(Q)cp tests/keys/hostkey out/floppy-keys/HOSTKEY && cp tests/keys/hostkey.pub out/floppy-keys/HOSTKEY.pub \
 	  && cp tests/keys/AUTHKEYS out/floppy-keys/AUTHKEYS

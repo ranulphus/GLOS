@@ -5,13 +5,14 @@
 #
 # On it: FreeDOS 1.4's kernel and COMMAND.COM, its FDISK, FORMAT and SYS (as its own boot floppy has them:
 # FreeDOS's programs, unchanged, under their own licences, the GPL for most), GLOS.EXE and GLOSK.BIN, a GLOS.CFG
-# with the PC's name, and KEYS\ (HOSTKEY: this floppy's own; AUTHKEYS: who may log in).
+# with the PC's name, PARTS.EXE (tools/floppy/parts.c), and KEYS\ (HOSTKEY: this floppy's own; AUTHKEYS: who may
+# log in).
 set -euo pipefail
 out=$1 keys=$2 host=$3
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 cache=${MGA_CACHE:-$HOME/.cache/mga-glide}
-for f in "$root/build/ow/GLOS.EXE" "$root/build/kernel/GLOSK.BIN" "$keys/HOSTKEY" "$keys/AUTHKEYS"; do
+for f in "$root/build/ow/GLOS.EXE" "$root/build/kernel/GLOSK.BIN" "$root/build/ow/dos/PARTS.EXE" "$keys/HOSTKEY" "$keys/AUTHKEYS"; do
     [ -s "$f" ] || { echo "mkfloppy: no $f"; exit 1; }
 done
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
@@ -36,9 +37,10 @@ mmd -i "$img" ::/GLOS ::/GLOS/KEYS
 mcopy -i "$img" "$root/build/ow/GLOS.EXE" ::/GLOS/GLOS.EXE
 mcopy -i "$img" "$root/build/kernel/GLOSK.BIN" ::/GLOS/GLOSK.BIN
 mcopy -i "$img" "$tmp/GLOS.CFG" ::/GLOS/GLOS.CFG
+mcopy -i "$img" "$root/build/ow/dos/PARTS.EXE" ::/GLOS/PARTS.EXE
 mcopy -i "$img" "$keys/HOSTKEY" ::/GLOS/KEYS/HOSTKEY
 mcopy -i "$img" "$keys/AUTHKEYS" ::/GLOS/KEYS/AUTHKEYS
 mlabel -i "$img" ::GLOSSETUP >/dev/null 2>&1 || true
 mkdir -p "$(dirname "$out")"
 mv "$img" "$out"
-echo "mkfloppy: $out ($(mdir -i "$out" :: | tail -1 | sed 's/^ *//'))"
+echo "mkfloppy: $out ($(mdir -i "$out" -/ :: | grep 'bytes free' | sed 's/^ *//; s/  */ /g'))"
