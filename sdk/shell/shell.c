@@ -685,6 +685,19 @@ static int is_builtin(const struct sh *s, const char *w)
     return strlen(w) == 2 && w[1] == ':';
 }
 
+/* DOS's own commands that this shell has not got (the batch language's and a few more: S4 brings them): the
+   line is the DOS's COMMAND.COM's, whole. */
+static int dos_own(const char *w)
+{
+    static const char *const names[] = { "CALL", "IF", "FOR", "GOTO", "REM", "PAUSE", "SHIFT", "BREAK", "VERIFY", "VOL",
+        "DATE", "TIME", "LH", "LOADHIGH", "CTTY", "TRUENAME", "CHCP", 0 };
+    int i;
+    for (i = 0; names[i]; i++)
+        if (same(w, names[i]))
+            return 1;
+    return 0;
+}
+
 /* ---- running a program: the host's. 1: under way; 0: started and left; -1: not run (and said). */
 
 static int run_program(struct sh *s, const char *line, int detach)
@@ -700,7 +713,8 @@ static int run_program(struct sh *s, const char *line, int detach)
         first[n++] = *p++;
     first[n] = 0;
     args = p;
-    if (strpbrk(line, "<>|")) {                 /* a pipe or a redirection: the line whole */
+    if (strpbrk(line, "<>|") || dos_own(first)) {       /* a pipe, a redirection, a command of DOS's own: the
+                                                           line whole */
         sh_fmt(command, sizeof command, "%s", line);
     } else if (find_program(s, first, prog, sizeof prog) == 0) {
         sh_fmt(command, sizeof command, "%s%s", prog, args);
@@ -1113,6 +1127,21 @@ void sh_complete(struct sh *s, const char *typed)
         sh_fmt(full, sizeof full, "%.*s%s", (int)keep, line, common);
         s->h->input(s->h->ctx, full);
     }
+}
+
+/* The shell's folder is this (a full path, as DOS has it for the program that starts the shell): its drive's,
+   and the drive the shell is on. Nothing, if it is no folder. */
+void sh_folder(struct sh *s, const char *path)
+{
+    char p[SH_PATH];
+    int d = upper((unsigned char)path[0]) - 'A';
+    if (d < 0 || d > 25 || path[1] != ':' || strlen(path) >= sizeof s->cwd[0])
+        return;
+    full_path(s, path, p, sizeof p);
+    if (!s->h->is_dir(s->h->ctx, p))
+        return;
+    sh_fmt(s->cwd[d], sizeof s->cwd[d], "%s", p);
+    s->drive = d;
 }
 
 void sh_start(struct sh *s, const struct sh_host *h, const char *const *env)

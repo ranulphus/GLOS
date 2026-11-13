@@ -988,6 +988,8 @@ static void gdb_send(const u8 *d, u32 n)
 }
 
 /* The built-in commands, and DOS command lines for the agent. */
+static int shell_line(struct ssh_chan *ch, const char *line);
+
 static int k_exec(struct ssh_chan *ch, const char *cmd)
 {
     static const char ver[] = "GLOS M3 (" __DATE__ ")\n";
@@ -997,7 +999,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         if (!agent_mode) {
             say(ch, 1, "glos: DOS commands need GLOS started without /RUN or /SHELL\n");
             ssh_chan_exit(ch, 126);
-        } else if (agent_post(ch, cmd) != 0) {
+        } else if (shell_line(ch, cmd) != 0) {  /* (GLOS's shell runs the line: docs/v1/shell.md, S2b) */
             say(ch, 1, "glos: busy\n");
             ssh_chan_exit(ch, 126);
         }
@@ -1473,12 +1475,14 @@ static int k_tcpip(struct ssh_chan *ch, const char *host, uint32_t port)
     return 0;
 }
 
-/* ---- logins: a shell's session (kernel/shell/shsess.c) at a channel */
+/* ---- GLOS's shell at a channel (kernel/shell/shsess.c): a login (`ssh pc`: a session with a terminal), or
+   a line to run (`ssh pc COMMAND`: a session with none, its end the command's exit code) */
 
-#define NSHELL 4
+#define NSHELL 12
 static struct {
     struct ssh_chan *ch;
     struct shsess *s;
+    u8 login;
 } shells[NSHELL];
 
 static struct shsess *shell_of(const struct ssh_chan *ch)
@@ -1509,10 +1513,25 @@ static int k_shell(struct ssh_chan *ch, uint32_t cols, uint32_t rows)
             if (!(shells[i].s = shsess_new(cols, rows, wake_ssh)))
                 break;
             shells[i].ch = ch;
+            shells[i].login = 1;
             kprintf("GLOS-SSH shell terminal=%ux%u\n", cols, rows);
             return 0;
         }
     kprintf("GLOS-SSH shell refused\n");
+    return -1;
+}
+
+static int shell_line(struct ssh_chan *ch, const char *line)
+{
+    u32 i;
+    for (i = 0; i < NSHELL; i++)
+        if (!shells[i].ch) {
+            if (!(shells[i].s = shsess_exec(line, wake_ssh)))
+                break;
+            shells[i].ch = ch;
+            shells[i].login = 0;
+            return 0;
+        }
     return -1;
 }
 
@@ -1528,17 +1547,17 @@ static void shells_turn(void)
 {
     static u8 buf[2048];
     u32 i, n;
-    int code;
+    int code, stream;
     shsess_turn();
     for (i = 0; i < NSHELL; i++) {
         if (!shells[i].ch)
             continue;
-        while (ssh_chan_pending(shells[i].ch) < 0x8000 && (n = shsess_read(shells[i].s, buf, sizeof buf)) != 0)
-            ssh_chan_write(shells[i].ch, 0, buf, n);
-        if (shsess_ended(shells[i].s, &code) && !shsess_read(shells[i].s, buf, 0)) {
+        for (stream = 0; stream < 2; stream++)
+            while (ssh_chan_pending(shells[i].ch) < 0x8000
+                   && (n = shsess_read(shells[i].s, stream, buf, sizeof buf)) != 0)
+                ssh_chan_write(shells[i].ch, stream, buf, n);
+        if (shsess_ended(shells[i].s, &code) && !shsess_waiting(shells[i].s)) {  /* (its last words have gone) */
             struct ssh_chan *ch = shells[i].ch;
-            while ((n = shsess_read(shells[i].s, buf, sizeof buf)) != 0)        /* (its last words) */
-                ssh_chan_write(ch, 0, buf, n);
             shell_drop(ch);
             ssh_chan_exit(ch, (u32)code);
         }
@@ -1565,9 +1584,14 @@ static void k_data(struct ssh_chan *ch, const uint8_t *d, uint32_t n)
 
 static void k_eof(struct ssh_chan *ch)
 {
-    if (shell_of(ch)) {                         /* nothing more will be typed: the session's end */
-        shell_drop(ch);
-        ssh_chan_exit(ch, 0);
+    if (shell_of(ch)) {                         /* nothing more will be typed: a login's end; a line being run
+                                                   has no use for what is typed, and goes on */
+        u32 i;
+        for (i = 0; i < NSHELL; i++)
+            if (shells[i].ch == ch && shells[i].login) {
+                shell_drop(ch);
+                ssh_chan_exit(ch, 0);
+            }
         return;
     }
     if (vnc_owns(ch)) {                         /* (the viewer has gone: its side closes too) */

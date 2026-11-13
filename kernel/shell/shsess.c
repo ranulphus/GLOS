@@ -30,6 +30,7 @@
 #include "kapi.h"
 #include "kcfg.h"
 #include "kprintf.h"
+#include "mixer.h"
 #include "mm.h"
 #include "sched.h"
 #include "shsess.h"
@@ -40,6 +41,7 @@
 
 #define IN_RING  4096u                  /* powers of two */
 #define OUT_RING 16384u
+#define ERR_RING 4096u                  /* (with no terminal: what is written as errors, kept apart) */
 #define PATH_AT  0u                     /* in the DOS server's buffer: a path, */
 #define PATH2_AT 128u                   /* a second, */
 #define DTA_AT   256u                   /* the find's state, */
@@ -51,11 +53,13 @@ struct shsess {
     struct sh_host host;
     struct waitq wq;                    /* its thread waits here: for keys, for room to write, for its end */
     void (*kick)(void);
-    u8 in[IN_RING], out[OUT_RING];
-    volatile u32 ih, it, oh, ot;
+    u8 in[IN_RING], out[OUT_RING], err[ERR_RING];
+    volatile u32 ih, it, oh, ot, eh, et;
     volatile u32 cols, rows;
     volatile u8 closing, ended, resized;
     u8 tty, editing, quit;
+    u8 starting;                        /* (the shell's first words: a terminal's alone) */
+    char *line;                         /* with no terminal: the one line it is there to run */
     int code, page;
     u32 utf, utf_left;                  /* a UTF-8 character under way from the terminal */
     u32 job;                            /* the program that runs: the agent's number for it */
@@ -72,27 +76,34 @@ static struct shsess *leaving;
 
 /* ---- to the terminal */
 
-static void term_bytes(struct shsess *s, const u8 *d, u32 n)
+/* Bytes as they are, to the terminal's side: what is written (stream 0), or with no terminal what is written
+   as errors (1). The thread waits for room. */
+static void stream_bytes(struct shsess *s, int stream, const u8 *d, u32 n)
 {
+    u8 *ring = stream ? s->err : s->out;
+    volatile u32 *head = stream ? &s->eh : &s->oh, *tail = stream ? &s->et : &s->ot;
+    u32 size = stream ? ERR_RING : OUT_RING;
     while (n) {
         u32 f = irq_save(), room, k, at;
-        while ((room = OUT_RING - (s->ot - s->oh)) == 0 && !s->closing)
+        while ((room = size - (*tail - *head)) == 0 && !s->closing)
             thread_wait(&s->wq, timer_ticks() + 256);
         if (s->closing) {                       /* (nobody to read it) */
             irq_restore(f);
             return;
         }
         k = n < room ? n : room;
-        at = s->ot % OUT_RING;
-        if (k > OUT_RING - at)
-            k = OUT_RING - at;
-        memcpy(s->out + at, d, k);
-        s->ot += k;
+        at = *tail % size;
+        if (k > size - at)
+            k = size - at;
+        memcpy(ring + at, d, k);
+        *tail += k;
         irq_restore(f);
         d += k, n -= k;
         s->kick();
     }
 }
+
+static void term_bytes(struct shsess *s, const u8 *d, u32 n) { stream_bytes(s, 0, d, n); }
 
 /* Text in the PC's code page (and the sequences among it, which are ASCII), as UTF-8. lf: a line feed with no
    carriage return before it gets one (a file's own text). */
@@ -130,10 +141,16 @@ static void ed_put(void *ctx, const char *t, int n) { term_text(ctx, t, n, 0); }
 static void h_write(void *ctx, int kind, const char *t, int n)
 {
     struct shsess *s = ctx;
+    if (!s->tty) {                              /* no terminal: bytes as they are, errors apart; no prompt, and
+                                                   none of the shell's greeting */
+        if (kind != SH_PROMPT && !s->starting)
+            stream_bytes(s, kind == SH_ERR, (const u8 *)t, (u32)n);
+        return;
+    }
     if (kind == SH_PROMPT) {
         char p[ED_PROMPT_MAX];
         int k = 0;
-        if (!s->tty || s->quit)                 /* (no terminal to prompt; or EXIT, and nothing more to ask) */
+        if (s->quit)                            /* (EXIT: nothing more to ask) */
             return;
         if (n > ED_PROMPT_MAX - 8)
             t += n - (ED_PROMPT_MAX - 8), n = ED_PROMPT_MAX - 8;
@@ -148,10 +165,10 @@ static void h_write(void *ctx, int kind, const char *t, int n)
         ed_away(&s->ed);
         s->editing = 0;
     }
-    if (kind == SH_ERR && s->tty)
+    if (kind == SH_ERR)
         term_bytes(s, (const u8 *)"\033[31m", 5);
     term_text(s, t, n, kind == SH_TEXT);
-    if (kind == SH_ERR && s->tty)
+    if (kind == SH_ERR)
         term_bytes(s, (const u8 *)"\033[0m", 4);
 }
 
@@ -426,12 +443,20 @@ static int h_run(void *ctx, const char *command, const char *prog, const char *n
     struct shsess *s = ctx;
     struct krun r;
     struct agent_opts o;
+    char typed[1024];
     u32 seq, i;
-    (void)prog, (void)name;
     memset(&r, 0, sizeof r);
     memset(&o, 0, sizeof o);
     r.size = sizeof r;
-    r.flags = KRUN_CONSOLE | (detach ? KRUN_DETACH : 0);
+    r.flags = (s->tty ? KRUN_CONSOLE : 0) | (detach ? KRUN_DETACH : 0);    /* (at a terminal: typed to, its output
+                                                   one stream; with none: nobody at it, what it writes as
+                                                   errors kept apart) */
+    if (prog && strlen(command) >= strlen(prog)) {      /* the program as it was named, its arguments after: the
+                                                           agent finds it as it always has (a batch file through
+                                                           COMMAND.COM), and its log says what was asked */
+        sh_fmt(typed, sizeof typed, "%s%s", name, command + strlen(prog));
+        command = typed;
+    }
     if (strlen(command) < sizeof r.command)
         strcpy(r.command, command);
     else
@@ -460,8 +485,12 @@ static void job_turn(struct shsess *s)
     gone = agent_app_status(s, s->job, &st, &code, &nout, &nerr, &ticks) != 0;  /* (its state first: once it has
                                                    ended, what is read is all of it) */
     for (stream = 0; !gone && stream < 2; stream++)
-        while ((n = agent_app_read1(s, s->job, stream, buf, sizeof buf)) > 0)
-            term_text(s, (const char *)buf, n, 1);
+        while ((n = agent_app_read1(s, s->job, stream, buf, sizeof buf)) > 0) {
+            if (s->tty)
+                term_text(s, (const char *)buf, n, 1);
+            else
+                stream_bytes(s, stream, buf, (u32)n);
+        }
     if (gone || st == GLOS_JS_DONE || st == GLOS_JS_APP) {
         if (!gone)
             agent_app_forget(s, s->job);        /* (an app goes on beside: nothing of it is the session's) */
@@ -594,6 +623,7 @@ static void session(void *arg)
 {
     struct shsess *s = arg;
     const char *env[SH_VARS + 1];
+    char extra[3][72];
     void (*kick)(void) = s->kick;
     u32 n = 0, at = (u32)vm_rd16(((u32)vm.loader_psp << 4) + 0x2C) << 4;
     int c;
@@ -601,11 +631,57 @@ static void session(void *arg)
         env[n++] = (const char *)vm_ptr(at);
         at += strlen((const char *)vm_ptr(at)) + 1;
     }
+    {                                           /* ... and what GLOS gives a DOS program besides (vm/session.c): the
+                                                   time zone, the code page, a Crystal chip's BLASTER */
+        static const char *const names[] = { "TZ=", "GLOSCP=", "BLASTER=" };
+        char value[64];
+        u32 i, k, have;
+        for (k = 0; k < 3 && n < SH_VARS; k++) {
+            for (i = 0, have = 0; i < n; i++)
+                have |= !strncmp(env[i], names[k], strlen(names[k]));
+            value[0] = 0;
+            if (k == 0 && kcfg_loaded())
+                kcfg_get("time", "zone", value, sizeof value);
+            else if (k == 1 && kcfg_loaded() && kcfg_get("region", "codepage", value, sizeof value) != 1)
+                value[0] = 0;
+            else if (k == 2 && crystal_blaster())
+                sh_fmt(value, sizeof value, "%s", crystal_blaster());
+            if (!have && value[0]) {
+                sh_fmt(extra[k], sizeof extra[k], "%s%s", names[k], value);
+                env[n++] = extra[k];
+            }
+        }
+    }
     env[n] = 0;
     dos_hold();
     ed_init(&s->ed, ed_put, s, (int)s->cols);
+    s->starting = 1;
     sh_start(&s->sh, &s->host, env);
-    sh_prompt(&s->sh);
+    s->starting = 0;
+    {                                           /* the folder DOS is in: the shell's to start with */
+        char at_dos[80];
+        req(s);
+        call(s, 0, 0x1900, 0, 0, 0);
+        call(s, 1, 0x4700, 0, 0, 0);
+        s->q.r[1].si = DATA_AT;
+        s->q.out = (u8 *)at_dos + 3, s->q.out_len = 64, s->q.out_at = DATA_AT;
+        if (made(s) == 0) {
+            at_dos[0] = (char)('A' + (s->q.r[0].ax & 0xFF)), at_dos[1] = ':', at_dos[2] = '\\';
+            at_dos[67] = 0;
+            sh_folder(&s->sh, at_dos);
+        }
+    }
+    if (!s->tty) {                              /* the one line, to its end */
+        sh_line(&s->sh, s->line);
+        while (s->sh.under_way && !s->quit && key(s) != EV_GONE)
+            if (s->job_on)
+                job_turn(s);
+        if (!s->quit)
+            s->code = s->sh.errorlevel;
+        s->quit = 1;
+    } else {
+        sh_prompt(&s->sh);
+    }
     while (!s->quit && (c = key(s)) != EV_GONE) {
         if (s->job_on) {                        /* a program runs: what is typed is its; what it writes, ours */
             if (c >= 0)
@@ -640,7 +716,8 @@ static void session(void *arg)
         irq_restore(f);
     }
     dos_release();
-    kprintf("GLOS-SHELL end code=%d%s\n", s->code, s->closing ? " terminal=gone" : "");
+    if (s->tty)
+        kprintf("GLOS-SHELL end code=%d%s\n", s->code, s->closing ? " terminal=gone" : "");
     s->ended = 1;                               /* (its memory is its terminal's side's from here) */
     kick();
     thread_exit();
@@ -648,7 +725,20 @@ static void session(void *arg)
 
 /* ---- the terminal's side */
 
-struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void))
+static void release(struct shsess *s)
+{
+    if (s->line)
+        kfree(s->line);
+    kfree(s);
+}
+
+static struct shsess *make(u32 cols, u32 rows, const char *line, void (*kick)(void));
+
+struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void)) { return make(cols, rows, 0, kick); }
+
+struct shsess *shsess_exec(const char *line, void (*kick)(void)) { return make(0, 0, line, kick); }
+
+static struct shsess *make(u32 cols, u32 rows, const char *line, void (*kick)(void))
 {
     static const struct sh_host host = { 0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free,
         h_is_dir, h_stat, h_open, h_read, h_put, h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_run, 0, 0, 0,
@@ -657,6 +747,13 @@ struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void))
     if (!(vm.bi->flags & BI_F_AGENT) || !(s = kmalloc(sizeof *s)))
         return 0;
     memset(s, 0, sizeof *s);
+    if (line) {
+        if (strlen(line) >= SH_LINE || !(s->line = kmalloc((u32)strlen(line) + 1))) {
+            kfree(s);
+            return 0;
+        }
+        strcpy(s->line, line);
+    }
     s->host = host;
     s->host.ctx = s;
     s->kick = kick;
@@ -664,26 +761,31 @@ struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void))
     s->cols = cols ? cols : 80, s->rows = rows ? rows : 24;
     s->page = kcfg_region()->codepage ? kcfg_region()->codepage : 437;
     if (!thread_create("shell", PRIO_NORMAL, session, s)) {
-        kfree(s);
+        release(s);
         return 0;
     }
-    kprintf("GLOS-SHELL begin terminal=%ux%u page=%d\n", cols, rows, s->page);
+    if (!line)
+        kprintf("GLOS-SHELL begin terminal=%ux%u page=%d\n", cols, rows, s->page);
     return s;
 }
 
-u32 shsess_read(struct shsess *s, u8 *buf, u32 room)
+u32 shsess_read(struct shsess *s, int stream, u8 *buf, u32 room)
 {
-    u32 f = irq_save(), n = s->ot - s->oh, i;
+    const u8 *ring = stream ? s->err : s->out;
+    volatile u32 *head = stream ? &s->eh : &s->oh, *tail = stream ? &s->et : &s->ot;
+    u32 size = stream ? ERR_RING : OUT_RING, f = irq_save(), n = *tail - *head, i;
     if (n > room)
         n = room;
     for (i = 0; i < n; i++)
-        buf[i] = s->out[(s->oh + i) % OUT_RING];
-    s->oh += n;
+        buf[i] = ring[(*head + i) % size];
+    *head += n;
     if (n)
         thread_wake(&s->wq);
     irq_restore(f);
     return n;
 }
+
+u32 shsess_waiting(const struct shsess *s) { return (s->ot - s->oh) + (s->et - s->eh); }
 
 u32 shsess_write(struct shsess *s, const u8 *d, u32 n)
 {
@@ -720,7 +822,7 @@ void shsess_free(struct shsess *s)
     u32 f = irq_save();
     if (s->ended) {
         irq_restore(f);
-        kfree(s);
+        release(s);
         return;
     }
     s->closing = 1;
@@ -736,7 +838,7 @@ void shsess_turn(void)
     while ((s = *p) != 0) {
         if (s->ended) {
             *p = s->next;
-            kfree(s);
+            release(s);
         } else {
             p = &s->next;
         }

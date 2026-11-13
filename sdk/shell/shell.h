@@ -83,6 +83,8 @@ struct sh {
 };
 
 void sh_start(struct sh *s, const struct sh_host *h, const char *const *env);  /* env: NAME=VALUE ..., 0 at the end */
+void sh_folder(struct sh *s, const char *path);         /* after sh_start(): the folder it starts in ("C:\" if never
+                                                           said) */
 void sh_prompt(struct sh *s);
 void sh_line(struct sh *s, const char *line);           /* a line typed and Enter */
 void sh_ended(struct sh *s, int code);                  /* what was under way has ended with this exit code */

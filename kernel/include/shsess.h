@@ -10,7 +10,12 @@ struct shsess;
 /* For the terminal's side (the ssh thread; later the CONSOLE call and the PC's own screen). cols 0: no
    terminal. kick is called, from the session's thread, when there is something to read or it has ended. */
 struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void));      /* NULL: no memory, or no DOS server */
-u32 shsess_read(struct shsess *s, u8 *buf, u32 room);    /* what it has written for the terminal (UTF-8) */
+struct shsess *shsess_exec(const char *line, void (*kick)(void));       /* no terminal: the one line run, the
+                                                            session's end its exit code; what it writes as it is
+                                                            (no UTF-8 made of it), errors apart (stream 1) */
+u32 shsess_read(struct shsess *s, int stream, u8 *buf, u32 room);       /* what it has written (a terminal's: UTF-8,
+                                                            stream 0 alone) */
+u32 shsess_waiting(const struct shsess *s);              /* ... how much of it is yet to be read */
 u32 shsess_write(struct shsess *s, const u8 *d, u32 n);  /* what was typed there: the bytes taken (the rest is lost) */
 void shsess_resize(struct shsess *s, u32 cols, u32 rows);
 int shsess_ended(const struct shsess *s, int *code);     /* 1 once it has ended (EXIT, Ctrl+D): its exit code */
