@@ -1,0 +1,129 @@
+-- the prompt
+  |C:\>                | <
+  cursor 0,4
+-- typed
+  |C:\>dir /w          | <
+  cursor 0,10
+-- left three times, X
+  |C:\>dirX /w         | <
+  cursor 0,8
+-- Home, Delete, End, Backspace
+  |C:\>irX /           | <
+  cursor 0,9
+-- Ctrl+U at the end, then a line longer than the row
+  |C:\>copy longname.tx|
+  |t c:\backup         | <
+  cursor 1,11
+-- Home, then a character put in before it
+  |C:\>>copy longname.t| <
+  |xt c:\backup        |
+  cursor 0,5
+-- Ctrl+E, Ctrl+W, Ctrl+W
+  |C:\>>copy           | <
+  cursor 0,10
+-- Ctrl+U, then typed to the row's last column
+  |C:\>abcdefghijklmnop|
+  |                    | <
+  cursor 1,0
+-- one more
+  |C:\>abcdefghijklmnop|
+  |q                   | <
+  cursor 1,1
+-- Backspace twice
+  |C:\>abcdefghijklmno | <
+  cursor 0,19
+-- right with Ctrl held (a modifier in the sequence), left, Ctrl+K
+  |C:\>a               | <
+  cursor 0,5
+-- Enter ENTER line="a"
+  |C:\>a               |
+  |                    | <
+  cursor 1,0
+-- a prompt in bold
+  |C:\>a               |
+  |C:\WORK>            | <
+  cursor 1,8
+-- Up UP
+  |C:\>a               |
+  |C:\WORK>            | <
+  cursor 1,8
+-- the history's line
+  |C:\>a               |
+  |C:\WORK>dir c:\tools|
+  | /b                 | <
+  cursor 2,3
+-- Tab TAB line="dir c:\tools /b ty"
+  |C:\>a               |
+  |C:\WORK>dir c:\tools|
+  | /b ty              | <
+  cursor 2,6
+-- completed, over the row's end
+  |C:\>a               |
+  |C:\WORK>dir c:\tools|
+  | /b TYPE            | <
+  cursor 2,9
+-- names listed, the prompt and the line again
+  |C:\>a               |
+  |C:\WORK>dir c:\tools|
+  | /b TYPE            |
+  |NOTES.TXT  README.MD|
+  |C:\WORK>type        | <
+  cursor 4,13
+-- Ctrl+C BREAK
+  |C:\>a               |
+  |C:\WORK>dir c:\tools|
+  | /b TYPE            |
+  |NOTES.TXT  README.MD|
+  |C:\WORK>type ^C     |
+  |                    | <
+  cursor 5,0
+-- a prompt of two rows
+  |C:\>a               |
+  |C:\WORK>dir c:\tools|
+  | /b TYPE            |
+  |NOTES.TXT  README.MD|
+  |C:\WORK>type ^C     |
+  |first row           |
+  |B>                  | <
+  cursor 6,2
+-- typed, and Home
+  |C:\>a               |
+  |C:\WORK>dir c:\tools|
+  | /b TYPE            |
+  |NOTES.TXT  README.MD|
+  |C:\WORK>type ^C     |
+  |first row           |
+  |B>xy                | <
+  cursor 6,2
+-- Ctrl+D with something typed: Delete
+  |C:\>a               |
+  |C:\WORK>dir c:\tools|
+  | /b TYPE            |
+  |NOTES.TXT  README.MD|
+  |C:\WORK>type ^C     |
+  |first row           |
+  |B>y                 | <
+  cursor 6,2
+-- Ctrl+U, Ctrl+D: the end END
+  |C:\>a               |
+  |C:\WORK>dir c:\tools|
+  | /b TYPE            |
+  |NOTES.TXT  README.MD|
+  |C:\WORK>type ^C     |
+  |first row           |
+  |B>                  | <
+  cursor 6,2
+-- the terminal 12 wide
+  |C:\>a       |
+  |C:\WORK>dir c:\tools|
+  | /b TYPE    |
+  |NOTES.TXT  README.MD|
+  |C:\WORK>type ^C|
+  |first row   |
+  |B>narrower n|
+  |ow, redrawn | <
+  cursor 7,11
+-- Ctrl+L CLEAR
+  |B>narrower n|
+  |ow, redrawn | <
+  cursor 1,11

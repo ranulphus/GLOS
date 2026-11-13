@@ -152,6 +152,9 @@ host-test-run:
 	  && tests/host/disk_test.sh build/host/disk_test build/host/disk
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/shell_test tests/host/shell_test.c sdk/shell/shell.c \
 	  && tests/host/shell_test.sh build/host/shell_test build/host/shell
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/edit_test tests/host/edit_test.c sdk/shell/edit.c \
+	  && build/host/edit_test > build/host/edit.out && diff -u tests/shell/edit.out build/host/edit.out \
+	  && echo "edit_test: 0 failures"
 
 # The toolkit (sdk/gui, M9) and the apps on the host, against tests/host/glosshim.c: each test script
 # (tests/gui/NAME.txt) run at 8, 16 and 32 bits, its shots written to build/host/gui/ (the goldens Loop A's
