@@ -1,0 +1,86 @@
+# GLOS's shell (sdk/shell) on the host: the commands, variables, chains, redirection, programs, history, completion.
+mkdir C:\WORK
+mkdir C:\BIN
+mkdir C:\TOOLS
+file C:\WORK\NOTES.TXT some notes
+file C:\WORK\README.MD read me
+file C:\BIN\A.COM x
+file C:\TOOLS\B.COM x
+file C:\TOOLS\TOOL.EXE x
+file C:\TOOLS\RUN.BAT x
+> ver
+> cd \work
+> dir
+> dir /w
+> dir /b *.txt
+> dir nosuch
+> set X=hello
+> echo %X% world, %% and %ERRORLEVEL%
+> echo.
+> set X
+> set NOPE
+> md new && cd new && echo made
+> cd .. || echo not shown
+> cd nosuch || echo no such folder
+> echo %ERRORLEVEL%
+> copy notes.txt new
+> copy *.* new
+> copy notes.txt notes.txt
+> dir new /b
+> echo kept > out.txt
+> echo more >> out.txt
+cat C:\WORK\OUT.TXT
+> type out.txt
+> type nosuch.txt
+> ren out.txt done.txt && del new\*.* && rd new
+> ren done.txt notes.txt
+> move done.txt c:\tools
+> dir c:\tools /b
+> nosuch
+> echo %ERRORLEVEL%
+# programs: here, then along PATH; the extensions; the arguments; the variables set here
+> a one two
+ended 3
+> echo %ERRORLEVEL%
+> b && echo after b
+ended 0
+> b || echo not after a success
+ended 0
+> tool /x
+> run
+> where b
+> where tool.exe
+> where nosuch
+> c:\bin\a.com direct
+ended 0
+> start tool
+> dir | sort
+> path
+> path c:\bin
+> where b
+> prompt $N$G
+> prompt
+> prompt $P$G
+> c:
+> d:
+> cd c:
+# the host's own commands
+> xtra a b
+> echo %ERRORLEVEL%
+> xwait
+ended 5
+> echo %ERRORLEVEL%
+> help
+> history
+up
+up
+down
+down
+tab di
+tab ty
+tab type no
+tab type c:\tools\t
+tab type c:\to
+tab copy r
+> cls
+> exit

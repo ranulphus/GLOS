@@ -1,0 +1,281 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+ver
+GLOS shell 1.0 (GLOS API 2.0)
+[[C:\>]]
+cd \work
+[[C:\WORK>]]
+dir
+ Directory of C:\WORK
+
+NOTES    TXT             12 11-13-2026  12:34
+README   MD               9 11-13-2026  12:34
+         2 file(s)             21 bytes
+         0 dir(s)
+[[C:\WORK>]]
+dir /w
+ Directory of C:\WORK
+
+NOTES.TXT      README.MD      
+         2 file(s)             21 bytes
+         0 dir(s)
+[[C:\WORK>]]
+dir /b *.txt
+NOTES.TXT
+[[C:\WORK>]]
+dir nosuch
+ Directory of C:\WORK
+
+         0 file(s)              0 bytes
+         0 dir(s)
+[[C:\WORK>]]
+set X=hello
+[[C:\WORK>]]
+echo %X% world, %% and %ERRORLEVEL%
+hello world, % and 0
+[[C:\WORK>]]
+echo.
+<<Bad command or file name
+>>[[C:\WORK>]]
+set X
+X=hello
+[[C:\WORK>]]
+set NOPE
+<<Environment variable not defined
+>>[[C:\WORK>]]
+md new && cd new && echo made
+made
+[[C:\WORK\NEW>]]
+cd .. || echo not shown
+[[C:\WORK>]]
+cd nosuch || echo no such folder
+<<Invalid directory
+>>no such folder
+[[C:\WORK>]]
+echo %ERRORLEVEL%
+0
+[[C:\WORK>]]
+copy notes.txt new
+        1 file(s) copied
+[[C:\WORK>]]
+copy *.* new
+        2 file(s) copied
+[[C:\WORK>]]
+copy notes.txt notes.txt
+<<File cannot be copied onto itself
+>>        0 file(s) copied
+[[C:\WORK>]]
+dir new /b
+NOTES.TXT
+README.MD
+[[C:\WORK>]]
+echo kept > out.txt
+[[C:\WORK>]]
+echo more >> out.txt
+[[C:\WORK>]]
+(CAT C:\WORK\OUT.TXT: kept \r\nmore \r\n)
+type out.txt
+{{kept 
+more 
+}}[[C:\WORK>]]
+type nosuch.txt
+<<File not found
+>>[[C:\WORK>]]
+ren out.txt done.txt && del new\*.* && rd new
+2 file(s) deleted
+[[C:\WORK>]]
+ren done.txt notes.txt
+<<Duplicate file name or file not found
+>>[[C:\WORK>]]
+move done.txt c:\tools
+        1 file(s) moved
+[[C:\WORK>]]
+dir c:\tools /b
+B.COM
+DONE.TXT
+RUN.BAT
+TOOL.EXE
+[[C:\WORK>]]
+nosuch
+<<Bad command or file name
+>>[[C:\WORK>]]
+echo %ERRORLEVEL%
+1
+[[C:\WORK>]]
+a one two
+(RUN command="C:\BIN\A.COM one two" prog=C:\BIN\A.COM name=a cwd=C:\WORK env=X=hello; detach=0 -> 1)
+(ENDED 3)
+[[C:\WORK>]]
+echo %ERRORLEVEL%
+3
+[[C:\WORK>]]
+b && echo after b
+(RUN command="C:\TOOLS\B.COM" prog=C:\TOOLS\B.COM name=b cwd=C:\WORK env=X=hello; detach=0 -> 1)
+(ENDED 0)
+after b
+[[C:\WORK>]]
+b || echo not after a success
+(RUN command="C:\TOOLS\B.COM" prog=C:\TOOLS\B.COM name=b cwd=C:\WORK env=X=hello; detach=0 -> 1)
+(ENDED 0)
+[[C:\WORK>]]
+tool /x
+(RUN command="C:\TOOLS\TOOL.EXE /x" prog=C:\TOOLS\TOOL.EXE name=tool cwd=C:\WORK env=X=hello; detach=0 -> -1)
+<<GLOS can't run it here.
+>>[[C:\WORK>]]
+run
+(RUN command="C:\TOOLS\RUN.BAT" prog=C:\TOOLS\RUN.BAT name=run cwd=C:\WORK env=X=hello; detach=0 -> -1)
+<<GLOS can't run it here.
+>>[[C:\WORK>]]
+where b
+C:\TOOLS\B.COM
+[[C:\WORK>]]
+where tool.exe
+C:\TOOLS\TOOL.EXE
+[[C:\WORK>]]
+where nosuch
+<<Not found
+>>[[C:\WORK>]]
+c:\bin\a.com direct
+(RUN command="C:\BIN\A.COM direct" prog=C:\BIN\A.COM name=c:\bin\a.com cwd=C:\WORK env=X=hello; detach=0 -> 1)
+(ENDED 0)
+[[C:\WORK>]]
+start tool
+(RUN command="C:\TOOLS\TOOL.EXE" prog=C:\TOOLS\TOOL.EXE name=tool cwd=C:\WORK env=X=hello; detach=1 -> 0)
+[[C:\WORK>]]
+dir | sort
+ Directory of C:\WORK
+
+         0 file(s)              0 bytes
+         0 dir(s)
+[[C:\WORK>]]
+path
+path=C:\BIN;C:\TOOLS
+[[C:\WORK>]]
+path c:\bin
+[[C:\WORK>]]
+where b
+<<Not found
+>>[[C:\WORK>]]
+prompt $N$G
+[[C>]]
+prompt
+prompt=$N$G
+[[C>]]
+prompt $P$G
+[[C:\WORK>]]
+c:
+[[C:\WORK>]]
+d:
+<<Invalid drive specification
+>>[[C:\WORK>]]
+cd c:
+C:\WORK
+[[C:\WORK>]]
+xtra a b
+(EXTRA xtra args=2)
+[[C:\WORK>]]
+echo %ERRORLEVEL%
+7
+[[C:\WORK>]]
+xwait
+(EXTRA xwait args=0)
+(ENDED 5)
+[[C:\WORK>]]
+echo %ERRORLEVEL%
+5
+[[C:\WORK>]]
+help
+CD [path]           the folder (of a drive: CD X:); X: changes drive
+DIR [path] [/W] [/B] a folder's files: wide, or names alone
+COPY from [to]      files (* and ?), into a folder or a file
+MOVE from [to]      ... moved
+REN from to         a file's new name
+DEL files           files deleted (* and ?)
+MD path, RD path    a folder made, removed
+TYPE file           a file shown
+ECHO [text]         text written
+SET [name[=value]]  the variables; PATH and PROMPT as SET does
+CLS                 a clean window
+HISTORY             the lines typed before (Up and Down)
+WHERE program       where it is along PATH
+START program       a program started beside the terminal
+XTRA                a command of the host's
+VER, HELP, EXIT
+Programs run here until they want the screen. a && b: b after a has worked; a || b: b if it hasn't.
+[[C:\WORK>]]
+history
+  1  set X=hello
+  2  echo %X% world, %% and %ERRORLEVEL%
+  3  echo.
+  4  set X
+  5  set NOPE
+  6  md new && cd new && echo made
+  7  cd .. || echo not shown
+  8  cd nosuch || echo no such folder
+  9  echo %ERRORLEVEL%
+ 10  copy notes.txt new
+ 11  copy *.* new
+ 12  copy notes.txt notes.txt
+ 13  dir new /b
+ 14  echo kept > out.txt
+ 15  echo more >> out.txt
+ 16  type out.txt
+ 17  type nosuch.txt
+ 18  ren out.txt done.txt && del new\*.* && rd new
+ 19  ren done.txt notes.txt
+ 20  move done.txt c:\tools
+ 21  dir c:\tools /b
+ 22  nosuch
+ 23  echo %ERRORLEVEL%
+ 24  a one two
+ 25  echo %ERRORLEVEL%
+ 26  b && echo after b
+ 27  b || echo not after a success
+ 28  tool /x
+ 29  run
+ 30  where b
+ 31  where tool.exe
+ 32  where nosuch
+ 33  c:\bin\a.com direct
+ 34  start tool
+ 35  dir | sort
+ 36  path
+ 37  path c:\bin
+ 38  where b
+ 39  prompt $N$G
+ 40  prompt
+ 41  prompt $P$G
+ 42  c:
+ 43  d:
+ 44  cd c:
+ 45  xtra a b
+ 46  echo %ERRORLEVEL%
+ 47  xwait
+ 48  echo %ERRORLEVEL%
+ 49  help
+ 50  history
+[[C:\WORK>]]
+(INPUT "history")
+(INPUT "help")
+(INPUT "history")
+(INPUT "")
+(TAB "di")
+(INPUT "DIR ")
+(TAB "ty")
+(INPUT "TYPE ")
+(TAB "type no")
+(INPUT "type NOTES.TXT")
+(TAB "type c:\tools\t")
+(INPUT "type c:\tools\TOOL.EXE")
+(TAB "type c:\to")
+(INPUT "type c:\TOOLS\")
+(TAB "copy r")
+(INPUT "copy README.MD")
+cls
+(CLEAR)
+[[C:\WORK>]]
+exit
+(QUIT 0)
+[[C:\WORK>]]
+

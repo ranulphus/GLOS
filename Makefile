@@ -150,6 +150,8 @@ host-test-run:
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/disk_test tests/host/disk_test.c kernel/disk/mbr.c \
 	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  && tests/host/disk_test.sh build/host/disk_test build/host/disk
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/shell_test tests/host/shell_test.c sdk/shell/shell.c \
+	  && tests/host/shell_test.sh build/host/shell_test build/host/shell
 
 # The toolkit (sdk/gui, M9) and the apps on the host, against tests/host/glosshim.c: each test script
 # (tests/gui/NAME.txt) run at 8, 16 and 32 bits, its shots written to build/host/gui/ (the goldens Loop A's
@@ -164,7 +166,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
 APPS := notepad calc images term files monitor control
-APP_LIBS_term := build/sdk/libsshc.a           # (TERM's ssh, sftp and ssh-keygen: M10)
+APP_LIBS_term := sdk/shell/shell.c build/sdk/libsshc.a  # (the shell's interpreter; TERM's ssh, sftp and ssh-keygen: M10)
 APP_HOST_FLAGS := -Ithird_party/stb
 define app_host
 build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h include/glos/glos.h tests/host/glosshim.c \
@@ -175,7 +177,7 @@ build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/g
 	  tests/host/glosshim.c $$(GUI_SRCS) $$(LIBGLOS_GFX) kernel/lib/png.c $$(CFG_SRCS) $$(CP_SRCS) $$(APP_HOST_LIBS_$(1)) -lm
 endef
 # The terminal's ssh (M10): the client for the host too, 32-bit as the rest, its crypto without -Werror.
-APP_HOST_LIBS_term := build/host/libsshc32.a
+APP_HOST_LIBS_term := sdk/shell/shell.c build/host/libsshc32.a
 build/host/libsshc32.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h
 	@mkdir -p build/host/sshc32
 	$(Q)echo "  CC      $@"
