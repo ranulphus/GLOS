@@ -4,6 +4,8 @@
 #define K_DOS_H
 #include "types.h"
 
+struct waitq;
+
 #define DOS_MAX_CALLS 4
 #define DOS_XFER 0xFFFF                         /* as DS or ES: the transfer buffer's segment */
 
@@ -24,6 +26,7 @@ struct dos_req {
     u16 error;                                  /* the failing call's AX (a DOS error), 0 if none */
     volatile u8 state;                          /* DR_* */
     struct dos_req *next;
+    struct waitq *waiter;                       /* woken at its end (dos_call); NULL: the ssh thread is told */
 };
 
 /* The ssh thread's side. */
@@ -31,6 +34,8 @@ void dos_init(void (*kick)(void));              /* kick: a request has finished 
 void dos_hold(void);                            /* a user (an SFTP session) begins ... */
 void dos_release(void);                         /* ... and ends: the buffer goes with the last */
 int dos_post(struct dos_req *q);                /* queue it; -1 without a DOS server (not headless) */
+int dos_call(struct dos_req *q);                /* for a thread of its own (a shell's session): made and waited
+                                                   for. 0 (its DOS error, if any, in q->error), or -1 as dos_post */
 u32 dos_xfer_size(void);                        /* the transfer buffer's size (32 KB, or less) */
 
 /* The VM thread's side (trap context). */

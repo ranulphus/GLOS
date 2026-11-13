@@ -13,6 +13,9 @@ char *strcpy(char *d, const char *s);
 char *strncpy(char *d, const char *s, size_t n);
 char *strchr(const char *s, int c);
 char *strstr(const char *s, const char *t);
+char *strrchr(const char *s, int c);
+char *strpbrk(const char *s, const char *set);
+size_t strspn(const char *s, const char *set);
 int strncmp(const char *a, const char *b, size_t n);
 void *memchr(const void *s, int c, size_t n);
 #endif

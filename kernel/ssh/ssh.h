@@ -38,6 +38,11 @@ struct ssh_ops {
        come through chan_data, the end through ssh_chan_close), -1 to refuse.
        May be NULL: every one is refused. */
     int (*tcpip)(struct ssh_chan *ch, const char *host, uint32_t port);
+    /* A login (the client's "shell" request): start it and return 0, or -1 to refuse. cols and rows are the
+       terminal's the client asked for first (pty-req), 0 if it asked for none. The client's keys come through
+       chan_data. May be NULL: no logins. */
+    int (*shell)(struct ssh_chan *ch, uint32_t cols, uint32_t rows);
+    void (*resize)(struct ssh_chan *ch, uint32_t cols, uint32_t rows);  /* its terminal's size has changed */
 };
 
 struct ssh_server {

@@ -57,6 +57,7 @@ struct ssh_chan {
     uint8_t unconfirmed;                        /* its open isn't answered yet: nothing may go out on it */
     uint32_t unconsumed;                        /* held: input delivered and not yet consumed */
     uint32_t exit_status;
+    uint32_t pty_cols, pty_rows;                /* the terminal a pty-req asked for (0: none) */
     uint8_t *out[2];
     uint32_t out_len[2], out_cap[2];
     void *user;
@@ -679,6 +680,29 @@ static int chan_request(struct ssh_conn *c, const uint8_t *p, uint32_t n)
             ok = sr_streq(type, tlen, "exec") ? c->ops->exec(ch, cmd) : c->ops->subsystem(ch, cmd);
             if (ok != 0)
                 ch->started = 0;
+        }
+    }
+    if (sr_streq(type, tlen, "pty-req") && !ch->started && c->ops->shell) {
+        uint32_t cols, rows;
+        (void)sr_string(&r, &alen);             /* (TERM: whatever it is, it is spoken to as an xterm) */
+        cols = sr_u32(&r);
+        rows = sr_u32(&r);
+        if (!r.err) {
+            ch->pty_cols = cols ? cols : 80;
+            ch->pty_rows = rows ? rows : 24;
+            ok = 0;
+        }
+    } else if (sr_streq(type, tlen, "shell") && !ch->started && c->ops->shell) {
+        ch->started = 1;
+        ok = c->ops->shell(ch, ch->pty_cols, ch->pty_rows);
+        if (ok != 0)
+            ch->started = 0;
+    } else if (sr_streq(type, tlen, "window-change") && ch->pty_cols && c->ops->resize) {
+        uint32_t cols = sr_u32(&r), rows = sr_u32(&r);
+        if (!r.err && cols && rows) {
+            ch->pty_cols = cols, ch->pty_rows = rows;
+            c->ops->resize(ch, cols, rows);
+            ok = 0;
         }
     }
     if (want) {

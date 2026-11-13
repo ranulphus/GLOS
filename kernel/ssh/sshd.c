@@ -16,6 +16,7 @@
 #include "glos/bootinfo.h"
 #include "glos/tz.h"
 #include "bdisk.h"
+#include "shsess.h"
 #include "agent.h"
 #include "cache.h"
 #include "clip.h"
@@ -1472,8 +1473,84 @@ static int k_tcpip(struct ssh_chan *ch, const char *host, uint32_t port)
     return 0;
 }
 
+/* ---- logins: a shell's session (kernel/shell/shsess.c) at a channel */
+
+#define NSHELL 4
+static struct {
+    struct ssh_chan *ch;
+    struct shsess *s;
+} shells[NSHELL];
+
+static struct shsess *shell_of(const struct ssh_chan *ch)
+{
+    u32 i;
+    for (i = 0; i < NSHELL; i++)
+        if (shells[i].ch == ch)
+            return shells[i].s;
+    return 0;
+}
+
+static void shell_drop(struct ssh_chan *ch)
+{
+    u32 i;
+    for (i = 0; i < NSHELL; i++)
+        if (shells[i].ch == ch) {
+            shsess_free(shells[i].s);
+            shells[i].ch = 0;
+            shells[i].s = 0;
+        }
+}
+
+static int k_shell(struct ssh_chan *ch, uint32_t cols, uint32_t rows)
+{
+    u32 i;
+    for (i = 0; i < NSHELL; i++)
+        if (!shells[i].ch) {
+            if (!(shells[i].s = shsess_new(cols, rows, wake_ssh)))
+                break;
+            shells[i].ch = ch;
+            kprintf("GLOS-SSH shell terminal=%ux%u\n", cols, rows);
+            return 0;
+        }
+    kprintf("GLOS-SSH shell refused\n");
+    return -1;
+}
+
+static void k_resize(struct ssh_chan *ch, uint32_t cols, uint32_t rows)
+{
+    struct shsess *s = shell_of(ch);
+    if (s)
+        shsess_resize(s, cols, rows);
+}
+
+/* What the sessions have written, to their channels; one that has ended, its channel's end. */
+static void shells_turn(void)
+{
+    static u8 buf[2048];
+    u32 i, n;
+    int code;
+    shsess_turn();
+    for (i = 0; i < NSHELL; i++) {
+        if (!shells[i].ch)
+            continue;
+        while (ssh_chan_pending(shells[i].ch) < 0x8000 && (n = shsess_read(shells[i].s, buf, sizeof buf)) != 0)
+            ssh_chan_write(shells[i].ch, 0, buf, n);
+        if (shsess_ended(shells[i].s, &code) && !shsess_read(shells[i].s, buf, 0)) {
+            struct ssh_chan *ch = shells[i].ch;
+            while ((n = shsess_read(shells[i].s, buf, sizeof buf)) != 0)        /* (its last words) */
+                ssh_chan_write(ch, 0, buf, n);
+            shell_drop(ch);
+            ssh_chan_exit(ch, (u32)code);
+        }
+    }
+}
+
 static void k_data(struct ssh_chan *ch, const uint8_t *d, uint32_t n)
 {
+    if (shell_of(ch)) {                         /* (what its ring has no room for is lost: 4 KB typed ahead) */
+        shsess_write(shell_of(ch), d, n);
+        return;
+    }
     if (vnc_owns(ch)) {
         vnc_input(ch, d, n);
         return;
@@ -1488,6 +1565,11 @@ static void k_data(struct ssh_chan *ch, const uint8_t *d, uint32_t n)
 
 static void k_eof(struct ssh_chan *ch)
 {
+    if (shell_of(ch)) {                         /* nothing more will be typed: the session's end */
+        shell_drop(ch);
+        ssh_chan_exit(ch, 0);
+        return;
+    }
     if (vnc_owns(ch)) {                         /* (the viewer has gone: its side closes too) */
         ssh_chan_close(ch);
         return;
@@ -1503,6 +1585,7 @@ static void k_eof(struct ssh_chan *ch)
 
 static void k_gone(struct ssh_chan *ch)
 {
+    shell_drop(ch);
     vnc_gone(ch);
     if (ch == gdb_chan) {
         gdbp_detach();
@@ -1524,7 +1607,8 @@ static void sftp_turn(void)
         }
 }
 
-static const struct ssh_ops ops = { k_alloc, k_free, k_send, k_log, k_exec, k_subsystem, k_data, k_eof, k_gone, k_tcpip };
+static const struct ssh_ops ops = { k_alloc, k_free, k_send, k_log, k_exec, k_subsystem, k_data, k_eof, k_gone, k_tcpip,
+                                    k_shell, k_resize };
 
 static void finish(struct sconn *s, const char *why)
 {
@@ -1579,6 +1663,7 @@ static void ssh_main(void *arg)
                 finish(s, "login-grace");
         }
         agent_service(agent_write, agent_done);
+        shells_turn();
         sftp_turn();
         streams_turn();
         vnc_keys_turn();                        /* (keys a viewer sent, that the keyboard hadn't room for yet) */

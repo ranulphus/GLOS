@@ -22,6 +22,7 @@
 #include "dos.h"
 #include "io.h"
 #include "kprintf.h"
+#include "sched.h"
 #include "vm.h"
 
 #define XFER_PARAS 2048u                        /* 32 KB */
@@ -79,6 +80,21 @@ int dos_post(struct dos_req *q)
     return 0;
 }
 
+int dos_call(struct dos_req *q)
+{
+    struct waitq wq;
+    u32 f;
+    memset(&wq, 0, sizeof wq);
+    q->waiter = &wq;
+    if (dos_post(q) != 0)
+        return -1;
+    f = irq_save();
+    while (q->state != DR_DONE)
+        thread_block(&wq);
+    irq_restore(f);
+    return 0;
+}
+
 /* ---- the VM thread's side */
 
 int dos_vm_pending(void) { return head || (!users && xfer_seg); }
@@ -111,7 +127,9 @@ static void finish(struct dos_req *q)
     if (q->out && q->out_len && xfer_seg && q->out_at + q->out_len <= xfer_paras * 16u)
         memcpy(q->out, vm_ptr(x + q->out_at), q->out_len);
     q->state = DR_DONE;
-    if (kick)
+    if (q->waiter)
+        thread_wake(q->waiter);
+    else if (kick)
         kick();
 }
 

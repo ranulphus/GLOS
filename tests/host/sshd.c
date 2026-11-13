@@ -203,7 +203,8 @@ static void x_gone(struct ssh_chan *ch)
         drop_job(j);
 }
 
-static const struct ssh_ops ops = { x_alloc, x_free, x_send, x_log, x_exec, x_subsystem, x_data, x_eof, x_gone, x_tcpip };
+static const struct ssh_ops ops = { x_alloc, x_free, x_send, x_log, x_exec, x_subsystem, x_data, x_eof, x_gone, x_tcpip,
+                                    0, 0 };
 
 /* The jobs that produce output over time. */
 static void run_jobs(void)

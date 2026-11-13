@@ -52,6 +52,33 @@ char *strstr(const char *s, const char *t)
     }
 }
 
+char *strrchr(const char *s, int c)
+{
+    const char *last = 0;
+    for (;; s++) {
+        if (*s == (char)c)
+            last = s;
+        if (!*s)
+            return (char *)last;
+    }
+}
+
+char *strpbrk(const char *s, const char *set)
+{
+    for (; *s; s++)
+        if (strchr(set, *s))
+            return (char *)s;
+    return 0;
+}
+
+size_t strspn(const char *s, const char *set)
+{
+    size_t n = 0;
+    while (s[n] && strchr(set, s[n]))
+        n++;
+    return n;
+}
+
 int strcmp(const char *a, const char *b)
 {
     while (*a && *a == *b)
