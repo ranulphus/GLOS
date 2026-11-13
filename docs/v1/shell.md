@@ -102,6 +102,61 @@ prompt holds it, and everything else that needs DOS waits behind it.
 | S4 | The batch language; GLOS's `COMMAND.COM`; `AUTOEXEC.BAT` run by GLOS; the floppy with FreeDOS's kernel alone | Batch files against FreeDOS's COMMAND.COM; `loopa-floppy` |
 | later | GLOS's own DOS services (files, FAT), then no DOS underneath | its own plan |
 
+## Step S2 as designed (for the owner's review, 2026-11-13; nothing of it is built)
+
+S1 left the interpreter a library that asks a host for a terminal, files, programs and memory, and never waits.
+S2 gives it a host in the kernel and takes the Terminal app's away.
+
+### A session
+
+- **A kernel thread** with a `struct sh` and a **console**: two rings of bytes (to the terminal, from it), a
+  size in characters, and whether there is a terminal at all. `kernel/shell/session.c`.
+- **Its host's side** (`kernel/shell/host.c`):
+  - *Files:* through the DOS server, a call at a time (`kernel/dos/dos.c`), as SFTP's are; the server's one
+    wake-up becomes a wait of the request's own, so that sessions and SFTP use it side by side. Folders are read
+    with DOS's find-first and find-next. 8.3 names at first; long names when SFTP has them (PRD §7.3).
+  - *Programs:* agent jobs, as an app's console jobs are (`agent_post_job`): the session sends the job's output
+    to its terminal and its keys to the job, and tells the shell when it has ended. One DOS: they take turns,
+    as now. A line with a pipe goes to the DOS's COMMAND.COM whole, until S4.
+  - *Memory:* the kernel's heap.
+- **The line editor** is the session's (`kernel/shell/edit.c`), since a terminal is only bytes: the keys an
+  xterm sends (arrows, Home, End, Delete, Backspace, Tab, Ctrl+C), the history and completion asked of the
+  shell, what is typed drawn again with a few ANSI sequences. The prompt and errors are coloured the same way.
+  With no terminal there is no editor: the line is run and the session ends with its exit code.
+- **Text** inside the shell is the PC's code page, as DOS's files and names are; a terminal speaks UTF-8. The
+  console turns one into the other, with the tables GLOS has (`kernel/lib/cp*.c`).
+- **GLOS's own commands** (`ps`, `kill`, `log`, `stat`, `config`, `display` ...) become the kernel host's
+  commands: what `kernel/ssh/sshd.c` does for `glos NAME` today, moved behind one table with a place to write
+  to, and named as decided below. `GLOS NAME` goes on working: it is that table's alias.
+
+### The ways in
+
+| Way in | What changes |
+|---|---|
+| `ssh pc` | New: `pty-req`, `shell` and `window-change` are answered. A session with a terminal: a prompt, editing, history, programs. Ends with EXIT or the connection. |
+| `ssh pc COMMAND` | The line runs through the shell, with no terminal: its exit code is the command's. Today's behaviour is kept where scripts lean on it: see the question below. |
+| The Terminal app | A terminal only. A new call (CONSOLE, API 2.1: open a session, read and write its bytes, its size, an event when there is something to read) and `vt.c`'s screen for everything. `apps/term/shell.c` and the app's own SSH client's screen switch go; SSH, SFTP and SSH-KEYGEN become programs of their own (`build/apps/SSH.EXE` ...), which the shell runs like any other. |
+| The PC's own screen | With no desktop, a session on the text screen and the keyboard. The idle screen's notice and its Ctrl-Alt-Del rule (2026-11-12) go: the prompt is there. |
+
+### In what order, inside S2
+
+| | What | Shows it works |
+|---|---|---|
+| S2a | Sessions, the kernel's host, the line editor; `ssh pc` logs in | Loop A: a script typed through `ssh -tt` (commands, a program, history, Tab, Ctrl+C), its transcript; host tests of the editor |
+| S2b | `ssh pc COMMAND` through the shell; GLOS's commands as the host's table, with their new names and `GLOS NAME` | Every suite as it is (they all speak through `ssh pc COMMAND`) |
+| S2c | The CONSOLE call; the Terminal app a terminal only; SSH, SFTP, SSH-KEYGEN programs | The Terminal's scripts in Loop A, the same lines; `loopa-sshc` |
+| S2d | The session on the PC's own screen | Loop A: keys typed at the emulated keyboard, the screen read back |
+
+### What it costs, and what could go wrong
+
+- **Ring 0 grows** by the interpreter, the editor and the sessions (my estimate: 25-35 KB of code; a session
+  about 12 KB of memory, mostly its history and folders).
+- **`ssh pc COMMAND` is what every test suite speaks.** If the shell's own DIR, COPY, TYPE and ECHO answered
+  there in place of the DOS's, some suites and scripts would see other text (the shell's DIR is not FreeDOS's).
+  That is the question put to the owner with this design.
+- **A session's files and a program's** go through the one DOS in turns: a long COPY in one session holds
+  nothing, but each of its calls waits its turn behind a running program. As SFTP today.
+
 ## Decided by the owner (2026-11-12)
 
 1. **The shell runs in the kernel**, as SSH and SFTP do.
