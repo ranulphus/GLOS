@@ -1,12 +1,13 @@
-/* ssh, sftp and ssh-keygen in the terminal (M10 step D, PRD D61): sdk/sshc
- * over a connection of GLOS's (NET), the xterm screen (vt.c) for a session with a
- * pty, the shell's own line for the questions (a new host key, a password).
+/* ssh, sftp and ssh-keygen (M10 step D, PRD D61; programs since S2c, with cli.c
+ * their terminal): sdk/sshc over a connection of GLOS's (NET); a session with a
+ * pty passes its bytes to the terminal as they are; the questions (a new host
+ * key, a password) are asked a line at a time.
  *
  *   ssh [-p PORT] [-i KEY] [-l USER] [USER@]HOST [COMMAND]
  *   sftp [-P PORT] [-i KEY] [USER@]HOST
  *   ssh-keygen [-f FILE] [-C COMMENT]
  *
- * Keys and known hosts are in SSH\ beside TERM.EXE (C:\GLOS\SSH; GLOSSSH in
+ * Keys and known hosts are in SSH\ beside the program (C:\GLOS\SSH; GLOSSSH in
  * the environment names another): ID_ED25 and ID_ED25.PUB, KNOWNHST.TXT. A
  * session's network is read whenever its connection has news (GLOS_EV_NET) or
  * the terminal's tick comes; sftp's requests wait for their answers there and
@@ -20,7 +21,6 @@
 #include <unistd.h>
 
 #include <glos/glos.h>
-#include <glos/gui.h>
 #ifdef __DJGPP__
 #include <glos/net.h>
 #else
@@ -29,14 +29,10 @@
 #include <glos/sftpc.h>
 #include <glos/sshc.h>
 
-#include "term.h"
-#include "vt.h"
+#include "cli.h"
 
 enum { S_OFF, S_CONNECTED, S_ASK_HOST, S_ASK_PASSWORD, S_LOGGING_IN, S_OPENING, S_RUNNING, S_SFTP };
 
-#ifndef SSH_PROGRAM
-static struct vt vt;
-#endif
 static struct {
     int stage;
     glos_handle conn;                   /* the GLOS connection */
@@ -55,18 +51,18 @@ static struct {
     int status;
     int accepted;                       /* (the channel's requests taken when it closed) */
     char sig[32];
-    unsigned changed_at;                /* (the log's screen dumps) */
-    int dump_due;
     char rcwd[512];                     /* sftp's folder there */
 } s;
 
-static int log_screens;
+static int log_screens = -1;                /* (SSHLOG=1 in the environment: the tests') */
 
 /* -log: where a session has got to, on stdout as it happens ("SSH| ...": the suite waits for them). */
 static void milestone(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void milestone(const char *fmt, ...)
 {
     va_list ap;
+    if (log_screens < 0)
+        log_screens = getenv("SSHLOG") != NULL;
     if (!log_screens)
         return;
     printf("SSH| ");
@@ -174,35 +170,14 @@ static void on_data(struct sshc_chan *ch, int stream, const uint8_t *d, uint32_t
         sftpc_input(s.sf, d, n);
         return;
     }
-#ifdef SSH_PROGRAM                              /* (SSH.EXE: the terminal is somebody else's, and has the bytes as
-                                                   they are: apps/ssh/cli.c) */
-    if (s.screen) {
+    if (s.screen) {                             /* (a pty: the terminal has the bytes as they are) */
         term_raw((const char *)d, (int)n);
         return;
     }
-#else
-    if (s.screen) {
-        vt_feed(&vt, d, (int)n);
-        if (vt.reply_n) {
-            sshc_write(s.ch, (const uint8_t *)vt.reply, (uint32_t)vt.reply_n);
-            vt.reply_n = 0;
-        }
-        if (vt.title_set) {
-            vt.title_set = 0;
-            term_title(vt.title);
-        }
-        s.changed_at = glos_ticks();
-        s.dump_due = 1;
-        term_screen_dirty();
-        return;
-    }
-#endif
-    {
-        if (stream)
-            term_attr(T_ERROR);
-        term_write((const char *)d, (int)n);
-        term_attr(T_NORMAL);
-    }
+    if (stream)
+        term_attr(T_ERROR);
+    term_write((const char *)d, (int)n);
+    term_attr(T_NORMAL);
 }
 
 static void on_exit_status(struct sshc_chan *ch, int status, const char *sig)
@@ -225,28 +200,10 @@ static const struct sshc_ops ops = { net_send, NULL, on_hostkey, on_banner, on_d
 
 /* ---- the session's stages */
 
-static void dump_screen(void)
-{
-#ifndef SSH_PROGRAM
-    static char text[VT_COLS_MAX * VT_ROWS_MAX * 3 + VT_ROWS_MAX + 1];
-    char *p, *nl;
-    if (!log_screens)
-        return;
-    vt_dump(&vt, text, sizeof text);
-    printf("VT-SCREEN %dx%d\n", vt.cols, vt.rows);
-    for (p = text; (nl = strchr(p, '\n')) != NULL; p = nl + 1)
-        printf("VT| %.*s\n", (int)(nl - p), p);
-    printf("VT-END\n");
-    fflush(stdout);
-#endif
-}
-
 static void finish(int code)
 {
     if (s.screen) {
-        dump_screen();
         s.screen = 0;
-        term_screen_off();
     }
     if (s.sf)
         sftpc_free(s.sf);
@@ -281,12 +238,6 @@ static void open_channel(void)
     int cols, rows;
     term_size(&cols, &rows);
     s.screen = !s.sftp && !s.cmd[0];
-#ifndef SSH_PROGRAM
-    if (s.screen) {
-        vt_init(&vt, cols, rows);
-        term_screen_on(&vt);
-    }
-#endif
     s.ch = s.sftp ? sshc_session(s.c, NULL, 0, 0, NULL, "sftp")
                   : sshc_session(s.c, s.screen ? "xterm" : NULL, (unsigned)cols, (unsigned)rows, s.cmd[0] ? s.cmd : NULL,
                                  NULL);
@@ -374,10 +325,8 @@ static void step(void)
         if (!s.ch) {
             int code = s.status >= 0 ? s.status : 255;
             if (s.screen) {
-                dump_screen();
-                s.screen = 0;
-                term_screen_off();
-            }
+                        s.screen = 0;
+                    }
             if (!s.cmd[0])
                 term_printf("Connection to %s closed.\r\n", s.host);
             if (s.sig[0])
@@ -398,10 +347,8 @@ void ssh_poll(void)
             return;
         }
         if (s.screen) {
-            dump_screen();
-            s.screen = 0;
-            term_screen_off();
-        }
+                s.screen = 0;
+            }
         term_printf("%s: %s: %s\r\n", s.sftp ? "sftp" : "ssh", s.host,
                     s.c && sshc_why(s.c)[0] ? sshc_why(s.c) : "the connection was closed");
         finish(255);
@@ -409,10 +356,6 @@ void ssh_poll(void)
     }
     if (s.stage != S_ASK_HOST && s.stage != S_ASK_PASSWORD && s.stage != S_SFTP)
         step();
-    if (s.dump_due && glos_ticks() - s.changed_at > 1500) {
-        s.dump_due = 0;
-        dump_screen();
-    }
 }
 
 /* ---- starting */
@@ -509,10 +452,8 @@ static int start(int argc, char **argv, int sftp)
 int ssh_command(int argc, char **argv) { return start(argc, argv, 0); }
 int sftp_command(int argc, char **argv) { return start(argc, argv, 1); }
 
-int ssh_active(void) { return s.stage != S_OFF; }
 int ssh_screen(void) { return s.screen; }
 int ssh_asking(void) { return s.stage == S_ASK_HOST || s.stage == S_ASK_PASSWORD || s.stage == S_SFTP; }
-void ssh_log_screens(int on) { log_screens = on; }
 
 /* ---- answers (lines typed while it asks) */
 
@@ -552,7 +493,6 @@ void ssh_answer(const char *line)
 
 /* ---- keys and the window, while the screen shows */
 
-#ifdef SSH_PROGRAM
 /* What was typed at the terminal, as it sent it: the session's. */
 void ssh_raw(const char *d, int n)
 {
@@ -565,37 +505,6 @@ void ssh_resize(int cols, int rows)
     if (s.screen && s.ch)
         sshc_resize(s.ch, (unsigned)cols, (unsigned)rows);
 }
-#else
-void ssh_key(unsigned key, unsigned ch, unsigned mods)
-{
-    char out[32];
-    int n;
-    if (s.stage != S_RUNNING || !s.ch)
-        return;
-    if ((n = vt_key(&vt, key, ch, mods, out, sizeof out)) > 0)
-        sshc_write(s.ch, (const uint8_t *)out, (uint32_t)n);
-}
-
-void ssh_paste(const char *text, int n)
-{
-    if (s.stage != S_RUNNING || !s.ch)
-        return;
-    if (vt.bracketed)
-        sshc_write(s.ch, (const uint8_t *)"\033[200~", 6);
-    sshc_write(s.ch, (const uint8_t *)text, (uint32_t)n);
-    if (vt.bracketed)
-        sshc_write(s.ch, (const uint8_t *)"\033[201~", 6);
-}
-
-void ssh_resize(int cols, int rows)
-{
-    if (!s.screen)
-        return;
-    vt_resize(&vt, cols, rows);
-    if (s.ch)
-        sshc_resize(s.ch, (unsigned)cols, (unsigned)rows);
-}
-#endif
 
 void ssh_break(void)
 {

@@ -755,8 +755,10 @@ struct glos_job_run {
                                    of `cols` by `rows`, whose bytes are READ (UTF-8, with an xterm's sequences)
                                    and whose keys are WRITE's GLOS_JOB_IN (as a terminal sends them); `command`
                                    empty: a login, to EXIT; else that line run, the session's end its. With no
-                                   terminal (0 by 0) a line's output comes as it is, errors apart. `dir`, `env`,
-                                   `profile`, the files and the flags are not used (0) */
+                                   terminal (0 by 0) a line's output comes as it is, errors apart. `dir` is the
+                                   folder it starts in (0: the one DOS is in; "\\": the root of the drive DOS
+                                   started from); `env`, `profile`, the files and
+                                   the flags are not used (0) */
 #define GLOS_RUNF_DETACH 1      /* nothing of it is the app's: no handle, no output kept, it runs on when the app ends */
 #define GLOS_RUNF_STDIN  2      /* its standard input is the app's WRITEs (else the keyboard's, when it has it) */
 #define GLOS_RUNF_DIRECT 4      /* direct mode (the PC's ports are its own: PRD D20) */

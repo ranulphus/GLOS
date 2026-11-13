@@ -2,7 +2,8 @@
  *
  * It knows DOS's commands and syntax, the variables, the folders of each drive, the history; it asks its host
  * for everything else: a terminal to write to, files, programs run, memory. Step S1: its host is the Terminal
- * app (apps/term/shell.c); from S2 the kernel, a thread a session.
+ * app; from S2 the kernel, a thread a session (kernel/shell/shsess.c), which is the Terminal's too since S2c.
+ * The host's test shim has a host of its own (tests/host/shimshell.c).
  *
  * Nothing here waits. A line's commands run one after another until one is a program (or a command of the
  * host's that goes on): sh_line() then returns, and the host says when it has ended (sh_ended()), which runs

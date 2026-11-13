@@ -7259,8 +7259,8 @@ SSHC_CASES = [("bf6", "g200", "ne2kpci", 16), ("486dx2", "vbe", "ne2k", 8)]
 
 
 def sshc_case(profile, vcard, card, bits):
-    """The terminal's SSH and SFTP client (M10 step D, PRD D61; sdk/sshc, apps/term/ssh.c) against OpenSSH in a
-    container: a new host key asked about and kept; a command's output and its exit status as %ERRORLEVEL%; a login
+    """The SSH and SFTP client (M10 step D, PRD D61; sdk/sshc, apps/ssh: programs since S2c) run in the Terminal app,
+    which draws what they and the far side write (apps/term, its xterm screen), against OpenSSH in a container: a new host key asked about and kept; a command's output and its exit status as %ERRORLEVEL%; a login
     by password after a wrong one; a session with a pty: vi editing a file (read back in the container) and top's
     screen; a changed host key refused; SFTP put and get of 1 MB (SHA-256 on both sides) and ls; ssh-keygen's key
     read by OpenSSH's ssh-keygen."""
@@ -7276,6 +7276,8 @@ def sshc_case(profile, vcard, card, bits):
     open(os.path.join(out, "MB.BIN"), "wb").write(mb)
     rel = lambda f: os.path.relpath(os.path.join(out, f), ROOT)
     agent = Agent("sshc-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/TERM.EXE=/TEST/TERM.EXE",
+        "--file", "build/apps/SSH.EXE=/TEST/SSH.EXE", "--file", "build/apps/SFTP.EXE=/TEST/SFTP.EXE",
+        "--file", "build/apps/SSHKEY.EXE=/TEST/SSHKEY.EXE",
         "--file", "%s=/TEST/SSH/ID_ED25" % rel("sshd/client"), "--file", "%s=/TEST/SSH/KNOWNHST.TXT" % rel("KNOWNHST.TXT"),
         "--file", "%s=/TEST/MB.BIN" % rel("MB.BIN"),
         "--cmd", "SERSAY HX-START sshc", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"],
@@ -7316,30 +7318,59 @@ def sshc_case(profile, vcard, card, bits):
                                 stderr=subprocess.STDOUT)
         threading.Thread(target=reader, args=(term,), daemon=True).start()
         time.sleep(8)
+        # (The Terminal is a terminal alone since S2c: SSH.EXE and SFTP.EXE are programs the shell runs at it,
+        # and what they do is seen on its screen, which -log writes out whenever it has been still a moment.)
+        prompt = "C:\\TEST>"
+        has = lambda t: (lambda rows: any(t in r for r in rows))
+        line = lambda t: (lambda rows: any(r == t for r in rows))
+        last = lambda t: (lambda rows: [r for r in rows if r.strip()][-1:] == [t])
+        both = lambda a, b: (lambda rows: a(rows) and b(rows))
+
+        def screen(pred, limit=120, start=0):
+            """A dump of the Terminal's screen after line `start` that pred accepts (its rows): the line after it."""
+            t0 = time.time()
+            while time.time() - t0 < limit:
+                at = start
+                while True:
+                    a = next((i for i in range(at, len(lines)) if lines[i].startswith("VT-SCREEN")), -1)
+                    b = next((i for i in range(a + 1, len(lines)) if lines[i] == "VT-END"), -1) if a >= 0 else -1
+                    if b < 0:
+                        break
+                    if pred([l[4:] for l in lines[a + 1:b] if l.startswith("VT| ")]):
+                        return b + 1
+                    at = b + 1
+                time.sleep(0.3)
+            notes.append("waited %ds for a screen (after line %d): %r" % (limit, start, lines[-6:]))
+            return 0
+
+        typed("c:\\n")                           # (the Terminal starts at the boot drive's root: A: in Loop A)
+        typed("cd \\\\test\\n")
+        k = screen(last(prompt))
         # a new host key: asked about, kept; a command's output
         typed("ssh -p %d glos@10.0.2.2 echo hello-over-ssh\\n" % p1)
-        k = until("SSH| ask-host")
-        checks["ask-host"] = bool(k) and ("SHA256:" in lines[k - 1])
+        k = screen(has("(yes/no)?"), start=k)
+        checks["ask-host"] = bool(k) and any("SHA256:" in l for l in lines)
         typed("yes\\n")
-        k = until("SSH| end", start=k)
-        checks["command"] = bool(k) and lines[k - 1] == "SSH| end code=0"
+        k = screen(both(line("hello-over-ssh"), last(prompt)), start=k)
+        checks["command"] = bool(k)
         # its exit status
         typed("ssh -p %d glos@10.0.2.2 exit 7 || echo status %%errorlevel%%\\n" % p1)
-        k = until("SSH| end", start=k)
-        checks["status"] = bool(k) and lines[k - 1] == "SSH| end code=7"
+        k = screen(both(line("status 7"), last(prompt)), start=k)
+        checks["status"] = bool(k)
         # by password: a wrong one, then the right one (no key: -i a file that isn't there)
         typed("ssh -p %d -i C:\\\\TEST\\\\NOKEY glos@10.0.2.2 echo by-password\\n" % p1)
-        k = until("SSH| ask-password", start=k)
+        k = screen(lambda rows: sum("password:" in r for r in rows) == 1, start=k)
         typed("wrong-password\\n")
-        k2 = until("SSH| ask-password", start=k)
+        k2 = screen(lambda rows: sum("password:" in r for r in rows) == 2, start=k)
         checks["wrong-password"] = bool(k2)
         typed(SshdContainer.PASSWORD + "\\n")
-        k = until("SSH| end", start=k2 or k)
-        checks["password"] = bool(k) and lines[k - 1] == "SSH| end code=0"
-        # a session with a pty: vi, then top
+        k = screen(both(line("by-password"), last(prompt)), start=k2 or k)
+        checks["password"] = bool(k) and not any("wrong-password" in l or SshdContainer.PASSWORD in l for l in lines)
+        # a session with a pty: vi, then top, drawn by the Terminal's screen
         typed("ssh -p %d glos@10.0.2.2\\n" % p1)
-        k = until("SSH| logged-in", start=k)
-        time.sleep(4)
+        k = screen(lambda rows: [r for r in rows if r.strip()][-1:] and [r for r in rows if r.strip()][-1].endswith("$"),
+                   start=k)
+        checks["logged-in"] = bool(k)
         typed("vi notes.txt\\n")
         time.sleep(4)
         typed("ihello from GLOS vi")
@@ -7348,46 +7379,45 @@ def sshc_case(profile, vcard, card, bits):
         typed(":wq\\n")
         time.sleep(3)
         typed("top -d 3\\n")
-        k3 = until("VT| top - ", 60, start=k)
-        checks["top"] = bool(k3) and 0 < until("VT| Tasks:", 15, start=k3) <= k3 + 6    # (the screen's rows come one
-                                                   # at a time: looked for at once, the second was not always there
-                                                   # yet, and the check failed one run in five: 2026-11-13)
+        k3 = screen(lambda rows: any(r.startswith("top - ") for r in rows) and any(r.startswith("Tasks:") for r in rows),
+                    60, start=k)
+        checks["top"] = bool(k3)
         typed("q")
         time.sleep(2)
         typed("exit\\n")
-        k = until("SSH| end", start=k)
-        checks["session"] = bool(k) and lines[k - 1] == "SSH| end code=0"
+        k = screen(both(has("Connection to 10.0.2.2 closed."), last(prompt)), start=k3 or k)
+        checks["session"] = bool(k)
         got = srv.run("cat notes.txt")
         checks["vi"] = got == "hello from GLOS vi\n"
         if not checks["vi"]:
             notes.append("notes.txt: %r" % got)
         # a changed host key: refused
-        typed("ssh -p %d glos@10.0.2.2 echo nope\\n" % p2)
-        k = until("SSH| end", start=k)
-        checks["changed-key"] = bool(k) and lines[k - 1] == "SSH| end code=255" and \
-            any(l == "SSH| host-key-changed" for l in lines)
+        typed("ssh -p %d glos@10.0.2.2 echo nope || echo refused %%errorlevel%%\\n" % p2)
+        k = screen(both(line("refused 255"), last(prompt)), start=k)
+        checks["changed-key"] = bool(k)
         # SFTP: 1 MB up and down, ls
         typed("sftp -P %d glos@10.0.2.2\\n" % p1)
-        k = until("SSH| sftp-ready", start=k)
+        k = screen(last("sftp>"), start=k)
+        checks["sftp"] = bool(k)
         t0 = time.time()
         typed("put C:\\\\TEST\\\\MB.BIN mb.bin\\n")
-        k = until("SSH| sftp-ready", 300, start=k)
+        k = screen(last("sftp>"), 300, start=k)
         up = time.time() - t0
         t0 = time.time()
         typed("get mb.bin C:\\\\TEST\\\\MB2.BIN\\n")
-        k = until("SSH| sftp-ready", 300, start=k)
+        k = screen(last("sftp>"), 300, start=k)
         down = time.time() - t0
         notes.append("sftp: 1 MB up %.1fs, down %.1fs" % (up, down))
         typed("ls -l\\n")
-        k = until("SSH| sftp-ready", start=k)
+        k = screen(both(has("mb.bin"), last("sftp>")), start=k)
         typed("exit\\n")
-        k = until("SSH| end", start=k)
+        k = screen(last(prompt), start=k)
         checks["sftp-up"] = srv.run("sha256sum mb.bin").split()[:1] == [hashlib.sha256(mb).hexdigest()]
         got = fetch("C:\\TEST\\MB2.BIN", os.path.join(out, "MB2.BIN"))
         checks["sftp-down"] = got == mb
-        # ssh-keygen: a key OpenSSH reads
-        typed("ssh-keygen -f C:\\\\TEST\\\\NEWKEY -C made-in-glos\\n")
-        time.sleep(15)
+        # SSHKEY: a key OpenSSH reads
+        typed("sshkey -f C:\\\\TEST\\\\NEWKEY -C made-in-glos\\n")
+        k = screen(both(has("Your public key has been saved"), last(prompt)), start=k)
         sk = fetch("C:\\TEST\\NEWKEY", os.path.join(out, "NEWKEY"))
         pk = fetch("C:\\TEST\\NEWKEY.PUB", os.path.join(out, "NEWKEY.PUB"))
         if sk and pk:
@@ -7401,6 +7431,7 @@ def sshc_case(profile, vcard, card, bits):
         term.wait(timeout=120)
         time.sleep(1)
         text = "\n".join(lines)
+        open(os.path.join(out, "term.log"), "w").write(text + "\n")    # (what the Terminal said, for a failure's reader)
         for want in ("TERM| hello-over-ssh", "TERM| status 7", "TERM| by-password", "TERM| sftp> ls -l"):
             if want not in lines:
                 checks["log"] = False

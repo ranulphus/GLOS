@@ -2,9 +2,8 @@
  * key maker as programs of their own, run by GLOS's shell at any terminal: the Terminal app's, or an SSH
  * login's (a hop from one PC to the next).
  *
- * The client itself is the Terminal app's (apps/term/ssh.c, built here with SSH_PROGRAM), and this file is
- * the terminal it speaks to in place of the Terminal's window: the terminal the program was started at, by
- * API 2.1's GLOS_INIT_TERMINAL and SYS's TERMINAL. A session's bytes pass both ways as they are (the terminal
+ * The client itself is ssh.c (the Terminal app's built-in one until S2c), and this file is the terminal it
+ * speaks to: the one the program was started at, by API 2.1's GLOS_INIT_TERMINAL and SYS's TERMINAL. A session's bytes pass both ways as they are (the terminal
  * at the far end of the chain draws them); the questions (a new host key, a password, sftp's commands) are
  * read a line at a time here. With no terminal (ssh pc "SSH host command", a batch file) what it says goes
  * to its standard output, and a question can't be asked: it ends.
@@ -17,7 +16,7 @@
 
 #include <glos/glos.h>
 
-#include "term.h"
+#include "cli.h"
 
 static int have_term, gone, resumed, exit_code, hidden, asking, esc;
 static unsigned cols = 80, rows = 24;
@@ -90,9 +89,6 @@ void term_prompt_done(void) { asking = 1, nline = 0; }
 void term_input_hidden(int on) { hidden = on; }
 void term_size(int *c, int *r) { *c = (int)cols, *r = (int)rows; }
 const char *term_home(void) { return home; }
-void term_screen_on(struct vt *v) { (void)v; }
-void term_screen_off(void) {}
-void term_screen_dirty(void) {}
 void shell_resume(int code) { resumed = 1, exit_code = code; }
 
 /* ---- what was typed */

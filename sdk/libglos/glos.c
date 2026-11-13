@@ -922,11 +922,14 @@ int glos_job_signal(glos_handle job, unsigned what)
     return raw(GLOS_JOB_SIGNAL, &q, 0);
 }
 
-glos_handle glos_job_shell(const char *line, unsigned cols, unsigned rows)
+glos_handle glos_job_shell(const char *line, unsigned cols, unsigned rows) { return glos_job_shell_in(line, 0, cols, rows); }
+
+glos_handle glos_job_shell_in(const char *line, const char *dir, unsigned cols, unsigned rows)
 {
     struct glos_job_run q;
     memset(&q, 0, sizeof q);
     q.command = (unsigned)line;
+    q.dir = (unsigned)dir;
     q.how = GLOS_RUN_SHELL;
     q.cols = cols, q.rows = rows;
     return glos_job_start(&q);

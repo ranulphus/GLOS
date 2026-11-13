@@ -189,6 +189,7 @@ int glos_job_status(glos_handle job, struct glos_job_status *out);
    (with a terminal, or with none: 0 by 0). Its terminal's bytes are glos_job_read()'s, what is typed there
    glos_job_write()'s. 0 if refused (glos_error()). */
 glos_handle glos_job_shell(const char *line, unsigned cols, unsigned rows);
+glos_handle glos_job_shell_in(const char *line, const char *dir, unsigned cols, unsigned rows);  /* ... in a folder */
 int glos_job_size(glos_handle job, unsigned cols, unsigned rows);                  /* its terminal's size now */
 
 /* ---- sound (AUDIO) */

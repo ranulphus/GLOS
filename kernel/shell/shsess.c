@@ -78,6 +78,7 @@ struct shsess {
     u8 job_esc;                         /* a key's sequence under way, typed to it */
     u8 job_full;                        /* it has the PC's own screen: its terminal has been told */
     u8 out_cr;                          /* the last character written to the terminal was a carriage return */
+    char dir[80];                       /* the folder it starts in, where its opener said one ("": DOS's own) */
     u8 fg;                              /* the program that runs is a GLOS_INIT_TERMINAL app: the terminal is its,
                                            bytes each way as they are (shsess_term_*) */
     u8 fgin[1024];                      /* ... what was typed for it */
@@ -988,7 +989,26 @@ static void session(void *arg)
     s->starting = 1;
     sh_start(&s->sh, &s->host, env);
     s->starting = 0;
-    if (s->tty || sh_builtin(&s->sh, s->line))  /* (a line that is a program's alone asks DOS nothing: it is
+    if (!strcmp(s->dir, "\\")) {                /* "\": the root of the drive DOS started from, as DOS says it
+                                                   (INT 21h 3305h); else the drive its command interpreter is on
+                                                   (COMSPEC), else the one GLOS runs from. (Loop A's machines start
+                                                   from a floppy: A: there.) */
+        char l = 0;
+        req(s);
+        call(s, 0, 0x3305, 0, 0, 0);
+        if (made(s) == 0 && (s->q.r[0].dx & 0xFF) >= 1 && (s->q.r[0].dx & 0xFF) <= 26)
+            l = (char)('A' + (s->q.r[0].dx & 0xFF) - 1);
+        if (!l && vm.bi->comspec[0] && vm.bi->comspec[1] == ':')
+            l = vm.bi->comspec[0];
+        if (!l)
+            l = vm.bi->cfg_path[0];
+        s->dir[0] = (char)((l >= 'a' && l <= 'z') ? l - 32 : (l >= 'A' && l <= 'Z') ? l : 'C');
+        s->dir[1] = ':', s->dir[2] = '\\', s->dir[3] = 0;
+    }
+    if (s->dir[0]) {
+        sh_folder(&s->sh, s->dir);
+        s->folder = 1;
+    } else if (s->tty || sh_builtin(&s->sh, s->line))  /* (a line that is a program's alone asks DOS nothing: it is
                                                    queued behind the program that runs, not held up by it) */
         folder(s);
     if (!s->tty) {                              /* the one line, to its end */
@@ -1067,18 +1087,18 @@ static void release(struct shsess *s)
     kfree(s);
 }
 
-static struct shsess *make(u32 cols, u32 rows, const char *line, void (*kick)(void *), void *arg);
+static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir, void (*kick)(void *), void *arg);
 
-struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void *), void *arg) { return make(cols, rows, 0, kick, arg); }
+struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void *), void *arg) { return make(cols, rows, 0, 0, kick, arg); }
 
-struct shsess *shsess_line(u32 cols, u32 rows, const char *line, void (*kick)(void *), void *arg)
+struct shsess *shsess_app(u32 cols, u32 rows, const char *line, const char *dir, void (*kick)(void *), void *arg)
 {
-    return make(cols, rows, line, kick, arg);
+    return make(cols, rows, line, dir, kick, arg);
 }
 
-struct shsess *shsess_exec(const char *line, void (*kick)(void *), void *arg) { return make(0, 0, line, kick, arg); }
+struct shsess *shsess_exec(const char *line, void (*kick)(void *), void *arg) { return make(0, 0, line, 0, kick, arg); }
 
-static struct shsess *make(u32 cols, u32 rows, const char *line, void (*kick)(void *), void *arg)
+static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir, void (*kick)(void *), void *arg)
 {
     static const struct sh_host host = { 0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free,
         h_is_dir, h_stat, h_open, h_read, h_put, h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space,
@@ -1097,6 +1117,8 @@ static struct shsess *make(u32 cols, u32 rows, const char *line, void (*kick)(vo
     }
     s->host = host;
     s->host.ctx = s;
+    if (dir && strlen(dir) < sizeof s->dir)
+        strcpy(s->dir, dir);
     s->kick = kick;
     s->kick_arg = arg;
     s->tty = cols != 0;

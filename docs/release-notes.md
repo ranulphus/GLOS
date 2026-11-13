@@ -15,8 +15,12 @@ in its `docs/milestones-*.md`.
   of its own.
 - `SSH.EXE`, `SFTP.EXE` and `SSHKEY.EXE` in `C:\GLOS`: the SSH client, its file transfer and its key maker as
   programs, run from any shell: at an SSH login to the PC they hop on to another computer (`ssh pc`, then
-  `ssh other`). The Terminal app still has its own built-in ones until it becomes a terminal of the kernel's
-  shell.
+  `ssh other`). `SSH-KEYGEN` in the Terminal is `SSHKEY` now.
+- **The Terminal app is a terminal alone:** the shell in its window is the kernel's, the same one an SSH login
+  has, with GLOS's own commands (`PS`, `LOG`, `DISK`, `NETWORK` ...) and everything else the shell gains from
+  here on. Full-screen programs over SSH (`vi`, `top`) draw in the same screen as everything else, and what
+  scrolls off is kept (a thousand lines) to scroll back to, choose and copy. Its look changed a little: the
+  prompt is drawn as the rest of the text, the cursor is a block.
 - GLOS's own commands (`PS`, `LOG`, `DISK` ...) no longer need a network card: the thread that runs them starts
   on every PC.
 

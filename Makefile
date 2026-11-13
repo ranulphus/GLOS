@@ -169,7 +169,8 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
 APPS := notepad calc images term files monitor control
-APP_LIBS_term := sdk/shell/shell.c build/sdk/libsshc.a  # (the shell's interpreter; TERM's ssh, sftp and ssh-keygen: M10)
+# (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
+# shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
 define app_host
 build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h include/glos/glos.h tests/host/glosshim.c \
@@ -180,7 +181,7 @@ build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/g
 	  tests/host/glosshim.c $$(GUI_SRCS) $$(LIBGLOS_GFX) kernel/lib/png.c $$(CFG_SRCS) $$(CP_SRCS) $$(APP_HOST_LIBS_$(1)) -lm
 endef
 # The terminal's ssh (M10): the client for the host too, 32-bit as the rest, its crypto without -Werror.
-APP_HOST_LIBS_term := sdk/shell/shell.c build/host/libsshc32.a
+APP_HOST_LIBS_term := tests/host/shimshell.c sdk/shell/shell.c sdk/shell/edit.c
 build/host/libsshc32.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h
 	@mkdir -p build/host/sshc32
 	$(Q)echo "  CC      $@"
@@ -764,15 +765,15 @@ build/apps/FETCH.EXE: apps/fetch/fetch.c $(NET_LIBS) tools/glosmark.py
 	$(Q)echo "  DJCC    apps/fetch"
 	$(Q)$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -Iinclude -Ithird_party/bearssl/inc -o $@ $< $(NET_LIBS)
 	$(Q)python3 tools/glosmark.py $@
-# SSH.EXE, SFTP.EXE and SSHKEY.EXE (apps/ssh; docs/v1/shell.md, S2c): the Terminal's ssh client (apps/term/ssh.c)
-# as programs run at a terminal (API 2.1's GLOS_INIT_TERMINAL), one source built three ways.
+# SSH.EXE, SFTP.EXE and SSHKEY.EXE (apps/ssh; docs/v1/shell.md, S2c): the SSH client as programs run at a
+# terminal (API 2.1's GLOS_INIT_TERMINAL), one source built three ways.
 SSH_EXES := build/apps/SSH.EXE build/apps/SFTP.EXE build/apps/SSHKEY.EXE
 define ssh_exe
-build/apps/$(1).EXE: apps/ssh/cli.c apps/term/ssh.c apps/term/term.h apps/term/vt.h build/sdk/libsshc.a build/sdk/libglos.a tools/glosmark.py
+build/apps/$(1).EXE: apps/ssh/cli.c apps/ssh/ssh.c apps/ssh/cli.h build/sdk/libsshc.a build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/apps
 	$$(Q)echo "  DJCC    apps/ssh ($(1))"
-	$$(Q)$$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -DSSH_PROGRAM -DCLI_WHICH=$(2) -Iinclude -Iapps/term -o $$@ \
-	  apps/ssh/cli.c apps/term/ssh.c build/sdk/libsshc.a build/sdk/libglos.a
+	$$(Q)$$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -DCLI_WHICH=$(2) -Iinclude -o $$@ \
+	  apps/ssh/cli.c apps/ssh/ssh.c build/sdk/libsshc.a build/sdk/libglos.a
 	$$(Q)python3 tools/glosmark.py $$@
 endef
 $(eval $(call ssh_exe,SSH,0))

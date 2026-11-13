@@ -3,6 +3,7 @@
 # a batch file with a variable the shell set, exit codes with ||, a program that takes the screen and gives it back.
 run TERM.EXE -log
 wait "Terminal"
+type c:\n
 type cd \\gui\n
 type c:\\test\\echoargs one two\n
 pause 3000

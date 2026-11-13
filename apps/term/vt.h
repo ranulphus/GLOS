@@ -45,6 +45,8 @@ struct vt {
     char reply[64];                     /* bytes to send back (DSR, DA): the terminal sends and clears them */
     int reply_n;
     long scrolled;                      /* lines that went off the top of the main screen, in all */
+    void (*gone)(void *ctx, const struct vt_cell *row, int cols);  /* ... each of them, as it goes (may be 0) */
+    void *gone_ctx;
 };
 
 void vt_init(struct vt *t, int cols, int rows);

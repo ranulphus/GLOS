@@ -121,8 +121,11 @@ static void scroll_up(struct vt *t, int top, int bottom, int n)
         n = bottom - top + 1;
     if (n <= 0)
         return;
-    if (top == 0 && !t->on_alt)
+    if (top == 0 && !t->on_alt) {
         t->scrolled += n;
+        for (y = 0; y < n && t->gone; y++)      /* (the terminal keeps them to scroll back to) */
+            t->gone(t->gone_ctx, at(t, 0, y), t->cols);
+    }
     for (y = top; y + n <= bottom; y++)
         memcpy(at(t, 0, y), at(t, 0, y + n), (size_t)t->cols * sizeof(struct vt_cell));
     clear_cells(t, 0, bottom - n + 1, t->cols - 1, bottom);
@@ -140,6 +143,24 @@ static void scroll_down(struct vt *t, int top, int bottom, int n)
         memcpy(at(t, 0, y), at(t, 0, y - n), (size_t)t->cols * sizeof(struct vt_cell));
     clear_cells(t, 0, top, t->cols - 1, top + n - 1);
     dirty(t, top, bottom);
+}
+
+/* The whole main screen is about to be wiped (CLS, a program that clears before it draws): its rows, down to
+   the last with anything on it, go where rows that scroll off go, so that the terminal keeps them above. */
+static void keep_screen(struct vt *t)
+{
+    int x, y, last = -1;
+    if (t->on_alt || !t->gone)
+        return;
+    for (y = 0; y < t->rows; y++)
+        for (x = 0; x < t->cols; x++)
+            if (at(t, x, y)->ch != ' ') {
+                last = y;
+                break;
+            }
+    for (y = 0; y <= last; y++)
+        t->gone(t->gone_ctx, at(t, 0, y), t->cols);
+    t->scrolled += last + 1;
 }
 
 static void line_feed(struct vt *t)
@@ -451,9 +472,17 @@ static void csi(struct vt *t, unsigned char f)
         break;
     case 'J':
         switch (arg0(t, 0)) {
-        case 0: clear_cells(t, t->x, t->y, t->cols - 1, t->rows - 1); break;
+        case 0:
+            if (!t->x && !t->y)
+                keep_screen(t);                 /* (from the top left: the whole screen) */
+            clear_cells(t, t->x, t->y, t->cols - 1, t->rows - 1);
+            break;
         case 1: clear_cells(t, 0, 0, t->x, t->y); break;
-        case 2: case 3: clear_cells(t, 0, 0, t->cols - 1, t->rows - 1); break;
+        case 2:
+            keep_screen(t);
+            clear_cells(t, 0, 0, t->cols - 1, t->rows - 1);
+            break;
+        case 3: clear_cells(t, 0, 0, t->cols - 1, t->rows - 1); break;
         }
         t->wrap_next = 0;
         break;

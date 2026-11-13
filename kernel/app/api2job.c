@@ -74,14 +74,17 @@ static void shjob_kick(void *arg)
 static int run_shell(struct app *a, struct trapframe *tf, struct glos_job_run *q, u32 size)
 {
     static char line[512];                      /* (the shell's longest line; no wait while it is used) */
+    char dir[80] = "";
     struct shjob *j;
     u32 i, f;
     int has;
-    if (q->flags || q->dir || q->env || q->profile || q->in || q->out || q->err || q->cols > 500 || q->rows > 200
+    if (q->flags || q->env || q->profile || q->in || q->out || q->err || q->cols > 500 || q->rows > 200
         || !q->cols != !q->rows)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     has = q->command ? a2_text_in(tf, q->command, line, sizeof line) : 0;
     if (has < 0 || (!has && !q->cols))          /* (a login is at a terminal) */
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (q->dir && a2_text_in(tf, q->dir, dir, sizeof dir) <= 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     if (!(vm.bi->flags & BI_F_AGENT))           /* (GLOS /RUN: there is no DOS server for a session) */
         return a2_fail(tf, GLOS_E_REFUSED);
@@ -96,8 +99,7 @@ static int run_shell(struct app *a, struct trapframe *tf, struct glos_job_run *q
     j = &shjobs[i];
     j->told = j->was_done = 0;
     j->t0 = timer_ticks();
-    j->s = !has ? shsess_new(q->cols, q->rows, shjob_kick, j)
-         : q->cols ? shsess_line(q->cols, q->rows, line, shjob_kick, j) : shsess_exec(line, shjob_kick, j);
+    j->s = shsess_app(q->cols, q->rows, has ? line : 0, dir[0] ? dir : 0, shjob_kick, j);
     f = irq_save();                             /* (the desktop's thread looks handles up for its events) */
     q->handle = j->s ? handle_new(&a->v2->h, GLOS_HK_JOB, (void *)(SH_OBJ | i)) : 0;
     irq_restore(f);

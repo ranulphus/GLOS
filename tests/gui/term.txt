@@ -4,6 +4,7 @@
 run TERM.EXE
 wait "Terminal"
 shot start "Terminal"
+type c:\n
 type cd \\term\n
 type dir /w\n
 shot dir "Terminal"

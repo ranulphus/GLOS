@@ -11,9 +11,9 @@ struct shsess;
    terminal. kick(arg) is called, from the session's thread, when there is something to read or it has ended. */
 struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void *arg), void *arg);  /* NULL: no memory, or no DOS
                                                             server */
-struct shsess *shsess_line(u32 cols, u32 rows, const char *line, void (*kick)(void *arg), void *arg);   /* a line
-                                                            run at a terminal (an app's: GLOS_RUN_SHELL), the
-                                                            session's end its */
+struct shsess *shsess_app(u32 cols, u32 rows, const char *line, const char *dir, void (*kick)(void *arg), void *arg);
+                                                         /* an app's (GLOS_RUN_SHELL): a login (line 0) or a line run,
+                                                            with a terminal or none, in a folder (0: DOS's own) */
 struct shsess *shsess_exec(const char *line, void (*kick)(void *arg), void *arg);   /* no terminal: the one line run, the
                                                             session's end its exit code; what it writes as it is
                                                             (no UTF-8 made of it), errors apart (stream 1) */

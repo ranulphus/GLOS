@@ -580,10 +580,10 @@ glos_handle glos_job_run(const char *command, const char *dir, const char *env, 
     (void)command, (void)dir, (void)env, (void)how, (void)flags, (void)profile;
     return 0;
 }
-int glos_job_read(glos_handle job, unsigned stream, void *buf, unsigned room) { (void)job, (void)stream, (void)buf, (void)room; return -1; }
+__attribute__((weak)) int glos_job_read(glos_handle job, unsigned stream, void *buf, unsigned room) { (void)job, (void)stream, (void)buf, (void)room; return -1; }
 int glos_job_keys(glos_handle job, const unsigned short *k, unsigned n) { (void)job, (void)k, (void)n; return -1; }
-int glos_job_signal(glos_handle job, unsigned what) { (void)job, (void)what; return GLOS_E_HANDLE; }
-int glos_job_status(glos_handle job, struct glos_job_status *out) { (void)job, (void)out; return GLOS_E_HANDLE; }
+__attribute__((weak)) int glos_job_signal(glos_handle job, unsigned what) { (void)job, (void)what; return GLOS_E_HANDLE; }
+__attribute__((weak)) int glos_job_status(glos_handle job, struct glos_job_status *out) { (void)job, (void)out; return GLOS_E_HANDLE; }
 int glos_shell(int on) { (void)on; return 0; }
 
 /* The machine's figures (SYS; MONITOR's tests): made up, from the script's clock, the same each run.
