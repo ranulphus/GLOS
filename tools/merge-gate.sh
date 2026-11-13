@@ -70,7 +70,22 @@ commit=$(git rev-parse --verify "${2:-HEAD}^{commit}")
 host=${GATE_HOST:-retro@devserver}
 lanes=${GATE_LANES:-4} vms=${LOOPA_MAX_VMS:-8} niceness=${MGA_NICE:-10}
 tjobs=${JOBS:-$(( vms / lanes > 0 ? vms / lanes : 1 ))}
-[ "$(cd "$rgpu" && pwd -P)" = "$HOME/RetroGPU" ] || { echo "merge-gate: RetroGPU must be ~/RetroGPU for a remote run" >&2; exit 1; }
+# RetroGPU is ~/RetroGPU, or (RETROGPU=) another checkout of it, for a branch's run: its HEAD is sent, and its
+# own built DOS-GL programs (gl/build/exe, gl/build/doom) take ~/RetroGPU's place there. A suite whose programs
+# it has not built is refused here: there it would run the ones ~/RetroGPU built, another branch's. (Fifth
+# Wheel in loopa-games is ~/FifthWheel's build whatever the branch.)
+other=
+[ "$(cd "$rgpu" && pwd -P)" = "$HOME/RetroGPU" ] || other=$(cd "$rgpu" && pwd -P)
+if [ -n "$other" ]; then
+    need() { [ -e "$other/gl/build/$2" ] || { echo "merge-gate: $1 needs $other/gl/build/$2, which is not built" >&2; exit 1; }; }
+    for s in $LOOPA_SUITES; do
+        case $s in
+            loopa-glwin) need $s exe/conform/T01.EXE;;
+            loopa-sdlwin) need $s exe/conform/T01.EXE; need $s exe/SDLGL.EXE;;
+            loopa-games) need $s doom/PRBOOMP.EXE;;
+        esac
+    done
+fi
 rcommit=$(git -C "$rgpu" rev-parse HEAD)
 if [ -z "${2:-}" ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     echo "merge-gate: uncommitted changes are not sent; running $(git log -1 --format=%h "$commit")" >&2
@@ -97,7 +112,10 @@ paths=("$(optdir WATCOM)" "$(optdir DJGPP_PREFIX)" "$box"
        .cache/mga-glide/glos FifthWheel/build/dos/FWHEEL.EXE FifthWheel/build/data/WORLD.PAK
        RetroGPU/gl/build/exe RetroGPU/gl/build/doom)
 present=()
-for p in "${paths[@]}"; do [ -e "$HOME/$p" ] && present+=("$p"); done
+for p in "${paths[@]}"; do
+    case "$p" in RetroGPU/*) [ -z "$other" ] || continue;; esac
+    [ -e "$HOME/$p" ] && present+=("$p")
+done
 echo "merge-gate: syncing ${#present[@]} paths to $host"
 ssh -o BatchMode=yes "$host" '
     for r in glos-gate retrogpu-gate; do [ -d $r.git ] || git init -q --bare $r.git; done
@@ -105,6 +123,14 @@ ssh -o BatchMode=yes "$host" '
     [ -d GLOS-gate/.git ] || { mkdir -p GLOS-gate && git -C GLOS-gate init -q && git -C GLOS-gate remote add origin "$HOME/glos-gate.git"; }'
 ( cd "$HOME" && rsync -aR --delete --exclude __pycache__ --exclude '/.cache/mga-glide/glos/bin-*' \
       --exclude /.cache/mga-glide/glos/trace "${present[@]}" "$host:" )
+if [ -n "$other" ]; then
+    for d in exe doom; do
+        if [ -d "$other/gl/build/$d" ]; then
+            ssh -o BatchMode=yes "$host" "mkdir -p RetroGPU/gl/build"
+            rsync -a --delete --exclude __pycache__ "$other/gl/build/$d" "$host:RetroGPU/gl/build/"
+        fi
+    done
+fi
 git push -q --force "$host:glos-gate.git" "$commit:refs/heads/gate"
 git -C "$rgpu" push -q --force "$host:retrogpu-gate.git" "$rcommit:refs/heads/gate"
 
