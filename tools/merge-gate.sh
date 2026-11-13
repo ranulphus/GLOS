@@ -19,7 +19,8 @@
 # There, GLOS is ~/GLOS-gate and RetroGPU is ~/RetroGPU (never ~/GLOS: RetroGPU's regress-remote.sh keeps
 # ~/GLOS/include in step with this machine's, under any checkout there).
 #
-# Environment: ONLY="loopa-ssh loopa-api" (those suites alone), JOBS (a suite's emulators at once, 3);
+# Environment: ONLY="loopa-ssh loopa-api" (those suites alone), JOBS (a suite's emulators at once: 3 here;
+# there, as many as the lanes leave each other, so that none waits for room with its test's clock running);
 # remote: GATE_HOST (retro@devserver), GATE_LANES (suites at once, 4), LOOPA_MAX_VMS (8), MGA_NICE (10).
 set -euo pipefail
 # (The whole of it is read before any of it runs, in these braces: a script changed on disk while it waits,
@@ -68,6 +69,7 @@ fi
 commit=$(git rev-parse --verify "${2:-HEAD}^{commit}")
 host=${GATE_HOST:-retro@devserver}
 lanes=${GATE_LANES:-4} vms=${LOOPA_MAX_VMS:-8} niceness=${MGA_NICE:-10}
+tjobs=${JOBS:-$(( vms / lanes > 0 ? vms / lanes : 1 ))}
 [ "$(cd "$rgpu" && pwd -P)" = "$HOME/RetroGPU" ] || { echo "merge-gate: RetroGPU must be ~/RetroGPU for a remote run" >&2; exit 1; }
 rcommit=$(git -C "$rgpu" rev-parse HEAD)
 if [ -z "${2:-}" ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
@@ -108,7 +110,7 @@ git -C "$rgpu" push -q --force "$host:retrogpu-gate.git" "$rcommit:refs/heads/ga
 
 # The run there: built in the dev container, then the Loop A suites in lanes; out/gate/done holds its result.
 echo "merge-gate: $(git log -1 --format='%h %s' "$commit" | cut -c1-70) with RetroGPU $(git -C "$rgpu" log -1 --format=%h)" \
-     "on $host (lanes $lanes, emulators $vms, nice $niceness)"
+     "on $host (lanes $lanes, $tjobs emulators a suite, $vms in all, nice $niceness)"
 ssh -o BatchMode=yes "$host" "set -e
     git -C RetroGPU fetch -q origin gate && git -C RetroGPU checkout -q -f --detach $rcommit
     cd GLOS-gate
@@ -117,7 +119,7 @@ ssh -o BatchMode=yes "$host" "set -e
     mkdir -p \$HOME/.cache/mga-glide/86box-glosgate/bin
     ln -sfn ../../86box/bin/86Box-$key \$HOME/.cache/mga-glide/86box-glosgate/bin/86Box
     ln -sfn ../86box/roms \$HOME/.cache/mga-glide/86box-glosgate/roms
-    MGA_NICE=$niceness LOOPA_MAX_VMS=$vms GATE_LANES=$lanes JOBS=$jobs HOST_SUITES='$(echo $HOST_SUITES)' \
+    MGA_NICE=$niceness LOOPA_MAX_VMS=$vms GATE_LANES=$lanes JOBS=$tjobs HOST_SUITES='$(echo $HOST_SUITES)' \
         LOOPA_SUITES='$(echo $there)' \
         setsid nohup bash tools/merge-gate-there.sh > out/gate-run.log 2>&1 < /dev/null &"
 dest=$root/out/gate-remote/${host#*@}-$(date +%Y%m%d-%H%M%S)

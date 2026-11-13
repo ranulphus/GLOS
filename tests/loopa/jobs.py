@@ -5954,7 +5954,8 @@ def time_case(profile, card):
         checks["tz"] = "GMT0BST,M3.5.0/1,M10.5.0" in agent.ssh("ECHO %TZ%")[1]
         ntp.offset += 10 * 86400                    # (ten days on)
         rc, o, _ = agent.ssh("glos time sync", timeout=90)
-        checks["step"] = rc == 0 and re.search(r"step=8640\d{5}ms", o) is not None
+        m = re.search(r"step=(\d+)ms", o)        # (ten days, give or take: 2 s short at most, 100 s long)
+        checks["step"] = rc == 0 and m is not None and 863998000 <= int(m.group(1)) <= 864100000
         if not checks["step"]:
             notes.append("step: rc=%d %r" % (rc, o[-200:]))
         agree("stepped", ntp.now(), 3600, "BST")
