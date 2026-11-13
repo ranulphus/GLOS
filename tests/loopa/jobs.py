@@ -1882,7 +1882,7 @@ def shell_case(profile, card):
         t.send("cd test\r")
         checks["cd"] = t.expect("C:\\TEST>")
         t.send("vex\x7fr\r")
-        checks["edited"] = t.expect("GLOS shell 1.0 (GLOS API 2.0)\n")
+        checks["edited"] = t.expect("GLOS shell 1.0 (GLOS API 2.1)\n")
         t.send("dir /w\r")
         checks["dir"] = t.expect(" Directory of C:\\TEST\n") and t.expect("GLOS.EXE") and t.expect(" file(s)") \
             and t.expect("C:\\TEST>")
@@ -5029,7 +5029,7 @@ def api_job_case(profile, vcard, card):
         info += " timeout"
     text = agent.wait()
     cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", text)
-    checks["cases"] = len(cases) >= 19 and all(k == "1" for c, k, w in cases)
+    checks["cases"] = len(cases) >= 24 and all(k == "1" for c, k, w in cases)    # (5 of them 2.1's shell as a job)
     if not checks["cases"]:
         info += " cases=%d failed-cases=%s" % (len(cases), ";".join(c + w.rstrip() for c, k, w in cases if k != "1"))
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text

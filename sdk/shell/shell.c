@@ -1099,7 +1099,7 @@ static int run_one(struct sh *s, const char *cmd)
     } else if (same(argv[0], "CLS")) {
         r = s->h->clear(s->h->ctx);
     } else if (same(argv[0], "VER")) {
-        say(s, "GLOS shell 1.0 (GLOS API 2.0)\r\n");
+        say(s, "GLOS shell 1.0 (GLOS API 2.1)\r\n");
     } else if (same(argv[0], "EXIT")) {
         s->h->quit(s->h->ctx, 0);
     } else if (same(argv[0], "HISTORY")) {

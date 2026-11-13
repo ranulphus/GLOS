@@ -205,7 +205,7 @@ else of that is built here.
 
 | | What | Shows it works |
 |---|---|---|
-| 1 | `GLOS_RUN_SHELL`, `GLOS_JOB_SIZE`; APITEST's cases; the shim's session | Loop A's api suite; host tests |
+| 1 | `GLOS_RUN_SHELL`, `GLOS_JOB_SIZE`; APITEST's cases; the shim's session (the kernel's side and the library's done, 2026-11-13: `kernel/app/api2job.c`, `glos_job_shell()`, `glos_job_size()`, API 2.1, five cases in APITEST's job mode. The kernel's command thread now runs on every PC, with or without a network, since every session asks GLOS's own commands of it. The shim's session comes with step 2) | Loop A's api suite; host tests |
 | 2 | `vt.c`'s scroll-back and selection; the Terminal on a session | The Terminal's scripts, host and Loop A |
 | 3 | `GLOS_SYS_TERMINAL`; SSH.EXE, SFTP.EXE, SSHKEY.EXE | `loopa-sshc`, from the Terminal and from an SSH login |
 

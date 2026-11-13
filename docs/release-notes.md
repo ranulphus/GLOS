@@ -4,6 +4,15 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## API 2.1: GLOS's shell as a job (2026-11-13)
+
+- An app can open a session of GLOS's shell as it runs a program: `GLOS_JOB_RUN` with `how = GLOS_RUN_SHELL` and
+  a terminal's size (`glos_job_shell()`), the terminal's bytes by READ and WRITE, its size by the new
+  `GLOS_JOB_SIZE` (`glos_job_size()`). The first step of making the Terminal app a terminal of the kernel's
+  shell (docs/v1/shell.md, S2c). `VER` says API 2.1; programs built for 2.0 run unchanged.
+- GLOS's own commands (`PS`, `LOG`, `DISK` ...) no longer need a network card: the thread that runs them starts
+  on every PC.
+
 ## The cable link: the network over a serial cable (2026-11-13)
 
 - `[net] cable = client COM1` in GLOS.CFG (or `NETWORK CLIENT COM1` while GLOS runs) makes a serial port a

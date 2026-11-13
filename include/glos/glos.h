@@ -180,6 +180,11 @@ int glos_job_eof(glos_handle job);                                              
 int glos_job_keys(glos_handle job, const unsigned short *keys, unsigned count);    /* a window's job: those taken */
 int glos_job_signal(glos_handle job, unsigned what);                               /* GLOS_SIGNAL_ */
 int glos_job_status(glos_handle job, struct glos_job_status *out);
+/* 2.1: GLOS's shell as a job (GLOS_RUN_SHELL): a login at a terminal of cols by rows (line 0), or a line run
+   (with a terminal, or with none: 0 by 0). Its terminal's bytes are glos_job_read()'s, what is typed there
+   glos_job_write()'s. 0 if refused (glos_error()). */
+glos_handle glos_job_shell(const char *line, unsigned cols, unsigned rows);
+int glos_job_size(glos_handle job, unsigned cols, unsigned rows);                  /* its terminal's size now */
 
 /* ---- sound (AUDIO) */
 /* A stream out: rate samples a second, 1 or 2 channels of signed 16 bits, a ring of bytes (a power of two, 4096

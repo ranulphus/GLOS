@@ -59,7 +59,8 @@ struct shsess {
     struct ed ed;
     struct sh_host host;
     struct waitq wq;                    /* its thread waits here: for keys, for room to write, for its end */
-    void (*kick)(void);
+    void (*kick)(void *arg);
+    void *kick_arg;
     u8 in[IN_RING], out[OUT_RING], err[ERR_RING];
     volatile u32 ih, it, oh, ot, eh, et;
     volatile u32 cols, rows;
@@ -120,7 +121,7 @@ static void stream_bytes(struct shsess *s, int stream, const u8 *d, u32 n)
         *tail += k;
         irq_restore(f);
         d += k, n -= k;
-        s->kick();
+        s->kick(s->kick_arg);
     }
 }
 
@@ -811,7 +812,7 @@ static void ext_turn(struct shsess *s)
         s->ext_on = 0;
         sh_ended(&s->sh, s->ext_code);
     } else {
-        s->kick();                              /* (room again for what the server has still to hand over) */
+        s->kick(s->kick_arg);                              /* (room again for what the server has still to hand over) */
     }
 }
 
@@ -911,7 +912,8 @@ static void session(void *arg)
     struct shsess *s = arg;
     const char *env[SH_VARS + 1];
     char extra[3][72];
-    void (*kick)(void) = s->kick;
+    void (*kick)(void *) = s->kick;
+    void *kick_arg = s->kick_arg;
     u32 n = 0, at = (u32)vm_rd16(((u32)vm.loader_psp << 4) + 0x2C) << 4;
     int c;
     while (at && n < SH_VARS && vm_rd8(at)) {   /* DOS's environment, as GLOS.EXE was given it */
@@ -1009,7 +1011,7 @@ static void session(void *arg)
     if (s->tty)
         kprintf("GLOS-SHELL end code=%d%s\n", s->code, s->closing ? " terminal=gone" : "");
     s->ended = 1;                               /* (its memory is its terminal's side's from here) */
-    kick();
+    kick(kick_arg);
     thread_exit();
 }
 
@@ -1022,13 +1024,18 @@ static void release(struct shsess *s)
     kfree(s);
 }
 
-static struct shsess *make(u32 cols, u32 rows, const char *line, void (*kick)(void));
+static struct shsess *make(u32 cols, u32 rows, const char *line, void (*kick)(void *), void *arg);
 
-struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void)) { return make(cols, rows, 0, kick); }
+struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void *), void *arg) { return make(cols, rows, 0, kick, arg); }
 
-struct shsess *shsess_exec(const char *line, void (*kick)(void)) { return make(0, 0, line, kick); }
+struct shsess *shsess_line(u32 cols, u32 rows, const char *line, void (*kick)(void *), void *arg)
+{
+    return make(cols, rows, line, kick, arg);
+}
 
-static struct shsess *make(u32 cols, u32 rows, const char *line, void (*kick)(void))
+struct shsess *shsess_exec(const char *line, void (*kick)(void *), void *arg) { return make(0, 0, line, kick, arg); }
+
+static struct shsess *make(u32 cols, u32 rows, const char *line, void (*kick)(void *), void *arg)
 {
     static const struct sh_host host = { 0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free,
         h_is_dir, h_stat, h_open, h_read, h_put, h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space,
@@ -1048,6 +1055,7 @@ static struct shsess *make(u32 cols, u32 rows, const char *line, void (*kick)(vo
     s->host = host;
     s->host.ctx = s;
     s->kick = kick;
+    s->kick_arg = arg;
     s->tty = cols != 0;
     s->cols = cols ? cols : 80, s->rows = rows ? rows : 24;
     s->page = kcfg_region()->codepage ? kcfg_region()->codepage : 437;

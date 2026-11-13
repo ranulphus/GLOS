@@ -125,12 +125,12 @@ static void before(void)
     }
     memset(&v, 0, sizeof v);
     v.size = sizeof v;
-    check("version", glos_version(&v) == 0 && v.major == 2 && v.minor == 0 && v.build[0]
+    check("version", glos_version(&v) == 0 && v.major == 2 && v.minor == 1 && v.build[0]
           && v.functions[GLOS_AREA_CORE][0] == 0x1FFFu && GLOS_HAS(&v, GLOS_CORE_RANDOM)
           && GLOS_HAS(&v, GLOS_WIN_CREATE) && GLOS_HAS(&v, GLOS_DRAW_SCREEN) && GLOS_HAS(&v, GLOS_WIN_EMBED)
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_WIN, 7))
           && GLOS_HAS(&v, GLOS_SHELL_SCHEDULE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SHELL, 10))
-          && GLOS_HAS(&v, GLOS_JOB_STATUS) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_JOB, 5))
+          && GLOS_HAS(&v, GLOS_JOB_STATUS) && GLOS_HAS(&v, GLOS_JOB_SIZE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_JOB, 6))
           && GLOS_HAS(&v, GLOS_SYS_PROGRAMS) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SYS, 4))
           && GLOS_HAS(&v, GLOS_AUDIO_IN) && GLOS_HAS(&v, GLOS_AUDIO_MIDI_OUT) && GLOS_HAS(&v, GLOS_AUDIO_DEVICES)
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 7))
@@ -141,7 +141,7 @@ static void before(void)
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
     small.v.size = 12;                                  /* (size, major, minor: an older program's) */
-    check("version-small", glos_version(&small.v) == 0 && small.v.major == 2 && small.v.minor == 0
+    check("version-small", glos_version(&small.v) == 0 && small.v.major == 2 && small.v.minor == 1
           && small.v.machine == 0xABABABABu && small.guard == 0xABABABABu, "machine=%x", small.v.machine);
     t = glos_ticks();
     check("ticks-any", t > 0, "ms=%u", t);
@@ -2051,6 +2051,60 @@ static int job_mode(void)
     check("job-window", ok && r == 3 && e && strstr(out, "<a><b>") && st.code == 2, "j=%x err=%d r=%d e=%d out=%s code=%u", j,
           glos_error(), r, e, out, st.code);
     glos_close(j);
+
+    /* 2.1: GLOS's shell as a job (GLOS_RUN_SHELL; docs/v1/shell.md, S2c). A line run with no terminal: what it
+       writes as it is, errors apart, the session's end its exit code. A login at a terminal: the prompt, a
+       command typed, the terminal's size changed, EXIT. A session ended by SIGNAL. What is refused. */
+    out[0] = err[0] = 0;
+    job_last = 99;
+    j = glos_job_shell("echo from the shell&& dir C:\\NOSUCH.DIR", 0, 0);
+    r = job_take(j, out, sizeof out, err, sizeof err, 0, 60000, &st);
+    no_cr(out), no_cr(err);
+    check("shell-line", j && r && !strncmp(out, "from the shell\n", 15) && strstr(err, "File not found") && st.state == GLOS_JS_DONE
+          && st.code == 1, "j=%x err=%d r=%d state=%u code=%u out=%s err=%s", j, glos_error(), r, st.state, st.code, out, err);
+    glos_close(j);
+    out[0] = 0;
+    j = glos_job_shell(0, 80, 25);
+    r = job_take(j, out, sizeof out, 0, 0, ">", 60000, &st);
+    ok = j && r && st.state == GLOS_JS_RUNNING;
+    n = glos_job_write(j, "ver\r", 4);
+    r = job_take(j, out, sizeof out, 0, 0, "GLOS shell 1.0 (GLOS API 2.1)", 60000, &st);
+    e = glos_job_size(j, 100, 30);
+    check("shell-login", ok && n == 4 && r && e == 0, "j=%x err=%d ok=%d n=%d r=%d e=%d out=%.80s", j, glos_error(), ok, n, r, e, out);
+    job_last = 99;
+    n = glos_job_write(j, "exit\r", 5);
+    r = job_take(j, out, sizeof out, 0, 0, 0, 60000, &st);
+    for (t0 = glos_ticks(); job_last != GLOS_JS_DONE && glos_ticks() - t0 < 3000;)     /* (its end is told too) */
+        if (glos_event(ev, sizeof ev, 100, 1u << GLOS_AREA_JOB) > 0 && je->ev.kind == GLOS_EV_JOB && je->ev.handle == j)
+            job_last = je->state;
+    check("shell-exit", n == 5 && r && st.state == GLOS_JS_DONE && st.code == 0 && job_last == GLOS_JS_DONE,
+          "n=%d r=%d state=%u code=%u last=%u", n, r, st.state, st.code, job_last);
+    glos_close(j);
+    out[0] = 0;
+    j = glos_job_shell(0, 80, 25);
+    r = job_take(j, out, sizeof out, 0, 0, ">", 60000, &st);
+    e = glos_job_signal(j, GLOS_SIGNAL_END);
+    ok = glos_job_status(j, &st) == 0 && st.state == GLOS_JS_DONE && st.code == 255;
+    check("shell-ended", j && r && e == 0 && ok && glos_job_size(j, 80, 25) == GLOS_E_REFUSED, "j=%x r=%d e=%d state=%u code=%u",
+          j, r, e, st.state, st.code);
+    glos_close(j);
+    out[0] = 0;
+    j = glos_job_run(TOOL("args x"), 0, 0, GLOS_RUN_HIDDEN, 0, 0);
+    e = glos_job_size(j, 80, 25);                       /* (a program's job has no terminal) */
+    r = job_take(j, out, sizeof out, 0, 0, 0, 60000, &st);
+    glos_close(j);
+    ok = j && r && e == GLOS_E_REFUSED;
+    {
+        struct glos_job_run q;
+        memset(&q, 0, sizeof q);
+        q.how = GLOS_RUN_SHELL;                         /* a login with no terminal; a terminal with one side */
+        ok = ok && glos_job_start(&q) == 0 && glos_error() == GLOS_E_ARGUMENT;
+        q.cols = 80;
+        ok = ok && glos_job_start(&q) == 0 && glos_error() == GLOS_E_ARGUMENT;
+        q.rows = 25, q.flags = GLOS_RUNF_STDIN;         /* (a session's input is WRITE's as it is: no flags) */
+        ok = ok && glos_job_start(&q) == 0 && glos_error() == GLOS_E_ARGUMENT;
+    }
+    check("shell-refused", ok, "j=%x r=%d e=%d err=%d", j, r, e, glos_error());
 
     snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
     com1(line);

@@ -54,7 +54,7 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 0
+#define GLOS_MINOR 1
 
 #define GLOS_FN(area, n) ((2u << 16) | ((unsigned)(area) << 8) | (unsigned)(n))
 #define GLOS_FN_MAJOR(fn) ((unsigned)(fn) >> 16)
@@ -717,6 +717,7 @@ struct glos_ev_wheel {
 #define GLOS_JOB_WRITE  GLOS_FN(GLOS_AREA_JOB, 2)       /* struct glos_job_io: its input */
 #define GLOS_JOB_SIGNAL GLOS_FN(GLOS_AREA_JOB, 3)       /* struct glos_job_signal: Ctrl+C, Ctrl+Break, or its end */
 #define GLOS_JOB_STATUS GLOS_FN(GLOS_AREA_JOB, 4)       /* struct glos_job_status: how it is doing */
+#define GLOS_JOB_SIZE   GLOS_FN(GLOS_AREA_JOB, 5)       /* 2.1, struct glos_job_size: a shell's terminal has another size */
 
 struct glos_job_run {
     unsigned size;
@@ -736,6 +737,7 @@ struct glos_job_run {
                                    not kept for READ. A file that can't be opened: the job ends, code 126 */
     glos_handle handle;         /* -> the job (no handle with GLOS_RUNF_DETACH) */
     unsigned id;                /* -> its number (SYS's) */
+    unsigned cols, rows;        /* 2.1, GLOS_RUN_SHELL: the terminal's size (0 by 0: no terminal) */
 };
 #define GLOS_RUN_HIDDEN    0    /* beside the desktop: its output kept for READ. If it wants the screen (a mode set,
                                    the text or graphics screen touched) it has it, full-screen, to its end */
@@ -744,6 +746,12 @@ struct glos_job_run {
 #define GLOS_RUN_FULL      2    /* as WINDOW, full-screen from the start */
 #define GLOS_RUN_EXCLUSIVE 3    /* an exclusive session: the machine is its alone until it ends */
 #define GLOS_RUN_APP       4    /* it is made an app without asking (a program that never calls INIT) */
+#define GLOS_RUN_SHELL     5    /* 2.1: GLOS's shell, not a program (docs/v1/shell.md): a session with a terminal
+                                   of `cols` by `rows`, whose bytes are READ (UTF-8, with an xterm's sequences)
+                                   and whose keys are WRITE's GLOS_JOB_IN (as a terminal sends them); `command`
+                                   empty: a login, to EXIT; else that line run, the session's end its. With no
+                                   terminal (0 by 0) a line's output comes as it is, errors apart. `dir`, `env`,
+                                   `profile`, the files and the flags are not used (0) */
 #define GLOS_RUNF_DETACH 1      /* nothing of it is the app's: no handle, no output kept, it runs on when the app ends */
 #define GLOS_RUNF_STDIN  2      /* its standard input is the app's WRITEs (else the keyboard's, when it has it) */
 #define GLOS_RUNF_DIRECT 4      /* direct mode (the PC's ports are its own: PRD D20) */
@@ -780,6 +788,12 @@ struct glos_job_signal {
 #define GLOS_SIGNAL_INT   1     /* Ctrl+C, as from the keyboard */
 #define GLOS_SIGNAL_BREAK 2     /* Ctrl+Break */
 #define GLOS_SIGNAL_END   3     /* it is ended, whatever it is doing (its exit code is then 255) */
+
+struct glos_job_size {
+    unsigned size;
+    glos_handle handle;         /* a GLOS_RUN_SHELL job */
+    unsigned cols, rows;
+};
 
 struct glos_job_status {
     unsigned size;

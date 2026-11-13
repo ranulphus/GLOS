@@ -296,6 +296,7 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 | WRITE | Input to its stdin pipe (new) |
 | SIGNAL | Ctrl+C, Ctrl+Break, or end it (new: as a call, beside the kill call) |
 | STATUS | Running or ended, its exit code, its time |
+| SIZE (2.1) | A shell job's terminal has another size |
 
 - **RUN's details:**
   - its working folder and environment;
@@ -304,6 +305,13 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   - long command lines: past DOS's 126 characters, passed in DJGPP's way (the `CMDLINE` variable) and as a response
     file for programs that take one (the IDE's compilers).
 - **Events:** output available; ended.
+- **2.1: GLOS's shell as a job** (`how = GLOS_RUN_SHELL`; docs/v1/shell.md, step S2c; built 2026-11-13). The job
+  is a session of GLOS's shell, not a program: `cols` and `rows` (two fields at the structure's end) are its
+  terminal's size; `command` empty is a login, to `EXIT`, else that line is run and the session's end is its.
+  READ gives the terminal's bytes (UTF-8, with an xterm's sequences), WRITE's input what is typed there, SIZE a
+  change of the terminal's size; STATUS, the event and CLOSE as for a program; SIGNAL's INT and BREAK are Ctrl+C
+  typed, END the session's end (code 255). With no terminal (0 by 0) a line's output comes as it is, errors on
+  the second stream. `GLOS_MINOR` is 1; a program built for 2.0 sees nothing change.
 - **Ownership:** a job belongs to the app that ran it. READ, WRITE and SIGNAL are for its owner. Task Manager's
   "end" uses SYS's kill, which is for any program.
 

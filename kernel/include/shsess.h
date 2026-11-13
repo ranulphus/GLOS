@@ -8,9 +8,13 @@
 struct shsess;
 
 /* For the terminal's side (the ssh thread; later the CONSOLE call and the PC's own screen). cols 0: no
-   terminal. kick is called, from the session's thread, when there is something to read or it has ended. */
-struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void));      /* NULL: no memory, or no DOS server */
-struct shsess *shsess_exec(const char *line, void (*kick)(void));       /* no terminal: the one line run, the
+   terminal. kick(arg) is called, from the session's thread, when there is something to read or it has ended. */
+struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void *arg), void *arg);  /* NULL: no memory, or no DOS
+                                                            server */
+struct shsess *shsess_line(u32 cols, u32 rows, const char *line, void (*kick)(void *arg), void *arg);   /* a line
+                                                            run at a terminal (an app's: GLOS_RUN_SHELL), the
+                                                            session's end its */
+struct shsess *shsess_exec(const char *line, void (*kick)(void *arg), void *arg);   /* no terminal: the one line run, the
                                                             session's end its exit code; what it writes as it is
                                                             (no UTF-8 made of it), errors apart (stream 1) */
 u32 shsess_read(struct shsess *s, int stream, u8 *buf, u32 room);       /* what it has written (a terminal's: UTF-8,

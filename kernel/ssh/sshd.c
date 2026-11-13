@@ -121,6 +121,8 @@ static void wake_ssh(void)
 
 void sshd_wake(void) { wake_ssh(); }
 
+static void wake_ssh_arg(void *arg) { (void)arg; wake_ssh(); }
+
 static void stream_at(u32 tick);
 
 void sshd_turn_at(u32 tick) { stream_at(tick); }
@@ -1590,7 +1592,7 @@ static int k_shell(struct ssh_chan *ch, uint32_t cols, uint32_t rows)
     u32 i;
     for (i = 0; i < NSHELL; i++)
         if (!shells[i].ch) {
-            if (!(shells[i].s = shsess_new(cols, rows, wake_ssh)))
+            if (!(shells[i].s = shsess_new(cols, rows, wake_ssh_arg, 0)))
                 break;
             shells[i].ch = ch;
             shells[i].login = 1;
@@ -1606,7 +1608,7 @@ static int shell_line(struct ssh_chan *ch, const char *line)
     u32 i;
     for (i = 0; i < NSHELL; i++)
         if (!shells[i].ch) {
-            if (!(shells[i].s = shsess_exec(line, wake_ssh)))
+            if (!(shells[i].s = shsess_exec(line, wake_ssh_arg, 0)))
                 break;
             shells[i].ch = ch;
             shells[i].login = 0;
@@ -1877,12 +1879,12 @@ void sshd_start(const struct bootinfo *bi)
     agent_mode = (bi->flags & BI_F_AGENT) != 0;
     agent_init(wake_ssh);
     dos_init(wake_ssh);
-    if (!bi->hostkey_len || ssh_parse_privkey(bi->hostkey, bi->hostkey_len, srv.host_sk, srv.host_pk) != 0) {
+    if (!bi->hostkey_len || ssh_parse_privkey(bi->hostkey, bi->hostkey_len, srv.host_sk, srv.host_pk) != 0)
         kprintf("GLOS-SSH off reason=%s\n", bi->hostkey_len ? "bad-hostkey" : "no-hostkey");
-        return;
-    }
-    ssh_is_on = 1;
-    for (i = 0; i < NCONN; i++) {
+    else
+        ssh_is_on = 1;                          /* (connections are taken; the thread runs either way: the sessions
+                                                   of apps and of the PC's own screen ask GLOS's own commands of it) */
+    for (i = 0; i < NCONN && ssh_is_on; i++) {
         conns[i].rx.buf = kmalloc(RING);
         conns[i].tx.buf = kmalloc(RING);
         if (!conns[i].rx.buf || !conns[i].tx.buf)
