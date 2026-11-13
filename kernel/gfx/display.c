@@ -511,7 +511,9 @@ void display_session(int begin)
 }
 
 /* A console job's program runs in its window (M9; vm/session.c): the VGA's memory not there, its ports
-   trapped, so that a touch of either makes it full-screen (display_vga_fault, display_vga_port). */
+   trapped, so that a touch of either makes it full-screen (display_vga_fault, display_vga_port). With no
+   desktop (a login's program) the ports alone: the memory is the PC's text screen, which GLOS reads and writes
+   itself (glos shot, the idle screen's notice), so a program that only writes there is not seen to. */
 void display_console_trap(int on)
 {
     u32 p;
@@ -570,14 +572,18 @@ void display_leave(void)
 }
 
 /* A program's INT 10h (its registers at eax to edx) while the desktop has
-   the screen: 1 if it is answered here, and must not reach the BIOS. app:
+   the screen, or a console job's wherever it runs: 1 if it is answered here, and must not reach the BIOS. app:
    the caller is a GLOS app; otherwise it is a program still starting, which
    a mode set shows to be a session: the screen is its from there. */
 int display_quiet(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, int app)
 {
     u32 ax = *eax & 0xFFFF, ah = ax >> 8;
-    if (!d.on || d.held)
-        return 0;
+    if (d.on ? d.held : app || !session_console())
+        return 0;                               /* (with no desktop, a console job's alone: a login's program, whose
+                                                   console is its terminal and not the PC's screen. MS-DOS 7.1's
+                                                   console driver writes with the teletype, and at a login on
+                                                   bench-g400, which has no desktop, nothing a program wrote
+                                                   reached the terminal: 2026-11-13) */
     if (!app && session_console()) {            /* a console job's program (M9): what a line-by-line one needs */
         switch (ah) {
         case 0x0E:                              /* the teletype: into its window */

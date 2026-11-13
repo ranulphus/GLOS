@@ -1860,7 +1860,9 @@ def shell_case(profile, card):
     edited (Backspace), kept (Up) and completed (Tab); the shell's own commands on DOS's files, UTF-8 at the
     terminal and the PC's code page in the file; a program's output and its exit code; a line typed to a program
     that reads one; a line with its input from a file, and a batch file, through the DOS's COMMAND.COM; Ctrl+C to
-    a program;
+    a program; what a program writes with the BIOS's teletype (by INT 10h, and by a far call as MS-DOS 7.1's
+    console driver), at the terminal and not on the PC's screen; a program that sets a mode, which the terminal
+    is told of;
     GLOS's own commands by their names as the shell's (PS, CLOCK), by GLOS's old ones (GLOS VER), a failing one's
     exit code, a long answer whole (LOG) with a line typed ahead of its end; EXIT, and the connection's end with
     code 0. A GLOS app started here goes on beside the shell and still writes to this terminal; started by a line
@@ -1869,7 +1871,7 @@ def shell_case(profile, card):
     tag = "shell-%s-%s" % (profile, card)
     agent = Agent("ssh-" + tag, profile, card, [
         "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE", "--file", "build/ow/dos/CONIN.EXE=/TEST/CONIN.EXE",
-        "--file", "build/dj/APPTEST.EXE=/TEST/APPTEST.EXE",
+        "--file", "build/dj/APPTEST.EXE=/TEST/APPTEST.EXE", "--file", "build/ow/dos/SCRTEXT.EXE=/TEST/SCRTEXT.EXE",
         "--cmd", "SERSAY HX-START shell", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     checks = {"listen": agent.listening()}
     try:
@@ -1927,6 +1929,18 @@ def shell_case(profile, card):
         t.expect("conin line\n")
         t.send("\x03")
         checks["break"] = t.expect("^C") and t.expect("C:\\TEST>")
+        # What a program writes with the BIOS's teletype is its terminal's too, with no desktop as with one: by
+        # INT 10h, and by a far call through the vector as MS-DOS 7.1's console driver does (at a login on
+        # bench-g400 nothing a program wrote arrived: 2026-11-13). A program that sets a mode has the PC's own
+        # screen from there, and the terminal is told.
+        t.send("conin tty teletyped\r")
+        checks["teletype"] = t.expect("\nteletyped\n") and t.expect("C:\\TEST>")
+        t.send("conin far farcalled\r")
+        checks["teletype-far"] = t.expect("\nfarcalled\n") and t.expect("C:\\TEST>")
+        rc, out, _ = agent.ssh("C:\\TEST\\SCRTEXT.EXE")
+        checks["not-on-screen"] = rc == 0 and "SCR-END" in out and "teletyped" not in out and "farcalled" not in out
+        t.send("conin mode\r")
+        checks["full"] = t.expect("has the PC's own screen") and t.expect("C:\\TEST>")
         # GLOS's own commands, the shell's too: by their names here, and by GLOS's old ones; one that fails says so
         # in the exit code; and what is typed while one runs waits for it.
         t.send("ps\r")

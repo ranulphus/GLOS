@@ -473,7 +473,8 @@ void session_exec(const struct trapframe *tf)
     hint = (psp == vm.loader_psp && job.app) || marked(tf);
     ses.t0 = timer_ticks() | 1;
     ses.hint = (u8)hint;
-    ses.console = (u8)(psp == vm.loader_psp && job.console && !hint && display_desktop_bpp());
+    ses.console = (u8)(psp == vm.loader_psp && job.console && !hint);   /* (with no desktop too: a login's program
+                                                   at a PC that has none, whose terminal is its console) */
     ses.full = 0;
     ses.active = 1;
     ses.parent = psp;

@@ -5,6 +5,8 @@
  *   CONIN bios N        N keys through INT 16h 00h: "BIOS <ascii codes>"
  *   CONIN char N        N characters through INT 21h 08h: "CHAR <text>"
  *   CONIN tty TEXT      TEXT through the BIOS's teletype (INT 10h 0Eh): "TTY TEXT"
+ *   CONIN far TEXT      TEXT through the teletype by PUSHF and a far call through the INT 10h vector, as
+ *                       MS-DOS 7.1's console driver writes (no INT for a trap to see): "TEXT"
  *   CONIN cls           INT 10h 06h over the whole screen, then "CLS done"
  *   CONIN b800          "GLOS" written into the text screen at B800:0000, then "B800 done"
  *   CONIN mode          INT 10h 0003h (a mode set), then "MODE done"
@@ -19,6 +21,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static void far_tty(unsigned char c)
+{
+    void (__interrupt __far *bios)(void) = _dos_getvect(0x10);
+    _asm {
+        mov ah, 0Eh
+        mov al, c
+        mov bx, 7
+        pushf
+        call dword ptr bios
+    }
+}
 
 static void say(const char *s)
 {
@@ -73,6 +87,11 @@ int main(int argc, char **argv)
             r.x.bx = 0x0007;
             int86(0x10, &r, &r);
         }
+        say("\r\n");
+    } else if (!strcmp(argv[1], "far")) {
+        const char *t = argc > 2 ? argv[2] : "";
+        for (; *t; t++)
+            far_tty((unsigned char)*t);
         say("\r\n");
     } else if (!strcmp(argv[1], "cls")) {
         r.x.ax = 0x0600;

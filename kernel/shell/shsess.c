@@ -74,6 +74,7 @@ struct shsess {
     u8 job_on;
     volatile u8 job_evt;                /* ... it has written, or moved on */
     u8 job_esc;                         /* a key's sequence under way, typed to it */
+    u8 job_full;                        /* it has the PC's own screen: its terminal has been told */
     u32 beside[BESIDE];                 /* apps it started, running beside it: what they write is still shown */
     u8 nbeside;
     char held[256];                     /* ... a line at a time: the part of one that has come so far */
@@ -501,7 +502,7 @@ static int h_run(void *ctx, const char *command, const char *prog, const char *n
         return 0;
     s->job = seq;
     s->job_on = 1;
-    s->job_esc = 0;
+    s->job_esc = s->job_full = 0;
     return 1;
 }
 
@@ -520,6 +521,12 @@ static void job_turn(struct shsess *s)
             else
                 stream_bytes(s, stream, buf, (u32)n);
         }
+    if (!gone && st == GLOS_JS_FULL && s->tty && !s->job_full) {      /* (a mode set, its drawing: nothing more of
+                                                   it comes here, and the keys typed here are not its) */
+        static const char full[] = "(The program has the PC's own screen and keyboard now.)\r\n";
+        s->job_full = 1;
+        term_text(s, full, (int)sizeof full - 1, 1);
+    }
     if (gone || st == GLOS_JS_DONE || (st == GLOS_JS_APP && s->tty)) {
         if (!gone && s->tty) {                  /* what was typed to it and it never read: the characters of it */
             u16 left[64];

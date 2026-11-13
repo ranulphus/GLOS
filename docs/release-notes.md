@@ -4,6 +4,18 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## `ssh pc` logs in to GLOS's shell (2026-11-13)
+
+- `ssh pc` with no command logs in: GLOS's own shell (DOS's commands and syntax, a history, completion with Tab),
+  the same one as the Terminal app's, on a session in the kernel (docs/v1/shell.md, steps S2a and S2b).
+  `ssh pc COMMAND` goes through that shell too. GLOS's own commands are the shell's as well (`PS`, `LOG`, `STAT`
+  ...; `GLOS name` as before). A GLOS app started there goes on beside the shell and still writes to that
+  terminal.
+- A program started at a login writes to its terminal on a PC without a desktop too, whichever way DOS writes
+  to the screen. (MS-DOS 7.1's console driver calls the video BIOS without an INT; at a login on such a PC
+  nothing a program wrote arrived, and it went to the PC's own screen instead. Seen on bench-g400.) A program
+  that takes the screen (a mode set, the VGA's ports) has the PC's own from there, and the terminal says so.
+
 ## The idle screen, and CR4 asked for only where CPUID names it (2026-11-12)
 
 - A PC that runs GLOS with no desktop and nothing running showed nothing of GLOS's and ignored its keyboard: it
