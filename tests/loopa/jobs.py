@@ -1810,6 +1810,150 @@ def idle_case(profile, card):
                              "" if not bad else " failed: " + " ".join(bad) + info), not bad
 
 
+class Login:
+    """`ssh -tt` to GLOS's shell (a session in the kernel: docs/v1/shell.md, S2): keys sent, and what comes back
+    read with the terminal's sequences and carriage returns taken out."""
+
+    def __init__(self, agent):
+        self.p = subprocess.Popen(agent.opts + ["-tt", "glos@127.0.0.1"], stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        os.set_blocking(self.p.stdout.fileno(), False)
+        self.raw, self.at = b"", 0
+
+    def text(self):
+        try:
+            while True:
+                d = os.read(self.p.stdout.fileno(), 4096)
+                if not d:
+                    break
+                self.raw += d
+        except (BlockingIOError, OSError):
+            pass
+        return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", self.raw.decode("utf-8", "replace")).replace("\r", "")
+
+    def send(self, keys):
+        self.p.stdin.write(keys if isinstance(keys, bytes) else keys.encode())
+        self.p.stdin.flush()
+
+    def expect(self, what, limit=60):
+        """what, after what was last expected: True, and on from there."""
+        import time
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            i = self.text().find(what, self.at)
+            if i >= 0:
+                self.at = i + len(what)
+                return True
+            time.sleep(0.2)
+        return False
+
+    def end(self, limit=30):
+        try:
+            return self.p.wait(timeout=limit)
+        except subprocess.TimeoutExpired:
+            self.p.kill()
+            return -1
+
+
+def shell_case(profile, card):
+    """`ssh pc` logs in to GLOS's shell (kernel/shell/shsess.c; docs/v1/shell.md, step S2a): a prompt; the line
+    edited (Backspace), kept (Up) and completed (Tab); the shell's own commands on DOS's files, UTF-8 at the
+    terminal and the PC's code page in the file; a program's output and its exit code; a line typed to a program
+    that reads one; a line with its input from a file, and a batch file, through the DOS's COMMAND.COM; Ctrl+C to
+    a program;
+    EXIT, and the connection's end with code 0. A second login while the first is open; and a login dropped
+    with a program running, which is ended."""
+    tag = "shell-%s-%s" % (profile, card)
+    agent = Agent("ssh-" + tag, profile, card, [
+        "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE", "--file", "build/ow/dos/CONIN.EXE=/TEST/CONIN.EXE",
+        "--cmd", "SERSAY HX-START shell", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks = {"listen": agent.listening()}
+    try:
+        t = Login(agent)
+        checks["banner"] = t.expect("GLOS shell 1.0") and t.expect("C:\\>")
+        t.send("cd \\test\r")
+        checks["cd"] = t.expect("C:\\TEST>")
+        t.send("vex\x7fr\r")
+        checks["edited"] = t.expect("GLOS shell 1.0 (GLOS API 2.0)\n")
+        t.send("dir /w\r")
+        checks["dir"] = t.expect(" Directory of C:\\TEST\n") and t.expect("GLOS.EXE") and t.expect(" file(s)") \
+            and t.expect("C:\\TEST>")
+        t.send("echo caf\u00e9 > t.txt\r")
+        t.expect("C:\\TEST>")
+        t.send("ty\tt.\t\r")                    # (TYPE, then T.TXT, by Tab)
+        checks["tab-type"] = t.expect("TYPE T.TXT") and t.expect("\ncaf\u00e9 \n")
+        rc, out, _ = agent.ssh("TYPE C:\\TEST\\T.TXT")      # (the file's own bytes, by the DOS's TYPE: code page 437)
+        checks["code-page"] = rc == 0 and "caf\x82" in out.encode("latin-1", "replace").decode("latin-1") \
+            or b"caf\x82" in subprocess.run(agent.opts + ["glos@127.0.0.1", "TYPE C:\\TEST\\T.TXT"],
+                                           capture_output=True, timeout=60).stdout
+        t.expect("C:\\TEST>")
+        t.send("\x1b[A\x1b[A")                    # (Up twice: the ECHO line again)
+        checks["history"] = t.expect("echo caf\u00e9 > t.txt")
+        t.send("\x03")
+        checks["given-up"] = t.expect("^C\n") and t.expect("C:\\TEST>")
+        t.send("del t.txt && echo gone\r")
+        checks["chain"] = t.expect("1 file(s) deleted\ngone\n")
+        t.send("nosuch\r")
+        checks["unknown"] = t.expect("Bad command or file name\n")
+        t.send("echoargs one two\r")
+        checks["program"] = t.expect("\none two\n") and t.expect("nine two six int29\n") \
+            and t.expect("echoargs: 2 arguments\n")
+        t.send("echo %errorlevel%\r")
+        checks["code"] = t.expect("\n7\n")
+        t.send("conin line\r")
+        t.expect("conin line\n")
+        t.send("typed into it\r")
+        checks["typed"] = t.expect("LINE typed into it\n")
+        t.send("conin code 3 || echo failed with %errorlevel%\r")
+        checks["or"] = t.expect("failed with 3\n")
+        t.send("echo echo from batch %1 > b.bat\r")
+        t.expect("C:\\TEST>")
+        t.send("b hello\r")
+        checks["batch"] = t.expect("from batch hello")
+        t.send("echo from a file > in.txt\r")
+        t.expect("C:\\TEST>")
+        t.send("conin line < in.txt\r")           # (its input from a file: the line whole to COMMAND.COM)
+        checks["redirected"] = t.expect("LINE from a file")
+        t.expect("C:\\TEST>")
+        t.send("del in.txt\r")
+        t.expect("C:\\TEST>")
+        t.send("conin line\r")
+        t.expect("conin line\n")
+        t.send("\x03")
+        checks["break"] = t.expect("^C") and t.expect("C:\\TEST>")
+        two = Login(agent)                          # a second login beside the first
+        checks["second"] = two.expect("C:\\>")
+        two.send("echo two\r")
+        checks["second-runs"] = two.expect("\ntwo\n")
+        two.send("exit\r")
+        checks["second-exit"] = two.end() == 0
+        t.send("del b.bat\r")
+        t.expect("C:\\TEST>")
+        t.send("exit\r")
+        checks["exit"] = t.end() == 0
+        drop = Login(agent)                         # a login dropped under its program: the program is ended
+        drop.expect("C:\\>")
+        drop.send("c:\\test\\conin line\r")
+        drop.expect("conin line\n")
+        n = agent.log().count("GLOS-AGENT done")
+        drop.p.kill()
+        t0 = time.time()
+        while time.time() - t0 < 60 and agent.log().count("GLOS-AGENT done") == n:
+            time.sleep(0.5)
+        checks["dropped"] = agent.log().count("GLOS-AGENT done") == n + 1
+        checks["after"] = agent.ssh("glos ver")[0] == 0
+        checks["glos-exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["ends"] = text.count("GLOS-SHELL begin") == 3 and text.count("GLOS-SHELL end") == 3
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
+        not bad
+
+
 def restart_case(profile, card):
     """glos restart: GLOS leaves with ERRORLEVEL 200 (AGENT_RESTART), and RUN.BAT, as bench-g400's AUTOEXEC.BAT does,
     loops back on it to start GLOS.EXE again: no reset, GLOS answering again in seconds; then glos exit (0) falls
@@ -7860,6 +8004,7 @@ def main():
             res += matrix(reboot_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(restart_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(idle_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
+            res += matrix(shell_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]
