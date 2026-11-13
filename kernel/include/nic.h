@@ -40,6 +40,8 @@ void net_irq(struct trapframe *tf);     /* the card's IRQ handler */
 void net_report(void);                  /* GLOS-NET counters, at leave */
 int net_address(char ip[16], const char **name);        /* 1 with DHCP's address and the PC's name; 0: none yet */
 int net_run(void (*fn)(void *arg), void *arg, int wait);       /* fn on the net thread (M10): 0, or -1 */
+int net_cable(u32 role, u32 com, u32 baud);     /* the cable link set (role 0: off) while GLOS runs: 0, uart_open()'s
+                                                   error, or -4: no network thread */
 void net_kick(void);                    /* the net thread to take a turn now (output waiting), from any context */
 int net_up(void);                       /* a card, and an address from DHCP */
 int net_resolve(const char *name, unsigned char ip[4], u32 ms);  /* a name's IPv4 address: 0, or -1 */

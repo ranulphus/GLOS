@@ -20,6 +20,7 @@
 #include "display.h"
 #include "dos.h"
 #include "dpmi.h"
+#include "slip.h"
 #include "session.h"
 #include "io.h"
 #include "kcfg.h"
@@ -531,6 +532,7 @@ static void vm_leave(u32 code)
         cpu_set_cr4(0, 1);
     sched_report();
     net_report();
+    slip_leave();                               /* (the cable link's port as it was found) */
     nic_leave();
     usb_leave();                                /* (its controllers stopped, reset, given back) */
     cache_end();

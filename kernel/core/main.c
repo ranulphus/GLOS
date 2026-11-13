@@ -122,7 +122,7 @@ void kmain(struct bootinfo *loader_bi)
         schedule_init(bi);                      /* the commands GLOS runs at times (GLOS.DAT; kernel/core/schedule.c) */
         pci_scan();
         cache_init(bi);                         /* the disk cache: its drives, the IDE ports it watches */
-        if (nic_probe() == 0) {
+        if (nic_probe() == 0 || bi->cable_role) {      /* (a cable link needs no card: docs/cable.md) */
             sshd_start(bi);                     /* before the net thread, which listens for it */
             net_start(bi->flags & BI_F_SELFTEST);
         }

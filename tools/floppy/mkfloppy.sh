@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mkfloppy.sh OUT.img KEYSDIR HOSTNAME [SIZE]: GLOS's setup floppy (docs/floppy.md), a disk that boots FreeDOS
+# mkfloppy.sh OUT.img KEYSDIR HOSTNAME [SIZE [CABLE]]: GLOS's setup floppy (docs/floppy.md), a disk that boots FreeDOS
 # and starts GLOS with its network and SSH, so that the rest is put on the PC's hard disk from another computer
 # (tools/floppy/install.py). In the dev container (mtools), from the repository's root.
 #
@@ -12,7 +12,7 @@
 # PC's name, and KEYS\ (HOSTKEY: this floppy's own; AUTHKEYS: who may log in). No FDISK, FORMAT or SYS: a disk is
 # laid out, formatted and made to start by GLOS's own DISK command (kernel/disk/diskcmd.c; since 2026-11-13).
 set -euo pipefail
-out=$1 keys=$2 host=$3 size=${4:-1440}
+out=$1 keys=$2 host=$3 size=${4:-1440} cable=${5:-}
 case $size in
     1440) fd=144m kernel=build/kernel/GLOSK.BIN
           keep="COMMAND.COM ATTRIB.COM XCOPY.EXE MEM.EXE MORE.EXE DELTREE.COM";;
@@ -43,6 +43,8 @@ mdel -i "$img" ::/FREEDOS/VERSION.FDI ::/FDAUTO.BAT ::/SETUP.BAT ::/FDCONFIG.SYS
 for f in FDCONFIG.SYS AUTOEXEC.BAT GLOS.CFG; do
     sed "s/@HOST@/$host/g" "$here/dos/$f" > "$tmp/$f"
 done
+# CABLE ("client COM1"): the PC is reached over a serial cable (docs/cable.md), with or without a network card.
+[ -z "$cable" ] || printf 'cable = %s\r\n' "$cable" >> "$tmp/GLOS.CFG"
 mcopy -o -i "$img" "$tmp/FDCONFIG.SYS" ::/FDCONFIG.SYS
 mcopy -o -i "$img" "$tmp/AUTOEXEC.BAT" ::/AUTOEXEC.BAT
 mmd -i "$img" ::/GLOS ::/GLOS/KEYS

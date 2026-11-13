@@ -21,6 +21,7 @@
 #include "midi.h"
 #include "pci.h"
 #include "timer.h"
+#include "uart.h"
 #include "vm.h"
 
 static struct { u16 base, len; } hidden[4];
@@ -35,6 +36,8 @@ static int com1_hold(void) { return com1_mid; }
 
 static void com1_out(u8 v)
 {
+    if (uart_is_open(0x3F8))                    /* (the cable link's: nothing of a program's goes into it) */
+        return;
     if (!(inb(0x3FB) & 0x80)) {                 /* not the divisor latch: a character */
         if (!com1_mid)
             kprintf_flush(1);                   /* the kernel's lines made before this one go before it */
@@ -57,6 +60,22 @@ void vdev_hide(u16 base, u16 len)
     hidden[nhidden++].len = len;
     for (p = base; p < (u32)base + len; p++)
         cpu_io_trap(p, 1);
+}
+
+/* ... and the VM's again (a serial port whose cable link has ended). COM1's data port stays trapped: what a
+   program writes there is the log's (com1_out). */
+void vdev_unhide(u16 base)
+{
+    u32 p;
+    int i;
+    for (i = 0; i < nhidden; i++)
+        if (hidden[i].base == base) {
+            for (p = base; p < (u32)base + hidden[i].len; p++)
+                if (p != 0x3F8)
+                    cpu_io_trap(p, 0);
+            hidden[i] = hidden[--nhidden];
+            return;
+        }
 }
 
 static int is_hidden(u16 port)

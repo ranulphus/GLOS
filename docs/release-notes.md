@@ -4,6 +4,16 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The cable link: the network over a serial cable (2026-11-13)
+
+- `[net] cable = client COM1` in GLOS.CFG (or `NETWORK CLIENT COM1` while GLOS runs) makes a serial port a
+  network link to the computer at the other end of a null-modem cable: SLIP, 115,200 baud unless said, the
+  server 192.168.250.1 and the client 192.168.250.2. SSH, SFTP, the installer and the apps' sockets work over
+  it. A PC with no network card GLOS drives is reached this way: the network starts for the cable alone
+  (docs/cable.md; `tools/cable.sh` is a Linux computer's end).
+- Fixed: the SSH server lost output when TCP refused a write with room still in its buffer (its queue of
+  segments full). Seen with the cable's small packets, where a download stopped after 20 KB.
+
 ## The DISK command; the setup floppy without FDISK, FORMAT and SYS (2026-11-13)
 
 - `DISK` (`glos disk` over SSH) lists the BIOS's hard disks and their partitions, and with `/Y` lays a disk out

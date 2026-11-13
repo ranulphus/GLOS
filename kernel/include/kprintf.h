@@ -15,6 +15,7 @@ void kvprintf(const char *fmt, __builtin_va_list ap);
 extern void (*kprintf_screen)(const char *s, u32 n);    /* /VERBOSE: lines on the text screen too (vm/vcon.c) */
 void vcon_start(void);
 void vcon_notice(void);                 /* the idle screen's notice, from the VM thread about to wait there */
+extern u8 kprintf_com1_off;             /* COM1 carries no log: it is a cable link's (drv/uart.c) */
 extern int (*kprintf_hold)(void);       /* 1 while a program's COM1 line is unfinished (vm/vdev.c) */
 void kprintf_flush(int force);
 void kprintf_direct(void);              /* a panic: no more holding */

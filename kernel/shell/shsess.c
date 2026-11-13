@@ -678,6 +678,7 @@ static const char *const own_names[] = { "GLOS", "PS", "KILL", "LOG", "STAT", "R
 static const char *const own_help[] = {
     "PS, KILL [n], RUN [--exclusive|--app] program   what runs; one ended; a program started GLOS's way",
     "LOG, STAT, SYSMEM, NETWORK, CLOCK, USB, JOY     GLOS's log, figures, memory, network, time, devices",
+    "NETWORK SERVER|CLIENT COMn [speed], NETWORK CABLE OFF   the network over a serial cable",
     "CONFIG, DISPLAY, DESK, AUDIO, CACHE, IDLE, CLIP, SECRETS   settings and the desktop",
     "SENDTEXT text, SENDKEYS codes, SENDMOUSE ...    keys and the mouse, as if at the PC",
     "DISK [n [NEW | FORMAT [p] | BOOT [p]]]          the hard disks; one laid out anew, formatted, made to start",

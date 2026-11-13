@@ -2004,6 +2004,161 @@ def shell_case(profile, card):
         not bad
 
 
+class Slip:
+    """This end of a SLIP line (RFC 1055) on a TCP connection to Loop A's COM2 bridge: IP packets each way, an
+    ICMP echo and a TCP SYN made by hand (no root, no interface)."""
+
+    def __init__(self, port, me, peer):
+        import socket
+        self.s = socket.create_connection(("127.0.0.1", port), timeout=10)
+        self.s.settimeout(0.2)
+        self.me, self.peer = bytes(me), bytes(peer)
+        self.buf = b""
+
+    @staticmethod
+    def csum(data):
+        if len(data) & 1:
+            data += b"\0"
+        t = sum(int.from_bytes(data[i:i + 2], "big") for i in range(0, len(data), 2))
+        while t >> 16:
+            t = (t & 0xFFFF) + (t >> 16)
+        return (~t & 0xFFFF).to_bytes(2, "big")
+
+    def send(self, proto, payload):
+        h = bytes([0x45, 0]) + (20 + len(payload)).to_bytes(2, "big") + bytes([0, 1, 0, 0, 64, proto, 0, 0]) + self.me + self.peer
+        h = h[:10] + self.csum(h) + h[12:]
+        pkt = (h + payload).replace(b"\xdb", b"\xdb\xdd").replace(b"\xc0", b"\xdb\xdc")
+        self.s.sendall(b"\xc0" + pkt + b"\xc0")
+
+    def packets(self, limit):
+        """IP packets from the peer that arrive within `limit` seconds: (protocol, payload) each."""
+        import socket
+        import time
+        t0, out = time.time(), []
+        while time.time() - t0 < limit:
+            try:
+                d = self.s.recv(4096)
+            except socket.timeout:
+                d = b""
+            self.buf += d
+            while b"\xc0" in self.buf:
+                f, self.buf = self.buf.split(b"\xc0", 1)
+                f = f.replace(b"\xdb\xdc", b"\xc0").replace(b"\xdb\xdd", b"\xdb")
+                if len(f) >= 20 and f[0] == 0x45 and f[12:16] == self.peer and f[16:20] == self.me \
+                        and self.csum(f[:20]) == b"\0\0":
+                    out.append((f[9], f[20:int.from_bytes(f[2:4], "big")]))
+            if out:
+                return out
+        return out
+
+    def ping(self, n, limit=5):
+        """An echo request of n bytes of data: True if its reply comes back whole."""
+        data = bytes((i * 7 + 0xC0) & 0xFF for i in range(n))       # (the bytes SLIP escapes are among them)
+        icmp = bytes([8, 0, 0, 0, 0x47, 0x4C, 0, n & 0xFF]) + data
+        self.send(1, icmp[:2] + self.csum(icmp) + icmp[4:])
+        return any(pr == 1 and len(pl) == 8 + n and pl[0] == 0 and pl[4:8] == icmp[4:8] and pl[8:] == data
+                   and self.csum(pl) == b"\0\0" for pr, pl in self.packets(limit))
+
+    def syn(self, port, limit=5):
+        """A TCP SYN to the peer's port: True if a SYN-ACK answers (then a reset, so nothing is left open)."""
+        seg = (40000).to_bytes(2, "big") + port.to_bytes(2, "big") + (1000).to_bytes(4, "big") + bytes(4) \
+            + bytes([0x50, 0x02]) + (4096).to_bytes(2, "big") + bytes(4)
+        pseudo = self.me + self.peer + bytes([0, 6]) + len(seg).to_bytes(2, "big")
+        self.send(6, seg[:16] + self.csum(pseudo + seg) + seg[18:])
+        for pr, pl in self.packets(limit):
+            if pr == 6 and len(pl) >= 20 and pl[0:2] == port.to_bytes(2, "big") and pl[13] & 0x12 == 0x12 \
+                    and int.from_bytes(pl[8:12], "big") == 1001:
+                rst = seg[:4] + (1001).to_bytes(4, "big") + bytes(4) + bytes([0x50, 0x04]) + bytes(6)
+                pseudo = self.me + self.peer + bytes([0, 6]) + len(rst).to_bytes(2, "big")
+                self.send(6, rst[:16] + self.csum(pseudo + rst) + rst[18:])
+                return True
+        return False
+
+
+def cable_port(name, limit=120):
+    import time
+    t0 = time.time()
+    path = os.path.join(ROOT, "out", name, "com2.port")
+    while time.time() - t0 < limit:
+        if os.path.exists(path) and open(path).read().strip():
+            return int(open(path).read())
+        time.sleep(0.5)
+    return 0
+
+
+def cable_case(profile, card):
+    """The cable link (kernel/net/slip.c, kernel/drv/uart.c; docs/cable.md): IP over a serial cable, on COM2
+    (Loop A's bridge to a TCP port; the other end is made here by hand). With a network card, GLOS.CFG's [net]
+    cable = client COM2: echo requests of several sizes answered whole, the SSH port answering a SYN over the
+    cable, `glos net` showing the link and its counts; switched off (nothing answers) and on again as the
+    server (the addresses the other way round) while GLOS runs; SSH over Ethernet all the while, and COM2 the
+    DOS's again after `glos exit`. Without a card (card "none"): [net] cable = server COM2 alone starts the
+    network, and the PC answers on the cable (echo, the SSH port)."""
+    tag = "cable-%s-%s" % (profile, card)
+    checks = {}
+    if card == "none":
+        cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py ssh, the cable link alone", "[net]", "cable = server com2"])
+        proc = run("ssh-" + tag, ["--machine", profile, "--com2", "--timeout", "300", "--idle", "200",
+                                  "--file", cfg + "=/TEST/GLOS.CFG"] + GLOS_FILES + KEYS
+                   + ["--cmd", "SERSAY HX-START cable", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
+                   background=True)
+        serial = os.path.join(ROOT, "out", "ssh-" + tag, "serial.log")
+        log = lambda: open(serial, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(serial) else ""
+        t0 = time.time()
+        while time.time() - t0 < 240 and "GLOS-SSH listen" not in log():
+            time.sleep(1)
+        text = log()
+        checks["up"] = "GLOS-NET cable role=server com=2 io=2f8 irq=3 baud=115200" in text and "GLOS-SSH listen" in text
+        port = cable_port("ssh-" + tag)
+        try:
+            line = Slip(port, [192, 168, 250, 2], [192, 168, 250, 1])
+            checks["echo"] = line.ping(56) and line.ping(500)
+            checks["ssh-port"] = line.syn(22)
+            checks["refused-port"] = not line.syn(23, 2)
+        except OSError:
+            checks["bridge"] = False
+        proc.kill()
+        proc.wait()
+        text = log()
+        checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+        bad = [k for k, v in checks.items() if not v]
+        return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
+            not bad
+    cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py ssh, the cable link beside a card", "[time]", "sntp = off", "[net]",
+                                      "cable = client com2 57600"])
+    agent = Agent("ssh-" + tag, profile, card, ["--com2", "--file", cfg + "=/TEST/GLOS.CFG",
+                                                "--cmd", "SERSAY HX-START cable", "--cmd", "C:\\TEST\\GLOS.EXE",
+                                                "--cmd", "SERSAY HX-DONE 0"])
+    checks["listen"] = agent.listening()
+    try:
+        checks["up"] = "GLOS-NET cable role=client com=2 io=2f8 irq=3 baud=57600" in agent.log()
+        line = Slip(cable_port("ssh-" + tag), [192, 168, 250, 1], [192, 168, 250, 2])
+        checks["echo"] = all(line.ping(n) for n in (0, 56, 300, 548))
+        checks["ssh-port"] = line.syn(22)
+        rc, out, _ = agent.ssh("glos net")
+        m = re.search(r"cable=client com=2 io=2f8 irq=3 baud=57600 fifo=\d ip=192\.168\.250\.2 peer=192\.168\.250\.1\n"
+                      r"cable rx=(\d+) tx=(\d+) rx_bad=0 tx_dropped=0 ", out.replace("\r", ""))
+        checks["stat"] = rc == 0 and bool(m) and int(m.group(1)) >= 5 and int(m.group(2)) >= 5
+        rc, out, _ = agent.ssh("glos net cable off")
+        checks["off"] = rc == 0 and "off" in out and not line.ping(56, 3)
+        rc, out, _ = agent.ssh("NETWORK SERVER COM2")          # (the shell's name for it; 115200 unless said)
+        checks["on-again"] = rc == 0 and "cable=server com=2" in out and "baud=115200" in out
+        back = line
+        back.me, back.peer, back.buf = bytes([192, 168, 250, 2]), bytes([192, 168, 250, 1]), b""     # (the other way round)
+        checks["echo-server"] = back.ping(56) and back.ping(400)
+        checks["usage"] = agent.ssh("glos net server com9")[0] == 2 and agent.ssh("glos net client com1 1000")[0] == 1
+        checks["still-on"] = back.ping(56)
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except (subprocess.TimeoutExpired, OSError):
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
+        not bad
+
+
 def restart_case(profile, card):
     """glos restart: GLOS leaves with ERRORLEVEL 200 (AGENT_RESTART), and RUN.BAT, as bench-g400's AUTOEXEC.BAT does,
     loops back on it to start GLOS.EXE again: no reset, GLOS answering again in seconds; then glos exit (0) falls
@@ -8163,6 +8318,7 @@ def main():
             res += matrix(restart_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(idle_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(shell_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
+            res += matrix(cable_case, [("bf6", "ne2kpci"), ("486dx2", "none")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]

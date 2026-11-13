@@ -145,6 +145,7 @@ static inline void vm_wr8(u32 lin, u8 v) { *vm_ptr(lin) = v; }
 /* vdev.c: the trapped ports */
 void vdev_init(void);
 void vdev_hide(u16 base, u16 len);              /* ports the kernel owns: FFh to the VM, writes dropped */
+void vdev_unhide(u16 base);                     /* ... and the VM's again */
 u32 vdev_in(u16 port, int width);
 void vdev_out(u16 port, u32 val, int width);
 void vdev_tick(struct trapframe *tf, u8 c);     /* every kernel tick, with RTC register C */

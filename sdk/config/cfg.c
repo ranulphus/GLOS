@@ -58,6 +58,9 @@ const struct cfg_key cfg_schema[] = {
     /* [net] (M5) */
     { "net", "hostname", CFG_TEXT, CFG_RESTART, 1, 15, "host", "glos", "&Host name",
       "This machine's name on the network (NAME.local)" },
+    { "net", "cable", CFG_TEXT, CFG_RESTART, 1, 31, "line", "off", "&Cable link",
+      "The network over a serial cable to another computer (docs/cable.md): off, or server COM1 or client COM1 "
+      "(COM1 to COM4), with a speed after it if not 115200" },
     /* [time] (M10): network time, the zone */
     { "time", "sntp", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "&Network time",
       "The clock is set from a time server (SNTP) when the network is up, and kept so" },

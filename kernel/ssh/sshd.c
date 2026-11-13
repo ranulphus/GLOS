@@ -34,6 +34,7 @@
 #include "kprintf.h"
 #include "mixer.h"
 #include "mm.h"
+#include "slip.h"
 #include "diskcmd.h"
 #include "dos.h"
 #include "dpmi.h"
@@ -218,9 +219,15 @@ void sshd_net_poll(void)
             u32 k = ring_used(&s->tx), room = tcp_sndbuf(s->pcb);
             if (k > sizeof chunk) k = sizeof chunk;
             if (k > room) k = room;
+            u32 was = s->tx.tail;
             k = ring_get(&s->tx, chunk, k);
-            if (tcp_write(s->pcb, chunk, (u16_t)k, TCP_WRITE_FLAG_COPY) != ERR_OK)
+            if (tcp_write(s->pcb, chunk, (u16_t)k, TCP_WRITE_FLAG_COPY) != ERR_OK) {
+                s->tx.tail = was;               /* (not taken: it stays in the ring for the next turn. TCP refuses
+                                                   with room in its buffer when its queue of segments is full, as
+                                                   it soon is with the cable link's small ones: the bytes were lost
+                                                   and the connection stopped, 2026-11-13) */
                 break;
+            }
         }
         if (s->pcb)
             tcp_output(s->pcb);
@@ -1006,6 +1013,15 @@ static void gdb_send(const u8 *d, u32 n)
 
 /* The built-in commands, and DOS command lines for the agent. */
 static int shell_line(struct ssh_chan *ch, const char *line);
+
+/* cmd begins with `what` (small letters), in either case: the shell passes a command's words as they were typed. */
+static int ci_starts(const char *cmd, const char *what)
+{
+    for (; *what; cmd++, what++)
+        if ((*cmd >= 'A' && *cmd <= 'Z' ? *cmd + 32 : *cmd) != *what)
+            return 0;
+    return 1;
+}
 static const struct ssh_ops ops;
 
 static int k_exec(struct ssh_chan *ch, const char *cmd)
@@ -1218,6 +1234,39 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             clock_text(b, sizeof b);
             say(ch, 0, b);
             ssh_chan_exit(ch, 0);
+        }
+    } else if (ci_starts(cmd, "glos net server ") || ci_starts(cmd, "glos net client ")
+               || (ci_starts(cmd, "glos net cable off") && !cmd[18])) {
+        /* the cable link (docs/cable.md): glos net server|client COMn [BAUD], glos net cable off */
+        const char *p = cmd + 16;
+        u32 role = (cmd[9] | 32) == 's' ? BI_CABLE_SERVER : (cmd[10] | 32) == 'l' ? BI_CABLE_CLIENT : 0, com = 0;
+        int baud = 0, e = -5;
+        if (!role)
+            e = net_cable(0, 0, 0);
+        else if ((p[0] | 32) == 'c' && (p[1] | 32) == 'o' && (p[2] | 32) == 'm' && p[3] >= '1' && p[3] <= '4'
+                 && (!p[4] || p[4] == ' ')) {
+            com = (u32)(p[3] - '0');
+            p += 4;
+            while (*p == ' ')
+                p++;
+            if (!*p || (number(&p, &baud) == 0 && !*p && baud > 0))
+                e = baud > 115200 || (baud && 115200 % baud) ? -3 : net_cable(role, com, (u32)baud);  /* (a speed
+                                                   that can't be set leaves a link that is up as it is) */
+        }
+        if (e == 0) {
+            char t[400];
+            u32 n = (u32)ksnprintf(t, sizeof t, role ? "" : "The cable link is off.\n");
+            if (role)
+                n = slip_stat(t, sizeof t);
+            ssh_chan_write(ch, 0, (const uint8_t *)t, n);
+            ssh_chan_exit(ch, 0);
+        } else {
+            say(ch, 1, e == -5 ? "glos net: server COMn [BAUD] | client COMn [BAUD] | cable off (COM1 to COM4; 115200 unless said)\n"
+                : e == -1 ? "glos net: no serial port answers there\n"
+                : e == -3 ? "glos net: the speed is 115200 divided by a whole number (57600, 38400, 19200, 9600 ...)\n"
+                : e == -4 ? "glos net: no network thread runs (GLOS.CFG: [net] cable = server COM1, then restart GLOS)\n"
+                : "glos net: the cable link could not be started\n");
+            ssh_chan_exit(ch, e == -5 ? 2 : 1);
         }
     } else if (!strncmp(cmd, "glos net resolve ", 17)) {
         struct resolve *r = kmalloc(sizeof *r);

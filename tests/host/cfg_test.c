@@ -131,6 +131,7 @@ static const struct { const char *sec, *key, *val; int ok; } values[] = {
     { "usb", "enabled", "maybe", 0 },
     { "sound", "crystal", "off", 1 }, { "sound", "crystal", "wss=534 irq=5 dma=1", 1 }, { "sound", "crystal", "", 0 },
     { "net", "hostname", "retro-486", 1 }, { "net", "hostname", "-x", 0 },
+    { "net", "cable", "off", 1 }, { "net", "cable", "client COM1", 1 }, { "net", "cable", "server com2 57600", 1 },
     { "net", "hostname", "a.b", 0 }, { "net", "hostname", "abcdefghijklmnop", 0 }, { "input", "repeat_rate", "30", 1 },
     { "input", "repeat_rate", "31", 0 }, { "input", "pointer_speed", "2", 1 }, { "shell", "comspec", "C:\\COMMAND.COM", 1 },
     { "shell", "comspec", "C:\\A|B", 0 }, { "program FWHEEL.EXE", "env", "DOOMWADDIR=D:\\DOOM", 1 },

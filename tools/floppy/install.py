@@ -214,7 +214,8 @@ def put_glos(pc, args, files):
         die("these aren't there whole: %s" % ", ".join(bad))
     print("  copied and checked in %d seconds" % (time.time() - t0))
     if pc.get_text("/C/GLOS/GLOS.CFG") is None:
-        pc.put_text("/C/GLOS/GLOS.CFG", ["[net]", "hostname = " + args.name])
+        pc.put_text("/C/GLOS/GLOS.CFG", ["[net]", "hostname = " + args.name]
+                    + (["cable = " + args.cable] if args.cable else []))
         print("  C:\\GLOS\\GLOS.CFG: the PC's name is %s (%s.local)" % (args.name, args.name))
     else:
         print("  C:\\GLOS\\GLOS.CFG is there already: kept")
@@ -249,6 +250,8 @@ def main():
                                   "was made with: ~/.ssh/glos_bench, else ~/.ssh/id_ed25519)")
     ap.add_argument("--keys", default="build/floppy/keys", help="the floppy's keys (HOSTKEY, HOSTKEY.pub, AUTHKEYS)")
     ap.add_argument("--name", default="glos", help="the installed PC's name on the network (NAME.local)")
+    ap.add_argument("--cable", metavar="SETTING", help="the installed system's cable link, as GLOS.CFG's [net] cable "
+                                                       "has it: \"client COM1\" (docs/cable.md)")
     ap.add_argument("--new-disk", action="store_true", help="partition and format the first hard disk first")
     ap.add_argument("--erase-existing", action="store_true", help="with --new-disk: even if the disk has a C: now")
     ap.add_argument("--autoexec", action="store_true", help="make C:\\AUTOEXEC.BAT of the DOS there start GLOS")

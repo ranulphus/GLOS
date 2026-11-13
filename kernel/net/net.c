@@ -33,6 +33,7 @@
 #include "io.h"
 #include "kcfg.h"
 #include "kprintf.h"
+#include "slip.h"
 #include "nic.h"
 #include "sched.h"
 #include "sock.h"
@@ -44,6 +45,7 @@ static struct waitq netq;
 static volatile u8 pending;
 static int selftest;
 static struct netif nif;
+static u8 started;                              /* the thread runs (with a card, or for the cable link alone) */
 static u8 txbuf[ETH_MAX];
 static const char *hostname = "glos";
 static u32 bound_at;                            /* the tick DHCP gave an address at */
@@ -80,7 +82,7 @@ int net_run(void (*fn)(void *arg), void *arg, int wait)
     static struct net_work pool[16];
     struct net_work *w = 0;
     u32 f, i;
-    if (!nic0)
+    if (!started)
         return -1;
     f = irq_save();
     for (i = 0; i < 16 && !w; i++)
@@ -275,15 +277,16 @@ int net_resolve(const char *name, u8 ip[4], u32 ms)
 }
 
 /* A card, and an address from DHCP. */
-int net_up(void) { return nic0 && bound_at; }
+int net_up(void) { return (nic0 && bound_at) || slip_up(); }
 
 int net_address(char ip[16], const char **name)
 {
-    if (!net_up())
-        return 0;
-    ip4addr_ntoa_r(netif_ip4_addr(&nif), ip, 16);
     *name = hostname;
-    return 1;
+    if (nic0 && bound_at) {
+        ip4addr_ntoa_r(netif_ip4_addr(&nif), ip, 16);
+        return 1;
+    }
+    return slip_address(ip);                    /* (the cable link's, where that is all there is) */
 }
 
 void net_irq(struct trapframe *tf)
@@ -318,7 +321,7 @@ void glos_lwip_assert(const char *msg, const char *file, int line)
 unsigned int glos_net_rand(void)
 {
     if (!rng)
-        rng = 0x9E3779B9u ^ ((u32)nic0->mac[3] << 16 | (u32)nic0->mac[4] << 8 | nic0->mac[5]);
+        rng = 0x9E3779B9u ^ (nic0 ? (u32)nic0->mac[3] << 16 | (u32)nic0->mac[4] << 8 | nic0->mac[5] : vm_rd32(0x46C) * 2654435761u);
     rng ^= timer_ticks();
     rng ^= rng << 13;
     rng ^= rng >> 17;
@@ -485,20 +488,24 @@ static void net_thread(void *arg)
     u32 ms, deadline;
     (void)arg;
     lwip_init();
-    netif_add(&nif, NULL, NULL, NULL, NULL, nif_init, ethernet_input);
-    netif_set_default(&nif);
-    netif_set_status_callback(&nif, status_cb);
-    netif_set_up(&nif);
-    dhcp_start(&nif);
-    mdns_resp_init();
-    if (mdns_resp_add_netif(&nif, hostname) != ERR_OK
-        || mdns_resp_add_service(&nif, hostname, "_ssh", DNSSD_PROTO_TCP, 22, NULL, NULL) < 0)
-        kprintf("GLOS-NET error=mdns\n");
-    else
-        kprintf("GLOS-NET mdns name=%s.local\n", hostname);
+    if (nic0) {                                 /* (a PC with no card GLOS drives has the cable link alone) */
+        netif_add(&nif, NULL, NULL, NULL, NULL, nif_init, ethernet_input);
+        netif_set_default(&nif);
+        netif_set_status_callback(&nif, status_cb);
+        netif_set_up(&nif);
+        dhcp_start(&nif);
+        mdns_resp_init();
+        if (mdns_resp_add_netif(&nif, hostname) != ERR_OK
+            || mdns_resp_add_service(&nif, hostname, "_ssh", DNSSD_PROTO_TCP, 22, NULL, NULL) < 0)
+            kprintf("GLOS-NET error=mdns\n");
+        else
+            kprintf("GLOS-NET mdns name=%s.local\n", hostname);
+    }
     if (selftest)
         echo_start();
     sshd_net_start(net_kick);
+    if (vm.bi->cable_role)                      /* [net] cable (docs/cable.md) */
+        slip_start(vm.bi->cable_role, vm.bi->cable_com, vm.bi->cable_baud, !nic0);
     for (;;) {
         ms = sys_timeouts_sleeptime();
         if (ms > 60000)
@@ -509,10 +516,13 @@ static void net_thread(void *arg)
             thread_wait(&netq, deadline);
         pending = 0;
         sti();
-        nic0->service(nic0);
-        cli();
-        vm_kmask(nic0->irq, 0);
-        sti();
+        if (nic0) {
+            nic0->service(nic0);
+            cli();
+            vm_kmask(nic0->irq, 0);
+            sti();
+        }
+        slip_turn();
         work_turn();
         sys_check_timeouts();
         if (sntp_due && bound_at && kcfg_loaded())
@@ -520,7 +530,7 @@ static void net_thread(void *arg)
         clock_second();
         sshd_net_poll();
         sock_net_poll();
-        if (selftest && bound_at && !mdns_asked && timer_ticks() - bound_at > 3 * 1024)
+        if (selftest && nic0 && bound_at && !mdns_asked && timer_ticks() - bound_at > 3 * 1024)
             mdns_ask();                         /* (the responder has probed for its name by then) */
     }
 }
@@ -539,6 +549,10 @@ void net_report(void)
 u32 net_stat(char *buf, u32 max, int json)
 {
     char ip[16], gw[16], mask[16];
+    if (!nic0 && slip_address(ip))              /* the cable link alone */
+        return json ? (u32)ksnprintf(buf, max, "{\"card\":\"cable\",\"ip\":\"%s\",\"rx\":0,\"tx\":0,\"rx_errors\":0,"
+                                     "\"overruns\":0}", ip)
+               : (u32)ksnprintf(buf, max, "no network card\n") + slip_stat(buf + 16, max - 16);
     if (!nic0)
         return (u32)ksnprintf(buf, max, json ? "null" : "no network card\n");
     ip4addr_ntoa_r(netif_ip4_addr(&nif), ip, sizeof ip);
@@ -554,7 +568,8 @@ u32 net_stat(char *buf, u32 max, int json)
                               "ip=%s mask=%s gw=%s dns=%s\nrx=%u tx=%u rx_errors=%u overruns=%u\nsockets=%u\n",
                               nic0->name, nic0->base, nic0->irq, nic0->mac[0], nic0->mac[1], nic0->mac[2], nic0->mac[3],
                               nic0->mac[4], nic0->mac[5], ip, mask, gw, dns, nic0->rx_frames, nic0->tx_frames,
-                              nic0->rx_errors, nic0->overruns, sock_count());
+                              nic0->rx_errors, nic0->overruns, sock_count())
+               + slip_stat(buf + strlen(buf), max - (u32)strlen(buf));
     }
 }
 
@@ -603,8 +618,28 @@ int net_counts(u8 ip[4], u32 *rx, u32 *tx, char *card, u32 room)
     return 0;
 }
 
+/* glos net server|client COMn [BAUD], glos net cable off (the net thread's, by net_run): the link's state
+   changed while GLOS runs. arg: role << 24 | com << 20 | baud; role 0: off. */
+static int cable_result;
+
+static void cable_set(void *arg)
+{
+    u32 a = (u32)arg;
+    slip_stop();
+    cable_result = a >> 24 ? slip_start(a >> 24, (a >> 20) & 15, a & 0xFFFFF, !nic0) : 0;
+    api2_net_changed();
+}
+
+int net_cable(u32 role, u32 com, u32 baud)
+{
+    if (net_run(cable_set, (void *)(role << 24 | com << 20 | (baud & 0xFFFFF)), 1) != 0)
+        return -4;                              /* (no network thread: GLOS.CFG's [net] cable starts one) */
+    return cable_result;
+}
+
 void net_start(int st)
 {
+    started = 1;
     selftest = st;
     if (vm.bi->hostname[0])
         hostname = vm.bi->hostname;

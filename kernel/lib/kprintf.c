@@ -116,13 +116,14 @@ u32 klog_from(u32 *pos, char *out, u32 max)
 }
 
 void (*kprintf_screen)(const char *s, u32 n);
+u8 kprintf_com1_off;                    /* COM1 is a cable link's (drv/uart.c): the lines stay in memory (glos log) */
 
 static void raw_out(const char *s, u32 n)
 {
     klog_put(s, n);
     if (kprintf_screen)                         /* (/VERBOSE: the text screen too, vm/vcon.c) */
         kprintf_screen(s, n);
-    for (; n; n--, s++) {
+    for (; n && !kprintf_com1_off; n--, s++) {
         if (*s == '\n') serial_putc(COM1, '\r');
         serial_putc(COM1, *s);
     }
@@ -132,7 +133,7 @@ static void emit(struct out *o, char c)
 {
     if (o->buf) {
         if (o->len + 1 < o->n) o->buf[o->len] = c;
-    } else {
+    } else if (!kprintf_com1_off) {
         if (c == '\n') serial_putc(COM1, '\r');
         serial_putc(COM1, c);
     }

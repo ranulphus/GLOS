@@ -336,7 +336,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/vjoy.c kernel/drv/uhci.c kernel/drv/uhcitd.c kernel/drv/hidparse.c kernel/drv/xpad.c kernel/drv/usbkbd.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/disk/bdisk.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fatfmt.c kernel/disk/fdboot.S \
-         kernel/disk/diskcmd.c \
+         kernel/disk/diskcmd.c kernel/drv/uart.c kernel/net/slip.c \
          kernel/shell/shsess.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
@@ -798,6 +798,8 @@ build/glos/KEYS/PKG/GLOS.PUB: tools/pkg/GLOS.PUB
 # FLOPPY_AUTHKEYS, an ed25519 public key (or a file of them).
 FLOPPY_HOST ?= glos-setup
 FLOPPY_SIZE ?= 1440
+# FLOPPY_CABLE="client COM1": the PC is reached over a serial cable, with or without a network card (docs/cable.md)
+FLOPPY_CABLE ?=
 FLOPPY_AUTHKEYS ?= $(firstword $(wildcard $(HOME)/.ssh/glos_bench.pub $(HOME)/.ssh/id_ed25519.pub))
 build/floppy/keys/HOSTKEY:
 	@mkdir -p build/floppy/keys
@@ -807,7 +809,7 @@ floppy: all build/kernel/GLOSK.PAK build/floppy/keys/HOSTKEY check-deps
 	  || { echo "floppy: FLOPPY_AUTHKEYS=FILE, an ed25519 public key (ssh-keygen -t ed25519): none found"; exit 1; }
 	$(Q)grep '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" > build/floppy/keys/AUTHKEYS
 	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \
-	  tools/floppy/mkfloppy.sh build/floppy/glos$(FLOPPY_SIZE).img build/floppy/keys $(FLOPPY_HOST) $(FLOPPY_SIZE)
+	  tools/floppy/mkfloppy.sh build/floppy/glos$(FLOPPY_SIZE).img build/floppy/keys $(FLOPPY_HOST) $(FLOPPY_SIZE) "$(FLOPPY_CABLE)"
 	@echo "floppy: build/floppy/glos$(FLOPPY_SIZE).img for $(FLOPPY_HOST).local; then: tools/floppy/install.py $(FLOPPY_HOST).local"
 # ... in Loop A (tests/loopa/jobs.py floppy): a 486 with an NE2000 and a blank disk boots the floppy (made here with
 # the tests' keys), install.py --new-disk does its work, and the PC then starts GLOS from the disk alone. It needs

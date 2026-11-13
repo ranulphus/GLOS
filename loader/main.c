@@ -1005,7 +1005,19 @@ static void read_cfg(const char *argv0, int shell_keys)
                 && strspn(v, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-") == strlen(v)
                 && *v && *v != '-')
                 strcpy(bi.hostname, v);
-            else
+            else if (!stricmp(k, "cable")) {    /* cable = off | server COMn [BAUD] | client COMn [BAUD]: IP over
+                                                   a serial cable (docs/cable.md) */
+                char role[8], port[8];
+                unsigned long baud = 0;
+                int n = sscanf(v, "%7s %7s %lu", role, port, &baud);
+                if (n >= 2 && (!stricmp(role, "server") || !stricmp(role, "client")) && !strnicmp(port, "com", 3)
+                    && port[3] >= '1' && port[3] <= '4' && !port[4] && (!baud || 115200UL % baud == 0)) {
+                    bi.cable_role = (role[0] | 32) == 's' ? BI_CABLE_SERVER : BI_CABLE_CLIENT;
+                    bi.cable_com = (unsigned long)(port[3] - '0');
+                    bi.cable_baud = baud;
+                } else if (stricmp(v, "off"))
+                    say("GLOS-WARN cfg-value section=net key=cable");
+            } else
                 say("GLOS-WARN cfg-key section=net key=%s", k);
             continue;
         }
