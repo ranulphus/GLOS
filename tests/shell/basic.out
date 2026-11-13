@@ -27,17 +27,19 @@ NOTES.TXT
 dir nosuch
  Directory of C:\WORK
 
-         0 file(s)              0 bytes
-         0 dir(s)
-[[C:\WORK>]]
+<<File not found
+>>[[C:\WORK>]]
 set X=hello
 [[C:\WORK>]]
 echo %X% world, %% and %ERRORLEVEL%
 hello world, % and 0
 [[C:\WORK>]]
 echo.
-<<Bad command or file name
->>[[C:\WORK>]]
+
+[[C:\WORK>]]
+echo.on
+on
+[[C:\WORK>]]
 set X
 X=hello
 [[C:\WORK>]]
@@ -144,13 +146,17 @@ start tool
 (RUN command="C:\TOOLS\TOOL.EXE" prog=C:\TOOLS\TOOL.EXE name=tool cwd=C:\WORK env=X=hello; detach=1 -> 0)
 [[C:\WORK>]]
 dir | sort
- Directory of C:\WORK
-
-         0 file(s)              0 bytes
-         0 dir(s)
+(RUN command="dir | sort" prog=- name=dir cwd=C:\WORK env=X=hello; detach=0 -> -1)
+<<GLOS can't run it here.
+>>[[C:\WORK>]]
+dir /b *.txt > list.txt
+[[C:\WORK>]]
+(CAT C:\WORK\LIST.TXT: LIST.TXT\r\nNOTES.TXT\r\n)
+del list.txt
+1 file(s) deleted
 [[C:\WORK>]]
 path
-path=C:\BIN;C:\TOOLS
+PATH=C:\BIN;C:\TOOLS
 [[C:\WORK>]]
 path c:\bin
 [[C:\WORK>]]
@@ -160,7 +166,7 @@ where b
 prompt $N$G
 [[C>]]
 prompt
-prompt=$N$G
+PROMPT=$N$G
 [[C>]]
 prompt $P$G
 [[C:\WORK>]]
@@ -205,41 +211,41 @@ VER, HELP, EXIT
 Programs run here until they want the screen. a && b: b after a has worked; a || b: b if it hasn't.
 [[C:\WORK>]]
 history
-  1  set X=hello
-  2  echo %X% world, %% and %ERRORLEVEL%
-  3  echo.
-  4  set X
-  5  set NOPE
-  6  md new && cd new && echo made
-  7  cd .. || echo not shown
-  8  cd nosuch || echo no such folder
-  9  echo %ERRORLEVEL%
- 10  copy notes.txt new
- 11  copy *.* new
- 12  copy notes.txt notes.txt
- 13  dir new /b
- 14  echo kept > out.txt
- 15  echo more >> out.txt
- 16  type out.txt
- 17  type nosuch.txt
- 18  ren out.txt done.txt && del new\*.* && rd new
- 19  ren done.txt notes.txt
- 20  move done.txt c:\tools
- 21  dir c:\tools /b
- 22  nosuch
+  1  echo.on
+  2  set X
+  3  set NOPE
+  4  md new && cd new && echo made
+  5  cd .. || echo not shown
+  6  cd nosuch || echo no such folder
+  7  echo %ERRORLEVEL%
+  8  copy notes.txt new
+  9  copy *.* new
+ 10  copy notes.txt notes.txt
+ 11  dir new /b
+ 12  echo kept > out.txt
+ 13  echo more >> out.txt
+ 14  type out.txt
+ 15  type nosuch.txt
+ 16  ren out.txt done.txt && del new\*.* && rd new
+ 17  ren done.txt notes.txt
+ 18  move done.txt c:\tools
+ 19  dir c:\tools /b
+ 20  nosuch
+ 21  echo %ERRORLEVEL%
+ 22  a one two
  23  echo %ERRORLEVEL%
- 24  a one two
- 25  echo %ERRORLEVEL%
- 26  b && echo after b
- 27  b || echo not after a success
- 28  tool /x
- 29  run
- 30  where b
- 31  where tool.exe
- 32  where nosuch
- 33  c:\bin\a.com direct
- 34  start tool
- 35  dir | sort
+ 24  b && echo after b
+ 25  b || echo not after a success
+ 26  tool /x
+ 27  run
+ 28  where b
+ 29  where tool.exe
+ 30  where nosuch
+ 31  c:\bin\a.com direct
+ 32  start tool
+ 33  dir | sort
+ 34  dir /b *.txt > list.txt
+ 35  del list.txt
  36  path
  37  path c:\bin
  38  where b

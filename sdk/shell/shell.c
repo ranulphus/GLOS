@@ -401,6 +401,10 @@ static int cmd_dir(struct sh *s, int argc, char **argv)
     s->h->dir_free(s->h->ctx, e);
     if (wide && col)
         say(s, "\r\n");
+    if (!files && !dirs && !same(pat, "*.*")) { /* (a name or a pattern, and nothing of it: as DOS says) */
+        err(s, "File not found\r\n");
+        return 1;
+    }
     if (!bare) {
         size_text(bytes, sz, sizeof sz);
         sh_fmt(line, sizeof line, "%10d file(s) %14s bytes\r\n%10d dir(s)\r\n", files, sz, dirs);
@@ -662,10 +666,19 @@ static int find_program(const struct sh *s, const char *name, char *found, unsig
     return -1;
 }
 
+/* ECHO. (a line of its own, or text that begins with a word ECHO would take for ON or OFF) */
+static int echo_dot(const char *w)
+{
+    return upper((unsigned char)w[0]) == 'E' && upper((unsigned char)w[1]) == 'C' && upper((unsigned char)w[2]) == 'H'
+           && upper((unsigned char)w[3]) == 'O' && w[4] == '.';
+}
+
 static int is_builtin(const struct sh *s, const char *w)
 {
     const char *name;
     int i;
+    if (echo_dot(w))
+        return 1;
     for (i = 0; (name = command_name(s, i)) != 0; i++)
         if (same(w, name))
             return 1;
@@ -749,7 +762,8 @@ static int run_one(struct sh *s, const char *cmd)
     argc = split_words(copy, argv, 32);
     if (!argc)
         return s->errorlevel;
-    if (!is_builtin(s, argv[0])) {
+    if (!is_builtin(s, argv[0]) || strpbrk(line, "|<")) {   /* (a built-in in a pipe, or with its input from a
+                                                               file, is the DOS's own until S4) */
         int st = run_program(s, line, 0);
         return st > 0 ? SH_UNDER_WAY : st < 0 ? 1 : 0;
     }
@@ -822,9 +836,10 @@ static int run_one(struct sh *s, const char *cmd)
         }
     } else if (same(argv[0], "TYPE")) {
         r = cmd_type(s, argc, argv);
-    } else if (same(argv[0], "ECHO")) {
+    } else if (same(argv[0], "ECHO") || echo_dot(argv[0])) {
         const char *t = line + 4;
         if (*t == '.') {
+            say(s, t + 1);
             say(s, "\r\n");
         } else {
             while (*t == ' ')
@@ -841,17 +856,16 @@ static int run_one(struct sh *s, const char *cmd)
         r = cmd_set(s, argc, argv, line);
     } else if (same(argv[0], "PATH") || same(argv[0], "PROMPT")) {
         const char *t = line + strlen(argv[0]);
-        char l[300];
+        char l[300], name[8];
+        sh_fmt(name, sizeof name, "%s", argv[0]);
+        upper_all(name);
         while (*t == ' ' || *t == '=')
             t++;
         if (!*t) {
-            const char *v = var_get(s, argv[0]);
-            sh_fmt(l, sizeof l, "%s=%s\r\n", argv[0], v ? v : "");
+            const char *v = var_get(s, name);
+            sh_fmt(l, sizeof l, "%s=%s\r\n", name, v ? v : "");
             say(s, l);
         } else {
-            char name[8];
-            sh_fmt(name, sizeof name, "%s", argv[0]);
-            upper_all(name);
             var_set(s, name, t);
         }
     } else if (same(argv[0], "CLS")) {

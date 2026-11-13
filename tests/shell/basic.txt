@@ -17,6 +17,7 @@ file C:\TOOLS\RUN.BAT x
 > set X=hello
 > echo %X% world, %% and %ERRORLEVEL%
 > echo.
+> echo.on
 > set X
 > set NOPE
 > md new && cd new && echo made
@@ -55,6 +56,9 @@ ended 0
 ended 0
 > start tool
 > dir | sort
+> dir /b *.txt > list.txt
+cat C:\WORK\LIST.TXT
+> del list.txt
 > path
 > path c:\bin
 > where b
