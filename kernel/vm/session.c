@@ -67,6 +67,8 @@ static struct session {
     u8 ending;                                  /* its end's work is under way */
     u8 console;                                 /* a console job's (M9): in its app's window, the desktop up ... */
     u8 full;                                    /* ... until it wanted the screen */
+    u8 graphic;                                 /* ... and the BIOS's mode byte says a graphics mode meanwhile
+                                                   (console_graphic) */
     u32 bios0;                                  /* the BIOS's tick count when it began */
     u32 irq0;                                   /* the PC's timer's interrupts until then */
     u16 env_seg, env_old;                       /* the environment GLOS made, and the EXEC block's own */
@@ -129,7 +131,7 @@ static u16 owner(u32 vec)
 static int remode_to(u8 mode)
 {
     struct rmregs r;
-    if ((vm_rd8(0x449) & 0x7F) == (mode & 0x7F))
+    if ((session_bios_mode() & 0x7F) == (mode & 0x7F))
         return 0;
     memset(&r, 0, sizeof r);
     r.eax = mode & 0x7F;
@@ -233,18 +235,42 @@ static int pit_moved(void)
     return (inb(0x40) & 0x3F) != 0x34 || n > want + 2 || n + 2 < want;
 }
 
+/* A console job's program on a PC in a text mode (no desktop: a login's): the BIOS's mode byte (0040:0049)
+   says a graphics mode while it runs in its terminal. MS-DOS 7.1's console driver writes characters straight
+   into the text screen's memory while that byte says a text mode, and calls the BIOS's teletype only at a row's
+   end and for the control characters: at a login on bench-g400 the first 79 characters any program wrote after
+   GLOS's start went to the PC's bottom row, and the terminal had the rest (2026-11-13). In a graphics mode a
+   console driver has only the BIOS to write with, which is GLOS's to answer (display_quiet); with the desktop
+   up the byte says the desktop's mode, and that is how it always worked there. The program asking the BIOS
+   for the mode is told 3, as under the desktop. session_bios_mode() is the byte as it really is. */
+static void console_graphic(int on)
+{
+    if (on && !ses.graphic && !display_desktop_bpp() && (ses.mode <= 3 || ses.mode == 7)) {
+        ses.graphic = 1;
+        vm_wr8(0x449, 0x12);
+    } else if (!on && ses.graphic) {
+        ses.graphic = 0;
+        if (vm_rd8(0x449) == 0x12)              /* (not a mode the program has set since) */
+            vm_wr8(0x449, ses.mode);
+    }
+}
+
+u8 session_bios_mode(void) { return ses.graphic ? ses.mode : vm_rd8(0x449); }
+
 static void end(const char *why)
 {
     struct rmregs r;
     u32 v, fixed = 0, ticks;
-    u8 mode = vm_rd8(0x449);
+    u8 mode;
     int remode;
 
     gdbp_program_end(0);                        /* (glos gdb: its program has gone) */
     shot_session_end();
+    console_graphic(0);
     if (ses.console && !ses.full)
         display_console_trap(0);                /* (a console job's, still in its window: the desktop's as it was) */
     ses.console = ses.full = 0;
+    mode = vm_rd8(0x449);
     ses.active = 0;
     ses.ending = 1;                             /* (apps wait on until this is done) */
     vm_direct(0);                               /* (before the BIOS calls: they run at IOPL 0) */
@@ -491,8 +517,10 @@ void session_exec(const struct trapframe *tf)
     ses.rtc_b = vm.rtc_b;
     ses.kbc_cmd = vkbc_cmd();
     memcpy(ses.ivt, vm_ptr(0), sizeof ses.ivt);
-    if (ses.console)
+    if (ses.console) {
         vm_int10_hook(1);                       /* (after the vectors are noted: the session's end finds them as they were) */
+        console_graphic(1);
+    }
     ses.bios0 = vm_rd32(0x46C);
     ses.irq0 = cpu_irq_count(0);
     ses.grab = 0;
@@ -622,6 +650,7 @@ void session_console_full(void)
     if (!session_console())
         return;
     ses.full = 1;
+    console_graphic(0);
     display_console_trap(0);
     display_session(1);
     agent_vm_console_full();
@@ -673,5 +702,5 @@ u32 session_stat(char *buf, u32 max)
     if (!ses.active)
         return (u32)ksnprintf(buf, max, "null");
     return (u32)ksnprintf(buf, max, "{\"n\":%u,\"program\":\"%s\",\"direct\":%u,\"mode\":%u,\"ticks\":%u}", ses.n,
-                          ses.prog, vm.direct, vm_rd8(0x449) & 0x7Fu, timer_ticks() - ses.t0);
+                          ses.prog, vm.direct, session_bios_mode() & 0x7Fu, timer_ticks() - ses.t0);
 }

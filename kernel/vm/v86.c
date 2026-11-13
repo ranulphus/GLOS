@@ -390,7 +390,7 @@ static void vm_exec_snap(void)
     s->rtc_a = vm.rtc_a;
     s->rtc_b = vm.rtc_b;
     s->kbc_cmd = vkbc_cmd();
-    s->mode = vm_rd8(0x449);
+    s->mode = session_bios_mode();
     s->leds = vm_rd8(0x417) & 0x70;
 }
 

@@ -7,6 +7,10 @@
  *   CONIN tty TEXT      TEXT through the BIOS's teletype (INT 10h 0Eh): "TTY TEXT"
  *   CONIN far TEXT      TEXT through the teletype by PUSHF and a far call through the INT 10h vector, as
  *                       MS-DOS 7.1's console driver writes (no INT for a trap to see): "TEXT"
+ *   CONIN drv TEXT      TEXT as MS-DOS 7.1's console driver writes it: while the BIOS's mode byte (0040:0049)
+ *                       says a text mode, straight into the text screen's memory at the cursor, which moves
+ *                       on (the teletype only at a row's last column); in any other mode by the teletype,
+ *                       called far. Then CR LF by the teletype.
  *   CONIN cls           INT 10h 06h over the whole screen, then "CLS done"
  *   CONIN b800          "GLOS" written into the text screen at B800:0000, then "B800 done"
  *   CONIN mode          INT 10h 0003h (a mode set), then "MODE done"
@@ -93,6 +97,21 @@ int main(int argc, char **argv)
         for (; *t; t++)
             far_tty((unsigned char)*t);
         say("\r\n");
+    } else if (!strcmp(argv[1], "drv")) {
+        const char *t = argc > 2 ? argv[2] : "";
+        unsigned char far *bda = (unsigned char far *)MK_FP(0x40, 0);
+        for (; *t; t++) {
+            unsigned mode = bda[0x49], cols = bda[0x4A], col = bda[0x50], row = bda[0x51];
+            if ((mode <= 3 || mode == 7) && col + 1 < cols) {
+                unsigned char far *scr = (unsigned char far *)MK_FP(mode == 7 ? 0xB000 : 0xB800, 0);
+                scr[(row * cols + col) * 2] = (unsigned char)*t;
+                bda[0x50] = (unsigned char)(col + 1);
+            } else {
+                far_tty((unsigned char)*t);
+            }
+        }
+        far_tty('\r');
+        far_tty('\n');
     } else if (!strcmp(argv[1], "cls")) {
         r.x.ax = 0x0600;
         r.h.bh = 0x07;

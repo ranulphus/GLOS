@@ -12,9 +12,11 @@ in its `docs/milestones-*.md`.
   ...; `GLOS name` as before). A GLOS app started there goes on beside the shell and still writes to that
   terminal.
 - A program started at a login writes to its terminal on a PC without a desktop too, whichever way DOS writes
-  to the screen. (MS-DOS 7.1's console driver calls the video BIOS without an INT; at a login on such a PC
-  nothing a program wrote arrived, and it went to the PC's own screen instead. Seen on bench-g400.) A program
-  that takes the screen (a mode set, the VGA's ports) has the PC's own from there, and the terminal says so.
+  to the screen. (MS-DOS 7.1's console driver calls the video BIOS without an INT, and in a text mode writes
+  most characters straight into the screen's memory; at a login on such a PC what a program wrote went to the
+  PC's own screen instead. Seen on bench-g400. While such a program runs, the BIOS's mode byte says a graphics
+  mode, as it does under the desktop, so the driver has only the BIOS to write with.) A program that takes the
+  screen (a mode set, the VGA's ports) has the PC's own from there, and the terminal says so.
 
 ## The idle screen, and CR4 asked for only where CPUID names it (2026-11-12)
 

@@ -75,6 +75,7 @@ struct shsess {
     volatile u8 job_evt;                /* ... it has written, or moved on */
     u8 job_esc;                         /* a key's sequence under way, typed to it */
     u8 job_full;                        /* it has the PC's own screen: its terminal has been told */
+    u8 out_cr;                          /* the last character written to the terminal was a carriage return */
     u32 beside[BESIDE];                 /* apps it started, running beside it: what they write is still shown */
     u8 nbeside;
     char held[256];                     /* ... a line at a time: the part of one that has come so far */
@@ -139,7 +140,8 @@ static void term_text(struct shsess *s, const char *t, int n, int lf)
             k = 0;
         }
         if (c < 0x80) {
-            if (lf && c == '\n' && (!i || t[i - 1] != '\r'))
+            if (lf && c == '\n' && (i ? t[i - 1] != '\r' : !s->out_cr))    /* (a program's CR and LF may come
+                                                   apart, a character at a time) */
                 b[k++] = '\r';
             b[k++] = c;
         } else {
@@ -153,6 +155,8 @@ static void term_text(struct shsess *s, const char *t, int n, int lf)
             b[k++] = (u8)(0x80 | (u & 0x3F));
         }
     }
+    if (n)
+        s->out_cr = t[n - 1] == '\r';
     term_bytes(s, b, k);
 }
 

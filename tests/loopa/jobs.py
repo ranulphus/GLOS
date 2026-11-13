@@ -1931,14 +1931,18 @@ def shell_case(profile, card):
         checks["break"] = t.expect("^C") and t.expect("C:\\TEST>")
         # What a program writes with the BIOS's teletype is its terminal's too, with no desktop as with one: by
         # INT 10h, and by a far call through the vector as MS-DOS 7.1's console driver does (at a login on
-        # bench-g400 nothing a program wrote arrived: 2026-11-13). A program that sets a mode has the PC's own
-        # screen from there, and the terminal is told.
+        # bench-g400 nothing a program wrote arrived: 2026-11-13), and as that driver writes in a text mode,
+        # straight into the screen's memory (CONIN drv). A program that sets a mode has the PC's own screen from
+        # there, and the terminal is told.
         t.send("conin tty teletyped\r")
         checks["teletype"] = t.expect("\nteletyped\n") and t.expect("C:\\TEST>")
         t.send("conin far farcalled\r")
         checks["teletype-far"] = t.expect("\nfarcalled\n") and t.expect("C:\\TEST>")
+        t.send("conin drv asmsdoswrites\r")       # (MS-DOS's driver writes into the text screen in a text mode: the
+        checks["teletype-drv"] = t.expect("\nasmsdoswrites\n") and t.expect("C:\\TEST>")     # mode byte says another)
         rc, out, _ = agent.ssh("C:\\TEST\\SCRTEXT.EXE")
-        checks["not-on-screen"] = rc == 0 and "SCR-END" in out and "teletyped" not in out and "farcalled" not in out
+        checks["not-on-screen"] = rc == 0 and "SCR-END" in out and "teletyped" not in out and "farcalled" not in out \
+            and "asmsdoswrites" not in out
         t.send("conin mode\r")
         checks["full"] = t.expect("has the PC's own screen") and t.expect("C:\\TEST>")
         # GLOS's own commands, the shell's too: by their names here, and by GLOS's old ones; one that fails says so

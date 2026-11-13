@@ -20,6 +20,7 @@
 #include "io.h"
 #include "kprintf.h"
 #include "nic.h"
+#include "session.h"
 #include "sshd.h"
 #include "vm.h"
 
@@ -35,7 +36,7 @@ static void scroll_up(u16 *scr, u32 cols, u32 rows)
 
 static int vcon_write(const char *s, u32 n, int fresh)
 {
-    u8 mode = vm_rd8(0x449), page = vm_rd8(0x462);
+    u8 mode = session_bios_mode(), page = vm_rd8(0x462);
     u32 cols = vm_rd8(0x44A) | (u32)vm_rd8(0x44B) << 8, rows = vm_rd8(0x484) + 1u;
     u32 col, row, base;
     u16 *scr;
