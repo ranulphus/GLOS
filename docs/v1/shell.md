@@ -100,7 +100,7 @@ prompt holds it, and everything else that needs DOS waits behind it.
 | S2 | Sessions in the kernel; the console call; the Terminal app a terminal only; SSH logins; `ssh pc COMMAND` through the shell | Loop A: the same script through both ways in gives the same output |
 | S3 | `DF`, `DU`, `DD`, `DISK`; the setup floppy without FreeDOS's FDISK and FORMAT | `loopa-floppy`; the 486 |
 | S4 | The batch language; GLOS's `COMMAND.COM`; `AUTOEXEC.BAT` run by GLOS; the floppy with FreeDOS's kernel alone | Batch files against FreeDOS's COMMAND.COM; `loopa-floppy` |
-| later | GLOS's own DOS services (files, FAT), then no DOS underneath | its own plan |
+| later | GLOS's own DOS services (files, FAT), then no DOS underneath. With INT 21h answered by GLOS, several DOS programs run at once, each in a machine of its own (text programs in separate terminals): the owner's choice of how that comes (2026-11-13), over giving each program a copy of the DOS's own state | its own plan |
 
 ## Step S2 as designed (2026-11-13; agreed by the owner the same day: GLOS's shell answers `ssh pc COMMAND` from S2)
 
