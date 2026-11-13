@@ -222,6 +222,7 @@ static void dump(const char *why, struct trapframe *tf)
 void panic(const char *why, struct trapframe *tf)
 {
     cli();
+    kprintf_com1_off = 0;                       /* (a cable link's port or not: the last words go out there) */
     kprintf_direct();
     dump(why, tf);
     for (;;)
@@ -241,6 +242,7 @@ static u32 pte_of(u32 lin)
 void double_fault(void)
 {
     u32 v, bad = 0;
+    kprintf_com1_off = 0;
     kprintf_direct();
     kprintf("GLOS-PANIC why=double-fault eip=%p esp=%p cs=%x ss=%x eflags=%x cr2=%p esp0=%p ss0=%x pte=%p\n",
             TSS->eip, TSS->esp, TSS->cs, TSS->ss, TSS->eflags, read_cr2(), TSS->esp0, TSS->ss0,
