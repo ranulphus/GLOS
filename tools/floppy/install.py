@@ -19,7 +19,8 @@ fonts' smoothing data, a GLOS.CFG with the PC's name (--name; one that is there 
 floppy's host key and AUTHKEYS, so the PC stays who it was and lets the same people in).
 
 Nothing is partitioned or formatted without --new-disk, and never a disk whose partition table has an entry
-(DOS's or any other system's: GLOS's kernel reads the table itself) without --erase-existing. Run from the repository's root, after `make all apps floppy`.
+(DOS's or any other system's: GLOS reads the table itself) without --erase-existing. The disk is laid out,
+formatted and made to start by GLOS's own DISK command; FreeDOS's FDISK, FORMAT and SYS are not on the floppy. Run from the repository's root, after `make all apps floppy`.
 """
 import argparse
 import os
@@ -93,27 +94,25 @@ class Pc:
         return out
 
     def parts(self):
-        """The first hard disk's partition table, as GLOS's kernel reads it (glos disktest list, whose lines are
-        the log's): a list of (number, type, MB, fat), or None if the disk can't be read."""
-        log = lambda: self.ssh("glos log", timeout=60)[1].replace("\r", "")
-        before = log().count("GLOS-DISKTEST list done")
-        self.ssh("glos disktest list", timeout=60)
-        t0 = time.time()
-        text = log()
-        while text.count("GLOS-DISKTEST list done") == before:
-            if time.time() - t0 > 120:
-                return None
-            time.sleep(1)
-            text = log()
-        at = text.rfind("GLOS-DISKTEST disk=80 ")
-        m = re.match(r"GLOS-DISKTEST disk=80 sectors=\d+ chs=\S+ edd=\d parts=(-?\d+)\n", text[at:]) if at >= 0 else None
-        if not m or int(m.group(1)) < -1:       # (no first disk, or the BIOS couldn't read it)
-            return None
+        """The first hard disk's partitions, as GLOS's DISK command lists them (GLOS reads the table itself):
+        a list of (number, type, MB, fat), or None if the disk can't be read."""
+        rc, out = self.ssh("glos disk 1", timeout=120)
+        if rc != 0 or not re.match(r"Disk 1: \d+ MB", out) or "can't be read" in out:
+            return None                         # (no first disk, or the BIOS couldn't read it)
         found = []
-        for n, kind, sectors in re.findall(r"GLOS-DISKTEST part disk=80 n=(\d+) type=(\w+) active=\d start=\d+ "
-                                           r"sectors=(\d+)\n", text[at:]):
-            found.append((int(n), kind, int(sectors) // 2048, kind.lower() in ("01", "04", "06", "0b", "0c", "0e")))
+        for n, kind, mb in re.findall(r"^  (\d+)  .*? \[(\w\w)\] +(\d+) MB", out, re.M):
+            found.append((int(n), kind, int(mb), kind.lower() in ("01", "04", "06", "0b", "0c", "0e")))
         return found
+
+    def disk(self, args, what, timeout=3600):
+        """One of DISK's writes there (with /Y: what it destroys was said and agreed to here), its words shown."""
+        print("  > DISK " + args)
+        rc, out = self.ssh("glos disk " + args, timeout=timeout)
+        for line in out.strip().split("\n"):
+            if line.strip():
+                print("    " + line.rstrip())
+        if rc != 0:
+            die("%s failed (exit code %d)" % (what, rc))
 
     def has_c(self):
         """DOS reads a C: there. (Asked only of a disk whose table has a DOS partition. One that isn't formatted
@@ -148,7 +147,8 @@ class Pc:
 
 
 def new_disk(pc, erase):
-    """One partition over the first hard disk, formatted, with FreeDOS from the floppy."""
+    """One partition over the first hard disk, formatted and made to start (GLOS's DISK command), with FreeDOS's
+    kernel and COMMAND.COM copied from the floppy."""
     parts = pc.parts()
     if parts is None:
         die("the PC's first hard disk can't be read (the BIOS has none?)")
@@ -157,29 +157,27 @@ def new_disk(pc, erase):
             "destroy everything on the disk and start anew: --new-disk --erase-existing"
             % ", ".join("%d: type %s, %d MB" % p[:3] for p in parts))
     print("The first hard disk: one partition over all of it%s" % (" (EVERYTHING ON IT IS LOST)" if parts else ""))
-    if parts:
-        pc.dos("FDISK 1 /DELETEALL", "deleting the partitions")
-    pc.dos("FDISK 1 /PRI:MAX", "making the partition")
-    pc.dos("FDISK 1 /ACTIVATE:1", "making it the one the PC starts from")
+    pc.disk("1 NEW /Y", "making the partition")
     parts = pc.parts()
     if not parts or len(parts) != 1 or not parts[0][3]:
         die("the partition wasn't made as expected: %r" % (parts,))
     print("  partition 1: type %s, %d MB" % parts[0][1:3])
-    print("Restarting the PC, so that DOS sees the new partition (from the floppy again)")
+    pc.disk("1 FORMAT 1 /V:GLOS /Y", "formatting the partition")
+    pc.disk("1 BOOT 1 /Y", "writing the boot records")
+    print("Restarting the PC, so that DOS sees the new volume (from the floppy again)")
     pc.ssh("glos reboot --force", timeout=30)
     time.sleep(20)
     if not pc.up(900):
         die("the PC didn't come back after the restart: is the floppy still in the drive, and the drive first in the "
             "BIOS's boot order?")
-    print("Formatting C: and putting FreeDOS on it")
-    pc.dos("FORMAT C: /Q /U /V:GLOS /Z:SERIOUSLY", "formatting C:", timeout=3600)
-    pc.dos("SYS A: C:", "making C: startable")
+    if not pc.has_c():
+        die("C: can't be read after the format")
+    print("Putting FreeDOS on C:")
+    pc.dos("COPY /Y A:\\KERNEL.SYS C:\\", "copying FreeDOS's kernel")
+    pc.dos("COPY /Y A:\\FREEDOS\\BIN\\COMMAND.COM C:\\", "copying FreeDOS's COMMAND.COM")
     pc.dos("MD C:\\FREEDOS", "making C:\\FREEDOS")
     pc.dos("MD C:\\FREEDOS\\BIN", "making C:\\FREEDOS\\BIN")
     pc.dos("COPY /Y A:\\FREEDOS\\BIN\\*.* C:\\FREEDOS\\BIN", "copying FreeDOS's programs")
-    pc.dos("FDISK 1 /IPL", "writing the disk's boot record")
-    if not pc.has_c():
-        die("C: can't be read after the format")
     pc.put_text("/C/FDCONFIG.SYS", NEW_FDCONFIG)
     pc.put_text("/C/AUTOEXEC.BAT", NEW_AUTOEXEC)
 

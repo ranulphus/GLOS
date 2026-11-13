@@ -4,6 +4,15 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The DISK command; the setup floppy without FDISK, FORMAT and SYS (2026-11-13)
+
+- `DISK` (`glos disk` over SSH) lists the BIOS's hard disks and their partitions, and with `/Y` lays a disk out
+  anew (`DISK n NEW`), formats a partition as FAT12, FAT16 or FAT32 (`DISK n FORMAT`) and writes boot records
+  that start FreeDOS (`DISK n BOOT`). Without `/Y` it says what would be lost and does nothing. The disk GLOS or
+  DOS runs from is never written (docs/floppy.md).
+- The setup floppy has no FDISK, FORMAT or SYS any more: `install.py --new-disk` uses `DISK`, and copies
+  FreeDOS's kernel and COMMAND.COM itself. The 720 KB floppy has about 90 KB to spare.
+
 ## `ssh pc` logs in to GLOS's shell (2026-11-13)
 
 - `ssh pc` with no command logs in: GLOS's own shell (DOS's commands and syntax, a history, completion with Tab),

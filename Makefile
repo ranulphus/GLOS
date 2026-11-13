@@ -335,7 +335,8 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/dbg/gdbstub.c kernel/dbg/gdbprog.c kernel/vm/v86.c kernel/vm/session.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c kernel/vm/vcon.c \
          kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/vjoy.c kernel/drv/uhci.c kernel/drv/uhcitd.c kernel/drv/hidparse.c kernel/drv/xpad.c kernel/drv/usbkbd.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
-         kernel/disk/bdisk.c kernel/disk/mbr.c kernel/disk/mbrboot.S \
+         kernel/disk/bdisk.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fatfmt.c kernel/disk/fdboot.S \
+         kernel/disk/diskcmd.c \
          kernel/shell/shsess.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \

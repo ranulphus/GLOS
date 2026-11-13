@@ -34,6 +34,7 @@
 #include "kprintf.h"
 #include "mixer.h"
 #include "mm.h"
+#include "diskcmd.h"
 #include "dos.h"
 #include "dpmi.h"
 #include "gdbprog.h"
@@ -981,6 +982,22 @@ static u32 reboot_at;                           /* glos reboot: the tick to rese
 /* glos gdb (kernel/dbg/gdbprog.c): gdb's channel, a direct-tcpip one to GDBP_PORT. */
 static struct ssh_chan *gdb_chan;
 
+/* glos disk (the shell's DISK: kernel/disk/diskcmd.c): the work is a thread's; what it says, as it says it. */
+static int disk_turn(struct ssh_chan *ch, void *arg)
+{
+    char b[512];
+    u32 n;
+    int code = 0, done = diskcmd_done(arg, &code);      /* (asked first: what it said before its end is all read) */
+    while ((n = diskcmd_read(arg, b, sizeof b)) != 0)
+        ssh_chan_write(ch, 0, (const uint8_t *)b, n);
+    if (!done)
+        return 0;
+    ssh_chan_exit(ch, (uint32_t)code);
+    return 1;
+}
+
+static void disk_drop(void *arg) { diskcmd_free(arg); }
+
 static void gdb_send(const u8 *d, u32 n)
 {
     if (gdb_chan)
@@ -1349,6 +1366,14 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             ssh_chan_exit(ch, 1);
         } else {
             ssh_chan_exit(ch, 0);
+        }
+    } else if (!strcmp(cmd, "glos disk") || !strncmp(cmd, "glos disk ", 10)) {
+        struct diskcmd *d = diskcmd_start(cmd[9] ? cmd + 10 : "", wake_ssh);
+        if (!d || stream_add(ch, disk_turn, disk_drop, d) != 0) {
+            if (d)
+                diskcmd_free(d);
+            say(ch, 1, "glos disk: another DISK command is under way\n");
+            ssh_chan_exit(ch, 1);
         }
     } else if (!strncmp(cmd, "glos disktest ", 14)) {
         if (bdisk_test(cmd + 14) != 0) {

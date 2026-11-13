@@ -6353,6 +6353,111 @@ def bdisk_case(profile, card):
                              info + ("" if not bad else " failed: " + " ".join(bad))), not bad
 
 
+def disk_case(profile, card, mb):
+    """The shell's DISK command (kernel/disk/diskcmd.c; the shell's step S3) on a PC whose GLOS runs from its
+    first disk, with a blank second one (Loop A's --scratch-hdd): the disks listed, the first marked as the one
+    GLOS runs from; nothing of the first written (NEW, FORMAT and BOOT refused, with /Y too); on the second,
+    each write asked without /Y says what it would do and does nothing (exit code 2), and with /Y is done: a
+    table with one partition, of the FAT kind the size asks for (8 MB FAT12, 40 MB FAT16); the volume
+    formatted with a label; boot records. What the image then holds is read here: the table, the volume's
+    first sector, GLOS's boot code in both, and fsck.fat's word on the volume. By its DOS name through the
+    shell too (DISK 2)."""
+    import shutil
+    tag = "disk-%s-%s" % (profile, card)
+    agent = Agent("floppy-" + tag, profile, card, ["--scratch-hdd", str(mb), "--keep-vm", "--cmd", "SERSAY HX-START disk",
+                                                   "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks = {"listen": agent.listening()}
+    kind = "FAT12 [01]" if mb < 16 else "FAT16 [06]"
+    notes = []
+
+    def disk(args, timeout=300):
+        rc, out, err = agent.ssh("glos disk" + (" " + args if args else ""), timeout=timeout)
+        return rc, (out + err).replace("\r", "")
+
+    try:
+        rc, out = disk("")
+        first = re.search(r"Disk 1: \d+ MB, \d+ cylinders, \d+ heads, 63 sectors.*\n  1  FAT\d\d \[\w\w\] +\d+ MB  active .*"
+                          r"GLOS or DOS runs from it\n", out)
+        checks["list"] = rc == 0 and bool(first) and bool(re.search(r"Disk 2: \d+ MB, .*\n  no partition table\n", out))
+        if not checks["list"]:
+            notes.append("list: rc=%d %r" % (rc, out[-500:]))
+        for name, args in (("new", "1 new /y"), ("format", "1 format /y"), ("boot", "1 boot /y")):
+            rc, out = disk(args)
+            checks["own-" + name] = rc == 1 and "runs from" in out and "not written" in out
+        rc, again = disk("1")
+        checks["own-untouched"] = rc == 0 and bool(first) and first.group(0) in again
+        rc, out = disk("2 new")
+        checks["new-asks"] = rc == 2 and "Nothing was done" in out and "DISK 2 NEW /Y" in out
+        rc, out = disk("2")
+        checks["new-not-done"] = rc == 0 and "no partition table" in out
+        rc, out = disk("2 format /y")
+        checks["format-none"] = rc == 1 and "no partitions" in out
+        rc, out = disk("2 new /y")
+        checks["new"] = rc == 0 and "Done." in out and "Restart the PC" in out
+        rc, out = disk("2")
+        checks["new-listed"] = rc == 0 and bool(re.search(r"  1  %s +\d+ MB  active  not formatted\n" % re.escape(kind), out))
+        if not checks["new-listed"]:
+            notes.append("new: %r" % out[-300:])
+        rc, out = disk("2 boot /y")
+        checks["boot-unformatted"] = rc == 1 and "isn't formatted" in out
+        rc, out = disk("2 format /v:scratch")
+        checks["format-asks"] = rc == 2 and "Nothing was done" in out
+        rc, out = disk("2 format 3 /y")
+        checks["format-no-such"] = rc == 1 and "no partition 3" in out
+        rc, out = disk("2 format /v:too.long.a.name /y")
+        checks["label-refused"] = rc == 1 and "11 characters" in out
+        rc, out = disk("2 format /v:scratch /y", timeout=600)
+        checks["format"] = rc == 0 and bool(re.search(r"Done: FAT%s, \d+ clusters of \d+ bytes, \d+ MB for files" % kind[3:5], out))
+        if not checks["format"]:
+            notes.append("format: rc=%d %r" % (rc, out[-300:]))
+        rc, out = agent.ssh("DISK 2")[:2]           # (the shell's own name for it)
+        checks["formatted-listed"] = rc == 0 and bool(re.search(r"  1  %s +\d+ MB  active  volume SCRATCH\n" % re.escape(kind),
+                                                                out.replace("\r", "")))
+        rc, out = disk("2 boot")
+        checks["boot-asks"] = rc == 2 and "Nothing was done" in out
+        rc, out = disk("2 boot /y")
+        checks["boot"] = rc == 0 and "Done." in out
+        checks["no-disk"] = disk("3")[0] == 1
+        rc, out = disk("bogus")
+        checks["usage"] = rc == 2 and "DISK n NEW /Y" in out
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    image = os.path.join(ROOT, "out", "floppy-" + tag, "vm", "scratch.img")
+    try:
+        with open(image, "rb") as f:
+            mbr = f.read(512)
+            start = int.from_bytes(mbr[454:458], "little")
+            count = int.from_bytes(mbr[458:462], "little")
+            f.seek(start * 512)
+            volume = f.read(count * 512)
+    except OSError:
+        mbr, start, count, volume = bytes(512), 0, 0, b""
+    checks["image-table"] = mbr[510:] == b"\x55\xaa" and mbr[446] == 0x80 and mbr[450] == int(kind[7:9], 16) and start == 63 \
+        and count > mb * 2048 * 9 // 10 and not any(mbr[462:510])
+    checks["image-volume"] = volume[510:512] == b"\x55\xaa" and volume[43:54] == b"SCRATCH    " \
+        and volume[54:62] == kind[:5].encode() + b"   " and int.from_bytes(volume[28:32], "little") == 63 \
+        and volume[:3] == b"\xeb\x3c\x90" and b"KERNEL  SYS" in volume[:512]
+    if shutil.which("fsck.fat") and volume:
+        tmp = os.path.join(ROOT, "out", "floppy-" + tag, "volume.img")
+        open(tmp, "wb").write(volume)
+        p = subprocess.run(["fsck.fat", "-n", tmp], capture_output=True)
+        checks["fsck"] = p.returncode == 0
+        if p.returncode:
+            notes.append("fsck.fat: " + (p.stdout + p.stderr).decode("latin-1")[-300:])
+        os.unlink(tmp)
+    shutil.rmtree(os.path.join(ROOT, "out", "floppy-" + tag, "vm"), ignore_errors=True)    # (--keep-vm, for the image)
+    checks["logged"] = all(w in text for w in ("GLOS-DISK new disk=81", "GLOS-DISK format disk=81", "GLOS-DISK boot disk=81"))
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    for n in notes:
+        print("DISK %s: %s" % (tag, n), flush=True)
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("floppy-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
+        not bad
+
+
 def fdboot_case(profile, kind):
     """GLOS's boot code for a FAT volume (kernel/disk/fdboot.S; the shell's step S0): a floppy (FAT12) and
     hard disks' partitions (FAT16 and FAT32, behind GLOS's own first-sector code), each formatted by GLOS's code and
@@ -6493,8 +6598,7 @@ def floppy_case(profile, card, size):
                 f.truncate(63 * 16 * 512 * 200)
             proc, port, opts, serial = start("floppy-%s-raw" % tag, ["--floppy", os.path.join(ROOT, "out", "floppy-test-%d.img" % size)])
             checks["raw-up"] = listening(serial)
-            ssh(port, opts, "FDISK 1 /PRI:MAX")
-            ssh(port, opts, "FDISK 1 /ACTIVATE:1")
+            checks["raw-made"] = ssh(port, opts, "glos disk 1 new /y")[0] == 0     # (the floppy has no FDISK now)
             n0 = log(serial).count("GLOS-SSH listen")
             ssh(port, opts, "glos reboot --force", timeout=30)
             t0 = time.time()
@@ -8090,6 +8194,8 @@ def main():
         res = matrix(floppy_case, cases, a.jobs)
         res += matrix(mbr_case, [(p,) for p in ("bf6", "486dx2") if not a.profile or p in a.profile], a.jobs)
         res += matrix(bdisk_case, [c for c in (("bf6", "ne2kpci"), ("486dx2", "ne2k")) if not a.profile or c[0] in a.profile],
+                      a.jobs)
+        res += matrix(disk_case, [c for c in (("bf6", "ne2kpci", 8), ("486dx2", "ne2k", 40)) if not a.profile or c[0] in a.profile],
                       a.jobs)
         res += matrix(fdboot_case, [(p, k) for p in ("bf6", "486dx2") if not a.profile or p in a.profile
                                     for k in ("floppy", "disk", "disk32")], a.jobs)

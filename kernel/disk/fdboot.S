@@ -295,3 +295,4 @@ fdboot16_end:
 fdboot32_code:
     bootcode 32, 90, 0x40
 fdboot32_end:
+    .section .note.GNU-stack, "", @progbits
