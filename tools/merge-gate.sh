@@ -22,6 +22,9 @@
 # Environment: ONLY="loopa-ssh loopa-api" (those suites alone), JOBS (a suite's emulators at once, 3);
 # remote: GATE_HOST (retro@devserver), GATE_LANES (suites at once, 4), LOOPA_MAX_VMS (8), MGA_NICE (10).
 set -euo pipefail
+# (The whole of it is read before any of it runs, in these braces: a script changed on disk while it waits,
+# by an edit or a checkout, would go on from the wrong place.)
+{
 root=$(cd "$(dirname "$0")/.." && pwd -P)
 cd "$root"
 rgpu=${RETROGPU:-$HOME/RetroGPU}
@@ -150,3 +153,5 @@ cat "$dest/summary.txt"
 [ ! -f "$dest/here.txt" ] || cat "$dest/here.txt"
 echo "merge-gate: logs in $dest"
 [ "$rc" = 0 ] && [ $bad = 0 ]
+exit
+}

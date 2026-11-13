@@ -4,6 +4,9 @@
 # environment. Everything is built, and the suites run, in the dev container (nothing is built or run on
 # that machine's own system). Logs in out/gate/; out/gate/done holds 0 or 1 at the end.
 set -u
+# (The whole of it is read before any of it runs, in these braces: a script changed on disk while it waits,
+# by an edit or a checkout, would go on from the wrong place.)
+{
 cd "$(dirname "$0")/.." || exit 1
 export MGA_EXTRA_DIR=$HOME MGA_NICE LOOPA_MAX_VMS
 export BOX86_DIR=$HOME/.cache/mga-glide/86box-glosgate
@@ -47,3 +50,5 @@ export dev log JOBS
 printf '%s\n' $LOOPA_SUITES | xargs -P "$GATE_LANES" -I{} bash -c 'one {}' || bad=1
 echo "total $(( ($(date +%s) - t0) / 60 )) min" >> $log/summary.txt
 echo $bad > $log/done
+exit
+}
