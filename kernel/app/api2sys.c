@@ -5,6 +5,8 @@
 #include <string.h>
 
 #include "agent.h"
+#include "agent.h"
+#include "shsess.h"
 #include "api2int.h"
 #include "cache.h"
 #include "desk.h"
@@ -261,6 +263,42 @@ void api2_end_event(struct app *a)
     a2_post(a, &ev, 1);
 }
 
+/* TERMINAL (2.1): the terminal of a program run at one (GLOS_INIT_TERMINAL), which is the shell's session that
+   started it (kernel/shell/shsess.c). Refused for a program that has none. */
+static int terminal(struct app *a, struct trapframe *tf)
+{
+    struct glos_sys_terminal q;
+    struct shsess *s;
+    u8 buf[512];
+    u32 size, f, done = 0, n, cols = 0, rows = 0;
+    int ok;
+    if (!a)
+        return a2_fail(tf, GLOS_E_NOT_APP);
+    if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.what > GLOS_TERMINAL_WRITE)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    do {
+        n = q.what == GLOS_TERMINAL_INFO ? 0 : q.length - done < sizeof buf ? q.length - done : sizeof buf;
+        if (q.what == GLOS_TERMINAL_WRITE && n && user_rd((u16)tf->ds, q.buffer + done, buf, n) != 0)
+            return a2_fail(tf, GLOS_E_ARGUMENT);
+        f = irq_save();                         /* (the session is there while the agent's job says so) */
+        s = app_terminal(a) && app_job_of(a) ? agent_job_session(app_job_of(a)) : 0;
+        ok = s && shsess_term_is(s, agent_job_seq(app_job_of(a)), &cols, &rows);
+        if (ok && q.what == GLOS_TERMINAL_READ)
+            n = shsess_term_read(s, buf, n);
+        else if (ok && q.what == GLOS_TERMINAL_WRITE)
+            n = shsess_term_write(s, buf, n);
+        irq_restore(f);
+        if (!ok)
+            return a2_fail(tf, GLOS_E_REFUSED);
+        if (q.what == GLOS_TERMINAL_READ && n && user_wr((u16)tf->ds, q.buffer + done, buf, n) != 0)
+            return a2_fail(tf, GLOS_E_ARGUMENT);
+        done += n;
+    } while (n == sizeof buf && done < q.length);
+    q.done = done;
+    q.cols = cols, q.rows = rows;
+    return a2_wr(tf, &q, sizeof q, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
+}
+
 int api2_sys(struct app *a, struct trapframe *tf, u32 n)
 {
     switch (GLOS_FN(GLOS_AREA_SYS, n)) {
@@ -272,6 +310,8 @@ int api2_sys(struct app *a, struct trapframe *tf, u32 n)
         return api2_sys_log(a, tf);
     case GLOS_SYS_PROGRAMS:
         return programs(tf);
+    case GLOS_SYS_TERMINAL:
+        return terminal(a, tf);
     }
     return a2_fail(tf, GLOS_E_FUNCTION);
 }

@@ -156,10 +156,15 @@ struct glos_init {
     char name[32];              /* its name, shown to the user (UTF-8) */
     char help[32];              /* its page in Help, or "" */
     char category[32];          /* its Start menu group ("Accessories", "Games"), or "" */
-    unsigned flags;             /* none yet: 0 */
+    unsigned flags;             /* GLOS_INIT_ */
     unsigned app;               /* -> its id */
     unsigned why;               /* -> INIT refused (GLOS_E_INIT): GLOS_WHY_ */
 };
+#define GLOS_INIT_TERMINAL 1    /* 2.1: a program that is run at a terminal (an SSH client, a pager): a shell's
+                                   session that starts it at one waits for its end, as for a DOS program, and
+                                   the terminal is the program's meanwhile, by SYS's TERMINAL: the bytes it
+                                   writes go there as they are, and what is typed comes as the terminal sent
+                                   it. Started anywhere else it has no terminal (TERMINAL: GLOS_E_REFUSED) */
 #define GLOS_WHY_ALREADY   1    /* it is an app already */
 #define GLOS_WHY_NESTED    2    /* a child program's, or from a handler or a callback */
 #define GLOS_WHY_16BIT     3    /* a 16-bit DPMI program */
@@ -1972,6 +1977,22 @@ struct glos_wait_any {
 #define GLOS_SYS_KILL     GLOS_FN(GLOS_AREA_SYS, 1)     /* struct glos_sys_kill: a program ended */
 #define GLOS_SYS_LOG      GLOS_FN(GLOS_AREA_SYS, 2)     /* struct glos_sys_log: GLOS's log, from a place on */
 #define GLOS_SYS_PROGRAMS GLOS_FN(GLOS_AREA_SYS, 3)     /* struct glos_sys_stat: struct glos_program for each */
+#define GLOS_SYS_TERMINAL GLOS_FN(GLOS_AREA_SYS, 4)     /* 2.1, struct glos_sys_terminal: a GLOS_INIT_TERMINAL
+                                                           program's terminal */
+
+struct glos_sys_terminal {
+    unsigned size;
+    unsigned what;              /* GLOS_TERMINAL_ */
+    unsigned buffer, length;    /* READ: where to, and the room; WRITE: the bytes */
+    unsigned done;              /* -> READ: the bytes there were; WRITE: those taken (the rest again later) */
+    unsigned cols, rows;        /* -> the terminal's size now */
+};
+#define GLOS_TERMINAL_INFO  0   /* its size alone */
+#define GLOS_TERMINAL_READ  1   /* what was typed, as the terminal sent it (an xterm's sequences for its keys) */
+#define GLOS_TERMINAL_WRITE 2   /* bytes for it, as they are (UTF-8, an xterm's sequences) */
+/* (the header alone) more was typed, or the terminal's size changed: TERMINAL again. When the terminal goes
+   (its window closed, its connection lost) the program is ended. */
+#define GLOS_EV_TERMINAL GLOS_EV(GLOS_AREA_SYS, 2)
 
 struct glos_sys_stat {
     unsigned size;

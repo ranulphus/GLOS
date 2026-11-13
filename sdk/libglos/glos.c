@@ -76,7 +76,9 @@ static void copy(char *dst, const char *src, unsigned room)
     }
 }
 
-int glos_init(const char *name, const char *help, const char *category)
+int glos_init(const char *name, const char *help, const char *category) { return glos_init_as(name, help, category, 0); }
+
+int glos_init_as(const char *name, const char *help, const char *category, unsigned flags)
 {
     struct glos_init in;
     int r;
@@ -84,6 +86,7 @@ int glos_init(const char *name, const char *help, const char *category)
     in.size = sizeof in;
     in.major = GLOS_MAJOR;
     in.minor = GLOS_MINOR;
+    in.flags = flags;
     copy(in.name, name, sizeof in.name);
     copy(in.help, help, sizeof in.help);
     copy(in.category, category, sizeof in.category);
@@ -944,6 +947,25 @@ int glos_job_status(glos_handle job, struct glos_job_status *out)
 }
 
 /* ---- SYS */
+
+static int terminal(unsigned what, const void *buf, unsigned length, unsigned *cols, unsigned *rows)
+{
+    struct glos_sys_terminal q = { sizeof q, what, (unsigned)buf, length, 0, 0, 0 };
+    int r = raw(GLOS_SYS_TERMINAL, &q, 0);
+    if (r) {
+        last_error = r;
+        return -1;
+    }
+    if (cols)
+        *cols = q.cols;
+    if (rows)
+        *rows = q.rows;
+    return (int)q.done;
+}
+
+int glos_terminal_size(unsigned *cols, unsigned *rows) { return terminal(GLOS_TERMINAL_INFO, 0, 0, cols, rows); }
+int glos_terminal_read(void *buf, unsigned room) { return terminal(GLOS_TERMINAL_READ, buf, room, 0, 0); }
+int glos_terminal_write(const void *data, unsigned length) { return terminal(GLOS_TERMINAL_WRITE, data, length, 0, 0); }
 
 int glos_sys_stat(unsigned kind, void *buf, unsigned room, unsigned *length, unsigned *count)
 {

@@ -28,6 +28,10 @@ void shsess_free(struct shsess *s);                      /* the terminal has gon
 u32 shsess_feed(struct shsess *s, int stream, const u8 *d, u32 n);       /* (the ssh thread) what a command of the
                                                             server's wrote for it: the bytes taken */
 void shsess_fed(struct shsess *s, int code);             /* ... and that command's end */
+/* A GLOS_INIT_TERMINAL app's side (interrupts off; kernel/app/api2sys.c): 1 if the terminal is job seq's app's. */
+int shsess_term_is(struct shsess *s, u32 seq, u32 *cols, u32 *rows);
+u32 shsess_term_read(struct shsess *s, u8 *buf, u32 room);      /* what was typed for it */
+u32 shsess_term_write(struct shsess *s, const u8 *d, u32 n);    /* bytes for the terminal: those taken */
 void shsess_turn(void);                                  /* the ssh thread's turn: sessions freed whose threads
                                                             have ended since shsess_free() */
 

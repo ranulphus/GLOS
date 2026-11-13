@@ -28,6 +28,7 @@
 #include "glos/cp.h"
 #include "glos/region.h"
 #include "glos/api.h"
+#include "app.h"
 #include "agent.h"
 #include "dos.h"
 #include "io.h"
@@ -77,6 +78,10 @@ struct shsess {
     u8 job_esc;                         /* a key's sequence under way, typed to it */
     u8 job_full;                        /* it has the PC's own screen: its terminal has been told */
     u8 out_cr;                          /* the last character written to the terminal was a carriage return */
+    u8 fg;                              /* the program that runs is a GLOS_INIT_TERMINAL app: the terminal is its,
+                                           bytes each way as they are (shsess_term_*) */
+    u8 fgin[1024];                      /* ... what was typed for it */
+    volatile u32 fh, ft;
     u32 beside[BESIDE];                 /* apps it started, running beside it: what they write is still shown */
     u8 nbeside;
     char held[256];                     /* ... a line at a time: the part of one that has come so far */
@@ -560,6 +565,30 @@ static int h_run(void *ctx, const char *command, const char *prog, const char *n
     return 1;
 }
 
+/* The app that has the terminal is told: more was typed, or the size changed. */
+static void fg_tell(struct shsess *s)
+{
+    struct kevent e;
+    struct app *a;
+    u32 f = irq_save();
+    if (s->fg && s->job_on && (a = app_of_job(s->job)) != 0) {
+        memset(&e, 0, sizeof e);
+        e.type = KEV_TERM;
+        app_event(a, &e);
+    }
+    irq_restore(f);
+}
+
+static void fg_key(struct shsess *s, int c)
+{
+    if (s->ft - s->fh < sizeof s->fgin) {       /* (typed faster than it reads: lost past a kilobyte) */
+        s->fgin[s->ft % sizeof s->fgin] = (u8)c;
+        __asm__ volatile("" ::: "memory");
+        s->ft++;
+    }
+    fg_tell(s);
+}
+
 /* What the program has written, to the terminal; its end, to the shell. */
 static void job_turn(struct shsess *s)
 {
@@ -581,7 +610,18 @@ static void job_turn(struct shsess *s)
         s->job_full = 1;
         term_text(s, full, (int)sizeof full - 1, 1);
     }
-    if (gone || st == GLOS_JS_DONE || (st == GLOS_JS_APP && s->tty)) {
+    if (!gone && st == GLOS_JS_APP && s->tty && !s->fg) {     /* an app now: one run at a terminal has this one,
+                                                   and the shell waits for its end as for a DOS program */
+        u32 f = irq_save();
+        struct app *a = app_of_job(s->job);
+        if (a && app_terminal(a)) {
+            s->fh = s->ft = 0;
+            s->fg = 1;
+        }
+        irq_restore(f);
+    }
+    if (gone || st == GLOS_JS_DONE || (st == GLOS_JS_APP && s->tty && !s->fg)) {
+        s->fg = 0;
         if (!gone && s->tty) {                  /* what was typed to it and it never read: the characters of it */
             u16 left[64];
             int i, k = agent_app_keys(s, s->job, left, 64);
@@ -859,6 +899,7 @@ static int key(struct shsess *s)
             irq_restore(f);
             if (s->editing)
                 ed_size(&s->ed, (int)s->cols);
+            fg_tell(s);
             continue;
         }
         if (s->ih == s->it || s->ext_on) {      /* (woken for nothing of ours) */
@@ -968,7 +1009,9 @@ static void session(void *arg)
         if (c == EV_JOB && s->nbeside)
             beside_turn(s);
         if (s->job_on) {                        /* a program runs: what is typed is its; what it writes, ours */
-            if (c >= 0)
+            if (c >= 0 && s->fg)
+                fg_key(s, c);
+            else if (c >= 0)
                 job_key(s, c);
             job_turn(s);
             continue;
@@ -1130,6 +1173,44 @@ void shsess_resize(struct shsess *s, u32 cols, u32 rows)
     s->resized = 1;
     thread_wake(&s->wq);
     irq_restore(f);
+}
+
+/* ---- a GLOS_INIT_TERMINAL app's side (SYS's TERMINAL: kernel/app/api2sys.c), interrupts off. s is the session
+   the agent's job says; seq the job's number. 0 if the terminal isn't that app's (any more). */
+int shsess_term_is(struct shsess *s, u32 seq, u32 *cols, u32 *rows)
+{
+    if (!s->tty || !s->job_on || s->job != seq || s->closing || s->ended)
+        return 0;
+    if (!s->fg) {                               /* (its first call comes before the session has seen that its
+                                                   program is an app: the terminal is the app's from here) */
+        s->fh = s->ft = 0;
+        s->fg = 1;
+    }
+    *cols = s->cols, *rows = s->rows;
+    return 1;
+}
+
+u32 shsess_term_read(struct shsess *s, u8 *buf, u32 room)
+{
+    u32 n = 0;
+    while (n < room && s->fh != s->ft)
+        buf[n++] = s->fgin[s->fh++ % sizeof s->fgin];
+    return n;
+}
+
+u32 shsess_term_write(struct shsess *s, const u8 *d, u32 n)    /* what there is room for: the bytes taken */
+{
+    u32 room = OUT_RING - (s->ot - s->oh), i;
+    if (n > room)
+        n = room;
+    for (i = 0; i < n; i++)
+        s->out[(s->ot + i) % OUT_RING] = d[i];
+    s->ot += n;
+    if (n) {
+        s->out_cr = d[n - 1] == '\r';
+        s->kick(s->kick_arg);
+    }
+    return n;
 }
 
 int shsess_ended(const struct shsess *s, int *code)

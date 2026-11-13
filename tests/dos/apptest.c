@@ -302,6 +302,40 @@ int main(int argc, char **argv)
         printf("APP-PLAIN version=%x\n", glos_version(&v) == 0 ? v.major << 16 | v.minor : 0);
         return 7;
     }
+    if (!strcmp(mode, "term")) {                /* 2.1: a program run at a terminal (GLOS_INIT_TERMINAL) */
+        unsigned char ev[GLOS_EV_MAX], b[64];
+        char line[200];
+        unsigned cols = 0, rows = 0, c2, r2;
+        int k, i, at, quit = 0;
+        if (glos_init_as("APPTEST", "", "", GLOS_INIT_TERMINAL) != 0)
+            return 3;
+        if (glos_terminal_size(&cols, &rows) != 0) {
+            printf("APP-TERM none error=%d\n", glos_error());
+            return 4;
+        }
+        at = snprintf(line, sizeof line, "TERM cols=%u rows=%u\r\n", cols, rows);
+        glos_terminal_write(line, (unsigned)at);
+        while (!quit) {                         /* each byte typed, back in hexadecimal; q ends it */
+            if (glos_event(ev, sizeof ev, 500, 1u << GLOS_AREA_SYS) < 0)
+                break;
+            while ((k = glos_terminal_read(b, sizeof b)) > 0) {
+                for (i = 0, at = 0; i < k; i++) {
+                    at += snprintf(line + at, sizeof line - (unsigned)at, "<%02x>", b[i]);
+                    quit |= b[i] == 'q';
+                }
+                glos_terminal_write(line, (unsigned)at);
+            }
+            if (k < 0)
+                return 5;                       /* (the terminal isn't ours any more) */
+            if (glos_terminal_size(&c2, &r2) == 0 && (c2 != cols || r2 != rows)) {
+                cols = c2, rows = r2;
+                at = snprintf(line, sizeof line, "\r\nTERM resized cols=%u rows=%u\r\n", cols, rows);
+                glos_terminal_write(line, (unsigned)at);
+            }
+        }
+        glos_terminal_write("\r\n", 2);
+        return 7;
+    }
     if ((r0 = glos_init("APPTEST", "", "")) != 0) {
         if (r0 < 0) {
             printf("APP-NOGLOS\n");

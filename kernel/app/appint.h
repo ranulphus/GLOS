@@ -42,6 +42,7 @@ struct app {
     struct thread *thread;
     struct trapframe start;                     /* where its thread begins: the return of its init call */
     void *job;                                  /* the agent's job it began as, or 0 */
+    u8 terminal;                                /* GLOS_INIT_TERMINAL: a program run at a terminal */
     u16 psp;
     u8 own;                                     /* its program is in GLOS's own folder: it may be the shell */
     char folder[80];                            /* the folder its file is in ("C:\\GLOS") */

@@ -1270,6 +1270,10 @@ void app_exit_turn(void)
     irq_restore(f);
 }
 
+int app_terminal(const struct app *a) { return a->terminal; }
+
+void *app_job_of(const struct app *a) { return a->job; }
+
 struct app *app_of_job(u32 seq)                 /* (interrupts off) the live app that began as that job, or NULL */
 {
     struct app *a;

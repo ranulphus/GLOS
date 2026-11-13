@@ -10,6 +10,9 @@ in its `docs/milestones-*.md`.
   a terminal's size (`glos_job_shell()`), the terminal's bytes by READ and WRITE, its size by the new
   `GLOS_JOB_SIZE` (`glos_job_size()`). The first step of making the Terminal app a terminal of the kernel's
   shell (docs/v1/shell.md, S2c). `VER` says API 2.1; programs built for 2.0 run unchanged.
+- A program can be run at a terminal as a GLOS app (`GLOS_INIT_TERMINAL`, `GLOS_SYS_TERMINAL`): the shell waits
+  for it, and the terminal's bytes are its, each way, as they are. What the SSH client needs to be a program
+  of its own.
 - GLOS's own commands (`PS`, `LOG`, `DISK` ...) no longer need a network card: the thread that runs them starts
   on every PC.
 

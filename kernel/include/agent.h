@@ -37,6 +37,7 @@ int agent_app_forget(void *app, u32 seq);
 void agent_app_gone(void *app);                 /* the app has ended: its jobs killed (or let go, if apps now) */
 u32 agent_jobs_stat(void *out, u32 room);       /* struct kprog for each job */
 u32 agent_job_seq(const void *job);             /* a job's number */
+void *agent_job_session(const void *job);       /* (interrupts off) the shell's session that has it, or NULL */
 u32 agent_job_by(u32 seq);                      /* the app that started it (its id), or 0 */
 /* API 2.0's JOB (kernel/app/api2job.c). */
 struct agent_opts {

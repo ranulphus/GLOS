@@ -76,6 +76,14 @@ void api2_event_1x(struct app *a, const struct kevent *e)
         return;
     }
     irq_restore(f);
+    if (a->v2 && e->type == KEV_TERM) {         /* its terminal has news (kernel/shell/shsess.c): TERMINAL's event */
+        struct glos_ev ev;
+        memset(&ev, 0, sizeof ev);
+        ev.size = sizeof ev;
+        ev.kind = GLOS_EV_TERMINAL;
+        a2_post(a, &ev, 1);                     /* (one waiting already stands for this too) */
+        return;
+    }
     if (a->v2 && e->type == KEV_JOB) {        /* a job's news (kernel/dos/agent.c): JOB's event */
         api2_job_event(a, e->key, (u32)e->x, (u32)e->y);
         return;

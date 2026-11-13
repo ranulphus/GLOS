@@ -21,6 +21,11 @@ int glos_running(void);                                 /* 1 if GLOS 2.0 answers
 
 int glos_version(struct glos_version *v);               /* v->size set by the caller */
 int glos_init(const char *name, const char *help, const char *category);      /* the program becomes an app */
+int glos_init_as(const char *name, const char *help, const char *category, unsigned flags);    /* ... GLOS_INIT_ */
+/* 2.1: the terminal of a program run at one (GLOS_INIT_TERMINAL). Each -1 if it has none (glos_error()). */
+int glos_terminal_size(unsigned *cols, unsigned *rows);                 /* 0, and its size */
+int glos_terminal_read(void *buf, unsigned room);                       /* what was typed: the bytes */
+int glos_terminal_write(const void *data, unsigned length);             /* bytes for it: those taken */
 unsigned glos_app(void);                                /* its id, once it is one */
 unsigned glos_why(void);                                /* why glos_init() was refused (GLOS_WHY_), after GLOS_E_INIT */
 int glos_close(glos_handle h);

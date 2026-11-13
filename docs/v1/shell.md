@@ -207,7 +207,7 @@ else of that is built here.
 |---|---|---|
 | 1 | `GLOS_RUN_SHELL`, `GLOS_JOB_SIZE`; APITEST's cases; the shim's session (the kernel's side and the library's done, 2026-11-13: `kernel/app/api2job.c`, `glos_job_shell()`, `glos_job_size()`, API 2.1, five cases in APITEST's job mode. The kernel's command thread now runs on every PC, with or without a network, since every session asks GLOS's own commands of it. The shim's session comes with step 2) | Loop A's api suite; host tests |
 | 2 | `vt.c`'s scroll-back and selection; the Terminal on a session | The Terminal's scripts, host and Loop A |
-| 3 | `GLOS_SYS_TERMINAL`; SSH.EXE, SFTP.EXE, SSHKEY.EXE | `loopa-sshc`, from the Terminal and from an SSH login |
+| 3 | `GLOS_SYS_TERMINAL`; SSH.EXE, SFTP.EXE, SSHKEY.EXE (the call done, 2026-11-13, before step 2 so that the Terminal keeps its SSH commands until the programs exist. As built: a program says `GLOS_INIT_TERMINAL` at INIT; a session that starts it at a terminal waits for its end; the program reads what is typed and writes its bytes with SYS's TERMINAL call itself (READ, WRITE, INFO for the size) and is told by `GLOS_EV_TERMINAL`, not through DOS's standard input and output, which would cost a trap a character. APPTEST `term` and the ssh suite's login case test it. The three programs are next) | `loopa-sshc`, from the Terminal and from an SSH login |
 
 ## Decided by the owner (2026-11-12)
 

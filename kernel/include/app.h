@@ -89,6 +89,8 @@ u32 app_began_as(u32 id);               /* the agent's job an app began as (its 
 int app_ask_end(u32 id);                /* API 2.0's GLOS_EV_END to an app: 0, or -1 */
 void app_exit_turn(void);               /* glos exit with apps running: asked to end, then ended (the VM thread) */
 struct app *app_by_id(u32 id);          /* (interrupts off) the live app with this id, or NULL */
+int app_terminal(const struct app *a);  /* it said GLOS_INIT_TERMINAL: a program run at a terminal */
+void *app_job_of(const struct app *a);  /* the agent's job it began as, or 0 */
 struct app *app_of_job(u32 seq);        /* (interrupts off) the live app that began as that job (its number), or NULL */
 int app_own(const struct app *a);       /* its program is one of GLOS's own (in GLOS.EXE's folder) */
 

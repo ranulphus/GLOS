@@ -1976,6 +1976,20 @@ def shell_case(profile, card):
             print("LINE-KEPT: %r" % t.text()[-700:], flush=True)
         rc, out, _ = agent.ssh("C:\\TEST\\APPTEST.EXE run A 2")
         checks["app-line"] = rc == 40 and "APP-OK name=A" in out
+        # A program run at a terminal (API 2.1's GLOS_INIT_TERMINAL and SYS's TERMINAL: S2c): the shell waits for
+        # it; the terminal's size is told it; what is typed reaches it as the terminal sent it (Ctrl+C and an
+        # arrow's sequence among it) and what it writes comes as it is; its exit code is the shell's. With no
+        # terminal it has none, and says so.
+        t.send("apptest term\r")
+        checks["term"] = t.expect("TERM cols=80 rows=24\n", 60)
+        t.send("ab\x03\x1b[A")
+        checks["term-raw"] = t.expect("<61><62><03><1b><5b><41>")
+        t.send("q")
+        checks["term-end"] = t.expect("<71>") and t.expect("C:\\TEST>")
+        t.send("echo code %errorlevel%\r")
+        checks["term-code"] = t.expect("code 7\n")
+        rc, out, _ = agent.ssh("C:\\TEST\\APPTEST.EXE term")
+        checks["term-none"] = rc == 4 and "APP-TERM none" in out
         two = Login(agent)                          # a second login beside the first
         checks["second"] = two.expect("C:\\TEST>")
         two.send("echo two\r")

@@ -312,6 +312,11 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   change of the terminal's size; STATUS, the event and CLOSE as for a program; SIGNAL's INT and BREAK are Ctrl+C
   typed, END the session's end (code 255). With no terminal (0 by 0) a line's output comes as it is, errors on
   the second stream. `GLOS_MINOR` is 1; a program built for 2.0 sees nothing change.
+- **2.1: a program run at a terminal** (INIT's flag `GLOS_INIT_TERMINAL`, SYS's `TERMINAL` call, `GLOS_EV_TERMINAL`;
+  built 2026-11-13). An app that says so at INIT and was started by a shell's session at a terminal has that
+  terminal while it runs: the shell waits for its end and takes its exit code; `TERMINAL` reads what was typed
+  as the terminal sent it, writes bytes to it as they are, and gives its size; the event says more was typed or
+  the size changed. Started anywhere else, the call is refused. For the SSH client and its like.
 - **Ownership:** a job belongs to the app that ran it. READ, WRITE and SIGNAL are for its owner. Task Manager's
   "end" uses SYS's kill, which is for any program.
 

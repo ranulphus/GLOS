@@ -452,7 +452,7 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_DEBUG][0] = 0x07;             /* ATTACH, READ, WRITE */
     v.functions[GLOS_AREA_SECRETS][0] = 0x07;           /* PUT, GET, REMOVE */
     v.functions[GLOS_AREA_NET][0] = 0x7F;               /* RESOLVE, CONNECT, SEND, RECEIVE, LISTEN, ACCEPT, STATE */
-    v.functions[GLOS_AREA_SYS][0] = 0x0F;               /* STAT, KILL, LOG, PROGRAMS */
+    v.functions[GLOS_AREA_SYS][0] = 0x1F;               /* STAT, KILL, LOG, PROGRAMS, TERMINAL */
     v.functions[GLOS_AREA_SETTINGS][0] = 0xFF;          /* GET, SET, SECTIONS, KEYS, SCHEMA, WATCH, THEME, REGION */
     v.functions[GLOS_AREA_IDLE][0] = 0x0F;              /* TIME, AWAKE, SAVER, POWER */
     return a2_wr(tf, &v, sizeof v, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, (GLOS_MAJOR << 16) | GLOS_MINOR);
@@ -476,6 +476,8 @@ static int init(struct trapframe *tf)
         return a2_fail(tf, GLOS_E_INIT);
     }
     a = app_pending();                          /* (its name, Help page and Start menu group, for later steps) */
+    if (a)
+        a->terminal = (in.flags & GLOS_INIT_TERMINAL) != 0;    /* (2.1: run at a terminal, a session waits for it) */
     if (a && a->v2) {
         in.name[sizeof in.name - 1] = in.help[sizeof in.help - 1] = in.category[sizeof in.category - 1] = 0;
         memcpy(a->v2->name, in.name, sizeof in.name);

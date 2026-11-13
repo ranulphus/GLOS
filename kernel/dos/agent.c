@@ -541,6 +541,14 @@ void agent_app_gone(void *app)
 
 u32 agent_job_seq(const void *job) { return ((const struct agent_job *)job)->seq; }
 
+/* (interrupts off) The shell's session that started the job and still has it (kernel/shell/shsess.c), or NULL:
+   an app's job, nobody's, or one the session has let go. */
+void *agent_job_session(const void *job)
+{
+    const struct agent_job *j = job;
+    return j->state != J_FREE && j->notify ? j->app_owner : 0;
+}
+
 u32 agent_job_by(u32 seq)                       /* the app that started a job (its id), or 0 */
 {
     u32 i, f = irq_save(), id = 0;

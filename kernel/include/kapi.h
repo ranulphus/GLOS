@@ -20,6 +20,7 @@
 #define KEV_CLOSE    5          /* the user asked for the window to be closed */
 #define KEV_LAUNCH   6          /* (the shell's) the launcher was asked for */
 #define KEV_SYSKEY   7          /* (the shell's) Ctrl-Alt-Del: the task list */
+#define KEV_TERM     9          /* a GLOS_INIT_TERMINAL app's terminal: more was typed, or its size changed */
 #define KEV_JOB      8          /* a job of the app's moved on: key its number, x its state, y its exit code */
 #define KEV_FILES    9          /* a watched folder changed: key the watch's id */
 #define KEV_WHEEL    11         /* the wheel turned over a window: key the notches (signed) */
