@@ -992,12 +992,15 @@ static struct ssh_chan *gdb_chan;
 /* glos disk (the shell's DISK: kernel/disk/diskcmd.c): the work is a thread's; what it says, as it says it. */
 static int disk_turn(struct ssh_chan *ch, void *arg)
 {
+    static u8 piece[4096];
     char b[512];
     u32 n;
     int code = 0, done = diskcmd_done(arg, &code);      /* (asked first: what it said before its end is all read) */
     while ((n = diskcmd_read(arg, b, sizeof b)) != 0)
-        ssh_chan_write(ch, 0, (const uint8_t *)b, n);
-    if (!done)
+        ssh_chan_write(ch, diskcmd_errors_apart(arg), (const uint8_t *)b, n);
+    while (ssh_chan_pending(ch) < ROOM && (n = diskcmd_data(arg, piece, sizeof piece)) != 0)   /* (a DD's bytes) */
+        ssh_chan_write(ch, 0, piece, n);
+    if (!done || ssh_chan_pending(ch) >= ROOM)  /* (more of its bytes may wait for room: the next turn) */
         return 0;
     ssh_chan_exit(ch, (uint32_t)code);
     return 1;
@@ -1416,12 +1419,14 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         } else {
             ssh_chan_exit(ch, 0);
         }
-    } else if (!strcmp(cmd, "glos disk") || !strncmp(cmd, "glos disk ", 10)) {
-        struct diskcmd *d = diskcmd_start(cmd[9] ? cmd + 10 : "", wake_ssh);
+    } else if (!strcmp(cmd, "glos disk") || !strncmp(cmd, "glos disk ", 10) || !strcmp(cmd, "glos dd")
+               || !strncmp(cmd, "glos dd ", 8)) {
+        int dd = cmd[6] == 'd';
+        struct diskcmd *d = diskcmd_start(dd ? cmd[7] ? cmd + 8 : "" : cmd[9] ? cmd + 10 : "", wake_ssh, dd);
         if (!d || stream_add(ch, disk_turn, disk_drop, d) != 0) {
             if (d)
                 diskcmd_free(d);
-            say(ch, 1, "glos disk: another DISK command is under way\n");
+            say(ch, 1, "glos disk: another DISK or DD command is under way\n");
             ssh_chan_exit(ch, 1);
         }
     } else if (!strncmp(cmd, "glos disktest ", 14)) {

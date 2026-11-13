@@ -75,7 +75,14 @@ FORMAT and SYS did for this floppy, over the BIOS's disks.
   can't say, or one isn't found, no hard disk is written at all. Started from this floppy, the hard disks are
   free.
 - **After a write the PC is to be restarted** before DOS uses that disk: DOS knows it as it was.
-- **Not yet:** more than one partition, logical drives made (they are listed), floppies, `DD`, `DF` and `DU`.
+- **Not yet:** more than one partition, logical drives made (they are listed), a floppy formatted.
+
+`DD IF=source OF=destination [SKIP=n] [SEEK=n] [COUNT=n] [/Y]` is the raw copy beside it: a source or destination
+is `DISKn` (a hard disk), `DISKn:p` (its partition p), `A:` (a floppy), a file by its full path, or `-`, the
+connection (as a destination: `ssh pc "glos dd if=disk1 of=-" > disk.img` images a disk onto another
+computer). SKIP, SEEK and COUNT are in sectors of 512 bytes. The same rules as `DISK`: a disk is written only
+with `/Y`, after what would be lost is said, and never the disk, volume or floppy GLOS or DOS runs from. From
+the connection onto a disk is not there yet (the image goes by SFTP into a file first).
 
 ## Limits
 

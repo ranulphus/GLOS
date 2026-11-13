@@ -718,11 +718,11 @@ static const struct {
     { "USB", "usb" }, { "JOY", "joy" }, { "CLIP", "clip" }, { "AUDIO", "audio" }, { "CACHE", "cache" },
     { "IDLE", "idle" }, { "RESTART", "restart" }, { "REBOOT", "reboot" },
     { "SENDTEXT", "type" }, { "SENDKEYS", "key" }, { "SENDMOUSE", "mouse" }, { "SHUTDOWN", "exit" },
-    { "CLOCK", "time" }, { "SYSMEM", "mem" }, { "NETWORK", "net" }, { "DISK", "disk" } };
+    { "CLOCK", "time" }, { "SYSMEM", "mem" }, { "NETWORK", "net" }, { "DISK", "disk" }, { "DD", "dd" } };
 
 static const char *const own_names[] = { "GLOS", "PS", "KILL", "LOG", "STAT", "RUN", "CONFIG", "DISPLAY", "DESK", "SHOT",
     "REC", "SECRETS", "USB", "JOY", "CLIP", "AUDIO", "CACHE", "IDLE", "RESTART", "REBOOT", "SENDTEXT", "SENDKEYS",
-    "SENDMOUSE", "SHUTDOWN", "CLOCK", "SYSMEM", "NETWORK", "DISK", 0 };
+    "SENDMOUSE", "SHUTDOWN", "CLOCK", "SYSMEM", "NETWORK", "DISK", "DD", 0 };
 
 static const char *const own_help[] = {
     "PS, KILL [n], RUN [--exclusive|--app] program   what runs; one ended; a program started GLOS's way",
@@ -731,6 +731,7 @@ static const char *const own_help[] = {
     "CONFIG, DISPLAY, DESK, AUDIO, CACHE, IDLE, CLIP, SECRETS   settings and the desktop",
     "SENDTEXT text, SENDKEYS codes, SENDMOUSE ...    keys and the mouse, as if at the PC",
     "DISK [n [NEW | FORMAT [p] | BOOT [p]]]          the hard disks; one laid out anew, formatted, made to start",
+    "DD IF=source OF=destination [SKIP= SEEK= COUNT=]   a raw copy: DISKn, DISKn:p, A:, a file, - (the connection)",
     "SHOT, REC                                       the screen as a picture, a recording",
     "SHUTDOWN, RESTART, REBOOT                       GLOS left, started again; the PC restarted",
     "GLOS name ...       any of those by GLOS's own old name (GLOS TYPE, GLOS EXIT ...)",

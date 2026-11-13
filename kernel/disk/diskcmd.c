@@ -53,7 +53,15 @@ struct diskcmd {
     u32 own[6];                                 /* the serial numbers of the volumes GLOS and DOS run from */
     u32 nown;
     u8 own_unknown;                             /* ... and one of them on a hard disk has none DOS could say */
+    u8 own_floppy;                              /* bit 0: GLOS or DOS runs from A:; bit 1: from B: */
+    u8 dd;                                      /* the command is DD */
+    u8 to_conn;                                 /* DD's output is the connection: what is said goes apart (errors) */
+    u8 *data;                                   /* ... its bytes, a ring the reader empties */
+    volatile u32 dh;                            /* (the worker's) */
+    volatile u32 dt;                            /* (the reader's) */
+    struct waitq roomq;                         /* the worker waits here for room in it */
 };
+#define DATA 32768u
 
 struct vol {
     u8 n;                                       /* 1-4 the table's; 5 on: logical drives, in their order */
@@ -260,6 +268,8 @@ static void own_volumes(struct diskcmd *c)
         char l = letters[i];
         if (l >= 'a' && l <= 'z')
             l = (char)(l - 32);
+        if (l == 'A' || l == 'B')
+            c->own_floppy |= (u8)(1u << (l - 'A'));
         if (!l || l == 'A' || l == 'B')
             continue;                           /* (not said; or a floppy: no hard disk's) */
         for (k = 0; k < i && letters[k] != letters[i]; k++)
@@ -600,6 +610,364 @@ static int do_boot(struct diskcmd *c, u32 n, u32 p, int yes)
     return 0;
 }
 
+
+/* ---- DD: a raw copy between disks, files and the connection
+ *
+ *   DD IF=source OF=destination [SKIP=n] [SEEK=n] [COUNT=n] [/Y]
+ *
+ * A source or destination is DISKn (hard disk n, all of it), DISKn:p (its partition p, one of the table's
+ * four), A: or B: (a floppy, all of it), a file by its full path (C:\IMAGES\DISK.IMG), or - : the connection
+ * the command was given over (as a destination: `ssh pc "glos dd if=disk1 of=-" > disk.img`). SKIP, SEEK and
+ * COUNT are in sectors of 512 bytes: where the source is read from, where the destination is written from,
+ * and how many (all of the source unless said). A disk is written only with /Y, after what it would
+ * destroy is said, and never the disk, volume or floppy GLOS or DOS runs from. A file is written over, as COPY
+ * does. From the connection to a disk is not here yet. */
+
+struct dd_end {
+    char kind;                                  /* 'd' a disk's sectors, 'f' a file, 'c' the connection */
+    u8 drive;                                   /* the BIOS's number */
+    u8 disk, part;                              /* DISKn, and :p (0: all of it); 0, 0: a floppy */
+    u32 start, sectors;                         /* the range on the disk; a file's size, rounded up */
+    u32 bytes;                                  /* a file's size */
+    u16 handle;
+    const char *name;
+};
+
+static void dq(struct dos_req *q, u16 ax, u16 bx, u16 cx, u16 dx)
+{
+    memset(q, 0, sizeof *q);
+    q->n = 1;
+    q->r[0].ax = ax, q->r[0].bx = bx, q->r[0].cx = cx, q->r[0].dx = dx;
+    q->r[0].ds = q->r[0].es = DOS_XFER;
+}
+
+static int dq_made(struct dos_req *q) { return dos_call(q) != 0 || q->error || (q->r[0].flags & 1) ? -1 : 0; }
+
+static int f_open(const char *path, int create, u16 *h)
+{
+    struct dos_req q;
+    char p[128];
+    memset(p, 0, sizeof p);
+    strcpy(p, path);
+    dq(&q, create ? 0x3C00 : 0x3D00, 0, 0, 0);
+    q.in = (const u8 *)p, q.in_len = sizeof p, q.in_at = 0;
+    if (dq_made(&q) != 0)
+        return -1;
+    *h = q.r[0].ax;
+    return 0;
+}
+
+static int f_seek(u16 h, u32 pos, int from_end, u32 *at)
+{
+    struct dos_req q;
+    dq(&q, from_end ? 0x4202 : 0x4200, h, (u16)(pos >> 16), (u16)pos);
+    if (dq_made(&q) != 0)
+        return -1;
+    if (at)
+        *at = (u32)q.r[0].dx << 16 | q.r[0].ax;
+    return 0;
+}
+
+static int f_read(u16 h, u8 *buf, u32 n, u32 *got)
+{
+    struct dos_req q;
+    dq(&q, 0x3F00, h, (u16)n, 0);
+    q.out = buf, q.out_len = n, q.out_at = 0;
+    if (dq_made(&q) != 0)
+        return -1;
+    *got = q.r[0].ax;
+    return 0;
+}
+
+static int f_write(u16 h, const u8 *buf, u32 n)        /* 0; -1; -2: the disk is full */
+{
+    struct dos_req q;
+    dq(&q, 0x4000, h, (u16)n, 0);
+    q.in = buf, q.in_len = n, q.in_at = 0;
+    if (dq_made(&q) != 0)
+        return -1;
+    return q.r[0].ax == n ? 0 : -2;
+}
+
+static void f_close(u16 h)
+{
+    struct dos_req q;
+    dq(&q, 0x3E00, h, 0, 0);
+    (void)dos_call(&q);
+}
+
+/* Bytes for the connection: into the ring, waiting for the reader while it is full. -1: the reader has gone. */
+static int conn_put(struct diskcmd *c, const u8 *d, u32 n)
+{
+    while (n) {
+        u32 room = DATA - (c->dh - c->dt), k = n < room ? n : room, i, f;
+        void (*kick)(void) = c->kick;
+        if (c->gone)
+            return -1;
+        for (i = 0; i < k; i++)
+            c->data[(c->dh + i) & (DATA - 1)] = d[i];
+        c->dh += k, d += k, n -= k;
+        if (kick)
+            kick();
+        if (n) {
+            f = irq_save();
+            if (DATA - (c->dh - c->dt) == 0 && !c->gone)
+                thread_wait(&c->roomq, timer_ticks() + 256);
+            irq_restore(f);
+        }
+    }
+    return 0;
+}
+
+/* One end, from its word (in capitals). 0, or -1 with the reason said. */
+static int dd_end(struct diskcmd *c, struct dd_end *e, const char *w, int dest)
+{
+    static struct layout L;
+    struct bdisk_geo g;
+    u32 i = 0;
+    memset(e, 0, sizeof *e);
+    e->name = w;
+    if (!strcmp(w, "-")) {
+        e->kind = 'c';
+        if (!dest)
+            say(c, "DD: from the connection is not here yet (a file, sent by SFTP, can be the source)\n");
+        return dest ? 0 : -1;
+    }
+    if ((w[0] == 'A' || w[0] == 'B') && w[1] == ':' && !w[2]) {
+        e->kind = 'd', e->drive = (u8)(w[0] - 'A');
+        if (bdisk_geo(e->drive, &g) != 0 || !g.sectors) {
+            say(c, "DD: no floppy drive %s, or nothing in it\n", w);
+            return -1;
+        }
+        if (dest && (c->own_floppy & (1u << e->drive))) {
+            say(c, "DD: %s is the floppy GLOS or DOS runs from: it is not written.\n", w);
+            return -1;
+        }
+        e->sectors = g.sectors;
+        return 0;
+    }
+    if (!strncmp(w, "DISK", 4) && w[4] >= '1' && w[4] <= '4' && (!w[5] || (w[5] == ':' && w[6] >= '1' && w[6] <= '4' && !w[7]))) {
+        e->kind = 'd', e->disk = (u8)(w[4] - '0'), e->part = (u8)(w[5] ? w[6] - '0' : 0);
+        e->drive = (u8)(0x7F + e->disk);
+        if (scan(e->drive, &L) != 0 || L.table < -1) {
+            say(c, "DD: the BIOS has no hard disk %u, or it can't be read\n", e->disk);
+            return -1;
+        }
+        e->sectors = L.g.sectors;
+        if (e->part) {
+            for (i = 0; i < L.nv && L.v[i].n != e->part; i++)
+                ;
+            if (i == L.nv || !L.v[i].start || L.v[i].start >= L.g.sectors || L.v[i].sectors > L.g.sectors - L.v[i].start) {
+                say(c, "DD: disk %u has no partition %u\n", e->disk, e->part);
+                return -1;
+            }
+            e->start = L.v[i].start, e->sectors = L.v[i].sectors;
+        }
+        if (!dest)
+            return 0;
+        if (c->own_unknown)
+            say(c, "DD: DOS doesn't say which disk it and GLOS run from, so no hard disk is written from here.\n");
+        else if (e->part ? own_vol(c, &L.v[i]) : own_disk(c, &L))
+            say(c, "DD: %s is what GLOS or DOS runs from: it is not written.\n", w);
+        else
+            return 0;
+        return -1;
+    }
+    if (!(w[0] >= 'A' && w[0] <= 'Z' && w[1] == ':' && w[2] == '\\' && w[3]) || strlen(w) > 79) {
+        say(c, "DD: %s: DISKn, DISKn:p, A:, a file by its full path (C:\\FOLDER\\NAME), or -\n", w);
+        return -1;
+    }
+    e->kind = 'f';
+    if (dest)
+        return 0;
+    if (f_open(w, 0, &e->handle) != 0 || f_seek(e->handle, 0, 1, &e->bytes) != 0 || f_seek(e->handle, 0, 0, 0) != 0) {
+        say(c, "DD: %s can't be opened\n", w);
+        return -1;
+    }
+    e->sectors = e->bytes / 512 + (e->bytes % 512 != 0);
+    return 0;
+}
+
+static int dd_fail(struct diskcmd *c, const char *what, const char *name, int e, u32 at)
+{
+    if (e == -2)
+        say(c, "DD: %s is full, at sector %u\n", name, at);
+    else if (e == BDISK_BUSY)
+        say(c, "DD: a program has the PC: %s %s stopped at sector %u\n", what, name, at);
+    else if (e > 0)
+        say(c, "DD: %s %s stopped at sector %u: the BIOS's error %02xh\n", what, name, at, e);
+    else
+        say(c, "DD: %s %s stopped at sector %u\n", what, name, at);
+    return 1;
+}
+
+static int num32(const char *w, u32 *v)         /* a count of sectors: decimal, up to 2^32 - 1 */
+{
+    u32 n = 0;
+    if (!*w)
+        return -1;
+    for (; *w; w++) {
+        if (*w < '0' || *w > '9' || n > 429496729u || (n == 429496729u && *w > '5'))
+            return -1;
+        n = n * 10 + (u32)(*w - '0');
+    }
+    *v = n;
+    return 0;
+}
+
+static int run_dd(struct diskcmd *c)
+{
+    struct dd_end in, out;
+    char *w[8], *a = c->args, *src = 0, *dst = 0;
+    u32 nw = 0, i, skip = 0, seek = 0, count = 0xFFFFFFFFu, done = 0, run, k, got, next_say = 0, t0, bytes;
+    int yes = 0, e = 0, ok = 1, has_count = 0;
+    u8 *buf;
+    while (*a) {
+        while (*a == ' ' || *a == '\t')
+            *a++ = 0;
+        if (!*a)
+            break;
+        if (nw == ARRAY_SIZE(w)) {
+            nw = 0;
+            break;
+        }
+        w[nw++] = a;
+        for (; *a && *a != ' ' && *a != '\t'; a++)
+            if (*a >= 'a' && *a <= 'z')
+                *a = (char)(*a - 32);
+    }
+    for (i = 0; i < nw && ok; i++) {
+        if (!strcmp(w[i], "/Y"))
+            yes = 1;
+        else if (!strncmp(w[i], "IF=", 3) && w[i][3])
+            src = w[i] + 3;
+        else if (!strncmp(w[i], "OF=", 3) && w[i][3])
+            dst = w[i] + 3;
+        else if (!strncmp(w[i], "SKIP=", 5))
+            ok = num32(w[i] + 5, &skip) == 0;
+        else if (!strncmp(w[i], "SEEK=", 5))
+            ok = num32(w[i] + 5, &seek) == 0;
+        else if (!strncmp(w[i], "COUNT=", 6))
+            ok = num32(w[i] + 6, &count) == 0, has_count = 1;
+        else
+            ok = 0;
+    }
+    if (!nw || !ok || !src || !dst) {
+        say(c, "DD IF=source OF=destination [SKIP=n] [SEEK=n] [COUNT=n] [/Y]\n"
+            "A source or destination: DISKn (a hard disk), DISKn:p (its partition p), A: (a floppy),\n"
+            "a file by its full path, or - (the connection, as a destination). SKIP, SEEK and COUNT\n"
+            "are in sectors of 512 bytes. A disk is written only with /Y, and never the one GLOS or\n"
+            "DOS runs from.\n");
+        return 2;
+    }
+    c->to_conn = !strcmp(dst, "-");             /* (before anything is said: it goes apart from the bytes) */
+    own_volumes(c);
+    dos_hold();
+    if (dd_end(c, &in, src, 0) != 0 || dd_end(c, &out, dst, 1) != 0) {
+        if (in.kind == 'f' && in.handle)
+            f_close(in.handle);
+        dos_release();
+        return 1;
+    }
+    if (skip > in.sectors)
+        skip = in.sectors;
+    if (count > in.sectors - skip)
+        count = in.sectors - skip;
+    if (in.kind == 'd' && out.kind == 'd' && in.drive == out.drive
+        && in.start + skip < out.start + seek + count && out.start + seek < in.start + skip + count) {
+        say(c, "DD: the source and the destination overlap\n");
+        dos_release();
+        return 1;
+    }
+    if (out.kind == 'd') {
+        if (seek > out.sectors || count > out.sectors - seek) {
+            say(c, "DD: %u sectors from sector %u don't fit in %s (%u sectors)\n", count, seek, dst, out.sectors);
+            ok = 0;
+        } else {
+            say(c, "%u sectors (%u MB) of %s to %s, from its sector %u: what is there %s LOST.\n", count, mb(count), src,
+                dst, seek, yes ? "IS" : "WOULD BE");
+            if (!yes)
+                say(c, "Nothing was done. To do it: the same command with /Y\n");
+        }
+        if (!ok || !yes) {
+            if (in.kind == 'f')
+                f_close(in.handle);
+            dos_release();
+            return ok ? 2 : 1;
+        }
+    }
+    if (!(buf = kmalloc(64 * 512)) || (out.kind == 'c' && !(c->data = kmalloc(DATA)))) {
+        say(c, "DD: no memory\n");
+        ok = 0;
+    } else if (out.kind == 'f' && (f_open(dst, 1, &out.handle) != 0 || (seek && f_seek(out.handle, seek * 512, 0, 0) != 0))) {
+        say(c, "DD: %s can't be made\n", dst);
+        ok = 0;
+    } else if (in.kind == 'f' && skip && f_seek(in.handle, skip * 512, 0, 0) != 0) {
+        say(c, "DD: %s can't be read from sector %u\n", src, skip);
+        ok = 0;
+    }
+    run = bdisk_run();                          /* (the most the BIOS's calls take here) */
+    if (run > 64)
+        run = 64;
+    if ((in.kind == 'f' || out.kind == 'f') && run > dos_xfer_size() / 512)
+        run = dos_xfer_size() / 512;            /* (a file's pieces by the DOS server's buffer) */
+    if (!run)
+        run = 1;
+    t0 = timer_ticks();
+    while (ok && done < count) {
+        k = count - done < run ? count - done : run;
+        bytes = k * 512;
+        if (in.kind == 'd') {
+            if ((e = bdisk_read(in.drive, in.start + skip + done, k, buf)) != 0)
+                ok = !dd_fail(c, "reading", src, e, skip + done);
+        } else {
+            if (f_read(in.handle, buf, bytes, &got) != 0 || !got)
+                ok = !dd_fail(c, "reading", src, 0, skip + done);
+            else if (got < bytes) {             /* the file's last sector, part of one: the rest zeros for a disk */
+                memset(buf + got, 0, bytes - got);
+                k = got / 512 + (got % 512 != 0);
+                bytes = out.kind == 'd' ? k * 512 : got;
+            }
+        }
+        if (!ok)
+            break;
+        if (in.kind == 'f' && !has_count && done + k >= count && in.bytes % 512 && out.kind != 'd')
+            bytes = (k - 1) * 512 + in.bytes % 512;         /* (a file's own length, to the byte) */
+        if (out.kind == 'd')
+            e = bdisk_write(out.drive, out.start + seek + done, k, buf);
+        else if (out.kind == 'f')
+            e = f_write(out.handle, buf, bytes);
+        else
+            e = conn_put(c, buf, bytes) ? -9 : 0;
+        if (e == -9)                            /* (the connection has gone: nobody to tell) */
+            break;
+        if (e) {
+            ok = !dd_fail(c, "writing", dst, e, seek + done);
+            break;
+        }
+        done += k;
+        if (done / 204800 > next_say) {         /* every 100 MB */
+            next_say = done / 204800;
+            say(c, "  %u MB\n", mb(done));
+        }
+    }
+    if (in.kind == 'f')
+        f_close(in.handle);
+    if (out.kind == 'f' && out.handle)
+        f_close(out.handle);
+    dos_release();
+    kfree(buf);
+    if (ok && done == count) {
+        u32 secs = (timer_ticks() - t0) >> 10;
+        kprintf("GLOS-DISK dd from=%s to=%s skip=%u seek=%u sectors=%u seconds=%u\n", src, dst, skip, seek, done, secs);
+        say(c, "%u sectors (%u MB) copied in %u seconds.\n", done, mb(done), secs);
+        if (out.kind == 'd' && out.disk)
+            say(c, "%s", restart);
+        return 0;
+    }
+    return 1;
+}
+
 /* ---- the command */
 
 static const char usage[] =
@@ -690,21 +1058,22 @@ static void worker(void *arg)
     u32 f;
     int gone;
     bdisk_open();
-    c->code = run(c);
+    c->code = c->dd ? run_dd(c) : run(c);
     bdisk_close();
     f = irq_save();
     busy = 0;
     gone = c->gone, kick = c->kick;
     c->done = 1;                                /* (the reader's to free from here, unless it has gone) */
     irq_restore(f);
-    if (gone)
+    if (gone) {
+        kfree(c->data);
         kfree(c);
-    else if (kick)
+    } else if (kick)
         kick();
     thread_exit();
 }
 
-struct diskcmd *diskcmd_start(const char *args, void (*kick)(void))
+struct diskcmd *diskcmd_start(const char *args, void (*kick)(void), int dd)
 {
     struct diskcmd *c;
     u32 f = irq_save();
@@ -721,6 +1090,7 @@ struct diskcmd *diskcmd_start(const char *args, void (*kick)(void))
     memset(c, 0, sizeof *c);
     strcpy(c->args, args);
     c->kick = kick;
+    c->dd = (u8)(dd != 0);
     if (!thread_create("disk", PRIO_NORMAL, worker, c)) {
         kfree(c);
         busy = 0;
@@ -750,12 +1120,33 @@ int diskcmd_done(const struct diskcmd *c, int *code)
 void diskcmd_free(struct diskcmd *c)
 {
     u32 f = irq_save();
-    if (!c->done) {                             /* (its channel has gone: the work goes on to its end) */
+    if (!c->done) {                             /* (its channel has gone: the work goes on to its end; a DD
+                                                   that waits for its reader stops) */
         c->gone = 1;
         c->kick = 0;
+        thread_wake(&c->roomq);
         irq_restore(f);
         return;
     }
     irq_restore(f);
+    kfree(c->data);
     kfree(c);
+}
+
+int diskcmd_errors_apart(const struct diskcmd *c) { return c->to_conn; }
+
+u32 diskcmd_data(struct diskcmd *c, u8 *buf, u32 room)
+{
+    u32 n = c->dh - c->dt, i, f;
+    if (!c->data || !n)
+        return 0;
+    if (n > room)
+        n = room;
+    for (i = 0; i < n; i++)
+        buf[i] = c->data[(c->dt + i) & (DATA - 1)];
+    f = irq_save();
+    c->dt += n;
+    thread_wake(&c->roomq);
+    irq_restore(f);
+    return n;
 }

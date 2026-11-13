@@ -6529,6 +6529,7 @@ def disk_case(profile, card, mb):
     checks = {"listen": agent.listening()}
     kind = "FAT12 [01]" if mb < 16 else "FAT16 [06]"
     notes = []
+    dd_start = None
 
     def disk(args, timeout=300):
         rc, out, err = agent.ssh("glos disk" + (" " + args if args else ""), timeout=timeout)
@@ -6577,6 +6578,38 @@ def disk_case(profile, card, mb):
         checks["boot-asks"] = rc == 2 and "Nothing was done" in out
         rc, out = disk("2 boot /y")
         checks["boot"] = rc == 0 and "Done." in out
+        # DD: a raw copy between the disks, files and the connection. The second disk's start to a file and to
+        # the connection (the same bytes, and the image's own, read after the run); the file back onto the disk
+        # further on, asked first and then done; a partition's first sector; a file whose length is no whole
+        # number of sectors, to the byte; refusals (the first disk, an overlap, from the connection).
+        def raw(cmd):
+            p = subprocess.run(agent.opts + ["glos@127.0.0.1", cmd], capture_output=True, timeout=300)
+            return p.returncode, p.stdout, p.stderr.decode("latin-1")
+        rc, out = agent.ssh("glos dd if=disk2 of=c:\\test\\d2.img count=2000", timeout=300)[:2]
+        checks["dd-to-file"] = rc == 0 and "2000 sectors" in out and "copied" in out
+        if not checks["dd-to-file"]:
+            notes.append("dd to a file: rc=%d %r" % (rc, out[-300:]))
+        rc, start, err = raw("glos dd if=disk2 of=- count=3000")
+        checks["dd-to-conn"] = rc == 0 and len(start) == 3000 * 512 and "3000 sectors" in err
+        rc, back, _ = raw("glos dd if=c:\\test\\d2.img of=-")
+        checks["dd-file-same"] = rc == 0 and back == start[:2000 * 512]
+        rc, named, _ = raw("DD IF=DISK2 OF=- COUNT=64 SKIP=63")        # (the shell's name for it, through a session)
+        checks["dd-shell"] = rc == 0 and named == start[63 * 512:127 * 512]
+        rc, first, _ = raw("glos dd if=disk2:1 of=- count=1")
+        checks["dd-partition"] = rc == 0 and first == start[63 * 512:64 * 512]
+        rc, exe, _ = raw("glos dd if=c:\\test\\glos.exe of=-")
+        checks["dd-file-bytes"] = rc == 0 and exe == open(os.path.join(ROOT, "build/ow/GLOS.EXE"), "rb").read()
+        rc, out, err = agent.ssh("glos dd if=c:\\test\\d2.img of=disk2 seek=8000")
+        checks["dd-asks"] = rc == 2 and "Nothing was done" in out and "WOULD BE LOST" in out
+        rc, out, err = agent.ssh("glos dd if=c:\\test\\d2.img of=disk2 seek=8000 /y", timeout=300)
+        checks["dd-to-disk"] = rc == 0 and "2000 sectors" in out and "IS LOST" in out
+        checks["dd-refused"] = agent.ssh("glos dd if=c:\\test\\d2.img of=disk1 /y")[0] == 1 \
+            and agent.ssh("glos dd if=c:\\test\\d2.img of=disk1:1 /y")[0] == 1 \
+            and agent.ssh("glos dd if=disk2 of=disk2 seek=100 count=500 /y")[0] == 1 \
+            and agent.ssh("glos dd if=- of=disk2 /y")[0] == 1 \
+            and agent.ssh("glos dd if=disk2 of=disk2 seek=99999999 count=1 /y")[0] == 1
+        checks["dd-usage"] = agent.ssh("glos dd if=disk2")[0] == 2
+        dd_start = start
         checks["no-disk"] = disk("3")[0] == 1
         rc, out = disk("bogus")
         checks["usage"] = rc == 2 and "DISK n NEW /Y" in out
@@ -6592,8 +6625,12 @@ def disk_case(profile, card, mb):
             count = int.from_bytes(mbr[458:462], "little")
             f.seek(start * 512)
             volume = f.read(count * 512)
+            f.seek(0)
+            head = f.read(3000 * 512)
+            f.seek(8000 * 512)
+            copied = f.read(2000 * 512)
     except OSError:
-        mbr, start, count, volume = bytes(512), 0, 0, b""
+        mbr, start, count, volume, head, copied = bytes(512), 0, 0, b"", b"", b"x"
     checks["image-table"] = mbr[510:] == b"\x55\xaa" and mbr[446] == 0x80 and mbr[450] == int(kind[7:9], 16) and start == 63 \
         and count > mb * 2048 * 9 // 10 and not any(mbr[462:510])
     checks["image-volume"] = volume[510:512] == b"\x55\xaa" and volume[43:54] == b"SCRATCH    " \
@@ -6608,6 +6645,7 @@ def disk_case(profile, card, mb):
             notes.append("fsck.fat: " + (p.stdout + p.stderr).decode("latin-1")[-300:])
         os.unlink(tmp)
     shutil.rmtree(os.path.join(ROOT, "out", "floppy-" + tag, "vm"), ignore_errors=True)    # (--keep-vm, for the image)
+    checks["dd-image"] = dd_start is not None and head == dd_start and copied == head[:2000 * 512]
     checks["logged"] = all(w in text for w in ("GLOS-DISK new disk=81", "GLOS-DISK format disk=81", "GLOS-DISK boot disk=81"))
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text

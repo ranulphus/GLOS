@@ -22,6 +22,9 @@ in its `docs/milestones-*.md`.
   DOS runs from is never written (docs/floppy.md).
 - `DF [drive: ...]` lists drives with their size, what is used and free (a FAT32 volume's real figures, past
   DOS's old 2 GB); `DU [folder] [/S]` says what a folder's files take, with everything under it.
+- `DD IF=source OF=destination [SKIP= SEEK= COUNT=] [/Y]` copies sectors between hard disks (`DISKn`), partitions
+  (`DISKn:p`), floppies (`A:`), files and, as a destination, the connection: `ssh pc "glos dd if=disk1 of=-" >
+  disk.img`. `DISK`'s rules for writing a disk hold.
 - The setup floppy has no FDISK, FORMAT or SYS any more: `install.py --new-disk` uses `DISK`, and copies
   FreeDOS's kernel and COMMAND.COM itself. The 720 KB floppy has about 90 KB to spare.
 
