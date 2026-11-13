@@ -7209,7 +7209,9 @@ def sshc_case(profile, vcard, card, bits):
         time.sleep(3)
         typed("top -d 3\\n")
         k3 = until("VT| top - ", 60, start=k)
-        checks["top"] = bool(k3) and any(l.startswith("VT| Tasks:") for l in lines[k3:k3 + 6])
+        checks["top"] = bool(k3) and 0 < until("VT| Tasks:", 15, start=k3) <= k3 + 6    # (the screen's rows come one
+                                                   # at a time: looked for at once, the second was not always there
+                                                   # yet, and the check failed one run in five: 2026-11-13)
         typed("q")
         time.sleep(2)
         typed("exit\\n")
