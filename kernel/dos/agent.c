@@ -486,7 +486,7 @@ int agent_app_keys(void *app, u32 seq, u16 *out, u32 room)
     u32 n, f;
     if (!j)
         return -1;
-    if (j->state != J_DONE)
+    if (j->state != J_DONE && !(j->app && j->notify))
         return 0;
     f = irq_save();
     n = j->nleft < room ? j->nleft : room;
@@ -1024,6 +1024,9 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
     }
     if (j && result == NEXT_DETACHED) {         /* its program is an app now: the job goes with it */
         j->app = 1;
+        if (j->console && j->notify)            /* (a shell's session typed to it while it started: an app reads
+                                                   no keys there, and they are the session's again) */
+            keys_left(j);
         kprintf("GLOS-AGENT app seq=%u via=%s\n", j->seq, j->shell ? "comspec" : j->path);
         running = NULL;
         if (j->kill)

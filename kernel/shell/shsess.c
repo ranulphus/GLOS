@@ -78,6 +78,8 @@ struct shsess {
     u8 nbeside;
     char held[256];                     /* ... a line at a time: the part of one that has come so far */
     u32 nheld;
+    u8 ahead[64];                       /* typed to a program that ended without reading it: typed here, then */
+    u8 nahead, ahead_at;
     u8 ext[2][EXT_RING];                /* a command of the SSH server's (glos NAME) runs for the session: what
                                            it has written (the ssh thread's to fill), by stream */
     volatile u32 xh[2], xt[2];
@@ -519,6 +521,14 @@ static void job_turn(struct shsess *s)
                 stream_bytes(s, stream, buf, (u32)n);
         }
     if (gone || st == GLOS_JS_DONE || (st == GLOS_JS_APP && s->tty)) {
+        if (!gone && s->tty) {                  /* what was typed to it and it never read: the characters of it */
+            u16 left[64];
+            int i, k = agent_app_keys(s, s->job, left, 64);
+            s->nahead = s->ahead_at = 0;
+            for (i = 0; i < k; i++)
+                if (left[i] & 0xFF)
+                    s->ahead[s->nahead++] = (u8)left[i];
+        }
         if (!gone && st == GLOS_JS_APP && s->nbeside < BESIDE)
             s->beside[s->nbeside++] = s->job;   /* an app: it goes on beside, and what it writes is still shown */
         else if (!gone)
@@ -763,6 +773,11 @@ static int key(struct shsess *s)
 {
     for (;;) {
         u32 f = irq_save(), c;
+        if (s->ahead_at < s->nahead && !s->ext_on && !s->closing) {
+            c = s->ahead[s->ahead_at++];
+            irq_restore(f);
+            return (int)c;
+        }
         while ((s->ih == s->it || s->ext_on) && !s->closing && !s->resized
                && !((s->job_on || s->nbeside) && s->job_evt) && !(s->ext_on && s->ext_evt))   /* (while a command of the server's runs, what is typed waits) */
             thread_block(&s->wq);

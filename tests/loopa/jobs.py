@@ -1949,6 +1949,8 @@ def shell_case(profile, card):
         checks["app-words"] = t.expect("APP-OK name=B", 60)
         t.send("le\r")
         checks["line-kept"] = t.expect("\nmeanwhile\n")
+        if not checks["line-kept"]:
+            print("LINE-KEPT: %r" % t.text()[-700:], flush=True)
         rc, out, _ = agent.ssh("C:\\TEST\\APPTEST.EXE run A 2")
         checks["app-line"] = rc == 40 and "APP-OK name=A" in out
         two = Login(agent)                          # a second login beside the first
