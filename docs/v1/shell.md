@@ -102,7 +102,7 @@ prompt holds it, and everything else that needs DOS waits behind it.
 | S4 | The batch language; GLOS's `COMMAND.COM`; `AUTOEXEC.BAT` run by GLOS; the floppy with FreeDOS's kernel alone | Batch files against FreeDOS's COMMAND.COM; `loopa-floppy` |
 | later | GLOS's own DOS services (files, FAT), then no DOS underneath | its own plan |
 
-## Step S2 as designed (for the owner's review, 2026-11-13; nothing of it is built)
+## Step S2 as designed (2026-11-13; agreed by the owner the same day: GLOS's shell answers `ssh pc COMMAND` from S2)
 
 S1 left the interpreter a library that asks a host for a terminal, files, programs and memory, and never waits.
 S2 gives it a host in the kernel and takes the Terminal app's away.
@@ -153,7 +153,9 @@ S2 gives it a host in the kernel and takes the Terminal app's away.
   about 12 KB of memory, mostly its history and folders).
 - **`ssh pc COMMAND` is what every test suite speaks.** If the shell's own DIR, COPY, TYPE and ECHO answered
   there in place of the DOS's, some suites and scripts would see other text (the shell's DIR is not FreeDOS's).
-  That is the question put to the owner with this design.
+  The owner's answer (2026-11-13): GLOS's shell from S2, as at the prompt; batch files and piped lines to the
+  DOS's COMMAND.COM until S4; the suites that leaned on FreeDOS's wording are changed, and a session begins
+  with the environment a DOS job gets (TZ and the rest).
 - **A session's files and a program's** go through the one DOS in turns: a long COPY in one session holds
   nothing, but each of its calls waits its turn behind a running program. As SFTP today.
 
