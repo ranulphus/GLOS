@@ -12,7 +12,11 @@
  *     is held while the session lasts, as an SFTP session holds it (32 KB of DOS's memory);
  *   - programs: the agent's jobs (kernel/dos/agent.c), as an app's console jobs are: what one writes goes to
  *     the terminal, what is typed meanwhile is typed to it (a character with its key's scan code where the
- *     key is a common one), Ctrl+C is the program's Ctrl+C, and its end is the shell's to go on from;
+ *     key is a common one), Ctrl+C is the program's Ctrl+C, and its end is the shell's to go on from. A program
+ *     that turns out to be a GLOS app goes on beside the shell: at a terminal the prompt comes back, and what
+ *     the app writes from then on (its printf: a graphical app's messages) still goes to the terminal that
+ *     started it, above the line being typed; with no terminal the session follows the app to its end, and
+ *     its exit code is the line's;
  *   - memory: the kernel's heap.
  *
  * Two threads touch a session: its own, and its terminal's side (the ssh thread), which only moves bytes in
@@ -43,6 +47,7 @@
 #define IN_RING  4096u                  /* powers of two */
 #define OUT_RING 16384u
 #define ERR_RING 4096u                  /* (with no terminal: what is written as errors, kept apart) */
+#define BESIDE   4u                     /* apps beside a session whose output it still shows */
 #define EXT_RING 4096u                  /* what a command of the SSH server's has written, on its way through */
 #define PATH_AT  0u                     /* in the DOS server's buffer: a path, */
 #define PATH2_AT 128u                   /* a second, */
@@ -69,6 +74,10 @@ struct shsess {
     u8 job_on;
     volatile u8 job_evt;                /* ... it has written, or moved on */
     u8 job_esc;                         /* a key's sequence under way, typed to it */
+    u32 beside[BESIDE];                 /* apps it started, running beside it: what they write is still shown */
+    u8 nbeside;
+    char held[256];                     /* ... a line at a time: the part of one that has come so far */
+    u32 nheld;
     u8 ext[2][EXT_RING];                /* a command of the SSH server's (glos NAME) runs for the session: what
                                            it has written (the ssh thread's to fill), by stream */
     volatile u32 xh[2], xt[2];
@@ -509,14 +518,58 @@ static void job_turn(struct shsess *s)
             else
                 stream_bytes(s, stream, buf, (u32)n);
         }
-    if (gone || st == GLOS_JS_DONE || st == GLOS_JS_APP) {
-        if (!gone)
-            agent_app_forget(s, s->job);        /* (an app goes on beside: nothing of it is the session's) */
+    if (gone || st == GLOS_JS_DONE || (st == GLOS_JS_APP && s->tty)) {
+        if (!gone && st == GLOS_JS_APP && s->nbeside < BESIDE)
+            s->beside[s->nbeside++] = s->job;   /* an app: it goes on beside, and what it writes is still shown */
+        else if (!gone)
+            agent_app_forget(s, s->job);
         s->job_on = 0;
         if (!s->folder && s->sh.rest[0])        /* (more of the line to come, and it may be the shell's own) */
             folder(s);
         sh_ended(&s->sh, gone ? 1 : st == GLOS_JS_DONE ? (int)code : 0);
     }
+}
+
+/* The apps that run beside the session: what they have written since, a whole line at a time (it comes a
+   character at a time), above what is being typed; one that has ended is let go, and what it left of a line
+   is shown. */
+static void beside_turn(struct shsess *s)
+{
+    u8 buf[128];
+    u32 st, code, nout, nerr, ticks, i, k;
+    int stream, n, wrote = 0, last;
+    for (i = 0; i < s->nbeside; i++) {
+        int gone = agent_app_status(s, s->beside[i], &st, &code, &nout, &nerr, &ticks) != 0;
+        int ended = gone || st == GLOS_JS_DONE;
+        for (stream = 0; !gone && stream < 2; stream++)
+            while ((n = agent_app_read1(s, s->beside[i], stream, buf, sizeof buf)) > 0)
+                for (k = 0; k < (u32)n; k++) {
+                    s->held[s->nheld++] = (char)buf[k];
+                    if (buf[k] != '\n' && s->nheld < sizeof s->held)
+                        continue;
+                    if (s->editing && !wrote)
+                        ed_away(&s->ed), term_bytes(s, (const u8 *)"\r\n", 2);
+                    wrote = 1;
+                    term_text(s, s->held, (int)s->nheld, 1);
+                    s->nheld = 0;
+                }
+        last = ended && s->nheld;               /* (its last words had no line's end) */
+        if (last) {
+            if (s->editing && !wrote)
+                ed_away(&s->ed), term_bytes(s, (const u8 *)"\r\n", 2);
+            wrote = 1;
+            term_text(s, s->held, (int)s->nheld, 1);
+            term_bytes(s, (const u8 *)"\r\n", 2);
+            s->nheld = 0;
+        }
+        if (ended) {
+            if (!gone)
+                agent_app_forget(s, s->beside[i]);
+            s->beside[i--] = s->beside[--s->nbeside];
+        }
+    }
+    if (wrote && s->editing)
+        ed_back(&s->ed);
 }
 
 /* (The agent's calls for a job's keys and its end wake the VM thread: interrupts off, as an app's thread has
@@ -710,14 +763,14 @@ static int key(struct shsess *s)
 {
     for (;;) {
         u32 f = irq_save(), c;
-        while ((s->ih == s->it || s->ext_on) && !s->closing && !s->resized && !(s->job_on && s->job_evt)
-               && !(s->ext_on && s->ext_evt))   /* (while a command of the server's runs, what is typed waits) */
+        while ((s->ih == s->it || s->ext_on) && !s->closing && !s->resized
+               && !((s->job_on || s->nbeside) && s->job_evt) && !(s->ext_on && s->ext_evt))   /* (while a command of the server's runs, what is typed waits) */
             thread_block(&s->wq);
         if (s->closing) {
             irq_restore(f);
             return EV_GONE;
         }
-        if ((s->job_on && s->job_evt) || (s->ext_on && s->ext_evt)) {
+        if (((s->job_on || s->nbeside) && s->job_evt) || (s->ext_on && s->ext_evt)) {
             s->job_evt = s->ext_evt = 0;
             irq_restore(f);
             return EV_JOB;
@@ -832,6 +885,8 @@ static void session(void *arg)
         sh_prompt(&s->sh);
     }
     while (!s->quit && (c = key(s)) != EV_GONE) {
+        if (c == EV_JOB && s->nbeside)
+            beside_turn(s);
         if (s->job_on) {                        /* a program runs: what is typed is its; what it writes, ours */
             if (c >= 0)
                 job_key(s, c);
@@ -868,6 +923,8 @@ static void session(void *arg)
         agent_app_forget(s, s->job);
         irq_restore(f);
     }
+    while (s->nbeside)                          /* (apps beside it go on: they are nobody's now) */
+        agent_app_forget(s, s->beside[--s->nbeside]);
     if (s->ext_on)
         sshd_ask_gone(s);
     dos_release();

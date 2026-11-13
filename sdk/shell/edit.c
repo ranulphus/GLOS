@@ -144,6 +144,12 @@ void ed_away(struct ed *e)
     e->drawn = 0;
 }
 
+void ed_back(struct ed *e)
+{
+    e->drawn = 0, e->rows = e->row = 1;
+    draw(e);
+}
+
 /* The cursor past the line's end, a mark if any, and a new row: the line is done with (Enter, Ctrl+C). */
 static void leave(struct ed *e, const char *mark)
 {

@@ -460,7 +460,7 @@ loopa-shell: all check-deps
 loopa-net: all check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py net -j $(JOBS)
 # On the host: ssh is not in the dev container; jobs.py starts Loop A through it.
-loopa-ssh: all dos-tests check-deps
+loopa-ssh: all dos-tests build/dj/APPTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py ssh -j $(JOBS)
 # M3's exit: the ssh suite (its 486DX2 + NE2000 and bf6 + RTL8029 cases).
 loopa-m3: loopa-ssh

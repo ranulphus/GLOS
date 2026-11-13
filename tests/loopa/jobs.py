@@ -1863,10 +1863,13 @@ def shell_case(profile, card):
     a program;
     GLOS's own commands by their names as the shell's (PS, CLOCK), by GLOS's old ones (GLOS VER), a failing one's
     exit code, a long answer whole (LOG) with a line typed ahead of its end; EXIT, and the connection's end with
-    code 0. A second login while the first is open; and a login dropped with a program running, which is ended."""
+    code 0. A GLOS app started here goes on beside the shell and still writes to this terminal; started by a line
+    with no terminal, the line is its to its end. A second login while the first is open; and a login dropped
+    with a program running, which is ended."""
     tag = "shell-%s-%s" % (profile, card)
     agent = Agent("ssh-" + tag, profile, card, [
         "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE", "--file", "build/ow/dos/CONIN.EXE=/TEST/CONIN.EXE",
+        "--file", "build/dj/APPTEST.EXE=/TEST/APPTEST.EXE",
         "--cmd", "SERSAY HX-START shell", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     checks = {"listen": agent.listening()}
     try:
@@ -1937,6 +1940,17 @@ def shell_case(profile, card):
         t.send("log\recho after the log\r")
         checks["long"] = t.expect("GLOS-SHELL begin") and t.expect('GLOS-SSH exec="glos log"') \
             and t.expect("after the log\n")
+        # A GLOS app goes on beside the shell: the prompt is back at once, and what the app writes later comes to
+        # this terminal, above the line being typed, which is kept. With no terminal the line is the app's to its
+        # end: its output and its exit code.
+        t.send("apptest run B 6\r")
+        checks["app-beside"] = t.expect("C:\\TEST>", 30)
+        t.send("echo meanwhi")
+        checks["app-words"] = t.expect("APP-OK name=B", 60)
+        t.send("le\r")
+        checks["line-kept"] = t.expect("\nmeanwhile\n")
+        rc, out, _ = agent.ssh("C:\\TEST\\APPTEST.EXE run A 2")
+        checks["app-line"] = rc == 40 and "APP-OK name=A" in out
         two = Login(agent)                          # a second login beside the first
         checks["second"] = two.expect("C:\\TEST>")
         two.send("echo two\r")

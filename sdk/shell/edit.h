@@ -45,6 +45,8 @@ void ed_begin(struct ed *e, const char *prompt, int n); /* a new line: the promp
 void ed_set(struct ed *e, const char *line);            /* what is typed is this now; the cursor at its end */
 void ed_away(struct ed *e);                             /* something else is about to be written: the cursor past
                                                            what is typed (ed_begin() draws a prompt again) */
+void ed_back(struct ed *e);                             /* ... and that is done, the cursor at a row's start: the
+                                                           prompt and what is typed, drawn again there */
 int ed_key(struct ed *e, unsigned char c);              /* a byte from the terminal: ED_... */
 
 #endif

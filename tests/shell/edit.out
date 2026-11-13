@@ -127,3 +127,12 @@
   |B>narrower n|
   |ow, redrawn | <
   cursor 1,11
+-- written over by another, and the line again
+  |B>narrower n|
+  |ow, redrawn |
+  |an app says |
+  |so          |
+  |B>narrower n|
+  |ow, redrawn!|
+  |            | <
+  cursor 6,0

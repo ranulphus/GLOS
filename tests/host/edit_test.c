@@ -151,5 +151,9 @@ int main(void)
     ed_set(&e, "narrower now, redrawn");
     show("the terminal 12 wide", 0, &e);
     show("Ctrl+L", keys(&e, "\014"), &e);
+    ed_away(&e);                                /* something else writes (an app beside the shell): then the line again */
+    term(0, "\r\nan app says so\r\n", 18);
+    ed_back(&e);
+    show("written over by another, and the line again", keys(&e, "!"), &e);
     return 0;
 }
