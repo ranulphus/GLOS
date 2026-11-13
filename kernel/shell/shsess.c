@@ -10,7 +10,9 @@
  * The shell's host here:
  *   - files: INT 21h through the DOS server (kernel/dos/dos.c), a request at a time, waited for; the server
  *     is held while the session lasts, as an SFTP session holds it (32 KB of DOS's memory);
- *   - programs: not yet (the next part of S2a: the agent's jobs);
+ *   - programs: the agent's jobs (kernel/dos/agent.c), as an app's console jobs are: what one writes goes to
+ *     the terminal, what is typed meanwhile is typed to it (a character with its key's scan code where the
+ *     key is a common one), Ctrl+C is the program's Ctrl+C, and its end is the shell's to go on from;
  *   - memory: the kernel's heap.
  *
  * Two threads touch a session: its own, and its terminal's side (the ssh thread), which only moves bytes in
@@ -21,8 +23,11 @@
 #include "glos/bootinfo.h"
 #include "glos/cp.h"
 #include "glos/region.h"
+#include "glos/api.h"
+#include "agent.h"
 #include "dos.h"
 #include "io.h"
+#include "kapi.h"
 #include "kcfg.h"
 #include "kprintf.h"
 #include "mm.h"
@@ -53,6 +58,10 @@ struct shsess {
     u8 tty, editing, quit;
     int code, page;
     u32 utf, utf_left;                  /* a UTF-8 character under way from the terminal */
+    u32 job;                            /* the program that runs: the agent's number for it */
+    u8 job_on;
+    volatile u8 job_evt;                /* ... it has written, or moved on */
+    u8 job_esc;                         /* a key's sequence under way, typed to it */
     struct dos_req q;
     u8 xfer[256];                       /* a request's paths */
     u8 dta[43];
@@ -400,13 +409,129 @@ static int h_rename(void *ctx, const char *from, const char *to)
     return made(s);
 }
 
-/* ---- programs (the next part of S2a) */
+/* ---- programs: the agent's jobs */
+
+static void job_notify(void *owner)             /* (the agent's: any thread, interrupts on or off) */
+{
+    struct shsess *s = owner;
+    u32 f = irq_save();
+    s->job_evt = 1;
+    thread_wake(&s->wq);
+    irq_restore(f);
+}
 
 static int h_run(void *ctx, const char *command, const char *prog, const char *name, const char *cwd, const char *env,
                  int detach)
 {
-    (void)ctx, (void)command, (void)prog, (void)name, (void)cwd, (void)env, (void)detach;
-    return -1;
+    struct shsess *s = ctx;
+    struct krun r;
+    struct agent_opts o;
+    u32 seq, i;
+    (void)prog, (void)name;
+    memset(&r, 0, sizeof r);
+    memset(&o, 0, sizeof o);
+    r.size = sizeof r;
+    r.flags = KRUN_CONSOLE | (detach ? KRUN_DETACH : 0);
+    if (strlen(command) < sizeof r.command)
+        strcpy(r.command, command);
+    else
+        o.command = command;
+    if (strlen(cwd) < sizeof r.dir)
+        strcpy(r.dir, cwd);
+    for (i = 0; i + 2 < sizeof r.env && (env[i] || (i && env[i - 1])); i++)
+        r.env[i] = env[i];                      /* (NAME=VALUE strings, to their double NUL) */
+    o.notify = job_notify;
+    if (agent_post_job(s, &r, &o, &seq) != 0)
+        return -1;
+    if (detach)
+        return 0;
+    s->job = seq;
+    s->job_on = 1;
+    s->job_esc = 0;
+    return 1;
+}
+
+/* What the program has written, to the terminal; its end, to the shell. */
+static void job_turn(struct shsess *s)
+{
+    u8 buf[512];
+    u32 st, code, nout, nerr, ticks;
+    int stream, n, gone;
+    gone = agent_app_status(s, s->job, &st, &code, &nout, &nerr, &ticks) != 0;  /* (its state first: once it has
+                                                   ended, what is read is all of it) */
+    for (stream = 0; !gone && stream < 2; stream++)
+        while ((n = agent_app_read1(s, s->job, stream, buf, sizeof buf)) > 0)
+            term_text(s, (const char *)buf, n, 1);
+    if (gone || st == GLOS_JS_DONE || st == GLOS_JS_APP) {
+        if (!gone)
+            agent_app_forget(s, s->job);        /* (an app goes on beside: nothing of it is the session's) */
+        s->job_on = 0;
+        sh_ended(&s->sh, gone ? 1 : st == GLOS_JS_DONE ? (int)code : 0);
+    }
+}
+
+/* (The agent's calls for a job's keys and its end wake the VM thread: interrupts off, as an app's thread has
+   them there.) */
+static void type_key(struct shsess *s, u16 k)
+{
+    u32 f = irq_save();
+    agent_app_type(s, s->job, &k, 1);
+    irq_restore(f);
+}
+
+/* A byte typed while the program runs: its key, as the BIOS has keys (the character, and the scan code of the
+   key that makes it on a US keyboard where that matters: letters, digits, Enter, Esc, Backspace, Tab, the
+   arrows). Ctrl+C is the program's Ctrl+C. */
+static void job_key(struct shsess *s, int c)
+{
+    static const char row1[] = "qwertyuiop", row2[] = "asdfghjkl", row3[] = "zxcvbnm", digits[] = "1234567890";
+    const char *at;
+    u16 k;
+    if (s->job_esc == 1) {
+        s->job_esc = c == '[' || c == 'O' ? 2 : 0;
+        if (s->job_esc)
+            return;
+        type_key(s, 0x011B);                    /* (Esc, then something else: Esc itself first) */
+    } else if (s->job_esc == 2) {
+        s->job_esc = 0;
+        k = c == 'A' ? 0x4800 : c == 'B' ? 0x5000 : c == 'C' ? 0x4D00 : c == 'D' ? 0x4B00 : c == 'H' ? 0x4700
+            : c == 'F' ? 0x4F00 : 0;
+        if (k)
+            type_key(s, k);
+        return;
+    }
+    if (c == 27) {
+        s->job_esc = 1;
+        return;
+    }
+    if (c == 3) {
+        u32 f = irq_save();
+        agent_app_signal(s, s->job, 0);
+        irq_restore(f);
+        return;
+    }
+    if (c == '\n')
+        return;                                 /* (Enter is its CR) */
+    if (c == 127)
+        c = 8;
+    k = (u16)c;
+    if (c == '\r')
+        k |= 0x1C00;
+    else if (c == 8)
+        k |= 0x0E00;
+    else if (c == '\t')
+        k |= 0x0F00;
+    else if (c == ' ')
+        k |= 0x3900;
+    else if ((at = strchr(row1, c | 32)) != 0 && (c | 32) >= 'a')
+        k |= (u16)((0x10 + (at - row1)) << 8);
+    else if ((at = strchr(row2, c | 32)) != 0 && (c | 32) >= 'a')
+        k |= (u16)((0x1E + (at - row2)) << 8);
+    else if ((at = strchr(row3, c | 32)) != 0 && (c | 32) >= 'a')
+        k |= (u16)((0x2C + (at - row3)) << 8);
+    else if (c >= '0' && c <= '9' && (at = strchr(digits, c)) != 0)
+        k |= (u16)((0x02 + (at - digits)) << 8);
+    type_key(s, k);
 }
 
 static void *h_alloc(void *ctx, unsigned n) { (void)ctx; return kmalloc(n); }
@@ -414,16 +539,24 @@ static void h_free(void *ctx, void *p) { (void)ctx; kfree(p); }
 
 /* ---- from the terminal */
 
-/* The next byte typed, in the PC's code page; -1: the terminal has gone. */
+#define EV_GONE (-1)                    /* the terminal has gone */
+#define EV_JOB  (-2)                    /* the program has written, or moved on */
+
+/* The next byte typed, in the PC's code page; or EV_. */
 static int key(struct shsess *s)
 {
     for (;;) {
         u32 f = irq_save(), c;
-        while (s->ih == s->it && !s->closing && !s->resized)
+        while (s->ih == s->it && !s->closing && !s->resized && !(s->job_on && s->job_evt))
             thread_block(&s->wq);
         if (s->closing) {
             irq_restore(f);
-            return -1;
+            return EV_GONE;
+        }
+        if (s->job_on && s->job_evt) {
+            s->job_evt = 0;
+            irq_restore(f);
+            return EV_JOB;
         }
         if (s->resized) {
             s->resized = 0;
@@ -473,7 +606,15 @@ static void session(void *arg)
     ed_init(&s->ed, ed_put, s, (int)s->cols);
     sh_start(&s->sh, &s->host, env);
     sh_prompt(&s->sh);
-    while (!s->quit && (c = key(s)) >= 0) {
+    while (!s->quit && (c = key(s)) != EV_GONE) {
+        if (s->job_on) {                        /* a program runs: what is typed is its; what it writes, ours */
+            if (c >= 0)
+                job_key(s, c);
+            job_turn(s);
+            continue;
+        }
+        if (c < 0)
+            continue;
         switch (ed_key(&s->ed, (unsigned char)c)) {
         case ED_ENTER:
             s->editing = 0;
@@ -491,6 +632,12 @@ static void session(void *arg)
             s->code = s->sh.errorlevel;
             break;
         }
+    }
+    if (s->job_on) {                            /* (the terminal went from under its program) */
+        u32 f = irq_save();
+        agent_app_kill(s, s->job);
+        agent_app_forget(s, s->job);
+        irq_restore(f);
     }
     dos_release();
     kprintf("GLOS-SHELL end code=%d%s\n", s->code, s->closing ? " terminal=gone" : "");

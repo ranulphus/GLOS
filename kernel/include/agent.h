@@ -53,6 +53,9 @@ struct agent_opts {
     u8 append;                                  /* bit 1, bit 2: the output's, the error's file is added to */
     u8 debug;                                   /* its program stops at its first 32-bit code, for its app's
                                                    debugger (API 2.0's DEBUG) */
+    void (*notify)(void *owner);                /* its owner is no app (a shell's session, kernel/shell): this is
+                                                   called, interrupts on or off, when the job has moved on or
+                                                   written; the owner is what agent_post_job()'s `app` was */
 };
 int agent_post_job(void *app, const struct krun *r, const struct agent_opts *o, u32 *seq);
 int agent_app_read1(void *app, u32 seq, int stream, u8 *out, u32 room);        /* one stream's bytes; -1 no such job */

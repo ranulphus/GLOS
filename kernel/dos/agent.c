@@ -96,6 +96,7 @@ struct agent_job {
     u8 dir_step;                                /* starting in dir: 1 its drive set, 2 its folder, 0 done */
     u8 told;                                    /* the GLOS_JOB_ state its app last heard of, FFh none */
     void *app_owner;                            /* its app (struct app), or NULL */
+    void (*notify)(void *owner);                /* ... or app_owner is no app, and this tells it (agent_opts) */
     char dir[80];
     char env[JOB_ENV];                          /* NAME=VALUE strings, a NUL after each and one more: its own */
     u16 keys[64];                               /* typed by its app, on their way into the BIOS's buffer */
@@ -178,6 +179,7 @@ int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, cons
     j->from_app = j->console = j->full = j->detach = j->dir_step = 0;
     j->told = 0xFF;
     j->app_owner = NULL;
+    j->notify = 0;
     j->dir[0] = 0;
     j->env[0] = j->env[1] = 0;
     j->kh = j->kt = 0;
@@ -217,6 +219,10 @@ static void tell(struct agent_job *j)
     if (!j->app_owner || st == j->told)
         return;
     j->told = (u8)st;
+    if (j->notify) {
+        j->notify(j->app_owner);
+        return;
+    }
     memset(&e, 0, sizeof e);
     e.type = KEV_JOB;
     e.key = j->seq;
@@ -286,6 +292,7 @@ int agent_post_job(void *app, const struct krun *r, const struct agent_opts *o, 
     j->full = (u8)(j->console && (r->flags & KRUN_FULL));
     j->dir_step = 0;
     j->told = 0xFF;
+    j->notify = o ? o->notify : 0;
     j->app_owner = j->detach ? NULL : app;
     j->kh = j->kt = 0;
     j->nleft = 0;
@@ -295,7 +302,7 @@ int agent_post_job(void *app, const struct krun *r, const struct agent_opts *o, 
     *seq = j->seq;
     vm_kick();
     irq_restore(f);
-    kprintf("GLOS-AGENT post seq=%u app=%u%s%s%s cmd=\"%s\"\n", j->seq, app ? app_id(app) : 0, j->console ? " console=1" : "",
+    kprintf("GLOS-AGENT post seq=%u app=%u%s%s%s cmd=\"%s\"\n", j->seq, app && !j->notify ? app_id(app) : 0, j->console ? " console=1" : "",
             j->full ? " full=1" : "", j->detach ? " detach=1" : "", j->cmd);
     return 0;
 }
@@ -538,7 +545,7 @@ u32 agent_job_by(u32 seq)                       /* the app that started a job (i
 {
     u32 i, f = irq_save(), id = 0;
     for (i = 0; i < NJOBS; i++)
-        if (jobs[i].state != J_FREE && jobs[i].seq == seq && jobs[i].app_owner)
+        if (jobs[i].state != J_FREE && jobs[i].seq == seq && jobs[i].app_owner && !jobs[i].notify)
             id = app_id(jobs[i].app_owner);
     irq_restore(f);
     return id;
@@ -1225,7 +1232,10 @@ static void put(int stream, u8 c)
         e.type = KEV_JOB;
         e.key = running->seq;
         e.x = (int)app_state(running);
-        app_event(running->app_owner, &e);
+        if (running->notify)
+            running->notify(running->app_owner);
+        else
+            app_event(running->app_owner, &e);
     }
 }
 
