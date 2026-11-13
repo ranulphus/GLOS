@@ -449,6 +449,162 @@ static int cmd_dir(struct sh *s, int argc, char **argv)
     return files + dirs ? 0 : 1;
 }
 
+/* A size in KB as people read it: "720 KB", "347 MB", "16.1 GB". */
+static void kb_text(unsigned long kb, char *b, size_t room)
+{
+    if (kb < 10240)
+        sh_fmt(b, (unsigned)room, "%lu KB", kb);
+    else if (kb < 10485760ul)
+        sh_fmt(b, (unsigned)room, "%lu MB", kb >> 10);
+    else
+        sh_fmt(b, (unsigned)room, "%lu.%lu GB", kb >> 20, ((kb >> 10) & 1023) * 10 / 1024);
+}
+
+/* DF [drive ...]: each drive's volume, its size, what is used and free. With no drive named: the hard disks'
+   and whatever else has a letter from C: on (a floppy is asked for by name: reading an empty drive takes its
+   time). */
+static int cmd_df(struct sh *s, int argc, char **argv)
+{
+    char line[120], label[12], a[16], b[16], c[16];
+    unsigned long total, left, used, pct;
+    int i, d, shown = 0, bad = 0;
+    if ((argc = switches(s, argc, argv, "")) < 0)
+        return 1;
+    if (!s->h->space) {
+        err(s, "DF: not here\r\n");
+        return 1;
+    }
+    for (i = 1; i < argc; i++)
+        if (!argv[i][0] || upper((unsigned char)argv[i][0]) < 'A' || upper((unsigned char)argv[i][0]) > 'Z'
+            || (argv[i][1] && (argv[i][1] != ':' || (argv[i][2] && (argv[i][2] != '\\' || argv[i][3]))))) {
+            err(s, "DF [drive: ...]\r\n");
+            return 1;
+        }
+    for (i = argc > 1 ? 1 : 2; argc > 1 ? i < argc : i < 26; i++) {
+        d = argc > 1 ? upper((unsigned char)argv[i][0]) - 'A' : i;
+        label[0] = 0;
+        if (s->h->space(s->h->ctx, d, &total, &left, label) != 0) {
+            if (argc > 1) {
+                sh_fmt(line, sizeof line, "%c:     no such drive, or nothing in it\r\n", 'A' + d);
+                err(s, line);
+                bad = 1;
+            }
+            continue;
+        }
+        if (!shown++)
+            say(s, "Drive  Volume            Size        Used        Free  Used\r\n");
+        if (left > total)
+            left = total;
+        kb_text(total, a, sizeof a);
+        kb_text(total - left, b, sizeof b);
+        kb_text(left, c, sizeof c);
+        used = total - left;                    /* (in hundredths of the whole where a product would not fit) */
+        pct = !total ? 0 : total >= 42949672ul ? used / (total / 100) : used * 100 / total;
+        sh_fmt(line, sizeof line, "%c:     %-11s %10s  %10s  %10s  %3lu%%\r\n", 'A' + d, label, a, b, c,
+               pct > 100 ? 100ul : pct);
+        say(s, line);
+    }
+    if (!shown && argc <= 1)
+        err(s, "DF: no drive from C: on\r\n");
+    return shown && !bad ? 0 : 1;
+}
+
+/* DU [folder] [/S]: what a folder's files take, with everything under it: each folder in it, then the whole
+   (/S: the whole alone). Sizes are the files' own, in KB (not the clusters they take). */
+struct du {
+    unsigned long kb, rest, files;
+    int failed;
+};
+
+/* name after the folder in path (len its length; the caller has seen to the room). */
+static void du_join(char *path, size_t len, const char *name)
+{
+    if (len && path[len - 1] != '\\')
+        path[len++] = '\\';
+    strcpy(path + len, name);
+}
+
+static void du_walk(struct sh *s, char *path, int depth, struct du *t)
+{
+    struct sh_dirent *e;
+    size_t len = strlen(path);
+    int n, i;
+    if ((n = s->h->dir_read(s->h->ctx, path, &e)) < 0) {
+        t->failed = 1;
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        if (!e[i].dir) {
+            t->kb += e[i].size >> 10;
+            t->rest += e[i].size & 1023;
+            t->kb += t->rest >> 10, t->rest &= 1023;
+            t->files++;
+        } else if (depth < 32 && len + strlen(e[i].name) + 2 < SH_PATH) {
+            du_join(path, len, e[i].name);
+            du_walk(s, path, depth + 1, t);
+            path[len] = 0;
+        }
+    }
+    s->h->dir_free(s->h->ctx, e);
+}
+
+static void du_line(struct sh *s, const struct du *t, const char *path)
+{
+    char line[SH_PATH + 40], sz[24];
+    size_text(t->kb + (t->rest ? 1 : 0), sz, sizeof sz);
+    sh_fmt(line, sizeof line, "%12s KB  %s\r\n", sz, path);
+    say(s, line);
+}
+
+static int cmd_du(struct sh *s, int argc, char **argv)
+{
+    char path[SH_PATH], line[SH_PATH + 40], sz[24];
+    struct sh_dirent *e;
+    struct du all, one;
+    size_t len;
+    int n, i, summary = 0, failed = 0;
+    for (i = 1; i < argc; i++)
+        if (same(argv[i], "/S"))
+            summary = 1;
+    if ((argc = switches(s, argc, argv, "S")) < 0)
+        return 1;
+    full_path(s, argc > 1 ? argv[1] : ".", path, sizeof path);
+    if (argc > 2 || !s->h->is_dir(s->h->ctx, path) || (n = s->h->dir_read(s->h->ctx, path, &e)) < 0) {
+        err(s, argc > 2 ? "DU [folder] [/S]\r\n" : "DU: no such folder\r\n");
+        return 1;
+    }
+    memset(&all, 0, sizeof all);
+    len = strlen(path);
+    for (i = 0; i < n; i++) {
+        if (!e[i].dir) {
+            all.kb += e[i].size >> 10;
+            all.rest += e[i].size & 1023;
+            all.kb += all.rest >> 10, all.rest &= 1023;
+            all.files++;
+            continue;
+        }
+        if (len + strlen(e[i].name) + 2 >= SH_PATH)
+            continue;
+        memset(&one, 0, sizeof one);
+        du_join(path, len, e[i].name);
+        du_walk(s, path, 1, &one);
+        if (!summary)
+            du_line(s, &one, path);
+        path[len] = 0;
+        all.kb += one.kb, all.rest += one.rest, all.files += one.files;
+        all.kb += all.rest >> 10, all.rest &= 1023;
+        failed |= one.failed;
+    }
+    s->h->dir_free(s->h->ctx, e);
+    du_line(s, &all, path);
+    size_text(all.files, sz, sizeof sz);
+    sh_fmt(line, sizeof line, "%12s file(s)\r\n", sz);
+    say(s, line);
+    if (failed)
+        err(s, "DU: a folder could not be read\r\n");
+    return failed;
+}
+
 static int copy_file(struct sh *s, const char *from, const char *to)
 {
     void *a = s->h->open(s->h->ctx, from, 'r'), *b;
@@ -632,7 +788,7 @@ static int cmd_set(struct sh *s, int argc, char **argv, const char *raw)
 
 static const char *const builtins[] = { "CD", "CHDIR", "DIR", "COPY", "MOVE", "REN", "RENAME", "DEL", "ERASE", "MD",
     "MKDIR", "RD", "RMDIR", "TYPE", "ECHO", "SET", "PATH", "PROMPT", "CLS", "VER", "EXIT", "HISTORY", "HELP", "WHERE",
-    "START", 0 };
+    "START", "DF", "DU", 0 };
 
 static const char *const helps[] = {
     "CD [path]           the folder (of a drive: CD X:); X: changes drive",
@@ -642,6 +798,8 @@ static const char *const helps[] = {
     "REN from to         a file's new name",
     "DEL files           files deleted (* and ?)",
     "MD path, RD path    a folder made, removed",
+    "DF [drive: ...]     the drives: their size, what is used and free",
+    "DU [folder] [/S]    what a folder's files take, with all under it",
     "TYPE file           a file shown",
     "ECHO [text]         text written",
     "SET [name[=value]]  the variables; PATH and PROMPT as SET does",
@@ -900,6 +1058,10 @@ static int run_one(struct sh *s, const char *cmd)
                 r = 1;
             }
         }
+    } else if (same(argv[0], "DF")) {
+        r = cmd_df(s, argc, argv);
+    } else if (same(argv[0], "DU")) {
+        r = cmd_du(s, argc, argv);
     } else if (same(argv[0], "TYPE")) {
         r = cmd_type(s, argc, argv);
     } else if (same(argv[0], "ECHO") || echo_dot(argv[0])) {

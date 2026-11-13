@@ -189,9 +189,24 @@ static int h_extra(void *ctx, int argc, char **argv, const char *line)
 static void *h_alloc(void *ctx, unsigned n) { (void)ctx; return malloc(n); }
 static void h_free(void *ctx, void *p) { (void)ctx; free(p); }
 
+/* Two drives: C: of 100 MB with a quarter free and a label, and a floppy with none; D: of 20 GB, nearly full. */
+static int h_space(void *ctx, int drive, unsigned long *total, unsigned long *left, char label[12])
+{
+    (void)ctx;
+    if (drive == 2)
+        *total = 102400, *left = 25600, strcpy(label, "TESTDISK");
+    else if (drive == 0)
+        *total = 1424, *left = 1000, label[0] = 0;
+    else if (drive == 3)
+        *total = 20971520ul, *left = 104857, strcpy(label, "BIG");
+    else
+        return -1;
+    return 0;
+}
+
 static const struct sh_host host = {
     0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free, h_is_dir, h_stat, h_open, h_read, h_put,
-    h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_run, 0, extra_names, extra_help, h_extra, h_alloc, h_free };
+    h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space, h_run, 0, extra_names, extra_help, h_extra, h_alloc, h_free };
 
 int main(int argc, char **argv)
 {

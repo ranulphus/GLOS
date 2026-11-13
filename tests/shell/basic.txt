@@ -92,5 +92,12 @@ tab type no
 tab type c:\tools\t
 tab type c:\to
 tab copy r
+> df
+> df a: c:
+> df q:
+> df /x
+> du c:\tools
+> du /s
+> du c:\nosuch
 > cls
 > exit

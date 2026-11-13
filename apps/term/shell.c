@@ -9,6 +9,9 @@
  *
  * Up and Down go through the history, Tab completes a file's name (term.c's keys). */
 #include <stdio.h>
+#ifdef __DJGPP__
+#include <dos.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -163,9 +166,34 @@ static int h_extra(void *ctx, int argc, char **argv, const char *line)
 static void *h_alloc(void *ctx, unsigned n) { (void)ctx; return malloc(n); }
 static void h_free(void *ctx, void *p) { (void)ctx; free(p); }
 
+/* A drive's size and free space, as DOS says them (a FAT32 volume's are DOS's 2 GB at most by this call; the
+   kernel's sessions ask the newer one). No label. */
+static int h_space(void *ctx, int drive, unsigned long *total, unsigned long *left, char label[12])
+{
+#ifdef __DJGPP__
+    struct diskfree_t d;
+    unsigned long per;
+    (void)ctx;
+    if (_dos_getdiskfree((unsigned)drive + 1, &d) != 0)
+        return -1;
+    per = (unsigned long)d.sectors_per_cluster * d.bytes_per_sector;
+    *total = per >= 1024 ? d.total_clusters * (per >> 10) : d.total_clusters / (1024 / (per ? per : 512));
+    *left = per >= 1024 ? d.avail_clusters * (per >> 10) : d.avail_clusters / (1024 / (per ? per : 512));
+    label[0] = 0;
+    return 0;
+#else                                           /* (the host's build, for the pictures: one drive, made up) */
+    (void)ctx;
+    if (drive != 2)
+        return -1;
+    *total = 102400, *left = 25600;
+    label[0] = 0;
+    return 0;
+#endif
+}
+
 static const struct sh_host host = {
     0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free, h_is_dir, h_stat, h_open, h_read, h_put,
-    h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_run, 0, extra_names, extra_help, h_extra, h_alloc, h_free };
+    h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space, h_run, 0, extra_names, extra_help, h_extra, h_alloc, h_free };
 
 /* ---- what the terminal asks of the shell (term.h) */
 

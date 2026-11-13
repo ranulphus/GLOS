@@ -218,6 +218,8 @@ MOVE from [to]      ... moved
 REN from to         a file's new name
 DEL files           files deleted (* and ?)
 MD path, RD path    a folder made, removed
+DF [drive: ...]     the drives: their size, what is used and free
+DU [folder] [/S]    what a folder's files take, with all under it
 TYPE file           a file shown
 ECHO [text]         text written
 SET [name[=value]]  the variables; PATH and PROMPT as SET does
@@ -297,6 +299,33 @@ history
 (INPUT "type c:\TOOLS\")
 (TAB "copy r")
 (INPUT "copy README.MD")
+df
+Drive  Volume            Size        Used        Free  Used
+C:     TESTDISK        100 MB       75 MB       25 MB   75%
+D:     BIG            20.0 GB     19.8 GB      102 MB   99%
+[[C:\WORK>]]
+df a: c:
+Drive  Volume            Size        Used        Free  Used
+A:                    1424 KB      424 KB     1000 KB   29%
+C:     TESTDISK        100 MB       75 MB       25 MB   75%
+[[C:\WORK>]]
+df q:
+<<Q:     no such drive, or nothing in it
+>>[[C:\WORK>]]
+df /x
+<<Invalid switch - /x
+>>[[C:\WORK>]]
+du c:\tools
+           1 KB  C:\TOOLS
+           4 file(s)
+[[C:\WORK>]]
+du /s
+           1 KB  C:\WORK
+           2 file(s)
+[[C:\WORK>]]
+du c:\nosuch
+<<DU: no such folder
+>>[[C:\WORK>]]
 cls
 (CLEAR)
 [[C:\WORK>]]

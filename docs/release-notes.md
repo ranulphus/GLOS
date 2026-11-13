@@ -20,6 +20,8 @@ in its `docs/milestones-*.md`.
   anew (`DISK n NEW`), formats a partition as FAT12, FAT16 or FAT32 (`DISK n FORMAT`) and writes boot records
   that start FreeDOS (`DISK n BOOT`). Without `/Y` it says what would be lost and does nothing. The disk GLOS or
   DOS runs from is never written (docs/floppy.md).
+- `DF [drive: ...]` lists drives with their size, what is used and free (a FAT32 volume's real figures, past
+  DOS's old 2 GB); `DU [folder] [/S]` says what a folder's files take, with everything under it.
 - The setup floppy has no FDISK, FORMAT or SYS any more: `install.py --new-disk` uses `DISK`, and copies
   FreeDOS's kernel and COMMAND.COM itself. The 720 KB floppy has about 90 KB to spare.
 

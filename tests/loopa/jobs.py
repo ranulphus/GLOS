@@ -1886,6 +1886,11 @@ def shell_case(profile, card):
         t.send("dir /w\r")
         checks["dir"] = t.expect(" Directory of C:\\TEST\n") and t.expect("GLOS.EXE") and t.expect(" file(s)") \
             and t.expect("C:\\TEST>")
+        t.send("df\r")                            # (the drive's size and free space, by DOS's own figures)
+        checks["df"] = t.expect("Drive  Volume") and t.expect("\nC:     ") and t.expect(" MB ") and t.expect("%\n") \
+            and t.expect("C:\\TEST>")
+        t.send("du c:\\test /s\r")
+        checks["du"] = t.expect(" KB  C:\\TEST\n") and t.expect(" file(s)\n") and t.expect("C:\\TEST>")
         t.send("echo caf\u00e9 > t.txt\r")
         t.expect("C:\\TEST>")
         t.send("ty\tt.\t\r")                    # (TYPE, then T.TXT, by Tab)

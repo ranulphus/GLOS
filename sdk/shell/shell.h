@@ -53,6 +53,9 @@ struct sh_host {
     int (*rmdir)(void *ctx, const char *path);
     int (*unlink)(void *ctx, const char *path);
     int (*rename)(void *ctx, const char *from, const char *to);
+    /* a drive's volume (drive 0: A:): its size and what is free, in KB, and its label ("" for none). 0, or -1:
+       no such drive, or it can't be read. May be 0: DF then has nothing to say. */
+    int (*space)(void *ctx, int drive, unsigned long *total_kb, unsigned long *free_kb, char label[12]);
     /* programs: command is the line to run; prog the program's file where the shell found it, or 0 (a pipe or
        a redirection: the DOS's COMMAND.COM has the line); name the command's first word. 1: under way
        (sh_ended() at its end); 0: started and left to itself (detach); -1: it can't be run. */

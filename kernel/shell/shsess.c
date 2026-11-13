@@ -317,6 +317,55 @@ static int h_stat(void *ctx, const char *path, struct sh_dirent *e)
     return 0;
 }
 
+/* A drive's volume: DOS's newer call first (INT 21h 7303h: a FAT32 volume's real size), else the old one
+   (36h: 2 GB at most); its label by a search for the volume's own entry. */
+static int h_space(void *ctx, int drive, unsigned long *total, unsigned long *left, char label[12])
+{
+    struct shsess *s = ctx;
+    char root[8];
+    u8 b[0x2C];
+    u32 per, clusters, avail, i, k;
+    sh_fmt(root, sizeof root, "%c:\\", 'A' + drive);
+    memset(b, 0, sizeof b);
+    paths(s, root, 0);                          /* (its buffer zeroed with the paths': DOS wants the structure's
+                                                   level, its second word, 0 on entry, and answers "invalid
+                                                   parameter" to anything else: MS-DOS 7.1 on bench-g400) */
+    call(s, 0, 0x7303, 0, sizeof b, PATH_AT);
+    s->q.r[0].di = PATH2_AT;
+    s->q.out = b, s->q.out_len = sizeof b, s->q.out_at = PATH2_AT;
+    (void)made(s);
+    if (!s->q.error && !(s->q.r[0].flags & 1) && (b[4] | b[5] | b[6] | b[7]) && (b[8] | b[9])) {
+        per = (b[4] | (u32)b[5] << 8 | (u32)b[6] << 16) * (b[8] | (u32)b[9] << 8);
+        avail = b[12] | (u32)b[13] << 8 | (u32)b[14] << 16 | (u32)b[15] << 24;
+        clusters = b[16] | (u32)b[17] << 8 | (u32)b[18] << 16 | (u32)b[19] << 24;
+    } else {
+        req(s);
+        call(s, 0, 0x3600, 0, 0, (u16)(drive + 1));
+        if (made(s) != 0 || s->q.r[0].ax == 0xFFFF)
+            return -1;
+        per = (u32)s->q.r[0].ax * s->q.r[0].cx;
+        avail = s->q.r[0].bx, clusters = s->q.r[0].dx;
+    }
+    if (!per || !clusters)
+        return -1;
+    *total = per >= 1024 ? clusters * (per >> 10) : clusters / (1024 / per);
+    *left = per >= 1024 ? avail * (per >> 10) : avail / (1024 / per);
+    label[0] = 0;
+    sh_fmt(root, sizeof root, "%c:\\*.*", 'A' + drive);
+    if (paths(s, root, 0) == 0) {
+        call(s, 0, 0x1A00, 0, 0, DTA_AT);
+        call(s, 1, 0x4E00, 0, 0x08, PATH_AT);
+        s->q.out = s->dta, s->q.out_len = sizeof s->dta, s->q.out_at = DTA_AT;
+        if (made(s) == 0 && (s->dta[0x15] & 0x08)) {
+            for (i = 0, k = 0; i < 13 && s->dta[0x1E + i] && k < 11; i++)
+                if (s->dta[0x1E + i] != '.')            /* (11 characters, with a dot DOS puts after the eighth) */
+                    label[k++] = (char)s->dta[0x1E + i];
+            label[k] = 0;
+        }
+    }
+    return 0;
+}
+
 static int before(const struct sh_dirent *a, const struct sh_dirent *b)
 {
     return a->dir != b->dir ? a->dir > b->dir : strcmp(a->name, b->name) < 0;
@@ -981,7 +1030,8 @@ struct shsess *shsess_exec(const char *line, void (*kick)(void)) { return make(0
 static struct shsess *make(u32 cols, u32 rows, const char *line, void (*kick)(void))
 {
     static const struct sh_host host = { 0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free,
-        h_is_dir, h_stat, h_open, h_read, h_put, h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_run, h_as_typed,
+        h_is_dir, h_stat, h_open, h_read, h_put, h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space,
+        h_run, h_as_typed,
         own_names, own_help, h_extra, h_alloc, h_free };
     struct shsess *s;
     if (!(vm.bi->flags & BI_F_AGENT) || !(s = kmalloc(sizeof *s)))
