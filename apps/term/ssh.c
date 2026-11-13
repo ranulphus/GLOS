@@ -34,7 +34,9 @@
 
 enum { S_OFF, S_CONNECTED, S_ASK_HOST, S_ASK_PASSWORD, S_LOGGING_IN, S_OPENING, S_RUNNING, S_SFTP };
 
+#ifndef SSH_PROGRAM
 static struct vt vt;
+#endif
 static struct {
     int stage;
     glos_handle conn;                   /* the GLOS connection */
@@ -172,6 +174,13 @@ static void on_data(struct sshc_chan *ch, int stream, const uint8_t *d, uint32_t
         sftpc_input(s.sf, d, n);
         return;
     }
+#ifdef SSH_PROGRAM                              /* (SSH.EXE: the terminal is somebody else's, and has the bytes as
+                                                   they are: apps/ssh/cli.c) */
+    if (s.screen) {
+        term_raw((const char *)d, (int)n);
+        return;
+    }
+#else
     if (s.screen) {
         vt_feed(&vt, d, (int)n);
         if (vt.reply_n) {
@@ -185,7 +194,10 @@ static void on_data(struct sshc_chan *ch, int stream, const uint8_t *d, uint32_t
         s.changed_at = glos_ticks();
         s.dump_due = 1;
         term_screen_dirty();
-    } else {
+        return;
+    }
+#endif
+    {
         if (stream)
             term_attr(T_ERROR);
         term_write((const char *)d, (int)n);
@@ -215,6 +227,7 @@ static const struct sshc_ops ops = { net_send, NULL, on_hostkey, on_banner, on_d
 
 static void dump_screen(void)
 {
+#ifndef SSH_PROGRAM
     static char text[VT_COLS_MAX * VT_ROWS_MAX * 3 + VT_ROWS_MAX + 1];
     char *p, *nl;
     if (!log_screens)
@@ -225,6 +238,7 @@ static void dump_screen(void)
         printf("VT| %.*s\n", (int)(nl - p), p);
     printf("VT-END\n");
     fflush(stdout);
+#endif
 }
 
 static void finish(int code)
@@ -267,10 +281,12 @@ static void open_channel(void)
     int cols, rows;
     term_size(&cols, &rows);
     s.screen = !s.sftp && !s.cmd[0];
+#ifndef SSH_PROGRAM
     if (s.screen) {
         vt_init(&vt, cols, rows);
         term_screen_on(&vt);
     }
+#endif
     s.ch = s.sftp ? sshc_session(s.c, NULL, 0, 0, NULL, "sftp")
                   : sshc_session(s.c, s.screen ? "xterm" : NULL, (unsigned)cols, (unsigned)rows, s.cmd[0] ? s.cmd : NULL,
                                  NULL);
@@ -536,6 +552,20 @@ void ssh_answer(const char *line)
 
 /* ---- keys and the window, while the screen shows */
 
+#ifdef SSH_PROGRAM
+/* What was typed at the terminal, as it sent it: the session's. */
+void ssh_raw(const char *d, int n)
+{
+    if (s.stage == S_RUNNING && s.ch)
+        sshc_write(s.ch, (const uint8_t *)d, (uint32_t)n);
+}
+
+void ssh_resize(int cols, int rows)
+{
+    if (s.screen && s.ch)
+        sshc_resize(s.ch, (unsigned)cols, (unsigned)rows);
+}
+#else
 void ssh_key(unsigned key, unsigned ch, unsigned mods)
 {
     char out[32];
@@ -565,6 +595,7 @@ void ssh_resize(int cols, int rows)
     if (s.ch)
         sshc_resize(s.ch, (unsigned)cols, (unsigned)rows);
 }
+#endif
 
 void ssh_break(void)
 {

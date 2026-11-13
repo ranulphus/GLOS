@@ -7172,6 +7172,89 @@ class SshdContainer:
         subprocess.run(["docker", "rm", "-f", self.name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def sshprog_case(profile, card):
+    """SSH.EXE, SFTP.EXE and SSHKEY.EXE (apps/ssh; docs/v1/shell.md, S2c): the SSH client as programs run at a
+    terminal, here an SSH login to GLOS itself (a hop from one computer to the next), against OpenSSH in a
+    container. A new host key asked about and kept; a command's output and its exit status as %ERRORLEVEL%; a
+    login by password after a wrong one, neither echoed; a session with a pty (the far shell told xterm and this
+    terminal's size) and its end; SFTP's put and get of 200 KB (SHA-256 there, the bytes back here) and its end;
+    a key made and its public half read; and with no terminal, a command through the hop."""
+    import hashlib
+    tag = "prog-%s-%s" % (profile, card)
+    out = os.path.join(ROOT, "out", "sshc-%s-files" % tag)
+    os.makedirs(out, exist_ok=True)
+    srv = SshdContainer(tag, out)
+    p1 = srv.ports[0]
+    data = bytes((i * 2654435761 >> 11) & 255 for i in range(200000))
+    open(os.path.join(out, "DATA.BIN"), "wb").write(data)
+    rel = lambda f: os.path.relpath(os.path.join(out, f), ROOT)
+    agent = Agent("sshc-" + tag, profile, card, ["--file", "build/apps/SSH.EXE=/TEST/SSH.EXE",
+        "--file", "build/apps/SFTP.EXE=/TEST/SFTP.EXE", "--file", "build/apps/SSHKEY.EXE=/TEST/SSHKEY.EXE",
+        "--file", "%s=/TEST/SSH/ID_ED25" % rel("sshd/client"), "--file", "%s=/TEST/DATA.BIN" % rel("DATA.BIN"),
+        "--cmd", "SERSAY HX-START sshprog", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1800)
+    checks = {"listen": agent.listening()}
+
+    def raw(cmd):
+        p = subprocess.run(agent.opts + ["glos@127.0.0.1", cmd], capture_output=True, timeout=300)
+        return p.returncode, p.stdout
+
+    try:
+        t = Login(agent)
+        checks["login"] = t.expect("C:\\TEST>")
+        t.send("ssh -p %d glos@10.0.2.2 echo hello-over-ssh\r" % p1)
+        checks["ask-host"] = t.expect("ED25519 key fingerprint is SHA256:", 180) and t.expect("(yes/no)? ")
+        t.send("maybe\r")
+        checks["asked-again"] = t.expect("Please type 'yes' or 'no': ")
+        t.send("yes\r")
+        checks["command"] = t.expect("hello-over-ssh\n", 120) and t.expect("C:\\TEST>")
+        t.send("ssh -p %d glos@10.0.2.2 echo ran-it; exit 7\r" % p1)
+        t.expect("ran-it\n", 120)                 # (the prompt alone would be found in the line's own echo)
+        t.expect("C:\\TEST>", 60)
+        t.send("echo status %errorlevel%\r")
+        checks["status"] = t.expect("status 7\n")
+        t.send("ssh -p %d -i C:\\TEST\\NOKEY glos@10.0.2.2 echo by-password\r" % p1)
+        ok = t.expect("password: ", 180)
+        t.send("wrong-password\r")
+        ok = ok and t.expect("password: ", 120)
+        t.send(SshdContainer.PASSWORD + "\r")
+        checks["password"] = ok and t.expect("by-password\n", 120) and t.expect("C:\\TEST>")
+        checks["not-echoed"] = "wrong-password" not in t.text() and SshdContainer.PASSWORD not in t.text()
+        t.send("ssh -p %d glos@10.0.2.2\r" % p1)
+        checks["session"] = t.expect("$ ", 180)
+        t.send("echo term=$TERM; stty size\r")
+        checks["pty"] = t.expect("term=xterm\n") and t.expect("24 80\n")
+        t.send("exit\r")
+        checks["closed"] = t.expect("Connection to 10.0.2.2 closed.") and t.expect("C:\\TEST>")
+        t.send("sftp -P %d glos@10.0.2.2\r" % p1)
+        checks["sftp"] = t.expect("sftp> ", 180)
+        t.send("put C:\\TEST\\DATA.BIN data.bin\r")
+        t.expect("sftp> ", 600)
+        checks["sftp-up"] = srv.run("sha256sum data.bin").split()[:1] == [hashlib.sha256(data).hexdigest()]
+        t.send("get data.bin C:\\TEST\\BACK.BIN\r")
+        t.expect("sftp> ", 600)
+        t.send("bye\r")
+        checks["sftp-end"] = t.expect("C:\\TEST>")
+        checks["sftp-down"] = raw("glos dd if=c:\\test\\back.bin of=-")[1] == data
+        t.send("sshkey -f C:\\TEST\\NEWKEY -C made-here\r")
+        checks["keygen"] = t.expect("Your public key has been saved in") and t.expect("C:\\TEST>")
+        pub = raw("glos dd if=c:\\test\\newkey.pub of=-")[1]
+        checks["key"] = pub.startswith(b"ssh-ed25519 AAAA") and b"made-here" in pub
+        t.send("exit\r")
+        checks["exit"] = t.end() == 0
+        rc, out, err = agent.ssh("C:\\TEST\\SSH.EXE -p %d glos@10.0.2.2 echo through-the-hop" % p1, timeout=300)
+        checks["hop"] = rc == 0 and "through-the-hop" in out
+        checks["glos-exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    srv.close()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("sshc-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
+        not bad
+
+
 SSHC_CASES = [("bf6", "g200", "ne2kpci", 16), ("486dx2", "vbe", "ne2k", 8)]
 
 
@@ -8400,7 +8483,10 @@ def main():
         return 0 if all(r[1] for r in matrix(pkg_case, cases, a.jobs)) else 1
     if a.suite == "sshc":
         cases = [c for c in SSHC_CASES if not a.profile or c[0] in a.profile]
-        return 0 if all(r[1] for r in matrix(sshc_case, cases, a.jobs)) else 1
+        res = matrix(sshc_case, cases, a.jobs)
+        res += matrix(sshprog_case, [c for c in (("bf6", "ne2kpci"), ("486dx2", "ne2k")) if not a.profile or c[0] in a.profile],
+                      a.jobs)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "https":
         cases = [c for c in HTTPS_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(https_case, cases, a.jobs)) else 1

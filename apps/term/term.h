@@ -53,6 +53,8 @@ void ssh_paste(const char *text, int n);
 void ssh_resize(int cols, int rows);
 void ssh_break(void);
 void ssh_poll(void);                            /* its network: on GLOS_EV_NET and the tick */
+void ssh_raw(const char *d, int n);             /* (SSH.EXE's: apps/ssh/cli.c) what was typed, as the terminal sent it */
+void term_raw(const char *d, int n);            /* ... and bytes for the terminal as they are */
 void ssh_log_screens(int on);                   /* -log: the screen on stdout when it's still */
 
 #endif

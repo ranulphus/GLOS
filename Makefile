@@ -556,7 +556,7 @@ loopa-pkg: all build/apps/PKG.EXE build/host/mkcerts build/glos/CERTS.DAT build/
            check-deps
 	$(Q)python3 tests/loopa/jobs.py pkg -j $(JOBS)
 # M10 step D: the terminal's ssh, sftp and ssh-keygen against OpenSSH in a container (tests/sshd).
-loopa-sshc: all build/apps/TERM.EXE check-deps
+loopa-sshc: all build/apps/TERM.EXE $(SSH_EXES) check-deps
 	$(Q)python3 tests/loopa/jobs.py sshc -j $(JOBS)
 # M9's exit: the toolkit, the settings, console jobs, the apps, the Control Panel.
 loopa-m9: loopa-gui loopa-config loopa-console loopa-native loopa-control
@@ -764,6 +764,20 @@ build/apps/FETCH.EXE: apps/fetch/fetch.c $(NET_LIBS) tools/glosmark.py
 	$(Q)echo "  DJCC    apps/fetch"
 	$(Q)$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -Iinclude -Ithird_party/bearssl/inc -o $@ $< $(NET_LIBS)
 	$(Q)python3 tools/glosmark.py $@
+# SSH.EXE, SFTP.EXE and SSHKEY.EXE (apps/ssh; docs/v1/shell.md, S2c): the Terminal's ssh client (apps/term/ssh.c)
+# as programs run at a terminal (API 2.1's GLOS_INIT_TERMINAL), one source built three ways.
+SSH_EXES := build/apps/SSH.EXE build/apps/SFTP.EXE build/apps/SSHKEY.EXE
+define ssh_exe
+build/apps/$(1).EXE: apps/ssh/cli.c apps/term/ssh.c apps/term/term.h apps/term/vt.h build/sdk/libsshc.a build/sdk/libglos.a tools/glosmark.py
+	@mkdir -p build/apps
+	$$(Q)echo "  DJCC    apps/ssh ($(1))"
+	$$(Q)$$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -DSSH_PROGRAM -DCLI_WHICH=$(2) -Iinclude -Iapps/term -o $$@ \
+	  apps/ssh/cli.c apps/term/ssh.c build/sdk/libsshc.a build/sdk/libglos.a
+	$$(Q)python3 tools/glosmark.py $$@
+endef
+$(eval $(call ssh_exe,SSH,0))
+$(eval $(call ssh_exe,SFTP,1))
+$(eval $(call ssh_exe,SSHKEY,2))
 # PKG (apps/pkg; M10 step E): packages from signed sources. Its zips through stb_image's inflater, signatures with
 # TinySSH's Ed25519 (in libsshc), downloads with sdk/http.
 build/apps/PKG.EXE: $(wildcard apps/pkg/*.c apps/pkg/*.h) $(NET_LIBS) build/sdk/libsshc.a build/sdk/libgui.a tools/glosmark.py
@@ -883,7 +897,7 @@ build/apps/$(1).EXE: $$(wildcard apps/$(2)/*.c apps/$(2)/*.h) build/sdk/libgui.a
 	$$(Q)python3 tools/glosmark.py $$@
 endef
 $(foreach a,$(APPS),$(eval $(call app_exe,$(shell echo $(a) | tr a-z A-Z),$(a))))
-apps: $(APP_EXES)
+apps: $(APP_EXES) $(SSH_EXES)
 build/dj/APPTEST.EXE: tests/dos/apptest.c build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"

@@ -185,7 +185,7 @@ def new_disk(pc, erase):
 def glos_files(args):
     """(local path, name there under /C/GLOS) for the whole system; what is missing ends the run."""
     files = [("build/ow/GLOS.EXE", "GLOS.EXE"), ("build/kernel/GLOSK.BIN", "GLOSK.BIN")]
-    files += [("build/apps/%s.EXE" % a, a + ".EXE") for a in APPS]
+    files += [("build/apps/%s.EXE" % a, a + ".EXE") for a in APPS + ["SSH", "SFTP", "SSHKEY"]]
     files += [("build/glos/CERTS.DAT", "CERTS.DAT"), ("sdk/gui/fonts/SMOOTH.DAT", "SMOOTH.DAT"),
               ("build/glos/KEYS/PKG/GLOS.PUB", "KEYS/PKG/GLOS.PUB"),
               (os.path.join(args.keys, "HOSTKEY"), "KEYS/HOSTKEY"), (os.path.join(args.keys, "AUTHKEYS"), "KEYS/AUTHKEYS")]

@@ -13,6 +13,10 @@ in its `docs/milestones-*.md`.
 - A program can be run at a terminal as a GLOS app (`GLOS_INIT_TERMINAL`, `GLOS_SYS_TERMINAL`): the shell waits
   for it, and the terminal's bytes are its, each way, as they are. What the SSH client needs to be a program
   of its own.
+- `SSH.EXE`, `SFTP.EXE` and `SSHKEY.EXE` in `C:\GLOS`: the SSH client, its file transfer and its key maker as
+  programs, run from any shell: at an SSH login to the PC they hop on to another computer (`ssh pc`, then
+  `ssh other`). The Terminal app still has its own built-in ones until it becomes a terminal of the kernel's
+  shell.
 - GLOS's own commands (`PS`, `LOG`, `DISK` ...) no longer need a network card: the thread that runs them starts
   on every PC.
 
