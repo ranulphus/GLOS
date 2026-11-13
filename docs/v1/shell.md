@@ -159,11 +159,11 @@ S2 gives it a host in the kernel and takes the Terminal app's away.
 - **A session's files and a program's** go through the one DOS in turns: a long COPY in one session holds
   nothing, but each of its calls waits its turn behind a running program. As SFTP today.
 
-## Step S2c as designed (for the owner's review, 2026-11-13; nothing of it is built)
+## Step S2c as designed (2026-11-13; agreed by the owner the same day: the shell as a kind of job, and SSH, SFTP and SSH-KEYGEN as programs with `GLOS_SYS_TERMINAL`; not built yet)
 
 S2a and S2b are built: `ssh pc` logs in, `ssh pc COMMAND` runs through the shell, GLOS's own commands are the
-shell's. S2c makes the Terminal app a terminal of that same shell. It touches the public API, so it waits for
-the owner.
+shell's. S2c makes the Terminal app a terminal of that same shell. It adds to the public API, which
+the owner has agreed (above).
 
 ### The API: the shell as a kind of job (2.1)
 

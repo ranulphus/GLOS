@@ -16,8 +16,7 @@ disk.
 
 - **On the floppy:** FreeDOS 1.4's kernel and `COMMAND.COM` with its `FDISK`, `FORMAT`, `SYS`, `XCOPY`, `ATTRIB`,
   `MEM`, `MORE` and `DELTREE` (FreeDOS's own programs, unchanged, from its boot floppy: `tools/setup/versions.mk`);
-  `A:\GLOS` with `GLOS.EXE`, `GLOSK.BIN`, a `GLOS.CFG` that names the PC, `PARTS.EXE` (the hard disk's partition
-  table, for `install.py`) and `KEYS\`. About 1.1 MB of the disk.
+  `A:\GLOS` with `GLOS.EXE`, `GLOSK.BIN`, a `GLOS.CFG` that names the PC, and `KEYS\`. About 1.1 MB of the disk.
 - **The smaller disks** carry the kernel packed (`tools/packkernel.py`: deflate, half the size; `GLOS.EXE` unpacks
   it and checks its sum, and takes either form under the name `GLOSK.BIN`). The 720 KB disk has FreeDOS's `FDISK`,
   `FORMAT` and `SYS` alone, and 12 KB to spare.
@@ -62,8 +61,8 @@ What is on the disk then: `C:\GLOS` with `GLOS.EXE`, `GLOSK.BIN`, the programs, 
   320h, 340h or 360h, not in Plug and Play mode, and no packet driver loaded.
 - **During `--new-disk` the floppy must be what the PC starts from** (the BIOS's order: A: before C:): between
   the partitioning and the format the disk can't be started from.
-- **`FDISK` shows nothing over SSH** (it writes to the screen itself): `install.py` reads the partition table
-  with `PARTS.EXE` instead. A disk with partitions of any system is never taken for a new one.
+- **`FDISK` shows nothing over SSH** (it writes to the screen itself): `install.py` has GLOS's kernel read the
+  partition table instead (`glos disktest list`). A disk with partitions of any system is never taken for a new one.
 - **A partition that isn't formatted** makes DOS stop and ask (Abort, Retry, Fail) when it is looked at: after
   `--new-disk`'s restart nothing looks at C: before `FORMAT`.
 - **Tested** in Loop A (`make loopa-floppy`: a 486DX4 with an NE2000 and a blank disk, from the 1.44 MB and the

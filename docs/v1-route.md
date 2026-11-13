@@ -224,6 +224,12 @@ two command sets that don't match). Before phase C, because the Terminal is one 
   - Date, time and region (zone, formats, network time); Mouse and keyboard (speed, wheel, repeat);
   - Game controllers (the pads, the mapping, a test and calibration: the gamepad plan's J6);
   - USB devices; startup programs and default apps.
+- **Background apps** (the owner, 2026-11-13): a `[services]` list of apps GLOS starts with itself (with no
+  desktop too), starts again if they end, and lists and stops by a command of the shell's. Supervision only:
+  they are apps like any other, and wait while a DOS program has the whole PC, as apps do today. Nothing in
+  how they are listed or kept depends on that wait: once DOS programs run in machines of their own (GLOS's own
+  DOS services: docs/v1/shell.md, "later"), a background app goes on through them, and the same list serves.
+  Not chosen: apps of a service class that run on through a full-screen DOS program now.
 - **The system monitor** becomes a task manager: programs, apps, sessions, memory, the network, end a task.
 
 ### E. The core apps, upgraded
