@@ -159,6 +159,56 @@ S2 gives it a host in the kernel and takes the Terminal app's away.
 - **A session's files and a program's** go through the one DOS in turns: a long COPY in one session holds
   nothing, but each of its calls waits its turn behind a running program. As SFTP today.
 
+## Step S2c as designed (for the owner's review, 2026-11-13; nothing of it is built)
+
+S2a and S2b are built: `ssh pc` logs in, `ssh pc COMMAND` runs through the shell, GLOS's own commands are the
+shell's. S2c makes the Terminal app a terminal of that same shell. It touches the public API, so it waits for
+the owner.
+
+### The API: the shell as a kind of job (2.1)
+
+A session is reached with the calls an app already has for a program it runs, not with an area of its own:
+
+| | Today (2.0) | Added (2.1) |
+|---|---|---|
+| `GLOS_JOB_RUN` | a program, in a window of the app's, full-screen or hidden | `how = GLOS_RUN_SHELL`: GLOS's shell, with a terminal of `cols` by `rows` (two fields at the structure's end; `command` empty for a login, or a line to run) |
+| `GLOS_JOB_READ`, `GLOS_JOB_WRITE` | the program's output; its input | the bytes for the terminal (UTF-8, an xterm's sequences); the bytes typed |
+| `GLOS_JOB_STATUS`, `GLOS_EV_JOB`, `GLOS_CORE_CLOSE` | its state, its end | the session's, the same |
+| `GLOS_JOB_SIZE` (new, the one new call) | | the terminal's size has changed |
+| `GLOS_SYS_TERMINAL` (new) | | for a program that is run at a terminal (below): its bytes are the terminal's as they are |
+
+One flag, two fields, two calls. `GLOS_MINOR` becomes 1; a 2.0 program sees nothing change.
+
+### The Terminal app
+
+- **A terminal only:** its window, `vt.c`'s screen for everything, keys turned into the bytes an xterm sends
+  (as its SSH client does today), a session opened with `GLOS_RUN_SHELL`. `apps/term/shell.c` goes (the shell
+  is the kernel's), and so does `term.c`'s own text view.
+- **`vt.c` gains what the text view had:** lines kept above the screen to scroll back to, and a selection to
+  copy. Its pictures change (the goldens are made again); the scripts' lines stay.
+- **On the host** (the toolkit's tests have no kernel): the shim runs the same shell and editor on a thread,
+  with the test's drives for files and no programs, as now.
+
+### SSH, SFTP and SSH-KEYGEN
+
+They are the Terminal app's own commands today. With the shell in the kernel they become programs
+(`C:\GLOS\SSH.EXE`, `SFTP.EXE`, `SSHKEY.EXE`: GLOS apps without a window, on `sdk/sshc`), run by the shell like
+any other, at any terminal: the Terminal app's, or an SSH login's (a hop from one PC to the next).
+
+A program like that speaks to its terminal in bytes, not as a DOS program does (keys from the BIOS, text in
+the code page). `GLOS_SYS_TERMINAL` says so: from then on what the program writes goes to the terminal as it
+is, and what is typed comes to its standard input as the terminal sent it; it is told the terminal's size
+and its changes. This is also the first piece of "text-mode programs over SSH" (decided: later), and nothing
+else of that is built here.
+
+### In what order, inside S2c
+
+| | What | Shows it works |
+|---|---|---|
+| 1 | `GLOS_RUN_SHELL`, `GLOS_JOB_SIZE`; APITEST's cases; the shim's session | Loop A's api suite; host tests |
+| 2 | `vt.c`'s scroll-back and selection; the Terminal on a session | The Terminal's scripts, host and Loop A |
+| 3 | `GLOS_SYS_TERMINAL`; SSH.EXE, SFTP.EXE, SSHKEY.EXE | `loopa-sshc`, from the Terminal and from an SSH login |
+
 ## Decided by the owner (2026-11-12)
 
 1. **The shell runs in the kernel**, as SSH and SFTP do.
