@@ -72,8 +72,9 @@ lanes=${GATE_LANES:-4} vms=${LOOPA_MAX_VMS:-8} niceness=${MGA_NICE:-10}
 tjobs=${JOBS:-$(( vms / lanes > 0 ? vms / lanes : 1 ))}
 # RetroGPU is ~/RetroGPU, or (RETROGPU=) another checkout of it, for a branch's run: its HEAD is sent, and its
 # own built DOS-GL programs (gl/build/exe, gl/build/doom) take ~/RetroGPU's place there. A suite whose programs
-# it has not built is refused here: there it would run the ones ~/RetroGPU built, another branch's. (Fifth
-# Wheel in loopa-games is ~/FifthWheel's build whatever the branch.)
+# it has not built is refused here: there it would run the ones ~/RetroGPU built, another branch's. Fifth
+# Wheel in loopa-games is ~/FifthWheel's build unless FIFTHWHEEL_DIR names another checkout's (one built against
+# that branch).
 other=
 [ "$(cd "$rgpu" && pwd -P)" = "$HOME/RetroGPU" ] || other=$(cd "$rgpu" && pwd -P)
 if [ -n "$other" ]; then
@@ -113,7 +114,10 @@ paths=("$(optdir WATCOM)" "$(optdir DJGPP_PREFIX)" "$box"
        RetroGPU/gl/build/exe RetroGPU/gl/build/doom)
 present=()
 for p in "${paths[@]}"; do
-    case "$p" in RetroGPU/*) [ -z "$other" ] || continue;; esac
+    case "$p" in
+        RetroGPU/*) [ -z "$other" ] || continue;;
+        FifthWheel/*) [ -z "${FIFTHWHEEL_DIR:-}" ] || continue;;
+    esac
     [ -e "$HOME/$p" ] && present+=("$p")
 done
 echo "merge-gate: syncing ${#present[@]} paths to $host"
@@ -130,6 +134,11 @@ if [ -n "$other" ]; then
             rsync -a --delete --exclude __pycache__ "$other/gl/build/$d" "$host:RetroGPU/gl/build/"
         fi
     done
+fi
+if [ -n "${FIFTHWHEEL_DIR:-}" ]; then
+    ssh -o BatchMode=yes "$host" "mkdir -p FifthWheel/build/dos FifthWheel/build/data"
+    rsync -a "$FIFTHWHEEL_DIR/build/dos/FWHEEL.EXE" "$host:FifthWheel/build/dos/"
+    rsync -a "$FIFTHWHEEL_DIR/build/data/WORLD.PAK" "$host:FifthWheel/build/data/"
 fi
 git push -q --force "$host:glos-gate.git" "$commit:refs/heads/gate"
 git -C "$rgpu" push -q --force "$host:retrogpu-gate.git" "$rcommit:refs/heads/gate"
