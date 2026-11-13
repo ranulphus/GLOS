@@ -6424,8 +6424,11 @@ def floppy_case(profile, card, size):
         checks["floppy-up"] = listening(serial)
         rc, o = ssh(port, opts, "glos ver")
         checks["floppy-ssh"] = rc == 0 and "GLOS" in o
-        rc, o = ssh(port, opts, "A:\\GLOS\\PARTS.EXE")
-        checks["blank"] = rc == 0 and "used=0" in o
+        ssh(port, opts, "glos disktest list")       # (the kernel's own reading of the table: none on a blank disk)
+        t0 = time.time()
+        while time.time() - t0 < 60 and "GLOS-DISKTEST list done" not in log(serial):
+            time.sleep(1)
+        checks["blank"] = bool(re.search(r"GLOS-DISKTEST disk=80 sectors=\d+ chs=\S+ edd=\d parts=-1\n", log(serial)))
         got = os.path.join(tmp, "GLOSK.BIN")    # a file read from the floppy through GLOS (SFTP): whole
         batch = os.path.join(tmp, "batch")
         open(batch, "w").write("get /A/GLOS/GLOSK.BIN %s\n" % got)

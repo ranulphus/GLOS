@@ -329,6 +329,40 @@ static int split_pattern(const struct sh *s, const char *arg, char *dir, unsigne
 
 /* ---- the built-ins */
 
+/* DOS's switches among a command's words (/Y, /-Y, /V ...): the ones in `known` (in capitals, between
+   spaces) are taken out, as answered or as nothing this shell does otherwise;
+   any other is said to be invalid, as DOS says it, and the command is not run. The words left: how many, or
+   -1. */
+static int switches(struct sh *s, int argc, char **argv, const char *known)
+{
+    int i, n = 1;
+    for (i = 1; i < argc; i++) {
+        const char *k = known;
+        int ok = 0;
+        if (argv[i][0] != '/' || !argv[i][1]) {
+            argv[n++] = argv[i];
+            continue;
+        }
+        while (*k && !ok) {                     /* (NAME: that switch; NAME*: with anything after it, as /O:N) */
+            const char *a = argv[i] + 1;
+            for (; *k && *k != ' ' && *k != '*' && upper((unsigned char)*a) == *k; k++, a++)
+                ;
+            ok = *k == '*' || ((!*k || *k == ' ') && !*a);
+            while (*k && *k != ' ')
+                k++;
+            while (*k == ' ')
+                k++;
+        }
+        if (!ok) {
+            char line[80];
+            sh_fmt(line, sizeof line, "Invalid switch - %s\r\n", argv[i]);
+            err(s, line);
+            return -1;
+        }
+    }
+    return n;
+}
+
 static void size_text(unsigned long v, char *b, size_t room)
 {
     char t[32];
@@ -353,8 +387,10 @@ static int cmd_dir(struct sh *s, int argc, char **argv)
             wide = 1;
         else if (same(argv[i], "/B"))
             bare = 1;
-        else
-            arg = argv[i];
+    if ((argc = switches(s, argc, argv, "W B O* P -P L")) < 0)   /* (/O: by name, as it is; /P, /L: nothing) */
+        return 1;
+    if (argc > 1)
+        arg = argv[argc - 1];
     split_pattern(s, arg ? arg : ".", dir, sizeof dir, pat, sizeof pat);
     if ((n = s->h->dir_read(s->h->ctx, dir, &e)) < 0) {
         err(s, "File not found\r\n");
@@ -439,6 +475,8 @@ static int cmd_copy(struct sh *s, int argc, char **argv, int move)
     char dir[SH_PATH], pat[64], to[SH_PATH], from[SH_PATH], dst[SH_PATH], line[80];
     struct sh_dirent *e;
     int n, i, done = 0, to_dir;
+    if ((argc = switches(s, argc, argv, "Y -Y V A B")) < 0)     /* (what is there is written over, asked or not) */
+        return 1;
     if (argc < 2) {
         err(s, "Required parameter missing\r\n");
         return 1;
@@ -483,6 +521,8 @@ static int cmd_del(struct sh *s, int argc, char **argv)
     char dir[SH_PATH], pat[64], p[SH_PATH], line[80];
     struct sh_dirent *e;
     int n, i, done = 0;
+    if ((argc = switches(s, argc, argv, "Q")) < 0)      /* (it never asks) */
+        return 1;
     if (argc < 2) {
         err(s, "Required parameter missing\r\n");
         return 1;

@@ -9,7 +9,7 @@
 #
 # On it: FreeDOS 1.4's kernel and COMMAND.COM, its FDISK, FORMAT and SYS (as its own boot floppy has them:
 # FreeDOS's programs, unchanged, under their own licences, the GPL for most), GLOS.EXE and GLOSK.BIN, a GLOS.CFG
-# with the PC's name, PARTS.EXE (tools/floppy/parts.c), and KEYS\ (HOSTKEY: this floppy's own; AUTHKEYS: who may
+# with the PC's name, and KEYS\ (HOSTKEY: this floppy's own; AUTHKEYS: who may
 # log in).
 set -euo pipefail
 out=$1 keys=$2 host=$3 size=${4:-1440}
@@ -19,13 +19,13 @@ case $size in
     1200) fd=120m kernel=build/kernel/GLOSK.PAK
           keep="COMMAND.COM FDISK.EXE FDISK.INI FORMAT.EXE SYS.COM ATTRIB.COM XCOPY.EXE MEM.EXE MORE.EXE DELTREE.COM";;
     720)  fd=720k kernel=build/kernel/GLOSK.PAK
-          keep="COMMAND.COM FDISK.EXE FDISK.INI FORMAT.EXE SYS.COM";;
+          keep="COMMAND.COM FDISK.EXE FORMAT.EXE SYS.COM";;
     *) echo "mkfloppy: SIZE is 1440, 1200 or 720"; exit 1;;
 esac
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 cache=${MGA_CACHE:-$HOME/.cache/mga-glide}
-for f in "$root/build/ow/GLOS.EXE" "$root/$kernel" "$root/build/ow/dos/PARTS.EXE" "$keys/HOSTKEY" "$keys/AUTHKEYS"; do
+for f in "$root/build/ow/GLOS.EXE" "$root/$kernel" "$keys/HOSTKEY" "$keys/AUTHKEYS"; do
     [ -s "$f" ] || { echo "mkfloppy: no $f"; exit 1; }
 done
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
@@ -49,7 +49,6 @@ mmd -i "$img" ::/GLOS ::/GLOS/KEYS
 mcopy -i "$img" "$root/build/ow/GLOS.EXE" ::/GLOS/GLOS.EXE
 mcopy -i "$img" "$root/$kernel" ::/GLOS/GLOSK.BIN
 mcopy -i "$img" "$tmp/GLOS.CFG" ::/GLOS/GLOS.CFG
-mcopy -i "$img" "$root/build/ow/dos/PARTS.EXE" ::/GLOS/PARTS.EXE
 mcopy -i "$img" "$keys/HOSTKEY" ::/GLOS/KEYS/HOSTKEY
 mcopy -i "$img" "$keys/AUTHKEYS" ::/GLOS/KEYS/AUTHKEYS
 mlabel -i "$img" ::GLOSSETUP >/dev/null 2>&1 || true

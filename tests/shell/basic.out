@@ -68,6 +68,25 @@ copy notes.txt notes.txt
 <<File cannot be copied onto itself
 >>        0 file(s) copied
 [[C:\WORK>]]
+copy /y notes.txt new\again.txt /v
+        1 file(s) copied
+[[C:\WORK>]]
+del /q new\again.txt
+1 file(s) deleted
+[[C:\WORK>]]
+copy /z notes.txt new
+<<Invalid switch - /z
+>>[[C:\WORK>]]
+dir new /o:n /b
+NOTES.TXT
+README.MD
+[[C:\WORK>]]
+dir /s
+<<Invalid switch - /s
+>>[[C:\WORK>]]
+dir /bogus
+<<Invalid switch - /bogus
+>>[[C:\WORK>]]
 dir new /b
 NOTES.TXT
 README.MD
@@ -211,16 +230,16 @@ VER, HELP, EXIT
 Programs run here until they want the screen. a && b: b after a has worked; a || b: b if it hasn't.
 [[C:\WORK>]]
 history
-  1  echo.on
-  2  set X
-  3  set NOPE
-  4  md new && cd new && echo made
-  5  cd .. || echo not shown
-  6  cd nosuch || echo no such folder
-  7  echo %ERRORLEVEL%
-  8  copy notes.txt new
-  9  copy *.* new
- 10  copy notes.txt notes.txt
+  1  echo %ERRORLEVEL%
+  2  copy notes.txt new
+  3  copy *.* new
+  4  copy notes.txt notes.txt
+  5  copy /y notes.txt new\again.txt /v
+  6  del /q new\again.txt
+  7  copy /z notes.txt new
+  8  dir new /o:n /b
+  9  dir /s
+ 10  dir /bogus
  11  dir new /b
  12  echo kept > out.txt
  13  echo more >> out.txt

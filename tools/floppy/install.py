@@ -19,10 +19,11 @@ fonts' smoothing data, a GLOS.CFG with the PC's name (--name; one that is there 
 floppy's host key and AUTHKEYS, so the PC stays who it was and lets the same people in).
 
 Nothing is partitioned or formatted without --new-disk, and never a disk whose partition table has an entry
-(DOS's or any other system's: the floppy's PARTS.EXE reads the table itself) without --erase-existing. Run from the repository's root, after `make all apps floppy`.
+(DOS's or any other system's: GLOS's kernel reads the table itself) without --erase-existing. Run from the repository's root, after `make all apps floppy`.
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -92,16 +93,26 @@ class Pc:
         return out
 
     def parts(self):
-        """The first hard disk's partition table, by the floppy's PARTS.EXE: a list of (number, type, MB, fat),
-        or None if the disk can't be read."""
-        rc, out = self.ssh("A:\\GLOS\\PARTS.EXE", timeout=120)
-        if "PARTS disk=" not in out:
+        """The first hard disk's partition table, as GLOS's kernel reads it (glos disktest list, whose lines are
+        the log's): a list of (number, type, MB, fat), or None if the disk can't be read."""
+        log = lambda: self.ssh("glos log", timeout=60)[1].replace("\r", "")
+        before = log().count("GLOS-DISKTEST list done")
+        self.ssh("glos disktest list", timeout=60)
+        t0 = time.time()
+        text = log()
+        while text.count("GLOS-DISKTEST list done") == before:
+            if time.time() - t0 > 120:
+                return None
+            time.sleep(1)
+            text = log()
+        at = text.rfind("GLOS-DISKTEST disk=80 ")
+        m = re.match(r"GLOS-DISKTEST disk=80 sectors=\d+ chs=\S+ edd=\d parts=(-?\d+)\n", text[at:]) if at >= 0 else None
+        if not m or int(m.group(1)) < -1:       # (no first disk, or the BIOS couldn't read it)
             return None
         found = []
-        for line in out.split("\n"):
-            w = dict(x.split("=", 1) for x in line.split()[1:] if "=" in x) if line.startswith("PARTS n=") else None
-            if w:
-                found.append((int(w["n"]), w["type"], int(w["mb"]), w["fat"] == "1"))
+        for n, kind, sectors in re.findall(r"GLOS-DISKTEST part disk=80 n=(\d+) type=(\w+) active=\d start=\d+ "
+                                           r"sectors=(\d+)\n", text[at:]):
+            found.append((int(n), kind, int(sectors) // 2048, kind.lower() in ("01", "04", "06", "0b", "0c", "0e")))
         return found
 
     def has_c(self):

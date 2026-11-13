@@ -27,6 +27,12 @@ file C:\TOOLS\RUN.BAT x
 > copy notes.txt new
 > copy *.* new
 > copy notes.txt notes.txt
+> copy /y notes.txt new\again.txt /v
+> del /q new\again.txt
+> copy /z notes.txt new
+> dir new /o:n /b
+> dir /s
+> dir /bogus
 > dir new /b
 > echo kept > out.txt
 > echo more >> out.txt

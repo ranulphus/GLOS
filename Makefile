@@ -797,17 +797,11 @@ build/glos/KEYS/PKG/GLOS.PUB: tools/pkg/GLOS.PUB
 # FLOPPY_AUTHKEYS, an ed25519 public key (or a file of them).
 FLOPPY_HOST ?= glos-setup
 FLOPPY_SIZE ?= 1440
-# PARTS (tools/floppy/parts.c): the first hard disk's partition table, on the floppy for install.py.
-build/ow/dos/PARTS.EXE: tools/floppy/parts.c
-	@mkdir -p build/ow/dos/obj
-	$(Q)echo "  WCC16   $<"
-	$(Q)$(WCC16) -bt=dos -ms -3 -os -zq -we -fo=build/ow/dos/obj/parts.obj $<
-	$(Q)$(WLINK) system dos option quiet option stack=4k name $@ file build/ow/dos/obj/parts.obj
 FLOPPY_AUTHKEYS ?= $(firstword $(wildcard $(HOME)/.ssh/glos_bench.pub $(HOME)/.ssh/id_ed25519.pub))
 build/floppy/keys/HOSTKEY:
 	@mkdir -p build/floppy/keys
 	$(Q)ssh-keygen -q -t ed25519 -N "" -C "$(FLOPPY_HOST)" -f $@
-floppy: all build/kernel/GLOSK.PAK build/ow/dos/PARTS.EXE build/floppy/keys/HOSTKEY check-deps
+floppy: all build/kernel/GLOSK.PAK build/floppy/keys/HOSTKEY check-deps
 	@[ -n "$(FLOPPY_AUTHKEYS)" ] && grep -q '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" \
 	  || { echo "floppy: FLOPPY_AUTHKEYS=FILE, an ed25519 public key (ssh-keygen -t ed25519): none found"; exit 1; }
 	$(Q)grep '^ssh-ed25519 ' "$(FLOPPY_AUTHKEYS)" > build/floppy/keys/AUTHKEYS
@@ -829,7 +823,7 @@ build/host/fdbootdisk: tests/host/fdbootdisk.c kernel/disk/mbr.c kernel/disk/fat
 	$(Q)echo "  HOSTCC  $@"
 	$(Q)$(DEV) $(HOST_CC) -m32 -D_FILE_OFFSET_BITS=64 -O1 -g -Wall -Wextra -Werror -Wl,-z,noexecstack -o $@ tests/host/fdbootdisk.c \
 	  kernel/disk/mbr.c kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S
-loopa-floppy: all build/kernel/GLOSK.PAK build/ow/dos/PARTS.EXE apps build/apps/FETCH.EXE build/apps/PKG.EXE build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB build/host/mbrdisk build/host/fdbootdisk check-deps
+loopa-floppy: all build/kernel/GLOSK.PAK apps build/apps/FETCH.EXE build/apps/PKG.EXE build/glos/CERTS.DAT build/glos/KEYS/PKG/GLOS.PUB build/host/mbrdisk build/host/fdbootdisk check-deps
 	@mkdir -p out/floppy-keys out/fdboot
 	$(Q)$(DEV) build/host/mbrdisk out/floppy-mbr.img 20160
 	$(Q)cp tests/keys/hostkey out/floppy-keys/HOSTKEY && cp tests/keys/hostkey.pub out/floppy-keys/HOSTKEY.pub \
