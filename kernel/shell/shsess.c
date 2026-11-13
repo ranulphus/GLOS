@@ -34,6 +34,7 @@
 #include "mm.h"
 #include "sched.h"
 #include "shsess.h"
+#include "sshd.h"
 #include "timer.h"
 #include "vm.h"
 #include "../../sdk/shell/shell.h"
@@ -42,6 +43,7 @@
 #define IN_RING  4096u                  /* powers of two */
 #define OUT_RING 16384u
 #define ERR_RING 4096u                  /* (with no terminal: what is written as errors, kept apart) */
+#define EXT_RING 4096u                  /* what a command of the SSH server's has written, on its way through */
 #define PATH_AT  0u                     /* in the DOS server's buffer: a path, */
 #define PATH2_AT 128u                   /* a second, */
 #define DTA_AT   256u                   /* the find's state, */
@@ -59,6 +61,7 @@ struct shsess {
     volatile u8 closing, ended, resized;
     u8 tty, editing, quit;
     u8 starting;                        /* (the shell's first words: a terminal's alone) */
+    u8 folder;                          /* the shell has been told the folder DOS is in */
     char *line;                         /* with no terminal: the one line it is there to run */
     int code, page;
     u32 utf, utf_left;                  /* a UTF-8 character under way from the terminal */
@@ -66,6 +69,11 @@ struct shsess {
     u8 job_on;
     volatile u8 job_evt;                /* ... it has written, or moved on */
     u8 job_esc;                         /* a key's sequence under way, typed to it */
+    u8 ext[2][EXT_RING];                /* a command of the SSH server's (glos NAME) runs for the session: what
+                                           it has written (the ssh thread's to fill), by stream */
+    volatile u32 xh[2], xt[2];
+    volatile u8 ext_on, ext_evt, ext_done;
+    int ext_code;
     struct dos_req q;
     u8 xfer[256];                       /* a request's paths */
     u8 dta[43];
@@ -172,11 +180,19 @@ static void h_write(void *ctx, int kind, const char *t, int n)
         term_bytes(s, (const u8 *)"\033[0m", 4);
 }
 
-static void h_clear(void *ctx)
+static int h_run(void *ctx, const char *command, const char *prog, const char *name, const char *cwd, const char *env,
+                 int detach);
+
+/* CLS: the terminal's screen; with no terminal the PC's own, as the DOS's CLS has always cleared it for a line
+   sent to it (COMMAND.COM's, as a program). */
+static int h_clear(void *ctx)
 {
     struct shsess *s = ctx;
-    if (s->tty)
+    if (s->tty) {
         term_bytes(s, (const u8 *)"\033[H\033[2J", 7);
+        return 0;
+    }
+    return h_run(ctx, "CLS", 0, "CLS", "", "", 0) > 0 ? SH_UNDER_WAY : 1;
 }
 
 static void h_prompted(void *ctx) { (void)ctx; }
@@ -428,6 +444,8 @@ static int h_rename(void *ctx, const char *from, const char *to)
 
 /* ---- programs: the agent's jobs */
 
+static void folder(struct shsess *s);
+
 static void job_notify(void *owner)             /* (the agent's: any thread, interrupts on or off) */
 {
     struct shsess *s = owner;
@@ -461,7 +479,7 @@ static int h_run(void *ctx, const char *command, const char *prog, const char *n
         strcpy(r.command, command);
     else
         o.command = command;
-    if (strlen(cwd) < sizeof r.dir)
+    if (s->folder && strlen(cwd) < sizeof r.dir)        /* (the folder not asked of DOS yet: DOS's own, as it is) */
         strcpy(r.dir, cwd);
     for (i = 0; i + 2 < sizeof r.env && (env[i] || (i && env[i - 1])); i++)
         r.env[i] = env[i];                      /* (NAME=VALUE strings, to their double NUL) */
@@ -495,6 +513,8 @@ static void job_turn(struct shsess *s)
         if (!gone)
             agent_app_forget(s, s->job);        /* (an app goes on beside: nothing of it is the session's) */
         s->job_on = 0;
+        if (!s->folder && s->sh.rest[0])        /* (more of the line to come, and it may be the shell's own) */
+            folder(s);
         sh_ended(&s->sh, gone ? 1 : st == GLOS_JS_DONE ? (int)code : 0);
     }
 }
@@ -563,6 +583,120 @@ static void job_key(struct shsess *s, int c)
     type_key(s, k);
 }
 
+/* ---- GLOS's own commands: the SSH server's (kernel/ssh/sshd.c: `glos NAME`), run there for the session.
+   The names are DOS-style; where the server's word would be taken for a DOS command of another meaning it
+   has a new one (the owner, 2026-11-12: docs/v1/shell.md). GLOS NAME is the old spelling, kept. */
+
+static const struct {
+    const char *name, *glos;
+} own[] = {
+    { "PS", "ps" }, { "KILL", "kill" }, { "LOG", "log" }, { "STAT", "stat" }, { "RUN", "run" }, { "CONFIG", "config" },
+    { "DISPLAY", "display" }, { "DESK", "desk" }, { "SHOT", "shot" }, { "REC", "rec" }, { "SECRETS", "secrets" },
+    { "USB", "usb" }, { "JOY", "joy" }, { "CLIP", "clip" }, { "AUDIO", "audio" }, { "CACHE", "cache" },
+    { "IDLE", "idle" }, { "RESTART", "restart" }, { "REBOOT", "reboot" },
+    { "SENDTEXT", "type" }, { "SENDKEYS", "key" }, { "SENDMOUSE", "mouse" }, { "SHUTDOWN", "exit" },
+    { "CLOCK", "time" }, { "SYSMEM", "mem" }, { "NETWORK", "net" } };
+
+static const char *const own_names[] = { "GLOS", "PS", "KILL", "LOG", "STAT", "RUN", "CONFIG", "DISPLAY", "DESK", "SHOT",
+    "REC", "SECRETS", "USB", "JOY", "CLIP", "AUDIO", "CACHE", "IDLE", "RESTART", "REBOOT", "SENDTEXT", "SENDKEYS",
+    "SENDMOUSE", "SHUTDOWN", "CLOCK", "SYSMEM", "NETWORK", 0 };
+
+static const char *const own_help[] = {
+    "PS, KILL [n], RUN [--exclusive|--app] program   what runs; one ended; a program started GLOS's way",
+    "LOG, STAT, SYSMEM, NETWORK, CLOCK, USB, JOY     GLOS's log, figures, memory, network, time, devices",
+    "CONFIG, DISPLAY, DESK, AUDIO, CACHE, IDLE, CLIP, SECRETS   settings and the desktop",
+    "SENDTEXT text, SENDKEYS codes, SENDMOUSE ...    keys and the mouse, as if at the PC",
+    "SHOT, REC                                       the screen as a picture, a recording",
+    "SHUTDOWN, RESTART, REBOOT                       GLOS left, started again; the PC restarted",
+    "GLOS name ...       any of those by GLOS's own old name (GLOS TYPE, GLOS EXIT ...)",
+    0 };
+
+static int same_word(const char *a, const char *b)     /* (a: any case; b: capitals) */
+{
+    for (; *a && *b && (*a >= 'a' && *a <= 'z' ? *a - 32 : *a) == *b; a++, b++)
+        ;
+    return !*a && !*b;
+}
+
+static int h_extra(void *ctx, int argc, char **argv, const char *line)
+{
+    struct shsess *s = ctx;
+    char ask[SH_LINE + 8];
+    const char *word = 0, *rest = line;
+    u32 i, n;
+    (void)argc;
+    while (*rest == ' ' || *rest == '\t')
+        rest++;
+    while (*rest && *rest != ' ' && *rest != '\t')      /* (past the command's own name) */
+        rest++;
+    if (same_word(argv[0], "GLOS")) {           /* GLOS NAME ...: the name as the server knows it, small */
+        while (*rest == ' ' || *rest == '\t')
+            rest++;
+        for (n = 0; rest[n] && rest[n] != ' ' && rest[n] != '\t'; n++)
+            ;
+        memcpy(ask, "glos ", 5);
+        for (i = 0; i < n && i < 32; i++)
+            ask[5 + i] = (char)(rest[i] >= 'A' && rest[i] <= 'Z' ? rest[i] + 32 : rest[i]);
+        sh_fmt(ask + 5 + i, (unsigned)sizeof ask - 5 - i, "%s", rest + n);
+        if (!n)
+            ask[4] = 0;                         /* ("glos" alone: its usage) */
+    } else {
+        for (i = 0; i < sizeof own / sizeof *own; i++)
+            if (same_word(argv[0], own[i].name))
+                word = own[i].glos;
+        if (!word)
+            return SH_NOT_MINE;
+        sh_fmt(ask, sizeof ask, "glos %s%s", word, rest);
+    }
+    for (n = (u32)strlen(ask); n && (ask[n - 1] == ' ' || ask[n - 1] == '\t'); n--)
+        ask[n - 1] = 0;
+    s->xh[0] = s->xt[0] = s->xh[1] = s->xt[1] = 0;
+    s->ext_done = 0, s->ext_evt = 0;
+    s->ext_on = 1;
+    if (sshd_ask(s, ask) != 0) {
+        s->ext_on = 0;
+        return 1;
+    }
+    return SH_UNDER_WAY;
+}
+
+/* What the server's command has written, to the terminal; its end, to the shell. */
+static void ext_turn(struct shsess *s)
+{
+    u8 buf[256];
+    int stream, done = s->ext_done;             /* (its end first: what is read after is all of it) */
+    for (stream = 0; stream < 2; stream++)
+        for (;;) {
+            u32 f = irq_save(), n = s->xt[stream] - s->xh[stream], i;
+            if (n > sizeof buf)
+                n = sizeof buf;
+            for (i = 0; i < n; i++)
+                buf[i] = s->ext[stream][(s->xh[stream] + i) % EXT_RING];
+            s->xh[stream] += n;
+            irq_restore(f);
+            if (!n)
+                break;
+            if (s->tty)
+                term_text(s, (const char *)buf, (int)n, 1);
+            else
+                stream_bytes(s, stream, buf, n);
+        }
+    if (done) {
+        s->ext_on = 0;
+        sh_ended(&s->sh, s->ext_code);
+    } else {
+        s->kick();                              /* (room again for what the server has still to hand over) */
+    }
+}
+
+/* With no terminal a program is the agent's to find, as it was before this shell: nothing is asked of DOS
+   for it, so a line sent while a program runs is in the agent's queue at once (glos ps, glos kill). */
+static int h_as_typed(void *ctx)
+{
+    struct shsess *s = ctx;
+    return !s->tty;
+}
+
 static void *h_alloc(void *ctx, unsigned n) { (void)ctx; return kmalloc(n); }
 static void h_free(void *ctx, void *p) { (void)ctx; kfree(p); }
 
@@ -576,14 +710,15 @@ static int key(struct shsess *s)
 {
     for (;;) {
         u32 f = irq_save(), c;
-        while (s->ih == s->it && !s->closing && !s->resized && !(s->job_on && s->job_evt))
+        while ((s->ih == s->it || s->ext_on) && !s->closing && !s->resized && !(s->job_on && s->job_evt)
+               && !(s->ext_on && s->ext_evt))   /* (while a command of the server's runs, what is typed waits) */
             thread_block(&s->wq);
         if (s->closing) {
             irq_restore(f);
             return EV_GONE;
         }
-        if (s->job_on && s->job_evt) {
-            s->job_evt = 0;
+        if ((s->job_on && s->job_evt) || (s->ext_on && s->ext_evt)) {
+            s->job_evt = s->ext_evt = 0;
             irq_restore(f);
             return EV_JOB;
         }
@@ -592,6 +727,10 @@ static int key(struct shsess *s)
             irq_restore(f);
             if (s->editing)
                 ed_size(&s->ed, (int)s->cols);
+            continue;
+        }
+        if (s->ih == s->it || s->ext_on) {      /* (woken for nothing of ours) */
+            irq_restore(f);
             continue;
         }
         c = s->in[s->ih++ % IN_RING];
@@ -618,6 +757,23 @@ static int key(struct shsess *s)
 }
 
 /* ---- the session's thread */
+
+/* The folder DOS is in: the shell's to start with. */
+static void folder(struct shsess *s)
+{
+    char at_dos[80];
+    req(s);
+    call(s, 0, 0x1900, 0, 0, 0);
+    call(s, 1, 0x4700, 0, 0, 0);
+    s->q.r[1].si = DATA_AT;
+    s->q.out = (u8 *)at_dos + 3, s->q.out_len = 64, s->q.out_at = DATA_AT;
+    if (made(s) == 0) {
+        at_dos[0] = (char)('A' + (s->q.r[0].ax & 0xFF)), at_dos[1] = ':', at_dos[2] = '\\';
+        at_dos[67] = 0;
+        sh_folder(&s->sh, at_dos);
+    }
+    s->folder = 1;
+}
 
 static void session(void *arg)
 {
@@ -658,24 +814,17 @@ static void session(void *arg)
     s->starting = 1;
     sh_start(&s->sh, &s->host, env);
     s->starting = 0;
-    {                                           /* the folder DOS is in: the shell's to start with */
-        char at_dos[80];
-        req(s);
-        call(s, 0, 0x1900, 0, 0, 0);
-        call(s, 1, 0x4700, 0, 0, 0);
-        s->q.r[1].si = DATA_AT;
-        s->q.out = (u8 *)at_dos + 3, s->q.out_len = 64, s->q.out_at = DATA_AT;
-        if (made(s) == 0) {
-            at_dos[0] = (char)('A' + (s->q.r[0].ax & 0xFF)), at_dos[1] = ':', at_dos[2] = '\\';
-            at_dos[67] = 0;
-            sh_folder(&s->sh, at_dos);
-        }
-    }
+    if (s->tty || sh_builtin(&s->sh, s->line))  /* (a line that is a program's alone asks DOS nothing: it is
+                                                   queued behind the program that runs, not held up by it) */
+        folder(s);
     if (!s->tty) {                              /* the one line, to its end */
         sh_line(&s->sh, s->line);
-        while (s->sh.under_way && !s->quit && key(s) != EV_GONE)
+        while (s->sh.under_way && !s->quit && key(s) != EV_GONE) {
             if (s->job_on)
                 job_turn(s);
+            else if (s->ext_on)
+                ext_turn(s);
+        }
         if (!s->quit)
             s->code = s->sh.errorlevel;
         s->quit = 1;
@@ -687,6 +836,10 @@ static void session(void *arg)
             if (c >= 0)
                 job_key(s, c);
             job_turn(s);
+            continue;
+        }
+        if (s->ext_on) {                        /* a command of the server's runs: what is typed waits */
+            ext_turn(s);
             continue;
         }
         if (c < 0)
@@ -715,6 +868,8 @@ static void session(void *arg)
         agent_app_forget(s, s->job);
         irq_restore(f);
     }
+    if (s->ext_on)
+        sshd_ask_gone(s);
     dos_release();
     if (s->tty)
         kprintf("GLOS-SHELL end code=%d%s\n", s->code, s->closing ? " terminal=gone" : "");
@@ -741,8 +896,8 @@ struct shsess *shsess_exec(const char *line, void (*kick)(void)) { return make(0
 static struct shsess *make(u32 cols, u32 rows, const char *line, void (*kick)(void))
 {
     static const struct sh_host host = { 0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free,
-        h_is_dir, h_stat, h_open, h_read, h_put, h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_run, 0, 0, 0,
-        h_alloc, h_free };
+        h_is_dir, h_stat, h_open, h_read, h_put, h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_run, h_as_typed,
+        own_names, own_help, h_extra, h_alloc, h_free };
     struct shsess *s;
     if (!(vm.bi->flags & BI_F_AGENT) || !(s = kmalloc(sizeof *s)))
         return 0;
@@ -798,6 +953,30 @@ u32 shsess_write(struct shsess *s, const u8 *d, u32 n)
     thread_wake(&s->wq);
     irq_restore(f);
     return n;
+}
+
+u32 shsess_feed(struct shsess *s, int stream, const u8 *d, u32 n)
+{
+    u32 f = irq_save(), room = EXT_RING - (s->xt[stream] - s->xh[stream]), i;
+    if (n > room)
+        n = room;
+    for (i = 0; i < n; i++)
+        s->ext[stream][(s->xt[stream] + i) % EXT_RING] = d[i];
+    s->xt[stream] += n;
+    s->ext_evt = 1;
+    thread_wake(&s->wq);
+    irq_restore(f);
+    return n;
+}
+
+void shsess_fed(struct shsess *s, int code)
+{
+    u32 f = irq_save();
+    s->ext_code = code;
+    s->ext_done = 1;
+    s->ext_evt = 1;
+    thread_wake(&s->wq);
+    irq_restore(f);
 }
 
 void shsess_resize(struct shsess *s, u32 cols, u32 rows)

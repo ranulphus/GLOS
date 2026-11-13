@@ -44,7 +44,7 @@ static void h_write(void *ctx, int kind, const char *s, int n)
     printf("%s%.*s%s", open[kind], n, s, close[kind]);
 }
 
-static void h_clear(void *ctx) { (void)ctx; printf("(CLEAR)\n"); }
+static int h_clear(void *ctx) { (void)ctx; printf("(CLEAR)\n"); return 0; }
 static void h_prompted(void *ctx) { (void)ctx; printf("\n"); }
 static void h_input(void *ctx, const char *line) { (void)ctx; printf("(INPUT \"%s\")\n", line); }
 static void h_quit(void *ctx, int code) { (void)ctx; printf("(QUIT %d)\n", code); }
@@ -179,9 +179,9 @@ static int h_run(void *ctx, const char *command, const char *prog, const char *n
 static const char *const extra_names[] = { "XTRA", "XWAIT", 0 };
 static const char *const extra_help[] = { "XTRA                a command of the host's", 0 };
 
-static int h_extra(void *ctx, int argc, char **argv)
+static int h_extra(void *ctx, int argc, char **argv, const char *line)
 {
-    (void)ctx;
+    (void)ctx, (void)line;
     printf("(EXTRA %s args=%d)\n", argv[0], argc - 1);
     return !strcmp(argv[0], "XTRA") || !strcmp(argv[0], "xtra") ? 7 : SH_UNDER_WAY;
 }
@@ -191,7 +191,7 @@ static void h_free(void *ctx, void *p) { (void)ctx; free(p); }
 
 static const struct sh_host host = {
     0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free, h_is_dir, h_stat, h_open, h_read, h_put,
-    h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_run, extra_names, extra_help, h_extra, h_alloc, h_free };
+    h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_run, 0, extra_names, extra_help, h_extra, h_alloc, h_free };
 
 int main(int argc, char **argv)
 {

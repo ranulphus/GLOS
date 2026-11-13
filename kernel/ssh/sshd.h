@@ -6,6 +6,11 @@ struct bootinfo;
 
 void sshd_start(const struct bootinfo *bi);    /* the ssh thread; nothing without a host key */
 int sshd_on(void);                              /* there is a host key: SSH answers */
+struct shsess;
+int sshd_ask(struct shsess *s, const char *line);       /* a shell's session asks for one of the server's commands
+                                                   (`glos NAME ...`): 0 (shsess_feed() with what it writes, then
+                                                   shsess_fed() with its exit code), or -1: no room */
+void sshd_ask_gone(struct shsess *s);           /* ... and has gone before its end */
 void sshd_net_start(void (*kick)(void));        /* the net thread, after lwIP is up: listen on 22 */
 void sshd_net_poll(void);                       /* the net thread, every turn */
 void sshd_wake(void);                           /* the ssh thread to take a turn (VNC's damage: M10) */

@@ -21,6 +21,9 @@ void shsess_resize(struct shsess *s, u32 cols, u32 rows);
 int shsess_ended(const struct shsess *s, int *code);     /* 1 once it has ended (EXIT, Ctrl+D): its exit code */
 void shsess_free(struct shsess *s);                      /* the terminal has gone, or the end is taken: the session
                                                             ends if it hasn't, and its memory goes once it has */
+u32 shsess_feed(struct shsess *s, int stream, const u8 *d, u32 n);       /* (the ssh thread) what a command of the
+                                                            server's wrote for it: the bytes taken */
+void shsess_fed(struct shsess *s, int code);             /* ... and that command's end */
 void shsess_turn(void);                                  /* the ssh thread's turn: sessions freed whose threads
                                                             have ended since shsess_free() */
 

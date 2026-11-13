@@ -655,6 +655,8 @@ int agent_kill_seq(u32 seq)
         } else {
             j->result = 0xFF;
             j->state = J_DONE;                  /* (agent_service tells its client) */
+            if (j->notify)                      /* (... and a shell's session is told here) */
+                tell(j);
         }
         r = 0;
     }

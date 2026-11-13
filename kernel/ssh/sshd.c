@@ -989,6 +989,7 @@ static void gdb_send(const u8 *d, u32 n)
 
 /* The built-in commands, and DOS command lines for the agent. */
 static int shell_line(struct ssh_chan *ch, const char *line);
+static const struct ssh_ops ops;
 
 static int k_exec(struct ssh_chan *ch, const char *cmd)
 {
@@ -1535,6 +1536,86 @@ static int shell_line(struct ssh_chan *ch, const char *line)
     return -1;
 }
 
+/* ---- the server's own commands (`glos NAME`: k_exec) for a shell's session, which has them as commands of
+   its own (kernel/shell/shsess.c): asked for from the session's thread, run here on a channel with no
+   connection, whose output is the session's and whose exit ends the command there. */
+
+static void k_gone(struct ssh_chan *ch);
+
+static struct {
+    struct shsess *s;
+    struct ssh_chan *ch;
+    volatile u8 state;                          /* 0 free, 1 asked, 2 running, 3 its session has gone */
+    char line[512];
+} asks[NSHELL];
+
+int sshd_ask(struct shsess *s, const char *line)
+{
+    u32 i, f;
+    if (strlen(line) >= sizeof asks[0].line)
+        return -1;
+    f = irq_save();
+    for (i = 0; i < NSHELL && asks[i].state; i++)
+        ;
+    if (i < NSHELL) {
+        asks[i].s = s;
+        strcpy(asks[i].line, line);
+        asks[i].state = 1;
+    }
+    irq_restore(f);
+    if (i == NSHELL)
+        return -1;
+    wake_ssh();
+    return 0;
+}
+
+void sshd_ask_gone(struct shsess *s)
+{
+    u32 i, f = irq_save();
+    for (i = 0; i < NSHELL; i++)
+        if (asks[i].state && asks[i].s == s)
+            asks[i].state = asks[i].state == 1 ? 0 : 3;
+    irq_restore(f);
+    wake_ssh();
+}
+
+static uint32_t ask_out(void *user, int stream, const uint8_t *d, uint32_t n)
+{
+    u32 i = (u32)user - 1;
+    return asks[i].state == 2 ? shsess_feed(asks[i].s, stream, d, n) : n;
+}
+
+static void ask_done(void *user, uint32_t status)
+{
+    u32 i = (u32)user - 1;
+    if (asks[i].state == 2)
+        shsess_fed(asks[i].s, (int)status);
+    asks[i].state = 0;
+}
+
+static void asks_turn(void)
+{
+    u32 i;
+    for (i = 0; i < NSHELL; i++) {
+        if (asks[i].state == 1) {
+            if (!(asks[i].ch = ssh_chan_local(&ops, (void *)(i + 1), ask_out, ask_done))) {
+                shsess_fed(asks[i].s, 1);
+                asks[i].state = 0;
+                continue;
+            }
+            asks[i].state = 2;
+            k_exec(asks[i].ch, asks[i].line);
+        }
+        if (asks[i].state == 3) {               /* its session went from under it */
+            k_gone(asks[i].ch);
+            ssh_chan_local_free(asks[i].ch);
+            asks[i].state = 0;
+        } else if (asks[i].state == 2) {
+            ssh_chan_local_turn(asks[i].ch);
+        }
+    }
+}
+
 static void k_resize(struct ssh_chan *ch, uint32_t cols, uint32_t rows)
 {
     struct shsess *s = shell_of(ch);
@@ -1687,6 +1768,7 @@ static void ssh_main(void *arg)
                 finish(s, "login-grace");
         }
         agent_service(agent_write, agent_done);
+        asks_turn();
         shells_turn();
         sftp_turn();
         streams_turn();

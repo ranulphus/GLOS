@@ -34,7 +34,8 @@ struct sh_host {
     void *ctx;
     /* the terminal */
     void (*write)(void *ctx, int kind, const char *s, int n);
-    void (*clear)(void *ctx);
+    int (*clear)(void *ctx);                            /* CLS: 0, or SH_UNDER_WAY (a host with no terminal of its
+                                                           own may have the PC's screen cleared by a program) */
     void (*prompted)(void *ctx);                        /* the prompt is out: what is typed goes after it */
     void (*input)(void *ctx, const char *line);         /* the line being typed is this now (history, completion) */
     void (*quit)(void *ctx, int code);                  /* EXIT */
@@ -57,10 +58,16 @@ struct sh_host {
        (sh_ended() at its end); 0: started and left to itself (detach); -1: it can't be run. */
     int (*run)(void *ctx, const char *command, const char *prog, const char *name, const char *cwd, const char *env,
                int detach);
+    /* A host that finds programs itself (the kernel's, for a line with no terminal: the agent's search, as
+       before there was this shell): 1, and what is no built-in is run as it is typed, prog 0, with nothing
+       looked for and no "Bad command" of the shell's. May be 0. */
+    int (*as_typed)(void *ctx);
     /* commands of the host's own (the Terminal's SSH, SFTP, SSH-KEYGEN): their names in capitals and their
        lines for HELP, each list ended by 0 */
     const char *const *extra_names, *const *extra_help;
-    int (*extra)(void *ctx, int argc, char **argv);     /* its exit code, SH_UNDER_WAY or SH_NOT_MINE */
+    int (*extra)(void *ctx, int argc, char **argv, const char *line);   /* its exit code, SH_UNDER_WAY or
+                                                           SH_NOT_MINE; line: the command as it was typed (its
+                                                           variables put in), for a host that wants the spacing */
     /* memory */
     void *(*alloc)(void *ctx, unsigned n);
     void (*free)(void *ctx, void *p);
@@ -85,6 +92,8 @@ struct sh {
 void sh_start(struct sh *s, const struct sh_host *h, const char *const *env);  /* env: NAME=VALUE ..., 0 at the end */
 void sh_folder(struct sh *s, const char *path);         /* after sh_start(): the folder it starts in ("C:\" if never
                                                            said) */
+int sh_builtin(const struct sh *s, const char *line);   /* the line's first command is the shell's own (or the
+                                                           host's): it will want files, not only a program run */
 void sh_prompt(struct sh *s);
 void sh_line(struct sh *s, const char *line);           /* a line typed and Enter */
 void sh_ended(struct sh *s, int code);                  /* what was under way has ended with this exit code */

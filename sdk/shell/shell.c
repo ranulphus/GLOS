@@ -698,6 +698,18 @@ static int dos_own(const char *w)
     return 0;
 }
 
+int sh_builtin(const struct sh *s, const char *line)
+{
+    char first[32];
+    unsigned n = 0;
+    while (*line == ' ' || *line == '\t')
+        line++;
+    for (; line[n] && line[n] != ' ' && line[n] != '\t' && n < sizeof first - 1; n++)
+        first[n] = line[n];
+    first[n] = 0;
+    return is_builtin(s, first) && !strpbrk(line, "|<");
+}
+
 /* ---- running a program: the host's. 1: under way; 0: started and left; -1: not run (and said). */
 
 static int run_program(struct sh *s, const char *line, int detach)
@@ -713,8 +725,8 @@ static int run_program(struct sh *s, const char *line, int detach)
         first[n++] = *p++;
     first[n] = 0;
     args = p;
-    if (strpbrk(line, "<>|") || dos_own(first)) {       /* a pipe, a redirection, a command of DOS's own: the
-                                                           line whole */
+    if (strpbrk(line, "<>|") || dos_own(first) || (s->h->as_typed && s->h->as_typed(s->h->ctx))) {
+        /* a pipe, a redirection, a command of DOS's own, or a host that finds programs itself: the line whole */
         sh_fmt(command, sizeof command, "%s", line);
     } else if (find_program(s, first, prog, sizeof prog) == 0) {
         sh_fmt(command, sizeof command, "%s%s", prog, args);
@@ -883,7 +895,7 @@ static int run_one(struct sh *s, const char *cmd)
             var_set(s, name, t);
         }
     } else if (same(argv[0], "CLS")) {
-        s->h->clear(s->h->ctx);
+        r = s->h->clear(s->h->ctx);
     } else if (same(argv[0], "VER")) {
         say(s, "GLOS shell 1.0 (GLOS API 2.0)\r\n");
     } else if (same(argv[0], "EXIT")) {
@@ -924,7 +936,8 @@ static int run_one(struct sh *s, const char *cmd)
             t++;
         r = run_program(s, t, 1) < 0;
     } else {
-        r = s->h->extra ? s->h->extra(s->h->ctx, argc, argv) : SH_NOT_MINE;     /* (SH_UNDER_WAY: as a program is) */
+        r = s->h->extra ? s->h->extra(s->h->ctx, argc, argv, line) : SH_NOT_MINE;       /* (SH_UNDER_WAY: as a program
+                                                                                           is) */
         if (r == SH_NOT_MINE)
             r = 1;
     }

@@ -52,7 +52,7 @@ static void h_write(void *ctx, int kind, const char *s, int n)
         term_attr(T_NORMAL);
 }
 
-static void h_clear(void *ctx) { (void)ctx; term_clear(); }
+static int h_clear(void *ctx) { (void)ctx; term_clear(); return 0; }
 static void h_prompted(void *ctx) { (void)ctx; term_prompt_done(); }
 static void h_input(void *ctx, const char *line) { (void)ctx; term_input_set(line); }
 static void h_quit(void *ctx, int code) { (void)ctx; term_quit(code); }
@@ -148,9 +148,9 @@ static const char *const extra_help[] = {
     "SSH-KEYGEN          a key of your own (SSH\\ID_ED25) for servers' authorized_keys",
     0 };
 
-static int h_extra(void *ctx, int argc, char **argv)
+static int h_extra(void *ctx, int argc, char **argv, const char *line)
 {
-    (void)ctx;
+    (void)ctx, (void)line;
     if (!strcasecmp(argv[0], "SSH"))
         return ssh_command(argc, argv);         /* (-2: under way, as a program is) */
     if (!strcasecmp(argv[0], "SFTP"))
@@ -165,7 +165,7 @@ static void h_free(void *ctx, void *p) { (void)ctx; free(p); }
 
 static const struct sh_host host = {
     0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free, h_is_dir, h_stat, h_open, h_read, h_put,
-    h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_run, extra_names, extra_help, h_extra, h_alloc, h_free };
+    h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_run, 0, extra_names, extra_help, h_extra, h_alloc, h_free };
 
 /* ---- what the terminal asks of the shell (term.h) */
 

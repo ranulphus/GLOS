@@ -58,6 +58,9 @@ struct ssh_chan {
     uint32_t unconsumed;                        /* held: input delivered and not yet consumed */
     uint32_t exit_status;
     uint32_t pty_cols, pty_rows;                /* the terminal a pty-req asked for (0: none) */
+    const struct ssh_ops *lops;                 /* a channel with no connection (ssh_chan_local): its memory's ops, */
+    uint32_t (*lout)(void *user, int stream, const uint8_t *data, uint32_t len);   /* where its output goes, */
+    void (*ldone)(void *user, uint32_t status); /* and its exit */
     uint8_t *out[2];
     uint32_t out_len[2], out_cap[2];
     void *user;
@@ -493,10 +496,13 @@ static void chan_msg(struct ssh_chan *ch, uint8_t type)
 static void flush(struct ssh_chan *ch)
 {
     struct ssh_conn *c = ch->conn;
-    uint8_t *m = c->twork + TX_PAYLOAD;         /* built where send_packet wants it */
+    uint8_t *m;
     struct sbuf b;
     int s;
 
+    if (!c)                                     /* (no connection: ssh_chan_local_turn() hands it over) */
+        return;
+    m = c->twork + TX_PAYLOAD;                  /* built where send_packet wants it */
     if (c->kex || c->dead || ch->close_sent || ch->unconfirmed)
         return;
     for (s = 0; s < 2; s++)
@@ -537,7 +543,7 @@ static void flush(struct ssh_chan *ch)
 
 uint32_t ssh_chan_write(struct ssh_chan *ch, int stream, const uint8_t *data, uint32_t len)
 {
-    struct ssh_conn *c = ch->conn;
+    const struct ssh_ops *ops = ch->conn ? ch->conn->ops : ch->lops;
     uint32_t room;
     if (ch->close_sent || ch->exit_pending || stream < 0 || stream > 1)
         return 0;
@@ -548,9 +554,9 @@ uint32_t ssh_chan_write(struct ssh_chan *ch, int stream, const uint8_t *data, ui
             cap *= 2;
         if (cap > OUT_MAX)
             cap = OUT_MAX;
-        if ((nb = c->ops->alloc(cap)) != NULL) {
+        if ((nb = ops->alloc(cap)) != NULL) {
             memcpy(nb, ch->out[stream], ch->out_len[stream]);
-            c->ops->free(ch->out[stream]);
+            ops->free(ch->out[stream]);
             ch->out[stream] = nb;
             ch->out_cap[stream] = cap;
         }
@@ -733,8 +739,52 @@ static void window_adjust(struct ssh_chan *ch)
 
 void ssh_chan_hold(struct ssh_chan *ch) { ch->held = 1; }
 
+/* ---- a channel with no connection */
+
+struct ssh_chan *ssh_chan_local(const struct ssh_ops *ops, void *user,
+                                uint32_t (*out)(void *user, int stream, const uint8_t *data, uint32_t len),
+                                void (*done)(void *user, uint32_t status))
+{
+    struct ssh_chan *ch = ops->alloc(sizeof *ch);
+    if (!ch)
+        return NULL;
+    ch->lops = ops, ch->lout = out, ch->ldone = done;
+    ch->user = user;
+    ch->started = 1;
+    return ch;
+}
+
+void ssh_chan_local_free(struct ssh_chan *ch)
+{
+    const struct ssh_ops *ops = ch->lops;
+    ops->free(ch->out[0]);
+    ops->free(ch->out[1]);
+    ops->free(ch);
+}
+
+int ssh_chan_local_turn(struct ssh_chan *ch)
+{
+    int s;
+    for (s = 0; s < 2; s++)
+        while (ch->out_len[s]) {
+            uint32_t k = ch->lout(ch->user, s, ch->out[s], ch->out_len[s]);
+            if (!k)
+                break;
+            memmove(ch->out[s], ch->out[s] + k, ch->out_len[s] - k);
+            ch->out_len[s] -= k;
+        }
+    if (ch->exit_pending && !ch->out_len[0] && !ch->out_len[1]) {
+        ch->ldone(ch->user, ch->exit_status);
+        ssh_chan_local_free(ch);
+        return 1;
+    }
+    return 0;
+}
+
 void ssh_chan_consumed(struct ssh_chan *ch, uint32_t n)
 {
+    if (!ch->conn)
+        return;
     ch->unconsumed -= n < ch->unconsumed ? n : ch->unconsumed;
     window_adjust(ch);
 }

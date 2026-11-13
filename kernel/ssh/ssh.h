@@ -71,6 +71,16 @@ uint32_t ssh_chan_write(struct ssh_chan *ch, int stream, const uint8_t *data, ui
 void ssh_chan_exit(struct ssh_chan *ch, uint32_t status);
 void ssh_chan_close(struct ssh_chan *ch);       /* a forwarded channel's end: EOF and CLOSE once the output has gone */
 uint32_t ssh_chan_pending(const struct ssh_chan *ch);       /* output bytes not yet sent */
+/* A channel with no connection: the platform's own (a shell's session that runs one of the server's
+   commands). What is written to it is kept as a connection's channel keeps it; ssh_chan_local_turn() hands
+   it to `out` (which returns the bytes it took), and once it has exited and all is handed over, calls `done`
+   and frees it, returning 1. ssh_chan_local_free() ends it before that (nothing more is handed over). */
+struct ssh_chan *ssh_chan_local(const struct ssh_ops *ops, void *user,
+                                uint32_t (*out)(void *user, int stream, const uint8_t *data, uint32_t len),
+                                void (*done)(void *user, uint32_t status));
+int ssh_chan_local_turn(struct ssh_chan *ch);
+void ssh_chan_local_free(struct ssh_chan *ch);
+
 /* Input at the platform's pace: after ssh_chan_hold(), the client's window
    reopens only as ssh_chan_consumed() reports input used, so what the
    platform buffers never exceeds one window (256 KB). */

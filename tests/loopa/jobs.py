@@ -1861,8 +1861,9 @@ def shell_case(profile, card):
     terminal and the PC's code page in the file; a program's output and its exit code; a line typed to a program
     that reads one; a line with its input from a file, and a batch file, through the DOS's COMMAND.COM; Ctrl+C to
     a program;
-    EXIT, and the connection's end with code 0. A second login while the first is open; and a login dropped
-    with a program running, which is ended."""
+    GLOS's own commands by their names as the shell's (PS, CLOCK), by GLOS's old ones (GLOS VER), a failing one's
+    exit code, a long answer whole (LOG) with a line typed ahead of its end; EXIT, and the connection's end with
+    code 0. A second login while the first is open; and a login dropped with a program running, which is ended."""
     tag = "shell-%s-%s" % (profile, card)
     agent = Agent("ssh-" + tag, profile, card, [
         "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE", "--file", "build/ow/dos/CONIN.EXE=/TEST/CONIN.EXE",
@@ -1870,8 +1871,10 @@ def shell_case(profile, card):
     checks = {"listen": agent.listening()}
     try:
         t = Login(agent)
-        checks["banner"] = t.expect("GLOS shell 1.0") and t.expect("C:\\>")
-        t.send("cd \\test\r")
+        checks["banner"] = t.expect("GLOS shell 1.0") and t.expect("C:\\TEST>")     # (the folder DOS is in)
+        t.send("cd \\\r")
+        t.expect("C:\\>")
+        t.send("cd test\r")
         checks["cd"] = t.expect("C:\\TEST>")
         t.send("vex\x7fr\r")
         checks["edited"] = t.expect("GLOS shell 1.0 (GLOS API 2.0)\n")
@@ -1921,8 +1924,21 @@ def shell_case(profile, card):
         t.expect("conin line\n")
         t.send("\x03")
         checks["break"] = t.expect("^C") and t.expect("C:\\TEST>")
+        # GLOS's own commands, the shell's too: by their names here, and by GLOS's old ones; one that fails says so
+        # in the exit code; and what is typed while one runs waits for it.
+        t.send("ps\r")
+        checks["ps"] = t.expect("thread shell ") and t.expect("C:\\TEST>")
+        t.send("GLOS Ver\r")
+        checks["glos-name"] = t.expect("GLOS M3 (")
+        t.send("clock\r")
+        checks["renamed"] = t.expect("time utc=") and t.expect("C:\\TEST>")
+        t.send("kill 9999\recho code %errorlevel%\r")
+        checks["own-code"] = t.expect("no such job") and t.expect("code 1\n")
+        t.send("log\recho after the log\r")
+        checks["long"] = t.expect("GLOS-SHELL begin") and t.expect('GLOS-SSH exec="glos log"') \
+            and t.expect("after the log\n")
         two = Login(agent)                          # a second login beside the first
-        checks["second"] = two.expect("C:\\>")
+        checks["second"] = two.expect("C:\\TEST>")
         two.send("echo two\r")
         checks["second-runs"] = two.expect("\ntwo\n")
         two.send("exit\r")
@@ -1932,7 +1948,7 @@ def shell_case(profile, card):
         t.send("exit\r")
         checks["exit"] = t.end() == 0
         drop = Login(agent)                         # a login dropped under its program: the program is ended
-        drop.expect("C:\\>")
+        drop.expect("C:\\TEST>")
         drop.send("c:\\test\\conin line\r")
         drop.expect("conin line\n")
         n = agent.log().count("GLOS-AGENT done")
@@ -6456,7 +6472,7 @@ def floppy_case(profile, card, size):
             rc, o = ssh(port, opts, "VOL C:", timeout=120)
             checks["job-answers"] = rc != 255 and time.time() - t0 < 60
             checks["failed"] = len(re.findall(r"GLOS-DOS critical ah=\w+ drive=C code=\w+ psp=\w+ answer=fail", log(serial))) >= 2
-            rc, o = ssh(port, opts, "VER")
+            rc, o = ssh(port, opts, "COMMAND /C VER")       # (the DOS's own VER: GLOS's shell has one too)
             checks["dos-alive"] = rc == 0 and "FreeCom" in o
             p = subprocess.run([sys.executable, os.path.join(ROOT, "tools/floppy/install.py"), "127.0.0.1", "--port", str(port),
                                 "--key", key, "--keys", os.path.join(ROOT, "out", "floppy-keys")], capture_output=True, timeout=600)
@@ -7457,7 +7473,8 @@ def config_case(profile, vcard, card):
         checks["list"] = "[display] accel = on\n" in lst.replace("\r", "") and "[display] mode = none (default)" in lst \
             and "[program COMMAND.COM] env = GLOSCFG=one" in lst
         # A program's env, from the file the loader read and the kernel keeps.
-        checks["env-file"] = "GLOSCFG=one" in agent.ssh("ECHO GLOSCFG=%GLOSCFG%")[1]
+        # (COMMAND.COM itself is the program: GLOS's shell would answer an ECHO of its own, and %% is its %)
+        checks["env-file"] = "GLOSCFG=one" in agent.ssh("COMMAND /C ECHO GLOSCFG=%%GLOSCFG%%")[1]
         for sec, key, val, effect in CONFIG_SETS:
             mark = len(agent.log())
             if effect == "pointer":
@@ -7488,7 +7505,7 @@ def config_case(profile, vcard, card):
         checks["unknown"] = rc == 2
         agent.ssh("glos config set sound mixer on")
         agent.ssh("glos config set program:COMMAND.COM env GLOSCFG=two")
-        checks["env-set"] = "GLOSCFG=two" in agent.ssh("ECHO GLOSCFG=%GLOSCFG%")[1]
+        checks["env-set"] = "GLOSCFG=two" in agent.ssh("COMMAND /C ECHO GLOSCFG=%%GLOSCFG%%")[1]
         # The file as the kernel wrote it: the suite's lines all there, the old ones where they were.
         t0 = time.time()
         while time.time() - t0 < 30 and " pending" in agent.ssh("glos config")[1].split("\n")[0]:
