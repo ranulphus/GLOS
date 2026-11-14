@@ -138,6 +138,19 @@ S2 gives it a host in the kernel and takes the Terminal app's away.
 | The Terminal app | A terminal only. A new call (CONSOLE, API 2.1: open a session, read and write its bytes, its size, an event when there is something to read) and `vt.c`'s screen for everything. `apps/term/shell.c` and the app's own SSH client's screen switch go; SSH, SFTP and SSH-KEYGEN become programs of their own (`build/apps/SSH.EXE` ...), which the shell runs like any other. |
 | The PC's own screen | With no desktop, a session on the text screen and the keyboard. The idle screen's notice and its Ctrl-Alt-Del rule (2026-11-12) go: the prompt is there. |
 
+**The session on the PC's own screen (S2d), as the owner settled it (2026-11-14):**
+
+- It is a session of its own, like each SSH login and each Terminal window: its own directory, history and
+  environment. Sessions are not mirrored; what is typed at the PC is not seen in an SSH login.
+- **Kernel messages: start-up lines, then notices.** At GLOS's start the screen shows its start-up lines
+  (version, the PC's name and address, anything refused, such as a network card), then the prompt. After that
+  the whole log stays in `LOG`; only what the person at the PC should know (a crash report written, the network
+  lost or found) is shown, as one line before the next prompt and never in the middle of a program's output.
+  Not chosen: the log printed on the console as it comes (Linux's way), several local screens on Alt-F1 and
+  the like, and nothing but a banner.
+- A full-screen program takes the PC's screen and keyboard whichever session started it, and the local session
+  has its prompt back when the program ends.
+
 ### In what order, inside S2
 
 | | What | Shows it works |
