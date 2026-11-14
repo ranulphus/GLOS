@@ -366,8 +366,19 @@ before that.
       with Crynwr's PLIP packet driver, or Linux.
   - **Which ports:** any not already the log's or the debugger's (COM1 and COM2 by default).
   - **Bridging:** a GLOS PC with both a network card and a cable puts the cable's PC on the network, as Direct
-    Cable Connection with Internet sharing did. Whether by routing with proxy ARP or by NAT is settled in H's
-    plan.
+    Cable Connection with Internet sharing did.
+  - **The owner's direction (2026-11-14):**
+    - Compatibility with Windows' Direct Cable Connection is **not** wanted: it was named as an example of the
+      idea, not as something to interwork with. PPP, whose main use here was that, is dropped from the plan
+      unless something else asks for it.
+    - What matters: **GLOS PCs link to each other by Ethernet, a serial cable or a parallel cable, and together
+      form one bridged network.** A cable link optionally becomes part of the network its PC's Ethernet card
+      is on: the PC at the far end of the cable is then a member of that network (an address of its own
+      there, reached like any other PC on it), not hidden behind the PC in between. So not NAT.
+    - Order: S2d (the prompt on the PC's own screen) first, then the parallel link and the bridging. How the
+      bridging is done over a link that carries IP and no Ethernet frames (proxy ARP with forwarding, the far
+      PC's address got from the network's DHCP on its behalf) is designed before it is built.
+    - Serial is built (SLIP, docs/cable.md); the Pentium III bench was brought up over it.
   - **Testing:** 86Box has a PLIP network device and serial passthrough, so Loop A can test both.
   - NET's STATE (phase B, step 11) lists every interface, the cables' too.
 - **The audit:** what GLOS drives today against what the benches have and what the period's PCs commonly had.

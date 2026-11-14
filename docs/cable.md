@@ -1,7 +1,8 @@
 # The cable link: the network over a serial cable
 
-**Status: SLIP over a serial port, built and tested (2026-11-13). PPP, Windows 9x's Direct Cable Connection and
-the parallel port are to come.**
+**Status: SLIP over a serial port, built and tested (2026-11-13). To come: the parallel port, and a cable link
+as part of the network its PC's Ethernet card is on (the owner's direction, 2026-11-14: docs/v1-route.md,
+phase H). Not planned: PPP and Windows 9x's Direct Cable Connection.**
 
 A PC that runs GLOS can be reached over a serial cable instead of, or beside, a network card: IP between the
 two ends of the cable. SSH, SFTP, the installer, VNC and the apps' sockets work over it as over Ethernet. It is
@@ -53,6 +54,9 @@ no DHCP and no `.local` name on the cable.
 
 ## To come
 
-- PPP (addresses agreed by the two ends, checked frames; what Windows 9x's Direct Cable Connection and modems
-  speak), then the parallel port.
-- The PC as a way to the network behind it (forwarding).
+- The parallel port (a LapLink cable, Crynwr's PLIP: several times a serial port's speed).
+- **One bridged network** (the owner, 2026-11-14): GLOS PCs link by Ethernet, serial or parallel, and a cable link
+  can be made part of the network its PC's Ethernet card is on, so that the PC at the cable's far end is a
+  member of that network with an address of its own. The design comes first.
+- Not planned: PPP and interworking with Windows 9x's Direct Cable Connection (it was the idea's example, not a
+  requirement).
