@@ -517,7 +517,13 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   two runs in four the same day, was the test's own: it read the log as the PC wrote it and took a half-written
   line for the answer. Fixed in the test.)
 - bench-486 stopped once after a restart (2026-11-14, not seen again); `thr-486dx2` stopped once after a crash
-  report; `sess-direct-486dx2`'s vif-stuck.
+  report.
+- **`sess-direct-486dx2-himemx`'s `GLOS-WARN vif-stuck`** (a program's virtual interrupts off for 50 ms with one
+  waiting, GLOS as the shell): on devserver, niced among eight emulators, it passed three gates and failed the
+  next two on 2026-11-14 (at 07a4:2bd1, after SESSTEST); on the build host it passed five runs of five at the
+  same commit. Load on the host stretches something past the watchdog's 50 ms: to be instrumented (what runs
+  at that address, and whether the guest's clock or the host's is the one that ran on). `apps-486dx2`'s
+  timers-at-once missed its 1.5% once the same evening (uclock 4062 ms for 4000) and passed the next run.
 
 **An idea from the same session's measurements (for the owner):** GLOS could set write-combining over a VBE
 linear framebuffer itself (a variable MTRR, as FASTVID does from plain DOS; under GLOS such a tool cannot run,
