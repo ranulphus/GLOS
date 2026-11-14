@@ -50,6 +50,7 @@
 #include "io.h"
 #include "kcfg.h"
 #include "gdbprog.h"
+#include "sshd.h"
 #include "lcon.h"
 #include "kprintf.h"
 #include "sched.h"
@@ -1135,6 +1136,15 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
                     kick_ssh();
                 return 0;
             }
+        if (sshd_unsent() && (s32)(timer_ticks() - exit_at) < 10 * 1024) {
+            settle = (timer_ticks() + 300) | 1; /* (and what SSH has for its clients gone out and acknowledged, not
+                                                   only 300 ms allowed for it: two apps ended by this exit on the
+                                                   486, with the host busy, lost their last line and exit code two
+                                                   runs in three, apishell-486dx2 "ended", 2026-11-14) */
+            if (kick_ssh)
+                kick_ssh();
+            return 0;
+        }
         if (settle && (s32)(timer_ticks() - settle) < 0)
             return 0;
         settle = 0;

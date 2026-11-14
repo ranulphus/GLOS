@@ -212,6 +212,20 @@ void sshd_net_start(void (*kick)(void))
     kprintf("GLOS-SSH listen port=22 authkeys=%u\n", srv.n_authkeys);
 }
 
+/* Something for a client has still to leave the PC: bytes waiting for TCP, or given to TCP and not yet sent or
+   acknowledged. (Any context: looked at, not touched. GLOS's exit waits for it: kernel/dos/agent.c.) */
+int sshd_unsent(void)
+{
+    int i;
+    for (i = 0; i < NCONN; i++) {
+        const struct sconn *s = &conns[i];
+        const struct tcp_pcb *pcb = s->pcb;
+        if (s->used && (ring_used(&s->tx) || (pcb && (pcb->unsent || pcb->unacked))))
+            return 1;
+    }
+    return 0;
+}
+
 /* Each turn of the net thread: output into TCP, and the closes. */
 void sshd_net_poll(void)
 {
