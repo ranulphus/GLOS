@@ -511,9 +511,11 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   320x200). The port's QDOS.EXE takes all the memory and runs. A DOS program must not be able to stop GLOS,
   whatever it asks for: to reproduce in 86Box with a large memory and follow its DPMI calls after the lock
   (its heap's reservation and lock). The executable is the owner's (local only).
-- **Loop A's API suite on the 486 profile misses a wait about one run in two** on a busy host
-  (2026-11-14: `apisec-486dx2-vbe` "right" twice, `apishell-486dx2-vbe` "ended" once, in four runs): in each the
-  log shows GLOS did what was asked. Being timed.
+- **Loop A's `apishell-486dx2-vbe` missed "ended" once** (2026-11-14, devserver): both apps ended with their
+  code at `glos exit` by the log, and the test's ssh ends did not both see it. Not yet looked into: the last
+  output of an app's channel as GLOS leaves is the place to look. (`apisec-486dx2-vbe` "right", which failed
+  two runs in four the same day, was the test's own: it read the log as the PC wrote it and took a half-written
+  line for the answer. Fixed in the test.)
 - bench-486 stopped once after a restart (2026-11-14, not seen again); `thr-486dx2` stopped once after a crash
   report; `sess-direct-486dx2`'s vif-stuck.
 

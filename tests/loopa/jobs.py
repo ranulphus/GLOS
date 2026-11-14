@@ -5333,7 +5333,10 @@ def api_sec_case(profile, vcard, card):
     def case(name, limit=120):                  # APITEST's line for a case, once it has said it
         t0 = time.time()
         while time.time() - t0 < limit:
-            m = re.findall(r"HX-APITEST case=%s ok=(\d)(.*)" % name, agent.log())
+            # (whole lines alone: the log is read as the PC writes it, and a line caught half written, right
+            # after the line before it was waited for, was taken for the answer: apisec-486dx2 "right" failed
+            # two runs in four, 2026-11-14, with the unlock done in six seconds)
+            m = re.findall(r"HX-APITEST case=%s ok=(\d)([^\r\n]*)\r?\n" % name, agent.log())
             if len(m) > case.seen.get(name, 0):
                 case.seen[name] = len(m)
                 return m[-1][0] + m[-1][1].rstrip()
