@@ -1,7 +1,7 @@
 # Cables as part of the network: the parallel link and the bridged network (design)
 
-**Status: a design for the owner's decision (2026-11-14). Nothing here is built.** The serial link it builds on
-is [docs/cable.md](../cable.md).
+**Status: agreed by the owner (2026-11-14, the answers at the end). Nothing here is built yet; N1 is next.** The
+serial link it builds on is [docs/cable.md](../cable.md).
 
 ## What the owner asked for (2026-11-14)
 
@@ -116,9 +116,10 @@ and that has a network card, unless `[net] cable_share = off`. The far PC joins 
 
 N1 first: the hardware for it is cabled already, and it is the larger unknown.
 
-## Questions for the owner
+## Decided by the owner (2026-11-14)
 
-1. Is membership on by default for a server link on a PC with a network card, or only when switched on?
-2. PLIP (compatible, testable in the emulator, 40 to 60 KB a second) for the parallel link, or wait for a
-   faster protocol of GLOS's own?
-3. N1 before N2 (membership over the serial cable first)? And is there a LapLink cable for the benches?
+1. **Membership as designed**: the address request relayed, A answering for the far PC on the Ethernet, its
+   traffic passed, names and broadcasts copied. Not a true Ethernet bridge.
+2. **On by default for a server link** on a PC with a network card; `[net] cable_share = off` switches it off.
+3. **PLIP** for the parallel cable.
+4. **Serial first** (N1, then N2, N3). The owner has a LapLink cable for the benches' proof of N2.
