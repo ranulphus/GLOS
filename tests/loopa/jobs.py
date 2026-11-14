@@ -2462,11 +2462,14 @@ def ssh_case(profile, card):
             checks["mtrr"] = rc == 0 and rc1 == 0 and "Write-combining is on for " in on and "(GLOS's)" in listed \
                 and "write-combining" in listed and rc2 == 0 and "(GLOS's)" not in ssh("glos mtrr")[1] \
                 and ssh("glos mtrr off")[0] == 1 and ssh("glos mtrr wc 12345 3")[0] == 1 \
-                and ssh("glos mtrr bogus")[0] == 2
+                and ssh("glos mtrr bogus")[0] == 2 \
+                and ssh("glos mtrr vga on")[0] == 0 and "window (a0000, 64 KB): write-combining" in ssh("glos mtrr")[1] \
+                and ssh("glos mtrr vga off")[0] == 0 and "window (a0000, 64 KB): uncached" in ssh("glos mtrr")[1]
         else:
             checks["mtrr"] = rc == 0 and "no MTRRs" in out and ssh("glos mtrr lfb on")[0] == 1
         if not checks["mtrr"]:
-            info += " mtrr=%r" % out[:200]
+            info += " mtrr=%r on=%r listed=%r pci=%r" % (out[:200], locals().get("on"), locals().get("listed"),
+                                                        [l for l in ssh("glos pci")[1].split("\n") if "class=03" in l])
         # glos kill SEQ: a job that waits its turn is taken out, then the one that runs is killed; and the
         # session shows in glos stat while it does.
         slow = subprocess.Popen(opts + ["glos@127.0.0.1", "WAITSEC 100"], stdout=subprocess.DEVNULL,

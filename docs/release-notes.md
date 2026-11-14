@@ -4,6 +4,20 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Write-combining for the video card's framebuffer: a setting, and the VGA window's trial (2026-11-14)
+
+- **`[display] write_combining = auto | on | off`** in GLOS.CFG (the owner's choice after the trial below; `auto` is
+  the default). `auto` switches write-combining on as GLOS starts for the video cards it has been checked on with
+  real hardware, whose registers are in an address range of their own: Matrox's G-series (measured on a G400)
+  and NVIDIA's TNT and TNT2 (measured on a TNT2 M64). Other cards are left alone and the log says so
+  (`GLOS-MTRR wc skip ... reason=unchecked-card`); `on` forces it for any card, and `MTRR LFB ON` tries it by hand.
+  ATI's Rage family and S3's cards keep registers inside the framebuffer's range and are not `auto`'s until
+  looked at.
+- **A second trial, `MTRR VGA ON` / `MTRR VGA OFF`:** the window at A0000h that mode 13h and banked VESA modes are
+  written through, made write-combining (the CPU's fixed range for it; FASTVID's other half). It is a command
+  only, off at every start. On the Pentium III bench (TNT2): mode 13h frames at 13.8 MB/s without and 48.9 with;
+  640x480 through the window a bank at a time at 13.6 and 47.6 (`LFBSPEED frames vga`, `LFBSPEED frames bank`).
+
 ## Write-combining for the video card's framebuffer: a trial (2026-11-14)
 
 - **`MTRR LFB ON`** (`glos mtrr lfb on`) makes the video card's linear framebuffer write-combining, as FASTVID does

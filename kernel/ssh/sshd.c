@@ -351,35 +351,6 @@ static void streams_gone(struct ssh_chan *ch)
         }
 }
 
-/* The video card's linear framebuffer, by PCI: the display device's first prefetchable memory BAR (the
-   framebuffer; registers are never prefetchable), sized as PCI sizes one. Its base in *base and its size, capped:
-   32 MB (no card of the period has more behind it), and 16 MB for S3's, whose 64 MB range has the card's
-   registers at its sixteenth megabyte. 0: none found. */
-static u32 lfb_range(u32 *base)
-{
-    struct pci_dev *d;
-    int i, k;
-    for (i = 0; (d = pci_at(i)) != 0; i++) {
-        if (d->class != 0x03)
-            continue;
-        for (k = 0; k < 6; k++) {
-            u32 b = d->bar[k], reg = 0x10 + 4u * (u32)k, size, f, cap = d->vendor == 0x5333 ? 16u << 20 : 32u << 20;
-            if (!b || (b & 1) || !(b & 8) || (b & 6))   /* (I/O; not prefetchable; 64-bit or below 1 MB) */
-                continue;
-            f = irq_save();
-            pci_write32(d->bus, d->dev, d->fn, reg, 0xFFFFFFFFu);
-            size = ~(pci_read32(d->bus, d->dev, d->fn, reg) & ~15u) + 1;
-            pci_write32(d->bus, d->dev, d->fn, reg, b);
-            irq_restore(f);
-            if (size < (1u << 20) || (size & (size - 1)))
-                continue;
-            *base = b & ~15u;
-            return size < cap ? size : cap;
-        }
-    }
-    return 0;
-}
-
 /* glos shot: the capture is the VM thread's (kernel/dos/shot.c); then the
    file, a piece at a time. */
 static int shot_turn(struct ssh_chan *ch, void *arg)
@@ -1316,12 +1287,20 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             say(ch, 0, t);
             ssh_chan_exit(ch, 0);
         } else {
+            if ((ci_starts(p, "vga on") && !p[6]) || (ci_starts(p, "vga off") && !p[7])) {
+                e = mtrr_vga((p[5] | 32) == 'n');
+                say(ch, e != 0, e ? "glos mtrr: this CPU has no fixed ranges to set\n"
+                    : (p[5] | 32) == 'n' ? "Write-combining is on for the VGA's window (A0000h, 64 KB).\n"
+                    : "The VGA's window is as it was found.\n");
+                ssh_chan_exit(ch, e != 0);
+                return 0;
+            }
             if (ci_starts(p, "off") && !p[3]) {
                 on = 0;
             } else if (ci_starts(p, "lfb off") && !p[7]) {
                 on = 0;
             } else if (ci_starts(p, "lfb on") && !p[6]) {
-                bytes = lfb_range(&base);
+                bytes = pci_lfb_range(&base, 0);
             } else if (ci_starts(p, "wc ")) {
                 u32 mb = 0;
                 for (p += 3; (*p >= '0' && *p <= '9') || ((*p | 32) >= 'a' && (*p | 32) <= 'f'); p++)
@@ -1335,7 +1314,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
                 on = -1;
             }
             if (on < 0) {
-                say(ch, 1, "glos mtrr [lfb on | lfb off | wc BASE MB | off] (BASE hexadecimal; MB a power of two)\n");
+                say(ch, 1, "glos mtrr [lfb on | lfb off | vga on | vga off | wc BASE MB | off] (BASE hexadecimal; MB a power of two)\n");
                 ssh_chan_exit(ch, 2);
             } else {
                 e = on && !bytes ? -2 : mtrr_wc(base, bytes, on);

@@ -18,6 +18,9 @@ const struct cfg_key cfg_schema[] = {
       "The desktop's screen: WIDTHxHEIGHTxBITS, or none for text mode (no desktop)" },
     { "display", "accel", CFG_CHOICE, CFG_DESKTOP, 0, 0, "on|off", "on", "&Drawing engine",
       "A Matrox card's engine draws the desktop (off: the processor does)" },
+    { "display", "write_combining", CFG_CHOICE, CFG_RESTART, 0, 0, "auto|on|off", "auto", "Fast &framebuffer writes",
+      "Write-combining for the video card's linear framebuffer, which software renderers write several times "
+      "faster with: auto for the cards it has been checked on, on for any card, off" },
     { "display", "gpu_watchdog", CFG_NUMBER, CFG_NOW, 50, 60000, "off", "500", "Engine &watchdog (ms)",
       "How long the desktop waits for an app's turn with the engine before ending the app" },
     { "display", "font_smoothing", CFG_CHOICE, CFG_PROGRAM, 0, 0, "on|off", "off", "Smooth &text",

@@ -147,3 +147,37 @@ u32 pci_low_claims(u32 *out, u32 max)
 }
 
 int pci_uses_line(const struct pci_dev *d) { return d->pin >= 1 && d->pin <= 4 && d->irq >= 1 && d->irq < 16; }
+
+/* The video card's linear framebuffer, by PCI: the display device's first prefetchable memory BAR (the
+   framebuffer; registers are never prefetchable), sized as PCI sizes one. Its base in *base, the card in *card
+   (if asked), and its size, capped: 32 MB (no card of the period has more behind it), and 16 MB for S3's, whose
+   64 MB range has the card's registers at its sixteenth megabyte. 0: none found. (kernel/arch/mtrr.c's
+   write-combining: the MTRR command and [display] write_combining.) */
+u32 pci_lfb_range(u32 *base, const struct pci_dev **card)
+{
+    struct pci_dev *d;
+    int i, k;
+    for (i = 0; (d = pci_at(i)) != 0; i++) {
+        if (d->class != 0x03)
+            continue;
+        for (k = 0; k < 6; k++) {
+            u32 b = d->bar[k], reg = 0x10 + 4u * (u32)k, size, f, cap = d->vendor == 0x5333 ? 16u << 20 : 32u << 20;
+            int matrox_fb = d->vendor == 0x102B && k == 0;      /* (Matrox's G-series: BAR 0 is the framebuffer,
+                                                   whatever its flags say: 86Box's G100 has it not prefetchable) */
+            if (!b || (b & 1) || (!(b & 8) && !matrox_fb) || (b & 6))   /* (I/O; not prefetchable; 64-bit or below 1 MB) */
+                continue;
+            f = irq_save();
+            pci_write32(d->bus, d->dev, d->fn, reg, 0xFFFFFFFFu);
+            size = ~(pci_read32(d->bus, d->dev, d->fn, reg) & ~15u) + 1;
+            pci_write32(d->bus, d->dev, d->fn, reg, b);
+            irq_restore(f);
+            if (size < (1u << 20) || (size & (size - 1)))
+                continue;
+            *base = b & ~15u;
+            if (card)
+                *card = d;
+            return size < cap ? size : cap;
+        }
+    }
+    return 0;
+}

@@ -67,7 +67,9 @@ int mtrr_wc(u32 base, u32 bytes, int on);       /* a range write-combining by a 
                                                    0; 1 so already; negative: why not (mtrr.c) */
 u32 mtrr_dev_flags(u32 phys);           /* the cache bits of a program's mapping of device memory there */
 u32 mtrr_text(char *out, u32 room);     /* the variable ranges, a line each */
-void mtrr_leave(void);                  /* GLOS's range off again */
+int mtrr_vga(int on);                   /* A0000h-AFFFFh write-combining (a fixed range), or as found: 0; -1 the
+                                           CPU can't */
+void mtrr_leave(void);                  /* GLOS's ranges off again */
 
 /* kernel/dpmi: traps from a DPMI client (ring 3), and the way back to it */
 void dpmi_trap(struct trapframe *tf);

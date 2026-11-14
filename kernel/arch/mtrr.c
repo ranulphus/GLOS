@@ -23,6 +23,7 @@
 #define MSR_PHYSBASE0   0x200
 #define MSR_FIX64K      0x250           /* 00000h-7FFFFh, a byte a 64 KB unit */
 #define MSR_FIX16K      0x258           /* 80000h-9FFFFh, a byte a 16 KB unit */
+#define MSR_FIX16K_VGA  0x259           /* A0000h-BFFFFh, the same */
 #define MSR_DEFTYPE     0x2FF
 #define DEF_FE          (1u << 10)      /* the fixed ranges enabled */
 #define DEF_E           (1u << 11)      /* the MTRRs enabled */
@@ -33,6 +34,8 @@
 static int usable;                      /* fixed ranges on, and WC a type the CPU has */
 static int var_ok;                      /* variable ranges there and on, and WC a type the CPU has */
 static u32 var_n;                       /* how many variable ranges the CPU has */
+static u64 vga_boot;                    /* the VGA's fixed ranges (A0000h-BFFFFh) as found */
+static int vga_on;                      /* ... A0000h-AFFFFh made write-combining (mtrr_vga) */
 static int wc_reg = -1;                 /* the variable range GLOS took, or -1 */
 static u32 wc_base, wc_bytes;
 static u8 boot_type[UNITS], cur_type[UNITS];
@@ -68,6 +71,7 @@ void mtrr_init(u32 cpuid_edx)
     for (i = 0; i < UNITS; i++)
         boot_type[i] = cur_type[i] = (u8)(rdmsr(i < 8 ? MSR_FIX64K : MSR_FIX16K) >> (8 * (i & 7)));
     usable = (cap & (1u << 8)) && (cap & (1u << 10)) && (def & (DEF_E | DEF_FE)) == (DEF_E | DEF_FE);
+    vga_boot = rdmsr(MSR_FIX16K_VGA);
     var_n = (u32)(cap & 0xFF) < 16 ? (u32)(cap & 0xFF) : 16;
     var_ok = var_n && (cap & (1u << 10)) && (def & DEF_E);
     kprintf("GLOS-MTRR cap=%x def=%x fix64k=%x%08x fix16k=%x%08x wc=%s\n", (u32)cap, (u32)def,
@@ -265,6 +269,10 @@ u32 mtrr_text(char *out, u32 room)
     t = (u32)rdmsr(MSR_DEFTYPE) & 0xFF;
     k += (u32)ksnprintf(out + k, room - k, "memory not in a range: %s; write-combining %s\n", t < 7 ? names[t] : "?",
                         var_ok ? "possible" : "not possible");
+    if (usable && k + 96 < room)
+        k += (u32)ksnprintf(out + k, room - k, "the VGA's window (a0000, 64 KB): %s\n",
+                            vga_on ? "write-combining (GLOS's)" : ((u32)rdmsr(MSR_FIX16K_VGA) & 0xFF) < 7
+                            ? names[(u32)rdmsr(MSR_FIX16K_VGA) & 0xFF] : "?");
     for (i = 0; i < var_n && k + 96 < room; i++) {
         if (!var_get(i, &b, &n, &t))
             continue;
@@ -274,8 +282,44 @@ u32 mtrr_text(char *out, u32 room)
     return k;
 }
 
+
+/* ---- the VGA's window */
+
+/* A0000h-AFFFFh, the window VGA graphics modes and banked VESA modes are written through, made write-combining
+   (on) or as it was found (off): a second trial (the owner, 2026-11-14), FASTVID's other half. The text screens'
+   memory above it is left alone. Programs reach the window through the first megabyte's own pages, which have
+   no cache bits set, so the fixed range's type is theirs at once. 0; -1 the CPU can't. */
+int mtrr_vga(int on)
+{
+    u64 v = on ? (vga_boot & ~(u64)0xFFFFFFFFu) | 0x01010101u : vga_boot, def;
+    u32 cr0, f;
+    if (!usable)
+        return -1;
+    if ((on != 0) == vga_on)
+        return 0;
+    f = irq_save();
+    cr0 = read_cr0();
+    write_cr0((cr0 | CR0_CD) & ~CR0_NW);
+    wbinvd();
+    write_cr3(read_cr3());
+    def = rdmsr(MSR_DEFTYPE);
+    wrmsr(MSR_DEFTYPE, def & ~(u64)DEF_E);
+    wrmsr(MSR_FIX16K_VGA, v);
+    wbinvd();
+    write_cr3(read_cr3());
+    wrmsr(MSR_DEFTYPE, def);
+    write_cr0(cr0);
+    irq_restore(f);
+    vga_on = on != 0;
+    kprintf("GLOS-MTRR vga %s fix=%x%08x\n", on ? "wc" : "restored", (u32)(v >> 32), (u32)v);
+    return 0;
+}
+
+int mtrr_vga_state(void) { return vga_on; }
+
 void mtrr_leave(void)                           /* GLOS is leaving: the CPU as it was found */
 {
     if (wc_reg >= 0)
         mtrr_wc(0, 0, 0);
+    mtrr_vga(0);
 }

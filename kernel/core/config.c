@@ -36,6 +36,8 @@
 #include "io.h"
 #include "kdata.h"
 #include "secrets.h"
+#include "pci.h"
+#include "arch.h"
 #include "keymap.h"
 #include "kprintf.h"
 #include "mm.h"
@@ -449,6 +451,39 @@ static u32 num(const char *s)
 /* [region] as it is now: the schema's defaults until the file is read. */
 static struct region region = { REGION_YMD, '-', 0, '.', ',', 1, 0, "us", "en" };
 
+/* [display] write_combining (the owner, 2026-11-14, after the MTRR command's trial): the video card's linear
+   framebuffer made write-combining as GLOS starts. auto (the default): for the cards it has been checked on with
+   real hardware, whose registers are in a range of their own (Matrox's G-series: the G400 measured; NVIDIA's
+   TNT and TNT2: the TNT2 M64 measured); on: any card with a framebuffer PCI shows; off. A card auto leaves alone
+   is said in the log, and MTRR LFB ON still tries it by hand. (ATI's Rage family and S3's cards have registers
+   inside the framebuffer's range: not auto's until looked at.) */
+static void wc_config(void)
+{
+    static u8 done;
+    const struct pci_dev *card = 0;
+    char v[8];
+    u32 base = 0, bytes;
+    int known, e;
+    if (done)
+        return;
+    done = 1;
+    v[0] = 0;
+    kcfg_get("display", "write_combining", v, sizeof v);
+    if (same(v, "off") || !(bytes = pci_lfb_range(&base, &card)))
+        return;
+    known = (card->vendor == 0x102B && (card->device == 0x0520 || card->device == 0x0521 || card->device == 0x0525
+                                        || card->device == 0x1000 || card->device == 0x1001 || card->device == 0x2527))
+        || (card->vendor == 0x10DE && (card->device == 0x0020 || (card->device >= 0x0028 && card->device <= 0x002F)));
+    if (!same(v, "on") && !known) {
+        kprintf("GLOS-MTRR wc skip card=%04x:%04x reason=unchecked-card (MTRR LFB ON tries it)\n", card->vendor, card->device);
+        return;
+    }
+    e = mtrr_wc(base, bytes, 1);
+    if (e)
+        kprintf("GLOS-MTRR wc none card=%04x:%04x reason=%s\n", card->vendor, card->device,
+                e == 1 ? "bios-has-it" : e == -1 ? "cpu" : e == -3 ? "meets-a-range" : e == -4 ? "no-range-free" : "range");
+}
+
 const struct region *kcfg_region(void) { return &region; }
 
 int kcfg_layout(void)                       /* keymap.h's number for [region] layout */
@@ -544,6 +579,7 @@ static void apply_read(void)
     mixer_late();                               /* a Crystal chip, with no SB16 ([sound] crystal) */
     joy_config();                               /* [joystick] port and range */
     usb_late();                                 /* [usb] enabled: GLOS's USB controllers */
+    wc_config();                                /* [display] write_combining */
 }
 
 /* The desktop has come on (display.c, the VM thread): [desktop] start's programs, beside GLOS.EXE when they have
@@ -709,6 +745,7 @@ static void load(void)
         mixer_late();                           /* (the defaults: [sound] crystal = auto) */
         joy_config();
         usb_late();
+        wc_config();
         return;
     }
     h = q.r[0].ax;
@@ -724,6 +761,7 @@ static void load(void)
         mixer_late();
         joy_config();
         usb_late();
+        wc_config();
         return;
     }
     got = q.r[0].ax;
