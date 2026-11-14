@@ -136,11 +136,13 @@ N1 first: the hardware for it is cabled already, and it is the larger unknown.
 - **Loop A** (`ssh-member-bf6-ne2kpci`, in `make loopa-ssh`): two emulated PCs, their COM2 ports joined by the
   test, which also notes every packet that crosses. The far PC is given 10.0.2.16 by SLiRP's DHCP server through
   the near one, sets its clock by a server on the host (the request out through the near PC's card, the answer
-  back down the cable), and its name's announcements reach the network.
+  back down the cable), its name's announcements reach the network, and `FETCH`, typed by the test at the far
+  PC's own prompt, takes 40 KB whole from a web server on the host (TCP through the near PC, five seconds).
 - **Owed before N1 is called done:**
   - the answer to an ARP request for a member's address (SLiRP never asks: it learns from the announcement),
     which a real router will need: the 486 bench through the P3;
-  - TCP through the near PC (an SSH login to the far PC from the network), and a packet too long for the cable;
+  - an SSH login to the far PC from another computer on the network (TCP begun from outside), and a packet too
+    long for the cable;
   - the network's own broadcast address (10.0.2.255) copied on as 255.255.255.255 is;
   - a far PC that goes away (its cable unplugged) forgotten before its lease ends.
 

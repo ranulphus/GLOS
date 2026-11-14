@@ -2189,6 +2189,24 @@ def cable_port(name, limit=120):
     return 0
 
 
+def typed_keys(text, start=1.0, step=0.15):
+    """Loop A's --keys list (after a marker) for a line of text on a US keyboard: a tap a character, Shift held
+    round those that need it."""
+    plain = "\x1b1234567890-=\b\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./"
+    shift = "\0!@#$%^&*()_+\0\0QWERTYUIOP{}\0\0ASDFGHJKL:\"~\0|ZXCVBNM<>?"
+    items, t = [], start
+    for c in text:
+        if c == " ":
+            items.append("%.2f:0x39" % t)
+        elif c in plain and c != "\0":
+            items.append("%.2f:0x%02x" % (t, plain.index(c) + 1))
+        else:
+            k = shift.index(c) + 1
+            items += ["%.2f:0x2a:down" % t, "%.2f:0x%02x" % (t + 0.03, k), "%.2f:0x2a:up" % (t + 0.1)]
+        t += step
+    return ",".join(items)
+
+
 def member_case(profile, card):
     """A cable's far PC as a member of the near PC's network (kernel/net/member.c; docs/v1/cable-network.md, N1):
     two PCs with their COM2 ports joined on the host. The near one has a network card and [net] cable = server
@@ -2196,12 +2214,30 @@ def member_case(profile, card):
     near one to the network's DHCP server (SLiRP's), which gives it an address of its own; the near PC says so
     (GLOS-NET member) and lists it (glos net); the far PC, at that address, sets its clock by a server on the
     host, there and back through the near PC, which answers for the far one's address on the Ethernet; the far
-    PC's announcements of its name are copied to the network; and with cable_share = off the near PC says it
-    shares nothing."""
+    PC's announcements of its name are copied to the network; a file fetched at the far PC's own prompt from a
+    web server on the host comes whole (TCP through the near PC, both ways, in segments the cable's size); and
+    with cable_share = off the near PC says it shares nothing."""
+    import hashlib
+    import http.server
     import socket
     import threading
     tag = "member-%s-%s" % (profile, card)
     ntp = NtpServer()
+    blob, got = os.urandom(40000), []
+
+    class Web(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(blob)))
+            self.end_headers()
+            self.wfile.write(blob)
+            got.append(self.client_address)
+
+        def log_message(self, *a):
+            pass
+    web = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Web)
+    threading.Thread(target=web.serve_forever, daemon=True).start()
+    fetch = "c:\\test\\fetch --quiet http://10.0.2.2:%d/blob c:\\test\\blob.bin\n" % web.server_address[1]
     cfg_a = batfile(tag + "/near/GLOS.CFG", ["; jobs.py ssh, membership: the PC with the card", "[time]", "sntp = off",
                                              "[net]", "hostname = near", "cable = server com2"])
     cfg_b = batfile(tag + "/far/GLOS.CFG", ["; jobs.py ssh, membership: the PC at the cable's far end", "[time]",
@@ -2211,7 +2247,8 @@ def member_case(profile, card):
                                                "--cmd", "SERSAY HX-START member", "--cmd", "C:\\TEST\\GLOS.EXE",
                                                "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     far = run("ssh-" + tag + "-far", ["--machine", profile, "--com2", "--timeout", "900", "--idle", "600",
-                                      "--file", cfg_b + "=/TEST/GLOS.CFG"] + GLOS_FILES + KEYS
+                                      "--file", cfg_b + "=/TEST/GLOS.CFG", "--file", "build/apps/FETCH.EXE=/TEST/FETCH.EXE",
+                                      "--keys", "@GLOS-TIME set by=sntp," + typed_keys(fetch, 3.0)] + GLOS_FILES + KEYS
               + ["--cmd", "SERSAY HX-START far", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
               background=True)
     fserial = os.path.join(ROOT, "out", "ssh-" + tag + "-far", "serial.log")
@@ -2283,6 +2320,12 @@ def member_case(profile, card):
             and ("near", "10.0.2.2", ip, "udp") in [(w, s_, d, x.split(":")[0]) for w, s_, d, x in seen]
         # (SLiRP learns where the far PC is from the near PC's announcement of it and never asks: the answer to
         # an ARP request for a member's address is the benches' to show, with a real router)
+        # TCP: FETCH typed at the far PC's own prompt (the test's keys, once its clock is set) takes 40 KB from
+        # the host's web server through the near PC, about five seconds of the cable
+        done = until(lambda: re.search(r"GLOS-APP end id=\d+ prog=FETCH\.EXE code=(\d+)", flog()), 180)
+        checks["tcp"] = bool(done) and done.group(1) == "0" and len(got) == 1
+        if not checks["tcp"]:
+            info += " fetch=%r got=%d far-tail=%r" % (done and done.group(0), len(got), flog().split("\n")[-6:])
         if not all(checks.values()):
             info += " asked=%d cable=%r near=%r far=%r net=%r" % (ntp.asked, seen[-24:], [l for l in near.log().split("\n") if "member" in l or "cable" in l][-4:],
                                                 [l for l in flog().split("\n") if "cable" in l or "GLOS-TIME" in l][-4:],
@@ -2296,6 +2339,7 @@ def member_case(profile, card):
         checks["timeout"] = False
     stop.append(1)
     ntp.stop = True
+    web.shutdown()
     text = near.wait()
     far.kill()
     far.wait()
