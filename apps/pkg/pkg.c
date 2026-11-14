@@ -16,8 +16,9 @@
  * GLOS's folder (PKG.EXE's; GLOSPKG in the environment names another):
  * PKG\SOURCES.TXT ("glos URL" or "freedos URL" a line), PKG\NAME.LST (what a
  * package put where, and its profile's keys), KEYS\PKG\, CERTS.DAT. A
- * GLOS package goes where its GLOSPKG.INI says (C:\APPS\NAME by default); a
- * FreeDOS one under DOSDIR (C:\FREEDOS), its sources left out. */
+ * GLOS package goes where its GLOSPKG.INI says (\APPS\NAME by default); a
+ * FreeDOS one under DOSDIR (\FREEDOS), its sources left out: both on the
+ * drive DOS started from, or on GLOS's own when that one is a floppy. */
 #include <ctype.h>
 #include <stdarg.h>
 #include <dirent.h>
@@ -601,6 +602,18 @@ static const struct avail *local_pkg(const char *path, unsigned char **zip, size
     return &local_av;
 }
 
+/* Where packages go by default: the root of the drive DOS started from; of the drive GLOS runs from when that is
+   a floppy (A: or B:), which has no room for them and is often taken out again (the owner, 2026-11-14). No drive
+   is C: by name. */
+static const char *install_root(void)
+{
+    static char root[4];
+    const char *boot = glos_boot_root(), *home = glos_home();
+    int floppy = (boot[0] | 32) == 'a' || (boot[0] | 32) == 'b';
+    snprintf(root, sizeof root, "%c:\\", floppy && home[0] && home[1] == ':' ? home[0] : boot[0]);
+    return root;
+}
+
 static int install(const char *name, int quiet)
 {
     char why[300], ver[32], dir[260] = "", lpath[300], *ini = 0;
@@ -635,7 +648,10 @@ static int install(const char *name, int quiet)
     }
     if (a->src->freedos) {
         const char *d = getenv("DOSDIR");
-        snprintf(dir, sizeof dir, "%s", d && *d ? d : "C:\\FREEDOS");
+        if (d && *d)
+            snprintf(dir, sizeof dir, "%s", d);
+        else                                    /* (FreeDOS's own folder) */
+            snprintf(dir, sizeof dir, "%sFREEDOS", install_root());
     } else {
         const struct zip_entry *e = zip_find(&z, "GLOSPKG.INI");
         if (!e || !(ini = (char *)zip_read(&z, e, why, sizeof why))) {
@@ -645,7 +661,7 @@ static int install(const char *name, int quiet)
         }
         ini = realloc(ini, e->usize + 1);
         ini[e->usize] = 0;
-        snprintf(dir, sizeof dir, "C:\\APPS\\%s", a->name);
+        snprintf(dir, sizeof dir, "%sAPPS\\%s", install_root(), a->name);
         apply_manifest(ini, dir, sizeof dir, 0, 1, why, sizeof why);
     }
     for (i = 0; i < z.n; i++) {                 /* every entry read and checked before anything is written */

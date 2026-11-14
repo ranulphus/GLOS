@@ -4,6 +4,17 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## No drive is C: by name (2026-11-14)
+
+- GLOS no longer assumes it, or DOS, is on C:. **GLOS's own files follow the folder GLOS.EXE runs from:** crash
+  reports go to `CRASH` beside it, `FETCH` finds `CERTS.DAT` there. **Where a user starts is the drive DOS
+  started from:** the Terminal, file dialogs and the Files browser open at its root (`A:\` on a PC started from
+  a floppy). **Packages** install into `\APPS` on that drive too, or on GLOS's own drive when DOS started from a
+  floppy.
+- Programs can ask where things are: `glos_home()` and `glos_boot_root()` (the system figures' `home` and
+  `boot`, API 2.1).
+- The setup floppy's installer still puts a new system on C:, the first hard disk's first partition.
+
 ## API 2.1: GLOS's shell as a job (2026-11-13)
 
 - An app can open a session of GLOS's shell as it runs a program: `GLOS_JOB_RUN` with `how = GLOS_RUN_SHELL` and

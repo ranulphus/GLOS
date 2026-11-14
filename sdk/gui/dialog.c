@@ -365,14 +365,15 @@ int gui_file_dialog(struct gui_window *owner, const char *title, int save, char 
     gui_button(row, "Cancel", fd_button, GUI_CANCEL_R)->flags |= GUI_CANCEL;
     {                                           /* where it starts: path's folder (and its name) */
         char start[260];
-        snprintf(start, sizeof start, "%s", path && path[0] ? path : "C:\\");
+        snprintf(start, sizeof start, "%s", path && path[0] ? path : glos_boot_root());   /* (no drive is C: by name:
+                                                   with nowhere said, the root of the drive DOS started from) */
         if (!gui_is_dir(start)) {
             char nm[128];
             gui_set_text(d.name, gui_dos_text(gui_path_name(start), nm, sizeof nm));
             gui_path_up(start);
         }
         if (!gui_is_dir(start))
-            snprintf(start, sizeof start, "C:\\");
+            snprintf(start, sizeof start, "%s", glos_boot_root());
         fd_go(&d, start);
     }
     d.w->focus = d.name;

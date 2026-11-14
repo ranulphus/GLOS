@@ -306,7 +306,7 @@ static void command(struct gui_window *w, int id)
     (void)w;
     switch (id) {
     case C_OPEN:
-        snprintf(p, sizeof p, "%s", pic.path[0] ? pic.path : "C:\\");
+        snprintf(p, sizeof p, "%s", pic.path[0] ? pic.path : glos_boot_root());
         if (gui_file_dialog(win, "Open", 0, p, sizeof p))
             load(p);
         break;

@@ -590,7 +590,8 @@ int glos_shell(int on) { (void)on; return 0; }
  * Two apps (the one under test and NOTEPAD) and a job; NOTEPAD can be ended. */
 /* Where things are on the host's drives: GLOS's folder, and the boot drive's root. */
 const char *glos_home(void) { return "C:\\GLOS"; }
-const char *glos_boot_root(void) { return "C:\\"; }
+const char *glos_boot_root(void) { return "A:\\"; }  /* (as Loop A's machines, which start from a floppy: the
+                                                           pictures made here are compared with theirs) */
 
 static int notepad_ended;
 int glos_sys_stat(unsigned kind, void *out, unsigned room, unsigned *length, unsigned *count)

@@ -121,7 +121,7 @@ static int save_to(const char *p)
 static int save_as(void)
 {
     char p[260];
-    snprintf(p, sizeof p, "%s", path[0] ? path : "C:\\");
+    snprintf(p, sizeof p, "%s", path[0] ? path : glos_boot_root());
     if (!gui_file_dialog(win, "Save As", 1, p, sizeof p))
         return -1;
     return save_to(p);
@@ -175,7 +175,7 @@ static void command(struct gui_window *w, int id)
         }
         break;
     case C_OPEN:
-        snprintf(p, sizeof p, "%s", path[0] ? path : "C:\\");
+        snprintf(p, sizeof p, "%s", path[0] ? path : glos_boot_root());
         if (keep_changes() == 0 && gui_file_dialog(win, "Open", 0, p, sizeof p))
             load(p);
         break;

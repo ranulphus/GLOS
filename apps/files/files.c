@@ -462,7 +462,7 @@ int main(int argc, char **argv)
     gui_on_event(app_event);
     folders_load();
     if (!strcmp(mode, "-browse")) {
-        browser_open(argc > 2 ? argv[2] : "C:\\");
+        browser_open(argc > 2 ? argv[2] : glos_boot_root());
     } else if (!strcmp(mode, "-folder") && argc > 2) {
         folder_open(argv[2]);
     } else {                                    /* the desktop's shell */
