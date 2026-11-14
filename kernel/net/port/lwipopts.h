@@ -72,5 +72,15 @@ void clock_get_us(unsigned int *sec, unsigned int *us);
 #define TCP_SND_BUF                 (8 * TCP_MSS)
 #define TCP_SND_QUEUELEN            ((4 * TCP_SND_BUF + TCP_MSS - 1) / TCP_MSS)
 #define LWIP_TCP_KEEPALIVE          1
+/* A cable's far PC as a member of the card's network (kernel/net/member.c; docs/v1/cable-network.md): its
+   packets are forwarded there (not by lwIP's IP_FORWARD: 2.2.0's ip4_forward clears the checksums of what it
+   forwards), this PC's own packets for it routed down its cable, its DHCP requests and broadcasts taken off the
+   cable. */
+struct netif;
+struct pbuf;
+int member_ip_hook(struct pbuf *p, struct netif *inp);
+struct netif *member_route(const void *src, const void *dest);
+#define LWIP_HOOK_IP4_INPUT(p, inp)             member_ip_hook(p, inp)
+#define LWIP_HOOK_IP4_ROUTE_SRC(src, dest)      member_route(src, dest)
 
 #endif

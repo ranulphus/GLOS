@@ -2189,6 +2189,123 @@ def cable_port(name, limit=120):
     return 0
 
 
+def member_case(profile, card):
+    """A cable's far PC as a member of the near PC's network (kernel/net/member.c; docs/v1/cable-network.md, N1):
+    two PCs with their COM2 ports joined on the host. The near one has a network card and [net] cable = server
+    COM2; the far one has no card and cable = client COM2. The far PC's request for an address goes through the
+    near one to the network's DHCP server (SLiRP's), which gives it an address of its own; the near PC says so
+    (GLOS-NET member) and lists it (glos net); the far PC, at that address, sets its clock by a server on the
+    host, there and back through the near PC, which answers for the far one's address on the Ethernet; the far
+    PC's announcements of its name are copied to the network; and with cable_share = off the near PC says it
+    shares nothing."""
+    import socket
+    import threading
+    tag = "member-%s-%s" % (profile, card)
+    ntp = NtpServer()
+    cfg_a = batfile(tag + "/near/GLOS.CFG", ["; jobs.py ssh, membership: the PC with the card", "[time]", "sntp = off",
+                                             "[net]", "hostname = near", "cable = server com2"])
+    cfg_b = batfile(tag + "/far/GLOS.CFG", ["; jobs.py ssh, membership: the PC at the cable's far end", "[time]",
+                                            "server = 10.0.2.2:%d" % ntp.port, "[net]", "hostname = far",
+                                            "cable = client com2"])
+    near = Agent("ssh-" + tag, profile, card, ["--com2", "--file", cfg_a + "=/TEST/GLOS.CFG",
+                                               "--cmd", "SERSAY HX-START member", "--cmd", "C:\\TEST\\GLOS.EXE",
+                                               "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    far = run("ssh-" + tag + "-far", ["--machine", profile, "--com2", "--timeout", "900", "--idle", "600",
+                                      "--file", cfg_b + "=/TEST/GLOS.CFG"] + GLOS_FILES + KEYS
+              + ["--cmd", "SERSAY HX-START far", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
+              background=True)
+    fserial = os.path.join(ROOT, "out", "ssh-" + tag + "-far", "serial.log")
+    flog = lambda: open(fserial, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(fserial) else ""
+    checks, info, stop = {"listen": near.listening()}, "", []
+    seen = []                                   # the packets that crossed the cable: (from, source, to, what)
+
+    def note(who, raw):                         # a SLIP frame as it passed: its IP header's addresses, its ports
+        d = raw.replace(b"\xdb\xdc", b"\xc0").replace(b"\xdb\xdd", b"\xdb")
+        if len(d) < 20 or d[0] >> 4 != 4:
+            return
+        ihl = (d[0] & 15) * 4
+        what = {1: "icmp", 2: "igmp", 6: "tcp", 17: "udp"}.get(d[9], str(d[9]))
+        if d[9] in (6, 17) and len(d) >= ihl + 4:
+            what += ":%d>%d" % (int.from_bytes(d[ihl:ihl + 2], "big"), int.from_bytes(d[ihl + 2:ihl + 4], "big"))
+        seen.append((who, ".".join(map(str, d[12:16])), ".".join(map(str, d[16:20])), what))
+
+    def join(pa, pb):                           # the cable: bytes from each COM2 bridge to the other
+        try:
+            sa = socket.create_connection(("127.0.0.1", pa), timeout=10)
+            sb = socket.create_connection(("127.0.0.1", pb), timeout=10)
+        except OSError:
+            return
+        for s in (sa, sb):
+            s.settimeout(0.2)
+        part = {sa: b"", sb: b""}
+        while not stop:
+            for src, dst in ((sa, sb), (sb, sa)):
+                try:
+                    d = src.recv(4096)
+                    if d:
+                        dst.sendall(d)
+                        *frames, part[src] = (part[src] + d).split(b"\xc0")
+                        for fr in frames:
+                            note("near" if src is sa else "far", fr)
+                except socket.timeout:
+                    pass
+                except OSError:
+                    return
+
+    def until(test, limit):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            r = test()
+            if r:
+                return r
+            time.sleep(1)
+        return test()
+
+    try:
+        pa, pb = cable_port("ssh-" + tag), cable_port("ssh-" + tag + "-far")
+        checks["ports"] = bool(pa and pb)
+        threading.Thread(target=join, args=(pa, pb), daemon=True).start()
+        m = until(lambda: re.search(r"GLOS-NET member ip=(10\.0\.2\.\d+) mac=02:47:4c:\S+ lease=(\d+)", near.log()), 300)
+        checks["member"] = bool(m) and m.group(1) != "10.0.2.15"
+        ip = m.group(1) if m else "?"
+        checks["far-member"] = bool(until(lambda: "GLOS-NET cable member ip=%s gw=10.0.2.2 mask=255.255.255.0" % ip
+                                          in flog(), 60))
+        rc, out, _ = near.ssh("glos net")
+        checks["listed"] = rc == 0 and ("member ip=%s mac=02:47:4c" % ip) in out and "share=on relayed=" in out \
+            and "cable=server" in out
+        # The far PC's clock, set by the host's server: its packets out through the near PC, the answers back to
+        # the near PC's card (which answers for the far one's address) and down the cable
+        checks["clock"] = bool(until(lambda: "GLOS-TIME set by=sntp" in flog(), 180)) and ntp.asked >= 1
+        out = until(lambda: (lambda o: o if re.search(r"copied_out=[1-9]", o) else "")(near.ssh("glos net")[1]), 60)
+        checks["names-copied"] = bool(out)      # (the far PC's announcements of its name, copied to the network)
+        checks["forwarded"] = bool(re.search(r"forwarded=([2-9]|\d\d)", out or "")) \
+            and ("far", ip, "10.0.2.2", "udp") in [(w, s_, d, x.split(":")[0]) for w, s_, d, x in seen] \
+            and ("near", "10.0.2.2", ip, "udp") in [(w, s_, d, x.split(":")[0]) for w, s_, d, x in seen]
+        # (SLiRP learns where the far PC is from the near PC's announcement of it and never asks: the answer to
+        # an ARP request for a member's address is the benches' to show, with a real router)
+        if not all(checks.values()):
+            info += " asked=%d cable=%r near=%r far=%r net=%r" % (ntp.asked, seen[-24:], [l for l in near.log().split("\n") if "member" in l or "cable" in l][-4:],
+                                                [l for l in flog().split("\n") if "cable" in l or "GLOS-TIME" in l][-4:],
+                                                near.ssh("glos net")[1][-400:])
+        checks["share-off"] = near.ssh("glos config set net cable_share off")[0] == 0 \
+            and "share=off" in near.ssh("glos net")[1]
+        checks["share-on"] = near.ssh("glos config set net cable_share on")[0] == 0 \
+            and "share=on" in near.ssh("glos net")[1]
+        checks["exit"] = near.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    stop.append(1)
+    ntp.stop = True
+    text = near.wait()
+    far.kill()
+    far.wait()
+    checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-WARN|GLOS-CRASH", text + flog())
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL",
+                             "" if not bad else " failed: " + " ".join(bad) + info), not bad
+
+
 def cable_case(profile, card):
     """The cable link (kernel/net/slip.c, kernel/drv/uart.c; docs/cable.md): IP over a serial cable, on COM2
     (Loop A's bridge to a TCP port; the other end is made here by hand). With a network card, GLOS.CFG's [net]
@@ -8639,6 +8756,7 @@ def main():
             res += matrix(idle_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(shell_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(cable_case, [("bf6", "ne2kpci"), ("486dx2", "none")], a.jobs)
+            res += matrix(member_case, [("bf6", "ne2kpci")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]

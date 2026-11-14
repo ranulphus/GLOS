@@ -32,6 +32,7 @@
 #include "clock.h"
 #include "io.h"
 #include "kcfg.h"
+#include "member.h"
 #include "lcon.h"
 #include "kprintf.h"
 #include "slip.h"
@@ -376,7 +377,9 @@ static err_t nif_init(struct netif *n)
 
 void net_rx(struct nic *c, const u8 *f, u32 len)
 {
-    struct pbuf *p = pbuf_alloc(PBUF_RAW, (u16)len, PBUF_POOL);
+    struct pbuf *p;
+    member_card_frame(f, len);                  /* (a cable's far PC that is this network's member: member.c) */
+    p = pbuf_alloc(PBUF_RAW, (u16)len, PBUF_POOL);
     if (!p) {
         c->rx_errors++;
         return;
@@ -515,6 +518,7 @@ static void net_thread(void *arg)
     sshd_net_start(net_kick);
     if (vm.bi->cable_role)                      /* [net] cable (docs/cable.md) */
         slip_start(vm.bi->cable_role, vm.bi->cable_com, vm.bi->cable_baud, !nic0);
+    member_links(nic0 ? &nif : 0, slip_netif(1));
     for (;;) {
         ms = sys_timeouts_sleeptime();
         if (ms > 60000)
@@ -532,6 +536,7 @@ static void net_thread(void *arg)
             sti();
         }
         slip_turn();
+        member_turn();
         work_turn();
         sys_check_timeouts();
         if (sntp_due && bound_at && kcfg_loaded())
@@ -578,7 +583,30 @@ u32 net_stat(char *buf, u32 max, int json)
                               nic0->name, nic0->base, nic0->irq, nic0->mac[0], nic0->mac[1], nic0->mac[2], nic0->mac[3],
                               nic0->mac[4], nic0->mac[5], ip, mask, gw, dns, nic0->rx_frames, nic0->tx_frames,
                               nic0->rx_errors, nic0->overruns, sock_count())
-               + slip_stat(buf + strlen(buf), max - (u32)strlen(buf));
+               + slip_stat(buf + strlen(buf), max - (u32)strlen(buf))
+               + member_stat(buf + strlen(buf), max - (u32)strlen(buf));
+    }
+}
+
+/* The cable's interface has an address of the network at its far end (slip.c: this PC is a member there, by
+   the far PC's doing: member.c), or has lost it. The clock's server, the names and the apps hear of it as of a
+   card's address. */
+void net_cable_member(struct netif *n, int on)
+{
+    static u8 named;
+    api2_net_changed();
+    bound_at = on ? timer_ticks() | 1 : nic0 ? bound_at : 0;
+    if (on && !named && !nic0) {                /* (its name on that network: the responder on the cable) */
+        named = 1;
+        mdns_resp_init();
+        if (mdns_resp_add_netif(n, hostname) != ERR_OK
+            || mdns_resp_add_service(n, hostname, "_ssh", DNSSD_PROTO_TCP, 22, NULL, NULL) < 0)
+            kprintf("GLOS-NET error=mdns\n");
+    }
+    if (on) {
+        char ip[16];
+        ip4addr_ntoa_r(netif_ip4_addr(n), ip, sizeof ip);
+        lcon_network(ip, hostname);
     }
 }
 
@@ -636,6 +664,7 @@ static void cable_set(void *arg)
     u32 a = (u32)arg;
     slip_stop();
     cable_result = a >> 24 ? slip_start(a >> 24, (a >> 20) & 15, a & 0xFFFFF, !nic0) : 0;
+    member_links(nic0 ? &nif : 0, slip_netif(1));
     api2_net_changed();
 }
 

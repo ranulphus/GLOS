@@ -64,6 +64,11 @@ const struct cfg_key cfg_schema[] = {
     { "net", "cable", CFG_TEXT, CFG_RESTART, 1, 31, "line", "off", "&Cable link",
       "The network over a serial cable to another computer (docs/cable.md): off, or server COM1 or client COM1 "
       "(COM1 to COM4), with a speed after it if not 115200" },
+    { "net", "cable_share", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "Share the network over the cable",
+      "A PC with a network card and a cable link as its server lets the PC at the cable's far end onto its network, "
+      "with an address of its own there" },
+    { "net", "cable_join", CFG_CHOICE, CFG_RESTART, 0, 0, "on|off", "on", "Join the network at the cable's far end",
+      "A PC with no network card asks over its cable link for an address of the far PC's network" },
     /* [time] (M10): network time, the zone */
     { "time", "sntp", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "&Network time",
       "The clock is set from a time server (SNTP) when the network is up, and kept so" },

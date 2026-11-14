@@ -1,7 +1,8 @@
 # Cables as part of the network: the parallel link and the bridged network (design)
 
-**Status: agreed by the owner (2026-11-14, the answers at the end). Nothing here is built yet; N1 is next.** The
-serial link it builds on is [docs/cable.md](../cable.md).
+**Status: agreed by the owner (2026-11-14, the answers at the end). N1's first cut is built and passes in Loop A
+(2026-11-14, "As built" below); the benches and a TCP check are owed. N2 and N3 are not started.** The serial
+link it builds on is [docs/cable.md](../cable.md).
 
 ## What the owner asked for (2026-11-14)
 
@@ -115,6 +116,33 @@ and that has a network card, unless `[net] cable_share = off`. The far PC joins 
 | N3 | Membership over the parallel link; the setup floppy and installer offered over it | Loop A; an install over the parallel cable |
 
 N1 first: the hardware for it is cabled already, and it is the larger unknown.
+
+## As built: N1's first cut (2026-11-14)
+
+- `kernel/net/member.c` on the PC that shares: the far PC's DHCP requests taken off the cable and sent to the
+  network as broadcasts with the "answer by broadcast" flag; the answers, known by the far PC's hardware
+  address, passed back and read on the way (an ACK makes a member: `GLOS-NET member ip=... mac=... lease=...`);
+  an unasked ARP announcement and answers to ARP requests for a member's address; a member's packets forwarded
+  each way with the time-to-live counted down; broadcasts and multicasts (UDP) copied each way, 2 KB a second at
+  most down the cable. `glos net` lists the members and the counts. `[net] cable_share = off` stops it at once.
+- **Forwarding is GLOS's own**, a few lines: lwIP 2.2.0's `ip4_forward` clears the IP, UDP and TCP checksums of
+  whatever it forwards when checksums are made in software, as GLOS's are, and everything it passed was thrown
+  away at the other end. `IP_FORWARD` stays off.
+- `kernel/net/slip.c` on the PC that joins (a client link, no card of its own): the cable's interface has a
+  hardware address made of the PC's host key and name (`02:47:4C:...`, the same at every start), and lwIP's
+  DHCP client runs on it. With an answer the interface has the network's address, gateway and name servers
+  (`GLOS-NET cable member ip=...`), the clock's server and the `.local` name work over it, and the prompt on the
+  PC's screen says the network is up; with none, the fixed pair stands. `[net] cable_join = off`: never asked.
+- **Loop A** (`ssh-member-bf6-ne2kpci`, in `make loopa-ssh`): two emulated PCs, their COM2 ports joined by the
+  test, which also notes every packet that crosses. The far PC is given 10.0.2.16 by SLiRP's DHCP server through
+  the near one, sets its clock by a server on the host (the request out through the near PC's card, the answer
+  back down the cable), and its name's announcements reach the network.
+- **Owed before N1 is called done:**
+  - the answer to an ARP request for a member's address (SLiRP never asks: it learns from the announcement),
+    which a real router will need: the 486 bench through the P3;
+  - TCP through the near PC (an SSH login to the far PC from the network), and a packet too long for the cable;
+  - the network's own broadcast address (10.0.2.255) copied on as 255.255.255.255 is;
+  - a far PC that goes away (its cable unplugged) forgotten before its lease ends.
 
 ## Decided by the owner (2026-11-14)
 

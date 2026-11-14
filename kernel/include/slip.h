@@ -10,6 +10,9 @@ int slip_start(u32 role, u32 com, u32 baud, int alone);
 void slip_stop(void);
 void slip_turn(void);                   /* what has come in, to lwIP */
 int slip_up(void);
+struct netif;
+struct netif *slip_netif(int server);  /* the link's interface while it is up (server: only if this PC is its server) */
+void net_cable_member(struct netif *n, int on);  /* (net.c) the cable's interface has an address of the far end's network, or has lost it */
 int slip_address(char ip[16]);          /* 1 and this PC's address on the link, or 0 */
 u32 slip_stat(char *buf, u32 max);      /* glos net's line for it ("" when off) */
 void slip_leave(void);                  /* GLOS leaving (any context, interrupts off): the port as it was found */

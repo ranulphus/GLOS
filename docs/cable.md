@@ -41,8 +41,11 @@ no DHCP and no `.local` name on the cable.
 - **Speed:** 115,200 baud is about 11 KB a second: 300 KB each way took 64 seconds on the 486 bench, an install
   of GLOS (5.5 MB) takes 8 to 9 minutes. A chip with no FIFO (an 8250 or 16450: `fifo=0` in `NETWORK`) loses
   bytes at that speed (`overruns`); TCP sends them again, and a lower speed stops it.
-- **No checks of its own:** SLIP relies on IP's and TCP's checksums. Nothing is forwarded between the cable and
-  a network card: the other end reaches this PC, not the network behind it.
+- **No checks of its own:** SLIP relies on IP's and TCP's checksums.
+- **The far PC as a member of this PC's network** (first cut, 2026-11-14; [v1/cable-network.md](v1/cable-network.md)):
+  a PC with a network card and a server link lets the PC at the cable's far end onto its network, with an
+  address of its own from the network's DHCP server. `[net] cable_share = off` keeps the cable to the two PCs;
+  `[net] cable_join = off` on the far PC stops it asking.
 
 ## Tested
 
