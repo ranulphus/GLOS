@@ -192,7 +192,8 @@ static void say(const char *text)
 
 int lcon_key(u8 b)
 {
-    if (!l.on || !ours())
+    if (!l.on || !ours() || agent_vm_app_keys(l.s))     /* (a GLOS app someone else started, with no terminal:
+                                                   it reads the keyboard through DOS, as before the prompt) */
         return 0;
     if (l.kt - l.kh < sizeof l.kq)
         l.kq[l.kt++ % sizeof l.kq] = b;

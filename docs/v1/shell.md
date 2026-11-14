@@ -181,6 +181,12 @@ S2 gives it a host in the kernel and takes the Terminal app's away.
   reached (`kernel/vm/vcon.c`), the keys DOS's.
 - **`glos shot --text`** gives the PC's text screen as text (a line a row, then `cursor=COL,ROW`): what the tests
   read, and a quick look at a bench's screen from afar.
+- **The keyboard is left to a GLOS app that has no terminal** and was started by someone else (`glos run --app`
+  over SSH): with no desktop such an app reads the PC's keyboard through DOS, as it always has.
+- **The session holds nothing of DOS's at its prompt**: the DOS server's 32 KB buffer is taken while a line of
+  its runs and given back at the prompt and before a program it starts, so GLOS at rest still takes 8 KB of
+  conventional memory at most and a program started at the PC finds what plain DOS would give. (A login over
+  SSH holds the buffer for its whole life, as before: to do the same for it is a follow-up.)
 - Not done: a program that writes text memory without the BIOS while another session's hidden program runs is
   not seen; 50-line and 132-column modes are taken as found but not set by the shell; the screen has no
   scroll-back.

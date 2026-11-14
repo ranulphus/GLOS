@@ -82,6 +82,7 @@ int agent_vm_unattended(void);                  /* the running job has nobody at
 int agent_vm_screen(void);              /* a DOS program has the PC's own screen and keyboard */
 u32 agent_vm_screen_had(void **whose);  /* how many have had it and ended, and the last one's owner */
 int agent_app_is_app(void *app, u32 seq);       /* the job's program is, or was, a GLOS app */
+int agent_vm_app_keys(void *mine);              /* an app with no terminal, not mine's, may read the keyboard */
 int agent_app_was_full(void *app, u32 seq);     /* ... has, or had before it ended, the PC's own screen */
 void *agent_vm_job(void);                       /* the running job, or 0 */
 void *agent_vm_as(void *job);                   /* output is this job's from now (an app's); returns the one before */

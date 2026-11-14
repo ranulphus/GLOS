@@ -444,6 +444,22 @@ int agent_app_is_app(void *app, u32 seq)
     return j && j->app;
 }
 
+/* A GLOS app runs that is not `mine`'s (a session's) and has no terminal of its own: with no desktop it reads
+   the PC's keyboard through DOS, as apps always have there. (Interrupts off: lcon.c leaves the keys to it.) */
+int agent_vm_app_keys(void *mine)
+{
+    u32 i;
+    for (i = 0; i < NJOBS; i++) {
+        struct agent_job *j = &jobs[i];
+        struct app *a;
+        if (j->state == J_FREE || j->state == J_DONE || !j->app || (mine && j->app_owner == mine))
+            continue;
+        if ((a = app_of_job(j->seq)) != 0 && !app_terminal(a))
+            return 1;
+    }
+    return 0;
+}
+
 /* 1 if the job's program has (or had, before it ended) the PC's own screen. */
 int agent_app_was_full(void *app, u32 seq)
 {

@@ -70,6 +70,7 @@ struct shsess {
     u8 tty, editing, quit;
     u8 local;                           /* the PC's own screen is its terminal (lcon.c): a DOS program it runs has
                                            that screen and its keyboard, as under DOS */
+    u8 dos_held;                        /* it holds the DOS server (and so 32 KB of DOS's memory for its buffer) */
     char notes[4][128];                 /* what the person at the PC should know (shsess_note), yet to be shown */
     volatile u8 nnotes, redraw;
     u8 starting;                        /* (the shell's first words: a terminal's alone) */
@@ -266,7 +267,31 @@ static int paths(struct shsess *s, const char *a, const char *b)
 }
 
 /* The request made: 0, or -1 (DOS's error in s->q.error). */
-static int made(struct shsess *s) { return dos_call(&s->q) != 0 || s->q.error ? -1 : 0; }
+/* The DOS server held while the session has calls to make. A login holds it from its start to its end, as an
+   SFTP session does. The PC's own screen's session is there for good, so it holds it only while a line of its
+   runs: at its prompt, and while a program it started has the PC, DOS has that memory (GLOS at rest takes 8 KB
+   of conventional memory at most, PRD's P7; and a program started at the PC finds what plain DOS would give). */
+static void hold(struct shsess *s)
+{
+    if (!s->dos_held) {
+        dos_hold();
+        s->dos_held = 1;
+    }
+}
+
+static void let_go(struct shsess *s)
+{
+    if (s->dos_held) {
+        s->dos_held = 0;
+        dos_release();
+    }
+}
+
+static int made(struct shsess *s)
+{
+    hold(s);
+    return dos_call(&s->q) != 0 || s->q.error ? -1 : 0;
+}
 
 static int is_root(const char *p) { return p[0] && p[1] == ':' && p[2] == '\\' && !p[3]; }
 
@@ -563,8 +588,10 @@ static int h_run(void *ctx, const char *command, const char *prog, const char *n
     for (i = 0; i + 2 < sizeof r.env && (env[i] || (i && env[i - 1])); i++)
         r.env[i] = env[i];                      /* (NAME=VALUE strings, to their double NUL) */
     o.notify = job_notify;
-    if (s->local && !detach)
+    if (s->local && !detach) {
         lcon_settle(s);
+        let_go(s);                              /* (the program has DOS's memory whole) */
+    }
     if (agent_post_job(s, &r, &o, &seq) != 0)
         return -1;
     if (detach)
@@ -893,7 +920,10 @@ static void h_free(void *ctx, void *p) { (void)ctx; kfree(p); }
 static int key(struct shsess *s)
 {
     for (;;) {
-        u32 f = irq_save(), c;
+        u32 f, c;
+        if (s->local && s->dos_held && s->editing && !s->job_on && !s->ext_on)
+            let_go(s);                          /* (at its prompt: nothing of DOS's held) */
+        f = irq_save();
         if (s->ahead_at < s->nahead && !s->ext_on && !s->closing) {
             c = s->ahead[s->ahead_at++];
             irq_restore(f);
@@ -1021,7 +1051,7 @@ static void session(void *arg)
         }
     }
     env[n] = 0;
-    dos_hold();
+    hold(s);
     ed_init(&s->ed, ed_put, s, (int)s->cols);
     s->starting = 1;
     sh_start(&s->sh, &s->host, env);
@@ -1096,7 +1126,7 @@ static void session(void *arg)
         agent_app_forget(s, s->beside[--s->nbeside]);
     if (s->ext_on)
         sshd_ask_gone(s);
-    dos_release();
+    let_go(s);
     if (s->tty)
         kprintf(s->local ? "GLOS-CONSOLE end code=%d%s\n" : "GLOS-SHELL end code=%d%s\n", s->code,
                 s->closing ? " terminal=gone" : "");
