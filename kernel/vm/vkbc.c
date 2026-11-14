@@ -37,6 +37,7 @@
  * for the keyboard's own, and F5h there turns the keyboard off. */
 #include "desk.h"
 #include "io.h"
+#include "lcon.h"
 #include "kprintf.h"
 #include "timer.h"
 #include "usb.h"
@@ -237,7 +238,7 @@ static void drain(void)
         } else if (!hotkey(b)) {
             if (desk_on)
                 desk_in(DESK_KEY, b, 0, 0);
-            else
+            else if (!lcon_key(b))              /* (the prompt on the PC's own screen, while no program has it) */
                 enqueue(b, 0);
         } else {
             trace('h', b, mods);
@@ -506,6 +507,8 @@ static int inject(u8 b, int aux)
         desk_in(aux ? DESK_AUX : DESK_KEY, b, aux_wheel, 0);
         return 0;
     }
+    if (!aux && lcon_key(b))
+        return 0;
     if (vm.direct) {
         if (injt - injh >= QSIZE)
             return -1;

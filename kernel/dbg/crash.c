@@ -21,6 +21,7 @@
 #include "app.h"
 #include "arch.h"
 #include "dpmi.h"
+#include "lcon.h"
 #include "kprintf.h"
 #include "mm.h"
 #include "vm.h"
@@ -226,6 +227,11 @@ void crash_report(struct trapframe *tf, const char *why)
     if (copy)
         kfree(copy);
     kprintf("GLOS-CRASH file=%s\n", name);
+    {
+        char note[128];
+        ksnprintf(note, sizeof note, "A program crashed. Its report: %s", name);
+        lcon_note(note);
+    }
     vm.kill_reason = "crash";
     dpmi_end(tf, 0xFF, 1);
 }

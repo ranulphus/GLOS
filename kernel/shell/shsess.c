@@ -35,6 +35,7 @@
 #include "kapi.h"
 #include "kcfg.h"
 #include "kprintf.h"
+#include "lcon.h"
 #include "mixer.h"
 #include "mm.h"
 #include "sched.h"
@@ -67,6 +68,10 @@ struct shsess {
     volatile u32 cols, rows;
     volatile u8 closing, ended, resized;
     u8 tty, editing, quit;
+    u8 local;                           /* the PC's own screen is its terminal (lcon.c): a DOS program it runs has
+                                           that screen and its keyboard, as under DOS */
+    char notes[4][128];                 /* what the person at the PC should know (shsess_note), yet to be shown */
+    volatile u8 nnotes, redraw;
     u8 starting;                        /* (the shell's first words: a terminal's alone) */
     u8 folder;                          /* the shell has been told the folder DOS is in */
     char *line;                         /* with no terminal: the one line it is there to run */
@@ -541,6 +546,8 @@ static int h_run(void *ctx, const char *command, const char *prog, const char *n
     r.flags = (s->tty ? KRUN_CONSOLE : 0) | (detach ? KRUN_DETACH : 0);    /* (at a terminal: typed to, its output
                                                    one stream; with none: nobody at it, what it writes as
                                                    errors kept apart) */
+    if (s->local && !detach)
+        r.flags |= KRUN_FULL;                   /* (at the PC itself: the screen and the keyboard are the program's) */
     if (prog && strlen(command) >= strlen(prog)) {      /* the program as it was named, its arguments after: the
                                                            agent finds it as it always has (a batch file through
                                                            COMMAND.COM), and its log says what was asked */
@@ -556,6 +563,8 @@ static int h_run(void *ctx, const char *command, const char *prog, const char *n
     for (i = 0; i + 2 < sizeof r.env && (env[i] || (i && env[i - 1])); i++)
         r.env[i] = env[i];                      /* (NAME=VALUE strings, to their double NUL) */
     o.notify = job_notify;
+    if (s->local && !detach)
+        lcon_settle(s);
     if (agent_post_job(s, &r, &o, &seq) != 0)
         return -1;
     if (detach)
@@ -600,13 +609,18 @@ static void job_turn(struct shsess *s)
                                                    ended, what is read is all of it) */
     for (stream = 0; !gone && stream < 2; stream++)
         while ((n = agent_app_read1(s, s->job, stream, buf, sizeof buf)) > 0) {
+            if (s->local && !agent_app_is_app(s, s->job))
+                continue;                       /* (a DOS program at the PC: it wrote that on the screen itself) */
             if (s->tty)
                 term_text(s, (const char *)buf, n, 1);
             else
                 stream_bytes(s, stream, buf, (u32)n);
         }
-    if (!gone && st == GLOS_JS_FULL && s->tty && !s->job_full) {      /* (a mode set, its drawing: nothing more of
-                                                   it comes here, and the keys typed here are not its) */
+    if (!gone && (st == GLOS_JS_FULL || (st == GLOS_JS_DONE && agent_app_was_full(s, s->job))) && s->tty && !s->job_full
+        && !s->local) {                         /* (a mode set, its drawing: nothing more of it comes here, and the
+                                                   keys typed here are not its. A program that took the screen and
+                                                   ended at once is said too: the session's thread may see only
+                                                   its end, as ssh-shell-bf6 did one run in three, 2026-11-14) */
         static const char full[] = "(The program has the PC's own screen and keyboard now.)\r\n";
         s->job_full = 1;
         term_text(s, full, (int)sizeof full - 1, 1);
@@ -884,7 +898,8 @@ static int key(struct shsess *s)
             return (int)c;
         }
         while ((s->ih == s->it || s->ext_on) && !s->closing && !s->resized
-               && !((s->job_on || s->nbeside) && s->job_evt) && !(s->ext_on && s->ext_evt))   /* (while a command of the server's runs, what is typed waits) */
+               && !((s->job_on || s->nbeside) && s->job_evt) && !(s->ext_on && s->ext_evt)   /* (while a command of the server's runs, what is typed waits) */
+               && !((s->nnotes || s->redraw) && s->editing && !s->job_on && !s->ext_on))
             thread_block(&s->wq);
         if (s->closing) {
             irq_restore(f);
@@ -901,6 +916,26 @@ static int key(struct shsess *s)
             if (s->editing)
                 ed_size(&s->ed, (int)s->cols);
             fg_tell(s);
+            continue;
+        }
+        if ((s->nnotes || s->redraw) && s->editing && !s->job_on && !s->ext_on) {
+            char notes[4][128];                 /* at the prompt: the notices above the line being typed (never
+                                                   in a program's output), or the line again where a program of
+                                                   another session's has written over it */
+            u32 k, nn = s->nnotes;
+            int over = s->redraw;               /* (written over: the line as it was drawn is not there to leave) */
+            memcpy(notes, s->notes, sizeof notes);
+            s->nnotes = s->redraw = 0;
+            irq_restore(f);
+            if (!over) {
+                ed_away(&s->ed);
+                term_bytes(s, (const u8 *)"\r\n", 2);
+            }
+            for (k = 0; k < nn; k++) {
+                term_text(s, notes[k], (int)strlen(notes[k]), 1);
+                term_bytes(s, (const u8 *)"\r\n", 2);
+            }
+            ed_back(&s->ed);
             continue;
         }
         if (s->ih == s->it || s->ext_on) {      /* (woken for nothing of ours) */
@@ -1061,7 +1096,8 @@ static void session(void *arg)
         sshd_ask_gone(s);
     dos_release();
     if (s->tty)
-        kprintf("GLOS-SHELL end code=%d%s\n", s->code, s->closing ? " terminal=gone" : "");
+        kprintf(s->local ? "GLOS-CONSOLE end code=%d%s\n" : "GLOS-SHELL end code=%d%s\n", s->code,
+                s->closing ? " terminal=gone" : "");
     s->ended = 1;                               /* (its memory is its terminal's side's from here) */
     kick(kick_arg);
     thread_exit();
@@ -1079,6 +1115,40 @@ static void release(struct shsess *s)
 static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir, void (*kick)(void *), void *arg);
 
 struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void *), void *arg) { return make(cols, rows, 0, 0, kick, arg); }
+
+static u8 make_local;                   /* (the next session made is the PC's own: lcon's thread alone asks) */
+
+struct shsess *shsess_local(u32 cols, u32 rows, void (*kick)(void *), void *arg)
+{
+    struct shsess *s;
+    make_local = 1;
+    s = make(cols, rows, 0, "\\", kick, arg);
+    make_local = 0;
+    return s;
+}
+
+void shsess_note(struct shsess *s, const char *text)
+{
+    u32 f = irq_save(), n = strlen(text);
+    if (s->nnotes == 4) {                       /* (more than it holds: the oldest goes) */
+        memmove(s->notes[0], s->notes[1], 3 * sizeof s->notes[0]);
+        s->nnotes = 3;
+    }
+    if (n >= sizeof s->notes[0])
+        n = sizeof s->notes[0] - 1;
+    memcpy(s->notes[s->nnotes], text, n);
+    s->notes[s->nnotes++][n] = 0;
+    thread_wake(&s->wq);
+    irq_restore(f);
+}
+
+void shsess_redraw(struct shsess *s)
+{
+    u32 f = irq_save();
+    s->redraw = 1;
+    thread_wake(&s->wq);
+    irq_restore(f);
+}
 
 struct shsess *shsess_app(u32 cols, u32 rows, const char *line, const char *dir, void (*kick)(void *), void *arg)
 {
@@ -1111,6 +1181,7 @@ static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir
     s->kick = kick;
     s->kick_arg = arg;
     s->tty = cols != 0;
+    s->local = make_local;
     s->cols = cols ? cols : 80, s->rows = rows ? rows : 24;
     s->page = kcfg_region()->codepage ? kcfg_region()->codepage : 437;
     if (!thread_create("shell", PRIO_NORMAL, session, s)) {
@@ -1118,7 +1189,8 @@ static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir
         return 0;
     }
     if (!line)
-        kprintf("GLOS-SHELL begin terminal=%ux%u page=%d\n", cols, rows, s->page);
+        kprintf(s->local ? "GLOS-CONSOLE begin screen=%ux%u page=%d\n" : "GLOS-SHELL begin terminal=%ux%u page=%d\n", cols,
+                rows, s->page);                 /* (the PC's own screen's session by another name: lcon.c) */
     return s;
 }
 

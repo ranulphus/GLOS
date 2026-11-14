@@ -11,6 +11,7 @@
 #include "gdb.h"
 #include "io.h"
 #include "kcfg.h"
+#include "lcon.h"
 #include "kprintf.h"
 #include "midi.h"
 #include "mixer.h"
@@ -122,6 +123,7 @@ void kmain(struct bootinfo *loader_bi)
         schedule_init(bi);                      /* the commands GLOS runs at times (GLOS.DAT; kernel/core/schedule.c) */
         pci_scan();
         cache_init(bi);                         /* the disk cache: its drives, the IDE ports it watches */
+        lcon_init();                            /* the prompt on the PC's own screen (kernel/shell/lcon.c) */
         sshd_start(bi);                         /* (with no network too: GLOS's own commands are run on its
                                                    thread for every shell session; before the net thread, which
                                                    listens for it) */

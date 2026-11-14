@@ -151,6 +151,40 @@ S2 gives it a host in the kernel and takes the Terminal app's away.
 - A full-screen program takes the PC's screen and keyboard whichever session started it, and the local session
   has its prompt back when the program ends.
 
+**As built (`kernel/shell/lcon.c`, 2026-11-14):**
+
+- The session is `shsess.c`'s, opened by a thread of its own (`console`) once DOS is at GLOS's idle point and
+  GLOS.CFG is read. Its terminal is `apps/term/vt.c`, the Terminal app's xterm screen, built into the kernel at
+  a text screen's sizes (132 by 60 at most; about 127 KB, taken when the prompt starts) and drawn into the
+  VGA's text memory: a cell's character in DOS's code page, its colours the nearest of the sixteen, the cursor
+  the BIOS's and the card's.
+- Keys come from `vkbc.c`, the real keyboard's and `glos key`'s and `glos type`'s alike, while the terminal has
+  the screen; they are made characters by `[region] layout` and sent as a terminal sends keys. Caps Lock and Num
+  Lock are kept in the BIOS's flags, so DOS programs find them as they were left.
+- **A DOS program started at this prompt has the screen and the keyboard itself, from its start**, as under DOS
+  (the job is `KRUN_FULL`): it writes on the screen its own way, text memory included, and nothing of it goes
+  through the session. A GLOS app started there writes through the session, as at an SSH login.
+- **The screen is the terminal's only while no DOS program has it** (one of this session's, or an SSH command's,
+  which has always had the PC's screen). Nothing is drawn meanwhile and the keys are the program's. When it has
+  gone the screen is **taken over as it stands**: the program's last output stays, the cursor is where the BIOS
+  has it, and the session goes on below. After another session's program the prompt and whatever was being
+  typed are drawn again on a fresh row.
+- **EXIT** there begins a new session (there is nowhere to go back to). `SHUTDOWN` leaves GLOS, `REBOOT` restarts
+  the PC, and Ctrl-Alt-Del at the prompt with nothing running restarts the PC, as it did at the idle screen.
+- **Start-up lines:** `GLOS is running on this PC: NAME.local, ADDRESS.`, a `Not used: ...` line for each thing GLOS
+  refused as it started (the log's `refuse` lines), then the shell's own first line and the prompt, in the
+  root of the drive DOS started from. The prompt waits up to four seconds for a network card's address so
+  that it is in those lines; later it comes as a notice.
+- **Notices** (`lcon_note`): the network up with its address, the network gone, a crash report written. Shown
+  above the line being typed, at the prompt alone; while a program runs they wait for its end.
+- **`[shell] prompt = off`** keeps the screen as it was before S2d: the line that says GLOS runs and how it is
+  reached (`kernel/vm/vcon.c`), the keys DOS's.
+- **`glos shot --text`** gives the PC's text screen as text (a line a row, then `cursor=COL,ROW`): what the tests
+  read, and a quick look at a bench's screen from afar.
+- Not done: a program that writes text memory without the BIOS while another session's hidden program runs is
+  not seen; 50-line and 132-column modes are taken as found but not set by the shell; the screen has no
+  scroll-back.
+
 ### In what order, inside S2
 
 | | What | Shows it works |
@@ -158,7 +192,7 @@ S2 gives it a host in the kernel and takes the Terminal app's away.
 | S2a | Sessions, the kernel's host, the line editor; `ssh pc` logs in | Loop A: a script typed through `ssh -tt` (commands, a program, history, Tab, Ctrl+C), its transcript; host tests of the editor |
 | S2b | `ssh pc COMMAND` through the shell; GLOS's commands as the host's table, with their new names and `GLOS NAME` | Every suite as it is (they all speak through `ssh pc COMMAND`) |
 | S2c | The CONSOLE call; the Terminal app a terminal only; SSH, SFTP, SSH-KEYGEN programs | The Terminal's scripts in Loop A, the same lines; `loopa-sshc` |
-| S2d | The session on the PC's own screen | Loop A: keys typed at the emulated keyboard, the screen read back |
+| S2d | The session on the PC's own screen (built 2026-11-14: `kernel/shell/lcon.c`) | Loop A: keys typed at the emulated keyboard, the screen read back (`ssh-idle-*`) |
 
 ### What it costs, and what could go wrong
 

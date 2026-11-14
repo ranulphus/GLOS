@@ -121,6 +121,8 @@ const struct cfg_key cfg_schema[] = {
       "As the shell: the batch file run first (empty: the boot drive's \\AUTOEXEC.BAT)" },
     { "shell", "console", CFG_TEXT, CFG_RESTART, 0, 127, "line", "", "C&onsole",
       "As the shell: run (through COMSPEC /C) instead of the prompt" },
+    { "shell", "prompt", CFG_CHOICE, CFG_RESTART, 0, 0, "on|off", "on", "&Prompt on the PC's screen",
+      "With no desktop: GLOS's shell at the PC's own screen and keyboard (off: a line that says GLOS runs)" },
     { "shell", "envsize", CFG_NUMBER, CFG_RESTART, 256, 32768, 0, "1024", "&Environment (bytes)",
       "As the shell: the master environment's size" },
     { "shell", "options", CFG_TEXT, CFG_RESTART, 0, 79, "line", "", "&Flags",

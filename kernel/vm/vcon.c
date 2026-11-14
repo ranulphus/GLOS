@@ -19,6 +19,7 @@
 #include "display.h"
 #include "io.h"
 #include "kprintf.h"
+#include "lcon.h"
 #include "nic.h"
 #include "session.h"
 #include "sshd.h"
@@ -80,7 +81,11 @@ void vcon_notice(void)
     static char said_ip[16];
     char line[160], ip[16];
     const char *name;
-    u32 f = irq_save();
+    u32 f;
+    lcon_ready();                               /* (DOS is at its idle screen: the prompt's session can start) */
+    if (lcon_on())
+        return;                                 /* (the prompt is there, or will be: kernel/shell/lcon.c) */
+    f = irq_save();
     if (!said && vcon_write(line, (u32)ksnprintf(line, sizeof line,
                                                  "GLOS is running on this PC (no desktop). Ctrl-Alt-Del restarts the PC.\n"), 1))
         said = 1;

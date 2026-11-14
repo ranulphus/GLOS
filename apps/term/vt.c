@@ -846,6 +846,25 @@ unsigned vt_rgb(unsigned short c, int fg)
     }
 }
 
+void vt_set(struct vt *t, int x, int y, unsigned ch, unsigned fg, unsigned bg)
+{
+    struct vt_cell *c;
+    if (x < 0 || y < 0 || x >= t->cols || y >= t->rows)
+        return;
+    c = &t->cell[y * VT_COLS_MAX + x];
+    c->ch = (unsigned short)ch;
+    c->fg = (unsigned short)fg;
+    c->bg = (unsigned short)bg;
+    c->attr = 0;
+}
+
+void vt_goto(struct vt *t, int x, int y)
+{
+    t->x = x < 0 ? 0 : x >= t->cols ? t->cols - 1 : x;
+    t->y = y < 0 ? 0 : y >= t->rows ? t->rows - 1 : y;
+    t->wrap_next = 0;
+}
+
 int vt_dump(const struct vt *t, char *out, int room)
 {
     int x, y, n = 0;

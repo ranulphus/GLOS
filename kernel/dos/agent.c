@@ -50,6 +50,7 @@
 #include "io.h"
 #include "kcfg.h"
 #include "gdbprog.h"
+#include "lcon.h"
 #include "kprintf.h"
 #include "sched.h"
 #include "timer.h"
@@ -433,6 +434,20 @@ int agent_app_status(void *app, u32 seq, u32 *state, u32 *code, u32 *nout, u32 *
     *nerr = ring_used(&j->out[1]);
     *ticks = !j->t_start ? 0 : (j->t_end ? j->t_end : timer_ticks()) - j->t_start;
     return 0;
+}
+
+/* 1 if the job's program is (or was) a GLOS app: what it wrote is in its rings and nowhere else. */
+int agent_app_is_app(void *app, u32 seq)
+{
+    struct agent_job *j = app_job(app, seq);
+    return j && j->app;
+}
+
+/* 1 if the job's program has (or had, before it ended) the PC's own screen. */
+int agent_app_was_full(void *app, u32 seq)
+{
+    struct agent_job *j = app_job(app, seq);
+    return j && j->console && j->full && !j->app;
 }
 
 /* Ctrl+C (brk 0) or Ctrl+Break for the job's program, as from the keyboard: the keys go to the VM's keyboard
@@ -959,10 +974,26 @@ void agent_vm_answer(u16 ax, int refused)
     ans_cf = (u8)(refused != 0);
 }
 
+/* DOS programs that have had the PC's own screen, in all, and whose the last was (lcon.c: the prompt there
+   takes the screen over again after each). */
+static u32 screen_had;
+static void *screen_whose;
+
+u32 agent_vm_screen_had(void **whose)
+{
+    *whose = screen_whose;
+    return screen_had;
+}
+
 /* A job has ended (its files closed): its app and the SSH side are told. */
 static void finish(struct agent_job *j)
 {
     u32 result = j->result;
+    if (!j->app && (!j->console || j->full)) {
+        screen_had++;
+        screen_whose = j->app_owner;            /* (a shell session's, or an app's; NULL an SSH command's) */
+        lcon_poke();                            /* (the prompt on the PC's screen: the screen is its again) */
+    }
     if (j->console)
         keys_left(j);
     j->t_end = timer_ticks();
@@ -1071,6 +1102,8 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
         j->state = J_RUNNING;
         j->t_start = timer_ticks() | 1;
         running = j;
+        if (!j->console || j->full)
+            lcon_program();                     /* (the PC's screen is its: the prompt there stops drawing) */
         if (j->debug && gdbp_arm_job(j->seq) != 0)      /* (the debugger has another program: it just runs) */
             j->debug = 0;
         if (j->console) {                       /* its keyboard is its app's from now: what the BIOS's buffer */
@@ -1156,6 +1189,10 @@ int agent_vm_capturing(void) { return running != 0 || closer != 0; }
 /* The job that runs has nobody at the PC to answer it: its output is kept for whoever asked (SSH, an app), and
    it has no console of its own (it isn't a terminal's, nor full-screen). */
 int agent_vm_unattended(void) { return running && !running->console && !running->full; }
+
+/* A DOS program has the PC's own screen and keyboard: one with no terminal, or one that is full-screen. (The
+   prompt on that screen waits: kernel/shell/lcon.c.) */
+int agent_vm_screen(void) { return running && !running->app && (!running->console || running->full); }
 
 /* The job whose program runs now (it may become an app's). */
 void *agent_vm_job(void) { return running; }

@@ -32,6 +32,7 @@
 #include "clock.h"
 #include "io.h"
 #include "kcfg.h"
+#include "lcon.h"
 #include "kprintf.h"
 #include "slip.h"
 #include "nic.h"
@@ -390,6 +391,8 @@ static void status_cb(struct netif *n)
     char ip[16], gw[16], mask[16];
     api2_net_changed();                         /* (API 2.0's apps: the network's state is another now) */
     if (ip4_addr_isany_val(*netif_ip4_addr(n))) {
+        if (bound_at)
+            lcon_network(0, hostname);
         bound_at = 0;                           /* (the address went: the lease ran out) */
         return;
     }
@@ -398,6 +401,7 @@ static void status_cb(struct netif *n)
     ip4addr_ntoa_r(netif_ip4_netmask(n), mask, sizeof mask);
     kprintf("GLOS-NET dhcp ip=%s gw=%s mask=%s ticks=%u\n", ip, gw, mask, timer_ticks());
     bound_at = timer_ticks() | 1;
+    lcon_network(ip, hostname);                 /* (the prompt on the PC's own screen says so) */
     {                                           /* the idle screen says the address (vm/vcon.c): a PC with no
                                                    serial cable is found by it */
         u32 f = irq_save();

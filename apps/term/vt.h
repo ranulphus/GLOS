@@ -4,8 +4,10 @@
 #ifndef VT_H
 #define VT_H
 
+#ifndef VT_COLS_MAX                     /* (the kernel's, for the PC's own text screen, is smaller: lcon.c) */
 #define VT_COLS_MAX 200
 #define VT_ROWS_MAX 100
+#endif
 #define VT_DEFAULT  0xFFFF              /* a cell's colour: the default foreground or background */
 
 enum { VT_BOLD = 1, VT_DIM = 2, VT_ITALIC = 4, VT_UNDER = 8, VT_BLINK = 16, VT_REVERSE = 32, VT_HIDDEN = 64,
@@ -56,6 +58,10 @@ void vt_feed(struct vt *t, const unsigned char *data, int n);
    scan code (100h added for E0 keys) as glos_event has it, ch its character, mods GLOS_MOD_. */
 int vt_key(const struct vt *t, unsigned key, unsigned ch, unsigned mods, char *out, int room);
 unsigned vt_rgb(unsigned short colour, int fg);         /* a cell colour as 0xRRGGBB (fg: the default's) */
+/* A screen taken over as it stands (the PC's own text screen after a program had it: kernel/shell/lcon.c): a cell
+   as it is there, and where the cursor is. */
+void vt_set(struct vt *t, int x, int y, unsigned ch, unsigned fg, unsigned bg);
+void vt_goto(struct vt *t, int x, int y);
 int vt_dump(const struct vt *t, char *out, int room);   /* the screen as text, a line a row, trailing blanks off
                                            (the tests'); its length */
 

@@ -1742,38 +1742,111 @@ def reboot_case(profile, card):
 
 
 def idle_case(profile, card):
-    """The idle screen (GLOS with no desktop and nothing running; kernel/vm/vcon.c, v86.c vm_idle_headless): the
-    notice on the PC's own screen, read back by SCRTEXT, said once however often GLOS goes idle; Ctrl-Alt-Del
-    while a job runs only asks (GLOS-RESET-REQ, as before), and at the idle screen restarts the PC, which
-    starts GLOS again (Loop A's boot runs the same RUN.BAT)."""
+    """The prompt on the PC's own screen (GLOS with no desktop; kernel/shell/lcon.c, docs/v1/shell.md S2d), the
+    screen read as text (glos shot --text) and typed at as at its keyboard (glos type): the start-up lines (how
+    the PC is reached) and the prompt, in the root of the drive DOS started from, the cursor behind it; the
+    shell's own commands; a DOS program, which writes on the screen itself and reads the keyboard itself, the
+    prompt below it afterwards; a program another session runs, written over the prompt, and the prompt and
+    what was being typed again below; EXIT, which begins a new session there. Ctrl-Alt-Del while a job runs only
+    asks (GLOS-RESET-REQ), and at the prompt with nothing running restarts the PC, which starts GLOS again (Loop
+    A's boot runs the same RUN.BAT): with [shell] prompt = off set before, the screen then has the line that
+    says GLOS runs, and no prompt."""
     import time
     tag = "idle-%s-%s" % (profile, card)
-    agent = Agent("ssh-" + tag, profile, card, ["--file", "build/ow/dos/SCRTEXT.EXE=/TEST/SCRTEXT.EXE",
+    agent = Agent("ssh-" + tag, profile, card, ["--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+                                                "--file", "build/ow/dos/TYPEIN.EXE=/TEST/TYPEIN.EXE",
                                                 "--cmd", "SERSAY HX-START idle", "--cmd", "C:\\TEST\\GLOS.EXE",
                                                 "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     checks = {"listen": agent.listening()}
     cad = "0.5:0x1D:down,0.6:0x38:down,0.7:0x153,0.9:0x38:up,1:0x1D:up"
     info = ""
     try:
-        def screen():                           # (into a file: a job's own output is on the screen too)
-            local = os.path.join(agent.tmp, "scr.txt")
-            agent.ssh("C:\\TEST\\SCRTEXT.EXE > C:\\TEST\\SCR.TXT")
-            p = subprocess.run(["scp", "-q", "-P", str(agent.port)] + agent.opts[agent.opts.index("-o"):] +
-                               ["glos@127.0.0.1:/C/TEST/SCR.TXT", local], capture_output=True, timeout=120)
-            return open(local, "rb").read().decode("latin-1").replace("\r", "") if p.returncode == 0 else ""
+        def screen():
+            rc, out, _ = agent.ssh("glos shot --text")
+            return out if rc == 0 else ""
 
-        t0, out = time.time(), ""
-        while time.time() - t0 < 90:
-            out = screen()
-            if "its address" in out:
-                break
-            time.sleep(2)
-        out = screen()                          # (GLOS has gone idle several times by now: said once all the same)
-        checks["running"] = "GLOS is running on this PC (no desktop). Ctrl-Alt-Del restarts the PC.\n" in out
-        checks["address"] = "Its name is glos.local, its address 10.0.2.15: reach it with ssh.\n" in out
-        checks["once"] = out.count("GLOS is running") == 1 and out.count("its address") == 1
-        if not (checks["running"] and checks["address"] and checks["once"]):
-            info = " screen: " + " | ".join(l for l in out.split("\n") if l.startswith("SCR "))[:400]
+        def rows(out):                          # the screen's lines down to the last with anything on it
+            lines = out.split("\n")
+            lines = [l for l in lines if not l.startswith("cursor=")]
+            while lines and not lines[-1]:
+                lines.pop()
+            return lines
+
+        def until(pred, limit=60):
+            t0, out = time.time(), ""
+            while time.time() - t0 < limit:
+                out = screen()
+                if pred(out):
+                    return out
+                time.sleep(1)
+            return out
+
+        def typed(text):
+            agent.ssh("glos type " + text)
+
+        out = until(lambda o: "GLOS shell 1.0" in o and rows(o)[-1:] == ["A:\\>"], 120)
+        checks["greeting"] = "GLOS is running on this PC" in out and out.count("GLOS shell 1.0") == 1
+        checks["prompt"] = rows(out)[-1:] == ["A:\\>"]
+        m = re.search(r"cursor=(\d+),(\d+)", out)
+        checks["cursor"] = bool(m) and int(m.group(1)) == 4 and int(m.group(2)) == len(rows(out)) - 1
+        out = until(lambda o: "glos.local, 10.0.2.15" in o)     # (in the start-up lines, or as a notice above the prompt)
+        checks["address"] = "glos.local, 10.0.2.15" in out and rows(out)[-1:] == ["A:\\>"]
+        if not all(checks.values()):
+            info += " start: " + " | ".join(rows(out)[-6:])
+        typed("ver\\n")
+        out = until(lambda o: o.count("GLOS shell 1.0") == 2 and rows(o)[-1:] == ["A:\\>"])
+        checks["ver"] = out.count("GLOS shell 1.0 (GLOS API 2.1)") >= 1 and "A:\\>ver" in out
+        typed("c:\\n")
+        typed("cd \\\\test\\n")
+        out = until(lambda o: rows(o)[-1:] == ["C:\\TEST>"])
+        checks["cd"] = rows(out)[-1:] == ["C:\\TEST>"]
+        # A DOS program: its output is DOS's own writing on the screen, the prompt below it
+        typed("echoargs one two\\n")
+        out = until(lambda o: "\none two\n" in o and rows(o)[-1:] == ["C:\\TEST>"])
+        r = rows(out)                           # (ECHOARGS: its arguments, a line by INT 29h, one to stderr)
+        checks["program"] = r[-5:] == ["C:\\TEST>echoargs one two", "one two", "nine two six int29",
+                                       "echoargs: 2 arguments", "C:\\TEST>"]
+        if not checks["program"]:
+            info += " program: " + " | ".join(r[-5:])
+        # ... and one that reads a line from the keyboard: the keys are its while it runs
+        typed("typein\\n")
+        t0 = time.time()
+        while time.time() - t0 < 60 and "HX-TYPE ready" not in agent.log():
+            time.sleep(0.5)
+        typed("hello there\\n")
+        t0 = time.time()
+        while time.time() - t0 < 60 and "HX-TYPE got=" not in agent.log():
+            time.sleep(0.5)
+        out = until(lambda o: rows(o)[-1:] == ["C:\\TEST>"])
+        checks["keys"] = "HX-TYPE got=hello there\n" in agent.log() and rows(out)[-1:] == ["C:\\TEST>"]
+        # Another session's program writes on the screen, over the prompt and what is being typed there: both
+        # again below it, and the line goes on
+        typed("echoargs lo")
+        until(lambda o: rows(o)[-1:] == ["C:\\TEST>echoargs lo"])
+        rc, afar, _ = agent.ssh("C:\\TEST\\ECHOARGS.EXE from afar")
+        out = until(lambda o: rows(o)[-1:] == ["C:\\TEST>echoargs lo"] and "from afar" in o)
+        checks["afar"] = "from afar" in afar \
+            and rows(out)[-5:] == ["C:\\TEST>echoargs lo", "from afar", "nine two six int29", "echoargs: 2 arguments",
+                                   "C:\\TEST>echoargs lo"]      # (the program's lines begin on a row of their own)
+        if not checks["afar"]:
+            info += " afar: " + " | ".join(rows(out)[-7:]) + " ;"
+        typed("cal\\n")
+        out = until(lambda o: "\nlocal\n" in o and rows(o)[-1:] == ["C:\\TEST>"])
+        checks["line-kept"] = rows(out)[-5:] == ["C:\\TEST>echoargs local", "local", "nine two six int29",
+                                         "echoargs: 1 arguments", "C:\\TEST>"]
+        if not (checks["afar"] and checks["line-kept"]):
+            info += " afar: " + " | ".join(rows(out)[-6:])
+        # EXIT: a new session, its start-up lines again
+        typed("exit\\n")
+        out = until(lambda o: rows(o)[-1:] == ["A:\\>"])
+        r = rows(out)
+        checks["exit-again"] = r[-1:] == ["A:\\>"] and "C:\\TEST>exit" in r \
+            and any(l.startswith("GLOS is running on this PC") for l in r[r.index("C:\\TEST>exit"):]) \
+            and any(l.startswith("GLOS shell 1.0") for l in r[r.index("C:\\TEST>exit"):])
+        if not checks["exit-again"]:
+            info += " exit: " + " | ".join(r[-6:])
+        open(os.path.join(agent.tmp, "screen-exit.txt"), "w").write(out)
+        checks["set-off"] = agent.ssh("glos config set shell prompt off")[0] == 0     # (for the next start)
         slow = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "WAITSEC 100"], stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL)
         t0 = time.time()
@@ -1787,18 +1860,28 @@ def idle_case(profile, card):
         checks["busy"] = "GLOS-RESET-REQ source=cad" in agent.log() and "GLOS-REBOOT" not in agent.log()
         checks["kill"] = agent.ssh("glos kill")[0] == 0 and slow.wait(timeout=120) == 255
         time.sleep(2)
-        typed = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "glos key " + cad], stdout=subprocess.DEVNULL,
+        keyed = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "glos key " + cad], stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL)     # (the PC restarts under it: its reply may never come)
         t0 = time.time()
         while time.time() - t0 < 60 and "GLOS-REBOOT source=cad" not in agent.log():
             time.sleep(0.5)
-        typed.kill()
+        keyed.kill()
         while time.time() - t0 < 400 and agent.log().count("GLOS-SSH listen") < 2:
             time.sleep(1)
         while time.time() - t0 < 400 and agent.log().count("GLOS-NET dhcp") < 2:
             time.sleep(1)
         rc, out, _ = agent.ssh("glos ver")
         checks["again"] = rc == 0 and out.startswith("GLOS ")
+        # ... with the prompt off: the line that says GLOS runs and how it is reached, said once, and no prompt
+        out = until(lambda o: "its address" in o, 90)
+        checks["off"] = "GLOS is running on this PC (no desktop). Ctrl-Alt-Del restarts the PC.\n" in out \
+            and "Its name is glos.local, its address 10.0.2.15: reach it with ssh.\n" in out \
+            and out.count("GLOS is running") == 1 and "GLOS shell" not in out
+        if not checks["off"]:
+            info += " off: " + " | ".join(rows(out)[-5:])
+        typed("ver\\n")                         # (the keys are DOS's there: nothing of GLOS's answers)
+        time.sleep(3)
+        checks["off-keys"] = "GLOS shell" not in screen()
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
@@ -2278,8 +2361,19 @@ def ssh_case(profile, card):
                          and hashlib.sha256(open(sback, "rb").read()).hexdigest() == want)
         rc, _, _ = ssh("del C:\\TEST\\S.BIN")
         # Built-ins: a known screen in a PNG, the COM1 mirror, the process list, and a kill.
-        ssh("cls")
+        def text_rows(want, limit=30):         # the PC's text screen, once its rows are these (lcon.c's prompt
+            t9, got = time.time(), None         # comes back a moment after a program has ended)
+            while time.time() - t9 < limit:
+                got = [l for l in ssh("glos shot --text")[1].split("\n") if l and not l.startswith("cursor=")]
+                if got == want:
+                    return True
+                time.sleep(0.5)
+            return False
+
+        ssh("cls")                              # (the DOS's CLS, as a job: the prompt again on the cleared screen)
+        checks["shot-cls"] = text_rows(["A:\\>"])
         ssh("echoargs GOLDEN")
+        checks["shot-rows"] = text_rows(["A:\\>", "GOLDEN", "nine two six int29", "echoargs: 1 arguments", "A:\\>"])
         p = subprocess.run(opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=180)
         open(os.path.join(ROOT, "out", "ssh-" + tag, "shot.png"), "wb").write(p.stdout)
         px = png_pixels(p.stdout)

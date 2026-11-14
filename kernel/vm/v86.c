@@ -24,6 +24,7 @@
 #include "session.h"
 #include "io.h"
 #include "kcfg.h"
+#include "lcon.h"
 #include "kprintf.h"
 #include "mixer.h"
 #include "mm.h"
@@ -533,6 +534,7 @@ static void vm_leave(u32 code)
     sched_report();
     net_report();
     slip_leave();                               /* (the cable link's port as it was found) */
+    lcon_leave();                               /* (the prompt on the PC's own screen: DOS's again) */
     nic_leave();
     usb_leave();                                /* (its controllers stopped, reset, given back) */
     cache_end();

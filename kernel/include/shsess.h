@@ -14,6 +14,15 @@ struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void *arg), void *arg
 struct shsess *shsess_app(u32 cols, u32 rows, const char *line, const char *dir, void (*kick)(void *arg), void *arg);
                                                          /* an app's (GLOS_RUN_SHELL): a login (line 0) or a line run,
                                                             with a terminal or none, in a folder (0: DOS's own) */
+struct shsess *shsess_local(u32 cols, u32 rows, void (*kick)(void *arg), void *arg);    /* the PC's own screen's
+                                                            (kernel/shell/lcon.c): a login in the root of the drive
+                                                            DOS started from; a DOS program it runs has the PC's
+                                                            screen and keyboard itself */
+void shsess_note(struct shsess *s, const char *text);    /* (any context) a line the person at its terminal should
+                                                            see: shown above the line being typed, at the prompt
+                                                            alone, never among a program's output */
+void shsess_redraw(struct shsess *s);                    /* its prompt and the line being typed again, on a fresh
+                                                            row: something else wrote on its terminal's screen */
 struct shsess *shsess_exec(const char *line, void (*kick)(void *arg), void *arg);   /* no terminal: the one line run, the
                                                             session's end its exit code; what it writes as it is
                                                             (no UTF-8 made of it), errors apart (stream 1) */

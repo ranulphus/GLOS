@@ -4,6 +4,24 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## A prompt on the PC's own screen (2026-11-14)
+
+- **With no desktop, the PC's screen and keyboard have GLOS's shell**: the same shell an SSH login and the
+  Terminal app have, in a session of its own (step S2d of docs/v1/shell.md). Before, the screen said only that
+  GLOS was running, and the keyboard did nothing but Ctrl-Alt-Del.
+- **A DOS program started there has the screen and the keyboard itself, as under DOS**, and the prompt goes on
+  below whatever it left on the screen. A program another session runs (an SSH command) writes on the screen as
+  before; the prompt and what was being typed come back below it.
+- **Start-up lines, then notices** (the owner's choice): how the PC is reached and anything GLOS refused as it
+  started, then the prompt. Later only what the person at the PC should know is shown, a line above the prompt:
+  the network up or gone, a crash report written. The log itself is `LOG`'s.
+- `EXIT` there begins a new session; `SHUTDOWN` leaves GLOS; Ctrl-Alt-Del at the prompt with nothing running
+  restarts the PC. The keyboard's layout is `[region] layout`'s.
+- **`[shell] prompt = off`** in GLOS.CFG keeps the old line and leaves the keyboard to DOS.
+- **`glos shot --text`**: the PC's text screen as text, a line a row and the cursor's place.
+- A terminal is told that its program took the PC's screen even when the program ended at once (one run in three
+  of Loop A's shell test missed it).
+
 ## British keyboards (2026-11-14)
 
 - **`[region] layout = uk`** (the Control Panel's Region page, or `glos config set region layout uk`): the desktop

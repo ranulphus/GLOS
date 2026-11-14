@@ -44,6 +44,8 @@
 #include "nic.h"
 #include "sched.h"
 #include "session.h"
+#include "glos/region.h"
+#include "glos/cp.h"
 #include "sftp.h"
 #include "secrets.h"
 #include "shot.h"
@@ -1105,6 +1107,35 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         say(ch, 0, cmd + 10);
         say(ch, 0, "\n");
         ssh_chan_exit(ch, 0);
+    } else if (!strcmp(cmd, "glos shot --text")) {
+        /* The PC's text screen as text: a line a row (UTF-8, trailing blanks off), then "cursor=COL,ROW". For a
+           screen that is no text screen, an error: glos shot has its picture. */
+        u8 mode = session_bios_mode(), page = vm_rd8(0x462);
+        u32 cols = vm_rd8(0x44A) | (u32)vm_rd8(0x44B) << 8, rows = vm_rd8(0x484) + 1u, x, y;
+        int cp = kcfg_region()->codepage ? kcfg_region()->codepage : 437;
+        if ((mode != 2 && mode != 3 && mode != 7) || display_fb() || cols < 40 || cols > 132 || rows < 25 || rows > 60
+            || page > 7) {
+            say(ch, 1, "glos shot --text: the screen is not in a text mode (glos shot has its picture)\n");
+            ssh_chan_exit(ch, 1);
+        } else {
+            const u16 *scr = (const u16 *)vm_ptr((mode == 7 ? 0xB0000u : 0xB8000u)
+                                                 + (u32)page * (vm_rd8(0x44C) | (u32)vm_rd8(0x44D) << 8));
+            char row[133], line[3 * 132 + 2], t[32];
+            for (y = 0; y < rows; y++) {
+                u32 end = cols;
+                while (end && ((u8)scr[y * cols + end - 1] == ' ' || !(u8)scr[y * cols + end - 1]))
+                    end--;
+                for (x = 0; x < end; x++)
+                    row[x] = (u8)scr[y * cols + x] ? (char)scr[y * cols + x] : ' ';
+                row[end] = 0;
+                cp_to_utf8(cp, row, line, (int)sizeof line - 1);
+                say(ch, 0, line);
+                say(ch, 0, "\n");
+            }
+            ksnprintf(t, sizeof t, "cursor=%u,%u\n", vm_rd8(0x450 + page * 2u), vm_rd8(0x451 + page * 2u));
+            say(ch, 0, t);
+            ssh_chan_exit(ch, 0);
+        }
     } else if (!strcmp(cmd, "glos shot") || !strcmp(cmd, "glos shot --raw")) {
         struct shot *sh = shot_new(cmd[9] != 0, wake_ssh);
         if (!sh || stream_add(ch, shot_turn, shot_drop, sh) != 0) {
