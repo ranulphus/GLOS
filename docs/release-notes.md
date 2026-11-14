@@ -11,8 +11,19 @@ in its `docs/milestones-*.md`.
   started afterwards that map the framebuffer (a game's software renderer, through DPMI) write it several
   times faster. `MTRR LFB OFF` (or `MTRR OFF`) takes it away, and GLOS takes it away when it leaves. `MTRR` alone
   lists the CPU's ranges; `MTRR WC BASE MB` names a range by hand.
-- On the Pentium III bench (TNT2): whole 640x480 frames written to the framebuffer at 13.9 MB/s without it and
-  54.5 MB/s with it (`LFBSPEED.EXE`, tests/dos/lfbspeed.c).
+- Measured (2026-11-14). Whole 640x480 frames written to the framebuffer (`LFBSPEED.EXE`, tests/dos/lfbspeed.c):
+  13.9 MB/s without and 54.5 MB/s with on the Pentium III bench (TNT2); 40.5 and 243.4 MB/s on bench-g400
+  (Pentium II, G400). Quake's demo1 on bench-g400 (the DOS-GL session's runs, `-mem 32 -nojoy`), frames a second
+  without / with:
+
+  | | 320x200 | 640x480 |
+  |---|---|---|
+  | id's QUAKE.EXE 1.06 | 90.7 / 91.1 | 19.2 / 38.8 |
+  | the port's software renderer (QDOS.EXE) | 106.9 / 106.9 | 23.2 / 43.75 |
+  | DOS-GL on the G400 | | 42.9 / 43.2 |
+
+  320x200 is mode 13h, through the window at A0000h, which the trial doesn't touch; the G400's own path
+  neither gains nor breaks.
 - It is a trial the owner asked for: off unless the command is given, nothing in GLOS.CFG yet. Pentium Pro, II
   and III class CPUs (MTRRs with write-combining); a 486 or a Pentium has none and the command says so. A range
   the BIOS set is never changed. The framebuffer is found by PCI (the display card's prefetchable memory, 32 MB
