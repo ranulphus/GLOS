@@ -503,6 +503,24 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
 - **bench-g400** stays the G400's bench and the place for by-hand checks with the owner.
 - **The gate before the release** runs every tier.
 
+## Open faults (noted, not yet chased)
+
+- **id's QUAKE.EXE 1.06 halts GLOS on bench-g400** (2026-11-14, found by the DOS-GL session; the owner: later).
+  Started under GLOS with no `-mem`, on a PC where GLOS's DPMI host offers it about 403 MB, it prints "Locked 1
+  Mb image" and the whole PC stops: no network, a reset needed. With `-mem 32` it runs (demo1: 91.2 fps at
+  320x200). The port's QDOS.EXE takes all the memory and runs. A DOS program must not be able to stop GLOS,
+  whatever it asks for: to reproduce in 86Box with a large memory and follow its DPMI calls after the lock
+  (its heap's reservation and lock). The executable is the owner's (local only).
+- **Loop A's API suite on the 486 profile misses a wait about one run in two** on a busy host
+  (2026-11-14: `apisec-486dx2-vbe` "right" twice, `apishell-486dx2-vbe` "ended" once, in four runs): in each the
+  log shows GLOS did what was asked. Being timed.
+- bench-486 stopped once after a restart (2026-11-14, not seen again); `thr-486dx2` stopped once after a crash
+  report; `sess-direct-486dx2`'s vif-stuck.
+
+**An idea from the same session's measurements (for the owner):** GLOS could set write-combining over a VBE
+linear framebuffer itself (a variable MTRR, as FASTVID does from plain DOS; under GLOS such a tool cannot run,
+since only the kernel is at ring 0). id's software Quake at 640x480 on bench-g400 runs at 19.2 fps without it.
+
 ## Open questions
 
 Plan v0's eight are answered (above), and the last, who builds DOS-GL's software renderer and when, was answered on
