@@ -63,6 +63,11 @@ struct dpmi_ctx;
 void mtrr_init(u32 cpuid_edx);
 int mtrr_set(struct dpmi_ctx *c, u32 lin, u32 bytes, u32 type);    /* 0; -1 the CPU can't; -2 a bad range */
 void mtrr_release(struct dpmi_ctx *c);  /* its changes undone */
+int mtrr_wc(u32 base, u32 bytes, int on);       /* a range write-combining by a variable MTRR, or GLOS's off:
+                                                   0; 1 so already; negative: why not (mtrr.c) */
+u32 mtrr_dev_flags(u32 phys);           /* the cache bits of a program's mapping of device memory there */
+u32 mtrr_text(char *out, u32 room);     /* the variable ranges, a line each */
+void mtrr_leave(void);                  /* GLOS's range off again */
 
 /* kernel/dpmi: traps from a DPMI client (ring 3), and the way back to it */
 void dpmi_trap(struct trapframe *tf);

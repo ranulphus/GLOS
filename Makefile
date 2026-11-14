@@ -657,6 +657,12 @@ build/dj/SHOTDJ.EXE: tests/dos/shottest.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+# LFBSPEED (tests/dos/lfbspeed.c): frames written to a VBE linear framebuffer a second, for the write-combining
+# trial (glos mtrr lfb on).
+build/dj/LFBSPEED.EXE: tests/dos/lfbspeed.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O2 -Wall -Werror -o $@ $<
 # GDBME (tests/dos/gdbme.c): a program for glos gdb, and its symbols' addresses for the host's gdb, which
 # reads no DJGPP executable (M5).
 build/dj/GDBME.EXE: tests/dos/gdbme.c

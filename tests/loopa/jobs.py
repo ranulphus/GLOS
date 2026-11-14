@@ -2452,6 +2452,21 @@ def ssh_case(profile, card):
                 and one.startswith("00: %s%s " % (rows[0][2], rows[0][1])) and ssh("glos pci 0:zz")[0] == 2
         if not checks["pci"]:
             info += " pci=%r" % out[:300]
+        # glos mtrr (the write-combining trial): the CPU's ranges; on a CPU that has them the video card's
+        # framebuffer made write-combining, listed as GLOS's, and off again; on one that has none, said so.
+        rc, out, _ = ssh("glos mtrr")
+        if "write-combining possible" in out:
+            rc1, on, _ = ssh("glos mtrr lfb on")
+            listed = ssh("glos mtrr")[1]
+            rc2, off, _ = ssh("glos mtrr off")
+            checks["mtrr"] = rc == 0 and rc1 == 0 and "Write-combining is on for " in on and "(GLOS's)" in listed \
+                and "write-combining" in listed and rc2 == 0 and "(GLOS's)" not in ssh("glos mtrr")[1] \
+                and ssh("glos mtrr off")[0] == 1 and ssh("glos mtrr wc 12345 3")[0] == 1 \
+                and ssh("glos mtrr bogus")[0] == 2
+        else:
+            checks["mtrr"] = rc == 0 and "no MTRRs" in out and ssh("glos mtrr lfb on")[0] == 1
+        if not checks["mtrr"]:
+            info += " mtrr=%r" % out[:200]
         # glos kill SEQ: a job that waits its turn is taken out, then the one that runs is killed; and the
         # session shows in glos stat while it does.
         slow = subprocess.Popen(opts + ["glos@127.0.0.1", "WAITSEC 100"], stdout=subprocess.DEVNULL,

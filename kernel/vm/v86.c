@@ -535,6 +535,7 @@ static void vm_leave(u32 code)
     net_report();
     slip_leave();                               /* (the cable link's port as it was found) */
     lcon_leave();                               /* (the prompt on the PC's own screen: DOS's again) */
+    mtrr_leave();                               /* (a write-combining range of GLOS's: off) */
     nic_leave();
     usb_leave();                                /* (its controllers stopped, reset, given back) */
     cache_end();

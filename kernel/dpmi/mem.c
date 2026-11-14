@@ -394,7 +394,7 @@ int phys_map(u32 phys, u32 size, u32 *lin)
     if (!(b = kmalloc(sizeof *b)))
         return 0x8013;
     for (i = 0; i < n; i++)
-        if (mm_map(at + (i << 12), base + (i << 12), MM_W | MM_U | MM_UC) != 0) {
+        if (mm_map(at + (i << 12), base + (i << 12), MM_W | MM_U | mtrr_dev_flags(base + (i << 12))) != 0) {
             while (i--)
                 mm_unmap(at + (i << 12));
             kfree(b);
@@ -585,7 +585,7 @@ int page_map(u32 handle, u32 off, u32 n, u32 phys, int device)
     for (i = 0; i < n; i++) {
         u32 lin = b->lin + off + (i << 12);
         release(lin, 0, 1);
-        if (mm_map(lin, phys + (i << 12), MM_W | MM_U | MM_MAPPED | (device ? MM_UC : 0)) != 0)
+        if (mm_map(lin, phys + (i << 12), MM_W | MM_U | MM_MAPPED | (device ? mtrr_dev_flags(phys + (i << 12)) : 0)) != 0)
             return 0x8013;
     }
     return 0;

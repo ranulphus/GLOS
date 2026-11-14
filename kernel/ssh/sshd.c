@@ -351,6 +351,35 @@ static void streams_gone(struct ssh_chan *ch)
         }
 }
 
+/* The video card's linear framebuffer, by PCI: the display device's first prefetchable memory BAR (the
+   framebuffer; registers are never prefetchable), sized as PCI sizes one. Its base in *base and its size, capped:
+   32 MB (no card of the period has more behind it), and 16 MB for S3's, whose 64 MB range has the card's
+   registers at its sixteenth megabyte. 0: none found. */
+static u32 lfb_range(u32 *base)
+{
+    struct pci_dev *d;
+    int i, k;
+    for (i = 0; (d = pci_at(i)) != 0; i++) {
+        if (d->class != 0x03)
+            continue;
+        for (k = 0; k < 6; k++) {
+            u32 b = d->bar[k], reg = 0x10 + 4u * (u32)k, size, f, cap = d->vendor == 0x5333 ? 16u << 20 : 32u << 20;
+            if (!b || (b & 1) || !(b & 8) || (b & 6))   /* (I/O; not prefetchable; 64-bit or below 1 MB) */
+                continue;
+            f = irq_save();
+            pci_write32(d->bus, d->dev, d->fn, reg, 0xFFFFFFFFu);
+            size = ~(pci_read32(d->bus, d->dev, d->fn, reg) & ~15u) + 1;
+            pci_write32(d->bus, d->dev, d->fn, reg, b);
+            irq_restore(f);
+            if (size < (1u << 20) || (size & (size - 1)))
+                continue;
+            *base = b & ~15u;
+            return size < cap ? size : cap;
+        }
+    }
+    return 0;
+}
+
 /* glos shot: the capture is the VM thread's (kernel/dos/shot.c); then the
    file, a piece at a time. */
 static int shot_turn(struct ssh_chan *ch, void *arg)
@@ -1271,6 +1300,60 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             say(ch, 0, b);
             ssh_chan_exit(ch, 0);
         }
+    } else if (ci_starts(cmd, "glos mtrr") && (!cmd[9] || cmd[9] == ' ')) {
+        /* glos mtrr: the CPU's variable memory-type ranges. glos mtrr lfb on: the video card's linear framebuffer
+           write-combining (its prefetchable memory, by PCI); glos mtrr wc BASE MB: a range named (hexadecimal
+           base, megabytes); glos mtrr off: GLOS's range taken away. An experiment (the owner, 2026-11-14): what
+           FASTVID does from plain DOS. Programs started afterwards have it; kernel/arch/mtrr.c. */
+        const char *p = cmd + 9;
+        char t[1024];
+        u32 base = 0, bytes = 0;
+        int e = -2, on = 1;
+        while (*p == ' ')
+            p++;
+        if (!*p) {
+            mtrr_text(t, sizeof t);
+            say(ch, 0, t);
+            ssh_chan_exit(ch, 0);
+        } else {
+            if (ci_starts(p, "off") && !p[3]) {
+                on = 0;
+            } else if (ci_starts(p, "lfb off") && !p[7]) {
+                on = 0;
+            } else if (ci_starts(p, "lfb on") && !p[6]) {
+                bytes = lfb_range(&base);
+            } else if (ci_starts(p, "wc ")) {
+                u32 mb = 0;
+                for (p += 3; (*p >= '0' && *p <= '9') || ((*p | 32) >= 'a' && (*p | 32) <= 'f'); p++)
+                    base = base << 4 | (u32)(*p <= '9' ? *p - '0' : (*p | 32) - 'a' + 10);
+                while (*p == ' ')
+                    p++;
+                for (; *p >= '0' && *p <= '9' && mb < 4096; p++)
+                    mb = mb * 10 + (u32)(*p - '0');
+                bytes = *p || mb > 2048 ? 0 : mb << 20;
+            } else {
+                on = -1;
+            }
+            if (on < 0) {
+                say(ch, 1, "glos mtrr [lfb on | lfb off | wc BASE MB | off] (BASE hexadecimal; MB a power of two)\n");
+                ssh_chan_exit(ch, 2);
+            } else {
+                e = on && !bytes ? -2 : mtrr_wc(base, bytes, on);
+                if (e == 0 && on)
+                    ksnprintf(t, sizeof t, "Write-combining is on for %08x, %u MB. Programs started from now on have it.\n",
+                              base, bytes >> 20);
+                else
+                    ksnprintf(t, sizeof t, "%s\n", e == 0 ? "Write-combining is off again."
+                              : e == 1 ? "That memory is write-combining already (the BIOS set it): nothing changed."
+                              : e == -1 ? "glos mtrr: this CPU has no write-combining to set (no MTRRs, or they are off)"
+                              : e == -2 ? "glos mtrr: no such range (no video card's framebuffer found by PCI, or a base or size that won't do)"
+                              : e == -3 ? "glos mtrr: the range meets one the BIOS set with another type: left alone (glos mtrr lists them)"
+                              : e == -4 ? "glos mtrr: the CPU has no range left"
+                              : "glos mtrr: GLOS has set none");
+                say(ch, e < 0, t);
+                ssh_chan_exit(ch, e < 0);
+            }
+        }
     } else if (!strncmp(cmd, "glos pci ", 9)) {
         /* glos pci BUS:DEV.FN: that function's configuration space, its 256 bytes as they read now. */
         const char *p = cmd + 9;
@@ -1576,7 +1659,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
     } else {
         say(ch, 1, "glos: no such command (glos ver, echo, run, shot, key, type, mouse, log, stat, ps, mem, net, tick, "
-                   "joy, usb, pci, kill, gdb, exit, restart, reboot)\n");
+                   "joy, usb, pci, mtrr, kill, gdb, exit, restart, reboot)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;

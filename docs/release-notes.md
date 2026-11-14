@@ -4,6 +4,20 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Write-combining for the video card's framebuffer: a trial (2026-11-14)
+
+- **`MTRR LFB ON`** (`glos mtrr lfb on`) makes the video card's linear framebuffer write-combining, as FASTVID does
+  from plain DOS (under GLOS such a tool cannot run: only the kernel may write the CPU's MTRRs). Programs
+  started afterwards that map the framebuffer (a game's software renderer, through DPMI) write it several
+  times faster. `MTRR LFB OFF` (or `MTRR OFF`) takes it away, and GLOS takes it away when it leaves. `MTRR` alone
+  lists the CPU's ranges; `MTRR WC BASE MB` names a range by hand.
+- On the Pentium III bench (TNT2): whole 640x480 frames written to the framebuffer at 13.9 MB/s without it and
+  54.5 MB/s with it (`LFBSPEED.EXE`, tests/dos/lfbspeed.c).
+- It is a trial the owner asked for: off unless the command is given, nothing in GLOS.CFG yet. Pentium Pro, II
+  and III class CPUs (MTRRs with write-combining); a 486 or a Pentium has none and the command says so. A range
+  the BIOS set is never changed. The framebuffer is found by PCI (the display card's prefetchable memory, 32 MB
+  of it at most; 16 MB on S3 cards, whose registers share the range).
+
 ## A prompt on the PC's own screen (2026-11-14)
 
 - **With no desktop, the PC's screen and keyboard have GLOS's shell**: the same shell an SSH login and the
