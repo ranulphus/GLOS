@@ -141,10 +141,12 @@ N1 first: the hardware for it is cabled already, and it is the larger unknown.
 - **Owed before N1 is called done:**
   - the answer to an ARP request for a member's address (SLiRP never asks: it learns from the announcement),
     which a real router will need: the 486 bench through the P3;
-  - an SSH login to the far PC from another computer on the network (TCP begun from outside), and a packet too
-    long for the cable;
-  - the network's own broadcast address (10.0.2.255) copied on as 255.255.255.255 is;
-  - a far PC that goes away (its cable unplugged) forgotten before its lease ends.
+  - an SSH login to the far PC from another computer on the network (TCP begun from outside): the benches.
+
+  Done since the first cut (2026-11-14, late): a member silent for 30 seconds is asked for an echo, and one
+  silent for 100 has gone (`GLOS-NET member gone ... why=silent`), so a pulled cable stops this PC answering for
+  that address (Loop A pulls it); a packet too long for the cable that may not be cut is answered with ICMP's
+  "fragmentation needed"; the network's own broadcast address is copied on as 255.255.255.255 is.
 
 ## Decided by the owner (2026-11-14)
 

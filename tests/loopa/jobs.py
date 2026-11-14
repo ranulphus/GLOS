@@ -2216,7 +2216,8 @@ def member_case(profile, card):
     host, there and back through the near PC, which answers for the far one's address on the Ethernet; the far
     PC's announcements of its name are copied to the network; a file fetched at the far PC's own prompt from a
     web server on the host comes whole (TCP through the near PC, both ways, in segments the cable's size); and
-    with cable_share = off the near PC says it shares nothing."""
+    the cable pulled out, the far PC is forgotten within two minutes; and with cable_share = off the near PC
+    says it shares nothing."""
     import hashlib
     import http.server
     import socket
@@ -2330,6 +2331,18 @@ def member_case(profile, card):
             info += " asked=%d cable=%r near=%r far=%r net=%r" % (ntp.asked, seen[-24:], [l for l in near.log().split("\n") if "member" in l or "cable" in l][-4:],
                                                 [l for l in flog().split("\n") if "cable" in l or "GLOS-TIME" in l][-4:],
                                                 near.ssh("glos net")[1][-400:])
+        # The cable pulled out (the test stops carrying it): asked for an echo and silent, the far PC has gone
+        # within two minutes, and the near PC answers for its address no more
+        # (first, idle but there: asked for an echo after half a minute's silence, it answers and stays)
+        out = until(lambda: (lambda o: o if re.search(r"probes=[2-9]", o) else "")(near.ssh("glos net")[1]), 150)
+        checks["stays"] = bool(out) and ("member ip=%s " % ip) in out and "member gone" not in near.log() \
+            and ("far", ip, "10.0.2.15", "icmp") in seen
+        stop.append(1)
+        gone = until(lambda: "GLOS-NET member gone ip=%s why=silent" % ip in near.log(), 200)
+        out = near.ssh("glos net")[1]
+        checks["unplugged"] = bool(gone) and "member ip=" not in out and bool(re.search(r"probes=[1-9]", out))
+        if not checks["unplugged"]:
+            info += " unplugged=%r" % out[-200:]
         checks["share-off"] = near.ssh("glos config set net cable_share off")[0] == 0 \
             and "share=off" in near.ssh("glos net")[1]
         checks["share-on"] = near.ssh("glos config set net cable_share on")[0] == 0 \

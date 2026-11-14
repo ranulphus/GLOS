@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "lwip/etharp.h"
+#include "lwip/icmp.h"
 #include "lwip/inet_chksum.h"
 #include "lwip/ip4.h"
 #include "lwip/ip4_frag.h"
@@ -46,13 +47,18 @@ struct member {
     ip4_addr_t ip;                      /* its address, once the server has acknowledged it */
     u32 until;                          /* the tick its lease ends at */
     u32 asked;                          /* the tick of its last request (one never answered is forgotten) */
+    u32 heard;                          /* the tick anything last came from it */
+    u32 probed;                         /* the tick it was last asked whether it is there */
 };
+#define QUIET   (30 * 1024u)            /* silent this long, a member is asked for an echo, and again each ... */
+#define GONE    (100 * 1024u)           /* ... and silent this long it has gone: its cable is out, or it is off */
+#define PROBE_ID 0x474Cu
 
 static struct member mem[MEMBERS];
 static struct netif *card, *cable;
 static u8 frame[1600];
 static u32 copy_tick, copy_left;        /* the cable's budget for copies, a second at a time */
-static u32 relayed, answered, copied_out, copied_in, copy_dropped, forwarded, too_long;
+static u32 relayed, answered, copied_out, copied_in, copy_dropped, forwarded, too_long, probes;
 
 static int sharing(void)
 {
@@ -252,6 +258,7 @@ void member_card_frame(const u8 *f, u32 len)
             memcpy(&m->ip, b + 16, 4);
             m->bound = !ip4_addr_isany_val(m->ip);
             m->until = timer_ticks() + (lease && lease < 0x3FFFFF ? lease : 0x3FFFFF) * 1024u;
+            m->heard = timer_ticks();
             if (m->bound && (!had || !ip4_addr_eq(&was, &m->ip))) {
                 char a[16];
                 ip4addr_ntoa_r(&m->ip, a, sizeof a);
@@ -295,11 +302,13 @@ static void forward(struct pbuf *p, struct netif *out)
         IPH_CHKSUM_SET(h, (u16_t)(IPH_CHKSUM(h) + PP_HTONS(0x100)));
     ip4_addr_copy(to, h->dest);
     if (out->mtu && p->tot_len > out->mtu) {
-        if (!(IPH_OFFSET(h) & PP_NTOHS(IP_DF)))
+        if (!(IPH_OFFSET(h) & PP_NTOHS(IP_DF))) {
             ip4_frag(p, out, &to);
-        else
-            too_long++;                         /* (it may not be cut: TCP over the cable never sends such, by the
-                                                   segment size the far PC asks for) */
+        } else {                                /* (it may not be cut: its sender is told, and sends smaller. TCP to
+                                                   the far PC never comes to this, by the segment size it asks for) */
+            too_long++;
+            icmp_dest_unreach(p, ICMP_DUR_FRAG);
+        }
         return;
     }
     out->output(out, p, &to);
@@ -325,17 +334,25 @@ int member_ip_hook(struct pbuf *p, struct netif *inp)
     }
     if (p->tot_len > sizeof pkt)
         return 0;
-    if (!ip4_addr_ismulticast(&h->dest) && dst != 0xFFFFFFFFu) {
+    {
+        struct member *from = by_ip(src);
+        if (from)
+            from->heard = timer_ticks();        /* (it is there) */
+    }
+    if (!ip4_addr_ismulticast(&h->dest) && dst != 0xFFFFFFFFu && !ip4_addr_isbroadcast_u32(dst, card)) {
         struct netif *n;                        /* from the cable, to one address: this PC's own are lwIP's; a
                                                    member's packet for anywhere else goes out of the card */
+        const u8 *b = (const u8 *)p->payload;
+        u32 hl = (b[0] & 15u) * 4;
         if (!by_ip(src))
             return 0;
+        if (b[9] == 1 && p->len >= hl + 8 && b[hl] == 0 && b[hl + 4] == (PROBE_ID >> 8) && b[hl + 5] == (PROBE_ID & 0xFF)) {
+            pbuf_free(p);                       /* (its answer to our asking whether it is there) */
+            return 1;
+        }
         for (n = netif_list; n; n = n->next)
             if (ip4_addr_get_u32(netif_ip4_addr(n)) == dst)
                 return 0;
-        if (ip4_addr_isbroadcast_u32(dst, card))
-            return 0;                           /* (the network's own broadcast address: this PC's to hear; not
-                                                   yet copied on, as 255.255.255.255 and multicasts are) */
         forward(p, card);
         pbuf_free(p);
         return 1;
@@ -355,7 +372,8 @@ int member_ip_hook(struct pbuf *p, struct netif *inp)
         pbuf_free(p);
         return 1;
     }
-    if (pkt[9] == 17 && any_bound()) {          /* its broadcast or multicast: a copy to the network; ours too */
+    if (pkt[9] == 17 && any_bound()) {          /* its broadcast (to everyone, or to the network's own broadcast
+                                                   address) or multicast: a copy to the network; ours too */
         u32 total = (u32)pkt[2] << 8 | pkt[3];
         if (total <= len) {
             card_send_ip(pkt, total);
@@ -382,11 +400,31 @@ void member_turn(void)
         struct member *m = &mem[i];
         if (!m->used)
             continue;
-        if (m->bound && (s32)(now - m->until) > 0) {
+        if (m->bound && ((s32)(now - m->until) > 0 || now - m->heard > GONE)) {
             char a[16];
             ip4addr_ntoa_r(&m->ip, a, sizeof a);
-            kprintf("GLOS-NET member gone ip=%s why=lease\n", a);
-            m->used = m->bound = 0;
+            kprintf("GLOS-NET member gone ip=%s why=%s\n", a, (s32)(now - m->until) > 0 ? "lease" : "silent");
+            m->used = m->bound = 0;             /* (nothing answers for its address from here: no packet for it
+                                                   is taken in and lost) */
+        } else if (m->bound && now - m->heard > QUIET && now - m->probed > QUIET && cable && netif_is_up(cable)) {
+            u8 e[28];                           /* an echo request down the cable: is it there? */
+            u32 sum = 0, k, us = card ? ip4_addr_get_u32(netif_ip4_addr(card)) : 0, it = ip4_addr_get_u32(&m->ip);
+            m->probed = now;
+            memset(e, 0, sizeof e);
+            e[0] = 0x45, e[3] = 28, e[8] = 64, e[9] = 1;
+            memcpy(e + 12, &us, 4);
+            memcpy(e + 16, &it, 4);
+            for (k = 0; k < 20; k += 2)
+                sum += (u32)e[k] << 8 | e[k + 1];
+            sum = (sum & 0xFFFF) + (sum >> 16), sum = ~((sum & 0xFFFF) + (sum >> 16));
+            e[10] = (u8)(sum >> 8), e[11] = (u8)sum;
+            e[20] = 8, e[24] = PROBE_ID >> 8, e[25] = PROBE_ID & 0xFF, e[26] = (u8)(now >> 18), e[27] = (u8)(now >> 10);
+            for (sum = 0, k = 20; k < 28; k += 2)
+                sum += (u32)e[k] << 8 | e[k + 1];
+            sum = (sum & 0xFFFF) + (sum >> 16), sum = ~((sum & 0xFFFF) + (sum >> 16));
+            e[22] = (u8)(sum >> 8), e[23] = (u8)sum;
+            cable_send_ip(e, 28);
+            probes++;
         } else if (!m->bound && now - m->asked > 120 * 1024u) {
             m->used = 0;                        /* (asked, and never acknowledged) */
         }
@@ -406,7 +444,7 @@ u32 member_stat(char *buf, u32 max)
         }
     if (card && cable && k + 96 < max)
         k += (u32)ksnprintf(buf + k, max - k, "share=%s relayed=%u arp_answers=%u forwarded=%u too_long=%u copied_out=%u "
-                            "copied_in=%u copy_dropped=%u\n", sharing() ? "on" : "off", relayed, answered, forwarded,
-                            too_long, copied_out, copied_in, copy_dropped);
+                            "copied_in=%u copy_dropped=%u probes=%u\n", sharing() ? "on" : "off", relayed, answered,
+                            forwarded, too_long, copied_out, copied_in, copy_dropped, probes);
     return k;
 }
