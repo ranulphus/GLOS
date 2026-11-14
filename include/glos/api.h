@@ -2029,6 +2029,8 @@ struct glos_sys_system {
     unsigned agent;             /* 1: GLOS runs with its agent (jobs, settings, SSH); 0: GLOS /RUN */
     char card[24], nic[16], hostname[16];
     char session[16];           /* the program that has the machine (a full-screen session), or "" */
+    char home[80];              /* 2.1: the folder GLOS runs from ("C:\\GLOS"), where its own files are */
+    char boot[4];               /* 2.1: the root of the drive DOS started from ("C:\\"): no drive is C: by name */
 };
 
 struct glos_sys_memory {

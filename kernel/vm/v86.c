@@ -1439,3 +1439,34 @@ void vm_start(struct bootinfo *bi)
     thread_go(vm.thread);
     irq_restore(f);
 }
+
+/* ---- where things are (vm.h) */
+
+static char up(char c) { return c >= 'a' && c <= 'z' ? (char)(c - 32) : c; }
+
+void vm_glos_home(char *out, u32 room)
+{
+    const char *p = vm.bi->cfg_path;
+    u32 n = 0, last = 0, i;
+    for (i = 0; p[i]; i++)
+        if (p[i] == '\\' || p[i] == '/')
+            last = i;
+    if (p[0] && p[1] == ':' && last >= 2)
+        for (; n < last && n + 1 < room; n++)
+            out[n] = p[n] == '/' ? '\\' : up(p[n]);
+    if (n == 2 && n + 1 < room)                 /* (GLOS.CFG in a drive's root: "C:\") */
+        out[n++] = '\\';
+    out[n] = 0;
+    if (!n)
+        ksnprintf(out, room, "%c:\\GLOS", vm_boot_drive());
+}
+
+char vm_boot_drive(void)
+{
+    char l = vm.bi->boot_drive >= 1 && vm.bi->boot_drive <= 26 ? (char)('A' + vm.bi->boot_drive - 1) : 0;
+    if (!l && vm.bi->comspec[0] && vm.bi->comspec[1] == ':')
+        l = up(vm.bi->comspec[0]);
+    if (!l && vm.bi->cfg_path[0] && vm.bi->cfg_path[1] == ':')
+        l = up(vm.bi->cfg_path[0]);
+    return l >= 'A' && l <= 'Z' ? l : 'C';
+}

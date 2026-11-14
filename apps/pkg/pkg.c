@@ -828,7 +828,7 @@ int main(int argc, char **argv)
         if ((p = strrchr(base, '\\')) != NULL)
             *p = 0;
         else
-            snprintf(base, sizeof base, "C:\\GLOS");
+            snprintf(base, sizeof base, "%s", glos_home());
     }
     while (argc > 2 && argv[1][0] == '-') {
         if (!strcmp(argv[1], "--certs"))

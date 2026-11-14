@@ -458,7 +458,7 @@ int main(int argc, char **argv)
     if (strrchr(files_home, '\\'))
         *strrchr(files_home, '\\') = 0;
     else
-        snprintf(files_home, sizeof files_home, "C:\\GLOS");
+        snprintf(files_home, sizeof files_home, "%s", glos_home());
     gui_on_event(app_event);
     folders_load();
     if (!strcmp(mode, "-browse")) {

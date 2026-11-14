@@ -155,7 +155,7 @@ int main(int argc, char **argv)
     if ((p = strrchr(home, '\\')) != 0)
         *p = 0;
     else
-        strcpy(home, "C:\\GLOS");
+        snprintf(home, sizeof home, "%s", glos_home());
     if (glos_init_as(names[CLI_WHICH], "", "", GLOS_INIT_TERMINAL) != 0) {
         printf("%s runs under GLOS.\n", names[CLI_WHICH]);
         return 2;

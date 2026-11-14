@@ -588,6 +588,10 @@ int glos_shell(int on) { (void)on; return 0; }
 
 /* The machine's figures (SYS; MONITOR's tests): made up, from the script's clock, the same each run.
  * Two apps (the one under test and NOTEPAD) and a job; NOTEPAD can be ended. */
+/* Where things are on the host's drives: GLOS's folder, and the boot drive's root. */
+const char *glos_home(void) { return "C:\\GLOS"; }
+const char *glos_boot_root(void) { return "C:\\"; }
+
 static int notepad_ended;
 int glos_sys_stat(unsigned kind, void *out, unsigned room, unsigned *length, unsigned *count)
 {

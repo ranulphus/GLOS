@@ -989,20 +989,9 @@ static void session(void *arg)
     s->starting = 1;
     sh_start(&s->sh, &s->host, env);
     s->starting = 0;
-    if (!strcmp(s->dir, "\\")) {                /* "\": the root of the drive DOS started from, as DOS says it
-                                                   (INT 21h 3305h); else the drive its command interpreter is on
-                                                   (COMSPEC), else the one GLOS runs from. (Loop A's machines start
-                                                   from a floppy: A: there.) */
-        char l = 0;
-        req(s);
-        call(s, 0, 0x3305, 0, 0, 0);
-        if (made(s) == 0 && (s->q.r[0].dx & 0xFF) >= 1 && (s->q.r[0].dx & 0xFF) <= 26)
-            l = (char)('A' + (s->q.r[0].dx & 0xFF) - 1);
-        if (!l && vm.bi->comspec[0] && vm.bi->comspec[1] == ':')
-            l = vm.bi->comspec[0];
-        if (!l)
-            l = vm.bi->cfg_path[0];
-        s->dir[0] = (char)((l >= 'a' && l <= 'z') ? l - 32 : (l >= 'A' && l <= 'Z') ? l : 'C');
+    if (!strcmp(s->dir, "\\")) {                /* "\": the root of the drive DOS started from (vm_boot_drive:
+                                                   Loop A's machines start from a floppy, A: there) */
+        s->dir[0] = vm_boot_drive();
         s->dir[1] = ':', s->dir[2] = '\\', s->dir[3] = 0;
     }
     if (s->dir[0]) {

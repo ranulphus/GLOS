@@ -17,7 +17,8 @@
 extern "C" {
 #endif
 
-#define TLS_CERTS "C:\\GLOS\\CERTS.DAT"        /* the trust anchors (GLOSCERTS in the environment for others) */
+#define TLS_CERTS "CERTS.DAT"                   /* the trust anchors' file, in GLOS's own folder (glos_home();
+                                                   GLOSCERTS in the environment names another) */
 
 struct tls_anchors {
     void *ta;                           /* br_x509_trust_anchor[n] */

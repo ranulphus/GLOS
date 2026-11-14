@@ -144,6 +144,11 @@ static inline void vm_wr8(u32 lin, u8 v) { *vm_ptr(lin) = v; }
 
 /* vdev.c: the trapped ports */
 void vdev_init(void);
+/* Where things are (no drive is C: by name): the folder GLOS runs from, where its own files are ("C:\\GLOS";
+   GLOS.CFG's, as GLOS.EXE found it); and the drive DOS started from, a capital letter: as DOS says it, else
+   the drive its command interpreter is on (COMSPEC), else GLOS's own. */
+void vm_glos_home(char *out, u32 room);
+char vm_boot_drive(void);
 void vdev_hide(u16 base, u16 len);              /* ports the kernel owns: FFh to the VM, writes dropped */
 void vdev_unhide(u16 base);                     /* ... and the VM's again */
 u32 vdev_in(u16 port, int width);

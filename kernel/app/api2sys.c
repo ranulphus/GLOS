@@ -79,6 +79,8 @@ int api2_sys_stat(struct trapframe *tf)         /* (for any program: api2.c) */
         mixer_counts(&s->mixer_rate, &s->streams, &s->underruns);
         s->agent = (vm.bi->flags & BI_F_AGENT) != 0;
         put_str(s->hostname, sizeof s->hostname, vm.bi->hostname[0] ? vm.bi->hostname : "glos");
+        vm_glos_home(s->home, sizeof s->home);
+        s->boot[0] = vm_boot_drive(), s->boot[1] = ':', s->boot[2] = '\\', s->boot[3] = 0;
         put_str(s->card, sizeof s->card, s->accel ? "Matrox" : s->screen_w ? "VESA" : "");
         if (session_active())
             put_str(s->session, sizeof s->session, session_prog());

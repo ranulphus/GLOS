@@ -751,6 +751,13 @@ static int glos_main(int argc, char **argv)
     segread(&sr);
     bi.magic = BOOTINFO_MAGIC;
     bi.version = BOOTINFO_VERSION;
+    {                                           /* the drive DOS started from (DOS 4 on; an older one leaves DL) */
+        union REGS b;
+        b.x.ax = 0x3305;
+        b.x.dx = 0;
+        intdos(&b, &b);
+        bi.boot_drive = b.h.dl >= 1 && b.h.dl <= 26 ? b.h.dl : 0;
+    }
     bi.size = sizeof bi;
     bi.cs_base = (unsigned long)FP_SEG(&stub_data) << 4;    /* 38h: the stub's segment */
     bi.ds_base = (unsigned long)sr.ds << 4;

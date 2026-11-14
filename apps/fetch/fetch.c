@@ -3,7 +3,7 @@
  *   FETCH [--certs FILE] [--resolve NAME:ADDRESS] [--quiet] URL [FILE]
  *
  * FILE defaults to the URL's last part (8.3, as DOS wants it); "-" writes
- * to stdout. Certificates are checked against C:\GLOS\CERTS.DAT (GLOSCERTS
+ * to stdout. Certificates are checked against CERTS.DAT in GLOS's own folder (GLOSCERTS
  * names another, as does --certs), and not before GLOS's clock has been set.
  * Progress goes to stderr; at the end, a line:
  *
@@ -115,8 +115,13 @@ int main(int argc, char **argv)
         return 1;
     }
     need_certs = !strncmp(url, "https://", 8);
-    if (need_certs && tls_anchors_load(&a, certs ? certs : TLS_CERTS) != 0) {
-        printf("FETCH failed: no trust anchors (%s)\n", certs ? certs : TLS_CERTS);
+    if (!certs) {                               /* (GLOS's own, in the folder GLOS runs from) */
+        static char own[100];
+        snprintf(own, sizeof own, "%s%s%s", glos_home(), glos_home()[strlen(glos_home()) - 1] == '\\' ? "" : "\\", TLS_CERTS);
+        certs = own;
+    }
+    if (need_certs && tls_anchors_load(&a, certs) != 0) {
+        printf("FETCH failed: no trust anchors (%s)\n", certs);
         return 1;
     }
     if (!file) {

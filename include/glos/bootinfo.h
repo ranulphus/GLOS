@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 8
+#define BOOTINFO_VERSION 9
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -167,6 +167,9 @@ struct bootinfo {
     bi_u32 cable_role;                          /* [net] cable = server | client COMn [BAUD]: BI_CABLE_*; 0: off */
     bi_u32 cable_com;                           /* 1 to 4 */
     bi_u32 cable_baud;                          /* 0: 115200 */
+    /* version 9 */
+    bi_u32 boot_drive;                          /* the drive DOS started from, as DOS says it (INT 21h 3305h): 1 A:,
+                                                   3 C:; 0: it doesn't say */
 };
 #define BI_CABLE_SERVER 1u
 #define BI_CABLE_CLIENT 2u

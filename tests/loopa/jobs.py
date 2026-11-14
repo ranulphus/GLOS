@@ -1263,7 +1263,8 @@ def djtst(profile, boot):
                     "MULTISPN3": "C:\\TEST\\DJ\\MULTISPN.EXE 3"}.get(
                 name, "C:\\TEST\\DJ\\%s.EXE" % name)
             f.write("C:\\TEST\\RUNOUT.EXE %s %s\n" % (name, prog))
-        f.write("C:\\TEST\\RUNOUT.EXE CRASHFILE %COMSPEC% /C TYPE C:\\GLOS\\CRASH\\CRASH000.TXT\n")
+        # (the crash reports' folder is beside GLOS.EXE, which runs from C:\TEST here: not C:\GLOS by name)
+        f.write("C:\\TEST\\RUNOUT.EXE CRASHFILE %COMSPEC% /C TYPE C:\\TEST\\CRASH\\CRASH000.TXT\n")
     files = ["--file", bat + "=/TEST/DJ.BAT", "--file", "build/ow/dos/RUNOUT.EXE=/TEST/RUNOUT.EXE",
              "--file", "build/dj/CRASHME.EXE=/TEST/DJ/CRASHME.EXE"]
     for name, _ in DJTST:
@@ -7066,7 +7067,8 @@ def https_case(profile, card):
 
     def fetch(name, url, ok_sha=None, why=None, resolve=True, timeout=600):
         t0 = time.time()
-        rc, o, e = agent.ssh("C:\\TEST\\FETCH.EXE --quiet --certs C:\\TEST\\CERTS.DAT %s%s C:\\TEST\\GOT.BIN"
+        # (no --certs: CERTS.DAT is looked for in the folder GLOS runs from, C:\TEST here, not in C:\GLOS by name)
+        rc, o, e = agent.ssh("C:\\TEST\\FETCH.EXE --quiet %s%s C:\\TEST\\GOT.BIN"
                              % ("--resolve test.glos:10.0.2.2 " if resolve else "", url), timeout=timeout)
         o = (o + e).replace("\r", "").strip()
         if ok_sha:

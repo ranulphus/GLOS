@@ -951,6 +951,27 @@ int glos_job_status(glos_handle job, struct glos_job_status *out)
 
 /* ---- SYS */
 
+/* Where things are (asked once): GLOS's own folder, and the root of the drive DOS started from. */
+static char where_home[80], where_boot[4];
+
+static void where(void)
+{
+    struct glos_sys_system y;
+    unsigned n = 0, c = 0;
+    if (where_boot[0])
+        return;
+    memset(&y, 0, sizeof y);
+    if (glos_sys_stat(GLOS_STAT_SYSTEM, &y, sizeof y, &n, &c) != 0 || !y.home[0] || !y.boot[0]) {
+        strcpy(y.home, "C:\\GLOS");             /* (a GLOS from before 2.1 had it there) */
+        strcpy(y.boot, "C:\\");
+    }
+    memcpy(where_home, y.home, sizeof where_home);
+    memcpy(where_boot, y.boot, sizeof where_boot);
+}
+
+const char *glos_home(void) { where(); return where_home; }
+const char *glos_boot_root(void) { where(); return where_boot; }
+
 static int terminal(unsigned what, const void *buf, unsigned length, unsigned *cols, unsigned *rows)
 {
     struct glos_sys_terminal q = { sizeof q, what, (unsigned)buf, length, 0, 0, 0 };

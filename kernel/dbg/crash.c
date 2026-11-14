@@ -109,6 +109,7 @@ static void put_str(u32 lin, const char *s)
 static int write_file(struct trapframe *tf, char *name, u32 n, const char *t, u32 tn)
 {
     struct rmregs r;
+    char home[80], dir[96];
     u32 lin, i, k, handle;
     u16 seg;
 
@@ -131,18 +132,19 @@ static int write_file(struct trapframe *tf, char *name, u32 n, const char *t, u3
     lin = seg * 16u;
     for (i = 0; i < tn; i++)
         vm_wr8(lin + 64 + i, (u8)t[i]);
-    put_str(lin, "C:\\GLOS");
-    memset(&r, 0, sizeof r);
-    r.eax = 0x3900;                             /* the directories may be there already */
-    r.ds = seg;
-    dos(tf, &r);
-    put_str(lin, "C:\\GLOS\\CRASH");
+    vm_glos_home(home, sizeof home);            /* (GLOS's own folder, whatever its drive: not C: by name) */
+    ksnprintf(dir, sizeof dir, "%s%sCRASH", home, home[strlen(home) - 1] == '\\' ? "" : "\\");
+    if (strlen(dir) + 14 > 64) {                /* (the name's room in the block above) */
+        ksnprintf(name, n, "none why=path");
+        return -1;
+    }
+    put_str(lin, dir);
     memset(&r, 0, sizeof r);
     r.eax = 0x3900;
     r.ds = seg;
     dos(tf, &r);
     for (k = 0; k < 1000; k++) {                /* the first free number */
-        ksnprintf(name, n, "C:\\GLOS\\CRASH\\CRASH%03u.TXT", k);
+        ksnprintf(name, n, "%s\\CRASH%03u.TXT", dir, k);
         put_str(lin, name);
         memset(&r, 0, sizeof r);
         r.eax = 0x5B00;                         /* create a new file: fails with 50h if it exists */

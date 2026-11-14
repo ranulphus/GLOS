@@ -21,6 +21,10 @@ int glos_running(void);                                 /* 1 if GLOS 2.0 answers
 
 int glos_version(struct glos_version *v);               /* v->size set by the caller */
 int glos_init(const char *name, const char *help, const char *category);      /* the program becomes an app */
+/* 2.1: where things are, for any program (no drive is C: by name). GLOS's own folder ("C:\\GLOS": its programs,
+   CERTS.DAT, its settings), and the root of the drive DOS started from ("C:\\"), where a user starts. */
+const char *glos_home(void);
+const char *glos_boot_root(void);
 int glos_init_as(const char *name, const char *help, const char *category, unsigned flags);    /* ... GLOS_INIT_ */
 /* 2.1: the terminal of a program run at one (GLOS_INIT_TERMINAL). Each -1 if it has none (glos_error()). */
 int glos_terminal_size(unsigned *cols, unsigned *rows);                 /* 0, and its size */
