@@ -748,8 +748,8 @@ static void key_event(unsigned key, int down, unsigned mods)
     e.key = key;
     e.mods = mods;
     e.down = (unsigned)down;
-    e.ch = down ? keymap_char(key, (mods & GLOS_MOD_SHIFT) != 0, (mods & GLOS_MOD_CTRL) != 0,
-                              (mods & GLOS_MOD_ALT) != 0, 0, 0) : 0;
+    e.ch = down ? keymap_char_in(KEYMAP_US, key, (mods & GLOS_MOD_SHIFT) != 0, (mods & GLOS_MOD_CTRL) != 0,
+                                 (mods & GLOS_MOD_ALT) != 0, 0, 0, 0) : 0;
     push(&e);
     H.clock += 20;
 }

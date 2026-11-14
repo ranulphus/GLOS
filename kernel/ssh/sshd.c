@@ -36,6 +36,7 @@
 #include "mm.h"
 #include "slip.h"
 #include "pci.h"
+#include "keymap.h"
 #include "diskcmd.h"
 #include "dos.h"
 #include "dpmi.h"
@@ -693,42 +694,40 @@ static const char *input_parse(struct input *in, const char *p)
     return 0;
 }
 
-/* The key for a character on the US layout: its code, 200h added with Shift; 0 if it has none. */
-static int us_key(char c)
-{
-    static const char plain[] = "\0331234567890-=\b\tqwertyuiop[]\n\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 ";
-    static const char shift[] = "\0!@#$%^&*()_+\0\0QWERTYUIOP{}\0\0ASDFGHJKL:\"~\0|ZXCVBNM<>?";
-    u32 i;
-    if (!c)
-        return 0;
-    for (i = 0; i < sizeof plain - 1; i++)
-        if (plain[i] == c && i != 0x36 && i != 0x37)
-            return (int)i + 1;
-    for (i = 0; i < sizeof shift - 1; i++)
-        if (shift[i] == c)
-            return ((int)i + 1) | 0x200;
-    return 0;
-}
-
-/* glos type's text: each character a key, 40 ticks apart; \n, \t, \e, \b and \\ as in C.
-   0, or the character without a key. */
+/* glos type's text: each character a key of the keyboard's layout ([region] layout: keymap.h), 40 ticks apart,
+   Shift or AltGr held round it where the layout wants them; \n, \t, \e, \b and \\ as in C; UTF-8 for the
+   characters past ASCII (the pound sign on a British keyboard). 0, or the character without a key. */
 static const char *type_parse(struct input *in, const char *p)
 {
+    int layout = kcfg_layout();
     u32 at = 0;
     for (; *p; p++, at += 40) {
-        char c = *p;
-        int k;
+        const char *from = p;
+        u32 c = (u8)*p, key;
+        int held = 0;
         if (c == '\\' && p[1]) {
             p++;
-            c = *p == 'n' ? '\n' : *p == 't' ? '\t' : *p == 'e' ? 27 : *p == 'b' ? '\b' : *p;
+            c = *p == 'n' ? 13 : *p == 't' ? '\t' : *p == 'e' ? 27 : *p == 'b' ? '\b' : (u8)*p;
+        } else if (c == '\n') {
+            c = 13;
+        } else if ((c & 0xE0) == 0xC0 && ((u8)p[1] & 0xC0) == 0x80) {
+            c = (c & 0x1F) << 6 | ((u8)p[1] & 0x3F);
+            p++;
+        } else if ((c & 0xF0) == 0xE0 && ((u8)p[1] & 0xC0) == 0x80 && ((u8)p[2] & 0xC0) == 0x80) {
+            c = (c & 0x0F) << 12 | ((u32)((u8)p[1] & 0x3F) << 6) | ((u8)p[2] & 0x3F);
+            p += 2;
         }
-        if (!(k = us_key(c)))
-            return p;
-        if (k & 0x200)
+        if (!(key = keymap_key(layout, c, &held)))
+            return from;
+        if (held & 1)
             input_add(in, at, EV_DOWN, 0x2A, 0, 0);
-        input_add(in, at + 5, EV_DOWN, k & 0xFF, 0, 0);
-        input_add(in, at + 20, EV_UP, k & 0xFF, 0, 0);
-        if (k & 0x200)
+        if (held & 2)
+            input_add(in, at, EV_DOWN, 0x138, 0, 0);
+        input_add(in, at + 5, EV_DOWN, key, 0, 0);
+        input_add(in, at + 20, EV_UP, key, 0, 0);
+        if (held & 2)
+            input_add(in, at + 25, EV_UP, 0x138, 0, 0);
+        if (held & 1)
             input_add(in, at + 25, EV_UP, 0x2A, 0, 0);
     }
     return 0;
@@ -823,7 +822,7 @@ static void input_cmd(struct ssh_chan *ch, const char *cmd)
 {
     const char *arg = cmd + (cmd[5] == 'k' ? 9 : cmd[5] == 't' ? 10 : 11), *bad = 0;
     const char *what = cmd[5] == 'k' ? "key" : cmd[5] == 't' ? "type" : "mouse";
-    struct input *in = strlen(arg) > 2000 ? 0 : input_new(cmd[5] == 't' ? (u32)strlen(arg) * 4 + 1 : (u32)strlen(arg) + 2);
+    struct input *in = strlen(arg) > 2000 ? 0 : input_new(cmd[5] == 't' ? (u32)strlen(arg) * 6 + 1 : (u32)strlen(arg) + 2);
     int dx, dy, buttons = -1;
     if (!in) {
         say(ch, 1, "glos: no memory\n");

@@ -83,8 +83,8 @@ const struct cfg_key cfg_schema[] = {
       "The first day of the week in a calendar" },
     { "region", "codepage", CFG_CHOICE, CFG_PROGRAM, 0, 0, "dos|437|850|852|866|737", "dos", "Code pa&ge",
       "The characters of file names and of DOS programs' text: what DOS says its code page is, or one named here" },
-    { "region", "layout", CFG_CHOICE, CFG_NOW, 0, 0, "us", "us", "&Keyboard layout",
-      "Which character each key types" },
+    { "region", "layout", CFG_CHOICE, CFG_NOW, 0, 0, "us|uk", "us", "&Keyboard layout",
+      "Which character each key types: a US keyboard's, or a British one's (DOS programs go by DOS's own KEYB)" },
     { "region", "language", CFG_CHOICE, CFG_APP, 0, 0, "en", "en", "&Language",
       "The language of GLOS's own words" },
     /* [cache]: the disk cache (docs/disk-cache.md) */

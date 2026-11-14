@@ -4,6 +4,17 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## British keyboards (2026-11-14)
+
+- **`[region] layout = uk`** (the Control Panel's Region page, or `glos config set region layout uk`): the desktop
+  and GLOS's apps type what a British keyboard's keys say: `"` on 2, `£` on 3, `@`, `#`, `~`, `\` and `|` where
+  they are, `¬`; and with AltGr `€`, `¦` and `á é í ó ú`. The right Alt is AltGr on this layout and no longer an
+  Alt. `us` stays the default.
+- **`glos type` and the remote desktop follow the layout**: they press the keys that type each character on the
+  keyboard set, so text typed from another computer comes out right in a DOS that has `KEYB UK` loaded.
+  `glos type` takes UTF-8 (`glos type £5`).
+- DOS programs are not touched: they read the keys themselves, by DOS's own keyboard setting.
+
 ## VIA Rhine network cards; PCI (2026-11-14)
 
 - **GLOS drives VIA's Rhine network chip** (the VT86C100A of D-Link's DFE-530TX and its like), found and started

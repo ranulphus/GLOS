@@ -221,7 +221,7 @@ Each step ends with its tests passing; each feature's gate is its step's exit. D
     window moved where nothing covers it and its old and new places don't overlap. The pixel format is whatever
     the viewer asks for. The cursor is drawn in as `glos shot` draws it, and an 8-bit screen's 6-bit DAC is
     widened as `glos shot` widens it, so a viewer's picture and a shot agree.
-  - Keys (X keysyms, US layout) wait in one queue for the keyboard to have room, so a viewer that sends and leaves
+  - Keys (X keysyms, turned into the keys of `[region] layout` since 2026-11-14; the US layout before) wait in one queue for the keyboard to have room, so a viewer that sends and leaves
     still delivers them. The pointer is absolute. While a viewer is connected, the task bar says VNC (D35).
   - `glos rec [--fps N] [--seconds S]` streams the desktop's frames while they change: each one a line of its
     time and length, then the PNG `glos shot` would give at that moment. `tools/rec.py` writes `NNNNN.png` and an

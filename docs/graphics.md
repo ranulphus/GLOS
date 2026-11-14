@@ -287,8 +287,29 @@ here can be driven over ssh.
 ### 4.2 Keys
 
 A key is its set 1 scan code, 100h added for those with an E0 prefix, and whether it went down or up. Its
-character comes from the US layout (Shift, Caps Lock, Num Lock for the number pad, Ctrl for the control
-characters; none with Alt). The locks start as the BIOS has them (40:17h). Other layouts are for later.
+character (Unicode) comes from the keyboard's layout (Shift, Caps Lock, Num Lock for the number pad, Ctrl for the
+control characters; none with Alt). The locks start as the BIOS has them (40:17h).
+
+**Layouts** (`kernel/include/keymap.h`; GLOS.CFG's `[region] layout`, changed at once by the Control Panel or
+`glos config set region layout uk`):
+
+- **`us`**, the default: the 101-key US keyboard. A 102-key keyboard's extra key types `\` and `|`.
+- **`uk`** (2026-11-14): the British 102-key keyboard. `"` on 2, `£` on 3, `@` beside `;`, `#` and `~` beside
+  Enter, `\` and `|` on the extra key, `¬` with Shift on the key under Esc. The right Alt is AltGr there and
+  not an Alt (no menus, no Alt-Tab): with it, 4 types `€`, the key under Esc `¦`, and the vowels their acute
+  accents (`á é í ó ú`, capitals with Shift or Caps Lock).
+
+The layout is the desktop's and GLOS apps'. A DOS program gets the keys themselves, and what they type there is
+DOS's business (`KEYB UK`). Text typed from afar goes the other way through the same table: `glos type` (UTF-8)
+and the remote desktop press the keys that type each character on the layout set, holding Shift or AltGr as it
+needs, so the PC's DOS should be set to the same keyboard. A character the layout has no key for is refused
+(`glos type`) or dropped (the remote desktop). More layouts are tables to add.
+
+Checked on the Pentium III bench (MS-DOS 7.1, `KEYB UK`, code page 850; 2026-11-14): `glos type` of
+`C:\GLOS "q" @home #1 ~x £5` into DOS's `COPY CON` arrived as typed. One character differs there, and it is
+DOS's doing: `KEYB UK` under code page 850 makes Shift and the extra key the broken bar `¦`, where GLOS's layout
+(as Windows' British one) has `|`; a person at that keyboard gets the same in DOS. Loop A's input case types a
+line with the British layout into a DOS that reads the keys as a US keyboard's, and checks which keys it got.
 
 **The manager's own**, never passed on:
 
@@ -415,7 +436,7 @@ keyboard there are no keys for it (a terminal is M9's; DOS programs in windows c
 
 ### 5.6 Limits
 
-- One layout (US). No key repeat of the manager's own: the keyboard's.
+- Two layouts (US, British); no dead keys. No key repeat of the manager's own: the keyboard's.
 - Ctrl-C in a window is a key (INT 16h gives 2E03h), not DJGPP's SIGINT: its handler looks at the BIOS's
   shift flags at 40:17h, which are the system VM's.
 - INT 33h has no handler calls (0Ch, 14h), no ranges and no cursor of its own.

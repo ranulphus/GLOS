@@ -80,7 +80,7 @@ int region_set(struct region *r, const char *key, const char *v)
             return -1;
         r->codepage = (unsigned short)n;
     } else if (same(key, "layout")) {
-        if (!same(v, "us"))
+        if (!same(v, "us") && !same(v, "uk"))
             return -1;
         copy(r->layout, v, sizeof r->layout);
     } else if (same(key, "language")) {

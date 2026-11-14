@@ -21,7 +21,7 @@
  * cards). The card's cursor is drawn over the picture where it is, as glos
  * shot draws it, so that the two give the same pixels, and its moves are
  * owed as damage. Keys (X keysyms) go in as glos key's do (set 1
- * codes, a US layout, Shift added for a character that needs it); the
+ * codes on the keyboard's layout, Shift or AltGr added for a character that needs it); the
  * pointer goes to the desktop as an absolute position. While a session has
  * the screen nothing is sent; the desktop's return repaints everything. */
 #include <string.h>
@@ -31,6 +31,7 @@
 #include "gfx.h"
 #include "io.h"
 #include "kcfg.h"
+#include "keymap.h"
 #include "kprintf.h"
 #include "mgadisp.h"
 #include "mm.h"
@@ -68,6 +69,7 @@ static struct viewer {
     u32 out_n, out_at;
     u32 updates;
     u8 shift;                                   /* its Shift keys held */
+    u8 altgr;                                   /* ... and its AltGr */
     int cur_on;                                 /* the card's cursor as last sent */
     s32 cur_x, cur_y;
 } vw[VIEWERS];
@@ -508,39 +510,30 @@ void vnc_moved(s32 x, s32 y, s32 w, s32 h, s32 dx, s32 dy)
 
 /* ---- keys */
 
-/* A keysym as a set 1 code (US layout; 100h: E0), and whether Shift makes it: the code, or 0. */
-static u32 key_code(u32 sym, int *shifted)
+/* A keysym as a set 1 code (100h: E0) on the keyboard's layout ([region] layout: keymap.h), and what makes it
+   there (*held: bit 0 Shift, bit 1 AltGr): the code, or 0. A character's keysym is its Unicode number up to FFh,
+   and 01000000h added above that (the euro sign also has an old keysym of its own). */
+static u32 key_code(u32 sym, int *held)
 {
-    static const char row1[] = "1234567890-=", row1s[] = "!@#$%^&*()_+", qrow[] = "qwertyuiop[]", qrows[] = "QWERTYUIOP{}";
-    static const char arow[] = "asdfghjkl;'`", arows[] = "ASDFGHJKL:\"~", zrow[] = "zxcvbnm,./", zrows[] = "ZXCVBNM<>?";
     static const struct { u32 sym, code; } special[] = {
         { 0xFF08, 0x0E }, { 0xFF09, 0x0F }, { 0xFF0D, 0x1C }, { 0xFF1B, 0x01 }, { 0xFFFF, 0x153 }, { 0xFF50, 0x147 },
         { 0xFF51, 0x14B }, { 0xFF52, 0x148 }, { 0xFF53, 0x14D }, { 0xFF54, 0x150 }, { 0xFF55, 0x149 },
         { 0xFF56, 0x151 }, { 0xFF57, 0x14F }, { 0xFF63, 0x152 }, { 0xFFE1, 0x2A }, { 0xFFE2, 0x36 },
         { 0xFFE3, 0x1D }, { 0xFFE4, 0x11D }, { 0xFFE9, 0x38 }, { 0xFFEA, 0x138 }, { 0xFFE7, 0x38 }, { 0xFFE8, 0x138 },
+        { 0xFE03, 0x138 }, { 0xFF7E, 0x138 },   /* (ISO_Level3_Shift, Mode_switch: a viewer's AltGr) */
         { 0xFFEB, 0x15B }, { 0xFFEC, 0x15C }, { 0xFFE5, 0x3A }, { 0xFF8D, 0x11C }, { 0xFF67, 0x15D },
         { 0xFFBE, 0x3B }, { 0xFFBF, 0x3C }, { 0xFFC0, 0x3D }, { 0xFFC1, 0x3E }, { 0xFFC2, 0x3F }, { 0xFFC3, 0x40 },
-        { 0xFFC4, 0x41 }, { 0xFFC5, 0x42 }, { 0xFFC6, 0x43 }, { 0xFFC7, 0x44 }, { 0xFFC8, 0x57 }, { 0xFFC9, 0x58 },
-        { 0x20, 0x39 }, { 0x5C, 0x2B }, { 0x7C, 0x2B } };
-    const char *p;
+        { 0xFFC4, 0x41 }, { 0xFFC5, 0x42 }, { 0xFFC6, 0x43 }, { 0xFFC7, 0x44 }, { 0xFFC8, 0x57 }, { 0xFFC9, 0x58 } };
     u32 i;
-    *shifted = 0;
+    *held = 0;
     for (i = 0; i < ARRAY_SIZE(special); i++)
-        if (special[i].sym == sym) {
-            *shifted = sym == 0x7C;
+        if (special[i].sym == sym)
             return special[i].code;
-        }
-    if (sym >= 0x80 || !sym)
+    if (sym >= 0x01000100 && sym <= 0x0100FFFF)
+        sym -= 0x01000000;
+    else if (sym != 0x20AC && (sym < 0x20 || sym > 0xFF || sym == 0x7F))
         return 0;
-    if ((p = strchr(row1, (int)sym)) != 0) return 0x02 + (u32)(p - row1);
-    if ((p = strchr(row1s, (int)sym)) != 0) return *shifted = 1, 0x02 + (u32)(p - row1s);
-    if ((p = strchr(qrow, (int)sym)) != 0) return 0x10 + (u32)(p - qrow);
-    if ((p = strchr(qrows, (int)sym)) != 0) return *shifted = 1, 0x10 + (u32)(p - qrows);
-    if ((p = strchr(arow, (int)sym)) != 0) return (p - arow == 11 ? 0x29 : 0x1E + (u32)(p - arow));
-    if ((p = strchr(arows, (int)sym)) != 0) return *shifted = 1, (p - arows == 11 ? 0x29 : 0x1E + (u32)(p - arows));
-    if ((p = strchr(zrow, (int)sym)) != 0) return 0x2C + (u32)(p - zrow);
-    if ((p = strchr(zrows, (int)sym)) != 0) return *shifted = 1, 0x2C + (u32)(p - zrows);
-    return 0;
+    return keymap_key(kcfg_layout(), sym, held);
 }
 
 /* Keys as the keyboard has room for them (glos key waits the same way: a slow app lost keys). */
@@ -564,18 +557,37 @@ static void key_in(u32 code, int down)
 
 static void key(struct viewer *v, u32 sym, int down)
 {
-    int shifted;
-    u32 code = key_code(sym, &shifted);
+    int held, unshift;
+    u32 code = key_code(sym, &held);
     if (!code)
         return;
     if (code == 0x2A || code == 0x36) {
         u8 bit = code == 0x2A ? 1 : 2;
         v->shift = (u8)(down ? v->shift | bit : v->shift & ~bit);
     }
-    if (down && shifted && !v->shift)
-        key_in(0x2A, 1);                        /* (a character Shift makes, and the viewer holds none: one held) */
+    if (code == 0x138)
+        v->altgr = (u8)(down != 0);
+    /* A character Shift makes, and the viewer holds none: one held round it. One the layout makes with no Shift
+       while the viewer holds one (a British viewer's Shift-2 on a US keyboard, where " is not on 2): let go
+       round it. AltGr the same way, where the layout has it. */
+    if (down && (held & 1) && !v->shift)
+        key_in(0x2A, 1);
+    unshift = down && !(held & 1) && v->shift && sym >= 0x20 && (sym < 0xFE00 || sym > 0xFFFF)
+        && keymap_char_in(kcfg_layout(), code, 1, 0, 0, (held & 2) != 0, 0, 0) != (sym > 0x01000000 ? sym - 0x01000000 : sym);
+    if (unshift) {
+        if (v->shift & 1) key_in(0x2A, 0);
+        if (v->shift & 2) key_in(0x36, 0);
+    }
+    if (down && (held & 2) && !v->altgr)
+        key_in(0x138, 1);
     key_in(code, down);
-    if (down && shifted && !v->shift)
+    if (down && (held & 2) && !v->altgr)
+        key_in(0x138, 0);
+    if (unshift) {
+        if (v->shift & 1) key_in(0x2A, 1);
+        if (v->shift & 2) key_in(0x36, 1);
+    }
+    if (down && (held & 1) && !v->shift)
         key_in(0x2A, 0);
     keys_out();
 }

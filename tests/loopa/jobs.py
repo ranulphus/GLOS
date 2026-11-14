@@ -2822,6 +2822,11 @@ INPUT_CASES = [("bf6", "ne2kpci", True), ("486dx2", "ne2k", False)]      # (the 
 MOUSE_KEYS = "1:mouse:40:-20:1,2:mouse:40:-20:0"        # MGA-Glide's selftest-mouse: right and up, the left button held
 
 
+# glos type on a British keyboard, and the line a DOS that reads keys as a US keyboard's makes of those keys.
+UK_TEXT = 'a"b@c#d~e\\\\f|g\u00a3h'
+UK_READ = 'a@b"c\\d|e\\f|g#h'
+
+
 def input_case(profile, card, mouse_too):
     """Input injected over ssh against the same input from Loop A's --keys (86Box's keyboard and mouse), in one
     run: KEYWAIT's key (Enter; the grey Up arrow, an E0 code) must be the same from both, and MGA-Glide's
@@ -2867,6 +2872,14 @@ def input_case(profile, card, mouse_too):
             checks["mouse-off"] = rc == 1 and "mouse" in err
         text = "Hello, World! 1+2=3 (ok) <a_b> ~x^y \"q\" z|w"
         checks["type-rc"] = job("C:\\TEST\\TYPEIN.EXE", "HX-TYPE ready", 1, "glos type " + text + "\\n") == (0, 0)
+        # The same with a British keyboard ([region] layout = uk): the keys such a keyboard has the characters
+        # on. DOS here reads keys as a US keyboard's (no KEYB), so the line it gets says which keys they were:
+        # Shift-2, Shift-', the key beside Enter alone and with Shift, the 102nd key the same, Shift-3.
+        checks["uk-set"] = agent.ssh("glos config set region layout uk")[0] == 0
+        checks["uk-rc"] = job("C:\\TEST\\TYPEIN.EXE", "HX-TYPE ready", 2, "glos type " + UK_TEXT + "\\n") == (0, 0)
+        checks["uk-refuse"] = agent.ssh("glos type \u03b1")[0] == 2    # (no key for an alpha)
+        checks["uk-unset"] = agent.ssh("glos config set region layout us")[0] == 0 \
+            and agent.ssh("glos config set region layout xx")[0] != 0
         rc, _, err = agent.ssh("glos key 1:0x1c,bogus")
         checks["refuse"] = rc == 2 and "bogus" in err
         rc, _, err = agent.ssh("glos type caf\xe9")
@@ -2891,6 +2904,9 @@ def input_case(profile, card, mouse_too):
         ours = re.match(r"dx=(-?\d+) dy=(-?\d+) ", mouse[1]) if len(mouse) == 2 else None
         checks["mouse-exact"] = bool(ours) and int(ours.group(1)) > 0 and int(ours.group(1)) == -2 * int(ours.group(2))
     checks["type"] = "HX-TYPE got=" + text + "\n" in log
+    checks["type-uk"] = "HX-TYPE got=" + UK_READ + "\n" in log
+    if not checks["type-uk"]:
+        info += " uk=%r" % re.findall(r"HX-TYPE got=(.*)", log)[1:]
     checks["hotkey-reason"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=hotkey", log))
     checks["direct"] = "HX-DIRECT keys=1c9c" in log
     checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-CRASH|GLOS-WARN|DPMI-UNIMPL", log)

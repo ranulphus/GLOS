@@ -43,6 +43,7 @@
 #include "deskint.h"
 #include "idle.h"
 #include "io.h"
+#include "kcfg.h"
 #include "keymap.h"
 #include "kprintf.h"
 #include "timer.h"
@@ -60,6 +61,8 @@ enum { KM_LSHIFT = 1, KM_RSHIFT = 2, KM_LCTRL = 4, KM_RCTRL = 8, KM_LALT = 16, K
 #define KM_SHIFT (KM_LSHIFT | KM_RSHIFT)
 #define KM_CTRL  (KM_LCTRL | KM_RCTRL)
 #define KM_ALT   (KM_LALT | KM_RALT)
+/* The Alts held, as Alts: on a layout with AltGr (keymap.h) the right one is no Alt. */
+#define ALT_HELD (kmods & (keymap_altgr(kcfg_layout()) ? KM_LALT : KM_ALT))
 
 static u8 e0, e1;                               /* a prefix came; bytes of a Pause still to come */
 static u8 kmods, caps, num;
@@ -142,7 +145,7 @@ const char *desk_focus_line(void)
 
 static u32 mods_now(void)
 {
-    return (kmods & KM_SHIFT ? GLOS_MOD_SHIFT : 0u) | (kmods & KM_CTRL ? GLOS_MOD_CTRL : 0u) | (kmods & KM_ALT ? GLOS_MOD_ALT : 0u);
+    return (kmods & KM_SHIFT ? GLOS_MOD_SHIFT : 0u) | (kmods & KM_CTRL ? GLOS_MOD_CTRL : 0u) | (ALT_HELD ? GLOS_MOD_ALT : 0u);
 }
 
 static void send_key2(struct app *a, u32 id, u32 key, int down, u32 ch, u32 mods, int again)
@@ -464,7 +467,8 @@ static void activate(struct wm *m, struct wm_window *w)
 
 static u32 key_char(u32 key)
 {
-    return keymap_char(key, (kmods & KM_SHIFT) != 0, (kmods & KM_CTRL) != 0, (kmods & KM_ALT) != 0, caps != 0, num != 0);
+    return keymap_char_in(kcfg_layout(), key, (kmods & KM_SHIFT) != 0, (kmods & KM_CTRL) != 0, (kmods & KM_LALT) != 0,
+                          (kmods & KM_RALT) != 0, caps != 0, num != 0);
 }
 
 /* The saver is on the screen (idle.c): the input that ends it is used up here, so that the key that wakes the
@@ -515,10 +519,10 @@ static void key_event(struct wm *m, u32 key, int down)
         drag_key(m, key);
         return;
     }
-    if (down && !again && ((key == 0x01 && (kmods & KM_CTRL) && !(kmods & KM_ALT)) || key == 0x15B)
+    if (down && !again && ((key == 0x01 && (kmods & KM_CTRL) && !ALT_HELD) || key == 0x15B)
         && to_shell(m, KEV_LAUNCH))
         return;                                 /* Ctrl-Esc, the Windows key: the launcher (the shell's, M9) */
-    if (down && (kmods & KM_ALT) && !(kmods & KM_CTRL)) {
+    if (down && ALT_HELD && !(kmods & KM_CTRL)) {
         switch (key) {
         case 0x0F:
             activate(m, wm_next(m, w));

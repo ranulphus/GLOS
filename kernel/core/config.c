@@ -36,6 +36,7 @@
 #include "io.h"
 #include "kdata.h"
 #include "secrets.h"
+#include "keymap.h"
 #include "kprintf.h"
 #include "mm.h"
 #include "sched.h"
@@ -449,6 +450,12 @@ static u32 num(const char *s)
 static struct region region = { REGION_YMD, '-', 0, '.', ',', 1, 0, "us", "en" };
 
 const struct region *kcfg_region(void) { return &region; }
+
+int kcfg_layout(void)                       /* keymap.h's number for [region] layout */
+{
+    int id = keymap_id(region.layout);
+    return id < 0 ? KEYMAP_US : id;
+}
 
 void kcfg_apply(const char *section, const char *key, const char *v)
 {

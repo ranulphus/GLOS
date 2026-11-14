@@ -20,6 +20,7 @@
 #include "dpmi.h"
 #include "io.h"
 #include "display.h"
+#include "kcfg.h"
 #include "keymap.h"
 #include "kprintf.h"
 #include "mgadisp.h"
@@ -792,7 +793,8 @@ int desk_win_key(u32 id, u32 key, int down, u32 mods)
         e.type = KEV_KEY;
         e.window = id;
         e.key = key;
-        e.ch = down ? keymap_char(key, (mods & GLOS_MOD_SHIFT) != 0, (mods & GLOS_MOD_CTRL) != 0, (mods & GLOS_MOD_ALT) != 0, 0, 0) : 0;
+        e.ch = down ? keymap_char_in(kcfg_layout(), key, (mods & GLOS_MOD_SHIFT) != 0, (mods & GLOS_MOD_CTRL) != 0,
+                                     (mods & GLOS_MOD_ALT) != 0, 0, 0, 0) : 0;
         e.mods = mods;
         e.down = (unsigned)(down != 0);
         app_event(win->owner, &e);
