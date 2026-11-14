@@ -43,6 +43,14 @@ to switch a device's interrupts off, and (from D2) whether it is asserting.
     C0h, bit 13). The controller then never drives its PCI line, while the BIOS's USB-keyboard emulation (SMI)
     goes on. On other makers' UHCI, interrupts are switched off (`USBINTR`) only while the controller isn't
     running; otherwise it stays DOS's.
+  - Second: **OHCI USB** (2026-11-14, for the Pentium III bench: the ALi board's OHCI shares IRQ 9 with the
+    network card). Its registers are in memory (BAR 0).
+    - With `HcControl`'s InterruptRouting set, its interrupts are SMIs for the BIOS's keyboard emulation and never
+      reach the PCI line: it is quiet as it is, and nothing is written (`how=smi`).
+    - Otherwise every interrupt is disabled (`HcInterruptDisable`, the master bit with the rest: `how=intr`),
+      unless the controller is operational with its master interrupt enable set. Then somebody drives it, and
+      it stays DOS's (`why=driven`).
+    - A controller whose memory isn't decoded can't interrupt (`how=off`).
 - **D2.** Chained handlers and pass-through.
   - Each GLOS driver on a line answers "was it mine?" from its device's status register.
   - What none of them claims goes on to DOS's handler for that IRQ, through the virtual PIC.
@@ -58,7 +66,7 @@ to switch a device's interrupts off, and (from D2) whether it is asserting.
   - Each card is then the SB16 mixer's (keeper GLOS) or DOS's.
 - **Later.** Full GLOS drivers, a class at a time, where GLOS gains something: USB keyboard, mouse and storage
   (OHCI, UHCI, EHCI), IDE, PCI sound. The first is under way: **UHCI** (docs/gamepad.md J2, D74), after which a
-  UHCI's keeper is GLOS (its quiet driver only holds it until GLOS.CFG is read). More quiet drivers as bench PCs need them: OHCI, AC'97, HDA, bus-master IDE,
+  UHCI's keeper is GLOS (its quiet driver only holds it until GLOS.CFG is read). More quiet drivers as bench PCs need them: AC'97, HDA, bus-master IDE,
   SMBus.
 
 ## What each step logs
@@ -81,8 +89,10 @@ The IBM PC 300PL, under MS-DOS 7.1 with GLOS in agent mode:
     GLOS-NET card=i8255x base=7c60 irq=11 mac=00:06:29:26:d0:1b
     GLOS-NET dhcp ip=192.168.1.33 gw=192.168.1.1 mask=255.255.255.0 ticks=1052
 
-`tests/host/dev_test.c` checks the rule and the UHCI driver against made-up functions and ports (in `make
-host-test`). Loop A's 86Box machines don't share these lines, so there the ssh suite only shows nothing broke.
+`tests/host/dev_test.c` checks the rule and the UHCI and OHCI drivers against made-up functions, ports and
+registers (in `make host-test`). `glos pci` (`PCI` in the shell) lists every function with its line and its keeper, and
+`glos pci BUS:DEV.FN` prints one function's configuration space: what a PC's log doesn't say about a card GLOS
+has no driver for. Loop A's 86Box machines don't share these lines, so there the ssh suite only shows nothing broke.
 
 ## UHCI's keeper becomes GLOS (docs/gamepad.md J2, 2026-11-05)
 

@@ -2344,6 +2344,20 @@ def ssh_case(profile, card):
             and "dpmi null" in out
         rc, out, _ = ssh("glos net")
         checks["net"] = rc == 0 and "ip=10.0.2.15 mask=255.255.255.0 gw=10.0.2.2" in out and "card=" in out
+        # glos pci: every function GLOS found, a line each, the card GLOS took as its own; one function's
+        # configuration space, its first word the identity the list gave; a bad address refused.
+        rc, out, _ = ssh("glos pci")
+        rows = re.findall(r"^([0-9a-f]{2}:[0-9a-f]{2}\.[0-7]) ([0-9a-f]{4}):([0-9a-f]{4}) class=[0-9a-f]{6} rev=[0-9a-f]{2} "
+                          r"irq=\d+ pin=\d keeper=(dos|glos|quiet)(?: (?:io|mem)\d=[0-9a-f]+)*$", out, re.M)
+        claim = re.search(r"GLOS-PCI claim=(\S+) ", agent.log())
+        checks["pci"] = rc == 0 and len(rows) >= 1 and len(rows) == len(out.strip().splitlines()) \
+            and (not claim or (claim.group(1), "glos") in [(r[0], r[3]) for r in rows])
+        if checks["pci"]:
+            rc, one, _ = ssh("glos pci " + rows[0][0])
+            checks["pci"] = rc == 0 and len(one.splitlines()) == 16 \
+                and one.startswith("00: %s%s " % (rows[0][2], rows[0][1])) and ssh("glos pci 0:zz")[0] == 2
+        if not checks["pci"]:
+            info += " pci=%r" % out[:300]
         # glos kill SEQ: a job that waits its turn is taken out, then the one that runs is killed; and the
         # session shows in glos stat while it does.
         slow = subprocess.Popen(opts + ["glos@127.0.0.1", "WAITSEC 100"], stdout=subprocess.DEVNULL,

@@ -760,15 +760,15 @@ static const struct {
     { "USB", "usb" }, { "JOY", "joy" }, { "CLIP", "clip" }, { "AUDIO", "audio" }, { "CACHE", "cache" },
     { "IDLE", "idle" }, { "RESTART", "restart" }, { "REBOOT", "reboot" },
     { "SENDTEXT", "type" }, { "SENDKEYS", "key" }, { "SENDMOUSE", "mouse" }, { "SHUTDOWN", "exit" },
-    { "CLOCK", "time" }, { "SYSMEM", "mem" }, { "NETWORK", "net" }, { "DISK", "disk" }, { "DD", "dd" } };
+    { "CLOCK", "time" }, { "SYSMEM", "mem" }, { "NETWORK", "net" }, { "DISK", "disk" }, { "DD", "dd" }, { "PCI", "pci" } };
 
 static const char *const own_names[] = { "GLOS", "PS", "KILL", "LOG", "STAT", "RUN", "CONFIG", "DISPLAY", "DESK", "SHOT",
     "REC", "SECRETS", "USB", "JOY", "CLIP", "AUDIO", "CACHE", "IDLE", "RESTART", "REBOOT", "SENDTEXT", "SENDKEYS",
-    "SENDMOUSE", "SHUTDOWN", "CLOCK", "SYSMEM", "NETWORK", "DISK", "DD", 0 };
+    "SENDMOUSE", "SHUTDOWN", "CLOCK", "SYSMEM", "NETWORK", "DISK", "DD", "PCI", 0 };
 
 static const char *const own_help[] = {
     "PS, KILL [n], RUN [--exclusive|--app] program   what runs; one ended; a program started GLOS's way",
-    "LOG, STAT, SYSMEM, NETWORK, CLOCK, USB, JOY     GLOS's log, figures, memory, network, time, devices",
+    "LOG, STAT, SYSMEM, NETWORK, CLOCK, USB, JOY, PCI   GLOS's log, figures, memory, network, time, devices",
     "NETWORK SERVER|CLIENT COMn [speed], NETWORK CABLE OFF   the network over a serial cable",
     "CONFIG, DISPLAY, DESK, AUDIO, CACHE, IDLE, CLIP, SECRETS   settings and the desktop",
     "SENDTEXT text, SENDKEYS codes, SENDMOUSE ...    keys and the mouse, as if at the PC",

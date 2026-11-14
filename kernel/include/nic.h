@@ -34,6 +34,7 @@ void nic_leave(void);                   /* GLOS leaving: the card stopped, its P
 int ne2k_probe(void);                   /* each: 0 once it has claimed its card */
 int rtl8139_probe(void);
 int e100_probe(void);
+int rhine_probe(void);
 void net_start(int selftest);           /* the net thread, once a card is claimed */
 void net_rx(struct nic *n, const u8 *frame, u32 len);
 void net_irq(struct trapframe *tf);     /* the card's IRQ handler */

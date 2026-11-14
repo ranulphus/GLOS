@@ -481,6 +481,22 @@ static void echo_start(void)
         tcp_accept(pcb, echo_accept);
 }
 
+/* The card's interface: its address asked of DHCP, its name said by mDNS. */
+static void eth_up(void)
+{
+    netif_add(&nif, NULL, NULL, NULL, NULL, nif_init, ethernet_input);
+    netif_set_default(&nif);
+    netif_set_status_callback(&nif, status_cb);
+    netif_set_up(&nif);
+    dhcp_start(&nif);
+    mdns_resp_init();
+    if (mdns_resp_add_netif(&nif, hostname) != ERR_OK
+        || mdns_resp_add_service(&nif, hostname, "_ssh", DNSSD_PROTO_TCP, 22, NULL, NULL) < 0)
+        kprintf("GLOS-NET error=mdns\n");
+    else
+        kprintf("GLOS-NET mdns name=%s.local\n", hostname);
+}
+
 /* ---- the thread */
 
 static void net_thread(void *arg)
@@ -488,19 +504,8 @@ static void net_thread(void *arg)
     u32 ms, deadline;
     (void)arg;
     lwip_init();
-    if (nic0) {                                 /* (a PC with no card GLOS drives has the cable link alone) */
-        netif_add(&nif, NULL, NULL, NULL, NULL, nif_init, ethernet_input);
-        netif_set_default(&nif);
-        netif_set_status_callback(&nif, status_cb);
-        netif_set_up(&nif);
-        dhcp_start(&nif);
-        mdns_resp_init();
-        if (mdns_resp_add_netif(&nif, hostname) != ERR_OK
-            || mdns_resp_add_service(&nif, hostname, "_ssh", DNSSD_PROTO_TCP, 22, NULL, NULL) < 0)
-            kprintf("GLOS-NET error=mdns\n");
-        else
-            kprintf("GLOS-NET mdns name=%s.local\n", hostname);
-    }
+    if (nic0)                                   /* (a PC with no card GLOS drives has the cable link alone) */
+        eth_up();
     if (selftest)
         echo_start();
     sshd_net_start(net_kick);

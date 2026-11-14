@@ -4,6 +4,20 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## VIA Rhine network cards; PCI (2026-11-14)
+
+- **GLOS drives VIA's Rhine network chip** (the VT86C100A of D-Link's DFE-530TX and its like), found and started
+  with the other cards when GLOS starts. Tested on a real card alone, in the Pentium III bench: 86Box has none.
+  The later Rhine II and III (VT6102, VT6105) are taken by the same driver, untried.
+- **A network card that shares its interrupt line with an OHCI USB controller nobody uses is taken now** (GLOS
+  switches that controller's interrupts off, as it did for UHCI ones). It was refused before (`reason=shared-irq`).
+- **`PCI`** (`glos pci`) lists the PC's PCI devices as GLOS found them: address, maker and device numbers, class,
+  interrupt line, I/O and memory ranges, and who keeps each (DOS, GLOS, or made quiet). `PCI 00:10.0` prints
+  one device's configuration space.
+- A PC started from Windows 98's "Restart in MS-DOS mode" can have its PCI cards left without addresses or
+  interrupt lines: GLOS says so (`reason=no-io`) and leaves the card. Started straight from the boot menu's
+  "Command prompt only", the BIOS's settings stand.
+
 ## No drive is C: by name (2026-11-14)
 
 - GLOS no longer assumes it, or DOS, is on C:. **GLOS's own files follow the folder GLOS.EXE runs from:** crash

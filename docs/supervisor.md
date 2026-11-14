@@ -673,7 +673,7 @@ mode set, so it knows when the BIOS is busy (§17.2).
 | 80h, E80h | Passed through | Passed through | POST code and the 86Box unit tester (the harness) |
 | 3F8h–3FFh (COM1) | Passed through; output mirrored to the log ring | Passed through | Programs reprogram the UART (Xash, PrBoom, Fifth Wheel [census]) |
 | 2F8h–2FFh (COM2) | Owned by the gdb stub when `/GDB` is given, otherwise passed through | Same | |
-| GLOS-owned NIC | Trapped; reads return FFh, writes dropped; its PCI function reads as absent | Trapped | One card, the first found of: an RTL8139 (M5), an Intel 8255x (M5), an NE2000 (M3: the RTL8029 on PCI, or ISA at 300h, 280h, 320h, 340h, 360h). Its IRQ is the kernel's: the VM never sees it. Refused (`GLOS-NET refuse`) under a packet driver, or on a PCI IRQ line another function shares unless that function can be made quiet (docs/devices.md: a UHCI controller nobody drives, say). See "The network cards" below. |
+| GLOS-owned NIC | Trapped; reads return FFh, writes dropped; its PCI function reads as absent | Trapped | One card, the first found of: an RTL8139 (M5), an Intel 8255x (M5), a VIA Rhine (2026-11-14), an NE2000 (M3: the RTL8029 on PCI, or ISA at 300h, 280h, 320h, 340h, 360h). Its IRQ is the kernel's: the VM never sees it. Refused (`GLOS-NET refuse`) under a packet driver, or on a PCI IRQ line another function shares unless that function can be made quiet (docs/devices.md: a UHCI or OHCI controller nobody drives, say). See "The network cards" below. |
 | 3F8h (COM1 data) | Trapped for output, passed through | Same | M3: tells the kernel when a program is part-way through a line, so the kernel's lines wait for it (§18) |
 | 1F7h, 177h (IDE command registers; a native-mode controller's BAR+7) | Trapped while the disk cache is on (§9.8), except during its own BIOS calls; passed through | Trapped (a direct-mode session's protected-mode code isn't: the cache stands aside) | A command that may write a disk, from anything but the cache's own calls, drops every block (`GLOS-CACHE drop reason=port`); count mode logs it. Reads (status polling) pass through. |
 | GLOS-owned UHCI (USB) | Trapped; reads return FFh, writes dropped; its PCI function reads as absent | Trapped | Each UHCI once GLOS.CFG is read (`[usb] enabled`, D74): taken from the BIOS, polled with no interrupt (`kernel/drv/uhci.c`). Its devices: hubs; boot keyboards and mice, as PS/2 ones (`vkbc_key`, `vkbc_mouse`; GLOS's own key repeat); HID and Xbox pads, to the game port. Given back stopped and reset at `glos exit` |
@@ -737,9 +737,16 @@ mode set, so it knows when the BIOS is busy (§17.2).
     again. One transmit block: a frame waits up to about a millisecond for the one before to leave. The
     address comes from the serial EEPROM, clocked bit by bit; its address width (93C46 or 93C66) is found
     by the zero the part puts out after the last address bit.
-  - Both take every multicast frame (mDNS's group is one).
+  - **VIA Rhine** (`rhine.c`, 2026-11-14: the VT86C100A; the VT6102 and VT6105 by the same registers,
+    untried), through its I/O registers. Two rings of 16-byte descriptors, 16 to receive and 8 to transmit,
+    each with a 2 KB buffer; a descriptor is the card's while its first word has OWN. Whole frames only, both
+    ways (no FIFO underrun on a slow bus). The card is told to look at the transmit ring for each frame. Duplex
+    is read from the PHY (what both ends advertised) at the start and when the link changes, and the MAC is
+    told. The address comes from the EEPROM, reloaded after the reset. 86Box has no Rhine: this driver is
+    tested on the Pentium III bench alone (docs/v1-route.md, phase H).
+  - All three take every multicast frame (mDNS's group is one).
   - **Memory a card reads and writes itself** comes from `dma_alloc()`: frames in a row, mapped in the
-    kernel for good at C0800000h (4 MB at most; eleven frames for the RTL8139, seven for the 8255x). They
+    kernel for good at C0800000h (4 MB at most; eleven frames for the RTL8139, seven for the 8255x, thirteen for the Rhine). They
     are taken only when that card is found.
 - **The RTC:** registers A, B and C are virtual. The periodic flag follows the program's rate (at most once
   per kernel tick); AF and UF come from the chip. IRQ 8 is raised for the VM when IRQF rises. Writes to

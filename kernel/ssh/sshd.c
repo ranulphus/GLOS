@@ -35,6 +35,7 @@
 #include "mixer.h"
 #include "mm.h"
 #include "slip.h"
+#include "pci.h"
 #include "diskcmd.h"
 #include "dos.h"
 #include "dpmi.h"
@@ -1240,6 +1241,52 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             say(ch, 0, b);
             ssh_chan_exit(ch, 0);
         }
+    } else if (!strncmp(cmd, "glos pci ", 9)) {
+        /* glos pci BUS:DEV.FN: that function's configuration space, its 256 bytes as they read now. */
+        const char *p = cmd + 9;
+        u32 v[3] = { 0, 0, 0 }, k, r;
+        char t[80];
+        for (k = 0; k < 3; k++) {
+            u32 digits = 0;
+            for (; (*p >= '0' && *p <= '9') || ((*p | 32) >= 'a' && (*p | 32) <= 'f'); p++, digits++)
+                v[k] = v[k] * 16 + (u32)(*p <= '9' ? *p - '0' : (*p | 32) - 'a' + 10);
+            if (!digits || (k < 2 && *p++ != (k ? '.' : ':')))
+                break;
+        }
+        if (k < 3 || *p || v[0] > 255 || v[1] > 31 || v[2] > 7) {
+            say(ch, 1, "glos pci [BUS:DEV.FN] (hexadecimal, as glos pci lists them)\n");
+            ssh_chan_exit(ch, 2);
+        } else {
+            for (r = 0; r < 256; r += 16) {
+                ksnprintf(t, sizeof t, "%02x: %08x %08x %08x %08x\n", r, pci_read32(v[0], v[1], v[2], r),
+                          pci_read32(v[0], v[1], v[2], r + 4), pci_read32(v[0], v[1], v[2], r + 8),
+                          pci_read32(v[0], v[1], v[2], r + 12));
+                say(ch, 0, t);
+            }
+            ssh_chan_exit(ch, 0);
+        }
+    } else if (!strcmp(cmd, "glos pci")) {
+        /* The PC's PCI functions as GLOS found them: where each is, what it is, its interrupt line, its first
+           memory and I/O ranges, and who keeps it (docs/devices.md). For a card GLOS has no driver for yet. */
+        static const char *const keeper[] = { "dos", "glos", "quiet" };
+        const struct pci_dev *d;
+        char t[160];
+        int i, k;
+        for (i = 0; (d = pci_at(i)) != 0; i++) {
+            u32 n = (u32)ksnprintf(t, sizeof t, "%02x:%02x.%u %04x:%04x class=%02x%02x%02x rev=%02x irq=%u pin=%u keeper=%s",
+                                   d->bus, d->dev, d->fn, d->vendor, d->device, d->class, d->subclass, d->progif,
+                                   pci_read32(d->bus, d->dev, d->fn, 8) & 0xFF, d->irq == 0xFF ? 0 : d->irq, d->pin,
+                                   keeper[d->keeper < 3 ? d->keeper : 0]);
+            for (k = 0; k < 6 && n + 24 < sizeof t; k++)
+                if (d->bar[k])
+                    n += (u32)ksnprintf(t + n, sizeof t - n, d->bar[k] & 1 ? " io%d=%04x" : " mem%d=%08x", k,
+                                        d->bar[k] & (d->bar[k] & 1 ? ~3u : ~15u));
+            ksnprintf(t + n, sizeof t - n, "\n");
+            say(ch, 0, t);
+        }
+        if (!i)
+            say(ch, 0, "no PCI\n");
+        ssh_chan_exit(ch, 0);
     } else if (ci_starts(cmd, "glos net server ") || ci_starts(cmd, "glos net client ")
                || (ci_starts(cmd, "glos net cable off") && !cmd[18])) {
         /* the cable link (docs/cable.md): glos net server|client COMn [BAUD], glos net cable off */
@@ -1499,7 +1546,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
     } else {
         say(ch, 1, "glos: no such command (glos ver, echo, run, shot, key, type, mouse, log, stat, ps, mem, net, tick, "
-                   "joy, usb, kill, gdb, exit, restart, reboot)\n");
+                   "joy, usb, pci, kill, gdb, exit, restart, reboot)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;

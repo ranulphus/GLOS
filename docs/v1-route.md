@@ -290,11 +290,14 @@ two command sets that don't match). Before phase C, because the Terminal is one 
 typical PCs of the period need. Its contents are settled after a hardware compatibility audit, and nothing is built
 before that.
 
-- **Known so far: a VIA Rhine network driver.**
+- **Known so far: a VIA Rhine network driver.** **Built 2026-11-14** (the owner lifted the hold for it alone,
+  2026-11-13): `kernel/drv/rhine.c`, taken at GLOS's start like the other cards. On the Pentium III bench: DHCP,
+  SSH, 32 MB each way with matching sums beside 20,000 large pings, none lost, no card errors. The Rhine II and
+  III are untried.
   - VIA Rhine I, II and III, from VIA's public datasheet. It covers the Pentium III bench's D-Link DFE-530TX (a Rhine
     marked DL10030, with a Davicom PHY) and the network built into VIA-chipset motherboards.
-  - 86Box has no Rhine model. Whether it is tested on the bench only, or 86Box gets a model as a RetroGPU patch,
-    is settled in H's plan.
+  - 86Box has no Rhine model. It is tested on the bench only so far; whether 86Box gets a model as a RetroGPU
+    patch is settled in H's plan.
 - **Known so far: C-Media's CM8738 (CMI8738), the Pentium III bench's sound.**
   - **A native driver for GLOS's mixer**, so the desktop and GLOS's apps have sound on it: PCI, bus-master DMA,
     from C-Media's datasheet.

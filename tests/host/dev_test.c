@@ -1,4 +1,4 @@
-/* The device layer's line rule and its UHCI quiet driver (kernel/drv/dev.c;
+/* The device layer's line rule and its UHCI and OHCI quiet drivers (kernel/drv/dev.c;
  * docs/devices.md, D1) against made-up PCI functions and ports: an Intel
  * UHCI under the BIOS's legacy support made quiet and its SMI kept; one a
  * driver runs refused; a stale line register with no pin ignored; another
@@ -17,6 +17,16 @@ u16 fake_ports[65536];
 static struct pci_dev fn[8];
 static int nfn;
 static u32 legsup[8];                           /* config C0h of each function */
+static u32 command[8];                          /* config 04h: I/O and memory decoded unless a case says not */
+static u32 ohci[32];                            /* an OHCI's registers, where mm_dev_map leads */
+static u32 mapped;                              /* the address mm_dev_map was last asked for */
+
+void *mm_dev_map(u32 phys, u32 bytes)
+{
+    (void)bytes;
+    mapped = phys;
+    return ohci;
+}
 static char logbuf[4096];
 static int fails;
 
@@ -55,7 +65,7 @@ static int find(u32 bus, u32 dev, u32 f)
 u32 pci_read32(u32 bus, u32 dev, u32 f, u32 reg)
 {
     int i = find(bus, dev, f);
-    return i >= 0 && reg == 0xC0 ? legsup[i] : 0xFFFFFFFFu;
+    return i >= 0 && reg == 0xC0 ? legsup[i] : i >= 0 && reg == 4 ? command[i] : 0xFFFFFFFFu;
 }
 
 void pci_write32(u32 bus, u32 dev, u32 f, u32 reg, u32 v)
@@ -81,6 +91,7 @@ static struct pci_dev *add(u8 dev, u8 f, u16 vendor, u16 device, u8 cls, u8 sub,
     d->class = cls, d->subclass = sub, d->progif = progif, d->pin = pin, d->irq = irq;
     d->bar[4] = io ? (u32)io | 1u : 0;
     legsup[nfn] = 0;
+    command[nfn] = 7;
     nfn++;
     return d;
 }
@@ -89,6 +100,8 @@ static void reset(void)
 {
     nfn = 0;
     memset(fake_ports, 0, sizeof fake_ports);
+    memset(ohci, 0, sizeof ohci);
+    mapped = 0;
     logbuf[0] = 0;
 }
 
@@ -139,6 +152,52 @@ int main(void)
     fake_ports[0xD004] = 0x000F;
     CHECK(dev_take_line(nic, with, sizeof with) == -1 && usb->keeper == DEV_DOS && fake_ports[0xD004] == 0x000F);
     CHECK(strstr(logbuf, "why=running") != NULL);
+
+    /* The P3 bench: the ALi board's OHCI and the VIA Rhine on IRQ 9. Nobody drives the OHCI (reset, its
+       interrupts neither routed to SMI nor enabled): every interrupt disabled, the master bit with them */
+    reset();
+    usb = add(2, 0, 0x10B9, 0x5237, 0x0C, 0x03, 0x10, 1, 9, 0);
+    usb->bar[0] = 0xDFFFC000u;
+    nic = add(16, 0, 0x1106, 0x3043, 0x02, 0x00, 0x00, 1, 9, 0);
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && usb->keeper == DEV_QUIET);
+    CHECK(mapped == 0xDFFFC000u && ohci[0x14 / 4] == 0xC000007Fu && ohci[0x10 / 4] == 0);
+    CHECK(strstr(logbuf, "GLOS-DEV quiet 00:02.0 id=10b9:5237 class=ohci irq=9 how=intr\n") != NULL);
+
+    /* ... under the BIOS's keyboard emulation (HcControl's InterruptRouting): its interrupts are SMIs, never the
+       line's. Quiet as it is, nothing written */
+    reset();
+    usb = add(2, 0, 0x10B9, 0x5237, 0x0C, 0x03, 0x10, 1, 9, 0);
+    usb->bar[0] = 0xDFFFC000u;
+    nic = add(16, 0, 0x1106, 0x3043, 0x02, 0x00, 0x00, 1, 9, 0);
+    ohci[0x04 / 4] = 0x00000180u;               /* operational, routed to SMI */
+    ohci[0x10 / 4] = 0x80000042u;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && usb->keeper == DEV_QUIET);
+    CHECK(ohci[0x14 / 4] == 0 && ohci[0x10 / 4] == 0x80000042u && strstr(logbuf, "how=smi") != NULL);
+
+    /* ... running with its interrupts on the line: somebody drives it. Kept, the card refused */
+    reset();
+    usb = add(2, 0, 0x10B9, 0x5237, 0x0C, 0x03, 0x10, 1, 9, 0);
+    usb->bar[0] = 0xDFFFC000u;
+    nic = add(16, 0, 0x1106, 0x3043, 0x02, 0x00, 0x00, 1, 9, 0);
+    ohci[0x04 / 4] = 0x00000080u;
+    ohci[0x10 / 4] = 0x80000002u;
+    CHECK(dev_take_line(nic, with, sizeof with) == -1 && !strcmp(with, "00:02.0") && usb->keeper == DEV_DOS);
+    CHECK(ohci[0x14 / 4] == 0 && strstr(logbuf, "why=driven") != NULL);
+
+    /* ... its memory not decoded (switched off in the BIOS's setup): it can't interrupt, and isn't looked at;
+       and one with no address there to look at is in the way */
+    reset();
+    usb = add(2, 0, 0x10B9, 0x5237, 0x0C, 0x03, 0x10, 1, 9, 0);
+    usb->bar[0] = 0xDFFFC000u;
+    nic = add(16, 0, 0x1106, 0x3043, 0x02, 0x00, 0x00, 1, 9, 0);
+    command[0] = 0;
+    CHECK(dev_take_line(nic, with, sizeof with) == 0 && usb->keeper == DEV_QUIET && mapped == 0);
+    CHECK(strstr(logbuf, "how=off") != NULL);
+    reset();
+    usb = add(2, 0, 0x10B9, 0x5237, 0x0C, 0x03, 0x10, 1, 9, 0);
+    nic = add(16, 0, 0x1106, 0x3043, 0x02, 0x00, 0x00, 1, 9, 0);
+    CHECK(dev_take_line(nic, with, sizeof with) == -1 && usb->keeper == DEV_DOS && mapped == 0);
+    CHECK(strstr(logbuf, "why=no-memory") != NULL);
 
     /* No quiet driver for it (a PCI sound card): in the way, untouched, nothing logged by the device layer */
     reset();

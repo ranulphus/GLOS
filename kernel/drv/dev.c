@@ -11,6 +11,7 @@
 #include "dev.h"
 #include "io.h"
 #include "kprintf.h"
+#include "mm.h"
 
 /* ---- quiet drivers: switch a device's interrupts off, or say why not */
 
@@ -59,8 +60,49 @@ static int uhci_quiet(struct pci_dev *d, const char **how)
     return 0;
 }
 
+/* OHCI USB (class 0C 03 10): its registers are in memory (BAR 0). With HcControl's InterruptRouting set its
+   interrupts go to SMI, for the BIOS's keyboard emulation, and never to the PCI line: nothing to do. Otherwise
+   every interrupt is disabled (HcInterruptDisable, the master bit with the rest), unless the controller is
+   running with its interrupts on the line: somebody drives it (a BIOS that serves its keyboard by IRQ, a DOS
+   driver). (The P3 bench: the ALi board's own OHCI shares IRQ 9 with the network card.) */
+#define OHCI_CONTROL  0x04
+#define OHCI_INTEN    0x10
+#define OHCI_INTDIS   0x14
+#define OHCI_IR       0x00000100u       /* HcControl: interrupts are routed to SMI */
+#define OHCI_HCFS     0x000000C0u       /* ... the controller's state: 80h operational */
+#define OHCI_MIE      0x80000000u
+
+static int ohci_match(const struct pci_dev *d) { return d->class == 0x0C && d->subclass == 0x03 && d->progif == 0x10; }
+
+static int ohci_quiet(struct pci_dev *d, const char **how)
+{
+    volatile u32 *r;
+    u32 control;
+    if (!(pci_read32(d->bus, d->dev, d->fn, 4) & 2)) {         /* its memory isn't decoded: it can't be running */
+        *how = "off";
+        return 0;
+    }
+    if ((d->bar[0] & 1) || !(d->bar[0] & ~15u) || !(r = mm_dev_map(d->bar[0] & ~15u, 4096))) {
+        *how = "no-memory";
+        return -1;
+    }
+    control = r[OHCI_CONTROL / 4];
+    if (control & OHCI_IR) {
+        *how = "smi";
+        return 0;
+    }
+    if ((control & OHCI_HCFS) == 0x80 && (r[OHCI_INTEN / 4] & OHCI_MIE)) {
+        *how = "driven";
+        return -1;
+    }
+    r[OHCI_INTDIS / 4] = OHCI_MIE | 0x4000007Fu;
+    *how = "intr";
+    return 0;
+}
+
 static const struct quiet quiets[] = {
     { "uhci", uhci_match, uhci_quiet },
+    { "ohci", ohci_match, ohci_quiet },
 };
 
 /* ---- lines */

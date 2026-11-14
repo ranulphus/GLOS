@@ -80,5 +80,5 @@ int nic_probe(void)
         kprintf("GLOS-NET refuse reason=packet-driver int=%02x\n", pd);
         return -1;
     }
-    return rtl8139_probe() == 0 || e100_probe() == 0 || ne2k_probe() == 0 ? 0 : -1;
+    return rtl8139_probe() == 0 || e100_probe() == 0 || rhine_probe() == 0 || ne2k_probe() == 0 ? 0 : -1;
 }
