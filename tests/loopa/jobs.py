@@ -5655,7 +5655,7 @@ def thr_case(profile, card):
     checks["balanced"] = text.count("GLOS-APP start ") == text.count("GLOS-APP end ") == 19
     checks["crash-report"] = bool(re.search(r"GLOS-CRASH why=thread-exception vec=0e .*prog=C:\\TEST\\THRTEST.EXE", text)) \
         and bool(re.search(r"GLOS-CRASH thread=\d+ name=app\d+\.\d+", text)) \
-        and bool(re.search(r"GLOS-CRASH file=C:\\GLOS\\CRASH\\CRASH\d+\.TXT", text))
+        and bool(re.search(r"GLOS-CRASH file=C:\\TEST\\CRASH\\CRASH\d+\.TXT", text))    # (beside GLOS.EXE: not C:\GLOS by name)
     checks["one-crash"] = len(re.findall(r"GLOS-CRASH why=", text)) == 1
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-APP error" not in text and "GLOS-APP warn" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
@@ -5849,7 +5849,7 @@ def apps_case(profile, card):
     checks["killed-in-dos"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=agent", text))
     checks["refused"] = len(re.findall(r"GLOS-APP refuse psp=\w+ why=(exclusive|already|parent)", text)) == 4
     checks["crash-report"] = bool(re.search(r"GLOS-CRASH why=exception vec=0e .*prog=C:\\TEST\\APPTEST.EXE", text)) \
-        and bool(re.search(r"GLOS-CRASH file=C:\\GLOS\\CRASH\\CRASH\d+\.TXT", text))
+        and bool(re.search(r"GLOS-CRASH file=C:\\TEST\\CRASH\\CRASH\d+\.TXT", text))    # (beside GLOS.EXE: not C:\GLOS by name)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-APP error" not in text and "GLOS-APP warn" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
     bad = [k for k, v in checks.items() if not v]
