@@ -134,9 +134,12 @@ static void notify(struct sock *s, int ev)
     u32 f = irq_save();
     struct app *a = s->app;
     if (a) {
-        if (ev && (s->flags & GLOS_NETF_EVENTS) && a->v2)
+        if (ev && (s->flags & GLOS_NETF_EVENTS) && a->v2 && !a->session)
             api2_net_event(a, id_of(s), s->state, waiting_of(s), room_of(s));
-        thread_wake(&a->wq);
+        if (a->session)
+            vm_kick();                          /* (a full-screen program's: it waits on the VM's thread) */
+        else
+            thread_wake(&a->wq);
     }
     irq_restore(f);
 }
@@ -568,6 +571,11 @@ static u32 ticks_of(u32 ms)
     return ms + (ms * 24 + 999) / 1000;
 }
 
+/* Where a call waits, and whether its program is being ended: an app's thread on the app's queue; a full-screen
+   program's calls (api2sess.c) on the VM's thread, on the VM's queue, which the net thread's news kicks. */
+static struct waitq *wq_of(struct app *a) { return a->session ? &vm.waitq : &a->wq; }
+static int killed(const struct app *a) { return a->session ? vm.kill_req != 0 : a->kill != 0; }
+
 /* Waits until ok(s), the time is up, or the app is killed: 1 if ok(s). */
 static int wait_for(struct app *a, struct sock *s, int (*ok)(const struct sock *), u32 ms)
 {
@@ -578,11 +586,11 @@ static int wait_for(struct app *a, struct sock *s, int (*ok)(const struct sock *
             irq_restore(f);
             return 1;
         }
-        if (a->kill || !ms || (until && (s32)(timer_ticks() - until) >= 0)) {
+        if (killed(a) || !ms || (until && (s32)(timer_ticks() - until) >= 0)) {
             irq_restore(f);
             return 0;
         }
-        thread_wait(&a->wq, until ? until : timer_ticks() + 1024);     /* (for ever: a second at a time) */
+        thread_wait(wq_of(a), until ? until : timer_ticks() + 1024);    /* (for ever: a second at a time) */
         irq_restore(f);
     }
 }
@@ -616,9 +624,9 @@ int sock_resolve(struct app *a, const char *name, u32 ms, u32 *addr)
     if ((k = net_lookup_start(name)) < 0)
         return GLOS_E_MEMORY;                   /* (the lookups are all taken) */
     until = ms == 0xFFFFFFFFu ? 0 : timer_ticks() + ticks_of(ms);
-    while ((r = net_lookup_poll(k, ip)) == 0 && !a->kill && (!until || (s32)(timer_ticks() - until) < 0)) {
+    while ((r = net_lookup_poll(k, ip)) == 0 && !killed(a) && (!until || (s32)(timer_ticks() - until) < 0)) {
         u32 f = irq_save();
-        thread_wait(&a->wq, timer_ticks() + 32);        /* (the resolver wakes its own queue: looked at often) */
+        thread_wait(wq_of(a), timer_ticks() + 32);      /* (the resolver wakes its own queue: looked at often) */
         irq_restore(f);
     }
     if (r == 0) {

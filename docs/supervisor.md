@@ -1946,9 +1946,32 @@ and GLOS's:
     choosing from its first use. Errors: `EADDRINUSE`, `EMSGSIZE`, `EACCES` (a broadcast without
     `SO_BROADCAST`), `EDESTADDRREQ`, `EAGAIN`.
   - lwIP's UDP pcbs are 24 (`MEMP_NUM_UDP_PCB`; its default of four was GLOS's own: DHCP, names, the clock).
+  - **In a program a library made an app** (DOS-GL's HAL and SDL's GLOS back end make the INIT call
+    themselves): `socket()` asks GLOS whether the program may use the network, not whether `glos_init()` ran
+    (`glos_is_app()` tells the same of being an app).
   - **Tested** (`make loopa-netapp`: NETTEST `udp` against a UDP echo server on the host, on both profiles;
     `make loopa-ssh`'s member cases: a program on each of two PCs joined by a cable, each found by the other's
     broadcast).
+
+- **The network for a program that is not an app (API 2.3, 2026-11-15; the owner: "sockets for sessions").** A
+  full-screen program is a plain DOS session to the kernel, and had no part of the API but the calls any
+  program may make. NET's calls are now among those: TCP and datagrams, at full-screen speed (asked for by a
+  game's LAN play; the DOS ports' net play is the same case).
+  - `kernel/app/api2sess.c`: the program's first NET call makes it a context for those calls alone: a table of
+    handles and the sockets' owner, one for the DPMI program that asked (`GLOS-NET session psp=...`). CLOSE,
+    GET and SET work for the handles NET gave it. Every other call of an app's answers `GLOS_E_NOT_APP` as
+    before, and so does CLOSE of a handle it does not have: that is how `glos_is_app()` still says no.
+  - No events: `GLOS_NETF_EVENTS` is taken and does nothing.
+  - Its calls run on the system VM's thread, as the whole program does, and a call that waits waits there
+    (`sock.c`: on the VM's queue, which the net thread's news kicks): the program's own interrupts wait with
+    it, as an app's handlers do while its thread is in a call. A program with handlers to run polls or uses
+    short waits. A kill ends the wait.
+  - What it has open is closed when the program ends (`api2_session_gone`, from the DPMI context's end), and
+    when it becomes an app (INIT): an app starts with none.
+  - Tested (`make loopa-netapp`, NETTEST `udpsess`): all of the datagram ports' and sockets' cases and a TCP
+    connection from a program that never becomes an app; three ports and a connection left open at its end
+    are closed (the host sees the connection go, `sockets=0`); one killed in a wait for a datagram that never
+    comes goes, and nothing is left.
 
 ### 17.12 VNC and capture (M10 step F, `kernel/wm/vnc.c`, `glos rec`)
 

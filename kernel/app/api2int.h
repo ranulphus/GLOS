@@ -141,6 +141,11 @@ int api2_secrets(struct app *a, struct trapframe *tf, u32 n);   /* SECRETS' call
 extern const struct propdef api2_net_props[];
 extern const u32 api2_net_nprops;
 int api2_net(struct app *a, struct trapframe *tf, u32 n);       /* NET's calls (made without the app's lock) */
+int api2_session_call(struct trapframe *tf, u32 fn, int *r);    /* a program that is not an app: NET's calls, and its
+                                                                   handles' (api2sess.c); 0: not one of those */
+int api2_session_core(struct app *a, struct trapframe *tf, u32 fn);    /* (api2.c: CLOSE, GET, SET for it) */
+struct dpmi_ctx;
+void api2_session_gone(struct dpmi_ctx *c);                     /* its program has ended */
 void api2_net_close(struct app *a, void *obj);                  /* CLOSE of a connection's handle, or a port's */
 void api2_audio_tick(struct app *a);                            /* each tick: a stream below its NOTIFY */
 

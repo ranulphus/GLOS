@@ -19,6 +19,11 @@
  *   NETTEST udpraw HOST PORT
  *                     the datagram sockets in a program made an app by an INIT
  *                     call of its own, not glos_init (as DOS-GL and SDL do)
+ *   NETTEST udpsess HOST UDPPORT TCPPORT [hold | block]
+ *                     the network from a program that is not an app (API 2.3,
+ *                     a full-screen program's case): the datagram cases, a
+ *                     TCP connection; hold: sockets left open at its end;
+ *                     block: a wait to be killed in
  *   NETTEST udpserve PORT SECONDS
  *                     a datagram port at PORT: what comes is sent back behind
  *                     "re:", and "announce" is broadcast to PORT+1 every
@@ -31,6 +36,7 @@
  *                     then "quit" to it
  *
  * "NETTEST-DONE failures=N" at the end of all. */
+#include <dos.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -292,6 +298,16 @@ static void case_bsd(const char *hosts, unsigned port, unsigned closed)
 
 /* ---- datagram ports (API 2.2) */
 
+static int no_app;                      /* the program is not an app (NETTEST udpsess): no events, no SLEEP */
+
+static void nap(unsigned ms)
+{
+    if (no_app)
+        delay(ms);
+    else
+        glos_sleep(ms);
+}
+
 static int dg_echo(glos_handle h, unsigned port, unsigned n, unsigned seed)
 {
     static unsigned char out[GLOS_NET_DATAGRAM_MAX], in[GLOS_NET_DATAGRAM_MAX + 8];
@@ -359,7 +375,7 @@ static void case_udp(unsigned port)
 
     /* more than the queue holds: 64 wait, in the order they came, and the rest were dropped */
     glos_net_sendto(h, "burst 80 200", 12, 1000, host, port);
-    glos_sleep(1500);
+    nap(1500);
     glos_get(h, GLOS_PROP_NET_WAITING, &waiting);
     for (n = 0, last = -1, ordered = 1; n < 100; n++) {
         if ((r = glos_net_recvfrom(h, buf, sizeof buf, 0, 0, 0, &len)) < 0)
@@ -380,7 +396,7 @@ static void case_udp(unsigned port)
     i = glos_net_sendto(h, "hello", 5, 0, bcast, port);
     report("dg-broadcast", r == -GLOS_E_REFUSED && r2 == -GLOS_E_REFUSED && r3 == 0 && i == 0,
            "without: %d %d, with: %d %d", r, r2, r3, i);
-    glos_sleep(300);
+    nap(300);
     while (glos_net_recvfrom(h, buf, sizeof buf, 0, 0, 0, 0) >= 0)      /* (an echo of those, if the server heard) */
         ;
     glos_close(h);
@@ -402,6 +418,8 @@ static void case_udp(unsigned port)
     if (h)
         glos_close(h);
 
+    if (no_app)                                         /* (events are an app's) */
+        return;
     /* events: one when a datagram comes in */
     h = glos_net_datagram(0, GLOS_NETF_EVENTS);
     glos_net_sendto(h, "ping", 4, 1000, host, port);
@@ -700,18 +718,71 @@ static int udpraw(int argc, char **argv)
     int fd, e, r;
     if (argc < 4)
         return 2;
-    fd = socket(AF_INET, SOCK_DGRAM, 0);
-    e = errno;
-    report("raw-before", fd == -1 && e == ENOSYS && !glos_is_app(), "socket=%d errno=%d", fd, e);
+    fd = socket(AF_INET, SOCK_DGRAM, 0);        /* (not an app yet: a socket all the same, from API 2.3; it is
+                                                   closed for it when the program becomes an app) */
+    e = fd >= 0 ? bind(fd, (struct sockaddr *)&(struct sockaddr_in){ AF_INET, htons(47004), { 0 }, { 0 } },
+                       sizeof(struct sockaddr_in)) : -1;
+    report("raw-before", fd >= 0 && e == 0 && !glos_is_app(), "socket=%d bind=%d", fd, e);
     memset(&in, 0, sizeof in);
     in.size = sizeof in;
     in.major = GLOS_MAJOR, in.minor = GLOS_MINOR;
     strcpy(in.name, "NETTEST RAW");
     r = glos_call(GLOS_CORE_INIT, &in);
     report("raw-init", r == 0 && !glos_app() && glos_is_app(), "r=%d app=%u is_app=%d", r, glos_app(), glos_is_app());
+    {                                           /* the port it bound before is free again: an app starts with none */
+        glos_handle h = glos_net_datagram(47004, 0);
+        report("raw-fresh", h != 0, "error=%d", h ? 0 : glos_error());
+        if (h)
+            glos_close(h);
+    }
     host = addr_of(argv[2]);
     case_udp_bsd((unsigned)atoi(argv[3]));
     printf("NETTEST-RAW-DONE failures=%d\n", failures);
+    return failures != 0;
+}
+
+/* The network from a program that is not an app and never becomes one (API 2.3: a full-screen program's case):
+   the datagram ports' cases and the sockets', a TCP connection; `hold`: three ports and a connection left open
+   at its end; `block`: a wait for a datagram that never comes, to be killed in. */
+static int udpsess(int argc, char **argv)
+{
+    char buf[16];
+    unsigned st = 0;
+    glos_handle c;
+    int r, r2, ev;
+    if (argc < 5)
+        return 2;
+    no_app = 1;
+    host = addr_of(argv[2]);
+    if (argc > 5 && !strcmp(argv[5], "block")) {
+        glos_handle h = glos_net_datagram(0, 0);
+        printf("NETTEST blocking %d\n", h != 0);
+        fflush(stdout);
+        glos_net_recvfrom(h, buf, sizeof buf, 0xFFFFFFFFu, 0, 0, 0);
+        printf("NETTEST unblocked\n");
+        return 1;
+    }
+    case_udp((unsigned)atoi(argv[3]));
+    case_udp_bsd((unsigned)atoi(argv[3]));
+    c = glos_net_connect(host, (unsigned)atoi(argv[4]), 5000, GLOS_NETF_EVENTS);   /* (the flag: taken, nothing done) */
+    r = c ? glos_net_send(c, "ping\n", 5, 1000) : -1;
+    r2 = c ? glos_net_receive(c, buf, sizeof buf, 3000, &st) : -1;
+    report("sess-tcp", c && r == 5 && r2 == 5 && !memcmp(buf, "ping\n", 5), "connect=%d send=%d receive=%d error=%d",
+           c != 0, r, r2, glos_error());
+    {
+        union { struct glos_ev ev; unsigned char room[GLOS_EV_MAX]; } e;
+        ev = glos_event(&e, sizeof e, 0, 0);
+    }
+    r = glos_sleep(1);
+    report("sess-not-app", !glos_is_app() && !glos_app() && r != 0 && glos_close(0) == GLOS_E_NOT_APP,
+           "is_app=%d sleep=%d event=%d close0=%d", glos_is_app(), r, ev, glos_close(0));
+    if (argc > 5 && !strcmp(argv[5], "hold")) {         /* (left open: GLOS closes them when the program has gone) */
+        r = glos_net_datagram(0, 0) && glos_net_datagram(0, 0) && glos_net_datagram(47003, 0);
+        printf("NETTEST holding %d\n", r);
+    } else if (c) {
+        glos_net_close(c, 0);
+    }
+    printf("NETTEST-SESS-DONE failures=%d\n", failures);
     return failures != 0;
 }
 
@@ -720,6 +791,8 @@ int main(int argc, char **argv)
     int r;
     if (argc > 1 && !strcmp(argv[1], "udpraw"))
         return udpraw(argc, argv);
+    if (argc > 1 && !strcmp(argv[1], "udpsess"))
+        return udpsess(argc, argv);
     r = glos_init("NETTEST", "", "");
     if (r != 0) {
         printf("NETTEST no GLOS (error %d)\n", r);

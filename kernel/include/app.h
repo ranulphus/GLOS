@@ -5,6 +5,9 @@
 #include "sched.h"
 
 struct app;
+struct dpmi_ctx;
+void api2_session_gone(struct dpmi_ctx *c);     /* a program that is not an app has ended: the network calls'
+                                                   context it had (app/api2sess.c) */
 struct rmregs;
 
 #define NEXT_DETACHED 0xFFFFFFFDu       /* the stub's NEXT: the program it EXECed runs on as an app */

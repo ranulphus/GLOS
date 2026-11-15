@@ -256,8 +256,16 @@ int socket(int domain, int type, int protocol)
         return fail(EPROTONOSUPPORT);
     memset(&v, 0, sizeof v);
     v.size = sizeof v;
-    if (!glos_is_app() || glos_version(&v) != 0)        /* (an app, whoever made the program one) */
+    if (glos_version(&v) != 0)
         return fail(ENOSYS);
+    {                                           /* may this program use the network's calls? An app may, whoever
+                                                   made it one (DOS-GL and SDL make GLOS's INIT call themselves);
+                                                   from API 2.3 a full-screen program may too. Asked of GLOS */
+        unsigned n = 0;
+        int r = glos_net_state(0, 0, &n);
+        if (r != 0 && r != GLOS_E_ROOM)
+            return fail(ENOSYS);
+    }
     if (!(v.machine & GLOS_MACHINE_NET))
         return fail(ENETDOWN);
     if (!(k = calloc(1, sizeof *k)))

@@ -7397,6 +7397,45 @@ def netapp_case(profile, card):
                 if m.group(2) != "ok":
                     notes.append("udpraw %s: %s" % (m.group(1), m.group(3)))
         checks["nt-raw-done"] = rc == 0 and "NETTEST-RAW-DONE failures=0" in o and "raw:dgbsd-connect" in checks
+        # ... and in a program that is not an app at all (API 2.3: a full-screen program's case): the same
+        # datagram cases and a TCP connection; it leaves three ports and the connection open when it ends, and
+        # GLOS closes them; one killed in a wait for a datagram goes, and nothing is left
+        before = echo.open
+        rc, o, e = agent.ssh("C:\\TEST\\NETTEST.EXE udpsess 10.0.2.2 %d %d hold" % (udp.port, echo.port), timeout=300)
+        open(os.path.join(ROOT, "out", "netapp-%s-sess.out" % tag), "w").write(o + e)
+        for line in o.replace("\r", "").split("\n"):
+            m = re.match(r"NETTEST (sess-\S+|dg-\S+|dgbsd-\S+) (ok|FAIL) ?(.*)", line)
+            if m:
+                checks["sess:" + m.group(1)] = m.group(2) == "ok"
+                if m.group(2) != "ok":
+                    notes.append("udpsess %s: %s" % (m.group(1), m.group(3)))
+        checks["nt-sess-done"] = rc == 0 and "NETTEST-SESS-DONE failures=0" in o and "NETTEST holding 1" in o \
+            and "sess:sess-tcp" in checks and "sess:dg-queue" in checks and "sess:dgbsd-connect" in checks
+        checks["sess-logged"] = "GLOS-NET session psp=" in agent.log() and "GLOS-APP start" not in agent.log().split("udpsess")[-1].split("GLOS-AGENT done")[0]
+        t0 = time.time()
+        while time.time() - t0 < 30 and (echo.open > before or "sockets=0" not in agent.ssh("glos net")[1]):
+            time.sleep(0.5)
+        checks["sess-closed"] = echo.open == before and "sockets=0" in agent.ssh("glos net")[1]
+        blocked = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\NETTEST.EXE udpsess 10.0.2.2 %d %d block"
+                                                 % (udp.port, echo.port)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        t0 = time.time()
+        while time.time() - t0 < 60 and "sockets=1" not in agent.ssh("glos net")[1]:
+            time.sleep(0.5)
+        checks["sess-blocked"] = "sockets=1" in agent.ssh("glos net")[1]
+        checks["sess-kill"] = agent.ssh("glos kill")[0] == 0
+        try:
+            blocked.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            blocked.kill()
+            checks["sess-kill"] = False
+        bout = blocked.stdout.read().decode("latin-1")
+        checks["sess-killed"] = "NETTEST blocking 1" in bout and "unblocked" not in bout
+        t0 = time.time()
+        while time.time() - t0 < 30 and "sockets=0" not in agent.ssh("glos net")[1]:
+            time.sleep(0.5)
+        checks["sess-kill-clean"] = "sockets=0" in agent.ssh("glos net")[1]
+        if not all(checks[k] for k in ("sess-closed", "sess-blocked", "sess-kill", "sess-killed", "sess-kill-clean")):
+            notes.append("session sockets: net=%r blocked=%r" % (agent.ssh("glos net")[1][-200:], bout[-200:]))
         checks["table-empty"] = "sockets=0" in agent.ssh("glos net")[1]
         # an app killed with connections open
         before = echo.open

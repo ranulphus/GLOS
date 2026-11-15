@@ -410,6 +410,9 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 - **2.2 (2026-11-15): datagram ports**, asked for by a game's LAN play (Echoes of the Void). 1472 bytes a
   datagram, 64 waiting at most, broadcasts for a port that has its BROADCAST property, the cut-short datagram's
   whole length told. As built: supervisor.md §17.11. On the BSD layer: `SOCK_DGRAM`.
+- **2.3 (2026-11-15): NET for a program that is not an app** (the owner: a full-screen program gets the network
+  too). NET's calls, and CLOSE, GET and SET for their handles; no events; waits are on the program's one
+  thread. As built: supervisor.md §17.11.
 
 ### 0Ch SETTINGS
 

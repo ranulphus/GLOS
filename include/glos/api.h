@@ -54,7 +54,7 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 2
+#define GLOS_MINOR 3
 
 #define GLOS_FN(area, n) ((2u << 16) | ((unsigned)(area) << 8) | (unsigned)(n))
 #define GLOS_FN_MAJOR(fn) ((unsigned)(fn) >> 16)
@@ -1125,7 +1125,13 @@ struct glos_ev_midi {
  * GLOS_FOREVER); a wait ends at once when the app is asked to end. A connection, and a port listened on, is a
  * handle (GLOS_HK_CONNECTION) until CLOSE: what is still to be sent is sent first, unless its RESET is set.
  * An app has 16 at most; one thread at a time reads a connection, and one writes it. These calls don't hold
- * up the app's other threads' calls. */
+ * up the app's other threads' calls.
+ *
+ * 2.3: NET's calls are also a program's that is not an app (a full-screen program, which GLOS runs as a plain
+ * DOS session): they, and CLOSE, GET and SET for the handles they give, and nothing else of an app's. It has
+ * no events (GLOS_NETF_EVENTS does nothing there). Its calls wait on the one thread it has, its own
+ * interrupts with them: a program with handlers to run uses short waits or none. What it has open is closed
+ * when it ends. */
 #define GLOS_NET_RESOLVE GLOS_FN(GLOS_AREA_NET, 0)      /* struct glos_net_resolve: a name's address (DNS) */
 #define GLOS_NET_CONNECT GLOS_FN(GLOS_AREA_NET, 1)      /* struct glos_net_connect: a connection out */
 #define GLOS_NET_SEND    GLOS_FN(GLOS_AREA_NET, 2)      /* struct glos_net_io */

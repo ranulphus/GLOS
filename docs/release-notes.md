@@ -4,6 +4,14 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The network for full-screen programs (API 2.3, 2026-11-15)
+
+- **A full-screen program can use sockets** (TCP and UDP), where only an app in a window could: a game plays over
+  the network at full-screen speed. Nothing changes in the program: `socket()` succeeds there now.
+- `socket()` also works in a program that DOS-GL or SDL made an app (it answered "not supported").
+- Such a program has no events, and a call that waits holds up the program's own interrupt handlers until it
+  returns: poll, or use short waits. What it leaves open is closed when it ends.
+
 ## UDP for apps: datagram sockets (API 2.2, 2026-11-15)
 
 - **`socket(AF_INET, SOCK_DGRAM, 0)`** in the SDK's BSD sockets, with `bind`, `getsockname`, `sendto`, `recvfrom`,

@@ -303,6 +303,7 @@ static void ctx_destroy(int psp)
     wp_clear_level(1);
     rmcb_free_ctx(c);
     mtrr_release(c);
+    api2_session_gone(c);                       /* (a full-screen program's connections and ports: api2sess.c) */
     current->ctx = 0;
     dpmi_ctx_load(0);
     mm_space_free(c->cr3);

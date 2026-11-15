@@ -56,6 +56,8 @@ struct app {
     u32 ivt[256];                               /* the real-mode vectors it changed ... */
     u8 ivt_mine[32];                            /* ... a bit for each */
     volatile u8 kill;
+    u8 session;                                 /* not an app: a full-screen program's context for NET's calls
+                                                   (api2sess.c): its calls are on the VM's thread */
     u8 adopted;                                 /* the VM thread is making a call for it */
     u8 dead;                                    /* DOS has ended its process */
     u8 call;                                    /* AC_: what it waits for the VM thread with */

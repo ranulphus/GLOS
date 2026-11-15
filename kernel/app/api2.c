@@ -476,6 +476,7 @@ static int init(struct trapframe *tf)
         a2_wr(tf, &in, sizeof in, size);
         return a2_fail(tf, GLOS_E_INIT);
     }
+    api2_session_gone(dctx);                    /* (what it had open as a program that was not an app: closed) */
     a = app_pending();                          /* (its name, Help page and Start menu group, for later steps) */
     if (a)
         a->terminal = (in.flags & GLOS_INIT_TERMINAL) != 0;    /* (2.1: run at a terminal, a session waits for it) */
@@ -726,6 +727,12 @@ static int cache_call(struct trapframe *tf)     /* DRAW's CACHE: for any program
     return r ? a2_fail(tf, r) : a2_ok(tf, 0);
 }
 
+/* CLOSE, GET and SET for a program that is not an app, of a handle NET gave it (api2sess.c). */
+int api2_session_core(struct app *a, struct trapframe *tf, u32 fn)
+{
+    return fn == GLOS_CORE_CLOSE ? close_call(a, tf) : prop_call(a, tf, fn == GLOS_CORE_SET);
+}
+
 int api2_call(struct trapframe *tf)
 {
     struct app *a = app_cur();
@@ -749,8 +756,8 @@ int api2_call(struct trapframe *tf)
         return api2_sys_stat(tf);
     if (fn == GLOS_SYS_LOG && (!a || !a->v2))  /* (... and its log, as far as it has got) */
         return api2_sys_log(0, tf);
-    if (!a)
-        return a2_fail(tf, GLOS_E_NOT_APP);
+    if (!a)                                     /* (not an app: the network's calls all the same, API 2.3) */
+        return api2_session_call(tf, fn, &r) ? r : a2_fail(tf, GLOS_E_NOT_APP);
     if (!a->v2)
         return a2_fail(tf, GLOS_E_NOT_APP);        /* (made an app without asking: it has no handles or events) */
     if (area > GLOS_AREA_SHELL && area != GLOS_AREA_THREAD && area != GLOS_AREA_SETTINGS && area != GLOS_AREA_IDLE

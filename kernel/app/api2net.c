@@ -112,7 +112,7 @@ static int connect(struct app *a, struct trapframe *tf)
         sock_close(a, id, 1);
         return a2_fail(tf, q.handle ? GLOS_E_ARGUMENT : GLOS_E_MEMORY);
     }
-    if ((q.flags & GLOS_NETF_EVENTS) && !q.ms && q.state != GLOS_NETS_CONNECTING) {     /* (it moved on before
+    if ((q.flags & GLOS_NETF_EVENTS) && !a->session && !q.ms && q.state != GLOS_NETS_CONNECTING) {     /* (it moved on before
                                                    its handle was made: the event the net thread couldn't post) */
         u32 f = irq_save();
         api2_net_event(a, id, q.state, waiting, room);
@@ -183,7 +183,7 @@ static int accept(struct app *a, struct trapframe *tf)
         sock_close(a, conn, 1);
         return a2_fail(tf, q.handle ? GLOS_E_ARGUMENT : GLOS_E_MEMORY);
     }
-    if (q.flags & GLOS_NETF_EVENTS) {           /* (what came in before it was accepted: told now) */
+    if ((q.flags & GLOS_NETF_EVENTS) && !a->session) {      /* (what came in before it was accepted: told now) */
         u32 waiting = 0, state = 0, room = 0, f;
         if (sock_state(a, conn, &waiting, &state, &room) == 0 && (waiting || state != GLOS_NETS_OPEN)) {
             f = irq_save();
