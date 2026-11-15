@@ -65,6 +65,7 @@ struct vm {
     u8 cf9;
     /* the vif-stuck watchdog */
     u32 stuck_since;
+    u32 stuck_n;                        /* ... the timer's interrupts that have come since */
     u8 stuck_warned;
     /* counts for the leave line */
     u32 n_gp, n_int, n_irq;

@@ -308,12 +308,17 @@ static void rtc_tick(u8 c)
     }
 }
 
-/* An IRQ waiting longer than 50 ms behind a cleared virtual IF. */
+/* An IRQ waiting longer than 50 ms behind a cleared virtual IF: 50 of the timer's interrupts that came while it
+   waited, counted one by one. (Not the tick counter's difference: the counter jumps when the clock catches up
+   on ticks it missed, with interrupts held off by the kernel itself or a PIT a program set, and a program that
+   had its interrupts off for a moment was then charged the whole jump: sess-direct-486dx2, three gates in four
+   on devserver, 2026-11-14 and 15.) */
 static void watchdog(struct trapframe *tf, u32 now)
 {
     if (vm.thread->vif || !vpic_pending(&vm.pic) || vm.direct || gdbp_stopped()) {    /* (direct mode: the real IF, the
                                                    program's own; glos gdb holds a stopped one) */
         vm.stuck_since = 0;
+        vm.stuck_n = 0;
         vm.stuck_warned = 0;
         return;
     }
@@ -324,10 +329,11 @@ static void watchdog(struct trapframe *tf, u32 now)
        longer gets its share and no more, and the warning. */
     if (!vm.stuck_since) {
         vm.stuck_since = now | 1;               /* (which may be the tick after this one) */
+        vm.stuck_n = 0;
         sched_front(vm.thread);
         return;
     }
-    if ((s32)(now - vm.stuck_since) <= 51) {
+    if (++vm.stuck_n <= 51) {
         sched_front(vm.thread);
         return;
     }
