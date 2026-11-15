@@ -2737,6 +2737,7 @@ def ssh_case(profile, card):
             listed = ssh("glos mtrr")[1]
             rc2, off, _ = ssh("glos mtrr off")
             checks["mtrr"] = rc == 0 and rc1 == 0 and "Write-combining is on for " in on and "(GLOS's)" in listed \
+                and "conventional memory 00000-" in out and "not as GLOS set it" not in out \
                 and "write-combining" in listed and rc2 == 0 and "(GLOS's)" not in ssh("glos mtrr")[1] \
                 and ssh("glos mtrr off")[0] == 1 and ssh("glos mtrr wc 12345 3")[0] == 1 \
                 and ssh("glos mtrr bogus")[0] == 2 \

@@ -273,6 +273,26 @@ u32 mtrr_text(char *out, u32 room)
         k += (u32)ksnprintf(out + k, room - k, "the VGA's window (a0000, 64 KB): %s\n",
                             vga_on ? "write-combining (GLOS's)" : ((u32)rdmsr(MSR_FIX16K_VGA) & 0xFF) < 7
                             ? names[(u32)rdmsr(MSR_FIX16K_VGA) & 0xFF] : "?");
+    if (usable) {                               /* conventional memory, as the CPU has it now (not as GLOS last
+                                                   wrote it: a program's ring that the card fetches must stay
+                                                   write-combining for the whole of its run) */
+        u64 v64 = rdmsr(MSR_FIX64K), v16 = rdmsr(MSR_FIX16K);
+        int u, from = 0, odd = 0;
+        for (u = 0; u <= UNITS; u++) {
+            u8 tu = u < UNITS ? (u8)((u < 8 ? v64 : v16) >> (8 * (u & 7))) : 0xFF;
+            u8 tf = (u8)((from < 8 ? v64 : v16) >> (8 * (from & 7)));
+            if (u < UNITS && tu != cur_type[u])
+                odd = 1;
+            if (tu == tf)
+                continue;
+            if (k + 96 < room)
+                k += (u32)ksnprintf(out + k, room - k, "conventional memory %05x-%05x: %s\n", unit_base(from),
+                                    (u < UNITS ? unit_base(u) : 0xA0000u) - 1, tf < 7 ? names[tf] : "?");
+            from = u;
+        }
+        if (odd && k + 96 < room)
+            k += (u32)ksnprintf(out + k, room - k, "conventional memory is not as GLOS set it: something else wrote the fixed ranges\n");
+    }
     for (i = 0; i < var_n && k + 96 < room; i++) {
         if (!var_get(i, &b, &n, &t))
             continue;
