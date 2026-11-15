@@ -43,6 +43,12 @@ int main(void)
         CHECK(big != NULL);
         heap_free(&h, big);
     }
+    {
+        void *a = heap_alloc(&h, 5000), *b2 = heap_alloc(&h, 64);   /* heap_has: a free block that fits, or none */
+        heap_free(&h, a);
+        CHECK(heap_has(&h, 5000) && heap_has(&h, 100) && !heap_has(&h, h.size));
+        heap_free(&h, b2);
+    }
     CHECK(heap_alloc(&h, 0) == NULL);
     CHECK(heap_alloc(&h, 2 << 20) == NULL);
     heap_free(&h, NULL);

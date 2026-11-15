@@ -38,6 +38,19 @@ void *heap_alloc(struct heap *h, size_t n)
     return b + 1;
 }
 
+/* 1 if a free block would take n bytes as the heap is, without growing. */
+int heap_has(struct heap *h, size_t n)
+{
+    u32 need = ALIGN_UP((u32)n, 16) + sizeof(struct blk), off;
+    struct blk *b;
+    for (off = 0; off < h->size; off += b->size) {
+        b = at(h, off);
+        if (!b->used && b->size >= need)
+            return 1;
+    }
+    return 0;
+}
+
 void heap_free(struct heap *h, void *p)
 {
     struct blk *b, *n;

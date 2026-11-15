@@ -84,6 +84,7 @@ struct heap {
 };
 void *heap_alloc(struct heap *h, size_t n);
 void heap_free(struct heap *h, void *p);
+int heap_has(struct heap *h, size_t n); /* 1: a free block takes n bytes without the heap growing */
 int heap_check(struct heap *h);         /* 0 when the block list is consistent */
 
 /* The frame bitmap itself (tests/host/pmm_test.c). */

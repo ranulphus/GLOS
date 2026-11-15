@@ -132,17 +132,27 @@ void kunmap(void *p)
 }
 
 /* The heap grows by mapping fresh frames, zeroed. */
+static u32 kheap_mapped;                 /* the heap's pages that are there, in bytes: its size and beyond */
+
+static int heap_map1(void)              /* one more page, cleared (interrupts off) */
+{
+    u32 f = pmm_alloc();
+    if (!f)
+        return -1;
+    kpt_heap[kheap_mapped / PAGE_SIZE] = f | PTE_P | PTE_W;
+    invlpg(HEAP_BASE + kheap_mapped);
+    memset((void *)(HEAP_BASE + kheap_mapped), 0, PAGE_SIZE);
+    kheap_mapped += PAGE_SIZE;
+    return 0;
+}
+
 static int heap_grow(struct heap *h, u32 new_size)
 {
-    u32 have = ALIGN_UP(h->size, PAGE_SIZE), want = ALIGN_UP(new_size, PAGE_SIZE);
-    for (; have < want; have += PAGE_SIZE) {
-        u32 f = pmm_alloc();
-        if (!f)
+    u32 want = ALIGN_UP(new_size, PAGE_SIZE);
+    (void)h;
+    while (kheap_mapped < want)
+        if (heap_map1() != 0)
             return -1;
-        kpt_heap[have / PAGE_SIZE] = f | PTE_P | PTE_W;
-        invlpg(HEAP_BASE + have);
-        memset((void *)(HEAP_BASE + have), 0, PAGE_SIZE);
-    }
     return 0;
 }
 
@@ -432,7 +442,24 @@ void *dma_alloc(u32 n, u32 *phys)
     return p;
 }
 
-void *kmalloc(size_t n) { LOCKED(void *, heap_alloc(&kheap, n)); }
+/* A block that needs the heap to grow by more than a page has its pages mapped and cleared first, one page an
+   interrupts-off stretch: the allocation itself is then short. (All of it in one stretch, the 190 KB of the
+   on-screen prompt's terminal took several milliseconds of a 486 at start-up, and a serial port's FIFO, 1.4 ms
+   deep at 115,200 baud, overran: an echo request over the cable lost, about one start in three; 2026-11-15.) */
+void *kmalloc(size_t n)
+{
+    if (n >= PAGE_SIZE && n <= HEAP_MAX) {
+        for (;;) {
+            u32 f = irq_save();
+            int more = !heap_has(&kheap, n) && kheap_mapped < HEAP_MAX
+                && kheap_mapped < ALIGN_UP(kheap.size + (u32)n + 64, PAGE_SIZE) && heap_map1() == 0;
+            irq_restore(f);
+            if (!more)
+                break;
+        }
+    }
+    LOCKED(void *, heap_alloc(&kheap, n));
+}
 void kfree(void *p) { LOCKED_V(heap_free(&kheap, p)); }
 
 void mm_init(struct bootinfo *bi)
