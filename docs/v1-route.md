@@ -518,12 +518,19 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   line for the answer. Fixed in the test.)
 - bench-486 stopped once after a restart (2026-11-14, not seen again); `thr-486dx2` stopped once after a crash
   report.
-- **`sess-direct-486dx2-himemx`'s `GLOS-WARN vif-stuck`** (a program's virtual interrupts off for 50 ms with one
-  waiting, GLOS as the shell): on devserver, niced among eight emulators, it passed three gates and failed the
-  next two on 2026-11-14 (at 07a4:2bd1, after SESSTEST); on the build host it passed five runs of five at the
-  same commit. Load on the host stretches something past the watchdog's 50 ms: to be instrumented (what runs
-  at that address, and whether the guest's clock or the host's is the one that ran on). `apps-486dx2`'s
-  timers-at-once missed its 1.5% once the same evening (uclock 4062 ms for 4000) and passed the next run.
+- **`apps-486dx2`'s timing checks, now and then** (devserver, under the gate's load; also the build host when it
+  is loaded):
+  - `alarm`: an app with DJGPP's 18.2 Hz timer signals had 3 of the timer's interrupts in 3 seconds (about 55
+    are due) in one gate on 2026-11-15 (`APP-ALARM-FAIL alarms=3`, `irq0=3` in the kernel's line for the app);
+    never before, not in the two gates after, and not in four runs alone. An app whose timer is the PC's own
+    gets an interrupt only when the DOS side has answered the PC's last one, so something held the system VM
+    back a second at a time just then: to be instrumented (repeat `loopa-apps` on devserver and log why the
+    VM's thread waited).
+  - `timers-at-once`: `uclock` 4062 ms for 4000 (one BIOS tick more than its 1.5% allows), once on 2026-11-14
+    and once on 2026-11-15, each time passing the next run.
+- Closed 2026-11-15: `sess-direct-486dx2-*`'s `GLOS-WARN vif-stuck` (the watchdog measured by the tick counter,
+  which jumps when the clock catches up: it counts the timer's interrupts now; three rounds and three full
+  gates clean since).
 
 **An idea from the same session's measurements (for the owner):** GLOS could set write-combining over a VBE
 linear framebuffer itself (a variable MTRR, as FASTVID does from plain DOS; under GLOS such a tool cannot run,
