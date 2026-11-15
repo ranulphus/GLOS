@@ -125,7 +125,7 @@ static void before(void)
     }
     memset(&v, 0, sizeof v);
     v.size = sizeof v;
-    check("version", glos_version(&v) == 0 && v.major == 2 && v.minor == 1 && v.build[0]
+    check("version", glos_version(&v) == 0 && v.major == 2 && v.minor == GLOS_MINOR && v.build[0]
           && v.functions[GLOS_AREA_CORE][0] == 0x1FFFu && GLOS_HAS(&v, GLOS_CORE_RANDOM)
           && GLOS_HAS(&v, GLOS_WIN_CREATE) && GLOS_HAS(&v, GLOS_DRAW_SCREEN) && GLOS_HAS(&v, GLOS_WIN_EMBED)
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_WIN, 7))
@@ -134,14 +134,14 @@ static void before(void)
           && GLOS_HAS(&v, GLOS_SYS_PROGRAMS) && GLOS_HAS(&v, GLOS_SYS_TERMINAL) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SYS, 5))
           && GLOS_HAS(&v, GLOS_AUDIO_IN) && GLOS_HAS(&v, GLOS_AUDIO_MIDI_OUT) && GLOS_HAS(&v, GLOS_AUDIO_DEVICES)
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_AUDIO, 7))
-          && GLOS_HAS(&v, GLOS_NET_STATE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_NET, 7))
+          && GLOS_HAS(&v, GLOS_NET_STATE) && GLOS_HAS(&v, GLOS_NET_RECVFROM) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_NET, 10))
           && GLOS_HAS(&v, GLOS_CAPTURE_MOUSE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_CAPTURE, 3))
           && GLOS_HAS(&v, GLOS_DEBUG_WRITE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_DEBUG, 3))
           && GLOS_HAS(&v, GLOS_SECRETS_REMOVE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SECRETS, 3)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
     small.v.size = 12;                                  /* (size, major, minor: an older program's) */
-    check("version-small", glos_version(&small.v) == 0 && small.v.major == 2 && small.v.minor == 1
+    check("version-small", glos_version(&small.v) == 0 && small.v.major == 2 && small.v.minor == GLOS_MINOR
           && small.v.machine == 0xABABABABu && small.guard == 0xABABABABu, "machine=%x", small.v.machine);
     t = glos_ticks();
     check("ticks-any", t > 0, "ms=%u", t);

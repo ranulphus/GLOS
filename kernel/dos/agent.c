@@ -138,6 +138,7 @@ static u8 sig_left, sig_brk;                    /* a job's Ctrl+C or Ctrl+Break 
 static u32 sig_at;
 static volatile u32 exit_at;
 static volatile u8 exit_req, exit_code;
+static u32 done_at;                             /* when a job last ended */
 static void (*kick_ssh)(void);
 
 static u32 ring_used(const struct ring *r) { return r->head - r->tail; }
@@ -694,6 +695,7 @@ int agent_kill_seq(u32 seq)
                 app_kill_job(j);
         } else {
             j->result = 0xFF;
+            done_at = timer_ticks();
             j->state = J_DONE;                  /* (agent_service tells its client) */
             if (j->notify)                      /* (... and a shell's session is told here) */
                 tell(j);
@@ -1014,6 +1016,7 @@ static void finish(struct agent_job *j)
     if (j->console)
         keys_left(j);
     j->t_end = timer_ticks();
+    done_at = timer_ticks();
     j->state = J_DONE;
     kprintf("GLOS-AGENT done seq=%u code=%u via=%s%s\n", j->seq, result & 0xFF, j->shell ? "comspec" : j->path,
             (result & 0x10000) ? " cannot-run" : "");
@@ -1143,16 +1146,21 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
     session_job(0, 0, "", "");
     if (exit_req && (s32)(timer_ticks() - exit_at) >= 0) {
         static u32 settle;                      /* the tick SSH's last news of a job will have gone out by */
+        u32 since = (s32)(done_at - exit_at) > 0 ? done_at : exit_at;   /* (ten seconds for that from the exit, or
+                                                   from the last job's end if that came later: an app ended by
+                                                   this exit may take most of ten seconds to go on a busy 486,
+                                                   and its news was then cut off: apishell-486dx2 "ended" again,
+                                                   2026-11-15) */
         if (kcfg_pending() && (s32)(timer_ticks() - exit_at) < 5 * 1024)
             return 0;                           /* (a setting or GLOS.DAT is being written: the writer wakes this) */
         for (i = 0; i < NJOBS; i++)             /* a job's end that SSH has still to tell its client (an app that */
-            if (jobs[i].state == J_DONE && jobs[i].owner && (s32)(timer_ticks() - exit_at) < 10 * 1024) {
+            if (jobs[i].state == J_DONE && jobs[i].owner && (s32)(timer_ticks() - since) < 10 * 1024) {
                 settle = (timer_ticks() + 300) | 1;     /* left when asked to at this exit: its last line and its */
                 if (kick_ssh)                   /* exit code were lost on a busy 486) */
                     kick_ssh();
                 return 0;
             }
-        if (sshd_unsent() && (s32)(timer_ticks() - exit_at) < 10 * 1024) {
+        if (sshd_unsent() && (s32)(timer_ticks() - since) < 10 * 1024) {
             settle = (timer_ticks() + 300) | 1; /* (and what SSH has for its clients gone out and acknowledged, not
                                                    only 300 ms allowed for it: two apps ended by this exit on the
                                                    486, with the host busy, lost their last line and exit code two
@@ -1250,6 +1258,7 @@ void agent_app_done(void *job, u32 result)
 {
     struct agent_job *j = job;
     j->result = result;
+    done_at = timer_ticks();
     j->state = J_DONE;
     kprintf("GLOS-AGENT done seq=%u code=%u via=app\n", j->seq, result & 0xFF);
     tell(j);
