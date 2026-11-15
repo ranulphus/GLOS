@@ -51,6 +51,8 @@ network card, the client PC becomes a member of its network (below) and has an a
   a PC with a network card and a server link lets the PC at the cable's far end onto its network, with an
   address of its own from the network's DHCP server. `[net] cable_share = off` keeps the cable to the two PCs;
   `[net] cable_join = off` on the far PC stops it asking. Over either kind of cable (the parallel one: N3).
+- **A PC with a network card as the PC without one:** `[net] card = off` in GLOS.CFG: GLOS looks for no card, and
+  the PC is on the network by its cable alone (a card GLOS drives badly, or a trial of the cable).
 - **Installing a PC over a cable to another GLOS PC:** the setup floppy made with `FLOPPY_CABLE="client LPT1"`
   (or `client COM1`), the cable to a GLOS PC with a network card and `NETWORK SERVER LPT1`: the new PC joins the
   network through it, and `tools/floppy/install.py ADDRESS --cable "client LPT1"` installs it from any computer

@@ -5,6 +5,7 @@
  * card is refused when it has no interrupt line, or when another function
  * shares the line and can't be made quiet (kernel/drv/dev.c: the IRQ would
  * no longer reach the device's DOS driver; docs/devices.md). */
+#include "glos/bootinfo.h"
 #include "dev.h"
 #include "io.h"
 #include "kprintf.h"
@@ -75,7 +76,12 @@ void nic_leave(void)
 
 int nic_probe(void)
 {
-    int pd = packet_driver();
+    int pd;
+    if (vm.bi->flags & BI_F_NOCARD) {           /* [net] card = off */
+        kprintf("GLOS-NET refuse reason=config\n");
+        return -1;
+    }
+    pd = packet_driver();
     if (pd) {
         kprintf("GLOS-NET refuse reason=packet-driver int=%02x\n", pd);
         return -1;

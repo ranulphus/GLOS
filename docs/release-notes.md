@@ -25,6 +25,8 @@ in its `docs/milestones-*.md`.
   `[net] cable_share = off` on the near PC, or `cable_join = off` on the far one, keeps the cable to the two.
 - **A PC with no network card is installed over a parallel cable** (N3): `make floppy FLOPPY_CABLE="client
   LPT1"`, the cable to a GLOS PC that has a card, `tools/floppy/install.py ADDRESS --cable "client LPT1"`.
+- `[net] card = off`: GLOS looks for no network card (the PC is on the network by its cable link alone).
+  `cable_share` and `cable_join` set in GLOS.CFG drew a warning from the loader at start: no more.
 - With a cable link up on a PC that has no network card, `glos exit` left the PS/2 mouse's interrupt line
   unmasked for DOS. It leaves the interrupt controller as it found it now.
 

@@ -1029,7 +1029,11 @@ static void read_cfg(const char *argv0, int shell_keys)
                     bi.cable_baud = 0;
                 } else if (stricmp(v, "off"))
                     say("GLOS-WARN cfg-value section=net key=cable");
-            } else
+            } else if (!stricmp(k, "card")) {   /* card = auto | off: off, no network card is looked for (a PC
+                                                   that is to be on the network by its cable link alone) */
+                if (!stricmp(v, "off"))
+                    bi.flags |= BI_F_NOCARD;
+            } else if (stricmp(k, "cable_share") && stricmp(k, "cable_join"))   /* (those two are the kernel's) */
                 say("GLOS-WARN cfg-key section=net key=%s", k);
             continue;
         }

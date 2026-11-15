@@ -61,6 +61,8 @@ const struct cfg_key cfg_schema[] = {
     /* [net] (M5) */
     { "net", "hostname", CFG_TEXT, CFG_RESTART, 1, 15, "host", "glos", "&Host name",
       "This machine's name on the network (NAME.local)" },
+    { "net", "card", CFG_CHOICE, CFG_RESTART, 0, 0, "auto|off", "auto", "Network c&ard",
+      "off: GLOS looks for no network card, and the PC is on the network by its cable link alone" },
     { "net", "cable", CFG_TEXT, CFG_RESTART, 1, 31, "line", "off", "&Cable link",
       "The network over a cable to another computer (docs/cable.md): off; server COM1 or client COM1 (a serial "
       "cable, COM1 to COM4, with a speed after it if not 115200); server LPT1 or client LPT1 (a parallel LapLink "

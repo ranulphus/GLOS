@@ -2487,13 +2487,17 @@ def cable_case(profile, card):
     cable, `glos net` showing the link and its counts; switched off (nothing answers) and on again as the
     server (the addresses the other way round) while GLOS runs; SSH over Ethernet all the while, and COM2 the
     DOS's again after `glos exit`. Without a card (card "none"): [net] cable = server COM2 alone starts the
-    network, and the PC answers on the cable (echo, the SSH port)."""
+    network, and the PC answers on the cable (echo, the SSH port). Card "off": the same on a PC that has a
+    network card (an RTL8029) and [net] card = off: the card is not looked for, and the two cable settings
+    that are the kernel's draw no warning from the loader."""
     tag = "cable-%s-%s" % (profile, card)
     checks, why = {}, ""
-    if card == "none":
-        cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py ssh, the cable link alone", "[net]", "cable = server com2"])
+    if card in ("none", "off"):
+        cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py ssh, the cable link alone", "[net]", "cable = server com2"]
+                      + (["card = off", "cable_share = on", "cable_join = on"] if card == "off" else []))
         proc = run("ssh-" + tag, ["--machine", profile, "--com2", "--timeout", "300", "--idle", "200",
-                                  "--file", cfg + "=/TEST/GLOS.CFG"] + GLOS_FILES + KEYS
+                                  "--file", cfg + "=/TEST/GLOS.CFG"] + (["--net", "ne2kpci"] if card == "off" else [])
+                   + GLOS_FILES + KEYS
                    + ["--cmd", "SERSAY HX-START cable", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
                    background=True)
         serial = os.path.join(ROOT, "out", "ssh-" + tag, "serial.log")
@@ -2503,6 +2507,8 @@ def cable_case(profile, card):
             time.sleep(1)
         text = log()
         checks["up"] = "GLOS-NET cable role=server com=2 io=2f8 irq=3 baud=115200" in text and "GLOS-SSH listen" in text
+        if card == "off":
+            checks["no-card"] = "GLOS-NET refuse reason=config" in text and "GLOS-NET card=" not in text
         port = cable_port("ssh-" + tag)
         try:
             line = Slip(port, [192, 168, 250, 2], [192, 168, 250, 1])
@@ -8986,7 +8992,7 @@ def main():
             res += matrix(restart_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(idle_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(shell_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
-            res += matrix(cable_case, [("bf6", "ne2kpci"), ("486dx2", "none")], a.jobs)
+            res += matrix(cable_case, [("bf6", "ne2kpci"), ("486dx2", "none"), ("bf6", "off")], a.jobs)
             res += matrix(member_case, [("bf6", "ne2kpci")], a.jobs)
             res += matrix(plip_case, [("bf6", "plip"), ("486dx2", "plip")], a.jobs)
             res += matrix(lambda pr, c: member_case(pr, c, True), [("bf6", "ne2kpci")], a.jobs)
