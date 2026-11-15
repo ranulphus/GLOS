@@ -256,7 +256,7 @@ int socket(int domain, int type, int protocol)
         return fail(EPROTONOSUPPORT);
     memset(&v, 0, sizeof v);
     v.size = sizeof v;
-    if (!glos_app() || glos_version(&v) != 0)
+    if (!glos_is_app() || glos_version(&v) != 0)        /* (an app, whoever made the program one) */
         return fail(ENOSYS);
     if (!(v.machine & GLOS_MACHINE_NET))
         return fail(ENETDOWN);

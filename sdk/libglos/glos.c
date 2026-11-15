@@ -98,6 +98,15 @@ int glos_init_as(const char *name, const char *help, const char *category, unsig
 }
 
 unsigned glos_app(void) { return app; }
+
+/* 1 if the program is an app, whoever made it one: glos_init() here, or a library that makes GLOS's INIT call
+   itself (DOS-GL's and SDL's GLOS back ends do). Asked of GLOS: a call that is an app's alone, of no handle,
+   is answered "no such handle" for an app and "not an app" otherwise. */
+int glos_is_app(void)
+{
+    struct glos_close q = { sizeof q, 0 };
+    return app || raw(GLOS_CORE_CLOSE, &q, 0) == GLOS_E_HANDLE;
+}
 unsigned glos_why(void) { return init_why; }
 
 int glos_close(glos_handle h)

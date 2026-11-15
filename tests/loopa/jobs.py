@@ -7387,6 +7387,16 @@ def netapp_case(profile, card):
                     notes.append("%s: %s" % (m.group(1), m.group(3)))
         checks["nt-udp-done"] = rc == 0 and "NETTEST-UDP-DONE failures=0" in o and "nt-dgbsd-connect" in checks
         checks["udp-heard"] = udp.seen >= 12 and len(udp.ports) >= 4       # (several ports of the app's, one after another)
+        # ... and in a program that a library's own INIT call made an app (DOS-GL's and SDL's GLOS back ends make
+        # it themselves: the SDK's sockets ask GLOS whether the program is one, 2026-11-15)
+        rc, o, e = agent.ssh("C:\\TEST\\NETTEST.EXE udpraw 10.0.2.2 %d" % udp.port, timeout=300)
+        for line in o.replace("\r", "").split("\n"):
+            m = re.match(r"NETTEST (raw-\S+|dgbsd-\S+) (ok|FAIL) ?(.*)", line)
+            if m:
+                checks["raw:" + m.group(1)] = m.group(2) == "ok"
+                if m.group(2) != "ok":
+                    notes.append("udpraw %s: %s" % (m.group(1), m.group(3)))
+        checks["nt-raw-done"] = rc == 0 and "NETTEST-RAW-DONE failures=0" in o and "raw:dgbsd-connect" in checks
         checks["table-empty"] = "sockets=0" in agent.ssh("glos net")[1]
         # an app killed with connections open
         before = echo.open

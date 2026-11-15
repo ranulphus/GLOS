@@ -16,6 +16,9 @@
  *                     datagram ports (API 2.2) and SOCK_DGRAM sockets against
  *                     a UDP echo server at HOST:PORT (one that is sent
  *                     "burst N SIZE" sends N numbered datagrams back)
+ *   NETTEST udpraw HOST PORT
+ *                     the datagram sockets in a program made an app by an INIT
+ *                     call of its own, not glos_init (as DOS-GL and SDL do)
  *   NETTEST udpserve PORT SECONDS
  *                     a datagram port at PORT: what comes is sent back behind
  *                     "re:", and "announce" is broadcast to PORT+1 every
@@ -689,9 +692,35 @@ static int hold(int argc, char **argv)
         glos_sleep(1000);
 }
 
+/* The sockets in a program that a library made an app with an INIT call of its own, as DOS-GL's and SDL's GLOS
+   back ends do: none before it is one, then all of the datagram sockets' cases. */
+static int udpraw(int argc, char **argv)
+{
+    struct glos_init in;
+    int fd, e, r;
+    if (argc < 4)
+        return 2;
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    e = errno;
+    report("raw-before", fd == -1 && e == ENOSYS && !glos_is_app(), "socket=%d errno=%d", fd, e);
+    memset(&in, 0, sizeof in);
+    in.size = sizeof in;
+    in.major = GLOS_MAJOR, in.minor = GLOS_MINOR;
+    strcpy(in.name, "NETTEST RAW");
+    r = glos_call(GLOS_CORE_INIT, &in);
+    report("raw-init", r == 0 && !glos_app() && glos_is_app(), "r=%d app=%u is_app=%d", r, glos_app(), glos_is_app());
+    host = addr_of(argv[2]);
+    case_udp_bsd((unsigned)atoi(argv[3]));
+    printf("NETTEST-RAW-DONE failures=%d\n", failures);
+    return failures != 0;
+}
+
 int main(int argc, char **argv)
 {
-    int r = glos_init("NETTEST", "", "");
+    int r;
+    if (argc > 1 && !strcmp(argv[1], "udpraw"))
+        return udpraw(argc, argv);
+    r = glos_init("NETTEST", "", "");
     if (r != 0) {
         printf("NETTEST no GLOS (error %d)\n", r);
         return 3;

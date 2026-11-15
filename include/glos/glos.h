@@ -31,6 +31,8 @@ int glos_terminal_size(unsigned *cols, unsigned *rows);                 /* 0, an
 int glos_terminal_read(void *buf, unsigned room);                       /* what was typed: the bytes */
 int glos_terminal_write(const void *data, unsigned length);             /* bytes for it: those taken */
 unsigned glos_app(void);                                /* its id, once it is one */
+int glos_is_app(void);                                  /* 1: an app, by glos_init() or by a library's own INIT call
+                                                           (DOS-GL, SDL): what the sockets ask */
 unsigned glos_why(void);                                /* why glos_init() was refused (GLOS_WHY_), after GLOS_E_INIT */
 int glos_close(glos_handle h);
 
