@@ -1247,10 +1247,12 @@ struct glos_net_dgram {
 #define GLOS_PROP_NET_BROADCAST GLOS_PROP(GLOS_HK_CONNECTION, 6) /* a datagram port: 1: SENDTO may send to a
                                                                    broadcast address (2.2) */
 
-/* The network's state: one interface today (the card GLOS drives). */
+/* The network's state: the card GLOS drives, and the cable link if one is up (2.2: docs/cable.md), in that
+   order. A cable link's `card` is its port ("COM2", "LPT1"); with DHCP in its flags the PC is a member of the
+   network at the cable's far end and the address is its own there. */
 struct glos_net_if {
     unsigned size;
-    unsigned kind;              /* GLOS_NETIF_ETHERNET */
+    unsigned kind;              /* GLOS_NETIF_ETHERNET, _SERIAL, _PARALLEL */
     unsigned flags;             /* GLOS_NETIF_ */
     unsigned char mac[6], pad[2];
     unsigned address, mask, gateway;
@@ -1258,10 +1260,12 @@ struct glos_net_if {
     unsigned lease, lease_left; /* DHCP's lease and what is left of it, in seconds (0: none) */
     unsigned rx_frames, tx_frames, rx_errors, overruns;
     unsigned connections;       /* apps' connections and ports open, all told */
-    char card[16];              /* the card's driver: "ne2k", "rtl8139", "e100" */
+    char card[16];              /* the card's driver: "ne2k", "rtl8139", "e100"; a cable link's port */
     char host[16];              /* GLOS's name on the network (HOST.local) */
 };
 #define GLOS_NETIF_ETHERNET 0
+#define GLOS_NETIF_SERIAL   1   /* a cable link on a serial port */
+#define GLOS_NETIF_PARALLEL 2   /* ... on a parallel port */
 #define GLOS_NETIF_UP       1   /* it has an address */
 #define GLOS_NETIF_DHCP     2   /* ... from DHCP */
 #define GLOS_NETIF_LINK_KNOWN 4 /* the card's driver can tell whether its cable is in (none can yet) ... */

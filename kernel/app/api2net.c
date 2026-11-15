@@ -239,14 +239,21 @@ static int state(struct trapframe *tf)
     struct glos_sys_stat q;
     struct glos_net_if nif;
     struct net_if k;
-    u32 size, give;
+    u32 size, which, kind;
     if (a2_rd(tf, &q, sizeof q, &size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     q.length = q.count = 0;
-    if (net_if_info(&k) == 0) {                 /* (no card: an empty list) */
+    for (which = 0; which < 2; which++) {       /* the card, then the cable link: those there are (none: an empty
+                                                   list) */
+        char ip[16];
+        const char *host = "";
+        kind = GLOS_NETIF_ETHERNET;
+        if ((which == 0 ? net_if_info(&k) : slip_if_info(&k, &kind)) != 0)
+            continue;
+        net_address(ip, &host);                 /* (GLOS's name on the network: one, whichever the interface) */
         memset(&nif, 0, sizeof nif);
         nif.size = sizeof nif;
-        nif.kind = GLOS_NETIF_ETHERNET;
+        nif.kind = kind;
         nif.flags = (k.up ? GLOS_NETIF_UP : 0) | (k.up && k.dhcp ? GLOS_NETIF_DHCP : 0);
         memcpy(nif.mac, k.mac, 6);
         nif.address = k.ip, nif.mask = k.mask, nif.gateway = k.gw;
@@ -255,12 +262,13 @@ static int state(struct trapframe *tf)
         nif.rx_frames = k.rx, nif.tx_frames = k.tx, nif.rx_errors = k.rx_errors, nif.overruns = k.overruns;
         nif.connections = sock_count();
         strncpy(nif.card, k.card, sizeof nif.card - 1);
-        strncpy(nif.host, k.host, sizeof nif.host - 1);
-        q.length = sizeof nif;
-        give = q.room >= sizeof nif ? sizeof nif : 0;
-        q.count = give ? 1 : 0;
-        if (give && user_wr((u16)tf->ds, q.buffer, &nif, give) != 0)
-            return a2_fail(tf, GLOS_E_ARGUMENT);
+        strncpy(nif.host, host, sizeof nif.host - 1);
+        q.length += sizeof nif;
+        if (q.room >= q.length) {
+            if (user_wr((u16)tf->ds, q.buffer + q.count * sizeof nif, &nif, sizeof nif) != 0)
+                return a2_fail(tf, GLOS_E_ARGUMENT);
+            q.count++;
+        }
     }
     if (a2_wr(tf, &q, sizeof q, size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);

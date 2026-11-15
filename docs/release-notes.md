@@ -12,6 +12,8 @@ in its `docs/milestones-*.md`.
 - **Broadcasts reach across a cable link:** a program on a PC with a network card and a program on the PC
   cabled to it find each other by broadcast, either way round.
 - Programs check `glos_version`: minor 2, or NET's function bits 7 to 9.
+- **The network's state lists the cable link too** (NET's STATE): a PC that is on the network through its cable
+  has an interface and an address to show, where it had none.
 
 ## The network over a parallel cable; a PC on a cable as a member of the network (2026-11-15)
 

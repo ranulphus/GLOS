@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "lwip/dhcp.h"
+#include "lwip/dns.h"
 #include "lwip/etharp.h"
 #include "lwip/ip.h"
 #include "lwip/netif.h"
@@ -375,4 +376,46 @@ u32 slip_stat(char *buf, u32 max)
                               member ? " member=yes" : "", rx_packets, tx_packets, rx_bad, tx_dropped, c.rx, c.tx,
                               c.overruns, c.errors + c.dropped);
     }
+}
+
+/* API 2.0's NET STATE: the cable link as an interface. Its name is its port ("COM2", "LPT1"); with an address of
+   the far PC's network (this PC a member there) it says DHCP and the lease. Read from an app's thread, a word
+   at a time. */
+int slip_if_info(struct net_if *o, u32 *kind)
+{
+    const struct dhcp *d;
+    if (!on)
+        return -1;
+    memset(o, 0, sizeof *o);
+    ksnprintf(o->card, sizeof o->card, "%s%u", par ? "LPT" : "COM", com);
+    memcpy(o->mac, sl.hwaddr, 6);
+    o->up = netif_is_up(&sl) && !ip4_addr_isany_val(*netif_ip4_addr(&sl));
+    o->ip = ip4_addr_get_u32(netif_ip4_addr(&sl));
+    o->mask = ip4_addr_get_u32(netif_ip4_netmask(&sl));
+    o->gw = ip4_addr_get_u32(netif_ip4_gw(&sl));
+    if (member && (d = netif_dhcp_data(&sl)) != 0) {
+        u32 used = (u32)d->lease_used * DHCP_COARSE_TIMER_SECS;
+        o->dhcp = 1;
+        o->lease = d->offered_t0_lease;
+        o->lease_left = used < o->lease ? o->lease - used : 0;
+        o->dns[0] = ip4_addr_get_u32(ip_2_ip4(dns_getserver(0)));
+        o->dns[1] = ip4_addr_get_u32(ip_2_ip4(dns_getserver(1)));
+    }
+    if (par) {
+        struct plip_counts c;
+        u32 lpt, irq;
+        u16 base;
+        if (plip_info(&lpt, &base, &irq, &c) == 0)
+            o->rx = c.rx, o->tx = c.tx, o->rx_errors = c.rx_errors + rx_bad;
+    } else {
+        struct uart_counts c;
+        u16 base;
+        u32 irq, baud;
+        int fifo;
+        o->rx = rx_packets, o->tx = tx_packets, o->rx_errors = rx_bad;
+        if (uart_info(&base, &irq, &baud, &fifo, &c) == 0)
+            o->overruns = c.overruns;
+    }
+    *kind = par ? 2 : 1;
+    return 0;
 }

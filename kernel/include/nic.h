@@ -60,5 +60,7 @@ struct net_if {                         /* API 2.0's NET STATE: the interface as
     u32 rx, tx, rx_errors, overruns;
 };
 int net_if_info(struct net_if *o);      /* 0, or -1 without a card */
+int slip_if_info(struct net_if *o, u32 *kind);  /* the cable link's (slip.c): 0 and 1 (serial) or 2 (parallel), or
+                                           -1 with none up */
 
 #endif

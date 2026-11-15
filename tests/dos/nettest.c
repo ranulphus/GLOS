@@ -522,9 +522,23 @@ static const char *ip_text(unsigned a)
     return inet_ntoa(ia);
 }
 
+/* The network's interfaces as text, "kind:name:address:flags" each, commas between: NET's STATE. */
+static int ifs_text(char *out, unsigned room)
+{
+    struct glos_net_if nif[4];
+    unsigned count = 0, i, k = 0;
+    out[0] = 0;
+    if (glos_net_state(nif, sizeof nif, &count) != 0)
+        return -1;
+    for (i = 0; i < count && k + 48 < room; i++)
+        k += (unsigned)sprintf(out + k, "%s%u:%s:%s:%u", i ? "," : "", nif[i].kind, nif[i].card, ip_text(nif[i].address),
+                               nif[i].flags & 3);
+    return (int)count;
+}
+
 static int udpserve(int argc, char **argv)
 {
-    static char buf[GLOS_NET_DATAGRAM_MAX], out[GLOS_NET_DATAGRAM_MAX];
+    static char buf[GLOS_NET_DATAGRAM_MAX], out[GLOS_NET_DATAGRAM_MAX], hello[128];
     unsigned port, secs, t0, last = 0, from, fport, len, heard = 0;
     glos_handle h;
     int r;
@@ -539,9 +553,11 @@ static int udpserve(int argc, char **argv)
     printf("NETTEST serving %u\n", port);
     fflush(stdout);
     for (t0 = glos_ticks(); glos_ticks() - t0 < secs * 1000;) {
-        if (glos_ticks() - last >= 1000) {
+        if (glos_ticks() - last >= 1000) {           /* (with this PC's interfaces, for the one that hears it to show) */
             last = glos_ticks();
-            glos_net_sendto(h, "announce", 8, 0, 0xFFFFFFFFu, port + 1);
+            strcpy(hello, "announce ");
+            ifs_text(hello + 9, sizeof hello - 9);
+            glos_net_sendto(h, hello, strlen(hello), 0, 0xFFFFFFFFu, port + 1);
         }
         if ((r = glos_net_recvfrom(h, buf, sizeof buf - 3, 200, &from, &fport, &len)) < 0)
             continue;
@@ -559,7 +575,7 @@ static int udpserve(int argc, char **argv)
 
 static int udpfind(int argc, char **argv)
 {
-    char buf[64];
+    char buf[160];
     unsigned port, from = 0, fport = 0, server = 0;
     glos_handle ask, hear;
     int r = -1, i;
@@ -588,8 +604,12 @@ static int udpfind(int argc, char **argv)
         report("find-long", r == 1403 && len == 1403 && !memcmp(back, "re:", 3) && !memcmp(back + 3, big, sizeof big),
                "r=%d length=%u", r, len);
     }
-    r = glos_net_recvfrom(hear, buf, sizeof buf, 5000, &from, &fport, 0);
-    report("find-announce", r == 8 && !memcmp(buf, "announce", 8), "from=%s r=%d", ip_text(from), r);
+    r = glos_net_recvfrom(hear, buf, sizeof buf - 1, 5000, &from, &fport, 0);
+    buf[r > 0 ? r : 0] = 0;
+    report("find-announce", r >= 9 && !memcmp(buf, "announce ", 9), "from=%s r=%d ifs=%s", ip_text(from), r,
+           r >= 9 ? buf + 9 : "");
+    r = ifs_text(buf, sizeof buf);
+    report("find-ifs", r > 0, "n=%d ifs=%s", r, buf);
     if (server)
         glos_net_sendto(ask, "quit", 4, 500, server, port);
     glos_sleep(500);                                    /* (sent before the port goes) */
