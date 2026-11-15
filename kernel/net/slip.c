@@ -1,6 +1,8 @@
-/* The cable link (slip.h; docs/cable.md): IP between this PC and one other over a serial cable, framed as
- * RFC 1055 says (SLIP). An interface of lwIP's beside the network card's, or the only one on a PC with no
- * card GLOS drives: SSH, SFTP, VNC and the apps' sockets go over it as over Ethernet.
+/* The cable link (slip.h; docs/cable.md): IP between this PC and one other over a cable. A serial cable: IP
+ * packets framed as RFC 1055 says (SLIP). A parallel (LapLink) cable: Ethernet frames by PLIP (kernel/drv/
+ * plip.c; docs/v1/cable-network.md, N2), the interface then an Ethernet one with ARP, as a card's is. Either
+ * way an interface of lwIP's beside the network card's, or the only one on a PC with no card GLOS drives: SSH,
+ * SFTP, VNC and the apps' sockets go over it as over Ethernet.
  *
  * Point to point, with fixed addresses by role: the server's 192.168.250.1, the client's 192.168.250.2 (the
  * roles say no more than that). SLIP has no checks of its own: a damaged packet fails IP's or TCP's checksum
@@ -14,15 +16,18 @@
 #include <string.h>
 
 #include "lwip/dhcp.h"
+#include "lwip/etharp.h"
 #include "lwip/ip.h"
 #include "lwip/netif.h"
 #include "lwip/pbuf.h"
+#include "netif/ethernet.h"
 
 #include "glos/bootinfo.h"
 #include "kcfg.h"
 #include "kprintf.h"
 #include "nic.h"
 #include "vm.h"
+#include "plip.h"
 #include "slip.h"
 #include "uart.h"
 
@@ -34,6 +39,7 @@
 
 static struct netif sl;
 static u8 on, added;
+static u8 par;                          /* the cable is a parallel one (PLIP): com is then the LPT's number */
 static u32 role, com;
 static u8 frame[1600];
 static u32 flen;
@@ -79,6 +85,20 @@ static err_t slip_out(struct netif *n, struct pbuf *p, const ip4_addr_t *to)
     return ERR_OK;
 }
 
+/* A frame for the parallel wire. */
+static err_t par_out(struct netif *n, struct pbuf *p)
+{
+    static u8 out[1600];
+    u16 len = pbuf_copy_partial(p, out, sizeof out, 0);
+    (void)n;
+    if (!on || plip_send(out, len < 60 ? 60 : len) != 0) {     /* (short frames padded, as a card pads them) */
+        tx_dropped++;
+        return ERR_MEM;
+    }
+    tx_packets++;
+    return ERR_OK;
+}
+
 static void deliver(void)
 {
     struct pbuf *p;
@@ -107,6 +127,20 @@ void slip_turn(void)
         asked = 1;
         if (strcmp(v, "off") && dhcp_start(&sl) == ERR_OK)
             asking = 1;
+    }
+    if (par) {                                  /* frames from the parallel wire, as from a card */
+        while ((n = plip_recv(frame, sizeof frame)) != 0) {
+            struct pbuf *p = pbuf_alloc(PBUF_RAW, (u16_t)n, PBUF_POOL);
+            if (!p) {
+                rx_bad++;
+                continue;
+            }
+            pbuf_take(p, frame, (u16_t)n);
+            rx_packets++;
+            if (sl.input(p, &sl) != ERR_OK)
+                pbuf_free(p);
+        }
+        return;
     }
     while ((n = uart_read(b, sizeof b)) != 0)
         for (i = 0; i < n; i++) {
@@ -171,10 +205,17 @@ static err_t sl_init(struct netif *n)
 {
     const struct bootinfo *bi = vm.bi;
     u32 h = 2166136261u, i;
-    n->name[0] = 's', n->name[1] = 'l';
-    n->output = slip_out;
-    n->mtu = MTU;
-    n->flags = NETIF_FLAG_LINK_UP | NETIF_FLAG_BROADCAST | NETIF_FLAG_IGMP;
+    n->name[0] = par ? 'p' : 's', n->name[1] = 'l';
+    if (par) {                                  /* Ethernet frames: lwIP's ARP in front, as for a card */
+        n->output = etharp_output;
+        n->linkoutput = par_out;
+        n->mtu = 1500;
+        n->flags = NETIF_FLAG_LINK_UP | NETIF_FLAG_BROADCAST | NETIF_FLAG_IGMP | NETIF_FLAG_ETHARP | NETIF_FLAG_ETHERNET;
+    } else {
+        n->output = slip_out;
+        n->mtu = MTU;
+        n->flags = NETIF_FLAG_LINK_UP | NETIF_FLAG_BROADCAST | NETIF_FLAG_IGMP;
+    }
     /* A hardware address of its own, for DHCP to know the PC by (a serial port has none): made of the PC's host
        key and name, so the same at every start; the bit that says "made up here" set. */
     for (i = 0; i < bi->hostkey_len; i++)
@@ -191,19 +232,27 @@ static err_t sl_init(struct netif *n)
 int slip_start(u32 r, u32 c, u32 baud, int alone)
 {
     ip4_addr_t ip, mask, peer;
-    u16 base;
-    u32 irq, bd;
-    int fifo, e;
-    struct uart_counts counts;
+    int e, p = (c & 16) != 0;                   /* (c: 1 to 4 a COM port; 17 to 19 LPT1 to LPT3) */
     if (on)
         return -2;
     if (r != BI_CABLE_SERVER && r != BI_CABLE_CLIENT)
         return -1;
-    if ((e = uart_open(c, baud ? baud : 115200, END, net_kick)) != 0) {
-        kprintf("GLOS-NET cable error=%s com=%u\n", e == -1 ? "no-port" : e == -2 ? "in-use" : "speed", c);
+    if (p)
+        e = plip_open(c & 15, net_kick);
+    else
+        e = uart_open(c, baud ? baud : 115200, END, net_kick);
+    if (e != 0) {
+        kprintf("GLOS-NET cable error=%s %s=%u\n", e == -1 ? "no-port" : e == -2 ? "in-use" : "speed", p ? "lpt" : "com",
+                c & 15);
         return e;
     }
-    role = r, com = c;
+    if (added && p != par) {                    /* (another kind of cable than before: the interface made again) */
+        net_cable_gone(&sl);
+        netif_remove(&sl);
+        added = 0;
+    }
+    par = (u8)p;
+    role = r, com = c & 15;
     flen = 0, esc = bad = 0;
     rx_packets = tx_packets = rx_bad = tx_dropped = 0;
     IP4_ADDR(&ip, 192, 168, 250, r == BI_CABLE_SERVER ? 1 : 2);
@@ -212,7 +261,8 @@ int slip_start(u32 r, u32 c, u32 baud, int alone)
     fixed_ip = ip, fixed_mask = mask, fixed_peer = peer;
     asking = asked = member = 0;
     if (!added) {
-        netif_add(&sl, &ip, &mask, &peer, NULL, sl_init, ip_input);
+        memset(&sl, 0, sizeof sl);
+        netif_add(&sl, &ip, &mask, &peer, NULL, sl_init, par ? ethernet_input : ip_input);
         netif_set_status_callback(&sl, sl_status);
         added = 1;
     } else {
@@ -222,10 +272,24 @@ int slip_start(u32 r, u32 c, u32 baud, int alone)
         netif_set_default(&sl);
     on = 1;
     netif_set_up(&sl);
-    uart_info(&base, &irq, &bd, &fifo, &counts);
-    kprintf("GLOS-NET cable role=%s com=%u io=%03x irq=%u baud=%u fifo=%u ip=192.168.250.%u peer=192.168.250.%u\n",
-            r == BI_CABLE_SERVER ? "server" : "client", c, base, irq, bd, fifo, r == BI_CABLE_SERVER ? 1 : 2,
-            r == BI_CABLE_SERVER ? 2 : 1);
+    if (par) {
+        struct plip_counts pc;
+        u32 lpt, irq;
+        u16 base;
+        plip_info(&lpt, &base, &irq, &pc);
+        kprintf("GLOS-NET cable role=%s lpt=%u io=%03x irq=%u ip=192.168.250.%u peer=192.168.250.%u\n",
+                r == BI_CABLE_SERVER ? "server" : "client", lpt, base, irq, r == BI_CABLE_SERVER ? 1 : 2,
+                r == BI_CABLE_SERVER ? 2 : 1);
+    } else {
+        struct uart_counts counts;
+        u16 base;
+        u32 irq, bd;
+        int fifo;
+        uart_info(&base, &irq, &bd, &fifo, &counts);
+        kprintf("GLOS-NET cable role=%s com=%u io=%03x irq=%u baud=%u fifo=%u ip=192.168.250.%u peer=192.168.250.%u\n",
+                r == BI_CABLE_SERVER ? "server" : "client", c, base, irq, bd, fifo, r == BI_CABLE_SERVER ? 1 : 2,
+                r == BI_CABLE_SERVER ? 2 : 1);
+    }
     return 0;
 }
 
@@ -242,11 +306,18 @@ void slip_stop(void)
     }
     netif_set_down(&sl);
     on = 0;
-    uart_close();
+    if (par)
+        plip_close();
+    else
+        uart_close();
     kprintf("GLOS-NET cable off\n");
 }
 
-void slip_leave(void) { uart_close(); }
+void slip_leave(void)
+{
+    uart_close();
+    plip_close();
+}
 
 int slip_up(void) { return on; }
 
@@ -262,18 +333,33 @@ int slip_address(char ip[16])
 
 u32 slip_stat(char *buf, u32 max)
 {
-    struct uart_counts c;
     char ip[16], gw[16];
-    u16 base;
-    u32 irq, baud;
-    int fifo;
-    if (!on || uart_info(&base, &irq, &baud, &fifo, &c) != 0)
+    if (!on)
         return 0;
     ip4addr_ntoa_r(netif_ip4_addr(&sl), ip, sizeof ip);
     ip4addr_ntoa_r(netif_ip4_gw(&sl), gw, sizeof gw);
-    return (u32)ksnprintf(buf, max, "cable=%s com=%u io=%03x irq=%u baud=%u fifo=%u ip=%s peer=%s%s\n"
-                          "cable rx=%u tx=%u rx_bad=%u tx_dropped=%u bytes_rx=%u bytes_tx=%u overruns=%u line_errors=%u\n",
-                          role == BI_CABLE_SERVER ? "server" : "client", com, base, irq, baud, fifo, ip, gw,
-                          member ? " member=yes" : "", rx_packets, tx_packets, rx_bad, tx_dropped, c.rx, c.tx,
-                          c.overruns, c.errors + c.dropped);
+    if (par) {
+        struct plip_counts c;
+        u32 lpt, irq;
+        u16 base;
+        if (plip_info(&lpt, &base, &irq, &c) != 0)
+            return 0;
+        return (u32)ksnprintf(buf, max, "cable=%s lpt=%u io=%03x irq=%u ip=%s peer=%s%s\n"
+                              "cable rx=%u tx=%u rx_bad=%u tx_dropped=%u rx_errors=%u tx_errors=%u collisions=%u irqs=%u\n",
+                              role == BI_CABLE_SERVER ? "server" : "client", lpt, base, irq, ip, gw,
+                              member ? " member=yes" : "", c.rx, c.tx, rx_bad + c.rx_dropped,
+                              tx_dropped + c.tx_dropped, c.rx_errors, c.tx_errors, c.collisions, c.irqs);
+    } else {
+        struct uart_counts c;
+        u16 base;
+        u32 irq, baud;
+        int fifo;
+        if (uart_info(&base, &irq, &baud, &fifo, &c) != 0)
+            return 0;
+        return (u32)ksnprintf(buf, max, "cable=%s com=%u io=%03x irq=%u baud=%u fifo=%u ip=%s peer=%s%s\n"
+                              "cable rx=%u tx=%u rx_bad=%u tx_dropped=%u bytes_rx=%u bytes_tx=%u overruns=%u line_errors=%u\n",
+                              role == BI_CABLE_SERVER ? "server" : "client", com, base, irq, baud, fifo, ip, gw,
+                              member ? " member=yes" : "", rx_packets, tx_packets, rx_bad, tx_dropped, c.rx, c.tx,
+                              c.overruns, c.errors + c.dropped);
+    }
 }

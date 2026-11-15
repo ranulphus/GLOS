@@ -1022,6 +1022,11 @@ static void read_cfg(const char *argv0, int shell_keys)
                     bi.cable_role = (role[0] | 32) == 's' ? BI_CABLE_SERVER : BI_CABLE_CLIENT;
                     bi.cable_com = (unsigned long)(port[3] - '0');
                     bi.cable_baud = baud;
+                } else if (n == 2 && (!stricmp(role, "server") || !stricmp(role, "client")) && !strnicmp(port, "lpt", 3)
+                           && port[3] >= '1' && port[3] <= '3' && !port[4]) {
+                    bi.cable_role = (role[0] | 32) == 's' ? BI_CABLE_SERVER : BI_CABLE_CLIENT;
+                    bi.cable_com = 16UL + (unsigned long)(port[3] - '0');   /* (a parallel cable: LPT1 to LPT3) */
+                    bi.cable_baud = 0;
                 } else if (stricmp(v, "off"))
                     say("GLOS-WARN cfg-value section=net key=cable");
             } else

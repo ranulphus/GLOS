@@ -526,6 +526,11 @@ static void vm_leave(u32 code)
     kprintf_direct();                           /* (no more traps to write the log from) */
     display_leave();
     int2f_unhook();
+    slip_leave();                               /* the cable link's port as it was found, and its interrupt line
+                                                   given back: before the PICs are DOS's again below (giving a line
+                                                   back sets the masks as GLOS has them, and after that the PS/2
+                                                   mouse's line was left open on a PC with a cable and no network
+                                                   card: VECCHK, 2026-11-15) */
     vkbc_leave();
     vdev_leave();
     pic_init(vm.pic.p[0].base, vm.pic.p[1].base, vpic_imr(&vm.pic));
@@ -533,7 +538,6 @@ static void vm_leave(u32 code)
         cpu_set_cr4(0, 1);
     sched_report();
     net_report();
-    slip_leave();                               /* (the cable link's port as it was found) */
     lcon_leave();                               /* (the prompt on the PC's own screen: DOS's again) */
     mtrr_leave();                               /* (a write-combining range of GLOS's: off) */
     nic_leave();

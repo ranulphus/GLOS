@@ -1,8 +1,9 @@
-# The cable link: the network over a serial cable
+# The cable link: the network over a serial or a parallel cable
 
-**Status: SLIP over a serial port, built and tested (2026-11-13). To come: the parallel port, and a cable link
-as part of the network its PC's Ethernet card is on (the owner's direction, 2026-11-14: docs/v1-route.md,
-phase H). Not planned: PPP and Windows 9x's Direct Cable Connection.**
+**Status: SLIP over a serial port, built and tested (2026-11-13); the far PC as a member of this PC's network
+(N1, 2026-11-14); PLIP over a parallel port (N2, 2026-11-15, in Loop A: two benches with a LapLink cable are
+owed). To come: membership and the installer over the parallel cable (N3). Not planned: PPP and Windows 9x's
+Direct Cable Connection. The design: [v1/cable-network.md](v1/cable-network.md).**
 
 A PC that runs GLOS can be reached over a serial cable instead of, or beside, a network card: IP between the
 two ends of the cable. SSH, SFTP, the installer, VNC and the apps' sockets work over it as over Ethernet. It is
@@ -28,6 +29,10 @@ how a PC whose network card GLOS has no driver for is installed and worked on (t
   and an interface with the server's address. Then `ssh glos@192.168.250.2`, `tools/floppy/install.py
   192.168.250.2 ...`.
 - **Between two PCs that run GLOS:** one is the server, the other the client.
+- **A parallel cable instead** (N2): a LapLink ("null printer") cable between the two PCs' parallel ports, and
+  `LPT1` to `LPT3` where the serial link has `COM1`: `cable = client LPT1` in GLOS.CFG, `NETWORK SERVER LPT1`,
+  `NETWORK CLIENT LPT1`. No speed is given. Any parallel port will do. One cable link at a time: serial or
+  parallel.
 
 The roles say only which address is whose: **the server is 192.168.250.1, the client 192.168.250.2.** There is
 no DHCP and no `.local` name on the cable.
@@ -47,6 +52,25 @@ no DHCP and no `.local` name on the cable.
   address of its own from the network's DHCP server. `[net] cable_share = off` keeps the cable to the two PCs;
   `[net] cable_join = off` on the far PC stops it asking.
 
+## The parallel link (N2)
+
+- **PLIP** as Crynwr's packet driver and Linux speak it (`kernel/drv/plip.c`): Ethernet frames, four bits at a
+  time over the cable's five crossed lines, each nibble acknowledged; a packet is announced on the other PC's
+  ACK line (its interrupt), then its length, its bytes and their sum. The interface is an Ethernet one to the
+  network stack (ARP, DHCP), with a made-up hardware address of its own.
+- **The port is the kernel's while the link is up:** nothing prints through it, and its interrupt (IRQ 7 for the
+  ports at 378h and 3BCh, IRQ 5 for 278h) is GLOS's. It is DOS's again when the link is switched off or GLOS
+  leaves.
+- **The wire has a thread of its own**, which runs beside the PC's programs and not ahead of them: every nibble
+  is a busy wait, 6000 of them in a full packet. Its waits are long (a quarter of a second a nibble), so two
+  GLOS PCs keep a packet going while either is busy. Linux and Crynwr wait about three milliseconds: a GLOS PC
+  cabled to one of those keeps up only while it has nothing else to do, and Linux's plip, which does not answer
+  ARP, has not been tried.
+- **Speed:** 40 to 60 KB a second is what PLIP gives on period hardware (to be measured on the benches). 86Box's
+  PLIP device has no such limit: Loop A's 256 KB each way takes under two seconds.
+- `NETWORK` shows the link: `cable=client lpt=1 io=378 irq=7 ip=... peer=...` and the wire's counts (`rx_errors`
+  and `tx_errors`: packets that stopped part way or whose sum was wrong; `collisions`: both ends began at once).
+
 ## Tested
 
 - Loop A (`make loopa-ssh`, the cable cases): on COM2 with the other end made by the test (echo requests of
@@ -54,6 +78,10 @@ no DHCP and no `.local` name on the cable.
   all, the cable alone.
 - The 486 bench's COM1 to the build host's `/dev/ttyS0` (2026-11-13): ping 16 ms, `ssh` logs in in 3 seconds,
   300 KB by SFTP each way, the copies identical.
+- Loop A (`make loopa-ssh`, `ssh-plip-*`, N2): a PC with no network card and 86Box's PLIP device on LPT1 (the
+  Loop A runner's `--net plip`), `cable = client LPT1`: an address by DHCP over the cable, SSH, 256 KB by SFTP
+  each way with the copies identical and no error on the wire, and the port and the interrupt controller as DOS
+  had them after `glos exit`. On the Pentium II and the 486 profiles.
 
 ## To come
 

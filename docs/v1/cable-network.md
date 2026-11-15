@@ -1,8 +1,9 @@
 # Cables as part of the network: the parallel link and the bridged network (design)
 
-**Status: agreed by the owner (2026-11-14, the answers at the end). N1's first cut is built and passes in Loop A
-(2026-11-14, "As built" below); the benches and a TCP check are owed. N2 and N3 are not started.** The serial
-link it builds on is [docs/cable.md](../cable.md).
+**Status: agreed by the owner (2026-11-14, the answers at the end). N1 is on GLOS main and passes in Loop A; its
+proof on the benches is owed. N2, the parallel link, is built and passes in Loop A against 86Box's PLIP device
+(2026-11-15); two benches with a LapLink cable are owed. N3 is not started.** The links themselves are in
+[docs/cable.md](../cable.md).
 
 ## What the owner asked for (2026-11-14)
 

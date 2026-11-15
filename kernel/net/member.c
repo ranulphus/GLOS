@@ -157,7 +157,8 @@ static void cable_send_ip(const u8 *ip, u32 len)
 {
     struct pbuf *p;
     ip4_addr_t to;
-    if (len > cable->mtu || !(p = pbuf_alloc(PBUF_RAW, (u16_t)len, PBUF_POOL)))
+    if (len > cable->mtu || !(p = pbuf_alloc(PBUF_LINK, (u16_t)len, PBUF_POOL)))    /* (room in front for an
+                                                   Ethernet header: a parallel cable's interface has ARP) */
         return;
     pbuf_take(p, ip, (u16_t)len);
     memcpy(&to, ip + 16, 4);

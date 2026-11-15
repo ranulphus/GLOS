@@ -591,13 +591,22 @@ u32 net_stat(char *buf, u32 max, int json)
 /* The cable's interface has an address of the network at its far end (slip.c: this PC is a member there, by
    the far PC's doing: member.c), or has lost it. The clock's server, the names and the apps hear of it as of a
    card's address. */
+static u8 cable_named;                  /* the .local name's responder is on the cable's interface */
+
+void net_cable_gone(struct netif *n)
+{
+    if (cable_named) {
+        mdns_resp_remove_netif(n);
+        cable_named = 0;
+    }
+}
+
 void net_cable_member(struct netif *n, int on)
 {
-    static u8 named;
     api2_net_changed();
     bound_at = on ? timer_ticks() | 1 : nic0 ? bound_at : 0;
-    if (on && !named && !nic0) {                /* (its name on that network: the responder on the cable) */
-        named = 1;
+    if (on && !cable_named && !nic0) {          /* (its name on that network: the responder on the cable) */
+        cable_named = 1;
         mdns_resp_init();
         if (mdns_resp_add_netif(n, hostname) != ERR_OK
             || mdns_resp_add_service(n, hostname, "_ssh", DNSSD_PROTO_TCP, 22, NULL, NULL) < 0)
@@ -656,21 +665,22 @@ int net_counts(u8 ip[4], u32 *rx, u32 *tx, char *card, u32 room)
 }
 
 /* glos net server|client COMn [BAUD], glos net cable off (the net thread's, by net_run): the link's state
-   changed while GLOS runs. arg: role << 24 | com << 20 | baud; role 0: off. */
+   changed while GLOS runs. arg: role << 28 | port << 20 | baud (port: 1 to 4 a COM port, 17 to 19 an LPT); role
+   0: off. */
 static int cable_result;
 
 static void cable_set(void *arg)
 {
     u32 a = (u32)arg;
     slip_stop();
-    cable_result = a >> 24 ? slip_start(a >> 24, (a >> 20) & 15, a & 0xFFFFF, !nic0) : 0;
+    cable_result = a >> 28 ? slip_start(a >> 28, (a >> 20) & 0xFF, a & 0xFFFFF, !nic0) : 0;
     member_links(nic0 ? &nif : 0, slip_netif(1));
     api2_net_changed();
 }
 
 int net_cable(u32 role, u32 com, u32 baud)
 {
-    if (net_run(cable_set, (void *)(role << 24 | com << 20 | (baud & 0xFFFFF)), 1) != 0)
+    if (net_run(cable_set, (void *)(role << 28 | (com & 0xFF) << 20 | (baud & 0xFFFFF)), 1) != 0)
         return -4;                              /* (no network thread: GLOS.CFG's [net] cable starts one) */
     return cable_result;
 }

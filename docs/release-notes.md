@@ -4,6 +4,18 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The network over a parallel cable; a PC on a cable as a member of the network (2026-11-15)
+
+- **A parallel (LapLink) cable is a second kind of cable link** (N2): `cable = client LPT1` in GLOS.CFG, or
+  `NETWORK SERVER LPT1` / `NETWORK CLIENT LPT1`. It speaks PLIP, as Crynwr's DOS packet driver and Linux do,
+  several times faster than a serial cable. The parallel port is GLOS's while the link is up.
+- **A PC at the far end of a cable can be a member of the near PC's network** (N1, serial cables so far): a PC
+  with a network card and a server link passes the far PC's request for an address to the network's DHCP
+  server and then its traffic both ways, so the far PC has an address of its own there and is reached by it.
+  `[net] cable_share = off` on the near PC, or `cable_join = off` on the far one, keeps the cable to the two.
+- With a cable link up on a PC that has no network card, `glos exit` left the PS/2 mouse's interrupt line
+  unmasked for DOS. It leaves the interrupt controller as it found it now.
+
 ## Write-combining for the video card's framebuffer: a setting, and the VGA window's trial (2026-11-14)
 
 - **`[display] write_combining = auto | on | off`** in GLOS.CFG (the owner's choice after the trial below; `auto` is

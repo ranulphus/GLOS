@@ -1401,6 +1401,8 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         int baud = 0, e = -5;
         if (!role)
             e = net_cable(0, 0, 0);
+        else if ((p[0] | 32) == 'l' && (p[1] | 32) == 'p' && (p[2] | 32) == 't' && p[3] >= '1' && p[3] <= '3' && !p[4])
+            e = net_cable(role, 16u + (u32)(p[3] - '0'), 0);    /* a parallel (LapLink) cable: PLIP */
         else if ((p[0] | 32) == 'c' && (p[1] | 32) == 'o' && (p[2] | 32) == 'm' && p[3] >= '1' && p[3] <= '4'
                  && (!p[4] || p[4] == ' ')) {
             com = (u32)(p[3] - '0');
@@ -1419,8 +1421,9 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             ssh_chan_write(ch, 0, (const uint8_t *)t, n);
             ssh_chan_exit(ch, 0);
         } else {
-            say(ch, 1, e == -5 ? "glos net: server COMn [BAUD] | client COMn [BAUD] | cable off (COM1 to COM4; 115200 unless said)\n"
-                : e == -1 ? "glos net: no serial port answers there\n"
+            say(ch, 1, e == -5 ? "glos net: server|client COMn [BAUD] | server|client LPTn | cable off (COM1 to COM4, 115200 unless "
+                                 "said; LPT1 to LPT3, a LapLink cable)\n"
+                : e == -1 ? "glos net: no port answers there\n"
                 : e == -3 ? "glos net: the speed is 115200 divided by a whole number (57600, 38400, 19200, 9600 ...)\n"
                 : e == -4 ? "glos net: no network thread runs (GLOS.CFG: [net] cable = server COM1, then restart GLOS)\n"
                 : "glos net: the cable link could not be started\n");

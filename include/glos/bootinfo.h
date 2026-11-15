@@ -165,7 +165,7 @@ struct bootinfo {
     bi_u32 sb_mpu;                              /* BLASTER's (or [sound] blaster's) P: the MPU-401's port; 0: not given */
     /* version 8: the cable link (docs/cable.md) */
     bi_u32 cable_role;                          /* [net] cable = server | client COMn [BAUD]: BI_CABLE_*; 0: off */
-    bi_u32 cable_com;                           /* 1 to 4 */
+    bi_u32 cable_com;                           /* 1 to 4: COM1 to COM4; 17 to 19: LPT1 to LPT3 (a parallel cable) */
     bi_u32 cable_baud;                          /* 0: 115200 */
     /* version 9 */
     bi_u32 boot_drive;                          /* the drive DOS started from, as DOS says it (INT 21h 3305h): 1 A:,

@@ -1625,8 +1625,8 @@ class Agent:
             text = self.log()
             if after:
                 text = text[text.index(after):] if after in text else ""
-            if "GLOS-NET dhcp" in text and "GLOS-SSH listen" in text:
-                return True
+            if ("GLOS-NET dhcp" in text or "GLOS-NET cable member" in text) and "GLOS-SSH listen" in text:
+                return True                     # (an address by a card, or by a cable that is the PC's network)
             time.sleep(1)
         return False
 
@@ -2187,6 +2187,66 @@ def cable_port(name, limit=120):
             return int(open(path).read())
         time.sleep(0.5)
     return 0
+
+
+def plip_case(profile, card):
+    """The parallel link (kernel/drv/plip.c, kernel/net/slip.c; docs/v1/cable-network.md, N2): a PC with no
+    network card, 86Box's PLIP device on LPT1 (card "plip": Ethernet frames over the parallel port, joined to
+    SLiRP) and [net] cable = client LPT1. GLOS's own PLIP is then the PC's network: the port taken (378h, IRQ
+    7), an address by DHCP over it, SSH and SFTP from the host (256 KB there and back, the copies identical),
+    `glos net`'s line with its counts and no errors; the port DOS's again after `glos exit`."""
+    import hashlib
+    import time
+    tag = "plip-%s" % profile
+    cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py ssh, the parallel link", "[time]", "sntp = off", "[net]",
+                                      "cable = client lpt1"])
+    agent = Agent("ssh-" + tag, profile, card, ["--file", cfg + "=/TEST/GLOS.CFG",
+                                                "--cmd", "SERSAY HX-START plip", "--cmd", "VECCHK save",
+                                                "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VECCHK check",
+                                                "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks, info = {"listen": agent.listening()}, ""
+    try:
+        log = agent.log()
+        checks["port"] = "GLOS-NET cable role=client lpt=1 io=378 irq=7 ip=192.168.250.2 peer=192.168.250.1" in log
+        checks["address"] = "GLOS-NET cable member ip=10.0.2.15 gw=10.0.2.2 mask=255.255.255.0" in log
+        t0 = time.time()
+        rc, out, _ = agent.ssh("glos ver")
+        info += " first=%.1fs" % (time.time() - t0)
+        checks["ver"] = rc == 0 and out.startswith("GLOS M3")
+        big = os.path.join(agent.tmp, "big.bin")
+        back = os.path.join(agent.tmp, "back.bin")
+        open(big, "wb").write(os.urandom(256 << 10))
+        want = hashlib.sha256(open(big, "rb").read()).hexdigest()
+        fx = ["-P", str(agent.port)] + agent.base[3:] + ["-i", agent.key]
+        batch = os.path.join(agent.tmp, "batch")
+        open(batch, "w").write("cd /C/TEST\nput %s BIG.BIN\nget BIG.BIN %s\nrm BIG.BIN\n" % (big, back))
+        t0 = time.time()
+        p = subprocess.run(["sftp"] + fx + ["-b", batch, "glos@127.0.0.1"], capture_output=True, timeout=900)
+        secs = time.time() - t0
+        info += " sftp=%.1fs (%.0f KB/s)" % (secs, 512 / secs)
+        checks["sftp"] = p.returncode == 0 and os.path.exists(back) \
+            and hashlib.sha256(open(back, "rb").read()).hexdigest() == want
+        if not checks["sftp"]:
+            info += " sftp-rc=%d err=%r" % (p.returncode, p.stderr.decode("latin-1")[-200:])
+        rc, out, _ = agent.ssh("glos net")
+        m = re.search(r"cable rx=(\d+) tx=(\d+) rx_bad=(\d+) tx_dropped=(\d+) rx_errors=(\d+) tx_errors=(\d+) "
+                      r"collisions=(\d+) irqs=(\d+)", out)
+        checks["net"] = rc == 0 and "no network card\n" in out and "cable=client lpt=1 io=378 irq=7 ip=10.0.2.15 " in out \
+            and "member=yes" in out and bool(m) and int(m.group(1)) > 300 and int(m.group(2)) > 300 \
+            and int(m.group(5)) == 0 and int(m.group(6)) == 0 and int(m.group(8)) > 0
+        if not checks["net"]:
+            info += " net=%r" % out[-300:]
+        else:
+            info += " rx=%s tx=%s collisions=%s" % (m.group(1), m.group(2), m.group(7))
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-WARN|GLOS-CRASH", text)
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-VECCHK ok" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL",
+                             info + ("" if not bad else " failed: " + " ".join(bad))), not bad
 
 
 def typed_keys(text, start=1.0, step=0.15):
@@ -8814,6 +8874,7 @@ def main():
             res += matrix(shell_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(cable_case, [("bf6", "ne2kpci"), ("486dx2", "none")], a.jobs)
             res += matrix(member_case, [("bf6", "ne2kpci")], a.jobs)
+            res += matrix(plip_case, [("bf6", "plip"), ("486dx2", "plip")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]
