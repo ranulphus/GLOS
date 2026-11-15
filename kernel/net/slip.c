@@ -25,6 +25,7 @@
 #include "glos/bootinfo.h"
 #include "kcfg.h"
 #include "kprintf.h"
+#include "member.h"
 #include "nic.h"
 #include "vm.h"
 #include "plip.h"
@@ -99,6 +100,17 @@ static err_t par_out(struct netif *n, struct pbuf *p)
     return ERR_OK;
 }
 
+/* An IP packet for the parallel cable: to a member of the card's network at the far end (and to that network's
+   broadcast address) straight to its hardware address, which member.c has: the cable's own interface is not on
+   that network, and lwIP's ARP would find no way to it. Everything else by ARP as on any Ethernet. */
+static err_t par_ip_out(struct netif *n, struct pbuf *p, const ip4_addr_t *to)
+{
+    struct eth_addr dst;
+    if (member_cable_mac(ip4_addr_get_u32(to), dst.addr))
+        return ethernet_output(n, p, (const struct eth_addr *)n->hwaddr, &dst, ETHTYPE_IP);
+    return etharp_output(n, p, to);
+}
+
 static void deliver(void)
 {
     struct pbuf *p;
@@ -137,6 +149,7 @@ void slip_turn(void)
             }
             pbuf_take(p, frame, (u16_t)n);
             rx_packets++;
+            member_cable_frame(frame, n);       /* (the far PC a member of the card's network: member.c) */
             if (sl.input(p, &sl) != ERR_OK)
                 pbuf_free(p);
         }
@@ -207,7 +220,7 @@ static err_t sl_init(struct netif *n)
     u32 h = 2166136261u, i;
     n->name[0] = par ? 'p' : 's', n->name[1] = 'l';
     if (par) {                                  /* Ethernet frames: lwIP's ARP in front, as for a card */
-        n->output = etharp_output;
+        n->output = par_ip_out;
         n->linkoutput = par_out;
         n->mtu = 1500;
         n->flags = NETIF_FLAG_LINK_UP | NETIF_FLAG_BROADCAST | NETIF_FLAG_IGMP | NETIF_FLAG_ETHARP | NETIF_FLAG_ETHERNET;

@@ -2,7 +2,9 @@
 
 **Status: agreed by the owner (2026-11-14, the answers at the end). N1 is on GLOS main and passes in Loop A; its
 proof on the benches is owed. N2, the parallel link, is built and passes in Loop A against 86Box's PLIP device
-(2026-11-15); two benches with a LapLink cable are owed. N3 is not started.** The links themselves are in
+(2026-11-15); two benches with a LapLink cable are owed. N3, membership and the installer over the parallel
+cable, is built and passes in Loop A (2026-11-15); its test of two PCs needs two changes to RetroGPU's Loop A
+(below) that wait for the owner's word.** The links themselves are in
 [docs/cable.md](../cable.md).
 
 ## What the owner asked for (2026-11-14)
@@ -148,6 +150,38 @@ N1 first: the hardware for it is cabled already, and it is the larger unknown.
   silent for 100 has gone (`GLOS-NET member gone ... why=silent`), so a pulled cable stops this PC answering for
   that address (Loop A pulls it); a packet too long for the cable that may not be cut is answered with ICMP's
   "fragmentation needed"; the network's own broadcast address is copied on as 255.255.255.255 is.
+
+## As built: N3 (2026-11-15)
+
+- **Membership over the parallel cable is N1's code with two additions**, both because the parallel link is an
+  Ethernet to the network stack and the serial one is not:
+  - The far PC, with the network's address and mask on its cable interface, asks by ARP for every address of
+    the network it wants (the router's first). **The near PC answers all of them with its own cable address**
+    (`member_cable_frame`; `cable_arp_answers=` in `NETWORK`), so everything the far PC sends comes to it to be
+    passed on.
+  - **The near PC sends a member's packets straight to the hardware address the member asked for its lease
+    with** (`member_cable_mac`): the cable's own interface is not on the card's network, and ARP there would
+    find no way to the member. The same for the network's broadcast address.
+- The far PC needs nothing new: `cable = client LPT1`, and the DHCP client N2 already runs on the link.
+- **The setup floppy and the installer** take the parallel link as they take the serial one, unchanged:
+  `make floppy FLOPPY_CABLE="client LPT1"`, `tools/floppy/install.py ADDRESS --cable "client LPT1"`. The PC
+  being installed is cabled to a GLOS PC that has a network card (its link `server LPT1`), gets an address of
+  the network's own through it, and is installed from any computer on the network.
+- **Loop A:**
+  - `ssh-member-par-bf6-ne2kpci` (in `make loopa-ssh`): N1's test with the two PCs' LPT1 ports joined instead
+    of their COM2 ports. The far PC is given 10.0.2.16 through the near one, sets its clock by a server on the
+    host, fetches 40 KB over TCP at its own prompt, stays a member while idle (asked for an echo), and is
+    forgotten when it is switched off.
+  - `floppy-486dx4-plip-1440` (in `make loopa-floppy`): a PC with no network card and a blank disk starts the
+    floppy made for `client LPT1`, is partitioned, formatted and installed over the cable, and comes up from
+    its disk with the same link.
+- **What the two-PC test needs of RetroGPU's Loop A** (branch `loopa-switch` there, not merged: the owner's
+  word is asked): the runner's `--net-switch NAME` and `--net2 CARD:NAME` (a PC's card, or a second card, on
+  86Box's local switch, which joins the 86Boxes of one run), and a patch to 86Box, which puts a PLIP device on
+  SLiRP whatever network it was given: on the local switch two PLIP devices are a LapLink cable between two
+  emulated PCs.
+- **Owed:** the benches, as for N1 and N2 (the owner's LapLink cable): the router's ARP for the member, an SSH
+  login to the far PC from another computer, an install over the cable, and PLIP's real speed.
 
 ## Decided by the owner (2026-11-14)
 

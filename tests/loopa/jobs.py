@@ -103,6 +103,7 @@ import argparse
 import concurrent.futures
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -124,6 +125,31 @@ def runpy_cmd():
     return [os.path.join(MGA, "tools/dev"), "python3", os.path.join(MGA, "tools/loopa/run.py")]
 
 
+def power_off(name):
+    """A background run's emulated PC switched off as by its switch: its 86Box, known by the run's own folder,
+    killed (the Popen is the runner, or the container's client: killing that leaves the PC running)."""
+    vm = os.path.join(ROOT, "out", name, "vm").encode()
+    for d in os.listdir("/proc"):
+        if d.isdigit():
+            try:
+                args = open("/proc/%s/cmdline" % d, "rb").read().split(b"\0")
+            except OSError:
+                continue
+            if b"86Box" in os.path.basename(args[0]) and vm in args:
+                try:
+                    os.kill(int(d), signal.SIGKILL)
+                except OSError:
+                    pass
+
+
+class Background(subprocess.Popen):
+    """A background run: kill() switches its PC off too (86Box outlives the runner, or the container's client,
+    by up to the run's time limit otherwise, and counts among the emulators a suite may have)."""
+    def kill(self):
+        power_off(self.run_name)
+        super().kill()
+
+
 def run(name, args, background=False):
     if os.environ.get("GLOS_SET"):              # GLOS.EXE's flags for the whole run (GLOS_SET=/DIRECT: forced direct mode;
         args = ["--pre", "SET GLOS=" + os.environ["GLOS_SET"]] + args      # not as the shell, started before RUN.BAT)
@@ -135,7 +161,9 @@ def run(name, args, background=False):
     env = dict(os.environ, MGA_DOCKER_NETWORK="host") if not IN_CONTAINER else None
     cmd = runpy_cmd() + ["--name", name, "--out", out, "--idle", "60", "--boot-grace", "60", "--timeout", "300"] + args
     if background:
-        return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ROOT, env=env)
+        proc = Background(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ROOT, env=env)
+        proc.run_name = name
+        return proc
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ROOT, env=env)
     status = open(os.path.join(out, "status")).read().strip() if os.path.exists(os.path.join(out, "status")) else "?"
     serial = open(os.path.join(out, "serial.log"), "rb").read().decode("latin-1").replace("\r", "") \
@@ -2267,8 +2295,11 @@ def typed_keys(text, start=1.0, step=0.15):
     return ",".join(items)
 
 
-def member_case(profile, card):
-    """A cable's far PC as a member of the near PC's network (kernel/net/member.c; docs/v1/cable-network.md, N1):
+def member_case(profile, card, par=False):
+    """A cable's far PC as a member of the near PC's network (kernel/net/member.c; docs/v1/cable-network.md, N1;
+    par: N3, over a parallel cable: each PC's LPT1 has 86Box's PLIP device, the two joined by 86Box's local
+    network switch, which stands for the LapLink cable; the near PC answers the far one's ARP requests for the
+    network's addresses, and "the cable pulled out" is the far PC switched off):
     two PCs with their COM2 ports joined on the host. The near one has a network card and [net] cable = server
     COM2; the far one has no card and cable = client COM2. The far PC's request for an address goes through the
     near one to the network's DHCP server (SLiRP's), which gives it an address of its own; the near PC says so
@@ -2282,7 +2313,9 @@ def member_case(profile, card):
     import http.server
     import socket
     import threading
-    tag = "member-%s-%s" % (profile, card)
+    tag = "member-%s%s-%s" % ("par-" if par else "", profile, card)
+    port = "lpt1" if par else "com2"
+    wire = "glos%d" % os.getpid()               # (the switch's name: this run's alone)
     ntp = NtpServer()
     blob, got = os.urandom(40000), []
 
@@ -2300,14 +2333,16 @@ def member_case(profile, card):
     threading.Thread(target=web.serve_forever, daemon=True).start()
     fetch = "c:\\test\\fetch --quiet http://10.0.2.2:%d/blob c:\\test\\blob.bin\n" % web.server_address[1]
     cfg_a = batfile(tag + "/near/GLOS.CFG", ["; jobs.py ssh, membership: the PC with the card", "[time]", "sntp = off",
-                                             "[net]", "hostname = near", "cable = server com2"])
+                                             "[net]", "hostname = near", "cable = server " + port])
     cfg_b = batfile(tag + "/far/GLOS.CFG", ["; jobs.py ssh, membership: the PC at the cable's far end", "[time]",
                                             "server = 10.0.2.2:%d" % ntp.port, "[net]", "hostname = far",
-                                            "cable = client com2"])
-    near = Agent("ssh-" + tag, profile, card, ["--com2", "--file", cfg_a + "=/TEST/GLOS.CFG",
+                                            "cable = client " + port])
+    near = Agent("ssh-" + tag, profile, card, (["--net2", "plip:" + wire] if par else ["--com2"])
+                                              + ["--file", cfg_a + "=/TEST/GLOS.CFG",
                                                "--cmd", "SERSAY HX-START member", "--cmd", "C:\\TEST\\GLOS.EXE",
                                                "--cmd", "SERSAY HX-DONE 0"], timeout=900)
-    far = run("ssh-" + tag + "-far", ["--machine", profile, "--com2", "--timeout", "900", "--idle", "600",
+    far = run("ssh-" + tag + "-far", ["--machine", profile] + (["--net", "plip", "--net-switch", wire] if par else ["--com2"])
+              + ["--timeout", "900", "--idle", "600",
                                       "--file", cfg_b + "=/TEST/GLOS.CFG", "--file", "build/apps/FETCH.EXE=/TEST/FETCH.EXE",
                                       "--keys", "@GLOS-TIME set by=sntp," + typed_keys(fetch, 3.0)] + GLOS_FILES + KEYS
               + ["--cmd", "SERSAY HX-START far", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
@@ -2360,9 +2395,10 @@ def member_case(profile, card):
         return test()
 
     try:
-        pa, pb = cable_port("ssh-" + tag), cable_port("ssh-" + tag + "-far")
-        checks["ports"] = bool(pa and pb)
-        threading.Thread(target=join, args=(pa, pb), daemon=True).start()
+        if not par:
+            pa, pb = cable_port("ssh-" + tag), cable_port("ssh-" + tag + "-far")
+            checks["ports"] = bool(pa and pb)
+            threading.Thread(target=join, args=(pa, pb), daemon=True).start()
         m = until(lambda: re.search(r"GLOS-NET member ip=(10\.0\.2\.\d+) mac=02:47:4c:\S+ lease=(\d+)", near.log()), 300)
         checks["member"] = bool(m) and m.group(1) != "10.0.2.15"
         ip = m.group(1) if m else "?"
@@ -2376,9 +2412,11 @@ def member_case(profile, card):
         checks["clock"] = bool(until(lambda: "GLOS-TIME set by=sntp" in flog(), 180)) and ntp.asked >= 1
         out = until(lambda: (lambda o: o if re.search(r"copied_out=[1-9]", o) else "")(near.ssh("glos net")[1]), 60)
         checks["names-copied"] = bool(out)      # (the far PC's announcements of its name, copied to the network)
-        checks["forwarded"] = bool(re.search(r"forwarded=([2-9]|\d\d)", out or "")) \
-            and ("far", ip, "10.0.2.2", "udp") in [(w, s_, d, x.split(":")[0]) for w, s_, d, x in seen] \
-            and ("near", "10.0.2.2", ip, "udp") in [(w, s_, d, x.split(":")[0]) for w, s_, d, x in seen]
+        checks["forwarded"] = bool(re.search(r"forwarded=([2-9]|\d\d)", out or "")) and (par or (
+            ("far", ip, "10.0.2.2", "udp") in [(w, s_, d, x.split(":")[0]) for w, s_, d, x in seen]
+            and ("near", "10.0.2.2", ip, "udp") in [(w, s_, d, x.split(":")[0]) for w, s_, d, x in seen]))
+        if par:                                 # (the far PC's ARP requests for the gateway, answered by the near PC)
+            checks["cable-arp"] = bool(re.search(r"cable_arp_answers=[1-9]", out or ""))
         # (SLiRP learns where the far PC is from the near PC's announcement of it and never asks: the answer to
         # an ARP request for a member's address is the benches' to show, with a real router)
         # TCP: FETCH typed at the far PC's own prompt (the test's keys, once its clock is set) takes 40 KB from
@@ -2396,8 +2434,10 @@ def member_case(profile, card):
         # (first, idle but there: asked for an echo after half a minute's silence, it answers and stays)
         out = until(lambda: (lambda o: o if re.search(r"probes=[2-9]", o) else "")(near.ssh("glos net")[1]), 150)
         checks["stays"] = bool(out) and ("member ip=%s " % ip) in out and "member gone" not in near.log() \
-            and ("far", ip, "10.0.2.15", "icmp") in seen
+            and (par or ("far", ip, "10.0.2.15", "icmp") in seen)
         stop.append(1)
+        if par:
+            power_off("ssh-" + tag + "-far")    # (no cable to pull: the far PC switched off)
         gone = until(lambda: "GLOS-NET member gone ip=%s why=silent" % ip in near.log(), 200)
         out = near.ssh("glos net")[1]
         checks["unplugged"] = bool(gone) and "member ip=" not in out and bool(re.search(r"probes=[1-9]", out))
@@ -2432,7 +2472,7 @@ def cable_case(profile, card):
     DOS's again after `glos exit`. Without a card (card "none"): [net] cable = server COM2 alone starts the
     network, and the PC answers on the cable (echo, the SSH port)."""
     tag = "cable-%s-%s" % (profile, card)
-    checks = {}
+    checks, why = {}, ""
     if card == "none":
         cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py ssh, the cable link alone", "[net]", "cable = server com2"])
         proc = run("ssh-" + tag, ["--machine", profile, "--com2", "--timeout", "300", "--idle", "200",
@@ -2449,7 +2489,10 @@ def cable_case(profile, card):
         port = cable_port("ssh-" + tag)
         try:
             line = Slip(port, [192, 168, 250, 2], [192, 168, 250, 1])
-            checks["echo"] = line.ping(56) and line.ping(500)
+            echo = [line.ping(56), line.ping(500)]
+            checks["echo"] = all(echo)
+            if not all(echo):                   # (once in a gate on devserver, 2026-11-15, never alone: what then?)
+                why = " echo=%r again=%r" % (echo, [line.ping(56), line.ping(500)])
             checks["ssh-port"] = line.syn(22)
             checks["refused-port"] = not line.syn(23, 2)
         except OSError:
@@ -2459,7 +2502,7 @@ def cable_case(profile, card):
         text = log()
         checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
         bad = [k for k, v in checks.items() if not v]
-        return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
+        return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad) + why), \
             not bad
     cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py ssh, the cable link beside a card", "[time]", "sntp = off", "[net]",
                                       "cable = client com2 57600"])
@@ -6813,7 +6856,7 @@ def free_port():
 
 
 NETAPP_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
-FLOPPY_CASES = [("486dx4", "ne2k", 1440), ("486dx4", "ne2k", 720)]
+FLOPPY_CASES = [("486dx4", "ne2k", 1440), ("486dx4", "ne2k", 720), ("486dx4", "plip", 1440)]
 
 
 def mbr_case(profile):
@@ -7077,11 +7120,16 @@ def floppy_case(profile, card, size):
     answers on the network from it, and
     tools/floppy/install.py --new-disk partitions and formats the disk, puts FreeDOS on it from the floppy and
     GLOS's files by SFTP. Then the PC is started from the disk alone: GLOS comes up as the installed system (its
-    name, the same host key), with its programs there and one of them run as an app."""
+    name, the same host key), with its programs there and one of them run as an app.
+    Card "plip" (N3): the PC has no network card and a parallel cable on LPT1 (86Box's PLIP device); the floppy
+    is the one made with FLOPPY_CABLE="client LPT1", and install.py --cable "client LPT1" gives the installed
+    system the same link: all of the above over the cable."""
     import shutil
     import socket
     import tempfile
     tag = "%s-%s-%d" % (profile, card, size)
+    lpt = card == "plip"
+    image = os.path.join(ROOT, "out", "floppy-test-%d%s.img" % (size, "-lpt" if lpt else ""))
     disk = os.path.join(ROOT, "out", "floppy-%s-disk.img" % tag)
     with open(disk, "wb") as f:                 # blank: 200 cylinders of 63 sectors by 16 heads, about 98 MB
         f.truncate(63 * 16 * 512 * 200)
@@ -7112,7 +7160,7 @@ def floppy_case(profile, card, size):
     def listening(serial, limit=600):
         t0 = time.time()
         while time.time() - t0 < limit:
-            if "GLOS-NET dhcp" in log(serial) and "GLOS-SSH listen" in log(serial):
+            if ("GLOS-NET cable member" if lpt else "GLOS-NET dhcp") in log(serial) and "GLOS-SSH listen" in log(serial):
                 return True
             time.sleep(1)
         return False
@@ -7135,7 +7183,7 @@ def floppy_case(profile, card, size):
 
     try:
         # 1. From the floppy, onto the blank disk.
-        proc, port, opts, serial = start("floppy-" + tag, ["--floppy", os.path.join(ROOT, "out", "floppy-test-%d.img" % size)])
+        proc, port, opts, serial = start("floppy-" + tag, ["--floppy", image])
         checks["floppy-up"] = listening(serial)
         rc, o = ssh(port, opts, "glos ver")
         checks["floppy-ssh"] = rc == 0 and "GLOS" in o
@@ -7156,7 +7204,7 @@ def floppy_case(profile, card, size):
         checks["refuses-blank"] = p.returncode == 1 and b"--new-disk" in p.stderr       # (nothing done unasked)
         p = subprocess.run([sys.executable, os.path.join(ROOT, "tools/floppy/install.py"), "127.0.0.1", "--port", str(port),
                             "--key", key, "--keys", os.path.join(ROOT, "out", "floppy-keys"), "--new-disk", "--name",
-                            "glos486"], capture_output=True, timeout=3000)
+                            "glos486"] + (["--cable", "client LPT1"] if lpt else []), capture_output=True, timeout=3000)
         out = (p.stdout + p.stderr).decode("latin-1")
         open(os.path.join(ROOT, "out", "floppy-%s-install.txt" % tag), "w").write(out)
         checks["install"] = p.returncode == 0 and "Done." in out
@@ -7173,6 +7221,8 @@ def floppy_case(profile, card, size):
         rc, o = ssh(port, opts, "glos ver")
         checks["disk-ssh"] = rc == 0 and "GLOS" in o            # (the same host key: ssh checks it)
         checks["name"] = "GLOS-NET mdns name=glos486.local" in log(serial)
+        if lpt:
+            checks["cable-kept"] = "GLOS-NET cable role=client lpt=1 " in log(serial)
         rc, o = ssh(port, opts, "C:\\GLOS\\PKG.EXE SOURCES")    # (one of its programs, an app)
         checks["app"] = rc == 0 and "GLOS-APP start" in log(serial)
         if not checks["app"]:
@@ -7185,7 +7235,7 @@ def floppy_case(profile, card, size):
         # 3. A disk DOS can't read (a partition made and not formatted): GLOS answers DOS's Abort, Retry, Fail
         # itself where nobody is at the PC, in its own work (SFTP) and in a command run over SSH. Before
         # 2026-11-12 each of these stopped DOS until a key was pressed at the PC.
-        if size == 1440:
+        if size == 1440 and not lpt:
             with open(disk, "wb") as f:
                 f.truncate(63 * 16 * 512 * 200)
             proc, port, opts, serial = start("floppy-%s-raw" % tag, ["--floppy", os.path.join(ROOT, "out", "floppy-test-%d.img" % size)])
@@ -8875,6 +8925,7 @@ def main():
             res += matrix(cable_case, [("bf6", "ne2kpci"), ("486dx2", "none")], a.jobs)
             res += matrix(member_case, [("bf6", "ne2kpci")], a.jobs)
             res += matrix(plip_case, [("bf6", "plip"), ("486dx2", "plip")], a.jobs)
+            res += matrix(lambda pr, c: member_case(pr, c, True), [("bf6", "ne2kpci")], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]

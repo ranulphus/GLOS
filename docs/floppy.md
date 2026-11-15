@@ -27,6 +27,10 @@ disk.
 - **Who the PC is:** a host key made once for the floppy (`build/floppy/keys/HOSTKEY`, kept from one image to the
   next). `install.py` trusts that key and no other, and gives it to the installed system, so the PC stays the PC.
 - **Its name:** `FLOPPY_HOST` (`glos-setup`): the PC answers as `glos-setup.local`.
+- **A PC with no network card GLOS drives:** `FLOPPY_CABLE="client COM1"` or `"client LPT1"` makes a floppy that
+  brings the PC up over a serial or a parallel (LapLink) cable ([cable.md](cable.md)): to a Linux computer
+  (serial: `tools/cable.sh`), or to a GLOS PC that has a network card, through which the new PC joins the
+  network. `install.py --cable "client LPT1"` gives the installed system the same link.
 
 Write the image to a floppy as it is (`dd if=build/floppy/glos1440.img of=/dev/sdX` with a USB floppy drive; a
 floppy emulator takes the file). Leave the floppy write-enabled: GLOS keeps its random seed on it.

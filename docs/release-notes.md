@@ -9,10 +9,13 @@ in its `docs/milestones-*.md`.
 - **A parallel (LapLink) cable is a second kind of cable link** (N2): `cable = client LPT1` in GLOS.CFG, or
   `NETWORK SERVER LPT1` / `NETWORK CLIENT LPT1`. It speaks PLIP, as Crynwr's DOS packet driver and Linux do,
   several times faster than a serial cable. The parallel port is GLOS's while the link is up.
-- **A PC at the far end of a cable can be a member of the near PC's network** (N1, serial cables so far): a PC
+- **A PC at the far end of a cable can be a member of the near PC's network** (N1; over the parallel cable
+  too: N3): a PC
   with a network card and a server link passes the far PC's request for an address to the network's DHCP
   server and then its traffic both ways, so the far PC has an address of its own there and is reached by it.
   `[net] cable_share = off` on the near PC, or `cable_join = off` on the far one, keeps the cable to the two.
+- **A PC with no network card is installed over a parallel cable** (N3): `make floppy FLOPPY_CABLE="client
+  LPT1"`, the cable to a GLOS PC that has a card, `tools/floppy/install.py ADDRESS --cable "client LPT1"`.
 - With a cable link up on a PC that has no network card, `glos exit` left the PS/2 mouse's interrupt line
   unmasked for DOS. It leaves the interrupt controller as it found it now.
 

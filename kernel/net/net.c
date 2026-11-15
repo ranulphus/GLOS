@@ -611,6 +611,8 @@ void net_cable_member(struct netif *n, int on)
         if (mdns_resp_add_netif(n, hostname) != ERR_OK
             || mdns_resp_add_service(n, hostname, "_ssh", DNSSD_PROTO_TCP, 22, NULL, NULL) < 0)
             kprintf("GLOS-NET error=mdns\n");
+        else
+            kprintf("GLOS-NET mdns name=%s.local\n", hostname);
     }
     if (on) {
         char ip[16];

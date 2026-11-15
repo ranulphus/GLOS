@@ -1,9 +1,8 @@
 # The cable link: the network over a serial or a parallel cable
 
 **Status: SLIP over a serial port, built and tested (2026-11-13); the far PC as a member of this PC's network
-(N1, 2026-11-14); PLIP over a parallel port (N2, 2026-11-15, in Loop A: two benches with a LapLink cable are
-owed). To come: membership and the installer over the parallel cable (N3). Not planned: PPP and Windows 9x's
-Direct Cable Connection. The design: [v1/cable-network.md](v1/cable-network.md).**
+(N1, 2026-11-14); PLIP over a parallel port (N2) and membership and the installer over it (N3), 2026-11-15, in
+Loop A: two benches with a LapLink cable are owed. Not planned: PPP and Windows 9x's Direct Cable Connection. The design: [v1/cable-network.md](v1/cable-network.md).**
 
 A PC that runs GLOS can be reached over a serial cable instead of, or beside, a network card: IP between the
 two ends of the cable. SSH, SFTP, the installer, VNC and the apps' sockets work over it as over Ethernet. It is
@@ -34,8 +33,9 @@ how a PC whose network card GLOS has no driver for is installed and worked on (t
   `NETWORK CLIENT LPT1`. No speed is given. Any parallel port will do. One cable link at a time: serial or
   parallel.
 
-The roles say only which address is whose: **the server is 192.168.250.1, the client 192.168.250.2.** There is
-no DHCP and no `.local` name on the cable.
+The roles say which address is whose: **the server is 192.168.250.1, the client 192.168.250.2.** Between two
+PCs with nothing else that is all there is: no DHCP and no `.local` name on the cable. When the server PC has a
+network card, the client PC becomes a member of its network (below) and has an address and a name there.
 
 ## What it is
 
@@ -50,7 +50,11 @@ no DHCP and no `.local` name on the cable.
 - **The far PC as a member of this PC's network** (first cut, 2026-11-14; [v1/cable-network.md](v1/cable-network.md)):
   a PC with a network card and a server link lets the PC at the cable's far end onto its network, with an
   address of its own from the network's DHCP server. `[net] cable_share = off` keeps the cable to the two PCs;
-  `[net] cable_join = off` on the far PC stops it asking.
+  `[net] cable_join = off` on the far PC stops it asking. Over either kind of cable (the parallel one: N3).
+- **Installing a PC over a cable to another GLOS PC:** the setup floppy made with `FLOPPY_CABLE="client LPT1"`
+  (or `client COM1`), the cable to a GLOS PC with a network card and `NETWORK SERVER LPT1`: the new PC joins the
+  network through it, and `tools/floppy/install.py ADDRESS --cable "client LPT1"` installs it from any computer
+  there ([floppy.md](floppy.md)).
 
 ## The parallel link (N2)
 
@@ -82,12 +86,14 @@ no DHCP and no `.local` name on the cable.
   Loop A runner's `--net plip`), `cable = client LPT1`: an address by DHCP over the cable, SSH, 256 KB by SFTP
   each way with the copies identical and no error on the wire, and the port and the interrupt controller as DOS
   had them after `glos exit`. On the Pentium II and the 486 profiles.
+- Loop A, N3: two emulated PCs with their LPT1 ports joined (`ssh-member-par-*`: the far PC a member of the
+  near PC's network, as over the serial cable), and a PC with no card installed from the setup floppy over the
+  PLIP link (`make loopa-floppy`, `floppy-486dx4-plip-1440`).
 
 ## To come
 
-- The parallel port (a LapLink cable, Crynwr's PLIP: several times a serial port's speed).
-- **One bridged network** (the owner, 2026-11-14): GLOS PCs link by Ethernet, serial or parallel, and a cable link
-  can be made part of the network its PC's Ethernet card is on, so that the PC at the cable's far end is a
-  member of that network with an address of its own. The design comes first.
+- The benches' proof of the parallel link and of membership over both cables
+  ([v1/cable-network.md](v1/cable-network.md): what is owed).
+- A chain (a PC on a cable with a second cable to a third PC), and a serial and a parallel link at once.
 - Not planned: PPP and interworking with Windows 9x's Direct Cable Connection (it was the idea's example, not a
   requirement).

@@ -58,7 +58,7 @@ static struct member mem[MEMBERS];
 static struct netif *card, *cable;
 static u8 frame[1600];
 static u32 copy_tick, copy_left;        /* the cable's budget for copies, a second at a time */
-static u32 relayed, answered, copied_out, copied_in, copy_dropped, forwarded, too_long, probes;
+static u32 relayed, answered, copied_out, copied_in, copy_dropped, forwarded, too_long, probes, cable_answers;
 
 static int sharing(void)
 {
@@ -218,6 +218,55 @@ static u32 udp_for(const u8 *ip, u32 len, u16 dport)
         || (((u32)ip[6] << 8 | ip[7]) & 0x3FFF))    /* (a fragment: left to the stack) */
         return 0;
     return ((u32)ip[ihl + 2] << 8 | ip[ihl + 3]) == dport ? ihl : 0;
+}
+
+/* ---- from a cable that carries Ethernet frames (the parallel link: N3) */
+
+/* A frame that has come by the cable, before lwIP has it. On such a cable the far PC, which has the network's
+   address and mask on its interface, asks by ARP for every address of the network it wants: this PC answers
+   for all of them (but the far PC's own and this PC's on the cable, which lwIP answers), so that everything
+   the far PC sends comes here, to be forwarded. */
+void member_cable_frame(const u8 *f, u32 len)
+{
+    u32 asker, target;
+    struct pbuf *p;
+    u8 *r;
+    if (len < 42 || !cable || !(cable->flags & NETIF_FLAG_ETHARP) || f[12] != 0x08 || f[13] != 0x06 || f[21] != 1
+        || !sharing())
+        return;
+    memcpy(&asker, f + 28, 4);
+    memcpy(&target, f + 38, 4);
+    if (!by_ip(asker) || target == asker || target == ip4_addr_get_u32(netif_ip4_addr(cable)))
+        return;
+    if (!(p = pbuf_alloc(PBUF_RAW, 60, PBUF_POOL)))
+        return;
+    r = (u8 *)p->payload;
+    memset(r, 0, 60);
+    memcpy(r, f + 6, 6);
+    memcpy(r + 6, cable->hwaddr, 6);
+    r[12] = 0x08, r[13] = 0x06;
+    r[15] = 1, r[16] = 0x08, r[18] = 6, r[19] = 4, r[21] = 2;
+    memcpy(r + 22, cable->hwaddr, 6);
+    memcpy(r + 28, &target, 4);
+    memcpy(r + 32, f + 22, 6);
+    memcpy(r + 38, &asker, 4);
+    cable->linkoutput(cable, p);
+    pbuf_free(p);
+    cable_answers++;
+}
+
+int member_cable_mac(u32 ip, u8 mac[6])
+{
+    struct member *m = by_ip(ip);
+    if (m) {
+        memcpy(mac, m->mac, 6);
+        return 1;
+    }
+    if (card && cable && any_bound() && ip == (ip4_addr_get_u32(netif_ip4_addr(card)) | ~ip4_addr_get_u32(netif_ip4_netmask(card)))) {
+        memset(mac, 0xFF, 6);                   /* (the card's network's broadcast address) */
+        return 1;
+    }
+    return 0;
 }
 
 /* ---- from the card */
@@ -444,8 +493,8 @@ u32 member_stat(char *buf, u32 max)
                                 (u32)((s32)(mem[i].until - timer_ticks()) > 0 ? (mem[i].until - timer_ticks()) >> 10 : 0));
         }
     if (card && cable && k + 96 < max)
-        k += (u32)ksnprintf(buf + k, max - k, "share=%s relayed=%u arp_answers=%u forwarded=%u too_long=%u copied_out=%u "
-                            "copied_in=%u copy_dropped=%u probes=%u\n", sharing() ? "on" : "off", relayed, answered,
-                            forwarded, too_long, copied_out, copied_in, copy_dropped, probes);
+        k += (u32)ksnprintf(buf + k, max - k, "share=%s relayed=%u arp_answers=%u cable_arp_answers=%u forwarded=%u too_long=%u "
+                            "copied_out=%u copied_in=%u copy_dropped=%u probes=%u\n", sharing() ? "on" : "off", relayed,
+                            answered, cable_answers, forwarded, too_long, copied_out, copied_in, copy_dropped, probes);
     return k;
 }
