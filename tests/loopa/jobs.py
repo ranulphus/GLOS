@@ -2306,7 +2306,8 @@ def member_case(profile, card, par=False):
     (GLOS-NET member) and lists it (glos net); the far PC, at that address, sets its clock by a server on the
     host, there and back through the near PC, which answers for the far one's address on the Ethernet; the far
     PC's announcements of its name are copied to the network; a file fetched at the far PC's own prompt from a
-    web server on the host comes whole (TCP through the near PC, both ways, in segments the cable's size); and
+    web server on the host comes whole (TCP through the near PC, both ways, in segments the cable's size);
+    datagrams between the two PCs' programs, found by broadcast in both directions (API 2.2); and
     the cable pulled out, the far PC is forgotten within two minutes; and with cable_share = off the near PC
     says it shares nothing."""
     import hashlib
@@ -2337,14 +2338,18 @@ def member_case(profile, card, par=False):
     cfg_b = batfile(tag + "/far/GLOS.CFG", ["; jobs.py ssh, membership: the PC at the cable's far end", "[time]",
                                             "server = 10.0.2.2:%d" % ntp.port, "[net]", "hostname = far",
                                             "cable = client " + port])
+    serve = "c:\\test\\nettest udpserve 47010 240\n"
     near = Agent("ssh-" + tag, profile, card, (["--net2", "plip:" + wire] if par else ["--com2"])
                                               + ["--file", cfg_a + "=/TEST/GLOS.CFG",
+                                               "--file", "build/dj/NETTEST.EXE=/TEST/NETTEST.EXE",
                                                "--cmd", "SERSAY HX-START member", "--cmd", "C:\\TEST\\GLOS.EXE",
                                                "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     far = run("ssh-" + tag + "-far", ["--machine", profile] + (["--net", "plip", "--net-switch", wire] if par else ["--com2"])
               + ["--timeout", "900", "--idle", "600",
                                       "--file", cfg_b + "=/TEST/GLOS.CFG", "--file", "build/apps/FETCH.EXE=/TEST/FETCH.EXE",
-                                      "--keys", "@GLOS-TIME set by=sntp," + typed_keys(fetch, 3.0)] + GLOS_FILES + KEYS
+                                      "--file", "build/dj/NETTEST.EXE=/TEST/NETTEST.EXE",
+                                      "--keys", "@GLOS-TIME set by=sntp," + typed_keys(fetch, 3.0) + ","
+                                      + typed_keys(serve, 45.0)] + GLOS_FILES + KEYS
               + ["--cmd", "SERSAY HX-START far", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
               background=True)
     fserial = os.path.join(ROOT, "out", "ssh-" + tag + "-far", "serial.log")
@@ -2425,6 +2430,18 @@ def member_case(profile, card, par=False):
         checks["tcp"] = bool(done) and done.group(1) == "0" and len(got) == 1
         if not checks["tcp"]:
             info += " fetch=%r got=%d far-tail=%r" % (done and done.group(0), len(got), flog().split("\n")[-6:])
+        # Datagrams between the two PCs (API 2.2), broadcasts both ways: the far PC, a program typed at its prompt,
+        # serves a UDP port and announces itself to everyone each second; the near PC's program finds it by a
+        # broadcast of its own (copied down the cable from the near PC, which is where its apps' broadcasts
+        # start), is answered from the far PC's address, hears its announcement, and tells it to end
+        up = until(lambda: "via=C:\\TEST\\NETTEST.EXE" in flog(), 150)
+        rc, o, _ = near.ssh("C:\\TEST\\NETTEST.EXE udpfind 47010", timeout=90) if up else (1, "the far PC's program never started", "")
+        checks["udp-found"] = ("NETTEST find-reply ok from=%s " % ip) in o
+        checks["udp-announced"] = ("NETTEST find-announce ok from=%s " % ip) in o
+        checks["udp-long"] = "NETTEST find-long ok " in o      # (1400 bytes each way: in fragments over the cable)
+        checks["udp-ended"] = bool(until(lambda: re.search(r"GLOS-APP end id=\d+ prog=NETTEST\.EXE code=0", flog()), 30))
+        if not (checks["udp-found"] and checks["udp-announced"] and checks["udp-long"] and checks["udp-ended"]):
+            info += " udp=%r far-tail=%r" % (o[-300:], flog().split("\n")[-5:])
         if not all(checks.values()):
             info += " asked=%d cable=%r near=%r far=%r net=%r" % (ntp.asked, seen[-24:], [l for l in near.log().split("\n") if "member" in l or "cable" in l][-4:],
                                                 [l for l in flog().split("\n") if "cable" in l or "GLOS-TIME" in l][-4:],
@@ -6795,6 +6812,37 @@ def time_case(profile, card):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+class UdpEcho:
+    """UDP echo on 127.0.0.1, which the guest reaches as 10.0.2.2 through SLiRP: each datagram goes back to
+    whoever sent it; one that says "burst N SIZE" is answered with N datagrams of SIZE bytes, numbered in their
+    first four characters, two milliseconds apart. `seen` the datagrams that came, `ports` where from."""
+
+    def __init__(self):
+        import socket
+        import threading
+        self.seen, self.ports = 0, set()
+        self.s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.s.bind(("127.0.0.1", 0))
+        self.port = self.s.getsockname()[1]
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                d, who = self.s.recvfrom(4096)
+            except OSError:
+                return
+            self.seen += 1
+            self.ports.add(who[1])
+            if d.startswith(b"burst "):
+                n, size = (int(x) for x in d.split()[1:3])
+                for i in range(n):
+                    self.s.sendto((b"%04d" % i).ljust(size, b"."), who)
+                    time.sleep(0.002)
+            else:
+                self.s.sendto(d, who)
+
+
 class EchoServer:
     """TCP echo on 127.0.0.1, which the guest reaches as 10.0.2.2 through SLiRP: a thread a connection, each
     giving back what it is sent; one whose first bytes are "bye\n" is closed after they are echoed. `open` the
@@ -7283,8 +7331,11 @@ def floppy_case(profile, card, size):
 def netapp_case(profile, card):
     """An app's TCP connections (M10 step B; GLOS_FN_NET, glos/net.h): NETTEST against an echo server on the
     host: names looked up and refused, a connection refused and one timed out, 1 MB echoed byte for byte, eight at
-    once and a ninth refused, the far end's close, events, random bytes, and the BSD sockets on it; then an app
-    holding four connections killed: the host sees them close and the kernel's table is empty."""
+    once and a ninth refused, the far end's close, events, random bytes, and the BSD sockets on it; datagram
+    ports (API 2.2: UDP) against a UDP echo server there: datagrams of 1 to 1472 bytes echoed, one cut short with
+    its length told, the wait for none, 64 of 80 kept in order, broadcasts refused until allowed, a port taken
+    twice, events, and SOCK_DGRAM sockets (bind, getsockname, sendto, recvfrom, MSG_TRUNC, connect, select);
+    then an app holding four connections killed: the host sees them close and the kernel's table is empty."""
     tag = "%s-%s" % (profile, card)
     echo = EchoServer()
     closed = free_port()
@@ -7313,6 +7364,18 @@ def netapp_case(profile, card):
                                                                                  and abs(int(m.group(2)) - time.time()) < 60))
         if not internet:
             notes.append("no internet from the guest: no name looked up there")
+        # datagram ports (API 2.2) and SOCK_DGRAM sockets, against a UDP echo server on the host
+        udp = UdpEcho()
+        rc, o, e = agent.ssh("C:\\TEST\\NETTEST.EXE udp 10.0.2.2 %d" % udp.port, timeout=300)
+        open(os.path.join(ROOT, "out", "netapp-%s-udp.out" % tag), "w").write(o + e)
+        for line in o.replace("\r", "").split("\n"):
+            m = re.match(r"NETTEST (\S+) (ok|FAIL) ?(.*)", line)
+            if m:
+                checks["nt-" + m.group(1)] = m.group(2) == "ok"
+                if m.group(2) != "ok":
+                    notes.append("%s: %s" % (m.group(1), m.group(3)))
+        checks["nt-udp-done"] = rc == 0 and "NETTEST-UDP-DONE failures=0" in o and "nt-dgbsd-connect" in checks
+        checks["udp-heard"] = udp.seen >= 12 and len(udp.ports) >= 4       # (several ports of the app's, one after another)
         checks["table-empty"] = "sockets=0" in agent.ssh("glos net")[1]
         # an app killed with connections open
         before = echo.open

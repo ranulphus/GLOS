@@ -227,6 +227,11 @@ int glos_net_receive(glos_handle h, void *buffer, unsigned room, unsigned ms, un
 glos_handle glos_net_listen(unsigned port, unsigned backlog, unsigned flags);
 glos_handle glos_net_accept(glos_handle listener, unsigned ms, unsigned flags, unsigned *address, unsigned *port);
 int glos_net_state(struct glos_net_if *out, unsigned room, unsigned *count);
+glos_handle glos_net_datagram(unsigned port, unsigned flags);          /* a datagram port (UDP; API 2.2); 0: glos_error() */
+int glos_net_sendto(glos_handle h, const void *bytes, unsigned count, unsigned ms, unsigned address, unsigned port);
+                                                        /* 0, or -GLOS_E_ */
+int glos_net_recvfrom(glos_handle h, void *buffer, unsigned room, unsigned ms, unsigned *address, unsigned *port,
+                      unsigned *length);                /* the bytes copied (length: the datagram's own), or -GLOS_E_ */
 int glos_net_close(glos_handle h, int reset);           /* closed: what waits to be sent is sent first, or (reset)
                                                            dropped and the connection reset */
 

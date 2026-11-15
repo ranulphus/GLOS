@@ -391,6 +391,7 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 |---|---|
 | CONNECT, SEND, RECEIVE | TCP, as 1.x's GLOS_FN_NET |
 | LISTEN, ACCEPT | A port to accept connections on (new) |
+| DATAGRAM, SENDTO, RECVFROM | UDP: a datagram port, one datagram out, the next one in (2.2) |
 | RESOLVE | A name's address (DNS) |
 | STATE | The network: the card, the link, the address, DHCP's lease, DNS, the gateway, the counters (new: the tray's icon and the Network page) |
 
@@ -404,6 +405,9 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   - ACCEPT takes the connection that came first; up to `backlog` wait, with what they sent.
   - STATE lists interfaces as structures (one today). The link isn't known yet.
   - NET's calls don't hold up the app's other threads.
+- **2.2 (2026-11-15): datagram ports**, asked for by a game's LAN play (Echoes of the Void). 1472 bytes a
+  datagram, 64 waiting at most, broadcasts for a port that has its BROADCAST property, the cut-short datagram's
+  whole length told. As built: supervisor.md §17.11. On the BSD layer: `SOCK_DGRAM`.
 
 ### 0Ch SETTINGS
 

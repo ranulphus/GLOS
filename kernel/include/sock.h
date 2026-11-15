@@ -20,6 +20,10 @@ int sock_close(struct app *a, u32 id, int reset);       /* (reset -1: as sock_ha
 int sock_hard(struct app *a, u32 id, int v);            /* its close resets it: read (-1) or set; -1 none, -2 a port */
 int sock_state(struct app *a, u32 id, u32 *waiting, u32 *state, u32 *room);
 int sock_peer(struct app *a, u32 id, u32 *addr, u32 *port);
+int sock_dgram(struct app *a, u32 port, u32 flags, u32 *id);    /* a datagram port (UDP; 0: any) */
+int sock_bcast(struct app *a, u32 id, int v);           /* it may send to broadcast addresses: read (-1) or set; -1 none */
+int sock_sendto(struct app *a, u32 id, u16 ds, u32 off, u32 n, u32 ms, u32 addr, u32 port);
+int sock_recvfrom(struct app *a, u32 id, u16 ds, u32 off, u32 room, u32 ms, u32 *got, u32 *len, u32 *addr, u32 *port);
 int sock_listen(struct app *a, u32 port, u32 backlog, u32 flags, u32 *id);     /* a port listened on (0: any) */
 int sock_accept(struct app *a, u32 id, u32 ms, u32 flags, u32 *conn, u32 *addr, u32 *port);
 

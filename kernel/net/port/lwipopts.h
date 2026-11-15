@@ -64,6 +64,7 @@ void clock_get_us(unsigned int *sec, unsigned int *us);
 #define MEMP_NUM_PBUF               32
 #define MEMP_NUM_TCP_PCB            40      /* (apps' connections, 32 in all, and GLOS's own) */
 #define MEMP_NUM_TCP_PCB_LISTEN     8       /* (GLOS's own, and the ports apps listen on) */
+#define MEMP_NUM_UDP_PCB            24      /* (GLOS's own: DHCP, names, the clock; and apps' datagram ports) */
 #define MEMP_NUM_TCP_SEG            64
 #define PBUF_POOL_SIZE              48
 

@@ -21,16 +21,24 @@
  * the other end sends meanwhile waits in its ring. At most `backlog` wait: more are refused by lwIP. Closing
  * the port resets those nobody took.
  *
+ * A datagram port (API 2.2: UDP) is a slot with lwIP's UDP pcb and the same two rings, which hold whole
+ * datagrams, each behind eight bytes that say its length and the other end's port and address. One that
+ * comes in when 64 wait, or when the ring has no room for it, is dropped, as UDP allows; what the app sends
+ * waits in the send ring for the net thread's turn, a datagram a pbuf.
+ *
  * The calls here take their arguments as they are (sock_connect, sock_send, ...): the API's NET
  * (kernel/app/api2net.c) comes through them. */
 #include "lwip/ip_addr.h"
+#include "lwip/netif.h"
 #include "lwip/pbuf.h"
 #include "lwip/tcp.h"
+#include "lwip/udp.h"
 
 #include <string.h>
 
 #include "kapi.h"
 #include "../app/appint.h"
+#include "member.h"
 #include "dpmi.h"
 #include "io.h"
 #include "kprintf.h"
@@ -45,6 +53,9 @@
 #define PER_APP 16                              /* an API 2.0 app's (a server's connections count too) ... */
 #define NETS_LISTENING 5                        /* (API 2.0's GLOS_NETS_LISTENING: a port listened on) */
 #define RING 16384u                             /* (a power of two, and more than TCP_WND) */
+#define DG_HDR 8u                               /* a datagram in a ring: its length, the port, the address */
+#define DG_MAX GLOS_NET_DATAGRAM_MAX
+#define DG_QUEUE GLOS_NET_DATAGRAM_QUEUE
 
 static struct sock {
     u8 used;                                    /* the slot is taken, until the net thread has done with it */
@@ -69,6 +80,13 @@ static struct sock {
     struct tcp_pcb *lpcb;
     struct sock *parent;                        /* pending: the port it came in on */
     u32 seq;                                    /* ... and its turn */
+    /* a datagram port (API 2.2) */
+    u8 dgram;
+    volatile u8 bcast;                          /* SENDTO may send to a broadcast address */
+    struct udp_pcb *upcb;
+    volatile u32 rx_n;                          /* datagrams in the receive ring */
+    u32 tx_need;                                /* the room a SENDTO waits for */
+    u32 dropped;                                /* those that came in and found no room */
 } socks[NSOCK];
 static u32 accept_seq;
 
@@ -93,6 +111,23 @@ static u32 waiting_on(const struct sock *l)    /* (interrupts off) connections w
     return n;
 }
 
+/* (interrupts off) What waits to be read, and the room to send: bytes; a port: connections, and none; a datagram
+   port: datagrams, and the longest SENDTO would take now. */
+static u32 waiting_of(const struct sock *s)
+{
+    return s->listen ? waiting_on(s) : s->dgram ? s->rx_n : s->rx_in - s->rx_out;
+}
+
+static u32 room_of(const struct sock *s)
+{
+    u32 room = RING - (s->tx_in - s->tx_out);
+    if (s->listen)
+        return 0;
+    if (!s->dgram)
+        return room;
+    return room < DG_HDR ? 0 : room - DG_HDR > DG_MAX ? DG_MAX : room - DG_HDR;
+}
+
 /* Its app told: woken, and with ev an event if it asked for them. From the net thread. */
 static void notify(struct sock *s, int ev)
 {
@@ -100,12 +135,32 @@ static void notify(struct sock *s, int ev)
     struct app *a = s->app;
     if (a) {
         if (ev && (s->flags & GLOS_NETF_EVENTS) && a->v2)
-            api2_net_event(a, id_of(s), s->state, s->listen ? waiting_on(s) : s->rx_in - s->rx_out,
-                           s->listen ? 0 : RING - (s->tx_in - s->tx_out));
+            api2_net_event(a, id_of(s), s->state, waiting_of(s), room_of(s));
         thread_wake(&a->wq);
     }
     irq_restore(f);
 }
+
+/* Bytes into a ring at a count, and out of one: round its end. */
+static void ring_put(u8 *ring, u32 at, const void *src, u32 n)
+{
+    u32 first;
+    at %= RING;
+    first = RING - at < n ? RING - at : n;
+    memcpy(ring + at, src, first);
+    memcpy(ring, (const u8 *)src + first, n - first);
+}
+
+static void ring_get(const u8 *ring, u32 at, void *dst, u32 n)
+{
+    u32 first;
+    at %= RING;
+    first = RING - at < n ? RING - at : n;
+    memcpy(dst, ring + at, first);
+    memcpy((u8 *)dst + first, ring, n - first);
+}
+
+struct dg_hdr { u16 len, port; u32 addr; };     /* (DG_HDR bytes) */
 
 /* ---- the net thread's side */
 
@@ -238,7 +293,7 @@ static err_t on_accept(void *arg, struct tcp_pcb *pcb, err_t err)
     s->flags = 0;
     s->state = GLOS_NETS_OPEN;
     s->why = 0;
-    s->closing = s->reset = s->tx_ev = s->listen = s->hard = 0;
+    s->closing = s->reset = s->tx_ev = s->listen = s->hard = s->dgram = 0;
     s->lpcb = 0;
     s->rx_in = s->rx_out = s->tx_in = s->tx_out = s->unacked = 0;
     ip_addr_copy(s->ip, pcb->remote_ip);
@@ -288,6 +343,125 @@ static void do_listen(void *arg)
     tcp_accept(l, on_accept);
     s->lpcb = l;
     s->state = NETS_LISTENING;
+}
+
+/* ---- datagram ports (the net thread's side) */
+
+/* A datagram has come in for a port: into its ring behind its header, or dropped when 64 wait or there is no
+   room. */
+static void on_udp(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
+{
+    struct sock *s = arg;
+    struct dg_hdr h;
+    u32 n = p->tot_len, at, first, f;
+    int was_empty;
+    (void)pcb;
+    if (!s || !s->rx || s->closing || n > DG_MAX || s->rx_n >= DG_QUEUE
+        || RING - (s->rx_in - s->rx_out) < DG_HDR + n) {
+        if (s)
+            s->dropped++;
+        pbuf_free(p);
+        return;
+    }
+    h.len = (u16)n, h.port = port, h.addr = ip4_addr_get_u32(ip_2_ip4(addr));
+    ring_put(s->rx, s->rx_in, &h, DG_HDR);
+    at = (s->rx_in + DG_HDR) % RING;
+    first = RING - at < n ? RING - at : n;
+    pbuf_copy_partial(p, s->rx + at, (u16_t)first, 0);
+    if (first < n)
+        pbuf_copy_partial(p, s->rx, (u16_t)(n - first), (u16_t)first);
+    pbuf_free(p);
+    f = irq_save();
+    was_empty = s->rx_n == 0;
+    s->rx_in += DG_HDR + n;
+    s->rx_n++;
+    irq_restore(f);
+    notify(s, was_empty);                       /* (an event for the first only, until the app has read) */
+}
+
+static void do_dgram(void *arg)
+{
+    struct sock *s = arg;
+    struct udp_pcb *pcb = udp_new_ip_type(IPADDR_TYPE_V4);
+    if (!pcb) {
+        s->why = GLOS_E_MEMORY;
+        s->state = GLOS_NETS_FAILED;
+        return;
+    }
+    if (s->flags & GLOS_NETF_REUSE)
+        ip_set_option(pcb, SOF_REUSEADDR);
+    if (udp_bind(pcb, IP_ANY_TYPE, s->port) != ERR_OK) {
+        udp_remove(pcb);
+        s->why = GLOS_E_NET_REFUSED;            /* (the port is taken) */
+        s->state = GLOS_NETS_FAILED;
+        return;
+    }
+    s->port = pcb->local_port;                  /* (port 0: the one lwIP chose) */
+    udp_recv(pcb, on_udp, s);
+    s->upcb = pcb;
+    s->state = GLOS_NETS_DATAGRAM;
+}
+
+/* A datagram port's turn: what the app queued goes out, a pbuf a datagram (one there is no memory for is
+   dropped: UDP may); closed once that is done. */
+/* The datagram at the front of a port's send ring as a pbuf, or 0 (no memory). */
+static struct pbuf *dg_pbuf(const struct sock *s, u32 len)
+{
+    struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, (u16_t)len, PBUF_RAM);
+    u32 at = (s->tx_out + DG_HDR) % RING, first = RING - at < len ? RING - at : len;
+    if (!p)
+        return 0;
+    if (first)
+        pbuf_take(p, s->tx + at, (u16_t)first);
+    if (first < len)
+        pbuf_take_at(p, s->tx, (u16_t)(len - first), (u16_t)first);
+    return p;
+}
+
+static void dgram_poll(struct sock *s)
+{
+    int sent = 0;
+    while (s->tx_in != s->tx_out && s->upcb && !s->reset) {
+        struct dg_hdr h;
+        struct pbuf *p;
+        struct netif *too;
+        ip_addr_t to, from;
+        u32 src = 0;
+        ring_get(s->tx, s->tx_out, &h, DG_HDR);
+        ip_addr_set_ip4_u32(&to, h.addr);
+        if ((p = dg_pbuf(s, h.len)) != 0) {
+            udp_sendto(s->upcb, p, &to, h.port);        /* (no route, no room in the card: lost, as UDP allows) */
+            pbuf_free(p);
+        }
+        if ((too = member_own_broadcast(h.addr, h.len, &src)) != 0 && (p = dg_pbuf(s, h.len)) != 0) {
+            ip_addr_set_ip4_u32(&from, src);            /* (a broadcast: a copy down the cable, for the PC there
+                                                           that is a member of the card's network: member.c) */
+            udp_sendto_if_src(s->upcb, p, &to, h.port, too, &from);
+            pbuf_free(p);
+        }
+        barrier();
+        s->tx_out += DG_HDR + h.len;
+        sent = 1;
+    }
+    if (sent) {
+        int ev = s->tx_ev && room_of(s) >= s->tx_need;
+        if (ev)
+            s->tx_ev = 0;
+        notify(s, ev);                          /* (a SENDTO waiting for room; an event after one that found none) */
+    }
+    if (s->closing) {
+        if (s->upcb) {
+            udp_recv(s->upcb, NULL, NULL);
+            udp_remove(s->upcb);
+            s->upcb = 0;
+        }
+        kfree(s->rx);
+        kfree(s->tx);
+        s->rx = s->tx = 0;
+        s->dgram = 0;
+        barrier();
+        s->used = 0;
+    }
 }
 
 static void do_nagle(void *arg)
@@ -340,6 +514,10 @@ void sock_net_poll(void)
         }
         if (!s->used || !s->rx)
             continue;
+        if (s->dgram) {
+            dgram_poll(s);
+            continue;
+        }
         f = irq_save();
         k = s->unacked;
         s->unacked = 0;
@@ -495,7 +673,7 @@ int sock_connect(struct app *a, u32 addr, u32 port, u32 ms, u32 flags, u32 *id)
     s->flags = flags & (GLOS_NETF_EVENTS | GLOS_NETF_NAGLE);
     s->state = GLOS_NETS_CONNECTING;
     s->why = 0;
-    s->closing = s->reset = s->tx_ev = s->listen = s->pending = s->hard = 0;
+    s->closing = s->reset = s->tx_ev = s->listen = s->pending = s->hard = s->dgram = 0;
     s->pcb = s->lpcb = 0;
     s->parent = 0;
     s->rx_in = s->rx_out = s->tx_in = s->tx_out = s->unacked = 0;
@@ -527,7 +705,7 @@ int sock_send(struct app *a, u32 id, u16 ds, u32 off, u32 n, u32 ms, u32 *taken)
     struct sock *s = find(a, id);
     u32 done = 0;
     *taken = 0;
-    if (!s || s->listen)
+    if (!s || s->listen || s->dgram)
         return GLOS_E_ARGUMENT;
     for (;;) {
         u32 room, at, k;
@@ -567,7 +745,7 @@ int sock_recv(struct app *a, u32 id, u16 ds, u32 off, u32 room, u32 ms, u32 *got
     struct sock *s = find(a, id);
     u32 n = 0, f;
     *got = 0;
-    if (!s || s->listen)
+    if (!s || s->listen || s->dgram)
         return GLOS_E_ARGUMENT;
     *state = s->state;
     if (s->state == GLOS_NETS_CONNECTING && !ms)
@@ -626,21 +804,156 @@ int sock_state(struct app *a, u32 id, u32 *waiting, u32 *state, u32 *room)
     if (!s)
         return GLOS_E_ARGUMENT;
     f = irq_save();
-    *waiting = s->listen ? waiting_on(s) : s->rx_in - s->rx_out;
+    *waiting = waiting_of(s);
     *state = s->state;
-    *room = s->listen ? 0 : RING - (s->tx_in - s->tx_out);
+    *room = room_of(s);
     irq_restore(f);
     return 0;
 }
 
-/* The other end's address and port (a port listened on: 0 and its own port). */
+/* The other end's address and port (a port listened on and a datagram port: 0 and its own port). */
 int sock_peer(struct app *a, u32 id, u32 *addr, u32 *port)
 {
     struct sock *s = find(a, id);
     if (!s)
         return GLOS_E_ARGUMENT;
-    *addr = s->listen ? 0 : ip4_addr_get_u32(ip_2_ip4(&s->ip));
+    *addr = s->listen || s->dgram ? 0 : ip4_addr_get_u32(ip_2_ip4(&s->ip));
     *port = s->port;
+    return 0;
+}
+
+/* ---- datagram ports (the app's side) */
+
+int sock_dgram(struct app *a, u32 port, u32 flags, u32 *id)
+{
+    struct sock *s;
+    u8 *rx, *tx;
+    if (!net_up())
+        return GLOS_E_NET_DOWN;
+    if (port > 65535)
+        return GLOS_E_ARGUMENT;
+    if (!(s = slot(a)))
+        return GLOS_E_MEMORY;
+    rx = kmalloc(RING);
+    tx = kmalloc(RING);
+    if (!rx || !tx) {
+        kfree(rx);
+        kfree(tx);
+        s->used = 0;
+        return GLOS_E_MEMORY;
+    }
+    s->gen++;
+    s->flags = flags & (GLOS_NETF_EVENTS | GLOS_NETF_BROADCAST | GLOS_NETF_REUSE);
+    s->state = GLOS_NETS_CONNECTING;
+    s->why = 0;
+    s->closing = s->reset = s->tx_ev = s->listen = s->pending = s->hard = 0;
+    s->bcast = (flags & GLOS_NETF_BROADCAST) != 0;
+    s->pcb = s->lpcb = 0;
+    s->upcb = 0;
+    s->parent = 0;
+    s->rx_in = s->rx_out = s->tx_in = s->tx_out = s->unacked = 0;
+    s->rx_n = s->tx_need = s->dropped = 0;
+    ip_addr_set_zero_ip4(&s->ip);
+    s->port = (u16)port;
+    s->app = a;
+    s->dgram = 1;
+    s->tx = tx;
+    barrier();
+    s->rx = rx;
+    if (net_run(do_dgram, s, 1) != 0 || s->state != GLOS_NETS_DATAGRAM) {
+        int why = s->state == GLOS_NETS_FAILED ? s->why : GLOS_E_NET_DOWN;
+        let_go(s, 1);
+        return why;
+    }
+    *id = id_of(s);
+    return 0;
+}
+
+/* Whether SENDTO may send to a broadcast address: read (v -1) or set. -1: no such datagram port. */
+int sock_bcast(struct app *a, u32 id, int v)
+{
+    struct sock *s = find(a, id);
+    if (!s || !s->dgram)
+        return -1;
+    if (v >= 0)
+        s->bcast = (u8)(v != 0);
+    return s->bcast;
+}
+
+static int is_broadcast(u32 addr)               /* everyone, or an interface's network's broadcast address */
+{
+    struct netif *n;
+    u32 f;
+    int yes = addr == 0xFFFFFFFFu;
+    f = irq_save();
+    for (n = netif_list; n && !yes; n = n->next)
+        yes = netif_is_up(n) && !ip4_addr_isany_val(*netif_ip4_addr(n)) && ip4_addr_isbroadcast_u32(addr, n);
+    irq_restore(f);
+    return yes;
+}
+
+static int dg_room(const struct sock *s)
+{
+    return RING - (s->tx_in - s->tx_out) >= DG_HDR + s->tx_need || s->state != GLOS_NETS_DATAGRAM;
+}
+
+int sock_sendto(struct app *a, u32 id, u16 ds, u32 off, u32 n, u32 ms, u32 addr, u32 port)
+{
+    struct sock *s = find(a, id);
+    struct dg_hdr h;
+    u32 at, first;
+    if (!s || !s->dgram || n > DG_MAX || !port || port > 65535 || !addr)
+        return GLOS_E_ARGUMENT;
+    if (!s->bcast && is_broadcast(addr))
+        return GLOS_E_REFUSED;                  /* (not without its BROADCAST) */
+    if (!net_up())
+        return GLOS_E_NET_DOWN;
+    s->tx_need = n;
+    if (!dg_room(s) && !wait_for(a, s, dg_room, ms)) {
+        s->tx_ev = 1;                           /* (an event when there is room for it) */
+        return GLOS_E_NET_TIMEOUT;
+    }
+    if (s->state != GLOS_NETS_DATAGRAM)
+        return GLOS_E_ARGUMENT;
+    at = (s->tx_in + DG_HDR) % RING;
+    first = RING - at < n ? RING - at : n;
+    if ((first && user_rd(ds, off, s->tx + at, first) != 0)
+        || (n > first && user_rd(ds, off + first, s->tx, n - first) != 0))
+        return GLOS_E_ARGUMENT;
+    h.len = (u16)n, h.port = (u16)port, h.addr = addr;
+    ring_put(s->tx, s->tx_in, &h, DG_HDR);
+    barrier();
+    s->tx_in += DG_HDR + n;
+    net_kick();
+    return 0;
+}
+
+static int dg_waiting(const struct sock *s) { return s->rx_n != 0 || s->state != GLOS_NETS_DATAGRAM; }
+
+/* The next datagram: `got` of its bytes copied (what the room takes), its whole length, and who sent it. */
+int sock_recvfrom(struct app *a, u32 id, u16 ds, u32 off, u32 room, u32 ms, u32 *got, u32 *len, u32 *addr, u32 *port)
+{
+    struct sock *s = find(a, id);
+    struct dg_hdr h;
+    u32 at, first, k, f;
+    *got = *len = *addr = *port = 0;
+    if (!s || !s->dgram)
+        return GLOS_E_ARGUMENT;
+    if (!wait_for(a, s, dg_waiting, ms) || !s->rx_n)
+        return GLOS_E_NET_TIMEOUT;
+    ring_get(s->rx, s->rx_out, &h, DG_HDR);
+    k = h.len < room ? h.len : room;
+    at = (s->rx_out + DG_HDR) % RING;
+    first = RING - at < k ? RING - at : k;
+    if ((first && user_wr(ds, off, s->rx + at, first) != 0)
+        || (k > first && user_wr(ds, off + first, s->rx, k - first) != 0))
+        return GLOS_E_ARGUMENT;                 /* (it waits still) */
+    barrier();
+    f = irq_save();
+    s->rx_out += DG_HDR + h.len;
+    s->rx_n--;
+    irq_restore(f);
+    *got = k, *len = h.len, *addr = h.addr, *port = h.port;
     return 0;
 }
 
@@ -657,7 +970,7 @@ int sock_listen(struct app *a, u32 port, u32 backlog, u32 flags, u32 *id)
     s->flags = flags & GLOS_NETF_EVENTS;
     s->state = GLOS_NETS_CONNECTING;
     s->why = 0;
-    s->closing = s->reset = s->tx_ev = s->pending = s->hard = 0;
+    s->closing = s->reset = s->tx_ev = s->pending = s->hard = s->dgram = 0;
     s->pcb = s->lpcb = 0;
     s->parent = 0;
     s->rx = s->tx = 0;

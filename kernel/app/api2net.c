@@ -1,6 +1,6 @@
 /* API 2.0's NET (include/glos/api.h; docs/v1/phase-b.md step 11): TCP connections out, ports listened on and
- * the connections that come in on them, names resolved, the network's state. Over kernel/net/sock.c and
- * kernel/net/net.c.
+ * the connections that come in on them, datagram ports (UDP: 2.2), names resolved, the network's state. Over
+ * kernel/net/sock.c and kernel/net/net.c.
  *
  * A connection (or a port) is a handle whose object is its number in sock.c's table. These calls are made
  * without the app's lock (api2.c): they wait, and the app's other threads go on. What they touch they look up
@@ -194,6 +194,46 @@ static int accept(struct app *a, struct trapframe *tf)
     return a2_ok(tf, 0);
 }
 
+static int datagram(struct app *a, struct trapframe *tf)
+{
+    struct glos_net_datagram q;
+    u32 size, id = 0;
+    int r;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if ((r = sock_dgram(a, q.port, q.flags, &id)) != 0)
+        return a2_fail(tf, (u32)r);
+    q.handle = handle_for(a, id);
+    if (!q.handle || a2_wr(tf, &q, sizeof q, size) != 0) {
+        if (q.handle)
+            handle_drop(a, q.handle);
+        sock_close(a, id, 1);
+        return a2_fail(tf, q.handle ? GLOS_E_ARGUMENT : GLOS_E_MEMORY);
+    }
+    return a2_ok(tf, 0);
+}
+
+static int dgram_io(struct app *a, struct trapframe *tf, int send)
+{
+    struct glos_net_dgram q;
+    u32 size, id;
+    int r;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (!(id = conn_of(a, q.handle)))
+        return a2_fail(tf, GLOS_E_HANDLE);
+    q.done = q.length = 0;
+    if (send) {
+        if ((r = sock_sendto(a, id, (u16)tf->ds, q.buffer, q.count, q.ms, q.address, q.port)) == 0)
+            q.done = q.length = q.count;
+    } else {
+        r = sock_recvfrom(a, id, (u16)tf->ds, q.buffer, q.count, q.ms, &q.done, &q.length, &q.address, &q.port);
+    }
+    if (a2_wr(tf, &q, sizeof q, size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    return r ? a2_fail(tf, (u32)r) : a2_ok(tf, 0);
+}
+
 static int state(struct trapframe *tf)
 {
     struct glos_sys_stat q;
@@ -244,6 +284,12 @@ int api2_net(struct app *a, struct trapframe *tf, u32 n)
         return accept(a, tf);
     case GLOS_NET_STATE:
         return state(tf);
+    case GLOS_NET_DATAGRAM:
+        return datagram(a, tf);
+    case GLOS_NET_SENDTO:
+        return dgram_io(a, tf, 1);
+    case GLOS_NET_RECVFROM:
+        return dgram_io(a, tf, 0);
     }
     return a2_fail(tf, GLOS_E_FUNCTION);
 }
@@ -256,6 +302,8 @@ static int p_get(struct app *a, void *obj, s32 *v, int what)
     if (sock_state(a, (u32)obj, &x[1], &x[0], &x[2]) != 0 || sock_peer(a, (u32)obj, &addr, &port) != 0)
         return GLOS_E_HANDLE;
     if (what >= 2 && what != 4 && x[0] == GLOS_NETS_LISTENING)  /* (a port has no room, no other end, no reset) */
+        return GLOS_E_PROPERTY;
+    if (what == 3 && x[0] == GLOS_NETS_DATAGRAM)                /* (a datagram port has no other end) */
         return GLOS_E_PROPERTY;
     *v = what < 3 ? (s32)x[what] : what == 3 ? (s32)addr : (s32)port;
     return 0;
@@ -286,6 +334,24 @@ static int reset_set(struct app *a, void *obj, s32 v, const char *text, u32 len)
     return r >= 0 ? 0 : r == -2 ? GLOS_E_PROPERTY : GLOS_E_HANDLE;
 }
 
+static int bcast_get(struct app *a, void *obj, s32 *v, char *text, u32 *len)
+{
+    int r = sock_bcast(a, (u32)obj, -1);
+    (void)text, (void)len;
+    if (r < 0)
+        return GLOS_E_PROPERTY;                 /* (a datagram port's alone) */
+    *v = r;
+    return 0;
+}
+
+static int bcast_set(struct app *a, void *obj, s32 v, const char *text, u32 len)
+{
+    (void)text, (void)len;
+    if (v != 0 && v != 1)
+        return GLOS_E_ARGUMENT;
+    return sock_bcast(a, (u32)obj, v) >= 0 ? 0 : GLOS_E_PROPERTY;
+}
+
 static int no_set(struct app *a, void *obj, s32 v, const char *text, u32 len)
 {
     (void)a, (void)obj, (void)v, (void)text, (void)len;
@@ -299,5 +365,6 @@ const struct propdef api2_net_props[] = {
     { GLOS_PROP_NET_ADDRESS, P_NUM | P_RO, addr_get, no_set },
     { GLOS_PROP_NET_PORT, P_NUM | P_RO, port_get, no_set },
     { GLOS_PROP_NET_RESET, P_NUM, reset_get, reset_set },
+    { GLOS_PROP_NET_BROADCAST, P_NUM, bcast_get, bcast_set },
 };
 const u32 api2_net_nprops = ARRAY_SIZE(api2_net_props);

@@ -255,6 +255,22 @@ void member_cable_frame(const u8 *f, u32 len)
     cable_answers++;
 }
 
+/* A broadcast of this PC's own (an app's datagram to everyone, or to the card's network's broadcast address) goes
+   out of the card as lwIP routes it: the cable's interface if a copy is due there too, for the members, within
+   the cable's means; and the card's address, which the copy says it is from (the members answer to it). */
+struct netif *member_own_broadcast(u32 dest, u32 len, u32 *src)
+{
+    if (!card || !cable || !sharing() || !any_bound() || !netif_is_up(cable))
+        return 0;
+    if (dest != 0xFFFFFFFFu && !ip4_addr_isbroadcast_u32(dest, card))
+        return 0;
+    if (!copy_budget(len + 28))
+        return 0;
+    *src = ip4_addr_get_u32(netif_ip4_addr(card));
+    copied_in++;
+    return cable;
+}
+
 int member_cable_mac(u32 ip, u8 mac[6])
 {
     struct member *m = by_ip(ip);

@@ -1921,6 +1921,34 @@ and GLOS's:
   command, so `glos/net.h` maps `fcntl` to `glos_fcntl`, which does O_NONBLOCK for sockets and hands the rest to
   DJGPP's (found by NETTEST: a non-blocking `recv` waited for ever). Headers named as POSIX has them are in
   `include/glos/posix`.
+- **Datagram ports (API 2.2, 2026-11-15: UDP).** `GLOS_NET_DATAGRAM` makes one (a port number, or any), SENDTO
+  and RECVFROM move a datagram a call; the handle is a connection's kind, with STATE `GLOS_NETS_DATAGRAM`,
+  WAITING the datagrams that wait, ROOM the longest SENDTO would take now, PORT its own port, and a BROADCAST
+  property.
+  - **In `sock.c`** a datagram port is a slot with lwIP's UDP pcb and the same two 16 KB rings, which hold
+    whole datagrams, each behind eight bytes: its length and the other end's port and address. One that comes
+    in when 64 wait, or with no room in the ring, is dropped (UDP allows it; `GLOS_NET_DATAGRAM_QUEUE`). The
+    net thread sends what the app queued, a pbuf a datagram.
+  - **A datagram is 1472 bytes at most** (one Ethernet frame's worth); over a cable link lwIP cuts it into
+    fragments and the far end puts them together.
+  - **Cut short:** RECVFROM copies what the room takes, says the datagram's whole length, and the rest is gone.
+  - **Broadcasts** (255.255.255.255 or the network's own broadcast address) are sent only by a port that has
+    BROADCAST (`GLOS_NETF_BROADCAST`, or the property later): otherwise `GLOS_E_REFUSED`. Every port hears
+    them. A broadcast of this PC's own also goes down a cable to the PC that is a member of its network
+    (`member_own_broadcast`, as from the card's address; within the cable's 2 KB a second for copies), so a
+    program on either PC finds one on the other.
+  - **A port taken** is `GLOS_E_NET_REFUSED`, unless both ports were made with `GLOS_NETF_REUSE`; of two on a
+    port, the later one has what comes in.
+  - **The BSD layer:** `socket(AF_INET, SOCK_DGRAM, 0)`, `bind`, `getsockname`, `sendto`, `recvfrom`, `connect`
+    (a peer for `send` and `recv`; others' datagrams are dropped), `O_NONBLOCK`, `MSG_DONTWAIT`, `select`,
+    `SO_BROADCAST`, `SO_REUSEADDR` (before `bind`), `SO_RCVBUF` and `SO_SNDBUF` taken as hints, and `MSG_TRUNC`
+    as Linux has it (`recvfrom` returns the datagram's real length). A socket never bound has a port of GLOS's
+    choosing from its first use. Errors: `EADDRINUSE`, `EMSGSIZE`, `EACCES` (a broadcast without
+    `SO_BROADCAST`), `EDESTADDRREQ`, `EAGAIN`.
+  - lwIP's UDP pcbs are 24 (`MEMP_NUM_UDP_PCB`; its default of four was GLOS's own: DHCP, names, the clock).
+  - **Tested** (`make loopa-netapp`: NETTEST `udp` against a UDP echo server on the host, on both profiles;
+    `make loopa-ssh`'s member cases: a program on each of two PCs joined by a cable, each found by the other's
+    broadcast).
 
 ### 17.12 VNC and capture (M10 step F, `kernel/wm/vnc.c`, `glos rec`)
 

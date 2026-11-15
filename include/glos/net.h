@@ -44,6 +44,8 @@ extern "C" {
 #define ENOBUFS         72
 #define EHOSTUNREACH    73
 #define EDESTADDRREQ    74
+#define EADDRINUSE      75
+#define EMSGSIZE        76
 #endif
 #ifndef EWOULDBLOCK
 #define EWOULDBLOCK     EAGAIN
@@ -59,12 +61,15 @@ typedef unsigned short in_port_t;
 #define PF_UNSPEC       AF_UNSPEC
 #define PF_INET         AF_INET
 #define SOCK_STREAM     1
+#define SOCK_DGRAM      2               /* UDP (API 2.2) */
 #define IPPROTO_IP      0
 #define IPPROTO_TCP     6
+#define IPPROTO_UDP     17
 
 #define INADDR_ANY      0x00000000UL
 #define INADDR_LOOPBACK 0x7F000001UL
 #define INADDR_NONE     0xFFFFFFFFUL
+#define INADDR_BROADCAST 0xFFFFFFFFUL
 
 #define INET_ADDRSTRLEN 16
 
@@ -95,9 +100,15 @@ struct sockaddr_storage {
 #define SO_RCVTIMEO     0x1006
 #define SO_SNDTIMEO     0x1005
 #define SO_KEEPALIVE    0x0008          /* (taken, and nothing done) */
-#define SO_REUSEADDR    0x0004          /* (taken, and nothing done) */
+#define SO_REUSEADDR    0x0004          /* a datagram socket, before bind(): the port may be one another has; a
+                                           stream socket: taken, and nothing done */
+#define SO_BROADCAST    0x0020          /* a datagram socket may send to a broadcast address */
+#define SO_SNDBUF       0x1001          /* (taken as a hint: GLOS's buffers are 16 KB each way) */
+#define SO_RCVBUF       0x1002
 #define TCP_NODELAY     0x0001
 
+#define MSG_TRUNC       0x20            /* recvfrom, a datagram socket: the datagram's own length is returned, more
+                                           than the room when it was cut short (as Linux has it) */
 #define MSG_DONTWAIT    0x40
 #define MSG_NOSIGNAL    0x4000          /* (GLOS raises no SIGPIPE: taken) */
 
@@ -113,6 +124,14 @@ int shutdown(int fd, int how);
 int setsockopt(int fd, int level, int name, const void *val, socklen_t len);
 int getsockopt(int fd, int level, int name, void *val, socklen_t *len);
 int getpeername(int fd, struct sockaddr *addr, socklen_t *len);
+/* Datagram sockets (SOCK_DGRAM: UDP; GLOS's API 2.2). A datagram is 1472 bytes at most (EMSGSIZE); 64 wait to
+   be read at most, and more are dropped. bind() takes a port (any address); a socket never bound has a port
+   of GLOS's choosing from its first sendto(), connect() or recvfrom(). connect() sets where send() goes and
+   whose datagrams recv() takes. */
+int bind(int fd, const struct sockaddr *addr, socklen_t len);
+int getsockname(int fd, struct sockaddr *addr, socklen_t *len);
+ssize_t sendto(int fd, const void *buf, size_t n, int flags, const struct sockaddr *addr, socklen_t len);
+ssize_t recvfrom(int fd, void *buf, size_t n, int flags, struct sockaddr *addr, socklen_t *len);
 unsigned glos_socket_handle(int fd);    /* GLOS's connection behind a socket (its handle), 0 before connect() */
 
 /* fcntl with O_NONBLOCK for sockets: DJGPP's fcntl tells a file-system extension only the descriptor, not the

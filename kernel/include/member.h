@@ -11,6 +11,8 @@ void member_links(struct netif *card, struct netif *cable);     /* the interface
                                                             NULL), and the cable's when this PC is its server */
 void member_cable_frame(const u8 *frame, u32 len);       /* every frame a cable that carries Ethernet frames
                                                             receives (the parallel link), before lwIP has it */
+struct netif *member_own_broadcast(u32 dest, u32 len, u32 *src);       /* this PC's own broadcast: the cable's
+                                                            interface if a copy goes there too, from src */
 int member_cable_mac(u32 ip, u8 mac[6]);                 /* 1: an IP packet for that address goes down such a cable
                                                             to this hardware address (a member's, or everyone's) */
 void member_card_frame(const u8 *frame, u32 len);        /* every frame the card receives, before lwIP has it */

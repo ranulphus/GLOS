@@ -1,7 +1,10 @@
 /* Sockets on GLOS's NET (include/glos/net.h; M10 step B; API 2.0). A socket is a
  * DOS file descriptor (the NUL device's, from __FSEXT_alloc_fd) with this
  * file's function behind it, so DJGPP's read, write, close, fcntl and select
- * reach GLOS's connection. */
+ * reach GLOS's connection.
+ *
+ * A datagram socket (SOCK_DGRAM, API 2.2) is GLOS's datagram port, made at bind() or, with a port of GLOS's
+ * choosing, at the first call that needs one. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +29,9 @@ struct sk {
     int rd_shut;
     unsigned rcv_ms, snd_ms;            /* 0xFFFFFFFF: for ever */
     struct sockaddr_in peer;
+    int dgram;                          /* SOCK_DGRAM: id is a datagram port, 0 before bind() or the first use */
+    int connected;                      /* ... with a peer set by connect() */
+    int bcast, reuse;                   /* SO_BROADCAST, SO_REUSEADDR */
 };
 
 int h_errno;
@@ -62,10 +68,66 @@ static int err_of(int g)
 
 static struct sk *sk_of(int fd);
 
+/* A datagram socket's port, made if it has none yet: 0, or -1 with errno. */
+static int dg_open(struct sk *k, unsigned port)
+{
+    if (k->id)
+        return 0;
+    k->id = glos_net_datagram(port, (k->bcast ? GLOS_NETF_BROADCAST : 0) | (k->reuse ? GLOS_NETF_REUSE : 0));
+    if (!k->id)
+        return fail(glos_error() == GLOS_E_NET_REFUSED ? EADDRINUSE : glos_error() == GLOS_E_FUNCTION ? EPROTONOSUPPORT
+                    : err_of(glos_error()));
+    return 0;
+}
+
+static int dg_send(struct sk *k, const void *buf, size_t n, int dontwait, const struct sockaddr_in *to)
+{
+    int r;
+    if (!to && !k->connected)
+        return fail(EDESTADDRREQ);
+    if (!to)
+        to = &k->peer;
+    if (to->sin_family != AF_INET)
+        return fail(EAFNOSUPPORT);
+    if (n > GLOS_NET_DATAGRAM_MAX)
+        return fail(EMSGSIZE);
+    if (dg_open(k, 0) != 0)
+        return -1;
+    r = glos_net_sendto(k->id, buf, (unsigned)n, k->nonblock || dontwait ? 0 : k->snd_ms,
+                        (unsigned)to->sin_addr.s_addr, ntohs(to->sin_port));
+    if (r < 0)
+        return fail(-r == GLOS_E_NET_TIMEOUT ? EAGAIN : -r == GLOS_E_REFUSED ? EACCES : err_of(-r));
+    return (int)n;
+}
+
+/* The next datagram (a connected socket: the next from its peer; others are dropped, as BSD does). */
+static int dg_recv(struct sk *k, void *buf, size_t n, int flags, struct sockaddr_in *from)
+{
+    unsigned addr = 0, port = 0, length = 0;
+    int r;
+    if (dg_open(k, 0) != 0)
+        return -1;
+    do {
+        r = glos_net_recvfrom(k->id, buf, (unsigned)n, k->nonblock || (flags & MSG_DONTWAIT) ? 0 : k->rcv_ms,
+                              &addr, &port, &length);
+        if (r < 0)
+            return fail(-r == GLOS_E_NET_TIMEOUT ? EAGAIN : err_of(-r));
+    } while (k->connected && (addr != (unsigned)k->peer.sin_addr.s_addr || port != ntohs(k->peer.sin_port)));
+    if (from) {
+        memset(from, 0, sizeof *from);
+        from->sin_family = AF_INET;
+        from->sin_port = htons((unsigned short)port);
+        from->sin_addr.s_addr = (in_addr_t)addr;
+    }
+    return flags & MSG_TRUNC ? (int)length : r;
+}
+
 static int sk_recv(struct sk *k, void *buf, size_t n, int dontwait)
 {
     unsigned st;
     int r;
+    if (k->dgram)
+        return dg_recv(k, buf, n, dontwait ? MSG_DONTWAIT : 0, 0);
     if (!k->id)
         return fail(ENOTCONN);
     if (k->rd_shut)
@@ -81,6 +143,8 @@ static int sk_recv(struct sk *k, void *buf, size_t n, int dontwait)
 static int sk_send(struct sk *k, const void *buf, size_t n, int dontwait)
 {
     int r;
+    if (k->dgram)
+        return dg_send(k, buf, n, dontwait, 0);
     if (!k->id)
         return fail(ENOTCONN);
     r = glos_net_send(k->id, buf, (unsigned)n, k->nonblock || dontwait ? 0 : k->snd_ms);
@@ -96,7 +160,7 @@ static int ready(struct sk *k)
     int avail = 0, st = 0, room = 0;
     int r = 0;
     if (!k->id)
-        return __FSEXT_ready_write | __FSEXT_ready_error;
+        return k->dgram ? __FSEXT_ready_write : __FSEXT_ready_write | __FSEXT_ready_error;
     if (glos_get(k->id, GLOS_PROP_NET_WAITING, &avail) != 0 || glos_get(k->id, GLOS_PROP_NET_STATE, &st) != 0
         || glos_get(k->id, GLOS_PROP_NET_ROOM, &room) != 0)
         return __FSEXT_ready_read | __FSEXT_ready_write | __FSEXT_ready_error;
@@ -187,7 +251,8 @@ int socket(int domain, int type, int protocol)
     int fd;
     if (domain != AF_INET)
         return fail(EAFNOSUPPORT);
-    if (type != SOCK_STREAM || (protocol && protocol != IPPROTO_TCP))
+    if (!(type == SOCK_STREAM && (!protocol || protocol == IPPROTO_TCP))
+        && !(type == SOCK_DGRAM && (!protocol || protocol == IPPROTO_UDP)))
         return fail(EPROTONOSUPPORT);
     memset(&v, 0, sizeof v);
     v.size = sizeof v;
@@ -198,6 +263,7 @@ int socket(int domain, int type, int protocol)
     if (!(k = calloc(1, sizeof *k)))
         return fail(ENOMEM);
     k->rcv_ms = k->snd_ms = 0xFFFFFFFFu;
+    k->dgram = type == SOCK_DGRAM;
     if ((fd = __FSEXT_alloc_fd(handler)) < 0) {
         free(k);
         return -1;
@@ -214,6 +280,17 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len)
     glos_handle id;
     if (!k)
         return fail(ENOTSOCK);
+    if (k->dgram) {                             /* where send() goes and whose datagrams recv() takes */
+        if (!addr || len < sizeof *in)
+            return fail(EINVAL);
+        if (in->sin_family != AF_INET)
+            return fail(EAFNOSUPPORT);
+        if (dg_open(k, 0) != 0)
+            return -1;
+        k->peer = *in;
+        k->connected = 1;
+        return 0;
+    }
     if (k->id)
         return fail(EISCONN);
     if (!addr || len < sizeof *in)
@@ -247,9 +324,82 @@ ssize_t recv(int fd, void *buf, size_t n, int flags)
     struct sk *k = sk_of(fd);
     if (!k)
         return fail(ENOTSOCK);
-    if (flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL))
+    if (flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL | (k->dgram ? MSG_TRUNC : 0)))
         return fail(EOPNOTSUPP);                /* (MSG_PEEK, MSG_WAITALL: not here) */
+    if (k->dgram)
+        return dg_recv(k, buf, n, flags, 0);
     return sk_recv(k, buf, n, (flags & MSG_DONTWAIT) != 0);
+}
+
+int bind(int fd, const struct sockaddr *addr, socklen_t len)
+{
+    struct sk *k = sk_of(fd);
+    const struct sockaddr_in *in = (const struct sockaddr_in *)addr;
+    if (!k)
+        return fail(ENOTSOCK);
+    if (!k->dgram)
+        return fail(EOPNOTSUPP);                /* (a stream socket that listens: GLOS's own calls, glos_net_listen) */
+    if (!addr || len < sizeof *in || k->id)
+        return fail(EINVAL);                    /* (bound already) */
+    if (in->sin_family != AF_INET)
+        return fail(EAFNOSUPPORT);
+    return dg_open(k, ntohs(in->sin_port));     /* (any address of this PC's: the port is what is bound) */
+}
+
+int getsockname(int fd, struct sockaddr *addr, socklen_t *len)
+{
+    struct sk *k = sk_of(fd);
+    struct sockaddr_in in;
+    int port = 0;
+    if (!k)
+        return fail(ENOTSOCK);
+    if (!addr || !len)
+        return fail(EINVAL);
+    if (!k->dgram)
+        return fail(EOPNOTSUPP);
+    if (k->id)
+        glos_get(k->id, GLOS_PROP_NET_PORT, &port);
+    memset(&in, 0, sizeof in);
+    in.sin_family = AF_INET;
+    in.sin_port = htons((unsigned short)port);
+    memcpy(addr, &in, *len < sizeof in ? *len : sizeof in);
+    *len = sizeof in;
+    return 0;
+}
+
+ssize_t sendto(int fd, const void *buf, size_t n, int flags, const struct sockaddr *addr, socklen_t len)
+{
+    struct sk *k = sk_of(fd);
+    if (!k)
+        return fail(ENOTSOCK);
+    if (!k->dgram)
+        return sk_send(k, buf, n, (flags & MSG_DONTWAIT) != 0);    /* (a stream's other end is the one it has) */
+    if (addr && len < sizeof(struct sockaddr_in))
+        return fail(EINVAL);
+    return dg_send(k, buf, n, (flags & MSG_DONTWAIT) != 0, (const struct sockaddr_in *)addr);
+}
+
+ssize_t recvfrom(int fd, void *buf, size_t n, int flags, struct sockaddr *addr, socklen_t *len)
+{
+    struct sk *k = sk_of(fd);
+    struct sockaddr_in in;
+    int r;
+    if (!k)
+        return fail(ENOTSOCK);
+    if (flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL | (k->dgram ? MSG_TRUNC : 0)))
+        return fail(EOPNOTSUPP);
+    if (!k->dgram) {
+        if ((r = sk_recv(k, buf, n, (flags & MSG_DONTWAIT) != 0)) >= 0 && addr && len) {
+            memcpy(addr, &k->peer, *len < sizeof k->peer ? *len : sizeof k->peer);
+            *len = sizeof k->peer;
+        }
+        return r;
+    }
+    if ((r = dg_recv(k, buf, n, flags, &in)) >= 0 && addr && len) {
+        memcpy(addr, &in, *len < sizeof in ? *len : sizeof in);
+        *len = sizeof in;
+    }
+    return r;
 }
 
 int shutdown(int fd, int how)
@@ -284,8 +434,14 @@ int setsockopt(int fd, int level, int name, const void *val, socklen_t len)
         k->rcv_ms = ms_of(val, len);
     else if (level == SOL_SOCKET && name == SO_SNDTIMEO)
         k->snd_ms = ms_of(val, len);
-    else if (level == SOL_SOCKET && (name == SO_KEEPALIVE || name == SO_REUSEADDR))
-        ;
+    else if (level == SOL_SOCKET && name == SO_REUSEADDR && len >= sizeof(int))
+        k->reuse = *(const int *)val != 0;      /* (a datagram socket's, before bind(); a stream's: nothing) */
+    else if (level == SOL_SOCKET && name == SO_BROADCAST && len >= sizeof(int) && k->dgram) {
+        k->bcast = *(const int *)val != 0;
+        if (k->id)
+            glos_set(k->id, GLOS_PROP_NET_BROADCAST, k->bcast);
+    } else if (level == SOL_SOCKET && (name == SO_KEEPALIVE || name == SO_RCVBUF || name == SO_SNDBUF))
+        ;                                       /* (hints: GLOS's buffers are what they are) */
     else if (level == IPPROTO_TCP && name == TCP_NODELAY && len >= sizeof(int))
         k->nagle = !*(const int *)val;          /* (before connect(): GLOS sets it with the connection) */
     else
@@ -302,11 +458,17 @@ int getsockopt(int fd, int level, int name, void *val, socklen_t *len)
     if (!val || !len || *len < sizeof(int))
         return fail(EINVAL);
     if (level == SOL_SOCKET && name == SO_TYPE) {
-        v = SOCK_STREAM;
+        v = k->dgram ? SOCK_DGRAM : SOCK_STREAM;
+    } else if (level == SOL_SOCKET && name == SO_BROADCAST) {
+        v = k->bcast;
+    } else if (level == SOL_SOCKET && name == SO_REUSEADDR) {
+        v = k->reuse;
+    } else if (level == SOL_SOCKET && (name == SO_RCVBUF || name == SO_SNDBUF)) {
+        v = 16384;
     } else if (level == SOL_SOCKET && name == SO_ERROR) {
         int st = 0;
         v = k->err;
-        if (!v && k->id && glos_get(k->id, GLOS_PROP_NET_STATE, &st) == 0 && st == GLOS_NETS_FAILED) {
+        if (!v && !k->dgram && k->id && glos_get(k->id, GLOS_PROP_NET_STATE, &st) == 0 && st == GLOS_NETS_FAILED) {
             char c;
             int r = glos_net_receive(k->id, &c, 0, 0, 0);       /* (the reason, from an empty read) */
             if (r < 0)
@@ -326,7 +488,7 @@ int getpeername(int fd, struct sockaddr *addr, socklen_t *len)
     struct sk *k = sk_of(fd);
     if (!k)
         return fail(ENOTSOCK);
-    if (!k->id)
+    if (k->dgram ? !k->connected : !k->id)
         return fail(ENOTCONN);
     if (!addr || !len)
         return fail(EINVAL);
@@ -454,7 +616,7 @@ int getaddrinfo(const char *node, const char *service, const struct addrinfo *hi
         return EAI_NONAME;
     if (hints && hints->ai_family != AF_UNSPEC && hints->ai_family != AF_INET)
         return EAI_FAMILY;
-    if (hints && hints->ai_socktype && hints->ai_socktype != SOCK_STREAM)
+    if (hints && hints->ai_socktype && hints->ai_socktype != SOCK_STREAM && hints->ai_socktype != SOCK_DGRAM)
         return EAI_SOCKTYPE;
     if (port_of(service, &port) != 0 || ((flags & AI_NUMERICSERV) && service && !*service))
         return EAI_SERVICE;
@@ -475,8 +637,8 @@ int getaddrinfo(const char *node, const char *service, const struct addrinfo *hi
     in->sin_port = htons((unsigned short)port);
     in->sin_addr.s_addr = a;
     ai->ai_family = AF_INET;
-    ai->ai_socktype = SOCK_STREAM;
-    ai->ai_protocol = IPPROTO_TCP;
+    ai->ai_socktype = hints && hints->ai_socktype == SOCK_DGRAM ? SOCK_DGRAM : SOCK_STREAM;
+    ai->ai_protocol = ai->ai_socktype == SOCK_DGRAM ? IPPROTO_UDP : IPPROTO_TCP;
     ai->ai_addrlen = sizeof *in;
     ai->ai_addr = (struct sockaddr *)in;
     if ((flags & AI_CANONNAME) && node)

@@ -1197,6 +1197,37 @@ glos_handle glos_net_accept(glos_handle listener, unsigned ms, unsigned flags, u
     return r ? 0 : q.handle;
 }
 
+glos_handle glos_net_datagram(unsigned port, unsigned flags)
+{
+    struct glos_net_datagram q = { sizeof q, port, flags, 0 };
+    int r = raw(GLOS_NET_DATAGRAM, &q, 0);
+    last_error = r;
+    return r ? 0 : q.handle;
+}
+
+int glos_net_sendto(glos_handle h, const void *bytes, unsigned count, unsigned ms, unsigned address, unsigned port)
+{
+    struct glos_net_dgram q = { sizeof q, h, (unsigned)bytes, count, ms, address, port, 0, 0 };
+    int r = raw(GLOS_NET_SENDTO, &q, 0);
+    last_error = r;
+    return -r;
+}
+
+int glos_net_recvfrom(glos_handle h, void *buffer, unsigned room, unsigned ms, unsigned *address, unsigned *port,
+                      unsigned *length)
+{
+    struct glos_net_dgram q = { sizeof q, h, (unsigned)buffer, room, ms, 0, 0, 0, 0 };
+    int r = raw(GLOS_NET_RECVFROM, &q, 0);
+    last_error = r;
+    if (address)
+        *address = q.address;
+    if (port)
+        *port = q.port;
+    if (length)
+        *length = q.length;
+    return r ? -r : (int)q.done;
+}
+
 int glos_net_close(glos_handle h, int reset)
 {
     if (reset)

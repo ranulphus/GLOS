@@ -54,7 +54,7 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 1
+#define GLOS_MINOR 2
 
 #define GLOS_FN(area, n) ((2u << 16) | ((unsigned)(area) << 8) | (unsigned)(n))
 #define GLOS_FN_MAJOR(fn) ((unsigned)(fn) >> 16)
@@ -1119,7 +1119,8 @@ struct glos_ev_midi {
 
 /* ================================================================== NET (0Bh): the network
  *
- * TCP over IPv4 through GLOS's own network (a card GLOS drives, an address from DHCP). An address is 32 bits as
+ * TCP, and UDP datagrams (2.2), over IPv4 through GLOS's own network (a card GLOS drives or a cable link, an
+ * address from DHCP). An address is 32 bits as
  * it is in memory: a.b.c.d is a | b << 8 | c << 16 | d << 24. Times are milliseconds to wait (0: not at all;
  * GLOS_FOREVER); a wait ends at once when the app is asked to end. A connection, and a port listened on, is a
  * handle (GLOS_HK_CONNECTION) until CLOSE: what is still to be sent is sent first, unless its RESET is set.
@@ -1133,15 +1134,20 @@ struct glos_ev_midi {
 #define GLOS_NET_ACCEPT  GLOS_FN(GLOS_AREA_NET, 5)      /* struct glos_net_accept: the next connection that came in */
 #define GLOS_NET_STATE   GLOS_FN(GLOS_AREA_NET, 6)      /* struct glos_sys_stat: a struct glos_net_if for each
                                                            interface (kind: not used) */
+#define GLOS_NET_DATAGRAM GLOS_FN(GLOS_AREA_NET, 7)     /* struct glos_net_datagram: a UDP port of the app's (2.2) */
+#define GLOS_NET_SENDTO  GLOS_FN(GLOS_AREA_NET, 8)      /* struct glos_net_dgram: one datagram out */
+#define GLOS_NET_RECVFROM GLOS_FN(GLOS_AREA_NET, 9)     /* struct glos_net_dgram: the next datagram that came in */
 
 #define GLOS_E_NET_DOWN    11   /* no network: no card GLOS can use, or no address yet */
 #define GLOS_E_NET_NAME    12   /* no such name (DNS) */
 #define GLOS_E_NET_TIMEOUT 13   /* no answer in the time given (the attempt is given up); ACCEPT: none came in */
-#define GLOS_E_NET_REFUSED 14   /* the other end refused the connection; LISTEN: the port is taken */
+#define GLOS_E_NET_REFUSED 14   /* the other end refused the connection; LISTEN, DATAGRAM: the port is taken */
 #define GLOS_E_NET_RESET   15   /* the connection was reset or broke: it is no more */
 
 #define GLOS_NETF_EVENTS 1      /* GLOS_EV_NET for this connection (or port) */
 #define GLOS_NETF_NAGLE  2      /* small writes may wait to be sent together; without it, each goes at once */
+#define GLOS_NETF_BROADCAST 4   /* DATAGRAM: SENDTO may send to a broadcast address (its BROADCAST property) */
+#define GLOS_NETF_REUSE  8      /* DATAGRAM: the port may be one another datagram port already has */
 
 #define GLOS_NETS_CONNECTING 1
 #define GLOS_NETS_OPEN       2
@@ -1149,6 +1155,11 @@ struct glos_ev_midi {
                                    app may still send) */
 #define GLOS_NETS_FAILED     4  /* refused, timed out or reset: RECEIVE gives what was left, then the reason */
 #define GLOS_NETS_LISTENING  5  /* a port listened on */
+#define GLOS_NETS_DATAGRAM   6  /* a datagram port */
+
+#define GLOS_NET_DATAGRAM_MAX 1472      /* a datagram's bytes at most (what one Ethernet frame carries) */
+#define GLOS_NET_DATAGRAM_QUEUE 64      /* datagrams that wait to be read at most (and 16 KB of them): more are
+                                           dropped, as UDP allows */
 
 struct glos_net_resolve {
     unsigned size;
@@ -1196,16 +1207,45 @@ struct glos_net_accept {
     unsigned address, port;     /* -> the other end's */
 };
 
-/* A connection's properties (a port listened on has STATE, WAITING and PORT). */
+/* A datagram port (2.2): UDP. Datagrams come in from anyone who sends to the port, broadcasts and all, and wait
+   (GLOS_NET_DATAGRAM_QUEUE of them) for RECVFROM, which takes one a call; SENDTO sends one to any address. No
+   connection: nothing says whether one arrived. The port is a handle (GLOS_HK_CONNECTION) until CLOSE. */
+struct glos_net_datagram {
+    unsigned size;
+    unsigned port;              /* 1 to 65535; 0: any free one (its PORT property says which) */
+    unsigned flags;             /* GLOS_NETF_EVENTS (GLOS_EV_NET when one comes in), _BROADCAST, _REUSE */
+    glos_handle handle;         /* -> */
+};
+
+struct glos_net_dgram {
+    unsigned size;
+    glos_handle handle;
+    unsigned buffer, count;     /* SENDTO: the datagram (GLOS_NET_DATAGRAM_MAX bytes at most; none is one too).
+                                   RECVFROM: the room */
+    unsigned ms;                /* SENDTO: the wait for room to queue it (none: GLOS_E_NET_TIMEOUT). RECVFROM: the
+                                   wait for one to come in (none: GLOS_E_NET_TIMEOUT) */
+    unsigned address, port;     /* SENDTO: where to (a broadcast address: GLOS_E_REFUSED without the port's
+                                   BROADCAST). RECVFROM: -> who sent it */
+    unsigned done;              /* -> SENDTO: count. RECVFROM: bytes copied */
+    unsigned length;            /* -> RECVFROM: the datagram's length: more than done, it was cut short and the
+                                   rest is gone */
+};
+
+/* A connection's properties (a port listened on has STATE, WAITING and PORT; a datagram port those, ROOM and
+   BROADCAST). */
 #define GLOS_PROP_NET_STATE   GLOS_PROP(GLOS_HK_CONNECTION, 0)  /* GLOS_NETS_ (read) */
 #define GLOS_PROP_NET_WAITING GLOS_PROP(GLOS_HK_CONNECTION, 1)  /* bytes waiting to be read; a port: connections
-                                                                   waiting for ACCEPT (read) */
-#define GLOS_PROP_NET_ROOM    GLOS_PROP(GLOS_HK_CONNECTION, 2)  /* bytes SEND would take now (read) */
+                                                                   waiting for ACCEPT; a datagram port:
+                                                                   datagrams waiting (read) */
+#define GLOS_PROP_NET_ROOM    GLOS_PROP(GLOS_HK_CONNECTION, 2)  /* bytes SEND would take now; a datagram port: the
+                                                                   longest datagram SENDTO would take now (read) */
 #define GLOS_PROP_NET_ADDRESS GLOS_PROP(GLOS_HK_CONNECTION, 3)  /* the other end's address (read) */
-#define GLOS_PROP_NET_PORT    GLOS_PROP(GLOS_HK_CONNECTION, 4)  /* the other end's port; a port listened on: its
-                                                                   own (read) */
+#define GLOS_PROP_NET_PORT    GLOS_PROP(GLOS_HK_CONNECTION, 4)  /* the other end's port; a port listened on and a
+                                                                   datagram port: its own (read) */
 #define GLOS_PROP_NET_RESET   GLOS_PROP(GLOS_HK_CONNECTION, 5)  /* 1: CLOSE resets it at once, and what waits to
                                                                    be sent is dropped */
+#define GLOS_PROP_NET_BROADCAST GLOS_PROP(GLOS_HK_CONNECTION, 6) /* a datagram port: 1: SENDTO may send to a
+                                                                   broadcast address (2.2) */
 
 /* The network's state: one interface today (the card GLOS drives). */
 struct glos_net_if {
@@ -1232,13 +1272,16 @@ struct glos_net_if {
                                                            GLOS_NETF_EVENTS moved on: it opened or failed, the
                                                            first bytes wait to be read, the other end closed,
                                                            there is room again after a short SEND; a port: a
-                                                           connection came in */
+                                                           connection came in; a datagram port: a datagram
+                                                           came in, or there is room again after a SENDTO
+                                                           that found none */
 #define GLOS_EV_NETWORK GLOS_EV(GLOS_AREA_NET, 2)       /* (the header alone) the network's state changed: an
                                                            address came or went. STATE says what it is now */
 struct glos_ev_net {
     struct glos_ev ev;          /* (handle: the connection, or the port) */
     unsigned state;             /* GLOS_NETS_ */
-    unsigned waiting;           /* bytes waiting to be read; a port: connections waiting */
+    unsigned waiting;           /* bytes waiting to be read; a port: connections waiting; a datagram port:
+                                   datagrams waiting */
     unsigned room;              /* bytes SEND would take */
 };
 

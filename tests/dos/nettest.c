@@ -12,6 +12,20 @@
  *   NETTEST hold HOST PORT N
  *                     N connections open, "NETTEST holding", then waits to be
  *                     killed
+ *   NETTEST udp HOST PORT
+ *                     datagram ports (API 2.2) and SOCK_DGRAM sockets against
+ *                     a UDP echo server at HOST:PORT (one that is sent
+ *                     "burst N SIZE" sends N numbered datagrams back)
+ *   NETTEST udpserve PORT SECONDS
+ *                     a datagram port at PORT: what comes is sent back behind
+ *                     "re:", and "announce" is broadcast to PORT+1 every
+ *                     second; until "quit" comes or SECONDS have passed
+ *   NETTEST udpfind PORT
+ *                     another PC's udpserve found by broadcast: "who" to
+ *                     everyone at PORT ("NETTEST find-reply ok from=IP"), its
+ *                     announcement heard at PORT+1 ("NETTEST find-announce ok
+ *                     from=IP"), 1400 bytes there and back ("find-long"),
+ *                     then "quit" to it
  *
  * "NETTEST-DONE failures=N" at the end of all. */
 #include <fcntl.h>
@@ -273,6 +287,317 @@ static void case_bsd(const char *hosts, unsigned port, unsigned closed)
     report("bsd-noname", r, "h_errno=%d", h_errno);
 }
 
+/* ---- datagram ports (API 2.2) */
+
+static int dg_echo(glos_handle h, unsigned port, unsigned n, unsigned seed)
+{
+    static unsigned char out[GLOS_NET_DATAGRAM_MAX], in[GLOS_NET_DATAGRAM_MAX + 8];
+    unsigned from = 0, fport = 0, len = 0;
+    int r;
+    pattern(&seed, out, n);
+    if (glos_net_sendto(h, out, n, 1000, host, port) != 0)
+        return -100;
+    r = glos_net_recvfrom(h, in, sizeof in, 3000, &from, &fport, &len);
+    return r == (int)n && len == n && from == host && fport == port && !memcmp(in, out, n) ? 0 : r < 0 ? r : -200;
+}
+
+static void case_udp(unsigned port)
+{
+    union {
+        struct glos_ev ev;
+        struct glos_ev_net net;
+        unsigned char room[GLOS_EV_MAX];
+    } ev;
+    static unsigned char buf[GLOS_NET_DATAGRAM_MAX + 1];
+    struct glos_version v;
+    unsigned from, fport, len, t0, ms, bcast = host | 0xFF000000u;       /* (the host's /24) */
+    int st = 0, waiting = -1, room = 0, own = 0, r, r2, r3, i, n, last, ordered;
+    glos_handle h, h2, h3;
+    memset(&v, 0, sizeof v);
+    v.size = sizeof v;
+    glos_version(&v);
+    report("dg-version", v.major == 2 && v.minor >= 2 && (v.functions[GLOS_AREA_NET][0] & 0x380) == 0x380,
+           "version=%u.%u net=%x", v.major, v.minor, v.functions[GLOS_AREA_NET][0]);
+    h = glos_net_datagram(0, 0);
+    if (!h) {
+        report("dg-open", 0, "error %d", glos_error());
+        return;
+    }
+    glos_get(h, GLOS_PROP_NET_STATE, &st);
+    glos_get(h, GLOS_PROP_NET_WAITING, &waiting);
+    glos_get(h, GLOS_PROP_NET_ROOM, &room);
+    glos_get(h, GLOS_PROP_NET_PORT, &own);
+    report("dg-open", st == GLOS_NETS_DATAGRAM && waiting == 0 && room == GLOS_NET_DATAGRAM_MAX && own > 0 && own < 65536,
+           "state=%d waiting=%d room=%d port=%d", st, waiting, room, own);
+    r = dg_echo(h, port, 1, 11);
+    r2 = dg_echo(h, port, 512, 12);
+    r3 = dg_echo(h, port, GLOS_NET_DATAGRAM_MAX, 13);
+    report("dg-echo", !r && !r2 && !r3, "1: %d, 512: %d, %d: %d", r, r2, GLOS_NET_DATAGRAM_MAX, r3);
+    r = glos_net_sendto(h, buf, GLOS_NET_DATAGRAM_MAX + 1, 0, host, port);
+    r2 = glos_net_sendto(h, buf, 10, 0, host, 0);
+    r3 = glos_net_send(h, buf, 10, 0);                  /* (a connection's call) */
+    report("dg-refusals", r == -GLOS_E_ARGUMENT && r2 == -GLOS_E_ARGUMENT && r3 == -GLOS_E_ARGUMENT,
+           "too long: %d, port 0: %d, SEND: %d", r, r2, r3);
+
+    /* one cut short: what the room takes, its whole length, and the rest gone */
+    memset(buf, 'x', 300);
+    glos_net_sendto(h, buf, 300, 1000, host, port);
+    len = 0;
+    r = glos_net_recvfrom(h, buf, 100, 3000, &from, &fport, &len);
+    r2 = glos_net_recvfrom(h, buf, 100, 300, 0, 0, 0);
+    report("dg-truncated", r == 100 && len == 300 && r2 == -GLOS_E_NET_TIMEOUT, "copied=%d length=%u next=%d", r, len, r2);
+
+    t0 = glos_ticks();
+    r = glos_net_recvfrom(h, buf, sizeof buf, 500, 0, 0, 0);
+    ms = glos_ticks() - t0;
+    r2 = glos_net_recvfrom(h, buf, sizeof buf, 0, 0, 0, 0);
+    report("dg-timeout", r == -GLOS_E_NET_TIMEOUT && ms >= 450 && ms < 1500 && r2 == -GLOS_E_NET_TIMEOUT,
+           "r=%d ms=%u at once: %d", r, ms, r2);
+
+    /* more than the queue holds: 64 wait, in the order they came, and the rest were dropped */
+    glos_net_sendto(h, "burst 80 200", 12, 1000, host, port);
+    glos_sleep(1500);
+    glos_get(h, GLOS_PROP_NET_WAITING, &waiting);
+    for (n = 0, last = -1, ordered = 1; n < 100; n++) {
+        if ((r = glos_net_recvfrom(h, buf, sizeof buf, 0, 0, 0, &len)) < 0)
+            break;
+        buf[4] = 0;
+        i = atoi((char *)buf);
+        ordered &= r == 200 && i > last;
+        last = i;
+    }
+    report("dg-queue", waiting == GLOS_NET_DATAGRAM_QUEUE && n == GLOS_NET_DATAGRAM_QUEUE && ordered && last == 63,
+           "waiting=%d read=%d ordered=%d last=%d", waiting, n, ordered, last);
+
+    /* a broadcast address: refused until the port may */
+    r = glos_net_sendto(h, "hello", 5, 0, 0xFFFFFFFFu, port);
+    r2 = glos_net_sendto(h, "hello", 5, 0, bcast, port);
+    glos_set(h, GLOS_PROP_NET_BROADCAST, 1);
+    r3 = glos_net_sendto(h, "hello", 5, 0, 0xFFFFFFFFu, port);
+    i = glos_net_sendto(h, "hello", 5, 0, bcast, port);
+    report("dg-broadcast", r == -GLOS_E_REFUSED && r2 == -GLOS_E_REFUSED && r3 == 0 && i == 0,
+           "without: %d %d, with: %d %d", r, r2, r3, i);
+    glos_sleep(300);
+    while (glos_net_recvfrom(h, buf, sizeof buf, 0, 0, 0, 0) >= 0)      /* (an echo of those, if the server heard) */
+        ;
+    glos_close(h);
+
+    /* a port of the app's choosing; taken twice only when both say so */
+    h = glos_net_datagram(47001, GLOS_NETF_REUSE);
+    own = 0;
+    if (h)
+        glos_get(h, GLOS_PROP_NET_PORT, &own);
+    h2 = glos_net_datagram(47001, GLOS_NETF_REUSE);
+    h3 = glos_net_datagram(47001, 0);
+    r = glos_error();
+    report("dg-port", h && own == 47001 && h2 && !h3 && r == GLOS_E_NET_REFUSED, "port=%d second=%d third=%d error=%d", own,
+           h2 != 0, h3 != 0, r);
+    if (h2)
+        glos_close(h2);                                 /* (of two on a port, the later one has what comes in) */
+    r = h ? dg_echo(h, port, 64, 21) : -1;              /* (the server answers to the port it heard from) */
+    report("dg-port-echo", r == 0, "r=%d", r);
+    if (h)
+        glos_close(h);
+
+    /* events: one when a datagram comes in */
+    h = glos_net_datagram(0, GLOS_NETF_EVENTS);
+    glos_net_sendto(h, "ping", 4, 1000, host, port);
+    for (i = 0, n = 0; i < 50 && !n; i++)
+        if (glos_event(&ev, sizeof ev, 100, 0) > 0 && ev.ev.kind == GLOS_EV_NET && ev.ev.handle == h
+            && ev.net.state == GLOS_NETS_DATAGRAM)
+            n = (int)ev.net.waiting;
+    r = glos_net_recvfrom(h, buf, sizeof buf, 1000, 0, 0, 0);
+    report("dg-events", n == 1 && r == 4 && !memcmp(buf, "ping", 4), "waiting=%d r=%d", n, r);
+    glos_close(h);
+}
+
+static void case_udp_bsd(unsigned port)
+{
+    struct sockaddr_in to, from, own;
+    static char buf[GLOS_NET_DATAGRAM_MAX + 1];
+    struct timeval tv;
+    fd_set rd;
+    socklen_t len;
+    int fd, fd2, r, r2, r3, e, e2, v = 0, one = 1;
+    memset(&to, 0, sizeof to);
+    to.sin_family = AF_INET;
+    to.sin_port = htons((unsigned short)port);
+    to.sin_addr.s_addr = (in_addr_t)host;
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        report("dgbsd-socket", 0, "%s", glos_net_strerror(errno));
+        return;
+    }
+    len = sizeof v;
+    getsockopt(fd, SOL_SOCKET, SO_TYPE, &v, &len);
+    memset(&own, 0, sizeof own);
+    own.sin_family = AF_INET;
+    own.sin_port = htons(47002);
+    own.sin_addr.s_addr = htonl(INADDR_ANY);
+    r = bind(fd, (struct sockaddr *)&own, sizeof own);
+    memset(&own, 0, sizeof own);
+    len = sizeof own;
+    r2 = getsockname(fd, (struct sockaddr *)&own, &len);
+    fd2 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    r3 = bind(fd2, (struct sockaddr *)&own, sizeof own);        /* (the same port: in use) */
+    e = errno;
+    report("dgbsd-bind", v == SOCK_DGRAM && r == 0 && r2 == 0 && ntohs(own.sin_port) == 47002 && r3 == -1 && e == EADDRINUSE,
+           "type=%d bind=%d port=%u second=%d errno=%d", v, r, ntohs(own.sin_port), r3, e);
+    close(fd2);
+
+    r = (int)sendto(fd, "hello", 5, 0, (struct sockaddr *)&to, sizeof to);
+    FD_ZERO(&rd);
+    FD_SET(fd, &rd);
+    tv.tv_sec = 5, tv.tv_usec = 0;
+    r2 = select(fd + 1, &rd, 0, 0, &tv);
+    memset(&from, 0, sizeof from);
+    len = sizeof from;
+    r3 = (int)recvfrom(fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &len);
+    report("dgbsd-echo", r == 5 && r2 == 1 && r3 == 5 && !memcmp(buf, "hello", 5) && from.sin_addr.s_addr == (in_addr_t)host
+           && ntohs(from.sin_port) == port, "sendto=%d select=%d recvfrom=%d from=%s:%u", r, r2, r3,
+           inet_ntoa(from.sin_addr), ntohs(from.sin_port));
+
+    memset(buf, 'y', 300);
+    sendto(fd, buf, 300, 0, (struct sockaddr *)&to, sizeof to);
+    r = (int)recvfrom(fd, buf, 100, MSG_TRUNC, 0, 0);          /* (its real length, as Linux gives it) */
+    sendto(fd, buf, 300, 0, (struct sockaddr *)&to, sizeof to);
+    r2 = (int)recvfrom(fd, buf, 100, 0, 0, 0);
+    report("dgbsd-trunc", r == 300 && r2 == 100, "with MSG_TRUNC: %d, without: %d", r, r2);
+
+    fcntl(fd, F_SETFL, O_NONBLOCK);
+    r = (int)recvfrom(fd, buf, sizeof buf, 0, 0, 0);
+    e = errno;
+    fcntl(fd, F_SETFL, 0);
+    r2 = (int)recvfrom(fd, buf, sizeof buf, MSG_DONTWAIT, 0, 0);
+    e2 = errno;
+    report("dgbsd-eagain", r == -1 && e == EAGAIN && r2 == -1 && e2 == EAGAIN, "nonblock: %d errno=%d, dontwait: %d errno=%d",
+           r, e, r2, e2);
+
+    r = (int)sendto(fd, buf, GLOS_NET_DATAGRAM_MAX + 1, 0, (struct sockaddr *)&to, sizeof to);
+    e = errno;
+    r2 = (int)send(fd, "x", 1, 0);                              /* (no peer set) */
+    e2 = errno;
+    report("dgbsd-errors", r == -1 && e == EMSGSIZE && r2 == -1 && e2 == EDESTADDRREQ, "too long: %d errno=%d, no peer: %d errno=%d",
+           r, e, r2, e2);
+
+    to.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    r = (int)sendto(fd, "hello", 5, 0, (struct sockaddr *)&to, sizeof to);
+    e = errno;
+    r2 = setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof one);
+    r3 = (int)sendto(fd, "hello", 5, 0, (struct sockaddr *)&to, sizeof to);
+    report("dgbsd-broadcast", r == -1 && e == EACCES && r2 == 0 && r3 == 5, "without: %d errno=%d, with: %d", r, e, r3);
+    to.sin_addr.s_addr = (in_addr_t)host;
+    close(fd);
+
+    /* connect(): send() and recv() with the peer it set; a socket never bound has a port of GLOS's choosing */
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    r = connect(fd, (struct sockaddr *)&to, sizeof to);
+    r2 = (int)send(fd, "again", 5, 0);
+    tv.tv_sec = 5, tv.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    r3 = (int)recv(fd, buf, sizeof buf, 0);
+    len = sizeof own;
+    memset(&own, 0, sizeof own);
+    getsockname(fd, (struct sockaddr *)&own, &len);
+    report("dgbsd-connect", r == 0 && r2 == 5 && r3 == 5 && !memcmp(buf, "again", 5) && ntohs(own.sin_port) != 0,
+           "connect=%d send=%d recv=%d port=%u", r, r2, r3, ntohs(own.sin_port));
+    close(fd);
+}
+
+static int udp(int argc, char **argv)
+{
+    if (argc < 4)
+        return 2;
+    host = addr_of(argv[2]);
+    case_udp((unsigned)atoi(argv[3]));
+    case_udp_bsd((unsigned)atoi(argv[3]));
+    printf("NETTEST-UDP-DONE failures=%d\n", failures);
+    return failures != 0;
+}
+
+static const char *ip_text(unsigned a)
+{
+    struct in_addr ia;
+    ia.s_addr = (in_addr_t)a;
+    return inet_ntoa(ia);
+}
+
+static int udpserve(int argc, char **argv)
+{
+    static char buf[GLOS_NET_DATAGRAM_MAX], out[GLOS_NET_DATAGRAM_MAX];
+    unsigned port, secs, t0, last = 0, from, fport, len, heard = 0;
+    glos_handle h;
+    int r;
+    if (argc < 4)
+        return 2;
+    port = (unsigned)atoi(argv[2]);
+    secs = (unsigned)atoi(argv[3]);
+    if (!(h = glos_net_datagram(port, GLOS_NETF_BROADCAST))) {
+        printf("NETTEST udpserve FAIL error %d\n", glos_error());
+        return 1;
+    }
+    printf("NETTEST serving %u\n", port);
+    fflush(stdout);
+    for (t0 = glos_ticks(); glos_ticks() - t0 < secs * 1000;) {
+        if (glos_ticks() - last >= 1000) {
+            last = glos_ticks();
+            glos_net_sendto(h, "announce", 8, 0, 0xFFFFFFFFu, port + 1);
+        }
+        if ((r = glos_net_recvfrom(h, buf, sizeof buf - 3, 200, &from, &fport, &len)) < 0)
+            continue;
+        heard++;
+        if (r == 4 && !memcmp(buf, "quit", 4))
+            break;
+        memcpy(out, "re:", 3);
+        memcpy(out + 3, buf, (unsigned)r);
+        glos_net_sendto(h, out, (unsigned)r + 3, 500, from, fport);
+    }
+    printf("NETTEST served %u\n", heard);
+    glos_close(h);
+    return 0;
+}
+
+static int udpfind(int argc, char **argv)
+{
+    char buf[64];
+    unsigned port, from = 0, fport = 0, server = 0;
+    glos_handle ask, hear;
+    int r = -1, i;
+    if (argc < 3)
+        return 2;
+    port = (unsigned)atoi(argv[2]);
+    ask = glos_net_datagram(0, GLOS_NETF_BROADCAST);
+    hear = glos_net_datagram(port + 1, 0);
+    if (!ask || !hear) {
+        printf("NETTEST udpfind FAIL error %d\n", glos_error());
+        return 1;
+    }
+    for (i = 0; i < 5 && r < 0; i++) {                  /* (asked again: a broadcast may be lost) */
+        glos_net_sendto(ask, "who", 3, 0, 0xFFFFFFFFu, port);
+        r = glos_net_recvfrom(ask, buf, sizeof buf, 1500, &from, &fport, 0);
+    }
+    report("find-reply", r == 6 && !memcmp(buf, "re:who", 6) && fport == port, "from=%s r=%d asked=%d", ip_text(from), r, i);
+    server = from;
+    if (server) {                                       /* a long one, there and back: more than a cable's packet
+                                                           holds, so cut into fragments and put together again */
+        static unsigned char big[1400], back[1403 + 8];
+        unsigned seed = 77, len = 0;
+        pattern(&seed, big, sizeof big);
+        glos_net_sendto(ask, big, sizeof big, 1000, server, port);
+        r = glos_net_recvfrom(ask, back, sizeof back, 8000, 0, 0, &len);
+        report("find-long", r == 1403 && len == 1403 && !memcmp(back, "re:", 3) && !memcmp(back + 3, big, sizeof big),
+               "r=%d length=%u", r, len);
+    }
+    r = glos_net_recvfrom(hear, buf, sizeof buf, 5000, &from, &fport, 0);
+    report("find-announce", r == 8 && !memcmp(buf, "announce", 8), "from=%s r=%d", ip_text(from), r);
+    if (server)
+        glos_net_sendto(ask, "quit", 4, 500, server, port);
+    glos_sleep(500);                                    /* (sent before the port goes) */
+    glos_close(ask);
+    glos_close(hear);
+    return failures != 0;
+}
+
 static int all(int argc, char **argv)
 {
     unsigned port, closed, a, t0, ms;
@@ -361,6 +686,12 @@ int main(int argc, char **argv)
     }
     if (argc > 1 && !strcmp(argv[1], "hold"))
         return hold(argc, argv);
-    printf("usage: NETTEST all HOST PORT CLOSED [NAME] | bsd HOST PORT CLOSED | hold HOST PORT N\n");
+    if (argc > 1 && !strcmp(argv[1], "udp"))
+        return udp(argc, argv);
+    if (argc > 1 && !strcmp(argv[1], "udpserve"))
+        return udpserve(argc, argv);
+    if (argc > 1 && !strcmp(argv[1], "udpfind"))
+        return udpfind(argc, argv);
+    printf("usage: NETTEST all HOST PORT CLOSED [NAME] | bsd HOST PORT CLOSED | hold HOST PORT N | udp HOST PORT\n");
     return 2;
 }

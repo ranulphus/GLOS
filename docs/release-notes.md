@@ -4,6 +4,15 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## UDP for apps: datagram sockets (API 2.2, 2026-11-15)
+
+- **`socket(AF_INET, SOCK_DGRAM, 0)`** in the SDK's BSD sockets, with `bind`, `getsockname`, `sendto`, `recvfrom`,
+  `connect`, non-blocking calls, `select`, `SO_BROADCAST`, `SO_REUSEADDR` and `MSG_TRUNC`; under it the API's
+  new NET calls DATAGRAM, SENDTO and RECVFROM. A datagram is 1472 bytes at most; 64 wait to be read.
+- **Broadcasts reach across a cable link:** a program on a PC with a network card and a program on the PC
+  cabled to it find each other by broadcast, either way round.
+- Programs check `glos_version`: minor 2, or NET's function bits 7 to 9.
+
 ## The network over a parallel cable; a PC on a cable as a member of the network (2026-11-15)
 
 - **A parallel (LapLink) cable is a second kind of cable link** (N2): `cable = client LPT1` in GLOS.CFG, or
