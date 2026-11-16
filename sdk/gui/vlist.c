@@ -173,7 +173,7 @@ static void vl_draw(struct gui_widget *w, struct gfx_surface *s)
             gfx_rect_cut(&cc, &in);
             gfx_clip(s, &cc);
             if (c == 0 && r.icon) {
-                gui_draw_icon(s, x, y + (GUI_ROW_H - GUI_ICON_W) / 2, r.icon, GUI_ICON_W);
+                gui_draw_icon_ink(s, x, y + (GUI_ROW_H - GUI_ICON_W) / 2, r.icon, GUI_ICON_W, fg);
                 x += GUI_ICON_W + 3, cw -= GUI_ICON_W + 3;
             }
             if (r.cell[c])

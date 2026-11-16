@@ -58,6 +58,16 @@ void gui_draw_check(struct gfx_surface *s, int x, int y, int on, int enabled);
 void gui_draw_radio(struct gfx_surface *s, int x, int y, int on, int enabled);
 void gui_strip_amp(char *out, const char *in, int room);       /* "&File" -> "File" */
 
+/* ---- icons.c, glyphs.c */
+struct gui_glyph_def {
+    const char *name;
+    unsigned char mask[4 + 2 * GUI_ICON_W];     /* GUI_MASK_MAGIC's four bytes, then 16 rows of two bytes */
+};
+extern const struct gui_glyph_def gui_glyphs[];
+extern const int gui_glyphs_n;
+#define GUI_MASK_MAGIC(p) ((p)[0] == 0xFF && (p)[1] == 'G' && (p)[2] == 'M' && (p)[3] == 0xFF)
+void *gui_open_beside(const char *name);        /* (fonts.c) a file beside the program, to read: a FILE *, or NULL */
+
 /* ---- command.c */
 struct gui_cmd {
     int id;

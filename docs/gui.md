@@ -220,6 +220,26 @@ build time was chosen instead, because the plan's way would have meant:
 - no hinting, so other advances and every layout moved;
 - 1.8 MB of fonts and a rasteriser in every program.
 
+### 1.11 Icons by name (toolkit 2; the owner's choice of sets, 2026-11-16)
+
+GLOS draws no icon set of its own: it takes two open ones, converted at build time (`make icons`,
+`tools/mkicons.py`; the sets pinned in `tools/setup/versions.mk`, what is made from them kept in the repository).
+
+- **Colour icons** (`gui_icon(name, big)`): FatCow's Farm-Fresh icons (CC BY 3.0), for files, folders, drives,
+  programs and the desktop, at 16 and at 32 pixels. `sdk/gui/icons/colour.list` says which Farm-Fresh icon each
+  GLOS name is (`folder`, `file-text`, `drive-floppy`, `app-files` ...); a name is added there when a program
+  needs one (the set has 3,926; icons that carry other companies' logos are not to be listed). They are in
+  `ICONS.DAT` beside the programs (1.3 KB an icon, read when first asked for), reduced to the palette's cube
+  with hard edges, so an icon is the same picture at every depth and in every theme.
+- **One-colour glyphs** (`gui_glyph(name)`): Font Awesome Free's solid icons (CC BY 4.0), for toolbars and menus:
+  16-pixel masks in the toolkit itself (`sdk/gui/glyphs.c`; `sdk/gui/icons/glyphs.list`: `save`, `cut`, `undo`
+  ...). A glyph is given wherever a 16-pixel icon is taken (a command's, a row's, a node's, a status section's)
+  and is drawn in the colour of the text there: the theme's, greyed while the command can't be used, the chosen
+  text's on a chosen row. So a toolbar is right in the dark and the high-contrast theme, which a colour picture
+  can't be.
+- **Credit** is the licences' condition: `THIRD_PARTY.md` and `README.md` name both sets, with their links and
+  what was changed; the About box of GLOS's shell is to say the same (phase D).
+
 ## 2. How the toolkit and the apps are tested
 
 The toolkit and every app build for the host too: the app's `main` renamed `app_main`, linked with

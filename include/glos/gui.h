@@ -332,6 +332,14 @@ void gui_list_icons(struct gui_widget *w, int big);     /* rows (0), or 32-pixel
 /* An icon: GUI_ICON_W x GUI_ICON_W pixels, a byte each: 0 clear, else a palette index of the 8-bit palette. */
 #define GUI_ICON_W 16
 #define GUI_BIG_W  32
+/* GLOS's own icons, by name (docs/gui.md 1.11). Wherever a 16-pixel icon is taken (a command's, a row's, a
+   node's, a status section's) either kind may be given. */
+const unsigned char *gui_icon(const char *name, int big);      /* a colour icon ("folder", "file-text", "drive",
+                                           "app-files" ...: sdk/gui/icons/colour.list) of GUI_ICON_W, or big:
+                                           GUI_BIG_W; from ICONS.DAT beside the program. NULL: no such icon */
+const unsigned char *gui_glyph(const char *name);              /* a one-colour glyph ("save", "cut", "undo" ...:
+                                           sdk/gui/icons/glyphs.list), drawn in the text's colour where it is
+                                           shown: for toolbars and menus. NULL: no such glyph */
 
 /* ---- the virtual list (toolkit 2; docs/v1/toolkit-2.md 2): a list that keeps no rows. The app's model says
    how many there are and, for those on the screen alone, what is in them; rows may go on arriving while the
@@ -498,6 +506,9 @@ void gui_draw_field(struct gfx_surface *s, const struct gfx_rect *r, int enabled
 void gui_draw_icon(struct gfx_surface *s, int x, int y, const unsigned char *icon, int side);
 void gui_draw_icon_dim(struct gfx_surface *s, int x, int y, const unsigned char *icon, int side);       /* its shape,
                                            as what can't be used now */
+void gui_draw_icon_ink(struct gfx_surface *s, int x, int y, const unsigned char *icon, int side, unsigned ink);
+                                        /* ... a glyph in the colour ink (the text's, where it is drawn); a colour
+                                           icon as it is */
 int gui_is_focus(struct gui_widget *w);
 int gui_char_w(const struct gfx_font *f, unsigned c);   /* one character's advance */
 void gui_text_fit(struct gfx_surface *s, int x, int y, int w, const struct gfx_font *f, const char *text,

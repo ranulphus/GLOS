@@ -9171,7 +9171,8 @@ def gui_case(profile, vcard, card, bits, scripts=None, files=None, tag_prefix="g
     import time
     tag = "%s-%s-%d" % (profile, vcard, bits)
     files = (files or ["build/dj/GUITEST.EXE=/TEST/GUITEST.EXE"]) + ["sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT",
-                                                                         "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT"]
+                                                                         "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT",
+                                                                         "sdk/gui/fonts/ICONS.DAT=/TEST/ICONS.DAT"]
     extra = []
     for f in files:
         extra += ["--file", f]

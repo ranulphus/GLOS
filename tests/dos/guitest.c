@@ -21,6 +21,9 @@
  *                       thousand rows that keeps none: the model is asked for the
  *                       rows on the screen alone (counted); rows that arrive,
  *                       sorting asked of the app, what is chosen kept by id
+ *   GUITEST icons       "GUITEST Icons": GLOS's own icons by name: colour ones at 16
+ *                       and 32 pixels (ICONS.DAT), one-colour glyphs in the text's
+ *                       colour and greyed, and in a list, a tree and a menu
  *   GUITEST names DIR   files in DIR named in DOS's code page (GLOSCP), then
  *                       the file dialog there: the name chosen, as DOS's
  *                       bytes (M10 step G)
@@ -528,6 +531,76 @@ static void commands(void)
     say("commands", "", 0);
 }
 
+/* ---- GLOS's icons by name (docs/gui.md 1.11) */
+static const char *const icolour[] = { "folder", "folder-open", "file", "file-text", "file-image", "file-sound",
+    "file-video", "file-archive", "file-program", "drive", "drive-floppy", "drive-cd", "computer", "printer", "trash",
+    "home", "app-files", "app-terminal", "app-notepad", "app-calc", "app-control", "settings", "info", "warning" };
+static const char *const iglyph[] = { "new", "open", "save", "cut", "copy", "paste", "undo", "redo", "delete", "find",
+    "print", "bold", "italic", "underline", "add", "close", "back", "forward", "up", "home", "refresh", "settings",
+    "info", "help", "warning", "star", "play", "pause", "stop", "volume", "lock", "edit", "check", "terminal" };
+
+static void icons_draw(struct gui_widget *w, struct gfx_surface *s)
+{
+    unsigned i;
+    for (i = 0; i < sizeof icolour / sizeof *icolour; i++) {
+        gui_draw_icon(s, w->r.x + 4 + (int)i * 20, w->r.y + 2, gui_icon(icolour[i], 0), GUI_ICON_W);
+        if (i < 12)
+            gui_draw_icon(s, w->r.x + 4 + (int)i * 40, w->r.y + 24, gui_icon(icolour[i], 1), GUI_BIG_W);
+    }
+    for (i = 0; i < sizeof iglyph / sizeof *iglyph; i++) {
+        int x = w->r.x + 4 + (int)(i % 24) * 20, y = w->r.y + 62 + (int)(i / 24) * 40;
+        gui_draw_icon(s, x, y, gui_glyph(iglyph[i]), GUI_ICON_W);
+        gui_draw_icon_dim(s, x, y + 20, gui_glyph(iglyph[i]), GUI_ICON_W);
+    }
+}
+
+static void icons_page(void)
+{
+    static const char *const rows[4][2] = { { "A folder", "colour" }, { "A text file", "colour" },
+                                            { "Saved", "a glyph" }, { "Found", "a glyph" } };
+    struct gui_widget *box, *row, *l, *t;
+    struct gui_node *n;
+    struct gui_menubar *bar;
+    struct gui_menu *m;
+    int i;
+    win = gui_window("GUITEST Icons", 500, 300, 0);
+    win->on_command = kcommand;
+    gui_command(win, K_SAVE, "&Save", "Ctrl+S", gui_glyph("save"), "Save");
+    gui_command(win, K_OPEN, "&Open...", "Ctrl+O", gui_icon("folder-open", 0), "Open");
+    gui_command(win, K_PASTE, "&Paste", "Ctrl+V", gui_glyph("paste"), "Paste");
+    gui_command_enable(win, K_PASTE, 0);
+    gui_command(win, K_EXIT, "E&xit", NULL, NULL, NULL);
+    bar = gui_menubar(win);
+    m = gui_menu(bar, "&File");
+    gui_menu_command(m, K_OPEN), gui_menu_command(m, K_SAVE), gui_menu_command(m, K_PASTE);
+    gui_menu_sep(m);
+    gui_menu_command(m, K_EXIT);
+    kbar = gui_toolbar(win);
+    gui_toolbar_command(kbar, K_OPEN), gui_toolbar_command(kbar, K_SAVE), gui_toolbar_command(kbar, K_PASTE);
+    box = gui_vbox(win->root, -1, -1);
+    gui_grow(box, 1);
+    gui_canvas(box, 484, 140, icons_draw, NULL);
+    row = gui_hbox(box, -1, 0);
+    gui_grow(row, 1);
+    l = gui_list(row, 2, NULL, NULL);
+    gui_grow(l, 1);
+    for (i = 0; i < 4; i++)
+        gui_list_add(l, rows[i], i == 0 ? gui_icon("folder", 0) : i == 1 ? gui_icon("file-text", 0)
+                                 : i == 2 ? gui_glyph("save") : gui_glyph("find"), NULL);
+    gui_list_set(l, 2);
+    t = gui_tree(row);
+    gui_grow(t, 1);
+    n = gui_tree_add(t, NULL, "This PC", gui_icon("computer", 0), NULL, 1);
+    gui_tree_add(t, n, "C:", gui_icon("drive", 0), NULL, 0);
+    gui_tree_add(t, n, "A:", gui_icon("drive-floppy", 0), NULL, 0);
+    gui_tree_add(t, n, "Starred", gui_glyph("star"), NULL, 0);
+    gui_tree_expand(t, n, 1);
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("icons: folder %s", gui_icon("folder", 1) ? "there" : "missing", 0);
+    say("icons: nothing %s", gui_icon("no-such-icon", 0) ? "there" : "missing", 0);
+}
+
 /* ---- the virtual list (toolkit 2, step C3) */
 static struct gui_widget *vl;
 static int vn = 20, vdown;
@@ -662,6 +735,8 @@ int main(int argc, char **argv)
         commands();
     else if (!strcmp(what, "vlist"))
         vlist();
+    else if (!strcmp(what, "icons"))
+        icons_page();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

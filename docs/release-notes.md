@@ -13,6 +13,9 @@ in its `docs/milestones-*.md`.
   The small and large fonts are in a new file, `FONTS.DAT`, which goes beside the programs with `SMOOTH.DAT`
   (copy it when updating; without it the text stays at the normal size).
 - The shell's `VER` says the API's version as it is (2.3; it said 2.1).
+- **Icons:** GLOS takes its icons from two open sets, FatCow's Farm-Fresh (colour) and Font Awesome Free (toolbar
+  and menu glyphs, drawn in the theme's colours); a new file, `ICONS.DAT`, goes beside the programs with the
+  font files. Both are credited in `THIRD_PARTY.md` and the README, as their licences ask.
 
 ## The shell runs batch files itself (S4a, 2026-11-16)
 

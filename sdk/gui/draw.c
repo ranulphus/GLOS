@@ -174,11 +174,31 @@ void gui_draw_field(struct gfx_surface *s, const struct gfx_rect *r, int enabled
     gui_frame(s, r, enabled ? GUI_LINE : GUI_DIM);
 }
 
+/* A glyph's mask (icons.c) in one colour. */
+static void mask(struct gfx_surface *s, int x, int y, const unsigned char *icon, int side, unsigned rgb)
+{
+    if (side >= GUI_ICON_W)             /* (16 pixels, in the middle of a larger place) */
+        gfx_mono(s, x + (side - GUI_ICON_W) / 2, y + (side - GUI_ICON_W) / 2, icon + 4, GUI_ICON_W, GUI_ICON_W, 2, rgb,
+                 GFX_NONE);
+}
+
+void gui_draw_icon_ink(struct gfx_surface *s, int x, int y, const unsigned char *icon, int side, unsigned ink)
+{
+    if (icon && GUI_MASK_MAGIC(icon))
+        mask(s, x, y, icon, side, ink);
+    else
+        gui_draw_icon(s, x, y, icon, side);
+}
+
 void gui_draw_icon(struct gfx_surface *s, int x, int y, const unsigned char *icon, int side)
 {
     int i, j;
     if (!icon)
         return;
+    if (GUI_MASK_MAGIC(icon)) {
+        mask(s, x, y, icon, side, GUI_TEXT);
+        return;
+    }
     for (j = 0; j < side; j++)
         for (i = 0; i < side; i++) {
             unsigned c = icon[j * side + i];
@@ -194,6 +214,10 @@ void gui_draw_icon_dim(struct gfx_surface *s, int x, int y, const unsigned char 
     int i, j;
     if (!icon)
         return;
+    if (GUI_MASK_MAGIC(icon)) {
+        mask(s, x, y, icon, side, GUI_DIM);
+        return;
+    }
     for (j = 0; j < side; j++)
         for (i = 0; i < side; i++)
             if (icon[j * side + i])

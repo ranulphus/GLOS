@@ -163,7 +163,7 @@ static void list_draw(struct gui_widget *w, struct gfx_surface *s)
                 gfx_rect_cut(&cc, &in);
                 gfx_clip(s, &cc);
                 if (c == 0 && r->icon) {
-                    gui_draw_icon(s, x, y, r->icon, GUI_ICON_W);
+                    gui_draw_icon_ink(s, x, y, r->icon, GUI_ICON_W, fg);
                     x += GUI_ICON_W + 3, cw -= GUI_ICON_W + 3;
                 }
                 if (r->cells[c])
@@ -657,7 +657,7 @@ static void tree_draw(struct gui_widget *w, struct gfx_surface *s)
         }
         x += 13;
         if (n->icon) {
-            gui_draw_icon(s, x, y, n->icon, GUI_ICON_W);
+            gui_draw_icon_ink(s, x, y, n->icon, GUI_ICON_W, n == t->cur ? GUI_CHOSEN_TEXT : on ? GUI_FIELD_TEXT : GUI_DIM);
             x += GUI_ICON_W + 3;
         }
         {

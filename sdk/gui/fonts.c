@@ -33,9 +33,11 @@ static unsigned le16(const unsigned char *p) { return p[0] | (unsigned)p[1] << 8
 static FILE *open_beside(const char *name)
 {
     char path[320];
-    snprintf(path, sizeof path, "%s%s", folder, name);
+    snprintf(path, sizeof path, "%s%s", folder[0] ? folder : "C:\\GLOS\\", name);
     return gui_fopen(path, "rb");
 }
+
+void *gui_open_beside(const char *name) { return open_beside(name); }
 
 /* FONTS.DAT's fonts of one size: 1 if all three are there. */
 static int load_size(int size)

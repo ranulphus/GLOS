@@ -463,7 +463,7 @@ static void view_draw(struct gui_widget *w, struct gfx_surface *s)
             if (it->off)
                 gui_draw_icon_dim(s, w->r.x + 3, iy, it->icon, GUI_ICON_W);
             else
-                gui_draw_icon(s, w->r.x + 3, iy, it->icon, GUI_ICON_W);
+                gui_draw_icon_ink(s, w->r.x + 3, iy, it->icon, GUI_ICON_W, fg);
             if (it->checked)
                 gfx_frame(s, w->r.x + 1, iy - 2, GUI_ICON_W + 4, GUI_ICON_W + 4, fg);
         } else if (it->checked && it->radio) {

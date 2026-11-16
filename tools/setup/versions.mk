@@ -48,3 +48,12 @@ FREEDOOM_SHA256 := 3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688
 # image: tools/loopa/mkgolden.sh.)
 FREEDOS_FLOPPY_URL    := https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/distributions/1.4/FD14-FloppyEdition.zip
 FREEDOS_FLOPPY_SHA256 := 45b1fa7c52dd996c3bfa5e352ffcd410781b952a6ad629f15a4c9ec4bbaefc5a
+
+# GLOS's icons (docs/gui.md 1.11; tools/mkicons.py, `make icons`): the sets they are taken from. What is made
+# from them is kept in the repository (sdk/gui/fonts/ICONS.DAT, sdk/gui/glyphs.c), so the build fetches
+# neither. Farm-Fresh v3.92 (FatCow; CC BY 3.0 US; the project closed in 2014, and this is a copy of its final
+# release at a fixed commit) and Font Awesome Free 6.7.2 (icons CC BY 4.0, fonts SIL OFL 1.1, code MIT).
+FARMFRESH_URL      := https://github.com/gammasoft/fatcow/archive/e6ee23359517a30cd388488a8f5fc7afcdcfdbc5.zip
+FARMFRESH_SHA256   := 45045ed8e51d6e25ddaa9b7354d107a498213abcca8a5b70307c9f238d78693d
+FONTAWESOME_URL    := https://github.com/FortAwesome/Font-Awesome/releases/download/6.7.2/fontawesome-free-6.7.2-web.zip
+FONTAWESOME_SHA256 := ecdaaa6d347cd7da82c66054770995e97f3d066a57e8d58ac9c517f0f77561fb

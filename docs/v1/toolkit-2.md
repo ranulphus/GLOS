@@ -369,6 +369,14 @@ which and why. The apps keep working at every step (they move as the toolkit doe
   distinct rows it was asked for, a few screens of ten thousand; sorted downward with the current row kept by
   its id; a range and a row more chosen; a column dragged wider; Enter).
 
+### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
+
+- **Farm-Fresh** (FatCow; CC BY 3.0) for colour icons and **Font Awesome Free, solid** (CC BY 4.0) for the
+  one-colour glyphs of toolbars and menus. Considered and not taken: Tango (public domain, 215 icons), Fugue,
+  Silk, Fluent Emoji; Fluent, Bootstrap, Material, Codicons, Open Iconic, Phosphor.
+- As built: `docs/gui.md` §1.11 (`gui_icon`, `gui_glyph`, `ICONS.DAT`, `make icons`). 55 of each to start with;
+  the lists grow as the apps need them. Test: `icons` (GUITEST's page, in the three themes).
+
 ## Settled at the owner's review (2026-11-06)
 
 1. **Fonts:** the UI's fonts stay bitmaps made at build time, in three sizes (small, normal, large), each with its

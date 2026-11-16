@@ -201,7 +201,7 @@ gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS))
 	@rm -rf build/host/gui build/host/gui-drives && mkdir -p build/host/gui
 	@set -e; for t in $(GUI_SCRIPTS); do n=$$(basename $$t .txt); prog=$$(awk '$$1=="run"{print tolower($$2); exit}' $$t); \
 	  prog=$${prog%.exe}; mkdir -p build/host/gui/$$n; for b in 8 16 32; do rm -rf build/host/gui-drives; \
-	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT sdk/gui/fonts/FONTS.DAT build/host/gui-drives/C/GLOS/; \
+	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT sdk/gui/fonts/FONTS.DAT sdk/gui/fonts/ICONS.DAT build/host/gui-drives/C/GLOS/; \
 	    mkdir -p build/host/gui-drives/A build/host/gui-drives/C/HX build/host/gui-drives/C/OUT build/host/gui-drives/C/TEST; \
 	    GLOS_HOST_DRIVES=build/host/gui-drives build/host/$$prog $$t build/host/gui/$$n $$b > build/host/gui/$$n-$$b.log \
 	      || { echo "gui-goldens: $$n at $$b bits:"; cat build/host/gui/$$n-$$b.log; exit 1; }; done; \
@@ -243,6 +243,15 @@ fonts:
 	$(Q){ printf 'GLOSAA1\n'; cat build/fonts/ui.aa build/fonts/bold.aa build/fonts/mono.aa \
 	  build/fonts/ui0.aa build/fonts/bold0.aa build/fonts/mono0.aa \
 	  build/fonts/ui2.aa build/fonts/bold2.aa build/fonts/mono2.aa; } > sdk/gui/fonts/SMOOTH.DAT
+# GLOS's icons (docs/gui.md 1.11): the colour ones from Farm-Fresh (sdk/gui/icons/colour.list ->
+# sdk/gui/fonts/ICONS.DAT, beside the programs as FONTS.DAT is) and the one-colour glyphs from Font Awesome Free
+# (sdk/gui/icons/glyphs.list -> sdk/gui/glyphs.c, in the toolkit). Both kept in the repository. On the host,
+# with python3-pil; the sets are pinned in tools/setup/versions.mk.
+icons:
+	$(Q)tools/setup/fetch.sh $(FARMFRESH_URL) $(FARMFRESH_SHA256) $(MGA_CACHE)/dl/$(notdir $(FARMFRESH_URL))
+	$(Q)tools/setup/fetch.sh $(FONTAWESOME_URL) $(FONTAWESOME_SHA256) $(MGA_CACHE)/dl/$(notdir $(FONTAWESOME_URL))
+	$(Q)python3 -I tools/mkicons.py $(MGA_CACHE)/dl/$(notdir $(FARMFRESH_URL)) $(MGA_CACHE)/dl/$(notdir $(FONTAWESOME_URL)) \
+	  sdk/gui/icons sdk/gui/fonts/ICONS.DAT sdk/gui/glyphs.c
 
 # The SSH layer (kernel/ssh) on host sockets against OpenSSH's client
 # (tests/host/sshd_test.sh): native, on the host, which has ssh.

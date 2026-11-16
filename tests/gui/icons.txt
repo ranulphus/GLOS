@@ -1,0 +1,20 @@
+# GLOS's icons by name (docs/gui.md 1.11): colour icons from ICONS.DAT (Farm-Fresh's) at 16 and 32 pixels;
+# one-colour glyphs (Font Awesome's) in the text's colour and greyed; both in a toolbar, a menu, a list (the
+# chosen row's glyph in the chosen text's colour) and a tree; an icon the file has not is none. Then the same
+# window in the dark theme: the colour icons as they are, the glyphs in that theme's text colour.
+run GUITEST.EXE icons
+wait "GUITEST Icons"
+shot icons "GUITEST Icons"
+key alt+f
+shot menu ""
+key esc
+theme dark
+shot icons-dark "GUITEST Icons"
+theme contrast
+shot icons-contrast "GUITEST Icons"
+theme slate
+key alt+f4
+gone "GUITEST Icons"
+expect GUI icons: folder there
+expect GUI icons: nothing missing
+expect GUI end

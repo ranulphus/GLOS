@@ -60,4 +60,11 @@ reached only through an SSH tunnel. Don't expose a GLOS PC to the internet.
 
 ## Licence
 
-MIT (see [LICENSE](LICENSE)). Third-party components keep their own licences (PRD §17).
+MIT (see [LICENSE](LICENSE)). Third-party components keep their own licences (PRD §17;
+[THIRD_PARTY.md](THIRD_PARTY.md)).
+
+Icons: GLOS's colour icons are from the [FatCow Farm-Fresh Web Icons](http://www.fatcow.com/free-icons), licensed
+under a [Creative Commons Attribution 3.0 License](http://creativecommons.org/licenses/by/3.0/us/), reduced here
+to GLOS's 216 colours. Its toolbar and menu glyphs are from [Font Awesome Free](https://fontawesome.com) by
+Fonticons, Inc., licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), drawn here as
+16-pixel masks.
