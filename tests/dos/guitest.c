@@ -17,6 +17,10 @@
  *                       a group of three, one that can be used only after
  *                       another (the update hook); a button that makes the
  *                       window narrow, so the toolbar's end goes into its menu
+ *   GUITEST vlist       "GUITEST Virtual list" (toolkit 2, step C3): a list of ten
+ *                       thousand rows that keeps none: the model is asked for the
+ *                       rows on the screen alone (counted); rows that arrive,
+ *                       sorting asked of the app, what is chosen kept by id
  *   GUITEST names DIR   files in DIR named in DOS's code page (GLOSCP), then
  *                       the file dialog there: the name chosen, as DOS's
  *                       bytes (M10 step G)
@@ -524,6 +528,92 @@ static void commands(void)
     say("commands", "", 0);
 }
 
+/* ---- the virtual list (toolkit 2, step C3) */
+static struct gui_widget *vl;
+static int vn = 20, vdown;
+static unsigned char vseen[10000 / 8 + 1];      /* the rows the list has asked for since last told */
+
+static int v_count(void *ctx) { (void)ctx; return vn; }
+
+static void v_row(void *ctx, int row, struct gui_vrow *out)
+{
+    static char name[24], size[16];
+    int item = vdown ? vn - 1 - row : row;
+    (void)ctx;
+    vseen[item >> 3] |= (unsigned char)(1 << (item & 7));
+    snprintf(name, sizeof name, "Item %05d", item);
+    snprintf(size, sizeof size, "%d", item * 37 % 10007);
+    out->cell[0] = name, out->cell[1] = size, out->cell[2] = item % 3 ? "Plain" : "Third";
+    out->icon = item % 5 ? icon_doc : icon_dir;
+    out->id = (unsigned long)item + 1;
+}
+
+static int v_find(void *ctx, unsigned long id)
+{
+    int item = (int)id - 1;
+    (void)ctx;
+    return item < 0 || item >= vn ? -1 : vdown ? vn - 1 - item : item;
+}
+
+static void v_on(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_SELECT) {
+        say("row%s %d", "", gui_vlist_get(w));
+    } else if (what == GUI_ON_ACTIVATE) {
+        say("open id%s %d", "", (int)gui_vlist_id(w));
+    } else if (what == GUI_ON_SORT) {
+        int col, down;
+        gui_vlist_sort(w, &col, &down);
+        vdown = down;
+        gui_vlist_changed(w);
+        say("sorted %s by column %d", down ? "down" : "up", col);
+    }
+}
+
+static void v_more(struct gui_widget *w, int what)
+{
+    (void)w, (void)what;
+    vn = 10000;
+    gui_vlist_changed(vl);
+    say("rows%s %d", "", vn);
+}
+
+static void v_asked(struct gui_widget *w, int what)     /* how many rows the list asked for since last told */
+{
+    unsigned long ids[4];
+    int n = gui_vlist_chosen(vl, ids, 4), i, rows = 0;
+    (void)w, (void)what;
+    for (i = 0; i < 10000; i++)
+        rows += vseen[i >> 3] >> (i & 7) & 1;
+    memset(vseen, 0, sizeof vseen);
+    if (rows <= 120)                            /* (a few screens of a dozen rows, of ten thousand) */
+        say("asked for a few screens of rows, not the list; chosen%s %d", "", n);
+    else
+        say("asked for%s %d rows!", "", rows);
+}
+
+static void vlist(void)
+{
+    static const char *const heads[] = { "Name", "Size", "Kind" };
+    static const int widths[] = { 150, 70, 80 };
+    static const struct gui_model model = { v_count, v_row, v_find, NULL };
+    struct gui_widget *box, *row;
+    win = gui_window("GUITEST Virtual list", 380, 240, 0);
+    box = gui_vbox(win->root, -1, -1);
+    gui_grow(box, 1);
+    row = gui_hbox(box, -1, 0);
+    gui_button(row, "&More rows", v_more, 0);
+    gui_button(row, "&Asked?", v_asked, 0);
+    vl = gui_vlist(box, 3, heads, widths, &model);
+    gui_vlist_multi(vl, 1);
+    gui_on(vl, v_on, 0);
+    gui_grow(vl, 1);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(vl);
+    say("vlist", "", 0);
+}
+
 static void names(const char *dir)
 {
     static const char *const n850[] = { "ÅRHUS.TXT", "ÉTÉ.TXT", "NIÑO.TXT", "ØL.TXT", 0 };
@@ -570,6 +660,8 @@ int main(int argc, char **argv)
         tabs();
     else if (!strcmp(what, "commands"))
         commands();
+    else if (!strcmp(what, "vlist"))
+        vlist();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

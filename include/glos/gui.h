@@ -108,6 +108,7 @@ enum {
     GUI_ON_CHANGE,                      /* its value changed (a check box, a field's text, a slider) */
     GUI_ON_SELECT,                      /* what is chosen in it changed (a list, a tree, tabs, a choice) */
     GUI_ON_ACTIVATE,                    /* an item was opened (Enter, a double click); a field's Enter */
+    GUI_ON_SORT,                        /* a virtual list's column head was pressed: the app sorts (gui_vlist_sort) */
     GUI_ON_CONTEXT                      /* its context menu is about to open (gui_context): the app may change the
                                            menu for what is chosen there */
 };
@@ -331,6 +332,36 @@ void gui_list_icons(struct gui_widget *w, int big);     /* rows (0), or 32-pixel
 /* An icon: GUI_ICON_W x GUI_ICON_W pixels, a byte each: 0 clear, else a palette index of the 8-bit palette. */
 #define GUI_ICON_W 16
 #define GUI_BIG_W  32
+
+/* ---- the virtual list (toolkit 2; docs/v1/toolkit-2.md 2): a list that keeps no rows. The app's model says
+   how many there are and, for those on the screen alone, what is in them; rows may go on arriving while the
+   list shows. What is chosen is kept by the rows' ids, so it survives sorting and arrivals. */
+#define GUI_VCOLS 8
+struct gui_vrow {
+    const char *cell[GUI_VCOLS];        /* its cells' texts (the model's to keep until it is next asked) */
+    const unsigned char *icon;          /* a GUI_ICON_W icon before the first cell, or NULL */
+    unsigned long id;                   /* the row's own, whatever place it has (not 0) */
+};
+struct gui_model {
+    int (*count)(void *ctx);            /* the rows there are now */
+    void (*row)(void *ctx, int row, struct gui_vrow *out);     /* a row's content */
+    int (*find)(void *ctx, unsigned long id);  /* the place of the row with that id now, or -1 (the function NULL:
+                                           the list looks a screen either side of where the row was) */
+    void *ctx;
+};
+struct gui_widget *gui_vlist(struct gui_widget *parent, int columns, const char *const *heads, const int *widths,
+                             const struct gui_model *model);   /* heads NULL: no header; widths in pixels (NULL:
+                                           100 each; the last column has what is left) */
+void gui_vlist_changed(struct gui_widget *w);          /* rows came, went, or were sorted: drawn again, the current
+                                           row found by its id */
+int gui_vlist_get(struct gui_widget *w);               /* the current row's place, or -1 */
+unsigned long gui_vlist_id(struct gui_widget *w);      /* ... its id, or 0 */
+void gui_vlist_set(struct gui_widget *w, int row);     /* the current row, chosen alone (-1: none) */
+void gui_vlist_multi(struct gui_widget *w, int on);    /* more than one row chosen (Ctrl, Shift) */
+int gui_vlist_chosen(struct gui_widget *w, unsigned long *ids, int room);      /* how many rows are chosen, and the
+                                           ids of as many as there is room for */
+void gui_vlist_sort(struct gui_widget *w, int *col, int *down);        /* at GUI_ON_SORT: the column whose head was
+                                           pressed, and whether downward (a second press on the same head) */
 
 struct gui_node;
 struct gui_widget *gui_tree(struct gui_widget *parent);

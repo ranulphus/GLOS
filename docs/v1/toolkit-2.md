@@ -349,6 +349,26 @@ which and why. The apps keep working at every step (they move as the toolkit doe
   made narrow and the overflow's menu; a list's context menu by the mouse and by Shift+F10; the status bar's
   sections; a button's and a label's tooltip), on the host and on the desktop in Loop A; the scripts' `move`.
 
+### C3 as built, first part: the virtual list's detail view (2026-11-16)
+
+- **The model** (`struct gui_model`): `count`, `row` (a row's cells, icon and id) and, if the app can say,
+  `find` (where the row with an id is now). `gui_vlist(parent, columns, heads, widths, &model)` keeps no rows:
+  it asks for the rows on the screen when it draws, and only for those among what is drawn again.
+- **Rows that arrive, go or are sorted:** the app says `gui_vlist_changed`; the current row is where its id is
+  now (the model's `find`, else a screen either side of where it was).
+- **Chosen by id:** the current row and the rows chosen are ids, so they survive sorting and arrivals
+  (`gui_vlist_id`, `gui_vlist_chosen`). Shift chooses a range (the rows between are asked for their ids), Ctrl
+  with the arrows moves without choosing and Ctrl+Space or a Ctrl press turns a row's choice over.
+- **Sorting is the app's:** a press on a column's head tells the widget's `on` (`GUI_ON_SORT`;
+  `gui_vlist_sort` says the column and the way, a second press on the same head turning it), the app sorts and
+  says the list changed. The head shows the way.
+- **Columns:** an edge in the header is dragged; the last column has what is left.
+- **Still to come in C3:** the icon views and rubber-band selection, columns reordered, type-ahead, the virtual
+  tree, and `gui_list` on top of the model.
+- **Tests:** `vlist` (GUITEST's page: twenty rows, then ten thousand; End and Page Up; the app counts the
+  distinct rows it was asked for, a few screens of ten thousand; sorted downward with the current row kept by
+  its id; a range and a row more chosen; a column dragged wider; Enter).
+
 ## Settled at the owner's review (2026-11-06)
 
 1. **Fonts:** the UI's fonts stay bitmaps made at build time, in three sizes (small, normal, large), each with its
