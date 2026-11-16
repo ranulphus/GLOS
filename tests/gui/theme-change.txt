@@ -8,6 +8,7 @@ key tab
 type r
 key down
 key f1
+wait "About GUITEST"
 key enter
 gone "About GUITEST"
 shot slate "GUITEST Gallery"
