@@ -385,6 +385,30 @@ which and why. The apps keep working at every step (they move as the toolkit doe
   opened by the arrows; one with five thousand children and its end; the nodes asked for counted; badges; a
   node's children changed with a folder open under it; Left out and Enter).
 
+### C4 in detail (2026-11-16, before it is built)
+
+- **What the API has** (phase B): `glos_thread`, `glos_join`, locks (`glos_lock`, `glos_take`, `glos_give`),
+  signals and `glos_wait`, and `glos_post`, an event of the app's own into its queue from any thread. A program
+  with threads is linked with `@gloswrap.opt` (one lock round DJGPP's C library): GUITEST and every app that
+  uses tasks.
+- **A task:** `gui_task_start(owner, title, work, arg, done, flags)` queues `work(task, arg)` for a worker
+  thread. From the worker: `gui_task_progress(task, done, total, text)`, `gui_task_cancelled(task)` and
+  `gui_task_post(task, fn, data)`, which has `fn(data)` run on the window's thread (rows for a list, a
+  thumbnail). On the window's thread: `gui_task_cancel(task)`, and `done(owner, arg, cancelled)` when the work
+  has returned. Only the window's thread touches widgets.
+- **How results cross:** a locked queue in the toolkit and one `glos_post` (a code of the toolkit's own) that
+  wakes the loop, which drains the queue in order; progress is the latest value, not a queue.
+- **The pool:** workers made when first needed, two by default and one where the CPU is a 486
+  (`gui_task_threads(n)` says otherwise); tasks wait in a queue for a free worker.
+- **The progress dialog** (`GUI_TASK_DIALOG`): if the task is still running a second after it started, a
+  modal dialog with its title, a bar, the text and Cancel; gone when the task ends.
+- **The host shim** gets threads two ways: real ones (pthreads), and for the goldens an in-order mode in which
+  one thread runs at a time: a worker runs while the window's thread waits for an event with none queued,
+  until it sleeps (the shim's clock moves on), blocks or ends. The same script then gives the same pictures.
+- **Tests:** a list that fills as a task "reads" ten thousand rows in pieces (posted), its progress dialog and
+  Cancel; two tasks and one worker (the second waits); the host's lock checks; Loop A smoke on a 486 and a
+  Pentium II.
+
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
 - **Farm-Fresh** (FatCow; CC BY 3.0) for colour icons and **Font Awesome Free, solid** (CC BY 4.0) for the
