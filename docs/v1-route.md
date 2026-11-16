@@ -528,8 +528,12 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
     load on devserver (2026-11-16), never saw it again. The kernel now notes it when it happens (`GLOS-APP
     timer-starved ...`, with the VM's interrupt state: `kernel/app/app.c`), and the test prints the note: the
     next failure's lines are the lead.
-  - `timers-at-once`: `uclock` 4062 ms for 4000 (one BIOS tick more than its 1.5% allows), once on 2026-11-14
-    and once on 2026-11-15, each time passing the next run.
+  - `timers-at-once`: `uclock` 4062 ms for 4000 (one BIOS tick more than its 1.5% allows), once on 2026-11-14,
+    once on 2026-11-15 and once on 2026-11-16, each time passing the next run. The last time both apps of the
+    run were out by the same amount (4064 for 4001, 4092 for 4032): so it is GLOS's clock that was 60 ms short
+    over those four seconds, not one app's `uclock`. Lead: the kernel's tick is the RTC's, a loaded emulator
+    drops some, and the check against the PC's timer that gives them back is off while a program has the
+    timer's ports (`timer_pit_irq`).
 - **`apishell-486dx2-vbe`'s `ended`, now and then on devserver** (two gates of eight on 2026-11-15 and 16): two
   apps ended by `glos exit` on the loaded 486; the kernel's log has both ending with their own exit codes, yet
   the test misses a last line or an exit code. `glos exit` waits for SSH's news of ended jobs and for what SSH
