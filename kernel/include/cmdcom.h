@@ -17,5 +17,7 @@ const char *cmdcom_path(void);          /* GLOS's own COMMAND.COM for the progra
 /* For the session (shsess.c), on its thread. */
 int cmdcom_exec(void *via, struct shsess *sess, const char *path, const char *tail, char *const *vars, int nvars);
 int cmdcom_done(void *via, struct shsess *sess, int *code);
+int cmdcom_clear(void *via, struct shsess *sess);       /* CLS: the PC's screen, by its COMMAND.COM */
+int cmdcom_cleared(void *via, struct shsess *sess);
 
 #endif

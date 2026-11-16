@@ -14,14 +14,18 @@ disk.
     make floppy                                                build/floppy/glos1440.img
     make floppy FLOPPY_SIZE=720                                build/floppy/glos720.img (or 1200)
 
-- **On the floppy:** FreeDOS 1.4's kernel and `COMMAND.COM` with its `ATTRIB`, `MEM`, `MORE` and `DELTREE`
-  (FreeDOS's own programs, unchanged, from its boot floppy: `tools/setup/versions.mk`); `A:\GLOS` with
-  `GLOS.EXE`, `GLOSK.BIN`, a `GLOS.CFG` that names the PC, and `KEYS\`. About 1.0 MB of the disk.
+- **On the floppy:** FreeDOS 1.4's kernel with its `ATTRIB`, `XCOPY`, `MEM`, `MORE` and `DELTREE` (FreeDOS's own
+  programs, unchanged, from its boot floppy: `tools/setup/versions.mk`); `A:\GLOS` with `GLOS.EXE`, `GLOSK.BIN`,
+  GLOS's own `COMMAND.COM`, a `GLOS.CFG` that names the PC, and `KEYS\`. About 0.9 MB of the disk.
+- **No COMMAND.COM of FreeDOS's** (since 2026-11-16): GLOS is DOS's shell on the floppy (`SHELL=A:\GLOS\GLOS.EXE
+  /SHELL` in `FDCONFIG.SYS`) and runs `AUTOEXEC.BAT` itself ([v1/shell.md](v1/shell.md), step S4d). A PC GLOS
+  cannot start on (no 386, too little memory) is told why and stops there: there is no DOS prompt to fall
+  back to.
 - **No `FDISK`, `FORMAT` or `SYS`** (since 2026-11-13): the disk is laid out, formatted and made to start by
   GLOS's own `DISK` command ([below](#the-disk-command)), which `install.py --new-disk` uses.
 - **The smaller disks** carry the kernel packed (`tools/packkernel.py`: deflate, half the size; `GLOS.EXE` unpacks
-  it and checks its sum, and takes either form under the name `GLOSK.BIN`). The 720 KB disk has no other program of FreeDOS's
-  than `COMMAND.COM`, and about 90 KB to spare.
+  it and checks its sum, and takes either form under the name `GLOSK.BIN`). The 720 KB disk has no program of
+  FreeDOS's but the kernel, and about 115 KB to spare.
 - **Who may log in:** `FLOPPY_AUTHKEYS`, an ed25519 public key or a file of them (by default `~/.ssh/glos_bench.pub`,
   else `~/.ssh/id_ed25519.pub`). GLOS takes public keys only.
 - **Who the PC is:** a host key made once for the floppy (`build/floppy/keys/HOSTKEY`, kept from one image to the
@@ -37,19 +41,20 @@ floppy emulator takes the file). Leave the floppy write-enabled: GLOS keeps its 
 
 ## Using it
 
-1. Start the PC from the floppy, its network cable in. FreeDOS starts GLOS, which shows what it is doing
-   (`/VERBOSE`): the network card it found, `GLOS-SSH listen`. Loading GLOS from a floppy takes most of a minute.
-   Then the screen says that GLOS is running, the PC's name and the address it was given, and that
-   Ctrl-Alt-Del restarts the PC (GLOS's idle screen: every GLOS PC with no desktop shows it).
+1. Start the PC from the floppy, its network cable in. FreeDOS's kernel starts GLOS, which shows what it is
+   doing (`/VERBOSE`): the network card it found, `GLOS-SSH listen`. Loading GLOS from a floppy takes most of a
+   minute. Then the screen says that GLOS is running, the PC's name and the address it was given, what to run
+   on the other computer (the floppy's `AUTOEXEC.BAT`), and GLOS's prompt is there.
 2. From the other computer, in GLOS's checkout:
 
        tools/floppy/install.py glos-setup.local
 
    - **A PC with DOS on its disk:** GLOS goes into `C:\GLOS`, and the three lines to add to `C:\AUTOEXEC.BAT` are
      shown. With `--autoexec` they are added (the file as it was is kept as `C:\AUTOEXEC.PRE`).
-   - **A new or empty disk:** `--new-disk` makes one partition over the first hard disk, restarts the PC (from
-     the floppy again) so that DOS sees it, formats it, puts FreeDOS on it from the floppy, then GLOS, started by
-     its `AUTOEXEC.BAT`.
+   - **A new or empty disk:** `--new-disk` makes one partition over the first hard disk, formats it, restarts
+     the PC (from the floppy again) so that DOS sees it, puts FreeDOS's kernel on it from the floppy, then GLOS,
+     which is DOS's shell there as on the floppy: `C:\FDCONFIG.SYS` has `SHELL=C:\GLOS\GLOS.EXE /SHELL`, and
+     `C:\AUTOEXEC.BAT` (two lines: the `PATH`) is run by GLOS. There is no COMMAND.COM of FreeDOS's on the disk.
    - **A disk to be erased:** `--new-disk --erase-existing`. Everything on the disk is lost. Nothing is ever
      partitioned or formatted without `--new-disk`, and never a disk that has a C: without `--erase-existing`.
    - `--name NAME` is the installed PC's name on the network (`glos`: `glos.local`); `--key FILE` the private
@@ -57,7 +62,8 @@ floppy emulator takes the file). Leave the floppy write-enabled: GLOS keeps its 
 3. Take the floppy out and restart the PC (`--reboot` does it, or `ssh glos@glos-setup.local glos reboot`). It
    starts GLOS from the disk and answers as `NAME.local` to the same keys.
 
-What is on the disk then: `C:\GLOS` with `GLOS.EXE`, `GLOSK.BIN`, the programs, `CERTS.DAT`, `SMOOTH.DAT`,
+What is on the disk then: `C:\GLOS` with `GLOS.EXE`, `GLOSK.BIN`, `COMMAND.COM` (GLOS's own), the programs,
+`CERTS.DAT`, `SMOOTH.DAT`,
 `GLOS.CFG` and `KEYS\` (the host key, `AUTHKEYS`, the package key). GLOS runs without its desktop until
 `[display]` in `GLOS.CFG` says otherwise (`glos display on`, the Control Panel).
 

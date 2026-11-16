@@ -10,7 +10,7 @@
  *   NEXT   AX 2, EBX how the last thing ended (FFFFFFFFh nothing, FFFFFFFEh a DOS call was made, else a
  *          program's: the word INT 21h 4Dh gave, or 10000h and DOS's error if it could not be started)
  *          -> AX 1 start the program in the block (EXEC, its child), 2 nothing yet (HLT, then ask again),
- *             3 make the DOS call in the block, 0 leave with the block's exit code
+ *             3 make the DOS call in the block, 4 clear the screen (CLS), 0 leave with the block's exit code
  *
  * Both by the stub's own instruction (ARPL, an invalid opcode in V86 mode) with "GCMD" after it, which the
  * kernel takes from any real-mode program (vm/v86.c).
@@ -49,6 +49,7 @@ struct cmdcom {
     struct shsess *sess;
     volatile u8 exec;                   /* 1: a program waits to be started; 2: it runs; 3: it has ended */
     volatile u8 ended;                  /* the session has ended: leave when its last DOS call is made */
+    volatile u8 clear;                  /* CLS: 1 the screen is to be cleared, 2 the program is told to */
     u32 result;
     char path[80], tail[128];
     char *env;                          /* the program's environment (NAME=VALUE strings, a NUL after the last) */
@@ -176,8 +177,16 @@ static u32 next(struct cmdcom *c, u32 result)
         c->exec = 3;
         shsess_cmd_wake(c->sess);
     }
+    if (c->clear == 2) {                        /* (it has cleared the screen) */
+        c->clear = 0;
+        shsess_cmd_wake(c->sess);
+    }
     if (dos_vm_next_for(c, ran, base + B_REGS, c->xfer_seg, c->xfer_paras))
         return 3;
+    if (c->clear == 1) {
+        c->clear = 2;
+        return 4;
+    }
     if (c->exec == 1) {
         for (i = 0; i < 80; i++)
             vm_wr8(base + B_PATH + i, (u8)c->path[i]);
@@ -242,7 +251,7 @@ int cmdcom_waits(u16 cs)
 int cmdcom_pending(void)
 {
     struct cmdcom *c = ncmd ? &cmds[ncmd - 1] : 0;
-    return c && (c->exec == 1 || dos_vm_pending_for(c) || c->ended);
+    return c && (c->exec == 1 || c->clear == 1 || dos_vm_pending_for(c) || c->ended);
 }
 
 /* The program the VM runs was killed: a batch file the COMMAND.COM on top was running is not gone on with. */
@@ -308,6 +317,27 @@ int cmdcom_exec(void *via, struct shsess *sess, const char *path, const char *ta
     vm_kick();
     irq_restore(f);
     return 0;
+}
+
+/* CLS: its COMMAND.COM is to clear the screen (by the BIOS, as the DOS's own does); 0, or -1 (it has gone).
+   cmdcom_cleared() says when it has. */
+int cmdcom_clear(void *via, struct shsess *sess)
+{
+    struct cmdcom *c = via;
+    u32 f = irq_save();
+    int ok = c->sess == sess;
+    if (ok) {
+        c->clear = 1;
+        vm_kick();
+    }
+    irq_restore(f);
+    return ok ? 0 : -1;
+}
+
+int cmdcom_cleared(void *via, struct shsess *sess)
+{
+    struct cmdcom *c = via;
+    return c->sess != sess || !c->clear;
 }
 
 /* Its program has ended: 1 with its exit code (1 if DOS could not start it), once. */

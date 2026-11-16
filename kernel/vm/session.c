@@ -82,7 +82,7 @@ static int is_session_parent(u16 psp)
 {
     if (!psp)
         return 0;
-    if (vm.bi->flags & BI_F_SHELL) {            /* the console (or AUTOEXEC.BAT's) COMMAND.COM, which */
+    if (vm_dos_shell()) {                       /* the console (or AUTOEXEC.BAT's) COMMAND.COM, which */
         u16 parent = vm_rd16(psp * 16u + 0x16); /* FreeCOM makes its own parent */
         return psp != vm.loader_psp && (parent == vm.loader_psp || parent == psp);
     }

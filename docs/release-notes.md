@@ -17,7 +17,12 @@ in its `docs/milestones-*.md`.
   GLOS's shell: the same commands and batch language as at GLOS's prompt, with the programs it starts as the
   calling program's children and its output where that program's goes. `[shell] command = dos` keeps the DOS's.
   Copy `COMMAND.COM` into GLOS's folder with the other files when updating (never over the DOS's own in `C:\`).
-- Still to come in S4: `AUTOEXEC.BAT` run by GLOS, and a setup floppy with FreeDOS's kernel alone.
+- **GLOS can be DOS's shell with no COMMAND.COM of the DOS's** (S4d): with `SHELL=C:\GLOS\GLOS.EXE /SHELL` in
+  CONFIG.SYS and GLOS's own COMMAND.COM beside it, GLOS runs `AUTOEXEC.BAT` itself at the PC's screen, what the
+  file `SET` is every program's environment from then on, and the prompt after it is GLOS's. The setup floppy
+  and a disk made by `install.py --new-disk` start this way, with FreeDOS's kernel as the only file of
+  FreeDOS's they need. `glos restart` restarts the PC there. A PC that has a DOS keeps its COMMAND.COM and
+  starts GLOS from `AUTOEXEC.BAT` as before.
 
 ## The network for full-screen programs (API 2.3, 2026-11-15)
 

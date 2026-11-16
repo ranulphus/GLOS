@@ -10,7 +10,8 @@
 ; The calls are the stub's own instruction, ARPL (an invalid opcode in V86 mode), followed by "GCMD":
 ;   AX 1 BEGIN: BX = blk, DX:CX = a block for children's environments (segment, paragraphs; 0: none),
 ;               SI:DI = a block for the DOS calls' data (segment, paragraphs) -> AX 0
-;   AX 2 NEXT:  EBX = how the last thing ended -> AX 1 EXEC blk's program, 2 wait, 3 DOS call, 0 leave
+;   AX 2 NEXT:  EBX = how the last thing ended -> AX 1 EXEC blk's program, 2 wait, 3 DOS call, 4 clear the
+;               screen (CLS, by the BIOS as DOS's COMMAND.COM clears it), 0 leave
 ; Without GLOS the instruction is an invalid opcode all the same (INT 6): caught here, said, and left.
 .386
 _TEXT   segment use16 public 'CODE'
@@ -74,6 +75,8 @@ next:   mov     ax, 2
         je      dcall
         cmp     ax, 1
         je      exec
+        cmp     ax, 4
+        je      cls
         cmp     ax, 2
         jne     quit
         sti                                     ; nothing yet: until an interrupt, or the kernel has something
@@ -83,6 +86,31 @@ next:   mov     ax, 2
 quit:   mov     al, byte ptr b_code
         mov     ah, 4Ch
         int     21h
+
+; CLS: the screen's rows scrolled out in its text colour and the cursor at the top, by the BIOS.
+cls:    mov     ah, 0Fh                         ; the mode's columns (AH) and the page (BH)
+        int     10h
+        push    bx
+        mov     dl, ah
+        dec     dl
+        push    es
+        mov     ax, 40h
+        mov     es, ax
+        mov     dh, es:[84h]                    ; the rows less one (EGA and later; 0: 25 rows)
+        pop     es
+        or      dh, dh
+        jnz     short cls_go
+        mov     dh, 24
+cls_go: xor     cx, cx
+        mov     bh, 07h
+        mov     ax, 0600h
+        int     10h
+        pop     bx
+        xor     dx, dx
+        mov     ah, 02h
+        int     10h
+        mov     ebx, 0FFFFFFFFh
+        jmp     next
 
 ; A DOS call for the kernel's shell: the registers in blk, which then hold what came back.
 dcall:  push    ds

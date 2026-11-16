@@ -258,7 +258,10 @@ static void own_volumes(struct diskcmd *c)
     char letters[3];
     struct dos_req q;
     u32 i, k, serial;
-    letters[0] = vm.bi->cfg_path[0], letters[1] = vm.bi->comspec[0], letters[2] = 0;
+    letters[0] = vm.bi->cfg_path[0], letters[2] = 0;
+    letters[1] = vm.bi->comspec[0] && vm.bi->comspec[1] == ':' ? vm.bi->comspec[0] : 0;  /* (the DOS's COMMAND.COM,
+                                                   where there is one: a bare name is none found, as on a disk
+                                                   with FreeDOS's kernel and GLOS as its shell) */
     dos_hold();
     memset(&q, 0, sizeof q);
     q.n = 1, q.r[0].ax = 0x3305;                /* the drive DOS started from, in DL */

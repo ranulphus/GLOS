@@ -2,7 +2,9 @@
 # fdboot-volumes.sh FLOPPY DIR: the volumes for the test of GLOS's FAT boot code (kernel/disk/fdboot.S; the
 # floppy suite's fdboot cases), in the dev container (mtools). build/host/fdbootdisk makes a floppy (FAT12)
 # and two disks with one partition (FAT16, FAT32), each formatted by GLOS's own code with GLOS's boot code in it; here
-# FreeDOS's KERNEL.SYS and COMMAND.COM (from FLOPPY, GLOS's setup floppy as built for the tests), a program
+# FreeDOS's KERNEL.SYS (from FLOPPY, GLOS's setup floppy as built for the tests) and its COMMAND.COM (from
+# FreeDOS's own boot floppy, FREEDOS_FLOPPY_URL's, which mkfloppy.sh has fetched: GLOS's floppy has had none since
+# S4d, and this test is of the boot code, with the plainest shell there is), a program
 # that reports on COM1 and an AUTOEXEC.BAT that runs it are put on them. KERNEL.SYS is written in two
 # pieces (a file is made before it and one removed), so the boot code follows a chain that is not in order.
 # Out: DIR/floppy.img, DIR/disk.img and DIR/disk32.img.
@@ -13,7 +15,9 @@ mkdir -p "$dir"
 build/host/fdbootdisk say "$dir/HXSAY.COM"
 printf '@ECHO OFF\r\nHXSAY\r\n' > "$dir/AUTOEXEC.BAT"
 mcopy -n -o -i "$floppy" ::KERNEL.SYS "$dir/KERNEL.SYS"
-mcopy -n -o -i "$floppy" ::FREEDOS/BIN/COMMAND.COM "$dir/COMMAND.COM"
+cache=${MGA_CACHE:-$HOME/.cache/mga-glide}
+unzip -q -o "$cache/dl/$(basename "$FREEDOS_FLOPPY_URL")" 144m/x86BOOT.img -d "$dir/freedos"
+mcopy -n -o -i "$dir/freedos/144m/x86BOOT.img" ::FREEDOS/BIN/COMMAND.COM "$dir/COMMAND.COM"
 head -c 3000 /dev/zero > "$dir/A.TMP"
 cp "$dir/A.TMP" "$dir/B.TMP"
 for kind in floppy disk disk32; do

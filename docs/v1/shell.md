@@ -261,7 +261,7 @@ else of that is built here.
 | 2 | `vt.c`'s scroll-back and selection; the Terminal on a session (done, 2026-11-13: `apps/term/term.c` is a terminal alone, on one xterm screen with a thousand lines kept above it, the session opened with `glos_job_shell_in()` at the root of the drive DOS started from (`dir` = `\`; the owner, 2026-11-13: not `C:\` by name); a shell job may name its starting folder, `dir`. `apps/term/shell.c` became the host shim's session, `tests/host/shimshell.c`; the SSH client's source is `apps/ssh/ssh.c`. The Terminal's pictures were made again: its prompt is drawn as the rest of its text, an error in xterm's red, the cursor a block) | The Terminal's scripts, host and Loop A |
 | 3 | `GLOS_SYS_TERMINAL`; SSH.EXE, SFTP.EXE, SSHKEY.EXE (the call done, 2026-11-13, before step 2 so that the Terminal keeps its SSH commands until the programs exist. As built: a program says `GLOS_INIT_TERMINAL` at INIT; a session that starts it at a terminal waits for its end; the program reads what is typed and writes its bytes with SYS's TERMINAL call itself (READ, WRITE, INFO for the size) and is told by `GLOS_EV_TERMINAL`, not through DOS's standard input and output, which would cost a trap a character. APPTEST `term` and the ssh suite's login case test it. The three programs, 2026-11-13: `apps/ssh/cli.c` is their terminal layer, and the client itself is still the Terminal's `apps/term/ssh.c`, built for both with a few `SSH_PROGRAM` conditions until step 2 takes it out of the Terminal; `loopa-sshc` has a case that runs them from an SSH login, and through a hop with no terminal) | `loopa-sshc`, from the Terminal and from an SSH login |
 
-## Step S4 as designed (2026-11-16; agreed by the owner the same day, with the three answers below; S4a to S4c built, S4d to come)
+## Step S4 as designed (2026-11-16; agreed by the owner the same day, with the three answers below; built in four steps: as built below)
 
 S2 and S3 left three things to the DOS's COMMAND.COM: batch files, any line with a pipe or a redirection around
 a program, and every program that shells out (`COMMAND /C`, the C library's `system()`). S4 takes all three, and
@@ -483,6 +483,38 @@ As designed above, with these particulars:
   - A program that looks for COMMAND.COM along `PATH` rather than by `COMSPEC` finds the DOS's (which works).
   - GLOS started as DOS's shell (`[shell]` mode) still runs `AUTOEXEC.BAT` and its console through the DOS's
     COMMAND.COM: that is S4d.
+
+### S4d as built (2026-11-16)
+
+- **Two ways of being DOS's shell.** With `SHELL=...GLOS.EXE /SHELL` in CONFIG.SYS:
+  - GLOS's own `COMMAND.COM` beside `GLOS.EXE` and `[shell] command` not `dos`: **the shell is GLOS's own**
+    (`GLOS-VM shell own autoexec=`). GLOS starts in its ordinary mode (the agent's: SSH, jobs, the prompt at the
+    PC), with no COMMAND.COM of the DOS's under it.
+  - otherwise, as since M3: the DOS's COMMAND.COM under GLOS runs `AUTOEXEC.BAT` and is the console
+    (`GLOS-VM shell comspec=`). Loop A's older shell suites test this way (their file lists leave GLOS's
+    COMMAND.COM out).
+- **`AUTOEXEC.BAT`** (the boot drive's, or `/P=`, or `[shell] autoexec`) is run by the first session at the PC's
+  own screen, before its prompt (`GLOS-SHELL autoexec=`): its lines are the shell's (S4a), its programs have the
+  screen and the keyboard, as any program started at that prompt. Where the screen is not a text screen of
+  GLOS's (`[shell] prompt = off`, the desktop) it is run with no terminal: what it writes is dropped.
+- **The system's environment:** at the file's end the session's variables are written into the master
+  environment, the block `GLOS.EXE`'s PSP points at (`GLOS-SHELL autoexec done code= env=N of SIZE`): every
+  program the agent starts is given it, and every later session's variables start from it. Its size is
+  `[shell] envsize` (or `/E:`); what does not fit is left out and said.
+- **`glos restart` restarts the PC** in this mode: there is no `AUTOEXEC.BAT` loop under GLOS to start it again,
+  and what `AUTOEXEC.BAT` loaded would be loaded twice. `glos exit` (SHUTDOWN) leaves GLOS: the resident stub
+  then runs the DOS's COMMAND.COM if the loader found one, and otherwise says that there is none and stops.
+- **If GLOS cannot start:** the same: the DOS's COMMAND.COM if there is one, else the message stays and the PC
+  stops. The loader never takes GLOS's own COMMAND.COM for the DOS's (it knows it by its mark).
+- **The setup floppy and `install.py --new-disk`:** `SHELL=X:\GLOS\GLOS.EXE /SHELL`, FreeDOS's kernel, no
+  COMMAND.COM of FreeDOS's ([floppy.md](../floppy.md)).
+- **`[shell] console`** (a command run again and again instead of the prompt) is the other way's only: with
+  the shell GLOS's own it is not used.
+- **Not done:** a session started before `AUTOEXEC.BAT` has ended (an SSH login in the PC's first seconds) has
+  the environment as it was before; a job of such a session can run between two of `AUTOEXEC.BAT`'s programs.
+- **Tested:** `ssh-ownshell-*` (Loop A's machine with GLOS as the shell: `AUTOEXEC.BAT` run by GLOS, `COMSPEC`
+  in it, its `SET` and `PATH` in a program started over SSH and in a new session, the prompt on the screen,
+  and `[shell] command = dos`); `loopa-floppy` (the floppy and a new disk with no COMMAND.COM of FreeDOS's).
 
 ### Decided by the owner (2026-11-16)
 

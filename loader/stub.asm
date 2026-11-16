@@ -103,7 +103,8 @@ fcb2            db      37 dup (0)
 msg_exit        db      'GLOS-EXIT code=', 0
 msg_a20         db      ' a20=', 0
 msg_crlf        db      13, 10, 0
-msg_noshell     db      'GLOS-SHELL error=cannot-run', 13, 10, 0
+msg_noshell     db      'GLOS-SHELL error=cannot-run', 13, 10
+                db      'GLOS is not running, and there is no DOS COMMAND.COM to go on with: restart the PC.', 13, 10, 0
 
 ; ---- pm_enter
 _pm_enter proc far

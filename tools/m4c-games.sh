@@ -23,7 +23,7 @@ CACHE=${MGA_CACHE:-$HOME/.cache/mga-glide}
 MGA_TREE=${M4C_MGA:-${RETROGPU:-$HOME/RetroGPU}}
 DOSBENCH=${DOSBENCH:-$HOME/DOSBench}
 BIN=${GLOS_BIN:-$CACHE/glos/bin}       # make glos-cache's (GLOS_CACHE=)
-export LOOPA_EXTRA_ARGS="--boot-cfg glosshell --file $BIN/GLOS.EXE=/TEST/GLOS.EXE --file $BIN/GLOSK.BIN=/TEST/GLOSK.BIN --file $BIN/COMMAND.COM=/TEST/COMMAND.COM"
+export LOOPA_EXTRA_ARGS="--boot-cfg glosshell --file $BIN/GLOS.EXE=/TEST/GLOS.EXE --file $BIN/GLOSK.BIN=/TEST/GLOSK.BIN"
 VARIANT=glos
 if [ "${M4C_DIRECT:-0}" = 1 ]; then
     LOOPA_EXTRA_ARGS="$LOOPA_EXTRA_ARGS --file $BIN/direct/GLOS.CFG=/TEST/GLOS.CFG"

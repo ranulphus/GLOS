@@ -875,7 +875,7 @@ loopa-floppy: all build/kernel/GLOSK.PAK apps build/apps/FETCH.EXE build/apps/PK
 	  tools/floppy/mkfloppy.sh out/floppy-test-720.img out/floppy-keys glos-setup 720
 	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) FREEDOS_FLOPPY_SHA256=$(FREEDOS_FLOPPY_SHA256) \
 	  tools/floppy/mkfloppy.sh out/floppy-test-1440-lpt.img out/floppy-keys glos-setup 1440 "client LPT1"
-	$(Q)$(DEV) tests/loopa/fdboot-volumes.sh out/floppy-test-1440.img out/fdboot
+	$(Q)$(DEV) env FREEDOS_FLOPPY_URL=$(FREEDOS_FLOPPY_URL) tests/loopa/fdboot-volumes.sh out/floppy-test-1440.img out/fdboot
 	$(Q)python3 tests/loopa/jobs.py floppy -j $(JOBS)
 # The toolkit (sdk/gui, include/glos/gui.h; M9): build/sdk/libgui.a, linked before libglos.a.
 build/sdk/libgui.a: $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h include/glos/glos.h include/glos/gfx.h

@@ -79,6 +79,8 @@ struct vm {
     u8 notice_due;                      /* the idle screen's notice has something new to say (vcon.c) */
     u8 reboot_req;                      /* Ctrl-Alt-Del at the idle screen: the PC restarts */
     u8 shell_state;                     /* as the shell: 0 start, 1 AUTOEXEC.BAT running, 2 the console */
+    volatile u8 autoexec;               /* as the shell with GLOS's own (S4d): 1 AUTOEXEC.BAT is still to be run by
+                                           the first session, 2 it runs, 0 done (or there is none) */
     /* the stub in a page of upper memory (docs/upper-memory.md) */
     u16 page_seg;                       /* its segment, 0: the stub is after the PSP */
     u32 page_frame;                     /* the frame mapped there */
@@ -189,5 +191,11 @@ int phys_owned(u32 base, u32 len);              /* 1 if GLOS owns any of it */
 
 void vm_int10_hook(int on);             /* (v86.c) a console job's INT 10h vector is GLOS's stub, or as it was again */
 extern const struct trapframe *vdev_from;      /* (vdev.c) the instruction making the port access under way */
+
+/* GLOS is DOS's shell (SHELL= in CONFIG.SYS) in one of two ways: with a COMMAND.COM of the DOS's under it, which
+   runs AUTOEXEC.BAT and is the console (no agent: M3), or with the shell its own (S4d): the agent's mode, where
+   the first session runs AUTOEXEC.BAT. */
+#define vm_dos_shell() ((vm.bi->flags & (BI_F_SHELL | BI_F_AGENT)) == BI_F_SHELL)
+#define vm_own_shell() ((vm.bi->flags & (BI_F_SHELL | BI_F_AGENT)) == (BI_F_SHELL | BI_F_AGENT))
 
 #endif

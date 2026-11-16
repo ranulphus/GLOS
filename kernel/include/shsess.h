@@ -49,6 +49,9 @@ struct shsess *shsess_cmd(void *via, const char *line, int shell, const char *en
                                                             until EXIT */
 void shsess_cmd_wake(struct shsess *s);                  /* (the VM's thread) the program it started has ended */
 void shsess_cmd_stop(struct shsess *s);                  /* ... or was killed */
+/* The session that runs AUTOEXEC.BAT when GLOS is DOS's shell (S4d): the PC's own, or (cols 0) with no terminal;
+   the prompt after it where there is a terminal. What the file SET becomes the system's environment. */
+struct shsess *shsess_boot(u32 cols, u32 rows, const char *line, void (*kick)(void *arg), void *arg);
 void shsess_turn(void);                                  /* the ssh thread's turn: sessions freed whose threads
                                                             have ended since shsess_free() */
 

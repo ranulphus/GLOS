@@ -513,7 +513,7 @@ int app_init(struct trapframe *tf, int asked, u32 *id)
         return GLOS_WHY_16BIT;
     if (session_exclusive() || vm.direct)
         return GLOS_WHY_EXCLUSIVE;             /* glos run --exclusive or --direct, a direct-mode profile */
-    if (!vm.sda || !vm.bi->detached_off || (vm.bi->flags & BI_F_SHELL) || !session_active() || psp != c->psp
+    if (!vm.sda || !vm.bi->detached_off || vm_dos_shell() || !session_active() || psp != c->psp
         || vm_rd16(psp * 16u + 0x16) != vm.loader_psp)
         return GLOS_WHY_PARENT;                /* GLOS itself didn't start it (a program's child, a batch file's) */
     if (napps >= MAX_APPS || !(a = kmalloc(sizeof *a)))

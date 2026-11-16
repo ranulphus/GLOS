@@ -9,8 +9,9 @@ with its network, SSH and SFTP, and answers as HOST (glos-setup.local, or its ad
   ... --autoexec                                      ... and done: C:\\AUTOEXEC.BAT starts GLOS (the file as it
                                                       was is kept as C:\\AUTOEXEC.PRE)
   ... --new-disk                                      the PC's first hard disk has nothing on it: one partition is
-                                                      made, formatted, FreeDOS put on it from the floppy, then
-                                                      GLOS, started by its AUTOEXEC.BAT
+                                                      made, formatted, FreeDOS's kernel put on it from the floppy,
+                                                      then GLOS, which is DOS's shell there (FDCONFIG.SYS's SHELL=
+                                                      line: no COMMAND.COM of FreeDOS's; GLOS runs AUTOEXEC.BAT)
   ... --new-disk --erase-existing                     the same on a disk that has partitions (any system's):
                                                       EVERYTHING ON THE DISK IS LOST
 
@@ -34,8 +35,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 APPS = ["FILES", "TERM", "NOTEPAD", "CALC", "IMAGES", "MONITOR", "CONTROL", "PKG", "FETCH"]
 
 AUTOEXEC_LINES = [":glosrun", "C:\\GLOS\\GLOS.EXE", "IF ERRORLEVEL 200 GOTO glosrun"]
-NEW_FDCONFIG = ["LASTDRIVE=Z", "BUFFERS=20", "FILES=40", "SHELL=C:\\COMMAND.COM C:\\ /E:2048 /P"]
-NEW_AUTOEXEC = ["@ECHO OFF", "SET PATH=C:\\FREEDOS\\BIN;C:\\GLOS", "SET DIRCMD=/OGN"] + AUTOEXEC_LINES
+# A new disk (docs/v1/shell.md, S4d): FreeDOS's kernel with GLOS as its shell, which runs this AUTOEXEC.BAT itself.
+NEW_FDCONFIG = ["LASTDRIVE=Z", "BUFFERS=20", "FILES=40", "SHELL=C:\\GLOS\\GLOS.EXE /SHELL"]
+NEW_AUTOEXEC = ["@ECHO OFF", "SET PATH=C:\\GLOS;C:\\FREEDOS\\BIN"]
 
 
 def die(msg):
@@ -148,7 +150,7 @@ class Pc:
 
 def new_disk(pc, erase):
     """One partition over the first hard disk, formatted and made to start (GLOS's DISK command), with FreeDOS's
-    kernel and COMMAND.COM copied from the floppy."""
+    kernel copied from the floppy (and the few programs of FreeDOS's the floppy has); GLOS is its shell."""
     parts = pc.parts()
     if parts is None:
         die("the PC's first hard disk can't be read (the BIOS has none?)")
@@ -172,12 +174,12 @@ def new_disk(pc, erase):
             "BIOS's boot order?")
     if not pc.has_c():
         die("C: can't be read after the format")
-    print("Putting FreeDOS on C:")
+    print("Putting FreeDOS's kernel on C:")
     pc.dos("COPY /Y A:\\KERNEL.SYS C:\\", "copying FreeDOS's kernel")
-    pc.dos("COPY /Y A:\\FREEDOS\\BIN\\COMMAND.COM C:\\", "copying FreeDOS's COMMAND.COM")
     pc.dos("MD C:\\FREEDOS", "making C:\\FREEDOS")
     pc.dos("MD C:\\FREEDOS\\BIN", "making C:\\FREEDOS\\BIN")
-    pc.dos("COPY /Y A:\\FREEDOS\\BIN\\*.* C:\\FREEDOS\\BIN", "copying FreeDOS's programs")
+    pc.dos("COPY /Y A:\\FREEDOS\\BIN\\*.* C:\\FREEDOS\\BIN", "copying FreeDOS's programs",
+           ok=(0, 1))                           # (a 720 KB floppy has none)
     pc.put_text("/C/FDCONFIG.SYS", NEW_FDCONFIG)
     pc.put_text("/C/AUTOEXEC.BAT", NEW_AUTOEXEC)
 

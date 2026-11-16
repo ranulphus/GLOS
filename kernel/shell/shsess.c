@@ -91,6 +91,8 @@ struct shsess {
     char *cmd_env;                      /* ... and this was its environment: the shell's variables to start with */
     u32 cmd_xfer;                       /* ... its own buffer for the DOS calls, in bytes (dos.c) */
     u8 cmd_dry;                         /* ... its standard input is a file at its end: no more keys */
+    u8 boot;                            /* the session that runs AUTOEXEC.BAT (S4d): at the file's end its variables
+                                           become the system's environment */
     u8 cmd_shell;                       /* ... it was started with no /C: lines are read (by DOS, through it) and
                                            run until EXIT */
     u16 cmd_std[2];                     /* a program's standard input and output put aside while files are in
@@ -248,6 +250,16 @@ static int h_clear(void *ctx)
     struct shsess *s = ctx;
     if (s->tty) {
         term_bytes(s, (const u8 *)"\033[H\033[2J", 7);
+        return 0;
+    }
+    if (s->via) {                               /* (a COMMAND.COM's session: that program clears it, by the BIOS) */
+        u32 f;
+        if (cmdcom_clear(s->via, s) != 0)
+            return 1;
+        f = irq_save();
+        while (!cmdcom_cleared(s->via, s) && !s->closing)
+            thread_block(&s->wq);
+        irq_restore(f);
         return 0;
     }
     return h_run(ctx, "CLS", 0, "CLS", "", "", 0) > 0 ? SH_UNDER_WAY : 1;
@@ -1304,6 +1316,40 @@ static int key(struct shsess *s)
 
 /* ---- the session's thread */
 
+/* AUTOEXEC.BAT has ended in the session that ran it as DOS's shell (S4d): what it SET (PATH, BLASTER, TEMP ...)
+   becomes the system's environment, the block GLOS.EXE's PSP points at, which every program the agent starts
+   is given and every session's variables start from. As far as that block holds ([shell] envsize). */
+static void boot_done(struct shsess *s)
+{
+    u32 d = (u32)vm_rd16(((u32)vm.loader_psp << 4) + 0x2C) << 4, size, at = 0, f;
+    int i, left = 0;
+    s->boot = 0;
+    if (d) {
+        size = (u32)vm_rd16(d - 16 + 3) << 4;   /* the block, from its arena header */
+        f = irq_save();                         /* (no program is started halfway through) */
+        for (i = 0; i < s->sh.nvars; i++) {
+            u32 n = (u32)strlen(s->sh.vars[i]) + 1;
+            if (at + n + 3 > size) {
+                left++;
+                continue;
+            }
+            memcpy(vm_ptr(d + at), s->sh.vars[i], n);
+            at += n;
+        }
+        vm_wr8(d + at, 0);                      /* the end of the strings, no program name */
+        vm_wr8(d + at + 1, 0);
+        vm_wr8(d + at + 2, 0);
+        irq_restore(f);
+        kprintf("GLOS-SHELL autoexec done code=%d env=%u of %u%s\n", s->sh.level, at + 1, size,
+                left ? " full=1" : "");
+        if (left) {
+            static const char full[] = "The environment is full: [shell] envsize in GLOS.CFG makes it larger.\r\n";
+            h_write(s, SH_ERR, full, (int)sizeof full - 1);
+        }
+    }
+    vm.autoexec = 0;
+}
+
 /* The folder DOS is in: the shell's to start with. */
 static void folder(struct shsess *s)
 {
@@ -1488,16 +1534,25 @@ static void session(void *arg)
                 sh_line(&s->sh, (const char *)buf);
             }
         }
+        if (s->boot)                            /* (AUTOEXEC.BAT with no terminal: S4d) */
+            boot_done(s);
         if (!s->quit)                           /* (a COMMAND.COM's: the last program's exit code, as COMMAND /C
                                                    leaves with under DOS; otherwise the line's own result) */
             s->code = s->via ? s->sh.level : s->sh.errorlevel;
         if (s->via && s->folder)
             cmd_folder(s, s->sh.cwd[s->sh.drive]);
         s->quit = 1;
+    } else if (s->boot) {                       /* AUTOEXEC.BAT first, then the prompt (S4d) */
+        s->editing = 0;
+        sh_line(&s->sh, s->line);
     } else {
         sh_prompt(&s->sh);
     }
-    while (!s->quit && (c = key(s)) != EV_GONE) {
+    for (;;) {
+        if (s->boot && !s->sh.under_way && !s->job_on && !s->ext_on)
+            boot_done(s);
+        if (s->quit || (c = key(s)) == EV_GONE)
+            break;
         if (c == EV_JOB && s->nbeside)
             beside_turn(s);
         if (s->job_on) {                        /* a program runs: what is typed is its; what it writes, ours */
@@ -1587,6 +1642,18 @@ struct shsess *shsess_cmd(void *via, const char *line, int shell, const char *en
 struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void *), void *arg) { return make(cols, rows, 0, 0, kick, arg); }
 
 static u8 make_local;                   /* (the next session made is the PC's own: lcon's thread alone asks) */
+static u8 make_boot;
+
+/* The session that runs AUTOEXEC.BAT as DOS's shell (S4d): the PC's own (cols, rows), or with no terminal
+   (cols 0: the screen is not a text screen of ours); the line is the file's path. */
+struct shsess *shsess_boot(u32 cols, u32 rows, const char *line, void (*kick)(void *), void *arg)
+{
+    struct shsess *s;
+    make_local = cols != 0, make_boot = 1;
+    s = make(cols, rows, line, "\\", kick, arg);
+    make_local = make_boot = 0;
+    return s;
+}
 
 struct shsess *shsess_local(u32 cols, u32 rows, void (*kick)(void *), void *arg)
 {
@@ -1662,6 +1729,7 @@ static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir
     s->kick_arg = arg;
     s->tty = cols != 0;
     s->local = make_local;
+    s->boot = make_boot;
     s->cols = cols ? cols : 80, s->rows = rows ? rows : 24;
     s->page = kcfg_region()->codepage ? kcfg_region()->codepage : 437;
     if (!thread_create("shell", PRIO_NORMAL, session, s)) {

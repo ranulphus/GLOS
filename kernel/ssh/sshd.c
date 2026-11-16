@@ -1649,6 +1649,13 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         if (!agent_mode) {
             say(ch, 1, "glos: exit and restart need GLOS started without /RUN or /SHELL\n");
             ssh_chan_exit(ch, 1);
+        } else if (vm_own_shell() && !strcmp(cmd, "glos restart")) {
+            /* GLOS is DOS's shell (S4d): there is no AUTOEXEC.BAT's loop under it to start it again, and what
+               AUTOEXEC.BAT loaded would be loaded twice: the PC restarts. */
+            say(ch, 0, "GLOS is DOS's shell on this PC: the PC restarts.\n");
+            ssh_chan_exit(ch, 0);
+            reboot_at = (timer_ticks() + 512) | 1;
+            stream_at(reboot_at);
         } else {                                /* (restart: GLOS leaves with ERRORLEVEL 200, which AUTOEXEC.BAT */
             ssh_chan_exit(ch, 0);               /* can loop on to start GLOS.EXE again, new files and all) */
             agent_exit(512, strcmp(cmd, "glos restart") ? 0 : AGENT_RESTART);  /* half a second for the reply */

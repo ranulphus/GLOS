@@ -343,6 +343,39 @@ static void greet(void)
 
 /* ---- the thread */
 
+static void kick(void *arg);
+static void nap(u32 ticks);
+
+/* AUTOEXEC.BAT, when GLOS is DOS's shell with the shell its own (docs/v1/shell.md, S4d): the line that runs it. */
+static const char *boot_line(void)
+{
+    static char line[96];
+    ksnprintf(line, sizeof line, "CALL %s", vm.bi->autoexec);
+    return line;
+}
+
+/* ... run with no terminal, where the screen is not a text screen of ours to show it on ([shell] prompt = off,
+   the desktop): what it writes is dropped, its resident programs load and its variables are the system's. */
+static void boot_headless(void)
+{
+    struct shsess *s;
+    u8 drop[256];
+    int code;
+    vm.autoexec = 2;
+    kprintf("GLOS-SHELL autoexec=%s terminal=none\n", vm.bi->autoexec);
+    if (!(s = shsess_boot(0, 0, boot_line(), kick, 0))) {
+        vm.autoexec = 0;
+        return;
+    }
+    while (!shsess_ended(s, &code)) {
+        while (shsess_read(s, 0, drop, sizeof drop) || shsess_read(s, 1, drop, sizeof drop))
+            ;
+        nap(64);
+    }
+    shsess_free(s);
+    vm.autoexec = 0;
+}
+
 static void kick(void *arg)                     /* (the session's thread: it has written, or ended) */
 {
     u32 f = irq_save();
@@ -439,6 +472,8 @@ static void lcon_thread(void *arg)
     kcfg_get("shell", "prompt", v, sizeof v);
     if (!strcmp(v, "off") || !(l.vt = kmalloc(sizeof *l.vt))) {
         l.off = 1;
+        if (vm.autoexec == 1)
+            boot_headless();
         thread_exit();
     }
     l.page = kcfg_region()->codepage ? kcfg_region()->codepage : 437;
@@ -452,9 +487,13 @@ static void lcon_thread(void *arg)
     while (!l.off) {
         struct geom g;
         int code;
+        u32 waited = 0;
         while (!ours() || !geom(&g)) {          /* (a program has the screen already: when it has gone) */
             if (l.off)
                 thread_exit();
+            if (vm.autoexec == 1 && (display_desktop_bpp() || display_fb() || ++waited > 80))
+                boot_headless();                /* (the desktop's screen, or one that is no text screen of ours
+                                                   after ten seconds: AUTOEXEC.BAT without a terminal) */
             nap(128);
         }
         vt_init(l.vt, (int)g.cols, (int)g.rows);
@@ -469,7 +508,15 @@ static void lcon_thread(void *arg)
             l.seen = agent_vm_screen_had(&whose);
         }
         l.kh = l.kt;
-        if (!(l.s = shsess_local(g.cols, g.rows, kick, 0))) {
+        if (vm.autoexec == 1) {                 /* DOS's shell: AUTOEXEC.BAT first, here, then the prompt */
+            vm.autoexec = 2;
+            kprintf("GLOS-SHELL autoexec=%s\n", vm.bi->autoexec);
+            if (!(l.s = shsess_boot(g.cols, g.rows, boot_line(), kick, 0)))
+                vm.autoexec = 0;
+        } else {
+            l.s = shsess_local(g.cols, g.rows, kick, 0);
+        }
+        if (!l.s) {
             say("GLOS's shell could not start here (no memory, or DOS has none to spare).\r\n");
             render();
             l.off = 1;
@@ -524,6 +571,8 @@ void lcon_leave(void)
 
 void lcon_init(void)
 {
+    if (vm_own_shell() && vm.bi->autoexec[0])
+        vm.autoexec = 1;
     if (!(vm.bi->flags & BI_F_AGENT) || !thread_create("console", PRIO_NORMAL, lcon_thread, 0))
         l.off = 1;
 }

@@ -216,6 +216,7 @@ def refuse():
 
 GLOS_FILES = ["--file", "build/ow/GLOS.EXE=/TEST/GLOS.EXE", "--file", "build/kernel/GLOSK.BIN=/TEST/GLOSK.BIN",
               "--file", "build/glos/COMMAND.COM=/TEST/COMMAND.COM"]     # (GLOS's own COMMAND.COM beside it: S4c)
+GLOS_FILES_DOS = GLOS_FILES[:4]         # without it: as DOS's shell, the DOS's COMMAND.COM under GLOS (M3's way)
 MGA_DOS = os.path.join(MGA, "build/ow/dos")
 M2_FILES = ["--file", MGA_DOS + "/XMSINFO.COM=/HX/XMSINFO.COM", "--file", MGA_DOS + "/VBEINFO.COM=/HX/VBEINFO.COM",
             "--file", "build/ow/dos/XMSTEST.EXE=/HX/XMSTEST.EXE", "--file", "build/ow/dos/HOSTILE.EXE=/HX/HOSTILE.EXE"]
@@ -808,7 +809,7 @@ def shell(profile, boot):
     con = batfile("shell-%s/SHCON.BAT" % tag, SHCON)
     cfg = batfile("shell-%s/GLOS.CFG" % tag, ["; GLOS as the shell, for jobs.py shell", "[shell]",
                                                "console = C:\\TEST\\SHCON.BAT"])
-    st, serial = run("shell-" + tag, ["--machine", profile, "--boot-cfg", cfg_boot] + GLOS_FILES + [
+    st, serial = run("shell-" + tag, ["--machine", profile, "--boot-cfg", cfg_boot] + GLOS_FILES_DOS + [
         "--file", con + "=/TEST/SHCON.BAT", "--file", cfg + "=/TEST/GLOS.CFG",
         "--cmd", "SERSAY HX-START shell", "--cmd", "SET GLOSVAR=from-autoexec",
         "--cmd", "SERSAY HX-SHELL autoexec comspec=%COMSPEC%", "--cmd", "EXIT"])
@@ -2429,6 +2430,64 @@ def batch_case(profile, card):
                              info if bad else ""), not bad
 
 
+def ownshell_case(profile, card):
+    """GLOS as DOS's shell with the shell its own (docs/v1/shell.md, step S4d): SHELL=GLOS.EXE /SHELL in CONFIG.SYS
+    and GLOS's COMMAND.COM beside GLOS.EXE. GLOS starts in the agent's mode with no COMMAND.COM of the DOS's under
+    it; the session at the PC's own screen runs AUTOEXEC.BAT first (the Loop A machine's: it sets PATH and calls
+    RUN.BAT, whose lines are this test's and which takes itself out of the way at its end), with COMSPEC GLOS's
+    own; what the file SET is the system's environment after: a program started over SSH has it, and so has a
+    new session's shell; the prompt is at the PC after it; and with [shell] command = dos the DOS's COMMAND.COM
+    runs AUTOEXEC.BAT as before."""
+    import time
+    tag = "ownshell-%s-%s" % (profile, card)
+    lines = ["SERSAY HX-START ownshell", "SET GLOSVAR=from-autoexec", "SERSAY HX-SHELL autoexec comspec=%COMSPEC%",
+             "REN C:\\RUN.BAT RUN.OLD"]
+    args = ["--boot-cfg", "glosshell", "--file", "build/ow/dos/CONIN.EXE=/TEST/CONIN.EXE"]
+    for c in lines:
+        args += ["--cmd", c]
+    agent = Agent("ssh-" + tag, profile, card, args, timeout=600)
+    checks, info = {"listen": agent.listening()}, ""
+    try:
+        t0 = time.time()
+        while time.time() - t0 < 120 and "GLOS-SHELL autoexec done" not in agent.log():
+            time.sleep(1)
+        text = agent.log()
+        checks["mode"] = "GLOS-VM shell own autoexec=A:\\AUTOEXEC.BAT" in text and "GLOS-VM autoexec code=" not in text
+        checks["autoexec"] = "GLOS-SHELL autoexec=A:\\AUTOEXEC.BAT" in text and "GLOS-SHELL autoexec done code=0" in text \
+            and "HX-SHELL autoexec comspec=C:\\TEST\\COMMAND.COM" in text and "UTEXIT" not in text
+        rc, out, e = agent.ssh("C:\\TEST\\CONIN.EXE env GLOSVAR")
+        rc2, out2, e2 = agent.ssh("C:\\TEST\\CONIN.EXE env PATH")
+        checks["env-program"] = out.strip() == "ENV GLOSVAR=from-autoexec" and out2.startswith("ENV PATH=") \
+            and "A:\\FREEDOS\\BIN" in out2.upper() and "C:\\HX" in out2.upper()
+        rc3, out3, e3 = agent.ssh("SET")
+        checks["env-session"] = "GLOSVAR=from-autoexec" in out3 and "COMSPEC=C:\\TEST\\COMMAND.COM" in out3.upper()
+        rc4, out4, e4 = agent.ssh("SERSAY HX-SHELL by-path")     # (found along AUTOEXEC.BAT's PATH)
+        checks["path"] = rc4 == 0 and "HX-SHELL by-path" in agent.log()
+        if not all(checks.values()):
+            info += " env=%r path=%r set=%r" % (out, out2, out3[-300:])
+        shot = agent.ssh("glos shot --text")
+        checks["prompt"] = bool(re.search(r"^[A-Z]:\\[^>\n]*>", shot[1], re.M))
+        if not checks["prompt"]:
+            info += " screen=%r" % (shot[1][-400:],)
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    power_off("ssh-" + tag)
+    text = agent.wait()
+    checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-WARN|GLOS-CRASH", text)
+    # [shell] command = dos: the DOS's COMMAND.COM under GLOS, which runs AUTOEXEC.BAT (M3's way), GLOS's own
+    # COMMAND.COM beside GLOS.EXE or not
+    cfg = batfile("ssh-%s/GLOS.CFG" % tag, ["; jobs.py ssh, ownshell: the DOS's COMMAND.COM all the same", "[shell]",
+                                            "command = dos"])
+    st, serial = run("ssh-" + tag + "-dos", ["--machine", profile, "--boot-cfg", "glosshell"] + GLOS_FILES + [
+        "--file", cfg + "=/TEST/GLOS.CFG", "--cmd", "SERSAY HX-START ownshell-dos",
+        "--cmd", "SERSAY HX-SHELL autoexec comspec=%COMSPEC%", "--cmd", "SERSAY HX-DONE 0", "--cmd", "UTEXIT 0"])
+    checks["command-dos"] = st == "PASS" and "GLOS-VM shell comspec=" in serial \
+        and "HX-SHELL autoexec comspec=A:\\FREEDOS\\BIN\\COMMAND.COM" in serial and "GLOS-SHELL autoexec" not in serial
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad),
+                             info if bad else ""), not bad
+
+
 def member_case(profile, card, par=False):
     """A cable's far PC as a member of the near PC's network (kernel/net/member.c; docs/v1/cable-network.md, N1;
     par: N3, over a parallel cable: each PC's LPT1 has 86Box's PLIP device, the two joined by 86Box's local
@@ -2988,7 +3047,7 @@ def sess(profile, boot, how):
     steps = list(SESS_STEPS)
     if how == "run":
         steps[2] = "C:\\TEST\\GLOS.EXE /RUN " + steps[2]
-    args = ["--machine", profile, "--boot-cfg", cfg] + SESS_FILES + GLOS_FILES
+    args = ["--machine", profile, "--boot-cfg", cfg] + SESS_FILES + (GLOS_FILES_DOS if how == "shell" else GLOS_FILES)
     for c in ["SERSAY HX-START sess"] + steps + ["SERSAY HX-DONE 0"]:
         args += ["--cmd", c]
     st, serial = run("sess-" + tag, args)
@@ -3015,7 +3074,7 @@ def sess_prof(profile, boot):
     replaced) and a DPMI context capped at 4 MB; the same program as NOPROF.EXE gets neither."""
     tag = "prof-%s-%s" % (profile, boot)
     cfg = batfile("sess-%s/GLOS.CFG" % tag, PROF_CFG)
-    args = ["--machine", profile, "--boot-cfg", "glosshell" + ("-himemx" if boot == "himemx" else "")] + GLOS_FILES + [
+    args = ["--machine", profile, "--boot-cfg", "glosshell" + ("-himemx" if boot == "himemx" else "")] + GLOS_FILES_DOS + [
         "--file", cfg + "=/TEST/GLOS.CFG", "--file", "build/dj/PROFCHK.EXE=/TEST/PROFCHK.EXE",
         "--file", "build/dj/PROFCHK.EXE=/TEST/NOPROF.EXE"]
     for c in ["SERSAY HX-START sess-prof", "C:\\TEST\\PROFCHK.EXE", "C:\\TEST\\NOPROF.EXE", "SERSAY HX-DONE 0"]:
@@ -3055,7 +3114,7 @@ def sess_direct(profile, boot):
     there too (typed as a person would: supervisor.md §9.7)."""
     tag = "direct-%s-%s" % (profile, boot)
     cfg = batfile("sess-%s/GLOS.CFG" % tag, DIRECT_CFG)
-    args = ["--machine", profile, "--boot-cfg", "glosshell" + ("-himemx" if boot == "himemx" else "")] + GLOS_FILES + \
+    args = ["--machine", profile, "--boot-cfg", "glosshell" + ("-himemx" if boot == "himemx" else "")] + GLOS_FILES_DOS + \
         SESS_FILES + ["--file", cfg + "=/TEST/GLOS.CFG"]
     for f in ("ENABLE", "ENABLE0"):
         args += ["--file", "build/dj/djtst/ENABLE.EXE=/TEST/%s.EXE" % f]
@@ -6332,7 +6391,9 @@ def apps_case(profile, card):
         rc, out, _ = agent.ssh(app + "twice")
         checks["twice"] = rc == 0 and "APP-TWICE r=5 reason=1" in out
         checks["exit-code"] = agent.ssh(app + "exit 23")[0] == 23
-        agent.ssh(app + "exit 9 > NUL")         # (through COMMAND.COM: not GLOS's own child; refused, in the log)
+        agent.ssh("C:\\TEST\\COMMAND.COM /C " + app + "exit 9")   # (through COMMAND.COM: not GLOS's own child;
+                                                # refused, in the log. A line with > NUL was COMMAND.COM's whole
+                                                # until S4b; now the shell does that itself)
         n0 = agent.log().count("GLOS-APP start ")
 
         spin = start(app + "spin")
@@ -7434,8 +7495,17 @@ def floppy_case(profile, card, size):
         checks["app"] = rc == 0 and "GLOS-APP start" in log(serial)
         if not checks["app"]:
             notes.append("PKG SOURCES: rc=%d %s" % (rc, o[-300:]))
-        rc, o = ssh(port, opts, "TYPE C:\\AUTOEXEC.BAT")
-        checks["autoexec"] = "C:\\GLOS\\GLOS.EXE" in o and "GOTO glosrun" in o
+        # (S4d: GLOS is DOS's shell on the new disk, with no COMMAND.COM of FreeDOS's there or on the floppy; it
+        # ran AUTOEXEC.BAT itself, and a program started over SSH has the PATH that file set)
+        rc, o = ssh(port, opts, "TYPE C:\\FDCONFIG.SYS")
+        rc2, o2 = ssh(port, opts, "DIR C:\\")
+        rc3, o3 = ssh(port, opts, "SET")
+        checks["autoexec"] = "SHELL=C:\\GLOS\\GLOS.EXE /SHELL" in o and "COMMAND" not in o2.upper() \
+            and "GLOS-VM shell own autoexec=C:\\AUTOEXEC.BAT" in log(serial) \
+            and "GLOS-SHELL autoexec done code=0" in log(serial) and "PATH=C:\\GLOS;C:\\FREEDOS\\BIN" in o3.upper() \
+            and "GLOS-VM shell own autoexec=A:\\AUTOEXEC.BAT" in t1
+        if not checks["autoexec"]:
+            notes.append("autoexec: %r %r %r" % (o[-200:], o2[-300:], o3[-200:]))
         checks["disk-end"] = end(proc, port, opts)
         t2 = log(serial)
         checks["disk-clean"] = "GLOS-PANIC" not in t2 and "GLOS-CRASH" not in t2 and "GLOS-WARN" not in t2
@@ -7462,8 +7532,10 @@ def floppy_case(profile, card, size):
             rc, o = ssh(port, opts, "VOL C:", timeout=120)
             checks["job-answers"] = rc != 255 and time.time() - t0 < 60
             checks["failed"] = len(re.findall(r"GLOS-DOS critical ah=\w+ drive=C code=\w+ psp=\w+ answer=fail", log(serial))) >= 2
-            rc, o = ssh(port, opts, "COMMAND /C VER")       # (the DOS's own VER: GLOS's shell has one too)
-            checks["dos-alive"] = rc == 0 and "FreeCom" in o
+            rc, o = ssh(port, opts, "A:\\GLOS\\COMMAND.COM /C VER")     # (a DOS program run, and DOS calls made by
+            checks["dos-alive"] = rc == 0 and "GLOS shell" in o     # it: GLOS's own COMMAND.COM, the floppy's only one)
+            rc, o = ssh(port, opts, "MEM")                  # (and one of FreeDOS's, along AUTOEXEC.BAT's PATH)
+            checks["dos-alive"] = checks["dos-alive"] and rc == 0 and "emory" in o
             p = subprocess.run([sys.executable, os.path.join(ROOT, "tools/floppy/install.py"), "127.0.0.1", "--port", str(port),
                                 "--key", key, "--keys", os.path.join(ROOT, "out", "floppy-keys")], capture_output=True, timeout=600)
             checks["unformatted-refused"] = p.returncode == 1 and b"no C: that DOS can read" in p.stderr
@@ -9195,6 +9267,7 @@ def main():
             res += matrix(shell_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(cable_case, [("bf6", "ne2kpci"), ("486dx2", "none"), ("bf6", "off")], a.jobs)
             res += matrix(batch_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
+            res += matrix(ownshell_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(member_case, [("bf6", "ne2kpci")], a.jobs)
             res += matrix(plip_case, [("bf6", "plip"), ("486dx2", "plip")], a.jobs)
             res += matrix(lambda pr, c: member_case(pr, c, True), [("bf6", "ne2kpci")], a.jobs)

@@ -184,6 +184,8 @@ static struct bootinfo bi;
 static unsigned xms_handles[4], n_xms;
 static unsigned buf_seg, tab_seg;                       /* the kernel image and the first page tables */
 static int shell;                                       /* GLOS is the DOS shell */
+static int own_shell;                                   /* ... and the shell is GLOS's own, not a COMMAND.COM under it */
+static int cmd_dos;                                     /* [shell] command = dos */
 
 static void add_range(unsigned long base, unsigned long len, unsigned long type)
 {
@@ -573,7 +575,7 @@ static int glos_main(int argc, char **argv)
             break;
         }
     }
-    if (run_at || shell)
+    if (run_at || (shell && !own_shell))
         bi.flags &= ~BI_F_AGENT;
     else if (!(bi.flags & BI_F_ROUNDTRIP))
         bi.flags |= BI_F_VM | BI_F_AGENT;               /* no mode: headless, the agent (supervisor.md §17.3) */
@@ -606,20 +608,6 @@ static int glos_main(int argc, char **argv)
     bi.font8hi = vga_font(4);                               /* ... and 80h-FFh */
     bi.pic_mask = inp(0x21) | ((unsigned long)inp(0xA1) << 8);
     say("GLOS-BOOT step=checks cpu=%lu cpuid_edx=%08lx", bi.cpu_family, bi.cpuid_edx);
-
-    /* GLOS's own COMMAND.COM beside GLOS.EXE (docs/v1/shell.md, S4c): the kernel gives programs that one. */
-    kernel_path(path, argv[0]);
-    strcpy(strrchr(path, '\\') ? strrchr(path, '\\') + 1 : path, "COMMAND.COM");
-    if ((f = fopen(path, "rb")) != NULL) {
-        static char head[1536];
-        size_t n = fread(head, 1, sizeof head - 1, f), i;
-        fclose(f);
-        for (i = 0; i + 4 <= n; i++)            /* (its mark: the kernel's call's four letters) */
-            if (!memcmp(head + i, "GCMD", 4)) {
-                bi.flags |= BI_F_OWNCMD;
-                break;
-            }
-    }
 
     /* The kernel image. */
     kernel_path(path, argv[0]);
@@ -841,7 +829,9 @@ static int glos_main(int argc, char **argv)
                 say("GLOS-VM error=stub-layout seg=%04x psp=%04x", FP_SEG(&stub_data), _psp);
                 return (int)glos_call(GLOS_CALL_LEAVE, 126);
             }
-            if (shell)
+            if (shell && own_shell)
+                say("GLOS-VM shell own autoexec=%s", bi.autoexec);
+            else if (shell)
                 say("GLOS-VM shell comspec=%s autoexec=%s", bi.comspec, bi.autoexec);
             else
                 say("GLOS-VM agent comspec=%s", bi.comspec);
@@ -1060,6 +1050,7 @@ static void read_cfg(const char *argv0, int shell_keys)
             continue;
         }
         if (!stricmp(k, "comspec")) opt_str(bi.comspec, sizeof bi.comspec, v);
+        else if (!stricmp(k, "command")) cmd_dos = !stricmp(v, "dos");
         else if (!stricmp(k, "autoexec")) opt_str(bi.autoexec, sizeof bi.autoexec, v), shell_p = 1;
         else if (!stricmp(k, "console")) opt_str(bi.console, sizeof bi.console, v);
         else if (!stricmp(k, "envsize")) envsize = (unsigned)atoi(v), shell_e = 1;
@@ -1070,8 +1061,25 @@ static void read_cfg(const char *argv0, int shell_keys)
     fclose(f);
 }
 
-/* COMSPEC as given, in the environment, on the boot drive (root,
-   \\FREEDOS\\BIN, \\DOS), next to GLOS.EXE or along PATH. */
+/* Is the COMMAND.COM at path GLOS's own (apps/command/command.asm; docs/v1/shell.md, S4c)? It has the four
+   letters of its call to the kernel in it. */
+static int own_cmd(const char *path)
+{
+    static char head[1536];
+    size_t n, i;
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return 0;
+    n = fread(head, 1, sizeof head, f);
+    fclose(f);
+    for (i = 0; i + 4 <= n; i++)
+        if (!memcmp(head + i, "GCMD", 4))
+            return 1;
+    return 0;
+}
+
+/* The DOS's COMMAND.COM: COMSPEC as given, in the environment, on the boot drive (root,
+   \\FREEDOS\\BIN, \\DOS), next to GLOS.EXE or along PATH. Never GLOS's own, which runs under GLOS only. */
 static void find_comspec(const char *argv0)
 {
     static char p[_MAX_PATH];                           /* _searchenv() fills _MAX_PATH bytes */
@@ -1081,7 +1089,7 @@ static void find_comspec(const char *argv0)
 
     r.x.ax = 0x3305;                                    /* the boot drive */
     intdos(&r, &r);
-    if (!bi.comspec[0] && (c = getenv("COMSPEC")) != NULL)
+    if (!bi.comspec[0] && (c = getenv("COMSPEC")) != NULL && !own_cmd(c))
         opt_str(bi.comspec, sizeof bi.comspec, c);
     for (i = 0; i < 4 && !bi.comspec[0]; i++) {
         static const char *const dirs[] = { "\\", "\\FREEDOS\\BIN\\", "\\DOS\\" };
@@ -1091,7 +1099,7 @@ static void find_comspec(const char *argv0)
             kernel_path(p, argv0);
             strcpy(strrchr(p, '\\') ? strrchr(p, '\\') + 1 : p, "COMMAND.COM");
         }
-        if (access(p, 0) == 0)
+        if (access(p, 0) == 0 && !own_cmd(p))
             opt_str(bi.comspec, sizeof bi.comspec, p);
     }
     if (!bi.comspec[0]) {
@@ -1109,6 +1117,13 @@ static void shell_setup(int argc, char **argv)
     union REGS r;
     int i;
 
+    {                                                   /* GLOS's own COMMAND.COM beside GLOS.EXE: the kernel */
+        static char own[_MAX_PATH];                     /* gives programs that one (S4c) */
+        kernel_path(own, argv[0]);
+        strcpy(strrchr(own, '\\') ? strrchr(own, '\\') + 1 : own, "COMMAND.COM");
+        if (own_cmd(own))
+            bi.flags |= BI_F_OWNCMD;
+    }
     shell = *(unsigned far *)MK_FP(_psp, 0x16) == _psp;        /* DOS made us our own parent */
     for (i = 1; i < argc; i++)
         if (!stricmp(argv[i], "/SHELL"))
@@ -1134,6 +1149,9 @@ static void shell_setup(int argc, char **argv)
         sprintf(bi.autoexec, "%c:\\AUTOEXEC.BAT", 'A' + r.h.dl - 1);
     if (access(bi.autoexec, 0) != 0)
         bi.autoexec[0] = 0;
+    /* With GLOS's own COMMAND.COM beside GLOS.EXE the shell is GLOS's (S4d): it runs AUTOEXEC.BAT itself and
+       the prompt is its own, with no COMMAND.COM of the DOS's under it. [shell] command = dos: as before. */
+    own_shell = (bi.flags & BI_F_OWNCMD) && !cmd_dos;
 }
 
 /* The master environment for the stub to install: ours, with COMSPEC. */
@@ -1187,7 +1205,8 @@ static void shell_fallback(void)
         strcat(tail, bi.autoexec);
     if (shell_e)
         sprintf(tail + strlen(tail), " /E:%u", envsize);
-    say("GLOS-SHELL fallback=%s%s", bi.comspec, tail);
+    say("GLOS-SHELL fallback=%s%s", bi.comspec, tail);  /* (FreeDOS's kernel alone on the disk: the stub says so
+                                                           and stops) */
     stub_data.mode = 0;
     stub_data.nxms = 0;
     stub_data.shell = 1;
