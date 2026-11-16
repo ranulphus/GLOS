@@ -261,6 +261,29 @@ static void side_on(struct gui_widget *t, int what)
     case GUI_ON_MOVE:
         changed(d);
         break;
+    case GUI_ON_DROP:                           /* a title dragged out and let go: docked by where, or floated */
+        {
+            int x, y, i = gui_tabs_dropped(t, &x, &y), ox, oy;
+            struct gfx_rect r = d->w.r;
+            if (!(p = by_page(d, gui_tabs_page(t, i))))
+                break;
+            if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h && x < r.x + r.w / 5)
+                p->side = GUI_DOCK_LEFT;
+            else if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h && x >= r.x + r.w * 4 / 5)
+                p->side = GUI_DOCK_RIGHT;
+            else if (x >= r.x && x < r.x + r.w && y >= r.y + r.h * 3 / 4 && y < r.y + r.h)
+                p->side = GUI_DOCK_BOTTOM;
+            else {                              /* (anywhere else: floating where it was let go) */
+                if (p->fw)
+                    break;
+                p->side = GUI_DOCK_FLOAT;
+                if (gui_origin(d->w.win, &ox, &oy) == 0)
+                    p->fx = ox + x - 40, p->fy = oy + y - 10;
+            }
+            place_pane(d, p);
+            changed(d);
+        }
+        break;
     case GUI_ON_CONTEXT:                        /* (the menu acts on this side's chosen pane, by its own side) */
         d->menu_side = side;
         if ((p = side_chosen(d, side)) != NULL)
@@ -282,7 +305,7 @@ static struct gui_widget *side_tabs(struct dock *d, struct gui_widget *parent, i
 {
     struct gui_widget *t = gui_tabs(parent);
     gui_tabs_style(t, GUI_TABS_SCROLL);
-    gui_tabs_flags(t, GUI_TABS_CLOSE | GUI_TABS_MOVE);
+    gui_tabs_flags(t, GUI_TABS_CLOSE | GUI_TABS_MOVE | GUI_TABS_DRAG);
     gui_on(t, side_on, side);
     t->user = d;
     gui_context(t, d->menu);

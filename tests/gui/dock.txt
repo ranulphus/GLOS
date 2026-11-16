@@ -4,7 +4,8 @@
 # Output; Tools' floats it in a tool window of its own beside the page's window (the left side goes); the layout
 # saved, reset to the first one (the tool window goes) and loaded again (it comes back). Then the window made
 # narrower than its sides and middle need: Properties joins the left side's tabs (still the right side's, as the
-# saved layout says), and wider again: it goes back. Each change as the API reads it.
+# saved layout says), and wider again: it goes back. Last, Properties' title dragged out of its strip and let go
+# low in the middle: it docks at the bottom beside Output. Each change as the API reads it.
 run GUITEST.EXE dock
 wait "GUITEST Docking"
 shot start "GUITEST Docking"
@@ -33,6 +34,8 @@ key alt+n
 shot narrow "GUITEST Docking"
 key alt+i
 shot wide "GUITEST Docking"
+drag "GUITEST Docking" 345 46 200 290
+shot dropped "GUITEST Docking"
 key alt+f4
 gone "GUITEST Docking"
 expect GUI dock
@@ -50,4 +53,5 @@ expect GUI narrow
 expect GUI layout dock1 110 -100 -90;1 l 1;2 l 1;4 r 1;3 b 1
 expect GUI panes 1:l1 2:l1 3:b1 4:r1
 expect GUI wide
+expect GUI panes 1:l1 2:l1 3:b1 4:b1
 expect GUI end

@@ -114,7 +114,9 @@ enum {
                                            menu for what is chosen there */
     GUI_ON_CLOSE,                       /* a page's close was asked (tabs with GUI_TABS_CLOSE: gui_tabs_closing) */
     GUI_ON_MOVE,                        /* a page was moved along the tabs (GUI_TABS_MOVE): the pages' order is new */
-    GUI_ON_NEW                          /* the tabs' "+" was pressed (GUI_TABS_NEW): the app adds a page */
+    GUI_ON_NEW,                         /* the tabs' "+" was pressed (GUI_TABS_NEW): the app adds a page */
+    GUI_ON_DROP                         /* a title was dragged out of the tabs' strip and let go (GUI_TABS_DRAG:
+                                           gui_tabs_dropped) */
 };
 
 struct gui_widget;
@@ -299,6 +301,10 @@ enum { GUI_TABS_ROWS, GUI_TABS_SCROLL, GUI_TABS_LIST };
 #define GUI_TABS_MOVE  2                /* a title dragged along the strip moves its page (GUI_ON_MOVE) */
 #define GUI_TABS_NEW   4                /* a "+" at the strip's end (GUI_ON_NEW) */
 #define GUI_TABS_MENU  8                /* a button at the strip's end that drops a list of every title */
+#define GUI_TABS_DRAG  16               /* (with GUI_TABS_MOVE) a title dragged well out of the strip is dropped
+                                           there, not moved along: GUI_ON_DROP (a docked pane: dock.c) */
+int gui_tabs_dropped(struct gui_widget *tabs, int *x, int *y);  /* at GUI_ON_DROP: the page, and where it was let go
+                                           (the window's coordinates) */
 void gui_tabs_flags(struct gui_widget *tabs, unsigned flags);  /* (the strip's styles, not GUI_TABS_LIST) */
 int gui_tabs_closing(struct gui_widget *tabs);         /* at GUI_ON_CLOSE: the page asked to close */
 struct gui_widget *gui_tabs_page(struct gui_widget *tabs, int page);   /* a page by its place, or NULL */

@@ -817,6 +817,7 @@ struct tabs {
     unsigned flags;                     /* GUI_TABS_CLOSE, _MOVE, _NEW, _MENU (toolkit 2) */
     int closing;                        /* the page whose close was asked (GUI_ON_CLOSE) */
     int press, press_x, moving, target; /* a title held (-1: none), and, dragged along, where it would go */
+    int out, drop_x, drop_y, dropped;   /* GUI_TABS_DRAG: held well out of the strip; where it was let go */
     struct gui_menu *menu;              /* GUI_TABS_MENU: every title, dropped from the strip's end */
 };
 
@@ -1015,7 +1016,7 @@ static void tabs_draw(struct gui_widget *w, struct gfx_surface *s)
         if (on)
             sel = r[i];
     }
-    if (t->moving && t->target != t->press && t->target < TABS_MAX && r[t->target].w) {       /* where it would go */
+    if (t->moving && !t->out && t->target != t->press && t->target < TABS_MAX && r[t->target].w) {    /* where it would go */
         int bx = t->target < t->press ? r[t->target].x : r[t->target].x + r[t->target].w - 1;
         gfx_fill(s, bx - 1, r[t->target].y, 3, TAB_H, GUI_MARK);
     }
@@ -1193,6 +1194,16 @@ static int tabs_event(struct gui_widget *w, struct gui_ev *e)
         for (i = 0; i < n && i < TABS_MAX; i++)
             if (r[i].w && e->x >= r[i].x && e->x < r[i].x + r[i].w && e->y >= r[i].y && e->y < r[i].y + TAB_H)
                 to = i;
+        if (t->flags & GUI_TABS_DRAG) {         /* well out of the strip (a pane to dock elsewhere) */
+            int out = e->y < w->r.y - 16 || e->y > w->r.y + TAB_H + 16 || e->x < w->r.x - 16
+                      || e->x > w->r.x + w->r.w + 16;
+            if (out != t->out) {
+                t->out = out;
+                if (out)
+                    t->moving = 1;
+                gui_damage(w);
+            }
+        }
         if (e->type == GUI_EV_MOVE) {
             if (!t->moving && (e->x - t->press_x > 5 || t->press_x - e->x > 5))
                 t->moving = 1;
@@ -1200,6 +1211,14 @@ static int tabs_event(struct gui_widget *w, struct gui_ev *e)
                 t->target = to;
                 gui_damage(w);
             }
+            return 1;
+        }
+        if (t->moving && t->out) {              /* let go out there: the app's (GUI_ON_DROP) */
+            t->moving = t->out = 0;
+            t->dropped = t->press, t->drop_x = e->x, t->drop_y = e->y;
+            t->press = -1;
+            gui_damage(w);
+            gui_send(w, GUI_ON_DROP);
             return 1;
         }
         if (t->moving) {
@@ -1298,6 +1317,13 @@ void gui_tabs_flags(struct gui_widget *tabs, unsigned flags)
 }
 
 int gui_tabs_closing(struct gui_widget *tabs) { return ((struct tabs *)tabs)->closing; }
+
+int gui_tabs_dropped(struct gui_widget *tabs, int *x, int *y)
+{
+    struct tabs *t = (struct tabs *)tabs;
+    *x = t->drop_x, *y = t->drop_y;
+    return t->dropped;
+}
 
 /* Pages came or went other than by the tabs (a docked pane moved: dock.c): the chosen one among those there. */
 void gui_tabs_fix(struct gui_widget *tabs)

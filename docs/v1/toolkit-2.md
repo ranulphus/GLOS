@@ -484,8 +484,11 @@ In three parts, each with its GUITEST page and script, on the host and in Loop A
 - **Narrow (640x480):** a dock narrower than its two sides and the middle's least (140 pixels) need lends the
   right side's panes to the left side's tabs; they go back once it is 32 pixels wider than that (so a size near
   the line doesn't swing). They stay the right side's: the menu, `gui_pane_side` and the saved layout say so.
-- **Still to come in C5:** a pane's title dragged onto a side's edge to dock it there (the context menu does it
-  meanwhile).
+- **Dragging a pane** (`GUI_TABS_DRAG`, the dock's tabs have it): a title dragged more than 16 pixels out of its
+  strip is dropped where it is let go (`GUI_ON_DROP`, `gui_tabs_dropped`), not moved along: in the dock's left
+  or right fifth it docks at that side, in its bottom quarter at the bottom, anywhere else it floats there. No
+  outline shows the place while it is dragged (the title stays shaded): a later refinement if it is missed.
+- C5 is complete with that.
 - **Tests:** `split` (GUITEST's page: a tree beside a list, an output pane under the list; the bar dragged, its
   arrows, a pane folded and back, the bar across moved up; the window made wider: the tree keeps its width, the
   output pane its height) and `doctabs` (six documents in a scrolling row: a page with changes kept at its close
@@ -495,7 +498,8 @@ In three parts, each with its GUITEST page and script, on the host and in Loop A
   goes), Output hidden and shown by a button, Layers docked at the bottom and Tools floated by their context
   menus, the layout saved, reset (the tool window goes) and loaded (it comes back), each change as the API
   reads it; then the window made narrow (Properties joins the left side's tabs, the layout still says right)
-  and wide again). All three in Loop A on a 486 and a Pentium II too; there a shot is of the screen, so a page's
+  and wide again; Properties' title dragged out and let go low in the middle: docked at the bottom). All three
+  in Loop A on a 486 and a Pentium II too; there a shot is of the screen, so a page's
   shot is never taken with a pop-up or a tool window over it (the page's window is placed, and narrow enough
   for its floating pane to go beside it).
 
