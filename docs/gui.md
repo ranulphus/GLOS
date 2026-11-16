@@ -74,6 +74,7 @@ compare, and costs a redraw twice a second for nothing.
 | check box, radio button | a group of radio buttons are the siblings made with the same first |
 | field | one line of UTF-8; selection, copy, cut, paste; stars for a password; Enter is `GUI_ON_ACTIVATE` |
 | editor | a file's bytes (below) |
+| combo box (toolkit 2) | a field with a drop button and a list: the app's items (`gui_combo_add`), a history of texts accepted by Enter (`gui_combo_history`), or items the app makes for what is typed (`gui_combo_source`); typing drops the items that begin so while the field keeps the keys (Up, Down, Enter, Esc steer the list), Alt+Down or F4 drops them all |
 | list | rows of cells under a header that sorts; 16-pixel icons; several rows chosen with Ctrl and Shift; typing a name's first letters goes to it; or 32-pixel icons in a grid with their names (the file manager's folders) |
 | tree | nodes that open and close, their children added by the app when one first opens |
 | virtual list (toolkit 2) | a list that keeps no rows: the app's model says how many and gives the rows on the screen when they are drawn (`gui_vlist`, `struct gui_model`); chosen rows kept by id; sorting asked of the app (`GUI_ON_SORT`); columns resized and moved by their heads (`gui_vlist_columns` to keep the layout); four views: detail, big icons, small icons, thumbnails (`gui_vlist_view`; the rows' `thumb` pictures, `GUI_THUMB` square at most); rubber band; type-ahead by the model's `match` |

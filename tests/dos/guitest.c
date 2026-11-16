@@ -43,6 +43,9 @@
  *                       the right; panes closed, shown again (the View button), docked
  *                       elsewhere and floated by their context menus; the layout saved,
  *                       reset and loaded
+ *   GUITEST combo       "GUITEST Combo boxes" (toolkit 2, step C6): a folder box with
+ *                       items and a history, and a name box whose items the app makes
+ *                       for what is typed; driven by keys alone
  *   GUITEST tasks       "GUITEST Tasks" (toolkit 2, step C4): background work: a task
  *                       "reads" ten thousand rows in pieces on a thread of its own,
  *                       the list filling as they are posted; its progress dialog
@@ -1070,6 +1073,62 @@ static void dock_page(void)
     say("dock", "", 0);
 }
 
+/* ---- combo boxes (toolkit 2, step C6) */
+static struct gui_widget *cb_dir, *cb_name;
+
+static void cb_on(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_ACTIVATE)
+        say(w == cb_dir ? "go %s" : "name %s", gui_get_text(w), 0);
+}
+
+static void cb_names(struct gui_widget *w, const char *typed)  /* the app's items for what is typed */
+{
+    char item[40];
+    int i;
+    gui_combo_clear(w);
+    for (i = 1; i <= 3; i++) {
+        snprintf(item, sizeof item, "%.24s%d.txt", typed, i);
+        gui_combo_add(w, item);
+    }
+}
+
+static void cb_list(struct gui_widget *w, int what)    /* the folder box's list, in order */
+{
+    char text[200];
+    int i, n = 0;
+    (void)w, (void)what;
+    text[0] = 0;
+    for (i = 0; i < gui_combo_count(cb_dir) && n < (int)sizeof text - 40; i++)
+        n += snprintf(text + n, sizeof text - (size_t)n, "%s%s", i ? "," : "", gui_combo_item(cb_dir, i));
+    say("list %s", text, 0);
+}
+
+static void combo_page(void)
+{
+    static const char *const dirs[] = { "C:\\GLOS", "C:\\GAMES", "C:\\FREEDOS", "D:\\DATA" };
+    struct gui_widget *form, *row;
+    int i;
+    win = gui_window("GUITEST Combo boxes", 360, 160, 0);
+    form = gui_form(win->root);
+    row = gui_row(form, "&Folder:", NULL);
+    cb_dir = gui_combo(row, 24);
+    for (i = 0; i < 4; i++)
+        gui_combo_add(cb_dir, dirs[i]);
+    gui_combo_history(cb_dir, 6);
+    gui_on(cb_dir, cb_on, 0);
+    row = gui_row(form, "&Name:", NULL);
+    cb_name = gui_combo(row, 24);
+    gui_combo_source(cb_name, cb_names);
+    gui_on(cb_name, cb_on, 0);
+    row = gui_hbox(win->root, -1, -1);
+    gui_button(row, "&List?", cb_list, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(cb_dir);
+    say("combo", "", 0);
+}
+
 /* ---- the virtual tree (toolkit 2, step C3). Ids: 1, 2, 3 at the top; a node's children are its id times ten
    and 1, 2, 3 (to three levels); but node 2's are five thousand leaves, 2000000 and on. */
 static struct gui_widget *vt;
@@ -1280,6 +1339,8 @@ int main(int argc, char **argv)
         doctabs();
     else if (!strcmp(what, "dock"))
         dock_page();
+    else if (!strcmp(what, "combo"))
+        combo_page();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

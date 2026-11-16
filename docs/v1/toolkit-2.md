@@ -535,6 +535,19 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
 - **C6f, Font** (`gui_font_dialog`): GLOS's fonts (the interface's at small, normal and large, bold or not, the
   fixed-width one, the smoothed scripts' where present), a size where a font has several, and a line of preview.
 
+### C6 as built, first part (2026-11-16)
+
+- **C6a, the combo box** as designed, in `sdk/gui/field.c` (a field with a drop button, the field's own code
+  given the button's width): its list is a pop-up window that never takes the keys (`gui_show_nofocus`), drawn
+  by the combo box's own row widget, a click on a row taking it. Esc closes the list and keeps the text as
+  typed; Enter with no row chosen takes the text as typed. Down drops the whole list when it is closed. Up to 64
+  rows match, eight show (the toolbar's combo item and a scrolling list are owed with the address bars that
+  need them).
+- **Test:** `combo` (GUITEST's folder and name boxes, by keys alone: typed and chosen from the list, a text
+  no item begins with, the history read back, F4's whole list, Esc, the name box's items made for what is
+  typed), on the host and in Loop A on a 486 and a Pentium II. Its shots are taken with no list dropped (Loop
+  A's shots are of the screen).
+
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
 - **Farm-Fresh** (FatCow; CC BY 3.0) for colour icons and **Font Awesome Free, solid** (CC BY 4.0) for the

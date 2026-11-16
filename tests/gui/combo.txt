@@ -1,0 +1,37 @@
+# The combo box (toolkit 2, step C6; docs/v1/toolkit-2.md 2): GUITEST's folder box (four items and a history of
+# six) and name box (items the app makes for what is typed), by keys alone. Typed "c:\g": the list of the items
+# that begin so, Down twice and Enter takes C:\GAMES, Enter goes there (and puts it at the top of the history);
+# a folder typed that no item begins with goes there too; the list read back (the history first); F4 drops the
+# whole list, Down and Enter take the first, Esc after Down closes it with the text as it was; the name box's
+# items made for what is typed, the second taken.
+run GUITEST.EXE combo
+wait "GUITEST Combo boxes"
+shot start "GUITEST Combo boxes"
+type c:\\g
+key down down enter
+key enter
+key ctrl+a
+type d:\\new
+key enter
+key alt+l
+key shift+tab shift+tab
+key f4
+key down enter
+key enter
+key f4
+key down down esc
+key enter
+key tab
+type b
+key down down enter
+key enter
+shot end "GUITEST Combo boxes"
+key alt+f4
+gone "GUITEST Combo boxes"
+expect GUI combo
+expect GUI go C:\GAMES
+expect GUI go d:\new
+expect GUI list d:\new,C:\GAMES,C:\GLOS,C:\FREEDOS,D:\DATA
+expect GUI go d:\new
+expect GUI name b2.txt
+expect GUI end

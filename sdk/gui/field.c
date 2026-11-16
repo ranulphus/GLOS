@@ -10,6 +10,8 @@
  * writes what the file's first line ends in. Tabs go to every eighth space.
  * With wrapping on, a line is shown in as many rows as it needs, broken
  * after a space where it can be. */
+#include <stdio.h>
+
 #include "guiint.h"
 
 /* ================================================================ fields */
@@ -19,6 +21,7 @@ struct field {
     int chars, mask;
     int caret, anchor, off;             /* bytes in the text; off: the first shown */
     int drag;
+    int btn;                            /* a combo box's drop button: its width at the right (0: a plain field) */
 };
 
 static int f_len(struct field *f) { return (int)strlen(gui_get_text(&f->w)); }
@@ -60,7 +63,7 @@ static int f_width(struct field *f, int n)
 static void f_visible(struct field *f)
 {
     const char *t = gui_get_text(&f->w);
-    int room = f->w.r.w - 8;
+    int room = f->w.r.w - 8 - f->btn;
     if (room <= 0)                              /* (not laid out yet: done when it is drawn) */
         return;
     if (f->caret < f->off)
@@ -72,7 +75,7 @@ static void f_visible(struct field *f)
 static void field_measure(struct gui_widget *w, int *pw, int *ph)
 {
     struct field *f = (struct field *)w;
-    *pw = f->chars * gfx_text_width(gui_font, "n", 1) + 8;
+    *pw = f->chars * gfx_text_width(gui_font, "n", 1) + 8 + f->btn;
     *ph = GUI_FIELD_H;
 }
 
@@ -83,7 +86,7 @@ static void field_draw(struct gui_widget *w, struct gfx_surface *s)
     int on = !(w->flags & GUI_DISABLED), focus = gui_is_focus(w), n = (int)strlen(t);
     int a = f->caret < f->anchor ? f->caret : f->anchor, b = f->caret < f->anchor ? f->anchor : f->caret;
     int x0 = w->r.x + 4 - f_width(f, f->off), y = w->r.y + (w->r.h - gui_font->height) / 2;
-    struct gfx_rect in = { w->r.x + 1, w->r.y + 1, w->r.w - 2, w->r.h - 2 };
+    struct gfx_rect in = { w->r.x + 1, w->r.y + 1, w->r.w - 2 - f->btn, w->r.h - 2 };
     f_visible(f);
     x0 = w->r.x + 4 - f_width(f, f->off);
     gui_draw_field(s, &w->r, on);
@@ -258,6 +261,272 @@ struct gui_widget *gui_field(struct gui_widget *parent, int chars)
     gui_set_text(&f->w, "");
     return &f->w;
 }
+
+/* ================================================================ the combo box (toolkit 2, step C6)
+ *
+ * A field with a drop button and a list: the app's items and, with a history, the texts accepted by Enter. Typing
+ * drops a list of the items that begin with what is typed, in a pop-up that never takes the keys: the field keeps
+ * them, and steers the list with Up, Down, Enter and Esc. Alt+Down or F4 drops the whole list. */
+
+#define COMBO_BTN  16
+#define COMBO_ROWS 8
+
+struct combo {
+    struct field f;
+    char **items;
+    int n, room;
+    int keep;                           /* a history of so many (0: none) */
+    void (*source)(struct gui_widget *combo, const char *typed);
+    struct gui_window *pop;             /* the list, while it is dropped */
+    struct gui_widget *view;
+    int match[64], nmatch, hot;         /* the items shown (their places), and the one Up and Down are on */
+};
+
+#define CB(w) ((struct combo *)(w))
+
+static int prefix(const char *item, const char *typed)
+{
+    for (; *typed; item++, typed++) {
+        int a = (unsigned char)*item, b = (unsigned char)*typed;
+        if (a >= 'A' && a <= 'Z')
+            a += 32;
+        if (b >= 'A' && b <= 'Z')
+            b += 32;
+        if (a != b)
+            return 0;
+    }
+    return 1;
+}
+
+static void list_draw(struct gui_widget *w, struct gfx_surface *s)
+{
+    struct combo *c = w->user;
+    int i;
+    gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_FIELD);
+    gfx_frame(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_LINE);
+    if (!c)
+        return;
+    for (i = 0; i < c->nmatch; i++) {
+        int y = w->r.y + 1 + i * GUI_ROW_H, on = i == c->hot;
+        if (on)
+            gfx_fill(s, w->r.x + 1, y, w->r.w - 2, GUI_ROW_H, GUI_CHOSEN);
+        gui_text_fit(s, w->r.x + 4, y + 1, w->r.w - 8, gui_font, c->items[c->match[i]],
+                     on ? GUI_CHOSEN_TEXT : GUI_FIELD_TEXT);
+    }
+}
+
+static void combo_close(struct combo *c)
+{
+    if (c->pop) {
+        struct gui_window *p = c->pop;
+        c->pop = NULL;
+        c->view->user = NULL;
+        gui_close_later(p);
+    }
+    c->hot = -1;
+}
+
+static void combo_take(struct combo *c, int i)  /* an item chosen: the field's text, as accepted */
+{
+    if (i < 0 || i >= c->nmatch)
+        return;
+    gui_set_text(&c->f.w, c->items[c->match[i]]);
+    combo_close(c);
+    gui_send(&c->f.w, GUI_ON_CHANGE);
+}
+
+static int list_event(struct gui_widget *w, struct gui_ev *e)
+{
+    struct combo *c = w->user;
+    int i;
+    if (!c)
+        return 1;
+    i = (e->y - w->r.y - 1) / GUI_ROW_H;
+    if (e->type == GUI_EV_MOVE && i >= 0 && i < c->nmatch && i != c->hot) {
+        c->hot = i;
+        gui_damage(w);
+    } else if (e->type == GUI_EV_RELEASE && i >= 0 && i < c->nmatch) {
+        combo_take(c, i);
+    }
+    return 1;
+}
+
+static const struct gui_class list_class = { "combolist", 0, list_draw, list_event, NULL, NULL, NULL };
+
+/* The list as it should be now: the items that begin with `typed` (all: NULL), dropped, or closed if none. */
+static void combo_show(struct combo *c, const char *typed)
+{
+    struct gui_widget *w = &c->f.w;
+    int i, ox, oy, h;
+    if (typed && c->source)
+        c->source(w, typed);
+    c->nmatch = 0;
+    for (i = 0; i < c->n && c->nmatch < (int)(sizeof c->match / sizeof c->match[0]); i++)
+        if (!typed || prefix(c->items[i], typed))
+            c->match[c->nmatch++] = i;
+    if (!c->nmatch || (typed && !*typed) || !w->win || gui_origin(w->win, &ox, &oy) != 0) {
+        combo_close(c);
+        return;
+    }
+    if (c->hot >= c->nmatch)
+        c->hot = c->nmatch - 1;
+    h = (c->nmatch < COMBO_ROWS ? c->nmatch : COMBO_ROWS) * GUI_ROW_H + 2;
+    if (!c->pop) {
+        c->pop = gui_window_at("", ox + w->r.x, oy + w->r.y + w->r.h, w->r.w, h, GUI_W_POPUP | GUI_W_BARE);
+        c->pop->owner = w->win;
+        c->view = gui_new(c->pop->root, &list_class, sizeof *c->view);
+        gui_grow(c->view, 1);
+        c->view->user = c;
+        gui_show_nofocus(c->pop, ox + w->r.x, oy + w->r.y + w->r.h);
+    } else {
+        gui_resize(c->pop, w->r.w, h);
+        gui_damage(c->view);
+    }
+}
+
+static void combo_draw(struct gui_widget *w, struct gfx_surface *s)
+{
+    struct gfx_rect b = { w->r.x + w->r.w - COMBO_BTN - 1, w->r.y + 1, COMBO_BTN, w->r.h - 2 }, clip = s->clip;
+    field_draw(w, s);
+    gfx_clip(s, &clip);                         /* (the field leaves its text's clip set) */
+    gui_draw_box(s, &b, GUI_FACE, CB(w)->pop != NULL);
+    gui_draw_arrow(s, b.x + b.w / 2, b.y + b.h / 2, 1, w->flags & GUI_DISABLED ? GUI_DIM : GUI_TEXT);
+}
+
+static int combo_event(struct gui_widget *w, struct gui_ev *e)
+{
+    struct combo *c = CB(w);
+    char before[256];
+    int r, hist = 0;
+    if (e->type == GUI_EV_BLUR) {
+        combo_close(c);
+        return field_event(w, e);
+    }
+    if (e->type == GUI_EV_PRESS && e->button == 1 && e->x >= w->r.x + w->r.w - COMBO_BTN - 1) {
+        if (c->pop)
+            combo_close(c);
+        else
+            combo_show(c, NULL);
+        gui_damage(w);
+        return 1;
+    }
+    if (e->type == GUI_EV_KEY) {
+        int alt = (e->mods & (GLOS_MOD_CTRL | GLOS_MOD_ALT | GLOS_MOD_SHIFT)) == GLOS_MOD_ALT, plain = !(e->mods &
+                  (GLOS_MOD_CTRL | GLOS_MOD_ALT));
+        if ((alt && e->key == GUI_K_DOWN) || (plain && e->key == GUI_K_F4)) {
+            if (c->pop)
+                combo_close(c);
+            else
+                combo_show(c, NULL);
+            gui_damage(w);
+            return 1;
+        }
+        if (plain && c->pop) {
+            switch (e->key) {
+            case GUI_K_DOWN: c->hot = c->hot + 1 < c->nmatch ? c->hot + 1 : c->hot; gui_damage(c->view); return 1;
+            case GUI_K_UP: c->hot = c->hot > 0 ? c->hot - 1 : 0; gui_damage(c->view); return 1;
+            case GUI_K_ESC: combo_close(c); gui_damage(w); return 1;
+            case GUI_K_ENTER:
+            case GUI_K_KPENTER:
+                if (c->hot >= 0) {
+                    combo_take(c, c->hot);
+                    return 1;
+                }
+                combo_close(c);
+                break;                          /* (nothing on the list chosen: the text as typed) */
+            }
+        } else if (plain && e->key == GUI_K_DOWN && c->n) {
+            combo_show(c, NULL);                /* (Down drops the list too) */
+            gui_damage(w);
+            return 1;
+        }
+        hist = plain && (e->key == GUI_K_ENTER || e->key == GUI_K_KPENTER);
+    }
+    snprintf(before, sizeof before, "%s", gui_get_text(w));
+    if (hist && c->keep && before[0])
+        gui_combo_add_top(w, before);
+    r = field_event(w, e);
+    if (e->type == GUI_EV_KEY && strcmp(before, gui_get_text(w)))
+        combo_show(c, gui_get_text(w));        /* typed: the items that begin so */
+    return r;
+}
+
+static void combo_destroy(struct gui_widget *w)
+{
+    struct combo *c = CB(w);
+    int i;
+    combo_close(c);
+    for (i = 0; i < c->n; i++)
+        free(c->items[i]);
+    free(c->items);
+}
+
+const struct gui_class gui_combo_class = { "combo", GUI_C_FOCUS, combo_draw, combo_event, field_measure, NULL,
+                                           combo_destroy };
+
+struct gui_widget *gui_combo(struct gui_widget *parent, int chars)
+{
+    struct combo *c = (struct combo *)gui_new(parent, &gui_combo_class, sizeof *c);
+    c->f.chars = chars > 0 ? chars : 20;
+    c->f.btn = COMBO_BTN;
+    c->hot = -1;
+    gui_set_text(&c->f.w, "");
+    return &c->f.w;
+}
+
+static void combo_insert(struct combo *c, int at, const char *text)
+{
+    char *t = strdup(text);
+    if (!t)
+        return;
+    if (c->n == c->room) {
+        int room = c->room * 2 + 8;
+        char **n = realloc(c->items, (size_t)room * sizeof *n);
+        if (!n) {
+            free(t);
+            return;
+        }
+        c->items = n, c->room = room;
+    }
+    memmove(c->items + at + 1, c->items + at, (size_t)(c->n - at) * sizeof *c->items);
+    c->items[at] = t;
+    c->n++;
+}
+
+void gui_combo_add(struct gui_widget *w, const char *text) { combo_insert(CB(w), CB(w)->n, text); }
+
+void gui_combo_add_top(struct gui_widget *w, const char *text)  /* (the history's: once, at the top) */
+{
+    struct combo *c = CB(w);
+    int i;
+    for (i = 0; i < c->n; i++)
+        if (!strcmp(c->items[i], text)) {
+            free(c->items[i]);
+            memmove(c->items + i, c->items + i + 1, (size_t)(c->n - i - 1) * sizeof *c->items);
+            c->n--;
+            break;
+        }
+    combo_insert(c, 0, text);
+    while (c->keep && c->n > c->keep)
+        free(c->items[--c->n]);
+}
+
+void gui_combo_clear(struct gui_widget *w)
+{
+    struct combo *c = CB(w);
+    while (c->n)
+        free(c->items[--c->n]);
+}
+
+void gui_combo_history(struct gui_widget *w, int keep) { CB(w)->keep = keep > 0 ? keep : 0; }
+
+void gui_combo_source(struct gui_widget *w, void (*fn)(struct gui_widget *combo, const char *typed))
+{
+    CB(w)->source = fn;
+}
+
+int gui_combo_count(struct gui_widget *w) { return CB(w)->n; }
+const char *gui_combo_item(struct gui_widget *w, int i) { return i >= 0 && i < CB(w)->n ? CB(w)->items[i] : NULL; }
 
 void gui_field_mask(struct gui_widget *w, int on)
 {

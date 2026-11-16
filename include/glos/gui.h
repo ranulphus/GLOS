@@ -350,6 +350,20 @@ void gui_set_value(struct gui_widget *w, int value);
 
 /* ---- text */
 struct gui_widget *gui_field(struct gui_widget *parent, int chars);    /* one line */
+/* A combo box (toolkit 2): a field with a drop button and a list (the app's items, and its history). Typing drops
+   the items that begin with what is typed, the field keeping the keys (Up, Down, Enter, Esc steer the list);
+   Alt+Down or F4 drops all of them. Its text is the value; GUI_ON_CHANGE as it changes, GUI_ON_ACTIVATE at Enter. */
+struct gui_widget *gui_combo(struct gui_widget *parent, int chars);
+void gui_combo_add(struct gui_widget *combo, const char *text);
+void gui_combo_add_top(struct gui_widget *combo, const char *text);    /* at the top, once (moved if it was there) */
+void gui_combo_clear(struct gui_widget *combo);
+void gui_combo_history(struct gui_widget *combo, int keep);    /* a text accepted by Enter goes to the top of the
+                                           list, which keeps so many (0: no history) */
+void gui_combo_source(struct gui_widget *combo, void (*fn)(struct gui_widget *combo, const char *typed));
+                                        /* asked before the list is shown for what is typed: the app may clear and
+                                           add the items to suit it (Files' folders) */
+int gui_combo_count(struct gui_widget *combo);
+const char *gui_combo_item(struct gui_widget *combo, int i);
 void gui_field_mask(struct gui_widget *w, int on);             /* shown as stars */
 struct gui_widget *gui_editor(struct gui_widget *parent);      /* many lines, scrolling */
 void gui_editor_set(struct gui_widget *w, const char *text, size_t n);  /* the whole text, bytes as they are */

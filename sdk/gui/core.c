@@ -323,7 +323,7 @@ void gui_set_text(struct gui_widget *w, const char *text)
     gui_damage(w);
     if (w->win)
         gui_relayout(w->win);
-    if (w->cls == &gui_field_class)             /* (a field keeps its caret in its text) */
+    if (w->cls == &gui_field_class || w->cls == &gui_combo_class)      /* (a field keeps its caret in its text) */
         gui_field_changed(w);
 }
 

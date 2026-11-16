@@ -82,6 +82,9 @@ void gui_cmd_update(struct gui_window *w);      /* the window's on_update */
 void gui_cmd_free(struct gui_window *w);
 extern const struct gui_class gui_toolbar_class;
 
+/* ---- field.c */
+extern const struct gui_class gui_combo_class;
+
 /* ---- basic.c */
 void gui_tabs_fix(struct gui_widget *tabs);     /* pages came or went other than by the tabs: the chosen one kept
                                                    among them */
