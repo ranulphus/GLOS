@@ -14,7 +14,6 @@ shot moved "GUITEST Document tabs"
 click "GUITEST Document tabs" 324 46
 shot new "GUITEST Document tabs"
 click "GUITEST Document tabs" 342 46
-shot list "GUITEST Document tabs"
 key down down down enter
 shot picked "GUITEST Document tabs"
 key tab

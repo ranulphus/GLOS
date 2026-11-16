@@ -1009,7 +1009,7 @@ static void dk_load(struct gui_widget *w, int what)
 static void dk_reset(struct gui_widget *w, int what)
 {
     (void)w, (void)what;
-    gui_dock_load(dk, "dock1 160 -160 -110;1 l 1;2 l 1;4 r 1;3 b 1");
+    gui_dock_load(dk, "dock1 110 -100 -90;1 l 1;2 l 1;4 r 1;3 b 1");
     dk_panes("reset");
 }
 
@@ -1020,7 +1020,7 @@ static void dock_page(void)
     static const char *const layers[] = { "Background", "Sketch", "Ink" };
     struct gui_widget *box, *row, *pane, *c, *l, *f;
     int i;
-    win = gui_window("GUITEST Docking", 560, 360, 0);
+    win = gui_window_at("GUITEST Docking", 0, 0, 390, 330, 0);    /* (a floating pane goes beside it) */
     box = gui_vbox(win->root, -1, -1);
     gui_grow(box, 1);
     row = gui_hbox(box, -1, 0);
@@ -1048,6 +1048,7 @@ static void dock_page(void)
     pane = gui_pane(dk, 4, "Properties", GUI_DOCK_RIGHT);
     gui_label(pane, "Width: 640");
     gui_label(pane, "Height: 480");
+    gui_dock_load(dk, "dock1 110 -100 -90;1 l 1;2 l 1;4 r 1;3 b 1");   /* (sides for the window's 390 pixels) */
     status = gui_status(win);
     gui_show(win, 1);
     gui_focus(f);

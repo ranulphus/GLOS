@@ -138,10 +138,16 @@ static void place_pane(struct dock *d, struct pane *p)
         gui_adopt(p->page, d->shelf);
     } else if (p->side == GUI_DOCK_FLOAT) {
         if (!p->fw) {
-            struct gui_window *fw = p->fx >= 0 ? gui_window_at(gui_get_text(p->page), p->fx, p->fy,
-                                                                p->fwidth, p->fheight, GUI_W_TOOL)
-                                               : gui_window(gui_get_text(p->page), p->fwidth, p->fheight, GUI_W_TOOL);
-            int ox, oy;
+            struct gui_window *fw;
+            int ox, oy, sw, sh;
+            if (p->fx < 0 && d->w.win && gui_origin(d->w.win, &ox, &oy) == 0) {   /* the first time: beside its
+                                                   window, where the screen has room (else GLOS chooses) */
+                gui_screen_size(&sw, &sh);
+                if (ox + d->w.win->w + 16 + p->fwidth + 8 <= sw)
+                    p->fx = ox + d->w.win->w + 16, p->fy = oy;
+            }
+            fw = p->fx >= 0 ? gui_window_at(gui_get_text(p->page), p->fx, p->fy, p->fwidth, p->fheight, GUI_W_TOOL)
+                            : gui_window(gui_get_text(p->page), p->fwidth, p->fheight, GUI_W_TOOL);
             fw->owner = d->w.win;
             fw->user = d;
             fw->on_close = float_close;

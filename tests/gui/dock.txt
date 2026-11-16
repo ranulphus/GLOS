@@ -1,19 +1,20 @@
 # Docking panes (toolkit 2, step C5; docs/v1/toolkit-2.md 7): GUITEST's document in the middle, Tools and Layers at
 # the left, Output under the document, Properties at the right. Properties' close box hides it (the right side
-# folds away); the View button hides Output and shows it again; Layers' context menu docks it at the bottom beside
-# Output; Tools' floats it in a tool window of its own (the left side folds away); the layout saved, reset to the
-# first one (the tool window goes) and loaded again (it comes back). Each change as the API reads it.
+# goes); the View button hides Output and shows it again; Layers' context menu docks it at the bottom beside
+# Output; Tools' floats it in a tool window of its own beside the page's window (the left side goes); the layout
+# saved, reset to the first one (the tool window goes) and loaded again (it comes back). Each change as the API
+# reads it.
 run GUITEST.EXE dock
 wait "GUITEST Docking"
 shot start "GUITEST Docking"
-click "GUITEST Docking" 470 46
+click "GUITEST Docking" 362 45
 shot closed "GUITEST Docking"
 key alt+v
 key alt+v
-click "GUITEST Docking" 95 46 right
+click "GUITEST Docking" 35 46 right
 key b
 shot layers-bottom "GUITEST Docking"
-click "GUITEST Docking" 35 46 right
+click "GUITEST Docking" 30 46 right
 key f
 wait "Tools"
 shot floated "GUITEST Docking"
@@ -22,10 +23,10 @@ click "GUITEST Docking" 140 17
 click "GUITEST Docking" 322 17
 gone "Tools"
 shot reset "GUITEST Docking"
-click "GUITEST Docking" 240 17
+click "GUITEST Docking" 236 17
 wait "Tools"
 shot loaded "GUITEST Docking"
-click "GUITEST Docking" 280 352
+click "GUITEST Docking" 200 322
 key alt+f4
 gone "GUITEST Docking"
 expect GUI dock

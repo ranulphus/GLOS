@@ -476,8 +476,9 @@ In three parts, each with its GUITEST page and script, on the host and in Loop A
   (scrolling, with close boxes and dragging). A side with no pane is folded away with its bar. Hidden panes keep
   their widgets on a shelf of the dock's; a pane moves between sides and windows whole (`gui_adopt`, the toolkit's
   own). A side's context menu acts on its chosen pane: dock at another side, float, hide. A floating pane is a
-  tool window (`GUI_W_TOOL`, GLOS_WK_TOOL, owned by the app's window); closing it hides the pane; its place is
-  kept when it docks again or the layout is saved. The layout line: `dock1 L R B;id side shown[ x y w h];...`
+  tool window (`GUI_W_TOOL`, GLOS_WK_TOOL, owned by the app's window), the first time beside the app's window
+  where the screen has room (else where GLOS puts it); closing it hides the pane; its place is kept when it
+  docks again or the layout is saved. The layout line: `dock1 L R B;id side shown[ x y w h];...`
   (the splitters' places; the docked panes in their sides' order, then the floating and hidden ones).
   `GUI_ON_CHANGE` on the dock for every change the user made (a bar, a close, a move, the menu).
 - **Still to come in C5:** narrower than its panes and the middle's least sizes need (640x480), the side panes
@@ -491,7 +492,9 @@ In three parts, each with its GUITEST page and script, on the host and in Loop A
   Tools and Layers at the left, Output at the bottom, Properties at the right; Properties closed (the right side
   goes), Output hidden and shown by a button, Layers docked at the bottom and Tools floated by their context
   menus, the layout saved, reset (the tool window goes) and loaded (it comes back), each change as the API
-  reads it).
+  reads it). All three in Loop A on a 486 and a Pentium II too; there a shot is of the screen, so a page's
+  shot is never taken with a pop-up or a tool window over it (the page's window is placed, and narrow enough
+  for its floating pane to go beside it).
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
