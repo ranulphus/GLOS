@@ -2704,11 +2704,12 @@ def cable_case(profile, card):
                    background=True)
         serial = os.path.join(ROOT, "out", "ssh-" + tag, "serial.log")
         log = lambda: open(serial, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(serial) else ""
-        t0 = time.time()
-        while time.time() - t0 < 240 and "GLOS-SSH listen" not in log():
-            time.sleep(1)
+        want = ("GLOS-NET cable role=server com=2 io=2f8 irq=3 baud=115200", "GLOS-SSH listen")
+        t0 = time.time()                        # (both: the cable's line comes just after the listen line, and on a
+        while time.time() - t0 < 240 and not all(w in log() for w in want):    # busy host a moment later: a gate
+            time.sleep(1)                       # on devserver, 2026-11-16, read the log between the two)
         text = log()
-        checks["up"] = "GLOS-NET cable role=server com=2 io=2f8 irq=3 baud=115200" in text and "GLOS-SSH listen" in text
+        checks["up"] = all(w in text for w in want)
         if card == "off":
             checks["no-card"] = "GLOS-NET refuse reason=config" in text and "GLOS-NET card=" not in text
         port = cable_port("ssh-" + tag)
