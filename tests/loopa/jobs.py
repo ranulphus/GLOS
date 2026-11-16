@@ -5455,8 +5455,17 @@ def api_shell_case(profile, vcard, card):
         if not all(checks.values()):
             info += " A=%r OTHER=%r" % (a.out[-12:], other.out[-6:])
         agent.ssh("glos exit")                  # (the apps left are asked to end: they say so and leave)
-        checks["ended"] = bool(other.said("end", 60)) and bool(again.said("end", 60)) \
-            and other.p.wait(timeout=120) == 42 and again.p.wait(timeout=120) == 42
+        ended = [bool(other.said("end", 60)), bool(again.said("end", 60))]
+        codes = []
+        for x in (other, again):
+            try:
+                codes.append(x.p.wait(timeout=120))
+            except subprocess.TimeoutExpired:
+                codes.append(None)
+        checks["ended"] = all(ended) and codes == [42, 42]
+        if not checks["ended"]:                 # (seen now and then on devserver's 486: which of them, and what came)
+            info += " ended=%r codes=%r other=%r again=%r err=%r" % (ended, codes, other.out[-3:] + [other.rest], again.out[-3:] + [again.rest],
+                                                                    [x.p.stderr.read()[-120:] for x in (other, again) if x.p.poll() is not None])
         procs = {}
     except subprocess.TimeoutExpired:
         info += " timeout"
