@@ -1,8 +1,7 @@
 # GLOS's shell: one command interpreter, reached two ways
 
-**Status: a design for the owner's review (2026-11-12). Nothing here is built, and nothing in the Terminal app or
-in SSH changes until it is agreed.** The disk-level code under the new tools (S0 below) is being built meanwhile:
-every version of this design needs it.
+**Status: agreed by the owner (2026-11-12, 2026-11-13) and built through S3 (S0 to S2d, and S3 but for `DD` from
+the connection). Step S4 is designed below (2026-11-16) and waits for the owner's review; none of it is built.**
 
 ## What the owner asked for (2026-11-12)
 
@@ -261,6 +260,110 @@ else of that is built here.
 | 1 | `GLOS_RUN_SHELL`, `GLOS_JOB_SIZE`; APITEST's cases; the shim's session (the kernel's side and the library's done, 2026-11-13: `kernel/app/api2job.c`, `glos_job_shell()`, `glos_job_size()`, API 2.1, five cases in APITEST's job mode. The kernel's command thread now runs on every PC, with or without a network, since every session asks GLOS's own commands of it. The shim's session comes with step 2) | Loop A's api suite; host tests |
 | 2 | `vt.c`'s scroll-back and selection; the Terminal on a session (done, 2026-11-13: `apps/term/term.c` is a terminal alone, on one xterm screen with a thousand lines kept above it, the session opened with `glos_job_shell_in()` at the root of the drive DOS started from (`dir` = `\`; the owner, 2026-11-13: not `C:\` by name); a shell job may name its starting folder, `dir`. `apps/term/shell.c` became the host shim's session, `tests/host/shimshell.c`; the SSH client's source is `apps/ssh/ssh.c`. The Terminal's pictures were made again: its prompt is drawn as the rest of its text, an error in xterm's red, the cursor a block) | The Terminal's scripts, host and Loop A |
 | 3 | `GLOS_SYS_TERMINAL`; SSH.EXE, SFTP.EXE, SSHKEY.EXE (the call done, 2026-11-13, before step 2 so that the Terminal keeps its SSH commands until the programs exist. As built: a program says `GLOS_INIT_TERMINAL` at INIT; a session that starts it at a terminal waits for its end; the program reads what is typed and writes its bytes with SYS's TERMINAL call itself (READ, WRITE, INFO for the size) and is told by `GLOS_EV_TERMINAL`, not through DOS's standard input and output, which would cost a trap a character. APPTEST `term` and the ssh suite's login case test it. The three programs, 2026-11-13: `apps/ssh/cli.c` is their terminal layer, and the client itself is still the Terminal's `apps/term/ssh.c`, built for both with a few `SSH_PROGRAM` conditions until step 2 takes it out of the Terminal; `loopa-sshc` has a case that runs them from an SSH login, and through a hop with no terminal) | `loopa-sshc`, from the Terminal and from an SSH login |
+
+## Step S4 as designed (2026-11-16; for the owner's review: nothing of it is built)
+
+S2 and S3 left three things to the DOS's COMMAND.COM: batch files, any line with a pipe or a redirection around
+a program, and every program that shells out (`COMMAND /C`, the C library's `system()`). S4 takes all three, and
+with them the last file of FreeDOS's that a GLOS disk needs beside its kernel.
+
+### 1. The batch language (in the library, `sdk/shell`)
+
+- **The shell runs a `.BAT` file itself**, at a prompt, from `ssh pc COMMAND`, and from another batch file.
+- **A batch file being run is a frame**: its path, how far it has got (a byte offset: the file is opened, a
+  line read and the file closed again for every line, as COMMAND.COM does, so a batch file may change or
+  delete itself and a floppy may be swapped), its arguments (`%0` to `%9`, `SHIFT`), and whether lines are
+  echoed. `CALL` puts a frame on top (sixteen deep at most); a batch file named without `CALL` takes the place
+  of the one that named it.
+- **It still never waits.** A line that starts a program returns to the host; when the program has ended the
+  shell goes on with the rest of the line and then with the frame's next line. Ctrl+C in a batch file asks
+  `Terminate batch job (Y/N)?` at a terminal, and ends it where there is none.
+- **Commands:** `@`, `ECHO ON | OFF | text` and `ECHO.`, `REM`, `IF [NOT] EXIST name | ERRORLEVEL n | a==b`, `GOTO`
+  and `:labels` (eight characters count, as DOS has it), `CALL`, `FOR %%v IN (set) DO` (and `%v` at the
+  prompt; names with `*` and `?` in the set), `SHIFT`, `PAUSE`, `%0` to `%9`, `%NAME%`, `%%`.
+- **The commands the shell hands to COMMAND.COM today**, become its own: `VOL`, `DATE`, `TIME` (GLOS's clock,
+  set as well as shown), `TRUENAME`, `BREAK` and `VERIFY` (taken, and nothing done: GLOS has neither switch),
+  `LH` and `LOADHIGH` (the program is run where it fits: upper memory is GLOS's to give), `CHCP` (shown; set
+  through `[region]`), `CTTY` (refused, in words).
+- **Whose behaviour:** MS-DOS 6.22's and 7.1's COMMAND.COM, which the period's batch files were written for.
+  FreeDOS's COMMAND.COM is the one the tests can run beside (Loop A has it): the same batch files through
+  both, the same output and exit codes; where FreeDOS's differs from MS-DOS's, MS-DOS's wins and the test's
+  list of differences says so.
+- **Not in it:** Windows NT's additions (`%~dp0`, `CALL :label`, `SETLOCAL`, `FOR /F`, `IF /I`). `&&` and `||`,
+  which the shell has had since the Terminal's (D50), stay.
+
+### 2. Redirection and pipes (the shell's own)
+
+- **`>`, `>>` and `<` around a program:** the job's standard input and output are those files, opened by the
+  resident stub before it starts the program (the agent already starts jobs with files for their streams, for
+  the API's JOB calls). A built-in's output to a file works today.
+- **`A | B`:** as DOS does it, since DOS runs one program at a time: A's output goes to a temporary file, B
+  reads it, and the file is deleted. The file is in `%TEMP%`, else in the root of the drive DOS started from.
+  Either side may be a built-in (`DIR | SORT`, `TYPE X | FIND "Y"`).
+- From here no line goes to the DOS's COMMAND.COM whole.
+
+### 3. GLOS's `COMMAND.COM`
+
+For DOS programs that shell out: `C:\GLOS\COMMAND.COM`, a real-mode program of a few KB, and `COMSPEC` points at
+it for everything GLOS starts.
+
+- **It is the resident stub's loop in a program of its own.** The stub asks the kernel what to do next and is
+  told "start this program", "make these DOS calls for me" or "leave": that is how GLOS's shell, which lives
+  in the kernel, runs programs and reaches files through the one DOS there is. `COMMAND.COM` asks the same
+  question, as the program that was started by whoever shelled out:
+  - `COMMAND /C line`: the kernel opens a shell with no terminal for the line. Its variables are the
+    environment `COMMAND.COM` was given, its folder DOS's current one, and its output goes where the calling
+    program's does. Built-ins are done with DOS calls that this `COMMAND.COM` makes; programs are started by
+    it, as its children, so they are the caller's grandchildren as under DOS. It ends with the line's exit
+    code. What the line `SET` is gone with it, as under DOS.
+  - `COMMAND` alone (a program's "DOS shell" item): an interactive session on what the program has, the PC's
+    own screen and keyboard or the terminal its job was started at. `EXIT` goes back to the program.
+  - `/K line` likewise, then the prompt. `/E:n`, `/P`, `/Y` and the rest are taken and nothing is done.
+- **Not provided:** INT 2Eh (COMMAND.COM's back door for running a line, which a few DOS utilities use).
+- **`[shell] comspec = glos | dos`** (default `glos`): `dos` leaves `COMSPEC` at the DOS's own COMMAND.COM for
+  the programs GLOS starts, for one that needs the real thing. GLOS's own shell does not change with it.
+
+### 4. `AUTOEXEC.BAT`, and GLOS as DOS's shell
+
+- With `SHELL=C:\GLOS\GLOS.EXE /SHELL` in CONFIG.SYS, GLOS is what DOS starts instead of a COMMAND.COM (this
+  exists: today GLOS then starts the DOS's COMMAND.COM to run `AUTOEXEC.BAT` and to be the console).
+- **New:** GLOS runs `AUTOEXEC.BAT` itself, in the root of the drive DOS started from, as the first thing the
+  session on the PC's own screen does: its output is on the screen, its resident programs (a mouse driver,
+  a CD-ROM's) load once before anything else, and when it has ended the prompt is there. **What it `SET`
+  (`PATH`, `BLASTER`, `TEMP` ...) becomes the system's environment**: every session and every job from then on
+  starts with it.
+- Started from an `AUTOEXEC.BAT` by the DOS's own COMMAND.COM, as an installed GLOS is today, nothing changes:
+  GLOS does not run the file again.
+- If GLOS cannot start (no 386, too little memory), the loader says why and, as today, starts the DOS's
+  COMMAND.COM if there is one. On a disk with FreeDOS's kernel alone there is none: the message stays on the
+  screen and the PC stops there.
+
+### 5. The setup floppy, and new disks
+
+- The floppy: `SHELL=A:\GLOS\GLOS.EXE /SHELL`, and FreeDOS's COMMAND.COM goes (about 90 KB, which doubles what
+  the 720 KB disk has to spare). FreeDOS's kernel is the one file of FreeDOS's left.
+- `install.py --new-disk` (a disk GLOS partitions and formats itself) installs the same way: FreeDOS's kernel,
+  GLOS as its shell, an `AUTOEXEC.BAT` of GLOS's own. A PC that has a DOS already keeps it and its COMMAND.COM,
+  with GLOS started from `AUTOEXEC.BAT` as now.
+
+### In what order, inside S4
+
+| | What | Shows it works |
+|---|---|---|
+| S4a | The batch language in the library; the shell runs `.BAT` files itself in every session | Host transcripts; the same batch files through FreeDOS's COMMAND.COM in Loop A, compared |
+| S4b | Redirection and pipes around programs | Host tests; Loop A: every line that went to COMMAND.COM whole |
+| S4c | GLOS's `COMMAND.COM` (`/C`, `/K`, alone); `COMSPEC`; `[shell] comspec` | Loop A: programs that shell out (`system()`, a batch file run by a program, a "DOS shell"), from an SSH login and at the PC |
+| S4d | GLOS as DOS's shell runs `AUTOEXEC.BAT`; the system's environment; the floppy and new disks with FreeDOS's kernel alone | `loopa-floppy`; the 486 bench from the floppy |
+
+### What it costs, and what could go wrong
+
+- **Ring 0 grows** by the batch language (my estimate: 8 to 12 KB of code).
+- **Batch files are where COMMAND.COMs differ in small ways** (spaces round `==`, `ECHO` with nothing after it,
+  `IF ERRORLEVEL` in a `FOR`, a label at the file's end). The comparison in Loop A is what finds them; an
+  installer's batch file that trips over one is fixed as it is met.
+- **A program that looks inside COMMAND.COM** (its memory, INT 2Eh) finds GLOS's is not it: `comspec = dos`.
+- **A PC whose only shell is GLOS** has nothing to fall back on if GLOS cannot start. That is the floppy and a
+  disk GLOS made, never a PC that had a DOS.
 
 ## Decided by the owner (2026-11-12)
 
