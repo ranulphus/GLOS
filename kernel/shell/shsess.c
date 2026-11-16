@@ -84,6 +84,7 @@ struct shsess {
     u8 job_esc;                         /* a key's sequence under way, typed to it */
     u8 job_full;                        /* it has the PC's own screen: its terminal has been told */
     u8 out_cr;                          /* the last character written to the terminal was a carriage return */
+    u8 out_mid;                         /* ... was neither that nor a line feed: the terminal is part way along a line */
     char dir[80];                       /* the folder it starts in, where its opener said one ("": DOS's own) */
     u8 fg;                              /* the program that runs is a GLOS_INIT_TERMINAL app: the terminal is its,
                                            bytes each way as they are (shsess_term_*) */
@@ -168,8 +169,10 @@ static void term_text(struct shsess *s, const char *t, int n, int lf)
             b[k++] = (u8)(0x80 | (u & 0x3F));
         }
     }
-    if (n)
+    if (n) {
         s->out_cr = t[n - 1] == '\r';
+        s->out_mid = t[n - 1] != '\r' && t[n - 1] != '\n';
+    }
     term_bytes(s, b, k);
 }
 
@@ -650,6 +653,10 @@ static void job_turn(struct shsess *s)
                                                    its end, as ssh-shell-bf6 did one run in three, 2026-11-14) */
         static const char full[] = "(The program has the PC's own screen and keyboard now.)\r\n";
         s->job_full = 1;
+        if (s->out_mid)                         /* (on a line of its own: the program's output may be part way
+                                                   along one. "MODE done(The program has...", native-486dx2's
+                                                   term-run in one gate, 2026-11-16) */
+            term_text(s, "\r\n", 2, 1);
         term_text(s, full, (int)sizeof full - 1, 1);
     }
     if (!gone && st == GLOS_JS_APP && s->tty && !s->fg) {     /* an app now: one run at a terminal has this one,
@@ -1323,6 +1330,7 @@ u32 shsess_term_write(struct shsess *s, const u8 *d, u32 n)    /* what there is 
     s->ot += n;
     if (n) {
         s->out_cr = d[n - 1] == '\r';
+        s->out_mid = d[n - 1] != '\r' && d[n - 1] != '\n';
         s->kick(s->kick_arg);
     }
     return n;
