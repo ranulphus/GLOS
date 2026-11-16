@@ -1,7 +1,7 @@
 # GLOS's shell: one command interpreter, reached two ways
 
 **Status: agreed by the owner (2026-11-12, 2026-11-13) and built through S3 (S0 to S2d, and S3 but for `DD` from
-the connection). Step S4 is designed below (2026-11-16) and waits for the owner's review; none of it is built.**
+the connection). Step S4 is designed below and agreed (2026-11-16); it is being built, S4a first.**
 
 ## What the owner asked for (2026-11-12)
 
@@ -261,7 +261,7 @@ else of that is built here.
 | 2 | `vt.c`'s scroll-back and selection; the Terminal on a session (done, 2026-11-13: `apps/term/term.c` is a terminal alone, on one xterm screen with a thousand lines kept above it, the session opened with `glos_job_shell_in()` at the root of the drive DOS started from (`dir` = `\`; the owner, 2026-11-13: not `C:\` by name); a shell job may name its starting folder, `dir`. `apps/term/shell.c` became the host shim's session, `tests/host/shimshell.c`; the SSH client's source is `apps/ssh/ssh.c`. The Terminal's pictures were made again: its prompt is drawn as the rest of its text, an error in xterm's red, the cursor a block) | The Terminal's scripts, host and Loop A |
 | 3 | `GLOS_SYS_TERMINAL`; SSH.EXE, SFTP.EXE, SSHKEY.EXE (the call done, 2026-11-13, before step 2 so that the Terminal keeps its SSH commands until the programs exist. As built: a program says `GLOS_INIT_TERMINAL` at INIT; a session that starts it at a terminal waits for its end; the program reads what is typed and writes its bytes with SYS's TERMINAL call itself (READ, WRITE, INFO for the size) and is told by `GLOS_EV_TERMINAL`, not through DOS's standard input and output, which would cost a trap a character. APPTEST `term` and the ssh suite's login case test it. The three programs, 2026-11-13: `apps/ssh/cli.c` is their terminal layer, and the client itself is still the Terminal's `apps/term/ssh.c`, built for both with a few `SSH_PROGRAM` conditions until step 2 takes it out of the Terminal; `loopa-sshc` has a case that runs them from an SSH login, and through a hop with no terminal) | `loopa-sshc`, from the Terminal and from an SSH login |
 
-## Step S4 as designed (2026-11-16; for the owner's review: nothing of it is built)
+## Step S4 as designed (2026-11-16; agreed by the owner the same day, with the three answers below; not built yet)
 
 S2 and S3 left three things to the DOS's COMMAND.COM: batch files, any line with a pipe or a redirection around
 a program, and every program that shells out (`COMMAND /C`, the C library's `system()`). S4 takes all three, and
@@ -354,6 +354,15 @@ it for everything GLOS starts.
 | S4b | Redirection and pipes around programs | Host tests; Loop A: every line that went to COMMAND.COM whole |
 | S4c | GLOS's `COMMAND.COM` (`/C`, `/K`, alone); `COMSPEC`; `[shell] comspec` | Loop A: programs that shell out (`system()`, a batch file run by a program, a "DOS shell"), from an SSH login and at the PC |
 | S4d | GLOS as DOS's shell runs `AUTOEXEC.BAT`; the system's environment; the floppy and new disks with FreeDOS's kernel alone | `loopa-floppy`; the 486 bench from the floppy |
+
+### Decided by the owner (2026-11-16)
+
+1. **GLOS's `COMMAND.COM` by default** for the programs GLOS starts; `[shell] comspec = dos` puts the DOS's own
+   back for a program that needs it.
+2. **MS-DOS 6.22's and 7.1's behaviour** where the COMMAND.COMs differ; FreeDOS's is the tests' comparison where
+   they agree, and MS-DOS's side is checked on the benches (bench-g400 and the P3 have MS-DOS 7.1).
+3. **GLOS as DOS's shell on the setup floppy and on disks GLOS makes** (`install.py --new-disk`). A PC that has a
+   DOS keeps it and its COMMAND.COM.
 
 ### What it costs, and what could go wrong
 
