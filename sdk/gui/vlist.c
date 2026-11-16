@@ -27,6 +27,8 @@ struct vlist {
     int multi;
     int sort_col, sort_down;            /* what the header last asked for (sort_col -1: nothing) */
     int drag_col;                       /* the column whose right edge is dragged (-1: none) */
+    char typed[32];                     /* letters typed, a second apart at most: the row that begins so */
+    unsigned typed_at;
     int view;                           /* GUI_VIEW_DETAIL, or GUI_VIEW_ICONS: big icons in a grid, a name under each */
     int band, bx0, by0, bx1, by1;       /* the icon view's rubber band: held, and its corners (the window's
                                            coordinates; by0 moves with the scrolling) */
@@ -410,6 +412,8 @@ static int vl_event(struct gui_widget *w, struct gui_ev *e)
     }
     if (e->mods & GLOS_MOD_ALT)
         return 0;
+    if (ctrl || e->ch <= 0x20 || e->ch >= 0x100)
+        l->typed[0] = 0;                        /* (another key: the next letters are a new name) */
     if (ctrl && l->multi && (e->key == GUI_K_UP || e->key == GUI_K_DOWN) && n) {
         int to = l->cur + (e->key == GUI_K_UP ? -1 : 1);       /* Ctrl and an arrow: the current row moves, what
                                                                    is chosen stays (Ctrl+Space then chooses it too) */
@@ -441,6 +445,29 @@ static int vl_event(struct gui_widget *w, struct gui_ev *e)
             return 1;
         }
         break;
+    }
+    if (!ctrl && e->ch > 0x20 && e->ch < 0x100 && l->m.match && n) {   /* typed: the row whose name begins so (the
+                                                                           model's search); the same letter again,
+                                                                           the next such row */
+        size_t k = strlen(l->typed), i;
+        int from, r2, same = 1;
+        char one[2];
+        if (e->time - l->typed_at > 1000)
+            k = 0;
+        l->typed_at = e->time;
+        if (k < sizeof l->typed - 1) {
+            l->typed[k] = (char)e->ch;
+            l->typed[k + 1] = 0;
+        }
+        for (i = 0; l->typed[i]; i++)
+            same &= l->typed[i] == l->typed[0];
+        one[0] = l->typed[0], one[1] = 0;       /* (one letter, again and again: each time the next row that
+                                                   begins with it; other letters after it: the whole of them) */
+        from = l->cur < 0 ? 0 : same ? l->cur + 1 : l->cur;
+        r2 = l->m.match(l->m.ctx, same ? one : l->typed, from >= n ? 0 : from);
+        if (r2 >= 0 && r2 < n)
+            go(l, r2, 0, 0);
+        return 1;
     }
     return 0;
 }

@@ -373,8 +373,11 @@ which and why. The apps keep working at every step (they move as the toolkit doe
   folder of five thousand costs their ids when opened and a screen of texts. `gui_vtree_changed(w, id)` asks
   for a node's children again; what was open under it and the current node are found by their ids. A badge is
   a short text at the row's right end. Keys and the mouse as `gui_tree`'s.
-- **Still to come in C3:** columns reordered, type-ahead, small-icon and thumbnail views, and `gui_list` and
-  `gui_tree` on top of the models.
+- **Type-ahead** (fourth part, 2026-11-16): letters typed within a second of each other go to the row whose
+  first cell begins so; one letter again and again goes on to the next such row. The search is the model's
+  (`match`), since only the app has all the rows.
+- **Still to come in C3:** columns reordered, small-icon and thumbnail views, and `gui_list` and `gui_tree` on
+  top of the models.
 - **Tests:** `vlist` (GUITEST's page: twenty rows, then ten thousand; End and Page Up; the app counts the
   distinct rows it was asked for, a few screens of ten thousand; sorted downward with the current row kept by
   its id; a range and a row more chosen; a column dragged wider; Enter; the icon view, the arrows in it, a

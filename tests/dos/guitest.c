@@ -632,6 +632,21 @@ static int v_find(void *ctx, unsigned long id)
     return item < 0 || item >= vn ? -1 : vdown ? vn - 1 - item : item;
 }
 
+/* The first row from `from` on whose name begins with what was typed ("i" and digits: Item 0NNNN), or -1. */
+static int v_match(void *ctx, const char *typed, int from)
+{
+    char name[24];
+    int i, row;
+    for (i = 0; i < vn; i++) {
+        row = (from + i) % vn;
+        snprintf(name, sizeof name, "item%05d", vdown ? vn - 1 - row : row);
+        if (!strncmp(name, typed, strlen(typed)) || !strncmp(name + 4, typed, strlen(typed)))
+            return row;
+    }
+    (void)ctx;
+    return -1;
+}
+
 static void v_on(struct gui_widget *w, int what)
 {
     if (what == GUI_ON_SELECT) {
@@ -682,7 +697,7 @@ static void vlist(void)
 {
     static const char *const heads[] = { "Name", "Size", "Kind" };
     static const int widths[] = { 150, 70, 80 };
-    static const struct gui_model model = { v_count, v_row, v_find, NULL };
+    static const struct gui_model model = { v_count, v_row, v_find, v_match, NULL };
     struct gui_widget *box, *row;
     win = gui_window("GUITEST Virtual list", 380, 240, 0);
     box = gui_vbox(win->root, -1, -1);

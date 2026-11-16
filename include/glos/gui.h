@@ -356,6 +356,9 @@ struct gui_model {
     void (*row)(void *ctx, int row, struct gui_vrow *out);     /* a row's content */
     int (*find)(void *ctx, unsigned long id);  /* the place of the row with that id now, or -1 (the function NULL:
                                            the list looks a screen either side of where the row was) */
+    int (*match)(void *ctx, const char *typed, int from);      /* the first row from `from` on (and round to the
+                                           start) whose first cell begins with what was typed, or -1 (NULL: typing
+                                           does nothing): the app's search, since only it has all the rows */
     void *ctx;
 };
 struct gui_widget *gui_vlist(struct gui_widget *parent, int columns, const char *const *heads, const int *widths,

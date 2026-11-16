@@ -1,5 +1,5 @@
 # The virtual list (toolkit 2, step C3; docs/v1/toolkit-2.md 2): GUITEST's list of ten thousand rows that keeps none.
-# Twenty rows at first, then ten thousand at once (rows that arrive); End and Page Up through them; the model was
+# Twenty rows at first, then ten thousand at once (rows that arrive); digits typed find the row whose number begins so (the app's search); End and Page Up through them; the model was
 # asked for a screen or so of rows, not the list (counted by the app); a press on the Name head sorts downward
 # (the app's doing, at the second press) and the row that was current is current still, found by its id; Shift
 # chooses a range, Ctrl and the arrows and Space a row more; a column's edge dragged; Enter opens the row. Then the icon
@@ -10,7 +10,9 @@ wait "GUITEST Virtual list"
 key down down
 shot start "GUITEST Virtual list"
 key alt+m
-key tab tab
+key tab tab tab
+type 00123
+shot typed "GUITEST Virtual list"
 key end
 shot end "GUITEST Virtual list"
 key pgup pgup
@@ -43,6 +45,7 @@ key alt+f4
 gone "GUITEST Virtual list"
 expect GUI vlist
 expect GUI rows 10000
+expect GUI row 123
 expect GUI row 9999
 expect GUI asked for a few screens of rows, not the list; chosen 1
 expect GUI sorted down by column 0
