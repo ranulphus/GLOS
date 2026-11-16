@@ -27,18 +27,35 @@ struct vlist {
     int multi;
     int sort_col, sort_down;            /* what the header last asked for (sort_col -1: nothing) */
     int drag_col;                       /* the column whose right edge is dragged (-1: none) */
+    int view;                           /* GUI_VIEW_DETAIL, or GUI_VIEW_ICONS: big icons in a grid, a name under each */
+    int band, bx0, by0, bx1, by1;       /* the icon view's rubber band: held, and its corners (the window's
+                                           coordinates; by0 moves with the scrolling) */
     struct gui_sb sb;
 };
+
+#define CELL_W  76                      /* an icon's place in the grid (as gui_list's big icons) */
+#define ICON_GAP 4
 
 #define VL(w) ((struct vlist *)(w))
 
 static int count(struct vlist *l) { int n = l->m.count ? l->m.count(l->m.ctx) : 0; return n > 0 ? n : 0; }
 static int head_h(struct vlist *l) { return l->heads ? GUI_ROW_H + 3 : 0; }
 
-static int shown(struct vlist *l)
+static int icons(struct vlist *l) { return l->view == GUI_VIEW_ICONS; }
+static int cell_h(void) { return GUI_BIG_W + ICON_GAP + gui_font->height + 6; }
+
+static int per_line(struct vlist *l)            /* rows a line of the screen: one, or the icons that fit across */
 {
-    int h = l->w.r.h - 2 - head_h(l);
-    return h / GUI_ROW_H > 1 ? h / GUI_ROW_H : 1;
+    int n = icons(l) ? (l->w.r.w - GUI_SB - 4) / CELL_W : 1;
+    return n > 0 ? n : 1;
+}
+
+static int lines_of(struct vlist *l, int n) { return (n + per_line(l) - 1) / per_line(l); }
+
+static int shown(struct vlist *l)               /* lines of the screen */
+{
+    int h = l->w.r.h - 2 - (icons(l) ? 0 : head_h(l)), unit = icons(l) ? cell_h() : GUI_ROW_H;
+    return h / unit > 1 ? h / unit : 1;
 }
 
 static int col_x(struct vlist *l, int c)
@@ -58,14 +75,15 @@ static int col_w(struct vlist *l, int c)
     return l->widths[c];
 }
 
-static void place(struct vlist *l, int n)
+static void place(struct vlist *l, int n)       /* (top is a line of the screen: a row, or a line of icons) */
 {
-    if (l->top > n - shown(l))
-        l->top = n - shown(l);
+    int lines = lines_of(l, n);
+    if (l->top > lines - shown(l))
+        l->top = lines - shown(l);
     if (l->top < 0)
         l->top = 0;
     l->sb.r.x = l->w.r.x + l->w.r.w - GUI_SB, l->sb.r.y = l->w.r.y, l->sb.r.w = GUI_SB, l->sb.r.h = l->w.r.h;
-    l->sb.total = n, l->sb.page = shown(l), l->sb.pos = l->top;
+    l->sb.total = lines, l->sb.page = shown(l), l->sb.pos = l->top;
 }
 
 static int is_chosen(struct vlist *l, unsigned long id)
@@ -108,14 +126,31 @@ static unsigned long id_of(struct vlist *l, int row)
 
 static void see(struct vlist *l, int row)
 {
+    int line = row / per_line(l);
     if (row < 0)
         return;
-    if (row < l->top)
-        l->top = row;
-    if (row >= l->top + shown(l))
-        l->top = row - shown(l) + 1;
+    if (line < l->top)
+        l->top = line;
+    if (line >= l->top + shown(l))
+        l->top = line - shown(l) + 1;
     if (l->top < 0)
         l->top = 0;
+}
+
+/* The icon view: an icon's cell (its place in the window), and the row at a place (-1: none). */
+static void cell_at(struct vlist *l, int row, int *x, int *y)
+{
+    *x = l->w.r.x + 2 + (row % per_line(l)) * CELL_W;
+    *y = l->w.r.y + 1 + (row / per_line(l) - l->top) * cell_h() + 2;
+}
+
+static int icon_row(struct vlist *l, int x, int y, int n)
+{
+    int col = (x - l->w.r.x - 2) / CELL_W, line = (y - l->w.r.y - 1) / cell_h() + l->top, r;
+    if (x < l->w.r.x + 2 || y < l->w.r.y + 1 || col >= per_line(l) || x >= l->w.r.x + l->w.r.w - GUI_SB)
+        return -1;
+    r = line * per_line(l) + col;
+    return r >= 0 && r < n ? r : -1;
 }
 
 static void vl_measure(struct gui_widget *w, int *pw, int *ph)
@@ -136,6 +171,50 @@ static void vl_draw(struct gui_widget *w, struct gfx_surface *s)
     struct gfx_rect clip = s->clip, in = { w->r.x + 1, y0, w->r.w - GUI_SB - 1, w->r.h - 2 - head_h(l) };
     place(l, n);
     gui_draw_field(s, &frame, on);
+    if (icons(l)) {                             /* big icons, a name under each: the lines on the screen alone */
+        struct gfx_rect all = { w->r.x + 1, w->r.y + 1, w->r.w - GUI_SB - 1, w->r.h - 2 };
+        int per = per_line(l);
+        gfx_rect_cut(&all, &clip);
+        gfx_clip(s, &all);
+        for (i = l->top * per; i < n && i < (l->top + shown(l) + 1) * per; i++) {
+            struct gui_vrow r;
+            int x, y, chosen, tw, lw, lx, ly, ix;
+            cell_at(l, i, &x, &y);
+            if (y >= s->clip.y + s->clip.h || y + cell_h() <= s->clip.y)
+                continue;
+            memset(&r, 0, sizeof r);
+            l->m.row(l->m.ctx, i, &r);
+            chosen = is_chosen(l, r.id);
+            ix = x + (CELL_W - GUI_BIG_W) / 2;
+            if (r.big)
+                gui_draw_icon(s, ix, y, r.big, GUI_BIG_W);
+            else
+                gui_draw_icon_ink(s, ix + (GUI_BIG_W - GUI_ICON_W) / 2, y + (GUI_BIG_W - GUI_ICON_W) / 2, r.icon,
+                                  GUI_ICON_W, on ? GUI_FIELD_TEXT : GUI_DIM);
+            if (chosen)
+                gfx_frame(s, ix - 2, y - 2, GUI_BIG_W + 4, GUI_BIG_W + 4, GUI_CHOSEN);
+            tw = r.cell[0] ? gfx_text_width(gui_font, r.cell[0], -1) : 0;
+            lw = tw < CELL_W - 4 ? tw : CELL_W - 4, lx = x + (CELL_W - lw) / 2, ly = y + GUI_BIG_W + ICON_GAP;
+            if (chosen)
+                gfx_fill(s, lx - 2, ly - 1, lw + 4, gui_font->height + 2, GUI_CHOSEN);
+            if (r.cell[0])
+                gui_text_fit(s, lx, ly, CELL_W - 4, gui_font, r.cell[0],
+                             chosen ? GUI_CHOSEN_TEXT : on ? GUI_FIELD_TEXT : GUI_DIM);
+            if (focus && i == l->cur) {
+                struct gfx_rect f = { lx - 2, ly - 1, lw + 4, gui_font->height + 2 };
+                gui_draw_focus(s, &f);
+            }
+        }
+        if (l->band) {                          /* the rubber band */
+            int x0 = l->bx0 < l->bx1 ? l->bx0 : l->bx1, x1 = l->bx0 < l->bx1 ? l->bx1 : l->bx0;
+            int y0b = l->by0 < l->by1 ? l->by0 : l->by1, y1 = l->by0 < l->by1 ? l->by1 : l->by0;
+            struct gfx_rect b = { x0, y0b, x1 - x0 + 1, y1 - y0b + 1 };
+            gui_draw_focus(s, &b);
+        }
+        gfx_clip(s, &clip);
+        gui_sb_draw(s, &l->sb, on);
+        return;
+    }
     if (l->heads) {
         gfx_fill(s, w->r.x + 1, w->r.y + 1, w->r.w - GUI_SB - 1, head_h(l) - 1, GUI_FACE);
         gfx_fill(s, w->r.x + 1, w->r.y + head_h(l), w->r.w - GUI_SB - 1, 1, GUI_LINE);
@@ -237,12 +316,55 @@ static int vl_event(struct gui_widget *w, struct gui_ev *e)
             return 1;
         }
     }
+    if (l->band) {                              /* the rubber band held: the icons it touches are the ones chosen */
+        if (e->type == GUI_EV_MOVE || e->type == GUI_EV_RELEASE) {
+            int x0, x1, y0, y1, i, cx, cy, was = l->nchosen;
+            l->bx1 = e->x, l->by1 = e->y;
+            x0 = l->bx0 < l->bx1 ? l->bx0 : l->bx1, x1 = l->bx0 < l->bx1 ? l->bx1 : l->bx0;
+            y0 = l->by0 < l->by1 ? l->by0 : l->by1, y1 = l->by0 < l->by1 ? l->by1 : l->by0;
+            l->nchosen = 0;
+            for (i = l->top * per_line(l); i < n && i < (l->top + shown(l) + 1) * per_line(l); i++) {
+                cell_at(l, i, &cx, &cy);
+                if (cx + CELL_W > x0 && cx <= x1 && cy + cell_h() > y0 && cy <= y1)
+                    choose(l, id_of(l, i), 1);
+            }
+            if (e->type == GUI_EV_RELEASE)
+                l->band = 0;
+            gui_damage(w);
+            if (l->nchosen != was || e->type == GUI_EV_RELEASE)
+                gui_send(w, GUI_ON_SELECT);
+            return 1;
+        }
+    }
     if (e->type != GUI_EV_KEY && gui_sb_event(w, &l->sb, e, 1)) {
         l->top = l->sb.pos;
         return 1;
     }
     switch (e->type) {
     case GUI_EV_PRESS:
+        if (icons(l)) {
+            r = icon_row(l, e->x, e->y, n);
+            if (r < 0) {                        /* a press on nothing: nothing chosen; held and moved, a rubber band */
+                if (e->x >= w->r.x + w->r.w - GUI_SB)
+                    return 1;
+                if (!ctrl && !shift && l->nchosen) {
+                    l->nchosen = 0;
+                    gui_send(w, GUI_ON_SELECT);
+                }
+                if (l->multi && e->button == 1)
+                    l->band = 1, l->bx0 = l->bx1 = e->x, l->by0 = l->by1 = e->y;
+                gui_damage(w);
+                return 1;
+            }
+            if (e->clicks == 2 && r == l->cur) {
+                gui_send(w, GUI_ON_ACTIVATE);
+                return 1;
+            }
+            if (e->button == 2 && is_chosen(l, id_of(l, r)))
+                return 1;
+            go(l, r, shift, ctrl);
+            return 1;
+        }
         if (l->heads && e->y < w->r.y + head_h(l)) {
             if (e->button != 1)
                 return 1;
@@ -298,10 +420,12 @@ static int vl_event(struct gui_widget *w, struct gui_ev *e)
         return 1;
     }
     switch (e->key) {
-    case GUI_K_UP: go(l, l->cur - 1, shift, 0); return 1;
-    case GUI_K_DOWN: go(l, l->cur < 0 ? 0 : l->cur + 1, shift, 0); return 1;
-    case GUI_K_PGUP: go(l, l->cur - (shown(l) - 1), shift, 0); return 1;
-    case GUI_K_PGDN: go(l, l->cur + (shown(l) - 1), shift, 0); return 1;
+    case GUI_K_UP: go(l, l->cur - per_line(l), shift, 0); return 1;
+    case GUI_K_DOWN: go(l, l->cur < 0 ? 0 : l->cur + per_line(l), shift, 0); return 1;
+    case GUI_K_LEFT: if (!icons(l)) return 0; go(l, l->cur - 1, shift, 0); return 1;
+    case GUI_K_RIGHT: if (!icons(l)) return 0; go(l, l->cur < 0 ? 0 : l->cur + 1, shift, 0); return 1;
+    case GUI_K_PGUP: go(l, l->cur - per_line(l) * (shown(l) - 1), shift, 0); return 1;
+    case GUI_K_PGDN: go(l, l->cur + per_line(l) * (shown(l) - 1), shift, 0); return 1;
     case GUI_K_HOME: go(l, 0, shift, 0); return 1;
     case GUI_K_END: go(l, n - 1, shift, 0); return 1;
     case GUI_K_ENTER:
@@ -397,6 +521,18 @@ void gui_vlist_set(struct gui_widget *w, int row)
 }
 
 void gui_vlist_multi(struct gui_widget *w, int on) { VL(w)->multi = on != 0; }
+
+void gui_vlist_view(struct gui_widget *w, int view)
+{
+    struct vlist *l = VL(w);
+    int cur = l->cur;
+    l->view = view == GUI_VIEW_ICONS ? GUI_VIEW_ICONS : GUI_VIEW_DETAIL;
+    l->band = 0;
+    l->top = 0;
+    if (cur >= 0)
+        see(l, cur);                            /* (the current row stays on the screen) */
+    gui_damage(w);
+}
 
 int gui_vlist_chosen(struct gui_widget *w, unsigned long *ids, int room)
 {

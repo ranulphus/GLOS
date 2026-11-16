@@ -618,6 +618,7 @@ static void v_row(void *ctx, int row, struct gui_vrow *out)
     snprintf(size, sizeof size, "%d", item * 37 % 10007);
     out->cell[0] = name, out->cell[1] = size, out->cell[2] = item % 3 ? "Plain" : "Third";
     out->icon = item % 5 ? icon_doc : icon_dir;
+    out->big = gui_icon(item % 5 ? "file-text" : "folder", 1);  /* (the icon view's: GLOS's own, by name) */
     out->id = (unsigned long)item + 1;
 }
 
@@ -651,6 +652,15 @@ static void v_more(struct gui_widget *w, int what)
     say("rows%s %d", "", vn);
 }
 
+static void v_icons(struct gui_widget *w, int what)     /* the detail view and the icon view, turn about */
+{
+    static int icons;
+    (void)w, (void)what;
+    icons = !icons;
+    gui_vlist_view(vl, icons ? GUI_VIEW_ICONS : GUI_VIEW_DETAIL);
+    say("view %s", icons ? "icons" : "detail", 0);
+}
+
 static void v_asked(struct gui_widget *w, int what)     /* how many rows the list asked for since last told */
 {
     unsigned long ids[4];
@@ -677,6 +687,7 @@ static void vlist(void)
     row = gui_hbox(box, -1, 0);
     gui_button(row, "&More rows", v_more, 0);
     gui_button(row, "&Asked?", v_asked, 0);
+    gui_button(row, "&Icons", v_icons, 0);
     vl = gui_vlist(box, 3, heads, widths, &model);
     gui_vlist_multi(vl, 1);
     gui_on(vl, v_on, 0);

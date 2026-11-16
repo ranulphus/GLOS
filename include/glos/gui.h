@@ -348,6 +348,7 @@ const unsigned char *gui_glyph(const char *name);              /* a one-colour g
 struct gui_vrow {
     const char *cell[GUI_VCOLS];        /* its cells' texts (the model's to keep until it is next asked) */
     const unsigned char *icon;          /* a GUI_ICON_W icon before the first cell, or NULL */
+    const unsigned char *big;           /* a GUI_BIG_W icon for the icon view (NULL: the small one, in its middle) */
     unsigned long id;                   /* the row's own, whatever place it has (not 0) */
 };
 struct gui_model {
@@ -366,6 +367,11 @@ int gui_vlist_get(struct gui_widget *w);               /* the current row's plac
 unsigned long gui_vlist_id(struct gui_widget *w);      /* ... its id, or 0 */
 void gui_vlist_set(struct gui_widget *w, int row);     /* the current row, chosen alone (-1: none) */
 void gui_vlist_multi(struct gui_widget *w, int on);    /* more than one row chosen (Ctrl, Shift) */
+enum { GUI_VIEW_DETAIL, GUI_VIEW_ICONS };
+void gui_vlist_view(struct gui_widget *w, int view);   /* rows of cells under the header (GUI_VIEW_DETAIL), or big
+                                           icons in a grid with the first cell's text under each (GUI_VIEW_ICONS:
+                                           the arrows move four ways; with gui_vlist_multi, a press on nothing
+                                           held and moved is a rubber band that chooses the icons it touches) */
 int gui_vlist_chosen(struct gui_widget *w, unsigned long *ids, int room);      /* how many rows are chosen, and the
                                            ids of as many as there is room for */
 void gui_vlist_sort(struct gui_widget *w, int *col, int *down);        /* at GUI_ON_SORT: the column whose head was

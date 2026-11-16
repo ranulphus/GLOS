@@ -363,11 +363,16 @@ which and why. The apps keep working at every step (they move as the toolkit doe
   `gui_vlist_sort` says the column and the way, a second press on the same head turning it), the app sorts and
   says the list changed. The head shows the way.
 - **Columns:** an edge in the header is dragged; the last column has what is left.
-- **Still to come in C3:** the icon views and rubber-band selection, columns reordered, type-ahead, the virtual
-  tree, and `gui_list` on top of the model.
+- **The icon view** (second part, 2026-11-16; `gui_vlist_view(w, GUI_VIEW_ICONS)`): the same rows as big icons
+  in a grid (the row's `big` icon, 32 pixels, or its small one in the middle), the first cell's text under
+  each; the arrows move four ways; only the lines of icons on the screen are asked for. With more than one row
+  to be chosen, a press on nothing held and moved is a rubber band that chooses the icons it touches.
+- **Still to come in C3:** columns reordered, type-ahead, small-icon and thumbnail views, the virtual tree, and
+  `gui_list` on top of the model.
 - **Tests:** `vlist` (GUITEST's page: twenty rows, then ten thousand; End and Page Up; the app counts the
   distinct rows it was asked for, a few screens of ten thousand; sorted downward with the current row kept by
-  its id; a range and a row more chosen; a column dragged wider; Enter).
+  its id; a range and a row more chosen; a column dragged wider; Enter; the icon view, the arrows in it, a
+  rubber band over nine icons, and back), on the host and on the desktop in Loop A.
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

@@ -2,7 +2,9 @@
 # Twenty rows at first, then ten thousand at once (rows that arrive); End and Page Up through them; the model was
 # asked for a screen or so of rows, not the list (counted by the app); a press on the Name head sorts downward
 # (the app's doing, at the second press) and the row that was current is current still, found by its id; Shift
-# chooses a range, Ctrl and the arrows and Space a row more; a column's edge dragged; Enter opens the row.
+# chooses a range, Ctrl and the arrows and Space a row more; a column's edge dragged; Enter opens the row. Then the icon
+# view of the same rows: big icons in a grid, the arrows four ways, a rubber band from a press on nothing that
+# chooses the nine icons it touches, and the detail view again.
 run GUITEST.EXE vlist
 wait "GUITEST Virtual list"
 key down down
@@ -26,6 +28,17 @@ key home
 key enter
 key alt+a
 shot top "GUITEST Virtual list"
+key alt+i
+key tab
+shot icons "GUITEST Virtual list"
+key right right down
+shot icons-moved "GUITEST Virtual list"
+drag "GUITEST Virtual list" 340 60 120 150
+shot icons-band "GUITEST Virtual list"
+key alt+a
+key alt+i
+key tab
+shot detail-again "GUITEST Virtual list"
 key alt+f4
 gone "GUITEST Virtual list"
 expect GUI vlist
@@ -34,4 +47,7 @@ expect GUI row 9999
 expect GUI asked for a few screens of rows, not the list; chosen 1
 expect GUI sorted down by column 0
 expect GUI open id 10000
+expect GUI view icons
+expect GUI asked for a few screens of rows, not the list; chosen 9
+expect GUI view detail
 expect GUI end
