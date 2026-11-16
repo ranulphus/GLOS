@@ -96,6 +96,14 @@ int main(void)
     CHECK(cs_chs_lba(&g, 0x0040, 0, &lba) != 0);        /* sector 0, cylinder 256 */
     CHECK(cs_chs_lba(&g, 0x0001, 32, &lba) != 0);       /* head 32 */
     CHECK(cs_chs_lba(&g, (65 << 8) | 1, 0, &lba) != 0); /* cylinder 65 */
+    {                                                   /* no geometry (bench F's BIOS: 08h says 0 sectors a track):
+                                                           every CHS address refused, and no division by 0 back */
+        struct cgeo none = { 0, 0, 0 };
+        u32 cx = 1, dh = 1;
+        CHECK(cs_chs_lba(&none, 0x0001, 0, &lba) != 0 && cs_chs_lba(&none, 0xFFFF, 0xEF, &lba) != 0);
+        cs_lba_chs(&none, 1234, &cx, &dh);
+        CHECK(cx == 0 && dh == 0);
+    }
     for (lba = 0; lba < 65u * 32 * 63; lba += 37) {
         u32 back;
         cs_lba_chs(&g, lba, &cx, &dh);

@@ -776,8 +776,10 @@ void cache_init(struct bootinfo *bi)
     for (i = 0; i < bi->n_disks && c.nd < BI_DISKS; i++) {
         struct bi_disk *b = &bi->disks[i];
         struct drive *d = &c.d[c.nd];
-        if (b->bps != 512 || (b->flags & BI_DISK_REMOVE) || b->sectors_hi || !b->heads || !b->spt)
-            continue;
+        if (b->bps != 512 || (b->flags & BI_DISK_REMOVE) || b->sectors_hi
+            || ((!b->heads || !b->spt) && (b->flags & (BI_DISK_EDD | BI_DISK_PARAMS)) != (BI_DISK_EDD | BI_DISK_PARAMS)))
+            continue;                           /* (no CHS geometry, as on bench F: its LBA calls alone, by 48h's size;
+                                                   cs_chs_lba refuses every CHS address, so those pass on) */
         d->dl = (u8)b->dl;
         d->idx = (u8)c.nd;
         d->edd = (b->flags & BI_DISK_EDD) ? 1 : 0;

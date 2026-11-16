@@ -121,7 +121,12 @@ int cs_chs_lba(const struct cgeo *g, u32 cx, u32 dh, u32 *lba)
 
 void cs_lba_chs(const struct cgeo *g, u32 lba, u32 *cx, u32 *dh)
 {
-    u32 sec = lba % g->spt + 1, t = lba / g->spt, head = t % g->heads, cyl = t / g->heads;
+    u32 sec, t, head, cyl;
+    if (!g->spt || !g->heads) {                 /* (never asked of a disk without a geometry: its reads are by LBA) */
+        *cx = *dh = 0;
+        return;
+    }
+    sec = lba % g->spt + 1, t = lba / g->spt, head = t % g->heads, cyl = t / g->heads;
     *cx = ((cyl & 0xFF) << 8) | ((cyl >> 2) & 0xC0) | sec;
     *dh = head;
 }

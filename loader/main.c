@@ -446,7 +446,10 @@ static char cfg_blaster[48];                    /* [sound] blaster = ..., in pla
 
 /* The BIOS's hard disks (INT 13h 08h, 41h, 48h; the count at 0040:0075) and
    whether SMARTDRV is there (INT 2Fh 4A10h): the disk cache's (bootinfo v5).
-   Read only; ES:DI zero for 08h, as some BIOSes want. */
+   Read only; ES:DI zero for 08h, as some BIOSes want. A disk whose 08h fails or
+   says no sectors a track (bench F's Award BIOS of 2005: CX FFC0h for a 60 GB
+   disk) is kept if the extensions (41h, 48h) give its size: its geometry is then
+   0/0/0, and the cache takes only its LBA calls. */
 static void disks_probe(void)
 {
     static unsigned char p48[30];
@@ -467,12 +470,14 @@ static void disks_probe(void)
         r.h.ah = 0x08;
         r.h.dl = (unsigned char)(0x80 + i);
         int86x(0x13, &r, &r, &sr);
-        if (r.x.cflag || !(r.h.cl & 63))
-            continue;
         d->dl = 0x80 + i;
-        d->cyls = (unsigned long)(r.h.ch | ((r.h.cl & 0xC0) << 2)) + 1;
-        d->heads = (unsigned long)r.h.dh + 1;
-        d->spt = r.h.cl & 63;
+        if (r.x.cflag || !(r.h.cl & 63)) {
+            d->cyls = d->heads = d->spt = 0;
+        } else {
+            d->cyls = (unsigned long)(r.h.ch | ((r.h.cl & 0xC0) << 2)) + 1;
+            d->heads = (unsigned long)r.h.dh + 1;
+            d->spt = r.h.cl & 63;
+        }
         d->sectors_lo = d->cyls * d->heads * d->spt;
         d->sectors_hi = 0;
         d->bps = 512;
@@ -501,6 +506,8 @@ static void disks_probe(void)
                 d->bps = *(unsigned *)(p48 + 24);
             }
         }
+        if (!d->spt && !(d->flags & BI_DISK_PARAMS))
+            continue;                           /* (neither 08h's geometry nor 48h's size: not a disk to us) */
         say("GLOS-BOOT disk dl=%02lx chs=%lu/%lu/%lu sectors=%lu bps=%lu flags=%lx", d->dl, d->cyls, d->heads, d->spt,
             d->sectors_lo, d->bps, d->flags);
         bi.n_disks++;
