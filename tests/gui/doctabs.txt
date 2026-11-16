@@ -1,0 +1,34 @@
+# Tabs that close, move and overflow (toolkit 2, step C5; docs/v1/toolkit-2.md 7): GUITEST's six documents in one
+# scrolling row, with a close box on each title, a "+" and a list of every title at the strip's end. A close box
+# on a page with changes (its title ends in "*") is answered "kept" by the app this once, and the middle button on
+# it then closes it; a title dragged onto the next moves its page; "+" adds a page and chooses it; the list chooses
+# a page out of sight; Ctrl+F4 in a page closes it; the order read back.
+run GUITEST.EXE doctabs
+wait "GUITEST Document tabs"
+shot start "GUITEST Document tabs"
+click "GUITEST Document tabs" 199 46
+shot kept "GUITEST Document tabs"
+click "GUITEST Document tabs" 160 46 middle
+drag "GUITEST Document tabs" 50 46 160 46
+shot moved "GUITEST Document tabs"
+click "GUITEST Document tabs" 324 46
+shot new "GUITEST Document tabs"
+click "GUITEST Document tabs" 342 46
+shot list "GUITEST Document tabs"
+key down down down enter
+shot picked "GUITEST Document tabs"
+key tab
+key ctrl+f4
+key alt+o
+shot end "GUITEST Document tabs"
+key alt+f4
+gone "GUITEST Document tabs"
+expect GUI doctabs
+expect GUI kept NOTES.TXT (it had changes)
+expect GUI closed NOTES.TXT
+expect GUI order GLOS.CFG,README.TXT,AUTOEXEC.BAT,FDCONFIG.SYS,TODO.TXT
+expect GUI new Untitled 1
+expect GUI page 2
+expect GUI closed AUTOEXEC.BAT
+expect GUI order GLOS.CFG,README.TXT,FDCONFIG.SYS,TODO.TXT,Untitled 1
+expect GUI end

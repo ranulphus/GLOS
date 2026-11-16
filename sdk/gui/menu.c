@@ -30,7 +30,15 @@ struct gui_menu {
     struct item *items;
     int n, room;
     unsigned mnemonic;
+    struct gui_widget *to;              /* a widget's own menu (gui_menu_to): the chosen id goes to its function */
+    void (*to_fn)(struct gui_widget *w, int id);
 };
+
+void gui_menu_to(struct gui_menu *m, struct gui_widget *w, void (*fn)(struct gui_widget *w, int id))
+{
+    m->to = w;
+    m->to_fn = fn;
+}
 
 struct gui_menubar {
     struct gui_widget w;
@@ -557,7 +565,9 @@ static void choose(int i)
     }
     id = m->items[i].id;
     close_menu();
-    if (choice) {
+    if (m->to && m->to_fn) {                    /* (a widget's own menu: the tabs' list of titles) */
+        m->to_fn(m->to, id);
+    } else if (choice) {
         gui_choice_value(choice, 1, id);
         gui_send(choice, GUI_ON_SELECT);
     } else if (owner) {

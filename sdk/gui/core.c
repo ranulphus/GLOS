@@ -951,6 +951,13 @@ static void key(struct gui_window *w, const struct os_event *ev)
         if (f && context_menu(w, f, f->r.x + 8, f->r.y + (f->r.h > 24 ? 24 : f->r.h)))
             return;
     }
+    if (e.key == GUI_K_F4 && (e.mods & (GLOS_MOD_CTRL | GLOS_MOD_ALT)) == GLOS_MOD_CTRL) {
+        struct gui_widget *t;                   /* Ctrl+F4 in a page: its tabs' (GUI_TABS_CLOSE) */
+        for (t = w->focus; t && t->cls != &gui_tabs_class; t = t->parent)
+            ;
+        if (t && t != w->focus && t->cls->event(t, &e))
+            return;
+    }
     if (e.key == GUI_K_TAB && e.mods & GLOS_MOD_CTRL) {
         tabs_key(w, &e);
         return;

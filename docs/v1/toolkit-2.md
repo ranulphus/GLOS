@@ -435,6 +435,48 @@ As designed above, with these particulars:
   a Pentium II). The work lasts ten seconds because Loop A's driver takes seconds a step on a 486: with two, the
   dialog came and went unseen.
 
+### C5 in detail (2026-11-16, before it is built)
+
+In three parts, each with its GUITEST page and script, on the host and in Loop A:
+- **C5a, splitters** (`sdk/gui/split.c`): `gui_split(parent, vertical, at)`; the app makes the two panes in it.
+  `at` is the first pane's size, kept as the window changes, or (less than 0) minus the second's, kept instead.
+  The bar is the split's own child, placed between the panes so that Tab reaches it between them; dragged, or
+  moved by the arrows (8 pixels, Ctrl 1); Home and End fold a pane away and back. Least sizes (32 pixels unless
+  `gui_split_min` says). `GUI_ON_CHANGE` when the user moved it, for the app's settings (`gui_split_get`).
+- **C5b, tabs that close, move and overflow** (the tabs widget grows; old uses unchanged unless they ask):
+  `gui_tabs_flags(tabs, GUI_TABS_CLOSE | GUI_TABS_MOVE | GUI_TABS_NEW | GUI_TABS_MENU)`. A close box on each
+  title (and the middle button, and Ctrl+F4 while the tabs or their page have the keys) asks the app
+  (`GUI_ON_CLOSE`, `gui_tabs_closing` says which; the app removes the page with `gui_tab_remove` when it agrees:
+  a document with changes asks first). A title dragged along the strip moves its page (`GUI_ON_MOVE`; the order
+  is the pages' order, so the app reads it from them). A "+" after the last title asks for a page (`GUI_ON_NEW`).
+  With more titles than fit, a "v" button at the strip's end drops a menu of every title (GUI_TABS_SCROLL keeps
+  its arrows as well). Ctrl+Tab and Ctrl+Page Up/Down as now.
+- **C5c, docking panes and their layout** (`sdk/gui/dock.c`): a window's dock (`gui_dock(win, centre)`) holds the
+  app's main content in the middle and panes at its four sides; `gui_pane(dock, id, title, side)` makes a pane
+  (a vbox for its content) docked at a side, several at one side shown as tabs, the sides separated from the
+  middle by splitters. A pane is hidden and shown again (`gui_pane_show`, the View menu's checks), moved to
+  another side or floated in a tool window of its own (WIN's tool window kind) by its title's context menu or by
+  dragging its title onto a side's edge. `gui_dock_save(dock, buf, room)` and `gui_dock_load` give the layout as
+  one line of text (sides, sizes, tabs' order, which shown, floating places) for the app's settings. Narrower than
+  the panes and the middle's least sizes (640x480), the side panes fold into tabs at one side.
+
+### C5 as built, first two parts (2026-11-16)
+
+- **C5a, splitters** as designed. The bar has the keys once pressed (a drag leaves it focused). A folded pane is
+  hidden (no keys go into it); dragging the bar out unfolds it. `gui_split_get` is the place when unfolded,
+  `gui_split_folded` says which pane is folded.
+- **C5b, tabs:** as designed, in the strip's styles (not GUI_TABS_LIST). A press on a title's close box or the
+  middle button on a title asks (`GUI_ON_CLOSE`), and so does Ctrl+F4 with the keys on the tabs or anywhere in
+  their pages (passed up by the window when the page's widget doesn't take it). A title moves once dragged more
+  than 5 pixels, a bar showing where; the moved page stays chosen. The "+" and the list button take the strip's
+  right end, the scrolling arrows before them; the list is a pop-up menu whose choice goes to the tabs themselves
+  (`gui_menu_to`, the toolkit's own), the chosen title checked. Old tabs (no flags) draw as before.
+- **Tests:** `split` (GUITEST's page: a tree beside a list, an output pane under the list; the bar dragged, its
+  arrows, a pane folded and back, the bar across moved up; the window made wider: the tree keeps its width, the
+  output pane its height) and `doctabs` (six documents in a scrolling row: a page with changes kept at its close
+  box, then closed by the middle button; a title dragged onto the next; "+"; the list; Ctrl+F4 in a page; the
+  order read back). Both scripts' players learnt a middle button (`click ... middle`).
+
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
 - **Farm-Fresh** (FatCow; CC BY 3.0) for colour icons and **Font Awesome Free, solid** (CC BY 4.0) for the

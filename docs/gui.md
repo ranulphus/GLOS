@@ -80,7 +80,8 @@ compare, and costs a redraw twice a second for nothing.
 | virtual tree (toolkit 2) | a tree that keeps only the ids on show: the model gives a node's children's ids when it opens, and their texts and icons when drawn (`gui_vtree`, `struct gui_tmodel`); badges |
 | choice | a button that drops its list of items down |
 | spin box, slider | a number in a range |
-| tabs, group, form, scrolling area, boxes, space, separator | containers and spacing |
+| tabs, group, form, scrolling area, boxes, space, separator | containers and spacing; tabs may close (a box on each title, the middle button, Ctrl+F4: `GUI_ON_CLOSE`, the app removes the page with `gui_tab_remove`), move by dragging (`GUI_ON_MOVE`), add a page ("+", `GUI_ON_NEW`) and list every title (a button at the strip's end): `gui_tabs_flags` |
+| splitter (toolkit 2) | two panes and a bar between them (`gui_split`): dragged, or moved by its keys between the panes in Tab's order; Home and End fold a pane; one pane keeps its size as the window changes (`at`, or minus the other's); `GUI_ON_CHANGE` for the app's settings |
 | menu bar, menus | menus are pop-up windows (below); items with letters, shortcuts, checks; separators |
 | progress bar, image, canvas, status bar | a canvas is the app's to draw in and has its events |
 | dialogs | message (OK, OK and Cancel, Yes and No, Yes No and Cancel), a line to type, open and save a file |

@@ -30,6 +30,14 @@
  *   GUITEST views       "GUITEST List views" (toolkit 2, step C3): the virtual list's
  *                       columns moved by their heads, and its four views (detail, big
  *                       icons, small icons, thumbnails the page draws)
+ *   GUITEST split       "GUITEST Splitters" (toolkit 2, step C5): a folder tree beside
+ *                       a list, an output pane under the list that keeps its height;
+ *                       the bars dragged, moved by keys, panes folded; the window
+ *                       made wider (each split keeps the pane it should)
+ *   GUITEST doctabs     "GUITEST Document tabs" (toolkit 2, step C5): tabs that close
+ *                       (a box, the middle button, Ctrl+F4; a page with changes says no
+ *                       once), move by dragging, add a page ("+") and list every
+ *                       title (the button at the strip's end)
  *   GUITEST tasks       "GUITEST Tasks" (toolkit 2, step C4): background work: a task
  *                       "reads" ten thousand rows in pieces on a thread of its own,
  *                       the list filling as they are posted; its progress dialog
@@ -805,6 +813,150 @@ static void views(void)
     say("views", "", 0);
 }
 
+/* ---- splitters (toolkit 2, step C5) */
+static struct gui_widget *sp_side, *sp_out;
+
+static void sp_where(struct gui_widget *w, int what)   /* both bars, as the app would keep them */
+{
+    char text[64];
+    (void)w, (void)what;
+    snprintf(text, sizeof text, "side %d fold %d, out %d fold %d", gui_split_get(sp_side), gui_split_folded(sp_side),
+             gui_split_get(sp_out), gui_split_folded(sp_out));
+    say("%s", text, 0);
+}
+
+static void sp_changed(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_CHANGE)
+        say("moved%s %d", w == sp_side ? " side" : " out", gui_split_get(w));
+}
+
+static void sp_wider(struct gui_widget *w, int what)
+{
+    (void)w, (void)what;
+    gui_resize(win, win->w + 100, win->h);
+    say("wider", "", 0);
+}
+
+static void split_page(void)
+{
+    static const char *const heads[] = { "Name", "Size" };
+    static const int widths[] = { 120, 60 };
+    static const char *const rows[][2] = { { "README.TXT", "2 KB" }, { "GLOS.EXE", "57 KB" }, { "GLOSK.BIN", "951 KB" },
+                                           { "FONTS.DAT", "109 KB" } };
+    struct gui_widget *box, *row, *l, *t, *right, *out;
+    struct gui_node *n;
+    int i;
+    win = gui_window("GUITEST Splitters", 420, 280, 0);
+    box = gui_vbox(win->root, -1, -1);
+    gui_grow(box, 1);
+    row = gui_hbox(box, -1, 0);
+    gui_button(row, "&Where?", sp_where, 0);
+    gui_button(row, "W&ider", sp_wider, 0);
+    sp_side = gui_split(box, 0, 130);           /* the tree keeps its width */
+    gui_grow(sp_side, 1);
+    gui_on(sp_side, sp_changed, 0);
+    t = gui_tree(sp_side);
+    n = gui_tree_add(t, NULL, "C:", gui_icon("drive", 0), NULL, 1);
+    gui_tree_add(t, n, "GLOS", gui_icon("folder", 0), NULL, 0);
+    gui_tree_add(t, n, "FREEDOS", gui_icon("folder", 0), NULL, 0);
+    gui_tree_expand(t, n, 1);
+    sp_out = right = gui_split(sp_side, 1, -60);        /* the output pane keeps its height */
+    gui_on(sp_out, sp_changed, 0);
+    l = gui_list(right, 2, heads, widths);
+    for (i = 0; i < 4; i++)
+        gui_list_add(l, rows[i], gui_icon("file-text", 0), NULL);
+    out = gui_vbox(right, 0, 4);
+    gui_label(out, "Output: 4 files");
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(t);
+    say("split", "", 0);
+}
+
+/* ---- tabs that close, move and overflow (toolkit 2, step C5) */
+static struct gui_widget *dt;
+static int dt_new;
+
+static void dt_page(const char *title)
+{
+    struct gui_widget *p = gui_tab(dt, title), *f;
+    gui_label(p, "A document's page:");
+    f = gui_field(p, 24);
+    gui_set_text(f, title);
+}
+
+static void dt_order(struct gui_widget *w, int what)   /* the pages' titles, in order */
+{
+    char text[160];
+    int i, n = 0;
+    struct gui_widget *p;
+    (void)w, (void)what;
+    text[0] = 0;
+    for (i = 0; (p = gui_tabs_page(dt, i)) != NULL; i++)
+        n += snprintf(text + n, sizeof text - (size_t)n, "%s%s", i ? "," : "", gui_get_text(p));
+    say("order %s", text, 0);
+}
+
+static void dt_on(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_CLOSE) {
+        int i = gui_tabs_closing(w);
+        struct gui_widget *p = gui_tabs_page(w, i);
+        char title[48];
+        snprintf(title, sizeof title, "%s", gui_get_text(p));
+        if (title[0] && title[strlen(title) - 1] == '*') {     /* changes: kept, this once (as "Save first?") */
+            title[strlen(title) - 1] = 0;
+            gui_set_text(p, title);
+            gui_damage(w);
+            say("kept %s (it had changes)", title, 0);
+            return;
+        }
+        gui_tab_remove(w, i);
+        say("closed %s", title, 0);
+    } else if (what == GUI_ON_MOVE) {
+        dt_order(w, 0);
+    } else if (what == GUI_ON_NEW) {
+        char title[24];
+        snprintf(title, sizeof title, "Untitled %d", ++dt_new);
+        dt_page(title);
+        gui_tabs_set(w, 9999);                  /* (out of range: nothing; the new page is chosen below) */
+        {
+            int n;
+            for (n = 0; gui_tabs_page(w, n); n++)
+                ;
+            gui_tabs_set(w, n - 1);
+        }
+        say("new %s", title, 0);
+    } else if (what == GUI_ON_SELECT) {
+        say("page%s %d", "", gui_tabs_get(w));
+    }
+}
+
+static void doctabs(void)
+{
+    static const char *const titles[] = { "README.TXT", "NOTES.TXT*", "GLOS.CFG", "AUTOEXEC.BAT", "FDCONFIG.SYS",
+                                          "TODO.TXT" };
+    struct gui_widget *box, *row;
+    int i;
+    win = gui_window("GUITEST Document tabs", 360, 200, 0);
+    box = gui_vbox(win->root, -1, -1);
+    gui_grow(box, 1);
+    row = gui_hbox(box, -1, 0);
+    gui_button(row, "&Order?", dt_order, 0);
+    dt = gui_tabs(box);
+    gui_grow(dt, 1);
+    gui_tabs_style(dt, GUI_TABS_SCROLL);
+    gui_tabs_flags(dt, GUI_TABS_CLOSE | GUI_TABS_MOVE | GUI_TABS_NEW | GUI_TABS_MENU);
+    for (i = 0; i < 6; i++)
+        dt_page(titles[i]);
+    gui_on(dt, dt_on, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(dt);
+    say("doctabs", "", 0);
+}
+
 /* ---- the virtual tree (toolkit 2, step C3). Ids: 1, 2, 3 at the top; a node's children are its id times ten
    and 1, 2, 3 (to three levels); but node 2's are five thousand leaves, 2000000 and on. */
 static struct gui_widget *vt;
@@ -1009,6 +1161,10 @@ int main(int argc, char **argv)
         tasks();
     else if (!strcmp(what, "views"))
         views();
+    else if (!strcmp(what, "split"))
+        split_page();
+    else if (!strcmp(what, "doctabs"))
+        doctabs();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

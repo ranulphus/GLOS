@@ -1,0 +1,31 @@
+# Splitters (toolkit 2, step C5; docs/v1/toolkit-2.md 7): GUITEST's folder tree beside a list, and an output pane
+# under the list that keeps its height. The upright bar dragged to the right (it has the keys then) and the arrows
+# (8 pixels, Ctrl 1); End folds the right side away and End brings it back; the bar across moved up by its keys (the output
+# pane grows: its `at` is minus its height); the window made 100 pixels wider: the tree keeps its width and the
+# output pane its height; the places read back as the app would keep them.
+run GUITEST.EXE split
+wait "GUITEST Splitters"
+shot start "GUITEST Splitters"
+drag "GUITEST Splitters" 141 120 191 120
+shot dragged "GUITEST Splitters"
+key right ctrl+left
+shot keyed "GUITEST Splitters"
+key end
+shot folded "GUITEST Splitters"
+key end
+key tab tab
+key up up
+shot output-taller "GUITEST Splitters"
+key alt+i
+shot wider "GUITEST Splitters"
+key alt+w
+key alt+f4
+gone "GUITEST Splitters"
+expect GUI split
+expect GUI moved side 180
+expect GUI moved side 188
+expect GUI moved side 187
+expect GUI moved out -76
+expect GUI wider
+expect GUI side 187 fold 0, out -76 fold 0
+expect GUI end

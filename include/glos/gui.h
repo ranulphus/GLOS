@@ -88,6 +88,7 @@ struct gui_ev {
 #define GUI_K_ENTER  0x1C
 #define GUI_K_SPACE  0x39
 #define GUI_K_F1     0x3B
+#define GUI_K_F4     0x3E
 #define GUI_K_F10    0x44
 #define GUI_K_MENU   0x15D              /* the Menu key (a context menu, as Shift+F10) */
 #define GUI_K_KPENTER 0x11C
@@ -109,8 +110,11 @@ enum {
     GUI_ON_SELECT,                      /* what is chosen in it changed (a list, a tree, tabs, a choice) */
     GUI_ON_ACTIVATE,                    /* an item was opened (Enter, a double click); a field's Enter */
     GUI_ON_SORT,                        /* a virtual list's column head was pressed: the app sorts (gui_vlist_sort) */
-    GUI_ON_CONTEXT                      /* its context menu is about to open (gui_context): the app may change the
+    GUI_ON_CONTEXT,                     /* its context menu is about to open (gui_context): the app may change the
                                            menu for what is chosen there */
+    GUI_ON_CLOSE,                       /* a page's close was asked (tabs with GUI_TABS_CLOSE: gui_tabs_closing) */
+    GUI_ON_MOVE,                        /* a page was moved along the tabs (GUI_TABS_MOVE): the pages' order is new */
+    GUI_ON_NEW                          /* the tabs' "+" was pressed (GUI_TABS_NEW): the app adds a page */
 };
 
 struct gui_widget;
@@ -254,11 +258,32 @@ struct gui_widget *gui_row(struct gui_widget *form, const char *label, struct gu
 struct gui_widget *gui_group(struct gui_widget *parent, const char *title);    /* a frame with a title, a vbox in it */
 struct gui_widget *gui_space(struct gui_widget *parent, int w, int h);         /* grow 1 if both are 0 */
 struct gui_widget *gui_scroll(struct gui_widget *parent);      /* a vbox that scrolls up and down */
+/* A splitter (toolkit 2): two panes, made in it by the app (the first, then the second), and a bar between them,
+   side by side (vertical 0: the bar upright) or one above the other (1). at: the first pane's size in pixels, kept
+   as the window's size changes; less than 0: minus the second pane's, kept instead. The bar is dragged, or takes
+   the keyboard between the panes in Tab's order: the arrows move it 8 pixels (Ctrl: 1); Home folds the first pane
+   away, End the second, the same key again unfolds it. GUI_ON_CHANGE (the split's gui_on) when the user moved or
+   folded it, for the app to keep gui_split_get in its settings. */
+struct gui_widget *gui_split(struct gui_widget *parent, int vertical, int at);
+int gui_split_get(struct gui_widget *split);            /* `at` as it is now (the place when unfolded) */
+void gui_split_set(struct gui_widget *split, int at);   /* (unfolded) */
+void gui_split_min(struct gui_widget *split, int first, int second);   /* the least each pane has while both fit (32) */
+int gui_split_folded(struct gui_widget *split);         /* 0, or 1 / 2: that pane folded away */
 struct gui_widget *gui_tabs(struct gui_widget *parent);
 struct gui_widget *gui_tab(struct gui_widget *tabs, const char *title);        /* the page: a vbox */
 int gui_tabs_get(struct gui_widget *tabs);
 void gui_tabs_set(struct gui_widget *tabs, int page);
 enum { GUI_TABS_ROWS, GUI_TABS_SCROLL, GUI_TABS_LIST };
+#define GUI_TABS_CLOSE 1                /* a close box on each title; its press, the middle button on a title or
+                                           Ctrl+F4 in the pages: GUI_ON_CLOSE (the app removes the page if it agrees) */
+#define GUI_TABS_MOVE  2                /* a title dragged along the strip moves its page (GUI_ON_MOVE) */
+#define GUI_TABS_NEW   4                /* a "+" at the strip's end (GUI_ON_NEW) */
+#define GUI_TABS_MENU  8                /* a button at the strip's end that drops a list of every title */
+void gui_tabs_flags(struct gui_widget *tabs, unsigned flags);  /* (the strip's styles, not GUI_TABS_LIST) */
+int gui_tabs_closing(struct gui_widget *tabs);         /* at GUI_ON_CLOSE: the page asked to close */
+struct gui_widget *gui_tabs_page(struct gui_widget *tabs, int page);   /* a page by its place, or NULL */
+void gui_tab_remove(struct gui_widget *tabs, int page);        /* a page gone (its widgets too); the one after it
+                                           chosen if it was the chosen one (else the one before) */
 void gui_tabs_style(struct gui_widget *tabs, int style);       /* titles that don't fit in a row: in more rows
                                            (GUI_TABS_ROWS, the default), one row with arrows that scroll it
                                            (GUI_TABS_SCROLL), or a list down the left (GUI_TABS_LIST); each laid out

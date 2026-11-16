@@ -82,6 +82,10 @@ void gui_cmd_update(struct gui_window *w);      /* the window's on_update */
 void gui_cmd_free(struct gui_window *w);
 extern const struct gui_class gui_toolbar_class;
 
+/* ---- menu.c */
+void gui_menu_to(struct gui_menu *m, struct gui_widget *w, void (*fn)(struct gui_widget *w, int id));
+                                                /* the menu's choice to w's fn, not the window's on_command */
+
 /* ---- task.c */
 extern int (*gui_post_hook)(unsigned code);     /* (core.c) an event of the app's own: 1 if it was the tasks'
                                                    (handled); NULL until a task is started */

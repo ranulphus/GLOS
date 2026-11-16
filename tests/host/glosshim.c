@@ -1105,6 +1105,8 @@ static int step(void)
             while (word(&p, b, sizeof b))
                 if (!strcmp(b, "right"))
                     button = 2;
+                else if (!strcmp(b, "middle"))
+                    button = 4;
                 else if (!strcmp(b, "double"))
                     dbl = 1;
             point(w->x + x, w->y + y);

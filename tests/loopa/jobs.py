@@ -6779,7 +6779,7 @@ class GuiDriver:
                 if not w:
                     self.bad.append("%s-%d" % (cmd, n))
                     continue
-                button = 2 if "right" in args else 1
+                button = 2 if "right" in args else 4 if "middle" in args else 1
                 self.point(w["x"] + int(args[1]), w["y"] + int(args[2]))
                 if cmd == "drag":
                     dx, dy = int(args[3]) - int(args[1]), int(args[4]) - int(args[2])
