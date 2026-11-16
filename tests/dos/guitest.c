@@ -296,13 +296,13 @@ static void text(void)
     for (f = 0; f < 3; f++)
         for (i = 0; i < (int)(sizeof lines / sizeof lines[0]); i++) {
             l = gui_label(box, lines[i]);
-            gui_label_style(l, fonts[f], 0, -1);
+            gui_label_style(l, fonts[f], GFX_NONE, -1);
         }
     for (i = 0; i < 48; i++)                    /* (B0h-DFh: shades, lines and blocks, as DOS programs draw) */
         bytes[i] = (char)(0xB0 + i);
     bytes[48] = 0;
     cp_to_utf8(437, bytes, drawing, sizeof drawing);
-    gui_label_style(gui_label(box, drawing), gui_mono, 0, -1);
+    gui_label_style(gui_label(box, drawing), gui_mono, GFX_NONE, -1);
     gui_show(win, 1);
 }
 

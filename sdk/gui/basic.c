@@ -34,7 +34,7 @@ static void label_draw(struct gui_widget *w, struct gfx_surface *s)
     else
         x += pad;
     gui_draw_text(s, x, w->r.y + (w->r.h - l->font->height) / 2, l->font, gui_get_text(w),
-                  w->flags & GUI_DISABLED ? GUI_DIM : l->rgb);
+                  w->flags & GUI_DISABLED ? GUI_DIM : l->rgb != GFX_NONE ? l->rgb : l->boxed ? GUI_FIELD_TEXT : GUI_TEXT);
 }
 
 const struct gui_class gui_label_class = { "label", 0, label_draw, NULL, label_measure, NULL, NULL };
@@ -43,7 +43,7 @@ struct gui_widget *gui_label(struct gui_widget *parent, const char *text)
 {
     struct label *l = (struct label *)gui_new(parent, &gui_label_class, sizeof *l);
     l->font = gui_font;
-    l->rgb = GUI_LINE;
+    l->rgb = GFX_NONE;                  /* (the theme's text, whatever the theme is when it is drawn) */
     l->align = -1;
     gui_set_text(&l->w, text);
     return &l->w;
@@ -94,7 +94,7 @@ static void button_draw(struct gui_widget *w, struct gfx_surface *s)
     }
     gui_draw_box(s, &r, GUI_FACE, pressed);
     gui_draw_text(s, r.x + (r.w - tw) / 2 + pressed, r.y + (r.h - gui_font->height) / 2 + pressed, gui_font,
-                  gui_get_text(w), on ? GUI_LINE : GUI_DIM);
+                  gui_get_text(w), on ? GUI_TEXT : GUI_DIM);
     if (gui_is_focus(w)) {
         struct gfx_rect f = { r.x + 3, r.y + 3, r.w - 6, r.h - 6 };
         gui_draw_focus(s, &f);
@@ -173,7 +173,7 @@ static void check_draw(struct gui_widget *w, struct gfx_surface *s)
     else
         gui_draw_check(s, w->r.x, y, c->on, on);
     gui_draw_text(s, w->r.x + 19, w->r.y + (w->r.h - gui_font->height) / 2, gui_font, gui_get_text(w),
-                  on ? GUI_LINE : GUI_DIM);
+                  on ? GUI_TEXT : GUI_DIM);
     if (gui_is_focus(w)) {
         struct gfx_rect f;
         tw = gui_text_w(gui_font, gui_get_text(w));
@@ -370,7 +370,7 @@ static void group_draw(struct gui_widget *w, struct gfx_surface *s)
     int top = w->r.y + gui_bold->height / 2, tw = gui_text_w(gui_bold, gui_get_text(w));
     gfx_frame(s, w->r.x, top, w->r.w, w->r.h - (top - w->r.y), GUI_LINE);
     gfx_fill(s, w->r.x + 6, w->r.y, tw + 6, gui_bold->height, GUI_FACE);
-    gui_draw_text(s, w->r.x + 9, w->r.y, gui_bold, gui_get_text(w), GUI_LINE);
+    gui_draw_text(s, w->r.x + 9, w->r.y, gui_bold, gui_get_text(w), GUI_TEXT);
 }
 
 static const struct gui_class group_class = { "group", 0, group_draw, NULL, group_measure, group_layout, NULL };
@@ -503,7 +503,7 @@ static void status_draw(struct gui_widget *w, struct gfx_surface *s)
 {
     gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_FACE);
     gfx_fill(s, w->r.x, w->r.y, w->r.w, 1, GUI_LINE);
-    gui_text_fit(s, w->r.x + 6, w->r.y + 3, w->r.w - 12, gui_font, gui_get_text(w), GUI_LINE);
+    gui_text_fit(s, w->r.x + 6, w->r.y + 3, w->r.w - 12, gui_font, gui_get_text(w), GUI_TEXT);
 }
 
 const struct gui_class gui_status_class = { "status", 0, status_draw, NULL, status_measure, NULL, NULL };
@@ -573,11 +573,11 @@ static void number_draw(struct gui_widget *w, struct gfx_surface *s)
         struct gfx_rect dn = { w->r.x + w->r.w - GUI_SB, w->r.y + w->r.h / 2, GUI_SB, w->r.h - w->r.h / 2 };
         gui_draw_field(s, &f, on);
         sprintf(t, "%d", n->value);
-        gfx_text(s, f.x + 4, f.y + (f.h - gui_font->height) / 2, gui_font, t, -1, on ? GUI_LINE : GUI_DIM);
+        gfx_text(s, f.x + 4, f.y + (f.h - gui_font->height) / 2, gui_font, t, -1, on ? GUI_FIELD_TEXT : GUI_DIM);
         gui_draw_box(s, &up, GUI_FACE, n->held == 1);
         gui_draw_box(s, &dn, GUI_FACE, n->held == 2);
-        gui_draw_arrow(s, up.x + up.w / 2, up.y + up.h / 2, 0, on ? GUI_LINE : GUI_DIM);
-        gui_draw_arrow(s, dn.x + dn.w / 2, dn.y + dn.h / 2, 1, on ? GUI_LINE : GUI_DIM);
+        gui_draw_arrow(s, up.x + up.w / 2, up.y + up.h / 2, 0, on ? GUI_TEXT : GUI_DIM);
+        gui_draw_arrow(s, dn.x + dn.w / 2, dn.y + dn.h / 2, 1, on ? GUI_TEXT : GUI_DIM);
         if (gui_is_focus(w)) {
             struct gfx_rect g = { f.x + 2, f.y + 2, f.w - 4, f.h - 4 };
             gui_draw_focus(s, &g);
@@ -871,11 +871,11 @@ static void tabs_draw(struct gui_widget *w, struct gfx_surface *s)
             if (!r[i].w)
                 continue;
             if (on) {
-                gfx_fill(s, a.x, a.y, a.w, a.h, GUI_DARK);
+                gfx_fill(s, a.x, a.y, a.w, a.h, GUI_CHOSEN);
                 sel = a;
             }
             gui_draw_text(s, a.x + 7, a.y + (a.h - gui_font->height) / 2, on ? gui_bold : gui_font, gui_get_text(c),
-                          on ? GUI_FIELD : GUI_LINE);
+                          on ? GUI_CHOSEN_TEXT : GUI_TEXT);
         }
         if (gui_is_focus(w) && sel.w) {
             struct gfx_rect f = { sel.x + 1, sel.y + 1, sel.w - 2, sel.h - 2 };
@@ -894,10 +894,10 @@ static void tabs_draw(struct gui_widget *w, struct gfx_surface *s)
         gfx_frame(s, r[i].x, y, r[i].w, r[i].y + TAB_H - y, GUI_LINE);
         if (r[i].w < tab_w(c))                  /* (GUI_TABS_SCROLL's one title wider than the strip) */
             gui_text_fit(s, r[i].x + 8, y + (r[i].y + TAB_H - y - gui_font->height) / 2, r[i].w - 12,
-                         on ? gui_bold : gui_font, gui_get_text(c), GUI_LINE);
+                         on ? gui_bold : gui_font, gui_get_text(c), GUI_TEXT);
         else
             gui_draw_text(s, r[i].x + 8, y + (r[i].y + TAB_H - y - gui_font->height) / 2, on ? gui_bold : gui_font,
-                          gui_get_text(c), GUI_LINE);
+                          gui_get_text(c), GUI_TEXT);
         if (on)
             sel = r[i];
     }
@@ -908,8 +908,8 @@ static void tabs_draw(struct gui_widget *w, struct gfx_surface *s)
         struct gfx_rect b = { a.x + GUI_SB, a.y, GUI_SB, a.h };
         gui_draw_box(s, &a, GUI_FACE, 0);
         gui_draw_box(s, &b, GUI_FACE, 0);
-        gui_draw_arrow(s, a.x + a.w / 2, a.y + a.h / 2, 2, t->first > 0 ? GUI_LINE : GUI_DIM);
-        gui_draw_arrow(s, b.x + b.w / 2, b.y + b.h / 2, 3, c || (n + 1 < TABS_MAX && n + 1 < i) ? GUI_LINE : GUI_DIM);
+        gui_draw_arrow(s, a.x + a.w / 2, a.y + a.h / 2, 2, t->first > 0 ? GUI_TEXT : GUI_DIM);
+        gui_draw_arrow(s, b.x + b.w / 2, b.y + b.h / 2, 3, c || (n + 1 < TABS_MAX && n + 1 < i) ? GUI_TEXT : GUI_DIM);
     }
     if (gui_is_focus(w) && sel.w) {
         struct gfx_rect f = { sel.x + 3, sel.y + 3, sel.w - 6, TAB_H - 6 };

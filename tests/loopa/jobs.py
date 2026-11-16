@@ -6784,6 +6784,13 @@ class GuiDriver:
                     self.agent.ssh("glos key 0:mouse:0:0:%d,0.05:mouse:0:0:0" % button)
             elif cmd == "pause":
                 time.sleep(int(args[0]) / 1000.0)
+            elif cmd == "same":                 # (the host's check of two of its goldens: both are compared here)
+                pass
+            elif cmd == "theme":                # the desktop's theme changed under the app (toolkit 2, C1a)
+                self.agent.ssh("glos config set desktop theme %s" % args[0])
+                if ("desktop", "theme") not in self.unset:
+                    self.unset.append(("desktop", "theme"))
+                time.sleep(1)
             elif cmd == "launch":               # Ctrl+Esc: the launcher, the shell's; its menu then
                 self.agent.ssh("glos key 0x1D:down,0.05:0x01,0.2:0x1D:up")
                 self.until(lambda d: any(w["shown"] and w["kind"] == "popup" for w in d["win"]), 5)

@@ -35,6 +35,29 @@ enum { OS_KEY = 1, OS_MOUSE, OS_WHEEL, OS_FOCUS, OS_RESIZE, OS_CLOSE };
 
 static unsigned dblclick = GUI_DBLCLICK;       /* [input] double_click (M9) */
 
+/* The theme in force (gui.h). Slate until GLOS says. */
+struct glos_theme gui_theme = {
+    sizeof(struct glos_theme), "slate", 0, GLOS_ROLES,
+    { [GLOS_ROLE_FACE] = 0xCCCCCC, [GLOS_ROLE_FACE_TEXT] = 0x000000, [GLOS_ROLE_FIELD] = 0xFFFFFF,
+      [GLOS_ROLE_FIELD_TEXT] = 0x000000, [GLOS_ROLE_LINE] = 0x000000, [GLOS_ROLE_DIM] = 0x999999,
+      [GLOS_ROLE_SHADE] = 0x666666, [GLOS_ROLE_DARK] = 0x333333, [GLOS_ROLE_MARK] = 0xCC6633,
+      [GLOS_ROLE_MARK_TEXT] = 0xFFFFFF, [GLOS_ROLE_CHOSEN] = 0x333333, [GLOS_ROLE_CHOSEN_TEXT] = 0xFFFFFF,
+      [GLOS_ROLE_LINK] = 0x0033CC, [GLOS_ROLE_DESK] = 0x666666, [GLOS_ROLE_FRAME] = 0x000000,
+      [GLOS_ROLE_TITLE] = 0x333333, [GLOS_ROLE_TITLE_TEXT] = 0xFFFFFF, [GLOS_ROLE_TITLE_OFF] = 0x999999,
+      [GLOS_ROLE_TITLE_OFF_TEXT] = 0x333333, [GLOS_ROLE_CLOSE] = 0xCC6633, [GLOS_ROLE_BAR] = 0x333333,
+      [GLOS_ROLE_BAR_TEXT] = 0xFFFFFF, [GLOS_ROLE_BAR_ON] = 0xCC6633, [GLOS_ROLE_BAR_ON_TEXT] = 0xFFFFFF,
+      [GLOS_ROLE_CODE_KEYWORD] = 0x0033CC, [GLOS_ROLE_CODE_STRING] = 0x006633, [GLOS_ROLE_CODE_COMMENT] = 0x666666,
+      [GLOS_ROLE_CODE_NUMBER] = 0x993300, [GLOS_ROLE_CODE_TYPE] = 0x660099, [GLOS_ROLE_CODE_DIRECTIVE] = 0x996600,
+      [GLOS_ROLE_ERROR] = 0xCC0000, [GLOS_ROLE_GOOD] = 0x006633 },
+    1, 18, 20, 16, 16, 1 };
+
+static void theme_read(void)
+{
+    struct glos_theme t;
+    if (glos_theme(&t) == 0 && t.roles >= GLOS_ROLES)
+        gui_theme = t;
+}
+
 int gui_init(int argc, char **argv)
 {
     char v[16], name[32] = "App";
@@ -52,6 +75,7 @@ int gui_init(int argc, char **argv)
     if (glos_setting_get("input", "double_click", v, sizeof v, 0) == 0 && atoi(v) >= 200 && atoi(v) <= 1000)
         dblclick = (unsigned)atoi(v);
     gui_smooth_start(argc > 0 ? argv[0] : NULL);
+    theme_read();
     return 0;
 }
 
@@ -387,7 +411,7 @@ static void box_draw(struct gui_widget *w, struct gfx_surface *s)
 {
     struct gui_box *b = (struct gui_box *)w;
     if (b->bg != GFX_NONE)
-        gui_fill(s, &w->r, b->bg);
+        gui_fill(s, &w->r, GUI_BG_RGB(b->bg));
 }
 
 const struct gui_class gui_box_class = { "box", 0, box_draw, NULL, box_measure, box_layout, NULL };
@@ -525,7 +549,7 @@ static void window_root(struct gui_window *w)
     b->vertical = 1;
     b->gap = 0;
     b->pad = 0;
-    b->bg = GUI_FACE;
+    b->bg = GUI_BG(GLOS_ROLE_FACE);
     b->w.win = w;
     w->root = &b->w;
 }
@@ -1278,7 +1302,17 @@ int gui_step(unsigned wait_ms)
             dispatch(&ev);
         else if (how == 0 && u.ev.kind == GLOS_EV_END)
             G.quit = 1;                         /* GLOS asks the app to end: its loop ends, as by gui_quit() */
-        else if (how == 0 && app_events)
+        else if (how == 0 && u.ev.kind == GLOS_EV_THEME) {       /* the theme changed: every window laid out and
+                                                                   drawn again in it; then the app's own turn */
+            theme_read();
+            for (w = G.wins; w; w = w->next) {
+                struct gfx_rect all = { 0, 0, w->w, w->h };
+                gui_relayout(w);
+                gui_damage_rect(w, &all);
+            }
+            if (app_events)
+                app_events(&u.ev);
+        } else if (how == 0 && app_events)
             app_events(&u.ev);
     }
     after_event();

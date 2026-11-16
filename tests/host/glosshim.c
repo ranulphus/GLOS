@@ -48,7 +48,10 @@ int app_main(int argc, char **argv);
 #define HW_ANYWHERE 4
 #define HW_POPUP    8
 #define HW_DESKTOP  16
-enum { HEV_KEY = 1, HEV_MOUSE, HEV_FOCUS, HEV_RESIZE, HEV_CLOSE, HEV_LAUNCH, HEV_SYSKEY };
+#include "../../kernel/wm/theme.c"      /* the built-in themes, as the kernel has them (themes[], theme_find) */
+static const struct theme *shim_theme;  /* set by a script's `theme NAME`; else GLOS_HOST_THEME's, or Slate */
+
+enum { HEV_KEY = 1, HEV_MOUSE, HEV_FOCUS, HEV_RESIZE, HEV_CLOSE, HEV_LAUNCH, HEV_SYSKEY, HEV_THEME };
 struct hev {
     unsigned type, window, time;
     int x, y;
@@ -534,6 +537,32 @@ static int config_keys(const char *section, char *out, unsigned room)
         if (cfg_same(cfg[i].sec, section))
             n += (size_t)snprintf(out + n, room - n, "%s = %s\n", cfg[i].key, cfg[i].val);
     return (int)(n < room ? n : room);
+}
+
+/* The theme: the kernel's built-in ones (kernel/wm/theme.c); the one a script's `theme NAME` put in force while
+   the app runs, else [desktop] theme's (a script's `config desktop theme NAME`), else GLOS_HOST_THEME's, else
+   Slate. */
+int glos_theme(struct glos_theme *t)
+{
+    const struct theme *th = shim_theme;
+    char v[32];
+    int i;
+    if (!th && config_get("desktop", "theme", v, sizeof v) >= 0)       /* ([desktop] theme, as a script's `config` */
+        th = theme_find(v);                                             /* sets it before the app starts) */
+    if (!th) {
+        const char *e = getenv("GLOS_HOST_THEME");
+        th = e && theme_find(e) ? theme_find(e) : theme_find("slate");
+    }
+    memset(t, 0, sizeof *t);
+    t->size = sizeof *t;
+    strncpy(t->name, th->name, sizeof t->name - 1);
+    t->flags = th->flags;
+    t->roles = GLOS_ROLES;
+    for (i = 0; i < GLOS_ROLES; i++)
+        t->colour[i] = th->colour[i];
+    t->border = th->border, t->title = th->title, t->bar = th->bar, t->scroll = th->scroll, t->icon = th->icon;
+    t->text = th->text;
+    return 0;
 }
 
 int glos_setting_get(const char *section, const char *key, char *value, unsigned room, int *set)
@@ -1061,6 +1090,16 @@ static int step(void)
         } else if (!strcmp(cmd, "pause")) {
             H.clock += (unsigned)atoi(word(&p, b, sizeof b) ? b : "0");
             return 1;
+        } else if (!strcmp(cmd, "theme")) {     /* theme NAME: the desktop's theme changes under the app */
+            struct hev e;
+            if (!word(&p, b, sizeof b) || !(shim_theme = theme_find(b)))
+                fail("theme: no such theme");
+            memset(&e, 0, sizeof e);
+            e.type = HEV_THEME;
+            e.time = H.clock;
+            push(&e);
+            H.clock += 50;
+            return 1;
         } else if (!strcmp(cmd, "clip")) {
             char *e;
             if (*p == ' ')
@@ -1114,6 +1153,23 @@ static int step(void)
             }
             png_out(w, a);
             H.settled = 0;
+        } else if (!strcmp(cmd, "same")) {      /* same SHOT SHOT: two of this run's shots are the same picture */
+            char pa[512], pb[512];
+            FILE *fa, *fb;
+            int ca, cb;
+            if (!word(&p, a, sizeof a) || !word(&p, b, sizeof b))
+                fail("same SHOT SHOT");
+            snprintf(pa, sizeof pa, "%s/%s-%d.png", H.out, a, H.bpp);
+            snprintf(pb, sizeof pb, "%s/%s-%d.png", H.out, b, H.bpp);
+            if (!(fa = fopen(pa, "rb")) || !(fb = fopen(pb, "rb")))
+                fail("same: no shot %s or %s", a, b);
+            do {
+                ca = fgetc(fa), cb = fgetc(fb);
+            } while (ca == cb && ca != EOF);
+            fclose(fa);
+            fclose(fb);
+            if (ca != cb)
+                fail("same: %s and %s differ", a, b);
         } else {
             fail("no command %s", cmd);
         }
@@ -1155,6 +1211,9 @@ static int give(const struct hev *e, void *buf, unsigned room)
         break;
     case HEV_CLOSE:
         u.ev.kind = GLOS_EV_CLOSE;
+        break;
+    case HEV_THEME:
+        u.ev.kind = GLOS_EV_THEME;
         break;
     case HEV_LAUNCH:
     case HEV_SYSKEY:

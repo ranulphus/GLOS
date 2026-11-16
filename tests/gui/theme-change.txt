@@ -1,0 +1,27 @@
+# Themes (toolkit 2, step C1a): the theme changed under a running app. GLOS tells the app (GLOS_EV_THEME); the
+# toolkit reads the theme again, lays every window out and draws it in the new colours, an open dialog too; and
+# back to Slate the pictures are the first ones again.
+run GUITEST.EXE gallery
+wait "GUITEST Gallery"
+key ctrl+tab ctrl+tab
+key tab
+type r
+key down
+key f1
+key enter
+gone "About GUITEST"
+shot slate "GUITEST Gallery"
+theme dark
+shot dark "GUITEST Gallery"
+key f1
+theme contrast
+shot contrast-about "About GUITEST"
+key enter
+gone "About GUITEST"
+shot contrast "GUITEST Gallery"
+theme slate
+shot slate-again "GUITEST Gallery"
+same slate slate-again
+key alt+f4
+gone "GUITEST Gallery"
+expect GUI end

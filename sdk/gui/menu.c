@@ -199,8 +199,8 @@ static void bar_draw(struct gui_widget *w, struct gfx_surface *s)
         int x = title_x(b, i), tw = gui_text_w(gui_font, b->menus[i]->title);
         int on = b->open == i;
         if (on)
-            gfx_fill(s, x, w->r.y, tw + 14, w->r.h - 1, GUI_DARK);
-        gui_draw_text(s, x + 7, w->r.y + 3, gui_font, b->menus[i]->title, on ? GUI_FIELD : GUI_LINE);
+            gfx_fill(s, x, w->r.y, tw + 14, w->r.h - 1, GUI_CHOSEN);
+        gui_draw_text(s, x + 7, w->r.y + 3, gui_font, b->menus[i]->title, on ? GUI_CHOSEN_TEXT : GUI_TEXT);
     }
 }
 
@@ -342,16 +342,16 @@ static void view_draw(struct gui_widget *w, struct gfx_surface *s)
     for (i = 0; i < m->n; i++) {
         const struct item *it = &m->items[i];
         int y = item_y(m, i), hot = i == M.hot;
-        unsigned fg = it->off ? GUI_DIM : hot ? GUI_FIELD : GUI_LINE;
+        unsigned fg = it->off ? GUI_DIM : hot ? GUI_CHOSEN_TEXT : GUI_FIELD_TEXT;
         if (it->sep) {
             gfx_fill(s, w->r.x + 1, y + SEP_H / 2, w->r.w - 2, 1, GUI_DIM);
             continue;
         }
         if (hot)
-            gfx_fill(s, w->r.x + 1, y, w->r.w - 2, GUI_ROW_H + 2, GUI_DARK);
+            gfx_fill(s, w->r.x + 1, y, w->r.w - 2, GUI_ROW_H + 2, GUI_CHOSEN);
         if (it->checked) {
             static const unsigned char tick[8] = { 0x01, 0x03, 0x86, 0xCC, 0x78, 0x30, 0x00, 0x00 };
-            gfx_fill(s, w->r.x + 3, y + 2, 12, 12, hot ? GUI_DARK : GUI_FIELD);
+            gfx_fill(s, w->r.x + 3, y + 2, 12, 12, hot ? GUI_CHOSEN : GUI_FIELD);
             gfx_mono(s, w->r.x + 5, y + 5, tick, 8, 8, 1, fg, GFX_NONE);
         }
         gui_draw_text(s, w->r.x + 18, y + 2, gui_font, it->text, fg);
@@ -521,7 +521,7 @@ static void open_menu(struct gui_window *owner, struct gui_menu *m, int sx, int 
     p = gui_window_at("", sx, sy, tw, h, GUI_W_POPUP);
     p->owner = owner;
     p->on_popdown = popdown;
-    ((struct gui_box *)p->root)->bg = GUI_FIELD;
+    ((struct gui_box *)p->root)->bg = GUI_BG(GLOS_ROLE_FIELD);
     v = gui_new(p->root, &view_class, sizeof(struct view));
     v->grow = 1;
     M.popup = p;
@@ -613,9 +613,9 @@ static void choice_draw(struct gui_widget *w, struct gfx_surface *s)
     gui_draw_box(s, &r, GUI_FACE, 0);
     if (c->value >= 0 && c->value < c->menu.n)
         gui_text_fit(s, r.x + 5, r.y + (r.h - gui_font->height) / 2, r.w - GUI_SB - 8, gui_font,
-                     c->menu.items[c->value].text, on ? GUI_LINE : GUI_DIM);
+                     c->menu.items[c->value].text, on ? GUI_TEXT : GUI_DIM);
     gfx_fill(s, r.x + r.w - GUI_SB - 1, r.y + 3, 1, r.h - 6, GUI_DIM);
-    gui_draw_arrow(s, r.x + r.w - GUI_SB / 2 - 1, r.y + r.h / 2, 1, on ? GUI_LINE : GUI_DIM);
+    gui_draw_arrow(s, r.x + r.w - GUI_SB / 2 - 1, r.y + r.h / 2, 1, on ? GUI_TEXT : GUI_DIM);
     if (gui_is_focus(w)) {
         struct gfx_rect f = { r.x + 3, r.y + 3, r.w - GUI_SB - 6, r.h - 6 };
         gui_draw_focus(s, &f);

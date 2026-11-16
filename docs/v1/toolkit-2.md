@@ -252,6 +252,44 @@ New (N) and grown (G). The users named are the app plans that need each.
   only by the theme's metrics), before phases E and F add their features.
 - **The toolkit's API is frozen with API 2.0 at GLOS v1:** the SDK publishes it, and after v1 it only grows.
 
+## Phase C in steps (2026-11-16: the order it is built in; the owner chose phase C as the next work that day)
+
+Each step ends with the host tests and goldens green and a Loop A smoke; a step that changes pictures says
+which and why. The apps keep working at every step (they move as the toolkit does).
+
+| | What | Shows it works |
+|---|---|---|
+| C1a | Colours by role: the toolkit and the apps draw with the theme's colours (API 2.0's THEME), read at start and again at a theme change; the host shim has the three themes | Slate's goldens byte for byte as before; the gallery's in the dark and the high-contrast theme; a theme changed under a running app in Loop A |
+| C1b | Metrics and fonts: the theme's sizes (scroll bar, icon, UI text small, normal and large), every widget measured with the font it has | The gallery at each text size; goldens that change by metrics, listed |
+| C2 | Commands (text, icon, shortcut, tooltip, enabled, checked, set once), the update hook; toolbars with overflow; tooltips; context menus; the status bar's sections; menus with icons, submenus and radio items | A gallery page for each; keys only |
+| C3 | Models: the virtual list (detail and icon views, columns sorted, resized and reordered, selection by ids, rubber band) and the virtual tree; the old `gui_list` on top of the model | 10,000 rows: only the visible rows' cells asked for, counted |
+| C4 | Background work on API 2.0's THREAD and POST: tasks, the pool, progress and cancelling, the progress dialog; the shim's threads with an in-order mode | A list that fills as a task reads a folder; Loop A smoke |
+| C5 | Splitters, tabs that close, move and overflow, docking panes and their saved layout | Gallery pages; a 640x480 window that folds |
+| C6 | The combo box; dialogs: open and save (places, views, filter, preview), folder, find and replace, colour, font, about, message with "don't ask again" | Each dialog driven by keys only |
+| C7 | Undo history and its list; the clipboard's formats and drag and drop (API 2.0's CLIP and DND), built into lists and trees | Host tests; two apps in Loop A |
+| C8 | The remaining widgets, in the order the apps of phases E and F need them: slider and level meter, graph, calendar, colour picker, image and canvas views, property grid, wizard, rich-text and chat views, terminal, code editor, tour overlay, preview surface | A gallery page each |
+| C9 | Resource files and the classes' property descriptions; `GUI_T` | Every dialog loaded from a file and compared with the same made in code |
+| C10 | The apps moved (each still doing what it did), the gallery app whole, the toolkit's documentation (`docs/gui.md`) | Every app's goldens; the full gate |
+
+### C1a as built (2026-11-16)
+
+- `gui_theme` (`include/glos/gui.h`): the theme in force, read by `gui_init` and at `GLOS_EV_THEME`; the old
+  names (`GUI_FACE` ...) are its roles now, with new ones for text (`GUI_TEXT`, `GUI_FIELD_TEXT`), for what is
+  chosen (`GUI_CHOSEN`, `GUI_CHOSEN_TEXT`) and `GUI_ROLE(role)` for the rest. `docs/gui.md` §1.9 has the table.
+- Every text, tick, arrow, caret and selection in the toolkit has its role; the apps' own fixed colours too
+  (Files' desktop, the Terminal's selection, Calculator's display). Left for later steps: the Terminal's
+  default colours (white paper in every theme, until the terminal widget of C8) and the Monitor's graph (its
+  own black scope, until the graph widget).
+- Kept colours follow the theme: a label's default text and a box's background are kept as "the theme's" and
+  looked up when drawn.
+- The host shim has the kernel's three themes (`kernel/wm/theme.c` itself), by `[desktop] theme` (a script's
+  `config desktop theme NAME`) and changed under the app by a script's `theme NAME`; `same A B` checks two shots
+  of a run are one picture.
+- Tests: Slate's 357 goldens byte for byte what they were (the Terminal's `ver` line apart, which says API 2.3
+  now); `theme-dark`, `theme-contrast` (the gallery's pages, a menu, typed and chosen text, a chosen row, the
+  About box) and `theme-change` (Slate, dark, high contrast with a dialog open, and Slate again: the first
+  picture), on the host and played on the desktop in Loop A.
+
 ## Settled at the owner's review (2026-11-06)
 
 1. **Fonts:** the UI's fonts stay bitmaps made at build time, in three sizes (small, normal, large), each with its

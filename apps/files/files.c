@@ -265,14 +265,14 @@ static void open_item(int i)
 static void area_draw(struct gui_widget *w, struct gfx_surface *s)
 {
     int i;
-    gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, 0x666666);     /* (the desktop's grey: Slate's) */
+    gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_ROLE(GLOS_ROLE_DESK));   /* (the desktop's colour) */
     for (i = 0; i < nitems; i++) {
         const struct item *it = &items[i];
         int tw = gfx_text_width(gui_font, it->name, -1), lw = tw < CELL_W - 4 ? tw : CELL_W - 4;
         int lx = it->x + (CELL_W - lw) / 2, ly = it->y + 36;
         gui_draw_icon(s, it->x + (CELL_W - 32) / 2, it->y, icon(it->kind, 1), 32);
-        gfx_fill(s, lx - 2, ly - 1, lw + 4, gui_font->height + 2, i == chosen ? 0x333333 : 0xFFFFFF);
-        gui_text_fit(s, lx, ly, CELL_W - 4, gui_font, it->name, i == chosen ? 0xFFFFFF : 0x000000);
+        gfx_fill(s, lx - 2, ly - 1, lw + 4, gui_font->height + 2, i == chosen ? GUI_CHOSEN : GUI_FIELD);
+        gui_text_fit(s, lx, ly, CELL_W - 4, gui_font, it->name, i == chosen ? GUI_CHOSEN_TEXT : GUI_FIELD_TEXT);
         if (i == chosen && gui_is_focus(w)) {
             struct gfx_rect f = { lx - 2, ly - 1, lw + 4, gui_font->height + 2 };
             gui_draw_focus(s, &f);

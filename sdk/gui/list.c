@@ -122,7 +122,7 @@ static void list_draw(struct gui_widget *w, struct gfx_surface *s)
             gfx_rect_cut(&hc, &clip);
             gfx_clip(s, &hc);
             gui_text_fit(s, x + 4, w->r.y + 2, col_w(l, c) - 8, c == l->sort_col && l->cmp ? gui_bold : gui_font,
-                         l->heads[c], GUI_LINE);
+                         l->heads[c], GUI_TEXT);
             gfx_clip(s, &clip);
             if (c > 0)
                 gfx_fill(s, x - 1, w->r.y + 1, 1, head_h(l) - 1, GUI_DIM);
@@ -138,12 +138,12 @@ static void list_draw(struct gui_widget *w, struct gfx_surface *s)
             int tw = gfx_text_width(gui_font, r->cells[0], -1), ix = x + (CELL_W - GUI_BIG_W) / 2;
             gui_draw_icon(s, ix, y, r->icon, GUI_BIG_W);
             if (r->chosen)
-                gfx_frame(s, ix - 2, y - 2, GUI_BIG_W + 4, GUI_BIG_W + 4, GUI_DARK);
+                gfx_frame(s, ix - 2, y - 2, GUI_BIG_W + 4, GUI_BIG_W + 4, GUI_CHOSEN);
             {
                 int lw = tw < CELL_W - 4 ? tw : CELL_W - 4, lx = x + (CELL_W - lw) / 2, ly = y + GUI_BIG_W + ICON_GAP;
                 if (r->chosen)
-                    gfx_fill(s, lx - 2, ly - 1, lw + 4, gui_font->height + 2, GUI_DARK);
-                gui_text_fit(s, lx, ly, CELL_W - 4, gui_font, r->cells[0], r->chosen ? GUI_FIELD : GUI_LINE);
+                    gfx_fill(s, lx - 2, ly - 1, lw + 4, gui_font->height + 2, GUI_CHOSEN);
+                gui_text_fit(s, lx, ly, CELL_W - 4, gui_font, r->cells[0], r->chosen ? GUI_CHOSEN_TEXT : GUI_FIELD_TEXT);
                 if (focus && i == l->cur) {
                     struct gfx_rect f = { lx - 2, ly - 1, lw + 4, gui_font->height + 2 };
                     gui_draw_focus(s, &f);
@@ -154,9 +154,9 @@ static void list_draw(struct gui_widget *w, struct gfx_surface *s)
         for (i = l->top; i < l->n && i < l->top + shown(l) + 1; i++) {
             struct row *r = &l->rows[i];
             int y = y0 + (i - l->top) * GUI_ROW_H, chosen = r->chosen;
-            unsigned fg = chosen ? GUI_FIELD : on ? GUI_LINE : GUI_DIM;
+            unsigned fg = chosen ? GUI_CHOSEN_TEXT : on ? GUI_FIELD_TEXT : GUI_DIM;
             if (chosen)
-                gfx_fill(s, w->r.x + 1, y, w->r.w - GUI_SB - 1, GUI_ROW_H, GUI_DARK);
+                gfx_fill(s, w->r.x + 1, y, w->r.w - GUI_SB - 1, GUI_ROW_H, GUI_CHOSEN);
             for (c = 0; c < l->cols; c++) {
                 int x = col_x(l, c) + 3, cw = col_w(l, c) - 6;
                 struct gfx_rect cc = { col_x(l, c), y, col_w(l, c), GUI_ROW_H };
@@ -651,9 +651,9 @@ static void tree_draw(struct gui_widget *w, struct gfx_surface *s)
         if (n->may || n->first) {               /* the box that opens it */
             gfx_fill(s, x + 1, y + 4, 9, 9, GUI_FIELD);
             gfx_frame(s, x + 1, y + 4, 9, 9, GUI_DIM);
-            gfx_fill(s, x + 3, y + 8, 5, 1, GUI_LINE);
+            gfx_fill(s, x + 3, y + 8, 5, 1, GUI_FIELD_TEXT);
             if (!n->open)
-                gfx_fill(s, x + 5, y + 6, 1, 5, GUI_LINE);
+                gfx_fill(s, x + 5, y + 6, 1, 5, GUI_FIELD_TEXT);
         }
         x += 13;
         if (n->icon) {
@@ -663,8 +663,8 @@ static void tree_draw(struct gui_widget *w, struct gfx_surface *s)
         {
             int tw = gfx_text_width(gui_font, n->text, -1);
             if (n == t->cur)
-                gfx_fill(s, x - 2, y, tw + 4, GUI_ROW_H, GUI_DARK);
-            gfx_text(s, x, y + 1, gui_font, n->text, -1, n == t->cur ? GUI_FIELD : on ? GUI_LINE : GUI_DIM);
+                gfx_fill(s, x - 2, y, tw + 4, GUI_ROW_H, GUI_CHOSEN);
+            gfx_text(s, x, y + 1, gui_font, n->text, -1, n == t->cur ? GUI_CHOSEN_TEXT : on ? GUI_FIELD_TEXT : GUI_DIM);
             if (focus && n == t->cur) {
                 struct gfx_rect f = { x - 2, y, tw + 4, GUI_ROW_H };
                 gui_draw_focus(s, &f);

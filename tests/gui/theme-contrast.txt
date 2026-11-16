@@ -1,0 +1,33 @@
+# Themes (toolkit 2, step C1a): the gallery in the high-contrast theme ([desktop] theme = contrast), as
+# theme-dark.txt has it in the dark one.
+config desktop theme contrast
+run GUITEST.EXE gallery
+wait "GUITEST Gallery"
+key tab tab
+key alt+i space
+shot buttons "GUITEST Gallery"
+key alt+f
+key right
+shot menu-edit ""
+key esc
+key ctrl+tab
+key tab
+type Hello, world
+key tab tab
+key ctrl+end
+type More text: typed.
+key shift+home
+shot text-typed "GUITEST Gallery"
+key ctrl+tab
+key tab
+type r
+key down
+key tab down right
+shot lists "GUITEST Gallery"
+key f1
+shot about "About GUITEST"
+key enter
+gone "About GUITEST"
+key alt+f4
+gone "GUITEST Gallery"
+expect GUI end

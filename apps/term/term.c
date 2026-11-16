@@ -237,7 +237,7 @@ static void grid_draw(struct gui_widget *w, struct gfx_surface *s)
             cur = on_screen && vt.cursor_on && x == vt.x && line - kcount == vt.y && gui_window_active(win) && !ended;
             if (!c) {
                 if (chosen || cur)
-                    gfx_fill(s, x0 + x * cw, y0 + y * ch, cw, ch, chosen ? GUI_DARK : 0x000000);
+                    gfx_fill(s, x0 + x * cw, y0 + y * ch, cw, ch, chosen ? GUI_CHOSEN : 0x000000);
                 continue;
             }
             rev = !!(c->attr & VT_REVERSE) ^ vt.reverse_screen;
@@ -249,7 +249,7 @@ static void grid_draw(struct gui_widget *w, struct gfx_surface *s)
                 fg = bg, bg = t;
             }
             if (chosen)
-                fg = GUI_FIELD, bg = GUI_DARK;
+                fg = GUI_CHOSEN_TEXT, bg = GUI_CHOSEN;
             if (bg != 0xFFFFFF)
                 gfx_fill(s, x0 + x * cw, y0 + y * ch, cw, ch, bg);
             if (c->ch == ' ' || (c->attr & VT_HIDDEN))

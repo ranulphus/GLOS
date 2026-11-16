@@ -25,8 +25,11 @@ void gui_tabs_step(struct gui_widget *tabs, int by);
 struct gui_box {
     struct gui_widget w;
     int vertical, gap, pad;
-    unsigned bg;                        /* GFX_NONE: its parent's background shows */
+    unsigned bg;                        /* GFX_NONE: its parent's background shows; GUI_BG(role): the theme's
+                                           colour of that role, as it is when the box is drawn */
 };
+#define GUI_BG(role) (0xFE000000u | (unsigned)(role))
+#define GUI_BG_RGB(v) (((v) & 0xFF000000u) == 0xFE000000u ? GUI_ROLE((v) & 0xFFu) : (v))
 
 /* ---- core.c */
 struct gui_widget *gui_hit(struct gui_widget *w, int x, int y);

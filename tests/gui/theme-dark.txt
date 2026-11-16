@@ -1,0 +1,34 @@
+# Themes (toolkit 2, step C1a; docs/v1/toolkit-2.md 5): the gallery in the dark theme ([desktop] theme = dark).
+# Every widget draws by the theme's roles: text on a face and in a field, what is chosen in a list, a tree, a
+# menu and typed text, what can't be used, the focus's mark.
+config desktop theme dark
+run GUITEST.EXE gallery
+wait "GUITEST Gallery"
+key tab tab
+key alt+i space
+shot buttons "GUITEST Gallery"
+key alt+f
+key right
+shot menu-edit ""
+key esc
+key ctrl+tab
+key tab
+type Hello, world
+key tab tab
+key ctrl+end
+type More text: typed.
+key shift+home
+shot text-typed "GUITEST Gallery"
+key ctrl+tab
+key tab
+type r
+key down
+key tab down right
+shot lists "GUITEST Gallery"
+key f1
+shot about "About GUITEST"
+key enter
+gone "About GUITEST"
+key alt+f4
+gone "GUITEST Gallery"
+expect GUI end

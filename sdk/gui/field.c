@@ -89,20 +89,20 @@ static void field_draw(struct gui_widget *w, struct gfx_surface *s)
     gui_draw_field(s, &w->r, on);
     gfx_clip(s, &in);
     if (focus && a != b)
-        gfx_fill(s, x0 + f_width(f, a), y, f_width(f, b) - f_width(f, a), gui_font->height, GUI_DARK);
+        gfx_fill(s, x0 + f_width(f, a), y, f_width(f, b) - f_width(f, a), gui_font->height, GUI_CHOSEN);
     if (f->mask) {
         int i, x = x0;
         for (i = 0; i < n; i = f_next(t, i))
-            x = gfx_text(s, x, y, gui_font, "*", 1, focus && i >= a && i < b ? GUI_FIELD : on ? GUI_LINE : GUI_DIM);
+            x = gfx_text(s, x, y, gui_font, "*", 1, focus && i >= a && i < b ? GUI_CHOSEN_TEXT : on ? GUI_FIELD_TEXT : GUI_DIM);
     } else if (focus && a != b) {
-        int x = gfx_text(s, x0, y, gui_font, t, a, GUI_LINE);
-        x = gfx_text(s, x, y, gui_font, t + a, b - a, GUI_FIELD);
-        gfx_text(s, x, y, gui_font, t + b, n - b, GUI_LINE);
+        int x = gfx_text(s, x0, y, gui_font, t, a, GUI_FIELD_TEXT);
+        x = gfx_text(s, x, y, gui_font, t + a, b - a, GUI_CHOSEN_TEXT);
+        gfx_text(s, x, y, gui_font, t + b, n - b, GUI_FIELD_TEXT);
     } else {
-        gfx_text(s, x0, y, gui_font, t, n, on ? GUI_LINE : GUI_DIM);
+        gfx_text(s, x0, y, gui_font, t, n, on ? GUI_FIELD_TEXT : GUI_DIM);
     }
     if (focus)
-        gfx_fill(s, x0 + f_width(f, f->caret), y, 1, gui_font->height, GUI_LINE);
+        gfx_fill(s, x0 + f_width(f, f->caret), y, 1, gui_font->height, GUI_FIELD_TEXT);
 }
 
 /* The byte offset nearest pixel x of the field. */
@@ -748,7 +748,7 @@ static void editor_draw(struct gui_widget *w, struct gfx_surface *s)
             size_t ca = sa > a ? sa : a, cb = sb < b ? sb : b;
             int end_too = sb > b && sa <= b;    /* (the line's end chosen too: a little more) */
             if (ca < cb || end_too)
-                gfx_fill(s, x + e_x(e, a, ca), y, e_x(e, ca, cb) + (end_too ? 4 : 0), e->font->height, GUI_DARK);
+                gfx_fill(s, x + e_x(e, a, ca), y, e_x(e, ca, cb) + (end_too ? 4 : 0), e->font->height, GUI_CHOSEN);
         }
         p = a;
         while (p < b) {                         /* text in runs of one colour, tabs as gaps */
@@ -764,11 +764,11 @@ static void editor_draw(struct gui_widget *w, struct gfx_surface *s)
             }
             if (px > in.x + in.w)
                 break;
-            gui_text_latin1(s, px, y, e->font, run, n, chosen ? GUI_FIELD : on ? GUI_LINE : GUI_DIM);
+            gui_text_latin1(s, px, y, e->font, run, n, chosen ? GUI_CHOSEN_TEXT : on ? GUI_FIELD_TEXT : GUI_DIM);
         }
         if (focus && e->caret >= a && (e->caret < b || (e->caret == b && (b == e_eol(e, e_line(e, a)) ||
                                                                            r + 1 >= total))))
-            gfx_fill(s, x + e_x(e, a, e->caret), y, 1, e->font->height, GUI_LINE);
+            gfx_fill(s, x + e_x(e, a, e->caret), y, 1, e->font->height, GUI_FIELD_TEXT);
     }
     gfx_clip(s, &clip);
     e_bars(e);                                  /* (the widest row now known) */

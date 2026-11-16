@@ -137,6 +137,28 @@ trough. A button has a shadow a pixel deep. The focus is a dotted line. Orange s
 colour is one of the palette's cube, so a window is the same picture at 8 bits as at 16 and 32 (to the screen's
 own precision).
 
+**By the theme's roles** (toolkit 2, step C1a; `docs/v1/toolkit-2.md` §5). The colours above are Slate's, one of
+three built-in themes (`[desktop] theme = slate | dark | contrast`). The toolkit reads the theme in force at
+`gui_init` (`gui_theme`, API 2.0's THEME) and again when it changes: every window is then laid out and drawn
+again, and an app that draws for itself is told (`GLOS_EV_THEME` through `gui_on_event`). Nothing is drawn with a
+colour of its own:
+
+| Name | Role | For |
+|---|---|---|
+| `GUI_FACE`, `GUI_TEXT` | FACE, FACE_TEXT | a window's background and buttons; text and glyphs on them |
+| `GUI_FIELD`, `GUI_FIELD_TEXT` | FIELD, FIELD_TEXT | fields, lists, menus; text, ticks and the caret there |
+| `GUI_LINE` | LINE | outlines and rules (never text) |
+| `GUI_DIM` | DIM | what can't be used now; a button held down |
+| `GUI_SHADE` | SHADE | a scroll bar's trough, a slider's track |
+| `GUI_DARK` | DARK | strong fills (a progress bar's); text on it is `GUI_CHOSEN_TEXT` |
+| `GUI_CHOSEN`, `GUI_CHOSEN_TEXT` | CHOSEN, CHOSEN_TEXT | what is chosen in a list, a tree, a menu, typed text |
+| `GUI_MARK`, `GUI_MARK_TEXT`, `GUI_LINK` | MARK, MARK_TEXT, LINK | the accent; a link |
+
+`GUI_ROLE(role)` gives any of API 2.0's roles (the desktop's, the editor's syntax colours). A colour kept in a
+widget is kept as "the theme's" (`GFX_NONE` to `gui_label_style`), not as the value it had when the widget was
+made. In Slate, text on a face, text in a field and lines are all black, and what is chosen is the title bars'
+dark grey, so Slate's pictures are what they were before the roles.
+
 ### 1.10 Other scripts, DOS's code pages and smoothed text (M10 step G)
 
 **The fonts** have Latin-1 and Latin Extended-A (U+0020-U+017F), then Greek and Cyrillic, the general

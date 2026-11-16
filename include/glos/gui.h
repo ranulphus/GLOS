@@ -32,14 +32,27 @@
 extern "C" {
 #endif
 
-/* ---- the look (Slate, PRD D7): colours of the palette's cube, so a window is the same picture at every depth */
-#define GUI_FACE   0xCCCCCCu            /* a window's background, buttons */
-#define GUI_FIELD  0xFFFFFFu            /* where the user types or chooses: fields, lists, menus */
-#define GUI_LINE   0x000000u            /* lines and text */
-#define GUI_DIM    0x999999u            /* what can't be used now; a pressed button */
-#define GUI_SHADE  0x666666u            /* scroll bars' troughs, a slider's track */
-#define GUI_DARK   0x333333u            /* headers, what is chosen (with GUI_FIELD's colour on it) */
-#define GUI_MARK   0xCC6633u            /* D7's one colour (the toolkit leaves it to the window manager) */
+/* ---- the look: the theme's colours, by what they are for (toolkit 2, docs/v1/toolkit-2.md 5; API 2.0's THEME).
+   gui_theme is the theme in force: read at gui_init and again when it changes (everything is then laid out and
+   drawn again; an app that draws for itself is told by GLOS_EV_THEME through gui_on_event). Before gui_init, and
+   under a GLOS with no themes, it is Slate (PRD D7). Every widget and every app draws with these and never with
+   a colour of its own: the built-in themes' colours are all of the 8-bit palette's cube, so a window is the same
+   picture at every depth. */
+extern struct glos_theme gui_theme;
+#define GUI_ROLE(role) (gui_theme.colour[role])
+#define GUI_FACE        GUI_ROLE(GLOS_ROLE_FACE)        /* a window's background, buttons ... */
+#define GUI_TEXT        GUI_ROLE(GLOS_ROLE_FACE_TEXT)   /* ... and text on it */
+#define GUI_FIELD       GUI_ROLE(GLOS_ROLE_FIELD)       /* where the user types or chooses: fields, lists, menus ... */
+#define GUI_FIELD_TEXT  GUI_ROLE(GLOS_ROLE_FIELD_TEXT)  /* ... and text there */
+#define GUI_LINE        GUI_ROLE(GLOS_ROLE_LINE)        /* outlines and rules (text has its own roles) */
+#define GUI_DIM         GUI_ROLE(GLOS_ROLE_DIM)         /* what can't be used now; a pressed button */
+#define GUI_SHADE       GUI_ROLE(GLOS_ROLE_SHADE)       /* scroll bars' troughs, a slider's track */
+#define GUI_DARK        GUI_ROLE(GLOS_ROLE_DARK)        /* strong fills: headers (text on it: GUI_CHOSEN_TEXT) */
+#define GUI_CHOSEN      GUI_ROLE(GLOS_ROLE_CHOSEN)      /* what is chosen: its ground ... */
+#define GUI_CHOSEN_TEXT GUI_ROLE(GLOS_ROLE_CHOSEN_TEXT) /* ... and its text */
+#define GUI_MARK        GUI_ROLE(GLOS_ROLE_MARK)        /* the accent (D7's one colour) ... */
+#define GUI_MARK_TEXT   GUI_ROLE(GLOS_ROLE_MARK_TEXT)   /* ... and text on it */
+#define GUI_LINK        GUI_ROLE(GLOS_ROLE_LINK)        /* a link's text, on a field */
 
 extern const struct gfx_font *gui_font, *gui_bold, *gui_mono;
 
@@ -235,7 +248,8 @@ void gui_tabs_style(struct gui_widget *tabs, int style);       /* titles that do
 /* ---- simple widgets */
 struct gui_widget *gui_label(struct gui_widget *parent, const char *text);
 void gui_label_style(struct gui_widget *w, const struct gfx_font *font, unsigned rgb, int align);   /* -1 left, 0
-                                           centred, 1 right */
+                                           centred, 1 right; rgb GFX_NONE: the theme's text, whatever the theme
+                                           comes to be (a colour given stays as given) */
 void gui_label_box(struct gui_widget *w, int on);      /* drawn in a white box, as a field (a display) */
 struct gui_widget *gui_button(struct gui_widget *parent, const char *text, void (*on)(struct gui_widget *, int), int id);
 struct gui_widget *gui_check(struct gui_widget *parent, const char *text, int on);

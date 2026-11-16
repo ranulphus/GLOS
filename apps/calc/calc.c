@@ -289,7 +289,7 @@ int main(int argc, char **argv)
     mem_label = gui_label(row, "");
     gui_size(mem_label, 16, 0);
     display = gui_label(row, "0");
-    gui_label_style(display, gui_bold, GUI_LINE, 1);
+    gui_label_style(display, gui_bold, GFX_NONE, 1);
     gui_label_box(display, 1);
     gui_grow(display, 1);
     gui_size(display, 0, 26);

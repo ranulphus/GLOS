@@ -209,7 +209,7 @@ void gui_draw_check(struct gfx_surface *s, int x, int y, int on, int enabled)
     gfx_fill(s, x + 1, y + 1, 11, 11, enabled ? GUI_FIELD : GUI_FACE);
     gfx_frame(s, x, y, 13, 13, enabled ? GUI_LINE : GUI_DIM);
     if (on)
-        gfx_mono(s, x + 2, y + 2, tick, 8, 9, 1, enabled ? GUI_LINE : GUI_DIM, GFX_NONE);
+        gfx_mono(s, x + 2, y + 2, tick, 8, 9, 1, enabled ? GUI_FIELD_TEXT : GUI_DIM, GFX_NONE);
 }
 
 static const unsigned char ring[13][2] = {
@@ -225,7 +225,7 @@ void gui_draw_radio(struct gfx_surface *s, int x, int y, int on, int enabled)
     gfx_mono(s, x, y, &disc[0][0], 13, 13, 2, enabled ? GUI_FIELD : GUI_FACE, GFX_NONE);
     gfx_mono(s, x, y, &ring[0][0], 13, 13, 2, enabled ? GUI_LINE : GUI_DIM, GFX_NONE);
     if (on)
-        gfx_mono(s, x + 4, y + 4, dot, 5, 5, 1, enabled ? GUI_LINE : GUI_DIM, GFX_NONE);
+        gfx_mono(s, x + 4, y + 4, dot, 5, 5, 1, enabled ? GUI_FIELD_TEXT : GUI_DIM, GFX_NONE);
 }
 
 /* ---- scroll bars: arrows at the ends, a trough, a thumb its size by what shows */
@@ -269,8 +269,8 @@ void gui_sb_draw(struct gfx_surface *s, const struct gui_sb *b, int enabled)
     }
     gui_draw_box(s, &a, GUI_FACE, b->held == 1);
     gui_draw_box(s, &z, GUI_FACE, b->held == 2);
-    gui_draw_arrow(s, a.x + a.w / 2, a.y + a.h / 2, vertical ? 0 : 2, can ? GUI_LINE : GUI_DIM);
-    gui_draw_arrow(s, z.x + z.w / 2, z.y + z.h / 2, vertical ? 1 : 3, can ? GUI_LINE : GUI_DIM);
+    gui_draw_arrow(s, a.x + a.w / 2, a.y + a.h / 2, vertical ? 0 : 2, can ? GUI_TEXT : GUI_DIM);
+    gui_draw_arrow(s, z.x + z.w / 2, z.y + z.h / 2, vertical ? 1 : 3, can ? GUI_TEXT : GUI_DIM);
     if (!can)
         return;
     sb_parts(b, &at, &len);
