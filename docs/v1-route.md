@@ -176,6 +176,9 @@ two command sets that don't match). Before phase C, because the Terminal is one 
 - **Steps:** S0 the disk code; S1 the interpreter as a host-tested library; S2 sessions in the kernel, the
   Terminal app a terminal only, SSH logins; S3 the tools, and the setup floppy without FreeDOS's FDISK and
   FORMAT; S4 the batch language and GLOS's COMMAND.COM (the floppy with FreeDOS's kernel alone).
+- **Done 2026-11-16** (S0 to S4, all on main). Owed on real PCs: the setup floppy on the 486, and the batch
+  language and GLOS's COMMAND.COM beside MS-DOS 7.1's on bench-g400 and the P3 (`docs/v1/shell.md`, the known
+  differences).
 - **Later:** text-mode programs mirrored into an SSH login; GLOS's own DOS services, and then no DOS underneath.
 
 ### C. Toolkit 2 (`sdk/gui`)
