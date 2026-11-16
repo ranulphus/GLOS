@@ -10,8 +10,9 @@ in its `docs/milestones-*.md`.
   `CALL`, `FOR`, `SHIFT`, `PAUSE`, `%0` to `%9`, `ECHO OFF`, as MS-DOS's COMMAND.COM has them. Ctrl+C asks
   `Terminate batch job (Y/N)?`.
 - `VOL`, `TRUENAME`, `DATE`, `TIME`, `CHCP`, `BREAK`, `VERIFY` and `LH` are commands of the shell's own.
-- Still to come in S4: pipes and redirection around programs, GLOS's own COMMAND.COM for programs that shell
-  out, and `AUTOEXEC.BAT` run by GLOS.
+- **Pipes and redirection around programs are the shell's own** (S4b): `PROG < IN > OUT`, `>>`, `> NUL`,
+  `A | B | C`, with DOS's temporary files in `TEMP`.
+- Still to come in S4: GLOS's own COMMAND.COM for programs that shell out, and `AUTOEXEC.BAT` run by GLOS.
 
 ## The network for full-screen programs (API 2.3, 2026-11-15)
 

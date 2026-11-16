@@ -1,0 +1,103 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+cd \work
+[[C:\WORK>]]
+a < in.txt
+(IO in=C:\WORK\IN.TXT out=-)
+(RUN command="C:\BIN\A.COM " prog=C:\BIN\A.COM name=a cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 0)
+[[C:\WORK>]]
+a > out.txt
+(IO in=- out=C:\WORK\OUT.TXT)
+(RUN command="C:\BIN\A.COM " prog=C:\BIN\A.COM name=a cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 0)
+[[C:\WORK>]]
+a one two >> out.txt three
+(IO in=- out=C:\WORK\OUT.TXT append)
+(RUN command="C:\BIN\A.COM one two  three" prog=C:\BIN\A.COM name=a cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 0)
+[[C:\WORK>]]
+a<in.txt>out.txt
+(IO in=C:\WORK\IN.TXT out=C:\WORK\OUT.TXT)
+(RUN command="C:\BIN\A.COM" prog=C:\BIN\A.COM name=a cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 0)
+[[C:\WORK>]]
+a > nul
+(IO in=- out=NUL)
+(RUN command="C:\BIN\A.COM " prog=C:\BIN\A.COM name=a cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 0)
+[[C:\WORK>]]
+a < "in.txt" > "c:\work\quoted name.txt"
+(IO in=C:\WORK\IN.TXT out=C:\WORK\QUOTED NAME.TXT)
+(RUN command="C:\BIN\A.COM  " prog=C:\BIN\A.COM name=a cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 0)
+[[C:\WORK>]]
+a >
+<<Syntax error
+>>[[C:\WORK>]]
+echo text > nul
+[[C:\WORK>]]
+echo kept > e.txt
+[[C:\WORK>]]
+(CAT C:\WORK\E.TXT: kept \r\n)
+a | b
+(IO in=- out=C:\GP000000.TMP append)
+(RUN command="C:\BIN\A.COM " prog=C:\BIN\A.COM name=a cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 0)
+(IO in=C:\GP000000.TMP out=-)
+(RUN command="C:\BIN\B.COM " prog=C:\BIN\B.COM name=b cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 5)
+[[C:\WORK>]]
+echo %ERRORLEVEL%
+5
+[[C:\WORK>]]
+dir C:\ /b
+BIN
+TMP
+WORK
+[[C:\WORK>]]
+a x | b y | a z && echo worked
+(IO in=- out=C:\GP000001.TMP append)
+(RUN command="C:\BIN\A.COM x " prog=C:\BIN\A.COM name=a cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 0)
+(IO in=C:\GP000001.TMP out=C:\GP000002.TMP append)
+(RUN command="C:\BIN\B.COM y  " prog=C:\BIN\B.COM name=b cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 0)
+(IO in=C:\GP000002.TMP out=-)
+(RUN command="C:\BIN\A.COM z " prog=C:\BIN\A.COM name=a cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 0)
+worked
+[[C:\WORK>]]
+a | b || echo the last one failed
+(IO in=- out=C:\GP000003.TMP append)
+(RUN command="C:\BIN\A.COM " prog=C:\BIN\A.COM name=a cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 0)
+(IO in=C:\GP000003.TMP out=-)
+(RUN command="C:\BIN\B.COM " prog=C:\BIN\B.COM name=b cwd=C:\WORK env= detach=0 -> 1)
+(ENDED 2)
+the last one failed
+[[C:\WORK>]]
+set TEMP=C:\TMP
+[[C:\WORK>]]
+dir /b | b
+(IO in=C:\TMP\GP000004.TMP out=-)
+(RUN command="C:\BIN\B.COM " prog=C:\BIN\B.COM name=b cwd=C:\WORK env=TEMP=C:\TMP; detach=0 -> 1)
+(ENDED 0)
+[[C:\WORK>]]
+dir C:\TMP /b
+[[C:\WORK>]]
+echo "a | b" stays one command
+"a | b" stays one command
+[[C:\WORK>]]
+type in.txt | nosuch
+(IO in=C:\TMP\GP000005.TMP out=-)
+<<Bad command or file name
+>>(IO in=- out=-)
+[[C:\WORK>]]
+dir C:\ /b
+BIN
+TMP
+WORK
+[[C:\WORK>]]
+

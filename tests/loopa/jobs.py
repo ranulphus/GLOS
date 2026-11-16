@@ -2345,6 +2345,24 @@ def batch_case(profile, card):
         checks["pause"] = rc == 0 and "Press any key" in out and "after the pause" in out
         if not (checks["labels"] and checks["pause"]):
             info += " last=%r" % ((rc, out[-200:], e[-100:]),)
+        # Redirection and pipes around programs (S4b): the shell's own, against FreeDOS's COMMAND.COM running the
+        # same line whole; a pipe's temporary file is gone afterwards
+        for key, line in (("redir-out", "C:\\TEST\\ECHOARGS.EXE one two > C:\\TEST\\O1.TXT"),
+                          ("redir-append", "C:\\TEST\\ECHOARGS.EXE three >> C:\\TEST\\O1.TXT"),
+                          ("redir-in", "C:\\TEST\\CONIN.EXE line < C:\\TEST\\T3B.BAT"),
+                          ("pipe", "TYPE C:\\TEST\\T3B.BAT | C:\\TEST\\CONIN.EXE line"),
+                          ("pipe-prog", "C:\\TEST\\ECHOARGS.EXE piped words | C:\\TEST\\CONIN.EXE line")):
+            a = agent.ssh('COMMAND /C %s' % line)
+            fa = agent.ssh("TYPE C:\\TEST\\O1.TXT")[1] if key.startswith("redir-o") or key == "redir-append" else ""
+            if key == "redir-out":
+                agent.ssh("DEL C:\\TEST\\O1.TXT")
+            b = agent.ssh(line)
+            fb = agent.ssh("TYPE C:\\TEST\\O1.TXT")[1] if key.startswith("redir-o") or key == "redir-append" else ""
+            checks[key] = a[0] == b[0] and a[1] == b[1] and (len(a[1]) > 4 or len(fa) > 4) and (key != "redir-out" or fa == fb)
+            if not checks[key]:
+                info += " %s: freedos=%r glos=%r files=%r/%r" % (key, (a[0], a[1][-160:]), (b[0], b[1][-160:], b[2][-80:]), fa[-80:], fb[-80:])
+        left = agent.ssh("DIR C:\\ /B")[1] + agent.ssh("DIR C:\\TEST /B")[1] + agent.ssh("DIR A:\\ /B")[1]
+        checks["pipe-files-gone"] = ".TMP" not in left.upper()
         # DATE, TIME and CHCP are the shell's own too (GLOS's clock, the region's format and code page)
         d, t, c = agent.ssh("DATE"), agent.ssh("TIME"), agent.ssh("CHCP")
         bad_date = agent.ssh("DATE 16/11/2026")

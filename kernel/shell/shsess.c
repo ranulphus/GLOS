@@ -85,6 +85,8 @@ struct shsess {
     volatile u8 job_evt;                /* ... it has written, or moved on */
     u8 job_esc;                         /* a key's sequence under way, typed to it */
     u8 job_full;                        /* it has the PC's own screen: its terminal has been told */
+    char io_in[SH_PATH], io_out[SH_PATH];       /* the next program's standard input and output (h_io): "" its own */
+    u8 io_append;
     u8 want_key;                        /* the shell waits for a key (PAUSE, a batch file's question): sh_key() */
     volatile u8 stopped;                /* Ctrl+C was typed to a program: the shell is told when it asks (h_stop) */
     u8 out_cr;                          /* the last character written to the terminal was a carriage return */
@@ -490,6 +492,15 @@ static void *h_open(void *ctx, const char *path, int mode)
     return made(s) == 0 ? (void *)(u32)(s->q.r[0].ax + 1u) : 0;
 }
 
+/* (S4b) The program h_run() starts next has these files for its standard input and output. */
+static void h_io(void *ctx, const char *in, const char *out, int append)
+{
+    struct shsess *s = ctx;
+    sh_fmt(s->io_in, sizeof s->io_in, "%s", in ? in : "");
+    sh_fmt(s->io_out, sizeof s->io_out, "%s", out ? out : "");
+    s->io_append = (u8)(append != 0);
+}
+
 /* (S4, batch files) A file opened to read: the next read is from pos. */
 static int h_seek(void *ctx, void *f, unsigned long pos)
 {
@@ -631,11 +642,19 @@ static int h_run(void *ctx, const char *command, const char *prog, const char *n
     for (i = 0; i + 2 < sizeof r.env && (env[i] || (i && env[i - 1])); i++)
         r.env[i] = env[i];                      /* (NAME=VALUE strings, to their double NUL) */
     o.notify = job_notify;
+    if (s->io_in[0])                            /* (< and >, and a pipe's files: the shell's, h_io) */
+        o.file[0] = s->io_in;
+    if (s->io_out[0]) {
+        o.file[1] = s->io_out;
+        o.append = (u8)(s->io_append ? 2 : 0);
+    }
     if (s->local && !detach) {
         lcon_settle(s);
         let_go(s);                              /* (the program has DOS's memory whole) */
     }
-    if (agent_post_job(s, &r, &o, &seq) != 0)
+    i = agent_post_job(s, &r, &o, &seq) != 0;
+    s->io_in[0] = s->io_out[0] = 0;             /* (this program's alone) */
+    if (i)
         return -1;
     if (detach)
         return 0;
@@ -1169,6 +1188,12 @@ static void session(void *arg)
     ed_init(&s->ed, ed_put, s, (int)s->cols);
     s->starting = 1;
     sh_start(&s->sh, &s->host, env);
+    {
+        static u32 ids;                         /* (its pipes' temporary files: not another session's) */
+        u32 f = irq_save();
+        s->sh.id = ++ids;
+        irq_restore(f);
+    }
     s->starting = 0;
     if (!strcmp(s->dir, "\\")) {                /* "\": the root of the drive DOS started from (vm_boot_drive:
                                                    Loop A's machines start from a floppy, A: there) */
@@ -1313,7 +1338,7 @@ static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir
     static const struct sh_host host = { 0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free,
         h_is_dir, h_stat, h_open, h_read, h_put, h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space,
         h_run, h_as_typed,
-        own_names, own_help, h_extra, h_alloc, h_free, h_seek, h_key, h_stop };
+        own_names, own_help, h_extra, h_alloc, h_free, h_seek, h_key, h_stop, h_io };
     struct shsess *s;
     if (!(vm.bi->flags & BI_F_AGENT) || !(s = kmalloc(sizeof *s)))
         return 0;

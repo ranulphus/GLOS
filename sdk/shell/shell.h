@@ -86,6 +86,10 @@ struct sh_host {
     int (*stop)(void *ctx);                             /* 1: Ctrl+C has come since this was last asked (asked
                                                            between a batch file's lines and a FOR's turns: a
                                                            program it ended has ended by then) */
+    /* (S4b) The program run() starts next has these files for its standard input and output (full paths, or
+       "NUL"; 0: its own); append: the output is added to the file. May be 0: a line with < or > around a
+       program is then the host's to run whole, as before. */
+    void (*io)(void *ctx, const char *in, const char *out, int append);
 };
 
 /* A batch file being run (S4): where it is, how far it has got, what it was given. */
@@ -127,6 +131,10 @@ struct sh {
     int key_for;                        /* what a key is waited for: 1 PAUSE, 2 the question after Ctrl+C */
     int rest_plain;                     /* `rest` has had its variables put in already (a batch file's line, a
                                            FOR's turn): its commands are run as they stand */
+    int pipes;                          /* pipes made so far: their temporary files' names ... */
+    unsigned id;                        /* ... with this in them, which the host may set after sh_start() to tell
+                                           this shell's files from another's in the same folder */
+    int discard;                        /* a built-in's output goes nowhere (> NUL) */
 };
 
 void sh_start(struct sh *s, const struct sh_host *h, const char *const *env);  /* env: NAME=VALUE ..., 0 at the end */

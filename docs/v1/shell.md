@@ -386,6 +386,24 @@ it for everything GLOS starts.
 - **Known differences from MS-DOS, to be met on the benches:** a batch file's words keep no quotation marks
   (`%1` of `"a b"` is `a b`); `DATE` and `TIME` with nothing after them do not wait for a new one.
 
+### S4b as built (2026-11-16)
+
+- **`<`, `>` and `>>` around a program** are the shell's: it takes them out of the line and tells its host the
+  files (`io`), and the kernel's host gives them to the agent as the job's standard input and output (the files
+  a job could always have, `agent_opts.file`). `> NUL` and a name in quotation marks work. A built-in's output
+  goes to the file as before; a built-in reads no input.
+- **A pipe** is made the steps DOS would take with one program at a time (`pipe_steps`): each step's output is
+  added to a temporary file made empty beforehand (so a step that writes nothing still leaves the next one a
+  file), the next step reads it, and it is deleted when it has been read, whatever came of the step. The files
+  are `GPnnnmmm.TMP` (the session's number, the pipe's) in `TEMP`'s folder, or `TMP`'s, else the root of the
+  drive the shell is on. `&&` and `||` after a pipe go by its last step.
+- **A batch file is not redirected by the line that names it** (`X.BAT > FILE`), as under MS-DOS.
+- No line goes to the DOS's COMMAND.COM whole any more at a terminal. With no terminal a batch file named as a
+  program still does (S4a's note), until S4c.
+- **Tests:** `tests/shell/pipes.txt` on the host; in Loop A's `ssh-batch-*`: output to a file, added to a file,
+  input from a file, a built-in piped to a program and a program to a program, each against FreeDOS's
+  COMMAND.COM running the same line: the same output, exit code and file; no temporary file left.
+
 ### Decided by the owner (2026-11-16)
 
 1. **GLOS's `COMMAND.COM` by default** for the programs GLOS starts; `[shell] comspec = dos` puts the DOS's own

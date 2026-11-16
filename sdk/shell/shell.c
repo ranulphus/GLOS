@@ -5,8 +5,9 @@
  * adds. A built-in's output goes to a file with > or >>.
  *
  * Anything else is a program: found here and along PATH (.COM, .EXE, .BAT) and run by the host, in this
- * shell's folder, with the variables this shell has set; a line with a pipe or a redirection is the host's
- * to run whole (through the DOS's COMMAND.COM until S4).
+ * shell's folder, with the variables this shell has set. A .BAT file is run here, a line at a time (S4a: IF,
+ * GOTO, CALL, FOR, SHIFT, PAUSE, %0 to %9). < and > around a program name the files of its standard input and
+ * output, and a pipe is made steps with a temporary file between them, as DOS does (S4b).
  *
  * %NAME% is a variable; %ERRORLEVEL% the last exit code. && runs what follows only after a success (exit code
  * 0), || only after a failure.
@@ -123,6 +124,8 @@ static void err(struct sh *s, const char *t) { s->h->write(s->h->ctx, SH_ERR, t,
 /* A built-in's output: to the terminal, or to a file (> and >>). */
 static void say(struct sh *s, const char *t)
 {
+    if (s->discard)
+        return;
     if (s->redirect)
         s->h->put(s->h->ctx, s->redirect, t, (int)strlen(t));
     else
@@ -944,7 +947,8 @@ static int run_program(struct sh *s, const char *line, int how)
         first[n++] = *p++;
     first[n] = 0;
     args = p;
-    if (strpbrk(line, "<>|") || dos_own(s, first) || (!s->nbat && s->h->as_typed && s->h->as_typed(s->h->ctx))) {
+    if ((strpbrk(line, "<>|") && !s->h->io) || dos_own(s, first)
+        || (!s->nbat && s->h->as_typed && s->h->as_typed(s->h->ctx))) {
         /* a pipe, a redirection, a command of DOS's own, or a host that finds programs itself: the line whole
            (in a batch file the shell looks all the same: a batch file named there takes this one's place) */
         sh_fmt(command, sizeof command, "%s", line);
@@ -1352,6 +1356,108 @@ static size_t prompt_text(const struct sh *s, char *t, size_t room)
     return n;
 }
 
+/* ---- redirection and pipes (S4b): the shell's own, around built-ins and programs alike */
+
+#define THEN '\001'                     /* in `rest`: the next command whatever came of this one (a pipe's steps) */
+#define GONE '\002'                     /* a step of the shell's own: this file deleted, quietly */
+
+/* The first of c in t that is not between quotation marks, or 0. */
+static char *bare(char *t, const char *c)
+{
+    int q = 0;
+    for (; *t; t++) {
+        if (*t == '"')
+            q = !q;
+        else if (!q && strchr(c, *t))
+            return t;
+    }
+    return 0;
+}
+
+/* < file, > file and >> file taken out of a command: the files' full paths ("NUL" as it is; "" for none).
+   0, or -1 (a sign with no file after it). */
+static int take_redirs(struct sh *s, char *line, char *in, char *outf, unsigned room, int *append)
+{
+    char *p;
+    in[0] = outf[0] = 0;
+    *append = 0;
+    while ((p = bare(line, "<>")) != 0) {
+        char name[SH_PATH], *e = p + 1, *dst = *p == '<' ? in : outf;
+        unsigned n = 0;
+        int app = 0;
+        if (*p == '>' && *e == '>')
+            app = 1, e++;
+        while (*e == ' ' || *e == '\t')
+            e++;
+        if (*e == '"') {
+            for (e++; *e && *e != '"' && n < sizeof name - 1; e++)
+                name[n++] = *e;
+            if (*e)
+                e++;
+        } else {
+            for (; *e && *e != ' ' && *e != '\t' && *e != '<' && *e != '>' && n < sizeof name - 1; e++)
+                name[n++] = *e;
+        }
+        name[n] = 0;
+        if (!n)
+            return -1;
+        if (same(name, "NUL") || same(name, "NUL:"))
+            sh_fmt(dst, room, "NUL");
+        else
+            full_path(s, name, dst, room);
+        if (dst == outf)
+            *append = app;
+        memmove(p, e, strlen(e) + 1);           /* (the sign and its file gone: what was before and after stays) */
+    }
+    return 0;
+}
+
+/* A line with pipes (a | b | c) made the steps that do it, as DOS does with one program at a time: a's output
+   to a temporary file, b reading it and writing the next, each file deleted when it has been read. The files
+   are made first, empty, and written by adding to them, so that a step which writes nothing (an IF that is not
+   so) still leaves the next one a file to read. In TEMP's folder (or TMP's), else the drive's root. The steps,
+   THEN between them, into outb: 0, or -1 (too long, or no file could be made). */
+static int pipe_steps(struct sh *s, char *cmd, char *outb, unsigned room)
+{
+    const char *dir = var_get(s, "TEMP");
+    char tmp[2][SH_PATH], base[SH_PATH], *stage = cmd, *bar;
+    unsigned k = 0;
+    int i = 0;
+    if (!dir)
+        dir = var_get(s, "TMP");
+    full_path(s, dir && *dir ? dir : "\\", base, sizeof base);
+    tmp[0][0] = tmp[1][0] = 0;
+    for (;; i++) {
+        char name[16], *e;
+        void *f;
+        if ((bar = bare(stage, "|")) != 0)
+            *bar = 0;
+        while (*stage == ' ' || *stage == '\t')
+            stage++;
+        for (e = stage + strlen(stage); e > stage && (e[-1] == ' ' || e[-1] == '\t'); e--)
+            ;
+        *e = 0;
+        if (!*stage)
+            return -1;
+        if (bar) {                              /* its output's file */
+            sh_fmt(name, sizeof name, "GP%03u%03u.TMP", s->id % 1000, (unsigned)(s->pipes++ % 1000));
+            path_join(tmp[i & 1], sizeof tmp[0], base, name);
+            if (!(f = s->h->open(s->h->ctx, tmp[i & 1], 'w')))
+                return -1;
+            s->h->close(s->h->ctx, f);
+        }
+        k += (unsigned)sh_fmt(outb + k, room - k, "%s%s%s%s%s%s", k ? "\001" : "", stage, i ? " < " : "",
+                              i ? tmp[(i - 1) & 1] : "", bar ? " >> " : "", bar ? tmp[i & 1] : "");
+        if (i)
+            k += (unsigned)sh_fmt(outb + k, room - k, "\001\002%s", tmp[(i - 1) & 1]);
+        if (k >= room - 1)
+            return -1;
+        if (!bar)
+            return 0;
+        stage = bar + 1;
+    }
+}
+
 /* ---- a command: its exit code, or SH_UNDER_WAY */
 
 static int run_one(struct sh *s, const char *cmd)
@@ -1366,7 +1472,7 @@ static int run_one(struct sh *s, const char *cmd)
 /* A command with its variables put in already (line is changed). */
 static int run_line(struct sh *s, char *line)
 {
-    char copy[SH_LINE], *argv[32], *gt, target[SH_PATH];
+    char copy[SH_LINE], *argv[32], target[SH_PATH], source[SH_PATH];
     const char *u;
     int argc, r = 0, append = 0;
     while (*line == ' ' || *line == '\t' || *line == '@')
@@ -1378,6 +1484,10 @@ static int run_line(struct sh *s, char *line)
     }
     if (*line == ':')                           /* (a label) */
         return s->errorlevel;
+    if (*line == GONE) {                        /* (a pipe's file, read: gone) */
+        s->h->unlink(s->h->ctx, line + 1);
+        return s->errorlevel;
+    }
     /* the batch language: these take the rest of the line as it stands (a > in it is the inner command's) */
     if ((u = word(line, "REM")) != 0)
         return s->errorlevel;
@@ -1412,23 +1522,34 @@ static int run_line(struct sh *s, char *line)
     argc = split_words(copy, argv, 32);
     if (!argc)
         return s->errorlevel;
-    if (!is_builtin(s, argv[0]) || strpbrk(line, "|<")) {   /* (a built-in in a pipe, or with its input from a
-                                                               file, is the DOS's own until S4b) */
-        int st = run_program(s, line, 0);
+    if (!is_builtin(s, argv[0])) {              /* a program: its standard input and output are the files named */
+        int st, io = 0;
+        if (bare(line, "<>") && s->h->io) {
+            if (take_redirs(s, line, source, target, sizeof target, &append) != 0) {
+                err(s, "Syntax error\r\n");
+                return 1;
+            }
+            s->h->io(s->h->ctx, source[0] ? source : 0, target[0] ? target : 0, append);
+            io = 1;
+        }
+        st = run_program(s, line, 0);
+        if (io && st != 1)                      /* (no program was started with them: a batch file, as under
+                                                   MS-DOS, is not redirected by the line that names it) */
+            s->h->io(s->h->ctx, 0, 0, 0);
         return st == BATCH_BEGUN ? s->errorlevel : st > 0 ? SH_UNDER_WAY : st < 0 ? 1 : 0;
     }
-    if ((gt = strchr(line, '>')) != 0) {
-        append = gt[1] == '>';                  /* a built-in's output to a file */
-        full_path(s, gt + 1 + append + strspn(gt + 1 + append, " "), target, sizeof target);
-        {
-            char *t = target + strlen(target);
-            while (t > target && t[-1] == ' ')
-                *--t = 0;
+    if (bare(line, "<>")) {                     /* a built-in: its output to the file (it reads none) */
+        if (take_redirs(s, line, source, target, sizeof target, &append) != 0) {
+            err(s, "Syntax error\r\n");
+            return 1;
         }
-        *gt = 0;
         sh_fmt(copy, sizeof copy, "%s", line);
         argc = split_words(copy, argv, 32);
-        if (!(s->redirect = s->h->open(s->h->ctx, target, append ? 'a' : 'w'))) {
+        if (!argc)
+            return s->errorlevel;
+        if (same(target, "NUL")) {
+            s->discard = 1;
+        } else if (target[0] && !(s->redirect = s->h->open(s->h->ctx, target, append ? 'a' : 'w'))) {
             err(s, "Access denied\r\n");
             return 1;
         }
@@ -1613,6 +1734,7 @@ static int run_line(struct sh *s, char *line)
         s->h->close(s->h->ctx, s->redirect);
         s->redirect = 0;
     }
+    s->discard = 0;
     return r;
 }
 
@@ -1639,16 +1761,34 @@ static void next_command(struct sh *s)
     for (;;) {
         while (s->rest[0] && !s->under_way) {
             char cmd[SH_LINE];
-            const char *a = strstr(s->rest, "&&"), *o = strstr(s->rest, "||"), *cut = a && (!o || a < o) ? a : o;
-            int op = cut == a && a ? 1 : cut ? 2 : 0, run, r;
-            size_t n = cut ? (size_t)(cut - s->rest) : strlen(s->rest);
+            const char *a = strstr(s->rest, "&&"), *o = strstr(s->rest, "||"), *t = strchr(s->rest, THEN);
+            const char *cut = a && (!o || a < o) ? a : o;
+            int op, run, r, w = 2;
+            size_t n;
+            if (t && (!cut || t < cut))
+                cut = t, w = 1;
+            op = !cut || w == 1 ? 0 : cut == a ? 1 : 2;
+            n = cut ? (size_t)(cut - s->rest) : strlen(s->rest);
             memcpy(cmd, s->rest, n);
             cmd[n] = 0;
             run = s->rest_op == 0 || (s->rest_op == 1 && s->errorlevel == 0) || (s->rest_op == 2 && s->errorlevel != 0);
-            memmove(s->rest, cut ? cut + 2 : s->rest + n, strlen(cut ? cut + 2 : s->rest + n) + 1);
+            memmove(s->rest, cut ? cut + w : s->rest + n, strlen(cut ? cut + w : s->rest + n) + 1);
             s->rest_op = op;
             if (!run)
                 continue;
+            if (s->h->io && cmd[0] != GONE && bare(cmd, "|")) {        /* a pipe: its steps, before what follows */
+                char steps[SH_LINE], all[SH_LINE + 8];
+                if (pipe_steps(s, cmd, steps, sizeof steps) != 0
+                    || sh_fmt(all, sizeof all, "%s%s%s", steps, op == 1 ? "&&" : op == 2 ? "||" : s->rest[0] ? "\001" : "",
+                              s->rest) >= (int)sizeof s->rest) {
+                    err(s, "The line is too long for its pipes, or no temporary file can be made (TEMP)\r\n");
+                    s->errorlevel = 1;
+                    continue;
+                }
+                strcpy(s->rest, all);
+                s->rest_op = 0;
+                continue;
+            }
             r = s->rest_plain ? run_line(s, cmd) : run_one(s, cmd);
             if (r == SH_UNDER_WAY) {
                 s->under_way = 1;               /* (a program: on when it ends) */
@@ -1733,6 +1873,12 @@ void sh_line(struct sh *s, const char *line)
     }
     s->hist_at = s->nhist;
     sh_fmt(s->rest, sizeof s->rest, "%s", p);
+    {
+        char *c;
+        for (c = s->rest; *c; c++)              /* (THEN and GONE are the shell's own marks: not typed) */
+            if (*c == THEN || *c == GONE)
+                *c = ' ';
+    }
     s->rest_op = 0;
     s->rest_plain = 0;
     next_command(s);

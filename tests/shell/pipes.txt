@@ -1,0 +1,47 @@
+# Redirection and pipes around programs and built-ins (S4b): the shell's own. A.COM and B.COM are programs the
+# test's host lets run (ended by the script); what they are given for their standard input and output is in (IO).
+mkdir C:\BIN
+mkdir C:\WORK
+mkdir C:\TMP
+file C:\BIN\A.COM x
+file C:\BIN\B.COM x
+file C:\WORK\IN.TXT some input
+> cd \work
+> a < in.txt
+ended 0
+> a > out.txt
+ended 0
+> a one two >> out.txt three
+ended 0
+> a<in.txt>out.txt
+ended 0
+> a > nul
+ended 0
+> a < "in.txt" > "c:\work\quoted name.txt"
+ended 0
+> a >
+> echo text > nul
+> echo kept > e.txt
+cat C:\WORK\E.TXT
+# a pipe: the first's output to a file, the second reading it; the file gone after
+> a | b
+ended 0
+ended 5
+> echo %ERRORLEVEL%
+> dir C:\ /b
+# three steps, and what follows the pipe goes by its last program
+> a x | b y | a z && echo worked
+ended 0
+ended 0
+ended 0
+> a | b || echo the last one failed
+ended 0
+ended 2
+# a built-in on the left; TEMP's folder
+> set TEMP=C:\TMP
+> dir /b | b
+ended 0
+> dir C:\TMP /b
+> echo "a | b" stays one command
+> type in.txt | nosuch
+> dir C:\ /b

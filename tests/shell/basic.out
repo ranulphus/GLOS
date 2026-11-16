@@ -165,9 +165,10 @@ start tool
 (RUN command="C:\TOOLS\TOOL.EXE" prog=C:\TOOLS\TOOL.EXE name=tool cwd=C:\WORK env=X=hello; detach=1 -> 0)
 [[C:\WORK>]]
 dir | sort
-(RUN command="dir | sort" prog=- name=dir cwd=C:\WORK env=X=hello; detach=0 -> -1)
-<<GLOS can't run it here.
->>[[C:\WORK>]]
+(IO in=C:\GP000000.TMP out=-)
+<<Bad command or file name
+>>(IO in=- out=-)
+[[C:\WORK>]]
 dir /b *.txt > list.txt
 [[C:\WORK>]]
 (CAT C:\WORK\LIST.TXT: LIST.TXT\r\nNOTES.TXT\r\n)
