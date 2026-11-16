@@ -404,6 +404,37 @@ it for everything GLOS starts.
   input from a file, a built-in piped to a program and a program to a program, each against FreeDOS's
   COMMAND.COM running the same line: the same output, exit code and file; no temporary file left.
 
+### S4c in detail (2026-11-16, before it is built)
+
+- **The program** (`apps/command/command.asm`, a `.COM` of about 1 KB): it tells the kernel it has begun, then
+  asks what to do next, again and again, exactly as the resident stub does: start this program (EXEC, as its
+  child), make this DOS call, wait (HLT), or leave with this exit code. It keeps a block for those (the
+  registers of a DOS call, a program's path and command tail) and a block of memory for its children's
+  environment.
+- **How it reaches the kernel:** the instruction the stub uses (`ARPL`, an invalid opcode in V86 mode) followed
+  by the letters `GCMD`: the kernel takes that from any real-mode program. Two calls: BEGIN (its block, its
+  environment block; the kernel reads its command tail and its environment from its PSP) and NEXT (how the
+  last thing ended).
+- **In the kernel** (`kernel/shell/cmdcom.c`): each such COMMAND.COM that runs has a shell session of the
+  ordinary kind (`shsess.c`) with three differences:
+  - **its DOS calls are made by its COMMAND.COM**, not by the resident stub, which cannot run while the
+    program that shelled out does. The DOS server's requests say who is to make them (`dos.c`); a file a
+    session has open is a handle of the process that opened it, so one executor must make all of a session's
+    calls. Other sessions' requests wait meanwhile, as they do behind any running program;
+  - **its programs are started by its COMMAND.COM** (EXEC), not as jobs of the agent's: they are children of
+    the program that shelled out, as under DOS, with the session's variables as their environment;
+  - **what it writes goes through DOS's handles 1 and 2** of its COMMAND.COM, so it lands where the calling
+    program's output does: the screen, a file it was redirected to, a job's captured output.
+- COMMAND.COMs nest (a program run by one shells out again): a stack, eight deep.
+- The DOS server's 32 KB buffer, if it has to be allocated while a COMMAND.COM is the one making DOS calls, is
+  made GLOS.EXE's block (its owner written into DOS's memory control block): DOS would free it with the
+  COMMAND.COM otherwise, while other sessions go on using it.
+- **`/C line`** first: a session with no terminal, the line, the exit code. Then `COMMAND` alone and `/K`: the
+  session reads lines with DOS's own line input (INT 21h 0Ah) through its COMMAND.COM, a plain prompt, no
+  history: what a program's "DOS shell" needs.
+- **`COMSPEC`** for the agent's jobs and in the master environment becomes `X:\...\GLOS\COMMAND.COM` (the
+  folder GLOS runs from); `[shell] comspec = dos` leaves the DOS's.
+
 ### Decided by the owner (2026-11-16)
 
 1. **GLOS's `COMMAND.COM` by default** for the programs GLOS starts; `[shell] comspec = dos` puts the DOS's own
