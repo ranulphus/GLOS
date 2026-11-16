@@ -28,9 +28,13 @@ static struct { u16 base, len; } hidden[4];
 static int nhidden;
 
 /* COM1's data port, trapped: whether a program is part-way through a line,
-   so the kernel's lines wait for it (lib/kprintf.c). */
+   so the kernel's lines wait for it (lib/kprintf.c). A PC with no UART at 3F8h
+   (bench F: its line control register reads FFh) has COM1's line control kept
+   here (3FBh trapped too), so that a program's divisor writes are still told
+   from its characters, and its lines still reach the log. */
 static u8 com1_mid;
 static u32 com1_since;
+static u8 com1_none, com1_lcr;
 
 static int com1_hold(void) { return com1_mid; }
 
@@ -38,7 +42,7 @@ static void com1_out(u8 v)
 {
     if (uart_is_open(0x3F8))                    /* (the cable link's: nothing of a program's goes into it) */
         return;
-    if (!(inb(0x3FB) & 0x80)) {                 /* not the divisor latch: a character */
+    if (!((com1_none ? com1_lcr : inb(0x3FB)) & 0x80)) {      /* not the divisor latch: a character */
         if (!com1_mid)
             kprintf_flush(1);                   /* the kernel's lines made before this one go before it */
         if (!com1_mid && v != '\n')
@@ -46,7 +50,8 @@ static void com1_out(u8 v)
         com1_mid = v != '\n';
         klog_put((const char *)&v, 1);
     }
-    outb(0x3F8, v);
+    if (!com1_none)
+        outb(0x3F8, v);
     if (!com1_mid)
         kprintf_flush(0);
 }
@@ -94,6 +99,12 @@ void vdev_init(void)
     vm.rtc_c = 0;
     vm.rtc_index = 0x0D;
     cpu_io_trap(0x3F8, 1);
+    com1_none = inb(0x3FB) == 0xFF && inb(0x3FD) == 0xFF;     /* (no UART there: nothing answers) */
+    com1_lcr = 0x03;
+    if (com1_none) {
+        cpu_io_trap(0x3FB, 1);
+        kprintf("GLOS-SERIAL com1 none: programs' COM1 lines kept in the log alone\n");
+    }
     kprintf_hold = com1_hold;
     outb(0x43, 0x34);                           /* PIT channel 0: mode 2, count FFFFh (§8.2) */
     outb(0x40, 0xFF);
@@ -106,6 +117,8 @@ void vdev_leave(void)
     kprintf_hold = NULL;
     kprintf_flush(1);
     cpu_io_trap(0x3F8, 0);
+    if (com1_none)
+        cpu_io_trap(0x3FB, 0);
     timer_set_hook(NULL);
     timer_stop_to(vm.rtc_a, vm.rtc_b);          /* the chip as the program set it */
     outb(0x43, 0x36);                           /* PIT channel 0 as the BIOS sets it at POST: */
@@ -213,6 +226,8 @@ static u8 dev_inb(u16 port)
         return (u8)((inb(0x92) & ~3u) | (vm.a20 << 1));
     case 0x201:                                 /* the game port: GLOS's while a joystick source is on (vjoy.c) */
         return joy_virtual() ? joy_in() : inb(0x201);
+    case 0x3FB:                                 /* (trapped only with no UART at 3F8h) */
+        return com1_none ? com1_lcr : inb(0x3FB);
     default:
         return is_hidden(port) ? 0xFF : inb(port);
     }
@@ -242,6 +257,12 @@ static void dev_outb(u16 port, u8 v)
         return;
     case 0x3F8:
         com1_out(v);
+        return;
+    case 0x3FB:
+        if (com1_none)
+            com1_lcr = v;
+        else
+            outb(0x3FB, v);
         return;
     case 0x201:
         if (joy_virtual())
