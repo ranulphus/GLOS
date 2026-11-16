@@ -38,6 +38,11 @@
  *                       (a box, the middle button, Ctrl+F4; a page with changes says no
  *                       once), move by dragging, add a page ("+") and list every
  *                       title (the button at the strip's end)
+ *   GUITEST dock        "GUITEST Docking" (toolkit 2, step C5): a document in the middle,
+ *                       Tools and Layers at the left, Output at the bottom, Properties at
+ *                       the right; panes closed, shown again (the View button), docked
+ *                       elsewhere and floated by their context menus; the layout saved,
+ *                       reset and loaded
  *   GUITEST tasks       "GUITEST Tasks" (toolkit 2, step C4): background work: a task
  *                       "reads" ten thousand rows in pieces on a thread of its own,
  *                       the list filling as they are posted; its progress dialog
@@ -957,6 +962,98 @@ static void doctabs(void)
     say("doctabs", "", 0);
 }
 
+/* ---- docking panes (toolkit 2, step C5) */
+static struct gui_widget *dk;
+static char dk_saved[256];
+
+static void dk_panes(const char *why)          /* each pane's side and whether it shows, by the API */
+{
+    static const char sides[] = "lrbf";
+    char text[96];
+    int id, n = 0;
+    for (id = 1; id <= 4; id++)
+        n += snprintf(text + n, sizeof text - (size_t)n, "%s%d:%c%d", id > 1 ? " " : "", id,
+                      sides[gui_pane_side(dk, id)], gui_pane_shown(dk, id));
+    say("%s", why, 0);
+    say("panes %s", text, 0);
+}
+
+static void dk_on(struct gui_widget *w, int what)
+{
+    (void)w;
+    if (what == GUI_ON_CHANGE)
+        dk_panes("layout changed");
+}
+
+static void dk_view(struct gui_widget *w, int what)     /* the View menu's "Output" check, as a button */
+{
+    (void)w, (void)what;
+    gui_pane_show(dk, 3, !gui_pane_shown(dk, 3));
+    dk_panes(gui_pane_shown(dk, 3) ? "output shown" : "output hidden");
+}
+
+static void dk_save(struct gui_widget *w, int what)
+{
+    (void)w, (void)what;
+    if (gui_dock_save(dk, dk_saved, sizeof dk_saved) > 0)
+        dk_panes("saved");
+}
+
+static void dk_load(struct gui_widget *w, int what)
+{
+    (void)w, (void)what;
+    if (gui_dock_load(dk, dk_saved) == 0)
+        dk_panes("loaded");
+}
+
+static void dk_reset(struct gui_widget *w, int what)
+{
+    (void)w, (void)what;
+    gui_dock_load(dk, "dock1 160 -160 -110;1 l 1;2 l 1;4 r 1;3 b 1");
+    dk_panes("reset");
+}
+
+static void dock_page(void)
+{
+    static const char *const heads[] = { "Layer" };
+    static const int widths[] = { 100 };
+    static const char *const layers[] = { "Background", "Sketch", "Ink" };
+    struct gui_widget *box, *row, *pane, *c, *l, *f;
+    int i;
+    win = gui_window("GUITEST Docking", 560, 360, 0);
+    box = gui_vbox(win->root, -1, -1);
+    gui_grow(box, 1);
+    row = gui_hbox(box, -1, 0);
+    gui_button(row, "&View Output", dk_view, 0);
+    gui_button(row, "&Save layout", dk_save, 0);
+    gui_button(row, "&Load layout", dk_load, 0);
+    gui_button(row, "R&eset", dk_reset, 0);
+    dk = gui_dock(box);
+    gui_grow(dk, 1);
+    gui_on(dk, dk_on, 0);
+    c = gui_dock_centre(dk);
+    gui_label(c, "The document");
+    f = gui_field(c, 30);
+    gui_set_text(f, "MOUNTAIN.PNG");
+    pane = gui_pane(dk, 1, "Tools", GUI_DOCK_LEFT);
+    gui_button(pane, "Pencil", NULL, 0);
+    gui_button(pane, "Brush", NULL, 0);
+    pane = gui_pane(dk, 2, "Layers", GUI_DOCK_LEFT);
+    l = gui_list(pane, 1, heads, widths);
+    gui_grow(l, 1);
+    for (i = 0; i < 3; i++)
+        gui_list_add(l, &layers[i], NULL, NULL);
+    pane = gui_pane(dk, 3, "Output", GUI_DOCK_BOTTOM);
+    gui_label(pane, "Saved MOUNTAIN.PNG (640x480)");
+    pane = gui_pane(dk, 4, "Properties", GUI_DOCK_RIGHT);
+    gui_label(pane, "Width: 640");
+    gui_label(pane, "Height: 480");
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(f);
+    say("dock", "", 0);
+}
+
 /* ---- the virtual tree (toolkit 2, step C3). Ids: 1, 2, 3 at the top; a node's children are its id times ten
    and 1, 2, 3 (to three levels); but node 2's are five thousand leaves, 2000000 and on. */
 static struct gui_widget *vt;
@@ -1165,6 +1262,8 @@ int main(int argc, char **argv)
         split_page();
     else if (!strcmp(what, "doctabs"))
         doctabs();
+    else if (!strcmp(what, "dock"))
+        dock_page();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

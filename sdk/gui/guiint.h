@@ -82,6 +82,17 @@ void gui_cmd_update(struct gui_window *w);      /* the window's on_update */
 void gui_cmd_free(struct gui_window *w);
 extern const struct gui_class gui_toolbar_class;
 
+/* ---- basic.c */
+void gui_tabs_fix(struct gui_widget *tabs);     /* pages came or went other than by the tabs: the chosen one kept
+                                                   among them */
+
+/* ---- split.c */
+void gui_split_gone(struct gui_widget *split, int which);      /* pane 1 or 2 folded away with the bar (0: back) */
+
+/* ---- core.c */
+void gui_adopt(struct gui_widget *w, struct gui_widget *parent);       /* moved, with what is in it, to the end of
+                                                   parent's children (another window's too) */
+
 /* ---- menu.c */
 void gui_menu_to(struct gui_menu *m, struct gui_widget *w, void (*fn)(struct gui_widget *w, int id));
                                                 /* the menu's choice to w's fn, not the window's on_command */

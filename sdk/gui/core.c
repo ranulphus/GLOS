@@ -174,6 +174,50 @@ static void unlink_widget(struct gui_widget *w)
     w->parent = w->next = w->prev = NULL;
 }
 
+static void set_win(struct gui_widget *w, struct gui_window *win)
+{
+    struct gui_widget *c;
+    w->win = win;
+    for (c = w->first; c; c = c->next)
+        set_win(c, win);
+}
+
+static int inside_of(struct gui_widget *x, struct gui_widget *w)
+{
+    for (; x; x = x->parent)
+        if (x == w)
+            return 1;
+    return 0;
+}
+
+/* w and what is in it moved to the end of another parent's children, in this window or another (a docked pane
+   moved or floated: dock.c). What the old window had of it (the keys, the mouse, the pointer) it has no more. */
+void gui_adopt(struct gui_widget *w, struct gui_widget *parent)
+{
+    struct gui_window *old = w->win;
+    if (old) {
+        if (inside_of(old->focus, w))
+            old->focus = NULL;
+        if (inside_of(old->capture, w))
+            old->capture = NULL;
+        if (inside_of(old->hover, w))
+            old->hover = NULL;
+        gui_damage(w);
+        gui_relayout(old);
+    }
+    unlink_widget(w);
+    w->parent = parent;
+    w->prev = parent->last, w->next = NULL;
+    if (parent->last)
+        parent->last->next = w;
+    else
+        parent->first = w;
+    parent->last = w;
+    set_win(w, parent->win);
+    if (parent->win)
+        gui_relayout(parent->win);
+}
+
 void gui_remove(struct gui_widget *w)
 {
     struct gui_window *win = w->win;
@@ -618,9 +662,12 @@ void gui_win_realize(struct gui_window *w, int x, int y, int anywhere)
         f |= GLOS_WF_BARE;
     if (w->flags & GUI_W_DESKTOP)
         kind = GLOS_WK_DESKTOP;
+    if (w->flags & GUI_W_TOOL)
+        kind = GLOS_WK_TOOL;
     if (anywhere)
         f |= GLOS_WF_ANYWHERE;
-    if (!(h = glos_window(w->gw.title, x, y, w->w, w->h, kind, f, 0)))
+    if (!(h = glos_window(w->gw.title, x, y, w->w, w->h, kind, f,
+                          w->flags & GUI_W_TOOL && w->owner ? w->owner->id : 0)))
         return;
     memset(&w->px, 0, sizeof w->px);
     w->px.size = sizeof w->px;

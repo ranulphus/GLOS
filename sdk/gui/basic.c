@@ -1299,6 +1299,20 @@ void gui_tabs_flags(struct gui_widget *tabs, unsigned flags)
 
 int gui_tabs_closing(struct gui_widget *tabs) { return ((struct tabs *)tabs)->closing; }
 
+/* Pages came or went other than by the tabs (a docked pane moved: dock.c): the chosen one among those there. */
+void gui_tabs_fix(struct gui_widget *tabs)
+{
+    struct tabs *t = (struct tabs *)tabs;
+    int n = tabs_count(t);
+    if (t->at >= n)
+        t->at = n > 0 ? n - 1 : 0;
+    if (t->first >= n)
+        t->first = n > 0 ? n - 1 : 0;
+    gui_damage(tabs);
+    if (tabs->win)
+        gui_relayout(tabs->win);
+}
+
 struct gui_widget *gui_tabs_page(struct gui_widget *tabs, int page) { return page_at((struct tabs *)tabs, page); }
 
 void gui_tab_remove(struct gui_widget *tabs, int page)

@@ -471,11 +471,27 @@ In three parts, each with its GUITEST page and script, on the host and in Loop A
   than 5 pixels, a bar showing where; the moved page stays chosen. The "+" and the list button take the strip's
   right end, the scrolling arrows before them; the list is a pop-up menu whose choice goes to the tabs themselves
   (`gui_menu_to`, the toolkit's own), the chosen title checked. Old tabs (no flags) draw as before.
+- **C5c, docking panes** (`sdk/gui/dock.c`): made of the toolkit's parts: three splitters (left | the rest;
+  the middle | right; the centre over the bottom) and at each side a row of tabs whose pages are the panes
+  (scrolling, with close boxes and dragging). A side with no pane is folded away with its bar. Hidden panes keep
+  their widgets on a shelf of the dock's; a pane moves between sides and windows whole (`gui_adopt`, the toolkit's
+  own). A side's context menu acts on its chosen pane: dock at another side, float, hide. A floating pane is a
+  tool window (`GUI_W_TOOL`, GLOS_WK_TOOL, owned by the app's window); closing it hides the pane; its place is
+  kept when it docks again or the layout is saved. The layout line: `dock1 L R B;id side shown[ x y w h];...`
+  (the splitters' places; the docked panes in their sides' order, then the floating and hidden ones).
+  `GUI_ON_CHANGE` on the dock for every change the user made (a bar, a close, a move, the menu).
+- **Still to come in C5:** narrower than its panes and the middle's least sizes need (640x480), the side panes
+  fold into tabs at one side; and a pane's title dragged onto a side's edge to dock it there (the context menu
+  does it meanwhile).
 - **Tests:** `split` (GUITEST's page: a tree beside a list, an output pane under the list; the bar dragged, its
   arrows, a pane folded and back, the bar across moved up; the window made wider: the tree keeps its width, the
   output pane its height) and `doctabs` (six documents in a scrolling row: a page with changes kept at its close
   box, then closed by the middle button; a title dragged onto the next; "+"; the list; Ctrl+F4 in a page; the
-  order read back). Both scripts' players learnt a middle button (`click ... middle`).
+  order read back). Both scripts' players learnt a middle button (`click ... middle`). `dock` (GUITEST's page:
+  Tools and Layers at the left, Output at the bottom, Properties at the right; Properties closed (the right side
+  goes), Output hidden and shown by a button, Layers docked at the bottom and Tools floated by their context
+  menus, the layout saved, reset (the tool window goes) and loaded (it comes back), each change as the API
+  reads it).
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

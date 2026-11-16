@@ -21,6 +21,7 @@ struct split {
     int min1, min2;
     int fold;                                   /* 0, or 1 / 2: that pane folded away */
     int drag, drag_off;                         /* the bar held, and where in it */
+    int nobar;                                  /* (dock.c: a side with no pane has no bar either) */
 };
 
 #define SP(w) ((struct split *)(w))
@@ -39,11 +40,12 @@ static void panes(struct split *s, struct gui_widget **a, struct gui_widget **b)
 }
 
 static int along(struct split *s) { return s->vertical ? s->w.r.h : s->w.r.w; }
+static int barw(struct split *s) { return s->nobar ? 0 : BAR; }
 
 /* The first pane's size now, as `at`, the least sizes and the folding say. */
 static int first_size(struct split *s)
 {
-    int room = along(s) - BAR, f;
+    int room = along(s) - barw(s), f;
     if (room < 0)
         room = 0;
     if (s->fold == 1)
@@ -100,21 +102,22 @@ static void split_layout(struct gui_widget *w)
         a->next = bar;
     }
     f = first_size(s);
-    rest = along(s) - BAR - f;
+    rest = along(s) - barw(s) - f;
     if (rest < 0)
         rest = 0;
+    s->bar->flags = s->nobar ? s->bar->flags | GUI_HIDDEN : s->bar->flags & ~GUI_HIDDEN;
     if (s->vertical) {
         if (a)
             gui_place(a, w->r.x, w->r.y, w->r.w, f);
-        gui_place(s->bar, w->r.x, w->r.y + f, w->r.w, BAR);
+        gui_place(s->bar, w->r.x, w->r.y + f, w->r.w, barw(s));
         if (b)
-            gui_place(b, w->r.x, w->r.y + f + BAR, w->r.w, rest);
+            gui_place(b, w->r.x, w->r.y + f + barw(s), w->r.w, rest);
     } else {
         if (a)
             gui_place(a, w->r.x, w->r.y, f, w->r.h);
-        gui_place(s->bar, w->r.x + f, w->r.y, BAR, w->r.h);
+        gui_place(s->bar, w->r.x + f, w->r.y, barw(s), w->r.h);
         if (b)
-            gui_place(b, w->r.x + f + BAR, w->r.y, rest, w->r.h);
+            gui_place(b, w->r.x + f + barw(s), w->r.y, rest, w->r.h);
     }
     if (a)                                      /* (a folded pane is hidden: no keys go into it) */
         a->flags = f ? a->flags & ~GUI_HIDDEN : a->flags | GUI_HIDDEN;
@@ -125,7 +128,7 @@ static void split_layout(struct gui_widget *w)
 /* The first pane to be f pixels, kept as `at` says (the first's size, or the second's). */
 static void move_to(struct split *s, int f, int by_user)
 {
-    int room = along(s) - BAR;
+    int room = along(s) - barw(s);
     if (f < 0)
         f = 0;
     if (f > room)
@@ -244,3 +247,18 @@ void gui_split_min(struct gui_widget *w, int first, int second)
 }
 
 int gui_split_folded(struct gui_widget *w) { return SP(w)->fold; }
+
+void gui_split_gone(struct gui_widget *w, int which)   /* (dock.c) a pane folded with its bar: nothing of it shows */
+{
+    gui_split_fold(w, which);
+    SP(w)->nobar = which == 1 || which == 2;
+}
+
+void gui_split_fold(struct gui_widget *w, int which)
+{
+    struct split *s = SP(w);
+    s->fold = which == 1 || which == 2 ? which : 0;
+    s->nobar = 0;
+    gui_relayout(w->win);
+    gui_damage(w);
+}

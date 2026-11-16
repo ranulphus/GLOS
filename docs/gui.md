@@ -81,6 +81,7 @@ compare, and costs a redraw twice a second for nothing.
 | choice | a button that drops its list of items down |
 | spin box, slider | a number in a range |
 | tabs, group, form, scrolling area, boxes, space, separator | containers and spacing; tabs may close (a box on each title, the middle button, Ctrl+F4: `GUI_ON_CLOSE`, the app removes the page with `gui_tab_remove`), move by dragging (`GUI_ON_MOVE`), add a page ("+", `GUI_ON_NEW`) and list every title (a button at the strip's end): `gui_tabs_flags` |
+| dock (toolkit 2) | a window's main area: the app's content in the middle (`gui_dock_centre`), panes at the left, right and bottom (several at a side as tabs) or floating in tool windows (`gui_pane`); a pane's close box hides it, its title's context menu docks it elsewhere, floats or hides it; `gui_pane_show` for the View menu; the layout as a line of text (`gui_dock_save`, `gui_dock_load`) |
 | splitter (toolkit 2) | two panes and a bar between them (`gui_split`): dragged, or moved by its keys between the panes in Tab's order; Home and End fold a pane; one pane keeps its size as the window changes (`at`, or minus the other's); `GUI_ON_CHANGE` for the app's settings |
 | menu bar, menus | menus are pop-up windows (below); items with letters, shortcuts, checks; separators |
 | progress bar, image, canvas, status bar | a canvas is the app's to draw in and has its events |

@@ -1,0 +1,42 @@
+# Docking panes (toolkit 2, step C5; docs/v1/toolkit-2.md 7): GUITEST's document in the middle, Tools and Layers at
+# the left, Output under the document, Properties at the right. Properties' close box hides it (the right side
+# folds away); the View button hides Output and shows it again; Layers' context menu docks it at the bottom beside
+# Output; Tools' floats it in a tool window of its own (the left side folds away); the layout saved, reset to the
+# first one (the tool window goes) and loaded again (it comes back). Each change as the API reads it.
+run GUITEST.EXE dock
+wait "GUITEST Docking"
+shot start "GUITEST Docking"
+click "GUITEST Docking" 470 46
+shot closed "GUITEST Docking"
+key alt+v
+key alt+v
+click "GUITEST Docking" 95 46 right
+key b
+shot layers-bottom "GUITEST Docking"
+click "GUITEST Docking" 35 46 right
+key f
+wait "Tools"
+shot floated "GUITEST Docking"
+shot tools "Tools"
+click "GUITEST Docking" 140 17
+click "GUITEST Docking" 322 17
+gone "Tools"
+shot reset "GUITEST Docking"
+click "GUITEST Docking" 240 17
+wait "Tools"
+shot loaded "GUITEST Docking"
+click "GUITEST Docking" 280 352
+key alt+f4
+gone "GUITEST Docking"
+expect GUI dock
+expect GUI panes 1:l1 2:l1 3:b1 4:r0
+expect GUI output hidden
+expect GUI panes 1:l1 2:l1 3:b0 4:r0
+expect GUI output shown
+expect GUI panes 1:l1 2:b1 3:b1 4:r0
+expect GUI panes 1:f1 2:b1 3:b1 4:r0
+expect GUI saved
+expect GUI reset
+expect GUI panes 1:l1 2:l1 3:b1 4:r1
+expect GUI loaded
+expect GUI end

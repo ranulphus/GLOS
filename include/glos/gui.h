@@ -161,6 +161,8 @@ struct gui_widget {
 #define GUI_W_DIALOG  4                 /* fixed, and sized to what it holds */
 #define GUI_W_DESKTOP 8                 /* GLOS_WIN_DESKTOP: under every window, the whole desktop */
 #define GUI_W_BARE    16                /* GLOS_WIN_BARE */
+#define GUI_W_TOOL    32                /* a tool window (GLOS_WK_TOOL): framed, in front of its owner (set
+                                           w->owner before it is shown), no button of its own: a floating pane */
 
 struct gui_menubar;
 struct gui_cmd;
@@ -269,6 +271,24 @@ int gui_split_get(struct gui_widget *split);            /* `at` as it is now (th
 void gui_split_set(struct gui_widget *split, int at);   /* (unfolded) */
 void gui_split_min(struct gui_widget *split, int first, int second);   /* the least each pane has while both fit (32) */
 int gui_split_folded(struct gui_widget *split);         /* 0, or 1 / 2: that pane folded away */
+void gui_split_fold(struct gui_widget *split, int which);      /* fold pane 1 or 2 away (0: neither) */
+/* Docking panes (toolkit 2): a window's main area, the app's content in its centre (gui_dock_centre, a vbox) and
+   panes at its left, right and bottom, several at a side as tabs, or floating in tool windows; a side with none is
+   folded away. A pane's title: a close box (hidden), dragged along to reorder, and a context menu to dock it at
+   another side, float it or hide it. GUI_ON_CHANGE (the dock's gui_on) when the user changed the layout. */
+enum { GUI_DOCK_LEFT, GUI_DOCK_RIGHT, GUI_DOCK_BOTTOM, GUI_DOCK_FLOAT };
+struct gui_widget *gui_dock(struct gui_widget *parent);
+struct gui_widget *gui_dock_centre(struct gui_widget *dock);
+struct gui_widget *gui_pane(struct gui_widget *dock, int id, const char *title, int side);     /* the pane's vbox,
+                                           for what goes in it (id: the app's, not 0); NULL: none more (16) */
+void gui_pane_show(struct gui_widget *dock, int id, int on);   /* hidden and shown again (the View menu's checks) */
+int gui_pane_shown(struct gui_widget *dock, int id);
+void gui_pane_move(struct gui_widget *dock, int id, int side); /* (and shown) */
+int gui_pane_side(struct gui_widget *dock, int id);
+int gui_dock_save(struct gui_widget *dock, char *buf, int room);       /* the layout as one line of text, for the
+                                           app's settings: its length, or -1 if room is short */
+int gui_dock_load(struct gui_widget *dock, const char *text);  /* and back: 0, or -1 (not a layout); panes it
+                                           doesn't name stay hidden */
 struct gui_widget *gui_tabs(struct gui_widget *parent);
 struct gui_widget *gui_tab(struct gui_widget *tabs, const char *title);        /* the page: a vbox */
 int gui_tabs_get(struct gui_widget *tabs);
