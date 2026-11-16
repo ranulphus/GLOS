@@ -261,6 +261,15 @@ int glos_close(glos_handle id)
     return 0;
 }
 
+int glos_show_quiet(glos_handle id, unsigned state)      /* (shown, the focus where it is: a tooltip) */
+{
+    struct hwin *w = find(id);
+    if (!w)
+        return GLOS_E_HANDLE;
+    w->shown = state != GLOS_WS_HIDDEN;
+    return 0;
+}
+
 int glos_show(glos_handle id, unsigned state)
 {
     struct hwin *w = find(id);
@@ -1078,6 +1087,15 @@ static int step(void)
                 press(button);
                 release(button);
             }
+            return 1;
+        } else if (!strcmp(cmd, "move")) {      /* move "TITLE" X Y: the pointer there, no button */
+            struct hwin *w;
+            int x, y;
+            if (!word(&p, a, sizeof a) || !(w = by_title(a)))
+                fail("move: no window \"%s\"", a);
+            x = atoi(word(&p, b, sizeof b) ? b : "0");
+            y = atoi(word(&p, b, sizeof b) ? b : "0");
+            point(w->x + x, w->y + y);
             return 1;
         } else if (!strcmp(cmd, "launch") || !strcmp(cmd, "syskey")) {
             struct hev e;

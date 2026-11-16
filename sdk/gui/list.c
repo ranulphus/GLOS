@@ -720,11 +720,15 @@ static int tree_event(struct gui_widget *w, struct gui_ev *e)
     }
     switch (e->type) {
     case GUI_EV_PRESS:
-        if (e->button != 1)
+        if (e->button != 1 && e->button != 2)
             return 0;
         n = nth(t, (e->y - w->r.y - 1) / GUI_ROW_H + t->top);
         if (!n)
             return 1;
+        if (e->button == 2) {                   /* (a right press chooses the node: a context menu for it) */
+            tree_go(t, n);
+            return 1;
+        }
         {
             int bx = w->r.x + 3 + depth(n) * INDENT;
             if (e->x >= bx && e->x < bx + 12 && (n->may || n->first)) {

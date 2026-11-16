@@ -497,22 +497,111 @@ struct gui_widget *gui_image(struct gui_widget *parent, const unsigned *rgb, int
 
 /* ---- the status bar */
 
-static void status_measure(struct gui_widget *w, int *pw, int *ph) { (void)w, *pw = 0, *ph = gui_font->height + 5; }
+/* Sections (toolkit 2, step C2): section 0 is the bar's own text, with what the others leave; the others are at
+   the right end, each as wide as it was made, with a text, an icon before it, or a small progress bar. */
+#define STATUS_MAX 8
+
+struct status {
+    struct gui_widget w;
+    struct {
+        int width;
+        char *text;
+        const unsigned char *icon;
+        int value, max;
+    } sec[STATUS_MAX];
+    int n;                              /* sections after the first */
+};
+
+static void status_measure(struct gui_widget *w, int *pw, int *ph)
+{
+    struct status *t = (struct status *)w;
+    int h = gui_font->height + 5;
+    *pw = 0;
+    *ph = t->n && h < GUI_ICON_W + 4 ? GUI_ICON_W + 4 : h;
+}
 
 static void status_draw(struct gui_widget *w, struct gfx_surface *s)
 {
+    struct status *t = (struct status *)w;
+    int right = w->r.x + w->r.w, i, ty = w->r.y + 1 + (w->r.h - 1 - gui_font->height) / 2;
     gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_FACE);
     gfx_fill(s, w->r.x, w->r.y, w->r.w, 1, GUI_LINE);
-    gui_text_fit(s, w->r.x + 6, w->r.y + 3, w->r.w - 12, gui_font, gui_get_text(w), GUI_TEXT);
+    for (i = t->n; i >= 1; i--) {               /* from the right end */
+        int x = right - t->sec[i].width, tx = x + 6;
+        if (x < w->r.x + 40)                    /* (a narrow window: the sections that fit) */
+            break;
+        gfx_fill(s, x, w->r.y + 3, 1, w->r.h - 5, GUI_DIM);
+        if (t->sec[i].max > 0) {
+            int bw = t->sec[i].width - 12, v = t->sec[i].value < 0 ? 0 : t->sec[i].value;
+            if (v > t->sec[i].max)
+                v = t->sec[i].max;
+            gfx_frame(s, tx, w->r.y + 4, bw, w->r.h - 7, GUI_LINE);
+            gfx_fill(s, tx + 1, w->r.y + 5, (bw - 2) * v / t->sec[i].max, w->r.h - 9, GUI_DARK);
+        } else {
+            if (t->sec[i].icon) {
+                gui_draw_icon(s, tx, w->r.y + 1 + (w->r.h - 1 - GUI_ICON_W) / 2, t->sec[i].icon, GUI_ICON_W);
+                tx += GUI_ICON_W + 4;
+            }
+            if (t->sec[i].text)
+                gui_text_fit(s, tx, ty, right - tx - 4, gui_font, t->sec[i].text, GUI_TEXT);
+        }
+        right = x;
+    }
+    gui_text_fit(s, w->r.x + 6, t->n ? ty : w->r.y + 3, right - w->r.x - 12, gui_font, gui_get_text(w), GUI_TEXT);
 }
 
-const struct gui_class gui_status_class = { "status", 0, status_draw, NULL, status_measure, NULL, NULL };
+static void status_destroy(struct gui_widget *w)
+{
+    struct status *t = (struct status *)w;
+    int i;
+    for (i = 1; i <= t->n; i++)
+        free(t->sec[i].text);
+}
+
+const struct gui_class gui_status_class = { "status", 0, status_draw, NULL, status_measure, NULL, status_destroy };
 
 struct gui_widget *gui_status(struct gui_window *win)
 {
-    struct gui_widget *w = gui_new(win->root, &gui_status_class, sizeof *w);
+    struct gui_widget *w = gui_new(win->root, &gui_status_class, sizeof(struct status));
     gui_set_text(w, "");
     return w;
+}
+
+int gui_status_section(struct gui_widget *w, int width)
+{
+    struct status *t = (struct status *)w;
+    if (t->n + 1 >= STATUS_MAX)
+        return 0;
+    t->sec[++t->n].width = width;
+    if (w->win)
+        gui_relayout(w->win);
+    gui_damage(w);
+    return t->n;
+}
+
+void gui_status_set(struct gui_widget *w, int section, const char *text, const unsigned char *icon)
+{
+    struct status *t = (struct status *)w;
+    if (section == 0) {
+        gui_set_text(w, text ? text : "");
+        return;
+    }
+    if (section < 1 || section > t->n)
+        return;
+    free(t->sec[section].text);
+    t->sec[section].text = text ? strdup(text) : NULL;
+    t->sec[section].icon = icon;
+    t->sec[section].max = 0;
+    gui_damage(w);
+}
+
+void gui_status_progress(struct gui_widget *w, int section, int value, int max)
+{
+    struct status *t = (struct status *)w;
+    if (section < 1 || section > t->n)
+        return;
+    t->sec[section].value = value, t->sec[section].max = max;
+    gui_damage(w);
 }
 
 /* ---- separators */

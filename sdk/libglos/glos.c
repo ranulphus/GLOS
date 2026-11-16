@@ -273,6 +273,12 @@ int glos_show(glos_handle w, unsigned state)
     return raw(GLOS_WIN_SHOW, &q, 0);
 }
 
+int glos_show_quiet(glos_handle w, unsigned state)
+{
+    struct glos_win_show q = { sizeof q, w, state, GLOS_SHOW_NOFOCUS };
+    return raw(GLOS_WIN_SHOW, &q, 0);
+}
+
 int glos_move(glos_handle w, int x, int y)
 {
     struct glos_win_place q = { sizeof q, w, GLOS_PLACE_MOVE, x, y, 0, 0 };

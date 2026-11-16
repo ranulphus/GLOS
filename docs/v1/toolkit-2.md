@@ -326,11 +326,24 @@ which and why. The apps keep working at every step (they move as the toolkit doe
   while it can't be used, held in while it is checked or pressed, framed under the pointer. What doesn't fit
   the window's width is behind a button at the bar's end, in a menu of the same commands. It never has the
   keyboard (D34).
-- **Still to come in C2:** tooltips, context menus, the status bar's sections, submenus, drop-down buttons and
-  fields in the toolbar.
+- **Tooltips** (`sdk/gui/tip.c`; `gui_tip(widget, text)`): a line in a pop-up of its own by the pointer, 600 ms
+  after the pointer came to rest there; gone when the pointer goes on to something else, at a press, a key or
+  the wheel, and when the window loses the keyboard. The pop-up is shown without the keyboard (libglos's
+  `glos_show_quiet`: API 2.0's SHOW with NOFOCUS). A toolbar's button has its command's tooltip, or its name
+  where the bar shows no texts, with the shortcut ("Open a file (Ctrl+O)"); a widget of an app's own names its
+  parts' tooltips from its pointer handling (`gui_tip_at`).
+- **Context menus** (`gui_context(widget, menu)`): opened by the right button over the widget or what is in it,
+  after the press has chosen what is under the pointer (lists did; trees do now), and by the Menu key or
+  Shift+F10 by the widget that has the keyboard. The widget's `on` is told first (`GUI_ON_CONTEXT`), so the app
+  can change the menu for what is chosen; the menu's commands are asked for as for any menu.
+- **The status bar's sections** (`gui_status_section`, `gui_status_set`, `gui_status_progress`): at its right
+  end, each as wide as it is made, with a text, an icon before it, or a small progress bar; the bar's own text
+  has what they leave.
+- **Still to come in C2:** submenus, drop-down buttons and fields in the toolbar.
 - **Tests:** `commands` (GUITEST's commands page: the menus with icons, a tick and a dot; the update hook
   greying Paste until Copy; a button pressed, a toggle held in, shortcuts; texts on the toolbar; the window
-  made narrow and the overflow's menu).
+  made narrow and the overflow's menu; a list's context menu by the mouse and by Shift+F10; the status bar's
+  sections; a button's and a label's tooltip), on the host and on the desktop in Loop A; the scripts' `move`.
 
 ## Settled at the owner's review (2026-11-06)
 

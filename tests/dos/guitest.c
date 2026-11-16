@@ -370,7 +370,8 @@ static void tabs(void)
 /* DOS names in the page DOS has: what M10's suite makes (letters the 437 upper-casing leaves alone). */
 /* ---- commands (toolkit 2, step C2) */
 enum { K_NEW = 100, K_OPEN, K_SAVE, K_CUT, K_COPY, K_PASTE, K_BOLD, K_SMALL, K_MEDIUM, K_LARGE, K_NARROW, K_TEXT,
-       K_ABOUT, K_EXIT };
+       K_ABOUT, K_EXIT, K_PROPS };
+static struct gui_widget *klist;
 static unsigned char kicon[8][GUI_ICON_W * GUI_ICON_W];
 static struct gui_widget *kbar;
 static int kcopied, kbold, ksize = K_MEDIUM, knarrow, ktext;
@@ -421,6 +422,12 @@ static void kupdate(struct gui_window *w)       /* what can be used now, and wha
     gui_command_check(w, K_TEXT, ktext);
 }
 
+static void kcontext(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_CONTEXT)
+        say("context for row%s %d", "", gui_list_get(w));
+}
+
 static void kcommand(struct gui_window *w, int id)
 {
     static const char *const names[] = { "new", "open", "save", "cut", "copy", "paste", "bold", "small", "medium",
@@ -431,8 +438,12 @@ static void kcommand(struct gui_window *w, int id)
     case K_SMALL: case K_MEDIUM: case K_LARGE: ksize = id; break;
     case K_NARROW:
         knarrow = !knarrow;
-        gui_resize(w, knarrow ? 150 : 380, 160);
+        gui_resize(w, knarrow ? 150 : 380, 220);
         break;
+    case K_PROPS:
+        say("properties of row%s %d", "", gui_list_get(klist));
+        gui_status_progress(status, 2, gui_list_get(klist) + 1, 3);
+        return;
     case K_TEXT:
         ktext = !ktext;
         gui_toolbar_text(kbar, ktext);
@@ -440,6 +451,7 @@ static void kcommand(struct gui_window *w, int id)
     case K_EXIT: gui_quit(0); return;
     }
     say("command %s", names[id - K_NEW], 0);
+    gui_status_set(status, 1, names[id - K_NEW], id == K_COPY ? kicon[4] : NULL);
 }
 
 static void commands(void)
@@ -457,7 +469,7 @@ static void commands(void)
         { K_ABOUT, "&About", "F1", 7, "About these commands" }, { K_EXIT, "E&xit", NULL, -1, NULL } };
     unsigned i;
     kicons();
-    win = gui_window("GUITEST Commands", 380, 160, 0);
+    win = gui_window("GUITEST Commands", 380, 220, 0);
     win->on_command = kcommand;
     win->on_update = kupdate;
     for (i = 0; i < sizeof def / sizeof *def; i++)
@@ -489,8 +501,23 @@ static void commands(void)
     box = gui_vbox(win->root, -1, -1);
     gui_grow(box, 1);
     gui_label(box, "Commands are set once; the menus and the toolbar show them.");
-    gui_label(box, "Paste can be used once Copy has been.");
+    gui_tip(gui_label(box, "Paste can be used once Copy has been."), "A label's own tooltip");
+    {                                           /* a list with a context menu: commands, and an item of its own */
+        static const char *const rows[3][1] = { { "First row" }, { "Second row" }, { "Third row" } };
+        struct gui_menu *cm = gui_menu_new();
+        klist = gui_list(box, 1, NULL, NULL);
+        gui_grow(klist, 1);
+        for (i = 0; i < 3; i++)
+            gui_list_add(klist, rows[i], kicon[0], NULL);
+        gui_on(klist, kcontext, 0);
+        gui_menu_command(cm, K_OPEN), gui_menu_command(cm, K_COPY), gui_menu_command(cm, K_PASTE);
+        gui_menu_sep(cm);
+        gui_menu_item(cm, "P&roperties", K_PROPS, NULL);
+        gui_context(klist, cm);
+    }
     status = gui_status(win);
+    gui_status_section(status, 90);             /* the last command, with Copy's icon */
+    gui_status_section(status, 70);             /* a small progress bar: the row whose properties were asked */
     gui_show(win, 1);
     say("commands", "", 0);
 }

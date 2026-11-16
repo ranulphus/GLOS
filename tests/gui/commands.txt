@@ -2,7 +2,9 @@
 # set once (its text, shortcut, icon, state) and the menus and the toolbar show it: icons in the menu, a tick, the
 # dot of a group of three; the update hook greys Paste until Copy has been used; a toolbar button pressed by the
 # mouse, a toggle held in, shortcuts; the toolbar with texts; and the window made narrow, where the toolbar's end
-# goes into its menu.
+# goes into its menu; and a button's tooltip, once the pointer has rested on it: the command's, with its shortcut,
+# gone at a key; a list's context menu by the right button (the press choosing the row first) and by Shift+F10,
+# with commands and an item of its own; and the status bar's sections (a text with an icon, a small progress bar).
 run GUITEST.EXE commands
 wait "GUITEST Commands"
 shot start "GUITEST Commands"
@@ -34,7 +36,28 @@ shot overflow ""
 key esc
 key f6
 shot wide-again "GUITEST Commands"
+click "GUITEST Commands" 60 118 right
+shot context ""
+key r
+shot status-sections "GUITEST Commands"
+key tab
+key up
+key shift+f10
+shot context-keys ""
+key esc
+move "GUITEST Commands" 100 76
+pause 700
+shot tip-label ""
+move "GUITEST Commands" 40 30
+pause 400
+move "GUITEST Commands" 42 31
+pause 700
+shot tip ""
+move "GUITEST Commands" 118 30
+pause 700
+shot tip-copy ""
 key ctrl+s
+shot tip-gone "GUITEST Commands"
 key alt+f4
 gone "GUITEST Commands"
 expect GUI commands
@@ -42,5 +65,8 @@ expect GUI command copy
 expect GUI command bold
 expect GUI command paste
 expect GUI command large
+expect GUI context for row 1
+expect GUI properties of row 1
+expect GUI context for row 0
 expect GUI command save
 expect GUI end

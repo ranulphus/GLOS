@@ -6782,6 +6782,13 @@ class GuiDriver:
                                    % (button, button))
                 else:
                     self.agent.ssh("glos key 0:mouse:0:0:%d,0.05:mouse:0:0:0" % button)
+            elif cmd == "move":                 # the pointer there, no button (a tooltip's rest)
+                w = self.until(lambda d: self.window(args[0], d) is not None, 30)
+                w = w and self.window(args[0], w)
+                if not w:
+                    self.bad.append("move-%d" % n)
+                    continue
+                self.point(w["x"] + int(args[1]), w["y"] + int(args[2]))
             elif cmd == "pause":
                 time.sleep(int(args[0]) / 1000.0)
             elif cmd == "same":                 # (the host's check of two of its goldens: both are compared here)

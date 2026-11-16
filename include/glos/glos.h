@@ -102,6 +102,7 @@ int glos_setting_keys(const char *section, char *buf, unsigned room);  /* "key =
    key, choices, default, label, description. */
 int glos_schema(unsigned index, struct glos_schema *s, char *buf, unsigned room);
 int glos_setting_watch(const char *section, int on);    /* GLOS_EV_SETTING for it from now ("" or NULL: all) */
+int glos_show_quiet(glos_handle w, unsigned state);     /* glos_show without taking the focus (a tooltip) */
 int glos_theme(struct glos_theme *t);                   /* the theme now (again at GLOS_EV_THEME) */
 int glos_region(struct glos_region *r);                 /* the region's formats now */
 int glos_modes(struct glos_mode *out, unsigned room, unsigned *count);  /* the screen modes the card has */

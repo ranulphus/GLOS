@@ -150,9 +150,11 @@ static void destroy(struct gui_widget *w)
             win->hover = NULL;
     }
     drop_timers(w);
+    gui_tip_forget(w);
     if (w->cls->destroy)
         w->cls->destroy(w);
     free(w->text);
+    free(w->tip);
     free(w);
 }
 
@@ -696,6 +698,16 @@ void gui_show(struct gui_window *w, int on)
     glos_show(w->id, on ? GLOS_WS_NORMAL : GLOS_WS_HIDDEN);
 }
 
+void gui_show_nofocus(struct gui_window *w, int sx, int sy)
+{
+    gui_win_realize(w, sx, sy, 0);
+    if (!w->id)
+        return;
+    w->shown = 1;
+    redraw(w);
+    glos_show_quiet(w->id, GLOS_WS_NORMAL);
+}
+
 void gui_title(struct gui_window *w, const char *title)
 {
     strncpy(w->gw.title, title, sizeof w->gw.title - 1);
@@ -904,6 +916,22 @@ static int deaf(struct gui_window *w)
 
 static void tabs_key(struct gui_window *w, struct gui_ev *e);
 
+/* The context menu of t, or of the nearest of its parents that has one, opened at x, y of the window: 1 if
+   there is one. The widget that has it is told first (GUI_ON_CONTEXT). */
+static int context_menu(struct gui_window *w, struct gui_widget *t, int x, int y)
+{
+    for (; t && !t->context; t = t->parent)
+        ;
+    if (!t || !usable(t))
+        return 0;
+    gui_send(t, GUI_ON_CONTEXT);
+    if (t->context)
+        gui_popup_menu(w, t->context, x, y);
+    return 1;
+}
+
+void gui_context(struct gui_widget *w, struct gui_menu *m) { w->context = m; }
+
 static void key(struct gui_window *w, const struct os_event *ev)
 {
     struct gui_ev e;
@@ -918,6 +946,11 @@ static void key(struct gui_window *w, const struct os_event *ev)
         return;
     if (gui_menubar_key(w, &e, 1))
         return;
+    if ((e.key == GUI_K_MENU && !e.mods) || (e.key == GUI_K_F10 && e.mods == GLOS_MOD_SHIFT)) {
+        struct gui_widget *f = w->focus;        /* the context menu of what has the keyboard, by it */
+        if (f && context_menu(w, f, f->r.x + 8, f->r.y + (f->r.h > 24 ? 24 : f->r.h)))
+            return;
+    }
     if (e.key == GUI_K_TAB && e.mods & GLOS_MOD_CTRL) {
         tabs_key(w, &e);
         return;
@@ -1002,6 +1035,9 @@ static void mouse(struct gui_window *w, const struct os_event *ev)
                 gui_focus(f);
         }
         send_ev(w->capture, &e);
+        if (e.button == 2 && !(w->flags & GUI_W_POPUP))        /* the right button: the context menu of what is
+                                                                   there, the press having chosen it first */
+            context_menu(w, t, ev->x, ev->y);
     } else if (ev->key) {                       /* a release */
         e.type = GUI_EV_RELEASE;
         e.button = ev->key;
@@ -1022,7 +1058,13 @@ static void mouse(struct gui_window *w, const struct os_event *ev)
             send_ev(w->hover, &l);
             w->hover = t;
         }
-        send_ev(t, &e);
+        if (!(w->flags & GUI_W_POPUP)) {        /* its tooltip, or the one its handler says this part of it has */
+            gui_tip_at(t, 0, t ? t->tip : NULL);
+            send_ev(t, &e);
+            gui_tip_moved(ev->x, ev->y);
+        } else {
+            send_ev(t, &e);
+        }
     }
 }
 
@@ -1081,6 +1123,9 @@ static void dispatch(const struct os_event *ev)
     struct gui_window *w = gui_window_of(ev->window);
     if (!w)
         return;
+    if ((ev->type == OS_KEY && ev->down) || ev->type == OS_WHEEL || (ev->type == OS_MOUSE && ev->key && ev->down)
+        || (ev->type == OS_FOCUS && !ev->down && !(w->flags & GUI_W_POPUP)))
+        gui_tip_hide();                         /* (a key, the wheel, a press, the keyboard gone: no tooltip) */
     switch (ev->type) {
     case OS_KEY:
         if (deaf(w) || !ev->down)
@@ -1224,7 +1269,7 @@ static unsigned until_due(unsigned wait)
             if ((unsigned)d < wait)
                 wait = (unsigned)d;
         }
-    return wait;
+    return gui_tip_due(now, wait);
 }
 
 static void fire(void)
@@ -1247,6 +1292,7 @@ static void fire(void)
             G.idle[i].due = now + G.idle[i].ms;
             G.idle[i].fn(G.idle[i].arg);
         }
+    gui_tip_fire(now);
 }
 
 void gui_close_later(struct gui_window *w)

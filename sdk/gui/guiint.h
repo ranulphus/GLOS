@@ -72,6 +72,15 @@ void gui_cmd_update(struct gui_window *w);      /* the window's on_update */
 void gui_cmd_free(struct gui_window *w);
 extern const struct gui_class gui_toolbar_class;
 
+/* ---- tip.c */
+void gui_tip_hide(void);
+void gui_tip_forget(struct gui_widget *w);
+void gui_tip_moved(int x, int y);
+unsigned gui_tip_due(unsigned now, unsigned wait);
+void gui_tip_fire(unsigned now);
+void gui_show_nofocus(struct gui_window *w, int sx, int sy);   /* (core.c) a pop-up shown at sx, sy of the screen,
+                                                                   the keyboard staying where it is */
+
 /* ---- menu.c */
 int gui_menubar_key(struct gui_window *w, struct gui_ev *e, int late);  /* Alt+letter, F10, shortcuts: 1 taken.
                                            late 0: before the focus has the key (shortcuts with Ctrl or Alt); 1: after

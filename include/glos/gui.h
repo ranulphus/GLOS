@@ -89,6 +89,7 @@ struct gui_ev {
 #define GUI_K_SPACE  0x39
 #define GUI_K_F1     0x3B
 #define GUI_K_F10    0x44
+#define GUI_K_MENU   0x15D              /* the Menu key (a context menu, as Shift+F10) */
 #define GUI_K_KPENTER 0x11C
 #define GUI_K_HOME   0x147
 #define GUI_K_UP     0x148
@@ -106,7 +107,9 @@ enum {
     GUI_ON_CLICK = 1,                   /* a button was pressed (by the mouse, Space, Enter or its letter) */
     GUI_ON_CHANGE,                      /* its value changed (a check box, a field's text, a slider) */
     GUI_ON_SELECT,                      /* what is chosen in it changed (a list, a tree, tabs, a choice) */
-    GUI_ON_ACTIVATE                     /* an item was opened (Enter, a double click); a field's Enter */
+    GUI_ON_ACTIVATE,                    /* an item was opened (Enter, a double click); a field's Enter */
+    GUI_ON_CONTEXT                      /* its context menu is about to open (gui_context): the app may change the
+                                           menu for what is chosen there */
 };
 
 struct gui_widget;
@@ -142,6 +145,8 @@ struct gui_widget {
     void (*on)(struct gui_widget *w, int what);
     void *user;                         /* the app's */
     char *text;                         /* its label (malloc'd), if it has one */
+    char *tip;                          /* its tooltip (gui_tip), or NULL */
+    struct gui_menu *context;           /* its context menu (gui_context), or NULL: its parent's */
     unsigned mnemonic;                  /* the letter after "&" in it (lower case), or 0 */
 };
 
@@ -229,6 +234,11 @@ const char *gui_get_text(struct gui_widget *w);
 void gui_size(struct gui_widget *w, int pw, int ph);   /* its size (0: as measured) */
 void gui_grow(struct gui_widget *w, int share);
 void gui_on(struct gui_widget *w, void (*on)(struct gui_widget *, int), int id);
+void gui_tip(struct gui_widget *w, const char *text);  /* its tooltip: shown by the pointer once it has rested over
+                                           the widget (NULL: none). A toolbar's buttons have their commands' */
+void gui_tip_at(struct gui_widget *w, int key, const char *text);      /* for a widget of an app's own, from its
+                                           handling of GUI_EV_MOVE: what a tooltip here would say (key: which part
+                                           of the widget; text NULL: nothing here) */
 void gui_remove(struct gui_widget *w);  /* gone, with its children */
 void gui_clear(struct gui_widget *w);   /* its children gone */
 struct gui_widget *gui_new(struct gui_widget *parent, const struct gui_class *cls, size_t size);
@@ -270,6 +280,13 @@ struct gui_widget *gui_canvas(struct gui_widget *parent, int w, int h,
                               int (*event)(struct gui_widget *, struct gui_ev *));
 struct gui_widget *gui_image(struct gui_widget *parent, const unsigned *rgb, int w, int h);    /* rgb is kept */
 struct gui_widget *gui_status(struct gui_window *win);         /* a bar along the bottom: gui_set_text */
+int gui_status_section(struct gui_widget *status, int width);  /* a section more at its right end, so wide (pixels):
+                                           its number, from 1 (the text gui_set_text sets is section 0's, which has
+                                           what the others leave) */
+void gui_status_set(struct gui_widget *status, int section, const char *text, const unsigned char *icon);
+                                        /* its text, and a GUI_ICON_W icon before it (or NULL) */
+void gui_status_progress(struct gui_widget *status, int section, int value, int max);  /* a small bar there instead
+                                           (max 0: the text again) */
 struct gui_widget *gui_sep(struct gui_widget *parent);         /* a line across */
 
 /* ---- numbers */
@@ -370,6 +387,12 @@ void gui_menu_free(struct gui_menu *m);                /* a gui_menu_new one, go
 void gui_menu_enable(struct gui_menu *m, int id, int on);
 void gui_menu_check(struct gui_menu *m, int id, int on);
 void gui_popup_menu(struct gui_window *w, struct gui_menu *m, int x, int y);    /* at x, y of w's client area */
+void gui_context(struct gui_widget *w, struct gui_menu *m);    /* w's context menu (a gui_menu_new one; NULL: none):
+                                           opened by the right button over w or what is in it, after the press
+                                           has chosen what is under the pointer, and by the Menu key or Shift+F10
+                                           while the keyboard is there, by the widget. Its `on` is told
+                                           (GUI_ON_CONTEXT) first; the menu's commands are asked for as for any
+                                           menu. The menu stays the app's to free */
 
 /* ---- dialogs (modal) */
 enum { GUI_OK = 1, GUI_CANCEL_R = 2, GUI_YES = 3, GUI_NO = 4 };

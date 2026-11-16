@@ -5,6 +5,8 @@
  * into a menu behind a button at the bar's end (">>"), so a narrow window loses nothing.
  *
  * The bar never has the keyboard (PRD D34): its commands are in the menus and have shortcuts. */
+#include <stdio.h>
+
 #include "guiint.h"
 
 struct tb_item {
@@ -157,6 +159,17 @@ static int tb_event(struct gui_widget *w, struct gui_ev *e)
         if (i != t->hot) {
             t->hot = i;
             gui_damage(w);
+        }
+        if (i >= 0 && i < t->n) {               /* the button's tooltip: the command's, or its name where the bar
+                                                   shows no texts; with its shortcut */
+            struct gui_cmd *c = gui_cmd_find(w->win, t->items[i].id);
+            char plain[80], tip[160];
+            if (c && (c->tip || (c->icon && !t->text))) {
+                gui_strip_amp(plain, c->text, sizeof plain);
+                snprintf(tip, sizeof tip, "%s%s%s%s", c->tip ? c->tip : plain, c->shortcut ? " (" : "",
+                         c->shortcut ? c->shortcut : "", c->shortcut ? ")" : "");
+                gui_tip_at(w, i + 1, tip);
+            }
         }
         return 1;
     case GUI_EV_LEAVE:
