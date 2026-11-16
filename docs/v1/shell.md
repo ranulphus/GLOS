@@ -261,7 +261,7 @@ else of that is built here.
 | 2 | `vt.c`'s scroll-back and selection; the Terminal on a session (done, 2026-11-13: `apps/term/term.c` is a terminal alone, on one xterm screen with a thousand lines kept above it, the session opened with `glos_job_shell_in()` at the root of the drive DOS started from (`dir` = `\`; the owner, 2026-11-13: not `C:\` by name); a shell job may name its starting folder, `dir`. `apps/term/shell.c` became the host shim's session, `tests/host/shimshell.c`; the SSH client's source is `apps/ssh/ssh.c`. The Terminal's pictures were made again: its prompt is drawn as the rest of its text, an error in xterm's red, the cursor a block) | The Terminal's scripts, host and Loop A |
 | 3 | `GLOS_SYS_TERMINAL`; SSH.EXE, SFTP.EXE, SSHKEY.EXE (the call done, 2026-11-13, before step 2 so that the Terminal keeps its SSH commands until the programs exist. As built: a program says `GLOS_INIT_TERMINAL` at INIT; a session that starts it at a terminal waits for its end; the program reads what is typed and writes its bytes with SYS's TERMINAL call itself (READ, WRITE, INFO for the size) and is told by `GLOS_EV_TERMINAL`, not through DOS's standard input and output, which would cost a trap a character. APPTEST `term` and the ssh suite's login case test it. The three programs, 2026-11-13: `apps/ssh/cli.c` is their terminal layer, and the client itself is still the Terminal's `apps/term/ssh.c`, built for both with a few `SSH_PROGRAM` conditions until step 2 takes it out of the Terminal; `loopa-sshc` has a case that runs them from an SSH login, and through a hop with no terminal) | `loopa-sshc`, from the Terminal and from an SSH login |
 
-## Step S4 as designed (2026-11-16; agreed by the owner the same day, with the three answers below; not built yet)
+## Step S4 as designed (2026-11-16; agreed by the owner the same day, with the three answers below; S4a to S4c built, S4d to come)
 
 S2 and S3 left three things to the DOS's COMMAND.COM: batch files, any line with a pipe or a redirection around
 a program, and every program that shells out (`COMMAND /C`, the C library's `system()`). S4 takes all three, and
@@ -434,6 +434,55 @@ it for everything GLOS starts.
   history: what a program's "DOS shell" needs.
 - **`COMSPEC`** for the agent's jobs and in the master environment becomes `X:\...\GLOS\COMMAND.COM` (the
   folder GLOS runs from); `[shell] comspec = dos` leaves the DOS's.
+
+### S4c as built (2026-11-16)
+
+As designed above, with these particulars:
+
+- **Where it is:** `COMMAND.COM` beside `GLOS.EXE` (1.2 KB; `make all` builds `build/glos/COMMAND.COM`; the
+  installer, the setup floppy and `~/bench-update.sh` carry it). The loader looks for it there and knows it by
+  its mark (`BI_F_OWNCMD`). Without the file GLOS behaves as before: the DOS's COMMAND.COM everywhere.
+- **Who is given it:** every program the agent starts has `COMSPEC` set to it (unless its profile or the job
+  sets `COMSPEC`); the agent's own "through COMSPEC" jobs (a line that is not a program's name, a batch file
+  named with no terminal) go through it; and GLOS's shell's own variables have it as `COMSPEC`. The DOS's own
+  COMMAND.COM stays where it was and still works when named by its path.
+- **The setting is `[shell] command = glos | dos`** (not `comspec = dos`, as the design said: `[shell] comspec`
+  is already the DOS's COMMAND.COM's path). `dos`: programs keep the DOS's.
+- **Its exit code** is the last program's (what `IF ERRORLEVEL` would see), as COMMAND /C's is under DOS.
+- **Its folder:** it starts in DOS's current drive and folder, runs programs there, and leaves DOS where the
+  shell ended (`COMMAND /C CD X` changes the folder for whoever asked).
+- **Redirection and pipes** inside a line it runs are done with DOS's handles in that process (the file opened,
+  the standard handle put aside with 45h, the file's put in its place with 46h, both put back after), so a
+  program it starts inherits them; a pipe's temporary files as in S4b.
+- **`COMMAND` alone and `/K line`:** lines are read through the program from its standard input, with the
+  prompt before each, until `EXIT`. From the keyboard, by DOS's own line input (INT 21h 0Ah). From a file
+  (`COMMAND < FILE`), by plain reads: a piece is read, the line taken from it and shown, and the file set back
+  to the line's end, so a program the line starts reads on from there. `COMMAND` alone says the shell's version
+  first. `PAUSE` and a batch file's question read their key by DOS (08h).
+- **Its memory:** about 11 KB of the calling program's: itself (1.2 KB and a stack), 4 KB for the environment of
+  the programs it starts, and 4 KB (1.5 KB where memory is short) of its own for the DOS calls' data. It does
+  not use the DOS server's 32 KB buffer: a program that shells out may have little memory left, and its child
+  needs what there is. (So the design's note on that buffer's owner fell away.)
+- **Ctrl+C:** it has its own INT 23h handler. While a program it started runs and has no handler of its own,
+  Ctrl+C ends that program (and a batch file goes no further: INT 21h 4Dh says how the program ended). While
+  the DOS call is its own, the batch file is stopped and the call goes on.
+- **Input that runs dry** (`COMMAND < FILE` with no `EXIT` in the file): the file's end, or a Ctrl+Z in it,
+  ends GLOS's COMMAND.COM as `EXIT` does. FreeDOS's own waits for ever there (seen in Loop A).
+- **`DISK` and `DD` are refused** from a program's COMMAND.COM: they wait for the DOS server, which cannot run
+  until the program that shelled out ends. The other commands of GLOS's own work there.
+- **One that goes without leaving** (ended by DOS, or killed with the program that started it): the kernel
+  finds it gone when the COMMAND.COM below it, or the resident stub, next asks (`GLOS-COMMAND gone`); its
+  session is closed and its DOS requests end with an error (`dos_vm_gone`).
+- **Log lines:** `GLOS-COMMAND begin psp= depth= mode=`, `GLOS-COMMAND end psp= code=`, `GLOS-COMMAND gone psp=`.
+- **Tested** (`ssh-batch-*`): `COMSPEC` as a program sees it; the C library's `system()` with a built-in, a
+  program and its exit code, a batch file that sets a variable for the program it starts and shells out again
+  (two deep); `COMMAND < FILE`, `/K`, an input that runs dry; and the batch files of S4a through FreeDOS's
+  COMMAND.COM (by its path) and through GLOS's, with the same output.
+- **Known differences from the DOS's COMMAND.COM:**
+  - `COMMAND /P`, `/E:` and `/Y` are accepted and ignored. No `/F`, no `CTTY`.
+  - A program that looks for COMMAND.COM along `PATH` rather than by `COMSPEC` finds the DOS's (which works).
+  - GLOS started as DOS's shell (`[shell]` mode) still runs `AUTOEXEC.BAT` and its console through the DOS's
+    COMMAND.COM: that is S4d.
 
 ### Decided by the owner (2026-11-16)
 

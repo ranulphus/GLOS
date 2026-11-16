@@ -32,6 +32,8 @@ enum { ST_NONE, ST_ALLOC, ST_CALLS, ST_FREE, ST_STRAT_GET, ST_STRAT_SET, ST_STRA
 static struct dos_req *head, *tail, *cur;
 static u32 step, users, xfer_paras;
 static u16 xfer_seg;
+static u16 cur_seg;                     /* the buffer the request under way uses: xfer_seg, or its COMMAND.COM's own */
+static u32 cur_paras;
 static u8 state, alloc_failed;
 static u16 strategy;                            /* DOS's allocation strategy, put back after the buffer's allocation */
 static u8 strategy_saved;
@@ -69,6 +71,10 @@ int dos_post(struct dos_req *q)
     q->error = 0;
     q->next = 0;
     f = irq_save();
+    if (q->via && q->gone && *q->gone) {        /* (its COMMAND.COM has gone: nobody would make the calls) */
+        irq_restore(f);
+        return -1;
+    }
     q->state = DR_QUEUED;
     if (tail)
         tail->next = q;
@@ -97,11 +103,41 @@ int dos_call(struct dos_req *q)
 
 /* ---- the VM thread's side */
 
-int dos_vm_pending(void) { return head || (!users && xfer_seg); }
+/* A request waits whose calls are via's to make (interrupts off, or the VM's thread). */
+static int waits_for(void *via)
+{
+    struct dos_req *q;
+    for (q = head; q; q = q->next)
+        if (q->via == via)
+            return 1;
+    return 0;
+}
+
+/* ... the first of them, taken out of the queue. */
+static struct dos_req *take(void *via)
+{
+    struct dos_req *q, *before = 0;
+    for (q = head; q && q->via != via; before = q, q = q->next)
+        ;
+    if (!q)
+        return 0;
+    if (before)
+        before->next = q->next;
+    else
+        head = q->next;
+    if (tail == q)
+        tail = before;
+    q->next = 0;
+    return q;
+}
+
+int dos_vm_pending(void) { return waits_for(0) || (!users && xfer_seg); }
+int dos_vm_pending_for(void *via) { return (cur && cur->via == via) || waits_for(via); }
 
 static void put_regs(u32 lin, const struct dos_regs *r)
 {
-    u16 ds = r->ds == DOS_XFER ? xfer_seg : r->ds, es = r->es == DOS_XFER ? xfer_seg : r->es;
+    u16 seg = cur ? cur_seg : xfer_seg;
+    u16 ds = r->ds == DOS_XFER ? seg : r->ds, es = r->es == DOS_XFER ? seg : r->es;
     u16 v[8] = { r->ax, r->bx, r->cx, r->dx, r->si, r->di, ds, es };
     u32 i;
     for (i = 0; i < 8; i++) {
@@ -123,8 +159,8 @@ static void get_regs(u32 lin, struct dos_regs *r)
 
 static void finish(struct dos_req *q)
 {
-    u32 x = (u32)xfer_seg << 4;
-    if (q->out && q->out_len && xfer_seg && q->out_at + q->out_len <= xfer_paras * 16u)
+    u32 x = (u32)cur_seg << 4;
+    if (q->out && q->out_len && cur_seg && q->out_at + q->out_len <= cur_paras * 16u)
         memcpy(q->out, vm_ptr(x + q->out_at), q->out_len);
     q->state = DR_DONE;
     if (q->waiter)
@@ -133,7 +169,35 @@ static void finish(struct dos_req *q)
         kick();
 }
 
-int dos_vm_next(int ran, u32 regs_lin)
+int dos_vm_next(int ran, u32 regs_lin) { return dos_vm_next_for(0, ran, regs_lin, 0, 0); }
+
+/* The program that made via's calls has gone without finishing them (DOS ended it, or it was killed): the
+   request under way and those that wait end with an error. */
+void dos_vm_gone(void *via)
+{
+    struct dos_req *q;
+    u32 f = irq_save();
+    if (cur && cur->via == via) {
+        cur->error = 0xFFFF;
+        q = cur;
+        cur = 0;
+        q->out = 0;
+        finish(q);
+        state = ST_NONE;
+    }
+    while ((q = take(via)) != 0) {
+        q->error = 0xFFFF;
+        q->out = 0;
+        finish(q);
+    }
+    irq_restore(f);
+}
+
+/* The requests whose calls are via's to make (0: the resident stub's), a call at a time: 1, with the call in
+   regs_lin; 0 when there is none. The stub allocates the server's transfer buffer and gives it back when that
+   is due; a COMMAND.COM's requests use a buffer of its own (seg, paras), in its own memory: a program that
+   shells out may have little memory left, and the server's 32 KB would be taken from what its child needs. */
+int dos_vm_next_for(void *via, int ran, u32 regs_lin, u16 seg, u32 paras)
 {
     struct dos_regs r;
     if (ran) {                                  /* the call made last time came back */
@@ -190,8 +254,8 @@ int dos_vm_next(int ran, u32 regs_lin)
         }
         state = ST_NONE;
     }
-    if (!cur && head) {                         /* the next request */
-        if (!xfer_seg && !alloc_failed) {
+    if (!cur && waits_for(via)) {               /* the next request */
+        if (!via && !xfer_seg && !alloc_failed) {
             xfer_paras = XFER_PARAS;
             r.ax = 0x5800;                      /* DOS's strategy first (ST_STRAT_GET) */
             r.bx = r.cx = r.dx = r.si = r.di = 0;
@@ -200,26 +264,27 @@ int dos_vm_next(int ran, u32 regs_lin)
             state = ST_STRAT_GET;
             return 1;
         }
-        cur = head;
-        head = head->next;
-        if (!head)
-            tail = 0;
+        cur = take(via);
         step = 0;
         cur->state = DR_RUNNING;
-        if (!xfer_seg) {                        /* no buffer: the request fails */
+        cur_seg = via ? seg : xfer_seg;
+        cur_paras = via ? paras : xfer_paras;
+        if (!cur_seg) {                         /* no buffer: the request fails */
             cur->error = 8;                     /* insufficient memory */
             finish(cur);
             cur = 0;
-            return dos_vm_next(0, regs_lin);
+            return dos_vm_next_for(via, 0, regs_lin, seg, paras);
         }
-        if (cur->in && cur->in_len && cur->in_at + cur->in_len <= xfer_paras * 16u)
-            memcpy(vm_ptr(((u32)xfer_seg << 4) + cur->in_at), cur->in, cur->in_len);
+        if (cur->in && cur->in_len && cur->in_at + cur->in_len <= cur_paras * 16u)
+            memcpy(vm_ptr(((u32)cur_seg << 4) + cur->in_at), cur->in, cur->in_len);
     }
     if (cur) {
         put_regs(regs_lin, &cur->r[step]);
         state = ST_CALLS;
         return 1;
     }
+    if (via)                                    /* (the server's buffer is the stub's to give back) */
+        return 0;
     if (!users && xfer_seg) {                   /* nobody holds it: give it back */
         r.ax = 0x4900;
         r.bx = r.cx = r.dx = r.si = r.di = 0;

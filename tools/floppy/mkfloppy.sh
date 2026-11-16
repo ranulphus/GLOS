@@ -50,6 +50,7 @@ mcopy -o -i "$img" "$tmp/AUTOEXEC.BAT" ::/AUTOEXEC.BAT
 mmd -i "$img" ::/GLOS ::/GLOS/KEYS
 mcopy -i "$img" "$root/build/ow/GLOS.EXE" ::/GLOS/GLOS.EXE
 mcopy -i "$img" "$root/$kernel" ::/GLOS/GLOSK.BIN
+mcopy -i "$img" "$root/build/glos/COMMAND.COM" ::/GLOS/COMMAND.COM    # GLOS's own, for programs that shell out (S4c)
 mcopy -i "$img" "$tmp/GLOS.CFG" ::/GLOS/GLOS.CFG
 mcopy -i "$img" "$keys/HOSTKEY" ::/GLOS/KEYS/HOSTKEY
 mcopy -i "$img" "$keys/AUTHKEYS" ::/GLOS/KEYS/AUTHKEYS

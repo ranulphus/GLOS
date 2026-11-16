@@ -85,7 +85,7 @@ WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
 .PHONY: floppy loopa-floppy loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
-all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN
+all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM
 
 help:
 	@sed -n '3,/^[^#]/p' Makefile | grep '^#' | sed 's/^# //'
@@ -298,6 +298,13 @@ build/ow/dos/DPMIMINI.COM: tests/dos/dpmimini.asm
 	$(Q)echo "  WASM    $<"
 	$(Q)$(OWENV) $(OWBIN)/wasm -q -fo=build/ow/dos/obj/dpmimini.obj $<
 	$(Q)$(WLINK) format dos com option quiet name $@ file build/ow/dos/obj/dpmimini.obj
+# GLOS's COMMAND.COM (docs/v1/shell.md, S4c): the real-mode program that programs shelling out are given; the
+# shell itself is the kernel's (kernel/shell/cmdcom.c).
+build/glos/COMMAND.COM: apps/command/command.asm
+	@mkdir -p build/glos build/ow/dos/obj
+	$(Q)echo "  WASM    $<"
+	$(Q)$(OWENV) $(OWBIN)/wasm -q -fo=build/ow/dos/obj/command.obj $<
+	$(Q)$(WLINK) format dos com option quiet name $@ file build/ow/dos/obj/command.obj
 # DPMICONF-16 (tests/dos/dpmi16/): the 16-bit client's checks, C and WASM (M4d).
 build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
 	@mkdir -p build/ow/dos/obj
@@ -340,7 +347,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/disk/bdisk.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fatfmt.c kernel/disk/fdboot.S \
          kernel/disk/diskcmd.c kernel/drv/uart.c kernel/net/slip.c kernel/net/member.c kernel/drv/plip.c kernel/drv/rhine.c \
-         kernel/shell/shsess.c kernel/shell/lcon.c \
+         kernel/shell/shsess.c kernel/shell/cmdcom.c kernel/shell/lcon.c \
          kernel/dpmi/host.c kernel/dpmi/ldt.c kernel/dpmi/mem.c kernel/dpmi/rmcall.c kernel/dpmi/int31.c \
          kernel/dpmi/deliver.c kernel/dpmi/level.c kernel/dpmi/dosx.c kernel/dbg/crash.c \
          kernel/app/app.c kernel/app/api.c kernel/app/api2.c kernel/app/api2win.c kernel/app/api2in.c kernel/app/api2thr.c kernel/app/api2set.c kernel/app/api2clip.c kernel/app/api2fs.c kernel/app/api2shell.c kernel/app/api2start.c kernel/app/api2job.c kernel/app/api2sys.c kernel/app/api2audio.c kernel/app/api2net.c kernel/app/api2sess.c kernel/app/api2cap.c kernel/app/api2dbg.c kernel/app/api2sec.c kernel/app/fslist.c kernel/app/clipstore.c kernel/app/tsync.c kernel/app/handle.c kernel/app/dev.c kernel/app/clip.c kernel/app/stat.c kernel/core/config.c kernel/core/kdata.c kernel/core/secrets.c kernel/core/secstore.c kernel/core/schedule.c kernel/core/clock.c $(GFX_SRCS) kernel/gfx/display.c kernel/gfx/mga.c kernel/gfx/gpu.c kernel/drv/sb16.c kernel/drv/crystal.c kernel/drv/mixer.c kernel/drv/mixgain.c kernel/drv/midi.c kernel/drv/midiq.c kernel/drv/fm.c kernel/drv/fmbank.c $(WM_SRCS) kernel/wm/theme.c kernel/wm/idle.c kernel/wm/dnd.c kernel/wm/notes.c kernel/wm/deskshell.c kernel/wm/deskpass.c kernel/wm/desk.c kernel/wm/deskin.c kernel/wm/deskapp.c kernel/wm/vnc.c
@@ -1045,7 +1052,7 @@ m4d-inputs: $(GLOS_HX)/.hdpmi16 build/ow/dos/DPMI16.EXE build/dj/DPMICONF.EXE $(
 GLOS_CACHE := $(MGA_CACHE)/glos/bin
 glos-cache: all
 	@mkdir -p $(GLOS_CACHE)/direct $(GLOS_CACHE)/keys
-	$(Q)cp build/ow/GLOS.EXE build/kernel/GLOSK.BIN $(GLOS_CACHE)/
+	$(Q)cp build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM $(GLOS_CACHE)/
 	$(Q)cp tests/keys/hostkey $(GLOS_CACHE)/keys/HOSTKEY
 	$(Q)cp tests/keys/AUTHKEYS $(GLOS_CACHE)/keys/AUTHKEYS
 	$(Q)printf '; every program in direct mode (M4C_DIRECT=1, the survey variant glos-direct)\r\n[shell]\r\noptions = /DIRECT\r\n' \

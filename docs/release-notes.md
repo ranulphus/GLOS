@@ -12,7 +12,12 @@ in its `docs/milestones-*.md`.
 - `VOL`, `TRUENAME`, `DATE`, `TIME`, `CHCP`, `BREAK`, `VERIFY` and `LH` are commands of the shell's own.
 - **Pipes and redirection around programs are the shell's own** (S4b): `PROG < IN > OUT`, `>>`, `> NUL`,
   `A | B | C`, with DOS's temporary files in `TEMP`.
-- Still to come in S4: GLOS's own COMMAND.COM for programs that shell out, and `AUTOEXEC.BAT` run by GLOS.
+- **GLOS has its own COMMAND.COM** (S4c): a 1 KB program beside `GLOS.EXE` that programs are given as `COMSPEC`.
+  A program that shells out (`COMMAND /C line`, the C library's `system()`, a "DOS shell" in its menu) gets
+  GLOS's shell: the same commands and batch language as at GLOS's prompt, with the programs it starts as the
+  calling program's children and its output where that program's goes. `[shell] command = dos` keeps the DOS's.
+  Copy `COMMAND.COM` into GLOS's folder with the other files when updating (never over the DOS's own in `C:\`).
+- Still to come in S4: `AUTOEXEC.BAT` run by GLOS, and a setup floppy with FreeDOS's kernel alone.
 
 ## The network for full-screen programs (API 2.3, 2026-11-15)
 

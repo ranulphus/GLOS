@@ -41,6 +41,14 @@ void shsess_fed(struct shsess *s, int code);             /* ... and that command
 int shsess_term_is(struct shsess *s, u32 seq, u32 *cols, u32 *rows);
 u32 shsess_term_read(struct shsess *s, u8 *buf, u32 room);      /* what was typed for it */
 u32 shsess_term_write(struct shsess *s, const u8 *d, u32 n);    /* bytes for the terminal: those taken */
+/* A COMMAND.COM of GLOS's (kernel/shell/cmdcom.c): its session, with no terminal: the line run (or none), with
+   that program's environment (strings, a second NUL after the last); its DOS calls are via's to make. */
+struct shsess *shsess_cmd(void *via, const char *line, int shell, const char *env, u32 xfer, void (*kick)(void *arg),
+                          void *arg);                    /* xfer: the bytes of its own buffer for DOS calls */
+                                                         /* shell: after the line, lines are read (by DOS) and run
+                                                            until EXIT */
+void shsess_cmd_wake(struct shsess *s);                  /* (the VM's thread) the program it started has ended */
+void shsess_cmd_stop(struct shsess *s);                  /* ... or was killed */
 void shsess_turn(void);                                  /* the ssh thread's turn: sessions freed whose threads
                                                             have ended since shsess_free() */
 

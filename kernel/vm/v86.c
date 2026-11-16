@@ -17,6 +17,7 @@
 #include "app.h"
 #include "bdisk.h"
 #include "cache.h"
+#include "cmdcom.h"
 #include "display.h"
 #include "dos.h"
 #include "dpmi.h"
@@ -188,7 +189,8 @@ void vm_idle(u32 until)
            && !(until && (s32)(timer_ticks() - until) >= 0)
            && !(vm.idle_agent && (vm.notice_due || vm.reboot_req))
            && !(vm.idle_agent && (agent_vm_wake_pending() || app_vm_pending() || display_vm_pending()
-                                  || bdisk_vm_pending())))
+                                  || bdisk_vm_pending()))
+           && !(vm.idle_cmd && cmdcom_pending()))
         thread_block(&vm.waitq);
     vm.waiting = 0;
     vm.wait_deadline = 0;
@@ -491,6 +493,7 @@ static int vm_try_kill(struct trapframe *tf, int force)
     tf->v86_ds = tf->v86_es = vm.loader_cs;
     kprintf("GLOS-KILL psp=%04x at=%04x:%04x ticks=%u reason=%s\n", psp, at_cs, at_ip, timer_ticks(),
             vm.kill_reason ? vm.kill_reason : "crash");
+    cmdcom_killed();                            /* (a batch file GLOS's COMMAND.COM runs it from goes no further) */
     vm.kill_reason = 0;
     return 1;
 }
@@ -799,7 +802,7 @@ static void vm_agent_next(struct trapframe *tf, u32 result)
         u32 regs = ((u32)vm.loader_cs << 4) + __builtin_offsetof(struct stub_data, dregs);
         agent_vm_answer(vm_rd16(regs), vm_rd16(regs + 16) & 1);
     }
-    r = agent_vm_next(result, vm.bi->comspec, &x);
+    r = agent_vm_next(result, cmdcom_path() ? cmdcom_path() : vm.bi->comspec, &x);
     if (r == 3) {                               /* a job's drive or folder, before its EXEC (M9) */
         u32 sd = (u32)vm.loader_cs << 4, regs = sd + __builtin_offsetof(struct stub_data, dregs), i;
         u16 v[8];
@@ -893,6 +896,7 @@ static void vm_call(struct trapframe *tf)
             vm_wr8(vm.indos, 0);                /* counts one call's end; MS-DOS zeroes it itself) */
         }
         session_stub_next();
+        cmdcom_stub_asks();                     /* (no COMMAND.COM of GLOS's runs any more) */
         vm_next(tf, arg);
         break;
     default:
@@ -1284,6 +1288,7 @@ static void vm_gp(struct trapframe *tf)
     case V86_HLT:
         tf->eip = next;
         vm.idle_agent = (tf->cs & 0xFFFF) == vm.loader_cs;     /* the stub, waiting for a command */
+        vm.idle_cmd = (u8)cmdcom_waits((u16)tf->cs);            /* ... or a COMMAND.COM of GLOS's, for its session */
         if (vm_idle_headless()) {
             vm.notice_due = 0;
             vcon_notice();
@@ -1298,6 +1303,7 @@ static void vm_gp(struct trapframe *tf)
             }
         }
         vm.idle_agent = 0;
+        vm.idle_cmd = 0;
         return;
     case V86_INT:
         soft_int(tf, in.imm, next, ip);
@@ -1360,6 +1366,8 @@ void vm_exception(struct trapframe *tf)
             return;
         }
         if (dpmi_v86_bp(tf))
+            return;
+        if (cmdcom_call(tf))                    /* (a COMMAND.COM of GLOS's asks what next: shell/cmdcom.c) */
             return;
         vm_int(tf, 6, ip);
         return;

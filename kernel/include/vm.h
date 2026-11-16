@@ -58,6 +58,7 @@ struct vm {
     u32 int2f_prev;                     /* INT 2Fh's vector under GLOS's own (v86.c vm_int2f) */
     struct vm_snap snap[SNAP_LEVELS];
     u8 kill_req;
+    u8 idle_cmd;                        /* the HLT waited in is a COMMAND.COM of GLOS's (shell/cmdcom.c) */
     const char *kill_reason;            /* hotkey, agent, priv or crash (M4e) */
     u32 kill_since;
     /* PCI configuration mechanism 1 */

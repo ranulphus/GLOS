@@ -128,6 +128,9 @@ const struct cfg_key cfg_schema[] = {
     /* [shell] (M3, M4e) */
     { "shell", "comspec", CFG_PATH, CFG_RESTART, 0, 79, 0, "", "&COMMAND.COM",
       "The command interpreter for batch files and the console (empty: COMSPEC, or found)" },
+    { "shell", "command", CFG_CHOICE, CFG_RESTART, 0, 0, "glos|dos", "glos", "COMMAND.COM for progra&ms",
+      "What a DOS program that shells out is given: GLOS's own COMMAND.COM, which is GLOS's shell, or the DOS's "
+      "(for a program that needs the real one)" },
     { "shell", "autoexec", CFG_PATH, CFG_RESTART, 0, 79, 0, "", "&AUTOEXEC.BAT",
       "As the shell: the batch file run first (empty: the boot drive's \\AUTOEXEC.BAT)" },
     { "shell", "console", CFG_TEXT, CFG_RESTART, 0, 127, "line", "", "C&onsole",

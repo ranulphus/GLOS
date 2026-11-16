@@ -162,6 +162,9 @@ to COM1 at each step:
     [shell]
     ; else COMSPEC, the boot drive's \, \FREEDOS\BIN or \DOS, GLOS.EXE's directory, or PATH
     comspec  = A:\FREEDOS\BIN\COMMAND.COM
+    ; what a program that shells out is given: glos (GLOS's own COMMAND.COM beside GLOS.EXE, the default where
+    ; that file is: docs/v1/shell.md, S4c) or dos (the one above)
+    command  = glos
     ; else the boot drive's \AUTOEXEC.BAT
     autoexec = C:\AUTOEXEC.BAT
     ; run (through COMSPEC /C) instead of the prompt
@@ -2044,6 +2047,7 @@ and GLOS's:
 | APP | A GLOS app (§12.5): `start id= prog= psp= thread= vectors=`, `end id= prog= code= how= calls= ticks= t= irq0= irq13=`, `refuse psp= why=` (a name, or the reason's number with `forced=1`), `kill id= reason=` |
 | TIMER | `check=off behind=`: the PC's timer was found running fast, and no longer checks the tick (§8.1) |
 | KILL | A kill (§9.6): `psp= at= ticks= reason=hotkey\|agent\|priv\|crash` |
+| COMMAND | GLOS's own COMMAND.COM, run by a program that shells out (docs/v1/shell.md, S4c): `begin psp= depth= mode=` (`/C`, `/K` or `shell`), `end psp= code=`, `gone psp=` (it ended without leaving through the kernel: DOS ended it, or it was killed) |
 | SESSION | A session (§11.1): `begin n= prog= parent= mode= [profile=] [direct=1]`, `direct-end imr= rtc=` (§9.7), `end n= prog= why=exit\|next-exec\|stub mode= [remode=1] vectors= ticks= t= irq=` (`mode=` the mode it ended in, `vectors=` those put back, `ticks=` the BIOS tick count set from the RTC, `t=` its length in kernel ticks, `irq=` `ok` when IRQ 0, 1, 5, 7 and 12's vectors and mask bits are as the session found them, as VECCHK compares, else which aren't) |
 | RESET-REQ | A reset request: `source=kbc`, `port92`, `cf9` or `cad` |
 | DPMI | The DPMI host: `start bits= psp= cs= ds= ss= level= term= parent= rm=page\|own`, `exit code=` (`real-mode`, `killed`), `exit terminated restored=`, `bad-frame`, `rmcb-failed`, and with `/DPMITRACE` `call fn= ... if= -> cf= ax=` (`if=` the virtual IF at the call), `raw to=rm|pm`, `dosx ax= ... -> cf=`, `vendor name=`, `v86-int21` (a client's real-mode DOS calls), `exception-code` (the code bytes and registers at a fault),, `deliver irq=|passup=|exception=|rmcb= to= from= at= err= entries= lstack=` (the first four of each) and `int23`/`int24 from= hooked= ivt=` for those from real mode |

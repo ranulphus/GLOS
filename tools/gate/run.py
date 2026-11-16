@@ -256,7 +256,8 @@ def slack(spec):
 
 def glos_args(boot, direct=False):
     a = ["--boot-cfg", "glosshell" + ("-himemx" if boot == "himemx" else ""),
-         "--file", BIN + "/GLOS.EXE=/TEST/GLOS.EXE", "--file", BIN + "/GLOSK.BIN=/TEST/GLOSK.BIN"]
+         "--file", BIN + "/GLOS.EXE=/TEST/GLOS.EXE", "--file", BIN + "/GLOSK.BIN=/TEST/GLOSK.BIN",
+         "--file", BIN + "/COMMAND.COM=/TEST/COMMAND.COM"]      # (GLOS's own COMMAND.COM beside it: S4c)
     if direct:
         a += ["--file", BIN + "/direct/GLOS.CFG=/TEST/GLOS.CFG"]
     return a

@@ -17,6 +17,9 @@
  *   CONIN port          the CRTC's cursor registers read (3D4h, 3D5h), then "PORT done"
  *   CONIN wait N        N seconds, a dot a second (DOS output): "WAIT done"
  *   CONIN code N        ends with exit code N
+ *   CONIN env NAME      a variable of its environment: "ENV NAME=value" ("ENV NAME is not set")
+ *   CONIN system LINE   LINE given to COMSPEC by the C library's system(): what the line writes, then
+ *                       "SYSTEM rc=N" (the command interpreter's exit code)
  *
  * Lines end CR LF; the exit code is 0 unless said. */
 #include <conio.h>
@@ -146,6 +149,17 @@ int main(int argc, char **argv)
         say("\r\nWAIT done\r\n");
     } else if (!strcmp(argv[1], "code")) {
         return n;
+    } else if (!strcmp(argv[1], "env") && argc > 2) {
+        const char *v = getenv(argv[2]);
+        if (v)
+            sprintf(out, "ENV %s=%s\r\n", argv[2], v);
+        else
+            sprintf(out, "ENV %s is not set\r\n", argv[2]);
+        say(out);
+    } else if (!strcmp(argv[1], "system") && argc > 2) {
+        int rc = system(argv[2]);
+        sprintf(out, "SYSTEM rc=%d\r\n", rc);
+        say(out);
     }
     return 0;
 }

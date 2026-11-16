@@ -607,6 +607,20 @@ static int glos_main(int argc, char **argv)
     bi.pic_mask = inp(0x21) | ((unsigned long)inp(0xA1) << 8);
     say("GLOS-BOOT step=checks cpu=%lu cpuid_edx=%08lx", bi.cpu_family, bi.cpuid_edx);
 
+    /* GLOS's own COMMAND.COM beside GLOS.EXE (docs/v1/shell.md, S4c): the kernel gives programs that one. */
+    kernel_path(path, argv[0]);
+    strcpy(strrchr(path, '\\') ? strrchr(path, '\\') + 1 : path, "COMMAND.COM");
+    if ((f = fopen(path, "rb")) != NULL) {
+        static char head[1536];
+        size_t n = fread(head, 1, sizeof head - 1, f), i;
+        fclose(f);
+        for (i = 0; i + 4 <= n; i++)            /* (its mark: the kernel's call's four letters) */
+            if (!memcmp(head + i, "GCMD", 4)) {
+                bi.flags |= BI_F_OWNCMD;
+                break;
+            }
+    }
+
     /* The kernel image. */
     kernel_path(path, argv[0]);
     f = fopen(path, "rb");

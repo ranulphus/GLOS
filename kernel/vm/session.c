@@ -38,6 +38,7 @@
 #include "kcfg.h"
 #include "agent.h"
 #include "app.h"
+#include "cmdcom.h"
 #include "display.h"
 #include "dpmi.h"
 #include "gdbprog.h"
@@ -569,6 +570,18 @@ void session_exec(const struct trapframe *tf)
                 memcpy(add + n, "BLASTER=", 8);
                 memcpy(add + n + 8, crystal_blaster(), strlen(crystal_blaster()) + 1);
                 n += 8 + (u32)strlen(crystal_blaster()) + 1;
+            }
+        }
+        if (psp == vm.loader_psp && cmdcom_path()) {     /* COMSPEC: GLOS's own COMMAND.COM (S4c), unless the */
+            int own = 0;                        /* profile or the job names one */
+            for (e = ses.prof ? ses.prof->env : ""; *e; e += strlen(e) + 1)
+                own |= same_var(e, "COMSPEC=");
+            for (e = job.env; *e; e += strlen(e) + 1)
+                own |= same_var(e, "COMSPEC=");
+            if (!own && n + 9 + strlen(cmdcom_path()) < sizeof add - 1) {
+                memcpy(add + n, "COMSPEC=", 8);
+                memcpy(add + n + 8, cmdcom_path(), strlen(cmdcom_path()) + 1);
+                n += 8 + (u32)strlen(cmdcom_path()) + 1;
             }
         }
         for (e = ses.prof ? ses.prof->env : ""; *e; e += l) {

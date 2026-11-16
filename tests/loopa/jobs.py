@@ -214,7 +214,8 @@ def refuse():
     return ok
 
 
-GLOS_FILES = ["--file", "build/ow/GLOS.EXE=/TEST/GLOS.EXE", "--file", "build/kernel/GLOSK.BIN=/TEST/GLOSK.BIN"]
+GLOS_FILES = ["--file", "build/ow/GLOS.EXE=/TEST/GLOS.EXE", "--file", "build/kernel/GLOSK.BIN=/TEST/GLOSK.BIN",
+              "--file", "build/glos/COMMAND.COM=/TEST/COMMAND.COM"]     # (GLOS's own COMMAND.COM beside it: S4c)
 MGA_DOS = os.path.join(MGA, "build/ow/dos")
 M2_FILES = ["--file", MGA_DOS + "/XMSINFO.COM=/HX/XMSINFO.COM", "--file", MGA_DOS + "/VBEINFO.COM=/HX/VBEINFO.COM",
             "--file", "build/ow/dos/XMSTEST.EXE=/HX/XMSTEST.EXE", "--file", "build/ow/dos/HOSTILE.EXE=/HX/HOSTILE.EXE"]
@@ -2322,6 +2323,10 @@ def batch_case(profile, card):
         "T7.BAT": ["@echo off", "goto longlabelname", "echo skipped", ":longlabelother", "echo eight", "set V=x y",
                    "echo [%V%]", "goto nowhere", "echo not reached"],
         "T8.BAT": ["@echo off", "pause", "echo after the pause"],
+        "T9.BAT": ["@echo off", "set V=set in the batch", "c:\\test\\conin env V", 'c:\\test\\conin system "echo deep"'],
+        "LINES.TXT": ["echo first", "set V=kept", "c:\\test\\conin env V", "c:\\test\\conin code 3",
+                      "if errorlevel 3 echo three", "exit"],
+        "NOEXIT.TXT": ["echo no exit here"],
     }
     files = []
     for n, lines in bats.items():
@@ -2331,9 +2336,11 @@ def batch_case(profile, card):
         "--cmd", "SERSAY HX-START batch", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     checks, info = {"listen": agent.listening()}, ""
     try:
+        m = re.search(r"GLOS-VM agent comspec=(\S+)", agent.log())
+        freedos = m.group(1) if m else "COMMAND"        # (FreeDOS's by its place: COMSPEC is GLOS's own now, S4c)
         for n, args in (("T1", "one two three"), ("T2", "yes"), ("T2", "no"), ("T2", ""), ("T3", ""), ("T4", ""),
                         ("T5", ""), ("T6", "")):
-            a = agent.ssh("COMMAND /C C:\\TEST\\%s.BAT %s" % (n, args))
+            a = agent.ssh("%s /C C:\\TEST\\%s.BAT %s" % (freedos, n, args))
             b = agent.ssh("CALL C:\\TEST\\%s.BAT %s" % (n, args))
             key = "%s%s" % (n.lower(), "-" + args.split()[0] if args else "")
             checks[key] = a[0] == b[0] and a[1] == b[1] and len(a[1]) > 4
@@ -2352,7 +2359,7 @@ def batch_case(profile, card):
                           ("redir-in", "C:\\TEST\\CONIN.EXE line < C:\\TEST\\T3B.BAT"),
                           ("pipe", "TYPE C:\\TEST\\T3B.BAT | C:\\TEST\\CONIN.EXE line"),
                           ("pipe-prog", "C:\\TEST\\ECHOARGS.EXE piped words | C:\\TEST\\CONIN.EXE line")):
-            a = agent.ssh('COMMAND /C %s' % line)
+            a = agent.ssh('%s /C %s' % (freedos, line))
             fa = agent.ssh("TYPE C:\\TEST\\O1.TXT")[1] if key.startswith("redir-o") or key == "redir-append" else ""
             if key == "redir-out":
                 agent.ssh("DEL C:\\TEST\\O1.TXT")
@@ -2363,6 +2370,45 @@ def batch_case(profile, card):
                 info += " %s: freedos=%r glos=%r files=%r/%r" % (key, (a[0], a[1][-160:]), (b[0], b[1][-160:], b[2][-80:]), fa[-80:], fb[-80:])
         left = agent.ssh("DIR C:\\ /B")[1] + agent.ssh("DIR C:\\TEST /B")[1] + agent.ssh("DIR A:\\ /B")[1]
         checks["pipe-files-gone"] = ".TMP" not in left.upper()
+        # GLOS's own COMMAND.COM (S4c) is what a program that shells out is given: COMSPEC names it; a line
+        # through the C library's system() is run by GLOS's shell (a built-in, a program and its exit code, a
+        # batch file that sets a variable for the program it starts); one that shells out from a program that
+        # was itself started that way (two deep); and with no terminal a batch file named as a program is its
+        # too, the same as FreeDOS's COMMAND.COM runs it
+        own = "C:\\TEST\\COMMAND.COM"
+        rc, out, e = agent.ssh("C:\\TEST\\CONIN.EXE env COMSPEC")
+        checks["comspec"] = out.strip().upper() == "ENV COMSPEC=" + own.replace("\\\\", "\\")
+        rc, out, e = agent.ssh('C:\\TEST\\CONIN.EXE system "echo from a child"')
+        checks["system-echo"] = out.replace("\r", "") == "from a child\nSYSTEM rc=0\n"
+        rc, out, e = agent.ssh('C:\\TEST\\CONIN.EXE system "c:\\test\\conin code 7"')
+        checks["system-code"] = out.replace("\r", "") == "SYSTEM rc=7\n"
+        rc, out, e = agent.ssh("C:\\TEST\\CONIN.EXE system c:\\test\\t9.bat")
+        checks["system-batch"] = out.replace("\r", "") == "ENV V=set in the batch\ndeep\nSYSTEM rc=0\nSYSTEM rc=0\n" \
+            and "GLOS-COMMAND begin" in agent.log() and "depth=2" in agent.log()
+        if not all(checks[k] for k in ("comspec", "system-echo", "system-code", "system-batch")):
+            info += " shellout=%r" % ((rc, out[-200:], e[-100:]),)
+        # COMMAND with no /C reads lines from its standard input (here a file: each is shown after the prompt,
+        # as DOS's line input shows it) until EXIT: its variables and the last program's exit code stay from
+        # line to line, and the folder it was started in is its own; /K runs a line first; an input that runs
+        # dry ends it (FreeDOS's COMMAND.COM waits for ever there)
+        want = ["C:\\TEST>echo first", "first", "C:\\TEST>set V=kept", "C:\\TEST>c:\\test\\conin env V", "ENV V=kept",
+                "C:\\TEST>c:\\test\\conin code 3", "C:\\TEST>if errorlevel 3 echo three", "three", "C:\\TEST>exit"]
+        rc, out, e = agent.ssh("%s < C:\\TEST\\LINES.TXT" % own, timeout=90)
+        got = [l for l in out.replace("\r", "").split("\n") if l]
+        checks["command-lines"] = rc == 0 and got[:1] != [] and got[0].startswith("GLOS shell") and got[1:] == want
+        rc2, out2, e2 = agent.ssh("%s /K echo k first < C:\\TEST\\LINES.TXT" % own, timeout=90)
+        got2 = [l for l in out2.replace("\r", "").split("\n") if l]
+        checks["command-k"] = rc2 == 0 and got2 == ["k first"] + want
+        rc3, out3, e3 = agent.ssh("%s < C:\\TEST\\NOEXIT.TXT" % own, timeout=90)
+        got3 = [l for l in out3.replace("\r", "").split("\n") if l]
+        checks["command-dry"] = rc3 == 0 and got3[1:] == ["C:\\TEST>echo no exit here", "no exit here", "C:\\TEST>"]
+        if not (checks["command-lines"] and checks["command-k"] and checks["command-dry"]):
+            info += " command=%r" % ((rc, out[-300:], e[-80:], rc2, out2[-200:], rc3, out3[-100:]),)
+        a, b = agent.ssh("%s /C C:\\TEST\\T5.BAT" % freedos), agent.ssh("C:\\TEST\\T5.BAT")
+        checks["bat-as-program"] = a[0] == b[0] and a[1] == b[1] and len(b[1]) > 4
+        log = agent.log()                       # (every COMMAND.COM of GLOS's left through the kernel)
+        checks["commands-ended"] = log.count("GLOS-COMMAND begin") == log.count("GLOS-COMMAND end") \
+            and "GLOS-COMMAND gone" not in log
         # DATE, TIME and CHCP are the shell's own too (GLOS's clock, the region's format and code page)
         d, t, c = agent.ssh("DATE"), agent.ssh("TIME"), agent.ssh("CHCP")
         bad_date = agent.ssh("DATE 16/11/2026")

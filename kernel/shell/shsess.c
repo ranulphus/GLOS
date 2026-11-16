@@ -32,6 +32,7 @@
 #include "app.h"
 #include "agent.h"
 #include "clock.h"
+#include "cmdcom.h"
 #include "dos.h"
 #include "io.h"
 #include "kapi.h"
@@ -85,6 +86,15 @@ struct shsess {
     volatile u8 job_evt;                /* ... it has written, or moved on */
     u8 job_esc;                         /* a key's sequence under way, typed to it */
     u8 job_full;                        /* it has the PC's own screen: its terminal has been told */
+    void *via;                          /* a COMMAND.COM of GLOS's is this session's (cmdcom.c; S4c): it makes its
+                                           DOS calls, starts its programs, and writes what it writes */
+    char *cmd_env;                      /* ... and this was its environment: the shell's variables to start with */
+    u32 cmd_xfer;                       /* ... its own buffer for the DOS calls, in bytes (dos.c) */
+    u8 cmd_dry;                         /* ... its standard input is a file at its end: no more keys */
+    u8 cmd_shell;                       /* ... it was started with no /C: lines are read (by DOS, through it) and
+                                           run until EXIT */
+    u16 cmd_std[2];                     /* a program's standard input and output put aside while files are in
+                                           their place (handles; 0: not) */
     char io_in[SH_PATH], io_out[SH_PATH];       /* the next program's standard input and output (h_io): "" its own */
     u8 io_append;
     u8 want_key;                        /* the shell waits for a key (PAUSE, a batch file's question): sh_key() */
@@ -119,11 +129,20 @@ static struct shsess *leaving;
 
 /* Bytes as they are, to the terminal's side: what is written (stream 0), or with no terminal what is written
    as errors (1). The thread waits for room. */
+static void cmd_out(struct shsess *s, int stream, const u8 *d, u32 n);
+
+/* The bytes of the buffer the session's DOS calls go through: the DOS server's, or its COMMAND.COM's own. */
+static u32 xfer_size(const struct shsess *s) { return s->via ? s->cmd_xfer : dos_xfer_size(); }
+
 static void stream_bytes(struct shsess *s, int stream, const u8 *d, u32 n)
 {
     u8 *ring = stream ? s->err : s->out;
     volatile u32 *head = stream ? &s->eh : &s->oh, *tail = stream ? &s->et : &s->ot;
     u32 size = stream ? ERR_RING : OUT_RING;
+    if (s->via) {                               /* (a COMMAND.COM's session: through its own handles 1 and 2) */
+        cmd_out(s, stream, d, n);
+        return;
+    }
     while (n) {
         u32 f = irq_save(), room, k, at;
         while ((room = size - (*tail - *head)) == 0 && !s->closing)
@@ -188,8 +207,9 @@ static void h_write(void *ctx, int kind, const char *t, int n)
 {
     struct shsess *s = ctx;
     if (!s->tty) {                              /* no terminal: bytes as they are, errors apart; no prompt, and
-                                                   none of the shell's greeting */
-        if (kind != SH_PROMPT && !s->starting)
+                                                   none of the shell's greeting (a COMMAND.COM's session that
+                                                   reads lines has the prompt, plain) */
+        if ((kind != SH_PROMPT || (s->cmd_shell && !s->quit)) && !s->starting)       /* (none after EXIT) */
             stream_bytes(s, kind == SH_ERR, (const u8 *)t, (u32)n);
         return;
     }
@@ -299,7 +319,145 @@ static void let_go(struct shsess *s)
 static int made(struct shsess *s)
 {
     hold(s);
+    s->q.via = s->via;                          /* (a COMMAND.COM's session: that program makes the calls, while it
+                                                   is there) */
+    s->q.gone = &s->closing;
     return dos_call(&s->q) != 0 || s->q.error ? -1 : 0;
+}
+
+/* ---- a COMMAND.COM of GLOS's (kernel/shell/cmdcom.c; docs/v1/shell.md, S4c): what its session does otherwise */
+
+/* What the session writes: by DOS, to its COMMAND.COM's standard output or error, wherever those lead. */
+static void cmd_out(struct shsess *s, int stream, const u8 *d, u32 n)
+{
+    u32 most = xfer_size(s) - DATA_AT;
+    while (n) {
+        u32 k = n < most ? n : most;
+        req(s);
+        call(s, 0, 0x4000, (u16)(1 + (stream != 0)), (u16)k, DATA_AT);
+        s->q.in = d, s->q.in_len = k, s->q.in_at = DATA_AT;
+        if (made(s) != 0)
+            return;
+        d += k, n -= k;
+    }
+}
+
+/* DOS's drive and folder made the shell's: a program is started there, and they stay so when the line is done
+   (COMMAND /C CD X changes the folder for whoever asked, as under DOS). */
+static void cmd_folder(struct shsess *s, const char *cwd)
+{
+    if (!cwd[0] || cwd[1] != ':' || paths(s, cwd, 0) != 0)
+        return;
+    call(s, 0, 0x0E00, 0, 0, (u16)((cwd[0] | 32) - 'a'));
+    call(s, 1, 0x3B00, 0, 0, PATH_AT);
+    made(s);
+}
+
+/* A file in the place of the program's standard input (which 0) or output (1): the handle as it was is put
+   aside (DOS's 45h) and the file's takes its number (46h). 0, or -1. */
+static int cmd_std_set(struct shsess *s, int which, const char *path, int append)
+{
+    u16 h, kept;
+    if (paths(s, path, 0) != 0)
+        return -1;
+    if (which == 0) {
+        call(s, 0, 0x3D00, 0, 0, PATH_AT);
+    } else if (append) {
+        call(s, 0, 0x3D01, 0, 0, PATH_AT);
+    } else {
+        call(s, 0, 0x3C00, 0, 0, PATH_AT);
+    }
+    if (made(s) != 0) {
+        if (which == 0 || !append || paths(s, path, 0) != 0)
+            return -1;
+        call(s, 0, 0x3C00, 0, 0, PATH_AT);     /* (nothing there to add to: made) */
+        if (made(s) != 0)
+            return -1;
+    }
+    h = s->q.r[0].ax;
+    req(s);
+    if (which && append)
+        call(s, 0, 0x4202, h, 0, 0);            /* (to its end) */
+    else
+        call(s, 0, 0x4201, h, 0, 0);            /* (where it is: nothing changed) */
+    call(s, 1, 0x4500, (u16)which, 0, 0);       /* the standard handle, put aside */
+    if (made(s) != 0)
+        goto close;
+    kept = s->q.r[1].ax;
+    req(s);
+    call(s, 0, 0x4600, h, (u16)which, 0);       /* the file's handle is the standard one's number too */
+    call(s, 1, 0x3E00, h, 0, 0);
+    if (made(s) != 0) {
+        req(s);
+        call(s, 0, 0x3E00, kept, 0, 0);
+        made(s);
+        goto close;
+    }
+    s->cmd_std[which] = (u16)(kept + 1);
+    return 0;
+close:
+    req(s);
+    call(s, 0, 0x3E00, h, 0, 0);
+    made(s);
+    return -1;
+}
+
+static void cmd_std_back(struct shsess *s)      /* ... and the handles as they were */
+{
+    int which;
+    for (which = 0; which < 2; which++)
+        if (s->cmd_std[which]) {
+            u16 kept = (u16)(s->cmd_std[which] - 1);
+            req(s);
+            call(s, 0, 0x4600, kept, (u16)which, 0);
+            call(s, 1, 0x3E00, kept, 0, 0);
+            made(s);
+            s->cmd_std[which] = 0;
+        }
+}
+
+/* The program is its COMMAND.COM's to start, in the shell's folder, with the shell's variables for its
+   environment and the files named for its standard input and output. 1 (under way), or -1. */
+static int cmd_run(struct shsess *s, const char *command, const char *prog, const char *cwd)
+{
+    int bad = 0;
+    if (!prog || strlen(command) < strlen(prog))
+        return -1;
+    cmd_folder(s, cwd);
+    if (s->io_in[0])
+        bad |= cmd_std_set(s, 0, s->io_in, 0) != 0;
+    if (s->io_out[0] && !bad)
+        bad |= cmd_std_set(s, 1, s->io_out, s->io_append) != 0;
+    s->io_in[0] = s->io_out[0] = 0;
+    if (bad || cmdcom_exec(s->via, s, prog, command + strlen(prog), s->sh.vars, s->sh.nvars) != 0) {
+        cmd_std_back(s);
+        return -1;
+    }
+    s->job_on = 1;
+    return 1;
+}
+
+static void cmd_job_turn(struct shsess *s)      /* its program has ended, perhaps */
+{
+    int code;
+    if (!cmdcom_done(s->via, s, &code))
+        return;
+    cmd_std_back(s);
+    s->job_on = 0;
+    sh_ended(&s->sh, code);
+}
+
+void shsess_cmd_wake(struct shsess *s)          /* (cmdcom.c, the VM's thread: its program has ended) */
+{
+    u32 f = irq_save();
+    s->job_evt = 1;
+    thread_wake(&s->wq);
+    irq_restore(f);
+}
+
+void shsess_cmd_stop(struct shsess *s)          /* ... or was killed: a batch file is not gone on with */
+{
+    s->stopped = 1;
 }
 
 static int is_root(const char *p) { return p[0] && p[1] == ':' && p[2] == '\\' && !p[3]; }
@@ -515,9 +673,9 @@ static int h_seek(void *ctx, void *f, unsigned long pos)
 static int h_key(void *ctx)
 {
     struct shsess *s = ctx;
-    if (!s->tty)
+    if ((!s->tty && !s->via) || s->cmd_dry)
         return 0;
-    s->want_key = 1;
+    s->want_key = 1;                            /* (a COMMAND.COM's session: read by DOS, in its loop) */
     return SH_UNDER_WAY;
 }
 
@@ -540,7 +698,7 @@ static int h_stop(void *ctx)
 static int h_read(void *ctx, void *f, void *buf, int n)
 {
     struct shsess *s = ctx;
-    u32 most = dos_xfer_size() - DATA_AT;
+    u32 most = xfer_size(s) - DATA_AT;
     if (n <= 0)
         return 0;
     if ((u32)n > most)
@@ -555,7 +713,7 @@ static int h_put(void *ctx, void *f, const void *buf, int n)
 {
     struct shsess *s = ctx;
     const u8 *p = buf;
-    u32 most = dos_xfer_size() - DATA_AT;
+    u32 most = xfer_size(s) - DATA_AT;
     while (n > 0) {
         u32 k = (u32)n < most ? (u32)n : most;
         req(s);
@@ -619,6 +777,8 @@ static int h_run(void *ctx, const char *command, const char *prog, const char *n
     struct agent_opts o;
     char typed[1024];
     u32 seq, i;
+    if (s->via)                                 /* (a COMMAND.COM's session: that program starts it, as its child) */
+        return detach ? -1 : cmd_run(s, command, prog, cwd);
     memset(&r, 0, sizeof r);
     memset(&o, 0, sizeof o);
     r.size = sizeof r;
@@ -694,6 +854,10 @@ static void job_turn(struct shsess *s)
     u8 buf[512];
     u32 st, code, nout, nerr, ticks;
     int stream, n, gone;
+    if (s->via) {
+        cmd_job_turn(s);
+        return;
+    }
     gone = agent_app_status(s, s->job, &st, &code, &nout, &nerr, &ticks) != 0;  /* (its state first: once it has
                                                    ended, what is read is all of it) */
     for (stream = 0; !gone && stream < 2; stream++)
@@ -973,6 +1137,13 @@ static int h_extra(void *ctx, int argc, char **argv, const char *line)
         rest++;
     while (*rest && *rest != ' ' && *rest != '\t')      /* (past the command's own name) */
         rest++;
+    if (s->via && (same_word(argv[0], "DISK") || same_word(argv[0], "DD")
+                   || (same_word(argv[0], "GLOS") && argc > 1 && (same_word(argv[1], "DISK") || same_word(argv[1], "DD"))))) {
+        static const char no[] = "DISK and DD are for GLOS's own prompt, not for a program's COMMAND.COM.\r\n";
+        cmd_out(s, 1, (const u8 *)no, sizeof no - 1);  /* (they wait for the DOS server, which waits for the
+                                                           program that shelled out: for ever) */
+        return 1;
+    }
     if (same_word(argv[0], "GLOS")) {           /* GLOS NAME ...: the name as the server knows it, small */
         while (*rest == ' ' || *rest == '\t')
             rest++;
@@ -1038,7 +1209,8 @@ static void ext_turn(struct shsess *s)
 static int h_as_typed(void *ctx)
 {
     struct shsess *s = ctx;
-    return !s->tty;
+    return !s->tty && !s->via;                  /* (a COMMAND.COM's session finds its programs itself: there is no
+                                                   queue of the agent's for it) */
 }
 
 static void *h_alloc(void *ctx, unsigned n) { (void)ctx; return kmalloc(n); }
@@ -1158,11 +1330,23 @@ static void session(void *arg)
     void *kick_arg = s->kick_arg;
     u32 n = 0, at = (u32)vm_rd16(((u32)vm.loader_psp << 4) + 0x2C) << 4;
     int c;
-    while (at && n < SH_VARS && vm_rd8(at)) {   /* DOS's environment, as GLOS.EXE was given it */
-        env[n++] = (const char *)vm_ptr(at);
-        at += strlen((const char *)vm_ptr(at)) + 1;
+    if (s->cmd_env) {                           /* (a COMMAND.COM's session: the environment that program had) */
+        const char *e;
+        for (e = s->cmd_env; *e && n < SH_VARS; e += strlen(e) + 1)
+            env[n++] = e;
+        at = 0;
     }
-    {                                           /* ... and what GLOS gives a DOS program besides (vm/session.c): the
+    while (at && n < SH_VARS && vm_rd8(at)) {   /* DOS's environment, as GLOS.EXE was given it */
+        const char *e = (const char *)vm_ptr(at);
+        at += strlen(e) + 1;
+        if (cmdcom_path() && !strncmp(e, "COMSPEC=", 8)) {      /* (COMSPEC is GLOS's own COMMAND.COM: S4c) */
+            static char own[108];
+            sh_fmt(own, sizeof own, "COMSPEC=%s", cmdcom_path());
+            e = own;
+        }
+        env[n++] = e;
+    }
+    if (!s->cmd_env) {                                           /* ... and what GLOS gives a DOS program besides (vm/session.c): the
                                                    time zone, the code page, a Crystal chip's BLASTER */
         static const char *const names[] = { "TZ=", "GLOSCP=", "BLASTER=" };
         char value[64];
@@ -1203,19 +1387,112 @@ static void session(void *arg)
     if (s->dir[0]) {
         sh_folder(&s->sh, s->dir);
         s->folder = 1;
-    } else if (s->tty || sh_builtin(&s->sh, s->line))  /* (a line that is a program's alone asks DOS nothing: it is
-                                                   queued behind the program that runs, not held up by it) */
+    } else if (s->tty || s->via || sh_builtin(&s->sh, s->line))    /* (a line that is a program's alone asks DOS
+                                                   nothing: it is queued behind the program that runs, not held up
+                                                   by it; a COMMAND.COM's session is where that program was) */
         folder(s);
     if (!s->tty) {                              /* the one line, to its end */
-        sh_line(&s->sh, s->line);
-        while (s->sh.under_way && !s->quit && key(s) != EV_GONE) {
-            if (s->job_on)
-                job_turn(s);
-            else if (s->ext_on)
-                ext_turn(s);
+        int idle = 0;
+        sh_line(&s->sh, s->cmd_shell && !s->line[0] ? "VER" : s->line);    /* (COMMAND alone says what it is) */
+        for (;;) {
+            while (s->sh.under_way && !s->quit) {
+                if (s->via && s->want_key && !s->job_on) {     /* PAUSE, a batch file's question: a key by DOS
+                                                                   (INT 21h 08h), through its COMMAND.COM; where
+                                                                   its standard input is a file, a byte of that
+                                                                   (at its end: Enter, and no more keys) */
+                    u8 one = 13;
+                    s->want_key = 0;
+                    req(s);
+                    call(s, 0, 0x4400, 0, 0, 0);
+                    if (made(s) != 0)
+                        break;
+                    req(s);
+                    if (s->q.r[0].dx & 0x80) {
+                        call(s, 0, 0x0800, 0, 0, 0);
+                        if (made(s) != 0)
+                            break;
+                        one = (u8)s->q.r[0].ax;
+                    } else {
+                        s->q.out = &one, s->q.out_len = 1, s->q.out_at = DATA_AT;
+                        call(s, 0, 0x3F00, 0, 1, DATA_AT);
+                        if (made(s) != 0)
+                            break;
+                        if (!s->q.r[0].ax)
+                            one = 13, s->cmd_dry = 1;
+                    }
+                    sh_key(&s->sh, one);
+                    continue;
+                }
+                if (key(s) == EV_GONE)
+                    break;
+                if (s->job_on)
+                    job_turn(s);
+                else if (s->ext_on)
+                    ext_turn(s);
+            }
+            if (!s->cmd_shell || s->quit || s->closing || idle > 20)
+                break;
+            {                                   /* a COMMAND.COM started with no /C: the next line, through that
+                                                   program, from its own standard input; until EXIT */
+                u8 buf[130];
+                u32 n, used;
+                memset(buf, 0, sizeof buf);
+                req(s);
+                call(s, 0, 0x4400, 0, 0, 0);
+                if (made(s) != 0)
+                    break;
+                if (s->q.r[0].dx & 0x80) {      /* a device (the keyboard): DOS's own line input (INT 21h 0Ah) */
+                    buf[0] = 127;
+                    req(s);
+                    s->q.in = buf, s->q.in_len = 2, s->q.in_at = DATA_AT;
+                    s->q.out = buf, s->q.out_len = sizeof buf, s->q.out_at = DATA_AT;
+                    call(s, 0, 0x0A00, 0, 0, DATA_AT);
+                    if (made(s) != 0)
+                        break;
+                    n = buf[1] < 127 ? buf[1] : 127;
+                    buf[2 + n] = 0;
+                    cmd_out(s, 0, (const u8 *)"\r\n", 2);
+                    idle = n ? 0 : idle + 1;
+                    sh_line(&s->sh, (const char *)buf + 2);
+                    continue;
+                }
+                /* A file: a piece read, the line taken from it, and the file set back to the line's end (the
+                   programs the line starts read on from there). Its end, or Ctrl+Z, is the shell's end: DOS's
+                   line input says Ctrl+C at a file's end for ever (DOS's own COMMAND.COM hangs there). The line
+                   is shown, as DOS's line input shows what it reads. */
+                req(s);
+                s->q.out = buf, s->q.out_len = 128, s->q.out_at = DATA_AT;
+                call(s, 0, 0x3F00, 0, 128, DATA_AT);
+                if (made(s) != 0 || !(n = s->q.r[0].ax) || n > 128 || buf[0] == 0x1A)
+                    break;
+                for (used = 0; used < n && buf[used] != '\r' && buf[used] != '\n' && buf[used] != 0x1A; used++)
+                    ;
+                buf[n] = 0;
+                {
+                    u32 len = used, back;
+                    if (used < n && buf[used] == '\r' && buf[used + 1] == '\n')
+                        used += 2;
+                    else if (used < n && buf[used] != 0x1A)
+                        used++;
+                    back = n - used;
+                    buf[len] = 0;
+                    if (back) {
+                        req(s);
+                        call(s, 0, 0x4201, 0, 0xFFFF, (u16)(0u - back));
+                        if (made(s) != 0)
+                            break;
+                    }
+                    cmd_out(s, 0, buf, len);
+                    cmd_out(s, 0, (const u8 *)"\r\n", 2);
+                }
+                sh_line(&s->sh, (const char *)buf);
+            }
         }
-        if (!s->quit)
-            s->code = s->sh.errorlevel;
+        if (!s->quit)                           /* (a COMMAND.COM's: the last program's exit code, as COMMAND /C
+                                                   leaves with under DOS; otherwise the line's own result) */
+            s->code = s->via ? s->sh.level : s->sh.errorlevel;
+        if (s->via && s->folder)
+            cmd_folder(s, s->sh.cwd[s->sh.drive]);
         s->quit = 1;
     } else {
         sh_prompt(&s->sh);
@@ -1285,10 +1562,27 @@ static void release(struct shsess *s)
 {
     if (s->line)
         kfree(s->line);
+    if (s->cmd_env)
+        kfree(s->cmd_env);
     kfree(s);
 }
 
 static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir, void (*kick)(void *), void *arg);
+
+static void *make_via;                  /* (the next session made is a COMMAND.COM's: cmdcom.c alone asks) */
+static const char *make_env;
+static u8 make_shell;
+static u32 make_xfer;
+
+struct shsess *shsess_cmd(void *via, const char *line, int shell, const char *env, u32 xfer, void (*kick)(void *),
+                          void *arg)
+{
+    struct shsess *s;
+    make_via = via, make_env = env, make_shell = (u8)(shell != 0), make_xfer = xfer;
+    s = make(0, 0, line ? line : "", 0, kick, arg);
+    make_via = 0, make_env = 0, make_shell = 0;
+    return s;
+}
 
 struct shsess *shsess_new(u32 cols, u32 rows, void (*kick)(void *), void *arg) { return make(cols, rows, 0, 0, kick, arg); }
 
@@ -1352,6 +1646,16 @@ static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir
     }
     s->host = host;
     s->host.ctx = s;
+    s->via = make_via;
+    s->cmd_shell = make_shell;
+    s->cmd_xfer = make_xfer;
+    if (make_env) {                             /* (its COMMAND.COM's environment: strings to a second NUL) */
+        u32 n = 0;
+        while (make_env[n] || make_env[n + 1])
+            n++;
+        if ((s->cmd_env = kmalloc(n + 2)) != 0)
+            memcpy(s->cmd_env, make_env, n + 2);
+    }
     if (dir && strlen(dir) < sizeof s->dir)
         strcpy(s->dir, dir);
     s->kick = kick;
