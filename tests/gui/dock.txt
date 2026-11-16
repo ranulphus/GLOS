@@ -2,8 +2,9 @@
 # the left, Output under the document, Properties at the right. Properties' close box hides it (the right side
 # goes); the View button hides Output and shows it again; Layers' context menu docks it at the bottom beside
 # Output; Tools' floats it in a tool window of its own beside the page's window (the left side goes); the layout
-# saved, reset to the first one (the tool window goes) and loaded again (it comes back). Each change as the API
-# reads it.
+# saved, reset to the first one (the tool window goes) and loaded again (it comes back). Then the window made
+# narrower than its sides and middle need: Properties joins the left side's tabs (still the right side's, as the
+# saved layout says), and wider again: it goes back. Each change as the API reads it.
 run GUITEST.EXE dock
 wait "GUITEST Docking"
 shot start "GUITEST Docking"
@@ -27,6 +28,11 @@ click "GUITEST Docking" 236 17
 wait "Tools"
 shot loaded "GUITEST Docking"
 click "GUITEST Docking" 200 322
+key alt+e
+key alt+n
+shot narrow "GUITEST Docking"
+key alt+i
+shot wide "GUITEST Docking"
 key alt+f4
 gone "GUITEST Docking"
 expect GUI dock
@@ -40,4 +46,8 @@ expect GUI saved
 expect GUI reset
 expect GUI panes 1:l1 2:l1 3:b1 4:r1
 expect GUI loaded
+expect GUI narrow
+expect GUI layout dock1 110 -100 -90;1 l 1;2 l 1;4 r 1;3 b 1
+expect GUI panes 1:l1 2:l1 3:b1 4:r1
+expect GUI wide
 expect GUI end

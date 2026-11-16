@@ -10,7 +10,11 @@
  *
  * Hidden panes keep their widgets (and so what is in them) on a shelf of the dock's, out of sight. The layout is
  * one line of text (gui_dock_save, gui_dock_load) for the app's settings: the splitters' places, then each pane in
- * its side's order, where it is, whether it shows, and a floating one's place. */
+ * its side's order, where it is, whether it shows, and a floating one's place.
+ *
+ * Narrower than its two sides and the middle's least (MIDDLE_MIN) need, as at 640x480, the right side's panes
+ * join the left side's tabs for as long as it is so (they are still the right side's: the layout says so, and
+ * they go back when there is room). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +24,8 @@
 #define PANES 16
 #define FLOAT_W 220
 #define FLOAT_H 160
+#define MIDDLE_MIN 140                          /* the middle's least width before the sides fold together */
+#define HYSTERESIS 32                           /* (and room enough again by this much before they part) */
 
 struct pane {
     int id;                                     /* the app's (0: no pane) */
@@ -30,6 +36,7 @@ struct pane {
     int fx, fy;                                 /* floating: its frame's place (-1: GLOS chooses) */
     int fwidth, fheight;
     int frame_dx, frame_dy;                     /* the client area's corner less the frame's, once known */
+    int lent;                                   /* a right side's pane in the left side's tabs (narrow) */
 };
 
 struct dock {
@@ -40,6 +47,7 @@ struct dock {
     struct pane p[PANES];
     struct gui_menu *menu;                      /* a side's context menu */
     int menu_side;
+    int narrow;                                 /* the right side's panes are in the left side's tabs */
 };
 
 enum { M_LEFT = 1, M_RIGHT, M_BOTTOM, M_FLOAT, M_HIDE };
@@ -51,9 +59,19 @@ static void dock_measure(struct gui_widget *w, int *pw, int *ph)
     gui_measure(DK(w)->split[0], pw, ph);
 }
 
+static void fold_together(struct dock *d, int on);
+
 static void dock_layout(struct gui_widget *w)
 {
-    gui_place(DK(w)->split[0], w->r.x, w->r.y, w->r.w, w->r.h);
+    struct dock *d = DK(w);
+    int need = gui_split_get(d->split[0]) - gui_split_get(d->split[1]) + MIDDLE_MIN + 12, right = 0, i;
+    for (i = 0; i < PANES; i++)
+        right |= d->p[i].id && d->p[i].shown && d->p[i].side == GUI_DOCK_RIGHT;
+    if (!d->narrow && right && w->r.w < need)
+        fold_together(d, 1);
+    else if (d->narrow && (w->r.w >= need + HYSTERESIS || !right))
+        fold_together(d, 0);
+    gui_place(d->split[0], w->r.x, w->r.y, w->r.w, w->r.h);
 }
 
 static void dock_destroy(struct gui_widget *w)
@@ -160,7 +178,8 @@ static void place_pane(struct dock *d, struct pane *p)
                 p->frame_dx = ox - p->fx, p->frame_dy = oy - p->fy;
         }
     } else {
-        struct gui_widget *t = d->tabs[p->side];
+        struct gui_widget *t = d->tabs[p->side == GUI_DOCK_RIGHT && d->narrow ? GUI_DOCK_LEFT : p->side];
+        p->lent = p->side == GUI_DOCK_RIGHT && d->narrow;
         if (p->page->parent != t)
             gui_adopt(p->page, t);
         gui_tabs_set(t, page_index(t, p->page));
@@ -172,6 +191,23 @@ static void place_pane(struct dock *d, struct pane *p)
 }
 
 static void changed(struct dock *d) { gui_send(&d->w, GUI_ON_CHANGE); }
+
+/* Narrow: the right side's panes lent to the left side's tabs, and back. */
+static void fold_together(struct dock *d, int on)
+{
+    int i;
+    d->narrow = on;
+    for (i = 0; i < PANES; i++) {
+        struct pane *p = &d->p[i];
+        if (!p->id || !p->shown || p->side != GUI_DOCK_RIGHT)
+            continue;
+        p->lent = on;
+        gui_adopt(p->page, d->tabs[on ? GUI_DOCK_LEFT : GUI_DOCK_RIGHT]);
+    }
+    gui_tabs_fix(d->tabs[GUI_DOCK_LEFT]);
+    gui_tabs_fix(d->tabs[GUI_DOCK_RIGHT]);
+    refold(d);
+}
 
 static void float_close(struct gui_window *fw)          /* a floating pane's window closed: the pane hidden */
 {
@@ -225,8 +261,10 @@ static void side_on(struct gui_widget *t, int what)
     case GUI_ON_MOVE:
         changed(d);
         break;
-    case GUI_ON_CONTEXT:                        /* (the menu acts on this side's chosen pane) */
+    case GUI_ON_CONTEXT:                        /* (the menu acts on this side's chosen pane, by its own side) */
         d->menu_side = side;
+        if ((p = side_chosen(d, side)) != NULL)
+            side = p->side;
         gui_menu_enable(d->menu, M_LEFT, side != GUI_DOCK_LEFT);
         gui_menu_enable(d->menu, M_RIGHT, side != GUI_DOCK_RIGHT);
         gui_menu_enable(d->menu, M_BOTTOM, side != GUI_DOCK_BOTTOM);
@@ -350,8 +388,8 @@ int gui_dock_save(struct gui_widget *dock, char *buf, int room)
     for (s = 0; s < 3; s++)                     /* the docked ones, side by side, in their order */
         for (i = 0; (c = gui_tabs_page(d->tabs[s], i)) != NULL; i++) {
             struct pane *p = by_page(d, c);
-            if (p && n < room)
-                n += snprintf(buf + n, (size_t)(room - n), ";%d %c 1", p->id, side_ch[s]);
+            if (p && n < room)                  /* (a lent pane is the right side's still) */
+                n += snprintf(buf + n, (size_t)(room - n), ";%d %c 1", p->id, side_ch[p->side]);
         }
     for (i = 0; i < PANES; i++) {               /* then the floating ones and the hidden */
         struct pane *p = &d->p[i];

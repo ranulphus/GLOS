@@ -1013,6 +1013,18 @@ static void dk_reset(struct gui_widget *w, int what)
     dk_panes("reset");
 }
 
+static void dk_width(struct gui_widget *w, int what)   /* the window narrower than its panes need, and wide again */
+{
+    char line[160];
+    (void)what;
+    gui_resize(win, w->id, win->h);
+    gui_relayout(win);
+    gui_step(0);                                /* (laid out at the new width before the layout is read) */
+    if (gui_dock_save(dk, line, sizeof line) > 0)
+        say("layout %s", line, 0);
+    dk_panes(w->id < 390 ? "narrow" : "wide");
+}
+
 static void dock_page(void)
 {
     static const char *const heads[] = { "Layer" };
@@ -1035,6 +1047,9 @@ static void dock_page(void)
     gui_label(c, "The document");
     f = gui_field(c, 30);
     gui_set_text(f, "MOUNTAIN.PNG");
+    row = gui_hbox(c, -1, 0);
+    gui_button(row, "&Narrow", dk_width, 330);
+    gui_button(row, "W&ide", dk_width, 430);
     pane = gui_pane(dk, 1, "Tools", GUI_DOCK_LEFT);
     gui_button(pane, "Pencil", NULL, 0);
     gui_button(pane, "Brush", NULL, 0);
