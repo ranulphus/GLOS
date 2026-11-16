@@ -86,7 +86,7 @@ compare, and costs a redraw twice a second for nothing.
 | splitter (toolkit 2) | two panes and a bar between them (`gui_split`): dragged, or moved by its keys between the panes in Tab's order; Home and End fold a pane; one pane keeps its size as the window changes (`at`, or minus the other's); `GUI_ON_CHANGE` for the app's settings |
 | menu bar, menus | menus are pop-up windows (below); items with letters, shortcuts, checks; separators |
 | progress bar, image, canvas, status bar | a canvas is the app's to draw in and has its events |
-| dialogs | message (OK, OK and Cancel, Yes and No, Yes No and Cancel), a line to type, open and save a file |
+| dialogs | message (OK, OK and Cancel, Yes and No, Yes No and Cancel; with a "Don't ask again" box: `gui_message_check`), a line to type, open and save a file, a folder (`gui_folder_dialog`: a tree of the drives' folders, New folder), About (`gui_about`: the app's credits and the toolkit's fonts' and icons') |
 
 ### 1.5 The editor
 

@@ -46,6 +46,9 @@
  *   GUITEST combo       "GUITEST Combo boxes" (toolkit 2, step C6): a folder box with
  *                       items and a history, and a name box whose items the app makes
  *                       for what is typed; driven by keys alone
+ *   GUITEST smalldlg    "GUITEST Small dialogs" (toolkit 2, step C6): a message with
+ *                       "Don't ask again", About (GUITEST's credits and the toolkit's),
+ *                       and Folder (a tree of the drives' folders, New folder)
  *   GUITEST tasks       "GUITEST Tasks" (toolkit 2, step C4): background work: a task
  *                       "reads" ten thousand rows in pieces on a thread of its own,
  *                       the list filling as they are posted; its progress dialog
@@ -1129,6 +1132,57 @@ static void combo_page(void)
     say("combo", "", 0);
 }
 
+/* ---- the small dialogs (toolkit 2, step C6) */
+static int sd_dont;
+
+static void sd_message(struct gui_widget *w, int what)
+{
+    int r;
+    (void)what;
+    r = gui_message_check(w->win, "Save changes?", "NOTES.TXT has changed. Save the changes before it closes?",
+                          GUI_MB_YESNO, "&Don't ask again", &sd_dont);
+    say(r == GUI_YES ? "message yes%s, checked %d" : "message no%s, checked %d", "", sd_dont);
+}
+
+static void sd_about(struct gui_widget *w, int what)
+{
+    static const char *const credits[] = { "stb_image 2.30 by Sean Barrett: none here, an example line", NULL };
+    static const struct gui_about a = { "GUITEST", "Version 2.0 (toolkit 2)", "Copyright (c) 2026 the GLOS authors",
+                                        "MIT licence: free to use, copy and change, with this notice kept.", credits,
+                                        NULL };
+    struct gui_about b = a;
+    (void)what;
+    b.icon = gui_icon("app-files", 1);
+    gui_about(w->win, &b);
+    say("about closed", "", 0);
+}
+
+static void sd_folder(struct gui_widget *w, int what)
+{
+    char path[160] = "C:\\GUI";
+    (void)what;
+    if (gui_folder_dialog(w->win, "Choose a folder", path, sizeof path)) {
+        say("folder %s", path, 0);
+        if (strstr(path, "NEWDIR"))             /* (the script's new folder taken away again: Loop A plays the other
+                                                   scripts on the same disk after this one) */
+            gui_rmdir(path);
+    } else
+        say("folder cancelled", "", 0);
+}
+
+static void smalldlg(void)
+{
+    struct gui_widget *row;
+    win = gui_window("GUITEST Small dialogs", 320, 90, 0);
+    row = gui_hbox(win->root, -1, -1);
+    gui_button(row, "&Message", sd_message, 0);
+    gui_button(row, "&About", sd_about, 0);
+    gui_button(row, "&Folder", sd_folder, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("smalldlg", "", 0);
+}
+
 /* ---- the virtual tree (toolkit 2, step C3). Ids: 1, 2, 3 at the top; a node's children are its id times ten
    and 1, 2, 3 (to three levels); but node 2's are five thousand leaves, 2000000 and on. */
 static struct gui_widget *vt;
@@ -1341,6 +1395,8 @@ int main(int argc, char **argv)
         dock_page();
     else if (!strcmp(what, "combo"))
         combo_page();
+    else if (!strcmp(what, "smalldlg"))
+        smalldlg();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

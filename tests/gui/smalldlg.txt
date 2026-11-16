@@ -1,0 +1,36 @@
+# The small dialogs (toolkit 2, step C6; docs/v1/toolkit-2.md): GUITEST's buttons, by keys alone. A message with a
+# "Don't ask again" box: Shift+Tab to the box, Space, and No (the app gets No and the box's state); About (its
+# icon, name, version, copyright, licence, its credit line and the toolkit's fonts' and icons'); Folder from
+# C:\GUI: the tree open at it, New folder makes NEWDIR there and chooses it, OK.
+run GUITEST.EXE smalldlg
+wait "GUITEST Small dialogs"
+key alt+m
+wait "Save changes?"
+shot message "Save changes?"
+key shift+tab
+key space
+key alt+n
+gone "Save changes?"
+key alt+a
+wait "About GUITEST"
+shot about "About GUITEST"
+key enter
+gone "About GUITEST"
+key alt+f
+wait "Choose a folder"
+shot folder "Choose a folder"
+key alt+n
+wait "New folder"
+type NEWDIR
+key enter
+gone "New folder"
+shot folder-new "Choose a folder"
+key tab enter
+gone "Choose a folder"
+key alt+f4
+gone "GUITEST Small dialogs"
+expect GUI smalldlg
+expect GUI message no, checked 1
+expect GUI about closed
+expect GUI folder C:\GUI\NEWDIR
+expect GUI end

@@ -543,7 +543,14 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
   typed; Enter with no row chosen takes the text as typed. Down drops the whole list when it is closed. Up to 64
   rows match, eight show (the toolbar's combo item and a scrolling list are owed with the address bars that
   need them).
-- **Test:** `combo` (GUITEST's folder and name boxes, by keys alone: typed and chosen from the list, a text
+- **C6b, the small dialogs:** `gui_message_check` (the check box tells the app's int as it changes, the dialog
+  being gone when gui_modal returns); `gui_about` (the toolkit's three credits after the app's, each a block);
+  `gui_folder_dialog` (a virtual tree whose ids are places in the dialog's table of paths, opened down to the
+  starting folder; the path in a combo box, Enter on it or the tree takes it; New folder asks for a name and
+  makes it with `gui_mkdir`, then shows and chooses it).
+- **Test:** `smalldlg` (GUITEST's three buttons by keys alone: the message's box ticked and No; About's shot;
+  Folder from C:\GUI, New folder NEWDIR, OK; the page removes NEWDIR after, as Loop A plays the other scripts on
+  the same disk), on the host and in Loop A with `dialogs`. `combo` (GUITEST's folder and name boxes, by keys alone: typed and chosen from the list, a text
   no item begins with, the history read back, F4's whole list, Esc, the name box's items made for what is
   typed), on the host and in Loop A on a 486 and a Pentium II. Its shots are taken with no list dropped (Loop
   A's shots are of the screen).

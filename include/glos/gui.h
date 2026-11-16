@@ -556,6 +556,21 @@ enum { GUI_OK = 1, GUI_CANCEL_R = 2, GUI_YES = 3, GUI_NO = 4 };
 #define GUI_MB_YESNOCANCEL 4
 int gui_message(struct gui_window *owner, const char *title, const char *text, int buttons);    /* GUI_OK ... */
 int gui_ask(struct gui_window *owner, const char *title, const char *prompt, char *buf, int room);  /* 1: OK */
+int gui_message_check(struct gui_window *owner, const char *title, const char *text, int buttons, const char *check,
+                      int *checked);    /* (toolkit 2) with a check box under the text ("&Don't ask again", "Do
+                                           this for &all"): its state in and out through *checked, the app's to
+                                           keep */
+struct gui_about {
+    const char *name, *version, *copyright;
+    const char *licence;                /* its text, or a line naming it */
+    const char *const *credits;         /* what it uses, a line each ("stb_image 2.30: pictures, public domain"),
+                                           NULL-ended; the toolkit's own fonts and icons are added */
+    const unsigned char *icon;          /* a GUI_BIG_W icon, or NULL */
+};
+void gui_about(struct gui_window *owner, const struct gui_about *a);  /* (toolkit 2) */
+int gui_folder_dialog(struct gui_window *owner, const char *title, char *path, int room);     /* (toolkit 2) a
+                                           folder chosen in a tree of the drives' folders, or typed; New folder
+                                           makes one. path in: where to start; out: the folder. 1: chosen */
 int gui_file_dialog(struct gui_window *owner, const char *title, int save, char *path, int room);  /* path in: the
                                            folder (and the name); out: the file chosen. 1: chosen */
 
