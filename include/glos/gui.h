@@ -377,6 +377,30 @@ int gui_vlist_chosen(struct gui_widget *w, unsigned long *ids, int room);      /
 void gui_vlist_sort(struct gui_widget *w, int *col, int *down);        /* at GUI_ON_SORT: the column whose head was
                                            pressed, and whether downward (a second press on the same head) */
 
+/* ---- the virtual tree (toolkit 2; docs/v1/toolkit-2.md 2): a tree that keeps no texts. The app's model says a
+   node's children's ids when the node is opened, and a node's text, icon and badge when it is drawn. */
+struct gui_tnode {
+    const char *text;                   /* (the model's to keep until it is next asked) */
+    const unsigned char *icon;          /* a GUI_ICON_W icon, or NULL */
+    const char *badge;                  /* a short text at the row's right end (a count), or NULL */
+    int may;                            /* it has, or may have, children: a box to open it */
+};
+struct gui_tmodel {
+    int (*children)(void *ctx, unsigned long id, unsigned long *ids, int room, int from);  /* the ids of the node's
+                                           children (id 0: the top's) from the from'th on, as many as there is
+                                           room for: how many it has in all */
+    void (*node)(void *ctx, unsigned long id, struct gui_tnode *out);
+    void *ctx;
+};
+struct gui_widget *gui_vtree(struct gui_widget *parent, const struct gui_tmodel *model);
+unsigned long gui_vtree_get(struct gui_widget *w);     /* the current node's id, or 0 */
+int gui_vtree_set(struct gui_widget *w, unsigned long id);     /* the current node (one on show: its parents open):
+                                           0, or -1 */
+int gui_vtree_open(struct gui_widget *w, unsigned long id, int on);    /* a node on show opened or closed: 0, or -1 */
+void gui_vtree_changed(struct gui_widget *w, unsigned long id);        /* a node's children changed (0: the top's):
+                                           asked for again; what was open under it, and the current node, are
+                                           found by their ids */
+
 struct gui_node;
 struct gui_widget *gui_tree(struct gui_widget *parent);
 struct gui_node *gui_tree_add(struct gui_widget *w, struct gui_node *parent, const char *text,

@@ -24,6 +24,9 @@
  *   GUITEST icons       "GUITEST Icons": GLOS's own icons by name: colour ones at 16
  *                       and 32 pixels (ICONS.DAT), one-colour glyphs in the text's
  *                       colour and greyed, and in a list, a tree and a menu
+ *   GUITEST vtree       "GUITEST Virtual tree": a tree that keeps no texts: nodes asked
+ *                       for when drawn, children's ids when a node is opened (one
+ *                       has five thousand); badges; a node's children changed
  *   GUITEST names DIR   files in DIR named in DOS's code page (GLOSCP), then
  *                       the file dialog there: the name chosen, as DOS's
  *                       bytes (M10 step G)
@@ -698,6 +701,80 @@ static void vlist(void)
     say("vlist", "", 0);
 }
 
+/* ---- the virtual tree (toolkit 2, step C3). Ids: 1, 2, 3 at the top; a node's children are its id times ten
+   and 1, 2, 3 (to three levels); but node 2's are five thousand leaves, 2000000 and on. */
+static struct gui_widget *vt;
+static int vt_asked, vt_more;
+
+static int t_children(void *ctx, unsigned long id, unsigned long *ids, int room, int from)
+{
+    int total = id == 0 ? 3 : id == 2 ? 5000 : id == 1 ? 3 + vt_more : id < 100 ? 3 : 0, i;
+    (void)ctx;
+    for (i = from; i < total && i - from < room; i++)
+        ids[i - from] = id == 2 ? 2000000ul + (unsigned long)i : id * 10 + (unsigned long)i + 1;
+    return total;
+}
+
+static void t_node(void *ctx, unsigned long id, struct gui_tnode *out)
+{
+    static char text[32];
+    (void)ctx;
+    vt_asked++;
+    if (id <= 3)
+        snprintf(text, sizeof text, "%s", id == 1 ? "Disk C:" : id == 2 ? "Disk D:" : "Mail");
+    else
+        snprintf(text, sizeof text, id >= 2000000ul ? "File %04lu" : "Folder %lu", id >= 2000000ul ? id - 2000000ul : id);
+    out->text = text;
+    out->may = id < 100;
+    out->icon = id == 3 ? gui_glyph("mail") : gui_icon(id <= 2 ? "drive" : out->may ? "folder" : "file", 0);
+    out->badge = id == 3 ? "12" : id == 31 ? "5" : NULL;
+}
+
+static void t_on(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_SELECT)
+        say("node%s %d", "", (int)gui_vtree_get(w));
+    else if (what == GUI_ON_ACTIVATE)
+        say("open node%s %d", "", (int)gui_vtree_get(w));
+}
+
+static void t_asked(struct gui_widget *w, int what)
+{
+    (void)w, (void)what;
+    if (vt_asked <= 400)                        /* (a few screens of a dozen, each drawn a few times) */
+        say("asked for the nodes on the screen, not the tree%s", "", 0);
+    else
+        say("asked for%s %d nodes!", "", vt_asked);
+    vt_asked = 0;
+}
+
+static void t_more(struct gui_widget *w, int what)      /* Disk C: has a folder more */
+{
+    (void)w, (void)what;
+    vt_more = 1;
+    gui_vtree_changed(vt, 1);
+    say("changed%s", "", 0);
+}
+
+static void vtree(void)
+{
+    static const struct gui_tmodel model = { t_children, t_node, NULL };
+    struct gui_widget *box, *row;
+    win = gui_window("GUITEST Virtual tree", 300, 260, 0);
+    box = gui_vbox(win->root, -1, -1);
+    gui_grow(box, 1);
+    row = gui_hbox(box, -1, 0);
+    gui_button(row, "&Asked?", t_asked, 0);
+    gui_button(row, "&More in C:", t_more, 0);
+    vt = gui_vtree(box, &model);
+    gui_on(vt, t_on, 0);
+    gui_grow(vt, 1);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(vt);
+    say("vtree", "", 0);
+}
+
 static void names(const char *dir)
 {
     static const char *const n850[] = { "ÅRHUS.TXT", "ÉTÉ.TXT", "NIÑO.TXT", "ØL.TXT", 0 };
@@ -748,6 +825,8 @@ int main(int argc, char **argv)
         vlist();
     else if (!strcmp(what, "icons"))
         icons_page();
+    else if (!strcmp(what, "vtree"))
+        vtree();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

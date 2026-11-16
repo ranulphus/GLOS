@@ -1,0 +1,41 @@
+# The virtual tree (toolkit 2, step C3; docs/v1/toolkit-2.md 2): GUITEST's tree that keeps no texts. Nodes opened by
+# the arrows; one with five thousand children opened and its end gone to, the model asked only for the nodes on
+# the screen (counted by the app); badges at the rows' right ends; a node's children changed under it (a folder
+# more), what was open under it open still and the current node current still; Left closes and goes out.
+run GUITEST.EXE vtree
+wait "GUITEST Virtual tree"
+key down
+key right
+key down
+key right
+shot open "GUITEST Virtual tree"
+key alt+m
+key tab
+shot changed "GUITEST Virtual tree"
+key home
+key left
+key down
+key right
+key end
+key up
+shot five-thousand "GUITEST Virtual tree"
+key alt+a
+key tab tab
+key down
+key right
+key down
+shot badges "GUITEST Virtual tree"
+key left
+key left
+key enter
+shot closed "GUITEST Virtual tree"
+key alt+f4
+gone "GUITEST Virtual tree"
+expect GUI vtree
+expect GUI node 11
+expect GUI changed
+expect GUI node 2004999
+expect GUI asked for the nodes on the screen, not the tree
+expect GUI node 31
+expect GUI open node 3
+expect GUI end

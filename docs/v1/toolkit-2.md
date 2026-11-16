@@ -367,12 +367,20 @@ which and why. The apps keep working at every step (they move as the toolkit doe
   in a grid (the row's `big` icon, 32 pixels, or its small one in the middle), the first cell's text under
   each; the arrows move four ways; only the lines of icons on the screen are asked for. With more than one row
   to be chosen, a press on nothing held and moved is a rubber band that chooses the icons it touches.
-- **Still to come in C3:** columns reordered, type-ahead, small-icon and thumbnail views, the virtual tree, and
-  `gui_list` on top of the model.
+- **The virtual tree** (third part, 2026-11-16; `sdk/gui/vtree.c`, `struct gui_tmodel`: `children`, `node`):
+  the widget keeps the ids of the nodes on show, in their order; a node's children's ids are asked for when it
+  is opened (in pieces of 64), and its text, icon, badge and whether it has children when it is drawn, so a
+  folder of five thousand costs their ids when opened and a screen of texts. `gui_vtree_changed(w, id)` asks
+  for a node's children again; what was open under it and the current node are found by their ids. A badge is
+  a short text at the row's right end. Keys and the mouse as `gui_tree`'s.
+- **Still to come in C3:** columns reordered, type-ahead, small-icon and thumbnail views, and `gui_list` and
+  `gui_tree` on top of the models.
 - **Tests:** `vlist` (GUITEST's page: twenty rows, then ten thousand; End and Page Up; the app counts the
   distinct rows it was asked for, a few screens of ten thousand; sorted downward with the current row kept by
   its id; a range and a row more chosen; a column dragged wider; Enter; the icon view, the arrows in it, a
-  rubber band over nine icons, and back), on the host and on the desktop in Loop A.
+  rubber band over nine icons, and back), on the host and on the desktop in Loop A. `vtree` (GUITEST's page: nodes
+  opened by the arrows; one with five thousand children and its end; the nodes asked for counted; badges; a
+  node's children changed with a folder open under it; Left out and Enter).
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
