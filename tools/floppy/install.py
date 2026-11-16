@@ -190,6 +190,7 @@ def glos_files(args):
              ("build/glos/COMMAND.COM", "COMMAND.COM")]         # (GLOS's own, for programs that shell out: S4c)
     files += [("build/apps/%s.EXE" % a, a + ".EXE") for a in APPS + ["SSH", "SFTP", "SSHKEY"]]
     files += [("build/glos/CERTS.DAT", "CERTS.DAT"), ("sdk/gui/fonts/SMOOTH.DAT", "SMOOTH.DAT"),
+              ("sdk/gui/fonts/FONTS.DAT", "FONTS.DAT"),         # (the UI's small and large fonts: toolkit 2)
               ("build/glos/KEYS/PKG/GLOS.PUB", "KEYS/PKG/GLOS.PUB"),
               (os.path.join(args.keys, "HOSTKEY"), "KEYS/HOSTKEY"), (os.path.join(args.keys, "AUTHKEYS"), "KEYS/AUTHKEYS")]
     missing = [src for src, _ in files if not os.path.exists(os.path.join(ROOT, src))]

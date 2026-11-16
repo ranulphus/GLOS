@@ -562,6 +562,8 @@ int glos_theme(struct glos_theme *t)
         t->colour[i] = th->colour[i];
     t->border = th->border, t->title = th->title, t->bar = th->bar, t->scroll = th->scroll, t->icon = th->icon;
     t->text = th->text;
+    if (config_get("desktop", "text", v, sizeof v) >= 0)        /* ([desktop] text: the UI's text size) */
+        t->text = !strcmp(v, "small") ? 0 : !strcmp(v, "large") ? 2 : 1;
     return 0;
 }
 
@@ -1090,10 +1092,18 @@ static int step(void)
         } else if (!strcmp(cmd, "pause")) {
             H.clock += (unsigned)atoi(word(&p, b, sizeof b) ? b : "0");
             return 1;
-        } else if (!strcmp(cmd, "theme")) {     /* theme NAME: the desktop's theme changes under the app */
+        } else if (!strcmp(cmd, "theme") || !strcmp(cmd, "text")) {     /* theme NAME, text SIZE: the desktop's
+                                                   theme, or its text size, changes under the app */
             struct hev e;
-            if (!word(&p, b, sizeof b) || !(shim_theme = theme_find(b)))
+            char why[160];
+            if (!word(&p, b, sizeof b))
+                fail("%s: what?", cmd);
+            if (!strcmp(cmd, "text")) {
+                if (config_set("desktop", "text", b, why, sizeof why) < 0)
+                    fail("text: %s", why);
+            } else if (!(shim_theme = theme_find(b))) {
                 fail("theme: no such theme");
+            }
             memset(&e, 0, sizeof e);
             e.type = HEV_THEME;
             e.time = H.clock;

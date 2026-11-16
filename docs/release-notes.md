@@ -4,6 +4,16 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Themes in the apps, and three text sizes (toolkit 2, 2026-11-16)
+
+- **The apps follow the desktop's theme** (`[desktop] theme = slate | dark | contrast`): windows' contents are
+  drawn in the theme's colours, and change with it while they run. Until now only the window frames and the task
+  bar did.
+- **`[desktop] text = small | normal | large`** sets the size of the text in windows, menus and dialogs, at once.
+  The small and large fonts are in a new file, `FONTS.DAT`, which goes beside the programs with `SMOOTH.DAT`
+  (copy it when updating; without it the text stays at the normal size).
+- The shell's `VER` says the API's version as it is (2.3; it said 2.1).
+
 ## The shell runs batch files itself (S4a, 2026-11-16)
 
 - **GLOS's shell runs `.BAT` files**, at an SSH login, in the Terminal and at the PC's own prompt: `IF`, `GOTO`,

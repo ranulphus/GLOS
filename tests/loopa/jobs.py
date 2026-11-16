@@ -6786,10 +6786,10 @@ class GuiDriver:
                 time.sleep(int(args[0]) / 1000.0)
             elif cmd == "same":                 # (the host's check of two of its goldens: both are compared here)
                 pass
-            elif cmd == "theme":                # the desktop's theme changed under the app (toolkit 2, C1a)
-                self.agent.ssh("glos config set desktop theme %s" % args[0])
-                if ("desktop", "theme") not in self.unset:
-                    self.unset.append(("desktop", "theme"))
+            elif cmd in ("theme", "text"):      # the desktop's theme, or its text size, changed under the app
+                self.agent.ssh("glos config set desktop %s %s" % (cmd, args[0]))        # (toolkit 2, C1a, C1b)
+                if ("desktop", cmd) not in self.unset:
+                    self.unset.append(("desktop", cmd))
                 time.sleep(1)
             elif cmd == "launch":               # Ctrl+Esc: the launcher, the shell's; its menu then
                 self.agent.ssh("glos key 0x1D:down,0.05:0x01,0.2:0x1D:up")
@@ -9163,7 +9163,8 @@ def gui_case(profile, vcard, card, bits, scripts=None, files=None, tag_prefix="g
     GUITESTs copying and pasting between them through the clipboard, and glos clip."""
     import time
     tag = "%s-%s-%d" % (profile, vcard, bits)
-    files = (files or ["build/dj/GUITEST.EXE=/TEST/GUITEST.EXE"]) + ["sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT"]
+    files = (files or ["build/dj/GUITEST.EXE=/TEST/GUITEST.EXE"]) + ["sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT",
+                                                                         "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT"]
     extra = []
     for f in files:
         extra += ["--file", f]

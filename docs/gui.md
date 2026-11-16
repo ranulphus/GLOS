@@ -178,7 +178,17 @@ programs' output and its title) all go through these. A file's text in Notepad s
 **Smoothed text** (`[display] font_smoothing`, off by default; when a program next starts). With it on,
 `gui_init` reads `SMOOTH.DAT` from the program's folder (on the host, drive C's GLOS folder). Its glyphs are the
 same ones in the same order, made anti-aliased by FreeType from the same DejaVu files when the 1-bit fonts are
-made (`make fonts`, `tools/mkfont.py --smooth`): 4-bit coverage, 129 KB for the three fonts.
+made (`make fonts`, `tools/mkfont.py --smooth`): 4-bit coverage, 400 KB for the nine fonts (three sizes), of which
+a program reads the three in force.
+
+**Three sizes** (toolkit 2, step C1b; `[desktop] text = small | normal | large`, at once: GLOS tells every app as
+for a theme). The normal size (DejaVu at 11 pixels, 14 rows) is built into each program. The small and the
+large one (9 and 14 pixels; 12 and 17 rows) are in `FONTS.DAT` beside the program (112 KB; `tools/mkfont.py
+--chunk`), read when the theme's text size asks for them; without the file the normal size stays. `gui_font`,
+`gui_bold` and `gui_mono` are the same three objects from `gui_init` on, whose contents are the size in force,
+so a widget that keeps one keeps "the UI's font". The toolkit's heights follow the font (a button its height
+and 8, a field 6, a row 2), a tab has room for its title in bold, and a scroll bar's width is the theme's
+(`GUI_SB`); with the normal size every widget is the size it always was.
 
 `gfx_smooth` hands them to the 2D library, which blends them at 16 and 32 bits (integer sums, the same on host and
 DOS). At 8 bits the text stays 1-bit. Pens still move by the 1-bit font's advances, so smoothed text takes exactly

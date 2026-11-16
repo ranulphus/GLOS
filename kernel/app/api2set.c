@@ -208,6 +208,11 @@ static int theme(struct trapframe *tf)
     q.scroll = t->scroll;
     q.icon = t->icon;
     q.text = t->text;
+    {                                           /* [desktop] text: the UI's text size, whatever the theme */
+        char v[8];
+        if (kcfg_get("desktop", "text", v, sizeof v) >= 0)
+            q.text = same(v, "small") ? 0 : same(v, "large") ? 2 : 1;
+    }
     return a2_wr(tf, &q, sizeof q, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 }
 
@@ -292,7 +297,7 @@ static void tell(struct app *a, void *arg)
 
 static void changed(const char *section, const char *key, const char *value)
 {
-    struct news n = { section, key, same(section, "desktop") && same(key, "theme") };
+    struct news n = { section, key, same(section, "desktop") && (same(key, "theme") || same(key, "text")) };
     (void)value;
     app_each(tell, &n);
     api2_shell_changed(section);                /* (a program's profile: the Start menu's entries, the shell's) */

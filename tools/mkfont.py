@@ -4,6 +4,7 @@
 build time from open TrueType fonts).
 
   mkfont.py TTF PIXELS NAME [--first N] [--last N] [--ranges A-B,C,...] [--smooth OUT] > kernel/gfx/fonts/NAME.c
+  mkfont.py TTF PIXELS NAME ... --chunk OUT --size N [--smooth OUT]      (no C: a chunk of FONTS.DAT)
 
 FreeType renders each code point without anti-aliasing, with the font's own
 hinting (Pillow's ImageFont in mode "1"). The glyph table has an entry for
@@ -21,7 +22,20 @@ the font's name (32 bytes, NUL-padded, as struct gfx_font has it), the
 glyphs' number and the coverage's bytes (u32 each), then a glyph's offset
 (u32), width (u8) and left edge (s8) and two zero bytes for each, and the
 coverage: `height` rows of (width + 1) / 2 bytes, the high nibble leftmost.
-`make fonts` joins the three after "GLOSAA1\n" as sdk/gui/fonts/SMOOTH.DAT.
+`make fonts` joins the nine (three fonts at three sizes) after "GLOSAA1\n" as
+sdk/gui/fonts/SMOOTH.DAT.
+--chunk (toolkit 2, step C1b) writes the 1-bit font as data instead of C: the
+UI's small and large sizes, which the toolkit reads from FONTS.DAT beside the
+program when the theme's text size is not the normal one (sdk/gui/fonts.c).
+The chunk, little-endian: the font's name (32 bytes), NAME (8 bytes: ui, bold
+or mono), --size (u32: 0 small, 2 large), height and ascent (u8 each), the
+first code point, their count, the missing glyph's index, the number of
+ranges and a zero (u16 each), the glyphs' number and the bitmaps' bytes (u32
+each); then for each glyph its offset (u32), width, advance (u8), left edge
+(s8) and a zero byte; for each range its first code point, count, first
+glyph and a zero (u16 each); and the bitmaps, padded to four bytes.
+`make fonts` joins them after "GLOSFN1\n" as sdk/gui/fonts/FONTS.DAT.
+
 Runs on the host: it needs python3-pil. `make fonts` runs it for the fonts
 the kernel has."""
 import argparse
@@ -97,6 +111,8 @@ def main():
     ap.add_argument("--last", type=lambda s: int(s, 0), default=0xFF)
     ap.add_argument("--ranges", default="", help="more code points: 0x370-0x3FF,0x20AC,...")
     ap.add_argument("--smooth", help="the glyphs anti-aliased too, as a chunk of sdk/gui/fonts/SMOOTH.DAT, into this file")
+    ap.add_argument("--chunk", help="the font as a chunk of sdk/gui/fonts/FONTS.DAT, into this file, and no C")
+    ap.add_argument("--size", type=int, default=1, help="with --chunk: 0 small, 2 large")
     a = ap.parse_args()
     more = []
     for part in filter(None, a.ranges.split(",")):
@@ -141,6 +157,20 @@ def main():
         table.append((len(bits), w, adv, left))
         for r in rows:
             bits += r
+    if a.chunk:
+        blob = ("%s %s %d" % (family, style, a.pixels)).encode().ljust(32, b"\0") + a.name.encode().ljust(8, b"\0")
+        blob += struct.pack("<IBBHHHHHII", a.size, height, ascent, a.first, a.last - a.first + 1, len(table) - 1,
+                            len(more), 0, len(table), len(bits))
+        for at, w, adv, left in table:
+            blob += struct.pack("<IBBbB", at, w, adv, left, 0)
+        at = a.last - a.first + 1
+        for lo, hi in more:
+            blob += struct.pack("<HHHH", lo, hi - lo + 1, at, 0)
+            at += hi - lo + 1
+        blob += bytes(bits) + b"\0" * (-len(bits) % 4)
+        with open(a.chunk, "wb") as f:
+            f.write(blob)
+        return
     out = sys.stdout
     out.write("/* %s %s at %d pixels: a 1-bit font for the 2D library (kernel/include/gfx.h).\n" % (family, style, a.pixels))
     out.write(" * Made by tools/mkfont.py from %s\n * (SHA-256 %s);\n" % (os.path.basename(a.ttf), digest))

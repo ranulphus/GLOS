@@ -1,0 +1,17 @@
+# Text sizes (toolkit 2, step C1b): the UI's text size changed under a running app ([desktop] text). GLOS tells the
+# app as for a theme; the toolkit puts the size's fonts in force (FONTS.DAT), lays every window out again and
+# draws it; and at the normal size again the picture is the first one.
+run GUITEST.EXE gallery
+wait "GUITEST Gallery"
+key tab tab
+shot normal "GUITEST Gallery"
+text large
+shot large "GUITEST Gallery"
+text small
+shot small-text "GUITEST Gallery"
+text normal
+shot normal-again "GUITEST Gallery"
+same normal normal-again
+key alt+f4
+gone "GUITEST Gallery"
+expect GUI end

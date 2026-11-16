@@ -384,7 +384,7 @@ int gui_clip_set(const char *text, size_t n);
 char *gui_clip_get(size_t *n);          /* malloc'd (NUL after), or NULL */
 
 /* ---- scroll bars, for widgets of an app's own (a part of the widget that has one) */
-#define GUI_SB 14                       /* a scroll bar's width */
+#define GUI_SB (gui_theme.scroll)        /* a scroll bar's width: the theme's (14 in the built-in ones) */
 struct gui_sb {
     int pos, page, total;               /* the first unit shown, how many show, how many there are */
     struct gfx_rect r;                  /* the bar (empty: none) */

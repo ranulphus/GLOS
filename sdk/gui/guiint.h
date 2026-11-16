@@ -8,16 +8,20 @@
 
 #define GUI_PAD      6                  /* a window's edge to its widgets */
 #define GUI_GAP      6                  /* between widgets */
-#define GUI_BTN_H    22
-#define GUI_BTN_W    72                 /* a button's width at least */
-#define GUI_FIELD_H  20
-#define GUI_ROW_H    16                 /* a list's row, a tree's, a menu's item less its gap */
+/* Heights by the UI font's (toolkit 2, C1b): with the normal size (14 rows) these are the 22, 20 and 16 pixels
+   they always were; the small and the large size (12 and 17 rows) make them smaller and larger. */
+#define GUI_BTN_H    (gui_font->height + 8)
+#define GUI_BTN_W    (gui_font->height * 5 + 2) /* a button's width at least (72) */
+#define GUI_FIELD_H  (gui_font->height + 6)
+#define GUI_ROW_H    (gui_font->height + 2)     /* a list's row, a tree's, a menu's item less its gap */
 #define GUI_DBLCLICK 500                /* milliseconds (step B makes it a setting) */
 
 /* Classes the toolkit's files share. */
 extern const struct gui_class gui_box_class, gui_label_class, gui_button_class, gui_menubar_class, gui_status_class,
     gui_field_class, gui_tabs_class;
-void gui_smooth_start(const char *argv0);       /* (smooth.c) [display] font_smoothing: SMOOTH.DAT's coverage */
+void gui_fonts_start(const char *argv0);        /* (fonts.c) the UI's fonts of the theme's text size, and with
+                                                   [display] font_smoothing their coverage (SMOOTH.DAT) */
+void gui_fonts_apply(void);                     /* ... again, the theme having changed */
 void gui_field_changed(struct gui_widget *w);          /* its text was set: the caret at its end */
 void gui_tabs_step(struct gui_widget *tabs, int by);
 

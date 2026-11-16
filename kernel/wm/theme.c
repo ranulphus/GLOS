@@ -5,7 +5,8 @@
 #include "glos/api.h"
 #include "theme.h"
 
-#define SIZES 1, 18, 10, 20, 16, 16, 1  /* border, title, box, bar, scroll, icon, text */
+#define SIZES 1, 18, 10, 20, 14, 16, 1  /* border, title, box, bar, scroll, icon, text (scroll: 14 as the toolkit
+                                           has always drawn it; it said 16 until the toolkit read it, C1b) */
 
 const struct theme themes[] = {
     { "slate", 0, {

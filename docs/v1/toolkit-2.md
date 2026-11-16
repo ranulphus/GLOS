@@ -290,6 +290,25 @@ which and why. The apps keep working at every step (they move as the toolkit doe
   About box) and `theme-change` (Slate, dark, high contrast with a dialog open, and Slate again: the first
   picture), on the host and played on the desktop in Loop A.
 
+### C1b as built (2026-11-16)
+
+- **Sizes:** small 9, normal 11, large 14 pixels (DejaVu Sans, Bold and Mono each). The normal ones stay built
+  into every program; the others are data, `FONTS.DAT` beside the program (112 KB), so a program pays for them
+  only when they are in force. `SMOOTH.DAT` has all nine's coverage (400 KB); a program reads its three.
+- **`[desktop] text = small | normal | large`** (the Control Panel's Desktop page), in force at once: the
+  kernel's THEME answers with it and tells the apps as for a theme change. The toolkit swaps the fonts' contents
+  (`sdk/gui/fonts.c`, which took `smooth.c`'s place), lays every window out again and draws it.
+- **Metrics by the font:** button, field, row and tab heights and a button's least width are the font's height
+  and a margin; a scroll bar's width is the theme's (14 in the built-in themes: the kernel's table said 16, which
+  nothing had read). A tab is as wide as its title in bold needs.
+- **Pictures that changed at the normal size:** the Control Panel's (its Desktop page has the new setting; its
+  tabs are a pixel or two wider for their bold titles). Everything else is byte for byte as before.
+- **Not yet by the font:** check boxes and radio buttons (13 pixels), the tree's indent, big icons' cells, the
+  windows' own sizes where an app gives them in pixels (the gallery's 440x330 holds the large size). Those go
+  with the widgets' own steps.
+- **Tests:** `text-small`, `text-large` (the gallery's pages, a menu, the About box) and `text-change` (normal,
+  large, small and normal again: the first picture), on the host and on the desktop in Loop A.
+
 ## Settled at the owner's review (2026-11-06)
 
 1. **Fonts:** the UI's fonts stay bitmaps made at build time, in three sizes (small, normal, large), each with its

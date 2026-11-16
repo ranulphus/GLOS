@@ -49,7 +49,7 @@ struct glos_theme gui_theme = {
       [GLOS_ROLE_CODE_KEYWORD] = 0x0033CC, [GLOS_ROLE_CODE_STRING] = 0x006633, [GLOS_ROLE_CODE_COMMENT] = 0x666666,
       [GLOS_ROLE_CODE_NUMBER] = 0x993300, [GLOS_ROLE_CODE_TYPE] = 0x660099, [GLOS_ROLE_CODE_DIRECTIVE] = 0x996600,
       [GLOS_ROLE_ERROR] = 0xCC0000, [GLOS_ROLE_GOOD] = 0x006633 },
-    1, 18, 20, 16, 16, 1 };
+    1, 18, 20, 14, 16, 1 };
 
 static void theme_read(void)
 {
@@ -74,8 +74,8 @@ int gui_init(int argc, char **argv)
         return -1;
     if (glos_setting_get("input", "double_click", v, sizeof v, 0) == 0 && atoi(v) >= 200 && atoi(v) <= 1000)
         dblclick = (unsigned)atoi(v);
-    gui_smooth_start(argc > 0 ? argv[0] : NULL);
     theme_read();
+    gui_fonts_start(argc > 0 ? argv[0] : NULL);
     return 0;
 }
 
@@ -1305,6 +1305,7 @@ int gui_step(unsigned wait_ms)
         else if (how == 0 && u.ev.kind == GLOS_EV_THEME) {       /* the theme changed: every window laid out and
                                                                    drawn again in it; then the app's own turn */
             theme_read();
+            gui_fonts_apply();
             for (w = G.wins; w; w = w->next) {
                 struct gfx_rect all = { 0, 0, w->w, w->h };
                 gui_relayout(w);

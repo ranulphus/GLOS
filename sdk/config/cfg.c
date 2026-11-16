@@ -116,6 +116,8 @@ const struct cfg_key cfg_schema[] = {
       "Programs started when the desktop starts, beside GLOS.EXE (FILES.EXE draws the desktop's icons)" },
     { "desktop", "snap", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "S&nap windows at the screen's edges",
       "A window dragged to the screen's top fills it; dragged to a side, it fills that half" },
+    { "desktop", "text", CFG_CHOICE, CFG_NOW, 0, 0, "small|normal|large", "normal", "Te&xt size",
+      "The size of the text in windows, menus and dialogs: every program lays its windows out again" },
     { "desktop", "theme", CFG_CHOICE, CFG_NOW, 0, 0, "slate|dark|contrast", "slate", "&Theme",
       "The desktop's colours: Slate, a dark one, or one of the strongest contrast" },
     /* [saver]: the screen saver and the screen's power (API 2.0 step 5; kernel/wm/idle.c) */

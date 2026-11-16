@@ -727,11 +727,15 @@ struct tabs {
     struct gui_sb sb;                   /* GUI_TABS_LIST taller than its room: its scroll bar */
 };
 
-#define TAB_H    22
+#define TAB_H    (gui_font->height + 8)  /* (22 with the normal font) */
 #define TAB_LINE (TAB_H - 1)            /* GUI_TABS_LIST: a title's height in the list */
 #define TABS_MAX 64                     /* titles placed (more are neither drawn nor clicked) */
 
-static int tab_w(struct gui_widget *c) { return gui_text_w(gui_font, gui_get_text(c)) + 16; }
+static int tab_w(struct gui_widget *c)          /* (room for the title in bold too, as the chosen tab has it) */
+{
+    int plain = gui_text_w(gui_font, gui_get_text(c)) + 16, bold = gui_text_w(gui_bold, gui_get_text(c)) + 10;
+    return plain > bold ? plain : bold;
+}
 
 /* GUI_TABS_SCROLL with more than fits: the arrows' room at the strip's right. */
 static int tabs_arrows(struct tabs *t, int gw)

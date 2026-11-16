@@ -63,7 +63,7 @@ floppy emulator takes the file). Leave the floppy write-enabled: GLOS keeps its 
    starts GLOS from the disk and answers as `NAME.local` to the same keys.
 
 What is on the disk then: `C:\GLOS` with `GLOS.EXE`, `GLOSK.BIN`, `COMMAND.COM` (GLOS's own), the programs,
-`CERTS.DAT`, `SMOOTH.DAT`,
+`CERTS.DAT`, `SMOOTH.DAT`, `FONTS.DAT`,
 `GLOS.CFG` and `KEYS\` (the host key, `AUTHKEYS`, the package key). GLOS runs without its desktop until
 `[display]` in `GLOS.CFG` says otherwise (`glos display on`, the Control Panel).
 

@@ -201,7 +201,7 @@ gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS))
 	@rm -rf build/host/gui build/host/gui-drives && mkdir -p build/host/gui
 	@set -e; for t in $(GUI_SCRIPTS); do n=$$(basename $$t .txt); prog=$$(awk '$$1=="run"{print tolower($$2); exit}' $$t); \
 	  prog=$${prog%.exe}; mkdir -p build/host/gui/$$n; for b in 8 16 32; do rm -rf build/host/gui-drives; \
-	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT build/host/gui-drives/C/GLOS/; \
+	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT sdk/gui/fonts/FONTS.DAT build/host/gui-drives/C/GLOS/; \
 	    mkdir -p build/host/gui-drives/A build/host/gui-drives/C/HX build/host/gui-drives/C/OUT build/host/gui-drives/C/TEST; \
 	    GLOS_HOST_DRIVES=build/host/gui-drives build/host/$$prog $$t build/host/gui/$$n $$b > build/host/gui/$$n-$$b.log \
 	      || { echo "gui-goldens: $$n at $$b bits:"; cat build/host/gui/$$n-$$b.log; exit 1; }; done; \
@@ -231,7 +231,18 @@ fonts:
 	  --smooth build/fonts/bold.aa > kernel/gfx/fonts/bold.c
 	$(Q)python3 tools/mkfont.py $(FONT_DIR)/DejaVuSansMono.ttf 11 mono --last 0x17F --ranges $(FONT_TEXT),$(FONT_437) \
 	  --smooth build/fonts/mono.aa > kernel/gfx/fonts/mono.c
-	$(Q){ printf 'GLOSAA1\n'; cat build/fonts/ui.aa build/fonts/bold.aa build/fonts/mono.aa; } > sdk/gui/fonts/SMOOTH.DAT
+	$(Q)for z in "0 9" "2 14"; do set -- $$z; \
+	  python3 tools/mkfont.py $(FONT_DIR)/DejaVuSans.ttf $$2 ui --last 0x17F --ranges $(FONT_TEXT),$(FONT_SIGNS) \
+	    --smooth build/fonts/ui$$1.aa --chunk build/fonts/ui$$1.fn --size $$1 || exit 1; \
+	  python3 tools/mkfont.py $(FONT_DIR)/DejaVuSans-Bold.ttf $$2 bold --last 0x17F --ranges $(FONT_TEXT),$(FONT_SIGNS) \
+	    --smooth build/fonts/bold$$1.aa --chunk build/fonts/bold$$1.fn --size $$1 || exit 1; \
+	  python3 tools/mkfont.py $(FONT_DIR)/DejaVuSansMono.ttf $$2 mono --last 0x17F --ranges $(FONT_TEXT),$(FONT_437) \
+	    --smooth build/fonts/mono$$1.aa --chunk build/fonts/mono$$1.fn --size $$1 || exit 1; done
+	$(Q){ printf 'GLOSFN1\n'; cat build/fonts/ui0.fn build/fonts/bold0.fn build/fonts/mono0.fn \
+	  build/fonts/ui2.fn build/fonts/bold2.fn build/fonts/mono2.fn; } > sdk/gui/fonts/FONTS.DAT
+	$(Q){ printf 'GLOSAA1\n'; cat build/fonts/ui.aa build/fonts/bold.aa build/fonts/mono.aa \
+	  build/fonts/ui0.aa build/fonts/bold0.aa build/fonts/mono0.aa \
+	  build/fonts/ui2.aa build/fonts/bold2.aa build/fonts/mono2.aa; } > sdk/gui/fonts/SMOOTH.DAT
 
 # The SSH layer (kernel/ssh) on host sockets against OpenSSH's client
 # (tests/host/sshd_test.sh): native, on the host, which has ssh.
