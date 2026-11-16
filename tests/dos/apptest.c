@@ -181,7 +181,14 @@ static int uclk(int seconds)
     t = glos_ticks() - t0;
     ms = (unsigned)((u - u1) * 1000 / UCLOCKS_PER_SEC);        /* the least of GLOS's span uclock() can have seen */
     ms2 = (unsigned)((uclock() - u0) * 1000 / UCLOCKS_PER_SEC);     /* and the most */
-    if (back || u < last || t + 60 < ms || t > ms2 + 60)       /* (60 ms: a BIOS tick, and the ms's rounding) */
+    if (back || u < last || t + 70 < ms || t > ms2 + 70)       /* (70 ms: a BIOS tick, 55 ms, which uclock() is out
+                                                   by when the BIOS's count is read before the tick the counter
+                                                   has already begun: measured 2026-11-16, alone the two clocks
+                                                   agree to the millisecond over 4, 16 and 32 s, and of two apps
+                                                   at once one is out by 55 or 56 now and then; the rest is the
+                                                   ms's rounding and GLOS's clock a few ticks behind until the
+                                                   PC's timer next checks it on a busy 486. 60 left 5 ms for
+                                                   that, and failed with 62 to 64 three times in three days) */
         fails++;
     printf("%s ms=%u..%u clock=%u reads=%u back=%u\n", fails ? "APP-UCLOCK-FAIL" : "APP-UCLOCK-OK", ms, ms2, t, n, back);
     return fails ? 1 : 0;
