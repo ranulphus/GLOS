@@ -247,6 +247,14 @@ static void do_connect(void *arg)
     if (!(s->flags & GLOS_NETF_NAGLE))
         tcp_nagle_disable(pcb);
     s->pcb = pcb;
+    {                                           /* (to a PC on this one's cable: from the card's address, as above) */
+        u32 src = 0;
+        ip_addr_t from;
+        if (member_source(ip4_addr_get_u32(ip_2_ip4(&s->ip)), &src)) {
+            ip_addr_set_ip4_u32(&from, src);
+            tcp_bind(pcb, &from, 0);
+        }
+    }
     if (tcp_connect(pcb, &s->ip, s->port, on_connected) != ERR_OK) {
         tcp_arg(pcb, NULL);
         tcp_abort(pcb);
@@ -433,7 +441,13 @@ static void dgram_poll(struct sock *s)
         ring_get(s->tx, s->tx_out, &h, DG_HDR);
         ip_addr_set_ip4_u32(&to, h.addr);
         if ((p = dg_pbuf(s, h.len)) != 0) {
-            udp_sendto(s->upcb, p, &to, h.port);        /* (no route, no room in the card: lost, as UDP allows) */
+            if ((too = member_source(h.addr, &src)) != 0) {     /* (to a PC on this one's cable: from the address
+                                                           the network knows this PC by, not the cable's own) */
+                ip_addr_set_ip4_u32(&from, src);
+                udp_sendto_if_src(s->upcb, p, &to, h.port, too, &from);
+            } else {
+                udp_sendto(s->upcb, p, &to, h.port);    /* (no route, no room in the card: lost, as UDP allows) */
+            }
             pbuf_free(p);
         }
         if ((too = member_own_broadcast(h.addr, h.len, &src)) != 0 && (p = dg_pbuf(s, h.len)) != 0) {

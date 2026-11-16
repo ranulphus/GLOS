@@ -271,6 +271,19 @@ struct netif *member_own_broadcast(u32 dest, u32 len, u32 *src)
     return cable;
 }
 
+/* A packet of this PC's own for a member goes down its cable (member_route), and lwIP would give it the cable
+   interface's address as its source: the pair's private one, which no other PC of the network knows this PC
+   by. The cable's interface if dest is a member, and the card's address for the packet to come from: this PC is
+   one PC on the network, whichever way a packet leaves it. (Echoes of the Void's two-PC test, 2026-11-16: the
+   far PC found the near one's game "at 192.168.250.1".) */
+struct netif *member_source(u32 dest, u32 *src)
+{
+    if (!card || !cable || !sharing() || !by_ip(dest))
+        return 0;
+    *src = ip4_addr_get_u32(netif_ip4_addr(card));
+    return cable;
+}
+
 int member_cable_mac(u32 ip, u8 mac[6])
 {
     struct member *m = by_ip(ip);

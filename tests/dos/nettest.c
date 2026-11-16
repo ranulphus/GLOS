@@ -585,6 +585,11 @@ static int udpserve(int argc, char **argv)
         heard++;
         if (r == 4 && !memcmp(buf, "quit", 4))
             break;
+        if (r == 5 && !memcmp(buf, "from?", 5)) {       /* (the address it was asked from, for the asker to check) */
+            const char *t = ip_text(from);
+            glos_net_sendto(h, t, strlen(t), 500, from, fport);
+            continue;
+        }
         memcpy(out, "re:", 3);
         memcpy(out + 3, buf, (unsigned)r);
         glos_net_sendto(h, out, (unsigned)r + 3, 500, from, fport);
@@ -624,6 +629,17 @@ static int udpfind(int argc, char **argv)
         r = glos_net_recvfrom(ask, back, sizeof back, 8000, 0, 0, &len);
         report("find-long", r == 1403 && len == 1403 && !memcmp(back, "re:", 3) && !memcmp(back + 3, big, sizeof big),
                "r=%d length=%u", r, len);
+    }
+    if (server) {                                       /* this PC's packets reach it from the address the network
+                                                           knows this PC by (its card's), not the cable's own */
+        struct glos_net_if nif[4];
+        unsigned count = 0;
+        glos_net_state(nif, sizeof nif, &count);
+        glos_net_sendto(ask, "from?", 5, 1000, server, port);
+        r = glos_net_recvfrom(ask, buf, sizeof buf - 1, 3000, 0, 0, 0);
+        buf[r > 0 ? r : 0] = 0;
+        report("find-source", count > 0 && r > 0 && !strcmp(buf, ip_text(nif[0].address)), "seen=%s mine=%s", buf,
+               count ? ip_text(nif[0].address) : "?");
     }
     r = glos_net_recvfrom(hear, buf, sizeof buf - 1, 5000, &from, &fport, 0);
     buf[r > 0 ? r : 0] = 0;

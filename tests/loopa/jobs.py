@@ -2439,13 +2439,15 @@ def member_case(profile, card, par=False):
         checks["udp-found"] = ("NETTEST find-reply ok from=%s " % ip) in o
         checks["udp-announced"] = ("NETTEST find-announce ok from=%s " % ip) in o
         checks["udp-long"] = "NETTEST find-long ok " in o      # (1400 bytes each way: in fragments over the cable)
+        checks["udp-source"] = "NETTEST find-source ok seen=10.0.2.15 " in o      # (the near PC's packets to the far one
+                                                                                 # come from its address on the network)
         # NET's STATE on each PC: the near one's card and its cable link; the far one's cable link alone, with the
         # address the network gave it (its announcement says so)
         link = "2:LPT1" if par else "1:COM2"
         checks["ifs-near"] = bool(re.search(r"NETTEST find-ifs ok n=2 ifs=0:\w+:10\.0\.2\.15:3,%s:192\.168\.250\.1:1\b" % link, o))
         checks["ifs-far"] = bool(re.search(r"NETTEST find-announce ok .* ifs=%s:%s:3\b" % (link, re.escape(ip)), o))
         checks["udp-ended"] = bool(until(lambda: re.search(r"GLOS-APP end id=\d+ prog=NETTEST\.EXE code=0", flog()), 30))
-        if not all(checks[k] for k in ("udp-found", "udp-announced", "udp-long", "udp-ended", "ifs-near", "ifs-far")):
+        if not all(checks[k] for k in ("udp-found", "udp-announced", "udp-long", "udp-source", "udp-ended", "ifs-near", "ifs-far")):
             info += " udp=%r far-tail=%r" % (o[-300:], flog().split("\n")[-5:])
         if not all(checks.values()):
             info += " asked=%d cable=%r near=%r far=%r net=%r" % (ntp.asked, seen[-24:], [l for l in near.log().split("\n") if "member" in l or "cable" in l][-4:],
