@@ -382,6 +382,9 @@ struct gui_menu *gui_menu_new(void);    /* for gui_popup_menu */
 void gui_menu_item(struct gui_menu *m, const char *text, int id, const char *shortcut);  /* "Ctrl+S", "F3", "Del" */
 void gui_menu_command(struct gui_menu *m, int id);      /* an item that shows the window's command of that id */
 void gui_menu_sep(struct gui_menu *m);
+struct gui_menu *gui_menu_sub(struct gui_menu *m, const char *text);   /* an item that opens a menu of its own
+                                           beside it (Right or Enter, the mouse; Left or Esc closes it): that menu,
+                                           to be filled. It is freed with m */
 void gui_menu_clear(struct gui_menu *m);               /* its items gone */
 void gui_menu_free(struct gui_menu *m);                /* a gui_menu_new one, gone */
 void gui_menu_enable(struct gui_menu *m, int id, int on);

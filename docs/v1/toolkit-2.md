@@ -339,7 +339,11 @@ which and why. The apps keep working at every step (they move as the toolkit doe
 - **The status bar's sections** (`gui_status_section`, `gui_status_set`, `gui_status_progress`): at its right
   end, each as wide as it is made, with a text, an icon before it, or a small progress bar; the bar's own text
   has what they leave.
-- **Still to come in C2:** submenus, drop-down buttons and fields in the toolbar.
+- **Submenus** (`gui_menu_sub(menu, text)`): an item with an arrow that opens a menu of its own beside it (to
+  the left at the screen's edge), by Right, Enter or its letter, or the mouse; Left or Esc closes it and the
+  menu it came from has the keyboard again; three deep at most. The open menus are a stack in `menu.c`; a
+  choice closes them all.
+- **Still to come in C2:** drop-down buttons and fields in the toolbar (with the combo box, C6).
 - **Tests:** `commands` (GUITEST's commands page: the menus with icons, a tick and a dot; the update hook
   greying Paste until Copy; a button pressed, a toggle held in, shortcuts; texts on the toolbar; the window
   made narrow and the overflow's menu; a list's context menu by the mouse and by Shift+F10; the status bar's

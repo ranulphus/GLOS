@@ -21,6 +21,7 @@ struct item {
     int bound;                          /* it shows the owner's command of its id (gui_menu_command): the rest is
                                            the command's, looked up when the menu opens */
     int radio;                          /* checked: a dot (one of a group) */
+    struct gui_menu *sub;               /* a submenu it opens (gui_menu_sub), or NULL */
     const unsigned char *icon;          /* the command's (GUI_ICON_W), or NULL */
 };
 
@@ -47,7 +48,18 @@ static struct {
     int hot;                            /* the item under the pointer or the arrows */
     unsigned closed_at;                 /* when it last went (a press on its title then closes, not opens) */
     int closed_from;
-} M = { NULL, NULL, NULL, NULL, NULL, -1, 0, -1 };
+    int sx, sy, sw;                     /* where the pop-up is on the screen, and how wide */
+} M = { NULL, NULL, NULL, NULL, NULL, -1, 0, -1, 0, 0, 0 };
+
+/* Submenus (toolkit 2, step C2): M is the deepest menu open; the menus it was opened from, each still showing,
+   are under it, the first opened first. */
+#define SUB_MAX 3
+static struct under {
+    struct gui_window *popup;
+    struct gui_menu *menu;
+    int hot, sx, sy, sw;
+} U[SUB_MAX];
+static int nunder;
 
 #define SEP_H 7
 
@@ -157,14 +169,31 @@ void gui_menu_clear(struct gui_menu *m)
     for (k = 0; k < m->n; k++) {
         free(m->items[k].text);
         free(m->items[k].shortcut);
+        if (m->items[k].sub)
+            gui_menu_free(m->items[k].sub);
     }
     m->n = 0;
 }
 
+struct gui_menu *gui_menu_sub(struct gui_menu *m, const char *text)
+{
+    struct gui_menu *sub = gui_menu_new();
+    struct item *it = add(m);
+    it->text = strdup(text);
+    it->mnemonic = mnemonic_of(text);
+    it->id = -1;
+    it->sub = sub;
+    return sub;
+}
+
 void gui_menu_free(struct gui_menu *m)
 {
+    int k;
     if (M.menu == m)
         gui_popdown_all();
+    for (k = 0; k < nunder; k++)
+        if (U[k].menu == m)
+            gui_popdown_all();
     gui_menu_clear(m);
     free(m->items);
     free(m->title);
@@ -305,13 +334,10 @@ static int bar_event(struct gui_widget *w, struct gui_ev *e)
 static void bar_destroy(struct gui_widget *w)
 {
     struct gui_menubar *b = (struct gui_menubar *)w;
-    int i, k;
+    int i;
     for (i = 0; i < b->n; i++) {
         struct gui_menu *m = b->menus[i];
-        for (k = 0; k < m->n; k++) {
-            free(m->items[k].text);
-            free(m->items[k].shortcut);
-        }
+        gui_menu_clear(m);
         free(m->items);
         free(m->title);
         free(m);
@@ -390,9 +416,27 @@ static int item_at(struct gui_menu *m, int y)
     return -1;
 }
 
+/* The open menu a pop-up's view shows, and its hot item: the deepest (M), or one under it. */
+static struct gui_menu *level_of(struct gui_widget *w, int *hot)
+{
+    int k;
+    if (w->win == M.popup) {
+        *hot = M.hot;
+        return M.menu;
+    }
+    for (k = 0; k < nunder; k++)
+        if (U[k].popup == w->win) {
+            *hot = U[k].hot;
+            return U[k].menu;
+        }
+    *hot = -1;
+    return NULL;
+}
+
 static void view_draw(struct gui_widget *w, struct gfx_surface *s)
 {
-    struct gui_menu *m = M.menu;
+    int hot_now;
+    struct gui_menu *m = level_of(w, &hot_now);
     int i, sc = 0;
     gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_FIELD);
     gfx_frame(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_LINE);
@@ -406,7 +450,7 @@ static void view_draw(struct gui_widget *w, struct gfx_surface *s)
         }
     for (i = 0; i < m->n; i++) {
         const struct item *it = &m->items[i];
-        int y = item_y(m, i), hot = i == M.hot;
+        int y = item_y(m, i), hot = i == hot_now;
         unsigned fg = it->off ? GUI_DIM : hot ? GUI_CHOSEN_TEXT : GUI_FIELD_TEXT;
         if (it->sep) {
             gfx_fill(s, w->r.x + 1, y + SEP_H / 2, w->r.w - 2, 1, GUI_DIM);
@@ -433,10 +477,13 @@ static void view_draw(struct gui_widget *w, struct gfx_surface *s)
         gui_draw_text(s, w->r.x + indent(m), y + 2, gui_font, it->text, fg);
         if (it->shortcut)
             gfx_text(s, w->r.x + w->r.w - 10 - sc, y + 2, gui_font, it->shortcut, -1, fg);
+        if (it->sub)
+            gui_draw_arrow(s, w->r.x + w->r.w - 8, y + (GUI_ROW_H + 2) / 2, 3, fg);
     }
 }
 
 static void choose(int i);
+static void open_sub(int i, int keyboard);
 
 static void step(int by)
 {
@@ -454,11 +501,31 @@ static void step(int by)
         gui_damage(M.popup->root);
 }
 
+/* The deepest menu closed, the one it was opened from the deepest again (with the keyboard): 1; 0 if it was
+   the only one. */
+static int close_top(void)
+{
+    struct gui_window *p = M.popup;
+    struct under *u;
+    if (!p || !nunder)
+        return 0;
+    u = &U[--nunder];
+    M.popup = u->popup, M.menu = u->menu, M.hot = u->hot, M.sx = u->sx, M.sy = u->sy, M.sw = u->sw;
+    gui_close_later(p);
+    if (M.popup->id)
+        glos_focus(M.popup->id);
+    if (M.popup->root)
+        gui_damage(M.popup->root);
+    return 1;
+}
+
 static void close_menu(void)
 {
     struct gui_window *p = M.popup;
     if (!p)
         return;
+    while (nunder)                              /* (those it was opened from, too) */
+        gui_close_later(U[--nunder].popup);
     M.closed_at = gui_now();
     M.closed_from = M.bar ? M.bar->open : -1;
     if (M.bar) {
@@ -484,6 +551,10 @@ static void choose(int i)
     int id;
     if (!m || i < 0 || i >= m->n || m->items[i].sep || m->items[i].off)
         return;
+    if (m->items[i].sub) {
+        open_sub(i, 1);
+        return;
+    }
     id = m->items[i].id;
     close_menu();
     if (choice) {
@@ -496,9 +567,18 @@ static void choose(int i)
 
 static int view_event(struct gui_widget *w, struct gui_ev *e)
 {
-    struct gui_menu *m = M.menu;
+    struct gui_menu *m;
     int i;
-    (void)w;
+    if (w->win != M.popup) {                    /* a menu under the deepest: the pointer back in it closes what was
+                                                   opened from it */
+        if (e->type != GUI_EV_MOVE && e->type != GUI_EV_PRESS)
+            return 1;
+        while (nunder && w->win != M.popup)
+            close_top();
+        if (w->win != M.popup)
+            return 1;
+    }
+    m = M.menu;
     if (!m)
         return 0;
     switch (e->type) {
@@ -532,10 +612,17 @@ static int view_event(struct gui_widget *w, struct gui_ev *e)
         choose(M.hot);
         return 1;
     case GUI_K_ESC:
-        close_menu();
+        if (!close_top())
+            close_menu();
         return 1;
     case GUI_K_LEFT:
     case GUI_K_RIGHT:
+        if (e->key == GUI_K_RIGHT && M.hot >= 0 && m->items[M.hot].sub && !m->items[M.hot].off) {
+            open_sub(M.hot, 1);
+            return 1;
+        }
+        if (e->key == GUI_K_LEFT && close_top())
+            return 1;
         if (M.bar && M.bar->n > 1) {
             struct gui_menubar *b = M.bar;
             int to = (b->open + (e->key == GUI_K_RIGHT ? 1 : -1) + b->n) % b->n;
@@ -567,35 +654,66 @@ static void popdown(struct gui_window *w)
         close_menu();
 }
 
+static void open_level(struct gui_window *owner, struct gui_menu *m, int sx, int sy, struct gui_menubar *bar,
+                       struct gui_widget *choice, int hot, int from_w);
+
 static void open_menu(struct gui_window *owner, struct gui_menu *m, int sx, int sy, struct gui_menubar *bar,
                       struct gui_widget *choice, int hot)
 {
+    close_menu();
+    if (owner && !choice)                       /* its commands as they are now: the app asked first */
+        gui_cmd_update(owner);
+    open_level(owner, m, sx, sy, bar, choice, hot, 0);
+}
+
+/* The submenu of the deepest menu's item i, beside it. */
+static void open_sub(int i, int keyboard)
+{
+    struct gui_menu *m = M.menu;
+    struct under *u;
+    if (!m || nunder == SUB_MAX || !m->items[i].sub || !m->items[i].sub->n)
+        return;
+    M.hot = i;
+    if (M.popup && M.popup->root)
+        gui_damage(M.popup->root);
+    u = &U[nunder++];
+    u->popup = M.popup, u->menu = M.menu, u->hot = M.hot, u->sx = M.sx, u->sy = M.sy, u->sw = M.sw;
+    open_level(M.owner, m->items[i].sub, M.sx + M.sw - 3, M.sy + item_y(m, i) - 2, M.bar, NULL, keyboard ? 0 : -1,
+               M.sw);
+}
+
+/* A menu's pop-up at sx, sy of the screen, the deepest from now on. from_w: it is a submenu, of a menu so wide
+   (at the screen's right edge it opens to the left of that one instead). */
+static void open_level(struct gui_window *owner, struct gui_menu *m, int sx, int sy, struct gui_menubar *bar,
+                       struct gui_widget *choice, int hot, int from_w)
+{
     struct gui_window *p;
     struct gui_widget *v;
-    int i, tw = 60, sc = 0, h = 4, sw, shh;
-    close_menu();
-    if (owner && !choice) {                     /* its commands as they are now: the app asked first */
-        gui_cmd_update(owner);
+    int i, tw = 60, sc = 0, h = 4, sw, shh, subs = 0;
+    if (owner && !choice)
         resolve(owner, m);
-    }
     for (i = 0; i < m->n; i++) {
         int k = gui_text_w(gui_font, m->items[i].text ? m->items[i].text : "");
         if (k > tw)
             tw = k;
         if (m->items[i].shortcut && (k = gfx_text_width(gui_font, m->items[i].shortcut, -1)) > sc)
             sc = k;
+        if (m->items[i].sub)
+            subs = 1;
         h += item_h(&m->items[i]);
     }
-    tw += indent(m) + 12 + (sc ? sc + 20 : 0);
+    tw += indent(m) + 12 + (sc ? sc + 20 : 0) + (subs && !sc ? 12 : 0);
     if (choice && tw < choice->r.w)
         tw = choice->r.w;
     gui_screen_size(&sw, &shh);
+    if (from_w && sx + tw > sw)                 /* (a submenu at the screen's edge: to the left of its menu) */
+        sx = sx - from_w - tw + 6;
     if (sx + tw > sw)
         sx = sw - tw;
     if (sx < 0)
         sx = 0;
     if (sy + h > shh - 20) {                    /* (above the task bar: up, if it fits better there) */
-        int above = sy - h - (bar ? bar_h() : choice ? choice->r.h : 0);
+        int above = sy - h - (from_w ? -(GUI_ROW_H + 6) : bar ? bar_h() : choice ? choice->r.h : 0);
         sy = above >= 0 ? above : shh - 20 - h;
     }
     p = gui_window_at("", sx, sy, tw, h, GUI_W_POPUP);
@@ -610,6 +728,7 @@ static void open_menu(struct gui_window *owner, struct gui_menu *m, int sx, int 
     M.bar = bar;
     M.choice = choice;
     M.hot = hot;
+    M.sx = sx, M.sy = sy, M.sw = tw;
     if (hot >= 0 && (m->items[hot].sep || m->items[hot].off)) {
         M.hot = -1;
         step(1);

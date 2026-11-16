@@ -4,7 +4,7 @@
 # mouse, a toggle held in, shortcuts; the toolbar with texts; and the window made narrow, where the toolbar's end
 # goes into its menu; and a button's tooltip, once the pointer has rested on it: the command's, with its shortcut,
 # gone at a key; a list's context menu by the right button (the press choosing the row first) and by Shift+F10,
-# with commands and an item of its own; and the status bar's sections (a text with an icon, a small progress bar).
+# with commands and an item of its own; a submenu (opened by its letter and by Right, closed by Left); and the status bar's sections (a text with an icon, a small progress bar).
 run GUITEST.EXE commands
 wait "GUITEST Commands"
 shot start "GUITEST Commands"
@@ -22,9 +22,14 @@ key alt+e
 shot menu-edit-paste ""
 key p
 key alt+v
+key s
+shot submenu ""
 key l
 key alt+v
-shot menu-view-large ""
+key down right
+shot submenu-large ""
+key left
+shot menu-view-back ""
 key esc
 key f7
 shot texts "GUITEST Commands"

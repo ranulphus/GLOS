@@ -483,8 +483,10 @@ static void commands(void)
     gui_menu_command(m, K_CUT), gui_menu_command(m, K_COPY), gui_menu_command(m, K_PASTE);
     m = gui_menu(bar, "&View");
     gui_menu_command(m, K_BOLD);
-    gui_menu_sep(m);
-    gui_menu_command(m, K_SMALL), gui_menu_command(m, K_MEDIUM), gui_menu_command(m, K_LARGE);
+    {                                           /* a submenu: the group of three */
+        struct gui_menu *sub = gui_menu_sub(m, "Text &size");
+        gui_menu_command(sub, K_SMALL), gui_menu_command(sub, K_MEDIUM), gui_menu_command(sub, K_LARGE);
+    }
     gui_menu_sep(m);
     gui_menu_command(m, K_NARROW), gui_menu_command(m, K_TEXT);
     m = gui_menu(bar, "&Help");
