@@ -110,6 +110,25 @@ dialog it opens is modal over the right window. The choice widget's list is a me
 A pop-up's place is on the screen: `GLOS_FN_PIXELS` gives a window's client area's corner from API 1.2, and a
 menu that would cross the screen's right edge or the task bar moves left or opens upward.
 
+**Commands, toolbars, tooltips and context menus** (toolkit 2, step C2; `docs/v1/toolkit-2.md` §1, §7).
+
+- A **command** is set once for its window (`gui_command(win, id, "&Save", "Ctrl+S", icon, tooltip)`) and
+  changed by `gui_command_enable`, `_check` and `_radio`. A menu's item (`gui_menu_command`) and a toolbar's
+  button (`gui_toolbar_command`) show it and follow it; the shortcut is the command's, menu bar or none.
+  The window's `on_update` is asked which commands can be used now before a menu opens, before a shortcut is
+  looked up and before a toolbar is drawn; `on_command` is told the id wherever it came from.
+- **Menus** have icons where their commands do, a tick or (for one of a group) a dot, and submenus
+  (`gui_menu_sub`): the open menus are a stack, a choice closes them all, Left or Esc goes back one.
+- **The toolbar** (`gui_toolbar`) is under the menu bar: icons, texts beside them if asked, a command with no
+  icon as its text; what doesn't fit the window is in a menu behind the button at its end. It never has the
+  keyboard.
+- **A tooltip** (`gui_tip`; a toolbar's buttons have their commands') is a pop-up by the pointer once it has
+  rested 600 ms, shown without the keyboard (`glos_show_quiet`).
+- **A context menu** (`gui_context`) opens by the right button, after the press has chosen what is under the
+  pointer, and by the Menu key or Shift+F10 by the widget with the keyboard; the widget is told first
+  (`GUI_ON_CONTEXT`).
+- **The status bar** has sections at its right end (`gui_status_section`): a text, an icon, a small progress bar.
+
 ### 1.7 Modal dialogs
 
 `gui_modal` shows a window and runs the loop until `gui_end_modal` answers it; meanwhile the app's other windows
@@ -211,7 +230,9 @@ shared), Alt+F4 a close request.
 
 A **test script** (`tests/gui/NAME.txt`) says what to do: run the app with arguments, wait for a window, keys
 (`ctrl+s`, `alt+f`, `shift+tab`), typed text, clicks and drags at a window's client coordinates, pauses, the
-clipboard's text, and shots: a window's client area by its title. On the host the shim plays the script and
+clipboard's text, the pointer moved with no button (`move`, for a tooltip), the desktop's theme or text size
+changed under the app (`theme NAME`, `text SIZE`), two shots that must be one picture (`same A B`), and shots: a
+window's client area by its title. On the host the shim plays the script and
 writes each shot as a PNG (`make gui-goldens`: build/host/gui/SCRIPT/NAME-BITS.png, at 8, 16 and 32 bits). In Loop A
 (`tests/loopa/jobs.py`'s `GuiDriver`) the same script is played over ssh on a GLOS desktop: the app started as an
 agent job, keys through `glos key`, text through `glos type`, the pointer moved by `glos mouse` to the window
