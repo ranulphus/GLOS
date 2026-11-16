@@ -17,6 +17,7 @@
 #include <stdarg.h>
 #include <string.h>
 
+#include "glos/api.h"
 #include "shell.h"
 
 static int upper(int c) { return c >= 'a' && c <= 'z' ? c - 32 : c; }
@@ -1647,7 +1648,10 @@ static int run_line(struct sh *s, char *line)
     } else if (same(argv[0], "CLS")) {
         r = s->h->clear(s->h->ctx);
     } else if (same(argv[0], "VER")) {
-        say(s, "GLOS shell 1.0 (GLOS API 2.1)\r\n");
+        char line[64];                          /* (the API's version as the headers have it: it said 2.1 until
+                                                   2026-11-16, two minors behind) */
+        sh_fmt(line, sizeof line, "GLOS shell 1.0 (GLOS API %u.%u)\r\n", (unsigned)GLOS_MAJOR, (unsigned)GLOS_MINOR);
+        say(s, line);
     } else if (same(argv[0], "EXIT")) {
         s->h->quit(s->h->ctx, 0);
     } else if (same(argv[0], "HISTORY")) {

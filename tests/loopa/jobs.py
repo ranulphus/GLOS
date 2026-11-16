@@ -216,6 +216,8 @@ def refuse():
 
 GLOS_FILES = ["--file", "build/ow/GLOS.EXE=/TEST/GLOS.EXE", "--file", "build/kernel/GLOSK.BIN=/TEST/GLOSK.BIN",
               "--file", "build/glos/COMMAND.COM=/TEST/COMMAND.COM"]     # (GLOS's own COMMAND.COM beside it: S4c)
+GLOS_API = "%s.%s" % tuple(re.search(r"#define GLOS_%s (\d+)" % w, open(os.path.join(ROOT, "include/glos/api.h")).read()).group(1)
+                           for w in ("MAJOR", "MINOR"))     # (the shell's VER says it)
 GLOS_FILES_DOS = GLOS_FILES[:4]         # without it: as DOS's shell, the DOS's COMMAND.COM under GLOS (M3's way)
 MGA_DOS = os.path.join(MGA, "build/ow/dos")
 M2_FILES = ["--file", MGA_DOS + "/XMSINFO.COM=/HX/XMSINFO.COM", "--file", MGA_DOS + "/VBEINFO.COM=/HX/VBEINFO.COM",
@@ -1825,7 +1827,7 @@ def idle_case(profile, card):
             info += " start: " + " | ".join(rows(out)[-6:])
         typed("ver\\n")
         out = until(lambda o: o.count("GLOS shell 1.0") == 2 and rows(o)[-1:] == ["A:\\>"])
-        checks["ver"] = out.count("GLOS shell 1.0 (GLOS API 2.1)") >= 1 and "A:\\>ver" in out
+        checks["ver"] = out.count("GLOS shell 1.0 (GLOS API %s)" % GLOS_API) >= 1 and "A:\\>ver" in out
         typed("c:\\n")
         typed("cd \\\\test\\n")
         out = until(lambda o: rows(o)[-1:] == ["C:\\TEST>"])
@@ -1996,7 +1998,7 @@ def shell_case(profile, card):
         t.send("cd test\r")
         checks["cd"] = t.expect("C:\\TEST>")
         t.send("vex\x7fr\r")
-        checks["edited"] = t.expect("GLOS shell 1.0 (GLOS API 2.1)\n")
+        checks["edited"] = t.expect("GLOS shell 1.0 (GLOS API %s)\n" % GLOS_API)
         t.send("dir /w\r")
         checks["dir"] = t.expect(" Directory of C:\\TEST\n") and t.expect("GLOS.EXE") and t.expect(" file(s)") \
             and t.expect("C:\\TEST>")

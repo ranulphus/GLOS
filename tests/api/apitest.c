@@ -2068,7 +2068,7 @@ static int job_mode(void)
     r = job_take(j, out, sizeof out, 0, 0, ">", 60000, &st);
     ok = j && r && st.state == GLOS_JS_RUNNING;
     n = glos_job_write(j, "ver\r", 4);
-    r = job_take(j, out, sizeof out, 0, 0, "GLOS shell 1.0 (GLOS API 2.1)", 60000, &st);
+    r = job_take(j, out, sizeof out, 0, 0, "GLOS shell 1.0 (GLOS API 2." , 60000, &st);
     e = glos_job_size(j, 100, 30);
     check("shell-login", ok && n == 4 && r && e == 0, "j=%x err=%d ok=%d n=%d r=%d e=%d out=%.80s", j, glos_error(), ok, n, r, e, out);
     job_last = 99;
