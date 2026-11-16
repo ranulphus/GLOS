@@ -1,0 +1,43 @@
+# The virtual list's columns and views (toolkit 2, step C3; docs/v1/toolkit-2.md 2): GUITEST's ten thousand rows.
+# The Name head dragged sideways past Size moves the column there (Size, Name, Kind; the widths go with them),
+# a press on a head that stays put still sorts; the layout read back and reset. Then the grids: big icons, small
+# icons with each name beside it, and thumbnails (the page's pictures, three shapes; folders show their big
+# icon), the arrows in each, a rubber band in the small icons, and the detail view again.
+run GUITEST.EXE views
+wait "GUITEST List views"
+key down down
+shot start "GUITEST List views"
+drag "GUITEST List views" 60 46 200 46
+shot moved "GUITEST List views"
+key alt+c
+click "GUITEST List views" 100 46
+click "GUITEST List views" 100 46
+shot sorted "GUITEST List views"
+key alt+i
+key alt+s
+shot small "GUITEST List views"
+key right down
+shot small-moved "GUITEST List views"
+drag "GUITEST List views" 420 120 140 160
+shot small-band "GUITEST List views"
+key alt+t
+key home right
+shot thumbs "GUITEST List views"
+key down
+shot thumbs-down "GUITEST List views"
+key alt+d
+key alt+r
+key alt+c
+shot detail "GUITEST List views"
+key alt+f4
+gone "GUITEST List views"
+expect GUI views
+expect GUI columns 1,0,2 widths 150,70,80
+expect GUI sorted down by column 0
+expect GUI view icons
+expect GUI view small
+expect GUI view thumbs
+expect GUI view detail
+expect GUI columns reset
+expect GUI columns 0,1,2 widths 150,70,80
+expect GUI end

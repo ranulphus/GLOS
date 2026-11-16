@@ -6,10 +6,13 @@
  * What is chosen is kept by the rows' ids, which the model gives, so it survives sorting and rows arriving or
  * going. Sorting is the app's, since only the app has all the rows: a press on a column's head asks for it
  * (GUI_ON_SORT; gui_vlist_sort says which column and which way), and the app sorts and says the list changed.
- * A column's edge in the header is dragged to make it wider or narrower.
+ * A column's edge in the header is dragged to make it wider or narrower, and a column's head dragged sideways
+ * moves the column (the order is the widget's: the model's cells keep their numbers).
  *
- * The detail view (rows of cells under a header) is here; the icon views come on the same model. gui_list
- * (list.c) stays for short lists that are simplest kept in the widget. */
+ * Views of the same rows: the detail view (rows of cells under a header), and three grids: big icons with the
+ * name under each, small icons with the name beside each, and thumbnails (the app's pictures, GUI_THUMB square
+ * at most) with the name under each. gui_list (list.c) stays for short lists that are simplest kept in the
+ * widget. */
 #include "guiint.h"
 
 struct vlist {
@@ -17,7 +20,9 @@ struct vlist {
     struct gui_model m;
     int cols;
     char **heads;
-    int widths[GUI_VCOLS];              /* (the last column has what is left) */
+    int widths[GUI_VCOLS];              /* by the model's column (the last shown has what is left) */
+    int order[GUI_VCOLS];               /* the model's column shown at each place, left to right */
+    int hpress, hpress_x, hmoving, htarget;     /* a head pressed (its place; -1: none), and moved sideways to */
     int top;                            /* the first row shown */
     int cur;                            /* the current row (-1: none), kept in step with cur_id */
     unsigned long cur_id, anchor_id;
@@ -26,16 +31,18 @@ struct vlist {
     int nchosen, room;
     int multi;
     int sort_col, sort_down;            /* what the header last asked for (sort_col -1: nothing) */
-    int drag_col;                       /* the column whose right edge is dragged (-1: none) */
+    int drag_col;                       /* the place whose right edge is dragged (-1: none) */
     char typed[32];                     /* letters typed, a second apart at most: the row that begins so */
     unsigned typed_at;
-    int view;                           /* GUI_VIEW_DETAIL, or GUI_VIEW_ICONS: big icons in a grid, a name under each */
-    int band, bx0, by0, bx1, by1;       /* the icon view's rubber band: held, and its corners (the window's
+    int view;                           /* GUI_VIEW_: DETAIL, or a grid (ICONS, SMALL, THUMBS) */
+    int band, bx0, by0, bx1, by1;       /* a grid's rubber band: held, and its corners (the window's
                                            coordinates; by0 moves with the scrolling) */
     struct gui_sb sb;
 };
 
-#define CELL_W  76                      /* an icon's place in the grid (as gui_list's big icons) */
+#define CELL_W  76                      /* a big icon's place in the grid (as gui_list's big icons) */
+#define SMALL_W 150                     /* a small icon's, its name beside it */
+#define THUMB_W (GUI_THUMB + 16)        /* a thumbnail's */
 #define ICON_GAP 4
 
 #define VL(w) ((struct vlist *)(w))
@@ -43,12 +50,17 @@ struct vlist {
 static int count(struct vlist *l) { int n = l->m.count ? l->m.count(l->m.ctx) : 0; return n > 0 ? n : 0; }
 static int head_h(struct vlist *l) { return l->heads ? GUI_ROW_H + 3 : 0; }
 
-static int icons(struct vlist *l) { return l->view == GUI_VIEW_ICONS; }
-static int cell_h(void) { return GUI_BIG_W + ICON_GAP + gui_font->height + 6; }
-
-static int per_line(struct vlist *l)            /* rows a line of the screen: one, or the icons that fit across */
+static int icons(struct vlist *l) { return l->view != GUI_VIEW_DETAIL; }      /* a grid */
+static int pic(struct vlist *l) { return l->view == GUI_VIEW_THUMBS ? GUI_THUMB : GUI_BIG_W; } /* its picture's side */
+static int cell_w(struct vlist *l) { return l->view == GUI_VIEW_SMALL ? SMALL_W : l->view == GUI_VIEW_THUMBS ? THUMB_W : CELL_W; }
+static int cell_h(struct vlist *l)
 {
-    int n = icons(l) ? (l->w.r.w - GUI_SB - 4) / CELL_W : 1;
+    return l->view == GUI_VIEW_SMALL ? GUI_ROW_H : pic(l) + ICON_GAP + gui_font->height + 6;
+}
+
+static int per_line(struct vlist *l)            /* rows a line of the screen: one, or the cells that fit across */
+{
+    int n = icons(l) ? (l->w.r.w - GUI_SB - 4) / cell_w(l) : 1;
     return n > 0 ? n : 1;
 }
 
@@ -56,25 +68,33 @@ static int lines_of(struct vlist *l, int n) { return (n + per_line(l) - 1) / per
 
 static int shown(struct vlist *l)               /* lines of the screen */
 {
-    int h = l->w.r.h - 2 - (icons(l) ? 0 : head_h(l)), unit = icons(l) ? cell_h() : GUI_ROW_H;
+    int h = l->w.r.h - 2 - (icons(l) ? 0 : head_h(l)), unit = icons(l) ? cell_h(l) : GUI_ROW_H;
     return h / unit > 1 ? h / unit : 1;
 }
 
-static int col_x(struct vlist *l, int c)
+static int col_x(struct vlist *l, int p)       /* (p a place, left to right) */
 {
     int x = l->w.r.x + 1, i;
-    for (i = 0; i < c; i++)
-        x += l->widths[i];
+    for (i = 0; i < p; i++)
+        x += l->widths[l->order[i]];
     return x;
 }
 
-static int col_w(struct vlist *l, int c)
+static int col_w(struct vlist *l, int p)
 {
-    if (c == l->cols - 1) {
-        int w = l->w.r.x + l->w.r.w - GUI_SB - col_x(l, c);
+    if (p == l->cols - 1) {
+        int w = l->w.r.x + l->w.r.w - GUI_SB - col_x(l, p);
         return w > 0 ? w : 0;
     }
-    return l->widths[c];
+    return l->widths[l->order[p]];
+}
+
+static int place_at(struct vlist *l, int x)     /* the place a column's head at x has */
+{
+    int p;
+    for (p = 0; p < l->cols - 1 && x >= col_x(l, p) + col_w(l, p); p++)
+        ;
+    return p;
 }
 
 static void place(struct vlist *l, int n)       /* (top is a line of the screen: a row, or a line of icons) */
@@ -139,16 +159,16 @@ static void see(struct vlist *l, int row)
         l->top = 0;
 }
 
-/* The icon view: an icon's cell (its place in the window), and the row at a place (-1: none). */
+/* A grid: a row's cell (its place in the window), and the row at a place (-1: none). */
 static void cell_at(struct vlist *l, int row, int *x, int *y)
 {
-    *x = l->w.r.x + 2 + (row % per_line(l)) * CELL_W;
-    *y = l->w.r.y + 1 + (row / per_line(l) - l->top) * cell_h() + 2;
+    *x = l->w.r.x + 2 + (row % per_line(l)) * cell_w(l);
+    *y = l->w.r.y + 1 + (row / per_line(l) - l->top) * cell_h(l) + 2;
 }
 
 static int icon_row(struct vlist *l, int x, int y, int n)
 {
-    int col = (x - l->w.r.x - 2) / CELL_W, line = (y - l->w.r.y - 1) / cell_h() + l->top, r;
+    int col = (x - l->w.r.x - 2) / cell_w(l), line = (y - l->w.r.y - 1) / cell_h(l) + l->top, r;
     if (x < l->w.r.x + 2 || y < l->w.r.y + 1 || col >= per_line(l) || x >= l->w.r.x + l->w.r.w - GUI_SB)
         return -1;
     r = line * per_line(l) + col;
@@ -168,40 +188,63 @@ static void vl_measure(struct gui_widget *w, int *pw, int *ph)
 static void vl_draw(struct gui_widget *w, struct gfx_surface *s)
 {
     struct vlist *l = VL(w);
-    int on = !(w->flags & GUI_DISABLED), focus = gui_is_focus(w), i, c, y0 = w->r.y + 1 + head_h(l), n = count(l);
+    int on = !(w->flags & GUI_DISABLED), focus = gui_is_focus(w), i, c, p, y0 = w->r.y + 1 + head_h(l), n = count(l);
     struct gfx_rect frame = { w->r.x, w->r.y, w->r.w - GUI_SB + 1, w->r.h };
     struct gfx_rect clip = s->clip, in = { w->r.x + 1, y0, w->r.w - GUI_SB - 1, w->r.h - 2 - head_h(l) };
     place(l, n);
     gui_draw_field(s, &frame, on);
-    if (icons(l)) {                             /* big icons, a name under each: the lines on the screen alone */
+    if (icons(l)) {                             /* a grid: the lines on the screen alone */
         struct gfx_rect all = { w->r.x + 1, w->r.y + 1, w->r.w - GUI_SB - 1, w->r.h - 2 };
-        int per = per_line(l);
+        int per = per_line(l), cw = cell_w(l), ch = cell_h(l), side = pic(l);
         gfx_rect_cut(&all, &clip);
         gfx_clip(s, &all);
         for (i = l->top * per; i < n && i < (l->top + shown(l) + 1) * per; i++) {
             struct gui_vrow r;
             int x, y, chosen, tw, lw, lx, ly, ix;
+            unsigned fg;
             cell_at(l, i, &x, &y);
-            if (y >= s->clip.y + s->clip.h || y + cell_h() <= s->clip.y)
+            if (y >= s->clip.y + s->clip.h || y + ch <= s->clip.y)
                 continue;
             memset(&r, 0, sizeof r);
             l->m.row(l->m.ctx, i, &r);
             chosen = is_chosen(l, r.id);
-            ix = x + (CELL_W - GUI_BIG_W) / 2;
-            if (r.big)
-                gui_draw_icon(s, ix, y, r.big, GUI_BIG_W);
-            else
-                gui_draw_icon_ink(s, ix + (GUI_BIG_W - GUI_ICON_W) / 2, y + (GUI_BIG_W - GUI_ICON_W) / 2, r.icon,
-                                  GUI_ICON_W, on ? GUI_FIELD_TEXT : GUI_DIM);
-            if (chosen)
-                gfx_frame(s, ix - 2, y - 2, GUI_BIG_W + 4, GUI_BIG_W + 4, GUI_CHOSEN);
+            fg = chosen ? GUI_CHOSEN_TEXT : on ? GUI_FIELD_TEXT : GUI_DIM;
             tw = r.cell[0] ? gfx_text_width(gui_font, r.cell[0], -1) : 0;
-            lw = tw < CELL_W - 4 ? tw : CELL_W - 4, lx = x + (CELL_W - lw) / 2, ly = y + GUI_BIG_W + ICON_GAP;
+            if (l->view == GUI_VIEW_SMALL) {    /* a small icon, its name beside it */
+                int tx = x + 2 + GUI_ICON_W + 3, room = cw - GUI_ICON_W - 9;
+                if (r.icon)
+                    gui_draw_icon_ink(s, x + 2, y + (GUI_ROW_H - GUI_ICON_W) / 2, r.icon, GUI_ICON_W,
+                                      on ? GUI_FIELD_TEXT : GUI_DIM);
+                lw = tw < room ? tw : room;
+                if (chosen)
+                    gfx_fill(s, tx - 2, y, lw + 4, GUI_ROW_H, GUI_CHOSEN);
+                if (r.cell[0])
+                    gui_text_fit(s, tx, y + 1, room, gui_font, r.cell[0], fg);
+                if (focus && i == l->cur) {
+                    struct gfx_rect f = { tx - 2, y, lw + 4, GUI_ROW_H };
+                    gui_draw_focus(s, &f);
+                }
+                continue;
+            }
+            ix = x + (cw - side) / 2;           /* a picture (a big icon, or a thumbnail), the name under it */
+            if (l->view == GUI_VIEW_THUMBS && r.thumb && r.thumb_w > 0 && r.thumb_h > 0) {
+                int pw = r.thumb_w < side ? r.thumb_w : side, ph = r.thumb_h < side ? r.thumb_h : side;
+                int px = ix + (side - pw) / 2, py = y + (side - ph) / 2;
+                gfx_image(s, px, py, r.thumb, pw, ph, (unsigned)r.thumb_w);
+                gfx_frame(s, px - 1, py - 1, pw + 2, ph + 2, GUI_LINE);
+            } else if (r.big) {
+                gui_draw_icon(s, ix + (side - GUI_BIG_W) / 2, y + (side - GUI_BIG_W) / 2, r.big, GUI_BIG_W);
+            } else if (r.icon) {
+                gui_draw_icon_ink(s, ix + (side - GUI_ICON_W) / 2, y + (side - GUI_ICON_W) / 2, r.icon,
+                                  GUI_ICON_W, on ? GUI_FIELD_TEXT : GUI_DIM);
+            }
+            if (chosen)
+                gfx_frame(s, ix - 2, y - 2, side + 4, side + 4, GUI_CHOSEN);
+            lw = tw < cw - 4 ? tw : cw - 4, lx = x + (cw - lw) / 2, ly = y + side + ICON_GAP;
             if (chosen)
                 gfx_fill(s, lx - 2, ly - 1, lw + 4, gui_font->height + 2, GUI_CHOSEN);
             if (r.cell[0])
-                gui_text_fit(s, lx, ly, CELL_W - 4, gui_font, r.cell[0],
-                             chosen ? GUI_CHOSEN_TEXT : on ? GUI_FIELD_TEXT : GUI_DIM);
+                gui_text_fit(s, lx, ly, cw - 4, gui_font, r.cell[0], fg);
             if (focus && i == l->cur) {
                 struct gfx_rect f = { lx - 2, ly - 1, lw + 4, gui_font->height + 2 };
                 gui_draw_focus(s, &f);
@@ -220,18 +263,25 @@ static void vl_draw(struct gui_widget *w, struct gfx_surface *s)
     if (l->heads) {
         gfx_fill(s, w->r.x + 1, w->r.y + 1, w->r.w - GUI_SB - 1, head_h(l) - 1, GUI_FACE);
         gfx_fill(s, w->r.x + 1, w->r.y + head_h(l), w->r.w - GUI_SB - 1, 1, GUI_LINE);
-        for (c = 0; c < l->cols; c++) {
-            int x = col_x(l, c), cw = col_w(l, c);
+        for (p = 0; p < l->cols; p++) {
+            int x = col_x(l, p), cw = col_w(l, p);
             struct gfx_rect hc = { x, w->r.y + 1, cw, head_h(l) - 1 };
+            c = l->order[p];
             gfx_rect_cut(&hc, &clip);
             gfx_clip(s, &hc);
+            if (l->hmoving && p == l->hpress)   /* the head being moved */
+                gfx_fill(s, x, w->r.y + 1, cw, head_h(l) - 1, GUI_SHADE);
             gui_text_fit(s, x + 4, w->r.y + 2, cw - 8 - (c == l->sort_col ? 10 : 0), c == l->sort_col ? gui_bold : gui_font,
                          l->heads[c], GUI_TEXT);
             if (c == l->sort_col && cw > 20)    /* which way it is sorted */
                 gui_draw_arrow(s, x + cw - 9, w->r.y + 1 + head_h(l) / 2, l->sort_down ? 1 : 0, GUI_TEXT);
             gfx_clip(s, &clip);
-            if (c > 0)
+            if (p > 0)
                 gfx_fill(s, x - 1, w->r.y + 1, 1, head_h(l) - 1, GUI_DIM);
+        }
+        if (l->hmoving && l->htarget != l->hpress) {    /* where it would go: a bar at that place's edge */
+            int bx = l->htarget < l->hpress ? col_x(l, l->htarget) : col_x(l, l->htarget) + col_w(l, l->htarget);
+            gfx_fill(s, bx - 2, w->r.y + 1, 3, head_h(l) - 1, GUI_MARK);
         }
     }
     gfx_rect_cut(&in, &clip);
@@ -248,9 +298,10 @@ static void vl_draw(struct gui_widget *w, struct gfx_surface *s)
         fg = chosen ? GUI_CHOSEN_TEXT : on ? GUI_FIELD_TEXT : GUI_DIM;
         if (chosen)
             gfx_fill(s, w->r.x + 1, y, w->r.w - GUI_SB - 1, GUI_ROW_H, GUI_CHOSEN);
-        for (c = 0; c < l->cols; c++) {
-            int x = col_x(l, c) + 3, cw = col_w(l, c) - 6;
-            struct gfx_rect cc = { col_x(l, c), y, col_w(l, c), GUI_ROW_H };
+        for (p = 0; p < l->cols; p++) {
+            int x = col_x(l, p) + 3, cw = col_w(l, p) - 6;
+            struct gfx_rect cc = { col_x(l, p), y, col_w(l, p), GUI_ROW_H };
+            c = l->order[p];
             gfx_rect_cut(&cc, &in);
             gfx_clip(s, &cc);
             if (c == 0 && r.icon) {
@@ -306,10 +357,43 @@ static int vl_event(struct gui_widget *w, struct gui_ev *e)
     struct vlist *l = VL(w);
     int shift = (e->mods & GLOS_MOD_SHIFT) != 0, ctrl = (e->mods & GLOS_MOD_CTRL) != 0, n = count(l), c, r;
     place(l, n);
+    if (l->hpress >= 0) {                       /* a column's head held: moved sideways, the column goes with it;
+                                                   let go where it was, the app is asked to sort by it */
+        if (e->type == GUI_EV_MOVE) {
+            if (!l->hmoving && (e->x - l->hpress_x > 5 || l->hpress_x - e->x > 5))
+                l->hmoving = 1;
+            if (l->hmoving) {
+                l->htarget = place_at(l, e->x);
+                gui_damage(w);
+            }
+            return 1;
+        }
+        if (e->type == GUI_EV_RELEASE) {
+            int from = l->hpress, to = place_at(l, e->x), i, moved = l->order[from];
+            l->hpress = -1;
+            if (l->hmoving) {
+                l->hmoving = 0;
+                if (to != from) {
+                    for (i = from; i < to; i++)
+                        l->order[i] = l->order[i + 1];
+                    for (i = from; i > to; i--)
+                        l->order[i] = l->order[i - 1];
+                    l->order[to] = moved;
+                }
+                gui_damage(w);
+                return 1;
+            }
+            l->sort_down = moved == l->sort_col ? !l->sort_down : 0;
+            l->sort_col = moved;
+            gui_damage(w);
+            gui_send(w, GUI_ON_SORT);           /* (the app sorts, and says the list changed) */
+            return 1;
+        }
+    }
     if (l->drag_col >= 0) {                     /* a column's edge held */
         if (e->type == GUI_EV_MOVE) {
             int nw = e->x - col_x(l, l->drag_col);
-            l->widths[l->drag_col] = nw < 16 ? 16 : nw;
+            l->widths[l->order[l->drag_col]] = nw < 16 ? 16 : nw;
             gui_damage(w);
             return 1;
         }
@@ -327,7 +411,7 @@ static int vl_event(struct gui_widget *w, struct gui_ev *e)
             l->nchosen = 0;
             for (i = l->top * per_line(l); i < n && i < (l->top + shown(l) + 1) * per_line(l); i++) {
                 cell_at(l, i, &cx, &cy);
-                if (cx + CELL_W > x0 && cx <= x1 && cy + cell_h() > y0 && cy <= y1)
+                if (cx + cell_w(l) > x0 && cx <= x1 && cy + cell_h(l) > y0 && cy <= y1)
                     choose(l, id_of(l, i), 1);
             }
             if (e->type == GUI_EV_RELEASE)
@@ -375,12 +459,9 @@ static int vl_event(struct gui_widget *w, struct gui_ev *e)
                     l->drag_col = c;
                     return 1;
                 }
-            for (c = l->cols - 1; c > 0 && e->x < col_x(l, c); c--)
-                ;
-            l->sort_down = c == l->sort_col ? !l->sort_down : 0;
-            l->sort_col = c;
-            gui_damage(w);
-            gui_send(w, GUI_ON_SORT);           /* (the app sorts, and says the list changed) */
+            l->hpress = place_at(l, e->x), l->hpress_x = e->x, l->hmoving = 0;   /* (sorted at the release, or
+                                                   moved if it is dragged first) */
+            l->htarget = l->hpress;
             return 1;
         }
         r = e->y < w->r.y + 1 + head_h(l) || e->x >= w->r.x + w->r.w - GUI_SB ? -1
@@ -497,10 +578,37 @@ struct gui_widget *gui_vlist(struct gui_widget *parent, int columns, const char 
             l->heads[i] = strdup(heads[i]);
     }
     for (i = 0; i < l->cols; i++)
-        l->widths[i] = widths ? widths[i] : 100;
+        l->widths[i] = widths ? widths[i] : 100, l->order[i] = i;
     l->cur = l->anchor = -1;
-    l->sort_col = l->drag_col = -1;
+    l->sort_col = l->drag_col = l->hpress = -1;
     return &l->w;
+}
+
+void gui_vlist_columns(struct gui_widget *w, int *order, int *widths)
+{
+    struct vlist *l = VL(w);
+    int i;
+    for (i = 0; i < l->cols; i++) {
+        if (order)
+            order[i] = l->order[i];
+        if (widths)
+            widths[i] = l->widths[i];
+    }
+}
+
+void gui_vlist_set_columns(struct gui_widget *w, const int *order, const int *widths)
+{
+    struct vlist *l = VL(w);
+    int i, seen = 0;
+    for (i = 0; order && i < l->cols; i++)      /* (an order is used only if it names each column once) */
+        if (order[i] >= 0 && order[i] < l->cols)
+            seen |= 1 << order[i];
+    if (order && seen == (1 << l->cols) - 1)
+        for (i = 0; i < l->cols; i++)
+            l->order[i] = order[i];
+    for (i = 0; widths && i < l->cols; i++)
+        l->widths[i] = widths[i] < 16 ? 16 : widths[i];
+    gui_damage(w);
 }
 
 /* Rows came, went or changed places: the current row is where its id is now. The model's find says where;
@@ -553,7 +661,7 @@ void gui_vlist_view(struct gui_widget *w, int view)
 {
     struct vlist *l = VL(w);
     int cur = l->cur;
-    l->view = view == GUI_VIEW_ICONS ? GUI_VIEW_ICONS : GUI_VIEW_DETAIL;
+    l->view = view == GUI_VIEW_ICONS || view == GUI_VIEW_SMALL || view == GUI_VIEW_THUMBS ? view : GUI_VIEW_DETAIL;
     l->band = 0;
     l->top = 0;
     if (cur >= 0)

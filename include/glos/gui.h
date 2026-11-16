@@ -351,7 +351,12 @@ struct gui_vrow {
     const unsigned char *icon;          /* a GUI_ICON_W icon before the first cell, or NULL */
     const unsigned char *big;           /* a GUI_BIG_W icon for the icon view (NULL: the small one, in its middle) */
     unsigned long id;                   /* the row's own, whatever place it has (not 0) */
+    const unsigned *thumb;              /* GUI_VIEW_THUMBS: a picture, 00RRGGBBh pixels, thumb_w by thumb_h (at most
+                                           GUI_THUMB of each shown), the model's to keep until it is next asked; NULL:
+                                           the big icon in its place (a picture not made yet, a folder) */
+    int thumb_w, thumb_h;
 };
+#define GUI_THUMB 96
 struct gui_model {
     int (*count)(void *ctx);            /* the rows there are now */
     void (*row)(void *ctx, int row, struct gui_vrow *out);     /* a row's content */
@@ -371,15 +376,23 @@ int gui_vlist_get(struct gui_widget *w);               /* the current row's plac
 unsigned long gui_vlist_id(struct gui_widget *w);      /* ... its id, or 0 */
 void gui_vlist_set(struct gui_widget *w, int row);     /* the current row, chosen alone (-1: none) */
 void gui_vlist_multi(struct gui_widget *w, int on);    /* more than one row chosen (Ctrl, Shift) */
-enum { GUI_VIEW_DETAIL, GUI_VIEW_ICONS };
+enum { GUI_VIEW_DETAIL, GUI_VIEW_ICONS, GUI_VIEW_SMALL, GUI_VIEW_THUMBS };
 void gui_vlist_view(struct gui_widget *w, int view);   /* rows of cells under the header (GUI_VIEW_DETAIL), or big
                                            icons in a grid with the first cell's text under each (GUI_VIEW_ICONS:
                                            the arrows move four ways; with gui_vlist_multi, a press on nothing
-                                           held and moved is a rubber band that chooses the icons it touches) */
+                                           held and moved is a rubber band that chooses the icons it touches);
+                                           GUI_VIEW_SMALL: small icons in a grid, each name beside its icon;
+                                           GUI_VIEW_THUMBS: the rows' thumbnails (else their big icons), each
+                                           name under; the arrows and the band as in the icon view */
 int gui_vlist_chosen(struct gui_widget *w, unsigned long *ids, int room);      /* how many rows are chosen, and the
                                            ids of as many as there is room for */
 void gui_vlist_sort(struct gui_widget *w, int *col, int *down);        /* at GUI_ON_SORT: the column whose head was
                                            pressed, and whether downward (a second press on the same head) */
+void gui_vlist_columns(struct gui_widget *w, int *order, int *widths);   /* the columns as they are: the model's
+                                           column at each place, left to right, and each column's width by the
+                                           model's number (either NULL), for the app to keep */
+void gui_vlist_set_columns(struct gui_widget *w, const int *order, const int *widths);    /* and back (an order
+                                           that doesn't name each column once is not used; either NULL) */
 
 /* ---- the virtual tree (toolkit 2; docs/v1/toolkit-2.md 2): a tree that keeps no texts. The app's model says a
    node's children's ids when the node is opened, and a node's text, icon and badge when it is drawn. */

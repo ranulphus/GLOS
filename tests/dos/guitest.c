@@ -27,6 +27,9 @@
  *   GUITEST vtree       "GUITEST Virtual tree": a tree that keeps no texts: nodes asked
  *                       for when drawn, children's ids when a node is opened (one
  *                       has five thousand); badges; a node's children changed
+ *   GUITEST views       "GUITEST List views" (toolkit 2, step C3): the virtual list's
+ *                       columns moved by their heads, and its four views (detail, big
+ *                       icons, small icons, thumbnails the page draws)
  *   GUITEST tasks       "GUITEST Tasks" (toolkit 2, step C4): background work: a task
  *                       "reads" ten thousand rows in pieces on a thread of its own,
  *                       the list filling as they are posted; its progress dialog
@@ -720,6 +723,88 @@ static void vlist(void)
     say("vlist", "", 0);
 }
 
+/* ---- the virtual list's columns and views (toolkit 2, step C3): the same model as the vlist page, ten thousand
+   rows; thumbnails of three shapes, drawn here once (a landscape, a portrait, a square), and folders without */
+static unsigned thumbs[3][GUI_THUMB * GUI_THUMB];
+static const int thumb_wh[3][2] = { { 96, 72 }, { 64, 96 }, { 96, 96 } };
+
+static void w_row(void *ctx, int row, struct gui_vrow *out)
+{
+    int item = vdown ? vn - 1 - row : row, k = item % 3;
+    v_row(ctx, row, out);
+    if (item % 5) {                             /* (folders, every fifth, have none: their big icon) */
+        out->thumb = thumbs[k];
+        out->thumb_w = thumb_wh[k][0], out->thumb_h = thumb_wh[k][1];
+    }
+}
+
+static void w_view(struct gui_widget *w, int what)
+{
+    static const char *const names[] = { "detail", "icons", "small", "thumbs" };
+    int view = w->id;                           /* (the button's id: the view) */
+    (void)what;
+    gui_vlist_view(vl, view);
+    gui_focus(vl);                              /* (as a toolbar's view buttons do: the list keeps the keys) */
+    say("view %s", names[view], 0);
+}
+
+static void w_columns(struct gui_widget *w, int what)  /* the columns as the list has them now */
+{
+    int order[3], widths[3];
+    char text[64];
+    (void)w, (void)what;
+    gui_vlist_columns(vl, order, widths);
+    snprintf(text, sizeof text, "columns %d,%d,%d widths %d,%d,%d", order[0], order[1], order[2], widths[0], widths[1],
+             widths[2]);
+    say("%s", text, 0);
+}
+
+static void w_reset(struct gui_widget *w, int what)    /* the columns as they began */
+{
+    static const int order[] = { 0, 1, 2 }, widths[] = { 150, 70, 80 };
+    (void)w, (void)what;
+    gui_vlist_set_columns(vl, order, widths);
+    say("columns reset", "", 0);
+}
+
+static void views(void)
+{
+    static const char *const heads[] = { "Name", "Size", "Kind" };
+    static const int widths[] = { 150, 70, 80 };
+    static const struct gui_model model = { v_count, w_row, v_find, v_match, NULL };
+    struct gui_widget *box, *row;
+    int k, x, y;
+    for (k = 0; k < 3; k++)                     /* a sky, a ground and a sun, each its own size */
+        for (y = 0; y < thumb_wh[k][1]; y++)
+            for (x = 0; x < thumb_wh[k][0]; x++) {
+                int w = thumb_wh[k][0], h = thumb_wh[k][1], dx = x - w * 2 / 3, dy = y - h / 3;
+                unsigned c = y > h * 2 / 3 ? 0x2E7D32u + (unsigned)((y * 40 / h) << 8)
+                             : 0x1565C0u + (unsigned)((y * 100 / h) << 16) + (unsigned)(y * 60 / h << 8);
+                if (dx * dx + dy * dy < (w / 7) * (w / 7))
+                    c = 0xFFD54Fu;
+                thumbs[k][y * w + x] = c;
+            }
+    vn = 10000;
+    win = gui_window("GUITEST List views", 470, 300, 0);
+    box = gui_vbox(win->root, -1, -1);
+    gui_grow(box, 1);
+    row = gui_hbox(box, -1, 0);
+    gui_button(row, "&Detail", w_view, GUI_VIEW_DETAIL);
+    gui_button(row, "&Icons", w_view, GUI_VIEW_ICONS);
+    gui_button(row, "&Small", w_view, GUI_VIEW_SMALL);
+    gui_button(row, "&Thumbs", w_view, GUI_VIEW_THUMBS);
+    gui_button(row, "&Columns?", w_columns, 0);
+    gui_button(row, "&Reset", w_reset, 0);
+    vl = gui_vlist(box, 3, heads, widths, &model);
+    gui_vlist_multi(vl, 1);
+    gui_on(vl, v_on, 0);
+    gui_grow(vl, 1);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(vl);
+    say("views", "", 0);
+}
+
 /* ---- the virtual tree (toolkit 2, step C3). Ids: 1, 2, 3 at the top; a node's children are its id times ten
    and 1, 2, 3 (to three levels); but node 2's are five thousand leaves, 2000000 and on. */
 static struct gui_widget *vt;
@@ -922,6 +1007,8 @@ int main(int argc, char **argv)
         vtree();
     else if (!strcmp(what, "tasks"))
         tasks();
+    else if (!strcmp(what, "views"))
+        views();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

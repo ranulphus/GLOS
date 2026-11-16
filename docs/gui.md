@@ -76,6 +76,8 @@ compare, and costs a redraw twice a second for nothing.
 | editor | a file's bytes (below) |
 | list | rows of cells under a header that sorts; 16-pixel icons; several rows chosen with Ctrl and Shift; typing a name's first letters goes to it; or 32-pixel icons in a grid with their names (the file manager's folders) |
 | tree | nodes that open and close, their children added by the app when one first opens |
+| virtual list (toolkit 2) | a list that keeps no rows: the app's model says how many and gives the rows on the screen when they are drawn (`gui_vlist`, `struct gui_model`); chosen rows kept by id; sorting asked of the app (`GUI_ON_SORT`); columns resized and moved by their heads (`gui_vlist_columns` to keep the layout); four views: detail, big icons, small icons, thumbnails (`gui_vlist_view`; the rows' `thumb` pictures, `GUI_THUMB` square at most); rubber band; type-ahead by the model's `match` |
+| virtual tree (toolkit 2) | a tree that keeps only the ids on show: the model gives a node's children's ids when it opens, and their texts and icons when drawn (`gui_vtree`, `struct gui_tmodel`); badges |
 | choice | a button that drops its list of items down |
 | spin box, slider | a number in a range |
 | tabs, group, form, scrolling area, boxes, space, separator | containers and spacing |

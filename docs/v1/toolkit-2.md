@@ -376,14 +376,24 @@ which and why. The apps keep working at every step (they move as the toolkit doe
 - **Type-ahead** (fourth part, 2026-11-16): letters typed within a second of each other go to the row whose
   first cell begins so; one letter again and again goes on to the next such row. The search is the model's
   (`match`), since only the app has all the rows.
-- **Still to come in C3:** columns reordered, small-icon and thumbnail views, and `gui_list` and `gui_tree` on
-  top of the models.
+- **Columns moved, small icons, thumbnails** (fifth part, 2026-11-16): a column's head dragged sideways (more
+  than 5 pixels) moves the column, a bar showing where it will go; a press that stays put sorts, at its
+  release. The order is the widget's (the model's cells keep their numbers); `gui_vlist_columns` and
+  `gui_vlist_set_columns` read and set the order and the widths, for an app to keep them. `GUI_VIEW_SMALL`:
+  small icons in a grid, the name beside each; `GUI_VIEW_THUMBS`: the row's `thumb` (a picture of its own size,
+  `GUI_THUMB` = 96 pixels square at most, framed; made by the app, best by a task) or its big icon, the name
+  under. Both have the icon view's arrows and rubber band.
+- **Moved to C10:** `gui_list` and `gui_tree` on top of the models. Every app's list and tree would be drawn
+  anew, which changes every app's pictures; C10 moves the apps and makes their goldens again in any case, so the
+  old widgets go onto the models there, once (decided 2026-11-16, at the end of C3).
 - **Tests:** `vlist` (GUITEST's page: twenty rows, then ten thousand; End and Page Up; the app counts the
   distinct rows it was asked for, a few screens of ten thousand; sorted downward with the current row kept by
   its id; a range and a row more chosen; a column dragged wider; Enter; the icon view, the arrows in it, a
   rubber band over nine icons, and back), on the host and on the desktop in Loop A. `vtree` (GUITEST's page: nodes
   opened by the arrows; one with five thousand children and its end; the nodes asked for counted; badges; a
-  node's children changed with a folder open under it; Left out and Enter).
+  node's children changed with a folder open under it; Left out and Enter). `views` (GUITEST's page: the Name
+  column dragged past Size, the layout read back and reset; a head pressed still sorts; small icons, their
+  arrows and a band; thumbnails of three shapes and a folder's icon).
 
 ### C4 in detail (2026-11-16, before it is built)
 
