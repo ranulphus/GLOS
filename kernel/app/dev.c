@@ -84,6 +84,10 @@ static void raise(struct app *a, int irq)
         sched_nudge(a->thread);
 }
 
+/* Its timer is the PC's own (as it programmed it) and it has a handler for it: app.c's note of a timer that
+   has all but stopped. */
+int appdev_timer_real(const struct app *a) { return pit_real(a) && wants_irq0(a); }
+
 void appdev_irq0(struct app *a)
 {
     if (pit_real(a) && wants_irq0(a))

@@ -6255,6 +6255,8 @@ def apps_case(profile, card):
         checks["alarm"] = rc == 0 and "APP-ALARM-OK" in out
         if not checks["alarm"]:
             print("    %s alarm: rc=%d out=%r" % (tag, rc, out))
+            for l in [l for l in agent.log().split("\n") if "timer-starved" in l][-6:]:     # (the kernel's note of it)
+                print("    %s %s" % (tag, l[:300]))
         kill_spin = kill("spin", spin)          # (four jobs at once at most: the spinner makes room)
         # (other programs start meanwhile: the kernel writes its log a line at a time, 9 ms for a hundred
         # characters, and only urgent threads run until a line is out, which costs a 250 Hz timer an interrupt)

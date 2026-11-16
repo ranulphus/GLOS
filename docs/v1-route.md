@@ -524,8 +524,10 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
     are due) in one gate on 2026-11-15 (`APP-ALARM-FAIL alarms=3`, `irq0=3` in the kernel's line for the app);
     never before, not in the two gates after, and not in four runs alone. An app whose timer is the PC's own
     gets an interrupt only when the DOS side has answered the PC's last one, so something held the system VM
-    back a second at a time just then: to be instrumented (repeat `loopa-apps` on devserver and log why the
-    VM's thread waited).
+    back a second at a time just then. 120 alarm runs and ten rounds of the whole suite with a probe, under
+    load on devserver (2026-11-16), never saw it again. The kernel now notes it when it happens (`GLOS-APP
+    timer-starved ...`, with the VM's interrupt state: `kernel/app/app.c`), and the test prints the note: the
+    next failure's lines are the lead.
   - `timers-at-once`: `uclock` 4062 ms for 4000 (one BIOS tick more than its 1.5% allows), once on 2026-11-14
     and once on 2026-11-15, each time passing the next run.
 - **`apishell-486dx2-vbe`'s `ended`, now and then on devserver** (two gates of eight on 2026-11-15 and 16): two

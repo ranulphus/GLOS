@@ -181,6 +181,7 @@ int appdev_int33(struct app *a, struct rmregs *r);
 void appdev_init(struct app *a);
 void appdev_tick(struct app *a);        /* every kernel tick while it isn't paused (interrupts off) */
 void appdev_irq0(struct app *a);        /* the PC's timer interrupted */
+int appdev_timer_real(const struct app *a);     /* its timer is the PC's own, and it has a handler for it */
 void appdev_irq0_at(u32 tick);          /* ... at this tick (every time, apps or not) */
 
 #endif

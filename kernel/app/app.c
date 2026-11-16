@@ -874,6 +874,8 @@ void app_idle(struct app *a)
 /* Every kernel tick, and every interrupt of the PC's timer (interrupts
    off): the apps' own timers. Not while a session has the machine: their
    time stands still with them. */
+static void timer_note(void);
+
 void app_tick(void)
 {
     struct app *a;
@@ -885,6 +887,32 @@ void app_tick(void)
             if (a->v2)
                 api2_tick(a);
         }
+    timer_note();
+}
+
+/* An app whose timer is the PC's own has an interrupt from it only when the system VM's program has answered
+   the PC's last one (v86.c: the line is masked until then). Once, in a gate on devserver (2026-11-15,
+   apps-486dx2's alarm), an app had 3 of them in 3 seconds for 55, and nothing in the log said why; 130 runs
+   with a probe never saw it again. So the kernel notes it when it happens: the first app with a handler for
+   the timer that had fewer than three of its interrupts in half a second, and the VM's state then. A line
+   every half second while it lasts: not a warning (a program may mask the timer itself), but what to read when
+   a timer test fails. */
+static void timer_note(void)
+{
+    static u32 at, was, id;
+    struct app *a = apps;
+    u32 now = timer_ticks();
+    char state[160];
+    if (!a || !a->ctx || !appdev_timer_real(a))
+        return;
+    if (a->id == id && now - at < 512)
+        return;
+    if (a->id == id && now - at < 640 && a->nirq[0] - was < 3) {       /* (a sample of the last half second, not
+                                                   one left from before a pause) */
+        vm_timer_state(state, sizeof state);
+        kprintf("GLOS-APP timer-starved id=%u irq0=%u %s\n", a->id, a->nirq[0], state);
+    }
+    id = a->id, was = a->nirq[0], at = now;
 }
 
 void app_irq0(void)

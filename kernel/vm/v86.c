@@ -282,6 +282,19 @@ void vm_direct(int on)
     vm_sync_mask();
 }
 
+/* The PC's timer interrupt as the system VM has it, for app.c's note of an app whose timer has all but stopped:
+   the interrupts taken so far, the VM's mask, the lines raised and not yet answered by the VM's program, what
+   the chip is given, whether the VM would take one now, and where it is. */
+u32 vm_phys0;
+u32 vm_timer_state(char *buf, u32 max)
+{
+    struct trapframe *tf = vm_frame();
+    return (u32)ksnprintf(buf, max, "phys0=%u vmimr=%04x inflight=%04x physmask=%04x vif=%u waiting=%u idle_agent=%u "
+                          "at=%04x:%04x vm86=%u", vm_phys0, vpic_imr(&vm.pic), vm.pic.inflight, vm.phys_mask,
+                          vm.thread->vif, vm.waiting, vm.idle_agent, (u32)tf->cs & 0xFFFF, (u32)tf->eip & 0xFFFF,
+                          (tf->eflags & FL_VM) != 0);
+}
+
 void vm_sync_mask(void)
 {
     u16 m = (u16)(((vpic_imr(&vm.pic) | vm.pic.inflight) & ~kernel_lines) | (kernel_masked & kernel_lines));
@@ -329,6 +342,7 @@ static void vm_irq_line(struct trapframe *tf)
         return;
     }
     if (irq == 0) {
+        vm_phys0++;
         timer_pit_irq(!session_active() && !app_vm_psp());      /* (the kernel's tick is checked against it,
                                                    core/timer.c: when no program has the timer's ports) */
         app_irq0();                             /* (apps whose timer is the PC's count it too) */

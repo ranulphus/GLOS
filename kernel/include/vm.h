@@ -113,6 +113,7 @@ void vm_work_turn(struct trapframe *tf);        /* at a return to user mode */
 void vm_start(struct bootinfo *bi);              /* sets up and creates the VM thread */
 void vm_kick(void);                             /* the VM may have something to do: wake it */
 struct trapframe *vm_frame(void);               /* the VM thread's V86 frame */
+u32 vm_timer_state(char *buf, u32 max);         /* the PC's timer interrupt as the VM has it, in words (a note's) */
 void selftest_report(void);                     /* core/main.c, /SELFTEST */
 void vm_exception(struct trapframe *tf);        /* a CPU exception from V86 mode */
 void vm_return(struct trapframe *tf);           /* last thing before IRET to V86 mode */
