@@ -3,7 +3,7 @@
 jobs.py's own GuiDriver, each shot compared byte for byte with the host's golden (make gui-goldens), as the gui
 suite does in 86Box. The desktop is put at 640x480xBITS first if it isn't; BITS from GLOS_BENCH_BITS (16).
 
-The bench PC (tests/bench/README.md): GLOS in agent mode at GLOS_BENCH_HOST (192.168.1.33), its host key in
+The bench PC (tests/bench/README.md): GLOS in agent mode at GLOS_BENCH_HOST (bench-g400.local: its address is DHCP's and has changed), its host key in
 known_hosts under the name bench-g400, logins by GLOS_BENCH_KEY (~/.ssh/glos_bench)."""
 import os
 import subprocess
@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests", "loopa"))
 os.chdir(ROOT)
 import jobs  # noqa: E402
 
-HOST = os.environ.get("GLOS_BENCH_HOST", "192.168.1.33")
+HOST = os.environ.get("GLOS_BENCH_HOST", "bench-g400.local")
 KEY = os.path.expanduser(os.environ.get("GLOS_BENCH_KEY", "~/.ssh/glos_bench"))
 
 

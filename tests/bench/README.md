@@ -15,7 +15,7 @@ without one `GLOS.EXE /VERBOSE` shows the kernel's log on the text screen.
 
 The PC, set in the environment:
 
-- `GLOS_BENCH_HOST`: its address (default 192.168.1.33).
+- `GLOS_BENCH_HOST`: its address (default `bench-g400.local`, the name GLOS announces: the address is DHCP's, .33 until 2026-11-16 and .41 since).
 - `GLOS_BENCH_KEY`: the private key its `KEYS\AUTHKEYS` lets in (default `~/.ssh/glos_bench`; not the repository's
   test key, which anyone can read).
 - `GLOS_BENCH_HOST_LAN`: this host's address as the PC reaches it (default: found from the route to it).
