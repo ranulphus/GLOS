@@ -58,6 +58,20 @@ void gui_draw_check(struct gfx_surface *s, int x, int y, int on, int enabled);
 void gui_draw_radio(struct gfx_surface *s, int x, int y, int on, int enabled);
 void gui_strip_amp(char *out, const char *in, int room);       /* "&File" -> "File" */
 
+/* ---- command.c */
+struct gui_cmd {
+    int id;
+    char *text, *shortcut, *tip;
+    const unsigned char *icon;
+    unsigned key, mods;                 /* the shortcut's (key 0: none) */
+    unsigned state;                     /* GUI_CS_ */
+};
+struct gui_cmd *gui_cmd_find(struct gui_window *w, int id);
+struct gui_cmd *gui_cmd_key(struct gui_window *w, unsigned key, unsigned mods);
+void gui_cmd_update(struct gui_window *w);      /* the window's on_update */
+void gui_cmd_free(struct gui_window *w);
+extern const struct gui_class gui_toolbar_class;
+
 /* ---- menu.c */
 int gui_menubar_key(struct gui_window *w, struct gui_ev *e, int late);  /* Alt+letter, F10, shortcuts: 1 taken.
                                            late 0: before the focus has the key (shortcuts with Ctrl or Alt); 1: after

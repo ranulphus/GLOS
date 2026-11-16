@@ -302,12 +302,35 @@ which and why. The apps keep working at every step (they move as the toolkit doe
   and a margin; a scroll bar's width is the theme's (14 in the built-in themes: the kernel's table said 16, which
   nothing had read). A tab is as wide as its title in bold needs.
 - **Pictures that changed at the normal size:** the Control Panel's (its Desktop page has the new setting; its
-  tabs are a pixel or two wider for their bold titles). Everything else is byte for byte as before.
+  tabs are a pixel or two wider for their bold titles) and the tabs page's list style, for the same reason.
+  Everything else is byte for byte as before.
 - **Not yet by the font:** check boxes and radio buttons (13 pixels), the tree's indent, big icons' cells, the
   windows' own sizes where an app gives them in pixels (the gallery's 440x330 holds the large size). Those go
   with the widgets' own steps.
 - **Tests:** `text-small`, `text-large` (the gallery's pages, a menu, the About box) and `text-change` (normal,
   large, small and normal again: the first picture), on the host and on the desktop in Loop A.
+
+### C2 as built, first part: commands and the toolbar (2026-11-16)
+
+- **Commands** (`sdk/gui/command.c`): `gui_command(win, id, text, shortcut, icon, tip)` sets one, once;
+  `gui_command_enable`, `_check` and `_radio` change its state, and every place that shows it follows. The
+  window's `on_update` is asked which commands can be used now before a menu opens, before a shortcut is looked
+  up and before a toolbar is drawn; `on_command` is told the id wherever it came from. A shortcut belongs to
+  the command, so a window with a toolbar and no menu bar has its shortcuts too.
+- **Menus show commands** (`gui_menu_command(menu, id)`): the text, shortcut and state are the command's, looked
+  up when the menu opens; with icons, where the commands have them (the texts then start past the icons); a
+  dot for the chosen one of a group; a checked command with an icon is framed. Items given by `gui_menu_item`
+  are as they were.
+- **The toolbar** (`sdk/gui/toolbar.c`; `gui_toolbar`, `gui_toolbar_command`, `_sep`, `_text`): under the menu
+  bar; a button a command, its icon (its text beside it if asked, its text alone where it has no icon), greyed
+  while it can't be used, held in while it is checked or pressed, framed under the pointer. What doesn't fit
+  the window's width is behind a button at the bar's end, in a menu of the same commands. It never has the
+  keyboard (D34).
+- **Still to come in C2:** tooltips, context menus, the status bar's sections, submenus, drop-down buttons and
+  fields in the toolbar.
+- **Tests:** `commands` (GUITEST's commands page: the menus with icons, a tick and a dot; the update hook
+  greying Paste until Copy; a button pressed, a toggle held in, shortcuts; texts on the toolbar; the window
+  made narrow and the overflow's menu).
 
 ## Settled at the owner's review (2026-11-06)
 

@@ -1,0 +1,46 @@
+# Commands, and the toolbar (toolkit 2, step C2; docs/v1/toolkit-2.md 1, 7): GUITEST's commands page. A command is
+# set once (its text, shortcut, icon, state) and the menus and the toolbar show it: icons in the menu, a tick, the
+# dot of a group of three; the update hook greys Paste until Copy has been used; a toolbar button pressed by the
+# mouse, a toggle held in, shortcuts; the toolbar with texts; and the window made narrow, where the toolbar's end
+# goes into its menu.
+run GUITEST.EXE commands
+wait "GUITEST Commands"
+shot start "GUITEST Commands"
+key alt+f
+shot menu-file ""
+key right
+shot menu-edit ""
+key right
+shot menu-view ""
+key esc
+click "GUITEST Commands" 118 30
+key ctrl+b
+shot copied-bold "GUITEST Commands"
+key alt+e
+shot menu-edit-paste ""
+key p
+key alt+v
+key l
+key alt+v
+shot menu-view-large ""
+key esc
+key f7
+shot texts "GUITEST Commands"
+key f7
+key f6
+shot narrow "GUITEST Commands"
+click "GUITEST Commands" 138 30
+shot overflow ""
+key esc
+key f6
+shot wide-again "GUITEST Commands"
+key ctrl+s
+key alt+f4
+gone "GUITEST Commands"
+expect GUI commands
+expect GUI command copy
+expect GUI command bold
+expect GUI command paste
+expect GUI command large
+expect GUI command save
+expect GUI end

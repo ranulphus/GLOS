@@ -763,6 +763,7 @@ void gui_close(struct gui_window *w)
             break;
         }
     free(w->back_mem);
+    gui_cmd_free(w);
     free(w);
 }
 
@@ -1293,8 +1294,12 @@ int gui_step(unsigned wait_ms)
     } u;
     struct os_event ev;
     int got, how;
-    for (w = G.wins; w; w = w->next)
+    for (w = G.wins; w; w = w->next) {
+        if (w->toolbar && w->on_update)         /* (a toolbar shows what can be used now: the app asked before it
+                                                   is drawn; what changed damages it) */
+            gui_cmd_update(w);
         redraw(w);
+    }
     got = glos_event(&u, sizeof u, until_due(wait_ms), 0) > 0;
     if (got) {
         how = os_from(&u.ev, &ev);

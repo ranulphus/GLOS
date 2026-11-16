@@ -12,6 +12,11 @@
  *   GUITEST tabs        "GUITEST Tabs": ten pages in tabs too many for a row,
  *                       and buttons that change their style (rows, scroll,
  *                       list) and the window's width
+ *   GUITEST commands    "GUITEST Commands" (toolkit 2, step C2): commands set once
+ *                       and shown by the menus and a toolbar: icons, a toggle,
+ *                       a group of three, one that can be used only after
+ *                       another (the update hook); a button that makes the
+ *                       window narrow, so the toolbar's end goes into its menu
  *   GUITEST names DIR   files in DIR named in DOS's code page (GLOSCP), then
  *                       the file dialog there: the name chosen, as DOS's
  *                       bytes (M10 step G)
@@ -363,6 +368,133 @@ static void tabs(void)
 }
 
 /* DOS names in the page DOS has: what M10's suite makes (letters the 437 upper-casing leaves alone). */
+/* ---- commands (toolkit 2, step C2) */
+enum { K_NEW = 100, K_OPEN, K_SAVE, K_CUT, K_COPY, K_PASTE, K_BOLD, K_SMALL, K_MEDIUM, K_LARGE, K_NARROW, K_TEXT,
+       K_ABOUT, K_EXIT };
+static unsigned char kicon[8][GUI_ICON_W * GUI_ICON_W];
+static struct gui_widget *kbar;
+static int kcopied, kbold, ksize = K_MEDIUM, knarrow, ktext;
+
+/* Icons made here, a shape and a colour each: a page, a folder, a disk, scissors' cross, two pages, a board, a
+   heavy B, an i. (Palette indices: 16 black, 231 white, the cube between.) */
+static void kicons(void)
+{
+    static const unsigned char colour[8] = { 231, 226, 27, 196, 231, 180, 16, 27 };
+    int k, x, y;
+    for (k = 0; k < 8; k++)
+        for (y = 0; y < 16; y++)
+            for (x = 0; x < 16; x++) {
+                int edge, in;
+                unsigned char c = 0;
+                switch (k) {
+                case 1: in = x >= 1 && x <= 14 && y >= 4 && y <= 13, edge = x == 1 || x == 14 || y == 4 || y == 13; break;
+                case 2: in = x >= 2 && x <= 13 && y >= 2 && y <= 13, edge = x == 2 || x == 13 || y == 2 || y == 13 ||
+                        (y >= 9 && x >= 5 && x <= 10); break;
+                case 3: in = 0, edge = (x == y || x == 15 - y) && x >= 3 && x <= 12; break;
+                case 4: in = (x >= 2 && x <= 9 && y >= 1 && y <= 10) || (x >= 6 && x <= 13 && y >= 5 && y <= 14),
+                        edge = ((x == 2 || x == 9) && y >= 1 && y <= 10) || ((y == 1 || y == 10) && x >= 2 && x <= 9) ||
+                               ((x == 6 || x == 13) && y >= 5 && y <= 14) || ((y == 5 || y == 14) && x >= 6 && x <= 13);
+                        break;
+                case 5: in = x >= 3 && x <= 12 && y >= 2 && y <= 14, edge = x == 3 || x == 12 || y == 2 || y == 14 ||
+                        (y <= 3 && x >= 6 && x <= 9); break;
+                case 6: in = 0, edge = (x >= 4 && x <= 5 && y >= 3 && y <= 12) || ((y == 3 || y == 7 || y == 12) && x >= 4 &&
+                        x <= 10) || (x >= 10 && x <= 11 && ((y >= 4 && y <= 6) || (y >= 8 && y <= 11))); break;
+                case 7: in = 0, edge = (x >= 7 && x <= 8 && ((y >= 2 && y <= 3) || (y >= 6 && y <= 13))); break;
+                default: in = x >= 3 && x <= 12 && y >= 1 && y <= 14, edge = x == 3 || x == 12 || y == 1 || y == 14; break;
+                }
+                if (edge)
+                    c = (unsigned char)(k == 3 ? 196 : k == 7 ? 27 : 16);
+                else if (in)
+                    c = colour[k];
+                kicon[k][y * 16 + x] = c;
+            }
+}
+
+static void kupdate(struct gui_window *w)       /* what can be used now, and what is on */
+{
+    gui_command_enable(w, K_PASTE, kcopied);
+    gui_command_check(w, K_BOLD, kbold);
+    gui_command_radio(w, K_SMALL, ksize == K_SMALL);
+    gui_command_radio(w, K_MEDIUM, ksize == K_MEDIUM);
+    gui_command_radio(w, K_LARGE, ksize == K_LARGE);
+    gui_command_check(w, K_NARROW, knarrow);
+    gui_command_check(w, K_TEXT, ktext);
+}
+
+static void kcommand(struct gui_window *w, int id)
+{
+    static const char *const names[] = { "new", "open", "save", "cut", "copy", "paste", "bold", "small", "medium",
+                                         "large", "narrow", "text", "about" };
+    switch (id) {
+    case K_COPY: kcopied = 1; break;
+    case K_BOLD: kbold = !kbold; break;
+    case K_SMALL: case K_MEDIUM: case K_LARGE: ksize = id; break;
+    case K_NARROW:
+        knarrow = !knarrow;
+        gui_resize(w, knarrow ? 150 : 380, 160);
+        break;
+    case K_TEXT:
+        ktext = !ktext;
+        gui_toolbar_text(kbar, ktext);
+        break;
+    case K_EXIT: gui_quit(0); return;
+    }
+    say("command %s", names[id - K_NEW], 0);
+}
+
+static void commands(void)
+{
+    struct gui_menubar *bar;
+    struct gui_menu *m;
+    struct gui_widget *box;
+    static const struct { int id; const char *text, *key; int icon; const char *tip; } def[] = {
+        { K_NEW, "&New", "Ctrl+N", 0, "A new page" }, { K_OPEN, "&Open...", "Ctrl+O", 1, "Open a file" },
+        { K_SAVE, "&Save", "Ctrl+S", 2, "Save the page" }, { K_CUT, "Cu&t", "Ctrl+X", 3, "Cut" },
+        { K_COPY, "&Copy", "Ctrl+C", 4, "Copy" }, { K_PASTE, "&Paste", "Ctrl+V", 5, "Paste what was copied" },
+        { K_BOLD, "&Bold", "Ctrl+B", 6, "Bold text" }, { K_SMALL, "&Small", NULL, -1, NULL },
+        { K_MEDIUM, "&Medium", NULL, -1, NULL }, { K_LARGE, "&Large", NULL, -1, NULL },
+        { K_NARROW, "&Narrow window", "F6", -1, NULL }, { K_TEXT, "&Text on the toolbar", "F7", -1, NULL },
+        { K_ABOUT, "&About", "F1", 7, "About these commands" }, { K_EXIT, "E&xit", NULL, -1, NULL } };
+    unsigned i;
+    kicons();
+    win = gui_window("GUITEST Commands", 380, 160, 0);
+    win->on_command = kcommand;
+    win->on_update = kupdate;
+    for (i = 0; i < sizeof def / sizeof *def; i++)
+        gui_command(win, def[i].id, def[i].text, def[i].key, def[i].icon >= 0 ? kicon[def[i].icon] : NULL, def[i].tip);
+    bar = gui_menubar(win);
+    m = gui_menu(bar, "&File");
+    gui_menu_command(m, K_NEW), gui_menu_command(m, K_OPEN), gui_menu_command(m, K_SAVE);
+    gui_menu_sep(m);
+    gui_menu_command(m, K_EXIT);
+    m = gui_menu(bar, "&Edit");
+    gui_menu_command(m, K_CUT), gui_menu_command(m, K_COPY), gui_menu_command(m, K_PASTE);
+    m = gui_menu(bar, "&View");
+    gui_menu_command(m, K_BOLD);
+    gui_menu_sep(m);
+    gui_menu_command(m, K_SMALL), gui_menu_command(m, K_MEDIUM), gui_menu_command(m, K_LARGE);
+    gui_menu_sep(m);
+    gui_menu_command(m, K_NARROW), gui_menu_command(m, K_TEXT);
+    m = gui_menu(bar, "&Help");
+    gui_menu_command(m, K_ABOUT);
+    kbar = gui_toolbar(win);
+    gui_toolbar_command(kbar, K_NEW), gui_toolbar_command(kbar, K_OPEN), gui_toolbar_command(kbar, K_SAVE);
+    gui_toolbar_sep(kbar);
+    gui_toolbar_command(kbar, K_CUT), gui_toolbar_command(kbar, K_COPY), gui_toolbar_command(kbar, K_PASTE);
+    gui_toolbar_sep(kbar);
+    gui_toolbar_command(kbar, K_BOLD);
+    gui_toolbar_command(kbar, K_MEDIUM);        /* (a command with no icon: its text) */
+    gui_toolbar_sep(kbar);
+    gui_toolbar_command(kbar, K_ABOUT);
+    box = gui_vbox(win->root, -1, -1);
+    gui_grow(box, 1);
+    gui_label(box, "Commands are set once; the menus and the toolbar show them.");
+    gui_label(box, "Paste can be used once Copy has been.");
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("commands", "", 0);
+}
+
 static void names(const char *dir)
 {
     static const char *const n850[] = { "ÅRHUS.TXT", "ÉTÉ.TXT", "NIÑO.TXT", "ØL.TXT", 0 };
@@ -407,6 +539,8 @@ int main(int argc, char **argv)
         text();
     else if (!strcmp(what, "tabs"))
         tabs();
+    else if (!strcmp(what, "commands"))
+        commands();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

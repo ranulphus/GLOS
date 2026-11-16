@@ -18,6 +18,10 @@ struct item {
     unsigned key, mods;                 /* the shortcut's */
     int sep, off, checked;
     unsigned mnemonic;
+    int bound;                          /* it shows the owner's command of its id (gui_menu_command): the rest is
+                                           the command's, looked up when the menu opens */
+    int radio;                          /* checked: a dot (one of a group) */
+    const unsigned char *icon;          /* the command's (GUI_ICON_W), or NULL */
 };
 
 struct gui_menu {
@@ -146,6 +150,67 @@ void gui_menu_item(struct gui_menu *m, const char *text, int id, const char *sho
 }
 
 void gui_menu_sep(struct gui_menu *m) { add(m)->sep = 1; }
+
+void gui_menu_clear(struct gui_menu *m)
+{
+    int k;
+    for (k = 0; k < m->n; k++) {
+        free(m->items[k].text);
+        free(m->items[k].shortcut);
+    }
+    m->n = 0;
+}
+
+void gui_menu_free(struct gui_menu *m)
+{
+    if (M.menu == m)
+        gui_popdown_all();
+    gui_menu_clear(m);
+    free(m->items);
+    free(m->title);
+    free(m);
+}
+
+void gui_menu_command(struct gui_menu *m, int id)
+{
+    struct item *it = add(m);
+    it->text = strdup("?");                     /* (until its window's command is looked up: resolve) */
+    it->id = id;
+    it->bound = 1;
+}
+
+/* The items that show commands, as owner's commands are now. */
+static void resolve(struct gui_window *owner, struct gui_menu *m)
+{
+    int i;
+    for (i = 0; i < m->n; i++) {
+        struct item *it = &m->items[i];
+        struct gui_cmd *c = it->bound ? gui_cmd_find(owner, it->id) : NULL;
+        if (!c)
+            continue;
+        if (strcmp(it->text, c->text)) {
+            free(it->text);
+            it->text = strdup(c->text);
+        }
+        it->mnemonic = mnemonic_of(it->text);
+        free(it->shortcut);
+        it->shortcut = c->shortcut ? strdup(c->shortcut) : NULL;
+        it->key = 0;                            /* (the shortcut is the command's: gui_cmd_key) */
+        it->off = (c->state & GUI_CS_OFF) != 0;
+        it->checked = (c->state & GUI_CS_CHECKED) != 0;
+        it->radio = (c->state & GUI_CS_RADIO) != 0;
+        it->icon = c->icon;
+    }
+}
+
+static int indent(const struct gui_menu *m)     /* where the items' text starts: past the ticks, or the icons */
+{
+    int i;
+    for (i = 0; i < m->n; i++)
+        if (m->items[i].icon)
+            return GUI_ICON_W + 8;
+    return 18;
+}
 
 static struct item *find_id(struct gui_menu *m, int id)
 {
@@ -349,12 +414,23 @@ static void view_draw(struct gui_widget *w, struct gfx_surface *s)
         }
         if (hot)
             gfx_fill(s, w->r.x + 1, y, w->r.w - 2, GUI_ROW_H + 2, GUI_CHOSEN);
-        if (it->checked) {
+        if (it->icon) {                         /* the command's icon; checked: framed, as a button held in */
+            int iy = y + (GUI_ROW_H + 2 - GUI_ICON_W) / 2;
+            if (it->off)
+                gui_draw_icon_dim(s, w->r.x + 3, iy, it->icon, GUI_ICON_W);
+            else
+                gui_draw_icon(s, w->r.x + 3, iy, it->icon, GUI_ICON_W);
+            if (it->checked)
+                gfx_frame(s, w->r.x + 1, iy - 2, GUI_ICON_W + 4, GUI_ICON_W + 4, fg);
+        } else if (it->checked && it->radio) {
+            static const unsigned char dot[5] = { 0x70, 0xF8, 0xF8, 0xF8, 0x70 };
+            gfx_mono(s, w->r.x + 6, y + (GUI_ROW_H + 2 - 5) / 2, dot, 5, 5, 1, fg, GFX_NONE);
+        } else if (it->checked) {
             static const unsigned char tick[8] = { 0x01, 0x03, 0x86, 0xCC, 0x78, 0x30, 0x00, 0x00 };
             gfx_fill(s, w->r.x + 3, y + 2, 12, 12, hot ? GUI_CHOSEN : GUI_FIELD);
             gfx_mono(s, w->r.x + 5, y + 5, tick, 8, 8, 1, fg, GFX_NONE);
         }
-        gui_draw_text(s, w->r.x + 18, y + 2, gui_font, it->text, fg);
+        gui_draw_text(s, w->r.x + indent(m), y + 2, gui_font, it->text, fg);
         if (it->shortcut)
             gfx_text(s, w->r.x + w->r.w - 10 - sc, y + 2, gui_font, it->shortcut, -1, fg);
     }
@@ -498,6 +574,10 @@ static void open_menu(struct gui_window *owner, struct gui_menu *m, int sx, int 
     struct gui_widget *v;
     int i, tw = 60, sc = 0, h = 4, sw, shh;
     close_menu();
+    if (owner && !choice) {                     /* its commands as they are now: the app asked first */
+        gui_cmd_update(owner);
+        resolve(owner, m);
+    }
     for (i = 0; i < m->n; i++) {
         int k = gui_text_w(gui_font, m->items[i].text ? m->items[i].text : "");
         if (k > tw)
@@ -506,7 +586,7 @@ static void open_menu(struct gui_window *owner, struct gui_menu *m, int sx, int 
             sc = k;
         h += item_h(&m->items[i]);
     }
-    tw += 18 + 12 + (sc ? sc + 20 : 0);
+    tw += indent(m) + 12 + (sc ? sc + 20 : 0);
     if (choice && tw < choice->r.w)
         tw = choice->r.w;
     gui_screen_size(&sw, &shh);
@@ -554,14 +634,24 @@ int gui_menubar_key(struct gui_window *w, struct gui_ev *e, int late)
     struct gui_menubar *b = w->menubar;
     unsigned mods = e->mods & (GLOS_MOD_CTRL | GLOS_MOD_ALT | GLOS_MOD_SHIFT);
     int i, k;
-    if (!b || b->w.flags & GUI_HIDDEN)
-        return 0;
     if (late != !(mods & (GLOS_MOD_CTRL | GLOS_MOD_ALT)))
+        return 0;
+    if (w->ncmds) {                             /* a command's shortcut (menu bar or none), the app asked first
+                                                   what can be used now */
+        struct gui_cmd *c;
+        gui_cmd_update(w);
+        if ((c = gui_cmd_key(w, e->key, mods)) != NULL) {
+            if (w->on_command)
+                w->on_command(w, c->id);
+            return 1;
+        }
+    }
+    if (!b || b->w.flags & GUI_HIDDEN)
         return 0;
     for (i = 0; i < b->n; i++)                  /* a shortcut */
         for (k = 0; k < b->menus[i]->n; k++) {
             struct item *it = &b->menus[i]->items[k];
-            if (it->key && it->key == e->key && it->mods == mods && !it->off && !it->sep) {
+            if (it->key && !it->bound && it->key == e->key && it->mods == mods && !it->off && !it->sep) {
                 if (w->on_command)
                     w->on_command(w, it->id);
                 return 1;

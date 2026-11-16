@@ -153,6 +153,7 @@ struct gui_widget {
 #define GUI_W_BARE    16                /* GLOS_WIN_BARE */
 
 struct gui_menubar;
+struct gui_cmd;
 
 struct gui_window {
     struct gui_window *next;
@@ -173,11 +174,17 @@ struct gui_window {
     struct gui_widget *root;            /* a vertical box the size of the client area */
     struct gui_widget *focus, *capture, *hover;
     struct gui_menubar *menubar;
+    struct gui_widget *toolbar;         /* its toolbar (gui_toolbar), or NULL */
     struct gfx_region dirty;
     int relayout, shown, closing;
     int result;                         /* a modal window's answer (gui_modal) */
     void (*on_close)(struct gui_window *w);     /* the user asked for it to close (NULL: it closes) */
-    void (*on_command)(struct gui_window *w, int id);   /* a menu item or shortcut */
+    void (*on_command)(struct gui_window *w, int id);   /* a menu item, a toolbar's button or a shortcut */
+    void (*on_update)(struct gui_window *w);    /* which commands can be used now? (gui_command_enable, _check):
+                                                   asked before a menu opens, before a shortcut is looked up and
+                                                   before a toolbar is drawn */
+    struct gui_cmd *cmds;                       /* its commands (gui_command) */
+    int ncmds;
     void (*on_resize)(struct gui_window *w);
     int (*on_key)(struct gui_window *w, struct gui_ev *e);      /* keys no widget took: 1 taken */
     void (*on_popdown)(struct gui_window *w);   /* a pop-up lost the keyboard (a press elsewhere) */
@@ -329,13 +336,37 @@ struct gui_widget *gui_choice(struct gui_widget *parent, int chars);   /* a butt
 void gui_choice_add(struct gui_widget *w, const char *text);
 void gui_choice_clear(struct gui_widget *w);
 
+/* ---- commands (toolkit 2; docs/v1/toolkit-2.md 1): what the app can be asked to do, each set once for its
+   window; menus and toolbars show them, and follow when one changes. on_command is told the id. */
+void gui_command(struct gui_window *w, int id, const char *text, const char *shortcut, const unsigned char *icon,
+                 const char *tip);      /* made, or changed: "&Save", "Ctrl+S" (or NULL), a GUI_ICON_W icon (or NULL:
+                                           kept by the caller), a tooltip (or NULL) */
+void gui_command_enable(struct gui_window *w, int id, int on);
+void gui_command_check(struct gui_window *w, int id, int on);  /* a tick in a menu, a toolbar's button held in */
+void gui_command_radio(struct gui_window *w, int id, int on);  /* one of a group: a dot when it is the one chosen */
+unsigned gui_command_state(struct gui_window *w, int id);      /* GUI_CS_ */
+#define GUI_CS_OFF     1                /* it can't be used now */
+#define GUI_CS_CHECKED 2
+#define GUI_CS_RADIO   4
+
+/* ---- the toolbar (toolkit 2; docs/v1/toolkit-2.md 7): a bar under the menu bar whose buttons show commands:
+   an icon (and the text, if asked for; the text alone where a command has no icon), greyed while the command
+   can't be used, held in while it is checked. What doesn't fit goes into a menu at the bar's end. */
+struct gui_widget *gui_toolbar(struct gui_window *win);        /* the window's (made at the first call) */
+void gui_toolbar_command(struct gui_widget *bar, int id);
+void gui_toolbar_sep(struct gui_widget *bar);
+void gui_toolbar_text(struct gui_widget *bar, int on);         /* the commands' texts beside their icons */
+
 /* ---- menus */
 struct gui_menu;
 struct gui_menubar *gui_menubar(struct gui_window *w);
 struct gui_menu *gui_menu(struct gui_menubar *bar, const char *title);
 struct gui_menu *gui_menu_new(void);    /* for gui_popup_menu */
 void gui_menu_item(struct gui_menu *m, const char *text, int id, const char *shortcut);  /* "Ctrl+S", "F3", "Del" */
+void gui_menu_command(struct gui_menu *m, int id);      /* an item that shows the window's command of that id */
 void gui_menu_sep(struct gui_menu *m);
+void gui_menu_clear(struct gui_menu *m);               /* its items gone */
+void gui_menu_free(struct gui_menu *m);                /* a gui_menu_new one, gone */
 void gui_menu_enable(struct gui_menu *m, int id, int on);
 void gui_menu_check(struct gui_menu *m, int id, int on);
 void gui_popup_menu(struct gui_window *w, struct gui_menu *m, int x, int y);    /* at x, y of w's client area */
@@ -408,6 +439,8 @@ void gui_draw_focus(struct gfx_surface *s, const struct gfx_rect *r);  /* a dott
 void gui_draw_box(struct gfx_surface *s, const struct gfx_rect *r, unsigned face, int pressed);   /* a button's */
 void gui_draw_field(struct gfx_surface *s, const struct gfx_rect *r, int enabled);     /* white, framed */
 void gui_draw_icon(struct gfx_surface *s, int x, int y, const unsigned char *icon, int side);
+void gui_draw_icon_dim(struct gfx_surface *s, int x, int y, const unsigned char *icon, int side);       /* its shape,
+                                           as what can't be used now */
 int gui_is_focus(struct gui_widget *w);
 int gui_char_w(const struct gfx_font *f, unsigned c);   /* one character's advance */
 void gui_text_fit(struct gfx_surface *s, int x, int y, int w, const struct gfx_font *f, const char *text,

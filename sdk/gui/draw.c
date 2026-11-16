@@ -188,6 +188,18 @@ void gui_draw_icon(struct gfx_surface *s, int x, int y, const unsigned char *ico
         }
 }
 
+/* An icon's shape alone, in the colour of what can't be used now. */
+void gui_draw_icon_dim(struct gfx_surface *s, int x, int y, const unsigned char *icon, int side)
+{
+    int i, j;
+    if (!icon)
+        return;
+    for (j = 0; j < side; j++)
+        for (i = 0; i < side; i++)
+            if (icon[j * side + i])
+                gfx_fill(s, x + i, y + j, 1, 1, GUI_DIM);
+}
+
 /* A filled triangle 7 wide and 4 high (or 4 wide and 7 high) about cx, cy. */
 void gui_draw_arrow(struct gfx_surface *s, int cx, int cy, int dir, unsigned rgb)
 {
