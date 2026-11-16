@@ -503,6 +503,38 @@ In three parts, each with its GUITEST page and script, on the host and in Loop A
   shot is never taken with a pop-up or a tool window over it (the page's window is placed, and narrow enough
   for its floating pane to go beside it).
 
+### C6 in detail (2026-11-16, before it is built)
+
+Each part with GUITEST pages and scripts that drive the dialogs by keys alone, on the host and in Loop A:
+- **C6a, the combo box** (`gui_combo`): a field with a drop button. Its list is the app's items
+  (`gui_combo_add`) and its history: with `gui_combo_history(combo, n)`, a text accepted by Enter goes to the top
+  of the list (once). Typing drops a list of the items that begin with what is typed, without taking the keys
+  from the field; Up and Down walk it, Enter or a click takes one, Esc closes it; Alt+Down or F4 drops the whole
+  list. An app may complete from its own source (`gui_combo_source`: Files' address bar, the folders there are).
+  The field's text is the value (`gui_get_text`); `GUI_ON_ACTIVATE` at Enter, `GUI_ON_CHANGE` as it is typed.
+  The toolbar takes a combo box as an item (C2's owed fields).
+- **C6b, the small dialogs:** a message with a check box of "Don't ask again" or "Do this for all"
+  (`gui_message_check`: the button, and the box's state, which the app keeps); About (`gui_about`: the app's
+  icon, name, version, copyright, its licence, and a list of the libraries and icon sets it uses with theirs,
+  the toolkit's own credits added for every app); Folder (`gui_folder_dialog`: a virtual tree of the drives and
+  their folders, the path typed in a combo box, a New folder button).
+- **C6c, Open and Save** (`gui_file_dialog_ex` with `struct gui_file_opts`; `gui_file_dialog` keeps its form):
+  places down the left (the drives, the app's recent folders, the desktop's folder), the address as a combo box
+  with the folders typed completed, the files in a virtual list (detail and icon views, sorted by column), a
+  filter choice ("Pictures (*.BMP;*.PNG)"), the name field; an optional preview pane the app draws for the file
+  chosen (Images', Paint's); for saving an optional format or encoding choice. Long names where DOS has them
+  (INT 21h 71h); 8.3 names otherwise, as today.
+- **C6d, Find and replace** (`gui_find`): modeless, over its window; what to find and what to put in its place
+  as combo boxes with history; Match case, Whole words, Regular expressions; Find next, Replace, Replace all.
+  The app is told what to do (`on_find`) and searches its own text; the toolkit gives the matching
+  (`gui_match`, `sdk/gui/regex.c`: . * + ? [ ] ^ $ \ and groups for replacing, host-tested) so every app
+  searches alike.
+- **C6e, Colour** (`gui_colour_dialog`): swatches (sixteen basic colours, the theme's colours, the app's recent
+  ones), a saturation-and-value square with a hue bar, red, green and blue, hue, saturation and value, and hex,
+  each typed or moved by keys; the old colour beside the new.
+- **C6f, Font** (`gui_font_dialog`): GLOS's fonts (the interface's at small, normal and large, bold or not, the
+  fixed-width one, the smoothed scripts' where present), a size where a font has several, and a line of preview.
+
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
 - **Farm-Fresh** (FatCow; CC BY 3.0) for colour icons and **Font Awesome Free, solid** (CC BY 4.0) for the
