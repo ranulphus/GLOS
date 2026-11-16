@@ -27,6 +27,10 @@
  *   GUITEST vtree       "GUITEST Virtual tree": a tree that keeps no texts: nodes asked
  *                       for when drawn, children's ids when a node is opened (one
  *                       has five thousand); badges; a node's children changed
+ *   GUITEST tasks       "GUITEST Tasks" (toolkit 2, step C4): background work: a task
+ *                       "reads" ten thousand rows in pieces on a thread of its own,
+ *                       the list filling as they are posted; its progress dialog
+ *                       after a second, and Cancel
  *   GUITEST names DIR   files in DIR named in DOS's code page (GLOSCP), then
  *                       the file dialog there: the name chosen, as DOS's
  *                       bytes (M10 step G)
@@ -790,6 +794,80 @@ static void vtree(void)
     say("vtree", "", 0);
 }
 
+/* ---- background work (toolkit 2, step C4) */
+static struct gui_widget *kl;
+static int kn;                                  /* the rows that have arrived */
+
+static int k_count(void *ctx) { (void)ctx; return kn; }
+
+static void k_row(void *ctx, int row, struct gui_vrow *out)
+{
+    static char name[24];
+    (void)ctx;
+    snprintf(name, sizeof name, "Row %05d", row);
+    out->cell[0] = name;
+    out->icon = gui_icon("file", 0);
+    out->id = (unsigned long)row + 1;
+}
+
+static void k_arrived(void *data)               /* (the window's thread) a piece of rows has come */
+{
+    kn += (int)(long)data;
+    gui_vlist_changed(kl);
+}
+
+static void k_work(struct gui_task *t, void *arg)       /* (a worker's thread) a hundred pieces, a tenth of a second
+                                                           each: ten seconds, so that Loop A's driver, seconds a
+                                                           step on a 486, sees the dialog and can cancel */
+{
+    char line[48];
+    int i;
+    (void)arg;
+    for (i = 0; i < 100 && !gui_task_cancelled(t); i++) {
+        glos_sleep(100);
+        gui_task_post(t, k_arrived, (void *)100L);
+        snprintf(line, sizeof line, "%d of 10000 rows", (i + 1) * 100);
+        gui_task_progress(t, i + 1, 100, line);
+    }
+}
+
+static void k_done(struct gui_window *w, void *arg, int cancelled)
+{
+    (void)w, (void)arg;
+    if (cancelled)
+        say("read cancelled%s", "", 0);
+    else
+        say("read done rows%s %d", "", kn);
+}
+
+static void k_read(struct gui_widget *w, int what)
+{
+    (void)w, (void)what;
+    kn = 0;
+    gui_vlist_changed(kl);
+    if (!gui_task_start(win, "Reading rows", k_work, NULL, k_done, GUI_TASK_DIALOG))
+        say("no threads%s", "", 0);
+    else
+        say("reading%s", "", 0);
+}
+
+static void tasks(void)
+{
+    static const char *const heads[] = { "Name" };
+    static const struct gui_model model = { k_count, k_row, NULL, NULL, NULL };
+    struct gui_widget *box, *row;
+    win = gui_window("GUITEST Tasks", 300, 220, 0);
+    box = gui_vbox(win->root, -1, -1);
+    gui_grow(box, 1);
+    row = gui_hbox(box, -1, 0);
+    gui_button(row, "&Read", k_read, 0);
+    kl = gui_vlist(box, 1, heads, NULL, &model);
+    gui_grow(kl, 1);
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("tasks", "", 0);
+}
+
 static void names(const char *dir)
 {
     static const char *const n850[] = { "ÅRHUS.TXT", "ÉTÉ.TXT", "NIÑO.TXT", "ØL.TXT", 0 };
@@ -842,6 +920,8 @@ int main(int argc, char **argv)
         icons_page();
     else if (!strcmp(what, "vtree"))
         vtree();
+    else if (!strcmp(what, "tasks"))
+        tasks();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

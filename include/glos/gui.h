@@ -164,6 +164,7 @@ struct gui_cmd;
 struct gui_window {
     struct gui_window *next;
     struct gui_window *owner;           /* a pop-up's or a dialog's */
+    struct gui_window *modal_prev;      /* (while it is the modal window without gui_modal: the one before it) */
     unsigned id;                        /* GLOS's: the window's handle */
     unsigned flags;                     /* GUI_W_ */
     struct {                            /* as it was asked for: where, GLOS_WF_ANYWHERE or not, its title */
@@ -507,6 +508,26 @@ const char *gui_path_name(const char *path);    /* the last part */
 const char *gui_dos_text(const char *dos, char *out, int room); /* a name or path DOS has, as text to show: out */
 int gui_text_dos(const char *text, char *out, int room);        /* text typed, as DOS's bytes: 0, or -1 if the
                                            code page hasn't got one of its characters ('?' there) or out is short */
+
+/* ---- background work (toolkit 2; docs/v1/toolkit-2.md 3): a function run on a thread of the app's own, while
+   the window's thread goes on taking events. Only the window's thread touches widgets: the work tells it things
+   by the calls below. The program is linked with @gloswrap.opt (libglos's lock round the C library). */
+struct gui_task;
+typedef void (*gui_task_fn)(struct gui_task *t, void *arg);
+#define GUI_TASK_DIALOG 1               /* a dialog over the owner (the title, a bar, a line, Cancel) once the work
+                                           has run a second */
+struct gui_task *gui_task_start(struct gui_window *owner, const char *title, gui_task_fn work, void *arg,
+                                void (*done)(struct gui_window *owner, void *arg, int cancelled), unsigned flags);
+                                        /* work(task, arg) runs on a worker's thread when one is free; done (or
+                                           NULL) on the window's thread when it has returned. NULL: no threads */
+void gui_task_cancel(struct gui_task *t);       /* asked: the work looks (gui_task_cancelled) and returns early */
+void gui_task_threads(int n);           /* the workers (before the first task): 2, and 1 on a 486, unless said */
+/* From the work: */
+void gui_task_progress(struct gui_task *t, int done, int total, const char *text);     /* (text NULL: as it was) */
+int gui_task_cancelled(struct gui_task *t);
+void gui_task_post(struct gui_task *t, void (*fn)(void *data), void *data);    /* fn(data) on the window's thread,
+                                           in the order posted (rows for a list, a picture made): the data is
+                                           the app's to free there */
 
 /* ---- the clipboard (GLOS_FN_CLIP) */
 int gui_clip_set(const char *text, size_t n);

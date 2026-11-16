@@ -1,0 +1,23 @@
+# Background work (toolkit 2, step C4; docs/v1/toolkit-2.md 3): GUITEST's tasks page. A task "reads" ten thousand
+# rows in a hundred pieces (ten seconds) on a thread of its own and posts each piece to the window's thread, where the list
+# grows; after a second its progress dialog is over the window (its bar and line change as it goes: masked);
+# when the work has returned the dialog goes and the list has every row. Read again, and Esc in the dialog
+# cancels: the work stops early and says so.
+run GUITEST.EXE tasks
+wait "GUITEST Tasks"
+key alt+r
+wait "Reading rows"
+shot dialog "Reading rows" 0 0 300 46
+gone "Reading rows"
+shot done "GUITEST Tasks"
+key alt+r
+wait "Reading rows"
+key esc
+gone "Reading rows"
+key alt+f4
+gone "GUITEST Tasks"
+expect GUI tasks
+expect GUI reading
+expect GUI read done rows 10000
+expect GUI read cancelled
+expect GUI end

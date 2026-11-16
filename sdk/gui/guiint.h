@@ -82,6 +82,13 @@ void gui_cmd_update(struct gui_window *w);      /* the window's on_update */
 void gui_cmd_free(struct gui_window *w);
 extern const struct gui_class gui_toolbar_class;
 
+/* ---- task.c */
+extern int (*gui_post_hook)(unsigned code);     /* (core.c) an event of the app's own: 1 if it was the tasks'
+                                                   (handled); NULL until a task is started */
+void gui_modal_on(struct gui_window *w);        /* (core.c) w shown, the app's other windows deaf, without waiting
+                                                   for its end (gui_modal waits) ... */
+void gui_modal_off(struct gui_window *w);       /* ... and heard again */
+
 /* ---- tip.c */
 void gui_tip_hide(void);
 void gui_tip_forget(struct gui_widget *w);

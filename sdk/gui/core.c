@@ -1364,6 +1364,9 @@ int gui_step(unsigned wait_ms)
             }
             if (app_events)
                 app_events(&u.ev);
+        } else if (how == 0 && u.ev.kind == GLOS_EV_POST && gui_post_hook
+                   && gui_post_hook(((const struct glos_ev_post *)&u.ev)->code)) {
+            /* (the tasks' own: what they had for this thread is done) */
         } else if (how == 0 && app_events)
             app_events(&u.ev);
     }
@@ -1406,6 +1409,29 @@ int gui_modal(struct gui_window *w)
     w->closing = 0;
     gui_close(w);
     return r;
+}
+
+int (*gui_post_hook)(unsigned code);    /* (task.c sets it at the first task: a program with no tasks has no
+                                           threads, and is not linked with what they need) */
+
+void gui_modal_on(struct gui_window *w)
+{
+    w->modal_prev = G.modal;
+    G.modal = w;
+    gui_show(w, 1);
+}
+
+void gui_modal_off(struct gui_window *w)
+{
+    struct gui_window *m;
+    if (G.modal == w) {
+        G.modal = w->modal_prev;
+    } else {                                    /* (one under another: taken out of the chain) */
+        for (m = G.modal; m && m->modal_prev != w; m = m->modal_prev)
+            ;
+        if (m)
+            m->modal_prev = w->modal_prev;
+    }
 }
 
 void gui_end_modal(struct gui_window *w, int result)

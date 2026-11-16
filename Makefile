@@ -129,7 +129,7 @@ host-test-run:
 	  tests/host/gfx_test.c tests/host/qdev.c $(GFX_SRCS) kernel/lib/png.c && build/host/gfx_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/wm_test \
 	  tests/host/wm_test.c tests/host/qdev.c $(WM_SRCS) $(GFX_SRCS) kernel/lib/png.c && build/host/wm_test
-	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Ikernel/include -Iinclude \
+	@$(HOST_CC) -m32 -O1 -g -pthread -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Ikernel/include -Iinclude \
 	  -DGLOSSHIM_NO_MAIN \
 	  -o build/host/gui_test tests/host/gui_test.c tests/host/glosshim.c $(filter-out sdk/gui/field.c,$(GUI_SRCS)) \
 	  $(GFX_SRCS) kernel/lib/png.c $(CFG_SRCS) $(CP_SRCS) && build/host/gui_test
@@ -162,7 +162,7 @@ host-test-run:
 # (tests/gui/NAME.txt) run at 8, 16 and 32 bits, its shots written to build/host/gui/ (the goldens Loop A's
 # gui suites compare with). `make gui-goldens` (in the dev container).
 GUI_SRCS := $(wildcard sdk/gui/*.c)
-GUI_HOST := $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Ikernel/include -Iinclude
+GUI_HOST := $(HOST_CC) -m32 -O1 -g -pthread -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Ikernel/include -Iinclude
 build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glos/gui.h include/glos/api.h include/glos/glos.h \
                     tests/host/glosshim.c kernel/include/keymap.h $(CFG_SRCS) $(CP_SRCS) include/glos/config.h include/glos/tz.h
 	@mkdir -p build/host
@@ -927,10 +927,13 @@ build/dj/RUNTEST.EXE: tests/dos/runtest.c build/sdk/libglos.a tools/glosmark.py
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
 	$(Q)python3 tools/glosmark.py $@
-build/dj/GUITEST.EXE: tests/dos/guitest.c build/sdk/libgui.a build/sdk/libglos.a tools/glosmark.py
+# (It uses the toolkit's tasks, so it has threads: linked with libglos's lock round the C library, and checked.)
+build/dj/GUITEST.EXE: tests/dos/guitest.c build/sdk/libgui.a build/sdk/libglos.a build/sdk/gloswrap.opt tools/glosmark.py tools/wrapcheck.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
-	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -o $@ $< build/sdk/libgui.a build/sdk/libglos.a
+	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -o $@ $< build/sdk/libgui.a build/sdk/libglos.a @build/sdk/gloswrap.opt \
+	  -Wl,-Map,build/dj/GUITEST.map -Wl,--cref
+	$(Q)python3 tools/wrapcheck.py sdk/libglos/wrap.list build/dj/GUITEST.map
 	$(Q)python3 tools/glosmark.py $@
 # The native apps for DOS: build/apps/NAME.EXE.
 APP_EXES := $(foreach a,$(APPS),build/apps/$(shell echo $(a) | tr a-z A-Z).EXE)

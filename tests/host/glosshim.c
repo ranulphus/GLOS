@@ -51,7 +51,7 @@ int app_main(int argc, char **argv);
 #include "../../kernel/wm/theme.c"      /* the built-in themes, as the kernel has them (themes[], theme_find) */
 static const struct theme *shim_theme;  /* set by a script's `theme NAME`; else GLOS_HOST_THEME's, or Slate */
 
-enum { HEV_KEY = 1, HEV_MOUSE, HEV_FOCUS, HEV_RESIZE, HEV_CLOSE, HEV_LAUNCH, HEV_SYSKEY, HEV_THEME };
+enum { HEV_KEY = 1, HEV_MOUSE, HEV_FOCUS, HEV_RESIZE, HEV_CLOSE, HEV_LAUNCH, HEV_SYSKEY, HEV_THEME, HEV_POST };
 struct hev {
     unsigned type, window, time;
     int x, y;
@@ -181,7 +181,16 @@ int glos_init(const char *name, const char *help, const char *category) { (void)
 int glos_error(void) { return GLOS_E_REFUSED; }         /* (what gives a handle and gave none: not on the host) */
 unsigned glos_app(void) { return 1; }
 int glos_yield(void) { return 0; }
-int glos_sleep(unsigned ms) { H.clock += ms; return 0; }
+static int me_thread(void);
+static void sleep_thread(unsigned ms);
+int glos_sleep(unsigned ms)             /* (a made thread's sleep is until the clock has moved so far) */
+{
+    if (me_thread())
+        sleep_thread(ms);
+    else
+        H.clock += ms;
+    return 0;
+}
 unsigned glos_ticks(void) { return H.clock; }
 void *glos_ptr(unsigned linear) { return (void *)(size_t)linear; }
 
@@ -1031,6 +1040,8 @@ static void png_out(struct hwin *w, const char *name)
     free(out);
 }
 
+static int threads_made(void);
+
 /* The script's next commands, up to one that makes events or lets time pass: 1, or 0 at its end. */
 static int step(void)
 {
@@ -1050,7 +1061,25 @@ static int step(void)
         }
         if (!word(&p, cmd, sizeof cmd) || cmd[0] == '#')
             continue;
-        if (!strcmp(cmd, "run") || !strcmp(cmd, "wait") || !strcmp(cmd, "gone") || !strcmp(cmd, "expect")) {
+        if (!strcmp(cmd, "wait") || !strcmp(cmd, "gone")) {     /* a window there, or gone: with background
+                                                   work (toolkit 2's tasks) it may take the app a while, so time
+                                                   passes, a tenth of a second at a go, until it is so */
+            static int waited;
+            int there = word(&p, a, sizeof a) && by_title(a) != NULL;
+            if (there != (cmd[0] == 'w') && threads_made()) {  /* (an app with no threads has nothing under way:
+                                                   a window that isn't there is another program's, which only
+                                                   Loop A runs) */
+                if (++waited > 600)
+                    fail("%s \"%s\": not so after a minute", cmd, a);
+                fseek(H.script, at, SEEK_SET);
+                H.line--;
+                H.clock += 100;
+                return 1;
+            }
+            waited = 0;
+            continue;
+        }
+        if (!strcmp(cmd, "run") || !strcmp(cmd, "expect")) {
             continue;
         } else if (!strcmp(cmd, "key") || !strcmp(cmd, "quick")) {
             while (word(&p, a, sizeof a))
@@ -1215,6 +1244,7 @@ static int give(const struct hev *e, void *buf, unsigned room)
         struct glos_ev_focus focus;
         struct glos_ev_size size;
         struct glos_ev_shell shell;
+        struct glos_ev_post post;
     } u;
     unsigned n = sizeof u.ev;
     memset(&u, 0, sizeof u);
@@ -1243,6 +1273,10 @@ static int give(const struct hev *e, void *buf, unsigned room)
     case HEV_THEME:
         u.ev.kind = GLOS_EV_THEME;
         break;
+    case HEV_POST:
+        u.ev.kind = GLOS_EV_POST, n = sizeof u.post;
+        u.post.code = e->key, u.post.a = (unsigned)e->x, u.post.b = (unsigned)e->y, u.post.c = e->buttons;
+        break;
     case HEV_LAUNCH:
     case HEV_SYSKEY:
         u.ev.kind = GLOS_EV_SHELL, n = sizeof u.shell;
@@ -1257,12 +1291,262 @@ static int give(const struct hev *e, void *buf, unsigned room)
     return (int)n;
 }
 
+/* ---- threads (API 2.0's THREAD), in order: one thread runs at a time, so a script gives the same pictures
+   every time. The app's first thread runs until it waits for an event with none queued; then each thread it made
+   that can run has a turn, until it sleeps (the shim's clock: glos_sleep), waits (a lock, a signal, a join) or
+   ends. What a thread posts (glos_post) is queued for the first thread as any event. */
+#include <pthread.h>
+
+#define HTHREADS 17                     /* (GLOS_THREADS and the first) */
+static struct hthr {
+    int used, done;
+    unsigned code, wake;                /* its exit code; the clock at which its sleep ends */
+    void (*fn)(void *);
+    void *arg;
+    pthread_t pt;
+} TH[HTHREADS];
+static struct { int used, owner, depth; } LK[32];       /* locks: owner -1 free */
+static struct { int used, set, manual; } SG[32];        /* signals */
+static pthread_mutex_t baton = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t baton_cv = PTHREAD_COND_INITIALIZER;
+static int running;                     /* the thread whose turn it is (0: the first) */
+static __thread int me;
+static int baton_held;
+
+static void turn_to(int who)            /* the turn to `who`; back here when it is this thread's again */
+{
+    running = who;
+    pthread_cond_broadcast(&baton_cv);
+    while (running != me)
+        pthread_cond_wait(&baton_cv, &baton);
+}
+
+static void yield_main(void)            /* (a made thread) the first thread's turn */
+{
+    if (me)
+        turn_to(0);
+}
+
+static void *thr_main(void *arg)
+{
+    me = (int)(long)arg;
+    pthread_mutex_lock(&baton);
+    while (running != me)
+        pthread_cond_wait(&baton_cv, &baton);
+    TH[me].fn(TH[me].arg);
+    TH[me].done = 1;
+    running = 0;
+    pthread_cond_broadcast(&baton_cv);
+    pthread_mutex_unlock(&baton);
+    return NULL;
+}
+
+/* Each made thread that can run now has a turn: 1 if any ran. */
+static int threads_turn(void)
+{
+    int k, ran = 0;
+    for (k = 1; k < HTHREADS; k++)
+        if (TH[k].used && !TH[k].done && TH[k].wake <= H.clock) {
+            turn_to(k);
+            ran = 1;
+        }
+    return ran;
+}
+
+glos_handle glos_thread(void (*fn)(void *arg), void *arg, unsigned stack, unsigned flags)
+{
+    int k;
+    (void)stack, (void)flags;
+    if (!baton_held) {                  /* (the first thread has the turn from the first use on) */
+        pthread_mutex_lock(&baton);
+        baton_held = 1;
+    }
+    for (k = 1; k < HTHREADS && TH[k].used; k++) ;
+    if (k == HTHREADS)
+        return 0;
+    memset(&TH[k], 0, sizeof TH[k]);
+    TH[k].used = 1, TH[k].fn = fn, TH[k].arg = arg;
+    if (pthread_create(&TH[k].pt, NULL, thr_main, (void *)(long)k) != 0) {
+        TH[k].used = 0;
+        return 0;
+    }
+    return 0x7100u + (unsigned)k;
+}
+
+void glos_thread_exit(unsigned code)
+{
+    TH[me].code = code, TH[me].done = 1;
+    running = 0;
+    pthread_cond_broadcast(&baton_cv);
+    pthread_mutex_unlock(&baton);
+    pthread_exit(NULL);
+}
+
+static int threads_made(void)
+{
+    int k;
+    for (k = 1; k < HTHREADS; k++)
+        if (TH[k].used)
+            return 1;
+    return 0;
+}
+
+unsigned glos_self(void) { return (unsigned)me; }
+static int me_thread(void) { return me != 0; }
+static void sleep_thread(unsigned ms)
+{
+    TH[me].wake = H.clock + ms;
+    yield_main();
+}
+int glos_detach(glos_handle t) { (void)t; return 0; }
+
+int glos_join(glos_handle t, unsigned ms, unsigned *code)
+{
+    int k = (int)t - 0x7100;
+    unsigned until = H.clock + ms;
+    if (k < 1 || k >= HTHREADS || !TH[k].used)
+        return GLOS_E_HANDLE;
+    while (!TH[k].done) {
+        if (me) {                       /* (a made thread waits by letting the others on) */
+            if (ms != 0xFFFFFFFFu && H.clock >= until)
+                return 0;
+            yield_main();
+            continue;
+        }
+        if (TH[k].wake > H.clock) {     /* (asleep: the clock moves on to its waking, or to the wait's end) */
+            if (ms != 0xFFFFFFFFu && TH[k].wake > until) {
+                H.clock = until;
+                return 0;
+            }
+            H.clock = TH[k].wake;
+        }
+        turn_to(k);
+    }
+    if (code)
+        *code = TH[k].code;
+    pthread_join(TH[k].pt, NULL);
+    TH[k].used = 0;
+    return 1;
+}
+
+glos_handle glos_lock(void)
+{
+    int i;
+    for (i = 0; i < 32 && LK[i].used; i++) ;
+    if (i == 32)
+        return 0;
+    LK[i].used = 1, LK[i].owner = -1, LK[i].depth = 0;
+    return 0x7200u + (unsigned)i;
+}
+
+int glos_take(glos_handle lock, unsigned ms)
+{
+    int i = (int)lock - 0x7200;
+    unsigned until = H.clock + ms;
+    if (i < 0 || i >= 32 || !LK[i].used)
+        return GLOS_E_HANDLE;
+    while (LK[i].owner != -1 && LK[i].owner != me) {
+        if (ms != 0xFFFFFFFFu && H.clock >= until)
+            return 0;
+        if (me) {
+            yield_main();
+        } else {                        /* (the first thread: the holder has turns until it gives the lock) */
+            int o = LK[i].owner;
+            if (TH[o].wake > H.clock)
+                H.clock = ms != 0xFFFFFFFFu && TH[o].wake > until ? until : TH[o].wake;
+            if (TH[o].wake <= H.clock)
+                turn_to(o);
+        }
+    }
+    LK[i].owner = me, LK[i].depth++;
+    return 1;
+}
+
+int glos_give(glos_handle lock)
+{
+    int i = (int)lock - 0x7200;
+    if (i < 0 || i >= 32 || !LK[i].used || LK[i].owner != me)
+        return GLOS_E_HANDLE;
+    if (--LK[i].depth == 0)
+        LK[i].owner = -1;
+    return 0;
+}
+
+glos_handle glos_signal(unsigned flags)
+{
+    int i;
+    for (i = 0; i < 32 && SG[i].used; i++) ;
+    if (i == 32)
+        return 0;
+    SG[i].used = 1, SG[i].set = 0, SG[i].manual = !(flags & GLOS_SIGNAL_ONE);
+    return 0x7300u + (unsigned)i;
+}
+
+int glos_signal_set(glos_handle signal, int set)
+{
+    int i = (int)signal - 0x7300;
+    if (i < 0 || i >= 32 || !SG[i].used)
+        return GLOS_E_HANDLE;
+    SG[i].set = set != 0;
+    return 0;
+}
+
+/* (Signals and threads; a made thread's wait lets the others on until one is ready or the time is up.) */
+int glos_wait(const glos_handle *handles, unsigned n, unsigned ms, int *which)
+{
+    unsigned until = H.clock + ms, i;
+    for (;;) {
+        for (i = 0; i < n; i++) {
+            int s = (int)handles[i] - 0x7300, t = (int)handles[i] - 0x7100;
+            if (s >= 0 && s < 32 && SG[s].used && SG[s].set) {
+                if (!SG[s].manual)
+                    SG[s].set = 0;
+                *which = (int)i;
+                return 1;
+            }
+            if (t >= 1 && t < HTHREADS && TH[t].used && TH[t].done) {
+                *which = (int)i;
+                return 1;
+            }
+        }
+        if (ms != 0xFFFFFFFFu && H.clock >= until) {
+            *which = -1;
+            return 0;
+        }
+        if (me) {
+            if (ms != 0xFFFFFFFFu)
+                TH[me].wake = 0;        /* (it has turns, and looks at the clock each time) */
+            yield_main();
+        } else if (!threads_turn()) {
+            if (ms == 0xFFFFFFFFu)
+                fail("the first thread waits for ever for a signal nobody can set");
+            H.clock = until;
+        }
+    }
+}
+
+void glos_libc_lock(void) { }           /* (one thread at a time here: nothing to lock) */
+void glos_libc_unlock(void) { }
+
+int glos_post(unsigned code, unsigned a, unsigned b, unsigned c)
+{
+    struct hev e;
+    memset(&e, 0, sizeof e);
+    e.type = HEV_POST;
+    e.key = code, e.x = (int)a, e.y = (int)b, e.buttons = c;
+    e.time = H.clock;
+    push(&e);
+    return 0;
+}
+
 int glos_event(void *buf, unsigned room, unsigned wait_ms, unsigned areas)
 {
     if (H.qh == H.qt && !H.done) {
         if (!step())
             H.done = 1;
     }
+    if (H.qh == H.qt)                           /* nothing for the first thread: the threads it made have turns */
+        threads_turn();
     if (H.qh != H.qt) {
         struct hev e = H.q[H.qh++ % 256];
         if (e.type == HEV_KEY) {                /* (a key goes to the window with the focus when it arrives, as the

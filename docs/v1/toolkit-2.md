@@ -409,6 +409,22 @@ which and why. The apps keep working at every step (they move as the toolkit doe
   Cancel; two tasks and one worker (the second waits); the host's lock checks; Loop A smoke on a 486 and a
   Pentium II.
 
+### C4 as built (2026-11-16)
+
+As designed above, with these particulars:
+- `sdk/gui/task.c`; the event loop reaches it through a hook set at the first task (`gui_post_hook`), so a
+  program that starts no task links no thread code and needs no `@gloswrap.opt`. GUITEST does, and is linked
+  with it (and `tools/wrapcheck.py`).
+- The progress dialog is modal without a loop of its own (`gui_modal_on`/`gui_modal_off`): the window's thread
+  goes on in `gui_run`, taking the tasks' posts.
+- The host shim's threads run in order on pthreads (one at a time, by a baton): the made threads have turns when
+  the first thread waits with no event queued; `glos_sleep` moves the shim's clock. A script's `wait` and `gone`
+  let the shim's time pass (a tenth of a second a go, a minute at most) when the app has made threads.
+- Tests: `tasks` (GUITEST's page: ten thousand rows read in a hundred pieces over ten seconds and posted, the
+  list growing; the dialog after a second; Cancel by Esc), on the host and on the desktop in Loop A (a 486 and
+  a Pentium II). The work lasts ten seconds because Loop A's driver takes seconds a step on a 486: with two, the
+  dialog came and went unseen.
+
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
 - **Farm-Fresh** (FatCow; CC BY 3.0) for colour icons and **Font Awesome Free, solid** (CC BY 4.0) for the
