@@ -28,8 +28,10 @@
 #include "glos/cp.h"
 #include "glos/region.h"
 #include "glos/api.h"
+#include "glos/tz.h"
 #include "app.h"
 #include "agent.h"
+#include "clock.h"
 #include "dos.h"
 #include "io.h"
 #include "kapi.h"
@@ -83,6 +85,8 @@ struct shsess {
     volatile u8 job_evt;                /* ... it has written, or moved on */
     u8 job_esc;                         /* a key's sequence under way, typed to it */
     u8 job_full;                        /* it has the PC's own screen: its terminal has been told */
+    u8 want_key;                        /* the shell waits for a key (PAUSE, a batch file's question): sh_key() */
+    volatile u8 stopped;                /* Ctrl+C was typed to a program: the shell is told when it asks (h_stop) */
     u8 out_cr;                          /* the last character written to the terminal was a carriage return */
     u8 out_mid;                         /* ... was neither that nor a line feed: the terminal is part way along a line */
     char dir[80];                       /* the folder it starts in, where its opener said one ("": DOS's own) */
@@ -486,6 +490,42 @@ static void *h_open(void *ctx, const char *path, int mode)
     return made(s) == 0 ? (void *)(u32)(s->q.r[0].ax + 1u) : 0;
 }
 
+/* (S4, batch files) A file opened to read: the next read is from pos. */
+static int h_seek(void *ctx, void *f, unsigned long pos)
+{
+    struct shsess *s = ctx;
+    req(s);
+    call(s, 0, 0x4200, (u16)((u32)f - 1), (u16)(pos >> 16), (u16)pos);
+    return made(s) == 0 ? 0 : -1;
+}
+
+/* The shell waits for a key: at a terminal, the next one typed (the session's loop gives it to sh_key()); with
+   none there is nobody to press one. */
+static int h_key(void *ctx)
+{
+    struct shsess *s = ctx;
+    if (!s->tty)
+        return 0;
+    s->want_key = 1;
+    return SH_UNDER_WAY;
+}
+
+/* Ctrl+C has come since the shell last asked: typed to a program (job_key), or waiting among what is typed
+   while a batch file runs lines of the shell's own. */
+static int h_stop(void *ctx)
+{
+    struct shsess *s = ctx;
+    u32 f = irq_save();
+    int yes = s->stopped;
+    s->stopped = 0;
+    if (!yes && s->ih != s->it && s->in[s->ih % IN_RING] == 3) {
+        s->ih++;
+        yes = 1;
+    }
+    irq_restore(f);
+    return yes;
+}
+
 static int h_read(void *ctx, void *f, void *buf, int n)
 {
     struct shsess *s = ctx;
@@ -769,6 +809,7 @@ static void job_key(struct shsess *s, int c)
     if (c == 3) {
         u32 f = irq_save();
         agent_app_signal(s, s->job, 0);
+        s->stopped = 1;                         /* (a batch file it was run from is asked about: sh's stop()) */
         irq_restore(f);
         return;
     }
@@ -813,7 +854,7 @@ static const struct {
 
 static const char *const own_names[] = { "GLOS", "PS", "KILL", "LOG", "STAT", "RUN", "CONFIG", "DISPLAY", "DESK", "SHOT",
     "REC", "SECRETS", "USB", "JOY", "CLIP", "AUDIO", "CACHE", "IDLE", "RESTART", "REBOOT", "SENDTEXT", "SENDKEYS",
-    "SENDMOUSE", "SHUTDOWN", "CLOCK", "SYSMEM", "NETWORK", "DISK", "DD", "PCI", "MTRR", 0 };
+    "SENDMOUSE", "SHUTDOWN", "CLOCK", "SYSMEM", "NETWORK", "DISK", "DD", "PCI", "MTRR", "DATE", "TIME", "CHCP", 0 };
 
 static const char *const own_help[] = {
     "PS, KILL [n], RUN [--exclusive|--app] program   what runs; one ended; a program started GLOS's way",
@@ -825,6 +866,7 @@ static const char *const own_help[] = {
     "DISK [n [NEW | FORMAT [p] | BOOT [p]]]          the hard disks; one laid out anew, formatted, made to start",
     "DD IF=source OF=destination [SKIP= SEEK= COUNT=]   a raw copy: DISKn, DISKn:p, A:, a file, - (the connection)",
     "SHOT, REC                                       the screen as a picture, a recording",
+    "DATE [YYYY-MM-DD], TIME [HH:MM[:SS]], CHCP      GLOS's clock, shown or set (local time); the code page",
     "SHUTDOWN, RESTART, REBOOT                       GLOS left, started again; the PC restarted",
     "GLOS name ...       any of those by GLOS's own old name (GLOS TYPE, GLOS EXIT ...)",
     0 };
@@ -836,13 +878,78 @@ static int same_word(const char *a, const char *b)     /* (a: any case; b: capit
     return !*a && !*b;
 }
 
+/* Numbers with sep between them ("2026-11-16", "14:05"): how many there are, or -1. */
+static int nums(const char *p, char sep, int *n, int max)
+{
+    int k = 0;
+    for (;;) {
+        if (*p < '0' || *p > '9' || k == max)
+            return -1;
+        n[k] = 0;
+        while (*p >= '0' && *p <= '9')
+            n[k] = n[k] * 10 + (*p++ - '0');
+        k++;
+        if (!*p)
+            return k;
+        if (*p++ != sep)
+            return -1;
+    }
+}
+
+/* DOS's DATE, TIME and CHCP (S4: the shell hands nothing to the DOS's COMMAND.COM): GLOS's clock in the region's
+   format, shown as DOS shows it with Enter pressed at its question (nothing waits here); set with a date as
+   YYYY-MM-DD or a time as HH:MM[:SS], local time. The code page is [region]'s: shown. */
+static int own_clock(struct shsess *s, int argc, char **argv)
+{
+    static const char days[] = "SunMonTueWedThuFriSat";
+    struct tz_tm tm;
+    char t[96], v[40];
+    int what = argv[0][0] == 'D' || argv[0][0] == 'd' ? 0 : argv[0][0] == 'T' || argv[0][0] == 't' ? 1 : 2;
+    tz_split(clock_local(), &tm);
+    if (what == 2) {
+        if (argc > 1) {
+            static const char m[] = "CHCP: the code page is the region's (CONFIG SET REGION CODEPAGE n)\r\n";
+            h_write(s, SH_ERR, m, (int)sizeof m - 1);
+            return 1;
+        }
+        sh_fmt(t, sizeof t, "Active code page: %u\r\n", (unsigned)s->page);
+        h_write(s, SH_OUT, t, (int)strlen(t));
+        return 0;
+    }
+    if (argc > 1) {
+        int n[3] = { 0, 0, 0 }, k = nums(argv[1], what ? ':' : '-', n, 3);
+        if ((what == 0 && (k != 3 || n[0] < 1980 || n[0] > 2105 || n[1] < 1 || n[1] > 12 || n[2] < 1 || n[2] > 31))
+            || (what == 1 && (k < 2 || n[0] > 23 || n[1] > 59 || n[2] > 59))) {
+            const char *m = what ? "Invalid time (TIME HH:MM[:SS])\r\n" : "Invalid date (DATE YYYY-MM-DD)\r\n";
+            h_write(s, SH_ERR, m, (int)strlen(m));
+            return 1;
+        }
+        if (what == 0)
+            tm.year = n[0], tm.mon = n[1], tm.day = n[2];
+        else
+            tm.hour = n[0], tm.min = n[1], tm.sec = n[2];
+        clock_set(clock_from_local(tz_join(&tm)), "hand");
+        return 0;
+    }
+    if (what == 0) {
+        region_date(kcfg_region(), v, sizeof v, tm.year, tm.mon, tm.day);
+        sh_fmt(t, sizeof t, "Current date is %.3s %s\r\n", days + 3 * (tm.wday % 7), v);
+    } else {
+        region_time(kcfg_region(), v, sizeof v, tm.hour, tm.min, tm.sec);
+        sh_fmt(t, sizeof t, "Current time is %s\r\n", v);
+    }
+    h_write(s, SH_OUT, t, (int)strlen(t));
+    return 0;
+}
+
 static int h_extra(void *ctx, int argc, char **argv, const char *line)
 {
     struct shsess *s = ctx;
     char ask[SH_LINE + 8];
     const char *word = 0, *rest = line;
     u32 i, n;
-    (void)argc;
+    if (same_word(argv[0], "DATE") || same_word(argv[0], "TIME") || same_word(argv[0], "CHCP"))
+        return own_clock(s, argc, argv);
     while (*rest == ' ' || *rest == '\t')
         rest++;
     while (*rest && *rest != ' ' && *rest != '\t')      /* (past the command's own name) */
@@ -1105,6 +1212,11 @@ static void session(void *arg)
         }
         if (c < 0)
             continue;
+        if (s->want_key) {                      /* (PAUSE, "Terminate batch job (Y/N)?": this key is the shell's) */
+            s->want_key = 0;
+            sh_key(&s->sh, c);
+            continue;
+        }
         switch (ed_key(&s->ed, (unsigned char)c)) {
         case ED_ENTER:
             s->editing = 0;
@@ -1201,7 +1313,7 @@ static struct shsess *make(u32 cols, u32 rows, const char *line, const char *dir
     static const struct sh_host host = { 0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free,
         h_is_dir, h_stat, h_open, h_read, h_put, h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space,
         h_run, h_as_typed,
-        own_names, own_help, h_extra, h_alloc, h_free };
+        own_names, own_help, h_extra, h_alloc, h_free, h_seek, h_key, h_stop };
     struct shsess *s;
     if (!(vm.bi->flags & BI_F_AGENT) || !(s = kmalloc(sizeof *s)))
         return 0;

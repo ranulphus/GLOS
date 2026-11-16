@@ -2295,6 +2295,76 @@ def typed_keys(text, start=1.0, step=0.15):
     return ",".join(items)
 
 
+def batch_case(profile, card):
+    """The shell's batch language against FreeDOS's COMMAND.COM (docs/v1/shell.md, step S4a): the same batch files
+    run by `COMMAND /C NAME.BAT` (FreeDOS's, which a line with no terminal still gets for a batch file) and by
+    `CALL NAME.BAT` (GLOS's shell, which runs the lines itself): the same output and the same exit code.
+    Parameters and SHIFT, ECHO's state and the lines shown, IF (==, EXIST with a file, a pattern and a folder's
+    NUL, ERRORLEVEL after a program and after a command of the shell's own), GOTO, CALL and a batch file that
+    names another, FOR over words and files. Where the two COMMAND.COMs differ GLOS has MS-DOS's way, checked by
+    its own output: a label's first eight characters count (FreeDOS: all of them). And PAUSE where nobody is
+    at a keyboard goes on."""
+    tag = "batch-%s-%s" % (profile, card)
+    bats = {
+        "T1.BAT": ["@echo off", "echo [%0] [%1] [%2] [%9] 100%% [%NOPE%]", "shift", "echo [%0] [%1]", "echo.", "echo"],
+        "T2.BAT": ["@echo off", 'if "%1"=="" goto none', "if %1==yes echo said yes", "if not %1==yes echo not yes",
+                   "if exist c:\\test\\t1.bat echo t1 is there", "if exist c:\\test\\*.bat echo some bats",
+                   "if not exist c:\\test\\nope.txt echo nope is not", "if exist c:\\test\\nul echo folder", "goto end",
+                   "echo skipped", ":none", "echo no argument", ":end", "echo done"],
+        "T3.BAT": ["@echo off", "call c:\\test\\t3b first", "echo back", "c:\\test\\t3b chained", "echo never"],
+        "T3B.BAT": ["@echo inner %1"],
+        "T4.BAT": ["@echo off", "for %%f in (a b,c) do echo item %%f", "for %%f in (c:\\test\\t3*.bat) do echo file %%f",
+                   "echo loop done"],
+        "T5.BAT": ["@echo off", "c:\\test\\conin code 3", "echo after", "if errorlevel 3 echo three or more",
+                   "if errorlevel 4 echo four or more", "if not errorlevel 4 echo less than four",
+                   "c:\\test\\echoargs one two", "if errorlevel 1 echo nonzero"],
+        "T6.BAT": ["echo first", "@echo second", "rem a remark", "echo off", "echo third"],
+        "T7.BAT": ["@echo off", "goto longlabelname", "echo skipped", ":longlabelother", "echo eight", "set V=x y",
+                   "echo [%V%]", "goto nowhere", "echo not reached"],
+        "T8.BAT": ["@echo off", "pause", "echo after the pause"],
+    }
+    files = []
+    for n, lines in bats.items():
+        files += ["--file", batfile(tag + "/" + n, lines) + "=/TEST/" + n]
+    agent = Agent("ssh-" + tag, profile, card, files + [
+        "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE", "--file", "build/ow/dos/CONIN.EXE=/TEST/CONIN.EXE",
+        "--cmd", "SERSAY HX-START batch", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks, info = {"listen": agent.listening()}, ""
+    try:
+        for n, args in (("T1", "one two three"), ("T2", "yes"), ("T2", "no"), ("T2", ""), ("T3", ""), ("T4", ""),
+                        ("T5", ""), ("T6", "")):
+            a = agent.ssh("COMMAND /C C:\\TEST\\%s.BAT %s" % (n, args))
+            b = agent.ssh("CALL C:\\TEST\\%s.BAT %s" % (n, args))
+            key = "%s%s" % (n.lower(), "-" + args.split()[0] if args else "")
+            checks[key] = a[0] == b[0] and a[1] == b[1] and len(a[1]) > 4
+            if not checks[key]:
+                info += " %s: freedos=%r glos=%r" % (key, (a[0], a[1][-200:]), (b[0], b[1][-200:]))
+        rc, out, e = agent.ssh("CALL C:\\TEST\\T7.BAT")
+        checks["labels"] = out.replace("\r", "") == "eight\n[x y]\n" and "Label not found" in e
+        rc, out, e = agent.ssh("CALL C:\\TEST\\T8.BAT", timeout=60)
+        checks["pause"] = rc == 0 and "Press any key" in out and "after the pause" in out
+        if not (checks["labels"] and checks["pause"]):
+            info += " last=%r" % ((rc, out[-200:], e[-100:]),)
+        # DATE, TIME and CHCP are the shell's own too (GLOS's clock, the region's format and code page)
+        d, t, c = agent.ssh("DATE"), agent.ssh("TIME"), agent.ssh("CHCP")
+        bad_date = agent.ssh("DATE 16/11/2026")
+        checks["date-time"] = bool(re.match(r"Current date is (Sun|Mon|Tue|Wed|Thu|Fri|Sat) [\d./-]{8,10}\r?\n$", d[1])) \
+            and bool(re.match(r"Current time is \d\d?[:.]\d\d[:.]\d\d", t[1])) and c[1].strip() == "Active code page: 437" \
+            and bad_date[0] == 1 and "Invalid date" in bad_date[2] and agent.ssh("TIME 12:34:56")[0] == 0 \
+            and bool(re.match(r"Current time is 12[:.]3[45]", agent.ssh("TIME")[1]))
+        if not checks["date-time"]:
+            info += " date=%r time=%r chcp=%r bad=%r" % (d[1], t[1], c[1], bad_date)
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-WARN|GLOS-CRASH", text)
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad),
+                             info if bad else ""), not bad
+
+
 def member_case(profile, card, par=False):
     """A cable's far PC as a member of the near PC's network (kernel/net/member.c; docs/v1/cable-network.md, N1;
     par: N3, over a parallel cable: each PC's LPT1 has 86Box's PLIP device, the two joined by 86Box's local
@@ -9060,6 +9130,7 @@ def main():
             res += matrix(idle_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(shell_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(cable_case, [("bf6", "ne2kpci"), ("486dx2", "none"), ("bf6", "off")], a.jobs)
+            res += matrix(batch_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(member_case, [("bf6", "ne2kpci")], a.jobs)
             res += matrix(plip_case, [("bf6", "plip"), ("486dx2", "plip")], a.jobs)
             res += matrix(lambda pr, c: member_case(pr, c, True), [("bf6", "ne2kpci")], a.jobs)

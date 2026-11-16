@@ -1,0 +1,142 @@
+GLOS shell 1.0. HELP lists its commands.
+
+[[C:\>]]
+cd \bat
+[[C:\BAT>]]
+set X=val
+[[C:\BAT>]]
+args one two three
+[args] [one] [two] [] 100% [] [val]
+[one] [two] [three]
+ECHO is off
+[[C:\BAT>]]
+echo
+ECHO is on
+[[C:\BAT>]]
+show
+C:\BAT>echo first
+first
+second
+C:\BAT>rem not run
+C:\BAT>echo off
+third
+[[C:\BAT>]]
+echo
+ECHO is on
+[[C:\BAT>]]
+ifs yes
+said yes
+one is there
+some text files
+nope is not
+the folder is there
+done
+[[C:\BAT>]]
+ifs no
+did not say yes
+one is there
+some text files
+nope is not
+the folder is there
+done
+[[C:\BAT>]]
+ifs
+no argument
+done
+[[C:\BAT>]]
+label
+eight characters count
+<<Label not found
+>>[[C:\BAT>]]
+prog
+(RUN command="C:\BIN\A.COM first" prog=C:\BIN\A.COM name=a cwd=C:\BAT env=X=val; detach=0 -> 1)
+(ENDED 3)
+after the program
+three or more
+less than four
+[[C:\BAT>]]
+outer
+inner called
+back in outer
+a command through CALL
+inner chained
+[[C:\BAT>]]
+loop
+item a
+item b
+item c
+file ONE.TXT
+file TWO.TXT
+(RUN command="C:\BIN\A.COM turn1" prog=C:\BIN\A.COM name=a cwd=C:\BAT env=X=val; detach=0 -> 1)
+(ENDED 0)
+(RUN command="C:\BIN\A.COM turn2" prog=C:\BIN\A.COM name=a cwd=C:\BAT env=X=val; detach=0 -> 1)
+(ENDED 0)
+loop done
+[[C:\BAT>]]
+for %v in (x y) do echo at the prompt %v
+at the prompt x
+at the prompt y
+[[C:\BAT>]]
+wait
+Press any key to continue . . .
+(KEY?)
+(KEY x)
+after the pause
+[[C:\BAT>]]
+long
+one
+(RUN command="C:\BIN\A.COM prog" prog=C:\BIN\A.COM name=a cwd=C:\BAT env=X=val; detach=0 -> 1)
+(CTRL+C)
+(ENDED 255)
+
+Terminate batch job (Y/N)?(KEY?)
+(KEY n)
+N
+two
+(RUN command="C:\BIN\A.COM prog" prog=C:\BIN\A.COM name=a cwd=C:\BAT env=X=val; detach=0 -> 1)
+(CTRL+C)
+(ENDED 255)
+
+Terminate batch job (Y/N)?(KEY?)
+(KEY y)
+Y
+[[C:\BAT>]]
+wait
+Press any key to continue . . .
+after the pause
+[[C:\BAT>]]
+long
+one
+(RUN command="C:\BIN\A.COM prog" prog=C:\BIN\A.COM name=a cwd=C:\BAT env=X=val; detach=0 -> 1)
+(CTRL+C)
+(ENDED 255)
+
+Terminate batch job (Y/N)?
+[[C:\BAT>]]
+vol
+ Volume in drive C is TESTDISK
+[[C:\BAT>]]
+vol a:
+ Volume in drive A has no label
+[[C:\BAT>]]
+truename ..\bat\one.txt
+C:\BAT\ONE.TXT
+[[C:\BAT>]]
+break
+BREAK is off
+[[C:\BAT>]]
+verify
+VERIFY is off
+[[C:\BAT>]]
+lh /l:1 echo loaded high
+loaded high
+[[C:\BAT>]]
+ctty com1
+<<CTTY: GLOS has no other console to give.
+>>[[C:\BAT>]]
+rem nothing
+[[C:\BAT>]]
+@echo with an at
+with an at
+[[C:\BAT>]]
+

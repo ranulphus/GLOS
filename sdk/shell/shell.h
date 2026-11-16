@@ -18,6 +18,8 @@
 #define SH_LINE    512
 #define SH_HISTORY 50
 #define SH_VARS    64
+#define SH_BATCH   16                   /* batch files that CALL one another, deep */
+#define SH_ARGS    32                   /* a batch file's arguments kept (%0 to %9 are the first ten after SHIFTs) */
 
 struct sh_dirent {
     char name[64];                      /* DOS's bytes */
@@ -75,6 +77,24 @@ struct sh_host {
     /* memory */
     void *(*alloc)(void *ctx, unsigned n);
     void (*free)(void *ctx, void *p);
+    /* (S4, batch files; each may be 0) */
+    int (*seek)(void *ctx, void *f, unsigned long pos); /* a file opened to read: the next read is from pos. 0, or
+                                                           -1. With none the shell reads up to the place */
+    int (*key)(void *ctx);                              /* a key is waited for (PAUSE, "Terminate batch job
+                                                           (Y/N)?"): SH_UNDER_WAY, and sh_key() when it comes; or
+                                                           0: nobody is at a keyboard here, the shell goes on */
+    int (*stop)(void *ctx);                             /* 1: Ctrl+C has come since this was last asked (asked
+                                                           between a batch file's lines and a FOR's turns: a
+                                                           program it ended has ended by then) */
+};
+
+/* A batch file being run (S4): where it is, how far it has got, what it was given. */
+struct sh_batch {
+    char path[SH_PATH];
+    unsigned long pos;                  /* the next line's place in the file (it is opened anew for every line) */
+    char *line;                         /* its command line, cut into words ... */
+    char *arg[SH_ARGS];                 /* ... which these point at: %0 is arg[shift] */
+    int argc, shift;
 };
 
 struct sh {
@@ -91,6 +111,22 @@ struct sh {
     int rest_op;                        /* how they follow: 0 none, 1 &&, 2 || */
     int under_way;                      /* a program runs (or a command of the host's): sh_ended() goes on */
     void *redirect;                     /* a built-in's output goes to this file (> and >>) */
+    /* batch files (S4) */
+    struct sh_batch *bat[SH_BATCH];     /* those being run: the last is the one whose lines are read */
+    int nbat;
+    int echo_off;                       /* ECHO OFF: a batch file's lines are not shown as they are run, nor the prompt */
+    int echo_was;                       /* ... as it was when the first batch file began: so again at its end */
+    int level;                          /* the last program's exit code: IF ERRORLEVEL's (a command of the shell's
+                                           own does not change it, as under MS-DOS) */
+    struct {                            /* a FOR under way */
+        char var;                       /* its variable's letter */
+        char *items;                    /* what it goes through, each ended by a NUL, the last by two */
+        const char *at;                 /* the next of them */
+        char cmd[SH_LINE];              /* what is DOne with each */
+    } loop;
+    int key_for;                        /* what a key is waited for: 1 PAUSE, 2 the question after Ctrl+C */
+    int rest_plain;                     /* `rest` has had its variables put in already (a batch file's line, a
+                                           FOR's turn): its commands are run as they stand */
 };
 
 void sh_start(struct sh *s, const struct sh_host *h, const char *const *env);  /* env: NAME=VALUE ..., 0 at the end */
@@ -101,6 +137,7 @@ int sh_builtin(const struct sh *s, const char *line);   /* the line's first comm
 void sh_prompt(struct sh *s);
 void sh_line(struct sh *s, const char *line);           /* a line typed and Enter */
 void sh_ended(struct sh *s, int code);                  /* what was under way has ended with this exit code */
+void sh_key(struct sh *s, int ch);                      /* the key the host's key() was asked for */
 void sh_history(struct sh *s, int by);                  /* Up (-1), Down (1): input() with the line */
 void sh_complete(struct sh *s, const char *typed);      /* Tab: input() with more of a name, or the names listed */
 

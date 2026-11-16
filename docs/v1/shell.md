@@ -355,6 +355,37 @@ it for everything GLOS starts.
 | S4c | GLOS's `COMMAND.COM` (`/C`, `/K`, alone); `COMSPEC`; `[shell] comspec` | Loop A: programs that shell out (`system()`, a batch file run by a program, a "DOS shell"), from an SSH login and at the PC |
 | S4d | GLOS as DOS's shell runs `AUTOEXEC.BAT`; the system's environment; the floppy and new disks with FreeDOS's kernel alone | `loopa-floppy`; the 486 bench from the floppy |
 
+### S4a as built (2026-11-16)
+
+- **In the library** (`sdk/shell/shell.c`): a batch file is a frame (`struct sh_batch`: its path, the place of its
+  next line, its words); `CALL` stacks them sixteen deep, a batch file named without `CALL` takes the place of
+  the one that named it. Every line is read by opening the file anew. `IF`, `GOTO`, `CALL`, `FOR`, `SHIFT`,
+  `PAUSE`, `REM`, `@`, labels, `%0` to `%9`, `ECHO ON | OFF` and the lines shown as they are run; `VOL`,
+  `TRUENAME`, `BREAK`, `VERIFY`, `LH`, `LOADHIGH`, `CTTY`. A batch file's lines have their variables put in as
+  the line is read, as DOS does; an unknown `%NAME%` is nothing there and stays as typed at the prompt.
+- **Two values where MS-DOS has one and GLOS's `&&` needs another:** `IF ERRORLEVEL` looks at the last
+  *program's* exit code, which a command of the shell's own leaves alone, as under MS-DOS; `&&` and `||` go by
+  the last command's result, as they did. A batch file's own result, for what follows it and for the line's
+  exit code, is its last program's exit code, as `COMMAND /C`'s is.
+- **The host's new parts** (each optional): `seek` (a batch file's next line without reading up to it), `key`
+  (`PAUSE`, and `Terminate batch job (Y/N)?`, which waits for Y or N) and `stop` (Ctrl+C since last asked: the
+  shell asks between lines, so a batch file that loops without running a program can be stopped).
+- **In the kernel** (`kernel/shell/shsess.c`): those three; and `DATE`, `TIME` and `CHCP` as commands of its
+  own (GLOS's clock in the region's format, set with `DATE YYYY-MM-DD` and `TIME HH:MM[:SS]`; they print what
+  DOS prints with Enter pressed at its question, since nothing waits). With that no command of the batch
+  language goes to the DOS's COMMAND.COM.
+- **Who runs a batch file today:** at a terminal (an SSH login, the Terminal app, the PC's own screen) GLOS's
+  shell, always. In a line with no terminal (`ssh pc NAME.BAT`) a program is the agent's to find, so that the
+  line is in its queue at once, and a batch file found there still goes to the DOS's COMMAND.COM until S4c
+  makes `COMSPEC` GLOS's; `CALL NAME.BAT` there is the shell's.
+- **Tests:** `tests/shell/batch.txt` on the host (a transcript: every command, Ctrl+C with a keyboard and
+  without). Loop A, `ssh-batch-*` in `make loopa-ssh`: eight batch files through FreeDOS's COMMAND.COM and
+  through GLOS's shell, the same output and exit code each; the label of more than eight characters, which
+  FreeDOS's takes whole and MS-DOS's (and GLOS's) by its first eight; `PAUSE` with nobody at a keyboard;
+  `DATE`, `TIME`, `CHCP`.
+- **Known differences from MS-DOS, to be met on the benches:** a batch file's words keep no quotation marks
+  (`%1` of `"a b"` is `a b`); `DATE` and `TIME` with nothing after them do not wait for a new one.
+
 ### Decided by the owner (2026-11-16)
 
 1. **GLOS's `COMMAND.COM` by default** for the programs GLOS starts; `[shell] comspec = dos` puts the DOS's own

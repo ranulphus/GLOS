@@ -192,19 +192,29 @@ static void var_set(struct sh *s, const char *name, const char *value)
     s->changed[i] = 1;
 }
 
-/* %NAME% expanded; %% is %. */
+/* %NAME% expanded; %% is %. In a batch file %0 to %9 are its arguments, and a name that is not a variable's
+   is nothing; at the prompt such a name stays as it was typed (FOR %A IN (...) DO ... %A), as under MS-DOS. */
 static void expand(const struct sh *s, const char *in, char *outb, size_t room)
 {
+    const struct sh_batch *b = s->nbat ? s->bat[s->nbat - 1] : 0;
     size_t n = 0;
     while (*in && n < room - 1) {
         if (*in == '%') {
-            const char *e = strchr(in + 1, '%');
-            if (e == in + 1) {
+            const char *e;
+            if (in[1] == '%') {
                 outb[n++] = '%';
                 in += 2;
                 continue;
             }
-            if (e) {
+            if (b && in[1] >= '0' && in[1] <= '9') {
+                int k = b->shift + (in[1] - '0');
+                const char *v = k < b->argc ? b->arg[k] : "";
+                while (*v && n < room - 1)
+                    outb[n++] = *v++;
+                in += 2;
+                continue;
+            }
+            if ((e = strchr(in + 1, '%')) != 0) {
                 char name[64], num[16];
                 const char *v;
                 size_t k = (size_t)(e - in - 1) < sizeof name - 1 ? (size_t)(e - in - 1) : sizeof name - 1;
@@ -216,10 +226,12 @@ static void expand(const struct sh *s, const char *in, char *outb, size_t room)
                 } else {
                     v = var_get(s, name);
                 }
-                while (v && *v && n < room - 1)
-                    outb[n++] = *v++;
-                in = e + 1;
-                continue;
+                if (v || b) {
+                    while (v && *v && n < room - 1)
+                        outb[n++] = *v++;
+                    in = e + 1;
+                    continue;
+                }
             }
         }
         outb[n++] = *in++;
@@ -788,7 +800,8 @@ static int cmd_set(struct sh *s, int argc, char **argv, const char *raw)
 
 static const char *const builtins[] = { "CD", "CHDIR", "DIR", "COPY", "MOVE", "REN", "RENAME", "DEL", "ERASE", "MD",
     "MKDIR", "RD", "RMDIR", "TYPE", "ECHO", "SET", "PATH", "PROMPT", "CLS", "VER", "EXIT", "HISTORY", "HELP", "WHERE",
-    "START", "DF", "DU", 0 };
+    "START", "DF", "DU", "CALL", "FOR", "GOTO", "IF", "PAUSE", "REM", "SHIFT", "VOL", "TRUENAME", "BREAK", "VERIFY",
+    "LH", "LOADHIGH", "CTTY", 0 };
 
 static const char *const helps[] = {
     "CD [path]           the folder (of a drive: CD X:); X: changes drive",
@@ -807,6 +820,8 @@ static const char *const helps[] = {
     "HISTORY             the lines typed before (Up and Down)",
     "WHERE program       where it is along PATH",
     "START program       a program started beside the terminal",
+    "VOL [drive:], TRUENAME [path]  a drive's label; a path in full",
+    "name.BAT [words]    a batch file run: %0 to %9, IF, GOTO, CALL, FOR, SHIFT, PAUSE, REM, @",
     0 };
 
 static const char *const helps_end[] = {
@@ -875,7 +890,7 @@ static int is_builtin(const struct sh *s, const char *w)
 {
     const char *name;
     int i;
-    if (echo_dot(w))
+    if (echo_dot(w) || w[0] == '@' || w[0] == ':')
         return 1;
     for (i = 0; (name = command_name(s, i)) != 0; i++)
         if (same(w, name))
@@ -883,16 +898,15 @@ static int is_builtin(const struct sh *s, const char *w)
     return strlen(w) == 2 && w[1] == ':';
 }
 
-/* DOS's own commands that this shell has not got (the batch language's and a few more: S4 brings them): the
-   line is the DOS's COMMAND.COM's, whole. */
-static int dos_own(const char *w)
+/* DOS's own commands that neither this shell nor its host has: the line is the DOS's COMMAND.COM's, whole. (DATE,
+   TIME and CHCP are the host's if it has them: the kernel's does.) */
+static int dos_own(const struct sh *s, const char *w)
 {
-    static const char *const names[] = { "CALL", "IF", "FOR", "GOTO", "REM", "PAUSE", "SHIFT", "BREAK", "VERIFY", "VOL",
-        "DATE", "TIME", "LH", "LOADHIGH", "CTTY", "TRUENAME", "CHCP", 0 };
+    static const char *const names[] = { "DATE", "TIME", "CHCP", 0 };
     int i;
     for (i = 0; names[i]; i++)
         if (same(w, names[i]))
-            return 1;
+            return !is_builtin(s, w);
     return 0;
 }
 
@@ -910,8 +924,15 @@ int sh_builtin(const struct sh *s, const char *line)
 
 /* ---- running a program: the host's. 1: under way; 0: started and left; -1: not run (and said). */
 
-static int run_program(struct sh *s, const char *line, int detach)
+static int batch_start(struct sh *s, const char *path, const char *line, int call);
+
+#define BATCH_BEGUN 2                   /* run_program(): the program was a batch file, whose lines come next */
+
+/* how: 0 run and waited for; 1 started and left to itself (START); 2 CALLed (a batch file comes back to the one
+   that called it). */
+static int run_program(struct sh *s, const char *line, int how)
 {
+    int detach = how == 1;
     char command[1024], env[512];
     char prog[SH_PATH], first[128];
     const char *p = line, *args;
@@ -923,10 +944,14 @@ static int run_program(struct sh *s, const char *line, int detach)
         first[n++] = *p++;
     first[n] = 0;
     args = p;
-    if (strpbrk(line, "<>|") || dos_own(first) || (s->h->as_typed && s->h->as_typed(s->h->ctx))) {
-        /* a pipe, a redirection, a command of DOS's own, or a host that finds programs itself: the line whole */
+    if (strpbrk(line, "<>|") || dos_own(s, first) || (!s->nbat && s->h->as_typed && s->h->as_typed(s->h->ctx))) {
+        /* a pipe, a redirection, a command of DOS's own, or a host that finds programs itself: the line whole
+           (in a batch file the shell looks all the same: a batch file named there takes this one's place) */
         sh_fmt(command, sizeof command, "%s", line);
     } else if (find_program(s, first, prog, sizeof prog) == 0) {
+        size_t pl = strlen(prog);
+        if (!detach && pl > 4 && same(prog + pl - 4, ".BAT"))    /* a batch file: this shell runs its lines */
+            return batch_start(s, prog, line, how == 2) == 0 ? BATCH_BEGUN : -1;
         sh_fmt(command, sizeof command, "%s%s", prog, args);
         found = 1;
     } else {
@@ -968,28 +993,429 @@ static int split_words(char *t, char **argv, int max)
     return n;
 }
 
+/* ---- batch files (S4; docs/v1/shell.md): frames, their lines, labels */
+
+static void loop_end(struct sh *s)
+{
+    if (s->loop.items)
+        s->h->free(s->h->ctx, s->loop.items);
+    s->loop.items = 0;
+    s->loop.at = 0;
+}
+
+static void batch_pop(struct sh *s)
+{
+    struct sh_batch *b = s->bat[--s->nbat];
+    s->h->free(s->h->ctx, b->line);
+    s->h->free(s->h->ctx, b);
+}
+
+static void batch_end(struct sh *s)             /* the one whose lines are read has ended */
+{
+    if (!s->nbat)
+        return;
+    batch_pop(s);
+    if (!s->nbat) {
+        s->echo_off = s->echo_was;              /* (ECHO as it was before the first of them) */
+        s->errorlevel = s->level;               /* (a batch file's own result is its last program's exit code, as
+                                                   COMMAND /C's is: what && and || after it, and a line's end, see) */
+    }
+}
+
+static void batch_end_all(struct sh *s)
+{
+    while (s->nbat)
+        batch_end(s);
+    loop_end(s);
+    s->rest[0] = 0;
+}
+
+/* A batch file begins: its lines are read from the next turn of next_command(). CALLed, it is put on top of the
+   one that called it; named without CALL in a batch file, it takes that one's place. 0, or -1 (and said). */
+static int batch_start(struct sh *s, const char *path, const char *line, int call)
+{
+    struct sh_batch *b;
+    int first = !s->nbat;
+    if (s->nbat && !call)
+        batch_pop(s);
+    if (s->nbat == SH_BATCH) {
+        err(s, "Batch files nested too deep\r\n");
+        return -1;
+    }
+    if (!(b = s->h->alloc(s->h->ctx, sizeof *b)))
+        return -1;
+    memset(b, 0, sizeof *b);
+    sh_fmt(b->path, sizeof b->path, "%s", path);
+    if (!(b->line = copy_of(s, line))) {
+        s->h->free(s->h->ctx, b);
+        return -1;
+    }
+    b->argc = split_words(b->line, b->arg, SH_ARGS);
+    if (first)
+        s->echo_was = s->echo_off;
+    s->bat[s->nbat++] = b;
+    if (!call) {                                /* (what was left of the line that named it is not run) */
+        s->rest[0] = 0;
+        loop_end(s);
+    }
+    return 0;
+}
+
+/* The file's bytes from `from`, a line at a time into out (no CR, no LF): each line's first byte's place is
+   given to see(), which says 1 to stop there. The place after the last line seen, or the file's end; -1 if the
+   file can't be opened. One opening, read through in pieces. */
+static long batch_scan(struct sh *s, const char *path, unsigned long from, char *out, unsigned room,
+                       int (*see)(struct sh *s, const char *line, void *arg), void *arg)
+{
+    char buf[256];
+    void *f = s->h->open(s->h->ctx, path, 'r');
+    unsigned long pos = from, start = from;
+    unsigned k = 0;
+    int n, i, stop = 0, any = 0;
+    if (!f)
+        return -1;
+    if (from && s->h->seek) {
+        if (s->h->seek(s->h->ctx, f, from) != 0)
+            stop = 1;
+    } else {
+        unsigned long skip = from;
+        while (skip && !stop) {
+            n = s->h->read(s->h->ctx, f, buf, skip < sizeof buf ? (int)skip : (int)sizeof buf);
+            if (n <= 0)
+                stop = 1;
+            else
+                skip -= (unsigned long)n;
+        }
+    }
+    while (!stop && (n = s->h->read(s->h->ctx, f, buf, sizeof buf)) > 0) {
+        for (i = 0; i < n && !stop; i++) {
+            char c = buf[i];
+            pos++;
+            if (c == 0x1A) {                    /* (DOS's end-of-file mark) */
+                pos--;
+                n = 0;
+                break;
+            }
+            any = 1;
+            if (c == '\n') {
+                out[k] = 0;
+                k = 0;
+                any = 0;
+                stop = see(s, out, arg);
+                start = pos;
+            } else if (c != '\r' && k < room - 1) {
+                out[k++] = c;
+            }
+        }
+        if (!n)
+            break;
+    }
+    if (!stop && any) {                         /* (a last line with no line end) */
+        out[k] = 0;
+        see(s, out, arg);
+        start = pos;
+    }
+    s->h->close(s->h->ctx, f);
+    return (long)start;
+}
+
+static int see_one(struct sh *s, const char *line, void *arg)
+{
+    (void)s, (void)line;
+    *(int *)arg = 1;
+    return 1;
+}
+
+/* The next line of the batch file on top: 1 with it; 0 at the file's end; -1 if the file has gone. */
+static int batch_read(struct sh *s, char *out, unsigned room)
+{
+    struct sh_batch *b = s->bat[s->nbat - 1];
+    int got = 0;
+    long end = batch_scan(s, b->path, b->pos, out, room, see_one, &got);
+    if (end < 0) {
+        err(s, "Batch file missing\r\n");
+        return -1;
+    }
+    b->pos = (unsigned long)end;
+    return got;
+}
+
+/* A label's line: ":NAME"; eight characters of the name count, and its case does not. */
+static int see_label(struct sh *s, const char *line, void *arg)
+{
+    const char *want = arg;
+    int i;
+    (void)s;
+    while (*line == ' ' || *line == '\t')
+        line++;
+    if (*line++ != ':')
+        return 0;
+    for (i = 0; i < 8; i++) {
+        int a = (unsigned char)line[i], b = (unsigned char)want[i];
+        if (a == ' ' || a == '\t')
+            a = 0;
+        if (upper(a) != upper(b))
+            return 0;
+        if (!a)
+            break;
+    }
+    return 1;
+}
+
+static int cmd_goto(struct sh *s, const char *t)
+{
+    struct sh_batch *b = s->nbat ? s->bat[s->nbat - 1] : 0;
+    char label[16], line[SH_LINE];
+    unsigned n = 0;
+    long at;
+    if (!b)
+        return s->errorlevel;                   /* (at the prompt: nothing to go to) */
+    while (*t == ' ' || *t == '\t' || *t == ':')
+        t++;
+    for (; t[n] && t[n] != ' ' && t[n] != '\t' && n < 8; n++)
+        label[n] = t[n];
+    label[n] = 0;
+    line[0] = 0;
+    at = batch_scan(s, b->path, 0, line, sizeof line, see_label, label);
+    if (at < 0 || !see_label(s, line, label)) { /* (the last line seen is the label's, if it was found) */
+        err(s, "Label not found\r\n");
+        batch_end_all(s);
+        return s->errorlevel;
+    }
+    b->pos = (unsigned long)at;
+    s->rest[0] = 0;                             /* (the rest of the GOTO's own line is not run) */
+    loop_end(s);
+    return s->errorlevel;
+}
+
+/* t begins with the word w (in capitals), a space or the text's end after it: the place after it, else 0. */
+static const char *word(const char *t, const char *w)
+{
+    size_t n = strlen(w), i;
+    for (i = 0; i < n; i++)
+        if (upper((unsigned char)t[i]) != w[i])
+            return 0;
+    if (t[n] && t[n] != ' ' && t[n] != '\t')
+        return 0;
+    t += n;
+    while (*t == ' ' || *t == '\t')
+        t++;
+    return t;
+}
+
+static int run_line(struct sh *s, char *line);
+
+/* A file, or any file a pattern names, is there (IF EXIST): a folder's NUL is, if the folder is. */
+static int exists(struct sh *s, const char *name)
+{
+    char full[SH_PATH], dir[SH_PATH], pat[64];
+    struct sh_dirent e, *list = 0;
+    int n, i, yes = 0;
+    full_path(s, name, full, sizeof full);
+    if (!strpbrk(name, "*?")) {
+        if (same(path_name(full), "NUL")) {
+            path_up(full);
+            return s->h->is_dir(s->h->ctx, full);
+        }
+        return s->h->stat(s->h->ctx, full, &e) == 0 && !e.dir;
+    }
+    split_pattern(s, name, dir, sizeof dir, pat, sizeof pat);
+    n = s->h->dir_read(s->h->ctx, dir, &list);
+    for (i = 0; i < n && !yes; i++)
+        yes = !list[i].dir && match(pat, list[i].name);
+    if (n >= 0)
+        s->h->dir_free(s->h->ctx, list);
+    return yes;
+}
+
+/* IF [NOT] ERRORLEVEL n | EXIST name | a==b  command */
+static int cmd_if(struct sh *s, char *t)
+{
+    const char *u;
+    int not = 0, yes = 0;
+    if ((u = word(t, "NOT")) != 0) {
+        not = 1;
+        t = (char *)u;
+    }
+    if ((u = word(t, "ERRORLEVEL")) != 0 && *u >= '0' && *u <= '9') {
+        int n = 0;
+        while (*u >= '0' && *u <= '9')
+            n = n * 10 + (*u++ - '0');
+        yes = s->level >= n;
+        t = (char *)u;
+    } else if ((u = word(t, "EXIST")) != 0 && *u) {
+        char name[SH_PATH];
+        unsigned n = 0;
+        while (*u && *u != ' ' && *u != '\t' && n < sizeof name - 1)
+            name[n++] = *u++;
+        name[n] = 0;
+        yes = exists(s, name);
+        t = (char *)u;
+    } else {
+        char *eq = strstr(t, "=="), *a = t, *b, *ae, *be;
+        if (!eq) {
+            err(s, "Syntax error\r\n");
+            return s->errorlevel;
+        }
+        for (ae = eq; ae > a && (ae[-1] == ' ' || ae[-1] == '\t'); ae--)
+            ;
+        for (b = eq + 2; *b == ' ' || *b == '\t'; b++)
+            ;
+        for (be = b; *be && *be != ' ' && *be != '\t'; be++)
+            ;
+        yes = ae - a == be - b && !strncmp(a, b, (size_t)(ae - a));
+        t = be;
+    }
+    while (*t == ' ' || *t == '\t')
+        t++;
+    return yes != not ? run_line(s, t) : s->errorlevel;
+}
+
+/* FOR %v IN (set) DO command: the set's words, and the files its patterns name, are kept; next_command() runs
+   the command for each in turn (a program among them is waited for like any other). */
+static int cmd_for(struct sh *s, const char *t)
+{
+    char set[SH_LINE], *w, *items;
+    const char *u, *open, *close;
+    unsigned room = 2048, k = 0;
+    char var;
+    if (*t != '%' || !t[1] || !(u = word(t + 2, "")) || !(u = word(u, "IN")) || *u != '('
+        || !(close = strchr(u, ')')) || !(open = u) || !(u = word(close + 1 + strspn(close + 1, " \t"), "DO")) || !*u) {
+        err(s, "Syntax error\r\n");
+        return s->errorlevel;
+    }
+    var = t[1];
+    sh_fmt(set, sizeof set, "%.*s", (int)(close - open - 1), open + 1);
+    if (!(items = s->h->alloc(s->h->ctx, room)))
+        return s->errorlevel;
+    for (w = set; *w;) {
+        char *e;
+        while (*w == ' ' || *w == '\t' || *w == ',' || *w == ';')
+            w++;
+        if (!*w)
+            break;
+        for (e = w; *e && *e != ' ' && *e != '\t' && *e != ',' && *e != ';'; e++)
+            ;
+        if (*e)
+            *e++ = 0;
+        if (strpbrk(w, "*?")) {                 /* the files it names, each with the folder as it was written */
+            char dir[SH_PATH], pat[64];
+            struct sh_dirent *list = 0;
+            const char *name = strrchr(w, '\\') ? strrchr(w, '\\') + 1 : strchr(w, ':') ? strchr(w, ':') + 1 : w;
+            int n, i;
+            split_pattern(s, w, dir, sizeof dir, pat, sizeof pat);
+            n = s->h->dir_read(s->h->ctx, dir, &list);
+            for (i = 0; i < n; i++)
+                if (!list[i].dir && match(pat, list[i].name)
+                    && k + (unsigned)(name - w) + strlen(list[i].name) + 2 < room)
+                    k += (unsigned)sh_fmt(items + k, room - k, "%.*s%s", (int)(name - w), w, list[i].name) + 1;
+            if (n >= 0)
+                s->h->dir_free(s->h->ctx, list);
+        } else if (k + strlen(w) + 2 < room) {
+            k += (unsigned)sh_fmt(items + k, room - k, "%s", w) + 1;
+        }
+        w = e;
+    }
+    items[k] = 0;
+    loop_end(s);
+    s->loop.var = var;
+    s->loop.items = items;
+    s->loop.at = items;
+    sh_fmt(s->loop.cmd, sizeof s->loop.cmd, "%s", u);
+    return s->errorlevel;
+}
+
+/* The prompt's text (PROMPT's codes put in): its length. */
+static size_t prompt_text(const struct sh *s, char *t, size_t room)
+{
+    const char *p = var_get(s, "PROMPT");
+    size_t n = 0;
+    if (!p)
+        p = "$P$G";
+    for (; *p && n < room - 80; p++) {
+        if (*p != '$' || !p[1]) {
+            t[n++] = *p;
+            continue;
+        }
+        switch (upper((unsigned char)*++p)) {
+        case 'P': n += (size_t)sh_fmt(t + n, (unsigned)(room - n), "%s", s->cwd[s->drive]); break;
+        case 'N': t[n++] = (char)('A' + s->drive); break;
+        case 'G': t[n++] = '>'; break;
+        case 'L': t[n++] = '<'; break;
+        case 'B': t[n++] = '|'; break;
+        case 'Q': t[n++] = '='; break;
+        case '$': t[n++] = '$'; break;
+        case '_': t[n++] = '\r', t[n++] = '\n'; break;
+        case 'E': t[n++] = 27; break;
+        }
+    }
+    return n;
+}
+
 /* ---- a command: its exit code, or SH_UNDER_WAY */
 
 static int run_one(struct sh *s, const char *cmd)
 {
-    char line[SH_LINE], copy[SH_LINE], *argv[32], *gt, target[SH_PATH];
-    int argc, r = 0, append = 0;
+    char line[SH_LINE];
     while (*cmd == ' ' || *cmd == '\t')
         cmd++;
     expand(s, cmd, line, sizeof line);
+    return run_line(s, line);
+}
+
+/* A command with its variables put in already (line is changed). */
+static int run_line(struct sh *s, char *line)
+{
+    char copy[SH_LINE], *argv[32], *gt, target[SH_PATH];
+    const char *u;
+    int argc, r = 0, append = 0;
+    while (*line == ' ' || *line == '\t' || *line == '@')
+        line++;
     {
         char *e = line + strlen(line);
         while (e > line && (e[-1] == ' ' || e[-1] == '\t'))
             *--e = 0;
+    }
+    if (*line == ':')                           /* (a label) */
+        return s->errorlevel;
+    /* the batch language: these take the rest of the line as it stands (a > in it is the inner command's) */
+    if ((u = word(line, "REM")) != 0)
+        return s->errorlevel;
+    if ((u = word(line, "IF")) != 0)
+        return cmd_if(s, (char *)u);
+    if ((u = word(line, "FOR")) != 0)
+        return cmd_for(s, u);
+    if ((u = word(line, "GOTO")) != 0)
+        return cmd_goto(s, u);
+    if ((u = word(line, "CALL")) != 0) {
+        char first[128], found[SH_PATH];
+        unsigned n = 0;
+        size_t fl;
+        for (; u[n] && u[n] != ' ' && u[n] != '\t' && n < sizeof first - 1; n++)
+            first[n] = u[n];
+        first[n] = 0;
+        if (n && !is_builtin(s, first) && find_program(s, first, found, sizeof found) == 0
+            && (fl = strlen(found)) > 4 && same(found + fl - 4, ".BAT"))
+            return batch_start(s, found, u, 1) == 0 ? s->errorlevel : 1;
+        return run_line(s, (char *)u);          /* (anything else is run as it would be without CALL) */
+    }
+    if ((u = word(line, "LH")) != 0 || (u = word(line, "LOADHIGH")) != 0) {
+        while (*u == '/') {                     /* (its switches: upper memory is GLOS's to give) */
+            while (*u && *u != ' ' && *u != '\t')
+                u++;
+            while (*u == ' ' || *u == '\t')
+                u++;
+        }
+        return run_line(s, (char *)u);
     }
     sh_fmt(copy, sizeof copy, "%s", line);
     argc = split_words(copy, argv, 32);
     if (!argc)
         return s->errorlevel;
     if (!is_builtin(s, argv[0]) || strpbrk(line, "|<")) {   /* (a built-in in a pipe, or with its input from a
-                                                               file, is the DOS's own until S4) */
+                                                               file, is the DOS's own until S4b) */
         int st = run_program(s, line, 0);
-        return st > 0 ? SH_UNDER_WAY : st < 0 ? 1 : 0;
+        return st == BATCH_BEGUN ? s->errorlevel : st > 0 ? SH_UNDER_WAY : st < 0 ? 1 : 0;
     }
     if ((gt = strchr(line, '>')) != 0) {
         append = gt[1] == '>';                  /* a built-in's output to a file */
@@ -1072,9 +1498,10 @@ static int run_one(struct sh *s, const char *cmd)
         } else {
             while (*t == ' ')
                 t++;
-            if (!*t || same(t, "ON") || same(t, "OFF")) {
-                if (!*t)
-                    say(s, "ECHO is on\r\n");
+            if (!*t) {
+                say(s, s->echo_off ? "ECHO is off\r\n" : "ECHO is on\r\n");
+            } else if (same(t, "ON") || same(t, "OFF")) {
+                s->echo_off = same(t, "OFF");
             } else {
                 say(s, t);
                 say(s, "\r\n");
@@ -1137,11 +1564,50 @@ static int run_one(struct sh *s, const char *cmd)
         while (*t == ' ')
             t++;
         r = run_program(s, t, 1) < 0;
+    } else if (same(argv[0], "SHIFT")) {
+        if (s->nbat && s->bat[s->nbat - 1]->shift < SH_ARGS)
+            s->bat[s->nbat - 1]->shift++;
+        r = s->errorlevel;
+    } else if (same(argv[0], "PAUSE")) {
+        say(s, "Press any key to continue . . .\r\n");
+        r = s->errorlevel;
+        if (s->h->key && s->h->key(s->h->ctx) == SH_UNDER_WAY) {
+            s->key_for = 1;
+            r = SH_UNDER_WAY;
+        }
+    } else if (same(argv[0], "VOL")) {
+        int d = argc > 1 && argv[1][0] && argv[1][1] == ':' ? upper((unsigned char)argv[1][0]) - 'A' : s->drive;
+        unsigned long total, left;
+        char label[12], l[80];
+        if (!s->h->space || s->h->space(s->h->ctx, d, &total, &left, label) != 0) {
+            err(s, "Invalid drive specification\r\n");
+            r = 1;
+        } else {
+            if (label[0])
+                sh_fmt(l, sizeof l, " Volume in drive %c is %s\r\n", 'A' + d, label);
+            else
+                sh_fmt(l, sizeof l, " Volume in drive %c has no label\r\n", 'A' + d);
+            say(s, l);
+        }
+    } else if (same(argv[0], "TRUENAME")) {
+        char full[SH_PATH];
+        full_path(s, argc > 1 ? argv[1] : ".", full, sizeof full);
+        say(s, full);
+        say(s, "\r\n");
+    } else if (same(argv[0], "BREAK") || same(argv[0], "VERIFY")) {
+        if (argc < 2)                           /* (GLOS has neither switch: taken, and said to be off) */
+            say(s, upper((unsigned char)argv[0][0]) == 'B' ? "BREAK is off\r\n" : "VERIFY is off\r\n");
+        r = s->errorlevel;
+    } else if (same(argv[0], "CTTY")) {
+        err(s, "CTTY: GLOS has no other console to give.\r\n");
+        r = 1;
     } else {
         r = s->h->extra ? s->h->extra(s->h->ctx, argc, argv, line) : SH_NOT_MINE;       /* (SH_UNDER_WAY: as a program
                                                                                            is) */
         if (r == SH_NOT_MINE)
             r = 1;
+        else if (r != SH_UNDER_WAY)
+            s->level = r;                       /* (a command of the host's is as a program to IF ERRORLEVEL) */
     }
     if (s->redirect) {
         s->h->close(s->h->ctx, s->redirect);
@@ -1152,31 +1618,101 @@ static int run_one(struct sh *s, const char *cmd)
 
 /* ---- a line: commands joined by && and || */
 
+/* The question after Ctrl+C in a batch file or a FOR: 1 if a key is waited for (sh_key() goes on). With no
+   keyboard here they end at once. */
+static int ask_stop(struct sh *s)
+{
+    s->rest[0] = 0;
+    out(s, "\r\nTerminate batch job (Y/N)?");
+    if (s->h->key && s->h->key(s->h->ctx) == SH_UNDER_WAY) {
+        s->key_for = 2;
+        s->under_way = 1;
+        return 1;
+    }
+    out(s, "\r\n");
+    batch_end_all(s);
+    return 0;
+}
+
 static void next_command(struct sh *s)
 {
-    while (s->rest[0] && !s->under_way) {
-        char cmd[SH_LINE];
-        const char *a = strstr(s->rest, "&&"), *o = strstr(s->rest, "||"), *cut = a && (!o || a < o) ? a : o;
-        int op = cut == a && a ? 1 : cut ? 2 : 0, run, r;
-        size_t n = cut ? (size_t)(cut - s->rest) : strlen(s->rest);
-        memcpy(cmd, s->rest, n);
-        cmd[n] = 0;
-        run = s->rest_op == 0 || (s->rest_op == 1 && s->errorlevel == 0) || (s->rest_op == 2 && s->errorlevel != 0);
-        memmove(s->rest, cut ? cut + 2 : s->rest + n, strlen(cut ? cut + 2 : s->rest + n) + 1);
-        s->rest_op = op;
-        if (!run)
-            continue;
-        r = run_one(s, cmd);
-        if (r == SH_UNDER_WAY) {
-            s->under_way = 1;                   /* (a program: on when it ends) */
-            return;
+    for (;;) {
+        while (s->rest[0] && !s->under_way) {
+            char cmd[SH_LINE];
+            const char *a = strstr(s->rest, "&&"), *o = strstr(s->rest, "||"), *cut = a && (!o || a < o) ? a : o;
+            int op = cut == a && a ? 1 : cut ? 2 : 0, run, r;
+            size_t n = cut ? (size_t)(cut - s->rest) : strlen(s->rest);
+            memcpy(cmd, s->rest, n);
+            cmd[n] = 0;
+            run = s->rest_op == 0 || (s->rest_op == 1 && s->errorlevel == 0) || (s->rest_op == 2 && s->errorlevel != 0);
+            memmove(s->rest, cut ? cut + 2 : s->rest + n, strlen(cut ? cut + 2 : s->rest + n) + 1);
+            s->rest_op = op;
+            if (!run)
+                continue;
+            r = s->rest_plain ? run_line(s, cmd) : run_one(s, cmd);
+            if (r == SH_UNDER_WAY) {
+                s->under_way = 1;               /* (a program: on when it ends) */
+                return;
+            }
+            s->errorlevel = r;
         }
-        s->errorlevel = r;
+        if (s->under_way)
+            return;
+        /* the line is done: a FOR's next turn, a batch file's next line, or the prompt */
+        if (!s->nbat && !s->loop.items)
+            break;
+        if (s->h->stop && s->h->stop(s->h->ctx)) {      /* Ctrl+C */
+            if (ask_stop(s))
+                return;
+            continue;                           /* (nobody to ask: they have ended) */
+        }
+        if (s->loop.items) {
+            if (*s->loop.at) {                  /* its command, the variable's place taken by the next of the set */
+                const char *c = s->loop.cmd, *item = s->loop.at;
+                size_t k = 0;
+                s->loop.at += strlen(item) + 1;
+                while (*c && k < sizeof s->rest - 1) {
+                    if (c[0] == '%' && upper((unsigned char)c[1]) == upper((unsigned char)s->loop.var)) {
+                        k += (size_t)sh_fmt(s->rest + k, (unsigned)(sizeof s->rest - k), "%s", item);
+                        c += 2;
+                    } else {
+                        s->rest[k++] = *c++;
+                    }
+                }
+                s->rest[k < sizeof s->rest ? k : sizeof s->rest - 1] = 0;
+                s->rest_op = 0;
+                s->rest_plain = 1;
+                continue;
+            }
+            loop_end(s);
+            continue;
+        }
+        {
+            char raw[SH_LINE], *p = raw;
+            int got = batch_read(s, raw, sizeof raw);
+            if (got <= 0) {                     /* its end (or the file has gone) */
+                batch_end(s);
+                continue;
+            }
+            while (*p == ' ' || *p == '\t')
+                p++;
+            if (!*p || *p == ':')               /* (an empty line; a label) */
+                continue;
+            expand(s, p, s->rest, sizeof s->rest);
+            if (!s->echo_off && *p != '@') {    /* shown as it is run, the prompt before it */
+                char t[300];
+                size_t n = prompt_text(s, t, sizeof t);
+                s->h->write(s->h->ctx, SH_OUT, t, (int)n);      /* (as output: nothing is typed after this one) */
+                out(s, s->rest);
+                out(s, "\r\n");
+            }
+            s->rest_op = 0;
+            s->rest_plain = 1;
+        }
     }
-    if (!s->under_way) {
-        s->rest[0] = 0;
-        sh_prompt(s);
-    }
+    s->rest[0] = 0;
+    s->rest_plain = 0;
+    sh_prompt(s);
 }
 
 void sh_line(struct sh *s, const char *line)
@@ -1198,6 +1734,7 @@ void sh_line(struct sh *s, const char *line)
     s->hist_at = s->nhist;
     sh_fmt(s->rest, sizeof s->rest, "%s", p);
     s->rest_op = 0;
+    s->rest_plain = 0;
     next_command(s);
 }
 
@@ -1205,6 +1742,31 @@ void sh_ended(struct sh *s, int code)
 {
     s->under_way = 0;
     s->errorlevel = code;
+    s->level = code;
+    next_command(s);
+}
+
+void sh_key(struct sh *s, int ch)
+{
+    int what = s->key_for;
+    if (!what)
+        return;
+    if (what == 2) {                            /* Terminate batch job (Y/N)? */
+        if (upper(ch) != 'Y' && upper(ch) != 'N') {
+            if (!s->h->key || s->h->key(s->h->ctx) != SH_UNDER_WAY) {   /* (asked again; nobody there: ended) */
+                s->key_for = 0;
+                s->under_way = 0;
+                batch_end_all(s);
+                next_command(s);
+            }
+            return;
+        }
+        out(s, upper(ch) == 'Y' ? "Y\r\n" : "N\r\n");
+        if (upper(ch) == 'Y')
+            batch_end_all(s);
+    }
+    s->key_for = 0;
+    s->under_way = 0;
     next_command(s);
 }
 
@@ -1212,28 +1774,8 @@ void sh_ended(struct sh *s, int code)
 
 void sh_prompt(struct sh *s)
 {
-    const char *p = var_get(s, "PROMPT");
     char t[300];
-    size_t n = 0;
-    if (!p)
-        p = "$P$G";
-    for (; *p && n < sizeof t - 80; p++) {
-        if (*p != '$' || !p[1]) {
-            t[n++] = *p;
-            continue;
-        }
-        switch (upper((unsigned char)*++p)) {
-        case 'P': n += (size_t)sh_fmt(t + n, (unsigned)(sizeof t - n), "%s", s->cwd[s->drive]); break;
-        case 'N': t[n++] = (char)('A' + s->drive); break;
-        case 'G': t[n++] = '>'; break;
-        case 'L': t[n++] = '<'; break;
-        case 'B': t[n++] = '|'; break;
-        case 'Q': t[n++] = '='; break;
-        case '$': t[n++] = '$'; break;
-        case '_': t[n++] = '\r', t[n++] = '\n'; break;
-        case 'E': t[n++] = 27; break;
-        }
-    }
+    size_t n = s->echo_off ? 0 : prompt_text(s, t, sizeof t);  /* (ECHO OFF at the prompt: none, as under DOS) */
     s->h->write(s->h->ctx, SH_PROMPT, t, (int)n);       /* (the folder: DOS's bytes) */
     s->h->prompted(s->h->ctx);
 }

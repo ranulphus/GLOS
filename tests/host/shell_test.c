@@ -9,6 +9,10 @@
  *   tab TEXT        completion of what is typed
  *   mkdir PATH      a folder made (DOS path)
  *   file PATH TEXT  a file made, with TEXT and a CR LF
+ *   line PATH TEXT  a line added to a file (a batch file's next line)
+ *   key C           the key the shell waits for (PAUSE, "Terminate batch job (Y/N)?")
+ *   stop            Ctrl+C: the shell is told when it next asks
+ *   nokeys          from here nobody is at a keyboard
  *   cat PATH        a file's bytes shown (CR and LF as \r and \n)
  *   # ...           a comment
  * In the transcript: errors are in <<...>>, the prompt in [[...]], a file's own text (TYPE) in {{...}};
@@ -204,9 +208,31 @@ static int h_space(void *ctx, int drive, unsigned long *total, unsigned long *le
     return 0;
 }
 
+static int keys = 1, stopped;
+
+static int h_seek(void *ctx, void *f, unsigned long pos) { (void)ctx; return fseek(f, (long)pos, SEEK_SET) ? -1 : 0; }
+
+static int h_key(void *ctx)
+{
+    (void)ctx;
+    if (!keys)
+        return 0;
+    printf("(KEY?)\n");
+    return SH_UNDER_WAY;
+}
+
+static int h_stop(void *ctx)
+{
+    int was = stopped;
+    (void)ctx;
+    stopped = 0;
+    return was;
+}
+
 static const struct sh_host host = {
     0, h_write, h_clear, h_prompted, h_input, h_quit, h_dir_read, h_dir_free, h_is_dir, h_stat, h_open, h_read, h_put,
-    h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space, h_run, 0, extra_names, extra_help, h_extra, h_alloc, h_free };
+    h_close, h_mkdir, h_rmdir, h_unlink, h_rename, h_space, h_run, 0, extra_names, extra_help, h_extra, h_alloc, h_free,
+    h_seek, h_key, h_stop };
 
 int main(int argc, char **argv)
 {
@@ -255,6 +281,23 @@ int main(int argc, char **argv)
                 fprintf(f, "%s\r\n", text ? text : "");
                 fclose(f);
             }
+        } else if (!strncmp(line, "line ", 5)) {
+            char *text = strchr(arg, ' ');
+            if (text)
+                *text++ = 0;
+            native(arg, p, sizeof p);
+            if ((f = fopen(p, "ab")) != NULL) {
+                fprintf(f, "%s\r\n", text ? text : "");
+                fclose(f);
+            }
+        } else if (!strncmp(line, "key ", 4)) {
+            printf("(KEY %c)\n", arg[0]);
+            sh_key(&sh, arg[0]);
+        } else if (!strcmp(line, "stop")) {
+            printf("(CTRL+C)\n");
+            stopped = 1;
+        } else if (!strcmp(line, "nokeys")) {
+            keys = 0;
         } else if (!strncmp(line, "cat ", 4)) {
             int c;
             native(arg, p, sizeof p);

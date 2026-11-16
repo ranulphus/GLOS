@@ -4,6 +4,15 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The shell runs batch files itself (S4a, 2026-11-16)
+
+- **GLOS's shell runs `.BAT` files**, at an SSH login, in the Terminal and at the PC's own prompt: `IF`, `GOTO`,
+  `CALL`, `FOR`, `SHIFT`, `PAUSE`, `%0` to `%9`, `ECHO OFF`, as MS-DOS's COMMAND.COM has them. Ctrl+C asks
+  `Terminate batch job (Y/N)?`.
+- `VOL`, `TRUENAME`, `DATE`, `TIME`, `CHCP`, `BREAK`, `VERIFY` and `LH` are commands of the shell's own.
+- Still to come in S4: pipes and redirection around programs, GLOS's own COMMAND.COM for programs that shell
+  out, and `AUTOEXEC.BAT` run by GLOS.
+
 ## The network for full-screen programs (API 2.3, 2026-11-15)
 
 - **A full-screen program can use sockets** (TCP and UDP), where only an app in a window could: a game plays over

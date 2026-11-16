@@ -145,8 +145,8 @@ tool /x
 <<GLOS can't run it here.
 >>[[C:\WORK>]]
 run
-(RUN command="C:\TOOLS\RUN.BAT" prog=C:\TOOLS\RUN.BAT name=run cwd=C:\WORK env=X=hello; detach=0 -> -1)
-<<GLOS can't run it here.
+C:\WORK>x
+<<Bad command or file name
 >>[[C:\WORK>]]
 where b
 C:\TOOLS\B.COM
@@ -227,6 +227,8 @@ CLS                 a clean window
 HISTORY             the lines typed before (Up and Down)
 WHERE program       where it is along PATH
 START program       a program started beside the terminal
+VOL [drive:], TRUENAME [path]  a drive's label; a path in full
+name.BAT [words]    a batch file run: %0 to %9, IF, GOTO, CALL, FOR, SHIFT, PAUSE, REM, @
 XTRA                a command of the host's
 VER, HELP, EXIT
 Programs run here until they want the screen. a && b: b after a has worked; a || b: b if it hasn't.

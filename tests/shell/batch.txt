@@ -1,0 +1,116 @@
+# The batch language (S4a): the shell runs .BAT files itself. Parameters, ECHO's state, IF, GOTO, CALL, FOR,
+# SHIFT, PAUSE, REM, labels, a batch file that names another, programs among the lines, Ctrl+C.
+mkdir C:\BAT
+mkdir C:\BIN
+file C:\BIN\A.COM x
+file C:\BAT\ONE.TXT one
+file C:\BAT\TWO.TXT two
+# parameters, %%, an unknown variable, ECHO's state
+file C:\BAT\ARGS.BAT @echo off
+line C:\BAT\ARGS.BAT echo [%0] [%1] [%2] [%9] 100%% [%NOPE%] [%X%]
+line C:\BAT\ARGS.BAT shift
+line C:\BAT\ARGS.BAT echo [%0] [%1] [%2]
+line C:\BAT\ARGS.BAT echo
+> cd \bat
+> set X=val
+> args one two three
+> echo
+# shown as they are run; @ hides a line
+file C:\BAT\SHOW.BAT echo first
+line C:\BAT\SHOW.BAT @echo second
+line C:\BAT\SHOW.BAT rem not run
+line C:\BAT\SHOW.BAT echo off
+line C:\BAT\SHOW.BAT echo third
+> show
+> echo
+# IF and GOTO
+file C:\BAT\IFS.BAT @echo off
+line C:\BAT\IFS.BAT if "%1"=="" goto none
+line C:\BAT\IFS.BAT if %1==yes echo said yes
+line C:\BAT\IFS.BAT if not %1==yes echo did not say yes
+line C:\BAT\IFS.BAT if exist one.txt echo one is there
+line C:\BAT\IFS.BAT if exist *.txt echo some text files
+line C:\BAT\IFS.BAT if not exist nope.txt echo nope is not
+line C:\BAT\IFS.BAT if exist c:\bat\nul echo the folder is there
+line C:\BAT\IFS.BAT if exist c:\nowhere\nul echo not shown
+line C:\BAT\IFS.BAT goto end
+line C:\BAT\IFS.BAT echo skipped
+line C:\BAT\IFS.BAT :none
+line C:\BAT\IFS.BAT echo no argument
+line C:\BAT\IFS.BAT :end
+line C:\BAT\IFS.BAT echo done
+> ifs yes
+> ifs no
+> ifs
+# a label of more than eight characters, and one that is not there
+file C:\BAT\LABEL.BAT @echo off
+line C:\BAT\LABEL.BAT goto longlabelname
+line C:\BAT\LABEL.BAT echo skipped
+line C:\BAT\LABEL.BAT :longlabelother
+line C:\BAT\LABEL.BAT echo eight characters count
+line C:\BAT\LABEL.BAT goto nowhere
+line C:\BAT\LABEL.BAT echo not reached
+> label
+# a program among the lines, and IF ERRORLEVEL (the program's exit code, which a command of the shell's leaves)
+file C:\BAT\PROG.BAT @echo off
+line C:\BAT\PROG.BAT a first
+line C:\BAT\PROG.BAT echo after the program
+line C:\BAT\PROG.BAT if errorlevel 3 echo three or more
+line C:\BAT\PROG.BAT if errorlevel 4 echo four or more
+line C:\BAT\PROG.BAT if not errorlevel 4 echo less than four
+> prog
+ended 3
+# CALL comes back; a batch file named without CALL does not
+file C:\BAT\INNER.BAT @echo inner %1
+file C:\BAT\OUTER.BAT @echo off
+line C:\BAT\OUTER.BAT call inner called
+line C:\BAT\OUTER.BAT echo back in outer
+line C:\BAT\OUTER.BAT call echo a command through CALL
+line C:\BAT\OUTER.BAT inner chained
+line C:\BAT\OUTER.BAT echo never shown
+> outer
+# FOR: words, files by a pattern, a program in each turn; at the prompt with one %
+file C:\BAT\LOOP.BAT @echo off
+line C:\BAT\LOOP.BAT for %%f in (a b,c) do echo item %%f
+line C:\BAT\LOOP.BAT for %%f in (*.txt) do echo file %%f
+line C:\BAT\LOOP.BAT for %%p in (1 2) do a turn%%p
+line C:\BAT\LOOP.BAT echo loop done
+> loop
+ended 0
+ended 0
+> for %v in (x y) do echo at the prompt %v
+# PAUSE waits for a key; with nobody at a keyboard it goes on
+file C:\BAT\WAIT.BAT @echo off
+line C:\BAT\WAIT.BAT pause
+line C:\BAT\WAIT.BAT echo after the pause
+> wait
+key x
+# Ctrl+C in a batch file: asked about; N goes on, Y ends it
+file C:\BAT\LONG.BAT @echo off
+line C:\BAT\LONG.BAT echo one
+line C:\BAT\LONG.BAT a prog
+line C:\BAT\LONG.BAT echo two
+line C:\BAT\LONG.BAT a prog
+line C:\BAT\LONG.BAT echo three
+> long
+stop
+ended 255
+key n
+stop
+ended 255
+key y
+nokeys
+> wait
+> long
+stop
+ended 255
+# the commands that were the DOS's COMMAND.COM's
+> vol
+> vol a:
+> truename ..\bat\one.txt
+> break
+> verify
+> lh /l:1 echo loaded high
+> ctty com1
+> rem nothing
+> @echo with an at
