@@ -152,7 +152,7 @@ host-test-run:
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/disk_test tests/host/disk_test.c kernel/disk/mbr.c \
 	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  && tests/host/disk_test.sh build/host/disk_test build/host/disk
-	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/shell_test tests/host/shell_test.c sdk/shell/shell.c \
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iinclude -o build/host/shell_test tests/host/shell_test.c sdk/shell/shell.c \
 	  && tests/host/shell_test.sh build/host/shell_test build/host/shell
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/edit_test tests/host/edit_test.c sdk/shell/edit.c \
 	  && build/host/edit_test > build/host/edit.out && diff -u tests/shell/edit.out build/host/edit.out \
