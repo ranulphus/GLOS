@@ -49,6 +49,7 @@ u32 mix_from_percent(u32 percent) { return percent * 256 / 100; }
 void mixer_late(void) { }                  /* (a Crystal chip: none on the host) */
 void joy_config(void) { snprintf(applied, sizeof applied, "joystick"); }
 void usb_late(void) { }
+void mga_clocks_config(void) { }            /* (a G400's clocks: no card on the host) */
 u32 pci_lfb_range(u32 *base, const struct pci_dev **card) { (void)base; (void)card; return 0; }  /* (no video card on the host) */
 int mtrr_wc(u32 base, u32 bytes, int on) { (void)base; (void)bytes; (void)on; return -1; }
 void vkbc_typematic(u32 d, u32 r) { snprintf(applied, sizeof applied, "typematic %u %u", d, r); }

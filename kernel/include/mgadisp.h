@@ -10,6 +10,10 @@ void mga_display_init(const struct bootinfo *bi);       /* the card on the PCI b
 int mga_display_up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h);   /* the VM thread, after the desktop's mode set (pix:
                                                    the screen's pixels): 1 if the engine is up on that framebuffer (the
                                                    card's), and the screen's surface may have mga_dev; 0 if not */
+void mga_clocks_config(void);                   /* a G400's clocks raised to Matrox's own, once the settings are read
+                                                   ([display] clocks; nothing may be drawing) ... */
+void mga_clocks_leave(void);                    /* ... and the BIOS's back as GLOS leaves */
+const char *mga_clocks_now(void);               /* "fast" or "bios"; 0: no G400 */
 void mga_display_down(void);                    /* drained and let go of: a session has the screen, or no desktop */
 int mga_display_on(void);
 void mga_display_sync(void);                    /* the engine finished: the CPU may read the screen */

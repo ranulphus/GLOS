@@ -3746,6 +3746,12 @@ def display_case(profile, vcard, card, cfg_mode, accel="on"):
     checks["text-at-exit"] = "HX-VMODE bios=03" in text
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    if vcard.startswith("g4"):                  # a G400: GLOS looked at its clocks once its settings were read, and
+        # left them (86Box's BIOS has not the table of the card this was tried with; the bench shows the rest)
+        checks["clocks"] = len(re.findall(r"GLOS-DISPLAY clocks=bios why=\S+\n", text)) == 1 \
+            and "GLOS-DISPLAY clocks=fast" not in text
+    elif "GLOS-MGA found" in text:
+        checks["clocks"] = "GLOS-DISPLAY clocks=" not in text   # (another Matrox card: not looked at)
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("display-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad

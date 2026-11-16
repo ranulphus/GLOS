@@ -18,6 +18,9 @@ const struct cfg_key cfg_schema[] = {
       "The desktop's screen: WIDTHxHEIGHTxBITS, or none for text mode (no desktop)" },
     { "display", "accel", CFG_CHOICE, CFG_DESKTOP, 0, 0, "on|off", "on", "&Drawing engine",
       "A Matrox card's engine draws the desktop (off: the processor does)" },
+    { "display", "clocks", CFG_CHOICE, CFG_RESTART, 0, 0, "auto|bios", "auto", "Card's cloc&ks",
+      "A Matrox G400 runs on the clocks Matrox's own driver uses, where its BIOS has them (auto: half as fast "
+      "again), or on those the BIOS leaves it on (bios)" },
     { "display", "write_combining", CFG_CHOICE, CFG_RESTART, 0, 0, "auto|on|off", "auto", "Fast &framebuffer writes",
       "Write-combining for the video card's linear framebuffer, which software renderers write several times "
       "faster with: auto for the cards it has been checked on, on for any card, off" },

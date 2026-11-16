@@ -28,6 +28,7 @@
 #include "app.h"
 #include "io.h"
 #include "gpu.h"
+#include "kcfg.h"
 #include "kprintf.h"
 #include "mgadisp.h"
 #include "mm.h"
@@ -169,6 +170,62 @@ void mga_display_init(const struct bootinfo *bi)
     kprintf("GLOS-MGA found %s id=%04x rev=%02x at %u:%u.%u fb=%08x mmio=%08x\n", mga.name, mga.device_id,
             mga.revision, mga.bus, mga.dev, mga.fn, mga.fb_phys, mga.mmio_phys);
 }
+
+/* ---- the G400's clocks (the owner's decision, 2026-11-16; RetroGPU's gl/docs/g4path.md, C)
+ *
+ * DOS leaves a G400 on the first record of its BIOS's table (PInS: system PLL 164.7 MHz); Matrox's own driver
+ * runs it on the second (252 MHz), where the card draws half as fast again. GLOS owns that: it raises the clocks
+ * once, when it has read its settings and before anything draws, for its desktop and every program, and puts
+ * the BIOS's back when it leaves. A program that raised them itself and was killed would leave nobody to lower
+ * them; so under GLOS the HAL's devices leave the clocks alone. The HAL's routine changes nothing unless the
+ * card's table and the clocks it runs on are the ones this was tried with (mga_clocks_why says which it found).
+ * [display] clocks = bios keeps the BIOS's. */
+static mga_clocks clocks_were;
+static const char *clocks_say = "bios";
+
+void mga_clocks_config(void)
+{
+    char v[8];
+    int r;
+    if (!m.found || mga.family != MGA_FAMILY_G400 || clocks_were.valid)
+        return;
+    v[0] = 0;
+    kcfg_get("display", "clocks", v, sizeof v);
+    if (!strcmp(v, "bios")) {
+        kprintf("GLOS-DISPLAY clocks=bios why=setting\n");
+        return;
+    }
+    if (!m.mapped) {
+        if (mga_map(&mga) != 0) {
+            kprintf("GLOS-DISPLAY clocks=bios why=map\n");
+            return;
+        }
+        m.mapped = 1;
+    }
+    r = mga_clocks_fast(&clocks_were);
+    if (r == 0)
+        clocks_say = "fast";
+    {                                           /* (the HAL's reason as one word of the log's line) */
+        char why[64];
+        u32 i;
+        ksnprintf(why, sizeof why, "%s", r == 0 ? "pins" : r < 0 ? "no-lock" : mga_clocks_why ? mga_clocks_why : "?");
+        for (i = 0; why[i]; i++)
+            if (why[i] == ' ')
+                why[i] = '-';
+        kprintf("GLOS-DISPLAY clocks=%s why=%s\n", clocks_say, why);
+    }
+}
+
+void mga_clocks_leave(void)                     /* GLOS leaves: the card as the BIOS had it */
+{
+    if (!clocks_were.valid)
+        return;
+    mga_clocks_restore(&clocks_were);
+    clocks_say = "bios";
+    kprintf("GLOS-DISPLAY clocks=bios why=leaving\n");
+}
+
+const char *mga_clocks_now(void) { return m.found && mga.family == MGA_FAMILY_G400 ? clocks_say : 0; }
 
 int mga_display_up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h)
 {
@@ -472,16 +529,21 @@ void mga_store_limit(u32 bytes) { m.store_max = bytes; }
 
 u32 mga_display_stat(char *buf, u32 max)
 {
-    u32 largest, free_;
+    u32 largest, free_, n;
     if (m.off)
         return (u32)ksnprintf(buf, max, "accel off (GLOS.CFG)\n");
     if (!m.found)
         return (u32)ksnprintf(buf, max, "accel none (no Matrox card)\n");
-    if (!m.up)
-        return (u32)ksnprintf(buf, max, "accel idle %s\n", mga.name);
-    free_ = vram_free_bytes(&m.heap, &largest);
-    return (u32)ksnprintf(buf, max, "accel on %s vram=%uK free=%uK largest=%uK draws=%u\n", mga.name, m.vram >> 10,
-                          free_ >> 10, largest >> 10, m.ops);
+    if (!m.up) {
+        n = (u32)ksnprintf(buf, max, "accel idle %s\n", mga.name);
+    } else {
+        free_ = vram_free_bytes(&m.heap, &largest);
+        n = (u32)ksnprintf(buf, max, "accel on %s vram=%uK free=%uK largest=%uK draws=%u\n", mga.name, m.vram >> 10,
+                           free_ >> 10, largest >> 10, m.ops);
+    }
+    if (n < max && mga_clocks_now())            /* (a G400: the clocks it runs on, the BIOS's or Matrox's own) */
+        n += (u32)ksnprintf(buf + n, max - n, "clocks %s\n", mga_clocks_now());
+    return n;
 }
 
 /* ---- the device behind the screen's surface */

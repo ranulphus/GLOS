@@ -40,6 +40,7 @@
 #include "arch.h"
 #include "keymap.h"
 #include "kprintf.h"
+#include "mgadisp.h"
 #include "mm.h"
 #include "sched.h"
 #include "timer.h"
@@ -580,6 +581,7 @@ static void apply_read(void)
     joy_config();                               /* [joystick] port and range */
     usb_late();                                 /* [usb] enabled: GLOS's USB controllers */
     wc_config();                                /* [display] write_combining */
+    mga_clocks_config();                        /* [display] clocks: a G400 on Matrox's own (gfx/mga.c) */
 }
 
 /* The desktop has come on (display.c, the VM thread): [desktop] start's programs, beside GLOS.EXE when they have
@@ -746,6 +748,7 @@ static void load(void)
         joy_config();
         usb_late();
         wc_config();
+        mga_clocks_config();
         return;
     }
     h = q.r[0].ax;
@@ -762,6 +765,7 @@ static void load(void)
         joy_config();
         usb_late();
         wc_config();
+        mga_clocks_config();
         return;
     }
     got = q.r[0].ax;

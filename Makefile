@@ -396,7 +396,7 @@ build/kernel/sdk_cfg.o build/kernel/sdk_tz.o build/kernel/sdk_region.o build/ker
 # The Matrox HAL (RetroGPU's checkout, RETROGPU), the part without FPU code, with its port for this
 # kernel (docs/milestones-m7.md step C). Its objects are built here; RetroGPU's tree is only read.
 MGAHAL := $(RETROGPU)/hal
-HAL_SRCS := $(addprefix $(MGAHAL)/src/,pci.c chip.c fifo.c engine.c blit.c cursor.c vram.c) $(MGAHAL)/port/glos.c
+HAL_SRCS := $(addprefix $(MGAHAL)/src/,pci.c chip.c fifo.c engine.c blit.c cursor.c vram.c clocks.c) $(MGAHAL)/port/glos.c
 HAL_OBJS := $(patsubst $(MGAHAL)/%.c,build/mgahal/%.o,$(HAL_SRCS))
 build/mgahal/%.o: $(MGAHAL)/%.c $(wildcard $(MGAHAL)/include/mga/*.h kernel/include/*.h)
 	@mkdir -p $(dir $@)

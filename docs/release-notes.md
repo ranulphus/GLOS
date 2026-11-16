@@ -4,6 +4,20 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## A Matrox G400 on its own driver's clocks (2026-11-16)
+
+- **`[display] clocks = auto | bios`** (auto by default; when GLOS next starts). DOS leaves a G400 on the first
+  record of its BIOS's clock table (system PLL 164.7 MHz); Matrox's own driver under Windows uses the second
+  (252 MHz), where the card draws about half as fast again (DOS-GL's measurements on the bench: fills 646 to
+  979 Mpixels/s, GLQuake at 640x480 45.6 to 56.3 frames a second, the frames byte for byte the same). With
+  `auto` GLOS raises the clocks itself once its settings are read, for its desktop and every program, and puts
+  the BIOS's back when it leaves; `bios` keeps the BIOS's.
+- It is done only on a G400 whose BIOS table and running clocks are the ones this was tried with; anything else
+  is left alone, and `GLOS-DISPLAY clocks=bios why=...` in the log says what was found. `glos display` has a
+  line `clocks fast` or `clocks bios` on a G400.
+- GLOS owns the clocks so that nothing is left raised by a program that was killed: RetroGPU's Matrox device
+  leaves them alone under GLOS, and raises them for itself only under plain DOS.
+
 ## Themes in the apps, and three text sizes (toolkit 2, 2026-11-16)
 
 - **The apps follow the desktop's theme** (`[desktop] theme = slate | dark | contrast`): windows' contents are

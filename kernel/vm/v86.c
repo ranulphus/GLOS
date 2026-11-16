@@ -27,6 +27,7 @@
 #include "kcfg.h"
 #include "lcon.h"
 #include "kprintf.h"
+#include "mgadisp.h"
 #include "mixer.h"
 #include "mm.h"
 #include "nic.h"
@@ -542,6 +543,7 @@ static void vm_leave(u32 code)
 {
     kprintf_direct();                           /* (no more traps to write the log from) */
     display_leave();
+    mga_clocks_leave();                         /* (a G400's clocks as the BIOS had them: gfx/mga.c) */
     int2f_unhook();
     slip_leave();                               /* the cable link's port as it was found, and its interrupt line
                                                    given back: before the PICs are DOS's again below (giving a line
