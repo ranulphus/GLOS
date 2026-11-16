@@ -1,0 +1,50 @@
+# Open and Save (toolkit 2, step C6; docs/v1/toolkit-2.md, Dialogs): GUITEST's two buttons, the dialogs by keys
+# alone. Open from C:\GUI with the Text filter: a folder's name typed goes into it (IMG: its one text file); the
+# Pictures filter; type-ahead in the list to B.JPG, which the preview pane describes; Enter opens it. Save as from
+# C:\GUI\NOTES.TXT: a name without a type gets the filter's (.TXT); NOTES again asks to replace it, No, then the
+# other format and Yes. (The list's Modified column is blanked in the shots: the dates are the copy's.)
+run GUITEST.EXE filedlg
+wait "GUITEST Open and Save"
+key alt+o
+wait "Open a file"
+shot open "Open a file" 355 56 110 118
+type img
+key enter
+shot open-img "Open a file" 355 56 110 118
+key alt+t
+key down
+shot open-pictures "Open a file" 355 56 110 118
+key shift+tab shift+tab
+type b
+shot open-preview "Open a file" 355 56 110 118
+key enter
+gone "Open a file"
+key alt+s
+wait "Save as"
+shot save "Save as" 375 56 104 118
+type LETTER
+key enter
+gone "Save as"
+key alt+s
+wait "Save as"
+key alt+n
+type notes
+key enter
+wait "Save"
+key alt+n
+gone "Save"
+key alt+f
+key down
+key alt+n
+type notes
+key enter
+wait "Save"
+key alt+y
+gone "Save as"
+key alt+f4
+gone "GUITEST Open and Save"
+expect GUI filedlg
+expect GUI open C:\GUI\IMG\B.JPG filter 1
+expect GUI save C:\GUI\LETTER.TXT format 0
+expect GUI save C:\GUI\NOTES.TXT format 1
+expect GUI end

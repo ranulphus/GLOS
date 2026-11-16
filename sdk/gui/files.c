@@ -32,9 +32,12 @@ static const char *native(const char *path, char *buf, size_t room)
     if (!root || !path[0] || path[1] != ':')
         return path;
     snprintf(buf, room, "%s/%c%s", root, path[0] >= 'a' ? path[0] - 32 : path[0], path + 2);
-    for (p = buf + strlen(root); *p; p++)
+    for (p = buf + strlen(root); *p; p++)      /* (as DOS takes a name in any case: the drives' names are its
+                                                   own, in capitals) */
         if (*p == '\\')
             *p = '/';
+        else if (*p >= 'a' && *p <= 'z')
+            *p = (char)(*p - 32);
     n = strlen(buf);
     if (n > 1 && buf[n - 1] == '/')
         buf[n - 1] = 0;

@@ -113,7 +113,8 @@ HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:ke
               tsync_test:kernel/app/tsync.c region_test:sdk/config/region.c theme_test:kernel/wm/theme.c \
               clip_test:kernel/app/clipstore.c dnd_test:kernel/wm/dnd.c notes_test:kernel/wm/notes.c \
               assoc_test:sdk/config/assoc.c sched_test:sdk/config/sched.c kdata_test:kernel/core/kdata.c \
-              mixgain_test:kernel/drv/mixgain.c fm_test:kernel/drv/fm.c midiq_test:kernel/drv/midiq.c
+              mixgain_test:kernel/drv/mixgain.c fm_test:kernel/drv/fm.c midiq_test:kernel/drv/midiq.c \
+              regex_test:sdk/gui/regex.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
 host-test-run:

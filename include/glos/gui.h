@@ -568,6 +568,68 @@ struct gui_about {
     const unsigned char *icon;          /* a GUI_BIG_W icon, or NULL */
 };
 void gui_about(struct gui_window *owner, const struct gui_about *a);  /* (toolkit 2) */
+/* Finding text (toolkit 2): the matching every app's Find uses (sdk/gui/regex.c says what a regular expression
+   may hold). */
+#define GUI_FIND_CASE  1                /* case matters */
+#define GUI_FIND_WORDS 2                /* whole words only */
+#define GUI_FIND_REGEX 4                /* what is a regular expression */
+#define GUI_FIND_BACK  8                /* the last that starts before `from` */
+struct gui_found {
+    int start, end;                     /* bytes in the text */
+    int group[10][2];                   /* \0 (the whole) to \9: start and end, -1 if the group matched nothing */
+};
+int gui_match(const char *what, unsigned flags, const char *text, int len, int from, struct gui_found *f);
+                                        /* 1 found (f filled), 0 not, -1 the expression is wrong */
+int gui_match_replace(const char *with, unsigned flags, const struct gui_found *f, const char *text, char *out,
+                      int room);        /* what replaces it (\0-\9, & with GUI_FIND_REGEX): its length, or -1 */
+
+/* Find and Replace (toolkit 2): a modeless dialog over its window; the app is told what to do and searches its
+   own text (best with gui_match), and puts its answer in the dialog (gui_find_say). The struct is the app's and
+   lives as long as the dialog may: what was found and put and the flags stay in it between uses. */
+enum { GUI_FIND_NEXT = 1, GUI_FIND_PREV, GUI_FIND_REPLACE, GUI_FIND_ALL };
+struct gui_find {
+    char what[128], with[128];          /* in and out */
+    unsigned flags;                     /* GUI_FIND_CASE, _WORDS, _REGEX: in and out */
+    int replace;                        /* 1: what to put in its place, Replace and Replace all too */
+    void (*on_find)(struct gui_find *f, int what);     /* GUI_FIND_NEXT ... (what, with and flags are filled) */
+    void *ctx;                          /* the app's */
+    struct gui_window *w;               /* (the dialog's own, while it shows) */
+    struct gui_widget *what_box, *with_box, *case_box, *words_box, *regex_box, *said;
+};
+void gui_find(struct gui_window *owner, struct gui_find *f);   /* shown (again: in front) */
+void gui_find_say(struct gui_find *f, const char *text);       /* "Not found", "3 replaced" in the dialog */
+void gui_find_close(struct gui_find *f);
+
+/* Open and Save (toolkit 2): places (the drives, the recent folders), the folder in a combo box, the files in a
+   virtual list (details or icons, sorted by a column), a filter, an optional preview the app draws, and saving,
+   an optional format. path in: where to start (a folder, or a file there); out: the file. 1: chosen. The old
+   gui_file_dialog keeps its own form until the apps move (step C10). */
+struct gui_file_opts {
+    const char *const *filters;         /* "Pictures|*.BMP;*.PNG", ..., NULL-ended (NULL: every file) */
+    int filter;                         /* in and out: the one chosen */
+    const char *const *formats;         /* saving: "Text (CR LF)", ..., NULL-ended (NULL: no choice) */
+    int format;                         /* in and out */
+    const char *const *recent;          /* recent folders (the places, the folder's list), NULL-ended */
+    int view;                           /* GUI_VIEW_DETAIL or GUI_VIEW_ICONS, in and out */
+    void (*preview)(struct gui_widget *pane, struct gfx_surface *s, const char *path, void *ctx);   /* draws the
+                                           chosen file in the pane (NULL: no pane) */
+    void *ctx;
+};
+int gui_file_dialog_ex(struct gui_window *owner, const char *title, int save, char *path, int room,
+                       struct gui_file_opts *o);
+/* Fonts for an app's own text (toolkit 2): GLOS's three faces at three sizes (0 small, 9 pixels; 1 normal, 11; 2
+   large, 14). gui_font_get: NULL if that size isn't there (FONTS.DAT is beside the program, as the toolkit's
+   small and large text want). */
+enum { GUI_FONT_SANS, GUI_FONT_BOLD, GUI_FONT_MONO };
+struct gui_fontspec { int face, size; };
+const struct gfx_font *gui_font_get(int face, int size);
+int gui_font_dialog(struct gui_window *owner, const char *title, struct gui_fontspec *f);     /* the faces, the
+                                           sizes there are, and a line shown in the one chosen. f in and out. 1:
+                                           chosen */
+int gui_colour_dialog(struct gui_window *owner, const char *title, unsigned *rgb);     /* (toolkit 2) swatches (the
+                                           basic sixteen, the theme's, the recent), a saturation-and-value square
+                                           with a hue bar, RGB and HSV spin boxes, hex, old beside new. rgb in and
+                                           out (00RRGGBBh). 1: chosen */
 int gui_folder_dialog(struct gui_window *owner, const char *title, char *path, int room);     /* (toolkit 2) a
                                            folder chosen in a tree of the drives' folders, or typed; New folder
                                            makes one. path in: where to start; out: the folder. 1: chosen */

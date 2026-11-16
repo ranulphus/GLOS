@@ -548,9 +548,33 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
   `gui_folder_dialog` (a virtual tree whose ids are places in the dialog's table of paths, opened down to the
   starting folder; the path in a combo box, Enter on it or the tree takes it; New folder asks for a name and
   makes it with `gui_mkdir`, then shows and chooses it).
+- **C6c, Open and Save** (`sdk/gui/filedlg.c`, `gui_file_dialog_ex` and `struct gui_file_opts`): as designed. The
+  places are a list (the drives, then the app's recent folders: a choice goes there); the folder's combo box keeps
+  the folders visited and completes the ones typed; the files are a virtual list (Name, Size, Modified; folders
+  first; a column's head sorts; details or icons by the View button; type-ahead). A name typed with * or ? is a
+  filter; a folder's name goes there; saving, a name without a type takes the filter's first and a file there
+  already asks before it is replaced. Names typed are DOS's capitals. Long names are not offered yet (DOS's
+  INT 21h 71h isn't used by the toolkit's files). `gui_file_dialog` keeps its old form until C10.
+- **C6d, Find and Replace** (`sdk/gui/find.c`, `sdk/gui/regex.c`): `gui_find` over its window, modeless; the two
+  combo boxes' histories last the app's run; the app's `on_find` is told Next, Previous, Replace or All and
+  answers with `gui_find_say`. `gui_match`: plain text (case, whole words) or a regular expression (. [] [^] * + ?
+  and their lazy forms, ^ $, \d \w \s and their opposites, groups, |), searching back too; a backtracking
+  matcher bounded at 200,000 steps (a pattern that would run on is "not found"). `gui_match_replace`: \0-\9 and
+  &. Host test `regex_test`.
+- **C6e, Colour** (`sdk/gui/colour.c`): as designed; the swatches' arrows take the colour they land on (Enter is
+  OK); the recent colours are the app's run's eight last.
+- **C6f, Font** (`sdk/gui/fontdlg.c`): the faces (sans, bold, fixed width) and the sizes there are (small and
+  large only with FONTS.DAT), a sample in the font chosen; `gui_font_get` gives an app the font. The smoothed
+  fonts' other scripts are not offered yet.
+- **Owed from C6:** the toolbar's combo item (C2's owed fields), long names in Open and Save.
 - **Test:** `smalldlg` (GUITEST's three buttons by keys alone: the message's box ticked and No; About's shot;
   Folder from C:\GUI, New folder NEWDIR, OK; the page removes NEWDIR after, as Loop A plays the other scripts on
-  the same disk), on the host and in Loop A with `dialogs`. `combo` (GUITEST's folder and name boxes, by keys alone: typed and chosen from the list, a text
+  the same disk), on the host and in Loop A with `dialogs`. `filedlg` (Open: a folder's name typed, the Pictures
+  filter, type-ahead to a picture the preview describes; Save as: a type added, a file there replaced after No
+  then Yes, the other format; the Modified column blanked in the shots, as the dates are the copy's), `find`
+  (next, previous, not found, replace, replace all, a regular expression swapping two words), `colour` (a
+  swatch, hex, the square's arrows; the recent swatch next time), `font` (bold, large; the page's line drawn
+  so), all on the host and in Loop A on a 486 and a Pentium II. `combo` (GUITEST's folder and name boxes, by keys alone: typed and chosen from the list, a text
   no item begins with, the history read back, F4's whole list, Esc, the name box's items made for what is
   typed), on the host and in Loop A on a 486 and a Pentium II. Its shots are taken with no list dropped (Loop
   A's shots are of the screen).

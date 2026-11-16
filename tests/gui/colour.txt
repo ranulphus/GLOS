@@ -1,0 +1,30 @@
+# The Colour dialog (toolkit 2, step C6; docs/v1/toolkit-2.md, Dialogs): GUITEST's button, the dialog by keys
+# alone. The swatches' arrows take the colour they land on; a colour typed as hex (#00FF80); the square nudged by
+# its arrows (saturation down three, value down one); OK gives #07FC81. Again: the colour among the recent
+# swatches, the old beside the new; Esc cancels.
+run GUITEST.EXE colour
+wait "GUITEST Colour"
+key alt+c
+wait "Choose a colour"
+shot dialog "Choose a colour"
+key right right
+key alt+x
+key ctrl+a
+type #00FF80
+key alt+s
+key tab
+key left left left down
+shot moved "Choose a colour"
+key enter
+gone "Choose a colour"
+key alt+c
+wait "Choose a colour"
+shot recent "Choose a colour"
+key esc
+gone "Choose a colour"
+key alt+f4
+gone "GUITEST Colour"
+expect GUI colour
+expect GUI colour #07FC81
+expect GUI colour cancelled
+expect GUI end

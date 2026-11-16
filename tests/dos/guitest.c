@@ -49,6 +49,15 @@
  *   GUITEST smalldlg    "GUITEST Small dialogs" (toolkit 2, step C6): a message with
  *                       "Don't ask again", About (GUITEST's credits and the toolkit's),
  *                       and Folder (a tree of the drives' folders, New folder)
+ *   GUITEST filedlg     "GUITEST Open and Save" (toolkit 2, step C6): the new Open and
+ *                       Save dialog (places, the folder's combo box, filters, a
+ *                       preview, formats), by keys alone
+ *   GUITEST find        "GUITEST Find" (toolkit 2, step C6): Find and Replace over a line
+ *                       of text (the page searches with gui_match): next, previous,
+ *                       replace, replace all, a regular expression with groups
+ *   GUITEST colour      "GUITEST Colour" (toolkit 2, step C6): the Colour dialog by keys
+ *   GUITEST font        "GUITEST Font" (toolkit 2, step C6): the Font dialog by keys, and
+ *                       a line of the page drawn in the font chosen
  *   GUITEST tasks       "GUITEST Tasks" (toolkit 2, step C4): background work: a task
  *                       "reads" ten thousand rows in pieces on a thread of its own,
  *                       the list filling as they are posted; its progress dialog
@@ -1183,6 +1192,212 @@ static void smalldlg(void)
     say("smalldlg", "", 0);
 }
 
+/* ---- Open and Save (toolkit 2, step C6) */
+static const char *const fd_filters[] = { "Text|*.TXT;*.CFG", "Pictures|*.BMP;*.PNG;*.JPG;*.GIF;*.PCX", "All files|*.*",
+                                          NULL };
+
+static void fd_preview(struct gui_widget *pane, struct gfx_surface *s, const char *path, void *ctx)
+{
+    struct gui_dirent e;
+    char line[64];
+    (void)ctx;
+    if (gui_stat(path, &e) != 0)
+        return;
+    gui_draw_text(s, pane->r.x + 6, pane->r.y + 6, gui_bold, gui_path_name(path), GUI_FIELD_TEXT);
+    snprintf(line, sizeof line, "%lu bytes", e.size);
+    gui_draw_text(s, pane->r.x + 6, pane->r.y + 24, gui_font, line, GUI_FIELD_TEXT);
+}
+
+static void fd_open(struct gui_widget *w, int what)
+{
+    static const char *const recent[] = { "C:\\GUI\\SUB", NULL };
+    struct gui_file_opts o;
+    char path[160] = "C:\\GUI", line[200];
+    (void)what;
+    memset(&o, 0, sizeof o);
+    o.filters = fd_filters, o.recent = recent, o.preview = fd_preview;
+    if (gui_file_dialog_ex(w->win, "Open a file", 0, path, sizeof path, &o)) {
+        snprintf(line, sizeof line, "open %s filter %d", path, o.filter);
+        say("%s", line, 0);
+    } else {
+        say("open cancelled", "", 0);
+    }
+}
+
+static void fd_save(struct gui_widget *w, int what)
+{
+    static const char *const formats[] = { "Text (CR LF)", "Text (LF)", NULL };
+    static char path[160] = "C:\\GUI\\NOTES.TXT";
+    struct gui_file_opts o;
+    char line[200];
+    (void)what;
+    memset(&o, 0, sizeof o);
+    o.filters = fd_filters, o.formats = formats;
+    if (gui_file_dialog_ex(w->win, "Save as", 1, path, sizeof path, &o)) {
+        snprintf(line, sizeof line, "save %s format %d", path, o.format);
+        say("%s", line, 0);
+    } else {
+        say("save cancelled", "", 0);
+    }
+}
+
+static void filedlg(void)
+{
+    struct gui_widget *row;
+    win = gui_window("GUITEST Open and Save", 300, 90, 0);
+    row = gui_hbox(win->root, -1, -1);
+    gui_button(row, "&Open...", fd_open, 0);
+    gui_button(row, "&Save as...", fd_save, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("filedlg", "", 0);
+}
+
+/* ---- Find and Replace (toolkit 2, step C6): the page's "document" is one line, searched with gui_match */
+static char fr_doc[200] = "The quick brown fox jumps over the lazy dog. The fox is quick.";
+static int fr_at, fr_start = -1, fr_end = -1;   /* where the next search starts; the found text */
+static struct gui_widget *fr_label;
+static struct gui_find fr;
+
+static void fr_show(void)
+{
+    gui_set_text(fr_label, fr_doc);
+}
+
+static void fr_on(struct gui_find *f, int what)
+{
+    struct gui_found m;
+    char line[160], with[200];                  /* (say's own line is 200 bytes) */
+    int len = (int)strlen(fr_doc), r, n = 0;
+    if (what == GUI_FIND_NEXT || what == GUI_FIND_PREV) {
+        r = gui_match(f->what, f->flags | (what == GUI_FIND_PREV ? GUI_FIND_BACK : 0), fr_doc, len,
+                      what == GUI_FIND_PREV ? (fr_start >= 0 ? fr_start : len) : fr_at, &m);
+        if (r < 0) {
+            gui_find_say(f, "That expression is wrong.");
+            say("bad expression", "", 0);
+        } else if (!r) {
+            gui_find_say(f, "Not found.");
+            say("not found", "", 0);
+        } else {
+            fr_start = m.start, fr_end = m.end, fr_at = m.end;
+            snprintf(line, sizeof line, "found %d-%d", m.start, m.end);
+            say("%s", line, 0);
+        }
+        return;
+    }
+    if (what == GUI_FIND_REPLACE) {             /* the found text (if it is still there), then the next */
+        if (fr_start >= 0 && gui_match(f->what, f->flags, fr_doc, len, fr_start, &m) == 1 && m.start == fr_start
+            && gui_match_replace(f->with, f->flags, &m, fr_doc, with, sizeof with) >= 0
+            && len - (m.end - m.start) + (int)strlen(with) < (int)sizeof fr_doc) {
+            memmove(fr_doc + m.start + strlen(with), fr_doc + m.end, (size_t)(len - m.end + 1));
+            memcpy(fr_doc + m.start, with, strlen(with));
+            fr_at = m.start + (int)strlen(with);
+            fr_start = fr_end = -1;
+            fr_show();
+            say("replaced: %s", fr_doc, 0);
+        }
+        fr_on(f, GUI_FIND_NEXT);
+        return;
+    }
+    fr_at = 0;                                  /* GUI_FIND_ALL */
+    while ((r = gui_match(f->what, f->flags, fr_doc, (len = (int)strlen(fr_doc)), fr_at, &m)) == 1
+           && gui_match_replace(f->with, f->flags, &m, fr_doc, with, sizeof with) >= 0
+           && len - (m.end - m.start) + (int)strlen(with) < (int)sizeof fr_doc && n < 50) {
+        memmove(fr_doc + m.start + strlen(with), fr_doc + m.end, (size_t)(len - m.end + 1));
+        memcpy(fr_doc + m.start, with, strlen(with));
+        fr_at = m.start + (int)strlen(with) + (m.end == m.start);
+        n++;
+    }
+    fr_start = fr_end = -1;
+    fr_at = 0;
+    fr_show();
+    snprintf(line, sizeof line, "%d replaced.", n);
+    gui_find_say(f, line);
+    snprintf(line, sizeof line, "replaced %d: %.140s", n, fr_doc);
+    say("%s", line, 0);
+}
+
+static void fr_open(struct gui_widget *w, int what)
+{
+    (void)what;
+    fr.replace = w->id;
+    fr.on_find = fr_on;
+    gui_find(w->win, &fr);
+}
+
+static void find_page(void)
+{
+    struct gui_widget *box, *row;
+    win = gui_window_at("GUITEST Find", 0, 0, 470, 90, 0);
+    box = gui_vbox(win->root, -1, -1);
+    fr_label = gui_label(box, "");
+    fr_show();
+    row = gui_hbox(box, -1, 0);
+    gui_button(row, "&Find...", fr_open, 0);
+    gui_button(row, "&Replace...", fr_open, 1);
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("find", "", 0);
+}
+
+/* ---- the Colour dialog (toolkit 2, step C6) */
+static unsigned cl_rgb = 0x336699;
+
+static void cl_choose(struct gui_widget *w, int what)
+{
+    char line[32];
+    (void)what;
+    if (gui_colour_dialog(w->win, "Choose a colour", &cl_rgb)) {
+        snprintf(line, sizeof line, "colour #%06X", cl_rgb);
+        say("%s", line, 0);
+    } else {
+        say("colour cancelled", "", 0);
+    }
+}
+
+static void colour_page(void)
+{
+    struct gui_widget *row;
+    win = gui_window("GUITEST Colour", 260, 80, 0);
+    row = gui_hbox(win->root, -1, -1);
+    gui_button(row, "&Colour...", cl_choose, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("colour", "", 0);
+}
+
+/* ---- the Font dialog (toolkit 2, step C6) */
+static struct gui_fontspec fn_spec = { GUI_FONT_SANS, 1 };
+static struct gui_widget *fn_line;
+
+static void fn_choose(struct gui_widget *w, int what)
+{
+    (void)what;
+    if (gui_font_dialog(w->win, "Choose a font", &fn_spec)) {
+        const struct gfx_font *f = gui_font_get(fn_spec.face, fn_spec.size);
+        if (f)
+            gui_label_style(fn_line, f, GFX_NONE, -1);
+        gui_relayout(w->win);
+        say("font %s, size %d", fn_spec.face == GUI_FONT_SANS ? "sans" : fn_spec.face == GUI_FONT_BOLD ? "bold"
+                                : "fixed", fn_spec.size);
+    } else {
+        say("font cancelled", "", 0);
+    }
+}
+
+static void font_page(void)
+{
+    struct gui_widget *box, *row;
+    win = gui_window("GUITEST Font", 360, 110, 0);
+    box = gui_vbox(win->root, -1, -1);
+    row = gui_hbox(box, -1, 0);
+    gui_button(row, "F&ont...", fn_choose, 0);
+    fn_line = gui_label(box, "A line in the font chosen.");
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("font", "", 0);
+}
+
 /* ---- the virtual tree (toolkit 2, step C3). Ids: 1, 2, 3 at the top; a node's children are its id times ten
    and 1, 2, 3 (to three levels); but node 2's are five thousand leaves, 2000000 and on. */
 static struct gui_widget *vt;
@@ -1397,6 +1612,14 @@ int main(int argc, char **argv)
         combo_page();
     else if (!strcmp(what, "smalldlg"))
         smalldlg();
+    else if (!strcmp(what, "filedlg"))
+        filedlg();
+    else if (!strcmp(what, "find"))
+        find_page();
+    else if (!strcmp(what, "colour"))
+        colour_page();
+    else if (!strcmp(what, "font"))
+        font_page();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

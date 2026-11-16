@@ -1,0 +1,24 @@
+# The Font dialog (toolkit 2, step C6; docs/v1/toolkit-2.md, Dialogs and 6): GUITEST's button, the dialog by keys
+# alone. Down to Sans bold, Tab and Down to Large, the sample shown in it; Enter takes it and the page's line is
+# drawn so. Again: bold and large chosen already; Esc cancels.
+run GUITEST.EXE font
+wait "GUITEST Font"
+key alt+o
+wait "Choose a font"
+key down
+key tab down
+shot dialog "Choose a font"
+key enter
+gone "Choose a font"
+shot page "GUITEST Font"
+key alt+o
+wait "Choose a font"
+shot again "Choose a font"
+key esc
+gone "Choose a font"
+key alt+f4
+gone "GUITEST Font"
+expect GUI font
+expect GUI font bold, size 2
+expect GUI font cancelled
+expect GUI end

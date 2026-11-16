@@ -174,6 +174,20 @@ void gui_fonts_apply(void)
     smooth();
 }
 
+/* (toolkit 2, step C6) A font by face (GUI_FONT_SANS, _BOLD, _MONO) and size (0 small, 1 normal, 2 large), for an
+   app's own text: NULL if that size isn't there (no FONTS.DAT beside the program). */
+const struct gfx_font *gui_font_get(int face, int size)
+{
+    static const struct gfx_font *const built[3] = { &gfx_font_ui, &gfx_font_bold, &gfx_font_mono };
+    if (face < 0 || face > 2 || size < 0 || size > 2)
+        return NULL;
+    if (size == 1)
+        return built[face];
+    if (!other[size][face].name && !load_size(size))
+        return NULL;
+    return other[size][face].name ? &other[size][face] : NULL;
+}
+
 void gui_fonts_start(const char *argv0)
 {
     char *p;
