@@ -158,6 +158,25 @@ u32 pmm_take_high(struct pmm *p)
 
 /* The lowest window of n frames that are free or, by also(), the disk
    cache's to give back: its first frame's number, or FFFFFFFFh. */
+/* The same from frame `from` on, round to the start: the first such window found (FFFFFFFFh: none). A window does
+   not wrap past the top. */
+u32 pmm_window_from(const struct pmm *p, u32 n, int (*also)(u32 frame, void *arg), void *arg, u32 from)
+{
+    u32 f, len = 0, k;
+    if (!n || !p->top)
+        return 0xFFFFFFFFu;
+    from %= p->top;
+    for (k = 0; k < p->top; k++) {
+        f = (from + k) % p->top;
+        if (f == 0)
+            len = 0;                            /* (no window across the top and round) */
+        len = (!is_used(p, f) || also(f, arg)) ? len + 1 : 0;
+        if (len == n)
+            return f + 1 - n;
+    }
+    return 0xFFFFFFFFu;
+}
+
 u32 pmm_window(const struct pmm *p, u32 n, int (*also)(u32 frame, void *arg), void *arg)
 {
     u32 f, len = 0;

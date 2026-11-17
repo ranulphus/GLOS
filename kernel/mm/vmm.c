@@ -47,12 +47,27 @@ u32 mm_cr3(void) { return kernel_phys(kpd); }
 #define LOCKED_V(stmt) do { u32 f_ = irq_save(); stmt; irq_restore(f_); } while (0)
 
 /* The disk cache holds frames nobody else wants and gives them back the
-   moment anything needs one (docs/disk-cache.md): a single frame, its
-   coldest block's; a run, the blocks in the lowest window that would make
-   one. With interrupts off, as everything here. */
+   moment anything needs one (docs/disk-cache.md): a run, the blocks in the
+   lowest window that would make one; a single frame, a whole window of them
+   (1 MB, else 128 KB) found from where the last one ended, its next frames
+   taken one after another as a fresh boot's are. Its coldest block's frame,
+   wherever that was, scattered a program's pages over the whole memory, and
+   a real PC's L2 cache and DRAM pages made GLQuake some 12% slower on
+   bench-g400 once the cache had filled it (2026-11-17; 86Box models
+   neither). The coldest block is still the last resort. With interrupts
+   off, as everything here. */
 static u32 take1(void)
 {
-    u32 r = pmm_take(&pmm);
+    static const u32 sizes[2] = { 256, 32 };
+    static u32 after;                           /* (where the last window ended: the next is looked for from there) */
+    u32 r = pmm_take(&pmm), w, i;
+    for (i = 0; !r && i < 2 && cache_frames(); i++)
+        if ((w = pmm_window_from(&pmm, sizes[i], cache_frame_evictable, 0, after)) != 0xFFFFFFFFu) {
+            cache_evict_frames(w, sizes[i]);
+            pmm.next = w;
+            after = w + sizes[i];
+            r = pmm_take(&pmm);
+        }
     if (!r && cache_reclaim(1))
         r = pmm_take(&pmm);
     return r;

@@ -97,6 +97,7 @@ struct pmm {
 };
 void pmm_setup(struct pmm *p, u32 *bits, u32 frames);
 void pmm_add_free(struct pmm *p, u32 base, u32 length);
+u32 pmm_window_from(const struct pmm *p, u32 n, int (*also)(u32 frame, void *arg), void *arg, u32 from);
 void pmm_reserve(struct pmm *p, u32 base, u32 length);
 u32 pmm_take(struct pmm *p);
 void pmm_give(struct pmm *p, u32 phys);

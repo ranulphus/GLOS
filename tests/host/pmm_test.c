@@ -74,6 +74,13 @@ int main(void)
         pmm_reserve(&q, 0x104000, 0x6D9000);            /* only 7DDh and the cache's left */
         CHECK(pmm_window(&q, 33, also, 0) == 0x7DD);
         CHECK(pmm_window(&q, 36, also, 0) == 0xFFFFFFFFu);
+        /* (from a frame on, round to the start: single frames' windows, vmm.c's take1) */
+        CHECK(pmm_window_from(&q, 33, also, 0, 0) == 0x7DD);
+        CHECK(pmm_window_from(&q, 33, also, 0, 0x7E0) == 0xFFFFFFFFu);  /* 7E0h on: 32 left, and no wrapping */
+        CHECK(pmm_window_from(&q, 2, also, 0, 0x7FF) == 0x7DD);         /* round to the start, the first found */
+        CHECK(pmm_window_from(&q, 4, also, 0, 0x7E0) == 0x7E0);
+        CHECK(pmm_window_from(&q, 4, also, 0, 0x7E0 + 0x800) == 0x7E0); /* (from past the top: as from % top) */
+        CHECK(pmm_window_from(&q, 0, also, 0, 0) == 0xFFFFFFFFu);
         CHECK(pmm_longest(&q, also, 0) == 35);          /* 7DDh and 7DEh free, then the cache's 33 */
         cache_like = 0;
         CHECK(pmm_longest(&q, also, 0) == pmm_largest_run(&q));
