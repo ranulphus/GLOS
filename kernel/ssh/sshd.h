@@ -7,6 +7,7 @@ struct bootinfo;
 void sshd_start(const struct bootinfo *bi);    /* the ssh thread; nothing without a host key */
 int sshd_on(void);                              /* there is a host key: SSH answers */
 int sshd_unsent(void);                          /* something for a client has still to leave the PC */
+int sshd_ending(void);                          /* a client has still to answer an ended program's channel close */
 struct shsess;
 int sshd_ask(struct shsess *s, const char *line);       /* a shell's session asks for one of the server's commands
                                                    (`glos NAME ...`): 0 (shsess_feed() with what it writes, then

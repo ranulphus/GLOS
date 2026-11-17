@@ -52,6 +52,7 @@ struct ssh_chan {
     struct ssh_conn *conn;
     uint32_t id, peer, peer_window, peer_maxpkt, our_window;
     uint8_t started, eof_recv, close_sent, close_recv, exit_pending;
+    uint8_t ending;                             /* counted in its connection's `ending` */
     uint8_t held;                               /* the window reopens only as the platform consumes */
     uint8_t forward;                            /* a direct-tcpip channel: no exec, no exit status */
     uint8_t unconfirmed;                        /* its open isn't answered yet: nothing may go out on it */
@@ -71,6 +72,8 @@ struct ssh_conn {
     const struct ssh_ops *ops;
     void *io;
     int got_version, authed, service_ok, auth_fails, dead;
+    int ending;                                 /* channels whose program has ended and whose close the client has
+                                                   not yet answered: until it has, it may not have their exit status */
     uint8_t *rx, *rwork, *twork;
     uint32_t rx_len, rx_plen;                   /* rx_plen: the decrypted length of the packet arriving */
     int rx_enc, tx_enc;
@@ -476,6 +479,8 @@ static struct ssh_chan *chan_of(struct ssh_conn *c, struct sread *r)
 static void chan_free(struct ssh_chan *ch)
 {
     struct ssh_conn *c = ch->conn;
+    if (ch->ending)
+        c->ending--;
     c->ops->chan_gone(ch);
     c->chans[ch->id] = NULL;
     c->ops->free(ch->out[0]);
@@ -576,6 +581,10 @@ void ssh_chan_exit(struct ssh_chan *ch, uint32_t status)
         return;
     ch->exit_pending = 1;
     ch->exit_status = status;
+    if (!ch->ending) {
+        ch->ending = 1;
+        ch->conn->ending++;
+    }
     flush(ch);
 }
 
@@ -1098,3 +1107,5 @@ void ssh_conn_free(struct ssh_conn *c)
 }
 
 int ssh_conn_authenticated(const struct ssh_conn *c) { return c->authed; }
+
+int ssh_conn_ending(const struct ssh_conn *c) { return c && !c->dead ? c->ending : 0; }

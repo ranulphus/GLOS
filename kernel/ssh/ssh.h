@@ -60,6 +60,7 @@ struct ssh_conn *ssh_conn_new(const struct ssh_server *srv, void *io);
 int ssh_conn_input(struct ssh_conn *c, const uint8_t *data, uint32_t len);
 void ssh_conn_free(struct ssh_conn *c);         /* every channel's chan_gone first */
 int ssh_conn_authenticated(const struct ssh_conn *c);
+int ssh_conn_ending(const struct ssh_conn *c);  /* channels whose program ended, their close not yet answered */
 
 /* Channels. user is the platform's own pointer. */
 void *ssh_chan_user(const struct ssh_chan *ch);

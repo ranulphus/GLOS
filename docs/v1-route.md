@@ -541,6 +541,12 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   the test misses a last line or an exit code. `glos exit` waits for SSH's news of ended jobs and for what SSH
   has unsent (2026-11-14, and from the job's end since 012d37a), which made it rarer, not gone. The test now
   says which app's line or code was missing and what did come: the next failure's line is the lead.
+  - 2026-11-17: three times in four runs (devserver twice, the build host once), either app: its "end" line
+    came, then its ssh ended with 255 (no exit status). TCP's acknowledgement of the last bytes is not the
+    client's in Loop A: 86Box's SLiRP acknowledges for the host and writes them to the host's socket afterwards,
+    and the emulator is stopped soon after GLOS leaves. So `glos exit` now also waits (within the same ten
+    seconds) until each client has answered the close of every channel whose program ended (`sshd_ending`,
+    counted by the SSH thread: OpenSSH answers only once it has the exit status).
 - Closed 2026-11-15: `sess-direct-486dx2-*`'s `GLOS-WARN vif-stuck` (the watchdog measured by the tick counter,
   which jumps when the clock catches up: it counts the timer's interrupts now; three rounds and three full
   gates clean since).

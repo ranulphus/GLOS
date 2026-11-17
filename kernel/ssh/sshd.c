@@ -69,6 +69,8 @@ struct sconn {
     u8 used;
     volatile u8 net_closed;                     /* net -> ssh: the peer or the stack ended it */
     volatile u8 ssh_done;                       /* ssh -> net: close once tx is empty */
+    volatile u8 ending;                         /* ssh -> anyone: its client has still to answer the close of a
+                                                   channel whose program ended (sshd_ending) */
     struct tcp_pcb *pcb;                        /* the net thread's */
     struct ssh_conn *conn;                      /* the ssh thread's */
     struct ring rx, tx;
@@ -223,6 +225,19 @@ int sshd_unsent(void)
         if (s->used && (ring_used(&s->tx) || (pcb && (pcb->unsent || pcb->unacked))))
             return 1;
     }
+    return 0;
+}
+
+/* A client has still to answer the close of a channel whose program ended: until it does, it may not have that
+   program's exit status, though TCP has had it acknowledged (in Loop A, 86Box's SLiRP acknowledges for the host
+   and passes the bytes on afterwards: apishell-486dx2 "ended", 2026-11-17). Any context; GLOS's exit waits for
+   it (kernel/dos/agent.c). */
+int sshd_ending(void)
+{
+    int i;
+    for (i = 0; i < NCONN; i++)
+        if (conns[i].used && !conns[i].ssh_done && conns[i].ending)
+            return 1;
     return 0;
 }
 
@@ -1963,6 +1978,7 @@ static void finish(struct sconn *s, const char *why)
 {
     ssh_conn_free(s->conn);
     s->conn = NULL;
+    s->ending = 0;
     kprintf("GLOS-SSH close slot=%u why=%s\n", (u32)(s - conns), why);
     s->ssh_done = 1;
     kick_net();
@@ -2018,6 +2034,9 @@ static void ssh_main(void *arg)
         streams_turn();
         vnc_keys_turn();                        /* (keys a viewer sent, that the keyboard hadn't room for yet) */
         gdbp_turn();
+        for (i = 0; i < NCONN; i++)             /* (for sshd_ending, read from other threads: the connections are
+                                                   this thread's) */
+            conns[i].ending = conns[i].used && conns[i].conn && ssh_conn_ending(conns[i].conn) > 0;
         if (reboot_at) {
             if ((s32)(timer_ticks() - reboot_at) >= 0) {
                 kprintf("GLOS-REBOOT\n");

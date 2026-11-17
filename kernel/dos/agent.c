@@ -1160,11 +1160,14 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
                     kick_ssh();
                 return 0;
             }
-        if (sshd_unsent() && (s32)(timer_ticks() - since) < 10 * 1024) {
+        if ((sshd_unsent() || sshd_ending()) && (s32)(timer_ticks() - since) < 10 * 1024) {
             settle = (timer_ticks() + 300) | 1; /* (and what SSH has for its clients gone out and acknowledged, not
                                                    only 300 ms allowed for it: two apps ended by this exit on the
                                                    486, with the host busy, lost their last line and exit code two
-                                                   runs in three, apishell-486dx2 "ended", 2026-11-14) */
+                                                   runs in three, apishell-486dx2 "ended", 2026-11-14; and its
+                                                   clients' answers to the closes of the channels of programs that
+                                                   ended: TCP's acknowledgement is SLiRP's in Loop A, not the
+                                                   client's, apishell-486dx2 "ended" again, 2026-11-17) */
             if (kick_ssh)
                 kick_ssh();
             return 0;
