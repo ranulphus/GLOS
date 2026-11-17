@@ -1,6 +1,6 @@
 # Phase D: the desktop shell and the system (step plan)
 
-Plan v1, 2026-11-17, written when phase C (toolkit 2) was merged (GLOS main 07dbd70) and the owner chose phase D
+Plan v1, 2026-11-17 (the owner's one question answered the same day), written when phase C (toolkit 2) was merged (GLOS main 07dbd70) and the owner chose phase D
 next. What D is for: `docs/v1-route.md`, "D. The shell and the system". Its design is phase A's `desktop.md` (the
 task bar, the Start menu, notifications, savers, the look), the Control Panel's and the task manager's plans
 (`apps/control-panel.md`, `apps/task-manager.md`), and what phases B and C built under it. This plan says what is
@@ -110,7 +110,8 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
 
 - The savers of `desktop.md` on DOS-GL: starfield, pipes, a 3D maze, flying objects (a flag, GLOS's mark), a line
   of 3D text; and blank (today's) with the screen's power off after a further wait.
-- How one runs: **for the owner** (below). Either way the saver programs are GLOS's (`apps/savers`), built
+- How one runs: as an app (the owner's choice, below): a full-screen topmost window drawn through DOS-GL's
+  windowed path. The saver programs are GLOS's (`apps/savers`), built
   against RetroGPU's DOS-GL as the games are (no copy of it), drawn by a Matrox card's engine or by DOS-GL's
   software renderer on any other card, at a modest size on a 486.
 - The preview: the saver drawn small inside the Control Panel's Screensaver page (`gui_preview`, EMBED).
@@ -150,10 +151,9 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
 - Files keeps the Start menu's tiles and its search index in its own folder, not in GLOS.CFG.
 - The bar's new settings default to today's behaviour: at the bottom, not hidden, grouping `auto`, quiet off.
 
-## For the owner
+## Decided by the owner (2026-11-17)
 
-- **How a saver runs.** (a) As an app: a full-screen, topmost window of a GLOS app drawing through DOS-GL's
-  windowed path (as `loopa-glwin` tests), so the desktop, its apps and the background services go on beneath it;
-  the preview is the same program in a small window. (b) As an exclusive session: the saver takes the whole PC as
-  a DOS program does, which pauses every app and service while it runs (for hours, if the PC is left). My
-  recommendation: (a).
+- **A saver runs as an app:** a full-screen, topmost window of a GLOS app drawing through DOS-GL's windowed path
+  (as `loopa-glwin` tests), so the desktop, its apps and the background services go on beneath it; the Control
+  Panel's preview is the same program in a small window. Not chosen: a saver as an exclusive session (which
+  would pause every app and service while it runs).
