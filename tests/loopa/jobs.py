@@ -5898,6 +5898,10 @@ def api_sec_case(profile, vcard, card):
     case.seen = {}
 
     try:
+        t0 = time.time()                        # (the store opens a moment after GLOS starts: "secrets none" until
+        while time.time() - t0 < 60 and stat().startswith("secrets none"):     # then; a loaded devserver took
+            time.sleep(0.5)                     # longer than the first ask, and every call after it was refused,
+                                                # apisec-bf6-g200, 2026-11-17)
         checks["none-yet"] = stat().startswith("secrets open key=pc secrets=0 ")
         checks["first"] = ran("first")
         checks["written"] = logged("GLOS-SECRETS written secrets=2")
