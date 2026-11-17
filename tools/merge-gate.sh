@@ -21,7 +21,10 @@
 #
 # Environment: ONLY="loopa-ssh loopa-api" (those suites alone), JOBS (a suite's emulators at once: 3 here;
 # there, as many as the lanes leave each other, so that none waits for room with its test's clock running);
-# remote: GATE_HOST (retro@devserver), GATE_LANES (suites at once, 4), LOOPA_MAX_VMS (8), MGA_NICE (10).
+# remote: GATE_HOST (retro@devserver), GATE_LANES (suites at once, 4), LOOPA_MAX_VMS (8), MGA_NICE (10),
+# LOOPA_MIN_FREE_MB (8192: an emulator starts only while that machine has this much memory available; the owner's
+# choice of 2026-11-17, after a gate's 5 GB helped the kernel's OOM killer end another project's job there). There
+# the gate's processes are also the first the OOM killer ends (LOOPA_OOM_FIRST, tests/loopa/jobs.py).
 set -euo pipefail
 # (The whole of it is read before any of it runs, in these braces: a script changed on disk while it waits,
 # by an edit or a checkout, would go on from the wrong place.)
@@ -68,7 +71,7 @@ fi
 # ---- on another machine ---------------------------------------------------------
 commit=$(git rev-parse --verify "${2:-HEAD}^{commit}")
 host=${GATE_HOST:-retro@devserver}
-lanes=${GATE_LANES:-4} vms=${LOOPA_MAX_VMS:-8} niceness=${MGA_NICE:-10}
+lanes=${GATE_LANES:-4} vms=${LOOPA_MAX_VMS:-8} niceness=${MGA_NICE:-10} minfree=${LOOPA_MIN_FREE_MB:-8192}
 tjobs=${JOBS:-$(( vms / lanes > 0 ? vms / lanes : 1 ))}
 # RetroGPU is ~/RetroGPU, or (RETROGPU=) another checkout of it, for a branch's run: its HEAD is sent, and its
 # own built DOS-GL programs (gl/build/exe, gl/build/doom) take ~/RetroGPU's place there. A suite whose programs
@@ -154,7 +157,8 @@ ssh -o BatchMode=yes "$host" "set -e
     mkdir -p \$HOME/.cache/mga-glide/86box-glosgate/bin
     ln -sfn ../../86box/bin/86Box-$key \$HOME/.cache/mga-glide/86box-glosgate/bin/86Box
     ln -sfn ../86box/roms \$HOME/.cache/mga-glide/86box-glosgate/roms
-    MGA_NICE=$niceness LOOPA_MAX_VMS=$vms GATE_LANES=$lanes JOBS=$tjobs HOST_SUITES='$(echo $HOST_SUITES)' \
+    MGA_NICE=$niceness LOOPA_MAX_VMS=$vms LOOPA_MIN_FREE_MB=$minfree LOOPA_OOM_FIRST=1 GATE_LANES=$lanes JOBS=$tjobs \
+        HOST_SUITES='$(echo $HOST_SUITES)' \
         LOOPA_SUITES='$(echo $there)' \
         setsid nohup bash tools/merge-gate-there.sh > out/gate-run.log 2>&1 < /dev/null &"
 dest=$root/out/gate-remote/${host#*@}-$(date +%Y%m%d-%H%M%S)

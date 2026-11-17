@@ -117,6 +117,36 @@ EXPECT, TOL = 1012, 0.02
 
 IN_CONTAINER = os.path.exists("/.dockerenv")
 
+# LOOPA_OOM_FIRST=1 (devserver's gates, the owner's choice of 2026-11-17): if the machine runs out of memory, the
+# kernel ends this test run's processes (the driver, its emulators) before anyone else's: they are cheap to run
+# again. Raising one's own score needs no privilege, and children inherit it.
+if os.environ.get("LOOPA_OOM_FIRST"):
+    try:
+        with open("/proc/self/oom_score_adj", "w") as _f:
+            _f.write("1000")
+    except OSError:
+        pass
+
+
+def memory_room():
+    """LOOPA_MIN_FREE_MB=N (devserver's gates, the owner's choice of 2026-11-17, 8192 there): an emulator starts
+    only while the machine has N MB available (/proc/meminfo's MemAvailable, the machine's own in Docker too),
+    else waits; before any of the run's clocks start. Unset or 0: no wait."""
+    need = int(os.environ.get("LOOPA_MIN_FREE_MB", "0") or 0)
+    said = False
+    while need > 0:
+        try:
+            avail = int(re.search(r"^MemAvailable:\s+(\d+) kB", open("/proc/meminfo").read(), re.M).group(1)) // 1024
+        except (OSError, AttributeError, ValueError):
+            return
+        if avail >= need:
+            return
+        if not said:
+            print("    (memory: %d MB available, %d MB wanted before an emulator starts: waiting)" % (avail, need),
+                  file=sys.stderr, flush=True)
+            said = True
+        time.sleep(5)
+
 
 def runpy_cmd():
     """run.py, directly in the dev container, else through it (on the host network)."""
@@ -160,6 +190,7 @@ def run(name, args, background=False):
             os.remove(os.path.join(out, stale))
     env = dict(os.environ, MGA_DOCKER_NETWORK="host") if not IN_CONTAINER else None
     cmd = runpy_cmd() + ["--name", name, "--out", out, "--idle", "60", "--boot-grace", "60", "--timeout", "300"] + args
+    memory_room()
     if background:
         proc = Background(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ROOT, env=env)
         proc.run_name = name
