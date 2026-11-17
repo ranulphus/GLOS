@@ -67,6 +67,8 @@
  *                       a basket (copied where it is let go), and reordered in its list
  *   GUITEST calendar    "GUITEST Calendar" (toolkit 2, step C8): a month (several days
  *                       chosen, two marked, today fixed), a date field, a time field
+ *   GUITEST wrap        "GUITEST Wrap" (toolkit 2, C10): the code editor plain and wrapped
+ *                       (Notepad's): a long line in rows, the caret moved through them
  *   GUITEST resource    "GUITEST Resources" (toolkit 2, step C9): a dialog made in code and
  *                       the same from a resource file's text; the text written back the same
  *   GUITEST code        "GUITEST Code" (toolkit 2, step C8): the code editor on C (colours,
@@ -1943,6 +1945,45 @@ static void rich_page(void)
     say("rich", "", 0);
 }
 
+/* ---- the code editor plain and wrapped (toolkit 2, C10: Notepad's) */
+static struct gui_widget *wr_ed;
+
+static void wr_where(struct gui_widget *w, int what)
+{
+    int line, col;
+    char t[48];
+    (void)what;
+    gui_code_where(wr_ed, &line, &col);
+    snprintf(t, sizeof t, "line %d col %d", line, col);
+    say("%s", t, 0);
+    (void)w;
+    gui_focus(wr_ed);
+}
+
+static void wrap_page(void)
+{
+    static const char text[] =
+        "A short line.\n"
+        "This line is long enough that a window three hundred pixels wide has to wrap it into several rows, "
+        "breaking it after the last space that fits each time.\n"
+        "\tA tab, then the last line.";
+    struct gui_widget *box;
+    char *t = malloc(sizeof text);
+    memcpy(t, text, sizeof text);
+    win = gui_window_at("GUITEST Wrap", 0, 0, 300, 200, 0);
+    box = gui_vbox(win->root, 4, 0);
+    gui_grow(box, 1);
+    wr_ed = gui_code(box);
+    gui_code_set(wr_ed, t, sizeof text - 1);
+    gui_code_style(wr_ed, GUI_CODE_PLAIN | GUI_CODE_WRAP);
+    gui_code_tabs(wr_ed, 8);
+    gui_button(box, "&Where", wr_where, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(wr_ed);
+    say("wrap", "", 0);
+}
+
 /* ---- resource files (toolkit 2, step C9): a dialog in code, and the same from text */
 static const char rs_text[] =
     "object Settings: Dialog\n"
@@ -2931,6 +2972,8 @@ int main(int argc, char **argv)
         code_page();
     else if (!strcmp(what, "resource"))
         resource_page();
+    else if (!strcmp(what, "wrap"))
+        wrap_page();
     else if (!strcmp(what, "embedded"))
         embedded_page();
     else if (!strcmp(what, "names")) {

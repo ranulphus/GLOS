@@ -809,6 +809,16 @@ widget now draws, and each such change is looked at before its goldens are made 
   a list draws (the sort arrow on the sorted head, the icon grid's spacing and its chosen icon); no script's lines
   changed. Loop A: GUITEST's gallery, icons, themes and text sizes, and the apps suite's Files, Files' browser,
   Monitor and the Control Panel, on a 486 and a Pentium II.
+- **C10b, Notepad on the code editor** (`apps/notepad`, `sdk/gui/code.c`): the code editor wraps
+  (`GUI_CODE_WRAP`: a line's rows start after the last space that fits, else where the row fills; each line's first
+  row is kept and worked out again after an edit, a fold or a change of width; Up and Down move by rows keeping
+  the column within the row; no bar across while wrapping), has a plain look (`GUI_CODE_PLAIN`: no margin), a tab's
+  stops (`gui_code_tabs`), Enter's line end as the text's (CR LF if its first line has it), and Notepad's calls
+  (`gui_code_find`, `gui_code_replace_sel`, `gui_code_command`). Notepad uses it plain with tabs of eight: its
+  script's lines, saved files and pictures are as they were (the frame's line aside). Monitor's and the Control
+  Panel's small text boxes stay on `gui_editor` (C10 plan, step 2, narrowed).
+- **Test** `wrap` (GUITEST: a long line in rows, Down through them, End, a click), and Notepad's own script; host
+  and Loop A.
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

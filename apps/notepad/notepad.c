@@ -1,7 +1,7 @@
 /* NOTEPAD: GLOS's text editor (PRD §10.6; docs/milestones-m9.md step D).
- * A file's bytes as they are, in the toolkit's editor (DejaVu Sans Mono;
- * Latin-1 until GLOS has code pages): open, save, find, replace, go to a
- * line, word wrap, the clipboard.
+ * A file's bytes as they are, in the toolkit's code editor (gui_code, plain:
+ * no margin; toolkit 2, C10; DejaVu Sans Mono; Latin-1 until GLOS has code
+ * pages): open, save, find, replace, go to a line, word wrap, the clipboard.
  *
  *   NOTEPAD [FILE]
  *
@@ -34,17 +34,17 @@ static void note(const char *fmt, const char *a)
 static void title(void)
 {
     char t[300], name[128];
-    snprintf(t, sizeof t, "%s%s - Notepad", gui_editor_modified(ed) ? "*" : "",
+    snprintf(t, sizeof t, "%s%s - Notepad", gui_code_modified(ed) ? "*" : "",
              path[0] ? gui_dos_text(gui_path_name(path), name, sizeof name) : "Untitled");
     gui_title(win, t);
 }
 
 static void where(void *arg)
 {
-    int line, col, mod = gui_editor_modified(ed);
+    int line, col, mod = gui_code_modified(ed);
     char t[64];
     (void)arg;
-    gui_editor_where(ed, &line, &col);
+    gui_code_where(ed, &line, &col);
     if (line != last_line || col != last_col) {
         snprintf(t, sizeof t, "Ln %d, Col %d", line, col);
         gui_set_text(status, t);
@@ -63,7 +63,7 @@ static int load(const char *p)
     size_t n = 0, room = 0, k;
     if (!f) {
         strncpy(path, p, sizeof path - 1);      /* (a new file by that name) */
-        gui_editor_set(ed, "", 0);
+        gui_code_set(ed, NULL, 0);
         note("new %s", p);
         title();
         return 0;
@@ -84,8 +84,7 @@ static int load(const char *p)
         n += k;
     }
     fclose(f);
-    gui_editor_set(ed, buf ? buf : "", n);
-    free(buf);
+    gui_code_set(ed, buf, n);                   /* (the buffer is the editor's now) */
     strncpy(path, p, sizeof path - 1);
     path[sizeof path - 1] = 0;
     title();
@@ -99,12 +98,11 @@ static int load(const char *p)
 
 static int save_to(const char *p)
 {
-    size_t n = gui_editor_length(ed);
-    char *buf = malloc(n ? n : 1);
+    size_t n;
+    char *buf = gui_code_text(ed, &n);
     FILE *f;
     if (!buf)
         return -1;
-    gui_editor_get(ed, buf, n);
     if (!(f = gui_fopen(p, "wb")) || fwrite(buf, 1, n, f) != n || fclose(f) != 0) {
         free(buf);
         gui_message(win, "Notepad", "The file couldn't be written.", GUI_MB_OK);
@@ -112,7 +110,7 @@ static int save_to(const char *p)
     }
     free(buf);
     strncpy(path, p, sizeof path - 1);
-    gui_editor_saved(ed);
+    gui_code_saved(ed);
     title();
     note("saved %s", p);
     return 0;
@@ -134,7 +132,7 @@ static int keep_changes(void)
 {
     char t[300], name[128];
     int r;
-    if (!gui_editor_modified(ed))
+    if (!gui_code_modified(ed))
         return 0;
     snprintf(t, sizeof t, "Save the changes to %s?",
              path[0] ? gui_dos_text(gui_path_name(path), name, sizeof name) : "Untitled");
@@ -149,13 +147,13 @@ static void find_next(void)
     int line, col;
     if (!what[0])
         return;
-    if (gui_editor_find(ed, what, 0, 1))
+    if (gui_code_find(ed, what, 0, 1))
         return;
-    gui_editor_where(ed, &line, &col);          /* round from the top again */
-    gui_editor_goto(ed, 1);
-    if (!gui_editor_find(ed, what, 0, 1)) {
+    gui_code_where(ed, &line, &col);          /* round from the top again */
+    gui_code_goto(ed, 1, 1);
+    if (!gui_code_find(ed, what, 0, 1)) {
         char t[200];
-        gui_editor_goto(ed, line);
+        gui_code_goto(ed, line, 1);
         snprintf(t, sizeof t, "\"%s\" isn't there.", what);
         gui_message(win, "Notepad", t, GUI_MB_OK);
     }
@@ -170,7 +168,7 @@ static void command(struct gui_window *w, int id)
     case C_NEW:
         if (keep_changes() == 0) {
             path[0] = 0;
-            gui_editor_set(ed, "", 0);
+            gui_code_set(ed, NULL, 0);
             title();
         }
         break;
@@ -185,12 +183,12 @@ static void command(struct gui_window *w, int id)
         if (keep_changes() == 0)
             gui_quit(0);
         break;
-    case C_UNDO: gui_editor_command(ed, GUI_CMD_UNDO); break;
-    case C_CUT: gui_editor_command(ed, GUI_CMD_CUT); break;
-    case C_COPY: gui_editor_command(ed, GUI_CMD_COPY); break;
-    case C_PASTE: gui_editor_command(ed, GUI_CMD_PASTE); break;
-    case C_DELETE: gui_editor_command(ed, GUI_CMD_DELETE); break;
-    case C_ALL: gui_editor_command(ed, GUI_CMD_ALL); break;
+    case C_UNDO: gui_code_command(ed, GUI_CMD_UNDO); break;
+    case C_CUT: gui_code_command(ed, GUI_CMD_CUT); break;
+    case C_COPY: gui_code_command(ed, GUI_CMD_COPY); break;
+    case C_PASTE: gui_code_command(ed, GUI_CMD_PASTE); break;
+    case C_DELETE: gui_code_command(ed, GUI_CMD_DELETE); break;
+    case C_ALL: gui_code_command(ed, GUI_CMD_ALL); break;
     case C_FIND:
         if (gui_ask(win, "Find", "Find what:", what, sizeof what))
             find_next();
@@ -205,20 +203,20 @@ static void command(struct gui_window *w, int id)
         if (!gui_ask(win, "Replace", "Replace what:", what, sizeof what) || !what[0]
             || !gui_ask(win, "Replace", "With:", with, sizeof with))
             break;
-        gui_editor_goto(ed, 1);
-        for (n = 0; gui_editor_find(ed, what, 0, 1); n++)
-            gui_editor_replace_sel(ed, with);
+        gui_code_goto(ed, 1, 1);
+        for (n = 0; gui_code_find(ed, what, 0, 1); n++)
+            gui_code_replace_sel(ed, with);
         snprintf(t, sizeof t, "%d replaced.", n);
         gui_message(win, "Replace", t, GUI_MB_OK);
         break;
     case C_GOTO:
         t[0] = 0;
         if (gui_ask(win, "Go To Line", "Line number:", t, sizeof t) && atoi(t) > 0)
-            gui_editor_goto(ed, atoi(t));
+            gui_code_goto(ed, atoi(t), 1);
         break;
     case C_WRAP:
         wrap = !wrap;
-        gui_editor_wrap(ed, wrap);
+        gui_code_style(ed, GUI_CODE_PLAIN | (wrap ? GUI_CODE_WRAP : 0));
         gui_menu_check(format, C_WRAP, wrap);
         break;
     case C_ABOUT:
@@ -270,7 +268,9 @@ int main(int argc, char **argv)
     gui_menu_item(m, "&Word Wrap", C_WRAP, NULL);
     m = gui_menu(bar, "&Help");
     gui_menu_item(m, "&About Notepad", C_ABOUT, NULL);
-    ed = gui_editor(gui_vbox(win->root, 0, 0));
+    ed = gui_code(gui_vbox(win->root, 0, 0));
+    gui_code_style(ed, GUI_CODE_PLAIN);
+    gui_code_tabs(ed, 8);
     gui_grow(ed->parent, 1);
     status = gui_status(win);
     if (argc > 1)

@@ -1,0 +1,23 @@
+# The code editor plain and wrapped (toolkit 2, C10: Notepad's look): a long line broken into rows after the last
+# space that fits; Down moves a row at a time through it (the column kept within the row), End goes to the line's
+# end; a click on the third row puts the caret there; a tab's stops every eight.
+run GUITEST.EXE wrap
+wait "GUITEST Wrap"
+shot start "GUITEST Wrap"
+key down down
+key alt+w
+key down
+key alt+w
+key end
+key alt+w
+click "GUITEST Wrap" 60 40
+key alt+w
+shot clicked "GUITEST Wrap"
+key alt+f4
+gone "GUITEST Wrap"
+expect GUI wrap
+expect GUI line 2 col 40
+expect GUI line 2 col 78
+expect GUI line 2 col 153
+expect GUI line 2 col 48
+expect GUI end

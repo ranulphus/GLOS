@@ -904,6 +904,13 @@ int gui_code_get_zoom(struct gui_widget *w);
 void gui_code_on_complete(struct gui_widget *w, void (*fn)(struct gui_widget *w, const char *word));
 void gui_code_complete(struct gui_widget *w, const char *const *words, int n);
 void gui_code_signature(struct gui_widget *w, const char *text);       /* NULL: none */
+#define GUI_CODE_WRAP  1                /* (gui_code_style) long lines wrapped at the last space that fits */
+#define GUI_CODE_PLAIN 2                /* ... no margin (no numbers, marks or folds): Notepad's look */
+void gui_code_style(struct gui_widget *w, unsigned style);
+void gui_code_tabs(struct gui_widget *w, int width);   /* a tab's stops: 4 unless said */
+int gui_code_find(struct gui_widget *w, const char *what, int match_case, int forward);        /* found: chosen */
+void gui_code_replace_sel(struct gui_widget *w, const char *text);
+int gui_code_command(struct gui_widget *w, int cmd);   /* GUI_CMD_ (cut, copy, paste, delete, all, undo, end) */
 
 /* ---- (toolkit 2, C9) resource files, names, the widgets' properties, translation */
 #define GUI_T(s) (s)                    /* every string a user sees: itself in v1; later the language's catalogue's */

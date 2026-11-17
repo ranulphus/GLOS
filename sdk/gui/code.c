@@ -66,6 +66,11 @@ struct code {
     size_t word_at;                     /* where the word being completed begins */
     char sigtext[160];
     void (*on_complete)(struct gui_widget *w, const char *word);
+    unsigned style;                     /* GUI_CODE_WRAP, GUI_CODE_PLAIN */
+    int crlf;                           /* the text's lines end in CR LF (its first does): Enter puts both in */
+    int *wfirst;                        /* wrapping: each line's first row (nlines + 1 of them; a folded line has its
+                                           next's), valid while wvalid and the width is wcols */
+    int wroom, wvalid, wcols;
 };
 
 #define CE(w) ((struct code *)(w))
@@ -204,7 +209,7 @@ static void make_folds(struct code *c)
 
 static void folds_now(struct code *c) { if (c->fold_dirty) make_folds(c); }
 
-static int nrows(struct code *c)
+static int plain_nrows(struct code *c)
 {
     int k, n = nlines(c);
     folds_now(c);
@@ -213,7 +218,7 @@ static int nrows(struct code *c)
     return n;
 }
 
-static int line_of_row(struct code *c, int row)
+static int plain_line_of_row(struct code *c, int row)
 {
     int k, line = row;
     folds_now(c);
@@ -222,7 +227,7 @@ static int line_of_row(struct code *c, int row)
     return line < nlines(c) ? line : nlines(c) - 1;
 }
 
-static int row_of_line(struct code *c, int line)        /* (a folded line: its head's row) */
+static int plain_row_of_line(struct code *c, int line)  /* (a folded line: its head's row) */
 {
     int k, row = line;
     folds_now(c);
@@ -233,6 +238,120 @@ static int row_of_line(struct code *c, int line)        /* (a folded line: its h
     }
     return row;
 }
+
+/* ---- wrapping: a line's rows start at these columns (after the last space that fits, else where it fills) */
+#define NOEND 0x7FFFFFFF
+static int wrap_width(struct code *c);
+
+static int breaks(struct code *c, int line, int *st, int max)
+{
+    char t[LINE_MAX];
+    int n = line_text(c, line, t), i = 0, col = 0, start = 0, after_space = -1, k = 1, cols = wrap_width(c);
+    st[0] = 0;
+    while (i < n) {
+        int next = t[i] == '\t' ? (col / c->tabw + 1) * c->tabw : col + 1, adv = 1;
+        while (i + adv < n && ((unsigned char)t[i + adv] & 0xC0) == 0x80)
+            adv++;
+        if (next - start > cols && col > start) {      /* this character goes to the next row */
+            start = after_space > start ? after_space : col;
+            if (k < max)
+                st[k] = start;
+            k++;
+            after_space = -1;
+        }
+        if (t[i] == ' ' || t[i] == '\t')
+            after_space = next;
+        col = next, i += adv;
+    }
+    return k;
+}
+
+static int hidden(struct code *c, int line)            /* inside a fold (not its head) */
+{
+    int k;
+    folds_now(c);
+    for (k = 0; k < c->nfolds && c->folds[k].head < line; k++)
+        if (line <= c->folds[k].end)
+            return c->folds[k].head + 1;
+    return 0;
+}
+
+static void wrap_build(struct code *c)
+{
+    int n = nlines(c), line, k = 0, st[1];
+    if (c->wvalid && c->wcols == wrap_width(c))
+        return;
+    if (n + 1 > c->wroom) {
+        int room = n * 2 + 64, *f = realloc(c->wfirst, (size_t)room * sizeof *f);
+        if (!f)
+            return;
+        c->wfirst = f, c->wroom = room;
+    }
+    folds_now(c);
+    for (line = 0; line < n; line++) {
+        c->wfirst[line] = k;
+        if (!hidden(c, line))
+            k += breaks(c, line, st, 1);
+    }
+    c->wfirst[n] = k;
+    c->wvalid = 1, c->wcols = wrap_width(c);
+}
+
+static int nrows(struct code *c)
+{
+    if (!(c->style & GUI_CODE_WRAP))
+        return plain_nrows(c);
+    wrap_build(c);
+    return c->wfirst ? c->wfirst[nlines(c)] : plain_nrows(c);
+}
+
+/* The line a row shows, and the columns it shows of it ([c0, c1); c1 NOEND: to its end). */
+static int row_line(struct code *c, int row, int *c0, int *c1)
+{
+    int lo = 0, hi, line, st[256], k;
+    *c0 = 0, *c1 = NOEND;
+    if (c->style & GUI_CODE_WRAP)
+        wrap_build(c);
+    if (!(c->style & GUI_CODE_WRAP) || !c->wfirst)
+        return plain_line_of_row(c, row);
+    hi = nlines(c) - 1;
+    if (row >= c->wfirst[nlines(c)])
+        row = c->wfirst[nlines(c)] - 1;
+    while (lo < hi) {                           /* the last line whose first row is at or before it */
+        int mid = (lo + hi + 1) / 2;
+        if (c->wfirst[mid] <= row)
+            lo = mid;
+        else
+            hi = mid - 1;
+    }
+    line = lo;
+    while (line > 0 && c->wfirst[line] == c->wfirst[line + 1])
+        line--;                                 /* (a line of no rows, folded: the one before it) */
+    k = breaks(c, line, st, 256);
+    row -= c->wfirst[line];
+    if (row >= 0 && row < k && row < 256) {
+        *c0 = st[row];
+        *c1 = row + 1 < k && row + 1 < 256 ? st[row + 1] : NOEND;
+    }
+    return line;
+}
+
+static int row_of(struct code *c, int line, int col)   /* the row a place is on */
+{
+    int st[256], k, i, h;
+    if (c->style & GUI_CODE_WRAP)
+        wrap_build(c);
+    if (!(c->style & GUI_CODE_WRAP) || !c->wfirst)
+        return plain_row_of_line(c, line);
+    if ((h = hidden(c, line)) != 0)
+        return c->wfirst[h - 1];
+    k = breaks(c, line, st, 256);
+    for (i = k < 256 ? k - 1 : 255; i > 0 && st[i] > col; i--)
+        ;
+    return c->wfirst[line] + i;
+}
+
+static int row_of_line(struct code *c, int line) { return row_of(c, line, 0); }
 
 static void fold_set(struct code *c, int line, int on)
 {
@@ -246,6 +365,7 @@ static void fold_set(struct code *c, int line, int on)
     }
     c->folded[line] = (unsigned char)on;
     c->fold_dirty = 1;
+    c->wvalid = 0;
     if (on) {                                   /* (the caret inside: to the head) */
         int cl, cc;
         where(c, c->caret, &cl, &cc);
@@ -291,30 +411,37 @@ static void metrics(struct code *c)
 static int margin_w(struct code *c)
 {
     char t[16];
+    if (c->style & GUI_CODE_PLAIN)
+        return 4;
     int digits = snprintf(t, sizeof t, "%d", nlines(c));
     return (digits < 3 ? 3 : digits) * c->cw + 8 + 12 + FOLD_W;        /* number, marks, the fold box */
 }
 
-static struct gfx_rect text_r(struct code *c)
+static struct gfx_rect text_r(struct code *c)     /* (wrapped: no bar across, the text down to the bottom) */
 {
     struct gfx_rect r = { c->w.r.x + margin_w(c), c->w.r.y + 1, c->w.r.w - margin_w(c) - GUI_SB - 1,
-                          c->w.r.h - 2 - GUI_SB };
+                          c->w.r.h - 2 - (c->style & GUI_CODE_WRAP ? 0 : GUI_SB) };
     return r;
 }
 
 static int rows_fit(struct code *c) { return text_r(c).h / c->ch > 1 ? text_r(c).h / c->ch : 1; }
+
+static int wrap_width(struct code *c) { int k = (text_r(c).w - 2) / (c->cw > 0 ? c->cw : 8); return k > 8 ? k : 8; }
 
 static void place(struct code *c)
 {
     struct gfx_rect r;
     metrics(c);
     r = text_r(c);
-    c->vsb.r.x = c->w.r.x + c->w.r.w - GUI_SB, c->vsb.r.y = c->w.r.y, c->vsb.r.w = GUI_SB, c->vsb.r.h = c->w.r.h - GUI_SB;
+    c->vsb.r.x = c->w.r.x + c->w.r.w - GUI_SB, c->vsb.r.y = c->w.r.y, c->vsb.r.w = GUI_SB;
+    c->vsb.r.h = c->w.r.h - (c->style & GUI_CODE_WRAP ? 0 : GUI_SB);
     c->hsb.r.x = c->w.r.x, c->hsb.r.y = c->w.r.y + c->w.r.h - GUI_SB, c->hsb.r.w = c->w.r.w - GUI_SB, c->hsb.r.h = GUI_SB;
+    if (c->style & GUI_CODE_WRAP)
+        c->hsb.r.w = c->hsb.r.h = 0;
     c->vsb.total = nrows(c), c->vsb.page = rows_fit(c), c->vsb.pos = c->top;
     gui_sb_clamp(&c->vsb);
     c->top = c->vsb.pos;
-    c->hsb.total = c->widest + c->cw * 4, c->hsb.page = r.w, c->hsb.pos = c->left;
+    c->hsb.total = c->style & GUI_CODE_WRAP ? r.w : c->widest + c->cw * 4, c->hsb.page = r.w, c->hsb.pos = c->left;
     gui_sb_clamp(&c->hsb);
     c->left = c->hsb.pos;
 }
@@ -325,16 +452,18 @@ static void show_caret(struct code *c)
     struct gfx_rect r;
     place(c);
     where(c, c->caret, &line, &col);
-    row = row_of_line(c, line);
+    row = row_of(c, line, col);
     if (row < c->top)
         c->top = row;
     if (row >= c->top + rows_fit(c))
         c->top = row - rows_fit(c) + 1;
     r = text_r(c);
     x = col * c->cw;
-    if (x < c->left)
+    if (c->style & GUI_CODE_WRAP)
+        c->left = 0;                            /* (wrapped: nothing to the right) */
+    else if (x < c->left)
         c->left = x - r.w / 4 > 0 ? x - r.w / 4 : 0;
-    if (x > c->left + r.w - 2 * c->cw)
+    else if (x > c->left + r.w - 2 * c->cw)
         c->left = x - r.w + r.w / 4;
     gui_damage(&c->w);
 }
@@ -441,18 +570,21 @@ static void ce_draw(struct gui_widget *w, struct gfx_surface *s)
     where(c, c->caret, &caret_line, &caret_col);
     have_brace = focus && sa == sb && brace(c, &ba, &bb);
     gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_FIELD);
-    gfx_frame(s, w->r.x, w->r.y, w->r.w - GUI_SB + 1, w->r.h - GUI_SB + 1, GUI_LINE);
+    gfx_frame(s, w->r.x, w->r.y, w->r.w - GUI_SB + 1, w->r.h - (c->style & GUI_CODE_WRAP ? 0 : GUI_SB - 1), GUI_LINE);
     mr.x = w->r.x + 1, mr.y = r.y, mr.w = mw - 1, mr.h = r.h;
     gfx_fill(s, mr.x, mr.y, mr.w, mr.h, GUI_FACE);
     for (row = 0; row <= rows_fit(c) && c->top + row < nrows(c); row++) {
-        int line = line_of_row(c, c->top + row), y = r.y + row * c->ch, n, i, x, col, st;
+        int c0, c1, line = row_line(c, c->top + row, &c0, &c1), y = r.y + row * c->ch, n, i, x, col, st;
+        int last = c1 == NOEND;                 /* (wrapped: the row shows columns c0 to c1 of its line) */
         size_t ls = line_start(c, line);
         struct cmark *m = mark_of(c, line);
         if (y >= clip.y + clip.h || y + c->ch <= clip.y)
             continue;
-        /* the margin: number, mark, fold box */
+        /* the margin: number, mark, fold box (on a line's first row) */
         snprintf(num, sizeof num, "%d", line + 1);
         gfx_clip(s, &mr);
+        if (c0 > 0 || c->style & GUI_CODE_PLAIN)
+            goto text;
         gfx_text(s, w->r.x + mw - FOLD_W - 4 - gfx_text_width(c->font, num, -1), y, c->font, num, -1,
                  line == caret_line ? GUI_TEXT : GUI_DIM);
         if (m)
@@ -466,6 +598,7 @@ static void ce_draw(struct gui_widget *w, struct gfx_surface *s)
             if (closed)
                 gfx_fill(s, bx + 5, by + 2, 1, 5, GUI_FIELD_TEXT);
         }
+text:
         gfx_clip(s, &clip);
         {
             struct gfx_rect tr = r;
@@ -485,7 +618,11 @@ static void ce_draw(struct gui_widget *w, struct gfx_surface *s)
             while (i + k < n && ((unsigned char)t[i + k] & 0xC0) == 0x80)
                 k++;
             cols = t[i] == '\t' ? (col / c->tabw + 1) * c->tabw - col : 1;
-            x = r.x + col * c->cw - c->left;
+            if (col < c0 || col >= c1) {        /* (another row's) */
+                col += cols, i += k;
+                continue;
+            }
+            x = r.x + (col - c0) * c->cw - c->left;
             chosen = c->col_mode ? line >= (c->col_a < c->col_b ? c->col_a : c->col_b)
                                    && line <= (c->col_a < c->col_b ? c->col_b : c->col_a)
                                    && col >= (c->cx_a < c->cx_b ? c->cx_a : c->cx_b)
@@ -499,24 +636,26 @@ static void ce_draw(struct gui_widget *w, struct gfx_surface *s)
                 gfx_text(s, x, y, c->font, t + i, k, chosen && focus ? GUI_CHOSEN_TEXT : on ? tok_rgb(cls[i]) : GUI_DIM);
             col += cols, i += k;
         }
-        if (!c->col_mode && sa < sb && ls + (size_t)n >= sa && ls + (size_t)n < sb)     /* (its end chosen) */
-            gfx_fill(s, r.x + col * c->cw - c->left, y, c->cw / 2, c->ch, focus ? GUI_CHOSEN : GUI_SHADE);
+        if (last && !c->col_mode && sa < sb && ls + (size_t)n >= sa && ls + (size_t)n < sb)    /* (its end chosen) */
+            gfx_fill(s, r.x + (col - c0) * c->cw - c->left, y, c->cw / 2, c->ch, focus ? GUI_CHOSEN : GUI_SHADE);
         if (col * c->cw > c->widest)
             c->widest = col * c->cw;
-        if (line < c->froom && c->folded[line] && foldable(c, line)) {  /* what is folded: a mark after the line */
-            int fx = r.x + col * c->cw - c->left + c->cw;
+        if (last && line < c->froom && c->folded[line] && foldable(c, line)) {    /* what is folded: a mark after it */
+            int fx = r.x + (col - c0) * c->cw - c->left + c->cw;
             gfx_frame(s, fx, y + 1, 3 * c->cw, c->ch - 2, GUI_DIM);
             gfx_text(s, fx + 2, y, c->font, "...", 3, GUI_DIM);
         }
-        if (focus && line == caret_line && !c->col_mode)
-            gfx_fill(s, r.x + caret_col * c->cw - c->left, y, 2, c->ch, GUI_FIELD_TEXT);
+        if (focus && line == caret_line && !c->col_mode && caret_col >= c0 && (caret_col < c1 || last))
+            gfx_fill(s, r.x + (caret_col - c0) * c->cw - c->left, y, 2, c->ch, GUI_FIELD_TEXT);
         if (focus && c->col_mode && line == c->col_b)
             gfx_fill(s, r.x + c->cx_b * c->cw - c->left, y, 2, c->ch, GUI_FIELD_TEXT);
         gfx_clip(s, &clip);
     }
     gui_sb_draw(s, &c->vsb, on);
-    gui_sb_draw(s, &c->hsb, on);
-    gfx_fill(s, c->vsb.r.x, c->hsb.r.y, GUI_SB, GUI_SB, GUI_FACE);
+    if (!(c->style & GUI_CODE_WRAP)) {
+        gui_sb_draw(s, &c->hsb, on);
+        gfx_fill(s, c->vsb.r.x, c->hsb.r.y, GUI_SB, GUI_SB, GUI_FACE);
+    }
 }
 
 /* ---- changes (each a step of the undo) */
@@ -534,6 +673,7 @@ static void changed(struct code *c, size_t at)
     if (c->state_ok > line + 1)
         c->state_ok = line + 1;
     c->fold_dirty = 1;
+    c->wvalid = 0;
     c->modified = 1;
     c->goal = -1;
     gui_damage(&c->w);
@@ -848,12 +988,12 @@ static const struct gui_class sig_class = { "codesig", 0, sig_draw, NULL, NULL, 
 static void at_point(struct code *c, int ex, int ey, int *line, int *col)
 {
     struct gfx_rect r = text_r(c);
-    int row = (ey - r.y) / c->ch;
+    int row = (ey - r.y) / c->ch, c0, c1;
     if (ey < r.y)
         row = -1;
-    *line = line_of_row(c, c->top + (row < 0 ? 0 : row));
-    *col = (ex - r.x + c->left + c->cw / 2) / c->cw;
-    *col = *col < 0 ? 0 : *col;
+    *line = row_line(c, c->top + (row < 0 ? 0 : row), &c0, &c1);
+    *col = c0 + (ex - r.x + c->left + c->cw / 2) / c->cw;
+    *col = *col < c0 ? c0 : c1 != NOEND && *col >= c1 ? c1 - 1 : *col;
 }
 
 static void move_to(struct code *c, size_t at, int extend)
@@ -1014,7 +1154,9 @@ static int ce_key(struct code *c, struct gui_ev *e)
     case GUI_K_DOWN:
     case GUI_K_PGUP:
     case GUI_K_PGDN: {
-        int row = row_of_line(c, line), want = c->goal >= 0 ? c->goal : col, goal;
+        int row = row_of(c, line, col), r0, r1, want, goal, l2;
+        row_line(c, row, &r0, &r1);
+        want = c->goal >= 0 ? c->goal : col - r0;     /* (the column within its row) */
         int step = e->key == GUI_K_UP ? -1 : e->key == GUI_K_DOWN ? 1 : e->key == GUI_K_PGUP ? -(rows_fit(c) - 1)
                    : rows_fit(c) - 1;
         if (ctrl && (e->key == GUI_K_UP || e->key == GUI_K_DOWN)) {    /* (the view, not the caret) */
@@ -1028,7 +1170,11 @@ static int ce_key(struct code *c, struct gui_ev *e)
         if (e->key == GUI_K_PGUP || e->key == GUI_K_PGDN)
             c->top += step;
         goal = want;
-        move_to(c, at_of(c, line_of_row(c, row), want), shift);
+        l2 = row_line(c, row, &r0, &r1);
+        want = r0 + want;
+        if (r1 != NOEND && want >= r1)
+            want = r1 - 1;
+        move_to(c, at_of(c, l2, want), shift);
         c->goal = goal;
         return 1;
     }
@@ -1074,15 +1220,17 @@ static int ce_key(struct code *c, struct gui_ev *e)
         show_caret(c);
         return 1;
     case GUI_K_ENTER:
-    case GUI_K_KPENTER: {                       /* a new line, as indented as this one */
-        char t[LINE_MAX + 2];
-        int n = line_text(c, line, t), i = 0;
-        t[LINE_MAX] = 0;
+    case GUI_K_KPENTER: {                       /* a new line (CR LF if the text's are), as indented as this one */
+        char t[LINE_MAX + 3];
+        int n = line_text(c, line, t), i = 0, e = c->crlf ? 2 : 1;
         while (i < n && (t[i] == ' ' || t[i] == '\t') && line_start(c, line) + (size_t)i < c->caret)
             i++;
-        memmove(t + 1, t, (size_t)i);
-        t[0] = '\n';
-        type_text(c, t, (size_t)i + 1, 0);
+        memmove(t + e, t, (size_t)i);
+        if (c->crlf)
+            t[0] = '\r', t[1] = '\n';
+        else
+            t[0] = '\n';
+        type_text(c, t, (size_t)(i + e), 0);
         return 1;
     }
     case GUI_K_TAB:
@@ -1132,7 +1280,8 @@ static int ce_event(struct gui_widget *w, struct gui_ev *e)
     struct code *c = CE(w);
     int line, col;
     place(c);
-    if (e->type != GUI_EV_KEY && (gui_sb_event(w, &c->vsb, e, 1) || gui_sb_event(w, &c->hsb, e, c->cw * 4))) {
+    if (e->type != GUI_EV_KEY && (gui_sb_event(w, &c->vsb, e, 1)
+                                  || (!(c->style & GUI_CODE_WRAP) && gui_sb_event(w, &c->hsb, e, c->cw * 4)))) {
         c->top = c->vsb.pos, c->left = c->hsb.pos;
         gui_damage(w);
         return 1;
@@ -1249,6 +1398,7 @@ struct gui_widget *gui_code(struct gui_widget *parent)
 {
     struct code *c = (struct code *)gui_new(parent, &ce_class, sizeof *c);
     c->zoom = 1, c->tabw = 4, c->goal = -1;
+    c->w.grow = 1;                              /* (as the editor did: it takes the room it is given) */
     pt_init(&c->t, NULL, 0);
     c->undo = gui_undo_new(1024u * 1024);
     metrics(c);
@@ -1263,7 +1413,11 @@ int gui_code_set(struct gui_widget *w, char *text, size_t n)
     if (pt_init(&c->t, text, n) != 0)
         return -1;
     c->caret = c->anchor = 0, c->top = c->left = 0, c->col_mode = 0, c->goal = -1;
-    c->state_ok = 0, c->modified = 0, c->widest = 0;
+    c->state_ok = 0, c->modified = 0, c->widest = 0, c->wvalid = 0;
+    {
+        const char *nl = text && n ? memchr(text, '\n', n) : NULL;
+        c->crlf = nl && nl > text && nl[-1] == '\r';
+    }
     if (c->folded)
         memset(c->folded, 0, (size_t)c->froom);
     c->fold_dirty = 1;
@@ -1523,4 +1677,83 @@ int gui_code_lex_c(void *ctx, const char *s, int n, int state, unsigned char *cl
         cls[i++] = strchr("+-*/%=<>!&|^~?:;,.()[]{}", ch) ? GUI_TOK_OP : GUI_TOK_TEXT;
     }
     return 0;
+}
+
+/* ---- (C10) what Notepad has of it: wrapping, a plain look, finding, replacing, the Edit menu's commands */
+void gui_code_tabs(struct gui_widget *w, int width)    /* a tab's stops (4 unless said; Notepad's 8) */
+{
+    CE(w)->tabw = width > 0 && width <= 16 ? width : 4;
+    CE(w)->wvalid = 0;
+    gui_damage(w);
+}
+
+void gui_code_style(struct gui_widget *w, unsigned style)
+{
+    struct code *c = CE(w);
+    c->style = style;
+    c->wvalid = 0, c->left = 0;
+    show_caret(c);
+}
+
+int gui_code_find(struct gui_widget *w, const char *what, int match_case, int forward)    /* found and chosen */
+{
+    struct code *c = CE(w);
+    size_t n = strlen(what), len = pt_length(&c->t), a, b, i;
+    char *t;
+    if (!n || n > len || !(t = pt_text(&c->t)))
+        return 0;
+    sel_range(c, &a, &b);
+    for (i = forward ? b : (a ? a - 1 : (size_t)-1); i != (size_t)-1 && i + n <= len; i = forward ? i + 1 : i - 1) {
+        size_t k;
+        for (k = 0; k < n; k++) {
+            int x = (unsigned char)t[i + k], y = (unsigned char)what[k];
+            if (!match_case && x >= 'A' && x <= 'Z')
+                x += 32;
+            if (!match_case && y >= 'A' && y <= 'Z')
+                y += 32;
+            if (x != y)
+                break;
+        }
+        if (k == n) {
+            free(t);
+            c->col_mode = 0;
+            c->anchor = i, c->caret = i + n;
+            show_caret(c);
+            gui_send(w, GUI_ON_SELECT);
+            return 1;
+        }
+        if (!forward && i == 0)
+            break;
+    }
+    free(t);
+    return 0;
+}
+
+void gui_code_replace_sel(struct gui_widget *w, const char *text) { type_text(CE(w), text, strlen(text), 0); }
+
+int gui_code_command(struct gui_widget *w, int cmd)    /* GUI_CMD_: 1 done */
+{
+    struct code *c = CE(w);
+    struct gui_ev e;
+    memset(&e, 0, sizeof e);
+    e.type = GUI_EV_KEY, e.mods = GLOS_MOD_CTRL;
+    switch (cmd) {
+    case GUI_CMD_CUT: e.ch = 24; break;
+    case GUI_CMD_COPY: e.ch = 3; break;
+    case GUI_CMD_PASTE: e.ch = 22; break;
+    case GUI_CMD_ALL: e.ch = 1; break;
+    case GUI_CMD_UNDO: e.ch = 26; break;
+    case GUI_CMD_DELETE:
+        if (!del_sel(c) && c->caret < pt_length(&c->t))
+            del(c, c->caret, 1, 0);
+        show_caret(c);
+        return 1;
+    case GUI_CMD_END:
+        move_to(c, pt_length(&c->t), 0);
+        c->top = nrows(c) - rows_fit(c) > 0 ? nrows(c) - rows_fit(c) : 0;
+        return 1;
+    default:
+        return 0;
+    }
+    return ce_key(c, &e);
 }
