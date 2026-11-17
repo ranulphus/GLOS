@@ -778,6 +778,25 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
   commands of OK and Cancel), host and Loop A. C10 moves the apps' dialogs to resource files, each compared with
   the dialog it was made in code.
 
+### C10 plan (2026-11-17)
+
+Each step keeps what the app did (its scripts' lines unchanged); its pictures change only where a toolkit 2
+widget now draws, and each such change is looked at before its goldens are made again.
+
+1. `gui_list` on the virtual list (the rows kept by the list, served through a model; sorting by the app's
+   comparison reorders them; the icon grid is `GUI_VIEW_ICONS`) and `gui_tree` on the virtual tree (nodes kept,
+   children added when a node first opens): Files, Monitor and the Control Panel move with them.
+2. The code editor grows word wrap (rows are then pieces of lines) and a style without its margin;
+   `gui_editor` becomes it, so Notepad, Monitor and the Control Panel move; Notepad's Find and Replace onto
+   `gui_find` with `gui_match`.
+3. Images onto `gui_image_view` (fit, zoom, pan); Files' and Notepad's Open and Save onto `gui_file_dialog_ex`
+   (places, filters, a preview); Monitor's history onto `gui_graph`.
+4. Each app's dialogs as resource files beside it (`gui_load`), each compared in a script with the dialog it was
+   made in code, before the code version goes; `GUI_T` round every string a user sees, the toolkit's and the
+   apps'.
+5. The gallery app whole: GUITEST's gallery page every widget of toolkit 1 and 2, in the three themes.
+6. `docs/gui.md` the toolkit's whole reference.
+
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
 - **Farm-Fresh** (FatCow; CC BY 3.0) for colour icons and **Font Awesome Free, solid** (CC BY 4.0) for the
