@@ -1,0 +1,33 @@
+# The wizard (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's four pages, their steps down the left.
+# Next takes the keyboard to the next page's first control; on the name's page Next is held back until a name is
+# typed (Alt+N: the name's field has the app's handler, so Enter is the field's own); Finish on the last page. Back
+# to the start, the options skipped by a box on the first page: Next goes past them, and the steps leave them out.
+run GUITEST.EXE wizard
+wait "GUITEST Wizard"
+shot start "GUITEST Wizard"
+key alt+n
+shot held "GUITEST Wizard"
+type BACKUP
+key alt+n
+key alt+q
+key alt+n
+shot ready "GUITEST Wizard"
+key alt+b alt+b alt+b
+key alt+s
+key alt+n
+key alt+n
+shot skipped "GUITEST Wizard"
+key alt+f
+key alt+f4
+gone "GUITEST Wizard"
+expect GUI wizard
+expect GUI page 1
+expect GUI page 2
+expect GUI page 3
+expect GUI page 2
+expect GUI page 1
+expect GUI page 0
+expect GUI page 1
+expect GUI page 3
+expect GUI finished: BACKUP on A:, quick=1
+expect GUI end

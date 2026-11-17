@@ -67,6 +67,14 @@
  *                       a basket (copied where it is let go), and reordered in its list
  *   GUITEST calendar    "GUITEST Calendar" (toolkit 2, step C8): a month (several days
  *                       chosen, two marked, today fixed), a date field, a time field
+ *   GUITEST wizard      "GUITEST Wizard" (toolkit 2, step C8): four pages with steps,
+ *                       Next held back until a name is typed, a page skipped
+ *   GUITEST props       "GUITEST Properties" (toolkit 2, step C8): a property grid, two
+ *                       groups, every kind of value edited
+ *   GUITEST cview       "GUITEST Views" (toolkit 2, step C8): an image view (fitted,
+ *                       zoomed) and a canvas view with rulers (presses and a drag in units)
+ *   GUITEST picker      "GUITEST Picker" (toolkit 2, step C8): a palette (primary and
+ *                       secondary colours, a swatch edited), colour buttons, one with alpha
  *   GUITEST meters      "GUITEST Meters" (toolkit 2, step C8): sliders across with marks
  *                       and a time, and upright; level meters with their peaks; a graph
  *   GUITEST tasks       "GUITEST Tasks" (toolkit 2, step C4): background work: a task
@@ -1832,6 +1840,236 @@ static void meters_page(void)
     say("meters", "", 0);
 }
 
+/* ---- the wizard (toolkit 2, step C8) */
+static struct gui_widget *wz, *wz_name, *wz_skip, *wz_quick, *wz_drive;
+
+static void wz_on(struct gui_widget *w, int what)
+{
+    char line[96];
+    if (w == wz_name && what == GUI_ON_CHANGE) {
+        gui_wizard_next_ok(wz, gui_get_text(w)[0] != 0);
+        return;
+    }
+    if (w == wz_skip && what == GUI_ON_CHANGE) {
+        gui_wizard_skip(wz, 2, gui_checked(w));
+        return;
+    }
+    if (w != wz)
+        return;
+    if (what == GUI_ON_CHANGE) {
+        if (gui_wizard_at(wz) == 1)
+            gui_wizard_next_ok(wz, gui_get_text(wz_name)[0] != 0);
+        say("page %s%d", "", gui_wizard_at(wz));
+    } else if (what == GUI_ON_ACTIVATE) {
+        snprintf(line, sizeof line, "finished: %s on %s, quick=%d", gui_get_text(wz_name),
+                 gui_checked(wz_drive) ? "A:" : "B:", gui_checked(wz_quick));
+        say("%s", line, 0);
+    } else if (what == GUI_ON_CLOSE) {
+        say("cancelled", "", 0);
+    }
+}
+
+static void wizard_page(void)
+{
+    struct gui_widget *p, *f;
+    win = gui_window_at("GUITEST Wizard", 0, 0, 470, 300, 0);
+    wz = gui_wizard(win->root, GUI_WIZ_STEPS);
+    gui_grow(wz, 1);
+    gui_on(wz, wz_on, 0);
+    p = gui_wizard_page(wz, "Choose a disk", "The floppy disk to make ready. Everything on it will be lost.");
+    wz_drive = gui_radio(p, "Drive &A:", NULL);
+    gui_radio(p, "Drive &B:", wz_drive);
+    gui_set_checked(wz_drive, 1);
+    wz_skip = gui_check(p, "&Skip the options", 0);
+    gui_on(wz_skip, wz_on, 0);
+    p = gui_wizard_page(wz, "Name it", "A name of up to eleven letters, shown when the disk is read.");
+    f = gui_form(p);
+    wz_name = gui_field(gui_row(f, "&Name:", NULL), 11);
+    gui_on(wz_name, wz_on, 0);
+    p = gui_wizard_page(wz, "Options", "A quick format only clears the disk's tables.");
+    wz_quick = gui_check(p, "&Quick format", 0);
+    gui_wizard_page(wz, "Ready", "Press Finish to make the disk ready, or Back to change something.");
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("wizard", "", 0);
+}
+
+/* ---- the property grid (toolkit 2, step C8) */
+static void pg_on(struct gui_widget *w, int what)
+{
+    static const char *const kinds[] = { "text", "number", "yes-no", "choice", "colour", "font" };
+    int id = gui_prop_changed(w);
+    const struct gui_prop *p = gui_prop_get(w, id);
+    char line[96];
+    if (what != GUI_ON_CHANGE || !p)
+        return;
+    if (p->kind == GUI_PROP_TEXT)
+        snprintf(line, sizeof line, "property %d (%s): %s", id, kinds[p->kind], p->text ? p->text : "");
+    else if (p->kind == GUI_PROP_COLOUR)
+        snprintf(line, sizeof line, "property %d (%s): %06X", id, kinds[p->kind], p->rgb);
+    else if (p->kind == GUI_PROP_FONT)
+        snprintf(line, sizeof line, "property %d (%s): %d %d", id, kinds[p->kind], p->font.face, p->font.size);
+    else
+        snprintf(line, sizeof line, "property %d (%s): %d", id, kinds[p->kind], p->value);
+    say("%s", line, 0);
+}
+
+static void props_page(void)
+{
+    static const char *const aligns[] = { "Left", "Centre", "Right", NULL };
+    struct gui_prop p;
+    struct gui_widget *g;
+    win = gui_window_at("GUITEST Properties", 0, 0, 320, 300, 0);
+    g = gui_propgrid(win->root);
+    gui_grow(g, 1);
+    gui_on(g, pg_on, 0);
+    gui_prop_group(g, "Appearance");
+    memset(&p, 0, sizeof p);
+    p.kind = GUI_PROP_TEXT, p.text = "Untitled";
+    gui_prop_add(g, "Title", "The text in the window's title bar.", &p);
+    memset(&p, 0, sizeof p);
+    p.kind = GUI_PROP_NUMBER, p.value = 320, p.min = 100, p.max = 2000;
+    gui_prop_add(g, "Width", "Its width in pixels, 100 to 2000.", &p);
+    memset(&p, 0, sizeof p);
+    p.kind = GUI_PROP_BOOL, p.value = 1;
+    gui_prop_add(g, "Visible", "Whether it is shown.", &p);
+    memset(&p, 0, sizeof p);
+    p.kind = GUI_PROP_CHOICE, p.items = aligns;
+    gui_prop_add(g, "Align", "Where its text goes.", &p);
+    memset(&p, 0, sizeof p);
+    p.kind = GUI_PROP_COLOUR, p.rgb = 0x3060C0;
+    gui_prop_add(g, "Colour", "Its ground.", &p);
+    memset(&p, 0, sizeof p);
+    p.kind = GUI_PROP_FONT, p.font.face = GUI_FONT_SANS, p.font.size = 1;
+    gui_prop_add(g, "Font", "Its text's font.", &p);
+    gui_prop_group(g, "Behaviour");
+    memset(&p, 0, sizeof p);
+    p.kind = GUI_PROP_NUMBER, p.value = 3, p.min = 0, p.max = 10;
+    gui_prop_add(g, "Retries", "How often it tries again.", &p);
+    memset(&p, 0, sizeof p);
+    p.kind = GUI_PROP_BOOL;
+    gui_prop_add(g, "Log", "Whether it keeps a log.", &p);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(g);
+    say("props", "", 0);
+}
+
+/* ---- the image view and the canvas view (toolkit 2, step C8) */
+static unsigned cv_pic[320 * 200];
+static struct gui_widget *cv_img, *cv_can;
+static int cv_mark_x = -1, cv_mark_y;
+
+static void cv_draw(struct gui_widget *w, struct gfx_surface *s, const struct gui_viewport *v)
+{
+    int x, y;
+    (void)w;
+    gfx_fill(s, v->ox, v->oy, 400 * v->num / v->den, 300 * v->num / v->den, 0xFFFFFF);  /* the page */
+    for (x = 0; x <= 400; x += 50)              /* a grid every 50 units */
+        gfx_fill(s, v->ox + x * v->num / v->den, v->oy, 1, 300 * v->num / v->den, 0xC0C0E0);
+    for (y = 0; y <= 300; y += 50)
+        gfx_fill(s, v->ox, v->oy + y * v->num / v->den, 400 * v->num / v->den, 1, 0xC0C0E0);
+    gfx_fill(s, v->ox + 100 * v->num / v->den, v->oy + 100 * v->num / v->den, 100 * v->num / v->den,
+             50 * v->num / v->den, 0x3060C0);
+    if (cv_mark_x >= 0)                         /* where the last press was */
+        gfx_fill(s, v->ox + cv_mark_x * v->num / v->den - 2, v->oy + cv_mark_y * v->num / v->den - 2, 5, 5, 0xD02020);
+}
+
+static int cv_event(struct gui_widget *w, struct gui_ev *e, int x, int y)
+{
+    char line[64];
+    if (e->type == GUI_EV_PRESS && e->button == 1) {
+        cv_mark_x = x, cv_mark_y = y;
+        gui_damage(w);
+        snprintf(line, sizeof line, "canvas press %d,%d", x, y);
+        say("%s", line, 0);
+        return 1;
+    }
+    if (e->type == GUI_EV_RELEASE && e->button == 1) {
+        snprintf(line, sizeof line, "canvas let go %d,%d", x, y);
+        say("%s", line, 0);
+        return 1;
+    }
+    return 0;
+}
+
+static void cv_zoomed(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_CHANGE)
+        say(w == cv_img ? "image zoom %s%d" : "canvas zoom %s%d", "", gui_cview_get_zoom(w));
+}
+
+static void cview_page(void)
+{
+    struct gui_widget *row;
+    int x, y;
+    for (y = 0; y < 200; y++)                   /* a picture: red across, green down, a white square, a black line */
+        for (x = 0; x < 320; x++)
+            cv_pic[y * 320 + x] = (unsigned)(x * 255 / 319) << 16 | (unsigned)(y * 255 / 199) << 8 | 0x80;
+    for (y = 80; y < 120; y++)
+        for (x = 140; x < 180; x++)
+            cv_pic[y * 320 + x] = 0xFFFFFF;
+    for (x = 0; x < 200; x++)
+        cv_pic[x * 320 + x + 60] = 0;
+    win = gui_window_at("GUITEST Views", 0, 0, 440, 260, 0);
+    row = gui_hbox(win->root, 8, 8);
+    gui_grow(row, 1);
+    cv_img = gui_image_view(row);
+    gui_image_view_set(cv_img, cv_pic, 320, 200, 320);
+    gui_grow(cv_img, 1);
+    gui_on(cv_img, cv_zoomed, 0);
+    cv_can = gui_canvas_view(row, 400, 300, cv_draw, cv_event);
+    gui_cview_style(cv_can, GUI_CV_RULERS | GUI_CV_RING, 10);
+    gui_cview_cursor(cv_can, GLOS_CURSOR_CROSS);
+    gui_grow(cv_can, 1);
+    gui_on(cv_can, cv_zoomed, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(cv_img);
+    say("cview", "", 0);
+}
+
+/* ---- the colour picker: a palette and colour buttons (toolkit 2, step C8) */
+static struct gui_widget *pk_pal, *pk_window, *pk_glass;
+
+static void pk_on(struct gui_widget *w, int what)
+{
+    char line[80];
+    if (w == pk_pal && what == GUI_ON_SELECT)
+        snprintf(line, sizeof line, "primary %06X, secondary %06X", gui_palette_get(w, 0), gui_palette_get(w, 1));
+    else if (w == pk_pal && what == GUI_ON_CHANGE)
+        snprintf(line, sizeof line, "swatch edited: %06X", gui_palette_colour(w, 0));
+    else if (what == GUI_ON_CHANGE)
+        snprintf(line, sizeof line, "%s %08X", w == pk_glass ? "glass" : "window", gui_colour_get(w));
+    else
+        return;
+    say("%s", line, 0);
+}
+
+static void picker_page(void)
+{
+    static const unsigned paint[28] = {
+        0x000000, 0x808080, 0x800000, 0x808000, 0x008000, 0x008080, 0x000080, 0x800080, 0x808040, 0x004040,
+        0x0080FF, 0x004080, 0x8000FF, 0x804000, 0xFFFFFF, 0xC0C0C0, 0xFF0000, 0xFFFF00, 0x00FF00, 0x00FFFF,
+        0x0000FF, 0xFF00FF, 0xFFFF80, 0x00FF80, 0x80FFFF, 0x8080FF, 0xFF0080, 0xFF8040 };
+    struct gui_widget *box, *form;
+    win = gui_window_at("GUITEST Picker", 0, 0, 330, 160, 0);
+    box = gui_vbox(win->root, 6, 10);
+    gui_grow(box, 1);
+    gui_label(box, "Palette:");
+    pk_pal = gui_palette(box, paint, 28, 14);
+    gui_on(pk_pal, pk_on, 0);
+    form = gui_form(box);
+    pk_window = gui_colour_button(gui_row(form, "&Window:", NULL), 0x3060C0, 0);
+    gui_on(pk_window, pk_on, 0);
+    pk_glass = gui_colour_button(gui_row(form, "&Glass:", NULL), 0x80FFFFFFu, GUI_COLOUR_ALPHA);
+    gui_on(pk_glass, pk_on, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(pk_pal);
+    say("picker", "", 0);
+}
+
 /* ---- the calendar and the date and time fields (toolkit 2, step C8) */
 static struct gui_widget *cl_cal, *cl_date, *cl_time;
 
@@ -2116,6 +2354,14 @@ int main(int argc, char **argv)
         meters_page();
     else if (!strcmp(what, "calendar"))
         calendar_page();
+    else if (!strcmp(what, "picker"))
+        picker_page();
+    else if (!strcmp(what, "cview"))
+        cview_page();
+    else if (!strcmp(what, "props"))
+        props_page();
+    else if (!strcmp(what, "wizard"))
+        wizard_page();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

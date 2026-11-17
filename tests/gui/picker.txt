@@ -1,0 +1,40 @@
+# The colour picker (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's page. In the palette the left
+# button takes red as the primary colour and the right green as the secondary; the first swatch edited by keys
+# (Enter: the colour dialog, a hex typed); the glass button's dialog has an alpha (64: the hex #40FFFFFF, the new
+# colour over a checkerboard); the window button's has none (a hex typed).
+run GUITEST.EXE picker
+wait "GUITEST Picker"
+shot start "GUITEST Picker"
+click "GUITEST Picker" 59 59
+click "GUITEST Picker" 99 39 right
+key left left left left enter
+wait "Edit colour"
+key alt+x
+key ctrl+a
+type #102030
+key tab enter
+gone "Edit colour"
+key alt+g space
+wait "Colour"
+key alt+a
+type 64
+shot alpha "Colour"
+key enter
+gone "Colour"
+key alt+w space
+wait "Colour"
+key alt+x
+key ctrl+a
+type #C03060
+key tab enter
+gone "Colour"
+shot taken "GUITEST Picker"
+key alt+f4
+gone "GUITEST Picker"
+expect GUI picker
+expect GUI primary FF0000, secondary FF8040
+expect GUI primary FF0000, secondary 008000
+expect GUI swatch edited: 102030
+expect GUI glass 40FFFFFF
+expect GUI window 00C03060
+expect GUI end

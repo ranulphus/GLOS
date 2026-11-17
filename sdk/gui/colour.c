@@ -4,7 +4,12 @@
  * saturation (across) and value (up) for the hue a bar beside it sets, red, green and blue, hue, saturation and
  * value as spin boxes, the colour as hex, and the old colour beside the new. Every part takes the keys: the square
  * and the bar move by the arrows (Ctrl: ten at a time), and in the swatches the arrows take the swatch they land
- * on. */
+ * on.
+ *
+ * Step C8 (the colour picker): with GUI_COLOUR_ALPHA (gui_colour_dialog_ex) the colour has an alpha too (0xAARRGGBB,
+ * FF opaque): a spin box for it, the hex as #AARRGGBB, the old and the new over a checkerboard. The colour button
+ * (gui_colour_button) shows its colour and opens the dialog; the palette (gui_palette) is a grid of swatches for
+ * Paint: the left button takes the primary colour, the right the secondary, a double click edits the swatch. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +34,8 @@ static int nrecent;
 static struct cd {
     struct gui_window *w;
     unsigned old, rgb;
+    int alpha, old_alpha, with_alpha;           /* (GUI_COLOUR_ALPHA) 0-255 */
+    struct gui_widget *aa;
     int h, s, v;                                /* 0-359, 0-100, 0-100 */
     int busy;                                   /* (the fields being set: their changes are not the user's) */
     struct gui_widget *sv, *bar, *sw, *r, *g, *b, *hh, *ss, *vv, *hex, *now;
@@ -85,7 +92,12 @@ static void refresh(int from_rgb)
     gui_set_value(C.hh, C.h);
     gui_set_value(C.ss, C.s);
     gui_set_value(C.vv, C.v);
-    snprintf(hex, sizeof hex, "#%06X", C.rgb & 0xFFFFFF);
+    if (C.with_alpha) {
+        gui_set_value(C.aa, C.alpha);
+        snprintf(hex, sizeof hex, "#%02X%06X", (unsigned)C.alpha, C.rgb & 0xFFFFFF);
+    } else {
+        snprintf(hex, sizeof hex, "#%06X", C.rgb & 0xFFFFFF);
+    }
     if (strcmp(gui_get_text(C.hex), hex))
         gui_set_text(C.hex, hex);
     C.busy = 0;
@@ -287,11 +299,35 @@ static void sw_measure(struct gui_widget *w, int *pw, int *ph)
 
 static const struct gui_class sw_class = { "swatches", GUI_C_FOCUS, sw_draw, sw_event, sw_measure, NULL, NULL };
 
+/* A colour with its alpha over a checkerboard (squares of 4, light and dark grey), in x, y, w, h. */
+static unsigned blend(unsigned rgb, int alpha, unsigned under)
+{
+    unsigned out = 0;
+    int k;
+    for (k = 0; k < 24; k += 8)
+        out |= (unsigned)(((int)(rgb >> k & 255) * alpha + (int)(under >> k & 255) * (255 - alpha) + 127) / 255) << k;
+    return out;
+}
+
+static void fill_alpha(struct gfx_surface *s, int x, int y, int w, int h, unsigned rgb, int alpha)
+{
+    int i, j;
+    if (alpha >= 255) {
+        gfx_fill(s, x, y, w, h, rgb);
+        return;
+    }
+    for (j = 0; j < h; j += 4)
+        for (i = 0; i < w; i += 4)
+            gfx_fill(s, x + i, y + j, w - i < 4 ? w - i : 4, h - j < 4 ? h - j : 4,
+                     blend(rgb, alpha, ((i ^ j) & 4) ? 0x999999u : 0xDDDDDDu));
+}
+
 /* ---- the old colour beside the new */
 static void now_draw(struct gui_widget *w, struct gfx_surface *s)
 {
-    gfx_fill(s, w->r.x + 1, w->r.y + 1, w->r.w / 2 - 1, w->r.h - 2, C.old);
-    gfx_fill(s, w->r.x + w->r.w / 2, w->r.y + 1, w->r.w - w->r.w / 2 - 1, w->r.h - 2, C.rgb);
+    fill_alpha(s, w->r.x + 1, w->r.y + 1, w->r.w / 2 - 1, w->r.h - 2, C.old, C.with_alpha ? C.old_alpha : 255);
+    fill_alpha(s, w->r.x + w->r.w / 2, w->r.y + 1, w->r.w - w->r.w / 2 - 1, w->r.h - 2, C.rgb,
+               C.with_alpha ? C.alpha : 255);
     gfx_frame(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_LINE);
 }
 
@@ -302,7 +338,10 @@ static void spin_on(struct gui_widget *w, int what)
 {
     if (what != GUI_ON_CHANGE || C.busy)
         return;
-    if (w == C.r || w == C.g || w == C.b) {
+    if (w == C.aa) {
+        C.alpha = gui_value(w);
+        refresh(1);
+    } else if (w == C.r || w == C.g || w == C.b) {
         C.rgb = (unsigned)gui_value(C.r) << 16 | (unsigned)gui_value(C.g) << 8 | (unsigned)gui_value(C.b);
         refresh(1);
     } else {
@@ -320,12 +359,14 @@ static void hex_on(struct gui_widget *w, int what)
         return;
     if (*t == '#')
         t++;
-    if (strlen(t) != 6 || C.busy)
+    if ((strlen(t) != 6 && !(C.with_alpha && strlen(t) == 8)) || C.busy)
         return;
     v = strtoul(t, &end, 16);
     if (*end)
         return;
-    C.rgb = (unsigned)v;
+    C.rgb = (unsigned)v & 0xFFFFFF;
+    if (strlen(t) == 8)
+        C.alpha = (int)(v >> 24 & 255);
     refresh(1);
 }
 
@@ -341,12 +382,14 @@ static void cancel_click(struct gui_widget *w, int what)
     gui_end_modal(w->win, GUI_CANCEL_R);
 }
 
-int gui_colour_dialog(struct gui_window *owner, const char *title, unsigned *rgb)
+int gui_colour_dialog_ex(struct gui_window *owner, const char *title, unsigned *rgb, unsigned flags)
 {
     struct gui_widget *box, *top, *pick, *fields, *row, *f;
     int r, i;
     memset(&C, 0, sizeof C);
     C.old = C.rgb = *rgb & 0xFFFFFF;
+    C.with_alpha = (flags & GUI_COLOUR_ALPHA) != 0;
+    C.alpha = C.old_alpha = C.with_alpha ? (int)(*rgb >> 24 & 255) : 255;
     C.pix_hue = -1;
     C.w = gui_window(title, 0, 0, GUI_W_DIALOG);
     C.w->owner = owner;
@@ -365,7 +408,9 @@ int gui_colour_dialog(struct gui_window *owner, const char *title, unsigned *rgb
     C.hh = gui_spin(gui_row(fields, "&Hue:", NULL), 0, 359, 0);
     C.ss = gui_spin(gui_row(fields, "Sa&turation:", NULL), 0, 100, 0);
     C.vv = gui_spin(gui_row(fields, "&Value:", NULL), 0, 100, 0);
-    C.hex = gui_field(gui_row(fields, "He&x:", NULL), 8);
+    if (C.with_alpha)
+        C.aa = gui_spin(gui_row(fields, "&Alpha:", NULL), 0, 255, 255);
+    C.hex = gui_field(gui_row(fields, "He&x:", NULL), C.with_alpha ? 10 : 8);
     f = gui_row(fields, "Old, new:", NULL);
     C.now = gui_new(f, &now_class, sizeof *C.now);
     gui_on(C.r, spin_on, 0);
@@ -375,6 +420,8 @@ int gui_colour_dialog(struct gui_window *owner, const char *title, unsigned *rgb
     gui_on(C.ss, spin_on, 0);
     gui_on(C.vv, spin_on, 0);
     gui_on(C.hex, hex_on, 0);
+    if (C.aa)
+        gui_on(C.aa, spin_on, 0);
     row = gui_hbox(box, GUI_GAP, 0);
     gui_space(row, 0, 0);
     gui_button(row, "OK", ok_click, 0)->flags |= GUI_DEFAULT;
@@ -389,7 +436,7 @@ int gui_colour_dialog(struct gui_window *owner, const char *title, unsigned *rgb
     r = gui_modal(C.w);
     if (r != GUI_OK)
         return 0;
-    *rgb = C.rgb;
+    *rgb = C.with_alpha ? (unsigned)C.alpha << 24 | C.rgb : C.rgb;
     for (i = 0; i < nrecent && recent[i] != C.rgb; i++)
         ;
     if (i == nrecent && nrecent < SW_ACROSS)
@@ -399,4 +446,228 @@ int gui_colour_dialog(struct gui_window *owner, const char *title, unsigned *rgb
     memmove(recent + 1, recent, (size_t)i * sizeof recent[0]);
     recent[0] = C.rgb;
     return 1;
+}
+
+int gui_colour_dialog(struct gui_window *owner, const char *title, unsigned *rgb)
+{
+    return gui_colour_dialog_ex(owner, title, rgb, 0);
+}
+
+/* ---- the colour button: its colour in a button's face; pressed, the dialog */
+struct cbutton {
+    struct gui_widget w;
+    unsigned argb, flags;
+    int down;
+};
+
+#define CBT(w) ((struct cbutton *)(w))
+
+static void cb_measure(struct gui_widget *w, int *pw, int *ph) { (void)w, *pw = 44, *ph = GUI_FIELD_H; }
+
+static void cb_draw(struct gui_widget *w, struct gfx_surface *s)
+{
+    struct cbutton *b = CBT(w);
+    int on = !(w->flags & GUI_DISABLED);
+    gui_draw_box(s, &w->r, GUI_FACE, b->down);
+    fill_alpha(s, w->r.x + 5, w->r.y + 4, w->r.w - 10, w->r.h - 8, b->argb & 0xFFFFFF,
+               b->flags & GUI_COLOUR_ALPHA ? (int)(b->argb >> 24) : 255);
+    gfx_frame(s, w->r.x + 4, w->r.y + 3, w->r.w - 8, w->r.h - 6, on ? GUI_TEXT : GUI_DIM);
+    if (gui_is_focus(w)) {
+        struct gfx_rect f = { w->r.x + 2, w->r.y + 1, w->r.w - 4, w->r.h - 2 };
+        gui_draw_focus(s, &f);
+    }
+}
+
+static void cb_open(struct gui_widget *w)
+{
+    struct cbutton *b = CBT(w);
+    unsigned c = b->argb;
+    b->down = 0;
+    gui_damage(w);
+    if (gui_colour_dialog_ex(w->win, "Colour", &c, b->flags) && c != b->argb) {
+        b->argb = c;
+        gui_damage(w);
+        gui_send(w, GUI_ON_CHANGE);
+    }
+}
+
+static int cb_event(struct gui_widget *w, struct gui_ev *e)
+{
+    struct cbutton *b = CBT(w);
+    switch (e->type) {
+    case GUI_EV_PRESS:
+        if (e->button != 1)
+            return 0;
+        b->down = 1;
+        gui_damage(w);
+        return 1;
+    case GUI_EV_RELEASE:
+        if (b->down && e->x >= w->r.x && e->x < w->r.x + w->r.w && e->y >= w->r.y && e->y < w->r.y + w->r.h)
+            cb_open(w);
+        b->down = 0;
+        gui_damage(w);
+        return 1;
+    case GUI_EV_KEY:
+        if (!(e->mods & (GLOS_MOD_CTRL | GLOS_MOD_ALT)) && (e->key == GUI_K_SPACE || e->key == GUI_K_ENTER)) {
+            cb_open(w);
+            return 1;
+        }
+        return 0;
+    case GUI_EV_FOCUS:
+    case GUI_EV_BLUR:
+        gui_damage(w);
+        return 1;
+    }
+    return 0;
+}
+
+static const struct gui_class cb_class = { "colourbutton", GUI_C_FOCUS, cb_draw, cb_event, cb_measure, NULL, NULL };
+
+struct gui_widget *gui_colour_button(struct gui_widget *parent, unsigned argb, unsigned flags)
+{
+    struct cbutton *b = (struct cbutton *)gui_new(parent, &cb_class, sizeof *b);
+    b->flags = flags;
+    b->argb = flags & GUI_COLOUR_ALPHA ? argb : (argb & 0xFFFFFF) | 0xFF000000u;
+    return &b->w;
+}
+
+unsigned gui_colour_get(struct gui_widget *w)
+{
+    if (w->cls == &cb_class)
+        return CBT(w)->flags & GUI_COLOUR_ALPHA ? CBT(w)->argb : CBT(w)->argb & 0xFFFFFF;
+    return 0;
+}
+
+void gui_colour_set(struct gui_widget *w, unsigned argb)
+{
+    if (w->cls != &cb_class)
+        return;
+    CBT(w)->argb = CBT(w)->flags & GUI_COLOUR_ALPHA ? argb : (argb & 0xFFFFFF) | 0xFF000000u;
+    gui_damage(w);
+}
+
+/* ---- the palette: swatches in rows; the left button the primary colour, the right the secondary */
+#define PAL_MAX 64
+
+struct palette {
+    struct gui_widget w;
+    unsigned c[PAL_MAX];
+    int n, across, hot;
+    int chosen[2];                      /* the primary's and the secondary's swatch */
+};
+
+#define PAL(w) ((struct palette *)(w))
+
+static void pal_measure(struct gui_widget *w, int *pw, int *ph)
+{
+    struct palette *p = PAL(w);
+    *pw = p->across * (SW + 2);
+    *ph = (p->n + p->across - 1) / p->across * (SW + 2);
+}
+
+static unsigned contrast(unsigned rgb)          /* black on a light colour, white on a dark one */
+{
+    return (rgb >> 16 & 255) * 3 + (rgb >> 8 & 255) * 6 + (rgb & 255) > 1280 ? 0x000000u : 0xFFFFFFu;
+}
+
+static void pal_draw(struct gui_widget *w, struct gfx_surface *s)
+{
+    struct palette *p = PAL(w);
+    int i;
+    for (i = 0; i < p->n; i++) {
+        int x = w->r.x + i % p->across * (SW + 2), y = w->r.y + i / p->across * (SW + 2);
+        gfx_fill(s, x + 1, y + 1, SW - 2, SW - 2, p->c[i]);
+        gfx_frame(s, x, y, SW, SW, i == p->chosen[0] || i == p->chosen[1] ? GUI_TEXT : GUI_LINE);
+        if (i == p->chosen[0])                  /* (the primary: a square at its top left; the secondary: a hollow
+                                                   one at its bottom right; black or white, whichever shows) */
+            gfx_fill(s, x + 2, y + 2, 6, 6, contrast(p->c[i]));
+        if (i == p->chosen[1])
+            gfx_frame(s, x + SW - 8, y + SW - 8, 6, 6, contrast(p->c[i]));
+        if (gui_is_focus(w) && i == p->hot) {
+            struct gfx_rect f = { x - 1, y - 1, SW + 2, SW + 2 };
+            gui_draw_focus(s, &f);
+        }
+    }
+}
+
+static void pal_choose(struct palette *p, int i, int which)
+{
+    p->hot = i;
+    p->chosen[which] = i;
+    gui_damage(&p->w);
+    gui_send(&p->w, GUI_ON_SELECT);
+}
+
+static void pal_edit(struct palette *p, int i)
+{
+    unsigned c = p->c[i];
+    if (gui_colour_dialog(p->w.win, "Edit colour", &c) && c != p->c[i]) {
+        p->c[i] = c;
+        gui_damage(&p->w);
+        gui_send(&p->w, GUI_ON_CHANGE);
+    }
+}
+
+static int pal_event(struct gui_widget *w, struct gui_ev *e)
+{
+    struct palette *p = PAL(w);
+    int i;
+    switch (e->type) {
+    case GUI_EV_PRESS:
+        if (e->button != 1 && e->button != 2)
+            return 0;
+        i = (e->y - w->r.y) / (SW + 2) * p->across + (e->x - w->r.x) / (SW + 2);
+        if (e->x - w->r.x >= p->across * (SW + 2) || i < 0 || i >= p->n)
+            return 1;
+        if (e->button == 1 && e->clicks == 2)
+            pal_edit(p, i);
+        else
+            pal_choose(p, i, e->button == 2);
+        return 1;
+    case GUI_EV_KEY:
+        if (e->mods & (GLOS_MOD_CTRL | GLOS_MOD_ALT))
+            return 0;
+        switch (e->key) {
+        case GUI_K_LEFT: p->hot = p->hot > 0 ? p->hot - 1 : 0; break;
+        case GUI_K_RIGHT: p->hot = p->hot + 1 < p->n ? p->hot + 1 : p->hot; break;
+        case GUI_K_UP: p->hot = p->hot >= p->across ? p->hot - p->across : p->hot; break;
+        case GUI_K_DOWN: p->hot = p->hot + p->across < p->n ? p->hot + p->across : p->hot; break;
+        case GUI_K_SPACE: pal_choose(p, p->hot, (e->mods & GLOS_MOD_SHIFT) != 0); return 1;
+        case GUI_K_ENTER: pal_edit(p, p->hot); return 1;
+        default: return 0;
+        }
+        gui_damage(w);
+        return 1;
+    case GUI_EV_FOCUS:
+    case GUI_EV_BLUR:
+        gui_damage(w);
+        return 1;
+    }
+    return 0;
+}
+
+static const struct gui_class pal_class = { "palette", GUI_C_FOCUS, pal_draw, pal_event, pal_measure, NULL, NULL };
+
+struct gui_widget *gui_palette(struct gui_widget *parent, const unsigned *colours, int n, int across)
+{
+    struct palette *p = (struct palette *)gui_new(parent, &pal_class, sizeof *p);
+    int i;
+    p->n = n < 1 ? 1 : n > PAL_MAX ? PAL_MAX : n;
+    p->across = across > 0 ? across : 14;
+    for (i = 0; i < p->n; i++)
+        p->c[i] = colours ? colours[i] & 0xFFFFFF : 0;
+    p->chosen[0] = 0, p->chosen[1] = p->n > 1 ? p->n - 1 : 0;
+    return &p->w;
+}
+
+unsigned gui_palette_get(struct gui_widget *w, int which)      /* 0 the primary colour, 1 the secondary */
+{
+    struct palette *p = PAL(w);
+    return p->c[p->chosen[which ? 1 : 0]];
+}
+
+unsigned gui_palette_colour(struct gui_widget *w, int i)
+{
+    struct palette *p = PAL(w);
+    return i >= 0 && i < p->n ? p->c[i] : 0;
 }

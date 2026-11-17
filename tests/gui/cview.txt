@@ -1,0 +1,27 @@
+# The image view and the canvas view (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's page. The
+# picture (320 by 200) fitted to its view (averaged down, centred), then shown at its size (1) and larger (=, as +). In
+# the canvas (400 by 300 units, rulers every 50 at 100%) a press is told in units; + zooms it to 150% (the same
+# place on the screen is then fewer units in); a drag let go outside the view is still the canvas's (the mouse kept
+# while the button is down).
+run GUITEST.EXE cview
+wait "GUITEST Views"
+shot start "GUITEST Views"
+key 1
+key =
+shot image-zoomed "GUITEST Views"
+click "GUITEST Views" 300 80
+key =
+click "GUITEST Views" 300 80
+drag "GUITEST Views" 300 100 436 250
+shot canvas-zoomed "GUITEST Views"
+key alt+f4
+gone "GUITEST Views"
+expect GUI cview
+expect GUI image zoom 100
+expect GUI image zoom 150
+expect GUI canvas press 50,52
+expect GUI canvas zoom 150
+expect GUI canvas press 61,66
+expect GUI canvas press 61,79
+expect GUI canvas let go 152,179
+expect GUI end

@@ -711,6 +711,71 @@ int gui_colour_dialog(struct gui_window *owner, const char *title, unsigned *rgb
                                            basic sixteen, the theme's, the recent), a saturation-and-value square
                                            with a hue bar, RGB and HSV spin boxes, hex, old beside new. rgb in and
                                            out (00RRGGBBh). 1: chosen */
+#define GUI_COLOUR_ALPHA 1              /* (toolkit 2) the colour has an alpha: AARRGGBBh, FFh opaque */
+int gui_colour_dialog_ex(struct gui_window *owner, const char *title, unsigned *rgb, unsigned flags);
+/* (toolkit 2) A button showing its colour (over a checkerboard with GUI_COLOUR_ALPHA) that opens the colour dialog;
+   GUI_ON_CHANGE when another is taken. */
+struct gui_widget *gui_colour_button(struct gui_widget *parent, unsigned rgb, unsigned flags);
+unsigned gui_colour_get(struct gui_widget *w);
+void gui_colour_set(struct gui_widget *w, unsigned rgb);
+/* (toolkit 2) A palette: swatches in rows (`across` to a row); the left button takes the primary colour, the right
+   (or Shift+Space) the secondary (GUI_ON_SELECT); a double click or Enter edits a swatch (GUI_ON_CHANGE). */
+struct gui_widget *gui_palette(struct gui_widget *parent, const unsigned *colours, int n, int across);
+unsigned gui_palette_get(struct gui_widget *w, int which);     /* 0: the primary colour, 1: the secondary */
+unsigned gui_palette_colour(struct gui_widget *w, int i);
+/* (toolkit 2) A canvas view: a document doc_w by doc_h units, at a zoom (a percentage, or 0: fitted, never
+   enlarged), scrolled both ways (bars, the wheel; Shift+wheel across; Ctrl+wheel zooms about the pointer; the
+   arrows, Page Up and Down, Home, End, + and - if the app leaves them), rulers if asked. The app's draw is given
+   where the document is: a unit x is the screen's ox + x * num / den; doc is the part of the document that shows
+   (in units), area the view's part of the screen. The app's event has the pointer in units (a drag keeps the mouse
+   until let go; the middle button pans); it returns 1 if it took the event. GUI_ON_CHANGE: the zoom changed. */
+struct gui_viewport {
+    struct gfx_rect area, doc;
+    int ox, oy, num, den, zoom;
+};
+struct gui_widget *gui_canvas_view(struct gui_widget *parent, int doc_w, int doc_h,
+                                   void (*draw)(struct gui_widget *, struct gfx_surface *, const struct gui_viewport *),
+                                   int (*event)(struct gui_widget *, struct gui_ev *, int x, int y));
+#define GUI_CV_RULERS 1                 /* rulers along the top and the left, labelled in units */
+#define GUI_CV_CENTRE 2                 /* a document smaller than the view in its middle (else at its corner) */
+#define GUI_CV_RING   4                 /* the focus ring inside the view when it has the keyboard */
+void gui_cview_style(struct gui_widget *w, unsigned flags, int ruler_unit);    /* ruler_unit: labels at a multiple of it */
+void gui_cview_size(struct gui_widget *w, int doc_w, int doc_h);
+void gui_cview_zoom(struct gui_widget *w, int percent);        /* about the middle of what shows; 0: fitted */
+int gui_cview_get_zoom(struct gui_widget *w);                  /* the percentage shown */
+void gui_cview_cursor(struct gui_widget *w, int shape);        /* GLOS_CURSOR_: the pointer over the document */
+void gui_cview_scroll(struct gui_widget *w, int doc_x, int doc_y);     /* that point to the view's corner */
+/* (toolkit 2) An image view: a canvas view of a picture (00RRGGBBh pixels, kept, not copied), fitted or at a zoom
+   (gui_cview_zoom), centred; the left button pans it; + and - zoom, 0 fits, 1 shows it at its size. */
+struct gui_widget *gui_image_view(struct gui_widget *parent);
+/* (toolkit 2) A property grid: names and values under groups that open and close, each value edited as its kind
+   wants (text and numbers in a field over it, a yes-or-no ticked, a choice stepped, a colour and a font by their
+   dialogs), the current one's help under the grid. GUI_ON_CHANGE: gui_prop_changed says which property. */
+enum { GUI_PROP_TEXT, GUI_PROP_NUMBER, GUI_PROP_BOOL, GUI_PROP_CHOICE, GUI_PROP_COLOUR, GUI_PROP_FONT };
+struct gui_prop {
+    int kind;
+    const char *text;                   /* TEXT (copied) */
+    int value, min, max;                /* NUMBER; BOOL (0, 1); CHOICE (the item's place) */
+    const char *const *items;           /* CHOICE: ending with NULL (kept, not copied) */
+    unsigned rgb;                       /* COLOUR */
+    struct gui_fontspec font;           /* FONT */
+};
+struct gui_widget *gui_propgrid(struct gui_widget *parent);
+void gui_prop_group(struct gui_widget *w, const char *name);   /* the properties added after it are in it */
+int gui_prop_add(struct gui_widget *w, const char *name, const char *help, const struct gui_prop *p);  /* its id */
+const struct gui_prop *gui_prop_get(struct gui_widget *w, int id);
+void gui_prop_set(struct gui_widget *w, int id, const struct gui_prop *p);
+int gui_prop_changed(struct gui_widget *w);
+/* (toolkit 2) A wizard: pages with Back, Next (Finish on the last) and Cancel; GUI_ON_CHANGE when the page shown
+   changes, GUI_ON_ACTIVATE on Finish, GUI_ON_CLOSE on Cancel. Each page starts with Next usable. */
+#define GUI_WIZ_STEPS 1                 /* the pages' titles listed down the left */
+struct gui_widget *gui_wizard(struct gui_widget *parent, unsigned flags);
+struct gui_widget *gui_wizard_page(struct gui_widget *w, const char *title, const char *text);   /* a box to fill */
+void gui_wizard_go(struct gui_widget *w, int page);
+int gui_wizard_at(struct gui_widget *w);
+void gui_wizard_next_ok(struct gui_widget *w, int ok);
+void gui_wizard_skip(struct gui_widget *w, int page, int skip);
+void gui_image_view_set(struct gui_widget *w, const unsigned *rgb, int iw, int ih, int stride);
 int gui_folder_dialog(struct gui_window *owner, const char *title, char *path, int room);     /* (toolkit 2) a
                                            folder chosen in a tree of the drives' folders, or typed; New folder
                                            makes one. path in: where to start; out: the folder. 1: chosen */

@@ -638,6 +638,50 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
 - **Tests** `calendar` (GLOS's own region: three days chosen, a month on, the arrow and a click, the date field
   typed and its calendar dropped down, the time field typed) and `calregion` (dd/mm/yyyy, 12 hours, Sunday
   first), host and Loop A.
+- **C8c, the colour picker** (`sdk/gui/colour.c`): `gui_colour_dialog_ex` with `GUI_COLOUR_ALPHA` gives the colour
+  an alpha (AARRGGBBh): a spin box for it, the hex as #AARRGGBB, the old and new over a checkerboard; the dialog
+  without it is as before. `gui_colour_button` shows its colour in a button's face and opens the dialog
+  (GUI_ON_CHANGE). `gui_palette` is Paint's grid of swatches: the left button takes the primary colour, the right
+  (or Shift+Space) the secondary (GUI_ON_SELECT; marks in black or white, whichever shows), a double click or
+  Enter edits a swatch with the dialog (GUI_ON_CHANGE).
+- **Test** `picker` (the primary and secondary taken by the mouse, a swatch edited by keys, the alpha dialog, the
+  plain one), host and Loop A.
+- **C8d, the canvas view and the image view** (`sdk/gui/view.c`): `gui_canvas_view` shows a document of so many
+  units at a zoom (percentages in steps from 10 to 1600, or fitted), scrolled both ways (bars, the wheel, Shift
+  across, Ctrl+wheel zooming about the pointer, the arrows and pages, + and -), with rulers labelled in units if
+  asked (`GUI_CV_RULERS`; labels at least 50 pixels apart, at a multiple of the app's unit). The app draws what
+  shows, given where the document is on the screen (`struct gui_viewport`: a unit x is ox + x * num / den), and
+  has the mouse in units; a drag keeps the mouse until let go, the middle button pans, and the pointer over the
+  document takes the app's shape for its tool (`gui_cview_cursor`, GLOS's window cursor: the toolkit's first use
+  of it). `gui_image_view` is a canvas view of a picture (kept, not copied), fitted (never enlarged) and centred,
+  panned by the left button; 0 fits it, 1 shows it at its size; a smaller picture is averaged once for its scale,
+  a larger one has its pixels repeated row by row.
+- **Owed from C8d:** the pointer's place marked on the rulers; smoothing when enlarging; a picture's own alpha.
+- **Test** `cview` (the picture fitted, at its size, larger; presses in units at 100% and 150%; a drag let go
+  outside the view), host and Loop A.
+- **C8e, the property grid** (`sdk/gui/props.c`): `gui_propgrid` with `gui_prop_group` and `gui_prop_add` (a name,
+  help, and a `struct gui_prop` of a kind: text, number with its range, yes-or-no, choice, colour, font). Names
+  and values in two columns, the line between them dragged; groups open and close (their box, a double click,
+  Left and Right). Text and numbers are edited in the toolkit's own field put over the value (its class wrapped
+  so that the grid has Enter, Esc and Up and Down first: a number steps, other rows move on; typing begins an edit;
+  the edit is kept when the keyboard goes elsewhere); a yes-or-no ticks, a choice steps (Shift back), a colour
+  and a font open their dialogs. The current property's name and help are shown under the grid.
+  `GUI_ON_CHANGE` with `gui_prop_changed`.
+- **Test** `props` (every kind of value by keys, the colour by its dialog, the font's dialog left, a group closed
+  and opened, a number edited and a box ticked by the mouse, an edit left by Esc, the column line dragged), host
+  and Loop A.
+- **C8f, the wizard** (`sdk/gui/wizard.c`): `gui_wizard` with `gui_wizard_page` (a title, a line or two of what
+  the page is for, on the field's ground, and a box the app fills); Back, Next (Finish on the last page; the
+  default, so Enter) and Cancel; `GUI_ON_CHANGE` as the page changes, `GUI_ON_ACTIVATE` on Finish, `GUI_ON_CLOSE` on
+  Cancel. The app holds Next back until a page is filled in (`gui_wizard_next_ok`; each page starts with it
+  usable) and skips pages (`gui_wizard_skip`); the keyboard goes to each page's first control. `GUI_WIZ_STEPS`
+  lists the pages' titles down the left, the one shown marked and bold, the skipped ones left out.
+- **Noted in C8f:** a field the app watches (its `on`) takes Enter as its own `GUI_ON_ACTIVATE`, so Enter there
+  does not press the dialog's default button (the colour dialog's hex field, a wizard's name field). That is the
+  field's documented behaviour; whether a field that only wants `GUI_ON_CHANGE` should pass Enter on is a C10
+  question.
+- **Test** `wizard` (Next held back until a name is typed, the pages forward and back, the options page skipped
+  and left out of the steps, Finish), host and Loop A.
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

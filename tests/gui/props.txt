@@ -1,0 +1,51 @@
+# The property grid (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's page, two groups. By keys: the
+# title edited in the field put over it; the width typed (an edit begun by typing) and stepped by Up; the yes-or-no
+# ticked off; the choice stepped twice; the colour by its dialog (a hex typed); the font's dialog left by Esc
+# (nothing changed); the second group closed by Left and opened by Right. By the mouse: a number edited in place,
+# a box ticked; an edit left by Esc (the title as it was); the line between the columns dragged.
+run GUITEST.EXE props
+wait "GUITEST Properties"
+key down enter
+type Hello
+key enter
+key down
+type 640
+key up enter
+key down space
+key down space space
+shot keys "GUITEST Properties"
+key down enter
+wait "Colour"
+key alt+x
+key ctrl+a
+type #FF8000
+key tab enter
+gone "Colour"
+key down enter
+wait "Font"
+key esc
+gone "Font"
+key down left
+shot closed "GUITEST Properties"
+key right
+click "GUITEST Properties" 200 137
+type 7
+key enter
+click "GUITEST Properties" 200 153
+click "GUITEST Properties" 200 25
+type zzz
+key esc
+drag "GUITEST Properties" 122 60 162 60
+shot wider "GUITEST Properties"
+key alt+f4
+gone "GUITEST Properties"
+expect GUI props
+expect GUI property 0 (text): Hello
+expect GUI property 1 (number): 641
+expect GUI property 2 (yes-no): 0
+expect GUI property 3 (choice): 1
+expect GUI property 3 (choice): 2
+expect GUI property 4 (colour): FF8000
+expect GUI property 6 (number): 7
+expect GUI property 7 (yes-no): 1
+expect GUI end
