@@ -67,6 +67,8 @@
  *                       a basket (copied where it is let go), and reordered in its list
  *   GUITEST calendar    "GUITEST Calendar" (toolkit 2, step C8): a month (several days
  *                       chosen, two marked, today fixed), a date field, a time field
+ *   GUITEST resource    "GUITEST Resources" (toolkit 2, step C9): a dialog made in code and
+ *                       the same from a resource file's text; the text written back the same
  *   GUITEST code        "GUITEST Code" (toolkit 2, step C8): the code editor on C (colours,
  *                       marks, a fold, a column typed into, completion, undo, zoom)
  *   GUITEST chat        "GUITEST Chat" (toolkit 2, step C8): a chat view, lines coloured by
@@ -1941,6 +1943,169 @@ static void rich_page(void)
     say("rich", "", 0);
 }
 
+/* ---- resource files (toolkit 2, step C9): a dialog in code, and the same from text */
+static const char rs_text[] =
+    "object Settings: Dialog\n"
+    "  Title = \"GUITEST Loaded\"\n"
+    "  object Body: VBox\n"
+    "    object Fields: Form\n"
+    "      object NameRow: Row\n"
+    "        Label = \"&Name:\"\n"
+    "        object NameField: Field\n"
+    "          Chars = 16\n"
+    "          Text = \"Ada\"\n"
+    "        end\n"
+    "      end\n"
+    "      object SizeRow: Row\n"
+    "        Label = \"&Size:\"\n"
+    "        object Size: Spin\n"
+    "          Min = 1\n"
+    "          Max = 64\n"
+    "          Value = 12\n"
+    "        end\n"
+    "      end\n"
+    "      object KindRow: Row\n"
+    "        Label = \"&Kind:\"\n"
+    "        object Kind: Choice\n"
+    "          Items = \"Small|Medium|Large\"\n"
+    "          Value = 1\n"
+    "        end\n"
+    "      end\n"
+    "    end\n"
+    "    object Options: Group\n"
+    "      Title = \"Options\"\n"
+    "      object Bold: Check\n"
+    "        Text = \"&Bold\"\n"
+    "        Checked = true\n"
+    "      end\n"
+    "      object Left: Radio\n"
+    "        Text = \"&Left\"\n"
+    "        Checked = true\n"
+    "      end\n"
+    "      object Right: Radio\n"
+    "        Text = \"&Right\"\n"
+    "      end\n"
+    "    end\n"
+    "    object Level: Slider\n"
+    "      Value = 40\n"
+    "    end\n"
+    "    object Buttons: HBox\n"
+    "      object Fill: Space\n"
+    "        Grow = 1\n"
+    "      end\n"
+    "      object Ok: Button\n"
+    "        Text = \"OK\"\n"
+    "        Default = true\n"
+    "        Command = 1\n"
+    "      end\n"
+    "      object Cancel: Button\n"
+    "        Text = \"Cancel\"\n"
+    "        Cancel = true\n"
+    "        Command = 2\n"
+    "      end\n"
+    "    end\n"
+    "  end\n"
+    "end\n";
+
+static void rs_command(struct gui_window *w, int id)
+{
+    say("%s command %d", w->gw.title, id);
+    gui_close_later(w);
+}
+
+static void rs_coded(struct gui_widget *b, int what)   /* the dialog made in code */
+{
+    struct gui_window *d;
+    struct gui_widget *body, *form, *f, *ch, *g, *r, *hb, *k;
+    (void)b, (void)what;
+    d = gui_window("GUITEST Coded", 0, 0, GUI_W_DIALOG);
+    d->on_command = rs_command;
+    body = gui_vbox(d->root, -1, -1);
+    form = gui_form(body);
+    f = gui_field(gui_row(form, "&Name:", NULL), 16);
+    gui_set_text(f, "Ada");
+    gui_spin(gui_row(form, "&Size:", NULL), 1, 64, 12);
+    ch = gui_choice(gui_row(form, "&Kind:", NULL), 10);
+    gui_choice_add(ch, "Small"), gui_choice_add(ch, "Medium"), gui_choice_add(ch, "Large");
+    gui_set_value(ch, 1);
+    g = gui_group(body, "Options");
+    gui_check(g, "&Bold", 1);
+    r = gui_radio(g, "&Left", NULL);
+    gui_radio(g, "&Right", r);
+    gui_set_checked(r, 1);
+    gui_slider(body, 0, 100, 40);
+    hb = gui_hbox(body, -1, -1);
+    gui_space(hb, 0, 0);
+    k = gui_button(hb, "OK", NULL, 0);
+    k->flags |= GUI_DEFAULT, k->cmd = 1;
+    k = gui_button(hb, "Cancel", NULL, 0);
+    k->flags |= GUI_CANCEL, k->cmd = 2;
+    gui_show(d, 1);
+}
+
+static void rs_loaded(struct gui_widget *b, int what)  /* the same from the resource text */
+{
+    char err[120];
+    struct gui_window *d = gui_load_text(rs_text, err, sizeof err);
+    (void)b, (void)what;
+    if (!d) {
+        say("load failed: %s", err, 0);
+        return;
+    }
+    d->on_command = rs_command;
+    say("loaded; the field named NameField says %s", gui_get_text(gui_named(d, "NameField")), 0);
+    {                                           /* (its properties, as the designer has them: one set) */
+        struct gui_widget *f = gui_named(d, "NameField");
+        const struct gui_wclass *c = gui_wclass_of(f);
+        char line[400], v[64];
+        int i, n = 0;
+        n += snprintf(line + n, sizeof line - (size_t)n, "%s is a %s:", gui_name(f), c ? c->name : "?");
+        for (i = 0; c && i < gui_wprop_count(c) && n < (int)sizeof line - 40; i++) {
+            gui_wprop_get(f, gui_wprop_at(c, i)->name, v, sizeof v);
+            n += snprintf(line + n, sizeof line - (size_t)n, " %s=%s", gui_wprop_at(c, i)->name, v);
+        }
+        printf("GUI %s\n", line);
+        gui_wprop_set(f, "Text", "Grace");
+        gui_wprop_get(f, "Text", v, sizeof v);
+        printf("GUI its Text set: %s; classes: %d\n", v, gui_wclass_count());
+        gui_wprop_set(f, "Text", "Ada");        /* (back: its picture is compared with the coded one's) */
+    }
+    gui_show(d, 1);
+}
+
+static void resource_page(void)
+{
+    struct gui_widget *row;
+    char err[120];
+    static char back[4096];
+    struct gui_window *d = gui_load_text(rs_text, err, sizeof err);
+    if (d) {                                    /* (written back: the same text?) */
+        int i, line = 1;
+        gui_save(d, back, sizeof back);
+        for (i = 0; back[i] && back[i] == rs_text[i]; i++)
+            line += back[i] == '\n';
+        if (!back[i] && !rs_text[i])
+            printf("GUI round trip: the same\n");
+        else
+            printf("GUI round trip: differs at line %d\n%s", line, getenv("GUITEST_SHOW") ? back : "");
+        gui_close(d);
+    } else {
+        printf("GUI round trip: load failed: %s\n", err);
+    }
+    {
+        static const char bad[] = "object X: Dialog\n  object Y: Gadget\n  end\nend\n";
+        if (!gui_load_text(bad, err, sizeof err))
+            printf("GUI a bad file: %s\n", err);
+    }
+    win = gui_window_at("GUITEST Resources", 360, 0, 260, 90, 0);
+    row = gui_hbox(win->root, -1, -1);
+    gui_button(row, "&Coded", rs_coded, 0);
+    gui_button(row, "&Loaded", rs_loaded, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("resource", "", 0);
+}
+
 /* ---- the code editor (toolkit 2, step C8) */
 static struct gui_widget *ce;
 
@@ -2764,6 +2929,8 @@ int main(int argc, char **argv)
         chat_page();
     else if (!strcmp(what, "code"))
         code_page();
+    else if (!strcmp(what, "resource"))
+        resource_page();
     else if (!strcmp(what, "embedded"))
         embedded_page();
     else if (!strcmp(what, "names")) {

@@ -907,6 +907,23 @@ struct gui_widget *gui_choice(struct gui_widget *parent, int chars)
     return &c->w;
 }
 
+int gui_res_choice(struct gui_widget *w, int *chars, const char **items, int room)       /* (res.c) */
+{
+    struct choice *c = (struct choice *)w;
+    int i;
+    *chars = c->chars;
+    for (i = 0; i < c->menu.n && i < room; i++)
+        items[i] = c->menu.items[i].text;
+    return c->menu.n;
+}
+
+void gui_res_choice_chars(struct gui_widget *w, int chars)
+{
+    ((struct choice *)w)->chars = chars > 0 ? chars : 10;
+    if (w->win)
+        gui_relayout(w->win);
+}
+
 void gui_choice_add(struct gui_widget *w, const char *text)
 {
     struct choice *c = (struct choice *)w;

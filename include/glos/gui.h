@@ -161,6 +161,9 @@ struct gui_widget {
     struct gui_menu *context;           /* its context menu (gui_context), or NULL: its parent's */
     unsigned mnemonic;                  /* the letter after "&" in it (lower case), or 0 */
     void *dnd;                          /* (toolkit 2) its drag and drop, if it has any (dnd.c) */
+    char *name;                         /* (toolkit 2) its name (gui_set_name, a resource file's), or NULL */
+    int cmd;                            /* (toolkit 2) a command: pressed, with no function of its own, its window's
+                                           on_command is told it */
 };
 
 /* ---- windows */
@@ -901,6 +904,44 @@ int gui_code_get_zoom(struct gui_widget *w);
 void gui_code_on_complete(struct gui_widget *w, void (*fn)(struct gui_widget *w, const char *word));
 void gui_code_complete(struct gui_widget *w, const char *const *words, int n);
 void gui_code_signature(struct gui_widget *w, const char *text);       /* NULL: none */
+
+/* ---- (toolkit 2, C9) resource files, names, the widgets' properties, translation */
+#define GUI_T(s) (s)                    /* every string a user sees: itself in v1; later the language's catalogue's */
+void gui_set_name(struct gui_widget *w, const char *name);
+const char *gui_name(struct gui_widget *w);
+struct gui_widget *gui_named(struct gui_window *w, const char *name);  /* the widget of that name, or NULL */
+/* A window from a resource file's text (nested "object Name: Class" blocks of "Property = value" lines, as
+   Delphi's DFM text): made, not shown; NULL and err ("line 3: no such class") if it can't be. */
+struct gui_window *gui_load_text(const char *text, char *err, int errroom);
+struct gui_window *gui_load(const char *path, char *err, int errroom);
+int gui_save(struct gui_window *w, char *out, int room);       /* its text (each widget's properties that aren't
+                                           its class's defaults); its length */
+enum { GUI_PK_TEXT, GUI_PK_NUMBER, GUI_PK_BOOL, GUI_PK_CHOICE, GUI_PK_COLOUR, GUI_PK_FONT, GUI_PK_COMMAND,
+       GUI_PK_PICTURE };
+struct gui_wprop {                      /* a property: its name, kind and default, as text */
+    const char *name;
+    int kind;
+    const char *def;
+    int (*get)(struct gui_widget *w, char *out, int room);
+    int (*set)(struct gui_widget *w, const char *value);
+};
+struct gui_wclass {                     /* a class as resource files and the form designer know it */
+    const char *name;
+    const struct gui_wprop *props;      /* its own (every class has the common ones too: gui_wprop_at) */
+    int nprops;
+    struct gui_widget *(*make)(struct gui_widget *parent, struct gui_widget **children);   /* a new one; where
+                                           its children go (NULL: it has none) */
+};
+int gui_wclass_count(void);
+const struct gui_wclass *gui_wclass_at(int i);
+const struct gui_wclass *gui_wclass_find(const char *name);
+const struct gui_wclass *gui_wclass_of(struct gui_widget *w);  /* NULL: not one a file describes */
+int gui_wprop_count(const struct gui_wclass *c);
+const struct gui_wprop *gui_wprop_at(const struct gui_wclass *c, int i);
+int gui_wprop_get(struct gui_widget *w, const char *name, char *out, int room);        /* -1: no such property */
+int gui_wprop_set(struct gui_widget *w, const char *name, const char *value);
+void gui_props_fill(struct gui_widget *grid, struct gui_widget *w);   /* a widget's properties in a property grid */
+int gui_props_apply(struct gui_widget *grid, struct gui_widget *w);   /* (the grid's GUI_ON_CHANGE) to the widget */
 void gui_image_view_set(struct gui_widget *w, const unsigned *rgb, int iw, int ih, int stride);
 int gui_folder_dialog(struct gui_window *owner, const char *title, char *path, int room);     /* (toolkit 2) a
                                            folder chosen in a tree of the drives' folders, or typed; New folder

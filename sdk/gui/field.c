@@ -254,6 +254,20 @@ static int field_event(struct gui_widget *w, struct gui_ev *e)
 
 const struct gui_class gui_field_class = { "field", GUI_C_FOCUS, field_draw, field_event, field_measure, NULL, NULL };
 
+/* (res.c) a field's width in characters and whether it shows stars; a combo box's items */
+int gui_res_field(struct gui_widget *w, int *mask)
+{
+    *mask = ((struct field *)w)->mask;
+    return ((struct field *)w)->chars;
+}
+
+void gui_res_field_chars(struct gui_widget *w, int chars)
+{
+    ((struct field *)w)->chars = chars > 0 ? chars : 20;
+    if (w->win)
+        gui_relayout(w->win);
+}
+
 struct gui_widget *gui_field(struct gui_widget *parent, int chars)
 {
     struct field *f = (struct field *)gui_new(parent, &gui_field_class, sizeof *f);
@@ -463,6 +477,12 @@ static void combo_destroy(struct gui_widget *w)
 
 const struct gui_class gui_combo_class = { "combo", GUI_C_FOCUS, combo_draw, combo_event, field_measure, NULL,
                                            combo_destroy };
+
+int gui_res_combo_items(struct gui_widget *w, char ***items)
+{
+    *items = CB(w)->items;
+    return CB(w)->n;
+}
 
 struct gui_widget *gui_combo(struct gui_widget *parent, int chars)
 {

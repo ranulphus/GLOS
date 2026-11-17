@@ -858,6 +858,28 @@ void gui_slider_style(struct gui_widget *w, unsigned style, int marks, void (*fm
 int gui_choice_value(struct gui_widget *w, int set, int value);
 extern const struct gui_class gui_choice_class;
 
+/* (res.c) what a resource file has of these */
+void gui_res_check(struct gui_widget *w, int *radio, struct gui_widget **group)
+{
+    *radio = ((struct check *)w)->radio, *group = ((struct check *)w)->group;
+}
+
+void gui_res_number(struct gui_widget *w, int *slider, int *min, int *max)
+{
+    struct number *n = (struct number *)w;
+    *slider = n->slider, *min = n->min, *max = n->max;
+}
+
+void gui_res_number_range(struct gui_widget *w, int min, int max)
+{
+    struct number *n = (struct number *)w;
+    n->min = min, n->max = max < min ? min : max;
+    number_set(n, n->value, 0);
+    gui_damage(w);
+}
+
+int gui_res_progress_max(struct gui_widget *w) { return ((struct progress *)w)->max; }
+
 int gui_value(struct gui_widget *w)
 {
     if (w->cls == &number_class)

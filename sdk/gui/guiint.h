@@ -129,6 +129,17 @@ void gui_post_command(struct gui_window *w, int id);    /* w's on_command(id), t
 void gui_popdown_all(void);
 int gui_menubar_height(struct gui_menubar *b);
 
+/* res.c's: what a resource file has of the widgets whose data is their own (basic.c, field.c, menu.c) */
+void gui_res_check(struct gui_widget *w, int *radio, struct gui_widget **group);
+void gui_res_number(struct gui_widget *w, int *slider, int *min, int *max);
+void gui_res_number_range(struct gui_widget *w, int min, int max);
+int gui_res_progress_max(struct gui_widget *w);
+int gui_res_field(struct gui_widget *w, int *mask);
+void gui_res_field_chars(struct gui_widget *w, int chars);
+int gui_res_combo_items(struct gui_widget *w, char ***items);
+int gui_res_choice(struct gui_widget *w, int *chars, const char **items, int room);
+void gui_res_choice_chars(struct gui_widget *w, int chars);
+
 /* rich.c */
 void gui_rdoc_drop_last(struct gui_rdoc *d);
 int gui_rdoc_last_empty(const struct gui_rdoc *d);

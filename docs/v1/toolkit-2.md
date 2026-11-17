@@ -755,6 +755,29 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
 - **Test** `code` (a C file coloured and marked; typing and its undo; a column typed into; a word completed;
   zoomed and back; a fold), host and Loop A; `piece_test` on the host.
 
+### C9 as built (resource files, property descriptions, GUI_T)
+
+- **Property descriptions** (`sdk/gui/res.c`): `struct gui_wclass` (a name, its own properties, how to make one
+  and where its children go) and `struct gui_wprop` (a name, a kind, a default, get and set as text), for
+  nineteen classes: VBox, HBox, Form, Row, Group, Tabs, Page, Label, Button, Check, Radio, Field, Combo, Spin,
+  Slider, Choice, Progress, Space, Separator; every widget also has Name, Width, Height, Grow, Enabled, Visible,
+  Tip, Id and Command. `gui_wclass_of` reads a widget's class back (a form's rows are Rows, a group's and a tab
+  page's widgets their own; the toolkit's private data through small accessors). `gui_wprop_get`/`_set` by name;
+  `gui_props_fill` and `gui_props_apply` put a widget's properties in a property grid and its edits back (the form
+  designer's and the property grid's one description).
+- **Resource files:** nested `object Name: Class` blocks of `Property = value` lines, as Delphi's DFM text; the
+  outer object the window (Window or Dialog: Title, Width, Height, Gap, Pad). `gui_load_text` and `gui_load` make
+  the window (not shown), or say what is wrong and on which line; `gui_named` finds a widget by name; `gui_save`
+  writes each widget's properties that are not its class's defaults, so a file loaded and written back is the same
+  text. Radio buttons that follow each other in one box are one group. A widget's `cmd` (Command): pressed, with
+  no function of its own, its window's `on_command` is told it.
+- **`GUI_T(s)`:** every string a user sees goes through it; in v1 it is the string (a resource file's texts pass
+  through it as they are loaded). Wrapping the toolkit's and the apps' own strings goes with C10.
+- **Test** `resource` (GUITEST's settings dialog made in code and loaded from text: the same picture, the same
+  text written back, a bad class reported by line, the field's properties as the designer has them, one set, the
+  commands of OK and Cancel), host and Loop A. C10 moves the apps' dialogs to resource files, each compared with
+  the dialog it was made in code.
+
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
 - **Farm-Fresh** (FatCow; CC BY 3.0) for colour icons and **Font Awesome Free, solid** (CC BY 4.0) for the

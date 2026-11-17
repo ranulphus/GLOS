@@ -1,0 +1,29 @@
+# Resource files (toolkit 2, step C9; docs/v1/toolkit-2.md 8): GUITEST's settings dialog made in code, and the same
+# from a resource file's text (a form's rows, a field, a spin box, a choice, a group with a check box and radio
+# buttons, a slider, OK and Cancel with their commands): the same picture. The text written back from the loaded
+# dialog is the text it was loaded from; a text with no such class says so, by line. The loaded field's properties
+# as the form designer has them, one set. Esc and Enter press the dialogs' Cancel and OK: their commands.
+run GUITEST.EXE resource
+wait "GUITEST Resources"
+key alt+c
+wait "GUITEST Coded"
+shot coded "GUITEST Coded"
+key esc
+gone "GUITEST Coded"
+key alt+l
+wait "GUITEST Loaded"
+shot loaded "GUITEST Loaded"
+same coded loaded
+key enter
+gone "GUITEST Loaded"
+key alt+f4
+gone "GUITEST Resources"
+expect GUI round trip: the same
+expect GUI a bad file: line 2: no such class
+expect GUI resource
+expect GUI GUITEST Coded command 2
+expect GUI loaded; the field named NameField says Ada
+expect GUI NameField is a Field: Chars=16 Text=Ada Mask=false Name=NameField Width=0 Height=0 Grow=0 Enabled=true Visible=true Tip= Id=0 Command=0
+expect GUI its Text set: Grace; classes: 19
+expect GUI GUITEST Loaded command 1
+expect GUI end

@@ -156,6 +156,7 @@ static void destroy(struct gui_widget *w)
         w->cls->destroy(w);
     free(w->text);
     free(w->tip);
+    free(w->name);
     free(w);
 }
 
@@ -354,6 +355,8 @@ void gui_send(struct gui_widget *w, int what)
 {
     if (w->on)
         w->on(w, what);
+    else if (what == GUI_ON_CLICK && w->cmd && w->win && w->win->on_command)
+        w->win->on_command(w->win, w->cmd);    /* (a resource file's button: its command) */
 }
 
 int gui_is_focus(struct gui_widget *w) { return w->win && w->win->focus == w && w->win->active; }
