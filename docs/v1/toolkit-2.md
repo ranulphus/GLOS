@@ -736,6 +736,24 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
   `gui_chat_markdown` a message of several blocks.
 - **Test** `chat` (lines in colour, a message of two blocks, fifteen more past the limit, scrolled back and left
   there, at the end and followed), host and Loop A.
+- **C8l, the code editor** (`sdk/gui/code.c`, `sdk/gui/piece.c`): `gui_code` keeps its text in a piece table (the
+  text as loaded untouched, what is typed appended to a second buffer, the text a list of pieces, each counting
+  its line ends, so a line's start is found by adding pieces up; `tests/host/piece_test.c` checks ten thousand
+  random edits against a plain copy). The margin has the lines' numbers, their marks (`gui_code_mark`: bookmark,
+  breakpoint, error, warning, each with a note the pointer shows) and boxes that fold what is indented under a
+  line (`gui_code_fold`; a fold's lines are hidden from the rows and the caret leaves them). The app's lexer
+  (`gui_lexer`; `gui_code_lex_c` is the toolkit's for C) colours a line at a time, its state carried from line to
+  line and worked out again only from a changed line on; the colours suit light and dark fields. The bracket at
+  the caret and its partner are framed; Alt with the mouse, or Alt+Shift with the arrows, chooses a column, and
+  typing goes into each of its lines; Ctrl with the wheel or with + and - zooms (the fixed font's three sizes);
+  Ctrl+Space asks the app (`gui_code_on_complete`) for words, which `gui_code_complete` shows under the caret
+  (narrowed as the word grows; Enter or Tab takes one); `gui_code_signature` shows a call's parameters over the
+  caret. Every change is a step of the toolkit's undo (a burst of typing or deleting one step); Enter keeps the
+  line's indentation, Tab indents the chosen lines (Shift+Tab takes it back), Home goes to the first non-blank.
+- **Owed from C8l:** finding and replacing (gui_find over it), folds by the lexer's levels as well as by
+  indentation, a long line's tail past 4096 bytes drawn, Notepad moved onto it (C10).
+- **Test** `code` (a C file coloured and marked; typing and its undo; a column typed into; a word completed;
+  zoomed and back; a fold), host and Loop A; `piece_test` on the host.
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

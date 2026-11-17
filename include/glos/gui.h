@@ -868,6 +868,39 @@ struct gui_rdoc *gui_markdown(const char *text, int len,
 struct gui_widget *gui_chatview(struct gui_widget *parent, int limit);
 void gui_chat_line(struct gui_widget *w, const char *who, unsigned rgb, const char *text);
 void gui_chat_markdown(struct gui_widget *w, const char *md);
+/* (toolkit 2) A code editor: the text in a piece table (big files), a margin (numbers, marks with notes the pointer
+   shows, fold boxes for what is indented under a line), colours from a lexer, brackets matched, columns chosen
+   (Alt), zoom (Ctrl with the wheel, + and -), completion (Ctrl+Space asks the app; gui_code_complete shows its words)
+   and a call's signature over the caret; the toolkit's undo (Ctrl+Z, Ctrl+Y). GUI_ON_CHANGE: the text (or the
+   zoom) changed; GUI_ON_SELECT: the caret moved. Lines and columns from 1. */
+enum { GUI_TOK_TEXT, GUI_TOK_KEYWORD, GUI_TOK_TYPE, GUI_TOK_STRING, GUI_TOK_NUMBER, GUI_TOK_COMMENT, GUI_TOK_PREPROC,
+       GUI_TOK_OP };
+typedef int (*gui_lexer)(void *ctx, const char *line, int n, int state, unsigned char *cls);  /* a GUI_TOK_ a
+                                           byte of the line; the state at its end (0 at the text's start) */
+int gui_code_lex_c(void *ctx, const char *line, int n, int state, unsigned char *cls);   /* the toolkit's, for C */
+#define GUI_CODE_BOOK  1                /* a margin's marks: a bookmark ... */
+#define GUI_CODE_BREAK 2                /* ... a breakpoint ... */
+#define GUI_CODE_ERROR 4                /* ... an error ... */
+#define GUI_CODE_WARN  8                /* ... a warning */
+struct gui_widget *gui_code(struct gui_widget *parent);
+int gui_code_set(struct gui_widget *w, char *text, size_t n);  /* text malloc'd: the editor's from now on */
+char *gui_code_text(struct gui_widget *w, size_t *n);          /* a copy (malloc'd, NUL ended) */
+char *gui_code_selection(struct gui_widget *w);                /* what is chosen (malloc'd) */
+size_t gui_code_length(struct gui_widget *w);
+int gui_code_modified(struct gui_widget *w);
+void gui_code_saved(struct gui_widget *w);
+void gui_code_where(struct gui_widget *w, int *line, int *col);
+void gui_code_goto(struct gui_widget *w, int line, int col);   /* (a fold round it opened) */
+void gui_code_select(struct gui_widget *w, size_t from, size_t to);    /* bytes */
+void gui_code_lexer(struct gui_widget *w, gui_lexer lex, void *ctx);
+void gui_code_mark(struct gui_widget *w, int line, unsigned marks, const char *note);  /* GUI_CODE_ (0: none) */
+const char *gui_code_note(struct gui_widget *w, int line);
+void gui_code_fold(struct gui_widget *w, int line, int folded);
+void gui_code_zoom(struct gui_widget *w, int size);    /* 0 small, 1 normal, 2 large */
+int gui_code_get_zoom(struct gui_widget *w);
+void gui_code_on_complete(struct gui_widget *w, void (*fn)(struct gui_widget *w, const char *word));
+void gui_code_complete(struct gui_widget *w, const char *const *words, int n);
+void gui_code_signature(struct gui_widget *w, const char *text);       /* NULL: none */
 void gui_image_view_set(struct gui_widget *w, const unsigned *rgb, int iw, int ih, int stride);
 int gui_folder_dialog(struct gui_window *owner, const char *title, char *path, int room);     /* (toolkit 2) a
                                            folder chosen in a tree of the drives' folders, or typed; New folder

@@ -67,6 +67,8 @@
  *                       a basket (copied where it is let go), and reordered in its list
  *   GUITEST calendar    "GUITEST Calendar" (toolkit 2, step C8): a month (several days
  *                       chosen, two marked, today fixed), a date field, a time field
+ *   GUITEST code        "GUITEST Code" (toolkit 2, step C8): the code editor on C (colours,
+ *                       marks, a fold, a column typed into, completion, undo, zoom)
  *   GUITEST chat        "GUITEST Chat" (toolkit 2, step C8): a chat view, lines coloured by
  *                       who wrote them, kept to twelve, at the end unless scrolled back
  *   GUITEST rich        "GUITEST Rich text" (toolkit 2, step C8): a Markdown page in the
@@ -1939,6 +1941,86 @@ static void rich_page(void)
     say("rich", "", 0);
 }
 
+/* ---- the code editor (toolkit 2, step C8) */
+static struct gui_widget *ce;
+
+static const char ce_text[] =
+    "#include <stdio.h>\n"
+    "\n"
+    "/* Counts the lines of a file,\n"
+    "   as wc -l would. */\n"
+    "static int count(FILE *f)\n"
+    "{\n"
+    "    int c, n = 0;\n"
+    "    while ((c = fgetc(f)) != EOF) {\n"
+    "        if (c == '\\n')\n"
+    "            n++;\n"
+    "    }\n"
+    "    return n;\n"
+    "}\n"
+    "\n"
+    "int main(void)\n"
+    "{\n"
+    "    printf(\"%d lines\\n\", count(stdin));\n"
+    "    return 0;\n"
+    "}\n";
+
+static void ce_line(struct gui_widget *w, int what)    /* the caret's line, and its text */
+{
+    int line, col;
+    char *t, *p, *e, out[120];
+    (void)w, (void)what;
+    gui_code_where(ce, &line, &col);
+    t = gui_code_text(ce, NULL);
+    for (p = t; p && line > 1 && (e = strchr(p, '\n')) != NULL; line--)
+        p = e + 1;
+    gui_code_where(ce, &line, &col);
+    if (p && (e = strchr(p, '\n')) != NULL)
+        *e = 0;
+    snprintf(out, sizeof out, "line %d col %d: %s", line, col, p ? p : "");
+    say("%s", out, 0);
+    free(t);
+    gui_focus(ce);
+}
+
+static void ce_complete(struct gui_widget *w, const char *word)
+{
+    static const char *const words[] = { "print_line", "printf", "private", "count", "stdin" };
+    say("complete %s", word, 0);
+    gui_code_complete(w, words, 5);
+}
+
+static void ce_on(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_CHANGE && gui_code_get_zoom(w) != 1)
+        say("zoom %s%d", "", gui_code_get_zoom(w));
+}
+
+static void code_page(void)
+{
+    struct gui_widget *box, *row;
+    char *t = malloc(sizeof ce_text);
+    memcpy(t, ce_text, sizeof ce_text);
+    win = gui_window_at("GUITEST Code", 0, 0, 460, 320, 0);
+    box = gui_vbox(win->root, 4, 0);
+    gui_grow(box, 1);
+    ce = gui_code(box);
+    gui_grow(ce, 1);
+    gui_code_set(ce, t, sizeof ce_text - 1);
+    gui_code_lexer(ce, gui_code_lex_c, NULL);
+    gui_code_mark(ce, 3, GUI_CODE_BOOK, "The comment");
+    gui_code_mark(ce, 9, GUI_CODE_ERROR, "Comparison of int with char: fine");
+    gui_code_mark(ce, 17, GUI_CODE_BREAK | GUI_CODE_WARN, "A breakpoint");
+    gui_code_on_complete(ce, ce_complete);
+    gui_on(ce, ce_on, 0);
+    row = gui_hbox(box, 4, 0);
+    gui_button(row, "&Line", ce_line, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(ce);
+    say("code", "", 0);
+}
+
 /* ---- the chat view (toolkit 2, step C8) */
 static struct gui_widget *ch_view;
 static int ch_n;
@@ -2680,6 +2762,8 @@ int main(int argc, char **argv)
         rich_page();
     else if (!strcmp(what, "chat"))
         chat_page();
+    else if (!strcmp(what, "code"))
+        code_page();
     else if (!strcmp(what, "embedded"))
         embedded_page();
     else if (!strcmp(what, "names")) {

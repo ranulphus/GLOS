@@ -82,6 +82,7 @@ compare, and costs a redraw twice a second for nothing.
 | choice | a button that drops its list of items down |
 | spin box, slider | a number in a range; a slider may be upright, have marks and show its value in the app's format (`gui_slider_style`, toolkit 2) |
 | level meter, graph (toolkit 2) | one or two channels' levels with their peaks held (`gui_meter`); a few series' recent samples as lines (`gui_graph`) |
+| code editor (toolkit 2) | big files in a piece table, a margin of numbers, marks and folds, colours from a lexer, brackets matched, columns chosen, zoom, completion and signatures, undo (`gui_code`) |
 | rich-text view, chat view (toolkit 2) | a document of headings, paragraphs, lists, quotes, code, tables, pictures, links and blocks that open, wrapped and scrolled, its text chosen and copied, built by the app or from Markdown (`gui_richview`, `gui_markdown`); a chat's lines coloured by who wrote them, kept to a limit and followed at the end (`gui_chatview`) |
 | preview surface (toolkit 2) | another program's window shown inside a widget, started, followed and ended by it (`gui_preview`; WIN's EMBED) |
 | tour (toolkit 2) | steps that point at a part of the shell or a widget, each a bubble beside it with its place framed (`gui_tour`) |

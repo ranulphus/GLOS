@@ -1,0 +1,38 @@
+# The code editor (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's C file, coloured by the toolkit's C
+# lexer, with a bookmark, an error and a breakpoint with a warning in the margin and boxes where lines nest. Typing
+# at the end, taken back by Ctrl+Z; a column two lines tall (Alt+Shift+Down) typed into on both; "pri" completed
+# from the app's words (Ctrl+Space; Down, Enter: printf); zoomed (Ctrl+=) and back (Ctrl+-); the function's body
+# folded by its box. The Line button says where the caret is and its line's text.
+run GUITEST.EXE code
+wait "GUITEST Code"
+shot start "GUITEST Code"
+key ctrl+end
+type // end
+key alt+l
+key ctrl+z ctrl+home
+key alt+l
+key down down down down down down down down down down down down down down down down home
+key alt+shift+down
+type //
+key alt+l
+shot column "GUITEST Code"
+key ctrl+end
+type pri
+key ctrl+space
+key down enter
+key alt+l
+key ctrl+=
+shot zoomed "GUITEST Code"
+key ctrl+- ctrl+home
+click "GUITEST Code" 45 87
+shot folded "GUITEST Code"
+key alt+f4
+gone "GUITEST Code"
+expect GUI code
+expect GUI line 20 col 7: // end
+expect GUI line 1 col 1: #include <stdio.h>
+expect GUI line 18 col 7:     //return 0;
+expect GUI complete pri
+expect GUI line 20 col 7: printf
+expect GUI zoom 2
+expect GUI end
