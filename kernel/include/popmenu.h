@@ -12,6 +12,7 @@
 #define PMI_OFF   1                     /* can't be chosen now (drawn dim) */
 #define PMI_SEP   2                     /* a line between items (no text, never current) */
 #define PMI_CHECK 4                     /* ticked (the window in front, in a group's menu) */
+#define PMI_TEXT  8                     /* a line of words, never chosen, drawn as ordinary text (a status list) */
 
 struct pm_item {
     char text[PM_TEXT];

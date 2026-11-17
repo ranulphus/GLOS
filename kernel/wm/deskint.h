@@ -40,14 +40,38 @@ int deskpass_key(struct wm *m, u32 key, int down, u32 ch);      /* (deskpass.c) 
                                                                    password dialog took it */
 void deskpass_turn(struct wm *m, int again);    /* ... each turn: drawn again when the screen changed under it */
 int deskshell_press(struct wm *m, u32 bit);     /* a button went down: 1 if on the tray or a notification (used up) */
+int deskshell_wheel(struct wm *m, int notches); /* the wheel: 1 if over one of GLOS's own icons (used up) */
+u32 deskshell_list(struct wm *m, char *buf, u32 max);   /* glos desk's lines for the tray's icons */
+u32 deskshell_own_add(struct wm *m, const u32 *icon, const char *tip);  /* one of GLOS's own tray icons: its id */
+void deskshell_own_set(struct wm *m, u32 id, const u32 *icon, const char *tip);        /* (NULL: as it was) */
+void deskshell_own_remove(struct wm *m, u32 id);
+u32 deskshell_note(const char *title, const char *text);        /* one of GLOS's own notifications */
+
+/* desktray.c: GLOS's own tray icons (phase D, D2): the volume, the network, the pads, a remote session. */
+void desktray_turn(struct wm *m, int screen, int again);        /* each turn (again: another theme: drawn again) */
+void desktray_press(struct wm *m, u32 id, int what, const struct gfx_rect *r);  /* 1 a press, 2 twice, 3 right */
+void desktray_wheel(struct wm *m, u32 id, int notches);
+void desktray_keep(void);               /* (after the turn, the manager unlocked) what is to be kept in GLOS.CFG */
+const char *desk_note_text(void);       /* a remote session's note (desk_note), or "" */
 
 /* deskpop.c: the desktop's own pop-up menus (phase D). */
-enum { DP_NONE, DP_WINDOW, DP_GROUP };  /* a window's menu (restore, minimise, maximise, close); a group's windows */
+enum { DP_NONE, DP_WINDOW, DP_GROUP, DP_CUSTOM };       /* a window's menu (restore, minimise, maximise, close); a
+                                                           group's windows; one made by deskpop_begin and _show */
+struct popmenu;
+struct popmenu *deskpop_begin(struct wm *m);    /* a menu of the desktop's own making, to fill (pm_add) ... */
+void deskpop_show(struct wm *m, s32 x, s32 y, int above, void (*chosen)(struct wm *m, u32 data));  /* ... and show */
 void deskpop_open(struct wm *m, int kind, u32 target, s32 x, s32 y, int above); /* at x, y: its bottom left corner
                                                                                     (above 1) or its top left */
 int deskpop_key(struct wm *m, u32 key, int down, u32 ch);       /* a key while it has the keyboard: 1 if taken */
 int deskpop_press(struct wm *m, u32 bit);       /* a button went down: 1 if on the pop-up (used up); outside, it goes */
-void deskpop_move(struct wm *m);        /* the pointer moved: the item under it is the current one */
+void deskpop_move(struct wm *m, u32 buttons);   /* the pointer moved: the item under it is the current one; the
+                                                   volume's slider follows a held button */
+void deskvol_open(struct wm *m, const struct gfx_rect *icon, s32 edge, int below, void (*get)(u32 *v, int *mute),
+                  void (*set)(u32 v, int mute), void (*done)(void));    /* the volume's slider by its icon (v: 0 to
+                                                   256); done: closed */
+int deskvol_up(void);
+void deskvol_close(struct wm *m);
+void deskvol_again(struct wm *m);       /* (the volume changed elsewhere: drawn again) */
 void deskpop_turn(struct wm *m, int again);     /* each turn (again: another screen or theme): it goes if it must */
 int deskpop_up(void);
 void deskswitch_step(struct wm *m, int back);   /* Alt+Tab (back: Shift too): the strip, or its next window */

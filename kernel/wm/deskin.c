@@ -862,15 +862,15 @@ static void mouse_to(struct wm *m, s32 x, s32 y, u32 now)
     wm_pointer(m, x, y, 1);
     dx = m->px - x0, dy = m->py - y0;
     buttons = (u8)now;
-    if (dx || dy)
-        deskpop_move(m);                        /* (a pop-up menu's item under the pointer is its current one) */
+    deskpop_move(m, buttons);                   /* (a pop-up menu's item under the pointer is its current one; a slider
+                                                   held follows, and lets go) */
     if (m->bar_hide && m->bar) {                /* a hidden bar: out at the screen's edge, in once the pointer leaves
                                                    it (unless one of its pop-ups is up) */
         int at_edge = m->bar_top ? m->py <= 0 : m->py >= m->h - 1;
         int on_bar = m->py >= m->bar->frame.y && m->py < m->bar->frame.y + m->bar->frame.h;
         if (at_edge)
             wm_bar_out(m, 1);
-        else if (m->bar_out && !on_bar && !deskpop_up() && !deskcal_up())
+        else if (m->bar_out && !on_bar && !deskpop_up() && !deskcal_up() && !deskvol_up())
             wm_bar_out(m, 0);
     }
     if (dnd_on) {                               /* an app's drag: the pointer is its until every button is up */
@@ -908,6 +908,8 @@ static void wheel(struct wm *m, int notches)
     struct kevent e;
     struct gfx_rect c;
     int part;
+    if (!asleep && notches && deskshell_wheel(m, notches))
+        return;                                 /* (over one of GLOS's own tray icons: the volume's) */
     if (asleep || !notches || !(w = wm_hit(m, m->px, m->py, &part)) || part != WH_CLIENT || !w->owner)
         return;
     wm_client(m, w, &c);

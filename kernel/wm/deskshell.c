@@ -12,6 +12,7 @@
 #include "deskint.h"
 #include "glos/region.h"
 #include "kcfg.h"
+#include "kprintf.h"
 #include "display.h"
 #include "gfx.h"
 #include "io.h"
@@ -45,9 +46,8 @@ static int width(const char *text, int len, int bold) { return gfx_text_width(bo
 
 /* ---- the tray */
 
-u32 desk_tray_add(struct app *a, const u32 *icon, const char *tip)
+static u32 tray_add(struct wm *m, struct app *a, const u32 *icon, const char *tip)
 {
-    struct wm *m = desk_lock();
     u32 id = wm_tray_add(m, icon), i;
     for (i = 0; id && i < WM_TRAY; i++)
         if (!trays[i].id) {
@@ -57,8 +57,48 @@ u32 desk_tray_add(struct app *a, const u32 *icon, const char *tip)
             trays[i].tip[sizeof trays[i].tip - 1] = 0;
             break;
         }
+    return id;
+}
+
+u32 desk_tray_add(struct app *a, const u32 *icon, const char *tip)
+{
+    struct wm *m = desk_lock();
+    u32 id = tray_add(m, a, icon, tip);
     desk_unlock();
     return id;
+}
+
+/* GLOS's own icons (phase D, D2; desktray.c): no app's; their presses are desktray_press's. With the manager
+   locked (the desktop's turn). */
+u32 deskshell_own_add(struct wm *m, const u32 *icon, const char *tip) { return tray_add(m, 0, icon, tip); }
+
+void deskshell_own_set(struct wm *m, u32 id, const u32 *icon, const char *tip)
+{
+    int i = -1;
+    u32 k;
+    for (k = 0; k < WM_TRAY; k++)
+        if (id && trays[k].id == id)
+            i = (int)k;
+    if (i < 0)
+        return;
+    if (icon)
+        wm_tray_icon(m, id, icon);
+    if (tip && strcmp(trays[i].tip, tip)) {
+        strncpy(trays[i].tip, tip, sizeof trays[i].tip - 1);
+        trays[i].tip[sizeof trays[i].tip - 1] = 0;
+        if (tip_id == id)
+            tip_id = 0;                 /* (shown again, with the new words) */
+    }
+}
+
+void deskshell_own_remove(struct wm *m, u32 id)
+{
+    u32 k;
+    for (k = 0; k < WM_TRAY; k++)
+        if (id && trays[k].id == id && !trays[k].a) {
+            wm_tray_remove(m, id);
+            trays[k].id = 0;
+        }
 }
 
 static int tray_of(u32 id)
@@ -252,7 +292,10 @@ static int more_press(struct wm *m, u32 bit)
         if (x >= 3 && k < more_n && (i = tray_of(more_ids[k])) >= 0 && (bit == 1 || bit == 2)) {
             r.x = w->frame.x + 3 + (s32)k * MORE_SLOT + 3, r.y = w->frame.y + 6, r.w = r.h = 16;
             more_hide(m);
-            api2_tray_event(trays[i].a, more_ids[k], bit == 1 ? 1 : 3, &r);
+            if (trays[i].a)
+                api2_tray_event(trays[i].a, more_ids[k], bit == 1 ? 1 : 3, &r);
+            else
+                desktray_press(m, more_ids[k], bit == 1 ? 1 : 3, &r);
         }
         return 1;
     }
@@ -346,11 +389,12 @@ u32 deskshell_turn(struct wm *m, int screen)
     struct note_news news;
     struct wm_window *w = note_win ? wm_find(m, note_win) : 0;
     u32 now = timer_ticks(), due, tip;
-    int full = m->focus && (m->focus->flags & WF_FULL);
+    int full = m->focus && (m->focus->flags & WF_FULL), again = 0;
     int over = w && m->px >= w->frame.x && m->py >= w->frame.y && m->px < w->frame.x + w->frame.w
                && m->py < w->frame.y + w->frame.h;
     if (look_w != (u32)m->w || look_h != (u32)m->h || look_bpp != m->fmt.bpp || look_theme != (const void *)desk_theme()) {
         look_w = (u32)m->w, look_h = (u32)m->h, look_bpp = m->fmt.bpp, look_theme = desk_theme();
+        again = 1;
         note_hide(m);                           /* another screen or theme: both drawn again, where they go now */
         tip_hide(m);
         more_hide(m);
@@ -362,6 +406,7 @@ u32 deskshell_turn(struct wm *m, int screen)
     if (note_win && !w)
         note_win = 0;                           /* (its window went with the screen it was on) */
     deskpop_turn(m, 0);
+    desktray_turn(m, screen, again);            /* (GLOS's own icons, and its notifications: desktray.c) */
     if (tip_win && !wm_find(m, tip_win))
         tip_win = 0;
     if (more_win && (!wm_find(m, more_win) || !wm_tray_hidden(m, more_ids, WM_TRAY)))
@@ -449,11 +494,62 @@ int deskshell_press(struct wm *m, u32 bit)
         int twice = press_id == id && now - press_at < deskin_double_ticks();
         press_id = twice ? 0 : id;
         press_at = now;
-        api2_tray_event(trays[i].a, id, twice ? 2 : 1, &r);
+        if (trays[i].a)
+            api2_tray_event(trays[i].a, id, twice ? 2 : 1, &r);
+        else
+            desktray_press(m, id, twice ? 2 : 1, &r);   /* (one of GLOS's own) */
     } else if (bit == 2) {
-        api2_tray_event(trays[i].a, id, 3, &r);
+        if (trays[i].a)
+            api2_tray_event(trays[i].a, id, 3, &r);
+        else
+            desktray_press(m, id, 3, &r);
     }
     return 1;
+}
+
+/* glos desk's lines for the tray: each icon, whose it is (an app's, or GLOS's own), where it is on the bar (-1,-1
+   behind the ^) and its tooltip. */
+u32 deskshell_list(struct wm *m, char *buf, u32 max)
+{
+    struct gfx_rect r;
+    u32 n = 0, i;
+    for (i = 0; i < WM_TRAY && n < max; i++)
+        if (trays[i].id) {
+            int on = wm_bar_part(m, WB_TRAY, trays[i].id, &r);
+            n += (u32)ksnprintf(buf + n, max - n, "tray %u %s at %d,%d \"%s\"\n", trays[i].id, trays[i].a ? "app" : "own",
+                                on ? r.x : -1, on ? r.y : -1, trays[i].tip);
+        }
+    return n < max ? n : max;
+}
+
+/* The wheel turned over the bar: 1 if over one of GLOS's own icons (the volume's: used up). */
+int deskshell_wheel(struct wm *m, int notches)
+{
+    u32 id = wm_tray_hit(m, m->px, m->py);
+    int i;
+    if (!id || (i = tray_of(id)) < 0 || trays[i].a)
+        return 0;
+    desktray_wheel(m, id, notches);
+    return 1;
+}
+
+/* One of GLOS's own notifications (a pad plugged in, the network up): with the manager locked; and from any
+   other thread. */
+u32 deskshell_note(const char *title, const char *text)
+{
+    struct note n;
+    memset(&n, 0, sizeof n);
+    strncpy(n.title, title, sizeof n.title - 1);
+    strncpy(n.text, text, sizeof n.text - 1);
+    return notes_add(&notes, &n, 0);
+}
+
+void desk_notify_own(const char *title, const char *text)
+{
+    desk_lock();
+    deskshell_note(title, text);
+    desk_unlock();
+    desk_kick();
 }
 
 int desk_point(int what, struct gfx_rect *r)

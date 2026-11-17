@@ -20,6 +20,7 @@ static struct {
     u32 win;                            /* the pop-up's window, 0: none */
     int kind;                           /* DP_ */
     u32 target;                         /* DP_WINDOW: the window it is for */
+    void (*chosen)(struct wm *m, u32 data);     /* DP_CUSTOM: told the item chosen's data */
     u32 back;                           /* the window that had the focus before it */
     struct popmenu pm;
 } pop;
@@ -28,6 +29,11 @@ static int cal_key(struct wm *m, u32 key, int down);
 static int cal_press(struct wm *m, u32 bit);
 static void cal_close(struct wm *m, int give_back);
 static u32 cal_win_id(void);
+static int vol_key(struct wm *m, u32 key, int down, u32 ch);
+static int vol_press(struct wm *m, u32 bit);
+static void vol_move(struct wm *m, u32 buttons);
+static void vol_close(struct wm *m, int give_back);
+static u32 vol_win_id(void);
 
 static int width(const char *t, int len, int bold)
 {
@@ -72,6 +78,10 @@ static void draw(struct wm *m)
         const struct pm_item *it = &pop.pm.it[i];
         s32 y = pm_item_y(&pop.pm, i);
         u32 ink = it->flags & PMI_OFF ? c.face_off : c.bar_text;
+        if (it->flags & PMI_TEXT) {             /* (a line of words: from the menu's left edge) */
+            text_amp(s, pop.pm.pad + 6, y + 3, it->text, ink);
+            continue;
+        }
         if (it->flags & PMI_SEP) {
             gfx_fill(s, pop.pm.pad + 4, y + pop.pm.sep_h / 2, pop.pm.w - 2 * pop.pm.pad - 8, 1, c.face_off);
             continue;
@@ -147,13 +157,53 @@ void deskpop_open(struct wm *m, int kind, u32 target, s32 x, s32 y, int above)
     wm_set_focus(m, w);
 }
 
+/* A menu of the desktop's own making (the tray's icons': desktray.c): deskpop_begin gives the menu to fill
+   (pm_add), deskpop_show puts it up at x, y (as deskpop_open) and `chosen` is told the item chosen's data. */
+struct popmenu *deskpop_begin(struct wm *m)
+{
+    if (pop.win)
+        close_pop(m, 1);
+    pm_clear(&pop.pm);
+    return &pop.pm;
+}
+
+void deskpop_show(struct wm *m, s32 x, s32 y, int above, void (*chosen)(struct wm *m, u32 data))
+{
+    struct wm_window *w;
+    if (!pop.pm.n)
+        return;
+    pm_layout(&pop.pm, width, gfx_font_ui.height, 120);
+    pm_first(&pop.pm);
+    if (x + pop.pm.w > m->w)
+        x = m->w - pop.pm.w;
+    if (x < 0)
+        x = 0;
+    if (above)
+        y -= pop.pm.h;
+    if (y + pop.pm.h > m->h)
+        y = m->h - pop.pm.h;
+    if (y < 0)
+        y = 0;
+    if (!(w = wm_create(m, x, y, pop.pm.w, pop.pm.h, "", WF_TOPMOST | WF_NOBAR | WF_FIXED, 0)))
+        return;
+    pop.win = w->id;
+    pop.kind = DP_CUSTOM;
+    pop.target = 0;
+    pop.chosen = chosen;
+    pop.back = m->focus ? m->focus->id : 0;
+    draw(m);
+    wm_show(m, w, 1);
+    wm_set_focus(m, w);
+}
+
 /* The item chosen: done. */
 static void choose(struct wm *m, int i)
 {
     struct wm_window *t = wm_find(m, pop.target), *v;
     int kind = pop.kind;
     u32 data = pop.pm.it[i].data;
-    close_pop(m, 0);
+    void (*chosen)(struct wm *m, u32 data) = pop.chosen;
+    close_pop(m, kind == DP_CUSTOM);
     if (kind == DP_WINDOW && t) {
         switch (data) {
         case CMD_RESTORE:
@@ -178,6 +228,8 @@ static void choose(struct wm *m, int i)
         if (wm_state_of(v) == WS_MIN)
             deskapp_state(m, v, WS_UNMIN);
         wm_set_focus(m, v);
+    } else if (kind == DP_CUSTOM && chosen) {
+        chosen(m, data);
     }
     deskin_focus(m);
 }
@@ -185,7 +237,7 @@ static void choose(struct wm *m, int i)
 int deskpop_key(struct wm *m, u32 key, int down, u32 ch)
 {
     int r;
-    if (cal_key(m, key, down))
+    if (cal_key(m, key, down) || vol_key(m, key, down, ch))
         return 1;
     if (!pop.win || !m->focus || m->focus->id != pop.win)
         return 0;
@@ -205,7 +257,7 @@ int deskpop_press(struct wm *m, u32 bit)
 {
     struct wm_window *w = pop.win ? wm_find(m, pop.win) : 0;
     int i;
-    if (cal_press(m, bit))
+    if (cal_press(m, bit) || vol_press(m, bit))
         return 1;
     if (!w)
         return 0;
@@ -218,10 +270,11 @@ int deskpop_press(struct wm *m, u32 bit)
     return 1;
 }
 
-void deskpop_move(struct wm *m)
+void deskpop_move(struct wm *m, u32 buttons)
 {
     struct wm_window *w = pop.win ? wm_find(m, pop.win) : 0;
     int i;
+    vol_move(m, buttons);
     if (!w || m->px < w->frame.x || m->py < w->frame.y || m->px >= w->frame.x + w->frame.w || m->py >= w->frame.y + w->frame.h)
         return;
     if ((i = pm_at(&pop.pm, m->px - w->frame.x, m->py - w->frame.y)) >= 0 && i != pop.pm.cur) {
@@ -234,7 +287,9 @@ void deskpop_turn(struct wm *m, int again)
 {
     if (cal_win_id() && (again || !wm_find(m, cal_win_id())))
         cal_close(m, 1);
-    if (pop.win && (again || !wm_find(m, pop.win) || !wm_find(m, pop.target)))
+    if (vol_win_id() && (again || !wm_find(m, vol_win_id())))
+        vol_close(m, 1);
+    if (pop.win && (again || !wm_find(m, pop.win) || (pop.kind != DP_CUSTOM && !wm_find(m, pop.target))))
         close_pop(m, 1);                        /* (another screen or theme, or its window went: it goes) */
 }
 
@@ -525,3 +580,177 @@ static int cal_press(struct wm *m, u32 bit)
 static u32 cal_win_id(void) { return cal.win; }
 
 void deskcal_close(struct wm *m) { if (cal.win) cal_close(m, 1); }
+
+/* ---- the volume icon's slider (phase D, D2): upright, the percentage over it, a mute box under it. A press or a
+   drag on its track sets the volume; Up and Down a step, PgUp and PgDn a big one, M mutes; Esc, or a press
+   outside it, closes it (a press on the icon it belongs to is left to the icon). Whose volume it is are the
+   functions given when it opens (desktray.c: the mixer's master). */
+
+#define VOL_W   64
+#define VOL_TOP 24                      /* the track's top */
+#define VOL_LEN 100
+#define VOL_H   (VOL_TOP + VOL_LEN + 34)
+
+static struct {
+    u32 win, back;
+    void (*get)(u32 *v, int *mute);     /* 0 to 256 */
+    void (*set)(u32 v, int mute);
+    void (*done)(void);                 /* closed: kept */
+    struct gfx_rect icon;               /* the icon's place: a press there is the icon's */
+    u8 hold;                            /* the left button went down on the track: it follows the pointer */
+} vol;
+
+static void vol_draw(struct wm *m)
+{
+    struct wm_window *w = vol.win ? wm_find(m, vol.win) : 0;
+    struct theme_look c;
+    struct gfx_surface *s;
+    char t[8];
+    u32 v;
+    int mute;
+    s32 tw, ky;
+    if (!w)
+        return;
+    vol.get(&v, &mute);
+    theme_look(desk_theme(), &c);
+    s = &w->store;
+    gfx_fill(s, 0, 0, VOL_W, VOL_H, c.edge);
+    gfx_fill(s, 1, 1, VOL_W - 2, VOL_H - 2, c.bar);
+    ksnprintf(t, sizeof t, "%u%%", (v * 100 + 128) / 256);
+    tw = gfx_text_width(&gfx_font_bold, t, -1);
+    gfx_text(s, (VOL_W - tw) / 2, 5, &gfx_font_bold, t, -1, mute ? c.face_off : c.bar_text);
+    gfx_fill(s, VOL_W / 2 - 1, VOL_TOP, 2, VOL_LEN, c.face_off);
+    ky = VOL_TOP + VOL_LEN - (s32)(v * VOL_LEN / 256);
+    gfx_fill(s, VOL_W / 2 - 1, ky, 2, VOL_TOP + VOL_LEN - ky, mute ? c.face_off : c.bar_on);
+    gfx_fill(s, VOL_W / 2 - 9, ky - 3, 18, 6, c.bar_text);
+    gfx_frame(s, 10, VOL_TOP + VOL_LEN + 12, 11, 11, c.bar_text);
+    if (mute)
+        gfx_fill(s, 13, VOL_TOP + VOL_LEN + 15, 5, 5, c.bar_text);
+    text_amp(s, 26, VOL_TOP + VOL_LEN + 11, "&Mute", c.bar_text);
+    wm_damage(m, w, 0);
+}
+
+static void vol_close(struct wm *m, int give_back)
+{
+    struct wm_window *w = vol.win ? wm_find(m, vol.win) : 0, *b;
+    if (w)
+        wm_destroy(m, w);
+    if (vol.win && vol.done)
+        vol.done();
+    vol.win = 0;
+    vol.hold = 0;
+    if (give_back && (b = vol.back ? wm_find(m, vol.back) : 0) != 0 && (b->flags & WF_SHOWN))
+        wm_set_focus(m, b);
+    else
+        desk_refocus(m);
+}
+
+int deskvol_up(void) { return vol.win != 0; }
+void deskvol_close(struct wm *m) { if (vol.win) vol_close(m, 1); }
+void deskvol_again(struct wm *m) { vol_draw(m); }
+
+void deskvol_open(struct wm *m, const struct gfx_rect *icon, s32 edge, int below, void (*get)(u32 *v, int *mute),
+                  void (*set)(u32 v, int mute), void (*done)(void))
+{
+    struct wm_window *w;
+    s32 x = icon->x + icon->w / 2 - VOL_W / 2, y = below ? edge : edge - VOL_H;
+    if (pop.win)
+        close_pop(m, 1);
+    if (cal.win)
+        cal_close(m, 1);
+    if (vol.win)
+        vol_close(m, 1);
+    if (x + VOL_W > m->w)
+        x = m->w - VOL_W;
+    if (!(w = wm_create(m, x < 0 ? 0 : x, y < 0 ? 0 : y, VOL_W, VOL_H, "", WF_TOPMOST | WF_NOBAR | WF_FIXED, 0)))
+        return;
+    vol.win = w->id;
+    vol.back = m->focus ? m->focus->id : 0;
+    vol.get = get, vol.set = set, vol.done = done;
+    vol.icon = *icon;
+    vol.hold = 0;
+    vol_draw(m);
+    wm_show(m, w, 1);
+    wm_set_focus(m, w);
+}
+
+static void vol_to(struct wm *m, s32 y)         /* the volume the track has at y (in the pop-up) */
+{
+    u32 v;
+    int mute;
+    s32 n = (VOL_TOP + VOL_LEN - y) * 256 / VOL_LEN;
+    vol.get(&v, &mute);
+    vol.set((u32)(n < 0 ? 0 : n > 256 ? 256 : n), mute);
+    vol_draw(m);
+}
+
+static void vol_step(struct wm *m, int by, int toggle_mute)
+{
+    u32 v;
+    int mute;
+    s32 n;
+    vol.get(&v, &mute);
+    n = (s32)v + by;
+    vol.set((u32)(n < 0 ? 0 : n > 256 ? 256 : n), toggle_mute ? !mute : mute);
+    vol_draw(m);
+}
+
+static int vol_key(struct wm *m, u32 key, int down, u32 ch)
+{
+    if (!vol.win || !m->focus || m->focus->id != vol.win)
+        return 0;
+    if (!down)
+        return 1;
+    if (key == 0x01)
+        vol_close(m, 1);
+    else if (key == 0x48 || key == 0x148)
+        vol_step(m, 8, 0);
+    else if (key == 0x50 || key == 0x150)
+        vol_step(m, -8, 0);
+    else if (key == 0x49 || key == 0x149)
+        vol_step(m, 32, 0);
+    else if (key == 0x51 || key == 0x151)
+        vol_step(m, -32, 0);
+    else if (ch == 'm' || ch == 'M')
+        vol_step(m, 0, 1);
+    return 1;
+}
+
+static int vol_press(struct wm *m, u32 bit)
+{
+    struct wm_window *w = vol.win ? wm_find(m, vol.win) : 0;
+    s32 x, y;
+    if (!w)
+        return 0;
+    x = m->px - w->frame.x, y = m->py - w->frame.y;
+    if (x < 0 || y < 0 || x >= VOL_W || y >= VOL_H) {
+        if (m->px >= vol.icon.x - 2 && m->px < vol.icon.x + vol.icon.w + 2 && m->py >= vol.icon.y - 2
+            && m->py < vol.icon.y + vol.icon.h + 2)
+            return 0;                           /* (the icon's own press closes it, or opens the Sound page) */
+        vol_close(m, 1);                        /* outside: it goes, and the press goes on */
+        return 0;
+    }
+    if (bit != 1)
+        return 1;
+    if (y >= VOL_TOP + VOL_LEN + 8) {
+        vol_step(m, 0, 1);                      /* the mute box, or its word */
+    } else if (y >= VOL_TOP - 6) {
+        vol.hold = 1;
+        vol_to(m, y);
+    }
+    return 1;
+}
+
+static void vol_move(struct wm *m, u32 buttons)
+{
+    struct wm_window *w = vol.win ? wm_find(m, vol.win) : 0;
+    if (!w || !vol.hold)
+        return;
+    if (!(buttons & 1)) {
+        vol.hold = 0;
+        return;
+    }
+    vol_to(m, m->py - w->frame.y);
+}
+
+static u32 vol_win_id(void) { return vol.win; }

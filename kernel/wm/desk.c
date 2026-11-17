@@ -170,8 +170,9 @@ static void bar_text(struct wm *m)
     u32 f = irq_save(), h = bcd(rtc_read(4) & 0x7F), min = bcd(rtc_read(2));
     irq_restore(f);
     region_time(kcfg_region(), t, sizeof t, (int)h, (int)min, -1);
-    if (!demo && (strcmp(t, m->clock) || strcmp(note, m->note)))
-        wm_bar_text(m, t, note);
+    /* (a remote session's note is an icon in the tray since phase D: desktray.c) */
+    if (!demo && strcmp(t, m->clock))
+        wm_bar_text(m, t, "");
 }
 
 /* ---- the theme ([desktop] theme; kernel/wm/theme.c) */
@@ -304,8 +305,11 @@ static void desk_thread(void *arg)
         owner = 0;
         thread_wake(&lockq);
         irq_restore(f);
+        desktray_keep();                        /* (the volume, kept in GLOS.CFG: without the manager's lock) */
     }
 }
+
+const char *desk_note_text(void) { return note; }
 
 void desk_note(const char *text)
 {
@@ -335,7 +339,7 @@ int desk_demo(int on)
         r = m->count >= before + 3 ? 0 : -1;
     } else {
         wm_bar(m, 1);
-        wm_bar_text(m, "", note);               /* (the composer's thread puts the time back) */
+        wm_bar_text(m, "", "");                 /* (the composer's thread puts the time back) */
     }
     desk_unlock();
     return r;
@@ -357,6 +361,8 @@ u32 desk_stat(char *buf, u32 max)
                             : w->flags & WF_DESKTOP ? " desktop"
                             : !(w->flags & WF_FRAME) ? " bare" : w->flags & WF_HUNG ? " hung" : w->owner ? " app" : "", w->frame.x,
                             w->frame.y, w->store.w, w->store.h, w->title);
+    if (n < max)
+        n += deskshell_list(m, buf + n, max - n);       /* (and the tray's icons: phase D) */
     desk_unlock();
     return n < max ? n : max;
 }

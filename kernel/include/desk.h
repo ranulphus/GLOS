@@ -111,6 +111,7 @@ const struct theme *desk_theme(void);   /* the theme in force (kernel/wm/theme.c
 int desk_theme_set(const char *name);   /* [desktop] theme: 0, or -1 no such theme */
 void desk_bar_group(int how);           /* [desktop] group: the task bar's buttons by program (WG_) */
 void desk_quiet(int on);
+void desk_notify_own(const char *title, const char *text);     /* one of GLOS's own notifications, from any thread */
 void desk_bar_place(int top, int hide); /* [desktop] bar, bar_hide: the task bar at the top, hidden until wanted */                /* [desktop] quiet: notifications held back, counted on the bar */
 void deskin_snap(int on);               /* a window dragged to the screen's edge snaps there ([desktop] snap) */
 struct app;

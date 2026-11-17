@@ -118,6 +118,36 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   guest's address, a virtual pad (`glos joy pad=`) plugs in and its notification shows, a hung test app's
   notification; host `notes_test` for the queue with quiet and held back.
 
+### D2 as built (2026-11-17)
+
+- **GLOS's own tray icons** (`kernel/wm/desktray.c`): no app's; four times a second at most each is made to
+  match what it stands for (there or not, its picture, its tooltip). Their pictures are one-bit shapes in the
+  bar's text colour, made again when the theme changes, so they are right in every theme. A press on one is the
+  kernel's (`deskshell.c` keeps whose each icon is), on the bar or behind the ^.
+  - **Volume** (while a card plays): a speaker, quieter below 37%, crossed when muted or at nothing; "Volume:
+    75%" in its tooltip. A press: an upright slider with its percentage and a Mute box (`deskpop.c`: a press or
+    a drag on the track, Up and Down a step, PgUp and PgDn a big one, M, Esc); the wheel over the icon: up and
+    down; the right button: mute; twice: the Control Panel's Sound page. It is the mixer's master, set at once,
+    and kept in `[sound] volume` and `mute` when the slider goes (after the desktop's lock is let go).
+  - **Network** (with a card, or a cable link): crossed out without an address; the address in its tooltip. A
+    press: the card, address, gateway, name server and frames in and out, and "Network settings..."; twice: the
+    Control Panel's Network page.
+  - **Pads** (while one is plugged in): which joysticks in its tooltip. A press: each pad and "Game
+    controllers..."; twice: the Joystick page.
+  - **A remote session:** PRD D35's note (VNC) is an icon now, not words on the bar; a press says who looks.
+- **Pop-ups of the desktop's own making** (`deskpop_begin`, `deskpop_show`): a menu filled by the kernel, with
+  lines of words (`PMI_TEXT`) that are read, not chosen, and a function told the item chosen.
+- **GLOS's notifications** (`deskshell_note`; `desk_notify_own` from other threads; their owner is nobody, so no
+  app hears of them): a pad plugged in or taken out, the network connected (with its address) or down, a window
+  whose app isn't answering (once, until it answers again). Not at the start for what was already so.
+- **`glos desk`** lists the tray too: `tray ID app|own at X,Y "tooltip"` (-1,-1 behind the ^), for the tests.
+- **Not done:** "a disk nearly full" (nothing in the kernel watches DOS's free space yet) and "a scheduled run
+  failed" (the scheduler queues a run and doesn't hear how it ended); the link's state and the API's "device came
+  or went" event are phase H's, as planned.
+- **Tests:** Loop A `win` (its first PC has a Sound Blaster): the network's icon with the guest's address; a
+  virtual pad plugged in (its icon and a notification) and taken out; the volume's slider, a step down, kept in
+  GLOS.CFG, muted and not by the right button.
+
 ### D3. The Start menu (Files)
 
 - Files' launcher becomes the Start menu of `desktop.md`: on the left recently added and most used, then every

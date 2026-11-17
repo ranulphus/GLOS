@@ -3,7 +3,7 @@
 
 static int can(const struct popmenu *p, s32 i)
 {
-    return i >= 0 && (u32)i < p->n && !(p->it[i].flags & (PMI_OFF | PMI_SEP));
+    return i >= 0 && (u32)i < p->n && !(p->it[i].flags & (PMI_OFF | PMI_SEP | PMI_TEXT));
 }
 
 void pm_clear(struct popmenu *p)

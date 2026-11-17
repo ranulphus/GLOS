@@ -3924,7 +3924,9 @@ def win_case(profile, vcard, card, bits, bits2):
     window up."""
     import time
     tag = "%s-%s" % (profile, vcard)
-    agent = Agent("win-" + tag, profile, card, ["--card", vcard,
+    sound = (profile, vcard) == ("bf6", "vbe")   # (one PC with a sound card: the tray's volume icon, phase D)
+    agent = Agent("win-" + tag, profile, card, ["--card", vcard]
+        + (["--sound", "sb16", "--pre", "SET BLASTER=A220 I5 D1 H5 T6"] if sound else []) + [
         "--file", "build/dj/WINTEST.EXE=/TEST/WINTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
         "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE",  # (the clock's double press opens it: phase D)
         "--cmd", "SERSAY HX-START win", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
@@ -4191,6 +4193,54 @@ def win_case(profile, vcard, card, bits, bits2):
         agent.ssh("glos config unset desktop bar")
         checks["bar-back"] = bar_is((0, 460))
 
+        # Phase D, D2: GLOS's own tray icons (glos desk lists the tray: whose, where, the tooltip). The network's,
+        # with the guest's address; a pad plugged in (glos joy pad=): its icon and GLOS's notification; taken out:
+        # gone. With a sound card the volume's: its slider by a press, a step lower by Down, kept in [sound] volume
+        # when Esc closes it; the right button mutes, and again.
+        def tray():
+            return {m.group(4): (m.group(1), int(m.group(2)), int(m.group(3))) for m in re.finditer(
+                r'^tray \d+ (\w+) at (-?\d+),(-?\d+) "(.*)"$', agent.ssh("glos desk")[1].replace("\r", ""), re.M)}
+
+        def tray_has(tip, exact=False, limit=20):
+            t0 = time.time()
+            while time.time() - t0 < limit:
+                for t, v in tray().items():
+                    if v[0] == "own" and (t == tip if exact else t.startswith(tip)):
+                        return v
+                time.sleep(0.5)
+            return None
+
+        def tray_gone(tip, limit=20):
+            t0 = time.time()
+            while any(t.startswith(tip) for t in tray()) and time.time() - t0 < limit:
+                time.sleep(0.5)
+            return not any(t.startswith(tip) for t in tray())
+        checks["tray-net"] = bool(tray_has("Network: 10."))
+        base = bare()
+        agent.ssh("glos joy pad=0,128,128,128,128,0")
+        checks["tray-pad"] = bool(tray_has("Pad: joystick A", True)) and bare_is(base + 1)     # (and its notification)
+        agent.ssh("glos joy pad=0,off")
+        checks["tray-pad-out"] = tray_gone("Pad")
+        checks["notes-gone"] = bare_is(base, 40)                # (the two notifications, six seconds each)
+        if sound:
+            v = tray_has("Volume: 100%", True)
+            checks["tray-volume"] = bool(v)
+            if v:
+                vx, vy = v[1] + 8, v[2] + 8
+                click(vx, vy)
+                checks["vol-slider"] = bare_is(base + 1)
+                agent.ssh("glos key 0x150")                     # Down: a step lower (8 of 256)
+                checks["vol-down"] = bool(tray_has("Volume: 97%", True))
+                agent.ssh("glos key 0x01")
+                checks["vol-kept"] = bare_is(base) and agent.ssh("glos config get sound volume")[1].strip() == "97"
+                click(vx, vy, 2)                                # the right button: muted, and not
+                checks["vol-mute"] = bool(tray_has("Volume: 97%, muted", True))
+                click(vx, vy, 2)
+                checks["vol-unmute"] = bool(tray_has("Volume: 97%", True))
+                agent.ssh("glos config unset sound mute")
+                agent.ssh("glos config unset sound volume")
+                until(focus("A"))
+
         ids = sorted(w["id"] for t, w in desk()["win"].items() if t.startswith("WINTEST"))
         click(62 + 120 * ids.index(wb["id"]) + 10, 470)        # (the bar's buttons: from 62, 120 wide)
         checks["bar-button"] = bool(until(focus("B")))
@@ -4283,7 +4333,7 @@ def win_case(profile, vcard, card, bits, bits2):
         f_alone = int(m.group(1)) * 1000.0 / int(m.group(2)) if m and alone[0] == 41 else 0
         spin = start(app + "spin C")
         checks["spin-up"] = bool(until(focus("C")))
-        beside = start(app + "draw B 10")
+        beside = start(app + "draw B 14")
         checks["draw-up"] = bool(until(focus("B")))
         agent.ssh("glos key " + ALT_TAB)        # (the busy one in front: the hotkey is for it)
         worst, probes, moving = 0.0, 0, []
@@ -4297,6 +4347,9 @@ def win_case(profile, vcard, card, bits, bits2):
                 if pic and w:
                     row = (w["y"] + BORDER + TITLE + BORDER + 30) * pic[0] + w["x"] + BORDER
                     moving.append(pic[2][row * 3:(row + w["w"]) * 3])
+                    # (the square goes round its 23 places in a second or two, about as long as a shot takes: shots
+                    # evenly apart can all find it in one place, so each wait is longer than the last)
+                    time.sleep(0.45 * len(moving))
             time.sleep(0.2)
         res = finish(beside)
         m = re.search(r"^WIN-OK B frames=(\d+) ms=(\d+)$", res[1], re.M)
@@ -4306,6 +4359,10 @@ def win_case(profile, vcard, card, bits, bits2):
         # (its picture moves, and its square is in it; not in every one: the composer may copy the band between
         # the app's clearing it and drawing the square, graphics.md 5.2)
         checks["busy-draws"] = len(set(moving)) >= 2 and any(bytes((255, 255, 255)) in row for row in moving)
+        if not checks["busy-draws"]:
+            print("    %s busy-draws: %d rows, %d different, white in %d; %s" % (
+                tag, len(moving), len(set(moving)), sum(bytes((255, 255, 255)) in row for row in moving),
+                agent.ssh("glos desk")[1].replace("\r", "")))
         info += " %dbpp steps/s alone=%.1f beside=%.1f probes=%d worst=%.2fs" % (bits, f_alone, f_beside, probes, worst)
         checks["busy-in-front"] = bool(until(focus("C")))
         agent.ssh("glos key 0x1D:down,0x38:down,0x2A:down,0x01,0x2A:up,0x38:up,0x1D:up")
@@ -4325,13 +4382,16 @@ def win_case(profile, vcard, card, bits, bits2):
         checks["told"] = said(ra, 40, "EV A resize 240x160 now=240x160 bpp=%d" % bits2, "WIN-OK A closed")
         # Apps that end with a window up: the window goes, and the memory comes back.
         finish(start(app + "draw B 1"))
+        bare_is(1, 60)                          # (none of GLOS's own notifications up: their windows are memory too)
+        d0 = agent.ssh("glos desk")[1].replace("\r", "")
         m0 = mem()
         for i in range(10):
             checks["again-%d" % i] = finish(start(app + "draw %s 1" % "ABC"[i % 3]))[0] == 41
+        bare_is(1, 60)
         m1 = mem()
         checks["memory-back"] = bool(m0) and m0 == m1
         if m0 != m1:
-            print("    %s memory: %r then %r" % (tag, m0, m1))
+            print("    %s memory: %r then %r; before: %s after: %s" % (tag, m0, m1, d0, agent.ssh("glos desk")[1].replace("\r", "")))
         checks["windows-gone"] = not any(t.startswith("WINTEST") for t in desk()["win"])
         last = start(app + "show B 900")
         checks["last-up"] = bool(until(focus("B")))
@@ -6853,10 +6913,12 @@ class GuiDriver:
         self.bad.append("shot-" + name)
 
     def park(self):                             # the pointer in the screen's corner, on the task bar: out of the shots
+        # (the bottom left one, on GLOS's mark: the bottom right one is the clock, whose tooltip, since phase D,
+        # would come up over the windows being shot)
         text = self.agent.ssh("glos desk")[1]
         m = re.search(r"^desk (\d+)x(\d+)x\d+ .*pointer=(-?\d+),(-?\d+)", text, re.M)
-        if m and (int(m.group(3)), int(m.group(4))) != (int(m.group(1)) - 1, int(m.group(2)) - 1):
-            self.agent.ssh("glos mouse %d %d" % (int(m.group(1)) - 1 - int(m.group(3)), int(m.group(2)) - 1 - int(m.group(4))))
+        if m and (int(m.group(3)), int(m.group(4))) != (0, int(m.group(2)) - 1):
+            self.agent.ssh("glos mouse %d %d" % (-int(m.group(3)), int(m.group(2)) - 1 - int(m.group(4))))
 
     def point(self, x, y):
         px, py = self.desk()["ptr"]
