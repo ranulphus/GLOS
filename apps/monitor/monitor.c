@@ -30,15 +30,16 @@ static int napps;
 static char seen[32][16];                       /* the programs it has said it saw (stdout, for the suite) */
 static int nseen;
 
-static const char *const kinds[] = { "App", "Job" };
-static const char *const job_states[] = { "Waiting", "Running", "Full-screen", "App", "Done" };
+static const char *const kinds[] = { GUI_N("App"), GUI_N("Job") };
+static const char *const job_states[] = { GUI_N("Waiting"), GUI_N("Running"), GUI_N("Full-screen"), GUI_N("App"),
+    GUI_N("Done") };
 
 static void line_text(char *b, size_t room, unsigned kb)
 {
     if (kb >= 10240)
-        snprintf(b, room, "%u MB", kb / 1024);
+        snprintf(b, room, GUI_T("%u MB"), kb / 1024);
     else
-        snprintf(b, room, "%u KB", kb);
+        snprintf(b, room, GUI_T("%u KB"), kb);
 }
 
 static void fill_programs(void)
@@ -60,9 +61,9 @@ static void fill_programs(void)
         snprintf(cpu, sizeof cpu, "%u.%u s", a->busy_ms / 1000, a->busy_ms % 1000 / 100);
         line_text(mem, sizeof mem, a->mem_kb);
         snprintf(wins, sizeof wins, "%u", a->windows);
-        snprintf(state, sizeof state, "%s", a->kind == GLOS_PROG_JOB ? job_states[a->state < 5 ? a->state : 4]
-                                            : a->state ? "Paused" : "Running");
-        cells[0] = a->name, cells[1] = kinds[a->kind == GLOS_PROG_JOB], cells[2] = id, cells[3] = cpu;
+        snprintf(state, sizeof state, "%s", a->kind == GLOS_PROG_JOB ? GUI_T(job_states[a->state < 5 ? a->state : 4])
+                                            : a->state ? GUI_T("Paused") : GUI_T("Running"));
+        cells[0] = a->name, cells[1] = GUI_T(kinds[a->kind == GLOS_PROG_JOB]), cells[2] = id, cells[3] = cpu;
         cells[4] = mem, cells[5] = wins, cells[6] = state;
         gui_list_add(list, cells, NULL, (void *)(size_t)o);
         napps++;
@@ -86,28 +87,28 @@ static void fill_system(void)
     char t[12][64];
     unsigned up = sys.uptime_ms / 1000;
     int i;
-    snprintf(t[0], 64, "GLOS %s, its API %u.%u", ver.build, ver.major, ver.minor);
+    snprintf(t[0], 64, GUI_T("GLOS %s, its API %u.%u"), ver.build, ver.major, ver.minor);
     snprintf(t[1], 64, "%u:%02u:%02u", up / 3600, up / 60 % 60, up % 60);
     snprintf(t[2], 64, "%s", sys.cpu_family == 4 ? "486" : sys.cpu_family == 5 ? "Pentium" : "Pentium Pro or later");
-    snprintf(t[3], 64, "%u KB, %u KB free", mem.total_kb, mem.free_kb);
-    snprintf(t[4], 64, "%u threads, %u apps, %u windows", sys.threads, sys.apps, sys.windows);
+    snprintf(t[3], 64, GUI_T("%u KB, %u KB free"), mem.total_kb, mem.free_kb);
+    snprintf(t[4], 64, GUI_T("%u threads, %u apps, %u windows"), sys.threads, sys.apps, sys.windows);
     if (sys.screen_w)
-        snprintf(t[5], 64, "%ux%u, %u bits, %s%s", sys.screen_w, sys.screen_h, sys.screen_bpp, sys.card,
+        snprintf(t[5], 64, GUI_T("%ux%u, %u bits, %s%s"), sys.screen_w, sys.screen_h, sys.screen_bpp, sys.card,
                  sys.accel ? " (its engine)" : "");
     else
-        snprintf(t[5], 64, "text mode");
+        snprintf(t[5], 64, GUI_T("text mode"));
     if (mem.vram_kb)
-        snprintf(t[6], 64, "%u KB", mem.vram_kb);
+        snprintf(t[6], 64, GUI_T("%u KB"), mem.vram_kb);
     else
         snprintf(t[6], 64, "-");
     if (sys.mixer_rate)
-        snprintf(t[7], 64, "%u Hz, %u streams, %u underruns", sys.mixer_rate, sys.streams, sys.underruns);
+        snprintf(t[7], 64, GUI_T("%u Hz, %u streams, %u underruns"), sys.mixer_rate, sys.streams, sys.underruns);
     else
-        snprintf(t[7], 64, "off");
+        snprintf(t[7], 64, GUI_T("off"));
     if (sys.nic[0])
         snprintf(t[8], 64, "%s, %u.%u.%u.%u", sys.nic, sys.ip[0], sys.ip[1], sys.ip[2], sys.ip[3]);
     else
-        snprintf(t[8], 64, "none");
+        snprintf(t[8], 64, GUI_T("none"));
     snprintf(t[9], 64, "%s", sys.hostname);
     snprintf(t[10], 64, "%s", sys.session[0] ? sys.session : "none");
     for (i = 0; i < 11; i++)
@@ -127,9 +128,11 @@ static void sample(void *arg)
         unsigned b = sys.busy_ms - last.busy_ms, i = sys.idle_ms - last.idle_ms;
         int pct = b + i ? (int)(b * 100 / (b + i)) : 0;
         gui_graph_add(graph, &pct);
-        snprintf(t, sizeof t, "Processor %d%%   Memory %u KB of %u KB used", pct, mem.total_kb - mem.free_kb, mem.total_kb);
+        snprintf(t, sizeof t, GUI_T("Processor %d%%   Memory %u KB of %u KB used"), pct, mem.total_kb - mem.free_kb,
+                 mem.total_kb);
         gui_set_text(status, t);
-        snprintf(t, sizeof t, "%u frames in, %u out a second", sys.net_rx - last.net_rx, sys.net_tx - last.net_tx);
+        snprintf(t, sizeof t, GUI_T("%u frames in, %u out a second"), sys.net_rx - last.net_rx,
+                 sys.net_tx - last.net_tx);
         gui_set_text(net_text, t);
     }
     last = sys;
@@ -139,7 +142,7 @@ static void sample(void *arg)
         char used[16], all[16];
         line_text(used, sizeof used, mem.total_kb - mem.free_kb);
         line_text(all, sizeof all, mem.total_kb);
-        snprintf(t, sizeof t, "%s of %s", used, all);
+        snprintf(t, sizeof t, GUI_T("%s of %s"), used, all);
         gui_set_text(mem_text, t);
     }
     fill_system();
@@ -156,11 +159,11 @@ static void end_task(struct gui_widget *w, int what)
     if (r < 0)
         return;
     a = progs[(size_t)gui_list_user(list, r)];
-    snprintf(q, sizeof q, "End %s? What it hasn't saved is lost.", a.name);
-    if (gui_message(win, "End Program", q, GUI_MB_YESNO) != GUI_YES)
+    snprintf(q, sizeof q, GUI_T("End %s? What it hasn't saved is lost."), a.name);
+    if (gui_message(win, GUI_T("End Program"), q, GUI_MB_YESNO) != GUI_YES)
         return;
     if (glos_sys_kill(a.kind == GLOS_PROG_JOB ? GLOS_KILL_JOB : GLOS_KILL_APP, a.id) != 0)
-        gui_message(win, "End Program", "It couldn't be ended.", GUI_MB_OK);
+        gui_message(win, GUI_T("End Program"), GUI_T("It couldn't be ended."), GUI_MB_OK);
     else
         printf("MONITOR ended %s\n", a.name);
     fflush(stdout);
@@ -198,10 +201,12 @@ static void tab_changed(struct gui_widget *w, int what)
 
 int main(int argc, char **argv)
 {
-    static const char *const heads[7] = { "Program", "Kind", "Id", "Processor", "Memory", "Windows", "State" };
+    static const char *const heads[7] = { GUI_N("Program"), GUI_N("Kind"), GUI_N("Id"), GUI_N("Processor"),
+        GUI_N("Memory"), GUI_N("Windows"), GUI_N("State") };
     static const int widths[7] = { 100, 44, 30, 70, 64, 62, 80 };
-    static const char *const labels[11] = { "Version:", "Running for:", "Processor:", "Memory:", "Work:", "Screen:",
-                                            "Card's memory:", "Sound:", "Network:", "Host name:", "In front:" };
+    static const char *const labels[11] = { GUI_N("Version:"), GUI_N("Running for:"), GUI_N("Processor:"),
+        GUI_N("Memory:"), GUI_N("Work:"), GUI_N("Screen:"), GUI_N("Card's memory:"), GUI_N("Sound:"),
+        GUI_N("Network:"), GUI_N("Host name:"), GUI_N("In front:") };
     struct gui_widget *page, *row, *form, *box;
     int i;
     if (gui_init(argc, argv) != 0) {
@@ -211,47 +216,47 @@ int main(int argc, char **argv)
     memset(&ver, 0, sizeof ver);
     ver.size = sizeof ver;
     glos_version(&ver);
-    win = gui_window("Monitor", 500, 330, 0);
+    win = gui_window(GUI_T("Monitor"), 500, 330, 0);
     tabs = gui_tabs(gui_vbox(win->root, -1, 6));
     gui_grow(tabs, 1);
     gui_grow(tabs->parent, 1);
     gui_on(tabs, tab_changed, 0);
 
-    page = gui_tab(tabs, "Programs");
+    page = gui_tab(tabs, GUI_T("Programs"));
     list = gui_list(page, 7, heads, widths);
     row = gui_hbox(page, -1, 0);
     gui_space(row, 0, 0);
-    gui_button(row, "&End Program", end_task, 0);
+    gui_button(row, GUI_T("&End Program"), end_task, 0);
 
-    page = gui_tab(tabs, "Performance");
-    gui_label(page, "Processor's use, the last minute:");
+    page = gui_tab(tabs, GUI_T("Performance"));
+    gui_label(page, GUI_T("Processor's use, the last minute:"));
     graph = gui_graph(page, 1, SAMPLES);       /* (toolkit 2: the last minute's samples as a line) */
-    gui_graph_series(graph, 0, "Processor", 0x20A040u);
+    gui_graph_series(graph, 0, GUI_T("Processor"), 0x20A040u);
     gui_graph_range(graph, 0, 100);
     gui_size(graph, 0, 100);
     gui_grow(graph, 1);
     form = gui_form(page);
-    row = gui_row(form, "Memory:", NULL);
+    row = gui_row(form, GUI_T("Memory:"), NULL);
     mem_bar = gui_progress(row, 100);
     mem_text = gui_label(row, "");
     gui_grow(mem_text, 1);
-    net_text = gui_label(gui_row(form, "Network:", NULL), "");
+    net_text = gui_label(gui_row(form, GUI_T("Network:"), NULL), "");
 
-    page = gui_tab(tabs, "System");
+    page = gui_tab(tabs, GUI_T("System"));
     form = gui_form(page);
     for (i = 0; i < 11; i++)
-        sysval[i] = gui_label(gui_row(form, labels[i], NULL), "");
+        sysval[i] = gui_label(gui_row(form, GUI_T(labels[i]), NULL), "");
 
-    page = gui_tab(tabs, "Log");
+    page = gui_tab(tabs, GUI_T("Log"));
     log_ed = gui_editor(page);
     gui_editor_font(log_ed, gui_mono);
     box = gui_hbox(page, -1, 0);
     gui_space(box, 0, 0);
-    gui_button(box, "&Refresh", refresh_log, 0);
+    gui_button(box, GUI_T("&Refresh"), refresh_log, 0);
 
     status = gui_status(win);
     if (argc > 1 && !strcmp(argv[1], "-tasks"))
-        gui_title(win, "Monitor: Programs");
+        gui_title(win, GUI_T("Monitor: Programs"));
     sample(NULL);
     gui_show(win, 1);
     gui_idle(sample, NULL, 1000);

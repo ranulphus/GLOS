@@ -10,7 +10,8 @@
 
 static struct gui_window *win;
 static struct gui_widget *list, *status;
-static const char *const heads[] = { "Name", "Version", "Installed", "From", "Summary" };
+static const char *const heads[] = { GUI_N("Name"), GUI_N("Version"), GUI_N("Installed"), GUI_N("From"),
+                                     GUI_N("Summary") };
 static const int widths[] = { 70, 70, 70, 70, 260 };
 
 void pkg_status(const char *text)
@@ -29,6 +30,7 @@ static void fill(void)
         const char *cells[5];
         char inst[32];
         pkg_row(i, cells, inst, sizeof inst);
+        cells[3] = GUI_T(cells[3]);             /* (where it is from: "local", "FreeDOS", "signed") */
         gui_list_add(list, cells, NULL, (void *)(size_t)i);
     }
 }
@@ -71,17 +73,17 @@ int pkg_window(int argc, char **argv)
         printf("PKG no GLOS\n");
         return 1;
     }
-    win = gui_window("Packages", 580, 300, 0);
+    win = gui_window(GUI_T("Packages"), 580, 300, 0);
     box = gui_vbox(win->root, -1, 6);
     gui_grow(box, 1);
     list = gui_list(box, 5, heads, widths);
     gui_grow(list, 1);
     row = gui_hbox(box, -1, 0);
-    gui_button(row, "&Install", act, 0);
-    gui_button(row, "&Remove", act, 1);
-    gui_button(row, "&Upgrade All", act, 2);
+    gui_button(row, GUI_T("&Install"), act, 0);
+    gui_button(row, GUI_T("&Remove"), act, 1);
+    gui_button(row, GUI_T("&Upgrade All"), act, 2);
     gui_space(row, 0, 0);
-    gui_button(row, "Re&fresh", act, 3);
+    gui_button(row, GUI_T("Re&fresh"), act, 3);
     status = gui_status(win);
     gui_show(win, 1);
     pkg_status("Reading the sources...");

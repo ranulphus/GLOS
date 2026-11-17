@@ -856,6 +856,19 @@ widget now draws, and each such change is looked at before its goldens are made 
   out the countdown on Loop A. Made in code still, as their content decides their layout: messages (their lines
   and buttons), About, Open and Save, the folder, font and colour dialogs (lists, trees, previews and palettes,
   which are not resource classes).
+- **C10d, `GUI_T` round the words** (C10 plan, step 4's second half): every literal a user sees that the toolkit
+  and its apps hand a toolkit call (titles, labels, buttons, check boxes, menus and their shortcuts' names,
+  tabs, tips, messages, a field's or a label's text, a choice's items, a graph's series) is `GUI_T("...")`, as
+  are the formats of the texts they make with `snprintf` (`GUI_T("%d replaced.")`) and the literals on either
+  side of a `?:`; code that compares a widget's text with a literal compares it with the same `GUI_T` (the
+  wizard's Next and Finish). A table's strings are marked `GUI_N("...")` (the bare literal, so that the table
+  stays a constant initializer when `GUI_T` becomes a look-up) and go through `GUI_T` where they are used; the
+  tables an app hands the toolkit whole are translated by the toolkit (list heads, a file dialog's filters and
+  formats). Not wrapped: file and folder names, GLOS.CFG's sections and keys, the lines the suites read, a
+  resource file's load errors (a developer's), and the console programs' words (PKG, SSH and the like do not
+  use the toolkit: theirs come with the catalogue, later). Plurals (`folder%s`) stay English's until then.
+  Done by a script for the toolkit's calls (256 places) and by hand for the rest; `GUI_T` is still the string,
+  so every golden is the same.
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

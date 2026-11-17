@@ -175,7 +175,7 @@ static void dialog_up(struct gui_task *t)
     gui_size(t->bar, 280, 0);
     row = gui_hbox(box, -1, 0);
     gui_space(row, 0, 0);
-    b = gui_button(row, "Cancel", cancel_click, 0);
+    b = gui_button(row, GUI_T("Cancel"), cancel_click, 0);
     b->user = t;
     b->flags |= GUI_CANCEL;
     t->dialog = d;
@@ -290,5 +290,5 @@ void gui_task_cancel(struct gui_task *t)
 {
     t->cancel = 1;
     if (t->dialog && t->line)
-        gui_set_text(t->line, "Cancelling...");
+        gui_set_text(t->line, GUI_T("Cancelling..."));
 }

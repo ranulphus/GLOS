@@ -396,22 +396,22 @@ int gui_colour_dialog_ex(struct gui_window *owner, const char *title, unsigned *
     box = gui_vbox(C.w->root, GUI_GAP, 10);
     top = gui_hbox(box, 12, 0);
     pick = gui_vbox(top, GUI_GAP, 0);
-    gui_label(pick, "&Swatches:");
+    gui_label(pick, GUI_T("&Swatches:"));
     C.sw = gui_new(pick, &sw_class, sizeof *C.sw);
     row = gui_hbox(top, 6, 0);
     C.sv = gui_new(row, &sv_class, sizeof *C.sv);
     C.bar = gui_new(row, &bar_class, sizeof *C.bar);
     fields = gui_form(top);
-    C.r = gui_spin(gui_row(fields, "&Red:", NULL), 0, 255, 0);
-    C.g = gui_spin(gui_row(fields, "&Green:", NULL), 0, 255, 0);
-    C.b = gui_spin(gui_row(fields, "&Blue:", NULL), 0, 255, 0);
-    C.hh = gui_spin(gui_row(fields, "&Hue:", NULL), 0, 359, 0);
-    C.ss = gui_spin(gui_row(fields, "Sa&turation:", NULL), 0, 100, 0);
-    C.vv = gui_spin(gui_row(fields, "&Value:", NULL), 0, 100, 0);
+    C.r = gui_spin(gui_row(fields, GUI_T("&Red:"), NULL), 0, 255, 0);
+    C.g = gui_spin(gui_row(fields, GUI_T("&Green:"), NULL), 0, 255, 0);
+    C.b = gui_spin(gui_row(fields, GUI_T("&Blue:"), NULL), 0, 255, 0);
+    C.hh = gui_spin(gui_row(fields, GUI_T("&Hue:"), NULL), 0, 359, 0);
+    C.ss = gui_spin(gui_row(fields, GUI_T("Sa&turation:"), NULL), 0, 100, 0);
+    C.vv = gui_spin(gui_row(fields, GUI_T("&Value:"), NULL), 0, 100, 0);
     if (C.with_alpha)
-        C.aa = gui_spin(gui_row(fields, "&Alpha:", NULL), 0, 255, 255);
-    C.hex = gui_field(gui_row(fields, "He&x:", NULL), C.with_alpha ? 10 : 8);
-    f = gui_row(fields, "Old, new:", NULL);
+        C.aa = gui_spin(gui_row(fields, GUI_T("&Alpha:"), NULL), 0, 255, 255);
+    C.hex = gui_field(gui_row(fields, GUI_T("He&x:"), NULL), C.with_alpha ? 10 : 8);
+    f = gui_row(fields, GUI_T("Old, new:"), NULL);
     C.now = gui_new(f, &now_class, sizeof *C.now);
     gui_on(C.r, spin_on, 0);
     gui_on(C.g, spin_on, 0);
@@ -424,8 +424,8 @@ int gui_colour_dialog_ex(struct gui_window *owner, const char *title, unsigned *
         gui_on(C.aa, spin_on, 0);
     row = gui_hbox(box, GUI_GAP, 0);
     gui_space(row, 0, 0);
-    gui_button(row, "OK", ok_click, 0)->flags |= GUI_DEFAULT;
-    gui_button(row, "Cancel", cancel_click, 0)->flags |= GUI_CANCEL;
+    gui_button(row, GUI_T("OK"), ok_click, 0)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), cancel_click, 0)->flags |= GUI_CANCEL;
     for (i = 0; i < swatch_count(); i++)        /* (the arrows start on the colour's swatch, if it has one) */
         if (swatch(i) == C.rgb) {
             C.hot = i;
@@ -601,7 +601,7 @@ static void pal_choose(struct palette *p, int i, int which)
 static void pal_edit(struct palette *p, int i)
 {
     unsigned c = p->c[i];
-    if (gui_colour_dialog(p->w.win, "Edit colour", &c) && c != p->c[i]) {
+    if (gui_colour_dialog(p->w.win, GUI_T("Edit colour"), &c) && c != p->c[i]) {
         p->c[i] = c;
         gui_damage(&p->w);
         gui_send(&p->w, GUI_ON_CHANGE);

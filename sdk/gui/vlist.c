@@ -678,7 +678,7 @@ struct gui_widget *gui_vlist(struct gui_widget *parent, int columns, const char 
     if (heads) {
         l->heads = calloc((size_t)l->cols, sizeof *l->heads);
         for (i = 0; l->heads && i < l->cols; i++)
-            l->heads[i] = strdup(heads[i]);
+            l->heads[i] = strdup(GUI_T(heads[i]));    /* (a table's: GUI_N in the app) */
     }
     for (i = 0; i < l->cols; i++)
         l->widths[i] = widths ? widths[i] : 100, l->order[i] = i;

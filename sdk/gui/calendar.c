@@ -19,9 +19,11 @@
 
 #include "guiint.h"
 
-static const char *const month_name[12] = { "January", "February", "March", "April", "May", "June", "July", "August",
-                                            "September", "October", "November", "December" };
-static const char *const day_name[7] = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" };
+static const char *const month_name[12] = { GUI_N("January"), GUI_N("February"), GUI_N("March"), GUI_N("April"),
+    GUI_N("May"), GUI_N("June"), GUI_N("July"), GUI_N("August"), GUI_N("September"), GUI_N("October"),
+    GUI_N("November"), GUI_N("December") };
+static const char *const day_name[7] = { GUI_N("Su"), GUI_N("Mo"), GUI_N("Tu"), GUI_N("We"), GUI_N("Th"), GUI_N("Fr"),
+    GUI_N("Sa") };
 
 #define Y(d) ((d) / 10000)
 #define M(d) ((d) / 100 % 100)
@@ -164,11 +166,11 @@ static void cal_draw(struct gui_widget *w, struct gfx_surface *s)
     gui_draw_box(s, &next, GUI_FACE, 0);
     gui_draw_arrow(s, prev.x + prev.w / 2, prev.y + prev.h / 2, 2, on ? GUI_TEXT : GUI_DIM);
     gui_draw_arrow(s, next.x + next.w / 2, next.y + next.h / 2, 3, on ? GUI_TEXT : GUI_DIM);
-    snprintf(t, sizeof t, "%s %d", month_name[M(c->shown) - 1], Y(c->shown));
+    snprintf(t, sizeof t, GUI_T("%s %d"), GUI_T(month_name[M(c->shown) - 1]), Y(c->shown));
     gfx_text(s, w->r.x + (w->r.w - gfx_text_width(gui_bold, t, -1)) / 2, w->r.y + (head_h() - gui_bold->height) / 2,
              gui_bold, t, -1, on ? GUI_FIELD_TEXT : GUI_DIM);
     for (i = 0; i < 7; i++) {                   /* the weekdays */
-        const char *n = day_name[(i + (int)reg()->first_day) % 7];
+        const char *n = GUI_T(day_name[(i + (int)reg()->first_day) % 7]);
         gfx_text(s, x0 + i * cw + (cw - gfx_text_width(gui_font, n, -1)) / 2, y0 + 1, gui_font, n, -1, GUI_DIM);
     }
     gfx_fill(s, x0 + 2, y0 + GUI_ROW_H, w->r.w - 6, 1, GUI_SHADE);

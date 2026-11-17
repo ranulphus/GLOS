@@ -68,7 +68,7 @@ int files_run(const char *command, const char *dir)
 {
     glos_job_run(command, dir && dir[0] ? dir : files_home, 0, GLOS_RUN_HIDDEN, GLOS_RUNF_DETACH, 0);
     if (glos_error() != 0) {
-        gui_message(desk, "Files", "GLOS couldn't start it.", GUI_MB_OK);
+        gui_message(desk, GUI_T("Files"), GUI_T("GLOS couldn't start it."), GUI_MB_OK);
         return -1;
     }
     say("run", command);
@@ -386,7 +386,7 @@ static void build_launcher(void)
     for (i = 0; i < n; i++)
         gui_menu_item(launcher, pt[i], L_PROGRAM + i, NULL);
     gui_menu_sep(launcher);
-    gui_menu_item(launcher, "&Run...", L_RUN, NULL);
+    gui_menu_item(launcher, GUI_T("&Run..."), L_RUN, NULL);
 }
 
 static void command(struct gui_window *w, int id)
@@ -403,12 +403,12 @@ static void command(struct gui_window *w, int id)
         files_run(cmd, dir);
     } else if (id == L_RUN) {
         char cmd[200] = "";
-        if (gui_ask(desk, "Run", "A program, a folder or a file to open:", cmd, sizeof cmd) && cmd[0]) {
+        if (gui_ask(desk, GUI_T("Run"), GUI_T("A program, a folder or a file to open:"), cmd, sizeof cmd) && cmd[0]) {
             struct gui_dirent e;
             char typed[200];
             snprintf(typed, sizeof typed, "%s", cmd);
             if (gui_text_dos(typed, cmd, sizeof cmd) != 0) {    /* (DOS's bytes) */
-                gui_message(desk, "Run", "DOS's code page hasn't got all of its letters.", GUI_MB_OK);
+                gui_message(desk, GUI_T("Run"), GUI_T("DOS's code page hasn't got all of its letters."), GUI_MB_OK);
                 return;
             }
             if (gui_is_dir(cmd) || (!strchr(cmd, ' ') && gui_stat(cmd, &e) == 0))
@@ -466,7 +466,7 @@ int main(int argc, char **argv)
     } else if (!strcmp(mode, "-folder") && argc > 2) {
         folder_open(argv[2]);
     } else {                                    /* the desktop's shell */
-        desk = gui_window_at("Desktop", 0, 0, 1, 1, GUI_W_DESKTOP | GUI_W_BARE);
+        desk = gui_window_at(GUI_T("Desktop"), 0, 0, 1, 1, GUI_W_DESKTOP | GUI_W_BARE);
         desk->on_command = command;
         desk->on_resize = desk_resized;
         area = gui_canvas(desk->root, 0, 0, area_draw, area_event);

@@ -108,7 +108,7 @@ static void term_on(struct gui_widget *w, int what)    /* the title a program se
     const char *t = gui_term_title(w);
     if (what != GUI_ON_CHANGE)
         return;
-    snprintf(full, sizeof full, "%s%sTerminal", t, t[0] ? " - " : "");
+    snprintf(full, sizeof full, GUI_T("%s%sTerminal"), t, t[0] ? " - " : "");
     gui_title(win, full);
 }
 
@@ -128,7 +128,7 @@ static void command(struct gui_window *w, int id)
         break;
     case C_EXIT: gui_quit(0); break;
     case C_ABOUT:
-        gui_message(win, "About Terminal", "Terminal: GLOS's shell. HELP lists its commands.", GUI_MB_OK);
+        gui_message(win, GUI_T("About Terminal"), GUI_T("Terminal: GLOS's shell. HELP lists its commands."), GUI_MB_OK);
         break;
     }
     gui_focus(grid);
@@ -160,17 +160,17 @@ int main(int argc, char **argv)
         log_on = 1;
         argv++, argc--;
     }
-    win = gui_window("Terminal", 8 + 80 * 7 + GUI_SB + 4, 25 * 14 + 4, 0);
+    win = gui_window(GUI_T("Terminal"), 8 + 80 * 7 + GUI_SB + 4, 25 * 14 + 4, 0);
     win->on_command = command;
     bar = gui_menubar(win);
-    m = gui_menu(bar, "&Edit");
-    gui_menu_item(m, "&Copy", C_COPY, "Ctrl+Shift+C");
-    gui_menu_item(m, "&Paste", C_PASTE, "Shift+Ins");
-    gui_menu_item(m, "C&lear", C_CLEAR, NULL);
+    m = gui_menu(bar, GUI_T("&Edit"));
+    gui_menu_item(m, GUI_T("&Copy"), C_COPY, GUI_T("Ctrl+Shift+C"));
+    gui_menu_item(m, GUI_T("&Paste"), C_PASTE, GUI_T("Shift+Ins"));
+    gui_menu_item(m, GUI_T("C&lear"), C_CLEAR, NULL);
     gui_menu_sep(m);
-    gui_menu_item(m, "E&xit", C_EXIT, NULL);
-    m = gui_menu(bar, "&Help");
-    gui_menu_item(m, "&About Terminal", C_ABOUT, NULL);
+    gui_menu_item(m, GUI_T("E&xit"), C_EXIT, NULL);
+    m = gui_menu(bar, GUI_T("&Help"));
+    gui_menu_item(m, GUI_T("&About Terminal"), C_ABOUT, NULL);
     grid = gui_terminal(gui_vbox(win->root, 0, 0), LINES);
     gui_term_callbacks(grid, &cb);
     gui_on(grid, term_on, 0);

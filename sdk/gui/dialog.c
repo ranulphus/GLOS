@@ -113,20 +113,20 @@ int gui_message_check(struct gui_window *owner, const char *title, const char *t
     row = buttons_row(box);
     switch (buttons) {
     case GUI_MB_OKCANCEL:
-        (b = gui_button(row, "OK", answer, GUI_OK))->flags |= GUI_DEFAULT;
-        gui_button(row, "Cancel", answer, GUI_CANCEL_R)->flags |= GUI_CANCEL;
+        (b = gui_button(row, GUI_T("OK"), answer, GUI_OK))->flags |= GUI_DEFAULT;
+        gui_button(row, GUI_T("Cancel"), answer, GUI_CANCEL_R)->flags |= GUI_CANCEL;
         break;
     case GUI_MB_YESNO:
-        (b = gui_button(row, "&Yes", answer, GUI_YES))->flags |= GUI_DEFAULT;
-        gui_button(row, "&No", answer, GUI_NO)->flags |= GUI_CANCEL;
+        (b = gui_button(row, GUI_T("&Yes"), answer, GUI_YES))->flags |= GUI_DEFAULT;
+        gui_button(row, GUI_T("&No"), answer, GUI_NO)->flags |= GUI_CANCEL;
         break;
     case GUI_MB_YESNOCANCEL:
-        (b = gui_button(row, "&Yes", answer, GUI_YES))->flags |= GUI_DEFAULT;
-        gui_button(row, "&No", answer, GUI_NO);
-        gui_button(row, "Cancel", answer, GUI_CANCEL_R)->flags |= GUI_CANCEL;
+        (b = gui_button(row, GUI_T("&Yes"), answer, GUI_YES))->flags |= GUI_DEFAULT;
+        gui_button(row, GUI_T("&No"), answer, GUI_NO);
+        gui_button(row, GUI_T("Cancel"), answer, GUI_CANCEL_R)->flags |= GUI_CANCEL;
         break;
     default:
-        (b = gui_button(row, "OK", answer, GUI_OK))->flags |= GUI_DEFAULT | GUI_CANCEL;
+        (b = gui_button(row, GUI_T("OK"), answer, GUI_OK))->flags |= GUI_DEFAULT | GUI_CANCEL;
         break;
     }
     w->focus = b;
@@ -236,7 +236,7 @@ void gui_about(struct gui_window *owner, const struct gui_about *a)
     struct gui_window *w;
     struct gui_widget *box, *top, *id, *l, *list, *row, *b;
     int i;
-    snprintf(title, sizeof title, "About %s", a->name ? a->name : "this program");
+    snprintf(title, sizeof title, GUI_T("About %s"), a->name ? a->name : GUI_T("this program"));
     w = gui_window(title, 0, 0, GUI_W_DIALOG);
     w->owner = owner;
     box = gui_vbox(w->root, GUI_GAP, 12);
@@ -252,14 +252,14 @@ void gui_about(struct gui_window *owner, const struct gui_about *a)
         wrapped(id, a->copyright, 300);
     if (a->licence)
         wrapped(box, a->licence, 360);
-    gui_label(box, "It uses:");
+    gui_label(box, GUI_T("It uses:"));
     list = gui_vbox(box, 5, 0);                 /* (a credit a block, its lines together) */
     for (i = 0; a->credits && a->credits[i]; i++)
         wrapped(gui_vbox(list, 0, 0), a->credits[i], 360);
     for (i = 0; toolkit_credits[i]; i++)
         wrapped(gui_vbox(list, 0, 0), toolkit_credits[i], 360);
     row = buttons_row(box);
-    (b = gui_button(row, "OK", answer, GUI_OK))->flags |= GUI_DEFAULT | GUI_CANCEL;
+    (b = gui_button(row, GUI_T("OK"), answer, GUI_OK))->flags |= GUI_DEFAULT | GUI_CANCEL;
     w->focus = b;
     gui_modal(w);
 }
@@ -396,13 +396,13 @@ static void fold_new(struct gui_widget *w, int what)
     if (!id || id > (unsigned long)FD.n)
         return;
     name[0] = 0;
-    if (gui_ask(w->win, "New folder", "&Name of the new folder:", name, sizeof name) != 1 || !name[0])
+    if (gui_ask(w->win, GUI_T("New folder"), GUI_T("&Name of the new folder:"), name, sizeof name) != 1 || !name[0])
         return;
     if (gui_text_dos(name, dos, sizeof dos) != 0)
         return;
     gui_path_join(path, sizeof path, FD.path[id - 1], dos);
     if (gui_mkdir(path) != 0) {
-        gui_message(w->win, "New folder", "The folder couldn't be made there.", GUI_MB_OK);
+        gui_message(w->win, GUI_T("New folder"), GUI_T("The folder couldn't be made there."), GUI_MB_OK);
         return;
     }
     gui_vtree_changed(FD.tree, id);
@@ -423,15 +423,15 @@ int gui_folder_dialog(struct gui_window *owner, const char *title, char *path, i
     gui_size(FD.tree, 320, 200);
     gui_on(FD.tree, fold_tree_on, 0);
     row = gui_hbox(box, GUI_GAP, 0);
-    gui_label(row, "&Folder:");
+    gui_label(row, GUI_T("&Folder:"));
     FD.at = gui_combo(row, 30);
     gui_grow(FD.at, 1);
     gui_on(FD.at, fold_at_on, 0);
     gui_set_text(FD.at, path);
     row = buttons_row(box);
-    gui_button(row, "&New folder", fold_new, 0);
-    (b = gui_button(row, "OK", fold_ok, GUI_OK))->flags |= GUI_DEFAULT;
-    gui_button(row, "Cancel", answer, GUI_CANCEL_R)->flags |= GUI_CANCEL;
+    gui_button(row, GUI_T("&New folder"), fold_new, 0);
+    (b = gui_button(row, GUI_T("OK"), fold_ok, GUI_OK))->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), answer, GUI_CANCEL_R)->flags |= GUI_CANCEL;
     FD.out = path, FD.room = room;
     fold_show(path);
     w->focus = FD.tree;

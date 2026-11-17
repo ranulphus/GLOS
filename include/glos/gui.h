@@ -918,6 +918,9 @@ int gui_code_command(struct gui_widget *w, int cmd);   /* GUI_CMD_ (cut, copy, p
 
 /* ---- (toolkit 2, C9) resource files, names, the widgets' properties, translation */
 #define GUI_T(s) (s)                    /* every string a user sees: itself in v1; later the language's catalogue's */
+#define GUI_N(s) s                      /* the same in a table's initializer: marked for the catalogue, translated
+                                           with GUI_T where it is used (list heads, a file dialog's filters and
+                                           formats: by the toolkit) */
 void gui_set_name(struct gui_widget *w, const char *name);
 const char *gui_name(struct gui_widget *w);
 struct gui_widget *gui_named(struct gui_window *w, const char *name);  /* the widget of that name, or NULL */

@@ -187,7 +187,7 @@ static void show_step(void)
     close_rings();
     screen_size(&sw, &sh);
     if (!T.bubble) {                            /* one bubble for the whole tour: the keyboard stays in it */
-        T.bubble = gui_window_at("Tour", 0, 0, bw, 100, GUI_W_TOOL | GUI_W_BARE);
+        T.bubble = gui_window_at(GUI_T("Tour"), 0, 0, bw, 100, GUI_W_TOOL | GUI_W_BARE);
         T.bubble->owner = T.owner;
         frame = gui_new(T.bubble->root, &frame_class, sizeof *frame);
         gui_grow(frame, 1);
@@ -199,14 +199,14 @@ static void show_step(void)
     box = gui_vbox(frame, 8, 0);
     gui_new(box, &head_class, sizeof(struct gui_widget));
     row = gui_hbox(box, 4, 0);
-    snprintf(count, sizeof count, "%d of %d", T.at + 1, T.n);
+    snprintf(count, sizeof count, GUI_T("%d of %d"), T.at + 1, T.n);
     T.count = gui_label(row, count);
     gui_space(row, 0, 0);
-    T.back = gui_button(row, "&Back", step_on, -1);
+    T.back = gui_button(row, GUI_T("&Back"), step_on, -1);
     gui_enable(T.back, T.at > 0);
-    T.next = gui_button(row, T.at + 1 < T.n ? "&Next" : "&Done", step_on, 1);
+    T.next = gui_button(row, T.at + 1 < T.n ? GUI_T("&Next") : GUI_T("&Done"), step_on, 1);
     T.next->flags |= GUI_DEFAULT;
-    gui_button(row, "Close", step_on, 0)->flags |= GUI_CANCEL;
+    gui_button(row, GUI_T("Close"), step_on, 0)->flags |= GUI_CANCEL;
     gui_measure(box, &mw, &mh);                 /* (the bubble as tall as its text and buttons) */
     bh = mh + 2 * PAD;
     T.side = -1;

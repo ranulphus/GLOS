@@ -186,13 +186,13 @@ static void m_row(void *ctx, int row, struct gui_vrow *out)
     e = &X.ents[X.shown[row]];
     gui_dos_text(e->name, X.cells[0], sizeof X.cells[0]);
     if (e->dir)
-        snprintf(X.cells[1], sizeof X.cells[1], "Folder");
+        snprintf(X.cells[1], sizeof X.cells[1], GUI_T("Folder"));
     else if (e->size < 10240)
-        snprintf(X.cells[1], sizeof X.cells[1], "%lu bytes", e->size);
+        snprintf(X.cells[1], sizeof X.cells[1], GUI_T("%lu bytes"), e->size);
     else if (e->size < 10240ul * 1024)
-        snprintf(X.cells[1], sizeof X.cells[1], "%lu KB", (e->size + 1023) / 1024);
+        snprintf(X.cells[1], sizeof X.cells[1], GUI_T("%lu KB"), (e->size + 1023) / 1024);
     else
-        snprintf(X.cells[1], sizeof X.cells[1], "%lu MB", (e->size + 1024ul * 1024 - 1) / (1024ul * 1024));
+        snprintf(X.cells[1], sizeof X.cells[1], GUI_T("%lu MB"), (e->size + 1024ul * 1024 - 1) / (1024ul * 1024));
     snprintf(X.cells[2], sizeof X.cells[2], "%04u-%02u-%02u %02u:%02u", (e->date >> 9) + 1980, (e->date >> 5) & 15,
              e->date & 31, e->time >> 11, (e->time >> 5) & 63);
     out->cell[0] = X.cells[0], out->cell[1] = X.cells[1], out->cell[2] = X.cells[2];
@@ -266,7 +266,8 @@ static void take(void)
         return;
     }
     if (gui_text_dos(t, dos, sizeof dos) != 0) {
-        gui_message(X.w, X.save ? "Save" : "Open", "DOS's code page hasn't got all of the name's letters.", GUI_MB_OK);
+        gui_message(X.w, X.save ? GUI_T("Save") : GUI_T("Open"), GUI_T("DOS's code page hasn't got all of the name's letters."),
+                    GUI_MB_OK);
         return;
     }
     upper(dos);
@@ -284,7 +285,7 @@ static void take(void)
     if (!X.save) {
         struct gui_dirent st;
         if (gui_stat(path, &st) != 0) {
-            gui_message(X.w, "Open", "There is no such file there.", GUI_MB_OK);
+            gui_message(X.w, GUI_T("Open"), GUI_T("There is no such file there."), GUI_MB_OK);
             return;
         }
         finish(path);
@@ -298,7 +299,7 @@ static void take(void)
     }
     {
         struct gui_dirent st;
-        if (gui_stat(path, &st) == 0 && gui_message(X.w, "Save", "That file is there already. Replace it?",
+        if (gui_stat(path, &st) == 0 && gui_message(X.w, GUI_T("Save"), GUI_T("That file is there already. Replace it?"),
                                                     GUI_MB_YESNO) != GUI_YES)
             return;
     }
@@ -372,7 +373,7 @@ static void at_on(struct gui_widget *w, int what)
     if (gui_text_dos(gui_get_text(w), dos, sizeof dos) == 0 && (upper(dos), gui_is_dir(dos)))
         go(dos);
     else
-        gui_message(X.w, X.save ? "Save" : "Open", "There is no such folder.", GUI_MB_OK);
+        gui_message(X.w, X.save ? GUI_T("Save") : GUI_T("Open"), GUI_T("There is no such folder."), GUI_MB_OK);
 }
 
 static void at_source(struct gui_widget *w, const char *typed)  /* the folders that begin with what is typed */
@@ -444,7 +445,7 @@ static void preview_draw(struct gui_widget *w, struct gfx_surface *s)
 int gui_file_dialog_ex(struct gui_window *owner, const char *title, int save, char *path, int room,
                        struct gui_file_opts *o)
 {
-    static const char *const heads[] = { "Name", "Size", "Modified" };
+    static const char *const heads[] = { GUI_N("Name"), GUI_N("Size"), GUI_N("Modified") };
     static const int widths[] = { 150, 80, 110 };
     static const struct gui_model model = { m_count, m_row, m_find, m_match, NULL };
     static struct gui_file_opts none;
@@ -460,7 +461,7 @@ int gui_file_dialog_ex(struct gui_window *owner, const char *title, int save, ch
     X.w->on_key = files_key;
     box = gui_vbox(X.w->root, GUI_GAP, 8);
     row = gui_hbox(box, GUI_GAP, 0);
-    gui_label(row, "Look &in:");
+    gui_label(row, GUI_T("Look &in:"));
     X.at = gui_combo(row, 40);
     gui_grow(X.at, 1);
     gui_combo_history(X.at, 12);
@@ -468,8 +469,8 @@ int gui_file_dialog_ex(struct gui_window *owner, const char *title, int save, ch
     gui_on(X.at, at_on, 0);
     for (i = 0; X.o->recent && X.o->recent[i]; i++)
         gui_combo_add(X.at, X.o->recent[i]);
-    gui_button(row, "&Up", up_click, 0);
-    X.view = gui_button(row, "&View", view_click, 0);  /* (details and icons, turn about) */
+    gui_button(row, GUI_T("&Up"), up_click, 0);
+    X.view = gui_button(row, GUI_T("&View"), view_click, 0);  /* (details and icons, turn about) */
     mid = gui_hbox(box, GUI_GAP, 0);
     gui_grow(mid, 1);
     left = gui_list(mid, 1, NULL, NULL);       /* the places: the drives, then the recent folders */
@@ -497,33 +498,33 @@ int gui_file_dialog_ex(struct gui_window *owner, const char *title, int save, ch
         X.preview = right;
     }
     form = gui_form(box);
-    X.name = gui_field(gui_row(form, "File &name:", NULL), 40);
+    X.name = gui_field(gui_row(form, GUI_T("File &name:"), NULL), 40);
     gui_on(X.name, name_on, 0);
     if (X.o->filters && X.o->filters[0]) {
-        X.type = gui_choice(gui_row(form, "Files of &type:", NULL), 30);
+        X.type = gui_choice(gui_row(form, GUI_T("Files of &type:"), NULL), 30);
         for (i = 0; X.o->filters[i]; i++) {
             char t[64];
-            const char *bar = strchr(X.o->filters[i], '|');
-            int k = bar ? (int)(bar - X.o->filters[i]) : 40;
+            const char *f = GUI_T(X.o->filters[i]), *bar = strchr(f, '|');    /* (a table's: GUI_N in the app) */
+            int k = bar ? (int)(bar - f) : 40;
             if (bar && (size_t)k + strlen(bar) + 2 <= 40)    /* (the patterns too, if they are short enough to read) */
-                snprintf(t, sizeof t, "%.*s (%s)", k, X.o->filters[i], bar + 1);
+                snprintf(t, sizeof t, "%.*s (%s)", k, f, bar + 1);
             else
-                snprintf(t, sizeof t, "%.*s", k, X.o->filters[i]);
+                snprintf(t, sizeof t, "%.*s", k, f);
             gui_choice_add(X.type, t);
         }
         gui_set_value(X.type, X.o->filter);
         gui_on(X.type, type_on, 0);
     }
     if (save && X.o->formats && X.o->formats[0]) {
-        X.format = gui_choice(gui_row(form, "&Format:", NULL), 30);
+        X.format = gui_choice(gui_row(form, GUI_T("&Format:"), NULL), 30);
         for (i = 0; X.o->formats[i]; i++)
-            gui_choice_add(X.format, X.o->formats[i]);
+            gui_choice_add(X.format, GUI_T(X.o->formats[i]));
         gui_set_value(X.format, X.o->format);
     }
     row = gui_hbox(box, GUI_GAP, 0);
     gui_space(row, 0, 0);
-    (ok = gui_button(row, save ? "&Save" : "&Open", ok_click, 0))->flags |= GUI_DEFAULT;
-    gui_button(row, "Cancel", cancel_click, 0)->flags |= GUI_CANCEL;
+    (ok = gui_button(row, save ? GUI_T("&Save") : GUI_T("&Open"), ok_click, 0))->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), cancel_click, 0)->flags |= GUI_CANCEL;
     snprintf(start, sizeof start, "%s", path && path[0] ? path : glos_boot_root());
     if (!gui_is_dir(start)) {                   /* (a file's path: its folder, and its name in the field) */
         char nm[128];

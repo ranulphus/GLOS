@@ -317,12 +317,12 @@ struct gui_widget *gui_dock(struct gui_widget *parent)
     struct dock *d = (struct dock *)gui_new(parent, &dock_class, sizeof *d);
     int s;
     d->menu = gui_menu_new();
-    gui_menu_item(d->menu, "Dock at the &left", M_LEFT, NULL);
-    gui_menu_item(d->menu, "Dock at the &right", M_RIGHT, NULL);
-    gui_menu_item(d->menu, "Dock at the &bottom", M_BOTTOM, NULL);
-    gui_menu_item(d->menu, "&Float", M_FLOAT, NULL);
+    gui_menu_item(d->menu, GUI_T("Dock at the &left"), M_LEFT, NULL);
+    gui_menu_item(d->menu, GUI_T("Dock at the &right"), M_RIGHT, NULL);
+    gui_menu_item(d->menu, GUI_T("Dock at the &bottom"), M_BOTTOM, NULL);
+    gui_menu_item(d->menu, GUI_T("&Float"), M_FLOAT, NULL);
     gui_menu_sep(d->menu);
-    gui_menu_item(d->menu, "&Hide", M_HIDE, NULL);
+    gui_menu_item(d->menu, GUI_T("&Hide"), M_HIDE, NULL);
     gui_menu_to(d->menu, &d->w, menu_pick);
     d->split[0] = gui_split(&d->w, 0, 160);                    /* left | the rest */
     d->tabs[GUI_DOCK_LEFT] = side_tabs(d, d->split[0], GUI_DOCK_LEFT);

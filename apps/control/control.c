@@ -59,9 +59,10 @@ static const char *const modes[] = { "none", "640x480x8", "640x480x16", "640x480
                                      "1280x1024x16", "1280x1024x32" };
 static char mode_extra[24];                     /* the file's mode, if it isn't one of these */
 
-static const char *const titles[] = { "Display", "Input", "Joystick", "USB", "Sound", "Network", "Date and Time",
-                                      "Region", "Disk Cache", "Memory", "Remote Desktop", "Desktop", "Saver", "Shell",
-                                      "File Types", "Programs" };
+static const char *const titles[] = { GUI_N("Display"), GUI_N("Input"), GUI_N("Joystick"), GUI_N("USB"),
+    GUI_N("Sound"), GUI_N("Network"), GUI_N("Date and Time"), GUI_N("Region"), GUI_N("Disk Cache"), GUI_N("Memory"),
+    GUI_N("Remote Desktop"), GUI_N("Desktop"), GUI_N("Saver"), GUI_N("Shell"), GUI_N("File Types"),
+    GUI_N("Programs") };
                                                 /* (cfg_sections' order) */
 
 static char *dup(const char *s) { return s ? strcpy(malloc(strlen(s) + 1), s) : NULL; }
@@ -259,10 +260,10 @@ static struct ctl *ctl_add(struct gui_widget *form, const struct cfg_key *k, int
 static void help_poll(void *arg)
 {
     static const struct cfg_key *shown = (const struct cfg_key *)1;
-    static const char *const when[] = { "Takes effect at once.", "Takes effect when GLOS next starts.",
-                                        "Takes effect when the program next starts.",
-                                        "Takes effect when the desktop next starts.",
-                                        "Takes effect when an app next starts." };
+    static const char *const when[] = { GUI_N("Takes effect at once."), GUI_N("Takes effect when GLOS next starts."),
+                                        GUI_N("Takes effect when the program next starts."),
+                                        GUI_N("Takes effect when the desktop next starts."),
+                                        GUI_N("Takes effect when an app next starts.") };
     const struct cfg_key *k = NULL;
     int i;
     (void)arg;
@@ -275,7 +276,7 @@ static void help_poll(void *arg)
         return;
     shown = k;
     gui_set_text(help, k ? k->desc : "");
-    gui_set_text(when_label, k ? when[k->when < 5 ? k->when : 0] : "");
+    gui_set_text(when_label, k ? GUI_T(when[k->when < 5 ? k->when : 0]) : "");
 }
 
 /* ---- the programs' profiles */
@@ -313,14 +314,14 @@ static void prog_new(struct gui_widget *w, int what)
     char name[32] = "", sec[48];
     int i;
     (void)w, (void)what;
-    if (!gui_ask(win, "New Program", "The program's file name (NAME.EXE):", name, sizeof name))
+    if (!gui_ask(win, GUI_T("New Program"), GUI_T("The program's file name (NAME.EXE):"), name, sizeof name))
         return;
     for (i = 0; name[i]; i++)
         if (name[i] >= 'a' && name[i] <= 'z')
             name[i] -= 32;
     snprintf(sec, sizeof sec, "program %s", name);
     if (!name[0] || strlen(name) > 12 || !cfg_section_ok(sec)) {
-        gui_message(win, "New Program", "That isn't a DOS program's file name.", GUI_MB_OK);
+        gui_message(win, GUI_T("New Program"), GUI_T("That isn't a DOS program's file name."), GUI_MB_OK);
         return;
     }
     for (i = 0; i < nprogs && !same(progs[i], name); i++)
@@ -339,8 +340,8 @@ static void prog_del(struct gui_widget *w, int what)
     (void)w, (void)what;
     if (prog_at < 0)
         return;
-    snprintf(q, sizeof q, "Remove %s's profile? It runs with GLOS's defaults then.", progs[prog_at]);
-    if (gui_message(win, "Remove", q, GUI_MB_YESNO) != GUI_YES)
+    snprintf(q, sizeof q, GUI_T("Remove %s's profile? It runs with GLOS's defaults then."), progs[prog_at]);
+    if (gui_message(win, GUI_T("Remove"), q, GUI_MB_YESNO) != GUI_YES)
         return;
     snprintf(sec, sizeof sec, "program %s", progs[prog_at]);
     for (i = 0; i < cfg_schema_n; i++)          /* every key it has: the default */
@@ -389,25 +390,25 @@ static void types_add(struct gui_widget *w, int what)
             return;
         v = gui_list_user(types_list, r);
         snprintf(prog, sizeof prog, "%s", val_text(v));
-        snprintf(q, sizeof q, "The program that opens %s files:", v->key);
-        if (!gui_ask(win, "Change", q, prog, sizeof prog))
+        snprintf(q, sizeof q, GUI_T("The program that opens %s files:"), v->key);
+        if (!gui_ask(win, GUI_T("Change"), q, prog, sizeof prog))
             return;
         val_put(v, prog);
         types_fill();
         return;
     }
-    if (!gui_ask(win, "Add", "The kind of file (.EXT):", ext, sizeof ext))
+    if (!gui_ask(win, GUI_T("Add"), GUI_T("The kind of file (.EXT):"), ext, sizeof ext))
         return;
     for (i = 0; ext[i]; i++)
         if (ext[i] >= 'a' && ext[i] <= 'z')
             ext[i] -= 32;
     if (ext[0] != '.' || !ext[1] || strlen(ext) > 4 || !(v = val_of("open", ext))) {
-        gui_message(win, "Add", "A kind of file is a dot and up to three letters: .TXT", GUI_MB_OK);
+        gui_message(win, GUI_T("Add"), GUI_T("A kind of file is a dot and up to three letters: .TXT"), GUI_MB_OK);
         return;
     }
-    snprintf(q, sizeof q, "The program that opens %s files:", ext);
+    snprintf(q, sizeof q, GUI_T("The program that opens %s files:"), ext);
     snprintf(prog, sizeof prog, "%s", val_text(v));
-    if (!gui_ask(win, "Add", q, prog, sizeof prog))
+    if (!gui_ask(win, GUI_T("Add"), q, prog, sizeof prog))
         return;
     val_put(v, prog);
     types_fill();
@@ -566,7 +567,7 @@ static int apply(void)
                          strncmp(v->sec, "program ", 8) ? "" : " of ", strncmp(v->sec, "program ", 8) ? "" : v->sec + 8,
                          why);
                 show_val(v);
-                gui_message(win, "Not Applied", msg, GUI_MB_OK);
+                gui_message(win, GUI_T("Not Applied"), msg, GUI_MB_OK);
                 return 0;
             }
             if (!*p++ || v->k->type != CFG_ENV)
@@ -584,9 +585,10 @@ static int apply(void)
             r = glos_setting_set(v->sec, v->key, v->now, &when, why, sizeof why) != 0 ? -1
                 : v->now ? (int)when : v->k->when;      /* (v->now NULL: taken out of the file) */
             if (r < 0) {
-                snprintf(msg, sizeof msg, "[%s] %s couldn't be set: %s", v->sec, v->key, why[0] ? why : "GLOS refused it");
+                snprintf(msg, sizeof msg, GUI_T("[%s] %s couldn't be set: %s"), v->sec, v->key,
+                         why[0] ? why : GUI_T("GLOS refused it"));
                 show_val(v);
-                gui_message(win, "Not Applied", msg, GUI_MB_OK);
+                gui_message(win, GUI_T("Not Applied"), msg, GUI_MB_OK);
                 return 0;
             }
             say_value(v->now ? "set" : "unset", v);
@@ -617,8 +619,9 @@ static int apply(void)
     }
     free(old_mode);
     changes_made += n;
-    gui_set_text(status, !n ? "Nothing was changed." : later ? "Applied. Some changes take effect later (see each one)."
-                                                              : "Applied.");
+    gui_set_text(status, !n       ? GUI_T("Nothing was changed.")
+                         : later ? GUI_T("Applied. Some changes take effect later (see each one).")
+                                 : GUI_T("Applied."));
     return 1;
 }
 
@@ -678,7 +681,7 @@ static void read_file(void)
 
 int main(int argc, char **argv)
 {
-    static const char *const heads[2] = { "Kind", "Opened by" };
+    static const char *const heads[2] = { GUI_N("Kind"), GUI_N("Opened by") };
     static const int widths[2] = { 70, 200 };
     struct gui_widget *box, *page, *form, *row, *left, *b;
     int s, i;
@@ -686,7 +689,8 @@ int main(int argc, char **argv)
         printf("CONTROL no GLOS\n");
         return 1;
     }
-    win = gui_window("Control Panel", 600, 440, 0);   /* (as tall as 640x480 allows: the pages' titles take two rows) */
+    win = gui_window(GUI_T("Control Panel"), 600, 440, 0); /* (as tall as 640x480 allows: the pages' titles take
+                                                                two rows) */
     box = gui_vbox(win->root, 6, 8);
     gui_grow(box, 1);
     tabs = gui_tabs(box);
@@ -694,17 +698,17 @@ int main(int argc, char **argv)
     gui_grow(tabs, 1);
     for (s = 0; cfg_sections[s]; s++) {
         const char *sec = cfg_sections[s];
-        page = gui_tab(tabs, titles[s]);
+        page = gui_tab(tabs, GUI_T(titles[s]));
         if (!strcmp(sec, "open")) {
             types_page = s;
-            gui_label(page, "Kinds of file, and the program the file manager opens each with:");
+            gui_label(page, GUI_T("Kinds of file, and the program the file manager opens each with:"));
             types_list = gui_list(page, 2, heads, widths);
             gui_grow(types_list, 1);
             row = gui_hbox(page, 6, 0);
             gui_space(row, 0, 0);
-            gui_button(row, "&Add...", types_add, 1);
-            gui_button(row, "&Change...", types_add, 2);
-            gui_button(row, "&Remove", types_del, 3);
+            gui_button(row, GUI_T("&Add..."), types_add, 1);
+            gui_button(row, GUI_T("&Change..."), types_add, 2);
+            gui_button(row, GUI_T("&Remove"), types_del, 3);
             continue;
         }
         if (!strcmp(sec, "program")) {
@@ -712,14 +716,14 @@ int main(int argc, char **argv)
             row = gui_hbox(page, 10, 0);
             gui_grow(row, 1);
             left = gui_vbox(row, 4, 0);
-            gui_label(left, "Pro&grams:");
+            gui_label(left, GUI_T("Pro&grams:"));
             prog_list = gui_list(left, 1, NULL, NULL);
             gui_size(prog_list, 130, 0);
             gui_grow(prog_list, 1);
             gui_on(prog_list, prog_select, 0);
             b = gui_hbox(left, 6, 0);
-            gui_button(b, "&New...", prog_new, 0);
-            prog_remove = gui_button(b, "&Remove", prog_del, 0);
+            gui_button(b, GUI_T("&New..."), prog_new, 0);
+            prog_remove = gui_button(b, GUI_T("&Remove"), prog_del, 0);
             form = gui_form(row);
             gui_grow(form, 1);
         } else {
@@ -733,9 +737,9 @@ int main(int argc, char **argv)
     when_label = gui_label(box, "");
     row = gui_hbox(box, 6, 0);
     gui_space(row, 0, 0);
-    gui_button(row, "OK", on_button, GUI_OK)->flags |= GUI_DEFAULT;
-    gui_button(row, "Cancel", on_button, GUI_CANCEL_R)->flags |= GUI_CANCEL;
-    gui_button(row, "A&pply", on_button, 3);
+    gui_button(row, GUI_T("OK"), on_button, GUI_OK)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), on_button, GUI_CANCEL_R)->flags |= GUI_CANCEL;
+    gui_button(row, GUI_T("A&pply"), on_button, 3);
     status = gui_status(win);
 
     read_file();

@@ -106,7 +106,8 @@ static void place(struct pgrid *g)
 
 static void value_text(const struct gui_prop *p, char *t, int room)
 {
-    static const char *const faces[3] = { "Sans", "Bold", "Fixed" }, *const sizes[3] = { "small", "normal", "large" };
+    static const char *const faces[3] = { GUI_N("Sans"), GUI_N("Bold"), GUI_N("Fixed") },
+                      *const sizes[3] = { GUI_N("small"), GUI_N("normal"), GUI_N("large") };
     int n = 0;
     switch (p->kind) {
     case GUI_PROP_TEXT: snprintf(t, (size_t)room, "%s", p->text ? p->text : ""); break;
@@ -119,8 +120,9 @@ static void value_text(const struct gui_prop *p, char *t, int room)
         break;
     case GUI_PROP_COLOUR: snprintf(t, (size_t)room, "#%06X", p->rgb & 0xFFFFFF); break;
     case GUI_PROP_FONT:
-        snprintf(t, (size_t)room, "%s, %s", faces[p->font.face >= 0 && p->font.face < 3 ? p->font.face : 0],
-                 sizes[p->font.size >= 0 && p->font.size < 3 ? p->font.size : 1]);
+        snprintf(t, (size_t)room, GUI_T("%s, %s"),
+                 GUI_T(faces[p->font.face >= 0 && p->font.face < 3 ? p->font.face : 0]),
+                 GUI_T(sizes[p->font.size >= 0 && p->font.size < 3 ? p->font.size : 1]));
         break;
     default: t[0] = 0;
     }

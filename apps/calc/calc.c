@@ -58,7 +58,7 @@ static void refresh(void)
     else
         show_number(value, t, sizeof t);
     gui_set_text(display, t);
-    gui_set_text(mem_label, has_mem ? "M" : "");
+    gui_set_text(mem_label, has_mem ? GUI_T("M") : "");
 }
 
 static double current(void) { return entry[0] ? atof(entry) : value; }
@@ -252,7 +252,7 @@ static void command(struct gui_window *w, int id)
             refresh();
         }
     } else if (id == C_ABOUT) {
-        gui_message(win, "About Calculator", "Calculator: GLOS's pocket calculator.", GUI_MB_OK);
+        gui_message(win, GUI_T("About Calculator"), GUI_T("Calculator: GLOS's pocket calculator."), GUI_MB_OK);
     }
 }
 
@@ -275,15 +275,15 @@ int main(int argc, char **argv)
         printf("CALC no GLOS\n");
         return 1;
     }
-    win = gui_window("Calculator", 0, 0, GUI_W_FIXED);
+    win = gui_window(GUI_T("Calculator"), 0, 0, GUI_W_FIXED);
     win->on_command = command;
     win->on_key = key;
     bar = gui_menubar(win);
-    m = gui_menu(bar, "&Edit");
-    gui_menu_item(m, "&Copy", C_COPY, "Ctrl+C");
-    gui_menu_item(m, "&Paste", C_PASTE, "Ctrl+V");
-    m = gui_menu(bar, "&Help");
-    gui_menu_item(m, "&About Calculator", C_ABOUT, NULL);
+    m = gui_menu(bar, GUI_T("&Edit"));
+    gui_menu_item(m, GUI_T("&Copy"), C_COPY, GUI_T("Ctrl+C"));
+    gui_menu_item(m, GUI_T("&Paste"), C_PASTE, GUI_T("Ctrl+V"));
+    m = gui_menu(bar, GUI_T("&Help"));
+    gui_menu_item(m, GUI_T("&About Calculator"), C_ABOUT, NULL);
     box = gui_vbox(win->root, 4, 8);
     row = gui_hbox(box, 4, 0);
     mem_label = gui_label(row, "");

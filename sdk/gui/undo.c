@@ -177,13 +177,13 @@ static void told(struct gui_undo *u)
     const char *n;
     if (u->win && u->undo_id) {
         n = gui_undo_name(u, 0);
-        snprintf(text, sizeof text, n ? "&Undo %s" : "&Undo", n ? n : "");
+        snprintf(text, sizeof text, n ? GUI_T("&Undo %s") : GUI_T("&Undo"), n ? n : "");
         gui_command(u->win, u->undo_id, text, "Ctrl+Z", gui_glyph("undo"), NULL);
         gui_command_enable(u->win, u->undo_id, n != NULL);
     }
     if (u->win && u->redo_id) {
         n = gui_undo_name(u, 1);
-        snprintf(text, sizeof text, n ? "&Redo %s" : "&Redo", n ? n : "");
+        snprintf(text, sizeof text, n ? GUI_T("&Redo %s") : GUI_T("&Redo"), n ? n : "");
         gui_command(u->win, u->redo_id, text, "Ctrl+Y", gui_glyph("redo"), NULL);
         gui_command_enable(u->win, u->redo_id, n != NULL);
     }
@@ -210,7 +210,7 @@ static void h_row(void *ctx, int row, struct gui_vrow *out)
 {
     struct gui_undo *u = ctx;
     if (row == 0)
-        snprintf(row_text, sizeof row_text, "(the start)");
+        snprintf(row_text, sizeof row_text, GUI_T("(the start)"));
     else
         snprintf(row_text, sizeof row_text, "%s%s", u->s[row - 1].name, row > u->done ? " (undone)" : "");
     out->cell[0] = row_text;

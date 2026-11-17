@@ -55,8 +55,9 @@ static void cancel_click(struct gui_widget *w, int what)
 
 int gui_font_dialog(struct gui_window *owner, const char *title, struct gui_fontspec *f)
 {
-    static const char *const face_names[3] = { "Sans", "Sans bold", "Fixed width" };
-    static const char *const size_names[3] = { "Small (9 pixels)", "Normal (11 pixels)", "Large (14 pixels)" };
+    static const char *const face_names[3] = { GUI_N("Sans"), GUI_N("Sans bold"), GUI_N("Fixed width") };
+    static const char *const size_names[3] = { GUI_N("Small (9 pixels)"), GUI_N("Normal (11 pixels)"),
+        GUI_N("Large (14 pixels)") };
     struct gui_window *w = gui_window(title, 0, 0, GUI_W_DIALOG);
     struct gui_widget *box, *top, *col, *row;
     int i, r, face, size;
@@ -65,30 +66,30 @@ int gui_font_dialog(struct gui_window *owner, const char *title, struct gui_font
     box = gui_vbox(w->root, GUI_GAP, 10);
     top = gui_hbox(box, 12, 0);
     col = gui_vbox(top, 2, 0);
-    gui_label(col, "&Font:");
+    gui_label(col, GUI_T("&Font:"));
     F.faces = gui_list(col, 1, NULL, NULL);
     gui_size(F.faces, 150, 70);
     for (i = 0; i < 3; i++) {
-        const char *cells[1] = { face_names[i] };
+        const char *cells[1] = { GUI_T(face_names[i]) };
         gui_list_add(F.faces, cells, NULL, NULL);
     }
     col = gui_vbox(top, 2, 0);
-    gui_label(col, "&Size:");
+    gui_label(col, GUI_T("&Size:"));
     F.sizes = gui_list(col, 1, NULL, NULL);
     gui_size(F.sizes, 150, 70);
     for (i = 0; i < 3; i++)
         if (gui_font_get(GUI_FONT_SANS, i)) {   /* (the sizes there are) */
-            const char *cells[1] = { size_names[i] };
+            const char *cells[1] = { GUI_T(size_names[i]) };
             F.size_of[F.nsizes++] = i;
             gui_list_add(F.sizes, cells, NULL, NULL);
         }
-    gui_label(box, "Sample:");
-    F.preview = gui_label(box, "The quick brown fox, 0123456789");
+    gui_label(box, GUI_T("Sample:"));
+    F.preview = gui_label(box, GUI_T("The quick brown fox, 0123456789"));
     gui_size(F.preview, 320, 24);
     row = gui_hbox(box, GUI_GAP, 0);
     gui_space(row, 0, 0);
-    gui_button(row, "OK", ok_click, 0)->flags |= GUI_DEFAULT;
-    gui_button(row, "Cancel", cancel_click, 0)->flags |= GUI_CANCEL;
+    gui_button(row, GUI_T("OK"), ok_click, 0)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), cancel_click, 0)->flags |= GUI_CANCEL;
     face = f->face >= 0 && f->face <= 2 ? f->face : 0;
     gui_list_set(F.faces, face);
     for (i = 0, size = 0; i < F.nsizes; i++)

@@ -190,15 +190,16 @@ static int load(const char *path)
     int w = 0, h = 0;
     unsigned *px = NULL;
     if (!(d = read_all(path, &n))) {
-        gui_message(win, "Images", "The file isn't there.", GUI_MB_OK);
+        gui_message(win, GUI_T("Images"), GUI_T("The file isn't there."), GUI_MB_OK);
         return -1;
     }
     px = decode(d, n, path, &w, &h, pic.kind, sizeof pic.kind);
     free(d);
     if (!px) {
         char t[300], name[128];
-        snprintf(t, sizeof t, "%s isn't a picture Images can show.", gui_dos_text(gui_path_name(path), name, sizeof name));
-        gui_message(win, "Images", t, GUI_MB_OK);
+        snprintf(t, sizeof t, GUI_T("%s isn't a picture Images can show."),
+                 gui_dos_text(gui_path_name(path), name, sizeof name));
+        gui_message(win, GUI_T("Images"), t, GUI_MB_OK);
         return -1;
     }
     free(pic.px);
@@ -210,7 +211,7 @@ static int load(const char *path)
     }
     {
         char t[300], name[128];
-        snprintf(t, sizeof t, "%s - Images", gui_dos_text(gui_path_name(path), name, sizeof name));
+        snprintf(t, sizeof t, GUI_T("%s - Images"), gui_dos_text(gui_path_name(path), name, sizeof name));
         gui_title(win, t);
     }
     printf("IMAGES open %s %dx%d %s\n", path, w, h, pic.kind);
@@ -332,8 +333,8 @@ static void preview(struct gui_widget *pane, struct gfx_surface *s, const char *
     }
 }
 
-static const char *const filters[] = { "Pictures|*.PNG;*.JPG;*.BMP;*.GIF;*.TGA;*.PNM;*.PPM;*.PGM;*.PCX",
-                                        "All files|*.*", NULL };
+static const char *const filters[] = { GUI_N("Pictures|*.PNG;*.JPG;*.BMP;*.GIF;*.TGA;*.PNM;*.PPM;*.PGM;*.PCX"),
+                                        GUI_N("All files|*.*"), NULL };
 static struct gui_file_opts file_opts = { filters, 0, NULL, 0, NULL, 0, preview, NULL };
 
 /* ---- showing */
@@ -353,7 +354,7 @@ static void status_line(void)
 {
     char t[200], name[128];
     if (!pic.px) {
-        gui_set_text(status, "No picture");
+        gui_set_text(status, GUI_T("No picture"));
         return;
     }
     snprintf(t, sizeof t, "%s   %d x %d   %s   %d%%%s", gui_dos_text(gui_path_name(pic.path), name, sizeof name), pic.w,
@@ -380,7 +381,7 @@ static void command(struct gui_window *w, int id)
     switch (id) {
     case C_OPEN:
         snprintf(p, sizeof p, "%s", pic.path[0] ? pic.path : glos_boot_root());
-        if (gui_file_dialog_ex(win, "Open", 0, p, sizeof p, &file_opts))
+        if (gui_file_dialog_ex(win, GUI_T("Open"), 0, p, sizeof p, &file_opts))
             load(p);
         free(thumb.px);                         /* (the preview's copy: not wanted until the next Open) */
         memset(&thumb, 0, sizeof thumb);
@@ -407,7 +408,8 @@ static void command(struct gui_window *w, int id)
         break;
     }
     case C_ABOUT:
-        gui_message(win, "About Images", "Images: GLOS's picture viewer. PNG, JPEG, BMP, GIF, TGA, PNM and PCX.",
+        gui_message(win, GUI_T("About Images"),
+                    GUI_T("Images: GLOS's picture viewer. PNG, JPEG, BMP, GIF, TGA, PNM and PCX."),
                     GUI_MB_OK);
         break;
     }
@@ -451,24 +453,24 @@ int main(int argc, char **argv)
         printf("IMAGES no GLOS\n");
         return 1;
     }
-    win = gui_window("Images", 480, 360, 0);
+    win = gui_window(GUI_T("Images"), 480, 360, 0);
     win->on_command = command;
     win->on_key = key;
     win->on_resize = resized;
     bar = gui_menubar(win);
-    m = gui_menu(bar, "&File");
-    gui_menu_item(m, "&Open...", C_OPEN, "Ctrl+O");
-    gui_menu_item(m, "&Next", C_NEXT, "PgDn");
-    gui_menu_item(m, "&Previous", C_PREV, "PgUp");
+    m = gui_menu(bar, GUI_T("&File"));
+    gui_menu_item(m, GUI_T("&Open..."), C_OPEN, GUI_T("Ctrl+O"));
+    gui_menu_item(m, GUI_T("&Next"), C_NEXT, GUI_T("PgDn"));
+    gui_menu_item(m, GUI_T("&Previous"), C_PREV, GUI_T("PgUp"));
     gui_menu_sep(m);
-    gui_menu_item(m, "E&xit", C_EXIT, NULL);
-    m = gui_menu(bar, "&View");
-    gui_menu_item(m, "&Fit to window", C_FIT, "F");
-    gui_menu_item(m, "&Actual size", C_ACTUAL, "1");
-    gui_menu_item(m, "Zoom &in", C_IN, NULL);
-    gui_menu_item(m, "Zoom &out", C_OUT, NULL);
-    m = gui_menu(bar, "&Help");
-    gui_menu_item(m, "&About Images", C_ABOUT, NULL);
+    gui_menu_item(m, GUI_T("E&xit"), C_EXIT, NULL);
+    m = gui_menu(bar, GUI_T("&View"));
+    gui_menu_item(m, GUI_T("&Fit to window"), C_FIT, GUI_T("F"));
+    gui_menu_item(m, GUI_T("&Actual size"), C_ACTUAL, "1");
+    gui_menu_item(m, GUI_T("Zoom &in"), C_IN, NULL);
+    gui_menu_item(m, GUI_T("Zoom &out"), C_OUT, NULL);
+    m = gui_menu(bar, GUI_T("&Help"));
+    gui_menu_item(m, GUI_T("&About Images"), C_ABOUT, NULL);
     view = gui_image_view(gui_vbox(win->root, 0, 0));
     gui_cview_on_event(view, view_event);
     gui_grow(view->parent, 1);

@@ -69,10 +69,10 @@ static void status_text(struct view *v)
         chosen += gui_list_chosen(v->list, i);
     }
     if (chosen)
-        snprintf(t, sizeof t, "%d of %d chosen", chosen, v->n);
+        snprintf(t, sizeof t, GUI_T("%d of %d chosen"), chosen, v->n);
     else
-        snprintf(t, sizeof t, "%d folder%s, %d file%s, %lu bytes", dirs, dirs == 1 ? "" : "s", files, files == 1 ? "" : "s",
-                 bytes);
+        snprintf(t, sizeof t, GUI_T("%d folder%s, %d file%s, %lu bytes"), dirs, dirs == 1 ? "" : "s", files,
+                 files == 1 ? "" : "s", bytes);
     gui_set_text(v->status, t);
 }
 
@@ -93,7 +93,7 @@ static void fill(struct view *v)
         const char *cells[3];
         const struct gui_dirent *e = &v->ents[i];
         if (e->dir)
-            snprintf(size, sizeof size, "Folder");
+            snprintf(size, sizeof size, GUI_T("Folder"));
         else
             snprintf(size, sizeof size, "%lu", e->size);
         snprintf(date, sizeof date, "%04u-%02u-%02u %02u:%02u", (e->date >> 9) + 1980, (e->date >> 5) & 15, e->date & 31,
@@ -243,7 +243,7 @@ static int dos_name(struct gui_window *w, char *name)
 {
     char b[128];
     if (gui_text_dos(name, b, sizeof b) != 0) {
-        gui_message(w, "Files", "DOS's code page hasn't got all of the name's letters.", GUI_MB_OK);
+        gui_message(w, GUI_T("Files"), GUI_T("DOS's code page hasn't got all of the name's letters."), GUI_MB_OK);
         return 0;
     }
     strcpy(name, b);
@@ -266,12 +266,12 @@ static void command(struct gui_window *w, int id)
         break;
     case C_NEWDIR:
         snprintf(name, sizeof name, "NEWDIR");
-        if (gui_ask(w, "New Folder", "The new folder's name:", name, sizeof name) && name[0]) {
+        if (gui_ask(w, GUI_T("New Folder"), GUI_T("The new folder's name:"), name, sizeof name) && name[0]) {
             if (!dos_name(w, name))
                 break;
             gui_path_join(to, sizeof to, v->dir, name);
             if (gui_mkdir(to) != 0)
-                gui_message(w, "Files", "The folder couldn't be made.", GUI_MB_OK);
+                gui_message(w, GUI_T("Files"), GUI_T("The folder couldn't be made."), GUI_MB_OK);
             else
                 say("made", to);
             fill(v);
@@ -282,12 +282,12 @@ static void command(struct gui_window *w, int id)
             break;
         gui_path_join(from, sizeof from, v->dir, v->ents[(size_t)gui_list_user(v->list, r)].name);
         snprintf(name, sizeof name, "%s", v->ents[(size_t)gui_list_user(v->list, r)].text);
-        if (gui_ask(w, "Rename", "Its new name:", name, sizeof name) && name[0]) {
+        if (gui_ask(w, GUI_T("Rename"), GUI_T("Its new name:"), name, sizeof name) && name[0]) {
             if (!dos_name(w, name))
                 break;
             gui_path_join(to, sizeof to, v->dir, name);
             if (gui_rename(from, to) != 0)
-                gui_message(w, "Files", "It couldn't be renamed.", GUI_MB_OK);
+                gui_message(w, GUI_T("Files"), GUI_T("It couldn't be renamed."), GUI_MB_OK);
             else
                 say("renamed", to);
             fill(v);
@@ -297,10 +297,10 @@ static void command(struct gui_window *w, int id)
         if (!(n = chosen_paths(v, paths, 64)))
             break;
         if (n == 1)
-            snprintf(t, sizeof t, "Delete %s?", gui_dos_text(gui_path_name(paths[0]), name, sizeof name));
+            snprintf(t, sizeof t, GUI_T("Delete %s?"), gui_dos_text(gui_path_name(paths[0]), name, sizeof name));
         else
-            snprintf(t, sizeof t, "Delete these %d?", n);
-        if (gui_message(w, "Delete", t, GUI_MB_YESNO) == GUI_YES) {
+            snprintf(t, sizeof t, GUI_T("Delete these %d?"), n);
+        if (gui_message(w, GUI_T("Delete"), t, GUI_MB_YESNO) == GUI_YES) {
             for (i = 0; i < n; i++)
                 if (remove_tree(paths[i]) == 0)
                     say("deleted", paths[i]);
@@ -428,30 +428,30 @@ static void closing(struct gui_window *w)
 static struct gui_menu *menus(struct gui_window *w, int browser)
 {
     struct gui_menubar *bar = gui_menubar(w);
-    struct gui_menu *m = gui_menu(bar, "&File");
-    gui_menu_item(m, "&Open", C_OPEN, NULL);
-    gui_menu_item(m, "&New Folder", C_NEWDIR, "Ctrl+Shift+N");
-    gui_menu_item(m, "&Rename", C_RENAME, "F2");
-    gui_menu_item(m, "&Delete", C_DELETE, "Del");
+    struct gui_menu *m = gui_menu(bar, GUI_T("&File"));
+    gui_menu_item(m, GUI_T("&Open"), C_OPEN, NULL);
+    gui_menu_item(m, GUI_T("&New Folder"), C_NEWDIR, GUI_T("Ctrl+Shift+N"));
+    gui_menu_item(m, GUI_T("&Rename"), C_RENAME, GUI_T("F2"));
+    gui_menu_item(m, GUI_T("&Delete"), C_DELETE, GUI_T("Del"));
     gui_menu_sep(m);
-    gui_menu_item(m, "&Close", C_CLOSE, "Ctrl+W");
-    m = gui_menu(bar, "&Edit");
-    gui_menu_item(m, "Cu&t", C_CUT, "Ctrl+X");
-    gui_menu_item(m, "&Copy", C_COPY, "Ctrl+C");
-    gui_menu_item(m, "&Paste", C_PASTE, "Ctrl+V");
+    gui_menu_item(m, GUI_T("&Close"), C_CLOSE, GUI_T("Ctrl+W"));
+    m = gui_menu(bar, GUI_T("&Edit"));
+    gui_menu_item(m, GUI_T("Cu&t"), C_CUT, GUI_T("Ctrl+X"));
+    gui_menu_item(m, GUI_T("&Copy"), C_COPY, GUI_T("Ctrl+C"));
+    gui_menu_item(m, GUI_T("&Paste"), C_PASTE, GUI_T("Ctrl+V"));
     gui_menu_sep(m);
-    gui_menu_item(m, "Select &All", C_ALL, "Ctrl+A");
-    m = gui_menu(bar, "&View");
-    gui_menu_item(m, "&Large icons", C_BIG, NULL);
-    gui_menu_item(m, "&Details", C_DETAILS, NULL);
+    gui_menu_item(m, GUI_T("Select &All"), C_ALL, GUI_T("Ctrl+A"));
+    m = gui_menu(bar, GUI_T("&View"));
+    gui_menu_item(m, GUI_T("&Large icons"), C_BIG, NULL);
+    gui_menu_item(m, GUI_T("&Details"), C_DETAILS, NULL);
     gui_menu_sep(m);
-    gui_menu_item(m, "&Refresh", C_REFRESH, "F5");
+    gui_menu_item(m, GUI_T("&Refresh"), C_REFRESH, GUI_T("F5"));
     {
         struct gui_menu *view = m;
-        m = gui_menu(bar, "&Go");
-        gui_menu_item(m, "&Up a folder", C_UP, "Backspace");
+        m = gui_menu(bar, GUI_T("&Go"));
+        gui_menu_item(m, GUI_T("&Up a folder"), C_UP, GUI_T("Backspace"));
         if (!browser)
-            gui_menu_item(m, "&Browser", C_BROWSER, NULL);
+            gui_menu_item(m, GUI_T("&Browser"), C_BROWSER, NULL);
         return view;
     }
 }
@@ -459,7 +459,7 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
 static struct view *new_view(const char *dir, int browser)
 {
     struct view *v = calloc(1, sizeof *v);
-    static const char *const heads[3] = { "Name", "Size", "Modified" };
+    static const char *const heads[3] = { GUI_N("Name"), GUI_N("Size"), GUI_N("Modified") };
     static const int widths[3] = { 130, 70, 120 };
     int i, x = -1, y = -1, w = 420, h = 280;
     if (!v)

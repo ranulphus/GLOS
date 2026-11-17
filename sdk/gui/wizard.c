@@ -145,8 +145,8 @@ static void show(struct wizard *z)
         ;
     gui_enable(z->back, z->at > first);
     gui_enable(z->next, z->next_ok);
-    if (strcmp(gui_get_text(z->next), z->at >= last ? "&Finish" : "&Next >"))
-        gui_set_text(z->next, z->at >= last ? "&Finish" : "&Next >");
+    if (strcmp(gui_get_text(z->next), z->at >= last ? GUI_T("&Finish") : GUI_T("&Next >")))
+        gui_set_text(z->next, z->at >= last ? GUI_T("&Finish") : GUI_T("&Next >"));
     gui_damage(&z->w);
     if (z->w.win)
         gui_relayout(z->w.win);
@@ -206,10 +206,10 @@ struct gui_widget *gui_wizard(struct gui_widget *parent, unsigned flags)
     struct wizard *z = (struct wizard *)gui_new(parent, &wz_class, sizeof *z);
     z->flags = flags;
     z->next_ok = 1;
-    z->back = gui_button(&z->w, "< &Back", back_click, 0);
-    z->next = gui_button(&z->w, "&Next >", next_click, 0);
+    z->back = gui_button(&z->w, GUI_T("< &Back"), back_click, 0);
+    z->next = gui_button(&z->w, GUI_T("&Next >"), next_click, 0);
     z->next->flags |= GUI_DEFAULT;
-    z->cancel = gui_button(&z->w, "Cancel", cancel_click, 0);
+    z->cancel = gui_button(&z->w, GUI_T("Cancel"), cancel_click, 0);
     z->cancel->flags |= GUI_CANCEL;
     return &z->w;
 }
