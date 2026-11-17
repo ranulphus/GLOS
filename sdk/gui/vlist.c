@@ -41,6 +41,8 @@ struct vlist {
     int band, bx0, by0, bx1, by1;       /* a grid's rubber band: held, and its corners (the window's
                                            coordinates; by0 moves with the scrolling) */
     struct gui_sb sb;
+    void (*sort_hook)(struct gui_widget *w, int col, int down);       /* (gui_list's: it sorts its own rows) */
+    void (*drop_hook)(void *ctx);       /* (... and frees them with the widget) */
 };
 
 #define CELL_W  76                      /* a big icon's place in the grid (as gui_list's big icons) */
@@ -454,7 +456,10 @@ static int vl_event(struct gui_widget *w, struct gui_ev *e)
             l->sort_down = moved == l->sort_col ? !l->sort_down : 0;
             l->sort_col = moved;
             gui_damage(w);
-            gui_send(w, GUI_ON_SORT);           /* (the app sorts, and says the list changed) */
+            if (l->sort_hook)                   /* (gui_list's rows: it sorts them itself) */
+                l->sort_hook(w, l->sort_col, l->sort_down);
+            else
+                gui_send(w, GUI_ON_SORT);       /* (the app sorts, and says the list changed) */
             return 1;
         }
     }
@@ -633,6 +638,32 @@ static void vl_destroy(struct gui_widget *w)
         free(l->heads[i]);
     free(l->heads);
     free(l->chosen);
+    if (l->drop_hook)
+        l->drop_hook(l->m.ctx);
+}
+
+/* (list.c: gui_list on the virtual list) its hooks; whether a row is chosen; the head's sort shown */
+void gui_vlist_hooks(struct gui_widget *w, void (*sort)(struct gui_widget *w, int col, int down), void (*drop)(void *ctx))
+{
+    VL(w)->sort_hook = sort, VL(w)->drop_hook = drop;
+}
+
+void *gui_vlist_ctx(struct gui_widget *w) { return VL(w)->m.ctx; }
+
+int gui_vlist_is_chosen(struct gui_widget *w, unsigned long id)
+{
+    struct vlist *l = VL(w);
+    int i;
+    for (i = 0; i < l->nchosen; i++)
+        if (l->chosen[i] == id)
+            return 1;
+    return 0;
+}
+
+void gui_vlist_sort_show(struct gui_widget *w, int col, int down)
+{
+    VL(w)->sort_col = col, VL(w)->sort_down = down;
+    gui_damage(w);
 }
 
 static const struct gui_class vlist_class = { "vlist", GUI_C_FOCUS, vl_draw, vl_event, vl_measure, NULL, vl_destroy };

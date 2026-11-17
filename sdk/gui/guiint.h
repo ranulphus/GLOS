@@ -140,6 +140,15 @@ int gui_res_combo_items(struct gui_widget *w, char ***items);
 int gui_res_choice(struct gui_widget *w, int *chars, const char **items, int room);
 void gui_res_choice_chars(struct gui_widget *w, int chars);
 
+/* vlist.c's, for list.c (gui_list on the virtual list) */
+void gui_vlist_hooks(struct gui_widget *w, void (*sort)(struct gui_widget *w, int col, int down), void (*drop)(void *ctx));
+int gui_vlist_is_chosen(struct gui_widget *w, unsigned long id);
+void *gui_vlist_ctx(struct gui_widget *w);     /* its model's ctx */
+/* vtree.c's, for list.c (gui_tree on the virtual tree) */
+void gui_vtree_hooks(struct gui_widget *w, void (*opening)(struct gui_widget *w, unsigned long id), void (*drop)(void *ctx));
+void *gui_vtree_ctx(struct gui_widget *w);
+void gui_vlist_sort_show(struct gui_widget *w, int col, int down);
+
 /* rich.c */
 void gui_rdoc_drop_last(struct gui_rdoc *d);
 int gui_rdoc_last_empty(const struct gui_rdoc *d);

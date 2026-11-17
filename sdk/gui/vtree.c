@@ -25,6 +25,9 @@ struct vtree {
     unsigned long cur_id;
     struct gui_sb sb;
     int dpress, dpx, dpy;               /* (toolkit 2, C7) a node pressed: dragged if it moves (dnd.c) */
+    void (*opening_hook)(struct gui_widget *w, unsigned long id);    /* (gui_tree's: told before a node opens, so
+                                           that its app adds the node's children then) */
+    void (*drop_hook)(void *ctx);       /* (... and its nodes freed with the widget) */
     int drop_at;                        /* a drag over it: the row of the node a drop would go into (-1: none) */
 };
 
@@ -130,6 +133,8 @@ static void open_at(struct vtree *t, int at, int on)
     if (on) {
         unsigned long id = s->id;
         int depth = s->depth + 1, k;
+        if (t->opening_hook)
+            t->opening_hook(&t->w, id);
         k = add_children(t, id, at + 1, depth);
         t->v[at].open = 1;
         if (!k)
@@ -323,7 +328,12 @@ static int vt_event(struct gui_widget *w, struct gui_ev *e)
     return 0;
 }
 
-static void vt_destroy(struct gui_widget *w) { free(VT(w)->v); }
+static void vt_destroy(struct gui_widget *w)
+{
+    free(VT(w)->v);
+    if (VT(w)->drop_hook)
+        VT(w)->drop_hook(VT(w)->m.ctx);
+}
 
 static const struct gui_class vtree_class = { "vtree", GUI_C_FOCUS, vt_draw, vt_event, vt_measure, NULL, vt_destroy };
 
@@ -337,6 +347,14 @@ struct gui_widget *gui_vtree(struct gui_widget *parent, const struct gui_tmodel 
 }
 
 unsigned long gui_vtree_get(struct gui_widget *w) { return VT(w)->cur >= 0 ? VT(w)->cur_id : 0; }
+
+/* (list.c: gui_tree on the virtual tree) its hooks and its model's ctx */
+void gui_vtree_hooks(struct gui_widget *w, void (*opening)(struct gui_widget *w, unsigned long id), void (*drop)(void *ctx))
+{
+    VT(w)->opening_hook = opening, VT(w)->drop_hook = drop;
+}
+
+void *gui_vtree_ctx(struct gui_widget *w) { return VT(w)->m.ctx; }
 
 unsigned long gui_vtree_id_at(struct gui_widget *w, int row)   /* (a drop's place) the node on show at that row */
 {

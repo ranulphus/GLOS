@@ -797,6 +797,19 @@ widget now draws, and each such change is looked at before its goldens are made 
 5. The gallery app whole: GUITEST's gallery page every widget of toolkit 1 and 2, in the three themes.
 6. `docs/gui.md` the toolkit's whole reference.
 
+### C10 as built (in progress)
+
+- **C10a, the list and the tree on the models** (`sdk/gui/list.c`): `gui_list` is now the virtual list over rows it
+  keeps itself (each with an id of its own, so that the current and chosen rows follow a row wherever sorting puts
+  it; the app's comparison sorts them when a head is pressed, through the virtual list's sort hook, and the head
+  shows the arrow; the icon grid is `GUI_VIEW_ICONS`; type-ahead by the model's match). `gui_tree` is the virtual
+  tree over nodes it keeps (a node's id its address); the virtual tree tells it before a node opens, so that the app
+  still adds a node's children on `GUI_ON_CHANGE` (`gui_tree_opening`), and a node with none after all loses its
+  box. The calls are as they were; Files, Monitor and the Control Panel did not change. Pictures changed only where
+  a list draws (the sort arrow on the sorted head, the icon grid's spacing and its chosen icon); no script's lines
+  changed. Loop A: GUITEST's gallery, icons, themes and text sizes, and the apps suite's Files, Files' browser,
+  Monitor and the Control Panel, on a 486 and a Pentium II.
+
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
 - **Farm-Fresh** (FatCow; CC BY 3.0) for colour icons and **Font Awesome Free, solid** (CC BY 4.0) for the
