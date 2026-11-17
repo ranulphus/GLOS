@@ -1,0 +1,35 @@
+# The rich-text view and Markdown (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's Markdown page, its
+# blocks as Markdown made them (headings, a paragraph's styles and links, lists nested and numbered, a quote,
+# fenced code, a table with its head, a rule, a block that opens and closes, a picture's words, a struck word, an
+# autolink). Tab reaches the first link and Enter follows it; a page down; text chosen by the mouse (the Chosen
+# button says what); the summary pressed opens its block.
+run GUITEST.EXE rich
+wait "GUITEST Rich text"
+shot top "GUITEST Rich text"
+key tab enter
+key pgdn
+shot down "GUITEST Rich text"
+drag "GUITEST Rich text" 6 255 110 255
+key alt+c
+click "GUITEST Rich text" 60 207
+shot opened "GUITEST Rich text"
+key alt+f4
+gone "GUITEST Rich text"
+expect GUI block 0 H1: Getting started
+expect GUI block 1 P: GLOS runs  *DOS programs*  and  /its own/  apps side by side. Press  `Alt+Tab`  to go between them, or see  [the manual](help:manual) .
+expect GUI block 2 H2: Lists
+expect GUI block 5 BULLET d1: its find
+expect GUI block 7 NUMBER 1.: First
+expect GUI block 9 QUOTE: A quote that is long enough to wrap on to a second line in the view.
+expect GUI block 10 CODE: make all|make test
+expect GUI block 11 ROW: *Key*  | *Does*
+expect GUI block 13 ROW: Esc  | Leaves
+expect GUI block 14 RULE:
+expect GUI block 15 DETAILS shut: More about windows
+expect GUI block 16 P in15: Windows can be  *moved*  and sized.
+expect GUI block 17 IMAGE: The desktop
+expect GUI block 18 P: A last paragraph with  ~old~  new text and  [https://glos.example/](https://glos.example/) .
+expect GUI rich
+expect GUI link help:manual
+expect GUI chosen: A last paragraph w
+expect GUI end

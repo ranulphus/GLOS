@@ -1,0 +1,27 @@
+# The tour (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's four steps by Enter (Next, the
+# bubble's default): under the Open button (the tab up at it), under the field, over GLOS's Start button (SHELL's
+# POINT; the tab down at it, the bubble kept on the screen), and in the middle with nowhere to point (Done). Again,
+# closed by Esc at the second step.
+run GUITEST.EXE tour
+wait "GUITEST Tour"
+key alt+t
+wait "Tour"
+shot step1 "Tour"
+key enter
+shot step2 "Tour"
+key enter
+shot step3 "Tour"
+key enter
+shot step4 "Tour"
+key enter
+gone "Tour"
+key alt+t
+wait "Tour"
+key enter esc
+gone "Tour"
+key alt+f4
+gone "GUITEST Tour"
+expect GUI tour
+expect GUI tour finished at step 4
+expect GUI tour closed at step 2
+expect GUI end

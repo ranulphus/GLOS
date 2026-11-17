@@ -848,6 +848,38 @@ static int config_keys(const char *section, char *out, unsigned room)
     return (int)(n < room ? n : room);
 }
 
+/* Other programs' windows (the preview surface's): none here, for no other program runs. */
+int glos_windows(unsigned app, struct glos_win_info *out, unsigned max, unsigned *count)
+{
+    (void)app, (void)out, (void)max;
+    *count = 0;
+    return 0;
+}
+
+int glos_embed(glos_handle w, unsigned window, int x, int y, int cw, int ch)
+{
+    (void)w, (void)window, (void)x, (void)y, (void)cw, (void)ch;
+    return GLOS_E_REFUSED;
+}
+
+/* The shell's parts (SHELL's POINT), as GLOS lays them out on this screen: a task bar 20 high along the bottom,
+   the Start button at its left, the tray and the clock at its right. */
+int glos_point(unsigned what, struct glos_point *out)
+{
+    int y = H.sh - 20;
+    memset(out, 0, sizeof *out);
+    out->size = sizeof *out, out->what = what;
+    switch (what) {
+    case GLOS_POINT_START: out->x = 0, out->y = y, out->w = 62, out->h = 20; break;      /* (kernel/wm/wm.c BAR_NAME) */
+    case GLOS_POINT_BAR: out->x = 0, out->y = y, out->w = H.sw, out->h = 20; break;
+    case GLOS_POINT_TRAY: out->x = H.sw - 84, out->y = y, out->w = 40, out->h = 20; break;
+    case GLOS_POINT_CLOCK: out->x = H.sw - 44, out->y = y, out->w = 44, out->h = 20; break;
+    case GLOS_POINT_WORK: out->x = 0, out->y = 0, out->w = H.sw, out->h = y; break;
+    default: return GLOS_E_ARGUMENT;
+    }
+    return 0;
+}
+
 /* The region: GLOS's defaults, and any [region] setting a script's `config region KEY VALUE` made. */
 int glos_region(struct glos_region *g)
 {

@@ -1,0 +1,24 @@
+# The chat view (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's chat, kept to twelve blocks. Lines
+# with who wrote them in bold in their colour, Markdown's inline styles and links, a message of several blocks;
+# fifteen more lines (the oldest go, the view at the end); scrolled back, a line sent leaves it where it is; at the
+# end again (End), a line sent is followed.
+run GUITEST.EXE chat
+wait "GUITEST Chat"
+shot start "GUITEST Chat"
+key alt+m
+shot many "GUITEST Chat"
+key alt+s
+key shift+tab
+key pgup
+key alt+s
+shot back "GUITEST Chat"
+key shift+tab
+key end
+key alt+s
+shot end "GUITEST Chat"
+key alt+f4
+gone "GUITEST Chat"
+expect GUI chat
+expect GUI blocks 5
+expect GUI blocks 12
+expect GUI end

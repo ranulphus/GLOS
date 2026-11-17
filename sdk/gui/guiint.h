@@ -129,4 +129,8 @@ void gui_post_command(struct gui_window *w, int id);    /* w's on_command(id), t
 void gui_popdown_all(void);
 int gui_menubar_height(struct gui_menubar *b);
 
+/* rich.c */
+void gui_rdoc_drop_last(struct gui_rdoc *d);
+int gui_rdoc_last_empty(const struct gui_rdoc *d);
+
 #endif

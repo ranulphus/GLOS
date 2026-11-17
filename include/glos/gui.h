@@ -800,6 +800,74 @@ int gui_term_cols(struct gui_widget *w);
 int gui_term_line(struct gui_widget *w, int line, char *out, int room);        /* its text (UTF-8), trailing blanks
                                            off: its length, or -1 */
 int gui_term_dump(struct gui_widget *w, char *out, int room);  /* the screen as text, a line a row (the tests') */
+/* (toolkit 2) A tour: steps one after another, each a bubble beside its place with a tab towards it, the place
+   framed in the accent colour: a part of the shell (point: GLOS_POINT_) or a widget of the app's (at), or no place
+   (the middle of the screen). Back, Next (Done on the last), Close; Enter is Next, Esc closes. done hears the step
+   it ended at and whether it was finished. */
+struct gui_tour_step {
+    const char *title, *text;
+    int point;                          /* GLOS_POINT_, or 0 */
+    struct gui_widget *at;              /* (point 0) a widget, or NULL */
+};
+void gui_tour(struct gui_window *owner, const struct gui_tour_step *steps, int n, void (*done)(int step, int finished));
+void gui_tour_end(void);
+/* (toolkit 2) A preview surface: another program's window inside the widget (WIN's EMBED), as large as it and
+   following it. gui_preview_run starts the program (hidden) and takes its window in once it has one; until then,
+   and after it has ended, the widget says so. GUI_ON_CHANGE when the window is in and when the program ends. The
+   program is ended when the widget goes (or by gui_preview_stop). */
+struct gui_widget *gui_preview(struct gui_widget *parent);
+int gui_preview_run(struct gui_widget *w, const char *command);        /* 0, or GLOS_E_; the program's path as DOS
+                                           writes it (C:\TEST\SAVER.EXE): through COMMAND.COM it could not be an app */
+unsigned gui_preview_window(struct gui_widget *w);     /* the window taken in (its number), or 0 */
+int gui_preview_info(struct gui_widget *w, struct glos_win_info *out);     /* ... as GLOS has it (its size) */
+void gui_preview_stop(struct gui_widget *w);
+/* (toolkit 2) A rich-text document: blocks, each of runs of text with a style; built by the app or from Markdown
+   (gui_markdown). The view keeps the document it is given (and frees it when given another, or when it goes). */
+enum { GUI_RB_PARA, GUI_RB_HEAD1, GUI_RB_HEAD2, GUI_RB_HEAD3, GUI_RB_BULLET, GUI_RB_NUMBER, GUI_RB_QUOTE, GUI_RB_CODE,
+       GUI_RB_RULE, GUI_RB_ROW, GUI_RB_IMAGE, GUI_RB_DETAILS };
+#define GUI_RS_BOLD   1
+#define GUI_RS_ITALIC 2
+#define GUI_RS_CODE   4
+#define GUI_RS_STRIKE 8
+#define GUI_RS_CELL   16                /* (gui_rdoc_cell's mark: a table row's next cell begins) */
+struct gui_rdoc;
+struct gui_rdoc *gui_rdoc_new(void);
+void gui_rdoc_free(struct gui_rdoc *d);
+void gui_rdoc_block(struct gui_rdoc *d, int kind, int depth);  /* a new block: the text added next is its (depth:
+                                           a list's or a quote's nesting, from 0) */
+void gui_rdoc_text(struct gui_rdoc *d, const char *text, int n, unsigned style, const char *link);    /* n -1:
+                                           to its NUL; link: where it goes (NULL: not a link) */
+void gui_rdoc_cell(struct gui_rdoc *d);         /* (a GUI_RB_ROW) the next cell */
+void gui_rdoc_colour(struct gui_rdoc *d, unsigned rgb);        /* the text added next in this colour (GFX_NONE:
+                                           as its style has it) */
+void gui_rdoc_image(struct gui_rdoc *d, const unsigned *px, int w, int h, const char *alt);   /* a picture (kept,
+                                           not copied; NULL: alt shown in a frame) */
+void gui_rdoc_details(struct gui_rdoc *d, int open);   /* a block that opens and closes: its text the summary, the
+                                           blocks added until gui_rdoc_end_details what it holds */
+void gui_rdoc_end_details(struct gui_rdoc *d);
+int gui_rdoc_blocks(const struct gui_rdoc *d);
+int gui_rdoc_describe(const struct gui_rdoc *d, int i, char *out, int room);   /* block i as a line (tests') */
+void gui_rdoc_drop_first(struct gui_rdoc *d, int n);   /* the first n blocks go */
+/* The view: wrapped, scrolled, text chosen by the mouse (Ctrl+C, Ctrl+A), links pressed or reached by Tab and
+   Enter (GUI_ON_ACTIVATE, gui_richview_link), summaries pressed to open and close what they hold. */
+struct gui_widget *gui_richview(struct gui_widget *parent);
+void gui_richview_set(struct gui_widget *w, struct gui_rdoc *doc);
+struct gui_rdoc *gui_richview_doc(struct gui_widget *w);
+void gui_richview_changed(struct gui_widget *w);       /* (after the document grew) laid out again */
+void gui_richview_follow(struct gui_widget *w, int on);        /* kept at the end as the document grows */
+const char *gui_richview_link(struct gui_widget *w);
+char *gui_richview_text(struct gui_widget *w, int chosen);     /* the text (all, or what is chosen): malloc'd */
+/* Markdown (CommonMark's headings, paragraphs, lists, quotes, code, rules, tables, emphasis, code spans, links,
+   pictures; and <details> and <summary> alone on their lines) into a document; image finds a picture's pixels (0:
+   found; NULL or not found: its words shown). len -1: to the NUL. */
+struct gui_rdoc *gui_markdown(const char *text, int len,
+                              int (*image)(void *ctx, const char *src, const unsigned **px, int *w, int *h), void *ctx);
+/* (toolkit 2) A chat view: a rich-text view that keeps to its end as lines come (unless scrolled back), at most
+   limit blocks (the oldest go). A line: who in bold in its colour, then the text (Markdown's inline styles and
+   links); or a message of several blocks in Markdown. */
+struct gui_widget *gui_chatview(struct gui_widget *parent, int limit);
+void gui_chat_line(struct gui_widget *w, const char *who, unsigned rgb, const char *text);
+void gui_chat_markdown(struct gui_widget *w, const char *md);
 void gui_image_view_set(struct gui_widget *w, const unsigned *rgb, int iw, int ih, int stride);
 int gui_folder_dialog(struct gui_window *owner, const char *title, char *path, int room);     /* (toolkit 2) a
                                            folder chosen in a tree of the drives' folders, or typed; New folder

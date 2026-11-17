@@ -67,6 +67,15 @@
  *                       a basket (copied where it is let go), and reordered in its list
  *   GUITEST calendar    "GUITEST Calendar" (toolkit 2, step C8): a month (several days
  *                       chosen, two marked, today fixed), a date field, a time field
+ *   GUITEST chat        "GUITEST Chat" (toolkit 2, step C8): a chat view, lines coloured by
+ *                       who wrote them, kept to twelve, at the end unless scrolled back
+ *   GUITEST rich        "GUITEST Rich text" (toolkit 2, step C8): a Markdown page in the
+ *                       rich-text view (its blocks as lines), links, a block opened, a choice
+ *   GUITEST preview     "GUITEST Preview" (toolkit 2, step C8): GUITEST embedded (another
+ *                       of itself) shown inside a widget, then ended
+ *   GUITEST embedded    "GUITEST Embedded": the program the preview page shows
+ *   GUITEST tour        "GUITEST Tour" (toolkit 2, step C8): four steps pointing at a
+ *                       button, a field, GLOS's Start button, and nowhere
  *   GUITEST terminal    "GUITEST Terminal" (toolkit 2, step C8): the toolkit's terminal fed
  *                       a build's output (colours, a title); a line's text by a double click
  *   GUITEST wizard      "GUITEST Wizard" (toolkit 2, step C8): four pages with steps,
@@ -1844,6 +1853,248 @@ static void meters_page(void)
     say("meters", "", 0);
 }
 
+/* ---- the rich-text view and Markdown (toolkit 2, step C8) */
+static struct gui_widget *rt;
+
+static const char rt_page[] =
+    "# Getting started\n"
+    "\n"
+    "GLOS runs **DOS programs** and *its own* apps side by side. Press `Alt+Tab` to go between them,\n"
+    "or see [the manual](help:manual).\n"
+    "\n"
+    "## Lists\n"
+    "\n"
+    "- Files\n"
+    "- Notepad\n"
+    "  - its find\n"
+    "  - its undo\n"
+    "1. First\n"
+    "2. Second\n"
+    "\n"
+    "> A quote that is long enough to wrap on to\n"
+    "> a second line in the view.\n"
+    "\n"
+    "```\n"
+    "make all\n"
+    "make test\n"
+    "```\n"
+    "\n"
+    "| Key | Does |\n"
+    "|-----|------|\n"
+    "| F1 | Help |\n"
+    "| Esc | Leaves |\n"
+    "\n"
+    "---\n"
+    "\n"
+    "<details>\n"
+    "<summary>More about windows</summary>\n"
+    "\n"
+    "Windows can be **moved** and sized.\n"
+    "\n"
+    "</details>\n"
+    "\n"
+    "![The desktop](desk.png)\n"
+    "\n"
+    "A last paragraph with ~~old~~ new text and <https://glos.example/>.\n";
+
+static void rt_on(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_ACTIVATE)
+        say("link %s", gui_richview_link(w), 0);
+}
+
+static void rt_chosen(struct gui_widget *w, int what)
+{
+    char *t = gui_richview_text(rt, 1), line[96];
+    int i;
+    (void)w, (void)what;
+    for (i = 0; t && t[i] && i < 60; i++)       /* (its first characters, its line ends shown as |) */
+        line[i] = t[i] == '\r' ? '|' : t[i] == '\n' ? '|' : t[i];
+    line[i] = 0;
+    say("chosen: %s", line, 0);
+    free(t);
+}
+
+static void rich_page(void)
+{
+    struct gui_rdoc *d = gui_markdown(rt_page, -1, NULL, NULL);
+    struct gui_widget *box;
+    char line[200];
+    int i;
+    for (i = 0; i < gui_rdoc_blocks(d); i++) {  /* (what the Markdown made, block by block) */
+        gui_rdoc_describe(d, i, line, sizeof line);
+        printf("GUI block %d %s\n", i, line);
+    }
+    win = gui_window_at("GUITEST Rich text", 0, 0, 420, 320, 0);
+    box = gui_vbox(win->root, 4, 0);
+    gui_grow(box, 1);
+    rt = gui_richview(box);
+    gui_grow(rt, 1);
+    gui_richview_set(rt, d);
+    gui_on(rt, rt_on, 0);
+    gui_button(box, "&Chosen", rt_chosen, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(rt);
+    say("rich", "", 0);
+}
+
+/* ---- the chat view (toolkit 2, step C8) */
+static struct gui_widget *ch_view;
+static int ch_n;
+
+static void ch_count(void) { say("blocks %s%d", "", gui_rdoc_blocks(gui_richview_doc(ch_view))); }
+
+static void ch_send(struct gui_widget *w, int what)
+{
+    char t[64];
+    (void)w, (void)what;
+    snprintf(t, sizeof t, "message %d, with **bold** and `code`", ++ch_n);
+    gui_chat_line(ch_view, "you", 0x2060D0, t);
+    ch_count();
+}
+
+static void ch_many(struct gui_widget *w, int what)
+{
+    int i;
+    char t[64];
+    (void)w, (void)what;
+    for (i = 0; i < 15; i++) {
+        snprintf(t, sizeof t, "line %d of a long talk", ++ch_n);
+        gui_chat_line(ch_view, i & 1 ? "bob" : "alice", i & 1 ? 0x208040 : 0xC03020, t);
+    }
+    ch_count();
+}
+
+static void chat_page(void)
+{
+    struct gui_widget *box, *row;
+    win = gui_window_at("GUITEST Chat", 0, 0, 360, 260, 0);
+    box = gui_vbox(win->root, 4, 0);
+    gui_grow(box, 1);
+    ch_view = gui_chatview(box, 12);
+    gui_grow(ch_view, 1);
+    gui_chat_line(ch_view, "alice", 0xC03020, "Hello! Is the *new* build up?");
+    gui_chat_line(ch_view, "bob", 0x208040, "Yes: see [the notes](notes:build) for what changed.");
+    gui_chat_markdown(ch_view, "A message of two parts:\n\n- one\n- two");
+    row = gui_hbox(box, 4, 0);
+    gui_button(row, "&Send", ch_send, 0);
+    gui_button(row, "&Many", ch_many, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(ch_view);
+    say("chat", "", 0);
+    ch_count();
+}
+
+/* ---- the preview surface (toolkit 2, step C8): another GUITEST inside a widget */
+static const char *self;                        /* GUITEST's own path (argv[0]) */
+static struct gui_widget *pv;
+
+static void pv_on(struct gui_widget *w, int what)
+{
+    struct glos_win_info info;
+    char line[100];
+    if (what != GUI_ON_CHANGE)
+        return;
+    if (!gui_preview_window(w)) {
+        say("preview ended", "", 0);
+        return;
+    }
+    if (gui_preview_info(w, &info) == 0)        /* (its size: the widget's, less its frame) */
+        snprintf(line, sizeof line, "preview in: %s, %dx%d", info.title, info.w, info.h);
+    else
+        snprintf(line, sizeof line, "preview in: no size");
+    say("%s", line, 0);
+}
+
+static void pv_start(struct gui_widget *w, int what)
+{
+    char cmd[200], *p;
+    (void)w, (void)what;
+    snprintf(cmd, sizeof cmd, "%s embedded", self);
+    for (p = cmd; *p && *p != ' '; p++)         /* (DJGPP's argv[0] is c:/test/guitest.exe: DOS's is wanted, or the
+                                                   agent runs it through COMMAND.COM, under which it may not be an
+                                                   app) */
+        if (*p == '/')
+            *p = '\\';
+    if (gui_preview_run(pv, cmd) != 0)
+        say("preview not started", "", 0);
+}
+
+static void pv_stop(struct gui_widget *w, int what)
+{
+    (void)w, (void)what;
+    gui_preview_stop(pv);
+}
+
+static void preview_page(void)
+{
+    struct gui_widget *box, *row;
+    win = gui_window_at("GUITEST Preview", 0, 0, 300, 230, 0);
+    box = gui_vbox(win->root, 8, 10);
+    gui_grow(box, 1);
+    pv = gui_preview(box);
+    gui_size(pv, 202, 122);
+    gui_on(pv, pv_on, 0);
+    row = gui_hbox(box, 4, 0);
+    gui_button(row, "&Start", pv_start, 0);
+    gui_button(row, "S&top", pv_stop, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("preview", "", 0);
+}
+
+static void embedded_draw(struct gui_widget *w, struct gfx_surface *s)
+{
+    gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, 0x3060C0);
+    gfx_text(s, w->r.x + 8, w->r.y + 8, gui_bold, "Embedded", -1, 0xFFFFFF);
+}
+
+static void embedded_page(void)                 /* (the program the preview shows) */
+{
+    struct gui_widget *c;
+    win = gui_window("GUITEST Embedded", 160, 100, 0);
+    c = gui_canvas(win->root, 0, 0, embedded_draw, NULL);
+    gui_grow(c, 1);
+    gui_show(win, 1);
+}
+
+/* ---- the tour (toolkit 2, step C8) */
+static struct gui_tour_step tr_steps[4];
+
+static void tr_done(int step, int finished)
+{
+    say(finished ? "tour finished at step %s%d" : "tour closed at step %s%d", "", step + 1);
+}
+
+static void tr_start(struct gui_widget *w, int what)
+{
+    (void)w, (void)what;
+    gui_tour(win, tr_steps, 4, tr_done);
+}
+
+static void tour_page(void)
+{
+    struct gui_widget *box, *row, *open, *f;
+    win = gui_window_at("GUITEST Tour", 160, 80, 300, 160, 0);
+    box = gui_vbox(win->root, 8, 10);
+    row = gui_hbox(box, 4, 0);
+    open = gui_button(row, "&Open", NULL, 0);
+    gui_button(row, "&Save", NULL, 0);
+    f = gui_form(box);
+    f = gui_field(gui_row(f, "&Find:", NULL), 16);
+    gui_button(box, "&Tour", tr_start, 0);
+    tr_steps[0].title = "Open a file", tr_steps[0].text = "Open shows the files you can read here.", tr_steps[0].at = open;
+    tr_steps[1].title = "Find", tr_steps[1].text = "Type a word here to find it in the file.", tr_steps[1].at = f;
+    tr_steps[2].title = "GLOS's programs", tr_steps[2].text = "Every program is under GLOS's mark at the task bar's left.";
+    tr_steps[2].point = GLOS_POINT_START;
+    tr_steps[3].title = "That is all", tr_steps[3].text = "Press Done to start.";
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("tour", "", 0);
+}
+
 /* ---- the terminal widget (toolkit 2, step C8): an IDE's output, no program behind it */
 static struct gui_widget *tw;
 
@@ -2357,6 +2608,7 @@ static void names(const char *dir)
 int main(int argc, char **argv)
 {
     const char *what = argc > 1 ? argv[1] : "gallery";
+    self = argv[0];
     if (gui_init(argc, argv) != 0) {
         printf("GUI no GLOS\n");
         return 1;
@@ -2420,6 +2672,16 @@ int main(int argc, char **argv)
         wizard_page();
     else if (!strcmp(what, "terminal"))
         terminal_page();
+    else if (!strcmp(what, "tour"))
+        tour_page();
+    else if (!strcmp(what, "preview"))
+        preview_page();
+    else if (!strcmp(what, "rich"))
+        rich_page();
+    else if (!strcmp(what, "chat"))
+        chat_page();
+    else if (!strcmp(what, "embedded"))
+        embedded_page();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

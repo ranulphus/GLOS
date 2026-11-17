@@ -694,6 +694,48 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
 - **Test** `terminal` (GUITEST's page: a build's output with colours and a title, a line's text by a double
   click, keys as an xterm sends them, a word copied and pasted), host and Loop A; Term's own `term` and `term-run`
   (the apps suite) and the sshc suite (`TERM.EXE -log`) unchanged.
+- **C8h, the tour** (`sdk/gui/tour.c`): `gui_tour` with `struct gui_tour_step` (a title, a few lines, and a place:
+  a part of the shell by SHELL's POINT, a widget of the app's, or none). One bubble for the whole tour (a bare tool
+  window in front of its owner, so the keyboard stays in it), measured to its text and buttons and moved beside
+  each place: under it if there is room, else over it, else beside it, kept on the screen, with a tab on its edge
+  towards the place; the place framed in the accent colour (four thin pop-ups); with no place, in the middle.
+  Back, Next (Done on the last; the default, so Enter) and Close (Esc); the app's `done` hears the step and whether
+  the tour was finished. The host shim answers SHELL's POINT with GLOS's layout (a task bar 20 high, the Start
+  button 62 wide).
+- **Test** `tour` (four steps: a button, a field, the Start button, nowhere; again, closed by Esc at the second),
+  host and Loop A.
+- **C8i, the preview surface** (`sdk/gui/preview.c`): `gui_preview` and `gui_preview_run` start a program hidden
+  (JOB's RUN), find its window once it has one (the job's number in its status, SYS's PROGRAMS for the app it
+  became, WIN's ENUM for that app's window) and have GLOS show it inside the widget's frame (WIN's EMBED), again
+  whenever the widget moves or changes size (its layout); until then, and after the program ends, the widget says
+  so. The program is let go and ended (JOB's SIGNAL END) by `gui_preview_stop` or when the widget goes.
+  `GUI_ON_CHANGE` as the window comes in and as the program ends. The host shim has no other program: there the
+  widget says "No preview".
+- **Test** `preview` (GUITEST starts another GUITEST, "embedded", whose window comes in at the widget's size less
+  its frame; Stop ends it): Loop A checks the lines; the picture (host and Loop A) is the page before it starts.
+  The program's path must be DOS's (backslashes): DJGPP's argv[0] (c:/test/...) made the agent run it through
+  COMMAND.COM, under which a program may not become an app (`GLOS-APP refuse why=parent`).
+- **C8j, the rich-text view and Markdown** (`sdk/gui/rich.c`, `sdk/gui/markdown.c`): a document (`struct
+  gui_rdoc`, built by `gui_rdoc_block`, `_text`, `_cell`, `_image`, `_details`, `_colour`) is a list of blocks
+  (paragraphs, three headings, bulleted and numbered items nested by depth, quotes, code, rules, table rows,
+  pictures, blocks that open and close) of styled runs (bold, italic, code, struck, links, a colour). `gui_richview`
+  wraps it to its width (whole words to the next line; code keeps its lines), draws headings large, code on a
+  ground, quotes with a bar, tables as framed grids (columns as wide as their widest cell, shared out if too
+  wide), pictures (or their words, framed), and scrolls; the mouse chooses text (Ctrl+C copies it as plain text,
+  Ctrl+A all), a link pressed or reached by Tab and Enter is the app's (`GUI_ON_ACTIVATE`), a summary pressed opens
+  what it holds (indented under it). `gui_markdown` reads CommonMark's headings, paragraphs and hard breaks, nested
+  lists, quotes, fenced and indented code, rules, tables, emphasis, code spans, strike-through, links, autolinks,
+  pictures (the app's function finds their pixels) and escapes, and `<details>`, `<summary>` alone on their lines.
+  `gui_rdoc_describe` writes a block as a line, for tests. Owed: italic as such (no italic font yet: drawn dimmed),
+  the HTML subset (with the browser, phase F), pictures inline in a line.
+- **Test** `rich` (GUITEST's Markdown page: its blocks as lines, a link by Tab and Enter, text chosen by the mouse,
+  a block opened), host and Loop A.
+- **C8k, the chat view** (in `sdk/gui/rich.c`): `gui_chatview` is a rich-text view that keeps to its end as lines
+  come, unless it is scrolled back, and keeps at most so many blocks (the oldest go, a choice moving with its
+  blocks); `gui_chat_line` adds who wrote it (bold, in its colour) and the text with Markdown's inline styles;
+  `gui_chat_markdown` a message of several blocks.
+- **Test** `chat` (lines in colour, a message of two blocks, fifteen more past the limit, scrolled back and left
+  there, at the end and followed), host and Loop A.
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

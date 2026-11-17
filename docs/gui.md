@@ -82,6 +82,9 @@ compare, and costs a redraw twice a second for nothing.
 | choice | a button that drops its list of items down |
 | spin box, slider | a number in a range; a slider may be upright, have marks and show its value in the app's format (`gui_slider_style`, toolkit 2) |
 | level meter, graph (toolkit 2) | one or two channels' levels with their peaks held (`gui_meter`); a few series' recent samples as lines (`gui_graph`) |
+| rich-text view, chat view (toolkit 2) | a document of headings, paragraphs, lists, quotes, code, tables, pictures, links and blocks that open, wrapped and scrolled, its text chosen and copied, built by the app or from Markdown (`gui_richview`, `gui_markdown`); a chat's lines coloured by who wrote them, kept to a limit and followed at the end (`gui_chatview`) |
+| preview surface (toolkit 2) | another program's window shown inside a widget, started, followed and ended by it (`gui_preview`; WIN's EMBED) |
+| tour (toolkit 2) | steps that point at a part of the shell or a widget, each a bubble beside it with its place framed (`gui_tour`) |
 | terminal (toolkit 2) | an xterm screen with lines kept above it, fed by the app, its keys and answers sent back, text chosen and copied, a double-clicked line's text to the app (`gui_terminal`; the Terminal's, moved into the toolkit) |
 | wizard (toolkit 2) | pages with Back, Next and Finish, Next held back until a page is filled in, pages skipped, the steps listed down the left (`gui_wizard`) |
 | property grid (toolkit 2) | names and values under groups, each edited as its kind wants (text, number, yes-or-no, choice, colour, font), with the current one's help (`gui_propgrid`) |
