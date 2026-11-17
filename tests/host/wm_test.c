@@ -636,6 +636,53 @@ static void groups(void)
     wm_bar_group(&m, WG_ALWAYS);
     CHECK(wm_bar_entry_at(&m, 70, 470, &count, &left) == a && count == 2);
     CHECK(wm_bar_entry_at(&m, 62 + 120 + 5, 470, &count, &left) == b && count == 1);
+    /* The bar at the top (phase D, D1): the work area under it, a maximised window there, a full-screen one the
+       whole screen; things open below it. Hidden: nothing taken from the work area; out and in. */
+    {
+        struct gfx_rect r;
+        int below;
+        wm_bar_place(&m, 1, 0);
+        wm_work(&m, &r);
+        CHECK(m.bar && m.bar->frame.y == 0 && r.y == 20 && r.h == 460 && wm_bar_edge(&m, &below) == 20 && below == 1);
+        CHECK(wm_bar_entry_at(&m, 70, 10, &count, &left) == a && wm_bar_entry_at(&m, 70, 470, &count, &left) == 0);
+        CHECK(wm_state(&m, b, WS_MAX) == 0 && b->frame.y == 20 && b->frame.h == 460);
+        wm_bar_place(&m, 0, 0);                 /* back at the bottom: the maximised window follows */
+        wm_work(&m, &r);
+        CHECK(m.bar->frame.y == 460 && r.y == 0 && r.h == 460 && b->frame.y == 0 && b->frame.h == 460);
+        CHECK(wm_bar_edge(&m, &below) == 460 && below == 0);
+        wm_bar_place(&m, 0, 1);                 /* hidden: the whole screen is the work area */
+        wm_work(&m, &r);
+        CHECK(!(m.bar->flags & WF_SHOWN) && r.h == 480 && b->frame.h == 480 && wm_bar_edge(&m, &below) == 480);
+        wm_bar_out(&m, 1);
+        CHECK((m.bar->flags & WF_SHOWN) && wm_bar_entry_at(&m, 70, 470, &count, &left) == a && b->frame.h == 480);
+        wm_bar_out(&m, 0);
+        CHECK(!(m.bar->flags & WF_SHOWN));
+        wm_bar_place(&m, 0, 0);
+        CHECK((m.bar->flags & WF_SHOWN) && b->frame.h == 460);
+        CHECK(wm_state(&m, b, WS_NORMAL) == 0);
+    }
+    /* The tray (phase D, D1): four icons on the bar at most, the first ones added; the rest behind its ^; and the
+       count of notifications held back takes its room to their right. */
+    {
+        struct gfx_rect r, r4;
+        u32 ids[8], hidden[8], i;
+        for (i = 0; i < 6; i++)
+            ids[i] = wm_tray_add(&m, 0);
+        CHECK(wm_bar_part(&m, WB_TRAY, ids[0], &r) && wm_bar_part(&m, WB_TRAY, ids[3], &r4) && r4.x == r.x + 60);
+        CHECK(!wm_bar_part(&m, WB_TRAY, ids[4], &r));           /* (behind the ^: no place on the bar) */
+        CHECK(wm_tray_hit(&m, r4.x + 8, 470) == ids[3] && wm_tray_hidden(&m, hidden, 8) == 2 && hidden[0] == ids[4]
+              && hidden[1] == ids[5]);
+        CHECK(wm_bar_part(&m, WB_MORE, 0, &r) && wm_tray_hit(&m, r.x + 8, 470) == 0 && wm_tray_picture(&m, ids[5]) != 0);
+        CHECK(!wm_bar_part(&m, WB_HELD, 0, &r));
+        wm_bar_held(&m, 3);                     /* (its count: the icons move left by its width) */
+        CHECK(wm_bar_part(&m, WB_HELD, 0, &r) && r.w > 0 && wm_bar_part(&m, WB_TRAY, ids[3], &r) && r.x < r4.x);
+        wm_bar_held(&m, 0);
+        wm_tray_remove(&m, ids[0]);
+        wm_tray_remove(&m, ids[1]);             /* four left: all on the bar, no ^ */
+        CHECK(!wm_bar_part(&m, WB_MORE, 0, &r) && wm_tray_hidden(&m, hidden, 8) == 0 && wm_bar_part(&m, WB_TRAY, ids[5], &r));
+        for (i = 2; i < 6; i++)
+            wm_tray_remove(&m, ids[i]);
+    }
     k1 = wm_create(&m, 40, 40, 50, 40, "Secrets", WF_FRAME, 0);         /* the kernel's own: never grouped */
     k2 = wm_create(&m, 50, 50, 50, 40, "Secrets 2", WF_FRAME, 0);
     wm_show(&m, k1, 1), wm_show(&m, k2, 1);

@@ -32,6 +32,9 @@ static u32 press_id, press_at;          /* the last icon pressed, and when: twic
 
 static struct notes notes;
 static u32 note_win;                    /* the window of the one shown */
+static u8 quiet, show_now;              /* [desktop] quiet: held back, counted on the bar; the count pressed: shown */
+static u32 more_win;                    /* the tray's icons behind its ^, in a pop-up of their own (0: not up) */
+static u32 more_ids[WM_TRAY], more_n;
 static u32 look_w, look_h, look_bpp;    /* the screen and the theme the two windows were drawn for */
 static const void *look_theme;
 static struct note_layout note_l;
@@ -169,7 +172,9 @@ static u32 tip_turn(struct wm *m, u32 now)
             x = m->w - 2 - tw;
         if (x < 2)
             x = 2;
-        if (!(w = wm_create(m, x, m->bar->frame.y - f_ui->height - 8, tw, f_ui->height + 4, "",
+        int below;
+        s32 edge = wm_bar_edge(m, &below);
+        if (!(w = wm_create(m, x, below ? edge + 4 : edge - f_ui->height - 8, tw, f_ui->height + 4, "",
                             WF_TOPMOST | WF_NOFOCUS | WF_NOBAR, 0)))
             return 0;
         theme_look(desk_theme(), &c);
@@ -182,6 +187,79 @@ static u32 tip_turn(struct wm *m, u32 now)
     return 0;
 }
 
+/* ---- the tray's icons behind its ^ (phase D): in a row in a pop-up above it; a press there is the icon's */
+
+#define MORE_SLOT 22
+
+static void more_hide(struct wm *m)
+{
+    struct wm_window *w = more_win ? wm_find(m, more_win) : 0;
+    if (w)
+        wm_destroy(m, w);
+    more_win = 0;
+}
+
+static void more_show(struct wm *m)
+{
+    struct gfx_rect r;
+    struct wm_window *w;
+    struct theme_look c;
+    s32 ww, x;
+    u32 k;
+    const u32 *px;
+    more_n = wm_tray_hidden(m, more_ids, WM_TRAY);
+    if (!more_n || !wm_bar_part(m, WB_MORE, 0, &r))
+        return;
+    ww = (s32)more_n * MORE_SLOT + 6;
+    x = r.x + r.w / 2 - ww / 2;
+    if (x + ww > m->w)
+        x = m->w - ww;
+    {
+        int below;
+        s32 edge = wm_bar_edge(m, &below);
+        w = wm_create(m, x < 0 ? 0 : x, below ? edge : edge - MORE_SLOT - 6, ww, MORE_SLOT + 6, "",
+                      WF_TOPMOST | WF_NOFOCUS | WF_NOBAR, 0);
+    }
+    if (!w)
+        return;
+    theme_look(desk_theme(), &c);
+    gfx_fill(&w->store, 0, 0, ww, MORE_SLOT + 6, c.edge);
+    gfx_fill(&w->store, 1, 1, ww - 2, MORE_SLOT + 4, c.bar);
+    for (k = 0; k < more_n; k++)
+        if ((px = wm_tray_picture(m, more_ids[k])) != 0) {
+            s32 i, j;
+            for (j = 0; j < 16; j++)
+                for (i = 0; i < 16; i++)
+                    if (px[j * 16 + i] >> 24 >= 0x80)
+                        gfx_fill(&w->store, 3 + (s32)k * MORE_SLOT + 3 + i, 6 + j, 1, 1, px[j * 16 + i] & 0xFFFFFF);
+        }
+    wm_show(m, w, 1);
+    more_win = w->id;
+}
+
+/* A press while the pop-up is up: 1 if used up here (on it, or on the ^ that closes it). */
+static int more_press(struct wm *m, u32 bit)
+{
+    struct wm_window *w = more_win ? wm_find(m, more_win) : 0;
+    struct gfx_rect r;
+    s32 x;
+    int i;
+    if (!w)
+        return 0;
+    x = m->px - w->frame.x;
+    if (m->px >= w->frame.x && m->py >= w->frame.y && m->px < w->frame.x + w->frame.w && m->py < w->frame.y + w->frame.h) {
+        u32 k = (u32)((x - 3) / MORE_SLOT);
+        if (x >= 3 && k < more_n && (i = tray_of(more_ids[k])) >= 0 && (bit == 1 || bit == 2)) {
+            r.x = w->frame.x + 3 + (s32)k * MORE_SLOT + 3, r.y = w->frame.y + 6, r.w = r.h = 16;
+            more_hide(m);
+            api2_tray_event(trays[i].a, more_ids[k], bit == 1 ? 1 : 3, &r);
+        }
+        return 1;
+    }
+    more_hide(m);
+    return wm_bar_part(m, WB_MORE, 0, &r) && m->px >= r.x && m->px < r.x + r.w && m->py >= r.y;     /* (the ^: closed) */
+}
+
 /* ---- notifications */
 
 u32 desk_notify_add(struct app *a, const struct note *n)
@@ -191,6 +269,15 @@ u32 desk_notify_add(struct app *a, const struct note *n)
     id = notes_add(&notes, n, app_id(a));
     desk_unlock();
     return id;
+}
+
+void desk_quiet(int on)
+{
+    desk_lock();
+    quiet = on != 0;
+    show_now = 0;
+    desk_unlock();
+    desk_kick();
 }
 
 void desk_notify_remove(struct app *a, u32 id)
@@ -216,7 +303,9 @@ static void note_draw(struct wm *m, const struct note *n)
     s32 i, j, run;
     u32 k;
     note_layout(n, width, &note_l);
-    if (!(w = wm_create(m, m->w - note_l.w - 6, (m->bar ? m->bar->frame.y : m->h) - note_l.h - 6, note_l.w, note_l.h, "",
+    int below;
+    s32 edge = wm_bar_edge(m, &below);
+    if (!(w = wm_create(m, m->w - note_l.w - 6, below ? edge + 6 : edge - note_l.h - 6, note_l.w, note_l.h, "",
                         WF_TOPMOST | WF_NOFOCUS | WF_NOBAR, 0)))
         return;
     theme_look(desk_theme(), &c);
@@ -264,6 +353,7 @@ u32 deskshell_turn(struct wm *m, int screen)
         look_w = (u32)m->w, look_h = (u32)m->h, look_bpp = m->fmt.bpp, look_theme = desk_theme();
         note_hide(m);                           /* another screen or theme: both drawn again, where they go now */
         tip_hide(m);
+        more_hide(m);
         deskpass_turn(m, 1);                    /* (and the secrets' password dialog, if it is up) */
         deskpop_turn(m, 1);                     /* (and a pop-up menu goes) */
         tip_id = 0;
@@ -274,7 +364,13 @@ u32 deskshell_turn(struct wm *m, int screen)
     deskpop_turn(m, 0);
     if (tip_win && !wm_find(m, tip_win))
         tip_win = 0;
-    if (notes_turn(&notes, now, screen && !full, over, &news) || (notes_shown(&notes) != 0) != (note_win != 0)
+    if (more_win && (!wm_find(m, more_win) || !wm_tray_hidden(m, more_ids, WM_TRAY)))
+        more_hide(m);
+    if (!notes.n)
+        show_now = 0;
+    wm_bar_held(m, quiet && !show_now ? notes.n - (notes_shown(&notes) != 0) : 0);
+    if (notes_turn(&notes, now, screen && !full && (!quiet || show_now), over, &news)
+        || (notes_shown(&notes) != 0) != (note_win != 0)
         || (notes_shown(&notes) && w && !(w->flags & WF_SHOWN))) {
         note_hide(m);
         if (notes_shown(&notes))
@@ -307,8 +403,23 @@ int deskshell_press(struct wm *m, u32 bit)
         }
         return 1;
     }
+    if (more_press(m, bit))                     /* the tray's icons behind its ^ */
+        return 1;
+    if (wm_bar_part(m, WB_MORE, 0, &r) && m->px >= r.x && m->px < r.x + r.w && m->py >= r.y && m->py < r.y + r.h) {
+        if (bit == 1)
+            more_show(m);
+        return 1;
+    }
+    if (wm_bar_part(m, WB_HELD, 0, &r) && m->px >= r.x && m->px < r.x + r.w && m->py >= r.y && m->py < r.y + r.h) {
+        if (bit == 1)                           /* the count of those held back: shown now, one after another */
+            show_now = 1;
+        desk_kick();
+        return 1;
+    }
     if (over_clock(m)) {                        /* the clock: its calendar; twice, the Date and Time page */
-        int twice = press_id == CLOCK_ID && now - press_at < deskin_double_ticks();
+        int twice = press_id == CLOCK_ID && now - press_at < deskin_double_ticks() && deskcal_up();
+                                                /* (the second of two only while the first one's calendar is still
+                                                   up: one closed by Esc since then begins again) */
         tip_hide(m);
         tip_since = now;
         if (bit != 1)
@@ -323,7 +434,9 @@ int deskshell_press(struct wm *m, u32 bit)
         } else {
             int y, mo, d;
             today(&y, &mo, &d);
-            deskcal_open(m, m->w - 2, m->bar ? m->bar->frame.y : m->h, y, mo, d, kcfg_region()->first_day);
+            int below;
+            s32 edge = wm_bar_edge(m, &below);
+            deskcal_open(m, m->w - 2, edge, below, y, mo, d, kcfg_region()->first_day);
         }
         return 1;
     }

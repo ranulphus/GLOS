@@ -3926,6 +3926,7 @@ def win_case(profile, vcard, card, bits, bits2):
     tag = "%s-%s" % (profile, vcard)
     agent = Agent("win-" + tag, profile, card, ["--card", vcard,
         "--file", "build/dj/WINTEST.EXE=/TEST/WINTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
+        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE",  # (the clock's double press opens it: phase D)
         "--cmd", "SERSAY HX-START win", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
         "--cmd", "VECCHK check", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
@@ -4142,6 +4143,53 @@ def win_case(profile, vcard, card, bits, bits2):
         checks["strip-esc"] = bare_is(base) and bool(until(focus("B")))
         agent.ssh("glos key " + ALT_TAB)                        # the whole of it: to A, the strip gone
         checks["strip-switch"] = bool(until(focus("A"))) and bare_is(base)
+
+        # D1's second part: the clock's calendar (a press, Esc), its double press (the Control Panel at Date and
+        # Time); the bar at the top (A maximised under it) and back; hidden until the pointer reaches the edge.
+        CLOCK = (640 - 20, 470)
+        click(*CLOCK)
+        checks["calendar"] = bare_is(base + 1)
+        agent.ssh("glos key 0x01")
+        checks["calendar-esc"] = bare_is(base) and bool(until(focus("A")))
+        point(*CLOCK)
+        agent.ssh("glos key mouse:0:0:1,mouse:0:0:0,mouse:0:0:1,mouse:0:0:0")
+        d = until(lambda d: "Control Panel" in d["win"] and d["focus"] == d["win"]["Control Panel"]["id"], 90)
+        checks["clock-control"] = bool(d)
+        if d:
+            agent.ssh("glos key " + ALT_F4)
+            until(lambda d: "Control Panel" not in d["win"], 30)
+        until(focus("A"))
+
+        def bar_at():
+            m = re.search(r'^window \d+ shown bar at (\d+),(\d+) 640x20 ""$', agent.ssh("glos desk")[1].replace("\r", ""), re.M)
+            return (int(m.group(1)), int(m.group(2))) if m else None
+
+        def bar_is(want, limit=20):
+            t0 = time.time()
+            while bar_at() != want and time.time() - t0 < limit:
+                time.sleep(0.3)
+            return bar_at() == want
+        agent.ssh("glos config set desktop bar top")
+        checks["bar-top"] = bar_is((0, 0))
+        agent.ssh("glos key 0x38:down,0x44,0x38:up")            # Alt-F10: A maximised, under the bar
+        checks["max-under-top"] = bool(until(a_is(0, 20, MAXED[2], MAXED[3])))
+        if not checks["max-under-top"]:
+            print("    %s max-under-top: %s" % (tag, agent.ssh("glos desk")[1].replace("\r", "")))
+        agent.ssh("glos key 0x38:down,0x44,0x38:up")
+        until(a_is(140, 190, 230, 140))
+        agent.ssh("glos config set desktop bar bottom")
+        checks["bar-bottom"] = bar_is((0, 460))
+        agent.ssh("glos config set desktop bar_hide on")
+        checks["bar-hidden"] = bar_is(None)
+        point(320, 479)                                         # the screen's bottom edge: out
+        checks["bar-out"] = bar_is((0, 460))
+        point(320, 200)                                         # away: in again
+        checks["bar-in"] = bar_is(None)
+        if not checks["bar-in"]:
+            print("    %s bar-in: %s" % (tag, agent.ssh("glos desk")[1].replace("\r", "")))
+        agent.ssh("glos config unset desktop bar_hide")
+        agent.ssh("glos config unset desktop bar")
+        checks["bar-back"] = bar_is((0, 460))
 
         ids = sorted(w["id"] for t, w in desk()["win"].items() if t.startswith("WINTEST"))
         click(62 + 120 * ids.index(wb["id"]) + 10, 470)        # (the bar's buttons: from 62, 120 wide)

@@ -465,10 +465,10 @@ static void cal_close(struct wm *m, int give_back)
 
 int deskcal_up(void) { return cal.win != 0; }
 
-void deskcal_open(struct wm *m, s32 right, s32 bottom, int year, int month, int day, int first_day)
+void deskcal_open(struct wm *m, s32 right, s32 edge, int below, int year, int month, int day, int first_day)
 {
     struct wm_window *w;
-    s32 x = right - cal_w(), y = bottom - cal_h();
+    s32 x = right - cal_w(), y = below ? edge : edge - cal_h();
     if (pop.win)
         close_pop(m, 1);
     if (cal.win)

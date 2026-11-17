@@ -539,6 +539,13 @@ void kcfg_apply(const char *section, const char *key, const char *v)
         joy_config();
     } else if (same(section, "desktop") && same(key, "snap")) {
         deskin_snap(same(v, "on"));
+    } else if (same(section, "desktop") && (same(key, "bar") || same(key, "bar_hide"))) {
+        char b[16], hd[8];
+        kcfg_get("desktop", "bar", b, sizeof b);
+        kcfg_get("desktop", "bar_hide", hd, sizeof hd);
+        desk_bar_place(same(b, "top"), same(hd, "on"));
+    } else if (same(section, "desktop") && same(key, "quiet")) {
+        desk_quiet(same(v, "on"));
     } else if (same(section, "desktop") && same(key, "group")) {
         desk_bar_group(same(v, "always") ? WG_ALWAYS : same(v, "never") ? WG_NEVER : WG_AUTO);
     } else if (same(section, "desktop") && same(key, "theme")) {
@@ -573,6 +580,9 @@ static void apply_read(void)
         kcfg_apply("desktop", "snap", v);
         kcfg_get("desktop", "group", v, sizeof v);
         kcfg_apply("desktop", "group", v);
+        kcfg_get("desktop", "quiet", v, sizeof v);
+        kcfg_apply("desktop", "quiet", v);
+        kcfg_apply("desktop", "bar", "");
         kcfg_get("desktop", "theme", v, sizeof v);
         kcfg_apply("desktop", "theme", v);
         for (i = 0; i < ARRAY_SIZE(keys); i++) {

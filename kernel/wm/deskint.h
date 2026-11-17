@@ -53,8 +53,9 @@ int deskpop_up(void);
 void deskswitch_step(struct wm *m, int back);   /* Alt+Tab (back: Shift too): the strip, or its next window */
 void deskswitch_end(struct wm *m, int go);      /* Alt let go (go 1), Esc (0): the strip goes, its window in front */
 int deskswitch_up(void);
-void deskcal_open(struct wm *m, s32 right, s32 bottom, int year, int month, int day, int first_day);    /* the
-                                           clock's calendar, its bottom right corner there (first_day: 0 Sunday) */
+void deskcal_open(struct wm *m, s32 right, s32 edge, int below, int year, int month, int day, int first_day);
+                                        /* the clock's calendar, its right at right, above edge (below: under it);
+                                           first_day: 0 Sunday */
 int deskcal_up(void);
 void deskcal_close(struct wm *m);
 

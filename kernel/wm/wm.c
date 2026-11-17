@@ -45,6 +45,7 @@ const struct wm_look wm_look_default = {
 #define BAR_RIGHT 110                   /* room for the note and the clock */
 #define ICON_W    11
 #define TRAY_W    20                    /* a tray icon's place: its 16 pixels and the gap */
+#define TRAY_SHOWN 4                    /* tray icons on the bar at most: the rest behind its ^ (phase D, D1) */
 
 /* The task bar's pictures, one bit a pixel: GLOS's mark (two windows), a
    window (a button's), and a line in use (beside the note). */
@@ -295,9 +296,11 @@ static int title_box(const struct wm *m, const struct wm_window *w, int part, st
 
 void wm_work(const struct wm *m, struct gfx_rect *out)
 {
-    out->x = out->y = 0;
+    s32 bh = m->bar && !m->bar_hide ? m->bar->frame.h : 0;    /* (a bar that hides takes nothing from it) */
+    out->x = 0;
+    out->y = m->bar_top ? bh : 0;
     out->w = m->w;
-    out->h = m->h - (m->bar ? m->bar->frame.h : 0);
+    out->h = m->h - bh;
 }
 
 #define WM_MIN_W 80                             /* the smallest client area the user can make */
@@ -381,7 +384,9 @@ static void bar_fit(struct wm *m)
     int hide = 0;
     if (!m->bar)
         return;
-    if (f && (f->flags & WF_FULL))
+    if (m->bar_hide && !m->bar_out)
+        hide = 1;                               /* (hidden until the pointer reaches its edge) */
+    else if (f && (f->flags & WF_FULL))
         hide = 1;
     else if (f && f->owner)
         for (w = m->bottom; w; w = w->above)
@@ -392,6 +397,9 @@ static void bar_fit(struct wm *m)
     m->bar->flags ^= WF_SHOWN;
     damage(m, &m->bar->frame);
 }
+
+static s32 held_w(const struct wm *m);
+static s32 tray_slots(const struct wm *m);
 
 #define GROUP_W 72                      /* buttons narrower than this are grouped by app (WG_AUTO) */
 
@@ -420,7 +428,7 @@ static struct wm_window *bar_entry(const struct wm *m, u32 k, s32 *width, u32 *c
 {
     struct wm_window *w, *best;
     u32 n = 0, nwin = 0, last = 0, i, c;
-    s32 room = m->w - BAR_NAME - BAR_RIGHT - (s32)m->ntray * TRAY_W;
+    s32 room = m->w - BAR_NAME - BAR_RIGHT - tray_slots(m) * TRAY_W - held_w(m);
     int grouped;
     for (w = m->bottom; w; w = w->above)
         nwin += on_bar(w);
@@ -494,15 +502,36 @@ static void draw_icon(struct gfx_surface *s, s32 x, s32 y, const u32 *icon)
         }
 }
 
-/* Where the k-th tray icon is in the bar: they end 8 pixels left of the note, or of the clock. */
-static s32 tray_x(const struct wm *m, u32 k)
+/* The tray's right end: 8 pixels left of the note, or of the clock; and left of that, the count of notifications
+   held back (phase D), when there are any. */
+static char held_text[8];
+
+static s32 held_w(const struct wm *m)
+{
+    return m->held ? gfx_text_width(m->look.bold, held_text, -1) + 10 : 0;
+}
+
+static s32 tray_right(const struct wm *m)
 {
     const struct wm_look *l = &m->look;
     s32 right = m->w - 6 - gfx_text_width(l->font, m->clock, -1) - 8;
     if (m->note[0])
         right -= 8 + gfx_text_width(l->bold, m->note, -1) + ICON_W + 4;
-    return right - (s32)(m->ntray - k) * TRAY_W + (TRAY_W - 16);
+    return right - held_w(m);
 }
+
+/* The icons on the bar (the first ones added: GLOS's own come first), and whether the rest are behind a ^. */
+static u32 tray_shown(const struct wm *m) { return m->ntray > TRAY_SHOWN ? TRAY_SHOWN : m->ntray; }
+static int tray_more(const struct wm *m) { return m->ntray > TRAY_SHOWN; }
+static s32 tray_slots(const struct wm *m) { return (s32)tray_shown(m) + tray_more(m); }
+
+/* Where the k-th tray icon on the bar is; the ^'s place is left of them. */
+static s32 tray_x(const struct wm *m, u32 k)
+{
+    return tray_right(m) - (s32)(tray_shown(m) - k) * TRAY_W + (TRAY_W - 16);
+}
+
+static s32 more_x(const struct wm *m) { return tray_right(m) - (s32)(tray_shown(m) + 1) * TRAY_W + (TRAY_W - 16); }
 
 static void bar_paint(struct wm *m)
 {
@@ -563,8 +592,20 @@ static void bar_paint(struct wm *m)
         gfx_text(s, x, ty, l->bold, m->note, -1, l->bar_text);
         gfx_mono(s, x - ICON_W - 4, (BAR_H - 7) / 2 + 1, &ico_link[0][0], ICON_W, 7, 2, l->bar_text, GFX_NONE);
     }
-    for (k = 0; k < m->ntray; k++)              /* the tray's icons, left of those */
+    for (k = 0; k < tray_shown(m); k++)         /* the tray's icons, left of those */
         draw_icon(s, tray_x(m, k), (BAR_H - 16) / 2 + 1, m->tray[k].icon);
+    if (tray_more(m)) {                         /* the rest behind a ^ */
+        x = more_x(m) + 4;
+        gfx_fill(s, x + 3, 7, 2, 1, l->bar_text);
+        gfx_fill(s, x + 2, 8, 4, 1, l->bar_text);
+        gfx_fill(s, x + 1, 9, 2, 1, l->bar_text), gfx_fill(s, x + 5, 9, 2, 1, l->bar_text);
+        gfx_fill(s, x, 10, 2, 1, l->bar_text), gfx_fill(s, x + 6, 10, 2, 1, l->bar_text);
+    }
+    if (m->held) {                              /* notifications held back: how many, in the mark's colour */
+        x = tray_right(m) + 2;
+        gfx_fill(s, x, 4, held_w(m) - 4, BAR_H - 7, l->mark != GFX_NONE ? l->mark : l->bar_on);
+        gfx_text(s, x + 3, ty, l->bold, held_text, -1, l->bar_on_text);
+    }
     damage(m, &m->bar->frame);
 }
 
@@ -576,7 +617,7 @@ static void bar_stale(struct wm *m)
 
 int wm_bar_mark(const struct wm *m, s32 x, s32 y)
 {
-    return m->bar && (m->bar->flags & WF_SHOWN) && y >= m->bar->frame.y && x < BAR_NAME;
+    return m->bar && (m->bar->flags & WF_SHOWN) && y >= m->bar->frame.y && y < m->bar->frame.y + BAR_H && x < BAR_NAME;
 }
 
 struct wm_window *wm_bar_entry_at(const struct wm *m, s32 x, s32 y, u32 *count, s32 *left)
@@ -584,7 +625,7 @@ struct wm_window *wm_bar_entry_at(const struct wm *m, s32 x, s32 y, u32 *count, 
     s32 bw;
     u32 k;
     *count = 0, *left = 0;
-    if (!m->bar || !(m->bar->flags & WF_SHOWN) || y < m->bar->frame.y || x < BAR_NAME)
+    if (!m->bar || !(m->bar->flags & WF_SHOWN) || y < m->bar->frame.y || y >= m->bar->frame.y + BAR_H || x < BAR_NAME)
         return 0;
     if (!bar_entry(m, 0, &bw, count))
         return 0;
@@ -600,6 +641,30 @@ struct wm_window *wm_bar_hit(const struct wm *m, s32 x, s32 y)
     u32 count;
     s32 left;
     return wm_bar_entry_at(m, x, y, &count, &left);
+}
+
+void wm_bar_place(struct wm *m, int top, int hide)
+{
+    if (m->bar_top == (u8)(top != 0) && m->bar_hide == (u8)(hide != 0))
+        return;
+    m->bar_top = (u8)(top != 0), m->bar_hide = (u8)(hide != 0), m->bar_out = 0;
+    wm_screen(m, m->w, m->h, &m->fmt);          /* (the bar made again where it goes; the placed windows follow) */
+}
+
+void wm_bar_out(struct wm *m, int out)
+{
+    if (m->bar_out != (u8)(out != 0)) {
+        m->bar_out = (u8)(out != 0);
+        bar_fit(m);
+    }
+}
+
+s32 wm_bar_edge(const struct wm *m, int *below)
+{
+    *below = m->bar_top;
+    if (!m->bar || !(m->bar->flags & WF_SHOWN))
+        return m->bar_top ? 0 : m->h;
+    return m->bar_top ? m->bar->frame.y + BAR_H : m->bar->frame.y;
 }
 
 void wm_bar_group(struct wm *m, int how)
@@ -651,12 +716,42 @@ void wm_tray_remove(struct wm *m, u32 id)
 u32 wm_tray_hit(const struct wm *m, s32 x, s32 y)
 {
     u32 k;
-    if (!m->bar || !(m->bar->flags & WF_SHOWN) || y < m->bar->frame.y)
+    if (!m->bar || !(m->bar->flags & WF_SHOWN) || y < m->bar->frame.y || y >= m->bar->frame.y + BAR_H)
         return 0;
-    for (k = 0; k < m->ntray; k++)
+    for (k = 0; k < tray_shown(m); k++)
         if (x >= tray_x(m, k) - 2 && x < tray_x(m, k) + 18)
             return m->tray[k].id;
     return 0;
+}
+
+u32 wm_tray_hidden(const struct wm *m, u32 *ids, u32 room)
+{
+    u32 k, n = 0;
+    for (k = tray_shown(m); k < m->ntray && n < room; k++)
+        ids[n++] = m->tray[k].id;
+    return n;
+}
+
+const u32 *wm_tray_picture(const struct wm *m, u32 id)
+{
+    u32 k;
+    for (k = 0; k < m->ntray; k++)
+        if (m->tray[k].id == id)
+            return m->tray[k].icon;
+    return 0;
+}
+
+void wm_bar_held(struct wm *m, u32 n)
+{
+    u32 i = 0, v = n > 99 ? 99 : n;
+    if (m->held == n)
+        return;
+    m->held = n;
+    if (v >= 10)
+        held_text[i++] = (char)('0' + v / 10);
+    held_text[i++] = (char)('0' + v % 10);
+    held_text[i] = 0;
+    bar_stale(m);
 }
 
 int wm_bar_part(const struct wm *m, int part, u32 tray_id, struct gfx_rect *r)
@@ -682,14 +777,24 @@ int wm_bar_part(const struct wm *m, int part, u32 tray_id, struct gfx_rect *r)
     case WB_CLOCK:
         r->x = m->w - 6 - tw - 2, r->w = tw + 8;
         return 1;
+    case WB_MORE:
+        if (!tray_more(m))
+            break;
+        r->x = more_x(m) - 2, r->w = TRAY_W;
+        return 1;
+    case WB_HELD:
+        if (!m->held)
+            break;
+        r->x = tray_right(m), r->w = held_w(m);
+        return 1;
     case WB_TRAY:
         if (!m->ntray)
             break;
         if (!tray_id) {
-            r->x = tray_x(m, 0) - 2, r->w = (s32)m->ntray * TRAY_W;
+            r->x = (tray_more(m) ? more_x(m) : tray_x(m, 0)) - 2, r->w = tray_slots(m) * TRAY_W;
             return 1;
         }
-        for (k = 0; k < m->ntray; k++)
+        for (k = 0; k < tray_shown(m); k++)     /* (one behind the ^ has no place on the bar) */
             if (m->tray[k].id == tray_id) {
                 r->x = tray_x(m, k), r->w = 16;
                 r->y += (BAR_H - 16) / 2 + 1, r->h = 16;
@@ -725,7 +830,7 @@ void wm_bar(struct wm *m, int on)
     }
     if (m->bar)
         return;
-    m->bar = wm_create(m, 0, m->h - BAR_H, m->w, BAR_H, "", WF_TOPMOST | WF_NOFOCUS | WF_FIXED, 0);
+    m->bar = wm_create(m, 0, m->bar_top ? 0 : m->h - BAR_H, m->w, BAR_H, "", WF_TOPMOST | WF_NOFOCUS | WF_FIXED, 0);
     if (m->bar) {
         bar_paint(m);
         wm_show(m, m->bar, 1);
@@ -869,6 +974,7 @@ static void place_frame(const struct wm *m, const struct wm_window *w, struct gf
 {
     wm_work(m, f);
     if (w->flags & WF_FULL) {
+        f->y = 0;                               /* (the whole screen, wherever the bar is) */
         f->h = m->h;
     } else if (w->flags & WF_SNAP_L) {
         f->w = f->w / 2;

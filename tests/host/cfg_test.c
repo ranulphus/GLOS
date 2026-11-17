@@ -57,6 +57,8 @@ void deskin_pointer_speed(int s) { snprintf(applied, sizeof applied, "speed %d",
 void deskin_double_click(u32 ms) { (void)ms; }
 void deskin_snap(int on) { snprintf(applied, sizeof applied, "snap %d", on); }
 void desk_bar_group(int how) { snprintf(applied, sizeof applied, "group %d", how); }
+void desk_quiet(int on) { snprintf(applied, sizeof applied, "quiet %d", on); }
+void desk_bar_place(int top, int hide) { snprintf(applied, sizeof applied, "bar %d %d", top, hide); }
 int desk_theme_set(const char *name) { snprintf(applied, sizeof applied, "theme %s", name); return 0; }
 void desk_kick(void) { }
 void idle_config(void) { snprintf(applied, sizeof applied, "saver"); }

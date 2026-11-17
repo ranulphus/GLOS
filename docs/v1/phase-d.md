@@ -80,6 +80,29 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   window in its group, the kernel's own windows); Loop A `win` (Alt+Space and its letters, a button's menu,
   the strip held, given up and switching).
 
+### D1 as built, second part (2026-11-17)
+
+- **The clock:** today's date in its tooltip, as the region writes a date; a press drops a month's calendar
+  (kernel-drawn, the weeks from the region's first day, today marked; PgUp and PgDn, Left and Right, or a press
+  on the header's arrows go a month back or on; Esc or a press elsewhere closes it, a press on the clock too);
+  a double press opens the Control Panel at Date and Time (`CONTROL SECTION` now opens that section's page;
+  `api2_shell_start` starts one of GLOS's own programs for the desktop).
+- **The tray's overflow:** at most four icons on the bar, the first ones added (GLOS's own will be, from D2);
+  the rest behind a ^, a press on which drops them in a row; a press on one there is that icon's press for its
+  app, as on the bar.
+- **Quiet** (`[desktop] quiet = off | on`): notifications wait, and the bar shows how many in the accent's
+  colour; a press on that number shows them, one after another, until none wait.
+- **The bar's place** (`[desktop] bar = bottom | top`, `bar_hide = off | on`): at the top the work area starts
+  under it, and pop-ups, tooltips, notifications and the calendar open below it; hidden, it takes nothing from
+  the work area and comes out when the pointer reaches the screen's edge it is at, going back once the pointer
+  leaves it (not while one of its pop-ups is up). Maximised and snapped windows follow (`wm_bar_place`, then
+  the apps are told their new sizes).
+- **Not done:** the Start menu's own placement with the bar at the top (Files' launcher is told the bar's edge;
+  D3's Start menu uses it); a WIN property for a 32-pixel icon (Alt+Tab draws the 16-pixel one twice the size).
+- **Tests:** Loop A `win` grows: the calendar up and closed by Esc, the clock's double press bringing up the
+  Control Panel, the bar at the top with a window maximised under it and back, hidden, out at the edge, in
+  again. Host: `cfg_test` knows the new settings; the Control Panel's Desktop page has them (`control` goldens).
+
 ### D2. GLOS's own tray icons and notifications (kernel)
 
 - **Volume:** the mixer's master (AUDIO); a click drops a slider and mute (kernel-drawn), the wheel over it

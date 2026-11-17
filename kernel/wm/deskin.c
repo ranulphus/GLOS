@@ -195,7 +195,12 @@ static int to_shell(struct wm *m, unsigned type)
     memset(&e, 0, sizeof e);
     e.type = type;
     e.x = 0;
-    e.y = m->bar ? m->bar->frame.y : m->h;      /* (the launcher's bottom left: the task bar's top) */
+    /* (the launcher's bottom left: the task bar's top; with the bar at the screen's top, its top left: the bar's
+       bottom; phase D's Start menu says which by its place) */
+    {
+        int below;
+        e.y = (unsigned)wm_bar_edge(m, &below);
+    }
     app_event(shell, &e);
     return 1;
 }
@@ -706,9 +711,13 @@ static void button(struct wm *m, u32 bit, int down)
         s32 left;
         if ((v = wm_bar_entry_at(m, m->px, m->py, &count, &left)) != 0) {
             if (count > 1 && (bit == 1 || bit == 2)) {          /* a group: its windows, to choose from */
-                deskpop_open(m, DP_GROUP, v->id, left, m->bar->frame.y, 1);
+                int below;
+                s32 edge = wm_bar_edge(m, &below);
+                deskpop_open(m, DP_GROUP, v->id, left, edge, !below);
             } else if (bit == 2) {                              /* the right button: its window's menu */
-                deskpop_open(m, DP_WINDOW, v->id, left, m->bar->frame.y, 1);
+                int below;
+                s32 edge = wm_bar_edge(m, &below);
+                deskpop_open(m, DP_WINDOW, v->id, left, edge, !below);
             } else if (bit != 1) {
                 ;
             } else if (v == m->focus && wm_can(v, WH_MIN)) {    /* the one in front: out of the way */
@@ -855,6 +864,15 @@ static void mouse_to(struct wm *m, s32 x, s32 y, u32 now)
     buttons = (u8)now;
     if (dx || dy)
         deskpop_move(m);                        /* (a pop-up menu's item under the pointer is its current one) */
+    if (m->bar_hide && m->bar) {                /* a hidden bar: out at the screen's edge, in once the pointer leaves
+                                                   it (unless one of its pop-ups is up) */
+        int at_edge = m->bar_top ? m->py <= 0 : m->py >= m->h - 1;
+        int on_bar = m->py >= m->bar->frame.y && m->py < m->bar->frame.y + m->bar->frame.h;
+        if (at_edge)
+            wm_bar_out(m, 1);
+        else if (m->bar_out && !on_bar && !deskpop_up() && !deskcal_up())
+            wm_bar_out(m, 0);
+    }
     if (dnd_on) {                               /* an app's drag: the pointer is its until every button is up */
         dnd_point(m);
         if (!now)

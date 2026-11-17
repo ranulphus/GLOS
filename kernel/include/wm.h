@@ -134,6 +134,9 @@ struct wm {
         u32 icon[16 * 16];              /* 0xAARRGGBB, drawn where AA is 80h or more */
     } tray[WM_TRAY];
     u32 ntray, tray_next;
+    u32 held;                           /* notifications held back, counted on the bar (phase D; 0: none, no count) */
+    u8 bar_top, bar_hide, bar_out;      /* the bar at the screen's top; hidden until the pointer reaches its edge
+                                           ([desktop] bar, bar_hide); out now (phase D) */
     u8 bar_group;                       /* the bar's buttons grouped by app: WG_AUTO (when they don't fit), WG_ALWAYS,
                                            WG_NEVER ([desktop] group) */
 };
@@ -206,14 +209,23 @@ int wm_bar_mark(const struct wm *m, s32 x, s32 y);     /* GLOS's mark at the tas
 struct wm_window *wm_bar_hit(const struct wm *m, s32 x, s32 y); /* the window whose button is at a point of the bar */
 struct wm_window *wm_bar_entry_at(const struct wm *m, s32 x, s32 y, u32 *count, s32 *left);  /* ... the same, a group's
                                            first window (count: how many it stands for) and the button's left edge */
-int wm_on_bar(const struct wm_window *w);       /* it has a button (or a place in a group's) on the task bar */
+int wm_on_bar(const struct wm_window *w);
+u32 wm_tray_hidden(const struct wm *m, u32 *ids, u32 room);    /* the tray's icons behind its ^ (phase D): their ids */
+const u32 *wm_tray_picture(const struct wm *m, u32 id);        /* a tray icon's pixels, or NULL */
+void wm_bar_held(struct wm *m, u32 n);  /* notifications held back: their count on the bar (0: none shown) */       /* it has a button (or a place in a group's) on the task bar */
+void wm_bar_place(struct wm *m, int top, int hide);    /* the bar at the top (or the bottom), hidden until wanted:
+                                           the work area and the windows placed in it follow */
+void wm_bar_out(struct wm *m, int out); /* a hidden bar shown (the pointer at its edge) or hidden again */
+s32 wm_bar_edge(const struct wm *m, int *below);       /* where things open from the bar: its top (below 0: they
+                                           open above it) or, at the top of the screen, its bottom (below 1) */
 void wm_bar_group(struct wm *m, int how);       /* WG_ */
 /* The tray: icons at the task bar's right, left of the note and the clock, in the order they came. */
 u32 wm_tray_add(struct wm *m, const u32 *icon);         /* its id, or 0: the tray is full */
 void wm_tray_icon(struct wm *m, u32 id, const u32 *icon);
 void wm_tray_remove(struct wm *m, u32 id);
 u32 wm_tray_hit(const struct wm *m, s32 x, s32 y);      /* the icon at a point of the screen, 0 none */
-enum { WB_START = 1, WB_BAR, WB_TRAY, WB_CLOCK, WB_WORK };
+enum { WB_START = 1, WB_BAR, WB_TRAY, WB_CLOCK, WB_WORK, WB_MORE, WB_HELD };   /* (WB_MORE: the tray's ^; WB_HELD:
+                                           the count of notifications held back: phase D) */
 int wm_bar_part(const struct wm *m, int part, u32 tray_id, struct gfx_rect *r);  /* where a part of the bar is on the
                                                            screen (WB_; WB_TRAY with an id: that icon): 1, or 0 if
                                                            it isn't there */

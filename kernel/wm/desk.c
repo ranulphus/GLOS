@@ -181,6 +181,15 @@ static const struct theme *theme_now = &themes[0], *theme_shown = &themes[0];
 const struct theme *desk_theme(void) { return theme_now; }
 
 /* From anywhere: the theme of that name from now on (the desktop's thread draws it). 0, or -1: no such theme. */
+void desk_bar_place(int top, int hide)
+{
+    struct wm *m = desk_lock();
+    wm_bar_place(m, top, hide);
+    deskapp_screen(m);                          /* (windows placed in the work area have new sizes: told) */
+    desk_unlock();
+    desk_kick();
+}
+
 void desk_bar_group(int how)
 {
     wm_bar_group(desk_lock(), how);
