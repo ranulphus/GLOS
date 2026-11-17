@@ -1,4 +1,6 @@
-# The image viewer (apps/images; M9 step D): each format, fitted; next and previous; zoom and moving about.
+# The image viewer (apps/images; M9 step D): each format, fitted; next and previous; zoom and moving about; Open
+# (C10): the list typed to BIG.PNG (too big for a thumbnail: described), then down to D.GIF (its
+# thumbnail), opened. (The list's Modified column is blanked in the shots: the dates are the copy's.)
 run IMAGES.EXE C:\GUI\IMG\A.PNG
 wait "A.PNG - Images"
 shot png "A.PNG - Images"
@@ -36,9 +38,20 @@ key pgdn
 wait "A.PNG - Images"
 key pgup
 wait "H.PCX - Images"
+key ctrl+o
+wait "Open"
+key shift+tab
+type big
+shot open-big "Open" 355 56 110 121
+key down down
+shot open-gif "Open" 355 56 110 121
+key enter
+gone "Open"
+wait "D.GIF - Images"
 key alt+f4
-gone "H.PCX - Images"
+gone "D.GIF - Images"
 expect IMAGES open C:\GUI\IMG\B.JPG 160x120 JPG
 expect IMAGES open C:\GUI\IMG\G.PCX 160x120 PCX
 expect IMAGES open C:\GUI\IMG\H.PCX 160x120 PCX
+expect IMAGES open C:\GUI\IMG\D.GIF 160x120 GIF
 expect IMAGES end

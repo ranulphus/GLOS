@@ -132,17 +132,14 @@ static int is_picture(const char *name)
 
 static void status_line(void);
 
-static int load(const char *path)
+/* The file's bytes (NULL: not read). */
+static unsigned char *read_all(const char *path, size_t *pn)
 {
     FILE *f = gui_fopen(path, "rb");
     unsigned char *d = NULL;
     size_t n = 0, room = 0, k;
-    int w = 0, h = 0, comp;
-    unsigned *px = NULL;
-    if (!f) {
-        gui_message(win, "Images", "The file isn't there.", GUI_MB_OK);
-        return -1;
-    }
+    if (!f)
+        return NULL;
     for (;;) {
         if (n == room) {
             unsigned char *nd = realloc(d, room = room * 2 + 65536);
@@ -155,23 +152,48 @@ static int load(const char *path)
         n += k;
     }
     fclose(f);
-    if (d && !strcmp(ext_of(path), "PCX")) {
+    *pn = n;
+    return d;
+}
+
+/* A picture's pixels from its file's bytes (00RRGGBBh; NULL: not one Images can show); kind: its type. */
+static unsigned *decode(const unsigned char *d, size_t n, const char *path, int *pw, int *ph, char *kind, size_t room)
+{
+    unsigned *px = NULL;
+    int w = 0, h = 0, comp;
+    if (!strcmp(ext_of(path), "PCX")) {
         px = pcx(d, n, &w, &h);
-        strcpy(pic.kind, "PCX");
-    } else if (d) {
+        snprintf(kind, room, "PCX");
+    } else {
         unsigned char *rgba = stbi_load_from_memory(d, (int)n, &w, &h, &comp, 4);
         if (rgba) {
             size_t i, all = (size_t)w * (size_t)h;
+            unsigned back = GUI_DARK, br = back >> 16 & 255, bg = back >> 8 & 255, bb = back & 255;
             px = malloc(all * sizeof *px);
-            for (i = 0; px && i < all; i++) {   /* (alpha: over the window's grey) */
+            for (i = 0; px && i < all; i++) {   /* (alpha: over the view's backdrop) */
                 unsigned a = rgba[i * 4 + 3], r = rgba[i * 4], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
-                r = (r * a + 0x66 * (255 - a)) / 255, g = (g * a + 0x66 * (255 - a)) / 255, b = (b * a + 0x66 * (255 - a)) / 255;
+                r = (r * a + br * (255 - a)) / 255, g = (g * a + bg * (255 - a)) / 255, b = (b * a + bb * (255 - a)) / 255;
                 px[i] = r << 16 | g << 8 | b;
             }
             stbi_image_free(rgba);
         }
-        snprintf(pic.kind, sizeof pic.kind, "%s", ext_of(path));
+        snprintf(kind, room, "%s", ext_of(path));
     }
+    *pw = w, *ph = h;
+    return px;
+}
+
+static int load(const char *path)
+{
+    unsigned char *d;
+    size_t n = 0;
+    int w = 0, h = 0;
+    unsigned *px = NULL;
+    if (!(d = read_all(path, &n))) {
+        gui_message(win, "Images", "The file isn't there.", GUI_MB_OK);
+        return -1;
+    }
+    px = decode(d, n, path, &w, &h, pic.kind, sizeof pic.kind);
     free(d);
     if (!px) {
         char t[300], name[128];
@@ -225,6 +247,95 @@ static void step(int by)
     free(e);
 }
 
+/* ---- Open's preview: the chosen picture made small, its size and type under it. A picture of more than 512 K
+   pixels is only described (decoding one at each step down the list would keep a 486 waiting). */
+
+#define THUMB_MAX (512L * 1024)
+
+static struct {
+    char path[260];
+    unsigned *px;                       /* the small copy (NULL: none) */
+    int w, h;                           /* its size */
+    int iw, ih;                         /* the picture's (0: not a picture) */
+    char kind[8];
+} thumb;
+
+static void make_thumb(const char *path, int room_w, int room_h)
+{
+    unsigned char *d;
+    size_t n = 0;
+    int w = 0, h = 0, comp, x, y;
+    unsigned *px;
+    free(thumb.px);
+    memset(&thumb, 0, sizeof thumb);
+    snprintf(thumb.path, sizeof thumb.path, "%s", path);
+    if (!(d = read_all(path, &n)))
+        return;
+    if (strcmp(ext_of(path), "PCX") && stbi_info_from_memory(d, (int)n, &w, &h, &comp)) {
+        thumb.iw = w, thumb.ih = h;
+        snprintf(thumb.kind, sizeof thumb.kind, "%s", ext_of(path));
+        if ((long)w * h > THUMB_MAX) {
+            free(d);
+            return;
+        }
+    }
+    px = decode(d, n, path, &w, &h, thumb.kind, sizeof thumb.kind);
+    free(d);
+    if (!px)
+        return;
+    thumb.iw = w, thumb.ih = h;
+    thumb.w = w, thumb.h = h;                   /* (made smaller to fit, never larger) */
+    if (thumb.w > room_w)
+        thumb.h = (int)((long)thumb.h * room_w / thumb.w), thumb.w = room_w;
+    if (thumb.h > room_h)
+        thumb.w = (int)((long)thumb.w * room_h / thumb.h), thumb.h = room_h;
+    if (thumb.w < 1)
+        thumb.w = 1;
+    if (thumb.h < 1)
+        thumb.h = 1;
+    thumb.px = malloc((size_t)thumb.w * (size_t)thumb.h * sizeof *thumb.px);
+    for (y = 0; thumb.px && y < thumb.h; y++)   /* (each pixel the mean of the ones it covers) */
+        for (x = 0; x < thumb.w; x++) {
+            int y0 = (int)((long)y * h / thumb.h), y1 = (int)((long)(y + 1) * h / thumb.h);
+            int x0 = (int)((long)x * w / thumb.w), x1 = (int)((long)(x + 1) * w / thumb.w), i, j;
+            unsigned long r = 0, g = 0, b = 0, k;
+            if (y1 <= y0)
+                y1 = y0 + 1;
+            if (x1 <= x0)
+                x1 = x0 + 1;
+            for (j = y0; j < y1; j++)
+                for (i = x0; i < x1; i++) {
+                    unsigned c = px[(size_t)j * (size_t)w + (size_t)i];
+                    r += c >> 16 & 255, g += c >> 8 & 255, b += c & 255;
+                }
+            k = (unsigned long)(y1 - y0) * (unsigned long)(x1 - x0);
+            thumb.px[(size_t)y * (size_t)thumb.w + (size_t)x] = (unsigned)(r / k << 16 | g / k << 8 | b / k);
+        }
+    free(px);
+}
+
+static void preview(struct gui_widget *pane, struct gfx_surface *s, const char *path, void *ctx)
+{
+    int room_h = pane->r.h - 30;
+    char t[48];
+    (void)ctx;
+    if (!is_picture(gui_path_name(path)))
+        return;
+    if (strcmp(thumb.path, path) != 0)
+        make_thumb(path, pane->r.w - 8, room_h);
+    if (thumb.px)
+        gfx_image(s, pane->r.x + (pane->r.w - thumb.w) / 2, pane->r.y + 4 + (room_h - thumb.h) / 2, thumb.px, thumb.w,
+                  thumb.h, (unsigned)thumb.w);
+    if (thumb.iw) {
+        snprintf(t, sizeof t, "%d x %d %s", thumb.iw, thumb.ih, thumb.kind);
+        gui_draw_text(s, pane->r.x + 6, pane->r.y + pane->r.h - 20, gui_font, t, GUI_FIELD_TEXT);
+    }
+}
+
+static const char *const filters[] = { "Pictures|*.PNG;*.JPG;*.BMP;*.GIF;*.TGA;*.PNM;*.PPM;*.PGM;*.PCX",
+                                        "All files|*.*", NULL };
+static struct gui_file_opts file_opts = { filters, 0, NULL, 0, NULL, 0, preview, NULL };
+
 /* ---- showing */
 
 static int scale_of(void)               /* the size shown, in tenths of a per cent */
@@ -269,8 +380,10 @@ static void command(struct gui_window *w, int id)
     switch (id) {
     case C_OPEN:
         snprintf(p, sizeof p, "%s", pic.path[0] ? pic.path : glos_boot_root());
-        if (gui_file_dialog(win, "Open", 0, p, sizeof p))
+        if (gui_file_dialog_ex(win, "Open", 0, p, sizeof p, &file_opts))
             load(p);
+        free(thumb.px);                         /* (the preview's copy: not wanted until the next Open) */
+        memset(&thumb, 0, sizeof thumb);
         break;
     case C_NEXT: step(1); break;
     case C_PREV: step(-1); break;

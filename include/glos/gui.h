@@ -686,8 +686,8 @@ void gui_find_close(struct gui_find *f);
 
 /* Open and Save (toolkit 2): places (the drives, the recent folders), the folder in a combo box, the files in a
    virtual list (details or icons, sorted by a column), a filter, an optional preview the app draws, and saving,
-   an optional format. path in: where to start (a folder, or a file there); out: the file. 1: chosen. The old
-   gui_file_dialog keeps its own form until the apps move (step C10). */
+   an optional format. path in: where to start (a folder, or a file there); out: the file. 1: chosen. o NULL (and
+   gui_file_dialog): every file, no preview, no format. */
 struct gui_file_opts {
     const char *const *filters;         /* "Pictures|*.BMP;*.PNG", ..., NULL-ended (NULL: every file) */
     int filter;                         /* in and out: the one chosen */
@@ -958,7 +958,8 @@ int gui_folder_dialog(struct gui_window *owner, const char *title, char *path, i
                                            folder chosen in a tree of the drives' folders, or typed; New folder
                                            makes one. path in: where to start; out: the folder. 1: chosen */
 int gui_file_dialog(struct gui_window *owner, const char *title, int save, char *path, int room);  /* path in: the
-                                           folder (and the name); out: the file chosen. 1: chosen */
+                                           folder (and the name); out: the file chosen. 1: chosen. (Since C10:
+                                           gui_file_dialog_ex with no options) */
 
 /* ---- files, by DOS paths ("C:\GLOS\GLOS.CFG"). The host tests map each drive to a directory
    ($GLOS_HOST_DRIVES/C and so on), so an app shows the same names there as on DOS. */

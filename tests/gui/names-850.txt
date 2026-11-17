@@ -1,11 +1,12 @@
 # DOS file names through code page 850 (M10 step G; GUITEST names, GLOSCP from GUITEST's profile): files named
 # with 850's letters, shown by the file dialog as text; the one chosen comes back as DOS's bytes.
+# (The file list's Modified column is blanked in the shots: the dates are the copy's.)
 config program:GUITEST.EXE env GLOSCP=850
 run GUITEST.EXE names C:\GUI\CP850
 wait "Open"
-shot names "Open"
-key shift+tab down down
-shot chosen "Open"
+shot names "Open" 373 56 103 94
+key shift+tab down
+shot chosen "Open" 373 56 103 94
 key enter
 gone "Open"
 expect GUI page 850

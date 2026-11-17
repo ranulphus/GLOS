@@ -116,11 +116,16 @@ static int save_to(const char *p)
     return 0;
 }
 
+/* Open's and Save As's: text files first (a name saved without a type gets .TXT), or every file; the one chosen
+   kept from one to the next. */
+static const char *const filters[] = { "Text files|*.TXT;*.MD;*.LOG;*.INI;*.CFG;*.BAT", "All files|*.*", NULL };
+static struct gui_file_opts file_opts = { filters, 0, NULL, 0, NULL, 0, NULL, NULL };
+
 static int save_as(void)
 {
     char p[260];
     snprintf(p, sizeof p, "%s", path[0] ? path : glos_boot_root());
-    if (!gui_file_dialog(win, "Save As", 1, p, sizeof p))
+    if (!gui_file_dialog_ex(win, "Save As", 1, p, sizeof p, &file_opts))
         return -1;
     return save_to(p);
 }
@@ -174,7 +179,7 @@ static void command(struct gui_window *w, int id)
         break;
     case C_OPEN:
         snprintf(p, sizeof p, "%s", path[0] ? path : glos_boot_root());
-        if (keep_changes() == 0 && gui_file_dialog(win, "Open", 0, p, sizeof p))
+        if (keep_changes() == 0 && gui_file_dialog_ex(win, "Open", 0, p, sizeof p, &file_opts))
             load(p);
         break;
     case C_SAVE: save(); break;

@@ -24,7 +24,7 @@ static struct gui_widget *sysval[12];
 static struct glos_sys_system sys, last;
 static struct glos_sys_memory mem;
 static struct glos_version ver;
-static int have_last, busy[SAMPLES], nbusy;
+static int have_last;
 static struct glos_program progs[96];
 static int napps;
 static char seen[32][16];                       /* the programs it has said it saw (stdout, for the suite) */
@@ -114,19 +114,6 @@ static void fill_system(void)
         gui_set_text(sysval[i], t[i]);
 }
 
-static void graph_draw(struct gui_widget *w, struct gfx_surface *s)
-{
-    int i, gx = w->r.x, gy = w->r.y, gw = w->r.w, gh = w->r.h;
-    gfx_fill(s, gx, gy, gw, gh, 0x000000);
-    for (i = 1; i < 4; i++)
-        gfx_fill(s, gx, gy + gh * i / 4, gw, 1, 0x333333);
-    for (i = 0; i < nbusy; i++) {
-        int x = gx + gw - (nbusy - i) * gw / SAMPLES, h = busy[i] * (gh - 2) / 100;
-        gfx_fill(s, x, gy + gh - 1 - h, gw / SAMPLES > 1 ? gw / SAMPLES - 1 : 1, h, 0x33CC33);
-    }
-    gfx_frame(s, gx, gy, gw, gh, GUI_LINE);
-}
-
 static void sample(void *arg)
 {
     char t[96];
@@ -139,12 +126,7 @@ static void sample(void *arg)
     if (have_last) {
         unsigned b = sys.busy_ms - last.busy_ms, i = sys.idle_ms - last.idle_ms;
         int pct = b + i ? (int)(b * 100 / (b + i)) : 0;
-        if (nbusy == SAMPLES)
-            memmove(busy, busy + 1, (SAMPLES - 1) * sizeof *busy);
-        else
-            nbusy++;
-        busy[nbusy - 1] = pct;
-        gui_damage(graph);
+        gui_graph_add(graph, &pct);
         snprintf(t, sizeof t, "Processor %d%%   Memory %u KB of %u KB used", pct, mem.total_kb - mem.free_kb, mem.total_kb);
         gui_set_text(status, t);
         snprintf(t, sizeof t, "%u frames in, %u out a second", sys.net_rx - last.net_rx, sys.net_tx - last.net_tx);
@@ -243,7 +225,10 @@ int main(int argc, char **argv)
 
     page = gui_tab(tabs, "Performance");
     gui_label(page, "Processor's use, the last minute:");
-    graph = gui_canvas(page, 0, 100, graph_draw, NULL);
+    graph = gui_graph(page, 1, SAMPLES);       /* (toolkit 2: the last minute's samples as a line) */
+    gui_graph_series(graph, 0, "Processor", 0x20A040u);
+    gui_graph_range(graph, 0, 100);
+    gui_size(graph, 0, 100);
     gui_grow(graph, 1);
     form = gui_form(page);
     row = gui_row(form, "Memory:", NULL);

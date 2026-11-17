@@ -7,7 +7,7 @@
  * file takes it; Backspace in the list goes up; a name with * or ? typed is a filter of its own. Names are DOS's
  * 8.3 ones, shown in its code page as text (gui_dos_text), as everywhere in the toolkit for now.
  *
- * gui_file_dialog keeps its own, older form until the apps move to this one (step C10). */
+ * gui_file_dialog is this dialog with no options (every file, no preview): its older form went in step C10. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -162,7 +162,10 @@ static void fill(void)
 
 static void go(const char *dir)
 {
+    size_t n;
     snprintf(X.dir, sizeof X.dir, "%s", dir);
+    if ((n = strlen(X.dir)) > 3 && X.dir[n - 1] == '\\')    /* ("C:\GUI\" is C:\GUI; "C:\" stays) */
+        X.dir[n - 1] = 0;
     gui_set_text(X.at, X.dir);
     gui_combo_add_top(X.at, X.dir);            /* (the folders visited, for the combo box's list) */
     X.chosen[0] = 0;
@@ -186,8 +189,10 @@ static void m_row(void *ctx, int row, struct gui_vrow *out)
         snprintf(X.cells[1], sizeof X.cells[1], "Folder");
     else if (e->size < 10240)
         snprintf(X.cells[1], sizeof X.cells[1], "%lu bytes", e->size);
-    else
+    else if (e->size < 10240ul * 1024)
         snprintf(X.cells[1], sizeof X.cells[1], "%lu KB", (e->size + 1023) / 1024);
+    else
+        snprintf(X.cells[1], sizeof X.cells[1], "%lu MB", (e->size + 1024ul * 1024 - 1) / (1024ul * 1024));
     snprintf(X.cells[2], sizeof X.cells[2], "%04u-%02u-%02u %02u:%02u", (e->date >> 9) + 1980, (e->date >> 5) & 15,
              e->date & 31, e->time >> 11, (e->time >> 5) & 63);
     out->cell[0] = X.cells[0], out->cell[1] = X.cells[1], out->cell[2] = X.cells[2];
@@ -260,11 +265,15 @@ static void take(void)
         fill();
         return;
     }
-    if (gui_text_dos(t, dos, sizeof dos) != 0)
+    if (gui_text_dos(t, dos, sizeof dos) != 0) {
+        gui_message(X.w, X.save ? "Save" : "Open", "DOS's code page hasn't got all of the name's letters.", GUI_MB_OK);
         return;
+    }
     upper(dos);
-    if ((dos[0] && dos[1] == ':') || dos[0] == '\\')
-        snprintf(path, sizeof path, "%s", dos);
+    if (dos[0] && dos[1] == ':')
+        snprintf(path, sizeof path, dos[2] ? "%s" : "%s\\", dos);   /* ("C:" is its root) */
+    else if (dos[0] == '\\')                    /* (from the root of the folder's drive) */
+        snprintf(path, sizeof path, "%c:%s", X.dir[0], dos);
     else
         gui_path_join(path, sizeof path, X.dir, dos);
     if (gui_is_dir(path)) {                     /* a folder named: there */
@@ -495,8 +504,11 @@ int gui_file_dialog_ex(struct gui_window *owner, const char *title, int save, ch
         for (i = 0; X.o->filters[i]; i++) {
             char t[64];
             const char *bar = strchr(X.o->filters[i], '|');
-            snprintf(t, sizeof t, "%.*s (%s)", bar ? (int)(bar - X.o->filters[i]) : 40, X.o->filters[i],
-                     bar ? bar + 1 : "");
+            int k = bar ? (int)(bar - X.o->filters[i]) : 40;
+            if (bar && (size_t)k + strlen(bar) + 2 <= 40)    /* (the patterns too, if they are short enough to read) */
+                snprintf(t, sizeof t, "%.*s (%s)", k, X.o->filters[i], bar + 1);
+            else
+                snprintf(t, sizeof t, "%.*s", k, X.o->filters[i]);
             gui_choice_add(X.type, t);
         }
         gui_set_value(X.type, X.o->filter);
@@ -527,4 +539,9 @@ int gui_file_dialog_ex(struct gui_window *owner, const char *title, int save, ch
     free(X.shown);
     X.ents = NULL, X.shown = NULL;
     return r == GUI_OK;
+}
+
+int gui_file_dialog(struct gui_window *owner, const char *title, int save, char *path, int room)
+{
+    return gui_file_dialog_ex(owner, title, save, path, room, NULL);
 }

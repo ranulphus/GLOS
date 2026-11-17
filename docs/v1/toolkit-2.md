@@ -826,6 +826,23 @@ widget now draws, and each such change is looked at before its goldens are made 
   and the previous picture and F, 1, + and - still fit, show actual size and zoom); the arrows are the view's
   (32 pixels a press). The script's lines are as they were; the pictures differ in the view's darker backdrop
   and its scroll bars when the picture is larger than the window. Host and Loop A (486 and Pentium II).
+- **C10c, one file dialog** (`sdk/gui/filedlg.c`): `gui_file_dialog` is now `gui_file_dialog_ex` with no options
+  (every file, no preview), and the older dialog's code is gone. What it did that the new one didn't came across:
+  a path typed from the root (`\NOTES`) is on the folder's drive, `C:` alone is its root, a name DOS's code page
+  can't hold says so, and sizes go on to MB. A folder given with a backslash at its end is shown without it; a
+  filter's patterns are shown beside its name only when the two fit in 40 characters (else the name alone).
+  Notepad's Open and Save As pass Text files (`*.TXT;*.MD;*.LOG;*.INI;*.CFG;*.BAT`; a name saved without a type
+  gets `.TXT`) or All files, the one chosen kept from one to the next. Images' Open passes Pictures or All files
+  and a preview: the chosen picture made small (each pixel the mean of those it covers), its size and type under
+  it; one of more than 512 K pixels is only described, as decoding it at each step down the list would keep a 486
+  waiting. Images blends a picture's transparency over the view's backdrop (`GUI_DARK`), not the old grey.
+  Scripts: the new list has no `..` row, so `dialogs` and `names-850`/`866` press Down once less; their Modified
+  column is blanked in their shots (the dates are the copy's); Images' script gains an Open (BIG.PNG described,
+  D.GIF's thumbnail, opened). Expected lines unchanged, one added (Images' D.GIF). (Files has no Open or Save
+  of its own: the plan's step 3 named it where Images was meant.)
+- **C10c, Monitor's history on the graph** (`apps/monitor`): the Performance page's processor history is a
+  `gui_graph` (one series, 0 to 100, the last 60 samples as a line) in place of its own bars. Its script masks the
+  graph (the machine's figures), so its pictures did not change.
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

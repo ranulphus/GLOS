@@ -1,4 +1,5 @@
-# The toolkit's dialogs (GUITEST dialogs): a question, a line typed, the file dialog going into a folder.
+# The toolkit's dialogs (GUITEST dialogs): a question, a line typed, the file dialog going into a folder. (The
+# file list's Modified column is blanked in the shots: the dates are the copy's.)
 run GUITEST.EXE dialogs
 wait "GUITEST Dialogs"
 shot dialogs "GUITEST Dialogs"
@@ -15,11 +16,11 @@ key enter
 gone "Ask"
 key alt+s
 wait "Save As"
-shot save-as "Save As"
-key shift+tab down
-shot save-as-list "Save As"
+shot save-as "Save As" 373 56 103 94
+key shift+tab
+shot save-as-list "Save As" 373 56 103 94
 key enter
-shot save-as-sub "Save As"
+shot save-as-sub "Save As" 373 56 103 94
 key alt+n
 type NEW.TXT\n
 gone "Save As"
