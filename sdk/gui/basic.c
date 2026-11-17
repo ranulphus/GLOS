@@ -617,7 +617,33 @@ struct gui_widget *gui_sep(struct gui_widget *parent) { return gui_new(parent, &
 struct number {
     struct gui_widget w;
     int min, max, value, slider, held, drag;
+    unsigned style;                     /* (toolkit 2) a slider's GUI_SLIDER_ flags */
+    int marks;                          /* ... a mark every so many (0: none) */
+    void (*fmt)(int value, char *out, int room);        /* ... its value as text (NULL: the number) */
 };
+
+#define VTRACK 140                      /* a vertical slider's length */
+
+static void value_text(const struct number *n, char *out, int room)
+{
+    if (n->fmt)
+        n->fmt(n->value, out, room);
+    else
+        snprintf(out, (size_t)room, "%d", n->value);
+}
+
+static int value_w(const struct number *n)     /* the room the value takes beside (or under) the track */
+{
+    char a[32], b[32];
+    struct number m = *n;
+    int wa, wb;
+    if (!(n->style & GUI_SLIDER_VALUE))
+        return 0;
+    m.value = n->min, value_text(&m, a, sizeof a);
+    m.value = n->max, value_text(&m, b, sizeof b);
+    wa = gfx_text_width(gui_font, a, -1), wb = gfx_text_width(gui_font, b, -1);
+    return (wa > wb ? wa : wb) + 6;
+}
 
 static void number_measure(struct gui_widget *w, int *pw, int *ph)
 {
@@ -625,7 +651,10 @@ static void number_measure(struct gui_widget *w, int *pw, int *ph)
     char a[16], b[16];
     int wa, wb;
     if (n->slider) {
-        *pw = 140, *ph = 20;
+        if (n->style & GUI_SLIDER_VERTICAL)     /* (the value under the track) */
+            *pw = 20 > value_w(n) ? 20 : value_w(n), *ph = VTRACK + (n->style & GUI_SLIDER_VALUE ? gui_font->height + 4 : 0);
+        else
+            *pw = 140 + value_w(n), *ph = n->marks ? 26 : 20;
         return;
     }
     sprintf(a, "%d", n->min);
@@ -636,23 +665,60 @@ static void number_measure(struct gui_widget *w, int *pw, int *ph)
     *ph = GUI_FIELD_H;
 }
 
-static int slider_x(struct number *n)
+static int track_len(struct number *n)          /* the track's length less the knob's travel margins */
 {
-    int span = n->max - n->min, room = n->w.r.w - 10;
-    return n->w.r.x + 5 + (span > 0 ? (int)((long long)room * (n->value - n->min) / span) : 0);
+    if (n->style & GUI_SLIDER_VERTICAL)
+        return VTRACK - 10;
+    return n->w.r.w - value_w(n) - 10;
+}
+
+static int slider_x(struct number *n)           /* (vertical: its y; the minimum at the bottom) */
+{
+    int span = n->max - n->min, room = track_len(n), at = span > 0 ? (int)((long long)room * (n->value - n->min) / span) : 0;
+    if (n->style & GUI_SLIDER_VERTICAL)
+        return n->w.r.y + 5 + room - at;
+    return n->w.r.x + 5 + at;
 }
 
 static void number_draw(struct gui_widget *w, struct gfx_surface *s)
 {
     struct number *n = (struct number *)w;
     int on = !(w->flags & GUI_DISABLED);
-    if (n->slider) {
-        int cy = w->r.y + w->r.h / 2, x = slider_x(n);
-        struct gfx_rect k = { x - 4, w->r.y + 2, 9, w->r.h - 4 };
-        gfx_fill(s, w->r.x + 5, cy - 1, w->r.w - 10, 3, on ? GUI_SHADE : GUI_DIM);
+    if (n->slider && n->style & GUI_SLIDER_VERTICAL) {
+        int cx = w->r.x + w->r.w / 2, y = slider_x(n), m;
+        struct gfx_rect k = { cx - 8, y - 4, 17, 9 };
+        gfx_fill(s, cx - 1, w->r.y + 5, 3, VTRACK - 10, on ? GUI_SHADE : GUI_DIM);
+        for (m = n->min; n->marks > 0 && m <= n->max; m += n->marks) {     /* marks beside the track */
+            int span = n->max - n->min, my = w->r.y + 5 + track_len(n) - (span ? track_len(n) * (m - n->min) / span : 0);
+            gfx_fill(s, cx + 6, my, 4, 1, GUI_DIM);
+        }
         gui_draw_box(s, &k, GUI_FACE, n->drag);
+        if (n->style & GUI_SLIDER_VALUE) {
+            char t[32];
+            value_text(n, t, sizeof t);
+            gfx_text(s, w->r.x + (w->r.w - gfx_text_width(gui_font, t, -1)) / 2, w->r.y + VTRACK + 2, gui_font, t, -1,
+                     on ? GUI_TEXT : GUI_DIM);
+        }
         if (gui_is_focus(w)) {
-            struct gfx_rect f = { w->r.x, w->r.y, w->r.w, w->r.h };
+            struct gfx_rect f = { w->r.x, w->r.y, w->r.w, VTRACK };
+            gui_draw_focus(s, &f);
+        }
+    } else if (n->slider) {
+        int th = n->marks ? 20 : w->r.h, cy = w->r.y + th / 2, x = slider_x(n), m, tw = w->r.w - value_w(n);
+        struct gfx_rect k = { x - 4, w->r.y + 2, 9, th - 4 };
+        gfx_fill(s, w->r.x + 5, cy - 1, tw - 10, 3, on ? GUI_SHADE : GUI_DIM);
+        for (m = n->min; n->marks > 0 && m <= n->max; m += n->marks) {     /* marks under the track */
+            int span = n->max - n->min, mx = w->r.x + 5 + (span ? track_len(n) * (m - n->min) / span : 0);
+            gfx_fill(s, mx, w->r.y + th + 1, 1, 4, GUI_DIM);
+        }
+        gui_draw_box(s, &k, GUI_FACE, n->drag);
+        if (n->style & GUI_SLIDER_VALUE) {
+            char t[32];
+            value_text(n, t, sizeof t);
+            gfx_text(s, w->r.x + tw + 4, w->r.y + (th - gui_font->height) / 2, gui_font, t, -1, on ? GUI_TEXT : GUI_DIM);
+        }
+        if (gui_is_focus(w)) {
+            struct gfx_rect f = { w->r.x, w->r.y, tw, th };
             gui_draw_focus(s, &f);
         }
     } else {
@@ -754,9 +820,10 @@ static int number_event(struct gui_widget *w, struct gui_ev *e)
     return 0;
 drag:
     {
-        int span = n->max - n->min, room = w->r.w - 10;
+        int span = n->max - n->min, room = track_len(n);
+        int along = n->style & GUI_SLIDER_VERTICAL ? room - (e->y - w->r.y - 5) : e->x - w->r.x - 5;
         if (room > 0)
-            number_set(n, n->min + (int)(((long long)(e->x - w->r.x - 5) * span + room / 2) / room), 1);
+            number_set(n, n->min + (int)(((long long)along * span + room / 2) / room), 1);
         gui_damage(w);
     }
     return 1;
@@ -777,6 +844,15 @@ static struct gui_widget *number(struct gui_widget *parent, int min, int max, in
 
 struct gui_widget *gui_spin(struct gui_widget *parent, int min, int max, int value) { return number(parent, min, max, value, 0); }
 struct gui_widget *gui_slider(struct gui_widget *parent, int min, int max, int value) { return number(parent, min, max, value, 1); }
+
+void gui_slider_style(struct gui_widget *w, unsigned style, int marks, void (*fmt)(int value, char *out, int room))
+{
+    struct number *n = (struct number *)w;
+    n->style = style, n->marks = marks > 0 ? marks : 0, n->fmt = fmt;
+    gui_damage(w);
+    if (w->win)
+        gui_relayout(w->win);
+}
 
 /* gui_value and gui_set_value for every kind that has a number. */
 int gui_choice_value(struct gui_widget *w, int set, int value);

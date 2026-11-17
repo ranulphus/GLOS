@@ -351,6 +351,21 @@ struct gui_widget *gui_sep(struct gui_widget *parent);         /* a line across 
 /* ---- numbers */
 struct gui_widget *gui_spin(struct gui_widget *parent, int min, int max, int value);
 struct gui_widget *gui_slider(struct gui_widget *parent, int min, int max, int value);
+#define GUI_SLIDER_VERTICAL 1           /* (toolkit 2) upright, the minimum at the bottom (Up raises it) */
+#define GUI_SLIDER_VALUE    2           /* its value shown beside it (under it, upright) */
+void gui_slider_style(struct gui_widget *w, unsigned style, int marks, void (*fmt)(int value, char *out, int room));
+/* (toolkit 2) A level meter: one or two channels' levels (0 to 1000) as bars, across or upright, green, yellow past
+   70%, red past 90%, each peak held a second and a half. */
+struct gui_widget *gui_meter(struct gui_widget *parent, int channels, int vertical);
+void gui_meter_set(struct gui_widget *w, int left, int right);         /* (right: a second channel's) */
+/* (toolkit 2) A graph: the last `points` samples of up to four series as lines, the newest at the right, scaled to
+   their highest (or gui_graph_range), each series named in its colour. */
+struct gui_widget *gui_graph(struct gui_widget *parent, int series, int points);
+void gui_graph_series(struct gui_widget *w, int i, const char *name, unsigned rgb);    /* rgb GFX_NONE: its own */
+void gui_graph_range(struct gui_widget *w, int lo, int hi);            /* hi <= lo: the samples' own */
+void gui_graph_add(struct gui_widget *w, const int *values);           /* a sample of each series */
+                                        /* marks: a mark every so many (0: none); fmt: the value as text ("1:23" for
+                                           seconds), NULL: the number */
 int gui_value(struct gui_widget *w);    /* a spin's, a slider's, a choice's (its item), a progress bar's */
 void gui_set_value(struct gui_widget *w, int value);
 

@@ -611,6 +611,18 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
 - **Test** `dnd` (GUITEST's fruit, basket and places: a copy between lists at the place shown, a reorder within a
   list, a drop on nothing, a drop into a tree's node, two chosen rows dragged together), host and Loop A.
 
+### C8 as built (in progress)
+
+- **C8a, slider, level meter, graph** (`sdk/gui/basic.c`, `sdk/gui/meter.c`): `gui_slider_style` makes a slider
+  upright (`GUI_SLIDER_VERTICAL`, the minimum at the bottom), puts marks every so many, and shows its value beside
+  it (`GUI_SLIDER_VALUE`) in the app's format (a time for seeking); sliders without a style draw as before.
+  `gui_meter` is one or two channels' levels as segmented bars, across or upright, green, yellow past 70%, red past
+  90% (the same in every theme), the peak held a second and a half. `gui_graph` keeps the last so many samples of
+  up to four series and draws them as lines over a grid, newest at the right, scaled to their highest or a set
+  range, with the series' names in their colours.
+- **Test** `meters` (GUITEST's page by keys: the seek slider with marks and a time, the levels with peaks held then
+  fallen back, twenty samples in a graph, the upright volume slider), host and Loop A.
+
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
 - **Farm-Fresh** (FatCow; CC BY 3.0) for colour icons and **Font Awesome Free, solid** (CC BY 4.0) for the

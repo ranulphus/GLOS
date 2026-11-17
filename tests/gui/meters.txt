@@ -1,0 +1,24 @@
+# Sliders, level meters and a graph (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's page by keys.
+# The seek slider (marks every minute, its value as a time) moved by its arrows; a loud moment and a quieter one in
+# the meters (the peaks held as marks, then fallen back: the shot waits two seconds, as a held peak's time is the
+# machine's); twenty samples of two series in the graph; the upright volume slider (its
+# value under it) moved up.
+run GUITEST.EXE meters
+wait "GUITEST Meters"
+key right right
+key alt+l
+key alt+f
+pause 2000
+shot all "GUITEST Meters"
+key alt+v
+key up up
+shot moved "GUITEST Meters"
+key alt+f4
+gone "GUITEST Meters"
+expect GUI meters
+expect GUI seek 1:38
+expect GUI seek 1:53
+expect GUI levels
+expect GUI fed
+expect GUI volume 80
+expect GUI end

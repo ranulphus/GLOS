@@ -65,6 +65,8 @@
  *                       and a private format put in one transaction, and read back
  *   GUITEST dnd         "GUITEST Drag and drop" (toolkit 2, step C7): fruit dragged into
  *                       a basket (copied where it is let go), and reordered in its list
+ *   GUITEST meters      "GUITEST Meters" (toolkit 2, step C8): sliders across with marks
+ *                       and a time, and upright; level meters with their peaks; a graph
  *   GUITEST tasks       "GUITEST Tasks" (toolkit 2, step C4): background work: a task
  *                       "reads" ten thousand rows in pieces on a thread of its own,
  *                       the list filling as they are posted; its progress dialog
@@ -1754,6 +1756,80 @@ static void dnd_page(void)
     say("dnd", "", 0);
 }
 
+/* ---- sliders, level meters and graphs (toolkit 2, step C8) */
+static struct gui_widget *mt_seek, *mt_vol, *mt_stereo, *mt_mono, *mt_graph;
+static int mt_t;
+
+static void mt_time(int v, char *out, int room) { snprintf(out, (size_t)room, "%d:%02d", v / 60, v % 60); }
+
+static void mt_slid(struct gui_widget *w, int what)
+{
+    char t[16];
+    if (what != GUI_ON_CHANGE)
+        return;
+    if (w == mt_seek) {
+        mt_time(gui_value(w), t, sizeof t);
+        say("seek %s", t, 0);
+    } else {
+        say("volume%s %d", "", gui_value(w));
+    }
+}
+
+static void mt_levels(struct gui_widget *w, int what)  /* a loud moment, then quieter: the peaks stay a while */
+{
+    (void)w, (void)what;
+    gui_meter_set(mt_stereo, 950, 640);
+    gui_meter_set(mt_mono, 820, 0);
+    gui_meter_set(mt_stereo, 400, 300);
+    gui_meter_set(mt_mono, 350, 0);
+    say("levels", "", 0);
+}
+
+static void mt_feed(struct gui_widget *w, int what)    /* twenty samples of two series */
+{
+    static const int cpu[20] = { 10, 25, 40, 35, 60, 80, 75, 50, 45, 30, 20, 55, 90, 85, 60, 40, 30, 35, 20, 15 };
+    int i, v[2];
+    (void)w, (void)what;
+    for (i = 0; i < 20; i++, mt_t++) {
+        v[0] = cpu[i], v[1] = 100 - cpu[(i + 7) % 20];
+        gui_graph_add(mt_graph, v);
+    }
+    say("fed", "", 0);
+}
+
+static void meters_page(void)
+{
+    struct gui_widget *box, *row, *col;
+    win = gui_window_at("GUITEST Meters", 0, 0, 420, 270, 0);
+    box = gui_vbox(win->root, -1, -1);
+    row = gui_hbox(box, -1, 0);
+    gui_label(row, "&Seek:");
+    mt_seek = gui_slider(row, 0, 300, 83);
+    gui_slider_style(mt_seek, GUI_SLIDER_VALUE, 60, mt_time);
+    gui_on(mt_seek, mt_slid, 0);
+    row = gui_hbox(box, 12, 0);
+    col = gui_vbox(row, 2, 0);
+    gui_label(col, "&Volume");
+    mt_vol = gui_slider(col, 0, 100, 70);
+    gui_slider_style(mt_vol, GUI_SLIDER_VERTICAL | GUI_SLIDER_VALUE, 25, NULL);
+    gui_on(mt_vol, mt_slid, 0);
+    col = gui_vbox(row, 4, 0);
+    gui_label(col, "Levels:");
+    mt_stereo = gui_meter(col, 2, 0);
+    mt_mono = gui_meter(row, 1, 1);
+    col = gui_vbox(row, 4, 0);
+    mt_graph = gui_graph(col, 2, 40);
+    gui_graph_series(mt_graph, 0, "CPU", GFX_NONE);
+    gui_graph_series(mt_graph, 1, "Free", GFX_NONE);
+    row = gui_hbox(box, -1, 0);
+    gui_button(row, "&Levels", mt_levels, 0);
+    gui_button(row, "&Feed", mt_feed, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(mt_seek);
+    say("meters", "", 0);
+}
+
 /* ---- the virtual tree (toolkit 2, step C3). Ids: 1, 2, 3 at the top; a node's children are its id times ten
    and 1, 2, 3 (to three levels); but node 2's are five thousand leaves, 2000000 and on. */
 static struct gui_widget *vt;
@@ -1982,6 +2058,8 @@ int main(int argc, char **argv)
         clip_page();
     else if (!strcmp(what, "dnd"))
         dnd_page();
+    else if (!strcmp(what, "meters"))
+        meters_page();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");
