@@ -206,7 +206,12 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   a program started detached is taken as started, so that Files goes on as it would and says what it ran.
 - **A tile dragged** onto another's place moves there (the toolkit's lists drag their chosen row; the tiles take
   it back as a move, in a format of Files' own); it moves by its page's rows too.
-- **Not yet:** the index of file names for the search; the tiles' groups and sizes; "Recently added".
+- **Files by their names:** the names of the files on the hard drives (C: and up) are walked a folder at a time
+  in the shell's idle moments once the menu has first come up (no thread: one folder's read is short; 4000
+  names at most, six folders deep; walked again when the menu comes up five minutes or more after the last walk
+  ended), kept in memory, not in a file. Two letters or more typed list up to eight files whose names have them,
+  each with its folder; Enter opens one as Files opens any file.
+- **Not yet:** the tiles' groups and sizes; "Recently added".
 - **Power's three rows** run `glos exit`, `glos restart` and `glos reboot` as lines of GLOS's own shell (a
   `GLOS_RUN_SHELL` job; a job's command would be run as a program). Exit GLOS was proven by hand on Loop A
   (2026-11-17: Files as the shell, Ctrl+Esc, Alt+P, Enter: Files is asked to end and says so, GLOS exits with

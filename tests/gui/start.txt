@@ -3,7 +3,7 @@
 # last one's place; "con" typed finds the Control
 # Panel, Enter starts it; "sound" finds the Control Panel's Sound page; "note", Down into the list and More
 # (Alt+M): Notepad's own page, unpinned there, back by Esc; Tab to the tiles, the second started by Enter; Doom's
-# page by Shift+F10: its tasks, the second run; Power's page; a recent document found by its name and opened; a
+# page by Shift+F10: its tasks, the second run; a file on the drive found by its name and opened; Power's page; a recent document found by its name and opened; a
 # folder's path typed opens the folder.
 config program:DOOM.EXE menu 1
 config program:DOOM.EXE title Doom
@@ -58,6 +58,13 @@ key enter
 gone "Start"
 launch
 wait "Start"
+pause 3000
+type letter
+shot found-file "Start"
+key enter
+gone "Start"
+launch
+wait "Start"
 key alt+p
 shot power "Start"
 key esc
@@ -82,6 +89,7 @@ expect FILES start unpinned Notepad
 expect FILES start run Files
 expect FILES start run Doom
 expect FILES run DOOM.EXE -net 2
+expect FILES start file C:\FM\DOCS\LETTER.TXT
 expect FILES start document C:\GUI\EDIT.TXT
 expect FILES start typed C:\GUI
 expect FILES end 

@@ -3,7 +3,8 @@
  * A pop-up of the shell's own at the task bar's edge (the task bar's mark, Ctrl+Esc, the Windows key:
  * GLOS_SHELL_LAUNCH). On the left a search field over one list: with nothing typed, the entries started most,
  * then every entry under its first letter; typing filters it to the programs, the Control Panel's pages and the
- * recent documents that match, and "Run" for what was typed as it stands. On the right the pinned entries as
+ * recent documents that match, files on the hard drives by their names, and "Run" for what was typed as it
+ * stands. On the right the pinned entries as
  * tiles. Under them: Settings, Files, More (the current row's or tile's own page: open, pin or unpin, move, its
  * tasks, its recent documents) and Power (exit GLOS, restart GLOS, restart the PC).
  *
@@ -32,7 +33,7 @@ struct ent {
     int uses;
 };
 
-enum { R_HEAD, R_ENT, R_PAGE, R_DOC, R_RUN, R_ACT, R_TASK };
+enum { R_HEAD, R_ENT, R_PAGE, R_DOC, R_RUN, R_ACT, R_TASK, R_FILE };
 enum { A_OPEN = 1, A_PIN, A_EARLIER, A_LATER, A_BACK, A_EXIT, A_RESTART, A_REBOOT };
 #define P_MAIN  -1                      /* the list's page: the entries (or what the search found) ... */
 #define P_POWER -2                      /* ... Power's ... (0 and up: that entry's own page) */
@@ -233,6 +234,79 @@ static int task_at(const char *tasks, int k, char *label, size_t lroom, char *ar
     return -1;
 }
 
+/* ---- the names of the files on the hard drives, for the search. Walked a folder at a time in the shell's idle
+   moments (no thread: one folder's read is short), 4000 names at most, six folders deep; walked again when the
+   menu comes up five minutes or more after the last walk ended. */
+
+#define NAMES 4000
+#define DEPTH 6
+#define WALK_AGAIN 300000u              /* milliseconds */
+
+static char *found[NAMES];
+static int nfound;
+static struct { char *dir; int depth; } *todo;
+static int ntodo, todo_room, walking;
+static unsigned walked_at;              /* when the last walk ended (glos_ticks; 0: never) */
+
+static void todo_add(const char *dir, int depth)
+{
+    if (ntodo == todo_room) {
+        void *n = realloc(todo, (size_t)(todo_room * 2 + 32) * sizeof *todo);
+        if (!n)
+            return;
+        todo = n, todo_room = todo_room * 2 + 32;
+    }
+    if ((todo[ntodo].dir = strdup(dir)) != NULL)
+        todo[ntodo++].depth = depth;
+}
+
+static void walk_tick(void *arg)
+{
+    struct gui_dirent *e = NULL;
+    char path[260], *dir;
+    int n, i, depth;
+    (void)arg;
+    if (!ntodo) {                               /* done */
+        walking = 0;
+        walked_at = glos_ticks() | 1;
+        gui_idle(walk_tick, NULL, 0);
+        return;
+    }
+    dir = todo[0].dir, depth = todo[0].depth;   /* (the oldest first: the folders nearest the root before the deep) */
+    memmove(&todo[0], &todo[1], (size_t)(--ntodo) * sizeof *todo);
+    n = gui_dir_read(dir, &e);
+    for (i = 0; i < n; i++) {
+        gui_path_join(path, sizeof path, dir, e[i].name);
+        if (e[i].dir) {
+            if (depth < DEPTH)
+                todo_add(path, depth + 1);
+        } else if (nfound < NAMES && (found[nfound] = strdup(path)) != NULL) {
+            nfound++;
+        }
+    }
+    free(e);
+    free(dir);
+}
+
+static void walk_start(void)
+{
+    char letters[27], root[4];
+    int i;
+    if (walking || (walked_at && glos_ticks() - walked_at < WALK_AGAIN))
+        return;
+    for (i = 0; i < nfound; i++)
+        free(found[i]);
+    nfound = 0;
+    gui_drives(letters);
+    for (i = 0; letters[i]; i++)
+        if (letters[i] >= 'C') {
+            snprintf(root, sizeof root, "%c:\\", letters[i]);
+            todo_add(root, 0);
+        }
+    walking = 1;
+    gui_idle(walk_tick, NULL, 30);
+}
+
 /* ---- the list's rows */
 
 static int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
@@ -337,6 +411,17 @@ static void fill(void)
                     add(R_HEAD, 0, GUI_T("Documents"));
                 add(R_DOC, i, gui_dos_text(gui_path_name(docs[i]), name, sizeof name));
             }
+        for (i = 0, n = 0; strlen(typed) >= 2 && i < nfound && n < 8; i++)   /* files by their names: eight at most */
+            if (has(gui_path_name(found[i]), typed)) {
+                char dir[200], dname[64];
+                if (!n++)
+                    add(R_HEAD, 0, GUI_T("Files"));
+                snprintf(dir, sizeof dir, "%s", found[i]);
+                gui_path_up(dir);
+                snprintf(t, sizeof t, "%s  (%s)", gui_dos_text(gui_path_name(found[i]), name, sizeof name),
+                         gui_dos_text(dir, dname, sizeof dname));
+                add(R_FILE, i, t);
+            }
         snprintf(t, sizeof t, GUI_T("Run: %s"), typed);
         add(R_RUN, 0, t);
     } else {                                    /* the entries started most, then all of them by their letters */
@@ -384,7 +469,8 @@ static void l_row(void *ctx, int r, struct gui_vrow *out)
     out->cell[0] = w->text;
     out->id = (unsigned long)r + 1;
     out->icon = w->kind == R_ENT ? icon(ents[w->idx].kind, 0) : w->kind == R_PAGE ? icon(IC_CONTROL, 0)
-              : w->kind == R_DOC ? icon(icon_for_file(docs[w->idx], 0), 0) : w->kind == R_RUN ? icon(IC_PROGRAM, 0) : NULL;
+              : w->kind == R_DOC ? icon(icon_for_file(docs[w->idx], 0), 0) : w->kind == R_RUN ? icon(IC_PROGRAM, 0)
+              : w->kind == R_FILE ? icon(icon_for_file(found[w->idx], 0), 0) : NULL;
 }
 
 static int t_count(void *ctx) { (void)ctx; return npins; }
@@ -504,6 +590,12 @@ static void act(int r)
     case R_DOC:
         snprintf(t, sizeof t, "%s", docs[w->idx]);
         say("document", t);
+        hide();
+        files_open(t);
+        break;
+    case R_FILE:
+        snprintf(t, sizeof t, "%s", found[w->idx]);
+        say("file", t);
         hide();
         files_open(t);
         break;
@@ -730,6 +822,7 @@ void start_open(int x, int y)
     }
     entries_load();
     docs_load();
+    walk_start();                               /* (the files' names, for the search: in the idle moments from now) */
     page = P_MAIN;
     gui_set_text(search, "");
     fill();
