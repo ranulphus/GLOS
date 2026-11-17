@@ -3,7 +3,8 @@
  * sdk/gui and sdk/libglos; on the host with tests/host/glosshim.c.
  *
  *   GUITEST gallery     one window, "GUITEST Gallery": a menu bar, tabs of
- *                       every widget, a status bar that says what happened
+ *                       every widget (toolkit 1's three, then toolkit 2's:
+ *                       C10), a status bar that says what happened
  *   GUITEST dialogs     a window with buttons that open each dialog
  *   GUITEST clip TEXT   a window with a field; Ctrl+C there copies, and the
  *                       field shows what Ctrl+V pasted
@@ -201,6 +202,151 @@ static void icons(void)
             icon_dir[y * 16 + x] = (unsigned char)(x == 1 || x == 14 || y == 3 || y == 13 || (y == 5 && x < 7) ? 16 : 226);
 }
 
+/* ---- toolkit 2's widgets in the gallery (C10, step 5): each tab the same every run (a date and a time of its
+   own, no clock, no machine's figures), so that the pictures are the host's on Loop A too */
+static const char gal_md[] =
+    "# Rich text\n\nMarkdown's **bold**, *italic*, `code` and [a link](http://example.org/).\n\n"
+    "- a list\n- of two items\n\n> A quote.\n\n| Kind | Count |\n|------|------:|\n| Text | 12 |\n| Image | 3 |\n";
+static const char gal_c[] =
+    "#include <stdio.h>\n\n/* The code editor, in C's colours */\nint main(void)\n{\n    int i;\n"
+    "    for (i = 0; i < 3; i++)\n        printf(\"%d\\n\", i);\n    return 0;\n}\n";
+static const char gal_term[] =
+    "\033[1mGLOS\033[0m's terminal: \033[31mred\033[0m, \033[32mgreen\033[0m, \033[34mblue\033[0m,"
+    " \033[7mreversed\033[0m\r\n\r\nC:\\>DIR /W\r\n"
+    "[GLOS]       [GAMES]      AUTOEXEC.BAT CONFIG.SYS   COMMAND.COM\r\n"
+    "        3 file(s)         93,412 bytes\r\n        2 dir(s)   1,048,576 bytes free\r\n\r\nC:\\>";
+static unsigned gal_px[160 * 120];
+static const unsigned gal_colours[16] = { 0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xAA5500,
+                                          0xAAAAAA, 0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF,
+                                          0xFFFF55, 0xFFFFFF };
+
+static void gallery_more(struct gui_widget *tabs)
+{
+    static const char *const kinds[] = { "Small", "Medium", "Large", NULL };
+    struct gui_widget *page, *split, *form, *row, *w;
+    int i, x, y;
+
+    page = gui_tab(tabs, "Views");             /* a list's icon view, a tree beside it */
+    split = gui_split(page, 0, 330);
+    gui_grow(split, 1);
+    {
+        static const char *const heads[1] = { "Name" };
+        static const int widths[1] = { 120 };
+        static const char *const names[] = { "GLOS", "GAMES", "AUTOEXEC.BAT", "CONFIG.SYS", "NOTES.TXT",
+                                             "PICTURE.PNG", "SOUND.WAV", "SETUP.EXE" };
+        static const char *const icons[] = { "folder", "folder", "file-batch", "file-text", "file-text", "file-image",
+                                             "file-sound", "file-program" };
+        w = gui_list(split, 1, heads, widths);
+        for (i = 0; i < 8; i++) {
+            const char *cells[1] = { names[i] };
+            gui_list_add(w, cells, gui_icon(icons[i], 1), NULL);        /* (a list's grid: 32-pixel icons) */
+        }
+        gui_list_icons(w, 1);
+        w = gui_tree(split);
+        {
+            struct gui_node *c = gui_tree_add(w, NULL, "C:", gui_icon("drive", 0), NULL, 0);
+            gui_tree_add(w, c, "GLOS", gui_icon("folder", 0), NULL, 0);
+            gui_tree_add(w, c, "GAMES", gui_icon("folder", 0), NULL, 0);
+            gui_tree_add(w, NULL, "D:", gui_icon("drive", 0), NULL, 0);
+            gui_tree_expand(w, c, 1);
+        }
+    }
+
+    page = gui_tab(tabs, "Pickers");           /* a combo box, a date and a time, a calendar, colours */
+    row = gui_hbox(page, 16, 0);
+    form = gui_form(row);
+    w = gui_combo(gui_row(form, "T&heme:", NULL), 12);
+    gui_combo_add(w, "Slate");
+    gui_combo_add(w, "Dark");
+    gui_combo_add(w, "Contrast");
+    gui_set_text(w, "Slate");
+    gui_date_field(gui_row(form, "D&ate:", NULL), 20261117);
+    gui_time_field(gui_row(form, "T&ime:", NULL), 140500, 0);
+    gui_colour_button(gui_row(form, "Co&lour:", NULL), 0x336699, 0);
+    gui_palette(gui_row(form, "&Swatches:", NULL), gal_colours, 16, 8);
+    w = gui_calendar(row, 20261117);
+    gui_calendar_style(w, 0, 20261117, NULL, NULL);
+
+    page = gui_tab(tabs, "Meters");            /* level meters, a graph */
+    row = gui_hbox(page, 16, 0);
+    form = gui_form(row);
+    gui_meter_set(gui_meter(gui_row(form, "Stereo:", NULL), 2, 0), 600, 850);
+    gui_meter_set(gui_meter(gui_row(form, "Mono:", NULL), 1, 0), 950, 0);
+    gui_grow(form, 1);
+    gui_meter_set(gui_meter(row, 2, 1), 300, 750);
+    w = gui_graph(page, 2, 40);
+    gui_grow(w, 1);
+    gui_graph_series(w, 0, "Up", GFX_NONE);
+    gui_graph_series(w, 1, "Down", GFX_NONE);
+    gui_graph_range(w, 0, 100);
+    for (i = 0; i < 40; i++) {
+        int v[2];
+        v[0] = 10 + i * 2 + (i % 5) * 3;
+        v[1] = 95 - i * 2 + (i % 3) * 4;
+        gui_graph_add(w, v);
+    }
+
+    page = gui_tab(tabs, "Documents");         /* Markdown beside C in the code editor */
+    split = gui_split(page, 0, 270);
+    gui_grow(split, 1);
+    w = gui_richview(split);
+    gui_richview_set(w, gui_markdown(gal_md, -1, NULL, NULL));
+    w = gui_code(split);
+    {
+        char *t = malloc(sizeof gal_c);
+        if (t) {
+            memcpy(t, gal_c, sizeof gal_c);
+            gui_code_set(w, t, sizeof gal_c - 1);
+        }
+    }
+    gui_code_lexer(w, gui_code_lex_c, NULL);
+
+    page = gui_tab(tabs, "Picture");           /* the image view, fitted */
+    for (y = 0; y < 120; y++)
+        for (x = 0; x < 160; x++) {
+            int dx = x - 110, dy = y - 60;
+            gal_px[y * 160 + x] = dx * dx + dy * dy < 900 ? 0x2030C0u
+                                : (unsigned)(x * 255 / 159) << 16 | (unsigned)(y * 255 / 119) << 8 | 0x60;
+        }
+    w = gui_image_view(page);
+    gui_grow(w, 1);
+    gui_image_view_set(w, gal_px, 160, 120, 160);
+
+    page = gui_tab(tabs, "Properties");        /* the property grid, a property of each kind */
+    w = gui_propgrid(page);
+    gui_grow(w, 1);
+    {
+        struct gui_prop pr;
+        gui_prop_group(w, "Text");
+        memset(&pr, 0, sizeof pr), pr.kind = GUI_PROP_TEXT, pr.text = "GLOS";
+        gui_prop_add(w, "Name", "What it is called", &pr);
+        memset(&pr, 0, sizeof pr), pr.kind = GUI_PROP_NUMBER, pr.value = 12, pr.min = 1, pr.max = 64;
+        gui_prop_add(w, "Size", "In points", &pr);
+        memset(&pr, 0, sizeof pr), pr.kind = GUI_PROP_BOOL, pr.value = 1;
+        gui_prop_add(w, "Bold", NULL, &pr);
+        gui_prop_group(w, "Look");
+        memset(&pr, 0, sizeof pr), pr.kind = GUI_PROP_CHOICE, pr.value = 1, pr.items = kinds;
+        gui_prop_add(w, "Kind", NULL, &pr);
+        memset(&pr, 0, sizeof pr), pr.kind = GUI_PROP_COLOUR, pr.rgb = 0x336699;
+        gui_prop_add(w, "Colour", NULL, &pr);
+        memset(&pr, 0, sizeof pr), pr.kind = GUI_PROP_FONT, pr.font.face = 0, pr.font.size = 1;
+        gui_prop_add(w, "Font", NULL, &pr);
+    }
+
+    page = gui_tab(tabs, "Terminal");          /* a terminal fed a program's output (the program gone: no cursor) */
+    w = gui_terminal(page, 100);
+    gui_grow(w, 1);
+    gui_term_feed(w, gal_term, (int)sizeof gal_term - 1);
+    gui_term_end(w);
+
+    page = gui_tab(tabs, "Chat");              /* the chat view */
+    w = gui_chatview(page, 100);
+    gui_grow(w, 1);
+    gui_chat_line(w, "alice", 0xC03020, "Has anyone tried the **new** toolkit?");
+    gui_chat_line(w, "bob", 0x208040, "Yes: the gallery shows `every` widget.");
+    gui_chat_markdown(w, "A message of *several* blocks:\n\n- one\n- two\n");
+}
+
 static void gallery(void)
 {
     struct gui_menubar *bar;
@@ -215,7 +361,7 @@ static void gallery(void)
         { "BIGFILE.DAT", "65536", "Data" }, { "EMPTY.TXT", "0", "Text" } };
     int i;
 
-    win = gui_window("GUITEST Gallery", 440, 330, 0);
+    win = gui_window("GUITEST Gallery", 624, 420, 0);  /* (toolkit 2's tabs too: their titles in one row) */
     win->on_command = command;
     bar = gui_menubar(win);
     m = gui_menu(bar, "&File");
@@ -301,6 +447,7 @@ static void gallery(void)
         gui_tree_add(tree, NULL, "D:", icon_dir, NULL, 1);
         gui_tree_expand(tree, n, 1);
     }
+    gallery_more(tabs);
 
     status = gui_status(win);
     gui_set_text(status, "Ready");

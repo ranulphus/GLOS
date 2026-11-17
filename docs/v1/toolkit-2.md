@@ -869,6 +869,25 @@ widget now draws, and each such change is looked at before its goldens are made 
   use the toolkit: theirs come with the catalogue, later). Plurals (`folder%s`) stay English's until then.
   Done by a script for the toolkit's calls (256 places) and by hand for the rest; `GUI_T` is still the string,
   so every golden is the same.
+- **C10e, the gallery whole** (C10 plan, step 5): GUITEST's gallery keeps toolkit 1's three tabs and gains eight
+  of toolkit 2's: Views (a list's icon view beside a tree, in a split), Pickers (a combo box, date and time
+  fields, a colour button, a palette, a calendar), Meters (level meters across and upright, a graph of two
+  series), Documents (Markdown in a rich-text view beside C in the code editor), Picture (the image view),
+  Properties (the property grid, a property of each kind), Terminal (a program's coloured output) and Chat. Each
+  is the same every run (its own date and time, no clock, no machine's figures). The window is 624 by 420, so that
+  the eleven titles take one row at the normal text size (two at the large). The gallery's script shoots each new
+  tab, and so do the dark and high-contrast themes' (the meters after their peaks have settled): every widget in
+  the three themes. Scripts: going back from Lists to Buttons is now Ctrl+Shift+Tab twice (Ctrl+Tab goes on to
+  Views); the mouse's clicks are where they were; no line changed.
+- **Fixed by it:** the terminal drew a program's default colours as black on white over the theme's field, so
+  in the dark and high-contrast themes its ordinary text was black on black; the default colours are now the
+  field's text and the field (`sdk/gui/term.c`; `vt_rgb` keeps xterm's for the rest). The default theme's
+  pictures are the same.
+- **C10f, the reference** (C10 plan, step 6; `docs/gui.md`): toolkit 2 introduced, with `gui.h`'s sections as the
+  reference for each call; the list and the tree on the models; Notepad on the code editor; new sections on
+  background work (§1.12), resource files and translation (`GUI_T`, `GUI_N`, which dialogs are resource text:
+  §1.13) and widgets of an app's own (§1.14); GUITEST and its gallery as the whole (§2); the apps' rows as C10
+  left them.
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

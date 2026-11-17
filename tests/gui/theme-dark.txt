@@ -1,6 +1,7 @@
 # Themes (toolkit 2, step C1a; docs/v1/toolkit-2.md 5): the gallery in the dark theme ([desktop] theme = dark).
 # Every widget draws by the theme's roles: text on a face and in a field, what is chosen in a list, a tree, a
 # menu and typed text, what can't be used, the focus's mark.
+# Then toolkit 2's tabs (C10), each shot (the meters after their peaks have settled).
 config desktop theme dark
 run GUITEST.EXE gallery
 wait "GUITEST Gallery"
@@ -29,6 +30,23 @@ key f1
 shot about "About GUITEST"
 key enter
 gone "About GUITEST"
+key ctrl+tab
+shot views "GUITEST Gallery"
+key ctrl+tab
+shot pickers "GUITEST Gallery"
+key ctrl+tab
+pause 2000
+shot meters "GUITEST Gallery"
+key ctrl+tab
+shot documents "GUITEST Gallery"
+key ctrl+tab
+shot picture "GUITEST Gallery"
+key ctrl+tab
+shot properties "GUITEST Gallery"
+key ctrl+tab
+shot terminal "GUITEST Gallery"
+key ctrl+tab
+shot chat "GUITEST Gallery"
 key alt+f4
 gone "GUITEST Gallery"
 expect GUI end

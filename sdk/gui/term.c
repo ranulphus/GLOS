@@ -137,6 +137,15 @@ static void tm_layout(struct gui_widget *w)    /* the window's size is the scree
     gui_damage(w);
 }
 
+/* A cell's colour: the program's, or for the default the theme's (a field's text and a field), not vt_rgb's
+   black on white, so that the default text shows in a dark theme too. fg: the default means the foreground. */
+static unsigned cell_rgb(unsigned short c, int fg)
+{
+    if (c == VT_DEFAULT)
+        return fg ? GUI_FIELD_TEXT : GUI_FIELD;
+    return vt_rgb(c, fg);
+}
+
 static void tm_draw(struct gui_widget *w, struct gfx_surface *s)
 {
     struct term *t = TM(w);
@@ -158,11 +167,11 @@ static void tm_draw(struct gui_widget *w, struct gfx_surface *s)
                   && !t->ended;
             if (!c) {
                 if (chosen || cur)
-                    gfx_fill(s, x0 + x * cw, y0 + y * ch, cw, ch, chosen ? GUI_CHOSEN : 0x000000);
+                    gfx_fill(s, x0 + x * cw, y0 + y * ch, cw, ch, chosen ? GUI_CHOSEN : GUI_FIELD_TEXT);
                 continue;
             }
             rev = !!(c->attr & VT_REVERSE) ^ vt->reverse_screen;
-            fg = vt_rgb(rev ? c->bg : c->fg, !rev), bg = vt_rgb(rev ? c->fg : c->bg, rev);
+            fg = cell_rgb(rev ? c->bg : c->fg, !rev), bg = cell_rgb(rev ? c->fg : c->bg, rev);
             if ((c->attr & VT_BOLD) && c->fg < 8 && !rev)
                 fg = vt_rgb((unsigned short)(c->fg + 8), 1);     /* (bold as the bright colour, as xterm can) */
             if (cur) {
@@ -171,7 +180,7 @@ static void tm_draw(struct gui_widget *w, struct gfx_surface *s)
             }
             if (chosen)
                 fg = GUI_CHOSEN_TEXT, bg = GUI_CHOSEN;
-            if (bg != 0xFFFFFF)
+            if (bg != GUI_FIELD)                /* (the field is there already) */
                 gfx_fill(s, x0 + x * cw, y0 + y * ch, cw, ch, bg);
             if (c->ch == ' ' || (c->attr & VT_HIDDEN))
                 continue;

@@ -1,5 +1,6 @@
 # Themes (toolkit 2, step C1a): the gallery in the high-contrast theme ([desktop] theme = contrast), as
 # theme-dark.txt has it in the dark one.
+# Then toolkit 2's tabs (C10), each shot (the meters after their peaks have settled).
 config desktop theme contrast
 run GUITEST.EXE gallery
 wait "GUITEST Gallery"
@@ -28,6 +29,23 @@ key f1
 shot about "About GUITEST"
 key enter
 gone "About GUITEST"
+key ctrl+tab
+shot views "GUITEST Gallery"
+key ctrl+tab
+shot pickers "GUITEST Gallery"
+key ctrl+tab
+pause 2000
+shot meters "GUITEST Gallery"
+key ctrl+tab
+shot documents "GUITEST Gallery"
+key ctrl+tab
+shot picture "GUITEST Gallery"
+key ctrl+tab
+shot properties "GUITEST Gallery"
+key ctrl+tab
+shot terminal "GUITEST Gallery"
+key ctrl+tab
+shot chat "GUITEST Gallery"
 key alt+f4
 gone "GUITEST Gallery"
 expect GUI end

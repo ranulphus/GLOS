@@ -1,5 +1,6 @@
 # The toolkit's gallery (GUITEST gallery; docs/milestones-m9.md step A): each tab of widgets, by keys alone and
-# by the mouse; the menus; the About box.
+# by the mouse; the menus; the About box; then toolkit 2's tabs (C10), each shot (the meters after their peaks
+# have settled).
 run GUITEST.EXE gallery
 wait "GUITEST Gallery"
 shot buttons "GUITEST Gallery"
@@ -7,7 +8,7 @@ key ctrl+tab
 shot text "GUITEST Gallery"
 key ctrl+tab
 shot lists "GUITEST Gallery"
-key ctrl+tab
+key ctrl+shift+tab ctrl+shift+tab
 key tab tab
 shot buttons-focus "GUITEST Gallery"
 key alt+i space
@@ -45,6 +46,23 @@ key down
 shot list-keys "GUITEST Gallery"
 key tab down right
 shot tree-open "GUITEST Gallery"
+key ctrl+tab
+shot views "GUITEST Gallery"
+key ctrl+tab
+shot pickers "GUITEST Gallery"
+key ctrl+tab
+pause 2000
+shot meters "GUITEST Gallery"
+key ctrl+tab
+shot documents "GUITEST Gallery"
+key ctrl+tab
+shot picture "GUITEST Gallery"
+key ctrl+tab
+shot properties "GUITEST Gallery"
+key ctrl+tab
+shot terminal "GUITEST Gallery"
+key ctrl+tab
+shot chat "GUITEST Gallery"
 key alt+f4
 gone "GUITEST Gallery"
 expect GUI change 11
