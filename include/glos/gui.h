@@ -168,7 +168,9 @@ struct gui_widget {
 
 /* ---- windows */
 #define GUI_W_FIXED   1                 /* GLOS_WIN_FIXED */
-#define GUI_W_POPUP   2                 /* a pop-up (menus): bare, above the others */
+#define GUI_W_POPUP   2                 /* a pop-up (menus): bare, above the others; on_popdown when a press elsewhere
+                                           takes the keyboard from it. One with on_key set is a panel of widgets
+                                           (the Start menu) and has a window's keys: Tab, Alt and a letter, on_key */
 #define GUI_W_DIALOG  4                 /* fixed, and sized to what it holds */
 #define GUI_W_DESKTOP 8                 /* GLOS_WIN_DESKTOP: under every window, the whole desktop */
 #define GUI_W_BARE    16                /* GLOS_WIN_BARE */

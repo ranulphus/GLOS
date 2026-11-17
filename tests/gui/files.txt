@@ -1,18 +1,19 @@
 # The file manager and the desktop's shell (apps/files; M9 step F): the desktop's icons, the launcher, an icon
-# moved; a folder opened by the launcher's Run; a new folder, a file copied into it, one deleted, one renamed.
+# moved; a folder opened by its path typed in the Start menu; a new folder, a file copied into it, one deleted, one renamed.
 run FILES.EXE
 wait "Desktop"
 shot desktop "Desktop"
 launch
-shot launcher ""
+wait "Start"
+shot launcher "Start"
 key esc
+gone "Start"
 key down down
 shot chosen "Desktop"
 drag "Desktop" 46 20 238 180
 shot dragged "Desktop"
 launch
-key r
-wait "Run"
+wait "Start"
 type C:\\FM\n
 wait "C:\FM"
 shot fm "C:\FM"

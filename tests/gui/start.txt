@@ -1,0 +1,73 @@
+# The Start menu (apps/files/start.c; phase D, D3): up by the launcher's event; "con" typed finds the Control
+# Panel, Enter starts it; "sound" finds the Control Panel's Sound page; "note", Down into the list and More
+# (Alt+M): Notepad's own page, unpinned there, back by Esc; Tab to the tiles, the second started by Enter; Doom's
+# page by Shift+F10: its tasks, the second run; Power's page; a recent document found by its name and opened; a
+# folder's path typed opens the folder.
+run FILES.EXE
+wait "Desktop"
+launch
+wait "Start"
+shot start "Start"
+type con
+shot search "Start"
+key enter
+gone "Start"
+launch
+wait "Start"
+type sound
+shot found-page "Start"
+key enter
+gone "Start"
+launch
+wait "Start"
+shot most-used "Start"
+type note
+key down
+key alt+m
+shot more "Start"
+key down
+key enter
+shot unpinned "Start"
+key esc
+key tab
+key right
+shot tiles "Start"
+key enter
+gone "Start"
+launch
+wait "Start"
+type doom
+key down
+key shift+f10
+shot tasks "Start"
+key down down down down
+key enter
+gone "Start"
+launch
+wait "Start"
+key alt+p
+shot power "Start"
+key esc
+type edit
+shot found-document "Start"
+key enter
+gone "Start"
+launch
+wait "Start"
+type C:\\GUI\n
+wait "C:\GUI"
+key ctrl+w
+gone "C:\GUI"
+key alt+f4
+gone "Desktop"
+expect FILES start up 
+expect FILES start run Control Panel
+expect FILES start page sound
+expect FILES run C:\GLOS\CONTROL.EXE sound
+expect FILES start unpinned Notepad
+expect FILES start run Terminal
+expect FILES start run Doom
+expect FILES run DOOM.EXE -net 2
+expect FILES start document C:\GUI\EDIT.TXT
+expect FILES start typed C:\GUI
+expect FILES end 

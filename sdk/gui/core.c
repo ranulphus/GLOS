@@ -995,7 +995,9 @@ static void key(struct gui_window *w, const struct os_event *ev)
         return;
     if (w->focus && usable(w->focus) && w->focus->cls->event && w->focus->cls->event(w->focus, &e))
         return;
-    if (w->flags & GUI_W_POPUP)
+    /* A pop-up's one widget has had the key (a menu, a drop-down). A pop-up that is a whole panel (the Start
+       menu: it has on_key) has a window's keys from here on: Tab, Alt and a letter, its buttons, on_key. */
+    if (w->flags & GUI_W_POPUP && !w->on_key)
         return;
     if (gui_menubar_key(w, &e, 1))
         return;

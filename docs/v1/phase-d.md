@@ -185,6 +185,32 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   a tile pinned and dragged, a jump list, Power's menu; `files` opens Run from the Start menu's search instead
   of the launcher's menu.
 
+### D3 as built, first part (2026-11-17)
+
+- **The Start menu** (`apps/files/start.c`): as designed above. One window, made the first time and hidden
+  between times (made again only if the task bar's edge has moved): a new window each time could be told of the
+  old one's lost keyboard. The launcher's event while it is up takes it away.
+- **Its pages** are in the list itself, not menus over it (a context menu would take the keyboard, and the
+  Start menu with it): More (the Menu key, Shift+F10, or its button) turns the list into the current row's or
+  tile's own page: Open, Pin to Start or Unpin, Move its tile earlier or later, its tasks, its recent documents,
+  Back; Power turns it into Exit GLOS, Restart GLOS, Restart the PC, Back. Esc goes back a page, then away.
+- **Typing anywhere** in it goes into the search; Down from the search goes into the list. A row that finds
+  nothing else is "Run: what was typed": a folder or a file there is opened, anything else run (the old
+  launcher's Run).
+- **Kept** in START.CFG beside FILES.EXE: `pin` and `use` lines. With none, the first four of GLOS's own apps
+  are pinned.
+- **The toolkit:** a pop-up window with `on_key` set is a panel of widgets and has a window's keys (Tab, Alt
+  and a letter, its default and cancel buttons, `on_key`); menus and drop-downs, which set none, are as they
+  were (`sdk/gui/core.c`).
+- **The host shim:** `glos_entry_list` and `glos_recent_list` answer with a few made-up entries and documents;
+  a program started detached is taken as started, so that Files goes on as it would and says what it ran.
+- **Not yet:** the index of file names for the search; tiles dragged by the mouse (they move by their page's
+  rows) and their groups and sizes; "Recently added". Power's three rows run `glos exit`, `glos restart` and
+  `glos reboot` as jobs: to be proven on Loop A.
+- **Tests:** host `start` (found by typing: a program, a page of the Control Panel, a recent document, a
+  folder's path; More: unpinned; a tile by Tab and Enter; a task from Doom's page; Power's page) and `files`
+  (the folder opened by its path typed in the Start menu).
+
 ### D4. Wallpapers and the look (kernel and the Control Panel)
 
 - `[desktop] wallpaper` (a picture), `wallpaper_style` (centre, stretch, fill, tile) and `colour`: the Control

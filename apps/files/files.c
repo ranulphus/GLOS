@@ -24,7 +24,6 @@ char files_home[260];
 
 static struct gui_window *desk;
 static struct gui_widget *area;
-static struct gui_menu *launcher;
 
 struct item {
     char name[40];                      /* shown under it */
@@ -80,6 +79,16 @@ static void run_app(const char *exe_and_args, const char *arg)
     char cmd[300];
     snprintf(cmd, sizeof cmd, "%s\\%s%s%s", files_home, exe_and_args, arg ? " " : "", arg ? arg : "");
     files_run(cmd, NULL);
+}
+
+void files_run_app(const char *exe_and_args, const char *arg) { run_app(exe_and_args, arg); }
+
+int files_app(int i, const char **title, const char **exe, int *kind)
+{
+    if (i < 0 || i >= NAPPS)
+        return 0;
+    *title = apps[i].title, *exe = apps[i].exe, *kind = apps[i].kind;
+    return 1;
 }
 
 static int ext_in(const char *path, const char *list)
@@ -365,58 +374,20 @@ static int area_event(struct gui_widget *w, struct gui_ev *e)
     return 0;
 }
 
-/* ---- the launcher */
+/* ---- what was typed to run (the Start menu's "Run"): a folder or a file there is opened, anything else run */
 
-enum { L_APP = 100, L_PROGRAM = 200, L_RUN = 300 };
-static char lnames[16][40];
-
-static void build_launcher(void)
+void files_run_typed(const char *typed)
 {
-    char pt[16][40];
-    int pk[16], n, i;
-    launcher = gui_menu_new();
-    for (i = 0; i < NAPPS; i++) {
-        char t[48];
-        snprintf(t, sizeof t, "&%s", apps[i].title);
-        gui_menu_item(launcher, t, L_APP + i, NULL);
+    char cmd[200];
+    struct gui_dirent e;
+    if (gui_text_dos(typed, cmd, sizeof cmd) != 0) {    /* (DOS's bytes) */
+        gui_message(desk, GUI_T("Run"), GUI_T("DOS's code page hasn't got all of its letters."), GUI_MB_OK);
+        return;
     }
-    n = programs("menu", lnames, pt, pk, 16);
-    if (n)
-        gui_menu_sep(launcher);
-    for (i = 0; i < n; i++)
-        gui_menu_item(launcher, pt[i], L_PROGRAM + i, NULL);
-    gui_menu_sep(launcher);
-    gui_menu_item(launcher, GUI_T("&Run..."), L_RUN, NULL);
-}
-
-static void command(struct gui_window *w, int id)
-{
-    (void)w;
-    if (id >= L_APP && id < L_APP + NAPPS) {
-        run_app(apps[id - L_APP].exe, NULL);
-    } else if (id >= L_PROGRAM && id < L_PROGRAM + 16) {
-        char sec[48], args[200], dir[100], cmd[300];
-        snprintf(sec, sizeof sec, "program %s", lnames[id - L_PROGRAM]);
-        setting(sec, "args", args, sizeof args);
-        setting(sec, "dir", dir, sizeof dir);
-        snprintf(cmd, sizeof cmd, "%s%s%s", lnames[id - L_PROGRAM], args[0] ? " " : "", args);
-        files_run(cmd, dir);
-    } else if (id == L_RUN) {
-        char cmd[200] = "";
-        if (gui_ask(desk, GUI_T("Run"), GUI_T("A program, a folder or a file to open:"), cmd, sizeof cmd) && cmd[0]) {
-            struct gui_dirent e;
-            char typed[200];
-            snprintf(typed, sizeof typed, "%s", cmd);
-            if (gui_text_dos(typed, cmd, sizeof cmd) != 0) {    /* (DOS's bytes) */
-                gui_message(desk, GUI_T("Run"), GUI_T("DOS's code page hasn't got all of its letters."), GUI_MB_OK);
-                return;
-            }
-            if (gui_is_dir(cmd) || (!strchr(cmd, ' ') && gui_stat(cmd, &e) == 0))
-                files_open(cmd);                /* (a folder or a file there: opened) */
-            else
-                files_run(cmd, NULL);
-        }
-    }
+    if (gui_is_dir(cmd) || (!strchr(cmd, ' ') && gui_stat(cmd, &e) == 0))
+        files_open(cmd);
+    else
+        files_run(cmd, NULL);
 }
 
 static void app_event(const struct glos_ev *ev)
@@ -426,7 +397,7 @@ static void app_event(const struct glos_ev *ev)
     case GLOS_EV_SHELL:
         if (sh->what == GLOS_SHELL_LAUNCH) {
             say("launcher", "");
-            gui_popup_menu(desk, launcher, sh->x, sh->y);       /* (above the task bar: it goes up to fit) */
+            start_open(sh->x, sh->y);                           /* the Start menu (start.c), at the bar's edge */
         } else if (sh->what == GLOS_SHELL_TASKS) {
             say("tasks", "");
             run_app("MONITOR.EXE -tasks", NULL);
@@ -436,6 +407,12 @@ static void app_event(const struct glos_ev *ev)
         folder_changed(ev->handle);
         break;
     }
+}
+
+static void desk_closed(struct gui_window *w)   /* the shell ends: the Start menu's window (hidden, perhaps) too */
+{
+    start_end();
+    gui_close_later(w);
 }
 
 static void desk_resized(struct gui_window *w)
@@ -467,15 +444,14 @@ int main(int argc, char **argv)
         folder_open(argv[2]);
     } else {                                    /* the desktop's shell */
         desk = gui_window_at(GUI_T("Desktop"), 0, 0, 1, 1, GUI_W_DESKTOP | GUI_W_BARE);
-        desk->on_command = command;
         desk->on_resize = desk_resized;
+        desk->on_close = desk_closed;
         area = gui_canvas(desk->root, 0, 0, area_draw, area_event);
         gui_grow(area, 1);
         gui_screen_size(&desk->w, &desk->h);
         desk->h -= 20;
         gui_show(desk, 1);
         desktop_items();
-        build_launcher();
         gui_focus(area);
         glos_shell(1);
         say("shell", files_home);

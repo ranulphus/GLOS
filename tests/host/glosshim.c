@@ -177,7 +177,9 @@ int glos_version(struct glos_version *v)
 }
 int glos_running(void) { return 1; }
 int glos_init(const char *name, const char *help, const char *category) { (void)name, (void)help, (void)category; return 0; }
-int glos_error(void) { return GLOS_E_REFUSED; }         /* (what gives a handle and gave none: not on the host) */
+static int last_error = GLOS_E_REFUSED;
+int glos_error(void) { return last_error; }             /* (what gives a handle and gave none: not on the host; a
+                                                           detached start is taken as made: glos_job_run) */
 unsigned glos_app(void) { return 1; }
 int glos_yield(void) { return 0; }
 static int me_thread(void);
@@ -965,11 +967,14 @@ int glos_setting_keys(const char *section, char *buf, unsigned room)
     return 0;
 }
 
-/* Programs, jobs, watches, the shell (M9 step C): nothing runs on the host (the tests run built-in work only). */
+/* Programs, jobs, watches, the shell (M9 step C): nothing runs on the host (the tests run built-in work only). A
+   program started detached (the shell's: nobody waits for it) is taken as started, so that the shell goes on as
+   it would (FILES says what it ran: the Start menu's script reads that). */
 glos_handle glos_job_run(const char *command, const char *dir, const char *env, unsigned how, unsigned flags,
                          const char *profile)
 {
-    (void)command, (void)dir, (void)env, (void)how, (void)flags, (void)profile;
+    (void)command, (void)dir, (void)env, (void)how, (void)profile;
+    last_error = flags & GLOS_RUNF_DETACH ? 0 : GLOS_E_REFUSED;
     return 0;
 }
 __attribute__((weak)) int glos_job_read(glos_handle job, unsigned stream, void *buf, unsigned room) { (void)job, (void)stream, (void)buf, (void)room; return -1; }
@@ -977,6 +982,37 @@ int glos_job_keys(glos_handle job, const unsigned short *k, unsigned n) { (void)
 __attribute__((weak)) int glos_job_signal(glos_handle job, unsigned what) { (void)job, (void)what; return GLOS_E_HANDLE; }
 __attribute__((weak)) int glos_job_status(glos_handle job, struct glos_job_status *out) { (void)job, (void)out; return GLOS_E_HANDLE; }
 int glos_shell(int on) { (void)on; return 0; }
+
+/* The Start menu's entries and the recent documents (SHELL's ENTRY and RECENT; FILES' Start menu, phase D): made
+   up, the same each run. */
+int glos_entry_list(char *list, unsigned room, unsigned *length)
+{
+    static const char made[] = "DOOM.EXE\tDoom\tGames\tgame\tC:\\GAMES\\DOOM\t\tSetup=-setup;Network game=-net 2\n"
+                               "NOTES.EXE\tNotes\t\ttext\t\t\t\n";
+    unsigned n = sizeof made - 1;
+    if (length)
+        *length = n;
+    if (n > room)
+        return GLOS_E_ROOM;
+    memcpy(list, made, n);
+    return 0;
+}
+
+int glos_recent_list(const char *program, char *list, unsigned room, unsigned *length)
+{
+    static const char *const made[][2] = { { "C:\\GUI\\EDIT.TXT", "NOTEPAD.EXE" }, { "C:\\GUI\\IMG\\A.PNG", "IMAGES.EXE" },
+                                           { "C:\\GUI\\NOTES.TXT", "NOTEPAD.EXE" } };
+    unsigned n = 0, i;
+    for (i = 0; i < 3; i++) {
+        if (program && strcmp(program, made[i][1]))
+            continue;
+        if (n + strlen(made[i][0]) + strlen(made[i][1]) + 2 <= room)
+            n += (unsigned)sprintf(list + n, "%s\t%s\n", made[i][0], made[i][1]);
+    }
+    if (length)
+        *length = n;
+    return 0;
+}
 
 /* The machine's figures (SYS; MONITOR's tests): made up, from the script's clock, the same each run.
  * Two apps (the one under test and NOTEPAD) and a job; NOTEPAD can be ended. */

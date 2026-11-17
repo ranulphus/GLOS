@@ -15,6 +15,14 @@ extern char files_home[260];            /* where GLOS.EXE and the apps are: FILE
 int files_open(const char *path);       /* a folder's window, or the file opened as [open] says: 0, or -1 */
 int files_run(const char *command, const char *dir);    /* a program started, nobody's */
 void files_watch_event(unsigned id);
+int files_app(int i, const char **title, const char **exe, int *kind);  /* GLOS's own apps beside FILES.EXE: the
+                                           i-th (its command, its icon): 1, or 0 past the last */
+void files_run_app(const char *exe_and_args, const char *arg);  /* one of them started (arg: one more, or NULL) */
+void files_run_typed(const char *typed);        /* what was typed to run: a folder or a file opened, else run */
+
+/* start.c: the Start menu (phase D) */
+void start_open(int x, int y);          /* at the task bar's edge (GLOS_SHELL_LAUNCH); up already: away */
+void start_end(void);                   /* the shell is ending: its window goes */
 
 /* folder.c */
 void folder_open(const char *dir);      /* its window (spatial: one a folder), or brought to the front */
