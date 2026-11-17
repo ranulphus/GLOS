@@ -513,6 +513,15 @@ static void key_event(struct wm *m, u32 key, int down)
     case 0x45: num ^= (u8)(down && !again); break;
     }
     kmods = (u8)(down ? kmods | mod : kmods & ~mod);
+    if (deskswitch_up() && ((!down && (key == 0x38 || key == 0x138) && !ALT_HELD) || (down && key == 0x01))) {
+        deskswitch_end(m, key != 0x01);         /* Alt let go: to the window chosen in the strip; Esc: given up */
+        deskin_focus(m);
+        if (key == 0x01) {
+            woke_key[key >> 3] |= bit;          /* (the Esc is nobody's; Alt's release goes on to whoever saw it go
+                                                   down, below) */
+            return;
+        }
+    }
 
     /* Every key is the outline's meanwhile (one let go still goes to whoever saw it go down). */
     if (down && (drag == D_KEY_MOVE || drag == D_KEY_SIZE)) {
@@ -524,8 +533,8 @@ static void key_event(struct wm *m, u32 key, int down)
         return;                                 /* Ctrl-Esc, the Windows key: the launcher (the shell's, M9) */
     if (down && ALT_HELD && !(kmods & KM_CTRL)) {
         switch (key) {
-        case 0x0F:
-            activate(m, wm_next(m, w));
+        case 0x0F:                              /* Alt-Tab: the strip of windows (deskpop.c), on while Alt is held */
+            deskswitch_step(m, (kmods & KM_SHIFT) != 0);
             return;
         case 0x3E:
             if (w && !again)
@@ -545,10 +554,17 @@ static void key_event(struct wm *m, u32 key, int down)
             if (w && !again && !drag)
                 toggle_max(m, w);
             return;
+        case 0x39:                              /* Alt-Space: the window's menu, under its title's left end */
+            if (w && !again && !drag && (w->flags & WF_FRAME) && !deskpop_up())
+                deskpop_open(m, DP_WINDOW, w->id, w->frame.x + m->look.border,
+                             w->frame.y + m->look.border + m->look.title_h, 0);
+            return;
         }
     }
     deskin_focus(m);                            /* (a key just before this one may have moved it) */
     w = m->focus;
+    if (deskpop_key(m, key, down, down ? key_char(key) : 0))
+        return;                                 /* (one of the desktop's pop-up menus has the keyboard: deskpop.c) */
     if (deskpass_key(m, key, down, down ? key_char(key) : 0))
         return;                                 /* (the secrets' password dialog has the keyboard: deskpass.c) */
     if (!w || !w->owner)
@@ -668,6 +684,8 @@ static void button(struct wm *m, u32 bit, int down)
         send_mouse(m, w, 0, 0, bit, 1);
         return;
     }
+    if (deskpop_press(m, bit))                  /* one of the desktop's pop-up menus: its item */
+        return;
     w = wm_hit(m, m->px, m->py, &part);
     if (m->focus && m->focus->flags & WF_POPUP && w != m->focus && (!w || w == m->bar)) {
         wm_set_focus(m, 0);                     /* a press outside a pop-up: it loses the keyboard (its app takes it */
@@ -684,8 +702,14 @@ static void button(struct wm *m, u32 bit, int down)
         return;
     }
     if (w == m->bar) {
-        if ((v = wm_bar_hit(m, m->px, m->py)) != 0) {
-            if (bit != 1) {
+        u32 count;
+        s32 left;
+        if ((v = wm_bar_entry_at(m, m->px, m->py, &count, &left)) != 0) {
+            if (count > 1 && (bit == 1 || bit == 2)) {          /* a group: its windows, to choose from */
+                deskpop_open(m, DP_GROUP, v->id, left, m->bar->frame.y, 1);
+            } else if (bit == 2) {                              /* the right button: its window's menu */
+                deskpop_open(m, DP_WINDOW, v->id, left, m->bar->frame.y, 1);
+            } else if (bit != 1) {
                 ;
             } else if (v == m->focus && wm_can(v, WH_MIN)) {    /* the one in front: out of the way */
                 deskapp_state(m, v, WS_MIN);
@@ -829,6 +853,8 @@ static void mouse_to(struct wm *m, s32 x, s32 y, u32 now)
     wm_pointer(m, x, y, 1);
     dx = m->px - x0, dy = m->py - y0;
     buttons = (u8)now;
+    if (dx || dy)
+        deskpop_move(m);                        /* (a pop-up menu's item under the pointer is its current one) */
     if (dnd_on) {                               /* an app's drag: the pointer is its until every button is up */
         dnd_point(m);
         if (!now)

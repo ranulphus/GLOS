@@ -117,6 +117,8 @@ const struct cfg_key cfg_schema[] = {
     /* [desktop] (M9) */
     { "desktop", "start", CFG_TEXT, CFG_DESKTOP, 0, 120, "line", "", "&Start with the desktop",
       "Programs started when the desktop starts, beside GLOS.EXE (FILES.EXE draws the desktop's icons)" },
+    { "desktop", "group", CFG_CHOICE, CFG_NOW, 0, 0, "auto|always|never", "auto", "&Group the task bar's buttons",
+      "A program's windows share one button on the task bar (auto: when their buttons would be too narrow)" },
     { "desktop", "snap", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "S&nap windows at the screen's edges",
       "A window dragged to the screen's top fills it; dragged to a side, it fills that half" },
     { "desktop", "text", CFG_CHOICE, CFG_NOW, 0, 0, "small|normal|large", "normal", "Te&xt size",

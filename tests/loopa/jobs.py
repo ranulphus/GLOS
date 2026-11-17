@@ -4107,6 +4107,42 @@ def win_case(profile, vcard, card, bits, bits2):
         agent.ssh("glos mouse %d %d" % (140 - wa["x"], 190 - wa["y"]))
         agent.ssh("glos mouse 0 0 0")
         checks["back"] = bool(until(a_is(140, 190, 230, 140)))
+
+        # Phase D, D1: A's window menu by Alt+Space (Maximise, then Restore, by their letters); B's by its task-bar
+        # button's right button (Minimise); Alt+Tab's strip up while Alt is held, given up by Esc, and a whole
+        # Alt+Tab switching. (The desktop's own windows have no title: the bar is one, a pop-up or the strip another.)
+        def bare():
+            return len(re.findall(r'^window \d+ shown.* ""$', agent.ssh("glos desk")[1].replace("\r", ""), re.M))
+
+        def bare_is(n, limit=20):
+            t0 = time.time()
+            while bare() != n and time.time() - t0 < limit:
+                time.sleep(0.3)
+            return bare() == n
+        base = bare()
+        agent.ssh("glos key 0x38:down,0x39,0x38:up")            # Alt+Space: A's menu
+        checks["alt-space"] = bare_is(base + 1)
+        agent.ssh("glos key 0x2D")                              # x: Maximise
+        checks["menu-max"] = bool(until(a_is(*MAXED))) and bare_is(base) and bool(until(focus("A")))
+        agent.ssh("glos key 0x38:down,0x39,0x38:up")
+        bare_is(base + 1)
+        agent.ssh("glos key 0x13")                              # r: Restore
+        checks["menu-restore"] = bool(until(a_is(140, 190, 230, 140))) and bare_is(base)
+        ids = sorted(w["id"] for t, w in desk()["win"].items() if t.startswith("WINTEST"))
+        click(62 + 120 * ids.index(wb["id"]) + 10, 470, 2)     # B's button, the right button: its menu
+        checks["bar-menu"] = bare_is(base + 1)
+        agent.ssh("glos key 0x31")                              # n: Minimise
+        checks["menu-min"] = bool(until(lambda d: has("B")(d) and not d["win"]["WINTEST B"]["shown"])) and bare_is(base)
+        click(62 + 120 * ids.index(wb["id"]) + 10, 470)        # back by its button
+        until(focus("B"))
+        agent.ssh("glos key 0x38:down,0x0F")                    # Alt held, Tab: the strip; the focus where it was
+        checks["strip"] = bare_is(base + 1) and bool(until(focus("B")))
+        agent.ssh("glos key 0x01")                              # Esc: given up
+        agent.ssh("glos key 0x38:up")
+        checks["strip-esc"] = bare_is(base) and bool(until(focus("B")))
+        agent.ssh("glos key " + ALT_TAB)                        # the whole of it: to A, the strip gone
+        checks["strip-switch"] = bool(until(focus("A"))) and bare_is(base)
+
         ids = sorted(w["id"] for t, w in desk()["win"].items() if t.startswith("WINTEST"))
         click(62 + 120 * ids.index(wb["id"]) + 10, 470)        # (the bar's buttons: from 62, 120 wide)
         checks["bar-button"] = bool(until(focus("B")))
@@ -4142,19 +4178,20 @@ def win_case(profile, vcard, card, bits, bits2):
             progs[name] = start(app + "keys %s %s 900" % (name, how))
             checks["keys-%s-up" % how] = bool(until(focus(name)))
         order = []
-        for k, code in enumerate((0x10, 0x11, 0x12)):
+        ALT_TAB_TAB = "0x38:down,0x0F,0x0F,0x38:up"   # (one Alt+Tab goes back to the window before, as Windows' does
+        for k, code in enumerate((0x10, 0x11, 0x12)):   # (phase D): with three, Tab twice goes round all of them)
             d = desk()
             order.append([t[8:] for t, w in d["win"].items() if w["id"] == d["focus"]][0])
             agent.ssh("glos key 0x%02X,0x148" % code)   # (and the grey up arrow: a key with a prefix)
             time.sleep(1)
-            agent.ssh("glos key " + ALT_TAB)
+            agent.ssh("glos key " + ALT_TAB_TAB)
             time.sleep(1)
         checks["each-had-it"] = sorted(order) == ["A", "B", "C"]
         for name, how in ways:
-            for _ in range(3):
+            for keys in (ALT_TAB, ALT_TAB_TAB, ALT_TAB):        # (the one before; the one before that)
                 if focus(name)(desk()):
                     break
-                agent.ssh("glos key " + ALT_TAB)
+                agent.ssh("glos key " + keys)
                 time.sleep(1)
             agent.ssh("glos key 0x01")
             res = finish(progs[name])

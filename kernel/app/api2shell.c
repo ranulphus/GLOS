@@ -334,6 +334,15 @@ static int start(const char *command, u32 *job)        /* 0, or GLOS_E_ */
     return agent_post_app(0, &run, job);
 }
 
+int api2_shell_start(const char *prog, const char *args)
+{
+    char dir[80], cmd[160];
+    u32 job;
+    home(dir, sizeof dir);
+    ksnprintf(cmd, sizeof cmd, args && args[0] ? "%s\\%s %s" : "%s\\%s", dir, prog, args);
+    return start(cmd, &job);
+}
+
 static int help(struct app *a, struct trapframe *tf)
 {
     struct glos_help q;

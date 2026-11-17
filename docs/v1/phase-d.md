@@ -56,6 +56,30 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
 - **Tests:** `wm_test` (grouping, the strip's order, overflow); Loop A `desk` grows (right-click menu, grouping,
   Alt+Tab switching, the calendar's month, top and hidden bars), `win` and `api` (a 32-pixel icon).
 
+### D1 as built, first part (2026-11-17)
+
+- **The desktop's pop-up menus** (`kernel/wm/popmenu.c`, pure and host-tested by `popmenu_test`;
+  `kernel/wm/deskpop.c` draws them and acts): items with "&" letters, lines between, ticks and dim ones; Up, Down,
+  Home, End, Enter, Esc and the letters (a letter only one item has chooses it, else moves to the next with it);
+  the item under the pointer is the current one. Drawn by the kernel in the task bar's colours; one at a time; it
+  has the keyboard while it is up and gives it back when it goes without a choice; a press outside closes it and
+  goes on to what it was on.
+- **A window's menu** (Restore, Minimise, Maximise, Close, each dim when it can't be done): a task bar button's
+  right button, or Alt+Space for the window in front (under its title's left end, as Windows has it).
+- **Grouping** (`[desktop] group = auto | always | never`, auto by default): a program's windows share one button
+  when the buttons would be narrower than 72 pixels (auto), always, or never; the button shows what their titles
+  end in after " - " ("Notepad") and how many, is in front when any of them is and flashes when any does, and a
+  press (either button) drops a menu of its windows, the one in front ticked. Windows of the kernel's own are
+  never grouped. `wm_bar_entry_at` gives a button's window, how many it stands for and its left edge.
+- **Alt+Tab's strip:** while Alt is held, every window that can have the focus, the one in front first, then the
+  others from the top down, the minimised ones last, each its icon (16 pixels drawn twice the size: no 32-pixel
+  icon from apps yet) in a row over the screen's middle, the current one's title under them; Tab and Shift+Tab
+  move along it, Esc gives up, letting Alt go switches. One Alt+Tab is still "the window before" (now the one most
+  recently in front, not the next by when it was made).
+- **Tests:** `popmenu_test`; `wm_test` (grouping: auto on a narrow and a wide bar, always, never, a minimised
+  window in its group, the kernel's own windows); Loop A `win` (Alt+Space and its letters, a button's menu,
+  the strip held, given up and switching).
+
 ### D2. GLOS's own tray icons and notifications (kernel)
 
 - **Volume:** the mixer's master (AUDIO); a click drops a slider and mute (kernel-drawn), the wheel over it

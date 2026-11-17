@@ -41,4 +41,21 @@ int deskpass_key(struct wm *m, u32 key, int down, u32 ch);      /* (deskpass.c) 
 void deskpass_turn(struct wm *m, int again);    /* ... each turn: drawn again when the screen changed under it */
 int deskshell_press(struct wm *m, u32 bit);     /* a button went down: 1 if on the tray or a notification (used up) */
 
+/* deskpop.c: the desktop's own pop-up menus (phase D). */
+enum { DP_NONE, DP_WINDOW, DP_GROUP };  /* a window's menu (restore, minimise, maximise, close); a group's windows */
+void deskpop_open(struct wm *m, int kind, u32 target, s32 x, s32 y, int above); /* at x, y: its bottom left corner
+                                                                                    (above 1) or its top left */
+int deskpop_key(struct wm *m, u32 key, int down, u32 ch);       /* a key while it has the keyboard: 1 if taken */
+int deskpop_press(struct wm *m, u32 bit);       /* a button went down: 1 if on the pop-up (used up); outside, it goes */
+void deskpop_move(struct wm *m);        /* the pointer moved: the item under it is the current one */
+void deskpop_turn(struct wm *m, int again);     /* each turn (again: another screen or theme): it goes if it must */
+int deskpop_up(void);
+void deskswitch_step(struct wm *m, int back);   /* Alt+Tab (back: Shift too): the strip, or its next window */
+void deskswitch_end(struct wm *m, int go);      /* Alt let go (go 1), Esc (0): the strip goes, its window in front */
+int deskswitch_up(void);
+void deskcal_open(struct wm *m, s32 right, s32 bottom, int year, int month, int day, int first_day);    /* the
+                                           clock's calendar, its bottom right corner there (first_day: 0 Sunday) */
+int deskcal_up(void);
+void deskcal_close(struct wm *m);
+
 #endif

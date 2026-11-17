@@ -109,6 +109,7 @@ void deskin_double_click(u32 ms);       /* [input] double_click: the title bar's
 struct theme;
 const struct theme *desk_theme(void);   /* the theme in force (kernel/wm/theme.c) */
 int desk_theme_set(const char *name);   /* [desktop] theme: 0, or -1 no such theme */
+void desk_bar_group(int how);           /* [desktop] group: the task bar's buttons by program (WG_) */
 void deskin_snap(int on);               /* a window dragged to the screen's edge snaps there ([desktop] snap) */
 struct app;
 void desk_shell(struct app *a, int on);
@@ -145,5 +146,8 @@ int desk_shell_set(struct app *a, int on);      /* a is the shell (0), or no lon
 void api2_tray_event(struct app *a, u32 tray, int what, const struct gfx_rect *r);
 void api2_note_event(const struct note_news *n);
 void api2_shell_hung(struct app *shell, u32 window, struct app *owner, int hung);
+int api2_shell_start(const char *prog, const char *args);      /* one of GLOS's own programs (beside GLOS.EXE)
+                                                                   started for the desktop (the clock's double click:
+                                                                   CONTROL.EXE time): 0, or GLOS_E_ */
 
 #endif

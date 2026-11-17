@@ -539,6 +539,8 @@ void kcfg_apply(const char *section, const char *key, const char *v)
         joy_config();
     } else if (same(section, "desktop") && same(key, "snap")) {
         deskin_snap(same(v, "on"));
+    } else if (same(section, "desktop") && same(key, "group")) {
+        desk_bar_group(same(v, "always") ? WG_ALWAYS : same(v, "never") ? WG_NEVER : WG_AUTO);
     } else if (same(section, "desktop") && same(key, "theme")) {
         desk_theme_set(v);
     } else if (same(section, "region")) {       /* (the task bar's clock is written again) */
@@ -569,6 +571,8 @@ static void apply_read(void)
         u32 i;
         kcfg_get("desktop", "snap", v, sizeof v);
         kcfg_apply("desktop", "snap", v);
+        kcfg_get("desktop", "group", v, sizeof v);
+        kcfg_apply("desktop", "group", v);
         kcfg_get("desktop", "theme", v, sizeof v);
         kcfg_apply("desktop", "theme", v);
         for (i = 0; i < ARRAY_SIZE(keys); i++) {

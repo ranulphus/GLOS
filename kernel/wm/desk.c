@@ -181,6 +181,13 @@ static const struct theme *theme_now = &themes[0], *theme_shown = &themes[0];
 const struct theme *desk_theme(void) { return theme_now; }
 
 /* From anywhere: the theme of that name from now on (the desktop's thread draws it). 0, or -1: no such theme. */
+void desk_bar_group(int how)
+{
+    wm_bar_group(desk_lock(), how);
+    desk_unlock();
+    desk_kick();
+}
+
 int desk_theme_set(const char *name)
 {
     const struct theme *t = theme_find(name);

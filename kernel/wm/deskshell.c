@@ -10,13 +10,17 @@
 
 #include "app.h"
 #include "deskint.h"
+#include "glos/region.h"
+#include "kcfg.h"
 #include "display.h"
 #include "gfx.h"
+#include "io.h"
 #include "notes.h"
 #include "theme.h"
 #include "timer.h"
 
 #define TIP_REST 600u                   /* ticks the pointer rests on an icon before its tooltip comes */
+#define CLOCK_ID 0xFFFFFFFEu            /* (the clock, as a tooltip's and a press's id) */
 
 static struct {
     u32 id;                             /* the bar's (wm_tray_add) */
@@ -112,26 +116,55 @@ static void tip_hide(struct wm *m)
 }
 
 /* The pointer over the tray: an icon's tooltip once it has rested there. The tick to look again at, 0 none. */
+static u32 bcd(u8 v) { return (v >> 4) * 10u + (v & 15); }
+
+/* Today, from the RTC (as the clock's time is). */
+static void today(int *y, int *mo, int *d)
+{
+    u32 f = irq_save(), cen = bcd(rtc_read(0x32)), yy = bcd(rtc_read(9));
+    *d = (int)bcd(rtc_read(7)), *mo = (int)bcd(rtc_read(8));
+    irq_restore(f);
+    *y = (int)((cen >= 19 && cen <= 21 ? cen : 20) * 100 + yy);
+}
+
+static int over_clock(struct wm *m)
+{
+    struct gfx_rect r;
+    return wm_bar_part(m, WB_CLOCK, 0, &r) && m->px >= r.x && m->py >= r.y && m->px < r.x + r.w && m->py < r.y + r.h;
+}
+
 static u32 tip_turn(struct wm *m, u32 now)
 {
     u32 id = wm_tray_hit(m, m->px, m->py);
     struct gfx_rect r;
     struct wm_window *w;
     struct theme_look c;
+    char date[40];
+    const char *text = 0;
     int i;
+    if (!id && over_clock(m) && !deskcal_up())
+        id = CLOCK_ID;                          /* (the clock's: today's date, as the region writes one) */
     if (id != tip_id) {
         tip_hide(m);
         tip_id = id;
         tip_since = now;
     }
-    if (!id || tip_win || (i = tray_of(id)) < 0 || !trays[i].tip[0])
+    if (id == CLOCK_ID) {
+        int y, mo, d;
+        today(&y, &mo, &d);
+        region_date(kcfg_region(), date, sizeof date, y, mo, d);
+        text = date;
+    } else if (id && (i = tray_of(id)) >= 0 && trays[i].tip[0]) {
+        text = trays[i].tip;
+    }
+    if (!text || tip_win)
         return 0;
     if (now - tip_since < TIP_REST)
         return tip_since + TIP_REST;
-    if (!wm_bar_part(m, WB_TRAY, id, &r))
+    if (!wm_bar_part(m, id == CLOCK_ID ? WB_CLOCK : WB_TRAY, id == CLOCK_ID ? 0 : id, &r))
         return 0;
     {
-        s32 tw = width(trays[i].tip, -1, 0) + 8, x = r.x + 8 - tw / 2;
+        s32 tw = width(text, -1, 0) + 8, x = r.x + r.w / 2 - tw / 2;
         if (x + tw > m->w - 2)
             x = m->w - 2 - tw;
         if (x < 2)
@@ -142,7 +175,7 @@ static u32 tip_turn(struct wm *m, u32 now)
         theme_look(desk_theme(), &c);
         gfx_fill(&w->store, 0, 0, tw, f_ui->height + 4, c.edge);
         gfx_fill(&w->store, 1, 1, tw - 2, f_ui->height + 2, 0xFFFFFF);
-        gfx_text(&w->store, 4, 2, f_ui, trays[i].tip, -1, 0x000000);
+        gfx_text(&w->store, 4, 2, f_ui, text, -1, 0x000000);
         wm_show(m, w, 1);
         tip_win = w->id;
     }
@@ -232,11 +265,13 @@ u32 deskshell_turn(struct wm *m, int screen)
         note_hide(m);                           /* another screen or theme: both drawn again, where they go now */
         tip_hide(m);
         deskpass_turn(m, 1);                    /* (and the secrets' password dialog, if it is up) */
+        deskpop_turn(m, 1);                     /* (and a pop-up menu goes) */
         tip_id = 0;
         w = 0;
     }
     if (note_win && !w)
         note_win = 0;                           /* (its window went with the screen it was on) */
+    deskpop_turn(m, 0);
     if (tip_win && !wm_find(m, tip_win))
         tip_win = 0;
     if (notes_turn(&notes, now, screen && !full, over, &news) || (notes_shown(&notes) != 0) != (note_win != 0)
@@ -269,6 +304,26 @@ int deskshell_press(struct wm *m, u32 bit)
             note_hide(m);
             api2_note_event(&news);
             desk_kick();                /* (the next one, if one waits) */
+        }
+        return 1;
+    }
+    if (over_clock(m)) {                        /* the clock: its calendar; twice, the Date and Time page */
+        int twice = press_id == CLOCK_ID && now - press_at < deskin_double_ticks();
+        tip_hide(m);
+        tip_since = now;
+        if (bit != 1)
+            return 1;
+        press_id = twice ? 0 : CLOCK_ID;
+        press_at = now;
+        if (twice) {
+            deskcal_close(m);
+            api2_shell_start("CONTROL.EXE", "time");
+        } else if (deskcal_up()) {
+            deskcal_close(m);
+        } else {
+            int y, mo, d;
+            today(&y, &mo, &d);
+            deskcal_open(m, m->w - 2, m->bar ? m->bar->frame.y : m->h, y, mo, d, kcfg_region()->first_day);
         }
         return 1;
     }

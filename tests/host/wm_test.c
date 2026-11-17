@@ -600,6 +600,52 @@ static void embeds(void)
     CHECK(m.count == 0 && m.focus == 0 && held == before);
 }
 
+/* The task bar's buttons grouped by program (phase D, D1): when they would be too narrow (auto), always, never; a
+   window of the kernel's own (no owner) never is. */
+static void groups(void)
+{
+    struct wm m;
+    struct wm_window *a, *b, *c, *k1, *k2;
+    int x = 1, y = 2;                           /* (two apps) */
+    u32 count;
+    s32 left;
+    wm_init(&m, &host, 320, 240, &gfx_fmt8);
+    wm_bar(&m, 1);
+    a = wm_create(&m, 10, 10, 50, 40, "A.TXT - Notepad", WF_FRAME, 0);
+    b = wm_create(&m, 20, 20, 50, 40, "Files", WF_FRAME, 0);
+    c = wm_create(&m, 30, 30, 50, 40, "B.TXT - Notepad", WF_FRAME, 0);
+    a->owner = &x, b->owner = &y, c->owner = &x;
+    wm_show(&m, a, 1), wm_show(&m, b, 1), wm_show(&m, c, 1);
+    /* 148 pixels for three buttons: too narrow (49), so grouped: Notepad's two at a, then Files, 74 each. */
+    CHECK(m.bar_group == WG_AUTO);
+    CHECK(wm_bar_entry_at(&m, 70, 230, &count, &left) == a && count == 2 && left == 62);
+    CHECK(wm_bar_entry_at(&m, 62 + 74 + 5, 230, &count, &left) == b && count == 1 && left == 62 + 74);
+    CHECK(wm_bar_entry_at(&m, 62 + 148 + 5, 230, &count, &left) == 0);
+    CHECK(wm_bar_hit(&m, 70, 230) == a);
+    wm_bar_group(&m, WG_NEVER);                 /* each its own, 49 wide */
+    CHECK(wm_bar_entry_at(&m, 70, 230, &count, &left) == a && count == 1);
+    CHECK(wm_bar_entry_at(&m, 62 + 49 + 5, 230, &count, &left) == b && count == 1 && left == 62 + 49);
+    CHECK(wm_bar_entry_at(&m, 62 + 98 + 5, 230, &count, &left) == c && count == 1);
+    wm_bar_group(&m, WG_AUTO);
+    wm_state(&m, a, WS_MIN);                    /* (a minimised window keeps its place in its group) */
+    CHECK(wm_bar_entry_at(&m, 70, 230, &count, &left) == a && count == 2);
+    wm_state(&m, a, WS_UNMIN);
+    wm_screen(&m, 640, 480, &gfx_fmt8);         /* room enough (156 each): auto doesn't group, always does */
+    CHECK(wm_bar_entry_at(&m, 70, 470, &count, &left) == a && count == 1);
+    CHECK(wm_bar_entry_at(&m, 62 + 120 + 5, 470, &count, &left) == b && count == 1);
+    wm_bar_group(&m, WG_ALWAYS);
+    CHECK(wm_bar_entry_at(&m, 70, 470, &count, &left) == a && count == 2);
+    CHECK(wm_bar_entry_at(&m, 62 + 120 + 5, 470, &count, &left) == b && count == 1);
+    k1 = wm_create(&m, 40, 40, 50, 40, "Secrets", WF_FRAME, 0);         /* the kernel's own: never grouped */
+    k2 = wm_create(&m, 50, 50, 50, 40, "Secrets 2", WF_FRAME, 0);
+    wm_show(&m, k1, 1), wm_show(&m, k2, 1);
+    CHECK(wm_bar_entry_at(&m, 62 + 240 + 5, 470, &count, &left) == k1 && count == 1);
+    CHECK(wm_bar_entry_at(&m, 62 + 360 + 5, 470, &count, &left) == k2 && count == 1);
+    wm_destroy(&m, k1), wm_destroy(&m, k2);
+    wm_destroy(&m, a), wm_destroy(&m, b), wm_destroy(&m, c);
+    wm_bar(&m, 0);
+}
+
 int main(void)
 {
     churn(&gfx_fmt8, "8", 0, 30000, 0);
@@ -614,6 +660,7 @@ int main(void)
     churn(&gfx_fmt888, "32", 1, 20000, 1);
     churn(&gfx_fmt565, "16", 0, 20000, 1);
     places();
+    groups();
     embeds();
     cursor_masks(&gfx_fmt8, "8");
     cursor_masks(&gfx_fmt565, "16");

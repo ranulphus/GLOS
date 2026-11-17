@@ -12,10 +12,14 @@
  * fifteen seconds, and goes back unless it is kept. OK applies and closes;
  * Cancel closes.
  *
+ *   CONTROL [SECTION]   at that section's page (time, sound, network ...: the
+ *                       task bar's clock and icons open theirs so)
+ *
  * What it changed goes to stdout as "CONTROL ..." lines (the suites'). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include <glos/config.h>
 #include <glos/gui.h>
@@ -751,6 +755,9 @@ int main(int argc, char **argv)
         gui_list_set(prog_list, 0);
     prog_choose(nprogs ? 0 : -1);
     types_fill();
+    for (s = 0; argc > 1 && cfg_sections[s]; s++)  /* CONTROL SECTION: at that page (the task bar's clock: time) */
+        if (!strcasecmp(argv[1], cfg_sections[s]))
+            gui_tabs_set(tabs, s);
     gui_show(win, 1);
     gui_idle(help_poll, NULL, 100);
     printf("CONTROL start\n");

@@ -372,6 +372,8 @@ static int on_bar(const struct wm_window *w)
     return (w->flags & (WF_FRAME | WF_NOBAR)) == WF_FRAME && (w->flags & (WF_SHOWN | WF_MIN));
 }
 
+int wm_on_bar(const struct wm_window *w) { return on_bar(w); }
+
 /* The task bar goes while a full-screen window, or another window of the same owner's, has the focus. */
 static void bar_fit(struct wm *m)
 {
@@ -391,28 +393,92 @@ static void bar_fit(struct wm *m)
     damage(m, &m->bar->frame);
 }
 
-/* The bar's buttons are the framed windows that are shown, in the order
-   they were made: the k-th's window, and how wide a button is. */
-static struct wm_window *bar_button(const struct wm *m, u32 k, s32 *width)
+#define GROUP_W 72                      /* buttons narrower than this are grouped by app (WG_AUTO) */
+
+/* The first of its owner's windows on the bar (the one with the lowest id): it stands for the others when the
+   bar's buttons are grouped. A window of the kernel's own (no owner) is never grouped. */
+static int first_of_owner(const struct wm *m, const struct wm_window *w, u32 *count)
+{
+    const struct wm_window *v;
+    int first = 1;
+    *count = 1;
+    if (!w->owner)
+        return 1;
+    *count = 0;
+    for (v = m->bottom; v; v = v->above)
+        if (on_bar(v) && v->owner == w->owner) {
+            (*count)++;
+            if (v->id < w->id)
+                first = 0;
+        }
+    return first;
+}
+
+/* The bar's buttons are the framed windows that are shown, in the order they were made, or (grouped) the first
+   window of each app's: the k-th's window, how wide a button is, and how many windows it stands for. */
+static struct wm_window *bar_entry(const struct wm *m, u32 k, s32 *width, u32 *count)
 {
     struct wm_window *w, *best;
-    u32 n = 0, last = 0, i;
+    u32 n = 0, nwin = 0, last = 0, i, c;
     s32 room = m->w - BAR_NAME - BAR_RIGHT - (s32)m->ntray * TRAY_W;
+    int grouped;
     for (w = m->bottom; w; w = w->above)
-        n += on_bar(w);
+        nwin += on_bar(w);
+    grouped = m->bar_group == WG_ALWAYS || (m->bar_group == WG_AUTO && nwin && room / (s32)nwin < GROUP_W);
+    for (w = m->bottom; w; w = w->above)
+        n += on_bar(w) && (!grouped || first_of_owner(m, w, &c));
     *width = n && room / (s32)n < BAR_BTN ? room / (s32)n : BAR_BTN;
     if (*width < 8)
         *width = 8;
-    for (i = 0; i <= k; i++) {                  /* the window with the (k+1)-th lowest id */
+    *count = 1;
+    for (i = 0; i <= k; i++) {                  /* the entry with the (k+1)-th lowest id */
         best = 0;
         for (w = m->bottom; w; w = w->above)
-            if (on_bar(w) && w->id > last && (!best || w->id < best->id))
+            if (on_bar(w) && w->id > last && (!best || w->id < best->id) && (!grouped || first_of_owner(m, w, &c)))
                 best = w;
         if (!best)
             return 0;
         last = best->id;
     }
+    if (grouped)
+        first_of_owner(m, best, count);
     return best;
+}
+
+/* A group's button's words: what its windows' titles end in after " - " if they all do ("Notepad"), else the first
+   one's title; and how many. */
+static void group_label(const struct wm *m, const struct wm_window *w, u32 count, char *out, u32 room)
+{
+    const char *t = w->title, *tail = 0, *p;
+    const struct wm_window *v;
+    u32 n = 0, i, tl;
+    for (p = t; p[0] && p[1] && p[2]; p++)
+        if (p[0] == ' ' && p[1] == '-' && p[2] == ' ')
+            tail = p + 3;
+    if (tail) {
+        for (tl = 0; tail[tl]; tl++) ;
+        for (v = m->bottom; v && tail; v = v->above) {
+            u32 vl;
+            if (!on_bar(v) || v->owner != w->owner)
+                continue;
+            for (vl = 0; v->title[vl]; vl++) ;
+            if (vl < tl + 3)
+                tail = 0;
+            else
+                for (i = 0; i < tl + 3 && tail; i++)
+                    if (v->title[vl - tl - 3 + i] != (i < 3 ? " - "[i] : tail[i - 3]))
+                        tail = 0;
+        }
+    }
+    for (p = tail ? tail : t; *p && n + 1 < room; p++)
+        out[n++] = *p;
+    if (n + 8 < room) {                         /* " (3)" */
+        out[n++] = ' ', out[n++] = '(';
+        if (count >= 10)
+            out[n++] = (char)('0' + count / 10 % 10);
+        out[n++] = (char)('0' + count % 10), out[n++] = ')';
+    }
+    out[n] = 0;
 }
 
 /* A window's picture, 16 by 16, its pixels with alpha of 80h or more. */
@@ -445,34 +511,48 @@ static void bar_paint(struct wm *m)
     struct gfx_rect clip;
     struct wm_window *w;
     s32 bw, x, ty = (BAR_H - l->font->height) / 2 + 1, tw;
-    u32 k;
+    u32 k, count;
 
     gfx_clip(s, 0);
     gfx_fill(s, 0, 0, s->w, s->h, l->bar);
     gfx_fill(s, 0, 0, s->w, 1, l->edge);
     gfx_mono(s, 6, (BAR_H - 11) / 2 + 1, &ico_glos[0][0], ICON_W, 11, 2, l->bar_text, GFX_NONE);
     gfx_text(s, 6 + ICON_W + 5, ty, l->bold, "GLOS", -1, l->bar_text);
-    for (k = 0; (w = bar_button(m, k, &bw)); k++) {
-        u32 ink = w == m->focus ? l->bar_on_text : w->flags & WF_MIN ? l->face_off : l->bar_text;
+    for (k = 0; (w = bar_entry(m, k, &bw, &count)); k++) {
+        struct wm_window *v;
+        int front = w == m->focus, flash = w->flash;
+        char label[WM_TITLE_MAX + 8];
+        const char *title = w->title;
+        u32 ink;
+        if (count > 1) {                        /* a group: in front if any of its windows is; flashing if any does */
+            for (v = m->bottom; v; v = v->above)
+                if (on_bar(v) && v->owner == w->owner) {
+                    front |= v == m->focus;
+                    flash |= v->flash;
+                }
+            group_label(m, w, count, label, sizeof label);
+            title = label;
+        }
+        ink = front ? l->bar_on_text : w->flags & WF_MIN && count == 1 ? l->face_off : l->bar_text;
         x = BAR_NAME + (s32)k * bw;
         clip.x = x, clip.y = 1, clip.w = bw - 2, clip.h = s->h - 1;
         gfx_clip(s, &clip);
-        if (w == m->focus)
+        if (front)
             gfx_fill(s, x, 3, bw - 2, s->h - 5, l->bar_on);
         else
-            gfx_frame(s, x, 3, bw - 2, s->h - 5, w->flash && l->mark != GFX_NONE ? l->mark : l->edge);
-        if (w->flash && w != m->focus && l->mark != GFX_NONE)
+            gfx_frame(s, x, 3, bw - 2, s->h - 5, flash && l->mark != GFX_NONE ? l->mark : l->edge);
+        if (flash && !front && l->mark != GFX_NONE)
             ink = l->mark;                      /* it asks for attention: the mark's colour */
         if (w->progress)                        /* how far its work is: along the button's bottom */
-            gfx_fill(s, x + 1, s->h - 4, (bw - 4) * (s32)(w->progress - 1) / 100, 2, w == m->focus ? l->bar_on_text : l->mark);
+            gfx_fill(s, x + 1, s->h - 4, (bw - 4) * (s32)(w->progress - 1) / 100, 2, front ? l->bar_on_text : l->mark);
         clip.x += 4, clip.w -= 8;
         gfx_clip(s, &clip);
         if (w->has_icon) {
             draw_icon(s, x + 3, (BAR_H - 16) / 2 + 1, w->icon);
-            gfx_text(s, x + 3 + 16 + 4, ty, l->font, w->title, -1, ink);
+            gfx_text(s, x + 3 + 16 + 4, ty, l->font, title, -1, ink);
         } else {
             gfx_mono(s, x + 5, (BAR_H - 9) / 2 + 1, &ico_win[0][0], ICON_W, 9, 2, ink, GFX_NONE);
-            gfx_text(s, x + 5 + ICON_W + 4, ty, l->font, w->title, -1, ink);
+            gfx_text(s, x + 5 + ICON_W + 4, ty, l->font, title, -1, ink);
         }
     }
     gfx_clip(s, 0);
@@ -499,14 +579,35 @@ int wm_bar_mark(const struct wm *m, s32 x, s32 y)
     return m->bar && (m->bar->flags & WF_SHOWN) && y >= m->bar->frame.y && x < BAR_NAME;
 }
 
-struct wm_window *wm_bar_hit(const struct wm *m, s32 x, s32 y)
+struct wm_window *wm_bar_entry_at(const struct wm *m, s32 x, s32 y, u32 *count, s32 *left)
 {
     s32 bw;
+    u32 k;
+    *count = 0, *left = 0;
     if (!m->bar || !(m->bar->flags & WF_SHOWN) || y < m->bar->frame.y || x < BAR_NAME)
         return 0;
-    if (!bar_button(m, 0, &bw))
+    if (!bar_entry(m, 0, &bw, count))
         return 0;
-    return (x - BAR_NAME) % bw < bw - 2 ? bar_button(m, (u32)((x - BAR_NAME) / bw), &bw) : 0;
+    if ((x - BAR_NAME) % bw >= bw - 2)
+        return 0;
+    k = (u32)((x - BAR_NAME) / bw);
+    *left = BAR_NAME + (s32)k * bw;
+    return bar_entry(m, k, &bw, count);
+}
+
+struct wm_window *wm_bar_hit(const struct wm *m, s32 x, s32 y)
+{
+    u32 count;
+    s32 left;
+    return wm_bar_entry_at(m, x, y, &count, &left);
+}
+
+void wm_bar_group(struct wm *m, int how)
+{
+    if (m->bar_group != (u8)how) {
+        m->bar_group = (u8)how;
+        bar_stale(m);
+    }
 }
 
 u32 wm_tray_add(struct wm *m, const u32 *icon)

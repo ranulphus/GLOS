@@ -134,7 +134,10 @@ struct wm {
         u32 icon[16 * 16];              /* 0xAARRGGBB, drawn where AA is 80h or more */
     } tray[WM_TRAY];
     u32 ntray, tray_next;
+    u8 bar_group;                       /* the bar's buttons grouped by app: WG_AUTO (when they don't fit), WG_ALWAYS,
+                                           WG_NEVER ([desktop] group) */
 };
+enum { WG_AUTO, WG_ALWAYS, WG_NEVER };
 
 extern const struct wm_look wm_look_default;
 
@@ -201,6 +204,10 @@ void wm_bar(struct wm *m, int on);                      /* the task bar: made, o
 void wm_bar_text(struct wm *m, const char *clock, const char *note);
 int wm_bar_mark(const struct wm *m, s32 x, s32 y);     /* GLOS's mark at the task bar's start (the launcher) */
 struct wm_window *wm_bar_hit(const struct wm *m, s32 x, s32 y); /* the window whose button is at a point of the bar */
+struct wm_window *wm_bar_entry_at(const struct wm *m, s32 x, s32 y, u32 *count, s32 *left);  /* ... the same, a group's
+                                           first window (count: how many it stands for) and the button's left edge */
+int wm_on_bar(const struct wm_window *w);       /* it has a button (or a place in a group's) on the task bar */
+void wm_bar_group(struct wm *m, int how);       /* WG_ */
 /* The tray: icons at the task bar's right, left of the note and the clock, in the order they came. */
 u32 wm_tray_add(struct wm *m, const u32 *icon);         /* its id, or 0: the tray is full */
 void wm_tray_icon(struct wm *m, u32 id, const u32 *icon);
