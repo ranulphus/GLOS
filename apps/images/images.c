@@ -1,7 +1,8 @@
 /* IMAGES: GLOS's image viewer (PRD §10.6; docs/milestones-m9.md step D).
  * PNG, JPEG, BMP, GIF (its first frame), TGA and PNM through stb_image
  * (third_party/stb: a parser, in ring 3, as PRD D19 has it), and PCX, the
- * DOS era's own, here. Fitted to the window (never enlarged) or at a zoom,
+ * DOS era's own, here, shown in the toolkit's image view (toolkit 2, C10).
+ * Fitted to the window (never enlarged) or at a zoom,
  * the next and the previous picture in the folder a key away; dithered to
  * the palette on an 8-bit desktop by the 2D library.
  *
@@ -41,9 +42,7 @@ static struct {
     int w, h;
     char path[260], kind[8];
 } pic;
-static int fit = 1, zoom = 3, sx, sy;   /* zoom: an index into zooms when not fitted; the corner shown */
-static unsigned *scaled;                /* the picture at the size shown */
-static int scaled_w, scaled_h;
+static int fit = 1, zoom = 3;           /* zoom: an index into zooms when not fitted */
 
 /* ---- PCX (ZSoft): 8 bits with a 256-colour palette at the end, 24 bits as three planes, 4 bits as four planes
    (the header's 16 colours), 1 bit (black and white) */
@@ -183,9 +182,10 @@ static int load(const char *path)
     free(pic.px);
     pic.px = px, pic.w = w, pic.h = h;
     snprintf(pic.path, sizeof pic.path, "%s", path);
-    free(scaled);
-    scaled = NULL;
-    sx = sy = 0;
+    if (view) {                         /* (the view shows the new one from its corner) */
+        gui_image_view_set(view, pic.px, pic.w, pic.h, pic.w);
+        gui_cview_scroll(view, 0, 0);
+    }
     {
         char t[300], name[128];
         snprintf(t, sizeof t, "%s - Images", gui_dos_text(gui_path_name(path), name, sizeof name));
@@ -229,17 +229,13 @@ static void step(int by)
 
 static int scale_of(void)               /* the size shown, in tenths of a per cent */
 {
-    int cw = view->r.w, ch = view->r.h, s;
+    int num, den;
     if (!pic.px)
         return 1000;
     if (!fit)
         return zooms[zoom];
-    s = 1000;
-    if (pic.w * s / 1000 > cw)
-        s = cw * 1000 / pic.w;
-    if (pic.h * s / 1000 > ch)
-        s = ch * 1000 / pic.h;
-    return s > 0 ? s : 1;
+    gui_cview_get_scale(view, &num, &den);
+    return den > 0 ? (int)((long)num * 1000 / den) : 1000;
 }
 
 static void status_line(void)
@@ -255,47 +251,13 @@ static void status_line(void)
     gui_set_text(status, t);
 }
 
-static void draw(struct gui_widget *w, struct gfx_surface *s)
+static void changed(void)               /* the view at the scale asked for, from its corner; the status line */
 {
-    int s1000 = scale_of(), dw, dh, x0, y0, x, y;
-    gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_SHADE);
-    if (!pic.px)
-        return;
-    dw = (int)((long)pic.w * s1000 / 1000), dh = (int)((long)pic.h * s1000 / 1000);
-    if (dw < 1)
-        dw = 1;
-    if (dh < 1)
-        dh = 1;
-    if (sx > dw - w->r.w)
-        sx = dw - w->r.w;
-    if (sy > dh - w->r.h)
-        sy = dh - w->r.h;
-    if (sx < 0)
-        sx = 0;
-    if (sy < 0)
-        sy = 0;
-    {
-        int vw = dw < w->r.w ? dw : w->r.w, vh = dh < w->r.h ? dh : w->r.h;     /* what of it shows */
-        if (!scaled || scaled_w != vw || scaled_h != vh) {
-            free(scaled);
-            scaled = malloc((size_t)vw * (size_t)vh * sizeof *scaled);
-            scaled_w = vw, scaled_h = vh;
-        }
-        if (!scaled)
-            return;
-        for (y = 0; y < vh; y++) {              /* nearest neighbour */
-            const unsigned *row = pic.px + (size_t)((long)(y + sy) * pic.h / dh) * (size_t)pic.w;
-            for (x = 0; x < vw; x++)
-                scaled[(size_t)y * (size_t)vw + (size_t)x] = row[(long)(x + sx) * pic.w / dw];
-        }
-        x0 = w->r.x + (w->r.w - vw) / 2;
-        y0 = w->r.y + (w->r.h - vh) / 2;
-        gfx_image(s, x0, y0, scaled, vw, vh, (unsigned)vw);
-    }
-}
-
-static void changed(void)
-{
+    if (fit)
+        gui_cview_zoom(view, 0);
+    else
+        gui_cview_scale(view, zooms[zoom], 1000);
+    gui_cview_scroll(view, 0, 0);
     status_line();
     gui_damage(view);
 }
@@ -338,14 +300,14 @@ static void command(struct gui_window *w, int id)
     }
 }
 
-static int key(struct gui_window *w, struct gui_ev *e)
+static int key(struct gui_window *w, struct gui_ev *e)      /* (the arrows are the view's own) */
 {
     (void)w;
+    if (e->mods & (GLOS_MOD_CTRL | GLOS_MOD_ALT))
+        return 0;
     switch (e->key) {
-    case GUI_K_LEFT: sx -= 32; changed(); return 1;
-    case GUI_K_RIGHT: sx += 32; changed(); return 1;
-    case GUI_K_UP: sy -= 32; changed(); return 1;
-    case GUI_K_DOWN: sy += 32; changed(); return 1;
+    case GUI_K_PGDN: command(win, C_NEXT); return 1;
+    case GUI_K_PGUP: command(win, C_PREV); return 1;
     }
     switch (e->ch) {
     case 'f': case 'F': command(win, C_FIT); return 1;
@@ -354,6 +316,12 @@ static int key(struct gui_window *w, struct gui_ev *e)
     case '-': command(win, C_OUT); return 1;
     }
     return 0;
+}
+
+static int view_event(struct gui_widget *w, struct gui_ev *e, int x, int y)   /* Images' keys, before the view's */
+{
+    (void)w, (void)x, (void)y;
+    return e->type == GUI_EV_KEY && key(win, e);
 }
 
 static void resized(struct gui_window *w)
@@ -388,9 +356,11 @@ int main(int argc, char **argv)
     gui_menu_item(m, "Zoom &out", C_OUT, NULL);
     m = gui_menu(bar, "&Help");
     gui_menu_item(m, "&About Images", C_ABOUT, NULL);
-    view = gui_canvas(gui_vbox(win->root, 0, 0), 0, 0, draw, NULL);
+    view = gui_image_view(gui_vbox(win->root, 0, 0));
+    gui_cview_on_event(view, view_event);
     gui_grow(view->parent, 1);
     gui_grow(view, 1);
+    win->focus = view;
     status = gui_status(win);
     gui_show(win, 1);
     if (argc > 1)

@@ -27,7 +27,8 @@ struct cview {
     struct gui_widget w;
     int doc_w, doc_h;
     int num, den;                       /* the scale: a document unit is num/den pixels */
-    int zoom;                           /* the percentage asked (0: fitted) */
+    int zoom;                           /* the percentage asked (0: fitted; -1: xnum/xden exactly) */
+    int xnum, xden;                     /* (gui_cview_scale) */
     unsigned flags;                     /* GUI_VIEW_ */
     int ruler_unit;                     /* (rulers) a label every so many units at the least */
     int cursor, cursor_on;              /* the pointer's shape over the document; set now in the window */
@@ -74,6 +75,8 @@ static void place(struct cview *v)
             v->num = aw, v->den = v->doc_w > 0 ? v->doc_w : 1;
         else
             v->num = ah, v->den = v->doc_h > 0 ? v->doc_h : 1;
+    } else if (v->zoom < 0) {
+        v->num = v->xnum, v->den = v->xden;
     } else {
         v->num = v->zoom, v->den = 100;
     }
@@ -386,6 +389,26 @@ void gui_cview_zoom(struct gui_widget *w, int percent)  /* 0: fitted */
     cx = gv.area.x + gv.area.w / 2, cy = gv.area.y + gv.area.h / 2;
     zoom_to(v, percent < 0 ? 100 : percent > 1600 ? 1600 : percent, (int)((long)(cx - gv.ox) * v->den / v->num),
             (int)((long)(cy - gv.oy) * v->den / v->num), cx, cy);
+}
+
+void gui_cview_scale(struct gui_widget *w, int num, int den)   /* exactly num/den (an app's own steps: 1/8) */
+{
+    struct cview *v = CV(w);
+    if (num <= 0 || den <= 0)
+        return;
+    v->zoom = -1, v->xnum = num, v->xden = den;
+    gui_damage(w);
+}
+
+void gui_cview_get_scale(struct gui_widget *w, int *num, int *den)    /* the scale shown (fitted: its own) */
+{
+    place(CV(w));
+    *num = CV(w)->num, *den = CV(w)->den;
+}
+
+void gui_cview_on_event(struct gui_widget *w, int (*event)(struct gui_widget *, struct gui_ev *, int x, int y))
+{
+    CV(w)->event = event;                       /* (the app's first, keys too: 1 taken) */
 }
 
 int gui_cview_get_zoom(struct gui_widget *w)    /* the percentage shown (fitted: what the fit came to) */

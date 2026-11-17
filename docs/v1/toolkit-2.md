@@ -819,6 +819,13 @@ widget now draws, and each such change is looked at before its goldens are made 
   Panel's small text boxes stay on `gui_editor` (C10 plan, step 2, narrowed).
 - **Test** `wrap` (GUITEST: a long line in rows, Down through them, End, a click), and Notepad's own script; host
   and Loop A.
+- **C10c, Images on the image view** (`apps/images`, `sdk/gui/view.c`): Images' picture is a `gui_image_view`
+  (its own drawing and scaled copy gone). The view gained an exact scale (`gui_cview_scale(w, num, den)`, read back
+  with `gui_cview_get_scale`, so that Images keeps its zoom steps of 12.5% to 800%) and an app's key hook
+  (`gui_cview_on_event`: called before the view's own keys, so that Page Down and Page Up still go to the next
+  and the previous picture and F, 1, + and - still fit, show actual size and zoom); the arrows are the view's
+  (32 pixels a press). The script's lines are as they were; the pictures differ in the view's darker backdrop
+  and its scroll bars when the picture is larger than the window. Host and Loop A (486 and Pentium II).
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
