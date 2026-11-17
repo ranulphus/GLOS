@@ -6777,8 +6777,10 @@ class GuiDriver:
     def play(self, script):
         self.script = os.path.splitext(os.path.basename(script))[0]     # (its goldens: build/host/gui/SCRIPT/)
         for n, line in enumerate(open(os.path.join(ROOT, script)), 1):
+            if line.lstrip().startswith("#"):   # (a comment: not split into words, whatever quotes it has)
+                continue
             words = gui_words(line.rstrip("\n"))
-            if not words or words[0].startswith("#"):
+            if not words:
                 continue
             cmd, args = words[0], words[1:]
             if cmd == "config":                 # (before run) a setting for this script, unset when it is done

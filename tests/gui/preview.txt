@@ -2,8 +2,8 @@
 # The preview surface (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's page starts another GUITEST
 # ("embedded") and shows its window inside the widget (WIN's EMBED), at the widget's size less its frame (278 by
 # 120: the page's box makes it as wide as the window); Stop ends it. The picture is of the page before it starts:
-# the program's window is GLOS's to draw, and the host's tests have no other program (there the page says "No
-# preview"; only Loop A checks the lines).
+# the program's window is GLOS's to draw, and the host's tests have no other program (there the page says No
+# preview; only Loop A checks the lines).
 run GUITEST.EXE preview
 wait "GUITEST Preview"
 shot start "GUITEST Preview"
