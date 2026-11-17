@@ -1998,12 +1998,19 @@ static void names(const char *dir)
     snprintf(chosen, sizeof chosen, "%s", dir);
     if (!gui_file_dialog(NULL, "Open", 0, chosen, sizeof chosen)) {
         printf("GUI chose nothing\n");
-        return;
+    } else {
+        for (i = 0; chosen[i] && o < (int)sizeof line - 5; i++)      /* (DOS's bytes: those above 7Fh as \xNN) */
+            o += snprintf(line + o, sizeof line - (size_t)o, (unsigned char)chosen[i] >= 0x80 ? "\\x%02X" : "%c",
+                          (unsigned char)chosen[i]);
+        printf("GUI chose %s\n", line);
     }
-    for (i = 0; chosen[i] && o < (int)sizeof line - 5; i++)  /* (DOS's bytes: those above 7Fh as \xNN) */
-        o += snprintf(line + o, sizeof line - (size_t)o, (unsigned char)chosen[i] >= 0x80 ? "\\x%02X" : "%c",
-                      (unsigned char)chosen[i]);
-    printf("GUI chose %s\n", line);
+    for (i = 0; list[i]; i++) {                 /* (Loop A plays every script on one disk: the files and the
+                                                   folder go, or later scripts' folder pictures show them) */
+        gui_text_dos(list[i], dos, sizeof dos);
+        gui_path_join(path, sizeof path, dir, dos);
+        gui_unlink(path);
+    }
+    gui_rmdir(dir);
 }
 
 int main(int argc, char **argv)
