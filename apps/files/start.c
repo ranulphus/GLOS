@@ -406,6 +406,49 @@ static int t_find(void *ctx, unsigned long id)
     return id ? pin_at((int)id - 1) : -1;
 }
 
+/* ---- a tile dragged to another place among them (the toolkit's lists drag their chosen row; the tiles take it
+   back as a move: the entry's name in a format of Files' own) */
+
+static unsigned tile_fmt;
+
+static int tile_offer(struct gui_widget *w, glos_handle t)
+{
+    int r = gui_vlist_get(w);
+    if (r < 0 || r >= npins)
+        return -1;
+    return gui_clip_put(t, tile_fmt, ents[pins[r]].name, strlen(ents[pins[r]].name) + 1) == 0 ? 0 : -1;
+}
+
+static void tile_done(struct gui_widget *w, unsigned effect) { (void)w, (void)effect; }
+
+static void say(const char *what, const char *a);
+static void state_save(void);
+
+static void tile_drop(struct gui_widget *w, int where, glos_handle data, unsigned effect)
+{
+    char *name = gui_drop_read(data, tile_fmt, NULL);
+    int e, at;
+    (void)effect;
+    glos_close(data);
+    if (!name)
+        return;
+    e = ent_by_name(name);
+    free(name);
+    if (e < 0 || (at = pin_at(e)) < 0)
+        return;
+    if (where < 0 || where > npins)
+        where = npins;
+    if (where > at)
+        where--;                                /* (its own place is taken out first) */
+    memmove(&pins[at], &pins[at + 1], (size_t)(npins - at - 1) * sizeof *pins);
+    memmove(&pins[where + 1], &pins[where], (size_t)(npins - 1 - where) * sizeof *pins);
+    pins[where] = e;
+    state_save();
+    gui_vlist_changed(w);
+    gui_vlist_set(w, where);
+    say("moved", ents[e].title);
+}
+
 /* ---- what a row does */
 
 static void hide(void)
@@ -674,6 +717,10 @@ void start_open(int x, int y)
         gui_vlist_view(tiles, GUI_VIEW_ICONS);
         gui_grow(tiles, 1);
         gui_on(tiles, tiles_on, 0);
+        if ((tile_fmt = glos_clip_format("glos.files.tile")) != 0) {   /* (dragged among themselves) */
+            gui_drag_source(tiles, GLOS_DND_MOVE, tile_offer, tile_done);
+            gui_drop_target(tiles, &tile_fmt, 1, GLOS_DND_MOVE, tile_drop);
+        }
         row = gui_hbox(box, 6, 0);
         gui_button(row, GUI_T("&Settings"), button, 1);
         gui_button(row, GUI_T("&Files"), button, 2);

@@ -204,8 +204,9 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   were (`sdk/gui/core.c`).
 - **The host shim:** `glos_entry_list` and `glos_recent_list` answer with a few made-up entries and documents;
   a program started detached is taken as started, so that Files goes on as it would and says what it ran.
-- **Not yet:** the index of file names for the search; tiles dragged by the mouse (they move by their page's
-  rows) and their groups and sizes; "Recently added".
+- **A tile dragged** onto another's place moves there (the toolkit's lists drag their chosen row; the tiles take
+  it back as a move, in a format of Files' own); it moves by its page's rows too.
+- **Not yet:** the index of file names for the search; the tiles' groups and sizes; "Recently added".
 - **Power's three rows** run `glos exit`, `glos restart` and `glos reboot` as lines of GLOS's own shell (a
   `GLOS_RUN_SHELL` job; a job's command would be run as a program). Exit GLOS was proven by hand on Loop A
   (2026-11-17: Files as the shell, Ctrl+Esc, Alt+P, Enter: Files is asked to end and says so, GLOS exits with
