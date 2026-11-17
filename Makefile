@@ -180,7 +180,7 @@ build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/g
                  kernel/include/keymap.h $$(CFG_SRCS) $$(CP_SRCS) include/glos/config.h include/glos/tz.h $$(APP_HOST_LIBS_$(1))
 	@mkdir -p build/host
 	$$(Q)$$(GUI_HOST) $$(APP_HOST_FLAGS) -Dmain=app_main -c -o build/host/$(1)-app.o apps/$(1)/$(1).c
-	$$(Q)$$(GUI_HOST) -o $$@ build/host/$(1)-app.o $$(filter-out apps/$(1)/$(1).c,$$(wildcard apps/$(1)/*.c)) \
+	$$(Q)$$(GUI_HOST) $$(APP_HOST_FLAGS) -o $$@ build/host/$(1)-app.o $$(filter-out apps/$(1)/$(1).c,$$(wildcard apps/$(1)/*.c)) \
 	  tests/host/glosshim.c $$(GUI_SRCS) $$(LIBGLOS_GFX) kernel/lib/png.c $$(CFG_SRCS) $$(CP_SRCS) $$(APP_HOST_LIBS_$(1)) -lm
 endef
 # The terminal's ssh (M10): the client for the host too, 32-bit as the rest, its crypto without -Werror.

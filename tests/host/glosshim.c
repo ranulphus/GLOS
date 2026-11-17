@@ -959,6 +959,10 @@ int glos_setting_sections(char *buf, unsigned room)
     return 0;
 }
 
+/* (A section watched: nothing on the host changes a setting under a running app but the script's own theme and
+   text lines, which have their own events.) */
+int glos_setting_watch(const char *section, int on) { (void)section, (void)on; return 0; }
+
 int glos_setting_keys(const char *section, char *buf, unsigned room)
 {
     int n = room ? config_keys(section, buf, room - 1) : 0;

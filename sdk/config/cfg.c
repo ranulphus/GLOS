@@ -131,6 +131,10 @@ const struct cfg_key cfg_schema[] = {
       "The size of the text in windows, menus and dialogs: every program lays its windows out again" },
     { "desktop", "theme", CFG_CHOICE, CFG_NOW, 0, 0, "slate|dark|contrast", "slate", "&Theme",
       "The desktop's colours: Slate, a dark one, or one of the strongest contrast" },
+    { "desktop", "wallpaper", CFG_PATH, CFG_NOW, 0, 119, 0, "", "&Wallpaper",
+      "A picture for the desktop (PNG, JPEG, BMP, GIF or TGA); empty: the theme's colour" },
+    { "desktop", "wallpaper_style", CFG_CHOICE, CFG_NOW, 0, 0, "fill|stretch|centre|tile", "fill", "Wallpaper st&yle",
+      "How the picture is put on the desktop: made to cover it, made its size, in its middle, or side by side" },
     /* [saver]: the screen saver and the screen's power (API 2.0 step 5; kernel/wm/idle.c) */
     { "saver", "wait", CFG_NUMBER, CFG_NOW, 1, 240, "off", "off", "&Wait (minutes)",
       "The saver comes on when nobody has touched the keyboard or the mouse for so long (off: never)" },

@@ -236,6 +236,26 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
 - **Tests:** host `wallpaper_test` (scaling, styles, dithering); Loop A `desk` (a picture set, then the mode
   changed: the wallpaper follows).
 
+### D4 as built (2026-11-17)
+
+- **Changed from the plan:** the shell draws the wallpaper, not the kernel. Files' desktop window is the whole
+  work area under the icons already, so a picture drawn by the kernel would be covered by it; and Files can have
+  the decoders the kernel is to do without. (With no shell running the desktop is its theme's colour, as before.)
+- **`[desktop] wallpaper`** (a picture: PNG, JPEG, BMP, GIF or TGA, by stb_image as Images has it) and
+  **`wallpaper_style`** (`fill`, the default: made as big as covers the desktop, what is over cut away;
+  `stretch`: made its size; `centre`: in its middle at its own size, the theme's colour round it; `tile`: side
+  by side). `apps/files/wall.c` reads the picture once into one the desktop's size (the mean of the pixels a
+  place covers when made smaller, the nearest when larger) and draws it under the icons; the 2D library dithers
+  it on an 8-bit desktop. Made again when either setting changes (the shell watches `[desktop]`:
+  `GLOS_EV_SETTING`), when the theme changes, and when the desktop's size does. One that can't be read is no
+  wallpaper. It costs the desktop's size in 32-bit pixels of the shell's memory (1.2 MB at 640 by 480).
+- **The desktop window follows the work area** (a gap of D1's): when the task bar goes to the top or hides,
+  the shell's desktop window is moved and sized to the work area, so its icons are never under the bar.
+- **Not done here:** the Control Panel's Appearance page with a file chooser and a preview (D5: the generic
+  Desktop page has the two settings meanwhile); a light and a Windows 98-like theme (not planned).
+- **Tests:** host and Loop A `wall` (tiled) and `wall-fill` (the default), each the desktop with its icons over
+  the picture, at 8, 16 and 32 bits.
+
 ### D5. The Control Panel grown
 
 - The pages of `apps/control-panel.md` that phase B's generic pages don't make well: Appearance (theme, text

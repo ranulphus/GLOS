@@ -1,5 +1,6 @@
 # The file manager and the desktop's shell (apps/files; M9 step F): the desktop's icons, the launcher, an icon
-# moved; a folder opened by its path typed in the Start menu; a new folder, a file copied into it, one deleted, one renamed.
+# moved; a folder opened by its path typed in the Start menu; a new folder, a file copied into it, one deleted, one renamed;
+# the icon dragged back where it was (the scripts after this one find the desktop as it was).
 run FILES.EXE
 wait "Desktop"
 shot desktop "Desktop"
@@ -46,6 +47,7 @@ key alt+v d
 shot fm-details "C:\FM"
 key ctrl+w
 gone "C:\FM"
+drag "Desktop" 238 180 46 20
 key alt+f4
 gone "Desktop"
 expect FILES launcher 

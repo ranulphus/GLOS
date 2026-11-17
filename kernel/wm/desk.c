@@ -185,7 +185,15 @@ const struct theme *desk_theme(void) { return theme_now; }
 void desk_bar_place(int top, int hide)
 {
     struct wm *m = desk_lock();
+    struct wm_window *w;
+    struct gfx_rect work;
     wm_bar_place(m, top, hide);
+    wm_work(m, &work);
+    for (w = m->bottom; w; w = w->above)        /* the shell's desktop is the work area: there, and its size */
+        if (w->flags & WF_DESKTOP) {
+            wm_move(m, w, work.x, work.y);
+            deskapp_resize(m, w, work.w, work.h);
+        }
     deskapp_screen(m);                          /* (windows placed in the work area have new sizes: told) */
     desk_unlock();
     desk_kick();

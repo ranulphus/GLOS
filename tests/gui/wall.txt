@@ -1,0 +1,9 @@
+# The desktop's wallpaper (apps/files/wall.c; phase D, D4): a picture side by side over the desktop, under the icons.
+config desktop wallpaper C:\FM\PICTURE.PNG
+config desktop wallpaper_style tile
+run FILES.EXE
+wait "Desktop"
+shot tiled "Desktop"
+key alt+f4
+gone "Desktop"
+expect FILES end 

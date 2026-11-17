@@ -1,0 +1,8 @@
+# The desktop's wallpaper (apps/files/wall.c; phase D, D4): a picture made to cover the desktop (the style's default).
+config desktop wallpaper C:\FM\PICTURE.PNG
+run FILES.EXE
+wait "Desktop"
+shot filled "Desktop"
+key alt+f4
+gone "Desktop"
+expect FILES end 

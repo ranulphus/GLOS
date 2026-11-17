@@ -282,7 +282,7 @@ static void open_item(int i)
 static void area_draw(struct gui_widget *w, struct gfx_surface *s)
 {
     int i;
-    gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_ROLE(GLOS_ROLE_DESK));   /* (the desktop's colour) */
+    wall_draw(s, w->r.x, w->r.y, w->r.w, w->r.h);      /* (the wallpaper, or the desktop's colour: wall.c) */
     for (i = 0; i < nitems; i++) {
         const struct item *it = &items[i];
         int tw = gfx_text_width(gui_font, it->name, -1), lw = tw < CELL_W - 4 ? tw : CELL_W - 4;
@@ -414,6 +414,20 @@ static void app_event(const struct glos_ev *ev)
     case GLOS_EV_FS:
         folder_changed(ev->handle);
         break;
+    case GLOS_EV_SETTING: {                     /* [desktop] wallpaper or its style changed: made again */
+        const struct glos_ev_setting *st = (const struct glos_ev_setting *)ev;
+        if (desk && !strcmp(st->section, "desktop") && !strncmp(st->key, "wallpaper", 9)) {
+            wall_load(area->r.w, area->r.h);
+            gui_damage(area);
+        }
+        break;
+    }
+    case GLOS_EV_THEME:                         /* (the colour round a centred picture is the theme's) */
+        if (desk) {
+            wall_load(area->r.w, area->r.h);
+            gui_damage(area);
+        }
+        break;
     }
 }
 
@@ -425,7 +439,7 @@ static void desk_closed(struct gui_window *w)   /* the shell ends: the Start men
 
 static void desk_resized(struct gui_window *w)
 {
-    (void)w;
+    wall_load(w->w, w->h);                      /* (the wallpaper is made for the desktop's size) */
     gui_damage(area);
 }
 
@@ -459,6 +473,8 @@ int main(int argc, char **argv)
         gui_screen_size(&desk->w, &desk->h);
         desk->h -= 20;
         gui_show(desk, 1);
+        wall_load(desk->w, desk->h);
+        glos_setting_watch("desktop", 1);
         desktop_items();
         gui_focus(area);
         glos_shell(1);
