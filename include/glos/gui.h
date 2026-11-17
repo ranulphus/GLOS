@@ -775,6 +775,31 @@ void gui_wizard_go(struct gui_widget *w, int page);
 int gui_wizard_at(struct gui_widget *w);
 void gui_wizard_next_ok(struct gui_widget *w, int ok);
 void gui_wizard_skip(struct gui_widget *w, int page, int skip);
+/* (toolkit 2) A terminal: an xterm screen (sdk/gui/vt.c) as big as fits, lines_kept lines kept above it. The app
+   feeds it what its program writes; send has what is typed or pasted (typed 1) and the screen's answers to the
+   program's questions (typed 0); resize the screen's size when it changes; line a double-clicked line's text.
+   Ctrl+Shift+C copies what the mouse chose, Shift+Ins and Ctrl+Shift+V paste, Shift+PgUp and PgDn look back.
+   GUI_ON_CHANGE: the program set the title (gui_term_title). */
+struct gui_term_cb {
+    void (*send)(struct gui_widget *w, const char *data, int n, int typed);
+    void (*resize)(struct gui_widget *w, int cols, int rows);
+    void (*line)(struct gui_widget *w, int line, const char *text);
+};
+struct gui_widget *gui_terminal(struct gui_widget *parent, int lines_kept);
+void gui_term_callbacks(struct gui_widget *w, const struct gui_term_cb *cb);
+void gui_term_feed(struct gui_widget *w, const void *data, int n);
+void gui_term_size(struct gui_widget *w, int *cols, int *rows);        /* the screen's, as laid out */
+void gui_term_end(struct gui_widget *w);        /* the program has gone: no cursor, no keys taken */
+void gui_term_copy(struct gui_widget *w);
+void gui_term_paste(struct gui_widget *w);
+void gui_term_clear(struct gui_widget *w);      /* the lines kept go; what the program wipes next isn't kept */
+const char *gui_term_title(struct gui_widget *w);
+int gui_term_kept(struct gui_widget *w);        /* lines kept; the screen's rows follow them (gui_term_line) */
+int gui_term_rows(struct gui_widget *w);
+int gui_term_cols(struct gui_widget *w);
+int gui_term_line(struct gui_widget *w, int line, char *out, int room);        /* its text (UTF-8), trailing blanks
+                                           off: its length, or -1 */
+int gui_term_dump(struct gui_widget *w, char *out, int room);  /* the screen as text, a line a row (the tests') */
 void gui_image_view_set(struct gui_widget *w, const unsigned *rgb, int iw, int ih, int stride);
 int gui_folder_dialog(struct gui_window *owner, const char *title, char *path, int room);     /* (toolkit 2) a
                                            folder chosen in a tree of the drives' folders, or typed; New folder

@@ -682,6 +682,18 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
   question.
 - **Test** `wizard` (Next held back until a name is typed, the pages forward and back, the options page skipped
   and left out of the steps, Finish), host and Loop A.
+- **C8g, the terminal** (`sdk/gui/term.c`, `sdk/gui/vt.c`): the Terminal's grid and xterm screen moved into the
+  toolkit (`vt.c` and `vt.h` from apps/term; the kernel's text console and `vt_test` build them from there).
+  `gui_terminal` keeps so many lines above the screen; the app feeds it what its program writes
+  (`gui_term_feed`) and has, through `struct gui_term_cb`, what is typed or pasted and the screen's answers
+  (`send`, typed or not), the screen's size when it changes (`resize`), and a double-clicked line's text
+  (`line`: clickable lines, for the IDE's messages and a log's entries). Copy, paste, clear, the title
+  (`GUI_ON_CHANGE`), the program's end (`gui_term_end`), and the lines as text for tests (`gui_term_line`,
+  `gui_term_dump`). TERM.EXE is now the window, its menus, the shell's job and its log around the widget; its
+  pictures and its log are as they were.
+- **Test** `terminal` (GUITEST's page: a build's output with colours and a title, a line's text by a double
+  click, keys as an xterm sends them, a word copied and pasted), host and Loop A; Term's own `term` and `term-run`
+  (the apps suite) and the sshc suite (`TERM.EXE -log`) unchanged.
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

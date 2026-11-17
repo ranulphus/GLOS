@@ -67,6 +67,8 @@
  *                       a basket (copied where it is let go), and reordered in its list
  *   GUITEST calendar    "GUITEST Calendar" (toolkit 2, step C8): a month (several days
  *                       chosen, two marked, today fixed), a date field, a time field
+ *   GUITEST terminal    "GUITEST Terminal" (toolkit 2, step C8): the toolkit's terminal fed
+ *                       a build's output (colours, a title); a line's text by a double click
  *   GUITEST wizard      "GUITEST Wizard" (toolkit 2, step C8): four pages with steps,
  *                       Next held back until a name is typed, a page skipped
  *   GUITEST props       "GUITEST Properties" (toolkit 2, step C8): a property grid, two
@@ -1840,6 +1842,58 @@ static void meters_page(void)
     say("meters", "", 0);
 }
 
+/* ---- the terminal widget (toolkit 2, step C8): an IDE's output, no program behind it */
+static struct gui_widget *tw;
+
+static void tw_line(struct gui_widget *w, int line, const char *text)
+{
+    char out[160];
+    (void)w;
+    snprintf(out, sizeof out, "line %d: %s", line, text);
+    say("%s", out, 0);
+}
+
+static void tw_send(struct gui_widget *w, const char *d, int n, int typed)
+{
+    char out[64];
+    int i, k = 0;
+    (void)w;
+    for (i = 0; i < n && k < (int)sizeof out - 5; i++)  /* (what would go to a program, as text) */
+        k += snprintf(out + k, sizeof out - (size_t)k, (unsigned char)d[i] < 0x20 ? "^%c" : "%c",
+                      (unsigned char)d[i] < 0x20 ? d[i] + 0x40 : d[i]);
+    say(typed ? "typed %s" : "answered %s", out, 0);
+}
+
+static void tw_on(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_CHANGE)
+        say("title %s", gui_term_title(w), 0);
+}
+
+static void terminal_page(void)
+{
+    static const struct gui_term_cb cb = { tw_send, NULL, tw_line };
+    static const char out[] =
+        "\033]0;Building\007"
+        "\033[1mmake\033[0m all\r\n"
+        "  CC      main.c\r\n"
+        "  CC      draw.c\r\n"
+        "draw.c:42:7: \033[31merror:\033[0m 'width' undeclared\r\n"
+        "  \033[32mok\033[0m      2 files, \033[33m1 warning\033[0m\r\n"
+        "$ ";
+    win = gui_window_at("GUITEST Terminal", 0, 0, 420, 200, 0);
+    tw = gui_terminal(gui_vbox(win->root, 0, 0), 100);
+    gui_grow(tw->parent, 1);
+    gui_grow(tw, 1);
+    gui_term_callbacks(tw, &cb);
+    gui_on(tw, tw_on, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(tw);
+    gui_term_feed(tw, out, (int)sizeof out - 1);
+    say("terminal", "", 0);
+}
+
 /* ---- the wizard (toolkit 2, step C8) */
 static struct gui_widget *wz, *wz_name, *wz_skip, *wz_quick, *wz_drive;
 
@@ -2362,6 +2416,8 @@ int main(int argc, char **argv)
         props_page();
     else if (!strcmp(what, "wizard"))
         wizard_page();
+    else if (!strcmp(what, "terminal"))
+        terminal_page();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

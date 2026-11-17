@@ -82,6 +82,7 @@ compare, and costs a redraw twice a second for nothing.
 | choice | a button that drops its list of items down |
 | spin box, slider | a number in a range; a slider may be upright, have marks and show its value in the app's format (`gui_slider_style`, toolkit 2) |
 | level meter, graph (toolkit 2) | one or two channels' levels with their peaks held (`gui_meter`); a few series' recent samples as lines (`gui_graph`) |
+| terminal (toolkit 2) | an xterm screen with lines kept above it, fed by the app, its keys and answers sent back, text chosen and copied, a double-clicked line's text to the app (`gui_terminal`; the Terminal's, moved into the toolkit) |
 | wizard (toolkit 2) | pages with Back, Next and Finish, Next held back until a page is filled in, pages skipped, the steps listed down the left (`gui_wizard`) |
 | property grid (toolkit 2) | names and values under groups, each edited as its kind wants (text, number, yes-or-no, choice, colour, font), with the current one's help (`gui_propgrid`) |
 | canvas view, image view (toolkit 2) | a document in units that the app draws, zoomed and scrolled both ways, with rulers and a pointer for each tool (`gui_canvas_view`); a picture fitted or zoomed and panned (`gui_image_view`) |

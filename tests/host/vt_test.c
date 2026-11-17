@@ -1,4 +1,4 @@
-/* apps/term/vt.c on the host: each family of sequences against the screen xterm would show (ctlseqs): text and
+/* sdk/gui/vt.c on the host: each family of sequences against the screen xterm would show (ctlseqs): text and
  * wrapping, cursor movement, erasing, the scroll region, insertion and deletion, the alternate screen, SGR's
  * colours, the line-drawing set, UTF-8, the reports, a resize; and vt_key's encodings. */
 #include <stdio.h>

@@ -3,7 +3,7 @@
  *
  * It is a session of its own, like each SSH login's and each Terminal window's (kernel/shell/shsess.c); this
  * file is its terminal. What the session writes goes through the xterm screen the Terminal app has
- * (apps/term/vt.c, built here for a text screen's sizes) into the VGA's text memory: a cell's character in
+ * (sdk/gui/vt.c, built here for a text screen's sizes) into the VGA's text memory: a cell's character in
  * DOS's code page, its colours the nearest of the sixteen. What is typed comes from the keyboard's bytes
  * (kernel/vm/vkbc.c: the real keyboard's, and glos key's and glos type's), made characters by the keyboard's
  * layout (keymap.h) and bytes as a terminal sends keys.
@@ -39,7 +39,7 @@
 #include "shsess.h"
 #include "timer.h"
 #include "vm.h"
-#include "../../apps/term/vt.h"
+#include "../../sdk/gui/vt.h"
 
 enum { M_LSHIFT = 1, M_RSHIFT = 2, M_LCTRL = 4, M_RCTRL = 8, M_LALT = 16, M_RALT = 32 };
 

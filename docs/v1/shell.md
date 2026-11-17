@@ -153,7 +153,7 @@ S2 gives it a host in the kernel and takes the Terminal app's away.
 **As built (`kernel/shell/lcon.c`, 2026-11-14):**
 
 - The session is `shsess.c`'s, opened by a thread of its own (`console`) once DOS is at GLOS's idle point and
-  GLOS.CFG is read. Its terminal is `apps/term/vt.c`, the Terminal app's xterm screen, built into the kernel at
+  GLOS.CFG is read. Its terminal is `sdk/gui/vt.c` (`apps/term/vt.c` until toolkit 2, C8), the xterm screen, built into the kernel at
   a text screen's sizes (132 by 60 at most; about 127 KB, taken when the prompt starts) and drawn into the
   VGA's text memory: a cell's character in DOS's code page, its colours the nearest of the sixteen, the cursor
   the BIOS's and the card's.

@@ -1,0 +1,23 @@
+# The terminal widget (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's page, a build's output fed in
+# by the app (bold, colours, a title: GUI_ON_CHANGE). A double click on the error's line gives the app its text;
+# keys go out as an xterm sends them; a word chosen by the mouse, copied (Ctrl+Shift+C) and pasted (Shift+Ins).
+run GUITEST.EXE terminal
+wait "GUITEST Terminal"
+shot start "GUITEST Terminal"
+click "GUITEST Terminal" 100 50 double
+type ls
+key enter
+drag "GUITEST Terminal" 74 23 116 23
+shot chosen "GUITEST Terminal"
+key ctrl+shift+c
+key shift+ins
+key alt+f4
+gone "GUITEST Terminal"
+expect GUI title Building
+expect GUI terminal
+expect GUI line 3: draw.c:42:7: error: 'width' undeclared
+expect GUI typed l
+expect GUI typed s
+expect GUI typed ^M
+expect GUI typed main.c
+expect GUI end

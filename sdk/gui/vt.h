@@ -1,6 +1,7 @@
-/* The terminal's xterm screen (vt.c; M10 step D): what an SSH session's
- * programs draw with escape sequences, as a grid of cells. Plain C, no GUI:
- * the terminal draws it (term.c), the host tests it (tests/host/vt_test.c). */
+/* The terminal's xterm screen (vt.c; M10 step D; in the toolkit since toolkit 2, C8): what a session's
+ * programs draw with escape sequences, as a grid of cells. Plain C, no GUI: the terminal widget draws it
+ * (sdk/gui/term.c), the kernel's text screen shows it (kernel/shell/lcon.c), the host tests it
+ * (tests/host/vt_test.c). */
 #ifndef VT_H
 #define VT_H
 
