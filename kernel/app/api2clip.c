@@ -116,16 +116,24 @@ static int put(struct app *a, struct trapframe *tf)
     struct clip_tx *t;
     u32 size;
     u8 *p;
-    if (a2_rd(tf, &q, sizeof q, &size) != 0 || !format_ok(q.format))
+    if (a2_rd(tf, &q, sizeof q, &size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     if (!(t = handle_obj(&a->v2->h, q.handle, GLOS_HK_CLIP)))
         return a2_fail(tf, handle_kind(&a->v2->h, q.handle) ? GLOS_E_KIND : GLOS_E_HANDLE);
     if (!t->write)
         return a2_fail(tf, GLOS_E_REFUSED);
-    if (q.length > DATA_MAX || !(p = clip_content_add(t->c, q.format, q.length)))
+    if (!format_ok(q.format)) {                 /* (a put that fails spoils the transaction: its close changes
+                                                   nothing, so a paste never sees part of a copy) */
+        t->commit = 0;
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    }
+    if (q.length > DATA_MAX || !(p = clip_content_add(t->c, q.format, q.length))) {
+        t->commit = 0;
         return a2_fail(tf, GLOS_E_MEMORY);
+    }
     if (copy_in(tf, q.data, p, q.length) != 0) {
         clip_content_add(t->c, q.format, 0);    /* (nothing of it: not half of it) */
+        t->commit = 0;
         return a2_fail(tf, GLOS_E_ARGUMENT);
     }
     t->puts = 1;
@@ -181,7 +189,7 @@ static int format(struct trapframe *tf)
 {
     struct glos_clip_format q;
     char name[CLIP_NAME_MAX];
-    u32 size, i;
+    u32 size, i, k;
     if (a2_rd(tf, &q, sizeof q, &size) != 0 || !q.name)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     for (i = 0; i < sizeof name; i++) {
@@ -190,8 +198,12 @@ static int format(struct trapframe *tf)
         if (!name[i])
             break;
     }
-    if (i == sizeof name || !(q.format = clip_private(name)))
-        return a2_fail(tf, i == sizeof name || !name[0] ? GLOS_E_ARGUMENT : GLOS_E_MEMORY);
+    for (k = 0; k < i && name[k] > ' ' && name[k] <= '~'; k++)
+        ;
+    if (i == sizeof name || !i || k < i)        /* (too long, empty, or a space or other than printable ASCII) */
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (!(q.format = clip_private(name)))
+        return a2_fail(tf, GLOS_E_MEMORY);      /* (the names are all taken) */
     return a2_wr(tf, &q, sizeof q, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 }
 

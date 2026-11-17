@@ -4,6 +4,13 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The clipboard's transactions are whole (2026-11-16)
+
+- **A copy that fails changes nothing:** in a writing clipboard transaction (API 2.0's CLIP), a put that fails
+  now spoils the transaction, and closing it leaves the clipboard as it was, so a paste never sees part of a copy.
+- **A private format's bad name** (a space, or other than printable ASCII; `glos_clip_format`) is answered
+  `GLOS_E_ARGUMENT`, no longer `GLOS_E_MEMORY`.
+
 ## A Matrox G400 on its own driver's clocks (2026-11-16)
 
 - **`[display] clocks = auto | bios`** (auto by default; when GLOS next starts). DOS leaves a G400 on the first

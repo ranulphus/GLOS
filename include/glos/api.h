@@ -1792,7 +1792,8 @@ struct glos_ev_shell {
  *     whatever is put meanwhile.
  * There is no limit to the data's size but memory. */
 #define GLOS_CLIP_OPEN    GLOS_FN(GLOS_AREA_CLIP, 0)    /* struct glos_clip_open: a transaction */
-#define GLOS_CLIP_PUT     GLOS_FN(GLOS_AREA_CLIP, 1)    /* struct glos_clip_data: a format's data into a writing one */
+#define GLOS_CLIP_PUT     GLOS_FN(GLOS_AREA_CLIP, 1)    /* struct glos_clip_data: a format's data into a writing one
+                                                           (one that fails spoils it: its close changes nothing) */
 #define GLOS_CLIP_GET     GLOS_FN(GLOS_AREA_CLIP, 2)    /* struct glos_clip_data: a format's data from a reading one */
 #define GLOS_CLIP_FORMATS GLOS_FN(GLOS_AREA_CLIP, 3)    /* struct glos_clip_formats: the formats there are */
 #define GLOS_CLIP_FORMAT  GLOS_FN(GLOS_AREA_CLIP, 4)    /* struct glos_clip_format: a private format's number */

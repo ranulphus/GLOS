@@ -80,8 +80,6 @@ static struct {
     FILE *script;
     const char *out;
     int bpp, line, done, settled;
-    char *clip;
-    unsigned clip_n;
     int px, py;                         /* the pointer */
     unsigned buttons;
 } H;
@@ -254,9 +252,13 @@ glos_handle glos_window(const char *title, int x, int y, int cw, int ch, unsigne
 }
 
 /* What a handle is here: a window (its id), or one of the others (a watch: from 1000h). */
+static int clip_close(glos_handle t);
+
 int glos_close(glos_handle id)
 {
     struct hwin *w = find(id);
+    if (id >= 0x7400 && id < 0x7404)
+        return clip_close(id);
     if (id >= 0x1000)
         return 0;
     if (!w)
@@ -372,34 +374,181 @@ int glos_present(glos_handle id, int x, int y, int cw, int ch)
 }
 int glos_focus(glos_handle id) { if (!find(id)) return GLOS_E_HANDLE; set_focus(id); return 0; }
 
-static void clip_set(const char *text, unsigned n)
+/* The clipboard (API 2.0's CLIP, as kernel/app/clipstore.c keeps it): up to GLOS_CLIP_ITEMS formats at once, put
+   whole (glos_clip_put) or by a writing transaction that becomes the clipboard when it is closed; private formats
+   by name. Transactions' handles are 0x7400 on. */
+struct hclip { unsigned n, format[GLOS_CLIP_ITEMS], len[GLOS_CLIP_ITEMS]; unsigned char *data[GLOS_CLIP_ITEMS]; };
+static struct hclip CLIP;
+static unsigned clip_serial;
+static struct { int used, write, spoilt; struct hclip c; } CT[4];
+static char clip_names[16][32];
+static int nclip_names;
+
+static void clip_free(struct hclip *c)
 {
-    char *c = malloc(n + 1);
-    if (!c)
-        return;
-    memcpy(c, text, n);
-    free(H.clip);
-    H.clip = c;
-    H.clip_n = n;
+    unsigned i;
+    for (i = 0; i < c->n; i++)
+        free(c->data[i]);
+    memset(c, 0, sizeof *c);
+}
+
+static int clip_add(struct hclip *c, unsigned format, const void *data, unsigned length)
+{
+    unsigned i;
+    unsigned char *d = malloc(length ? length : 1);
+    if (!d)
+        return GLOS_E_MEMORY;
+    memcpy(d, data, length);
+    for (i = 0; i < c->n && c->format[i] != format; i++)
+        ;
+    if (i == c->n) {
+        if (c->n == GLOS_CLIP_ITEMS) {
+            free(d);
+            return GLOS_E_ROOM;
+        }
+        c->n++;
+    } else {
+        free(c->data[i]);
+    }
+    c->format[i] = format, c->data[i] = d, c->len[i] = length;
+    return 0;
+}
+
+static struct hclip *clip_of(glos_handle t)
+{
+    int i = (int)t - 0x7400;
+    if (!t)
+        return &CLIP;
+    return i >= 0 && i < 4 && CT[i].used ? &CT[i].c : NULL;
+}
+
+static void clip_set(const char *text, unsigned n)     /* (the script's "clip" command) */
+{
+    clip_free(&CLIP);
+    clip_add(&CLIP, GLOS_CLIP_TEXT, text, n);
+    clip_serial++;
 }
 
 int glos_clip_put(unsigned format, const void *data, unsigned length)
 {
-    if (format != GLOS_CLIP_TEXT)
-        return GLOS_E_ARGUMENT;
-    clip_set(data, length);
+    struct hclip c;
+    int r;
+    memset(&c, 0, sizeof c);
+    if ((r = clip_add(&c, format, data, length)) != 0)
+        return r;
+    clip_free(&CLIP);
+    CLIP = c;
+    clip_serial++;
     return 0;
 }
 
 int glos_clip_get(unsigned format, void *buf, unsigned room, unsigned *length)
 {
-    if (format != GLOS_CLIP_TEXT || !H.clip)
+    unsigned i;
+    for (i = 0; i < CLIP.n && CLIP.format[i] != format; i++)
+        ;
+    if (i == CLIP.n)
         return GLOS_E_ARGUMENT;
     if (length)
-        *length = H.clip_n;
+        *length = CLIP.len[i];
     if (buf)
-        memcpy(buf, H.clip, room < H.clip_n ? room : H.clip_n);
-    return H.clip_n > room ? GLOS_E_ROOM : 0;
+        memcpy(buf, CLIP.data[i], room < CLIP.len[i] ? room : CLIP.len[i]);
+    return CLIP.len[i] > room ? GLOS_E_ROOM : 0;
+}
+
+glos_handle glos_clip_open(int write)
+{
+    int i;
+    unsigned k;
+    for (i = 0; i < 4 && CT[i].used; i++)
+        ;
+    if (i == 4)
+        return 0;
+    memset(&CT[i], 0, sizeof CT[i]);
+    CT[i].used = 1, CT[i].write = write != 0;
+    if (!write)                                 /* (a reading one: the clipboard as it is now) */
+        for (k = 0; k < CLIP.n; k++)
+            clip_add(&CT[i].c, CLIP.format[k], CLIP.data[k], CLIP.len[k]);
+    return 0x7400u + (unsigned)i;
+}
+
+int glos_clip_add(glos_handle t, unsigned format, const void *data, unsigned length)
+{
+    int i = (int)t - 0x7400;
+    int r;
+    if (i < 0 || i >= 4 || !CT[i].used || !CT[i].write)
+        return GLOS_E_HANDLE;
+    if (!format || (format > GLOS_CLIP_RICH && format < GLOS_CLIP_PRIVATE))
+        r = GLOS_E_ARGUMENT;
+    else
+        r = clip_add(&CT[i].c, format, data, length);
+    if (r)
+        CT[i].spoilt = 1;                       /* (as GLOS: a put that fails spoils the transaction) */
+    return r;
+}
+
+int glos_clip_read(glos_handle t, unsigned format, void *buf, unsigned room, unsigned offset, unsigned *total)
+{
+    struct hclip *c = clip_of(t);
+    unsigned i, n;
+    if (!c)
+        return GLOS_E_HANDLE;
+    for (i = 0; i < c->n && c->format[i] != format; i++)
+        ;
+    if (i == c->n)
+        return GLOS_E_ARGUMENT;
+    if (total)
+        *total = c->len[i];
+    if (offset >= c->len[i])
+        return 0;
+    n = c->len[i] - offset < room ? c->len[i] - offset : room;
+    memcpy(buf, c->data[i] + offset, n);
+    return (int)n;
+}
+
+int glos_clip_formats(glos_handle t, struct glos_clip_formats *f)
+{
+    struct hclip *c = clip_of(t);
+    unsigned i;
+    if (!c)
+        return GLOS_E_HANDLE;
+    f->count = c->n;
+    for (i = 0; i < c->n; i++)
+        f->format[i] = c->format[i], f->length[i] = c->len[i];
+    f->serial = t ? 0 : clip_serial;
+    return 0;
+}
+
+unsigned glos_clip_format(const char *name)
+{
+    int i;
+    const char *p;
+    for (p = name; *p; p++)                     /* (as GLOS: printable ASCII, no spaces) */
+        if (*p <= ' ' || *p > '~')
+            return 0;
+    for (i = 0; i < nclip_names; i++)
+        if (!strcmp(clip_names[i], name))
+            return GLOS_CLIP_PRIVATE + (unsigned)i;
+    if (nclip_names == 16 || strlen(name) >= sizeof clip_names[0])
+        return 0;
+    strcpy(clip_names[nclip_names], name);
+    return GLOS_CLIP_PRIVATE + (unsigned)nclip_names++;
+}
+
+static int clip_close(glos_handle t)            /* (glos_close of a transaction) */
+{
+    int i = (int)t - 0x7400;
+    if (i < 0 || i >= 4 || !CT[i].used)
+        return GLOS_E_HANDLE;
+    if (CT[i].write && !CT[i].spoilt && CT[i].c.n) {
+        clip_free(&CLIP);
+        CLIP = CT[i].c;
+        clip_serial++;
+    } else {
+        clip_free(&CT[i].c);
+    }
+    CT[i].used = 0;
+    return 0;
 }
 
 /* The settings: GLOS.CFG's lines in memory, from $GLOS_HOST_DRIVES/C/GLOS/GLOS.CFG if there is one, checked by the

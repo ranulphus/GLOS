@@ -1,0 +1,26 @@
+# The clipboard's formats (toolkit 2, step C7; docs/v1/toolkit-2.md 9): GUITEST's buttons. Text, an 8 by 8 picture,
+# two files and a private format put in one transaction, read back whole; a copy whose second put fails changes
+# nothing (the same read back); then plain text alone, after which the clipboard has only it.
+run GUITEST.EXE clipfmt
+wait "GUITEST Clipboard"
+key alt+a
+key alt+p
+key alt+b
+key alt+p
+key alt+t
+key alt+p
+shot end "GUITEST Clipboard"
+key alt+f4
+gone "GUITEST Clipboard"
+expect GUI clipfmt
+expect GUI copied all
+expect GUI has text 1 image 1 files 1 private 1
+expect GUI text 'GLOS clipboard text'
+expect GUI image 8x8, first FFF0E0D0, second FF102030
+expect GUI files 2: C:\GUI\NOTES.TXT, C:\GUI\EDIT.TXT
+expect GUI private '3 rows'
+expect GUI bad copy refused
+expect GUI copied text
+expect GUI has text 1 image 0 files 0 private 0
+expect GUI text 'just text'
+expect GUI end
