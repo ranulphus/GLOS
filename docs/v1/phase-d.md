@@ -161,6 +161,30 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
 - **Tests:** host script `start` (search, letters, tiles dragged, a jump list, Power's menu) and its goldens in
   the three themes; Loop A native (Ctrl+Esc opens it, typing finds Notepad, Enter starts it).
 
+### D3 in detail (2026-11-17, before it is built)
+
+- **The window:** Files' own, a pop-up (`GUI_W_POPUP`: bare, above the others, with the keyboard; `on_popdown`
+  hides it when a press elsewhere takes the keyboard). Made once, shown at the bar's edge that
+  `GLOS_SHELL_LAUNCH` gives: above it, or below it when the bar is at the screen's top. Esc hides it.
+- **Left:** a search field, then one list (a virtual list): with nothing typed, "Most used" (the five started
+  most from the menu, Files' own count), then every entry under its first letter; typing filters it to what
+  matches, by kind: programs (their titles), the Control Panel's pages (their titles: opened as
+  `CONTROL SECTION`), recent documents (their names). Enter opens the current row (the first, while typing);
+  Down from the field goes into the list. The names of files in the user's folders (an index built in the
+  background) come in a second part.
+- **The entries:** SHELL's ENTRY list (the programs whose profiles ask to be listed) and GLOS's own apps beside
+  FILES.EXE (Files' table, as the desktop's icons have them).
+- **Right:** the pinned tiles, big icons with their titles in a grid (a list's icon view), in the order the user
+  dragged them to; Enter or a double press starts one. A right press (or the Menu key) on a row or a tile: Pin
+  to Start or Unpin, and the entry's jump list: its tasks (ENTRY) and its recent documents (RECENT).
+- **Bottom:** Settings (the Control Panel), Files (the browser), Power: a menu of Exit GLOS, Restart GLOS and
+  Restart the PC.
+- **Kept** in START.CFG beside FILES.EXE: the pins in their order, and how often each entry was started.
+- **The host:** the shim answers `glos_entry_list` and `glos_recent_list` with a few made-up entries and
+  documents, so that the script `start` plays there: the menu up, a search, a page of the Control Panel found,
+  a tile pinned and dragged, a jump list, Power's menu; `files` opens Run from the Start menu's search instead
+  of the launcher's menu.
+
 ### D4. Wallpapers and the look (kernel and the Control Panel)
 
 - `[desktop] wallpaper` (a picture), `wallpaper_style` (centre, stretch, fill, tile) and `colour`: the Control
