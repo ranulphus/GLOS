@@ -1,8 +1,17 @@
+#host-only (its programs and recent documents are the host's made-up ones: start-run.txt is Loop A's)
 # The Start menu (apps/files/start.c; phase D, D3): up by the launcher's event; "con" typed finds the Control
 # Panel, Enter starts it; "sound" finds the Control Panel's Sound page; "note", Down into the list and More
 # (Alt+M): Notepad's own page, unpinned there, back by Esc; Tab to the tiles, the second started by Enter; Doom's
 # page by Shift+F10: its tasks, the second run; Power's page; a recent document found by its name and opened; a
 # folder's path typed opens the folder.
+config program:DOOM.EXE menu 1
+config program:DOOM.EXE title Doom
+config program:DOOM.EXE icon game
+config program:DOOM.EXE dir C:\GAMES\DOOM
+config program:DOOM.EXE tasks Setup=-setup;Network game=-net 2
+config program:NOTES.EXE menu 1
+config program:NOTES.EXE title Notes
+config program:NOTES.EXE icon text
 run FILES.EXE
 wait "Desktop"
 launch

@@ -983,18 +983,34 @@ __attribute__((weak)) int glos_job_signal(glos_handle job, unsigned what) { (voi
 __attribute__((weak)) int glos_job_status(glos_handle job, struct glos_job_status *out) { (void)job, (void)out; return GLOS_E_HANDLE; }
 int glos_shell(int on) { (void)on; return 0; }
 
-/* The Start menu's entries and the recent documents (SHELL's ENTRY and RECENT; FILES' Start menu, phase D): made
-   up, the same each run. */
+/* The Start menu's entries (SHELL's ENTRY; FILES' Start menu, phase D): as the kernel makes them, the programs
+   whose profiles in the settings say menu = 1 (a script's `config program:NAME menu 1` lines), each a line of
+   name, title, group, icon, folder, arguments and tasks. The recent documents (RECENT) are made up, the same
+   each run. */
 int glos_entry_list(char *list, unsigned room, unsigned *length)
 {
-    static const char made[] = "DOOM.EXE\tDoom\tGames\tgame\tC:\\GAMES\\DOOM\t\tSetup=-setup;Network game=-net 2\n"
-                               "NOTES.EXE\tNotes\t\ttext\t\t\t\n";
-    unsigned n = sizeof made - 1;
+    static const char *const keys[] = { "title", "group", "icon", "dir", "args", "tasks" };
+    char secs[2048], v[200], *s;
+    unsigned n = 0, k;
+    int set;
+    secs[0] = 0;
+    glos_setting_sections(secs, sizeof secs);
+    for (s = strtok(secs, "\n"); s; s = strtok(NULL, "\n")) {
+        char line[700];
+        unsigned m;
+        if (strncmp(s, "program ", 8) || glos_setting_get(s, "menu", v, sizeof v, &set) != 0 || strcmp(v, "1"))
+            continue;
+        m = (unsigned)snprintf(line, sizeof line, "%s", s + 8);
+        for (k = 0; k < 6; k++) {
+            v[0] = 0;
+            glos_setting_get(s, keys[k], v, sizeof v, &set);
+            m += (unsigned)snprintf(line + m, sizeof line - m, "\t%s", k == 2 && !set ? "" : v);
+        }
+        if (n + m + 1 <= room)
+            n += (unsigned)sprintf(list + n, "%s\n", line);
+    }
     if (length)
         *length = n;
-    if (n > room)
-        return GLOS_E_ROOM;
-    memcpy(list, made, n);
     return 0;
 }
 

@@ -1,0 +1,30 @@
+#loopa-run-only (it starts programs, which only GLOS runs; no shots)
+# The Start menu on GLOS (apps/files/start.c; phase D, D3): the Calculator found by typing and started; the Control
+# Panel's Region page found and opened; Esc takes the menu away; the shell ends.
+run FILES.EXE
+wait "Desktop"
+launch
+wait "Start"
+type calc
+key enter
+gone "Start"
+wait "Calculator"
+key alt+f4
+gone "Calculator"
+launch
+wait "Start"
+type region
+key enter
+gone "Start"
+wait "Control Panel"
+key alt+f4
+gone "Control Panel"
+launch
+wait "Start"
+key esc
+gone "Start"
+key alt+f4
+gone "Desktop"
+expect FILES start run Calculator
+expect FILES start page region
+expect FILES end

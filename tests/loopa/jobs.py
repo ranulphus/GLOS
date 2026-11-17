@@ -9173,7 +9173,8 @@ NATIVE_CASES = [("bf6", "vbe", "ne2kpci", 8), ("bf6", "g200", "ne2kpci", 16), ("
 
 def native_case(profile, vcard, card, bits):
     scripts = sorted(f for f in os.listdir(os.path.join(ROOT, "tests", "gui"))
-                     if f.endswith(".txt") and "GUITEST" not in open(os.path.join(ROOT, "tests", "gui", f)).read())
+                     if f.endswith(".txt") and "GUITEST" not in open(os.path.join(ROOT, "tests", "gui", f)).read()
+                     and not open(os.path.join(ROOT, "tests", "gui", f)).read().startswith("#host-only"))
     only = os.environ.get("NATIVE_ONLY")        # e.g. NATIVE_ONLY=notepad,calc
     if only:
         scripts = [f for f in scripts if f[:-4] in only.split(",")]

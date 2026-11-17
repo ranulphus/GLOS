@@ -200,7 +200,8 @@ gui-goldens:
 	$(Q)$(DEV) $(MAKE) -s gui-goldens-run
 gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS))
 	@rm -rf build/host/gui build/host/gui-drives && mkdir -p build/host/gui
-	@set -e; for t in $(GUI_SCRIPTS); do n=$$(basename $$t .txt); prog=$$(awk '$$1=="run"{print tolower($$2); exit}' $$t); \
+	@set -e; for t in $(GUI_SCRIPTS); do n=$$(basename $$t .txt); \
+	  if head -1 $$t | grep -q '^#loopa-run-only'; then continue; fi; prog=$$(awk '$$1=="run"{print tolower($$2); exit}' $$t); \
 	  prog=$${prog%.exe}; mkdir -p build/host/gui/$$n; for b in 8 16 32; do rm -rf build/host/gui-drives; \
 	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT sdk/gui/fonts/FONTS.DAT sdk/gui/fonts/ICONS.DAT build/host/gui-drives/C/GLOS/; \
 	    mkdir -p build/host/gui-drives/A build/host/gui-drives/C/HX build/host/gui-drives/C/OUT build/host/gui-drives/C/TEST; \
