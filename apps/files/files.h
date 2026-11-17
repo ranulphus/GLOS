@@ -19,6 +19,7 @@ int files_app(int i, const char **title, const char **exe, int *kind);  /* GLOS'
                                            i-th (its command, its icon): 1, or 0 past the last */
 void files_run_app(const char *exe_and_args, const char *arg);  /* one of them started (arg: one more, or NULL) */
 void files_run_typed(const char *typed);        /* what was typed to run: a folder or a file opened, else run */
+void files_shell(const char *line);     /* a line run by GLOS's own shell (glos exit ...) */
 
 /* start.c: the Start menu (phase D) */
 void start_open(int x, int y);          /* at the task bar's edge (GLOS_SHELL_LAUNCH); up already: away */

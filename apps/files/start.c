@@ -506,7 +506,7 @@ static void act(int r)
         case A_REBOOT:
             say("power", w->idx == A_EXIT ? "exit" : w->idx == A_RESTART ? "restart" : "reboot");
             hide();
-            files_run(w->idx == A_EXIT ? "glos exit" : w->idx == A_RESTART ? "glos restart" : "glos reboot", NULL);
+            files_shell(w->idx == A_EXIT ? "glos exit" : w->idx == A_RESTART ? "glos restart" : "glos reboot");
             return;
         }
         state_save();

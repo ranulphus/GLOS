@@ -205,8 +205,16 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
 - **The host shim:** `glos_entry_list` and `glos_recent_list` answer with a few made-up entries and documents;
   a program started detached is taken as started, so that Files goes on as it would and says what it ran.
 - **Not yet:** the index of file names for the search; tiles dragged by the mouse (they move by their page's
-  rows) and their groups and sizes; "Recently added". Power's three rows run `glos exit`, `glos restart` and
-  `glos reboot` as jobs: to be proven on Loop A.
+  rows) and their groups and sizes; "Recently added".
+- **Power's three rows** run `glos exit`, `glos restart` and `glos reboot` as lines of GLOS's own shell (a
+  `GLOS_RUN_SHELL` job; a job's command would be run as a program). Exit GLOS was proven by hand on Loop A
+  (2026-11-17: Files as the shell, Ctrl+Esc, Alt+P, Enter: Files is asked to end and says so, GLOS exits with
+  code 0, DOS goes on); no suite ends GLOS from the menu.
+- **A press on the task bar's mark while the menu is up** takes it away (the press takes the keyboard from it,
+  and the launch that follows within 300 ms is ignored).
+- **Loop A:** the native suite's `files` (the Start menu's picture is the host's) and `start-run` (the Calculator
+  and the Control Panel's Region page found by typing and really started; Esc; the shell ends), on a Pentium II
+  with the VBE card and a G200, and a 486.
 - **Tests:** host `start` (found by typing: a program, a page of the Control Panel, a recent document, a
   folder's path; More: unpinned; a tile by Tab and Enter; a task from Doom's page; Power's page) and `files`
   (the folder opened by its path typed in the Start menu).

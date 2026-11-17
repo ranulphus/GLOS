@@ -83,6 +83,14 @@ static void run_app(const char *exe_and_args, const char *arg)
 
 void files_run_app(const char *exe_and_args, const char *arg) { run_app(exe_and_args, arg); }
 
+/* A line for GLOS's own shell (the Start menu's Power: glos exit, glos restart, glos reboot): a shell session
+   that runs it (API 2.1's GLOS_RUN_SHELL), nothing of which is waited for. */
+void files_shell(const char *line)
+{
+    glos_job_run(line, NULL, NULL, GLOS_RUN_SHELL, 0, NULL);
+    say("shell", line);
+}
+
 int files_app(int i, const char **title, const char **exe, int *kind)
 {
     if (i < 0 || i >= NAPPS)
