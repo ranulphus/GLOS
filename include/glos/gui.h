@@ -364,6 +364,29 @@ struct gui_widget *gui_graph(struct gui_widget *parent, int series, int points);
 void gui_graph_series(struct gui_widget *w, int i, const char *name, unsigned rgb);    /* rgb GFX_NONE: its own */
 void gui_graph_range(struct gui_widget *w, int lo, int hi);            /* hi <= lo: the samples' own */
 void gui_graph_add(struct gui_widget *w, const int *values);           /* a sample of each series */
+/* (toolkit 2) Dates as one number, yyyymmdd (20261117), times as hhmmss (140500); the Gregorian calendar, years
+   1601 to 9999. Written as GLOS.CFG's [region] says (read when first needed). */
+int gui_today(void);
+int gui_date_valid(int date);
+int gui_month_days(int year, int month);
+int gui_weekday(int date);                      /* 0 Sunday .. 6 Saturday */
+int gui_date_add(int date, int days);
+int gui_date_text(int date, char *out, int room);        /* "2026-11-17", "17/11/2026", ... */
+/* A month's calendar: the arrows, the region's weekdays, six weeks; today framed, the chosen day (or days) filled,
+   the days the app marks bold. GUI_ON_CHANGE as the day changes, GUI_ON_ACTIVATE on a double click. date 0:
+   today. */
+struct gui_widget *gui_calendar(struct gui_widget *parent, int date);
+#define GUI_CAL_RANGE 1                 /* several days chosen together (Shift with a click or the keys) */
+void gui_calendar_style(struct gui_widget *w, unsigned flags, int today, int (*mark)(void *ctx, int date), void *ctx);
+                                        /* today: the day framed (0: the machine's); mark: bold days (NULL: none) */
+int gui_calendar_get(struct gui_widget *w, int *to);    /* the first day chosen; *to the last */
+void gui_calendar_set(struct gui_widget *w, int from, int to);
+/* A date field (a calendar dropped down by its button, Alt+Down or F4) and a time field (twenty-four or twelve
+   hours as the region says, seconds if asked): each part changed by Up and Down or typed; GUI_ON_CHANGE. */
+struct gui_widget *gui_date_field(struct gui_widget *parent, int date);
+struct gui_widget *gui_time_field(struct gui_widget *parent, int hms, int seconds);
+int gui_datetime_get(struct gui_widget *w);     /* yyyymmdd or hhmmss */
+void gui_datetime_set(struct gui_widget *w, int value);
                                         /* marks: a mark every so many (0: none); fmt: the value as text ("1:23" for
                                            seconds), NULL: the number */
 int gui_value(struct gui_widget *w);    /* a spin's, a slider's, a choice's (its item), a progress bar's */

@@ -35,6 +35,7 @@
 #include "glos/glos.h"
 #include "glos/config.h"
 #include "glos/gfx.h"
+#include "glos/region.h"
 #include "keymap.h"
 #include "png.h"
 
@@ -845,6 +846,26 @@ static int config_keys(const char *section, char *out, unsigned room)
         if (cfg_same(cfg[i].sec, section))
             n += (size_t)snprintf(out + n, room - n, "%s = %s\n", cfg[i].key, cfg[i].val);
     return (int)(n < room ? n : room);
+}
+
+/* The region: GLOS's defaults, and any [region] setting a script's `config region KEY VALUE` made. */
+int glos_region(struct glos_region *g)
+{
+    static const char *const keys[] = { "date", "clock", "decimal", "thousands", "first_day", "layout", "language" };
+    struct region r;
+    char v[32];
+    unsigned i;
+    region_default(&r);
+    for (i = 0; i < sizeof keys / sizeof keys[0]; i++)
+        if (config_get("region", keys[i], v, sizeof v) >= 0)
+            region_set(&r, keys[i], v);
+    memset(g, 0, sizeof *g);
+    g->size = sizeof *g;
+    g->date = r.date == REGION_DMY ? GLOS_DATE_DMY : r.date == REGION_MDY ? GLOS_DATE_MDY : GLOS_DATE_YMD;
+    g->date_sep = (unsigned char)r.date_sep, g->clock12 = r.clock12, g->first_day = r.first_day;
+    g->decimal = (unsigned char)r.decimal, g->thousands = (unsigned char)r.thousands, g->codepage = r.codepage;
+    memcpy(g->layout, r.layout, sizeof g->layout), memcpy(g->language, r.language, sizeof g->language);
+    return 0;
 }
 
 /* The theme: the kernel's built-in ones (kernel/wm/theme.c); the one a script's `theme NAME` put in force while

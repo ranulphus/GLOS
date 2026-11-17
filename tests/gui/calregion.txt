@@ -1,0 +1,24 @@
+# The calendar and the fields in another region (toolkit 2, step C8): dd/mm/yyyy, twelve hours, Sunday first.
+# The weeks begin on Sunday; the date field's parts are day, month, year (the 3rd typed, then March); the time
+# field's hours go 2 PM to 3 PM by Up and its last part, PM, becomes AM.
+config region date dd/mm/yyyy
+config region clock 12
+config region first_day sunday
+run GUITEST.EXE calendar
+wait "GUITEST Calendar"
+shot start "GUITEST Calendar"
+key alt+d
+type 03
+type 3
+key alt+t
+key up end
+type a
+shot typed "GUITEST Calendar"
+key alt+f4
+gone "GUITEST Calendar"
+expect GUI calendar
+expect GUI date 03/11/2026
+expect GUI date 03/03/2026
+expect GUI time 150530
+expect GUI time 030530
+expect GUI end

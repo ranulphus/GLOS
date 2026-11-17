@@ -1,0 +1,38 @@
+# The calendar and the date and time fields (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's page
+# (today fixed at 17 November 2026; the 5th and 25th marked bold; the region GLOS's own: yyyy-mm-dd, 24 hours,
+# Monday first). Three days chosen with Shift; a month on by Page Down, its first by Home; the arrow back to
+# November and the 25th clicked; then the date field typed part by part (a year, February, the 28th), its calendar
+# dropped down by F4 and a day taken by Right and Enter; the time field typed (9 hours, Up a minute, 59 seconds).
+run GUITEST.EXE calendar
+wait "GUITEST Calendar"
+shot start "GUITEST Calendar"
+key shift+right shift+right
+shot range "GUITEST Calendar"
+key pgdn home
+shot december "GUITEST Calendar"
+click "GUITEST Calendar" 10 10
+click "GUITEST Calendar" 61 112
+key alt+d
+type 2027
+type 2
+type 28
+key f4
+key right enter
+key alt+t
+type 09
+key up right
+type 59
+shot typed "GUITEST Calendar"
+key alt+f4
+gone "GUITEST Calendar"
+expect GUI calendar
+expect GUI days 2026-11-17 to 2026-11-19 (not a Sunday)
+expect GUI days 2026-12-19 to 2026-12-19 (not a Sunday)
+expect GUI days 2026-12-01 to 2026-12-01 (not a Sunday)
+expect GUI days 2026-11-25 to 2026-11-25 (not a Sunday)
+expect GUI date 2027-02-28
+expect GUI date 2027-03-01
+expect GUI time 090530
+expect GUI time 090630
+expect GUI time 090659
+expect GUI end

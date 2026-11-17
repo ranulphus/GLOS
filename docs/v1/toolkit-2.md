@@ -622,6 +622,22 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
   range, with the series' names in their colours.
 - **Test** `meters` (GUITEST's page by keys: the seek slider with marks and a time, the levels with peaks held then
   fallen back, twenty samples in a graph, the upright volume slider), host and Loop A.
+- **C8b, calendar, date and time fields** (`sdk/gui/calendar.c`): dates are one number, yyyymmdd, times hhmmss
+  (`gui_today`, `gui_date_add`, `gui_weekday`, `gui_month_days`, `gui_date_text`; Gregorian, 1601 to 9999).
+  `gui_calendar` shows a month: arrows, the weekdays from the region's first day, six weeks (the months either side
+  dimmed), today framed in the accent, the chosen day or days filled (`GUI_CAL_RANGE`: Shift with the keys or a
+  click), the days the app marks bold (`gui_calendar_style`). Keys: arrows, Page Up and Down (Ctrl: a year), Home
+  and End. `gui_date_field` and `gui_time_field` show their parts as the region writes them (yyyy-mm-dd,
+  dd/mm/yyyy, mm/dd/yyyy; 24 or 12 hours with AM and PM; seconds if asked): each part is changed by Up and Down or
+  typed (a part that can take no more digits moves on; digits that make no valid value yet are held, not
+  passed on), Left, Right or a separator move between them; the date field drops a calendar down (its button,
+  Alt+Down, F4; Enter takes the day, Esc leaves it). The region is read once, when first needed (libglos's
+  `glos_region`; the host shim's from a script's `config region`).
+- **Owed from C8b:** the region read again when GLOS.CFG's [region] changes while an app runs; month and day names
+  in other languages.
+- **Tests** `calendar` (GLOS's own region: three days chosen, a month on, the arrow and a click, the date field
+  typed and its calendar dropped down, the time field typed) and `calregion` (dd/mm/yyyy, 12 hours, Sunday
+  first), host and Loop A.
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

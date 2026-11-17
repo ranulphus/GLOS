@@ -65,6 +65,8 @@
  *                       and a private format put in one transaction, and read back
  *   GUITEST dnd         "GUITEST Drag and drop" (toolkit 2, step C7): fruit dragged into
  *                       a basket (copied where it is let go), and reordered in its list
+ *   GUITEST calendar    "GUITEST Calendar" (toolkit 2, step C8): a month (several days
+ *                       chosen, two marked, today fixed), a date field, a time field
  *   GUITEST meters      "GUITEST Meters" (toolkit 2, step C8): sliders across with marks
  *                       and a time, and upright; level meters with their peaks; a graph
  *   GUITEST tasks       "GUITEST Tasks" (toolkit 2, step C4): background work: a task
@@ -1830,6 +1832,51 @@ static void meters_page(void)
     say("meters", "", 0);
 }
 
+/* ---- the calendar and the date and time fields (toolkit 2, step C8) */
+static struct gui_widget *cl_cal, *cl_date, *cl_time;
+
+static int cl_mark(void *ctx, int date) { (void)ctx; return date == 20261105 || date == 20261125; }
+
+static void cl_on(struct gui_widget *w, int what)
+{
+    char a[16], b[16], line[64];
+    int to, from;
+    if (what != GUI_ON_CHANGE && what != GUI_ON_ACTIVATE)
+        return;
+    if (w == cl_cal) {
+        from = gui_calendar_get(w, &to);
+        gui_date_text(from, a, sizeof a), gui_date_text(to, b, sizeof b);
+        snprintf(line, sizeof line, "%s %s to %s (%s)", what == GUI_ON_ACTIVATE ? "opened" : "days", a, b,
+                 gui_weekday(from) == 0 ? "a Sunday" : "not a Sunday");
+    } else if (w == cl_date) {
+        gui_date_text(gui_datetime_get(w), a, sizeof a);
+        snprintf(line, sizeof line, "date %s", a);
+    } else {
+        snprintf(line, sizeof line, "time %06d", gui_datetime_get(w));
+    }
+    say("%s", line, 0);
+}
+
+static void calendar_page(void)
+{
+    struct gui_widget *row, *form;
+    win = gui_window_at("GUITEST Calendar", 0, 0, 400, 190, 0);
+    row = gui_hbox(win->root, 12, 0);
+    gui_grow(row, 1);
+    cl_cal = gui_calendar(row, 20261117);
+    gui_calendar_style(cl_cal, GUI_CAL_RANGE, 20261117, cl_mark, NULL);
+    gui_on(cl_cal, cl_on, 0);
+    form = gui_form(row);
+    cl_date = gui_date_field(gui_row(form, "&Date:", NULL), 20261117);
+    gui_on(cl_date, cl_on, 0);
+    cl_time = gui_time_field(gui_row(form, "&Time:", NULL), 140530, 1);
+    gui_on(cl_time, cl_on, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_focus(cl_cal);
+    say("calendar", "", 0);
+}
+
 /* ---- the virtual tree (toolkit 2, step C3). Ids: 1, 2, 3 at the top; a node's children are its id times ten
    and 1, 2, 3 (to three levels); but node 2's are five thousand leaves, 2000000 and on. */
 static struct gui_widget *vt;
@@ -2067,6 +2114,8 @@ int main(int argc, char **argv)
         dnd_page();
     else if (!strcmp(what, "meters"))
         meters_page();
+    else if (!strcmp(what, "calendar"))
+        calendar_page();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");
