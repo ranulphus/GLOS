@@ -4,6 +4,13 @@ The design of M9's ring-3 side (PRD §10.6, D49; docs/milestones-m9.md): the too
 (`sdk/gui`, `include/glos/gui.h`), and how the apps and their tests are made. The kernel's side (windows, events,
 the clipboard) is docs/graphics.md's.
 
+**Toolkit 2** (docs/v1/toolkit-2.md, steps C1 to C10, 2026-11-16 and 17) grew it to what the v1 apps need; what
+it added is marked "(toolkit 2)". `include/glos/gui.h` is the reference for each call (its arguments, what it
+returns), in sections: the look, events, windows, the loop, widgets in general, containers, simple widgets,
+numbers, text, lists and trees, the virtual list and tree, commands, the toolbar, menus, dialogs, resource files
+and translation, files, background work, the clipboard, scroll bars, GLOS's other events, drawing. This document
+says how they work and fit together. GUITEST's gallery shows every widget in one window (§2).
+
 ## 1. The toolkit (`sdk/gui`)
 
 ### 1.1 Retained widgets
@@ -75,8 +82,8 @@ compare, and costs a redraw twice a second for nothing.
 | field | one line of UTF-8; selection, copy, cut, paste; stars for a password; Enter is `GUI_ON_ACTIVATE` |
 | editor | a file's bytes (below) |
 | combo box (toolkit 2) | a field with a drop button and a list: the app's items (`gui_combo_add`), a history of texts accepted by Enter (`gui_combo_history`), or items the app makes for what is typed (`gui_combo_source`); typing drops the items that begin so while the field keeps the keys (Up, Down, Enter, Esc steer the list), Alt+Down or F4 drops them all |
-| list | rows of cells under a header that sorts; 16-pixel icons; several rows chosen with Ctrl and Shift; typing a name's first letters goes to it; or 32-pixel icons in a grid with their names (the file manager's folders) |
-| tree | nodes that open and close, their children added by the app when one first opens |
+| list | rows of cells under a header that sorts; 16-pixel icons; several rows chosen with Ctrl and Shift; typing a name's first letters goes to it; or 32-pixel icons in a grid with their names (the file manager's folders: the app then gives 32-pixel icons). Since C10 it is the virtual list over rows it keeps itself, so it has the virtual list's drawing, keys and views |
+| tree | nodes that open and close, their children added by the app when one first opens (`gui_tree_opening` in its `GUI_ON_CHANGE`). Since C10 it is the virtual tree over nodes it keeps itself |
 | virtual list (toolkit 2) | a list that keeps no rows: the app's model says how many and gives the rows on the screen when they are drawn (`gui_vlist`, `struct gui_model`); chosen rows kept by id; sorting asked of the app (`GUI_ON_SORT`); columns resized and moved by their heads (`gui_vlist_columns` to keep the layout); four views: detail, big icons, small icons, thumbnails (`gui_vlist_view`; the rows' `thumb` pictures, `GUI_THUMB` square at most); rubber band; type-ahead by the model's `match` |
 | virtual tree (toolkit 2) | a tree that keeps only the ids on show: the model gives a node's children's ids when it opens, and their texts and icons when drawn (`gui_vtree`, `struct gui_tmodel`); badges |
 | choice | a button that drops its list of items down |
@@ -97,8 +104,8 @@ compare, and costs a redraw twice a second for nothing.
 | dock (toolkit 2) | a window's main area: the app's content in the middle (`gui_dock_centre`), panes at the left, right and bottom (several at a side as tabs) or floating in tool windows (`gui_pane`); a pane's close box hides it, its title's context menu docks it elsewhere, floats or hides it; `gui_pane_show` for the View menu; the layout as a line of text (`gui_dock_save`, `gui_dock_load`) |
 | splitter (toolkit 2) | two panes and a bar between them (`gui_split`): dragged, or moved by its keys between the panes in Tab's order; Home and End fold a pane; one pane keeps its size as the window changes (`at`, or minus the other's); `GUI_ON_CHANGE` for the app's settings |
 | menu bar, menus | menus are pop-up windows (below); items with letters, shortcuts, checks; separators |
-| progress bar, image, canvas, status bar | a canvas is the app's to draw in and has its events |
-| dialogs | message (OK, OK and Cancel, Yes and No, Yes No and Cancel; with a "Don't ask again" box: `gui_message_check`), a line to type, open and save a file (and toolkit 2's `gui_file_dialog_ex`: places, the folder's combo box, the files in a virtual list, filters, a preview, formats), a folder (`gui_folder_dialog`), About (`gui_about`: the app's credits and the toolkit's fonts' and icons'), Find and Replace (`gui_find`, modeless; the matching is `gui_match`: plain or regular expressions, case, whole words, groups for replacing), Colour (`gui_colour_dialog`), Font (`gui_font_dialog`; `gui_font_get` for an app's own text) |
+| progress bar, image, canvas, status bar | a canvas is the app's to draw in and has its events (§1.14); the status bar's sections, the toolbar, tooltips and context menus: §1.6 |
+| dialogs | message (OK, OK and Cancel, Yes and No, Yes No and Cancel; with a "Don't ask again" box: `gui_message_check`), a line to type, open and save a file (`gui_file_dialog_ex`: places, the folder's combo box, the files in a virtual list, filters, a preview, formats; `gui_file_dialog` is it with none of them, since C10), a folder (`gui_folder_dialog`), About (`gui_about`: the app's credits and the toolkit's fonts' and icons'), Find and Replace (`gui_find`, modeless; the matching is `gui_match`: plain or regular expressions, case, whole words, groups for replacing), Colour (`gui_colour_dialog`), Font (`gui_font_dialog`; `gui_font_get` for an app's own text) |
 
 ### 1.5 The editor
 
@@ -114,6 +121,11 @@ case), replace the chosen text, go to a line, the caret's line and column.
 `tests/host/gui_test.c` makes 20,000 random edits and undos (insertions, replacements, removals, wrapping on,
 another width), checking after each the text, every line's start and every row's place against a plain copy kept
 beside, and then a megabyte.
+
+Since C10 Notepad is on toolkit 2's code editor instead, in its plain look (`GUI_CODE_PLAIN`: no margin) with
+wrapping (`GUI_CODE_WRAP`) and tabs of eight; its text is a piece table (`sdk/gui/piece.c`, tested alone by
+`tests/host/piece_test.c` the same way). The editor stays for the small text boxes (Monitor's log, the Control
+Panel's).
 
 ### 1.6 Menus and pop-up windows
 
@@ -171,7 +183,8 @@ app shows the same names in the host's tests as on DOS. A name or path is DOS's 
 without regard to case. The drives are those DOS has (INT 21h 4408h; floppies from the BIOS's equipment word, not
 touched to see).
 
-The clipboard is the system's (`GLOS_FN_CLIP`, `glos clip`): text, 64 KB at most.
+The clipboard is the system's (`GLOS_FN_CLIP`, `glos clip`): text, 64 KB at most, and toolkit 2's other
+formats (§1.6b).
 
 ### 1.9 The look
 
@@ -266,6 +279,52 @@ GLOS draws no icon set of its own: it takes two open ones, converted at build ti
 - **Credit** is the licences' condition: `THIRD_PARTY.md` and `README.md` name both sets, with their links and
   what was changed; the About box of GLOS's shell is to say the same (phase D).
 
+### 1.12 Background work (toolkit 2)
+
+Work that takes a while (reading a folder of pictures for their thumbnails, a search, a copy) runs as a task
+(`gui_task_start`): a function on a worker thread of the app's own (two, one on a 486, unless
+`gui_task_threads` says), while the window's thread goes on taking events. Only the window's thread touches
+widgets: the work says how far it has got (`gui_task_progress`), looks whether it was cancelled
+(`gui_task_cancelled`), and hands results to the window's thread in order (`gui_task_post`: rows for a list, a
+picture made); `done` runs there when it has returned. With `GUI_TASK_DIALOG` a dialog (the title, a bar, a line,
+Cancel) shows over the owner once the work has run a second. A program with tasks is linked with
+`@gloswrap.opt`, so that the C library is called under libglos's lock (`tools/wrapcheck.py` checks the map).
+
+### 1.13 Resource files and translation (toolkit 2)
+
+**A resource file** is a window as text: nested `object Name: Class` blocks of `Property = value` lines, as
+Delphi's DFM text, the outer object a `Window` or a `Dialog` (a dialog is the size its widgets want).
+`gui_load_text` and `gui_load` make the window without showing it, or say on which line what is wrong;
+`gui_named` finds a widget by its name; `gui_save` writes back each property that isn't its class's default, so a
+file loaded and saved is the same text. Nineteen classes (boxes, forms and rows, groups, tabs and pages, labels,
+buttons, check boxes and radio buttons, fields, combo boxes, spin boxes, sliders, choices, progress bars, space,
+separators) are described property by property (`gui_wclass_of`, `gui_wprop_get`/`_set`), which the property grid
+uses too (`gui_props_fill`, `gui_props_apply`); every widget also has Name, Width, Height, Grow, Enabled, Visible,
+Tip, Id and Command. A button with a Command and no function of its own tells its window's `on_command`.
+
+The toolkit's dialogs whose layout is fixed are made from resource text kept beside the code that uses it: Find
+and Find and replace, the line to type (`gui_ask`); so is the Control Panel's Screen question. A message's lines
+and buttons, and the dialogs made of lists, trees, previews and palettes, are made in code.
+
+**Translation** comes later (the owner: English in v1); what v1 does so that it needs no change to the code:
+every string a user sees goes through `GUI_T("...")`, which is the string itself in v1 and will look it up in the
+language's catalogue. The formats of texts made with `snprintf` go through it too (`GUI_T("%d replaced.")`). A
+table's strings are marked `GUI_N("...")` (the bare literal, so that the table stays a constant initializer) and
+go through `GUI_T` where they are used; the tables an app hands the toolkit whole (a list's heads, a file
+dialog's filters and formats) the toolkit translates. A resource file's texts go through `GUI_T` as it is loaded,
+and a translation can lay a dialog out anew. Not translated: names of files, GLOS.CFG's sections and keys, the
+lines the test suites read.
+
+### 1.14 Widgets of an app's own
+
+A canvas (`gui_canvas`) gives the app the drawing and the events of a rectangle; for a widget of its own class
+the app fills a `struct gui_class` and makes one with `gui_new` (its own structure, starting with a
+`struct gui_widget`, of the size it says). Either draws with the 2D library and the toolkit's helpers (`gui_draw_text`
+with its "&" letters, `gui_draw_field`, `gui_draw_box`, `gui_draw_focus`, `gui_draw_icon` and its dimmed and inked
+forms), always in the theme's roles (§1.9) so that it is right in every theme. A part that scrolls has a
+`struct gui_sb` (`gui_sb_draw`, `gui_sb_event`), as the toolkit's own lists and views do. GLOS's events that are
+not a window's (a job's, a watched folder's, a setting's, the theme's) come through `gui_on_event`.
+
 ## 2. How the toolkit and the apps are tested
 
 The toolkit and every app build for the host too: the app's `main` renamed `app_main`, linked with
@@ -290,7 +349,7 @@ formats; what differs between a host and a GLOS desktop (where a window is put, 
 
 What a picture can't hold the same on both is masked: a shot may name rectangles of the client area (`shot NAME
 "TITLE" X Y W H ...`) that both sides paint black before comparing, as the monitor's figures and the file
-manager's dates are. `quick` sends keys that open no menu in one `glos key` (the Loop A driver otherwise waits
+manager's and the file dialog's dates are. `quick` sends keys that open no menu in one `glos key` (the Loop A driver otherwise waits
 after each Alt and letter for the menu it may open). `make gui-goldens` also checks each script's `expect` lines
 against what the host run printed, except in a script marked `#loopa-only` (the terminal's programs, which only
 Loop A runs).
@@ -301,6 +360,13 @@ checks them. A script's `config SECTION KEY VALUE` lines before its `run` change
 driver sets them with `glos config set` and unsets them afterwards. A `[program NAME]` section's `env` reaches the
 program's environment on the host as GLOS gives it at the EXEC; `GLOS_FN_STAT` gives made-up figures that follow the script's clock (two apps, a job, a log), and
 one of the apps can be ended. Neither runs programs.
+
+**GUITEST** (`tests/dos/guitest.c`) is the toolkit's own test program: a page for each part (`GUITEST NAME`, its
+script `tests/gui/NAME.txt`). Its gallery (`gallery`) is every widget in one window: toolkit 1's three tabs
+(buttons, text, lists) and toolkit 2's eight (views, pickers, meters, documents, a picture, properties, a
+terminal, a chat), each the same every run; its script, and the dark and high-contrast themes' (`theme-dark`,
+`theme-contrast`), shoot every tab, so that every widget is seen in the three themes; `text-small` and
+`text-large` lay it out at the other text sizes.
 
 The Control Panel's every setting is changed by keys in the `control` suite: it reads the schema from
 `sdk/config/cfg.c`, writes a script that changes each setting from its default (Alt and the label's letter, the
@@ -313,9 +379,9 @@ Each is one DJGPP EXE beside GLOS.EXE, on the toolkit, with a script in `tests/g
 | App | What it does | Script |
 |---|---|---|
 | `FILES.EXE` | The desktop's shell (PRD D55): drive, app and program icons, the launcher, a window for each folder (spatial; places in FOLDERS.CFG), the browser (`-browse`, a tree and a list), copy, move, delete, rename, new folders, opening by `[open]`, watching | `files`, `files-browse` |
-| `NOTEPAD.EXE` | Text files of a megabyte: find, go to, wrap, undo, the clipboard, DOS's CR LF kept | `notepad` |
+| `NOTEPAD.EXE` | Text files of a megabyte on the code editor (§1.5): find and replace, go to, wrap, undo, the clipboard, DOS's CR LF kept; Open and Save with text files first | `notepad` |
 | `CALC.EXE` | A calculator: keys and presses, memory, square root, errors | `calc` |
-| `IMAGES.EXE` | PNG, JPEG, BMP, GIF, TGA, PNM (stb_image) and PCX; fitted, zoomed, the next in the folder; dithered at 8 bits | `images` |
+| `IMAGES.EXE` | PNG, JPEG, BMP, GIF, TGA, PNM (stb_image) and PCX in the image view; fitted, zoomed, moved about, the next in the folder; Open shows a picture small before it is opened; dithered at 8 bits | `images` |
 | `TERM.EXE` | GLOS's shell (D50) in a terminal: history, completion, `&&`, `\|\|`, redirection; DOS programs as console jobs (D51, supervisor.md §17.10), type-ahead kept; redraws only the rows that changed | `term`, `term-run` |
-| `MONITOR.EXE` | Programs (End), performance (the processor over a minute, memory, the network), the system, GLOS's log; `-tasks` for Ctrl-Alt-Del | `monitor` (its figures masked) |
+| `MONITOR.EXE` | Programs (End), performance (the processor over a minute as a graph, memory, the network), the system, GLOS's log; `-tasks` for Ctrl-Alt-Del | `monitor` (its figures masked) |
 | `CONTROL.EXE` | The Control Panel, drawn from the settings' schema (D53): a page per section, programs' profiles, kinds of file; everything checked before anything is set; a new screen mode tried for fifteen seconds | `control`; every setting by keys: the `control` suite |
