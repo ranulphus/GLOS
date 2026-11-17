@@ -888,7 +888,9 @@ static void split_page(void)
     struct gui_widget *box, *row, *l, *t, *right, *out;
     struct gui_node *n;
     int i;
-    win = gui_window("GUITEST Splitters", 420, 280, 0);
+    win = gui_window_at("GUITEST Splitters", 0, 0, 420, 280, 0);       /* (at the corner: the script makes it 100
+                                                   wider, which a window GLOS placed after many others may not have
+                                                   room for: the gate's split "wider", 2026-11-17) */
     box = gui_vbox(win->root, -1, -1);
     gui_grow(box, 1);
     row = gui_hbox(box, -1, 0);
