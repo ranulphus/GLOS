@@ -58,6 +58,11 @@
  *   GUITEST colour      "GUITEST Colour" (toolkit 2, step C6): the Colour dialog by keys
  *   GUITEST font        "GUITEST Font" (toolkit 2, step C6): the Font dialog by keys, and
  *                       a line of the page drawn in the font chosen
+ *   GUITEST undo        "GUITEST Undo" (toolkit 2, step C7): a number and a line changed
+ *                       by buttons, undone and redone by the Edit menu, Ctrl+Z and
+ *                       Ctrl+Y and the history list
+ *   GUITEST clipfmt     "GUITEST Clipboard" (toolkit 2, step C7): text, a picture, files
+ *                       and a private format put in one transaction, and read back
  *   GUITEST tasks       "GUITEST Tasks" (toolkit 2, step C4): background work: a task
  *                       "reads" ten thousand rows in pieces on a thread of its own,
  *                       the list filling as they are posted; its progress dialog
@@ -1398,6 +1403,195 @@ static void font_page(void)
     say("font", "", 0);
 }
 
+/* ---- undo (toolkit 2, step C7): the "document" is a number and a line of typing */
+enum { U_UNDO = 100, U_REDO };
+static struct gui_undo *ud;
+static int ud_value;
+static char ud_text[64];
+static struct gui_widget *ud_label;
+
+struct ud_change { int before, after; char text[16]; };       /* a number's change, or letters typed */
+
+static void ud_show(const char *why)
+{
+    char line[160];
+    int done, n = gui_undo_steps(ud, &done);
+    snprintf(line, sizeof line, "value %d, text '%s'", ud_value, ud_text);
+    gui_set_text(ud_label, line);
+    snprintf(line, sizeof line, "%s: value %d text '%s' steps %d done %d undo %s redo %s", why, ud_value, ud_text, n,
+             done, gui_undo_name(ud, 0) ? gui_undo_name(ud, 0) : "-", gui_undo_name(ud, 1) ? gui_undo_name(ud, 1) : "-");
+    say("%s", line, 0);
+}
+
+static void ud_num_undo(void *d) { ud_value = ((struct ud_change *)d)->before; }
+static void ud_num_redo(void *d) { ud_value = ((struct ud_change *)d)->after; }
+static void ud_text_undo(void *d)
+{
+    ud_text[strlen(ud_text) - strlen(((struct ud_change *)d)->text)] = 0;
+}
+static void ud_text_redo(void *d) { strcat(ud_text, ((struct ud_change *)d)->text); }
+static int ud_merge(void *into, void *d)
+{
+    struct ud_change *a = into, *b = d;
+    if (strlen(a->text) + strlen(b->text) >= sizeof a->text)
+        return 0;
+    strcat(a->text, b->text);
+    return 1;
+}
+
+static void ud_number(struct gui_widget *w, int what)  /* id 1: add one; 2: double */
+{
+    struct ud_change *c = calloc(1, sizeof *c);
+    (void)what;
+    c->before = ud_value;
+    ud_value = c->after = w->id == 1 ? ud_value + 1 : ud_value * 2;
+    gui_undo_push(ud, w->id == 1 ? "Add 1" : "Double", ud_num_undo, ud_num_redo, c, sizeof *c, free, NULL, 0);
+}
+
+static void ud_type(struct gui_widget *w, int what)    /* three letters, one at a time, merged into one step */
+{
+    int i;
+    (void)w, (void)what;
+    for (i = 0; i < 3 && strlen(ud_text) < sizeof ud_text - 2; i++) {
+        struct ud_change *c = calloc(1, sizeof *c);
+        c->text[0] = (char)('a' + (int)strlen(ud_text) % 26);
+        strcat(ud_text, c->text);
+        gui_undo_push(ud, "Typing", ud_text_undo, ud_text_redo, c, sizeof *c, free, ud_merge, 1);
+    }
+}
+
+static void ud_command(struct gui_window *w, int id)
+{
+    (void)w;
+    if (id == U_UNDO)
+        gui_undo(ud);
+    else if (id == U_REDO)
+        gui_redo(ud);
+}
+
+static void ud_watch(struct gui_undo *u, void *ctx)    /* every change: the page shown and said */
+{
+    (void)u, (void)ctx;
+    ud_show("state");
+}
+
+static void undo_page(void)
+{
+    struct gui_widget *box, *row, *list;
+    struct gui_menubar *bar;
+    struct gui_menu *m;
+    win = gui_window_at("GUITEST Undo", 0, 0, 360, 260, 0);
+    win->on_command = ud_command;
+    bar = gui_menubar(win);
+    m = gui_menu(bar, "&Edit");
+    ud = gui_undo_new(0);
+    gui_undo_commands(ud, win, U_UNDO, U_REDO);    /* (before the label: the watch comes after it) */
+    gui_menu_command(m, U_UNDO);
+    gui_menu_command(m, U_REDO);
+    box = gui_vbox(win->root, -1, -1);
+    gui_grow(box, 1);
+    ud_label = gui_label(box, "");
+    row = gui_hbox(box, -1, 0);
+    gui_button(row, "Add &1", ud_number, 1);
+    gui_button(row, "&Double", ud_number, 2);
+    gui_button(row, "&Type", ud_type, 0);
+    gui_label(box, "&History:");
+    list = gui_undo_list(box, ud);
+    gui_grow(list, 1);
+    gui_undo_watch(ud, ud_watch, NULL);
+    status = gui_status(win);
+    gui_show(win, 1);
+    ud_show("undo page");
+}
+
+/* ---- the clipboard's formats (toolkit 2, step C7) */
+static void cp_all(struct gui_widget *w, int what)
+{
+    static const char *const files[] = { "C:\\GUI\\NOTES.TXT", "C:\\GUI\\EDIT.TXT" };
+    unsigned pix[64], pf;
+    int i, step = 0;
+    glos_handle t = gui_clip_start();
+    (void)w, (void)what;
+    for (i = 0; i < 64; i++)                    /* an 8 by 8 chequer */
+        pix[i] = (i / 8 + i % 8) & 1 ? 0xFF102030u : 0xFFF0E0D0u;
+    pf = glos_clip_format("glos.guitest.rows");
+    if (!t || (step = 1, gui_clip_put_text(t, "GLOS clipboard text", 19)) || (step = 2, gui_clip_put_image(t, pix, 8, 8))
+        || (step = 3, gui_clip_put_files(t, files, 2)) || (step = 4, gui_clip_put(t, pf, "3 rows", 6))
+        || (step = 5, gui_clip_done(t))) {
+        char line[80];
+        snprintf(line, sizeof line, "copy failed at step %d (format %u, error %d)", step, pf, glos_error());
+        say("%s", line, 0);
+        if (t && step < 5)
+            glos_close(t);                      /* (the transaction not left open) */
+        return;
+    }
+    say("copied all", "", 0);
+}
+
+static void cp_bad(struct gui_widget *w, int what)     /* a copy whose second put fails: nothing changes */
+{
+    glos_handle t = gui_clip_start();
+    int a, b;
+    (void)w, (void)what;
+    a = gui_clip_put_text(t, "half a copy", 11);
+    b = gui_clip_put(t, 9, "x", 1);             /* (9: no format there is) */
+    gui_clip_done(t);
+    say(a == 0 && b != 0 ? "bad copy refused%s" : "bad copy NOT refused%s", "", 0);
+}
+
+static void cp_text(struct gui_widget *w, int what)
+{
+    (void)w, (void)what;
+    gui_clip_set("just text", 9);
+    say("copied text", "", 0);
+}
+
+static void cp_paste(struct gui_widget *w, int what)   /* what the clipboard has now */
+{
+    char line[200], *t, **files, *priv;
+    unsigned *pix;
+    int iw = 0, ih = 0, n = 0, k;
+    unsigned pf = glos_clip_format("glos.guitest.rows");
+    size_t tn;
+    (void)w, (void)what;
+    k = snprintf(line, sizeof line, "has text %d image %d files %d private %d", gui_clip_has(GLOS_CLIP_TEXT),
+                 gui_clip_has(GLOS_CLIP_IMAGE), gui_clip_has(GLOS_CLIP_FILES), gui_clip_has(pf));
+    say("%s", line, 0);
+    if ((t = gui_clip_get(&tn)) != NULL) {
+        say("text '%s'", t, 0);
+        free(t);
+    }
+    if ((pix = gui_clip_get_image(&iw, &ih)) != NULL) {
+        snprintf(line, sizeof line, "image %dx%d, first %08X, second %08X", iw, ih, pix[0], pix[1]);
+        say("%s", line, 0);
+        free(pix);
+    }
+    if ((files = gui_clip_get_files(&n)) != NULL) {
+        snprintf(line, sizeof line, "files %d: %s, %s", n, files[0], n > 1 ? files[1] : "-");
+        say("%s", line, 0);
+        free(files);
+    }
+    if ((priv = gui_clip_read(pf, NULL)) != NULL) {
+        say("private '%s'", priv, 0);
+        free(priv);
+    }
+    (void)k;
+}
+
+static void clip_page(void)
+{
+    struct gui_widget *row;
+    win = gui_window("GUITEST Clipboard", 380, 80, 0);
+    row = gui_hbox(win->root, -1, -1);
+    gui_button(row, "Copy &all", cp_all, 0);
+    gui_button(row, "Copy &text", cp_text, 0);
+    gui_button(row, "&Bad", cp_bad, 0);
+    gui_button(row, "&Paste?", cp_paste, 0);
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("clipfmt", "", 0);
+}
+
 /* ---- the virtual tree (toolkit 2, step C3). Ids: 1, 2, 3 at the top; a node's children are its id times ten
    and 1, 2, 3 (to three levels); but node 2's are five thousand leaves, 2000000 and on. */
 static struct gui_widget *vt;
@@ -1620,6 +1814,10 @@ int main(int argc, char **argv)
         colour_page();
     else if (!strcmp(what, "font"))
         font_page();
+    else if (!strcmp(what, "undo"))
+        undo_page();
+    else if (!strcmp(what, "clipfmt"))
+        clip_page();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

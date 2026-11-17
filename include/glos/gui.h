@@ -568,6 +568,28 @@ struct gui_about {
     const unsigned char *icon;          /* a GUI_BIG_W icon, or NULL */
 };
 void gui_about(struct gui_window *owner, const struct gui_about *a);  /* (toolkit 2) */
+/* Undo (toolkit 2): an app's history of changes. A step is a name, the app's undo and redo functions and its data
+   (bytes: what it holds, for the limit; drop frees it when the step goes). Steps pushed with the same merge key
+   (not 0) within a second are one, merge folding the newer data into the older (1: folded). */
+struct gui_undo;
+struct gui_undo *gui_undo_new(unsigned limit_bytes);   /* (0: 256 KB of steps' data) */
+void gui_undo_free(struct gui_undo *u);
+void gui_undo_push(struct gui_undo *u, const char *name, void (*undo)(void *), void (*redo)(void *), void *data,
+                   unsigned bytes, void (*drop)(void *), int (*merge)(void *into, void *data), unsigned key);
+int gui_undo(struct gui_undo *u);                      /* 1 if a step was undone */
+int gui_redo(struct gui_undo *u);
+void gui_undo_to(struct gui_undo *u, int done);        /* undone or redone until so many steps are done */
+const char *gui_undo_name(struct gui_undo *u, int redo);       /* the step Undo (redo: Redo) would act on, or NULL */
+int gui_undo_steps(struct gui_undo *u, int *done);     /* the steps, and how many are done */
+const char *gui_undo_step(struct gui_undo *u, int i);
+void gui_undo_clear(struct gui_undo *u);               /* (a file saved or opened: a new start) */
+void gui_undo_commands(struct gui_undo *u, struct gui_window *w, int undo_id, int redo_id);   /* the window's Undo
+                                           and Redo commands kept named ("&Undo Fill", Ctrl+Z, Ctrl+Y) and enabled */
+void gui_undo_watch(struct gui_undo *u, void (*fn)(struct gui_undo *u, void *ctx), void *ctx);       /* fn after
+                                           every change to the history (a "changed" mark, the screen redrawn) */
+struct gui_widget *gui_undo_list(struct gui_widget *parent, struct gui_undo *u);       /* the history list: a row
+                                           a step, the undone ones marked; choosing a row undoes or redoes to it */
+
 /* Finding text (toolkit 2): the matching every app's Find uses (sdk/gui/regex.c says what a regular expression
    may hold). */
 #define GUI_FIND_CASE  1                /* case matters */
@@ -687,6 +709,20 @@ void gui_task_post(struct gui_task *t, void (*fn)(void *data), void *data);    /
 /* ---- the clipboard (GLOS_FN_CLIP) */
 int gui_clip_set(const char *text, size_t n);
 char *gui_clip_get(size_t *n);          /* malloc'd (NUL after), or NULL */
+/* (toolkit 2) The clipboard's other formats (GLOS_CLIP_IMAGE, _FILES, private ones by glos_clip_format), alone or
+   several at once: gui_clip_start, the puts, gui_clip_done (the clipboard changes then, whole). */
+int gui_clip_set_image(const unsigned *argb, int w, int h);    /* 0xAARRGGBB pixels */
+int gui_clip_set_files(const char *const *paths, int n);       /* full DOS paths */
+glos_handle gui_clip_start(void);       /* 0 if refused */
+int gui_clip_put_text(glos_handle t, const char *text, size_t n);
+int gui_clip_put_image(glos_handle t, const unsigned *argb, int w, int h);
+int gui_clip_put_files(glos_handle t, const char *const *paths, int n);
+int gui_clip_put(glos_handle t, unsigned format, const void *data, size_t n);  /* any format */
+int gui_clip_done(glos_handle t);       /* (after a put failed it changes nothing: the clipboard stays whole) */
+int gui_clip_has(unsigned format);      /* 1 if the clipboard has that format now (Paste enabled or not) */
+void *gui_clip_read(unsigned format, size_t *n);       /* any format's data (malloc'd, NUL after), or NULL */
+unsigned *gui_clip_get_image(int *w, int *h);          /* malloc'd, or NULL */
+char **gui_clip_get_files(int *n);      /* the paths, NULL-ended, in one malloc'd block, or NULL */
 
 /* ---- scroll bars, for widgets of an app's own (a part of the widget that has one) */
 #define GUI_SB (gui_theme.scroll)        /* a scroll bar's width: the theme's (14 in the built-in ones) */

@@ -134,6 +134,13 @@ menu that would cross the screen's right edge or the task bar moves left or open
   (`GUI_ON_CONTEXT`).
 - **The status bar** has sections at its right end (`gui_status_section`): a text, an icon, a small progress bar.
 
+### 1.6b Undo and the clipboard's formats (toolkit 2)
+
+An app keeps its changes in a `gui_undo` history (each step: a name, undo and redo functions and their data;
+typing bursts merge by a key); `gui_undo_commands` names its Undo and Redo commands after the steps and
+`gui_undo_list` shows the history. The clipboard holds text, pictures, lists of files and private formats, several
+at once (`gui_clip_start` ... `gui_clip_done`); a copy whose put fails changes nothing.
+
 ### 1.7 Modal dialogs
 
 `gui_modal` shows a window and runs the loop until `gui_end_modal` answers it; meanwhile the app's other windows

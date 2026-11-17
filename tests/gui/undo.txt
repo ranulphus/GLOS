@@ -1,0 +1,30 @@
+# Undo (toolkit 2, step C7; docs/v1/toolkit-2.md 4): GUITEST's number and line, by keys alone. Add 1, Double, and
+# three letters typed (merged into one Typing step); Ctrl+Z twice (the letters at once, then Double), Ctrl+Y (Double
+# again); Add 1 after that drops the undone Typing; the history list: Home (back to the start), End (everything
+# again), Up (one step back). Every change as the page hears it (gui_undo_watch), with the steps' names Undo and
+# Redo would act on.
+run GUITEST.EXE undo
+wait "GUITEST Undo"
+key alt+1
+key alt+d
+key alt+t
+shot three "GUITEST Undo"
+key ctrl+z
+key ctrl+z
+key ctrl+y
+key alt+1
+key alt+h
+key home
+key end
+key up
+shot history "GUITEST Undo"
+key alt+f4
+gone "GUITEST Undo"
+expect GUI undo page: value 0 text '' steps 0 done 0 undo - redo -
+expect GUI state: value 2 text 'abc' steps 3 done 3 undo Typing redo -
+expect GUI state: value 2 text '' steps 3 done 2 undo Double redo Typing
+expect GUI state: value 1 text '' steps 3 done 1 undo Add 1 redo Double
+expect GUI state: value 3 text '' steps 3 done 3 undo Add 1 redo -
+expect GUI state: value 0 text '' steps 3 done 0 undo - redo Add 1
+expect GUI state: value 2 text '' steps 3 done 2 undo Double redo Add 1
+expect GUI end

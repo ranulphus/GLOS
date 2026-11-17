@@ -579,6 +579,24 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
   typed), on the host and in Loop A on a 486 and a Pentium II. Its shots are taken with no list dropped (Loop
   A's shots are of the screen).
 
+### C7 as built, first two parts (2026-11-16)
+
+- **C7a, undo** (`sdk/gui/undo.c`): `gui_undo_new(limit)`, `gui_undo_push(u, name, undo, redo, data, bytes, drop,
+  merge, key)`; a step pushed with the same key within a second is folded into the one before by the app's merge
+  (a burst of typing undoes at once); a push after undone steps drops them; the oldest steps go past the limit.
+  `gui_undo_commands` keeps the window's Undo and Redo commands named and enabled (Ctrl+Z, Ctrl+Y);
+  `gui_undo_list` is the history list ("(the start)" and a row a step, the undone marked; a row chosen undoes or
+  redoes to it); `gui_undo_watch` tells the app of every change. Test `undo` (host; Loop A on a 486 and a
+  Pentium II).
+- **C7b, the clipboard's formats** (`sdk/gui/clip.c`): pictures and lists of files besides text, any format by its
+  name, several at once in a transaction (`gui_clip_start`, the puts, `gui_clip_done`), `gui_clip_has` for Paste,
+  and readers for each. On the way GLOS itself changed: a put that fails spoils its transaction (closing it
+  changes nothing: a paste never sees part of a copy), and a private format's name refused (a space, or not
+  printable ASCII) is a wrong argument, no longer "no memory". The host shim's clipboard is GLOS's: formats,
+  transactions, private names by the same rule. Test `clipfmt` (all four kinds and a private one in one
+  transaction, read back; a failing copy changes nothing; plain text alone after), host and Loop A.
+- **Still to come in C7:** drag and drop in lists and trees (API 2.0's DND).
+
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 
 - **Farm-Fresh** (FatCow; CC BY 3.0) for colour icons and **Font Awesome Free, solid** (CC BY 4.0) for the
