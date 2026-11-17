@@ -66,8 +66,13 @@ enum {
     GUI_EV_FOCUS,                       /* it has the keyboard */
     GUI_EV_BLUR,                        /* ... and no longer */
     GUI_EV_TIMER,                       /* its timer (gui_timer) */
-    GUI_EV_WHEEL                        /* the mouse's wheel turned over it: x, y, wheel (to it, then its parents
+    GUI_EV_WHEEL,                       /* the mouse's wheel turned over it: x, y, wheel (to it, then its parents
                                            until one takes it; a scroll bar's widget scrolls) */
+    GUI_EV_DRAG,                        /* (toolkit 2) a drag is over it, a drop target: x, y, key the effects
+                                           allowed (a list shows where a drop would go) */
+    GUI_EV_DRAG_LEAVE,                  /* ... and left it */
+    GUI_EV_DROP                         /* ... was dropped on it: x, y; the class sets ch to the place it goes (a
+                                           list's row; -1: the whole widget) */
 };
 
 struct gui_ev {
@@ -155,6 +160,7 @@ struct gui_widget {
     char *tip;                          /* its tooltip (gui_tip), or NULL */
     struct gui_menu *context;           /* its context menu (gui_context), or NULL: its parent's */
     unsigned mnemonic;                  /* the letter after "&" in it (lower case), or 0 */
+    void *dnd;                          /* (toolkit 2) its drag and drop, if it has any (dnd.c) */
 };
 
 /* ---- windows */
@@ -476,6 +482,7 @@ struct gui_tmodel {
 };
 struct gui_widget *gui_vtree(struct gui_widget *parent, const struct gui_tmodel *model);
 unsigned long gui_vtree_get(struct gui_widget *w);     /* the current node's id, or 0 */
+unsigned long gui_vtree_id_at(struct gui_widget *w, int row);  /* the node on show at that row (a drop's place), or 0 */
 int gui_vtree_set(struct gui_widget *w, unsigned long id);     /* the current node (one on show: its parents open):
                                            0, or -1 */
 int gui_vtree_open(struct gui_widget *w, unsigned long id, int on);    /* a node on show opened or closed: 0, or -1 */
@@ -589,6 +596,20 @@ void gui_undo_watch(struct gui_undo *u, void (*fn)(struct gui_undo *u, void *ctx
                                            every change to the history (a "changed" mark, the screen redrawn) */
 struct gui_widget *gui_undo_list(struct gui_widget *parent, struct gui_undo *u);       /* the history list: a row
                                            a step, the undone ones marked; choosing a row undoes or redoes to it */
+
+/* Drag and drop (toolkit 2; on API 2.0's DND and CLIP). A source: offer fills t (a writing clipboard
+   transaction: gui_clip_put_text, _image, _files, gui_clip_put) with what is chosen in w and returns 0 (-1: no
+   drag); done hears what was done (GLOS_DND_MOVE: the app takes what was moved away; 0: nothing). A list starts a
+   drag when its chosen rows are dragged. A target: the formats and effects w takes; drop gets where (a list: the
+   row the drop goes before, 0 to its count; a tree: the row of the node under the pointer; -1: the whole widget),
+   the data (a reading transaction: gui_drop_read, then glos_close) and the effect. Within one widget the effect
+   is a move (a list's rows reordered). */
+void gui_drag_source(struct gui_widget *w, unsigned effects, int (*offer)(struct gui_widget *w, glos_handle t),
+                     void (*done)(struct gui_widget *w, unsigned effect));
+void gui_drop_target(struct gui_widget *w, const unsigned *formats, int n, unsigned effects,
+                     void (*drop)(struct gui_widget *w, int where, glos_handle data, unsigned effect));
+void *gui_drop_read(glos_handle data, unsigned format, size_t *n);     /* a format's data (malloc'd), or NULL */
+struct gui_widget *gui_drag_from(void);         /* the widget of this app's a drag under way came from, or NULL */
 
 /* Finding text (toolkit 2): the matching every app's Find uses (sdk/gui/regex.c says what a regular expression
    may hold). */

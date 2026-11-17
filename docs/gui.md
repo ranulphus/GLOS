@@ -139,7 +139,9 @@ menu that would cross the screen's right edge or the task bar moves left or open
 An app keeps its changes in a `gui_undo` history (each step: a name, undo and redo functions and their data;
 typing bursts merge by a key); `gui_undo_commands` names its Undo and Redo commands after the steps and
 `gui_undo_list` shows the history. The clipboard holds text, pictures, lists of files and private formats, several
-at once (`gui_clip_start` ... `gui_clip_done`); a copy whose put fails changes nothing.
+at once (`gui_clip_start` ... `gui_clip_done`); a copy whose put fails changes nothing. Widgets are drag sources
+(`gui_drag_source`) and drop targets (`gui_drop_target`); the virtual list and tree drag what is chosen in them
+and show where a drop would go.
 
 ### 1.7 Modal dialogs
 

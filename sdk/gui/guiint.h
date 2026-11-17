@@ -82,6 +82,11 @@ void gui_cmd_update(struct gui_window *w);      /* the window's on_update */
 void gui_cmd_free(struct gui_window *w);
 extern const struct gui_class gui_toolbar_class;
 
+/* ---- dnd.c */
+extern int (*gui_dnd_hook)(const struct glos_ev *ev);  /* (core.c) DND's events: 1 if taken; NULL until used */
+void gui_dnd_register(struct gui_window *win);  /* the window's DND target made again from its widgets' */
+int gui_drag_start(struct gui_widget *w);       /* (a class's) its chosen things dragged: 1 if a drag began */
+
 /* ---- field.c */
 extern const struct gui_class gui_combo_class;
 

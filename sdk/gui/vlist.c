@@ -35,6 +35,9 @@ struct vlist {
     char typed[32];                     /* letters typed, a second apart at most: the row that begins so */
     unsigned typed_at;
     int view;                           /* GUI_VIEW_: DETAIL, or a grid (ICONS, SMALL, THUMBS) */
+    int dpress, dpx, dpy, defer;        /* (toolkit 2, C7) a press on a chosen row: a drag if it moves (dnd.c);
+                                           defer: the row to choose at the release if it didn't (-1: none) */
+    int drop_at;                        /* a drag over it: where a drop would go (-1: none) */
     int band, bx0, by0, bx1, by1;       /* a grid's rubber band: held, and its corners (the window's
                                            coordinates; by0 moves with the scrolling) */
     struct gui_sb sb;
@@ -250,6 +253,11 @@ static void vl_draw(struct gui_widget *w, struct gfx_surface *s)
                 gui_draw_focus(s, &f);
             }
         }
+        if (l->drop_at >= 0 && l->drop_at < n) {       /* a drop on that one */
+            int x, y;
+            cell_at(l, l->drop_at, &x, &y);
+            gfx_frame(s, x, y - 2, cw, ch, GUI_MARK);
+        }
         if (l->band) {                          /* the rubber band */
             int x0 = l->bx0 < l->bx1 ? l->bx0 : l->bx1, x1 = l->bx0 < l->bx1 ? l->bx1 : l->bx0;
             int y0b = l->by0 < l->by1 ? l->by0 : l->by1, y1 = l->by0 < l->by1 ? l->by1 : l->by0;
@@ -317,6 +325,10 @@ static void vl_draw(struct gui_widget *w, struct gfx_surface *s)
             gui_draw_focus(s, &f);
         }
     }
+    if (l->drop_at >= 0 && l->drop_at >= l->top && l->drop_at <= l->top + shown(l)) {     /* where a drop would go */
+        int y = y0 + (l->drop_at - l->top) * GUI_ROW_H;
+        gfx_fill(s, w->r.x + 1, y > y0 ? y - 1 : y, w->r.w - GUI_SB - 1, 2, GUI_MARK);
+    }
     gfx_clip(s, &clip);
     gui_sb_draw(s, &l->sb, on);
 }
@@ -352,11 +364,67 @@ static void go(struct vlist *l, int row, int extend, int toggle)
     gui_send(&l->w, GUI_ON_SELECT);
 }
 
+/* A press on row r with the left button, in a list that offers drags: if r is chosen already, nothing changes yet
+   (several chosen rows are dragged together; at the release without a drag, r alone is chosen); else r is chosen
+   now and may be dragged. 1 if the press was taken so. */
+static int drag_press(struct vlist *l, int r, const struct gui_ev *e, int shift, int ctrl)
+{
+    if (e->button != 1 || !l->w.dnd || shift || ctrl)
+        return 0;
+    l->dpress = 1, l->dpx = e->x, l->dpy = e->y;
+    if (is_chosen(l, id_of(l, r))) {
+        l->defer = r;
+        l->cur = r, l->cur_id = id_of(l, r);
+        gui_damage(&l->w);
+        return 1;
+    }
+    l->defer = -1;
+    go(l, r, 0, 0);
+    return 1;
+}
+
 static int vl_event(struct gui_widget *w, struct gui_ev *e)
 {
     struct vlist *l = VL(w);
     int shift = (e->mods & GLOS_MOD_SHIFT) != 0, ctrl = (e->mods & GLOS_MOD_CTRL) != 0, n = count(l), c, r;
     place(l, n);
+    if (e->type == GUI_EV_DRAG || e->type == GUI_EV_DRAG_LEAVE || e->type == GUI_EV_DROP) {
+        int at = -1;                            /* a drag over it: where a drop would go */
+        if (e->type == GUI_EV_DRAG) {
+            if (icons(l)) {
+                at = icon_row(l, e->x, e->y, n);
+                at = at < 0 ? n : at;
+            } else {
+                int y = e->y - (w->r.y + 1 + head_h(l));
+                at = y < 0 ? l->top : l->top + (y + GUI_ROW_H / 2) / GUI_ROW_H;     /* (the nearer edge) */
+                at = at > n ? n : at;
+            }
+        }
+        if (e->type == GUI_EV_DROP)
+            e->ch = (unsigned)l->drop_at;
+        if (at != l->drop_at) {
+            l->drop_at = at;
+            gui_damage(w);
+        }
+        return 1;
+    }
+    if (l->dpress) {                            /* chosen rows pressed: dragged, or (let go where they were) chosen */
+        if (e->type == GUI_EV_MOVE && e->buttons & 1) {
+            if (abs(e->x - l->dpx) + abs(e->y - l->dpy) > 5) {
+                l->dpress = 0;
+                if (gui_drag_start(w))
+                    l->defer = -1;
+            }
+            return 1;
+        }
+        if (e->type == GUI_EV_RELEASE) {
+            l->dpress = 0;
+            if (l->defer >= 0)
+                go(l, l->defer, 0, 0);
+            l->defer = -1;
+            return 1;
+        }
+    }
     if (l->hpress >= 0) {                       /* a column's head held: moved sideways, the column goes with it;
                                                    let go where it was, the app is asked to sort by it */
         if (e->type == GUI_EV_MOVE) {
@@ -448,6 +516,8 @@ static int vl_event(struct gui_widget *w, struct gui_ev *e)
             }
             if (e->button == 2 && is_chosen(l, id_of(l, r)))
                 return 1;
+            if (drag_press(l, r, e, shift, ctrl))
+                return 1;
             go(l, r, shift, ctrl);
             return 1;
         }
@@ -479,6 +549,8 @@ static int vl_event(struct gui_widget *w, struct gui_ev *e)
             return 1;
         }
         if (e->button == 2 && is_chosen(l, id_of(l, r)))        /* (a right press keeps what is chosen: a menu for it) */
+            return 1;
+        if (drag_press(l, r, e, shift, ctrl))
             return 1;
         go(l, r, shift, ctrl);
         return 1;
@@ -581,6 +653,7 @@ struct gui_widget *gui_vlist(struct gui_widget *parent, int columns, const char 
         l->widths[i] = widths ? widths[i] : 100, l->order[i] = i;
     l->cur = l->anchor = -1;
     l->sort_col = l->drag_col = l->hpress = -1;
+    l->drop_at = l->defer = -1;
     return &l->w;
 }
 

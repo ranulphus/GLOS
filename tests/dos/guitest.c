@@ -63,6 +63,8 @@
  *                       Ctrl+Y and the history list
  *   GUITEST clipfmt     "GUITEST Clipboard" (toolkit 2, step C7): text, a picture, files
  *                       and a private format put in one transaction, and read back
+ *   GUITEST dnd         "GUITEST Drag and drop" (toolkit 2, step C7): fruit dragged into
+ *                       a basket (copied where it is let go), and reordered in its list
  *   GUITEST tasks       "GUITEST Tasks" (toolkit 2, step C4): background work: a task
  *                       "reads" ten thousand rows in pieces on a thread of its own,
  *                       the list filling as they are posted; its progress dialog
@@ -1592,6 +1594,166 @@ static void clip_page(void)
     say("clipfmt", "", 0);
 }
 
+/* ---- drag and drop (toolkit 2, step C7): two lists of names; the private format carries the dragged rows' places */
+static char dd_fruit[8][16] = { "Apple", "Banana", "Cherry", "Damson", "Elderberry", "Fig" }, dd_basket[16][16] = {
+    "Grape", "Kiwi" };
+static int dd_nf = 6, dd_nb = 2;
+static struct gui_widget *dd_lf, *dd_lb;
+static unsigned dd_rows;                        /* the private format "glos.guitest.rows" */
+
+static int dd_count(void *ctx) { return ctx == dd_fruit ? dd_nf : dd_nb; }
+
+static void dd_row(void *ctx, int row, struct gui_vrow *out)
+{
+    out->cell[0] = ctx == dd_fruit ? dd_fruit[row] : dd_basket[row];
+    out->icon = gui_glyph("star");
+    out->id = (unsigned long)row + 1;
+}
+
+static int dd_offer(struct gui_widget *w, glos_handle t)       /* the fruit chosen: names (text) and places */
+{
+    unsigned long ids[8];
+    int n = gui_vlist_chosen(w, ids, 8), i;
+    char names[128] = "", rows[32] = "";
+    if (n <= 0)
+        return -1;
+    for (i = 0; i < n && i < 8; i++) {
+        snprintf(names + strlen(names), sizeof names - strlen(names), "%s%s", i ? "\n" : "", dd_fruit[ids[i] - 1]);
+        snprintf(rows + strlen(rows), sizeof rows - strlen(rows), "%s%lu", i ? "," : "", ids[i] - 1);
+    }
+    gui_clip_put_text(t, names, strlen(names));
+    gui_clip_put(t, dd_rows, rows, strlen(rows));
+    return 0;
+}
+
+static void dd_done(struct gui_widget *w, unsigned effect)
+{
+    (void)w;
+    say(effect == GLOS_DND_MOVE ? "drag done: moved%s" : effect == GLOS_DND_COPY ? "drag done: copied%s"
+        : "drag done: nothing%s", "", 0);
+}
+
+static void dd_into_basket(struct gui_widget *w, int where, glos_handle data, unsigned effect)
+{
+    char *names = gui_drop_read(data, GLOS_CLIP_TEXT, NULL), *p, *nl, line[160];
+    int k = 0;
+    glos_close(data);
+    if (!names)
+        return;
+    where = where < 0 || where > dd_nb ? dd_nb : where;
+    for (p = names; *p && dd_nb < 16; p = nl ? nl + 1 : p + strlen(p), k++) {
+        nl = strchr(p, '\n');
+        if (nl)
+            *nl = 0;
+        memmove(dd_basket[where + k + 1], dd_basket[where + k], (size_t)(dd_nb - where - k) * sizeof dd_basket[0]);
+        snprintf(dd_basket[where + k], sizeof dd_basket[0], "%s", p);
+        dd_nb++;
+        if (!nl)
+            break;
+    }
+    free(names);
+    gui_vlist_changed(w);
+    snprintf(line, sizeof line, "basket: %s %s %s %s %s (%s at %d)", dd_basket[0], dd_basket[1], dd_nb > 2 ? dd_basket[2] : "",
+             dd_nb > 3 ? dd_basket[3] : "", dd_nb > 4 ? dd_basket[4] : "", effect == GLOS_DND_COPY ? "copy" : "move", where);
+    say("%s", line, 0);
+}
+
+static void dd_reorder(struct gui_widget *w, int where, glos_handle data, unsigned effect)    /* within the fruit */
+{
+    char *rows = gui_drop_read(data, dd_rows, NULL), line[160], keep[16];
+    int from;
+    glos_close(data);
+    if (!rows || gui_drag_from() != w || effect != GLOS_DND_MOVE) {
+        free(rows);
+        return;
+    }
+    from = atoi(rows);                          /* (one row moved: the first chosen) */
+    free(rows);
+    if (from < 0 || from >= dd_nf || where < 0 || where > dd_nf)
+        return;
+    memcpy(keep, dd_fruit[from], sizeof keep);
+    memmove(dd_fruit[from], dd_fruit[from + 1], (size_t)(dd_nf - from - 1) * sizeof dd_fruit[0]);
+    if (where > from)
+        where--;
+    memmove(dd_fruit[where + 1], dd_fruit[where], (size_t)(dd_nf - 1 - where) * sizeof dd_fruit[0]);
+    memcpy(dd_fruit[where], keep, sizeof keep);
+    gui_vlist_changed(w);
+    gui_vlist_set(w, where);
+    snprintf(line, sizeof line, "fruit: %s %s %s %s %s %s", dd_fruit[0], dd_fruit[1], dd_fruit[2], dd_fruit[3], dd_fruit[4],
+             dd_fruit[5]);
+    say("%s", line, 0);
+}
+
+static const char *const dd_places[] = { "Kitchen", "Larder" };
+
+static int dd_children(void *ctx, unsigned long id, unsigned long *ids, int room, int from)
+{
+    int i, k = 0;
+    (void)ctx;
+    if (id)
+        return 0;
+    for (i = from; i < 2 && k < room; i++)
+        ids[k++] = (unsigned long)i + 1;
+    return 2;
+}
+
+static void dd_node(void *ctx, unsigned long id, struct gui_tnode *out)
+{
+    (void)ctx;
+    out->text = dd_places[id - 1];
+    out->icon = gui_glyph("home");
+}
+
+static void dd_into_place(struct gui_widget *w, int where, glos_handle data, unsigned effect)
+{
+    char *names = gui_drop_read(data, GLOS_CLIP_TEXT, NULL), *nl, line[120];
+    unsigned long id = gui_vtree_id_at(w, where);
+    glos_close(data);
+    if (!names)
+        return;
+    if ((nl = strchr(names, '\n')) != NULL)
+        *nl = ' ';
+    snprintf(line, sizeof line, "into %s: %s (%s)", id ? dd_places[id - 1] : "nowhere", names,
+             effect == GLOS_DND_COPY ? "copy" : "move");
+    free(names);
+    say("%s", line, 0);
+}
+
+static void dnd_page(void)
+{
+    static const char *const hf[] = { "Fruit" }, *const hb[] = { "Basket" };
+    static const int width[] = { 140 };
+    static struct gui_model mf, mb;
+    unsigned text_rows[2];
+    static const struct gui_tmodel mt = { dd_children, dd_node, NULL };
+    struct gui_widget *box, *row, *tree;
+    dd_rows = glos_clip_format("glos.guitest.rows");
+    mf.count = dd_count, mf.row = dd_row, mf.ctx = dd_fruit;
+    mb.count = dd_count, mb.row = dd_row, mb.ctx = dd_basket;
+    win = gui_window_at("GUITEST Drag and drop", 0, 0, 380, 270, 0);
+    box = gui_vbox(win->root, -1, -1);
+    gui_grow(box, 1);
+    row = gui_hbox(box, -1, 0);
+    gui_grow(row, 1);
+    dd_lf = gui_vlist(row, 1, hf, width, &mf);
+    gui_grow(dd_lf, 1);
+    dd_lb = gui_vlist(row, 1, hb, width, &mb);
+    gui_grow(dd_lb, 1);
+    gui_vlist_multi(dd_lf, 1);
+    gui_drag_source(dd_lf, GLOS_DND_COPY | GLOS_DND_MOVE, dd_offer, dd_done);
+    text_rows[0] = dd_rows;
+    gui_drop_target(dd_lf, text_rows, 1, GLOS_DND_MOVE, dd_reorder);
+    text_rows[0] = GLOS_CLIP_TEXT, text_rows[1] = dd_rows;
+    gui_drop_target(dd_lb, text_rows, 2, GLOS_DND_COPY, dd_into_basket);
+    gui_label(box, "Places:");
+    tree = gui_vtree(box, &mt);
+    gui_size(tree, 0, 40);
+    gui_drop_target(tree, text_rows, 1, GLOS_DND_COPY, dd_into_place);
+    status = gui_status(win);
+    gui_show(win, 1);
+    say("dnd", "", 0);
+}
+
 /* ---- the virtual tree (toolkit 2, step C3). Ids: 1, 2, 3 at the top; a node's children are its id times ten
    and 1, 2, 3 (to three levels); but node 2's are five thousand leaves, 2000000 and on. */
 static struct gui_widget *vt;
@@ -1818,6 +1980,8 @@ int main(int argc, char **argv)
         undo_page();
     else if (!strcmp(what, "clipfmt"))
         clip_page();
+    else if (!strcmp(what, "dnd"))
+        dnd_page();
     else if (!strcmp(what, "names")) {
         names(argc > 2 ? argv[2] : "C:\\GUI\\NAMES");
         printf("GUI end\n");

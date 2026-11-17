@@ -595,7 +595,21 @@ Each part with GUITEST pages and scripts that drive the dialogs by keys alone, o
   printable ASCII) is a wrong argument, no longer "no memory". The host shim's clipboard is GLOS's: formats,
   transactions, private names by the same rule. Test `clipfmt` (all four kinds and a private one in one
   transaction, read back; a failing copy changes nothing; plain text alone after), host and Loop A.
-- **Still to come in C7:** drag and drop in lists and trees (API 2.0's DND).
+- **C7c, drag and drop** (`sdk/gui/dnd.c`, on API 2.0's DND and CLIP): `gui_drag_source` (the app's offer fills
+  a writing transaction with what is chosen; done hears the effect: a move takes the things away) and
+  `gui_drop_target` (formats, effects, the app's drop with the place and a reading transaction:
+  `gui_drop_read`). A window's GLOS target is all its widgets' formats; the core routes ENTER/OVER/LEAVE/DROP to
+  the widget under the pointer (`GUI_EV_DRAG`, `GUI_EV_DRAG_LEAVE`, `GUI_EV_DROP`) and answers GLOS with the
+  widget's effect (a move within the widget a drag came from: `gui_drag_from`). The virtual list drags its chosen
+  rows (a press on a chosen row keeps the choice until the release, so several go together) and shows a line where
+  a drop would go (a frame round the cell in its grids); the virtual tree drags its current node and frames the
+  node a drop would go into (`gui_vtree_id_at` for the drop's row). The host shim drives a drag on the kernel's own
+  state machine (`kernel/wm/dnd.c`): a held button keeps the moves with its window, and the drop is decided once
+  the move's events are answered, as on GLOS.
+- **Owed from C7:** a picture with the pointer while dragging, scrolling when a drag stays near a list's edge, the
+  old gui_list and gui_tree (on the models in C10).
+- **Test** `dnd` (GUITEST's fruit, basket and places: a copy between lists at the place shown, a reorder within a
+  list, a drop on nothing, a drop into a tree's node, two chosen rows dragged together), host and Loop A.
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

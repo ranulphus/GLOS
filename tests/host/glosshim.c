@@ -51,7 +51,7 @@ int app_main(int argc, char **argv);
 #include "../../kernel/wm/theme.c"      /* the built-in themes, as the kernel has them (themes[], theme_find) */
 static const struct theme *shim_theme;  /* set by a script's `theme NAME`; else GLOS_HOST_THEME's, or Slate */
 
-enum { HEV_KEY = 1, HEV_MOUSE, HEV_FOCUS, HEV_RESIZE, HEV_CLOSE, HEV_LAUNCH, HEV_SYSKEY, HEV_THEME, HEV_POST };
+enum { HEV_KEY = 1, HEV_MOUSE, HEV_FOCUS, HEV_RESIZE, HEV_CLOSE, HEV_LAUNCH, HEV_SYSKEY, HEV_THEME, HEV_POST, HEV_DND };
 struct hev {
     unsigned type, window, time;
     int x, y;
@@ -549,6 +549,147 @@ static int clip_close(glos_handle t)            /* (glos_close of a transaction)
     }
     CT[i].used = 0;
     return 0;
+}
+
+/* ---- drag and drop (API 2.0's DND), on the kernel's own state machine (kernel/wm/dnd.c): a drag a widget starts
+   from a mouse move takes the queued mouse events that follow as the pointer's, and they become the targets' and
+   the source's DND events as they are given (the one app is app 1; its windows are the targets). */
+#include "../../kernel/wm/dnd.c"
+static struct hwin *at_point(int x, int y);
+static struct dnd DD;
+static struct hclip dd_data;                    /* the drag's data, from the source's writing transaction */
+static struct { unsigned win, effects, n, format[GLOS_CLIP_ITEMS]; } dd_t[16];
+static int dd_nt;
+static struct hev dd_q[16];                     /* the drag's events, given before the script's */
+static int dd_end_due;                          /* the button let go: the drop is decided once the move's events
+                                                   are given, so a target's answer (glos_dnd_answer) counts, as on GLOS */
+static unsigned given_buttons;                  /* the buttons down as of the last mouse event given (a drag starts
+                                                   only with one down then: the script's own may be up already) */
+static unsigned dd_qh, dd_qt;
+
+static void dnd_formats(unsigned *count, unsigned *format)
+{
+    unsigned i;
+    *count = dd_data.n;
+    for (i = 0; i < dd_data.n; i++)
+        format[i] = dd_data.format[i];
+}
+
+static glos_handle dnd_data(void)               /* DROP's data: a reading transaction of the target's */
+{
+    int i;
+    unsigned k;
+    for (i = 0; i < 4 && CT[i].used; i++)
+        ;
+    if (i == 4)
+        return 0;
+    memset(&CT[i], 0, sizeof CT[i]);
+    CT[i].used = 1;
+    for (k = 0; k < dd_data.n; k++)
+        clip_add(&CT[i].c, dd_data.format[k], dd_data.data[k], dd_data.len[k]);
+    return 0x7400u + (unsigned)i;
+}
+
+static unsigned dd_takes(unsigned win)          /* the effects the window takes for what is offered */
+{
+    int i;
+    unsigned k, f;
+    for (i = 0; i < dd_nt; i++)
+        if (dd_t[i].win == win)
+            for (k = 0; k < dd_t[i].n; k++)
+                for (f = 0; f < dd_data.n; f++)
+                    if (dd_t[i].format[k] == dd_data.format[f])
+                        return dd_t[i].effects;
+    return 0;
+}
+
+int glos_dnd_target(glos_handle w, unsigned effects, const unsigned *formats, unsigned count)
+{
+    int i;
+    unsigned k;
+    for (i = 0; i < dd_nt && dd_t[i].win != w; i++)
+        ;
+    if (!effects) {                             /* (a target no more) */
+        if (i < dd_nt)
+            dd_t[i] = dd_t[--dd_nt];
+        return 0;
+    }
+    if (i == dd_nt) {
+        if (dd_nt == 16)
+            return GLOS_E_MEMORY;
+        dd_nt++;
+    }
+    dd_t[i].win = w, dd_t[i].effects = effects;
+    dd_t[i].n = count < GLOS_CLIP_ITEMS ? count : GLOS_CLIP_ITEMS;
+    for (k = 0; k < dd_t[i].n; k++)
+        dd_t[i].format[k] = formats[k];
+    return 0;
+}
+
+int glos_dnd(glos_handle w, glos_handle data, unsigned effects, const unsigned *picture, unsigned pw, unsigned ph)
+{
+    int i = (int)data - 0x7400;
+    (void)picture, (void)pw, (void)ph;
+    if (i < 0 || i >= 4 || !CT[i].used || !CT[i].write)
+        return GLOS_E_HANDLE;
+    clip_free(&dd_data);
+    dd_data = CT[i].c;                          /* (the drag's now; the handle is closed by the call) */
+    CT[i].used = 0;
+    if (!given_buttons || dnd_begin(&DD, 1, w, effects) != 0) {
+        clip_free(&dd_data);
+        return GLOS_E_REFUSED;
+    }
+    return 0;
+}
+
+int glos_dnd_answer(glos_handle w, unsigned effect) { return dnd_answer(&DD, 1, w, effect) ? GLOS_E_REFUSED : 0; }
+
+int glos_set(glos_handle h, unsigned prop, int value)  /* (the clipboard's commit; nothing else here) */
+{
+    int i = (int)h - 0x7400;
+    if (prop == GLOS_PROP_CLIP_COMMIT && i >= 0 && i < 4 && CT[i].used && CT[i].write) {
+        CT[i].spoilt = !value;
+        return 0;
+    }
+    return 0;
+}
+
+static void dd_notes(const struct dnd_note *n, unsigned count)
+{
+    unsigned i;
+    for (i = 0; i < count && dd_qt - dd_qh < 16; i++) {
+        struct hev *e = &dd_q[dd_qt++ % 16];
+        struct hwin *w = find(n[i].win);
+        memset(e, 0, sizeof *e);
+        e->type = HEV_DND, e->window = n[i].win, e->key = n[i].kind, e->time = H.clock;
+        e->x = w ? n[i].x - w->x : n[i].x, e->y = w ? n[i].y - w->y : n[i].y;
+        e->buttons = n[i].effect;
+    }
+}
+
+/* A queued mouse event or key while a drag is on: its notes instead (1), or 0 if it is no drag's. */
+static int dd_take(const struct hev *e)
+{
+    struct dnd_note notes[2 * DND_NOTES];
+    unsigned n = 0;
+    if (!DD.on)
+        return 0;
+    if (e->type == HEV_KEY && e->key == 0x01 && e->down) {      /* Esc: given up */
+        n = dnd_end(&DD, 0, notes);
+    } else if (e->type == HEV_MOUSE) {
+        struct hwin *src = find(e->window), *t;
+        int sx = (src ? src->x : 0) + e->x, sy = (src ? src->y : 0) + e->y;
+        struct dnd_target tg;
+        t = at_point(sx, sy);
+        tg.app = 1, tg.win = t ? t->id : 0, tg.effects = t ? dd_takes(t->id) : 0;
+        n = dnd_move(&DD, t && tg.effects ? &tg : NULL, sx, sy, notes);
+        if (e->key && !e->down)                 /* the button let go: the drop (or nothing), after these */
+            dd_end_due = 1;
+    } else {
+        return 0;
+    }
+    dd_notes(notes, n);
+    return 1;
 }
 
 /* The settings: GLOS.CFG's lines in memory, from $GLOS_HOST_DRIVES/C/GLOS/GLOS.CFG if there is one, checked by the
@@ -1121,6 +1262,9 @@ static void point(int x, int y)
     w = at_point(x, y);
     if (w && w->id == H.focus)
         mouse_event(w, 0, 0);
+    else if (H.buttons && H.focus && find(H.focus))   /* (a button held: the moves are its window's, wherever the
+                                                   pointer goes, as GLOS's window manager has it; a drag needs them) */
+        mouse_event(find(H.focus), 0, 0);
 }
 
 static void press(unsigned button)
@@ -1396,6 +1540,7 @@ static int give(const struct hev *e, void *buf, unsigned room)
         struct glos_ev_size size;
         struct glos_ev_shell shell;
         struct glos_ev_post post;
+        struct glos_ev_dnd dnd;
     } u;
     unsigned n = sizeof u.ev;
     memset(&u, 0, sizeof u);
@@ -1423,6 +1568,15 @@ static int give(const struct hev *e, void *buf, unsigned room)
         break;
     case HEV_THEME:
         u.ev.kind = GLOS_EV_THEME;
+        break;
+    case HEV_DND:
+        n = sizeof u.dnd;
+        u.ev.kind = e->key == DND_ENTER ? GLOS_EV_DND_ENTER : e->key == DND_OVER ? GLOS_EV_DND_OVER
+                  : e->key == DND_LEAVE ? GLOS_EV_DND_LEAVE : e->key == DND_DROP ? GLOS_EV_DND_DROP : GLOS_EV_DND_DONE;
+        u.dnd.x = e->x, u.dnd.y = e->y, u.dnd.effects = e->buttons;
+        dnd_formats(&u.dnd.count, u.dnd.format);
+        if (e->key == DND_DROP)
+            u.dnd.data = dnd_data();
         break;
     case HEV_POST:
         u.ev.kind = GLOS_EV_POST, n = sizeof u.post;
@@ -1692,6 +1846,22 @@ int glos_post(unsigned code, unsigned a, unsigned b, unsigned c)
 
 int glos_event(void *buf, unsigned room, unsigned wait_ms, unsigned areas)
 {
+    if (dd_qh == dd_qt && dd_end_due) {         /* (the move's events given and answered: now the drop) */
+        struct dnd_note notes[DND_NOTES];
+        dd_end_due = 0;
+        dd_notes(notes, dnd_end(&DD, 1, notes));
+    }
+    if (dd_qh != dd_qt) {                       /* (a drag's events first) */
+        struct hev e = dd_q[dd_qh++ % 16];
+        int r = give(&e, buf, room);
+        if (e.key == DND_DONE)
+            clip_free(&dd_data);
+        return r;
+    }
+    if (H.qh != H.qt && DD.on && dd_take(&H.q[H.qh % 256])) {  /* (the pointer is the drag's) */
+        H.qh++;
+        return glos_event(buf, room, wait_ms, areas);
+    }
     if (H.qh == H.qt && !H.done) {
         if (!step())
             H.done = 1;
@@ -1700,6 +1870,8 @@ int glos_event(void *buf, unsigned room, unsigned wait_ms, unsigned areas)
         threads_turn();
     if (H.qh != H.qt) {
         struct hev e = H.q[H.qh++ % 256];
+        if (e.type == HEV_MOUSE)
+            given_buttons = e.buttons;
         if (e.type == HEV_KEY) {                /* (a key goes to the window with the focus when it arrives, as the
                                                    window manager sends it: a menu opened by the key before) */
             if (!H.focus)

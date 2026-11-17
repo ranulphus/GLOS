@@ -24,6 +24,8 @@ struct vtree {
     int top, cur;                       /* the first row shown; the current node's place (-1: none) */
     unsigned long cur_id;
     struct gui_sb sb;
+    int dpress, dpx, dpy;               /* (toolkit 2, C7) a node pressed: dragged if it moves (dnd.c) */
+    int drop_at;                        /* a drag over it: the row of the node a drop would go into (-1: none) */
 };
 
 #define VT(w) ((struct vtree *)(w))
@@ -209,6 +211,8 @@ static void vt_draw(struct gui_widget *w, struct gfx_surface *s)
             struct gfx_rect f = { x - 2, y, tw + 4, GUI_ROW_H };
             gui_draw_focus(s, &f);
         }
+        if (i == t->drop_at)                    /* a drop would go into this node */
+            gfx_frame(s, x - 3, y, tw + 6, GUI_ROW_H, GUI_MARK);
     }
     gfx_clip(s, &clip);
     gui_sb_draw(s, &t->sb, on);
@@ -219,6 +223,29 @@ static int vt_event(struct gui_widget *w, struct gui_ev *e)
     struct vtree *t = VT(w);
     int at;
     place(t);
+    if (e->type == GUI_EV_DRAG || e->type == GUI_EV_DRAG_LEAVE || e->type == GUI_EV_DROP) {
+        int r = -1;                             /* a drag over it: the node under the pointer */
+        if (e->type == GUI_EV_DRAG && e->y >= w->r.y + 1) {
+            r = (e->y - w->r.y - 1) / GUI_ROW_H + t->top;
+            r = r < t->n ? r : -1;
+        }
+        if (e->type == GUI_EV_DROP)
+            e->ch = (unsigned)t->drop_at;
+        if (r != t->drop_at) {
+            t->drop_at = r;
+            gui_damage(w);
+        }
+        return 1;
+    }
+    if (t->dpress && (e->type == GUI_EV_MOVE || e->type == GUI_EV_RELEASE)) {
+        if (e->type == GUI_EV_RELEASE)
+            t->dpress = 0;
+        else if (e->buttons & 1 && abs(e->x - t->dpx) + abs(e->y - t->dpy) > 5) {
+            t->dpress = 0;
+            gui_drag_start(w);                  /* (the current node offered: the app's offer reads it) */
+        }
+        return 1;
+    }
     if (e->type != GUI_EV_KEY && gui_sb_event(w, &t->sb, e, 1)) {
         t->top = t->sb.pos;
         return 1;
@@ -241,6 +268,8 @@ static int vt_event(struct gui_widget *w, struct gui_ev *e)
         if (e->button == 1 && e->clicks == 2) {
             open_at(t, t->cur, !t->v[t->cur].open);
             gui_send(w, GUI_ON_ACTIVATE);
+        } else if (e->button == 1 && w->dnd) {
+            t->dpress = 1, t->dpx = e->x, t->dpy = e->y;
         }
         return 1;
     case GUI_EV_FOCUS:
@@ -302,12 +331,18 @@ struct gui_widget *gui_vtree(struct gui_widget *parent, const struct gui_tmodel 
 {
     struct vtree *t = (struct vtree *)gui_new(parent, &vtree_class, sizeof *t);
     t->m = *model;
-    t->cur = -1;
+    t->cur = t->drop_at = -1;
     add_children(t, 0, 0, 0);
     return &t->w;
 }
 
 unsigned long gui_vtree_get(struct gui_widget *w) { return VT(w)->cur >= 0 ? VT(w)->cur_id : 0; }
+
+unsigned long gui_vtree_id_at(struct gui_widget *w, int row)   /* (a drop's place) the node on show at that row */
+{
+    struct vtree *t = VT(w);
+    return row >= 0 && row < t->n ? t->v[row].id : 0;
+}
 
 static int place_of(struct vtree *t, unsigned long id)
 {

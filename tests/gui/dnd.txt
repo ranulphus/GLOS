@@ -1,0 +1,28 @@
+# Drag and drop (toolkit 2, step C7; docs/v1/toolkit-2.md 9): GUITEST's two lists and a tree of places. Cherry
+# dragged into the basket between Grape and Kiwi (copied there: the line showed where); Apple dragged down within
+# the fruit, let go between Damson and Elderberry (moved: the fruit reordered); Fig let go between the lists, on
+# nothing (nothing done); Damson dropped into the Larder (the tree's node under the pointer); two fruit chosen
+# (Banana and Cherry) dragged together to the basket's end.
+run GUITEST.EXE dnd
+wait "GUITEST Drag and drop"
+drag "GUITEST Drag and drop" 40 65 240 41
+shot copied "GUITEST Drag and drop"
+drag "GUITEST Drag and drop" 40 33 40 90
+shot moved "GUITEST Drag and drop"
+drag "GUITEST Drag and drop" 40 113 191 100
+drag "GUITEST Drag and drop" 40 65 60 229
+click "GUITEST Drag and drop" 40 33
+key shift+down
+drag "GUITEST Drag and drop" 40 33 240 150
+shot two "GUITEST Drag and drop"
+key alt+f4
+gone "GUITEST Drag and drop"
+expect GUI dnd
+expect GUI basket: Grape Cherry Kiwi   (copy at 1)
+expect GUI fruit: Banana Cherry Damson Apple Elderberry Fig
+expect GUI drag done: moved
+expect GUI drag done: nothing
+expect GUI into Larder: Damson (copy)
+expect GUI basket: Grape Cherry Kiwi Banana Cherry (copy at 3)
+expect GUI drag done: copied
+expect GUI end

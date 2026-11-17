@@ -151,6 +151,7 @@ static void destroy(struct gui_widget *w)
     }
     drop_timers(w);
     gui_tip_forget(w);
+    free(w->dnd);
     if (w->cls->destroy)
         w->cls->destroy(w);
     free(w->text);
@@ -679,6 +680,8 @@ void gui_win_realize(struct gui_window *w, int x, int y, int anywhere)
     w->gw.x = x, w->gw.y = y;
     w->w = w->px.w, w->h = w->px.h;
     w->relayout = 1;
+    if (gui_dnd_hook)                           /* (its widgets' drop targets: the window's DND target) */
+        gui_dnd_register(w);
 }
 
 /* Where a dialog goes: the middle of its owner, on the screen. */
@@ -1418,6 +1421,8 @@ int gui_step(unsigned wait_ms)
             }
             if (app_events)
                 app_events(&u.ev);
+        } else if (how == 0 && gui_dnd_hook && gui_dnd_hook(&u.ev)) {
+            /* (a drag's: dnd.c) */
         } else if (how == 0 && u.ev.kind == GLOS_EV_POST && gui_post_hook
                    && gui_post_hook(((const struct glos_ev_post *)&u.ev)->code)) {
             /* (the tasks' own: what they had for this thread is done) */
@@ -1465,6 +1470,7 @@ int gui_modal(struct gui_window *w)
     return r;
 }
 
+int (*gui_dnd_hook)(const struct glos_ev *ev);  /* (dnd.c sets it at the first source or target) */
 int (*gui_post_hook)(unsigned code);    /* (task.c sets it at the first task: a program with no tasks has no
                                            threads, and is not linked with what they need) */
 
