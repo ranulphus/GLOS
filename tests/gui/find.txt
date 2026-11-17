@@ -1,7 +1,8 @@
 # Find and Replace (toolkit 2, step C6; docs/v1/toolkit-2.md, Dialogs): GUITEST's line of text, the dialog by keys
 # alone, the page searching with gui_match. "fox": Find next twice (both), once more (not found: no wrapping, the
 # app's choice), Find previous (the first again); Replace with "cat" (that one, then on to the next), Replace all
-# (the rest); then a regular expression with groups, (\w+) (cat) put back as \2 \1 (two words swapped, twice).
+# (the rest); then a regular expression with groups, (\w+) (cat) put back as \2 \1 (two words swapped, twice);
+# then Find alone (the last text found in it).
 run GUITEST.EXE find
 wait "GUITEST Find"
 key alt+r
@@ -27,6 +28,11 @@ key alt+a
 key esc
 gone "Find and replace"
 shot replaced "GUITEST Find"
+key alt+f
+wait "Find"
+shot find "Find"
+key esc
+gone "Find"
 key alt+f4
 gone "GUITEST Find"
 expect GUI find

@@ -1,11 +1,12 @@
 /* The toolkit's dialogs (include/glos/gui.h): messages, a question with a
- * line to type, the file dialog; and the clipboard.
+ * line to type, About and the folder dialog; and the clipboard. (Open and
+ * Save: filedlg.c.)
  *
  * Each is modal (gui_modal): its owner and the app's other windows hear
- * nothing until it is answered. The file dialog lists a folder (folders
- * first, then files, with their sizes), goes into a folder by Enter or a
- * double click, up by Backspace or "..", to another drive by its choice;
- * a name or path typed and Enter go there or choose it. */
+ * nothing until it is answered. The question with a line to type is made
+ * from a resource file's text (toolkit 2, C10), so that its words go
+ * through GUI_T and a translation can lay it out anew; a message's buttons
+ * and lines depend on what it says, so it is made in code. */
 #include <stdio.h>
 
 #include "guiint.h"
@@ -148,27 +149,61 @@ static struct {
     int room;
 } ask;
 
-static void ask_ok(struct gui_widget *w, int what)
+static const char ask_text[] =
+    "object Ask: Dialog\n"
+    "  object Box: VBox\n"
+    "    Pad = 12\n"
+    "    object Prompt: Label\n"
+    "    end\n"
+    "    object Answer: Field\n"
+    "      Chars = 36\n"
+    "    end\n"
+    "    object Gap: Space\n"
+    "      Height = 4\n"
+    "      Grow = 0\n"
+    "    end\n"
+    "    object Buttons: HBox\n"
+    "      Pad = 0\n"
+    "      object Fill: Space\n"
+    "      end\n"
+    "      object OK: Button\n"
+    "        Text = \"OK\"\n"
+    "        Default = true\n"
+    "        Command = 1\n"
+    "      end\n"
+    "      object Cancel: Button\n"
+    "        Text = \"Cancel\"\n"
+    "        Cancel = true\n"
+    "        Command = 2\n"
+    "      end\n"
+    "    end\n"
+    "  end\n"
+    "end\n";
+
+static void ask_command(struct gui_window *w, int id)  /* OK (1): the line typed; Cancel (2) */
 {
-    (void)what;
-    snprintf(ask.buf, (size_t)ask.room, "%s", gui_get_text(ask.field));
-    gui_end_modal(w->win, GUI_OK);
+    if (id == 1) {
+        snprintf(ask.buf, (size_t)ask.room, "%s", gui_get_text(ask.field));
+        gui_end_modal(w, GUI_OK);
+    } else {
+        gui_end_modal(w, GUI_CANCEL_R);
+    }
 }
 
 int gui_ask(struct gui_window *owner, const char *title, const char *prompt, char *buf, int room)
 {
-    struct gui_window *w = gui_window(title, 0, 0, GUI_W_DIALOG);
-    struct gui_widget *box = gui_vbox(w->root, GUI_GAP, 12), *f, *row;
+    char err[96];
+    struct gui_window *w = gui_load_text(ask_text, err, sizeof err);
+    if (!w)
+        return 0;
+    gui_title(w, title);
     w->owner = owner;
-    gui_label(box, prompt);
-    f = gui_field(box, 36);
-    gui_set_text(f, buf);
-    gui_space(box, 0, 4);
-    row = buttons_row(box);
-    gui_button(row, "OK", ask_ok, GUI_OK)->flags |= GUI_DEFAULT;
-    gui_button(row, "Cancel", answer, GUI_CANCEL_R)->flags |= GUI_CANCEL;
-    ask.field = f, ask.buf = buf, ask.room = room;
-    w->focus = f;
+    w->on_command = ask_command;
+    gui_set_text(gui_named(w, "Prompt"), prompt);
+    ask.field = gui_named(w, "Answer");
+    gui_set_text(ask.field, buf);
+    ask.buf = buf, ask.room = room;
+    w->focus = ask.field;
     return gui_modal(w) == GUI_OK;
 }
 

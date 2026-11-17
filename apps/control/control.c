@@ -432,46 +432,69 @@ static struct gui_window *try_w;
 static struct gui_widget *try_text;
 static int try_left;
 
-static void try_draw(struct gui_widget *w, struct gfx_surface *s) { (void)w, (void)s; }
+/* The question, from a resource file's text (toolkit 2, C10: its words through GUI_T as it is loaded). */
+static const char try_res[] =
+    "object Screen: Dialog\n"
+    "  Title = \"Screen\"\n"
+    "  object Box: VBox\n"
+    "    Gap = 10\n"
+    "    Pad = 12\n"
+    "    object Says: Label\n"
+    "    end\n"
+    "    object Buttons: HBox\n"
+    "      Pad = 0\n"
+    "      object Fill: Space\n"
+    "      end\n"
+    "      object Keep: Button\n"
+    "        Text = \"&Keep\"\n"
+    "        Default = true\n"
+    "        Command = 1\n"
+    "      end\n"
+    "      object Back: Button\n"
+    "        Text = \"&Back\"\n"
+    "        Cancel = true\n"
+    "        Command = 2\n"
+    "      end\n"
+    "    end\n"
+    "  end\n"
+    "end\n";
 
-static int try_tick(struct gui_widget *w, struct gui_ev *e)
+static void try_say(void)
 {
     char t[80];
-    (void)w;
-    if (e->type != GUI_EV_TIMER)
-        return 0;
-    if (--try_left <= 0) {
-        gui_end_modal(try_w, GUI_CANCEL_R);
-        return 1;
-    }
-    snprintf(t, sizeof t, "Keep this screen? It goes back in %d second%s.", try_left, try_left == 1 ? "" : "s");
+    snprintf(t, sizeof t, GUI_T("Keep this screen? It goes back in %d second%s."), try_left, try_left == 1 ? "" : "s");
     gui_set_text(try_text, t);
-    return 1;
 }
 
-static void try_button(struct gui_widget *w, int what)
+static void try_tick(void *arg)                 /* a second gone */
 {
-    (void)what;
-    gui_end_modal(try_w, w->id);
+    (void)arg;
+    if (--try_left <= 0)
+        gui_end_modal(try_w, GUI_CANCEL_R);
+    else
+        try_say();
+}
+
+static void try_command(struct gui_window *w, int id)  /* Keep (1) or Back (2) */
+{
+    gui_end_modal(w, id == 1 ? GUI_OK : GUI_CANCEL_R);
 }
 
 /* The new screen mode, tried: 1 kept; 0 the old one again. */
 static int try_mode(void)
 {
-    struct gui_widget *box, *row, *tick;
+    char err[96];
     int r;
-    try_w = gui_window("Screen", 0, 0, GUI_W_DIALOG);
+    if (!(try_w = gui_load_text(try_res, err, sizeof err)))
+        return 0;                               /* (no question to ask: the old screen again, to be safe) */
     try_w->owner = win;
-    box = gui_vbox(try_w->root, 10, 12);
+    try_w->on_command = try_command;
+    try_text = gui_named(try_w, "Says");
     try_left = TRY_SECONDS;
-    try_text = gui_label(box, "Keep this screen? It goes back in 15 seconds.");
-    tick = gui_canvas(box, 1, 1, try_draw, try_tick);
-    row = gui_hbox(box, 6, 0);
-    gui_space(row, 0, 0);
-    gui_button(row, "&Keep", try_button, GUI_OK)->flags |= GUI_DEFAULT;
-    gui_button(row, "&Back", try_button, GUI_CANCEL_R)->flags |= GUI_CANCEL;
-    gui_timer(tick, 1000);
+    try_say();
+    gui_idle(try_tick, NULL, 1000);
     r = gui_modal(try_w);
+    gui_idle(try_tick, NULL, 0);
     gui_close(try_w);
     return r == GUI_OK;
 }

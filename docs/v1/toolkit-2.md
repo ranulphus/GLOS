@@ -843,6 +843,19 @@ widget now draws, and each such change is looked at before its goldens are made 
 - **C10c, Monitor's history on the graph** (`apps/monitor`): the Performance page's processor history is a
   `gui_graph` (one series, 0 to 100, the last 60 samples as a line) in place of its own bars. Its script masks the
   graph (the machine's figures), so its pictures did not change.
+- **C10d, dialogs from resource text** (C10 plan, step 4, narrowed): the apps have one dialog of their own, the
+  Control Panel's Screen question (keep the new mode, or back in 15 seconds); the rest are the toolkit's. Those
+  whose layout is fixed are now made from a resource file's text kept in the source beside the code that uses
+  it (`gui_load_text`; their words go through `GUI_T` as they are loaded): Find and Find and replace
+  (`sdk/gui/find.c`: one text, lines marked `?` for Find and replace's alone and `!` for Find's), the question
+  with a line to type (`gui_ask`) and the Screen question (`apps/control`: its countdown now `gui_idle`, not a
+  1-pixel canvas's timer; if its text could not be loaded, the old mode comes back). The code calls the widgets
+  by name (`gui_named`) and hears the buttons as commands. Each was compared with the dialog made in code before
+  that went: `find` gained a shot of Find alone, made first with the code version; every host picture of
+  `find`, `dialogs` and `smalldlg` is the same at 8, 16 and 32 bits; the control suite presses Keep and waits
+  out the countdown on Loop A. Made in code still, as their content decides their layout: messages (their lines
+  and buttons), About, Open and Save, the folder, font and colour dialogs (lists, trees, previews and palettes,
+  which are not resource classes).
 
 ### Icons (2026-11-16: the owner's choice, after sample sheets of eight sets in GLOS's format)
 

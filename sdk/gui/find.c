@@ -2,8 +2,12 @@
  * find and what to put in its place are combo boxes whose history lasts while the app runs; Match case, Whole
  * words and Regular expressions are check boxes. The app is told what to do (Find next, Find previous, Replace,
  * Replace all) and searches its own text, best with gui_match (sdk/gui/regex.c), so that every app finds alike;
- * gui_find_say puts its answer ("Not found", "3 replaced") in the dialog. */
+ * gui_find_say puts its answer ("Not found", "3 replaced") in the dialog.
+ *
+ * The dialog is made from a resource file's text (step C10): its words go through GUI_T as it is loaded, and a
+ * translation can lay it out anew. Lines of the text that start with ? are Find and replace's alone, ! Find's. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "guiint.h"
@@ -29,14 +33,102 @@ static void remember(int which, const char *text)
     nhist[which] = n;
 }
 
-static struct gui_find *of(struct gui_widget *w) { return w->win ? w->win->user : NULL; }
+enum { C_CLOSE = 9 };                          /* (the buttons' commands: GUI_FIND_NEXT ... and this) */
+
+static const char dialog_text[] =
+    "object Find: Dialog\n"
+    "!  Title = \"Find\"\n"
+    "?  Title = \"Find and replace\"\n"
+    "  object Box: HBox\n"
+    "    Gap = 12\n"
+    "    Pad = 10\n"
+    "    object Left: VBox\n"
+    "      Pad = 0\n"
+    "      object Fields: Form\n"
+    "        object WhatRow: Row\n"
+    "          Label = \"Find &what:\"\n"
+    "          object What: Combo\n"
+    "            Chars = 24\n"
+    "          end\n"
+    "        end\n"
+    "?        object WithRow: Row\n"
+    "?          Label = \"Re&place with:\"\n"
+    "?          object With: Combo\n"
+    "?            Chars = 24\n"
+    "?          end\n"
+    "?        end\n"
+    "      end\n"
+    "      object Checks: VBox\n"
+    "        Gap = 2\n"
+    "        Pad = 0\n"
+    "        object Case: Check\n"
+    "          Text = \"Match &case\"\n"
+    "        end\n"
+    "        object Words: Check\n"
+    "          Text = \"Whole w&ords\"\n"
+    "        end\n"
+    "        object Regex: Check\n"
+    "          Text = \"Regular e&xpressions\"\n"
+    "        end\n"
+    "      end\n"
+    "      object Said: Label\n"
+    "        Width = 260\n"
+    "      end\n"
+    "    end\n"
+    "    object Buttons: VBox\n"
+    "      Pad = 0\n"
+    "      object Next: Button\n"
+    "        Text = \"Find &next\"\n"
+    "        Default = true\n"
+    "        Command = 1\n"
+    "      end\n"
+    "      object Previous: Button\n"
+    "        Text = \"Find pre&vious\"\n"
+    "        Command = 2\n"
+    "      end\n"
+    "?      object Replace: Button\n"
+    "?        Text = \"&Replace\"\n"
+    "?        Command = 3\n"
+    "?      end\n"
+    "?      object All: Button\n"
+    "?        Text = \"Replace &all\"\n"
+    "?        Command = 4\n"
+    "?      end\n"
+    "      object Close: Button\n"
+    "        Text = \"Close\"\n"
+    "        Cancel = true\n"
+    "        Command = 9\n"
+    "      end\n"
+    "    end\n"
+    "  end\n"
+    "end\n";
+
+/* The dialog's text for Find (replace 0) or Find and replace: malloc'd. */
+static char *text_for(int replace)
+{
+    char *out = malloc(sizeof dialog_text), *o = out;
+    const char *p = dialog_text;
+    if (!out)
+        return NULL;
+    while (*p) {
+        const char *e = strchr(p, '\n');
+        size_t n = e ? (size_t)(e - p) + 1 : strlen(p);
+        int keep = *p == '?' ? replace : *p == '!' ? !replace : 1;
+        if (keep) {
+            size_t skip = *p == '?' || *p == '!';
+            memcpy(o, p + skip, n - skip);
+            o += n - skip;
+        }
+        p += n;
+    }
+    *o = 0;
+    return out;
+}
 
 /* The dialog's fields into f, the texts remembered, and the app told. */
-static void act(struct gui_widget *w, int what)
+static void act(struct gui_find *f, int what)
 {
-    struct gui_find *f = of(w);
     int i;
-    (void)what;
     if (!f)
         return;
     snprintf(f->what, sizeof f->what, "%s", gui_get_text(f->what_box));
@@ -56,22 +148,23 @@ static void act(struct gui_widget *w, int what)
     }
     gui_find_say(f, "");
     if (f->what[0] && f->on_find)
-        f->on_find(f, w->id);
+        f->on_find(f, what);
 }
 
 static void what_on(struct gui_widget *w, int what)    /* Enter in what to find: Find next */
 {
-    if (what == GUI_ON_ACTIVATE) {
-        w->id = GUI_FIND_NEXT;
-        act(w, 0);
-    }
+    if (what == GUI_ON_ACTIVATE && w->win)
+        act(w->win->user, GUI_FIND_NEXT);
 }
 
-static void close_click(struct gui_widget *w, int what)
+static void command(struct gui_window *w, int id)      /* its buttons */
 {
-    (void)what;
-    if (of(w))
-        gui_find_close(of(w));
+    if (!w->user)
+        return;
+    if (id == C_CLOSE)
+        gui_find_close(w->user);
+    else
+        act(w->user, id);
 }
 
 static void find_closed(struct gui_window *w)  /* its close box or Esc */
@@ -82,46 +175,39 @@ static void find_closed(struct gui_window *w)  /* its close box or Esc */
 
 void gui_find(struct gui_window *owner, struct gui_find *f)
 {
-    struct gui_widget *box, *form, *row, *checks, *buttons, *b;
+    char *text, err[96];
     int i;
     if (f->w) {                                 /* (shown already: in front, the text to find chosen) */
         gui_show(f->w, 1);
         gui_focus(f->what_box);
         return;
     }
-    f->w = gui_window(f->replace ? "Find and replace" : "Find", 0, 0, GUI_W_DIALOG);
+    if (!(text = text_for(f->replace)))
+        return;
+    f->w = gui_load_text(text, err, sizeof err);
+    free(text);
+    if (!f->w)
+        return;
     f->w->owner = owner;
     f->w->user = f;
     f->w->on_close = find_closed;
-    box = gui_hbox(f->w->root, 12, 10);
-    form = gui_vbox(box, GUI_GAP, 0);
-    row = gui_form(form);
-    f->what_box = gui_combo(gui_row(row, "Find &what:", NULL), 24);
+    f->w->on_command = command;
+    f->what_box = gui_named(f->w, "What");
     for (i = 0; i < nhist[0]; i++)
         gui_combo_add(f->what_box, hist[0][i]);
     gui_set_text(f->what_box, f->what);
     gui_on(f->what_box, what_on, GUI_FIND_NEXT);
-    f->with_box = NULL;
-    if (f->replace) {
-        f->with_box = gui_combo(gui_row(row, "Re&place with:", NULL), 24);
+    f->with_box = gui_named(f->w, "With");     /* (NULL: Find alone) */
+    if (f->with_box) {
         for (i = 0; i < nhist[1]; i++)
             gui_combo_add(f->with_box, hist[1][i]);
         gui_set_text(f->with_box, f->with);
     }
-    checks = gui_vbox(form, 2, 0);
-    f->case_box = gui_check(checks, "Match &case", (f->flags & GUI_FIND_CASE) != 0);
-    f->words_box = gui_check(checks, "Whole w&ords", (f->flags & GUI_FIND_WORDS) != 0);
-    f->regex_box = gui_check(checks, "Regular e&xpressions", (f->flags & GUI_FIND_REGEX) != 0);
-    f->said = gui_label(form, " ");
-    gui_size(f->said, 260, 0);
-    buttons = gui_vbox(box, GUI_GAP, 0);
-    (b = gui_button(buttons, "Find &next", act, GUI_FIND_NEXT))->flags |= GUI_DEFAULT;
-    gui_button(buttons, "Find pre&vious", act, GUI_FIND_PREV);
-    if (f->replace) {
-        gui_button(buttons, "&Replace", act, GUI_FIND_REPLACE);
-        gui_button(buttons, "Replace &all", act, GUI_FIND_ALL);
-    }
-    gui_button(buttons, "Close", close_click, 0)->flags |= GUI_CANCEL;
+    gui_set_checked(f->case_box = gui_named(f->w, "Case"), (f->flags & GUI_FIND_CASE) != 0);
+    gui_set_checked(f->words_box = gui_named(f->w, "Words"), (f->flags & GUI_FIND_WORDS) != 0);
+    gui_set_checked(f->regex_box = gui_named(f->w, "Regex"), (f->flags & GUI_FIND_REGEX) != 0);
+    f->said = gui_named(f->w, "Said");
+    gui_set_text(f->said, " ");
     f->w->focus = f->what_box;
     gui_show(f->w, 1);
 }
