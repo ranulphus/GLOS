@@ -59,6 +59,7 @@ static int ndocs;
 static struct gui_window *start;         /* made once (and again if the task bar's edge moves), hidden between */
 static struct gui_widget *search, *list, *tiles;
 static int up, start_x, start_y;        /* on the screen now; where it was made */
+static unsigned down_at;                /* when a press elsewhere took it away (glos_ticks; 0: not so) */
 
 static void say(const char *what, const char *a)
 {
@@ -619,6 +620,8 @@ static int key(struct gui_window *w, struct gui_ev *e)
 static void popdown(struct gui_window *w)
 {
     (void)w;
+    if (up)
+        down_at = glos_ticks() | 1;
     hide();
 }
 
@@ -634,6 +637,13 @@ void start_open(int x, int y)
         hide();
         return;
     }
+    /* A press on the task bar's mark while it was up took it away just now (the press took the keyboard from it,
+       then asked for the launcher): it stays away. */
+    if (down_at && glos_ticks() - down_at < 300) {
+        down_at = 0;
+        return;
+    }
+    down_at = 0;
     gui_screen_size(&sw, &sh);
     if (y > sh / 2)
         y -= START_H;

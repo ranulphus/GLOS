@@ -27,4 +27,4 @@ key alt+f4
 gone "Desktop"
 expect FILES start run Calculator
 expect FILES start page region
-expect FILES end
+expect FILES end 
