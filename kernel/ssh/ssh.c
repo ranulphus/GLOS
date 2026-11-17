@@ -479,7 +479,7 @@ static struct ssh_chan *chan_of(struct ssh_conn *c, struct sread *r)
 static void chan_free(struct ssh_chan *ch)
 {
     struct ssh_conn *c = ch->conn;
-    if (ch->ending)
+    if (ch->ending && c)
         c->ending--;
     c->ops->chan_gone(ch);
     c->chans[ch->id] = NULL;
@@ -581,7 +581,9 @@ void ssh_chan_exit(struct ssh_chan *ch, uint32_t status)
         return;
     ch->exit_pending = 1;
     ch->exit_status = status;
-    if (!ch->ending) {
+    if (!ch->ending && ch->conn) {              /* (a local channel, ssh_chan_local's, has no connection: no client to
+                                                   answer; counting it wrote near address 0, into DOS's interrupt
+                                                   table: the cable and floppy suites' cannot-run, 2026-11-17) */
         ch->ending = 1;
         ch->conn->ending++;
     }
