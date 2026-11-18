@@ -613,6 +613,59 @@ void status_add_display(struct gui_widget *page)
 
 /* ---- the network */
 
+/* ---- the Secrets page (phase D): not GLOS.CFG's, the secrets store itself: how it is, and the two things the
+   user does to it, each in a dialog of GLOS's own (SECRETS' STORE): no password passes through this program. */
+
+static struct gui_widget *sec_line, *sec_unlock, *sec_change;
+static unsigned sec_state = 99, sec_has = 99;
+
+static void secrets_poll(void)
+{
+    unsigned state = GLOS_STORE_NONE, has = 0;
+    const char *t;
+    if (!sec_line)
+        return;
+    if (glos_secrets_store(GLOS_STORE_STATE, &state, &has) != 0)
+        state = GLOS_STORE_NONE;
+    if (state == sec_state && has == sec_has)
+        return;
+    sec_state = state, sec_has = has;
+    t = state == GLOS_STORE_OPEN ? (has ? GUI_T("The store is open. It has a master password.")
+                                        : GUI_T("The store is open. It has no master password."))
+      : state == GLOS_STORE_LOCKED ? GUI_T("The store is locked: its master password hasn't been given since GLOS started.")
+      : state == GLOS_STORE_BAD ? GUI_T("The store's file can't be read.")
+      : GUI_T("There is no store here (GLOS runs without its agent).");
+    gui_set_text(sec_line, t);
+    gui_enable(sec_unlock, state == GLOS_STORE_LOCKED);
+    gui_enable(sec_change, state == GLOS_STORE_OPEN || state == GLOS_STORE_LOCKED);
+    gui_set_text(sec_change, has ? GUI_T("&Master password...") : GUI_T("Set a &master password..."));
+    printf("CONTROL secrets state=%u password=%u\n", state, has);
+    fflush(stdout);
+}
+
+static void secrets_button(struct gui_widget *b, int what)
+{
+    (void)what;
+    glos_secrets_store(b->id == 21 ? GLOS_STORE_UNLOCK : GLOS_STORE_PASSWORD, NULL, NULL);     /* (GLOS asks) */
+    sec_state = 99;
+    secrets_poll();
+}
+
+void status_add_secrets(struct gui_widget *page)
+{
+    struct gui_widget *row;
+    gui_label(page, GUI_T("Programs keep passwords and keys in GLOS's secrets store, each its own."));
+    gui_label(page, GUI_T("With a master password the store is encrypted under it, and GLOS asks"));
+    gui_label(page, GUI_T("for it once after each start. Without one, whoever has the disk has them."));
+    sec_line = gui_label(page, "");
+    row = gui_hbox(page, 6, 0);
+    sec_unlock = gui_button(row, GUI_T("&Unlock..."), secrets_button, 21);
+    sec_change = gui_button(row, GUI_T("Set a &master password..."), secrets_button, 22);
+    gui_space(row, 0, 0);
+    gui_space(page, 0, 0);
+    secrets_poll();
+}
+
 void status_poll(void)
 {
     static struct glos_net_if nif[4];
@@ -628,6 +681,7 @@ void status_poll(void)
     sl_poll();
     display_poll();
     zone_poll();
+    secrets_poll();
     if (!net[0] || (last && now - last < 1000))
         return;
     last = now ? now : 1;

@@ -20,6 +20,7 @@ void status_add_time(struct gui_widget *page);  /* the Date and Time page's cloc
 void status_add_zone(struct gui_widget *page, struct gui_widget *field);        /* ... and its list of places */
 void status_add_saver(struct gui_widget *tabs, int page_n, struct gui_widget *page, struct gui_widget *choice,
                       const char *const *values, const char *argv0);    /* the Saver page's saver, running small */
+void status_add_secrets(struct gui_widget *page);        /* the Secrets page: the store's state, Unlock, the master password */
 void status_poll(void);                 /* read again (the network once a second, the pads each time) */
 
 #endif

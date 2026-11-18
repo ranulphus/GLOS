@@ -66,9 +66,37 @@ static int call(struct app *a, struct trapframe *tf, u32 fn)
     return len > q.count ? a2_fail(tf, GLOS_E_ROOM) : a2_ok(tf, 0);
 }
 
+/* STORE: the store's state; its unlocking and its master password's change, which the user does in the desktop's
+   own dialogs (deskpass.c): this thread waits for them, as GET's does. */
+static int store(struct app *a, struct trapframe *tf)
+{
+    struct glos_secrets_store q;
+    u32 size;
+    int bad = 0;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.what > GLOS_STORE_PASSWORD)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if (q.what == GLOS_STORE_PASSWORD && !app_own(a))
+        return a2_fail(tf, GLOS_E_REFUSED);     /* (the user's to do, from GLOS's own Control Panel) */
+    if (q.what != GLOS_STORE_STATE) {
+        if (secrets_state() == SEC_LOCKED)
+            bad = desk_password(a) != 0;
+        else if (secrets_state() != SEC_OPEN)
+            bad = 1;
+        if (!bad && q.what == GLOS_STORE_PASSWORD)
+            bad = desk_password_change(a) != 0;
+    }
+    q.state = (u32)secrets_state();             /* (SEC_ and GLOS_STORE_ are the same numbers) */
+    q.has_password = (u32)secrets_has_password();
+    if (a2_wr(tf, &q, sizeof q, size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    return bad ? a2_fail(tf, GLOS_E_REFUSED) : a2_ok(tf, 0);
+}
+
 int api2_secrets(struct app *a, struct trapframe *tf, u32 n)
 {
     u32 fn = GLOS_FN(GLOS_AREA_SECRETS, n);
+    if (fn == GLOS_SECRETS_STORE)
+        return store(a, tf);
     if (fn == GLOS_SECRETS_PUT || fn == GLOS_SECRETS_GET || fn == GLOS_SECRETS_REMOVE)
         return call(a, tf, fn);
     return a2_fail(tf, GLOS_E_FUNCTION);

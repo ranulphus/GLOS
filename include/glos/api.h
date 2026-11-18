@@ -54,7 +54,7 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 3
+#define GLOS_MINOR 4            /* (2.4, phase D: SECRETS' STORE; a window's GLOS_PROP_WIN_ICON_BIG) */
 
 #define GLOS_FN(area, n) ((2u << 16) | ((unsigned)(area) << 8) | (unsigned)(n))
 #define GLOS_FN_MAJOR(fn) ((unsigned)(fn) >> 16)
@@ -1405,6 +1405,27 @@ struct glos_secret {
     unsigned length;            /* -> GET: the value's length */
 };
 #define GLOS_SECRET_SHARED 1    /* one that programs share, by the user's leave */
+
+/* The store itself (phase D: the Control Panel's Secrets page). STATE: how it is. UNLOCK: a locked store opened
+   by the user, in GLOS's own dialog (as a GET that finds it locked does). PASSWORD: the master password set,
+   changed or taken away by the user, again in GLOS's own dialog (the one it has now, the new one twice: no app
+   sees either); for GLOS's own programs alone, and only on an open store (a locked one is opened first).
+   GLOS_E_REFUSED: the user said no, there is no desktop to ask on, no store here, or (PASSWORD) another's
+   program asked. The state as it is afterwards comes back either way. */
+#define GLOS_SECRETS_STORE  GLOS_FN(GLOS_AREA_SECRETS, 3)       /* struct glos_secrets_store */
+struct glos_secrets_store {
+    unsigned size;
+    unsigned what;              /* GLOS_STORE_STATE, _UNLOCK, _PASSWORD */
+    unsigned state;             /* -> GLOS_STORE_NONE, _OPEN, _LOCKED, _BAD */
+    unsigned has_password;      /* -> 1: it has a master password */
+};
+#define GLOS_STORE_STATE    0
+#define GLOS_STORE_UNLOCK   1
+#define GLOS_STORE_PASSWORD 2
+#define GLOS_STORE_NONE   0     /* no store here (GLOS wasn't started with its agent) */
+#define GLOS_STORE_OPEN   1     /* usable */
+#define GLOS_STORE_LOCKED 2     /* its master password hasn't been given since GLOS started */
+#define GLOS_STORE_BAD    3     /* its file can't be read */
 
 /* ================================================================== SETTINGS (0Ch): GLOS.CFG, the theme, the region
  *

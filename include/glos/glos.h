@@ -251,6 +251,9 @@ int glos_capture_mouse(unsigned window, const struct glos_capture_mouse *events,
 int glos_secret_put(const char *name, const void *value, unsigned length, unsigned flags);
 int glos_secret_get(const char *name, void *buffer, unsigned room, unsigned *length, unsigned flags);
 int glos_secret_remove(const char *name, unsigned flags);
+/* The store itself (what: GLOS_STORE_STATE, _UNLOCK, _PASSWORD): its state (GLOS_STORE_) and whether it has a
+   master password, as they are afterwards (either pointer may be 0). The user is asked in GLOS's own dialogs. */
+int glos_secrets_store(unsigned what, unsigned *state, unsigned *has_password);
 /* DRAW's CACHE: some of the program's DOS memory write-combining (GLOS_CACHE_WC) or write-back again; for any
    program. 0, or GLOS_E_. */
 int glos_cache(unsigned address, unsigned bytes, unsigned type);

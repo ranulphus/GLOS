@@ -403,6 +403,19 @@ int glos_resize(glos_handle id, int cw, int ch)
     return 0;
 }
 
+/* (The secrets store: open and without a master password here; nobody to ask for one.) */
+int glos_secrets_store(unsigned what, unsigned *state, unsigned *has_password)
+{
+    if (state)
+        *state = GLOS_STORE_OPEN;
+    if (has_password)
+        *has_password = 0;
+    if (what == GLOS_STORE_STATE)
+        return 0;
+    last_error = GLOS_E_REFUSED;
+    return GLOS_E_REFUSED;
+}
+
 /* (A window's pictures and the like: taken, and not drawn here.) */
 int glos_set_data(glos_handle h, unsigned prop, const void *data, unsigned length)
 {

@@ -897,6 +897,8 @@ int main(int argc, char **argv)
     }
     if (side && wall && style)
         look_add(side, win, wall->w, style->w, style->choice, begin ? begin->w : NULL, argv[0]);
+    /* A last page that is not one of GLOS.CFG's: the secrets store (status.c). */
+    status_add_secrets(gui_tab(tabs, GUI_T("Secrets")));
     help = gui_label(box, "");
     when_label = gui_label(box, "");
     row = gui_hbox(box, 6, 0);
@@ -918,6 +920,8 @@ int main(int argc, char **argv)
     for (s = 0; argc > 1 && cfg_sections[s]; s++)  /* CONTROL SECTION: at that page (the task bar's clock: time) */
         if (!strcasecmp(argv[1], cfg_sections[s]))
             gui_tabs_set(tabs, s);
+    if (argc > 1 && !strcasecmp(argv[1], "secrets"))    /* (s: the sections' number, the page after them) */
+        gui_tabs_set(tabs, s);
     gui_show(win, 1);
     gui_idle(help_poll, NULL, 100);
     printf("CONTROL start\n");

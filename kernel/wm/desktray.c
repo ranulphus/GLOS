@@ -190,7 +190,12 @@ void desktray_turn(struct wm *m, int screen, int again)
         if (k == ARRAY_SIZE(hung_told))
             break;
         hung_told[k] = w->id;
-        ksnprintf(buf, sizeof buf, "%.60s isn't answering.", w->title[0] ? w->title : "A program");
+        {                                       /* (its title's first 60 bytes: ksnprintf has no "%.60s") */
+            char name[61];
+            strncpy(name, w->title[0] ? w->title : "A program", 60);
+            name[60] = 0;
+            ksnprintf(buf, sizeof buf, "%s isn't answering.", name);
+        }
         deskshell_note("Not answering", buf);
     }
     started = 1;

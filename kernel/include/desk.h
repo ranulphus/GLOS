@@ -88,6 +88,7 @@ int desk_win_embed(struct app *a, u32 host, u32 child, const struct gfx_rect *at
                                                    window `child` shown inside a's window `host` (at NULL: let go):
                                                    0, GLOS_E_HANDLE, DESK_E_REFUSED */
 int desk_drawing(void);                 /* the desktop is painting, or owes the screen something (glos shot waits) */
+int desk_password_change(struct app *a);        /* ... and its change, asked the same way: 0 done, -1 not */
 int desk_password(struct app *a);       /* (kernel/wm/deskpass.c) the secrets store's master password asked of the
                                            user in a dialog of the desktop's, the calling app's thread waiting: 0
                                            once the store is open; -1: no desktop to ask on, the user said no, or

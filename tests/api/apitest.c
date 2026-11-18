@@ -137,7 +137,8 @@ static void before(void)
           && GLOS_HAS(&v, GLOS_NET_STATE) && GLOS_HAS(&v, GLOS_NET_RECVFROM) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_NET, 10))
           && GLOS_HAS(&v, GLOS_CAPTURE_MOUSE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_CAPTURE, 3))
           && GLOS_HAS(&v, GLOS_DEBUG_WRITE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_DEBUG, 3))
-          && GLOS_HAS(&v, GLOS_SECRETS_REMOVE) && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SECRETS, 3)),
+          && GLOS_HAS(&v, GLOS_SECRETS_REMOVE) && GLOS_HAS(&v, GLOS_SECRETS_STORE)
+          && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SECRETS, 4)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
     memset(&small, 0xAB, sizeof small);
     small.v.size = 12;                                  /* (size, major, minor: an older program's) */
@@ -3157,6 +3158,10 @@ static int sec_mode(const char *what)
         r = glos_secret_get("wifi", v, sizeof v - 1, &len, GLOS_SECRET_SHARED);
         r2 = glos_secret_get("keep-me", v + 32, 16, &len, 0);          /* (the same program's name: its own) */
         check("sec-shared", r == 0, "r=%d value=%s own=%d", r, r == 0 ? v : "-", r2);
+    } else if (!strcmp(what, "store") || !strcmp(what, "store-pw")) {   /* (phase D: the store itself) */
+        unsigned state = 99, has = 99;
+        r = glos_secrets_store(what[5] ? GLOS_STORE_PASSWORD : GLOS_STORE_STATE, &state, &has);
+        check(what[5] ? "sec-store-pw" : "sec-store", 1, "r=%d state=%u password=%u", r, state, has);
     } else {
         r = glos_secret_remove("keep-me", 0);
         r2 = glos_secret_remove("wifi", GLOS_SECRET_SHARED);

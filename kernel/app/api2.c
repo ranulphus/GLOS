@@ -469,7 +469,7 @@ static int version(struct trapframe *tf)
     v.functions[GLOS_AREA_AUDIO][0] = 0x7F;             /* OUT, IN, MIXER, LEVELS, MIDI_OUT, MIDI_IN, DEVICES */
     v.functions[GLOS_AREA_CAPTURE][0] = 0x07;           /* PIXELS, KEYS, MOUSE */
     v.functions[GLOS_AREA_DEBUG][0] = 0x07;             /* ATTACH, READ, WRITE */
-    v.functions[GLOS_AREA_SECRETS][0] = 0x07;           /* PUT, GET, REMOVE */
+    v.functions[GLOS_AREA_SECRETS][0] = 0x0F;           /* PUT, GET, REMOVE, STORE (phase D) */
     v.functions[GLOS_AREA_NET][0] = 0x3FF;              /* RESOLVE, CONNECT, SEND, RECEIVE, LISTEN, ACCEPT, STATE,
                                                            DATAGRAM, SENDTO, RECVFROM */
     v.functions[GLOS_AREA_SYS][0] = 0x1F;               /* STAT, KILL, LOG, PROGRAMS, TERMINAL */

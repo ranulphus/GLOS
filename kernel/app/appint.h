@@ -49,6 +49,7 @@ struct app {
     u32 wake;                                   /* counts every event given it (app_sleep's) */
     u32 ev_since;                               /* the tick its queue last got its first event, or it last took one */
     u8 ev_taken;                                /* it has taken an event at least once (it reads its queue) */
+    u8 asking;                                  /* it waits for the user in a dialog of GLOS's own (app_asking) */
     struct api2 *v2;                            /* the API's: its handles, timers and events (api2.c); NULL: a program
                                                    made an app without asking (glos run --app), which makes no calls */
     u32 dta;

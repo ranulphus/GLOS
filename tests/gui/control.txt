@@ -51,6 +51,8 @@ wait "New Program"
 type quake.exe\n
 gone "New Program"
 shot cp-new "Control Panel"
+key ctrl+tab
+shot cp-secrets "Control Panel"
 key esc
 gone "Control Panel"
 expect CONTROL start

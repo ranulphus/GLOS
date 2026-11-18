@@ -572,6 +572,35 @@ The steps:
   g100win (the DOS-GL session's; not merged yet): a GLOS built against it says `vram=4096K` on that card and
   OBJECTS.SCR draws as it should there, in the hardware's window.
 
+### D5's Secrets page (2026-11-18; API 2.4)
+
+- **The page** is the Control Panel's last, and the one that is not a section of GLOS.CFG (`CONTROL secrets`
+  opens it): what the store is for, how it is now (open, with or without a master password; locked; no store
+  here; its file unreadable), and two buttons: **Unlock...** for a locked store, and **Set a master password...**
+  (or **Master password...**, where it has one) to set, change or take away the master password.
+- **No password passes through the program.** Both buttons call SECRETS' new **STORE** (`glos_secrets_store`:
+  GLOS_STORE_STATE, _UNLOCK, _PASSWORD), and the kernel asks the user in the desktop's own dialog
+  (kernel/wm/deskpass.c), as it already did when an app needed a locked store. The change is asked there a
+  question at a time: the password it has now (where it has one), the new one (none: just Enter), the new one
+  once more; a wrong one or two that differ are asked again, Esc leaves everything as it was. PASSWORD is for
+  GLOS's own programs alone (another's is refused), and a locked store is opened first.
+- **The change's arithmetic is done on a thread of the kernel's own** (deskpass.c `change`), the caller waiting
+  for it ("One moment..." in the dialog). An app's call is a trap path, with interrupts off: the tick stands
+  still in it, and secrets.c chooses the key's rounds by timing this PC against the tick. Called straight from
+  the dialog it took the most rounds there are (four million: minutes, with the whole PC stopped; Loop A called
+  it a hang).
+- **Two older faults seen on the way, mended:** an app that waits in a call for GLOS's own dialog was said to be
+  "not answering" after five seconds (its events wait with it): it isn't now (`app_asking`), and its five
+  seconds begin again when it is back. And that notification's words were ".60s isn't answering": ksnprintf
+  has no "%.60s".
+- **API 2.4:** the STORE call, and a window's GLOS_PROP_WIN_ICON_BIG (above). `ver` in the shell says so.
+- **Tests:** `api` (the functions' list; `apisec`: the store open without a password, another folder's program
+  refused the change, the store locked after a restart with one); Loop A `control-secrets` (a master password
+  set in the dialog, typed twice, then taken away with the old one: the page's lines say each state); the
+  page's shot in `control`; the control suite (its walk counts the page).
+- **Not done:** the shared secrets' grants (which program may use which name) as a list on the page; today
+  `glos secrets allow|deny` over SSH alone.
+
 ## Where phase D stands (2026-11-18)
 
 | Step | Done | Left |
@@ -580,7 +609,7 @@ The steps:
 | **D2** the tray | GLOS's own icons (volume, network, pads, a remote session), its notifications (a pad, the network, an app not answering, a scheduled run that failed, a disk nearly full: the shell's), the overflow, the held count | (nothing) |
 | **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes |
 | **D4** the wallpaper | A picture in four styles, drawn by the shell | (its chooser and preview are D5's, done) |
-| **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list and the startup programs' | The pads' mapping; USB as a tree; Secrets (needs a call of its own for the master password: no shell line may carry it); icons in the list |
+| **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list and the startup programs'; the Secrets page (the store's state, Unlock, the master password in GLOS's own dialog) | The pads' mapping; USB as a tree; the shared secrets' grants as a list; icons in the list |
 | **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES, TEXT, OBJECTS and MAZE (the five of the plan), on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word, the savers' speed and detail | (the pipes' joints and such: not planned); their speed measured where the software renderer draws them |
 | **D7** background apps | `[services] run`, started again when they end, `glos services`, refused if no app | A folder or a user for each |
 | **D8** the task manager | Monitor's Services page with Stop and Start; Switch To; the Windows page with Go To; each app's share of the processor | Sessions and streams; SYS's structures for NET, AUDIO and USB |
@@ -589,9 +618,6 @@ The steps:
 
 - **Tiles' groups and sizes** (D3): the pins' lines of START.CFG gain a group's name and a size; the tiles' area
   lays out by group. Not begun.
-- **Secrets** (D5): SECRETS needs calls for the store's state, unlocking and the master password (today only
-  `glos secrets ...` has them); the page then asks for the passwords in a dialog. No shell line may carry a
-  password (the lines are in logs).
 - **The pads' mapping** (D5): `[joystick] map` is in the gamepad plan but not in the kernel (vjoy.c reads port
   and range alone): the kernel first, then a page with a row a button.
 - **USB as a tree** (D5): SYS's STAT needs USB as structures (a controller, a hub, a device, its parent), which

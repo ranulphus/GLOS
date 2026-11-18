@@ -1294,6 +1294,17 @@ int glos_secret_get(const char *name, void *buffer, unsigned room, unsigned *len
     return r;
 }
 
+int glos_secrets_store(unsigned what, unsigned *state, unsigned *has_password)
+{
+    struct glos_secrets_store q = { sizeof q, what, 0, 0 };
+    int r = raw(GLOS_SECRETS_STORE, &q, 0);
+    if (state)
+        *state = q.state;
+    if (has_password)
+        *has_password = q.has_password;
+    return r;
+}
+
 int glos_secret_remove(const char *name, unsigned flags)
 {
     struct glos_secret q = { sizeof q, (unsigned)name, flags, 0, 0, 0 };

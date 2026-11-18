@@ -6077,6 +6077,10 @@ def api_sec_case(profile, vcard, card):
         checks["deny"] = agent.ssh("glos secrets deny APITEST.EXE wifi")[0] == 0 and " grants=0 " in stat()
         ran("shared", other)
         checks["shared-denied"] = case("sec-shared").startswith("0 r=19 ")
+        ran("store")                            # (phase D) the store itself: open, no master password yet
+        checks["store-open"] = case("sec-store").startswith("1 r=0 state=1 password=0")
+        ran("store-pw", other)                  # its password's change is not for another's program to ask
+        checks["store-other"] = case("sec-store-pw").startswith("1 r=19 ")
         n = agent.log().count("GLOS-SECRETS written")
         rc, o, _ = agent.ssh("glos secrets password - sesame")
         checks["password"] = rc == 0 and "secrets open key=password " in o and logged("GLOS-SECRETS password set rounds=")
@@ -6089,6 +6093,8 @@ def api_sec_case(profile, vcard, card):
         checks["locked"] = logged("GLOS-SECRETS locked") and stat().startswith("secrets locked key=password ")
         ran("get")                              # no desktop: nobody to ask
         checks["no-desk"] = case("sec-get").startswith("0 r=19 ")
+        ran("store")
+        checks["store-locked"] = case("sec-store").startswith("1 r=0 state=2 password=1")
         rc, o, _ = agent.ssh("glos secrets unlock nope")
         checks["wrong-ssh"] = rc == 1 and "wrong password" in o and stat().startswith("secrets locked ")
         checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
@@ -9454,7 +9460,7 @@ def control_script(schema):
     def to(p):
         nonlocal page
         if p != page:
-            lines.append("quick" + " ctrl+tab" * ((p - page) % len(cfg_pages())))
+            lines.append("quick" + " ctrl+tab" * ((p - page) % (len(cfg_pages()) + 1)))    # (and Secrets, the last)
             page = p
 
     def value(k):

@@ -854,7 +854,16 @@ void app_event(struct app *a, const struct kevent *e)
    never reads them (it reads the keyboard another way) is never said to be. */
 int app_stalled(const struct app *a)
 {
-    return a->ev_taken && api2_pending(a) && !a->kill && timer_ticks() - a->ev_since > 5 * 1024u;
+    return !a->asking && a->ev_taken && api2_pending(a) && !a->kill && timer_ticks() - a->ev_since > 5 * 1024u;
+}
+
+/* The app waits, in a call, for the user's answer in a dialog of GLOS's own (the secrets' password: deskpass.c):
+   its events wait with it, and that is not "not answering"; their five seconds begin again when it is back. */
+void app_asking(struct app *a, int on)
+{
+    a->asking = (u8)(on != 0);
+    if (!on)
+        a->ev_since = timer_ticks();
 }
 u32 app_event_backlog(const struct app *a) { return api2_backlog(a); }
 

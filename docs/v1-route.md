@@ -508,6 +508,15 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
 
 ## Open faults (noted, not yet chased)
 
+- **Bench C (the 486DX4, now with an S3 ViRGE/DX and 32 MB) hung after a full-screen session's end**
+  (2026-11-18, GLOS main 4df396a; the DOS-GL session's report): a DOS-GL program that had drawn for 40 seconds
+  through the ViRGE's VBE frame buffer ended, set text mode 3, and the PC answered nothing more (no ping; a
+  power cycle). The file it had just written was short on the disk (645,632 of 921,615 bytes): the cache's
+  writing never finished. Shorter programs with the same mode sets had ended well on that start. The same PC
+  hung once after a restart on the 14th. No serial capture there. The owner saw it before the reset: text mode,
+  the job's last lines and DOS's prompt on the screen, the keyboard dead and Num Lock not toggling (interrupts
+  gone, or the kernel stuck with them off). To find out: the same run without GLOS; `C:\GLOS\CRASH`.
+
 - **DOS-GL savers on a G100** (2026-11-18, bench-g400's new card and Loop A `--card g100` alike): the program
   ends at its start with SIGFPE, a divide by zero in the HAL's `write_origin` (hal/src/engine.c: the branch
   without DSTORG, bits per pixel 0); and on the real card, which has 4 MB, the HAL's probe measured 8 MB, so the
