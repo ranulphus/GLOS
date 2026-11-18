@@ -63,6 +63,8 @@ int glos_show(glos_handle w, unsigned state);           /* GLOS_WS_ */
 int glos_move(glos_handle w, int x, int y);             /* its frame's corner */
 int glos_resize(glos_handle w, int cw, int ch);         /* its client area: GLOS_EV_SIZE comes, its pixels are new */
 int glos_focus(glos_handle w);
+int glos_focus_id(unsigned id);         /* any window by its number (glos_windows'): the shell's and the task manager's
+                                           to do; in front, with the keyboard */
 int glos_windows(unsigned app, struct glos_win_info *out, unsigned max, unsigned *count);      /* GLOS_E_ROOM: more */
 int glos_drag(glos_handle w, unsigned part);            /* GLOS_DRAG_ */
 int glos_pixels(glos_handle w, struct glos_pixels *p);  /* where its pixels are now (after every GLOS_EV_SIZE) */

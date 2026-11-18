@@ -297,6 +297,12 @@ int glos_focus(glos_handle w)
     return raw(GLOS_WIN_FOCUS, &q, 0);
 }
 
+int glos_focus_id(unsigned id)
+{
+    struct glos_win_focus q = { sizeof q, 0, id };
+    return raw(GLOS_WIN_FOCUS, &q, 0);
+}
+
 int glos_windows(unsigned app_id, struct glos_win_info *out, unsigned max, unsigned *count)
 {
     struct glos_win_enum q = { sizeof q, app_id, (unsigned)out, max * sizeof *out, 0 };

@@ -436,6 +436,7 @@ int glos_present(glos_handle id, int x, int y, int cw, int ch)
     return find(id) ? 0 : GLOS_E_HANDLE;
 }
 int glos_focus(glos_handle id) { if (!find(id)) return GLOS_E_HANDLE; set_focus(id); return 0; }
+int glos_focus_id(unsigned id) { (void)id; return GLOS_E_HANDLE; }      /* (another program's window: none here) */
 
 /* The clipboard (API 2.0's CLIP, as kernel/app/clipstore.c keeps it): up to GLOS_CLIP_ITEMS formats at once, put
    whole (glos_clip_put) or by a writing transaction that becomes the clipboard when it is closed; private formats

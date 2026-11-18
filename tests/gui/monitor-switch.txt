@@ -1,0 +1,22 @@
+#loopa-run-only
+# Monitor's Switch To (apps/monitor; phase D, D8): the program chosen in its list has its window put in front
+# with the keyboard: Alt+F4 then closes Notepad, not Monitor. (On the real desktop alone: the host's programs are
+# one process, with no windows of another's to switch to.)
+run MONITOR.EXE
+wait "Monitor"
+run NOTEPAD.EXE
+wait "Untitled - Notepad"
+key alt+tab
+pause 2500
+key tab
+type N
+key alt+w
+pause 1500
+key alt+f4
+gone "Untitled - Notepad"
+pause 1000
+key alt+f4
+gone "Monitor"
+expect MONITOR has NOTEPAD.EXE
+expect MONITOR switched NOTEPAD.EXE
+expect MONITOR end

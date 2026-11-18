@@ -491,8 +491,10 @@ The steps:
 - **SYS's STAT has `GLOS_STAT_SERVICES`** (22): `glos services`' lines as text, as its other text kinds are.
 - **`glos services stop|start`** takes its words in capitals too (the shell's command is typed as DOS's are;
   found by Monitor's Stop).
-- **Not done yet:** Monitor as the plan's task manager: the apps' windows, sessions, the network's and the
-  sound's streams, the processor's time by program over time; SYS's STAT's structures for NET, AUDIO and USB
+- **Switch To** (Programs page): the chosen program's window in front, with the keyboard (WIN's FOCUS by a
+  window's number, which the API keeps for the shell and the task manager; libglos has `glos_focus_id`).
+- **Not done yet:** Monitor as the plan's task manager: each app's windows listed, sessions, the network's and
+  the sound's streams, the processor's time by program over time; SYS's STAT's structures for NET, AUDIO and USB
   (so that Monitor reads numbers and not text).
 - **Tests:** host and Loop A `monitor` (the fifth page, none there); by hand on Loop A with a service set: its
   row, Stop (stopped), Start (running again); the apps suite's `glos services START NAME`.
@@ -519,7 +521,7 @@ The steps:
 | **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list | The pads' mapping; USB as a tree; startup and default apps; Secrets (needs a call of its own for the master password: no shell line may carry it); icons in the list |
 | **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES and TEXT, on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word | The maze and the flying objects; the savers' other settings; their speed measured where the software renderer draws them |
 | **D7** background apps | `[services] run`, started again when they end, `glos services`, refused if no app | A folder or a user for each |
-| **D8** the task manager | Monitor's Services page with Stop and Start | The apps' windows, sessions, streams and the processor by program; SYS's structures for NET, AUDIO and USB |
+| **D8** the task manager | Monitor's Services page with Stop and Start; Switch To | The apps' windows, sessions, streams and the processor by program; SYS's structures for NET, AUDIO and USB |
 
 ## What waits for other phases
 

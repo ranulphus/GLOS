@@ -3,7 +3,8 @@
  *
  *   Programs      the apps and the jobs: the processor's
  *                 time each has had, its memory and windows; End ends one
- *                 (SYS's KILL). Ctrl+Alt+Del's task list (MONITOR -tasks).
+ *                 (SYS's KILL); Switch To puts its window in front, with the
+ *                 keyboard. Ctrl+Alt+Del's task list (MONITOR -tasks).
  *   Performance   the processor's use over the last minute, memory, the
  *                 network's frames
  *   System        GLOS, the machine, the screen, the sound, the network
@@ -180,6 +181,32 @@ static void end_task(struct gui_widget *w, int what)
     fill_programs();
 }
 
+/* Switch To: the chosen program's window (its first, front to back) in front, with the keyboard. */
+static void switch_to(struct gui_widget *w, int what)
+{
+    static struct glos_win_info wins[8];
+    struct glos_program a;
+    unsigned n = 0;
+    int r = gui_list_get(list);
+    char t[96];
+    (void)w, (void)what;
+    if (r < 0)
+        return;
+    a = progs[(size_t)gui_list_user(list, r)];
+    memset(wins, 0, sizeof wins);
+    if (a.kind == GLOS_PROG_JOB || (glos_windows(a.id, wins, 8, &n) != 0 && glos_error() != GLOS_E_ROOM) || !n) {
+        snprintf(t, sizeof t, GUI_T("%s has no window to switch to."), a.name);
+        gui_set_text(status, t);
+        return;
+    }
+    if (glos_focus_id(wins[0].id) != 0) {
+        gui_message(win, GUI_T("Switch To"), GUI_T("GLOS couldn't bring its window forward."), GUI_MB_OK);
+        return;
+    }
+    printf("MONITOR switched %s\n", a.name);
+    fflush(stdout);
+}
+
 static void refresh_log(struct gui_widget *w, int what)
 {
     static char buf[8192];                      /* the log's last lines: read to its end, the newest kept */
@@ -301,6 +328,7 @@ int main(int argc, char **argv)
     list = gui_list(page, 7, heads, widths);
     row = gui_hbox(page, -1, 0);
     gui_space(row, 0, 0);
+    gui_button(row, GUI_T("S&witch To"), switch_to, 0);
     gui_button(row, GUI_T("&End Program"), end_task, 0);
 
     page = gui_tab(tabs, GUI_T("Performance"));
