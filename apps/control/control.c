@@ -3,7 +3,7 @@
  * GLOS.CFG's settings, drawn from the schema (include/glos/config.h): a page
  * for each of its sections, with a widget for each setting by its kind (a
  * check box for on and off, a list to choose from, a field, the screen's
- * modes, lines for a program's environment); the programs' profiles (a list
+ * modes (the ones the card has), lines for a program's environment); the programs' profiles (a list
  * of the [program NAME.EXT] sections, a form for the one chosen, New and
  * Remove); the kinds of file and what opens them ([open]). The pages' names
  * are a list down the left (phase D); over it a field that finds a setting
@@ -33,6 +33,7 @@
 #define MAXCTL 96                       /* (the schema's settings: 53 with API 2.0 step 5's) */
 #define MAXPROG 64
 #define TRY_SECONDS 15
+#define MAXCHOICE 40                    /* (a list's values: the screen's modes are the most) */
 
 /* A setting's value: as the file has it, and as the user has made it (NULL: the default; not in the file). */
 struct val {
@@ -49,7 +50,7 @@ struct ctl {
     const struct cfg_key *k;
     struct gui_widget *w, *label;
     int kind, page;
-    const char *choice[16];
+    const char *choice[MAXCHOICE];
     int nchoice;
 };
 static struct ctl ctls[MAXCTL];
@@ -69,6 +70,26 @@ static const char *const modes[] = { "none", "640x480x8", "640x480x16", "640x480
                                      "800x600x32", "1024x768x8", "1024x768x16", "1024x768x32", "1280x1024x8",
                                      "1280x1024x16", "1280x1024x32" };
 static char mode_extra[24];                     /* the file's mode, if it isn't one of these */
+/* The modes the card has (DRAW's MODES; phase D), 640 by 480 and up as the desktop needs: the Screen list is
+   these when the card says, the ones above when it doesn't. */
+static char card_modes[MAXCHOICE - 2][16];
+static int ncard;
+
+static void modes_read(void)
+{
+    static struct glos_mode m[64];
+    unsigned count = 0, i;
+    int r = glos_modes(m, 64, &count), tries;
+    for (tries = 0; r == GLOS_E_REFUSED && tries < 10; tries++) {      /* (DOS is busy: a moment) */
+        glos_sleep(200);
+        r = glos_modes(m, 64, &count);
+    }
+    if (r != 0 && r != GLOS_E_ROOM)
+        return;
+    for (i = 0; i < count && i < 64 && ncard < MAXCHOICE - 2; i++)
+        if (m[i].w >= 640 && m[i].h >= 480)
+            snprintf(card_modes[ncard++], sizeof card_modes[0], "%dx%dx%u", m[i].w, m[i].h, m[i].bits);
+}
 
 static const char *const titles[] = { GUI_N("Display"), GUI_N("Input"), GUI_N("Joystick"), GUI_N("USB"),
     GUI_N("Sound"), GUI_N("Network"), GUI_N("Date and Time"), GUI_N("Region"), GUI_N("Disk Cache"), GUI_N("Memory"),
@@ -151,7 +172,7 @@ static void ctl_load(struct ctl *c)
     case W_MODE:
         for (i = 0; i < c->nchoice && !same(c->choice[i], t); i++)
             ;
-        if (i == c->nchoice && c->kind == W_MODE && c->nchoice < 16) {
+        if (i == c->nchoice && c->kind == W_MODE && c->nchoice < MAXCHOICE) {
             snprintf(mode_extra, sizeof mode_extra, "%s", t);
             gui_choice_add(c->w, mode_extra);
             c->choice[c->nchoice++] = mode_extra;
@@ -229,7 +250,7 @@ static struct ctl *ctl_add(struct gui_widget *form, const struct cfg_key *k, int
     if (k->type == CFG_CHOICE) {                /* "a|b|c" into its parts */
         char *p = choices[nctl - 1], *e;
         snprintf(p, sizeof choices[0], "%s", k->choices);
-        for (; p && c->nchoice < 16; p = e ? e + 1 : NULL) {
+        for (; p && c->nchoice < MAXCHOICE; p = e ? e + 1 : NULL) {
             if ((e = strchr(p, '|')) != NULL)
                 *e = 0;
             c->choice[c->nchoice++] = p;
@@ -245,9 +266,14 @@ static struct ctl *ctl_add(struct gui_widget *form, const struct cfg_key *k, int
         c->kind = k->type == CFG_MODE ? W_MODE : W_CHOICE;
         row = gui_row(form, k->label, &c->label);
         c->w = gui_choice(row, k->type == CFG_MODE ? 14 : 10);
-        if (c->kind == W_MODE)
+        if (c->kind == W_MODE && ncard) {       /* none, and what the card has */
+            c->choice[0] = modes[0];
+            for (c->nchoice = 1; c->nchoice <= ncard; c->nchoice++)
+                c->choice[c->nchoice] = card_modes[c->nchoice - 1];
+        } else if (c->kind == W_MODE) {
             for (c->nchoice = 0; c->nchoice < (int)(sizeof modes / sizeof *modes); c->nchoice++)
                 c->choice[c->nchoice] = modes[c->nchoice];
+        }
         for (i = 0; i < c->nchoice; i++)
             gui_choice_add(c->w, c->choice[i]);
     } else if (k->type == CFG_ENV) {
@@ -777,6 +803,7 @@ int main(int argc, char **argv)
         printf("CONTROL no GLOS\n");
         return 1;
     }
+    modes_read();
     win = gui_window(GUI_T("Control Panel"), 600, 440, 0); /* (as large as 640x480 allows) */
     win->on_key = on_key;
     box = gui_vbox(win->root, 6, 8);

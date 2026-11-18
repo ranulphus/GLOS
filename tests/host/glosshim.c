@@ -195,6 +195,23 @@ int glos_sleep(unsigned ms)             /* (a made thread's sleep is until the c
 unsigned glos_ticks(void) { return H.clock; }
 void *glos_ptr(unsigned linear) { return (void *)(size_t)linear; }
 
+/* (The card's modes: the three sizes and depths every card of the tests has.) */
+int glos_modes(struct glos_mode *out, unsigned room, unsigned *count)
+{
+    static const int size[4][2] = { { 640, 480 }, { 800, 600 }, { 1024, 768 }, { 1280, 1024 } };
+    static const unsigned bits[3] = { 8, 16, 32 };
+    unsigned n = 0, i, j;
+    for (i = 0; i < 4; i++)
+        for (j = 0; j < 3; j++, n++)
+            if (n < room) {
+                out[n].w = size[i][0], out[n].h = size[i][1];
+                out[n].bits = bits[j];
+            }
+    if (count)
+        *count = n;
+    return n > room ? GLOS_E_ROOM : 0;
+}
+
 int glos_screen(struct glos_screen *s)
 {
     unsigned size = s->size;

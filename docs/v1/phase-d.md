@@ -288,7 +288,10 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   the field (once the typing has stopped for a moment) and the list.
 - **For its room at 640 by 480:** the Desktop page's fields are 20 characters wide, and "Snap windows at the
   screen's edges" is "Snap to the screen's edges".
-- **Not done yet:** the other grown pages (Display's modes from the card, Sound, Network status, Date and time,
+- **Display's modes are the card's** (DRAW's MODES): the Screen list has "none" and the modes the card says it
+  has, 640 by 480 and up (what the desktop needs), in place of twelve usual ones whatever the card; those only
+  when the card doesn't answer. The file's own mode is in the list whatever it is, as before.
+- **Not done yet:** the other grown pages (the card's details on Display, Sound, Network status, Date and time,
   Mouse and keyboard with their test areas, Game controllers, USB devices, Startup and default apps, Secrets);
   the Screensaver page's preview (D6); a preview of a theme not yet applied; icons in the list.
 - **Tests:** host and Loop A `control-find` (a setting found, the next, a word nothing has, the look following
