@@ -6787,6 +6787,106 @@ def apps_case(profile, card):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def saver_case(profile, vcard, card):
+    """A saver that is a program (phase D, D6; kernel/wm/saver.c, apps/savers): [saver] saver = stars, the saver
+    asked for (glos idle saver). On a Matrox card at 16 bits STARS.SCR's full-screen window comes: stars on black,
+    another picture a moment later, no pointer; a key ends it, the program is ended and the desktop is as it was.
+    Where DOS-GL has no window (the S3) the program ends at once and the blank saver is what shows; a key ends
+    that too. With the program gone from the disk: the blank saver again."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("saver-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/STARS.SCR=/TEST/STARS.SCR",
+        "--cmd", "SERSAY HX-START saver", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    out = os.path.join(ROOT, "out", "saver-" + tag)
+    matrox = vcard != "vbe"
+    checks, info = {"listen": agent.listening()}, ""
+
+    def shot(name):
+        p = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=300)
+        open(os.path.join(out, name + ".png"), "wb").write(p.stdout)
+        return png_rgb(p.stdout) if p.returncode == 0 else None
+
+    def said(text, n=1, limit=90):
+        t0 = time.time()
+        while time.time() - t0 < limit and agent.log().count(text) < n:
+            time.sleep(0.5)
+        return agent.log().count(text) >= n
+
+    def lit(pic):                               # the pixels that aren't black
+        return sum(1 for i in range(0, len(pic[2]), 3) if pic[2][i:i + 3] != b"\0\0\0") if pic else -1
+
+    def above_bar(pic):                         # the desktop less its bar (whose clock moves on)
+        return pic[2][:pic[0] * (pic[1] - 24) * 3] if pic else None
+
+    def apps():
+        return len(re.findall(r"^app ", agent.ssh("glos ps")[1], re.M))
+
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and " 640x480x16 " not in agent.ssh("glos display")[1]:
+            time.sleep(0.5)
+        checks["set"] = agent.ssh("glos config set saver saver stars")[0] == 0
+        time.sleep(2)
+        before = shot("before")
+        checks["before"] = bool(before) and lit(before) > 100000
+        checks["ask"] = agent.ssh("glos idle saver")[0] == 0 and said("GLOS-IDLE saver on")
+        checks["started"] = said("GLOS-IDLE saver program=stars seq=")
+        if matrox:
+            checks["shown"] = said("GLOS-IDLE saver program=stars shown", 1, 120)
+            time.sleep(2)
+            a = shot("stars-1")
+            time.sleep(1.5)
+            b = shot("stars-2")
+            n = lit(a)
+            checks["stars"] = bool(a) and a[:2] == (640, 480) and 40 < n < 40000
+            checks["moves"] = bool(a) and bool(b) and a[2] != b[2]
+            if not (checks["stars"] and checks["moves"]):
+                info += " lit=%d,%d" % (n, lit(b))
+            checks["one-app"] = apps() == 1
+        else:
+            checks["blank"] = said("GLOS-IDLE saver program=stars ended code=3: blank")
+            time.sleep(2)
+            a = shot("blank")
+            checks["black"] = bool(a) and lit(a) == 0
+            if not checks["black"]:
+                info += " lit=%d" % lit(a)
+        agent.ssh("glos key 0x39")              # a key ends it (and types nothing)
+        checks["off"] = said("GLOS-IDLE saver off")
+        if matrox:
+            checks["ended"] = said("GLOS-IDLE saver program=stars ended by the saver's end")
+        t0 = time.time()
+        while time.time() - t0 < 60 and apps():
+            time.sleep(0.5)
+        checks["none-left"] = apps() == 0
+        time.sleep(2)
+        after = shot("after")
+        checks["as-it-was"] = bool(after) and above_bar(after) == above_bar(before)
+        # The program gone: the blank saver, whatever the card.
+        checks["gone"] = agent.ssh("DEL C:\\TEST\\STARS.SCR")[0] == 0
+        n0 = agent.log().count("GLOS-IDLE saver off")
+        checks["ask-2"] = agent.ssh("glos idle saver")[0] == 0 and said("GLOS-IDLE saver program=stars ended code=126: blank")
+        time.sleep(2)
+        c = shot("blank-2")
+        checks["black-2"] = bool(c) and lit(c) == 0
+        agent.ssh("glos key 0x39")
+        checks["off-2"] = said("GLOS-IDLE saver off", n0 + 1)
+        time.sleep(2)
+        again = shot("after-2")
+        checks["as-it-was-2"] = bool(again) and above_bar(again) == above_bar(before)
+        agent.ssh("glos config unset saver saver")
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("saver-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
 def exit_case(profile, vcard):
     """PRD §19's exit for M5. SHOTDJ v112k shows three pictures (640x480 in 32 bits), each until a key.
     The twin: plain DOS (CWSDPMI), Loop A's --keys anchored on the program's lines, 86Box's own screenshots
@@ -9567,7 +9667,10 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]
-        return 0 if all(r[1] for r in matrix(desk_case, cases, a.jobs)) else 1
+        res = matrix(desk_case, cases, a.jobs)
+        savers = [c for c in [("bf6", "g200", "ne2kpci"), ("bf6", "vbe", "ne2kpci")] if not a.profile or c[0] in a.profile]
+        res += matrix(saver_case, savers, a.jobs)       # ... and a saver that is a program (phase D)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "win":
         cases = [(win_case,) + c for c in WIN_CASES if not a.profile or c[0] in a.profile] \
             + [(win_phys_case,) + c for c in WIN_PHYS_CASES if not a.profile or c[0] in a.profile]

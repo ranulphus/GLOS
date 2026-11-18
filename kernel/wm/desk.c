@@ -34,6 +34,7 @@
 #include "display.h"
 #include "glos/region.h"
 #include "idle.h"
+#include "saver.h"
 #include "io.h"
 #include "kcfg.h"
 #include "kprintf.h"
@@ -259,12 +260,18 @@ static void desk_thread(void *arg)
             wm_bar_again(m);
             repaint = 1;
         }
-        /* The saver (kernel/wm/idle.c): a black screen in place of the windows, which are as they were under it. */
+        /* The saver (kernel/wm/idle.c): a black screen in place of the windows, which are as they were under it;
+           or a program's full-screen window (saver.c, phase D), over windows that go on being composed. */
         if (idle_turn(fb != 0, m->focus && (m->focus->flags & WF_FULL))) {
-            if (!saved) {
-                saved = 1;
+            int program = saver_turn(m);
+            if (!saved) {                       /* (either way the pointer is away) */
                 display_cursor(0, 0, 0);
                 wm_hw_pointer(m, 1);
+            }
+            if (program) {
+                saved = 2;
+            } else if (saved != 1) {
+                saved = 1;
                 gfx_fill(fb, 0, 0, fb->w, fb->h, 0x000000);
                 display_sync();
                 if (vnc_viewers()) {
@@ -273,9 +280,11 @@ static void desk_thread(void *arg)
                     vnc_damage(&drawn, fb);
                 }
             }
-            fb = 0;                             /* (nothing is composed meanwhile) */
+            if (!program)
+                fb = 0;                         /* (nothing is composed under the blank one) */
         } else if (saved) {
             saved = 0;
+            saver_end();                        /* (its program, if it had one, is ended) */
             repaint = 1;
         }
         if (!fb)

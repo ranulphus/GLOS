@@ -361,6 +361,35 @@ The steps:
    `GLOS_DRAW_BLIT`, without which a saver draws only on a Matrox card at 16 bits. Until then the blank saver is
    what every other card and depth gets, by step 1's rule.
 
+### D6 as built, first part (2026-11-18)
+
+- **The kernel runs a saver's program** (`kernel/wm/saver.c`, asked each turn by the desktop's thread while the
+  saver is on): `[saver] saver` is `blank` or a saver's name, whose program is `NAME.SCR` beside GLOS.EXE,
+  started as a job of the kernel's own and made an app. The desktop goes on composing with the pointer away;
+  once the program has a full-screen window up, that is the saver (`GLOS-IDLE saver program=NAME shown`). The
+  blank saver takes over if the program isn't there (code 126), ends (its code says why), has no full-screen
+  window ten seconds after its start, or the screen's power goes off. The saver's end (the first input, used
+  up as ever, or `glos idle wake`) ends the program.
+- **`.SCR` is a program to the agent** (`kernel/dos/agent.c`): run by EXEC as a `.COM` or `.EXE` is, not given
+  to COMMAND.COM, whose child could not be an app.
+- **STARS.SCR** (`apps/savers/stars.c`): a flight through 220 stars, each a small square larger and brighter
+  the nearer it is, moved by the clock so that its speed is the same at any frame rate. It asks GLOS first
+  whether DOS-GL has a window here (`GLOS_MACHINE_GLWIN`: a Matrox card at 16 bits) and ends with code 3 if not,
+  since DOS-GL would otherwise take the screen as a DOS program does; then a context of the screen's size, its
+  window made topmost and full-screen. `/P W H` is its preview: a context that size in an ordinary window.
+  It uses DOS-GL's hidden start when the library has it (asked of DOS-GL: until then its window is framed for
+  a moment before it is full-screen).
+- **Built** against RetroGPU's DOS-GL as built there (`$(DOSGL_DIR)/build/lib/libGL.a`, no copy): `make apps`
+  makes `build/apps/STARS.SCR` (680 KB, most of it the library).
+- **Seen on Loop A** (bf6, G200, 640 by 480 at 16 bits): the program's window up 115 ms after the saver came
+  on; about 1500 lit pixels on black, another picture a moment later; a key ends it and the desktop above the
+  bar is pixel for pixel as it was.
+- **Not done yet:** the Control Panel's Saver page (the list and the preview); the other savers; STARS.SCR in
+  the packages, the floppy and the benches' update; the software renderer's window (DOS-GL's B3), without
+  which every other card and depth has the blank saver.
+- **Tests:** Loop A `desk` suite's saver case: the G200 (the program shown, moving, ended by a key, the
+  desktop as it was), the S3 (code 3, the blank saver, black), and the program deleted (code 126, blank).
+
 ### D7. Background apps (`[services]`)
 
 - A list of apps GLOS starts with itself (with or without a desktop), starts again if they end (with a growing

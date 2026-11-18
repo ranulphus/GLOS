@@ -775,7 +775,9 @@ static int split(struct agent_job *j)
     j->args = c;
     if (!n || (n == 2 && j->prog[1] == ':'))
         return 1;                               /* nothing, or a drive change */
-    if (ext && ((ext[1] != 'C' || ext[2] != 'O' || ext[3] != 'M') && (ext[1] != 'E' || ext[2] != 'X' || ext[3] != 'E')))
+    /* (.SCR: a saver's program, phase D: an EXE by another name, which DOS's EXEC loads as one.) */
+    if (ext && ((ext[1] != 'C' || ext[2] != 'O' || ext[3] != 'M') && (ext[1] != 'E' || ext[2] != 'X' || ext[3] != 'E')
+                && (ext[1] != 'S' || ext[2] != 'C' || ext[3] != 'R')))
         return 1;                               /* .BAT, or something COMMAND.COM must judge */
     if (ext && ext[4])
         return 1;

@@ -141,8 +141,8 @@ const struct cfg_key cfg_schema[] = {
     /* [saver]: the screen saver and the screen's power (API 2.0 step 5; kernel/wm/idle.c) */
     { "saver", "wait", CFG_NUMBER, CFG_NOW, 1, 240, "off", "off", "&Wait (minutes)",
       "The saver comes on when nobody has touched the keyboard or the mouse for so long (off: never)" },
-    { "saver", "saver", CFG_CHOICE, CFG_NOW, 0, 0, "blank", "blank", "&Saver",
-      "What the saver shows: blank, a black screen" },
+    { "saver", "saver", CFG_CHOICE, CFG_NOW, 0, 0, "blank|stars", "blank", "&Saver",
+      "What the saver shows: blank, a black screen; stars, a flight through them (the blank one where it can't draw)" },
     { "saver", "power", CFG_NUMBER, CFG_NOW, 1, 240, "off", "off", "Screen &off after (minutes more)",
       "The screen's power is turned off so long after the saver came on, where the card can (off: never)" },
     /* [shell] (M3, M4e) */
