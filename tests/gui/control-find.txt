@@ -1,0 +1,27 @@
+# The Control Panel's search and the desktop's look (apps/control; phase D, D5): a setting found by a word of its
+# name or description (Ctrl+F, Enter; F3 the next); a word nothing has; the wallpaper's picture beside the Desktop
+# page following its field and its style. Cancel: nothing is set.
+run CONTROL.EXE
+wait "Control Panel"
+key ctrl+f
+type wallpaper\n
+shot found "Control Panel"
+key f3
+shot next "Control Panel"
+key ctrl+f
+type zzzz\n
+shot none "Control Panel"
+key ctrl+f
+key home shift+end
+type wallpaper\n
+key home shift+end
+type C:\\FM\\PICTURE.PNG
+pause 800
+shot look "Control Panel"
+key alt+y home down down down
+pause 800
+shot look-tile "Control Panel"
+key esc
+gone "Control Panel"
+expect CONTROL start
+expect CONTROL end

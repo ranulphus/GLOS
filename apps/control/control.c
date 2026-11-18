@@ -5,7 +5,10 @@
  * check box for on and off, a list to choose from, a field, the screen's
  * modes, lines for a program's environment); the programs' profiles (a list
  * of the [program NAME.EXT] sections, a form for the one chosen, New and
- * Remove); the kinds of file and what opens them ([open]). Under the pages,
+ * Remove); the kinds of file and what opens them ([open]). The pages' names
+ * are a list down the left (phase D); over it a field that finds a setting
+ * by a word of its name or description (Ctrl+F; Enter or F3: the next one).
+ * Beside the Desktop page's settings, the desktop's look (look.c). Under the pages,
  * what the setting with the keyboard does and when a change to it takes
  * effect. Apply checks every change against the schema first, then sets them
  * (SETTINGS' SET, which writes the file); a new screen mode is tried for
@@ -23,6 +26,8 @@
 
 #include <glos/config.h>
 #include <glos/gui.h>
+
+#include "control.h"
 
 #define MAXVAL 256
 #define MAXCTL 96                       /* (the schema's settings: 53 with API 2.0 step 5's) */
@@ -51,7 +56,9 @@ static struct ctl ctls[MAXCTL];
 static int nctl;
 
 static struct gui_window *win;
-static struct gui_widget *tabs, *help, *when_label, *status;
+static struct gui_widget *tabs, *help, *when_label, *status, *find;
+static int find_at = -1;                        /* the setting last found (ctls' index) */
+static int field_chars = 30;                    /* a text setting's field: as wide as this at most */
 static struct gui_widget *prog_list, *types_list, *prog_remove;
 static int prog_page, types_page;
 static char progs[MAXPROG][16];
@@ -254,7 +261,7 @@ static struct ctl *ctl_add(struct gui_widget *form, const struct cfg_key *k, int
     } else {
         c->kind = W_FIELD;
         row = gui_row(form, k->label, &c->label);
-        c->w = gui_field(row, k->type == CFG_NUMBER ? 8 : k->max > 30 ? 30 : (int)k->max + 1);
+        c->w = gui_field(row, k->type == CFG_NUMBER ? 8 : k->max >= field_chars ? field_chars : (int)k->max + 1);
     }
     return c;
 }
@@ -271,6 +278,7 @@ static void help_poll(void *arg)
     const struct cfg_key *k = NULL;
     int i;
     (void)arg;
+    look_poll();                                /* (the desktop's look follows its page: look.c) */
     for (i = 0; i < nctl; i++)
         if (win->focus == ctls[i].w)
             k = ctls[i].k;
@@ -281,6 +289,81 @@ static void help_poll(void *arg)
     shown = k;
     gui_set_text(help, k ? k->desc : "");
     gui_set_text(when_label, k ? GUI_T(when[k->when < 5 ? k->when : 0]) : "");
+}
+
+/* ---- a setting found by a word of its name or description */
+
+/* Whether s has t in it, whatever the capitals (s's & for its letter left out). */
+static int has_text(const char *s, const char *t)
+{
+    for (; *s; s++) {
+        const char *a = s, *b = t;
+        while (*b) {
+            if (*a == '&')
+                a++;
+            if (!*a || (*a | 0x20) != (*b | 0x20))
+                break;
+            a++, b++;
+        }
+        if (!*b)
+            return 1;
+    }
+    return 0;
+}
+
+/* The next setting after the one last found that has the field's text: its page, and the keyboard to it. */
+static void find_step(void)
+{
+    const char *t = gui_get_text(find);
+    char say[160], label[64];
+    int i, k;
+    size_t a, b;
+    if (!t[0])
+        return;
+    for (i = 1; i <= nctl; i++) {
+        const struct cfg_key *key;
+        k = (find_at + i) % nctl;
+        key = ctls[k].k;
+        if (!has_text(key->label, t) && !has_text(key->desc, t) && !has_text(GUI_T(titles[ctls[k].page]), t))
+            continue;
+        find_at = k;
+        gui_tabs_set(tabs, ctls[k].page);
+        gui_focus(ctls[k].w);
+        for (a = b = 0; key->label[a] && b < sizeof label - 1; a++)
+            if (key->label[a] != '&')
+                label[b++] = key->label[a];
+        label[b] = 0;
+        snprintf(say, sizeof say, GUI_T("Found: %s, %s. F3 finds the next."), GUI_T(titles[ctls[k].page]), label);
+        gui_set_text(status, say);
+        return;
+    }
+    gui_set_text(status, GUI_T("No setting has that in its name or description."));
+}
+
+static void find_on(struct gui_widget *w, int what)
+{
+    (void)w;
+    if (what == GUI_ON_CHANGE)
+        find_at = -1;                           /* (another word: from the first setting) */
+    else if (what == GUI_ON_ACTIVATE)
+        find_step();
+}
+
+/* Ctrl+F: the keyboard to the search; F3: the next setting found. */
+static int on_key(struct gui_window *w, struct gui_ev *e)
+{
+    (void)w;
+    if (e->type != GUI_EV_KEY)
+        return 0;
+    if (e->key == 0x21 && (e->mods & GLOS_MOD_CTRL)) {
+        gui_focus(find);
+        return 1;
+    }
+    if (e->key == 0x3D) {
+        find_step();
+        return 1;
+    }
+    return 0;
 }
 
 /* ---- the programs' profiles */
@@ -687,18 +770,23 @@ int main(int argc, char **argv)
 {
     static const char *const heads[2] = { GUI_N("Kind"), GUI_N("Opened by") };
     static const int widths[2] = { 70, 200 };
-    struct gui_widget *box, *page, *form, *row, *left, *b;
+    struct gui_widget *box, *page, *form, *row, *left, *b, *side = NULL;
+    struct ctl *wall = NULL, *style = NULL;
     int s, i;
     if (gui_init(argc, argv) != 0) {
         printf("CONTROL no GLOS\n");
         return 1;
     }
-    win = gui_window(GUI_T("Control Panel"), 600, 440, 0); /* (as tall as 640x480 allows: the pages' titles take
-                                                                two rows) */
+    win = gui_window(GUI_T("Control Panel"), 600, 440, 0); /* (as large as 640x480 allows) */
+    win->on_key = on_key;
     box = gui_vbox(win->root, 6, 8);
     gui_grow(box, 1);
+    row = gui_hbox(box, 6, 0);
+    gui_label(row, GUI_T("Find a setting (Ctrl+F):"));
+    find = gui_field(row, 24);
+    gui_on(find, find_on, 0);
     tabs = gui_tabs(box);
-    gui_tabs_style(tabs, GUI_TABS_ROWS);        /* (every page's title in view, in as many rows as the width needs) */
+    gui_tabs_style(tabs, GUI_TABS_LIST);        /* (the pages' names down the left: phase D) */
     gui_grow(tabs, 1);
     for (s = 0; cfg_sections[s]; s++) {
         const char *sec = cfg_sections[s];
@@ -730,13 +818,27 @@ int main(int argc, char **argv)
             prog_remove = gui_button(b, GUI_T("&Remove"), prog_del, 0);
             form = gui_form(row);
             gui_grow(form, 1);
+        } else if (!strcmp(sec, "desktop")) {   /* its settings, and the desktop's look beside them (look.c) */
+            row = gui_hbox(page, 10, 0);
+            gui_grow(row, 1);
+            form = gui_form(row);
+            gui_grow(form, 1);
+            side = gui_vbox(row, 6, 0);
         } else {
             form = gui_form(page);
         }
+        field_chars = side && !strcmp(sec, "desktop") ? 20 : 30;        /* (the look takes room beside that page's) */
         for (i = 0; i < cfg_schema_n; i++)
-            if (!strcmp(cfg_schema[i].section, sec) && nctl < MAXCTL)
-                ctl_add(form, &cfg_schema[i], s);
+            if (!strcmp(cfg_schema[i].section, sec) && nctl < MAXCTL) {
+                struct ctl *c = ctl_add(form, &cfg_schema[i], s);
+                if (!strcmp(sec, "desktop") && !strcmp(c->k->key, "wallpaper"))
+                    wall = c;
+                if (!strcmp(sec, "desktop") && !strcmp(c->k->key, "wallpaper_style"))
+                    style = c;
+            }
     }
+    if (side && wall && style)
+        look_add(side, win, wall->w, style->w, style->choice);
     help = gui_label(box, "");
     when_label = gui_label(box, "");
     row = gui_hbox(box, 6, 0);

@@ -194,6 +194,8 @@ build/host/libsshc32.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/g
 	  done
 	$(Q)ar rcs $@ build/host/sshc32/*.o
 $(foreach a,$(APPS),$(eval $(call app_host,$(a))))
+# (The Control Panel's picture of the desktop is made by FILES' wallpaper code: apps/control/look.c.)
+build/host/control build/apps/CONTROL.EXE: apps/files/wallmake.h
 GUI_SCRIPTS := $(wildcard tests/gui/*.txt)
 # (A:, C:\HX, C:\OUT and C:\TEST are the Loop A machine's own, which the file manager's tree shows.)
 gui-goldens:

@@ -267,6 +267,33 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   search over every page.
 - **Tests:** the `control` suite (every setting by keys) grows with the new pages; host scripts per page.
 
+### D5 as built, first part (2026-11-18)
+
+- **Decided here:** the pages stay the schema's sections, in its order, and a page grows by what is put beside
+  or under its generic rows. The control suite walks every setting by the pages' order and each label's letter,
+  and goes on doing so; a page of settings from several sections (the plan's Appearance) would have needed a
+  second map of what is where, for the app and for the suite. So the wallpaper, the theme and the text size are
+  on the Desktop page, with the desktop's look beside them.
+- **The frame:** the pages' names are a list down the left (toolkit 2's `GUI_TABS_LIST`), which gives the pages
+  the two rows the titles took. Ctrl+Tab goes from page to page as before.
+- **Search:** a field over the list (Ctrl+F). Enter goes to the first setting whose label, description or page
+  name has the word (whatever its capitals): its page, the keyboard to its widget, its description under the
+  page as always, and the status line says what was found. F3, or Enter in the field again, goes to the next
+  one, round and round; another word starts from the first setting. A word nothing has is said so.
+- **The desktop's look** (`apps/control/look.c`): beside the Desktop page, a picture of the desktop 80 by 60 as
+  the wallpaper and style in the page would make it (not yet applied), with a window and the task bar in the
+  theme's colours; and **Choose...**, the file dialog with the kinds of picture, whose choice goes into the
+  field. The picture is made as FILES makes the real one, by the same code (`apps/files/wallmake.h`, in a
+  header because the two programs each have a copy), for the screen's work area, then made small; it follows
+  the field (once the typing has stopped for a moment) and the list.
+- **For its room at 640 by 480:** the Desktop page's fields are 20 characters wide, and "Snap windows at the
+  screen's edges" is "Snap to the screen's edges".
+- **Not done yet:** the other grown pages (Display's modes from the card, Sound, Network status, Date and time,
+  Mouse and keyboard with their test areas, Game controllers, USB devices, Startup and default apps, Secrets);
+  the Screensaver page's preview (D6); a preview of a theme not yet applied; icons in the list.
+- **Tests:** host and Loop A `control-find` (a setting found, the next, a word nothing has, the look following
+  the field and the style); `control` and the control suite as before, by the list.
+
 ### D6. Screensavers
 
 - The savers of `desktop.md` on DOS-GL: starfield, pipes, a 3D maze, flying objects (a flag, GLOS's mark), a line
