@@ -73,6 +73,7 @@ struct wm_window {
     u8 progress;                        /* 1 to 101: a bar along its task-bar button, 0 to 100 in a hundred; 0: none */
     u8 has_icon;
     u32 icon[16 * 16];                  /* its picture, 16 by 16: 0xAARRGGBB, drawn where AA is 80h or more */
+    u32 *icon_big;                      /* ... and 32 by 32 (4096 bytes from wm_host.alloc), or 0: none */
     struct wm_cursor cursor_img;        /* its own pointer (cursor == WC_CUSTOM) */
     char help[32];                      /* its owner's page in Help */
     struct gfx_surface store;           /* the client area's pixels, in the screen's format */

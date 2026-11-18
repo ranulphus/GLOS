@@ -470,6 +470,8 @@ static struct view *new_view(const char *dir, int browser)
         if (!strcmp(places.path[i], dir))
             x = places.x[i], y = places.y[i], w = places.w[i], h = places.h[i];
     v->win = gui_window_at(dir, x, y, browser ? 540 : w, browser ? 330 : h, 0);
+    if (v->win)
+        gui_window_icon(v->win, browser ? "app-files" : "folder");
     v->win->on_command = command;
     v->win->on_close = closing;
     v->view_menu = menus(v->win, browser);

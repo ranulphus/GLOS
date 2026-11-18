@@ -293,8 +293,8 @@ void deskpop_turn(struct wm *m, int again)
         close_pop(m, 1);                        /* (another screen or theme, or its window went: it goes) */
 }
 
-/* ---- Alt+Tab's strip: every window that can have the focus, the one in front first, each its icon (16 pixels
-   drawn twice the size: an app can't give one of 32 yet) in a row over the screen's middle, the current one's
+/* ---- Alt+Tab's strip: every window that can have the focus, the one in front first, each its icon (its own of
+   32 pixels, GLOS_PROP_WIN_ICON_BIG; without one, its 16 drawn twice the size) in a row over the screen's middle, the current one's
    title under them. Tab and Shift+Tab move along it while Alt is held, Esc gives up, letting go of Alt switches. */
 
 #define SW_CELL 64                      /* a window's place in the strip */
@@ -315,6 +315,19 @@ static int switchable(const struct wm_window *v)
 static void sw_icon(struct gfx_surface *s, s32 x, s32 y, const struct wm_window *v, u32 ink)
 {
     s32 i, j;
+    if (v->icon_big) {                          /* its own of 32 pixels (runs of one colour at a time) */
+        for (j = 0; j < 32; j++)
+            for (i = 0; i < 32;) {
+                u32 c = v->icon_big[j * 32 + i];
+                s32 run = 1;
+                while (i + run < 32 && v->icon_big[j * 32 + i + run] == c)
+                    run++;
+                if (c >> 24 >= 0x80)
+                    gfx_fill(s, x + i, y + j, run, 1, c & 0xFFFFFF);
+                i += run;
+            }
+        return;
+    }
     if (!v->has_icon) {                         /* (no picture: a window's outline) */
         gfx_frame(s, x + 2, y + 4, 28, 24, ink);
         gfx_fill(s, x + 2, y + 4, 28, 5, ink);

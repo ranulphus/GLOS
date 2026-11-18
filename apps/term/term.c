@@ -161,6 +161,7 @@ int main(int argc, char **argv)
         argv++, argc--;
     }
     win = gui_window(GUI_T("Terminal"), 8 + 80 * 7 + GUI_SB + 4, 25 * 14 + 4, 0);
+    gui_window_icon(win, "app-terminal");
     win->on_command = command;
     bar = gui_menubar(win);
     m = gui_menu(bar, GUI_T("&Edit"));

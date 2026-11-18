@@ -413,6 +413,10 @@ struct glos_win_drag {
 #define GLOS_PROP_WIN_POINTER  GLOS_PROP(GLOS_HK_WINDOW, 17) /* data: struct glos_cursor, a pointer of the app's own;
                                                                 CURSOR becomes GLOS_CURSOR_CUSTOM */
 #define GLOS_PROP_WIN_HELP     GLOS_PROP(GLOS_HK_WINDOW, 18) /* text, at most 31 bytes: its page in Help */
+#define GLOS_PROP_WIN_ICON_BIG GLOS_PROP(GLOS_HK_WINDOW, 19) /* data: its picture where there is room (Alt+Tab's strip),
+                                                                32 by 32 pixels as GLOS_PROP_WIN_ICON's, 4096
+                                                                bytes; none: taken away (the small one is then
+                                                                drawn twice the size) */
 
 /* The pointer's shapes. */
 #define GLOS_CURSOR_ARROW  0

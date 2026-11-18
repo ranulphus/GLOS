@@ -403,6 +403,13 @@ int glos_resize(glos_handle id, int cw, int ch)
     return 0;
 }
 
+/* (A window's pictures and the like: taken, and not drawn here.) */
+int glos_set_data(glos_handle h, unsigned prop, const void *data, unsigned length)
+{
+    (void)h, (void)prop, (void)data, (void)length;
+    return 0;
+}
+
 int glos_set_text(glos_handle id, unsigned prop, const char *text)
 {
     struct hwin *w = find(id);

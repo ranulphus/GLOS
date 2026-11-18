@@ -287,13 +287,27 @@ static const struct propdef props[] = {
     { GLOS_PROP_TIMER_NAME, P_TEXT, t_name_get, t_name_set },
 };
 
+/* prop_call's ends: a large property's memory is let go. */
+static int prop_done(char *text, char *small, int r)
+{
+    if (text != small)
+        kfree(text);
+    return r;
+}
+
+static int prop_end(struct trapframe *tf, char *text, char *small, u32 e)
+{
+    return prop_done(text, small, e ? a2_fail(tf, e) : a2_ok(tf, 0));
+}
+
 static int prop_call(struct app *a, struct trapframe *tf, int set)
 {
     struct glos_prop p;
     const struct propdef *d = 0;
-    char text[1040];                            /* (on the app's own kernel stack, 16 KB: a setter may wait for the
+    char small[1040];                           /* (on the app's own kernel stack, 16 KB: a setter may wait for the
                                                    desktop with it in use) */
-    u32 size, i, len = 0;
+    char *text = small;
+    u32 size, i, len = 0, room = sizeof small;
     int kind, e;
     void *obj;
     if (a2_rd(tf, &p, sizeof p, &size) != 0)
@@ -325,37 +339,42 @@ static int prop_call(struct app *a, struct trapframe *tf, int set)
     if (!d || (p.prop >> 8) != (u32)kind || (set && (d->flags & P_RO)))
         return a2_fail(tf, (p.prop >> 8) != (u32)kind && d ? GLOS_E_KIND : GLOS_E_PROPERTY);
     obj = handle_obj(&a->v2->h, p.handle, (u8)kind);
+    if (d->flags & P_BIG) {                     /* (a large one's bytes: the kernel's memory, let go in prop_big) */
+        room = 4097;
+        if (!(text = kmalloc(room)))
+            return a2_fail(tf, GLOS_E_MEMORY);
+    }
     if (set) {
         if (d->flags & (P_TEXT | P_DATA)) {
-            if (p.room >= sizeof text || (p.room && user_rd((u16)tf->ds, p.data, text, p.room) != 0))
-                return a2_fail(tf, GLOS_E_ARGUMENT);
+            if (p.room >= room || (p.room && user_rd((u16)tf->ds, p.data, text, p.room) != 0))
+                return prop_end(tf, text, small, GLOS_E_ARGUMENT);
             len = p.room;
         }
         e = d->set(a, obj, p.value, text, len);
-        return e ? a2_fail(tf, (u32)e) : a2_ok(tf, 0);
+        return prop_end(tf, text, small, (u32)e);
     }
     e = d->get(a, obj, &p.value, text, &len);
     if (e)
-        return a2_fail(tf, (u32)e);
+        return prop_end(tf, text, small, (u32)e);
     if (d->flags & P_DATA) {                    /* bytes as they are: all of them, or as many as there is room for */
         p.length = len;
         if (p.room && len && user_wr((u16)tf->ds, p.data, text, len <= p.room ? len : p.room) != 0)
-            return a2_fail(tf, GLOS_E_ARGUMENT);
+            return prop_done(text, small, a2_fail(tf, GLOS_E_ARGUMENT));
         if (a2_wr(tf, &p, sizeof p, size) != 0)
-            return a2_fail(tf, GLOS_E_ARGUMENT);
-        return p.room < len ? a2_fail(tf, GLOS_E_ROOM) : a2_ok(tf, 0);
+            return prop_done(text, small, a2_fail(tf, GLOS_E_ARGUMENT));
+        return prop_done(text, small, p.room < len ? a2_fail(tf, GLOS_E_ROOM) : a2_ok(tf, 0));
     }
     if (d->flags & P_TEXT) {
         u32 n = len + 1 <= p.room ? len + 1 : p.room;     /* (its NUL too, where there is room for it) */
         text[len] = 0;
         p.length = len;
         if (n && user_wr((u16)tf->ds, p.data, text, n) != 0)
-            return a2_fail(tf, GLOS_E_ARGUMENT);
+            return prop_done(text, small, a2_fail(tf, GLOS_E_ARGUMENT));
         if (a2_wr(tf, &p, sizeof p, size) != 0)
-            return a2_fail(tf, GLOS_E_ARGUMENT);
-        return p.room <= len ? a2_fail(tf, GLOS_E_ROOM) : a2_ok(tf, 0);
+            return prop_done(text, small, a2_fail(tf, GLOS_E_ARGUMENT));
+        return prop_done(text, small, p.room <= len ? a2_fail(tf, GLOS_E_ROOM) : a2_ok(tf, 0));
     }
-    return a2_wr(tf, &p, sizeof p, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
+    return prop_done(text, small, a2_wr(tf, &p, sizeof p, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0));
 }
 
 /* ---- the app's state */

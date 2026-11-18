@@ -449,6 +449,23 @@ static void windows(void)
               && glos_get_data(w, GLOS_PROP_WIN_ICON, back, 16, &len) == GLOS_E_ROOM && len == 1024, "r=%d n=%d len=%u", r, n, len);
         r = glos_set_data(w, GLOS_PROP_WIN_ICON, icon, 0);
         check("win-icon-off", r == 0 && glos_get_data(w, GLOS_PROP_WIN_ICON, back, sizeof back, &len) == 0 && len == 0, "r=%d", r);
+        {   /* (phase D: the picture of 32 pixels, 4096 bytes: more than a property's usual room) */
+            static unsigned big[1024], bigback[1024];
+            for (i = 0; i < 1024; i++)
+                big[i] = 0xFF000000u | (i * 0x000305u);
+            r = glos_get_data(w, GLOS_PROP_WIN_ICON_BIG, bigback, sizeof bigback, &len);
+            check("win-icon-big-none", r == 0 && len == 0, "r=%d len=%u", r, len);
+            r = glos_set_data(w, GLOS_PROP_WIN_ICON_BIG, big, sizeof big);
+            n = glos_get_data(w, GLOS_PROP_WIN_ICON_BIG, bigback, sizeof bigback, &len);
+            check("win-icon-big", r == 0 && n == 0 && len == 4096 && !memcmp(big, bigback, sizeof big)
+                  && glos_set_data(w, GLOS_PROP_WIN_ICON_BIG, big, 1024) == GLOS_E_ARGUMENT
+                  && glos_get_data(w, GLOS_PROP_WIN_ICON_BIG, bigback, 16, &len) == GLOS_E_ROOM && len == 4096,
+                  "r=%d n=%d len=%u", r, n, len);
+            r = glos_set_data(w, GLOS_PROP_WIN_ICON_BIG, big, 0);
+            check("win-icon-big-off", r == 0 && glos_get_data(w, GLOS_PROP_WIN_ICON_BIG, bigback, sizeof bigback, &len) == 0
+                  && len == 0, "r=%d", r);
+            glos_set_data(w, GLOS_PROP_WIN_ICON_BIG, big, sizeof big);  /* (left on: let go with the window) */
+        }
         check("win-pointer-none", glos_set(w, GLOS_PROP_WIN_CURSOR, GLOS_CURSOR_CUSTOM) == GLOS_E_ARGUMENT, 0);
         memset(&cur, 0, sizeof cur);
         cur.w = 8, cur.h = 8, cur.hot_x = 4, cur.hot_y = 4;

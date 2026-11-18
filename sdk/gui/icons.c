@@ -84,3 +84,26 @@ const unsigned char *gui_icon(const char *name, int big)
     kept[k].none = 1;
     return NULL;
 }
+
+/* A window's own picture: the icon's 16 pixels for its title bar and the task bar, its 32 for Alt+Tab's strip (the
+   palette's colours as GLOS's pixels; 0 is nothing drawn). The name is kept: GLOS's window is made when the
+   toolkit's is first shown, and is given the picture then (core.c). */
+void gui_window_icon(struct gui_window *w, const char *name)
+{
+    static unsigned px[GUI_BIG_W * GUI_BIG_W];
+    int big;
+    if (name != w->icon)
+        snprintf(w->icon, sizeof w->icon, "%s", name ? name : "");
+    if (!w->id)
+        return;
+    name = w->icon[0] ? w->icon : NULL;
+    for (big = 0; big < 2; big++) {
+        const unsigned char *ic = name ? gui_icon(name, big) : NULL;
+        int n = big ? GUI_BIG_W * GUI_BIG_W : GUI_ICON_W * GUI_ICON_W, i;
+        for (i = 0; ic && i < n; i++)
+            px[i] = ic[i] ? 0xFF000000u | (unsigned)gfx_palette[ic[i]][0] << 16 | (unsigned)gfx_palette[ic[i]][1] << 8
+                                | gfx_palette[ic[i]][2]
+                          : 0;
+        glos_set_data(w->id, big ? GLOS_PROP_WIN_ICON_BIG : GLOS_PROP_WIN_ICON, px, ic ? (unsigned)n * 4 : 0);
+    }
+}

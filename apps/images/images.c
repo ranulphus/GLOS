@@ -454,6 +454,7 @@ int main(int argc, char **argv)
         return 1;
     }
     win = gui_window(GUI_T("Images"), 480, 360, 0);
+    gui_window_icon(win, "app-images");
     win->on_command = command;
     win->on_key = key;
     win->on_resize = resized;

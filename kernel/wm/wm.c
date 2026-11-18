@@ -935,6 +935,8 @@ void wm_destroy(struct wm *m, struct wm_window *w)
     if (w->store.dev)
         w->store.dev->sync(&w->store);
     store_free(m, w);
+    if (w->icon_big)
+        m->host.free(w->icon_big, 4096, WM_MEM_SMALL);
     w->flags = 0;
     bar_stale(m);
     bar_fit(m);

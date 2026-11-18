@@ -54,6 +54,7 @@ struct api2 {
 #define P_TEXT 2
 #define P_RO   4
 #define P_DATA 8                        /* bytes, up to 1039 (text: up to 255 and a NUL) */
+#define P_BIG  16                       /* (with P_DATA) up to 4096 bytes: in memory of the kernel's, not on the stack */
 struct propdef {
     u32 prop;
     u32 flags;

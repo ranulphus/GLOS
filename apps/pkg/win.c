@@ -74,6 +74,7 @@ int pkg_window(int argc, char **argv)
         return 1;
     }
     win = gui_window(GUI_T("Packages"), 580, 300, 0);
+    gui_window_icon(win, "app-pkg");
     box = gui_vbox(win->root, -1, 6);
     gui_grow(box, 1);
     list = gui_list(box, 5, heads, widths);

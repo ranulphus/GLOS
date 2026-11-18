@@ -408,6 +408,17 @@ W_SET(w_top_set, DW_TOPMOST) W_SET(w_bar_set, DW_TASKBAR) W_SET(w_flash_set, DW_
     static int name(struct app *a, void *o, s32 v, const char *x, u32 l) \
     { (void)v; return desk_win_set(a, (u32)o, what, 0, x, l); }
 W_PUT(w_icon_set, DW_ICON) W_PUT(w_pointer_set, DW_CURSOR_IMG) W_PUT(w_help_set, DW_HELP)
+W_PUT(w_icon_big_set, DW_ICON_BIG)
+
+static int w_icon_big_get(struct app *a, void *o, s32 *v, char *x, u32 *l)
+{
+    int r = desk_win_icon_big(a, (u32)o, (u32 *)(void *)x);
+    (void)v;
+    if (r < 0)
+        return GLOS_E_HANDLE;
+    *l = r ? 4096 : 0;
+    return 0;
+}
 
 static int w_icon_get(struct app *a, void *o, s32 *v, char *x, u32 *l)
 {
@@ -467,6 +478,7 @@ const struct propdef api2_win_props[] = {
     { GLOS_PROP_WIN_ICON, P_DATA, w_icon_get, w_icon_set },
     { GLOS_PROP_WIN_POINTER, P_DATA, w_pointer_get, w_pointer_set },
     { GLOS_PROP_WIN_HELP, P_TEXT, w_help_get, w_help_set },
+    { GLOS_PROP_WIN_ICON_BIG, P_DATA | P_BIG, w_icon_big_get, w_icon_big_set },
 };
 const u32 api2_win_nprops = ARRAY_SIZE(api2_win_props);
 

@@ -246,6 +246,7 @@ int main(int argc, char **argv)
         return 1;
     }
     win = gui_window(GUI_T("Untitled - Notepad"), 520, 340, 0);
+    gui_window_icon(win, "app-notepad");
     win->on_command = command;
     win->on_close = closing;
     bar = gui_menubar(win);

@@ -18,6 +18,8 @@ shot mon-log "Monitor" 13 35 474 235 0 312 500 18
 key ctrl+tab
 shot mon-services "Monitor" 0 312 500 18
 key ctrl+tab
+shot mon-windows "Monitor" 14 55 459 214 0 312 500 18
+key ctrl+tab
 key tab
 type N
 key alt+e

@@ -548,6 +548,17 @@ int desk_win_set(struct app *a, u32 id, int what, s32 v, const void *data, u32 l
                 memcpy(w->icon, data, sizeof w->icon);
             wm_frame_again(m, w);
         }
+    } else if (what == DW_ICON_BIG) {
+        if (len != 0 && len != 4096)
+            r = GLOS_E_ARGUMENT;
+        else if (len && !w->icon_big && !(w->icon_big = m->host.alloc(4096, WM_MEM_SMALL)))
+            r = GLOS_E_MEMORY;
+        else if (len)
+            memcpy(w->icon_big, data, 4096);
+        else if (w->icon_big) {
+            m->host.free(w->icon_big, 4096, WM_MEM_SMALL);
+            w->icon_big = 0;
+        }
     } else if (what == DW_CURSOR_IMG) {
         const struct wm_cursor *c = data;
         if (len != sizeof *c || !c->w || !c->h || c->w > 32 || c->h > 32 || c->hx >= c->w || c->hy >= c->h)
@@ -564,6 +575,17 @@ int desk_win_set(struct app *a, u32 id, int what, s32 v, const void *data, u32 l
             w->help[len] = 0;
         }
     }
+    desk_unlock();
+    return r;
+}
+
+int desk_win_icon_big(struct app *a, u32 id, u32 *out)
+{
+    struct wm *m = desk_lock();
+    struct wm_window *w = own(m, a, id);
+    int r = !w ? -1 : w->icon_big != 0;
+    if (r > 0)
+        memcpy(out, w->icon_big, 4096);
     desk_unlock();
     return r;
 }

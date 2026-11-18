@@ -806,6 +806,7 @@ int main(int argc, char **argv)
     }
     modes_read();
     win = gui_window(GUI_T("Control Panel"), 600, 440, 0); /* (as large as 640x480 allows) */
+    gui_window_icon(win, "app-control");
     win->on_key = on_key;
     box = gui_vbox(win->root, 6, 8);
     gui_grow(box, 1);

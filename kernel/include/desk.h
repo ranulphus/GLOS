@@ -67,9 +67,10 @@ u32 desk_win_list(struct desk_info *out, u32 max);      /* every window but the 
 int desk_win_limit(struct app *a, u32 id, int which, s32 v);   /* 0 min_w, 1 min_h, 2 max_w, 3 max_h */
 int desk_win_cursor(struct app *a, u32 id, int shape);
 int desk_win_focus_id(u32 id);          /* any window, by its id */
-enum { DW_TOPMOST, DW_TASKBAR, DW_FLASH, DW_PROGRESS, DW_ICON, DW_CURSOR_IMG, DW_HELP };
+enum { DW_TOPMOST, DW_TASKBAR, DW_FLASH, DW_PROGRESS, DW_ICON, DW_CURSOR_IMG, DW_HELP, DW_ICON_BIG };
 int desk_win_set(struct app *a, u32 id, int what, s32 v, const void *data, u32 len);
-int desk_win_icon(struct app *a, u32 id, u32 *out);     /* its picture (256 pixels): 1 if it has one, 0, or -1 */
+int desk_win_icon(struct app *a, u32 id, u32 *out);
+int desk_win_icon_big(struct app *a, u32 id, u32 *out);        /* (4096 bytes) */     /* its picture (256 pixels): 1 if it has one, 0, or -1 */
 int desk_win_drag(struct app *a, u32 id, int part);     /* the user moves or sizes it from here on (a button is down) */
 void desk_work(s32 *x, s32 *y, s32 *w, s32 *h);         /* the screen less the task bar */
 struct desk_blit {

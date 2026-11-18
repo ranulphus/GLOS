@@ -276,6 +276,7 @@ int main(int argc, char **argv)
         return 1;
     }
     win = gui_window(GUI_T("Calculator"), 0, 0, GUI_W_FIXED);
+    gui_window_icon(win, "app-calc");
     win->on_command = command;
     win->on_key = key;
     bar = gui_menubar(win);

@@ -683,6 +683,8 @@ void gui_win_realize(struct gui_window *w, int x, int y, int anywhere)
     w->gw.x = x, w->gw.y = y;
     w->w = w->px.w, w->h = w->px.h;
     w->relayout = 1;
+    if (w->icon[0])                             /* (its own picture, asked for before GLOS's window was there) */
+        gui_window_icon(w, w->icon);
     if (gui_dnd_hook)                           /* (its widgets' drop targets: the window's DND target) */
         gui_dnd_register(w);
 }

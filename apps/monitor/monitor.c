@@ -12,6 +12,8 @@
  *   Services      the background apps ([services] run): each one's state and
  *                 how often it was started again; Stop and Start (the shell's
  *                 SERVICES, run for it)
+ *   Windows       the apps' windows, front to back: each one's program, its
+ *                 state and size; Go To puts one in front, with the keyboard
  *
  * "MONITOR ..." lines on stdout (the suite's). */
 #include <stdio.h>
@@ -28,6 +30,10 @@ static struct gui_widget *sysval[12];
 static struct gui_widget *svc_list, *svc_note;
 static char svc_name[16][16];                   /* the services listed, by row */
 static int nsvc;
+static struct gui_widget *win_list;
+static unsigned win_ids[32];
+static char win_titles[32][64];
+static int nwins;
 static struct glos_sys_system sys, last;
 static struct glos_sys_memory mem;
 static struct glos_version ver;
@@ -123,6 +129,7 @@ static void fill_system(void)
 }
 
 static void fill_services(void);
+static void fill_windows(void);
 
 static void sample(void *arg)
 {
@@ -159,6 +166,8 @@ static void sample(void *arg)
         fill_programs();
     if (gui_tabs_get(tabs) == 4)
         fill_services();
+    if (gui_tabs_get(tabs) == 5)
+        fill_windows();
 }
 
 static void end_task(struct gui_widget *w, int what)
@@ -288,6 +297,60 @@ static void svc_ask(struct gui_widget *w, int what)
     fflush(stdout);
 }
 
+/* The Windows page: the apps' ordinary windows that are shown or minimised, front to back, each its program's
+   name (PROGRAMS'), how it is shown and its client area's size. */
+static void fill_windows(void)
+{
+    static const char *const states[8] = { GUI_N("Hidden"), GUI_N("Normal"), GUI_N("Minimised"), GUI_N("Maximised"),
+        GUI_N("Full screen"), GUI_N("Normal"), GUI_N("Left half"), GUI_N("Right half") };
+    static struct glos_win_info wins[32];
+    static struct glos_program pr[96];
+    unsigned n = 0, np = 0, i, k;
+    int keep = gui_list_get(win_list), r;
+    memset(wins, 0, sizeof wins);
+    if (glos_windows(GLOS_ENUM_ALL, wins, 32, &n) != 0 && glos_error() != GLOS_E_ROOM)
+        n = 0;
+    r = glos_programs(pr, sizeof pr, &np);
+    if (r != 0 && r != GLOS_E_ROOM)
+        np = 0;
+    gui_list_clear(win_list);
+    nwins = 0;
+    for (i = 0; i < n && i < 32; i++) {
+        const struct glos_win_info *v = &wins[i];
+        const char *cells[4], *prog = "";
+        char size[24];
+        if (!v->app || v->kind != GLOS_WK_NORMAL || v->state == GLOS_WS_HIDDEN)
+            continue;
+        for (k = 0; k < np && k < 96; k++)
+            if (pr[k].kind != GLOS_PROG_JOB && pr[k].id == v->app)
+                prog = pr[k].name;
+        snprintf(size, sizeof size, "%d x %d", v->w, v->h);
+        snprintf(win_titles[nwins], sizeof win_titles[0], "%s", v->title);
+        cells[0] = win_titles[nwins], cells[1] = prog, cells[2] = GUI_T(states[v->state < 8 ? v->state : 1]);
+        cells[3] = size;
+        gui_list_add(win_list, cells, NULL, NULL);
+        win_ids[nwins++] = v->id;
+    }
+    if (keep >= 0 && keep < nwins)
+        gui_list_set(win_list, keep);
+}
+
+/* Go To: the chosen window in front, with the keyboard. */
+static void win_go(struct gui_widget *w, int what)
+{
+    int r = gui_list_get(win_list);
+    (void)w, (void)what;
+    if (r < 0 || r >= nwins)
+        return;
+    if (glos_focus_id(win_ids[r]) != 0) {
+        gui_message(win, GUI_T("Go To"), GUI_T("GLOS couldn't bring the window forward."), GUI_MB_OK);
+        fill_windows();
+        return;
+    }
+    printf("MONITOR window %s\n", win_titles[r]);
+    fflush(stdout);
+}
+
 static void tab_changed(struct gui_widget *w, int what)
 {
     (void)what;
@@ -297,6 +360,8 @@ static void tab_changed(struct gui_widget *w, int what)
         refresh_log(NULL, 0);
     if (gui_tabs_get(w) == 4)
         fill_services();
+    if (gui_tabs_get(w) == 5)
+        fill_windows();
 }
 
 int main(int argc, char **argv)
@@ -309,6 +374,8 @@ int main(int argc, char **argv)
         GUI_N("Network:"), GUI_N("Host name:"), GUI_N("In front:") };
     static const char *const svc_heads[4] = { GUI_N("Service"), GUI_N("State"), GUI_N("Started again"), GUI_N("Command") };
     static const int svc_widths[4] = { 96, 120, 84, 160 };
+    static const char *const win_heads[4] = { GUI_N("Window"), GUI_N("Program"), GUI_N("State"), GUI_N("Size") };
+    static const int win_widths[4] = { 190, 100, 84, 86 };
     struct gui_widget *page, *row, *form, *box;
     int i;
     if (gui_init(argc, argv) != 0) {
@@ -319,6 +386,7 @@ int main(int argc, char **argv)
     ver.size = sizeof ver;
     glos_version(&ver);
     win = gui_window(GUI_T("Monitor"), 500, 330, 0);
+    gui_window_icon(win, "app-monitor");
     tabs = gui_tabs(gui_vbox(win->root, -1, 6));
     gui_grow(tabs, 1);
     gui_grow(tabs->parent, 1);
@@ -365,6 +433,13 @@ int main(int argc, char **argv)
     gui_space(box, 0, 0);
     gui_button(box, GUI_T("S&top"), svc_ask, 1);
     gui_button(box, GUI_T("&Start"), svc_ask, 2);
+
+    page = gui_tab(tabs, GUI_T("Windows"));
+    win_list = gui_list(page, 4, win_heads, win_widths);
+    gui_grow(win_list, 1);
+    box = gui_hbox(page, 6, 0);
+    gui_space(box, 0, 0);
+    gui_button(box, GUI_T("&Go To"), win_go, 0);
 
     status = gui_status(win);
     if (argc > 1 && !strcmp(argv[1], "-tasks"))

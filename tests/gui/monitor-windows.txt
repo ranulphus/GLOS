@@ -1,0 +1,23 @@
+#loopa-run-only
+# Monitor's Windows page (apps/monitor; phase D, D8): the apps' windows listed; the one chosen there is put in
+# front with the keyboard by Go To: Alt+F4 then closes Notepad, not Monitor. (On the real desktop alone: the
+# host's programs are one process, with no windows of another's.)
+run MONITOR.EXE
+wait "Monitor"
+run NOTEPAD.EXE
+wait "Untitled - Notepad"
+key alt+tab
+pause 2500
+key ctrl+tab ctrl+tab ctrl+tab ctrl+tab ctrl+tab
+pause 2500
+key tab
+type U
+key alt+g
+pause 1500
+key alt+f4
+gone "Untitled - Notepad"
+pause 1000
+key alt+f4
+gone "Monitor"
+expect MONITOR window Untitled - Notepad
+expect MONITOR end
