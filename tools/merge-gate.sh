@@ -74,7 +74,8 @@ host=${GATE_HOST:-retro@devserver}
 lanes=${GATE_LANES:-4} vms=${LOOPA_MAX_VMS:-8} niceness=${MGA_NICE:-10} minfree=${LOOPA_MIN_FREE_MB:-8192}
 tjobs=${JOBS:-$(( vms / lanes > 0 ? vms / lanes : 1 ))}
 # RetroGPU is ~/RetroGPU, or (RETROGPU=) another checkout of it, for a branch's run: its HEAD is sent, and its
-# own built DOS-GL programs (gl/build/exe, gl/build/doom) take ~/RetroGPU's place there. A suite whose programs
+# own built DOS-GL programs and library (gl/build/exe, gl/build/doom, gl/build/lib: GLOS's savers are linked against
+# libGL.a) take ~/RetroGPU's place there. A suite whose programs
 # it has not built is refused here: there it would run the ones ~/RetroGPU built, another branch's. Fifth
 # Wheel in loopa-games is ~/FifthWheel's build unless FIFTHWHEEL_DIR names another checkout's (one built against
 # that branch).
@@ -90,6 +91,8 @@ if [ -n "$other" ]; then
         esac
     done
 fi
+# GLOS's savers (apps/savers) are linked against DOS-GL's library as it is built here.
+[ -e "$rgpu/gl/build/lib/libGL.a" ] || { echo "merge-gate: $rgpu/gl/build/lib/libGL.a is not built (make -C $rgpu/gl)" >&2; exit 1; }
 rcommit=$(git -C "$rgpu" rev-parse HEAD)
 if [ -z "${2:-}" ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     echo "merge-gate: uncommitted changes are not sent; running $(git log -1 --format=%h "$commit")" >&2
@@ -114,7 +117,7 @@ optdir() { sed -n "s|^$1 *?= *\$(HOME)/||p" config.mk; }
 paths=("$(optdir WATCOM)" "$(optdir DJGPP_PREFIX)" "$box"
        .cache/mga-glide/86box/roms .cache/mga-glide/loopa .cache/mga-glide/dl .cache/mga-glide/games
        .cache/mga-glide/glos FifthWheel/build/dos/FWHEEL.EXE FifthWheel/build/data/WORLD.PAK
-       RetroGPU/gl/build/exe RetroGPU/gl/build/doom)
+       RetroGPU/gl/build/exe RetroGPU/gl/build/doom RetroGPU/gl/build/lib)
 present=()
 for p in "${paths[@]}"; do
     case "$p" in
@@ -131,7 +134,7 @@ ssh -o BatchMode=yes "$host" '
 ( cd "$HOME" && rsync -aR --delete --exclude __pycache__ --exclude '/.cache/mga-glide/glos/bin-*' \
       --exclude /.cache/mga-glide/glos/trace "${present[@]}" "$host:" )
 if [ -n "$other" ]; then
-    for d in exe doom; do
+    for d in exe doom lib; do
         if [ -d "$other/gl/build/$d" ]; then
             ssh -o BatchMode=yes "$host" "mkdir -p RetroGPU/gl/build"
             rsync -a --delete --exclude __pycache__ "$other/gl/build/$d" "$host:RetroGPU/gl/build/"
