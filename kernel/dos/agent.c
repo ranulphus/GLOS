@@ -744,6 +744,9 @@ void agent_exit_cancel(void) { exit_req = 0; }
 
 u8 agent_exit_code(void) { return exit_code; }
 
+/* GLOS has been asked to leave (and has not been refused): nothing new is to be started (kernel/core/services.c). */
+int agent_exiting(void) { return exit_req; }
+
 /* ---- the VM thread's side (trap context) */
 
 static const char *const internal[] = {

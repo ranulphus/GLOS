@@ -6534,7 +6534,9 @@ def apps_case(profile, card):
         "--file", "build/dj/djtst/TIMER.EXE=/TEST/TIMER.EXE", "--file", "build/dj/djtst/UCLOCK.EXE=/TEST/UCLOCK.EXE",
         "--file", "build/dj/djtst/SIGNALS.EXE=/TEST/SIGNALS.EXE",
         "--cmd", "SERSAY HX-START apps", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
-        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
+        "--cmd", "SERSAY HX-AGAIN", "--cmd", "C:\\TEST\\GLOS.EXE",       # (a second start: its service at once)
+        "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=2700)
+    plain = list(agent.opts)                    # (for the second start: the first's connection is gone with it)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
                    "-o", "ControlPersist=600"]
     app = "C:\\TEST\\APPTEST.EXE "
@@ -6579,8 +6581,10 @@ def apps_case(profile, card):
         checks["plain"] = rc == 7 and "APP-PLAIN version=%x" % api_version() in out
         rc, out, _ = agent.ssh("glos run --exclusive " + app + "exit 5")
         checks["exclusive"] = rc == 3 and "APP-REFUSED error=5 reason=5" in out
-        rc, out, _ = agent.ssh("glos run --app " + app + "exit 6")     # (an app before it asks: step B)
-        checks["run-app"] = rc == 3 and "APP-REFUSED error=5 reason=1" in out
+        # (--app makes an app of a program that never asks. APPTEST is marked as one and asks by itself: it is
+        # left to, since phase D's D7. Made one before it asked, its own asking was refused as a second.)
+        rc, out, _ = agent.ssh("glos run --app " + app + "exit 6")
+        checks["run-app"] = rc == 6 and "APP-REFUSED" not in out
         rc, out, _ = agent.ssh(app + "twice")
         checks["twice"] = rc == 0 and "APP-TWICE r=5 reason=1" in out
         checks["exit-code"] = agent.ssh(app + "exit 23")[0] == 23
@@ -6689,21 +6693,95 @@ def apps_case(profile, card):
         if not checks["memory-back"]:
             info += " mem=%r->%r" % (m0, m1)
 
+        # Background apps (phase D, D7; kernel/core/services.c): [services] run's program started, started again
+        # when it ends (after two seconds, then four), ended and started by hand, ended when the setting lists it
+        # no more; a program that is no app refused, DOS and the apps as they were after it.
+        def svc_said(word, n, limit=180):
+            t0 = time.time()
+            while time.time() - t0 < limit and agent.log().count("GLOS-SERVICE " + word) < n:
+                time.sleep(0.3)
+            return agent.log().count("GLOS-SERVICE " + word) >= n
+
+        def svc(want, limit=60):                # glos services' line for APPTEST.EXE says so
+            t0 = time.time()
+            out = ""
+            while time.time() - t0 < limit:
+                out = agent.ssh("glos services")[1].replace("\r", "")
+                if re.search(want, out, re.M):
+                    return True
+                time.sleep(0.5)
+            print("    %s services: wanted %r, have %r" % (tag, want, out))
+            return False
+
+        def svc_job():                          # its job's number, as glos ps has it
+            m = re.search(r"^job (\d+) running app \S+ sleep 600$", agent.ssh("glos ps")[1].replace("\r", ""), re.M)
+            return m.group(1) if m else None
+
+        checks["svc-none"] = agent.ssh("glos services")[1].startswith("no services")
+        checks["svc-set"] = agent.ssh("glos config set services run " + app + "sleep 600")[0] == 0
+        checks["svc-start"] = svc_said("start name=APPTEST.EXE", 1) and svc(r"^service APPTEST\.EXE running seq=\d+ restarts=0 ")
+        job = svc_job()
+        checks["svc-is-app"] = bool(job)
+        checks["svc-again"] = bool(job) and agent.ssh("glos kill " + job)[0] == 0 \
+            and svc_said("start name=APPTEST.EXE", 2) and svc(r"^service APPTEST\.EXE running seq=\d+ restarts=1 ") \
+            and bool(re.search(r"GLOS-SERVICE ended name=APPTEST\.EXE code=\d+ again=2s", agent.log()))
+        job2 = svc_job()
+        checks["svc-again-4s"] = bool(job2) and job2 != job and agent.ssh("glos kill " + job2)[0] == 0 \
+            and svc_said("start name=APPTEST.EXE", 3) \
+            and bool(re.search(r"GLOS-SERVICE ended name=APPTEST\.EXE code=\d+ again=4s", agent.log()))
+        checks["svc-stop"] = agent.ssh("glos services stop apptest.exe")[0] == 0 \
+            and svc(r"^service APPTEST\.EXE stopped seq=0 restarts=2 ") and not svc_job()
+        time.sleep(4)                           # (left ended: not started again)
+        checks["svc-stays"] = agent.log().count("GLOS-SERVICE start name=APPTEST.EXE") == 3 and not svc_job()
+        checks["svc-start-again"] = agent.ssh("glos services start APPTEST.EXE")[0] == 0 \
+            and svc_said("start name=APPTEST.EXE", 4) and svc(r"^service APPTEST\.EXE running ") and bool(svc_job())
+        checks["svc-no-such"] = agent.ssh("glos services stop NOSUCH.EXE")[0] == 1
+        checks["svc-unset"] = agent.ssh("glos config unset services run")[0] == 0 and svc_said("gone name=APPTEST.EXE", 1) \
+            and svc(r"^no services")
+        t0 = time.time()
+        while time.time() - t0 < 60 and re.search(r"^app ", agent.ssh("glos ps")[1], re.M):
+            time.sleep(0.5)
+        checks["svc-gone"] = not re.search(r"^app ", agent.ssh("glos ps")[1], re.M)
+        # (WAITSEC is a real-mode program that stays: one that ended at once would be started again, not refused)
+        checks["svc-refused"] = agent.ssh("glos config set services run C:\\HX\\WAITSEC.COM 300")[0] == 0 \
+            and svc_said("refused name=WAITSEC.COM why=not-an-app", 1, 240) and svc(r"^service WAITSEC\.COM refused ")
+        checks["svc-refused-unset"] = agent.ssh("glos config unset services run")[0] == 0 and svc(r"^no services")
+        rc, out, err = agent.ssh("C:\\TEST\\ECHOARGS.EXE after services")
+        checks["dos-after-services"] = rc == 7 and out == "after services\r\nnine two six int29\r\n"
+        if not checks["dos-after-services"]:
+            info += " after-services=%d %r" % (rc, out[-200:])
+        checks["app-after-services"] = agent.ssh(app + "exit 33")[0] == 33
+        # (Named with no folder: beside GLOS.EXE. Left set: glos exit ends it and is not held up by it, and
+        # GLOS's next start starts it with nobody asking.)
+        checks["svc-beside"] = agent.ssh("glos config set services run APPTEST.EXE sleep 600")[0] == 0 \
+            and svc_said("start name=APPTEST.EXE", 5) and svc(r"^service APPTEST\.EXE running ") and bool(svc_job())
+
         last = start(app + "spin")              # glos exit ends it first
         t0 = time.time()
-        while time.time() - t0 < 240 and not re.search(r"^app ", agent.ssh("glos ps")[1], re.M):
+        while time.time() - t0 < 240 and not re.search(r"^job \d+ running app \S+ spin$", agent.ssh("glos ps")[1].replace("\r", ""), re.M):
             time.sleep(0.5)
         checks["exit"] = agent.ssh("glos exit")[0] == 0 and last.wait(timeout=300) == 255
+        t0 = time.time()
+        while time.time() - t0 < 300 and "HX-AGAIN" not in agent.log():
+            time.sleep(1)
+        checks["exit-with-service"] = "HX-AGAIN" in agent.log() \
+            and agent.log().split("HX-AGAIN")[0].count("GLOS-SERVICE start name=APPTEST.EXE") == 5   # (not again as it left)
+        agent.opts = plain
+        checks["listen-again"] = agent.listening(after="HX-AGAIN")
+        checks["svc-at-start"] = svc_said("start name=APPTEST.EXE", 6) and svc(r"^service APPTEST\.EXE running seq=\d+ restarts=0 ") \
+            and bool(svc_job())
+        checks["svc-unset-again"] = agent.ssh("glos config unset services run")[0] == 0 and svc(r"^no services")
+        checks["exit-again"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["balanced"] = text.count("GLOS-APP start ") == text.count("GLOS-APP end ") == 34
+    checks["balanced"] = text.count("GLOS-APP start ") == text.count("GLOS-APP end ") == 41      # (7 are D7's)
     checks["killed-in-dos"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=agent", text))
-    checks["refused"] = len(re.findall(r"GLOS-APP refuse psp=\w+ why=(exclusive|already|parent)", text)) == 4
+    checks["refused"] = len(re.findall(r"GLOS-APP refuse psp=\w+ why=(exclusive|already|parent)", text)) == 3
     checks["crash-report"] = bool(re.search(r"GLOS-CRASH why=exception vec=0e .*prog=C:\\TEST\\APPTEST.EXE", text)) \
         and bool(re.search(r"GLOS-CRASH file=C:\\TEST\\CRASH\\CRASH\d+\.TXT", text))    # (beside GLOS.EXE: not C:\GLOS by name)
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-APP error" not in text and "GLOS-APP warn" not in text
-    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text and "HX-VECCHK ok" in text
+    checks["done"] = text.count("GLOS-EXIT code=0") == 2 and "HX-DONE 0" in text and "HX-VECCHK ok" in text
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("apps-" + tag, "PASS" if not bad else "FAIL", info,
                                "" if not bad else " failed: " + " ".join(bad)), not bad
@@ -9198,7 +9276,8 @@ CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\K
                  "title": "CP Test", "args": "-a -b", "comspec": "C:\\COMMAND.COM",
                  "autoexec": "C:\\AUTOEXEC.BAT", "dir": "C:\\CP", "blaster": "A220 I7 D1 H5",
                  "env": "CPA=1\nPATH=C:\\A;C:\\B", "server": "time.example.org:1230",
-                 "zone": "CET-1CEST,M3.5.0,M10.5.0/3", "stub_page": "D800"}
+                 "zone": "CET-1CEST,M3.5.0,M10.5.0/3", "stub_page": "D800", "wallpaper": "C:\\CP\\WALL.PNG",
+                 "run": "NOSVC.EXE /Q"}     # (a service that isn't there: tried, and tried again later)
 
 
 def cfg_pages():

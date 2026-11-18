@@ -473,7 +473,7 @@ void session_exec(const struct trapframe *tf)
     struct rmregs r;
     u16 psp = vm_current_psp();
     u32 path = vm_lin(tf->v86_ds, tf->edx), i, b = 0;
-    int hint;
+    int hint, mark;
     if (ses.active && psp == ses.parent)
         end("next-exec");                       /* the last one's EXEC failed */
     if (ses.active || !is_session_parent(psp) || (tf->eax & 0xFF) != 0)
@@ -497,7 +497,8 @@ void session_exec(const struct trapframe *tf)
        yet, it paused the apps (session_pauses()), and an app that looked just then waited for the whole of
        the new program's start, which nothing ends early: a 100 Hz timer of an app's lost 30 interrupts in
        400 on the 486 one time in five when another app started beside it. */
-    hint = (psp == vm.loader_psp && job.app) || marked(tf);
+    mark = marked(tf);
+    hint = (psp == vm.loader_psp && job.app) || mark;
     ses.t0 = timer_ticks() | 1;
     ses.hint = (u8)hint;
     ses.console = (u8)(psp == vm.loader_psp && job.console && !hint);   /* (with no desktop too: a login's program
@@ -529,7 +530,9 @@ void session_exec(const struct trapframe *tf)
     ses.prof = profile_for(psp == vm.loader_psp && job.profile[0] ? job.profile : ses.prog, &ses.prof_copy);
     ses.direct = psp == vm.loader_psp && job.direct;
     ses.exclusive = psp == vm.loader_psp && job.exclusive;
-    ses.app = psp == vm.loader_psp && job.app;
+    /* (A program marked as an app asks to be one by itself, with API 2.0's init: made one before it asked, its
+       own asking was refused as a second one and it ended. A service is started so, marked or not: services.c.) */
+    ses.app = psp == vm.loader_psp && job.app && !mark;
     ses.env_seg = 0;
     {                                           /* TZ (M10), the profile's strings, then the job's own (M9) over */
         static char add[128 + BI_PROF_ENV + sizeof job.env];         /* them */

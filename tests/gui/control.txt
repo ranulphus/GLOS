@@ -30,6 +30,8 @@ shot cp-desktop "Control Panel"
 key ctrl+tab
 shot cp-saver "Control Panel"
 key ctrl+tab
+shot cp-services "Control Panel"
+key ctrl+tab
 shot cp-shell "Control Panel"
 key ctrl+tab
 shot cp-types "Control Panel"

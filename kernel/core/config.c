@@ -33,6 +33,7 @@
 #include "dos.h"
 #include "glos/region.h"
 #include "idle.h"
+#include "services.h"
 #include "io.h"
 #include "kdata.h"
 #include "secrets.h"
@@ -557,6 +558,8 @@ void kcfg_apply(const char *section, const char *key, const char *v)
         desk_kick();
     } else if (same(section, "saver")) {        /* wait, saver, power (kernel/wm/idle.c) */
         idle_config();
+    } else if (same(section, "services")) {     /* run: the background apps (kernel/core/services.c) */
+        services_changed();
     }
 }
 

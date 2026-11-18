@@ -9,7 +9,7 @@
 /* ---- the schema */
 
 const char *const cfg_sections[] = { "display", "input", "joystick", "usb", "sound", "net", "time", "region", "cache",
-                                     "memory", "vnc", "desktop", "saver", "shell", "open", "program",
+                                     "memory", "vnc", "desktop", "saver", "services", "shell", "open", "program",
                                      0 };
 
 const struct cfg_key cfg_schema[] = {
@@ -135,6 +135,9 @@ const struct cfg_key cfg_schema[] = {
       "A picture for the desktop (PNG, JPEG, BMP, GIF or TGA); empty: the theme's colour" },
     { "desktop", "wallpaper_style", CFG_CHOICE, CFG_NOW, 0, 0, "fill|stretch|centre|tile", "fill", "Wallpaper st&yle",
       "How the picture is put on the desktop: made to cover it, made its size, in its middle, or side by side" },
+    /* [services]: the background apps (phase D; kernel/core/services.c) */
+    { "services", "run", CFG_TEXT, CFG_NOW, 0, 190, "line", "", "&Programs",
+      "Programs GLOS starts with itself and starts again if they end: their command lines, ; between them" },
     /* [saver]: the screen saver and the screen's power (API 2.0 step 5; kernel/wm/idle.c) */
     { "saver", "wait", CFG_NUMBER, CFG_NOW, 1, 240, "off", "off", "&Wait (minutes)",
       "The saver comes on when nobody has touched the keyboard or the mouse for so long (off: never)" },

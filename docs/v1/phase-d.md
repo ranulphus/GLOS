@@ -287,6 +287,36 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   manager. Supervision only: they wait while a DOS program has the whole PC, as every app does.
 - **Tests:** Loop A `console` or `apps` (a service started at boot, killed and restarted, stopped by command).
 
+### D7 as built (2026-11-17)
+
+- **`[services] run`**: programs' command lines with `;` between them (190 characters in all, eight services).
+  `kernel/core/services.c` is their supervisor, a kernel thread in agent mode: each is a job of the agent's,
+  made an app without asking and owned by the supervisor, which is told when it moves on. Started as soon as
+  GLOS.CFG is read, with a desktop or with none. A service's name is its program's file name (`CHATD.EXE`); one
+  written with no folder is beside GLOS.EXE, as `[desktop] start`'s are. What a service writes is thrown away.
+- **Started again when it ends:** after two seconds, then four, and so on up to five minutes while it keeps
+  ending within a minute of its start; one that ran a minute or more starts again after two seconds. A program
+  that isn't there ends at once with code 126 and is tried again by the same rule.
+- **Only apps:** a service is a GLOS app, or a 32-bit DPMI program GLOS can make one. Anything else would have
+  DOS to itself with the apps paused for as long as it liked: a service that is no app twenty seconds after its
+  start is ended and left "refused" until `services start NAME` or another command line for it.
+- **`glos services`** (the shell's `SERVICES`): a line each, `service NAME running|waiting|stopped|refused
+  seq=N restarts=N code=N "command line"`. **`glos services stop NAME`** ends one and leaves it ended (until
+  GLOS's next start); **`glos services start NAME`** starts it again. A change to the setting takes effect at
+  once: what it lists no more is ended, what is new is started.
+- **Found on the way:** `glos run --app` of a program that is marked as an app and asks to be one itself raced:
+  made one first, its own init was refused ("already") and it ended with an error; a restarted service ended so
+  every time. A marked program is no longer made an app before it asks (`kernel/vm/session.c`); the apps
+  suite's `run-app` case, which had the refusal as its expectation, has the program's own exit code now.
+- **GLOS leaving:** nothing is started while GLOS has been asked to leave (the exit ends the apps, and a
+  service started again would hold it up).
+- **Not done here:** the task manager's list of them (D8); a page of its own in the Control Panel (D5: the
+  generic Services page has the one setting); per-service settings (a folder to start in, a user to tell).
+- **Tests:** Loop A `apps`: started by the setting, started again after a kill (2 s, then 4 s), stopped and
+  started by hand, ended when unset, a real-mode program refused with DOS and the apps as they were after it,
+  one named with no folder, `glos exit` with one running, and one started with nobody asking at GLOS's next
+  start.
+
 ### D8. The task manager (Monitor grown)
 
 - `apps/task-manager.md`: programs, apps and their windows, sessions, services, memory, the network, the sound

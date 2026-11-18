@@ -1045,11 +1045,12 @@ static const struct {
     { "IDLE", "idle" }, { "RESTART", "restart" }, { "REBOOT", "reboot" },
     { "SENDTEXT", "type" }, { "SENDKEYS", "key" }, { "SENDMOUSE", "mouse" }, { "SHUTDOWN", "exit" },
     { "CLOCK", "time" }, { "SYSMEM", "mem" }, { "NETWORK", "net" }, { "DISK", "disk" }, { "DD", "dd" }, { "PCI", "pci" },
-    { "MTRR", "mtrr" } };
+    { "MTRR", "mtrr" }, { "SERVICES", "services" } };
 
 static const char *const own_names[] = { "GLOS", "PS", "KILL", "LOG", "STAT", "RUN", "CONFIG", "DISPLAY", "DESK", "SHOT",
     "REC", "SECRETS", "USB", "JOY", "CLIP", "AUDIO", "CACHE", "IDLE", "RESTART", "REBOOT", "SENDTEXT", "SENDKEYS",
-    "SENDMOUSE", "SHUTDOWN", "CLOCK", "SYSMEM", "NETWORK", "DISK", "DD", "PCI", "MTRR", "DATE", "TIME", "CHCP", 0 };
+    "SENDMOUSE", "SHUTDOWN", "CLOCK", "SYSMEM", "NETWORK", "DISK", "DD", "PCI", "MTRR", "SERVICES",
+    "DATE", "TIME", "CHCP", 0 };
 
 static const char *const own_help[] = {
     "PS, KILL [n], RUN [--exclusive|--app] program   what runs; one ended; a program started GLOS's way",

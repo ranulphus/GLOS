@@ -65,7 +65,7 @@ static char mode_extra[24];                     /* the file's mode, if it isn't 
 
 static const char *const titles[] = { GUI_N("Display"), GUI_N("Input"), GUI_N("Joystick"), GUI_N("USB"),
     GUI_N("Sound"), GUI_N("Network"), GUI_N("Date and Time"), GUI_N("Region"), GUI_N("Disk Cache"), GUI_N("Memory"),
-    GUI_N("Remote Desktop"), GUI_N("Desktop"), GUI_N("Saver"), GUI_N("Shell"), GUI_N("File Types"),
+    GUI_N("Remote Desktop"), GUI_N("Desktop"), GUI_N("Saver"), GUI_N("Services"), GUI_N("Shell"), GUI_N("File Types"),
     GUI_N("Programs") };
                                                 /* (cfg_sections' order) */
 

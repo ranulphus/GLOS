@@ -48,6 +48,7 @@
 #include "glos/cp.h"
 #include "sftp.h"
 #include "secrets.h"
+#include "services.h"
 #include "shot.h"
 #include "ssh.h"
 #include "sshbuf.h"
@@ -1561,6 +1562,33 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             k = secrets_stat(b, sizeof b);
         ssh_chan_write(ch, 0, (const uint8_t *)b, k);
         ssh_chan_exit(ch, r ? 1 : 0);
+    } else if (!strcmp(cmd, "glos services") || !strncmp(cmd, "glos services ", 14)) {
+        /* glos services: the background apps ([services] run; kernel/core/services.c). glos services stop NAME:
+           one ended, and left so; glos services start NAME: started again. */
+        char b[1024];
+        const char *p = cmd + 13;
+        int what = 0, r = 0;
+        u32 k;
+        while (*p == ' ')
+            p++;
+        if (!strncmp(p, "stop ", 5))
+            what = 1, p += 5;
+        else if (!strncmp(p, "start ", 6))
+            what = 2, p += 6;
+        else if (*p)
+            r = 1;
+        while (*p == ' ')
+            p++;
+        if (what && services_ask(p, what) != 0)
+            r = 2;
+        if (r == 1)
+            k = (u32)ksnprintf(b, sizeof b, "glos services [stop NAME | start NAME]\n");
+        else if (r == 2)
+            k = (u32)ksnprintf(b, sizeof b, "glos services: no such service\n");
+        else
+            k = what ? 0 : services_stat(b, sizeof b);
+        ssh_chan_write(ch, 0, (const uint8_t *)b, k);
+        ssh_chan_exit(ch, r ? 1 : 0);
     } else if (!strcmp(cmd, "glos audio")) {
         /* glos audio: the mixer and its streams (M8) */
         char b[512];
@@ -1677,7 +1705,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
     } else {
         say(ch, 1, "glos: no such command (glos ver, echo, run, shot, key, type, mouse, log, stat, ps, mem, net, tick, "
-                   "joy, usb, pci, mtrr, kill, gdb, exit, restart, reboot)\n");
+                   "joy, usb, pci, mtrr, services, kill, gdb, exit, restart, reboot)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;

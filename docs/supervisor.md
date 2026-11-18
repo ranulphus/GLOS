@@ -1231,7 +1231,9 @@ direct = 1
 - **Without asking** (`glos run --app`): a session's program becomes an app at the first return to its
   protected-mode code where init would be allowed, as a rule its very first instruction after the mode
   switch, so that its stub loads it as an app already. DJGPP 2.05's TIMER, UCLOCK and SIGNALS tests run so,
-  unchanged.
+  unchanged. A program marked as an app ("GLOSAPP1" in its file, as libglos's programs are) is left to ask by
+  itself: made one first, its own init was refused as a second one, or was not, as the two fell (found by phase
+  D's background apps, which are started so whatever they are: `kernel/core/services.c`).
 - **Not the app's:** the system VM's interrupts met during a call (they go to real mode, never to the app's
   protected-mode handlers; nor is the BIOS's INT 1Ch passed up); INT 23h and 24h raised in its own DOS call
   are passed up as in a session.

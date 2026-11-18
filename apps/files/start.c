@@ -47,7 +47,7 @@ struct row {
 static const struct { const char *section, *title; } pages[] = {
     { "display", "Display" }, { "input", "Input" }, { "joystick", "Joystick" }, { "usb", "USB" }, { "sound", "Sound" },
     { "net", "Network" }, { "time", "Date and Time" }, { "region", "Region" }, { "cache", "Disk Cache" },
-    { "memory", "Memory" }, { "vnc", "Remote Desktop" }, { "desktop", "Desktop" }, { "saver", "Saver" },
+    { "memory", "Memory" }, { "vnc", "Remote Desktop" }, { "desktop", "Desktop" }, { "saver", "Saver" }, { "services", "Services" },
     { "shell", "Shell" }, { "open", "File Types" }, { "program", "Programs" } };
 #define NPAGES ((int)(sizeof pages / sizeof *pages))
 

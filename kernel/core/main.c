@@ -11,6 +11,7 @@
 #include "gdb.h"
 #include "io.h"
 #include "kcfg.h"
+#include "services.h"
 #include "lcon.h"
 #include "kprintf.h"
 #include "midi.h"
@@ -120,6 +121,7 @@ void kmain(struct bootinfo *loader_bi)
         midi_init(bi);                          /* the FM chip and an MPU-401, for API 2.0's MIDI ports */
         desk_init();
         kcfg_init(bi);                          /* GLOS.CFG, read and kept by the kernel (M9) */
+        services_init(bi);                      /* the background apps ([services] run; kernel/core/services.c) */
         schedule_init(bi);                      /* the commands GLOS runs at times (GLOS.DAT; kernel/core/schedule.c) */
         pci_scan();
         cache_init(bi);                         /* the disk cache: its drives, the IDE ports it watches */
