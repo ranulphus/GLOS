@@ -9096,7 +9096,11 @@ def vnc_case(profile, vcard, card, bits):
             notes.append("VNC.TXT: %r" % got)
         time.sleep(2)
         checks["typed-same"] = same("typed")
-        w = next((w for w in g.desk()["win"] if "Notepad" in w["title"] and w["shown"]), None)
+        w, t0 = None, time.time()               # (looked for until it is there: this case holds two of the server's
+        while not w and time.time() - t0 < 20:  # four connections, rec's and Notepad's, and a look made right after
+            w = next((w for w in g.desk()["win"] if "Notepad" in w["title"] and w["shown"]), None)     # another
+            if not w:                           # command is refused now and then: "button" failed so, 2026-11-18)
+                time.sleep(1)
         if w:                                   # the close box: the title bar's right end
             vncdo("move", str(w["x"] + w["w"] - 9), str(w["y"] - 10), "click", "1")
         checks["button"] = bool(w) and bool(g.until(lambda d: not any("Notepad" in x["title"] and x["shown"]
@@ -9734,7 +9738,10 @@ def main():
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]
         res = matrix(desk_case, cases, a.jobs)
-        savers = [c for c in [("bf6", "g200", "ne2kpci"), ("bf6", "vbe", "ne2kpci")] if not a.profile or c[0] in a.profile]
+        # (the G100 since RetroGPU d51210f, 2026-11-18: its window's first lock divided by nothing, and on the real
+        # card the memory's size was misread)
+        savers = [c for c in [("bf6", "g200", "ne2kpci"), ("bf6", "vbe", "ne2kpci"), ("bf6", "g100", "ne2kpci")]
+                  if not a.profile or c[0] in a.profile]
         res += matrix(saver_case, savers, a.jobs)       # ... and a saver that is a program (phase D)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "win":

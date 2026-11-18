@@ -568,9 +568,10 @@ The steps:
   acceleration; every DOS-GL saver ends there at once (a divide by zero in the HAL's `write_origin`, the same on
   Loop A's G100) and the blank one takes over, as it is meant to. With that mended the real card still drew
   nothing right: it has 4 MB, and the HAL's memory probe measured 8 (memory that isn't there read back what was
-  just written), so the window's buffers lay where there is no memory. Both are mended on RetroGPU's branch
-  g100win (the DOS-GL session's; not merged yet): a GLOS built against it says `vram=4096K` on that card and
-  OBJECTS.SCR draws as it should there, in the hardware's window.
+  just written), so the window's buffers lay where there is no memory. Both are mended in RetroGPU since its
+  main d51210f (the DOS-GL session's work): a GLOS built against it says `vram=4096K` on that card and
+  OBJECTS.SCR draws as it should there, in the hardware's window. The saver case has a G100 round since then
+  (Loop A's G100: every saver shown).
 
 ### D5's Secrets page (2026-11-18; API 2.4)
 

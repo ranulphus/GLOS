@@ -517,13 +517,6 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   the job's last lines and DOS's prompt on the screen, the keyboard dead and Num Lock not toggling (interrupts
   gone, or the kernel stuck with them off). To find out: the same run without GLOS; `C:\GLOS\CRASH`.
 
-- **DOS-GL savers on a G100** (2026-11-18, bench-g400's new card and Loop A `--card g100` alike): the program
-  ends at its start with SIGFPE, a divide by zero in the HAL's `write_origin` (hal/src/engine.c: the branch
-  without DSTORG, bits per pixel 0); and on the real card, which has 4 MB, the HAL's probe measured 8 MB, so the
-  kernel hands out video memory that isn't there (GLOS main's kernel does so on that card until this is in).
-  The blank saver takes over. Both mended on RetroGPU's branch g100win and proven on the card with a GLOS built
-  against it; waiting for its merge. Then: GLOS rebuilt, a G100 round in the saver case, the bench updated.
-
 - **id's QUAKE.EXE 1.06 halts GLOS on bench-g400** (2026-11-14, found by the DOS-GL session; the owner: later).
   Started under GLOS with no `-mem`, on a PC where GLOS's DPMI host offers it about 403 MB, it prints "Locked 1
   Mb image" and the whole PC stops: no network, a reset needed. With `-mem 32` it runs (demo1: 91.2 fps at
