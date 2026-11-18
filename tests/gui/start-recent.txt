@@ -1,0 +1,19 @@
+#loopa-run-only (START.CFG is kept on GLOS alone; a program joins the menu while the shell runs)
+# The Start menu's "Recently added" (apps/files/start.c; phase D, D3): the menu up once, so that START.CFG has
+# when each entry was first seen; a program is given a place in the menu; the menu up again lists it as recently
+# added.
+run FILES.EXE
+wait "Desktop"
+launch
+wait "Start"
+key esc
+gone "Start"
+config program:NEWGAME.EXE menu 1
+config program:NEWGAME.EXE title Newgame
+launch
+wait "Start"
+key esc
+gone "Start"
+key alt+f4
+gone "Desktop"
+expect FILES start recent Newgame

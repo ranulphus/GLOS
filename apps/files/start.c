@@ -9,7 +9,9 @@
  * tasks, its recent documents) and Power (exit GLOS, restart GLOS, restart the PC).
  *
  * The entries are SHELL's ENTRY list (the programs whose profiles ask to be listed) and GLOS's own apps beside
- * FILES.EXE. The pins in their order and how often each entry was started are kept in START.CFG there.
+ * FILES.EXE. The pins in their order, how often each entry was started and when each was first seen are kept in
+ * START.CFG there: an entry first seen in the last fortnight and not yet started is "Recently added" (the first
+ * START.CFG takes everything there is for old).
  * Everything is by keys: type to search, Down into the list, Enter, Tab to the tiles, Esc (back a page, then
  * away); a press elsewhere takes the menu away. "FILES start ..." lines on stdout say what it did. */
 #include <stdio.h>
@@ -31,6 +33,7 @@ struct ent {
     int kind;                           /* IC_ */
     int own;                            /* one of GLOS's own apps (run from FILES.EXE's folder) */
     int uses;
+    unsigned seen;                      /* when it was first seen (seconds since 1970; 1: there from the first) */
 };
 
 enum { R_HEAD, R_ENT, R_PAGE, R_DOC, R_RUN, R_ACT, R_TASK, R_FILE };
@@ -101,7 +104,31 @@ static void state_save(void)
     for (i = 0; i < nents; i++)
         if (ents[i].uses)
             fprintf(f, "use\t%d\t%s\n", ents[i].uses, ents[i].name);
+    for (i = 0; i < nents; i++)
+        fprintf(f, "seen\t%u\t%s\n", ents[i].seen, ents[i].name);
     fclose(f);
+}
+
+static unsigned now_utc(void)
+{
+    struct glos_time t;
+    memset(&t, 0, sizeof t);
+    t.size = sizeof t;
+    return glos_time(&t) == 0 ? t.utc : 0;
+}
+
+/* The entries not seen before are stamped: with now where START.CFG already had stamps (they are new), as old
+   where it had none (the first one, or one of before there were stamps). 1 if any was. */
+static int stamp(int had)
+{
+    unsigned now = now_utc();
+    int i, any = 0;
+    for (i = 0; i < nents; i++)
+        if (!ents[i].seen) {
+            ents[i].seen = had ? (now > 2 ? now : 2) : 1;
+            any = 1;
+        }
+    return any;
 }
 
 static void state_load(void)
@@ -109,13 +136,15 @@ static void state_load(void)
     static const char *const first[] = { "FILES.EXE -browse", "NOTEPAD.EXE", "TERM.EXE", "CONTROL.EXE" };
     char p[300], line[200];
     FILE *f;
-    int i, e;
+    int i, e, had = 0;
     npins = 0;
     snprintf(p, sizeof p, "%s\\START.CFG", files_home);
     if (!(f = gui_fopen(p, "r"))) {             /* (never kept: the first four of GLOS's own, pinned) */
         for (i = 0; i < 4; i++)
             if ((e = ent_by_name(first[i])) >= 0)
                 pins[npins++] = e;
+        stamp(0);                               /* (and everything there is, old: kept now, so that what */
+        state_save();                           /* comes later is new) */
         return;
     }
     while (fgets(line, sizeof line, f)) {
@@ -127,9 +156,16 @@ static void state_load(void)
             char *t = strchr(line + 4, '\t');
             if (t && (e = ent_by_name(t + 1)) >= 0)
                 ents[e].uses = atoi(line + 4);
+        } else if (!strncmp(line, "seen\t", 5)) {
+            char *t = strchr(line + 5, '\t');
+            had = 1;
+            if (t && (e = ent_by_name(t + 1)) >= 0)
+                ents[e].seen = (unsigned)strtoul(line + 5, NULL, 10);
         }
     }
     fclose(f);
+    if (stamp(had))
+        state_save();                           /* (a new entry's stamp is kept at once: it is new only once) */
 }
 
 /* A line's next part, to its tab (or its end). */
@@ -424,8 +460,16 @@ static void fill(void)
             }
         snprintf(t, sizeof t, GUI_T("Run: %s"), typed);
         add(R_RUN, 0, t);
-    } else {                                    /* the entries started most, then all of them by their letters */
-        int letter = 0;
+    } else {                                    /* the new entries, those started most, then all by their letters */
+        unsigned now = now_utc();
+        int letter = 0, fresh = 0;
+        for (i = nents - 1; i >= 0 && fresh < 3; i--)   /* (first seen in the last fortnight, and never started) */
+            if (ents[i].seen > 1 && !ents[i].uses && (now < ents[i].seen || now - ents[i].seen < 14u * 86400u)) {
+                if (!fresh++)
+                    add(R_HEAD, 0, GUI_T("Recently added"));
+                add(R_ENT, i, ents[i].title);
+                say("recent", ents[i].title);
+            }
         for (i = 0; i < nents; i++)
             if (ents[i].uses)
                 order[n++] = i;
