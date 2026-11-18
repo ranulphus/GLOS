@@ -428,6 +428,9 @@ The steps:
 - **Seen on Loop A** (bf6): stars, pipes and text shown 125 to 177 ms after the saver came on, on the G200 at 16
   bits (the engine), the G200 at 32 bits and the S3 at 8, 16 and 32 bits (software); the Control Panel's preview
   embedded on each. The software renderer draws fewer frames a second than the engine (not yet measured).
+- **Seen on bench-g400** (the IBM 300PL's G400, 640 by 480 at 16 bits, GLOS 82efd1c, 2026-11-18): the three
+  savers, each asked for and ended over SSH: the pipes' window up 184 ms after the saver came on, the text's
+  200 ms; the pictures right (two pipes grown in seven seconds); the bench as it was afterwards.
 - **The blank saver** is still what shows where a saver's program isn't there or ends: the kernel's rule.
 - **Tests:** Loop A's saver case expects the savers on the S3 as on the G200.
 
