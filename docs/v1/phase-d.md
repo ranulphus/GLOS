@@ -327,6 +327,40 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   tier 1); Loop A: after the wait the saver starts, a key ends it and the desktop is as it was; the preview;
   bench-g400 and bench F: each saver timed in hardware and in software.
 
+### D6 in detail (2026-11-18, before any of it is written)
+
+What there is to build on, read from both repositories:
+
+- **DOS-GL in a window:** `dglInit` under GLOS opens a window of the context's size and shows it at once, framed
+  and with the focus (RetroGPU `hal/src/rg/mga_glos.c`); `dglGetGlosWindow()` gives its GLOS handle. Only a
+  Matrox card at 16 bits has it (`GLOS_MACHINE_GLWIN`). There is no frameless, full-screen, topmost or hidden
+  start, no on-screen software renderer (DOS-GL's step B3), and DOS-GL reads no GLOS events: its program must.
+- **GLOS:** a window can be full-screen (`GLOS_WS_FULL`) and topmost (`GLOS_PROP_WIN_TOPMOST`); the blank saver
+  paints the screen black and stops composing while it is on (`kernel/wm/desk.c`), and the input that ends it is
+  used up (`deskin.c`); `[saver] saver` is in the schema ("blank") and read by nobody; the toolkit's
+  `gui_preview` embeds another program's window in a widget and resizes it to the widget.
+
+The steps:
+
+1. **The kernel runs a saver's program** (`kernel/wm/saver.c`). `[saver] saver` names it: `blank` (the built-in
+   one) or a saver, whose program is `NAME.SCR` beside GLOS.EXE (an ordinary GLOS app's EXE by another
+   extension, so that the Control Panel can list what is there). When the saver comes on with one named, the
+   desktop goes on composing and the program is started as a job of the kernel's (as a service is); the pointer
+   is hidden. Once the program has a full-screen window up, that is the saver. If its program isn't there, ends,
+   or has no such window ten seconds on, the blank saver takes over: the screen is never left as it was. The
+   first input ends the saver as today (and is used up): the program is ended by the kernel. The screen's power
+   going off ends the program too (nothing sees its pictures).
+2. **A saver's program:** with no arguments, a DOS-GL context of the screen's size, its window made full-screen
+   and topmost, frames until it is ended (it reads its events: the end, its window's close). With `/P W H`, a
+   context W by H and nothing else: the Control Panel's preview embeds that window.
+3. **The savers** (`apps/savers`, built against RetroGPU's DOS-GL: `-I$(DOSGL_DIR)/include`, `libGL.a`): first
+   the starfield; then pipes, the maze, flying objects, 3D text.
+4. **The Control Panel's Saver page:** the savers there are, the preview (`gui_preview`), the waits.
+5. **Asked of DOS-GL** (its session, 2026-11-18): a hidden start for the window, so that a saver is full-screen
+   from its first frame and a preview doesn't flash up framed; and B3, the on-screen software renderer through
+   `GLOS_DRAW_BLIT`, without which a saver draws only on a Matrox card at 16 bits. Until then the blank saver is
+   what every other card and depth gets, by step 1's rule.
+
 ### D7. Background apps (`[services]`)
 
 - A list of apps GLOS starts with itself (with or without a desktop), starts again if they end (with a growing
