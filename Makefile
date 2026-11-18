@@ -954,10 +954,10 @@ $(foreach a,$(APPS),$(eval $(call app_exe,$(shell echo $(a) | tr a-z A-Z),$(a)))
 # The savers (phase D, D6; apps/savers): GLOS apps that draw with RetroGPU's DOS-GL as it is built there (no copy
 # of it), each NAME.SCR beside GLOS.EXE (kernel/wm/saver.c). (DJGPP's linker makes a DOS program of a name that
 # ends .EXE only: built as one, then named.)
-SAVERS := stars
+SAVERS := stars pipes
 SAVER_SCRS := $(foreach s,$(SAVERS),build/apps/$(shell echo $(s) | tr a-z A-Z).SCR)
 define saver_scr
-build/apps/$(1).SCR: apps/savers/$(2).c build/sdk/libglos.a tools/glosmark.py $$(DOSGL_DIR)/build/lib/libGL.a
+build/apps/$(1).SCR: apps/savers/$(2).c apps/savers/saver.h build/sdk/libglos.a tools/glosmark.py $$(DOSGL_DIR)/build/lib/libGL.a
 	@mkdir -p build/apps build/savers
 	$$(Q)echo "  DJCC    apps/savers/$(2).c"
 	$$(Q)$$(DJCC) -O2 -Wall -Werror -Iinclude -I$$(DOSGL_DIR)/include -o build/savers/$(1).EXE apps/savers/$(2).c \

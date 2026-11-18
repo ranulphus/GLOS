@@ -391,7 +391,11 @@ The steps:
   resize. Where the program can't draw, or isn't there, the place says "Ended". (The program's path is written
   as DOS writes one: DJGPP's `argv[0]` has `/` for `\`, and the agent takes a `/` as where a command's
   switches begin.)
-- **Not done yet:** the other savers; each saver's own settings; STARS.SCR in the packages, the floppy and the
+- **PIPES.SCR** (`apps/savers/pipes.c`): pipes that grow a cell at a time through a nine-cell box, with a joint
+  where they turn, each in its colour, its sides lit by which way they face, with a depth buffer; seven pipes to
+  a picture, which is looked at for a moment and begun again; the box turns slowly. What the two savers do the
+  same (the start, the frames' time, GLOS's word to end) is `apps/savers/saver.h`.
+- **Not done yet:** the maze, the flying objects and the 3D text; each saver's own settings; STARS.SCR in the packages, the floppy and the
   benches' update; the software renderer's window (DOS-GL's B3), without which every other card and depth has
   the blank saver.
 - **Tests:** Loop A `desk` suite's saver case: the G200 (the program shown, moving, ended by a key, the

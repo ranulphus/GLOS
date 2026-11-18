@@ -6798,6 +6798,7 @@ def saver_case(profile, vcard, card):
     import time
     tag = "%s-%s" % (profile, vcard)
     agent = Agent("saver-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/STARS.SCR=/TEST/STARS.SCR",
+        "--file", "build/apps/PIPES.SCR=/TEST/PIPES.SCR",
         "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--cmd", "SERSAY HX-START saver", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
                    "-o", "ControlPersist=600"]
@@ -6866,6 +6867,23 @@ def saver_case(profile, vcard, card):
         time.sleep(2)
         after = shot("after")
         checks["as-it-was"] = bool(after) and above_bar(after) == above_bar(before)
+        if matrox:                              # the other saver, PIPES.SCR: pipes in colour, with depth
+            n0 = agent.log().count("GLOS-IDLE saver off")
+            checks["pipes"] = agent.ssh("glos config set saver saver pipes")[0] == 0 and agent.ssh("glos idle saver")[0] == 0 \
+                and said("GLOS-IDLE saver program=pipes shown", 1, 120)
+            time.sleep(6)
+            a = shot("pipes")
+            coloured = sum(1 for i in range(0, len(a[2]), 3) if a[2][i] > a[2][i + 2] + 40) if a else -1
+            checks["pipes-drawn"] = coloured > 300      # (the first pipe is red)
+            if not checks["pipes-drawn"]:
+                info += " pipes-red=%d" % coloured
+            agent.ssh("glos key 0x39")
+            checks["pipes-off"] = said("GLOS-IDLE saver off", n0 + 1) and said("GLOS-IDLE saver program=pipes ended by the saver's end")
+            t0 = time.time()
+            while time.time() - t0 < 60 and apps():
+                time.sleep(0.5)
+            agent.ssh("glos config set saver saver stars")
+            time.sleep(2)
         # The Control Panel's Saver page: the saver chosen runs small in the page.
         cp = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\CONTROL.EXE saver"], stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
@@ -6873,9 +6891,7 @@ def saver_case(profile, vcard, card):
         while time.time() - t0 < 120 and '"Control Panel"' not in agent.ssh("glos desk")[1]:
             time.sleep(0.5)
         time.sleep(2)
-        agent.ssh("glos key 0x38:down,0x1F,0x38:up")        # Alt+S: the Saver list
-        agent.ssh("glos key 0x150")                          # down: stars
-        t0 = time.time()
+        t0 = time.time()                        # (the saver that is set, stars, is the one shown)
         small = None
         while time.time() - t0 < 40 and not small:
             small = re.search(r'^window \d+ shown bare at (\d+),(\d+) 192x144 "', agent.ssh("glos desk")[1].replace("\r", ""), re.M)
