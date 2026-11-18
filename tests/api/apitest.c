@@ -1528,7 +1528,7 @@ static void on_screen(void)
     struct glos_screen scr;
     unsigned t0, took, i;
     glos_handle t, n;
-    int r, e, ok;
+    int r, e, ok, own;
     for (i = 0; i < 256; i++)
         icon[i] = 0xFF2060C0u;
     glos_screen(&scr);
@@ -1538,14 +1538,15 @@ static void on_screen(void)
     e = glos_point(GLOS_POINT_TRAY, &tray);
     ok = r == 0 && bar.x == 0 && bar.w == scr.w && bar.y + bar.h == scr.h && work.x == 0 && work.y == 0 && work.w == scr.w
          && work.h == bar.y && start.x == 0 && start.y == bar.y && start.w > 8 && start.w < 100 && clock.y == bar.y
-         && clock.x > scr.w / 2 && clock.x + clock.w <= scr.w && clock.w > 8 && e == 0 && tray.w == 0;
+         && clock.x > scr.w / 2 && clock.x + clock.w <= scr.w && clock.w > 8 && e == 0 && tray.w >= 0 && tray.w <= 4 * 24;
+    own = tray.w;                               /* (GLOS's own icons, phase D: the network's on a PC with a card) */
     check("point", ok, "r=%d bar=%d,%d %dx%d work=%dx%d start=%d clock=%d,%d tray=%d", r, bar.x, bar.y, bar.w, bar.h, work.w,
           work.h, start.w, clock.x, clock.w, tray.w);
     t = glos_tray(icon, "APITEST's icon");
     r = glos_point(GLOS_POINT_TRAY, &tray);
-    ok = t && r == 0 && tray.w >= 16 && tray.w <= 24 && tray.y == bar.y && tray.x + tray.w <= clock.x + 2;
+    ok = t && r == 0 && tray.w - own >= 16 && tray.w - own <= 24 && tray.y == bar.y && tray.x + tray.w <= clock.x + 2;
     glos_close(t);
-    ok = ok && glos_point(GLOS_POINT_TRAY, &bar) == 0 && bar.w == 0;
+    ok = ok && glos_point(GLOS_POINT_TRAY, &bar) == 0 && bar.w == own;
     check("tray-place", ok, "t=%x r=%d at=%d,%d w=%d clock=%d after=%d", t, r, tray.x, tray.y, tray.w, clock.x, bar.w);
     /* A notification shown for its time. */
     while (glos_event(ev, sizeof ev, 0, 0) > 0) ;

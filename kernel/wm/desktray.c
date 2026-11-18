@@ -24,43 +24,7 @@
 #include "popmenu.h"
 #include "theme.h"
 #include "timer.h"
-
-/* The pictures, 16 by 16: X is the bar's text colour. */
-static const char *const art_vol[16] = {
-    "................", "................", ".......X........", "......XX...X....", ".....XXX....X...", ".XXXXXXX..X..X..",
-    ".XXXXXXX...X.X..", ".XXXXXXX...X.X..", ".XXXXXXX...X.X..", ".XXXXXXX..X..X..", ".....XXX....X...", "......XX...X....",
-    ".......X........", "................", "................", "................",
-};
-static const char *const art_low[16] = {
-    "................", "................", ".......X........", "......XX........", ".....XXX........", ".XXXXXXX..X.....",
-    ".XXXXXXX...X....", ".XXXXXXX...X....", ".XXXXXXX...X....", ".XXXXXXX..X.....", ".....XXX........", "......XX........",
-    ".......X........", "................", "................", "................",
-};
-static const char *const art_mute[16] = {
-    "................", "................", ".......X........", "......XX........", ".....XXX........", ".XXXXXXX.X...X..",
-    ".XXXXXXX..X.X...", ".XXXXXXX...X....", ".XXXXXXX..X.X...", ".XXXXXXX.X...X..", ".....XXX........", "......XX........",
-    ".......X........", "................", "................", "................",
-};
-static const char *const art_net[16] = {
-    "................", "..XXXXXXXXXXXX..", "..X..........X..", "..X..........X..", "..X..........X..", "..X..........X..",
-    "..X..........X..", "..XXXXXXXXXXXX..", ".......XX.......", ".......XX.......", "....XXXXXXXX....", "................",
-    ".XXXXXXXXXXXXXX.", ".......XX.......", "................", "................",
-};
-static const char *const art_nonet[16] = {
-    "................", "..XXXXXXXXXXXX..", "..X..X....X..X..", "..X...X..X...X..", "..X....XX....X..", "..X...X..X...X..",
-    "..X..X....X..X..", "..XXXXXXXXXXXX..", ".......XX.......", ".......XX.......", "....XXXXXXXX....", "................",
-    ".XXXXXXXXXXXXXX.", ".......XX.......", "................", "................",
-};
-static const char *const art_pad[16] = {
-    "................", "................", "................", "...XXXX..XXXX...", "..XXXXXXXXXXXX..", ".XXX.XXXXXX.XXX.",
-    ".XX...XXXX.X.XX.", ".XXX.XXXXXX.XXX.", ".XXXXXXXXXXXXXX.", ".XXXX......XXXX.", ".XXX........XXX.", "..X..........X..",
-    "................", "................", "................", "................",
-};
-static const char *const art_remote[16] = {
-    "................", "................", "................", "....XXXXXXXX....", "..XX........XX..", ".X....XXXX....X.",
-    "X....XXXXXX....X", "X....XXXXXX....X", ".X....XXXX....X.", "..XX........XX..", "....XXXXXXXX....", "................",
-    "................", "................", "................", "................",
-};
+#include "trayart.h"
 
 static u32 id_vol, id_net, id_pad, id_rem;
 static u32 last_check, ink;
@@ -70,14 +34,6 @@ static u32 seen_v = ~0u, seen_pads;
 static int seen_mute = -1, seen_net = -1;       /* seen_net: 0 no card, 1 a card with no address, 2 an address */
 static char seen_ip[20], seen_note[16];
 static u32 hung_told[8];
-
-static void picture(u32 *out, const char *const *art)
-{
-    u32 i, j;
-    for (j = 0; j < 16; j++)
-        for (i = 0; i < 16; i++)
-            out[j * 16 + i] = art[j][i] == 'X' ? 0xFF000000u | ink : 0;
-}
 
 /* The icon `*id` there (with that picture and tooltip) or not. */
 static void icon(struct wm *m, u32 *id, int there, const char *const *art, const char *tip)
@@ -89,7 +45,7 @@ static void icon(struct wm *m, u32 *id, int there, const char *const *art, const
         *id = 0;
         return;
     }
-    picture(px, art);
+    trayart_picture(px, art, ink);
     if (!*id)
         *id = deskshell_own_add(m, px, tip);
     else

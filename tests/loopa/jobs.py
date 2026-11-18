@@ -5748,16 +5748,20 @@ def api_shell_case(profile, vcard, card):
         ready = a.said("ready shell=0 focus=3 tray=*", 240)
         checks["own"] = bool(ready)
         tx, ty, tw, th = [int(v) for v in re.search(r"tray=(-?\d+),(-?\d+),(\d+),(\d+)", ready or "tray=0,0,0,0").groups()]
-        checks["two-icons"] = tw == 40
+        # (The tray has GLOS's own icons too, phase D: the network's here. The apps' two are found in glos desk's
+        # lines, and a press on one of GLOS's would open its menu.)
+        icons = re.findall(r'^tray \d+ (app|own) at (-?\d+),(-?\d+) "', desk(), re.M)
+        mine = [(int(x), int(y)) for kind, x, y in icons if kind == "app"]
+        checks["two-icons"] = len(mine) == 2 and tw == 20 * len(icons) and all(tx <= x < tx + tw for x, y in mine)
         # Which of the two icons is the shell's: the one whose press it hears of.
         slot = None
-        for k in (0, 1):
-            click(tx + 2 + k * 20 + 8, ty + th // 2)
+        for k, (x, y) in enumerate(mine):
+            click(x + 8, ty + th // 2)
             if a.said("tray what=1 mine=1 at=*", 5):
                 slot = k
                 break
         checks["press"] = slot is not None
-        ix, iy = tx + 2 + (slot or 0) * 20 + 8, ty + th // 2
+        ix, iy = (mine[slot][0] if slot is not None else tx + 2) + 8, ty + th // 2
         checks["others"] = bool(other.said("tray what=1 mine=1 at=*", 5)) == (slot == 1)
         time.sleep(1.5)                         # (the next press is no double click's second)
         na = len(a.out)

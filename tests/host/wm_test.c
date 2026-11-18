@@ -19,6 +19,8 @@
 #include "qdev.h"
 #include "png.h"
 
+#include "../../kernel/wm/trayart.h"
+
 void wm_demo(struct wm *m);
 
 static int fails;
@@ -443,6 +445,11 @@ static void desk(const struct gfx_fmt *f, const char *name, s32 w, s32 h, int pt
     screen_new(&s, f, w, h);
     wm_init(&m, &host, w, h, f);
     wm_demo(&m);
+    {                                           /* GLOS's own network icon, as the PCs of Loop A's desk suite */
+        u32 px[256];                            /* have it in the tray (they have an address: desktray.c) */
+        trayart_picture(px, art_net, m.look.bar_text);
+        wm_tray_add(&m, px);
+    }
     if (ptr)                                    /* (wm-desk-ptr-N: with the pointer at 200,150) */
         wm_pointer(&m, 200, 150, 1);
     wm_compose(&m, &s);
