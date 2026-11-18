@@ -537,6 +537,30 @@ The steps:
 | **D7** background apps | `[services] run`, started again when they end, `glos services`, refused if no app | A folder or a user for each |
 | **D8** the task manager | Monitor's Services page with Stop and Start; Switch To | The apps' windows, sessions, streams and the processor by program; SYS's structures for NET, AUDIO and USB |
 
+### What is left, and how each is meant to be done (2026-11-18)
+
+- **"Disk nearly full"** (D2): in the shell (FILES, which is there whenever the desktop is), not the kernel:
+  FS's DRIVES for each fixed drive once a minute, SHELL's NOTIFY when one has under a twentieth free (said once,
+  again only after it has been above a tenth). To test: a small second disk in Loop A (`--scratch-hdd`), filled.
+- **"Recently added"** (D3): START.CFG keeps when each entry was first seen (`seen TIME NAME`); the first run
+  marks everything as old; an entry seen for the first time later is listed for a fortnight or until it is
+  started. The host's clock is 0 and a script can't put a START.CFG in place first: it needs a script command
+  for that, or a Loop A check.
+- **Tiles' groups and sizes** (D3): the pins' lines of START.CFG gain a group's name and a size; the tiles' area
+  lays out by group. Not begun.
+- **A window's own 32-pixel icon** (D1): a WIN property (1024 pixels kept with the window), `gui_window_icon`
+  in the toolkit (from ICONS.DAT by the app's name by default), drawn by Alt+Tab's strip and the group menu.
+- **Secrets** (D5): SECRETS needs calls for the store's state, unlocking and the master password (today only
+  `glos secrets ...` has them); the page then asks for the passwords in a dialog. No shell line may carry a
+  password (the lines are in logs).
+- **The pads' mapping** (D5): `[joystick] map` is in the gamepad plan but not in the kernel (vjoy.c reads port
+  and range alone): the kernel first, then a page with a row a button.
+- **USB as a tree** (D5): SYS's STAT needs USB as structures (a controller, a hub, a device, its parent), which
+  D8 wants too; the page then draws a tree with each device's details.
+- **The task manager's other views** (D8): each app's windows under it, the sessions, the sound's streams and
+  the network's connections, from structures of SYS's STAT (NET, AUDIO, USB) rather than the commands' text.
+- **The savers' own looks** (D6): settings a saver (`[saver] pipes = ...`), read as `[saver] text` is.
+
 ## What waits for other phases
 
 - The volume icon's double-click opens the Mixer when phase F has made it (the Control Panel's Sound page until
