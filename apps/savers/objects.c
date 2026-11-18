@@ -1,11 +1,12 @@
 /* OBJECTS.SCR: a screen saver, solid things that tumble past (phase D, docs/v1/phase-d.md D6; saver.h).
  *
- * Fourteen blocks of several shapes and colours come from far off towards the viewer, each turning about an axis
+ * Fourteen blocks (eight or twenty-six by [saver] detail) of several shapes and colours come from far off towards the viewer, each turning about an axis
  * of its own and drifting a little sideways; one that has gone by starts again far off, somewhere else. Their
  * sides are lit by which way they face (saver_box), so the turning shows. */
 #include "saver.h"
 
-#define THINGS 14
+#define THINGS 26                       /* the most ([saver] detail = more); 14 as a rule, 8 for less */
+static int nthings = 14;
 #define FAR   (-46.0f)
 #define NEAR  (-5.0f)
 
@@ -50,7 +51,7 @@ static void frame(float s, float aspect)
     glLoadIdentity();
     glFrustum(-0.5f * aspect, 0.5f * aspect, -0.5f, 0.5f, 1.0f, 80.0f);
     glMatrixMode(GL_MODELVIEW);
-    for (i = 0; i < THINGS; i++) {
+    for (i = 0; i < nthings; i++) {
         th[i].x += th[i].vx * s, th[i].y += th[i].vy * s, th[i].z += th[i].vz * s;
         th[i].turn += th[i].spin * s;
         if (th[i].turn >= 360.0f)
@@ -73,7 +74,8 @@ int main(int argc, char **argv)
         return r;
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    for (i = 0; i < THINGS; i++)
+    nthings = saver_amount(8, 14, THINGS);
+    for (i = 0; i < nthings; i++)
         start(i, 1);
     do
         frame((float)saver_ms() * 0.001f, (float)w / (float)h);

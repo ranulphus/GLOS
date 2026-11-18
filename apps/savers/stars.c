@@ -5,7 +5,8 @@
  * square, larger and brighter the nearer it is, moved by the clock: the same speed at any frame rate. */
 #include "saver.h"
 
-#define STARS 220
+#define STARS 440                       /* the most ([saver] detail = more); 220 as a rule, 110 for less */
+static int nstars = 220;
 
 static struct { float x, y, z; } star[STARS];
 
@@ -21,7 +22,7 @@ static void frame(float step, float aspect)
     int i;
     glClear(GL_COLOR_BUFFER_BIT);
     glBegin(GL_TRIANGLES);
-    for (i = 0; i < STARS; i++) {
+    for (i = 0; i < nstars; i++) {
         float x, y, s, c;
         star[i].z -= step;
         if (star[i].z < 0.02f)
@@ -60,7 +61,8 @@ int main(int argc, char **argv)
     glLoadIdentity();
     glDisable(GL_DEPTH_TEST);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    for (i = 0; i < STARS; i++)
+    nstars = saver_amount(110, 220, STARS);
+    for (i = 0; i < nstars; i++)
         place(i, 1);
     do
         frame((float)saver_ms() * 0.00022f, (float)w / (float)h);

@@ -428,7 +428,10 @@ The steps:
   turns and back out of the dead ends; after 420 cells the walls change colour and another maze is made. (Its
   near plane is 0.2 of a cell: at 0.07 the 16-bit depth buffer could not tell the walls apart, and the screen
   was one wall's colour.)
-- **Not done yet:** the savers' own looks (the pipes' joints, the stars' number, the maze's size); STARS.SCR in the packages, the floppy and the
+- **`[saver] detail`** (less, normal, more; the Control Panel's Detail): how much the savers draw: 110, 220 or
+  440 stars; 4, 7 or 10 pipes to a picture; 8, 14 or 26 blocks; a maze of 7, 10 or 14 cells a side (`saver_amount`
+  in saver.h). Read as the saver starts, like its speed.
+- **Not done yet:** looks of a saver's own beyond that (the pipes' joints); STARS.SCR in the packages, the floppy and the
   benches' update; the software renderer's window (DOS-GL's B3), without which every other card and depth has
   the blank saver.
 - **Tests:** Loop A `desk` suite's saver case: the G200 (the program shown, moving, ended by a key, the
@@ -550,6 +553,8 @@ The steps:
 - **Monitor's Windows page** (D8): the apps' ordinary windows that are shown or minimised, front to back, each
   its program, how it is shown (normal, minimised, maximised, full screen, a half) and its client area's size;
   **Go To** puts the chosen one in front with the keyboard (`glos_focus_id`).
+- **The processor by program** (D8): the Programs page's Use column: each app's share of the processor since
+  the last look (a second), from PROGRAMS' busy time; the time it has had in all stays beside it.
 - **Tests:** Loop A `start-recent` (a program given a place in the menu while the shell runs: the menu's
   `FILES start recent` line); `api` (win-icon-big: set, read back, the wrong size refused, taken away);
   `monitor` (the page's shot, its rows masked) and Loop A `monitor-windows` (Notepad chosen by its title, Go To,
@@ -576,9 +581,9 @@ The steps:
 | **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes |
 | **D4** the wallpaper | A picture in four styles, drawn by the shell | (its chooser and preview are D5's, done) |
 | **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list and the startup programs' | The pads' mapping; USB as a tree; Secrets (needs a call of its own for the master password: no shell line may carry it); icons in the list |
-| **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES, TEXT, OBJECTS and MAZE (the five of the plan), on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word, the savers' speed | The savers' own looks; their speed measured where the software renderer draws them |
+| **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES, TEXT, OBJECTS and MAZE (the five of the plan), on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word, the savers' speed and detail | (the pipes' joints and such: not planned); their speed measured where the software renderer draws them |
 | **D7** background apps | `[services] run`, started again when they end, `glos services`, refused if no app | A folder or a user for each |
-| **D8** the task manager | Monitor's Services page with Stop and Start; Switch To; the Windows page with Go To | Sessions, streams and the processor by program; SYS's structures for NET, AUDIO and USB |
+| **D8** the task manager | Monitor's Services page with Stop and Start; Switch To; the Windows page with Go To; each app's share of the processor | Sessions and streams; SYS's structures for NET, AUDIO and USB |
 
 ### What is left, and how each is meant to be done (2026-11-18)
 
@@ -593,7 +598,6 @@ The steps:
   D8 wants too; the page then draws a tree with each device's details.
 - **The task manager's other views** (D8): the sessions, the sound's streams and the network's connections, from
   structures of SYS's STAT (NET, AUDIO, USB) rather than the commands' text. (The apps' windows: done, below.)
-- **The savers' own looks** (D6): settings a saver (`[saver] pipes = ...`), read as `[saver] text` is.
 
 ## What waits for other phases
 

@@ -28,6 +28,7 @@
 
 static unsigned saver_last, saver_step;
 static unsigned saver_speed = 100;      /* [saver] speed, percent: slow 50, normal 100, fast 200 */
+static int saver_detail = 1;            /* [saver] detail: 0 less, 1 normal, 2 more */
 static unsigned saver_seed = 0x1234567u;
 
 /* 0 to 1, the same numbers each run. */
@@ -95,6 +96,9 @@ static inline int saver_begin(int argc, char **argv, const char *name, int depth
         v[0] = 0;
         if (glos_setting_get("saver", "speed", v, sizeof v, &set) == 0)
             saver_speed = !strcmp(v, "slow") ? 50 : !strcmp(v, "fast") ? 200 : 100;
+        v[0] = 0;                               /* [saver] detail: how much of it there is */
+        if (glos_setting_get("saver", "detail", v, sizeof v, &set) == 0)
+            saver_detail = !strcmp(v, "less") ? 0 : !strcmp(v, "more") ? 2 : 1;
     }
     saver_last = glos_ticks();
     return 0;
@@ -102,6 +106,12 @@ static inline int saver_begin(int argc, char **argv, const char *name, int depth
 
 /* The milliseconds this frame stands for (100 at most: held up is no leap), by [saver] speed's clock. */
 static inline unsigned saver_ms(void) { return saver_step * saver_speed / 100; }
+
+/* One of three numbers by [saver] detail (after saver_begin). */
+static inline int saver_amount(int less, int normal, int more)
+{
+    return saver_detail == 0 ? less : saver_detail == 2 ? more : normal;
+}
 
 /* The frame shown; 1 to go on, 0 when GLOS has said to end or the window was closed. */
 static inline int saver_shown(void)

@@ -1,7 +1,8 @@
 /* MONITOR: what GLOS is doing (PRD §10.6; docs/milestones-m9.md step G),
  * from SYS's STAT and PROGRAMS, again every second:
  *
- *   Programs      the apps and the jobs: the processor's
+ *   Programs      the apps and the jobs: the processor's share each has now
+ *                 (over the last look's second) and the
  *                 time each has had, its memory and windows; End ends one
  *                 (SYS's KILL); Switch To puts its window in front, with the
  *                 keyboard. Ctrl+Alt+Del's task list (MONITOR -tasks).
@@ -55,10 +56,17 @@ static void line_text(char *b, size_t room, unsigned kb)
         snprintf(b, room, GUI_T("%u KB"), kb);
 }
 
+/* What each app had of the processor at the last look, for its share since (a look within half a second of the
+   last one, a tab's change, shows the shares again as they were). */
+static struct { unsigned id, busy, share; } was[96];
+static int nwas;
+static unsigned was_at;
+
 static void fill_programs(void)
 {
-    int o, keep = gui_list_get(list), r;
-    unsigned n = 0;
+    int o, keep = gui_list_get(list), r, k;
+    unsigned n = 0, now = glos_ticks(), dt = now - was_at;
+    int again = was_at && dt < 500;
     r = glos_programs(progs, sizeof progs, &n);
     if (r != 0 && r != GLOS_E_ROOM)
         n = 0;
@@ -66,20 +74,33 @@ static void fill_programs(void)
     napps = 0;
     for (o = 0; o < (int)n; o++) {
         const struct glos_program *a = &progs[o];
-        char id[12], cpu[16], mem[16], wins[8], state[16];
-        const char *cells[7];
+        char id[12], use[8], cpu[16], mem[16], wins[8], state[16];
+        const char *cells[8];
+        unsigned share = 0;
         if (a->kind == GLOS_PROG_JOB && a->state == GLOS_JS_APP)
             continue;                           /* (a job whose program is an app: the app's row is it) */
+        use[0] = 0;
+        if (a->kind != GLOS_PROG_JOB) {
+            for (k = 0; k < nwas && was[k].id != a->id; k++)
+                ;
+            if (k < nwas)
+                share = again ? was[k].share : was_at && dt && a->busy_ms >= was[k].busy
+                                                   ? (a->busy_ms - was[k].busy) * 100 / dt : 0;
+            if (share > 100)
+                share = 100;
+            snprintf(use, sizeof use, "%u%%", share);
+        }
         snprintf(id, sizeof id, "%u", a->id);
         snprintf(cpu, sizeof cpu, "%u.%u s", a->busy_ms / 1000, a->busy_ms % 1000 / 100);
         line_text(mem, sizeof mem, a->mem_kb);
         snprintf(wins, sizeof wins, "%u", a->windows);
         snprintf(state, sizeof state, "%s", a->kind == GLOS_PROG_JOB ? GUI_T(job_states[a->state < 5 ? a->state : 4])
                                             : a->state ? GUI_T("Paused") : GUI_T("Running"));
-        cells[0] = a->name, cells[1] = GUI_T(kinds[a->kind == GLOS_PROG_JOB]), cells[2] = id, cells[3] = cpu;
-        cells[4] = mem, cells[5] = wins, cells[6] = state;
+        cells[0] = a->name, cells[1] = GUI_T(kinds[a->kind == GLOS_PROG_JOB]), cells[2] = id, cells[3] = use;
+        cells[4] = cpu, cells[5] = mem, cells[6] = wins, cells[7] = state;
         gui_list_add(list, cells, NULL, (void *)(size_t)o);
         napps++;
+        progs[o].by = share;                    /* (kept for the next look, below: `by` is not shown) */
         {
             int k;
             for (k = 0; k < nseen && strcmp(seen[k], a->name); k++)
@@ -93,6 +114,13 @@ static void fill_programs(void)
     }
     if (keep >= 0 && keep < napps)
         gui_list_set(list, keep);
+    if (!again) {                               /* what each has had by now, for the next look */
+        nwas = 0;
+        for (o = 0; o < (int)n && nwas < 96; o++)
+            if (progs[o].kind != GLOS_PROG_JOB)
+                was[nwas].id = progs[o].id, was[nwas].busy = progs[o].busy_ms, was[nwas++].share = progs[o].by;
+        was_at = now ? now : 1;
+    }
 }
 
 static void fill_system(void)
@@ -366,9 +394,9 @@ static void tab_changed(struct gui_widget *w, int what)
 
 int main(int argc, char **argv)
 {
-    static const char *const heads[7] = { GUI_N("Program"), GUI_N("Kind"), GUI_N("Id"), GUI_N("Processor"),
-        GUI_N("Memory"), GUI_N("Windows"), GUI_N("State") };
-    static const int widths[7] = { 100, 44, 30, 70, 64, 62, 80 };
+    static const char *const heads[8] = { GUI_N("Program"), GUI_N("Kind"), GUI_N("Id"), GUI_N("Use"),
+        GUI_N("Processor"), GUI_N("Memory"), GUI_N("Windows"), GUI_N("State") };
+    static const int widths[8] = { 92, 40, 28, 38, 66, 62, 58, 66 };
     static const char *const labels[11] = { GUI_N("Version:"), GUI_N("Running for:"), GUI_N("Processor:"),
         GUI_N("Memory:"), GUI_N("Work:"), GUI_N("Screen:"), GUI_N("Card's memory:"), GUI_N("Sound:"),
         GUI_N("Network:"), GUI_N("Host name:"), GUI_N("In front:") };
@@ -393,7 +421,7 @@ int main(int argc, char **argv)
     gui_on(tabs, tab_changed, 0);
 
     page = gui_tab(tabs, GUI_T("Programs"));
-    list = gui_list(page, 7, heads, widths);
+    list = gui_list(page, 8, heads, widths);
     row = gui_hbox(page, -1, 0);
     gui_space(row, 0, 0);
     gui_button(row, GUI_T("S&witch To"), switch_to, 0);

@@ -6861,6 +6861,8 @@ def saver_case(profile, vcard, card):
         checks["as-it-was"] = bool(after) and above_bar(after) == above_bar(before)
         for other in ("pipes", "text", "objects", "maze"):      # the other savers: solid things, with depth
             n0 = agent.log().count("GLOS-IDLE saver off")
+            if other == "maze":                 # ([saver] detail = more: the maze of fourteen cells by fourteen)
+                checks["detail"] = agent.ssh("glos config set saver detail more")[0] == 0
             checks[other] = agent.ssh("glos config set saver saver " + other)[0] == 0 and agent.ssh("glos idle saver")[0] == 0 \
                 and said("GLOS-IDLE saver program=%s shown" % other, 1, 120)
             time.sleep(6)

@@ -1,13 +1,13 @@
 /* MAZE.SCR: a screen saver, a walk through a maze (phase D, docs/v1/phase-d.md D6; saver.h).
  *
- * A maze of ten cells by ten is made by carving passages from a corner (every cell is reached, and there is one
+ * A maze of ten cells by ten (seven or fourteen by [saver] detail) is made by carving passages from a corner (every cell is reached, and there is one
  * way between any two). The viewer walks it with a hand on the right-hand wall: a cell forward at a time,
  * turning where the wall turns, back out of the dead ends. After a good while the walls change colour and a new
  * maze is made. The walls are thin boxes lit by which way they face (saver_box), between a floor and a ceiling. */
 #include "saver.h"
 
-#define W 10
-#define H 10
+#define W 14                            /* the most ([saver] detail = more) */
+#define H 14
 #define STEP_MS 620                     /* a cell's walk */
 #define TURN_MS 420                     /* a quarter turn */
 #define WALKS   420                     /* cells walked before another maze */
@@ -15,6 +15,7 @@
 static unsigned char north[W][H + 1];   /* a wall along the north side of cell x, y (y = H: the south edge) */
 static unsigned char west[W + 1][H];    /* ... along its west side (x = W: the east edge) */
 static unsigned char seen[W][H];
+static int mw = 10, mh = 10;            /* the maze's size in cells */
 static const int dx[4] = { 0, 1, 0, -1 }, dy[4] = { -1, 0, 1, 0 };     /* north, east, south, west */
 
 static int open_way(int x, int y, int d)
@@ -32,7 +33,7 @@ static void carve(int x, int y)
     }
     for (i = 0; i < 4; i++) {
         int d = order[i], nx = x + dx[d], ny = y + dy[d];
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H || seen[nx][ny])
+        if (nx < 0 || ny < 0 || nx >= mw || ny >= mh || seen[nx][ny])
             continue;
         if (d == 0)
             north[x][y] = 0;
@@ -68,14 +69,14 @@ static void frame(float px, float pz, float heading, const float *wall, float as
     glRotatef(heading, 0.0f, 1.0f, 0.0f);
     glTranslatef(-px, -0.5f, -pz);
     glBegin(GL_TRIANGLES);
-    saver_box(0.0f, -0.05f, 0.0f, (float)W, 0.0f, (float)H, floor_c);
-    saver_box(0.0f, 1.0f, 0.0f, (float)W, 1.05f, (float)H, roof_c);
-    for (x = 0; x < W; x++)
-        for (y = 0; y <= H; y++)
+    saver_box(0.0f, -0.05f, 0.0f, (float)mw, 0.0f, (float)mh, floor_c);
+    saver_box(0.0f, 1.0f, 0.0f, (float)mw, 1.05f, (float)mh, roof_c);
+    for (x = 0; x < mw; x++)
+        for (y = 0; y <= mh; y++)
             if (north[x][y])
                 saver_box((float)x - t, 0.0f, (float)y - t, (float)x + 1.0f + t, 1.0f, (float)y + t, wall);
-    for (x = 0; x <= W; x++)
-        for (y = 0; y < H; y++)
+    for (x = 0; x <= mw; x++)
+        for (y = 0; y < mh; y++)
             if (west[x][y])
                 saver_box((float)x - t, 0.0f, (float)y - t, (float)x + t, 1.0f, (float)y + 1.0f + t, wall);
     glEnd();
@@ -93,6 +94,7 @@ int main(int argc, char **argv)
         return r;
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    mw = mh = saver_amount(7, 10, W);
     make();
     do {
         float ms = (float)saver_ms(), px, pz, heading;

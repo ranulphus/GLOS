@@ -8,7 +8,7 @@
 
 #define N       9                       /* cells a side */
 #define MAXSEG  420
-#define PIPES   7                       /* pipes to a picture */
+static int pipes_max = 7;               /* pipes to a picture (4, 7 or 10 by [saver] detail) */
 #define LONGEST 90                      /* cells to a pipe */
 #define GROW_MS 55                      /* a cell this often */
 #define REST_MS 2500                    /* the finished picture is looked at this long */
@@ -56,7 +56,7 @@ static void grow(void)
 {
     int next[3], d, tries, i;
     if (dir < 0) {                              /* a new pipe, in a free cell */
-        if (npipes == PIPES || nseg >= MAXSEG - 2) {
+        if (npipes == pipes_max || nseg >= MAXSEG - 2) {
             rest = REST_MS;
             return;
         }
@@ -139,6 +139,7 @@ int main(int argc, char **argv)
         return r;
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    pipes_max = saver_amount(4, 7, 10);
     begin_again();
     do {
         unsigned ms = saver_ms();
