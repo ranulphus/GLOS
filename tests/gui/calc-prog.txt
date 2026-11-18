@@ -1,0 +1,42 @@
+# The Calculator's programmer mode (apps/calc; phase E, docs/v1/apps/calculator.md): a sum in a 32-bit word; base
+# 16 and an AND; a shift, shown in base 2; a byte that overflows, and a negative one; a bit turned over by a click;
+# back to the standard mode.
+run CALC.EXE -p
+wait "Calculator"
+shot prog-start "Calculator"
+type 255+1=
+key f5
+type ff&f0=
+shot prog-hex "Calculator"
+key esc
+type 1<4=
+key f8
+shot prog-bin "Calculator"
+key f6 f4
+key esc
+type 200+100=
+key esc
+type 1
+key f9
+type =
+shot prog-byte "Calculator"
+key f2
+key esc
+click "Calculator" 299 153
+shot prog-bit "Calculator"
+key alt+v s
+wait "Calculator"
+pause 500
+type 2+2=
+key alt+f4
+gone "Calculator"
+expect CALC = 256 100h
+expect CALC = 240 F0h
+expect CALC = 16 10h
+expect CALC = 44 2Ch
+expect CALC neg -1 FFh
+expect CALC bit 5
+expect CALC = 32 20h
+expect CALC mode standard
+expect CALC = 4
+expect CALC end

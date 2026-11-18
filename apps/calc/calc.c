@@ -20,6 +20,14 @@
  *   l n              log, ln                  p  !      pi, n!
  *   i                Inv                      m         mod
  *
+ * Programmer: whole numbers in a word of 8, 16, 32 or 64 bits, signed or not, typed and shown in base 16, 10, 8
+ * or 2 (all four are under the display, and the word's bits, which a click turns over); each operation as it
+ * comes, as the standard mode does them. Its keys:
+ *
+ *   0-9 a-f          digits of the base       F5 F6 F7 F8    base 16, 10, 8, 2
+ *   + - * /  %       the operations, modulo   F12 F2 F3 F4   64, 32, 16, 8 bits
+ *   & | ^ ~          AND OR XOR NOT           < >            shifts left and right
+ *
  * "CALC ..." lines on stdout give each result (the suite's). */
 #include <math.h>
 #include <stdio.h>
@@ -39,9 +47,11 @@ static double value, operand, memory;
 static int op, has_mem, error, fresh;   /* op: the pending operation; fresh: an operand is wanted */
 
 enum { K_C = 100, K_CE, K_BACK, K_SIGN, K_DOT, K_EQ, K_SQRT, K_PCT, K_INV, K_MC, K_MR, K_MS, K_MP,
-       K_LP, K_RP, K_POW, K_MOD, K_PI, K_E, K_EXP, K_INVERSE, K_ANGLE, K_FN };   /* (K_FN + n: fns[n]) */
-enum { C_COPY = 1, C_PASTE, C_ABOUT, C_STANDARD, C_SCIENTIFIC };
-enum { M_STANDARD, M_SCIENTIFIC };
+       K_LP, K_RP, K_POW, K_MOD, K_PI, K_E, K_EXP, K_INVERSE, K_ANGLE,
+       K_BASE, K_SIZE = K_BASE + 4, K_SIGNED = K_SIZE + 4, K_NOT, K_WOP,       /* (K_WOP + a CALC_ operation) */
+       K_FN = K_WOP + 16 };                                                     /* (K_FN + n: fns[n]) */
+enum { C_COPY = 1, C_PASTE, C_ABOUT, C_STANDARD, C_SCIENTIFIC, C_PROGRAMMER };
+enum { M_STANDARD, M_SCIENTIFIC, M_PROGRAMMER };
 
 /* ---- the scientific mode's state: the expression so far (it ends with an operator, an open bracket, or, when
    `have`, a bracket just closed, which is an operand already there), how many brackets are open, whether an
@@ -72,9 +82,51 @@ static void show_number(double v, char *out, size_t room)
     }
 }
 
+/* ---- the programmer mode's state: the word in the display, the digits being typed in the base, the operation
+   waiting and its left side, the word's size, the base, signed or not */
+static unsigned long long pval, pacc;
+static char pentry[72];
+static int pop, pfresh, pbits = 32, pbase = 10, psigned = 1;
+static struct gui_widget *base_label[4], *bits_view, *signed_key;
+static const int bases[4] = { 16, 10, 8, 2 }, sizes[4] = { 64, 32, 16, 8 };
+
+static unsigned long long pcur(void)
+{
+    unsigned long long v = pval;
+    if (pentry[0])
+        calc_word_parse(pentry, pbase, pbits, &v);
+    return calc_word(v, pbits);
+}
+
+static void prog_refresh(void)
+{
+    static const char *const names[4] = { "HEX", "DEC", "OCT", "BIN" };
+    char t[96], line[112];
+    int i;
+    if (error)
+        snprintf(t, sizeof t, "%s", "Cannot divide by zero");
+    else if (pentry[0])
+        snprintf(t, sizeof t, "%s", pentry);
+    else
+        calc_word_show(pval, pbits, pbase, psigned, t, sizeof t);
+    gui_set_text(display, t);
+    for (i = 0; i < 4; i++) {
+        calc_word_show(pcur(), pbits, bases[i], psigned, t, sizeof t);
+        snprintf(line, sizeof line, "%s %s  %s", bases[i] == pbase ? ">" : " ", names[i], t);
+        gui_set_text(base_label[i], line);
+    }
+    snprintf(t, sizeof t, "%s", psigned ? GUI_T("Signed") : GUI_T("Unsign."));
+    gui_set_text(signed_key, t);
+    gui_damage(bits_view);
+}
+
 static void refresh(void)
 {
     char t[48];
+    if (mode == M_PROGRAMMER) {
+        prog_refresh();
+        return;
+    }
     if (error)
         snprintf(t, sizeof t, "%s", error == 1 ? "Cannot divide by zero" : "Invalid input");
     else if (entry[0])
@@ -119,6 +171,138 @@ static void apply(void)
     }
     op = 0;
     entry[0] = 0;
+}
+
+/* ---- the programmer mode */
+
+static void prog_said(const char *what)
+{
+    char d[32], h[24];
+    calc_word_show(pval, pbits, 10, psigned, d, sizeof d);
+    calc_word_show(pval, pbits, 16, 0, h, sizeof h);
+    if (error)
+        printf("CALC %s error\n", what);
+    else
+        printf("CALC %s %s %sh\n", what, d, h);
+    fflush(stdout);
+}
+
+static void prog_apply(void)
+{
+    unsigned long long v = pcur();
+    if (pop && calc_word_op(pop, pacc, v, pbits, psigned, &v) != CALC_OK)
+        error = 1;
+    else
+        pval = v;
+    pop = 0;
+    pentry[0] = 0;
+}
+
+static void prog_press(int k)
+{
+    size_t n = strlen(pentry);
+    if (error && k != K_C && k != K_CE)
+        return;
+    if ((k >= '0' && k <= '9') || (k >= 'A' && k <= 'F')) {
+        unsigned long long v;
+        if ((k <= '9' ? k - '0' : k - 'A' + 10) >= pbase)
+            return;
+        if (pfresh)
+            pentry[0] = 0, n = 0, pfresh = 0;
+        if (n == 1 && pentry[0] == '0')
+            n = 0;
+        if (n < sizeof pentry - 2) {
+            pentry[n] = (char)k, pentry[n + 1] = 0;
+            if (calc_word_parse(pentry, pbase, pbits, &v) != CALC_OK)
+                pentry[n] = 0;                  /* (more than the word holds: not taken) */
+        }
+    } else if (k == K_BACK) {
+        if (n && !pfresh)
+            pentry[n - 1] = 0;
+    } else if (k == K_CE) {
+        pentry[0] = 0;
+        error = 0;
+        if (!pop)
+            pval = 0;
+    } else if (k == K_C) {
+        pentry[0] = 0;
+        pval = pacc = 0;
+        pop = error = pfresh = 0;
+    } else if (k == K_SIGN || k == K_NOT) {
+        pval = calc_word(k == K_NOT ? ~pcur() : 0 - pcur(), pbits);
+        pentry[0] = 0;
+        pfresh = 1;
+        prog_said(k == K_NOT ? "not" : "neg");
+    } else if (k == '+' || k == '-' || k == '*' || k == '/' || (k > K_WOP && k < K_WOP + 16)) {
+        int code = k == '+' ? CALC_ADD : k == '-' ? CALC_SUB : k == '*' ? CALC_MUL : k == '/' ? CALC_DIV : k - K_WOP;
+        if (pop && !pfresh)
+            prog_apply();
+        else if (!pop)
+            pval = pcur(), pentry[0] = 0;
+        if (!error) {
+            pacc = pval;
+            pop = code;
+            pfresh = 1;
+        }
+    } else if (k == K_EQ) {
+        if (pop)
+            prog_apply();
+        else
+            pval = pcur(), pentry[0] = 0;
+        pfresh = 1;
+        prog_said("=");
+    } else if (k >= K_BASE && k < K_BASE + 4) {
+        pval = pcur(), pentry[0] = 0;
+        pbase = bases[k - K_BASE];
+        pfresh = 1;
+    } else if (k >= K_SIZE && k < K_SIZE + 4) {
+        pval = pcur(), pentry[0] = 0;
+        pbits = sizes[k - K_SIZE];
+        pval = calc_word(pval, pbits), pacc = calc_word(pacc, pbits);
+        pfresh = 1;
+        prog_said("word");
+    } else if (k == K_SIGNED) {
+        psigned = !psigned;
+    }
+}
+
+/* The word's bits, 63 to 32 over 31 to 0, in fours; those the word hasn't are dots. A click turns one over. */
+#define BIT_W 10
+#define BIT_H 14
+
+static int bit_x(int col) { return 3 + col * BIT_W + (col / 4) * 4; }
+
+static void bits_draw(struct gui_widget *w, struct gfx_surface *s)
+{
+    unsigned long long v = pcur();
+    int i;
+    gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_ROLE(GLOS_ROLE_FIELD));
+    gfx_frame(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_ROLE(GLOS_ROLE_LINE));
+    for (i = 63; i >= 0; i--) {
+        int col = 31 - i % 32, row = i < 32;
+        gui_draw_text(s, w->r.x + bit_x(col), w->r.y + 2 + row * BIT_H, gui_font, i >= pbits ? "." : v >> i & 1 ? "1" : "0",
+                      GUI_ROLE(i >= pbits ? GLOS_ROLE_DIM : GLOS_ROLE_FIELD_TEXT));
+    }
+}
+
+static int bits_event(struct gui_widget *w, struct gui_ev *e)
+{
+    int col, row, i;
+    if (e->type != GUI_EV_PRESS)
+        return 0;
+    row = (e->y - w->r.y - 2) / BIT_H;
+    for (col = 31; col > 0 && e->x - w->r.x < bit_x(col); col--)
+        ;
+    i = (row ? 0 : 32) + 31 - col;
+    if (row < 0 || row > 1 || i >= pbits || error)
+        return 1;
+    pval = pcur() ^ 1ull << i;
+    pentry[0] = 0;
+    pfresh = 1;
+    printf("CALC bit %d\n", i);
+    prog_said("=");
+    refresh();
+    return 1;
 }
 
 /* ---- the scientific mode */
@@ -326,6 +510,11 @@ static int sci_press(int k)
 static void press(int k)
 {
     size_t n = strlen(entry);
+    if (mode == M_PROGRAMMER) {
+        prog_press(k);
+        refresh();
+        return;
+    }
     if (error && k != K_C && k != K_CE)
         return;
     if (mode == M_SCIENTIFIC && sci_press(k)) {
@@ -449,6 +638,30 @@ static int key(struct gui_window *w, struct gui_ev *e)
         press((int)e->ch);
         return 1;
     }
+    if (mode == M_PROGRAMMER) {
+        static const struct { unsigned key; int k; } fkeys[8] = { { 0x3F, K_BASE }, { 0x40, K_BASE + 1 }, { 0x41, K_BASE + 2 },
+            { 0x42, K_BASE + 3 }, { 0x58, K_SIZE }, { 0x3C, K_SIZE + 1 }, { 0x3D, K_SIZE + 2 }, { 0x3E, K_SIZE + 3 } };
+        int i;
+        for (i = 0; i < 8; i++)
+            if (e->key == fkeys[i].key && !e->ch && !(e->mods & GLOS_MOD_ALT)) {
+                press(fkeys[i].k);
+                return 1;
+            }
+        if ((e->ch >= 'a' && e->ch <= 'f') || (e->ch >= 'A' && e->ch <= 'F')) {
+            press((int)(e->ch & ~0x20u));
+            return 1;
+        }
+        switch (e->ch) {
+        case '&': press(K_WOP + CALC_AND); return 1;
+        case '|': press(K_WOP + CALC_OR); return 1;
+        case '^': press(K_WOP + CALC_XOR); return 1;
+        case '~': press(K_NOT); return 1;
+        case '<': press(K_WOP + CALC_SHL); return 1;
+        case '>': press(K_WOP + CALC_SHR); return 1;
+        case '%': press(K_WOP + CALC_MOD); return 1;
+        case '.': case ',': case '@': case 'r': case 'R': return 1;    /* (no fractions here) */
+        }
+    }
     if (mode == M_SCIENTIFIC) {
         static const char keys_of[] = "sctln";  /* sin cos tan log ln, as fns has them */
         static const int fn_of[] = { 0, 1, 2, 7, 6 };
@@ -500,7 +713,13 @@ static void command(struct gui_window *w, int id)
     } else if (id == C_PASTE) {
         size_t n;
         char *c = gui_clip_get(&n);
-        if (c) {
+        if (c && mode == M_PROGRAMMER) {        /* a word, in the base */
+            unsigned long long v;
+            if (calc_word_parse(c, pbase, pbits, &v) == CALC_OK)
+                pval = v, pentry[0] = 0, pfresh = 1;
+            free(c);
+            refresh();
+        } else if (c) {
             double v = atof(c);
             if (mode == M_SCIENTIFIC && calc_eval(c, angle, &v) != CALC_OK)    /* (an expression, here) */
                 v = atof(c);
@@ -511,7 +730,7 @@ static void command(struct gui_window *w, int id)
         }
     } else if (id == C_ABOUT) {
         gui_message(win, GUI_T("About Calculator"), GUI_T("Calculator: GLOS's pocket calculator."), GUI_MB_OK);
-    } else if ((id == C_STANDARD || id == C_SCIENTIFIC) && id - C_STANDARD != mode) {
+    } else if (id >= C_STANDARD && id <= C_PROGRAMMER && id - C_STANDARD != mode) {
         struct gui_window *old = win;           /* another mode: its window made, this one gone after */
         mode = id - C_STANDARD;
         sx[0] = 0;
@@ -520,7 +739,7 @@ static void command(struct gui_window *w, int id)
         gui_show(win, 1);
         refresh();
         gui_close_later(old);
-        printf("CALC mode %s\n", mode == M_SCIENTIFIC ? "scientific" : "standard");
+        printf("CALC mode %s\n", mode == M_SCIENTIFIC ? "scientific" : mode == M_PROGRAMMER ? "programmer" : "standard");
         fflush(stdout);
     }
 }
@@ -544,6 +763,21 @@ static const struct { const char *t; int k; } sci_keys[6][4] = {
     { { "cbrt", K_FN + 11 }, { "abs", K_FN + 12 }, { "", 0 }, { "", 0 } },
 };
 
+/* The programmer mode's keys: its own left of the digits', five rows of four each. */
+static const struct { const char *t; int k; } prog_keys[5][8] = {
+    { { "Hex", K_BASE }, { "Dec", K_BASE + 1 }, { "Oct", K_BASE + 2 }, { "Bin", K_BASE + 3 },
+      { "AC", K_C }, { "CE", K_CE }, { "<-", K_BACK }, { "/", '/' } },
+    { { "64", K_SIZE }, { "32", K_SIZE + 1 }, { "16", K_SIZE + 2 }, { "8", K_SIZE + 3 },
+      { "7", '7' }, { "8", '8' }, { "9", '9' }, { "*", '*' } },
+    { { "And", K_WOP + CALC_AND }, { "Or", K_WOP + CALC_OR }, { "Xor", K_WOP + CALC_XOR }, { "Not", K_NOT },
+      { "4", '4' }, { "5", '5' }, { "6", '6' }, { "-", '-' } },
+    { { "Lsh", K_WOP + CALC_SHL }, { "Rsh", K_WOP + CALC_SHR }, { "RoL", K_WOP + CALC_ROL }, { "RoR", K_WOP + CALC_ROR },
+      { "1", '1' }, { "2", '2' }, { "3", '3' }, { "+", '+' } },
+    { { "A", 'A' }, { "B", 'B' }, { "C", 'C' }, { "Mod", K_WOP + CALC_MOD },
+      { "0", '0' }, { "\xC2\xB1", K_SIGN }, { "=", K_EQ }, { "Signed", K_SIGNED } },
+};
+static const struct { const char *t; int k; } prog_more[3] = { { "D", 'D' }, { "E", 'E' }, { "F", 'F' } };
+
 /* The mode's window (the standard one's is as it always was: the tests press its keys by their places). */
 static void build(void)
 {
@@ -562,6 +796,7 @@ static void build(void)
     m = gui_menu(bar, GUI_T("&View"));
     gui_menu_item(m, GUI_T("&Standard"), C_STANDARD, NULL);
     gui_menu_item(m, GUI_T("S&cientific"), C_SCIENTIFIC, NULL);
+    gui_menu_item(m, GUI_T("&Programmer"), C_PROGRAMMER, NULL);
     gui_menu_check(m, C_STANDARD + mode, 1);
     m = gui_menu(bar, GUI_T("&Help"));
     gui_menu_item(m, GUI_T("&About Calculator"), C_ABOUT, NULL);
@@ -579,6 +814,33 @@ static void build(void)
     gui_label_box(display, 1);
     gui_grow(display, 1);
     gui_size(display, 0, 26);
+    if (mode == M_PROGRAMMER) {                 /* the four bases, the bits, and its own keys alone */
+        for (r = 0; r < 4; r++) {
+            base_label[r] = gui_label(box, "");
+            gui_label_style(base_label[r], gui_mono, GFX_NONE, -1);
+        }
+        bits_view = gui_canvas(box, 3 + 32 * BIT_W + 7 * 4 + 3, 2 * BIT_H + 4, bits_draw, bits_event);
+        for (r = 0; r < 6; r++) {
+            row = gui_hbox(box, 4, 0);
+            for (c = 0; c < 8; c++) {
+                const char *t = r < 5 ? prog_keys[r][c].t : c < 3 ? prog_more[c].t : "";
+                int k = r < 5 ? prog_keys[r][c].k : c < 3 ? prog_more[c].k : 0;
+                if (c == 4)
+                    gui_space(row, 4, 26);      /* (between its keys and the digits') */
+                if (!t[0]) {
+                    gui_space(row, 44, 26);
+                    continue;
+                }
+                b = gui_button(row, t, clicked, k);
+                b->flags |= GUI_NOTAB;
+                gui_size(b, 44, 26);
+                if (k == K_SIGNED)
+                    signed_key = b;
+            }
+        }
+        gui_fit(win);
+        return;
+    }
     pads = gui_hbox(box, 8, 0);
     if (mode == M_SCIENTIFIC) {
         pad = gui_vbox(pads, 4, 0);
@@ -621,8 +883,10 @@ int main(int argc, char **argv)
         printf("CALC no GLOS\n");
         return 1;
     }
-    if (argc > 1 && !strcmp(argv[1], "-s"))     /* CALC -s: scientific from the start */
+    if (argc > 1 && !strcmp(argv[1], "-s"))     /* CALC -s: scientific from the start; CALC -p: programmer */
         mode = M_SCIENTIFIC;
+    if (argc > 1 && !strcmp(argv[1], "-p"))
+        mode = M_PROGRAMMER;
     build();
     gui_show(win, 1);
     refresh();
