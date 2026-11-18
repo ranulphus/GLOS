@@ -6729,9 +6729,14 @@ def apps_case(profile, card):
             print("    %s services: wanted %r, have %r" % (tag, want, out))
             return False
 
-        def svc_job():                          # its job's number, as glos ps has it
-            m = re.search(r"^job (\d+) running app \S+ sleep 600$", agent.ssh("glos ps")[1].replace("\r", ""), re.M)
-            return m.group(1) if m else None
+        def svc_job(limit=15):                  # its job's number, as glos ps has it, once its program is an app
+            t0 = time.time()                    # (the service is "running" from the moment its job is asked for: the
+            while True:                         # program's own start comes a moment later; one look, at once, missed
+                m = re.search(r"^job (\d+) running app \S+ sleep 600$",      # it in a gate, 2026-11-18)
+                              agent.ssh("glos ps")[1].replace("\r", ""), re.M)
+                if m or time.time() - t0 >= limit:
+                    return m.group(1) if m else None
+                time.sleep(0.5)
 
         checks["svc-none"] = agent.ssh("glos services")[1].startswith("no services")
         checks["svc-set"] = agent.ssh("glos config set services run " + app + "sleep 600")[0] == 0
@@ -6746,9 +6751,9 @@ def apps_case(profile, card):
             and svc_said("start name=APPTEST.EXE", 3) \
             and bool(re.search(r"GLOS-SERVICE ended name=APPTEST\.EXE code=\d+ again=4s", agent.log()))
         checks["svc-stop"] = agent.ssh("glos services stop apptest.exe")[0] == 0 \
-            and svc(r"^service APPTEST\.EXE stopped seq=0 restarts=2 ") and not svc_job()
+            and svc(r"^service APPTEST\.EXE stopped seq=0 restarts=2 ") and not svc_job(0)
         time.sleep(4)                           # (left ended: not started again)
-        checks["svc-stays"] = agent.log().count("GLOS-SERVICE start name=APPTEST.EXE") == 3 and not svc_job()
+        checks["svc-stays"] = agent.log().count("GLOS-SERVICE start name=APPTEST.EXE") == 3 and not svc_job(0)
         checks["svc-start-again"] = agent.ssh("glos services START APPTEST.EXE")[0] == 0 \
             and svc_said("start name=APPTEST.EXE", 4) and svc(r"^service APPTEST\.EXE running ") and bool(svc_job())
         checks["svc-no-such"] = agent.ssh("glos services stop NOSUCH.EXE")[0] == 1
