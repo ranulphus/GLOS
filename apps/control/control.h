@@ -11,6 +11,7 @@ void look_poll(void);                   /* the picture follows the field and the
 /* status.c: how things are now, under a page's settings */
 void status_add_net(struct gui_widget *page);   /* the Network page's lines */
 void status_add_pads(struct gui_widget *page);  /* the Joystick page's picture of the pads */
+void status_add_input(struct gui_widget *page); /* the Input page's places to try the keys and the mouse */
 void status_poll(void);                 /* read again (the network once a second, the pads each time) */
 
 #endif

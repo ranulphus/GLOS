@@ -6,7 +6,10 @@
  *
  * The Joystick page: the pads as they are (PADS, ten times a second): for each of the two joysticks a DOS program
  * sees, its stick's place in a square (and the right stick's, if the pad has one) and its first ten buttons,
- * lit while they are down. A pad's test before a game is started. */
+ * lit while they are down. A pad's test before a game is started.
+ *
+ * The Input page: a field to try the keys' repeat in, and a place that counts the double clicks made on it (by
+ * the double-click time this program started with: the setting is an app's at its start). */
 #include <stdio.h>
 #include <string.h>
 
@@ -89,6 +92,43 @@ void status_add_pads(struct gui_widget *page)
 {
     gui_label(page, GUI_T("The pads now (move a stick, press a button):"));
     pads_view = gui_canvas(page, 2 * PAD_W + 10, PAD_H, pads_draw, NULL);
+}
+
+/* ---- the keys and the mouse, tried */
+
+static int doubles;
+
+static void try_draw(struct gui_widget *w, struct gfx_surface *s)
+{
+    char t[40];
+    if (doubles)
+        snprintf(t, sizeof t, GUI_T("Double clicks: %d"), doubles);
+    else
+        snprintf(t, sizeof t, "%s", GUI_T("Double-click here"));
+    gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_ROLE(GLOS_ROLE_FIELD));
+    gfx_frame(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_ROLE(GLOS_ROLE_LINE));
+    gui_draw_text(s, w->r.x + 8, w->r.y + (w->r.h - gui_font->height) / 2, gui_font, t, GUI_ROLE(GLOS_ROLE_FIELD_TEXT));
+}
+
+static int try_event(struct gui_widget *w, struct gui_ev *e)
+{
+    if (e->type != GUI_EV_PRESS)
+        return 0;
+    if (e->clicks == 2) {
+        doubles++;
+        gui_damage(w);
+    }
+    return 1;
+}
+
+/* The Input page's places to try the keys and the mouse, under its settings. */
+void status_add_input(struct gui_widget *page)
+{
+    struct gui_widget *row;
+    gui_label(page, GUI_T("Try the keys and the mouse as they are now:"));
+    row = gui_hbox(page, 10, 0);
+    gui_field(row, 22);
+    gui_canvas(row, 170, gui_font->height + 10, try_draw, try_event);
 }
 
 /* ---- the network */

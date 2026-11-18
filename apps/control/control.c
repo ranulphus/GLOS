@@ -868,6 +868,8 @@ int main(int argc, char **argv)
             status_add_net(page);               /* (how the network is now, under its settings: status.c) */
         if (!strcmp(sec, "joystick"))
             status_add_pads(page);              /* (the pads as they are, for a test) */
+        if (!strcmp(sec, "input"))
+            status_add_input(page);             /* (a field and a place to try the keys and the mouse) */
     }
     if (side && wall && style)
         look_add(side, win, wall->w, style->w, style->choice);
