@@ -1,0 +1,25 @@
+#loopa-run-only
+# Notepad's session (apps/notepad; phase E, docs/v1/apps/notepad.md): View's Keep Session on, two files open at
+# the end; Notepad started bare opens them again; Keep Session off, and a bare Notepad is an empty one. (On GLOS
+# alone: the host's programs have no folder to keep NOTEPAD.CFG in.)
+run NOTEPAD.EXE C:\GUI\EDIT.TXT C:\GUI\NOTES.TXT
+wait "EDIT.TXT - Notepad"
+key alt+v k
+key alt+f4
+gone "EDIT.TXT - Notepad"
+pause 1500
+run NOTEPAD.EXE
+wait "EDIT.TXT - Notepad"
+key ctrl+tab
+wait "NOTES.TXT - Notepad"
+key alt+v k
+key alt+f4
+gone "NOTES.TXT - Notepad"
+pause 1500
+run NOTEPAD.EXE
+wait "Untitled - Notepad"
+key alt+f4
+gone "Untitled - Notepad"
+expect NOTEPAD view session kept
+expect NOTEPAD view session not kept
+expect NOTEPAD end

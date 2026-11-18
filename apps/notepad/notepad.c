@@ -14,6 +14,10 @@
  * Highlighting colours a file by its kind, which its name's end says (C, batch, INI and GLOS.CFG, assembly,
  * Pascal, HTML: lexers.c; the kind is in the status bar). Both are every document's.
  *
+ * Find and Replace are dialogs with Match case; F3 finds the next. View's Keep Session keeps the open files'
+ * names, and View's and Format's choices, in NOTEPAD.CFG beside the program, and NOTEPAD started with no file
+ * opens them again (off as a rule: a NOTEPAD started bare is an empty one).
+ *
  * A file that doesn't exist yet is a new one by that name, made when it is
  * saved. Changes not saved are asked about before the file or the window
  * goes. "NOTEPAD ..." lines on stdout say what happened (the suite's). */
@@ -26,7 +30,7 @@
 #include "lexers.h"
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_CUT, C_COPY, C_PASTE, C_DELETE, C_FIND, C_NEXT,
-       C_REPLACE, C_GOTO, C_ALL, C_WRAP, C_ABOUT, C_CLOSE, C_NUMBERS, C_COLOURS };
+       C_REPLACE, C_GOTO, C_ALL, C_WRAP, C_ABOUT, C_CLOSE, C_NUMBERS, C_COLOURS, C_SESSION };
 
 #define DOCS 12
 
@@ -41,6 +45,8 @@ static struct gui_widget *strip, *status;
 static struct gui_menu *format, *view;
 static struct doc doc[DOCS];
 static int numbers, colours = 1, kind_at;      /* View's two; the status bar's section for the file's kind */
+static int match_case, session;                /* Find's Match case; View's Keep Session */
+static char home[200];                         /* the program's folder: NOTEPAD.CFG is there (none known: nothing kept) */
 static int ndocs;
 static char what[128];
 static int wrap, last_line = -1, last_col = -1;
@@ -292,17 +298,115 @@ static void doc_close(struct doc *d)
     title();
 }
 
+/* What is kept between runs, when View's Keep Session is on: the choices, and the open files' names in their
+   order (a file a line; an Untitled has none). */
+static void session_save(void)
+{
+    char path[240];
+    FILE *f;
+    int i;
+    snprintf(path, sizeof path, "%s\\NOTEPAD.CFG", home);
+    if (!home[0] || !(f = gui_fopen(path, "w")))
+        return;
+    fprintf(f, "session %d\nwrap %d\nnumbers %d\nhighlighting %d\ncase %d\n", session, wrap, numbers, colours, match_case);
+    for (i = 0; session && i < ndocs; i++)
+        if (doc[i].path[0])
+            fprintf(f, "file %s\n", doc[i].path);
+    fclose(f);
+}
+
+static void open_file(const char *p);
+
+static void session_load(int files)
+{
+    char path[240], line[300];
+    FILE *f;
+    snprintf(path, sizeof path, "%s\\NOTEPAD.CFG", home);
+    if (!home[0] || !(f = gui_fopen(path, "r")))
+        return;
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (!strncmp(line, "session ", 8))
+            session = atoi(line + 8) != 0;
+        else if (!strncmp(line, "wrap ", 5))
+            wrap = atoi(line + 5) != 0;
+        else if (!strncmp(line, "numbers ", 8))
+            numbers = atoi(line + 8) != 0;
+        else if (!strncmp(line, "highlighting ", 13))
+            colours = atoi(line + 13) != 0;
+        else if (!strncmp(line, "case ", 5))
+            match_case = atoi(line + 5) != 0;
+        else if (!strncmp(line, "file ", 5) && files && session && line[5])
+            open_file(line + 5);
+    }
+    fclose(f);
+}
+
+/* Find's and Replace's dialog: what to find (and what to put for it), Match case. 0: cancelled; 1: Find Next
+   (Replace: the next one replaced... all of them: 2). */
+static struct gui_window *fdlg;
+static struct gui_widget *f_what, *f_with, *f_case;
+
+static char f_with_text[128];
+
+static void find_button(struct gui_widget *b, int on)
+{
+    (void)on;
+    if (b->id == 10 || b->id == 11) {           /* (the fields are read while the dialog is there) */
+        snprintf(what, sizeof what, "%s", gui_get_text(f_what));
+        if (f_with)
+            snprintf(f_with_text, sizeof f_with_text, "%s", gui_get_text(f_with));
+        if (match_case != gui_checked(f_case)) {
+            match_case = gui_checked(f_case);
+            session_save();
+        }
+    }
+    gui_end_modal(fdlg, b->id == 10 ? 1 : b->id == 11 ? 2 : 0);
+}
+
+static int find_dialog(int replace, char *with, size_t room)
+{
+    struct gui_widget *box, *form, *row;
+    int r;
+    fdlg = gui_window(replace ? GUI_T("Replace") : GUI_T("Find"), 300, 0, GUI_W_DIALOG);
+    fdlg->owner = win;
+    box = gui_vbox(fdlg->root, 6, 8);
+    form = gui_form(box);
+    f_what = gui_field(gui_row(form, GUI_T("Fi&nd what:"), NULL), 30);
+    gui_set_text(f_what, what);
+    f_with = NULL;
+    if (replace) {
+        f_with = gui_field(gui_row(form, GUI_T("Re&place with:"), NULL), 30);
+        gui_set_text(f_with, with);
+    }
+    f_case = gui_check(box, GUI_T("Match &case"), match_case);
+    row = gui_hbox(box, 6, 0);
+    gui_space(row, 0, 0);
+    if (replace)
+        gui_button(row, GUI_T("Replace &All"), find_button, 11)->flags |= GUI_DEFAULT;
+    else
+        gui_button(row, GUI_T("&Find Next"), find_button, 10)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), find_button, 12)->flags |= GUI_CANCEL;
+    gui_focus(f_what);
+    r = gui_modal(fdlg);
+    if (r && replace)
+        snprintf(with, room, "%s", f_with_text);
+    gui_close(fdlg);
+    fdlg = NULL;
+    return r;
+}
+
 static void find_next(void)
 {
     struct gui_widget *ed = cur()->ed;
     int line, col;
     if (!what[0])
         return;
-    if (gui_code_find(ed, what, 0, 1))
+    if (gui_code_find(ed, what, match_case, 1))
         return;
     gui_code_where(ed, &line, &col);          /* round from the top again */
     gui_code_goto(ed, 1, 1);
-    if (!gui_code_find(ed, what, 0, 1)) {
+    if (!gui_code_find(ed, what, match_case, 1)) {
         char t[200];
         gui_code_goto(ed, line, 1);
         snprintf(t, sizeof t, "\"%s\" isn't there.", what);
@@ -334,6 +438,7 @@ static void command(struct gui_window *w, int id)
         for (i = 0; i < ndocs; i++)             /* each one's changes; any "cancel" keeps the window */
             if (keep_changes(&doc[i]) != 0)
                 return;
+        session_save();                         /* (the files open at the end are the session) */
         gui_quit(0);
         return;
     case C_UNDO: gui_code_command(ed, GUI_CMD_UNDO); break;
@@ -343,21 +448,20 @@ static void command(struct gui_window *w, int id)
     case C_DELETE: gui_code_command(ed, GUI_CMD_DELETE); break;
     case C_ALL: gui_code_command(ed, GUI_CMD_ALL); break;
     case C_FIND:
-        if (gui_ask(win, GUI_T("Find"), GUI_T("Find what:"), what, sizeof what))
+        if (find_dialog(0, NULL, 0))
             find_next();
         break;
     case C_NEXT:
-        if (!what[0] && !gui_ask(win, GUI_T("Find"), GUI_T("Find what:"), what, sizeof what))
+        if (!what[0] && !find_dialog(0, NULL, 0))
             break;
         find_next();
         break;
     case C_REPLACE:
         with[0] = 0;
-        if (!gui_ask(win, GUI_T("Replace"), GUI_T("Replace what:"), what, sizeof what) || !what[0]
-            || !gui_ask(win, GUI_T("Replace"), GUI_T("With:"), with, sizeof with))
+        if (!find_dialog(1, with, sizeof with) || !what[0])
             break;
         gui_code_goto(ed, 1, 1);
-        for (n = 0; gui_code_find(ed, what, 0, 1); n++)
+        for (n = 0; gui_code_find(ed, what, match_case, 1); n++)
             gui_code_replace_sel(ed, with);
         snprintf(t, sizeof t, GUI_T("%d replaced."), n);
         gui_message(win, GUI_T("Replace"), t, GUI_MB_OK);
@@ -381,7 +485,14 @@ static void command(struct gui_window *w, int id)
         gui_menu_check(format, C_WRAP, wrap);
         gui_menu_check(view, C_NUMBERS, numbers);
         gui_menu_check(view, C_COLOURS, colours);
+        session_save();
         note("view %s", id == C_WRAP ? "wrap" : id == C_NUMBERS ? "numbers" : "highlighting");
+        break;
+    case C_SESSION:
+        session = !session;
+        gui_menu_check(view, C_SESSION, session);
+        session_save();
+        note("view %s", session ? "session kept" : "session not kept");
         break;
     case C_ABOUT:
         gui_message(win, GUI_T("About Notepad"), GUI_T("Notepad: GLOS's text editor."), GUI_MB_OK);
@@ -423,6 +534,17 @@ int main(int argc, char **argv)
         printf("NOTEPAD no GLOS\n");
         return 1;
     }
+    {                                           /* its own folder, as DOS writes it: NOTEPAD.CFG's place */
+        char *q;
+        snprintf(home, sizeof home, "%s", argv[0]);
+        for (q = home; *q; q++)
+            *q = *q == '/' ? '\\' : (*q >= 'a' && *q <= 'z') ? (char)(*q - 32) : *q;
+        if ((q = strrchr(home, '\\')) != NULL)
+            *q = 0;
+        else
+            home[0] = 0;
+    }
+    session_load(0);                            /* (the choices first: the window is made by them) */
     win = gui_window(GUI_T("Untitled - Notepad"), 520, 340, 0);
     gui_window_icon(win, "app-notepad");
     win->on_command = command;
@@ -455,7 +577,7 @@ int main(int argc, char **argv)
     view = m = gui_menu(bar, GUI_T("&View"));
     gui_menu_item(m, GUI_T("&Line Numbers"), C_NUMBERS, NULL);
     gui_menu_item(m, GUI_T("&Highlighting"), C_COLOURS, NULL);
-    gui_menu_check(m, C_COLOURS, colours);
+    gui_menu_item(m, GUI_T("&Keep Session"), C_SESSION, NULL);
     m = gui_menu(bar, GUI_T("&Help"));
     gui_menu_item(m, GUI_T("&About Notepad"), C_ABOUT, NULL);
     strip = gui_tabs(gui_vbox(win->root, 0, 0));
@@ -466,11 +588,19 @@ int main(int argc, char **argv)
     gui_grow(strip, 1);
     status = gui_status(win);
     kind_at = gui_status_section(status, 90);
+    gui_menu_check(format, C_WRAP, wrap);
+    gui_menu_check(view, C_NUMBERS, numbers);
+    gui_menu_check(view, C_COLOURS, colours);
+    gui_menu_check(view, C_SESSION, session);
     doc_new();
     for (i = 1; i < argc; i++)                  /* NOTEPAD FILE...: each in a tab */
         open_file(argv[i]);
-    if (ndocs > 1)
+    if (argc < 2)
+        session_load(1);                        /* (started bare: the session's files, if one is kept) */
+    if (ndocs > 1) {
         gui_tabs_set(strip, 0);
+        title();
+    }
     win->focus = cur()->ed;
     gui_show(win, 1);
     gui_idle(where, NULL, 100);

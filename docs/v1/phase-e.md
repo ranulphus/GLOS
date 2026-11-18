@@ -89,8 +89,16 @@ Plan: `docs/v1/apps/notepad.md`. The first of its parts.
   in the status bar. A file saved by another name gets that name's kind. Both are every document's.
 - **Tests:** `lex_test` in the host run (each lexer's lines against tables, comments over two lines among them);
   `notepad-view` on the host and on Loop A (C typed and saved as T.C, the margin, a batch file, plain again).
-- **Not done yet:** sessions kept; files dropped on the window; bookmarks; Markdown's colours and a menu to
-  choose a kind; find and replace's options and results pane, find in files; code pages; large files.
+- **Find and Replace** (the third part) are dialogs, with **Match case** (kept): Find's Enter finds the next and
+  F3 goes on; Replace's replaces every one and says how many. (A dialog's fields are read while it is there,
+  in its button's handler: after `gui_modal` has come back their text is not to be had.)
+- **Keep Session** (View; off as a rule): the open files' names in their order, and View's and Format's choices,
+  are kept in `NOTEPAD.CFG` beside the program, and a Notepad started with no file opens them again. With it off
+  a bare Notepad is an empty one, as the other programs' tests expect.
+- **Tests:** `notepad-find` on the host and on Loop A (two replaced; "the" is not "The" with Match case);
+  `notepad-session` on Loop A alone (two files kept and opened again; off again: an empty Notepad).
+- **Not done yet:** files dropped on the window; bookmarks; Markdown's colours and a menu to choose a kind;
+  whole words, regular expressions and the results pane, find in files; code pages; large files.
 
 ## What is next
 

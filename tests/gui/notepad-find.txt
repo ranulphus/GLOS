@@ -1,0 +1,36 @@
+# Notepad's Find and Replace (apps/notepad; phase E, docs/v1/apps/notepad.md): Replace's dialog, every one
+# replaced and counted; Find's with Match case on: "the" is not "The"; Match case off again.
+run NOTEPAD.EXE C:\GUI\EDIT.TXT
+wait "EDIT.TXT - Notepad"
+key ctrl+h
+wait "Replace"
+shot find-replace "Replace"
+type second
+key tab
+type 2nd
+key enter
+pause 1000
+shot find-replaced "Replace"
+key enter
+pause 500
+shot find-done "*EDIT.TXT - Notepad"
+key ctrl+home
+key ctrl+f
+wait "Find"
+key ctrl+a
+type the
+key alt+c
+shot find-case "Find"
+key enter
+gone "Find"
+shot find-found "*EDIT.TXT - Notepad"
+key ctrl+f
+wait "Find"
+key alt+c
+key enter
+gone "Find"
+key alt+f4
+wait "Notepad"
+key alt+n
+gone "*EDIT.TXT - Notepad"
+expect NOTEPAD end
