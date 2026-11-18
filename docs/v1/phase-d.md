@@ -476,6 +476,19 @@ The steps:
 - **Tests:** host and Loop A `monitor` (the fifth page, none there); by hand on Loop A with a service set: its
   row, Stop (stopped), Start (running again); the apps suite's `glos services START NAME`.
 
+## Where phase D stands (2026-11-18)
+
+| Step | Done | Left |
+|---|---|---|
+| **D1** the task bar | Window and group menus, grouping, Alt+Tab's strip in the order of use, the calendar, the volume's slider, the bar at the top or hidden | A window's own 32-pixel icon |
+| **D2** the tray | GLOS's own icons (volume, network, pads, a remote session), its notifications, the overflow, the held count | "Disk nearly full" and "a scheduled run failed" |
+| **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes; "Recently added" |
+| **D4** the wallpaper | A picture in four styles, drawn by the shell | (its chooser and preview are D5's, done) |
+| **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card's own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server; the services' list | The card's details; the time zone as a list; the pads' mapping; USB as a tree; startup and default apps; Secrets; icons in the list |
+| **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES and TEXT; the Control Panel's preview; the text saver's word | The maze and the flying objects; the savers' other settings; DOS-GL's hidden start (asked) and its software renderer's window (B3), without which only a Matrox card at 16 bits has them |
+| **D7** background apps | `[services] run`, started again when they end, `glos services`, refused if no app | A folder or a user for each |
+| **D8** the task manager | Monitor's Services page with Stop and Start | The apps' windows, sessions, streams and the processor by program; SYS's structures for NET, AUDIO and USB |
+
 ## What waits for other phases
 
 - The volume icon's double-click opens the Mixer when phase F has made it (the Control Panel's Sound page until
