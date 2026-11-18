@@ -1234,6 +1234,8 @@ static int ce_key(struct code *c, struct gui_ev *e)
         return 1;
     }
     case GUI_K_TAB:
+        if (ctrl)                               /* (Ctrl+Tab is the window's: round its tabs, of which this may be one) */
+            return 0;
         sel_range(c, &a, &b);
         if (a != b && line_of(c, a) != line_of(c, b)) {
             tab_lines(c, shift);

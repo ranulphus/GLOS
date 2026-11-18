@@ -1,0 +1,36 @@
+# Notepad's tabs (apps/notepad; phase E, docs/v1/apps/notepad.md): New makes a tab; Ctrl+Tab goes round; a changed
+# one closed asks about its changes; a file opened comes in a tab of its own, and one open already is only shown;
+# two files given to the program are two tabs.
+run NOTEPAD.EXE C:\GUI\EDIT.TXT C:\GUI\NOTES.TXT
+wait "EDIT.TXT - Notepad"
+shot tabs-start "EDIT.TXT - Notepad"
+key ctrl+n
+wait "Untitled - Notepad"
+type a third tab
+shot tabs-three "*Untitled - Notepad"
+key ctrl+tab
+wait "EDIT.TXT - Notepad"
+shot tabs-round "EDIT.TXT - Notepad"
+key ctrl+tab
+wait "NOTES.TXT - Notepad"
+key ctrl+tab
+wait "*Untitled - Notepad"
+key ctrl+w
+wait "Notepad"
+key alt+n
+wait "NOTES.TXT - Notepad"
+key ctrl+o
+wait "Open"
+type C:\\GUI\\EDIT.TXT\n
+wait "EDIT.TXT - Notepad"
+key ctrl+w
+wait "NOTES.TXT - Notepad"
+shot tabs-one "NOTES.TXT - Notepad"
+key ctrl+w
+wait "Untitled - Notepad"
+key alt+f4
+gone "Untitled - Notepad"
+expect NOTEPAD closed Untitled
+expect NOTEPAD closed C:\GUI\EDIT.TXT
+expect NOTEPAD closed C:\GUI\NOTES.TXT
+expect NOTEPAD end

@@ -65,7 +65,27 @@ Plan: `docs/v1/apps/term.md`. The first of its parts.
   SFTP pane; the scroll-back's length and search; fonts and colour schemes; more of xterm (256 colours, the
   mouse, bracketed paste); splits; tabs dragged along the strip.
 
+## Notepad (2026-11-18): tabs
+
+Plan: `docs/v1/apps/notepad.md`. The first of its parts.
+
+- **Tabs:** a tab for each open file (the toolkit's code editor in each), with its name and a `*` while it has
+  changes not saved; the window's title is the shown one's, as it was with one file. New makes an empty tab;
+  Open opens the file in a tab of its own (in the empty Untitled, if that is all there is; a file open already
+  is only shown); Close (Ctrl+W, a tab's close box) asks about its changes and takes it away, and the last one's
+  leaves an empty Untitled; Exit asks about each changed one in turn, showing it. `NOTEPAD FILE...` opens each
+  in a tab. Ctrl+Tab goes round; the strip's "+" is New. Twelve at most. Word Wrap is every document's.
+- **A fault of the toolkit's, mended:** the code editor took Ctrl+Tab for Tab, so a window's tabs could not be
+  gone round from inside one (`sdk/gui/code.c`). Loop A showed it; on the host the script's `wait` passed with
+  the title never come (a host `wait` does not fail for an app without threads), so the script now has a shot
+  of the tab it expects.
+- **Tests:** `notepad-tabs` on the host and on Loop A (two files as two tabs, New, round by Ctrl+Tab, a changed
+  one closed and asked about, a file open already shown again, the last one's close); `notepad` as before; the
+  scripts that start Notepad (`monitor`, `monitor-switch`, `monitor-windows`, `wrap`, `control-startup`).
+- **Not done yet:** sessions kept; files dropped on the window; the margin's line numbers and bookmarks; syntax
+  highlighting; find and replace's options and results pane, find in files; code pages; large files.
+
 ## What is next
 
-The Terminal's saved connections and the rest of its plan; Notepad (tabs, find and replace, highlighting); Files (toolbar, address bar,
+The rest of the Terminal's and Notepad's plans (the margin and highlighting first); Files (toolbar, address bar,
 views, thumbnails, search, archives as folders); Images and Paint. Each by its plan in `docs/v1/apps/`.
