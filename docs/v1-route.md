@@ -515,8 +515,10 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   whatever it asks for: to reproduce in 86Box with a large memory and follow its DPMI calls after the lock
   (its heap's reservation and lock). The executable is the owner's (local only).
 - **Loop A's `apishell-486dx2-vbe` missed "ended" once** (2026-11-14, devserver): both apps ended with their
-  code at `glos exit` by the log, and the test's ssh ends did not both see it. Not yet looked into: the last
-  output of an app's channel as GLOS leaves is the place to look. (`apisec-486dx2-vbe` "right", which failed
+  code at `glos exit` by the log, and the test's ssh ends did not both see it. **Cause found 2026-11-18** (the
+  apps suite on the 486, two runs in three once a background app ran at the exit): a command run over SSH is its
+  shell session's job, and `glos exit` did not wait for the session to tell its client the end; it does now
+  (`sshd_commands`, kernel/dos/agent.c's exit). To be struck off when some gates have gone by without it. (`apisec-486dx2-vbe` "right", which failed
   two runs in four the same day, was the test's own: it read the log as the PC wrote it and took a half-written
   line for the answer. Fixed in the test.)
 - bench-486 stopped once after a restart (2026-11-14, not seen again); `thr-486dx2` stopped once after a crash
