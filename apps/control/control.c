@@ -866,6 +866,8 @@ int main(int argc, char **argv)
             }
         if (!strcmp(sec, "net"))
             status_add_net(page);               /* (how the network is now, under its settings: status.c) */
+        if (!strcmp(sec, "joystick"))
+            status_add_pads(page);              /* (the pads as they are, for a test) */
     }
     if (side && wall && style)
         look_add(side, win, wall->w, style->w, style->choice);

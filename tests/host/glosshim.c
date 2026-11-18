@@ -195,6 +195,14 @@ int glos_sleep(unsigned ms)             /* (a made thread's sleep is until the c
 unsigned glos_ticks(void) { return H.clock; }
 void *glos_ptr(unsigned linear) { return (void *)(size_t)linear; }
 
+/* (The pads: none plugged in.) */
+int glos_pads(struct glos_pads *p, int events)
+{
+    (void)events;
+    memset(p->pad, 0, sizeof p->pad);
+    return 0;
+}
+
 /* (The network's state: one card with an address, made up and the same each run.) */
 int glos_net_state(struct glos_net_if *out, unsigned room, unsigned *count)
 {
