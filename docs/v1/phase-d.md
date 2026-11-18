@@ -446,6 +446,21 @@ The steps:
   that Monitor reads numbers and not text.
 - **Tests:** `monitor` script (masked figures), Loop A native, APITEST's SYS cases for the new structures.
 
+### D8 as built, first part (2026-11-18)
+
+- **Monitor's Services page:** the background apps (`[services] run`, D7), each one's state (Running, Starting
+  again, Stopped, Refused: not an app), how often it was started again and its command line, read every second
+  while the page is shown; **Stop** and **Start** for the one chosen, which run the shell's `SERVICES STOP NAME`
+  and `SERVICES START NAME` for it. With none, the page says where they are set.
+- **SYS's STAT has `GLOS_STAT_SERVICES`** (22): `glos services`' lines as text, as its other text kinds are.
+- **`glos services stop|start`** takes its words in capitals too (the shell's command is typed as DOS's are;
+  found by Monitor's Stop).
+- **Not done yet:** Monitor as the plan's task manager: the apps' windows, sessions, the network's and the
+  sound's streams, the processor's time by program over time; SYS's STAT's structures for NET, AUDIO and USB
+  (so that Monitor reads numbers and not text).
+- **Tests:** host and Loop A `monitor` (the fifth page, none there); by hand on Loop A with a service set: its
+  row, Stop (stopped), Start (running again); the apps suite's `glos services START NAME`.
+
 ## What waits for other phases
 
 - The volume icon's double-click opens the Mixer when phase F has made it (the Control Panel's Sound page until

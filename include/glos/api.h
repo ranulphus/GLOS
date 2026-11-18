@@ -2069,6 +2069,7 @@ struct glos_sys_stat {
 #define GLOS_STAT_DISPLAY 19    /* glos display */
 #define GLOS_STAT_CACHE   20    /* glos cache */
 #define GLOS_STAT_THREADS 21    /* the kernel's threads and their time */
+#define GLOS_STAT_SERVICES 22   /* glos services: the background apps, a line each (phase D) */
 
 struct glos_sys_system {
     unsigned size;

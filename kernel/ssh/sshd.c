@@ -1571,9 +1571,11 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         u32 k;
         while (*p == ' ')
             p++;
-        if (!strncmp(p, "stop ", 5))
+        /* (The words in capitals too: the shell's SERVICES STOP NAME, typed as DOS's commands are.) */
+        if ((p[0] | 0x20) == 's' && (p[1] | 0x20) == 't' && (p[2] | 0x20) == 'o' && (p[3] | 0x20) == 'p' && p[4] == ' ')
             what = 1, p += 5;
-        else if (!strncmp(p, "start ", 6))
+        else if ((p[0] | 0x20) == 's' && (p[1] | 0x20) == 't' && (p[2] | 0x20) == 'a' && (p[3] | 0x20) == 'r'
+                 && (p[4] | 0x20) == 't' && p[5] == ' ')
             what = 2, p += 6;
         else if (*p)
             r = 1;

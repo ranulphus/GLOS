@@ -1105,6 +1105,16 @@ static int notepad_ended;
 int glos_sys_stat(unsigned kind, void *out, unsigned room, unsigned *length, unsigned *count)
 {
     unsigned s = H.clock / 1000;
+    if (kind == GLOS_STAT_SERVICES) {           /* (no background apps on the host: what glos services says then) */
+        static const char none[] = "no services ([services] run)\n";
+        unsigned n = sizeof none - 1 < room ? sizeof none - 1 : room;
+        memcpy(out, none, n);
+        if (length)
+            *length = n;
+        if (count)
+            *count = 0;
+        return 0;
+    }
     if (kind == GLOS_STAT_SYSTEM && room >= sizeof(struct glos_sys_system)) {
         struct glos_sys_system y;
         memset(&y, 0, sizeof y);

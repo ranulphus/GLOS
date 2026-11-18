@@ -6733,7 +6733,7 @@ def apps_case(profile, card):
             and svc(r"^service APPTEST\.EXE stopped seq=0 restarts=2 ") and not svc_job()
         time.sleep(4)                           # (left ended: not started again)
         checks["svc-stays"] = agent.log().count("GLOS-SERVICE start name=APPTEST.EXE") == 3 and not svc_job()
-        checks["svc-start-again"] = agent.ssh("glos services start APPTEST.EXE")[0] == 0 \
+        checks["svc-start-again"] = agent.ssh("glos services START APPTEST.EXE")[0] == 0 \
             and svc_said("start name=APPTEST.EXE", 4) and svc(r"^service APPTEST\.EXE running ") and bool(svc_job())
         checks["svc-no-such"] = agent.ssh("glos services stop NOSUCH.EXE")[0] == 1
         checks["svc-unset"] = agent.ssh("glos config unset services run")[0] == 0 and svc_said("gone name=APPTEST.EXE", 1) \

@@ -4,6 +4,7 @@
  * it has more), KILL. */
 #include <string.h>
 
+#include "services.h"
 #include "agent.h"
 #include "agent.h"
 #include "shsess.h"
@@ -138,6 +139,10 @@ int api2_sys_stat(struct trapframe *tf)         /* (for any program: api2.c) */
         break;
     case GLOS_STAT_THREADS:
         n = sched_stat(b, TEXT_ROOM);
+        r = give(tf, &q, size, b, n, 0);
+        break;
+    case GLOS_STAT_SERVICES:
+        n = services_stat(b, TEXT_ROOM);
         r = give(tf, &q, size, b, n, 0);
         break;
     default:

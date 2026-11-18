@@ -8,6 +8,9 @@
  *                 network's frames
  *   System        GLOS, the machine, the screen, the sound, the network
  *   Log           GLOS's log's last lines
+ *   Services      the background apps ([services] run): each one's state and
+ *                 how often it was started again; Stop and Start (the shell's
+ *                 SERVICES, run for it)
  *
  * "MONITOR ..." lines on stdout (the suite's). */
 #include <stdio.h>
@@ -21,6 +24,9 @@
 static struct gui_window *win;
 static struct gui_widget *tabs, *list, *graph, *mem_bar, *mem_text, *net_text, *log_ed, *status;
 static struct gui_widget *sysval[12];
+static struct gui_widget *svc_list, *svc_note;
+static char svc_name[16][16];                   /* the services listed, by row */
+static int nsvc;
 static struct glos_sys_system sys, last;
 static struct glos_sys_memory mem;
 static struct glos_version ver;
@@ -115,6 +121,8 @@ static void fill_system(void)
         gui_set_text(sysval[i], t[i]);
 }
 
+static void fill_services(void);
+
 static void sample(void *arg)
 {
     char t[96];
@@ -148,6 +156,8 @@ static void sample(void *arg)
     fill_system();
     if (gui_tabs_get(tabs) == 0)
         fill_programs();
+    if (gui_tabs_get(tabs) == 4)
+        fill_services();
 }
 
 static void end_task(struct gui_widget *w, int what)
@@ -190,6 +200,67 @@ static void refresh_log(struct gui_widget *w, int what)
     gui_editor_command(log_ed, GUI_CMD_END);
 }
 
+/* The background apps, from glos services' lines (SYS's STAT):
+   service NAME running|waiting|stopped|refused seq=N restarts=N code=N "command line" */
+static void fill_services(void)
+{
+    static char text[2048];
+    unsigned length = 0;
+    int keep = gui_list_get(svc_list);
+    char *p = text, *e;
+    if (glos_sys_stat(GLOS_STAT_SERVICES, text, sizeof text - 1, &length, 0) != 0 && glos_error() != GLOS_E_ROOM)
+        length = 0;
+    text[length < sizeof text - 1 ? length : sizeof text - 1] = 0;
+    gui_list_clear(svc_list);
+    nsvc = 0;
+    for (; *p && nsvc < 16; p = e) {
+        char state[16], restarts[12], *q;
+        const char *cells[4];
+        unsigned n = 0;
+        if ((e = strchr(p, '\n')) != NULL)
+            *e++ = 0;
+        else
+            e = p + strlen(p);
+        if (sscanf(p, "service %15s %15s", svc_name[nsvc], state) != 2)
+            continue;
+        if ((q = strstr(p, "restarts=")) != NULL)
+            n = (unsigned)atoi(q + 9);
+        snprintf(restarts, sizeof restarts, "%u", n);
+        if ((q = strchr(p, '"')) != NULL) {     /* its command line, between the quotes */
+            char *end = strrchr(++q, '"');
+            if (end)
+                *end = 0;
+        }
+        cells[0] = svc_name[nsvc], cells[1] = !strcmp(state, "running") ? GUI_T("Running") : !strcmp(state, "waiting")
+            ? GUI_T("Starting again") : !strcmp(state, "stopped") ? GUI_T("Stopped") : GUI_T("Refused: not an app");
+        cells[2] = restarts, cells[3] = q ? q : "";
+        gui_list_add(svc_list, cells, NULL, (void *)(size_t)nsvc);
+        nsvc++;
+    }
+    gui_set_text(svc_note, nsvc ? "" : GUI_T("No background apps: [services] run lists them (the Control Panel's Services page)."));
+    if (nsvc)                                   /* (one is always chosen: Stop and Start are for it) */
+        gui_list_set(svc_list, keep >= 0 && keep < nsvc ? keep : 0);
+}
+
+/* Stop (1) or Start (2) the one chosen: the shell's SERVICES, run for it. */
+static void svc_ask(struct gui_widget *w, int what)
+{
+    static glos_handle job;                     /* the last line's job (its handle let go at the next) */
+    char line[64];
+    int r = gui_list_get(svc_list);
+    (void)what;
+    if (r < 0 || r >= nsvc)
+        return;
+    if (job)
+        glos_close(job);
+    snprintf(line, sizeof line, "SERVICES %s %s", w->id == 1 ? "STOP" : "START", svc_name[r]);
+    if (!(job = glos_job_run(line, NULL, NULL, GLOS_RUN_SHELL, 0, NULL)))
+        gui_message(win, GUI_T("Services"), GUI_T("GLOS couldn't do it."), GUI_MB_OK);
+    else
+        printf("MONITOR services %s %s\n", w->id == 1 ? "stop" : "start", svc_name[r]);
+    fflush(stdout);
+}
+
 static void tab_changed(struct gui_widget *w, int what)
 {
     (void)what;
@@ -197,6 +268,8 @@ static void tab_changed(struct gui_widget *w, int what)
         fill_programs();
     if (gui_tabs_get(w) == 3)
         refresh_log(NULL, 0);
+    if (gui_tabs_get(w) == 4)
+        fill_services();
 }
 
 int main(int argc, char **argv)
@@ -207,6 +280,8 @@ int main(int argc, char **argv)
     static const char *const labels[11] = { GUI_N("Version:"), GUI_N("Running for:"), GUI_N("Processor:"),
         GUI_N("Memory:"), GUI_N("Work:"), GUI_N("Screen:"), GUI_N("Card's memory:"), GUI_N("Sound:"),
         GUI_N("Network:"), GUI_N("Host name:"), GUI_N("In front:") };
+    static const char *const svc_heads[4] = { GUI_N("Service"), GUI_N("State"), GUI_N("Started again"), GUI_N("Command") };
+    static const int svc_widths[4] = { 96, 120, 84, 160 };
     struct gui_widget *page, *row, *form, *box;
     int i;
     if (gui_init(argc, argv) != 0) {
@@ -253,6 +328,15 @@ int main(int argc, char **argv)
     box = gui_hbox(page, -1, 0);
     gui_space(box, 0, 0);
     gui_button(box, GUI_T("&Refresh"), refresh_log, 0);
+
+    page = gui_tab(tabs, GUI_T("Services"));
+    svc_list = gui_list(page, 4, svc_heads, svc_widths);
+    gui_grow(svc_list, 1);
+    svc_note = gui_label(page, "");
+    box = gui_hbox(page, 6, 0);
+    gui_space(box, 0, 0);
+    gui_button(box, GUI_T("S&top"), svc_ask, 1);
+    gui_button(box, GUI_T("&Start"), svc_ask, 2);
 
     status = gui_status(win);
     if (argc > 1 && !strcmp(argv[1], "-tasks"))
