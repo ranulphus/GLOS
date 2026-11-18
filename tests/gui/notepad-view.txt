@@ -1,0 +1,28 @@
+# Notepad's View (apps/notepad; phase E, docs/v1/apps/notepad.md): a C file typed and saved by that name gets C's
+# colours; Line Numbers shows the margin; a batch file's colours; Highlighting off, everything plain again.
+run NOTEPAD.EXE
+wait "Untitled - Notepad"
+type /* a test */\n#include <stdio.h>\nint main(void)\n{\n    return 42;   // the answer\n}\n
+pause 8000
+key alt+f a
+wait "Save As"
+type C:\\OUT\\T.C\n
+wait "T.C - Notepad"
+shot view-c "T.C - Notepad"
+key alt+v l
+shot view-numbers "T.C - Notepad"
+key ctrl+o
+wait "Open"
+type C:\\GUI\\RUN.BAT\n
+wait "RUN.BAT - Notepad"
+shot view-batch "RUN.BAT - Notepad"
+key alt+v h
+shot view-plain "RUN.BAT - Notepad"
+key alt+v h
+key alt+v l
+key alt+f4
+gone "RUN.BAT - Notepad"
+expect NOTEPAD saved C:\OUT\T.C
+expect NOTEPAD view numbers
+expect NOTEPAD view highlighting
+expect NOTEPAD end

@@ -82,8 +82,15 @@ Plan: `docs/v1/apps/notepad.md`. The first of its parts.
 - **Tests:** `notepad-tabs` on the host and on Loop A (two files as two tabs, New, round by Ctrl+Tab, a changed
   one closed and asked about, a file open already shown again, the last one's close); `notepad` as before; the
   scripts that start Notepad (`monitor`, `monitor-switch`, `monitor-windows`, `wrap`, `control-startup`).
-- **Not done yet:** sessions kept; files dropped on the window; the margin's line numbers and bookmarks; syntax
-  highlighting; find and replace's options and results pane, find in files; code pages; large files.
+- **View** (the second part): **Line Numbers** shows the code editor's margin (numbers, and fold boxes for what
+  is indented under a line); **Highlighting** (on as a rule) colours a file by its kind, which its name's end
+  says: C (the toolkit's lexer), batch, INI and GLOS.CFG, assembly, Pascal and HTML (`apps/notepad/lexers.c`:
+  a lexer gives each byte of a line a class and the state the line ends in, a comment still open). The kind is
+  in the status bar. A file saved by another name gets that name's kind. Both are every document's.
+- **Tests:** `lex_test` in the host run (each lexer's lines against tables, comments over two lines among them);
+  `notepad-view` on the host and on Loop A (C typed and saved as T.C, the margin, a batch file, plain again).
+- **Not done yet:** sessions kept; files dropped on the window; bookmarks; Markdown's colours and a menu to
+  choose a kind; find and replace's options and results pane, find in files; code pages; large files.
 
 ## What is next
 

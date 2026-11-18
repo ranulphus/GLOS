@@ -160,6 +160,8 @@ host-test-run:
 	  && echo "edit_test: 0 failures"
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/calc_test tests/host/calc_test.c apps/calc/calcmath.c -lm \
 	  && build/host/calc_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iinclude -o build/host/lex_test tests/host/lex_test.c apps/notepad/lexers.c \
+	  && build/host/lex_test
 
 # The toolkit (sdk/gui, M9) and the apps on the host, against tests/host/glosshim.c: each test script
 # (tests/gui/NAME.txt) run at 8, 16 and 32 bits, its shots written to build/host/gui/ (the goldens Loop A's
