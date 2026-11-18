@@ -8,4 +8,8 @@ void look_add(struct gui_widget *side, struct gui_window *win, struct gui_widget
               const char *const *values);
 void look_poll(void);                   /* the picture follows the field and the list */
 
+/* status.c: how things are now, under a page's settings */
+void status_add_net(struct gui_widget *page);   /* the Network page's lines */
+void status_poll(void);                 /* read again, once a second */
+
 #endif

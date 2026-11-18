@@ -291,7 +291,11 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
 - **Display's modes are the card's** (DRAW's MODES): the Screen list has "none" and the modes the card says it
   has, 640 by 480 and up (what the desktop needs), in place of twelve usual ones whatever the card; those only
   when the card doesn't answer. The file's own mode is in the list whatever it is, as before.
-- **Not done yet:** the other grown pages (the card's details on Display, Sound, Network status, Date and time,
+- **The Network page says how the network is now** (`apps/control/status.c`, NET's STATE, once a second): the
+  card and its hardware address (or the cable link), the address and mask with what is left of DHCP's lease, the
+  gateway and the name servers, GLOS's name, the frames in, out and bad. The scripts' shot of the page masks the
+  lines, which are the machine's.
+- **Not done yet:** the other grown pages (the card's details on Display, Sound, Date and time,
   Mouse and keyboard with their test areas, Game controllers, USB devices, Startup and default apps, Secrets);
   the Screensaver page's preview (D6); a preview of a theme not yet applied; icons in the list.
 - **Tests:** host and Loop A `control-find` (a setting found, the next, a word nothing has, the look following

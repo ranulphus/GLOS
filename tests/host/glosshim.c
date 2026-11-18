@@ -195,6 +195,27 @@ int glos_sleep(unsigned ms)             /* (a made thread's sleep is until the c
 unsigned glos_ticks(void) { return H.clock; }
 void *glos_ptr(unsigned linear) { return (void *)(size_t)linear; }
 
+/* (The network's state: one card with an address, made up and the same each run.) */
+int glos_net_state(struct glos_net_if *out, unsigned room, unsigned *count)
+{
+    if (count)
+        *count = 1;
+    if (!room)
+        return GLOS_E_ROOM;
+    memset(out, 0, sizeof *out);
+    out->size = sizeof *out;
+    out->kind = GLOS_NETIF_ETHERNET;
+    out->flags = GLOS_NETIF_UP | GLOS_NETIF_DHCP;
+    memcpy(out->mac, "\x52\x54\x00\x12\x34\x56", 6);
+    out->address = 10u | 2u << 16 | 15u << 24, out->mask = 0x00FFFFFFu, out->gateway = 10u | 2u << 16 | 2u << 24;
+    out->dns[0] = 10u | 2u << 16 | 3u << 24;
+    out->lease = 86400, out->lease_left = 80000;
+    out->rx_frames = 1200, out->tx_frames = 900;
+    strcpy(out->card, "ne2k");
+    strcpy(out->host, "glos");
+    return 0;
+}
+
 /* (The card's modes: the three sizes and depths every card of the tests has.) */
 int glos_modes(struct glos_mode *out, unsigned room, unsigned *count)
 {

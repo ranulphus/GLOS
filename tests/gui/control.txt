@@ -2,6 +2,7 @@
 # (tests/gui/drives/C/GLOS/GLOS.CFG; beside GLOS.EXE in Loop A); what the setting with the keyboard does and when
 # it takes effect; a program's profile; a wrong value refused with the schema's rule, before anything is set; a
 # new program; Cancel, which sets nothing. (Every setting changed by keys: the control suite.)
+# (The Network page's lines of how the network is now are the machine's: masked.)
 run CONTROL.EXE
 wait "Control Panel"
 shot cp-display "Control Panel"
@@ -14,7 +15,7 @@ shot cp-usb "Control Panel"
 key ctrl+tab
 shot cp-sound "Control Panel"
 key ctrl+tab
-shot cp-network "Control Panel"
+shot cp-network "Control Panel" 146 176 440 84
 key ctrl+tab
 shot cp-time "Control Panel"
 key ctrl+tab

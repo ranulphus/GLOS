@@ -305,6 +305,7 @@ static void help_poll(void *arg)
     int i;
     (void)arg;
     look_poll();                                /* (the desktop's look follows its page: look.c) */
+    status_poll();                              /* (and the network's state is read: status.c) */
     for (i = 0; i < nctl; i++)
         if (win->focus == ctls[i].w)
             k = ctls[i].k;
@@ -863,6 +864,8 @@ int main(int argc, char **argv)
                 if (!strcmp(sec, "desktop") && !strcmp(c->k->key, "wallpaper_style"))
                     style = c;
             }
+        if (!strcmp(sec, "net"))
+            status_add_net(page);               /* (how the network is now, under its settings: status.c) */
     }
     if (side && wall && style)
         look_add(side, win, wall->w, style->w, style->choice);
