@@ -475,6 +475,7 @@ int main(int argc, char **argv)
         gui_show(desk, 1);
         wall_load(desk->w, desk->h);
         glos_setting_watch("desktop", 1);
+        diskwarn_start();                       /* (a disk nearly full is said: diskwarn.c) */
         desktop_items();
         gui_focus(area);
         glos_shell(1);

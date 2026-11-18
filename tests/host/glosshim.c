@@ -195,6 +195,24 @@ int glos_sleep(unsigned ms)             /* (a made thread's sleep is until the c
 unsigned glos_ticks(void) { return H.clock; }
 void *glos_ptr(unsigned linear) { return (void *)(size_t)linear; }
 
+/* (The drives' sizes: none said on the host, so no disk is ever "nearly full" there. A notification: taken and
+   not shown.) */
+int glos_fs_drives(unsigned drive, struct glos_fs_drive *out, unsigned room, unsigned *count)
+{
+    (void)drive, (void)out, (void)room;
+    if (count)
+        *count = 0;
+    return 0;
+}
+
+glos_handle glos_notify(const char *title, const char *text, const char *action1, const char *action2, const unsigned *icon,
+                        unsigned seconds)
+{
+    (void)title, (void)text, (void)action1, (void)action2, (void)icon, (void)seconds;
+    last_error = GLOS_E_REFUSED;
+    return 0;
+}
+
 /* (Sound: no card on the host.) */
 glos_handle glos_audio_out(unsigned rate, unsigned channels, unsigned bytes, struct glos_audio_ring **ring, unsigned *id)
 {

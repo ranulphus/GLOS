@@ -21,6 +21,9 @@ void files_run_app(const char *exe_and_args, const char *arg);  /* one of them s
 void files_run_typed(const char *typed);        /* what was typed to run: a folder or a file opened, else run */
 void files_shell(const char *line);     /* a line run by GLOS's own shell (glos exit ...) */
 
+/* diskwarn.c: a disk nearly full is said (phase D) */
+void diskwarn_start(void);
+
 /* wall.c: the desktop's wallpaper (phase D) */
 int wall_load(int w, int h);            /* made for a desktop that size from [desktop] wallpaper: 1 if there is one */
 void wall_draw(struct gfx_surface *s, int ox, int oy, int w, int h);    /* it, or the desktop's colour */

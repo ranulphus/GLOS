@@ -524,12 +524,22 @@ The steps:
 - **Tests:** by hand on Loop A (a schedule entry whose program isn't there: the log's line, the notification
   18 s after the desktop came on); the api suite's schedule cases and the apps suite as before.
 
+### D2's other leftover: a disk nearly full (2026-11-18)
+
+- In the shell, which is there whenever the desktop is (`apps/files/diskwarn.c`), not the kernel: every half
+  minute FS's DRIVES gives each hard disk's size and what is free of it (no floppy or CD is made to spin), and
+  one with under a twentieth free is said with one of the shell's notifications ("Drive C: has 12 MB free of
+  490 MB."): once, and again only after it has had twice that free. `GLOSDISKWARN` in the environment is another
+  percentage (0: never said).
+- **Tests:** by hand on Loop A with `GLOSDISKWARN=100` (the notification 35 s after the shell's start, the
+  shell's `FILES disk-low C` line); the shell's scripts as before (their disk has room: nothing is said).
+
 ## Where phase D stands (2026-11-18)
 
 | Step | Done | Left |
 |---|---|---|
 | **D1** the task bar | Window and group menus, grouping, Alt+Tab's strip in the order of use, the calendar, the volume's slider, the bar at the top or hidden | A window's own 32-pixel icon |
-| **D2** the tray | GLOS's own icons (volume, network, pads, a remote session), its notifications (a pad, the network, an app not answering, a scheduled run that failed), the overflow, the held count | "Disk nearly full" |
+| **D2** the tray | GLOS's own icons (volume, network, pads, a remote session), its notifications (a pad, the network, an app not answering, a scheduled run that failed, a disk nearly full: the shell's), the overflow, the held count | (nothing) |
 | **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes; "Recently added" |
 | **D4** the wallpaper | A picture in four styles, drawn by the shell | (its chooser and preview are D5's, done) |
 | **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list and the startup programs' | The pads' mapping; USB as a tree; Secrets (needs a call of its own for the master password: no shell line may carry it); icons in the list |
@@ -539,9 +549,6 @@ The steps:
 
 ### What is left, and how each is meant to be done (2026-11-18)
 
-- **"Disk nearly full"** (D2): in the shell (FILES, which is there whenever the desktop is), not the kernel:
-  FS's DRIVES for each fixed drive once a minute, SHELL's NOTIFY when one has under a twentieth free (said once,
-  again only after it has been above a tenth). To test: a small second disk in Loop A (`--scratch-hdd`), filled.
 - **"Recently added"** (D3): START.CFG keeps when each entry was first seen (`seen TIME NAME`); the first run
   marks everything as old; an entry seen for the first time later is listed for a fortnight or until it is
   started. The host's clock is 0 and a script can't put a START.CFG in place first: it needs a script command
