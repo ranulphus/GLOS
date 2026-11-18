@@ -6792,11 +6792,13 @@ def saver_case(profile, vcard, card):
     asked for (glos idle saver). On a Matrox card at 16 bits STARS.SCR's full-screen window comes: stars on black,
     another picture a moment later, no pointer; a key ends it, the program is ended and the desktop is as it was.
     Where DOS-GL has no window (the S3) the program ends at once and the blank saver is what shows; a key ends
-    that too. With the program gone from the disk: the blank saver again."""
+    that too. The Control Panel's Saver page with stars chosen: on the Matrox card the program runs small in the
+    page (its window bare, 192 by 144, inside the Control Panel's), and is ended when another page is shown; on
+    the S3 it ends at once. With the program gone from the disk: the blank saver again."""
     import time
     tag = "%s-%s" % (profile, vcard)
     agent = Agent("saver-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/STARS.SCR=/TEST/STARS.SCR",
-        "--cmd", "SERSAY HX-START saver", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--cmd", "SERSAY HX-START saver", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
                    "-o", "ControlPersist=600"]
     out = os.path.join(ROOT, "out", "saver-" + tag)
@@ -6864,6 +6866,41 @@ def saver_case(profile, vcard, card):
         time.sleep(2)
         after = shot("after")
         checks["as-it-was"] = bool(after) and above_bar(after) == above_bar(before)
+        # The Control Panel's Saver page: the saver chosen runs small in the page.
+        cp = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\CONTROL.EXE saver"], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
+        t0 = time.time()
+        while time.time() - t0 < 120 and '"Control Panel"' not in agent.ssh("glos desk")[1]:
+            time.sleep(0.5)
+        time.sleep(2)
+        agent.ssh("glos key 0x38:down,0x1F,0x38:up")        # Alt+S: the Saver list
+        agent.ssh("glos key 0x150")                          # down: stars
+        t0 = time.time()
+        small = None
+        while time.time() - t0 < 40 and not small:
+            small = re.search(r'^window \d+ shown bare at (\d+),(\d+) 192x144 "', agent.ssh("glos desk")[1].replace("\r", ""), re.M)
+            time.sleep(0.5)
+        if matrox:
+            checks["preview"] = bool(small) and apps() == 2
+            if small:                           # (stars in it: lit pixels on black where its window is)
+                time.sleep(2)
+                pic = shot("preview")
+                x0, y0 = int(small.group(1)), int(small.group(2))
+                n = sum(1 for y in range(y0, y0 + 144) for x in range(x0, x0 + 192)
+                        if pic and pic[2][(y * pic[0] + x) * 3:(y * pic[0] + x) * 3 + 3] != b"\0\0\0")
+                checks["preview-stars"] = 5 < n < 6000
+                if not checks["preview-stars"]:
+                    info += " preview-lit=%d" % n
+        else:
+            checks["no-preview"] = not small and apps() == 1
+        agent.ssh("glos key 0x1D:down,0x0F,0x1D:up")        # Ctrl+Tab: another page, and the preview is over
+        t0 = time.time()
+        while time.time() - t0 < 40 and apps() > 1:
+            time.sleep(0.5)
+        checks["preview-over"] = apps() == 1
+        agent.ssh("glos key 0x01")                           # Esc: Cancel, nothing set
+        checks["cp-ended"] = cp.wait(timeout=120) == 0
+        time.sleep(1)
         # The program gone: the blank saver, whatever the card.
         checks["gone"] = agent.ssh("DEL C:\\TEST\\STARS.SCR")[0] == 0
         n0 = agent.log().count("GLOS-IDLE saver off")

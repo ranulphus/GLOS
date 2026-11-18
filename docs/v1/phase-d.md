@@ -384,11 +384,19 @@ The steps:
 - **Seen on Loop A** (bf6, G200, 640 by 480 at 16 bits): the program's window up 115 ms after the saver came
   on; about 1500 lit pixels on black, another picture a moment later; a key ends it and the desktop above the
   bar is pixel for pixel as it was.
-- **Not done yet:** the Control Panel's Saver page (the list and the preview); the other savers; STARS.SCR in
-  the packages, the floppy and the benches' update; the software renderer's window (DOS-GL's B3), without
-  which every other card and depth has the blank saver.
+- **The Control Panel's Saver page shows the saver chosen, running small** (`apps/control/status.c`, the
+  toolkit's `gui_preview`): the saver's own program started with `/P 192 144`, its window taken into the page.
+  Only while the Saver page is the one shown, and nothing for the blank saver; another saver chosen ends the
+  one before. The picture's place is held at the saver's own size, since a DOS-GL window can't follow a
+  resize. Where the program can't draw, or isn't there, the place says "Ended". (The program's path is written
+  as DOS writes one: DJGPP's `argv[0]` has `/` for `\`, and the agent takes a `/` as where a command's
+  switches begin.)
+- **Not done yet:** the other savers; each saver's own settings; STARS.SCR in the packages, the floppy and the
+  benches' update; the software renderer's window (DOS-GL's B3), without which every other card and depth has
+  the blank saver.
 - **Tests:** Loop A `desk` suite's saver case: the G200 (the program shown, moving, ended by a key, the
-  desktop as it was), the S3 (code 3, the blank saver, black), and the program deleted (code 126, blank).
+  desktop as it was; in the Control Panel its window bare, 192 by 144, stars in it, ended when another page is
+  shown), the S3 (code 3, the blank saver, black; no preview), and the program deleted (code 126, blank).
 
 ### D7. Background apps (`[services]`)
 

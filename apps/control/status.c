@@ -14,6 +14,11 @@
  * The USB page: GLOS's USB controllers and what is plugged into them, as `glos usb` says it (SYS's STAT), read
  * every two seconds: a pad or a keyboard plugged in is there a moment later.
  *
+ * The Saver page: the saver its list has chosen, running small in the page: its own program, started with /P and
+ * the picture's size, its window taken into the page (the toolkit's gui_preview). Only while the page is the one
+ * shown; the blank saver has nothing to show. Where the program can't draw (DOS-GL has no window on this card or
+ * at this depth) it ends at once, and the picture says "Ended".
+ *
  * The Sound page: Test sound plays two notes through the mixer at the volume that is set, and says so, or that
  * there is no card GLOS can play through. */
 #include <stdio.h>
@@ -239,6 +244,64 @@ void status_add_usb(struct gui_widget *page)
         usb[i] = gui_label(page, "");
 }
 
+/* ---- the saver, running small */
+
+#define SV_W 192
+#define SV_H 144
+
+static struct gui_widget *sv_view, *sv_choice, *sv_tabs;
+static const char *const *sv_names;
+static char sv_home[80], sv_seen[16];
+static int sv_page;
+
+static void saver_poll(void)
+{
+    const char *name;
+    char cmd[160], up[16];
+    int v, i;
+    if (!sv_view)
+        return;
+    v = gui_value(sv_choice);
+    name = gui_tabs_get(sv_tabs) == sv_page && v >= 0 && sv_names[v] ? sv_names[v] : "";    /* (none on another page) */
+    if (!strcmp(name, sv_seen))
+        return;
+    snprintf(sv_seen, sizeof sv_seen, "%s", name);
+    gui_preview_stop(sv_view);
+    if (!name[0] || !strcmp(name, "blank"))
+        return;
+    for (i = 0; name[i] && i < (int)sizeof up - 1; i++)
+        up[i] = (char)(name[i] >= 'a' && name[i] <= 'z' ? name[i] - 32 : name[i]);
+    up[i] = 0;
+    snprintf(cmd, sizeof cmd, "%s%s.SCR /P %d %d", sv_home, up, SV_W, SV_H);
+    gui_preview_run(sv_view, cmd);
+}
+
+/* The Saver page's picture, under its settings: for the saver's list (whose values are `values`, NULL-ended); the
+   savers' programs are beside this one (argv0). */
+void status_add_saver(struct gui_widget *tabs, int page_n, struct gui_widget *page, struct gui_widget *choice,
+                      const char *const *values, const char *argv0)
+{
+    struct gui_widget *row;
+    const char *p, *slash = NULL;
+    int i;
+    for (p = argv0; *p; p++)
+        if (*p == '\\' || *p == '/' || *p == ':')
+            slash = p;
+    snprintf(sv_home, sizeof sv_home, "%.*s", slash ? (int)(slash - argv0 + 1) : 0, argv0);
+    for (i = 0; sv_home[i]; i++)                /* (as DOS writes a path: DJGPP's argv[0] has / for \, and a / in a
+                                                   command is where its switches begin) */
+        if (sv_home[i] == '/')
+            sv_home[i] = '\\';
+    sv_tabs = tabs;
+    sv_page = page_n;
+    sv_choice = choice;
+    sv_names = values;
+    row = gui_hbox(page, 0, 0);                 /* (its own size and no wider: the saver's picture is that size) */
+    sv_view = gui_preview(row);
+    gui_size(sv_view, SV_W + 2, SV_H + 2);
+    gui_space(row, 0, 0);
+}
+
 /* ---- the network */
 
 void status_poll(void)
@@ -251,6 +314,7 @@ void status_poll(void)
     pads_poll();
     sound_poll();
     usb_poll();
+    saver_poll();
     if (!net[0] || (last && now - last < 1000))
         return;
     last = now ? now : 1;
