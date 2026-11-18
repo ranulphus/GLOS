@@ -94,6 +94,13 @@ The default mapping, overridable with `[joystick] map=`:
 - **With a second pad**, pad 2 becomes joystick B (its left stick → B's X/Y, its A and B → B1 and B2), and pad 1
   keeps A's axes and buttons A1 and A2.
 - Triggers are unmapped by default.
+- **`[joystick] map`** (phase D, 2026-11-18; the Control Panel's Mapping): eight words that say what of a pad
+  drives the port: for A's X and Y and B's X and Y an axis of the pad's (`lx`, `ly`, `rx`, `ry`; a `-` before it
+  turns it round; `none` leaves it at its middle), then for the buttons A1, A2, B1 and B2 a button of the pad's
+  by its number (1 to 16; `none`). The rule is `lx ly rx ry 1 2 3 4`; a left-handed pad is `rx ry lx ly 1 2 3 4`,
+  a flight stick's pull-back `lx -ly rx ry 1 2 3 4`. A setting that is not eight such words is not taken (the
+  rule holds, and the log says `GLOS-JOY map not taken`). With two pads each is mapped by the same words (the
+  first two axes, the first two buttons).
 
 GLOS apps get the same virtual port (D48 changes with it). Joystick events in the GLOS API (PRD §10) come later,
 outside this plan.

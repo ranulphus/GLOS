@@ -609,7 +609,7 @@ The steps:
 | **D2** the tray | GLOS's own icons (volume, network, pads, a remote session), its notifications (a pad, the network, an app not answering, a scheduled run that failed, a disk nearly full: the shell's), the overflow, the held count | (nothing) |
 | **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes |
 | **D4** the wallpaper | A picture in four styles, drawn by the shell | (its chooser and preview are D5's, done) |
-| **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list and the startup programs'; the Secrets page (the store's state, Unlock, the master password in GLOS's own dialog) | The pads' mapping; USB as a tree; the shared secrets' grants as a list; icons in the list |
+| **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list and the startup programs'; the Secrets page (the store's state, Unlock, the master password in GLOS's own dialog) | A page of its own for the pads' mapping (today: one line of eight words); USB as a tree; the shared secrets' grants as a list; icons in the list |
 | **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES, TEXT, OBJECTS and MAZE (the five of the plan), on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word, the savers' speed and detail | (the pipes' joints and such: not planned); their speed measured where the software renderer draws them |
 | **D7** background apps | `[services] run`, started again when they end, `glos services`, refused if no app | A folder or a user for each |
 | **D8** the task manager | Monitor's Services page with Stop and Start; Switch To; the Windows page with Go To; each app's share of the processor | Sessions and streams; SYS's structures for NET, AUDIO and USB |
@@ -618,8 +618,9 @@ The steps:
 
 - **Tiles' groups and sizes** (D3): the pins' lines of START.CFG gain a group's name and a size; the tiles' area
   lays out by group. Not begun.
-- **The pads' mapping** (D5): `[joystick] map` is in the gamepad plan but not in the kernel (vjoy.c reads port
-  and range alone): the kernel first, then a page with a row a button.
+- **The pads' mapping** (D5): done as a setting (`[joystick] map`, eight words: docs/gamepad.md "Sources and
+  mapping"; the Joystick page's Mapping line, beside the pads' picture that shows what each does). A page that
+  asks "press the button for A1" is not written.
 - **USB as a tree** (D5): SYS's STAT needs USB as structures (a controller, a hub, a device, its parent), which
   D8 wants too; the page then draws a tree with each device's details.
 - **The task manager's other views** (D8): the sessions, the sound's streams and the network's connections, from

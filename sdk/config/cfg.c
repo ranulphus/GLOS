@@ -43,6 +43,9 @@ const struct cfg_key cfg_schema[] = {
       "is used otherwise; virtual: always GLOS's; off: always the PC's" },
     { "joystick", "range", CFG_NUMBER, CFG_NOW, 100, 10000, 0, "1124", "Axis &range (microseconds)",
       "How long an axis's one-shot runs at its far end (24 at the near end): 1124 as a 100 kΩ stick" },
+    { "joystick", "map", CFG_TEXT, CFG_NOW, 0, 47, "line", "lx ly rx ry 1 2 3 4", "&Mapping",
+      "What of a pad drives the port: for A's X and Y and B's X and Y one of lx ly rx ry (-ly: the other way; none), "
+      "then for the buttons A1 A2 B1 B2 the pad's button's number (1 to 16; none)" },
     /* [usb]: GLOS's own USB stack (docs/gamepad.md) */
     { "usb", "enabled", CFG_CHOICE, CFG_RESTART, 0, 0, "on|off", "on", "&USB",
       "GLOS drives the PC's USB controllers itself (UHCI) and finds what is plugged in; off: they are left to the "

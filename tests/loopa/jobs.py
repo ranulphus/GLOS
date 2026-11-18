@@ -4758,6 +4758,16 @@ def joy_case(profile, vcard, card):
         checks["cfg-auto"] = agent.ssh("glos config set joystick port auto")[0] == 0 \
             and agent.ssh("glos joy")[1].startswith("joy port=real ")
         checks["bad"] = agent.ssh("glos joy a=300,1")[0] == 2 and agent.ssh("glos joy buttons=12")[0] == 2
+        # (phase D) a USB pad through [joystick] map: as a rule; the sticks and the buttons moved about, an axis the
+        # other way round; a setting that is not a map is not taken
+        agent.ssh("glos joy pad=0,10,20,30,40,5")
+        checks["pad"] = " source=usb a=10,20 b=30,40 buttons=1010 " in agent.ssh("glos joy")[1]
+        checks["map"] = agent.ssh("glos config set joystick map rx -ry lx ly 2 1 none 3")[0] == 0 \
+            and " source=usb a=30,215 b=10,20 buttons=0101 " in agent.ssh("glos joy")[1]
+        checks["map-not"] = agent.ssh("glos config set joystick map lx ly")[0] == 0 \
+            and " source=usb a=10,20 b=30,40 buttons=1010 " in agent.ssh("glos joy")[1]
+        agent.ssh("glos config unset joystick map")
+        agent.ssh("glos joy pad=0,off")
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
@@ -9427,7 +9437,8 @@ CONTROL_TEXTS = {"hostname": "cptest", "start": "NOTEPAD.EXE", "console": "C:\\K
                  "autoexec": "C:\\AUTOEXEC.BAT", "dir": "C:\\CP", "blaster": "A220 I7 D1 H5",
                  "env": "CPA=1\nPATH=C:\\A;C:\\B", "server": "time.example.org:1230",
                  "zone": "CET-1CEST,M3.5.0,M10.5.0/3", "stub_page": "D800", "wallpaper": "C:\\CP\\WALL.PNG",
-                 "run": "NOSVC.EXE /Q"}     # (a service that isn't there: tried, and tried again later)
+                 "run": "NOSVC.EXE /Q",     # (a service that isn't there: tried, and tried again later)
+                 "map": "rx ry lx -ly 2 1 4 none"}
 
 
 def cfg_pages():

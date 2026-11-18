@@ -66,21 +66,90 @@ static struct {
 
 static const char *const how_name[] = { "tsc", "pit", "reads" };
 
+/* [joystick] map (phase D): what of a pad drives the port. Eight words: for A's X and Y and B's X and Y an axis of
+   the pad's (lx, ly, rx, ry; a "-" before it: the other way round; none: its middle), then for the buttons A1,
+   A2, B1 and B2 a button of the pad's by its number (1 to 16; none). "lx ly rx ry 1 2 3 4" as a rule, and
+   whenever the setting is not eight such words. With two pads the second is joystick B by the same words as the
+   first is A (the first two axes, the first two buttons). */
+static struct {
+    u8 axis[4];                         /* 0 none, 1 lx, 2 ly, 3 rx, 4 ry */
+    u8 inv[4];
+    u8 btn[4];                          /* 0 none, 1 to 16 */
+} map = { { 1, 2, 3, 4 }, { 0, 0, 0, 0 }, { 1, 2, 3, 4 } };
+
+static u8 axis_of(const struct joy_pad *p, int k)
+{
+    u8 v = map.axis[k] == 1 ? p->lx : map.axis[k] == 2 ? p->ly : map.axis[k] == 3 ? p->rx : map.axis[k] == 4 ? p->ry : 128;
+    return map.inv[k] ? (u8)(255 - v) : v;
+}
+
+static u8 btn_of(const struct joy_pad *p, int k)
+{
+    return (u8)(map.btn[k] && (p->buttons >> (map.btn[k] - 1) & 1));
+}
+
+static void map_read(void)
+{
+    static const u8 rule_axis[4] = { 1, 2, 3, 4 }, rule_btn[4] = { 1, 2, 3, 4 };
+    char m[64];
+    const char *p;
+    int k = 0, bad = 0;
+    memcpy(map.axis, rule_axis, 4);
+    memset(map.inv, 0, 4);
+    memcpy(map.btn, rule_btn, 4);
+    m[0] = 0;
+    kcfg_get("joystick", "map", m, sizeof m);
+    for (p = m; !bad;) {
+        char w[8];
+        const char *q = w;
+        u32 n = 0;
+        while (*p == ' ')
+            p++;
+        if (!*p)
+            break;
+        for (; *p && *p != ' '; p++)
+            if (n < sizeof w - 1)
+                w[n++] = *p;
+        w[n] = 0;
+        if (k >= 8) {
+            bad = 1;
+        } else if (k < 4) {
+            int inv = *q == '-';
+            q += inv;
+            map.inv[k] = (u8)inv;
+            map.axis[k] = !strcmp(q, "lx") ? 1 : !strcmp(q, "ly") ? 2 : !strcmp(q, "rx") ? 3 : !strcmp(q, "ry") ? 4 : 0;
+            bad = !map.axis[k] && (inv || strcmp(q, "none"));
+        } else {
+            for (n = 0; *q >= '0' && *q <= '9' && n <= 16; q++)
+                n = n * 10 + (u32)(*q - '0');
+            map.btn[k - 4] = (u8)n;
+            bad = strcmp(w, "none") ? (*q || n < 1 || n > 16) : 0;
+        }
+        k++;
+    }
+    if (bad || (k && k != 8)) {                 /* not a map: the rule (said without alarm: a setting half typed) */
+        memcpy(map.axis, rule_axis, 4);
+        memset(map.inv, 0, 4);
+        memcpy(map.btn, rule_btn, 4);
+        kprintf("GLOS-JOY map not taken: \"%s\"\n", m);
+    }
+}
+
 /* The USB pads onto the port. */
 static void from_pads(struct joy_state *s)
 {
     const struct joy_pad *a = j.have_pad[0] ? &j.pad[0] : &j.pad[1], *b = j.have_pad[0] && j.have_pad[1] ? &j.pad[1] : 0;
-    s->axis[0] = a->lx, s->axis[1] = a->ly;
+    s->axis[0] = axis_of(a, 0), s->axis[1] = axis_of(a, 1);
     s->present = 0x3;
     if (b) {
-        s->axis[2] = b->lx, s->axis[3] = b->ly;
+        s->axis[2] = axis_of(b, 0), s->axis[3] = axis_of(b, 1);
         s->present |= 0xC;
-        s->buttons = (u8)((a->buttons & 3) | (b->buttons & 3) << 2);
+        s->buttons = (u8)(btn_of(a, 0) | btn_of(a, 1) << 1 | btn_of(b, 0) << 2 | btn_of(b, 1) << 3);
     } else {
-        s->axis[2] = a->rx, s->axis[3] = a->ry;
-        if (a->right)
-            s->present |= 0xC;
-        s->buttons = (u8)(a->buttons & 0xF);
+        s->axis[2] = axis_of(a, 2), s->axis[3] = axis_of(a, 3);
+        if ((map.axis[2] > 2 || map.axis[3] > 2) ? a->right : (map.axis[2] || map.axis[3]))
+            s->present |= 0xC;                  /* (B is there by the stick it is mapped from) */
+        s->buttons = (u8)(btn_of(a, 0) | btn_of(a, 1) << 1 | btn_of(a, 2) << 2 | btn_of(a, 3) << 3);
     }
 }
 
@@ -124,6 +193,7 @@ void joy_config(void)
         if (!*p && n >= 100 && n <= 10000)
             j.range_us = n - 24;
     }
+    map_read();
     update();
 }
 
