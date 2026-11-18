@@ -33,6 +33,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 APPS = ["FILES", "TERM", "NOTEPAD", "CALC", "IMAGES", "MONITOR", "CONTROL", "PKG", "FETCH"]
+SAVERS = ["STARS"]                      # (apps/savers: NAME.SCR beside GLOS.EXE)
 
 AUTOEXEC_LINES = [":glosrun", "C:\\GLOS\\GLOS.EXE", "IF ERRORLEVEL 200 GOTO glosrun"]
 # A new disk (docs/v1/shell.md, S4d): FreeDOS's kernel with GLOS as its shell, which runs this AUTOEXEC.BAT itself.
@@ -189,6 +190,7 @@ def glos_files(args):
     files = [("build/ow/GLOS.EXE", "GLOS.EXE"), ("build/kernel/GLOSK.BIN", "GLOSK.BIN"),
              ("build/glos/COMMAND.COM", "COMMAND.COM")]         # (GLOS's own, for programs that shell out: S4c)
     files += [("build/apps/%s.EXE" % a, a + ".EXE") for a in APPS + ["SSH", "SFTP", "SSHKEY"]]
+    files += [("build/apps/%s.SCR" % v, v + ".SCR") for v in SAVERS]   # (the savers' programs: phase D)
     files += [("build/glos/CERTS.DAT", "CERTS.DAT"), ("sdk/gui/fonts/SMOOTH.DAT", "SMOOTH.DAT"),
               ("sdk/gui/fonts/FONTS.DAT", "FONTS.DAT"),         # (the UI's small and large fonts: toolkit 2)
               ("sdk/gui/fonts/ICONS.DAT", "ICONS.DAT"),         # (GLOS's colour icons, by name)
