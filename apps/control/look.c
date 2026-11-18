@@ -7,12 +7,15 @@
  * looked at a few times a second (look_poll), made again when either has changed and the user has stopped typing. */
 #include "../files/wallmake.h"
 
+#include <strings.h>
+
 #include "control.h"
 
 #define PW 80                           /* (what the Desktop page has room for beside its settings at 640x480) */
 #define PH 60
 
 static struct gui_window *owner;
+static char su_home[100];               /* this program's folder (GLOS's own programs are beside it) */
 static struct gui_widget *field, *choice, *view;
 static const char *const *styles;       /* the choice's values, as the schema has them */
 static unsigned small[PW * PH];
@@ -103,17 +106,135 @@ void look_poll(void)
     }
 }
 
-/* The picture and its button in `side`, for the wallpaper's field and its style's list (whose values are
-   `values`, NULL-ended). */
-void look_add(struct gui_widget *side, struct gui_window *win, struct gui_widget *path, struct gui_widget *style,
-              const char *const *values)
+/* ---- the programs started with the desktop ([desktop] start: names with spaces between them), as a list
+
+   Startup...: a dialog with the field's programs one a row; Add... chooses one with the file dialog (one beside
+   this program is written by its name alone, as the setting has GLOS's own), Remove takes the chosen row out; OK
+   writes the list back in the field, Cancel leaves it. */
+
+#define SU_MAX 12
+#define SU_ADD    10                   /* (its buttons: not GUI_OK's and GUI_CANCEL_R's numbers) */
+#define SU_REMOVE 11
+
+static struct gui_widget *su_field, *su_list;
+static struct gui_window *su_win;
+static char su_item[SU_MAX][80];
+static int su_n;
+
+static void su_fill(void)
 {
+    int i, keep = gui_list_get(su_list);
+    gui_list_clear(su_list);
+    for (i = 0; i < su_n; i++) {
+        const char *cells[1] = { su_item[i] };
+        gui_list_add(su_list, cells, NULL, NULL);
+    }
+    if (su_n)
+        gui_list_set(su_list, keep >= 0 && keep < su_n ? keep : su_n - 1);
+}
+
+static void su_button(struct gui_widget *b, int what)
+{
+    static const char *const filters[] = { "Programs|*.EXE;*.COM;*.BAT", "Every file|*.*", NULL };
+    (void)what;
+    if (b->id == SU_ADD && su_n < SU_MAX) {     /* Add... */
+        struct gui_file_opts o;
+        char path[160], *name;
+        memset(&o, 0, sizeof o);
+        o.filters = filters;
+        path[0] = 0;
+        if (gui_file_dialog_ex(su_win, GUI_T("Add a Program"), 0, path, sizeof path, &o) != 1 || !path[0])
+            return;
+        if (strchr(path, ' ')) {
+            gui_message(su_win, GUI_T("Start With The Desktop"), GUI_T("A program whose path has a space can't be listed here."),
+                        GUI_MB_OK);
+            return;
+        }
+        name = strrchr(path, '\\');
+        if (name && su_home[0] && (size_t)(name - path) == strlen(su_home) && !strncasecmp(path, su_home, strlen(su_home)))
+            snprintf(su_item[su_n++], sizeof su_item[0], "%s", name + 1);      /* (beside GLOS: its name alone) */
+        else
+            snprintf(su_item[su_n++], sizeof su_item[0], "%s", path);
+        su_fill();
+    } else if (b->id == SU_REMOVE) {            /* Remove */
+        int r = gui_list_get(su_list), i;
+        if (r < 0 || r >= su_n)
+            return;
+        for (i = r; i + 1 < su_n; i++)
+            strcpy(su_item[i], su_item[i + 1]);
+        su_n--;
+        su_fill();
+    } else if (b->id == GUI_OK || b->id == GUI_CANCEL_R) {
+        gui_end_modal(su_win, b->id);
+    }
+}
+
+static void startup(struct gui_widget *b, int what)
+{
+    struct gui_widget *box, *row;
+    const char *p = gui_get_text(su_field);
+    char line[256];
+    int i;
+    size_t n = 0;
+    (void)b, (void)what;
+    for (su_n = 0; *p && su_n < SU_MAX;) {      /* the field's programs */
+        size_t k = 0;
+        while (*p == ' ')
+            p++;
+        for (; *p && *p != ' '; p++)
+            if (k < sizeof su_item[0] - 1)
+                su_item[su_n][k++] = *p;
+        su_item[su_n][k] = 0;
+        if (k)
+            su_n++;
+    }
+    su_win = gui_window(GUI_T("Start With The Desktop"), 300, 200, GUI_W_DIALOG);
+    su_win->owner = owner;
+    box = gui_vbox(su_win->root, 6, 8);
+    gui_grow(box, 1);
+    gui_label(box, GUI_T("Started each time the desktop comes on:"));
+    su_list = gui_list(box, 1, NULL, NULL);
+    gui_grow(su_list, 1);
+    row = gui_hbox(box, 6, 0);
+    gui_button(row, GUI_T("&Add..."), su_button, SU_ADD);
+    gui_button(row, GUI_T("&Remove"), su_button, SU_REMOVE);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("OK"), su_button, GUI_OK)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), su_button, GUI_CANCEL_R)->flags |= GUI_CANCEL;
+    su_fill();
+    if (gui_modal(su_win) == GUI_OK) {
+        line[0] = 0;
+        for (i = 0; i < su_n; i++)
+            n += (size_t)snprintf(line + n, sizeof line - n, "%s%s", n ? " " : "", su_item[i]);
+        gui_set_text(su_field, line);
+    }
+    gui_close(su_win);
+    su_win = NULL;
+}
+
+/* The picture and its button in `side`, for the wallpaper's field and its style's list (whose values are
+   `values`, NULL-ended); and Startup..., for the field of the programs started with the desktop (`start`). */
+void look_add(struct gui_widget *side, struct gui_window *win, struct gui_widget *path, struct gui_widget *style,
+              const char *const *values, struct gui_widget *start, const char *argv0)
+{
+    const char *sl = NULL, *q;
+    size_t i;
+    for (q = argv0; *q; q++)                    /* this program's folder, as DOS writes it (GLOS's own are there) */
+        if (*q == '\\' || *q == '/')
+            sl = q;
+    snprintf(su_home, sizeof su_home, "%.*s", sl ? (int)(sl - argv0) : 0, argv0);
+    for (i = 0; su_home[i]; i++)
+        if (su_home[i] == '/')
+            su_home[i] = '\\';
+    su_field = start;
     owner = win;
     field = path;
     choice = style;
     styles = values;
     view = gui_canvas(side, PW + 2, PH + 2, draw, NULL);
     gui_button(side, GUI_T("&Choose..."), choose, 0);
+    if (start)
+        gui_button(side, GUI_T("Start&up..."), startup, 0);
     seen_path[0] = 1, seen_path[1] = 0;         /* (nothing seen: the first look makes it) */
     still = 99;
 }

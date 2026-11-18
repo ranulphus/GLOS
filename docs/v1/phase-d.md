@@ -320,6 +320,10 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
 - **The time zone is chosen by place:** a list of 28 places on the Date and Time page; one chosen writes its
   POSIX string in the Time zone setting's field (the setting stays that string), and the list shows the place
   whose string the field has. Every string of the list is one `tz_parse` takes.
+- **Startup...** (beside the Desktop page): the programs started with the desktop (`[desktop] start`) as a
+  list in a dialog, with Add... (the file dialog; a program beside GLOS's own is written by its name alone, as
+  the setting has them) and Remove; OK writes the list back in the setting's field. A path with a space can't
+  be listed (the setting's programs have spaces between them).
 - **Not done yet:** the other grown pages (the sound devices and each stream's volume (the Mixer's, phase F), the pads' mapping, USB's devices as a tree with their
   details, Startup and default apps, Secrets);
   the Screensaver page's preview (D6); a preview of a theme not yet applied; icons in the list.
@@ -417,7 +421,9 @@ The steps:
 - **OBJECTS.SCR** (`apps/savers/objects.c`): fourteen blocks (cubes, slabs, bars) in seven colours come from
   far off towards the viewer, each turning about an axis of its own and drifting a little; one that has gone by
   starts again far off.
-- **Not done yet:** the maze; the savers' other settings (their speeds, the pipes' look); STARS.SCR in the packages, the floppy and the
+- **`[saver] speed`** (slow, normal, fast): the savers' clock at half, its own or twice the speed, for all of
+  them (`saver_ms` in `saver.h`), read when a saver starts.
+- **Not done yet:** the maze; the savers' own looks (the pipes' joints, the stars' number); STARS.SCR in the packages, the floppy and the
   benches' update; the software renderer's window (DOS-GL's B3), without which every other card and depth has
   the blank saver.
 - **Tests:** Loop A `desk` suite's saver case: the G200 (the program shown, moving, ended by a key, the
@@ -521,8 +527,8 @@ The steps:
 | **D2** the tray | GLOS's own icons (volume, network, pads, a remote session), its notifications (a pad, the network, an app not answering, a scheduled run that failed), the overflow, the held count | "Disk nearly full" |
 | **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes; "Recently added" |
 | **D4** the wallpaper | A picture in four styles, drawn by the shell | (its chooser and preview are D5's, done) |
-| **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list | The pads' mapping; USB as a tree; startup and default apps; Secrets (needs a call of its own for the master password: no shell line may carry it); icons in the list |
-| **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES, TEXT and OBJECTS, on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word | The maze; the savers' other settings; their speed measured where the software renderer draws them |
+| **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list and the startup programs' | The pads' mapping; USB as a tree; Secrets (needs a call of its own for the master password: no shell line may carry it); icons in the list |
+| **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES, TEXT and OBJECTS, on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word, the savers' speed | The maze; the savers' own looks; their speed measured where the software renderer draws them |
 | **D7** background apps | `[services] run`, started again when they end, `glos services`, refused if no app | A folder or a user for each |
 | **D8** the task manager | Monitor's Services page with Stop and Start; Switch To | The apps' windows, sessions, streams and the processor by program; SYS's structures for NET, AUDIO and USB |
 

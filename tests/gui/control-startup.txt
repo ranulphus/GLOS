@@ -1,0 +1,22 @@
+# The Control Panel's Startup dialog (apps/control/look.c; phase D, D5): the programs started with the desktop
+# ([desktop] start) as a list: two written in the field, the dialog opened, the last removed, OK: the field has
+# the one left. Add...'s file dialog opened and left. Cancel: nothing is set.
+run CONTROL.EXE desktop
+wait "Control Panel"
+key alt+s
+type NOTEPAD.EXE CALC.EXE
+key alt+u
+wait "Start With The Desktop"
+shot two "Start With The Desktop"
+key alt+r
+key alt+a
+wait "Add a Program"
+key esc
+gone "Add a Program"
+key tab tab enter
+gone "Start With The Desktop"
+shot one "Control Panel"
+key esc
+gone "Control Panel"
+expect CONTROL start
+expect CONTROL end

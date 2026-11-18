@@ -798,7 +798,7 @@ int main(int argc, char **argv)
     static const char *const heads[2] = { GUI_N("Kind"), GUI_N("Opened by") };
     static const int widths[2] = { 70, 200 };
     struct gui_widget *box, *page, *form, *row, *left, *b, *side = NULL;
-    struct ctl *wall = NULL, *style = NULL, *saver, *run, *zone;
+    struct ctl *wall = NULL, *style = NULL, *begin = NULL, *saver, *run, *zone;
     int s, i;
     if (gui_init(argc, argv) != 0) {
         printf("CONTROL no GLOS\n");
@@ -870,6 +870,8 @@ int main(int argc, char **argv)
                     wall = c;
                 if (!strcmp(sec, "desktop") && !strcmp(c->k->key, "wallpaper_style"))
                     style = c;
+                if (!strcmp(sec, "desktop") && !strcmp(c->k->key, "start"))
+                    begin = c;
             }
         if (!strcmp(sec, "net"))
             status_add_net(page);               /* (how the network is now, under its settings: status.c) */
@@ -893,7 +895,7 @@ int main(int argc, char **argv)
             status_add_saver(tabs, s, page, saver->w, saver->choice, argv[0]);  /* (the saver chosen, running small) */
     }
     if (side && wall && style)
-        look_add(side, win, wall->w, style->w, style->choice);
+        look_add(side, win, wall->w, style->w, style->choice, begin ? begin->w : NULL, argv[0]);
     help = gui_label(box, "");
     when_label = gui_label(box, "");
     row = gui_hbox(box, 6, 0);
