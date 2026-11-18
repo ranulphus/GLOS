@@ -1144,6 +1144,20 @@ static int notepad_ended;
 int glos_sys_stat(unsigned kind, void *out, unsigned room, unsigned *length, unsigned *count)
 {
     unsigned s = H.clock / 1000;
+    if (kind == GLOS_STAT_USB) {                /* (made up: a hub with a keyboard and a pad on it, and a mouse) */
+        static const char usb[] = "uhci 00:07.2 io=ff00 ports=2 frame=100\n"
+            "port=1 addr=1 speed=full id=0409:0058 is=hub reports=0 errors=0\n"
+            "port=1.1 addr=2 speed=low id=046d:c31c is=keyboard reports=12 errors=0\n"
+            "port=1.3 addr=3 speed=full id=045e:028e is=xbox360 pad=1 reports=340 errors=0\n"
+            "port=2 addr=4 speed=low id=046d:c077 is=mouse reports=81 errors=0\n";
+        unsigned n = sizeof usb - 1 < room ? sizeof usb - 1 : room;
+        memcpy(out, usb, n);
+        if (length)
+            *length = sizeof usb - 1;
+        if (count)
+            *count = 5;
+        return sizeof usb - 1 > room ? GLOS_E_ROOM : 0;
+    }
     if (kind == GLOS_STAT_SERVICES) {           /* (no background apps on the host: what glos services says then) */
         static const char none[] = "no services ([services] run)\n";
         unsigned n = sizeof none - 1 < room ? sizeof none - 1 : room;

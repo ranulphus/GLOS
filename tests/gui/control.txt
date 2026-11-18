@@ -12,7 +12,7 @@ shot cp-input "Control Panel"
 key ctrl+tab
 shot cp-joystick "Control Panel"
 key ctrl+tab
-shot cp-usb "Control Panel" 146 80 440 170
+shot cp-usb "Control Panel" 146 80 440 264
 key ctrl+tab
 shot cp-sound "Control Panel"
 key ctrl+tab
