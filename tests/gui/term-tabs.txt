@@ -1,0 +1,31 @@
+#loopa-run-only
+# The Terminal's tabs (apps/term; phase E, docs/v1/apps/term.md): a second tab by Ctrl+Shift+T, a shell of its own
+# in it; closed by Ctrl+Shift+W; a third, closed by its shell's EXIT; the first tab's shell and what it kept are
+# as they were; its EXIT ends the Terminal. (On GLOS alone: the host's shim has one shell's session; the tabs'
+# strip itself is in term.txt's pictures.)
+run TERM.EXE -log
+wait "Terminal"
+type echo one\n
+key ctrl+shift+t
+wait "Shell 2 - Terminal"
+type echo two\n
+pause 1500
+key ctrl+shift+w
+wait "Terminal"
+type echo back\n
+pause 1000
+key ctrl+shift+t
+wait "Shell 3 - Terminal"
+type exit\n
+wait "Terminal"
+pause 1000
+type echo last\n
+pause 1000
+type exit\n
+gone "Terminal"
+expect TERM tab new tabs=2
+expect TERM tab closed tabs=1
+expect TERM| one
+expect TERM| back
+expect TERM| last
+expect TERM end

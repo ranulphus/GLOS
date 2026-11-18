@@ -38,7 +38,25 @@ Plan: `docs/v1/apps/calculator.md`. Three modes, chosen in View; a mode's change
   `calc-prog` and `calc-hist`, on the host and on Loop A (three machines).
 - **Not done:** units (optional in the plan); the programmer mode has no memory keys and no history.
 
+## The Terminal (2026-11-18): tabs
+
+Plan: `docs/v1/apps/term.md`. The first of its parts.
+
+- **Tabs:** each is a terminal (the toolkit's widget) with a shell's session of its own, named by the title its
+  programs set ("Shell 2" until one does); the window's title is the shown tab's. The strip's "+", File's New
+  Tab or Ctrl+Shift+T opens one; a tab's close box, Close Tab or Ctrl+Shift+W closes it and ends its session;
+  EXIT in a shell closes its tab, and the last tab's end is the Terminal's, as it was. Eight at most. The
+  window is as much larger as the strip takes: a terminal is 80 by 25 still.
+- **-log** (the suites') writes the first tab's lines; its last words are written when the window closes, before
+  its widgets go (Alt+F4 with -log once read a terminal already freed).
+- **Tests:** Loop A `term-tabs` (a second tab, a command in it, closed by the key; a third, closed by its
+  shell's EXIT; the first tab's shell and what it kept as they were), with `term`, `term-run` and `terminal` as
+  before, on three machines. On the host the strip is in `term`'s pictures; the host's shim has one shell's
+  session, so `term-tabs` is GLOS's alone.
+- **Not done yet:** saved connections, the SFTP pane, the scroll-back's length and search, fonts and colour
+  schemes, more of xterm (256 colours, the mouse, bracketed paste), splits, tabs dragged along the strip.
+
 ## What is next
 
-Term's tabs and saved sessions; Notepad (tabs, find and replace, highlighting); Files (toolbar, address bar,
+The Terminal's saved connections and the rest of its plan; Notepad (tabs, find and replace, highlighting); Files (toolbar, address bar,
 views, thumbnails, search, archives as folders); Images and Paint. Each by its plan in `docs/v1/apps/`.
