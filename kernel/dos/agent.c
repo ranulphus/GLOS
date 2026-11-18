@@ -75,6 +75,7 @@ struct ring {
 struct agent_job {
     volatile u8 state;
     u8 cand;                                    /* the next program to try */
+    u8 missing;                                 /* its program was found nowhere: COMMAND.COM was left to say so */
     u8 shell;                                   /* running as COMSPEC /C */
     u8 direct;                                  /* glos run --direct */
     u8 exclusive;                               /* glos run: 1 --exclusive, 2 --app */
@@ -140,6 +141,7 @@ static volatile u32 exit_at;
 static volatile u8 exit_req, exit_code;
 static volatile u32 ssh_told_at;                /* SSH's turns when it last took a job's end to tell its client ... */
 static volatile u8 ssh_told;                    /* ... if it ever did */
+static void (*done_hook)(u32 seq, u32 code);    /* agent_on_done()'s */
 static u32 done_at;                             /* when a job last ended */
 static void (*kick_ssh)(void);
 
@@ -171,7 +173,7 @@ int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, cons
     j->cmd[i] = 0;
     j->owner = owner;
     j->result = 0;
-    j->cand = 0;
+    j->cand = j->missing = 0;
     j->shell = 0;
     j->kill = 0;
     j->app = 0;
@@ -267,7 +269,7 @@ int agent_post_job(void *app, const struct krun *r, const struct agent_opts *o, 
     j->env[i + 1 < sizeof j->env ? i + 1 : i] = 0;
     j->owner = NULL;
     j->result = 0;
-    j->cand = j->shell = 0;
+    j->cand = j->shell = j->missing = 0;
     j->kill = 0;
     j->app = 0;
     j->direct = (u8)(o && o->direct);
@@ -752,6 +754,10 @@ u8 agent_exit_code(void) { return exit_code; }
 /* GLOS has been asked to leave (and has not been refused): nothing new is to be started (kernel/core/services.c). */
 int agent_exiting(void) { return exit_req; }
 
+/* Every job's end, told as it happens (the VM thread, or the app's own): its number and its exit code (126: it
+   couldn't be run). The schedule's runner listens for its own (kernel/core/schedule.c). */
+void agent_on_done(void (*fn)(u32 seq, u32 code)) { done_hook = fn; }
+
 /* ---- the VM thread's side (trap context) */
 
 static const char *const internal[] = {
@@ -1030,6 +1036,8 @@ static void finish(struct agent_job *j)
     j->state = J_DONE;
     kprintf("GLOS-AGENT done seq=%u code=%u via=%s%s\n", j->seq, result & 0xFF, j->shell ? "comspec" : j->path,
             (result & 0x10000) ? " cannot-run" : "");
+    if (done_hook)
+        done_hook(j->seq, (result & 0x10000) || j->missing ? 126 : result & 0xFF);
     if (running == j)
         running = NULL;
     if (j->debug) {
@@ -1114,6 +1122,7 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
                 goto exec;
             if (!j->keep) {
                 j->shell = 1;                   /* not found anywhere: COMMAND.COM says so */
+                j->missing = 1;
                 goto exec;
             }                                   /* (API 2.0's: its app is told it could not be run, code 126) */
         }
@@ -1297,6 +1306,8 @@ void agent_app_done(void *job, u32 result)
     done_at = timer_ticks();
     j->state = J_DONE;
     kprintf("GLOS-AGENT done seq=%u code=%u via=app\n", j->seq, result & 0xFF);
+    if (done_hook)
+        done_hook(j->seq, result & 0xFF);
     tell(j);
     if (j->detach)
         j->state = J_FREE;

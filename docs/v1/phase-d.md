@@ -490,12 +490,23 @@ The steps:
 - **Tests:** host and Loop A `monitor` (the fifth page, none there); by hand on Loop A with a service set: its
   row, Stop (stopped), Start (running again); the apps suite's `glos services START NAME`.
 
+### D2's leftover: a scheduled run that failed (2026-11-18)
+
+- The schedule's runner (`kernel/core/schedule.c`) remembers the runs it starts by their job numbers; the agent
+  tells of every job's end (`agent_on_done`), with its exit code, or 126 when its program was found nowhere
+  (COMMAND.COM was left to say so, and its own code is 0). A run that ends with anything but 0 is a line in the
+  log (`GLOS-SCHED failed name=NAME code=N`) and one of GLOS's notifications: "NAME" couldn't be run: its
+  program wasn't found, or "NAME" ended with an error (code N). The notification waits for a desktop on the
+  screen (a run at GLOS's start ends before the desktop is up).
+- **Tests:** by hand on Loop A (a schedule entry whose program isn't there: the log's line, the notification
+  18 s after the desktop came on); the api suite's schedule cases and the apps suite as before.
+
 ## Where phase D stands (2026-11-18)
 
 | Step | Done | Left |
 |---|---|---|
 | **D1** the task bar | Window and group menus, grouping, Alt+Tab's strip in the order of use, the calendar, the volume's slider, the bar at the top or hidden | A window's own 32-pixel icon |
-| **D2** the tray | GLOS's own icons (volume, network, pads, a remote session), its notifications, the overflow, the held count | "Disk nearly full" and "a scheduled run failed" |
+| **D2** the tray | GLOS's own icons (volume, network, pads, a remote session), its notifications (a pad, the network, an app not answering, a scheduled run that failed), the overflow, the held count | "Disk nearly full" |
 | **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes; "Recently added" |
 | **D4** the wallpaper | A picture in four styles, drawn by the shell | (its chooser and preview are D5's, done) |
 | **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card's own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server; the services' list | The card's details; the time zone as a list; the pads' mapping; USB as a tree; startup and default apps; Secrets; icons in the list |

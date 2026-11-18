@@ -22,6 +22,7 @@ void agent_exit(u32 delay_ticks, u8 code);      /* glos exit (code 0), glos rest
                                                    idle, this many ticks on, DOS's ERRORLEVEL the code */
 u8 agent_exit_code(void);
 int agent_exiting(void);                        /* asked to leave, and not refused */
+void agent_on_done(void (*fn)(u32 seq, u32 code));      /* told of every job's end (its code; 126: not run) */
 void agent_exit_cancel(void);                   /* that leave refused: GLOS stays (docs/upper-memory.md) */
 int agent_kill(void);                           /* glos kill: end the running job; -1 if none */
 int agent_kill_seq(u32 seq);                    /* glos kill SEQ: that job, running or waiting; -1 if none */
