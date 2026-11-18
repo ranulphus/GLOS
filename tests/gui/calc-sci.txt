@@ -1,0 +1,46 @@
+# The Calculator's scientific mode (apps/calc; phase E, docs/v1/apps/calculator.md): the order of operations and
+# brackets; a function of the number in the display; a power, a factorial; Inv and the angles' unit; a bracket
+# closed and a function of it; View's other mode and back.
+run CALC.EXE -s
+wait "Calculator"
+shot sci-start "Calculator"
+type 2+3*4=
+type (2+3)*4
+shot sci-bracket "Calculator"
+type =
+type 30s
+type 2^10=
+type 5!
+shot sci-fact "Calculator"
+key esc
+type 1is
+shot sci-asin "Calculator"
+key esc
+type 2*(1+2)s=
+key esc
+type 7m4=
+key alt+v s
+wait "Calculator"
+pause 500
+shot sci-standard "Calculator"
+type 3+4*5=
+key alt+v c
+wait "Calculator"
+pause 500
+type 3+4*5=
+shot sci-back "Calculator"
+key alt+f4
+gone "Calculator"
+expect CALC = 14
+expect CALC = 20
+expect CALC sin 0.5
+expect CALC = 1024
+expect CALC fact 120
+expect CALC asin 90
+expect CALC = 0.104671912485888
+expect CALC = 3
+expect CALC mode standard
+expect CALC = 35
+expect CALC mode scientific
+expect CALC = 23
+expect CALC end
