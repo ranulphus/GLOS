@@ -404,7 +404,11 @@ The steps:
   where they turn, each in its colour, its sides lit by which way they face, with a depth buffer; seven pipes to
   a picture, which is looked at for a moment and begun again; the box turns slowly. What the two savers do the
   same (the start, the frames' time, GLOS's word to end) is `apps/savers/saver.h`.
-- **Not done yet:** the maze, the flying objects and the 3D text; each saver's own settings; STARS.SCR in the packages, the floppy and the
+- **TEXT.SCR** (`apps/savers/text.c`): a word (GLOS) in solid letters made of cubes, five by seven from a small
+  table of capitals and digits; it swings from side to side about its upright, never so far that it can't be
+  read, tips a little, drifts across the screen and back, and its colour goes slowly round. The lit box the
+  pipes and the letters are made of is `saver_box` in `saver.h`.
+- **Not done yet:** the maze and the flying objects; each saver's own settings (the word, the speeds); STARS.SCR in the packages, the floppy and the
   benches' update; the software renderer's window (DOS-GL's B3), without which every other card and depth has
   the blank saver.
 - **Tests:** Loop A `desk` suite's saver case: the G200 (the program shown, moving, ended by a key, the

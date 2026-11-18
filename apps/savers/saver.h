@@ -106,6 +106,24 @@ static inline int saver_shown(void)
     return on;
 }
 
+/* A box from (x0, y0, z0) to (x1, y1, z1), between glBegin(GL_TRIANGLES) and glEnd(): each side the colour c
+   times how it is lit by the way it faces (from above and a little to the right and the front). */
+static inline void saver_box(float x0, float y0, float z0, float x1, float y1, float z1, const float *c)
+{
+    static const float lit[6] = { 0.78f, 0.62f, 1.00f, 0.38f, 0.88f, 0.50f };  /* +x -x +y -y +z -z */
+#define SAVER_SIDE(k, ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz) \
+    glColor3f(c[0] * lit[k], c[1] * lit[k], c[2] * lit[k]); \
+    glVertex3f(ax, ay, az), glVertex3f(bx, by, bz), glVertex3f(cx, cy, cz); \
+    glVertex3f(ax, ay, az), glVertex3f(cx, cy, cz), glVertex3f(dx, dy, dz);
+    SAVER_SIDE(0, x1, y0, z0, x1, y1, z0, x1, y1, z1, x1, y0, z1)
+    SAVER_SIDE(1, x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0)
+    SAVER_SIDE(2, x0, y1, z0, x0, y1, z1, x1, y1, z1, x1, y1, z0)
+    SAVER_SIDE(3, x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1)
+    SAVER_SIDE(4, x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1)
+    SAVER_SIDE(5, x0, y0, z0, x0, y1, z0, x1, y1, z0, x1, y0, z0)
+#undef SAVER_SIDE
+}
+
 static inline int saver_done(void)
 {
     dglShutdown();

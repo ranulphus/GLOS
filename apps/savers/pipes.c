@@ -103,23 +103,6 @@ static void grow(void)
     }
 }
 
-/* A box from (x0, y0, z0) to (x1, y1, z1), each side the colour times how it is lit. */
-static void box(float x0, float y0, float z0, float x1, float y1, float z1, const float *c)
-{
-    static const float lit[6] = { 0.78f, 0.62f, 1.00f, 0.38f, 0.88f, 0.50f };  /* +x -x +y -y +z -z */
-#define SIDE(k, ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz) \
-    glColor3f(c[0] * lit[k], c[1] * lit[k], c[2] * lit[k]); \
-    glVertex3f(ax, ay, az), glVertex3f(bx, by, bz), glVertex3f(cx, cy, cz); \
-    glVertex3f(ax, ay, az), glVertex3f(cx, cy, cz), glVertex3f(dx, dy, dz);
-    SIDE(0, x1, y0, z0, x1, y1, z0, x1, y1, z1, x1, y0, z1)
-    SIDE(1, x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0)
-    SIDE(2, x0, y1, z0, x0, y1, z1, x1, y1, z1, x1, y1, z0)
-    SIDE(3, x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1)
-    SIDE(4, x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1)
-    SIDE(5, x0, y0, z0, x0, y1, z0, x1, y1, z0, x1, y0, z0)
-#undef SIDE
-}
-
 static void frame(float turn, float aspect)
 {
     const float r = 0.17f, j = 0.25f, mid = (float)(N - 1) * 0.5f;
@@ -142,7 +125,7 @@ static void frame(float turn, float aspect)
             lo[k] = (a < b ? a : b) - w;
             hi[k] = (a > b ? a : b) + w;
         }
-        box(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2], tint[seg[i].colour]);
+        saver_box(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2], tint[seg[i].colour]);
     }
     glEnd();
 }

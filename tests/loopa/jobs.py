@@ -6798,7 +6798,7 @@ def saver_case(profile, vcard, card):
     import time
     tag = "%s-%s" % (profile, vcard)
     agent = Agent("saver-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/STARS.SCR=/TEST/STARS.SCR",
-        "--file", "build/apps/PIPES.SCR=/TEST/PIPES.SCR",
+        "--file", "build/apps/PIPES.SCR=/TEST/PIPES.SCR", "--file", "build/apps/TEXT.SCR=/TEST/TEXT.SCR",
         "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--cmd", "SERSAY HX-START saver", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
                    "-o", "ControlPersist=600"]
@@ -6867,21 +6867,22 @@ def saver_case(profile, vcard, card):
         time.sleep(2)
         after = shot("after")
         checks["as-it-was"] = bool(after) and above_bar(after) == above_bar(before)
-        if matrox:                              # the other saver, PIPES.SCR: pipes in colour, with depth
+        for other in ("pipes", "text") if matrox else ():    # the other savers: solid things, with depth
             n0 = agent.log().count("GLOS-IDLE saver off")
-            checks["pipes"] = agent.ssh("glos config set saver saver pipes")[0] == 0 and agent.ssh("glos idle saver")[0] == 0 \
-                and said("GLOS-IDLE saver program=pipes shown", 1, 120)
+            checks[other] = agent.ssh("glos config set saver saver " + other)[0] == 0 and agent.ssh("glos idle saver")[0] == 0 \
+                and said("GLOS-IDLE saver program=%s shown" % other, 1, 120)
             time.sleep(6)
-            a = shot("pipes")
-            coloured = sum(1 for i in range(0, len(a[2]), 3) if a[2][i] > a[2][i + 2] + 40) if a else -1
-            checks["pipes-drawn"] = coloured > 300      # (the first pipe is red)
-            if not checks["pipes-drawn"]:
-                info += " pipes-red=%d" % coloured
+            n = lit(shot(other))
+            checks[other + "-drawn"] = 300 < n < 150000
+            if not checks[other + "-drawn"]:
+                info += " %s-lit=%d" % (other, n)
             agent.ssh("glos key 0x39")
-            checks["pipes-off"] = said("GLOS-IDLE saver off", n0 + 1) and said("GLOS-IDLE saver program=pipes ended by the saver's end")
+            checks[other + "-off"] = said("GLOS-IDLE saver off", n0 + 1) \
+                and said("GLOS-IDLE saver program=%s ended by the saver's end" % other)
             t0 = time.time()
             while time.time() - t0 < 60 and apps():
                 time.sleep(0.5)
+        if matrox:
             agent.ssh("glos config set saver saver stars")
             time.sleep(2)
         # The Control Panel's Saver page: the saver chosen runs small in the page.
