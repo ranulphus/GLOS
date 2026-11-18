@@ -19,7 +19,9 @@
  * shown; the blank saver has nothing to show. Where the program can't draw (DOS-GL has no window on this card or
  * at this depth) it ends at once, and the picture says "Ended".
  *
- * The Date and Time page: the clock as it is now (local time, and how it was last set), a date and a time to set
+ * The Date and Time page: a list of places whose choice writes the Time zone setting (the setting stays the POSIX
+ * string it is: the list is a way to write it, and shows the place whose string the field has); the clock as it
+ * is now (local time, and how it was last set), a date and a time to set
  * it to by hand, and the time server asked at once. Both are the shell's CLOCK, run for the page.
  *
  * The Services page: the programs of its one setting ([services] run: command lines with ; between them) as a
@@ -312,6 +314,79 @@ void status_add_saver(struct gui_widget *tabs, int page_n, struct gui_widget *pa
     gui_space(row, 0, 0);
 }
 
+/* ---- the time zone, by place */
+
+static const struct { const char *place, *tz; } zones[] = {
+    { GUI_N("(as written below)"), "" },
+    { GUI_N("UTC"), "UTC0" },
+    { GUI_N("Hawaii"), "HST10" },
+    { GUI_N("Alaska"), "AKST9AKDT,M3.2.0,M11.1.0" },
+    { GUI_N("Pacific (Los Angeles, Vancouver)"), "PST8PDT,M3.2.0,M11.1.0" },
+    { GUI_N("Mountain (Denver, Calgary)"), "MST7MDT,M3.2.0,M11.1.0" },
+    { GUI_N("Arizona"), "MST7" },
+    { GUI_N("Central (Chicago, Mexico City)"), "CST6CDT,M3.2.0,M11.1.0" },
+    { GUI_N("Eastern (New York, Toronto)"), "EST5EDT,M3.2.0,M11.1.0" },
+    { GUI_N("Atlantic (Halifax)"), "AST4ADT,M3.2.0,M11.1.0" },
+    { GUI_N("Newfoundland"), "NST3:30NDT,M3.2.0,M11.1.0" },
+    { GUI_N("Brasilia, Buenos Aires"), "<-03>3" },
+    { GUI_N("Azores"), "<-01>1<+00>,M3.5.0/0,M10.5.0/1" },
+    { GUI_N("Britain, Ireland, Portugal"), "GMT0BST,M3.5.0/1,M10.5.0" },
+    { GUI_N("Central Europe (Berlin, Paris, Rome)"), "CET-1CEST,M3.5.0,M10.5.0/3" },
+    { GUI_N("Eastern Europe (Athens, Helsinki)"), "EET-2EEST,M3.5.0/3,M10.5.0/4" },
+    { GUI_N("South Africa"), "SAST-2" },
+    { GUI_N("Moscow, Istanbul, Riyadh"), "<+03>-3" },
+    { GUI_N("Gulf (Dubai)"), "<+04>-4" },
+    { GUI_N("Pakistan"), "PKT-5" },
+    { GUI_N("India"), "IST-5:30" },
+    { GUI_N("Bangladesh"), "<+06>-6" },
+    { GUI_N("Thailand, Vietnam, Jakarta"), "<+07>-7" },
+    { GUI_N("China, Singapore, Perth"), "<+08>-8" },
+    { GUI_N("Japan, Korea"), "JST-9" },
+    { GUI_N("Adelaide"), "ACST-9:30ACDT,M10.1.0,M4.1.0/3" },
+    { GUI_N("Brisbane"), "AEST-10" },
+    { GUI_N("Sydney, Melbourne"), "AEST-10AEDT,M10.1.0,M4.1.0/3" },
+    { GUI_N("New Zealand"), "NZST-12NZDT,M9.5.0,M4.1.0/3" },
+};
+#define NZONES ((int)(sizeof zones / sizeof zones[0]))
+
+static struct gui_widget *zone_list, *zone_field;
+static char zone_seen[64] = "\1";
+
+/* A place chosen: its string written in the setting's field. */
+static void zone_chosen(struct gui_widget *w, int what)
+{
+    int v = gui_value(w);
+    if (what == GUI_ON_SELECT && v > 0 && v < NZONES) {
+        gui_set_text(zone_field, zones[v].tz);
+        snprintf(zone_seen, sizeof zone_seen, "%s", zones[v].tz);
+    }
+}
+
+/* The list shows the place whose string the field has (the first row for any other). */
+static void zone_poll(void)
+{
+    const char *t;
+    int i;
+    if (!zone_list || !strcmp(t = gui_get_text(zone_field), zone_seen))
+        return;
+    snprintf(zone_seen, sizeof zone_seen, "%s", t);
+    for (i = NZONES - 1; i > 0 && strcmp(zones[i].tz, t); i--) ;
+    gui_set_value(zone_list, i);
+}
+
+/* The Date and Time page's list of places, for its Time zone setting's field. */
+void status_add_zone(struct gui_widget *page, struct gui_widget *field)
+{
+    struct gui_widget *row = gui_hbox(page, 8, 0);
+    int i;
+    zone_field = field;
+    gui_label(row, GUI_T("Time zone of:"));
+    zone_list = gui_choice(row, 30);
+    for (i = 0; i < NZONES; i++)
+        gui_choice_add(zone_list, GUI_T(zones[i].place));
+    gui_on(zone_list, zone_chosen, 0);
+}
+
 /* ---- the clock */
 
 static struct gui_widget *clock_now, *clock_date, *clock_time, *clock_says;
@@ -552,6 +627,7 @@ void status_poll(void)
     clock_poll();
     sl_poll();
     display_poll();
+    zone_poll();
     if (!net[0] || (last && now - last < 1000))
         return;
     last = now ? now : 1;

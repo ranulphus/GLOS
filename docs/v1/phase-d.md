@@ -315,8 +315,12 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   the line changes; **Add...** chooses a program with the file dialog and puts it at the line's end, **Remove**
   takes the chosen row out. The line stays the setting, and its label's letter is O now (P is Apply's: on that
   page Alt+P went to the field).
-- **Not done yet:** the other grown pages (the card's details on Display, the sound devices and each stream's
-  volume (the Mixer's, phase F), the time zone as a list, the pads' mapping, USB's devices as a tree with their
+- **The Display page says which card it is** (SYS's STAT): the card, its memory, whether its engine draws the
+  desktop, and the mode now.
+- **The time zone is chosen by place:** a list of 28 places on the Date and Time page; one chosen writes its
+  POSIX string in the Time zone setting's field (the setting stays that string), and the list shows the place
+  whose string the field has. Every string of the list is one `tz_parse` takes.
+- **Not done yet:** the other grown pages (the sound devices and each stream's volume (the Mixer's, phase F), the pads' mapping, USB's devices as a tree with their
   details, Startup and default apps, Secrets);
   the Screensaver page's preview (D6); a preview of a theme not yet applied; icons in the list.
 - **Tests:** host and Loop A `control-find` (a setting found, the next, a word nothing has, the look following
@@ -512,7 +516,7 @@ The steps:
 | **D2** the tray | GLOS's own icons (volume, network, pads, a remote session), its notifications (a pad, the network, an app not answering, a scheduled run that failed), the overflow, the held count | "Disk nearly full" |
 | **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes; "Recently added" |
 | **D4** the wallpaper | A picture in four styles, drawn by the shell | (its chooser and preview are D5's, done) |
-| **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card's own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server; the services' list | The card's details; the time zone as a list; the pads' mapping; USB as a tree; startup and default apps; Secrets; icons in the list |
+| **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list | The pads' mapping; USB as a tree; startup and default apps; Secrets (needs a call of its own for the master password: no shell line may carry it); icons in the list |
 | **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES and TEXT, on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word | The maze and the flying objects; the savers' other settings; their speed measured where the software renderer draws them |
 | **D7** background apps | `[services] run`, started again when they end, `glos services`, refused if no app | A folder or a user for each |
 | **D8** the task manager | Monitor's Services page with Stop and Start | The apps' windows, sessions, streams and the processor by program; SYS's structures for NET, AUDIO and USB |

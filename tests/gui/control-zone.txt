@@ -1,0 +1,16 @@
+# The Control Panel's Date and Time page (apps/control/status.c; phase D, D5): the time zone by place: a place
+# chosen writes its string in the setting's field; a string typed there is found in the list. (The clock's rows are
+# the machine's: masked.) Cancel: nothing is set.
+run CONTROL.EXE time
+wait "Control Panel"
+key alt+a tab end
+pause 400
+shot place "Control Panel" 146 168 440 46
+key alt+z home shift+end
+type JST-9
+pause 600
+shot typed "Control Panel" 146 168 440 46
+key esc
+gone "Control Panel"
+expect CONTROL start
+expect CONTROL end

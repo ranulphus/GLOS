@@ -18,7 +18,7 @@ shot cp-sound "Control Panel"
 key ctrl+tab
 shot cp-network "Control Panel" 146 176 440 84
 key ctrl+tab
-shot cp-time "Control Panel" 146 142 440 46
+shot cp-time "Control Panel" 146 168 440 46
 key ctrl+tab
 shot cp-region "Control Panel"
 key ctrl+tab
