@@ -13,12 +13,17 @@
 
 #include "files.h"
 
+#define HIST 16
+
 struct view {
     struct view *next;
     struct gui_window *win;
     struct gui_widget *list, *tree, *status;
+    struct gui_widget *address;         /* the browser's address bar (phase E): the folder's path, to type into */
     struct gui_menu *view_menu;
     char dir[260];
+    char hist[HIST][260];               /* the browser's way here: Back and Forward go along it */
+    int nhist, at, moving;              /* at: where in it the folder shown is; moving: go() by Back or Forward */
     int browser, big;
     glos_handle watch;
     struct gui_dirent *ents;
@@ -37,7 +42,7 @@ static struct {                         /* where folders' windows were */
 } places;
 
 enum { C_OPEN = 1, C_NEWDIR, C_RENAME, C_DELETE, C_CLOSE, C_CUT, C_COPY, C_PASTE, C_ALL, C_BIG, C_DETAILS, C_REFRESH,
-       C_UP, C_BROWSER };
+       C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS };
 
 static void say(const char *what, const char *a)
 {
@@ -113,9 +118,35 @@ static void retitle(struct view *v)
     gui_title(v->win, t);
 }
 
+/* The browser's way: a folder gone to joins it after the one shown (what lay ahead is forgotten); Back and
+   Forward move along it. The address bar says the folder, and keeps the ones typed or gone to. */
+static void way(struct view *v)
+{
+    if (!v->browser)
+        return;
+    if (!v->moving && (!v->nhist || strcmp(v->hist[v->at], v->dir))) {
+        if (v->nhist && v->at == HIST - 1) {
+            memmove(v->hist[0], v->hist[1], sizeof v->hist[0] * (HIST - 1));
+            v->at--;
+        }
+        if (v->nhist)
+            v->at++;
+        snprintf(v->hist[v->at], sizeof v->hist[0], "%s", v->dir);
+        v->nhist = v->at + 1;
+    }
+    gui_command_enable(v->win, C_BACK, v->at > 0);
+    gui_command_enable(v->win, C_FORWARD, v->at + 1 < v->nhist);
+    gui_command_enable(v->win, C_UP, strlen(v->dir) > 3);
+    if (v->address) {
+        gui_set_text(v->address, v->dir);
+        gui_combo_add_top(v->address, v->dir);
+    }
+}
+
 static void go(struct view *v, const char *dir)
 {
     snprintf(v->dir, sizeof v->dir, "%s", dir);
+    way(v);
     if (v->watch)
         glos_close(v->watch);
     v->watch = glos_fs_watch(v->dir);
@@ -357,6 +388,29 @@ static void command(struct gui_window *w, int id)
     case C_BROWSER:
         browser_open(v->dir);
         break;
+    case C_BACK:
+    case C_FORWARD:
+        if (id == C_BACK ? v->at > 0 : v->at + 1 < v->nhist) {
+            v->at += id == C_BACK ? -1 : 1;
+            v->moving = 1;
+            go(v, v->hist[v->at]);
+            v->moving = 0;
+            say(id == C_BACK ? "back" : "forward", v->dir);
+        }
+        break;
+    case C_ADDRESS:                             /* the keyboard's way to the address bar */
+        if (v->address) {                       /* (its text chosen, as its own Ctrl+A does: what is typed takes
+                                                   its place; gui_editor_command is the editor's alone) */
+            struct gui_ev e;
+            memset(&e, 0, sizeof e);
+            e.type = GUI_EV_KEY;
+            e.key = 0x1E;
+            e.ch = 1;
+            e.mods = GLOS_MOD_CTRL;
+            gui_focus(v->address);
+            v->address->cls->event(v->address, &e);
+        }
+        return;
     }
     if (v->list)
         gui_focus(v->list);
@@ -449,11 +503,40 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
     {
         struct gui_menu *view = m;
         m = gui_menu(bar, GUI_T("&Go"));
+        if (browser) {
+            gui_menu_item(m, GUI_T("&Back"), C_BACK, GUI_T("Alt+Left"));
+            gui_menu_item(m, GUI_T("&Forward"), C_FORWARD, GUI_T("Alt+Right"));
+            gui_menu_item(m, GUI_T("&Address bar"), C_ADDRESS, GUI_T("Ctrl+L"));
+        }
         gui_menu_item(m, GUI_T("&Up a folder"), C_UP, GUI_T("Backspace"));
         if (!browser)
             gui_menu_item(m, GUI_T("&Browser"), C_BROWSER, NULL);
         return view;
     }
+}
+
+/* The address bar: Enter goes to the folder typed (or chosen from the ones kept); what is no folder is said. */
+static void address_on(struct gui_widget *w, int what)
+{
+    struct view *v = view_of(w->win);
+    char p[260];
+    size_t n;
+    if (what != GUI_ON_ACTIVATE || !v)
+        return;
+    snprintf(p, sizeof p, "%s", gui_get_text(w));
+    for (n = strlen(p); n > 3 && (p[n - 1] == '\\' || p[n - 1] == ' '); n--)
+        p[n - 1] = 0;
+    for (n = 0; p[n]; n++)
+        if (p[n] >= 'a' && p[n] <= 'z')
+            p[n] = (char)(p[n] - 32);
+    if (!gui_is_dir(p)) {
+        gui_message(v->win, GUI_T("Files"), GUI_T("There is no such folder."), GUI_MB_OK);
+        gui_set_text(w, v->dir);
+        return;
+    }
+    go(v, p);
+    say("address", v->dir);
+    gui_focus(v->list);
 }
 
 static struct view *new_view(const char *dir, int browser)
@@ -475,6 +558,38 @@ static struct view *new_view(const char *dir, int browser)
     v->win->on_command = command;
     v->win->on_close = closing;
     v->view_menu = menus(v->win, browser);
+    if (browser) {                              /* its toolbar and its address bar (phase E) */
+        static const struct { int id; const char *text, *glyph, *tip; } tools[] = {
+            { C_BACK, GUI_N("&Back"), "back", GUI_N("Back (Alt+Left)") },
+            { C_FORWARD, GUI_N("&Forward"), "forward", GUI_N("Forward (Alt+Right)") },
+            { C_UP, GUI_N("&Up a folder"), "up", GUI_N("Up a folder (Backspace)") },
+            { C_REFRESH, GUI_N("&Refresh"), "refresh", GUI_N("Refresh (F5)") },
+            { 0, NULL, NULL, NULL },
+            { C_NEWDIR, GUI_N("&New Folder"), "folder-new", GUI_N("New folder (Ctrl+Shift+N)") },
+            { 0, NULL, NULL, NULL },
+            { C_CUT, GUI_N("Cu&t"), "cut", GUI_N("Cut (Ctrl+X)") },
+            { C_COPY, GUI_N("&Copy"), "copy", GUI_N("Copy (Ctrl+C)") },
+            { C_PASTE, GUI_N("&Paste"), "paste", GUI_N("Paste (Ctrl+V)") },
+            { C_DELETE, GUI_N("&Delete"), "delete", GUI_N("Delete (Del)") },
+            { 0, NULL, NULL, NULL },
+            { C_BIG, GUI_N("&Large icons"), "grid", GUI_N("Large icons") },
+            { C_DETAILS, GUI_N("&Details"), "list", GUI_N("Details") },
+        };
+        struct gui_widget *bar = gui_toolbar(v->win), *row;
+        size_t k;
+        for (k = 0; k < sizeof tools / sizeof tools[0]; k++)
+            if (!tools[k].id) {
+                gui_toolbar_sep(bar);
+            } else {
+                gui_command(v->win, tools[k].id, GUI_T(tools[k].text), NULL, gui_glyph(tools[k].glyph), GUI_T(tools[k].tip));
+                gui_toolbar_command(bar, tools[k].id);
+            }
+        row = gui_hbox(v->win->root, 6, 3);
+        gui_label(row, GUI_T("Address:"));
+        v->address = gui_combo(row, 40);
+        gui_grow(v->address, 1);
+        gui_on(v->address, address_on, 0);
+    }
     {
         struct gui_widget *row = gui_hbox(v->win->root, 0, 0);
         gui_grow(row, 1);

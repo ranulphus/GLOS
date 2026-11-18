@@ -100,7 +100,29 @@ Plan: `docs/v1/apps/notepad.md`. The first of its parts.
 - **Not done yet:** files dropped on the window; bookmarks; Markdown's colours and a menu to choose a kind;
   whole words, regular expressions and the results pane, find in files; code pages; large files.
 
+## Files (2026-11-18): the browser's toolbar and address bar
+
+Plan: `docs/v1/apps/files.md`. The first of its parts, in the browser (`FILES -browse`; the folders' own windows
+are as they were).
+
+- **The toolbar** (the toolkit's, with its commands and one-colour glyphs): Back, Forward, Up, Refresh; New
+  Folder; Cut, Copy, Paste, Delete; Large icons, Details. Each has its tip; Back, Forward and Up are grey when
+  there is nowhere to go.
+- **The address bar:** the folder's path, to type into (Ctrl+L goes to it with its text chosen); Enter goes to
+  the folder typed, a path that is no folder is said and the bar says the folder shown again; the folders gone
+  to are kept in its list.
+- **Back and Forward** (Alt+Left, Alt+Right, Go's menu): along the way the browser came, sixteen folders long;
+  a folder gone to from the middle of it forgets what lay ahead.
+- **Two things of the toolkit's learnt:** `gui_editor_command` is the many-lined editor's alone (given a field
+  it writes over the widget); and a combo dropped its list again at Enter when the app put the text as it
+  wanted it (an address bar's path in capitals): Enter never drops it now (`sdk/gui/field.c`).
+- **Tests:** `files-address` on the host and on Loop A (a path typed, Back, Forward, Up, a path that is none);
+  `files-browse`, `files` and the desktop's scripts as before.
+- **Not done yet:** the rest of the plan: views (small icons, a list, sorted and resized columns), folders that
+  load as they go, long names, operations in the background with their progress, the context menu, archives as
+  folders, search, properties, thumbnails.
+
 ## What is next
 
-The rest of the Terminal's and Notepad's plans (the margin and highlighting first); Files (toolbar, address bar,
-views, thumbnails, search, archives as folders); Images and Paint. Each by its plan in `docs/v1/apps/`.
+The rest of Files' plan (views, operations in the background, archives, search); Images and Paint; what is
+left of the Terminal's and Notepad's plans. Each by its plan in `docs/v1/apps/`.

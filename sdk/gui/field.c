@@ -460,8 +460,12 @@ static int combo_event(struct gui_widget *w, struct gui_ev *e)
     if (hist && c->keep && before[0])
         gui_combo_add_top(w, before);
     r = field_event(w, e);
-    if (e->type == GUI_EV_KEY && strcmp(before, gui_get_text(w)))
-        combo_show(c, gui_get_text(w));        /* typed: the items that begin so */
+    if (e->type == GUI_EV_KEY && !hist && strcmp(before, gui_get_text(w)))
+        combo_show(c, gui_get_text(w));        /* typed: the items that begin so (not at Enter: the app may have
+                                                   put the text as it wants it, an address bar's path, and that
+                                                   is no typing) */
+    else if (hist)
+        combo_close(c);
     return r;
 }
 

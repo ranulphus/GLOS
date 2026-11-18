@@ -1,0 +1,29 @@
+# The browser's address bar and its way (apps/files; phase E, docs/v1/apps/files.md): a folder typed into the
+# address bar; Back and Forward along the way; Up; a path that is no folder is said, and the bar says the folder
+# shown again.
+run FILES.EXE -browse C:\FM
+wait "C:\FM - Files"
+key ctrl+l
+type c:\\fm\\docs\n
+wait "C:\FM\DOCS - Files"
+shot addr-docs "C:\FM\DOCS - Files" 371 0 169 330
+key alt+left
+wait "C:\FM - Files"
+shot addr-back "C:\FM - Files" 371 0 169 330
+key alt+right
+wait "C:\FM\DOCS - Files"
+shot addr-forward "C:\FM\DOCS - Files" 371 0 169 330
+key backspace
+wait "C:\FM - Files"
+key ctrl+l
+type c:\\nowhere\n
+wait "Files"
+shot addr-none "Files"
+key enter
+shot addr-still "C:\FM - Files" 371 0 169 330
+key alt+f4
+gone "C:\FM - Files"
+expect FILES address C:\FM\DOCS
+expect FILES back C:\FM
+expect FILES forward C:\FM\DOCS
+expect FILES end 
