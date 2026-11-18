@@ -138,6 +138,8 @@ static u8 sig_left, sig_brk;                    /* a job's Ctrl+C or Ctrl+Break 
 static u32 sig_at;
 static volatile u32 exit_at;
 static volatile u8 exit_req, exit_code;
+static volatile u32 ssh_told_at;                /* SSH's turns when it last took a job's end to tell its client ... */
+static volatile u8 ssh_told;                    /* ... if it ever did */
 static u32 done_at;                             /* when a job last ended */
 static void (*kick_ssh)(void);
 
@@ -659,8 +661,11 @@ void agent_service(u32 (*write)(void *owner, int stream, const u8 *d, u32 n), vo
             irq_restore(f);
         }
         if (j->state == J_DONE && !ring_used(&j->out[0]) && !ring_used(&j->out[1])) {
-            if (j->owner)
+            if (j->owner) {
+                ssh_told_at = sshd_turns();     /* (SSH has the job's end to tell: glos exit waits for its turn) */
+                ssh_told = 1;
                 done(j->owner, (j->result & 0x10000) ? 126 : (j->result & 0xFF));
+            }
             f = irq_save();
             j->owner = NULL;
             j->state = J_FREE;
@@ -1165,6 +1170,29 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
                     kick_ssh();
                 return 0;
             }
+        /* SSH has taken a job's end to tell (agent_service), but its turn is not over: the exit status and the
+           channel's close are not queued yet, and sshd_ending() is of the turn before. Until it has finished that
+           turn and one more. (Nothing held GLOS here when SSH took the job before this thread had seen it done:
+           with the client's app the last of two ended by the exit, on a 486, the client never heard: apps-486dx2
+           with a service running, two runs in three, 2026-11-18.) */
+        if (ssh_told && sshd_turns() - ssh_told_at < 2 && (s32)(timer_ticks() - since) < 10 * 1024) {
+            settle = (timer_ticks() + 300) | 1;
+            if (kick_ssh)
+                kick_ssh();
+            return 0;
+        }
+        /* A command run over SSH is a shell session's job, not SSH's own (kernel/shell/shsess.c): when it ends
+           the session takes some turns to end too, and only then is its client told the exit status. Until
+           every such session has ended. (Nothing held GLOS here: the job was the session's, so no job was "SSH's
+           to tell", and nothing was unsent yet. With the client's app the last ended by the exit, on a 486, GLOS
+           left first and the client never heard: apps-486dx2 with a service running, two runs in three,
+           2026-11-18. An interactive session is not waited for: it has no end of its own.) */
+        if (sshd_commands() && (s32)(timer_ticks() - since) < 10 * 1024) {
+            settle = (timer_ticks() + 300) | 1;
+            if (kick_ssh)
+                kick_ssh();
+            return 0;
+        }
         if ((sshd_unsent() || sshd_ending()) && (s32)(timer_ticks() - since) < 10 * 1024) {
             settle = (timer_ticks() + 300) | 1; /* (and what SSH has for its clients gone out and acknowledged, not
                                                    only 300 ms allowed for it: two apps ended by this exit on the

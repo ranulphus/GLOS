@@ -217,6 +217,16 @@ void sshd_net_start(void (*kick)(void))
 
 /* Something for a client has still to leave the PC: bytes waiting for TCP, or given to TCP and not yet sent or
    acknowledged. (Any context: looked at, not touched. GLOS's exit waits for it: kernel/dos/agent.c.) */
+/* The turns the SSH thread has finished (any context): GLOS's exit waits for it to have taken one after a job's
+   end was its to tell, so that the news is queued and sshd_ending() knows of the channel (kernel/dos/agent.c). */
+static volatile u32 turns;
+u32 sshd_turns(void) { return turns; }
+
+/* The shell sessions that run a command for a client (ssh HOST COMMAND) and have not ended (any context): each
+   ends when its command has, and its client is then told the exit status. GLOS's exit waits for them. */
+static volatile u32 commands;
+u32 sshd_commands(void) { return commands; }
+
 int sshd_unsent(void)
 {
     int i;
@@ -1773,6 +1783,7 @@ static struct {
     struct ssh_chan *ch;
     struct shsess *s;
     u8 login;
+    u8 command;                                 /* it runs a command for its client, and ends with it (sshd_commands) */
 } shells[NSHELL];
 
 static struct shsess *shell_of(const struct ssh_chan *ch)
@@ -1790,6 +1801,9 @@ static void shell_drop(struct ssh_chan *ch)
     for (i = 0; i < NSHELL; i++)
         if (shells[i].ch == ch) {
             shsess_free(shells[i].s);
+            if (shells[i].command)
+                commands--;
+            shells[i].command = 0;
             shells[i].ch = 0;
             shells[i].s = 0;
         }
@@ -1820,6 +1834,8 @@ static int shell_line(struct ssh_chan *ch, const char *line)
                 break;
             shells[i].ch = ch;
             shells[i].login = 0;
+            shells[i].command = 1;
+            commands++;
             return 0;
         }
     return -1;
@@ -2067,6 +2083,7 @@ static void ssh_main(void *arg)
         for (i = 0; i < NCONN; i++)             /* (for sshd_ending, read from other threads: the connections are
                                                    this thread's) */
             conns[i].ending = conns[i].used && conns[i].conn && ssh_conn_ending(conns[i].conn) > 0;
+        turns++;                                /* (a turn done: what it found to say is queued, "ending" is of now) */
         if (reboot_at) {
             if ((s32)(timer_ticks() - reboot_at) >= 0) {
                 kprintf("GLOS-REBOOT\n");
