@@ -87,6 +87,33 @@ static u32 num(const char *s)
     return v;
 }
 
+/* An entry made in this run before the runner's first look is not one "at GLOS's start" of this start: an app
+   that sets one quickly enough after GLOS came up (the runner waits for GLOS.CFG and GLOS.DAT, at a low
+   priority) would see its command run at once. The API says which names are new (schedule_fresh); the first
+   look leaves those out. */
+#define FRESH 16
+static char fresh[FRESH][32];
+static int nfresh, looked;
+
+void schedule_fresh(const char *name)
+{
+    u32 f = irq_save();
+    if (!looked && nfresh < FRESH) {
+        strncpy(fresh[nfresh], name, sizeof fresh[0] - 1);
+        fresh[nfresh++][sizeof fresh[0] - 1] = 0;
+    }
+    irq_restore(f);
+}
+
+static int is_fresh(const char *name)
+{
+    int i;
+    for (i = 0; i < nfresh; i++)
+        if (!strcmp(fresh[i], name))
+            return 1;
+    return 0;
+}
+
 static void turn(int first)
 {
     static struct krun run;         /* (this thread's alone) */
@@ -110,7 +137,8 @@ static void turn(int first)
         if (k < 5 || sched_parse(f[1], &w) != 0)
             continue;
         since = num(f[2]);
-        if (w.kind == SCHED_START ? !first : !sched_due(&w, (u32)((long)since + off), (u32)((long)now + off)))
+        if (w.kind == SCHED_START ? (!first || is_fresh(f[0]))
+                                  : !sched_due(&w, (u32)((long)since + off), (u32)((long)now + off)))
             continue;
         memset(&run, 0, sizeof run);
         run.size = sizeof run;
@@ -138,6 +166,7 @@ static void runner(void *arg)
         u32 until = timer_ticks() + EVERY, f;
         turn(first);
         first = 0;
+        looked = 1;                             /* (the entries made from now on are for the next start) */
         do {                                    /* (woken early by a run that ended badly: said at once) */
             say_failed();
             f = irq_save();

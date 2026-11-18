@@ -270,6 +270,10 @@ GLOS draws no icon set of its own: it takes two open ones, converted at build ti
   needs one (the set has 3,926; icons that carry other companies' logos are not to be listed). They are in
   `ICONS.DAT` beside the programs (1.3 KB an icon, read when first asked for), reduced to the palette's cube
   with hard edges, so an icon is the same picture at every depth and in every theme.
+- **A window's own icon** (`gui_window_icon(win, "app-calc")`, phase D): one of the colour icons as the window's
+  picture: its 16 pixels in the title bar and on the task bar's button, its 32 in Alt+Tab's strip
+  (GLOS_PROP_WIN_ICON and GLOS_PROP_WIN_ICON_BIG). Asked for at any time: the toolkit gives GLOS's window the
+  pictures when that is made. Without one a window has GLOS's one-colour window sign.
 - **One-colour glyphs** (`gui_glyph(name)`): Font Awesome Free's solid icons (CC BY 4.0), for toolbars and menus:
   16-pixel masks in the toolkit itself (`sdk/gui/glyphs.c`; `sdk/gui/icons/glyphs.list`: `save`, `cut`, `undo`
   ...). A glyph is given wherever a 16-pixel icon is taken (a command's, a row's, a node's, a status section's)

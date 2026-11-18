@@ -26,6 +26,7 @@ struct region;
 const struct region *kcfg_region(void); /* [region] as it is now (include/glos/region.h) */
 int kcfg_layout(void);                  /* ... its keyboard layout, as keymap.h numbers them */
 
+void schedule_fresh(const char *name);      /* an entry by this name was made just now (the API: not this start's) */
 void schedule_init(const struct bootinfo *bi);  /* kernel/core/schedule.c: the schedule's runner (agent mode) */
 
 #endif

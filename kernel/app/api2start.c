@@ -274,6 +274,8 @@ static int sched_call(struct trapframe *tf)
         ksnprintf(rec, sizeof rec, "%s\t%s\t%u\t0\t%s", name, canon, clock_utc(), cmd);  /* (its times count from now) */
         if ((at < 0 ? kdata_add("sched", rec, 0) : kdata_set("sched", (u32)at, rec)) != 0)
             return a2_fail(tf, GLOS_E_MEMORY);
+        if (at < 0)
+            schedule_fresh(name);               /* (a new one: not for the start GLOS is still making) */
         return a2_ok(tf, 0);
     case GLOS_SCHEDULE_REMOVE:
         if ((at = sched_find(name, rec, sizeof rec)) < 0)

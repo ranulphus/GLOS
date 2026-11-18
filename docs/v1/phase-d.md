@@ -211,7 +211,7 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   names at most, six folders deep; walked again when the menu comes up five minutes or more after the last walk
   ended), kept in memory, not in a file. Two letters or more typed list up to eight files whose names have them,
   each with its folder; Enter opens one as Files opens any file.
-- **Not yet:** the tiles' groups and sizes; "Recently added".
+- **Not yet:** the tiles' groups and sizes. ("Recently added": further down.)
 - **Power's three rows** run `glos exit`, `glos restart` and `glos reboot` as lines of GLOS's own shell (a
   `GLOS_RUN_SHELL` job; a job's command would be run as a program). Exit GLOS was proven by hand on Loop A
   (2026-11-17: Files as the shell, Ctrl+Esc, Alt+P, Enter: Files is asked to end and says so, GLOS exits with
@@ -534,29 +534,56 @@ The steps:
 - **Tests:** by hand on Loop A with `GLOSDISKWARN=100` (the notification 35 s after the shell's start, the
   shell's `FILES disk-low C` line); the shell's scripts as before (their disk has room: nothing is said).
 
+### D3's "Recently added", and D1's windows' own icons (2026-11-18)
+
+- **"Recently added":** START.CFG keeps when each entry was first seen (`seen TIME NAME`, seconds since 1970;
+  1: there from the first). The first START.CFG (written when the menu first comes up) takes everything there is
+  for old; an entry met later is stamped with the time, and is listed first in the menu's list, under "Recently
+  added" (three at most, the newest first), for a fortnight or until it is started. A START.CFG of before the
+  stamps takes what it finds for old, as a first one does.
+- **A window's own icons:** `gui_window_icon(win, "app-calc")` gives a window one of ICONS.DAT's colour icons:
+  its 16 pixels as GLOS_PROP_WIN_ICON (the task bar's button, which had only the one-colour window sign: no app
+  had set one), its 32 as the new **GLOS_PROP_WIN_ICON_BIG** (4096 bytes, kept with the window in memory of its
+  own; a property's bytes over the usual 1039 go through the kernel's memory, not the app's kernel stack), which
+  Alt+Tab's strip draws instead of the 16 twice the size. GLOS's own apps set theirs (Files' browser and its
+  folders, the Terminal, Notepad, the Calculator, Images, the Monitor, the Control Panel, Packages).
+- **Monitor's Windows page** (D8): the apps' ordinary windows that are shown or minimised, front to back, each
+  its program, how it is shown (normal, minimised, maximised, full screen, a half) and its client area's size;
+  **Go To** puts the chosen one in front with the keyboard (`glos_focus_id`).
+- **Tests:** Loop A `start-recent` (a program given a place in the menu while the shell runs: the menu's
+  `FILES start recent` line); `api` (win-icon-big: set, read back, the wrong size refused, taken away);
+  `monitor` (the page's shot, its rows masked) and Loop A `monitor-windows` (Notepad chosen by its title, Go To,
+  Alt+F4 closes Notepad).
+- **A race mended on the way** (kernel/core/schedule.c): a schedule entry "at GLOS's start" that an app made
+  before the runner's first look (the runner waits for GLOS.CFG and GLOS.DAT at a low priority: a second or so,
+  more on a loaded machine) ran at once, as if it had been there at the start. The API now tells the runner which
+  names are new (`schedule_fresh`), and the first look leaves them for the next start. Seen as `apisched-bf6`
+  failing (written, start, once) on a loaded host.
+- **On silicon (2026-11-18):** bench-g400, whose card is a G100 since today, runs this desktop at 640x480x16 with
+  acceleration; every DOS-GL saver ends there at once (a divide by zero in the HAL's `write_origin`, the same on
+  Loop A's G100) and the blank one takes over, as it is meant to. With that mended the real card still drew
+  nothing right: it has 4 MB, and the HAL's memory probe measured 8 (memory that isn't there read back what was
+  just written), so the window's buffers lay where there is no memory. Both are mended on RetroGPU's branch
+  g100win (the DOS-GL session's; not merged yet): a GLOS built against it says `vram=4096K` on that card and
+  OBJECTS.SCR draws as it should there, in the hardware's window.
+
 ## Where phase D stands (2026-11-18)
 
 | Step | Done | Left |
 |---|---|---|
-| **D1** the task bar | Window and group menus, grouping, Alt+Tab's strip in the order of use, the calendar, the volume's slider, the bar at the top or hidden | A window's own 32-pixel icon |
+| **D1** the task bar | Window and group menus, grouping, Alt+Tab's strip in the order of use, the calendar, the volume's slider, the bar at the top or hidden | (nothing: a group's windows are one app's, with one icon, so the group menu stays text) |
 | **D2** the tray | GLOS's own icons (volume, network, pads, a remote session), its notifications (a pad, the network, an app not answering, a scheduled run that failed, a disk nearly full: the shell's), the overflow, the held count | (nothing) |
-| **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes; "Recently added" |
+| **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes |
 | **D4** the wallpaper | A picture in four styles, drawn by the shell | (its chooser and preview are D5's, done) |
 | **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list and the startup programs' | The pads' mapping; USB as a tree; Secrets (needs a call of its own for the master password: no shell line may carry it); icons in the list |
 | **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES, TEXT, OBJECTS and MAZE (the five of the plan), on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word, the savers' speed | The savers' own looks; their speed measured where the software renderer draws them |
 | **D7** background apps | `[services] run`, started again when they end, `glos services`, refused if no app | A folder or a user for each |
-| **D8** the task manager | Monitor's Services page with Stop and Start; Switch To | The apps' windows, sessions, streams and the processor by program; SYS's structures for NET, AUDIO and USB |
+| **D8** the task manager | Monitor's Services page with Stop and Start; Switch To; the Windows page with Go To | Sessions, streams and the processor by program; SYS's structures for NET, AUDIO and USB |
 
 ### What is left, and how each is meant to be done (2026-11-18)
 
-- **"Recently added"** (D3): START.CFG keeps when each entry was first seen (`seen TIME NAME`); the first run
-  marks everything as old; an entry seen for the first time later is listed for a fortnight or until it is
-  started. The host's clock is 0 and a script can't put a START.CFG in place first: it needs a script command
-  for that, or a Loop A check.
 - **Tiles' groups and sizes** (D3): the pins' lines of START.CFG gain a group's name and a size; the tiles' area
   lays out by group. Not begun.
-- **A window's own 32-pixel icon** (D1): a WIN property (1024 pixels kept with the window), `gui_window_icon`
-  in the toolkit (from ICONS.DAT by the app's name by default), drawn by Alt+Tab's strip and the group menu.
 - **Secrets** (D5): SECRETS needs calls for the store's state, unlocking and the master password (today only
   `glos secrets ...` has them); the page then asks for the passwords in a dialog. No shell line may carry a
   password (the lines are in logs).
@@ -564,8 +591,8 @@ The steps:
   and range alone): the kernel first, then a page with a row a button.
 - **USB as a tree** (D5): SYS's STAT needs USB as structures (a controller, a hub, a device, its parent), which
   D8 wants too; the page then draws a tree with each device's details.
-- **The task manager's other views** (D8): each app's windows under it, the sessions, the sound's streams and
-  the network's connections, from structures of SYS's STAT (NET, AUDIO, USB) rather than the commands' text.
+- **The task manager's other views** (D8): the sessions, the sound's streams and the network's connections, from
+  structures of SYS's STAT (NET, AUDIO, USB) rather than the commands' text. (The apps' windows: done, below.)
 - **The savers' own looks** (D6): settings a saver (`[saver] pipes = ...`), read as `[saver] text` is.
 
 ## What waits for other phases
