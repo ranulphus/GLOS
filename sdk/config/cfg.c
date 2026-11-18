@@ -145,6 +145,8 @@ const struct cfg_key cfg_schema[] = {
       "What the saver shows: a black screen, stars, pipes that grow, a word that turns, or blocks that tumble past" },
     { "saver", "text", CFG_TEXT, CFG_NOW, 0, 12, "line", "GLOS", "&Text saver's word",
       "The word the text saver shows: capitals and digits, twelve at most (as the saver next starts)" },
+    { "saver", "speed", CFG_CHOICE, CFG_NOW, 0, 0, "slow|normal|fast", "normal", "Sp&eed",
+      "How fast the savers move (as the saver next starts)" },
     { "saver", "power", CFG_NUMBER, CFG_NOW, 1, 240, "off", "off", "Screen &off after (minutes more)",
       "The screen's power is turned off so long after the saver came on, where the card can (off: never)" },
     /* [shell] (M3, M4e) */

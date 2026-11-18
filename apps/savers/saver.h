@@ -27,6 +27,7 @@
 #include <glos/glos.h>
 
 static unsigned saver_last, saver_step;
+static unsigned saver_speed = 100;      /* [saver] speed, percent: slow 50, normal 100, fast 200 */
 static unsigned saver_seed = 0x1234567u;
 
 /* 0 to 1, the same numbers each run. */
@@ -88,12 +89,19 @@ static inline int saver_begin(int argc, char **argv, const char *name, int depth
         glos_show_quiet(win, GLOS_WS_NORMAL);   /* (the Control Panel takes it in) */
 #endif
     glViewport(0, 0, *w, *h);
+    {                                           /* [saver] speed: how fast the saver's clock goes */
+        char v[16];
+        int set = 0;
+        v[0] = 0;
+        if (glos_setting_get("saver", "speed", v, sizeof v, &set) == 0)
+            saver_speed = !strcmp(v, "slow") ? 50 : !strcmp(v, "fast") ? 200 : 100;
+    }
     saver_last = glos_ticks();
     return 0;
 }
 
-/* The milliseconds this frame stands for (100 at most: held up is no leap). */
-static inline unsigned saver_ms(void) { return saver_step; }
+/* The milliseconds this frame stands for (100 at most: held up is no leap), by [saver] speed's clock. */
+static inline unsigned saver_ms(void) { return saver_step * saver_speed / 100; }
 
 /* The frame shown; 1 to go on, 0 when GLOS has said to end or the window was closed. */
 static inline int saver_shown(void)
