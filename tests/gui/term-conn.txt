@@ -1,0 +1,30 @@
+# The Terminal's saved connections (apps/term; phase E, docs/v1/apps/term.md): File's Connections...: one made
+# and saved, shown in the list; Connect opens a tab for it (the SSH command is typed into its shell: the host has
+# none there, and in Loop A the name is one no network has); the tab closed, the Terminal ended.
+run TERM.EXE -log
+wait "Terminal"
+key ctrl+shift+o
+wait "Connections"
+shot conn-empty "Connections"
+type lab
+key tab
+type nohost.invalid
+key tab
+type glos
+key tab
+type 2222
+key alt+s
+shot conn-saved "Connections"
+key alt+c
+gone "Connections"
+wait "Shell 2 - Terminal"
+pause 1500
+key ctrl+shift+w
+wait "Terminal"
+type exit\n
+gone "Terminal"
+expect TERM connection saved lab
+expect TERM tab new tabs=2
+expect TERM connect lab
+expect TERM tab closed tabs=1
+expect TERM end

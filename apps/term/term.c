@@ -15,6 +15,10 @@
  * one; a tab's close box, Close Tab or Ctrl+Shift+W closes it and ends its session; EXIT in a shell closes its
  * tab, and the last tab's end is the Terminal's. Eight at most.
  *
+ * Saved connections (File's Connections..., Ctrl+Shift+O): a name, a host, a user and a port each, kept in
+ * TERM.CFG beside the program. Connect opens a tab and types the SSH command into its shell (SSH.EXE does the
+ * rest, its keys and its questions included: nothing secret is kept here).
+ *
  *   TERM [-log] [COMMAND]
  *                      a terminal; COMMAND typed into it first. -log: on stdout, the screen whenever it has
  *                      been still for a moment ("VT| ...") and, at the end, every line kept and the screen
@@ -280,6 +284,209 @@ static void strip_on(struct gui_widget *w, int what)
     }
 }
 
+/* ---- saved connections */
+
+#define CONNS 16
+
+static struct conn {
+    char name[24], host[64], user[24];
+    int port;                           /* 0: SSH's own (22) */
+} conn[CONNS];
+static int nconn;
+static char home[200];                  /* the program's folder: TERM.CFG is there (none known: nothing is kept) */
+static struct gui_window *cdlg;
+static struct gui_widget *clist, *cname, *chost, *cuser, *cport;
+
+static void conn_load(void)
+{
+    char path[240], line[160];
+    FILE *f;
+    snprintf(path, sizeof path, "%s\\TERM.CFG", home);
+    if (!home[0] || !(f = gui_fopen(path, "r")))
+        return;
+    while (nconn < CONNS && fgets(line, sizeof line, f)) {
+        struct conn *c = &conn[nconn];
+        char *p[4], *q = line;
+        int k;
+        line[strcspn(line, "\r\n")] = 0;
+        if (strncmp(line, "connection ", 11))
+            continue;
+        for (k = 0, q = line + 11; k < 4; k++) {
+            p[k] = q;
+            if ((q = strchr(q, '\t')) != NULL)
+                *q++ = 0;
+            else
+                q = p[k] + strlen(p[k]);
+        }
+        if (!p[0][0] || !p[1][0])
+            continue;
+        snprintf(c->name, sizeof c->name, "%s", p[0]);
+        snprintf(c->host, sizeof c->host, "%s", p[1]);
+        snprintf(c->user, sizeof c->user, "%s", p[2]);
+        c->port = atoi(p[3]);
+        nconn++;
+    }
+    fclose(f);
+}
+
+static void conn_save(void)
+{
+    char path[240];
+    FILE *f;
+    int i;
+    snprintf(path, sizeof path, "%s\\TERM.CFG", home);
+    if (!home[0] || !(f = gui_fopen(path, "w")))
+        return;
+    for (i = 0; i < nconn; i++)
+        fprintf(f, "connection %s\t%s\t%s\t%d\n", conn[i].name, conn[i].host, conn[i].user, conn[i].port);
+    fclose(f);
+}
+
+static void conn_fill(void)
+{
+    int i, keep = gui_list_get(clist);
+    gui_list_clear(clist);
+    for (i = 0; i < nconn; i++) {
+        char where[100];
+        const char *cells[2];
+        snprintf(where, sizeof where, "%s%s%s", conn[i].user, conn[i].user[0] ? "@" : "", conn[i].host);
+        cells[0] = conn[i].name, cells[1] = where;
+        gui_list_add(clist, cells, NULL, NULL);
+    }
+    if (keep >= 0 && keep < nconn)
+        gui_list_set(clist, keep);
+}
+
+/* A word of a field, as a connection can have it: no spaces, tabs or quotes (it goes into a command line). */
+static int conn_word(struct gui_widget *field, char *out, size_t room)
+{
+    const char *t = gui_get_text(field);
+    while (*t == ' ')
+        t++;
+    snprintf(out, room, "%s", t);
+    while (out[0] && out[strlen(out) - 1] == ' ')
+        out[strlen(out) - 1] = 0;
+    return !strpbrk(out, " \t\"'&|<>");
+}
+
+/* The fields as a connection: 0, or -1 with the user told. */
+static int conn_read(struct conn *c)
+{
+    char port[12];
+    memset(c, 0, sizeof *c);
+    if (!conn_word(cname, c->name, sizeof c->name) || !conn_word(chost, c->host, sizeof c->host)
+        || !conn_word(cuser, c->user, sizeof c->user) || !conn_word(cport, port, sizeof port) || !c->host[0]
+        || (port[0] && (atoi(port) < 1 || atoi(port) > 65535))) {
+        gui_message(cdlg, GUI_T("Connections"), GUI_T("A connection wants a host, and words without spaces; its port is 1 to 65535."),
+                    GUI_MB_OK);
+        return -1;
+    }
+    c->port = atoi(port);
+    if (!c->name[0])
+        snprintf(c->name, sizeof c->name, "%.23s", c->host);
+    return 0;
+}
+
+static void tab_open(void);
+
+static void conn_button(struct gui_widget *b, int what)
+{
+    struct conn c;
+    int i, r = gui_list_get(clist);
+    (void)what;
+    if (b->id == 11) {                          /* Save: a new one, or the one of that name again */
+        if (conn_read(&c) != 0)
+            return;
+        for (i = 0; i < nconn && strcmp(conn[i].name, c.name); i++)
+            ;
+        if (i == CONNS)
+            return;
+        conn[i] = c;
+        if (i == nconn)
+            nconn++;
+        conn_save();
+        conn_fill();
+        gui_list_set(clist, i);
+        printf("TERM connection saved %s\n", c.name);
+        fflush(stdout);
+    } else if (b->id == 12) {                   /* Remove */
+        if (r < 0 || r >= nconn)
+            return;
+        memmove(&conn[r], &conn[r + 1], (size_t)(nconn - r - 1) * sizeof conn[0]);
+        nconn--;
+        conn_save();
+        conn_fill();
+    } else if (b->id == 10) {                   /* Connect: what the fields say, saved or not */
+        if (conn_read(&c) != 0)
+            return;
+        conn[CONNS - 1 >= nconn ? nconn : CONNS - 1] = c;      /* (kept past the dialog's end, beyond the saved ones) */
+        gui_end_modal(cdlg, 10);
+    } else {
+        gui_end_modal(cdlg, 0);
+    }
+}
+
+static void conn_pick(struct gui_widget *w, int what)
+{
+    int r = gui_list_get(w);
+    char port[12];
+    (void)what;
+    if (r < 0 || r >= nconn)
+        return;
+    gui_set_text(cname, conn[r].name);
+    gui_set_text(chost, conn[r].host);
+    gui_set_text(cuser, conn[r].user);
+    snprintf(port, sizeof port, "%d", conn[r].port);
+    gui_set_text(cport, conn[r].port ? port : "");
+}
+
+static void conn_dialog(void)
+{
+    static const char *const heads[2] = { GUI_N("Name"), GUI_N("Where") };
+    static const int widths[2] = { 100, 190 };
+    struct gui_widget *box, *form, *row;
+    struct tab *t;
+    char line[160];
+    int r;
+    cdlg = gui_window(GUI_T("Connections"), 330, 300, GUI_W_DIALOG);
+    cdlg->owner = win;
+    box = gui_vbox(cdlg->root, 6, 8);
+    gui_grow(box, 1);
+    clist = gui_list(box, 2, heads, widths);
+    gui_grow(clist, 1);
+    gui_on(clist, conn_pick, 0);
+    form = gui_form(box);
+    cname = gui_field(gui_row(form, GUI_T("&Name:"), NULL), 22);
+    chost = gui_field(gui_row(form, GUI_T("&Host:"), NULL), 30);
+    cuser = gui_field(gui_row(form, GUI_T("&User:"), NULL), 22);
+    cport = gui_field(gui_row(form, GUI_T("&Port:"), NULL), 6);
+    row = gui_hbox(box, 6, 0);
+    gui_button(row, GUI_T("&Connect"), conn_button, 10)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("&Save"), conn_button, 11);
+    gui_button(row, GUI_T("&Remove"), conn_button, 12);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("Close"), conn_button, 13)->flags |= GUI_CANCEL;
+    conn_fill();
+    gui_focus(cname);
+    r = gui_modal(cdlg);
+    gui_close(cdlg);
+    cdlg = NULL;
+    if (r != 10)
+        return;
+    {                                           /* a tab, and the SSH command typed into its shell */
+        const struct conn *c = &conn[CONNS - 1 >= nconn ? nconn : CONNS - 1];
+        char port[16] = "";
+        if (c->port)
+            snprintf(port, sizeof port, "-p %d ", c->port);
+        snprintf(line, sizeof line, "ssh %s%s%s%s\r", port, c->user, c->user[0] ? "@" : "", c->host);
+        tab_open();
+        if ((t = tab_shown()) != NULL)
+            job_write(t, line, (int)strlen(line));
+        printf("TERM connect %s\n", c->name);
+        fflush(stdout);
+    }
+}
+
 /* ---- the window */
 
 /* -log's last words: every line the first tab there still is has kept, and its screen to its last row with
@@ -314,7 +521,7 @@ static void closing(struct gui_window *w)       /* (the window's close box, Alt+
     gui_quit(0);
 }
 
-enum { C_COPY = 1, C_PASTE, C_CLEAR, C_EXIT, C_ABOUT, C_NEW, C_CLOSE };
+enum { C_COPY = 1, C_PASTE, C_CLEAR, C_EXIT, C_ABOUT, C_NEW, C_CLOSE, C_CONNS };
 
 static void command(struct gui_window *w, int id)
 {
@@ -323,6 +530,7 @@ static void command(struct gui_window *w, int id)
     switch (id) {
     case C_NEW: tab_open(); return;
     case C_CLOSE: tab_close(t); return;
+    case C_CONNS: conn_dialog(); return;
     case C_COPY:
         if (t)
             gui_term_copy(t->grid);
@@ -368,6 +576,17 @@ int main(int argc, char **argv)
         printf("TERM no GLOS\n");
         return 1;
     }
+    {                                           /* its own folder, as DOS writes it: TERM.CFG's place */
+        char *q;
+        snprintf(home, sizeof home, "%s", argv[0]);
+        for (q = home; *q; q++)
+            *q = *q == '/' ? '\\' : (*q >= 'a' && *q <= 'z') ? (char)(*q - 32) : *q;
+        if ((q = strrchr(home, '\\')) != NULL)
+            *q = 0;
+        else
+            home[0] = 0;
+    }
+    conn_load();
     if (argc > 1 && !strcmp(argv[1], "-log")) {
         log_on = 1;
         argv++, argc--;
@@ -380,6 +599,7 @@ int main(int argc, char **argv)
     m = gui_menu(bar, GUI_T("&File"));
     gui_menu_item(m, GUI_T("New &Tab"), C_NEW, GUI_T("Ctrl+Shift+T"));
     gui_menu_item(m, GUI_T("&Close Tab"), C_CLOSE, GUI_T("Ctrl+Shift+W"));
+    gui_menu_item(m, GUI_T("C&onnections..."), C_CONNS, GUI_T("Ctrl+Shift+O"));
     gui_menu_sep(m);
     gui_menu_item(m, GUI_T("E&xit"), C_EXIT, NULL);
     m = gui_menu(bar, GUI_T("&Edit"));

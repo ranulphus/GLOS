@@ -53,8 +53,17 @@ Plan: `docs/v1/apps/term.md`. The first of its parts.
   shell's EXIT; the first tab's shell and what it kept as they were), with `term`, `term-run` and `terminal` as
   before, on three machines. On the host the strip is in `term`'s pictures; the host's shim has one shell's
   session, so `term-tabs` is GLOS's alone.
-- **Not done yet:** saved connections, the SFTP pane, the scroll-back's length and search, fonts and colour
-  schemes, more of xterm (256 colours, the mouse, bracketed paste), splits, tabs dragged along the strip.
+- **Saved connections** (File's Connections..., Ctrl+Shift+O): a list of them and a form (a name, a host, a
+  user, a port); Save keeps the form's (a new one, or the one of that name again), Remove takes the chosen one
+  away, Connect opens a tab and types the SSH command into its shell (`ssh -p 2222 glos@host`): SSH.EXE does the
+  rest, its keys and its questions included, so nothing secret is kept. They are in `TERM.CFG` beside the
+  program (`connection NAME<tab>HOST<tab>USER<tab>PORT` a line). A word with a space, a quote or a shell's sign
+  in it is refused (it goes into a command line).
+- **Tests:** `term-conn` on the host and on Loop A (one made and saved, in the list; Connect's tab; the name is
+  one no network has, `nohost.invalid`).
+- **Not done yet:** a connection's key and its terminal settings, the Start menu's jump list and `ssh NAME`; the
+  SFTP pane; the scroll-back's length and search; fonts and colour schemes; more of xterm (256 colours, the
+  mouse, bracketed paste); splits; tabs dragged along the strip.
 
 ## What is next
 
