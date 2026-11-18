@@ -879,6 +879,8 @@ int main(int argc, char **argv)
             status_add_sound(page);             /* (two notes, to hear that there is sound) */
         if (!strcmp(sec, "usb"))
             status_add_usb(page);               /* (the controllers and what is plugged in) */
+        if (!strcmp(sec, "display"))
+            status_add_display(page);           /* (the card, its memory and the mode now) */
         if (!strcmp(sec, "time"))
             status_add_time(page);              /* (the clock now, set by hand, the server asked) */
         if (run)

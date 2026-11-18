@@ -26,6 +26,9 @@
  * list, one a row; Add... chooses a program with the file dialog and puts it at the line's end, Remove takes the
  * chosen row out of the line. The line stays the setting: the list is what it says, read again when it changes.
  *
+ * The Display page: which card it is, its memory, whether its engine draws the desktop, and the screen's mode now
+ * (SYS's STAT, every two seconds).
+ *
  * The Sound page: Test sound plays two notes through the mixer at the volume that is set, and says so, or that
  * there is no card GLOS can play through. */
 #include <stdio.h>
@@ -485,6 +488,54 @@ void status_add_services(struct gui_window *win, struct gui_widget *page, struct
     gui_button(row, GUI_T("&Remove"), sl_ask, 2);
 }
 
+/* ---- the card and the screen */
+
+static struct gui_widget *card_line, *mode_line;
+static char card_seen[96], mode_seen[64];
+
+static void display_poll(void)
+{
+    static unsigned last;
+    struct glos_sys_system sys;
+    struct glos_sys_memory mem;
+    char a[96], b[64], kb[24];
+    unsigned now = glos_ticks();
+    if (!card_line || (last && now - last < 2000))
+        return;
+    last = now ? now : 1;
+    memset(&sys, 0, sizeof sys);
+    memset(&mem, 0, sizeof mem);
+    if (glos_sys_stat(GLOS_STAT_SYSTEM, &sys, sizeof sys, 0, 0) != 0 || glos_sys_stat(GLOS_STAT_MEMORY, &mem, sizeof mem, 0, 0) != 0)
+        return;
+    if (mem.vram_kb >= 1024)
+        snprintf(kb, sizeof kb, GUI_T(", %u MB"), mem.vram_kb / 1024);
+    else if (mem.vram_kb)
+        snprintf(kb, sizeof kb, GUI_T(", %u KB"), mem.vram_kb);
+    else
+        kb[0] = 0;
+    snprintf(a, sizeof a, GUI_T("Card: %s%s%s"), sys.card[0] ? sys.card : GUI_T("none GLOS can draw on"), kb,
+             sys.accel ? GUI_T(" (its engine draws the desktop)") : "");
+    if (sys.screen_w)
+        snprintf(b, sizeof b, GUI_T("Now: %u by %u, %u bits"), sys.screen_w, sys.screen_h, sys.screen_bpp);
+    else
+        snprintf(b, sizeof b, "%s", GUI_T("Now: text mode"));
+    if (strcmp(a, card_seen)) {
+        strcpy(card_seen, a);
+        gui_set_text(card_line, a);
+    }
+    if (strcmp(b, mode_seen)) {
+        strcpy(mode_seen, b);
+        gui_set_text(mode_line, b);
+    }
+}
+
+/* The Display page's card and mode, under its settings. */
+void status_add_display(struct gui_widget *page)
+{
+    card_line = gui_label(page, "");
+    mode_line = gui_label(page, "");
+}
+
 /* ---- the network */
 
 void status_poll(void)
@@ -500,6 +551,7 @@ void status_poll(void)
     saver_poll();
     clock_poll();
     sl_poll();
+    display_poll();
     if (!net[0] || (last && now - last < 1000))
         return;
     last = now ? now : 1;
