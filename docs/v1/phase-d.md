@@ -408,7 +408,9 @@ The steps:
   table of capitals and digits; it swings from side to side about its upright, never so far that it can't be
   read, tips a little, drifts across the screen and back, and its colour goes slowly round. The lit box the
   pipes and the letters are made of is `saver_box` in `saver.h`.
-- **Not done yet:** the maze and the flying objects; each saver's own settings (the word, the speeds); STARS.SCR in the packages, the floppy and the
+- **`[saver] text`** is the word TEXT.SCR shows (twelve characters at most; GLOS unless set), read when the
+  saver starts: the Control Panel's preview shows the word that is applied.
+- **Not done yet:** the maze and the flying objects; the savers' other settings (their speeds, the pipes' look); STARS.SCR in the packages, the floppy and the
   benches' update; the software renderer's window (DOS-GL's B3), without which every other card and depth has
   the blank saver.
 - **Tests:** Loop A `desk` suite's saver case: the G200 (the program shown, moving, ended by a key, the

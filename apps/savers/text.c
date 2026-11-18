@@ -1,7 +1,7 @@
 /* TEXT.SCR: a screen saver, a word in solid letters that turns and wanders (phase D, docs/v1/phase-d.md D6;
  * saver.h).
  *
- * The word (GLOS; the saver's own settings, when savers have them, will say another) is made of cubes, a letter
+ * The word ([saver] text, GLOS unless the user has set another) is made of cubes, a letter
  * five wide and seven high from the small table below, each cube's sides lit by which way they face. It swings
  * from side to side about its upright (never so far that it can't be read), tips a little, drifts across the
  * screen and back, and its colour goes slowly round. */
@@ -29,7 +29,7 @@ static const unsigned char font[36][7] = {
     { 0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E }, { 0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C },    /* 8 9 */
 };
 
-static const char *word = "GLOS";
+static char word[16] = "GLOS";          /* ([saver] text: capitals and digits; a space is a gap) */
 
 /* A colour of the wheel at h (0 to 6), bright. */
 static void wheel(float h, float *c)
@@ -43,17 +43,18 @@ static void wheel(float h, float *c)
 
 static void frame(float turn, float tip, float x, float y, float hue, float aspect)
 {
-    float c[3], wide;
+    float c[3], wide, far;
     int n = (int)strlen(word), k, row, col;
     wheel(hue, c);
     wide = (float)(n * 6 - 1);
+    far = wide > 23.0f ? 40.0f * wide / 23.0f : 40.0f;      /* (a longer word is further off: all of it in view) */
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glFrustum(-0.5f * aspect, 0.5f * aspect, -0.5f, 0.5f, 1.0f, 120.0f);
+    glFrustum(-0.5f * aspect, 0.5f * aspect, -0.5f, 0.5f, 1.0f, 400.0f);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    glTranslatef(x, y, -40.0f);
+    glTranslatef(x * far / 40.0f, y * far / 40.0f, -far);
     glRotatef(tip, 1.0f, 0.0f, 0.0f);
     glRotatef(turn, 0.0f, 1.0f, 0.0f);
     glBegin(GL_TRIANGLES);
@@ -76,8 +77,16 @@ int main(int argc, char **argv)
 {
     int w, h, r = saver_begin(argc, argv, "Text", 1, &w, &h);
     float t = 0.0f, hue = 0.0f;
+    char set[16];
+    int i, is_set = 0;
     if (r)
         return r;
+    set[0] = 0;
+    if (glos_setting_get("saver", "text", set, sizeof set, &is_set) == 0 && set[0]) {
+        for (i = 0; set[i] && i < (int)sizeof word - 1; i++)
+            word[i] = (char)(set[i] >= 'a' && set[i] <= 'z' ? set[i] - 32 : set[i]);
+        word[i] = 0;
+    }
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     do {
