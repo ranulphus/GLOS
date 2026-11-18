@@ -9,7 +9,10 @@
  * lit while they are down. A pad's test before a game is started.
  *
  * The Input page: a field to try the keys' repeat in, and a place that counts the double clicks made on it (by
- * the double-click time this program started with: the setting is an app's at its start). */
+ * the double-click time this program started with: the setting is an app's at its start).
+ *
+ * The Sound page: Test sound plays two notes through the mixer at the volume that is set, and says so, or that
+ * there is no card GLOS can play through. */
 #include <stdio.h>
 #include <string.h>
 
@@ -131,6 +134,63 @@ void status_add_input(struct gui_widget *page)
     gui_canvas(row, 170, gui_font->height + 10, try_draw, try_event);
 }
 
+/* ---- a sound, to hear that there is one */
+
+static struct gui_widget *sound_says;
+static glos_handle sound;
+static unsigned sound_until;
+
+/* A sine's value (-32767 to 32767) at phase p of 65536, by a parabola a side: near enough for two notes. */
+static int wave(unsigned p)
+{
+    int x = (int)(p & 32767) - 16384;           /* -16384 to 16383 over half a turn */
+    int y = 32767 - (int)((long)x * x / 8192);
+    return p & 32768 ? -y : y;
+}
+
+static void sound_test(struct gui_widget *b, int what)
+{
+    static short note[2 * 5512];                /* half a second at 11025 Hz: two notes */
+    struct glos_audio_ring *ring = NULL;
+    unsigned i, phase = 0;
+    (void)b, (void)what;
+    if (sound)
+        return;                                 /* (the last one is still playing) */
+    if (!(sound = glos_audio_out(11025, 1, 32768, &ring, NULL)) || !ring) {
+        gui_set_text(sound_says, glos_error() == GLOS_E_NO_AUDIO ? GUI_T("No sound card that GLOS can play through.")
+                                                                 : GUI_T("GLOS couldn't play it."));
+        if (sound)
+            glos_close(sound);
+        sound = 0;
+        return;
+    }
+    for (i = 0; i < 2 * 5512; i++) {            /* 660 Hz, then 880 Hz, each fading out */
+        unsigned k = i % 5512;
+        phase += (i < 5512 ? 660u : 880u) * 65536u / 11025u;
+        note[i] = (short)(wave(phase) / 4 * (int)(5512 - k) / 5512);
+    }
+    glos_audio_write(ring, note, sizeof note);
+    sound_until = glos_ticks() + 1500;
+    gui_set_text(sound_says, GUI_T("Two notes, at the volume that is set."));
+}
+
+static void sound_poll(void)
+{
+    if (sound && (int)(glos_ticks() - sound_until) >= 0) {      /* played out: its stream closed */
+        glos_close(sound);
+        sound = 0;
+    }
+}
+
+/* The Sound page's test, under its settings. */
+void status_add_sound(struct gui_widget *page)
+{
+    struct gui_widget *row = gui_hbox(page, 10, 0);
+    gui_button(row, GUI_T("&Test sound"), sound_test, 0);
+    sound_says = gui_label(row, "");
+    gui_grow(sound_says, 1);
+}
+
 /* ---- the network */
 
 void status_poll(void)
@@ -141,6 +201,7 @@ void status_poll(void)
     unsigned count = 0, now = glos_ticks(), i;
     const struct glos_net_if *n = &nif[0];
     pads_poll();
+    sound_poll();
     if (!net[0] || (last && now - last < 1000))
         return;
     last = now ? now : 1;

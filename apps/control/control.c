@@ -870,6 +870,8 @@ int main(int argc, char **argv)
             status_add_pads(page);              /* (the pads as they are, for a test) */
         if (!strcmp(sec, "input"))
             status_add_input(page);             /* (a field and a place to try the keys and the mouse) */
+        if (!strcmp(sec, "sound"))
+            status_add_sound(page);             /* (two notes, to hear that there is sound) */
     }
     if (side && wall && style)
         look_add(side, win, wall->w, style->w, style->choice);

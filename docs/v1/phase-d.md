@@ -302,8 +302,12 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
 - **The Input page has places to try the keys and the mouse:** a field for the keys' repeat, and a place that
   counts the double clicks made on it (by the double-click time the Control Panel started with: that setting is
   an app's at its start).
-- **Not done yet:** the other grown pages (the card's details on Display, Sound, Date and time,
-  the pads' mapping, USB devices, Startup and default apps, Secrets);
+- **The Sound page has Test sound:** two notes through the mixer at the volume that is set, and the page says
+  so, or that there is no card GLOS can play through (seen on Loop A's SB16: its stream in `glos audio` while
+  it plays, closed after).
+- **Not done yet:** the other grown pages (the card's details on Display, the sound devices and each stream's
+  volume (the Mixer's, phase F), Date and time, the pads' mapping, USB devices, Startup and default apps,
+  Secrets);
   the Screensaver page's preview (D6); a preview of a theme not yet applied; icons in the list.
 - **Tests:** host and Loop A `control-find` (a setting found, the next, a word nothing has, the look following
   the field and the style); `control` and the control suite as before, by the list.

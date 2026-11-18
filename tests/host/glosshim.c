@@ -195,6 +195,20 @@ int glos_sleep(unsigned ms)             /* (a made thread's sleep is until the c
 unsigned glos_ticks(void) { return H.clock; }
 void *glos_ptr(unsigned linear) { return (void *)(size_t)linear; }
 
+/* (Sound: no card on the host.) */
+glos_handle glos_audio_out(unsigned rate, unsigned channels, unsigned bytes, struct glos_audio_ring **ring, unsigned *id)
+{
+    (void)rate, (void)channels, (void)bytes, (void)ring, (void)id;
+    last_error = GLOS_E_NO_AUDIO;
+    return 0;
+}
+
+unsigned glos_audio_write(struct glos_audio_ring *r, const void *samples, unsigned bytes)
+{
+    (void)r, (void)samples, (void)bytes;
+    return 0;
+}
+
 /* (The pads: none plugged in.) */
 int glos_pads(struct glos_pads *p, int events)
 {
