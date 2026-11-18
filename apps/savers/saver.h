@@ -15,8 +15,8 @@
  *     }
  *
  * A saver ends at once, with a code that says why, where it can't draw (GLOS then shows its blank saver): 2 no
- * GLOS, 3 no windowed DOS-GL on this card or at this depth, 4 DOS-GL wouldn't start. In a header: each saver is one
- * source file. */
+ * GLOS, 3 no windowed DOS-GL on this card or at this depth (a DOS-GL before 1.7, whose window is a Matrox card's
+ * at 16 bits alone), 4 DOS-GL wouldn't start. In a header: each saver is one source file. */
 #ifndef SAVERS_SAVER_H
 #define SAVERS_SAVER_H
 #include <stdlib.h>
@@ -48,8 +48,14 @@ static inline int saver_begin(int argc, char **argv, const char *name, int depth
         return 2;
     memset(&ver, 0, sizeof ver);
     ver.size = sizeof ver;
+#if DGL_API_VERSION < 0x0107                    /* (since 1.7 DOS-GL has a window on any desktop: its software
+                                                   renderer's where the card's engine can't draw one) */
     if (glos_version(&ver) != 0 || !(ver.machine & GLOS_MACHINE_GLWIN))
         return 3;                               /* (DOS-GL would take the whole screen, as a DOS program does) */
+#else
+    if (glos_version(&ver) != 0)
+        return 2;
+#endif
     memset(&scr, 0, sizeof scr);
     scr.size = sizeof scr;
     glos_screen(&scr);

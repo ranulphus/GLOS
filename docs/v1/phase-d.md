@@ -417,6 +417,20 @@ The steps:
   desktop as it was; in the Control Panel its window bare, 192 by 144, stars in it, ended when another page is
   shown), the S3 (code 3, the blank saver, black; no preview), and the program deleted (code 126, blank).
 
+### D6 on every card (2026-11-18)
+
+- **DOS-GL 1.7** (RetroGPU main 1c9f73b; its session's work, asked for here) has a window on any desktop: a
+  Matrox card's engine draws it at 16 bits, and its software renderer everywhere else (another card, or an 8- or
+  32-bit desktop), shown through `GLOS_DRAW_BLIT`. It also has `dglGlosHints`: the window made hidden and bare.
+- **The savers use both** (`apps/savers/saver.h`): built against 1.7 or later they no longer ask GLOS whether
+  DOS-GL has a window here, and their window is hidden and bare until it is shown full-screen (no framed moment
+  first). Built against an older DOS-GL they are as before.
+- **Seen on Loop A** (bf6): stars, pipes and text shown 125 to 177 ms after the saver came on, on the G200 at 16
+  bits (the engine), the G200 at 32 bits and the S3 at 8, 16 and 32 bits (software); the Control Panel's preview
+  embedded on each. The software renderer draws fewer frames a second than the engine (not yet measured).
+- **The blank saver** is still what shows where a saver's program isn't there or ends: the kernel's rule.
+- **Tests:** Loop A's saver case expects the savers on the S3 as on the G200.
+
 ### D7. Background apps (`[services]`)
 
 - A list of apps GLOS starts with itself (with or without a desktop), starts again if they end (with a growing
@@ -485,7 +499,7 @@ The steps:
 | **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes; "Recently added" |
 | **D4** the wallpaper | A picture in four styles, drawn by the shell | (its chooser and preview are D5's, done) |
 | **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card's own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server; the services' list | The card's details; the time zone as a list; the pads' mapping; USB as a tree; startup and default apps; Secrets; icons in the list |
-| **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES and TEXT; the Control Panel's preview; the text saver's word | The maze and the flying objects; the savers' other settings; DOS-GL's hidden start (asked) and its software renderer's window (B3), without which only a Matrox card at 16 bits has them |
+| **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES and TEXT, on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word | The maze and the flying objects; the savers' other settings; their speed measured where the software renderer draws them |
 | **D7** background apps | `[services] run`, started again when they end, `glos services`, refused if no app | A folder or a user for each |
 | **D8** the task manager | Monitor's Services page with Stop and Start | The apps' windows, sessions, streams and the processor by program; SYS's structures for NET, AUDIO and USB |
 
