@@ -872,6 +872,8 @@ int main(int argc, char **argv)
             status_add_input(page);             /* (a field and a place to try the keys and the mouse) */
         if (!strcmp(sec, "sound"))
             status_add_sound(page);             /* (two notes, to hear that there is sound) */
+        if (!strcmp(sec, "usb"))
+            status_add_usb(page);               /* (the controllers and what is plugged in) */
     }
     if (side && wall && style)
         look_add(side, win, wall->w, style->w, style->choice);

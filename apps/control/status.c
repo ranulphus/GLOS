@@ -11,6 +11,9 @@
  * The Input page: a field to try the keys' repeat in, and a place that counts the double clicks made on it (by
  * the double-click time this program started with: the setting is an app's at its start).
  *
+ * The USB page: GLOS's USB controllers and what is plugged into them, as `glos usb` says it (SYS's STAT), read
+ * every two seconds: a pad or a keyboard plugged in is there a moment later.
+ *
  * The Sound page: Test sound plays two notes through the mixer at the volume that is set, and says so, or that
  * there is no card GLOS can play through. */
 #include <stdio.h>
@@ -191,6 +194,51 @@ void status_add_sound(struct gui_widget *page)
     gui_grow(sound_says, 1);
 }
 
+/* ---- USB's controllers and devices */
+
+#define USB_LINES 8
+
+static struct gui_widget *usb[USB_LINES];
+static char usb_seen[USB_LINES][100];
+
+static void usb_poll(void)
+{
+    static char text[1600];
+    static unsigned last;
+    unsigned now = glos_ticks(), length = 0, count = 0;
+    char *p = text, *e;
+    int i;
+    if (!usb[0] || (last && now - last < 2000))
+        return;
+    last = now ? now : 1;
+    if (glos_sys_stat(GLOS_STAT_USB, text, sizeof text - 1, &length, &count) != 0 && glos_error() != GLOS_E_ROOM)
+        length = 0;
+    text[length < sizeof text - 1 ? length : sizeof text - 1] = 0;
+    for (i = 0; i < USB_LINES; i++, p = e) {
+        char line[100];
+        if ((e = strchr(p, '\n')) != NULL)
+            *e++ = 0;
+        else
+            e = p + strlen(p);
+        snprintf(line, sizeof line, "%s", p);
+        if (strlen(line) && line[strlen(line) - 1] == '\r')
+            line[strlen(line) - 1] = 0;
+        if (strcmp(usb_seen[i], line)) {
+            strcpy(usb_seen[i], line);
+            gui_set_text(usb[i], line);
+        }
+    }
+}
+
+/* The USB page's lines, under its settings. */
+void status_add_usb(struct gui_widget *page)
+{
+    int i;
+    gui_label(page, GUI_T("Controllers and devices now:"));
+    for (i = 0; i < USB_LINES; i++)
+        usb[i] = gui_label(page, "");
+}
+
 /* ---- the network */
 
 void status_poll(void)
@@ -202,6 +250,7 @@ void status_poll(void)
     const struct glos_net_if *n = &nif[0];
     pads_poll();
     sound_poll();
+    usb_poll();
     if (!net[0] || (last && now - last < 1000))
         return;
     last = now ? now : 1;

@@ -13,6 +13,7 @@ void status_add_net(struct gui_widget *page);   /* the Network page's lines */
 void status_add_pads(struct gui_widget *page);  /* the Joystick page's picture of the pads */
 void status_add_input(struct gui_widget *page); /* the Input page's places to try the keys and the mouse */
 void status_add_sound(struct gui_widget *page); /* the Sound page's Test sound */
+void status_add_usb(struct gui_widget *page);   /* the USB page's controllers and devices */
 void status_poll(void);                 /* read again (the network once a second, the pads each time) */
 
 #endif
