@@ -508,6 +508,16 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
 
 ## Open faults (noted, not yet chased)
 
+- **Two cases that failed once under a gate's load on devserver and not in isolation** (the ninth gate,
+  2026-11-18; three runs each here afterwards, all passing):
+  - `native-486dx2-vbe-8`, `term-run`: the full-screen test program's line came into the Terminal as "MODE do"
+    for "MODE done", and nothing of what the shell wrote after it was in the Terminal's last log, though the
+    shell ran the commands typed and ended well. A program's captured output cut short, or the Terminal's
+    reading of it stopped, after a session gave the screen back on a slow, loaded PC: not known which.
+  - `control-bf6-g200`: the Control Panel's display-mode trial went back by itself ("mode back") where the
+    script meant to keep it, and the script's last keys then missed: no "CONTROL end". The trial's wait is
+    fifteen seconds of the PC's own time; the script's key came later than that.
+
 - **Bench C (the 486DX4, now with an S3 ViRGE/DX and 32 MB) hung after a full-screen session's end**
   (2026-11-18, GLOS main 4df396a; the DOS-GL session's report): a DOS-GL program that had drawn for 40 seconds
   through the ViRGE's VBE frame buffer ended, set text mode 3, and the PC answered nothing more (no ping; a
