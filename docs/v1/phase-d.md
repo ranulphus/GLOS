@@ -414,7 +414,10 @@ The steps:
   pipes and the letters are made of is `saver_box` in `saver.h`.
 - **`[saver] text`** is the word TEXT.SCR shows (twelve characters at most; GLOS unless set), read when the
   saver starts: the Control Panel's preview shows the word that is applied.
-- **Not done yet:** the maze and the flying objects; the savers' other settings (their speeds, the pipes' look); STARS.SCR in the packages, the floppy and the
+- **OBJECTS.SCR** (`apps/savers/objects.c`): fourteen blocks (cubes, slabs, bars) in seven colours come from
+  far off towards the viewer, each turning about an axis of its own and drifting a little; one that has gone by
+  starts again far off.
+- **Not done yet:** the maze; the savers' other settings (their speeds, the pipes' look); STARS.SCR in the packages, the floppy and the
   benches' update; the software renderer's window (DOS-GL's B3), without which every other card and depth has
   the blank saver.
 - **Tests:** Loop A `desk` suite's saver case: the G200 (the program shown, moving, ended by a key, the
@@ -519,7 +522,7 @@ The steps:
 | **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes; "Recently added" |
 | **D4** the wallpaper | A picture in four styles, drawn by the shell | (its chooser and preview are D5's, done) |
 | **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list | The pads' mapping; USB as a tree; startup and default apps; Secrets (needs a call of its own for the master password: no shell line may carry it); icons in the list |
-| **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES and TEXT, on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word | The maze and the flying objects; the savers' other settings; their speed measured where the software renderer draws them |
+| **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES, TEXT and OBJECTS, on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word | The maze; the savers' other settings; their speed measured where the software renderer draws them |
 | **D7** background apps | `[services] run`, started again when they end, `glos services`, refused if no app | A folder or a user for each |
 | **D8** the task manager | Monitor's Services page with Stop and Start; Switch To | The apps' windows, sessions, streams and the processor by program; SYS's structures for NET, AUDIO and USB |
 

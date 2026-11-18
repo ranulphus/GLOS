@@ -33,7 +33,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 APPS = ["FILES", "TERM", "NOTEPAD", "CALC", "IMAGES", "MONITOR", "CONTROL", "PKG", "FETCH"]
-SAVERS = ["STARS", "PIPES", "TEXT"]                      # (apps/savers: NAME.SCR beside GLOS.EXE)
+SAVERS = ["STARS", "PIPES", "TEXT", "OBJECTS"]                      # (apps/savers: NAME.SCR beside GLOS.EXE)
 
 AUTOEXEC_LINES = [":glosrun", "C:\\GLOS\\GLOS.EXE", "IF ERRORLEVEL 200 GOTO glosrun"]
 # A new disk (docs/v1/shell.md, S4d): FreeDOS's kernel with GLOS as its shell, which runs this AUTOEXEC.BAT itself.

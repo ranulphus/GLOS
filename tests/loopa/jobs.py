@@ -6800,6 +6800,7 @@ def saver_case(profile, vcard, card):
     tag = "%s-%s" % (profile, vcard)
     agent = Agent("saver-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/STARS.SCR=/TEST/STARS.SCR",
         "--file", "build/apps/PIPES.SCR=/TEST/PIPES.SCR", "--file", "build/apps/TEXT.SCR=/TEST/TEXT.SCR",
+        "--file", "build/apps/OBJECTS.SCR=/TEST/OBJECTS.SCR",
         "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--cmd", "SERSAY HX-START saver", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
                    "-o", "ControlPersist=600"]
@@ -6858,7 +6859,7 @@ def saver_case(profile, vcard, card):
         time.sleep(2)
         after = shot("after")
         checks["as-it-was"] = bool(after) and above_bar(after) == above_bar(before)
-        for other in ("pipes", "text"):         # the other savers: solid things, with depth
+        for other in ("pipes", "text", "objects"):      # the other savers: solid things, with depth
             n0 = agent.log().count("GLOS-IDLE saver off")
             checks[other] = agent.ssh("glos config set saver saver " + other)[0] == 0 and agent.ssh("glos idle saver")[0] == 0 \
                 and said("GLOS-IDLE saver program=%s shown" % other, 1, 120)
