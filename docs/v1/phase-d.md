@@ -307,9 +307,13 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
   it plays, closed after).
 - **The USB page lists the controllers and what is plugged in**, as `glos usb` says it (SYS's STAT, its text),
   read every two seconds; masked in the scripts' shot.
+- **The Date and Time page has the clock:** local time now and how it was last set (the PC's own clock, the
+  network, by hand), read every second; a date field and a time field with **Set the clock**, and **Ask the
+  server now**: both the shell's CLOCK (`glos time set`, `glos time sync`), run for the page. Seen on Loop A:
+  set by the button, `glos time` says by hand. Masked in the scripts' shot.
 - **Not done yet:** the other grown pages (the card's details on Display, the sound devices and each stream's
-  volume (the Mixer's, phase F), Date and time, the pads' mapping, USB's devices as a tree with their details,
-  Startup and default apps, Secrets);
+  volume (the Mixer's, phase F), the time zone as a list, the pads' mapping, USB's devices as a tree with their
+  details, Startup and default apps, Secrets);
   the Screensaver page's preview (D6); a preview of a theme not yet applied; icons in the list.
 - **Tests:** host and Loop A `control-find` (a setting found, the next, a word nothing has, the look following
   the field and the style); `control` and the control suite as before, by the list.

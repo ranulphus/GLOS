@@ -877,6 +877,8 @@ int main(int argc, char **argv)
             status_add_sound(page);             /* (two notes, to hear that there is sound) */
         if (!strcmp(sec, "usb"))
             status_add_usb(page);               /* (the controllers and what is plugged in) */
+        if (!strcmp(sec, "time"))
+            status_add_time(page);              /* (the clock now, set by hand, the server asked) */
         if (saver)
             status_add_saver(tabs, s, page, saver->w, saver->choice, argv[0]);  /* (the saver chosen, running small) */
     }

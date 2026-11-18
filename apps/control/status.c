@@ -19,6 +19,9 @@
  * shown; the blank saver has nothing to show. Where the program can't draw (DOS-GL has no window on this card or
  * at this depth) it ends at once, and the picture says "Ended".
  *
+ * The Date and Time page: the clock as it is now (local time, and how it was last set), a date and a time to set
+ * it to by hand, and the time server asked at once. Both are the shell's CLOCK, run for the page.
+ *
  * The Sound page: Test sound plays two notes through the mixer at the volume that is set, and says so, or that
  * there is no card GLOS can play through. */
 #include <stdio.h>
@@ -302,6 +305,91 @@ void status_add_saver(struct gui_widget *tabs, int page_n, struct gui_widget *pa
     gui_space(row, 0, 0);
 }
 
+/* ---- the clock */
+
+static struct gui_widget *clock_now, *clock_date, *clock_time, *clock_says;
+static unsigned clock_seen;
+
+/* Seconds since 1970 as a date (yyyymmdd) and a time (hhmmss). */
+static void civil(unsigned t, int *date, int *hms)
+{
+    unsigned days = t / 86400, s = t % 86400;
+    int z = (int)days + 719468, era = z / 146097, doe = z - era * 146097;
+    int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365, y = yoe + era * 400;
+    int doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+    int d = doy - (153 * mp + 2) / 5 + 1, m = mp < 10 ? mp + 3 : mp - 9;
+    *date = (y + (m <= 2)) * 10000 + m * 100 + d;
+    *hms = (int)(s / 3600) * 10000 + (int)(s / 60 % 60) * 100 + (int)(s % 60);
+}
+
+static unsigned local_now(unsigned *how)
+{
+    struct glos_time t;
+    memset(&t, 0, sizeof t);
+    t.size = sizeof t;
+    if (glos_time(&t) != 0)
+        return 0;
+    if (how)
+        *how = t.how;
+    return (unsigned)((int)t.utc + t.offset);
+}
+
+static void clock_poll(void)
+{
+    static const char *const hows[] = { GUI_N("the PC's own clock"), GUI_N("set from the network"), GUI_N("set by hand") };
+    char text[96], day[24];
+    unsigned how = 0, now;
+    int date, hms;
+    if (!clock_now || (now = local_now(&how)) == clock_seen)
+        return;
+    clock_seen = now;
+    civil(now, &date, &hms);
+    gui_date_text(date, day, sizeof day);
+    snprintf(text, sizeof text, "%s  %02d:%02d:%02d  (%s)", day, hms / 10000, hms / 100 % 100, hms % 100,
+             GUI_T(hows[how < 3 ? how : 0]));
+    gui_set_text(clock_now, text);
+}
+
+/* Set the clock (1): the date and time in the fields, local time; Ask the server now (2). The shell's CLOCK. */
+static void clock_ask(struct gui_widget *b, int what)
+{
+    static glos_handle job;
+    char line[64];
+    int d = gui_datetime_get(clock_date), t = gui_datetime_get(clock_time);
+    (void)what;
+    if (job)
+        glos_close(job);
+    if (b->id == 1)
+        snprintf(line, sizeof line, "CLOCK set %04d-%02d-%02dT%02d:%02d:%02d", d / 10000, d / 100 % 100, d % 100, t / 10000,
+                 t / 100 % 100, t % 100);
+    else
+        snprintf(line, sizeof line, "CLOCK sync");
+    job = glos_job_run(line, NULL, NULL, GLOS_RUN_SHELL, 0, NULL);
+    gui_set_text(clock_says, !job ? GUI_T("GLOS couldn't do it.") : b->id == 1 ? GUI_T("The clock was set.")
+                                  : GUI_T("The time server was asked."));
+    printf("CONTROL clock %s\n", b->id == 1 ? line + 10 : "sync");
+    fflush(stdout);
+    clock_seen = 0;
+}
+
+/* The Date and Time page's clock, under its settings. */
+void status_add_time(struct gui_widget *page)
+{
+    struct gui_widget *row;
+    int date = 0, hms = 0;
+    row = gui_hbox(page, 8, 0);
+    gui_label(row, GUI_T("Now:"));
+    clock_now = gui_label(row, "");
+    gui_grow(clock_now, 1);
+    civil(local_now(NULL), &date, &hms);
+    row = gui_hbox(page, 8, 0);
+    clock_date = gui_date_field(row, date);
+    clock_time = gui_time_field(row, hms, 1);
+    gui_button(row, GUI_T("S&et the clock"), clock_ask, 1);
+    gui_button(row, GUI_T("As&k the server now"), clock_ask, 2);
+    clock_says = gui_label(page, "");
+}
+
 /* ---- the network */
 
 void status_poll(void)
@@ -315,6 +403,7 @@ void status_poll(void)
     sound_poll();
     usb_poll();
     saver_poll();
+    clock_poll();
     if (!net[0] || (last && now - last < 1000))
         return;
     last = now ? now : 1;
