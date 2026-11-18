@@ -798,7 +798,7 @@ int main(int argc, char **argv)
     static const char *const heads[2] = { GUI_N("Kind"), GUI_N("Opened by") };
     static const int widths[2] = { 70, 200 };
     struct gui_widget *box, *page, *form, *row, *left, *b, *side = NULL;
-    struct ctl *wall = NULL, *style = NULL, *saver;
+    struct ctl *wall = NULL, *style = NULL, *saver, *run;
     int s, i;
     if (gui_init(argc, argv) != 0) {
         printf("CONTROL no GLOS\n");
@@ -856,12 +856,14 @@ int main(int argc, char **argv)
             form = gui_form(page);
         }
         field_chars = side && !strcmp(sec, "desktop") ? 20 : 30;        /* (the look takes room beside that page's) */
-        saver = NULL;
+        saver = run = NULL;
         for (i = 0; i < cfg_schema_n; i++)
             if (!strcmp(cfg_schema[i].section, sec) && nctl < MAXCTL) {
                 struct ctl *c = ctl_add(form, &cfg_schema[i], s);
                 if (!strcmp(sec, "saver") && !strcmp(c->k->key, "saver"))
                     saver = c;
+                if (!strcmp(sec, "services") && !strcmp(c->k->key, "run"))
+                    run = c;
                 if (!strcmp(sec, "desktop") && !strcmp(c->k->key, "wallpaper"))
                     wall = c;
                 if (!strcmp(sec, "desktop") && !strcmp(c->k->key, "wallpaper_style"))
@@ -879,6 +881,8 @@ int main(int argc, char **argv)
             status_add_usb(page);               /* (the controllers and what is plugged in) */
         if (!strcmp(sec, "time"))
             status_add_time(page);              /* (the clock now, set by hand, the server asked) */
+        if (run)
+            status_add_services(win, page, run->w);     /* (its programs as a list, Add... and Remove) */
         if (saver)
             status_add_saver(tabs, s, page, saver->w, saver->choice, argv[0]);  /* (the saver chosen, running small) */
     }

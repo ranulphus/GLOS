@@ -1,0 +1,19 @@
+# The Control Panel's Services page (apps/control/status.c; phase D, D5): the programs of [services] run as a list:
+# two written in the line, the first removed, Add...'s file dialog opened and left. Cancel: nothing is set.
+run CONTROL.EXE services
+wait "Control Panel"
+key alt+o
+type CHATD.EXE /Q; C:\\APPS\\LOG.EXE
+pause 400
+shot two "Control Panel"
+key alt+r
+pause 400
+shot one "Control Panel"
+key alt+a
+wait "Background App"
+key esc
+gone "Background App"
+key esc
+gone "Control Panel"
+expect CONTROL start
+expect CONTROL end

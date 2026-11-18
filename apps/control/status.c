@@ -22,6 +22,10 @@
  * The Date and Time page: the clock as it is now (local time, and how it was last set), a date and a time to set
  * it to by hand, and the time server asked at once. Both are the shell's CLOCK, run for the page.
  *
+ * The Services page: the programs of its one setting ([services] run: command lines with ; between them) as a
+ * list, one a row; Add... chooses a program with the file dialog and puts it at the line's end, Remove takes the
+ * chosen row out of the line. The line stays the setting: the list is what it says, read again when it changes.
+ *
  * The Sound page: Test sound plays two notes through the mixer at the volume that is set, and says so, or that
  * there is no card GLOS can play through. */
 #include <stdio.h>
@@ -390,6 +394,97 @@ void status_add_time(struct gui_widget *page)
     clock_says = gui_label(page, "");
 }
 
+/* ---- [services] run, as a list */
+
+#define SL_MAX 8
+
+static struct gui_window *sl_win;
+static struct gui_widget *sl_field, *sl_list;
+static char sl_seen[256] = "\1";                /* (nothing seen: the first look fills it) */
+
+/* The line's entry k (between the ;, the spaces round it gone): 1 if there is one. */
+static int sl_entry(const char *line, int k, char *out, size_t room)
+{
+    const char *p = line;
+    for (;; k--) {
+        size_t n = 0;
+        while (*p == ' ' || *p == ';')
+            p++;
+        if (!*p)
+            return 0;
+        for (; *p && *p != ';'; p++)
+            if (n < room - 1)
+                out[n++] = *p;
+        while (n && out[n - 1] == ' ')
+            n--;
+        out[n] = 0;
+        if (!k)
+            return 1;
+    }
+}
+
+static void sl_poll(void)
+{
+    const char *line;
+    char one[160];
+    int k, keep;
+    if (!sl_field || !strcmp(line = gui_get_text(sl_field), sl_seen))
+        return;
+    snprintf(sl_seen, sizeof sl_seen, "%s", line);
+    keep = gui_list_get(sl_list);
+    gui_list_clear(sl_list);
+    for (k = 0; k < SL_MAX && sl_entry(sl_seen, k, one, sizeof one); k++) {
+        const char *cells[1] = { one };
+        gui_list_add(sl_list, cells, NULL, NULL);
+    }
+    if (k)
+        gui_list_set(sl_list, keep >= 0 && keep < k ? keep : 0);
+}
+
+/* Add... (1): a program chosen, at the line's end. Remove (2): the chosen row out of the line. */
+static void sl_ask(struct gui_widget *b, int what)
+{
+    static const char *const filters[] = { "Programs|*.EXE", "Every file|*.*", NULL };
+    char line[256], one[160], path[160];
+    int k, row = gui_list_get(sl_list);
+    size_t n = 0;
+    (void)what;
+    line[0] = 0;
+    for (k = 0; k < SL_MAX && sl_entry(gui_get_text(sl_field), k, one, sizeof one); k++)
+        if (b->id == 1 || k != row)
+            n += (size_t)snprintf(line + n, sizeof line - n, "%s%s", n ? "; " : "", one);
+    if (b->id == 1) {
+        struct gui_file_opts o;
+        memset(&o, 0, sizeof o);
+        o.filters = filters;
+        path[0] = 0;
+        if (gui_file_dialog_ex(sl_win, GUI_T("Background App"), 0, path, sizeof path, &o) != 1 || !path[0])
+            return;
+        if (n + strlen(path) + 3 > sizeof line || k == SL_MAX) {
+            gui_message(sl_win, GUI_T("Services"), GUI_T("There is no room for another."), GUI_MB_OK);
+            return;
+        }
+        snprintf(line + n, sizeof line - n, "%s%s", n ? "; " : "", path);
+    }
+    gui_set_text(sl_field, line);
+    sl_poll();
+}
+
+/* The Services page's list and buttons, under its setting's field. */
+void status_add_services(struct gui_window *win, struct gui_widget *page, struct gui_widget *field)
+{
+    struct gui_widget *row;
+    sl_win = win;
+    sl_field = field;
+    gui_label(page, GUI_T("GLOS starts these with itself, and again if they end:"));
+    sl_list = gui_list(page, 1, NULL, NULL);
+    gui_grow(sl_list, 1);
+    row = gui_hbox(page, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("&Add..."), sl_ask, 1);
+    gui_button(row, GUI_T("&Remove"), sl_ask, 2);
+}
+
 /* ---- the network */
 
 void status_poll(void)
@@ -404,6 +499,7 @@ void status_poll(void)
     usb_poll();
     saver_poll();
     clock_poll();
+    sl_poll();
     if (!net[0] || (last && now - last < 1000))
         return;
     last = now ? now : 1;
