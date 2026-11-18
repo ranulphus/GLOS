@@ -423,7 +423,12 @@ The steps:
   starts again far off.
 - **`[saver] speed`** (slow, normal, fast): the savers' clock at half, its own or twice the speed, for all of
   them (`saver_ms` in `saver.h`), read when a saver starts.
-- **Not done yet:** the maze; the savers' own looks (the pipes' joints, the stars' number); STARS.SCR in the packages, the floppy and the
+- **MAZE.SCR** (`apps/savers/maze.c`): a maze of ten cells by ten, carved from a corner so that every cell is
+  reached; the viewer walks it with a hand on the right-hand wall, a cell at a time, turning where the wall
+  turns and back out of the dead ends; after 420 cells the walls change colour and another maze is made. (Its
+  near plane is 0.2 of a cell: at 0.07 the 16-bit depth buffer could not tell the walls apart, and the screen
+  was one wall's colour.)
+- **Not done yet:** the savers' own looks (the pipes' joints, the stars' number, the maze's size); STARS.SCR in the packages, the floppy and the
   benches' update; the software renderer's window (DOS-GL's B3), without which every other card and depth has
   the blank saver.
 - **Tests:** Loop A `desk` suite's saver case: the G200 (the program shown, moving, ended by a key, the
@@ -528,7 +533,7 @@ The steps:
 | **D3** the Start menu | Apps, pins and tiles, the most used, search (apps, settings, files by name), Power, tiles dragged | Tiles' groups and sizes; "Recently added" |
 | **D4** the wallpaper | A picture in four styles, drawn by the shell | (its chooser and preview are D5's, done) |
 | **D5** the Control Panel | The page list and search; the desktop's look and Choose...; the card and its own modes; the network, USB and pads as they are; places to try keys, mouse and sound; the clock set by hand or by the server, the time zone by place; the services' list and the startup programs' | The pads' mapping; USB as a tree; Secrets (needs a call of its own for the master password: no shell line may carry it); icons in the list |
-| **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES, TEXT and OBJECTS, on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word, the savers' speed | The maze; the savers' own looks; their speed measured where the software renderer draws them |
+| **D6** savers | The kernel runs a saver's program and falls back to the blank one; STARS, PIPES, TEXT, OBJECTS and MAZE (the five of the plan), on any card and at 8, 16 and 32 bits (DOS-GL 1.7); the Control Panel's preview; the text saver's word, the savers' speed | The savers' own looks; their speed measured where the software renderer draws them |
 | **D7** background apps | `[services] run`, started again when they end, `glos services`, refused if no app | A folder or a user for each |
 | **D8** the task manager | Monitor's Services page with Stop and Start; Switch To | The apps' windows, sessions, streams and the processor by program; SYS's structures for NET, AUDIO and USB |
 
