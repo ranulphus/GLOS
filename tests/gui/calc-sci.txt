@@ -29,6 +29,9 @@ wait "Calculator"
 pause 500
 type 3+4*5=
 shot sci-back "Calculator"
+key alt+v s
+wait "Calculator"
+pause 500
 key alt+f4
 gone "Calculator"
 expect CALC = 14

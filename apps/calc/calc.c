@@ -28,6 +28,10 @@
  *   + - * /  %       the operations, modulo   F12 F2 F3 F4   64, 32, 16, 8 bits
  *   & | ^ ~          AND OR XOR NOT           < >            shifts left and right
  *
+ * View's History shows the calculations done, beside the keys (the standard and the scientific modes'): a click
+ * on one takes its result again. The mode, the history's place, the angles' unit and the programmer's word are
+ * kept in CALC.CFG beside the program (CALC -s, -p and -n start in a mode whatever is kept).
+ *
  * "CALC ..." lines on stdout give each result (the suite's). */
 #include <math.h>
 #include <stdio.h>
@@ -44,13 +48,15 @@ static struct gui_window *win;
 static struct gui_widget *display, *mem_label;
 static char entry[40];                  /* what is being typed ("" : none: the display shows `value`) */
 static double value, operand, memory;
-static int op, has_mem, error, fresh;   /* op: the pending operation; fresh: an operand is wanted */
+static int op, has_mem, error, fresh;   /* op: the pending operation; fresh: the next digit begins a number */
+static int got;                         /* an operand came without typing (a function's result, the memory, the
+                                           clipboard, the history) since the last operation */
 
 enum { K_C = 100, K_CE, K_BACK, K_SIGN, K_DOT, K_EQ, K_SQRT, K_PCT, K_INV, K_MC, K_MR, K_MS, K_MP,
        K_LP, K_RP, K_POW, K_MOD, K_PI, K_E, K_EXP, K_INVERSE, K_ANGLE,
        K_BASE, K_SIZE = K_BASE + 4, K_SIGNED = K_SIZE + 4, K_NOT, K_WOP,       /* (K_WOP + a CALC_ operation) */
        K_FN = K_WOP + 16 };                                                     /* (K_FN + n: fns[n]) */
-enum { C_COPY = 1, C_PASTE, C_ABOUT, C_STANDARD, C_SCIENTIFIC, C_PROGRAMMER };
+enum { C_COPY = 1, C_PASTE, C_ABOUT, C_STANDARD, C_SCIENTIFIC, C_PROGRAMMER, C_HISTORY };
 enum { M_STANDARD, M_SCIENTIFIC, M_PROGRAMMER };
 
 /* ---- the scientific mode's state: the expression so far (it ends with an operator, an open bracket, or, when
@@ -82,11 +88,90 @@ static void show_number(double v, char *out, size_t room)
     }
 }
 
+static int pbits = 32, pbase = 10, psigned = 1;     /* the programmer's word: its size, the base, signed or not */
+
+/* ---- the history: the calculations done, the newest last (the standard mode's as they were typed, each
+   operation as it came; the scientific mode's expressions), and each one's result */
+#define HIST 30
+static char hist[HIST][72];
+static double hist_value[HIST];
+static int nhist, show_history;
+static struct gui_widget *hist_list;
+static char hx[100];                    /* the standard mode's calculation so far, in words */
+static char home[200];                  /* the program's folder: CALC.CFG is there */
+
+static void hist_fill(void)
+{
+    int i;
+    if (!hist_list)
+        return;
+    gui_list_clear(hist_list);
+    for (i = 0; i < nhist; i++) {
+        const char *cells[1] = { hist[i] };
+        gui_list_add(hist_list, cells, NULL, NULL);
+    }
+}
+
+static void hist_add(const char *what, double result, int failed)
+{
+    char t[48];
+    if (nhist == HIST) {
+        memmove(hist[0], hist[1], sizeof hist[0] * (HIST - 1));
+        memmove(&hist_value[0], &hist_value[1], sizeof hist_value[0] * (HIST - 1));
+        nhist--;
+    }
+    if (failed)
+        snprintf(t, sizeof t, "%s", "error");
+    else
+        show_number(result, t, sizeof t);
+    snprintf(hist[nhist], sizeof hist[0], "%.50s = %s", what, t);
+    hist_value[nhist++] = failed ? 0 : result;
+    hist_fill();
+}
+
+/* What is kept between runs (a file of the program's own: GLOS.CFG's settings are GLOS's). */
+static void cfg_save(void)
+{
+    char path[240];
+    FILE *f;
+    snprintf(path, sizeof path, "%s\\CALC.CFG", home);
+    if (!home[0] || !(f = gui_fopen(path, "w")))        /* (no folder known, as on the host: nothing is kept) */
+        return;
+    fprintf(f, "mode %d\nhistory %d\nangle %d\nbits %d\nbase %d\nsigned %d\n", mode, show_history, angle, pbits, pbase,
+            psigned);
+    fclose(f);
+}
+
+static void cfg_load(void)
+{
+    char path[240], key[16];
+    FILE *f;
+    int v;
+    snprintf(path, sizeof path, "%s\\CALC.CFG", home);
+    if (!home[0] || !(f = gui_fopen(path, "r")))
+        return;
+    while (fscanf(f, "%15s %d", key, &v) == 2) {
+        if (!strcmp(key, "mode") && v >= M_STANDARD && v <= M_PROGRAMMER)
+            mode = v;
+        else if (!strcmp(key, "history"))
+            show_history = v != 0;
+        else if (!strcmp(key, "angle") && v >= CALC_DEG && v <= CALC_GRAD)
+            angle = v;
+        else if (!strcmp(key, "bits") && (v == 8 || v == 16 || v == 32 || v == 64))
+            pbits = v;
+        else if (!strcmp(key, "base") && (v == 2 || v == 8 || v == 10 || v == 16))
+            pbase = v;
+        else if (!strcmp(key, "signed"))
+            psigned = v != 0;
+    }
+    fclose(f);
+}
+
 /* ---- the programmer mode's state: the word in the display, the digits being typed in the base, the operation
    waiting and its left side, the word's size, the base, signed or not */
 static unsigned long long pval, pacc;
 static char pentry[72];
-static int pop, pfresh, pbits = 32, pbase = 10, psigned = 1;
+static int pop, pfresh;
 static struct gui_widget *base_label[4], *bits_view, *signed_key;
 static const int bases[4] = { 16, 10, 8, 2 }, sizes[4] = { 64, 32, 16, 8 };
 
@@ -255,14 +340,17 @@ static void prog_press(int k)
         pval = pcur(), pentry[0] = 0;
         pbase = bases[k - K_BASE];
         pfresh = 1;
+        cfg_save();
     } else if (k >= K_SIZE && k < K_SIZE + 4) {
         pval = pcur(), pentry[0] = 0;
         pbits = sizes[k - K_SIZE];
         pval = calc_word(pval, pbits), pacc = calc_word(pacc, pbits);
         pfresh = 1;
+        cfg_save();
         prog_said("word");
     } else if (k == K_SIGNED) {
         psigned = !psigned;
+        cfg_save();
     }
 }
 
@@ -381,6 +469,7 @@ static int sci_press(int k)
     }
     if (k == K_ANGLE) {
         angle = (angle + 1) % 3;
+        cfg_save();
         return 1;
     }
     if ((k >= '0' && k <= '9') || k == K_DOT) {
@@ -452,6 +541,7 @@ static int sci_press(int k)
             sci_error(e);
         else
             value = v;
+        hist_add(sx, value, e != CALC_OK);
         sx[0] = 0;
         have = pending = 0;                     /* (the result is there for an operator; a bracket may begin too) */
         entry[0] = 0;
@@ -534,27 +624,51 @@ static void press(int k)
         if (!strchr(entry, '.') && n < DIGITS + 1)
             strcat(entry, ".");
     } else if (k == '+' || k == '-' || k == '*' || k == '/') {
-        if (op && !fresh)
+        {                                       /* (the history's words: the operand, unless only the operator changes) */
+            char t[48], o[4] = { ' ', (char)k, ' ', 0 };
+            size_t m = strlen(hx);
+            if (op && fresh && !got && m >= 3) {
+                hx[m - 3] = 0;
+            } else {
+                show_number(current(), t, sizeof t);
+                if (strlen(hx) + strlen(t) < sizeof hx - 4)
+                    strcat(hx, t);
+            }
+            if (strlen(hx) < sizeof hx - 4)
+                strcat(hx, o);
+        }
+        if (op && (!fresh || got))
             apply();
         else if (!op)
             value = current(), entry[0] = 0;
+        got = 0;
         if (!error) {
             operand = value;
             op = k;
             fresh = 1;
         }
     } else if (k == K_EQ) {
+        {
+            char t[48];
+            show_number(current(), t, sizeof t);
+            if (strlen(hx) + strlen(t) < sizeof hx)
+                strcat(hx, t);
+        }
         if (op)
             apply();
         else
             value = current(), entry[0] = 0;
         fresh = 1;
+        got = 0;
+        hist_add(hx, value, error);
+        hx[0] = 0;
         said("=");
     } else if (k == K_C) {
         entry[0] = 0;
         value = operand = 0;
         op = error = 0;
-        fresh = 0;
+        fresh = got = 0;
+        hx[0] = 0;
     } else if (k == K_CE) {
         entry[0] = 0;
         error = 0;
@@ -590,7 +704,7 @@ static void press(int k)
         }
         if (op) {                               /* (the operand being typed becomes this) */
             show_number(v, entry, sizeof entry);
-            fresh = 1;
+            fresh = got = 1;
         } else {
             value = v;
             entry[0] = 0;
@@ -602,7 +716,7 @@ static void press(int k)
     } else if (k == K_MR) {
         if (has_mem) {
             show_number(memory, entry, sizeof entry);
-            fresh = 1;
+            fresh = got = 1;
         }
     } else if (k == K_MS) {
         memory = current(), has_mem = memory != 0;
@@ -703,6 +817,27 @@ static int key(struct gui_window *w, struct gui_ev *e)
 
 static void build(void);
 
+/* A calculation of the history chosen: its result is the number in the display again. */
+static void hist_pick(struct gui_widget *w, int what)
+{
+    int r = gui_list_get(w);
+    (void)what;
+    if (r < 0 || r >= nhist || error)
+        return;
+    if (have)
+        sx[0] = 0, have = depth = 0;
+    value = hist_value[r];
+    entry[0] = 0;
+    fresh = pending = got = 1;
+    if (win->focus) {                           /* (the keys stay the keyboard's) */
+        gui_damage(win->focus);
+        win->focus = NULL;
+    }
+    printf("CALC again %d\n", r + 1);
+    fflush(stdout);
+    refresh();
+}
+
 static void command(struct gui_window *w, int id)
 {
     char t[48];
@@ -724,17 +859,21 @@ static void command(struct gui_window *w, int id)
             if (mode == M_SCIENTIFIC && calc_eval(c, angle, &v) != CALC_OK)    /* (an expression, here) */
                 v = atof(c);
             show_number(v, entry, sizeof entry);
-            fresh = pending = 1;
+            fresh = pending = got = 1;
             free(c);
             refresh();
         }
     } else if (id == C_ABOUT) {
         gui_message(win, GUI_T("About Calculator"), GUI_T("Calculator: GLOS's pocket calculator."), GUI_MB_OK);
-    } else if (id >= C_STANDARD && id <= C_PROGRAMMER && id - C_STANDARD != mode) {
+    } else if ((id >= C_STANDARD && id <= C_PROGRAMMER && id - C_STANDARD != mode) || id == C_HISTORY) {
         struct gui_window *old = win;           /* another mode: its window made, this one gone after */
-        mode = id - C_STANDARD;
+        if (id == C_HISTORY)
+            show_history = !show_history;
+        else
+            mode = id - C_STANDARD;
         sx[0] = 0;
         have = depth = inverse = pending = 0;
+        cfg_save();
         build();
         gui_show(win, 1);
         refresh();
@@ -781,7 +920,7 @@ static const struct { const char *t; int k; } prog_more[3] = { { "D", 'D' }, { "
 /* The mode's window (the standard one's is as it always was: the tests press its keys by their places). */
 static void build(void)
 {
-    struct gui_widget *box, *row, *b, *pads, *pad;
+    struct gui_widget *box, *row, *b, *pads, *pad, *host = NULL;
     struct gui_menubar *bar;
     struct gui_menu *m;
     int r, c;
@@ -797,10 +936,18 @@ static void build(void)
     gui_menu_item(m, GUI_T("&Standard"), C_STANDARD, NULL);
     gui_menu_item(m, GUI_T("S&cientific"), C_SCIENTIFIC, NULL);
     gui_menu_item(m, GUI_T("&Programmer"), C_PROGRAMMER, NULL);
+    gui_menu_item(m, GUI_T("&History"), C_HISTORY, NULL);
     gui_menu_check(m, C_STANDARD + mode, 1);
+    gui_menu_check(m, C_HISTORY, show_history);
     m = gui_menu(bar, GUI_T("&Help"));
     gui_menu_item(m, GUI_T("&About Calculator"), C_ABOUT, NULL);
-    box = gui_vbox(win->root, 4, 8);
+    hist_list = NULL;
+    if (show_history && mode != M_PROGRAMMER) { /* the history beside the keys (the window is as wide again) */
+        host = gui_hbox(win->root, 0, 0);
+        box = gui_vbox(host, 4, 8);
+    } else {
+        box = gui_vbox(win->root, 4, 8);
+    }
     expr_label = angle_key = inverse_key = NULL;
     if (mode == M_SCIENTIFIC) {
         expr_label = gui_label(box, "");
@@ -874,6 +1021,15 @@ static void build(void)
             gui_size(b, 44, 26);
         }
     }
+    if (host) {
+        pad = gui_vbox(host, 0, 8);
+        hist_list = gui_list(pad, 1, NULL, NULL);
+        hist_list->flags |= GUI_NOTAB;
+        gui_size(hist_list, mode == M_SCIENTIFIC ? 160 : 190, 0);      /* (the window fits 640 pixels) */
+        gui_grow(hist_list, 1);
+        gui_on(hist_list, hist_pick, 0);
+        hist_fill();
+    }
     gui_fit(win);
 }
 
@@ -883,10 +1039,23 @@ int main(int argc, char **argv)
         printf("CALC no GLOS\n");
         return 1;
     }
-    if (argc > 1 && !strcmp(argv[1], "-s"))     /* CALC -s: scientific from the start; CALC -p: programmer */
+    {                                           /* its own folder, as DOS writes it: CALC.CFG's place */
+        char *q;
+        snprintf(home, sizeof home, "%s", argv[0]);
+        for (q = home; *q; q++)
+            *q = *q == '/' ? '\\' : (*q >= 'a' && *q <= 'z') ? (char)(*q - 32) : *q;
+        if ((q = strrchr(home, '\\')) != NULL)
+            *q = 0;
+        else
+            home[0] = 0;
+    }
+    cfg_load();
+    if (argc > 1 && !strcmp(argv[1], "-s"))     /* CALC -s: scientific whatever is kept; -p: programmer; -n: standard */
         mode = M_SCIENTIFIC;
     if (argc > 1 && !strcmp(argv[1], "-p"))
         mode = M_PROGRAMMER;
+    if (argc > 1 && !strcmp(argv[1], "-n"))
+        mode = M_STANDARD, show_history = 0;
     build();
     gui_show(win, 1);
     refresh();

@@ -1,5 +1,5 @@
 # The calculator (apps/calc; M9 step D): sums by keys and by presses, the memory, an error, the clipboard.
-run CALC.EXE
+run CALC.EXE -n
 wait "Calculator"
 shot start "Calculator"
 type 12+7*3=

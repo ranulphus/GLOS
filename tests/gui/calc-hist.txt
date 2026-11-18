@@ -1,0 +1,35 @@
+# The Calculator's history (apps/calc; phase E, docs/v1/apps/calculator.md): View's History puts it beside the
+# keys; two calculations (the second has a root in its middle, which once lost the sum before it); a click on
+# the first takes its result again; the scientific mode's expressions join it; History off again.
+run CALC.EXE -n
+wait "Calculator"
+key alt+v h
+wait "Calculator"
+pause 500
+type 12+7*3=
+type 9+16@*2=
+shot hist-two "Calculator"
+click "Calculator" 320 37
+type +1=
+shot hist-again "Calculator"
+key alt+v c
+wait "Calculator"
+pause 500
+type (2+3)*4=
+shot hist-sci "Calculator"
+key alt+v h
+wait "Calculator"
+pause 500
+key alt+v s
+wait "Calculator"
+pause 500
+shot hist-off "Calculator"
+key alt+f4
+gone "Calculator"
+expect CALC = 57
+expect CALC = 26
+expect CALC again 1
+expect CALC = 58
+expect CALC mode scientific
+expect CALC = 20
+expect CALC end
