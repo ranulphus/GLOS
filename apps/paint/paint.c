@@ -21,6 +21,7 @@
 #include "paintdoc.h"
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_IN, C_OUT, C_ACTUAL, C_FIT, C_ABOUT, C_FILLED,
+       C_RESIZE, C_CANVAS,
        C_TURN = 50,                     /* + PD_RIGHT, PD_LEFT, PD_ACROSS, PD_OVER */
        C_TOOL = 100 };
 enum { T_PENCIL, T_BRUSH, T_ERASER, T_LINE, T_RECT, T_ELLIPSE, T_FILL, T_PICK, T_COUNT };
@@ -161,6 +162,84 @@ static void turn(int how)
     *h = how;
     turned(how);
     gui_undo_push(undo, GUI_T(names[how]), turn_undo, turn_redo, h, sizeof *h, free, NULL, 0);
+}
+
+/* ---- the whole picture another size (Image's Resize and Canvas Size): the picture before is kept whole, and
+   undo and redo change the kept one and the shown one over */
+
+static void kept_swap(void *p)
+{
+    if (pd_swap(doc, p) != 0)
+        return;
+    gui_image_view_set(view, doc->flat, doc->w, doc->h, doc->w);
+    status_parts();
+    gui_damage(view);
+    dirty = 1;
+    printf("PAINT size %dx%d\n", doc->w, doc->h);
+    fflush(stdout);
+}
+
+static void kept_drop(void *p) { pd_kept_free(p); }
+
+static struct {
+    struct gui_widget *w, *h, *smooth, *where;
+    int vw, vh, vsmooth, vwhere;
+} sz;
+
+static void size_button(struct gui_widget *b, int what)
+{
+    (void)what;
+    sz.vw = gui_value(sz.w), sz.vh = gui_value(sz.h);   /* (read while the dialog is there) */
+    sz.vsmooth = sz.smooth ? gui_checked(sz.smooth) : 0;
+    sz.vwhere = sz.where ? gui_value(sz.where) : 0;
+    gui_end_modal(b->win, b->id);
+}
+
+/* Resize (canvas 0): every layer scaled to the size asked. Canvas Size (1): the picture kept as it is on a
+   canvas that size, at one of nine places; the new part is the second colour's. */
+static void resize(int canvas)
+{
+    static const char *const places[9] = { GUI_N("Top left"), GUI_N("Top"), GUI_N("Top right"), GUI_N("Left"),
+                                           GUI_N("Middle"), GUI_N("Right"), GUI_N("Bottom left"), GUI_N("Bottom"),
+                                           GUI_N("Bottom right") };
+    struct gui_window *d = gui_window(canvas ? GUI_T("Canvas Size") : GUI_T("Resize"), 240, 0, GUI_W_DIALOG);
+    struct gui_widget *box = gui_vbox(d->root, 6, 8), *form = gui_form(box), *row;
+    struct pd_kept *k;
+    int r, i;
+    d->owner = win;
+    sz.w = gui_spin(gui_row(form, GUI_T("&Width:"), NULL), 1, PD_MAX, doc->w);
+    sz.h = gui_spin(gui_row(form, GUI_T("&Height:"), NULL), 1, PD_MAX, doc->h);
+    sz.smooth = sz.where = NULL;
+    if (canvas) {
+        sz.where = gui_choice(gui_row(form, GUI_T("&Picture at:"), NULL), 12);
+        for (i = 0; i < 9; i++)
+            gui_choice_add(sz.where, GUI_T(places[i]));
+        gui_set_value(sz.where, 4);
+    } else {
+        sz.smooth = gui_check(box, GUI_T("&Smooth"), 1);
+    }
+    row = gui_hbox(box, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("OK"), size_button, 1)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), size_button, 0)->flags |= GUI_CANCEL;
+    r = gui_modal(d);                           /* (which closes it) */
+    if (r != 1 || (sz.vw == doc->w && sz.vh == doc->h))
+        return;
+    if (!(k = pd_keep(doc))
+        || (canvas ? pd_canvas(doc, sz.vw, sz.vh, sz.vwhere % 3, sz.vwhere / 3, gui_colour_get(second))
+                   : pd_resize(doc, sz.vw, sz.vh, sz.vsmooth)) != 0) {
+        pd_kept_free(k);
+        gui_message(win, GUI_T("Paint"), GUI_T("There isn't the memory for a picture that large."), GUI_MB_OK);
+        return;
+    }
+    gui_image_view_set(view, doc->flat, doc->w, doc->h, doc->w);
+    status_parts();
+    gui_damage(view);
+    dirty = 1;
+    printf("PAINT %s %dx%d\n", canvas ? "canvas" : "resized", doc->w, doc->h);
+    fflush(stdout);
+    gui_undo_push(undo, canvas ? GUI_T("Canvas Size") : GUI_T("Resize"), kept_swap, kept_swap, k, pd_kept_bytes(k), kept_drop,
+                  NULL, 0);
 }
 
 /* ---- the tools */
@@ -476,6 +555,8 @@ static void command(struct gui_window *w, int id)
     case C_OUT: gui_cview_zoom(view, gui_cview_get_zoom(view) > 25 ? gui_cview_get_zoom(view) / 2 : 25); break;
     case C_ACTUAL: gui_cview_zoom(view, 100); break;
     case C_FIT: gui_cview_zoom(view, 0); break;
+    case C_RESIZE: resize(0); break;
+    case C_CANVAS: resize(1); break;
     case C_FILLED:
         filled = !filled;
         gui_command_check(win, C_FILLED, filled);
@@ -580,6 +661,9 @@ int main(int argc, char **argv)
     gui_menu_item(m, GUI_T("Turn &Right"), C_TURN + PD_RIGHT, NULL);
     gui_menu_item(m, GUI_T("Flip &Across"), C_TURN + PD_ACROSS, NULL);
     gui_menu_item(m, GUI_T("Flip &Over"), C_TURN + PD_OVER, NULL);
+    gui_menu_sep(m);
+    gui_menu_item(m, GUI_T("Re&size..."), C_RESIZE, NULL);
+    gui_menu_item(m, GUI_T("&Canvas Size..."), C_CANVAS, NULL);
     m = gui_menu(bar, GUI_T("&Tools"));
     for (i = 0; i < T_COUNT; i++)
         gui_menu_item(m, GUI_T(tools[i].text), C_TOOL + i, NULL);

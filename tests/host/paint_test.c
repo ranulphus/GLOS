@@ -284,6 +284,54 @@ int main(void)
     is("no such turn", pd_turn(d, 9), -1);
     pd_free(d);
 
+    {                                           /* the whole picture another size, and kept for undoing that */
+        struct pd_kept *k;
+        d = pd_new(2, 2, PAPER);
+        pd_dot(d, 0, 0, INK, 1);
+        pd_dot(d, 1, 1, RED, 1);
+        k = pd_keep(d);
+        is("resized", pd_resize(d, 4, 4, 0), 0);
+        check("twice as large, by the nearest", d,
+              "##..\n"
+              "##..\n"
+              "..oo\n"
+              "..oo\n");
+        is("kept, and changed over", k && pd_swap(d, k) == 0, 1);
+        check("as it was", d,
+              "#.\n"
+              ".o\n");
+        is("and over again", pd_swap(d, k), 0);
+        is("its size again", d->w * 10 + d->h, 44);
+        pd_kept_free(k);
+        is("made smaller", pd_resize(d, 2, 2, 0), 0);
+        check("half as large", d,
+              "#.\n"
+              ".o\n");
+        pd_free(d);
+        d = pd_new(2, 1, PAPER);                /* smooth: a black and a white pixel, four wide */
+        pd_dot(d, 0, 0, INK, 1);
+        pd_resize(d, 4, 1, 1);
+        is("smooth: the ends as they were", (long)(pd_get(d, 0, 0) == INK && pd_get(d, 3, 0) == PAPER), 1);
+        is("smooth: a dark grey", (long)pd_get(d, 1, 0), 0x404040);
+        is("smooth: a light grey", (long)pd_get(d, 2, 0), 0xBFBFBF);
+        pd_free(d);
+        d = pd_new(2, 2, PAPER);                /* a canvas: larger about the middle, then cut to a corner */
+        pd_rect(d, 0, 0, 1, 1, INK, 0, INK);
+        is("a larger canvas", pd_canvas(d, 4, 4, 1, 1, RED), 0);
+        check("the picture in its middle", d,
+              "oooo\n"
+              "o##o\n"
+              "o##o\n"
+              "oooo\n");
+        is("a smaller canvas", pd_canvas(d, 2, 3, 2, 2, PAPER), 0);
+        check("its bottom right corner kept", d,
+              "#o\n"
+              "#o\n"
+              "oo\n");
+        is("no such size", pd_resize(d, 0, 5, 0), -1);
+        pd_free(d);
+    }
+
     is("too large is refused", pd_new(PD_MAX + 1, 1, PAPER) == NULL, 1);
     is("nothing is refused", pd_new(0, 4, PAPER) == NULL, 1);
 

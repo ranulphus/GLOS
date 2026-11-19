@@ -3,7 +3,9 @@
 # the first colour from the palette, shapes filled, a flood, the picker, the eraser; undo and redo; the picture
 # saved as a PNG, a new one made, the saved one opened: it is the picture that was saved (the toolbar is masked
 # in the pictures that are compared: Undo is grey after a file is opened). Then the whole picture turned left
-# (Image's menu) and the turn undone: the picture as it was; and Paint asks about changes not saved.
+# (Image's menu) and the turn undone: the picture as it was; made half as large (Resize, smooth), put on a
+# larger canvas of the second colour, and both undone: the picture as it was; and Paint asks about changes not
+# saved.
 run PAINT.EXE
 wait "Untitled - Paint"
 shot start "Untitled - Paint"
@@ -55,6 +57,29 @@ shot turned "P1.PNG - Paint"
 key ctrl+z
 shot unturned "P1.PNG - Paint" 0 20 560 26
 same opened unturned
+key alt+i
+key s
+wait "Resize"
+shot resize-ask "Resize"
+quick home shift+end
+type 160\t
+quick home shift+end
+type 120\n
+gone "Resize"
+shot resized "P1.PNG - Paint"
+key alt+i
+key c
+wait "Canvas Size"
+quick home shift+end
+type 200\t
+quick home shift+end
+type 160\n
+gone "Canvas Size"
+shot canvas "P1.PNG - Paint"
+key ctrl+z
+key ctrl+z
+shot unsized "P1.PNG - Paint" 0 20 560 26
+same opened unsized
 key alt+f4
 wait "Paint"
 key alt+n
@@ -74,4 +99,8 @@ expect PAINT saved C:\OUT\P1.PNG 320x240
 expect PAINT open C:\OUT\P1.PNG 320x240 PNG
 expect PAINT turned left 240x320
 expect PAINT turned right 320x240
+expect PAINT resized 160x120
+expect PAINT canvas 200x160
+expect PAINT size 160x120
+expect PAINT size 320x240
 expect PAINT end

@@ -48,6 +48,24 @@ enum { PD_RIGHT = 1, PD_LEFT, PD_ACROSS, PD_OVER };
 int pd_turn(struct pd_doc *d, int how);
 int pd_turn_back(int how);
 
+/* The whole picture another size. pd_resize: every layer scaled (smooth: each new pixel from the four old ones
+   round where it falls; else from the nearest). pd_canvas: the picture as it is on a canvas nw by nh, at the
+   place ax, ay say (0 the left or top, 1 the middle, 2 the right or bottom): what falls outside is cut off,
+   what is new is `paper` on the bottom layer and clear on the others. 0, or -1 with nothing changed. */
+int pd_resize(struct pd_doc *d, int nw, int nh, int smooth);
+int pd_canvas(struct pd_doc *d, int nw, int nh, int ax, int ay, unsigned paper);
+
+/* The whole picture kept, for a step that changes all of it (a resize, a canvas): pd_keep copies it; pd_swap
+   changes what is kept and what the picture is over (undo, and redo again). */
+struct pd_kept {
+    int w, h, n;
+    unsigned *px[PD_LAYERS];
+};
+struct pd_kept *pd_keep(const struct pd_doc *d);
+int pd_swap(struct pd_doc *d, struct pd_kept *k);       /* 0, or -1 (no memory for what shows: nothing changed) */
+void pd_kept_free(struct pd_kept *k);
+unsigned pd_kept_bytes(const struct pd_kept *k);
+
 /* A step to undo: the current layer's pixels in a rectangle, before and after. pd_before copies the layer (as
    a tool begins); pd_step makes the step of what the tools changed since pd_clean (NULL: nothing did, or no
    memory) and frees the copy; pd_apply puts the before (undo) or the after back and flattens. */

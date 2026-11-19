@@ -427,6 +427,157 @@ int pd_turn(struct pd_doc *d, int how)
     return 0;
 }
 
+/* ---- the whole picture another size */
+
+/* The layers' new pixels put in place of the old (taken over), the picture nw by nh. */
+static int resized(struct pd_doc *d, unsigned **n, int nw, int nh)
+{
+    unsigned *flat = malloc((size_t)nw * (size_t)nh * sizeof *flat);
+    int i;
+    if (!flat)
+        return -1;
+    for (i = 0; i < d->n; i++) {
+        free(d->layer[i].px);
+        d->layer[i].px = n[i];
+    }
+    free(d->flat);
+    d->flat = flat;
+    d->w = nw, d->h = nh;
+    pd_flatten(d, 0, 0, nw, nh);
+    pd_clean(d);
+    return 0;
+}
+
+static int layers_new(const struct pd_doc *d, unsigned **n, int nw, int nh)
+{
+    int i;
+    if (nw < 1 || nh < 1 || nw > PD_MAX || nh > PD_MAX)
+        return -1;
+    for (i = 0; i < d->n; i++)
+        if (!(n[i] = malloc((size_t)nw * (size_t)nh * sizeof **n))) {
+            while (i--)
+                free(n[i]);
+            return -1;
+        }
+    return 0;
+}
+
+int pd_resize(struct pd_doc *d, int nw, int nh, int smooth)
+{
+    unsigned *n[PD_LAYERS];
+    int i, x, y, k, w = d->w, h = d->h;
+    if (layers_new(d, n, nw, nh) != 0)
+        return -1;
+    for (i = 0; i < d->n; i++) {
+        const unsigned *from = d->layer[i].px;
+        for (y = 0; y < nh; y++)
+            for (x = 0; x < nw; x++) {
+                if (!smooth) {
+                    n[i][(size_t)y * nw + x] = from[(size_t)((long long)y * h / nh) * w + (int)((long long)x * w / nw)];
+                } else {                        /* where the new pixel's middle falls among the old ones' middles, in
+                                                   256ths; the four round it, each by how near it is */
+                    long long fx = ((2LL * x + 1) * w * 256) / (2LL * nw) - 128, fy = ((2LL * y + 1) * h * 256) / (2LL * nh) - 128;
+                    int x0, y0, x1, y1, wx, wy;
+                    unsigned c = 0;
+                    if (fx < 0)
+                        fx = 0;
+                    if (fy < 0)
+                        fy = 0;
+                    x0 = (int)(fx >> 8), y0 = (int)(fy >> 8), wx = (int)(fx & 255), wy = (int)(fy & 255);
+                    x1 = x0 + 1 < w ? x0 + 1 : x0, y1 = y0 + 1 < h ? y0 + 1 : y0;
+                    for (k = 0; k < 32; k += 8) {
+                        unsigned a = from[(size_t)y0 * w + x0] >> k & 255, b = from[(size_t)y0 * w + x1] >> k & 255;
+                        unsigned e = from[(size_t)y1 * w + x0] >> k & 255, f = from[(size_t)y1 * w + x1] >> k & 255;
+                        unsigned top = a * (256 - wx) + b * wx, bot = e * (256 - wx) + f * wx;
+                        c |= ((top * (256 - wy) + bot * wy + 32768) >> 16) << k;
+                    }
+                    n[i][(size_t)y * nw + x] = c;
+                }
+            }
+    }
+    if (resized(d, n, nw, nh) != 0) {
+        for (i = 0; i < d->n; i++)
+            free(n[i]);
+        return -1;
+    }
+    return 0;
+}
+
+int pd_canvas(struct pd_doc *d, int nw, int nh, int ax, int ay, unsigned paper)
+{
+    unsigned *n[PD_LAYERS];
+    int i, x, y, w = d->w, h = d->h, ox, oy;
+    if (layers_new(d, n, nw, nh) != 0)
+        return -1;
+    ox = ax == 0 ? 0 : ax == 1 ? (nw - w) / 2 : nw - w;         /* (where the old picture's corner is on the new) */
+    oy = ay == 0 ? 0 : ay == 1 ? (nh - h) / 2 : nh - h;
+    for (i = 0; i < d->n; i++) {
+        unsigned ground = i ? 0 : 0xFF000000u | (paper & 0xFFFFFFu);
+        for (y = 0; y < nh; y++)
+            for (x = 0; x < nw; x++) {
+                int sx = x - ox, sy = y - oy;
+                n[i][(size_t)y * nw + x] = sx >= 0 && sy >= 0 && sx < w && sy < h ? d->layer[i].px[(size_t)sy * w + sx]
+                                                                                 : ground;
+            }
+    }
+    if (resized(d, n, nw, nh) != 0) {
+        for (i = 0; i < d->n; i++)
+            free(n[i]);
+        return -1;
+    }
+    return 0;
+}
+
+struct pd_kept *pd_keep(const struct pd_doc *d)
+{
+    struct pd_kept *k = calloc(1, sizeof *k);
+    size_t all = (size_t)d->w * (size_t)d->h * sizeof(unsigned);
+    int i;
+    if (!k)
+        return NULL;
+    k->w = d->w, k->h = d->h, k->n = d->n;
+    for (i = 0; i < d->n; i++) {
+        if (!(k->px[i] = malloc(all))) {
+            pd_kept_free(k);
+            return NULL;
+        }
+        memcpy(k->px[i], d->layer[i].px, all);
+    }
+    return k;
+}
+
+int pd_swap(struct pd_doc *d, struct pd_kept *k)
+{
+    unsigned *flat, *t;
+    int i, w = d->w, h = d->h;
+    if (k->n != d->n || !(flat = malloc((size_t)k->w * (size_t)k->h * sizeof *flat)))
+        return -1;
+    for (i = 0; i < d->n; i++)
+        t = d->layer[i].px, d->layer[i].px = k->px[i], k->px[i] = t;
+    free(d->flat);
+    d->flat = flat;
+    d->w = k->w, d->h = k->h;
+    k->w = w, k->h = h;
+    pd_flatten(d, 0, 0, d->w, d->h);
+    pd_clean(d);
+    return 0;
+}
+
+void pd_kept_free(struct pd_kept *k)
+{
+    int i;
+    if (!k)
+        return;
+    for (i = 0; i < k->n; i++)
+        free(k->px[i]);
+    free(k);
+}
+
+unsigned pd_kept_bytes(const struct pd_kept *k)
+{
+    return (unsigned)(sizeof *k + (size_t)k->w * (size_t)k->h * (size_t)k->n * sizeof(unsigned));
+}
+
 /* ---- steps to undo */
 
 unsigned *pd_before(const struct pd_doc *d)
