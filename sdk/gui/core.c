@@ -634,6 +634,44 @@ struct gui_window *gui_window_of(unsigned id)
     return NULL;
 }
 
+/* The pop-ups closed lately, and whose they were. GLOS sends a key to the window that has the keyboard as it is
+   pressed: a key typed just after a menu's item was chosen, while the app (a slow PC's) had not yet closed the
+   menu, comes for the pop-up, which is gone by the time it is looked at: it is the pop-up's owner's then (it was
+   dropped: B typed after Layers' New Layer in Paint's suite on the 486 chose no brush). */
+static struct {
+    unsigned id;
+    struct gui_window *owner;
+} gone_pop[8];
+static unsigned gone_n;
+
+static void popup_gone(struct gui_window *w)
+{
+    unsigned i;
+    if (!(w->flags & GUI_W_POPUP) || !w->id || !w->owner)
+        return;
+    for (i = 0; i < 8; i++)
+        if (gone_pop[i].id == w->id) {          /* (GLOS gives a window's number out again: whose it is now) */
+            gone_pop[i].owner = w->owner;
+            return;
+        }
+    gone_pop[gone_n % 8].id = w->id, gone_pop[gone_n % 8].owner = w->owner;
+    gone_n++;
+}
+
+static struct gui_window *popup_owner(unsigned id)     /* of a pop-up that has gone: its owner, if that is there */
+{
+    struct gui_window *w;
+    unsigned i;
+    for (i = 0; i < 8; i++)
+        if (gone_pop[i].id == id && gone_pop[i].owner) {
+            for (w = G.wins; w; w = w->next)
+                if (w == gone_pop[i].owner && !w->closing)
+                    return w;
+            return NULL;
+        }
+    return NULL;
+}
+
 int gui_window_active(struct gui_window *w) { return w->active; }
 
 void gui_fit(struct gui_window *w)
@@ -812,6 +850,13 @@ void gui_close(struct gui_window *w)
         return;
     }
     gui_menu_gone(w);                           /* (an open menu of it, or it a menu's pop-up: forgotten) */
+    popup_gone(w);
+    {                                           /* (and it is no gone pop-up's owner any more) */
+        unsigned i;
+        for (i = 0; i < 8; i++)
+            if (gone_pop[i].owner == w)
+                gone_pop[i].owner = NULL;
+    }
     for (;;) {                                  /* pop-ups and dialogs of it go first */
         struct gui_window *o;
         for (o = G.wins; o && !(o->owner == w && !o->closing); o = o->next)
@@ -1194,6 +1239,8 @@ static int os_from(const struct glos_ev *e, struct os_event *o)
 static void dispatch(const struct os_event *ev)
 {
     struct gui_window *w = gui_window_of(ev->window);
+    if (!w && ev->type == OS_KEY)               /* (typed to a pop-up that has closed since: its owner's) */
+        w = popup_owner(ev->window);
     if (!w)
         return;
     if ((ev->type == OS_KEY && ev->down) || ev->type == OS_WHEEL || (ev->type == OS_MOUSE && ev->key && ev->down)
@@ -1371,6 +1418,7 @@ static void fire(void)
 void gui_close_later(struct gui_window *w)
 {
     if (w && !w->closing) {
+        popup_gone(w);
         w->closing = 2;
         if (w->id)
             glos_show(w->id, GLOS_WS_HIDDEN);
