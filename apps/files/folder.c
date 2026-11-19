@@ -526,6 +526,8 @@ struct job {
     struct gui_widget *line, *left, *bar;
     char *buf;
     unsigned began;
+    unsigned t_work, t_count, t_end;    /* when the work's thread took it up, had counted, had done (job_done says
+                                           how long each took: where a job's time goes on a slow PC) */
     int n, cut, del, shown;             /* (del: a delete: `from` alone, and the counts are of files and folders) */
     int ext;                            /* an archive unpacked whole (Extract Here): said so */
     int zip;                            /* a ZIP changed (zfile): 1: each `from` put into it under the name `to`
@@ -957,8 +959,10 @@ static void job_work(struct gui_task *t, void *arg)
     struct job *j = arg;
     int i;
     (void)t;
+    j->t_work = j->t_count = glos_ticks();
     if (j->zip) {
         zip_work(j);
+        j->t_end = glos_ticks();
         return;
     }
     for (i = 0; i < j->n; i++) {
@@ -969,6 +973,7 @@ static void job_work(struct gui_task *t, void *arg)
             job_count(j, j->from[i], 0);
     }
     j->counted = 1;
+    j->t_count = glos_ticks();
     for (i = 0; i < j->n && !job_stopped(j); i++) {
         j->at = i;
         if (j->del ? remove_tree(j, j->from[i]) == 0
@@ -979,6 +984,7 @@ static void job_work(struct gui_task *t, void *arg)
             j->ok++;
         }
     }
+    j->t_end = glos_ticks();
 }
 
 /* ---- ... and on the window's thread: its progress, and its end */
@@ -1057,6 +1063,12 @@ static void job_done(struct gui_window *owner, void *arg, int cancelled)
         }
     if (!jobs)
         gui_idle(job_tick, NULL, 0);
+    if (j->task) {                              /* its time, in milliseconds: until the work's thread took it up, the
+                                                   counting, the work, and until this was told of its end */
+        snprintf(t, sizeof t, "start=%u count=%u work=%u told=%u", j->t_work - j->began, j->t_count - j->t_work,
+                 j->t_end - j->t_count, glos_ticks() - j->t_end);
+        say("job", t);
+    }
     if (j->del) {
         int i;
         for (i = 0; i < j->n; i++)

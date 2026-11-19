@@ -231,9 +231,18 @@ are as they were).
   - **A folder shown is not listed anew for every file a job writes** (found by these scripts on the 486's
     profile, where two small files took more than a second to pack, and plain copies as long): each file
     written changed the watched folder, and its listing, made again each time, held the job up. While a job is
-    at work a changed folder is listed again once a second at most, and at the job's end. A small job on that
-    profile still takes about a second (its window comes up); where the rest of it goes (DOS's own calls, the
-    threads' turns) is not measured yet.
+    at work a changed folder is listed again once a second at most, and at the job's end.
+  - **A file is asked after by DOS's own find, not the C library's `stat`** (the toolkit's `gui_stat`,
+    `gui_is_dir` and `gui_dir_read` on DOS: `sdk/gui/files.c`). A job says how long it took (`FILES job
+    start=... count=... work=... told=...`, milliseconds), and on the 486's profile that showed where a small
+    job's second went: not the threads (a few milliseconds) but the files' own calls. DJGPP's `stat` makes a
+    dozen DOS calls for a name and opens every file to see whether it is a program: 45 ms a name there, once
+    for every name in a folder listed and two or three times for every file of a job. One find call says the
+    same (attributes, size, date, time). Measured there, before and after: a paste's counting 0.49 s to 0.11;
+    Add to ZIP 1.47 s to 0.39; three files pasted out of a ZIP 1.67 s to 0.47; a TAR in a GZ extracted 1.78 s
+    to 0.82. No job of the scripts takes a second there any more. What is left is the library's `open` (it
+    walks the path for symbolic links) and the cost of a DOS call from an app's thread, some 4 ms each on
+    that profile: to be measured apart (an app's call goes to the system VM's thread and back).
   - **The scripts wait for a job's end by what Files says of it** (`said LINE`, new in both players: the
     host's reads its own output's file back, Loop A's reads the app's output as it comes), and then for its
     window's going (`gone "Packing"`), where the older scripts pause a second and a half: on the 486's profile

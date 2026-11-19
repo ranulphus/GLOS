@@ -16,6 +16,9 @@ in its `docs/milestones-*.md`.
   one of what is chosen. A paste that is stopped or runs out of room leaves the ZIP as it was.
 - **Pastes are quicker on a slow PC:** the folder being written to was listed again after every file; while a
   job is at work it is now listed again once a second at most.
+- **Folders are listed and files found faster in every app** (the toolkit on DOS): one DOS call a name where
+  the C library made a dozen. On the emulated 486DX2 a listing's and a job's file calls take a tenth of the
+  time they did.
 - **Not yet:** LZH, ARJ and 7z; renaming inside a ZIP; a TAR or a GZ written.
 - `apps/shared/arc.c` (the reader and the ZIP writer), `apps/shared/deflate.c` (GLOS's own packer); the
   loader's inflate takes its state from the caller now.

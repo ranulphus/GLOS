@@ -81,10 +81,51 @@ static int name_cmp(const struct gui_dirent *a, const struct gui_dirent *b)
 
 static int qcmp(const void *a, const void *b) { return name_cmp(a, b); }
 
+#ifdef __DJGPP__
+/* On DOS a file or a folder is asked after by DOS's own find: one call, which says its attributes, size, date
+   and time. The C library's stat makes a dozen calls for the same and opens every file to see whether it is a
+   program: 45 ms a name on the 486's profile, for a folder's listing a stat for each name in it, and for a job
+   two or three for each file (a copy of two small files took a second there; 2026-11-19). */
+#define DOS_ALL (FA_RDONLY | FA_HIDDEN | FA_SYSTEM | FA_DIREC | FA_ARCH)
+
+static void from_find(const struct ffblk *f, const char *name, struct gui_dirent *e)
+{
+    memset(e, 0, sizeof *e);
+    strncpy(e->name, name, sizeof e->name - 1);
+    e->dir = (f->ff_attrib & FA_DIREC) != 0;
+    e->size = e->dir ? 0 : f->ff_fsize;
+    e->date = f->ff_fdate ? f->ff_fdate : (1 << 5) | 1;        /* (none: 1980's first day, as stat's was) */
+    e->time = f->ff_fdate ? f->ff_ftime : 0;
+}
+
+/* A find that is not gone through to its end: with long file names DOS keeps a handle for it, which the
+   library gives back when the next find comes to nothing. */
+static void find_end(struct ffblk *f)
+{
+    if (!memcmp(f->lfn_magic, "LFN32", 6))
+        while (findnext(f) == 0)
+            ;
+}
+#endif
+
 int gui_stat(const char *path, struct gui_dirent *e)
 {
     char buf[512];
     struct stat st;
+#ifdef __DJGPP__
+    {
+        size_t n = strlen(path);
+        struct ffblk f;
+        if (n > 3 && path[n - 1] != '\\' && path[n - 1] != '/' && path[n - 1] != ':' && !strpbrk(path, "*?")) {
+            if (findfirst(path, &f, DOS_ALL) != 0)
+                return -1;
+            find_end(&f);
+            from_find(&f, gui_path_name(path), e);
+            gui_dos_text(e->name, e->text, sizeof e->text);
+            return 0;
+        }
+    }                                           /* (a drive's root, a path that ends oddly: the library's) */
+#endif
     if (stat(native(path, buf, sizeof buf), &st) != 0)
         return -1;
     memset(e, 0, sizeof *e);
@@ -96,6 +137,48 @@ int gui_stat(const char *path, struct gui_dirent *e)
     return 0;
 }
 
+#ifdef __DJGPP__
+int gui_dir_read(const char *dir, struct gui_dirent **out)
+{
+    char pattern[512];
+    struct ffblk f;
+    struct gui_dirent *list = NULL;
+    size_t dn = strlen(dir);
+    int n = 0, room = 0, r;
+    *out = NULL;
+    if (!gui_is_dir(dir))
+        return -1;
+    snprintf(pattern, sizeof pattern, "%s%s*.*", dir, dn && (dir[dn - 1] == '\\' || dir[dn - 1] == '/' || dir[dn - 1] == ':')
+                                                   ? "" : "\\");
+    for (r = findfirst(pattern, &f, DOS_ALL); r == 0; r = findnext(&f)) {       /* (to its end: see find_end) */
+        struct gui_dirent e;
+        char *q;
+        if (!strcmp(f.ff_name, ".") || !strcmp(f.ff_name, ".."))
+            continue;
+        from_find(&f, f.ff_name, &e);
+        for (q = e.name; *q; q++)               /* (DOS's names as DOS has them, in capitals) */
+            if (*q >= 'a' && *q <= 'z')
+                *q -= 32;
+        if (n == room) {
+            struct gui_dirent *nl;
+            room = room * 2 + 32;
+            if (!(nl = realloc(list, (size_t)room * sizeof *nl))) {
+                while (findnext(&f) == 0)
+                    ;
+                free(list);
+                return -1;
+            }
+            list = nl;
+        }
+        gui_dos_text(e.name, e.text, sizeof e.text);
+        list[n++] = e;
+    }
+    if (n)
+        qsort(list, (size_t)n, sizeof *list, qcmp);
+    *out = list;
+    return n;
+}
+#else
 int gui_dir_read(const char *dir, struct gui_dirent **out)
 {
     char buf[512], full[512];
@@ -140,6 +223,7 @@ int gui_dir_read(const char *dir, struct gui_dirent **out)
     *out = list;
     return n;
 }
+#endif
 
 static int page(void)
 {
