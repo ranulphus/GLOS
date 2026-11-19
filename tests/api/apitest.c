@@ -140,6 +140,9 @@ static void before(void)
           && GLOS_HAS(&v, GLOS_SECRETS_REMOVE) && GLOS_HAS(&v, GLOS_SECRETS_STORE)
           && !GLOS_HAS(&v, GLOS_FN(GLOS_AREA_SECRETS, 4)),
           "major=%u minor=%u build=%s core=%x machine=%x", v.major, v.minor, v.build, v.functions[0][0], v.machine);
+    /* 2.6: a card's engine or a DOS-GL window on the desktop is never said without the desktop itself. */
+    check("version-desktop", !(v.machine & (GLOS_MACHINE_GPU | GLOS_MACHINE_GLWIN)) || (v.machine & GLOS_MACHINE_DESKTOP),
+          "machine=%x", v.machine);
     memset(&small, 0xAB, sizeof small);
     small.v.size = 12;                                  /* (size, major, minor: an older program's) */
     check("version-small", glos_version(&small.v) == 0 && small.v.major == 2 && small.v.minor == GLOS_MINOR
@@ -2177,7 +2180,12 @@ static int sndsess_mode(void)
     int before, after;
     char line[64];
     __dpmi_regs r;
+    struct glos_version ver;
 
+    memset(&ver, 0, sizeof ver);                /* 2.6: the desktop this runs beside is said (and the mixer) */
+    ver.size = sizeof ver;
+    check("sess-desktop", glos_version(&ver) == 0 && (ver.machine & GLOS_MACHINE_DESKTOP) && (ver.machine & GLOS_MACHINE_AUDIO),
+          "machine=%x", ver.machine);
     s = glos_audio_out(22050, 2, 16384, &ring, &id);
     check("sess-open", s && GLOS_HANDLE_KIND(s) == GLOS_HK_STREAM && ring && ring->rate == 22050 && id
           && prop(s, GLOS_PROP_STREAM_ID) == (int)id && !glos_is_app(), "s=%x err=%d id=%u app=%d", s, glos_error(), id,
@@ -2251,6 +2259,21 @@ static int audio_mode(int loop)
         snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
         com1(line);
         return fails;
+    }
+    {   /* The virtual Sound Blaster is a session's program's: an app, which has the mixer, finds no card at
+           BLASTER's ports (a DSP reset there, and nothing to read). */
+        unsigned base = 0x220, got;
+        const char *b = getenv("BLASTER"), *a = b ? strchr(b, 'A') : 0;
+        if (a)
+            base = (unsigned)strtoul(a + 1, 0, 16);
+        outportb(base + 6, 1);
+        for (i = 0; i < 8; i++)
+            (void)inportb(base + 6);
+        outportb(base + 6, 0);
+        for (i = 0; i < 64; i++)
+            (void)inportb(base + 0xE);
+        got = inportb(base + 0xA);
+        check("audio-no-blaster", got == 0xFF, "base=%x read=%02x", base, got);
     }
 
     /* Played: its position moves at its rate, nothing runs short, its level is the tone's, and the output's. */

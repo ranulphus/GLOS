@@ -436,6 +436,8 @@ static u32 machine(void)                        /* (as api.c's caps(): the deskt
 {
     u32 bpp = (u32)display_desktop_bpp();
     u32 m = (mixer_on() || mixer_found() ? GLOS_MACHINE_AUDIO : 0u) | (net_up() ? GLOS_MACHINE_NET : 0u);
+    if (bpp)
+        m |= GLOS_MACHINE_DESKTOP;
     if (bpp && mga_desktop_card())
         m |= GLOS_MACHINE_GPU | (bpp == 16 ? GLOS_MACHINE_GLWIN : 0u);
     return m;

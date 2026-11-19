@@ -96,6 +96,8 @@ out (a master clear becomes a cleared flip-flop and the other channels' masks).
 - **A session in direct mode** (`[program NAME] direct = 1`: its protected-mode code reaches the PC's ports
   untrapped) has the real card, as it always did: the mixer hands that over for the session and takes it back,
   the ports its real-mode code uses go to the real card too, and `BLASTER` is the real card's.
+- **A program that has become an app does not find the card** (its ports read FFh there): an app plays through
+  the mixer, and the card's interrupt goes to the system VM's programs alone.
 - **A session's end** makes the card as after a reset, and the log says what the session played:
   `GLOS-VSB end starts=3 irqs=15 played=36959 peak=28672` (sounds begun, interrupts, frames given to the
   mixer, the loudest sample).
@@ -117,6 +119,11 @@ out (a master clear becomes a cleared flip-flop and the other channels' masks).
   Blaster driver (`SDL_AUDIO_DRIVER=soundblaster`) plays through the virtual card, 16 bits at 44100 a second
   in auto-initialised blocks, with none of SDL's chunks short; beside it the same program through GLOS's
   mixer itself (API 2.5), which is what SDL chooses when nothing is said.
+- **On silicon (2026-11-19):** bench-g400's Crystal codec under GLOS's mixer, `SBTEST` at the virtual card: six
+  cases of six, with the numbers 86Box gave (`GLOS-VSB end starts=3 irqs=15 played=36959 peak=28672`).
+- **Echoes of the Void, by its session (2026-11-19, Loop A, full screen):** through SDL's Sound Blaster driver at
+  the virtual card, none of 757 chunks short and its six test tones in the recording; through GLOS's mixer
+  itself, two minutes of play, 10386 periods and none short.
 - **Real programs, by the DOS-GL session (2026-11-19, Loop A):** PrBoom-plus's timedemo full-screen on SDL's
   Sound Blaster driver has its sound throughout; 12% of SDL's chunks are short with the virtual card and with
   86Box's own alike (the timedemo keeps SDL's mixing waiting, not the card). Half-Life's own Sound Blaster code
@@ -131,5 +138,7 @@ out (a master clear becomes a cleared flip-flop and the other channels' masks).
    with a filter (it is taken between samples now: what lies above half the mixer's rate folds back).
 3. **FM** for cards with no FM chip: a synthesiser (ymfm is the first candidate: BSD, C++, to be ported or
    run outside the kernel). **MIDI** at 330h into GLOS's own MIDI out.
-4. **The bench:** a game with sound on a card that is no Sound Blaster (the Pentium III's CMI8738, once it
-   has its driver).
+4. **The bench:** the owner's games on bench-g400 (its Crystal codec is no Sound Blaster 16, and the virtual
+   card is what they find there now); a card with no Sound Blaster side at all (the Pentium III's CMI8738, once
+   it has its driver); what the virtual card costs a game beside the mixer itself (PrBoom's timedemo three
+   ways, asked of the DOS-GL session).

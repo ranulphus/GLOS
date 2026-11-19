@@ -54,8 +54,9 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 5            /* (2.5: AUDIO's OUT for a program that is not an app, full-screen too; 2.4, phase D:
-                                   SECRETS' STORE; a window's GLOS_PROP_WIN_ICON_BIG) */
+#define GLOS_MINOR 6            /* (2.6: VERSION's GLOS_MACHINE_DESKTOP; 2.5: AUDIO's OUT for a program that is not an
+                                   app, full-screen too; 2.4, phase D: SECRETS' STORE; a window's
+                                   GLOS_PROP_WIN_ICON_BIG) */
 
 #define GLOS_FN(area, n) ((2u << 16) | ((unsigned)(area) << 8) | (unsigned)(n))
 #define GLOS_FN_MAJOR(fn) ((unsigned)(fn) >> 16)
@@ -148,6 +149,10 @@ struct glos_version {
 #define GLOS_MACHINE_GLWIN  2   /* DOS-GL in a window on the desktop */
 #define GLOS_MACHINE_AUDIO  4   /* GLOS's mixer */
 #define GLOS_MACHINE_NET    8   /* the network is up */
+#define GLOS_MACHINE_DESKTOP 16 /* (2.6) a desktop is on the screen, on any card and at any depth (while a full-screen
+                                   program has the screen too): there is somewhere for a window to be. The other
+                                   bits say nothing of it: the mixer and the network are there with no desktop.
+                                   An older GLOS never sets it. */
 #define GLOS_HAS(v, fn) (((v)->functions[GLOS_FN_AREA(fn)][((fn) & 0xFFu) / 32] >> (((fn) & 0xFFu) % 32)) & 1u)
 
 /* INIT */

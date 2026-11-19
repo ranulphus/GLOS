@@ -4,6 +4,15 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## A program can tell whether a desktop is up (API 2.6, 2026-11-19)
+
+- **`GLOS_MACHINE_DESKTOP`** in what `glos_version` says of the machine: a desktop is on the screen, on any card
+  and at any depth. The other bits never said it (the mixer and the network are there with no desktop), and
+  DOS-GL's software window took "GLOS answers" for "there is a desktop": with none, a full-screen game became
+  an app with a window nobody could see. DOS-GL asks for this bit from its next version on.
+- **The virtual Sound Blaster is not found by a program that has become an app**: an app plays through the
+  mixer. (Its interrupt could not reach an app; SDL's Sound Blaster driver in an app waited for it.)
+
 ## An NE2000 card can no longer freeze the PC (2026-11-19)
 
 - **The NE2000 driver believed whatever stood in the card's receive ring.** A real card now and then leaves a

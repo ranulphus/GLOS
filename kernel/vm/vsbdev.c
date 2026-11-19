@@ -125,7 +125,13 @@ u8 vsbdev_in(u16 port)
     u8 val = 0xFF, mask = 0;
     if (port >= v.base && port < v.base + 16) {
         unsigned reg = port - v.base;
-        val = fm_port(reg) >= 0 ? inb((u16)fm_port(reg)) : vsb_in(&v.sb, reg);
+        if (current != vm.thread)               /* an app's thread: the card is a session's program's. An app plays
+                                                   through the mixer; here it finds no card (its interrupt would
+                                                   never reach it: Echoes as an app on SDL's Sound Blaster driver,
+                                                   2026-11-19) */
+            val = 0xFF;
+        else
+            val = fm_port(reg) >= 0 ? inb((u16)fm_port(reg)) : vsb_in(&v.sb, reg);
     } else {
         int r = vdma_in(&v.dma, port, &val, &mask);
         if (r == 0)
@@ -143,7 +149,8 @@ void vsbdev_out(u16 port, u8 val)
     int began = 0;
     if (port >= v.base && port < v.base + 16) {
         unsigned reg = port - v.base;
-        if (fm_port(reg) >= 0) {
+        if (current != vm.thread) {             /* (an app's: no card there) */
+        } else if (fm_port(reg) >= 0) {
             outb((u16)fm_port(reg), val);
         } else {
             u32 was = v.sb.begun, fresh = v.sb.fresh;

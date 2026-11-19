@@ -19,7 +19,8 @@ extern "C" {
 int glos_call(unsigned fn, void *s);                    /* any call: s its structure (or 0) */
 int glos_running(void);                                 /* 1 if GLOS 2.0 answers */
 
-int glos_version(struct glos_version *v);               /* v->size set by the caller */
+int glos_version(struct glos_version *v);               /* v->size set by the caller (2.6: v->machine has
+                                                           GLOS_MACHINE_DESKTOP while a desktop is on the screen) */
 int glos_init(const char *name, const char *help, const char *category);      /* the program becomes an app */
 /* 2.1: where things are, for any program (no drive is C: by name). GLOS's own folder ("C:\\GLOS": its programs,
    CERTS.DAT, its settings), and the root of the drive DOS started from ("C:\\"), where a user starts. */
