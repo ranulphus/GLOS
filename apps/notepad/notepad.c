@@ -388,10 +388,9 @@ static int find_dialog(int replace, char *with, size_t room)
         gui_button(row, GUI_T("&Find Next"), find_button, 10)->flags |= GUI_DEFAULT;
     gui_button(row, GUI_T("Cancel"), find_button, 12)->flags |= GUI_CANCEL;
     gui_focus(f_what);
-    r = gui_modal(fdlg);
+    r = gui_modal(fdlg);                        /* (which closes it) */
     if (r && replace)
         snprintf(with, room, "%s", f_with_text);
-    gui_close(fdlg);
     fdlg = NULL;
     return r;
 }

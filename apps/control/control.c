@@ -608,9 +608,9 @@ static int try_mode(void)
     try_left = TRY_SECONDS;
     try_say();
     gui_idle(try_tick, NULL, 1000);
-    r = gui_modal(try_w);
+    r = gui_modal(try_w);                       /* (which closes it: it was closed again here, after it had
+                                                   been freed, since M9) */
     gui_idle(try_tick, NULL, 0);
-    gui_close(try_w);
     return r == GUI_OK;
 }
 

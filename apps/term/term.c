@@ -468,8 +468,7 @@ static void conn_dialog(void)
     gui_button(row, GUI_T("Close"), conn_button, 13)->flags |= GUI_CANCEL;
     conn_fill();
     gui_focus(cname);
-    r = gui_modal(cdlg);
-    gui_close(cdlg);
+    r = gui_modal(cdlg);                        /* (which closes it) */
     cdlg = NULL;
     if (r != 10)
         return;

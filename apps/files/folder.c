@@ -518,8 +518,7 @@ static int clash_ask(struct view *v, const char *name, int dir)
     gui_button(row, GUI_T("&Skip"), clash_button, CLASH_SKIP)->flags |= GUI_DEFAULT;
     gui_button(row, GUI_T("&Keep Both"), clash_button, CLASH_BOTH);
     gui_button(row, GUI_T("Cancel"), clash_button, CLASH_STOP)->flags |= GUI_CANCEL;
-    r = gui_modal(d);
-    gui_close(d);
+    r = gui_modal(d);                           /* (which closes it) */
     return r >= CLASH_REPLACE && r <= CLASH_BOTH ? r : CLASH_STOP;     /* (its close box: Cancel) */
 }
 
@@ -958,8 +957,7 @@ static void properties(struct view *v)
     gui_space(row, 0, 0);
     gui_button(row, GUI_T("OK"), props_ok, 1)->flags |= GUI_DEFAULT | GUI_CANCEL;
     say("properties", path);
-    gui_modal(d);
-    gui_close(d);
+    gui_modal(d);                               /* (which closes it) */
 }
 
 /* ---- search (phase E): files and folders by name, under the folder shown: a name with DOS's wildcards (* and
@@ -1089,8 +1087,7 @@ static void find_files(struct view *v)
     gui_button(row, GUI_T("Close"), find_button, 12)->flags |= GUI_CANCEL;
     fnd.n = 0;
     gui_focus(fnd.what);
-    r = gui_modal(fnd.win);
-    gui_close(fnd.win);
+    r = gui_modal(fnd.win);                     /* (which closes it) */
     fnd.win = NULL;
     if (r != 1)
         return;

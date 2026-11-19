@@ -993,6 +993,14 @@ static void key(struct gui_window *w, const struct os_event *ev)
     memset(&e, 0, sizeof e);
     e.type = GUI_EV_KEY;
     e.key = ev->key, e.ch = ev->ch, e.mods = ev->mods, e.time = ev->time;
+    if (!(w->flags & GUI_W_POPUP)) {            /* a key typed while this window's menu was opening (Alt+T, then D
+                                                   at once, on a slow PC: GLOS sent it here, the pop-up not yet
+                                                   having the keyboard) is the menu's: the letter chose nothing and
+                                                   went to the app, the menu left open (Paint's suite, the 486) */
+        struct gui_window *p = gui_menu_popup_of(w);
+        if (p)
+            w = p;
+    }
     if (!(w->flags & GUI_W_POPUP) && gui_menubar_key(w, &e, 0))
         return;
     if (w->focus && usable(w->focus) && w->focus->cls->event && w->focus->cls->event(w->focus, &e))
@@ -1437,7 +1445,12 @@ int gui_step(unsigned wait_ms)
             app_events(&u.ev);
     }
     after_event();
-    fire();
+    /* The app's idle functions and the widgets' timers, while the loop goes on. Not after its end is set: an
+       event that closed the last window (GLOS's close box with no on_close of the app's: Monitor) has freed
+       every widget, and an idle function due in the same turn went on to use them: the app died there, now and
+       then, on a slow PC under load ("no MONITOR end", code 255: one gate, 2026-11-19). */
+    if (!G.quit && G.wins)
+        fire();
     after_event();
     return got;
 }

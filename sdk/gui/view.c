@@ -284,7 +284,7 @@ static int cv_event(struct gui_widget *w, struct gui_ev *e)
     }
     switch (e->type) {
     case GUI_EV_PRESS:
-        if (in && (e->button == 4 || (image && e->button == 1))) {
+        if (in && (e->button == 4 || (image && e->button == 1 && !(v->flags & GUI_CV_TOOLS)))) {
             v->pan = 1, v->pan_x = e->x, v->pan_y = e->y, v->pan_hx = v->hsb.pos, v->pan_vx = v->vsb.pos;
             return 1;
         }

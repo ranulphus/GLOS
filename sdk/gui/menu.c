@@ -664,6 +664,13 @@ static void popdown(struct gui_window *w)
         close_menu();
 }
 
+/* The open menu's pop-up (the deepest), if the menu is of this window: a key GLOS sent the window before the
+   pop-up had the keyboard is the menu's all the same (core.c). */
+struct gui_window *gui_menu_popup_of(struct gui_window *owner)
+{
+    return M.popup && M.owner == owner ? M.popup : NULL;
+}
+
 static void open_level(struct gui_window *owner, struct gui_menu *m, int sx, int sy, struct gui_menubar *bar,
                        struct gui_widget *choice, int hot, int from_w);
 

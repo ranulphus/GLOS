@@ -240,7 +240,10 @@ void gui_quit(int code);
 int gui_exit_code(void);
 int gui_step(unsigned wait_ms);         /* one turn: what is damaged drawn, then one event (waiting at most
                                            wait_ms): 1 if there was one */
-int gui_modal(struct gui_window *w);    /* w shown, the app's other windows deaf, until gui_end_modal(w, r): r */
+int gui_modal(struct gui_window *w);    /* w shown, the app's other windows deaf, until gui_end_modal(w, r): r.
+                                           It closes w before it returns: the window and its widgets are gone
+                                           (what a dialog's fields hold is read before gui_end_modal, and w is
+                                           not closed again) */
 void gui_end_modal(struct gui_window *w, int result);
 void gui_timer(struct gui_widget *w, unsigned ms);     /* GUI_EV_TIMER to w every ms (0: no more) */
 void gui_idle(void (*fn)(void *), void *arg, unsigned ms);     /* fn every ms while the loop runs (0: off) */
@@ -749,6 +752,8 @@ struct gui_widget *gui_canvas_view(struct gui_widget *parent, int doc_w, int doc
 #define GUI_CV_RULERS 1                 /* rulers along the top and the left, labelled in units */
 #define GUI_CV_CENTRE 2                 /* a document smaller than the view in its middle (else at its corner) */
 #define GUI_CV_RING   4                 /* the focus ring inside the view when it has the keyboard */
+#define GUI_CV_TOOLS  8                 /* an image view whose left button is the app's (an editor's tools), not the
+                                           view's own moving of the picture: the middle button still moves it */
 void gui_cview_style(struct gui_widget *w, unsigned flags, int ruler_unit);    /* ruler_unit: labels at a multiple of it */
 void gui_cview_size(struct gui_widget *w, int doc_w, int doc_h);
 void gui_cview_zoom(struct gui_widget *w, int percent);        /* about the middle of what shows; 0: fitted */
