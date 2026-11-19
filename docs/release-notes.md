@@ -4,6 +4,15 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## A full-screen window that keeps its size (API 2.8, 2026-11-19)
+
+- **`GLOS_WF_OWN_MODE`** when a window is made: full screen (`GLOS_WS_FULL`) it keeps its client area's size.
+  A game's 640 by 480 on a larger desktop is in the middle of the screen with black round it, and its block of
+  video memory of that size is taken (without the flag a full-screen window's pixels are the screen's size,
+  and a smaller block was refused: the DOS-GL session saw a white screen). The black is nothing's to a click.
+- For now such a window is composed with the rest. To come: GLOS sets a screen mode of the window's size while
+  it is alone in front and shows its pixels as they are (`docs/v1/fullscreen-apps.md`, F3).
+
 ## A full-screen window is shown as it is (API 2.7, 2026-11-19)
 
 - **A program's full-screen window that shows a block of its own video memory** (DOS-GL's on a Matrox card: a

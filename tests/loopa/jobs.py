@@ -4664,6 +4664,37 @@ def gpu_case(profile, vcard, card):
         after = shot("full-after")
         checks["full-as-it-was"] = bool(before) and bool(after) and before[2][:640 * 440 * 3] == after[2][:640 * 440 * 3]
 
+        # Full screen at a size of its own (API 2.8, GLOS_WF_OWN_MODE; F3's first half): 320 by 240 on the 640 by
+        # 480 desktop is in the middle of the screen, black round it, composed (no mode of its own yet).
+        def own_picture(pic, colour):
+            if not pic or pic[:2] != (640, 480):
+                return False
+            black = inside = 0
+            for y in range(0, 480, 2):
+                for x in range(0, 640, 2):
+                    i = (y * 640 + x) * 3
+                    p = pic[2][i:i + 3]
+                    if 160 <= x < 480 and 120 <= y < 360:
+                        inside += all(abs(p[k] - colour[k]) <= 8 for k in range(3))
+                    else:
+                        black += p[0] < 8 and p[1] < 8 and p[2] < 8
+            return black >= (320 * 240 - 160 * 120) - 400 and inside >= 160 * 120 - 2 * 30 * 30 - 400
+
+        ons = agent.log().count("GLOS-DESK scanout on")
+        g = start(app + "full B 14 0 0 320 240")
+        checks["own-up"] = until("B")
+        time.sleep(2)
+        checks["own-picture"] = own_picture(shot("own-1"), WIN_COLOUR["B"])
+        w = desk().get("GPUTEST B")
+        checks["own-size"] = bool(w) and (w["w"], w["h"]) == (320, 240)
+        res = finish(g)
+        checks["own-B"] = ok_line(res, "B")[0]
+        m = re.search(r"^GPU-OK B frames=\d+ .* shown=(\d+)", res[1], re.M)
+        checks["own-composed"] = bool(m) and m.group(1) == "0" and agent.log().count("GLOS-DESK scanout on") == ons
+        time.sleep(2)
+        after = shot("own-after")
+        checks["own-as-it-was"] = bool(before) and bool(after) and before[2][:640 * 440 * 3] == after[2][:640 * 440 * 3]
+
         # 8 bits: no windowed GL, and no window shows VRAM.
         checks["on-8"] = agent.ssh("glos display on 640x480x8")[0] == 0 and " 640x480x8 " in state("display on mode=")
         rc, o, _ = agent.ssh(app + "info")

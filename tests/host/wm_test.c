@@ -379,6 +379,48 @@ static void places(void)
         wm_pointer(&m, px0, py0, ptr);
         wm_hw_pointer(&m, hw);
     }
+    {   /* Full screen at a size of its own (WF_OWNMODE; docs/v1/fullscreen-apps.md, F3): the frame is the screen,
+           its pixels keep their size, in the middle, black round them; the black is nothing's to a click; with
+           pixels of its owner's own it is the window to show as it is (in a mode of its size: the caller's). */
+        static u8 scr_px[320 * 240], own_px[100 * 60];
+        struct gfx_surface scr, ext;
+        struct gfx_rect cl;
+        struct wm_window *o = wm_create(&m, 20, 20, 100, 60, "O", WF_OWNMODE, &m);
+        u8 hw = m.hw_pointer;
+        int x, y, bad = 0;
+        CHECK(o != 0);
+        gfx_init(&scr, scr_px, 320, 240, 320, &gfx_fmt8);
+        gfx_init(&ext, own_px, 100, 60, 100, &gfx_fmt8);
+        memset(o->store.pix, 0x55, (size_t)o->store.pitch * 60);
+        wm_show(&m, o, 1);
+        wm_raise(&m, o);
+        wm_set_focus(&m, o);
+        wm_hw_pointer(&m, 1);
+        CHECK(wm_state(&m, o, WS_FULL) == 0 && o->frame.x == 0 && o->frame.y == 0 && o->frame.w == 320 && o->frame.h == 240
+              && o->store.w == 100 && o->store.h == 60);
+        wm_client(&m, o, &cl);
+        CHECK(cl.x == 110 && cl.y == 90 && cl.w == 100 && cl.h == 60);
+        CHECK(wm_hit(&m, 5, 5, &part) == o && part == WH_NONE && wm_hit(&m, 160, 120, &part) == o && part == WH_CLIENT
+              && wm_hit(&m, 215, 100, &part) == o && part == WH_NONE);
+        wm_damage_all(&m);
+        wm_compose(&m, &scr);
+        for (y = 0; y < 240; y++)
+            for (x = 0; x < 320; x++) {
+                int in = x >= 110 && x < 210 && y >= 90 && y < 150;
+                if (scr_px[y * 320 + x] != (in ? 0x55 : (u8)gfx_px(&scr.fmt, 0x000000)))
+                    bad++;
+            }
+        CHECK(bad == 0);
+        CHECK(!wm_scanout(&m));                 /* (its pixels are the manager's) */
+        wm_ext(&m, o, &ext);
+        CHECK(o->has_ext && wm_scanout(&m) == o);
+        CHECK(wm_state(&m, o, WS_NORMAL) == 0 && o->frame.x == 20 && o->frame.y == 20 && o->store.w == 100 && o->store.h == 60);
+        wm_client(&m, o, &cl);
+        CHECK(cl.x == 20 && cl.y == 20 && !wm_scanout(&m));
+        wm_hw_pointer(&m, hw);
+        wm_destroy(&m, o);
+        wm_set_focus(&m, a);
+    }
     wm_screen(&m, 400, 300, &gfx_fmt8);         /* another screen: it fills that one */
     CHECK(a->frame.w == 400 && a->store.h == 300 && !(m.bar->flags & WF_SHOWN));
     wm_screen(&m, 320, 240, &gfx_fmt8);

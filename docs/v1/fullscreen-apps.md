@@ -81,11 +81,11 @@ whatever the program made (a smaller block of its own is refused, and the window
 DOS-GL session saw a white screen, and its `DGL_GLOS_FULL` asks for full screen only at the screen's size
 until this is built). The plan:
 
-- **The window keeps its size.** A flag at its making (`GLOS_WF_OWN_MODE`) says that full screen does not make
-  its client area the screen's: the frame covers the screen, black, and the client area keeps the size the
-  program gave it.
-- **Composed** (something over it, a VNC viewer, a card or a size with no mode for it): its pixels in the
-  middle of the black.
+- **The window keeps its size: built (API 2.8).** A flag at its making (`GLOS_WF_OWN_MODE`) says that full
+  screen does not make its client area the screen's: the frame covers the screen, black, and the client area
+  keeps the size the program gave it (`kernel/wm/wm.c` `ownmode`).
+- **Composed: built.** Its pixels in the middle of the black: always for now, and later whenever something is
+  over it, a VNC viewer is there, or the card has no mode of its size.
 - **Alone in front, with a block of its own:** GLOS sets the card to the mode of the client's size at the
   desktop's depth (the BIOS's mode set by the system VM's thread, as the desktop's own, with the card's memory
   kept), points the display at the block, and the row length is the mode's (the block's must be the same:

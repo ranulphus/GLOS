@@ -54,7 +54,8 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 7            /* (2.7: WINVRAM says when the display is on the window's own pixels;
+#define GLOS_MINOR 8            /* (2.8: GLOS_WF_OWN_MODE, a full-screen window that keeps its size;
+                                   2.7: WINVRAM says when the display is on the window's own pixels;
                                    2.6: VERSION's GLOS_MACHINE_DESKTOP; 2.5: AUDIO's OUT for a program that is not an
                                    app, full-screen too; 2.4, phase D: SECRETS' STORE; a window's
                                    GLOS_PROP_WIN_ICON_BIG) */
@@ -303,6 +304,10 @@ struct glos_random {
 #define GLOS_WF_BARE     2      /* no title bar or border: the app draws its own (GLOS_WIN_DRAG) */
 #define GLOS_WF_ANYWHERE 4      /* GLOS chooses the place: x and y are not looked at */
 #define GLOS_WF_MODAL    8      /* a dialog's: its owner takes no input while it is up */
+#define GLOS_WF_OWN_MODE 0x10   /* (2.8) full screen (GLOS_WS_FULL) it keeps its client area's size: a game's 640 by
+                                   480 on a larger desktop is shown in the middle of the screen, black round it
+                                   (or, where GLOS can, in a screen mode of that size). Without it a full-screen
+                                   window's client area is the screen's size */
 #define GLOS_WF_HUNG     0x100  /* (ENUM tells) its app isn't taking its events: "not answering" */
 
 struct glos_win_create {

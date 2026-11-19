@@ -143,6 +143,7 @@ static void info(void)
 }
 
 static int full;                                /* its window is full screen: the whole screen, no frame */
+static int own;                                 /* ... at a size of its own (GLOS_WF_OWN_MODE): its pixels keep it */
 static int shown;                               /* frames GLOS said the display itself was on (API 2.7) */
 
 static void window(int x, int y, int w, int h)
@@ -156,7 +157,7 @@ static void window(int x, int y, int w, int h)
     card();
     memset(&win, 0, sizeof win);
     sprintf(title, "GPUTEST %s", name);
-    if (!(win.id = glos_window(title, x, y, w, h, GLOS_WK_NORMAL, GLOS_WF_FIXED, 0))) {
+    if (!(win.id = glos_window(title, x, y, w, h, GLOS_WK_NORMAL, GLOS_WF_FIXED | (own ? GLOS_WF_OWN_MODE : 0), 0))) {
         last = glos_error();
         die(44, "window");
     }
@@ -268,8 +269,11 @@ int main(int argc, char **argv)
     if (!strcmp(argv[1], "draw"))
         return run(argc, argv, 0);
     if (!strcmp(argv[1], "full")) {            /* as draw, in a full-screen window: GLOS shows its buffers by
-                                                   pointing the display at them (docs/v1/fullscreen-apps.md) */
+                                                   pointing the display at them (docs/v1/fullscreen-apps.md).
+                                                   With a place and a size (full NAME SECS X Y W H): full screen
+                                                   at that size of its own, in the middle of the screen */
         full = 1;
+        own = argc >= 8;
         return run(argc, argv, 0);
     }
     if (!strcmp(argv[1], "spin"))

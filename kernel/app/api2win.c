@@ -161,7 +161,7 @@ static int create(struct app *a, struct trapframe *tf)
     u32 size, id, f, h;
     int r;
     if (a2_rd(tf, &q, sizeof q, &size) != 0 || q.kind > GLOS_WK_DESKTOP
-        || (q.flags & ~(u32)(GLOS_WF_FIXED | GLOS_WF_BARE | GLOS_WF_ANYWHERE | GLOS_WF_MODAL)))
+        || (q.flags & ~(u32)(GLOS_WF_FIXED | GLOS_WF_BARE | GLOS_WF_ANYWHERE | GLOS_WF_MODAL | GLOS_WF_OWN_MODE)))
         return a2_fail(tf, GLOS_E_ARGUMENT);
     q.title[sizeof q.title - 1] = 0;
     memset(&n, 0, sizeof n);
@@ -169,7 +169,7 @@ static int create(struct app *a, struct trapframe *tf)
     n.title = q.title;
     n.tag = q.kind | (q.flags << 8);
     n.anywhere = (q.flags & GLOS_WF_ANYWHERE) != 0;
-    n.wf = q.flags & GLOS_WF_FIXED ? WF_FIXED : 0;
+    n.wf = (q.flags & GLOS_WF_FIXED ? WF_FIXED : 0u) | (q.flags & GLOS_WF_OWN_MODE ? WF_OWNMODE : 0u);
     if (q.kind == GLOS_WK_POPUP)
         n.wf |= WF_POPUP | WF_TOPMOST;
     else if (q.kind == GLOS_WK_DESKTOP)

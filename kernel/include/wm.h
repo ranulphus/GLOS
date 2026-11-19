@@ -32,6 +32,10 @@
 #define WF_HUNG    0x10000              /* its owner isn't taking its events (the kernel's side says) */
 #define WF_EMBED   0x20000              /* shown inside its parent's client area (wm_embed): bare, with no button of
                                            its own, where and as large as its parent has it */
+#define WF_OWNMODE 0x40000              /* full screen it keeps its client area's size (a game's 640 by 480 on a
+                                           larger desktop): in the middle of the screen, black round it. The
+                                           kernel's side may show it in a screen mode of that size instead
+                                           (docs/v1/fullscreen-apps.md, F3) */
 #define WF_PLACED  (WF_MAX | WF_FULL | WF_SNAP_L | WF_SNAP_R)   /* its place is the manager's, not its own */
 
 /* A window's state (wm_state). */

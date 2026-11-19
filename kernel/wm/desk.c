@@ -79,6 +79,9 @@ static u32 scan_no;                             /* the last window that could ha
 static int scan_turn(struct wm *m, const struct gfx_surface *fb, int viewers)
 {
     struct wm_window *w = viewers ? 0 : wm_scanout(m);
+    if (w && (w->ext.w != fb->w || w->ext.h != fb->h))  /* (a size of its own: composed in the middle, until the
+                                                           display is given a mode for it: F3) */
+        w = 0;
     if (w && w->ext.pitch == fb->pitch && display_scanout(&w->ext)) {
         if (scan_id != w->id) {
             scan_id = w->id;

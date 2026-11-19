@@ -317,12 +317,20 @@ void wm_limits(const struct wm *m, const struct wm_window *w, s32 *min_w, s32 *m
     if (*max_h < *min_h) *max_h = *min_h;
 }
 
+/* Full screen at a size of its own (WF_OWNMODE): the frame is the whole screen, the client area the size it
+   was, in the middle. */
+static int ownmode(const struct wm_window *w) { return (w->flags & (WF_FULL | WF_OWNMODE)) == (WF_FULL | WF_OWNMODE); }
+
 void wm_client(const struct wm *m, const struct wm_window *w, struct gfx_rect *out)
 {
     out->x = w->frame.x + side(m, w);
     out->y = w->frame.y + top_h(m, w);
     out->w = w->store.w;
     out->h = w->store.h;
+    if (ownmode(w)) {
+        out->x = w->frame.x + (w->frame.w - w->store.w) / 2;
+        out->y = w->frame.y + (w->frame.h - w->store.h) / 2;
+    }
 }
 
 static void set_frame(const struct wm *m, struct wm_window *w, s32 x, s32 y)
@@ -997,6 +1005,12 @@ static int fit(struct wm *m, struct wm_window *w, const struct gfx_rect *f)
     s32 cw = f->w - 2 * side(m, w), ch = f->h - top_h(m, w) - side(m, w);
     if (shown(w))
         damage(m, &w->frame);
+    if (ownmode(w) && w->store.w <= f->w && w->store.h <= f->h) {      /* (its pixels stay the size they are) */
+        w->frame = *f;
+        if (shown(w))
+            damage(m, &w->frame);
+        return 0;
+    }
     if (wm_resize(m, w, cw < 1 ? 1 : cw, ch < 1 ? 1 : ch) != 0)
         return -1;
     set_frame(m, w, f->x, f->y);
@@ -1280,6 +1294,10 @@ static int part_at(const struct wm *m, const struct wm_window *w, s32 x, s32 y)
     const struct wm_look *l = &m->look;
     s32 fx = w->frame.x, fy = w->frame.y, fw = w->frame.w, fh = w->frame.h, b = l->border;
     struct gfx_rect c, box;
+    if (ownmode(w)) {                           /* (the black round its pixels is nothing's) */
+        wm_client(m, w, &c);
+        return x >= c.x && y >= c.y && x - c.x < c.w && y - c.y < c.h ? WH_CLIENT : WH_NONE;
+    }
     if (!framed(w))
         return WH_CLIENT;
     wm_client(m, w, &c);
@@ -1486,9 +1504,11 @@ struct wm_window *wm_scanout(const struct wm *m)
             && w->frame.y + w->frame.h > 0)
             break;
     if (!w || !(w->flags & WF_FULL) || !w->has_ext || w->frame.x || w->frame.y || w->frame.w != m->w
-        || w->frame.h != m->h || w->ext.w != m->w || w->ext.h != m->h)
+        || w->frame.h != m->h || ((w->ext.w != m->w || w->ext.h != m->h) && !ownmode(w)))
         return 0;
-    return w;
+    return w;                                   /* (WF_OWNMODE: its pixels may be smaller than the screen: shown as
+                                                   they are only in a screen mode of their size, the caller's to
+                                                   see to) */
 }
 
 void wm_screen(struct wm *m, s32 w, s32 h, const struct gfx_fmt *fmt)
@@ -1586,6 +1606,13 @@ static void draw_window(const struct wm *m, struct gfx_surface *scr, const struc
             }
             gfx_clip(scr, &keep);
         }
+    }
+    if (ownmode(w)) {                           /* black round its pixels, to the screen's edges */
+        s32 fx = w->frame.x, fy = w->frame.y, fw = w->frame.w, fh = w->frame.h;
+        gfx_fill(scr, fx, fy, fw, c.y - fy, 0x000000);
+        gfx_fill(scr, fx, c.y + c.h, fw, fy + fh - c.y - c.h, 0x000000);
+        gfx_fill(scr, fx, c.y, c.x - fx, c.h, 0x000000);
+        gfx_fill(scr, c.x + c.w, c.y, fx + fw - c.x - c.w, c.h, 0x000000);
     }
     gfx_blit(scr, c.x, c.y, w->has_ext ? &w->ext : &w->store, 0, 0, c.w, c.h);
 }
