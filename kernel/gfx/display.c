@@ -71,6 +71,12 @@ static struct {
     u32 nmodes;
     struct display_mode modes[DISPLAY_MODES];
     struct waitq asked;                         /* whoever waits for the list or the power */
+    /* A mode of its own for a full-screen window of another size than the desktop's (display_app_mode): */
+    u16 app_w, app_h;                           /* the size the card is in now; 0: the desktop's own mode */
+    u16 want_w, want_h;                         /* ... and the one asked for */
+    u16 bad_w, bad_h;                           /* a size the card had no mode for, or would not set */
+    u8 app_ask;                                 /* the VM thread is to make it so */
+    void (*app_done)(void);                     /* ... and tell this when it has */
 } d;
 
 /* The VGA's memory as the desktop leaves it: hidden behind a spare frame, or not there (a console job's). */
@@ -117,10 +123,13 @@ static int describe(u32 mode, u8 *info)
 
 /* How well a mode's description fits what is wanted: 0 not at all, 2 as
    asked, 1 the 5-5-5 mode for 16 bits. */
+static u16 fit_w, fit_h;                        /* (0: the desktop's size) */
+
 static int fits(const u8 *m)
 {
     u32 attr = le16(m), bpp = m[0x19], model = m[0x1B];
-    if ((attr & 0x91) != 0x91 || le16(m + 0x12) != d.w || le16(m + 0x14) != d.h || m[0x18] != 1 || !le32(m + 0x28))
+    if ((attr & 0x91) != 0x91 || le16(m + 0x12) != (fit_w ? fit_w : d.w) || le16(m + 0x14) != (fit_h ? fit_h : d.h)
+        || m[0x18] != 1 || !le32(m + 0x28))
         return 0;                               /* (supported, graphics, with a linear framebuffer; one plane) */
     if (d.bpp == 8)
         return bpp == 8 && model == 4 ? 2 : 0;
@@ -366,6 +375,100 @@ int display_scanout(const struct gfx_surface *s)
 
 u32 display_scanout_phys(void) { return d.on ? mga_scanout_phys() : 0; }
 
+/* A mode of its own for a full-screen window whose pixels are not the desktop's size (docs/v1/fullscreen-apps.md,
+   F3): the card set to the mode of w by h at the desktop's depth, its memory kept, so that the display can be
+   pointed at the window's pixels (display_scanout); the desktop's own pixels stay as they are, unseen. w 0: the
+   desktop's mode again. (x, y): where the window's pixels are on the desktop (the cursor is placed from there).
+   The mode is the BIOS's to set, by the system VM's thread: 1 once the card is so, 0 while that is asked for
+   (done() is called when it is, or cannot be), -1 if the card has no such mode or there is no desktop on a card
+   whose engine GLOS drives. Nothing may be drawn on the screen while the card is in such a mode, or while a
+   change is asked for. */
+static s32 app_x, app_y;
+
+int display_app_mode(u32 w, u32 h, s32 x, s32 y, void (*done)(void))
+{
+    u32 f;
+    int r;
+    if (!d.on || d.held || !mga_display_on())
+        return w ? -1 : 1;
+    if (w == d.w && h == d.h)
+        w = h = 0;
+    f = irq_save();
+    if (w && w == d.bad_w && h == d.bad_h) {
+        r = -1;
+    } else if (!d.app_ask && d.app_w == w && d.app_h == h) {
+        r = 1;
+    } else {
+        d.want_w = (u16)w, d.want_h = (u16)h;
+        app_x = x, app_y = y;
+        d.app_done = done;
+        d.app_ask = 1;
+        vm_kick();
+        r = 0;
+    }
+    irq_restore(f);
+    return r;
+}
+
+/* The mode the card is in for a window is of no use after all (the window's rows are not the mode's length):
+   that size is not asked for again. */
+void display_app_refuse(void)
+{
+    u32 f = irq_save();
+    if (d.app_w)
+        d.bad_w = d.app_w, d.bad_h = d.app_h;
+    irq_restore(f);
+}
+
+/* 1 while the card is in such a mode, or on its way into or out of one: the screen's own pixels are not what is
+   seen, and the engine's state is not the kernel's to draw with. */
+int display_app_busy(void) { return d.on && (d.app_w || d.app_ask); }
+
+static void app_turn(void)                      /* (the VM thread) */
+{
+    u32 w = d.want_w, h = d.want_h, mode = d.mode, pitch = d.fb.pitch;
+    struct rmregs r;
+    u8 m[64];
+    d.app_ask = 0;
+    if (d.on && !d.held && (w != d.app_w || h != d.app_h)) {
+        if (w) {
+            fit_w = (u16)w, fit_h = (u16)h;
+            mode = find(m);
+            fit_w = fit_h = 0;
+            pitch = mode ? (le16(m + 0x32) >= w * (d.fb.fmt.bpp / 8u) ? le16(m + 0x32) : le16(m + 0x10)) : 0;
+        }
+        if (!mode) {
+            d.bad_w = (u16)w, d.bad_h = (u16)h;
+            kprintf("GLOS-DISPLAY app error=no-mode want=%ux%ux%u\n", w, h, d.bpp);
+        } else {
+            mga_mode_begin();
+            memset(&r, 0, sizeof r);
+            r.eax = 0x4F02;
+            r.ebx = mode | 0x4000u | 0x8000u;   /* its linear framebuffer; the card's memory kept */
+            if (!vbe(&r)) {
+                kprintf("GLOS-DISPLAY app error=mode-set mode=%x ax=%04x\n", mode, r.eax & 0xFFFF);
+                d.bad_w = (u16)w, d.bad_h = (u16)h;
+                if (w) {                        /* (the desktop's again, whatever it left) */
+                    memset(&r, 0, sizeof r);
+                    r.eax = 0x4F02;
+                    r.ebx = d.mode | 0x4000u | 0x8000u;
+                    vbe(&r);
+                }
+                w = h = 0;
+                pitch = d.fb.pitch;
+            }
+            d.app_w = (u16)w, d.app_h = (u16)h;
+            mga_mode_end(pitch, w ? app_x : 0, w ? app_y : 0);
+            if (w)
+                kprintf("GLOS-DISPLAY app mode=%x %ux%ux%u pitch=%u\n", mode, w, h, d.bpp, pitch);
+            else
+                kprintf("GLOS-DISPLAY app off\n");
+        }
+    }
+    if (d.app_done)
+        d.app_done();
+}
+
 void display_init(const struct bootinfo *bi)
 {
     if (!d.paint)
@@ -397,7 +500,7 @@ int display_ask(int what, u32 w, u32 h, u32 bpp)
     return r;
 }
 
-int display_vm_pending(void) { return d.ask || d.list_ask || d.power_ask; }
+int display_vm_pending(void) { return d.ask || d.list_ask || d.power_ask || d.app_ask; }
 
 /* The modes the card has, for DRAW's MODES (any thread that may wait): listed by the VM thread the first time,
    which is waited for (ten seconds at most: a session may have the VM). How many there are (out: the first max
@@ -463,9 +566,14 @@ void display_vm_turn(void)
         thread_wake(&d.asked);
         irq_restore(f);
     }
+    if (d.app_ask && !d.ask)
+        app_turn();
     if (!d.ask)
         return;
     d.ask = 0;
+    /* (A mode of a window's own goes with the desktop's.) */
+    d.app_ask = 0;
+    d.app_w = d.app_h = d.want_w = d.want_h = 0;
     leaving();
     if (what == DISPLAY_OFF) {
         mixer_desktop(0);
@@ -510,6 +618,9 @@ void display_session(int begin)
     if (!d.on)
         return;
     if (begin && !d.held) {
+        /* (A mode of a window's own goes with the screen: the desktop's own mode is set when the session ends.) */
+        d.app_ask = 0;
+        d.app_w = d.app_h = d.want_w = d.want_h = 0;
         mixer_desktop(0);                       /* (the session's: the Sound Blaster too) */
         leaving();
         mga_display_down();
@@ -661,6 +772,8 @@ u32 display_stat(char *buf, u32 max)
         n = (u32)ksnprintf(buf, max, "display %s mode=%x %ux%ux%u pitch=%u lfb=%08x rgb=%u.%u.%u dac=%u\n",
                            d.held ? "held" : "on", d.mode, d.w, d.h, d.bpp, d.fb.pitch, d.phys, d.fb.fmt.rsize,
                            d.fb.fmt.gsize, d.fb.fmt.bsize, d.fb.fmt.bpp == 8 ? d.dac : 0);
+    if (d.on && d.app_w && n < max)             /* (a full-screen window's own mode is what the card is in) */
+        n += (u32)ksnprintf(buf + n, max - n, "app mode %ux%u\n", d.app_w, d.app_h);
     if (n < max)
         n += mga_display_stat(buf + n, max - n);
     if (n < max && mga_display_on())

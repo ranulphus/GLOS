@@ -84,19 +84,29 @@ until this is built). The plan:
 - **The window keeps its size: built (API 2.8).** A flag at its making (`GLOS_WF_OWN_MODE`) says that full
   screen does not make its client area the screen's: the frame covers the screen, black, and the client area
   keeps the size the program gave it (`kernel/wm/wm.c` `ownmode`).
-- **Composed: built.** Its pixels in the middle of the black: always for now, and later whenever something is
-  over it, a VNC viewer is there, or the card has no mode of its size.
-- **Alone in front, with a block of its own:** GLOS sets the card to the mode of the client's size at the
-  desktop's depth (the BIOS's mode set by the system VM's thread, as the desktop's own, with the card's memory
-  kept), points the display at the block, and the row length is the mode's (the block's must be the same:
-  it is, at the sizes the BIOS lists). The desktop's own pixels stay as they are in the card's memory, unseen.
-  Leaving: the desktop's mode again, the screen composed whole, the display back on it.
+- **Composed: built.** Its pixels in the middle of the black, whenever something is over it, a VNC viewer is
+  there, or the card has no mode of its size.
+- **Alone in front, with a block of its own: built** (`display_app_mode`, `mga_mode_begin` and `mga_mode_end`,
+  `scan_turn`). GLOS sets the card to the mode of the client's size at the desktop's depth (the BIOS's mode set
+  by the system VM's thread, as the desktop's own, with the card's memory kept: VBE 4F02h with bit 15), points
+  the display at the block, and the row length is the mode's (the block's must be the same: it is, at the sizes
+  the BIOS lists; if not, that size is not tried again). The desktop's own pixels stay as they are in the
+  card's memory, unseen. Leaving: the desktop's mode again, the screen composed whole, the display back on it.
+  Nothing is drawn on the screen while the card is in such a mode or changing (`display_app_busy`); the engine
+  is the kernel's around the BIOS's call, and the app finds it was taken (`lost`) when it next draws.
 - **The pointer and the mouse:** a game takes the mouse to itself (`GLOS_INPUT_CAPTURE`, movements); a
-  pointer over such a window is the card's own cursor at the client's coordinates.
-- **Sizes:** those `GLOS_DRAW_MODES` lists at the desktop's depth; another size is composed in the middle.
-- **Tests:** `GPUTEST full NAME SECS W H` on Loop A (the mode by `glos display`, the picture by `glos shot` at
-  the game's size, the desktop's mode and picture after), and DOS-GL's TEXCUBE at 640x480 on an 800x600
-  desktop.
+  pointer over such a window is the card's own cursor at the client's coordinates (`mga_cursor` from the
+  window's corner).
+- **Sizes:** those `GLOS_DRAW_MODES` lists at the desktop's depth; another size is composed in the middle
+  (`GLOS-DISPLAY app error=no-mode`). Lower sizes through the HAL's own mode set are a later step.
+- **The log and `glos display`:** `GLOS-DISPLAY app mode=N WxHxB pitch=P`, `GLOS-DISPLAY app off`, and a line
+  `app mode WxH` in `glos display` while it is so.
+- **Tests:** the gpu suite's mode part on Loop A (`GPUTEST full A 40 0 0 640 480` on an 800x600 desktop: the
+  mode by `glos display`, the picture by `glos shot` at the game's size, the desktop's mode and picture after;
+  320 by 240 composed), on the G200, G400 and G450. DOS-GL's TEXCUBE at 640x480 on an 800x600 desktop is owed
+  (its `DGL_GLOS_FULL` asks for full screen only at the screen's size until it uses the flag).
+- **Open:** a notification over such a window takes the card out of its mode and back (a flicker of a second
+  or two): whether notifications wait while a game is in front is the owner's to say.
 
 ### F4. Other cards
 

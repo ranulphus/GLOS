@@ -76,13 +76,39 @@ static u8 scan_left;                            /* it has just stopped being so:
                                                    the display on it again */
 static u32 scan_no;                             /* the last window that could have been, but for its pixels (the log's) */
 
+/* The card is changing into or out of a mode of a window's own: nothing is drawn, and what was shown stays
+   until the change is done. Once it is out of one, the screen is composed whole. */
+static int scan_wait(struct wm *m)
+{
+    if (scan_id) {
+        kprintf("GLOS-DESK scanout off win=%u why=mode\n", scan_id);
+        scan_id = 0;
+    }
+    scan_left = 1;
+    wm_damage_all(m);
+    return 1;
+}
+
 static int scan_turn(struct wm *m, const struct gfx_surface *fb, int viewers)
 {
     struct wm_window *w = viewers ? 0 : wm_scanout(m);
-    if (w && (w->ext.w != fb->w || w->ext.h != fb->h))  /* (a size of its own: composed in the middle, until the
-                                                           display is given a mode for it: F3) */
-        w = 0;
-    if (w && w->ext.pitch == fb->pitch && display_scanout(&w->ext)) {
+    int own = w && (w->ext.w != fb->w || w->ext.h != fb->h), r;
+    /* A size of its own (WF_OWNMODE; F3): the card in a mode of that size first, by the system VM's thread, which
+       tells this one when it is done; until then the window is composed in the middle of the screen. Out of
+       such a mode the same way, before anything is drawn on the screen again: 1 (nothing composed) while the
+       card is in one or changing. */
+    if (own) {
+        struct gfx_rect c;
+        wm_client(m, w, &c);
+        r = display_app_mode((u32)w->ext.w, (u32)w->ext.h, c.x, c.y, desk_kick);
+        if (r == 0)
+            return scan_wait(m);                /* (asked for) */
+        if (r < 0)
+            w = 0, own = 0;                     /* (no such mode: composed in the middle, for good) */
+    }
+    if (!own && (display_app_mode(0, 0, 0, 0, desk_kick) == 0 || display_app_busy()))
+        return scan_wait(m);                    /* (the desktop's mode is on its way back) */
+    if (w && (own || w->ext.pitch == fb->pitch) && display_scanout(&w->ext)) {
         if (scan_id != w->id) {
             scan_id = w->id;
             scan_left = 0;
@@ -90,6 +116,12 @@ static int scan_turn(struct wm *m, const struct gfx_surface *fb, int viewers)
         }
         gfx_region_set(&m->dirty, 0);
         return 1;
+    }
+    /* (The mode is there, but its rows are not the block's length: never again for this size; the desktop's mode
+       back first.) */
+    if (own) {
+        display_app_refuse();
+        return scan_wait(m);
     }
     if (scan_id) {
         kprintf("GLOS-DESK scanout off win=%u why=%s\n", scan_id, viewers ? "viewer" : !w ? "window" : "pixels");

@@ -56,6 +56,10 @@ static struct {
     u32 screen_bytes;
     u32 scan;                                   /* where the display begins: the screen's own offset, or a block of
                                                    an app's (mga_scanout) */
+    u32 scan_pitch;                             /* the CRTC's row length in bytes: the screen's, or that of a mode
+                                                   set for a full-screen window of another size (mga_mode_end) */
+    s32 org_x, org_y;                           /* the desktop's point that is the display's corner then (the
+                                                   cursor is placed from it) */
     u8 busy;                                    /* drawn since the last sync */
     u32 ops;                                    /* draws the engine has had */
     u32 store_max;                              /* bytes of VRAM the desktop's windows may have (glos display vram) */
@@ -279,6 +283,8 @@ static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes)
     engine_init(m.screen.pitch_px, m.screen.bpp);
     crtc_set_start(m.screen.color_off);         /* (the screen where the VRAM manager has it, whatever ran before) */
     m.scan = m.screen.color_off;
+    m.scan_pitch = pitch;
+    m.org_x = m.org_y = 0;
     engine_set_target(&m.screen);
     engine_set_clip(0, 0, m.screen.pitch_px, (int)h);
     if (engine_sync(1000000) != 0) {
@@ -357,7 +363,7 @@ int mga_scanout(u32 off, u32 pitch)
             if (m.scan != m.screen.color_off)
                 scan_home();
             r = 1;
-        } else if (pitch == (u32)m.screen.pitch_px * (u32)(m.screen.bpp / 8) && !(off & 7) && off < m.vram) {
+        } else if (pitch == m.scan_pitch && !(off & 7) && off < m.vram) {
             if (off == m.scan || scan_set(off) == 0) {
                 m.scan = off;
                 r = 1;
@@ -366,6 +372,42 @@ int mga_scanout(u32 off, u32 pitch)
     }
     irq_restore(f);
     return r;
+}
+
+/* The card's mode set again by its BIOS with its memory kept (display.c: a mode of its own for a full-screen
+   window of another size, docs/v1/fullscreen-apps.md F3; or the desktop's mode after one). Around the BIOS's
+   call: the engine is the kernel's first (an app's turn ends wherever it is, and it finds the engine was taken
+   when it next draws: `lost`), since the BIOS leaves the engine as it likes. After it: the kernel's own state
+   for the screen again, the display at the screen's first pixel (the BIOS put it at the card's), the cursor to
+   be shown again by its next placing; `pitch` is the row length the CRTC has now, and (org_x, org_y) the
+   desktop's point at the display's corner. */
+void mga_mode_begin(void)
+{
+    gpu_take_force();
+    if (m.up)
+        drain("mode");
+}
+
+void mga_mode_end(u32 pitch, s32 org_x, s32 org_y)
+{
+    if (m.up) {
+        u32 f;
+        engine_init(m.screen.pitch_px, m.screen.bpp);
+        engine_set_target(&m.screen);
+        engine_set_clip(0, 0, m.screen.pitch_px, (int)(m.screen_bytes / ((u32)m.screen.pitch_px * (u32)(m.screen.bpp / 8))));
+        if (engine_sync(1000000) != 0)
+            kprintf("GLOS-MGA error=engine after=mode resets=%u\n", engine_resets);
+        m.cur = m.screen;
+        f = irq_save();
+        scan_set(m.screen.color_off);
+        m.scan = m.screen.color_off;
+        m.scan_pitch = pitch;
+        m.org_x = org_x, m.org_y = org_y;
+        m.cur_loaded = m.cur_shown = 0;         /* (its image again, into the place it has) */
+        irq_restore(f);
+        m.busy = 0;
+    }
+    gpu_give();
 }
 
 /* Where the display begins while it is on an app's block: the physical address of its first pixel (for a
@@ -414,6 +456,8 @@ int mga_cursor(int on, s32 x, s32 y)
     u32 f = irq_save();                         /* (the RAMDAC's registers: not the engine's) */
     if (m.up && m.cur_have && (m.cur_loaded || cursor_place() == 0)) {
         m.cur_loaded = 1;
+        /* (The display's corner is not the desktop's in a mode of a window's own.) */
+        x -= m.org_x, y -= m.org_y;
         if (on && (!m.cur_shown || x != m.cur_x || y != m.cur_y))
             cursor_move(x, y);
         if ((on != 0) != m.cur_shown)

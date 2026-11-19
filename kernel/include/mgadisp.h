@@ -51,6 +51,9 @@ void *mga_vram_ptr(u32 off);                    /* the kernel's address of a VRA
 int mga_scanout(u32 off, u32 pitch);            /* the display begins at this offset (a block with the screen's row
                                                    length), or MGA_SCAN_SCREEN: the screen's own again; 1 if so */
 u32 mga_scanout_phys(void);                     /* the first pixel shown while it is on a block; else 0 */
+void mga_mode_begin(void);                      /* the BIOS is about to set the card's mode again, its memory kept ... */
+void mga_mode_end(u32 pitch, s32 org_x, s32 org_y);     /* ... and has: the CRTC's row length now, and the desktop's
+                                                   point at the display's corner */
 u32 mga_vram_size(void);
 int mga_app_next(u32 id, u32 from, u32 *start, u32 *bytes);    /* the app's first block at or after from: 1, or 0 */
 

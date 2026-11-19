@@ -25,6 +25,13 @@ int display_cursor(int on, s32 x, s32 y);       /* the pointer by the card's cur
 int display_scanout(const struct gfx_surface *s);       /* the display on these pixels in the card's memory instead of
                                                            the screen's own (NULL: the screen's again); 1 if so */
 u32 display_scanout_phys(void);                 /* the first pixel shown while it is so (physical); else 0 */
+int display_app_mode(u32 w, u32 h, s32 x, s32 y, void (*done)(void));  /* the card in the mode of w by h, its memory
+                                                   kept, for a full-screen window of that size at (x, y) on the
+                                                   desktop (w 0: the desktop's mode again): 1 it is so, 0 asked for
+                                                   (done() when it is), -1 it cannot be */
+int display_app_busy(void);                     /* the card is in such a mode, or changing: nothing is drawn on the
+                                                   screen */
+void display_app_refuse(void);                  /* the mode it is in is no use for the window: not asked for again */
 void display_evicter(void (*evict)(void));      /* who moves pixels out of the card's memory before it changes hands */
 void *display_vram_alloc(u32 bytes);            /* the card's memory for pixels (a drawing engine's), or NULL */
 int display_vram_free(void *p);                 /* 1 if p was such, now free */

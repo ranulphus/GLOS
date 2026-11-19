@@ -4695,6 +4695,35 @@ def gpu_case(profile, vcard, card):
         after = shot("own-after")
         checks["own-as-it-was"] = bool(before) and bool(after) and before[2][:640 * 440 * 3] == after[2][:640 * 440 * 3]
 
+        # ... and in a mode of its own (F3's second half): 640 by 480 on an 800 by 600 desktop. GLOS sets the card to
+        # 640 by 480 while the window is alone in front and points the display at its buffers: the screenshot is
+        # 640 by 480 and all the app's; the app is told its frames are shown; at its end the desktop's mode and
+        # picture are back.
+        checks["on-800"] = agent.ssh("glos display on 800x600x16")[0] == 0 and " 800x600x16 " in state("display on mode=")
+        time.sleep(3)
+        b800 = shot("mode-before")
+        ons = agent.log().count("GLOS-DESK scanout on")
+        g = start(app + "full A 40 0 0 640 480")
+        checks["mode-set"] = scan("on", ons + 1, 90) and "GLOS-DISPLAY app mode=" in agent.log() \
+            and " 640x480x16 " in agent.log().split("GLOS-DISPLAY app mode=")[-1][:40]
+        checks["mode-said"] = "app mode 640x480" in display()
+        time.sleep(1)
+        pic = shot("mode-1")
+        checks["mode-picture"] = whole(pic, WIN_COLOUR["A"], 2 * 120 * 120 + 2000)
+        res = finish(g)
+        checks["mode-A"] = ok_line(res, "A")[0]
+        m = re.search(r"^GPU-OK A frames=(\d+) .* shown=(\d+)", res[1], re.M)
+        checks["mode-told"] = bool(m) and int(m.group(2)) > int(m.group(1)) // 3
+        t0 = time.time()
+        while time.time() - t0 < 60 and "GLOS-DISPLAY app off" not in agent.log().split("GLOS-DISPLAY app mode=")[-1]:
+            time.sleep(0.5)
+        checks["mode-off"] = "GLOS-DISPLAY app off" in agent.log().split("GLOS-DISPLAY app mode=")[-1] \
+            and "app mode" not in display()
+        time.sleep(3)
+        a800 = shot("mode-after")
+        checks["mode-as-it-was"] = bool(b800) and bool(a800) and a800[:2] == (800, 600) \
+            and b800[2][:800 * 500 * 3] == a800[2][:800 * 500 * 3]      # (above the bar and a notification's place)
+
         # 8 bits: no windowed GL, and no window shows VRAM.
         checks["on-8"] = agent.ssh("glos display on 640x480x8")[0] == 0 and " 640x480x8 " in state("display on mode=")
         rc, o, _ = agent.ssh(app + "info")

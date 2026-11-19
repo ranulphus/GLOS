@@ -10,8 +10,14 @@ in its `docs/milestones-*.md`.
   A game's 640 by 480 on a larger desktop is in the middle of the screen with black round it, and its block of
   video memory of that size is taken (without the flag a full-screen window's pixels are the screen's size,
   and a smaller block was refused: the DOS-GL session saw a white screen). The black is nothing's to a click.
-- For now such a window is composed with the rest. To come: GLOS sets a screen mode of the window's size while
-  it is alone in front and shows its pixels as they are (`docs/v1/fullscreen-apps.md`, F3).
+- **A screen mode of its own.** While such a window is alone in front and shows a block of its own video
+  memory (as DOS-GL's do on a Matrox card), GLOS sets the card to the mode of the window's size at the
+  desktop's depth and points the display at the block: the game fills the monitor at its own resolution, and
+  nothing is composed. Something over it (a notification, the switcher, a VNC viewer), or the window no longer
+  in front: the desktop's mode again, the screen composed whole, the window in the middle of it. `glos display`
+  says `app mode 640x480` while it is so; the log has `GLOS-DISPLAY app mode=...` and `app off`.
+- The sizes are those the card's BIOS has at the desktop's depth (`GLOS_DRAW_MODES`); a window of another size
+  (320 by 240 on most cards) stays composed in the middle (`docs/v1/fullscreen-apps.md`, F3).
 
 ## A full-screen window is shown as it is (API 2.7, 2026-11-19)
 
