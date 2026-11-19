@@ -332,6 +332,69 @@ int main(void)
         pd_free(d);
     }
 
+    {                                           /* layers */
+        struct pd_kept *k;
+        unsigned out[2];
+        d = pd_new(3, 2, PAPER);
+        pd_dot(d, 0, 0, INK, 1);
+        is("a layer added", pd_layer_add(d), 0);
+        is("it is the current one, of two", d->cur * 10 + d->n, 12);
+        is("its name", strcmp(d->layer[1].name, "Layer 2"), 0);
+        check("clear: the one under shows", d,
+              "#..\n"
+              "...\n");
+        pd_dot(d, 0, 0, RED, 1);
+        pd_dot(d, 1, 0, RED, 1);
+        check("drawn on it, over the other", d,
+              "oo.\n"
+              "...\n");
+        pd_dot(d, 0, 0, PD_CLEAR, 1);
+        check("made clear again there", d,
+              "#o.\n"
+              "...\n");
+        pd_layer_set(d, 1, 0, -1);
+        check("not shown", d,
+              "#..\n"
+              "...\n");
+        pd_layer_set(d, 1, 1, -1);
+        is("copied", pd_layer_copy(d), 0);
+        is("the copy is the current one, of three", d->cur * 10 + d->n, 23);
+        is("moved down", pd_layer_move(d, 0), 0);
+        is("and up again", pd_layer_move(d, 1), 0);
+        is("no further than the top", pd_layer_move(d, 1), -1);
+        k = pd_keep(d);
+        is("merged down", pd_layer_merge(d), 0);
+        is("and again", pd_layer_merge(d), 0);
+        is("one layer", d->n * 10 + d->cur, 10);
+        check("as it showed", d,
+              "#o.\n"
+              "...\n");
+        is("the bottom one merges onto nothing", pd_layer_merge(d), -1);
+        is("the only one stays", pd_layer_delete(d), -1);
+        is("undone", k && pd_swap(d, k) == 0, 1);
+        is("three layers again", d->n * 10 + d->cur, 32);
+        check("as it showed before", d,
+              "#o.\n"
+              "...\n");
+        is("the top one taken away", pd_layer_delete(d), 0);
+        is("two left", d->n * 10 + d->cur, 21);
+        pd_kept_free(k);
+        pd_free(d);
+        d = pd_new(2, 1, PAPER);                /* half shown; and clear to the ground */
+        pd_layer_add(d);
+        pd_dot(d, 0, 0, INK, 1);
+        pd_layer_set(d, 1, 1, 128);
+        is("half of black over white", (long)pd_get(d, 0, 0), 0x7F7F7F);
+        d->cur = 0;
+        pd_dot(d, 1, 0, PD_CLEAR, 1);
+        pd_flatten(d, 0, 0, 2, 1);
+        is("clear shows the chequered ground", (long)pd_get(d, 1, 0), 0xFFFFFF);
+        pd_render(d, out, RED);
+        is("and a plain one when it is saved", (long)out[1], RED);
+        is("the rest as it shows", (long)out[0], 0x7F7F7F);
+        pd_free(d);
+    }
+
     is("too large is refused", pd_new(PD_MAX + 1, 1, PAPER) == NULL, 1);
     is("nothing is refused", pd_new(0, 4, PAPER) == NULL, 1);
 

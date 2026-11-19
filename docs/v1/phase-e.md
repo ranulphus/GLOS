@@ -233,9 +233,18 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
 - **Resize and Canvas Size** (Image's menu): the picture scaled to a size (smooth: each new pixel from the four
   old ones round where it falls; or by the nearest), or kept as it is on a canvas of another size, at one of
   nine places, the new part in the second colour. The picture before is kept whole for undo.
-- **Not done yet:** layers' panel and blend modes; selections and crop; text; gradients, curves, the clone
-  stamp; resizing in proportion and bicubic; adjustments and effects; the clipboard; PCX and the layered format
-  written; tiles for pictures of any size.
+- **Layers** (2026-11-19): a list of them beside the picture (the top one first; a click makes one the current
+  one) and a Layers menu: New Layer (clear, over the current one), Duplicate, Delete, Move Up and Down, Merge
+  Down, Shown, Opacity. The tools draw on the current layer; the eraser makes it clear there, so that what is
+  under shows (on the bottom layer it paints the second colour, as before). Every change of the layers is
+  undone as a resize is (the picture before kept whole). A picture is saved as it shows, what is clear in all
+  its layers white.
+- **Tests:** `paint_test` (layers added, drawn on, made clear, hidden, copied, moved, merged, undone, half
+  shown); `paint` on the host and on Loop A (a layer drawn on and rubbed out in part, hidden, merged, the merge
+  undone, the layer deleted: the picture as it was).
+- **Not done yet:** blend modes, layers renamed and dragged, the layered format written; selections and crop;
+  text; gradients, curves, the clone stamp; resizing in proportion and bicubic; adjustments and effects; the
+  clipboard; PCX written; tiles for pictures of any size.
 
 ## Faults of the toolkit and the suites that phase E's gates found (2026-11-19)
 
@@ -251,6 +260,12 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
 - **`gui_modal` closes and frees its window**, which the header did not say; eight dialogs (seven written in
   this phase after the Control Panel's old one) closed theirs again, reading freed memory. No harm was seen
   from it; they no longer do, and `gui.h` says it.
+- **A key typed just after a menu's item was chosen was dropped** (the other side of the first fault): it
+  came for the menu's pop-up, which had the keyboard as it was pressed and was gone when the app looked at it.
+  It is the pop-up's owner's now (`sdk/gui/core.c`: the pop-ups closed lately are remembered, and whose they
+  were). Paint's suite on the 486 again: B after Layers' New Layer chose no brush.
+- **An open menu is forgotten when its window goes** (`gui_menu_gone`): the menus' state pointed at freed
+  windows when a menu's owner was closed with the menu open.
 - **The suites:** a GUI script that fails now reports each app's exit code and what it wrote to stderr; a
   script waits for a full-screen program's end by `settle` (no DOS program running) where it paused a fixed
   time (a session is 8.6 seconds on the G400's machine: `term-run`, the twelfth gate); the batch case waits

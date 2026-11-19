@@ -35,12 +35,25 @@ void pd_line(struct pd_doc *d, int xa, int ya, int xb, int yb, unsigned colour, 
 /* A rectangle and an ellipse between two corners (either way round), an outline `size` wide (0: none) in
    colour, filled with `fill` unless that is PD_NONE. */
 #define PD_NONE 0xFF000000u
+#define PD_CLEAR 0xFE000000u            /* as a colour: the pixels made clear (an eraser's on a layer over another) */
 void pd_rect(struct pd_doc *d, int xa, int ya, int xb, int yb, unsigned colour, int size, unsigned fill);
 void pd_ellipse(struct pd_doc *d, int xa, int ya, int xb, int yb, unsigned colour, int size, unsigned fill);
 /* The pixels that touch (x, y) and are within `tolerance` of its colour in every channel (0: the same) take
    colour: how many did. */
 long pd_fill(struct pd_doc *d, int x, int y, unsigned colour, int tolerance);
 unsigned pd_get(const struct pd_doc *d, int x, int y);  /* what shows there (00RRGGBBh); outside: 0 */
+
+/* Layers. A new one is clear, over the current one, and current; a copy likewise. Delete takes the current one
+   away (not the only one). Move changes it over with the one above (up) or under it. Merge puts the current one
+   down onto the one under it, as it shows, and takes it away. 0, or -1 with nothing changed. */
+int pd_layer_add(struct pd_doc *d);
+int pd_layer_copy(struct pd_doc *d);
+int pd_layer_delete(struct pd_doc *d);
+int pd_layer_move(struct pd_doc *d, int up);
+int pd_layer_merge(struct pd_doc *d);
+void pd_layer_set(struct pd_doc *d, int i, int visible, int opacity);  /* shown or not; 0 to 255 (-1: as it is) */
+/* The picture as it shows, over a plain ground and not the chequered one (to save it): out is w by h pixels. */
+void pd_render(const struct pd_doc *d, unsigned *out, unsigned paper);
 
 /* The whole picture (every layer) turned a quarter right (PD_RIGHT) or left, or flipped across or over. 0, or
    -1 with nothing changed (no memory). pd_turn_back: the turn that undoes one. */
@@ -55,11 +68,12 @@ int pd_turn_back(int how);
 int pd_resize(struct pd_doc *d, int nw, int nh, int smooth);
 int pd_canvas(struct pd_doc *d, int nw, int nh, int ax, int ay, unsigned paper);
 
-/* The whole picture kept, for a step that changes all of it (a resize, a canvas): pd_keep copies it; pd_swap
-   changes what is kept and what the picture is over (undo, and redo again). */
+/* The whole picture kept, for a step that changes all of it (a resize, a canvas, a layer added or taken away):
+   pd_keep copies it, its layers and what they are; pd_swap changes what is kept and what the picture is over
+   (undo, and redo again). */
 struct pd_kept {
-    int w, h, n;
-    unsigned *px[PD_LAYERS];
+    int w, h, n, cur;
+    struct pd_layer layer[PD_LAYERS];
 };
 struct pd_kept *pd_keep(const struct pd_doc *d);
 int pd_swap(struct pd_doc *d, struct pd_kept *k);       /* 0, or -1 (no memory for what shows: nothing changed) */

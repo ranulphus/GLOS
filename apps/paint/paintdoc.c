@@ -1,4 +1,5 @@
 /* PAINT's picture and what its tools do to it (paintdoc.h). */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -92,29 +93,22 @@ static void touch(struct pd_doc *d, int x0, int y0, int x1, int y1)     /* (x1, 
         d->y1 = y1;
 }
 
-/* What shows: the layers one over another, the bottom one on a chequered ground where it is clear. */
-void pd_flatten(struct pd_doc *d, int x0, int y0, int x1, int y1)
+/* What shows: the layers one over another, on a chequered ground where all are clear (or on `paper`, plain,
+   for pd_render). */
+static void compose(const struct pd_doc *d, unsigned *to, int x0, int y0, int x1, int y1, int plain, unsigned paper)
 {
     int x, y, i;
-    if (x0 < 0)
-        x0 = 0;
-    if (y0 < 0)
-        y0 = 0;
-    if (x1 > d->w)
-        x1 = d->w;
-    if (y1 > d->h)
-        y1 = d->h;
     for (y = y0; y < y1; y++) {
-        unsigned *out = d->flat + (size_t)y * d->w;
-        if (d->n == 1 && d->layer[0].visible && d->layer[0].opacity == 255) {    /* (the usual picture: quickly) */
+        unsigned *out = to + (size_t)y * d->w;
+        if (d->n == 1 && d->layer[0].visible && d->layer[0].opacity == 255 && !plain) {  /* (the usual: quickly) */
             const unsigned *in = d->layer[0].px + (size_t)y * d->w;
             for (x = x0; x < x1; x++)
                 out[x] = (in[x] >> 24) == 255 ? in[x] & 0xFFFFFFu : ((x >> 3) + (y >> 3)) & 1 ? 0xC0C0C0u : 0xFFFFFFu;
             continue;
         }
         for (x = x0; x < x1; x++) {
-            unsigned r, g, b, c = ((x >> 3) + (y >> 3)) & 1 ? 0xC0C0C0u : 0xFFFFFFu;
-            r = c >> 16, g = c >> 8 & 255, b = c & 255;
+            unsigned r, g, b, c = plain ? paper : ((x >> 3) + (y >> 3)) & 1 ? 0xC0C0C0u : 0xFFFFFFu;
+            r = c >> 16 & 255, g = c >> 8 & 255, b = c & 255;
             for (i = 0; i < d->n; i++) {
                 unsigned p, a;
                 if (!d->layer[i].visible)
@@ -134,12 +128,30 @@ void pd_flatten(struct pd_doc *d, int x0, int y0, int x1, int y1)
     }
 }
 
+void pd_flatten(struct pd_doc *d, int x0, int y0, int x1, int y1)
+{
+    if (x0 < 0)
+        x0 = 0;
+    if (y0 < 0)
+        y0 = 0;
+    if (x1 > d->w)
+        x1 = d->w;
+    if (y1 > d->h)
+        y1 = d->h;
+    compose(d, d->flat, x0, y0, x1, y1, 0, 0);
+}
+
+void pd_render(const struct pd_doc *d, unsigned *out, unsigned paper) { compose(d, out, 0, 0, d->w, d->h, 1, paper); }
+
 unsigned pd_get(const struct pd_doc *d, int x, int y)
 {
     return x < 0 || y < 0 || x >= d->w || y >= d->h ? 0 : d->flat[(size_t)y * d->w + x];
 }
 
 /* ---- the tools */
+
+/* A tool's colour as a layer's pixel: opaque, or clear for PD_CLEAR. */
+static unsigned ink(unsigned c) { return c == PD_CLEAR ? 0 : 0xFF000000u | (c & 0xFFFFFFu); }
 
 /* A row's pixels from x0 to x1 (the last one), clipped, on the current layer. */
 static void span(struct pd_doc *d, int y, int x0, int x1, unsigned argb)
@@ -182,7 +194,7 @@ void pd_dot(struct pd_doc *d, int x, int y, unsigned colour, int size)
 {
     if (size < 1)
         size = 1;
-    tip(d, x, y, 0xFF000000u | colour, size);
+    tip(d, x, y, ink(colour), size);
     touch(d, x - size / 2, y - size / 2, x - size / 2 + size, y - size / 2 + size);
 }
 
@@ -190,7 +202,7 @@ void pd_line(struct pd_doc *d, int xa, int ya, int xb, int yb, unsigned colour, 
 {
     int dx = abs(xb - xa), dy = -abs(yb - ya), sx = xa < xb ? 1 : -1, sy = ya < yb ? 1 : -1, err = dx + dy;
     int lx = xa < xb ? xa : xb, ly = ya < yb ? ya : yb, hx = xa < xb ? xb : xa, hy = ya < yb ? yb : ya, x = xa, y = ya;
-    unsigned argb = 0xFF000000u | colour;
+    unsigned argb = ink(colour);
     if (size < 1)
         size = 1;
     for (;;) {                                  /* (Bresenham's, a tip at each of its pixels) */
@@ -217,7 +229,7 @@ static void order(int *a, int *b)
 
 void pd_rect(struct pd_doc *d, int xa, int ya, int xb, int yb, unsigned colour, int size, unsigned fill)
 {
-    unsigned argb = 0xFF000000u | colour;
+    unsigned argb = ink(colour);
     int y;
     order(&xa, &xb);
     order(&ya, &yb);
@@ -228,7 +240,7 @@ void pd_rect(struct pd_doc *d, int xa, int ya, int xb, int yb, unsigned colour, 
             if (size)
                 span(d, y, xa, xb, argb);
             else if (fill != PD_NONE)
-                span(d, y, xa, xb, 0xFF000000u | fill);
+                span(d, y, xa, xb, ink(fill));
             continue;
         }
         if (size) {
@@ -236,7 +248,7 @@ void pd_rect(struct pd_doc *d, int xa, int ya, int xb, int yb, unsigned colour, 
             span(d, y, xb - size + 1, xb, argb);
         }
         if (fill != PD_NONE)
-            span(d, y, xa + size, xb - size, 0xFF000000u | fill);
+            span(d, y, xa + size, xb - size, ink(fill));
     }
     touch(d, xa, ya, xb + 1, yb + 1);
 }
@@ -268,7 +280,7 @@ static int oval_row(int y, int x0, int y0, int x1, int y1, int *first)
 
 void pd_ellipse(struct pd_doc *d, int xa, int ya, int xb, int yb, unsigned colour, int size, unsigned fill)
 {
-    unsigned argb = 0xFF000000u | colour;
+    unsigned argb = ink(colour);
     int y;
     order(&xa, &xb);
     order(&ya, &yb);
@@ -281,14 +293,14 @@ void pd_ellipse(struct pd_doc *d, int xa, int ya, int xb, int yb, unsigned colou
         has_in = oval_row(y, xa + size, ya + size, xb - size, yb - size, &i);
         if (!size) {
             if (fill != PD_NONE)
-                span(d, y, o, xa + xb - o, 0xFF000000u | fill);
+                span(d, y, o, xa + xb - o, ink(fill));
         } else if (!has_in) {
             span(d, y, o, xa + xb - o, argb);
         } else {
             span(d, y, o, i - 1, argb);
             span(d, y, xa + xb - i + 1, xa + xb - o, argb);
             if (fill != PD_NONE)
-                span(d, y, i, xa + xb - i, 0xFF000000u | fill);
+                span(d, y, i, xa + xb - i, ink(fill));
         }
     }
     touch(d, xa, ya, xb + 1, yb + 1);
@@ -318,7 +330,7 @@ long pd_fill(struct pd_doc *d, int x, int y, unsigned colour, int tolerance)
     } *st = NULL, *ns;
     size_t n = 0, room = 0;
     unsigned char *seen;
-    unsigned *px = d->layer[d->cur].px, seed, argb = 0xFF000000u | colour;
+    unsigned *px = d->layer[d->cur].px, seed, argb = ink(colour);
     long done = 0;
     int w = d->w, h = d->h, lx = x, hx = x, ly = y, hy = y;
     if (x < 0 || y < 0 || x >= w || y >= h || !(seen = calloc((size_t)w * (size_t)h, 1)))
@@ -535,29 +547,32 @@ struct pd_kept *pd_keep(const struct pd_doc *d)
     int i;
     if (!k)
         return NULL;
-    k->w = d->w, k->h = d->h, k->n = d->n;
+    k->w = d->w, k->h = d->h, k->cur = d->cur;
     for (i = 0; i < d->n; i++) {
-        if (!(k->px[i] = malloc(all))) {
+        k->layer[i] = d->layer[i];
+        if (!(k->layer[i].px = malloc(all))) {
             pd_kept_free(k);
             return NULL;
         }
-        memcpy(k->px[i], d->layer[i].px, all);
+        memcpy(k->layer[i].px, d->layer[i].px, all);
+        k->n = i + 1;
     }
     return k;
 }
 
 int pd_swap(struct pd_doc *d, struct pd_kept *k)
 {
-    unsigned *flat, *t;
-    int i, w = d->w, h = d->h;
-    if (k->n != d->n || !(flat = malloc((size_t)k->w * (size_t)k->h * sizeof *flat)))
+    struct pd_layer t;
+    unsigned *flat;
+    int i, w = d->w, h = d->h, n = d->n, cur = d->cur;
+    if (!(flat = malloc((size_t)k->w * (size_t)k->h * sizeof *flat)))
         return -1;
-    for (i = 0; i < d->n; i++)
-        t = d->layer[i].px, d->layer[i].px = k->px[i], k->px[i] = t;
+    for (i = 0; i < PD_LAYERS; i++)
+        t = d->layer[i], d->layer[i] = k->layer[i], k->layer[i] = t;
     free(d->flat);
     d->flat = flat;
-    d->w = k->w, d->h = k->h;
-    k->w = w, k->h = h;
+    d->w = k->w, d->h = k->h, d->n = k->n, d->cur = k->cur;
+    k->w = w, k->h = h, k->n = n, k->cur = cur;
     pd_flatten(d, 0, 0, d->w, d->h);
     pd_clean(d);
     return 0;
@@ -569,13 +584,134 @@ void pd_kept_free(struct pd_kept *k)
     if (!k)
         return;
     for (i = 0; i < k->n; i++)
-        free(k->px[i]);
+        free(k->layer[i].px);
     free(k);
 }
 
 unsigned pd_kept_bytes(const struct pd_kept *k)
 {
     return (unsigned)(sizeof *k + (size_t)k->w * (size_t)k->h * (size_t)k->n * sizeof(unsigned));
+}
+
+/* ---- layers */
+
+static void all_again(struct pd_doc *d)
+{
+    pd_flatten(d, 0, 0, d->w, d->h);
+    pd_clean(d);
+}
+
+/* A place made over the current layer for one more, which is the current one then: its pixels are the caller's
+   to fill. */
+static int layer_new(struct pd_doc *d, const char *name)
+{
+    size_t all = (size_t)d->w * (size_t)d->h;
+    unsigned *px;
+    int i;
+    if (d->n >= PD_LAYERS || !(px = malloc(all * sizeof *px)))
+        return -1;
+    for (i = d->n; i > d->cur + 1; i--)
+        d->layer[i] = d->layer[i - 1];
+    d->n++, d->cur++;
+    memset(&d->layer[d->cur], 0, sizeof d->layer[0]);
+    d->layer[d->cur].px = px;
+    d->layer[d->cur].visible = 1, d->layer[d->cur].opacity = 255;
+    strncpy(d->layer[d->cur].name, name, sizeof d->layer[0].name - 1);
+    return 0;
+}
+
+int pd_layer_add(struct pd_doc *d)
+{
+    char name[24];
+    int k = d->n + 1, i, taken;
+    do {                                        /* ("Layer 2", or the first number no layer has) */
+        sprintf(name, "Layer %d", k++);
+        for (taken = 0, i = 0; i < d->n; i++)
+            taken |= !strcmp(d->layer[i].name, name);
+    } while (taken);
+    if (layer_new(d, name) != 0)
+        return -1;
+    memset(d->layer[d->cur].px, 0, (size_t)d->w * (size_t)d->h * sizeof(unsigned));
+    all_again(d);
+    return 0;
+}
+
+int pd_layer_copy(struct pd_doc *d)
+{
+    char name[24];
+    int from = d->cur;
+    sprintf(name, "%.17s copy", d->layer[from].name);
+    if (layer_new(d, name) != 0)
+        return -1;
+    memcpy(d->layer[d->cur].px, d->layer[from].px, (size_t)d->w * (size_t)d->h * sizeof(unsigned));
+    d->layer[d->cur].visible = d->layer[from].visible, d->layer[d->cur].opacity = d->layer[from].opacity;
+    all_again(d);
+    return 0;
+}
+
+int pd_layer_delete(struct pd_doc *d)
+{
+    int i;
+    if (d->n < 2)
+        return -1;
+    free(d->layer[d->cur].px);
+    for (i = d->cur; i + 1 < d->n; i++)
+        d->layer[i] = d->layer[i + 1];
+    d->n--;
+    memset(&d->layer[d->n], 0, sizeof d->layer[0]);
+    if (d->cur >= d->n)
+        d->cur = d->n - 1;
+    all_again(d);
+    return 0;
+}
+
+int pd_layer_move(struct pd_doc *d, int up)
+{
+    int to = d->cur + (up ? 1 : -1);
+    struct pd_layer t;
+    if (to < 0 || to >= d->n)
+        return -1;
+    t = d->layer[d->cur], d->layer[d->cur] = d->layer[to], d->layer[to] = t;
+    d->cur = to;
+    all_again(d);
+    return 0;
+}
+
+int pd_layer_merge(struct pd_doc *d)
+{
+    struct pd_layer *top = &d->layer[d->cur], *low;
+    size_t i, all = (size_t)d->w * (size_t)d->h;
+    if (d->cur < 1)
+        return -1;
+    low = top - 1;
+    for (i = 0; top->visible && i < all; i++) { /* (one not shown adds nothing: it only goes) */
+        unsigned p = top->px[i], q = low->px[i], a = (p >> 24) * top->opacity / 255, qa = q >> 24, oa, k;
+        unsigned out = 0;
+        if (!a)
+            continue;
+        if (a == 255 || !qa) {
+            low->px[i] = a << 24 | (p & 0xFFFFFFu);
+            continue;
+        }
+        oa = a + qa * (255 - a) / 255;         /* the one over the other: its alpha, then each colour by the two's */
+        for (k = 0; k < 24; k += 8) {
+            unsigned pc = p >> k & 255, qc = q >> k & 255;
+            out |= ((pc * a * 255 + qc * qa * (255 - a)) / (oa * 255)) << k;
+        }
+        low->px[i] = oa << 24 | out;
+    }
+    return pd_layer_delete(d) == 0 ? 0 : -1;
+}
+
+void pd_layer_set(struct pd_doc *d, int i, int visible, int opacity)
+{
+    if (i < 0 || i >= d->n)
+        return;
+    if (visible >= 0)
+        d->layer[i].visible = visible != 0;
+    if (opacity >= 0)
+        d->layer[i].opacity = (unsigned char)(opacity > 255 ? 255 : opacity);
+    all_again(d);
 }
 
 /* ---- steps to undo */

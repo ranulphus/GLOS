@@ -21,7 +21,7 @@
 #include "paintdoc.h"
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_IN, C_OUT, C_ACTUAL, C_FIT, C_ABOUT, C_FILLED,
-       C_RESIZE, C_CANVAS,
+       C_RESIZE, C_CANVAS, C_LADD, C_LCOPY, C_LDELETE, C_LUP, C_LDOWN, C_LMERGE, C_LSHOWN, C_LOPACITY,
        C_TURN = 50,                     /* + PD_RIGHT, PD_LEFT, PD_ACROSS, PD_OVER */
        C_TOOL = 100 };
 enum { T_PENCIL, T_BRUSH, T_ERASER, T_LINE, T_RECT, T_ELLIPSE, T_FILL, T_PICK, T_COUNT };
@@ -49,7 +49,9 @@ static const unsigned swatches[28] = {
 };
 
 static struct gui_window *win;
-static struct gui_widget *view, *status, *pal, *first, *second, *tip_spin;
+static struct gui_widget *view, *status, *pal, *first, *second, *tip_spin, *layers;
+static struct gui_menu *layers_menu;
+static int filling;                     /* the layers' list is being filled: its tellings are not the user's */
 static struct pd_doc *doc;
 static struct gui_undo *undo;
 static char path[260];                  /* the file it is ("": never saved) */
@@ -167,19 +169,112 @@ static void turn(int how)
 /* ---- the whole picture another size (Image's Resize and Canvas Size): the picture before is kept whole, and
    undo and redo change the kept one and the shown one over */
 
+/* The layers' list beside the picture: the top one first, the current one chosen; one not shown says so. */
+static void layers_fill(void)
+{
+    int i;
+    filling = 1;
+    gui_list_clear(layers);
+    for (i = doc->n - 1; i >= 0; i--) {
+        char t[48];
+        const char *cells[1];
+        snprintf(t, sizeof t, doc->layer[i].visible ? "%s" : GUI_T("%s (hidden)"), doc->layer[i].name);
+        cells[0] = t;
+        gui_list_add(layers, cells, NULL, NULL);
+    }
+    gui_list_set(layers, doc->n - 1 - doc->cur);
+    filling = 0;
+    gui_menu_check(layers_menu, C_LSHOWN, doc->layer[doc->cur].visible);
+}
+
+static void layers_on(struct gui_widget *w, int what)
+{
+    int r = gui_list_get(w);
+    if (what != GUI_ON_SELECT || filling || drag.on || r < 0 || r >= doc->n)
+        return;
+    doc->cur = doc->n - 1 - r;
+    gui_menu_check(layers_menu, C_LSHOWN, doc->layer[doc->cur].visible);
+    printf("PAINT layer %d\n", doc->cur + 1);
+    fflush(stdout);
+}
+
 static void kept_swap(void *p)
 {
     if (pd_swap(doc, p) != 0)
         return;
     gui_image_view_set(view, doc->flat, doc->w, doc->h, doc->w);
+    layers_fill();
     status_parts();
     gui_damage(view);
     dirty = 1;
-    printf("PAINT size %dx%d\n", doc->w, doc->h);
+    printf("PAINT size %dx%d layers %d\n", doc->w, doc->h, doc->n);
     fflush(stdout);
 }
 
 static void kept_drop(void *p) { pd_kept_free(p); }
+
+/* A layer's command (Layers' menu): the picture before is kept whole for undo, as for a resize. */
+static struct {
+    struct gui_widget *spin;
+    int v;
+} op;
+
+static void opacity_button(struct gui_widget *b, int what)
+{
+    (void)what;
+    op.v = gui_value(op.spin);                  /* (read while the dialog is there) */
+    gui_end_modal(b->win, b->id);
+}
+
+static int opacity_ask(void)                    /* per cent, or -1: cancelled */
+{
+    struct gui_window *d = gui_window(GUI_T("Layer Opacity"), 220, 0, GUI_W_DIALOG);
+    struct gui_widget *box = gui_vbox(d->root, 6, 8), *form = gui_form(box), *row;
+    d->owner = win;
+    op.spin = gui_spin(gui_row(form, GUI_T("&Opacity (per cent):"), NULL), 0, 100,
+                       (doc->layer[doc->cur].opacity * 100 + 127) / 255);
+    row = gui_hbox(box, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("OK"), opacity_button, 1)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), opacity_button, 0)->flags |= GUI_CANCEL;
+    return gui_modal(d) == 1 ? op.v : -1;       /* (which closes it) */
+}
+
+static void layer_command(int id)
+{
+    static const char *const names[] = { GUI_N("New Layer"), GUI_N("Duplicate Layer"), GUI_N("Delete Layer"),
+                                         GUI_N("Move Layer Up"), GUI_N("Move Layer Down"), GUI_N("Merge Down"),
+                                         GUI_N("Show Layer"), GUI_N("Layer Opacity") };
+    static const char *const words[] = { "add", "copy", "delete", "up", "down", "merge", "shown", "opacity" };
+    struct pd_kept *k;
+    int r = 0, pct = 0;
+    if (id == C_LOPACITY && (pct = opacity_ask()) < 0)
+        return;
+    if (!(k = pd_keep(doc))) {
+        gui_message(win, GUI_T("Paint"), GUI_T("There isn't the memory for that."), GUI_MB_OK);
+        return;
+    }
+    switch (id) {
+    case C_LADD: r = pd_layer_add(doc); break;
+    case C_LCOPY: r = pd_layer_copy(doc); break;
+    case C_LDELETE: r = pd_layer_delete(doc); break;
+    case C_LUP: r = pd_layer_move(doc, 1); break;
+    case C_LDOWN: r = pd_layer_move(doc, 0); break;
+    case C_LMERGE: r = pd_layer_merge(doc); break;
+    case C_LSHOWN: pd_layer_set(doc, doc->cur, !doc->layer[doc->cur].visible, -1); break;
+    case C_LOPACITY: pd_layer_set(doc, doc->cur, -1, (pct * 255 + 50) / 100); break;
+    }
+    if (r != 0) {                               /* (the only layer deleted, the top one moved up: nothing done) */
+        pd_kept_free(k);
+        return;
+    }
+    layers_fill();
+    gui_damage(view);
+    dirty = 1;
+    printf("PAINT layer %s %d of %d\n", words[id - C_LADD], doc->cur + 1, doc->n);
+    fflush(stdout);
+    gui_undo_push(undo, GUI_T(names[id - C_LADD]), kept_swap, kept_swap, k, pd_kept_bytes(k), kept_drop, NULL, 0);
+}
 
 static struct {
     struct gui_widget *w, *h, *smooth, *where;
@@ -286,8 +381,8 @@ static void press(struct gui_ev *e, int x, int y)
         }
         return;
     }
-    if (tool == T_ERASER)
-        colour = b;
+    if (tool == T_ERASER)                       /* (the paper's colour on the bottom layer; over another, clear) */
+        colour = doc->cur ? PD_CLEAR : b;
     if (!(drag.before = pd_before(doc))) {
         gui_message(win, GUI_T("Paint"), GUI_T("There isn't the memory to draw on this picture."), GUI_MB_OK);
         return;
@@ -383,6 +478,7 @@ static void adopt(struct pd_doc *d, const char *p)
     dirty = 0;
     gui_undo_clear(undo);
     gui_image_view_set(view, doc->flat, doc->w, doc->h, doc->w);
+    layers_fill();
     gui_cview_zoom(view, 100);
     gui_cview_scroll(view, 0, 0);
     retitle();
@@ -392,7 +488,13 @@ static void adopt(struct pd_doc *d, const char *p)
 
 static int save_to(const char *p)
 {
-    int r = pic_write(p, doc->flat, doc->w, doc->h, 0);
+    unsigned *out = malloc((size_t)doc->w * (size_t)doc->h * sizeof *out);
+    int r = -3;
+    if (out) {                                  /* as it shows, what is clear white: not the chequered ground */
+        pd_render(doc, out, 0xFFFFFF);
+        r = pic_write(p, out, doc->w, doc->h, 0);
+        free(out);
+    }
     if (r != 0) {
         gui_message(win, GUI_T("Paint"), r == -2 ? GUI_T("Paint saves PNG, BMP and JPG pictures: give the name one of those ends.")
                                          : r == -3 ? GUI_T("There isn't the memory to save this picture.")
@@ -532,6 +634,10 @@ static void command(struct gui_window *w, int id)
         turn(id - C_TURN);
         return;
     }
+    if (id >= C_LADD && id <= C_LOPACITY) {
+        layer_command(id);
+        return;
+    }
     switch (id) {
     case C_NEW:
         if (let_go())
@@ -664,6 +770,17 @@ int main(int argc, char **argv)
     gui_menu_sep(m);
     gui_menu_item(m, GUI_T("Re&size..."), C_RESIZE, NULL);
     gui_menu_item(m, GUI_T("&Canvas Size..."), C_CANVAS, NULL);
+    layers_menu = m = gui_menu(bar, GUI_T("&Layers"));
+    gui_menu_item(m, GUI_T("&New Layer"), C_LADD, GUI_T("Ctrl+Shift+N"));
+    gui_menu_item(m, GUI_T("&Duplicate"), C_LCOPY, NULL);
+    gui_menu_item(m, GUI_T("D&elete"), C_LDELETE, NULL);
+    gui_menu_sep(m);
+    gui_menu_item(m, GUI_T("Move &Up"), C_LUP, NULL);
+    gui_menu_item(m, GUI_T("Move Do&wn"), C_LDOWN, NULL);
+    gui_menu_item(m, GUI_T("&Merge Down"), C_LMERGE, NULL);
+    gui_menu_sep(m);
+    gui_menu_item(m, GUI_T("&Shown"), C_LSHOWN, NULL);
+    gui_menu_item(m, GUI_T("&Opacity..."), C_LOPACITY, NULL);
     m = gui_menu(bar, GUI_T("&Tools"));
     for (i = 0; i < T_COUNT; i++)
         gui_menu_item(m, GUI_T(tools[i].text), C_TOOL + i, NULL);
@@ -699,7 +816,17 @@ int main(int argc, char **argv)
     gui_toolbar_command(tb, C_OUT);
     gui_undo_commands(undo, win, C_UNDO, C_REDO);
 
-    view = gui_image_view(gui_vbox(win->root, 0, 0));
+    row = gui_hbox(win->root, 0, 0);            /* the picture, and its layers beside it */
+    gui_grow(row, 1);
+    view = gui_image_view(gui_vbox(row, 0, 0));
+    {
+        static const char *const heads[1] = { GUI_N("Layers") };
+        static const int widths[1] = { 100 };
+        layers = gui_list(row, 1, heads, widths);
+        gui_size(layers, 120, 0);
+        gui_grow(layers, 0);
+        gui_on(layers, layers_on, 0);
+    }
     gui_cview_on_event(view, tool_event);
     gui_cview_style(view, GUI_CV_CENTRE | GUI_CV_RING | GUI_CV_TOOLS, 0);       /* (the left button is the tools') */
     gui_cview_cursor(view, GLOS_CURSOR_CROSS);
@@ -726,6 +853,7 @@ int main(int argc, char **argv)
         return 1;
     }
     gui_image_view_set(view, doc->flat, doc->w, doc->h, doc->w);
+    layers_fill();
     gui_cview_zoom(view, 100);
     retitle();
     choose(T_PENCIL);
