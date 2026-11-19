@@ -1079,6 +1079,51 @@ static void split_page(void)
     say("split", "", 0);
 }
 
+/* ---- keys and an app that is behind (phase E's gates, 2026-11-19). GLOS sends a key to the window that has the
+   keyboard as it is pressed; an app that is behind looks at it later, when a menu may have opened or closed
+   meanwhile. This page is always behind: an idle function sleeps most of every second (a slow PC's stand-in).
+   A key typed while the menu is opening is the menu's all the same (it chooses the item), and one typed just
+   after an item was chosen, the pop-up still having the keyboard, is the window's (it is not dropped). */
+static void slow_idle(void *arg)
+{
+    (void)arg;
+    glos_sleep(900);
+}
+
+static void slow_command(struct gui_window *w, int id)
+{
+    (void)w;
+    say("slow %s", id == 1 ? "alpha" : "beta", 0);
+}
+
+static int slow_key(struct gui_window *w, struct gui_ev *e)
+{
+    char t[2] = { (char)e->ch, 0 };
+    (void)w;
+    if (e->ch < 'a' || e->ch > 'z' || (e->mods & (GLOS_MOD_ALT | GLOS_MOD_CTRL)))
+        return 0;
+    say("slow key %s", t, 0);
+    return 1;
+}
+
+static void slow_page(void)
+{
+    struct gui_menubar *bar;
+    struct gui_menu *m;
+    win = gui_window("GUITEST Slow", 300, 140, 0);
+    win->on_command = slow_command;
+    win->on_key = slow_key;
+    bar = gui_menubar(win);
+    m = gui_menu(bar, "&Menu");
+    gui_menu_item(m, "&Alpha", 1, NULL);
+    gui_menu_item(m, "&Beta", 2, NULL);
+    gui_label(gui_vbox(win->root, 6, 8), "This window is always a second behind.");
+    status = gui_status(win);
+    gui_show(win, 1);
+    gui_idle(slow_idle, NULL, 1);
+    say("slow", "", 0);
+}
+
 /* ---- tabs that close, move and overflow (toolkit 2, step C5) */
 static struct gui_widget *dt;
 static int dt_new;
@@ -3079,6 +3124,8 @@ int main(int argc, char **argv)
         combo_page();
     else if (!strcmp(what, "smalldlg"))
         smalldlg();
+    else if (!strcmp(what, "slow"))
+        slow_page();
     else if (!strcmp(what, "filedlg"))
         filedlg();
     else if (!strcmp(what, "find"))
