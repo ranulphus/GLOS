@@ -222,7 +222,7 @@ int desk_win_present(struct app *a, u32 id, const struct krect *r)
     return w ? 0 : GLOS_E_HANDLE;
 }
 
-int desk_win_vram(struct app *a, u32 id, u32 off, u32 pitch)
+int desk_win_vram(struct app *a, u32 id, u32 off, u32 pitch, int *shown)
 {
     struct wm *m = desk_lock();
     struct wm_window *w = own(m, a, id);
@@ -243,6 +243,7 @@ int desk_win_vram(struct app *a, u32 id, u32 off, u32 pitch)
         gfx_init(&s, mga_vram_ptr(off), w->store.w, w->store.h, pitch, &m->fmt);
         s.dev = display_vram_dev(s.pix);
         wm_ext(m, w, &s);
+        *shown = desk_scan_swap(m, w);          /* (a full-screen window shown by the display itself: at once) */
     }
     desk_unlock();
     return r;

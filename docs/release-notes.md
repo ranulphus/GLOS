@@ -4,6 +4,19 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## A full-screen window is shown as it is (API 2.7, 2026-11-19)
+
+- **A program's full-screen window that shows a block of its own video memory** (DOS-GL's on a Matrox card: a
+  saver, a game) is no longer copied to the screen frame by frame: while it is all there is to see, GLOS points
+  the display at the program's block. Nothing is composed, and the card's engine stays the program's. Something
+  over it (a notification, another window, a VNC viewer) and it is copied as before, for as long. The first
+  step of games full screen as GLOS apps (`docs/v1/fullscreen-apps.md`).
+- **Why:** a window's frame cost 14 ms more than a session's on the IBM bench with its G400 (PrBoom-plus, 36
+  frames a second in a window against 74.5 in a session): the engine changed hands twice a frame for the copy.
+- **`GLOS_DRAW_WINVRAM` says so** (the structure's new last field, `shown`): a program that wants no tearing
+  waits for the vertical blank itself before its next swap while the display is on its pixels.
+- `glos shot` shows what the display shows. The log: `GLOS-DESK scanout on win=N`, `... off win=N why=...`.
+
 ## A program can tell whether a desktop is up (API 2.6, 2026-11-19)
 
 - **`GLOS_MACHINE_DESKTOP`** in what `glos_version` says of the machine: a desktop is on the screen, on any card

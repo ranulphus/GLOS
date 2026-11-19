@@ -22,6 +22,9 @@ u32 display_stat(char *buf, u32 max);           /* glos display: a line */
 void display_sync(void);                        /* a drawing engine's work on the screen finished: before reading it */
 void display_cursor_image(const u8 *and_mask, const u8 *xor_mask);      /* the pointer, for a hardware cursor */
 int display_cursor(int on, s32 x, s32 y);       /* the pointer by the card's cursor: 1, or 0 if it must be drawn */
+int display_scanout(const struct gfx_surface *s);       /* the display on these pixels in the card's memory instead of
+                                                           the screen's own (NULL: the screen's again); 1 if so */
+u32 display_scanout_phys(void);                 /* the first pixel shown while it is so (physical); else 0 */
 void display_evicter(void (*evict)(void));      /* who moves pixels out of the card's memory before it changes hands */
 void *display_vram_alloc(u32 bytes);            /* the card's memory for pixels (a drawing engine's), or NULL */
 int display_vram_free(void *p);                 /* 1 if p was such, now free */

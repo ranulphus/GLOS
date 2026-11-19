@@ -1471,6 +1471,26 @@ void wm_ext(struct wm *m, struct wm_window *w, const struct gfx_surface *s)
     wm_damage(m, w, 0);
 }
 
+/* The window that is all there is to see, in pixels that are not the manager's (docs/v1/fullscreen-apps.md,
+   F1): the topmost shown window that touches the screen, full screen, the whole of the screen its own, showing
+   a surface of an app's of that size; and nothing the manager draws over the windows (the pointer, if the
+   manager draws it; the outline of a move). Such a window can be shown by pointing the display at its pixels.
+   NULL if there is none. */
+struct wm_window *wm_scanout(const struct wm *m)
+{
+    struct wm_window *w;
+    if (m->ghost_on || (m->pointer && !m->hw_pointer))
+        return 0;
+    for (w = m->top; w; w = w->below)
+        if (shown(w) && w->frame.x < m->w && w->frame.y < m->h && w->frame.x + w->frame.w > 0
+            && w->frame.y + w->frame.h > 0)
+            break;
+    if (!w || !(w->flags & WF_FULL) || !w->has_ext || w->frame.x || w->frame.y || w->frame.w != m->w
+        || w->frame.h != m->h || w->ext.w != m->w || w->ext.h != m->h)
+        return 0;
+    return w;
+}
+
 void wm_screen(struct wm *m, s32 w, s32 h, const struct gfx_fmt *fmt)
 {
     struct wm_window *v;

@@ -47,6 +47,10 @@ int mga_app_block(u32 id, u32 off, u32 len, u32 *start, u32 *bytes);   /* [off, 
                                                    1 (and the block), or 0 */
 void mga_app_gone(u32 id);
 void *mga_vram_ptr(u32 off);                    /* the kernel's address of a VRAM offset */
+#define MGA_SCAN_SCREEN 0xFFFFFFFFu
+int mga_scanout(u32 off, u32 pitch);            /* the display begins at this offset (a block with the screen's row
+                                                   length), or MGA_SCAN_SCREEN: the screen's own again; 1 if so */
+u32 mga_scanout_phys(void);                     /* the first pixel shown while it is on a block; else 0 */
 u32 mga_vram_size(void);
 int mga_app_next(u32 id, u32 from, u32 *start, u32 *bytes);    /* the app's first block at or after from: 1, or 0 */
 

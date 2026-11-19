@@ -642,6 +642,12 @@ static int grab_vbe(struct shot *s, struct trapframe *tf, const struct vga *v)
     if (cap_alloc(s, total * planes) != 0)
         return -1;
     x0 = s->kind == K_PLANAR ? x0 / 8 : x0 * bytes;
+    if (lfb && s->kind == K_DIRECT && display_scanout_phys()) {        /* the desktop's display is on a full-screen
+                                                   window's own pixels (docs/v1/fullscreen-apps.md): those are
+                                                   what is shown, whatever the BIOS says of the display's start */
+        lfb = display_scanout_phys();
+        x0 = y0 = 0;
+    }
 
     if (lfb) {
         for (y = 0; y < s->h; y++)

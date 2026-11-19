@@ -332,6 +332,53 @@ static void places(void)
     wm_set_focus(&m, b);
     CHECK(m.bar->flags & WF_SHOWN);
     wm_set_focus(&m, a);
+    {   /* Shown as it is (docs/v1/fullscreen-apps.md, F1): full screen and in front, in pixels of its owner's own of
+           the screen's size, with nothing of the manager's drawn over the windows. */
+        static u8 px[320 * 240], small_px[100 * 60];
+        struct gfx_surface ext, small;
+        struct gfx_rect g = { 5, 5, 50, 50 };
+        u8 hw = m.hw_pointer, ptr = m.pointer;
+        s32 px0 = m.px, py0 = m.py;
+        gfx_init(&ext, px, 320, 240, 320, &gfx_fmt8);
+        gfx_init(&small, small_px, 100, 60, 100, &gfx_fmt8);
+        wm_raise(&m, a);
+        wm_hw_pointer(&m, 1);
+        CHECK(!wm_scanout(&m));                 /* (its pixels are the manager's own) */
+        wm_ext(&m, a, &small);                  /* (not of its size: not taken at all) */
+        CHECK(!a->has_ext && !wm_scanout(&m));
+        wm_ext(&m, a, &ext);
+        CHECK(wm_scanout(&m) == a);
+        wm_hw_pointer(&m, 0);                   /* the pointer drawn by the manager, over it */
+        wm_pointer(&m, 10, 10, 1);
+        CHECK(!wm_scanout(&m));
+        wm_pointer(&m, 10, 10, 0);              /* ... hidden: nothing is drawn */
+        CHECK(wm_scanout(&m) == a);
+        wm_pointer(&m, 10, 10, 1);
+        wm_hw_pointer(&m, 1);                   /* ... or the card's own */
+        CHECK(wm_scanout(&m) == a);
+        wm_ghost(&m, &g);                       /* the outline of a move */
+        CHECK(!wm_scanout(&m));
+        wm_ghost(&m, 0);
+        CHECK(wm_scanout(&m) == a);
+        wm_set_focus(&m, b);                    /* the bar is back, over it */
+        CHECK(!wm_scanout(&m));
+        wm_set_focus(&m, a);
+        CHECK(wm_scanout(&m) == a);
+        wm_raise(&m, b);                        /* another window in front of it */
+        CHECK(!wm_scanout(&m));
+        wm_raise(&m, a);
+        CHECK(wm_scanout(&m) == a);
+        wm_show(&m, a, 0);                      /* not shown */
+        CHECK(!wm_scanout(&m));
+        wm_show(&m, a, 1);
+        wm_raise(&m, a);
+        wm_set_focus(&m, a);
+        CHECK(wm_scanout(&m) == a);
+        wm_ext(&m, a, 0);                       /* its own pixels again */
+        CHECK(!wm_scanout(&m));
+        wm_pointer(&m, px0, py0, ptr);
+        wm_hw_pointer(&m, hw);
+    }
     wm_screen(&m, 400, 300, &gfx_fmt8);         /* another screen: it fills that one */
     CHECK(a->frame.w == 400 && a->store.h == 300 && !(m.bar->flags & WF_SHOWN));
     wm_screen(&m, 320, 240, &gfx_fmt8);

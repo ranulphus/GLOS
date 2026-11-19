@@ -351,6 +351,21 @@ void display_vram_limit(u32 bytes) { mga_store_limit(bytes); }
 
 int display_cursor(int on, s32 x, s32 y) { return d.on && !d.held && mga_cursor(on, x, y); }
 
+/* The display on a surface in the card's memory that is not the screen's own (a full-screen window's pixels,
+   an app's: docs/v1/fullscreen-apps.md), or with NULL on the screen again. 1 if it is there now. */
+int display_scanout(const struct gfx_surface *s)
+{
+    u32 off;
+    if (!d.on || d.held || !mga_display_on())
+        return 0;
+    if (!s)
+        return mga_scanout(MGA_SCAN_SCREEN, 0);
+    off = (u32)(s->pix - (const u8 *)mga_vram_ptr(0));
+    return s->pix >= (const u8 *)mga_vram_ptr(0) && off < mga_vram_size() && mga_scanout(off, s->pitch);
+}
+
+u32 display_scanout_phys(void) { return d.on ? mga_scanout_phys() : 0; }
+
 void display_init(const struct bootinfo *bi)
 {
     if (!d.paint)

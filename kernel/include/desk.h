@@ -31,7 +31,12 @@ int desk_win_close(struct app *a, u32 id);
 int desk_win_title(struct app *a, u32 id, const char *title);
 int desk_win_pixels(struct app *a, u32 id, struct kwindow *g);
 int desk_win_present(struct app *a, u32 id, const struct krect *r);        /* NULL: all of it */
-int desk_win_vram(struct app *a, u32 id, u32 off, u32 pitch);         /* GLOS_FN_WINVRAM */
+int desk_win_vram(struct app *a, u32 id, u32 off, u32 pitch, int *shown);     /* GLOS_FN_WINVRAM (*shown: the
+                                                                                   display is on those pixels) */
+struct wm;
+struct wm_window;
+int desk_scan_swap(struct wm *m, struct wm_window *w);  /* the window shown by the display itself has other pixels:
+                                                           the display on them now (desk.c); 1 if it is so */
 void desk_app_vram_gone(struct app *a, u32 off, u32 bytes);     /* its windows stop showing that block */
 int desk_win_focus(struct app *a, u32 id);
 void desk_screen(struct kwindow *g);

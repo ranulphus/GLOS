@@ -142,6 +142,9 @@ static void info(void)
         gg.revision, gg.vram, gg.regs, gg.base, gg.share, gg.bpp, mga.family);
 }
 
+static int full;                                /* its window is full screen: the whole screen, no frame */
+static int shown;                               /* frames GLOS said the display itself was on (API 2.7) */
+
 static void window(int x, int y, int w, int h)
 {
     unsigned bytes;
@@ -157,14 +160,18 @@ static void window(int x, int y, int w, int h)
         last = glos_error();
         die(44, "window");
     }
+    if (full)                                   /* (its size is the screen's from here: the buffers' too) */
+        glos_show(win.id, GLOS_WS_FULL);
     glos_get(win.id, GLOS_PROP_WIN_W, &win.w);
     glos_get(win.id, GLOS_PROP_WIN_H, &win.h);
     glos_get(win.id, GLOS_PROP_WIN_ID, &id);
+    w = win.w, h = win.h;
     pitch_b = ((unsigned)w + 31) / 32 * 32 * 2;
     for (i = 0; i < 2; i++)
         if ((last = glos_vram(pitch_b * (unsigned)h, 0, 4096, &buf_off[i], &bytes)) != 0)
             die(44, "vram");
-    glos_show(win.id, GLOS_WS_NORMAL);
+    if (!full)
+        glos_show(win.id, GLOS_WS_NORMAL);
     say("WIN name=%s id=%d bufs=%x,%x pitch=%u\n", name, id, buf_off[0], buf_off[1], pitch_b);
 }
 
@@ -226,8 +233,12 @@ static int run(int argc, char **argv, int spin)
             if (r > worst)
                 worst = r;
         }
-        if ((last = glos_winvram(win.id, buf_off[b], pitch_b)) != 0)
-            die(45, "winvram");
+        {
+            int direct = 0;
+            if ((last = glos_winvram_shown(win.id, buf_off[b], pitch_b, &direct)) != 0)
+                die(45, "winvram");
+            shown += direct != 0;
+        }
         b ^= 1;
         sx = (sx + 3) % (win.w - win.h / 4);
         n++;
@@ -241,7 +252,8 @@ static int run(int argc, char **argv, int spin)
             }
         glos_sleep(20);
     }
-    say("GPU-OK %s frames=%d bad=%d worst=%d lost=%u resyncs=%u\n", name, n, bad, worst, share->lost, resyncs);
+    say("GPU-OK %s frames=%d bad=%d worst=%d lost=%u resyncs=%u shown=%d\n", name, n, bad, worst, share->lost, resyncs,
+        shown);
     return 41;
 }
 
@@ -255,6 +267,11 @@ int main(int argc, char **argv)
     }
     if (!strcmp(argv[1], "draw"))
         return run(argc, argv, 0);
+    if (!strcmp(argv[1], "full")) {            /* as draw, in a full-screen window: GLOS shows its buffers by
+                                                   pointing the display at them (docs/v1/fullscreen-apps.md) */
+        full = 1;
+        return run(argc, argv, 0);
+    }
     if (!strcmp(argv[1], "spin"))
         return run(argc, argv, 1);
     if (!strcmp(argv[1], "raw")) {             /* no lock asked for: the first touch faults and takes it */

@@ -67,6 +67,57 @@ static void cursor_image(struct wm *m)
 
 u32 desk_frames(void) { return frames; }
 
+/* A full-screen window that is all there is to see, in pixels of an app's own in the card's memory, is shown by
+   pointing the display at them, not by copying them to the screen (docs/v1/fullscreen-apps.md, F1). While it is
+   so nothing is composed: what lies under it is drawn when it is seen again. VNC's viewers are shown the
+   composed screen, so with one there the window is copied as any other. */
+static u32 scan_id;                             /* the window shown so, by its id; 0: none */
+static u8 scan_left;                            /* it has just stopped being so: the screen composed whole, then
+                                                   the display on it again */
+static u32 scan_no;                             /* the last window that could have been, but for its pixels (the log's) */
+
+static int scan_turn(struct wm *m, const struct gfx_surface *fb, int viewers)
+{
+    struct wm_window *w = viewers ? 0 : wm_scanout(m);
+    if (w && w->ext.pitch == fb->pitch && display_scanout(&w->ext)) {
+        if (scan_id != w->id) {
+            scan_id = w->id;
+            scan_left = 0;
+            kprintf("GLOS-DESK scanout on win=%u\n", w->id);
+        }
+        gfx_region_set(&m->dirty, 0);
+        return 1;
+    }
+    if (scan_id) {
+        kprintf("GLOS-DESK scanout off win=%u why=%s\n", scan_id, viewers ? "viewer" : !w ? "window" : "pixels");
+        scan_id = 0;
+        scan_left = 1;
+        wm_damage_all(m);
+    } else if (w && w->id != scan_no) {         /* (said once a window: why such a window is copied all the same) */
+        scan_no = w->id;
+        kprintf("GLOS-DESK scanout no win=%u pitch=%u screen=%u\n", w->id, w->ext.pitch, fb->pitch);
+    }
+    return 0;
+}
+
+/* The window shown so has other pixels to show (an app's swap: desk_win_vram, in the app's own call, under the
+   desktop's lock): the display goes to them now, before the app draws into those it showed. If it cannot (they
+   are not of the screen's row length any more), the display is the screen's again at once, composed as soon as
+   the desktop's thread has its turn. 1 if the display is on the window's new pixels. */
+int desk_scan_swap(struct wm *m, struct wm_window *w)
+{
+    (void)m;
+    if (!scan_id || scan_id != w->id)
+        return 0;
+    if (w->has_ext && display_scanout(&w->ext)) {
+        frames++;
+        return 1;
+    }
+    display_scanout(0);                         /* (the next turn sees no such window, and composes) */
+    desk_kick();
+    return 0;
+}
+
 static void *d_alloc(u32 bytes, int kind)
 {
     void *p;
@@ -253,6 +304,9 @@ static void desk_thread(void *arg)
         deskin_turn(m);
         deskapp_embeds(m);
         fb = display_fb();
+        if (!fb && scan_id)                     /* (the screen is a session's: the display is its program's, and the
+                                                   desktop's own again when it comes back) */
+            scan_id = scan_left = 0;
         if (theme_shown != theme_now) {         /* a new theme: the frames, the bar and the desktop drawn again */
             theme_shown = theme_now;
             theme_show(m, theme_now);
@@ -272,6 +326,10 @@ static void desk_thread(void *arg)
                 saved = 2;
             } else if (saved != 1) {
                 saved = 1;
+                if (scan_id) {                  /* (the black screen is the screen's own pixels) */
+                    scan_id = scan_left = 0;
+                    display_scanout(0);
+                }
                 gfx_fill(fb, 0, 0, fb->w, fb->h, 0x000000);
                 display_sync();
                 if (vnc_viewers()) {
@@ -309,7 +367,20 @@ static void desk_thread(void *arg)
             dirty = m->dirty.n != 0;
             if ((vnc = vnc_viewers() != 0))
                 drawn = m->dirty;
-            wm_compose(m, fb);
+            if (scan_turn(m, fb, vnc)) {        /* (a full-screen window's own pixels are on the display) */
+                dirty = 0;
+            } else {
+                if (scan_left && vnc) {         /* (the viewers are owed the whole screen) */
+                    drawn.n = 1;
+                    drawn.r[0].x = drawn.r[0].y = 0, drawn.r[0].w = fb->w, drawn.r[0].h = fb->h;
+                }
+                wm_compose(m, fb);
+                if (scan_left) {                /* the screen is whole again: the display back on it */
+                    scan_left = 0;
+                    display_sync();
+                    display_scanout(0);
+                }
+            }
             /* What changed, once it is drawn (M10): VNC's viewers are owed it, and glos rec counts a frame. After the
                compose, so that a viewer's update or a capture read while it was being drawn is made again. */
             if (vnc)

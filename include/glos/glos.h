@@ -85,6 +85,8 @@ int glos_gpu_unlock(void);
 int glos_vram(unsigned least, unsigned most, unsigned align, unsigned *offset, unsigned *bytes);
 int glos_vram_free(unsigned offset);
 int glos_winvram(glos_handle w, unsigned offset, unsigned pitch);
+int glos_winvram_shown(glos_handle w, unsigned offset, unsigned pitch, int *shown);     /* 2.7: ... and whether the
+                                                           display itself is on those pixels now (api.h) */
 /* ---- input (INPUT) */
 int glos_keys(struct glos_keys *k);                     /* the keyboard as it is now */
 int glos_capture(glos_handle w, int on);                /* the mouse to w, wherever the pointer is; or let go */

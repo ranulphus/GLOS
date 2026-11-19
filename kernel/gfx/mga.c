@@ -53,6 +53,8 @@ static struct {
     mga_target cur;                             /* the engine's target now */
     u8 *screen_pix;                             /* the screen's pixels in display.c's mapping */
     u32 screen_bytes;
+    u32 scan;                                   /* where the display begins: the screen's own offset, or a block of
+                                                   an app's (mga_scanout) */
     u8 busy;                                    /* drawn since the last sync */
     u32 ops;                                    /* draws the engine has had */
     u32 store_max;                              /* bytes of VRAM the desktop's windows may have (glos display vram) */
@@ -77,9 +79,13 @@ static struct ablk {
     u32 *saved;                                 /* its pages' frames while the card is another's, or 0 */
 } ab[APP_BLOCKS];
 
+static void scan_home(void);
+
 static void ab_drop(struct ablk *b)
 {
     u32 i;
+    if (m.up && m.scan != m.screen.color_off && m.scan >= b->off && m.scan - b->off < b->bytes)
+        scan_home();                            /* (the display never stays on memory that is nobody's) */
     if (b->saved) {
         for (i = 0; i < b->bytes >> 12; i++)
             if (b->saved[i])
@@ -271,6 +277,7 @@ static int up(u8 *pix, u32 lfb, u32 pitch, u32 bpp, u32 h, u32 bytes)
     m.screen.zbits = 16;
     engine_init(m.screen.pitch_px, m.screen.bpp);
     crtc_set_start(m.screen.color_off);         /* (the screen where the VRAM manager has it, whatever ran before) */
+    m.scan = m.screen.color_off;
     engine_set_target(&m.screen);
     engine_set_clip(0, 0, m.screen.pitch_px, (int)h);
     if (engine_sync(1000000) != 0) {
@@ -314,6 +321,41 @@ void mga_display_down(void)
     }
     gpu_give();
 }
+
+/* ---- the display on a block of an app's (docs/v1/fullscreen-apps.md, F1) */
+
+static void scan_home(void)
+{
+    crtc_set_start(m.screen.color_off);
+    m.scan = m.screen.color_off;
+}
+
+/* The display begins at a block of an app's instead of the screen's own pixels, or (MGA_SCAN_SCREEN) at the
+   screen's again: 1 if it is there now. The block has the screen's row length (the CRTC's is left as it is)
+   and lies in the card's memory; whose it is, is the caller's to know. The cursor is the card's own and stays. */
+int mga_scanout(u32 off, u32 pitch)
+{
+    u32 f = irq_save();
+    int r = 0;
+    if (m.up) {
+        if (off == MGA_SCAN_SCREEN) {
+            if (m.scan != m.screen.color_off)
+                scan_home();
+            r = 1;
+        } else if (pitch == (u32)m.screen.pitch_px * (u32)(m.screen.bpp / 8) && !(off & 7) && off < m.vram) {
+            if (off == m.scan || crtc_set_start(off) == 0) {
+                m.scan = off;
+                r = 1;
+            }
+        }
+    }
+    irq_restore(f);
+    return r;
+}
+
+/* Where the display begins while it is on an app's block: the physical address of its first pixel (for a
+   screenshot, which reads what is shown); 0 while it is on the screen's own. */
+u32 mga_scanout_phys(void) { return m.up && m.scan != m.screen.color_off ? mga.fb_phys + m.scan : 0; }
 
 /* ---- the hardware cursor */
 

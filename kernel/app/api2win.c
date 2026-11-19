@@ -599,12 +599,15 @@ static int winvram(struct app *a, struct trapframe *tf)
 {
     struct glos_winvram q;
     u32 size, id;
-    int r;
+    int r, shown = 0;
     if (a2_rd(tf, &q, sizeof q, &size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
     if (!(id = win_id(a, q.handle)))
         return not_window(a, tf, q.handle);
-    return (r = desk_win_vram(a, id, q.offset, q.pitch)) != 0 ? a2_fail(tf, (u32)r) : a2_ok(tf, 0);
+    if ((r = desk_win_vram(a, id, q.offset, q.pitch, &shown)) != 0)
+        return a2_fail(tf, (u32)r);
+    q.shown = (u32)shown;                       /* (2.7: to a caller whose structure has the field) */
+    return a2_wr(tf, &q, sizeof q, size) != 0 ? a2_fail(tf, GLOS_E_ARGUMENT) : a2_ok(tf, 0);
 }
 
 /* MODES: the screen modes the card has (the display lists them once, by the VM thread: this may wait for it). */

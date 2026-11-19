@@ -233,5 +233,7 @@ int wm_bar_part(const struct wm *m, int part, u32 tray_id, struct gfx_rect *r); 
 
 void wm_damage_all(struct wm *m);
 int wm_compose(struct wm *m, struct gfx_surface *screen);       /* what is dirty, drawn; 1 if anything was */
+struct wm_window *wm_scanout(const struct wm *m);       /* the full-screen window that is all there is to see, in
+                                                           pixels of an app's own: it can be shown as it is. Or NULL */
 
 #endif

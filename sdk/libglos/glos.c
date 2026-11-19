@@ -416,8 +416,16 @@ int glos_vram_free(unsigned offset)
 
 int glos_winvram(glos_handle w, unsigned offset, unsigned pitch)
 {
-    struct glos_winvram q = { sizeof q, w, offset, pitch };
+    struct glos_winvram q = { sizeof q, w, offset, pitch, 0 };
     return raw(GLOS_DRAW_WINVRAM, &q, 0);
+}
+
+int glos_winvram_shown(glos_handle w, unsigned offset, unsigned pitch, int *shown)
+{
+    struct glos_winvram q = { sizeof q, w, offset, pitch, 0 };
+    int r = raw(GLOS_DRAW_WINVRAM, &q, 0);
+    *shown = r == 0 && q.shown;                 /* (a GLOS before 2.7 leaves it 0) */
+    return r;
 }
 
 /* The code page DOS has (glos/cp.h): GLOSCP in the environment (a profile's env), else INT 21h 6601h's (with

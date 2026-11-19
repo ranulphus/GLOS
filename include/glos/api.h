@@ -54,7 +54,8 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 6            /* (2.6: VERSION's GLOS_MACHINE_DESKTOP; 2.5: AUDIO's OUT for a program that is not an
+#define GLOS_MINOR 7            /* (2.7: WINVRAM says when the display is on the window's own pixels;
+                                   2.6: VERSION's GLOS_MACHINE_DESKTOP; 2.5: AUDIO's OUT for a program that is not an
                                    app, full-screen too; 2.4, phase D: SECRETS' STORE; a window's
                                    GLOS_PROP_WIN_ICON_BIG) */
 
@@ -593,6 +594,11 @@ struct glos_winvram {
                                    the window shows them from now on (a swap: the other buffer). GLOS_OWN_PIXELS:
                                    its own pixels again */
     unsigned pitch;             /* bytes from one of their rows to the next (a multiple of 64) */
+    unsigned shown;             /* (2.7) -> 1: the display itself is on these pixels now, and was before the call
+                                   came back (a full-screen window that is all there is to see: nothing is copied);
+                                   the block shown before is free to draw in. A program that wants no tearing
+                                   waits for the vertical blank before its next call while this says 1. 0: the
+                                   window is composed with the rest, a copy, at the compositor's next turn */
 };
 #define GLOS_OWN_PIXELS 0xFFFFFFFFu
 

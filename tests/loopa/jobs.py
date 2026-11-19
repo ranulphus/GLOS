@@ -4610,6 +4610,60 @@ def gpu_case(profile, vcard, card):
         checks["vram-back"] = free0 > 0 and free1 == free0
         info += " free=%d,%d" % (free0, free1)
 
+        # A full-screen window's buffers are shown as they are (docs/v1/fullscreen-apps.md, F1): the display is
+        # pointed at them, nothing is copied. A screenshot has the app's picture all the same (its colour over the
+        # whole screen, the white squares); another app's window in front and it is copied as any window, with
+        # that window over it; alone in front again, shown as it is again; and when it ends the desktop is back
+        # as it was. Every frame of both apps right throughout.
+        def scan(what, n, limit=60):
+            t0 = time.time()
+            while time.time() - t0 < limit and agent.log().count("GLOS-DESK scanout " + what) < n:
+                time.sleep(0.5)
+            return agent.log().count("GLOS-DESK scanout " + what) == n
+
+        def whole(pic, colour, most_other):     # the app's colour, but for the squares and what lies over it
+            if not pic or pic[:2] != (640, 480):
+                return False
+            other = sum(1 for i in range(0, len(pic[2]), 3)
+                        if any(abs(pic[2][i + k] - colour[k]) > 8 for k in range(3)))
+            return other <= most_other
+
+        base = agent.log().count("GLOS-DESK scanout on")
+        time.sleep(2)
+        before = shot("full-before")
+        f = start(app + "full C 100")
+        checks["full-on"] = scan("on", base + 1)
+        time.sleep(1)
+        pic = shot("full-1")
+        checks["full-picture"] = whole(pic, WIN_COLOUR["C"], 2 * 120 * 120 + 2000)      # (two squares of 120 by 120)
+        offs = agent.log().count("GLOS-DESK scanout off")
+        d = start(app + "draw A 8 60 60 200 120")
+        checks["full-covered"] = until("A") and scan("off", offs + 1, 30) \
+            and "why=window" in agent.log().split("GLOS-DESK scanout off")[-1][:40]
+        checks["full-copied"] = picture("A")                    # (A's window is seen over it, in A's colour)
+        res = finish_a = finish(d)
+        checks["full-A"] = ok_line(res, "A")[0]
+        checks["full-on-again"] = scan("on", base + 2)
+        time.sleep(1)
+        checks["full-picture-2"] = whole(shot("full-2"), WIN_COLOUR["C"], 2 * 120 * 120 + 2000)
+        # A session meanwhile: the card is its program's, and the desktop's again after, the window shown as it is
+        # once more (its buffers went out to memory and came back).
+        checks["full-session"] = agent.ssh("C:\\TEST\\ECHOARGS.EXE over the full-screen window")[0] == 7
+        checks["full-on-after-session"] = scan("on", base + 3)
+        time.sleep(1)
+        checks["full-picture-3"] = whole(shot("full-3"), WIN_COLOUR["C"], 2 * 120 * 120 + 2000)
+        res = finish(f)
+        checks["full-C"] = ok_line(res, "C")[0]
+        m = re.search(r"^GPU-OK C frames=(\d+) .* shown=(\d+)", res[1], re.M)     # (API 2.7: WINVRAM says so)
+        checks["full-told"] = bool(m) and int(m.group(1)) // 3 < int(m.group(2)) < int(m.group(1))
+        m = re.search(r"^GPU-OK A frames=\d+ .* shown=(\d+)", finish_a[1], re.M)
+        checks["window-told"] = bool(m) and m.group(1) == "0"
+        checks["full-off"] = agent.log().count("GLOS-DESK scanout on") == base + 3 and scan("off", offs + 2, 30)
+        # (off said twice: covered, and at its end; the session's start takes the screen without a word)
+        time.sleep(2)
+        after = shot("full-after")
+        checks["full-as-it-was"] = bool(before) and bool(after) and before[2][:640 * 440 * 3] == after[2][:640 * 440 * 3]
+
         # 8 bits: no windowed GL, and no window shows VRAM.
         checks["on-8"] = agent.ssh("glos display on 640x480x8")[0] == 0 and " 640x480x8 " in state("display on mode=")
         rc, o, _ = agent.ssh(app + "info")
