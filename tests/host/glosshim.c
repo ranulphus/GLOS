@@ -18,6 +18,8 @@
  *   click "TITLE" X Y [right] [double]
  *   drag "TITLE" X0 Y0 X1 Y1
  *   pause MS                   time passes (timers run)
+ *   said LINE                  until the app has printed LINE (a job's end, which shows in no window): each
+ *                              `said` of a line waits for another of it
  *   launch, syskey             the shell's events: the launcher (Ctrl+Esc), the task list (Ctrl+Alt+Del)
  *   clip TEXT                  the clipboard's text (glos clip)
  *   shot NAME "TITLE" [X Y W H]   OUTDIR/NAME-BPP.png: that window's client area (the rectangle, if given,
@@ -31,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "glos/glos.h"
 #include "glos/config.h"
@@ -1600,6 +1603,48 @@ static int step(void)
                 H.line--;
                 H.clock += 100;
                 return 1;
+            }
+            waited = 0;
+            continue;
+        }
+        if (!strcmp(cmd, "said")) {             /* said LINE: until the app has printed that line (the end of work
+                                                   that shows in no window's title: a job's). Each `said` of a line
+                                                   waits for another of it. What the app prints is this program's
+                                                   own output: read back from its file (the suite's log); printed
+                                                   to anything else it cannot be, and a second and a half passes. */
+            static struct { char line[200]; int n; } heard[32];
+            static int nheard, waited;
+            struct stat st;
+            int k, have = 0;
+            while (*p == ' ')
+                p++;
+            snprintf(a, sizeof a, "%s", p);
+            a[strcspn(a, "\r\n")] = 0;
+            for (k = 0; k < nheard && strcmp(heard[k].line, a); k++)
+                ;
+            if (k == nheard && nheard < 32)
+                snprintf(heard[nheard++].line, sizeof heard[0].line, "%s", a);
+            fflush(stdout);
+            if (k < 32 && fstat(1, &st) == 0 && S_ISREG(st.st_mode)) {
+                FILE *f = fopen("/proc/self/fd/1", "r");
+                char l[1024];
+                while (f && fgets(l, sizeof l, f)) {
+                    l[strcspn(l, "\r\n")] = 0;
+                    have += !strcmp(l, a);
+                }
+                if (f)
+                    fclose(f);
+                if (have <= heard[k].n) {
+                    if (++waited > 600 || !threads_made())
+                        fail("said \"%s\": not said%s", a, threads_made() ? " after a minute" : "");
+                    fseek(H.script, at, SEEK_SET);
+                    H.line--;
+                    H.clock += 100;
+                    return 1;
+                }
+                heard[k].n++;
+            } else {
+                H.clock += 1500;
             }
             waited = 0;
             continue;

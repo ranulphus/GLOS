@@ -4,6 +4,22 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Files: archives as folders (2026-11-19)
+
+- **A ZIP, a TAR, a GZ or a TAR in a GZ is gone into like a folder** in Files' browser: its folders and files
+  listed with their sizes and dates, the address bar saying where (`C:\DOCS\PACK.ZIP\TEXT`). A file in it is
+  opened from an unpacked copy; Copy and a paste elsewhere unpack what was chosen, as a job in the background;
+  **Extract Here** unpacks a whole archive into a folder of its name.
+- **Long names become DOS names** when they are unpacked (`a long file name.text` is `ALONGFIL.TEX`; a second
+  that would be the same is `ALONGF~1.TEX`). A name that would leave the folder it is unpacked into is ignored.
+- **A ZIP can be changed:** paste into it, make a folder in it, delete from it, and **Add to ZIP** makes a new
+  one of what is chosen. A paste that is stopped or runs out of room leaves the ZIP as it was.
+- **Pastes are quicker on a slow PC:** the folder being written to was listed again after every file; while a
+  job is at work it is now listed again once a second at most.
+- **Not yet:** LZH, ARJ and 7z; renaming inside a ZIP; a TAR or a GZ written.
+- `apps/shared/arc.c` (the reader and the ZIP writer), `apps/shared/deflate.c` (GLOS's own packer); the
+  loader's inflate takes its state from the caller now.
+
 ## A full-screen window that keeps its size (API 2.8, 2026-11-19)
 
 - **`GLOS_WF_OWN_MODE`** when a window is made: full screen (`GLOS_WS_FULL`) it keeps its client area's size.

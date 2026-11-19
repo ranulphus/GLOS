@@ -1,6 +1,7 @@
 /* A deflate stream (RFC 1951, as zlib and gzip make it, without their wrappers) unpacked through a 32 KB window:
  * the loader's, for a packed GLOSK.BIN (loader/main.c; tools/packkernel.py), and built for the host by its test
- * (tests/host/inflate_test.c). No memory of its own but its tables (about 3 KB, static). */
+ * (tests/host/inflate_test.c), and the apps' archives (apps/shared/arc.c). No memory of its own but its tables
+ * (about 4 KB, static). */
 #ifndef GLOS_INFLATE_H
 #define GLOS_INFLATE_H
 
@@ -17,5 +18,12 @@ typedef int (*infl_flush)(unsigned n, void *ctx);
 
 /* 0: the whole stream unpacked. -1: the stream is damaged or ends too soon; -2: flush said stop. */
 int inflate_stream(infl_fill fill, infl_flush flush, void *ctx, unsigned char INFL_FAR *window);
+
+/* The same with the caller's memory for the tables and the state (inflate_state_size() bytes, about 4 KB; what
+   is in it does not matter): for a program that unpacks more than one stream at a time (an app's threads:
+   apps/shared/arc.c). */
+struct infl;
+unsigned inflate_state_size(void);
+int inflate_stream_r(struct infl *z, infl_fill fill, infl_flush flush, void *ctx, unsigned char INFL_FAR *window);
 
 #endif

@@ -1,0 +1,15 @@
+#loopa-run-only (the file opened is another program's window, Notepad's: only Loop A runs those)
+# A file of an archive opened (apps/files; phase E): unpacked beside FILES.EXE (ARCTEMP) under the name DOS can
+# have, and opened by its kind: Notepad has it. The browser started on the archive itself.
+run FILES.EXE -browse C:\ARC\BUNDLE.TGZ
+wait "C:\ARC\BUNDLE.TGZ - Files"
+key end
+key enter
+wait "TOP.TXT - Notepad"
+key alt+f4
+gone "TOP.TXT - Notepad"
+key alt+f4
+gone "C:\ARC\BUNDLE.TGZ - Files"
+expect FILES archive TAR.GZ
+expect FILES unpacked TOP.TXT
+expect FILES end 

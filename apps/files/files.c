@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "files.h"
+#include "../shared/arc.h"
 
 char files_home[260];
 
@@ -144,6 +145,10 @@ int files_open(const char *path)
     }
     if (ext_in(path, "EXE COM"))
         return files_run(path, dir);
+    if (arc_name_is(path)) {                    /* an archive: gone into as a folder, in the browser (phase E) */
+        browser_open(path);
+        return 0;
+    }
     if (ext_in(path, "BAT")) {
         run_app("TERM.EXE", path);
         return 0;

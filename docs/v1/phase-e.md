@@ -181,10 +181,72 @@ are as they were).
 - **A copy is as old as what it was copied from** (its date and time, as DOS's COPY leaves them); it was as
   new as the copying. (`gui_set_time` holds the C library's lock in a program with tasks: `utime` is not among
   the functions the lock is put round.)
+- **Archives as folders** (the seventh part, 2026-11-19): an archive's file is gone into as a folder is. In
+  the browser, Enter or a double click on `PACK.ZIP` shows what is in it, and the address bar says
+  `C:\DOCS\PACK.ZIP\TEXT` for a folder inside (typed there too; Up and Back go out of it again). What is in it is
+  listed with its sizes and dates; a file of it is opened from a copy unpacked beside FILES.EXE (`ARCTEMP`,
+  emptied when Files starts); Properties says what a file comes to packed. Copy and a paste elsewhere unpack
+  what was chosen, a folder with all in it, as a job in the background like any paste; **Extract Here** (File's
+  menu, the context menu) unpacks a whole archive into a folder of its name.
+  - **A ZIP is changed from here too:** files and folders are pasted into the folder of it that is shown (one
+    of that name there already is asked about, as on a disc: Replace, Skip, Keep Both), a folder is made in it
+    (New Folder), what is chosen is deleted from it, and **Add to ZIP** (File's menu, the context menu) makes a
+    new ZIP of what is chosen, named after it. All of it is a job in the background. A paste is all or nothing:
+    if it is stopped, or the disc fills, the ZIP is as it was (a new one: not there); what a paste replaces goes
+    only once the new is in. Rename and Cut are grey inside an archive, and a TAR or a GZ is only read.
+  - **Read:** ZIP (stored and deflated; one behind a program that unpacks it; sizes after the bytes), TAR
+    (ustar, GNU's and pax's long names), GZ, and a TAR in a GZ. Told by the file's bytes; gone into by its
+    name's end (`.ZIP .TAR .GZ .TGZ`). An archive that is damaged, cut short, encrypted or packed in a way not
+    read here is said so, in a word (`arc_error`).
+  - **Names:** an archive's own names are shown as they are. Unpacked, each part of a name becomes one DOS can
+    have (eight characters, a dot and three; `a long file name.text` is `ALONGFIL.TEX`), and the later of two
+    that would be alike in one folder is numbered (`ALONGF~1.TEX`), the same however much of the archive is
+    unpacked. A name that would leave the folder it is unpacked into (`..\..\AUTOEXEC.BAT`) is not listed at
+    all.
+  - **The code** is `apps/shared/arc.c` (the reader; a ZIP's writer too, below) over the loader's inflate
+    (`loader/inflate.c`, whose state is now a structure the caller may give: two archives are unpacked at once
+    by an app's threads). In an app with threads only the C library's functions that libglos's lock is round
+    touch a file there.
+  - **ZIPs written** (`arcw_*`, `arc_zip_remove`; `apps/shared/deflate.c` packs): a new archive, entries
+    added to one, entries taken out (the archive written again beside itself without them, their packed bytes
+    as they are, and put in its place); anything that fails (the disc full) leaves the disc as it was. An
+    archive's file is open only while it is read or written, so a window may show one that is being changed.
+    The packer finds
+    matches through a hash of three bytes in the last 32 KB and writes each block with codes of its own, the
+    fixed ones, or as it is. The test's 27 inputs (3.5 MB of made-up text, noise, runs and program-like
+    bytes) come to 1.15 MB at its quick level and 1.08 MB at its better one; zlib makes 1.24 MB of them at
+    its level 1 and 1.11 MB at its level 6. Its speed on a 486 is not measured yet.
+  - **Tests:** on the host, `arc_test` (39 archives made by Python's zipfile, tarfile and gzip against a list
+    of what each must be read as: every entry's name, size, date and bytes, one by one and in one walk; the DOS
+    names; then 1,360 archives with bytes changed, cut or moved, under the address and undefined-behaviour
+    checkers while it was written), `deflate_test` (27 inputs packed at both levels, however they are given,
+    unpacked again here and by zlib) and `arcw_test` (archives written, added to, given up, failed for want
+    of room, entries taken out; read back here, by Python's zipfile and by `unzip -t`). `files-arc` on the host
+    and on Loop A (a ZIP gone into, a folder and three long-named files pasted out and checked byte for byte,
+    a TAR in a GZ extracted and gone into, a cut-short ZIP refused, the address bar into a folder of one);
+    `files-arc-open` on Loop A alone (a file opened from an archive: Notepad has it); `files-zip` on the host
+    and on Loop A (a folder packed by Add to ZIP, a file pasted in and pasted again over itself, a folder made,
+    a file deleted, then all of it unpacked again and read back byte for byte). The script found that a
+    paste's new entry was taken out again as "the old one" when there was no old one.
+  - **A folder shown is not listed anew for every file a job writes** (found by these scripts on the 486's
+    profile, where two small files took more than a second to pack, and plain copies as long): each file
+    written changed the watched folder, and its listing, made again each time, held the job up. While a job is
+    at work a changed folder is listed again once a second at most, and at the job's end. A small job on that
+    profile still takes about a second (its window comes up); where the rest of it goes (DOS's own calls, the
+    threads' turns) is not measured yet.
+  - **The scripts wait for a job's end by what Files says of it** (`said LINE`, new in both players: the
+    host's reads its own output's file back, Loop A's reads the app's output as it comes), and then for its
+    window's going (`gone "Packing"`), where the older scripts pause a second and a half: on the 486's profile
+    that was not enough for these, and the keys typed while a job's window was going were nobody's.
+  - **Not yet:** a thing of one archive pasted straight into another (it is unpacked to a folder first),
+    renaming inside a ZIP, "Extract To...", LZH/LHA, ARJ and 7z, the old ZIPs' implode and shrink, big archives
+    listed as they load (a TAR in a GZ is unpacked from end to end for its list, with the window waiting),
+    names by long file names where DOS has them, the packer's speed on a 486 (unmeasured: its quick level is
+    there for it).
 - **Not done yet:** the rest of the plan: views
   (small icons, a list, resized columns), folders that load as they go, long names, "open with" and apps'
-  entries in the context menu, archives as folders, a search that goes on in the background and looks inside
-  files, a folder's size counted in the background, thumbnails, drag and drop, the Recycle folder.
+  entries in the context menu, the rest of archives (above), a search that goes on in the background and looks
+  inside files, a folder's size counted in the background, thumbnails, drag and drop, the Recycle folder.
 
 ## Images (2026-11-19): the viewer's toolbar, turning, details, slideshow
 

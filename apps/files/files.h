@@ -5,7 +5,8 @@
 
 /* icons.c: 16- and 32-pixel pictures, palette indices (0 clear) */
 enum { IC_FOLDER, IC_DRIVE, IC_FILE, IC_TEXT, IC_PICTURE, IC_PROGRAM, IC_BATCH, IC_TERMINAL, IC_NOTEPAD, IC_CALC,
-       IC_IMAGES, IC_MONITOR, IC_CONTROL, IC_FILES, IC_GAME, IC_TOOL, IC_SOUND, IC_NETWORK, IC_PAINT, IC_COUNT };
+       IC_IMAGES, IC_MONITOR, IC_CONTROL, IC_FILES, IC_GAME, IC_TOOL, IC_SOUND, IC_NETWORK, IC_PAINT, IC_ARCHIVE,
+       IC_COUNT };
 const unsigned char *icon(int kind, int big);
 int icon_by_name(const char *name);     /* [program] icon = NAME */
 int icon_for_file(const char *name, int dir);

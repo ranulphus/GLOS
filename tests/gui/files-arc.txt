@@ -1,0 +1,85 @@
+# Archives as folders in the browser (apps/files; phase E, docs/v1/apps/files.md; apps/shared/arc.c): a ZIP gone
+# into as a folder is (its folders, its files' sizes and dates), a file's properties there; a folder and three
+# files copied out of it by a paste (the long names as DOS can have them, numbered where two would be alike);
+# a TAR in a GZ unpacked whole by Extract Here and then gone into, a file of it opened (unpacked beside
+# FILES.EXE first); an archive that is cut short refused with a word; the address bar into a folder of one.
+# The archives are tests/gui/mkarc.py's, in C:\ARC.
+run FILES.EXE -browse C:\ARC
+wait "C:\ARC - Files"
+key end
+key enter
+wait "C:\ARC\PACK.ZIP - Files"
+shot zip "C:\ARC\PACK.ZIP - Files"
+key enter
+wait "C:\ARC\PACK.ZIP\DOCS - Files"
+shot zip-docs "C:\ARC\PACK.ZIP\DOCS - Files"
+key end
+key alt+enter
+wait "Properties"
+shot zip-props "Properties"
+key enter
+gone "Properties"
+key home
+key ctrl+c
+key ctrl+l
+type c:\\arc\\out\n
+wait "C:\ARC\OUT - Files"
+key ctrl+v
+said FILES pasted 1 copied
+gone "Copying"
+file C:\ARC\OUT\DEEP\NOTE.TXT A note, two folders down.\r\n
+key alt+left
+wait "C:\ARC\PACK.ZIP\DOCS - Files"
+key end
+key shift+up
+key shift+up
+key ctrl+c
+key alt+right
+wait "C:\ARC\OUT - Files"
+key ctrl+v
+said FILES pasted 3 copied
+gone "Copying"
+file C:\ARC\OUT\ALONGFIL.TEX So is this one's: the two get numbered names on a DOS disc.\r\n
+file C:\ARC\OUT\ALONGF~1.TEX Its name is longer than DOS has room for.\r\n
+shot out "C:\ARC\OUT - Files" 371 0 169 330
+key ctrl+l
+type c:\\arc\n
+wait "C:\ARC - Files"
+key home
+key down
+key down
+key alt+f e
+said FILES extracted 1 unpacked
+gone "Unpacking"
+file C:\ARC\BUNDLE\LETTERS\ONE.TXT The first letter.\r\n
+file C:\ARC\BUNDLE\TOP.TXT At the top of the bundle.\r\n
+key end
+key up
+key enter
+wait "C:\ARC\BUNDLE.TGZ - Files"
+shot tgz "C:\ARC\BUNDLE.TGZ - Files"
+key ctrl+l
+type c:\\arc\\broken.zip\n
+wait "Files"
+shot broken "Files"
+key enter
+gone "Files"
+key ctrl+l
+type c:\\arc\\pack.zip\\DOCS\\DEEP\n
+wait "C:\ARC\PACK.ZIP\DOCS\DEEP - Files"
+shot zip-deep "C:\ARC\PACK.ZIP\DOCS\DEEP - Files"
+key backspace
+wait "C:\ARC\PACK.ZIP\DOCS - Files"
+key backspace
+wait "C:\ARC\PACK.ZIP - Files"
+key backspace
+wait "C:\ARC - Files"
+key alt+f4
+gone "C:\ARC - Files"
+expect FILES archive ZIP
+expect FILES pasted 1 copied
+expect FILES pasted 3 copied
+expect FILES extracted 1 unpacked
+expect FILES archive TAR.GZ
+expect FILES archive refused
+expect FILES end 

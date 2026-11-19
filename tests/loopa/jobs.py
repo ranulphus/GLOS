@@ -106,6 +106,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -7412,6 +7413,16 @@ class GuiDriver:
     def __init__(self, agent, out, bits, dac6, appdir="C:\\TEST\\"):
         self.agent, self.out, self.bits, self.dac6, self.appdir = agent, out, bits, dac6, appdir
         self.bad, self.notes, self.procs, self.expects, self.unset = [], [], [], [], []
+        self.heard = {}                         # said: how many of each line have been waited for already
+
+    @staticmethod
+    def _listen(p):
+        """An app's output kept as it comes (p.said), for `said` and for the end."""
+        while True:
+            chunk = os.read(p.stdout.fileno(), 4096)
+            if not chunk:
+                break
+            p.said += chunk
 
     def desk(self):
         text = self.agent.ssh("glos desk")[1].replace("\r", "")
@@ -7515,8 +7526,25 @@ class GuiDriver:
                 self.unset.append((args[0], args[1]))
             elif cmd == "run":
                 prog = self.appdir + args[0] + "".join(" " + a for a in args[1:])
-                self.procs.append(subprocess.Popen(self.agent.opts + ["glos@127.0.0.1", prog],
-                                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+                p = subprocess.Popen(self.agent.opts + ["glos@127.0.0.1", prog], stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE)
+                p.said = bytearray()
+                p.listener = threading.Thread(target=self._listen, args=(p,), daemon=True)
+                p.listener.start()
+                self.procs.append(p)
+            elif cmd == "said":                 # until an app has said this line: the end of work that shows in no
+                want = line.split(None, 1)[1].rstrip("\n")     # window's title (a job's). Said twice, it is waited
+                t0, ok = time.time(), False                    # for twice: each `said` is another of that line.
+                while not ok and time.time() - t0 < 120:
+                    n_said = sum(bytes(q.said).decode("latin-1").replace("\r", "").split("\n").count(want)
+                                 for q in self.procs)
+                    ok = n_said > self.heard.get(want, 0)
+                    if not ok:
+                        time.sleep(0.3)
+                self.heard[want] = self.heard.get(want, 0) + 1
+                if not ok:
+                    self.bad.append("said-%d" % n)
+                    self.notes.append("never said %r" % want)
             elif cmd == "wait":
                 if not self.until(lambda d: self.window(args[0], d) is not None, 120):
                     self.bad.append("wait-%d" % n)
@@ -7614,11 +7642,13 @@ class GuiDriver:
         text, ends = "", []
         for p in self.procs:
             try:
-                o, e = p.communicate(timeout=limit)
+                p.wait(timeout=limit)
             except subprocess.TimeoutExpired:
                 p.kill()
-                o, e = p.communicate()
+                p.wait()
                 self.bad.append("app-end")
+            p.listener.join(10)                 # (its output is read as it comes: _listen)
+            o, e = bytes(p.said), p.stderr.read()
             text += o.decode("latin-1").replace("\r", "")
             ends.append((p.returncode, (e or b"").decode("latin-1").replace("\r", "")))
         for sec, key in self.unset:

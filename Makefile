@@ -155,6 +155,14 @@ host-test-run:
 	  && build/host/vt_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/inflate_test tests/host/inflate_test.c loader/inflate.c \
 	  && build/host/inflate_test `python3 tests/host/inflate_cases.py build/host/inflate build/kernel/GLOSK.BIN`
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/deflate_test tests/host/deflate_test.c \
+	  apps/shared/deflate.c loader/inflate.c \
+	  && build/host/deflate_test `python3 tests/host/deflate_cases.py make build/host/deflate` \
+	  && python3 tests/host/deflate_cases.py check build/host/deflate
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -o build/host/arc_test tests/host/arc_test.c \
+	  $(ARC_SRCS) && build/host/arc_test `python3 tests/host/arc_cases.py build/host/arc`
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -o build/host/arcw_test tests/host/arcw_test.c \
+	  $(ARC_SRCS) && build/host/arcw_test build/host/arc && python3 tests/host/arcw_check.py build/host/arc
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/disk_test tests/host/disk_test.c kernel/disk/mbr.c \
 	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  && tests/host/disk_test.sh build/host/disk_test build/host/disk
@@ -196,7 +204,11 @@ build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/g
 endef
 # The terminal's ssh (M10): the client for the host too, 32-bit as the rest, its crypto without -Werror.
 APP_HOST_LIBS_term := tests/host/shimshell.c sdk/shell/shell.c sdk/shell/edit.c
+# Archives read and ZIPs written (Files' folders, phase E): the reader and writer, the packer, the loader's unpacker.
+ARC_SRCS := apps/shared/arc.c apps/shared/deflate.c loader/inflate.c
 # Pictures read and written: one code in the viewer and the editor (apps/shared/picfile.c).
+APP_HOST_LIBS_files := $(ARC_SRCS)
+APP_LIBS_files := $(ARC_SRCS)
 APP_HOST_LIBS_images := apps/shared/picfile.c
 APP_HOST_LIBS_paint := apps/shared/picfile.c
 APP_LIBS_images := apps/shared/picfile.c

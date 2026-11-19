@@ -1,0 +1,75 @@
+# ZIPs changed from the browser (apps/files; phase E, docs/v1/apps/files.md; apps/shared/arc.c's writer and
+# apps/shared/deflate.c): a folder packed into a new ZIP (Add to ZIP) and gone into; a file pasted into the ZIP,
+# and pasted again over itself (Replace: one of it is there after); a new folder made in it; a file deleted from
+# it; then all of it unpacked beside it again (Extract Here) and its files read back, byte for byte.
+# The files are tests/gui/mkarc.py's, in C:\ZIP. The dates' column is blanked: they are the copy's. Each job's
+# end is waited for by what Files says of it (said), and then its window's going, if it had one (a job that
+# takes more than a second has, on a 486: keys typed while it goes are nobody's).
+run FILES.EXE -browse C:\ZIP
+wait "C:\ZIP - Files"
+key home
+key alt+f z
+said FILES zipped PAPERS.ZIP
+gone "Packing"
+key end
+key enter
+wait "C:\ZIP\PAPERS.ZIP - Files"
+key enter
+wait "C:\ZIP\PAPERS.ZIP\PAPERS - Files"
+shot made "C:\ZIP\PAPERS.ZIP\PAPERS - Files" 371 0 169 330
+key ctrl+l
+type c:\\zip\n
+wait "C:\ZIP - Files"
+key home
+key down
+key ctrl+c
+key ctrl+l
+type c:\\zip\\papers.zip\n
+wait "C:\ZIP\PAPERS.ZIP - Files"
+key ctrl+v
+said FILES pasted 1 copied
+gone "Copying"
+key ctrl+v
+wait "Paste"
+shot clash "Paste"
+key alt+r
+gone "Paste"
+said FILES pasted 1 copied
+gone "Copying"
+key ctrl+shift+n
+wait "New Folder"
+type EXTRA\n
+gone "New Folder"
+said FILES made EXTRA
+shot pasted "C:\ZIP\PAPERS.ZIP - Files" 371 0 169 330
+key home
+key down
+key enter
+wait "C:\ZIP\PAPERS.ZIP\PAPERS - Files"
+key end
+key del
+wait "Delete"
+key alt+y
+gone "Delete"
+said FILES deleted C:\ZIP\PAPERS.ZIP\PAPERS\TWO.TXT
+gone "Deleting"
+shot less "C:\ZIP\PAPERS.ZIP\PAPERS - Files" 371 0 169 330
+key ctrl+l
+type c:\\zip\n
+wait "C:\ZIP - Files"
+key end
+key alt+f e
+said FILES extracted 1 unpacked
+gone "Unpacking"
+file C:\ZIP\PAPERS~1\PAPERS\ONE.TXT The first note.\r\n
+file C:\ZIP\PAPERS~1\MEMO.TXT A memo, to go into a ZIP.\r\n
+shot after "C:\ZIP - Files" 371 0 169 330
+key alt+f4
+gone "C:\ZIP - Files"
+expect FILES zipped PAPERS.ZIP
+expect FILES archive ZIP
+expect FILES pasted 1 copied
+expect FILES made EXTRA
+expect FILES deleted C:\ZIP\PAPERS.ZIP\PAPERS\TWO.TXT
+expect FILES extracted 1 unpacked
+expect FILES end 

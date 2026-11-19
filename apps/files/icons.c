@@ -87,6 +87,14 @@ static void draw(int kind, struct pen *g)
     case IC_TEXT:
         page(g, GREY);
         break;
+    case IC_ARCHIVE:                            /* a box done up: its lid, a strap round it, the strap's buckle */
+        fill(g, 4, 6, 24, 22, CUBE(4, 3, 1));
+        frame(g, 4, 6, 24, 22, BLACK);
+        fill(g, 4, 12, 24, 2, BLACK);
+        fill(g, 14, 6, 4, 22, CUBE(2, 2, 3));
+        fill(g, 12, 14, 8, 6, LIGHT);
+        frame(g, 12, 14, 8, 6, BLACK);
+        break;
     case IC_PICTURE:
         page(g, 0);
         fill(g, 9, 6, 14, 12, CUBE(2, 4, 5));
@@ -242,8 +250,11 @@ int icon_for_file(const char *name, int dir)
     static const char *const pics_[] = { "PNG", "JPG", "JPEG", "BMP", "GIF", "TGA", "PCX", "PPM", "PGM", "PNM", 0 };
     static const char *const progs[] = { "EXE", "COM", 0 };
     static const char *const bats[] = { "BAT", 0 };
+    static const char *const arcs[] = { "ZIP", "TAR", "GZ", "TGZ", "LZH", "LHA", "ARJ", "7Z", 0 };
     if (dir)
         return IC_FOLDER;
+    if (ext_is(name, arcs))
+        return IC_ARCHIVE;
     if (ext_is(name, text))
         return IC_TEXT;
     if (ext_is(name, pics_))

@@ -1,5 +1,6 @@
 /* inflate.c: see inflate.h. Huffman codes are looked up 9 bits at a time in a table (a code that long or
- * shorter in one step, as nearly all are), longer ones bit by bit by their canonical order. */
+ * shorter in one step, as nearly all are), longer ones bit by bit by their canonical order. Everything a stream
+ * being unpacked needs is in one structure, the caller's (inflate_stream_r) or the one here (inflate_stream). */
 #include "inflate.h"
 
 #define FAST 9
@@ -11,10 +12,9 @@ struct huff {
     unsigned short symbol[288];         /* symbols in their codes' order */
 };
 
-static struct huff lencode, distcode;
-static unsigned char lengths[320];
-
-static struct {
+struct infl {
+    struct huff lencode, distcode;
+    unsigned char lengths[320];
     infl_fill fill;
     infl_flush flush;
     void *ctx;
@@ -26,55 +26,55 @@ static struct {
     unsigned wpos;
     int full;                           /* the window has been filled once: every distance reaches back */
     int err;
-} s;
+};
 
-static void need(void)                  /* 25 bits or more, while the stream has them */
+static void need(struct infl *z)                  /* 25 bits or more, while the stream has them */
 {
-    while (s.nbits <= 24) {
-        if (!s.in_n) {
-            s.in_n = s.fill(&s.in, s.ctx);
-            if (!s.in_n)
+    while (z->nbits <= 24) {
+        if (!z->in_n) {
+            z->in_n = z->fill(&z->in, z->ctx);
+            if (!z->in_n)
                 return;
         }
-        s.bits |= (unsigned long)*s.in++ << s.nbits;
-        s.nbits += 8;
-        s.in_n--;
+        z->bits |= (unsigned long)*z->in++ << z->nbits;
+        z->nbits += 8;
+        z->in_n--;
     }
 }
 
-static void drop(unsigned n)
+static void drop(struct infl *z, unsigned n)
 {
-    if (n > s.nbits) {                  /* (past the stream's end) */
-        s.err = -1;
-        s.nbits = 0;
-        s.bits = 0;
+    if (n > z->nbits) {                  /* (past the stream's end) */
+        z->err = -1;
+        z->nbits = 0;
+        z->bits = 0;
         return;
     }
-    s.bits >>= n;
-    s.nbits -= n;
+    z->bits >>= n;
+    z->nbits -= n;
 }
 
-static unsigned take(unsigned n)        /* n bits, 16 at most */
+static unsigned take(struct infl *z, unsigned n)        /* n bits, 16 at most */
 {
     unsigned v;
-    need();
-    v = (unsigned)(s.bits & ((1UL << n) - 1));
-    drop(n);
+    need(z);
+    v = (unsigned)(z->bits & ((1UL << n) - 1));
+    drop(z, n);
     return v;
 }
 
-static void put(unsigned char c)
+static void put(struct infl *z, unsigned char c)
 {
-    s.win[s.wpos++] = c;
-    if (s.wpos == INFL_WINDOW) {
-        if (!s.err && s.flush(INFL_WINDOW, s.ctx) != 0)
-            s.err = -2;
-        s.wpos = 0;
-        s.full = 1;
+    z->win[z->wpos++] = c;
+    if (z->wpos == INFL_WINDOW) {
+        if (!z->err && z->flush(INFL_WINDOW, z->ctx) != 0)
+            z->err = -2;
+        z->wpos = 0;
+        z->full = 1;
     }
 }
 
-/* The table for n code lengths: 0, or -1 for lengths no code can have. */
+/* The table for n code z->lengths: 0, or -1 for z->lengths no code can have. */
 static int build(struct huff *h, const unsigned char *len, unsigned n)
 {
     unsigned short offs[MAXBITS + 1];
@@ -89,7 +89,7 @@ static int build(struct huff *h, const unsigned char *len, unsigned n)
         left <<= 1;
         left -= (long)h->count[l];
         if (left < 0)
-            return -1;                  /* more codes than the lengths have room for */
+            return -1;                  /* more codes than the z->lengths have room for */
     }
     offs[1] = 0;
     for (l = 1; l < MAXBITS; l++)
@@ -113,21 +113,21 @@ static int build(struct huff *h, const unsigned char *len, unsigned n)
     return 0;
 }
 
-static unsigned decode(const struct huff *h)
+static unsigned decode(struct infl *z, const struct huff *h)
 {
     unsigned e, code, first, index, len, count;
-    need();
-    e = h->fast[(unsigned)s.bits & ((1u << FAST) - 1)];
+    need(z);
+    e = h->fast[(unsigned)z->bits & ((1u << FAST) - 1)];
     if (e) {
-        drop(e >> 12);
+        drop(z, e >> 12);
         return e & 0x0FFF;
     }
     code = first = index = 0;
     for (len = 1; len <= MAXBITS; len++) {
-        code |= (unsigned)(s.bits >> (len - 1)) & 1u;
+        code |= (unsigned)(z->bits >> (len - 1)) & 1u;
         count = h->count[len];
         if (code - first < count) {
-            drop(len);
+            drop(z, len);
             return h->symbol[index + (code - first)];
         }
         index += count;
@@ -135,11 +135,11 @@ static unsigned decode(const struct huff *h)
         first <<= 1;
         code <<= 1;
     }
-    s.err = -1;
+    z->err = -1;
     return 0;
 }
 
-static void codes(void)                 /* a block's symbols, by lencode and distcode */
+static void codes(struct infl *z)                 /* a block's symbols, by lencode and distcode */
 {
     static const unsigned short lbase[29] = { 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67,
                                               83, 99, 115, 131, 163, 195, 227, 258 };
@@ -150,136 +150,145 @@ static void codes(void)                 /* a block's symbols, by lencode and dis
     static const unsigned char dext[30] = { 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11,
                                             12, 12, 13, 13 };
     unsigned sym, len, dist, src;
-    while (!s.err) {
-        sym = decode(&lencode);
+    while (!z->err) {
+        sym = decode(z, &z->lencode);
         if (sym < 256) {
-            put((unsigned char)sym);
+            put(z, (unsigned char)sym);
         } else if (sym == 256) {
             return;
         } else {
             sym -= 257;
             if (sym >= 29) {
-                s.err = -1;
+                z->err = -1;
                 return;
             }
-            len = lbase[sym] + take(lext[sym]);
-            sym = decode(&distcode);
+            len = lbase[sym] + take(z, lext[sym]);
+            sym = decode(z, &z->distcode);
             if (sym >= 30) {
-                s.err = -1;
+                z->err = -1;
                 return;
             }
-            dist = dbase[sym] + take(dext[sym]);
-            if (dist > INFL_WINDOW || (!s.full && dist > s.wpos)) {
-                s.err = -1;             /* before the stream's start */
+            dist = dbase[sym] + take(z, dext[sym]);
+            if (dist > INFL_WINDOW || (!z->full && dist > z->wpos)) {
+                z->err = -1;             /* before the stream's start */
                 return;
             }
-            src = (s.wpos - dist) & (INFL_WINDOW - 1);
-            while (len-- && !s.err) {
-                put(s.win[src]);
+            src = (z->wpos - dist) & (INFL_WINDOW - 1);
+            while (len-- && !z->err) {
+                put(z, z->win[src]);
                 src = (src + 1) & (INFL_WINDOW - 1);
             }
         }
     }
 }
 
-static void stored(void)
+static void stored(struct infl *z)
 {
     unsigned len, nlen;
-    drop(s.nbits & 7);                  /* (to a byte's start) */
-    len = take(16);
-    nlen = take(16);
+    drop(z, z->nbits & 7);                  /* (to a byte's start) */
+    len = take(z, 16);
+    nlen = take(z, 16);
     if (len != (unsigned)(~nlen & 0xFFFFu)) {
-        s.err = -1;
+        z->err = -1;
         return;
     }
-    while (len-- && !s.err)
-        put((unsigned char)take(8));
+    while (len-- && !z->err)
+        put(z, (unsigned char)take(z, 8));
 }
 
-static void fixed(void)
+static void fixed(struct infl *z)
 {
     unsigned i;
-    for (i = 0; i < 144; i++) lengths[i] = 8;
-    for (; i < 256; i++) lengths[i] = 9;
-    for (; i < 280; i++) lengths[i] = 7;
-    for (; i < 288; i++) lengths[i] = 8;
-    build(&lencode, lengths, 288);
-    for (i = 0; i < 30; i++) lengths[i] = 5;
-    build(&distcode, lengths, 30);
-    codes();
+    for (i = 0; i < 144; i++) z->lengths[i] = 8;
+    for (; i < 256; i++) z->lengths[i] = 9;
+    for (; i < 280; i++) z->lengths[i] = 7;
+    for (; i < 288; i++) z->lengths[i] = 8;
+    build(&z->lencode, z->lengths, 288);
+    for (i = 0; i < 30; i++) z->lengths[i] = 5;
+    build(&z->distcode, z->lengths, 30);
+    codes(z);
 }
 
-static void dynamic(void)
+static void dynamic(struct infl *z)
 {
     static const unsigned char order[19] = { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
-    unsigned nlen = take(5) + 257, ndist = take(5) + 1, ncode = take(4) + 4, i, sym, rep, prev;
+    unsigned nlen = take(z, 5) + 257, ndist = take(z, 5) + 1, ncode = take(z, 4) + 4, i, sym, rep, prev;
     if (nlen > 286 || ndist > 30) {
-        s.err = -1;
+        z->err = -1;
         return;
     }
     for (i = 0; i < 19; i++)
-        lengths[i] = 0;
+        z->lengths[i] = 0;
     for (i = 0; i < ncode; i++)
-        lengths[order[i]] = (unsigned char)take(3);
-    if (build(&lencode, lengths, 19) != 0) {
-        s.err = -1;
+        z->lengths[order[i]] = (unsigned char)take(z, 3);
+    if (build(&z->lencode, z->lengths, 19) != 0) {
+        z->err = -1;
         return;
     }
-    for (i = 0; i < nlen + ndist && !s.err; ) {
-        sym = decode(&lencode);
+    for (i = 0; i < nlen + ndist && !z->err; ) {
+        sym = decode(z, &z->lencode);
         if (sym < 16) {
-            lengths[i++] = (unsigned char)sym;
+            z->lengths[i++] = (unsigned char)sym;
             continue;
         }
         prev = 0;
         if (sym == 16) {
             if (!i) {
-                s.err = -1;
+                z->err = -1;
                 return;
             }
-            prev = lengths[i - 1];
-            rep = 3 + take(2);
+            prev = z->lengths[i - 1];
+            rep = 3 + take(z, 2);
         } else if (sym == 17) {
-            rep = 3 + take(3);
+            rep = 3 + take(z, 3);
         } else {
-            rep = 11 + take(7);
+            rep = 11 + take(z, 7);
         }
         if (i + rep > nlen + ndist) {
-            s.err = -1;
+            z->err = -1;
             return;
         }
         while (rep--)
-            lengths[i++] = (unsigned char)prev;
+            z->lengths[i++] = (unsigned char)prev;
     }
-    if (s.err || !lengths[256] || build(&lencode, lengths, nlen) != 0 || build(&distcode, lengths + nlen, ndist) != 0) {
-        s.err = -1;
+    if (z->err || !z->lengths[256] || build(&z->lencode, z->lengths, nlen) != 0
+        || build(&z->distcode, z->lengths + nlen, ndist) != 0) {
+        z->err = -1;
         return;
     }
-    codes();
+    codes(z);
 }
+
+int inflate_stream_r(struct infl *z, infl_fill fill, infl_flush flush, void *ctx, unsigned char INFL_FAR *window)
+{
+    unsigned last, type;
+    z->fill = fill, z->flush = flush, z->ctx = ctx;
+    z->in = 0, z->in_n = 0;
+    z->bits = 0, z->nbits = 0;
+    z->win = window, z->wpos = 0, z->full = 0, z->err = 0;
+    do {
+        last = take(z, 1);
+        type = take(z, 2);
+        if (z->err)
+            break;
+        if (type == 0)
+            stored(z);
+        else if (type == 1)
+            fixed(z);
+        else if (type == 2)
+            dynamic(z);
+        else
+            z->err = -1;
+    } while (!last && !z->err);
+    if (!z->err && z->wpos && z->flush(z->wpos, z->ctx) != 0)
+        z->err = -2;
+    return z->err;
+}
+
+unsigned inflate_state_size(void) { return (unsigned)sizeof(struct infl); }
 
 int inflate_stream(infl_fill fill, infl_flush flush, void *ctx, unsigned char INFL_FAR *window)
 {
-    unsigned last, type;
-    s.fill = fill, s.flush = flush, s.ctx = ctx;
-    s.in = 0, s.in_n = 0;
-    s.bits = 0, s.nbits = 0;
-    s.win = window, s.wpos = 0, s.full = 0, s.err = 0;
-    do {
-        last = take(1);
-        type = take(2);
-        if (s.err)
-            break;
-        if (type == 0)
-            stored();
-        else if (type == 1)
-            fixed();
-        else if (type == 2)
-            dynamic();
-        else
-            s.err = -1;
-    } while (!last && !s.err);
-    if (!s.err && s.wpos && s.flush(s.wpos, s.ctx) != 0)
-        s.err = -2;
-    return s.err;
+    static struct infl one;
+    return inflate_stream_r(&one, fill, flush, ctx, window);
 }

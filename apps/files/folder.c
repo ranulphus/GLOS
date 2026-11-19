@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "files.h"
+#include "../shared/arc.h"
 
 #define HIST 16
 
@@ -31,6 +32,12 @@ struct view {
     glos_handle watch;
     struct gui_dirent *ents;
     int n;
+    /* The folder shown is in an archive (phase E: archives as folders; apps/shared/arc.c): */
+    struct arc *arc;                    /* it, open */
+    char arc_file[260], arc_in[520];    /* its file, and the folder inside ('/' between its parts; "" its top) */
+    char **arc_row;                     /* each of ents' own name there (ents' keep 63 characters of it) */
+    struct gui_dirent arc_was;          /* the file as it was when it was opened (changed: opened again) */
+    int stale;                          /* its folder changed while a job was at work: to be listed again */
 };
 
 static struct view *views;
@@ -45,7 +52,7 @@ static struct {                         /* where folders' windows were */
 } places;
 
 enum { C_OPEN = 1, C_NEWDIR, C_RENAME, C_DELETE, C_CLOSE, C_CUT, C_COPY, C_PASTE, C_ALL, C_BIG, C_DETAILS, C_REFRESH,
-       C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS, C_PROPS, C_FIND };
+       C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS, C_PROPS, C_FIND, C_EXTRACT, C_ZIP };
 
 static void say(const char *what, const char *a)
 {
@@ -60,6 +67,220 @@ static struct view *view_of(struct gui_window *w)
         if (v->win == w)
             return v;
     return NULL;
+}
+
+/* ---- archives as folders (phase E; docs/v1/apps/files.md). An archive's file in a path is gone into as a
+   folder is: C:\DOCS\PACK.ZIP\TEXT is the folder TEXT inside PACK.ZIP. What is in it is listed from the archive
+   (arc_list), a file of it is opened from a copy unpacked beside FILES.EXE (ARCTEMP), and what is copied out of
+   it is unpacked by a paste's job. A ZIP is changed from here too: files and folders pasted into it, a folder
+   made in it, things deleted from it, and a new one made of what is chosen (Add to ZIP); the other kinds are
+   only read. */
+
+static int in_zip(const struct view *v) { return v->arc && !strcmp(arc_kind(v->arc), "ZIP"); }
+
+/* The archive in a path: its file, and what follows as the folder inside. 1 if there is one. */
+static int arc_split(const char *path, char *file, size_t froom, char *inner, size_t iroom)
+{
+    size_t i, n = strlen(path), o = 0;
+    struct gui_dirent st;
+    for (i = 3; i <= n; i++) {
+        if (path[i] && path[i] != '\\')
+            continue;
+        if (i >= froom)
+            return 0;
+        memcpy(file, path, i);
+        file[i] = 0;
+        if (gui_is_dir(file))
+            continue;
+        if (!arc_name_is(file) || gui_stat(file, &st) != 0)
+            return 0;
+        for (i += path[i] != 0; path[i] && o + 1 < iroom; i++)
+            inner[o++] = path[i] == '\\' ? '/' : path[i];
+        while (o && inner[o - 1] == '/')
+            o--;
+        inner[o] = 0;
+        return 1;
+    }
+    return 0;
+}
+
+static int utf8_ok(const char *s)
+{
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p) {
+        int more = *p < 0x80 ? 0 : (*p & 0xE0) == 0xC0 ? 1 : (*p & 0xF0) == 0xE0 ? 2 : (*p & 0xF8) == 0xF0 ? 3 : -1;
+        if (more < 0)
+            return 0;
+        for (p++; more; more--, p++)
+            if ((*p & 0xC0) != 0x80)
+                return 0;
+    }
+    return 1;
+}
+
+/* A name in an archive as text to show: UTF-8 as it is (the archives of today), DOS's bytes otherwise. */
+static void arc_text(const char *name, char *out, int room)
+{
+    if (utf8_ok(name))
+        snprintf(out, (size_t)room, "%s", name);
+    else
+        gui_dos_text(name, out, room);
+}
+
+static void arc_rows_free(struct view *v)
+{
+    int i;
+    for (i = 0; v->arc_row && i < v->n; i++)
+        free(v->arc_row[i]);
+    free(v->arc_row);
+    v->arc_row = NULL;
+}
+
+/* An archive's file has been written again by Files itself: whoever shows it reads its list anew at the next
+   listing, whatever the file's size and time say (a file put in over itself leaves the archive the size it
+   was, and within DOS's two seconds the time it was: but nothing in it is where it was). */
+static void arc_changed(const char *file)
+{
+    struct view *v;
+    for (v = views; v; v = v->next)
+        if (v->arc && !strcmp(v->arc_file, file))
+            v->arc_was.size = 0xFFFFFFFFul;
+}
+
+static void arc_leave(struct view *v)
+{
+    arc_rows_free(v);
+    arc_close(v->arc);
+    v->arc = NULL;
+    v->arc_file[0] = v->arc_in[0] = 0;
+}
+
+struct arc_rows {
+    struct view *v;
+    int room, dirs;                     /* dirs: this pass takes the folders (the files come after them) */
+};
+
+static int arc_row_each(void *ctx, const char *name, int is_dir, const struct arc_entry *e)
+{
+    struct arc_rows *r = ctx;
+    struct view *v = r->v;
+    struct gui_dirent *d;
+    if (!is_dir != !r->dirs)
+        return 0;
+    if (v->n == r->room) {
+        int room = r->room ? r->room * 2 : 64;
+        struct gui_dirent *m = realloc(v->ents, (size_t)room * sizeof *m);
+        char **rows = m ? realloc(v->arc_row, (size_t)room * sizeof *rows) : NULL;
+        if (m)
+            v->ents = m;
+        if (rows)
+            v->arc_row = rows;
+        if (!m || !rows)
+            return 1;
+        r->room = room;
+    }
+    if (!(v->arc_row[v->n] = strdup(name)))
+        return 1;
+    d = &v->ents[v->n++];
+    memset(d, 0, sizeof *d);
+    snprintf(d->name, sizeof d->name, "%s", name);
+    arc_text(name, d->text, sizeof d->text);
+    d->dir = (unsigned char)(is_dir != 0);
+    if (e) {
+        d->size = is_dir ? 0 : e->size;
+        d->date = e->date, d->time = e->time;
+    }
+    return 0;
+}
+
+/* The archive's folder read into ents. If its file has changed since it was opened it is opened again; 0 if
+   it is no longer there to be shown (the caller shows the folder it was in). */
+static int arc_read(struct view *v)
+{
+    struct gui_dirent st;
+    struct arc_rows r;
+    arc_rows_free(v);
+    free(v->ents);
+    v->ents = NULL;
+    v->n = 0;
+    if (gui_stat(v->arc_file, &st) != 0)
+        return 0;
+    if (st.size != v->arc_was.size || st.date != v->arc_was.date || st.time != v->arc_was.time) {
+        struct arc *a = arc_open(v->arc_file, NULL);
+        if (!a)
+            return 0;
+        arc_close(v->arc);
+        v->arc = a;
+        v->arc_was = st;
+        if (!arc_has_folder(a, v->arc_in))
+            v->arc_in[0] = 0;
+    }
+    r.v = v, r.room = 0;
+    for (r.dirs = 1; r.dirs >= 0; r.dirs--)
+        arc_list(v->arc, v->arc_in, arc_row_each, &r);
+    return 1;
+}
+
+/* A row's path as the address bar would have it: the folder shown and the row's own name. */
+static int row_path(struct view *v, int row, char *out, size_t room)
+{
+    size_t idx = (size_t)gui_list_user(v->list, row);
+    const char *name = v->arc ? v->arc_row[idx] : v->ents[idx].name;
+    if (strlen(v->dir) + strlen(name) + 2 > room)
+        return -1;
+    gui_path_join(out, (int)room, v->dir, name);
+    return 0;
+}
+
+static void arc_temp(char *out, size_t room) { snprintf(out, room, "%s\\ARCTEMP", files_home); }
+
+/* What was unpacked to be opened is taken away when Files starts (the programs that opened it are gone then). */
+static void arc_temp_clean(void)
+{
+    struct gui_dirent *e;
+    char dir[260], p[260];
+    int n, i;
+    arc_temp(dir, sizeof dir);
+    if ((n = gui_dir_read(dir, &e)) < 0)
+        return;
+    for (i = 0; i < n; i++)
+        if (!e[i].dir) {
+            gui_path_join(p, sizeof p, dir, e[i].name);
+            gui_unlink(p);
+        }
+    free(e);
+}
+
+static int to_file(void *ctx, const void *p, unsigned n) { return fwrite(p, 1, n, ctx) != n; }
+
+/* A file of the archive shown is opened: unpacked into ARCTEMP under the name DOS can have, and that opened. */
+static void arc_open_row(struct view *v, int row)
+{
+    char dir[260], to[260], t[200];
+    const char *dos;
+    FILE *f;
+    int i, r;
+    snprintf(t, sizeof t, "%s%s%s", v->arc_in, v->arc_in[0] ? "/" : "", v->arc_row[(size_t)gui_list_user(v->list, row)]);
+    if ((i = arc_find(v->arc, t)) < 0 || !(dos = arc_dos_path(v->arc, (unsigned)i)))
+        return;
+    arc_temp(dir, sizeof dir);
+    gui_mkdir(dir);
+    gui_path_join(to, sizeof to, dir, strrchr(dos, '\\') ? strrchr(dos, '\\') + 1 : dos);
+    if (!(f = gui_fopen(to, "wb"))) {
+        gui_message(v->win, GUI_T("Files"), GUI_T("The file couldn't be unpacked: there is nowhere to put it."), GUI_MB_OK);
+        return;
+    }
+    r = arc_extract(v->arc, (unsigned)i, to_file, f);
+    if (fclose(f) != 0 && r == ARC_OK)
+        r = ARC_E_OPEN;
+    if (r != ARC_OK) {
+        gui_unlink(to);
+        snprintf(t, sizeof t, GUI_T("The file couldn't be unpacked: %s."), GUI_T(arc_error(r)));
+        gui_message(v->win, GUI_T("Files"), t, GUI_MB_OK);
+        return;
+    }
+    say("unpacked", gui_path_name(to));
+    files_open(to);
 }
 
 /* ---- what a folder shows */
@@ -81,8 +302,13 @@ static void status_text(struct view *v)
     else
         snprintf(t, sizeof t, GUI_T("%d folder%s, %d file%s, %lu bytes"), dirs, dirs == 1 ? "" : "s", files,
                  files == 1 ? "" : "s", bytes);
+    if (v->arc && !chosen)
+        snprintf(t + strlen(t), sizeof t - strlen(t), GUI_T(" (in a %s archive)"), arc_kind(v->arc));
     gui_set_text(v->status, t);
 }
+
+static void retitle(struct view *v);
+static void way(struct view *v);
 
 static void fill(struct view *v)
 {
@@ -90,11 +316,20 @@ static void fill(struct view *v)
     char keep_name[64] = "";
     if (keep >= 0 && keep < v->n)
         snprintf(keep_name, sizeof keep_name, "%s", v->ents[keep].name);
-    free(v->ents);
-    v->ents = NULL;
-    v->n = gui_dir_read(v->dir, &v->ents);
-    if (v->n < 0)
-        v->n = 0;
+    if (v->arc && !arc_read(v)) {               /* the archive has gone: the folder it was in */
+        snprintf(v->dir, sizeof v->dir, "%s", v->arc_file);
+        gui_path_up(v->dir);
+        arc_leave(v);
+        retitle(v);
+        way(v);
+    }
+    if (!v->arc) {
+        free(v->ents);
+        v->ents = NULL;
+        v->n = gui_dir_read(v->dir, &v->ents);
+        if (v->n < 0)
+            v->n = 0;
+    }
     gui_list_clear(v->list);
     for (i = 0; i < v->n; i++) {
         char size[24], date[24];
@@ -106,6 +341,8 @@ static void fill(struct view *v)
             snprintf(size, sizeof size, "%lu", e->size);
         snprintf(date, sizeof date, "%04u-%02u-%02u %02u:%02u", (e->date >> 9) + 1980, (e->date >> 5) & 15, e->date & 31,
                  e->time >> 11, (e->time >> 5) & 63);
+        if (!e->date)
+            date[0] = 0;                        /* (a folder that is only in an archive's names has none) */
         cells[0] = e->text, cells[1] = size, cells[2] = date;
         gui_list_add(v->list, cells, icon(icon_for_file(e->name, e->dir), v->big), (void *)(size_t)i);
         if (keep_name[0] && !strcmp(keep_name, e->name))
@@ -140,6 +377,12 @@ static void way(struct view *v)
     gui_command_enable(v->win, C_BACK, v->at > 0);
     gui_command_enable(v->win, C_FORWARD, v->at + 1 < v->nhist);
     gui_command_enable(v->win, C_UP, strlen(v->dir) > 3);
+    {                                           /* (in an archive: what a ZIP can have done to it, and no more) */
+        static const int changes[] = { C_NEWDIR, C_DELETE, C_PASTE, C_RENAME, C_CUT, C_FIND, C_EXTRACT, C_ZIP };
+        size_t k;
+        for (k = 0; k < sizeof changes / sizeof changes[0]; k++)
+            gui_command_enable(v->win, changes[k], !v->arc || (k < 3 && in_zip(v)));
+    }
     if (v->address) {
         gui_set_text(v->address, v->dir);
         gui_combo_add_top(v->address, v->dir);
@@ -176,12 +419,53 @@ static void tree_follow(struct view *v)
 
 static void go(struct view *v, const char *dir)
 {
-    snprintf(v->dir, sizeof v->dir, "%s", dir);
+    char file[260], in[520], t[300];
+    int in_arc = arc_split(dir, file, sizeof file, in, sizeof in);
+    if (in_arc && (!v->arc || strcmp(v->arc_file, file))) {     /* into an archive: opened first */
+        int err;
+        struct arc *a = arc_open(file, &err);
+        if (!a) {
+            snprintf(t, sizeof t, GUI_T("%s can't be opened: %s."), gui_path_name(file), GUI_T(arc_error(err)));
+            gui_message(v->win, GUI_T("Files"), t, GUI_MB_OK);
+            say("archive", "refused");
+            if (v->dir[0])
+                return;                         /* (the folder shown stays) */
+            gui_path_up(file);                  /* (a window opened for it: the folder it is in) */
+            dir = file;
+            in_arc = 0;
+        } else {
+            arc_leave(v);
+            v->arc = a;
+            snprintf(v->arc_file, sizeof v->arc_file, "%s", file);
+            gui_stat(file, &v->arc_was);
+            say("archive", arc_kind(a));
+        }
+    }
+    if (in_arc) {                               /* about in an archive */
+        if (!arc_has_folder(v->arc, in))
+            in[0] = 0;
+        snprintf(v->arc_in, sizeof v->arc_in, "%s", in);
+        snprintf(v->dir, sizeof v->dir, "%s%s%s", file, in[0] ? "\\" : "", in);
+        {
+            char *q;
+            for (q = v->dir + strlen(file); *q; q++)
+                if (*q == '/')
+                    *q = '\\';
+        }
+    } else {
+        if (v->arc)
+            arc_leave(v);
+        snprintf(v->dir, sizeof v->dir, "%s", dir);
+    }
     tree_follow(v);
     way(v);
     if (v->watch)
         glos_close(v->watch);
-    v->watch = glos_fs_watch(v->dir);
+    if (v->arc) {                               /* (the archive's own folder is watched: the file may change) */
+        snprintf(file, sizeof file, "%s", v->arc_file);
+        gui_path_up(file);
+    }
+    v->watch = glos_fs_watch(v->arc ? file : v->dir);
     retitle(v);
     fill(v);
     if (gui_list_count(v->list)) {
@@ -190,11 +474,21 @@ static void go(struct view *v, const char *dir)
     }
 }
 
+static int jobs_running(void);
+
+/* A watched folder has changed. While a job is at work its own writing changes folders a file at a time: a
+   folder shown is listed again once a second at most then (job_tick), and at the job's end; a paste of a
+   hundred files was a hundred listings, each longer than the last, and the job waited for every one of them
+   (a second and more for two small files on a 486). */
 void folder_changed(unsigned watch)
 {
     struct view *v;
     for (v = views; v; v = v->next)
         if (v->watch == watch) {
+            if (jobs_running()) {
+                v->stale = 1;
+                continue;
+            }
             fill(v);
             say("refreshed", v->dir);
         }
@@ -206,8 +500,8 @@ static int chosen_paths(struct view *v, char (*out)[260], int room)
 {
     int i, n = 0;
     for (i = 0; i < v->n && n < room; i++)
-        if (gui_list_chosen(v->list, i))
-            gui_path_join(out[n++], 260, v->dir, v->ents[(size_t)gui_list_user(v->list, i)].name);
+        if (gui_list_chosen(v->list, i) && row_path(v, i, out[n], 260) == 0)
+            n++;
     return n;
 }
 
@@ -233,6 +527,12 @@ struct job {
     char *buf;
     unsigned began;
     int n, cut, del, shown;             /* (del: a delete: `from` alone, and the counts are of files and folders) */
+    int ext;                            /* an archive unpacked whole (Extract Here): said so */
+    int zip;                            /* a ZIP changed (zfile): 1: each `from` put into it under the name `to`
+                                           (with what is in it, a folder); 2: the `to`s and all under them taken
+                                           out of it; 3: as 1, a new ZIP (Add to ZIP): said so */
+    char zfile[260];
+    unsigned char arc[JOB_ITEMS];       /* the item is a thing of an archive: `from` is its path there */
     volatile int at, ok, counted;       /* the item in hand, the items done well, the count is whole */
     volatile unsigned total_kb, done_kb;
     unsigned char well[JOB_ITEMS];      /* the items done well, each */
@@ -240,6 +540,7 @@ struct job {
 };
 
 static struct job *jobs;
+static int jobs_running(void) { return jobs != NULL; }
 int folder_slow;                        /* -slowcopy (the suites'): ten seconds before each file, to cancel in */
 
 static int job_stopped(struct job *j) { return j->task && gui_task_cancelled(j->task); }
@@ -280,11 +581,143 @@ static int copy_file(struct job *j, const char *from, const char *to)
     return bad ? -1 : 0;
 }
 
+/* A thing of an archive unpacked to `to` (phase E): a file, or a folder with all that is in it (inner "": the
+   whole archive), in one pass through the archive. Each gets the name DOS can have (arc_dos_path). */
+struct unpack {
+    struct job *j;
+    struct arc *a;
+    const char *inner;
+    size_t ilen, skip;                  /* skip: the item's own DOS path's length, which `to` stands for */
+    const char *to;
+    FILE *f;
+    char path[260];
+    unsigned part;
+    int bad, wrote;
+};
+
+static void make_folders(const char *path, int itself)
+{
+    char p[260];
+    size_t i;
+    snprintf(p, sizeof p, "%s", path);
+    for (i = 3; p[i]; i++)
+        if (p[i] == '\\') {
+            p[i] = 0;
+            if (!gui_is_dir(p))
+                gui_mkdir(p);
+            p[i] = '\\';
+        }
+    if (itself && !gui_is_dir(p))
+        gui_mkdir(p);
+}
+
+static int unpack_begin(void *ctx, unsigned i, const struct arc_entry *e)
+{
+    struct unpack *u = ctx;
+    const char *dos, *rel;
+    int k;
+    if (job_stopped(u->j))
+        return -1;
+    if (u->ilen && (strncmp(e->name, u->inner, u->ilen) != 0 || (e->name[u->ilen] && e->name[u->ilen] != '/')))
+        return 0;
+    if (!(dos = arc_dos_path(u->a, i))) {
+        u->bad = 1;
+        return 0;
+    }
+    rel = strlen(dos) > u->skip ? dos + u->skip + (u->skip != 0) : "";
+    if (strlen(u->to) + strlen(rel) + 2 > sizeof u->path) {
+        u->bad = 1;                     /* (a path longer than DOS has) */
+        return 0;
+    }
+    snprintf(u->path, sizeof u->path, "%s%s%s", u->to, rel[0] ? "\\" : "", rel);
+    make_folders(u->path, e->dir);
+    if (e->dir)
+        return 0;
+    for (k = 0; folder_slow && k < 200 && !job_stopped(u->j); k++)
+        glos_sleep(50);
+    if (job_stopped(u->j))
+        return -1;
+    if (e->how != ARC_OK || !(u->f = gui_fopen(u->path, "wb"))) {
+        u->bad = 1;
+        return 0;
+    }
+    u->wrote = 0;
+    return 1;
+}
+
+static int unpack_data(void *ctx, const void *p, unsigned n)
+{
+    struct unpack *u = ctx;
+    if (fwrite(p, 1, n, u->f) != n) {
+        u->wrote = -1;
+        return 1;
+    }
+    u->part += n;
+    u->j->done_kb += u->part >> 10;
+    u->part &= 1023;
+    return job_stopped(u->j);
+}
+
+static void unpack_end(void *ctx, unsigned i, int err)
+{
+    struct unpack *u = ctx;
+    const struct arc_entry *e = arc_at(u->a, i);
+    if (!u->f)
+        return;                         /* (a folder's) */
+    if (fclose(u->f) != 0 || u->wrote < 0)
+        err = ARC_E_OPEN;
+    u->f = NULL;
+    if (err != ARC_OK) {
+        gui_unlink(u->path);            /* (a piece of a file is no file) */
+        u->bad = 1;
+    } else if (e && e->date) {
+        gui_set_time(u->path, e->date, e->time);
+    }
+}
+
+static int unpack_tree(struct job *j, const char *file, const char *inner, const char *to)
+{
+    static const struct arc_sink sink = { unpack_begin, unpack_data, unpack_end };
+    struct unpack u;
+    char base[260];
+    int r;
+    memset(&u, 0, sizeof u);
+    if (!(u.a = arc_open(file, NULL)))
+        return -1;
+    if (arc_dos_of(u.a, inner, base, sizeof base) != 0) {
+        arc_close(u.a);
+        return -1;
+    }
+    u.j = j, u.inner = inner, u.ilen = strlen(inner), u.skip = strlen(base), u.to = to;
+    if (!inner[0])
+        make_folders(to, 1);            /* (the whole archive: into a folder of its own) */
+    r = arc_walk(u.a, &sink, &u);
+    arc_close(u.a);
+    return r != ARC_OK || u.bad || job_stopped(j) ? -1 : 0;
+}
+
+/* What a thing of an archive comes to unpacked, in kilobytes (a job's count). */
+static unsigned unpack_count(const char *file, const char *inner)
+{
+    struct arc *a = arc_open(file, NULL);
+    size_t n = strlen(inner);
+    unsigned i, kb = 0;
+    for (i = 0; a && i < arc_count(a); i++) {
+        const struct arc_entry *e = arc_at(a, i);
+        if (!e->dir && (!n || (!strncmp(e->name, inner, n) && (!e->name[n] || e->name[n] == '/'))))
+            kb += (unsigned)((e->size + 1023) >> 10);
+    }
+    arc_close(a);
+    return kb;
+}
+
 static int copy_tree(struct job *j, const char *from, const char *to)
 {
     struct gui_dirent *e;
     int n, i, bad = 0;
-    char a[260], b[260];
+    char a[260], b[520];
+    if (j->arc[j->at] && arc_split(from, a, sizeof a, b, sizeof b))
+        return unpack_tree(j, a, b, to);
     if (!gui_is_dir(from))
         return copy_file(j, from, to);
     if (gui_mkdir(to) != 0 && !gui_is_dir(to))
@@ -293,7 +726,7 @@ static int copy_tree(struct job *j, const char *from, const char *to)
         return -1;
     for (i = 0; i < n && !job_stopped(j); i++) {
         gui_path_join(a, sizeof a, from, e[i].name);
-        gui_path_join(b, sizeof b, to, e[i].name);
+        gui_path_join(b, 260, to, e[i].name);
         bad |= copy_tree(j, a, b) != 0;
     }
     free(e);
@@ -349,13 +782,192 @@ static void job_count(struct job *j, const char *path, int depth)
     free(e);
 }
 
+/* ---- a ZIP changed (phase E): on the work's thread, as the rest */
+
+struct znames {                         /* names in the archive, sorted once all are there */
+    char **name;
+    unsigned char *seen;
+    int n, room;
+};
+
+static int znames_add(struct znames *z, const char *name)
+{
+    if (z->n == z->room) {
+        int room = z->room ? z->room * 2 : 64;
+        char **m = realloc(z->name, (size_t)room * sizeof *m);
+        if (!m)
+            return -1;
+        z->name = m, z->room = room;
+    }
+    if (!(z->name[z->n] = strdup(name)))
+        return -1;
+    z->n++;
+    return 0;
+}
+
+static int znames_cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+
+static void znames_free(struct znames *z)
+{
+    int i;
+    for (i = 0; i < z->n; i++)
+        free(z->name[i]);
+    free(z->name);
+    free(z->seen);
+}
+
+/* The names a thing gets in the archive, itself and (a folder) all in it. */
+static void zip_names(struct znames *z, const char *from, const char *name, int depth)
+{
+    struct gui_dirent *e;
+    char a[260], b[520];
+    int n, i;
+    znames_add(z, name);
+    if (depth > 24 || !gui_is_dir(from) || (n = gui_dir_read(from, &e)) < 0)
+        return;
+    for (i = 0; i < n; i++) {
+        gui_path_join(a, sizeof a, from, e[i].name);
+        snprintf(b, sizeof b, "%s/%s", name, e[i].name);
+        zip_names(z, a, b, depth + 1);
+    }
+    free(e);
+}
+
+/* An entry that was there under a name now put in again: the old one (the first of the two) goes. seen: 0 for
+   a name the archive had before (its first entry is the old one), anything else for the rest. */
+static int zip_drop_old(void *ctx, const char *name)
+{
+    struct znames *z = ctx;
+    char **hit = bsearch(&name, z->name, (size_t)z->n, sizeof *z->name, znames_cmp);
+    if (!hit || z->seen[hit - z->name])
+        return 0;
+    z->seen[hit - z->name] = 1;
+    return 1;
+}
+
+/* An entry that is one of the names, or under one. */
+static int zip_drop_under(void *ctx, const char *name)
+{
+    struct job *j = ctx;
+    int i;
+    for (i = 0; i < j->n; i++) {
+        size_t n = strlen(j->to[i]);
+        if (!strncmp(name, j->to[i], n) && (!name[n] || name[n] == '/')) {
+            j->well[i] = 1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int zip_add(struct job *j, struct arcw *w, const char *from, const char *name, int depth)
+{
+    struct gui_dirent st, *e;
+    char a[260], b[520];
+    int n, i, bad = 0;
+    FILE *f;
+    size_t got;
+    unsigned part = 0;
+    if (job_stopped(j) || gui_stat(from, &st) != 0)
+        return -1;
+    if (st.dir) {
+        if (arcw_folder(w, name, st.date, st.time) != 0 || depth > 24 || (n = gui_dir_read(from, &e)) < 0)
+            return -1;
+        for (i = 0; i < n && !bad; i++) {
+            gui_path_join(a, sizeof a, from, e[i].name);
+            snprintf(b, sizeof b, "%s/%s", name, e[i].name);
+            bad = zip_add(j, w, a, b, depth + 1) != 0;
+        }
+        free(e);
+        return bad ? -1 : 0;
+    }
+    for (i = 0; folder_slow && i < 200 && !job_stopped(j); i++)
+        glos_sleep(50);
+    if (job_stopped(j) || !(f = gui_fopen(from, "rb")))
+        return -1;
+    bad = arcw_begin(w, name, st.date, st.time) != 0;
+    while (!bad && (got = fread(j->buf, 1, JOB_BUF, f)) > 0) {
+        bad = arcw_data(w, j->buf, (unsigned)got) != 0 || job_stopped(j);
+        part += (unsigned)got;
+        j->done_kb += part >> 10;
+        part &= 1023;
+    }
+    fclose(f);
+    if (!bad)
+        bad = arcw_end(w) != 0;
+    return bad ? -1 : 0;
+}
+
+static void zip_work(struct job *j)
+{
+    struct znames z;
+    struct gui_dirent st;
+    struct arcw *w;
+    int i, bad = 0, olds = 0, there = gui_stat(j->zfile, &st) == 0;
+    memset(&z, 0, sizeof z);
+    if (j->zip == 2) {                          /* taken out */
+        j->counted = 1;
+        if (arc_zip_remove(j->zfile, zip_drop_under, j) > 0)
+            for (i = 0; i < j->n; i++)
+                j->ok += j->well[i];
+        else
+            memset(j->well, 0, sizeof j->well);
+        return;
+    }
+    for (i = 0; i < j->n; i++) {
+        job_count(j, j->from[i], 0);
+        zip_names(&z, j->from[i], j->to[i], 0);
+    }
+    j->counted = 1;
+    /* Which of those names the archive has already (a paste that replaces: asked about before): their old
+       entries go once the new are in. */
+    if (there && z.n && (z.seen = malloc((size_t)z.n)) != NULL) {
+        struct arc *old = arc_open(j->zfile, NULL);
+        qsort(z.name, (size_t)z.n, sizeof *z.name, znames_cmp);
+        for (i = 0; i < z.n; i++) {
+            z.seen[i] = (unsigned char)(old && arc_find(old, z.name[i]) >= 0 ? 0 : 2);
+            olds += !z.seen[i];
+        }
+        arc_close(old);
+    }
+    if (!(w = arcw_open(j->zfile, 1, 2, NULL))) {
+        znames_free(&z);
+        return;
+    }
+    for (i = 0; i < j->n && !bad && !job_stopped(j); i++) {
+        j->at = i;
+        bad = zip_add(j, w, j->from[i], j->to[i], 0) != 0;
+    }
+    /* All or nothing: a ZIP half added to is the ZIP as it was (a new one: none). */
+    if (arcw_close(w, !bad && !job_stopped(j)) != ARC_OK) {
+        znames_free(&z);
+        return;
+    }
+    for (i = 0; i < j->n; i++)
+        j->well[i] = 1, j->ok++;
+    if (olds)                                   /* (now that the new are in) */
+        arc_zip_remove(j->zfile, zip_drop_old, &z);
+    znames_free(&z);
+    for (i = 0; j->cut && i < j->n; i++)        /* (a move: what was put in is taken away where it was) */
+        remove_tree(j, j->from[i]);
+}
+
 static void job_work(struct gui_task *t, void *arg)
 {
     struct job *j = arg;
     int i;
     (void)t;
-    for (i = 0; i < j->n; i++)
-        job_count(j, j->from[i], 0);
+    if (j->zip) {
+        zip_work(j);
+        return;
+    }
+    for (i = 0; i < j->n; i++) {
+        char file[260], in[520];
+        if (j->arc[i] && arc_split(j->from[i], file, sizeof file, in, sizeof in))
+            j->total_kb += unpack_count(file, in);
+        else
+            job_count(j, j->from[i], 0);
+    }
     j->counted = 1;
     for (i = 0; i < j->n && !job_stopped(j); i++) {
         j->at = i;
@@ -374,7 +986,17 @@ static void job_work(struct gui_task *t, void *arg)
 static void job_tick(void *arg)                 /* four times a second while there are jobs */
 {
     struct job *j;
+    static unsigned ticks;
     (void)arg;
+    if (!(++ticks & 3)) {                       /* once a second: the folders that changed meanwhile */
+        struct view *v;
+        for (v = views; v; v = v->next)
+            if (v->stale) {
+                v->stale = 0;
+                fill(v);
+                say("refreshed", v->dir);
+            }
+    }
     for (j = jobs; j; j = j->next) {
         unsigned run = glos_ticks() - j->began, total = j->total_kb, done = j->done_kb;
         char t[200], name[128];
@@ -440,12 +1062,18 @@ static void job_done(struct gui_window *owner, void *arg, int cancelled)
         for (i = 0; i < j->n; i++)
             if (j->well[i])
                 say("deleted", j->from[i]);
+    } else if (j->zip == 3) {
+        say("zipped", j->ok == j->n ? gui_path_name(j->zfile) : "nothing");
     } else {
-        snprintf(t, sizeof t, "%d %s%s", j->ok, j->cut ? "moved" : "copied", cancelled ? " stopped" : "");
-        say("pasted", t);
+        snprintf(t, sizeof t, "%d %s%s", j->ok, j->ext ? "unpacked" : j->cut ? "moved" : "copied", cancelled ? " stopped" : "");
+        say(j->ext ? "extracted" : "pasted", t);
     }
-    for (v = views; v; v = v->next)             /* (where it wrote and what it took from, shown as they are now) */
+    if (j->zip)
+        arc_changed(j->zfile);
+    for (v = views; v; v = v->next) {           /* (where it wrote and what it took from, shown as they are now) */
+        v->stale = 0;
         fill(v);
+    }
     gui_close(j->win);
     free(j->buf);
     free(j);
@@ -455,7 +1083,8 @@ static void job_start(struct job *j)
 {
     struct gui_widget *box, *row;
     j->began = glos_ticks();
-    j->win = gui_window(j->del ? GUI_T("Deleting") : j->cut ? GUI_T("Moving") : GUI_T("Copying"), 320, 0, GUI_W_DIALOG);
+    j->win = gui_window(j->del ? GUI_T("Deleting") : j->ext ? GUI_T("Unpacking") : j->zip == 3 ? GUI_T("Packing")
+                        : j->cut ? GUI_T("Moving") : GUI_T("Copying"), 320, 0, GUI_W_DIALOG);
     j->win->user = j;
     j->win->on_close = job_close;
     box = gui_vbox(j->win->root, 6, 8);
@@ -549,12 +1178,85 @@ static int inside(const char *from, const char *to)
     return !strncasecmp(from, to, n) && (!to[n] || to[n] == '\\');
 }
 
+/* A name in the ZIP shown that nothing there has: NAME~1.EXT, as free_name's on a disc. */
+static int zip_free_name(struct view *v, const char *name, char *out, size_t room)
+{
+    const char *dot = strrchr(name, '.');
+    int stem = dot && dot > name ? (int)(dot - name) : (int)strlen(name), k;
+    if (!dot || dot == name)
+        dot = "";
+    for (k = 1; k < 100; k++) {
+        int keep = k < 10 ? 6 : 5;
+        snprintf(out, room, "%s%s%.*s~%d%.4s", v->arc_in, v->arc_in[0] ? "/" : "", stem < keep ? stem : keep, name, k, dot);
+        if (arc_find(v->arc, out) < 0 && !arc_has_folder(v->arc, out))
+            return 0;
+    }
+    return -1;
+}
+
+/* A paste into the ZIP shown: what was cut or copied is put into it (a job's work: zip_work), under its own
+   names in the folder shown. One of that name there already is asked about as on a disc. */
+static void paste_zip(struct view *v)
+{
+    struct job *j = NULL;
+    int i, all = 0;
+    char to[520], file[260], in[520];
+    if (!clip.n || !(j = calloc(1, sizeof *j)) || !(j->buf = malloc(JOB_BUF))) {
+        free(j);
+        say("pasted", clip.cut ? "0 moved" : "0 copied");
+        return;
+    }
+    j->cut = clip.cut;
+    j->zip = 1;
+    snprintf(j->zfile, sizeof j->zfile, "%s", v->arc_file);
+    for (i = 0; i < clip.n && j->n < JOB_ITEMS; i++) {
+        const char *name = gui_path_name(clip.paths[i]);
+        int dir = gui_is_dir(clip.paths[i]), a;
+        if (arc_split(clip.paths[i], file, sizeof file, in, sizeof in) || !strcasecmp(clip.paths[i], v->arc_file)) {
+            gui_message(v->win, GUI_T("Files"), GUI_T("An archive's own things are unpacked to a folder first; "
+                                                    "and an archive is not put into itself."), GUI_MB_OK);
+            continue;
+        }
+        snprintf(to, sizeof to, "%s%s%s", v->arc_in, v->arc_in[0] ? "/" : "", name);
+        if (strlen(to) >= sizeof j->to[0])
+            continue;
+        if (arc_find(v->arc, to) >= 0 || arc_has_folder(v->arc, to)) {  /* one of that name is there already */
+            a = all ? all : clash_ask(v, name, dir && arc_has_folder(v->arc, to));
+            if (a == CLASH_STOP) {
+                free(j->buf);
+                free(j);
+                say("pasted", "cancelled");
+                return;
+            }
+            if (!all && clash.for_all)
+                all = a;
+            if (a == CLASH_SKIP || (a == CLASH_BOTH && zip_free_name(v, name, to, sizeof j->to[0]) != 0))
+                continue;
+        }
+        snprintf(j->from[j->n], sizeof j->from[0], "%s", clip.paths[i]);
+        snprintf(j->to[j->n++], sizeof j->to[0], "%s", to);
+    }
+    if (clip.cut)
+        clip.n = 0;
+    if (!j->n) {
+        say("pasted", j->cut ? "0 moved" : "0 copied");
+        free(j->buf);
+        free(j);
+        return;
+    }
+    job_start(j);
+}
+
 static void paste(struct view *v)
 {
     struct job *j;
     int i, all = 0;
     char to[260];
     struct gui_dirent e;
+    if (v->arc) {
+        paste_zip(v);
+        return;
+    }
     if (!clip.n || !(j = calloc(1, sizeof *j)) || !(j->buf = malloc(JOB_BUF))) {
         say("pasted", clip.cut ? "0 moved" : "0 copied");
         return;
@@ -562,7 +1264,18 @@ static void paste(struct view *v)
     j->cut = clip.cut;
     for (i = 0; i < clip.n && j->n < JOB_ITEMS; i++) {
         const char *name = gui_path_name(clip.paths[i]);
-        int dir = gui_is_dir(clip.paths[i]);
+        int dir = gui_is_dir(clip.paths[i]), in_arc;
+        char file[260], in[520], dos[260];
+        if ((in_arc = arc_split(clip.paths[i], file, sizeof file, in, sizeof in)) != 0) {
+            struct arc *a = arc_open(file, NULL);       /* a thing of an archive: under the name DOS can have */
+            int ok = a && in[0] && arc_dos_of(a, in, dos, sizeof dos) == 0;
+            dir = ok && arc_has_folder(a, in);
+            arc_close(a);
+            if (!ok)
+                continue;
+            name = strrchr(dos, '\\') ? strrchr(dos, '\\') + 1 : dos;
+            j->cut = 0;                         /* (never moved out of one) */
+        }
         gui_path_join(to, sizeof to, v->dir, name);
         if (!strcmp(to, clip.paths[i])) {       /* into its own folder: a copy beside it; a move: it is there */
             if (clip.cut || free_name(v->dir, name, to, sizeof to) != 0)
@@ -583,6 +1296,7 @@ static void paste(struct view *v)
             if (a == CLASH_SKIP || (a == CLASH_BOTH && free_name(v->dir, name, to, sizeof to) != 0))
                 continue;
         }
+        j->arc[j->n] = (unsigned char)in_arc;
         snprintf(j->from[j->n], sizeof j->from[0], "%s", clip.paths[i]);
         snprintf(j->to[j->n++], sizeof j->to[0], "%s", to);
     }
@@ -624,16 +1338,63 @@ static void command(struct gui_window *w, int id)
     if (!v)
         return;
     r = gui_list_get(v->list);
+    if (v->arc && (id == C_RENAME || id == C_CUT || id == C_FIND || id == C_EXTRACT || id == C_ZIP
+                   || ((id == C_NEWDIR || id == C_DELETE || id == C_PASTE) && !in_zip(v))))
+        return;                                 /* (in an archive: what a ZIP can have done to it, and no more) */
     switch (id) {
     case C_OPEN:
         if (r >= 0)
             gui_send(v->list, GUI_ON_ACTIVATE);
+        break;
+    case C_EXTRACT:                             /* the chosen archive unpacked into a folder of its name, here */
+        if (r < 0)
+            break;
+        gui_path_join(from, sizeof from, v->dir, v->ents[(size_t)gui_list_user(v->list, r)].name);
+        if (!arc_name_is(from) || gui_is_dir(from)) {
+            gui_message(w, GUI_T("Files"), GUI_T("That is no archive Files can unpack."), GUI_MB_OK);
+            break;
+        }
+        {
+            struct job *j;
+            char *dot;
+            snprintf(name, sizeof name, "%s", v->ents[(size_t)gui_list_user(v->list, r)].name);
+            if ((dot = strrchr(name, '.')) != NULL)
+                *dot = 0;
+            gui_path_join(to, sizeof to, v->dir, name);
+            {
+                struct gui_dirent st;           /* one of that name is here: a free name beside it */
+                if ((gui_stat(to, &st) == 0 || gui_is_dir(to)) && free_name(v->dir, name, to, sizeof to) != 0)
+                    break;
+            }
+            if (!(j = calloc(1, sizeof *j)) || !(j->buf = malloc(JOB_BUF))) {
+                free(j);
+                break;
+            }
+            j->ext = 1;
+            j->arc[0] = 1;
+            snprintf(j->from[0], sizeof j->from[0], "%s", from);
+            snprintf(j->to[0], sizeof j->to[0], "%s", to);
+            j->n = 1;
+            job_start(j);
+        }
         break;
     case C_NEWDIR:
         snprintf(name, sizeof name, "NEWDIR");
         if (gui_ask(w, GUI_T("New Folder"), GUI_T("The new folder's name:"), name, sizeof name) && name[0]) {
             if (!dos_name(w, name))
                 break;
+            if (v->arc) {                       /* in the ZIP shown: an entry for it */
+                struct arcw *z;
+                snprintf(t, sizeof t, "%s%s%s", v->arc_in, v->arc_in[0] ? "/" : "", name);
+                if (arc_find(v->arc, t) >= 0 || arc_has_folder(v->arc, t) || !(z = arcw_open(v->arc_file, 1, 2, NULL))
+                    || (arcw_folder(z, t, 0, 0), arcw_close(z, 1)) != ARC_OK)
+                    gui_message(w, GUI_T("Files"), GUI_T("The folder couldn't be made."), GUI_MB_OK);
+                else
+                    say("made", t);
+                arc_changed(v->arc_file);
+                fill(v);
+                break;
+            }
             gui_path_join(to, sizeof to, v->dir, name);
             if (gui_mkdir(to) != 0)
                 gui_message(w, GUI_T("Files"), GUI_T("The folder couldn't be made."), GUI_MB_OK);
@@ -670,8 +1431,49 @@ static void command(struct gui_window *w, int id)
             if (!j)
                 break;
             j->del = 1;
-            for (i = 0; i < n && i < JOB_ITEMS; i++)
+            if (v->arc) {                       /* out of the ZIP shown: each by its name there */
+                j->zip = 2;
+                snprintf(j->zfile, sizeof j->zfile, "%s", v->arc_file);
+            }
+            for (i = 0; i < n && i < JOB_ITEMS; i++) {
+                if (v->arc) {
+                    char file[260];
+                    if (!arc_split(paths[i], file, sizeof file, j->to[j->n], sizeof j->to[0]))
+                        continue;
+                }
                 snprintf(j->from[j->n++], sizeof j->from[0], "%s", paths[i]);
+            }
+            job_start(j);
+        }
+        break;
+    case C_ZIP:                                 /* a new ZIP of what is chosen, here: named after it (one thing), or
+                                                   after the folder (several) */
+        if (!(n = chosen_paths(v, paths, 64)))
+            break;
+        {
+            struct job *j;
+            struct gui_dirent st;
+            char *dot;
+            snprintf(name, sizeof name, "%s",
+                     n == 1 ? gui_path_name(paths[0]) : strlen(v->dir) > 3 ? gui_path_name(v->dir) : "FILES");
+            if ((dot = strrchr(name, '.')) != NULL)
+                *dot = 0;
+            if (!name[0])
+                snprintf(name, sizeof name, "FILES");
+            snprintf(t, sizeof t, "%.8s.ZIP", name);
+            gui_path_join(to, sizeof to, v->dir, t);
+            if (gui_stat(to, &st) == 0 && free_name(v->dir, t, to, sizeof to) != 0)
+                break;
+            if (!(j = calloc(1, sizeof *j)) || !(j->buf = malloc(JOB_BUF))) {
+                free(j);
+                break;
+            }
+            j->zip = 3;
+            snprintf(j->zfile, sizeof j->zfile, "%s", to);
+            for (i = 0; i < n && i < JOB_ITEMS; i++) {
+                snprintf(j->from[j->n], sizeof j->from[0], "%s", paths[i]);
+                snprintf(j->to[j->n++], sizeof j->to[0], "%s", gui_path_name(paths[i]));
+            }
             job_start(j);
         }
         break;
@@ -772,9 +1574,16 @@ static void list_on(struct gui_widget *w, int what)
     }
     if (what != GUI_ON_ACTIVATE || (r = gui_list_get(w)) < 0)
         return;
+    if (v->arc) {                               /* in an archive: its folders gone into, its files opened unpacked */
+        if (!v->ents[(size_t)gui_list_user(w, r)].dir)
+            arc_open_row(v, r);
+        else if (row_path(v, r, p, sizeof p) == 0)
+            go(v, p);
+        return;
+    }
     gui_path_join(p, sizeof p, v->dir, v->ents[(size_t)gui_list_user(w, r)].name);
-    if (v->ents[(size_t)gui_list_user(w, r)].dir && v->browser)
-        go(v, p);
+    if (v->browser && (v->ents[(size_t)gui_list_user(w, r)].dir || arc_name_is(p)))
+        go(v, p);                               /* (an archive is gone into as a folder is) */
     else
         files_open(p);
 }
@@ -796,6 +1605,8 @@ static void closing(struct gui_window *w)
 {
     struct view *v = view_of(w), **p;
     int x, y;
+    if (v && v->arc)
+        arc_leave(v);
     if (v && !v->browser && gui_origin(w, &x, &y) == 0) {      /* (where it was: for the next time) */
         int i;
         for (i = 0; i < places.n && strcmp(places.path[i], v->dir); i++)
@@ -834,6 +1645,8 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
     gui_menu_item(m, GUI_T("&New Folder"), C_NEWDIR, GUI_T("Ctrl+Shift+N"));
     gui_menu_item(m, GUI_T("&Rename"), C_RENAME, GUI_T("F2"));
     gui_menu_item(m, GUI_T("&Delete"), C_DELETE, GUI_T("Del"));
+    gui_menu_item(m, GUI_T("&Extract Here"), C_EXTRACT, NULL);
+    gui_menu_item(m, GUI_T("Add to &ZIP"), C_ZIP, NULL);
     gui_menu_item(m, GUI_T("P&roperties"), C_PROPS, GUI_T("Alt+Enter"));
     gui_menu_sep(m);
     gui_menu_item(m, GUI_T("&Close"), C_CLOSE, GUI_T("Ctrl+W"));
@@ -908,6 +1721,59 @@ static void properties(struct view *v)
     char path[260], t[160], name[128];
     int r = gui_list_get(v->list), item = r >= 0;
     memset(&ent, 0, sizeof ent);
+    if (v->arc) {                               /* a thing of an archive, or the archive's folder shown */
+        const struct arc_entry *e = NULL;
+        unsigned long files = 0, kb = 0;
+        unsigned i;
+        size_t n;
+        if (item) {
+            ent = v->ents[(size_t)gui_list_user(v->list, r)];
+            snprintf(path, sizeof path, "%s%s%s", v->arc_in, v->arc_in[0] ? "/" : "",
+                     v->arc_row[(size_t)gui_list_user(v->list, r)]);
+        } else {
+            snprintf(path, sizeof path, "%s", v->arc_in);
+            ent.dir = 1;
+            snprintf(ent.text, sizeof ent.text, "%s", gui_path_name(v->dir));
+        }
+        if (!ent.dir && (r = arc_find(v->arc, path)) >= 0)
+            e = arc_at(v->arc, (unsigned)r);
+        d = gui_window(GUI_T("Properties"), 300, 0, GUI_W_DIALOG);
+        d->owner = v->win;
+        box = gui_vbox(d->root, 6, 8);
+        form = gui_form(box);
+        props_row(form, GUI_T("Name:"), ent.text);
+        props_row(form, GUI_T("Where:"), item ? v->dir : v->arc_file);
+        snprintf(t, sizeof t, ent.dir ? GUI_T("Folder in a %s archive") : GUI_T("File in a %s archive"), arc_kind(v->arc));
+        props_row(form, GUI_T("Kind:"), t);
+        if (ent.dir) {
+            n = strlen(path);
+            for (i = 0; i < arc_count(v->arc); i++) {
+                const struct arc_entry *x = arc_at(v->arc, i);
+                if (!x->dir && (!n || (!strncmp(x->name, path, n) && x->name[n] == '/')))
+                    files++, kb += (x->size + 1023) >> 10;
+            }
+            snprintf(t, sizeof t, GUI_T("%lu files, %lu KB"), files, kb);
+            props_row(form, GUI_T("Holds:"), t);
+        } else if (e) {
+            snprintf(t, sizeof t, GUI_T("%lu bytes"), e->size);
+            props_row(form, GUI_T("Size:"), t);
+            snprintf(t, sizeof t, GUI_T("%lu bytes"), e->packed);
+            props_row(form, GUI_T("Packed:"), t);
+            if (e->how != ARC_OK)
+                props_row(form, GUI_T("Note:"), GUI_T(arc_error(e->how)));
+        }
+        if (item && ent.date) {
+            snprintf(t, sizeof t, "%04u-%02u-%02u %02u:%02u", (ent.date >> 9) + 1980, (ent.date >> 5) & 15, ent.date & 31,
+                     ent.time >> 11, (ent.time >> 5) & 63);
+            props_row(form, GUI_T("Modified:"), t);
+        }
+        row = gui_hbox(box, 6, 0);
+        gui_space(row, 0, 0);
+        gui_button(row, GUI_T("OK"), props_ok, 1)->flags |= GUI_DEFAULT | GUI_CANCEL;
+        say("properties", path);
+        gui_modal(d);                           /* (which closes it) */
+        return;
+    }
     if (item) {
         ent = v->ents[(size_t)gui_list_user(v->list, r)];
         gui_path_join(path, sizeof path, v->dir, ent.name);
@@ -1109,18 +1975,28 @@ static void address_on(struct gui_widget *w, int what)
     size_t n;
     if (what != GUI_ON_ACTIVATE || !v)
         return;
-    snprintf(p, sizeof p, "%s", gui_get_text(w));
-    for (n = strlen(p); n > 3 && (p[n - 1] == '\\' || p[n - 1] == ' '); n--)
-        p[n - 1] = 0;
-    for (n = 0; p[n]; n++)
-        if (p[n] >= 'a' && p[n] <= 'z')
-            p[n] = (char)(p[n] - 32);
-    if (!gui_is_dir(p)) {
-        gui_message(v->win, GUI_T("Files"), GUI_T("There is no such folder."), GUI_MB_OK);
-        gui_set_text(w, v->dir);
-        return;
+    {
+        char file[260], in[520], typed[260];
+        snprintf(typed, sizeof typed, "%s", gui_get_text(w));
+        for (n = strlen(typed); n > 3 && (typed[n - 1] == '\\' || typed[n - 1] == ' '); n--)
+            typed[n - 1] = 0;
+        snprintf(p, sizeof p, "%s", typed);
+        for (n = 0; p[n]; n++)
+            if (p[n] >= 'a' && p[n] <= 'z')
+                p[n] = (char)(p[n] - 32);
+        if (!gui_is_dir(p)) {
+            if (!arc_split(p, file, sizeof file, in, sizeof in)) {
+                gui_message(v->win, GUI_T("Files"), GUI_T("There is no such folder."), GUI_MB_OK);
+                gui_set_text(w, v->dir);
+                return;
+            }
+            /* Into an archive: its file as DOS has it, in capitals; what is inside it as it was typed (an
+               archive's own names have small letters too). */
+            snprintf(p, sizeof p, "%s%s", file, typed + strlen(file));
+        }
     }
     go(v, p);
+    gui_set_text(w, v->dir);                    /* (an archive that would not open: the folder shown still) */
     say("address", v->dir);
     gui_focus(v->list);
 }
@@ -1200,6 +2076,8 @@ static struct view *new_view(const char *dir, int browser)
             gui_menu_sep(c);
             gui_menu_item(c, GUI_T("&Delete"), C_DELETE, NULL);
             gui_menu_item(c, GUI_T("Rena&me"), C_RENAME, NULL);
+            gui_menu_item(c, GUI_T("&Extract Here"), C_EXTRACT, NULL);
+            gui_menu_item(c, GUI_T("Add to &ZIP"), C_ZIP, NULL);
             gui_menu_sep(c);
             gui_menu_item(c, GUI_T("&New Folder"), C_NEWDIR, NULL);
             gui_menu_item(c, GUI_T("P&roperties"), C_PROPS, NULL);
@@ -1286,6 +2164,8 @@ void folders_load(void)
 {
     char p[300], line[400];
     FILE *f;
+    arc_files(gui_fopen, gui_unlink, gui_rename);       /* (the toolkit's: they know DOS's paths on the host too) */
+    arc_temp_clean();                           /* (Files is starting: what was unpacked to be opened goes) */
     snprintf(p, sizeof p, "%s\\FOLDERS.CFG", files_home);
     if (!(f = gui_fopen(p, "r")))
         return;
