@@ -65,3 +65,4 @@ rectangle       square
 ellipse         circle
 fill            fill-drip
 picker          eye-dropper
+select          vector-square

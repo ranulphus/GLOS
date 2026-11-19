@@ -515,14 +515,13 @@ int pd_resize(struct pd_doc *d, int nw, int nh, int smooth)
     return 0;
 }
 
-int pd_canvas(struct pd_doc *d, int nw, int nh, int ax, int ay, unsigned paper)
+/* The picture on a canvas nw by nh, its old corner at ox, oy of the new one. */
+static int canvas_at(struct pd_doc *d, int nw, int nh, int ox, int oy, unsigned paper)
 {
     unsigned *n[PD_LAYERS];
-    int i, x, y, w = d->w, h = d->h, ox, oy;
+    int i, x, y, w = d->w, h = d->h;
     if (layers_new(d, n, nw, nh) != 0)
         return -1;
-    ox = ax == 0 ? 0 : ax == 1 ? (nw - w) / 2 : nw - w;         /* (where the old picture's corner is on the new) */
-    oy = ay == 0 ? 0 : ay == 1 ? (nh - h) / 2 : nh - h;
     for (i = 0; i < d->n; i++) {
         unsigned ground = i ? 0 : 0xFF000000u | (paper & 0xFFFFFFu);
         for (y = 0; y < nh; y++)
@@ -537,6 +536,61 @@ int pd_canvas(struct pd_doc *d, int nw, int nh, int ax, int ay, unsigned paper)
             free(n[i]);
         return -1;
     }
+    return 0;
+}
+
+int pd_canvas(struct pd_doc *d, int nw, int nh, int ax, int ay, unsigned paper)
+{
+    return canvas_at(d, nw, nh, ax == 0 ? 0 : ax == 1 ? (nw - d->w) / 2 : nw - d->w,
+                     ay == 0 ? 0 : ay == 1 ? (nh - d->h) / 2 : nh - d->h, paper);
+}
+
+/* A rectangle clipped to the picture: 0 if nothing of it is left. */
+static int clip_rect(const struct pd_doc *d, int *x, int *y, int *w, int *h)
+{
+    if (*x < 0)
+        *w += *x, *x = 0;
+    if (*y < 0)
+        *h += *y, *y = 0;
+    if (*x + *w > d->w)
+        *w = d->w - *x;
+    if (*y + *h > d->h)
+        *h = d->h - *y;
+    return *w > 0 && *h > 0;
+}
+
+int pd_crop(struct pd_doc *d, int x, int y, int w, int h)
+{
+    if (!clip_rect(d, &x, &y, &w, &h))
+        return -1;
+    return canvas_at(d, w, h, -x, -y, 0xFFFFFF);
+}
+
+unsigned *pd_copy(const struct pd_doc *d, int x, int y, int *w, int *h)
+{
+    unsigned *out;
+    int r;
+    if (!clip_rect(d, &x, &y, w, h) || !(out = malloc((size_t)*w * (size_t)*h * sizeof *out)))
+        return NULL;
+    for (r = 0; r < *h; r++)
+        memcpy(out + (size_t)r * *w, d->layer[d->cur].px + (size_t)(y + r) * d->w + x, (size_t)*w * sizeof *out);
+    return out;
+}
+
+static int layer_new(struct pd_doc *d, const char *name);
+
+int pd_paste(struct pd_doc *d, const unsigned *px, int w, int h, int x, int y)
+{
+    int r, c;
+    if (layer_new(d, "Pasted") != 0)
+        return -1;
+    memset(d->layer[d->cur].px, 0, (size_t)d->w * (size_t)d->h * sizeof(unsigned));
+    for (r = 0; r < h; r++)
+        for (c = 0; c < w; c++)
+            if (x + c >= 0 && y + r >= 0 && x + c < d->w && y + r < d->h)
+                d->layer[d->cur].px[(size_t)(y + r) * d->w + x + c] = px[(size_t)r * w + c];
+    pd_flatten(d, 0, 0, d->w, d->h);
+    pd_clean(d);
     return 0;
 }
 

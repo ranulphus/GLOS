@@ -767,6 +767,8 @@ void gui_cview_on_event(struct gui_widget *w, int (*event)(struct gui_widget *, 
 /* (toolkit 2) An image view: a canvas view of a picture (00RRGGBBh pixels, kept, not copied), fitted or at a zoom
    (gui_cview_zoom), centred; the left button pans it; + and - zoom, 0 fits, 1 shows it at its size. */
 struct gui_widget *gui_image_view(struct gui_widget *parent);
+void gui_image_view_mark(struct gui_widget *w, int x, int y, int mw, int mh);  /* a rectangle of the picture's
+                                           pixels marked by dashes round it (a selection); mw 0: none */
 /* (toolkit 2) A property grid: names and values under groups that open and close, each value edited as its kind
    wants (text and numbers in a field over it, a yes-or-no ticked, a choice stepped, a colour and a font by their
    dialogs), the current one's help under the grid. GUI_ON_CHANGE: gui_prop_changed says which property. */

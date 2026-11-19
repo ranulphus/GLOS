@@ -21,10 +21,10 @@
 #include "paintdoc.h"
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_IN, C_OUT, C_ACTUAL, C_FIT, C_ABOUT, C_FILLED,
-       C_RESIZE, C_CANVAS, C_LADD, C_LCOPY, C_LDELETE, C_LUP, C_LDOWN, C_LMERGE, C_LSHOWN, C_LOPACITY,
+       C_RESIZE, C_CANVAS, C_CUT, C_COPY, C_PASTE, C_ALL, C_CROP, C_LADD, C_LCOPY, C_LDELETE, C_LUP, C_LDOWN, C_LMERGE, C_LSHOWN, C_LOPACITY,
        C_TURN = 50,                     /* + PD_RIGHT, PD_LEFT, PD_ACROSS, PD_OVER */
        C_TOOL = 100 };
-enum { T_PENCIL, T_BRUSH, T_ERASER, T_LINE, T_RECT, T_ELLIPSE, T_FILL, T_PICK, T_COUNT };
+enum { T_PENCIL, T_BRUSH, T_ERASER, T_LINE, T_RECT, T_ELLIPSE, T_FILL, T_PICK, T_SELECT, T_COUNT };
 
 static const struct {
     const char *name, *text, *glyph, *tip;
@@ -38,6 +38,7 @@ static const struct {
     { "ellipse", GUI_N("Ellip&se"), "ellipse", GUI_N("Ellipse (O)"), 'o' },
     { "fill", GUI_N("&Fill"), "fill", GUI_N("Fill (F)"), 'f' },
     { "picker", GUI_N("Colour P&icker"), "picker", GUI_N("Colour picker (I)"), 'i' },
+    { "select", GUI_N("Selec&t"), "select", GUI_N("Select (S)"), 's' },
 };
 
 /* The palette: strong colours along the top, lighter ones under them; black first and white last, which are the
@@ -52,6 +53,15 @@ static struct gui_window *win;
 static struct gui_widget *view, *status, *pal, *first, *second, *tip_spin, *layers;
 static struct gui_menu *layers_menu;
 static int filling;                     /* the layers' list is being filled: its tellings are not the user's */
+static struct {                         /* the part of the picture selected (the Select tool, Select All): none, w 0 */
+    int x, y, w, h;
+} sel;
+static struct {                         /* what was copied or cut (a layer's pixels there) */
+    unsigned *px;
+    int w, h;
+} clip;
+
+static void deselect(void);
 static struct pd_doc *doc;
 static struct gui_undo *undo;
 static char path[260];                  /* the file it is ("": never saved) */
@@ -130,6 +140,7 @@ static void commit(const char *name, unsigned *before)
 static void turned(int how)                     /* (the picture is another size: the view's, and what the bar says) */
 {
     static const char *const names[] = { "", "right", "left", "across", "over" };
+    deselect();
     gui_image_view_set(view, doc->flat, doc->w, doc->h, doc->w);
     status_parts();
     gui_damage(view);
@@ -169,6 +180,31 @@ static void turn(int how)
 /* ---- the whole picture another size (Image's Resize and Canvas Size): the picture before is kept whole, and
    undo and redo change the kept one and the shown one over */
 
+/* ---- the selection: a rectangle of the picture, marked by the view (dashes round it) */
+
+static void deselect(void)
+{
+    sel.w = sel.h = 0;
+    gui_image_view_mark(view, 0, 0, 0, 0);
+}
+
+static void select_rect(int ax, int ay, int bx, int by)         /* two corners, either way round; clipped */
+{
+    int t;
+    if (ax > bx)
+        t = ax, ax = bx, bx = t;
+    if (ay > by)
+        t = ay, ay = by, by = t;
+    ax = ax < 0 ? 0 : ax, ay = ay < 0 ? 0 : ay;
+    bx = bx >= doc->w ? doc->w - 1 : bx, by = by >= doc->h ? doc->h - 1 : by;
+    if (bx <= ax || by <= ay) {                 /* (a click, or all of it outside: nothing selected) */
+        deselect();
+        return;
+    }
+    sel.x = ax, sel.y = ay, sel.w = bx - ax + 1, sel.h = by - ay + 1;
+    gui_image_view_mark(view, sel.x, sel.y, sel.w, sel.h);
+}
+
 /* The layers' list beside the picture: the top one first, the current one chosen; one not shown says so. */
 static void layers_fill(void)
 {
@@ -202,6 +238,7 @@ static void kept_swap(void *p)
 {
     if (pd_swap(doc, p) != 0)
         return;
+    deselect();
     gui_image_view_set(view, doc->flat, doc->w, doc->h, doc->w);
     layers_fill();
     status_parts();
@@ -212,6 +249,68 @@ static void kept_swap(void *p)
 }
 
 static void kept_drop(void *p) { pd_kept_free(p); }
+
+/* Edit's Cut, Copy and Paste, and Image's Crop: of the selection, or of the whole picture with none. What is
+   copied is the current layer's pixels there, kept in Paint (the desktop's clipboard for pictures is to come);
+   a paste is a new layer, its corner at the selection's (the picture's, with none). */
+static void edit_command(int id)
+{
+    int x = sel.w ? sel.x : 0, y = sel.w ? sel.y : 0, w = sel.w ? sel.w : doc->w, h = sel.w ? sel.h : doc->h;
+    struct pd_kept *k;
+    unsigned *before;
+    switch (id) {
+    case C_ALL:
+        select_rect(0, 0, doc->w - 1, doc->h - 1);
+        printf("PAINT select %d,%d %dx%d\n", sel.x, sel.y, sel.w, sel.h);
+        break;
+    case C_COPY:
+    case C_CUT: {
+        unsigned *px = pd_copy(doc, x, y, &w, &h);
+        if (!px)
+            return;
+        free(clip.px);
+        clip.px = px, clip.w = w, clip.h = h;
+        printf("PAINT %s %dx%d\n", id == C_CUT ? "cut" : "copy", w, h);
+        if (id == C_COPY || !(before = pd_before(doc)))
+            break;
+        pd_clean(doc);                          /* cut: clear there (the paper's colour on the bottom layer) */
+        pd_rect(doc, x, y, x + w - 1, y + h - 1, 0, 0, doc->cur ? PD_CLEAR : gui_colour_get(second));
+        show(doc->x0, doc->y0, doc->x1, doc->y1);
+        commit(GUI_T("Cut"), before);
+        break;
+    }
+    case C_PASTE:
+        if (!clip.px || !(k = pd_keep(doc)))
+            return;
+        if (pd_paste(doc, clip.px, clip.w, clip.h, x, y) != 0) {
+            pd_kept_free(k);
+            gui_message(win, GUI_T("Paint"), GUI_T("There is no room for another layer."), GUI_MB_OK);
+            return;
+        }
+        layers_fill();
+        gui_damage(view);
+        dirty = 1;
+        printf("PAINT paste %dx%d at %d,%d\n", clip.w, clip.h, x, y);
+        gui_undo_push(undo, GUI_T("Paste"), kept_swap, kept_swap, k, pd_kept_bytes(k), kept_drop, NULL, 0);
+        break;
+    case C_CROP:
+        if (!sel.w || !(k = pd_keep(doc)))
+            return;
+        if (pd_crop(doc, x, y, w, h) != 0) {
+            pd_kept_free(k);
+            return;
+        }
+        deselect();
+        gui_image_view_set(view, doc->flat, doc->w, doc->h, doc->w);
+        status_parts();
+        gui_damage(view);
+        dirty = 1;
+        printf("PAINT crop %dx%d\n", doc->w, doc->h);
+        gui_undo_push(undo, GUI_T("Crop"), kept_swap, kept_swap, k, pd_kept_bytes(k), kept_drop, NULL, 0);
+        break;
+    }
+    fflush(stdout);
+}
 
 /* A layer's command (Layers' menu): the picture before is kept whole for undo, as for a resize. */
 static struct {
@@ -327,6 +426,7 @@ static void resize(int canvas)
         gui_message(win, GUI_T("Paint"), GUI_T("There isn't the memory for a picture that large."), GUI_MB_OK);
         return;
     }
+    deselect();
     gui_image_view_set(view, doc->flat, doc->w, doc->h, doc->w);
     status_parts();
     gui_damage(view);
@@ -372,6 +472,13 @@ static void press(struct gui_ev *e, int x, int y)
 {
     unsigned a = gui_colour_get(first), b = gui_colour_get(second);
     unsigned colour = e->button == 1 ? a : b, other = e->button == 1 ? b : a;
+    if (tool == T_SELECT) {                     /* a rectangle dragged out; a click takes the selection away */
+        deselect();
+        drag.on = 1;
+        drag.button = e->button;
+        drag.x0 = drag.lx = x, drag.y0 = drag.ly = y;
+        return;
+    }
     if (tool == T_PICK) {
         if (x >= 0 && y >= 0 && x < doc->w && y < doc->h) {
             unsigned c = pd_get(doc, x, y);
@@ -410,6 +517,11 @@ static void press(struct gui_ev *e, int x, int y)
 
 static void move(int x, int y)
 {
+    if (tool == T_SELECT) {
+        select_rect(drag.x0, drag.y0, x, y);
+        drag.lx = x, drag.ly = y;
+        return;
+    }
     if (tool <= T_ERASER) {                     /* a stroke: one more piece of it */
         int s = tip(), ax = x < drag.lx ? x : drag.lx, ay = y < drag.ly ? y : drag.ly;
         int bx = x < drag.lx ? drag.lx : x, by = y < drag.ly ? drag.ly : y;
@@ -426,6 +538,13 @@ static void release(int x, int y)
 {
     static const char *const names[] = { GUI_N("Pencil"), GUI_N("Brush"), GUI_N("Eraser"), GUI_N("Line"),
                                          GUI_N("Rectangle"), GUI_N("Ellipse") };
+    if (tool == T_SELECT) {
+        select_rect(drag.x0, drag.y0, x, y);
+        drag.on = 0;
+        printf("PAINT select %d,%d %dx%d\n", sel.x, sel.y, sel.w, sel.h);
+        fflush(stdout);
+        return;
+    }
     if (x != drag.lx || y != drag.ly)
         move(x, y);
     drag.on = 0;
@@ -477,6 +596,7 @@ static void adopt(struct pd_doc *d, const char *p)
     snprintf(path, sizeof path, "%s", p ? p : "");
     dirty = 0;
     gui_undo_clear(undo);
+    deselect();
     gui_image_view_set(view, doc->flat, doc->w, doc->h, doc->w);
     layers_fill();
     gui_cview_zoom(view, 100);
@@ -638,6 +758,10 @@ static void command(struct gui_window *w, int id)
         layer_command(id);
         return;
     }
+    if (id >= C_CUT && id <= C_CROP) {
+        edit_command(id);
+        return;
+    }
     switch (id) {
     case C_NEW:
         if (let_go())
@@ -692,6 +816,10 @@ static int key(struct gui_window *w, struct gui_ev *e)
             command(win, C_TOOL + i);
             return 1;
         }
+    if (e->key == GUI_K_ESC && sel.w) {         /* (Esc: the selection taken away) */
+        deselect();
+        return 1;
+    }
     if (c == '[' || c == ']') {
         int v = gui_value(tip_spin) + (c == ']' ? 1 : -1);
         gui_set_value(tip_spin, v < 1 ? 1 : v > 64 ? 64 : v);
@@ -757,6 +885,11 @@ int main(int argc, char **argv)
     m = gui_menu(bar, GUI_T("&Edit"));
     gui_menu_item(m, GUI_T("&Undo"), C_UNDO, GUI_T("Ctrl+Z"));
     gui_menu_item(m, GUI_T("&Redo"), C_REDO, GUI_T("Ctrl+Y"));
+    gui_menu_sep(m);
+    gui_menu_item(m, GUI_T("Cu&t"), C_CUT, GUI_T("Ctrl+X"));
+    gui_menu_item(m, GUI_T("&Copy"), C_COPY, GUI_T("Ctrl+C"));
+    gui_menu_item(m, GUI_T("&Paste"), C_PASTE, GUI_T("Ctrl+V"));
+    gui_menu_item(m, GUI_T("Select &All"), C_ALL, GUI_T("Ctrl+A"));
     m = gui_menu(bar, GUI_T("&View"));
     gui_menu_item(m, GUI_T("Zoom &in"), C_IN, NULL);
     gui_menu_item(m, GUI_T("Zoom &out"), C_OUT, NULL);
@@ -770,6 +903,7 @@ int main(int argc, char **argv)
     gui_menu_sep(m);
     gui_menu_item(m, GUI_T("Re&size..."), C_RESIZE, NULL);
     gui_menu_item(m, GUI_T("&Canvas Size..."), C_CANVAS, NULL);
+    gui_menu_item(m, GUI_T("Cro&p to Selection"), C_CROP, NULL);
     layers_menu = m = gui_menu(bar, GUI_T("&Layers"));
     gui_menu_item(m, GUI_T("&New Layer"), C_LADD, GUI_T("Ctrl+Shift+N"));
     gui_menu_item(m, GUI_T("&Duplicate"), C_LCOPY, NULL);

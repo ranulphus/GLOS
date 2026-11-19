@@ -242,9 +242,17 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
 - **Tests:** `paint_test` (layers added, drawn on, made clear, hidden, copied, moved, merged, undone, half
   shown); `paint` on the host and on Loop A (a layer drawn on and rubbed out in part, hidden, merged, the merge
   undone, the layer deleted: the picture as it was).
-- **Not done yet:** blend modes, layers renamed and dragged, the layered format written; selections and crop;
-  text; gradients, curves, the clone stamp; resizing in proportion and bicubic; adjustments and effects; the
-  clipboard; PCX written; tiles for pictures of any size.
+- **A selection** (2026-11-19): the Select tool (S) drags out a rectangle, which the view marks with dashes
+  (`gui_image_view_mark`, new in the toolkit); Select All; Esc or a click takes it away. **Cut**, **Copy** and
+  **Paste** (Edit's menu) are of the selection, or of the whole picture with none: what is copied is the
+  current layer's pixels there, and a paste is a new layer with its corner at the selection's. **Crop to
+  Selection** (Image's menu) cuts the picture down to it. What is copied is kept in Paint for now: the
+  desktop's clipboard for pictures is to come.
+- **Tests:** `paint_test` (a part copied, pasted as a layer, the picture cut down); `paint` (a part selected and
+  copied, pasted elsewhere, the picture cropped, both undone: the picture as it was).
+- **Not done yet:** blend modes, layers renamed and dragged, the layered format written; selections of other
+  shapes, a selection moved, the desktop's clipboard; text; gradients, curves, the clone stamp; resizing in
+  proportion and bicubic; adjustments and effects; PCX written; tiles for pictures of any size.
 
 ## Faults of the toolkit and the suites that phase E's gates found (2026-11-19)
 

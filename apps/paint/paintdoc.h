@@ -67,6 +67,13 @@ int pd_turn_back(int how);
    what is new is `paper` on the bottom layer and clear on the others. 0, or -1 with nothing changed. */
 int pd_resize(struct pd_doc *d, int nw, int nh, int smooth);
 int pd_canvas(struct pd_doc *d, int nw, int nh, int ax, int ay, unsigned paper);
+/* A part of the picture. pd_crop: the picture cut down to the rectangle (clipped to it; -1: nothing of it is
+   in the picture). pd_copy: the current layer's pixels there (AARRGGBBh, malloc'd; the rectangle clipped, its
+   size as taken in *w, *h; NULL: none). pd_paste: such pixels as a new layer over the current one, their
+   corner at x, y (what falls outside is not kept), the rest of the layer clear. */
+int pd_crop(struct pd_doc *d, int x, int y, int w, int h);
+unsigned *pd_copy(const struct pd_doc *d, int x, int y, int *w, int *h);
+int pd_paste(struct pd_doc *d, const unsigned *px, int w, int h, int x, int y);
 
 /* The whole picture kept, for a step that changes all of it (a resize, a canvas, a layer added or taken away):
    pd_keep copies it, its layers and what they are; pd_swap changes what is kept and what the picture is over

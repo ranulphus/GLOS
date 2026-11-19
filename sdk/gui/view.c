@@ -41,6 +41,7 @@ struct cview {
     int iw, ih, istride;
     unsigned *small;                    /* the picture averaged down for the scale (num/den < 1) */
     int sw, sh, s_num, s_den;
+    int mark_x, mark_y, mark_w, mark_h; /* a rectangle of its pixels marked (gui_image_view_mark); none: mark_w 0 */
 };
 
 #define CV(w) ((struct cview *)(w))
@@ -480,11 +481,9 @@ static void image_draw(struct gui_widget *w, struct gfx_surface *s, const struct
     if (!v->img)
         return;
     shrink(v);
-    if (v->small) {                             /* smaller: the averaged picture, as it is */
+    if (v->small)                               /* smaller: the averaged picture, as it is */
         gfx_image(s, gv->ox, gv->oy, v->small, v->sw, v->sh, (unsigned)v->sw);
-        return;
-    }
-    for (y = c.y; y < c.y + c.h; y++) {         /* the same size or larger: each pixel repeated */
+    for (y = c.y; !v->small && y < c.y + c.h; y++) {    /* the same size or larger: each pixel repeated */
         int sy = (int)((long)(y - gv->oy) * v->den / v->num), n = c.w < 2048 ? c.w : 2048;
         const unsigned *src;
         if (sy < 0 || sy >= v->ih)
@@ -496,6 +495,35 @@ static void image_draw(struct gui_widget *w, struct gfx_surface *s, const struct
         }
         gfx_image(s, c.x, y, row, n, 1, (unsigned)n);
     }
+    if (v->mark_w > 0 && v->mark_h > 0) {       /* the mark: a rectangle of dashes round those pixels, black and
+                                                   white by turns, so that it shows on any picture */
+        int x0 = gv->ox + (int)((long)v->mark_x * v->num / v->den), y0 = gv->oy + (int)((long)v->mark_y * v->num / v->den);
+        int x1 = gv->ox + (int)((long)(v->mark_x + v->mark_w) * v->num / v->den) - 1;
+        int y1 = gv->oy + (int)((long)(v->mark_y + v->mark_h) * v->num / v->den) - 1, i;
+        if (x1 < x0)
+            x1 = x0;
+        if (y1 < y0)
+            y1 = y0;
+        for (i = x0; i <= x1; i += 4) {
+            unsigned ink = ((i - x0) / 4) & 1 ? 0xFFFFFFu : 0x000000u;
+            int n = x1 - i + 1 < 4 ? x1 - i + 1 : 4;
+            gfx_fill(s, i, y0, n, 1, ink);
+            gfx_fill(s, i, y1, n, 1, ink);
+        }
+        for (i = y0; i <= y1; i += 4) {
+            unsigned ink = ((i - y0) / 4) & 1 ? 0xFFFFFFu : 0x000000u;
+            int n = y1 - i + 1 < 4 ? y1 - i + 1 : 4;
+            gfx_fill(s, x0, i, 1, n, ink);
+            gfx_fill(s, x1, i, 1, n, ink);
+        }
+    }
+}
+
+void gui_image_view_mark(struct gui_widget *w, int x, int y, int mw, int mh)
+{
+    struct cview *v = CV(w);
+    v->mark_x = x, v->mark_y = y, v->mark_w = mw > 0 && mh > 0 ? mw : 0, v->mark_h = mh;
+    gui_damage(w);
 }
 
 struct gui_widget *gui_image_view(struct gui_widget *parent)

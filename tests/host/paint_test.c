@@ -395,6 +395,41 @@ int main(void)
         pd_free(d);
     }
 
+    {                                           /* a part of the picture: copied, pasted as a layer, cut down to */
+        unsigned *part;
+        int w = 2, h = 2;
+        d = pd_new(4, 3, PAPER);
+        pd_rect(d, 1, 0, 2, 1, INK, 0, INK);
+        pd_dot(d, 3, 2, RED, 1);
+        check("before", d,
+              ".##.\n"
+              ".##.\n"
+              "...o\n");
+        part = pd_copy(d, 2, 1, &w, &h);
+        is("a part copied", part != NULL && w == 2 && h == 2, 1);
+        is("its pixels", part ? (long)((part[0] & 0xFFFFFF) == INK && (part[3] & 0xFFFFFF) == RED) : 0, 1);
+        is("pasted", pd_paste(d, part, w, h, 0, 1), 0);
+        is("as a layer of its own", d->n * 10 + d->cur, 21);
+        check("over the picture, its corner where asked", d,
+              ".##.\n"
+              "#.#.\n"
+              ".o.o\n");
+        free(part);
+        w = 9, h = 9;
+        part = pd_copy(d, 3, 2, &w, &h);        /* (clipped to the picture: one pixel, the pasted layer's: clear) */
+        is("clipped", part != NULL && w == 1 && h == 1 && part[0] == 0, 1);
+        free(part);
+        w = 2, h = 2;
+        is("nothing outside it", pd_copy(d, 7, 7, &w, &h) == NULL, 1);
+        is("cut down", pd_crop(d, 1, 1, 9, 9), 0);
+        is("its size", d->w * 10 + d->h, 32);
+        check("the part that was there", d,
+              ".#.\n"
+              "o.o\n");
+        is("nothing to cut down to", pd_crop(d, 5, 5, 2, 2), -1);
+        pd_free(d);
+    }
+
     is("too large is refused", pd_new(PD_MAX + 1, 1, PAPER) == NULL, 1);
     is("nothing is refused", pd_new(0, 4, PAPER) == NULL, 1);
 
