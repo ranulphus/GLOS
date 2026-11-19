@@ -30,7 +30,8 @@
 #include "lexers.h"
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_CUT, C_COPY, C_PASTE, C_DELETE, C_FIND, C_NEXT,
-       C_REPLACE, C_GOTO, C_ALL, C_WRAP, C_ABOUT, C_CLOSE, C_NUMBERS, C_COLOURS, C_SESSION };
+       C_REPLACE, C_GOTO, C_ALL, C_WRAP, C_ABOUT, C_CLOSE, C_NUMBERS, C_COLOURS, C_SESSION, C_BOOK, C_BOOKNEXT,
+       C_BOOKPREV };
 
 #define DOCS 12
 
@@ -500,6 +501,35 @@ static void command(struct gui_window *w, int id)
         if (gui_ask(win, GUI_T("Go To Line"), GUI_T("Line number:"), t, sizeof t) && atoi(t) > 0)
             gui_code_goto(ed, atoi(t), 1);
         break;
+    case C_BOOK: {                              /* the line's bookmark, put or taken away (they are the editor's:
+                                                   they move with their lines); the margin shows them */
+        int line, col;
+        unsigned m;
+        gui_code_where(ed, &line, &col);
+        m = gui_code_marks(ed, line);
+        gui_code_mark(ed, line, m ^ GUI_CODE_BOOK, NULL);
+        if (!numbers) {
+            numbers = 1;
+            for (i = 0; i < ndocs; i++)
+                doc_style(&doc[i]);
+            gui_menu_check(view, C_NUMBERS, numbers);
+            session_save();
+        }
+        printf("NOTEPAD bookmark %d %s\n", line, m & GUI_CODE_BOOK ? "off" : "on");
+        fflush(stdout);
+        break;
+    }
+    case C_BOOKNEXT:
+    case C_BOOKPREV: {                          /* to the next line with one (the one before), round the end */
+        int line, col, to;
+        gui_code_where(ed, &line, &col);
+        if ((to = gui_code_mark_next(ed, line, GUI_CODE_BOOK, id == C_BOOKPREV)) > 0) {
+            gui_code_goto(ed, to, 1);
+            printf("NOTEPAD at bookmark %d\n", to);
+            fflush(stdout);
+        }
+        break;
+    }
     case C_WRAP:                                /* (every document's, as View's two are) */
     case C_NUMBERS:
     case C_COLOURS:
@@ -599,6 +629,10 @@ int main(int argc, char **argv)
     gui_menu_item(m, GUI_T("Find &Next"), C_NEXT, GUI_T("F3"));
     gui_menu_item(m, GUI_T("&Replace..."), C_REPLACE, GUI_T("Ctrl+H"));
     gui_menu_item(m, GUI_T("&Go To..."), C_GOTO, GUI_T("Ctrl+G"));
+    gui_menu_sep(m);
+    gui_menu_item(m, GUI_T("Toggle &Bookmark"), C_BOOK, GUI_T("Ctrl+F2"));
+    gui_menu_item(m, GUI_T("&Next Bookmark"), C_BOOKNEXT, GUI_T("F2"));
+    gui_menu_item(m, GUI_T("Pre&vious Bookmark"), C_BOOKPREV, GUI_T("Shift+F2"));
     gui_menu_sep(m);
     gui_menu_item(m, GUI_T("Select &All"), C_ALL, GUI_T("Ctrl+A"));
     format = m = gui_menu(bar, GUI_T("F&ormat"));

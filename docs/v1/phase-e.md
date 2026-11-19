@@ -103,8 +103,13 @@ Plan: `docs/v1/apps/notepad.md`. The first of its parts.
   The editor has a find by those rules for it (`gui_code_find_ex`, and `gui_code_sel` for what is chosen).
 - **Tests:** `notepad-find` anew on the host and on Loop A (two replaced; "the" is not "The"; "start" is not
   "starts", said in the dialog; `st.rts` found); `notepad` closes the dialog by Esc before F3.
-- **Not done yet:** files dropped on the window; bookmarks; Markdown's colours and a menu to choose a kind;
-  the results pane, find in files; code pages; large files.
+- **Bookmarks** (Edit's menu): Ctrl+F2 puts one on the line or takes it away, F2 goes to the next round the
+  text's end, Shift+F2 to the one before. They are the editor's margin marks, which move with their lines as
+  the text is edited (the editor is asked where they are: `gui_code_marks`, `gui_code_mark_next`); the first
+  one turns Line Numbers on, so that they show. They are not kept with the file.
+- **Tests:** `notepad-book` on the host and on Loop A.
+- **Not done yet:** files dropped on the window; Markdown's colours and a menu to choose a kind; the results
+  pane, find in files; code pages; large files; bookmarks kept with the session.
 
 ## Files (2026-11-18): the browser's toolbar and address bar
 

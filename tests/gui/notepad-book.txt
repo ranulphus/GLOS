@@ -1,0 +1,35 @@
+# Notepad's bookmarks (apps/notepad; phase E, docs/v1/apps/notepad.md): Ctrl+F2 puts one on the line (the margin
+# comes with the first, to show them), F2 goes to the next round the text's end, Shift+F2 to the one before;
+# they move with their lines as the text is edited (a line put in at the top: the third line's is the fourth's;
+# the first line's stays where Enter was pressed); Ctrl+F2 again takes one away.
+# (Line Numbers, which the first bookmark turned on, is turned off again at the end: it is kept in NOTEPAD.CFG,
+# and Loop A's scripts after this one run on the same disk.)
+run NOTEPAD.EXE C:\GUI\EDIT.TXT
+wait "EDIT.TXT - Notepad"
+key ctrl+f2
+key down
+key down
+key ctrl+f2
+shot two "EDIT.TXT - Notepad"
+key f2
+key f2
+key shift+f2
+key ctrl+home
+key enter
+key f2
+shot moved "*EDIT.TXT - Notepad"
+key ctrl+f2
+key f2
+key f2
+key alt+v l
+key alt+f4
+wait "Notepad"
+key alt+n
+gone "*EDIT.TXT - Notepad"
+expect NOTEPAD bookmark 1 on
+expect NOTEPAD bookmark 3 on
+expect NOTEPAD at bookmark 1
+expect NOTEPAD at bookmark 3
+expect NOTEPAD at bookmark 4
+expect NOTEPAD bookmark 4 off
+expect NOTEPAD end

@@ -1532,6 +1532,32 @@ void gui_code_mark(struct gui_widget *w, int line, unsigned flags, const char *n
     gui_damage(w);
 }
 
+unsigned gui_code_marks(struct gui_widget *w, int line)        /* (line from 1) its marks, or 0 */
+{
+    struct cmark *m = mark_of(CE(w), line - 1);
+    return m ? m->flags : 0;
+}
+
+/* The nearest line after `line` (back: before it) with one of the marks in flags, round the text's end: from 1;
+   0 if no line has one. */
+int gui_code_mark_next(struct gui_widget *w, int line, unsigned flags, int back)
+{
+    struct code *c = CE(w);
+    int i, near = -1, far = -1, at = line - 1;
+    for (i = 0; i < c->nmarks; i++) {
+        int l = c->marks[i].line;
+        if (!(c->marks[i].flags & flags))
+            continue;
+        if (back ? l < at : l > at) {           /* (on this side: the nearest) */
+            if (near < 0 || (back ? l > near : l < near))
+                near = l;
+        } else if (far < 0 || (back ? l > far : l < far)) {     /* (round the end: the furthest back, or forth) */
+            far = l;
+        }
+    }
+    return (near >= 0 ? near : far) + 1;
+}
+
 const char *gui_code_note(struct gui_widget *w, int line)
 {
     struct cmark *m = mark_of(CE(w), line - 1);

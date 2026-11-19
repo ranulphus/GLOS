@@ -914,6 +914,11 @@ void gui_code_select(struct gui_widget *w, size_t from, size_t to);    /* bytes 
 void gui_code_lexer(struct gui_widget *w, gui_lexer lex, void *ctx);
 void gui_code_mark(struct gui_widget *w, int line, unsigned marks, const char *note);  /* GUI_CODE_ (0: none) */
 const char *gui_code_note(struct gui_widget *w, int line);
+unsigned gui_code_marks(struct gui_widget *w, int line);       /* the line's marks (GUI_CODE_), or 0: they move
+                                           with their lines as the text is edited, so the editor is asked */
+int gui_code_mark_next(struct gui_widget *w, int line, unsigned flags, int back);      /* the nearest line after
+                                           `line` (back: before it) with one of those marks, round the text's
+                                           end; 0 if none has */
 void gui_code_fold(struct gui_widget *w, int line, int folded);
 void gui_code_zoom(struct gui_widget *w, int size);    /* 0 small, 1 normal, 2 large */
 int gui_code_get_zoom(struct gui_widget *w);
