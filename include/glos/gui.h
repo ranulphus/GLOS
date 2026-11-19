@@ -443,7 +443,7 @@ void gui_list_set(struct gui_widget *w, int row);
 void *gui_list_user(struct gui_widget *w, int row);
 const char *gui_list_cell(struct gui_widget *w, int row, int col);
 void gui_list_sort(struct gui_widget *w, int col, int (*cmp)(struct gui_widget *, int a, int b, int col));
-void gui_list_multi(struct gui_widget *w, int on);      /* more than one row chosen (Ctrl, Shift) */
+void gui_list_multi(struct gui_widget *w, int on);      /* more than one row chosen (Ctrl, Shift; Ctrl+A: all) */
 int gui_list_chosen(struct gui_widget *w, int row);
 void gui_list_icons(struct gui_widget *w, int big);     /* rows (0), or 32-pixel icons in a grid (1) */
 /* An icon: GUI_ICON_W x GUI_ICON_W pixels, a byte each: 0 clear, else a palette index of the 8-bit palette. */

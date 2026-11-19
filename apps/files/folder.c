@@ -22,6 +22,7 @@ struct view {
     struct gui_widget *list, *tree, *status;
     struct gui_widget *address;         /* the browser's address bar (phase E): the folder's path, to type into */
     struct gui_menu *context;           /* the list's context menu (phase E) */
+    int following;                      /* the tree is being taken to the folder shown (tree_follow) */
     struct gui_menu *view_menu;
     char dir[260];
     char hist[HIST][260];               /* the browser's way here: Back and Forward go along it */
@@ -145,9 +146,38 @@ static void way(struct view *v)
     }
 }
 
+/* The browser's tree follows the folder shown (phase E), however it was gone to (the address bar, Back, Up, a
+   folder opened in the list, Find's Go To): down from its drive, each folder on the way opened. */
+static void tree_follow(struct view *v)
+{
+    char root[4], part[64], shown[128];
+    const char *rest, *e;
+    struct gui_node *n, *c;
+    size_t k;
+    if (!v->tree || !v->dir[0])
+        return;
+    snprintf(root, sizeof root, "%c:", toupper((unsigned char)v->dir[0]));
+    if (!(n = gui_tree_child(v->tree, NULL, root)))
+        return;
+    v->following = 1;                           /* (what the tree tells on the way is no going) */
+    for (rest = strlen(v->dir) > 3 ? v->dir + 3 : ""; *rest; rest += k + (e ? 1 : 0)) {
+        e = strchr(rest, '\\');
+        k = e ? (size_t)(e - rest) : strlen(rest);
+        snprintf(part, sizeof part, "%.*s", (int)k, rest);
+        gui_tree_expand(v->tree, n, 1);
+        if (!(c = gui_tree_child(v->tree, n, gui_dos_text(part, shown, sizeof shown))))
+            break;
+        n = c;
+    }
+    if (gui_tree_get(v->tree) != n)
+        gui_tree_set(v->tree, n);
+    v->following = 0;
+}
+
 static void go(struct view *v, const char *dir)
 {
     snprintf(v->dir, sizeof v->dir, "%s", dir);
+    tree_follow(v);
     way(v);
     if (v->watch)
         glos_close(v->watch);
@@ -241,19 +271,100 @@ static int remove_tree(const char *path)
     return bad ? -1 : gui_rmdir(path);
 }
 
+/* A paste onto a name that is there already (phase E) is asked about: Replace (a file: written over; a folder:
+   what is copied goes into it, over its files of the same names), Skip, Keep Both (the copy gets a name that
+   is free: LETTER~1.TXT), or Cancel, which stops the paste there; "for all" answers for the rest of this
+   paste. Before this a paste wrote over what was there without a word. */
+enum { CLASH_REPLACE = 1, CLASH_SKIP, CLASH_BOTH, CLASH_STOP };
+
+static struct {
+    struct gui_widget *all;
+    int for_all;
+} clash;
+
+static void clash_button(struct gui_widget *b, int what)
+{
+    (void)what;
+    clash.for_all = gui_checked(clash.all);     /* (read while the dialog is there) */
+    gui_end_modal(b->win, b->id);
+}
+
+static int clash_ask(struct view *v, const char *name, int dir)
+{
+    struct gui_window *d = gui_window(GUI_T("Paste"), 340, 0, GUI_W_DIALOG);
+    struct gui_widget *box, *row;
+    char t[200], shown[128];
+    int r;
+    d->owner = v->win;
+    box = gui_vbox(d->root, 6, 8);
+    snprintf(t, sizeof t, dir ? GUI_T("A folder named %s is here already.") : GUI_T("A file named %s is here already."),
+             gui_dos_text(name, shown, sizeof shown));
+    gui_label(box, t);
+    gui_label(box, dir ? GUI_T("Replace copies into it, over files of the same names.")
+                       : GUI_T("Replace writes over it. Keep Both names the copy anew."));
+    clash.all = gui_check(box, GUI_T("Do this for &all that are here already"), 0);
+    clash.for_all = 0;
+    row = gui_hbox(box, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("&Replace"), clash_button, CLASH_REPLACE);
+    gui_button(row, GUI_T("&Skip"), clash_button, CLASH_SKIP)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("&Keep Both"), clash_button, CLASH_BOTH);
+    gui_button(row, GUI_T("Cancel"), clash_button, CLASH_STOP)->flags |= GUI_CANCEL;
+    r = gui_modal(d);
+    gui_close(d);
+    return r >= CLASH_REPLACE && r <= CLASH_BOTH ? r : CLASH_STOP;     /* (its close box: Cancel) */
+}
+
+/* A name that is free in dir, made from name as DOS makes its short ones: LETTER~1.TXT, ~2 ... (six of its
+   letters kept, five from ~10 on). */
+static int free_name(const char *dir, const char *name, char *out, int room)
+{
+    const char *dot = strrchr(name, '.');
+    int stem = dot && dot > name ? (int)(dot - name) : (int)strlen(name), k;
+    char leaf[24];
+    struct gui_dirent e;
+    if (!dot || dot == name)
+        dot = "";
+    for (k = 1; k < 100; k++) {
+        int keep = k < 10 ? 6 : 5;
+        snprintf(leaf, sizeof leaf, "%.*s~%d%.4s", stem < keep ? stem : keep, name, k, dot);
+        gui_path_join(out, room, dir, leaf);
+        if (gui_stat(out, &e) != 0)
+            return 0;
+    }
+    return -1;
+}
+
+/* Is `to` the folder `from`, or under it? */
+static int inside(const char *from, const char *to)
+{
+    size_t n = strlen(from);
+    return !strncasecmp(from, to, n) && (!to[n] || to[n] == '\\');
+}
+
 static void paste(struct view *v)
 {
-    int i, done = 0;
+    int i, done = 0, all = 0;
     char to[260], t[80];
+    struct gui_dirent e;
     for (i = 0; i < clip.n; i++) {
-        gui_path_join(to, sizeof to, v->dir, gui_path_name(clip.paths[i]));
-        if (!strcmp(to, clip.paths[i])) {
-            const char *dot = strrchr(gui_path_name(clip.paths[i]), '.');
-            char base[16], name[20];
-            snprintf(base, sizeof base, "%.*s", dot ? (int)(dot - gui_path_name(clip.paths[i])) : 6,
-                     gui_path_name(clip.paths[i]));
-            snprintf(name, sizeof name, "%.6s~1%s", base, dot ? dot : "");     /* (a copy beside the file) */
-            gui_path_join(to, sizeof to, v->dir, name);
+        const char *name = gui_path_name(clip.paths[i]);
+        int dir = gui_is_dir(clip.paths[i]);
+        gui_path_join(to, sizeof to, v->dir, name);
+        if (!strcmp(to, clip.paths[i])) {       /* into its own folder: a copy beside it; a move: it is there */
+            if (clip.cut || free_name(v->dir, name, to, sizeof to) != 0)
+                continue;
+        } else if (dir && inside(clip.paths[i], to)) {
+            gui_message(v->win, GUI_T("Files"), GUI_T("A folder can't be put into itself."), GUI_MB_OK);
+            continue;
+        } else if (gui_stat(to, &e) == 0) {     /* one of that name is here already */
+            int a = all ? all : clash_ask(v, name, dir && e.dir);
+            if (a == CLASH_STOP)
+                break;
+            if (!all && clash.for_all)
+                all = a;
+            if (a == CLASH_SKIP || (a == CLASH_BOTH && free_name(v->dir, name, to, sizeof to) != 0))
+                continue;
         }
         if (clip.cut ? (gui_rename(clip.paths[i], to) == 0
                         || (copy_tree(clip.paths[i], to) == 0 && remove_tree(clip.paths[i]) == 0))
@@ -925,14 +1036,9 @@ static void tree_on(struct gui_widget *w, int what)
                 gui_tree_add(w, n, e[i].text, icon(IC_FOLDER, 0), p, 1);
             }
         free(e);
-    } else if (what == GUI_ON_SELECT && strcmp(v->dir, path)) {
+    } else if (what == GUI_ON_SELECT && !v->following && strcmp(v->dir, path)) {
         go(v, path);
     }
-}
-
-static struct gui_node *find_child(struct gui_widget *t, struct gui_node *n, const char *name)
-{
-    return gui_tree_child(t, n, name);
 }
 
 void browser_open(const char *dir)
@@ -944,31 +1050,11 @@ void browser_open(const char *dir)
     gui_drives(letters);
     for (i = 0; letters[i]; i++) {
         char *p = malloc(4);
-        struct gui_node *n;
         snprintf(root, sizeof root, "%c:", letters[i]);
         snprintf(p, 4, "%c:\\", letters[i]);
-        n = gui_tree_add(v->tree, NULL, root, icon(IC_DRIVE, 0), p, 1);
-        if (letters[i] == ((dir[0] >= 'a' ? dir[0] - 32 : dir[0]))) {
-            const char *rest = dir + 3, *e;     /* down the folders to dir, each opened */
-            gui_tree_set(v->tree, n);
-            while (*rest) {
-                char part[64];
-                size_t k;
-                struct gui_node *c = NULL;
-                e = strchr(rest, '\\');
-                k = e ? (size_t)(e - rest) : strlen(rest);
-                snprintf(part, sizeof part, "%.*s", (int)k, rest);
-                gui_tree_expand(v->tree, n, 1);
-                c = find_child(v->tree, n, part);
-                if (!c)
-                    break;
-                n = c;
-                gui_tree_set(v->tree, n);
-                rest += k + (e ? 1 : 0);
-            }
-        }
+        gui_tree_add(v->tree, NULL, root, icon(IC_DRIVE, 0), p, 1);
     }
-    go(v, dir);
+    go(v, dir);                                 /* (the tree goes down the folders to dir: tree_follow) */
     v->win->focus = v->list;
     gui_show(v->win, 1);
     say("browser", dir);

@@ -131,6 +131,19 @@ are as they were).
   (Enter, a double click) shows the chosen one in its folder, chosen there. Looked for at once, to two hundred
   found and five thousand looked at ("and there may be more").
 - **Tests:** `files-find` on the host and on Loop A (a wildcard's four, one gone to, a piece of a name).
+- **A paste onto a name that is there already is asked about** (the fourth part): Replace (a file: written
+  over; a folder: what is copied goes into it, over its files of the same names), Skip, Keep Both (the copy
+  gets a free name of DOS's kind, `LETTER~1.TXT`), or Cancel, which stops the paste there; "Do this for all"
+  answers for the rest of the paste. Until now a paste wrote over what was there without a word. A copy into
+  its own folder gets a free name too (it took `~1` whatever was there); a move into its own folder does
+  nothing; a folder is not put into itself.
+- **Select All did nothing** in Files: it sent the list Ctrl+A, and the toolkit's list had none. A list that
+  lets several rows be chosen takes Ctrl+A now (`sdk/gui/vlist.c`).
+- **The tree follows** the folder shown, however it was gone to (the address bar, Back and Forward, Up, a
+  folder opened in the list, Find's Go To); it only did when the tree itself was what was clicked.
+- **Tests:** `files-clash` on the host and on Loop A (two files copied, pasted again: Keep Both for all; again:
+  Skip one, Replace the other; then it deletes what it made: Loop A runs the scripts on one disk, in their
+  names' order, and the ones after it count the folder's files).
 - **Not done yet:** the rest of the plan: views (small icons, a list, resized columns), folders that load as
   they go, long names, operations in the background with their progress, "open with" and apps' entries in the
   context menu, archives as folders, a search that goes on in the background and looks inside files, a

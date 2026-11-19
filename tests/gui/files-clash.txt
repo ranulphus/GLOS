@@ -1,0 +1,44 @@
+# A paste onto names that are there already (apps/files; phase E): asked about, where a paste once wrote over
+# what was there. Two files copied from DOCS into GAMES; pasted again: Keep Both for all (the copies get free
+# names); again: Skip one, Replace the other. Then what the script made is deleted, for the scripts after it
+# (Loop A runs them on one disk).
+run FILES.EXE -browse C:\FM\DOCS
+wait "C:\FM\DOCS - Files"
+key ctrl+a
+key ctrl+c
+key ctrl+l
+type c:\\fm\\games\n
+wait "C:\FM\GAMES - Files"
+key ctrl+v
+pause 1000
+key ctrl+v
+wait "Paste"
+shot clash "Paste"
+key alt+a
+key alt+k
+gone "Paste"
+pause 1000
+shot kept "C:\FM\GAMES - Files" 371 0 169 330
+key ctrl+v
+wait "Paste"
+key alt+s
+pause 1000
+key alt+r
+gone "Paste"
+pause 1000
+key home
+key shift+down
+key shift+down
+key shift+down
+key del
+wait "Delete"
+key alt+y
+gone "Delete"
+pause 1000
+shot clean "C:\FM\GAMES - Files" 371 0 169 330
+key alt+f4
+gone "C:\FM\GAMES - Files"
+expect FILES pasted 2 copied
+expect FILES pasted 1 copied
+expect FILES deleted C:\FM\GAMES\LIST~1.TXT
+expect FILES end 

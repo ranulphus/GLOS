@@ -581,6 +581,15 @@ static int vl_event(struct gui_widget *w, struct gui_ev *e)
         gui_damage(w);
         return 1;
     }
+    if (ctrl && l->multi && e->ch == 1 && n) {
+        int i;                                  /* Ctrl+A: every row chosen; the current row stays where it is */
+        l->nchosen = 0;
+        for (i = 0; i < n; i++)
+            choose(l, id_of(l, i), 1);
+        gui_damage(w);
+        gui_send(w, GUI_ON_SELECT);
+        return 1;
+    }
     switch (e->key) {
     case GUI_K_UP: go(l, l->cur - per_line(l), shift, 0); return 1;
     case GUI_K_DOWN: go(l, l->cur < 0 ? 0 : l->cur + per_line(l), shift, 0); return 1;
