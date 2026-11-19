@@ -1697,6 +1697,33 @@ void gui_code_style(struct gui_widget *w, unsigned style)
     show_caret(c);
 }
 
+/* The next match after what is chosen (GUI_FIND_BACK: the last before it) by the toolkit's matching (gui_match:
+   case, whole words, regular expressions), chosen: 1; 0 none; -1 the expression is wrong. */
+int gui_code_find_ex(struct gui_widget *w, const char *what, unsigned flags, struct gui_found *found)
+{
+    struct code *c = CE(w);
+    size_t len = pt_length(&c->t), a, b;
+    struct gui_found f;
+    char *t;
+    int r;
+    if (!what[0] || !(t = pt_text(&c->t)))
+        return 0;
+    sel_range(c, &a, &b);
+    r = gui_match(what, flags, t, (int)len, (int)(flags & GUI_FIND_BACK ? a : b), &f);
+    free(t);
+    if (r == 1) {
+        c->col_mode = 0;
+        c->anchor = (size_t)f.start, c->caret = (size_t)f.end;
+        show_caret(c);
+        gui_send(w, GUI_ON_SELECT);
+        if (found)
+            *found = f;
+    }
+    return r;
+}
+
+void gui_code_sel(struct gui_widget *w, size_t *from, size_t *to) { sel_range(CE(w), from, to); }
+
 int gui_code_find(struct gui_widget *w, const char *what, int match_case, int forward)    /* found and chosen */
 {
     struct code *c = CE(w);

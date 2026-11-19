@@ -97,8 +97,14 @@ Plan: `docs/v1/apps/notepad.md`. The first of its parts.
   a bare Notepad is an empty one, as the other programs' tests expect.
 - **Tests:** `notepad-find` on the host and on Loop A (two replaced; "the" is not "The" with Match case);
   `notepad-session` on Loop A alone (two files kept and opened again; off again: an empty Notepad).
+- **Find and Replace on the toolkit's dialog** (the fourth part, 2026-11-19), which stays up beside the text:
+  Find next and previous, Replace, Replace all; Match case, **Whole words** and **Regular expressions** (the
+  toolkit's matching, as every app's Find is to have). Notepad's own two dialogs, of the day before, are gone.
+  The editor has a find by those rules for it (`gui_code_find_ex`, and `gui_code_sel` for what is chosen).
+- **Tests:** `notepad-find` anew on the host and on Loop A (two replaced; "the" is not "The"; "start" is not
+  "starts", said in the dialog; `st.rts` found); `notepad` closes the dialog by Esc before F3.
 - **Not done yet:** files dropped on the window; bookmarks; Markdown's colours and a menu to choose a kind;
-  whole words, regular expressions and the results pane, find in files; code pages; large files.
+  the results pane, find in files; code pages; large files.
 
 ## Files (2026-11-18): the browser's toolbar and address bar
 

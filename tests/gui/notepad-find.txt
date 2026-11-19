@@ -1,36 +1,57 @@
-# Notepad's Find and Replace (apps/notepad; phase E, docs/v1/apps/notepad.md): Replace's dialog, every one
-# replaced and counted; Find's with Match case on: "the" is not "The"; Match case off again.
+# Notepad's Find and Replace (apps/notepad; phase E, docs/v1/apps/notepad.md): the toolkit's dialog, which stays
+# up beside the text. Replace all: every "second" replaced and counted. Find with Match case on: "the" is not
+# "The". Whole words: "start" is not "starts", and the dialog says so. A regular expression: st.rts.
 run NOTEPAD.EXE C:\GUI\EDIT.TXT
 wait "EDIT.TXT - Notepad"
 key ctrl+h
-wait "Replace"
-shot find-replace "Replace"
+wait "Find and replace"
+shot find-replace "Find and replace"
 type second
 key tab
 type 2nd
-key enter
+quick alt+a
 pause 1000
-shot find-replaced "Replace"
-key enter
-pause 500
+shot find-replaced "Find and replace"
+key esc
+gone "Find and replace"
 shot find-done "*EDIT.TXT - Notepad"
 key ctrl+home
 key ctrl+f
 wait "Find"
-key ctrl+a
+quick alt+c
+quick alt+w
+quick home shift+end
 type the
-key alt+c
-shot find-case "Find"
 key enter
+pause 500
+shot find-case "Find"
+key esc
 gone "Find"
 shot find-found "*EDIT.TXT - Notepad"
+key ctrl+home
 key ctrl+f
 wait "Find"
-key alt+c
+quick alt+c
+quick alt+o
+quick alt+w
+quick home shift+end
+type start
 key enter
+pause 500
+shot find-words "Find"
+quick alt+o
+quick alt+x
+quick alt+w
+quick home shift+end
+type st.rts
+key enter
+pause 500
+key esc
 gone "Find"
+shot find-regex "*EDIT.TXT - Notepad"
 key alt+f4
 wait "Notepad"
 key alt+n
 gone "*EDIT.TXT - Notepad"
+expect NOTEPAD replaced 2
 expect NOTEPAD end

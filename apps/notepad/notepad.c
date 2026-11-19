@@ -48,7 +48,6 @@ static int numbers, colours = 1, kind_at;      /* View's two; the status bar's s
 static int match_case, session;                /* Find's Match case; View's Keep Session */
 static char home[200];                         /* the program's folder: NOTEPAD.CFG is there (none known: nothing kept) */
 static int ndocs;
-static char what[128];
 static int wrap, last_line = -1, last_col = -1;
 static struct doc *last_doc;
 
@@ -342,83 +341,121 @@ static void session_load(int files)
     fclose(f);
 }
 
-/* Find's and Replace's dialog: what to find (and what to put for it), Match case. 0: cancelled; 1: Find Next
-   (Replace: the next one replaced... all of them: 2). */
-static struct gui_window *fdlg;
-static struct gui_widget *f_what, *f_with, *f_case;
+/* Find and Replace: the toolkit's own dialog (gui_find), which stays up beside the text: Find next and previous,
+   Replace, Replace all; Match case, Whole words, Regular expressions. What is looked for, what is put for it and
+   the three choices are kept in `fr`; the finding is the editor's (gui_code_find_ex, by the toolkit's matching). */
+static struct gui_find fr;
 
-static char f_with_text[128];
-
-static void find_button(struct gui_widget *b, int on)
+/* The next one (back: the one before), round the text's end once: chosen, 1; 0 none; -1 a wrong expression. */
+static int find_step(int back)
 {
-    (void)on;
-    if (b->id == 10 || b->id == 11) {           /* (the fields are read while the dialog is there) */
-        snprintf(what, sizeof what, "%s", gui_get_text(f_what));
-        if (f_with)
-            snprintf(f_with_text, sizeof f_with_text, "%s", gui_get_text(f_with));
-        if (match_case != gui_checked(f_case)) {
-            match_case = gui_checked(f_case);
-            session_save();
-        }
-    }
-    gui_end_modal(fdlg, b->id == 10 ? 1 : b->id == 11 ? 2 : 0);
-}
-
-static int find_dialog(int replace, char *with, size_t room)
-{
-    struct gui_widget *box, *form, *row;
-    int r;
-    fdlg = gui_window(replace ? GUI_T("Replace") : GUI_T("Find"), 300, 0, GUI_W_DIALOG);
-    fdlg->owner = win;
-    box = gui_vbox(fdlg->root, 6, 8);
-    form = gui_form(box);
-    f_what = gui_field(gui_row(form, GUI_T("Fi&nd what:"), NULL), 30);
-    gui_set_text(f_what, what);
-    f_with = NULL;
-    if (replace) {
-        f_with = gui_field(gui_row(form, GUI_T("Re&place with:"), NULL), 30);
-        gui_set_text(f_with, with);
-    }
-    f_case = gui_check(box, GUI_T("Match &case"), match_case);
-    row = gui_hbox(box, 6, 0);
-    gui_space(row, 0, 0);
-    if (replace)
-        gui_button(row, GUI_T("Replace &All"), find_button, 11)->flags |= GUI_DEFAULT;
-    else
-        gui_button(row, GUI_T("&Find Next"), find_button, 10)->flags |= GUI_DEFAULT;
-    gui_button(row, GUI_T("Cancel"), find_button, 12)->flags |= GUI_CANCEL;
-    gui_focus(f_what);
-    r = gui_modal(fdlg);                        /* (which closes it) */
-    if (r && replace)
-        snprintf(with, room, "%s", f_with_text);
-    fdlg = NULL;
+    struct gui_widget *ed = cur()->ed;
+    unsigned flags = fr.flags | (back ? GUI_FIND_BACK : 0);
+    size_t a, b, end = gui_code_length(ed);
+    int r = gui_code_find_ex(ed, fr.what, flags, NULL);
+    if (r != 0)
+        return r;
+    gui_code_sel(ed, &a, &b);
+    gui_code_select(ed, back ? end : 0, back ? end : 0);
+    if ((r = gui_code_find_ex(ed, fr.what, flags, NULL)) != 1)
+        gui_code_select(ed, a, b);
     return r;
 }
 
-static void find_next(void)
+/* What is chosen, if it is a match, replaced: 1. */
+static int replace_here(void)
 {
     struct gui_widget *ed = cur()->ed;
-    int line, col;
-    if (!what[0])
-        return;
-    if (gui_code_find(ed, what, match_case, 1))
-        return;
-    gui_code_where(ed, &line, &col);          /* round from the top again */
-    gui_code_goto(ed, 1, 1);
-    if (!gui_code_find(ed, what, match_case, 1)) {
-        char t[200];
-        gui_code_goto(ed, line, 1);
-        snprintf(t, sizeof t, "\"%s\" isn't there.", what);
-        gui_message(win, GUI_T("Notepad"), t, GUI_MB_OK);
+    struct gui_found m;
+    size_t a, b, n = 0;
+    char *text, with[512];
+    int ok = 0;
+    gui_code_sel(ed, &a, &b);
+    if (!(text = gui_code_text(ed, &n)))
+        return 0;
+    if (gui_match(fr.what, fr.flags, text, (int)n, (int)a, &m) == 1 && (size_t)m.start == a && (size_t)m.end == b
+        && gui_match_replace(fr.with, fr.flags, &m, text, with, sizeof with) >= 0) {
+        gui_code_replace_sel(ed, with);
+        ok = 1;
     }
+    free(text);
+    return ok;
+}
+
+static void find_say(int r)
+{
+    char t[200];
+    if (r == 1) {
+        if (fr.w)
+            gui_find_say(&fr, "");
+        return;
+    }
+    snprintf(t, sizeof t, r < 0 ? GUI_T("That expression is wrong.") : GUI_T("\"%s\" isn't there."), fr.what);
+    if (fr.w)
+        gui_find_say(&fr, t);
+    else
+        gui_message(win, GUI_T("Notepad"), t, GUI_MB_OK);
+}
+
+static void find_on(struct gui_find *f, int todo)
+{
+    struct gui_widget *ed = cur()->ed;
+    char t[80];
+    int n = 0;
+    if (match_case != ((f->flags & GUI_FIND_CASE) != 0)) {      /* (kept, with the session's other choices) */
+        match_case = (f->flags & GUI_FIND_CASE) != 0;
+        session_save();
+    }
+    if (!f->what[0])
+        return;
+    switch (todo) {
+    case GUI_FIND_NEXT:
+    case GUI_FIND_PREV:
+        find_say(find_step(todo == GUI_FIND_PREV));
+        break;
+    case GUI_FIND_REPLACE:                      /* the one chosen, then on to the next */
+        replace_here();
+        find_say(find_step(0));
+        break;
+    case GUI_FIND_ALL: {
+        struct gui_found m;
+        gui_code_select(ed, 0, 0);
+        while (n < 100000 && gui_code_find_ex(ed, f->what, f->flags, &m) == 1) {
+            size_t a, b;
+            if (!replace_here())
+                break;
+            n++;
+            if (m.end == m.start) {             /* (an expression that matched nothing at all: one on, or it
+                                                   would match there for ever) */
+                gui_code_sel(ed, &a, &b);
+                if (b >= gui_code_length(ed))
+                    break;
+                gui_code_select(ed, b + 1, b + 1);
+            }
+        }
+        snprintf(t, sizeof t, GUI_T("%d replaced."), n);
+        gui_find_say(f, t);
+        printf("NOTEPAD replaced %d\n", n);
+        fflush(stdout);
+        break;
+    }
+    }
+}
+
+static void find_open(int replace)
+{
+    fr.replace = replace;
+    fr.on_find = find_on;
+    fr.flags = (fr.flags & ~(unsigned)GUI_FIND_CASE) | (match_case ? GUI_FIND_CASE : 0);
+    gui_find(win, &fr);
 }
 
 static void command(struct gui_window *w, int id)
 {
     struct doc *d = cur();
     struct gui_widget *ed = d->ed;
-    char p[260], with[128], t[200];
-    int n, i;
+    char p[260], t[200];
+    int i;
     (void)w;
     switch (id) {
     case C_NEW:
@@ -447,23 +484,16 @@ static void command(struct gui_window *w, int id)
     case C_DELETE: gui_code_command(ed, GUI_CMD_DELETE); break;
     case C_ALL: gui_code_command(ed, GUI_CMD_ALL); break;
     case C_FIND:
-        if (find_dialog(0, NULL, 0))
-            find_next();
+        find_open(0);
         break;
-    case C_NEXT:
-        if (!what[0] && !find_dialog(0, NULL, 0))
-            break;
-        find_next();
+    case C_NEXT:                                /* (F3: the next one, with nothing to look for yet, asked) */
+        if (!fr.what[0])
+            find_open(0);
+        else
+            find_say(find_step(0));
         break;
     case C_REPLACE:
-        with[0] = 0;
-        if (!find_dialog(1, with, sizeof with) || !what[0])
-            break;
-        gui_code_goto(ed, 1, 1);
-        for (n = 0; gui_code_find(ed, what, match_case, 1); n++)
-            gui_code_replace_sel(ed, with);
-        snprintf(t, sizeof t, GUI_T("%d replaced."), n);
-        gui_message(win, GUI_T("Replace"), t, GUI_MB_OK);
+        find_open(1);
         break;
     case C_GOTO:
         t[0] = 0;

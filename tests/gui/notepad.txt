@@ -9,6 +9,7 @@ key ctrl+f
 wait "Find"
 type second
 key enter
+key esc
 gone "Find"
 shot found "*EDIT.TXT - Notepad"
 key f3

@@ -925,6 +925,11 @@ void gui_code_signature(struct gui_widget *w, const char *text);       /* NULL: 
 void gui_code_style(struct gui_widget *w, unsigned style);
 void gui_code_tabs(struct gui_widget *w, int width);   /* a tab's stops: 4 unless said */
 int gui_code_find(struct gui_widget *w, const char *what, int match_case, int forward);        /* found: chosen */
+int gui_code_find_ex(struct gui_widget *w, const char *what, unsigned flags, struct gui_found *found);
+                                        /* (GUI_FIND_ flags, by gui_match) the next match after what is chosen, or
+                                           with GUI_FIND_BACK the last before it, chosen: 1; 0 none; -1 a wrong
+                                           expression. found (or NULL): where, and its groups */
+void gui_code_sel(struct gui_widget *w, size_t *from, size_t *to);     /* what is chosen: bytes (from == to: the caret) */
 void gui_code_replace_sel(struct gui_widget *w, const char *text);
 int gui_code_command(struct gui_widget *w, int cmd);   /* GUI_CMD_ (cut, copy, paste, delete, all, undo, end) */
 
