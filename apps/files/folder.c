@@ -232,9 +232,10 @@ struct job {
     struct gui_widget *line, *left, *bar;
     char *buf;
     unsigned began;
-    int n, cut, shown;
+    int n, cut, del, shown;             /* (del: a delete: `from` alone, and the counts are of files and folders) */
     volatile int at, ok, counted;       /* the item in hand, the items done well, the count is whole */
     volatile unsigned total_kb, done_kb;
+    unsigned char well[JOB_ITEMS];      /* the items done well, each */
     char from[JOB_ITEMS][260], to[JOB_ITEMS][260];
 };
 
@@ -269,8 +270,13 @@ static int copy_file(struct job *j, const char *from, const char *to)
     fclose(a);
     if (fclose(b) != 0)
         bad = 1;
-    if (bad)
+    if (bad) {
         gui_unlink(to);                         /* (a piece of a file is no copy) */
+    } else {
+        struct gui_dirent st;                   /* the copy is as old as what it was copied from, as DOS's COPY */
+        if (gui_stat(from, &st) == 0)           /* leaves it */
+            gui_set_time(to, st.date, st.time);
+    }
     return bad ? -1 : 0;
 }
 
@@ -294,24 +300,27 @@ static int copy_tree(struct job *j, const char *from, const char *to)
     return bad || job_stopped(j) ? -1 : 0;
 }
 
-static int remove_tree(const char *path)
+static int remove_tree(struct job *j, const char *path)
 {
     struct gui_dirent *e;
     int n, i, bad = 0;
     char a[260];
+    if (j->del)
+        j->done_kb++;
     if (!gui_is_dir(path))
         return gui_unlink(path);
     if ((n = gui_dir_read(path, &e)) < 0)
         return -1;
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < n && !(j->del && job_stopped(j)); i++) {    /* (a move's taking away is not cut short: what
+                                                                   was copied whole goes) */
         gui_path_join(a, sizeof a, path, e[i].name);
-        bad |= remove_tree(a) != 0;
+        bad |= remove_tree(j, a) != 0;
     }
     free(e);
-    return bad ? -1 : gui_rmdir(path);
+    return bad || (j->del && job_stopped(j)) ? -1 : gui_rmdir(path);
 }
 
-/* What there is to copy, in kilobytes (a file's rounded up). */
+/* What there is to copy, in kilobytes (a file's rounded up); to delete: how many files and folders. */
 static void job_count(struct job *j, const char *path, int depth)
 {
     struct gui_dirent st, *e;
@@ -320,10 +329,14 @@ static void job_count(struct job *j, const char *path, int depth)
     if (job_stopped(j))
         return;
     if (!gui_is_dir(path)) {
-        if (gui_stat(path, &st) == 0)
+        if (j->del)
+            j->total_kb++;
+        else if (gui_stat(path, &st) == 0)
             j->total_kb += (st.size + 1023) >> 10;
         return;
     }
+    if (j->del)
+        j->total_kb++;
     if (depth > 24 || (n = gui_dir_read(path, &e)) < 0)
         return;
     for (i = 0; i < n; i++)
@@ -331,7 +344,7 @@ static void job_count(struct job *j, const char *path, int depth)
             gui_path_join(p, sizeof p, path, e[i].name);
             job_count(j, p, depth + 1);
         } else {
-            j->total_kb += (e[i].size + 1023) >> 10;
+            j->total_kb += j->del ? 1 : (e[i].size + 1023) >> 10;
         }
     free(e);
 }
@@ -346,10 +359,13 @@ static void job_work(struct gui_task *t, void *arg)
     j->counted = 1;
     for (i = 0; i < j->n && !job_stopped(j); i++) {
         j->at = i;
-        if (j->cut ? (gui_rename(j->from[i], j->to[i]) == 0
-                      || (copy_tree(j, j->from[i], j->to[i]) == 0 && remove_tree(j->from[i]) == 0))
-                   : copy_tree(j, j->from[i], j->to[i]) == 0)
+        if (j->del ? remove_tree(j, j->from[i]) == 0
+            : j->cut ? (gui_rename(j->from[i], j->to[i]) == 0
+                        || (copy_tree(j, j->from[i], j->to[i]) == 0 && remove_tree(j, j->from[i]) == 0))
+            : copy_tree(j, j->from[i], j->to[i]) == 0) {
+            j->well[i] = 1;
             j->ok++;
+        }
     }
 }
 
@@ -368,7 +384,7 @@ static void job_tick(void *arg)                 /* four times a second while the
                 continue;
             j->shown = 1;
             gui_show(j->win, 1);
-            say("progress", j->cut ? "moving" : "copying");
+            say("progress", j->del ? "deleting" : j->cut ? "moving" : "copying");
         }
         if (done > total)
             done = total;
@@ -419,8 +435,15 @@ static void job_done(struct gui_window *owner, void *arg, int cancelled)
         }
     if (!jobs)
         gui_idle(job_tick, NULL, 0);
-    snprintf(t, sizeof t, "%d %s%s", j->ok, j->cut ? "moved" : "copied", cancelled ? " stopped" : "");
-    say("pasted", t);
+    if (j->del) {
+        int i;
+        for (i = 0; i < j->n; i++)
+            if (j->well[i])
+                say("deleted", j->from[i]);
+    } else {
+        snprintf(t, sizeof t, "%d %s%s", j->ok, j->cut ? "moved" : "copied", cancelled ? " stopped" : "");
+        say("pasted", t);
+    }
     for (v = views; v; v = v->next)             /* (where it wrote and what it took from, shown as they are now) */
         fill(v);
     gui_close(j->win);
@@ -432,7 +455,7 @@ static void job_start(struct job *j)
 {
     struct gui_widget *box, *row;
     j->began = glos_ticks();
-    j->win = gui_window(j->cut ? GUI_T("Moving") : GUI_T("Copying"), 320, 0, GUI_W_DIALOG);
+    j->win = gui_window(j->del ? GUI_T("Deleting") : j->cut ? GUI_T("Moving") : GUI_T("Copying"), 320, 0, GUI_W_DIALOG);
     j->win->user = j;
     j->win->on_close = job_close;
     box = gui_vbox(j->win->root, 6, 8);
@@ -644,10 +667,13 @@ static void command(struct gui_window *w, int id)
         else
             snprintf(t, sizeof t, GUI_T("Delete these %d?"), n);
         if (gui_message(w, GUI_T("Delete"), t, GUI_MB_YESNO) == GUI_YES) {
-            for (i = 0; i < n; i++)
-                if (remove_tree(paths[i]) == 0)
-                    say("deleted", paths[i]);
-            fill(v);
+            struct job *j = calloc(1, sizeof *j);       /* a job's work, as a paste's: its end says what went */
+            if (!j)
+                break;
+            j->del = 1;
+            for (i = 0; i < n && i < JOB_ITEMS; i++)
+                snprintf(j->from[j->n++], sizeof j->from[0], "%s", paths[i]);
+            job_start(j);
         }
         break;
     case C_CLOSE:

@@ -249,8 +249,17 @@ int gui_set_time(const char *path, unsigned short date, unsigned short tm)
     g.tm_min = (tm >> 5) & 63;
     g.tm_sec = (tm & 31) * 2;
     g.tm_isdst = -1;
-    u.actime = u.modtime = mktime(&g);
-    return utime(native(path, buf, sizeof buf), &u);
+    {                                           /* (mktime's zone and utime's own DOS calls are not among the C
+                                                   library's locked ones: in a program with tasks, under its lock) */
+        int r;
+        if (gui_libc_hook)
+            gui_libc_hook(1);
+        u.actime = u.modtime = mktime(&g);
+        r = utime(native(path, buf, sizeof buf), &u);
+        if (gui_libc_hook)
+            gui_libc_hook(0);
+        return r;
+    }
 }
 
 void gui_path_join(char *out, int room, const char *dir, const char *name)
