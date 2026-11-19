@@ -7,6 +7,7 @@
  * by any program, the agent or SFTP, shows without a refresh.
  *
  * Where folders' windows were is kept in FOLDERS.CFG beside FILES.EXE. */
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,7 +44,7 @@ static struct {                         /* where folders' windows were */
 } places;
 
 enum { C_OPEN = 1, C_NEWDIR, C_RENAME, C_DELETE, C_CLOSE, C_CUT, C_COPY, C_PASTE, C_ALL, C_BIG, C_DETAILS, C_REFRESH,
-       C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS, C_PROPS };
+       C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS, C_PROPS, C_FIND };
 
 static void say(const char *what, const char *a)
 {
@@ -270,6 +271,7 @@ static void paste(struct view *v)
 
 static void closing(struct gui_window *w);
 static void properties(struct view *v);
+static void find_files(struct view *v);
 
 /* A name typed (text) as DOS's bytes, in place: false, and said, if DOS's code page hasn't got all of it. */
 static int dos_name(struct gui_window *w, char *name)
@@ -403,6 +405,9 @@ static void command(struct gui_window *w, int id)
     case C_PROPS:
         properties(v);
         break;
+    case C_FIND:
+        find_files(v);
+        break;
     case C_ADDRESS:                             /* the keyboard's way to the address bar */
         if (v->address) {                       /* (its text chosen, as its own Ctrl+A does: what is typed takes
                                                    its place; gui_editor_command is the editor's alone) */
@@ -505,6 +510,8 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
     gui_menu_item(m, GUI_T("&Paste"), C_PASTE, GUI_T("Ctrl+V"));
     gui_menu_sep(m);
     gui_menu_item(m, GUI_T("Select &All"), C_ALL, GUI_T("Ctrl+A"));
+    gui_menu_sep(m);
+    gui_menu_item(m, GUI_T("&Find..."), C_FIND, GUI_T("Ctrl+F"));
     m = gui_menu(bar, GUI_T("&View"));
     gui_menu_item(m, GUI_T("&Large icons"), C_BIG, NULL);
     gui_menu_item(m, GUI_T("&Details"), C_DETAILS, NULL);
@@ -621,6 +628,148 @@ static void properties(struct view *v)
     gui_close(d);
 }
 
+/* ---- search (phase E): files and folders by name, under the folder shown: a name with DOS's wildcards (* and
+   ?), or a piece of a name; what is found is listed with its folder, and Go To shows one in its folder. Looked
+   for at once, to a limit (the plan's search in the background, with its results as they come, is to come). */
+
+#define FOUND_MAX 200
+#define VISIT_MAX 5000
+
+static struct {
+    struct gui_window *win;
+    struct gui_widget *what, *list, *note;
+    char dir[FOUND_MAX][200], name[FOUND_MAX][64];
+    int n, visited, go;
+} fnd;
+
+/* A name against a pattern of * and ?, letters' case apart. */
+static int wild(const char *p, const char *s)
+{
+    for (; *p; p++, s++) {
+        if (*p == '*') {
+            while (p[1] == '*')
+                p++;
+            if (!p[1])
+                return 1;
+            for (; *s; s++)
+                if (wild(p + 1, s))
+                    return 1;
+            return 0;
+        }
+        if (!*s || (*p != '?' && toupper((unsigned char)*p) != toupper((unsigned char)*s)))
+            return 0;
+    }
+    return !*s;
+}
+
+static void find_in(const char *dir, const char *pattern, int depth)
+{
+    struct gui_dirent *e = NULL;
+    int n = gui_dir_read(dir, &e), i;
+    char p[260];
+    for (i = 0; i < n && fnd.n < FOUND_MAX && fnd.visited < VISIT_MAX; i++) {
+        fnd.visited++;
+        if (wild(pattern, e[i].name)) {
+            snprintf(fnd.dir[fnd.n], sizeof fnd.dir[0], "%s", dir);
+            snprintf(fnd.name[fnd.n++], sizeof fnd.name[0], "%s", e[i].name);
+        }
+        if (e[i].dir && depth < 8) {
+            gui_path_join(p, sizeof p, dir, e[i].name);
+            find_in(p, pattern, depth + 1);
+        }
+    }
+    if (n >= 0)
+        free(e);
+}
+
+static void find_button(struct gui_widget *b, int what)
+{
+    struct view *v = b->win->owner ? view_of(b->win->owner) : NULL;
+    char pattern[80], t[100];
+    int i;
+    (void)what;
+    if (b->id == 10 && v) {                     /* Find: under the folder shown */
+        snprintf(pattern, sizeof pattern, "%s", gui_get_text(fnd.what));
+        if (!pattern[0])
+            return;
+        if (!strpbrk(pattern, "*?")) {          /* (a piece of a name: anywhere in it) */
+            snprintf(t, sizeof t, "*%s*", pattern);
+            snprintf(pattern, sizeof pattern, "%s", t);
+        }
+        fnd.n = fnd.visited = 0;
+        find_in(v->dir, pattern, 0);
+        gui_list_clear(fnd.list);
+        for (i = 0; i < fnd.n; i++) {
+            const char *cells[2] = { fnd.name[i], fnd.dir[i] };
+            gui_list_add(fnd.list, cells, NULL, NULL);
+        }
+        snprintf(t, sizeof t, fnd.n == FOUND_MAX || fnd.visited == VISIT_MAX ? GUI_T("%d found, and there may be more.")
+                                                                           : GUI_T("%d found."), fnd.n);
+        gui_set_text(fnd.note, t);
+        if (fnd.n) {
+            gui_list_set(fnd.list, 0);
+            gui_focus(fnd.list);
+        }
+        snprintf(t, sizeof t, "%d %s", fnd.n, gui_get_text(fnd.what));
+        say("found", t);
+    } else if (b->id == 11) {                   /* Go To: the chosen one, in its folder */
+        fnd.go = gui_list_get(fnd.list);
+        if (fnd.go >= 0 && fnd.go < fnd.n)
+            gui_end_modal(fnd.win, 1);
+    } else if (b->id == 12) {
+        gui_end_modal(fnd.win, 0);
+    }
+}
+
+static void find_list_on(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_ACTIVATE) {              /* (Enter or a double click on one: Go To) */
+        fnd.go = gui_list_get(w);
+        if (fnd.go >= 0 && fnd.go < fnd.n)
+            gui_end_modal(fnd.win, 1);
+    }
+}
+
+static void find_files(struct view *v)
+{
+    static const char *const heads[2] = { GUI_N("Name"), GUI_N("In folder") };
+    static const int widths[2] = { 110, 210 };
+    struct gui_widget *box, *row;
+    int r, i;
+    fnd.win = gui_window(GUI_T("Find Files"), 360, 260, GUI_W_DIALOG);
+    fnd.win->owner = v->win;
+    box = gui_vbox(fnd.win->root, 6, 8);
+    gui_grow(box, 1);
+    row = gui_hbox(box, 6, 0);
+    gui_label(row, GUI_T("Named:"));
+    fnd.what = gui_field(row, 24);
+    gui_grow(fnd.what, 1);
+    gui_button(row, GUI_T("&Find"), find_button, 10)->flags |= GUI_DEFAULT;
+    fnd.list = gui_list(box, 2, heads, widths);
+    gui_grow(fnd.list, 1);
+    gui_on(fnd.list, find_list_on, 0);
+    fnd.note = gui_label(box, GUI_T("A name, or a piece of one; * and ? stand for any letters."));
+    row = gui_hbox(box, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("&Go To"), find_button, 11);
+    gui_button(row, GUI_T("Close"), find_button, 12)->flags |= GUI_CANCEL;
+    fnd.n = 0;
+    gui_focus(fnd.what);
+    r = gui_modal(fnd.win);
+    gui_close(fnd.win);
+    fnd.win = NULL;
+    if (r != 1)
+        return;
+    if (v->browser)                             /* the one chosen, shown in its folder */
+        go(v, fnd.dir[fnd.go]);
+    else
+        folder_open(fnd.dir[fnd.go]);
+    for (i = 0; v->browser && i < v->n; i++)
+        if (!strcmp(v->ents[(size_t)gui_list_user(v->list, i)].name, fnd.name[fnd.go]))
+            gui_list_set(v->list, i);
+    say("went", fnd.name[fnd.go]);
+}
+
 /* The address bar: Enter goes to the folder typed (or chosen from the ones kept); what is no folder is said. */
 static void address_on(struct gui_widget *w, int what)
 {
@@ -680,6 +829,8 @@ static struct view *new_view(const char *dir, int browser)
             { 0, NULL, NULL, NULL },
             { C_BIG, GUI_N("&Large icons"), "grid", GUI_N("Large icons") },
             { C_DETAILS, GUI_N("&Details"), "list", GUI_N("Details") },
+            { 0, NULL, NULL, NULL },
+            { C_FIND, GUI_N("&Find..."), "find", GUI_N("Find files (Ctrl+F)") },
         };
         struct gui_widget *bar = gui_toolbar(v->win), *row;
         size_t k;

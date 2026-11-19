@@ -1,0 +1,31 @@
+# Search in the browser (apps/files; phase E, docs/v1/apps/files.md): Find Files, a name with a wildcard: what is
+# found under the folder shown, with its folders; Go To (here Enter on one) shows the chosen one in its folder;
+# a piece of a name finds too, under the folder shown now.
+run FILES.EXE -browse C:\FM
+wait "C:\FM - Files"
+key ctrl+f
+wait "Find Files"
+shot find-empty "Find Files"
+type *.txt
+key enter
+pause 500
+shot find-txt "Find Files"
+key down
+key enter
+gone "Find Files"
+wait "C:\FM\DOCS - Files"
+shot find-went "C:\FM\DOCS - Files" 371 0 169 330
+key ctrl+f
+wait "Find Files"
+type let
+key enter
+pause 500
+shot find-piece "Find Files"
+key esc
+gone "Find Files"
+key alt+f4
+gone "C:\FM\DOCS - Files"
+expect FILES found 4 *.txt
+expect FILES went LIST.TXT
+expect FILES found 1 let
+expect FILES end 

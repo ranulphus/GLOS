@@ -126,9 +126,15 @@ are as they were).
   Rename; New Folder, Properties. In the folders' own windows too.
 - **Tests:** `files-props` on the host and on Loop A (a folder's, a file's, and the same dialog from the context
   menu; the dates and attributes are the copy's, and masked).
+- **Find Files** (the third part; Edit's Find..., Ctrl+F, the toolbar): files and folders by name under the
+  folder shown: a name with `*` and `?`, or a piece of one. What is found is listed with its folder; Go To
+  (Enter, a double click) shows the chosen one in its folder, chosen there. Looked for at once, to two hundred
+  found and five thousand looked at ("and there may be more").
+- **Tests:** `files-find` on the host and on Loop A (a wildcard's four, one gone to, a piece of a name).
 - **Not done yet:** the rest of the plan: views (small icons, a list, resized columns), folders that load as
   they go, long names, operations in the background with their progress, "open with" and apps' entries in the
-  context menu, archives as folders, search, a folder's size counted in the background, thumbnails.
+  context menu, archives as folders, a search that goes on in the background and looks inside files, a
+  folder's size counted in the background, thumbnails.
 
 ## What is next
 
