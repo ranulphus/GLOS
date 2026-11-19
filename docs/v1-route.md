@@ -299,7 +299,8 @@ two command sets that don't match). Before phase C, because the Terminal is one 
     software renderer elsewhere (its CPU floor to be measured); in a window, or full screen as an app
     (`docs/v1/fullscreen-apps.md`).
   - A page each in phase A's manner (what it does, what it needs, its CPU floor, how it is tested) before either
-    is built.
+    is built: `docs/v1/apps/skiing.md` and `docs/v1/apps/hovercraft.md` (written 2026-11-19). Their names and
+    the choices at each page's end are the owner's.
 
 ### H. Hardware compatibility (to be planned after an audit)
 
