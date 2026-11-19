@@ -2097,6 +2097,11 @@ def shell_case(profile, card):
             and "asmsdoswrites" not in out
         t.send("conin mode\r")
         checks["full"] = t.expect("has the PC's own screen") and t.expect("C:\\TEST>")
+        # A line the program is part way along when it takes the screen is not cut in two by that notice (CONIN
+        # midmode: a piece of a line, the mode set, a wait, the line's end): the piece is taken off the terminal
+        # and written again under the notice ("MODE do", the notice, "ne" in a Terminal, one gate, 2026-11-18).
+        t.send("conin midmode\r")
+        checks["full-mid"] = t.expect("now.)\nMID done\n") and t.expect("C:\\TEST>")
         # GLOS's own commands, the shell's too: by their names here, and by GLOS's old ones; one that fails says so
         # in the exit code; and what is typed while one runs waits for it.
         t.send("ps\r")

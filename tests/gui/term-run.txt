@@ -18,6 +18,8 @@ type c:\\test\\conin code 3 || echo failed with %errorlevel%\n
 pause 3000
 type c:\\test\\conin mode\n
 pause 6000
+type c:\\test\\conin midmode\n
+pause 7000
 type echo back\n
 pause 1000
 type exit\n
@@ -29,5 +31,6 @@ expect TERM| typed into it
 expect TERM| LINE typed into it
 expect TERM| failed with 3
 expect TERM| MODE done
+expect TERM| MID done
 expect TERM| back
 expect TERM end

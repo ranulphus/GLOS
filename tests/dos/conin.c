@@ -14,6 +14,8 @@
  *   CONIN cls           INT 10h 06h over the whole screen, then "CLS done"
  *   CONIN b800          "GLOS" written into the text screen at B800:0000, then "B800 done"
  *   CONIN mode          INT 10h 0003h (a mode set), then "MODE done"
+ *   CONIN midmode       "MID " (a piece of a line), the mode set, half a second, then "done": the line its
+ *                       terminal has must be "MID done", whole, whatever the terminal is told meanwhile
  *   CONIN port          the CRTC's cursor registers read (3D4h, 3D5h), then "PORT done"
  *   CONIN wait N        N seconds, a dot a second (DOS output): "WAIT done"
  *   CONIN code N        ends with exit code N
@@ -130,6 +132,15 @@ int main(int argc, char **argv)
         r.x.ax = 0x0003;
         int86(0x10, &r, &r);
         say("MODE done\r\n");
+    } else if (!strcmp(argv[1], "midmode")) {
+        volatile unsigned long far *tick = (volatile unsigned long far *)MK_FP(0x40, 0x6C);
+        unsigned long t0;
+        say("MID ");
+        r.x.ax = 0x0003;
+        int86(0x10, &r, &r);
+        for (t0 = *tick; *tick - t0 < 9;)
+            ;
+        say("done\r\n");
     } else if (!strcmp(argv[1], "port")) {
         unsigned char hi;
         outp(0x3D4, 0x0E);

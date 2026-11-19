@@ -103,6 +103,10 @@ struct shsess {
     volatile u8 stopped;                /* Ctrl+C was typed to a program: the shell is told when it asks (h_stop) */
     u8 out_cr;                          /* the last character written to the terminal was a carriage return */
     u8 out_mid;                         /* ... was neither that nor a line feed: the terminal is part way along a line */
+    u8 mid_bad, nmid;                   /* that line so far (mid), while it is plain letters and short: the session
+                                           can take it off the terminal and write it again under a notice of its
+                                           own (job_turn); mid_bad: it is not to be had (a control code, too long) */
+    char mid[96];
     char dir[80];                       /* the folder it starts in, where its opener said one ("": DOS's own) */
     u8 fg;                              /* the program that runs is a GLOS_INIT_TERMINAL app: the terminal is its,
                                            bytes each way as they are (shsess_term_*) */
@@ -180,6 +184,12 @@ static void term_text(struct shsess *s, const char *t, int n, int lf)
             term_bytes(s, b, k);
             k = 0;
         }
+        if (c == '\r' || c == '\n')             /* (the line under way: kept while it can be written again) */
+            s->nmid = s->mid_bad = 0;
+        else if (c < 0x20 || c == 0x7F || s->nmid == sizeof s->mid)
+            s->mid_bad = 1;
+        else if (!s->mid_bad)
+            s->mid[s->nmid++] = (char)c;
         if (c < 0x80) {
             if (lf && c == '\n' && (i ? t[i - 1] != '\r' : !s->out_cr))    /* (a program's CR and LF may come
                                                    apart, a character at a time) */
@@ -888,11 +898,23 @@ static void job_turn(struct shsess *s)
                                                    its end, as ssh-shell-bf6 did one run in three, 2026-11-14) */
         static const char full[] = "(The program has the PC's own screen and keyboard now.)\r\n";
         s->job_full = 1;
-        if (s->out_mid)                         /* (on a line of its own: the program's output may be part way
-                                                   along one. "MODE done(The program has...", native-486dx2's
-                                                   term-run in one gate, 2026-11-16) */
-            term_text(s, "\r\n", 2, 1);
-        term_text(s, full, (int)sizeof full - 1, 1);
+        /* On a line of its own: the program's output may be part way along one ("MODE done(The program has...",
+           native-486dx2's term-run in one gate, 2026-11-16). And a line it is part way along is not cut in two
+           by the notice ("MODE do", the notice, "ne": the same script in another gate, 2026-11-18): the piece
+           written is taken off the terminal, the notice written, and the piece again under it, for the program
+           to go on from. A piece that can't be written again (control codes in it, or a long one) ends there. */
+        if (s->out_mid && !s->mid_bad && s->nmid && s->nmid < s->cols) {
+            char piece[sizeof s->mid];
+            int k = s->nmid;
+            memcpy(piece, s->mid, (size_t)k);
+            term_text(s, "\r\x1b[K", 4, 0);
+            term_text(s, full, (int)sizeof full - 1, 1);
+            term_text(s, piece, k, 1);
+        } else {
+            if (s->out_mid)
+                term_text(s, "\r\n", 2, 1);
+            term_text(s, full, (int)sizeof full - 1, 1);
+        }
     }
     if (!gone && st == GLOS_JS_APP && s->tty && !s->fg) {     /* an app now: one run at a terminal has this one,
                                                    and the shell waits for its end as for a DOS program */
@@ -1841,6 +1863,8 @@ u32 shsess_term_write(struct shsess *s, const u8 *d, u32 n)    /* what there is 
     if (n) {
         s->out_cr = d[n - 1] == '\r';
         s->out_mid = d[n - 1] != '\r' && d[n - 1] != '\n';
+        s->nmid = 0;                            /* (an app's own bytes: a line of them is not written again) */
+        s->mid_bad = s->out_mid;
         s->kick(s->kick_arg);
     }
     return n;

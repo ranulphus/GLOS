@@ -510,10 +510,12 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
 
 - **Two cases that failed once under a gate's load on devserver and not in isolation** (the ninth gate,
   2026-11-18; three runs each here afterwards, all passing):
-  - `native-486dx2-vbe-8`, `term-run`: the full-screen test program's line came into the Terminal as "MODE do"
-    for "MODE done", and nothing of what the shell wrote after it was in the Terminal's last log, though the
-    shell ran the commands typed and ended well. A program's captured output cut short, or the Terminal's
-    reading of it stopped, after a session gave the screen back on a slow, loaded PC: not known which.
+  - `native-486dx2-vbe-8`, `term-run`: "MODE do" for "MODE done" in the Terminal. **Mended 2026-11-19:** it was
+    the session's own notice ("The program has the PC's own screen and keyboard now"), written in the middle
+    of the program's line when the session's thread saw the program take the screen between two of its
+    characters: "MODE do", the notice, "ne". The piece of the line is now taken off the terminal and written
+    again under the notice (`kernel/shell/shsess.c`, `job_turn`). (First written down here as output lost;
+    it was not: the case's log had gone before that was checked.)
   - `control-bf6-g200`: the Control Panel's display-mode trial went back by itself ("mode back") where the
     script meant to keep it, and the script's last keys then missed: no "CONTROL end". The trial's wait is
     fifteen seconds of the PC's own time; the script's key came later than that.
