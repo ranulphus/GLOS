@@ -50,9 +50,15 @@ A Sound Blaster 16's DSP, version 4.05, with the older cards' commands under it:
 
 What the program plays is turned into 16-bit stereo at the rate GLOS's mixer plays at, once a period of the
 mixer's (`vsb_mix`): between two of the program's frames, the mixer's frame is the part of the way from one to
-the other that its moment is. The program's bytes are taken from its DMA channel a few at a time (64), so a
-block's interrupt comes when its last bytes are all but played; the mixer's period (about 12 ms) is the grain
-of it all.
+the other that its moment is. The mixer's period (about 12 ms) is the grain of it all.
+
+**The program's bytes are taken a period before they sound:** each period the card has in hand what that
+period plays and as much again. So a block's interrupt comes about a period before its last frame is heard,
+and a program that asks for its next block from that interrupt (single blocks one after another: how many
+games play, auto-initialised blocks being the Sound Blaster 2.0's and later) is heard with no gap where one
+block ends and the next begins. It holds while the program answers its interrupt within a period and its
+blocks are no shorter than one; the DMA's count is that period ahead of the ear. A block asked for at another
+rate, after a pause, or once the one before has played out starts afresh.
 
 ## The DMA channels (`vdma.c`)
 
@@ -101,18 +107,28 @@ out (a master clear becomes a cleared flip-flop and the other channels' masks).
 - **Host:** `vdma_test` and `vsb_test` (the port sequences a game sends; samples out checked to the number).
 - **Loop A, the audio suite's `vsb` cases:** `SBTEST` (`tests/dos/sbtest.c`, real mode) finds the card by
   `BLASTER` and plays it as a game does: one 8-bit block by a time constant, auto-initialised blocks and their
-  end, the SB16's 16 bits by the high DMA channel, each in its time. On an SB16, on a Crystal chip's codec
+  end, eight single blocks one after another from the interrupt's handler, the SB16's 16 bits by the high DMA
+  channel, each in its time. On an SB16, on a Crystal chip's codec
   (where `BLASTER` is GLOS's own), on the 486; and with `[sound] virtual = off` against 86Box's own SB16, where
   the same cases pass with the same timings: the test itself is right; and in direct mode, where it has the
   real card too. The suite's older cases (`audio_case`) run both ways: the virtual card on (the mixer plays from
   GLOS's start, keeps the card through a session, `BLASTER` is the virtual card's) and off (as before).
+- **Loop A, the sdlwin suite's full-screen cases** (`sdlsess_case`): DOS-GL's SDLBEEP with SDL's own Sound
+  Blaster driver (`SDL_AUDIO_DRIVER=soundblaster`) plays through the virtual card, 16 bits at 44100 a second
+  in auto-initialised blocks, with none of SDL's chunks short; beside it the same program through GLOS's
+  mixer itself (API 2.5), which is what SDL chooses when nothing is said.
+- **Real programs, by the DOS-GL session (2026-11-19, Loop A):** PrBoom-plus's timedemo full-screen on SDL's
+  Sound Blaster driver has its sound throughout; 12% of SDL's chunks are short with the virtual card and with
+  86Box's own alike (the timedemo keeps SDL's mixing waiting, not the card). Half-Life's own Sound Blaster code
+  finds the card (16 bits, 44100 a second, blocks of 32768 bytes) and plays for minutes.
 
 ## What is next
 
-1. **Real programs:** the ports' sound runs on Loop A (Half-Life, PrBoom with its music: RetroGPU's tests),
-   SDL's soundblaster driver, and the owner's games: each sound library drives a Sound Blaster its own way.
+1. **Real programs:** the owner's games on a bench (each sound library drives a Sound Blaster its own way:
+   Miles, HMI, DMX, id's), and a game with FM music.
 2. **What they will want:** ADPCM, perhaps; the DMA's count moving between the mixer's periods (it moves a
-   period at a time now); a program's volume changes heard at once.
+   period at a time now, a period ahead); blocks shorter than a period; a rate above the mixer's brought down
+   with a filter (it is taken between samples now: what lies above half the mixer's rate folds back).
 3. **FM** for cards with no FM chip: a synthesiser (ymfm is the first candidate: BSD, C++, to be ported or
    run outside the kernel). **MIDI** at 330h into GLOS's own MIDI out.
 4. **The bench:** a game with sound on a card that is no Sound Blaster (the Pentium III's CMI8738, once it

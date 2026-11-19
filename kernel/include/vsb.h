@@ -19,6 +19,8 @@ struct vsb_host {
     void (*irq)(void *ctx);                     /* its interrupt line, raised (an edge) */
 };
 
+#define VSB_Q 4096                              /* frames in hand at the most (a power of two) */
+
 struct vsb {
     struct vsb_host h;
     u8 irq, dma8, dma16;                        /* as BLASTER says them: I, D, H (H may be D's) */
@@ -30,19 +32,25 @@ struct vsb {
     u8 irq8, irq16;                             /* asked for, not yet acknowledged (the mixer's register 82h) */
     /* what plays */
     u8 active, paused, auto_init, stop_after;   /* stop_after: auto-initialise ends with the block under way */
+    u8 xfer;                                    /* the program's bytes are still to come (active without it: what
+                                                   is in hand plays out) */
     u8 wide, stereo, sign, silence;             /* 16 bits; two channels; signed; a block of silence (80h) */
     u32 rate;                                   /* frames a second, as it plays */
     u32 set_rate;                               /* as the program set it: 41h's, or the time constant's (bytes a second) */
     u32 block, left;                            /* a block's bytes; those of this block still to come */
     u32 block_set;                              /* 48h's */
-    /* from the program's rate to the mixer's: between two frames, 16.16 of the way from cur to next */
-    s16 cur[2], next[2];
+    /* The program's frames in hand, taken from its DMA channel a period of the mixer's before they sound:
+       a block's interrupt comes while its last frames still play, and a program that asks for its next block
+       from that interrupt is heard without a gap. From the program's rate to the mixer's: 16.16 of the way
+       from the first frame in hand to the one after it. */
+    s16 q[VSB_Q][2];
+    u32 q_at, q_n;
     u32 frac;
-    u8 primed;                                  /* cur is a frame of the program's */
-    u8 next_ok;                                 /* ... and next the one after it (else none has come yet: cur is held) */
-    u8 buf[64];                                 /* the DMA's bytes not yet played: few, so that a block's
-                                                   interrupt comes when its last bytes are all but played */
+    u8 buf[64];                                 /* the DMA's bytes not yet made frames */
     u32 buf_n, buf_at;
+    u32 begun, fresh;                           /* blocks the program has asked for, and those of them that began
+                                                   afresh, not on from the one before (never put back: vsbdev.c's
+                                                   log) */
     /* the mixer chip */
     u8 mix_index, mix[256];
     u32 played;                                 /* frames given to the mixer since the reset (the suites') */

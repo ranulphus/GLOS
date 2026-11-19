@@ -7,7 +7,8 @@
  * The cases: found (BLASTER, the DSP's reset and version), ident (the identification and test bytes, the mixer
  * chip's interrupt and DMA registers), irq (an interrupt asked for comes on BLASTER's line), single (one 8-bit
  * block by a time constant: its interrupt after as long as the block takes), auto (auto-initialised blocks: an
- * interrupt a block, the DMA's count moving, and no more after the end is asked for), sb16 (16 bits, two
+ * interrupt a block, the DMA's count moving, and no more after the end is asked for), chain (single blocks one
+ * after another, each asked for in the interrupt of the one before, as many games play), sb16 (16 bits, two
  * channels, by the high DMA channel, where BLASTER has one). The exit code is the failures. */
 #include <conio.h>
 #include <dos.h>
@@ -21,10 +22,22 @@ static volatile unsigned irqs;
 static int wide_ack;
 static int pass, fails;
 
+static volatile unsigned chain_left;            /* single blocks still to ask for from the handler */
+static unsigned long chain_phys;
+static void dsp_write(unsigned char b);
+static void dma8_setup(unsigned long phys, unsigned bytes, int auto_init);
+
 static void __interrupt __far handler(void)
 {
     irqs++;
     inp(base + (wide_ack ? 0xF : 0xE));         /* the card's interrupt acknowledged */
+    if (chain_left) {                           /* the next block of 1024 bytes: the channel again, and the command */
+        chain_left--;
+        dma8_setup(chain_phys, 1024, 0);
+        dsp_write(0x14);
+        dsp_write(0xFF);
+        dsp_write(0x03);
+    }
     if (irq >= 8)
         outp(0xA0, 0x20);
     outp(0x20, 0x20);
@@ -245,6 +258,23 @@ int main(void)
     wait_irqs(99, 8);
     sprintf(line, "ticks=%u moved=%u irqs=%u then=%u", took, moved, after, irqs);
     check("auto", took >= 8 && took <= 30 && moved && after >= 4 && after <= 7 && irqs == after, line);
+
+    /* Eight single blocks of 1024 bytes one after another, each asked for in the interrupt of the one before:
+       eight interrupts in the time eight blocks take, 0.75 seconds, about 14 ticks; and no ninth. */
+    dsp_write(0x40);
+    dsp_write(165);
+    chain_phys = phys;
+    dma8_setup(phys, 1024, 0);
+    irqs = 0;
+    chain_left = 7;
+    dsp_write(0x14);
+    dsp_write(0xFF);
+    dsp_write(0x03);
+    took = wait_irqs(8, 60);
+    for (i = 0; i < 3; i++)
+        wait_irqs(99, 2);
+    sprintf(line, "irqs=%u ticks=%u", irqs, took);
+    check("chain", irqs == 8 && took >= 11 && took <= 18, line);
 
     /* The SB16's 16 bits, two channels, signed, at 22050 a second, by the high DMA channel: blocks of 1024
        frames, eight interrupts in about 7 ticks. */

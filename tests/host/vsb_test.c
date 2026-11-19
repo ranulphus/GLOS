@@ -1,11 +1,14 @@
 /* Host test for GLOS's virtual Sound Blaster (kernel/vm/vsb.c) with the virtual 8237 under it (vdma.c), as the
  * port sequences a game's sound code sends: how a card is found (the reset, the version, the identification
  * and test bytes, an interrupt asked for, the mixer's interrupt and DMA registers); a single 8-bit block by a
- * time constant; a rate half the mixer's, heard between its samples; auto-initialised blocks, their
+ * time constant; single blocks one after another, each asked for from the interrupt of the one before, with no
+ * gap between them; a rate half the mixer's, heard between its samples; auto-initialised blocks, their
  * interrupts, and their end asked for; the SB16's 16-bit stereo; pause; the Pro's stereo; the mixer's volumes;
  * a block of silence; a DMA channel masked under it; a reset while it plays.
  *
- * "Memory" is an array the DMA channels point into; the mixer's period is a call of vsb_mix. */
+ * "Memory" is an array the DMA channels point into; the mixer's period is a call of vsb_mix. The card takes
+ * the program's bytes a period before they sound (what a period plays, and as much again, is in hand): a
+ * block's interrupt comes that much before its last frame is heard. */
 #include <stdio.h>
 #include <string.h>
 #include "vdma.h"
@@ -96,7 +99,8 @@ static int mix(u32 frames, u32 rate)
 int main(void)
 {
     static const struct vsb_host host = { 0, dma, irq };
-    u32 i, before;
+    u32 i, before, fresh0;
+    int n, gaps;
 
     vdma_reset(&d, 1 << 1 | 1 << 5, 1 << 1);
     vsb_init(&s, &host, 5, 1, 5);
@@ -149,7 +153,8 @@ int main(void)
     mixer(0x04, 0xFF);
 
     /* One block of a hundred bytes, 8 bits, by a time constant: as loud as it gets, on both sides; its
-       interrupt when its last bytes have been taken; then nothing. */
+       interrupt when its last bytes have been taken (a period before they sound: with the first fifty frames,
+       here); then nothing. */
     irqs = 0;
     memset(mem + 0x24000, 0xFF, 100);
     dma_setup(1, 0, 0x24000, 100);
@@ -159,13 +164,55 @@ int main(void)
     dsp(99);
     dsp(0);
     CHECK(vsb_playing(&s) && s.rate == 10989);
-    CHECK(mix(50, 10989) == 1 && s.played == 50 && irqs == 0);
+    CHECK(mix(50, 10989) == 1 && s.played == 50 && irqs == 1 && vsb_playing(&s));
     CHECK(acc[0] == 127 * 256 && acc[1] == 127 * 256 && acc[98] == 127 * 256 && acc[100] == 0);
     CHECK(mix(60, 10989) == 1 && s.played == 100 && irqs == 1 && !vsb_playing(&s));
     CHECK(acc[98] == 127 * 256 && acc[100] == 0);
     CHECK(mixer_get(0x82) == 0x01 && !vdma_running(&d, 1));
     vsb_in(&s, 0xE);
     CHECK(mix(10, 10989) == 0);
+
+    /* Single blocks of fifty bytes one after another, each asked for when the one before has had its
+       interrupt, as many games play (the handler runs after the mixer's period, and sets the channel and the
+       block up again): every period of thirty-two frames is whole, with no gap where a block ends. */
+    reset();
+    rd();
+    mixer(0x22, 0xFF);
+    mixer(0x04, 0xFF);
+    irqs = 0;
+    before = s.begun;                           /* (the blocks asked for are counted from the card's start) */
+    fresh0 = s.fresh;
+    memset(mem + 0x24000, 0xFF, 50);
+    dma_setup(1, 0, 0x24000, 50);
+    dsp(0x40);
+    dsp(165);
+    dsp(0x14);
+    dsp(49);
+    dsp(0);
+    for (n = 0, gaps = 0; n < 20; n++) {
+        int was = irqs;
+        if (mix(32, 10989) != 1)
+            gaps++;
+        for (i = 0; i < 32; i++)
+            if (acc[i * 2] != 127 * 256 || acc[i * 2 + 1] != 127 * 256)
+                gaps++;
+        if (irqs != was) {
+            vsb_in(&s, 0xE);
+            dma_setup(1, 0, 0x24000, 50);
+            dsp(0x14);
+            dsp(49);
+            dsp(0);
+        }
+    }
+    CHECK(gaps == 0 && s.played == 20 * 32);
+    CHECK(irqs >= 13 && irqs <= 14 && s.begun - before == (u32)irqs + 1);       /* (640 frames played, 65 more in hand
+                                                                                   at the most) */
+    CHECK(s.fresh - fresh0 == 1);               /* (one sound: the blocks after the first went on from the one before) */
+    /* ... and with no next block asked for, what is in hand plays out and it ends. */
+    before = s.played;
+    for (n = 0; n < 4; n++)
+        mix(32, 10989);
+    CHECK(!vsb_playing(&s) && s.played > before && s.played <= before + 100 && s.played % 50 == 0);
 
     /* Half the mixer's rate: every other frame of the mixer's is half-way between two of the program's. */
     reset();
@@ -203,13 +250,14 @@ int main(void)
     dsp(0);
     dsp(0x1C);
     CHECK(mix(160, 11025) == 1 && s.played == 160);
-    CHECK(irqs == 6);                           /* (five blocks played; a frame is looked ahead: the sixth's bytes are in hand) */
+    CHECK(irqs == 10);                          /* (five blocks played, and as much again and a frame in hand:
+                                                   ten blocks' bytes taken, and a byte of the eleventh) */
     CHECK(vsb_playing(&s) && vdma_running(&d, 1));
     dsp(0xDA);
     before = s.played;
-    CHECK(mix(100, 11025) == 1 && !vsb_playing(&s) && irqs == 7);
-    CHECK(s.played - before == 64);             /* (the sixth block, in hand, and the seventh, the one under way
-                                                   for a program that has had six interrupts; no eighth) */
+    CHECK(mix(100, 11025) == 1 && vsb_playing(&s) && irqs == 11);       /* (the eleventh, under way, to its end) */
+    CHECK(mix(100, 11025) == 1 && !vsb_playing(&s) && irqs == 11);
+    CHECK(s.played - before == 192);            /* (what was in hand, and the rest of the eleventh; no twelfth) */
 
     /* The SB16's 16 bits, two channels, signed, by channel 5. */
     reset();
@@ -228,7 +276,7 @@ int main(void)
     dsp(63);                                    /* 64 words a block */
     dsp(0);
     CHECK(mix(40, 22050) == 1 && acc[0] == 1000 && acc[1] == -2000 && acc[78] == 1000 && acc[79] == -2000);
-    CHECK(irqs == 1 && mixer_get(0x82) == 0x02);     /* (a block is 32 frames: one whole, and part of the next) */
+    CHECK(irqs == 2 && mixer_get(0x82) == 0x02);     /* (a block is 32 frames: 81 are in hand, two blocks whole) */
     vsb_in(&s, 0xF);
     CHECK(mixer_get(0x82) == 0x00);
 

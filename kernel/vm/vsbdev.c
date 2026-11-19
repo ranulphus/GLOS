@@ -36,7 +36,8 @@ static struct {
     struct vsb sb;
     struct vdma dma;
     char blaster[32];
-    u32 irqs, starts, peak, frames;             /* since the session before ended (the log's) */
+    u32 irqs, starts, said, peak, frames;       /* since the session before ended (the log's): interrupts,
+                                                   blocks asked for, sounds begun and said in the log, ... */
 } v;
 
 /* The program's bytes under a DMA channel (interrupt time). A buffer above the VM's first megabyte is not
@@ -145,9 +146,10 @@ void vsbdev_out(u16 port, u8 val)
         if (fm_port(reg) >= 0) {
             outb((u16)fm_port(reg), val);
         } else {
-            int was = vsb_playing(&v.sb);
+            u32 was = v.sb.begun, fresh = v.sb.fresh;
             vsb_out(&v.sb, reg, val);
-            began = !was && vsb_playing(&v.sb);
+            v.starts += v.sb.begun - was;
+            began = v.sb.fresh != fresh;        /* (not a block that goes on from the one before it) */
         }
     } else {
         struct vdma_real real;
@@ -157,7 +159,7 @@ void vsbdev_out(u16 port, u8 val)
             outb(real.port[i], real.val[i]);
     }
     irq_restore(f);
-    if (began && v.starts++ < 8)                /* (the first few of a session: what kind of sound a program plays) */
+    if (began && v.said++ < 8)                  /* (the first few sounds a session begins: what it plays, how) */
         kprintf("GLOS-VSB play rate=%u bits=%u channels=%u block=%u auto=%u\n", v.sb.rate, v.sb.wide ? 16 : 8,
                 v.sb.stereo ? 2 : 1, v.sb.block, v.sb.auto_init);
 }
@@ -195,6 +197,6 @@ void vsbdev_session_end(void)
     f = irq_save();
     vsb_init(&v.sb, &host, v.irq, v.dma8, v.dma16);
     vdma_reset(&v.dma, (u8)(1u << v.dma8 | (v.dma16 >= 5 ? 1u << v.dma16 : 0)), 0);     /* (its channels masked) */
-    v.starts = v.irqs = v.peak = v.frames = 0;
+    v.starts = v.said = v.irqs = v.peak = v.frames = 0;
     irq_restore(f);
 }

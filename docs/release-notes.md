@@ -12,6 +12,9 @@ in its `docs/milestones-*.md`.
 - **`BLASTER`** is set for the programs GLOS starts where DOS's environment has none (A220 I5 D1 H5).
 - **The real card stays the mixer's** through a session. `[sound] virtual = off` (and a restart) gives
   programs the real card as before.
+- **Single blocks one after another**, each asked for from the interrupt of the one before (how many older
+  games play), are heard without a gap between them: the card takes a program's bytes a moment before they
+  sound.
 - **FM music** goes to the card's real FM chip as before; a card with none has no FM music yet. Recording and
   ADPCM are not done. `docs/v1/vsb.md` has the whole of it.
 

@@ -4596,7 +4596,8 @@ def vsb_case(profile, vcard, card, sound="sb16", virtual=True):
     """The virtual Sound Blaster (kernel/vm/vsb.c, vdma.c, vsbdev.c; docs/v1/vsb.md): SBTEST (tests/dos/sbtest.c)
     finds a Sound Blaster by BLASTER and plays it as a DOS game does, in a session: the reset and version, the
     identification, an interrupt asked for, one 8-bit block by a time constant, auto-initialised blocks and
-    their end, the SB16's 16 bits by the high DMA channel; every case in its time. With the virtual card (the
+    their end, single blocks one after another from the interrupt's handler, the SB16's 16 bits by the high DMA
+    channel; every case in its time. With the virtual card (the
     rule) GLOS's mixer plays it all on whatever card it has (an SB16, a Crystal chip's codec) and keeps that
     card through the session; GLOS's log says what was played, how loud. With [sound] virtual = off the program
     has 86Box's own SB16, and the same cases pass: the test itself is right. And with the virtual card on but
@@ -4617,7 +4618,7 @@ def vsb_case(profile, vcard, card, sound="sb16", virtual=True):
         m = len(agent.log())
         rc, o, _ = agent.ssh("C:\\TEST\\SBTEST.EXE", timeout=240)
         cases = re.findall(r"SBTEST case=(\S+) ok=(\d) ?([^\r\n]*)", o)
-        checks["run"] = rc == 0 and {"found", "ident", "irq", "single", "auto", "sb16"} <= {c for c, k, w in cases} \
+        checks["run"] = rc == 0 and {"found", "ident", "irq", "single", "auto", "chain", "sb16"} <= {c for c, k, w in cases} \
             and all(k == "1" for c, k, w in cases)
         if not checks["run"]:
             info += " rc=%d %s" % (rc, " | ".join("%s (%s)" % (c, w) for c, k, w in cases if k != "1"))
@@ -4630,10 +4631,11 @@ def vsb_case(profile, vcard, card, sound="sb16", virtual=True):
             checks["said"] = "GLOS-VSB on blaster=\"A220 I5 D1 H5 T6\"" in agent.log() \
                 and "GLOS-VSB play rate=10989 bits=8 channels=1 block=4096 auto=0" in t \
                 and "GLOS-VSB play rate=22050 bits=16 channels=2 block=4096 auto=1" in t
-            # three sounds; an interrupt asked for and a dozen blocks' ends; over a second of frames; as loud as
-            # the square waves are (the 8-bit one's 112 steps of 256: 28672)
-            checks["played"] = bool(end) and int(end.group(1)) == 3 and int(end.group(2)) >= 14 \
-                and int(end.group(3)) > 22050 and 24000 <= int(end.group(4)) <= 28672
+            # eleven blocks asked for (the single one, the auto-initialised ones' start, the eight in a row, the
+            # SB16's start); an interrupt asked for and a score of blocks' ends; over a second and a half of
+            # frames; as loud as the square waves are (the 8-bit one's 112 steps of 256: 28672)
+            checks["played"] = bool(end) and int(end.group(1)) == 11 and int(end.group(2)) >= 22 \
+                and int(end.group(3)) > 33000 and 24000 <= int(end.group(4)) <= 28672
             if end:
                 info += " played=%s peak=%s" % (end.group(3), end.group(4))
             checks["kept"] = "GLOS-SB stop" not in t        # (the real card stayed the mixer's through the session)

@@ -98,29 +98,36 @@ static void dsp_reset(struct vsb *s)
     s->out_n = s->out_at = 0;
     s->speaker = 0;
     s->irq8 = s->irq16 = 0;
-    s->active = s->paused = s->auto_init = s->stop_after = s->silence = 0;
+    s->active = s->xfer = s->paused = s->auto_init = s->stop_after = s->silence = 0;
     s->set_rate = 22050;
     s->block_set = 1;
     s->buf_n = s->buf_at = 0;
-    s->primed = s->next_ok = 0;
+    s->q_n = s->q_at = 0;
     s->frac = 0;
     s->played = 0;
     push(s, 0xAA);
 }
 
-/* A block begins: `bytes` of it to the interrupt, at the rate set, frames a second. */
+/* A block begins: `bytes` of it to the interrupt, at the rate set, frames a second. While the block before
+   it still plays (asked for from that one's interrupt, at the same rate) it goes on from that one's last frame:
+   what is in hand is kept. */
 static void start(struct vsb *s, int wide, int sign, int stereo, int auto_init, u32 bytes, u32 rate)
 {
+    rate = rate < 1000 ? 1000 : rate > 96000 ? 96000 : rate;
+    if (!s->active || s->paused || rate != s->rate) {
+        s->q_n = s->q_at = 0;
+        s->frac = 0;
+        s->fresh++;
+    }
     s->wide = (u8)wide, s->sign = (u8)sign, s->stereo = (u8)stereo;
     s->auto_init = (u8)auto_init;
     s->stop_after = s->silence = 0;
     s->block = s->left = bytes ? bytes : 1;
-    s->rate = rate < 1000 ? 1000 : rate > 96000 ? 96000 : rate;
-    s->active = 1;
+    s->rate = rate;
+    s->active = s->xfer = 1;
     s->paused = 0;
     s->buf_n = s->buf_at = 0;
-    s->primed = s->next_ok = 0;
-    s->frac = 0;
+    s->begun++;
 }
 
 /* How many bytes follow a command. */
@@ -309,20 +316,19 @@ static void block_end(struct vsb *s)
     if (s->auto_init && !s->stop_after)
         s->left = s->block;
     else
-        s->auto_init = s->stop_after = 0;       /* (left stays 0: what is in hand is played, then it stops) */
+        s->auto_init = s->stop_after = s->xfer = 0;     /* (left stays 0: what is in hand is played, then it stops) */
 }
 
-/* The next frame the program plays, as 16 bits signed, left and right: 0 if there is none now (the transfer
-   has ended: s->active is 0 then; or the DMA channel is masked, and it may go on later). */
-static int frame(struct vsb *s, s16 *f)
+/* The next frame the program plays, as 16 bits signed, left and right: 0 if there is none now (the transfer's
+   bytes have all come: s->xfer is 0 then; or the DMA channel is masked, and it may go on later). No more of
+   the program's bytes are taken than `most` frames want. */
+static int frame(struct vsb *s, s16 *f, u32 most)
 {
     u32 fb = (s->wide ? 2u : 1u) * (s->stereo ? 2u : 1u), ch;
     const u8 *p;
     if (s->silence) {
-        if (!s->left) {
-            s->active = 0;
+        if (!s->left)
             return 0;
-        }
         f[0] = f[1] = 0;
         if (!--s->left)
             block_end(s);
@@ -332,6 +338,8 @@ static int frame(struct vsb *s, s16 *f)
         u32 keep = s->buf_n - s->buf_at, want = sizeof s->buf - keep, got;
         memmove(s->buf, s->buf + s->buf_at, keep);
         s->buf_at = 0, s->buf_n = keep;
+        if (want > most * fb - keep)
+            want = most * fb - keep;
         if (want > s->left)
             want = s->left;
         got = want && s->h.dma ? s->h.dma(s->h.ctx, s->wide ? s->dma16 : s->dma8, s->buf + keep, want) : 0;
@@ -341,11 +349,8 @@ static int frame(struct vsb *s, s16 *f)
         s->left -= got;
         if (got && !s->left)
             block_end(s);
-        if (s->buf_n < fb) {
-            if (!s->left)                       /* (a single block, all played) */
-                s->active = 0;
+        if (s->buf_n < fb)
             return 0;
-        }
     }
     p = s->buf + s->buf_at;
     for (ch = 0; ch < (s->stereo ? 2u : 1u); ch++) {
@@ -369,43 +374,51 @@ static int frame(struct vsb *s, s16 *f)
 
 int vsb_mix(struct vsb *s, s32 *acc, u32 frames, u32 rate)
 {
-    u32 step, i, gl, gr;
+    u32 step, i, gl, gr, take, want, ahead;
     if (!vsb_playing(s) || !rate || rate > 65535)
         return 0;
     step = ((s->rate / rate) << 16) + ((s->rate % rate) << 16) / rate;  /* (16.16, in 32 bits: the remainder is
                                                                            less than the mixer's rate, under 65536) */
     gl = (u32)gain5[s->mix[0x30] >> 3] * gain5[s->mix[0x32] >> 3] >> 8;
     gr = (u32)gain5[s->mix[0x31] >> 3] * gain5[s->mix[0x33] >> 3] >> 8;
+    /* The program's frames this period takes, and as many again, in hand before it plays: a period ahead. */
+    take = ((step >> 8) * frames + 0xFF) >> 8;
+    want = take * 2 + 1;
+    if (want > VSB_Q)
+        want = VSB_Q;
+    ahead = s->q_n > (s->frac >> 16) ? s->q_n - (s->frac >> 16) : 0;
+    while (ahead < want && s->q_n < VSB_Q) {
+        if (!frame(s, s->q[(s->q_at + s->q_n) & (VSB_Q - 1)], want - ahead))
+            break;
+        s->q_n++;
+        ahead++;
+    }
     for (i = 0; i < frames; i++) {
+        const s16 *a, *b;
         s32 f, l, r;
-        if (!s->primed) {                       /* the first frame */
-            if (!frame(s, s->cur))
-                break;
-            s->primed = 1;
-            s->next_ok = 0;
-        }
-        if (!s->next_ok) {                      /* the frame after it, to go between; none yet: cur is held */
-            s->next_ok = (u8)frame(s, s->next);
-            if (!s->next_ok)
-                s->next[0] = s->cur[0], s->next[1] = s->cur[1];
-        }
-        while (s->frac >= 0x10000 && s->next_ok) {      /* on to the frames this moment lies between */
-            s->cur[0] = s->next[0], s->cur[1] = s->next[1];
+        while (s->frac >= 0x10000 && s->q_n > 1) {      /* on to the frames this moment lies between */
+            s->q_at = (s->q_at + 1) & (VSB_Q - 1);
+            s->q_n--;
             s->frac -= 0x10000;
-            s->next_ok = (u8)frame(s, s->next);
-            if (!s->next_ok)
-                s->next[0] = s->cur[0], s->next[1] = s->cur[1];
         }
-        if (s->frac >= 0x10000)                 /* past the last frame there is: its end, or the DMA channel has */
-            break;                              /* nothing for it now (masked): it waits */
+        if (!s->q_n || s->frac >= 0x10000)      /* none yet, or past the last frame there is: its end, or the DMA */
+            break;                              /* channel has nothing for it now (masked): it waits */
+        a = s->q[s->q_at];
+        b = s->q_n > 1 ? s->q[(s->q_at + 1) & (VSB_Q - 1)] : a;        /* (the last there is: held) */
         f = (s32)((s->frac & 0xFFFF) >> 1);     /* (fifteen bits of the way: two frames a whole swing apart, times
                                                    sixteen bits, would not fit in thirty-two) */
-        l = s->cur[0] + (((s->next[0] - s->cur[0]) * f) >> 15);
-        r = s->cur[1] + (((s->next[1] - s->cur[1]) * f) >> 15);
+        l = a[0] + (((b[0] - a[0]) * f) >> 15);
+        r = a[1] + (((b[1] - a[1]) * f) >> 15);
         acc[i * 2] += (l * (s32)gl) >> 8;
         acc[i * 2 + 1] += (r * (s32)gr) >> 8;
         s->frac += step;
         s->played++;
     }
-    return i != 0;                              /* (at a transfer's end s->active went 0 with its last frame's fetch) */
+    if (!s->xfer && (!s->q_n || (s->q_n == 1 && s->frac >= 0x10000))) {    /* the transfer's last frame has had
+                                                                              its time: it has ended */
+        s->q_n = 0;
+        s->frac = 0;
+        s->active = 0;
+    }
+    return i != 0;
 }
