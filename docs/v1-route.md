@@ -286,6 +286,20 @@ two command sets that don't match). Before phase C, because the Terminal is one 
 - **Disk Tools:** floppy images read and written (IMG/IMA), disks formatted, a disk's image to a file, backup to and
   restore from an SFTP server.
 - **Help and a welcome tour:** GLOS's user guide in a viewer, and a first-start tour.
+- **Two games of GLOS's own** (the owner, 2026-11-19): GLOS comes with games that need nobody's licensed files.
+  The ports all need their games' data, and Fifth Wheel and Echoes are projects with timelines of their own, too
+  big to ride with a release. Both are original games in a genre, with their own names, pictures, sounds and
+  courses, not copies of the games that inspired the wish.
+  - **A downhill skiing game, in 2D:** the slope scrolls under a skier who steers between trees, rocks and
+    gates; a free run for distance and style, and a slalom against the clock. An app on the toolkit's canvas:
+    any card GLOS has a desktop on, a 486 enough; the keys, the mouse or a pad.
+  - **A hovercraft arena game, in 3D, for a LAN:** craft that slide and bump round walled arenas, a team game of
+    flags carried home; alone against the computer's craft, or PCs against each other over the network (GLOS's
+    UDP sockets, API 2.2, the game found by a broadcast). On DOS-GL: the card's engine where there is one, the
+    software renderer elsewhere (its CPU floor to be measured); in a window, or full screen as an app
+    (`docs/v1/fullscreen-apps.md`).
+  - A page each in phase A's manner (what it does, what it needs, its CPU floor, how it is tested) before either
+    is built.
 
 ### H. Hardware compatibility (to be planned after an audit)
 
