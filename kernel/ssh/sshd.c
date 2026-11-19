@@ -1657,6 +1657,14 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         } else {
             panic("asked", 0);
         }
+    } else if (!strcmp(cmd, "glos stuck")) {    /* (the suites': a thread that never lets go, for the scheduler's
+                                                   watch to find after half a minute. /SELFTEST alone) */
+        if (!(vm.bi->flags & BI_F_SELFTEST)) {
+            say(ch, 1, "glos stuck: only under GLOS /SELFTEST\n");
+            ssh_chan_exit(ch, 2);
+        } else {
+            net_stuck_test();
+        }
     } else if (!strcmp(cmd, "glos gdb")) {
         char t[160];
         gdbp_arm(wake_ssh);

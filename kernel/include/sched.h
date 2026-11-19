@@ -83,6 +83,7 @@ void preempt_disable(void);
 void preempt_enable(void);
 
 void sched_tick(void);                  /* every kernel tick, from the clock's IRQ */
+void sched_watch(struct trapframe *tf); /* ... and after it: a kernel thread that never lets go is a panic */
 void sched_trap_exit(struct trapframe *tf);     /* the end of an IRQ or a trap from V86 */
 void sched_report(void);                /* GLOS-SCHED lines */
 void sched_panic_report(void);          /* GLOS-PANIC thread= lines */

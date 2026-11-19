@@ -44,6 +44,7 @@ int net_run(void (*fn)(void *arg), void *arg, int wait);       /* fn on the net 
 int net_cable(u32 role, u32 com, u32 baud);     /* the cable link set (role 0: off) while GLOS runs: 0, uart_open()'s
                                                    error, or -4: no network thread */
 void net_kick(void);                    /* the net thread to take a turn now (output waiting), from any context */
+void net_stuck_test(void);              /* the suites' (glos stuck, under /SELFTEST): the net thread never lets go again */
 int net_up(void);                       /* a card, and an address from DHCP */
 int net_resolve(const char *name, unsigned char ip[4], u32 ms);  /* a name's IPv4 address: 0, or -1 */
 int net_lookup_start(const char *name);  /* a lookup begun, not waited for: its number, or -1 ... */

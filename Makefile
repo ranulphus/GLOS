@@ -147,6 +147,8 @@ host-test-run:
 	  && build/host/cp_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Itests/host/devstub -Ikernel/include -Iinclude -o build/host/dev_test \
 	  tests/host/dev_test.c kernel/drv/dev.c && build/host/dev_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Itests/host/ne2kstub -Ikernel/include -Iinclude -o build/host/ne2k_test \
+	  tests/host/ne2k_test.c kernel/drv/ne2k.c && build/host/ne2k_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -o build/host/keymap_test tests/host/keymap_test.c \
 	  && build/host/keymap_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Isdk/gui -o build/host/vt_test tests/host/vt_test.c sdk/gui/vt.c \

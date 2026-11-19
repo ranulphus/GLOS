@@ -506,9 +506,17 @@ static void eth_up(void)
 
 /* ---- the thread */
 
+static volatile u8 stuck_test;                  /* glos stuck (the suites', under /SELFTEST): this thread goes round
+                                                   for ever from its next turn, for the scheduler's watch to find */
+void net_stuck_test(void)
+{
+    stuck_test = 1;
+    net_kick();
+}
+
 static void net_thread(void *arg)
 {
-    u32 ms, deadline;
+    u32 ms, deadline, rested = timer_ticks();
     (void)arg;
     lwip_init();
     if (nic0)                                   /* (a PC with no card GLOS drives has the cable link alone) */
@@ -525,10 +533,22 @@ static void net_thread(void *arg)
             ms = 60000;
         deadline = timer_ticks() + (ms * 1024 + 999) / 1000 + 1;
         cli();
-        if (!pending)
+        if (!pending) {
             thread_wait(&netq, deadline);
+            rested = timer_ticks();
+        }
         pending = 0;
         sti();
+        if ((s32)(timer_ticks() - rested) > 100) {      /* a tenth of a second with something to do at every turn
+                                                           (a flood of frames, a card that asks without end):
+                                                           this thread outranks every other, so it lets them
+                                                           have a turn. The card's ring may fill meanwhile:
+                                                           what cannot be kept up with is lost either way. */
+            thread_sleep_until(timer_ticks() + 10);
+            rested = timer_ticks();
+        }
+        while (stuck_test)
+            ;
         if (nic0) {
             nic0->service(nic0);
             cli();

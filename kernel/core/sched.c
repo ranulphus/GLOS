@@ -485,6 +485,47 @@ void sched_tick(void)
         need_resched = 1;
 }
 
+/* A thread of the kernel's that never lets go. Two ways of it, each for half a minute of ticks on end:
+   - the urgent class has the CPU at every tick while a thread of the classes below stands ready (the urgent
+     class goes first, always: one of its threads that goes round for ever stops all the rest, though other
+     urgent threads still have their short turns between);
+   - one thread at every tick, each in the kernel's own code (not the VM's or an app's), with no switch at all
+     and another thread ready (one that will not be switched from).
+   Nothing that works does either. The urgent class's work is short, the network's thread rests when it has
+   run long (net.c), the other classes take turns. It is a loop that will not end (a driver believing a card
+   that says the same thing for ever), and the PC stood still with no word, the keyboard dead (the 486 bench,
+   2026-11-18 and 19: the NE2000's receive ring). A panic names the thread and the place. Code that runs with
+   interrupts off is not seen from here: no tick comes. */
+#define STUCK (30u * 1024)
+
+void sched_watch(struct trapframe *tf)
+{
+    static struct thread *who;
+    static u32 switches, same, starved;
+    if (!current || current == &idle_thread) {
+        who = 0;
+        same = starved = 0;
+        return;
+    }
+    if (current->prio == PRIO_URGENT && (rq_head[PRIO_NORMAL] || rq_head[PRIO_BULK]))
+        starved++;
+    else
+        starved = 0;
+    if ((tf->eflags & EFLAGS_VM) || (tf->cs & 3) || current != who || n_switches != switches
+        || !(rq_head[PRIO_URGENT] || rq_head[PRIO_NORMAL] || rq_head[PRIO_BULK])) {
+        who = current;
+        switches = n_switches;
+        same = 0;
+    } else {
+        same++;
+    }
+    if (same < STUCK && starved < STUCK)
+        return;
+    kprintf("GLOS-SCHED stuck thread=%s class=%u same=%u starved=%u eip=%p\n", current->name ? current->name : "?",
+            current->prio, same, starved, tf->eip);
+    panic("thread-stuck", tf);
+}
+
 /* A switch only where the interrupted code may lose the CPU: V86 mode, or a
    thread that had interrupts on (never a trap path, which runs with them
    off), and not inside a preempt_disable() section. */

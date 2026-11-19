@@ -3233,26 +3233,32 @@ def sess_kill(profile, boot):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
-def panic_case(profile, card):
+def panic_case(profile, card, how="asked"):
     """A panic's last words at the PC (kernel/arch/cpu.c, 2026-11-19: the 486 bench stood dead twice with no
     serial cable and nothing to say why). Asked for under GLOS /SELFTEST (glos panic), the log has its line,
     the PC answers no more, and its speaker sounds two notes every seven seconds: 86Box's recording has their
-    880 Hz. The line is on the text screen too: the screenshots in out/panic-TAG are for the eye."""
+    880 Hz. The line is on the text screen too: the screenshots in out/panic-TAG are for the eye.
+    how "stuck": a thread of the kernel's that never lets go (glos stuck: the network's, which outranks every
+    other, goes round for ever) is found by the scheduler's watch after half a minute and is a panic that names
+    it (kernel/core/sched.c): what stood still with no word, the bench's NE2000 driver in its receive ring."""
     import time
-    tag = "%s-%s" % (profile, card)
+    tag = "%s-%s%s" % (profile, card, "" if how == "asked" else "-" + how)
+    why = "asked" if how == "asked" else "thread-stuck"
     agent = Agent("panic-" + tag, profile, card, ["--sound", "sb16", "--wav", "--shots", "100,130",
         "--cmd", "SERSAY HX-START panic", "--cmd", "C:\\TEST\\GLOS.EXE /SELFTEST", "--cmd", "SERSAY HX-DONE 0"],
-        timeout=150)
+        timeout=150 if how == "asked" else 480)
     checks = {"listen": agent.listening()}
     try:
         try:
-            agent.ssh("glos panic", timeout=20)
+            agent.ssh("glos panic" if how == "asked" else "glos stuck", timeout=20)
         except subprocess.TimeoutExpired:
             pass
         t0 = time.time()
-        while time.time() - t0 < 30 and "GLOS-PANIC why=asked" not in agent.log():
+        while time.time() - t0 < (30 if how == "asked" else 360) and "GLOS-PANIC why=" + why not in agent.log():
             time.sleep(1)
-        checks["said"] = "GLOS-PANIC why=asked" in agent.log()
+        checks["said"] = "GLOS-PANIC why=" + why in agent.log()
+        if how == "stuck":
+            checks["named"] = bool(re.search(r"GLOS-SCHED stuck thread=net class=0 same=\d+ starved=\d+ eip=", agent.log()))
         try:
             checks["stopped"] = agent.ssh("glos ver", timeout=20)[0] != 0
         except subprocess.TimeoutExpired:
@@ -10095,6 +10101,7 @@ def main():
         res += matrix(sess_kill, combos, a.jobs)
         res += matrix(sess_agent, [c for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
         res += matrix(panic_case, [c for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
+        res += matrix(panic_case, [c + ("stuck",) for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "dpmi":
         res = matrix(dpmi, combos, a.jobs) + matrix(dpmiconf, combos, a.jobs) + matrix(lazy, combos, a.jobs)

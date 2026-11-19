@@ -45,6 +45,7 @@ static void rtc_irq(struct trapframe *tf)
     if (c & 0x40) {                             /* PF: a periodic interrupt */
         ticks++;
         sched_tick();
+        sched_watch(tf);
     } else {
         spurious_c++;
     }

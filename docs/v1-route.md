@@ -563,6 +563,19 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   a panic is heard and, on a text screen, read at the PC (below). To do when the bench is back: a mode-set loop
   under GLOS with the log followed over SSH, for a rate; the same under plain DOS; a serial cable on it if one
   can be had.
+  **What the afternoon found.** The owner put the serial cable on the bench. 130 mode sets and ten restarts of
+  GLOS went through (`MODELOOP`), and thirty runs of the triangle test: the mode set is not it. At 16:17 the
+  bench stood still again, idle at GLOS's prompt, with nothing on the serial port and no notes from the
+  speaker: frozen and silent, the owner said, the Num Lock key dead. Its answers to multicast questions had
+  stopped two minutes before the rest. So: no panic, the kernel going round somewhere, the network first. The
+  NE2000 driver's receive routine believed any frame header whose next page lay in the ring, in a loop with
+  no end: a header that names its own page keeps it there for ever, in the thread that outranks all others.
+  `tests/host/ne2k_test.c` shows it on a model of the card, and the bench is the one PC with that card. Mended
+  (`kernel/drv/ne2k.c`): the header checked against its own length, the loop bounded, the ring begun again with
+  a line in the log; and the scheduler's watch makes any thread that never lets go a panic with its name.
+  **Not yet proved** to be what the bench had: that is the line `GLOS-NET ne2000 ring restart` in its serial
+  log one day, where the bench would have stood still. The three earlier stops (two idle at the prompt, one
+  at the triangle test's mode set) fit it: each came at no particular moment.
 
 - **id's QUAKE.EXE 1.06 halts GLOS on bench-g400** (2026-11-14, found by the DOS-GL session; the owner: later).
   Started under GLOS with no `-mem`, on a PC where GLOS's DPMI host offers it about 403 MB, it prints "Locked 1

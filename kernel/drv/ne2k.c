@@ -47,6 +47,7 @@
 static struct nic ne;
 static u8 frame[ETH_MAX + 6];
 static int tx_busy;
+static u32 restarts;                    /* the times the ring was begun again for what was found in it */
 
 static u8 rd(u8 reg) { return inb((u16)(ne.base + reg)); }
 static void wr(u8 reg, u8 v) { outb((u16)(ne.base + reg), v); }
@@ -163,11 +164,17 @@ static int ne_send(struct nic *n, const void *f, u32 len)
     (void)n;
     if (len > ETH_MAX)
         return -1;
-    for (spin = 0; tx_busy && spin < 200000; spin++)    /* the last frame is still going */
+    for (spin = 0; tx_busy && spin < 200000; spin++) {  /* the last frame is still going */
         if (rd(ISR) & (ISR_PTX | ISR_TXE)) {
             wr(ISR, ISR_PTX | ISR_TXE);
             tx_busy = 0;
+        } else if (!(rd(CR) & 0x04)) {          /* (the transmitter stands idle: its interrupt was taken with
+                                                   another's, or the card was stopped under the frame. Without
+                                                   this look every later frame waited the whole count and was
+                                                   refused) */
+            tx_busy = 0;
         }
+    }
     if (tx_busy)
         return -1;
     memcpy(frame, f, len);
@@ -186,11 +193,12 @@ static int ne_send(struct nic *n, const void *f, u32 len)
     return 0;
 }
 
-/* Receive-buffer overflow: the DP8390's recovery sequence. */
-static void overflow(void)
+/* The ring begun again, empty: the DP8390's recovery sequence for a receive-buffer overflow, which stops the
+   card (a frame it was sending is lost with it: the transmitter is free again), puts the ring's two pointers
+   at its start and starts the card. */
+static void ring_reset(void)
 {
     u32 n;
-    ne.overruns++;
     wr(CR, 0x21);
     for (n = 0; n < 2000; n++)
         (void)rd(ISR);
@@ -204,12 +212,49 @@ static void overflow(void)
     wr(CR, 0x22);
     wr(ISR, ISR_OVW);
     wr(TCR, 0x00);
+    tx_busy = 0;
 }
 
+static void overflow(void)
+{
+    ne.overruns++;
+    ring_reset();
+}
+
+/* What was found in the ring is no frame's: the ring begun again, and a line in the log (the first few times,
+   then every 256th). */
+static void ring_restart(const char *why, u32 page, u32 curr, const u8 *hdr)
+{
+    ne.rx_errors++;
+    if (restarts++ < 8 || !(restarts & 255))
+        kprintf("GLOS-NET ne2000 ring restart why=%s page=%02x curr=%02x header=%02x.%02x.%02x.%02x times=%u\n", why, page,
+                curr, hdr[0], hdr[1], hdr[2], hdr[3], restarts);
+    ring_reset();
+}
+
+/* The page a frame's header must name as the next frame's: the page after those its own length fills, as the
+   DP8390 counts them (the frame's first page, one more, and the length's high byte), or the one after that
+   (cards and emulators differ by the four bytes of the CRC); round the ring's end. */
+static int next_ok(u32 page, u32 named, u32 len)
+{
+    u32 expect = page + 1 + (len >> 8);
+    if (expect >= RX_STOP)
+        expect -= RX_STOP - RX_START;
+    return named == expect || named == (expect + 1 >= RX_STOP ? RX_START : expect + 1);
+}
+
+/* The frames the card has for us, from the ring. Each has the card's own header before it: its state, the
+   page of the next frame, its length. A real DP8390 now and then leaves a header that is not one (the status
+   byte never written, a ring gone round under load, noise on an old bus; 86Box's never does): it is believed
+   only if its next page is the one its own length ends at, and one turn takes no more frames than four rings
+   full (a card that fills it faster than that is not being kept up with anyway). Otherwise the ring is begun
+   again. This loop believed any header whose next page lay in the ring:
+   one that named its own page, or pages behind it, kept it going round for ever, in the network's thread,
+   which outranks every other: the PC stood still with no word (the 486 bench, 2026-11-18 and 19). */
 static void receive(void)
 {
-    u8 hdr[4];
-    u32 next, curr, len, at, first;
+    u8 hdr[4] = { 0, 0, 0, 0 };
+    u32 next, curr, len, at, first, taken = 0;
     for (;;) {
         wr(CR, 0x62);
         curr = rd(CURR);
@@ -219,12 +264,20 @@ static void receive(void)
             next = RX_START;
         if (next == curr)
             return;
+        if (curr < RX_START || curr >= RX_STOP) {       /* (the card's own pointer is nowhere in its ring) */
+            ring_restart("pointer", next, curr, hdr);
+            return;
+        }
+        if (taken++ >= 4 * (RX_STOP - RX_START)) {      /* (round and round, the card's pointer never met) */
+            ring_restart("endless", next, curr, hdr);
+            return;
+        }
         if (dma_read(next << 8, hdr, 4) != 0)
             return;
         len = (u32)(hdr[2] | (hdr[3] << 8));
-        if (hdr[1] < RX_START || hdr[1] >= RX_STOP || len < 4 + 14 || len > ETH_MAX + 4 + 4) {
-            ne.rx_errors++;                     /* a broken header: start the ring again */
-            overflow();
+        if (hdr[1] < RX_START || hdr[1] >= RX_STOP || len < 4 + 14 || len > ETH_MAX + 4 + 4
+            || !next_ok(next, hdr[1], len)) {
+            ring_restart("header", next, curr, hdr);
             return;
         }
         len -= 4;

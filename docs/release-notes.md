@@ -4,6 +4,21 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## An NE2000 card can no longer freeze the PC (2026-11-19)
+
+- **The NE2000 driver believed whatever stood in the card's receive ring.** A real card now and then leaves a
+  frame header there that is not one (86Box's never does), and one that named its own page kept the driver
+  going round for ever, in the network's thread, which outranks every other: the PC stood still, no network,
+  the keyboard dead, no word in the log. The 486 bench did so three times in two days, idle and at work. Now a
+  header is believed only if the next page it names is where its own length ends, a turn has an end, and what
+  fails that begins the ring again with a line in the log (`GLOS-NET ne2000 ring restart why=...`).
+- **A frame being sent when the ring was begun again** (after an overflow too) left the transmitter taken for
+  ever: every later frame waited a third of a second and was refused. It is free again now.
+- **A thread of the kernel's that never lets go is a panic** that names it (`GLOS-SCHED stuck thread=...`),
+  after half a minute in which no other thread had a turn: whatever driver does this next is found by its
+  name. And the network's thread rests a moment when it has had something to do for a tenth of a second on
+  end (a flood of frames), so that the rest of GLOS goes on.
+
 ## A panic is heard and read at the PC (2026-11-19)
 
 - **When GLOS's kernel stops itself** (a panic: it cannot go on safely) the PC's speaker sounds two short notes,
