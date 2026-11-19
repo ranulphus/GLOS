@@ -114,7 +114,8 @@ HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:ke
               clip_test:kernel/app/clipstore.c dnd_test:kernel/wm/dnd.c notes_test:kernel/wm/notes.c \
               assoc_test:sdk/config/assoc.c sched_test:sdk/config/sched.c kdata_test:kernel/core/kdata.c \
               mixgain_test:kernel/drv/mixgain.c fm_test:kernel/drv/fm.c midiq_test:kernel/drv/midiq.c \
-              regex_test:sdk/gui/regex.c piece_test:sdk/gui/piece.c popmenu_test:kernel/wm/popmenu.c
+              regex_test:sdk/gui/regex.c piece_test:sdk/gui/piece.c popmenu_test:kernel/wm/popmenu.c \
+              vdma_test:kernel/vm/vdma.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
 host-test-run:
@@ -122,6 +123,8 @@ host-test-run:
 	@set -e; for t in $(HOST_TESTS); do n=$${t%%:*}; src=$${t#*:}; \
 	  $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/$$n tests/host/$$n.c $$src; \
 	  build/host/$$n; done
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/vsb_test \
+	  tests/host/vsb_test.c kernel/vm/vsb.c kernel/vm/vdma.c && build/host/vsb_test
 	@$(HOST_CC) -m32 -O2 -g -Wall -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -o build/host/crypto_kat \
 	  tests/host/crypto_kat.c $(TINYSSH_SRCS) && build/host/crypto_kat
 	@$(HOST_CC) -m32 -O2 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint \
