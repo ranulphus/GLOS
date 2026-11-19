@@ -430,6 +430,35 @@ int main(void)
         pd_free(d);
     }
 
+    d = pd_new(3, 1, PAPER);                    /* adjustments: all of it, a part of it; clear stays clear */
+    pd_dot(d, 0, 0, RED, 1);
+    pd_dot(d, 2, 0, 0x204060, 1);
+    pd_clean(d);
+    pd_adjust(d, PD_INVERT, 0, 0, 0, 0, 2, 1);
+    pd_flatten(d, 0, 0, 3, 1);
+    is("inverted: red is cyan", (long)pd_get(d, 0, 0), 0x00FFFF);
+    is("inverted: white is black", (long)pd_get(d, 1, 0), 0x000000);
+    is("outside the part: as it was", (long)pd_get(d, 2, 0), 0x204060);
+    is("what changed: the part", d->x0 * 10 + d->x1, 2);
+    pd_adjust(d, PD_INVERT, 0, 0, -5, -5, 99, 99);
+    pd_adjust(d, PD_GREY, 0, 0, 0, 0, 3, 1);
+    pd_flatten(d, 0, 0, 3, 1);
+    is("black and white: red's brightness", (long)pd_get(d, 0, 0), 0x4D4D4D);
+    is("black and white: white stays", (long)pd_get(d, 1, 0), 0xFFFFFF);
+    pd_adjust(d, PD_BRIGHT, 20, 0, 0, 0, 1, 1);
+    pd_flatten(d, 0, 0, 3, 1);
+    is("brighter by a fifth", (long)pd_get(d, 0, 0), 0x808080);
+    pd_adjust(d, PD_BRIGHT, 0, 100, 2, 0, 1, 1);
+    pd_flatten(d, 0, 0, 3, 1);
+    is("twice the contrast", (long)pd_get(d, 2, 0), ((long)pd_get(d, 2, 0) & 0xFF) * 0x010101);
+    pd_adjust(d, PD_SEPIA, 0, 0, 1, 0, 1, 1);
+    pd_flatten(d, 0, 0, 3, 1);
+    is("sepia: white is cream", (long)pd_get(d, 1, 0), 0xFFFFEF);
+    d->layer[0].px[0] = 0;
+    pd_adjust(d, PD_INVERT, 0, 0, 0, 0, 1, 1);
+    is("clear stays clear", (long)d->layer[0].px[0], 0);
+    pd_free(d);
+
     is("too large is refused", pd_new(PD_MAX + 1, 1, PAPER) == NULL, 1);
     is("nothing is refused", pd_new(0, 4, PAPER) == NULL, 1);
 

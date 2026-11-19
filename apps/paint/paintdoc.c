@@ -439,6 +439,54 @@ int pd_turn(struct pd_doc *d, int how)
     return 0;
 }
 
+/* ---- adjustments */
+
+static unsigned clamp8(int v) { return v < 0 ? 0 : v > 255 ? 255 : (unsigned)v; }
+
+void pd_adjust(struct pd_doc *d, int kind, int a, int b, int x, int y, int w, int h)
+{
+    int r, c;
+    if (x < 0)
+        w += x, x = 0;
+    if (y < 0)
+        h += y, y = 0;
+    if (x + w > d->w)
+        w = d->w - x;
+    if (y + h > d->h)
+        h = d->h - y;
+    if (w <= 0 || h <= 0)
+        return;
+    for (r = 0; r < h; r++) {
+        unsigned *p = d->layer[d->cur].px + (size_t)(y + r) * d->w + x;
+        for (c = 0; c < w; c++, p++) {
+            int R = (int)(*p >> 16 & 255), G = (int)(*p >> 8 & 255), B = (int)(*p & 255), grey;
+            if (!(*p >> 24))
+                continue;
+            switch (kind) {
+            case PD_INVERT:
+                R = 255 - R, G = 255 - G, B = 255 - B;
+                break;
+            case PD_GREY:
+                R = G = B = (77 * R + 150 * G + 29 * B + 128) >> 8;
+                break;
+            case PD_SEPIA:
+                grey = R;
+                R = (393 * R + 769 * G + 189 * B + 500) / 1000;
+                G = (349 * grey + 686 * G + 168 * B + 500) / 1000;
+                B = (272 * grey + 534 * (int)(*p >> 8 & 255) + 131 * B + 500) / 1000;
+                break;
+            default:                            /* brightness, then contrast about the middle grey */
+                R = (R + a * 255 / 100 - 128) * (100 + b) / 100 + 128;
+                G = (G + a * 255 / 100 - 128) * (100 + b) / 100 + 128;
+                B = (B + a * 255 / 100 - 128) * (100 + b) / 100 + 128;
+                break;
+            }
+            *p = (*p & 0xFF000000u) | clamp8(R) << 16 | clamp8(G) << 8 | clamp8(B);
+        }
+    }
+    touch(d, x, y, x + w, y + h);
+}
+
 /* ---- the whole picture another size */
 
 /* The layers' new pixels put in place of the old (taken over), the picture nw by nh. */

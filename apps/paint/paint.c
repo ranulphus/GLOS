@@ -23,6 +23,7 @@
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_IN, C_OUT, C_ACTUAL, C_FIT, C_ABOUT, C_FILLED,
        C_RESIZE, C_CANVAS, C_CUT, C_COPY, C_PASTE, C_ALL, C_CROP, C_LADD, C_LCOPY, C_LDELETE, C_LUP, C_LDOWN, C_LMERGE, C_LSHOWN, C_LOPACITY,
        C_TURN = 50,                     /* + PD_RIGHT, PD_LEFT, PD_ACROSS, PD_OVER */
+       C_ADJUST = 60,                   /* + PD_INVERT, PD_GREY, PD_SEPIA, PD_BRIGHT */
        C_TOOL = 100 };
 enum { T_PENCIL, T_BRUSH, T_ERASER, T_LINE, T_RECT, T_ELLIPSE, T_FILL, T_PICK, T_SELECT, T_COUNT };
 
@@ -310,6 +311,56 @@ static void edit_command(int id)
         break;
     }
     fflush(stdout);
+}
+
+/* An adjustment (Adjustments' menu): the current layer's colours changed, in the selection or all of it; a step
+   as a tool's stroke is. */
+static struct {
+    struct gui_widget *a, *b;
+    int va, vb;
+} bc;
+
+static void bright_button(struct gui_widget *w, int what)
+{
+    (void)what;
+    bc.va = gui_value(bc.a), bc.vb = gui_value(bc.b);   /* (read while the dialog is there) */
+    gui_end_modal(w->win, w->id);
+}
+
+static int bright_ask(void)
+{
+    struct gui_window *d = gui_window(GUI_T("Brightness and Contrast"), 240, 0, GUI_W_DIALOG);
+    struct gui_widget *box = gui_vbox(d->root, 6, 8), *form = gui_form(box), *row;
+    d->owner = win;
+    bc.a = gui_spin(gui_row(form, GUI_T("&Brightness:"), NULL), -100, 100, 0);
+    bc.b = gui_spin(gui_row(form, GUI_T("&Contrast:"), NULL), -100, 100, 0);
+    row = gui_hbox(box, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("OK"), bright_button, 1)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), bright_button, 0)->flags |= GUI_CANCEL;
+    return gui_modal(d) == 1;                   /* (which closes it) */
+}
+
+static void adjust(int kind)
+{
+    static const char *const names[] = { "", GUI_N("Invert"), GUI_N("Black and White"), GUI_N("Sepia"),
+                                         GUI_N("Brightness and Contrast") };
+    static const char *const words[] = { "", "invert", "grey", "sepia", "bright" };
+    int x = sel.w ? sel.x : 0, y = sel.w ? sel.y : 0, w = sel.w ? sel.w : doc->w, h = sel.w ? sel.h : doc->h;
+    unsigned *before;
+    bc.va = bc.vb = 0;
+    if (kind == PD_BRIGHT && !bright_ask())
+        return;
+    if (!(before = pd_before(doc))) {
+        gui_message(win, GUI_T("Paint"), GUI_T("There isn't the memory for that."), GUI_MB_OK);
+        return;
+    }
+    pd_clean(doc);
+    pd_adjust(doc, kind, bc.va, bc.vb, x, y, w, h);
+    show(doc->x0, doc->y0, doc->x1, doc->y1);
+    printf("PAINT adjust %s %d %d\n", words[kind], bc.va, bc.vb);
+    fflush(stdout);
+    commit(GUI_T(names[kind]), before);
 }
 
 /* A layer's command (Layers' menu): the picture before is kept whole for undo, as for a resize. */
@@ -762,6 +813,10 @@ static void command(struct gui_window *w, int id)
         edit_command(id);
         return;
     }
+    if (id > C_ADJUST && id <= C_ADJUST + PD_BRIGHT) {
+        adjust(id - C_ADJUST);
+        return;
+    }
     switch (id) {
     case C_NEW:
         if (let_go())
@@ -904,6 +959,11 @@ int main(int argc, char **argv)
     gui_menu_item(m, GUI_T("Re&size..."), C_RESIZE, NULL);
     gui_menu_item(m, GUI_T("&Canvas Size..."), C_CANVAS, NULL);
     gui_menu_item(m, GUI_T("Cro&p to Selection"), C_CROP, NULL);
+    m = gui_menu(bar, GUI_T("&Adjustments"));
+    gui_menu_item(m, GUI_T("&Invert"), C_ADJUST + PD_INVERT, GUI_T("Ctrl+I"));
+    gui_menu_item(m, GUI_T("Black and &White"), C_ADJUST + PD_GREY, NULL);
+    gui_menu_item(m, GUI_T("&Sepia"), C_ADJUST + PD_SEPIA, NULL);
+    gui_menu_item(m, GUI_T("&Brightness and Contrast..."), C_ADJUST + PD_BRIGHT, NULL);
     layers_menu = m = gui_menu(bar, GUI_T("&Layers"));
     gui_menu_item(m, GUI_T("&New Layer"), C_LADD, GUI_T("Ctrl+Shift+N"));
     gui_menu_item(m, GUI_T("&Duplicate"), C_LCOPY, NULL);

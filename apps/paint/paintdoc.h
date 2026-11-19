@@ -61,6 +61,12 @@ enum { PD_RIGHT = 1, PD_LEFT, PD_ACROSS, PD_OVER };
 int pd_turn(struct pd_doc *d, int how);
 int pd_turn_back(int how);
 
+/* Adjustments: the current layer's colours changed in a rectangle (clipped; what is clear stays clear). Invert;
+   black and white (each pixel its brightness); sepia; brightness (a: -100 darkest to 100) and contrast (b: -100
+   none to 100 twice as much), together. */
+enum { PD_INVERT = 1, PD_GREY, PD_SEPIA, PD_BRIGHT };
+void pd_adjust(struct pd_doc *d, int kind, int a, int b, int x, int y, int w, int h);
+
 /* The whole picture another size. pd_resize: every layer scaled (smooth: each new pixel from the four old ones
    round where it falls; else from the nearest). pd_canvas: the picture as it is on a canvas nw by nh, at the
    place ax, ay say (0 the left or top, 1 the middle, 2 the right or bottom): what falls outside is cut off,

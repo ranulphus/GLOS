@@ -7,8 +7,9 @@
 # larger canvas of the second colour, and both undone: the picture as it was. Layers: a new one drawn on with
 # the brush and rubbed out in part (clear there: the picture under it shows), hidden and shown, merged down,
 # the merge undone, the layer deleted: the picture as it was. A selection: a part copied, pasted elsewhere as
-# a layer of its own, the picture cut down to the selection, and both undone. And Paint asks about changes not
-# saved.
+# a layer of its own, the picture cut down to the selection, and both undone. Adjustments: all of it inverted;
+# a selected part made black and white, then brighter and flatter; all three undone. And Paint asks about
+# changes not saved.
 run PAINT.EXE
 wait "Untitled - Paint"
 shot start "Untitled - Paint"
@@ -119,6 +120,28 @@ key ctrl+z
 key p
 shot unpasted "P1.PNG - Paint" 0 20 560 26
 same opened unpasted
+key ctrl+i
+shot inverted "P1.PNG - Paint"
+key s
+drag "P1.PNG - Paint" 70 159 150 219
+key alt+a
+key w
+key alt+a
+key b
+wait "Brightness and Contrast"
+quick home shift+end
+type 40\t
+quick home shift+end
+type -50\n
+gone "Brightness and Contrast"
+key esc
+shot adjusted "P1.PNG - Paint"
+key ctrl+z
+key ctrl+z
+key ctrl+z
+key p
+shot unadjusted "P1.PNG - Paint" 0 20 560 26
+same opened unadjusted
 key alt+f4
 wait "Paint"
 key alt+n
@@ -153,5 +176,8 @@ expect PAINT copy 81x61
 expect PAINT select 200,20 41x41
 expect PAINT paste 81x61 at 200,20
 expect PAINT crop 41x41
+expect PAINT adjust invert 0 0
+expect PAINT adjust grey 0 0
+expect PAINT adjust bright 40 -50
 expect PAINT size 320x240 layers 2
 expect PAINT end

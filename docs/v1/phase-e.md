@@ -250,9 +250,14 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
   desktop's clipboard for pictures is to come.
 - **Tests:** `paint_test` (a part copied, pasted as a layer, the picture cut down); `paint` (a part selected and
   copied, pasted elsewhere, the picture cropped, both undone: the picture as it was).
+- **Adjustments** (2026-11-19; their own menu): Invert (Ctrl+I), Black and White, Sepia, Brightness and
+  Contrast, on the current layer, in the selection or all of it; what is clear stays clear. A step as a tool's
+  stroke is. `paint_test` has each; `paint` inverts the picture, makes a selected part black and white and
+  brighter and flatter, and undoes all three.
 - **Not done yet:** blend modes, layers renamed and dragged, the layered format written; selections of other
   shapes, a selection moved, the desktop's clipboard; text; gradients, curves, the clone stamp; resizing in
-  proportion and bicubic; adjustments and effects; PCX written; tiles for pictures of any size.
+  proportion and bicubic; levels, curves, hue and saturation, the effects, their previews; PCX written; tiles
+  for pictures of any size.
 
 ## Faults of the toolkit and the suites that phase E's gates found (2026-11-19)
 
@@ -272,6 +277,10 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
   came for the menu's pop-up, which had the keyboard as it was pressed and was gone when the app looked at it.
   It is the pop-up's owner's now (`sdk/gui/core.c`: the pop-ups closed lately are remembered, and whose they
   were). Paint's suite on the 486 again: B after Layers' New Layer chose no brush.
+- **A number typed into a spin box** went on the end of the value that was there (5, then "40" typed, was 0),
+  and a minus sign only changed the sign of what was there ("-50" typed over 100 was -100). The first digit
+  typed is the number anew now, the next ones go on its end, and a minus sign before them makes it negative
+  (`sdk/gui/basic.c`). Found by Paint's Brightness and Contrast in its script.
 - **An open menu is forgotten when its window goes** (`gui_menu_gone`): the menus' state pointed at freed
   windows when a menu's owner was closed with the menu open.
 - **The suites:** a GUI script that fails now reports each app's exit code and what it wrote to stderr; a
