@@ -4,13 +4,16 @@
 # 120: the page's box makes it as wide as the window); Stop ends it. The picture is of the page before it starts:
 # the program's window is GLOS's to draw, and the host's tests have no other program (there the page says No
 # preview; only Loop A checks the lines).
+# (Alt+F4 only once the embedded program has gone: on the 486 under a gate's load it was still there two seconds
+# after Stop, and the key meant for the page was lost with it: "gone-15", 2026-11-19.)
 run GUITEST.EXE preview
 wait "GUITEST Preview"
 shot start "GUITEST Preview"
 key alt+s
 pause 8000
 key alt+t
-pause 2000
+gone "GUITEST Embedded"
+pause 5000
 key alt+f4
 gone "GUITEST Preview"
 expect GUI preview
