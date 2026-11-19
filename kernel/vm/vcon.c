@@ -74,6 +74,16 @@ static int vcon_write(const char *s, u32 n, int fresh)
 
 static void vcon_put(const char *s, u32 n) { (void)vcon_write(s, n, 0); }
 
+/* A panic (cpu.c): what the kernel says from here goes to the screen as well, verbose boot or not, where the
+   screen is a text screen and no desktop's. A PC with no serial cable has its last words there. */
+void vcon_panic(void)
+{
+    if (kprintf_screen != vcon_put) {
+        (void)vcon_write("\n", 1, 1);
+        kprintf_screen = vcon_put;
+    }
+}
+
 /* The VM thread, about to wait at the idle screen: what the screen hasn't said yet. */
 void vcon_notice(void)
 {

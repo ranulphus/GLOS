@@ -552,6 +552,18 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   at once now if that is asked (`GLOS-VM stub-end ...`, `kernel/vm/v86.c`), with the log's held lines, so that
   the next time leaves something to go by.
 
+- **Bench C stands dead after a VBE mode set** (2026-11-19 14:21, the second time in two days, on main
+  ea04e3d): the DOS-GL session's ViRGE triangle test, a session over SSH, said its card was mapped; its next
+  step is a VBE mode set (110h) and the 3D engine's start; nothing more came, and the PC answered no ping. The
+  same program ran through the day before on 4df396a, and nothing between the two touches a session's mode
+  set: the same fault as 11-18's (then at the mode set back to text), come and gone by chance. A PC that
+  answers no ping is another picture than "GLOS gone, DOS carrying on" above: the kernel itself stopped (a
+  panic halts it, and says so on the serial port alone), the PC hung, or it restarted into DOS. Nothing was
+  left to tell which: GLOS keeps no log on disk, and bench C's serial cable is on the Pentium III. Since then
+  a panic is heard and, on a text screen, read at the PC (below). To do when the bench is back: a mode-set loop
+  under GLOS with the log followed over SSH, for a rate; the same under plain DOS; a serial cable on it if one
+  can be had.
+
 - **id's QUAKE.EXE 1.06 halts GLOS on bench-g400** (2026-11-14, found by the DOS-GL session; the owner: later).
   Started under GLOS with no `-mem`, on a PC where GLOS's DPMI host offers it about 403 MB, it prints "Locked 1
   Mb image" and the whole PC stops: no network, a reset needed. With `-mem 32` it runs (demo1: 91.2 fps at

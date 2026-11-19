@@ -219,12 +219,44 @@ static void dump(const char *why, struct trapframe *tf)
     kprintf("\n");
 }
 
+/* The last words for someone at the PC, where no cable is on the serial port (the 486 bench stood dead twice
+   with nothing to say why, 2026-11-18 and 11-19). The lines go to the screen too if it is a text screen
+   (vcon_panic), and the PC's speaker sounds: two notes, every seven seconds for the first minutes, then once a
+   minute, then every ten, for as long as the PC stands. A PC that has hung is silent, and one that restarted
+   shows its BIOS. The speaker's own counter keeps the time, a half-wave an edge of its output read back (port
+   61h, bit 5): interrupts are off, and no clock of the kernel's is left to trust. */
+static void last_sound(void)
+{
+    static const u16 pair[3] = { 528, 352, 528 };       /* 0.3 s on, 0.2 s off, 0.3 s on: half-waves of 880 Hz */
+    u32 div = 1193182u / 880u, n, k;
+    outb(0x43, 0xB6);                           /* counter 2: a square wave */
+    outb(0x42, (u8)div);
+    outb(0x42, (u8)(div >> 8));
+    for (n = 0;; n++) {
+        u32 rest = n < 20 ? 6u : n < 80 ? 59u : 599u;   /* seconds of silence after the pair */
+        for (k = 0; k < 3 + rest; k++) {
+            u32 edges = 0, tries = 0, want = k < 3 ? pair[k] : 1760;
+            u8 was;
+            outb(0x61, (u8)((inb(0x61) & 0xFC) | 1 | (k == 0 || k == 2 ? 2 : 0)));     /* the gate open; the
+                                                                                          speaker on, or not */
+            was = inb(0x61) & 0x20;
+            while (edges < want && ++tries < 40000000u) {       /* (no edges: a counter that isn't there) */
+                u8 now = inb(0x61) & 0x20;
+                if (now != was)
+                    was = now, edges++;
+            }
+        }
+    }
+}
+
 void panic(const char *why, struct trapframe *tf)
 {
     cli();
     kprintf_com1_off = 0;                       /* (a cable link's port or not: the last words go out there) */
     kprintf_direct();
+    vcon_panic();
     dump(why, tf);
+    last_sound();
     for (;;)
         hlt();
 }
@@ -244,6 +276,7 @@ void double_fault(void)
     u32 v, bad = 0;
     kprintf_com1_off = 0;
     kprintf_direct();
+    vcon_panic();
     kprintf("GLOS-PANIC why=double-fault eip=%p esp=%p cs=%x ss=%x eflags=%x cr2=%p esp0=%p ss0=%x pte=%p\n",
             TSS->eip, TSS->esp, TSS->cs, TSS->ss, TSS->eflags, read_cr2(), TSS->esp0, TSS->ss0,
             pte_of(TSS->esp0 - 4));
@@ -259,6 +292,7 @@ void double_fault(void)
             && v / 2 != SEL_ESPFIX / 8 && bad++ < 8)
             kprintf("GLOS-PANIC gdt=%x is=%p was=%p\n", v / 2 * 8, gdt[v], gdt_copy[v]);
     sched_panic_report();
+    last_sound();
     for (;;)
         hlt();
 }

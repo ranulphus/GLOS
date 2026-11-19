@@ -1650,6 +1650,13 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             say(ch, 0, "glos disktest: started; its lines are in the log (GLOS-DISKTEST)\n");
             ssh_chan_exit(ch, 0);
         }
+    } else if (!strcmp(cmd, "glos panic")) {    /* (the suites': what a panic leaves at the PC. /SELFTEST alone) */
+        if (!(vm.bi->flags & BI_F_SELFTEST)) {
+            say(ch, 1, "glos panic: only under GLOS /SELFTEST\n");
+            ssh_chan_exit(ch, 2);
+        } else {
+            panic("asked", 0);
+        }
     } else if (!strcmp(cmd, "glos gdb")) {
         char t[160];
         gdbp_arm(wake_ssh);

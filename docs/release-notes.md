@@ -4,6 +4,16 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## A panic is heard and read at the PC (2026-11-19)
+
+- **When GLOS's kernel stops itself** (a panic: it cannot go on safely) the PC's speaker sounds two short notes,
+  every seven seconds for the first minutes, then once a minute, then every ten. Until now a panic said so on
+  the serial port alone, and a PC with no cable there stood silent, like one that had hung.
+- **On a text screen** (no desktop, a DOS program in a text mode) the panic's lines are written to the screen
+  as well. A desktop or a program's graphics are left as they stand: there the notes are the sign.
+- A PC that stands silent with GLOS not answering has hung without a panic, or its speaker is not connected;
+  one that shows its BIOS has restarted. A reset is needed in every case.
+
 ## A virtual Sound Blaster for DOS programs (2026-11-19)
 
 - **A DOS program finds a Sound Blaster 16** at `BLASTER`'s ports whatever sound card the PC has, as long as

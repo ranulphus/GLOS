@@ -3233,6 +3233,42 @@ def sess_kill(profile, boot):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def panic_case(profile, card):
+    """A panic's last words at the PC (kernel/arch/cpu.c, 2026-11-19: the 486 bench stood dead twice with no
+    serial cable and nothing to say why). Asked for under GLOS /SELFTEST (glos panic), the log has its line,
+    the PC answers no more, and its speaker sounds two notes every seven seconds: 86Box's recording has their
+    880 Hz. The line is on the text screen too: the screenshots in out/panic-TAG are for the eye."""
+    import time
+    tag = "%s-%s" % (profile, card)
+    agent = Agent("panic-" + tag, profile, card, ["--sound", "sb16", "--wav", "--shots", "100,130",
+        "--cmd", "SERSAY HX-START panic", "--cmd", "C:\\TEST\\GLOS.EXE /SELFTEST", "--cmd", "SERSAY HX-DONE 0"],
+        timeout=150)
+    checks = {"listen": agent.listening()}
+    try:
+        try:
+            agent.ssh("glos panic", timeout=20)
+        except subprocess.TimeoutExpired:
+            pass
+        t0 = time.time()
+        while time.time() - t0 < 30 and "GLOS-PANIC why=asked" not in agent.log():
+            time.sleep(1)
+        checks["said"] = "GLOS-PANIC why=asked" in agent.log()
+        try:
+            checks["stopped"] = agent.ssh("glos ver", timeout=20)[0] != 0
+        except subprocess.TimeoutExpired:
+            checks["stopped"] = True
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()                         # (the run's own time limit ends it: the PC stands)
+    wav = os.path.join(ROOT, "out", "panic-" + tag, "audio.wav")
+    checks["sounded"] = os.path.exists(wav) and subprocess.run(
+        [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "880"],
+        capture_output=True).returncode == 0
+    checks["once"] = text.count("GLOS-PANIC why=") == 1 and "HX-DONE" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("panic-" + tag, "PASS" if not bad else "FAIL", " failed: " + " ".join(bad) if bad else ""), not bad
+
+
 def sess_agent(profile, card):
     """SESSTEST and the checks as agent jobs, through ssh: each job is a session (the agent EXECs a program
     directly, trying each place along PATH; only the one found begins a session). Then glos run (E4):
@@ -3268,6 +3304,7 @@ def sess_agent(profile, card):
         while time.time() - t0 < 120 and "HX-SESS armed" not in agent.log():
             time.sleep(0.5)
         checks["kill"] = agent.ssh("glos kill")[0] == 0 and hang.wait(timeout=120) == 255
+        checks["panic-refused"] = agent.ssh("glos panic")[0] == 2      # (the suites' own, under /SELFTEST alone)
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
@@ -9981,6 +10018,7 @@ def main():
         res += matrix(sess_direct, combos, a.jobs)
         res += matrix(sess_kill, combos, a.jobs)
         res += matrix(sess_agent, [c for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
+        res += matrix(panic_case, [c for c in SESS_AGENT if not a.profile or c[0] in a.profile], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "dpmi":
         res = matrix(dpmi, combos, a.jobs) + matrix(dpmiconf, combos, a.jobs) + matrix(lazy, combos, a.jobs)
