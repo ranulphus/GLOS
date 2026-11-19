@@ -20,6 +20,7 @@ struct view {
     struct gui_window *win;
     struct gui_widget *list, *tree, *status;
     struct gui_widget *address;         /* the browser's address bar (phase E): the folder's path, to type into */
+    struct gui_menu *context;           /* the list's context menu (phase E) */
     struct gui_menu *view_menu;
     char dir[260];
     char hist[HIST][260];               /* the browser's way here: Back and Forward go along it */
@@ -42,7 +43,7 @@ static struct {                         /* where folders' windows were */
 } places;
 
 enum { C_OPEN = 1, C_NEWDIR, C_RENAME, C_DELETE, C_CLOSE, C_CUT, C_COPY, C_PASTE, C_ALL, C_BIG, C_DETAILS, C_REFRESH,
-       C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS };
+       C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS, C_PROPS };
 
 static void say(const char *what, const char *a)
 {
@@ -268,6 +269,7 @@ static void paste(struct view *v)
 /* ---- the commands */
 
 static void closing(struct gui_window *w);
+static void properties(struct view *v);
 
 /* A name typed (text) as DOS's bytes, in place: false, and said, if DOS's code page hasn't got all of it. */
 static int dos_name(struct gui_window *w, char *name)
@@ -398,6 +400,9 @@ static void command(struct gui_window *w, int id)
             say(id == C_BACK ? "back" : "forward", v->dir);
         }
         break;
+    case C_PROPS:
+        properties(v);
+        break;
     case C_ADDRESS:                             /* the keyboard's way to the address bar */
         if (v->address) {                       /* (its text chosen, as its own Ctrl+A does: what is typed takes
                                                    its place; gui_editor_command is the editor's alone) */
@@ -473,6 +478,10 @@ static void closing(struct gui_window *w)
     if (v) {
         if (v->watch)
             glos_close(v->watch);
+        if (v->context) {
+            gui_context(v->list, NULL);
+            gui_menu_free(v->context);
+        }
         free(v->ents);
         free(v);
     }
@@ -487,6 +496,7 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
     gui_menu_item(m, GUI_T("&New Folder"), C_NEWDIR, GUI_T("Ctrl+Shift+N"));
     gui_menu_item(m, GUI_T("&Rename"), C_RENAME, GUI_T("F2"));
     gui_menu_item(m, GUI_T("&Delete"), C_DELETE, GUI_T("Del"));
+    gui_menu_item(m, GUI_T("P&roperties"), C_PROPS, GUI_T("Alt+Enter"));
     gui_menu_sep(m);
     gui_menu_item(m, GUI_T("&Close"), C_CLOSE, GUI_T("Ctrl+W"));
     m = gui_menu(bar, GUI_T("&Edit"));
@@ -513,6 +523,102 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
             gui_menu_item(m, GUI_T("&Browser"), C_BROWSER, NULL);
         return view;
     }
+}
+
+/* ---- properties (phase E): what the chosen file or folder is: its name, where it is, its kind, its size (a
+   folder's: its files' in all, counted to a limit), when it was last written, its attributes; with nothing
+   chosen, the folder shown, and its drive's room. */
+
+#define COUNT_MAX 5000
+
+static void count(const char *dir, unsigned long *files, unsigned long long *bytes, int depth)
+{
+    struct gui_dirent *e = NULL;
+    int n = gui_dir_read(dir, &e), i;
+    char p[260];
+    for (i = 0; i < n; i++) {
+        if (!e[i].dir) {
+            (*files)++;
+            *bytes += e[i].size;
+        } else if (depth < 8 && *files < COUNT_MAX) {
+            gui_path_join(p, sizeof p, dir, e[i].name);
+            count(p, files, bytes, depth + 1);
+        }
+    }
+    if (n >= 0)
+        free(e);
+}
+
+static void props_ok(struct gui_widget *b, int what)
+{
+    (void)what;
+    gui_end_modal(b->win, 1);
+}
+
+static void props_row(struct gui_widget *form, const char *label, const char *text)
+{
+    gui_label(gui_row(form, label, NULL), text);
+}
+
+static void properties(struct view *v)
+{
+    struct gui_window *d;
+    struct gui_widget *box, *form, *row;
+    struct gui_dirent ent;
+    char path[260], t[160], name[128];
+    int r = gui_list_get(v->list), item = r >= 0;
+    memset(&ent, 0, sizeof ent);
+    if (item) {
+        ent = v->ents[(size_t)gui_list_user(v->list, r)];
+        gui_path_join(path, sizeof path, v->dir, ent.name);
+    } else {
+        snprintf(path, sizeof path, "%s", v->dir);
+        ent.dir = 1;
+        snprintf(ent.text, sizeof ent.text, "%s", strlen(path) > 3 ? gui_dos_text(gui_path_name(path), name, sizeof name) : path);
+    }
+    d = gui_window(GUI_T("Properties"), 300, 0, GUI_W_DIALOG);
+    d->owner = v->win;
+    box = gui_vbox(d->root, 6, 8);
+    form = gui_form(box);
+    props_row(form, GUI_T("Name:"), ent.text);
+    props_row(form, GUI_T("Where:"), item ? v->dir : path);
+    if (ent.dir) {
+        unsigned long files = 0;
+        unsigned long long bytes = 0;
+        count(path, &files, &bytes, 0);
+        props_row(form, GUI_T("Kind:"), GUI_T("Folder"));
+        snprintf(t, sizeof t, files >= COUNT_MAX ? GUI_T("%lu files or more, %lu KB or more") : GUI_T("%lu files, %lu KB"), files,
+                 (unsigned long)((bytes + 1023) / 1024));
+        props_row(form, GUI_T("Holds:"), t);
+    } else {
+        const char *dot = strrchr(ent.name, '.');
+        snprintf(t, sizeof t, dot && dot[1] ? GUI_T("%s file") : GUI_T("File"), dot ? dot + 1 : "");
+        props_row(form, GUI_T("Kind:"), t);
+        snprintf(t, sizeof t, GUI_T("%lu bytes"), ent.size);
+        props_row(form, GUI_T("Size:"), t);
+    }
+    if (item) {
+        snprintf(t, sizeof t, "%04u-%02u-%02u %02u:%02u", (ent.date >> 9) + 1980, (ent.date >> 5) & 15, ent.date & 31,
+                 ent.time >> 11, (ent.time >> 5) & 63);
+        props_row(form, GUI_T("Modified:"), t);
+        snprintf(t, sizeof t, "%s%s%s%s", ent.attr & 1 ? GUI_T("Read-only ") : "", ent.attr & 2 ? GUI_T("Hidden ") : "",
+                 ent.attr & 4 ? GUI_T("System ") : "", ent.attr & 0x20 ? GUI_T("Archive") : "");
+        props_row(form, GUI_T("Attributes:"), t[0] ? t : GUI_T("None"));
+    } else {                                    /* the folder shown: its drive's room */
+        struct glos_fs_drive dr;
+        unsigned n = 0;
+        memset(&dr, 0, sizeof dr);
+        if (glos_fs_drives((unsigned)path[0], &dr, 1, &n) == 0 && n && dr.total_kb && (dr.flags & GLOS_DRIVE_DETAILS)) {
+            snprintf(t, sizeof t, GUI_T("%u MB free of %u MB"), dr.free_kb / 1024, dr.total_kb / 1024);
+            props_row(form, GUI_T("Drive:"), t);
+        }
+    }
+    row = gui_hbox(box, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("OK"), props_ok, 1)->flags |= GUI_DEFAULT | GUI_CANCEL;
+    say("properties", path);
+    gui_modal(d);
+    gui_close(d);
 }
 
 /* The address bar: Enter goes to the folder typed (or chosen from the ones kept); what is no folder is said. */
@@ -602,6 +708,21 @@ static struct view *new_view(const char *dir, int browser)
         gui_list_multi(v->list, 1);
         gui_list_icons(v->list, v->big);
         gui_on(v->list, list_on, 0);
+        {                                       /* the list's context menu (the right button, the Menu key) */
+            struct gui_menu *c = v->context = gui_menu_new();
+            gui_menu_item(c, GUI_T("&Open"), C_OPEN, NULL);
+            gui_menu_sep(c);
+            gui_menu_item(c, GUI_T("Cu&t"), C_CUT, NULL);
+            gui_menu_item(c, GUI_T("&Copy"), C_COPY, NULL);
+            gui_menu_item(c, GUI_T("&Paste"), C_PASTE, NULL);
+            gui_menu_sep(c);
+            gui_menu_item(c, GUI_T("&Delete"), C_DELETE, NULL);
+            gui_menu_item(c, GUI_T("Rena&me"), C_RENAME, NULL);
+            gui_menu_sep(c);
+            gui_menu_item(c, GUI_T("&New Folder"), C_NEWDIR, NULL);
+            gui_menu_item(c, GUI_T("P&roperties"), C_PROPS, NULL);
+            gui_context(v->list, c);
+        }
         if (browser)
             gui_list_sort(v->list, 0, by_column);   /* (a column's head sorts by it) */
     }

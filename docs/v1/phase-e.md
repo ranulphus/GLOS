@@ -118,9 +118,17 @@ are as they were).
   wanted it (an address bar's path in capitals): Enter never drops it now (`sdk/gui/field.c`).
 - **Tests:** `files-address` on the host and on Loop A (a path typed, Back, Forward, Up, a path that is none);
   `files-browse`, `files` and the desktop's scripts as before.
-- **Not done yet:** the rest of the plan: views (small icons, a list, sorted and resized columns), folders that
-  load as they go, long names, operations in the background with their progress, the context menu, archives as
-  folders, search, properties, thumbnails.
+- **Properties** (the second part; Alt+Enter, File's menu, the context menu): the chosen file's or folder's
+  name, where it is, its kind, its size (a folder's: its files' number and size in all, counted now, to five
+  thousand files and eight folders deep), when it was last written and its attributes; with nothing chosen,
+  the folder shown and its drive's room.
+- **The list's context menu** (the right button, the Menu key, Shift+F10): Open; Cut, Copy, Paste; Delete,
+  Rename; New Folder, Properties. In the folders' own windows too.
+- **Tests:** `files-props` on the host and on Loop A (a folder's, a file's, and the same dialog from the context
+  menu; the dates and attributes are the copy's, and masked).
+- **Not done yet:** the rest of the plan: views (small icons, a list, resized columns), folders that load as
+  they go, long names, operations in the background with their progress, "open with" and apps' entries in the
+  context menu, archives as folders, search, a folder's size counted in the background, thumbnails.
 
 ## What is next
 

@@ -1,0 +1,27 @@
+# Properties and the context menu in the browser (apps/files; phase E, docs/v1/apps/files.md): a folder's
+# properties (what it holds, counted), a file's (its size), the folder shown's own with nothing chosen... the
+# dates are the copy's and the drive's room is the machine's: the pictures mask them. The Menu key opens the
+# list's context menu; its Properties is the same dialog.
+run FILES.EXE -browse C:\FM
+wait "C:\FM - Files"
+key alt+enter
+wait "Properties"
+shot props-folder "Properties" 80 88 107 42
+key enter
+gone "Properties"
+key end
+key alt+enter
+wait "Properties"
+shot props-file "Properties" 80 88 107 42
+key enter
+gone "Properties"
+key shift+f10
+pause 500
+key r
+wait "Properties"
+key enter
+gone "Properties"
+key alt+f4
+gone "C:\FM - Files"
+expect FILES properties C:\FM\DOCS
+expect FILES end 
