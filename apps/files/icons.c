@@ -131,6 +131,15 @@ static void draw(int kind, struct pen *g)
         fill(g, 20, 9, 4, 4, CUBE(5, 5, 1));
         frame(g, 2, 6, 28, 20, BLACK);
         break;
+    case IC_PAINT:                              /* a picture being painted: three dabs of colour, a brush */
+        fill(g, 2, 6, 28, 20, WHITE);
+        fill(g, 5, 9, 6, 6, CUBE(5, 1, 1));
+        fill(g, 13, 9, 6, 6, CUBE(1, 4, 1));
+        fill(g, 21, 9, 6, 6, CUBE(1, 2, 5));
+        fill(g, 6, 19, 14, 3, DARK);
+        fill(g, 20, 18, 6, 5, CUBE(5, 3, 1));
+        frame(g, 2, 6, 28, 20, BLACK);
+        break;
     case IC_MONITOR:
         screen(g, WHITE);
         fill(g, 5, 18, 3, 4, CUBE(1, 4, 1));

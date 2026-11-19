@@ -41,7 +41,8 @@ static int nitems, chosen = -1, dragging = -1, drag_dx, drag_dy, moved;
 static const struct { const char *title, *exe; int kind; } apps[] = {
     { "Files", "FILES.EXE -browse", IC_FILES }, { "Terminal", "TERM.EXE", IC_TERMINAL },
     { "Notepad", "NOTEPAD.EXE", IC_NOTEPAD }, { "Calculator", "CALC.EXE", IC_CALC }, { "Images", "IMAGES.EXE", IC_IMAGES },
-    { "Monitor", "MONITOR.EXE", IC_MONITOR }, { "Control Panel", "CONTROL.EXE", IC_CONTROL } };
+    { "Monitor", "MONITOR.EXE", IC_MONITOR }, { "Control Panel", "CONTROL.EXE", IC_CONTROL },
+    { "Paint", "PAINT.EXE", IC_PAINT } };
 #define NAPPS ((int)(sizeof apps / sizeof *apps))
 
 static void say(const char *what, const char *a)

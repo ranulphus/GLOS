@@ -186,10 +186,61 @@ Plan: `docs/v1/apps/paint.md` (Images stays the viewer; Paint is the editor to c
   while it is there (a second window, bare, shown `GLOS_WS_FULL`). Esc, F11 or Enter comes back; Next,
   Previous, turning and the slideshow work there as in the window.
 - **Tests:** `images-view` on the host and on Loop A; `images` as before (its pictures have the toolbar now).
+- **Edit** (E; with Paint, below): the picture shown is opened in Paint.
 - **Not done yet:** the filmstrip of the folder's pictures; the picture kept as tiles (any size
-  memory allows); Edit, which opens the picture in Paint; Paint itself.
+  memory allows).
+
+## Paint (2026-11-19): the editor's first part
+
+Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and the Start menu, and Images'
+**Edit** (E, its File menu, its toolbar) opens the picture shown in it.
+
+- **The picture and its tools are apart from the window** (`apps/paint/paintdoc.c`), so the host tests each
+  tool against small pictures written out as text (`tests/host/paint_test.c`). A picture is layers (one, so
+  far: the layers' panel is to come) of AARRGGBB pixels, shown one over another on a chequered ground.
+- **Tools** (the toolbar, the Tools menu, a key each): pencil (P), brush (B), eraser (E), line (L), rectangle
+  (R), ellipse (O), flood fill (F), colour picker (I). The left button draws in the first colour, the right in
+  the second; the eraser always in the second, the paper's. The brush's, eraser's and shapes' width is the
+  Tip box's (`[` and `]`); **Shapes Filled** fills rectangles and ellipses with the other colour. A shape is
+  drawn anew as it is dragged out.
+- **Colours:** the two in hand (each a button that opens the colour dialog) and a palette of 28: a click takes
+  the first colour, a right click the second.
+- **Undo and Redo** of every step (the toolkit's history: "Undo Fill"), a step being the pixels a tool changed,
+  before and after; eight megabytes of them are kept.
+- **Files:** New (its size asked), Open (every kind Images shows), Save and Save As: PNG, BMP or JPEG by the
+  name's end. Changes not saved are asked about. Reading and writing are one code in Images and Paint
+  (`apps/shared/picfile.c`; writing by stb_image_write, new in `third_party/stb`).
+- **The view** is the toolkit's image view (zoom by + and -, the wheel with Ctrl; the middle button moves the
+  picture). One thing of the toolkit's was in the way: an image view took the left button to move the picture
+  before the app saw it; `GUI_CV_TOOLS` (`gui_cview_style`) leaves that button to the app.
+- **Eight glyphs more** in the toolkit's set, for the tools (`sdk/gui/icons/glyphs.list`; `make icons`).
+- **Tests:** `paint_test` in the host run; `paint` on the host and on Loop A (a drawing session with every
+  tool, undo and redo, the picture saved as a PNG and opened again: the same picture); `images-edit` on Loop A.
+- **Not done yet:** layers' panel and blend modes; selections; text; gradients, curves, the clone stamp;
+  resize, crop, turn; adjustments and effects; the clipboard; PCX and the layered format written; tiles for
+  pictures of any size.
+
+## Faults of the toolkit and the suites that phase E's gates found (2026-11-19)
+
+- **Keys typed ahead of an opening menu** went to the window behind it: GLOS sends a key to the window that has
+  the keyboard as it is pressed, and a menu's pop-up has it only once the app has made and shown it. Alt+T and
+  then D at once, on a slow PC, chose nothing and left the menu open (Paint's suite on the 486). A key that
+  comes for a window whose menu is open is the menu's now (`sdk/gui/core.c`, `gui_menu_popup_of`).
+- **An app's idle functions ran after its last window was freed:** the loop's turn that took GLOS's close
+  (with no `on_close` of the app's) freed every widget and then ran what was due. Monitor, which samples
+  every second, died there now and then (exit code 255, no last line): the twelfth gate's `monitor-windows` on
+  the 486, and likely others before it taken for lost keys. Idle functions and timers run only while the loop
+  goes on.
+- **`gui_modal` closes and frees its window**, which the header did not say; eight dialogs (seven written in
+  this phase after the Control Panel's old one) closed theirs again, reading freed memory. No harm was seen
+  from it; they no longer do, and `gui.h` says it.
+- **The suites:** a GUI script that fails now reports each app's exit code and what it wrote to stderr; a
+  script waits for a full-screen program's end by `settle` (no DOS program running) where it paused a fixed
+  time (a session is 8.6 seconds on the G400's machine: `term-run`, the twelfth gate); the batch case waits
+  for the log's line that names FreeDOS's COMMAND.COM where it looked once (the 486, the twelfth gate).
 
 ## What is next
 
-The rest of Files' plan (views, operations in the background, archives, search); Images and Paint; what is
-left of the Terminal's and Notepad's plans. Each by its plan in `docs/v1/apps/`.
+More of Paint (layers, selections, the image's size, adjustments); the rest of Files' plan (views, archives,
+thumbnails); Images' filmstrip; what is left of the Terminal's and Notepad's plans. Each by its plan in
+`docs/v1/apps/`.

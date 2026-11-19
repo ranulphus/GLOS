@@ -57,3 +57,11 @@ eject           eject
 power           power-off
 menu            bars
 view            eye
+pencil          pencil
+brush           paintbrush
+eraser          eraser
+line            slash
+rectangle       square
+ellipse         circle
+fill            fill-drip
+picker          eye-dropper

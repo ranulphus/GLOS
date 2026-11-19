@@ -15,24 +15,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_NO_STDIO
-#define STBI_NO_HDR
-#define STBI_NO_LINEAR
-#define STBI_NO_PSD
-#define STBI_NO_PIC
-#define STBI_ONLY_PNG
-#define STBI_ONLY_JPEG
-#define STBI_ONLY_BMP
-#define STBI_ONLY_GIF
-#define STBI_ONLY_TGA
-#define STBI_ONLY_PNM
-#include "stb_image.h"
 
 #include <glos/gui.h>
 
+#include "../shared/picfile.h"
+
 enum { C_OPEN = 1, C_NEXT, C_PREV, C_EXIT, C_FIT, C_ACTUAL, C_IN, C_OUT, C_ABOUT, C_LEFT, C_RIGHT, C_ACROSS, C_OVER,
-       C_DETAILS, C_SLIDES, C_FULL };
+       C_DETAILS, C_SLIDES, C_FULL, C_EDIT };
 
 static const int zooms[] = { 125, 250, 500, 1000, 2000, 4000, 8000 };   /* tenths of a per cent */
 
@@ -48,145 +37,9 @@ static int fit = 1, zoom = 3;           /* zoom: an index into zooms when not fi
 static int sliding;                     /* the slideshow runs (slideshow) */
 static struct gui_window *full;         /* the picture alone on the whole screen (fullscreen), or NULL */
 static struct gui_widget *full_view;
-
-/* ---- PCX (ZSoft): 8 bits with a 256-colour palette at the end, 24 bits as three planes, 4 bits as four planes
-   (the header's 16 colours), 1 bit (black and white) */
-
-static unsigned *pcx(const unsigned char *d, size_t n, int *pw, int *ph)
-{
-    int bpp, planes, bpl, w, h, x, y, p;
-    unsigned *out;
-    unsigned char *line;
-    size_t at = 128;
-    if (n < 128 || d[0] != 0x0A || d[2] != 1)
-        return NULL;
-    bpp = d[3];
-    w = (d[8] | d[9] << 8) - (d[4] | d[5] << 8) + 1;
-    h = (d[10] | d[11] << 8) - (d[6] | d[7] << 8) + 1;
-    planes = d[65];
-    bpl = d[66] | d[67] << 8;
-    if (w < 1 || h < 1 || w > 8192 || h > 8192 || bpl < 1 || !((bpp == 8 && (planes == 1 || planes == 3))
-                                                              || (bpp == 1 && (planes == 1 || planes == 4))))
-        return NULL;
-    out = malloc((size_t)w * (size_t)h * sizeof *out);
-    line = malloc((size_t)bpl * (size_t)planes);
-    if (!out || !line) {
-        free(out);
-        free(line);
-        return NULL;
-    }
-    for (y = 0; y < h; y++) {
-        int k = 0, total = bpl * planes;
-        while (k < total && at < n) {           /* a scanline's bytes, run-length coded */
-            unsigned char c = d[at++], run = 1;
-            if ((c & 0xC0) == 0xC0 && at < n) {
-                run = c & 0x3F;
-                c = d[at++];
-            }
-            while (run-- && k < total)
-                line[k++] = c;
-        }
-        for (x = 0; x < w; x++) {
-            unsigned rgb = 0;
-            if (bpp == 8 && planes == 1) {
-                const unsigned char *pal = d + n - 768;
-                unsigned i = line[x];
-                if (n >= 128 + 769 && d[n - 769] == 0x0C)
-                    rgb = (unsigned)pal[i * 3] << 16 | (unsigned)pal[i * 3 + 1] << 8 | pal[i * 3 + 2];
-                else
-                    rgb = i * 0x010101u;
-            } else if (bpp == 8) {
-                rgb = (unsigned)line[x] << 16 | (unsigned)line[bpl + x] << 8 | line[2 * bpl + x];
-            } else if (planes == 4) {
-                unsigned i = 0;
-                for (p = 0; p < 4; p++)
-                    i |= (unsigned)((line[p * bpl + x / 8] >> (7 - x % 8)) & 1) << p;
-                rgb = (unsigned)d[16 + i * 3] << 16 | (unsigned)d[17 + i * 3] << 8 | d[18 + i * 3];
-            } else {
-                rgb = (line[x / 8] >> (7 - x % 8)) & 1 ? 0xFFFFFF : 0;
-            }
-            out[(size_t)y * (size_t)w + (size_t)x] = rgb;
-        }
-    }
-    free(line);
-    *pw = w, *ph = h;
-    return out;
-}
-
-/* ---- loading */
-
-static const char *ext_of(const char *path)
-{
-    const char *d = strrchr(path, '.');
-    return d && !strchr(d, '\\') ? d + 1 : "";
-}
-
-static int is_picture(const char *name)
-{
-    static const char *const known[] = { "PNG", "JPG", "JPEG", "BMP", "GIF", "TGA", "PNM", "PPM", "PGM", "PCX", 0 };
-    const char *e = ext_of(name);
-    int i, k;
-    for (i = 0; known[i]; i++) {
-        for (k = 0; e[k] && known[i][k] && (e[k] & ~0x20) == known[i][k]; k++)
-            ;
-        if (!e[k] && !known[i][k])
-            return 1;
-    }
-    return 0;
-}
+static char home[260];                  /* where IMAGES.EXE is: PAINT.EXE is beside it */
 
 static void status_line(void);
-
-/* The file's bytes (NULL: not read). */
-static unsigned char *read_all(const char *path, size_t *pn)
-{
-    FILE *f = gui_fopen(path, "rb");
-    unsigned char *d = NULL;
-    size_t n = 0, room = 0, k;
-    if (!f)
-        return NULL;
-    for (;;) {
-        if (n == room) {
-            unsigned char *nd = realloc(d, room = room * 2 + 65536);
-            if (!nd)
-                break;
-            d = nd;
-        }
-        if (!(k = fread(d + n, 1, room - n, f)))
-            break;
-        n += k;
-    }
-    fclose(f);
-    *pn = n;
-    return d;
-}
-
-/* A picture's pixels from its file's bytes (00RRGGBBh; NULL: not one Images can show); kind: its type. */
-static unsigned *decode(const unsigned char *d, size_t n, const char *path, int *pw, int *ph, char *kind, size_t room)
-{
-    unsigned *px = NULL;
-    int w = 0, h = 0, comp;
-    if (!strcmp(ext_of(path), "PCX")) {
-        px = pcx(d, n, &w, &h);
-        snprintf(kind, room, "PCX");
-    } else {
-        unsigned char *rgba = stbi_load_from_memory(d, (int)n, &w, &h, &comp, 4);
-        if (rgba) {
-            size_t i, all = (size_t)w * (size_t)h;
-            unsigned back = GUI_DARK, br = back >> 16 & 255, bg = back >> 8 & 255, bb = back & 255;
-            px = malloc(all * sizeof *px);
-            for (i = 0; px && i < all; i++) {   /* (alpha: over the view's backdrop) */
-                unsigned a = rgba[i * 4 + 3], r = rgba[i * 4], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
-                r = (r * a + br * (255 - a)) / 255, g = (g * a + bg * (255 - a)) / 255, b = (b * a + bb * (255 - a)) / 255;
-                px[i] = r << 16 | g << 8 | b;
-            }
-            stbi_image_free(rgba);
-        }
-        snprintf(kind, room, "%s", ext_of(path));
-    }
-    *pw = w, *ph = h;
-    return px;
-}
 
 static int load(const char *path)
 {
@@ -194,11 +47,11 @@ static int load(const char *path)
     size_t n = 0;
     int w = 0, h = 0;
     unsigned *px = NULL;
-    if (!(d = read_all(path, &n))) {
+    if (!(d = pic_read_all(path, &n))) {
         gui_message(win, GUI_T("Images"), GUI_T("The file isn't there."), GUI_MB_OK);
         return -1;
     }
-    px = decode(d, n, path, &w, &h, pic.kind, sizeof pic.kind);
+    px = pic_decode(d, n, path, &w, &h, pic.kind, sizeof pic.kind, GUI_DARK);
     free(d);
     if (!px) {
         char t[300], name[128];
@@ -249,7 +102,7 @@ static void step(int by)
             at = i;
     for (k = 1; k <= n; k++) {
         i = ((at < 0 ? 0 : at) + by * k + n * 2) % n;
-        if (!e[i].dir && is_picture(e[i].name)) {
+        if (!e[i].dir && pic_is_picture(e[i].name)) {
             gui_path_join(next, sizeof next, dir, e[i].name);
             free(e);
             load(next);
@@ -276,22 +129,22 @@ static void make_thumb(const char *path, int room_w, int room_h)
 {
     unsigned char *d;
     size_t n = 0;
-    int w = 0, h = 0, comp, x, y;
+    int w = 0, h = 0, x, y;
     unsigned *px;
     free(thumb.px);
     memset(&thumb, 0, sizeof thumb);
     snprintf(thumb.path, sizeof thumb.path, "%s", path);
-    if (!(d = read_all(path, &n)))
+    if (!(d = pic_read_all(path, &n)))
         return;
-    if (strcmp(ext_of(path), "PCX") && stbi_info_from_memory(d, (int)n, &w, &h, &comp)) {
+    if (strcmp(pic_ext(path), "PCX") && pic_info(d, n, &w, &h)) {
         thumb.iw = w, thumb.ih = h;
-        snprintf(thumb.kind, sizeof thumb.kind, "%s", ext_of(path));
+        snprintf(thumb.kind, sizeof thumb.kind, "%s", pic_ext(path));
         if ((long)w * h > THUMB_MAX) {
             free(d);
             return;
         }
     }
-    px = decode(d, n, path, &w, &h, thumb.kind, sizeof thumb.kind);
+    px = pic_decode(d, n, path, &w, &h, thumb.kind, sizeof thumb.kind, GUI_DARK);
     free(d);
     if (!px)
         return;
@@ -331,7 +184,7 @@ static void preview(struct gui_widget *pane, struct gfx_surface *s, const char *
     int room_h = pane->r.h - 30;
     char t[48];
     (void)ctx;
-    if (!is_picture(gui_path_name(path)))
+    if (!pic_is_picture(gui_path_name(path)))
         return;
     if (strcmp(thumb.path, path) != 0)
         make_thumb(path, pane->r.w - 8, room_h);
@@ -464,8 +317,7 @@ static void details(void)
     gui_button(row, GUI_T("OK"), details_ok, 1)->flags |= GUI_DEFAULT | GUI_CANCEL;
     printf("IMAGES details %s\n", pic.path);
     fflush(stdout);
-    gui_modal(d);
-    gui_close(d);
+    gui_modal(d);                               /* (which closes it) */
 }
 
 /* ---- the slideshow (phase E): the folder's next picture every few seconds, round and round, until it is
@@ -565,6 +417,17 @@ static void command(struct gui_window *w, int id)
     case C_DETAILS: details(); break;
     case C_SLIDES: slideshow(!sliding); break;
     case C_FULL: fullscreen(!full); break;
+    case C_EDIT:                                /* the picture's file opened in Paint (the editor: paint.md) */
+        if (pic.path[0]) {
+            char cmd[600];
+            snprintf(cmd, sizeof cmd, "%s\\PAINT.EXE %s", home, pic.path);
+            glos_job_run(cmd, home, 0, GLOS_RUN_HIDDEN, GLOS_RUNF_DETACH, 0);
+            if (glos_error() != 0)
+                gui_message(win, GUI_T("Images"), GUI_T("Paint couldn't be started."), GUI_MB_OK);
+            printf("IMAGES edit %s\n", pic.path);
+            fflush(stdout);
+        }
+        break;
     case C_FIT: fit = 1; changed(); break;
     case C_ACTUAL: fit = 0, zoom = 3; changed(); break;
     case C_IN:
@@ -609,6 +472,7 @@ static int key(struct gui_window *w, struct gui_ev *e)      /* (the arrows are t
     case 'l': case 'L': command(win, C_LEFT); return 1;
     case 'r': case 'R': command(win, C_RIGHT); return 1;
     case 's': case 'S': command(win, C_SLIDES); return 1;
+    case 'e': case 'E': command(win, C_EDIT); return 1;
     case 'f': case 'F': command(win, C_FIT); return 1;
     case '1': command(win, C_ACTUAL); return 1;
     case '+': case '=': command(win, C_IN); return 1;
@@ -637,6 +501,16 @@ int main(int argc, char **argv)
         printf("IMAGES no GLOS\n");
         return 1;
     }
+    {                                           /* (DJGPP gives the program's name with / and its case) */
+        char *p;
+        snprintf(home, sizeof home, "%s", argv[0]);
+        for (p = home; *p; p++)
+            *p = *p == '/' ? '\\' : (*p >= 'a' && *p <= 'z') ? (char)(*p - 32) : *p;
+        if (strrchr(home, '\\'))
+            *strrchr(home, '\\') = 0;
+        else
+            snprintf(home, sizeof home, "%s", glos_home());
+    }
     win = gui_window(GUI_T("Images"), 480, 360, 0);
     gui_window_icon(win, "app-images");
     win->on_command = command;
@@ -648,6 +522,7 @@ int main(int argc, char **argv)
     gui_menu_item(m, GUI_T("&Next"), C_NEXT, GUI_T("PgDn"));
     gui_menu_item(m, GUI_T("&Previous"), C_PREV, GUI_T("PgUp"));
     gui_menu_item(m, GUI_T("&Details"), C_DETAILS, GUI_T("Alt+Enter"));
+    gui_menu_item(m, GUI_T("&Edit in Paint"), C_EDIT, "E");
     gui_menu_sep(m);
     gui_menu_item(m, GUI_T("E&xit"), C_EXIT, NULL);
     m = gui_menu(bar, GUI_T("&View"));
@@ -683,6 +558,7 @@ int main(int argc, char **argv)
             { 0, NULL, NULL, NULL },
             { C_SLIDES, GUI_N("&Slideshow"), "play", GUI_N("Slideshow (S)") },
             { C_DETAILS, GUI_N("&Details"), "info", GUI_N("Details (Alt+Enter)") },
+            { C_EDIT, GUI_N("&Edit in Paint"), "edit", GUI_N("Edit in Paint (E)") },
         };
         struct gui_widget *tb = gui_toolbar(win);
         size_t k;

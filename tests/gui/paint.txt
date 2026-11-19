@@ -1,0 +1,66 @@
+# The picture editor (apps/paint; phase E, docs/v1/apps/paint.md), its first part: a drawing session with each
+# tool by its key and the mouse (a drag is one straight move; the picture's corner is at 120, 79 of the window),
+# the first colour from the palette, shapes filled, a flood, the picker, the eraser; undo and redo; the picture
+# saved as a PNG, a new one made, the saved one opened: it is the picture that was saved (the toolbar is masked
+# in the two that are compared: Undo is grey after a file is opened).
+run PAINT.EXE
+wait "Untitled - Paint"
+shot start "Untitled - Paint"
+drag "Untitled - Paint" 130 89 180 89
+key b
+drag "Untitled - Paint" 130 109 180 139
+key l
+drag "Untitled - Paint" 200 89 300 139
+key r
+drag "Untitled - Paint" 130 159 200 209
+click "Untitled - Paint" 192 366
+key alt+t
+key d
+key o
+drag "Untitled - Paint" 220 159 320 219
+key f
+click "Untitled - Paint" 160 179
+key i
+click "Untitled - Paint" 150 89
+key e
+drag "Untitled - Paint" 240 169 300 169
+shot drawn "Untitled - Paint"
+key ctrl+z
+key ctrl+z
+shot undone "Untitled - Paint"
+key ctrl+y
+key ctrl+y
+key p
+shot again "Untitled - Paint" 0 20 560 26
+key ctrl+s
+wait "Save As"
+type C:\\OUT\\P1.PNG\n
+wait "P1.PNG - Paint"
+key ctrl+n
+wait "New Picture"
+key enter
+wait "Untitled - Paint"
+shot new "Untitled - Paint"
+key ctrl+o
+wait "Open"
+type C:\\OUT\\P1.PNG\n
+wait "P1.PNG - Paint"
+key p
+shot opened "P1.PNG - Paint" 0 20 560 26
+same again opened
+key alt+f4
+expect PAINT new 320x240
+expect PAINT drew pencil 10,10 60,10 000000
+expect PAINT drew brush 10,30 60,60 000000
+expect PAINT drew line 80,10 180,60 000000
+expect PAINT drew rectangle 10,80 80,130 000000
+expect PAINT colours FF0000 FFFFFF
+expect PAINT filled 1
+expect PAINT drew ellipse 100,80 200,140 FF0000
+expect PAINT pick 000000
+expect PAINT drew eraser 120,90 180,90 FFFFFF
+expect PAINT undone
+expect PAINT redone
+expect PAINT saved C:\OUT\P1.PNG 320x240
+expect PAINT open C:\OUT\P1.PNG 320x240 PNG
+expect PAINT end

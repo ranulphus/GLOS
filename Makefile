@@ -162,6 +162,8 @@ host-test-run:
 	  && build/host/calc_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iinclude -o build/host/lex_test tests/host/lex_test.c apps/notepad/lexers.c \
 	  && build/host/lex_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/paint_test tests/host/paint_test.c apps/paint/paintdoc.c \
+	  && build/host/paint_test
 
 # The toolkit (sdk/gui, M9) and the apps on the host, against tests/host/glosshim.c: each test script
 # (tests/gui/NAME.txt) run at 8, 16 and 32 bits, its shots written to build/host/gui/ (the goldens Loop A's
@@ -175,7 +177,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
-APPS := notepad calc images term files monitor control
+APPS := notepad calc images term files monitor control paint
 # (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
 # shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
@@ -189,6 +191,11 @@ build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/g
 endef
 # The terminal's ssh (M10): the client for the host too, 32-bit as the rest, its crypto without -Werror.
 APP_HOST_LIBS_term := tests/host/shimshell.c sdk/shell/shell.c sdk/shell/edit.c
+# Pictures read and written: one code in the viewer and the editor (apps/shared/picfile.c).
+APP_HOST_LIBS_images := apps/shared/picfile.c
+APP_HOST_LIBS_paint := apps/shared/picfile.c
+APP_LIBS_images := apps/shared/picfile.c
+APP_LIBS_paint := apps/shared/picfile.c
 build/host/libsshc32.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h
 	@mkdir -p build/host/sshc32
 	$(Q)echo "  CC      $@"

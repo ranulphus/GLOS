@@ -1,0 +1,14 @@
+#loopa-run-only (the host has no other program to start)
+# Images' Edit (apps/images; phase E): the picture shown is opened in Paint, the editor beside it; Paint closed,
+# Images is as it was.
+run IMAGES.EXE C:\GUI\IMG\A.PNG
+wait "A.PNG - Images"
+key e
+wait "A.PNG - Paint"
+key alt+f4
+gone "A.PNG - Paint"
+pause 1000
+key alt+f4
+gone "A.PNG - Images"
+expect IMAGES edit C:\GUI\IMG\A.PNG
+expect IMAGES end
