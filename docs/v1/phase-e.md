@@ -133,7 +133,7 @@ are as they were).
 - **Tests:** `files-find` on the host and on Loop A (a wildcard's four, one gone to, a piece of a name).
 - **A paste onto a name that is there already is asked about** (the fourth part): Replace (a file: written
   over; a folder: what is copied goes into it, over its files of the same names), Skip, Keep Both (the copy
-  gets a free name of DOS's kind, `LETTER~1.TXT`), or Cancel, which stops the paste there; "Do this for all"
+  gets a free name of DOS's kind, `LETTER~1.TXT`), or Cancel (nothing of the paste is done); "Do this for all"
   answers for the rest of the paste. Until now a paste wrote over what was there without a word. A copy into
   its own folder gets a free name too (it took `~1` whatever was there); a move into its own folder does
   nothing; a folder is not put into itself.
@@ -144,10 +144,25 @@ are as they were).
 - **Tests:** `files-clash` on the host and on Loop A (two files copied, pasted again: Keep Both for all; again:
   Skip one, Replace the other; then it deletes what it made: Loop A runs the scripts on one disk, in their
   names' order, and the ones after it count the folder's files).
-- **Not done yet:** the rest of the plan: views (small icons, a list, resized columns), folders that load as
-  they go, long names, operations in the background with their progress, "open with" and apps' entries in the
-  context menu, archives as folders, a search that goes on in the background and looks inside files, a
-  folder's size counted in the background, thumbnails.
+- **A paste's work is a job in the background** (the fifth part): the copying and moving is done on a thread of
+  the toolkit's (`gui_task`), so Files' windows, the desktop among them, go on answering. Every question (a
+  name that is there already) is asked first; Cancel there now means nothing of the paste is done. What there
+  is to copy is counted (kilobytes), for a bar and "About N seconds left". A job that has run a second has a
+  window of its own ("Copying", "Moving": the item in hand, the bar, the time left, Cancel), which is no dialog
+  over anything: the folder may be closed and the work goes on, and Files itself stays until its jobs are
+  done. Cancel stops after the piece of a file in hand; a file cut short is taken away (so is one that could
+  not be written whole: a piece of a file was left before).
+- **Files is the first app with threads:** linked with the C library's lock (`@build/sdk/gloswrap.opt`; the
+  Makefile's `APP_LINK_files`), its map checked by `tools/wrapcheck.py`. The toolkit's file helpers hold that
+  lock over `localtime` in a program with tasks (`gui_libc_hook`): a folder read on a task's thread and one
+  read on the window's would otherwise have each other's dates.
+- **Tests:** every script that pastes goes through a job now (`files`, `files-clash`); `files-job` on Loop A
+  (`FILES -browse DIR -slowcopy` waits ten seconds before each file: the job's window comes, Esc stops it,
+  nothing was copied).
+- **Not done yet:** the rest of the plan: Delete as a job, and a job's files' dates kept as they were; views
+  (small icons, a list, resized columns), folders that load as they go, long names, "open with" and apps'
+  entries in the context menu, archives as folders, a search that goes on in the background and looks inside
+  files, a folder's size counted in the background, thumbnails, drag and drop, the Recycle folder.
 
 ## What is next
 

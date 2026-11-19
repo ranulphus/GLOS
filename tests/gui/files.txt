@@ -28,6 +28,7 @@ type b
 key enter
 wait "C:\FM\BACKUP"
 key ctrl+v
+pause 1500
 shot backup "C:\FM\BACKUP"
 file C:\FM\BACKUP\README.TXT readme\r\n
 key ctrl+w

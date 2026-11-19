@@ -213,45 +213,85 @@ static int chosen_paths(struct view *v, char (*out)[260], int room)
 
 /* ---- copying, moving, removing: folders with what is in them */
 
-static int copy_file(const char *from, const char *to)
+/* A paste's work is done in the background (phase E; docs/v1/apps/files.md, File operations): on a thread of
+   the toolkit's (gui_task), so that Files' windows, the desktop among them, go on answering. What there is to
+   copy is counted first (in kilobytes), for a bar and the time left. A job that has run a second has a window
+   of its own, no dialog over anything: its folder may be closed and the work goes on, and Files stays until it
+   is done. Cancel stops it after the piece of a file in hand; the file cut short is taken away.
+
+   The functions down to job_work run on the work's thread: nothing of a window is touched there. What the
+   window's thread shows it reads from the job's counts (job_tick). */
+
+#define JOB_ITEMS 64
+#define JOB_BUF 16384
+
+struct job {
+    struct job *next;
+    struct gui_task *task;              /* (NULL: no threads to be had, done at once on the window's thread) */
+    struct gui_window *win;             /* its progress: made with it, shown when it has run a second */
+    struct gui_widget *line, *left, *bar;
+    char *buf;
+    unsigned began;
+    int n, cut, shown;
+    volatile int at, ok, counted;       /* the item in hand, the items done well, the count is whole */
+    volatile unsigned total_kb, done_kb;
+    char from[JOB_ITEMS][260], to[JOB_ITEMS][260];
+};
+
+static struct job *jobs;
+int folder_slow;                        /* -slowcopy (the suites'): ten seconds before each file, to cancel in */
+
+static int job_stopped(struct job *j) { return j->task && gui_task_cancelled(j->task); }
+
+static int copy_file(struct job *j, const char *from, const char *to)
 {
-    FILE *a = gui_fopen(from, "rb"), *b;
-    char buf[8192];
+    FILE *a, *b;
     size_t n;
-    int bad = 0;
-    if (!a)
+    unsigned part = 0;
+    int bad = 0, k;
+    for (k = 0; folder_slow && k < 200 && !job_stopped(j); k++)
+        glos_sleep(50);
+    if (job_stopped(j) || !(a = gui_fopen(from, "rb")))
         return -1;
     if (!(b = gui_fopen(to, "wb"))) {
         fclose(a);
         return -1;
     }
-    while ((n = fread(buf, 1, sizeof buf, a)) > 0)
-        if (fwrite(buf, 1, n, b) != n)
+    while (!bad && (n = fread(j->buf, 1, JOB_BUF, a)) > 0) {
+        if (fwrite(j->buf, 1, n, b) != n)
             bad = 1;
+        part += (unsigned)n;
+        j->done_kb += part >> 10;
+        part &= 1023;
+        if (job_stopped(j))
+            bad = 1;
+    }
     fclose(a);
     if (fclose(b) != 0)
         bad = 1;
+    if (bad)
+        gui_unlink(to);                         /* (a piece of a file is no copy) */
     return bad ? -1 : 0;
 }
 
-static int copy_tree(const char *from, const char *to)
+static int copy_tree(struct job *j, const char *from, const char *to)
 {
     struct gui_dirent *e;
     int n, i, bad = 0;
     char a[260], b[260];
     if (!gui_is_dir(from))
-        return copy_file(from, to);
+        return copy_file(j, from, to);
     if (gui_mkdir(to) != 0 && !gui_is_dir(to))
         return -1;
     if ((n = gui_dir_read(from, &e)) < 0)
         return -1;
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < n && !job_stopped(j); i++) {
         gui_path_join(a, sizeof a, from, e[i].name);
         gui_path_join(b, sizeof b, to, e[i].name);
-        bad |= copy_tree(a, b) != 0;
+        bad |= copy_tree(j, a, b) != 0;
     }
     free(e);
-    return bad ? -1 : 0;
+    return bad || job_stopped(j) ? -1 : 0;
 }
 
 static int remove_tree(const char *path)
@@ -271,10 +311,155 @@ static int remove_tree(const char *path)
     return bad ? -1 : gui_rmdir(path);
 }
 
+/* What there is to copy, in kilobytes (a file's rounded up). */
+static void job_count(struct job *j, const char *path, int depth)
+{
+    struct gui_dirent st, *e;
+    int n, i;
+    char p[260];
+    if (job_stopped(j))
+        return;
+    if (!gui_is_dir(path)) {
+        if (gui_stat(path, &st) == 0)
+            j->total_kb += (st.size + 1023) >> 10;
+        return;
+    }
+    if (depth > 24 || (n = gui_dir_read(path, &e)) < 0)
+        return;
+    for (i = 0; i < n; i++)
+        if (e[i].dir) {
+            gui_path_join(p, sizeof p, path, e[i].name);
+            job_count(j, p, depth + 1);
+        } else {
+            j->total_kb += (e[i].size + 1023) >> 10;
+        }
+    free(e);
+}
+
+static void job_work(struct gui_task *t, void *arg)
+{
+    struct job *j = arg;
+    int i;
+    (void)t;
+    for (i = 0; i < j->n; i++)
+        job_count(j, j->from[i], 0);
+    j->counted = 1;
+    for (i = 0; i < j->n && !job_stopped(j); i++) {
+        j->at = i;
+        if (j->cut ? (gui_rename(j->from[i], j->to[i]) == 0
+                      || (copy_tree(j, j->from[i], j->to[i]) == 0 && remove_tree(j->from[i]) == 0))
+                   : copy_tree(j, j->from[i], j->to[i]) == 0)
+            j->ok++;
+    }
+}
+
+/* ---- ... and on the window's thread: its progress, and its end */
+
+static void job_tick(void *arg)                 /* four times a second while there are jobs */
+{
+    struct job *j;
+    (void)arg;
+    for (j = jobs; j; j = j->next) {
+        unsigned run = glos_ticks() - j->began, total = j->total_kb, done = j->done_kb;
+        char t[200], name[128];
+        int at = j->at;
+        if (!j->shown) {
+            if (run < 1000)
+                continue;
+            j->shown = 1;
+            gui_show(j->win, 1);
+            say("progress", j->cut ? "moving" : "copying");
+        }
+        if (done > total)
+            done = total;
+        snprintf(t, sizeof t, GUI_T("%s (%d of %d)"), gui_dos_text(gui_path_name(j->from[at]), name, sizeof name),
+                 at + 1, j->n);
+        gui_set_text(j->line, t);
+        if (job_stopped(j)) {
+            snprintf(t, sizeof t, "%s", GUI_T("Stopping..."));
+        } else if (!j->counted || !done || run < 3000) {
+            snprintf(t, sizeof t, "%s", GUI_T("Working out how long it takes..."));
+        } else {
+            unsigned left = (unsigned)((unsigned long long)run * (total - done) / done / 1000);
+            if (left < 90)
+                snprintf(t, sizeof t, GUI_T("About %u seconds left"), left < 5 ? 5 : (left + 4) / 5 * 5);
+            else
+                snprintf(t, sizeof t, GUI_T("About %u minutes left"), (left + 30) / 60);
+        }
+        gui_set_text(j->left, t);
+        gui_progress_set(j->bar, (int)(done >> 2), (total >> 2) ? (int)(total >> 2) : 1);
+    }
+}
+
+static void job_cancel(struct gui_widget *b, int what)
+{
+    struct job *j = b->win->user;
+    (void)what;
+    if (j->task)
+        gui_task_cancel(j->task);
+}
+
+static void job_close(struct gui_window *w)     /* (its close box: Cancel; it goes when the work has stopped) */
+{
+    struct job *j = w->user;
+    if (j->task)
+        gui_task_cancel(j->task);
+}
+
+static void job_done(struct gui_window *owner, void *arg, int cancelled)
+{
+    struct job *j = arg, **p;
+    struct view *v;
+    char t[80];
+    (void)owner;
+    for (p = &jobs; *p; p = &(*p)->next)
+        if (*p == j) {
+            *p = j->next;
+            break;
+        }
+    if (!jobs)
+        gui_idle(job_tick, NULL, 0);
+    snprintf(t, sizeof t, "%d %s%s", j->ok, j->cut ? "moved" : "copied", cancelled ? " stopped" : "");
+    say("pasted", t);
+    for (v = views; v; v = v->next)             /* (where it wrote and what it took from, shown as they are now) */
+        fill(v);
+    gui_close(j->win);
+    free(j->buf);
+    free(j);
+}
+
+static void job_start(struct job *j)
+{
+    struct gui_widget *box, *row;
+    j->began = glos_ticks();
+    j->win = gui_window(j->cut ? GUI_T("Moving") : GUI_T("Copying"), 320, 0, GUI_W_DIALOG);
+    j->win->user = j;
+    j->win->on_close = job_close;
+    box = gui_vbox(j->win->root, 6, 8);
+    j->line = gui_label(box, " ");
+    gui_size(j->line, 300, 0);
+    j->bar = gui_progress(box, 100);
+    gui_size(j->bar, 300, 0);
+    j->left = gui_label(box, " ");
+    gui_size(j->left, 300, 0);
+    row = gui_hbox(box, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("Cancel"), job_cancel, 0)->flags |= GUI_CANCEL;
+    j->next = jobs;
+    jobs = j;
+    if (!(j->task = gui_task_start(NULL, NULL, job_work, j, job_done, 0))) {
+        job_work(NULL, j);                      /* (no threads to be had: done here, the window waiting) */
+        job_done(NULL, j, 0);
+        return;
+    }
+    gui_idle(job_tick, NULL, 250);
+}
+
 /* A paste onto a name that is there already (phase E) is asked about: Replace (a file: written over; a folder:
    what is copied goes into it, over its files of the same names), Skip, Keep Both (the copy gets a name that
-   is free: LETTER~1.TXT), or Cancel, which stops the paste there; "for all" answers for the rest of this
-   paste. Before this a paste wrote over what was there without a word. */
+   is free: LETTER~1.TXT), or Cancel, with which nothing of the paste is done; "for all" answers for the rest
+   of this paste. All of it is asked before any of it is done (the work is a job's, below). Before this a paste
+   wrote over what was there without a word. */
 enum { CLASH_REPLACE = 1, CLASH_SKIP, CLASH_BOTH, CLASH_STOP };
 
 static struct {
@@ -344,10 +529,16 @@ static int inside(const char *from, const char *to)
 
 static void paste(struct view *v)
 {
-    int i, done = 0, all = 0;
-    char to[260], t[80];
+    struct job *j;
+    int i, all = 0;
+    char to[260];
     struct gui_dirent e;
-    for (i = 0; i < clip.n; i++) {
+    if (!clip.n || !(j = calloc(1, sizeof *j)) || !(j->buf = malloc(JOB_BUF))) {
+        say("pasted", clip.cut ? "0 moved" : "0 copied");
+        return;
+    }
+    j->cut = clip.cut;
+    for (i = 0; i < clip.n && j->n < JOB_ITEMS; i++) {
         const char *name = gui_path_name(clip.paths[i]);
         int dir = gui_is_dir(clip.paths[i]);
         gui_path_join(to, sizeof to, v->dir, name);
@@ -359,23 +550,29 @@ static void paste(struct view *v)
             continue;
         } else if (gui_stat(to, &e) == 0) {     /* one of that name is here already */
             int a = all ? all : clash_ask(v, name, dir && e.dir);
-            if (a == CLASH_STOP)
-                break;
+            if (a == CLASH_STOP) {              /* Cancel: nothing of this paste is done */
+                free(j->buf);
+                free(j);
+                say("pasted", "cancelled");
+                return;
+            }
             if (!all && clash.for_all)
                 all = a;
             if (a == CLASH_SKIP || (a == CLASH_BOTH && free_name(v->dir, name, to, sizeof to) != 0))
                 continue;
         }
-        if (clip.cut ? (gui_rename(clip.paths[i], to) == 0
-                        || (copy_tree(clip.paths[i], to) == 0 && remove_tree(clip.paths[i]) == 0))
-                     : copy_tree(clip.paths[i], to) == 0)
-            done++;
+        snprintf(j->from[j->n], sizeof j->from[0], "%s", clip.paths[i]);
+        snprintf(j->to[j->n++], sizeof j->to[0], "%s", to);
     }
     if (clip.cut)
         clip.n = 0;
-    snprintf(t, sizeof t, "%d %s", done, clip.cut ? "moved" : "copied");
-    say("pasted", t);
-    fill(v);
+    if (!j->n) {
+        say("pasted", j->cut ? "0 moved" : "0 copied");
+        free(j->buf);
+        free(j);
+        return;
+    }
+    job_start(j);                               /* (its end says what was pasted, and shows the folders anew) */
 }
 
 /* ---- the commands */

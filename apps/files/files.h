@@ -38,5 +38,6 @@ void browser_open(const char *dir);
 void folder_changed(unsigned watch);
 void folders_save(void);
 void folders_load(void);
+extern int folder_slow;                 /* -slowcopy, the suites': a paste waits ten seconds before each file */
 
 #endif

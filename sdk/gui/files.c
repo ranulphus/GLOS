@@ -45,16 +45,26 @@ static const char *native(const char *path, char *buf, size_t room)
 #endif
 }
 
+void (*gui_libc_hook)(int on);
+
+/* (localtime keeps its answer in memory of its own: in a program with tasks, a folder read on a task's thread
+   and one read on the window's would have each other's dates. The C library's lock is held over the call and
+   the reading of its answer.) */
 static void dos_time(time_t t, unsigned short *date, unsigned short *tm)
 {
-    struct tm *g = localtime(&t);
+    struct tm *g;
+    if (gui_libc_hook)
+        gui_libc_hook(1);
+    g = localtime(&t);
     if (!g || g->tm_year < 80) {
         *date = (1 << 5) | 1;
         *tm = 0;
-        return;
+    } else {
+        *date = (unsigned short)(((g->tm_year - 80) << 9) | ((g->tm_mon + 1) << 5) | g->tm_mday);
+        *tm = (unsigned short)((g->tm_hour << 11) | (g->tm_min << 5) | (g->tm_sec / 2));
     }
-    *date = (unsigned short)(((g->tm_year - 80) << 9) | ((g->tm_mon + 1) << 5) | g->tm_mday);
-    *tm = (unsigned short)((g->tm_hour << 11) | (g->tm_min << 5) | (g->tm_sec / 2));
+    if (gui_libc_hook)
+        gui_libc_hook(0);
 }
 
 static int upper(int c) { return c >= 'a' && c <= 'z' ? c - 32 : c; }

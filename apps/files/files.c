@@ -460,6 +460,7 @@ int main(int argc, char **argv)
         snprintf(files_home, sizeof files_home, "%s", glos_home());
     gui_on_event(app_event);
     folders_load();
+    folder_slow = argc > 3 && !strcmp(argv[3], "-slowcopy");   /* (FILES -browse DIR -slowcopy: the suites') */
     if (!strcmp(mode, "-browse")) {
         browser_open(argc > 2 ? argv[2] : glos_boot_root());
     } else if (!strcmp(mode, "-folder") && argc > 2) {

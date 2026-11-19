@@ -259,6 +259,14 @@ static int task_event(unsigned code)
     return 1;
 }
 
+static void libc_lock(int on)
+{
+    if (on)
+        glos_libc_lock();
+    else
+        glos_libc_unlock();
+}
+
 struct gui_task *gui_task_start(struct gui_window *owner, const char *title, gui_task_fn work, void *arg,
                                 void (*done)(struct gui_window *owner, void *arg, int cancelled), unsigned flags)
 {
@@ -266,6 +274,7 @@ struct gui_task *gui_task_start(struct gui_window *owner, const char *title, gui
     if (start_pool() != 0 || !(t = calloc(1, sizeof *t)))
         return NULL;
     gui_post_hook = task_event;
+    gui_libc_hook = libc_lock;
     t->owner = owner, t->work = work, t->arg = arg, t->done = done, t->flags = flags;
     snprintf(t->title, sizeof t->title, "%s", title ? title : "");
     t->began = gui_now();

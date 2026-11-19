@@ -1,0 +1,21 @@
+#loopa-run-only (a job's window comes after a second of its work: on the host the clock is the script's own)
+# A paste's work is a job in the background (apps/files; phase E): with -slowcopy (the suites') a job waits ten
+# seconds before each file, so its window is there to be cancelled: Esc stops it, nothing was copied, and the
+# folder is as it was.
+run FILES.EXE -browse C:\FM\DOCS -slowcopy
+wait "C:\FM\DOCS - Files"
+key ctrl+a
+key ctrl+c
+key ctrl+l
+type c:\\fm\\games\n
+wait "C:\FM\GAMES - Files"
+key ctrl+v
+wait "Copying"
+key esc
+gone "Copying"
+pause 1000
+key alt+f4
+gone "C:\FM\GAMES - Files"
+expect FILES progress copying
+expect FILES pasted 0 copied stopped
+expect FILES end 

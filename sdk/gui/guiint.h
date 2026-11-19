@@ -106,6 +106,9 @@ void gui_menu_to(struct gui_menu *m, struct gui_widget *w, void (*fn)(struct gui
                                                 /* the menu's choice to w's fn, not the window's on_command */
 
 /* ---- task.c */
+extern void (*gui_libc_hook)(int on);           /* (files.c) the C library's lock taken (1) and given back (0), in a
+                                                   program with tasks (task.c sets it: glos_libc_lock is in such a
+                                                   program only); NULL: one thread, nothing to lock */
 extern int (*gui_post_hook)(unsigned code);     /* (core.c) an event of the app's own: 1 if it was the tasks'
                                                    (handled); NULL until a task is started */
 void gui_modal_on(struct gui_window *w);        /* (core.c) w shown, the app's other windows deaf, without waiting
