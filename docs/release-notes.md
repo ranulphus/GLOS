@@ -18,6 +18,9 @@ in its `docs/milestones-*.md`.
   says `app mode 640x480` while it is so; the log has `GLOS-DISPLAY app mode=...` and `app off`.
 - The sizes are those the card's BIOS has at the desktop's depth (`GLOS_DRAW_MODES`); a window of another size
   (320 by 240 on most cards) stays composed in the middle (`docs/v1/fullscreen-apps.md`, F3).
+- **A toolkit fix beside it:** Alt+F4 typed with a menu open, or just after a menu's item on a slow PC, closed
+  the menu alone or nothing at all (GLOS asks the window that has the keyboard, which was the menu's pop-up).
+  It is the window's now whose menu it was.
 
 ## A full-screen window is shown as it is (API 2.7, 2026-11-19)
 

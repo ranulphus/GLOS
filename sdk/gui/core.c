@@ -637,7 +637,8 @@ struct gui_window *gui_window_of(unsigned id)
 /* The pop-ups closed lately, and whose they were. GLOS sends a key to the window that has the keyboard as it is
    pressed: a key typed just after a menu's item was chosen, while the app (a slow PC's) had not yet closed the
    menu, comes for the pop-up, which is gone by the time it is looked at: it is the pop-up's owner's then (it was
-   dropped: B typed after Layers' New Layer in Paint's suite on the 486 chose no brush). */
+   dropped: B typed after Layers' New Layer in Paint's suite on the 486 chose no brush). Alt+F4 the same: GLOS
+   asks the pop-up to close, and the request is its owner's (Notepad was not closed after View's Line Numbers). */
 static struct {
     unsigned id;
     struct gui_window *owner;
@@ -1239,7 +1240,7 @@ static int os_from(const struct glos_ev *e, struct os_event *o)
 static void dispatch(const struct os_event *ev)
 {
     struct gui_window *w = gui_window_of(ev->window);
-    if (!w && ev->type == OS_KEY)               /* (typed to a pop-up that has closed since: its owner's) */
+    if (!w && (ev->type == OS_KEY || ev->type == OS_CLOSE))    /* (for a pop-up that has closed since: its owner's) */
         w = popup_owner(ev->window);
     if (!w)
         return;
@@ -1286,6 +1287,21 @@ static void dispatch(const struct os_event *ev)
         resized(w);
         break;
     case OS_CLOSE:
+        /* Alt+F4 with a menu open: GLOS asks the window that has the keyboard, which is the menu's pop-up. The
+           menu goes, and the question is the window's whose menu it was (as it is when the pop-up has closed
+           since, above: Alt+F4 typed just after a menu's item on a slow PC closed nothing, 2026-11-19). */
+        if (w->flags & GUI_W_POPUP && w->owner) {
+            struct gui_window *o = w->owner, *t;
+            if (w->on_popdown)
+                w->on_popdown(w);
+            else
+                gui_close(w);
+            for (t = G.wins; t && t != o; t = t->next)
+                ;
+            if (!t || t->closing)
+                return;
+            w = t;
+        }
         if (deaf(w))
             return;
         if (w->on_close)

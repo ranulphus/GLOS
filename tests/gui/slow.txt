@@ -2,7 +2,10 @@
 # PC's app is busy). Alt+M and A typed at once: A is the menu's, though the menu was not open yet when A was
 # pressed (it chose nothing, and the menu stayed open, until 2026-11-19); K after it is the window's. Then, the
 # menu open: B chooses, and J typed just after it, while the pop-up still had the keyboard, is the window's (it
-# was dropped). On the host nothing is ever behind: the lines are for Loop A.
+# was dropped). Alt+F4 likewise: typed just after an item (A), the pop-up still having the keyboard, it asks the
+# window to close (the request was the pop-up's, which was gone: dropped, until 2026-11-19); and typed with the
+# menu open it closes the menu and asks the window (it closed the menu alone). The page closes at the second
+# request. On the host nothing is ever behind: the lines are for Loop A.
 run GUITEST.EXE slow
 wait "GUITEST Slow"
 quick alt+m a k
@@ -11,10 +14,18 @@ quick alt+m
 pause 5000
 quick b j
 pause 7000
+quick alt+m
+pause 5000
+quick a alt+f4
+pause 7000
+quick alt+m
+pause 5000
 key alt+f4
 gone "GUITEST Slow"
 expect GUI slow alpha
 expect GUI slow key k
 expect GUI slow beta
 expect GUI slow key j
+expect GUI slow close 1
+expect GUI slow close 2
 expect GUI end

@@ -284,6 +284,11 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
   came for the menu's pop-up, which had the keyboard as it was pressed and was gone when the app looked at it.
   It is the pop-up's owner's now (`sdk/gui/core.c`: the pop-ups closed lately are remembered, and whose they
   were). Paint's suite on the 486 again: B after Layers' New Layer chose no brush.
+- **Alt+F4 with a menu open, or typed just after its item,** closed the menu alone, or nothing (the third
+  side of the same fault): GLOS asks the window that has the keyboard to close, which is the menu's pop-up. A
+  close request for a pop-up is its owner's now, the pop-up open (it goes first) or closed since. The twentieth
+  gate's `notepad-book` on the 486: Notepad was not closed after View's Line Numbers. The Slow page of GUITEST
+  (`tests/gui/slow.txt`) has both cases.
 - **A number typed into a spin box** went on the end of the value that was there (5, then "40" typed, was 0),
   and a minus sign only changed the sign of what was there ("-50" typed over 100 was -100). The first digit
   typed is the number anew now, the next ones go on its end, and a minus sign before them makes it negative

@@ -1083,11 +1083,22 @@ static void split_page(void)
    keyboard as it is pressed; an app that is behind looks at it later, when a menu may have opened or closed
    meanwhile. This page is always behind: an idle function sleeps most of every second (a slow PC's stand-in).
    A key typed while the menu is opening is the menu's all the same (it chooses the item), and one typed just
-   after an item was chosen, the pop-up still having the keyboard, is the window's (it is not dropped). */
+   after an item was chosen, the pop-up still having the keyboard, is the window's (it is not dropped). Alt+F4
+   likewise: typed with the menu open, or just after an item of it, it is the window's (the first is only said
+   here, the second closes). */
+static int slow_closes;
+
 static void slow_idle(void *arg)
 {
     (void)arg;
     glos_sleep(900);
+}
+
+static void slow_close(struct gui_window *w)
+{
+    say("slow close %s%d", "", ++slow_closes);
+    if (slow_closes >= 2)
+        gui_close(w);
 }
 
 static void slow_command(struct gui_window *w, int id)
@@ -1113,6 +1124,7 @@ static void slow_page(void)
     win = gui_window("GUITEST Slow", 300, 140, 0);
     win->on_command = slow_command;
     win->on_key = slow_key;
+    win->on_close = slow_close;
     bar = gui_menubar(win);
     m = gui_menu(bar, "&Menu");
     gui_menu_item(m, "&Alpha", 1, NULL);
