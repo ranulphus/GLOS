@@ -534,6 +534,16 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   the job's last lines and DOS's prompt on the screen, the keyboard dead and Num Lock not toggling (interrupts
   gone, or the kernel stuck with them off). To find out: the same run without GLOS; `C:\GLOS\CRASH`.
 
+- **GLOS gone without a word, DOS carrying on** (the thirteenth gate, 2026-11-19: `gui-486dx2-vbe-8` on
+  devserver, twelve minutes into the toolkit's suite, in the folder dialog's script): the serial log's last
+  lines are a `glos shot`, and then the batch file's next commands run under DOS, the VBE mode still set: no
+  GLOS-EXIT, no panic, no crash line. The same scripts pass here, the whole suite twice on that machine. Bench
+  C's hang above has the same look (DOS's prompt on the screen after the job, the keyboard dead), and both were
+  a slow 486 under load. What it is, is not known. A guess to be proved or put away: a program's end asked of
+  DOS while DOS's current program is GLOS's own (the loader's), which DOS would then end. The kernel says so
+  at once now if that is asked (`GLOS-VM stub-end ...`, `kernel/vm/v86.c`), with the log's held lines, so that
+  the next time leaves something to go by.
+
 - **id's QUAKE.EXE 1.06 halts GLOS on bench-g400** (2026-11-14, found by the DOS-GL session; the owner: later).
   Started under GLOS with no `-mem`, on a PC where GLOS's DPMI host offers it about 403 MB, it prints "Locked 1
   Mb image" and the whole PC stops: no network, a reset needed. With `-mem 32` it runs (demo1: 91.2 fps at

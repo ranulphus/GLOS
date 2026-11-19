@@ -381,6 +381,20 @@ void vm_reset_req(const char *source)
 
 u16 vm_current_psp(void) { return vm.sda ? vm_rd16(vm.sda + 0x10) : 0; }
 
+/* A program's end (INT 20h, INT 21h 4Ch or 00h) asked from V86 code while DOS's current program is GLOS's own
+   (the loader's, which every job is a child of): DOS would end GLOS.EXE and carry on with whatever started it,
+   the kernel still under it. Seen as GLOS gone without a word and the batch file going on under DOS (the gui
+   suite on the 486 in a gate, 2026-11-19; bench C the day before, by its look). What asked for it is not known
+   yet: it is said at once here, the log's held lines with it, so that the next time leaves something. */
+static void stub_end_watch(const struct trapframe *tf, u32 ax)
+{
+    if (!vm.loader_psp || vm_current_psp() != vm.loader_psp)
+        return;
+    kprintf("GLOS-VM stub-end ax=%04x from=%04x:%04x app-psp=%04x indos=%u: GLOS's own DOS program is being ended\n", ax,
+            tf->cs & 0xFFFF, tf->eip & 0xFFFF, app_vm_psp(), vm.indos ? vm_rd8(vm.indos) : 0);
+    kprintf_flush(1);
+}
+
 /* INT 21h 4B00h/4B01h: the snapshot a kill of the coming child restores. A
    parent has one child at a time, so an older snapshot taken for the same
    parent (and any above it) belongs to programs that have ended. */
@@ -1138,6 +1152,8 @@ static int critical_error(struct trapframe *tf)
         return 0;
     if (!(ah & 0x08)) {                         /* (Fail isn't offered: DOS would make it Abort, the program's end) */
         kprintf("GLOS-DOS critical ah=%02x al=%02x code=%02x psp=%04x answer=asked\n", ah, al, tf->edi & 0xFF, psp);
+        kprintf_flush(1);                       /* (said at once: an Abort answered there ends the program, and if
+                                                   that is GLOS's own, GLOS, with the log's held lines unsaid) */
         return 0;
     }
     kprintf("GLOS-DOS critical ah=%02x drive=%c code=%02x psp=%04x answer=fail\n", ah, ah & 0x80 ? '-' : (char)('A' + al),
@@ -1203,6 +1219,7 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next, u32 at)
             return;
         break;
     case 0x20:
+        stub_end_watch(tf, 0x20FF);
         session_terminate();
         break;
     case 0x21:
@@ -1235,6 +1252,8 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next, u32 at)
             vm_exec_snap();
         if (vm.shell_state == 1 && ((ax >> 8) == 0x4C || (ax >> 8) == 0x00))
             vm_env_back();
+        if ((ax >> 8) == 0x4C || (ax >> 8) == 0x00)
+            stub_end_watch(tf, ax);
         if ((ax >> 8) == 0x4C || (ax >> 8) == 0x00)
             session_terminate();
         if ((ax >> 8) == 0x4C || (ax >> 8) == 0x00)

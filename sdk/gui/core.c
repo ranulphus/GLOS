@@ -811,6 +811,7 @@ void gui_close(struct gui_window *w)
         w->closing = 1;
         return;
     }
+    gui_menu_gone(w);                           /* (an open menu of it, or it a menu's pop-up: forgotten) */
     for (;;) {                                  /* pop-ups and dialogs of it go first */
         struct gui_window *o;
         for (o = G.wins; o && !(o->owner == w && !o->closing); o = o->next)

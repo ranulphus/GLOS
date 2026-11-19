@@ -110,6 +110,7 @@ extern void (*gui_libc_hook)(int on);           /* (files.c) the C library's loc
                                                    program with tasks (task.c sets it: glos_libc_lock is in such a
                                                    program only); NULL: one thread, nothing to lock */
 struct gui_window *gui_menu_popup_of(struct gui_window *owner);  /* (menu.c) its open menu's pop-up, or NULL */
+void gui_menu_gone(struct gui_window *w);       /* (menu.c) w is being closed: an open menu that is its is forgotten */
 extern int (*gui_post_hook)(unsigned code);     /* (core.c) an event of the app's own: 1 if it was the tasks'
                                                    (handled); NULL until a task is started */
 void gui_modal_on(struct gui_window *w);        /* (core.c) w shown, the app's other windows deaf, without waiting

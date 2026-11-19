@@ -664,6 +664,31 @@ static void popdown(struct gui_window *w)
         close_menu();
 }
 
+/* A window is going (core.c gui_close). If it is the open menu's owner, or one of the menu's pop-ups closed
+   from outside (its owner closing takes its pop-ups with it), the menu is forgotten: M would point at freed
+   windows, and gui_menu_popup_of is asked at every key. The other levels' pop-ups, if any are left, go. */
+void gui_menu_gone(struct gui_window *w)
+{
+    int i, ours = w == M.popup || w == M.owner;
+    if (!M.popup)
+        return;
+    for (i = 0; i < nunder && !ours; i++)
+        ours = U[i].popup == w;
+    if (!ours)
+        return;
+    if (M.bar && w != M.owner) {                /* (the bar is the owner's: gone with it) */
+        M.bar->open = -1;
+        gui_damage(&M.bar->w);
+    }
+    for (i = 0; i < nunder; i++)
+        if (U[i].popup != w)
+            gui_close_later(U[i].popup);
+    if (M.popup != w)
+        gui_close_later(M.popup);
+    nunder = 0;
+    M.popup = NULL, M.menu = NULL, M.bar = NULL, M.choice = NULL, M.owner = NULL;
+}
+
 /* The open menu's pop-up (the deepest), if the menu is of this window: a key GLOS sent the window before the
    pop-up had the keyboard is the menu's all the same (core.c). */
 struct gui_window *gui_menu_popup_of(struct gui_window *owner)
