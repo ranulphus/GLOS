@@ -978,6 +978,8 @@ int app_vm_pending(void) { return callq != 0; }
 
 u16 app_vm_psp(void) { return adopted ? adopted->psp : 0; }
 
+int app_is_session(const struct app *a) { return a && a->session; }
+
 int app_vm_ending(void) { return adopted && ending; }
 
 void app_vm_base(int *depth, struct trapframe **f)

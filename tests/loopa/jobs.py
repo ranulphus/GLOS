@@ -5929,6 +5929,14 @@ def api_audio_case(profile, vcard, card, sound="sb16"):
     checks, info = {"listen": agent.listening()}, ""
     try:
         checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        # First a program that is not an app (API 2.5, APITEST sndsess): its stream plays beside the desktop, and
+        # on when it takes the PC's own screen (the card was the session's alone until then); closed and opened
+        # anew there; left open at its end, which GLOS closes. Then the app's cases: the desktop's mixer plays
+        # again after such a session as it did before one.
+        checks["sess-run"] = agent.ssh("C:\\TEST\\APITEST.EXE sndsess", timeout=300)[0] == 0
+        log = agent.log().split("APITEST.EXE sndsess")[-1]
+        checks["sess-logged"] = "GLOS-AUDIO session psp=" in log and " session=1" in log and "GLOS-APP start" not in log
+        checks["sess-closed"] = len(re.findall(r"GLOS-AUDIO close app=0 stream=", log)) == 2
         checks["run"] = agent.ssh("C:\\TEST\\APITEST.EXE audio", timeout=900)[0] == 0
         cfg = agent.ssh("type C:\\TEST\\GLOS.CFG")[1].replace("\r", "")       # (the master is kept there: as the test left it)
         checks["kept"] = "volume = 50" not in cfg and "mute = on" not in cfg
@@ -5937,7 +5945,9 @@ def api_audio_case(profile, vcard, card, sound="sb16"):
         info += " timeout"
     text = agent.wait()
     cases = re.findall(r"HX-APITEST case=(\S+) ok=(\d)(.*)", text)
-    checks["cases"] = len(cases) >= 13 and all(k == "1" for c, k, w in cases)
+    checks["cases"] = len(cases) >= 13 + 7 and all(k == "1" for c, k, w in cases)
+    checks["sess-cases"] = {"sess-open", "sess-plays", "sess-full-plays", "sess-volume", "sess-close", "sess-again",
+                            "sess-again-plays"} <= {c for c, k, w in cases if k == "1"}
     checks["recorded"] = ("GLOS-SOUND record " if crystal else "GLOS-SB record ") in text
     if not checks["cases"]:
         info += " cases=%d failed-cases=%s" % (len(cases), ";".join(c + w.rstrip() for c, k, w in cases if k != "1"))

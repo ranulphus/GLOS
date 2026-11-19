@@ -21,7 +21,11 @@
  *
  * While a session runs the card is the session's (session.c): the mixer stops
  * it and starts it again after; the apps are paused meanwhile, and their
- * streams with them. */
+ * streams with them. Unless the session's own program has a stream (API 2.5:
+ * a full-screen program may open one, api2sess.c): then the mixer keeps the
+ * card, or takes it back, and plays that program's streams while it has one
+ * (the owner, 2026-11-19: our own games' sound on every card GLOS drives,
+ * whatever the graphics card). */
 #include <string.h>
 
 #include "kapi.h"
@@ -271,9 +275,13 @@ static void fill(s16 *out, u32 frames, const struct trapframe *tf)
 {
     u32 i;
     memset(mx.acc, 0, frames * 2 * sizeof mx.acc[0]);
-    for (i = 0; i < STREAMS && !apps_paused(); i++)    /* (paused apps' streams wait with them) */
-        if (st[i].a)
-            take(&st[i], frames, tf);
+    {
+        int paused = apps_paused();             /* (paused apps' streams wait with them; a full-screen program's
+                                                   own are what plays then) */
+        for (i = 0; i < STREAMS; i++)
+            if (st[i].a && (!paused || app_is_session(st[i].a)))
+                take(&st[i], frames, tf);
+    }
     {
         u16 peak[2] = { 0, 0 };
         mix_master(mx.acc, out, frames, mx.master, mx.mute, peak);
@@ -282,15 +290,22 @@ static void fill(s16 *out, u32 frames, const struct trapframe *tf)
     mx.periods++;
 }
 
-/* The mixer is the desktop's: it plays while the desktop has the screen, and
-   a session (or no desktop) has the card. */
-void mixer_desktop(int on)
+static int session_streams(void)        /* streams of a program that is not an app (API 2.5) */
 {
-    mx.desk = (u8)(on != 0);
-    midi_desktop(on);                           /* (the MIDI ports, with or without a mixer) */
+    u32 i;
+    int n = 0;
+    for (i = 0; i < STREAMS; i++)
+        n += st[i].a && app_is_session(st[i].a);
+    return n;
+}
+
+/* The card plays while the desktop has the screen, or a full-screen program has a stream of its own; otherwise
+   a session (or no desktop) has the card. */
+static void card_want(void)
+{
     if (!mx.on)
         return;
-    if (on) {
+    if (mx.desk || session_streams()) {
         mx.out = 0;
         if (!mx.card->running() && mx.card->start(mx.rate, PERIOD, fill) != 0)
             mx.on = 0;
@@ -302,6 +317,14 @@ void mixer_desktop(int on)
         mx.out = 1;
     }
     rec_update();
+}
+
+/* The mixer is the desktop's: it plays while the desktop has the screen. */
+void mixer_desktop(int on)
+{
+    mx.desk = (u8)(on != 0);
+    midi_desktop(on);                           /* (the MIDI ports, with or without a mixer) */
+    card_want();
 }
 
 /* The card records while the mixer plays and a stream in is open. */
@@ -421,7 +444,15 @@ int mixer_open(struct app *a, u32 rate, u32 channels, u32 bytes, u32 *id, u32 *l
     s->a = a;
     irq_restore(f);
     *id = s->id;
-    kprintf("GLOS-AUDIO open app=%u stream=%u rate=%u channels=%u ring=%u\n", app_id(a), s->id, rate, channels, bytes);
+    kprintf("GLOS-AUDIO open app=%u stream=%u rate=%u channels=%u ring=%u%s\n", app_id(a), s->id, rate, channels, bytes,
+            app_is_session(a) ? " session=1" : "");
+    if (app_is_session(a)) {                    /* (a full-screen program's: the card is the mixer's while it has one) */
+        card_want();
+        if (!mx.on) {                           /* (the card would not start again: no stream, and said so) */
+            mixer_close(a, s->id);
+            return GLOS_E_NO_AUDIO;
+        }
+    }
     return 0;
 }
 
@@ -500,11 +531,14 @@ static void drop(struct strm *s)
     u32 f = irq_save();
     struct glos_audio_ring *h = s->h;
     u32 pages = s->pages;
+    int sess = app_is_session(s->a);
     kprintf("GLOS-AUDIO close app=%u stream=%u periods=%u underruns=%u%s%u\n", app_id(s->a), s->id, h->periods,
             h->underruns, " short-at-close=", s->short_run);
     s->a = 0;
     irq_restore(f);
     mm_win_free(h, pages);                      /* (its mapping in the app: undone by the caller, or gone with it) */
+    if (sess)                                   /* (a full-screen program's last one: the card is the session's again) */
+        card_want();
 }
 
 int mixer_close(struct app *a, u32 id)

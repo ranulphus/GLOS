@@ -205,7 +205,9 @@ int glos_job_size(glos_handle job, unsigned cols, unsigned rows);               
 /* A stream out: rate samples a second, 1 or 2 channels of signed 16 bits, a ring of bytes (a power of two, 4096
    to 65536). *ring is its header (the samples follow at ring->ring), *id its number; either may be NULL. 0 if
    refused (glos_error(): GLOS_E_NO_AUDIO without a card). Its volume, balance, mute, pause, position and NOTIFY
-   are properties (glos_get, glos_set). */
+   are properties (glos_get, glos_set). Since API 2.5 a program that is not an app may open one too, a
+   full-screen one among them (GLOS_E_NOT_APP before 2.5): the mixer plays it while the program has it, and
+   closes it at the program's end; such a program has no events (NOTIFY tells it nothing). */
 glos_handle glos_audio_out(unsigned rate, unsigned channels, unsigned bytes, struct glos_audio_ring **ring, unsigned *id);
 /* A stream in, asked for as one out: what the card records, to be read from its ring. */
 glos_handle glos_audio_in(unsigned rate, unsigned channels, unsigned bytes, struct glos_audio_ring **ring, unsigned *id);

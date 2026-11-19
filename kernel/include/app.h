@@ -78,6 +78,7 @@ void app_kill(struct app *a, const char *why);
 int app_ending(const void *a);          /* (interrupts off) it has been killed, or is on its way out */
 void app_kill_id(u32 id, const char *why);      /* the app with that id, if it still runs */
 u32 app_id(const struct app *a);
+int app_is_session(const struct app *a); /* not an app: a full-screen program's context for its API calls (api2sess.c) */
 int apps_paused(void);                          /* a session (or an app's child program) has the machine */
 void app_kill_job(void *job);           /* the app that agent job began, if it still runs */
 void app_kill_all(const char *why);

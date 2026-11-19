@@ -54,7 +54,8 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 4            /* (2.4, phase D: SECRETS' STORE; a window's GLOS_PROP_WIN_ICON_BIG) */
+#define GLOS_MINOR 5            /* (2.5: AUDIO's OUT for a program that is not an app, full-screen too; 2.4, phase D:
+                                   SECRETS' STORE; a window's GLOS_PROP_WIN_ICON_BIG) */
 
 #define GLOS_FN(area, n) ((2u << 16) | ((unsigned)(area) << 8) | (unsigned)(n))
 #define GLOS_FN_MAJOR(fn) ((unsigned)(fn) >> 16)

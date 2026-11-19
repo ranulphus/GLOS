@@ -336,6 +336,14 @@ before that.
     - the games' sound as acceptance tests: the owner's games, whose sound libraries (DMX, HMI, Miles and others)
       each drive a Sound Blaster their own way;
     - tests in the three tiers, the virtual DSP and DMA tested on the host first.
+- **Decided (the owner, 2026-11-19): game audio now, before the rest of phase E.** Two steps:
+  - **GLOS's mixer for full-screen programs** (API 2.5): a program that is not an app may open a stream out,
+    and the mixer keeps the card (or takes it back) while it has one. For SDL's games on any graphics card;
+    SDL's half is RetroGPU's. **Built 2026-11-19** (`kernel/app/api2sess.c`, `kernel/drv/mixer.c`).
+  - **The virtual Sound Blaster** above, as the main work after it: its DSP and DMA tested on the host first,
+    then the ports and the interrupt in sessions, `BLASTER` and the mixer; FM passed through to a real OPL
+    where the card has one, a synthesiser later; the ports' sound runs in Loop A (Half-Life, PrBoom) as
+    acceptance.
 - **Decided (the owner, 2026-11-09): the ceiling is Intel's 4th and 5th generations (Haswell, Broadwell).**
   - They are the last mainstream PCs where DOS is still at home: the firmware's legacy BIOS (CSM), disks through
     INT 13h even in AHCI mode, often PS/2 ports, and EHCI beside xHCI. From Skylake on, EHCI is gone and the

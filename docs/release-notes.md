@@ -4,6 +4,19 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Sound through GLOS's mixer for full-screen programs (API 2.5, 2026-11-19)
+
+- **A program that is not an app can open a stream out** (AUDIO's OUT; `glos_audio_out`), where only an app in
+  a window could, and GLOS's mixer plays it: beside the desktop, and on when the program takes the PC's own
+  screen. Until now a full-screen program had the sound card to itself, and GLOS's mixer, with every card it
+  has a driver for, was out of its reach.
+- **The card is the mixer's while such a program has a stream**, and the session's again when it has closed its
+  last one. What it leaves open is closed at its end.
+- **For SDL's games** (the owner, 2026-11-19): one that draws by VESA, on any graphics card, can play through
+  GLOS's audio driver as one in a window does; nothing changes in the game. SDL's side is RetroGPU's.
+- Such a program has the stream's handle for CLOSE, GET and SET (its volume, balance, mute, pause, position),
+  and no events: it reads the ring's counts itself, as SDL's driver does.
+
 ## The clipboard's transactions are whole (2026-11-16)
 
 - **A copy that fails changes nothing:** in a writing clipboard transaction (API 2.0's CLIP), a put that fails

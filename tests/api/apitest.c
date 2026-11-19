@@ -2163,6 +2163,68 @@ static void feed(struct glos_audio_ring *r, unsigned ms, unsigned *phase)
 
 static int near(unsigned v, unsigned want, unsigned slack) { return v + slack >= want && v <= want + slack; }
 
+/* AUDIO for a program that is not an app (API 2.5; kernel/app/api2sess.c): no INIT here. A stream out opens and
+   plays (beside the desktop, the program being a job with no window); the program takes the PC's own screen (a
+   mode set: it is a full-screen session from there, and the card was the session's alone until 2.5) and the
+   stream plays on; closed there, the card is the session's again, and a stream opened anew takes it back. The
+   last one is left open: GLOS closes it at the program's end. (A stream runs short while a mode is set, the
+   program not feeding it: what is asked is that it plays at its rate before and after.) */
+static int sndsess_mode(void)
+{
+    struct glos_audio_ring *ring = 0;
+    glos_handle s;
+    unsigned id = 0, phase = 0;
+    int before, after;
+    char line[64];
+    __dpmi_regs r;
+
+    s = glos_audio_out(22050, 2, 16384, &ring, &id);
+    check("sess-open", s && GLOS_HANDLE_KIND(s) == GLOS_HK_STREAM && ring && ring->rate == 22050 && id
+          && prop(s, GLOS_PROP_STREAM_ID) == (int)id && !glos_is_app(), "s=%x err=%d id=%u app=%d", s, glos_error(), id,
+          glos_is_app());
+    if (!s) {
+        snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+        com1(line);
+        return fails ? fails : 1;
+    }
+    feed(ring, 300, &phase);
+    before = prop(s, GLOS_PROP_STREAM_POSITION);
+    feed(ring, 700, &phase);
+    after = prop(s, GLOS_PROP_STREAM_POSITION);
+    check("sess-plays", after - before > 22050 * 7 / 10 * 6 / 10 && after - before < 22050 * 7 / 10 * 14 / 10,
+          "frames=%d underruns=%u periods=%u", after - before, ring->underruns, ring->periods);
+
+    memset(&r, 0, sizeof r);                    /* the PC's own screen: a session from here */
+    r.x.ax = 0x0013;
+    __dpmi_int(0x10, &r);
+    feed(ring, 300, &phase);
+    before = prop(s, GLOS_PROP_STREAM_POSITION);
+    feed(ring, 1000, &phase);
+    after = prop(s, GLOS_PROP_STREAM_POSITION);
+    check("sess-full-plays", after - before > 22050 * 6 / 10 && after - before < 22050 * 14 / 10,
+          "frames=%d underruns=%u periods=%u", after - before, ring->underruns, ring->periods);
+    check("sess-volume", glos_set(s, GLOS_PROP_STREAM_VOLUME, 128) == 0 && prop(s, GLOS_PROP_STREAM_VOLUME) == 128, "err=%d",
+          glos_error());
+    check("sess-close", glos_close(s) == 0, "err=%d", glos_error());
+
+    ring = 0, id = 0, phase = 0;                /* the card is the session's again; a stream anew takes it back */
+    s = glos_audio_out(11025, 1, 8192, &ring, &id);
+    check("sess-again", s && ring && ring->rate == 11025 && ring->channels == 1, "s=%x err=%d", s, glos_error());
+    if (s) {
+        feed(ring, 300, &phase);
+        before = prop(s, GLOS_PROP_STREAM_POSITION);
+        feed(ring, 700, &phase);
+        after = prop(s, GLOS_PROP_STREAM_POSITION);
+        check("sess-again-plays", after - before > 11025 * 7 / 10 * 6 / 10 && after - before < 11025 * 7 / 10 * 14 / 10,
+              "frames=%d underruns=%u periods=%u", after - before, ring->underruns, ring->periods);
+    }
+    r.x.ax = 0x0003;                            /* (text again; the stream is left for GLOS to close) */
+    __dpmi_int(0x10, &r);
+    snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
+    com1(line);
+    return fails;
+}
+
 static int audio_mode(int loop)
 {
     static struct glos_audio_stream streams[8];
@@ -3270,6 +3332,8 @@ int main(int argc, char **argv)
         return job_mode();
     if (argc > 1 && !strcmp(argv[1], "audio"))
         return audio_mode(argc > 2 && !strcmp(argv[2], "loop"));
+    if (argc > 1 && !strcmp(argv[1], "sndsess"))
+        return sndsess_mode();
     if (argc > 2 && !strcmp(argv[1], "sec"))
         return sec_mode(argv[2]);
     if (argc > 1 && !strcmp(argv[1], "dbg"))

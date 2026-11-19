@@ -8,7 +8,11 @@
  * and ports closed as an app's are at its end). A program that becomes an app (INIT) starts as an app with
  * none: what it had open before is closed then too.
  *
- * What it has: NET's calls, and CLOSE, GET and SET for the handles those gave it. What it has not: events
+ * Since API 2.5 it may also open a stream out (AUDIO's OUT; the owner, 2026-11-19): GLOS's mixer plays it while
+ * the program has it, full-screen too, where the card was the session's alone: an SDL game that draws by VESA
+ * has sound on every card GLOS drives. kernel/drv/mixer.c keeps the card for it.
+ *
+ * What it has: NET's calls, AUDIO's OUT, and CLOSE, GET and SET for the handles those gave it. What it has not: events
  * (GLOS_NETF_EVENTS is taken and does nothing), and every other call, which answers GLOS_E_NOT_APP as before:
  * so does CLOSE of a handle it does not have, which is how a library tells an app from such a program
  * (libglos's glos_is_app).
@@ -22,6 +26,7 @@
 #include "dpmi.h"
 #include "io.h"
 #include "kprintf.h"
+#include "mixer.h"
 #include "mm.h"
 #include "sock.h"
 #include "vm.h"
@@ -29,7 +34,7 @@
 static struct app *sess;                /* made at the first such call ever, and kept */
 static struct dpmi_ctx *owner;          /* whose it is now; 0: nobody's */
 
-static struct app *ctx_for(int make)
+static struct app *ctx_for(int make, const char *what)
 {
     if (!dctx)
         return 0;                       /* (the API is a protected-mode program's) */
@@ -57,7 +62,7 @@ static struct app *ctx_for(int make)
     sess->ctx = dctx;
     sess->psp = dctx->psp;
     owner = dctx;
-    kprintf("GLOS-NET session psp=%04x\n", dctx->psp);
+    kprintf("GLOS-%s session psp=%04x\n", what, dctx->psp);
     return sess;
 }
 
@@ -67,18 +72,20 @@ int api2_session_call(struct trapframe *tf, u32 fn, int *r)
 {
     struct app *a;
     u32 hdr[2];
-    if (GLOS_FN_AREA(fn) == GLOS_AREA_NET) {
-        if (!(a = ctx_for(1))) {
+    if (GLOS_FN_AREA(fn) == GLOS_AREA_NET || fn == GLOS_AUDIO_OUT) {    /* (2.5: a stream out, played by the mixer
+                                                   while the program has it, full-screen or not) */
+        int net = GLOS_FN_AREA(fn) == GLOS_AREA_NET;
+        if (!(a = ctx_for(1, net ? "NET" : "AUDIO"))) {
             *r = a2_fail(tf, dctx && owner ? GLOS_E_REFUSED : GLOS_E_MEMORY);
             return 1;
         }
-        *r = api2_net(a, tf, fn & 0xFFu);
+        *r = net ? api2_net(a, tf, fn & 0xFFu) : api2_audio(a, tf, fn & 0xFFu);
         return 1;
     }
     if (fn != GLOS_CORE_CLOSE && fn != GLOS_CORE_GET && fn != GLOS_CORE_SET)
         return 0;
-    if (!(a = ctx_for(0)) || user_rd((u16)tf->ds, tf->ebx, hdr, sizeof hdr) != 0
-        || handle_kind(&a->v2->h, hdr[1]) != GLOS_HK_CONNECTION)
+    if (!(a = ctx_for(0, "")) || user_rd((u16)tf->ds, tf->ebx, hdr, sizeof hdr) != 0
+        || (handle_kind(&a->v2->h, hdr[1]) != GLOS_HK_CONNECTION && handle_kind(&a->v2->h, hdr[1]) != GLOS_HK_STREAM))
         return 0;                       /* (a handle it does not have: it is not an app) */
     *r = api2_session_core(a, tf, fn);
     return 1;
@@ -90,6 +97,7 @@ void api2_session_gone(struct dpmi_ctx *c)
     if (!owner || owner != c)
         return;
     sock_app_gone(sess);
+    mixer_app_gone(sess);               /* (its streams: the card is the session's again, or the desktop's) */
     htab_init(&sess->v2->h);
     sess->ctx = 0;
     owner = 0;
