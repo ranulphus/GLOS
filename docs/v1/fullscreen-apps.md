@@ -76,10 +76,27 @@ the kernel.
 
 ### F3. A mode of its own (GLOS, an API addition)
 
-A game that wants 640x480 on a desktop of 1024x768: GLOS sets the game's mode while its full-screen window is
-in front and scans out its block; the desktop's own picture is kept and comes back when the window loses the
-front or ends (Alt+Tab, a crash). The mode is the window's client size, of those the card's driver lists
-(`GLOS_DRAW_MODES`); a property may say the refresh rate. Until then a smaller picture is centred.
+A game that wants 640x480 on a desktop of 1024x768. Today a full-screen window's pixels are the screen's size,
+whatever the program made (a smaller block of its own is refused, and the window shows its blank store: the
+DOS-GL session saw a white screen, and its `DGL_GLOS_FULL` asks for full screen only at the screen's size
+until this is built). The plan:
+
+- **The window keeps its size.** A flag at its making (`GLOS_WF_OWN_MODE`) says that full screen does not make
+  its client area the screen's: the frame covers the screen, black, and the client area keeps the size the
+  program gave it.
+- **Composed** (something over it, a VNC viewer, a card or a size with no mode for it): its pixels in the
+  middle of the black.
+- **Alone in front, with a block of its own:** GLOS sets the card to the mode of the client's size at the
+  desktop's depth (the BIOS's mode set by the system VM's thread, as the desktop's own, with the card's memory
+  kept), points the display at the block, and the row length is the mode's (the block's must be the same:
+  it is, at the sizes the BIOS lists). The desktop's own pixels stay as they are in the card's memory, unseen.
+  Leaving: the desktop's mode again, the screen composed whole, the display back on it.
+- **The pointer and the mouse:** a game takes the mouse to itself (`GLOS_INPUT_CAPTURE`, movements); a
+  pointer over such a window is the card's own cursor at the client's coordinates.
+- **Sizes:** those `GLOS_DRAW_MODES` lists at the desktop's depth; another size is composed in the middle.
+- **Tests:** `GPUTEST full NAME SECS W H` on Loop A (the mode by `glos display`, the picture by `glos shot` at
+  the game's size, the desktop's mode and picture after), and DOS-GL's TEXCUBE at 640x480 on an 800x600
+  desktop.
 
 ### F4. Other cards
 

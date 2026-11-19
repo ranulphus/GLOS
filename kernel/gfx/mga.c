@@ -36,6 +36,7 @@
 
 #include "mga/hal.h"
 #include "mga/mmio.h"
+#include "mga/regs_mga.h"
 
 #define OWN_SCREEN 1u                           /* (VRAM owners) */
 #define OWN_CURSOR 2u
@@ -324,10 +325,24 @@ void mga_display_down(void)
 
 /* ---- the display on a block of an app's (docs/v1/fullscreen-apps.md, F1) */
 
+/* The CRTC's start address, with its two index registers left as they were: this comes at any moment (an app's
+   swap, the desktop's thread), and the card's BIOS may be half-way through an index and its data in the system
+   VM (a power state, a mode's list). Callers have interrupts off. */
+static int scan_set(u32 off)
+{
+    u8 ci = MGA_RD8(MGAREG_CRTC_INDEX), xi = MGA_RD8(MGAREG_CRTCEXT_INDEX);
+    int r = crtc_set_start(off);
+    MGA_WR8(MGAREG_CRTCEXT_INDEX, xi);
+    MGA_WR8(MGAREG_CRTC_INDEX, ci);
+    return r;
+}
+
 static void scan_home(void)
 {
-    crtc_set_start(m.screen.color_off);
+    u32 f = irq_save();
+    scan_set(m.screen.color_off);
     m.scan = m.screen.color_off;
+    irq_restore(f);
 }
 
 /* The display begins at a block of an app's instead of the screen's own pixels, or (MGA_SCAN_SCREEN) at the
@@ -343,7 +358,7 @@ int mga_scanout(u32 off, u32 pitch)
                 scan_home();
             r = 1;
         } else if (pitch == (u32)m.screen.pitch_px * (u32)(m.screen.bpp / 8) && !(off & 7) && off < m.vram) {
-            if (off == m.scan || crtc_set_start(off) == 0) {
+            if (off == m.scan || scan_set(off) == 0) {
                 m.scan = off;
                 r = 1;
             }
