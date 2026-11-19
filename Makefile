@@ -678,6 +678,12 @@ build/dj/PROFCHK.EXE: tests/dos/profchk.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+# MODELOOP (tests/dos/modeloop.c): a VBE mode set and text mode again, over and over: for a bench that stood dead
+# at a mode set (docs/v1-route.md). Built by name: make build/dj/MODELOOP.EXE
+build/dj/MODELOOP.EXE: tests/dos/modeloop.c
+	@mkdir -p $(dir $@)
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
 # CACHEWC (tests/dos/cachewc.c): GLOS_FN_CACHE, write-combining conventional memory (API 1.4).
 build/dj/CACHEWC.EXE: tests/dos/cachewc.c build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/dj

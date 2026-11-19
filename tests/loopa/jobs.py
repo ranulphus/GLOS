@@ -5038,6 +5038,78 @@ def glwin_case(profile, vcard, card, desk):
 
 
 # (machine, video card, network card, desktop): SDL3 windowed (M8 step F)
+def sdlsess_case(profile, vcard, card):
+    """SDL3 full-screen and GLOS's sound (API 2.5 with DOS-GL's SDL patch 0010; the virtual Sound Blaster,
+    docs/v1/vsb.md): DOS-GL's SDL examples with SDL's vesa video driver (asked for by SDL_VIDEO_DRIVER on a
+    Matrox desktop, where SDL would take a window; SDL's own choice on a card that is none), each a session.
+    SDLINFO says SDL's audio driver is glos; SDLBEEP plays through GLOS's mixer as a program that is no app (its
+    stream a session's), with no underrun by SDL's count or the mixer's, also with a main thread that yields once
+    in 37 ms. Then the same SDLBEEP told to use SDL's Sound Blaster driver (SDL_AUDIO_DRIVER) plays through the
+    virtual card, 16 bits at 44100 a second in auto-initialised blocks, with no underrun. 86Box's recording has
+    the beeps."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    src = os.path.join(ROOT, "build/dosgl/sdl")
+    env = ["env = SDL_VIDEO_DRIVER=vesa"] if vcard != "vbe" else []
+    cfg = batfile("sdlsess-%s/GLOS.CFG" % tag, ["; jobs.py sdlwin, full-screen", "[time]", "sntp = off"]
+                  + ["[program SDLINFO.EXE]"] + env + ["[program SDLBEEP.EXE]"] + env
+                  + ["[program SDLBEEPS.EXE]"] + env + ["env = SDL_AUDIO_DRIVER=soundblaster"])
+    checks, info = {"inputs": all(os.path.exists(os.path.join(src, e + ".EXE")) for e in ("SDLINFO", "SDLBEEP"))}, ""
+    agent = Agent("sdlsess-" + tag, profile, card, ["--card", vcard, "--sound", "sb16", "--wav",
+        "--pre", "SET BLASTER=A220 I5 D1 H5 T6", "--file", cfg + "=/TEST/GLOS.CFG",
+        "--file", "%s=/TEST/SDLINFO.EXE" % os.path.join(src, "SDLINFO.EXE"),
+        "--file", "%s=/TEST/SDLBEEP.EXE" % os.path.join(src, "SDLBEEP.EXE"),
+        "--file", "%s=/TEST/SDLBEEPS.EXE" % os.path.join(src, "SDLBEEP.EXE"),
+        "--cmd", "SERSAY HX-START sdlsess", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1200)
+    checks["listen"] = agent.listening()
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and not agent.ssh("glos audio")[1].startswith("audio on "):
+            time.sleep(0.5)
+        m = len(agent.log())
+        rc, o, _ = agent.ssh("C:\\TEST\\SDLINFO.EXE --noexit", timeout=120)
+        d = re.search(r"drivers video=(\S+) audio=(\S+)", agent.log()[m:])
+        checks["drivers"] = rc == 0 and bool(d) and d.group(1) == "vesa" and d.group(2) == "glos"
+        if not checks["drivers"]:
+            info += " info=%s" % (d.group(0) if d else "?")
+        for what, exe, args in (("beep", "SDLBEEP", ""), ("busy", "SDLBEEP", " --busy 37"), ("blaster", "SDLBEEPS", "")):
+            m = len(agent.log())
+            rc, o, _ = agent.ssh("C:\\TEST\\%s.EXE%s --noexit" % (exe, args), timeout=180)
+            t0 = time.time()                    # (the session's end and its lines come a moment after the answer)
+            while time.time() - t0 < 20 and "GLOS-SESSION end" not in agent.log()[m:]:
+                time.sleep(0.5)
+            t = agent.log()[m:]
+            lines = [l for l in t.split("\n") if l.startswith("HX-TEST")]
+            u = re.search(r"HX-TEST underruns (\w+) (\d+) of (\d+)", t)
+            good = rc == 0 and bool(u) and u.group(2) == "0" and int(u.group(3)) > 50 \
+                and not any("FAIL" in l for l in lines) and "GLOS-APP start" not in t
+            if what == "blaster":               # SDL's own driver, at the virtual card
+                end = re.search(r"GLOS-VSB end starts=(\d+) irqs=(\d+) played=(\d+) peak=(\d+)", t)
+                good = good and "GLOS-VSB play rate=44100 bits=16 channels=2 " in t and "GLOS-AUDIO open" not in t \
+                    and bool(end) and int(end.group(2)) > 50 and int(end.group(3)) > 22050
+            else:                               # GLOS's mixer, by a program that is no app
+                c = re.findall(r"GLOS-AUDIO close app=0 stream=\d+ periods=(\d+) underruns=(\d+)", t)
+                good = good and " session=1" in t and "GLOS-VSB play" not in t \
+                    and max([int(p) for p, _ in c] or [0]) > 50 and all(x == "0" for _, x in c)   # (SDL's trial stream too)
+            checks[what] = good
+            info += " %s=%s" % (what, "%s/%s" % (u.group(2), u.group(3)) if u else "?")
+            if not good:
+                print("    sdlsess-%s %s: rc=%d %r" % (tag, what, rc, " | ".join(lines)[:400]))
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    wav = os.path.join(ROOT, "out", "sdlsess-" + tag, "audio.wav")
+    checks["recorded"] = os.path.exists(wav) and subprocess.run(
+        [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440"],
+        capture_output=True).returncode == 0
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("sdlsess-" + tag, "PASS" if not bad else "FAIL", info,
+                               " failed: " + " ".join(bad) if bad else ""), not bad
+
+
 SDLWIN_CASES = [("bf6", "g450", "ne2kpci", "800x600x16"), ("bf6", "g200", "ne2kpci", "800x600x16")]
 
 
@@ -9959,7 +10031,11 @@ def main():
         cases = [c for c in SDLWIN_CASES if not a.profile or c[0] in a.profile]
         if os.environ.get("SDLWIN_ONLY"):
             cases = [c for c in cases if c[1] in os.environ["SDLWIN_ONLY"].split(",")]
-        return 0 if all(r[1] for r in matrix(sdlwin_case, cases, a.jobs)) else 1
+        res = matrix(sdlwin_case, cases, a.jobs)
+        if not os.environ.get("SDLWIN_ONLY"):       # ... and full-screen, through GLOS's mixer and the virtual card
+            res += matrix(sdlsess_case, [c for c in [("bf6", "g200", "ne2kpci"), ("bf6", "vbe", "ne2kpci")]
+                                         if not a.profile or c[0] in a.profile], a.jobs)
+        return 0 if all(r[1] for r in res) else 1
     if a.suite == "glwin":
         cases = [c for c in GLWIN_CASES if not a.profile or c[0] in a.profile]
         if os.environ.get("GLWIN_ONLY"):        # e.g. GLWIN_ONLY=g200
