@@ -65,6 +65,8 @@ const char *mixer_card(void);                                   /* the card the 
 int mixer_chan(int chan, int set, u8 *left, u8 *right, u8 *mute);
 int mixer_input(int set, int *input);
 extern const struct sound_card sb16_card, crystal_card;
+void mixer_refresh(void);                       /* the card started or stopped as things stand now */
+const char *mixer_blaster(void);                /* BLASTER for programs: the virtual Sound Blaster's, a Crystal chip's, 0 */
 void mixer_late(void);                          /* GLOS.CFG read: a Crystal chip set up when there's no SB16 */
 int crystal_init(const char *cfg);              /* [sound] crystal (auto, off, or resources): the part set up: 0 */
 u16 crystal_sb(void);                           /* its SB Pro's port, 0 if none set up */

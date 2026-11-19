@@ -138,13 +138,13 @@ int main(void)
     CHECK(mixer_get(0x80) == 0x02 && mixer_get(0x81) == 0x22);  /* interrupt 5; channels 1 and 5 */
 
     /* The mixer chip: the older cards' volumes are the SB16's top bits; a reset puts them back. */
-    CHECK(mixer_get(0x30) == 0xC0 && mixer_get(0x22) == 0xCC);
+    CHECK(mixer_get(0x30) == 0xF8 && mixer_get(0x22) == 0xFF);
     mixer(0x22, 0xF8);
     CHECK(mixer_get(0x30) == 0xF8 && mixer_get(0x31) == 0x88 && mixer_get(0x22) == 0xF8);
     mixer(0x04, 0xFF);
     CHECK(mixer_get(0x32) == 0xF8 && mixer_get(0x33) == 0xF8);
     mixer(0x00, 0);
-    CHECK(mixer_get(0x30) == 0xC0 && mixer_get(0x04) == 0xCC);
+    CHECK(mixer_get(0x30) == 0xF8 && mixer_get(0x04) == 0xFF);
     mixer(0x22, 0xFF);                          /* (everything at its loudest, for the numbers below) */
     mixer(0x04, 0xFF);
 
@@ -231,6 +231,42 @@ int main(void)
     CHECK(irqs == 1 && mixer_get(0x82) == 0x02);     /* (a block is 32 frames: one whole, and part of the next) */
     vsb_in(&s, 0xF);
     CHECK(mixer_get(0x82) == 0x00);
+
+    /* A whole swing between two frames, heard at four thirds of the rate: three quarters of the way from one to
+       the other is three quarters of the swing (the sum overflowed thirty-two bits once), and so on. */
+    reset();
+    rd();
+    mem[0x30000] = 0x00, mem[0x30001] = 0x80, mem[0x30002] = 0xFF, mem[0x30003] = 0x7F;         /* -32768, 32767 */
+    mem[0x30004] = 0x00, mem[0x30005] = 0x80, mem[0x30006] = 0xFF, mem[0x30007] = 0x7F;
+    dma_setup(5, 0, 0x30000, 8);
+    dsp(0x41);
+    dsp(11025 >> 8);
+    dsp(11025 & 0xFF);
+    dsp(0xB0);
+    dsp(0x10);                                  /* signed, one channel */
+    dsp(3);
+    dsp(0);
+    mix(4, 14700);
+    CHECK(acc[0] == -32768 && acc[2] >= 16380 && acc[2] <= 16385 && acc[4] >= -2 && acc[4] <= 1 && acc[6] >= -16388
+          && acc[6] <= -16380);
+
+    /* The SB16's 16 bits again, block after block, for what follows. */
+    reset();
+    rd();
+    irqs = 0;
+    dma_setup(5, 1, 0x30000, 128);
+    for (i = 0; i < 32; i++) {
+        mem[0x30000 + i * 4] = 1000 & 0xFF, mem[0x30000 + i * 4 + 1] = 1000 >> 8;
+        mem[0x30000 + i * 4 + 2] = (u8)(-2000 & 0xFF), mem[0x30000 + i * 4 + 3] = (u8)((-2000 >> 8) & 0xFF);
+    }
+    dsp(0x41);
+    dsp(22050 >> 8);
+    dsp(22050 & 0xFF);
+    dsp(0xB6);
+    dsp(0x30);
+    dsp(63);
+    dsp(0);
+    mix(8, 22050);
 
     /* Paused, nothing comes and nothing moves; on again from where it was. */
     dsp(0xD5);

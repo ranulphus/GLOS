@@ -23,6 +23,7 @@
 #include "timer.h"
 #include "uart.h"
 #include "vm.h"
+#include "vsbdev.h"
 
 static struct { u16 base, len; } hidden[4];
 static int nhidden;
@@ -229,6 +230,8 @@ static u8 dev_inb(u16 port)
     case 0x3FB:                                 /* (trapped only with no UART at 3F8h) */
         return com1_none ? com1_lcr : inb(0x3FB);
     default:
+        if (vsbdev_port(port))                  /* the virtual Sound Blaster's, and the DMA controllers' under it */
+            return vsbdev_in(port);
         return is_hidden(port) ? 0xFF : inb(port);
     }
 }
@@ -271,6 +274,10 @@ static void dev_outb(u16 port, u8 v)
             outb(0x201, v);
         return;
     default:
+        if (vsbdev_port(port)) {
+            vsbdev_out(port, v);
+            return;
+        }
         cache_port_out(port, v);                /* an IDE command the disk cache must see (when it watches) */
         if (!is_hidden(port))
             outb(port, v);

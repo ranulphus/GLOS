@@ -17,11 +17,11 @@ through GLOS's mixer. The virtual Sound Blaster is the piece between: the game f
 |---|---|---|
 | The DSP and the mixer chip | `kernel/vm/vsb.c`, `kernel/include/vsb.h` | built, host-tested |
 | The DMA channels (a virtual 8237) | `kernel/vm/vdma.c`, `kernel/include/vdma.h` | built, host-tested |
-| The ports in a session, the interrupt, the program's memory | `kernel/vm/` (the trapped ports) | next |
-| Into GLOS's mixer; the card kept through a session | `kernel/drv/mixer.c` | next |
-| `BLASTER` for programs; `[sound] blaster` in GLOS.CFG | the shell, sessions, the settings | next |
-| FM music | passed to a real OPL where the card has one; a synthesiser | after |
-| MIDI at 330h | passed to a real MPU-401, or GLOS's MIDI out | after |
+| The ports in a session, the interrupt, the program's memory | `kernel/vm/vsbdev.c`, `vdev.c` | built, on Loop A |
+| Into GLOS's mixer; the card kept through a session | `kernel/drv/mixer.c` | built, on Loop A |
+| `BLASTER` for programs; `[sound] virtual` in GLOS.CFG | `mixer_blaster`, the settings | built, on Loop A |
+| FM music | passed to a real FM chip at 388h; a synthesiser | passed through; the synthesiser after |
+| MIDI at 330h | a real MPU-401's, as before | GLOS's own MIDI out after |
 
 The first two are pure state with no I/O in them, as the virtual interrupt controller is (`vpic.c`), so that
 the host's tests drive them with the port sequences a game sends (`tests/host/vsb_test.c`, `vdma_test.c`).
@@ -68,16 +68,52 @@ playing through one. The other channels (the floppy's) are the real chip's, and 
 through; registers that all of a controller's channels share go through with the virtual channels' part taken
 out (a master clear becomes a cleared flip-flop and the other channels' masks).
 
+## In the system VM (`vsbdev.c`)
+
+- **On when** GLOS's mixer has a card and `[sound] virtual` is not `off` (it is `on` unless said; a restart
+  takes a change). The log says `GLOS-VSB on blaster="A220 I5 D1 H5 T6"`.
+- **Its numbers** are `BLASTER`'s where DOS's environment has one: with a real Sound Blaster 16 under GLOS's
+  mixer, a program finds the virtual card exactly where it would have found the real one. Otherwise A220 I5 D1
+  H5, and GLOS puts `BLASTER` into the environment of the programs it starts (as it did for a Crystal chip's
+  own Sound Blaster Pro side, which the virtual card now stands before).
+- **The ports** (the card's sixteen, the two DMA controllers', the page registers) are trapped for the VM,
+  real-mode and protected-mode programs alike. The DSP's and the mixer chip's are the virtual card's; the
+  card's FM ports go to the real FM chip at 388h; the DMA's are `vdma.c`'s, which says what goes on to the
+  real chip.
+- **What plays** is asked for by GLOS's mixer once a period, in the sound card's interrupt: the DSP takes the
+  program's bytes from the VM's first megabyte by its DMA channel and adds 16-bit stereo to the mixer's sum. A
+  DMA buffer above the first megabyte is not memory GLOS can say is the program's: silence.
+- **The interrupt** is raised in the virtual interrupt controller, on `BLASTER`'s line, whatever line the real
+  card under the mixer has (GLOS's own driver has that one).
+- **The mixer keeps the card all the time** while the virtual card is on: it was given to a session and taken
+  back after. A program that wants the real card itself runs with `[sound] virtual = off`.
+- **A session in direct mode** (`[program NAME] direct = 1`: its protected-mode code reaches the PC's ports
+  untrapped) has the real card, as it always did: the mixer hands that over for the session and takes it back,
+  the ports its real-mode code uses go to the real card too, and `BLASTER` is the real card's.
+- **A session's end** makes the card as after a reset, and the log says what the session played:
+  `GLOS-VSB end starts=3 irqs=15 played=36959 peak=28672` (sounds begun, interrupts, frames given to the
+  mixer, the loudest sample).
+- **The mixer chip's volumes are at their loudest after a reset,** where a real card's are a little under: what
+  a program plays goes into GLOS's mixer as it is, as loud as an app's own sound.
+
+## Tests
+
+- **Host:** `vdma_test` and `vsb_test` (the port sequences a game sends; samples out checked to the number).
+- **Loop A, the audio suite's `vsb` cases:** `SBTEST` (`tests/dos/sbtest.c`, real mode) finds the card by
+  `BLASTER` and plays it as a game does: one 8-bit block by a time constant, auto-initialised blocks and their
+  end, the SB16's 16 bits by the high DMA channel, each in its time. On an SB16, on a Crystal chip's codec
+  (where `BLASTER` is GLOS's own), on the 486; and with `[sound] virtual = off` against 86Box's own SB16, where
+  the same cases pass with the same timings: the test itself is right; and in direct mode, where it has the
+  real card too. The suite's older cases (`audio_case`) run both ways: the virtual card on (the mixer plays from
+  GLOS's start, keeps the card through a session, `BLASTER` is the virtual card's) and off (as before).
+
 ## What is next
 
-1. **In a session:** the card's ports and the DMA's trapped (`cpu_io_trap`, `kernel/vm/vdev.c`), the DMA's
-   bytes read from the system VM's memory, the interrupt raised in the virtual interrupt controller.
-2. **Into the mixer:** `vsb_mix` called from the mixer's period, and the card kept by the mixer through a
-   session while the virtual card is on (as it is for a full-screen program's own stream since API 2.5).
-3. **`BLASTER`** in the environment of the programs GLOS starts, where DOS's own has none; `[sound] blaster`
-   to turn the virtual card off (the real one is the session's then, as before) or say its numbers.
-4. **Tests on Loop A:** a DOS test program that finds the card and plays a block each way, with what GLOS's
-   mixer played counted; then the ports' sound runs (Half-Life, PrBoom: RetroGPU's) and SDLBEEP.
-5. **FM** passed through to a real OPL; a synthesiser for cards with none (ymfm is the first candidate: BSD,
-   C++, to be ported or run outside the kernel). **MIDI** at 330h.
-6. **The bench:** a game with sound on the Pentium III's CMI8738 once that has its driver.
+1. **Real programs:** the ports' sound runs on Loop A (Half-Life, PrBoom with its music: RetroGPU's tests),
+   SDL's soundblaster driver, and the owner's games: each sound library drives a Sound Blaster its own way.
+2. **What they will want:** ADPCM, perhaps; the DMA's count moving between the mixer's periods (it moves a
+   period at a time now); a program's volume changes heard at once.
+3. **FM** for cards with no FM chip: a synthesiser (ymfm is the first candidate: BSD, C++, to be ported or
+   run outside the kernel). **MIDI** at 330h into GLOS's own MIDI out.
+4. **The bench:** a game with sound on a card that is no Sound Blaster (the Pentium III's CMI8738, once it
+   has its driver).

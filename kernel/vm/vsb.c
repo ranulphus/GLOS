@@ -20,9 +20,12 @@ static const u16 gain5[32] = { 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 3, 3, 4, 5, 6, 8
 static void mixer_reset(struct vsb *s)
 {
     memset(s->mix, 0, sizeof s->mix);
-    s->mix[0x30] = s->mix[0x31] = 0xC0;         /* master, left and right */
-    s->mix[0x32] = s->mix[0x33] = 0xC0;         /* voice: what the DSP plays */
-    s->mix[0x34] = s->mix[0x35] = 0xC0;         /* the synthesiser */
+    /* At their loudest (a real card's are a little under it, and its amplifier makes up for that: here what
+       the program plays goes into GLOS's mixer as it is, as loud as an app's own sound; a program that turns
+       its volumes down is turned down). */
+    s->mix[0x30] = s->mix[0x31] = 0xF8;         /* master, left and right */
+    s->mix[0x32] = s->mix[0x33] = 0xF8;         /* voice: what the DSP plays */
+    s->mix[0x34] = s->mix[0x35] = 0xF8;         /* the synthesiser */
     s->mix[0x3C] = 0x1F;
     s->mix[0x44] = s->mix[0x45] = s->mix[0x46] = s->mix[0x47] = 0x80;
 }
@@ -367,9 +370,10 @@ static int frame(struct vsb *s, s16 *f)
 int vsb_mix(struct vsb *s, s32 *acc, u32 frames, u32 rate)
 {
     u32 step, i, gl, gr;
-    if (!vsb_playing(s) || !rate)
+    if (!vsb_playing(s) || !rate || rate > 65535)
         return 0;
-    step = (u32)(((unsigned long long)s->rate << 16) / rate);
+    step = ((s->rate / rate) << 16) + ((s->rate % rate) << 16) / rate;  /* (16.16, in 32 bits: the remainder is
+                                                                           less than the mixer's rate, under 65536) */
     gl = (u32)gain5[s->mix[0x30] >> 3] * gain5[s->mix[0x32] >> 3] >> 8;
     gr = (u32)gain5[s->mix[0x31] >> 3] * gain5[s->mix[0x33] >> 3] >> 8;
     for (i = 0; i < frames; i++) {
@@ -394,9 +398,10 @@ int vsb_mix(struct vsb *s, s32 *acc, u32 frames, u32 rate)
         }
         if (s->frac >= 0x10000)                 /* past the last frame there is: its end, or the DMA channel has */
             break;                              /* nothing for it now (masked): it waits */
-        f = (s32)(s->frac & 0xFFFF);
-        l = s->cur[0] + (((s->next[0] - s->cur[0]) * f) >> 16);
-        r = s->cur[1] + (((s->next[1] - s->cur[1]) * f) >> 16);
+        f = (s32)((s->frac & 0xFFFF) >> 1);     /* (fifteen bits of the way: two frames a whole swing apart, times
+                                                   sixteen bits, would not fit in thirty-two) */
+        l = s->cur[0] + (((s->next[0] - s->cur[0]) * f) >> 15);
+        r = s->cur[1] + (((s->next[1] - s->cur[1]) * f) >> 15);
         acc[i * 2] += (l * (s32)gl) >> 8;
         acc[i * 2 + 1] += (r * (s32)gr) >> 8;
         s->frac += step;

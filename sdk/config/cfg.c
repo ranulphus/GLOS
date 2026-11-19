@@ -61,6 +61,9 @@ const struct cfg_key cfg_schema[] = {
       "Samples a second the mixer plays" },
     { "sound", "blaster", CFG_BLASTER, CFG_RESTART, 0, 40, 0, "", "&Card (BLASTER)",
       "Where the Sound Blaster is, as BLASTER says it (A220 I5 D1 H5); empty: BLASTER's" },
+    { "sound", "virtual", CFG_CHOICE, CFG_RESTART, 0, 0, "on|off", "on", "Virtual &Sound Blaster",
+      "DOS programs find a Sound Blaster 16 that plays through GLOS's mixer, on any card it drives (off: they have "
+      "the PC's own card)" },
     { "sound", "crystal", CFG_TEXT, CFG_RESTART, 1, 95, "line", "auto", "Cr&ystal chip",
       "A Crystal CS423x chip GLOS sets up when there is no SB16 (docs/crystal-audio.md): auto, off, or its resources "
       "(wss=534 sb=220 fm=388 irq=5 dma=1 cap=0 game=200 ctrl=120)" },

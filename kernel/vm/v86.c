@@ -39,6 +39,7 @@
 #include "umapage.h"
 #include "v86dec.h"
 #include "vm.h"
+#include "vsbdev.h"
 
 /* The kernel's lines: keyboard, cascade, clock, AUX, and any it claims later
    (the network card); kernel_masked holds those a driver has masked. */
@@ -556,6 +557,7 @@ static void vm_leave(u32 code) __attribute__((noreturn));
 static void vm_leave(u32 code)
 {
     kprintf_direct();                           /* (no more traps to write the log from) */
+    vsbdev_leave();                             /* (the virtual Sound Blaster off: the mixer stops the real card below) */
     display_leave();
     mga_clocks_leave();                         /* (a G400's clocks as the BIOS had them: gfx/mga.c) */
     int2f_unhook();

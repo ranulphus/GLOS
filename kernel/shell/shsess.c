@@ -1428,8 +1428,8 @@ static void session(void *arg)
                 kcfg_get("time", "zone", value, sizeof value);
             else if (k == 1 && kcfg_loaded() && kcfg_get("region", "codepage", value, sizeof value) != 1)
                 value[0] = 0;
-            else if (k == 2 && crystal_blaster())
-                sh_fmt(value, sizeof value, "%s", crystal_blaster());
+            else if (k == 2 && mixer_blaster())
+                sh_fmt(value, sizeof value, "%s", mixer_blaster());
             if (!have && value[0]) {
                 sh_fmt(extra[k], sizeof extra[k], "%s%s", names[k], value);
                 env[n++] = extra[k];

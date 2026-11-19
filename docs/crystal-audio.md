@@ -4,6 +4,11 @@
 upper memory, and answered the four questions ([Decisions](#decisions)); PRD D73. In Loop A on 86Box's CS4232,
 CS4235 and CS4236B; on bench-g400 by ear ([Results](#results)).**
 
+**Since 2026-11-19** DOS programs in sessions find GLOS's virtual Sound Blaster 16 before the chip's own Sound
+Blaster Pro side (`BLASTER` is `A220 I5 D1 H5 T6`; what they play comes out of the mixer, through the codec),
+and the mixer keeps the chip through a session. `[sound] virtual = off`, or a program in direct mode, has the
+chip's own side as described below. FM is the chip's, both ways. See `docs/v1/vsb.md`.
+
 Until this plan, GLOS's mixer played only a Sound Blaster 16 (D47, `kernel/drv/sb16.c`: DSP version 4, 16-bit DMA).
 bench-g400, an IBM PC 300PL, has onboard Crystal audio, which no DOS driver sets up, so it stayed silent under GLOS and plain DOS
 alike. This plan gave GLOS a driver of its own for the Crystal CS423x family:

@@ -42,6 +42,7 @@
 #include "mm.h"
 #include "sched.h"
 #include "timer.h"
+#include "vsbdev.h"
 
 #define STREAMS   8
 #define PERIOD    256                           /* frames */
@@ -123,6 +124,7 @@ void mixer_late(void)
 {
     late();
     midi_late();                                /* (a Crystal chip's FM chip and MPU-401: midi.c) */
+    vsbdev_init(mx.bi);                         /* the virtual Sound Blaster, where the mixer has a card (vsbdev.c) */
 }
 
 static void late(void)
@@ -233,19 +235,22 @@ static void take(struct strm *s, u32 frames, const struct trapframe *tf)
         s->short_run = 0;
     }
     for (i = 0; i < frames; i++) {
-        u32 at = frac >> 16, f = frac & 0xFFFF;
+        u32 at = frac >> 16, f = (frac & 0xFFFF) >> 1;  /* (fifteen bits of the way between two samples: sixteen,
+                                                           times a whole swing from one to the next, overflowed
+                                                           thirty-two bits: found in the virtual Sound Blaster's
+                                                           copy of this, 2026-11-19) */
         s32 l, r;
         if (at + 1 >= have)
             break;                              /* (the rest silence) */
         if (s->frame_bytes == 2) {
             s16 a = *(s16 *)(s->ring + ((pos + at * 2) & mask)), b = *(s16 *)(s->ring + ((pos + at * 2 + 2) & mask));
-            l = r = a + (((b - a) * (s32)f) >> 16);
+            l = r = a + (((b - a) * (s32)f) >> 15);
         } else {
             u32 p = pos + at * 4;
             s16 al = *(s16 *)(s->ring + (p & mask)), ar = *(s16 *)(s->ring + ((p + 2) & mask));
             s16 bl = *(s16 *)(s->ring + ((p + 4) & mask)), br = *(s16 *)(s->ring + ((p + 6) & mask));
-            l = al + (((bl - al) * (s32)f) >> 16);
-            r = ar + (((br - ar) * (s32)f) >> 16);
+            l = al + (((bl - al) * (s32)f) >> 15);
+            r = ar + (((br - ar) * (s32)f) >> 15);
         }
         l = (l * (s32)gl) >> 8;
         r = (r * (s32)gr) >> 8;
@@ -282,6 +287,7 @@ static void fill(s16 *out, u32 frames, const struct trapframe *tf)
             if (st[i].a && (!paused || app_is_session(st[i].a)))
                 take(&st[i], frames, tf);
     }
+    vsbdev_mix(mx.acc, frames, mx.rate);        /* what a DOS program plays on the virtual Sound Blaster */
     {
         u16 peak[2] = { 0, 0 };
         mix_master(mx.acc, out, frames, mx.master, mx.mute, peak);
@@ -300,12 +306,15 @@ static int session_streams(void)        /* streams of a program that is not an a
 }
 
 /* The card plays while the desktop has the screen, or a full-screen program has a stream of its own; otherwise
-   a session (or no desktop) has the card. */
+   a session (or no desktop) has the card. With the virtual Sound Blaster on it plays all the time: what a
+   session's program finds is that card, and the real one stays the mixer's. But for a session in direct mode,
+   whose ports are not trapped: its program reaches the real card, which is the session's as it ever was
+   (vsbdev_on() says no for as long). */
 static void card_want(void)
 {
     if (!mx.on)
         return;
-    if (mx.desk || session_streams()) {
+    if (mx.desk || session_streams() || vsbdev_on()) {
         mx.out = 0;
         if (!mx.card->running() && mx.card->start(mx.rate, PERIOD, fill) != 0)
             mx.on = 0;
@@ -318,6 +327,11 @@ static void card_want(void)
     }
     rec_update();
 }
+
+void mixer_refresh(void) { card_want(); }      /* (the virtual Sound Blaster has come on) */
+
+/* BLASTER for the programs GLOS starts: the virtual card's, or else a Crystal chip's own; 0: none of GLOS's. */
+const char *mixer_blaster(void) { return vsbdev_blaster() ? vsbdev_blaster() : crystal_blaster(); }
 
 /* The mixer is the desktop's: it plays while the desktop has the screen. */
 void mixer_desktop(int on)
@@ -585,6 +599,8 @@ u32 mixer_stat(char *buf, u32 max)
             n += (u32)ksnprintf(buf + n, max - n, "stream %u app=%u rate=%u channels=%u periods=%u underruns=%u\n",
                                 st[i].id, app_id(st[i].a), st[i].h->rate, st[i].h->channels, st[i].h->periods,
                                 st[i].h->underruns);
+    if (vsbdev_blaster() && n < max)            /* (the virtual Sound Blaster: where programs find it) */
+        n += (u32)ksnprintf(buf + n, max - n, "blaster virtual %s\n", vsbdev_blaster());
     return n + midi_stat(buf + n, n < max ? max - n : 0);
 }
 

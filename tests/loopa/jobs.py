@@ -4592,7 +4592,69 @@ AUDIO_CASES = [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k"),
 #   offers these three Crystal cards, given MGA-Glide's sound/crystal ROMs)
 
 
-def audio_case(profile, vcard, card, sound="sb16"):
+def vsb_case(profile, vcard, card, sound="sb16", virtual=True):
+    """The virtual Sound Blaster (kernel/vm/vsb.c, vdma.c, vsbdev.c; docs/v1/vsb.md): SBTEST (tests/dos/sbtest.c)
+    finds a Sound Blaster by BLASTER and plays it as a DOS game does, in a session: the reset and version, the
+    identification, an interrupt asked for, one 8-bit block by a time constant, auto-initialised blocks and
+    their end, the SB16's 16 bits by the high DMA channel; every case in its time. With the virtual card (the
+    rule) GLOS's mixer plays it all on whatever card it has (an SB16, a Crystal chip's codec) and keeps that
+    card through the session; GLOS's log says what was played, how loud. With [sound] virtual = off the program
+    has 86Box's own SB16, and the same cases pass: the test itself is right. And with the virtual card on but
+    the program in direct mode (virtual "direct": its ports are not trapped), it has the real card too, which
+    the mixer hands over for the session and takes back."""
+    direct = virtual == "direct"
+    virtual = virtual is True
+    tag = "%s-%s-%s%s" % (profile, vcard, sound, "-direct" if direct else "" if virtual else "-real")
+    cfg = batfile("vsb-%s/GLOS.CFG" % tag, ["; jobs.py audio, the virtual Sound Blaster", "[time]", "sntp = off"]
+                  + (["[program SBTEST.EXE]", "direct = 1"] if direct else [] if virtual else ["[sound]", "virtual = off"]))
+    agent = Agent("vsb-" + tag, profile, card, ["--card", vcard, "--sound", sound]
+        + (["--pre", "SET BLASTER=A220 I5 D1 H5 T6"] if sound == "sb16" else []) + [
+        "--file", cfg + "=/TEST/GLOS.CFG", "--file", "build/ow/dos/SBTEST.EXE=/TEST/SBTEST.EXE",
+        "--cmd", "SERSAY HX-START vsb", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks, info = {"listen": agent.listening()}, ""
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        m = len(agent.log())
+        rc, o, _ = agent.ssh("C:\\TEST\\SBTEST.EXE", timeout=240)
+        cases = re.findall(r"SBTEST case=(\S+) ok=(\d) ?([^\r\n]*)", o)
+        checks["run"] = rc == 0 and {"found", "ident", "irq", "single", "auto", "sb16"} <= {c for c, k, w in cases} \
+            and all(k == "1" for c, k, w in cases)
+        if not checks["run"]:
+            info += " rc=%d %s" % (rc, " | ".join("%s (%s)" % (c, w) for c, k, w in cases if k != "1"))
+        t0 = time.time()                        # (the session's end and its line come a moment after the answer)
+        while time.time() - t0 < 20 and "GLOS-SESSION end" not in agent.log()[m:]:
+            time.sleep(0.5)
+        t = agent.log()[m:]
+        if virtual:
+            end = re.search(r"GLOS-VSB end starts=(\d+) irqs=(\d+) played=(\d+) peak=(\d+)", t)
+            checks["said"] = "GLOS-VSB on blaster=\"A220 I5 D1 H5 T6\"" in agent.log() \
+                and "GLOS-VSB play rate=10989 bits=8 channels=1 block=4096 auto=0" in t \
+                and "GLOS-VSB play rate=22050 bits=16 channels=2 block=4096 auto=1" in t
+            # three sounds; an interrupt asked for and a dozen blocks' ends; over a second of frames; as loud as
+            # the square waves are (the 8-bit one's 112 steps of 256: 28672)
+            checks["played"] = bool(end) and int(end.group(1)) == 3 and int(end.group(2)) >= 14 \
+                and int(end.group(3)) > 22050 and 24000 <= int(end.group(4)) <= 28672
+            if end:
+                info += " played=%s peak=%s" % (end.group(3), end.group(4))
+            checks["kept"] = "GLOS-SB stop" not in t        # (the real card stayed the mixer's through the session)
+        elif direct:                            # handed over for the session, nothing of the virtual card's played,
+            checks["handed"] = "GLOS-SB stop" in t and "GLOS-VSB play" not in t and "GLOS-VSB end" not in t   # and back
+            t0 = time.time()
+            while time.time() - t0 < 20 and not agent.ssh("glos audio")[1].startswith("audio on "):
+                time.sleep(0.5)
+            checks["back"] = agent.ssh("glos audio")[1].startswith("audio on ")
+        else:
+            checks["real"] = "GLOS-VSB" not in agent.log()
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-26s %s%s" % ("vsb-" + tag, "PASS" if not bad else "FAIL", info + (" failed: " + " ".join(bad) if bad else "")), not bad
+
+
+def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     """GLOS's mixer (M8 step E; kernel/drv/mixer.c, sb16.c, tests/dos/audtest.c): with the desktop up GLOS plays
     the SB16 itself; AUDTEST's tone through a stream, then two streams of other rates and channels at once, then
     one while a session (a DOS program) has the card: no underrun in any while it was fed, the card given to the
@@ -4602,8 +4664,17 @@ def audio_case(profile, vcard, card, sound="sb16"):
     import time
     crystal = sound != "sb16"
     tag = "%s-%s" % (profile, vcard) + ("-" + sound if crystal else "")
-    blaster = "A220 I5 D1 T4" if crystal else "A220 I5 D1 H5 T6"
-    agent = Agent("audio-" + tag, profile, card, ["--card", vcard, "--sound", sound, "--wav"]
+    # With the virtual Sound Blaster (the rule since 2026-11-19; docs/v1/vsb.md) the mixer plays from GLOS's
+    # start and keeps the card through a session, and BLASTER is the virtual card's; with [sound] virtual = off
+    # (virtual False) it is as it was: the mixer idle with no desktop, the card handed to a session and taken
+    # back, a Crystal chip's own BLASTER.
+    if not virtual:
+        tag += "-real"
+    blaster = "A220 I5 D1 T4" if crystal and not virtual else "A220 I5 D1 H5 T6"
+    off_cfg = [] if virtual else ["--file", batfile("audio-%s/GLOS.CFG" % tag, [
+        "; jobs.py audio, the virtual Sound Blaster off", "[time]", "sntp = off", "[sound]", "virtual = off"])
+        + "=/TEST/GLOS.CFG"]
+    agent = Agent("audio-" + tag, profile, card, ["--card", vcard, "--sound", sound, "--wav"] + off_cfg
         + ([] if crystal else ["--pre", "SET BLASTER=" + blaster]) + [
         "--file", "build/dj/AUDTEST.EXE=/TEST/AUDTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
         "--file", "build/ow/dos/FMTEST.EXE=/TEST/FMTEST.EXE",
@@ -4630,7 +4701,12 @@ def audio_case(profile, vcard, card, sound="sb16"):
         return good, (int(m.group(1)) if m else 0)
 
     try:
-        checks["idle"] = agent.ssh("glos audio")[1].startswith("audio idle ")
+        want = "audio on " if virtual else "audio idle "
+        t0 = time.time()                        # (the virtual card comes on with GLOS.CFG, a moment after the agent)
+        while time.time() - t0 < 30 and not agent.ssh("glos audio")[1].startswith(want):
+            time.sleep(0.5)
+        checks["idle"] = agent.ssh("glos audio")[1].startswith(want)
+        checks["said"] = ("blaster virtual " + blaster in agent.ssh("glos audio")[1]) == virtual
         if crystal:                             # (GLOS set it up: the data sheet's resources, BLASTER for sessions)
             checks["setup"] = "GLOS-SOUND crystal wss=534 sb=220 fm=388 irq=5 dma=1 " in agent.log()
             checks["blaster"] = "BLASTER=" + blaster in agent.ssh("SET")[1]
@@ -4657,7 +4733,7 @@ def audio_case(profile, vcard, card, sound="sb16"):
             checks["fm"] = rc1 == 0 and rc2 == 0 and "found=1 notes=1" in o1 and "found=1 notes=1" in o2
         log = agent.log()
         on, off = ("GLOS-SOUND start", "GLOS-SOUND stop") if crystal else ("GLOS-SB start", "GLOS-SB stop")
-        checks["handed-over"] = log.count(on) >= 2 and off in log
+        checks["handed-over"] = (log.count(on) >= 2 and off in log) if not virtual else off not in log
         info += " periods=%d" % n
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
@@ -9855,9 +9931,18 @@ def main():
         if os.environ.get("LOOPA_AUDIO_SOUND"):    # e.g. LOOPA_AUDIO_SOUND=cs4236b,cs4232
             cases = [c for c in cases if (c[3] if len(c) > 3 else "sb16") in os.environ["LOOPA_AUDIO_SOUND"].split(",")]
         res = matrix(audio_case, cases, a.jobs)
+        if not os.environ.get("LOOPA_AUDIO_SOUND"):     # ... and with the virtual Sound Blaster off: the card handed
+            res += matrix(audio_case, [c for c in [("bf6", "g200", "ne2kpci", "sb16", False),      # to a session
+                                                   ("bf6", "g200", "ne2kpci", "cs4236b", False)]
+                                       if not a.profile or c[0] in a.profile], a.jobs)
         if not os.environ.get("LOOPA_AUDIO_SOUND") or "off" in os.environ["LOOPA_AUDIO_SOUND"].split(","):
             res += matrix(crystal_off_case, [c[:3] for c in AUDIO_CASES if len(c) > 3
                                              and (not a.profile or c[0] in a.profile)][:1], a.jobs)
+        if not os.environ.get("LOOPA_AUDIO_SOUND"):     # the virtual Sound Blaster: on an SB16, on a Crystal chip, on
+            vsb = [("bf6", "g200", "ne2kpci", "sb16", True), ("bf6", "g200", "ne2kpci", "cs4236b", True),   # the 486;
+                   ("486dx2", "vbe", "ne2k", "sb16", True), ("bf6", "g200", "ne2kpci", "sb16", False),     # and off,
+                   ("bf6", "g200", "ne2kpci", "sb16", "direct")]                                         # in direct mode
+            res += matrix(vsb_case, [c for c in vsb if not a.profile or c[0] in a.profile], a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "joy":
         cases = [c for c in JOY_CASES if not a.profile or c[0] in a.profile]

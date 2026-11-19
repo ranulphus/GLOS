@@ -45,6 +45,7 @@
 #include "io.h"
 #include "kprintf.h"
 #include "mixer.h"
+#include "vsbdev.h"
 #include "session.h"
 #include "shot.h"
 #include "timer.h"
@@ -287,8 +288,11 @@ static void end(const char *why)
         ses.env_seg = 0;
     }
     remode = remode_to(ses.mode);               /* the mode it began in, and so the palette */
+    vsbdev_session_end();                       /* (the virtual Sound Blaster: silent, as after a reset) */
     if (!mixer_on())
         sb_stop();                              /* (not the mixer's: a program's that started as an app's) */
+    mixer_refresh();                            /* (... and the mixer's again, where the virtual Sound Blaster keeps
+                                                   it with no desktop) */
     display_session(0);                         /* ... and the desktop's again, if it had the screen (and the mixer
                                                    the Sound Blaster) */
     if (pit_moved()) {
@@ -529,6 +533,8 @@ void session_exec(const struct trapframe *tf)
     ses.n++;
     ses.prof = profile_for(psp == vm.loader_psp && job.profile[0] ? job.profile : ses.prog, &ses.prof_copy);
     ses.direct = psp == vm.loader_psp && job.direct;
+    mixer_refresh();                            /* (a session in direct mode has the real sound card, the virtual
+                                                   Sound Blaster or no: its ports are not trapped. mixer.c) */
     ses.exclusive = psp == vm.loader_psp && job.exclusive;
     /* (A program marked as an app asks to be one by itself, with API 2.0's init: made one before it asked, its
        own asking was refused as a second one and it ended. A service is started so, marked or not: services.c.) */
@@ -563,7 +569,7 @@ void session_exec(const struct trapframe *tf)
                 n += 7 + (u32)strlen(cp) + 1;
             }
         }
-        if (psp == vm.loader_psp && crystal_blaster() && !env_has(tf, psp, "BLASTER=")) {
+        if (psp == vm.loader_psp && mixer_blaster() && !env_has(tf, psp, "BLASTER=")) {
             int own = 0;                        /* a Crystal chip GLOS set up: BLASTER for its SB Pro, unless the */
             for (e = ses.prof ? ses.prof->env : ""; *e; e += strlen(e) + 1)     /* program's environment, the */
                 own |= same_var(e, "BLASTER=");                                 /* profile or the job has one */
@@ -571,8 +577,8 @@ void session_exec(const struct trapframe *tf)
                 own |= same_var(e, "BLASTER=");
             if (!own) {
                 memcpy(add + n, "BLASTER=", 8);
-                memcpy(add + n + 8, crystal_blaster(), strlen(crystal_blaster()) + 1);
-                n += 8 + (u32)strlen(crystal_blaster()) + 1;
+                memcpy(add + n + 8, mixer_blaster(), strlen(mixer_blaster()) + 1);
+                n += 8 + (u32)strlen(mixer_blaster()) + 1;
             }
         }
         if (psp == vm.loader_psp && cmdcom_path()) {     /* COMSPEC: GLOS's own COMMAND.COM (S4c), unless the */

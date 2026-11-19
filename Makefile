@@ -319,6 +319,7 @@ $(eval $(call dos_test,XMSBIG,xmsbig))
 $(eval $(call dos_test,ECHOARGS,echoargs))
 $(eval $(call dos_test,SCRTEXT,scrtext))
 $(eval $(call dos_test,CLOCKCHK,clockchk))
+$(eval $(call dos_test,SBTEST,sbtest))
 $(eval $(call dos_test,CONIN,conin))
 $(eval $(call dos_test,RUNOUT,runout))
 $(eval $(call dos_test,SESSTEST,sesstest))
@@ -354,7 +355,7 @@ build/ow/dos/DPMI16.EXE: tests/dos/dpmi16/dpmi16.c tests/dos/dpmi16/dpmi16a.asm
 	  file build/ow/dos/obj/dpmi16.obj,build/ow/dos/obj/dpmi16a.obj
 DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/XMSBIG.EXE build/ow/dos/ECHOARGS.EXE build/ow/dos/DPMIMINI.COM \
              build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
-             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/CLOCKCHK.EXE \
+             build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/CLOCKCHK.EXE build/ow/dos/SBTEST.EXE \
              build/ow/dos/I2FTSR.EXE build/ow/dos/STUBTSR.EXE build/ow/dos/UMBRD.EXE build/ow/dos/FMTEST.EXE \
              build/ow/dos/JOYTEST.EXE build/ow/dos/SCRTEXT.EXE
 dos-tests: $(DOS_TESTS)
@@ -381,7 +382,7 @@ KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c
          kernel/ssh/sshd.c \
          kernel/drv/serial.c kernel/lib/kprintf.c kernel/mm/pmm.c kernel/mm/heap.c kernel/mm/vmm.c kernel/mm/umapage.c \
          kernel/dbg/gdbstub.c kernel/dbg/gdbprog.c kernel/vm/v86.c kernel/vm/session.c kernel/vm/v86dec.c kernel/vm/vpic.c kernel/vm/vdev.c kernel/vm/vcon.c \
-         kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/vjoy.c kernel/drv/uhci.c kernel/drv/uhcitd.c kernel/drv/hidparse.c kernel/drv/xpad.c kernel/drv/usbkbd.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
+         kernel/vm/vkbc.c kernel/vm/int15.c kernel/vm/vjoy.c kernel/vm/vdma.c kernel/vm/vsb.c kernel/vm/vsbdev.c kernel/drv/uhci.c kernel/drv/uhcitd.c kernel/drv/hidparse.c kernel/drv/xpad.c kernel/drv/usbkbd.c kernel/vm/xms.c kernel/dos/agent.c kernel/dos/watch.c \
          kernel/dos/shot.c kernel/lib/png.c kernel/dos/dos.c kernel/ssh/sftp.c \
          kernel/disk/bdisk.c kernel/disk/mbr.c kernel/disk/mbrboot.S kernel/disk/fatfmt.c kernel/disk/fdboot.S \
          kernel/disk/diskcmd.c kernel/drv/uart.c kernel/net/slip.c kernel/net/member.c kernel/drv/plip.c kernel/drv/rhine.c \

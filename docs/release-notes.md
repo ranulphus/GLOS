@@ -4,6 +4,17 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## A virtual Sound Blaster for DOS programs (2026-11-19)
+
+- **A DOS program finds a Sound Blaster 16** at `BLASTER`'s ports whatever sound card the PC has, as long as
+  GLOS's mixer has a driver for it: what the program plays there comes out of GLOS's mixer, beside the
+  desktop's own sound. Games' digital sound on a Crystal chip's codec, and on the cards GLOS gains drivers for.
+- **`BLASTER`** is set for the programs GLOS starts where DOS's environment has none (A220 I5 D1 H5).
+- **The real card stays the mixer's** through a session. `[sound] virtual = off` (and a restart) gives
+  programs the real card as before.
+- **FM music** goes to the card's real FM chip as before; a card with none has no FM music yet. Recording and
+  ADPCM are not done. `docs/v1/vsb.md` has the whole of it.
+
 ## Sound through GLOS's mixer for full-screen programs (API 2.5, 2026-11-19)
 
 - **A program that is not an app can open a stream out** (AUDIO's OUT; `glos_audio_out`), where only an app in
