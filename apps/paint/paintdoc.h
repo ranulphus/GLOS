@@ -42,6 +42,12 @@ void pd_ellipse(struct pd_doc *d, int xa, int ya, int xb, int yb, unsigned colou
 long pd_fill(struct pd_doc *d, int x, int y, unsigned colour, int tolerance);
 unsigned pd_get(const struct pd_doc *d, int x, int y);  /* what shows there (00RRGGBBh); outside: 0 */
 
+/* The whole picture (every layer) turned a quarter right (PD_RIGHT) or left, or flipped across or over. 0, or
+   -1 with nothing changed (no memory). pd_turn_back: the turn that undoes one. */
+enum { PD_RIGHT = 1, PD_LEFT, PD_ACROSS, PD_OVER };
+int pd_turn(struct pd_doc *d, int how);
+int pd_turn_back(int how);
+
 /* A step to undo: the current layer's pixels in a rectangle, before and after. pd_before copies the layer (as
    a tool begins); pd_step makes the step of what the tools changed since pd_clean (NULL: nothing did, or no
    memory) and frees the copy; pd_apply puts the before (undo) or the after back and flattens. */

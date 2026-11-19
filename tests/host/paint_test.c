@@ -250,6 +250,40 @@ int main(void)
         pd_free(d);
     }
 
+    d = pd_new(3, 2, PAPER);                    /* the whole picture turned and flipped */
+    pd_dot(d, 0, 0, INK, 1);
+    pd_dot(d, 2, 0, RED, 1);
+    pd_dot(d, 2, 1, RED, 1);
+    check("before turning", d,
+          "#.o\n"
+          "..o\n");
+    is("turned right", pd_turn(d, PD_RIGHT), 0);
+    is("its size", d->w * 10 + d->h, 23);
+    check("a quarter right", d,
+          ".#\n"
+          "..\n"
+          "oo\n");
+    is("and back", pd_turn(d, pd_turn_back(PD_RIGHT)), 0);
+    check("back again", d,
+          "#.o\n"
+          "..o\n");
+    pd_turn(d, PD_LEFT);
+    check("a quarter left", d,
+          "oo\n"
+          "..\n"
+          "#.\n");
+    pd_turn(d, PD_RIGHT);
+    pd_turn(d, PD_ACROSS);
+    check("flipped across", d,
+          "o.#\n"
+          "o..\n");
+    pd_turn(d, PD_OVER);
+    check("and over", d,
+          "o..\n"
+          "o.#\n");
+    is("no such turn", pd_turn(d, 9), -1);
+    pd_free(d);
+
     is("too large is refused", pd_new(PD_MAX + 1, 1, PAPER) == NULL, 1);
     is("nothing is refused", pd_new(0, 4, PAPER) == NULL, 1);
 

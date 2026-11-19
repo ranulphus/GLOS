@@ -21,6 +21,7 @@
 #include "paintdoc.h"
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_IN, C_OUT, C_ACTUAL, C_FIT, C_ABOUT, C_FILLED,
+       C_TURN = 50,                     /* + PD_RIGHT, PD_LEFT, PD_ACROSS, PD_OVER */
        C_TOOL = 100 };
 enum { T_PENCIL, T_BRUSH, T_ERASER, T_LINE, T_RECT, T_ELLIPSE, T_FILL, T_PICK, T_COUNT };
 
@@ -119,6 +120,47 @@ static void commit(const char *name, unsigned *before)
         return;
     dirty = 1;
     gui_undo_push(undo, name, step_undo, step_redo, s, pd_step_bytes(s), step_drop, NULL, 0);
+}
+
+/* ---- the whole picture turned or flipped (Image's menu): undone by the turn the other way, with no pixels kept */
+
+static void turned(int how)                     /* (the picture is another size: the view's, and what the bar says) */
+{
+    static const char *const names[] = { "", "right", "left", "across", "over" };
+    gui_image_view_set(view, doc->flat, doc->w, doc->h, doc->w);
+    status_parts();
+    gui_damage(view);
+    dirty = 1;
+    printf("PAINT turned %s %dx%d\n", names[how], doc->w, doc->h);
+    fflush(stdout);
+}
+
+static void turn_undo(void *p)
+{
+    int how = pd_turn_back(*(int *)p);
+    if (pd_turn(doc, how) == 0)
+        turned(how);
+}
+
+static void turn_redo(void *p)
+{
+    if (pd_turn(doc, *(int *)p) == 0)
+        turned(*(int *)p);
+}
+
+static void turn(int how)
+{
+    static const char *const names[] = { "", GUI_N("Turn Right"), GUI_N("Turn Left"), GUI_N("Flip Across"),
+                                         GUI_N("Flip Over") };
+    int *h = malloc(sizeof *h);
+    if (!h || pd_turn(doc, how) != 0) {
+        free(h);
+        gui_message(win, GUI_T("Paint"), GUI_T("There isn't the memory to turn this picture."), GUI_MB_OK);
+        return;
+    }
+    *h = how;
+    turned(how);
+    gui_undo_push(undo, GUI_T(names[how]), turn_undo, turn_redo, h, sizeof *h, free, NULL, 0);
 }
 
 /* ---- the tools */
@@ -407,6 +449,10 @@ static void command(struct gui_window *w, int id)
         choose(id - C_TOOL);
         return;
     }
+    if (id > C_TURN && id <= C_TURN + PD_OVER) {
+        turn(id - C_TURN);
+        return;
+    }
     switch (id) {
     case C_NEW:
         if (let_go())
@@ -529,6 +575,11 @@ int main(int argc, char **argv)
     gui_menu_item(m, GUI_T("Zoom &out"), C_OUT, NULL);
     gui_menu_item(m, GUI_T("&Actual size"), C_ACTUAL, NULL);
     gui_menu_item(m, GUI_T("&Fit to window"), C_FIT, NULL);
+    m = gui_menu(bar, GUI_T("&Image"));
+    gui_menu_item(m, GUI_T("Turn &Left"), C_TURN + PD_LEFT, NULL);
+    gui_menu_item(m, GUI_T("Turn &Right"), C_TURN + PD_RIGHT, NULL);
+    gui_menu_item(m, GUI_T("Flip &Across"), C_TURN + PD_ACROSS, NULL);
+    gui_menu_item(m, GUI_T("Flip &Over"), C_TURN + PD_OVER, NULL);
     m = gui_menu(bar, GUI_T("&Tools"));
     for (i = 0; i < T_COUNT; i++)
         gui_menu_item(m, GUI_T(tools[i].text), C_TOOL + i, NULL);

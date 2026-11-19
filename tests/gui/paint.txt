@@ -2,7 +2,8 @@
 # tool by its key and the mouse (a drag is one straight move; the picture's corner is at 120, 79 of the window),
 # the first colour from the palette, shapes filled, a flood, the picker, the eraser; undo and redo; the picture
 # saved as a PNG, a new one made, the saved one opened: it is the picture that was saved (the toolbar is masked
-# in the two that are compared: Undo is grey after a file is opened).
+# in the pictures that are compared: Undo is grey after a file is opened). Then the whole picture turned left
+# (Image's menu) and the turn undone: the picture as it was; and Paint asks about changes not saved.
 run PAINT.EXE
 wait "Untitled - Paint"
 shot start "Untitled - Paint"
@@ -48,7 +49,15 @@ wait "P1.PNG - Paint"
 key p
 shot opened "P1.PNG - Paint" 0 20 560 26
 same again opened
+key alt+i
+key l
+shot turned "P1.PNG - Paint"
+key ctrl+z
+shot unturned "P1.PNG - Paint" 0 20 560 26
+same opened unturned
 key alt+f4
+wait "Paint"
+key alt+n
 expect PAINT new 320x240
 expect PAINT drew pencil 10,10 60,10 000000
 expect PAINT drew brush 10,30 60,60 000000
@@ -63,4 +72,6 @@ expect PAINT undone
 expect PAINT redone
 expect PAINT saved C:\OUT\P1.PNG 320x240
 expect PAINT open C:\OUT\P1.PNG 320x240 PNG
+expect PAINT turned left 240x320
+expect PAINT turned right 320x240
 expect PAINT end

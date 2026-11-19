@@ -382,6 +382,51 @@ out:
     return done;
 }
 
+/* ---- the whole picture turned */
+
+int pd_turn_back(int how) { return how == PD_RIGHT ? PD_LEFT : how == PD_LEFT ? PD_RIGHT : how; }
+
+int pd_turn(struct pd_doc *d, int how)
+{
+    int quarter = how == PD_RIGHT || how == PD_LEFT, w = d->w, h = d->h, nw = quarter ? h : w, nh = quarter ? w : h;
+    unsigned *n[PD_LAYERS], *flat;
+    int i, x, y;
+    if (how < PD_RIGHT || how > PD_OVER)
+        return -1;
+    for (i = 0; i < d->n; i++)
+        if (!(n[i] = malloc((size_t)nw * (size_t)nh * sizeof **n))) {
+            while (i--)
+                free(n[i]);
+            return -1;
+        }
+    if (!(flat = malloc((size_t)nw * (size_t)nh * sizeof *flat))) {
+        for (i = 0; i < d->n; i++)
+            free(n[i]);
+        return -1;
+    }
+    for (i = 0; i < d->n; i++) {
+        const unsigned *from = d->layer[i].px;
+        for (y = 0; y < h; y++)
+            for (x = 0; x < w; x++) {
+                unsigned c = from[(size_t)y * w + x];
+                switch (how) {
+                case PD_RIGHT: n[i][(size_t)x * nw + (h - 1 - y)] = c; break;
+                case PD_LEFT: n[i][(size_t)(w - 1 - x) * nw + y] = c; break;
+                case PD_ACROSS: n[i][(size_t)y * nw + (w - 1 - x)] = c; break;
+                default: n[i][(size_t)(h - 1 - y) * nw + x] = c; break;
+                }
+            }
+        free(d->layer[i].px);
+        d->layer[i].px = n[i];
+    }
+    free(d->flat);
+    d->flat = flat;
+    d->w = nw, d->h = nh;
+    pd_flatten(d, 0, 0, nw, nh);
+    pd_clean(d);
+    return 0;
+}
+
 /* ---- steps to undo */
 
 unsigned *pd_before(const struct pd_doc *d)

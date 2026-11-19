@@ -216,9 +216,12 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
 - **Eight glyphs more** in the toolkit's set, for the tools (`sdk/gui/icons/glyphs.list`; `make icons`).
 - **Tests:** `paint_test` in the host run; `paint` on the host and on Loop A (a drawing session with every
   tool, undo and redo, the picture saved as a PNG and opened again: the same picture); `images-edit` on Loop A.
+- **The whole picture turned and flipped** (Image's menu: Turn Left, Turn Right, Flip Across, Flip Over), every
+  layer; undone by the turn the other way, with no pixels kept for it. `paint` turns the opened picture and
+  undoes it (the picture as it was), and answers Paint's question about changes not saved.
 - **Not done yet:** layers' panel and blend modes; selections; text; gradients, curves, the clone stamp;
-  resize, crop, turn; adjustments and effects; the clipboard; PCX and the layered format written; tiles for
-  pictures of any size.
+  resize, crop, the canvas's size; adjustments and effects; the clipboard; PCX and the layered format written;
+  tiles for pictures of any size.
 
 ## Faults of the toolkit and the suites that phase E's gates found (2026-11-19)
 
