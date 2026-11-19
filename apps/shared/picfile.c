@@ -183,18 +183,55 @@ static void put(void *ctx, void *data, int size)
     }
 }
 
-static int kind_of(const char *name)            /* 1 PNG, 2 BMP, 3 JPEG, 0 none of them */
+static int kind_of(const char *name)            /* 1 PNG, 2 BMP, 3 JPEG, 4 PCX, 0 none of them */
 {
-    static const char *const known[] = { "PNG", "BMP", "JPG", "JPEG", 0 };
+    static const char *const known[] = { "PNG", "BMP", "JPG", "JPEG", "PCX", 0 };
+    static const int kinds[] = { 1, 2, 3, 3, 4 };
     const char *e = pic_ext(name);
     int i, k;
     for (i = 0; known[i]; i++) {
         for (k = 0; e[k] && known[i][k] && (e[k] & ~0x20) == known[i][k]; k++)
             ;
         if (!e[k] && !known[i][k])
-            return i < 3 ? i + 1 : 3;
+            return kinds[i];
     }
     return 0;
+}
+
+/* PCX, 24 bits: the header, then each row as three planes (red, green, blue), each run-length coded by itself
+   (a count byte C0h + n, then the byte, for a run or for a byte whose top two bits are set). */
+static int pcx_write(FILE **f, const unsigned char *rgb, int w, int h)
+{
+    unsigned char head[128], *line;
+    int bpl = (w + 1) & ~1, x, y, p;
+    if (!(line = malloc((size_t)bpl * 2 + 2)))
+        return 0;
+    memset(head, 0, sizeof head);
+    head[0] = 0x0A, head[1] = 5, head[2] = 1, head[3] = 8;
+    head[8] = (unsigned char)(w - 1), head[9] = (unsigned char)((w - 1) >> 8);
+    head[10] = (unsigned char)(h - 1), head[11] = (unsigned char)((h - 1) >> 8);
+    head[12] = 72, head[14] = 72;               /* (dots an inch, across and down) */
+    head[65] = 3;                               /* planes */
+    head[66] = (unsigned char)bpl, head[67] = (unsigned char)(bpl >> 8);
+    head[68] = 1;                               /* a colour picture */
+    put(f, head, sizeof head);
+    for (y = 0; y < h && *f; y++)
+        for (p = 0; p < 3; p++) {
+            int n = 0;
+            for (x = 0; x < bpl;) {
+                unsigned char c = x < w ? rgb[((size_t)y * w + x) * 3 + p] : 0;
+                int run = 1;
+                while (run < 63 && x + run < bpl && (x + run < w ? rgb[((size_t)y * w + x + run) * 3 + p] : 0) == c)
+                    run++;
+                if (run > 1 || (c & 0xC0) == 0xC0)
+                    line[n++] = (unsigned char)(0xC0 | run);
+                line[n++] = c;
+                x += run;
+            }
+            put(f, line, n);
+        }
+    free(line);
+    return *f != NULL;
 }
 
 int pic_can_write(const char *name) { return kind_of(name) != 0; }
@@ -220,6 +257,8 @@ int pic_write(const char *path, const unsigned *px, int w, int h, int quality)
         ok = stbi_write_png_to_func(put, &f, w, h, 3, rgb, w * 3);
     else if (kind == 2)
         ok = stbi_write_bmp_to_func(put, &f, w, h, 3, rgb);
+    else if (kind == 4)
+        ok = pcx_write(&f, rgb, w, h);
     else
         ok = stbi_write_jpg_to_func(put, &f, w, h, 3, rgb, quality > 0 && quality <= 100 ? quality : 90);
     free(rgb);

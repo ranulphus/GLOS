@@ -261,8 +261,10 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
   brighter and flatter, and undoes all three.
 - **Not done yet:** blend modes, layers renamed and dragged, the layered format written; selections of other
   shapes, a selection moved, the desktop's clipboard; text; gradients, curves, the clone stamp; resizing in
-  proportion and bicubic; levels, curves, hue and saturation, the effects, their previews; PCX written; tiles
-  for pictures of any size.
+  proportion and bicubic; levels, curves, hue and saturation, the effects, their previews; tiles for pictures
+  of any size.
+- **PCX written** (2026-11-19): Save As has PCX, of 24 bits (three planes a row, each run-length coded by
+  itself: `apps/shared/picfile.c`). `paint-pcx`: a picture saved so and opened again is the same picture.
 
 ## Faults of the toolkit and the suites that phase E's gates found (2026-11-19)
 

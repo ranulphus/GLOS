@@ -14,8 +14,8 @@ int pic_info(const unsigned char *d, size_t n, int *pw, int *ph);       /* its s
    `back` (00RRGGBBh). */
 unsigned *pic_decode(const unsigned char *d, size_t n, const char *path, int *pw, int *ph, char *kind, size_t room,
                      unsigned back);
-/* A picture written as its name's end says: PNG, BMP, or JPG (quality 1 to 100; 0: 90). 0; -1 the file can't be
-   written; -2 no such kind; -3 no memory. */
+/* A picture written as its name's end says: PNG, BMP, PCX (24 bits), or JPG (quality 1 to 100; 0: 90). 0; -1 the
+   file can't be written; -2 no such kind; -3 no memory. */
 int pic_write(const char *path, const unsigned *px, int w, int h, int quality);
 int pic_can_write(const char *name);            /* by its name's end: a kind pic_write writes */
 #endif

@@ -1,0 +1,26 @@
+# Paint writes PCX (apps/shared/picfile.c; phase E, docs/v1/apps/paint.md): a picture opened, saved as a PCX
+# of 24 bits (three planes, run-length coded), a new picture made, the PCX opened: the same picture (PCX loses
+# nothing).
+run PAINT.EXE C:\GUI\IMG\A.PNG
+wait "A.PNG - Paint"
+shot png "A.PNG - Paint"
+key alt+f
+key a
+wait "Save As"
+type C:\\OUT\\A2.PCX\n
+wait "A2.PCX - Paint"
+key ctrl+n
+wait "New Picture"
+key enter
+wait "Untitled - Paint"
+key ctrl+o
+wait "Open"
+type C:\\OUT\\A2.PCX\n
+wait "A2.PCX - Paint"
+shot pcx "A2.PCX - Paint"
+same png pcx
+key alt+f4
+expect PAINT open C:\GUI\IMG\A.PNG 160x120 PNG
+expect PAINT saved C:\OUT\A2.PCX 160x120
+expect PAINT open C:\OUT\A2.PCX 160x120 PCX
+expect PAINT end

@@ -667,7 +667,7 @@ static int save_to(const char *p)
         free(out);
     }
     if (r != 0) {
-        gui_message(win, GUI_T("Paint"), r == -2 ? GUI_T("Paint saves PNG, BMP and JPG pictures: give the name one of those ends.")
+        gui_message(win, GUI_T("Paint"), r == -2 ? GUI_T("Paint saves PNG, BMP, PCX and JPG pictures: give the name one of those ends.")
                                          : r == -3 ? GUI_T("There isn't the memory to save this picture.")
                                                    : GUI_T("The picture couldn't be written there."), GUI_MB_OK);
         return 0;
@@ -682,11 +682,12 @@ static int save_to(const char *p)
 
 static const char *const filters[] = { GUI_N("Pictures|*.PNG;*.JPG;*.BMP;*.GIF;*.TGA;*.PNM;*.PPM;*.PGM;*.PCX"),
                                        GUI_N("All files|*.*"), NULL };
-static const char *const save_filters[] = { GUI_N("PNG|*.PNG"), GUI_N("BMP|*.BMP"), GUI_N("JPEG|*.JPG"), NULL };
+static const char *const save_filters[] = { GUI_N("PNG|*.PNG"), GUI_N("BMP|*.BMP"), GUI_N("JPEG|*.JPG"),
+                                            GUI_N("PCX|*.PCX"), NULL };
 
 static int save_as(void)
 {
-    static const char *const ends[] = { ".PNG", ".BMP", ".JPG" };
+    static const char *const ends[] = { ".PNG", ".BMP", ".JPG", ".PCX" };
     struct gui_file_opts o;
     char p[260];
     memset(&o, 0, sizeof o);
@@ -695,7 +696,7 @@ static int save_as(void)
     if (!gui_file_dialog_ex(win, GUI_T("Save As"), 1, p, sizeof p, &o))
         return 0;
     if (!pic_ext(gui_path_name(p))[0] && strlen(p) + 5 < sizeof p)     /* (no end: the kind chosen's) */
-        strcat(p, ends[o.filter >= 0 && o.filter < 3 ? o.filter : 0]);
+        strcat(p, ends[o.filter >= 0 && o.filter < 4 ? o.filter : 0]);
     return save_to(p);
 }
 
