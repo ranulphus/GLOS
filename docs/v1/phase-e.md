@@ -108,8 +108,13 @@ Plan: `docs/v1/apps/notepad.md`. The first of its parts.
   the text is edited (the editor is asked where they are: `gui_code_marks`, `gui_code_mark_next`); the first
   one turns Line Numbers on, so that they show. They are not kept with the file.
 - **Tests:** `notepad-book` on the host and on Loop A.
-- **Not done yet:** files dropped on the window; Markdown's colours and a menu to choose a kind; the results
-  pane, find in files; code pages; large files; bookmarks kept with the session.
+- **Markdown, and Highlight As** (2026-11-19): Markdown has its colours (headings, lists' and quotes' marks,
+  rules, code in spans and fenced over lines, emphasis, links; `.MD` files), and View's **Highlight As** chooses
+  the shown document's kind by hand, or By the File's Name again: a file with no name, or one whose name says
+  nothing, can be coloured.
+- **Tests:** `lex_test` (Markdown's lines, the kinds' list); `notepad-kind` on the host and on Loop A.
+- **Not done yet:** files dropped on the window; the results pane, find in files; code pages; large files;
+  bookmarks and the chosen kind kept with the session.
 
 ## Files (2026-11-18): the browser's toolbar and address bar
 

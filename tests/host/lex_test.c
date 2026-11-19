@@ -68,6 +68,23 @@ int main(void)
     line("html", lex_html, line("html", lex_html, 0, "<a href=\"long", "KK.TTTTOSSSSS", 2 + '"'), "name\">x", "SSSSSK.", 0);
     line("html", lex_html, line("html", lex_html, 0, "<img", "KKKK", 2), " alt='y'>", ".TTTOSSSK", 0);
 
+    line("markdown", lex_markdown, 0, "# A heading", "KKKKKKKKKKK", 0);
+    line("markdown", lex_markdown, 0, "#no heading", "...........", 0);
+    line("markdown", lex_markdown, 0, "- an *item* and `code`", "O....TTTTTT.....SSSSSS", 0);
+    line("markdown", lex_markdown, 0, "12. **bold** snake_case_name", "OOO.TTTTTTTT................", 0);
+    line("markdown", lex_markdown, 0, "> see [the page](http://x) <!-- n -->", "O.....KKKKKKKKKKSSSSSSSSSS.CCCCCCCCCC", 0);
+    line("markdown", lex_markdown, 0, "* * *", "OOOOO", 0);
+    line("markdown", lex_markdown, 0, "a * b and 2*3", ".............", 0);
+    line("markdown", lex_markdown, 0, "an \\*escaped* star", "..................", 0);
+    line("markdown", lex_markdown, line("markdown", lex_markdown, line("markdown", lex_markdown, 0, "```c", "PPPP", 1),
+                                        "# not a heading *here*", "SSSSSSSSSSSSSSSSSSSSSS", 1), "```", "PPP", 0);
+    if (lexer_kind(0, &name) != NULL || strcmp(name, "Text") || lexer_kind(7, &name) != lex_markdown
+        || strcmp(name, "Markdown") || lexer_kind(8, &name) != NULL || name != NULL
+        || lexer_for("README.MD", &name) != lex_markdown) {
+        printf("lex_test: the kinds' list is wrong\n");
+        fails++;
+    }
+
     if (lexer_for("C:\\SRC\\MAIN.C", &name) != gui_code_lex_c || strcmp(name, "C") || lexer_for("run.bat", &name) != lex_batch
         || strcmp(name, "Batch") || lexer_for("C:\\GLOS\\GLOS.CFG", NULL) != lex_ini || lexer_for("X.ASM", NULL) != lex_asm
         || lexer_for("x.pas", NULL) != lex_pascal || lexer_for("INDEX.HTM", NULL) != lex_html

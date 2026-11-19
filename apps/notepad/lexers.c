@@ -359,6 +359,127 @@ int lex_html(void *ctx, const char *s, int n, int state, unsigned char *cls)
 
 /* ---- which lexer a file gets */
 
+/* ---- Markdown: headings, lists' and quotes' marks, rules, code (spans, and fenced over lines), emphasis, links.
+   The state: 1 inside a fenced block. */
+int lex_markdown(void *ctx, const char *s, int n, int state, unsigned char *cls)
+{
+    int i = 0, j, k;
+    (void)ctx;
+    fill(cls, 0, n, GUI_TOK_TEXT);
+    while (i < n && i < 3 && s[i] == ' ')
+        i++;
+    if (i + 3 <= n && (!strncmp(s + i, "```", 3) || !strncmp(s + i, "~~~", 3))) {     /* a fence: in, or out */
+        fill(cls, 0, n, GUI_TOK_PREPROC);
+        return !state;
+    }
+    if (state) {
+        fill(cls, 0, n, GUI_TOK_STRING);
+        return 1;
+    }
+    if (i < n && s[i] == '#') {                 /* a heading: one to six #, a space */
+        for (j = i; j < n && s[j] == '#'; j++)
+            ;
+        if (j - i <= 6 && (j == n || s[j] == ' ')) {
+            fill(cls, 0, n, GUI_TOK_KEYWORD);
+            return 0;
+        }
+    }
+    if (i < n && (s[i] == '-' || s[i] == '*' || s[i] == '_')) {         /* a rule: three or more of one, and spaces */
+        for (j = i, k = 0; j < n && (s[j] == s[i] || s[j] == ' '); j++)
+            k += s[j] == s[i];
+        if (j == n && k >= 3) {
+            fill(cls, 0, n, GUI_TOK_OP);
+            return 0;
+        }
+    }
+    while (i < n && s[i] == '>') {              /* a quote's marks */
+        cls[i++] = GUI_TOK_OP;
+        while (i < n && s[i] == ' ')
+            i++;
+    }
+    if (i + 1 < n && (s[i] == '-' || s[i] == '*' || s[i] == '+') && s[i + 1] == ' ') {
+        cls[i] = GUI_TOK_OP;                    /* a list's mark */
+        i += 2;
+    } else if (i < n && isdigit((unsigned char)s[i])) {
+        for (j = i; j < n && isdigit((unsigned char)s[j]); j++)
+            ;
+        if (j + 1 < n && (s[j] == '.' || s[j] == ')') && s[j + 1] == ' ') {
+            fill(cls, i, j + 1, GUI_TOK_OP);    /* a numbered list's */
+            i = j + 2;
+        }
+    }
+    while (i < n) {
+        if (s[i] == '\\' && i + 1 < n) {        /* (a mark taken as itself) */
+            i += 2;
+        } else if (s[i] == '`') {               /* a code span: to the next ` */
+            for (j = i + 1; j < n && s[j] != '`'; j++)
+                ;
+            if (j == n) {
+                i++;
+                continue;
+            }
+            fill(cls, i, j + 1, GUI_TOK_STRING);
+            i = j + 1;
+        } else if (s[i] == '*' || s[i] == '_') {        /* emphasis: * or ** (or _), to the same again on the line */
+            int w = i + 1 < n && s[i + 1] == s[i] ? 2 : 1;
+            if (s[i] == '_' && i && word_char((unsigned char)s[i - 1])) {       /* (snake_case is no emphasis) */
+                i += w;
+                continue;
+            }
+            for (j = i + w; j + w <= n; j++)
+                if (s[j] == s[i] && (w == 1 || s[j + 1] == s[i]) && s[j - 1] != ' ' && j > i + w)
+                    break;
+            if (j + w > n || i + w >= n || s[i + w] == ' ') {
+                i += w;
+                continue;
+            }
+            fill(cls, i, j + w, GUI_TOK_TYPE);
+            i = j + w;
+        } else if (s[i] == '[') {               /* a link: [its words](where to) */
+            for (j = i + 1; j < n && s[j] != ']'; j++)
+                ;
+            if (j + 1 < n && s[j + 1] == '(') {
+                for (k = j + 2; k < n && s[k] != ')'; k++)
+                    ;
+                if (k < n) {
+                    fill(cls, i, j + 1, GUI_TOK_KEYWORD);
+                    fill(cls, j + 1, k + 1, GUI_TOK_STRING);
+                    i = k + 1;
+                    continue;
+                }
+            }
+            i++;
+        } else if (s[i] == '<' && i + 4 <= n && !strncmp(s + i, "<!--", 4)) {  /* a comment, on one line */
+            for (j = i + 4; j + 3 <= n && strncmp(s + j, "-->", 3); j++)
+                ;
+            j = j + 3 <= n ? j + 3 : n;
+            fill(cls, i, j, GUI_TOK_COMMENT);
+            i = j;
+        } else {
+            i++;
+        }
+    }
+    return 0;
+}
+
+static const struct {
+    const char *name;
+    gui_lexer lex;
+} kinds[] = {
+    { "Text", NULL }, { "C", gui_code_lex_c }, { "Batch", lex_batch }, { "INI", lex_ini }, { "Assembly", lex_asm },
+    { "Pascal", lex_pascal }, { "HTML", lex_html }, { "Markdown", lex_markdown },
+};
+
+gui_lexer lexer_kind(int i, const char **name)
+{
+    if (i < 0 || i >= (int)(sizeof kinds / sizeof kinds[0])) {
+        *name = NULL;
+        return NULL;
+    }
+    *name = kinds[i].name;
+    return kinds[i].lex;
+}
+
 gui_lexer lexer_for(const char *path, const char **name)
 {
     static const struct {
@@ -372,6 +493,7 @@ gui_lexer lexer_for(const char *path, const char **name)
         { "NAS", "Assembly", lex_asm },
         { "PAS", "Pascal", lex_pascal }, { "PP", "Pascal", lex_pascal },
         { "HTM", "HTML", lex_html }, { "HTML", "HTML", lex_html },
+        { "MD", "Markdown", lex_markdown }, { "MARKDOWN", "Markdown", lex_markdown },
     };
     const char *dot = strrchr(path, '.'), *slash = strrchr(path, '\\');
     size_t i;

@@ -1,0 +1,27 @@
+# Notepad's Markdown and View's Highlight As (apps/notepad; phase E, docs/v1/apps/notepad.md): Markdown typed
+# into a file with no name, which has no kind; Highlight As' Markdown colours it (a heading, a list's mark,
+# emphasis, code, a link); By the File's Name makes it plain text again.
+run NOTEPAD.EXE
+wait "Untitled - Notepad"
+type # Notes\n
+type - an *item* with `code`\n
+type See [the plan](docs/plan.md).\n
+pause 8000
+key alt+v
+key a
+key end
+key enter
+pause 500
+shot markdown "*Untitled - Notepad"
+key alt+v
+key a
+key n
+pause 500
+shot plain "*Untitled - Notepad"
+key alt+f4
+wait "Notepad"
+key alt+n
+gone "*Untitled - Notepad"
+expect NOTEPAD kind Markdown
+expect NOTEPAD kind Text
+expect NOTEPAD end

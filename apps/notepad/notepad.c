@@ -31,7 +31,8 @@
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_CUT, C_COPY, C_PASTE, C_DELETE, C_FIND, C_NEXT,
        C_REPLACE, C_GOTO, C_ALL, C_WRAP, C_ABOUT, C_CLOSE, C_NUMBERS, C_COLOURS, C_SESSION, C_BOOK, C_BOOKNEXT,
-       C_BOOKPREV };
+       C_BOOKPREV,
+       C_KIND_AUTO = 200, C_KIND };     /* Highlight As: by the file's name; C_KIND + i: the i-th kind (lexers.c) */
 
 #define DOCS 12
 
@@ -39,11 +40,12 @@ struct doc {
     struct gui_widget *page, *ed;
     char path[260];
     int last_mod;                       /* how its tab is marked now: -1 not yet */
+    int kind;                           /* its highlighting chosen by hand (lexer_kind's number); -1: by its name */
 };
 
 static struct gui_window *win;
 static struct gui_widget *strip, *status;
-static struct gui_menu *format, *view;
+static struct gui_menu *format, *view, *kind_menu;
 static struct doc doc[DOCS];
 static int numbers, colours = 1, kind_at;      /* View's two; the status bar's section for the file's kind */
 static int match_case, session;                /* Find's Match case; View's Keep Session */
@@ -75,11 +77,21 @@ static const char *doc_name(const struct doc *d, char *name, size_t room)
     return d->path[0] ? gui_dos_text(gui_path_name(d->path), name, room) : "Untitled";
 }
 
-/* A document's look: the margin or not, wrapped or not, and its kind's colours (by its name's end). */
+/* A document's kind: the one chosen for it by hand (View's Highlight As), else its name's end's. */
+static gui_lexer doc_lexer(const struct doc *d, const char **name)
+{
+    const char *n = "Text";
+    gui_lexer lex = d->kind >= 0 ? lexer_kind(d->kind, &n) : d->path[0] ? lexer_for(d->path, &n) : NULL;
+    if (name)
+        *name = n ? n : "Text";
+    return lex;
+}
+
+/* A document's look: the margin or not, wrapped or not, and its kind's colours. */
 static void doc_style(struct doc *d)
 {
     gui_code_style(d->ed, (numbers ? 0 : GUI_CODE_PLAIN) | (wrap ? GUI_CODE_WRAP : 0));
-    gui_code_lexer(d->ed, colours && d->path[0] ? lexer_for(d->path, NULL) : NULL, NULL);
+    gui_code_lexer(d->ed, colours ? doc_lexer(d, NULL) : NULL, NULL);
     gui_damage(d->ed);
 }
 
@@ -92,10 +104,13 @@ static void title(void)
     snprintf(t, sizeof t, GUI_T("%s%s - Notepad"), gui_code_modified(d->ed) ? "*" : "", doc_name(d, name, sizeof name));
     gui_title(win, t);
     {                                           /* (and its kind, in the status bar) */
-        const char *kind = "Text";
-        if (d->path[0])
-            lexer_for(d->path, &kind);
+        const char *kind = "Text", *name;
+        int k;
+        doc_lexer(d, &kind);
         gui_status_set(status, kind_at, GUI_T(kind), NULL);
+        gui_menu_check(kind_menu, C_KIND_AUTO, d->kind < 0);    /* (Highlight As: the shown document's) */
+        for (k = 0; lexer_kind(k, &name), name; k++)
+            gui_menu_check(kind_menu, C_KIND + k, d->kind == k);
     }
     for (i = 0; i < ndocs; i++) {
         int mod = gui_code_modified(doc[i].ed);
@@ -140,6 +155,7 @@ static struct doc *doc_new(void)
     d = &doc[ndocs++];
     memset(d, 0, sizeof *d);
     d->last_mod = -1;
+    d->kind = -1;
     d->page = gui_tab(strip, "Untitled");
     d->ed = gui_code(d->page);
     doc_style(d);
@@ -458,6 +474,15 @@ static void command(struct gui_window *w, int id)
     char p[260], t[200];
     int i;
     (void)w;
+    if (id >= C_KIND_AUTO && id < C_KIND + 32) {        /* Highlight As: this document's kind, by hand */
+        const char *name;
+        d->kind = id == C_KIND_AUTO ? -1 : id - C_KIND;
+        doc_style(d);
+        title();
+        doc_lexer(d, &name);
+        note("kind %s", name);
+        return;
+    }
     switch (id) {
     case C_NEW:
         doc_new();
@@ -640,6 +665,15 @@ int main(int argc, char **argv)
     view = m = gui_menu(bar, GUI_T("&View"));
     gui_menu_item(m, GUI_T("&Line Numbers"), C_NUMBERS, NULL);
     gui_menu_item(m, GUI_T("&Highlighting"), C_COLOURS, NULL);
+    {                                           /* the shown document's kind, chosen by hand */
+        const char *name;
+        int k;
+        kind_menu = gui_menu_sub(m, GUI_T("Highlight &As"));
+        gui_menu_item(kind_menu, GUI_T("By the File's &Name"), C_KIND_AUTO, NULL);
+        gui_menu_sep(kind_menu);
+        for (k = 0; lexer_kind(k, &name), name; k++)
+            gui_menu_item(kind_menu, GUI_T(name), C_KIND + k, NULL);
+    }
     gui_menu_item(m, GUI_T("&Keep Session"), C_SESSION, NULL);
     m = gui_menu(bar, GUI_T("&Help"));
     gui_menu_item(m, GUI_T("&About Notepad"), C_ABOUT, NULL);
