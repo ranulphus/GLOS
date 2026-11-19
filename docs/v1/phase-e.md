@@ -159,10 +159,35 @@ are as they were).
 - **Tests:** every script that pastes goes through a job now (`files`, `files-clash`); `files-job` on Loop A
   (`FILES -browse DIR -slowcopy` waits ten seconds before each file: the job's window comes, Esc stops it,
   nothing was copied).
-- **Not done yet:** the rest of the plan: Delete as a job, and a job's files' dates kept as they were; views
+- **Delete is a job too** (the sixth part), with its window ("Deleting") when it takes more than a second:
+  a folder of thousands of files no longer holds the desktop still. Cancel stops between two files; what has
+  gone has gone.
+- **A copy is as old as what it was copied from** (its date and time, as DOS's COPY leaves them); it was as
+  new as the copying. (`gui_set_time` holds the C library's lock in a program with tasks: `utime` is not among
+  the functions the lock is put round.)
+- **Not done yet:** the rest of the plan: views
   (small icons, a list, resized columns), folders that load as they go, long names, "open with" and apps'
   entries in the context menu, archives as folders, a search that goes on in the background and looks inside
   files, a folder's size counted in the background, thumbnails, drag and drop, the Recycle folder.
+
+## Images (2026-11-19): the viewer's toolbar, turning, details, slideshow
+
+Plan: `docs/v1/apps/paint.md` (Images stays the viewer; Paint is the editor to come). The first of its parts.
+
+- **A toolbar:** Open, Previous, Next; Zoom in, Zoom out, Fit; Turn left, Turn right; Slideshow, Details.
+- **Turned and flipped** (Image's menu; L and R): a quarter turn either way, flipped across or over. It is the
+  picture in memory that turns, not the file: saving is Paint's, and the plan's turn of the file itself
+  (a JPEG's without loss) waits for the encoders that come with it.
+- **Details** (File's menu, Alt+Enter): the picture's name and folder, its kind, its size in pixels, the file's
+  size and date, how large it is shown.
+- **Slideshow** (View's menu, S): the folder's next picture every four seconds, round and round; S again or
+  Esc stops it, and so does Next or Previous by hand. The status bar says while it runs.
+- **Full screen** (View's menu, F11): the picture alone on the whole screen, fitted, GLOS's task bar gone
+  while it is there (a second window, bare, shown `GLOS_WS_FULL`). Esc, F11 or Enter comes back; Next,
+  Previous, turning and the slideshow work there as in the window.
+- **Tests:** `images-view` on the host and on Loop A; `images` as before (its pictures have the toolbar now).
+- **Not done yet:** the filmstrip of the folder's pictures; the picture kept as tiles (any size
+  memory allows); Edit, which opens the picture in Paint; Paint itself.
 
 ## What is next
 

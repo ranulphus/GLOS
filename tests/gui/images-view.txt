@@ -1,0 +1,42 @@
+# The image viewer's toolbar, turning, details and slideshow (apps/images; phase E, docs/v1/apps/paint.md): a
+# picture turned right, then twice left (the toolbar is in every picture); its details (the file's date is the
+# copy's: masked); full screen (F11: the picture alone, the next one there, Esc back); the slideshow goes to the
+# folder's next picture by itself and Esc stops it (which picture it has reached by then is the clock's affair:
+# no picture of it).
+# (The full screen's bottom left pixel is masked: the host's stand-in for GLOS leaves it black.)
+run IMAGES.EXE C:\GUI\IMG\A.PNG
+wait "A.PNG - Images"
+key r
+shot right "A.PNG - Images"
+key l
+key l
+shot left "A.PNG - Images"
+key alt+enter
+wait "Details"
+shot details "Details" 70 103 150 22
+key enter
+gone "Details"
+key f11
+pause 1500
+shot full "Images" 0 479 1 1
+key pgdn
+pause 1500
+shot full-next "Images" 0 479 1 1
+key esc
+pause 1000
+key s
+pause 6000
+key esc
+pause 500
+key alt+f4
+expect IMAGES turned right 120x160
+expect IMAGES turned left 160x120
+expect IMAGES turned left 120x160
+expect IMAGES details C:\GUI\IMG\A.PNG
+expect IMAGES full on
+expect IMAGES full off
+expect IMAGES slideshow on
+expect IMAGES open C:\GUI\IMG\B.JPG 160x120 JPG
+expect IMAGES open C:\GUI\IMG\BIG.PNG 900x700 PNG
+expect IMAGES slideshow off
+expect IMAGES end
