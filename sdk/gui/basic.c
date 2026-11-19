@@ -617,6 +617,8 @@ struct gui_widget *gui_sep(struct gui_widget *parent) { return gui_new(parent, &
 struct number {
     struct gui_widget w;
     int min, max, value, slider, held, drag;
+    unsigned char typing, minus;        /* a spin: a number is being typed (the next digit goes on its end; else the
+                                           first digit is the number anew); a minus sign came before its digits */
     unsigned style;                     /* (toolkit 2) a slider's GUI_SLIDER_ flags */
     int marks;                          /* ... a mark every so many (0: none) */
     void (*fmt)(int value, char *out, int room);        /* ... its value as text (NULL: the number) */
@@ -759,9 +761,45 @@ static int number_event(struct gui_widget *w, struct gui_ev *e)
     struct number *n = (struct number *)w;
     int step = n->slider ? ((n->max - n->min) / 20 > 1 ? (n->max - n->min) / 20 : 1) : 1;
     switch (e->type) {
+    case GUI_EV_FOCUS:
+    case GUI_EV_BLUR:
+        n->typing = n->minus = 0;               /* (a number typed is typed from its first digit) */
+        return 0;
     case GUI_EV_KEY:
         if (e->mods & (GLOS_MOD_CTRL | GLOS_MOD_ALT))
             return 0;
+        if (!n->slider && e->ch >= '0' && e->ch <= '9') {
+            /* A number typed: its first digit is the number anew (as text chosen is typed over), the next ones
+               go on its end; a minus sign before them makes it negative. Until 2026-11-19 every digit went on
+               the end of the value that was there (5, then "40" typed, was 0), and a minus sign only changed
+               the sign of what was there ("-50" over 100 was -100). */
+            long d = e->ch - '0', v;
+            if (!n->typing) {
+                v = n->minus ? -d : d;
+            } else {
+                v = (long)n->value * 10 + (n->value < 0 || (n->minus && !n->value) ? -d : d);
+                if (v > n->max || v < n->min)
+                    v = n->minus ? -d : d;
+            }
+            n->typing = 1;
+            number_set(n, (int)v, 1);
+            return 1;
+        }
+        if (!n->slider && e->ch == '-' && n->min < 0) {
+            if (n->typing && n->value) {        /* (among the digits: the sign of what is typed) */
+                number_set(n, -n->value, 1);
+                n->minus = n->value < 0;
+            } else {
+                n->minus = !n->minus;
+            }
+            return 1;
+        }
+        if (!n->slider && e->key == GUI_K_BACK) {
+            number_set(n, n->value / 10, 1);
+            n->typing = 1;
+            return 1;
+        }
+        n->typing = n->minus = 0;               /* (any other key: the next digit starts a number) */
         switch (e->key) {
         case GUI_K_UP: case GUI_K_RIGHT: number_set(n, n->value + step, 1); return 1;
         case GUI_K_DOWN: case GUI_K_LEFT: number_set(n, n->value - step, 1); return 1;
@@ -769,21 +807,6 @@ static int number_event(struct gui_widget *w, struct gui_ev *e)
         case GUI_K_PGDN: number_set(n, n->value - step * 10, 1); return 1;
         case GUI_K_HOME: number_set(n, n->min, 1); return 1;
         case GUI_K_END: number_set(n, n->max, 1); return 1;
-        }
-        if (!n->slider && e->ch >= '0' && e->ch <= '9') {       /* typed: digits on the end, or anew */
-            long v = (long)n->value * 10 + (long)(e->ch - '0');
-            if (v > n->max)
-                v = (long)(e->ch - '0');
-            number_set(n, (int)v, 1);
-            return 1;
-        }
-        if (!n->slider && e->key == GUI_K_BACK) {
-            number_set(n, n->value / 10, 1);
-            return 1;
-        }
-        if (!n->slider && e->ch == '-' && n->min < 0) {
-            number_set(n, -n->value, 1);
-            return 1;
         }
         return 0;
     case GUI_EV_PRESS:
