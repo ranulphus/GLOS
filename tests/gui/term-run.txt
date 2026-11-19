@@ -1,6 +1,9 @@
 #loopa-only (its programs run in Loop A only: the host runs none, so its expects are for the suite)
 # The terminal's programs (apps/term; M9 step E, PRD D51), in Loop A only: their output and keys in the window,
 # a batch file with a variable the shell set, exit codes with ||, a program that takes the screen and gives it back.
+# (After a program that takes the screen the script waits until it has ended, by `settle`: how long a session
+# is depends on the card and the load, and what is typed during it is the program's, kept only as far as the
+# BIOS's fifteen keys.)
 run TERM.EXE -log
 wait "Terminal"
 type c:\n
@@ -17,9 +20,11 @@ pause 2000
 type c:\\test\\conin code 3 || echo failed with %errorlevel%\n
 pause 3000
 type c:\\test\\conin mode\n
-pause 6000
+pause 3000
+settle
 type c:\\test\\conin midmode\n
-pause 7000
+pause 3000
+settle
 type echo back\n
 pause 1000
 type exit\n

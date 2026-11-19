@@ -516,9 +516,14 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
     characters: "MODE do", the notice, "ne". The piece of the line is now taken off the terminal and written
     again under the notice (`kernel/shell/shsess.c`, `job_turn`). (First written down here as output lost;
     it was not: the case's log had gone before that was checked.)
-  - `control-bf6-g200`: the Control Panel's display-mode trial went back by itself ("mode back") where the
-    script meant to keep it, and the script's last keys then missed: no "CONTROL end". The trial's wait is
-    fifteen seconds of the PC's own time; the script's key came later than that.
+  - `control-bf6-g200`: no "CONTROL end": the Control Panel ended with code 255, as an app that has died does,
+    after its second display-mode trial had gone back as the script means it to. (What was first written here,
+    that a trial went back where the script meant to keep it and a key then missed, was a guess, and wrong.)
+    Why it died is not known: the case's log had gone. Two faults found on 2026-11-19 are in its path and are
+    mended: the trial's dialog was closed a second time after `gui_modal` had freed it, and the toolkit ran an
+    app's idle functions (the Control Panel has one) in the turn in which its last window was freed (that one
+    is what killed Monitor the same way in the twelfth gate). If it comes back, the suite now keeps what the
+    app wrote as it died (its exit code and stderr, in the failure's notes).
 
 - **Bench C (the 486DX4, now with an S3 ViRGE/DX and 32 MB) hung after a full-screen session's end**
   (2026-11-18, GLOS main 4df396a; the DOS-GL session's report): a DOS-GL program that had drawn for 40 seconds

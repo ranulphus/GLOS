@@ -2375,7 +2375,14 @@ def batch_case(profile, card):
         "--cmd", "SERSAY HX-START batch", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     checks, info = {"listen": agent.listening()}, ""
     try:
-        m = re.search(r"GLOS-VM agent comspec=(\S+)", agent.log())
+        import time
+        m = None
+        for _ in range(60):                     # (the log's lines come a little after what they tell of: on the
+            m = re.search(r"GLOS-VM agent comspec=(\S+)", agent.log())     # 486 under a gate's load this one was
+            if m:                               # not there yet at the first look, "COMMAND" was GLOS's own, and
+                break                           # every comparison had nothing of FreeDOS's: 2026-11-19)
+            time.sleep(0.5)
+        checks["comspec"] = m is not None
         freedos = m.group(1) if m else "COMMAND"        # (FreeDOS's by its place: COMSPEC is GLOS's own now, S4c)
         for n, args in (("T1", "one two three"), ("T2", "yes"), ("T2", "no"), ("T2", ""), ("T3", ""), ("T4", ""),
                         ("T5", ""), ("T6", "")):
@@ -7234,6 +7241,15 @@ class GuiDriver:
                 self.point(w["x"] + int(args[1]), w["y"] + int(args[2]))
             elif cmd == "pause":
                 time.sleep(int(args[0]) / 1000.0)
+            elif cmd == "settle":               # until no DOS program runs: one that had the PC's own screen has given
+                t0, ok = time.time(), False     # it back, and what is typed next is the shell's (a session's length
+                while not ok and time.time() - t0 < 120:    # is the card's and the load's: 8.6 s on the G400's
+                    out = self.agent.ssh("glos ps")[1].replace("\r", "")       # machine where a pause had 6)
+                    ok = not re.search(r"^job \d+ (queued|running) (?!app )", out, re.M)
+                    if not ok:
+                        time.sleep(0.5)
+                if not ok:
+                    self.bad.append("settle-%d" % n)
             elif cmd == "same":                 # (the host's check of two of its goldens: both are compared here)
                 pass
             elif cmd in ("theme", "text"):      # the desktop's theme, or its text size, changed under the app
@@ -7278,15 +7294,16 @@ class GuiDriver:
 
     def finish(self, limit=120):
         """The apps' ends and their output: each expected line there; the script's settings unset."""
-        text = ""
+        text, ends = "", []
         for p in self.procs:
             try:
-                o, _ = p.communicate(timeout=limit)
+                o, e = p.communicate(timeout=limit)
             except subprocess.TimeoutExpired:
                 p.kill()
-                o, _ = p.communicate()
+                o, e = p.communicate()
                 self.bad.append("app-end")
             text += o.decode("latin-1").replace("\r", "")
+            ends.append((p.returncode, (e or b"").decode("latin-1").replace("\r", "")))
         for sec, key in self.unset:
             self.agent.ssh("glos config unset %s %s" % (sec, key))
         self.unset = []
@@ -7295,6 +7312,10 @@ class GuiDriver:
             if e not in lines:
                 self.bad.append("expect")
                 self.notes.append("no line %r" % e)
+        if self.bad:                            # what each app ended with and wrote to stderr: an app that died says
+            for code, err in ends:              # where there (DJGPP's "Exiting due to signal", its EIPs: an app gone
+                if code or err.strip():         # with code 255 and no last line, in three gates, left nothing to go by)
+                    self.notes.append("app ended %s, stderr: %s" % (code, " | ".join(err.strip().split("\n"))[-900:]))
         return text
 
 

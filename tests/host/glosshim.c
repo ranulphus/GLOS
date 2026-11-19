@@ -1666,6 +1666,8 @@ static int step(void)
         } else if (!strcmp(cmd, "pause")) {
             H.clock += (unsigned)atoi(word(&p, b, sizeof b) ? b : "0");
             return 1;
+        } else if (!strcmp(cmd, "settle")) {    /* (Loop A's: until no DOS program runs; there are none here) */
+            return 1;
         } else if (!strcmp(cmd, "theme") || !strcmp(cmd, "text")) {     /* theme NAME, text SIZE: the desktop's
                                                    theme, or its text size, changes under the app */
             struct hev e;
