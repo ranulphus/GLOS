@@ -4804,9 +4804,9 @@ def crystal_off_case(profile, vcard, card):
         "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VECCHK check", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     checks = {"listen": agent.listening()}
     try:
-        t0 = time.time()                        # (the line comes with GLOS.CFG, a moment after the network's)
-        while time.time() - t0 < 30 and "GLOS-SOUND crystal" not in agent.log():
-            time.sleep(0.5)
+        t0 = time.time()                        # (the line comes with GLOS.CFG, a moment after the network's; the
+        while time.time() - t0 < 30 and not re.search(r"GLOS-SOUND crystal [^\n]*\n", agent.log()):     # whole line:
+            time.sleep(0.5)                     # its first words alone were there at one look, 2026-11-19)
         checks["off"] = "GLOS-SOUND crystal off\n" in agent.log() and "GLOS-SOUND crystal wss=" not in agent.log()
         checks["no-card"] = " card=crystal " not in agent.ssh("glos audio")[1]
         checks["get"] = agent.ssh("glos config get sound crystal")[1].strip() == "off"
