@@ -37,8 +37,12 @@ taken (`lost`) and writes its engine state again. F1 has none of that for a full
 
 Built 2026-11-19 (`kernel/wm/desk.c` `scan_turn` and `desk_scan_swap`, `wm_scanout`, `mga_scanout`; API 2.7's
 `shown`). On Loop A the five DOS-GL savers and the gpu suite's full-screen part run so on the G200, G400 and
-G450, and DOS-GL's TEXCUBE from the DOS-GL session's branch for F2 fills the screen as an app. The bench's
-frame rate is owed.
+G450, and DOS-GL's TEXCUBE from the DOS-GL session's branch for F2 fills the screen as an app.
+
+**On the real G400** (the IBM bench, 2026-11-19, GLOS main e55a9a5; the gpu suite's GPUTEST by hand): a
+full-screen window at the screen's size (800x600x16) is shown by the display itself (`GLOS-DESK scanout on`,
+1,693 frames in its run, all but one told `shown`), and the desktop is back as it was after. A game's frame
+rate so (DOS-GL's PrBoom-plus against 74.5 in a session and 36.0 in a window) is owed.
 
 A window that is full screen, in front of everything, and showing a block of the app's video memory of the
 screen's size, format and row length is shown **by pointing the display at that block** (the CRTC's start
@@ -105,6 +109,11 @@ until this is built). The plan:
   mode by `glos display`, the picture by `glos shot` at the game's size, the desktop's mode and picture after;
   320 by 240 composed), on the G200, G400 and G450. DOS-GL's TEXCUBE at 640x480 on an 800x600 desktop is owed
   (its `DGL_GLOS_FULL` asks for full screen only at the screen's size until it uses the flag).
+- **On the real G400** (the IBM bench, 2026-11-19): a 640x480 window of its own on an 800x600x16 desktop:
+  `GLOS-DISPLAY app mode=111 640x480x16 pitch=1280`, the display on the window's block, `glos shot` 640 by 480
+  with the program's picture, 1,772 frames; then `GLOS-DISPLAY app off` and the desktop at 800x600 as it was.
+  No warning and no reset of the engine: the card's BIOS keeps the memory at a mode set that asks it to, as
+  86Box's does.
 - **Open:** a notification over such a window takes the card out of its mode and back (a flicker of a second
   or two): whether notifications wait while a game is in front is the owner's to say.
 
