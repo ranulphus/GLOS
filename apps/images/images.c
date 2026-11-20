@@ -551,7 +551,8 @@ static void strip_done(struct gui_window *owner, void *arg, int cancelled)
             t->px = m->px, t->w = (short)m->w, t->h = (short)m->h, t->state = 2;
             m->px = NULL;
             strip.kept++;
-            printf("IMAGES strip %s %dx%d %s\n", m->e.name, t->w, t->h, m->made ? "made" : "kept");
+            printf("IMAGES strip %s %dx%d\n", m->e.name, t->w, t->h);  /* (made now or kept from before: Files'
+                                                   own script has both; here it depends on who looked first) */
         } else {
             t->state = 3;
             printf("IMAGES strip none %s\n", m->e.name);

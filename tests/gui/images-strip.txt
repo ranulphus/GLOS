@@ -1,17 +1,18 @@
 # The image viewer's filmstrip (apps/images; phase E, docs/v1/apps/paint.md): T shows the folder's pictures along
 # the bottom of the window, small (apps/shared/thumbs.c makes them, as for Files' thumbnail view, and keeps them
 # beside the programs; here each is half that size). They are made one at a time on a worker's thread and Images
-# says each (said). The one shown is framed; PgDn moves the frame with the picture; a press on another shows it.
+# says each (said; whether it was made now or kept from before it does not say: on Loop A Files' own script has
+# been at the folder first). The one shown is framed; PgDn moves the frame with the picture; a press on another shows it.
 # T again hides the strip, as the other scripts find it (IMAGES.CFG keeps which, and on Loop A they share a disc).
 run IMAGES.EXE C:\PIX\GRID.PNG
 wait "GRID.PNG - Images"
 key t
 said IMAGES filmstrip on
 said IMAGES strip none BROKEN.PNG
-said IMAGES strip GRID.PNG 48x32 made
-said IMAGES strip SUNSET.BMP 48x30 made
-said IMAGES strip TALL.PCX 19x48 made
-said IMAGES strip TINY.BMP 10x6 made
+said IMAGES strip GRID.PNG 48x32
+said IMAGES strip SUNSET.BMP 48x30
+said IMAGES strip TALL.PCX 19x48
+said IMAGES strip TINY.BMP 10x6
 shot strip "GRID.PNG - Images"
 key pgdn
 wait "SUNSET.BMP - Images"
@@ -24,7 +25,7 @@ said IMAGES filmstrip off
 shot off "TALL.PCX - Images"
 key alt+f4
 expect IMAGES filmstrip on
-expect IMAGES strip GRID.PNG 48x32 made
+expect IMAGES strip GRID.PNG 48x32
 expect IMAGES open C:\PIX\TALL.PCX 60x150 PCX
 expect IMAGES filmstrip off
 expect IMAGES end

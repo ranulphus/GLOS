@@ -7536,12 +7536,16 @@ class GuiDriver:
             elif cmd == "said":                 # until an app has said this line: the end of work that shows in no
                 want = line.split(None, 1)[1].rstrip("\n")     # window's title (a job's). Said twice, it is waited
                 t0, ok = time.time(), False                    # for twice: each `said` is another of that line.
+                asked = t0
                 while not ok and time.time() - t0 < 120:
                     n_said = sum(bytes(q.said).decode("latin-1").replace("\r", "").split("\n").count(want)
                                  for q in self.procs)
                     ok = n_said > self.heard.get(want, 0)
                     if not ok:
                         time.sleep(0.3)
+                    if not ok and time.time() - asked > 20:     # (a word to GLOS now and then: a line that never
+                        self.desk()                             # comes is this script's failure; a log silent for
+                        asked = time.time()                     # five minutes would be taken for the whole PC's hang)
                 self.heard[want] = self.heard.get(want, 0) + 1
                 if not ok:
                     self.bad.append("said-%d" % n)
