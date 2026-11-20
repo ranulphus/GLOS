@@ -54,6 +54,7 @@ struct sshc_chan {
     int replies;                                /* requests sent with want-reply, not yet answered */
     int refused;
     char term[32], cmd[512], subsystem[32];
+    int direct;                                 /* a "direct-tcpip" channel: no requests follow its opening */
     unsigned cols, rows;
     uint32_t unconsumed;
     uint8_t *out;
@@ -697,6 +698,38 @@ struct sshc_chan *sshc_session(struct sshc *c, const char *term, unsigned cols, 
     return ch;
 }
 
+/* A local tunnel's far half (RFC 4254, 7.2): the server connects to host:port, and the channel's bytes are that
+   connection's. */
+struct sshc_chan *sshc_direct(struct sshc *c, const char *host, unsigned port, const char *from, unsigned from_port)
+{
+    struct sshc_chan *ch;
+    uint8_t m[600];
+    struct sbuf b;
+    uint32_t i;
+    if (c->state != SSHC_READY || strlen(host) > 255 || strlen(from) > 255)
+        return NULL;
+    for (i = 0; i < NCHAN && c->chans[i]; i++) ;
+    if (i == NCHAN || !(ch = calloc(1, sizeof *ch)))
+        return NULL;
+    ch->conn = c;
+    ch->id = i;
+    ch->our_window = WINDOW;
+    ch->direct = 1;
+    c->chans[i] = ch;
+    sb_init(&b, m, sizeof m);
+    sb_u8(&b, MSG_CHANNEL_OPEN);
+    sb_cstr(&b, "direct-tcpip");
+    sb_u32(&b, i);
+    sb_u32(&b, WINDOW);
+    sb_u32(&b, MAXPKT);
+    sb_cstr(&b, host);
+    sb_u32(&b, port);
+    sb_cstr(&b, from);
+    sb_u32(&b, from_port);
+    send_sb(c, &b);
+    return ch;
+}
+
 int sshc_chan_ok(const struct sshc_chan *ch)
 {
     if (ch->refused)
@@ -820,7 +853,10 @@ static int channel(struct sshc *c, const uint8_t *p, uint32_t n)
             chan_msg(ch, MSG_CHANNEL_CLOSE);
             return 0;
         }
-        chan_start(ch);
+        if (ch->direct)
+            flush(ch);                          /* (what was written while it opened) */
+        else
+            chan_start(ch);
         return 0;
     case MSG_CHANNEL_OPEN_FAILURE:             /* (chan_closed tells its user) */
         ch->refused = 1;

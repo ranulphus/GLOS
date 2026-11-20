@@ -1,6 +1,7 @@
 /* sdk/sshc against OpenSSH's sshd on the host (tests/host/sshc_test.sh starts it): the host key's fingerprint, a
  * login by key, a command's output, error and exit status, a pty's size, two channels at once, 1 MB each way, a
- * key refused, a host key refused; and a key written that OpenSSH reads (the script checks ssh-keygen -y).
+ * tunnel's channel (direct-tcpip) and one refused, a key refused, a host key refused; and a key written that
+ * OpenSSH reads (the script checks ssh-keygen -y).
  *
  *   sshc_test PORT USER KEY FINGERPRINT WORKDIR      (prints "sshc_test: N failures") */
 #include <arpa/inet.h>
@@ -145,6 +146,7 @@ static int st_dead(void *a) { return sshc_state(a) == SSHC_DEAD; }
 static int closed(void *a) { return ((struct out *)a)->closed; }
 static int opened(void *a) { return sshc_chan_ok(a) != 0; }
 static int drained(void *a) { return sshc_pending(a) <= 4 * 65536; }
+static int answered(void *a) { return ((struct out *)a)->total[0] > 100 || ((struct out *)a)->closed; }
 struct two { struct out *a, *b; };
 static int both_closed(void *a) { return ((struct two *)a)->a->closed && ((struct two *)a)->b->closed; }
 
@@ -312,6 +314,30 @@ int main(int argc, char **argv)
         sshc_close(sf_ch);
         sf_ch = 0;
     }
+    /* a tunnel's far half: a "direct-tcpip" channel to the sshd's own port carries that connection (its banner
+       comes, and what follows our own, written before the channel was open); a port nothing listens on: refused */
+    pump(c, &s, closed, &o, 10000);             /* (SFTP's channel gone first: its close is told to o too) */
+    memset(&o, 0, sizeof o);
+    ch = sshc_direct(c, "127.0.0.1", port, "127.0.0.1", 40000);
+    CHECK(ch != NULL, "direct: no channel");
+    if (ch) {
+        sshc_chan_set_user(ch, &o);
+        CHECK(sshc_chan_ok(ch) == 0, "direct: open before its answer");
+        sshc_write(ch, (const uint8_t *)"SSH-2.0-sshc_test\r\n", 19);
+        pump(c, &s, answered, &o, 10000);
+        CHECK(!o.closed && sshc_chan_ok(ch) == 1 && !strncmp(o.buf[0], "SSH-2.0-OpenSSH", 15) && o.total[0] > 100,
+              "direct: closed %d, %lu bytes: %.20s", o.closed, o.total[0], o.buf[0]);
+        if (!o.closed)
+            sshc_close(ch);
+        pump(c, &s, closed, &o, 10000);
+        CHECK(o.closed, "direct: not closed");
+    }
+    memset(&o, 0, sizeof o);
+    ch = sshc_direct(c, "127.0.0.1", 1, "127.0.0.1", 40000);
+    if (ch)
+        sshc_chan_set_user(ch, &o);
+    pump(c, &s, closed, &o, 10000);
+    CHECK(ch && o.closed && !o.total[0], "direct to a port with no listener: closed %d", o.closed);
     close_conn(c, &s);
 
     /* a key the server doesn't know: refused, with the server's methods */

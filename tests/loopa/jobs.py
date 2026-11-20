@@ -9136,9 +9136,16 @@ def sshprog_case(profile, card):
     container. A new host key asked about and kept; a command's output and its exit status as %ERRORLEVEL%; a
     login by password after a wrong one, neither echoed; a session with a pty (the far shell told xterm and this
     terminal's size) and its end; SFTP's put and get of 200 KB (SHA-256 there, the bytes back here) and its end;
-    a key made and its public half read; and with no terminal, a command through the hop."""
+    a key made and its public half read; tunnels (-L with -N): by one open to every computer (*:) the host comes
+    in, through a port of the guest that SLiRP forwards, and logs in to the container's own sshd through the
+    session (a command, 200 KB each way by SHA-256, two logins at once); one to a port nothing listens on closes
+    what comes to it; one of this PC's own (the default: listened on at 127.0.0.1) is nobody's for the host,
+    and a second SSH.EXE on the PC logs in through it; Ctrl+C ends them, and a -L that is no tunnel is refused
+    with the usage; and with no terminal, a command through the hop."""
     import hashlib
+    import socket
     tag = "prog-%s-%s" % (profile, card)
+    tun, tun2, tun3 = free_port(), free_port(), free_port()
     out = os.path.join(ROOT, "out", "sshc-%s-files" % tag)
     os.makedirs(out, exist_ok=True)
     srv = SshdContainer(tag, out)
@@ -9146,7 +9153,9 @@ def sshprog_case(profile, card):
     data = bytes((i * 2654435761 >> 11) & 255 for i in range(200000))
     open(os.path.join(out, "DATA.BIN"), "wb").write(data)
     rel = lambda f: os.path.relpath(os.path.join(out, f), ROOT)
-    agent = Agent("sshc-" + tag, profile, card, ["--file", "build/apps/SSH.EXE=/TEST/SSH.EXE",
+    agent = Agent("sshc-" + tag, profile, card, ["--net-fwd", "%d:2222" % tun, "--net-fwd", "%d:2223" % tun2,
+        "--net-fwd", "%d:2224" % tun3,
+        "--file", "build/apps/SSH.EXE=/TEST/SSH.EXE",
         "--file", "build/apps/SFTP.EXE=/TEST/SFTP.EXE", "--file", "build/apps/SSHKEY.EXE=/TEST/SSHKEY.EXE",
         "--file", "%s=/TEST/SSH/ID_ED25" % rel("sshd/client"), "--file", "%s=/TEST/DATA.BIN" % rel("DATA.BIN"),
         "--cmd", "SERSAY HX-START sshprog", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1800)
@@ -9197,6 +9206,54 @@ def sshprog_case(profile, card):
         checks["keygen"] = t.expect("Your public key has been saved in") and t.expect("C:\\TEST>")
         pub = raw("glos dd if=c:\\test\\newkey.pub of=-")[1]
         checks["key"] = pub.startswith(b"ssh-ed25519 AAAA") and b"made-here" in pub
+        t.send("ssh -L 2222 glos@10.0.2.2\r")
+        checks["tunnel-usage"] = t.expect("-L wants [ADDRESS:]PORT:HOST:HOSTPORT") and t.expect("C:\\TEST>")
+        t.send("ssh -p %d -N -L *:2222:127.0.0.1:22 -L *:2223:127.0.0.1:1 -L 2224:127.0.0.1:22 glos@10.0.2.2\r" % p1)
+        checks["tunnel-up"] = t.expect("The tunnels are open.", 180)
+        thru = ["ssh", "-p", str(tun), "-i", os.path.join(out, "sshd", "client"), "-o", "IdentitiesOnly=yes",
+                "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=120", "glos@127.0.0.1"]
+        p = subprocess.run(thru + ["echo through-the-tunnel; sha256sum data.bin"], capture_output=True, timeout=300)
+        checks["tunnel"] = p.returncode == 0 and b"through-the-tunnel" in p.stdout \
+            and hashlib.sha256(data).hexdigest().encode() in p.stdout
+        if not checks["tunnel"]:
+            print("  %s tunnel: rc %d %r %r" % (tag, p.returncode, p.stdout[-200:], p.stderr[-300:]))
+        p = subprocess.run(thru + ["sha256sum"], input=data, capture_output=True, timeout=600)
+        checks["tunnel-there"] = p.stdout.split()[:1] == [hashlib.sha256(data).hexdigest().encode()]
+        p = subprocess.run(thru + ["cat data.bin"], capture_output=True, timeout=600)
+        checks["tunnel-back"] = p.stdout == data
+        two = [subprocess.Popen(thru + ["sleep 3; echo login-%d" % i], stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL) for i in (1, 2)]
+        got = [q.communicate(timeout=300)[0] for q in two]
+        checks["tunnel-two"] = got == [b"login-1\n", b"login-2\n"]
+        try:                                        # (the far side refuses the connection: this one is closed)
+            with socket.create_connection(("127.0.0.1", tun2), timeout=30) as c:
+                c.settimeout(60)
+                checks["tunnel-refused"] = c.recv(16) == b""
+        except ConnectionResetError:
+            checks["tunnel-refused"] = True
+        except OSError as e:
+            checks["tunnel-refused"] = False
+            print("  %s tunnel-refused: %s" % (tag, e))
+        try:                                        # (this PC's own: nobody there for another computer)
+            with socket.create_connection(("127.0.0.1", tun3), timeout=30) as c:
+                c.settimeout(60)
+                checks["tunnel-own-shut"] = c.recv(16) == b""
+        except ConnectionResetError:
+            checks["tunnel-own-shut"] = True
+        except OSError as e:
+            checks["tunnel-own-shut"] = False
+            print("  %s tunnel-own-shut: %s" % (tag, e))
+        t2 = Login(agent)                           # (... and a program of this PC goes through it)
+        ok = t2.expect("C:\\TEST>")
+        t2.send("ssh -p 2224 glos@127.0.0.1 echo through-my-own-tunnel\r")
+        ok = ok and t2.expect("(yes/no)? ", 180)
+        t2.send("yes\r")
+        checks["tunnel-own"] = ok and t2.expect("through-my-own-tunnel\n", 180) and t2.expect("C:\\TEST>")
+        t2.send("exit\r")
+        checks["tunnel-own-exit"] = t2.end() == 0
+        t.send("\x03")
+        checks["tunnel-end"] = t.expect("Connection to 10.0.2.2 closed.") and t.expect("C:\\TEST>")
         t.send("exit\r")
         checks["exit"] = t.end() == 0
         rc, out, err = agent.ssh("C:\\TEST\\SSH.EXE -p %d glos@10.0.2.2 echo through-the-hop" % p1, timeout=300)

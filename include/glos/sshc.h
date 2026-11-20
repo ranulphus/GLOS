@@ -9,7 +9,8 @@
  * reason. Re-keying when the server asks. Logins by an Ed25519 key, a
  * password, or keyboard-interactive answered with the password. "session"
  * channels with a pty, a shell, a command or a subsystem (sftp), several on a
- * connection, with window flow control. No forwarding yet. */
+ * connection, with window flow control; "direct-tcpip" channels (a local
+ * tunnel's far half: sshc_direct). No remote forwarding. */
 #ifndef GLOS_SSHC_H
 #define GLOS_SSHC_H
 #include <stddef.h>
@@ -63,6 +64,11 @@ const char *sshc_methods(const struct sshc *c);
 struct sshc_chan *sshc_session(struct sshc *c, const char *term, unsigned cols, unsigned rows, const char *cmd,
                                const char *subsystem);
 int sshc_chan_ok(const struct sshc_chan *ch);
+/* A "direct-tcpip" channel (SSHC_READY): the server is asked to connect to host:port, and the channel's bytes are
+   that connection's (ssh -L's far half). from, from_port: whose connection it carries, for the server's log.
+   sshc_chan_ok() says 1 once it is open; refused: chan_closed is told, and it is gone. What is written before it
+   is open is kept and sent then. */
+struct sshc_chan *sshc_direct(struct sshc *c, const char *host, unsigned port, const char *from, unsigned from_port);
 uint32_t sshc_write(struct sshc_chan *ch, const uint8_t *data, uint32_t len);  /* buffered past the server's window:
                                            the bytes buffered and not yet sent */
 void sshc_eof(struct sshc_chan *ch);    /* no more input from us */

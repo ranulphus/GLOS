@@ -3,7 +3,14 @@
  * pty passes its bytes to the terminal as they are; the questions (a new host
  * key, a password) are asked a line at a time.
  *
- *   ssh [-p PORT] [-i KEY] [-l USER] [USER@]HOST [COMMAND]
+ *   ssh [-p PORT] [-i KEY] [-l USER] [-L [ADDRESS:]PORT:HOST:HOSTPORT]... [-g] [-N] [USER@]HOST [COMMAND]
+ *                              -L: a tunnel: connections to PORT of this PC go through the session and come
+ *                              out of the other computer to HOST:HOSTPORT (up to four -L's; six connections
+ *                              through them at a time). The port is this PC's programs' alone (it is
+ *                              listened on at 127.0.0.1: API 2.9's GLOS_NETF_LOCAL) unless -g opens the
+ *                              tunnels to every computer that reaches this one, or ADDRESS says for one:
+ *                              * (every computer) or 127.0.0.1 (this PC).
+ *                              -N: no shell or command, the tunnels alone (Ctrl+C ends it)
  *   sftp [-P PORT] [-i KEY] [USER@]HOST
  *   ssh-keygen [-f FILE] [-C COMMENT]
  *
@@ -32,6 +39,8 @@
 #include "cli.h"
 
 enum { S_OFF, S_CONNECTED, S_ASK_HOST, S_ASK_PASSWORD, S_LOGGING_IN, S_OPENING, S_RUNNING, S_SFTP };
+#define NFWD 4                          /* -L's */
+#define NPIPE 6                         /* connections through them at once (the client has eight channels) */
 
 static struct {
     int stage;
@@ -52,6 +61,19 @@ static struct {
     int accepted;                       /* (the channel's requests taken when it closed) */
     char sig[32];
     char rcwd[512];                     /* sftp's folder there */
+    /* The tunnels (-L): each listens on a port of this PC; a connection to it is a "direct-tcpip" channel's. */
+    struct {
+        unsigned port, hport;
+        char host[80];
+        int open;                       /* 1: every computer may connect to it, 0: this PC alone, -1: as -g says */
+        glos_handle listener;
+    } fwd[NFWD];
+    int nfwd, no_shell, gateway;
+    struct {
+        glos_handle sock;               /* (0: free) */
+        struct sshc_chan *ch;
+        int sock_ended;
+    } pipe[NPIPE];
 } s;
 
 static int log_screens = -1;                /* (SSHLOG=1 in the environment: the tests') */
@@ -162,8 +184,36 @@ static void on_banner(void *io, const char *text)
     term_write(text, -1);
 }
 
+static int pipe_of(struct sshc_chan *ch)        /* the tunnel's connection this channel carries, or -1 */
+{
+    int i;
+    for (i = 0; i < NPIPE; i++)
+        if (s.pipe[i].sock && s.pipe[i].ch == ch)
+            return i;
+    return -1;
+}
+
+static void pipe_end(int i)
+{
+    if (s.pipe[i].sock)
+        glos_net_close(s.pipe[i].sock, 0);
+    s.pipe[i].sock = 0, s.pipe[i].ch = 0, s.pipe[i].sock_ended = 0;
+}
+
 static void on_data(struct sshc_chan *ch, int stream, const uint8_t *d, uint32_t n)
 {
+    int i = pipe_of(ch);
+    if (i >= 0) {                               /* a tunnel's: to the connection on this PC */
+        while (n) {
+            int k = glos_net_send(s.pipe[i].sock, d, n, 10000);
+            if (k <= 0) {
+                sshc_close(ch);
+                break;
+            }
+            d += k, n -= (uint32_t)k;
+        }
+        return;
+    }
     if (ch != s.ch)
         return;
     if (s.sf && !stream) {
@@ -188,15 +238,107 @@ static void on_exit_status(struct sshc_chan *ch, int status, const char *sig)
         snprintf(s.sig, sizeof s.sig, "%s", sig);
 }
 
+static void on_eof(struct sshc_chan *ch)       /* the far side has no more: a tunnel's connection here is closed */
+{
+    int i = pipe_of(ch);
+    if (i >= 0) {
+        glos_net_close(s.pipe[i].sock, 0);      /* (what was sent is sent first) */
+        s.pipe[i].sock = 0;
+        sshc_close(ch);
+    }
+}
+
 static void on_closed(struct sshc_chan *ch)
 {
+    int i;
+    for (i = 0; i < NPIPE; i++)
+        if (s.pipe[i].ch == ch) {
+            pipe_end(i);
+            milestone("tunnel-closed");
+        }
     if (ch == s.ch) {
         s.accepted = sshc_chan_ok(ch) == 1;     /* (a quick command may open, run and close between two polls) */
         s.ch = 0;
     }
 }
 
-static const struct sshc_ops ops = { net_send, NULL, on_hostkey, on_banner, on_data, NULL, on_exit_status, on_closed };
+static const struct sshc_ops ops = { net_send, NULL, on_hostkey, on_banner, on_data, on_eof, on_exit_status, on_closed };
+
+/* ---- the tunnels (-L) */
+
+static void tunnels_listen(void)                /* logged in: each -L's port of this PC listened on */
+{
+    struct glos_version v;
+    int i, own;
+    memset(&v, 0, sizeof v);
+    v.size = sizeof v;
+    glos_version(&v);
+    own = v.major > 2 || (v.major == 2 && v.minor >= 9);       /* (a GLOS before 2.9 listens for everyone) */
+    for (i = 0; i < s.nfwd; i++) {
+        int open = s.fwd[i].open < 0 ? s.gateway : s.fwd[i].open;
+        if (!open && !own) {
+            term_printf("ssh: port %u: this GLOS has no ports for this PC alone (-g opens a tunnel to every computer)\r\n",
+                        s.fwd[i].port);
+            continue;
+        }
+        s.fwd[i].listener = glos_net_listen(s.fwd[i].port, 4, GLOS_NETF_EVENTS | (open ? 0 : GLOS_NETF_LOCAL));
+        if (!s.fwd[i].listener)
+            term_printf("ssh: port %u of this PC can't be listened on\r\n", s.fwd[i].port);
+        else
+            milestone("tunnel %u %s:%u %s", s.fwd[i].port, s.fwd[i].host, s.fwd[i].hport, open ? "open" : "own");
+    }
+}
+
+static void tunnels_poll(void)                  /* new connections taken; what each has to send, sent */
+{
+    static uint8_t buf[4096];
+    unsigned st, addr, port;
+    int i, k, f;
+    if (!s.c || sshc_state(s.c) != SSHC_READY)
+        return;
+    for (f = 0; f < s.nfwd; f++) {
+        glos_handle h;
+        while (s.fwd[f].listener && (h = glos_net_accept(s.fwd[f].listener, 0, GLOS_NETF_EVENTS, &addr, &port)) != 0) {
+            for (i = 0; i < NPIPE && (s.pipe[i].sock || s.pipe[i].ch); i++)
+                ;
+            if (i == NPIPE || !(s.pipe[i].ch = sshc_direct(s.c, s.fwd[f].host, s.fwd[f].hport, "127.0.0.1", port))) {
+                glos_net_close(h, 1);           /* (no room for one more: refused) */
+                continue;
+            }
+            s.pipe[i].sock = h, s.pipe[i].sock_ended = 0;
+            milestone("tunnel-open %u", s.fwd[f].port);
+        }
+    }
+    for (i = 0; i < NPIPE; i++) {
+        if (!s.pipe[i].sock || !s.pipe[i].ch || s.pipe[i].sock_ended)
+            continue;
+        while (sshc_pending(s.pipe[i].ch) < 32768) {    /* (no further ahead of the far side than that) */
+            k = glos_net_receive(s.pipe[i].sock, buf, sizeof buf, 0, &st);
+            if (k > 0) {
+                sshc_write(s.pipe[i].ch, buf, (uint32_t)k);
+                continue;
+            }
+            if (k < 0 || st == GLOS_NETS_FAILED) {      /* this PC's side broke off: so does the far one */
+                s.pipe[i].sock_ended = 1;
+                sshc_close(s.pipe[i].ch);
+            } else if (st == GLOS_NETS_CLOSED) {        /* it has no more to send: said to the far side */
+                s.pipe[i].sock_ended = 1;
+                sshc_eof(s.pipe[i].ch);
+            }
+            break;
+        }
+    }
+}
+
+static void tunnels_end(void)
+{
+    int i;
+    for (i = 0; i < s.nfwd; i++)
+        if (s.fwd[i].listener)
+            glos_net_close(s.fwd[i].listener, 1);
+    for (i = 0; i < NPIPE; i++)
+        pipe_end(i);
+}
 
 /* ---- the session's stages */
 
@@ -205,6 +347,7 @@ static void finish(int code)
     if (s.screen) {
         s.screen = 0;
     }
+    tunnels_end();
     if (s.sf)
         sftpc_free(s.sf);
     if (s.c)
@@ -283,7 +426,13 @@ static void step(void)
     case S_LOGGING_IN:
         if (sshc_state(s.c) == SSHC_READY) {
             milestone("logged-in");
-            open_channel();
+            tunnels_listen();
+            if (s.no_shell) {                   /* -N: the tunnels alone, until Ctrl+C */
+                term_printf("The tunnels are open. Ctrl+C ends them.\r\n");
+                s.stage = S_RUNNING;
+            } else {
+                open_channel();
+            }
         } else if (sshc_state(s.c) == SSHC_AUTH) {      /* refused */
             const char *m = sshc_methods(s.c);
             if ((strstr(m, "password") || strstr(m, "keyboard-interactive")) && s.tries < 3) {
@@ -322,7 +471,7 @@ static void step(void)
         }
         break;
     case S_RUNNING:
-        if (!s.ch) {
+        if (!s.ch && !s.no_shell) {
             int code = s.status >= 0 ? s.status : 255;
             if (s.screen) {
                         s.screen = 0;
@@ -354,6 +503,7 @@ void ssh_poll(void)
         finish(255);
         return;
     }
+    tunnels_poll();
     if (s.stage != S_ASK_HOST && s.stage != S_ASK_PASSWORD && s.stage != S_SFTP)
         step();
 }
@@ -411,6 +561,35 @@ static int start(int argc, char **argv, int sftp)
             snprintf(key, sizeof key, "%s", argv[++i]);
         else if (!strcmp(argv[i], "-l") && i + 1 < argc)
             snprintf(s.user, sizeof s.user, "%s", argv[++i]);
+        else if (!sftp && !strcmp(argv[i], "-N"))
+            s.no_shell = 1;
+        else if (!sftp && !strcmp(argv[i], "-g"))
+            s.gateway = 1;
+        else if (!sftp && !strcmp(argv[i], "-L") && i + 1 < argc) {     /* [address:]port:host:hostport */
+            const char *a = argv[++i], *c1 = strchr(a, ':'), *c2 = c1 ? strchr(c1 + 1, ':') : NULL;
+            const char *c3 = c2 ? strchr(c2 + 1, ':') : NULL;
+            unsigned lp = 0, hp = 0;
+            int open = -1, bad = 0;
+            if (c3) {                           /* an address first: whose the port is */
+                size_t n = (size_t)(c1 - a);
+                if ((n == 1 && a[0] == '*') || (n == 7 && !strncmp(a, "0.0.0.0", 7)))
+                    open = 1;
+                else if (!n || (n == 9 && (!strncmp(a, "127.0.0.1", 9) || !strncmp(a, "localhost", 9))))
+                    open = 0;
+                else
+                    bad = 1;
+                a = c1 + 1, c1 = c2, c2 = c3;
+            }
+            if (c1 && c2)
+                lp = (unsigned)atoi(a), hp = (unsigned)atoi(c2 + 1);
+            if (bad || !lp || lp > 65535 || !hp || hp > 65535 || c2 - c1 - 1 <= 0 || c2 - c1 - 1 >= 80 || s.nfwd == NFWD) {
+                term_printf("ssh: -L wants [ADDRESS:]PORT:HOST:HOSTPORT, ADDRESS * or 127.0.0.1 (at most %d of them)\r\n", NFWD);
+                return 1;
+            }
+            s.fwd[s.nfwd].port = lp, s.fwd[s.nfwd].hport = hp, s.fwd[s.nfwd].open = open;
+            snprintf(s.fwd[s.nfwd].host, sizeof s.fwd[0].host, "%.*s", (int)(c2 - c1 - 1), c1 + 1);
+            s.nfwd++;
+        }
         else {
             term_printf("%s: unknown option %s\r\n", sftp ? "sftp" : "ssh", argv[i]);
             return 1;
@@ -418,7 +597,7 @@ static int start(int argc, char **argv, int sftp)
     }
     if (i >= argc || parse_target(argv[i], s.user, sizeof s.user, s.host, sizeof s.host) != 0 || !s.port) {
         say(sftp ? "usage: sftp [-P port] [-i key] [user@]host\r\n"
-                 : "usage: ssh [-p port] [-i key] [-l user] [user@]host [command]\r\n");
+                 : "usage: ssh [-p port] [-i key] [-l user] [-L [address:]port:host:hostport] [-g] [-N] [user@]host [command]\r\n");
         return 1;
     }
     for (i++; !sftp && i < argc; i++) {         /* the command: the words that follow */
@@ -508,7 +687,10 @@ void ssh_resize(int cols, int rows)
 
 void ssh_break(void)
 {
-    if (s.ch && s.stage == S_RUNNING)
+    if (s.no_shell && s.stage == S_RUNNING) {   /* -N: the tunnels end */
+        term_printf("Connection to %s closed.\r\n", s.host);
+        finish(0);
+    } else if (s.ch && s.stage == S_RUNNING)
         sshc_signal(s.ch, "INT");
     else if (s.stage != S_OFF && s.stage != S_SFTP) {
         err("^Break\r\n");
