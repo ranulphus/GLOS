@@ -499,6 +499,19 @@ static int vm_try_kill(struct trapframe *tf, int force)
         return 0;
     }
 
+    if (psp == app_vm_psp()) {
+        /* An app, in the call the VM thread makes for it: nothing of the system's devices is its to put back
+           (snap_restore, which a session's program has, is not for it), but one thing is cut short with the
+           call all the same: an interrupt's handler that was running in it. A timer tick's, say, the BIOS's own:
+           it will never send its EOI, the virtual controller has the line "in service" for ever, and no line
+           below it is given to the VM again: the tick stops, and the first write to the disc that the cache
+           cannot answer waits for an interrupt that cannot come, until the BIOS gives up and DOS says the
+           drive is not ready (the twenty-third gate, 2026-11-20, and one run in 128 of a soak after it: the
+           kill had found the VM at F000:C104). Nothing is in service after a kill, as after a session's. */
+        vm.pic.p[0].isr = vm.pic.p[1].isr = 0;
+        vm.pic.inflight = 0;
+        vm_sync_mask();
+    }
     current->vif = 1;
     vm.vflags_hi = 0;
     tf->eflags = (tf->eflags & FL_ARITH & ~0x400u) | FL_VM | FL_IF | 2;

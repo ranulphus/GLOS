@@ -535,17 +535,27 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   2026-11-20, devserver: `apps-486dx2-ne2k`). Ten small apps had started and ended, then `glos config set`
   wrote GLOS.CFG: the write stood in the BIOS for a minute or two (its own timeout, stretched by the traps of
   a processor without VME), DOS's critical error said drive not ready (`GLOS-DOS critical ah=39 drive=C
-  code=02`), and every read and write of the disc after it failed the same way. The emulator's host had room
-  and no errors of its own. **Not seen again:** seven runs of the case and two hundred rounds of an app's
-  start and end followed by a settings write (`build/run_cfgstress.py`), all here, all clean. **Not
-  explained.** That gate was the first with two changes to the kernel that are at work on exactly this
-  profile (the short way for the V86 traps of a processor without VME, and an app's call no longer going
-  through the 256 vectors), neither of which shows a way to lose a disc's interrupt on reading; they are
-  taken out of what goes to main (the branch `v86-fast` keeps them, with a third: an app's call made from the
-  stub's wait) until the fault is found, or the case has run a few dozen times under a gate's load with them
-  and without. What to look at when it comes again: whether the BIOS's INT 76h ran for the write's
-  interrupt (the kernel masks a line from its interrupt to the program's EOI: an interrupt the drive takes
-  back while the line is masked is lost in 86Box's PIC).
+  code=02`), and every read and write of the disc after it failed the same way. **Found and mended**
+  (2026-11-20), GLOS's own fault, as old as its apps:
+  - **What it was.** The suite kills an app that waits for a key in DOS, a little before those ten. The kill
+    of an app in the system VM's call for it put nothing back of the interrupt controller's state (a
+    session's program has that done with the rest of what it changed; an app "changed no device of the
+    system's"). When the kill found the VM inside an interrupt's handler, the BIOS's timer tick's say, the
+    handler was cut short with the call, never sent its EOI, and the virtual controller had the timer's line
+    in service for ever: no line below it was given to the VM again. The tick stopped; reads of the disc went
+    on from GLOS's cache; the first write waited for the drive's interrupt, which could not come.
+  - **How it was found.** It came once in a gate and not again in seven runs and two hundred rounds of a
+    stress here. `tools/soak.sh` ran the case eight at a time on devserver, round after round: once in 128
+    runs it came again, and the line the kernel now writes when DOS gives a hard disc up said it all
+    (`GLOS-DISK state virtual irr=4040 isr=0001 ...`: the drive's interrupt waiting, the timer's in
+    service), with the kill's own line above it (`GLOS-KILL ... at=f000:c104`: in the BIOS).
+  - **The two changes to the kernel taken out after that gate were not its cause** (the short way for V86
+    traps without VME, an app's call without the 256 vectors): the gate with them was only the first to
+    meet a fault that comes about once in a hundred runs of this case. They are to come back.
+  - **The test** makes it certain: APPTEST's `tickhang` hooks the BIOS's tick with a handler that never
+    returns and waits in DOS; killed there, the VM must still have its tick after (`kill-in-tick`,
+    `tick-after-kill`, in the apps suite).
+  - Other faults of this list that look like a PC whose tick has stopped may have been this one.
 
 - **`apiset-bf6-g200`'s `screen-off` failed once** (the twenty-second gate, 2026-11-20, devserver; never in the
   ninety runs before it). **Mended:** the suite's own race. It waited for `GLOS-DISPLAY power can=` in the log

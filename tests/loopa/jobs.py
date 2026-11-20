@@ -7030,6 +7030,17 @@ def apps_case(profile, card):
         checks["kill-asleep"] = started(n1 + 1) and kill("sleep 600", nap)
         key = start(app + "key")                # (in DOS for good: the system VM's kill, after its two seconds)
         checks["kill-in-dos"] = started(n1 + 2) and kill("key", key)
+        # In DOS for good with the BIOS's tick hooked by a handler that never returns: the kill comes while the
+        # timer's interrupt is in service in the system VM. After it the VM has its interrupts all the same: the
+        # tick goes on (WAITSEC counts a second of it and ends), where the timer's line stayed "in service" for
+        # ever, nothing below it came again, and the next write to the disc found the drive "not ready" (the
+        # twenty-third gate's fault, 2026-11-20).
+        hang = start(app + "tickhang")
+        checks["kill-in-tick"] = started(n1 + 3) and kill("tickhang", hang)
+        try:
+            checks["tick-after-kill"] = agent.ssh("C:\\HX\\WAITSEC.COM 1", timeout=90)[0] == 0
+        except subprocess.TimeoutExpired:
+            checks["tick-after-kill"] = False
         checks["none-left"] = not re.search(r"^app ", agent.ssh("glos ps")[1], re.M)
         rc, out, err = agent.ssh("C:\\TEST\\ECHOARGS.EXE after kills")     # (DOS as it was: INT 29h counts outside DOS)
         checks["dos-after-kill"] = rc == 7 and out == "after kills\r\nnine two six int29\r\n"

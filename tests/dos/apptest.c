@@ -395,6 +395,23 @@ int main(int argc, char **argv)
         fflush(stdout);
         return read(0, line, sizeof line) > 0 ? 0 : 1;
     }
+    if (!strcmp(mode, "tickhang")) {            /* in DOS for good, and the BIOS's tick (INT 1Ch) hooked in real mode
+                                                   by two bytes that never come back (JMP to itself): the next
+                                                   timer interrupt's handler hangs in them, the timer's line in
+                                                   service. What a kill finds there must not stay so. */
+        int sel = 0, seg = __dpmi_allocate_dos_memory(1, &sel);
+        __dpmi_raddr v;
+        char line[40];
+        if (seg < 0)
+            return 2;
+        _farpokeb(_dos_ds, (unsigned)seg * 16, 0xEB);
+        _farpokeb(_dos_ds, (unsigned)seg * 16 + 1, 0xFE);
+        v.segment = (unsigned short)seg, v.offset16 = 0;
+        __dpmi_set_real_mode_interrupt_vector(0x1C, &v);
+        printf("APP-TICKHANG id=%u\n", glos_app());
+        fflush(stdout);
+        return read(0, line, sizeof line) > 0 ? 0 : 1;
+    }
     if (!strcmp(mode, "sleep") && argc > 2) {
         printf("APP-SLEEP id=%u\n", glos_app());
         fflush(stdout);
@@ -402,7 +419,7 @@ int main(int argc, char **argv)
         printf("APP-SLEPT\n");
         return 0;
     }
-    printf("usage: APPTEST run NAME SECONDS | spin | crash | exit N | twice | child PROGRAM | key | sleep SECONDS |"
+    printf("usage: APPTEST run NAME SECONDS | spin | crash | exit N | twice | child PROGRAM | key | tickhang | sleep SECONDS |"
            " uclock SECONDS | timer HZ SECONDS | plain\n");
     return 2;
 }
