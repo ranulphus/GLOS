@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <glos/cp.h>
 #include <glos/gui.h>
 
 #include "lexers.h"
@@ -33,6 +34,7 @@
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_CUT, C_COPY, C_PASTE, C_DELETE, C_FIND, C_NEXT,
        C_REPLACE, C_GOTO, C_ALL, C_WRAP, C_ABOUT, C_CLOSE, C_NUMBERS, C_COLOURS, C_SESSION, C_BOOK, C_BOOKNEXT,
        C_BOOKPREV, C_INFILES, C_RESULTS,
+       C_ENC = 300,                     /* Format's Encoding: C_ENC UTF-8, C_ENC + i: the i-th code page (enc_pages) */
        C_KIND_AUTO = 200, C_KIND };     /* Highlight As: by the file's name; C_KIND + i: the i-th kind (lexers.c) */
 
 #define DOCS 12
@@ -42,13 +44,16 @@ struct doc {
     char path[260];
     int last_mod;                       /* how its tab is marked now: -1 not yet */
     int kind;                           /* its highlighting chosen by hand (lexer_kind's number); -1: by its name */
+    int enc;                            /* how its file's bytes are text: 0 UTF-8, else a DOS code page's number */
+    int bom;                            /* (UTF-8) its file began with the byte order mark: written again */
 };
 
 static struct gui_window *win;
 static struct gui_widget *strip, *status;
-static struct gui_menu *format, *view, *kind_menu;
+static struct gui_menu *format, *view, *kind_menu, *enc_menu;
 static struct doc doc[DOCS];
-static int numbers, colours = 1, kind_at;      /* View's two; the status bar's section for the file's kind */
+static int numbers, colours = 1, kind_at, enc_at;      /* View's two; the status bar's sections for the file's kind
+                                                           and for its encoding */
 static int match_case, session;                /* Find's Match case; View's Keep Session */
 static char home[200];                         /* the program's folder: NOTEPAD.CFG is there (none known: nothing kept) */
 static int ndocs;
@@ -97,6 +102,18 @@ static void doc_style(struct doc *d)
 }
 
 /* The window's title, the shown document's; and each tab's, its document's name with a * while it has changes. */
+/* (Encodings, below: the code pages GLOS has, and an encoding's name for the status bar.) */
+static const int enc_pages[] = { 437, 850, 852, 866, 737 };
+#define ENC_PAGES ((int)(sizeof enc_pages / sizeof enc_pages[0]))
+
+static const char *enc_name(int enc, char *out, size_t room)
+{
+    if (!enc)
+        return "UTF-8";
+    snprintf(out, room, "CP %d", enc);
+    return out;
+}
+
 static void title(void)
 {
     char t[300], name[128];
@@ -112,6 +129,14 @@ static void title(void)
         gui_menu_check(kind_menu, C_KIND_AUTO, d->kind < 0);    /* (Highlight As: the shown document's) */
         for (k = 0; lexer_kind(k, &name), name; k++)
             gui_menu_check(kind_menu, C_KIND + k, d->kind == k);
+    }
+    {                                           /* (and its encoding) */
+        char e[16];
+        int k;
+        gui_status_set(status, enc_at, enc_name(d->enc, e, sizeof e), NULL);
+        gui_menu_check(enc_menu, C_ENC, d->enc == 0);
+        for (k = 0; k < ENC_PAGES; k++)
+            gui_menu_check(enc_menu, C_ENC + 1 + k, d->enc == enc_pages[k]);
     }
     for (i = 0; i < ndocs; i++) {
         int mod = gui_code_modified(doc[i].ed);
@@ -144,6 +169,100 @@ static void where(void *arg)
     last_doc = d;
 }
 
+/* ---- encodings (phase E; docs/v1/apps/notepad.md): the editor's text is UTF-8, as all the toolkit's is; a
+   file's bytes are UTF-8 too, or one of DOS's code pages (the ones GLOS has: include/glos/cp.h). Opened: a file
+   that begins with UTF-8's mark, or has bytes above 7Fh that are all well-formed UTF-8, is UTF-8; any other is in
+   the code page DOS has now (a file of plain ASCII too: what is typed into it later is written as DOS's programs
+   expect it). Format's Encoding says which, and changes it: a file as it is on the disc is read again as the one
+   chosen; a changed or new text will be written as it. Saved: UTF-8 as it is; a code page's bytes, and if some
+   characters have no place in that page the user is asked whether UTF-8 would do instead. */
+static int enc_dos(void)                /* the code page DOS has, if it is one of GLOS's (else 437) */
+{
+    int page = cp_active(), i;
+    for (i = 0; i < ENC_PAGES; i++)
+        if (enc_pages[i] == page)
+            return page;
+    return 437;
+}
+
+/* Well-formed UTF-8 (no byte out of place, none longer than it need be, no half of a pair). *high: it has bytes
+   above 7Fh. */
+static int utf8_ok(const unsigned char *s, size_t n, int *high)
+{
+    size_t i = 0;
+    *high = 0;
+    while (i < n) {
+        unsigned c = s[i], k, u, j;
+        if (c < 0x80) {
+            i++;
+            continue;
+        }
+        *high = 1;
+        k = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC2 ? 1 : 0;      /* (the bytes that follow) */
+        if (!k || c > 0xF4 || i + k >= n)
+            return 0;
+        u = c & (0x3Fu >> k);
+        for (j = 1; j <= k; j++) {
+            if ((s[i + j] & 0xC0) != 0x80)
+                return 0;
+            u = u << 6 | (s[i + j] & 0x3F);
+        }
+        if ((k == 2 && u < 0x800) || (k == 3 && (u < 0x10000 || u > 0x10FFFF)) || (u >= 0xD800 && u <= 0xDFFF))
+            return 0;
+        i += k + 1;
+    }
+    return 1;
+}
+
+static char *enc_to_utf8(int page, const char *in, size_t n, size_t *out_n)    /* a code page's bytes (malloc'd) */
+{
+    char *out = malloc(n * 3 + 1);
+    size_t i, o = 0;
+    for (i = 0; out && i < n; i++) {
+        unsigned u = cp_char(page, (unsigned char)in[i]);
+        if (u < 0x80)
+            out[o++] = (char)u;
+        else if (u < 0x800)
+            out[o++] = (char)(0xC0 | u >> 6), out[o++] = (char)(0x80 | (u & 0x3F));
+        else
+            out[o++] = (char)(0xE0 | u >> 12), out[o++] = (char)(0x80 | (u >> 6 & 0x3F)), out[o++] = (char)(0x80 | (u & 0x3F));
+    }
+    *out_n = o;
+    return out;
+}
+
+/* UTF-8 as a code page's bytes (malloc'd), '?' for what the page hasn't got: *lost, how many those were. */
+static char *enc_from_utf8(int page, const char *in, size_t n, size_t *out_n, int *lost)
+{
+    char *out = malloc(n + 1), *z = malloc(n + 1);     /* (z: the text with a NUL at its end, for cp_utf8_next) */
+    const char *p;
+    size_t o = 0;
+    *lost = 0;
+    if (!out || !z) {
+        free(out);
+        free(z);
+        return NULL;
+    }
+    memcpy(z, in, n);
+    z[n] = 0;
+    for (p = z; p < z + n; ) {
+        unsigned u = (unsigned char)*p;
+        int b;
+        if (u < 0x80) {
+            out[o++] = *p++;
+            continue;
+        }
+        u = cp_utf8_next(&p);
+        b = cp_byte(page, u);
+        if (b < 0)
+            (*lost)++;
+        out[o++] = (char)(b < 0 ? '?' : b);
+    }
+    free(z);
+    *out_n = o;
+    return out;
+}
+
 /* A document more, empty, in a tab of its own, shown. NULL: there are twelve. */
 static struct doc *doc_new(void)
 {
@@ -157,6 +276,7 @@ static struct doc *doc_new(void)
     memset(d, 0, sizeof *d);
     d->last_mod = -1;
     d->kind = -1;
+    d->enc = enc_dos();
     d->page = gui_tab(strip, "Untitled");
     d->ed = gui_code(d->page);
     doc_style(d);
@@ -169,11 +289,13 @@ static struct doc *doc_new(void)
     return d;
 }
 
-static int load(struct doc *d, const char *p)
+/* A file read into a document. as: how its bytes are text (0 UTF-8, a code page's number), or -1: found out. */
+static int load_as(struct doc *d, const char *p, int as)
 {
     FILE *f = gui_fopen(p, "rb");
     char *buf = NULL;
-    size_t n = 0, room = 0, k;
+    size_t n = 0, room = 0, k, size;
+    int high = 0;
     if (!f) {
         strncpy(d->path, p, sizeof d->path - 1);        /* (a new file by that name) */
         gui_code_set(d->ed, NULL, 0);
@@ -198,6 +320,29 @@ static int load(struct doc *d, const char *p)
         n += k;
     }
     fclose(f);
+    size = n;
+    d->bom = 0;
+    if (as != 0 && as != -1) {                  /* (said: that code page's) */
+        d->enc = as;
+    } else if (n >= 3 && !memcmp(buf, "\xEF\xBB\xBF", 3)) {
+        d->enc = 0, d->bom = 1;
+        memmove(buf, buf + 3, n -= 3);
+    } else if (as == 0 || (utf8_ok((const unsigned char *)buf, n, &high) && high)) {
+        d->enc = 0;
+    } else {
+        d->enc = enc_dos();
+    }
+    if (d->enc) {                               /* its bytes as the editor's text */
+        size_t m = 0;
+        char *u = enc_to_utf8(d->enc, buf, n, &m);
+        if (!u) {
+            free(buf);
+            gui_message(win, GUI_T("Notepad"), GUI_T("The file is too big for the memory there is."), GUI_MB_OK);
+            return -1;
+        }
+        free(buf);
+        buf = u, n = m;
+    }
     gui_code_set(d->ed, buf, n);                /* (the buffer is the editor's now) */
     strncpy(d->path, p, sizeof d->path - 1);
     d->path[sizeof d->path - 1] = 0;
@@ -205,11 +350,13 @@ static int load(struct doc *d, const char *p)
     title();
     {
         char t[300];
-        snprintf(t, sizeof t, "%s %lu", p, (unsigned long)n);
+        snprintf(t, sizeof t, "%s %lu", p, (unsigned long)size);
         note("open %s", t);
     }
     return 0;
 }
+
+static int load(struct doc *d, const char *p) { return load_as(d, p, -1); }
 
 /* A file opened: in the shown tab if that is an empty, untouched Untitled; in a tab of its own otherwise. */
 static void open_file(const char *p)
@@ -238,7 +385,38 @@ static int save_to(struct doc *d, const char *p)
     FILE *f;
     if (!buf)
         return -1;
-    if (!(f = gui_fopen(p, "wb")) || fwrite(buf, 1, n, f) != n || fclose(f) != 0) {
+    if (d->enc) {                               /* as its code page's bytes; what the page hasn't got is asked about */
+        size_t m = 0;
+        int lost = 0;
+        char *b = enc_from_utf8(d->enc, buf, n, &m, &lost);
+        if (b && lost) {
+            char t[300], name[16];
+            int r;
+            snprintf(t, sizeof t, GUI_T("Not all of this text can be written in %s: %d of its characters would become \"?\". "
+                                        "Save it as UTF-8 instead?"), enc_name(d->enc, name, sizeof name), lost);
+            r = gui_message(win, GUI_T("Notepad"), t, GUI_MB_YESNOCANCEL);
+            if (r != GUI_YES && r != GUI_NO) {
+                free(b);
+                free(buf);
+                return -1;
+            }
+            if (r == GUI_YES) {
+                free(b);
+                b = NULL;
+                d->enc = 0, d->bom = 0;
+            }
+        }
+        if (b) {
+            free(buf);
+            buf = b, n = m;
+        } else if (d->enc) {
+            free(buf);
+            gui_message(win, GUI_T("Notepad"), GUI_T("The file is too big for the memory there is."), GUI_MB_OK);
+            return -1;
+        }
+    }
+    if (!(f = gui_fopen(p, "wb")) || (!d->enc && d->bom && fwrite("\xEF\xBB\xBF", 1, 3, f) != 3)
+        || fwrite(buf, 1, n, f) != n || fclose(f) != 0) {
         free(buf);
         gui_message(win, GUI_T("Notepad"), GUI_T("The file couldn't be written."), GUI_MB_OK);
         return -1;
@@ -873,6 +1051,19 @@ static void command(struct gui_window *w, int id)
     case C_INFILES:
         find_in_files();
         return;
+    case C_ENC: case C_ENC + 1: case C_ENC + 2: case C_ENC + 3: case C_ENC + 4: case C_ENC + 5: {
+        struct doc *d = cur();                  /* Format's Encoding: the file as it is on the disc read again as
+                                                   the one chosen; a changed or new text written as it */
+        int enc = id == C_ENC ? 0 : enc_pages[id - C_ENC - 1];
+        char e[16];
+        if (d->path[0] && !gui_code_modified(d->ed) && gui_code_length(d->ed))
+            load_as(d, d->path, enc);
+        else
+            d->enc = enc, d->bom = 0;
+        note("encoding %s", enc_name(d->enc, e, sizeof e));
+        title();
+        return;
+    }
     case C_RESULTS:
         inf_show(!inf.on);
         return;
@@ -1027,6 +1218,17 @@ int main(int argc, char **argv)
     gui_menu_item(m, GUI_T("Select &All"), C_ALL, GUI_T("Ctrl+A"));
     format = m = gui_menu(bar, GUI_T("F&ormat"));
     gui_menu_item(m, GUI_T("&Word Wrap"), C_WRAP, NULL);
+    {                                           /* how the shown document's file is written */
+        static const char *const names[] = { GUI_N("Code Page &437 (DOS, United States)"), GUI_N("Code Page &850 (Western Europe)"),
+                                             GUI_N("Code Page 85&2 (Central Europe)"), GUI_N("Code Page 8&66 (Cyrillic)"),
+                                             GUI_N("Code Page &737 (Greek)") };
+        int k;
+        enc_menu = gui_menu_sub(m, GUI_T("&Encoding"));
+        gui_menu_item(enc_menu, GUI_T("&UTF-8"), C_ENC, NULL);
+        gui_menu_sep(enc_menu);
+        for (k = 0; k < ENC_PAGES; k++)
+            gui_menu_item(enc_menu, GUI_T(names[k]), C_ENC + 1 + k, NULL);
+    }
     view = m = gui_menu(bar, GUI_T("&View"));
     gui_menu_item(m, GUI_T("&Line Numbers"), C_NUMBERS, NULL);
     gui_menu_item(m, GUI_T("&Highlighting"), C_COLOURS, NULL);
@@ -1065,6 +1267,7 @@ int main(int argc, char **argv)
         gui_visible(inf.box, 0);
     }
     status = gui_status(win);
+    enc_at = gui_status_section(status, 60);
     kind_at = gui_status_section(status, 90);
     gui_menu_check(format, C_WRAP, wrap);
     gui_menu_check(view, C_NUMBERS, numbers);

@@ -128,8 +128,20 @@ Plan: `docs/v1/apps/notepad.md`. The first of its parts.
   Match case is ticked; a file with a zero byte in its first 512 is no text and is left out, as is one of
   more than 4 MB; a thousand lines at most. View's item, or the pane's Close, puts the pane away and ends a
   search at work. `notepad-infiles` on the host and on Loop A (`C:\INF`).
+- **Code pages and UTF-8** (2026-11-20): the editor's text is UTF-8, as all the toolkit's is; a file's bytes
+  are UTF-8 or one of DOS's code pages (437, 850, 852, 866, 737: `include/glos/cp.h`). A file that begins with
+  UTF-8's mark, or has bytes above 7Fh that are all well-formed UTF-8, is UTF-8 (the mark is written back if
+  it was there); any other is in the code page DOS has now, plain ASCII too, so that what is typed into
+  AUTOEXEC.BAT is written as DOS's programs read it. The status bar says which. **Format's Encoding** changes
+  it: a file as it is on the disc is read again as the one chosen (bytes taken for the wrong page are put
+  right so); a changed or new text will be written as it. Saving in a code page a text with characters the
+  page hasn't got asks first: UTF-8 instead, or a question mark for each.
+  - Until now a file's bytes were shown as UTF-8 whatever they were: a DOS text with accents was strays.
+  - **Tests:** `notepad-enc` on the host and on Loop A (a code page file changed and read back byte for byte;
+    a UTF-8 file with its mark; a UTF-8 text saved in code page 437 with a euro sign in it).
 - **Not done yet:** files dropped on the window; the pane resized by a bar, regular expressions and whole
-  words in Find in Files; code pages; large files; bookmarks and the chosen kind kept with the session.
+  words in Find in Files; the line ends in the status bar and chosen; large files; bookmarks and the chosen
+  kind kept with the session.
 
 ## Files (2026-11-18): the browser's toolbar and address bar
 

@@ -1,0 +1,41 @@
+# Encodings in Notepad (apps/notepad; phase E, docs/v1/apps/notepad.md): a file whose bytes above 7Fh are no
+# UTF-8 is read in DOS's code page and written back in it, byte for byte (C:\ENC\LATIN.TXT: an e acute and an i
+# with two dots as code page 437 has them); a UTF-8 file is read and written as UTF-8, with its mark if it had
+# one (BOM.TXT); the status bar says which. A UTF-8 text told to be code page 437 (Format's Encoding) has a
+# character the page hasn't got, the euro sign: saving asks; No writes a question mark for it, and the rest
+# in the page's bytes.
+run NOTEPAD.EXE C:\ENC\LATIN.TXT
+wait "LATIN.TXT - Notepad"
+shot page "LATIN.TXT - Notepad"
+key end
+type !
+key ctrl+s
+file C:\ENC\LATIN.TXT caf\x82 na\x8bve!\r\n
+key ctrl+o
+wait "Open"
+type c:\\enc\\bom.txt\n
+wait "BOM.TXT - Notepad"
+key end
+type !
+key ctrl+s
+file C:\ENC\BOM.TXT \xef\xbb\xbfbom \xc3\xbc!\r\n
+key ctrl+o
+wait "Open"
+type c:\\enc\\utf.txt\n
+wait "UTF.TXT - Notepad"
+shot utf "UTF.TXT - Notepad"
+key end
+type !
+key alt+o e 4
+key ctrl+s
+wait "Notepad"
+shot asks "Notepad"
+key alt+n
+gone "Notepad"
+file C:\ENC\UTF.TXT caf\x82 ?5!\r\n
+shot written "UTF.TXT - Notepad"
+key alt+f4
+expect NOTEPAD open C:\ENC\LATIN.TXT 12
+expect NOTEPAD encoding CP 437
+expect NOTEPAD saved C:\ENC\UTF.TXT
+expect NOTEPAD end

@@ -4,6 +4,13 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Notepad: code pages and UTF-8 (2026-11-20)
+
+- **A DOS text with accented letters is shown as it should be,** and written back as it was: Notepad reads a
+  file as UTF-8 if it is UTF-8, and otherwise in the code page DOS has (437, 850, 852, 866 or 737). The status
+  bar says which; **Format's Encoding** changes it. A text that a code page cannot hold all of is asked about
+  when it is saved.
+
 ## Notepad: Find in Files (2026-11-20)
 
 - **Edit's Find in Files... (Ctrl+Shift+F)** looks for text in every file of a folder and of the folders under
