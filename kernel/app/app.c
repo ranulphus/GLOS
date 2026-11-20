@@ -395,7 +395,18 @@ static void wr32(u32 lin, u32 v)
 }
 
 static int mine(const struct app *a, u32 v) { return (a->ivt_mine[v >> 3] >> (v & 7)) & 1; }
+
 static u32 ivt_in[256];                 /* the vectors as adopt() gave them to the call in hand */
+
+/* Two tables of 256 vectors the same: compared a dword at a time (the library's memcmp goes by bytes: a
+   thousand turns of its loop after every call of every app). */
+static int ivt_same(const void *a, const void *b)
+{
+    u32 n = 256;
+    int same;
+    __asm__ volatile("repe cmpsl; sete %b0" : "=a"(same), "+S"(a), "+D"(b), "+c"(n) : : "cc", "memory");
+    return same & 1;
+}
 
 /* ---- DOS's current drive and directory (the VM thread, as the system) */
 
@@ -1069,7 +1080,7 @@ static void unadopt(struct app *a, int cwd)
         /* The vectors the call changed are the app's own from now. Nearly every call changes none: the table is
            as it was given, and what is the app's own is as it was (asked first: going through all 256 after
            every call of every app was a good part of what an app's DOS call cost a 486). */
-        if (memcmp(vm_ptr(0), ivt_in, sizeof ivt_in) != 0)
+        if (!ivt_same(vm_ptr(0), ivt_in))
             for (v = 0; v < 256; v++) {
                 u32 cur = vm_rd32(v * 4);
                 if (cur != sys.ivt[v]) {

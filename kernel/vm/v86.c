@@ -1410,7 +1410,22 @@ static void vm_gp(struct trapframe *tf)
             vm.notice_due = 0;
             vcon_notice();
         }
-        vm_idle(0);
+        /* The stub's wait between jobs. An app's call into the VM wakes it: the call is made from here, and the
+           wait goes on, where the stub was sent back to ask what next (to its loop's top, into the kernel for
+           the question, out with "nothing", STI, HLT: five trips between V86 code and the kernel for every DOS
+           call of an app, a third of what such a call cost a 486 over a program's own; 2026-11-20). Whatever
+           else ended the wait goes back to the stub as before. */
+        for (;;) {
+            vm_idle(0);
+            if (!vm.idle_agent || !app_vm_pending() || vm.kill_req || vm.reboot_req || vm.notice_due || vm_work_due()
+                || (current->vif && vpic_pending(&vm.pic)) || agent_vm_wake_pending() || display_vm_pending()
+                || bdisk_vm_pending())
+                break;                          /* (other work for the VM has its turn by the stub's asking, as it had) */
+            vm.idle_agent = 0;                  /* (the VM is not idle while it makes the call) */
+            vm.idle_cmd = 0;
+            app_vm_turn();
+            vm.idle_agent = 1;
+        }
         if (vm.reboot_req) {
             vm.reboot_req = 0;
             if (vm_idle_headless()) {           /* (still nothing running) */
