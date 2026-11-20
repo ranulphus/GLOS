@@ -427,8 +427,13 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
   Contrast, on the current layer, in the selection or all of it; what is clear stays clear. A step as a tool's
   stroke is. `paint_test` has each; `paint` inverts the picture, makes a selected part black and white and
   brighter and flatter, and undoes all three.
+- **The desktop's clipboard** (2026-11-20): what Copy and Cut take goes on GLOS's clipboard as a picture
+  (`GLOS_CLIP_IMAGE`), and Paste takes the picture that is there, whoever put it: pictures go between Paint
+  and any other program that takes them. One the clipboard has no room for stays Paint's own until the next
+  copy. `paint-clip` on the host and on Loop A (a copy, the clipboard given words instead, a paste that finds
+  no picture, a copy pasted).
 - **Not done yet:** blend modes, layers renamed and dragged, the layered format written; selections of other
-  shapes, a selection moved, the desktop's clipboard; text; gradients, curves, the clone stamp; resizing in
+  shapes, a selection moved; text; gradients, curves, the clone stamp; resizing in
   proportion and bicubic; levels, curves, hue and saturation, the effects, their previews; tiles for pictures
   of any size.
 - **PCX written** (2026-11-19): Save As has PCX, of 24 bits (three planes a row, each run-length coded by
@@ -475,6 +480,12 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
 - **Page Up and Page Down did nothing in a grid one line high** (the toolkit's list: they move by a screen
   less a line, which was no line when one line of big pictures is all that fits; a line at least now). Found
   by the thumbnail view in the browser's window at its first size.
+- **A key typed just after the one that opened a submenu was dropped** (the fourth side of the menus' fault):
+  it came for the menu's own pop-up, which still had the keyboard as it was pressed, and a menu under a
+  submenu took no keys. Format, Encoding and 4, a tenth of a second apart, left the submenu open on the 486
+  (`notepad-enc`: two runs of four under load before the change, none of eight after). Such a key is the
+  submenu's now (`sdk/gui/menu.c`, `gui_menu_popup_of`). The Slow page has a submenu too, typed ahead as its
+  other cases are, but that order did not lose the key: `notepad-enc` on the 486's profile is what shows it.
 - **The host's script player waited for the first 32 different `said` lines only,** and went straight past
   any after them: a script with more passed without its lines being said. 256 now, and a script with more
   fails.

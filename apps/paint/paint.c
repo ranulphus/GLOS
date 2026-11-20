@@ -252,8 +252,10 @@ static void kept_swap(void *p)
 static void kept_drop(void *p) { pd_kept_free(p); }
 
 /* Edit's Cut, Copy and Paste, and Image's Crop: of the selection, or of the whole picture with none. What is
-   copied is the current layer's pixels there, kept in Paint (the desktop's clipboard for pictures is to come);
-   a paste is a new layer, its corner at the selection's (the picture's, with none). */
+   copied is the current layer's pixels there, put on the desktop's clipboard as a picture (GLOS_CLIP_IMAGE: any
+   program that takes pictures can paste it, and Paint pastes what any program put there). A picture the
+   clipboard would not take (no memory for it) stays Paint's own, and is what Paint pastes until the next copy.
+   A paste is a new layer, its corner at the selection's (the picture's, with none). */
 static void edit_command(int id)
 {
     int x = sel.w ? sel.x : 0, y = sel.w ? sel.y : 0, w = sel.w ? sel.w : doc->w, h = sel.w ? sel.h : doc->h;
@@ -270,8 +272,12 @@ static void edit_command(int id)
         if (!px)
             return;
         free(clip.px);
-        clip.px = px, clip.w = w, clip.h = h;
-        printf("PAINT %s %dx%d\n", id == C_CUT ? "cut" : "copy", w, h);
+        clip.px = NULL;
+        if (gui_clip_set_image(px, w, h) == 0)
+            free(px);                           /* (the desktop's clipboard has it) */
+        else
+            clip.px = px, clip.w = w, clip.h = h;       /* (Paint's own) */
+        printf("PAINT %s %dx%d%s\n", id == C_CUT ? "cut" : "copy", w, h, clip.px ? " kept here" : "");
         if (id == C_COPY || !(before = pd_before(doc)))
             break;
         pd_clean(doc);                          /* cut: clear there (the paper's colour on the bottom layer) */
@@ -280,20 +286,33 @@ static void edit_command(int id)
         commit(GUI_T("Cut"), before);
         break;
     }
-    case C_PASTE:
-        if (!clip.px || !(k = pd_keep(doc)))
+    case C_PASTE: {
+        unsigned *got = clip.px ? NULL : gui_clip_get_image(&w, &h);   /* the desktop's picture (or Paint's own) */
+        const unsigned *px = clip.px ? clip.px : got;
+        if (clip.px)
+            w = clip.w, h = clip.h;
+        if (!px) {
+            printf("PAINT paste none\n");
+            break;
+        }
+        if (!(k = pd_keep(doc))) {
+            free(got);
             return;
-        if (pd_paste(doc, clip.px, clip.w, clip.h, x, y) != 0) {
+        }
+        if (pd_paste(doc, px, w, h, x, y) != 0) {
             pd_kept_free(k);
+            free(got);
             gui_message(win, GUI_T("Paint"), GUI_T("There is no room for another layer."), GUI_MB_OK);
             return;
         }
+        free(got);
         layers_fill();
         gui_damage(view);
         dirty = 1;
-        printf("PAINT paste %dx%d at %d,%d\n", clip.w, clip.h, x, y);
+        printf("PAINT paste %dx%d at %d,%d\n", w, h, x, y);
         gui_undo_push(undo, GUI_T("Paste"), kept_swap, kept_swap, k, pd_kept_bytes(k), kept_drop, NULL, 0);
         break;
+    }
     case C_CROP:
         if (!sel.w || !(k = pd_keep(doc)))
             return;

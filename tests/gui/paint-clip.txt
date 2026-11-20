@@ -1,0 +1,25 @@
+# The desktop's clipboard in Paint (apps/paint; phase E, docs/v1/apps/paint.md): what Copy takes is put on GLOS's
+# clipboard as a picture, and Paste takes the picture that is there, whoever put it. A stroke drawn, selected and
+# copied; then the clipboard is given words in the picture's place (the script's clip, as another program's
+# copy), and Paste finds no picture; copied again and pasted at another selection's corner, as a layer of its own.
+run PAINT.EXE
+wait "Untitled - Paint"
+drag "Untitled - Paint" 70 89 120 139
+key s
+drag "Untitled - Paint" 70 89 120 139
+key ctrl+c
+clip words and no picture
+key ctrl+v
+key ctrl+c
+drag "Untitled - Paint" 200 99 220 119
+key ctrl+v
+key p
+shot pasted "Untitled - Paint"
+key alt+f4
+wait "Paint"
+key alt+n
+expect PAINT select 10,10 51x51
+expect PAINT copy 51x51
+expect PAINT paste none
+expect PAINT paste 51x51 at 140,20
+expect PAINT end
