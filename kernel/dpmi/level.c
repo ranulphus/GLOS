@@ -114,7 +114,7 @@ void level_pop(int psp)
     for (i = 0; i < NSEGSEL; i++)
         if (dctx->segsel[i].sel && dctx->ldt_used[dctx->segsel[i].sel >> 3] >= lev)
             dctx->segsel[i].sel = 0;
-    for (i = 0; i < LDT_ENTRIES; i++)
+    for (i = 0; i < dctx->ldt_cap; i++)
         if (dctx->ldt_used[i] >= lev) {
             dctx->ldt_used[i] = 0;
             dctx->ldt[i * 2] = dctx->ldt[i * 2 + 1] = 0;

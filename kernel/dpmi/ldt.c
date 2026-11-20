@@ -1,5 +1,7 @@
 /* Descriptors and selectors (supervisor.md §12.1, §13: 0000h-000Dh). Each
- * context has an LDT of 8192 entries that only the host writes. A client's
+ * context has an LDT that only the host writes: a page (512 entries) at first,
+ * doubled as its clients want more, 8192 entries at most (until 2026-11-20 it
+ * was 8192 from the start: 64 KB and more a context; the memory diet). A client's
  * selector has TI set and RPL 3; 0000h hands out indices from 16 up, so
  * selectors 04h-7Ch stay free for 000Dh. A descriptor a client sets must be
  * a code or data segment of DPL 3: no gates, no system segments. The base
@@ -7,6 +9,7 @@
  * supervisor-only pages. */
 #include "arch.h"
 #include "dpmi.h"
+#include "io.h"
 #include "kprintf.h"
 #include "mm.h"
 
@@ -28,17 +31,49 @@ static void put(u32 i, u32 base, u32 limit, u8 access, u8 flags)
 
 void ldt_init(struct dpmi_ctx *c)
 {
-    memset(c->ldt, 0, LDT_ENTRIES * 8);
-    memset(c->ldt_used, 0, LDT_ENTRIES);
+    memset(c->ldt, 0, c->ldt_cap * 8);
+    memset(c->ldt_used, 0, c->ldt_cap);
     c->ldt_used[0] = 1;
+}
+
+/* The current context's LDT made `cap` entries (more than now): new pages, the descriptors and their owners
+   copied, LDTR loaded with the new one before the old pages go. -1 without memory (nothing changed). */
+static int ldt_grow(u32 cap)
+{
+    u32 *ldt = mm_win_alloc(cap * 8), f;
+    u8 *used = ldt ? kmalloc(cap) : 0;
+    u32 *old = dctx->ldt, old_cap = dctx->ldt_cap;
+    u8 *old_used = dctx->ldt_used;
+
+    if (!used) {
+        if (ldt)
+            mm_win_free(ldt, cap * 8);
+        return -1;
+    }
+    memset(used, 0, cap);
+    f = irq_save();
+    memcpy(ldt, old, old_cap * 8);
+    memcpy(used, old_used, old_cap);
+    dctx->ldt = ldt;
+    dctx->ldt_used = used;
+    dctx->ldt_cap = cap;
+    cpu_set_ldt(ldt, cap * 8 - 1);
+    irq_restore(f);
+    mm_win_free(old, old_cap * 8);
+    kfree(old_used);
+    return 0;
 }
 
 int ldt_alloc(u32 n)
 {
     u32 i, k;
-    if (!n)
+    if (!n || n > LDT_ENTRIES - SEL_FIRST)
         return -1;
-    for (i = SEL_FIRST; i + n <= LDT_ENTRIES; i++) {
+    while (SEL_FIRST + n > dctx->ldt_cap && dctx->ldt_cap < LDT_ENTRIES)
+        if (ldt_grow(dctx->ldt_cap * 2) != 0)
+            return -1;
+again:
+    for (i = SEL_FIRST; i + n <= dctx->ldt_cap; i++) {
         for (k = 0; k < n && !dctx->ldt_used[i + k]; k++) ;
         if (k == n) {
             for (k = 0; k < n; k++)
@@ -47,6 +82,8 @@ int ldt_alloc(u32 n)
         }
         i += k;
     }
+    if (dctx->ldt_cap < LDT_ENTRIES && ldt_grow(dctx->ldt_cap * 2) == 0)
+        goto again;
     return -1;
 }
 
@@ -66,6 +103,9 @@ int ldt_alias_sel(void)
 {
     if (!dctx->ldt_alias) {
         u32 nlv = dctx->nlv;
+        /* (the whole LDT first, so that the alias's pages never move: few clients ask for one) */
+        if (dctx->ldt_cap < LDT_ENTRIES && ldt_grow(LDT_ENTRIES) != 0)
+            return 0;
         if (lin_alias(LDT_ALIAS_LIN, dctx->ldt, LDT_ENTRIES * 8) != 0)
             return 0;
         dctx->nlv = 1;
@@ -78,7 +118,7 @@ int ldt_alias_sel(void)
 int ldt_valid(u16 sel)
 {
     u32 i = sel >> 3;
-    return (sel & 4) && i < LDT_ENTRIES && dctx && dctx->ldt_used[i];
+    return (sel & 4) && dctx && i < dctx->ldt_cap && dctx->ldt_used[i];
 }
 
 int ldt_free(u16 sel)

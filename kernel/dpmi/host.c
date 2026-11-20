@@ -126,7 +126,7 @@ void dpmi_ctx_load(struct dpmi_ctx *c)
         return;
     dctx = c;
     mm_space_enter(c ? c->cr3 : 0);
-    cpu_set_ldt(c ? c->ldt : 0, c ? LDT_ENTRIES * 8 - 1 : 0);
+    cpu_set_ldt(c ? c->ldt : 0, c ? c->ldt_cap * 8 - 1 : 0);
     wp_load();
 }
 
@@ -307,7 +307,7 @@ static void ctx_destroy(int psp)
     current->ctx = 0;
     dpmi_ctx_load(0);
     mm_space_free(c->cr3);
-    kfree(c->ldt_mem);
+    mm_win_free(c->ldt, c->ldt_cap * 8);
     kfree(c->ldt_used);
     kfree(c);
 }
@@ -346,12 +346,12 @@ static void mode_switch(struct trapframe *tf)
             return;
         }
         memset(c, 0, sizeof *c);
-        c->ldt_mem = kmalloc(LDT_ENTRIES * 8 + 4096);
-        c->ldt = c->ldt_mem ? (u32 *)(((u32)c->ldt_mem + 4095) & ~4095u) : 0;
-        c->ldt_used = kmalloc(LDT_ENTRIES);
+        c->ldt_cap = LDT_FIRST_CAP;
+        c->ldt = mm_win_alloc(LDT_FIRST_CAP * 8);
+        c->ldt_used = kmalloc(LDT_FIRST_CAP);
         c->cr3 = mm_space_new();
         if (!c->ldt || !c->ldt_used || !c->cr3) {
-            if (c->ldt_mem) kfree(c->ldt_mem);
+            if (c->ldt) mm_win_free(c->ldt, LDT_FIRST_CAP * 8);
             if (c->ldt_used) kfree(c->ldt_used);
             if (c->cr3) mm_space_free(c->cr3);
             kfree(c);

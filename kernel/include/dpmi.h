@@ -18,7 +18,8 @@
 #define K_DPMI_H
 #include "arch.h"
 
-#define LDT_ENTRIES    8192
+#define LDT_ENTRIES    8192                     /* the most an LDT grows to */
+#define LDT_FIRST_CAP  512                      /* what it starts at: a page (the memory diet, 2026-11-20) */
 #define SEL_FIRST      16               /* 0000h's first index: selectors 04h-7Ch stay free for 000Dh */
 #define RM_STACK_PARAS 0x100            /* 1687h's SI: the host's real-mode stack, 4 KB of the client's: an
                                            RM_SLICE for each of the real-mode calls that can nest (rmcall.c) */
@@ -104,15 +105,15 @@ struct dpmi_level {
 
 struct dpmi_ctx {
     u32 cr3;                            /* its page directory */
-    u32 *ldt;                           /* LDT_ENTRIES descriptors (two dwords each), page-aligned ... */
-    void *ldt_mem;                      /* ... in this allocation (so its frames hold the LDT only) */
+    u32 *ldt;                           /* ldt_cap descriptors (two dwords each), whole pages of their own (mm_win_alloc) */
+    u32 ldt_cap;                        /* LDT_FIRST_CAP, doubled as clients want more, LDT_ENTRIES at most */
     u16 ldt_alias;                      /* "MS-DOS" 0100h: a selector for it, read-only; 0 until asked */
     u8 tsr_pending;                     /* the client's program called INT 21h 31h: it goes resident ... */
     u16 resident_parent;                /* ... and its context with it, until this program (its parent) ends */
     u16 xbuf_seg;                       /* dosx.c: DOS memory for 16-bit clients' INT 21h buffers */
     u16 xret_ds, xret_es, xret_si;      /* the segments (and SI) its last DOS call returned */
     u16 dta_sel, dta_off;               /* the client's DTA (1Ah), 0: its PSP's */
-    u8 *ldt_used;
+    u8 *ldt_used;                       /* ldt_cap bytes */
     u8 bits32;                          /* a 32-bit client */
     u16 psp, env_seg;                   /* real-mode segments */
     u16 psp_sel, env_sel;
