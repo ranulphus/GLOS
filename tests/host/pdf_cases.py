@@ -255,4 +255,43 @@ tree = {1: b"<< /Type /Catalog /Pages 2 0 R >>",
 for i, (num, parent) in enumerate(((10, 3), (11, 3), (12, 5), (13, 5), (14, 4), (15, 4), (20, 2))):
     tree[num] = b"<< /Type /Page /Parent %d 0 R /Number %d >>" % (parent, i)
 write("tree.pdf", classic(tree, 1)[0])
+
+# ---- drawing (tests/host/pdfdraw_test.c): a page 200 by 100 points with a shape of every kind at a known place
+K = 0.5523                                                      # (a quarter circle by one curve)
+circle = lambda x, y, r: (b"%g %g m " % (x + r, y) + b"%g %g %g %g %g %g c " % (x + r, y + K * r, x + K * r, y + r, x, y + r)
+                          + b"%g %g %g %g %g %g c " % (x - K * r, y + r, x - r, y + K * r, x - r, y)
+                          + b"%g %g %g %g %g %g c " % (x - r, y - K * r, x - K * r, y - r, x, y - r)
+                          + b"%g %g %g %g %g %g c h " % (x + K * r, y - r, x + r, y - K * r, x + r, y))
+words = b"\n".join([
+    b"1 0 0 rg 10 10 50 30 re f",                                # a red box
+    b"0 0 1 RG 4 w 100 20 m 180 20 l S",                         # a blue line, four wide
+    b"0 1 0 rg 100 50 m 140 90 l 180 50 l h f",                  # a green triangle
+    b"0 g 20 60 30 30 re 30 70 10 10 re f*",                     # a black box with a hole (even-odd)
+    b"q 150 5 20 10 re W n 1 0 1 rg 140 0 60 40 re f Q",         # magenta, clipped to a small box
+    b"q 2 0 0 2 0 0 cm 0.5 g 0 0 4 4 re f Q",                    # gray, the matrix doubled
+    b"0 1 1 rg " + circle(80, 75, 12) + b"f",                    # a cyan disc
+    b"q 20 0 0 20 150 60 cm /Im1 Do Q",                          # four colours, a pixel each
+    b"q 16 0 0 16 180 80 cm /Im2 Do Q",                          # an indexed picture
+    b"q 1 0.5 0 rg 8 0 0 8 60 2 cm /Im3 Do Q",                   # a stencil in orange
+    b"q /G1 gs 0 0 1 rg 12 12 20 10 re f Q",                     # blue at half strength over the red
+    b"q 0 0 0 0 k 190 2 8 8 re f 0 1 0 0 k 190 2 4 4 re f Q",    # CMYK: white, then magenta
+    b"q 10 0 0 10 120 2 cm /Fm1 Do Q",                           # a form: a unit box of its own colour
+])
+draw = {
+    1: b"<< /Type /Catalog /Pages 2 0 R >>",
+    2: b"<< /Type /Pages /Kids [3 0 R 10 0 R 11 0 R] /Count 3 >>",
+    3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents [4 0 R] /Resources << /XObject << /Im1 5 0 R /Im2 6 0 R "
+       b"/Im3 7 0 R /Fm1 8 0 R >> /ExtGState << /G1 << /ca 0.5 >> >> >> >>",
+    4: stream(b"/Filter /FlateDecode", zlib.compress(words)),
+    5: stream(b"/Type /XObject /Subtype /Image /Width 2 /Height 2 /BitsPerComponent 8 /ColorSpace /DeviceRGB",
+              bytes([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0])),
+    6: stream(b"/Type /XObject /Subtype /Image /Width 2 /Height 1 /BitsPerComponent 4 /ColorSpace [/Indexed /DeviceRGB 2 <000000 800000 008000>]",
+              bytes([0x12])),
+    7: stream(b"/Type /XObject /Subtype /Image /Width 8 /Height 2 /ImageMask true", bytes([0xF0, 0x0F])),
+    8: stream(b"/Type /XObject /Subtype /Form /BBox [0 0 1 1] /Matrix [1 0 0 1 0 0]", b"0.25 0.5 0.75 rg 0 0 1 1 re f"),
+    # the same page turned a quarter, and one with a box of its own to show (a part of the page)
+    10: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Rotate 90 /Contents 4 0 R /Resources << >> >>",
+    11: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /CropBox [100 0 200 50] /Contents 4 0 R /Resources << >> >>",
+}
+write("draw.pdf", classic(draw, 1)[0])
 print(out)

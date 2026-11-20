@@ -570,5 +570,27 @@ has already (`loader/inflate.c`). PDFio was not tried; no code of another reader
   page tree three deep, the tables lost in both kinds of file, a file cut in its last object, locked, and no
   PDF; and 2500 copies with bytes changed at random, every object, page and stream of those that open gone
   through.
-- **Next**: the pages' drawing (paths, text, pictures; an anti-aliased rasteriser), fonts, then the program.
+- **The pages' drawing** (`apps/shared/pdfdraw.c`; the second step, without text yet): a page's content stream
+  run word by word into a canvas of pixels, at any scale and from any corner of the page (a part at a time,
+  for big zooms).
+  - **Paths**: lines, curves (cut into straight pieces by their length on the screen), boxes; filled by the
+    nonzero or the even-odd rule, with smoothed edges: each edge's exact share of every pixel it crosses is
+    added into sums a row of pixels wide, a band of 64 rows at a time, and the running sum along a row is how
+    much of each pixel is inside. A stroke is filled as its outline (a box a piece, round joins and caps where
+    the line is thick enough to show them, square caps; never thinner than a pixel).
+  - **State**: the matrix (`cm`), saved and restored (`q`, `Q`); colours as gray, RGB and CMYK; how much shows
+    (`gs` with `ca`, `CA`); line width, caps, joins; clipping to the box around the clip's path.
+  - **Pictures**: of 1 to 16 bits a sample, gray, RGB, CMYK, indexed (the table a string or a stream), ICC
+    spaces by their number of components; stencils in the fill colour; a picture's own soft mask; JPEGs by a
+    decoder the app gives (`pdf_draw_jpeg`); drawn through any matrix by asking the picture for each pixel
+    under it. Forms (`Do` of a stream of words) with their own matrix and resources, twelve deep.
+  - **Pages** by their CropBox or MediaBox, turned by Rotate.
+  - **Not yet**: text; dashes; shadings and patterns (a flat gray); clipping to shapes other than boxes;
+    pictures among the words (`BI`: passed over); blend modes.
+  - **Tests.** `pdfdraw_test` on the host (23 checks, under the sanitizers too): a page with a shape of every
+    kind at a known place (`pdf_cases.py`'s draw.pdf), its pixels looked at: box, line, triangle, a hole by
+    the even-odd rule, a clip, a matrix, a disc of curves, three kinds of picture, half strength, CMYK, a
+    form, a smoothed edge; the page turned a quarter and cropped; a part of it at three times the size; and
+    1500 copies with bytes changed at random, their pages drawn at odd scales and corners.
+- **Next**: fonts and text, then the program.
 

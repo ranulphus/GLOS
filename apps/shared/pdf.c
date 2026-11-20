@@ -405,6 +405,34 @@ static struct pdf_obj *parse(struct src *s)
     return o;
 }
 
+int pdf_word(struct pdf_words *w, struct pdf_obj **obj, char op[8])
+{
+    struct src s = { w->p, w->end, w->d, 0, 0 };
+    unsigned n = 0;
+    for (;;) {
+        blank(&s);
+        if (s.p >= s.end) {
+            w->p = s.p;
+            return 0;
+        }
+        if ((*obj = parse(&s)) != NULL) {
+            w->p = s.p;
+            return 1;
+        }
+        if (!delim(*s.p))
+            break;
+        s.p++;                                  /* (a bracket with no partner: passed over) */
+    }
+    for (; s.p < s.end && !white(*s.p) && !delim(*s.p); s.p++)
+        if (n < 7)
+            op[n++] = (char)*s.p;
+    op[n] = 0;
+    w->p = s.p;
+    return 2;
+}
+
+void pdf_free(struct pdf_obj *o) { unmake(o); }
+
 /* ---- the file's pieces */
 
 static unsigned char *fetch(struct pdf *d, unsigned long at, unsigned long n, unsigned long *got)
