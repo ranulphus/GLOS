@@ -4,6 +4,12 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Terminal: Find (2026-11-20)
+
+- **Edit's Find... (Ctrl+Shift+F)** looks for text in everything the tab has kept: each match is selected and
+  scrolled to. Ctrl+Shift+G finds the next, Ctrl+Shift+H the one before.
+- For apps: `gui_term_find` (the terminal widget).
+
 ## Files: searching and counting in the background (2026-11-20)
 
 - **Find Files** lists what it finds as it comes, and can look inside files: **Containing:** takes text, and

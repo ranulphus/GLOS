@@ -1,0 +1,39 @@
+# Find in the Terminal (apps/term; phase E, docs/v1/apps/term.md): text looked for in what the tab has kept and
+# shows, with the toolkit's Find dialog (Ctrl+Shift+F). Each one found is chosen in the grid; Find next goes on
+# down the lines and round to the top; a word that isn't there is said in the dialog; with the dialog away,
+# Ctrl+Shift+H finds the one before what is chosen, Ctrl+Shift+G the one after. Letters' case apart unless the
+# box says otherwise (Alpha is found for alpha).
+run TERM.EXE
+wait "Terminal"
+type c:\n
+type cd \\term\n
+type echo alpha one\n
+type echo beta two\n
+type echo Alpha three\n
+key ctrl+shift+f
+wait "Find"
+type alpha
+key enter
+shot first "Terminal"
+key enter
+key enter
+shot third "Terminal"
+key esc
+gone "Find"
+key ctrl+shift+h
+shot back "Terminal"
+key ctrl+shift+g
+key ctrl+shift+g
+shot on "Terminal"
+key ctrl+shift+f
+wait "Find"
+quick alt+w
+quick home shift+end
+type gamma
+key enter
+shot none "Find"
+key esc
+gone "Find"
+key alt+f4
+expect TERM find alpha found
+expect TERM find gamma none

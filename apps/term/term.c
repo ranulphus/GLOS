@@ -520,13 +520,50 @@ static void closing(struct gui_window *w)       /* (the window's close box, Alt+
     gui_quit(0);
 }
 
-enum { C_COPY = 1, C_PASTE, C_CLEAR, C_EXIT, C_ABOUT, C_NEW, C_CLOSE, C_CONNS };
+enum { C_COPY = 1, C_PASTE, C_CLEAR, C_EXIT, C_ABOUT, C_NEW, C_CLOSE, C_CONNS, C_FIND, C_FIND_NEXT, C_FIND_PREV };
+
+/* ---- Find (phase E): text looked for in what the tab shown has kept and shows, with the toolkit's own dialog
+   (which stays up beside the terminal: Find next and previous, Match case, Whole words, Regular expressions) and
+   the terminal widget's finding (gui_term_find): each one found is chosen (Ctrl+Shift+C copies it) and scrolled
+   to. Next goes down the lines, Previous up: from the bottom of what shows, the newest first. */
+static struct gui_find fr;
+
+static void find_step(int back)
+{
+    struct tab *t = tab_shown();
+    char say[200];
+    int r;
+    if (!t || !fr.what[0])
+        return;
+    r = gui_term_find(t->grid, fr.what, fr.flags, back);
+    snprintf(say, sizeof say, r == 1 ? "" : r < 0 ? GUI_T("That expression is wrong.") : GUI_T("\"%s\" isn't there."), fr.what);
+    if (fr.w)
+        gui_find_say(&fr, say);
+    else if (r != 1)
+        gui_message(win, GUI_T("Terminal"), say, GUI_MB_OK);
+    printf("TERM find %s %s\n", fr.what, r == 1 ? "found" : r < 0 ? "wrong" : "none");
+    fflush(stdout);
+}
+
+static void find_on(struct gui_find *f, int todo)
+{
+    (void)f;
+    if (todo == GUI_FIND_NEXT || todo == GUI_FIND_PREV)
+        find_step(todo == GUI_FIND_PREV);
+}
 
 static void command(struct gui_window *w, int id)
 {
     struct tab *t = tab_shown();
     (void)w;
     switch (id) {
+    case C_FIND:
+        fr.replace = 0;
+        fr.on_find = find_on;
+        gui_find(win, &fr);
+        return;
+    case C_FIND_NEXT: find_step(0); return;
+    case C_FIND_PREV: find_step(1); return;
     case C_NEW: tab_open(); return;
     case C_CLOSE: tab_close(t); return;
     case C_CONNS: conn_dialog(); return;
@@ -605,6 +642,10 @@ int main(int argc, char **argv)
     gui_menu_item(m, GUI_T("&Copy"), C_COPY, GUI_T("Ctrl+Shift+C"));
     gui_menu_item(m, GUI_T("&Paste"), C_PASTE, GUI_T("Shift+Ins"));
     gui_menu_item(m, GUI_T("C&lear"), C_CLEAR, NULL);
+    gui_menu_sep(m);
+    gui_menu_item(m, GUI_T("&Find..."), C_FIND, GUI_T("Ctrl+Shift+F"));
+    gui_menu_item(m, GUI_T("Find &Next"), C_FIND_NEXT, GUI_T("Ctrl+Shift+G"));
+    gui_menu_item(m, GUI_T("Find Pre&vious"), C_FIND_PREV, GUI_T("Ctrl+Shift+H"));
     m = gui_menu(bar, GUI_T("&Help"));
     gui_menu_item(m, GUI_T("&About Terminal"), C_ABOUT, NULL);
     strip = gui_tabs(gui_vbox(win->root, 0, 0));

@@ -61,9 +61,16 @@ Plan: `docs/v1/apps/term.md`. The first of its parts.
   in it is refused (it goes into a command line).
 - **Tests:** `term-conn` on the host and on Loop A (one made and saved, in the list; Connect's tab; the name is
   one no network has, `nohost.invalid`).
+- **Find** (2026-11-20; Edit's Find..., Ctrl+Shift+F): text looked for in what the tab has kept and shows,
+  with the toolkit's Find dialog (it stays up beside the terminal: Find next and previous, Match case, Whole
+  words, Regular expressions, its history). Each one found is chosen in the grid (Ctrl+Shift+C copies it) and
+  scrolled to; the search goes round the end. Without the dialog: Ctrl+Shift+G the next, Ctrl+Shift+H the one
+  before (F3 is the shell's own key). The finding is the terminal widget's (`gui_term_find`, by `gui_match`
+  as every app's), so the IDE's output and the Task Manager's log will have it too. `term-find` on the host
+  and on Loop A.
 - **Not done yet:** a connection's key and its terminal settings, the Start menu's jump list and `ssh NAME`; the
-  SFTP pane; the scroll-back's length and search; fonts and colour schemes; more of xterm (256 colours, the
-  mouse, bracketed paste); splits; tabs dragged along the strip.
+  SFTP pane; the scroll-back's length (a setting); every match marked at once; fonts and colour schemes; more of
+  xterm (256 colours, the mouse, bracketed paste); splits; tabs dragged along the strip.
 
 ## Notepad (2026-11-18): tabs
 

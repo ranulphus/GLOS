@@ -831,6 +831,11 @@ int gui_term_rows(struct gui_widget *w);
 int gui_term_cols(struct gui_widget *w);
 int gui_term_line(struct gui_widget *w, int line, char *out, int room);        /* its text (UTF-8), trailing blanks
                                            off: its length, or -1 */
+int gui_term_find(struct gui_widget *w, const char *what, unsigned flags, int back);   /* (GUI_FIND_ flags, by
+                                           gui_match) the next match after what is chosen (back: the one before it),
+                                           in the lines kept and the screen's, round the end once: chosen and
+                                           scrolled to, 1; 0 none; -1 a wrong expression. With nothing chosen, from
+                                           the top of what shows (back: from its bottom) */
 int gui_term_dump(struct gui_widget *w, char *out, int room);  /* the screen as text, a line a row (the tests') */
 /* (toolkit 2) A tour: steps one after another, each a bubble beside its place with a tab towards it, the place
    framed in the accent colour: a part of the shell (point: GLOS_POINT_) or a widget of the app's (at), or no place

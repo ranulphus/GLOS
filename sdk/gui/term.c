@@ -474,6 +474,80 @@ int gui_term_rows(struct gui_widget *w) { return TM(w)->vt->rows; }
 
 int gui_term_cols(struct gui_widget *w) { return TM(w)->vt->cols; }
 
+/* ---- finding (the Terminal's Find: the lines kept and the screen's) */
+
+/* A line's text for matching (UTF-8, trailing blanks off), and for each of its bytes the column it is of, the
+   text's end having the column after the last. */
+static int line_text(struct term *t, int line, char *out, unsigned short *col, int room)
+{
+    int n = 0, c, cols = line < t->kcount ? kept_at(t, line)->n : t->vt->cols, k, i;
+    for (c = 0; c < cols && n < room - 4; c++) {
+        const struct vt_cell *cell = cell_at(t, line, c);
+        k = utf8_of(cell ? cell->ch : ' ', out + n);
+        for (i = 0; i < k; i++)
+            col[n + i] = (unsigned short)c;
+        n += k;
+    }
+    while (n > 0 && out[n - 1] == ' ')
+        n--;
+    out[n] = 0;
+    col[n] = (unsigned short)(n ? col[n - 1] + 1 : 0);
+    return n;
+}
+
+int gui_term_find(struct gui_widget *w, const char *what, unsigned flags, int back)
+{
+    struct term *t = TM(w);
+    static char text[VT_COLS_MAX * 3 + 8];
+    static unsigned short col[VT_COLS_MAX * 3 + 8];
+    struct gui_found f;
+    int total = t->kcount + t->vt->rows, line, from_col, tried, n, b, r;
+    if (!what || !what[0] || total < 1)
+        return 0;
+    if (t->sel_on) {                            /* on from what is chosen (the last found): its end, or its start */
+        int al = t->sel_a_line, ac = t->sel_a_col, bl = t->sel_b_line, bc = t->sel_b_col;
+        if (al > bl || (al == bl && ac > bc))
+            n = al, al = bl, bl = n, n = ac, ac = bc, bc = n;
+        line = back ? al : bl, from_col = back ? ac : bc;
+    } else {                                    /* from the top of what shows; back: from its bottom */
+        line = back ? first_shown(t) + t->vt->rows - 1 : first_shown(t);
+        from_col = back ? VT_COLS_MAX : 0;
+    }
+    if (line < 0 || line >= total)
+        line = back ? total - 1 : 0, from_col = back ? VT_COLS_MAX : 0;
+    for (tried = 0; tried <= total; tried++) {  /* (round the end once, and the first line's other half last) */
+        n = line_text(t, line, text, col, (int)sizeof text);
+        for (b = 0; b < n && col[b] < from_col; b++)   /* the byte that column begins at */
+            ;
+        r = gui_match(what, back ? flags | GUI_FIND_BACK : flags & ~(unsigned)GUI_FIND_BACK, text, n, b, &f);
+        if (r < 0)
+            return -1;
+        if (r == 1 && f.end > f.start) {
+            int top;
+            t->sel_on = 1, t->dragging = 0;
+            t->sel_a_line = t->sel_b_line = line;
+            t->sel_a_col = col[f.start], t->sel_b_col = col[f.end - 1] + 1;
+            top = line - t->rows / 2;           /* shown: its line in the middle, if it is not on the screen now */
+            if (line < first_shown(t) || line >= first_shown(t) + t->rows) {
+                if (top > t->kcount)
+                    top = t->kcount;
+                if (top < 0)
+                    top = 0;
+                t->back = t->kcount - top;
+            }
+            gui_damage(w);
+            return 1;
+        }
+        line += back ? -1 : 1;
+        if (line < 0)
+            line = total - 1;
+        if (line >= total)
+            line = 0;
+        from_col = back ? VT_COLS_MAX : 0;
+    }
+    return 0;
+}
+
 int gui_term_line(struct gui_widget *w, int line, char *out, int room)
 {
     struct term *t = TM(w);
