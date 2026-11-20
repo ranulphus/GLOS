@@ -57,6 +57,15 @@ VARIANTS = {
 }
 # The same with every program in direct mode (IOPL 3, M4e): GLOS.CFG's [shell] options = /DIRECT.
 VARIANTS["glos-direct"] = VARIANTS["glos"] + ["--file", CACHE + "/glos/bin/direct/GLOS.CFG=/TEST/GLOS.CFG"]
+# The INT 21h census (docs/v1/native-dos.md, N0): CENSUS.EXE resident first, on plain DOS, counting the DOS
+# services each program asks for (tools/census/census.c; its lines in serial.log, tools/census/report.py). With
+# -lfn, DOSLFN under it, so that long-name calls reach it (DOSLFN started later, as Half-Life's runner does,
+# would answer them above it; that second DOSLFN finds the first and stays out).
+CENSUS = os.path.join(CACHE, "glos", "census")
+DOSLFN = os.path.join(CACHE, "glos", "doslfn")
+VARIANTS["census"] = ["--file", CENSUS + "/CENSUS.EXE=/HX/CENSUS.EXE", "--pre", "CENSUS"]
+VARIANTS["census-lfn"] = ["--file", DOSLFN + "/DOSLFN.COM=/HX/DOSLFN.COM", "--file",
+                          DOSLFN + "/CP437UNI.TBL=/HX/CP437UNI.TBL", "--pre", "DOSLFN"] + VARIANTS["census"]
 DEFAULT_VARIANTS = ["base", "hdpmi32", "hdpmi32i"]
 
 # name -> how to run it. "run": MGA-Glide's run.py with these arguments,
@@ -111,6 +120,15 @@ SUITES = {
 def pins():
     text = open(os.path.join(ROOT, "tools/setup/versions.mk")).read()
     return dict(re.findall(r"^(\w+)\s*:=\s*(\S+)", text, re.M))
+
+
+def prepare_census():
+    """This tree's CENSUS.EXE (make census) into the cache, which the dev container mounts."""
+    src = os.path.join(ROOT, "build/ow/dos/CENSUS.EXE")
+    if not os.path.exists(src):
+        sys.exit("no %s: make census first" % src)
+    os.makedirs(CENSUS, exist_ok=True)
+    shutil.copyfile(src, os.path.join(CENSUS, "CENSUS.EXE"))
 
 
 def prepare_hosts():
@@ -267,6 +285,8 @@ def main():
                 print("  %-26s %-9s %s" % (name, v, c))
         return 1 if bad else 0
     prepare_hosts()
+    if any(v.startswith("census") for v in a.variant or []):
+        prepare_census()
     for name, spec in all_jobs(a.suite or list(SUITES)):
         for v in a.variant or DEFAULT_VARIANTS:
             run_job(name, spec, v)

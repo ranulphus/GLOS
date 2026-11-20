@@ -84,7 +84,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: floppy loopa-floppy loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: census rbil floppy loopa-floppy loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM
 
 help:
@@ -501,6 +501,14 @@ $(eval $(call dos_test,FMTEST,fmtest))
 $(eval $(call dos_test,STUBTSR,stubtsr))
 $(eval $(call dos_test,UMBRD,umbrd))
 $(eval $(call dos_test,JOYTEST,joytest))
+# CENSUS.EXE: the INT 21h census's resident counter (tools/census/census.c; docs/v1/native-dos.md). 8086 code
+# (-0) so that its handlers touch no 32-bit register; no stack checks (-s): they run on their callers' stacks.
+build/ow/dos/CENSUS.EXE: tools/census/census.c
+	@mkdir -p build/ow/dos/obj
+	$(Q)echo "  WCC16   $<"
+	$(Q)$(WCC16) -bt=dos -ms -0 -os -s -zq -we -fo=build/ow/dos/obj/census.obj $<
+	$(Q)$(WLINK) system dos option quiet option stack=2k name $@ file build/ow/dos/obj/census.obj
+census: build/ow/dos/CENSUS.EXE
 # DPMIMINI.COM: the smallest DPMI client, in assembly (M4a).
 build/ow/dos/DPMIMINI.COM: tests/dos/dpmimini.asm
 	@mkdir -p build/ow/dos/obj
@@ -1353,6 +1361,19 @@ $(GLOS_BORLAND)/.tpx: $(addprefix $(BORLAND_DIR)/TP7/,$(TPX_FILES))
 	$(Q)cp $^ $(GLOS_BORLAND)/
 	$(Q)touch $@
 m4d-inputs: $(GLOS_HX)/.hdpmi16 build/ow/dos/DPMI16.EXE build/dj/DPMICONF.EXE $(GLOS_BORLAND)/.tpx
+
+# Ralf Brown's Interrupt List (tools/setup/versions.mk) unpacked in the cache, and native GLOS's DOS checklist
+# made from it with the census's results (docs/v1/native-dos.md, N0).
+GLOS_RBIL := $(MGA_CACHE)/glos/rbil
+$(GLOS_RBIL)/.rbil: tools/setup/versions.mk
+	@mkdir -p $(GLOS_RBIL)
+	$(Q)tools/setup/fetch.sh $(RBIL_A_URL) $(RBIL_A_SHA256) $(MGA_CACHE)/dl/inter61a.zip
+	$(Q)tools/setup/fetch.sh $(RBIL_B_URL) $(RBIL_B_SHA256) $(MGA_CACHE)/dl/inter61b.zip
+	$(Q)tools/setup/fetch.sh $(RBIL_C_URL) $(RBIL_C_SHA256) $(MGA_CACHE)/dl/inter61c.zip
+	$(Q)for z in a b c; do unzip -o -q $(MGA_CACHE)/dl/inter61$$z.zip -d $(GLOS_RBIL); done
+	@touch $@
+rbil: $(GLOS_RBIL)/.rbil
+	$(Q)python3 tools/census/rbil.py --rbil $(GLOS_RBIL)
 
 # GLOS for other repos' Loop A jobs (M4c): in the cache the dev container
 # mounts, for LOOPA_EXTRA_ARGS="--boot-cfg glosshell --file $(GLOS_CACHE)/GLOS.EXE=/TEST/GLOS.EXE ..."

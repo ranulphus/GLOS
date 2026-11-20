@@ -179,7 +179,9 @@ two command sets that don't match). Before phase C, because the Terminal is one 
 - **Done 2026-11-16** (S0 to S4, all on main). Owed on real PCs: the setup floppy on the 486, and the batch
   language and GLOS's COMMAND.COM beside MS-DOS 7.1's on bench-g400 and the P3 (`docs/v1/shell.md`, the known
   differences).
-- **Later:** text-mode programs mirrored into an SSH login; GLOS's own DOS services, and then no DOS underneath.
+- **Later:** text-mode programs mirrored into an SSH login; GLOS's own DOS services, and then no DOS underneath
+  (designed in [v1/native-dos.md](v1/native-dos.md), 2026-11-20, for the owner's review: native only, a boot
+  manager for MS-DOS and Windows 9x on the same disk, INT 21h in the 32-bit kernel; N0's census built).
 
 ### C. Toolkit 2 (`sdk/gui`)
 

@@ -57,3 +57,13 @@ FARMFRESH_URL      := https://github.com/gammasoft/fatcow/archive/e6ee23359517a3
 FARMFRESH_SHA256   := 45045ed8e51d6e25ddaa9b7354d107a498213abcca8a5b70307c9f238d78693d
 FONTAWESOME_URL    := https://github.com/FortAwesome/Font-Awesome/releases/download/6.7.2/fontawesome-free-6.7.2-web.zip
 FONTAWESOME_SHA256 := ecdaaa6d347cd7da82c66054770995e97f3d066a57e8d58ac9c517f0f77561fb
+
+# Ralf Brown's Interrupt List, release 61 (2000; "permission is granted to use and redistribute the files ... in
+# any way", credit kept): parts A-C hold INT 00h-2Fh. Native GLOS's DOS checklist is made from it
+# (tools/census/rbil.py, docs/v1/native-dos-rbil.md); none of it is in GLOS.
+RBIL_A_URL    := https://www.cs.cmu.edu/~ralf/interrupt-list/inter61a.zip
+RBIL_A_SHA256 := 8077536135c0290ff18a4a44cf63c56339f6127f053ee673f9895837248cc947
+RBIL_B_URL    := https://www.cs.cmu.edu/~ralf/interrupt-list/inter61b.zip
+RBIL_B_SHA256 := 713e9e218eda694ed2bac8d5f02378f935f3e3132b79c92c44c14101e76b88a7
+RBIL_C_URL    := https://www.cs.cmu.edu/~ralf/interrupt-list/inter61c.zip
+RBIL_C_SHA256 := d7a059a1700c765adb9d4bf9dbe6289621aca6ff09c0583192764ee47e2b690a
