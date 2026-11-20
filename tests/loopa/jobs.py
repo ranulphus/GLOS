@@ -4885,6 +4885,10 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     tune = bytes([0, 0xC0, 73, 0, 0x90, 66, 127, 0x83, 0x60, 0x80, 66, 0, 0x60, 0xFF, 0x2F, 0])
     open(os.path.join(snd, "PTUNE.MID"), "wb").write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, 96) + b"MTrk"
                                                      + struct.pack(">I", len(tune)) + tune)
+    # ... and one for MIDI Studio to play: the flute's D (294 Hz), as long
+    tune = tune.replace(bytes([0x90, 66]), bytes([0x90, 62])).replace(bytes([0x80, 66]), bytes([0x80, 62]))
+    open(os.path.join(snd, "STUNE.MID"), "wb").write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, 96) + b"MTrk"
+                                                     + struct.pack(">I", len(tune)) + tune)
     off_cfg = [] if virtual else ["--file", batfile("audio-%s/GLOS.CFG" % tag, [
         "; jobs.py audio, the virtual Sound Blaster off", "[time]", "sntp = off", "[sound]", "virtual = off"])
         + "=/TEST/GLOS.CFG"]
@@ -4896,6 +4900,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         "--file", os.path.join(snd, "PTONE.WAV") + "=/TEST/PTONE.WAV",
         "--file", os.path.join(snd, "PSONG.MOD") + "=/TEST/PSONG.MOD",
         "--file", os.path.join(snd, "PTUNE.MID") + "=/TEST/PTUNE.MID",
+        "--file", os.path.join(snd, "STUNE.MID") + "=/TEST/STUNE.MID", "--file", "build/apps/STUDIO.EXE=/TEST/STUDIO.EXE",
         "--file", "tests/host/sndfix/PS3M.S3M=/TEST/PS3M.S3M", "--file", "tests/host/sndfix/PXM.XM=/TEST/PXM.XM",
         "--file", "tests/host/sndfix/PMP3.MP3=/TEST/PMP3.MP3", "--file", "tests/host/sndfix/POGG.OGG=/TEST/POGG.OGG",
         "--file", "sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT", "--file", "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT",
@@ -5059,6 +5064,28 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
             and "PLAYER slow" not in o_p
         if not checks["player-said"]:
             print("    %s player: rc=%d %r" % (tag, rc_p, o_p[-400:]))
+        # MIDI Studio (phase F; apps/studio), the real one: a MIDI file of its command line opened as a song (a
+        # track, a note), played by F5 through the card's FM chip to its end; its tone is in the recording.
+        stu = start("C:\\TEST\\STUDIO.EXE C:\\TEST\\STUNE.MID")
+        stu.said = bytearray()
+        heard = threading.Thread(target=GuiDriver._listen, args=(stu,), daemon=True)
+        heard.start()
+        checks["studio-window"] = bool(g.until(lambda d: g.window("MIDI Studio", d) is not None, 120))
+        keys("f5")
+        t0 = time.time()
+        while time.time() - t0 < 120 and b"STUDIO ended" not in stu.said:
+            time.sleep(1)
+        keys("alt+f4")
+        try:
+            rc_s = stu.wait(60)
+        except subprocess.TimeoutExpired:
+            rc_s = -1
+        heard.join(10)
+        o_s = bytes(stu.said).decode("latin-1").replace("\r", "")
+        checks["studio-said"] = rc_s == 0 and all(l in o_s for l in (
+            "STUDIO opened STUNE.MID tracks=1 notes=1", "STUDIO playing 5", "STUDIO ended", "STUDIO end"))
+        if not checks["studio-said"]:
+            print("    %s studio: rc=%d %r" % (tag, rc_s, o_s[-400:]))
         if crystal:                             # the FM synthesiser in a session, at the AdLib's ports and the SB Pro's
             agent.ssh("C:\\TEST\\FMTEST.EXE 388 330 400")          # (86Box: the first notes after power-on are faint)
             rc1, o1, _ = agent.ssh("C:\\TEST\\FMTEST.EXE 388 330 1500")
@@ -5076,7 +5103,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     checks["recorded"] = os.path.exists(wav) and subprocess.run(
         [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440", "--tone", "1000",
          "--tone", "784", "--tone", "523", "--tone", "1175", "--tone", "259",       # (the last two: the Player's;
-         "--tone", "1319.8", "--tone", "1862.6", "--tone", "370"]                   # its S3M's, its XM's, its MIDI file's)
+         "--tone", "1319.8", "--tone", "1862.6", "--tone", "370",                   # its S3M's, its XM's, its MIDI file's)
+         "--tone", "293.7"]                                                         # (MIDI Studio's)
         + (["--tone", "1568", "--tone", "2093"] if profile == "bf6" else [])      # (... and its MP3's and its Ogg's)
         + (["--tone", "330", "--tone", "659"] if crystal else []),
         capture_output=True).returncode == 0
@@ -10671,7 +10699,7 @@ def console_case(profile, vcard, card, bits):
 
 # The native apps (M9 steps D-G): their scripts (tests/gui, all but GUITEST's) on the desktop, the apps beside
 # GLOS.EXE.
-NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER", "RECORDER", "PLAYER"]
+NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER", "RECORDER", "PLAYER", "STUDIO"]
 NATIVE_CASES = [("bf6", "vbe", "ne2kpci", 8), ("bf6", "g200", "ne2kpci", 16), ("bf6", "g400", "ne2kpci", 32),
                 ("486dx2", "vbe", "ne2k", 8)]
 

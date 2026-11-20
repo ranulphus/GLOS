@@ -174,6 +174,8 @@ host-test-run:
 	  && build/host/xm_test `python3 tests/host/xm_cases.py build/host/xm`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/smf_test tests/host/smf_test.c apps/shared/smf.c \
 	  && build/host/smf_test `python3 tests/host/smf_cases.py build/host/smf`
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/song_test tests/host/song_test.c apps/shared/song.c \
+	  apps/shared/smf.c && build/host/song_test build/host/smf
 	@mkdir -p build/host/packed && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/packed_test \
 	  tests/host/packed_test.c $(SOURCE_SRCS) -lm && build/host/packed_test tests/host/sndfix build/host/packed
 	@mkdir -p build/host/sessions && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation \
@@ -211,7 +213,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
-APPS := notepad calc images term files monitor control paint mixer recorder player
+APPS := notepad calc images term files monitor control paint mixer recorder player studio
 # (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
 # shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
@@ -246,8 +248,11 @@ APP_LIBS_recorder := apps/shared/wave.c
 # Sound files as they are played (the Player, phase F): WAV piece by piece, MOD modules.
 SOURCE_SRCS := apps/shared/source.c apps/shared/wave.c apps/shared/mod.c apps/shared/s3m.c apps/shared/xm.c \
                apps/shared/packed.c apps/shared/packedv.c
-APP_HOST_LIBS_player := $(SOURCE_SRCS) apps/shared/smf.c
-APP_LIBS_player := $(SOURCE_SRCS) apps/shared/smf.c
+APP_HOST_LIBS_player := $(SOURCE_SRCS) apps/shared/smf.c apps/shared/midiplay.c
+APP_LIBS_player := $(SOURCE_SRCS) apps/shared/smf.c apps/shared/midiplay.c
+# Songs as MIDI Studio holds them (phase F), read from and written as MIDI files, and played as the Player plays them.
+APP_HOST_LIBS_studio := apps/shared/song.c apps/shared/smf.c apps/shared/midiplay.c
+APP_LIBS_studio := apps/shared/song.c apps/shared/smf.c apps/shared/midiplay.c
 build/host/libsshc32.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h
 	@mkdir -p build/host/sshc32
 	$(Q)echo "  CC      $@"
@@ -601,7 +606,7 @@ loopa-gpu: all dos-tests build/dj/GPUTEST.EXE check-deps
 # The virtual game port (docs/gamepad.md J1): glos joy's stick read by JOYTEST three ways on bf6 and the 486.
 loopa-joy: all dos-tests build/dj/JOYTEST.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py joy -j $(JOBS)
-loopa-audio: all dos-tests build/dj/AUDTEST.EXE build/apps/MIXER.EXE build/apps/RECORDER.EXE build/apps/PLAYER.EXE \
+loopa-audio: all dos-tests build/dj/AUDTEST.EXE build/apps/MIXER.EXE build/apps/RECORDER.EXE build/apps/PLAYER.EXE build/apps/STUDIO.EXE \
              check-deps
 	$(Q)python3 tests/loopa/jobs.py audio -j $(JOBS)
 # Windowed DOS-GL (M8 step D): DOS-GL's conformance EXEs (from DOSGL_DIR's build) full-screen on plain DOS and
@@ -1040,6 +1045,9 @@ APP_AFTER_notepad := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps
 APP_DEPS_player := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_player := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/PLAYER.map -Wl,--cref
 APP_AFTER_player := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/PLAYER.map
+APP_DEPS_studio := build/sdk/gloswrap.opt tools/wrapcheck.py
+APP_LINK_studio := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/STUDIO.map -Wl,--cref
+APP_AFTER_studio := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/STUDIO.map
 APP_DEPS_images := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_images := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/IMAGES.map -Wl,--cref
 APP_AFTER_images := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/IMAGES.map

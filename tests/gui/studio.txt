@@ -1,0 +1,70 @@
+# MIDI Studio (apps/studio; phase F, docs/v1/apps/midi-studio.md) with no MIDI device and no clock of its own
+# (STUDIO -demo: F9 is a second heard): notes put on the roll by clicks (on the grid, as long as the last),
+# moved and stretched by drags, one taken out by the right button (a click that only chooses a note is no step
+# of the history), the history back and forth; a second track
+# with its instrument, a note on it, muted; the tempo; played to its end (the muted track is not sent);
+# saved, a new song, the saved one opened again; a file of songs side by side refused.
+run STUDIO.EXE -demo
+wait "MIDI Studio"
+shot empty "MIDI Studio"
+click "MIDI Studio" 70 312
+said STUDIO note added key=60 at=480 len=480
+click "MIDI Studio" 130 296
+said STUDIO note added key=62 at=960 len=480
+drag "MIDI Studio" 80 312 200 328
+said STUDIO notes moved
+drag "MIDI Studio" 238 328 298 328
+said STUDIO notes stretched
+click "MIDI Studio" 140 296 right
+said STUDIO note removed 1
+click "MIDI Studio" 200 328
+key ctrl+z
+said STUDIO undone 2
+key ctrl+y
+said STUDIO redone 1
+key ctrl+z
+said STUDIO undone 2
+key ctrl+y
+said STUDIO redone 1
+key ctrl+z
+said STUDIO undone 2
+shot notes "MIDI Studio"
+key ctrl+t
+said STUDIO track 2 channel=2
+key ctrl+i
+wait "Instrument"
+key end
+key enter
+said STUDIO instrument 2 Gunshot
+click "MIDI Studio" 70 280
+said STUDIO note added key=64 at=480 len=960
+key ctrl+m
+said STUDIO mute 2 1
+shot two "MIDI Studio"
+key f5
+said STUDIO playing 7
+key f9
+key f9
+key f9
+key f9
+said STUDIO ended
+key ctrl+s
+wait "Save Song"
+type C:\\OUT\\SONG\n
+said STUDIO saved SONG.MID 116
+key ctrl+n
+said STUDIO new
+key ctrl+o
+wait "Open Song"
+type C:\\OUT\\SONG.MID\n
+said STUDIO opened SONG.MID tracks=2 notes=3
+key ctrl+o
+wait "Open Song"
+type C:\\SND\\SONGS.MID\n
+said STUDIO refused SONGS.MID -4
+pause 500
+key enter
+shot opened "MIDI Studio"
+key alt+f4
+gone "MIDI Studio"
+expect STUDIO end

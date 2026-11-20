@@ -12,24 +12,22 @@
  * after the new place has been asked for. A module is played at the mixer's own rate (it costs the least there:
  * on a 486 the mixer runs at 22050 Hz).
  *
- * A MIDI file (apps/shared/smf.c) is no samples: its messages go to a MIDI port (AUDIO's: the card's FM chip,
- * played by GLOS's own driver, or else an MPU-401), each with its time on GLOS's clock, and GLOS plays each when
- * its time comes. The thread sends those of the next 400 ms at each look. To the window it is a file of 1000
- * "frames" a second. A pause drops what waits and ends the notes; going on, or a seek, first tells the port what
- * the file had said up to there (each channel's instrument, controllers, bend and bend range) and then sends on
- * from there: no note from before the place is struck late. The Player's volume is the force of the notes. */
+ * A MIDI file (apps/shared/smf.c) is no samples: its messages go to a MIDI port, each with its time on GLOS's
+ * clock (apps/shared/midiplay.c, which MIDI Studio plays by too); the thread sends those of the next 400 ms at
+ * each look. To the window it is a file of 1000 "frames" a second. The Player's volume is the force of the
+ * notes. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <glos/glos.h>
 
+#include "../shared/midiplay.h"
 #include "../shared/smf.h"
 #include "engine.h"
 
 #define FRAMES 2048u
 #define MIDI_MAX (8ul << 20)            /* a MIDI file at most */
-#define MIDI_AHEAD 400u                 /* its messages are sent so long before their times: ms */
 #define MIDI_TAIL 800ul                 /* ... and its last notes given so long to die away */
 
 static struct {
@@ -45,10 +43,7 @@ static struct {
     unsigned id;
     unsigned long demo_at;
     struct smf *mid;                    /* a MIDI file (no src then, and no stream) */
-    glos_handle port;                   /* ... its port, while it plays or is paused */
-    unsigned long m_next;               /* the next of its messages to send */
-    unsigned long m_at;                 /* where it is while it does not play: ms */
-    unsigned m_base;                    /* while it plays: GLOS's clock at what would have been its start */
+    struct midiplay mp;                 /* ... and its playing (apps/shared/midiplay.c) */
     short buf[FRAMES * 2];
 } E = { .volume = 256 };
 
@@ -117,122 +112,6 @@ static void fill(void)                  /* (the lock held) the ring filled from 
     }
 }
 
-/* ---- a MIDI file (the lock held, all of it) */
-
-static void midi_close(void)
-{
-    if (E.port) {
-        glos_midi_flush(E.port);
-        glos_close(E.port);
-    }
-    E.port = 0;
-}
-
-/* The port told what the file has said before message `upto`: the channels' instruments, controllers, bends and
-   bend ranges as they stand there (what was never said: as General MIDI begins). */
-static void midi_chase(unsigned long upto)
-{
-    static unsigned char cc[16][120], prog[16], range[16];
-    static unsigned short bend[16];
-    static struct glos_midi_msg m[GLOS_MIDI_QUEUE];
-    static const unsigned char first[][2] = { { 1, 0 }, { 7, 100 }, { 10, 64 }, { 11, 127 }, { 64, 0 } };
-    const struct smf_event *e = smf_events(E.mid);
-    unsigned long i;
-    unsigned ch, k, n = 0;
-    memset(cc, 0xFF, sizeof cc);
-    memset(prog, 0, sizeof prog);
-    memset(range, 0xFF, sizeof range);
-    for (ch = 0; ch < 16; ch++) {
-        bend[ch] = 0x2000;
-        for (k = 0; k < sizeof first / sizeof first[0]; k++)
-            cc[ch][first[k][0]] = first[k][1];
-    }
-    for (i = 0; i < upto; i++) {
-        ch = e[i].status & 15;
-        switch (e[i].status & 0xF0) {
-        case 0xB0:
-            if (e[i].d1 == 6 && cc[ch][101] == 0 && cc[ch][100] == 0)   /* (data for parameter 0: the bend's range) */
-                range[ch] = e[i].d2;
-            else if (e[i].d1 < 120)
-                cc[ch][e[i].d1] = e[i].d2;
-            break;
-        case 0xC0:
-            prog[ch] = e[i].d1;
-            break;
-        case 0xE0:
-            bend[ch] = (unsigned short)(e[i].d1 | e[i].d2 << 7);
-            break;
-        }
-    }
-#define PUT(s, a, b) (n < GLOS_MIDI_QUEUE ? (m[n].time = 0, m[n].status = (unsigned char)(s), m[n].data1 = (unsigned char)(a), \
-                                             m[n].data2 = (unsigned char)(b), m[n].pad = 0, n++) : 0)
-    for (ch = 0; ch < 16; ch++) {
-        PUT(0xB0 | ch, 121, 0);                 /* every controller as it begins */
-        for (k = 0; k < 120; k++)               /* (6, 38 and 96 to 101 are no settings by themselves) */
-            if (cc[ch][k] != 0xFF && k != 6 && k != 38 && !(k >= 96 && k <= 101))
-                PUT(0xB0 | ch, k, cc[ch][k]);
-        if (range[ch] != 0xFF) {
-            PUT(0xB0 | ch, 101, 0), PUT(0xB0 | ch, 100, 0), PUT(0xB0 | ch, 6, range[ch]);
-            PUT(0xB0 | ch, 101, 127), PUT(0xB0 | ch, 100, 127);
-        }
-        PUT(0xC0 | ch, prog[ch], 0);
-        PUT(0xE0 | ch, bend[ch] & 0x7F, bend[ch] >> 7);
-    }
-#undef PUT
-    glos_midi_send(E.port, m, n, NULL, NULL);
-}
-
-static void midi_go(void)               /* on from m_at: the port told how things stand there */
-{
-    const struct smf_event *e = smf_events(E.mid);
-    unsigned long lo = 0, hi = smf_count(E.mid);
-    while (lo < hi) {                           /* the first message at or after m_at */
-        unsigned long mid = lo + (hi - lo) / 2;
-        if (e[mid].ms < E.m_at)
-            lo = mid + 1;
-        else
-            hi = mid;
-    }
-    E.m_next = lo;
-    glos_midi_flush(E.port);
-    midi_chase(lo);
-    E.m_base = glos_ticks() - (unsigned)E.m_at;
-}
-
-static void midi_feed(void)             /* the messages of the next while sent; the end seen */
-{
-    const struct smf_event *e = smf_events(E.mid);
-    unsigned long count = smf_count(E.mid);
-    unsigned at = glos_ticks() - E.m_base;
-    for (;;) {
-        struct glos_midi_msg m[64];
-        unsigned n = 0, taken = 0;
-        for (; n < 64 && E.m_next + n < count && e[E.m_next + n].ms < at + MIDI_AHEAD; n++) {
-            const struct smf_event *v = &e[E.m_next + n];
-            unsigned force = v->d2;
-            if ((v->status & 0xF0) == 0x90) {   /* (the Player's volume) */
-                force = force * (unsigned)E.volume / 256;
-                force = force ? force : 1;
-            }
-            m[n].time = E.m_base + (unsigned)v->ms;
-            m[n].time += !m[n].time;            /* (0 would be "now") */
-            m[n].status = v->status, m[n].data1 = v->d1, m[n].data2 = (unsigned char)force, m[n].pad = 0;
-        }
-        if (!n)
-            break;
-        glos_midi_send(E.port, m, n, &taken, NULL);
-        E.m_next += taken;
-        if (taken < n)                          /* (the port's queue is full, or a session has the machine: the
-                                                   rest at the next look) */
-            break;
-    }
-    if (E.m_next >= count && at >= E.info.frames) {     /* played out: at its start again, and the window told */
-        midi_close();
-        E.m_at = 0, E.m_next = 0;
-        E.state = ENG_STOPPED, E.ended = 1;
-    }
-}
-
 /* The file at `path` as a MIDI file (no lock is needed): SOURCE_OK, the file read and what it says of itself; or
    a SOURCE_E_. */
 static int midi_read(const char *path, struct smf **mid, struct source_info *info)
@@ -288,8 +167,8 @@ static void feeder(void *arg)
         }
         if (E.state == ENG_PLAYING && E.out && E.src)
             fill();
-        else if (E.state == ENG_PLAYING && E.port && E.mid)
-            midi_feed();
+        else if (E.state == ENG_PLAYING && E.mid && mp_feed(&E.mp))
+            E.state = ENG_STOPPED, E.ended = 1; /* played out: at its start again, and the window told */
         give();
         glos_sleep(15);
     }
@@ -321,12 +200,12 @@ void eng_close(void)
 {
     take();
     stream_close();
-    midi_close();
+    mp_stop(&E.mp);
     if (E.src)
         source_close(E.src);
     smf_free(E.mid);
     E.src = NULL, E.mid = NULL;
-    E.state = ENG_STOPPED, E.eof = 0, E.demo_at = 0, E.m_at = 0, E.m_next = 0;
+    E.state = ENG_STOPPED, E.eof = 0, E.demo_at = 0;
     give();
 }
 
@@ -344,7 +223,9 @@ int eng_open(const char *path, struct source_info *info)
             return err;
         take();
         E.mid = m, E.info = in;
-        E.m_at = 0, E.m_next = 0, E.ended = 0;
+        mp_init(&E.mp, m, in.frames);
+        E.mp.volume = E.volume;
+        E.ended = 0;
         give();
         if (info)
             *info = in;
@@ -371,16 +252,11 @@ int eng_play(void)
     } else if (E.demo) {
         E.state = ENG_PLAYING;
     } else if (E.mid) {
-        if (E.state != ENG_PLAYING) {           /* (the FM chip where there is one, else an MPU-401) */
-            if (!E.port && !(E.port = glos_midi_out(GLOS_MIDI_PORT_FM)))
-                E.port = glos_midi_out(GLOS_MIDI_PORT_MPU);
-            if (E.port) {
-                midi_go();
+        if (E.state != ENG_PLAYING) {
+            if (mp_play(&E.mp) == 0)
                 E.state = ENG_PLAYING;
-                midi_feed();
-            } else {
+            else
                 r = -2;
-            }
         }
     } else if (E.state == ENG_PAUSED && E.out) {
         glos_set(E.out, GLOS_PROP_STREAM_PAUSED, 0);
@@ -404,17 +280,14 @@ void eng_pause(void)
     if (E.state == ENG_PLAYING) {
         if (E.out)
             glos_set(E.out, GLOS_PROP_STREAM_PAUSED, 1);
-        if (E.port) {                           /* what waits dropped, the notes ended */
-            E.m_at = glos_ticks() - E.m_base;
-            E.m_at = E.m_at > E.info.frames ? E.info.frames : E.m_at;
-            glos_midi_flush(E.port);
-        }
+        if (E.mid)                              /* what waits dropped, the notes ended */
+            mp_pause(&E.mp);
         E.state = ENG_PAUSED;
     } else if (E.state == ENG_PAUSED) {
         if (E.out)
             glos_set(E.out, GLOS_PROP_STREAM_PAUSED, 0);
-        if (E.port)
-            midi_go();
+        if (E.mid)
+            mp_play(&E.mp);
         E.state = ENG_PLAYING;
     }
     give();
@@ -424,10 +297,10 @@ void eng_stop(void)
 {
     take();
     stream_close();
-    midi_close();
+    mp_stop(&E.mp);
     if (E.src)
         source_seek(E.src, 0);
-    E.state = ENG_STOPPED, E.eof = 0, E.demo_at = 0, E.m_at = 0, E.m_next = 0;
+    E.state = ENG_STOPPED, E.eof = 0, E.demo_at = 0;
     give();
 }
 
@@ -435,9 +308,8 @@ void eng_seek(unsigned long frame)
 {
     take();
     if (E.mid) {
-        E.m_at = E.demo_at = frame > E.info.frames ? E.info.frames : frame;
-        if (E.port && E.state == ENG_PLAYING)
-            midi_go();
+        E.demo_at = frame > E.info.frames ? E.info.frames : frame;
+        mp_seek(&E.mp, frame);
     } else if (E.src) {
         source_seek(E.src, frame);
         E.eof = 0;
@@ -461,6 +333,7 @@ void eng_volume(int v)
 {
     take();
     E.volume = v < 0 ? 0 : v > 256 ? 256 : v;
+    E.mp.volume = E.volume;
     if (E.out)
         glos_set(E.out, GLOS_PROP_STREAM_VOLUME, E.volume);
     give();
@@ -479,8 +352,7 @@ void eng_now(struct eng_now *n)
         if (E.demo) {
             n->at = E.demo_at;
         } else if (E.mid) {
-            n->at = E.state == ENG_PLAYING ? glos_ticks() - E.m_base : E.m_at;
-            n->at = n->at > n->frames ? n->frames : n->at;
+            n->at = mp_where(&E.mp);
         } else {
             unsigned long at = source_tell(E.src);
             int queued = 0;

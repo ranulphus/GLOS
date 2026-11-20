@@ -17,6 +17,7 @@
 
 #define MAX_TRACKS 256
 #define MAX_EVENTS 4000000ul
+#define MAX_TEMPOS 4096u
 
 struct track {
     const unsigned char *p, *end;
@@ -26,8 +27,11 @@ struct track {
 
 struct smf {
     struct smf_event *ev;
-    unsigned long count, room, length;
-    unsigned tracks, channels;
+    unsigned long count, room, length, ticks;
+    unsigned tracks, channels, division, beats, unit;
+    struct smf_tempo *tempo;
+    unsigned ntempo, tempo_room;
+    char (*names)[32];                  /* each track's */
     char title[64];
 };
 
@@ -64,7 +68,19 @@ static void ahead(struct track *t)      /* the ticks to its next event read; don
         t->tick += d;
 }
 
-static int add(struct smf *m, unsigned long ms, unsigned status, unsigned d1, unsigned d2, unsigned track)
+static void text(char *to, unsigned room, const unsigned char *p, unsigned long len)   /* a name: its plain letters */
+{
+    unsigned long k;
+    unsigned c = 0;
+    for (k = 0; k < len && c < room - 1; k++)
+        if (p[k] >= 32 && p[k] < 127)
+            to[c++] = (char)p[k];
+    while (c && to[c - 1] == ' ')
+        c--;
+    to[c] = 0;
+}
+
+static int add(struct smf *m, unsigned long ms, unsigned long tick, unsigned status, unsigned d1, unsigned d2, unsigned track)
 {
     struct smf_event *e;
     if (m->count == m->room) {
@@ -74,7 +90,7 @@ static int add(struct smf *m, unsigned long ms, unsigned status, unsigned d1, un
         m->ev = e, m->room = room;
     }
     e = &m->ev[m->count++];
-    e->ms = ms, e->status = (unsigned char)status, e->d1 = (unsigned char)d1, e->d2 = (unsigned char)d2;
+    e->ms = ms, e->tick = tick, e->status = (unsigned char)status, e->d1 = (unsigned char)d1, e->d2 = (unsigned char)d2;
     e->track = (unsigned char)track;
     return 0;
 }
@@ -82,7 +98,7 @@ static int add(struct smf *m, unsigned long ms, unsigned status, unsigned d1, un
 struct smf *smf_open(const unsigned char *data, unsigned long size, int *err)
 {
     struct track *tr;
-    struct smf *m;
+    struct smf *m = NULL;
     unsigned long hlen, at, last = 0, tempo = 500000ul, div;
     unsigned long long time = 0;                /* microseconds times div */
     unsigned format, want, n = 0, i, notes = 0;
@@ -139,11 +155,13 @@ struct smf *smf_open(const unsigned char *data, unsigned long size, int *err)
         at += 8 + len;
     }
     *err = n ? SMF_E_MEMORY : SMF_E_DAMAGED;
-    if (!n || !(m = calloc(1, sizeof *m))) {
+    if (!n || !(m = calloc(1, sizeof *m)) || !(m->names = calloc(n, sizeof *m->names))) {
+        free(m);
         free(tr);
         return NULL;
     }
-    m->tracks = n;
+    m->tracks = n, m->beats = 4, m->unit = 4;
+    m->division = data[12] & 0x80 ? 0 : (unsigned)div;
     for (;;) {
         struct track *t = NULL;
         unsigned b, status, which;
@@ -160,7 +178,7 @@ struct smf *smf_open(const unsigned char *data, unsigned long size, int *err)
             unsigned long long q = time / ((unsigned long long)div * 1000);
             ms = q > 0x7FFFFFFFul ? 0x7FFFFFFFul : (unsigned long)q;
         }
-        m->length = ms;
+        m->length = ms, m->ticks = t->tick;
         b = *t->p;
         if (b == 0xFF) {                        /* for the reader */
             unsigned kind;
@@ -177,14 +195,21 @@ struct smf *smf_open(const unsigned char *data, unsigned long size, int *err)
                 tempo = (unsigned long)t->p[0] << 16 | (unsigned long)t->p[1] << 8 | t->p[2];
                 if (!tempo)
                     tempo = 500000ul;
-            } else if (kind == 0x03 && !which && !m->title[0]) {
-                unsigned k, c = 0;
-                for (k = 0; k < len && c < sizeof m->title - 1; k++)
-                    if (t->p[k] >= 32 && t->p[k] < 127)
-                        m->title[c++] = (char)t->p[k];
-                while (c && m->title[c - 1] == ' ')
-                    c--;
-                m->title[c] = 0;
+                if (m->ntempo == m->tempo_room && m->tempo_room < MAX_TEMPOS) { /* (kept for an editor, as room allows) */
+                    unsigned room = m->tempo_room ? m->tempo_room * 2 : 16;
+                    struct smf_tempo *more = realloc(m->tempo, room * sizeof *more);
+                    if (more)
+                        m->tempo = more, m->tempo_room = room;
+                }
+                if (m->ntempo < m->tempo_room)
+                    m->tempo[m->ntempo].tick = t->tick, m->tempo[m->ntempo++].us = tempo;
+            } else if (kind == 0x03) {
+                if (!m->names[which][0])
+                    text(m->names[which], sizeof m->names[which], t->p, len);
+                if (!which && !m->title[0])
+                    text(m->title, sizeof m->title, t->p, len);
+            } else if (kind == 0x58 && len >= 2 && !m->ticks && t->p[0] && t->p[1] < 7) {
+                m->beats = t->p[0], m->unit = 1u << t->p[1];    /* (the first time signature, at the start) */
             }
             t->p += len;
             if (kind == 0x2F)
@@ -214,7 +239,7 @@ struct smf *smf_open(const unsigned char *data, unsigned long size, int *err)
                 status -= 0x10;
             if ((status & 0xF0) == 0x90)
                 notes |= 1u << (status & 15);
-            if (add(m, ms, status, d1, d2, which) != 0) {
+            if (add(m, ms, t->tick, status, d1, d2, which) != 0) {
                 smf_free(m);
                 free(tr);
                 return NULL;
@@ -232,9 +257,27 @@ struct smf *smf_open(const unsigned char *data, unsigned long size, int *err)
 
 void smf_free(struct smf *m)
 {
-    if (m)
+    if (m) {
         free(m->ev);
+        free(m->tempo);
+        free(m->names);
+    }
     free(m);
+}
+
+unsigned smf_division(const struct smf *m) { return m->division; }
+unsigned long smf_ticks(const struct smf *m) { return m->ticks; }
+const char *smf_track_name(const struct smf *m, unsigned track) { return track < m->tracks ? m->names[track] : ""; }
+
+const struct smf_tempo *smf_tempos(const struct smf *m, unsigned *count)
+{
+    *count = m->ntempo;
+    return m->tempo;
+}
+
+void smf_meter(const struct smf *m, unsigned *beats, unsigned *unit)
+{
+    *beats = m->beats, *unit = m->unit;
 }
 
 unsigned long smf_count(const struct smf *m) { return m->count; }

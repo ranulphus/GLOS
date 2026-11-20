@@ -464,3 +464,65 @@ an MPU-401 with whatever is plugged into it. The Player is that port's first rea
   Loop A, with no card: a MIDI file, an S3M and an XM added and played through, a type 2 file refused. Loop
   A's audio suite: the real Player plays a MIDI file of one flute note through the card's FM chip after the
   modules, on every PC of the suite, and its 370 Hz is in the recording.
+
+## MIDI Studio (2026-11-20): the first part
+
+Plan: `docs/v1/apps/midi-studio.md`. `apps/studio/studio.c`, STUDIO.EXE, in the Start menu; on three pieces
+shared with the Player:
+
+- **`apps/shared/smf.c`**, the MIDI file reader, now also says what an editor needs: each message's tick, what
+  a tick is, the tempo changes, the first time signature, the tracks' names.
+- **`apps/shared/song.c`**: the song. Up to 32 tracks, each a name, a channel, an instrument, a volume and a
+  place, whether it is muted or solo, its notes (start, length, key, force; kept in order) and whatever else
+  its channel is sent (controllers, bends: kept as they were read); the tempo with its changes; the time
+  signature; 480 ticks to the quarter note.
+  - **Read from a MIDI file:** a track for each of the file's tracks' channels (a type 0 file comes apart by
+    channel); a note on is held until its note off, the same key struck again, or the song's end; the first
+    instrument, volume and place a channel is given before its first note are the track's own; the file's
+    ticks are scaled.
+  - **Written as one:** type 1, a first track with the title, the time signature and the tempo, then a track
+    for each of the song's, with running status. Written "as heard" for playing: no muted track, and where a
+    track is solo, those alone.
+  - What is read, written and read again is the same song, and written again the same bytes: the test holds
+    2000 damaged files to that.
+- **`apps/shared/midiplay.c`**: a MIDI file's messages sent to AUDIO's MIDI port as their times come, taken
+  out of the Player's engine, which uses it too: the port told how every channel stands at the place playing
+  begins, the messages of the next 400 ms sent at each look.
+
+The app:
+
+- **The tracks** in a list: name (or "Track 3"), instrument (General MIDI's 128 names; "Drums" on channel
+  10), channel, and Muted or Solo. New Track takes a channel no track has (never the drums'); New Drum Track
+  is on channel 10; Remove Track; Instrument... (a list to choose from; Enter or a double click on a track
+  opens it too); Mute and Solo.
+- **The piano roll** (a toolkit canvas view: scroll bars, the wheel, the middle button) of the chosen track:
+  time across, a line a beat and a darker one a bar; the keys down it, a black key's row shaded, each C named
+  at the left of what shows. A click on nothing puts a note there, on the grid (sixteenths) and as long as
+  the last note made; the drag that follows moves it. A click on a note chooses it (Ctrl: one more, or one
+  fewer); a drag moves what is chosen in time (by the grid) and in pitch; a drag of a note's right end
+  stretches the chosen notes. The right button takes the note under it out; Del the chosen ones; Ctrl+A
+  chooses all. Zoom In and Out: 2 to 32 ticks a pixel.
+- **The history**: every change to a track's notes is a step (the toolkit's undo: Ctrl+Z, Ctrl+Y, named in
+  the menu): the track's notes before and after. A change to the tracks themselves (one added or removed)
+  starts the history anew.
+- **Playing** (F5, F6): the song as heard is written to memory as a MIDI file, read by the Player's reader
+  and sent by `midiplay.c`, from a thread of the app's own (the music goes on under menus and dialogs); a
+  line goes along the roll and "Bar and beat" counts. What is edited while it plays is heard at the next F5.
+- **Files**: New, Open, Save, Save As (.MID); a changed song is asked about before it is left. A type 2 file
+  is refused with its reason.
+- **`STUDIO -demo`** (the GUI scripts'): no MIDI device is asked for and no time passes by itself: F9 is a
+  second heard.
+- **Not yet** (the plan's rest): the arrangement view (regions along bars); velocity and controller lanes;
+  step entry from the PC's keys, a MIDI keyboard (MPU-401 in, USB MIDI) and recording; quantise, transpose;
+  the tempo's changes and the time signature edited (those of a file are kept and played); loops; the
+  software synthesiser and WAV export; the choice of device; mute and solo kept in the file; undo of track
+  changes; other tracks' notes shown behind the chosen one's.
+- **Tests.** `song_test` on the host (34 checks, under the sanitizers too): notes kept in order, the tempo's
+  arithmetic, a built song written and read back the same and its messages at the right milliseconds by the
+  Player's reader, muted and solo tracks as heard, `smf_cases.py`'s files as songs, and the 2000 damaged
+  files' round trips. `tests/gui/studio.txt`, host and Loop A: notes put in, moved, stretched and removed by
+  the mouse, undone and redone, a second track with an instrument and a note, muted, the song played to its
+  end (the muted track's messages not sent), saved (116 bytes), a new song, the saved one opened with its
+  two tracks and three notes, a type 2 file refused. Loop A's audio suite: the real program opens a MIDI
+  file, F5 plays it through the card's FM chip, and its 294 Hz is in the recording, on every PC of the suite.
+

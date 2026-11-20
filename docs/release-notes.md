@@ -4,6 +4,30 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## MIDI Studio (2026-11-20)
+
+- **A new program, MIDI Studio** (STUDIO.EXE, in the Start menu): songs made of tracks, each an instrument of
+  General MIDI's 128 (or drums) on a channel. The chosen track's notes are on a piano roll: a click puts a
+  note in, on a grid of sixteenths; notes are chosen, moved and stretched with the mouse and taken out with
+  the right button or Del; every such change can be undone and redone. Tracks are added, removed, muted and
+  made solo; the tempo is set.
+- **It plays the song** through the sound card's FM chip (or an MPU-401), a line going along the roll, and
+  goes on playing while its menus and dialogs are open.
+- **Songs are standard MIDI files**: saved as type 1 files that the Player and DOS programs play, and any type
+  0 or type 1 MIDI file opens as a song (a track for each of its tracks' channels).
+- **Not yet:** the arrangement of regions along bars; velocities and controllers in lanes; notes from the PC's
+  keys or a MIDI keyboard, and recording; quantising; loops; the software synthesiser and WAV export; undo of
+  changes to the tracks themselves.
+
+## The Player: S3M and XM modules, MIDI files (2026-11-20)
+
+- **The Player plays Scream Tracker 3 (S3M) and FastTracker 2 (XM) modules**, by players of GLOS's own, in
+  whole numbers as its MOD player: a 486's work.
+- **The Player plays MIDI files** (.MID, .RMI; types 0 and 1) through the sound card's FM chip with General
+  MIDI's instruments, or through an MPU-401 where there is no FM chip. Pause, seeking and the volume work as
+  for other files.
+- Files opens S3M, XM, MID and RMI files with the Player.
+
 ## The Player: MP3 and Ogg Vorbis (2026-11-20)
 
 - **The Player plays MP3 and Ogg Vorbis files** (and MP2), with their titles and lengths; Files opens them

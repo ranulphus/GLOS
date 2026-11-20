@@ -14,8 +14,14 @@ enum {
 
 struct smf_event {
     unsigned long ms;                   /* when, from the file's start */
+    unsigned long tick;                 /* ... in the file's own ticks */
     unsigned char status, d1, d2;       /* a channel message (80h to EFh; a note on with no force comes as a note off) */
     unsigned char track;
+};
+
+struct smf_tempo {
+    unsigned long tick;
+    unsigned long us;                   /* a quarter note's microseconds from there on */
 };
 
 struct smf;
@@ -30,5 +36,14 @@ unsigned long smf_length(const struct smf *m);                  /* milliseconds:
 const char *smf_title(const struct smf *m);                     /* its first track's name, or "" */
 unsigned smf_tracks(const struct smf *m);
 unsigned smf_channels(const struct smf *m);                     /* how many of the 16 have notes */
+/* For an editor (MIDI Studio): what a tick is (so many to the quarter note; 0: the file counts in film time, a
+   tick a fixed length), the tempo changes in their order (none: 120 quarter notes a minute), the first time
+   signature (4/4 where the file says none), each track's name ("" where it has none), and the ticks to the
+   end of the longest track. */
+unsigned smf_division(const struct smf *m);
+const struct smf_tempo *smf_tempos(const struct smf *m, unsigned *count);
+void smf_meter(const struct smf *m, unsigned *beats, unsigned *unit);
+const char *smf_track_name(const struct smf *m, unsigned track);
+unsigned long smf_ticks(const struct smf *m);
 
 #endif
