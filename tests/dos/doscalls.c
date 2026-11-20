@@ -4,8 +4,6 @@
  * the 486's profile, most of it in the files' own calls.
  *
  *     DOSCALLS [app] [FILE]      FILE: a file to find, open and read (itself, if none is named)
- *     DOSCALLS ver N [app]       N of the plainest call and no more (as an app, with "app"): for a count of
- *                                GLOS's traps a call, by glos stat's "gp" before and after
  *
  * Each kind of call is made a number of times, three times over, and the least time taken: microseconds a
  * call, by the timer chip (uclock).
@@ -99,8 +97,6 @@ int main(int argc, char **argv)
     if (argc > 2 && !strcmp(argv[1], "ver")) {  /* DOSCALLS ver N: that many of the plainest call, and no more (for
                                                    a count of GLOS's traps a call: glos stat's "gp" before and after) */
         long n = atol(argv[2]);
-        if (argc > 3 && !strcmp(argv[3], "app") && glos_init("DOSCALLS", "What a DOS call costs", "test") != 0)
-            return 2;                           /* (DOSCALLS ver N app: as an app) */
         while (n-- > 0)
             c_ver();
         return 0;
