@@ -61,6 +61,7 @@ void app_vm_base(int *depth, struct trapframe **f);     /* where an app's level 
 int app_vm_ending(void);                /* the call under way is an app's end */
 void app_vm_ended(struct trapframe *tf) __attribute__((noreturn));      /* DOS has ended the app's process */
 u16 app_vm_psp(void);                   /* the PSP of the app the VM thread makes a call for, or 0 */
+void app_vm_killed(void);               /* that app is being killed in the call: its real-mode vectors go now */
 
 /* Events (app.c): the desktop gives them (e->size and e->time carry the
    pointer's movement for a mouse event on the way in), the API takes them. */

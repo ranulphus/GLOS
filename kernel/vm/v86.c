@@ -507,10 +507,14 @@ static int vm_try_kill(struct trapframe *tf, int force)
            below it is given to the VM again: the tick stops, and the first write to the disc that the cache
            cannot answer waits for an interrupt that cannot come, until the BIOS gives up and DOS says the
            drive is not ready (the twenty-third gate, 2026-11-20, and one run in 128 of a soak after it: the
-           kill had found the VM at F000:C104). Nothing is in service after a kill, as after a session's. */
+           kill had found the VM at F000:C104). Nothing is in service after a kill, as after a session's.
+           And the app's own real-mode vectors go at once (app.c), as a session's program's do: DOS's ending
+           of it, which follows, takes interrupts, and a handler of the app's own that never returns (which
+           may be why it is being killed) would be gone into again at the next one. */
         vm.pic.p[0].isr = vm.pic.p[1].isr = 0;
         vm.pic.inflight = 0;
         vm_sync_mask();
+        app_vm_killed();
     }
     current->vif = 1;
     vm.vflags_hi = 0;

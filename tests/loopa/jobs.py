@@ -7140,7 +7140,8 @@ def apps_case(profile, card):
         checks["timeout"] = False
         info += " timeout: %s" % " ".join(str(x) for x in (e.cmd if isinstance(e.cmd, list) else [e.cmd])[-1:])[:60]
     text = agent.wait()
-    checks["balanced"] = text.count("GLOS-APP start ") == text.count("GLOS-APP end ") == 41      # (7 are D7's)
+    checks["balanced"] = text.count("GLOS-APP start ") == text.count("GLOS-APP end ") == 42      # (7 are D7's; one
+                                                                                                 # is tickhang's)
     checks["killed-in-dos"] = bool(re.search(r"GLOS-KILL psp=\w+ at=\S+ ticks=\d+ reason=agent", text))
     checks["refused"] = len(re.findall(r"GLOS-APP refuse psp=\w+ why=(exclusive|already|parent)", text)) == 3
     checks["crash-report"] = bool(re.search(r"GLOS-CRASH why=exception vec=0e .*prog=C:\\TEST\\APPTEST.EXE", text)) \

@@ -978,6 +978,17 @@ int app_vm_pending(void) { return callq != 0; }
 
 u16 app_vm_psp(void) { return adopted ? adopted->psp : 0; }
 
+/* The app whose call the VM thread is making is being killed there (v86.c: DOS is about to end it as that
+   program). Its own real-mode vectors are out of the table from here, the system's in: what the VM still does
+   for it takes interrupts (DOS's ending of it does), and a hook of the app's that was the trouble (the BIOS's
+   tick taken by a handler that never returns: APPTEST's tickhang) must not be gone into again. unadopt() puts
+   the same table back afterwards, as it always has. */
+void app_vm_killed(void)
+{
+    if (adopted)
+        memcpy(vm_ptr(0), sys.ivt, sizeof sys.ivt);
+}
+
 int app_is_session(const struct app *a) { return a && a->session; }
 
 int app_vm_ending(void) { return adopted && ending; }
