@@ -31,7 +31,9 @@ static u32 kpt_win[WIN_MAX >> 22][1024] __attribute__((aligned(4096)));
 static u32 kpt_dev[DEV_MAX >> 22][1024] __attribute__((aligned(4096)));
 static u32 kpt_cache[CACHE_MAX >> 22][1024] __attribute__((aligned(4096)));
 static u32 win_used[(WIN_MAX >> 12) / 32];      /* a bit a page of the windows' region */
-static u32 frame_bits[MAX_FRAMES / 32];
+/* The frame bitmap, as big as the RAM the loader found asks (mm_init): a static one for 4 GB was 128 KB of the
+   kernel's bss on every PC (the memory diet, 2026-11-20). */
+static u32 *frame_bits;
 static struct pmm pmm;
 static struct heap kheap;
 static u32 image_phys, kmap_next, given;       /* given: the frames the loader handed over */
@@ -477,15 +479,69 @@ void *kmalloc(size_t n)
 }
 void kfree(void *p) { LOCKED_V(heap_free(&kheap, p)); }
 
+/* One past the highest frame of the loader's free ranges (4 GB at most). */
+static u32 frames_present(const struct bootinfo *bi)
+{
+    u32 i, top = 0;
+
+    for (i = 0; i < bi->n_ranges; i++)
+        if (bi->range[i].type == BI_MEM_FREE) {
+            u32 end = bi->range[i].base + bi->range[i].length, f;
+
+            f = end < bi->range[i].base ? MAX_FRAMES : end >> 12;
+            if (f > top)
+                top = f;
+        }
+    return top < MAX_FRAMES ? top : MAX_FRAMES;
+}
+
+/* Where `bytes` (whole pages) of the bitmap can live: the first free range with room above the HMA and clear of
+   the kernel's image (image_phys up to image_end); 0 if none has. */
+static u32 bitmap_home(const struct bootinfo *bi, u32 bytes, u32 image_end)
+{
+    u32 i;
+
+    for (i = 0; i < bi->n_ranges; i++) {
+        u32 b = bi->range[i].base, e = b + bi->range[i].length;
+
+        if (bi->range[i].type != BI_MEM_FREE)
+            continue;
+        if (e < b || e > 0xFFFFF000u)
+            e = 0xFFFFF000u;
+        if (b < 0x110000)
+            b = 0x110000;
+        b = (b + 0xFFF) & ~0xFFFu;
+        if (b < image_end && b + bytes > image_phys)
+            b = image_end;
+        if (b < e && e - b >= bytes)
+            return b;
+    }
+    return 0;
+}
+
 void mm_init(struct bootinfo *bi)
 {
     u32 i, pages = ((u32)__kernel_end - (u32)__kernel_start) / PAGE_SIZE;
+    u32 frames, bits_bytes, bits_pages, bits_phys;
 
     image_phys = bi->kernel_phys;
     for (i = 0; i < 0x110; i++)
         kpt_low[i] = (i << 12) | PTE_P | PTE_W;
     for (i = 0; i < pages; i++)
         kpt_kernel[0x100 + i] = (image_phys + (i << 12)) | PTE_P | PTE_W;
+    /* The frame bitmap's pages: in the kernel's page table just past the image, wherever in RAM they are. */
+    frames = frames_present(bi);
+    bits_bytes = (frames + 31) / 32 * 4;
+    bits_pages = (bits_bytes + PAGE_SIZE - 1) / PAGE_SIZE;
+    bits_phys = bitmap_home(bi, bits_pages * PAGE_SIZE, image_phys + pages * PAGE_SIZE);
+    if (!frames || !bits_phys || 0x100 + pages + bits_pages > 1024) {
+        kprintf("GLOS-PANIC frame-bitmap frames=%u pages=%u home=%x\n", frames, bits_pages, bits_phys);
+        for (;;)
+            hlt();
+    }
+    for (i = 0; i < bits_pages; i++)
+        kpt_kernel[0x100 + pages + i] = (bits_phys + (i << 12)) | PTE_P | PTE_W;
+    frame_bits = (u32 *)((u32)__kernel_start + pages * PAGE_SIZE);
     kpd[0] = kernel_phys(kpt_low) | PTE_P | PTE_W;
     kpd[KERNEL_PDE] = kernel_phys(kpt_kernel) | PTE_P | PTE_W;
     kpd[HEAP_BASE >> 22] = kernel_phys(kpt_heap) | PTE_P | PTE_W;
@@ -502,7 +558,7 @@ void mm_init(struct bootinfo *bi)
     kpd[1023] = kernel_phys(kpd) | PTE_P | PTE_W;
     write_cr3(mm_cr3());
 
-    pmm_setup(&pmm, frame_bits, MAX_FRAMES);
+    pmm_setup(&pmm, frame_bits, frames);
     for (i = 0; i < bi->n_ranges; i++)
         if (bi->range[i].type == BI_MEM_FREE) {
             pmm_add_free(&pmm, bi->range[i].base, bi->range[i].length);
@@ -510,6 +566,7 @@ void mm_init(struct bootinfo *bi)
         }
     pmm_reserve(&pmm, 0, 0x110000);                     /* conventional memory, UMA, HMA */
     pmm_reserve(&pmm, image_phys, pages * PAGE_SIZE);   /* the kernel */
+    pmm_reserve(&pmm, bits_phys, bits_pages * PAGE_SIZE);   /* ... and the frame bitmap */
 
     kheap.base = (u8 *)HEAP_BASE;
     kheap.size = 0;

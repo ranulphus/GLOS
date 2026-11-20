@@ -53,6 +53,7 @@
 #include "sshd.h"
 #include "lcon.h"
 #include "kprintf.h"
+#include "mm.h"
 #include "sched.h"
 #include "timer.h"
 #include "vm.h"
@@ -70,6 +71,14 @@ enum { J_FREE, J_QUEUED, J_RUNNING, J_DONE };
 struct ring {
     u8 buf[RING];
     volatile u32 head, tail;
+};
+
+/* A job's big buffers, whole pages of their own (mm_win_alloc), taken when its slot is and given back when the
+   slot has been idle a while (take_slot): 16 slots with these inside them were 644 KB of the kernel's bss for
+   good (the memory diet, 2026-11-20). */
+struct job_bufs {
+    struct ring out[2];                         /* stdout, stderr */
+    u8 in[IN_RING];                             /* standard input from its app */
 };
 
 struct agent_job {
@@ -90,7 +99,8 @@ struct agent_job {
     char prog[80];                              /* the command's first word */
     const char *args;                           /* the rest, from the separator on */
     char path[80];                              /* what the stub is EXECing */
-    struct ring out[2];                         /* stdout, stderr */
+    struct ring *out;                           /* stdout, stderr: bufs->out */
+    struct job_bufs *bufs;                      /* its buffers, while it has them (take_slot) */
     /* M9: an app's job (GLOS_FN_RUN) */
     u8 from_app;                                /* its output is its app's to read, its keys the app's to type */
     u8 console;                                 /* KRUN_CONSOLE: its program writes into the app's window */
@@ -116,7 +126,7 @@ struct agent_job {
                                                    and nobody types to it */
     u8 in_pipe;                                 /* its standard input is what its app writes ... */
     volatile u8 in_eof;                         /* ... and the app has written its last */
-    u8 in[IN_RING];
+    u8 *in;                                     /* IN_RING bytes: bufs->in */
     volatile u32 ih, it;
     char file[3][80];                           /* files for its standard input, output and error ("": none) */
     u8 fappend;                                 /* bit s: stream s's file is added to, not made anew */
@@ -150,6 +160,46 @@ static u32 ring_used(const struct ring *r) { return r->head - r->tail; }
 
 static char upper(char c) { return c >= 'a' && c <= 'z' ? (char)(c - 32) : c; }
 
+/* A free slot, its buffers there (taken now if it had none), or NULL: none free, or no memory for them. Safe with
+   interrupts off (agent_post_detached is the VM thread's). The buffers of other slots idle since are given back
+   here, one slot's kept for the next job: never those of the running job or of the one whose files are being
+   closed, and only of free slots, which nobody reads (every reader looks at a job's state first). */
+static struct agent_job *take_slot(void)
+{
+    struct agent_job *j = NULL;
+    u32 i, f = irq_save();
+    int spare = 0;
+
+    for (i = 0; i < NJOBS; i++)
+        if (jobs[i].state == J_FREE && (!j || (!j->bufs && jobs[i].bufs)))
+            j = &jobs[i];
+    for (i = 0; j && i < NJOBS; i++) {
+        struct agent_job *o = &jobs[i];
+
+        if (o == j || o->state != J_FREE || !o->bufs || o == running || o == closer)
+            continue;
+        if (!spare) {
+            spare = 1;                          /* (the one kept for the next job) */
+            continue;
+        }
+        mm_win_free(o->bufs, sizeof *o->bufs);
+        o->bufs = NULL;
+        o->out = NULL;
+        o->in = NULL;
+    }
+    if (j && !j->bufs) {
+        j->bufs = mm_win_alloc(sizeof *j->bufs);
+        if (!j->bufs)
+            j = NULL;
+    }
+    if (j) {
+        j->out = j->bufs->out;
+        j->in = j->bufs->in;
+    }
+    irq_restore(f);
+    return j;
+}
+
 /* ---- the ssh thread's side */
 
 void agent_init(void (*kick)(void)) { kick_ssh = kick; }
@@ -158,13 +208,8 @@ int agent_post(void *owner, const char *cmd) { return agent_post_run(owner, cmd,
 
 int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, const char *profile)
 {
-    struct agent_job *j = NULL;
+    struct agent_job *j = take_slot();
     u32 f, i;
-    for (i = 0; i < NJOBS; i++)
-        if (jobs[i].state == J_FREE) {
-            j = &jobs[i];
-            break;
-        }
     if (!j)
         return -1;
     while (*cmd == ' ' || *cmd == '\t')
@@ -245,20 +290,16 @@ int agent_post_app(void *app, const struct krun *r, u32 *seq) { return agent_pos
 /* ... and the API's (o: what struct krun has no word for; NULL: none of it). */
 int agent_post_job(void *app, const struct krun *r, const struct agent_opts *o, u32 *seq)
 {
-    struct agent_job *j = NULL;
+    struct agent_job *j;
     u32 f, i;
     const char *cmd = o && o->command ? o->command : r->command;
-    for (i = 0; i < NJOBS; i++)
-        if (jobs[i].state == J_FREE) {
-            j = &jobs[i];
-            break;
-        }
-    if (!j)
-        return GLOS_E_MEMORY;
     while (*cmd == ' ' || *cmd == '\t')
         cmd++;
     if (!*cmd)
         return GLOS_E_ARGUMENT;
+    j = take_slot();
+    if (!j)
+        return GLOS_E_MEMORY;
     for (i = 0; cmd[i] && i < sizeof j->cmd - 1; i++)
         j->cmd[i] = cmd[i];
     j->cmd[i] = 0;
