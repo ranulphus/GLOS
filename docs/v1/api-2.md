@@ -413,6 +413,16 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 - **2.3 (2026-11-15): NET for a program that is not an app** (the owner: a full-screen program gets the network
   too). NET's calls, and CLOSE, GET and SET for their handles; no events; waits are on the program's one
   thread. As built: supervisor.md §17.11.
+- **2.9 (2026-11-20): the PC's own ports, from the PC itself.** Until now nothing a program sent to this PC
+  came back to it: there was no 127.0.0.1, and a packet for the PC's own address went out of the card for
+  nobody. Now a program connects to what another program, itself or GLOS listens on, at 127.0.0.1 or at the
+  PC's own address, and datagrams go the same way (lwIP's loopback: an interface of its own for 127.0.0.1, the
+  card's queue for the PC's address; taken in on the network thread's turns). The network must be up all the
+  same. **`GLOS_NETF_LOCAL`** on LISTEN: the port is listened on at 127.0.0.1 alone, so it is this PC's
+  programs' and no other computer's (a packet for 127.x that comes in by a card is dropped). Asked for by
+  `ssh -L`: a tunnel's port is local unless it is opened. An older GLOS ignores the flag and listens for
+  everyone: a program that relies on it reads VERSION's minor first. Tests: `APITEST net` (`net-own`,
+  `net-local`), with the test's host finding nobody at the local port.
 
 ### 0Ch SETTINGS
 

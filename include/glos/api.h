@@ -54,7 +54,9 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 8            /* (2.8: GLOS_WF_OWN_MODE, a full-screen window that keeps its size;
+#define GLOS_MINOR 9            /* (2.9: NET reaches this PC's own ports (127.0.0.1, its own address);
+                                   GLOS_NETF_LOCAL, a port for this PC's programs alone;
+                                   2.8: GLOS_WF_OWN_MODE, a full-screen window that keeps its size;
                                    2.7: WINVRAM says when the display is on the window's own pixels;
                                    2.6: VERSION's GLOS_MACHINE_DESKTOP; 2.5: AUDIO's OUT for a program that is not an
                                    app, full-screen too; 2.4, phase D: SECRETS' STORE; a window's
@@ -1152,7 +1154,13 @@ struct glos_ev_midi {
  * DOS session): they, and CLOSE, GET and SET for the handles they give, and nothing else of an app's. It has
  * no events (GLOS_NETF_EVENTS does nothing there). Its calls wait on the one thread it has, its own
  * interrupts with them: a program with handlers to run uses short waits or none. What it has open is closed
- * when it ends. */
+ * when it ends.
+ *
+ * 2.9: this PC's own ports are reached from it, at 127.0.0.1 and at its own address: a program connects to
+ * what another of its programs (or itself, or GLOS) listens on, and datagrams go the same way. It needs the
+ * network up all the same (GLOS_E_NET_DOWN without). A port listened on with GLOS_NETF_LOCAL takes
+ * connections to 127.0.0.1 alone: this PC's. (A GLOS before 2.9 has no such address, and listens for
+ * everyone whatever the flag: a program that relies on it looks at VERSION's minor first.) */
 #define GLOS_NET_RESOLVE GLOS_FN(GLOS_AREA_NET, 0)      /* struct glos_net_resolve: a name's address (DNS) */
 #define GLOS_NET_CONNECT GLOS_FN(GLOS_AREA_NET, 1)      /* struct glos_net_connect: a connection out */
 #define GLOS_NET_SEND    GLOS_FN(GLOS_AREA_NET, 2)      /* struct glos_net_io */
@@ -1175,6 +1183,8 @@ struct glos_ev_midi {
 #define GLOS_NETF_NAGLE  2      /* small writes may wait to be sent together; without it, each goes at once */
 #define GLOS_NETF_BROADCAST 4   /* DATAGRAM: SENDTO may send to a broadcast address (its BROADCAST property) */
 #define GLOS_NETF_REUSE  8      /* DATAGRAM: the port may be one another datagram port already has */
+#define GLOS_NETF_LOCAL  16     /* (2.9) LISTEN: a port of this PC's own programs alone: it is listened on at
+                                   127.0.0.1, where no other computer's connection comes */
 
 #define GLOS_NETS_CONNECTING 1
 #define GLOS_NETS_OPEN       2

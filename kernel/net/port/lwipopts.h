@@ -64,6 +64,12 @@ void clock_get_us(unsigned int *sec, unsigned int *us);
 #define MEM_LIBC_MALLOC             0
 #define MEMP_MEM_MALLOC             0
 #define MEM_ALIGNMENT               4
+/* This PC's own packets to itself (API 2.9): 127.0.0.1 by an interface of lwIP's own for it (so that a packet
+   for 127.x that comes in by a card is nobody's), the PC's own address by its card's; they wait in a queue, 32
+   at most an interface, and are taken in on the network thread's turns (net.c: netif_poll_all). */
+#define LWIP_NETIF_LOOPBACK         1
+#define LWIP_HAVE_LOOPIF            1
+#define LWIP_LOOPBACK_MAX_PBUFS     32
 #define MEM_SIZE                    (128 * 1024)
 #define MEMP_NUM_PBUF               32
 #define MEMP_NUM_TCP_PCB            40      /* (apps' connections, 32 in all, and GLOS's own) */

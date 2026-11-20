@@ -327,6 +327,7 @@ static void do_listen(void *arg)
 {
     struct sock *s = arg;
     struct tcp_pcb *pcb = tcp_new_ip_type(IPADDR_TYPE_V4), *l;
+    ip_addr_t own;
     err_t err = ERR_OK;
     if (!pcb) {
         s->why = GLOS_E_MEMORY;
@@ -337,7 +338,8 @@ static void do_listen(void *arg)
        keep an app from listening on it anew. A port something listens on is refused all the same: GLOS's own
        at the bind, another app's at the listen.) */
     ip_set_option(pcb, SOF_REUSEADDR);
-    if (tcp_bind(pcb, IP_ANY_TYPE, s->port) != ERR_OK) {
+    IP_ADDR4(&own, 127, 0, 0, 1);               /* (GLOS_NETF_LOCAL: no other computer's packets come to that) */
+    if (tcp_bind(pcb, s->flags & GLOS_NETF_LOCAL ? &own : IP_ANY_TYPE, s->port) != ERR_OK) {
         tcp_close(pcb);
         s->why = GLOS_E_NET_REFUSED;
         s->state = GLOS_NETS_FAILED;
@@ -989,7 +991,7 @@ int sock_listen(struct app *a, u32 port, u32 backlog, u32 flags, u32 *id)
     if (!(s = slot(a)))
         return GLOS_E_MEMORY;
     s->gen++;
-    s->flags = flags & GLOS_NETF_EVENTS;
+    s->flags = flags & (GLOS_NETF_EVENTS | GLOS_NETF_LOCAL);
     s->state = GLOS_NETS_CONNECTING;
     s->why = 0;
     s->closing = s->reset = s->tx_ev = s->pending = s->hard = s->dgram = 0;

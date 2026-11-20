@@ -6650,13 +6650,17 @@ def api_net_case(profile, vcard, card):
     out to an echo server on the host, 100,000 bytes through it; what is refused; events. Then APITEST listens on
     a port that SLiRP forwards from the host: the host connects, a line goes each way, 200,000 bytes come back
     as sent until the host closes its side; two connections at once are taken in the order they came; one that
-    nobody takes is dropped when the port is closed. Every case ok, and no connection left in the kernel's table."""
+    nobody takes is dropped when the port is closed. 2.9: the PC's own ports from the PC itself, at 127.0.0.1 and
+    at its own address (50,000 bytes there and back by each, inside APITEST), and a port of its programs alone
+    (GLOS_NETF_LOCAL): reached at 127.0.0.1, refused at the PC's own address, and nobody's for the host, which
+    tries it through a second forward. Every case ok, and no connection left in the kernel's table."""
     import socket
     import threading
     import time
     tag = "%s-%s" % (profile, card)
-    echo, closed, fwd = EchoServer(), free_port(), free_port()
+    echo, closed, fwd, fwd2 = EchoServer(), free_port(), free_port(), free_port()
     agent = Agent("apinet-" + tag, profile, card, ["--card", vcard, "--net-fwd", "%d:7777" % fwd,
+        "--net-fwd", "%d:7778" % fwd2,
         "--file", "build/dj/APITEST.EXE=/TEST/APITEST.EXE",
         "--cmd", "SERSAY HX-START apinet", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1500)
     checks, info, p = {"listen": agent.listening()}, "", None
@@ -6726,6 +6730,17 @@ def api_net_case(profile, vcard, card):
         except socket.timeout:
             checks["dropped"] = False
         d.close()
+        checks["local-asked"] = said("HX-APITEST net-local")
+        try:                                        # (a port of the PC's own programs alone: nobody for the host)
+            with socket.create_connection(("127.0.0.1", fwd2), timeout=30) as q:
+                q.settimeout(30)
+                q.sendall(b"anyone?")
+                checks["local-shut"] = q.recv(16) == b""
+        except (ConnectionResetError, BrokenPipeError):
+            checks["local-shut"] = True
+        except OSError as e:
+            checks["local-shut"] = False
+            info += " local-shut=%s" % type(e).__name__
         checks["run"] = p.wait(timeout=600) == 0
         checks["table-empty"] = "sockets=0" in agent.ssh("glos net")[1]
         agent.ssh("glos exit")
@@ -10621,6 +10636,9 @@ def main():
         cases = combos if (a.profile or a.boot) else [("bf6", "default"), ("486dx2", "himemx")]
         return 0 if all(r[1] for r in matrix(xfer_case, cases, a.jobs)) else 1
     if a.suite == "api":                        # (API 2.0: bf6 raw, the 486 with HIMEMX)
+        if os.environ.get("API_ONLY") == "net":     # (API_ONLY=net: the network's case alone)
+            wins = [c for c in [("bf6", "g200", "ne2kpci"), ("486dx2", "vbe", "ne2k")] if not a.profile or c[0] in a.profile]
+            return 0 if all(r[1] for r in matrix(api_net_case, wins, a.jobs)) else 1
         cases = combos if (a.profile or a.boot) else [("bf6", "default"), ("486dx2", "himemx")]
         res = matrix(api_case, cases, a.jobs)
         res += matrix(api_lfn_case, cases, a.jobs)      # ... and long names, with DOSLFN loaded before GLOS

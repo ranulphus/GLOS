@@ -2622,7 +2622,9 @@ static int midi_mode(int mpu)
    the test's host as the PC sees it (dotted), ECHO a port there that echoes, CLOSED one where nothing listens,
    PORT the port this PC listens on, which the test reaches from outside. The network's state; a name; a
    connection out, echoed through; what is refused; events; then a server: the test's host connects to PORT (told
-   when by lines on COM1) once, then twice at once, then once more for a connection nobody takes. */
+   when by lines on COM1) once, then twice at once, then once more for a connection nobody takes. Then 2.9's:
+   the PC's own ports from the PC itself (127.0.0.1, its own address), and a port of its programs alone
+   (PORT + 1, which the test's host tries too, in vain). */
 static unsigned char net_buf[8192], net_back[8192];
 
 static int net_all(glos_handle h, const unsigned char *b, unsigned n)        /* all of it sent: 1 */
@@ -2643,6 +2645,40 @@ static int net_line(glos_handle h, char *line, unsigned room)   /* what comes wi
     int n = glos_net_receive(h, line, room - 1, 10000, &state);
     line[n > 0 ? n : 0] = 0;
     return n;
+}
+
+/* `total` bytes from one end of a connection to the other and back again, both ends this program's: 0 if they
+   came back as they were sent, or where it went wrong. */
+static int net_round(glos_handle a, glos_handle b, unsigned total)
+{
+    unsigned sent = 0, mid = 0, got = 0, i, state = 0, turns = 0;
+    int n;
+    while (got < total) {
+        if (++turns > 6000)
+            return 9;
+        if (sent < total) {                     /* a's bytes out: what there is room for */
+            unsigned k = total - sent < sizeof net_buf ? total - sent : sizeof net_buf;
+            for (i = 0; i < k; i++)
+                net_buf[i] = (unsigned char)((sent + i) * 11 + ((sent + i) >> 7));
+            if ((n = glos_net_send(a, net_buf, k, 0)) < 0)
+                return 1;
+            sent += (unsigned)n;
+        }
+        n = glos_net_receive(b, net_back, sizeof net_back, 5, &state);  /* b's end: straight back */
+        if (n < 0)
+            return 2;
+        if (n > 0 && !net_all(b, net_back, (unsigned)n))
+            return 3;
+        mid += n > 0 ? (unsigned)n : 0;
+        n = glos_net_receive(a, net_back, sizeof net_back, 5, &state);
+        if (n < 0)
+            return 4;
+        for (i = 0; n > 0 && i < (unsigned)n; i++)
+            if (net_back[i] != (unsigned char)((got + i) * 11 + ((got + i) >> 7)))
+                return 5;
+        got += n > 0 ? (unsigned)n : 0;
+    }
+    return mid == total ? 0 : 6;
 }
 
 static int net_mode(int argc, char **argv)
@@ -2776,6 +2812,66 @@ static int net_mode(int argc, char **argv)
     l = glos_net_listen(port, 1, 0);
     ok = ok && l && glos_close(l) == 0 && glos_net_state(nif, sizeof nif, &count) == 0;
     check("net-closed", ok, "l=%x err=%d connections=%u", l, glos_error(), nif[0].connections);
+
+    /* 2.9: this PC's own ports from the PC itself. One listened on is reached at 127.0.0.1 and at the PC's own
+       address: 50,000 bytes to the other end and back by each. One listened on with GLOS_NETF_LOCAL is reached
+       at 127.0.0.1 and from nowhere else: the PC's own address is refused, and the test's host, told to try
+       now (through SLiRP), is nobody's to take. */
+    {
+        unsigned lo = 0, own = nif[0].address, k, trip[2] = { 99, 99 }, came[2] = { 0, 0 };
+        glos_handle ll;
+        r = glos_net_resolve("127.0.0.1", 1000, &lo);
+        l = glos_net_listen(port, 2, 0);
+        for (k = 0; k < 2 && l; k++) {
+            c = glos_net_connect(k ? own : lo, port, 5000, 0);
+            s = c ? glos_net_accept(l, 5000, 0, &came[k], &from) : 0;
+            if (c && s)
+                trip[k] = (unsigned)net_round(c, s, 50000);
+            if (c)
+                glos_close(c);
+            if (s)
+                glos_close(s);
+        }
+        ok = r == 0 && l && !trip[0] && !trip[1] && came[0] == lo && came[1] == own;
+        {                                       /* ... and a datagram, from one port of the program's to another */
+            glos_handle d1 = glos_net_datagram(port + 2, 0), d2 = glos_net_datagram(0, 0);
+            unsigned dfrom = 0, dport = 0, dlen = 0;
+            int sent2 = d1 && d2 ? glos_net_sendto(d2, "to myself", 9, 1000, lo, port + 2) : -1;
+            n = d1 ? glos_net_recvfrom(d1, text, sizeof text - 1, 5000, &dfrom, &dport, &dlen) : -1;
+            text[n > 0 ? n : 0] = 0;
+            ok = ok && sent2 == 0 && n == 9 && dlen == 9 && !strcmp(text, "to myself") && dfrom == lo
+                 && (int)dport == prop(d2, GLOS_PROP_NET_PORT);
+            if (d1)
+                glos_close(d1);
+            if (d2)
+                glos_close(d2);
+        }
+        check("net-own", ok, "r=%d l=%x lo=%08x own=%08x round=%u,%u from=%08x,%08x datagram=%d err=%d", r, l, lo, own, trip[0],
+              trip[1], came[0], came[1], n, glos_error());
+        if (l)
+            glos_close(l);
+        ll = glos_net_listen(port + 1, 2, GLOS_NETF_LOCAL);
+        c = ll ? glos_net_connect(lo, port + 1, 5000, 0) : 0;
+        s = c ? glos_net_accept(ll, 5000, 0, &addr, &from) : 0;
+        text[0] = 0;
+        ok = ll && c && s && addr == lo && net_all(c, (const unsigned char *)"local\n", 6) && net_line(s, text, sizeof text) == 6
+             && !strcmp(text, "local\n");
+        if (c)
+            glos_close(c);
+        if (s)
+            glos_close(s);
+        c2 = ll ? glos_net_connect(own, port + 1, 5000, 0) : 0;
+        r = glos_error();
+        ok = ok && !c2 && r == GLOS_E_NET_REFUSED;
+        com1("HX-APITEST net-local\r\n");
+        glos_sleep(6000);
+        n = ll ? prop(ll, GLOS_PROP_NET_WAITING) : -1;
+        check("net-local", ok && n == 0, "ll=%x c=%x s=%x from=%08x c2=%x err=%d waiting=%d", ll, c, s, addr, c2, r, n);
+        if (c2)
+            glos_close(c2);
+        if (ll)
+            glos_close(ll);
+    }
 
     snprintf(line, sizeof line, "HX-APITEST done pass=%d fail=%d\r\n", pass, fails);
     com1(line);

@@ -1957,6 +1957,23 @@ and GLOS's:
   - **Tested** (`make loopa-netapp`: NETTEST `udp` against a UDP echo server on the host, on both profiles;
     `make loopa-ssh`'s member cases: a program on each of two PCs joined by a cable, each found by the other's
     broadcast).
+- **The PC's own ports from the PC itself (API 2.9, 2026-11-20).** lwIP's loopback is on
+  (`LWIP_NETIF_LOOPBACK`, `LWIP_HAVE_LOOPIF`): 127.0.0.1 is an interface of lwIP's own, and a packet for the
+  PC's own address is put on its card's (or cable's) loopback queue instead of the wire.
+  - **Taken in on the net thread's turn:** with `NO_SYS` nothing delivers the queues by itself, so the thread
+    calls `netif_poll_all()` at the end of each turn, and takes another turn at once while a queue still holds
+    something (the answers to what it has just taken in). A queue holds 32 packets at most
+    (`LWIP_LOOPBACK_MAX_PBUFS`); more is refused to TCP, which sends it again.
+  - **Why the interface of its own:** without it lwIP takes a packet for 127.0.0.1 in from any interface, the
+    card's too, so a computer on the network could reach a port meant for this PC alone. With it such a packet
+    from a card is nobody's.
+  - **`GLOS_NETF_LOCAL`** (LISTEN): the port is bound to 127.0.0.1, not to every address. The PC's own
+    address gets a reset there, as any other computer does.
+  - STATE does not list the loopback interface (the card, then the cable, as before); `net_up()` is still the
+    card's or the cable's, so with no network there is no 127.0.0.1 either. The cable's hooks (`member.c`)
+    look at the card's and the cable's packets only.
+  - **Tested** (`make loopa-api`, APITEST `net`: `net-own`, 50,000 bytes there and back at 127.0.0.1 and at the
+    PC's address; `net-local`, with the test's host turned away; `make loopa-sshc`: SSH.EXE's tunnels).
 
 - **The network for a program that is not an app (API 2.3, 2026-11-15; the owner: "sockets for sessions").** A
   full-screen program is a plain DOS session to the kernel, and had no part of the API but the calls any

@@ -564,6 +564,15 @@ static void net_thread(void *arg)
         clock_second();
         sshd_net_poll();
         sock_net_poll();
+        /* What this PC has sent to itself (127.0.0.1, its own address) is taken in; what that sends in its turn
+           (the answers) waits for the next turn, which then comes at once. */
+        netif_poll_all();
+        {
+            struct netif *n;
+            NETIF_FOREACH(n)
+                if (n->loop_first)
+                    pending = 1;
+        }
         if (selftest && nic0 && bound_at && !mdns_asked && timer_ticks() - bound_at > 3 * 1024)
             mdns_ask();                         /* (the responder has probed for its name by then) */
     }
