@@ -431,6 +431,27 @@ static struct pbuf *dg_pbuf(const struct sock *s, u32 len)
     return p;
 }
 
+static int is_broadcast(u32 addr);
+
+/* (2.9) A broadcast of this PC's own is for its own programs too: lwIP sends it out of the card and hears
+   nothing of it, so one program on a PC never found another by asking everyone. A copy goes to every other
+   datagram port of this PC on the port it is sent to, as from this PC's address and the sender's port. (Not to
+   the sender's own port, where other systems would have it hear itself: no program here ever has.) */
+static void own_broadcast(const struct sock *from, const struct dg_hdr *h)
+{
+    ip_addr_t us;
+    u32 i;
+    ip_addr_set_ip4_u32(&us, netif_default ? ip4_addr_get_u32(netif_ip4_addr(netif_default)) : PP_HTONL(IPADDR_LOOPBACK));
+    for (i = 0; i < NSOCK; i++) {
+        struct sock *s = &socks[i];
+        struct pbuf *p;
+        if (s == from || !s->used || !s->dgram || !s->upcb || s->state != GLOS_NETS_DATAGRAM || s->port != h->port)
+            continue;
+        if ((p = dg_pbuf(from, h->len)) != 0)
+            on_udp(s, s->upcb, p, &us, from->port);     /* (which frees it) */
+    }
+}
+
 static void dgram_poll(struct sock *s)
 {
     int sent = 0;
@@ -458,6 +479,8 @@ static void dgram_poll(struct sock *s)
             udp_sendto_if_src(s->upcb, p, &to, h.port, too, &from);
             pbuf_free(p);
         }
+        if (is_broadcast(h.addr))
+            own_broadcast(s, &h);
         barrier();
         s->tx_out += DG_HDR + h.len;
         sent = 1;

@@ -170,7 +170,8 @@ The owner's choice of 2026-11-20 (`docs/v1-route.md`, F, "More of SSH"): port fo
 - **That needed the PC to reach itself: API 2.9.** GLOS's network had no 127.0.0.1, and a packet for the PC's
   own address went out of the card for nobody. lwIP's loopback is on now, and LISTEN has `GLOS_NETF_LOCAL`
   (`docs/v1/api-2.md`, NET; `docs/supervisor.md` §17.11). It is every program's gain: one that serves can be
-  its own client (a game that hosts and joins on one PC), and two programs on a PC can talk.
+  its own client (a game that hosts and joins on one PC), and two programs on a PC can talk, or find each
+  other by a broadcast (which the PC's other datagram ports now hear too).
 - **Carried how.** SSH.EXE's poll takes new connections and what each has to send, no further than 32 KB
   ahead of the far side; what comes back is written to the connection at once (where this PC's side is slow
   that waits, up to ten seconds, and the session's other traffic with it); either end's last byte is told to

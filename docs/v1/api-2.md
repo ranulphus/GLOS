@@ -418,7 +418,9 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   nobody. Now a program connects to what another program, itself or GLOS listens on, at 127.0.0.1 or at the
   PC's own address, and datagrams go the same way (lwIP's loopback: an interface of its own for 127.0.0.1, the
   card's queue for the PC's address; taken in on the network thread's turns). The network must be up all the
-  same. **`GLOS_NETF_LOCAL`** on LISTEN: the port is listened on at 127.0.0.1 alone, so it is this PC's
+  same. A broadcast datagram is also given to the PC's other datagram ports on the port it is sent to (as from
+  the PC's address; not to the sender's own port), so a program finds another on its own PC by asking
+  everyone, as it finds one on another PC. **`GLOS_NETF_LOCAL`** on LISTEN: the port is listened on at 127.0.0.1 alone, so it is this PC's
   programs' and no other computer's (a packet for 127.x that comes in by a card is dropped). Asked for by
   `ssh -L`: a tunnel's port is local unless it is opened. An older GLOS ignores the flag and listens for
   everyone: a program that relies on it reads VERSION's minor first. Tests: `APITEST net` (`net-own`,

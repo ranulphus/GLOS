@@ -1157,8 +1157,9 @@ struct glos_ev_midi {
  * when it ends.
  *
  * 2.9: this PC's own ports are reached from it, at 127.0.0.1 and at its own address: a program connects to
- * what another of its programs (or itself, or GLOS) listens on, and datagrams go the same way. It needs the
- * network up all the same (GLOS_E_NET_DOWN without). A port listened on with GLOS_NETF_LOCAL takes
+ * what another of its programs (or itself, or GLOS) listens on, and datagrams go the same way. A broadcast
+ * datagram is this PC's other datagram ports' too (those on the port it is sent to; not the sender's own). It
+ * needs the network up all the same (GLOS_E_NET_DOWN without). A port listened on with GLOS_NETF_LOCAL takes
  * connections to 127.0.0.1 alone: this PC's. (A GLOS before 2.9 has no such address, and listens for
  * everyone whatever the flag: a program that relies on it looks at VERSION's minor first.) */
 #define GLOS_NET_RESOLVE GLOS_FN(GLOS_AREA_NET, 0)      /* struct glos_net_resolve: a name's address (DNS) */

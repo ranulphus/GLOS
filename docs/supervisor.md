@@ -1969,6 +1969,11 @@ and GLOS's:
     from a card is nobody's.
   - **`GLOS_NETF_LOCAL`** (LISTEN): the port is bound to 127.0.0.1, not to every address. The PC's own
     address gets a reset there, as any other computer does.
+  - **A broadcast of the PC's own** is not lwIP's to bring back (it goes out of the card, and nothing is heard
+    of it), so `sock.c` gives a copy to every other datagram port of the PC on the port it is sent to
+    (`own_broadcast`: as from the PC's address and the sender's port). The sender's own port does not hear
+    itself, as it never did here. Asked for by Echoes of the Void: a second game on a PC finds the first by
+    its broadcast.
   - STATE does not list the loopback interface (the card, then the cable, as before); `net_up()` is still the
     card's or the cable's, so with no network there is no 127.0.0.1 either. The cable's hooks (`member.c`)
     look at the card's and the cable's packets only.

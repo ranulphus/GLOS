@@ -2834,13 +2834,23 @@ static int net_mode(int argc, char **argv)
         }
         ok = r == 0 && l && !trip[0] && !trip[1] && came[0] == lo && came[1] == own;
         {                                       /* ... and a datagram, from one port of the program's to another */
-            glos_handle d1 = glos_net_datagram(port + 2, 0), d2 = glos_net_datagram(0, 0);
+            glos_handle d1 = glos_net_datagram(port + 2, 0), d2 = glos_net_datagram(0, GLOS_NETF_BROADCAST);
             unsigned dfrom = 0, dport = 0, dlen = 0;
-            int sent2 = d1 && d2 ? glos_net_sendto(d2, "to myself", 9, 1000, lo, port + 2) : -1;
+            int sent2 = d1 && d2 ? glos_net_sendto(d2, "to myself", 9, 1000, lo, port + 2) : -1, heard;
             n = d1 ? glos_net_recvfrom(d1, text, sizeof text - 1, 5000, &dfrom, &dport, &dlen) : -1;
             text[n > 0 ? n : 0] = 0;
             ok = ok && sent2 == 0 && n == 9 && dlen == 9 && !strcmp(text, "to myself") && dfrom == lo
                  && (int)dport == prop(d2, GLOS_PROP_NET_PORT);
+            /* ... and one to everyone: the PC's other port on that port has it, as from the PC's address; the
+               sender's own port hears nothing of it */
+            sent2 = d1 && d2 ? glos_net_sendto(d2, "to everyone", 11, 1000, 0xFFFFFFFFu, port + 2) : -1;
+            dfrom = dport = 0;
+            heard = d1 ? glos_net_recvfrom(d1, text, sizeof text - 1, 5000, &dfrom, &dport, &dlen) : -1;
+            text[heard > 0 ? heard : 0] = 0;
+            ok = ok && sent2 == 0 && heard == 11 && !strcmp(text, "to everyone") && dfrom == own
+                 && (int)dport == prop(d2, GLOS_PROP_NET_PORT) && prop(d2, GLOS_PROP_NET_WAITING) == 0;
+            if (heard != 11)
+                n = -100 - heard;
             if (d1)
                 glos_close(d1);
             if (d2)
