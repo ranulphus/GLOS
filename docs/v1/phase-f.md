@@ -538,3 +538,37 @@ The app:
   two tracks and three notes, a type 2 file refused. Loop A's audio suite: the real program opens a MIDI
   file, F5 plays it through the card's FM chip, and its 294 Hz is in the recording, on every PC of the suite.
 
+## The PDF Viewer (2026-11-20): the reader's objects
+
+Plan: `docs/v1/apps/pdf-viewer.md`. The first of its steps, with no program yet: **`apps/shared/pdf.c`**, the
+file's objects. The plan left the parser open (PDFio as the first candidate, or GLOS's own): it is GLOS's own,
+written from the specification (ISO 32000-1): small (some 1300 lines), permissive where real files
+are wrong, reading the file by pieces through the caller's function (never whole), and on the unpacker GLOS
+has already (`loader/inflate.c`). PDFio was not tried; no code of another reader's was looked at.
+
+- **Objects**: numbers (their digits taken as a whole number and divided once), names with their `#xx`, strings
+  with their escapes and in hex, arrays, dictionaries, references; nesting to 64 deep. A numbered object is
+  read when it is first asked for (a piece of the file at its place, a larger one if it doesn't end there)
+  and kept; `pdf_trim` lets the kept ones go between pages.
+- **Cross-reference tables**: from `startxref`, the newest first and each one's `Prev` after it (an update's
+  newer objects stand); tables of text with their trailers, and 1.5's cross-reference streams (their `W`
+  widths and `Index` runs), hybrid files' `XRefStm`; objects packed in object streams (the two last used kept
+  unpacked).
+- **Damaged files**: where the tables can't be read or lead to no catalog with pages, the file is gone through
+  for `N G obj` at lines' starts and for a trailer; object streams found so give up their objects, and a file
+  with no trailer of text takes its cross-reference stream's dictionary, or the catalog by its type.
+- **Streams**: their bytes by `Length` (which may be another object) when the end is where that says, else up
+  to `endstream`; unpacked through Flate, LZW (both early-change ways), ASCII85, ASCIIHex and RunLength, in
+  chains, with PNG's and TIFF's predictors undone. A picture's own packing (a JPEG's `DCTDecode`) is left to
+  the caller, who is told its name.
+- **Pages**: counted by the tree's `Count`, found by going down the tree by the counts; what a page has by its
+  parents (`Resources`, `MediaBox`, `CropBox`, `Rotate`).
+- **Encrypted files** are refused as locked for now.
+- **Tests.** `pdf_test` on the host (56 checks, under the sanitizers too) over files written byte by byte
+  (`tests/host/pdf_cases.py`): words of every kind, two pages and their inherited boxes, an update, a file of
+  1.5's kind (object stream, cross-reference stream with a predictor), sixteen streams packed every way, a
+  page tree three deep, the tables lost in both kinds of file, a file cut in its last object, locked, and no
+  PDF; and 2500 copies with bytes changed at random, every object, page and stream of those that open gone
+  through.
+- **Next**: the pages' drawing (paths, text, pictures; an anti-aliased rasteriser), fonts, then the program.
+

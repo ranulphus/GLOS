@@ -176,6 +176,8 @@ host-test-run:
 	  && build/host/smf_test `python3 tests/host/smf_cases.py build/host/smf`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/song_test tests/host/song_test.c apps/shared/song.c \
 	  apps/shared/smf.c && build/host/song_test build/host/smf
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c loader/inflate.c \
+	  && build/host/pdf_test `python3 tests/host/pdf_cases.py build/host/pdf`
 	@mkdir -p build/host/packed && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/packed_test \
 	  tests/host/packed_test.c $(SOURCE_SRCS) -lm && build/host/packed_test tests/host/sndfix build/host/packed
 	@mkdir -p build/host/sessions && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation \
