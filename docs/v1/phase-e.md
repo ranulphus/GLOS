@@ -247,8 +247,10 @@ are as they were).
     host's reads its own output's file back, Loop A's reads the app's output as it comes), and then for its
     window's going (`gone "Packing"`), where the older scripts pause a second and a half: on the 486's profile
     that was not enough for these, and the keys typed while a job's window was going were nobody's.
+  - **Extract To...** (2026-11-20; File's menu, the context menu): the archive unpacked into a folder of its
+    name in a folder chosen for it (the toolkit's folder dialog: its tree, or a path typed). `files-arc` has it.
   - **Not yet:** a thing of one archive pasted straight into another (it is unpacked to a folder first),
-    renaming inside a ZIP, "Extract To...", LZH/LHA, ARJ and 7z, the old ZIPs' implode and shrink, big archives
+    renaming inside a ZIP, LZH/LHA, ARJ and 7z, the old ZIPs' implode and shrink, big archives
     listed as they load (a TAR in a GZ is unpacked from end to end for its list, with the window waiting),
     names by long file names where DOS has them, the packer's speed on a 486 (unmeasured: its quick level is
     there for it).

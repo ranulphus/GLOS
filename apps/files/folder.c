@@ -60,7 +60,7 @@ static struct {                         /* the browser's view and its columns, a
 
 enum { C_OPEN = 1, C_NEWDIR, C_RENAME, C_DELETE, C_CLOSE, C_CUT, C_COPY, C_PASTE, C_ALL, C_BIG, C_DETAILS, C_REFRESH,
        C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS, C_PROPS, C_FIND, C_EXTRACT, C_ZIP, C_DELETE_NOW, C_RECYCLE,
-       C_SMALL, C_THUMBS, C_OPENWITH };
+       C_SMALL, C_THUMBS, C_OPENWITH, C_EXTRACT_TO };
 
 static void say(const char *what, const char *a)
 {
@@ -1639,6 +1639,7 @@ static void command(struct gui_window *w, int id)
         }
         break;
     case C_EXTRACT:                             /* the chosen archive unpacked into a folder of its name, here */
+    case C_EXTRACT_TO:                          /* ... or in a folder chosen for it */
         if (r < 0)
             break;
         gui_path_join(from, sizeof from, v->dir, v->ents[(size_t)gui_list_user(v->list, r)].name);
@@ -1648,14 +1649,24 @@ static void command(struct gui_window *w, int id)
         }
         {
             struct job *j;
-            char *dot;
+            char *dot, base[260];
+            snprintf(base, sizeof base, "%s", v->dir);
+            if (id == C_EXTRACT_TO) {
+                char *q;
+                if (!gui_folder_dialog(w, GUI_T("Extract To"), base, sizeof base))
+                    break;
+                for (q = base; *q; q++)         /* (a path typed: as DOS has it) */
+                    if (*q >= 'a' && *q <= 'z')
+                        *q = (char)(*q - 32);
+                say("extract to", base);
+            }
             snprintf(name, sizeof name, "%s", v->ents[(size_t)gui_list_user(v->list, r)].name);
             if ((dot = strrchr(name, '.')) != NULL)
                 *dot = 0;
-            gui_path_join(to, sizeof to, v->dir, name);
+            gui_path_join(to, sizeof to, base, name);
             {
-                struct gui_dirent st;           /* one of that name is here: a free name beside it */
-                if ((gui_stat(to, &st) == 0 || gui_is_dir(to)) && free_name(v->dir, name, to, sizeof to) != 0)
+                struct gui_dirent st;           /* one of that name is there: a free name beside it */
+                if ((gui_stat(to, &st) == 0 || gui_is_dir(to)) && free_name(base, name, to, sizeof to) != 0)
                     break;
             }
             if (!(j = calloc(1, sizeof *j)) || !(j->buf = malloc(JOB_BUF))) {
@@ -1965,6 +1976,7 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
     gui_menu_item(m, GUI_T("&Delete"), C_DELETE, GUI_T("Del"));
     gui_menu_item(m, GUI_T("Delete for &Good"), C_DELETE_NOW, GUI_T("Shift+Del"));
     gui_menu_item(m, GUI_T("&Extract Here"), C_EXTRACT, NULL);
+    gui_menu_item(m, GUI_T("E&xtract To..."), C_EXTRACT_TO, NULL);
     gui_menu_item(m, GUI_T("Add to &ZIP"), C_ZIP, NULL);
     gui_menu_item(m, GUI_T("P&roperties"), C_PROPS, GUI_T("Alt+Enter"));
     gui_menu_sep(m);
@@ -2798,6 +2810,7 @@ static struct view *new_view(const char *dir, int browser)
             gui_menu_item(c, GUI_T("&Delete"), C_DELETE, NULL);
             gui_menu_item(c, GUI_T("Rena&me"), C_RENAME, NULL);
             gui_menu_item(c, GUI_T("&Extract Here"), C_EXTRACT, NULL);
+            gui_menu_item(c, GUI_T("E&xtract To..."), C_EXTRACT_TO, NULL);
             gui_menu_item(c, GUI_T("Add to &ZIP"), C_ZIP, NULL);
             gui_menu_sep(c);
             gui_menu_item(c, GUI_T("&New Folder"), C_NEWDIR, NULL);

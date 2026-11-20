@@ -4,6 +4,7 @@
 # a TAR in a GZ unpacked whole by Extract Here and then gone into, a file of it opened (unpacked beside
 # FILES.EXE first); an archive that is cut short refused with a word; the address bar into a folder of one.
 # The archives are tests/gui/mkarc.py's, in C:\ARC.
+# Extract To unpacks the same archive into a folder chosen for it (typed into the folder dialog).
 run FILES.EXE -browse C:\ARC
 wait "C:\ARC - Files"
 key end
@@ -53,6 +54,14 @@ said FILES extracted 1 unpacked
 gone "Unpacking"
 file C:\ARC\BUNDLE\LETTERS\ONE.TXT The first letter.\r\n
 file C:\ARC\BUNDLE\TOP.TXT At the top of the bundle.\r\n
+key alt+f x
+wait "Extract To"
+key alt+f
+type c:\\arc\\out\n
+gone "Extract To"
+said FILES extracted 1 unpacked
+gone "Unpacking"
+file C:\ARC\OUT\BUNDLE\LETTERS\ONE.TXT The first letter.\r\n
 key end
 key up
 key enter
