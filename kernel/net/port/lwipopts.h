@@ -47,8 +47,12 @@ void clock_get_us(unsigned int *sec, unsigned int *us);
 #define SNTP_STARTUP_DELAY          0
 #define SNTP_SUPPRESS_DELAY_CHECK   1
 #define SNTP_UPDATE_DELAY           clock_sntp_interval()
+/* An answer is waited for 5 s and asked for again 15 s after that (RFC 4330's least between two questions): the
+   second question at 20 s, within the 30 s glos time sync waits. (lwIP's 15 s wait put it at 30 s: one lost
+   answer, or a pool's server that would not answer twice in a row, and the sync failed.) */
+#define SNTP_RECV_TIMEOUT           5000
 #define SNTP_RETRY_TIMEOUT          15000
-#define SNTP_PORT                   clock_sntp_port
+#define SNTP_PORT                  clock_sntp_port
 #define SNTP_SET_SYSTEM_TIME_US(sec, us) clock_sntp((unsigned int)(sec), (unsigned int)(us))
 #define SNTP_GET_SYSTEM_TIME(sec, us) do { unsigned int s_, u_; clock_get_us(&s_, &u_); (sec) = s_; (us) = u_; } while (0)
 

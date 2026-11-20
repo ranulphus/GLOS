@@ -7863,12 +7863,12 @@ CONFIG_CASES = [("bf6", "g200", "ne2kpci")]
 class NtpServer:
     """An SNTP server on the host, for the time suite: UDP on 127.0.0.1, which the guest reaches as 10.0.2.2
     through SLiRP, answering with the host's time plus `offset` seconds, the request's transmit time as the
-    originate time (lwIP checks it)."""
+    originate time (lwIP checks it). `deaf`: that many of the next questions are left unanswered."""
 
     def __init__(self):
         import socket
         import threading
-        self.offset, self.asked, self.stop = 0.0, 0, False
+        self.offset, self.asked, self.stop, self.deaf = 0.0, 0, False, 0
         self.s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.s.bind(("127.0.0.1", 0))
         self.s.settimeout(0.3)
@@ -7889,6 +7889,9 @@ class NtpServer:
             if len(data) < 48:
                 continue
             self.asked += 1
+            if self.deaf > 0:
+                self.deaf -= 1
+                continue
             t = self.now() + 2208988800             # (NTP counts from 1900)
             ts = struct.pack("!II", int(t), int((t - int(t)) * 2 ** 32))
             pkt = bytes([0x24, 1, 6, 0xEC]) + bytes(8) + b"GPS\0" + ts + data[40:48] + ts + ts
@@ -7906,9 +7909,10 @@ TIME_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
 def time_case(profile, card):
     """The clock (M10 step A; kernel/core/clock.c, PRD §11.3): SNTP sets it from an NTP server on the host, in
     GLOS.CFG's zone (the United Kingdom's): glos time, the RTC and DOS (CLOCKCHK) agree, in summer time; a step
-    of ten days followed; the end of summer time seen by itself, the RTC and DOS set back an hour; another zone;
-    the time set by hand; a zone refused; TZ in a program's environment; names looked up; and, when the host has
-    the internet, pool.ntp.org through SLiRP agreeing with the host's clock."""
+    of ten days followed; an answer lost and asked for again within glos time sync's wait; the end of summer time
+    seen by itself, the RTC and DOS set back an hour; another zone; the time set by hand; a zone refused; TZ in a
+    program's environment; names looked up; and, when the host has the internet, pool.ntp.org through SLiRP
+    agreeing with the host's clock."""
     import calendar
     tag = "%s-%s" % (profile, card)
     ntp = NtpServer()
@@ -7964,6 +7968,12 @@ def time_case(profile, card):
         if not checks["step"]:
             notes.append("step: rc=%d %r" % (rc, o[-200:]))
         agree("stepped", ntp.now(), 3600, "BST")
+        asked, t0, ntp.deaf = ntp.asked, time.time(), 1     # (an answer lost: asked again within the sync's 30 s)
+        rc, o, _ = agent.ssh("glos time sync", timeout=90)
+        checks["asked-again"] = rc == 0 and "utc=" in o and ntp.asked >= asked + 2 and time.time() - t0 >= 15
+        if not checks["asked-again"]:
+            notes.append("asked-again: rc=%d %r, %d questions in %d s" % (rc, o[-200:], ntp.asked - asked,
+                                                                         time.time() - t0))
         ntp.offset = calendar.timegm((2026, 10, 25, 0, 59, 30, 0, 0, 0)) - time.time()   # (BST ends at 01:00 UTC)
         mark = len(agent.log())
         agent.ssh("glos time sync", timeout=90)
@@ -7985,13 +7995,16 @@ def time_case(profile, card):
         internet = rc == 0 and re.match(r"\d+\.\d+\.\d+\.\d+$", o.strip()) is not None
         checks["resolve-unknown"] = agent.ssh("glos net resolve no-such-name.invalid", timeout=30)[0] == 1
         if internet:                                 # (pool.ntp.org through SLiRP: the host's own time)
+            # (One question to the pool, the one turning SNTP on asks: a second a second later, as glos time sync
+            # here once was, is one a pool's server may leave unanswered, and gate 28's did.)
             agent.ssh("glos config set time server pool.ntp.org")
+            mark = len(agent.log())
             agent.ssh("glos config set time sntp on")
-            rc, o, _ = agent.ssh("glos time sync", timeout=90)
-            m = re.search(r"utc=(\S+)Z", o)
-            checks["pool"] = rc == 0 and bool(m) and abs(at(m.group(1)) - time.time()) <= 5
+            got = until_log("GLOS-TIME set by=sntp", 75, mark)
+            c = clock() if got else None
+            checks["pool"] = bool(c) and abs(c["utc"] - time.time()) <= 5
             if not checks["pool"]:
-                notes.append("pool.ntp.org: %r" % o)
+                notes.append("pool.ntp.org: answered %s, %r" % (got, c))
         else:
             notes.append("no internet from the guest: pool.ntp.org not asked")
         checks["exit"] = agent.ssh("glos exit")[0] == 0
