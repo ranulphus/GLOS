@@ -631,6 +631,9 @@ the performance counters, so it can pace each machine.
   90 KB, the desktop's back buffer 0.94 MB at 800×600×16 and VNC's shadow about 1 MB. About 1 MB of the static
   data could be allocated as needed, on every PC; loadable drivers (Room to grow) would take the code down
   further.
+- **Decided (the owner, 2026-11-20):** the memory diet now, on a branch of its own (the job slots on demand, the
+  frame bitmap and LDTs sized to need, lwIP's pools to the RAM); a **headless 386 tier later**, after native GLOS,
+  with the diet and FPU emulation for apps; no desktop on 386s. The probe branches stay local until then.
 
 ### Newer hardware: the BIOS is the next thing under GLOS
 
