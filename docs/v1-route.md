@@ -551,7 +551,9 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
     service), with the kill's own line above it (`GLOS-KILL ... at=f000:c104`: in the BIOS).
   - **The two changes to the kernel taken out after that gate were not its cause** (the short way for V86
     traps without VME, an app's call without the 256 vectors): the gate with them was only the first to
-    meet a fault that comes about once in a hundred runs of this case. They are to come back.
+    meet a fault that comes about once in a hundred runs of this case. They are back, with a third (an app's
+    call made from the stub's wait: below), after 128 runs of the case with all three on devserver, eight at
+    a time, in which nothing else went wrong.
   - **The test** makes it certain: APPTEST's `tickhang` hooks the BIOS's tick with a handler that never
     returns and waits in DOS; killed there, the VM must still have its tick after (`kill-in-tick`,
     `tick-after-kill`, in the apps suite).
@@ -597,11 +599,20 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
     is compared whole first, and nearly every call has changed nothing): an app's plain call 1,133 to 912
     there, 512 bytes read 4,881 to 3,937 (5,678 before both).
   - **Counted:** an app's call makes two traps more than a program's (18 to 16 on the 486DX2's profile), so
-    what an app still pays over a program (some 0.6 ms a call there) is the kernel's own work in handing
-    the call over: two changes of thread, four of address space, the app's DOS state put in and taken out.
-    Not yet taken apart.
+    what an app paid over a program (some 0.6 ms a call there) was the kernel's own work in handing the call
+    over. Taken apart with the PIT's count at six places: the VM woken 99 microseconds, the app's DOS state
+    put in 62, the call itself some 430, the state taken out 180 (the kernel's `memcmp` goes a byte at a
+    time, over a thousand bytes of vectors), and 215 back to the app, most of it the stub's way round to its
+    wait again (to its loop's top, into the kernel for "what next", out with "nothing", STI, HLT: five trips
+    between V86 code and the kernel).
+  - **Done about that:** the vectors are compared a dword at a time, and an app's call is made from the
+    stub's wait itself (`vm_gp`'s HLT, `kernel/vm/v86.c`: the wait goes on after it; anything else that ends
+    the wait goes back to the stub as before): an app's plain call 912 to 596 microseconds on the 486DX2's
+    profile (1,303 at the start), 512 bytes read 3,937 to 2,713 (5,678 at the start).
   - **Owed:** the same numbers on the real 486 (86Box's cycle counts are not a 486's: the bench's are the
-    ones to believe), and a cheaper way for an app's call into the VM.
+    ones to believe). What is left of an app's call over a program's, some 250 microseconds there: the
+    state in and out (three copies of the vectors and a compare, the address space changed twice) and two
+    changes of thread.
 
 - **Two cases that failed once under a gate's load on devserver and not in isolation** (the ninth gate,
   2026-11-18; three runs each here afterwards, all passing):

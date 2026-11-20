@@ -55,12 +55,21 @@ in its `docs/milestones-*.md`.
 - A drive's Recycle folder holds a tenth of the drive at most (the oldest go first). `[desktop] recycle = off`
   turns it off.
 
+## Fixed: a drive "not ready" after an app was ended (2026-11-20)
+
+- **Ending an app (`glos kill`, the task list's End) while it was inside a DOS call could stop DOS's clock
+  and, at the next write, make the hard disc "not ready"** until GLOS was restarted: the kill sometimes came
+  in the middle of an interrupt's handler and left that interrupt marked as still being served. Rare (about
+  one such kill in a hundred on a 486), and as old as GLOS's apps. It can no longer happen.
+
 ## DOS calls on a 486 without VME (2026-11-20)
 
 - **A quarter to a third quicker for programs** on a processor without VME (a 486DX2, the Cyrix and ST 486s):
   there every CLI, STI, PUSHF, POPF and IRET of DOS's own code is a trap into GLOS, sixteen of them in DOS's
   plainest call, and each went the whole way round. They have a short way now when nothing waits on them.
-  Measured in 86Box only; `tests/dos/doscalls.c` measures it on a PC.
+- **About half the cost for GLOS's own apps there** (Files, Notepad and the rest make their DOS calls through
+  the system's): an app's call is handed over with less work on the way in and out.
+- Measured in 86Box only; `tests/dos/doscalls.c` measures it on a PC.
 
 ## Files: archives as folders (2026-11-19)
 
