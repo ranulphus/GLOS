@@ -4,6 +4,12 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Images: a filmstrip (2026-11-20)
+
+- **View's Filmstrip (T)** shows the folder's pictures in a row along the bottom of the viewer's window; the
+  one shown is framed, and a press on another shows that one. The small pictures are the thumbnails Files
+  makes and keeps, so a folder seen in either program is ready in the other.
+
 ## Files: small icons and thumbnails (2026-11-20)
 
 - **View has four views now:** Large icons, Small icons, Thumbnails and Details. Thumbnails shows each picture

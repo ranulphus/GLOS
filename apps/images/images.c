@@ -9,7 +9,8 @@
  *   IMAGES [FILE]
  *
  * Keys: PgDn, PgUp the next, previous; F fitted; 1 actual size; + and -
- * zoom; the arrows move about a picture bigger than the window.
+ * zoom; the arrows move about a picture bigger than the window; T the
+ * filmstrip (the folder's pictures along the bottom, small).
  * "IMAGES ..." lines on stdout (the suite's). */
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,9 +20,10 @@
 #include <glos/gui.h>
 
 #include "../shared/picfile.h"
+#include "../shared/thumbs.h"
 
 enum { C_OPEN = 1, C_NEXT, C_PREV, C_EXIT, C_FIT, C_ACTUAL, C_IN, C_OUT, C_ABOUT, C_LEFT, C_RIGHT, C_ACROSS, C_OVER,
-       C_DETAILS, C_SLIDES, C_FULL, C_EDIT };
+       C_DETAILS, C_SLIDES, C_FULL, C_EDIT, C_STRIP };
 
 static const int zooms[] = { 125, 250, 500, 1000, 2000, 4000, 8000 };   /* tenths of a per cent */
 
@@ -40,6 +42,7 @@ static struct gui_widget *full_view;
 static char home[260];                  /* where IMAGES.EXE is: PAINT.EXE is beside it */
 
 static void status_line(void);
+static void strip_sync(void);
 
 static int load(const char *path)
 {
@@ -82,6 +85,7 @@ static int load(const char *path)
     fflush(stdout);
     status_line();
     gui_damage(view);
+    strip_sync();
     return 0;
 }
 
@@ -395,11 +399,309 @@ static void full_closed(struct gui_window *w)   /* (closed by GLOS: Alt+F4, the 
     fullscreen(0);
 }
 
+/* ---- the filmstrip (phase E; docs/v1/apps/paint.md): the folder's pictures in a row along the window's bottom
+   edge, each half the size of a kept thumbnail (apps/shared/thumbs.c: Files' own, so a folder Files has shown as
+   thumbnails is here at once, and the other way). The one shown is framed; a press on another shows it; the wheel
+   moves the row. They are made one at a time on a worker's thread, those in the row first, then those beside it;
+   STRIP_KEEP of them are kept in memory, the farthest from the one shown going first. View's Filmstrip (T)
+   shows and hides it, and IMAGES.CFG beside the program keeps which. */
+#define STRIP_PIC (GUI_THUMB / 2)
+#define STRIP_CELL (STRIP_PIC + 8)
+#define STRIP_H (STRIP_PIC + 11)
+#define STRIP_KEEP 160
+
+struct spic {
+    unsigned *px;
+    short w, h;
+    char state;                         /* 0 not looked at; 1 being made; 2 made; 3 none (not a picture after all) */
+};
+
+static struct {
+    struct gui_widget *w;
+    struct gui_menu *menu;              /* View, for the item's mark */
+    int on;
+    char dir[260];
+    struct gui_dirent *e;               /* the folder's pictures (by their names' ends), in the folder's order */
+    struct spic *t;
+    int n, cur, first, kept;            /* cur: the one shown (-1: none of them); first: the leftmost in the row */
+    int gen;                            /* which listing: one made for an older listing is nobody's */
+    int busy, ticking, trimmed;
+} strip;
+
+struct smake {
+    int gen, i, w, h, made;
+    char path[300];
+    struct gui_dirent e;
+    unsigned *px;
+};
+
+static void strip_next(void *arg);
+
+/* How many are whole in the row. (By the window's width, which the strip has all of: its own is not known until
+   the window has been laid out again, and the first is made before that.) */
+static int strip_fits(void) { return win && win->w >= 8 + STRIP_CELL ? (win->w - 8) / STRIP_CELL : 1; }
+
+static void strip_free(void)
+{
+    int i;
+    for (i = 0; i < strip.n; i++)
+        free(strip.t[i].px);
+    free(strip.t);
+    free(strip.e);
+    strip.t = NULL, strip.e = NULL;
+    strip.n = strip.kept = strip.first = 0;
+    strip.cur = -1;
+    strip.dir[0] = 0;
+    strip.gen++;
+}
+
+static void strip_show_cur(void)        /* the row moved so that the one shown is in it, with one either side */
+{
+    int fits = strip_fits();
+    if (strip.cur >= 0) {
+        if (strip.cur - 1 < strip.first)
+            strip.first = strip.cur - 1;
+        if (strip.cur + 1 >= strip.first + fits)
+            strip.first = strip.cur + 2 - fits;
+    }
+    if (strip.first > strip.n - fits)
+        strip.first = strip.n - fits;
+    if (strip.first < 0)
+        strip.first = 0;
+}
+
+/* The picture shown has changed (load), or the strip has just been shown: its folder listed if it is another,
+   the picture found in it. */
+static void strip_sync(void)
+{
+    char dir[260];
+    struct gui_dirent *e = NULL;
+    int n, i, k = 0;
+    if (!strip.on || !strip.w || !pic.path[0])
+        return;
+    snprintf(dir, sizeof dir, "%s", pic.path);
+    gui_path_up(dir);
+    if (strcmp(dir, strip.dir) != 0) {
+        strip_free();
+        n = gui_dir_read(dir, &e);
+        for (i = 0; i < n; i++)
+            if (!e[i].dir && pic_is_picture(e[i].name))
+                e[k++] = e[i];
+        strip.e = e, strip.n = k;
+        if (!(strip.t = calloc((size_t)k + 1, sizeof *strip.t)))
+            abort();
+        snprintf(strip.dir, sizeof strip.dir, "%s", dir);
+    }
+    strip.cur = -1;
+    for (i = 0; i < strip.n; i++)
+        if (!strcmp(strip.e[i].name, gui_path_name(pic.path)))
+            strip.cur = i;
+    strip_show_cur();
+    gui_damage(strip.w);
+    if (!strip.ticking) {
+        strip.ticking = 1;
+        gui_idle(strip_next, NULL, 250);
+    }
+    strip_next(NULL);
+}
+
+static unsigned *halve(const unsigned *px, int w, int h, int *pw, int *ph)     /* each pixel the mean of four */
+{
+    int hw = (w + 1) / 2, hh = (h + 1) / 2, x, y;
+    unsigned *out = malloc((size_t)hw * (size_t)hh * sizeof *out);
+    for (y = 0; out && y < hh; y++)
+        for (x = 0; x < hw; x++) {
+            unsigned r = 0, g = 0, b = 0, k = 0;
+            int i, j;
+            for (j = y * 2; j < y * 2 + 2 && j < h; j++)
+                for (i = x * 2; i < x * 2 + 2 && i < w; i++) {
+                    unsigned c = px[j * w + i];
+                    r += c >> 16 & 255, g += c >> 8 & 255, b += c & 255, k++;
+                }
+            out[y * hw + x] = r / k << 16 | g / k << 8 | b / k;
+        }
+    *pw = hw, *ph = hh;
+    return out;
+}
+
+static void strip_work(struct gui_task *t, void *arg)
+{
+    struct smake *m = arg;
+    unsigned *px;
+    int w = 0, h = 0;
+    (void)t;
+    if (!strip.trimmed) {                       /* (once a run, before the first is made) */
+        strip.trimmed = 1;
+        thumb_trim();
+    }
+    if ((px = thumb_make(m->path, &m->e, &w, &h, &m->made)) != NULL) {
+        m->px = halve(px, w, h, &m->w, &m->h);
+        free(px);
+    }
+}
+
+static void strip_done(struct gui_window *owner, void *arg, int cancelled)
+{
+    struct smake *m = arg;
+    (void)owner, (void)cancelled;
+    strip.busy = 0;
+    if (m->gen == strip.gen && m->i < strip.n && strip.t[m->i].state == 1) {
+        struct spic *t = &strip.t[m->i];
+        if (m->px) {
+            t->px = m->px, t->w = (short)m->w, t->h = (short)m->h, t->state = 2;
+            m->px = NULL;
+            strip.kept++;
+            printf("IMAGES strip %s %dx%d %s\n", m->e.name, t->w, t->h, m->made ? "made" : "kept");
+        } else {
+            t->state = 3;
+            printf("IMAGES strip none %s\n", m->e.name);
+        }
+        fflush(stdout);
+        if (strip.w)
+            gui_damage(strip.w);
+    }
+    free(m->px);
+    free(m);
+    strip_next(NULL);
+}
+
+static void strip_next(void *arg)
+{
+    int fits, k, i = -1;
+    struct smake *m;
+    (void)arg;
+    if (!strip.on || !strip.n) {
+        if (strip.ticking)
+            gui_idle(strip_next, NULL, 0);
+        strip.ticking = 0;
+        return;
+    }
+    if (strip.busy)
+        return;
+    fits = strip_fits() + 1;
+    for (k = 0; k < fits && i < 0; k++)         /* those in the row, */
+        if (strip.first + k < strip.n && !strip.t[strip.first + k].state)
+            i = strip.first + k;
+    for (k = 1; k <= fits && i < 0; k++) {      /* then a row's worth after it and before it */
+        if (strip.first + fits - 1 + k < strip.n && !strip.t[strip.first + fits - 1 + k].state)
+            i = strip.first + fits - 1 + k;
+        else if (strip.first - k >= 0 && !strip.t[strip.first - k].state)
+            i = strip.first - k;
+    }
+    if (i < 0)
+        return;
+    while (strip.kept >= STRIP_KEEP) {          /* (room: the farthest from the one to be made goes) */
+        int far = -1, j;
+        for (j = 0; j < strip.n; j++)
+            if (strip.t[j].state == 2 && (far < 0 || abs(j - i) > abs(far - i)))
+                far = j;
+        if (far < 0 || abs(far - i) <= fits * 2)
+            break;
+        free(strip.t[far].px);
+        strip.t[far].px = NULL, strip.t[far].state = 0;
+        strip.kept--;
+    }
+    if (!(m = calloc(1, sizeof *m)))
+        return;
+    m->gen = strip.gen, m->i = i, m->e = strip.e[i];
+    gui_path_join(m->path, sizeof m->path, strip.dir, strip.e[i].name);
+    strip.t[i].state = 1;
+    strip.busy = 1;
+    if (!gui_task_start(NULL, NULL, strip_work, m, strip_done, 0)) {    /* (no threads: made here) */
+        strip_work(NULL, m);
+        strip_done(NULL, m, 0);
+    }
+}
+
+static void strip_draw(struct gui_widget *w, struct gfx_surface *s)
+{
+    int i, fits = strip_fits() + 1;
+    gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, GUI_DARK);
+    gfx_fill(s, w->r.x, w->r.y, w->r.w, 1, GUI_LINE);
+    for (i = strip.first; i < strip.n && i < strip.first + fits; i++) {
+        const struct spic *t = &strip.t[i];
+        int x = w->r.x + 4 + (i - strip.first) * STRIP_CELL, y = w->r.y + 5;
+        if (t->px)
+            gfx_image(s, x + 4 + (STRIP_PIC - t->w) / 2, y + (STRIP_PIC - t->h) / 2, t->px, t->w, t->h, (unsigned)t->w);
+        else
+            gfx_frame(s, x + 4 + STRIP_PIC / 4, y + STRIP_PIC / 4, STRIP_PIC / 2, STRIP_PIC / 2, GUI_LINE);
+        if (i == strip.cur) {                   /* (a light line and the theme's mark: one of them shows on any
+                                                   backdrop) */
+            gfx_frame(s, x + 1, y - 3, STRIP_PIC + 6, STRIP_PIC + 6, GUI_CHOSEN_TEXT);
+            gfx_frame(s, x + 2, y - 2, STRIP_PIC + 4, STRIP_PIC + 4, GUI_CHOSEN);
+        }
+    }
+}
+
+static void slideshow(int on);
+
+static int strip_event(struct gui_widget *w, struct gui_ev *e)
+{
+    if (e->type == GUI_EV_PRESS && e->button == 1) {
+        int i = strip.first + (e->x - w->r.x - 4) / STRIP_CELL;
+        if (e->x >= w->r.x + 4 && i >= 0 && i < strip.n && i != strip.cur) {
+            char p[300];
+            gui_path_join(p, sizeof p, strip.dir, strip.e[i].name);
+            slideshow(0);
+            load(p);
+        }
+        return 1;
+    }
+    if (e->type == GUI_EV_WHEEL) {
+        int fits = strip_fits();
+        strip.first -= e->wheel * 2;
+        if (strip.first > strip.n - fits)
+            strip.first = strip.n - fits;
+        if (strip.first < 0)
+            strip.first = 0;
+        gui_damage(w);
+        strip_next(NULL);
+        return 1;
+    }
+    return 0;
+}
+
+static void strip_keep(int load_it)     /* IMAGES.CFG beside the program: whether the strip shows */
+{
+    char path[300], line[40];
+    FILE *f;
+    snprintf(path, sizeof path, "%s\\IMAGES.CFG", home);
+    if (load_it) {
+        if ((f = gui_fopen(path, "r")) != NULL) {
+            while (fgets(line, sizeof line, f))
+                if (!strncmp(line, "filmstrip=", 10))
+                    strip.on = line[10] == '1';
+            fclose(f);
+        }
+    } else if ((f = gui_fopen(path, "w")) != NULL) {
+        fprintf(f, "filmstrip=%d\n", strip.on);
+        fclose(f);
+    }
+}
+
+static void strip_set(int on)
+{
+    strip.on = on;
+    gui_menu_check(strip.menu, C_STRIP, on);
+    gui_visible(strip.w, on);
+    gui_relayout(win);
+    if (on)
+        strip_sync();
+    else
+        strip_free();
+    printf("IMAGES filmstrip %s\n", on ? "on" : "off");
+    fflush(stdout);
+}
+
 static void command(struct gui_window *w, int id)
 {
     char p[260];
     (void)w;
     switch (id) {
+    case C_STRIP:
+        strip_set(!strip.on);
+        strip_keep(0);
+        break;
     case C_OPEN:
         snprintf(p, sizeof p, "%s", pic.path[0] ? pic.path : glos_boot_root());
         if (gui_file_dialog_ex(win, GUI_T("Open"), 0, p, sizeof p, &file_opts))
@@ -474,6 +776,7 @@ static int key(struct gui_window *w, struct gui_ev *e)      /* (the arrows are t
     case 's': case 'S': command(win, C_SLIDES); return 1;
     case 'e': case 'E': command(win, C_EDIT); return 1;
     case 'f': case 'F': command(win, C_FIT); return 1;
+    case 't': case 'T': command(win, C_STRIP); return 1;
     case '1': command(win, C_ACTUAL); return 1;
     case '+': case '=': command(win, C_IN); return 1;
     case '-': command(win, C_OUT); return 1;
@@ -491,6 +794,11 @@ static void resized(struct gui_window *w)
 {
     (void)w;
     changed();
+    if (strip.on && strip.n) {                  /* (a wider row has more in it) */
+        strip_show_cur();
+        gui_damage(strip.w);
+        strip_next(NULL);
+    }
 }
 
 int main(int argc, char **argv)
@@ -533,6 +841,9 @@ int main(int argc, char **argv)
     gui_menu_sep(m);
     gui_menu_item(m, GUI_T("&Slideshow"), C_SLIDES, "S");
     gui_menu_item(m, GUI_T("F&ull Screen"), C_FULL, "F11");
+    gui_menu_sep(m);
+    gui_menu_item(m, GUI_T("Film&strip"), C_STRIP, "T");
+    strip.menu = m;
     m = gui_menu(bar, GUI_T("&Image"));
     gui_menu_item(m, GUI_T("Turn &Left"), C_LEFT, "L");
     gui_menu_item(m, GUI_T("Turn &Right"), C_RIGHT, "R");
@@ -575,6 +886,12 @@ int main(int argc, char **argv)
     gui_grow(view->parent, 1);
     gui_grow(view, 1);
     win->focus = view;
+    thumb_home(home);                           /* (thumbnails are kept beside the programs: Files' too) */
+    strip.cur = -1;
+    strip.w = gui_canvas(view->parent, 0, STRIP_H, strip_draw, strip_event);
+    strip_keep(1);
+    gui_menu_check(strip.menu, C_STRIP, strip.on);
+    gui_visible(strip.w, strip.on);
     status = gui_status(win);
     gui_show(win, 1);
     if (argc > 1)

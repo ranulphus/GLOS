@@ -50,14 +50,6 @@ struct recycled {
     unsigned long kb;
     int dir;
 };
-/* thumbs.c: a picture's thumbnail (the thumbnail view) */
-struct gui_dirent;
-int thumb_is_picture(const char *name);         /* by its name's end: a kind that has one */
-unsigned *thumb_make(const char *path, const struct gui_dirent *e, int *pw, int *ph, int *made);       /* its pixels
-                                           (malloc'd, 00RRGGBBh, at most GUI_THUMB each way), from the kept one or
-                                           made now and kept (*made 1); NULL: none. For a worker's thread */
-void thumb_trim(void);                  /* the kept ones' folder brought under its limits (the oldest go) */
-
 int recycle_on(void);                   /* [desktop] recycle */
 int recycle_can(const char *path);      /* a thing of this path would go there (a hard disc's, and it is on) */
 int recycle_is(const char *dir, const char *name);      /* name in dir is a drive's Recycle folder itself: not shown */

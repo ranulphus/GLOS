@@ -1,7 +1,8 @@
-/* Thumbnails for Files' thumbnail view (phase E; docs/v1/apps/files.md, Views): a picture's file read and decoded
- * (apps/shared/picfile.c: the viewer's and the editor's own decoders), made small enough for the list's square
- * (GUI_THUMB each way at most, its shape kept), and kept in a folder beside FILES.EXE (THUMBS) under a name made
- * from its path, so that the next time it is one small file read: a big JPEG takes a 486 many seconds.
+/* Thumbnails, for Files' thumbnail view and Images' filmstrip (phase E; docs/v1/apps/files.md, Views; thumbs.h):
+ * a picture's file read and decoded (picfile.c: the viewer's and the editor's own decoders), made small enough for
+ * the toolkit's list's square (GUI_THUMB each way at most, its shape kept), and kept in a folder beside the
+ * programs (THUMBS, in the folder thumb_home names: GLOS's own apps are all in one, so they share it) under a
+ * name made from its path, so that the next time it is one small file read: a big JPEG takes a 486 many seconds.
  *
  * A kept thumbnail is its picture's only while the file's size and date are what they were when it was made (its
  * head says them, and the path's second hash, in case two paths make one name). The folder is kept to
@@ -15,8 +16,8 @@
 
 #include <glos/gui.h>
 
-#include "files.h"
-#include "../shared/picfile.h"
+#include "picfile.h"
+#include "thumbs.h"
 
 #define THUMBS_FILES 400
 #define THUMBS_BYTES (6ul << 20)
@@ -37,11 +38,15 @@ static unsigned long hash(const char *path, unsigned long h, unsigned long mul)
     return h;
 }
 
-static void cache_dir(char *out, size_t room) { snprintf(out, room, "%s\\THUMBS", files_home); }
+static char home[260];                  /* thumb_home: THUMBS is in it ("": nothing is kept) */
+
+void thumb_home(const char *dir) { snprintf(home, sizeof home, "%s", dir ? dir : ""); }
+
+static void cache_dir(char *out, size_t room) { snprintf(out, room, "%s\\THUMBS", home); }
 
 static void cache_name(char *out, size_t room, const char *path)
 {
-    snprintf(out, room, "%s\\THUMBS\\%08lX.THM", files_home, hash(path, 2166136261ul, 16777619ul));
+    snprintf(out, room, "%s\\THUMBS\\%08lX.THM", home, hash(path, 2166136261ul, 16777619ul));
 }
 
 static void put16(unsigned char *p, unsigned v) { p[0] = (unsigned char)v, p[1] = (unsigned char)(v >> 8); }
@@ -65,7 +70,7 @@ static unsigned *cache_read(const char *path, const struct gui_dirent *e, int *p
     FILE *f;
     int w, ht, i;
     cache_name(name, sizeof name, path);
-    if (!(f = gui_fopen(name, "rb")))
+    if (!home[0] || !(f = gui_fopen(name, "rb")))
         return NULL;
     if (fread(h, 1, HEAD, f) == HEAD) {
         w = (int)get16(h + 4), ht = (int)get16(h + 6);
@@ -91,7 +96,7 @@ static void cache_write(const char *path, const struct gui_dirent *e, const unsi
     unsigned char h[HEAD], *rgb;
     FILE *f;
     int i, ok;
-    if (!(rgb = malloc((size_t)w * (size_t)ht * 3)))
+    if (!home[0] || !(rgb = malloc((size_t)w * (size_t)ht * 3)))
         return;
     for (i = 0; i < w * ht; i++)
         rgb[i * 3] = (unsigned char)(px[i] >> 16), rgb[i * 3 + 1] = (unsigned char)(px[i] >> 8), rgb[i * 3 + 2] = (unsigned char)px[i];
@@ -194,6 +199,8 @@ void thumb_trim(void)
     struct gui_dirent *e = NULL;
     unsigned long bytes = 0;
     int n, i, files = 0;
+    if (!home[0])
+        return;
     cache_dir(dir, sizeof dir);
     n = gui_dir_read(dir, &e);
     for (i = 0; i < n; i++)

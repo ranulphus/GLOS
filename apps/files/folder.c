@@ -14,6 +14,7 @@
 
 #include "files.h"
 #include "../shared/arc.h"
+#include "../shared/thumbs.h"
 
 #define HIST 16
 
@@ -367,7 +368,7 @@ static void fill(struct view *v)
     status_text(v);
 }
 
-/* ---- thumbnails (phase E: the thumbnail view; thumbs.c makes one)
+/* ---- thumbnails (phase E: the thumbnail view; apps/shared/thumbs.c makes one)
 
    A view that shows thumbnails has one place for each of its folder's entries (tp, beside ents). Pictures' are
    made one at a time on a worker's thread, those on the screen first and then a screenful after them
@@ -2484,6 +2485,7 @@ void folders_load(void)
     FILE *f;
     arc_files(gui_fopen, gui_unlink, gui_rename);       /* (the toolkit's: they know DOS's paths on the host too) */
     arc_temp_clean();                           /* (Files is starting: what was unpacked to be opened goes) */
+    thumb_home(files_home);                     /* (thumbnails are kept beside the programs) */
     snprintf(p, sizeof p, "%s\\FOLDERS.CFG", files_home);
     if (!(f = gui_fopen(p, "r")))
         return;

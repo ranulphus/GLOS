@@ -207,11 +207,11 @@ APP_HOST_LIBS_term := tests/host/shimshell.c sdk/shell/shell.c sdk/shell/edit.c
 # Archives read and ZIPs written (Files' folders, phase E): the reader and writer, the packer, the loader's unpacker.
 ARC_SRCS := apps/shared/arc.c apps/shared/deflate.c loader/inflate.c
 # Pictures read and written: one code in the viewer and the editor (apps/shared/picfile.c).
-APP_HOST_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c
-APP_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c
-APP_HOST_LIBS_images := apps/shared/picfile.c
+APP_HOST_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c
+APP_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c
+APP_HOST_LIBS_images := apps/shared/picfile.c apps/shared/thumbs.c
 APP_HOST_LIBS_paint := apps/shared/picfile.c
-APP_LIBS_images := apps/shared/picfile.c
+APP_LIBS_images := apps/shared/picfile.c apps/shared/thumbs.c
 APP_LIBS_paint := apps/shared/picfile.c
 build/host/libsshc32.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h
 	@mkdir -p build/host/sshc32
@@ -977,11 +977,14 @@ build/dj/GUITEST.EXE: tests/dos/guitest.c build/sdk/libgui.a build/sdk/libglos.a
 	$(Q)python3 tools/glosmark.py $@
 # The native apps for DOS: build/apps/NAME.EXE.
 APP_EXES := $(foreach a,$(APPS),build/apps/$(shell echo $(a) | tr a-z A-Z).EXE)
-# An app with threads of its own (the toolkit's tasks: Files' copying) is linked with the C library's lock
+# An app with threads of its own (the toolkit's tasks: Files' copying, Images' filmstrip) is linked with the C library's lock
 # (@build/sdk/gloswrap.opt, as GUITEST is), and its map is checked for callers that went round the lock.
 APP_DEPS_files := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_files := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/FILES.map -Wl,--cref
 APP_AFTER_files := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/FILES.map
+APP_DEPS_images := build/sdk/gloswrap.opt tools/wrapcheck.py
+APP_LINK_images := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/IMAGES.map -Wl,--cref
+APP_AFTER_images := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/IMAGES.map
 define app_exe
 build/apps/$(1).EXE: $$(wildcard apps/$(2)/*.c apps/$(2)/*.h) build/sdk/libgui.a build/sdk/libglos.a tools/glosmark.py $$(APP_LIBS_$(2)) $$(APP_DEPS_$(2))
 	@mkdir -p build/apps

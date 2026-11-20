@@ -312,8 +312,19 @@ Plan: `docs/v1/apps/paint.md` (Images stays the viewer; Paint is the editor to c
   Previous, turning and the slideshow work there as in the window.
 - **Tests:** `images-view` on the host and on Loop A; `images` as before (its pictures have the toolbar now).
 - **Edit** (E; with Paint, below): the picture shown is opened in Paint.
-- **Not done yet:** the filmstrip of the folder's pictures; the picture kept as tiles (any size
-  memory allows).
+- **The filmstrip** (2026-11-20): View's **Filmstrip** (T) shows the folder's pictures in a row along the
+  bottom of the window, small, the one shown framed; a press on another shows it, the wheel moves the row,
+  PgDn and PgUp take the frame along. Images remembers whether it was shown (`IMAGES.CFG` beside the program).
+  - The pictures are Files' thumbnails (`apps/shared/thumbs.c`, moved there from Files; the kept ones' folder
+    is one for both programs), shown at half their size: a folder Files has shown as thumbnails is in the
+    strip at once, and the other way. They are made one at a time on a worker's thread (Images is linked
+    with the C library's lock now, as Files is), those in the row first and then a row either side; 160 are
+    kept in memory, the farthest from the one wanted going first.
+  - **Tests:** `images-strip` on the host and on Loop A (the strip of `C:\PIX`, each one said as it is made;
+    the next picture; a press; the strip hidden again).
+  - **Not yet:** the strip down the side; a bigger size on a big screen; names under the pictures or as
+    tooltips; the row dragged.
+- **Not done yet:** the picture kept as tiles (any size memory allows).
 
 ## Paint (2026-11-19): the editor's first part
 
