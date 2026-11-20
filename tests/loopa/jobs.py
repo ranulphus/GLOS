@@ -184,7 +184,8 @@ class Background(subprocess.Popen):
 def run(name, args, background=False):
     if os.environ.get("GLOS_SET"):              # GLOS.EXE's flags for the whole run (GLOS_SET=/DIRECT: forced direct mode;
         args = ["--pre", "SET GLOS=" + os.environ["GLOS_SET"]] + args      # not as the shell, started before RUN.BAT)
-    out = os.path.join(ROOT, "out", name)
+    name += os.environ.get("LOOPA_SUFFIX", "")  # (tools/soak.sh: the same case several times at once, each run
+    out = os.path.join(ROOT, "out", name)       # under a name and in a folder of its own)
     os.makedirs(out, exist_ok=True)
     for stale in ("serial.log", "status", "result.json"):   # a background run's caller polls these
         if os.path.exists(os.path.join(out, stale)):
@@ -1665,7 +1666,7 @@ class Agent:
         self.proc = run(name, os.environ.get("SSH_EXTRA", "").split() + [
             "--machine", profile, "--net", card, "--net-fwd", "%d:22" % self.port, "--timeout", str(timeout),
             "--idle", "300"] + GLOS_FILES + KEYS + args, background=True)
-        self.serial = os.path.join(ROOT, "out", name, "serial.log")
+        self.serial = os.path.join(ROOT, "out", self.proc.run_name, "serial.log")
         self.tmp = tempfile.mkdtemp()
         self.key, known = os.path.join(self.tmp, "client"), os.path.join(self.tmp, "known")
         open(self.key, "w").write(open(os.path.join(ROOT, "tests/keys/client")).read())
