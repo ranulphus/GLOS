@@ -56,6 +56,9 @@ static struct {
     u8 on;                              /* the screen is in the desktop's mode */
     u8 held;                            /* ... but for a session, which has it in text mode */
     u8 ask;                             /* 1 + DISPLAY_: what the VM thread is to do */
+    u8 turning;                         /* ... and it is doing it now: w, h, bpp and mode are that change's */
+    u8 next;                            /* 1 + DISPLAY_: asked for meanwhile, taken up at that one's end ... */
+    u16 next_w, next_h, next_bpp;       /* ... with its mode */
     u8 dac;                             /* bits a colour in the DAC, at 8 bits a pixel */
     u16 w, h, bpp;                      /* the mode wanted */
     u16 mode;                           /* its VBE number */
@@ -483,17 +486,29 @@ void display_init(const struct bootinfo *bi)
     }
 }
 
+/* (Interrupts off.) A change taken for the VM thread to make. */
+static void take(int what, u32 w, u32 h, u32 bpp)
+{
+    if (w && (w != d.w || h != d.h || bpp != d.bpp)) {
+        d.w = (u16)w, d.h = (u16)h, d.bpp = (u16)bpp;
+        d.mode = 0;                             /* (to be found) */
+    }
+    d.ask = (u8)(1 + what);
+    vm_kick();
+}
+
+/* A change asked for: 0, or -1 (one is asked for already and not yet begun). One asked for while another is
+   being made waits for that one's end: its numbers taken at once would be the mode's under the VM thread's
+   hands (gate 29: a mode logged as "mode=0 640x480x32 pitch=1280 rgb=5.6.5"). */
 int display_ask(int what, u32 w, u32 h, u32 bpp)
 {
     u32 f = irq_save();
     int r = -1;
-    if (!d.ask) {
-        if (w && (w != d.w || h != d.h || bpp != d.bpp)) {
-            d.w = (u16)w, d.h = (u16)h, d.bpp = (u16)bpp;
-            d.mode = 0;                         /* (to be found) */
-        }
-        d.ask = (u8)(1 + what);
-        vm_kick();
+    if (d.turning && !d.ask) {
+        d.next = (u8)(1 + what), d.next_w = (u16)w, d.next_h = (u16)h, d.next_bpp = (u16)bpp;
+        r = 0;
+    } else if (!d.ask) {
+        take(what, w, h, bpp);
         r = 0;
     }
     irq_restore(f);
@@ -552,6 +567,8 @@ void display_power_post(int state)
     irq_restore(f);
 }
 
+static void turn(int what);
+
 void display_vm_turn(void)
 {
     int what = d.ask - 1;
@@ -570,7 +587,22 @@ void display_vm_turn(void)
         app_turn();
     if (!d.ask)
         return;
+    d.turning = 1;                              /* (set before the asking is taken: never neither) */
     d.ask = 0;
+    turn(what);
+    {
+        u32 f = irq_save();
+        d.turning = 0;
+        if (d.next) {                           /* (what was asked for meanwhile: the next turn's) */
+            take(d.next - 1, d.next_w, d.next_h, d.next_bpp);
+            d.next = 0;
+        }
+        irq_restore(f);
+    }
+}
+
+static void turn(int what)
+{
     /* (A mode of a window's own goes with the desktop's.) */
     d.app_ask = 0;
     d.app_w = d.app_h = d.want_w = d.want_h = 0;
@@ -763,9 +795,15 @@ quiet:
     }
 }
 
+/* The display's state in a line (glos display). While a change asked for waits for the VM thread or is being
+   made, it says so and no more: the mode's numbers are already the new ones, and "on" with them would be a
+   mode that is not on the screen yet (gate 29: two suites took their pictures by it, a mode too early, when
+   the VM thread was a second late: it was still starting the console). */
 u32 display_stat(char *buf, u32 max)
 {
     u32 n;
+    if (d.ask || d.turning)
+        return (u32)ksnprintf(buf, max, "display changing\n");
     if (!d.on)
         n = (u32)ksnprintf(buf, max, "display off%s\n", d.w ? "" : " (no mode given)");
     else

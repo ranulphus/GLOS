@@ -256,3 +256,21 @@ config like PuTTY). The Terminal's Connections (a name, a host, a user and a por
   Terminal's page of the Start menu, and starts it. The log: `sesslog_test` on the host (what is kept of 17
   kinds of output, each also cut in two at every place; the file begun and added to; 2,000 pieces of
   rubbish), and on Loop A a session's two runs in its file and a login with a pty logged with no escape in it.
+
+## The display's state, told a mode too early (2026-11-20)
+
+Gate 29 failed two cases, the desktop's and the test card's pictures at 16 bits on the Matrox cards, with
+nothing in its commits to do with either. An old race, found by it:
+
+- A mode asked for (`glos display on`, the Control Panel) is made by the VM thread at its next turn, which
+  takes seconds (the card's BIOS). From the asking on, `glos display` said **"display on"** with the new
+  mode's numbers: the tests waited for that line and took their pictures. As a rule the VM thread had begun
+  by then (the line said "off" meanwhile); in gate 29 it was a second late (it was still starting the
+  console), and the pictures were of the mode before.
+- Worse, a second mode asked for while the first was being made changed the first's numbers under the VM
+  thread's hands: the log's `mode=0 640x480x32 pitch=1280 rgb=5.6.5` (a 16-bit mode told as 32).
+- **Now** `glos display` says **"display changing"** from the asking until the mode is on the screen, and a
+  mode asked for while another is being made waits for that one's end (`display.c`: `turning`, `next`).
+- **Tests** (the display suite, every card): the answer right after an asking is "display changing" (or the
+  mode asked for, with its real number, where the card was quicker than the question); a mode asked for a
+  second after another ends as the mode on the screen, and no line of the log says `mode=0`.

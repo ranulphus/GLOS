@@ -3731,8 +3731,10 @@ def display_case(profile, vcard, card, cfg_mode, accel="on"):
     (tests/host/gfx_test.c wrote it: build/host/gfx-card-N.png), pixel for pixel; at 8 bits through the DAC's
     6 bits a colour where the BIOS can't give 8. Then: a DOS program (a session) gets text mode and the card
     is back after it; a program marked as a GLOS app starts, writes to the console and ends with the card
-    untouched; glos display off is text mode; a mode no card has is refused; GLOS leaves in text mode. With a
-    [display] mode in GLOS.CFG the desktop is there from the start, one colour above its task bar.
+    untouched; while a mode asked for is not yet on the screen glos display says "display changing", and one
+    asked for while another is being made waits its turn; glos display off is text mode; a mode no card has is
+    refused; GLOS leaves in text mode. With a [display] mode in GLOS.CFG the desktop is there from the start,
+    one colour above its task bar.
     On a Matrox card the drawing engine is up on every desktop mode (M7 step C: glos display says "accel on",
     and the card is let go of for a session and with the desktop off), unless GLOS.CFG's accel = off."""
     import time
@@ -3795,13 +3797,33 @@ def display_case(profile, vcard, card, cfg_mode, accel="on"):
         line = ""
         for bits in (8, 16, 32):
             checks["ask-%d" % bits] = agent.ssh("glos display card 640x480x%d" % bits)[0] == 0
+            # (Until the mode is on the screen the answer is "display changing": it was "display on" with the
+            # new mode's numbers from the asking on, and gate 29's pictures were taken by it, a mode too early.)
+            first = agent.ssh("glos display")[1]
+            checks["changing-%d" % bits] = first.startswith("display changing") or (
+                first.startswith("display on mode=") and "mode=0 " not in first and (" 640x480x%d " % bits) in first)
+            if not checks["changing-%d" % bits]:
+                info += " after-ask-%d=%r" % (bits, first[:60])
             line = state("display on mode=")
             checks["on-%d" % bits] = " 640x480x%d " % bits in line
             checks["accel-%d" % bits] = want_accel in line and (not engine or int((re.findall(r"draws=(\d+)", line)
                                                                                     or ["0"])[0]) > 0)
             if checks["on-%d" % bits]:
                 checks["card-%d" % bits] = same(shot("card-%d" % bits), card(bits, line), "card at %d bits" % bits)
-        info = " " + " ".join(w for w in line.split() if w.startswith(("mode=", "rgb=", "lfb=")))
+        info += " " + " ".join(w for w in line.split() if w.startswith(("mode=", "rgb=", "lfb=")))
+        # One asked for while another is being made waits its turn (gate 29: it changed the first's numbers under
+        # the VM thread's hands, and the log said "mode=0 640x480x32 pitch=1280 rgb=5.6.5").
+        agent.ssh("glos display card 640x480x16")
+        time.sleep(1)
+        t0 = time.time()
+        while agent.ssh("glos display card 640x480x8")[0] != 0 and time.time() - t0 < 20:   # (busy: not begun yet)
+            time.sleep(0.3)
+        queued = state("display on mode=")
+        checks["queued"] = " 640x480x8 " in queued and "GLOS-DISPLAY on mode=0 " not in agent.log()
+        if not checks["queued"]:
+            info += " queued=%r" % queued[:60]
+        agent.ssh("glos display card 640x480x32")       # (as it was, for what follows)
+        line = state("display on mode=")
         # A session takes the screen and gives it back; an app doesn't take it.
         rc, o, _ = agent.ssh("C:\\TEST\\ECHOARGS.EXE on the screen")
         checks["session"] = rc == 7 and "on the screen" in o
