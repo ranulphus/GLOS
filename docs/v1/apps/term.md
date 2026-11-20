@@ -17,6 +17,11 @@
   - host, user, port, key, and the terminal's settings;
   - kept in GLOS's folder, with keys and passwords in SECRETS, not in the file;
   - opened from a menu, the Start menu's jump list, or `ssh NAME`.
+- **Decided by the owner, 2026-11-20** (phase F; `docs/v1-route.md`, F, "More of SSH"): the saved connections
+  become a session manager as PuTTY has one (a list of sessions, each with its settings: host, port, user, key,
+  the terminal's font, colours and scroll-back, its tunnels), with `ssh NAME` and the Start menu's list; port
+  forwarding (local tunnels); and remote folders are Files' (below, and `files.md`). Older servers' RSA and AES
+  were offered and not chosen.
 - **SFTP from the session:** a side pane to drag files between the PC and the host (Files' views over SFTP),
   beside the session's tab.
 - **Scroll-back:** as long as memory allows (a setting), searchable (Ctrl+Shift+F), with matches highlighted.

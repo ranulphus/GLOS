@@ -286,6 +286,18 @@ two command sets that don't match). Before phase C, because the Terminal is one 
 - **Disk Tools:** floppy images read and written (IMG/IMA), disks formatted, a disk's image to a file, backup to and
   restore from an SFTP server.
 - **Help and a welcome tour:** GLOS's user guide in a viewer, and a first-start tour.
+- **More of SSH** (the owner, 2026-11-20). GLOS has its SSH client since M10 (`SSH.EXE`, `SFTP.EXE`, `SSHKEY.EXE`;
+  the Terminal's saved connections; tested each gate against OpenSSH on Linux, and it logs in to another GLOS
+  PC): no new app is needed for reaching remote GLOS and Linux PCs. Asked what should be added to it, the owner
+  chose:
+  - **Remote folders in Files:** a remote GLOS or Linux PC opened over SFTP like a drive: browsed, files
+    opened, copied and pasted both ways, by the saved connections (`docs/v1/apps/files.md`).
+  - **Saved connections and their settings as PuTTY has them:** the Terminal's Connections grown into a list of
+    saved sessions, each with its settings (the host, port and user; its key; the terminal's own: font, colours,
+    scroll-back; its tunnels), loaded, saved and opened from one dialog; `ssh NAME` from any shell, and the
+    connections in the Start menu (`docs/v1/apps/term.md`).
+  - **Port forwarding:** local tunnels (`ssh -L`), kept with a connection.
+  - Not chosen: older servers (RSA host keys, AES ciphers). The client stays with the modern set.
 - **Two games of GLOS's own** (the owner, 2026-11-19): GLOS comes with games that need nobody's licensed files.
   The ports all need their games' data, and Fifth Wheel and Echoes are projects with timelines of their own, too
   big to ride with a release. Both are original games in a genre, with their own names, pictures, sounds and

@@ -43,6 +43,9 @@ A folder is read whole before anything is shown. No toolbar, no archives, 8.3 na
   picture's size; an archive's contents.
 - **Drives:**
   - floppies, hard disks, CD-ROMs (MSCDEX), network drives where DOS has them;
+  - **remote folders over SFTP** (the owner, 2026-11-20; phase F): a remote GLOS or Linux PC, by the Terminal's
+    saved connections, browsed like a drive: listed as it loads, files opened from a copy, copy and paste both
+    ways as jobs, rename, delete, new folder; the host's key and the password asked as `ssh` asks them;
   - free space as a bar;
   - a floppy's disk changed is noticed.
 - **The shell's part** (`shell.md`): the desktop's icons and wallpaper, the Start menu (Files gives the Start menu
