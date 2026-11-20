@@ -592,5 +592,21 @@ has already (`loader/inflate.c`). PDFio was not tried; no code of another reader
     the even-odd rule, a clip, a matrix, a disc of curves, three kinds of picture, half strength, CMYK, a
     form, a smoothed edge; the page turned a quarter and cropped; a part of it at three times the size; and
     1500 copies with bytes changed at random, their pages drawn at odd scales and corners.
-- **Next**: fonts and text, then the program.
+- **Fonts, the first part** (the third step's ground): what the text will be drawn with.
+  - **`apps/shared/ttf.c`**: GLOS's own TrueType reader: the character maps (formats 0, 4, 6, 12; Unicode,
+    symbol and Macintosh), advances, and outlines (simple glyphs, and glyphs put together from others by
+    their matrices, eight deep), given piece by piece to whoever draws them. The plan named stb_truetype; its
+    own notes say it is not for fonts one cannot trust, and a PDF's embedded font is whatever its writer put
+    there: so every offset and count here is checked against the table it lies in. Not used: stb_truetype.
+  - **Stand-in fonts** (`apps/pdf/fonts`, 490 KB in twelve files): sans, serif and mono, each regular, bold,
+    italic and bold italic, for PDFs that name Helvetica, Times or Courier (or anything else) and carry no
+    font. Made by `tools/mkpdffonts.py` from the Liberation fonts (their widths are those three's): cut down
+    to some 250 glyphs and seven tables, glyphs renumbered; SIL OFL 1.1 (`apps/pdf/fonts/OFL.txt`,
+    `THIRD_PARTY.md`), under names of their own as that licence asks of changed fonts.
+  - **Tests.** `ttf_test` on the host (89 checks, under the sanitizers too): each of the twelve opens; A, o,
+    space and an accented e have the contours they should, every contour closed, every glyph drawn, the
+    advances are Helvetica's, Times's and Courier's; and 3000 copies with bytes changed at random, every
+    glyph of those that open drawn.
+- **Next**: a PDF's fonts (their encodings and widths, embedded TrueType; then CFF and Type 1) and its text
+  operators, then the program.
 
