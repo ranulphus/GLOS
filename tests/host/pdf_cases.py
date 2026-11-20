@@ -294,4 +294,59 @@ draw = {
     11: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /CropBox [100 0 200 50] /Contents 4 0 R /Resources << >> >>",
 }
 write("draw.pdf", classic(draw, 1)[0])
+
+# ---- text (tests/host/pdfdraw_test.c): a page 300 by 200 points
+def glyph_of(font, code):
+    """a character's glyph in a TrueType font, by its Unicode map of format 4 (the stand-in fonts have that alone)"""
+    n = struct.unpack(">H", font[4:6])[0]
+    for i in range(n):
+        tag, _, off, length = struct.unpack(">4sIII", font[12 + 16 * i:28 + 16 * i])
+        if tag == b"cmap":
+            sub = font[off + 12:off + length]
+            segs = struct.unpack(">H", sub[6:8])[0] // 2
+            ends = struct.unpack(">%dH" % segs, sub[14:14 + 2 * segs])
+            starts = struct.unpack(">%dH" % segs, sub[16 + 2 * segs:16 + 4 * segs])
+            deltas = struct.unpack(">%dH" % segs, sub[16 + 4 * segs:16 + 6 * segs])
+            for k in range(segs):
+                if starts[k] <= code <= ends[k]:
+                    return (code + deltas[k]) & 0xFFFF
+    return 0
+
+
+fonts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "apps", "pdf", "fonts")
+serif = open(os.path.join(fonts_dir, "PDFSERI.TTF"), "rb").read()
+mono = open(os.path.join(fonts_dir, "PDFMONOB.TTF"), "rb").read()
+glyphs = b"".join(struct.pack(">H", glyph_of(mono, ord(ch))) for ch in "GLOS 2.10")
+words = b"\n".join([
+    b"BT /F1 24 Tf 20 165 Td (Hello, GLOS!) Tj ET",                                  # Helvetica, not carried: a stand-in
+    b"BT /F2 12 Tf 20 140 Td [(The quick) -250 (brown fox, kerned: A) 80 (V) 80 (A)] TJ ET",
+    b"q BT /F3 10 Tf 20 122 Td 1 Tc 4 Tw (Courier, spaced out) Tj ET Q",              # (the spacings stay until Q)
+    b"BT /F4 12 Tf 14 TL 20 104 Td (Bold: caf\\351 na\\357ve \\200 5) Tj T* /F5 12 Tf (Italic, on the next line) Tj ET",
+    b"BT /F6 14 Tf 20 60 Td (A font the file carries) Tj ET",                         # TrueType, in the file
+    b"BT /F7 14 Tf 20 40 Td <" + glyphs.hex().encode() + b"> Tj ET",                  # ... and one by glyph numbers
+    b"BT /F1 12 Tf 0 1 -1 0 280 20 Tm (Turned) Tj ET",                                # a quarter turned
+    b"q BT /F1 12 Tf 3 Tr 150 20 Td (Unseen) Tj ET Q",                                # not painted
+    b"0 0 1 rg BT /F1 9 Tf 150 8 Td (small and blue) Tj ET",
+])
+text = {
+    1: b"<< /Type /Catalog /Pages 2 0 R >>",
+    2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R "
+       b"/F4 8 0 R /F5 9 0 R /F6 10 0 R /F7 13 0 R >> >> >>",
+    4: stream(b"", words),
+    5: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    6: b"<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>",
+    7: b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
+    8: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
+    9: b"<< /Type /Font /Subtype /Type1 /BaseFont /Times-Italic /Encoding /WinAnsiEncoding >>",
+    10: b"<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+Carried /Encoding /WinAnsiEncoding /FirstChar 32 /LastChar 126 /Widths ["
+        + b" ".join(b"%d" % 500 for _ in range(95)) + b"] /FontDescriptor 11 0 R >>",
+    11: b"<< /Type /FontDescriptor /FontName /ABCDEF+Carried /Flags 32 /FontFile2 12 0 R >>",
+    12: stream(b"/Filter /FlateDecode /Length1 %d" % len(serif), zlib.compress(serif)),
+    13: b"<< /Type /Font /Subtype /Type0 /BaseFont /GHIJKL+Numbered /Encoding /Identity-H /DescendantFonts [14 0 R] >>",
+    14: b"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /GHIJKL+Numbered /CIDToGIDMap /Identity /DW 600 /FontDescriptor 15 0 R >>",
+    15: b"<< /Type /FontDescriptor /FontName /GHIJKL+Numbered /Flags 4 /FontFile2 16 0 R >>",
+    16: stream(b"/Filter /FlateDecode /Length1 %d" % len(mono), zlib.compress(mono)),
+}
+write("text.pdf", classic(text, 1)[0])
 print(out)

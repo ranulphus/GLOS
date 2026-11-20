@@ -12,13 +12,18 @@
  * to show them. Clipping is to boxes: a path set as the clip clips to the box around it (most are boxes).
  * Pictures are drawn by going through the device's pixels under them and asking the picture for each.
  *
- * Not yet: text (the next step), dashes, shadings and patterns (a flat gray), clipping to shapes, soft masks
- * other than a picture's own, blending. Written from the specification (ISO 32000-1). */
+ * Text: each code of a shown string is a glyph's outline (apps/shared/pdffont.c: from the PDF's own TrueType
+ * font, or a stand-in), drawn through the text matrix, the font's size and the page's matrix, and filled as any
+ * path; the text matrix then moves on by the code's width and the spacings.
+ *
+ * Not yet: dashes, shadings and patterns (a flat gray), clipping to shapes, soft masks other than a picture's
+ * own, blending; text as a clip. Written from the specification (ISO 32000-1). */
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "pdfdraw.h"
+#include "pdffont.h"
 
 #define BAND 64                         /* rows filled at a time */
 #define MAX_PICTURE (16ul << 20)        /* a picture's pixels at most */
@@ -33,6 +38,9 @@ struct gstate {
     double width;
     int cap, join;
     double clip[4];                     /* device pixels: x0, y0, x1, y1 */
+    struct pdf_font *font;              /* text: the font and its size, the spacings, the rise, how it is painted */
+    double size, tc, tw, th, tl, rise;
+    int mode;
 };
 
 struct path {
@@ -53,6 +61,11 @@ struct ctx {
     float *acc;                         /* the filler's sums: BAND rows */
     int acc_w;
     int forms;                          /* Do within Do */
+    double tm[6], tlm[6];               /* the text matrix, and the line's */
+    struct { struct pdf_obj *dict; struct pdf_font *f; } fonts[64];     /* the page's fonts, opened as they are named */
+    int nfonts;
+    struct path tp;                     /* a glyph's outline, in device pixels */
+    double gm[6], gx, gy;               /* ... the matrix it is drawn through, and where its last piece ended */
 };
 
 /* ---- matrices: x' = a x + c y + e, y' = b x + d y + f */
@@ -566,6 +579,96 @@ static void draw_picture(struct ctx *c, const struct picture *pic)
         }
 }
 
+/* ---- text */
+
+static struct pdf_font *font_for(struct ctx *c, struct pdf_obj *resources, const char *name)
+{
+    struct pdf_obj *dict = pdf_get(c->d, pdf_get(c->d, resources, "Font"), name);
+    int i;
+    if (!pdf_is(dict, PDF_DICT))
+        return NULL;
+    for (i = 0; i < c->nfonts; i++)
+        if (c->fonts[i].dict == dict)
+            return c->fonts[i].f;
+    if (c->nfonts == 64)
+        return NULL;
+    c->fonts[c->nfonts].dict = dict;
+    return c->fonts[c->nfonts++].f = pdf_font_open(c->d, dict);
+}
+
+static void g_move(void *v, double x, double y)
+{
+    struct ctx *c = v;
+    to_device(c->gm, x, y, &c->gx, &c->gy);
+    path_point(&c->tp, c->gx, c->gy, 3);
+}
+
+static void g_line(void *v, double x, double y)
+{
+    struct ctx *c = v;
+    to_device(c->gm, x, y, &c->gx, &c->gy);
+    path_point(&c->tp, c->gx, c->gy, 0);
+}
+
+static void g_curve(void *v, double cx, double cy, double x, double y)  /* (one control point: cut by its length) */
+{
+    struct ctx *c = v;
+    double ax, ay, bx, by, len;
+    int i, n;
+    to_device(c->gm, cx, cy, &ax, &ay);
+    to_device(c->gm, x, y, &bx, &by);
+    len = fabs(ax - c->gx) + fabs(ay - c->gy) + fabs(bx - ax) + fabs(by - ay);
+    n = len < 1.5 ? 1 : len < 6 ? 2 : len < 20 ? 4 : len < 80 ? 8 : 16;
+    for (i = 1; i <= n; i++) {
+        double t = (double)i / n, u = 1 - t;
+        path_point(&c->tp, u * u * c->gx + 2 * u * t * ax + t * t * bx, u * u * c->gy + 2 * u * t * ay + t * t * by, 0);
+    }
+    c->gx = bx, c->gy = by;
+}
+
+/* A string shown: each code's glyph through the text matrix, which then moves on by its width. */
+static void show(struct ctx *c, const unsigned char *s, unsigned len)
+{
+    const struct ttf_sink sink = { g_move, g_line, g_curve, c };
+    struct pdf_font *f = c->g.font;
+    unsigned code, n;
+    if (!f)
+        return;
+    while ((n = pdf_font_next(f, s, len, &code)) != 0) {
+        double tx, m[6] = { c->g.size * c->g.th, 0, 0, c->g.size, 0, c->g.rise }, ox, oy, em;
+        s += n, len -= n;
+        memcpy(c->gm, c->g.ctm, sizeof c->gm);
+        concat(c->gm, c->tm);
+        concat(c->gm, m);
+        to_device(c->gm, 0, 0, &ox, &oy);
+        em = fabs(c->gm[0]) + fabs(c->gm[1]) + fabs(c->gm[2]) + fabs(c->gm[3]);        /* (no smaller than it is) */
+        if ((c->g.mode & 3) != 3 && ox + 2 * em >= c->g.clip[0] && ox - 2 * em <= c->g.clip[2] && oy + 2 * em >= c->g.clip[1]
+            && oy - 2 * em <= c->g.clip[3]) {   /* (not the unseen kind, nor out of sight) */
+            c->tp.n = 0;
+            if (pdf_font_outline(f, code, &sink) == 0 && c->tp.n) {
+                if ((c->g.mode & 3) == 0 || (c->g.mode & 3) == 2)
+                    fill(c, &c->tp, 0, c->g.fill, c->g.fill_alpha);
+                if ((c->g.mode & 3) == 1 || (c->g.mode & 3) == 2) {
+                    struct path kept = c->p;
+                    c->p = c->tp;
+                    stroke(c);
+                    c->tp = c->p, c->p = kept;
+                }
+            }
+        }
+        tx = (pdf_font_width(f, code) / 1000 * c->g.size + c->g.tc + (pdf_font_is_space(f, code) ? c->g.tw : 0)) * c->g.th;
+        c->tm[4] += tx * c->tm[0], c->tm[5] += tx * c->tm[1];
+    }
+}
+
+static void next_line(struct ctx *c, double tx, double ty)
+{
+    double m[6] = { 1, 0, 0, 1, 0, 0 };
+    m[4] = tx, m[5] = ty;
+    concat(c->tlm, m);
+    memcpy(c->tm, c->tlm, sizeof c->tm);
+}
+
 /* ---- the words */
 
 static void run(struct ctx *c, const unsigned char *bytes, unsigned long len, struct pdf_obj *resources);
@@ -639,7 +742,7 @@ static void run(struct ctx *c, const unsigned char *bytes, unsigned long len, st
 {
     struct pdf_words w = { bytes, bytes + len, c->d };
     struct pdf_obj *arg[32], *o;
-    char op[8];
+    char op[16];
     double v[32];
     int n = 0, i, kind, base = c->depth;
     while ((kind = pdf_word(&w, &o, op)) != 0) {
@@ -737,6 +840,52 @@ static void run(struct ctx *c, const unsigned char *bytes, unsigned long len, st
             c->g.width = pdf_num(pdf_get(c->d, e, "LW"), c->g.width);
         } else if (OP("Do") && n >= 1) {
             do_object(c, resources, pdf_name(arg[0]));
+        } else if (OP("BT")) {
+            static const double same[6] = { 1, 0, 0, 1, 0, 0 };
+            memcpy(c->tm, same, sizeof same), memcpy(c->tlm, same, sizeof same);
+        } else if (OP("Tf") && n >= 2) {
+            c->g.font = font_for(c, resources, pdf_name(arg[0]));
+            c->g.size = v[1];
+        } else if (OP("Td") && n >= 2) {
+            next_line(c, v[0], v[1]);
+        } else if (OP("TD") && n >= 2) {
+            c->g.tl = -v[1];
+            next_line(c, v[0], v[1]);
+        } else if (OP("Tm") && n >= 6) {
+            memcpy(c->tm, v, sizeof c->tm), memcpy(c->tlm, v, sizeof c->tlm);
+        } else if (OP("T*")) {
+            next_line(c, 0, -c->g.tl);
+        } else if ((OP("Tj") || OP("'") || OP("\"")) && n >= 1 && pdf_is(arg[n - 1], PDF_STRING)) {
+            unsigned sl = 0;
+            const char *str = pdf_string(arg[n - 1], &sl);
+            if (op[0] == '"' && n >= 3)
+                c->g.tw = v[0], c->g.tc = v[1];
+            if (op[0] != 'T')
+                next_line(c, 0, -c->g.tl);
+            show(c, (const unsigned char *)str, sl);
+        } else if (OP("TJ") && n >= 1 && pdf_is(arg[0], PDF_ARRAY)) {  /* strings, and numbers that close them up */
+            unsigned k;
+            for (k = 0; k < arg[0]->n; k++) {
+                const struct pdf_obj *e = arg[0]->u.item[k];
+                if (pdf_is(e, PDF_STRING)) {
+                    show(c, (const unsigned char *)e->u.s, e->n);
+                } else if (pdf_is(e, PDF_NUMBER)) {
+                    double tx = -e->u.num / 1000 * c->g.size * c->g.th;
+                    c->tm[4] += tx * c->tm[0], c->tm[5] += tx * c->tm[1];
+                }
+            }
+        } else if (OP("Tc") && n >= 1) {
+            c->g.tc = v[0];
+        } else if (OP("Tw") && n >= 1) {
+            c->g.tw = v[0];
+        } else if (OP("Tz") && n >= 1) {
+            c->g.th = v[0] / 100;
+        } else if (OP("TL") && n >= 1) {
+            c->g.tl = v[0];
+        } else if (OP("Ts") && n >= 1) {
+            c->g.rise = v[0];
+        } else if (OP("Tr") && n >= 1) {
+            c->g.mode = (int)v[0] & 7;
         } else if (OP("BI")) {                  /* a picture among the words: passed over, to after its "EI" */
             const unsigned char *p = w.p;
             while (p + 2 < w.end && !(p[0] == 'I' && p[1] == 'D' && (p[2] == 32 || p[2] == 10 || p[2] == 13)))
@@ -830,7 +979,7 @@ int pdf_draw(struct pdf *d, unsigned n, double scale, int ox, int oy, struct pdf
         c->g.ctm[4] = -box[0] * scale, c->g.ctm[5] = box[3] * scale;
     }
     c->g.ctm[4] -= ox, c->g.ctm[5] -= oy;
-    c->g.fill = c->g.stroke = 0, c->g.fill_alpha = c->g.stroke_alpha = 1, c->g.width = 1;
+    c->g.fill = c->g.stroke = 0, c->g.fill_alpha = c->g.stroke_alpha = 1, c->g.width = 1, c->g.th = 1;
     c->g.clip[0] = -ox, c->g.clip[1] = -oy;
     c->g.clip[2] = (turn & 1 ? h : w) * scale - ox, c->g.clip[3] = (turn & 1 ? w : h) * scale - oy;
     resources = pdf_page_attr(d, page, "Resources");
@@ -856,6 +1005,10 @@ int pdf_draw(struct pdf *d, unsigned n, double scale, int ox, int oy, struct pdf
             run(c, all, total, resources);
         free(all);
     }
+    for (i = 0; i < (unsigned)c->nfonts; i++)
+        pdf_font_close(c->fonts[i].f);
+    free(c->tp.xy);
+    free(c->tp.first);
     free(c->p.xy);
     free(c->p.first);
     free(c->acc);

@@ -179,7 +179,8 @@ host-test-run:
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c loader/inflate.c \
 	  && build/host/pdf_test `python3 tests/host/pdf_cases.py build/host/pdf`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdfdraw_test tests/host/pdfdraw_test.c apps/shared/pdfdraw.c \
-	  apps/shared/pdf.c loader/inflate.c -lm && build/host/pdfdraw_test build/host/pdf
+	  apps/shared/pdffont.c apps/shared/ttf.c apps/shared/pdf.c loader/inflate.c -lm \
+	  && build/host/pdfdraw_test build/host/pdf apps/pdf/fonts
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/ttf_test tests/host/ttf_test.c apps/shared/ttf.c \
 	  && build/host/ttf_test apps/pdf/fonts
 	@mkdir -p build/host/packed && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/packed_test \

@@ -607,6 +607,29 @@ has already (`loader/inflate.c`). PDFio was not tried; no code of another reader
     space and an accented e have the contours they should, every contour closed, every glyph drawn, the
     advances are Helvetica's, Times's and Courier's; and 3000 copies with bytes changed at random, every
     glyph of those that open drawn.
-- **Next**: a PDF's fonts (their encodings and widths, embedded TrueType; then CFF and Type 1) and its text
-  operators, then the program.
+- **Text** (`apps/shared/pdffont.c`, and the text operators in `pdfdraw.c`).
+  - **A PDF's font** opened from its dictionary: simple (codes of a byte) or composite (`Type0`: two bytes,
+    the glyphs of the font it is made from, straight or by its `CIDToGIDMap`); its widths (`Widths` and
+    `MissingWidth`; a composite font's `W` runs and `DW`); its characters: the three standard tables
+    (Windows', the Macintosh's, Adobe's), changed by `Differences` through a table of some 230 glyph names
+    (and `uniXXXX`), and `ToUnicode`'s `bfchar` and `bfrange` runs.
+  - **Its outlines**: from the TrueType font the PDF carries (`FontFile2`, by `ttf.c`): a symbolic font's
+    glyphs by its symbol or Macintosh map, the others by their characters; else from a stand-in, chosen by
+    the font's name and flags (mono, serif or sans; bold; italic), the glyph of the code's character, made as
+    wide as the PDF says where that is near the stand-in's own (0.6 to 1.6 of it). A standard font with no
+    widths said (old PDFs) takes the stand-in's.
+  - **The operators**: `BT ET Tf Td TD Tm T* Tj TJ ' "`, the spacings `Tc Tw`, `Tz`, `TL`, `Ts`, and `Tr`
+    (filled, stroked, both, or unseen: a scanned page's hidden text). Each glyph's outline goes through the
+    text matrix, the size and the page's matrix into the same filler as every path, its curves cut by their
+    length on the screen; glyphs out of the canvas's sight are not made.
+  - **Not yet**: embedded Type 1 and CFF fonts (they are drawn by the stand-ins: right letters and places,
+    not their own shapes; a font whose letters are symbols or whose encoding is its own shows wrong or not at
+    all), Type 3 fonts, the Symbol font, vertical writing, CJK encodings other than by glyph numbers, a
+    cache of glyphs (each is made anew every time).
+  - **Tests.** `pdfdraw_test` (34 checks now): a page of text at twice the size: the stand-in sans, serif
+    (with `TJ`'s kerning), mono (with `Tc` and `Tw`: a line's length to the pixel by its font's advances),
+    bold with accents and the euro, italic by `T*`, a TrueType font the file carries, one by glyph numbers
+    (`Identity-H`), text turned a quarter, unseen text (no ink), small blue text; the damaged-file runs take
+    the text page too.
+- **Next**: the program (`apps/pdf`); then embedded CFF and Type 1 fonts, and what the plan lists after.
 

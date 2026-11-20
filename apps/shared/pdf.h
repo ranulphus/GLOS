@@ -77,9 +77,9 @@ struct pdf_words {
     const unsigned char *p, *end;       /* what is left of the stream's bytes */
     struct pdf *d;
 };
-/* The next word: 1 and *obj, an object (the caller's: pdf_free); 2 and op, an operator's name (cut to 7
+/* The next word: 1 and *obj, an object (the caller's: pdf_free); 2 and op, an operator's name (cut to 15
    letters); 0 at the end. */
-int pdf_word(struct pdf_words *w, struct pdf_obj **obj, char op[8]);
+int pdf_word(struct pdf_words *w, struct pdf_obj **obj, char op[16]);
 void pdf_free(struct pdf_obj *o);
 
 #endif

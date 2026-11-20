@@ -10,12 +10,13 @@
 #include <string.h>
 
 #include "../../apps/shared/pdfdraw.h"
+#include "../../apps/shared/pdffont.h"
 
 static int fails, checks;
 #define CHECK(c, ...) do { checks++; if (!(c)) { printf("FAIL %s:%d %s: ", __FILE__, __LINE__, #c); printf(__VA_ARGS__); \
                                                 printf("\n"); fails++; } } while (0)
 
-static const char *dir, *out_dir;
+static const char *dir, *out_dir, *fonts_dir;
 static unsigned char *file;
 static unsigned long file_size;
 
@@ -81,6 +82,42 @@ static int is(int x, int y, unsigned want)      /* within a step or two a colour
     return 1;
 }
 
+/* The stand-in fonts, from apps/pdf/fonts. */
+static const unsigned char *a_face(int family, int bold, int italic, unsigned long *len)
+{
+    static const char *const stem[3] = { "PDFSANS", "PDFSERI", "PDFMONO" };
+    static unsigned char *kept[3][2][2];
+    static unsigned long size[3][2][2];
+    char path[600];
+    FILE *f;
+    if (!kept[family][bold][italic]) {
+        snprintf(path, sizeof path, "%s/%s%s.TTF", fonts_dir, stem[family], bold && italic ? "Z" : bold ? "B" : italic ? "I" : "");
+        if (!(f = fopen(path, "rb")))
+            return NULL;
+        kept[family][bold][italic] = malloc(1 << 16);
+        size[family][bold][italic] = (unsigned long)fread(kept[family][bold][italic], 1, 1 << 16, f);
+        fclose(f);
+    }
+    *len = size[family][bold][italic];
+    return kept[family][bold][italic];
+}
+
+/* The ink in a part of the canvas: how many pixels are darker than half, and where they are across. */
+static int ink(int x0, int y0, int x1, int y1, int *left, int *right)
+{
+    int x, y, n = 0;
+    *left = x1, *right = x0;
+    for (y = y0; y < y1; y++)
+        for (x = x0; x < x1; x++) {
+            unsigned p = cv.px[y * cv.w + x];
+            if ((p >> 16 & 255) + (p >> 8 & 255) < 255) {
+                n++;
+                *left = x < *left ? x : *left, *right = x > *right ? x : *right;
+            }
+        }
+    return n;
+}
+
 static void keep(const char *name)
 {
     char path[600];
@@ -105,7 +142,9 @@ int main(int argc, char **argv)
     double w, h;
     int err, x, y, n;
     dir = argc > 1 ? argv[1] : ".";
-    out_dir = argc > 2 ? argv[2] : NULL;
+    fonts_dir = argc > 2 ? argv[2] : "apps/pdf/fonts";
+    out_dir = argc > 3 ? argv[3] : NULL;
+    pdf_font_faces(a_face);
 
     if ((d = open_pdf("draw.pdf", &err)) != NULL) {
         CHECK(pdf_page_size(d, 0, &w, &h) == PDF_OK && w == 200 && h == 100, "the page's size: %g by %g", w, h);
@@ -160,17 +199,60 @@ int main(int argc, char **argv)
         CHECK(0, "draw.pdf: not opened: %d", err);
     }
 
+    /* text: at twice the size (600 by 400). Where each line is, there is ink; a line is as long as its font's
+       advances make it; what is not painted leaves none */
+    if ((d = open_pdf("text.pdf", &err)) != NULL) {
+        int l, r, n2;
+        canvas(600, 400);
+        CHECK(pdf_draw(d, 0, 2, 0, 0, &cv) == PDF_OK, "text drawn");
+        keep("text");
+        /* "Hello, GLOS!" in the sans at 24 points: its advances sum to 5.891 em (as Helvetica's): 141.4 points */
+        n = ink(0, 20, 600, 80, &l, &r);
+        CHECK(n > 2500 && l >= 40 && l <= 46 && r >= 2 * (20 + 141.4) - 14 && r <= 2 * (20 + 141.4) + 2,
+              "the stand-in sans: %d pixels of ink from %d to %d", n, l, r);
+        n = ink(0, 100, 600, 128, &l, &r);
+        CHECK(n > 1200 && l >= 40 && l <= 44 && r > 330 && r < 420, "the serif, kerned: %d pixels from %d to %d", n, l, r);
+        /* the mono at 10 points, a point more after each letter and four more at each space: 19 letters of 7
+           points and two spaces of four more: 141 points */
+        n = ink(0, 140, 600, 166, &l, &r);
+        CHECK(n > 600 && l >= 40 && l <= 46 && r >= 2 * (20 + 141) - 16 && r <= 2 * (20 + 141), "the mono, spaced: %d pixels from %d to %d", n,
+              l, r);
+        n = ink(0, 172, 600, 200, &l, &r);
+        CHECK(n > 1200 && r < 330, "bold with accents (the spacing gone again): %d pixels to %d", n, r);
+        n2 = ink(0, 202, 600, 230, &l, &r);
+        CHECK(n2 > 700 && l >= 40 && l <= 46, "italic on the next line: %d pixels from %d", n2, l);
+        n = ink(0, 255, 520, 295, &l, &r);
+        CHECK(n > 800 && l >= 40 && l <= 46 && r >= 2 * (20 + 23 * 7) - 14 && r <= 2 * (20 + 23 * 7) + 2,
+              "a font the file carries, 23 letters of half an em each: %d pixels from %d to %d", n, l, r);
+        n = ink(0, 298, 280, 330, &l, &r);
+        CHECK(n > 800 && l >= 40 && l <= 48 && r >= 2 * (20 + 9 * 8.4) - 16 && r <= 2 * (20 + 9 * 8.4) + 2,
+              "a font by glyph numbers, nine letters of 0.6 em: %d pixels from %d to %d", n, l, r);
+        n = ink(530, 240, 580, 380, &l, &r);
+        CHECK(n > 300 && r - l < 30, "a quarter turned: %d pixels, %d wide", n, r - l + 1);
+        n = ink(290, 340, 420, 366, &l, &r);
+        CHECK(n == 0, "unseen text: %d pixels", n);
+        n = ink(296, 366, 440, 392, &l, &r);
+        CHECK(n > 150 && l >= 300 && l <= 306, "small text in blue: %d pixels from %d", n, l);
+        pdf_close(d);
+    } else {
+        CHECK(0, "text.pdf: not opened: %d", err);
+    }
+
     /* Files with bytes changed, drawn: whatever is in them, the drawing comes back and stays in its canvas. */
     {
-        unsigned long made = 0, drawn = 0, round, k, orig_size;
-        unsigned char *orig;
-        d = open_pdf("draw.pdf", &err);
-        pdf_close(d);
-        orig = malloc(file_size), orig_size = file_size;
-        memcpy(orig, file, file_size);
-        /* (its words unpacked, so that the changes fall among them: the same file with no Flate) */
-        for (round = 0; round < 1500 && orig_size > 200; round++) {
+        unsigned long made = 0, drawn = 0, round, k, orig_size = 0;
+        unsigned char *orig = NULL;
+        for (round = 0; round < 1500; round++) {
             unsigned long changes;
+            if (round % 750 == 0) {             /* (the shapes' page, then the text's) */
+                d = open_pdf(round ? "text.pdf" : "draw.pdf", &err);
+                pdf_close(d);
+                free(orig);
+                orig = malloc(file_size), orig_size = file_size;
+                memcpy(orig, file, file_size);
+            }
+            if (orig_size < 200)
+                continue;
             free(file);
             file = malloc(orig_size);
             memcpy(file, orig, orig_size);
@@ -194,7 +276,7 @@ int main(int argc, char **argv)
             }
         }
         free(orig);
-        CHECK(made == 1500 && drawn > 1500, "%lu changed files, %lu pages drawn", made, drawn);
+        CHECK(made == 1500 && drawn > 1200, "%lu changed files, %lu pages drawn", made, drawn);
         printf("pdfdraw_test: %lu changed files, %lu pages drawn\n", made, drawn);
     }
     free(file);

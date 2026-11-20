@@ -405,7 +405,7 @@ static struct pdf_obj *parse(struct src *s)
     return o;
 }
 
-int pdf_word(struct pdf_words *w, struct pdf_obj **obj, char op[8])
+int pdf_word(struct pdf_words *w, struct pdf_obj **obj, char op[16])
 {
     struct src s = { w->p, w->end, w->d, 0, 0 };
     unsigned n = 0;
@@ -424,7 +424,7 @@ int pdf_word(struct pdf_words *w, struct pdf_obj **obj, char op[8])
         s.p++;                                  /* (a bracket with no partner: passed over) */
     }
     for (; s.p < s.end && !white(*s.p) && !delim(*s.p); s.p++)
-        if (n < 7)
+        if (n < 15)
             op[n++] = (char)*s.p;
     op[n] = 0;
     w->p = s.p;
