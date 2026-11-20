@@ -1,0 +1,22 @@
+# A big folder in the browser (apps/files; phase E, docs/v1/apps/files.md): a folder's first entries are read
+# and shown at once and the rest come from a worker's thread, each piece into its place in the list. "Big" here
+# is more than two entries (-listfirst 2: 256 without it), so that C:\FM is one: its two first as the disc has
+# them, then the other four. Files says when the last has come; the list is then as any listing of the folder
+# (folders first, by name), and the tree's folder opened likewise.
+run FILES.EXE -browse C:\FM -listfirst 2
+wait "C:\FM - Files"
+said FILES listed 6
+shot listed "C:\FM - Files" 371 0 169 330
+key end
+key home
+key enter
+wait "C:\FM\DOCS - Files"
+shot docs "C:\FM\DOCS - Files" 371 0 169 330
+key backspace
+wait "C:\FM - Files"
+said FILES listed 6
+key alt+f4
+gone "C:\FM - Files"
+expect FILES browser C:\FM
+expect FILES listed 6
+expect FILES end 

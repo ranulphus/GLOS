@@ -456,6 +456,8 @@ void gui_list_big(struct gui_widget *w, int row, const unsigned char *big);    /
 void gui_list_thumb(struct gui_widget *w, int row, const unsigned *px, int tw, int th);        /* a row's
                                            thumbnail for GUI_VIEW_THUMBS (00RRGGBBh, at most GUI_THUMB each way):
                                            the app's pixels, to be kept while the row has them (NULL: none) */
+void gui_list_resort(struct gui_widget *w);     /* rows were added to a sorted list: in their places (gui_list_sort's
+                                           comparison, the column and the way the header shows) */
 int gui_list_shown(struct gui_widget *w, int *first);   /* how many rows are on the screen now, and the first's
                                            place: what a thumbnail is wanted for first */
 /* An icon: GUI_ICON_W x GUI_ICON_W pixels, a byte each: 0 clear, else a palette index of the 8-bit palette. */
@@ -1015,6 +1017,12 @@ struct gui_dirent {
 };
 int gui_dir_read(const char *dir, struct gui_dirent **out);    /* its entries (malloc'd; no "." or ".."), sorted:
                                            folders first, then by name; -1 if it can't be read */
+struct gui_dir;                         /* a folder read a piece at a time (a big one's first screenful at once) */
+struct gui_dir *gui_dir_open(const char *dir);         /* NULL: no such folder, or no memory */
+int gui_dir_next(struct gui_dir *d, struct gui_dirent *out, int room); /* up to `room` more of its entries, in the
+                                           folder's own order (no "." or ".."): how many; 0 at its end */
+void gui_dir_close(struct gui_dir *d);
+void gui_dir_sort(struct gui_dirent *e, int n);        /* as gui_dir_read gives them: folders first, then by name */
 int gui_drives(char *letters);          /* the drives there are, "ACD": their number */
 int gui_is_dir(const char *path);
 void *gui_fopen(const char *path, const char *mode);    /* a FILE * */

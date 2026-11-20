@@ -470,6 +470,9 @@ int main(int argc, char **argv)
     gui_on_event(app_event);
     folders_load();
     folder_slow = argc > 3 && !strcmp(argv[3], "-slowcopy");   /* (FILES -browse DIR -slowcopy: the suites') */
+    if (argc > 4 && !strcmp(argv[3], "-listfirst"))            /* (FILES -browse DIR -listfirst N: a folder of more
+                                                                   than N entries is "big", for the suites) */
+        folder_list_first(atoi(argv[4]));
     if (!strcmp(mode, "-browse")) {
         browser_open(argc > 2 ? argv[2] : glos_boot_root());
     } else if (!strcmp(mode, "-folder") && argc > 2) {

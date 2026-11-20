@@ -37,6 +37,7 @@ void start_end(void);                   /* the shell is ending: its window goes 
 void folder_open(const char *dir);      /* its window (spatial: one a folder), or brought to the front */
 void browser_open(const char *dir);
 void folder_changed(unsigned watch);
+void folder_list_first(int n);          /* how many of a folder's entries are read before it is shown (the tests') */
 void folders_save(void);
 void folders_load(void);
 extern int folder_slow;                 /* -slowcopy, the suites': a paste waits ten seconds before each file */

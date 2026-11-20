@@ -33,6 +33,8 @@ struct view {
     glos_handle watch;
     struct gui_dirent *ents;
     int n;
+    struct gui_task *ltask;             /* the rest of a big folder being read (list_rest, below), or NULL */
+    int lgen;                           /* which reading: a piece of an older one is nobody's */
     struct tpic *tp;                    /* the thumbnail view: one for each of ents (thumbnails, below) */
     int tp_n;                           /* ... as many as there were entries when they were last fitted */
     char tp_dir[260];                   /* ... of that folder */
@@ -312,6 +314,8 @@ static void status_text(struct view *v)
                  files == 1 ? "" : "s", bytes);
     if (v->arc && !chosen)
         snprintf(t + strlen(t), sizeof t - strlen(t), GUI_T(" (in a %s archive)"), arc_kind(v->arc));
+    if (v->ltask && !chosen)                    /* (a big folder's rest is still being read) */
+        snprintf(t + strlen(t), sizeof t - strlen(t), GUI_T(" so far: reading more..."));
     gui_set_text(v->status, t);
 }
 
@@ -319,12 +323,168 @@ static void retitle(struct view *v);
 static void way(struct view *v);
 static void thumbs_fit(struct view *v);
 
+/* ---- a folder's listing. A folder is read a piece at a time (the toolkit's gui_dir_*): the first LIST_FIRST
+   entries at once, sorted and shown, which is all of nearly every folder; a bigger one's rest on a worker's
+   thread, each piece put in its place in the list as it comes (the rows keep the order the list shows: folders
+   first and by name, or as its header says), the status bar saying so until the end. The window answers
+   meanwhile: what is listed can be opened, chosen, copied. Another listing of the view (it goes elsewhere, the
+   folder changes) ends the one under way. */
+#define LIST_FIRST 256
+static int list_first = LIST_FIRST;     /* (FILES -listfirst N: the tests' way to a "big" folder of six files) */
+
+void folder_list_first(int n) { list_first = n > 0 ? n : LIST_FIRST; }
+
+struct lmore {                          /* the rest of a folder being read */
+    struct view *v;
+    int gen;
+    struct gui_dir *d;
+};
+
+struct lpiece {                         /* a piece of it, for the window's thread */
+    struct view *v;
+    int gen, n;
+    struct gui_dirent e[64];
+};
+
+static void add_row(struct view *v, int i)      /* the list's row for ents[i] */
+{
+    char size[24], date[24];
+    const char *cells[3];
+    const struct gui_dirent *e = &v->ents[i];
+    if (e->dir)
+        snprintf(size, sizeof size, GUI_T("Folder"));
+    else
+        snprintf(size, sizeof size, "%lu", e->size);
+    snprintf(date, sizeof date, "%04u-%02u-%02u %02u:%02u", (e->date >> 9) + 1980, (e->date >> 5) & 15, e->date & 31,
+             e->time >> 11, (e->time >> 5) & 63);
+    if (!e->date)
+        date[0] = 0;                            /* (a folder that is only in an archive's names has none) */
+    cells[0] = e->text, cells[1] = size, cells[2] = date;
+    gui_list_big(v->list, gui_list_add(v->list, cells, icon(icon_for_file(e->name, e->dir), 0), (void *)(size_t)i),
+                 icon(icon_for_file(e->name, e->dir), 1));
+}
+
+static void list_stop(struct view *v)   /* a reading under way is no longer wanted */
+{
+    if (v->ltask)
+        gui_task_cancel(v->ltask);
+    v->ltask = NULL;
+    v->lgen++;
+}
+
+/* Entries more for the view's folder (not its drive's Recycle folder, which is Files' own): at the end of ents.
+   0, or -1: no memory. */
+static int list_append(struct view *v, const struct gui_dirent *e, int n)
+{
+    struct gui_dirent *ne = realloc(v->ents, (size_t)(v->n + n + 1) * sizeof *ne);
+    int i;
+    if (!ne)
+        return -1;
+    v->ents = ne;
+    for (i = 0; i < n; i++)
+        if (!recycle_is(v->dir, e[i].name))
+            v->ents[v->n++] = e[i];
+    return 0;
+}
+
+static void list_piece(void *data)      /* (the window's thread) a piece of the rest: its rows, in their places */
+{
+    struct lpiece *p = data;
+    struct view *v;
+    int was, i;
+    for (v = views; v && v != p->v; v = v->next)
+        ;
+    if (v && v->ltask && v->lgen == p->gen && !v->arc) {
+        int top = gui_list_get(v->list) == 0;   /* (the first row chosen, as a folder just gone to has it: the
+                                                   first row is chosen after too, whichever entry that is now;
+                                                   a row the user went to stays the chosen one) */
+        was = v->n;
+        if (list_append(v, p->e, p->n) == 0) {
+            for (i = was; i < v->n; i++)
+                add_row(v, i);
+            gui_list_resort(v->list);
+            if (top)
+                gui_list_set(v->list, 0);
+            thumbs_fit(v);
+            status_text(v);
+        }
+    }
+    free(p);
+}
+
+static void list_work(struct gui_task *t, void *arg)
+{
+    struct lmore *m = arg;
+    for (;;) {
+        struct lpiece *p = malloc(sizeof *p);
+        if (!p)
+            break;
+        p->v = m->v, p->gen = m->gen;
+        p->n = gui_task_cancelled(t) ? 0 : gui_dir_next(m->d, p->e, 64);
+        if (p->n <= 0) {
+            free(p);
+            break;
+        }
+        gui_task_post(t, list_piece, p);
+    }
+    gui_dir_close(m->d);
+}
+
+static void list_done(struct gui_window *owner, void *arg, int cancelled)
+{
+    struct lmore *m = arg;
+    struct view *v;
+    (void)owner, (void)cancelled;
+    for (v = views; v && v != m->v; v = v->next)
+        ;
+    if (v && v->ltask && v->lgen == m->gen) {
+        char t[24];
+        v->ltask = NULL;
+        status_text(v);
+        snprintf(t, sizeof t, "%d", v->n);
+        say("listed", t);
+    }
+    free(m);
+}
+
+/* The view's folder read: its first entries here, in ents, sorted; the rest, if there are more, begun. */
+static void list_read(struct view *v)
+{
+    struct gui_dir *d = gui_dir_open(v->dir);
+    struct gui_dirent piece[64];
+    struct lmore *m;
+    int k = 0, more = d != NULL, first = 0;
+    while (more && first < list_first) {
+        k = gui_dir_next(d, piece, list_first - first < 64 ? list_first - first : 64);
+        if (k <= 0 || list_append(v, piece, k) != 0)
+            more = 0;
+        else
+            first += k;
+    }
+    gui_dir_sort(v->ents, v->n);
+    if (!more) {
+        gui_dir_close(d);
+        return;
+    }
+    if ((m = calloc(1, sizeof *m)) != NULL) {
+        m->v = v, m->gen = v->lgen, m->d = d;
+        if ((v->ltask = gui_task_start(NULL, NULL, list_work, m, list_done, 0)) != NULL)
+            return;
+        free(m);
+    }
+    while ((k = gui_dir_next(d, piece, 64)) > 0 && list_append(v, piece, k) == 0)      /* (no threads: all of it here) */
+        ;
+    gui_dir_close(d);
+    gui_dir_sort(v->ents, v->n);
+}
+
 static void fill(struct view *v)
 {
     int i, keep = gui_list_get(v->list);
     char keep_name[64] = "";
-    if (keep >= 0 && keep < v->n)
-        snprintf(keep_name, sizeof keep_name, "%s", v->ents[keep].name);
+    if (keep >= 0 && (size_t)gui_list_user(v->list, keep) < (size_t)v->n)      /* (the row's entry: the header sorts) */
+        snprintf(keep_name, sizeof keep_name, "%s", v->ents[(size_t)gui_list_user(v->list, keep)].name);
+    list_stop(v);
     if (v->arc && !arc_read(v)) {               /* the archive has gone: the folder it was in */
         snprintf(v->dir, sizeof v->dir, "%s", v->arc_file);
         gui_path_up(v->dir);
@@ -335,35 +495,16 @@ static void fill(struct view *v)
     if (!v->arc) {
         free(v->ents);
         v->ents = NULL;
-        v->n = gui_dir_read(v->dir, &v->ents);
-        if (v->n < 0)
-            v->n = 0;
-        for (i = 0; i < v->n; i++)              /* (a drive's Recycle folder is Files' own: recycle.c) */
-            if (recycle_is(v->dir, v->ents[i].name)) {
-                memmove(&v->ents[i], &v->ents[i + 1], (size_t)(v->n - i - 1) * sizeof *v->ents);
-                v->n--;
-                break;
-            }
+        v->n = 0;
+        list_read(v);
     }
     gui_list_clear(v->list);
     for (i = 0; i < v->n; i++) {
-        char size[24], date[24];
-        const char *cells[3];
-        const struct gui_dirent *e = &v->ents[i];
-        if (e->dir)
-            snprintf(size, sizeof size, GUI_T("Folder"));
-        else
-            snprintf(size, sizeof size, "%lu", e->size);
-        snprintf(date, sizeof date, "%04u-%02u-%02u %02u:%02u", (e->date >> 9) + 1980, (e->date >> 5) & 15, e->date & 31,
-                 e->time >> 11, (e->time >> 5) & 63);
-        if (!e->date)
-            date[0] = 0;                        /* (a folder that is only in an archive's names has none) */
-        cells[0] = e->text, cells[1] = size, cells[2] = date;
-        gui_list_big(v->list, gui_list_add(v->list, cells, icon(icon_for_file(e->name, e->dir), 0), (void *)(size_t)i),
-                     icon(icon_for_file(e->name, e->dir), 1));
-        if (keep_name[0] && !strcmp(keep_name, e->name))
+        add_row(v, i);
+        if (keep_name[0] && !strcmp(keep_name, v->ents[i].name))
             gui_list_set(v->list, i);
     }
+    gui_list_resort(v->list);                   /* (as the header has them sorted, if it has) */
     thumbs_fit(v);
     status_text(v);
 }
@@ -1978,8 +2119,10 @@ static void closing(struct gui_window *w)
         gui_vlist_columns(v->list, bview.order, bview.widths);
         folders_save();
     }
-    if (v)
+    if (v) {
+        list_stop(v);
         thumbs_drop(v);
+    }
     for (p = &views; *p; p = &(*p)->next)
         if (*p == v) {
             *p = v->next;
@@ -2850,8 +2993,9 @@ static struct view *new_view(const char *dir, int browser)
             gui_menu_item(c, GUI_T("P&roperties"), C_PROPS, NULL);
             gui_context(v->list, c);
         }
-        if (browser)
-            gui_list_sort(v->list, 0, by_column);   /* (a column's head sorts by it) */
+        gui_list_sort(v->list, 0, by_column);       /* (a column's head sorts by it; and a big folder's later
+                                                       pieces go to their places by it, in a folder's own window
+                                                       too) */
     }
     v->status = gui_status(v->win);
     set_view(v, v->view);

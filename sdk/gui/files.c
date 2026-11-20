@@ -224,6 +224,95 @@ int gui_dir_read(const char *dir, struct gui_dirent **out)
     return n;
 }
 #endif
+/* A folder read a piece at a time (Files' big folders: the first screenful at once, the rest as it comes). The
+   entries come in the folder's own order; gui_dir_sort puts a run of them in gui_dir_read's. */
+struct gui_dir {
+#ifdef __DJGPP__
+    struct ffblk f;
+    int state;                          /* 0 not begun; 1 under way; 2 at its end */
+    char pattern[512];
+#else
+    DIR *d;
+    char dir[512];
+#endif
+};
+
+struct gui_dir *gui_dir_open(const char *dir)
+{
+    struct gui_dir *d;
+    if (!gui_is_dir(dir) || !(d = calloc(1, sizeof *d)))
+        return NULL;
+#ifdef __DJGPP__
+    {
+        size_t dn = strlen(dir);
+        snprintf(d->pattern, sizeof d->pattern, "%s%s*.*", dir,
+                 dn && (dir[dn - 1] == '\\' || dir[dn - 1] == '/' || dir[dn - 1] == ':') ? "" : "\\");
+    }
+#else
+    {
+        char buf[512];
+        snprintf(d->dir, sizeof d->dir, "%s", dir);
+        if (!(d->d = opendir(native(dir, buf, sizeof buf)))) {
+            free(d);
+            return NULL;
+        }
+    }
+#endif
+    return d;
+}
+
+int gui_dir_next(struct gui_dir *d, struct gui_dirent *out, int room)
+{
+    int n = 0;
+#ifdef __DJGPP__
+    while (n < room && d->state != 2) {
+        int r = d->state ? findnext(&d->f) : findfirst(d->pattern, &d->f, DOS_ALL);
+        char *q;
+        d->state = r == 0 ? 1 : 2;
+        if (r != 0 || !strcmp(d->f.ff_name, ".") || !strcmp(d->f.ff_name, ".."))
+            continue;
+        from_find(&d->f, d->f.ff_name, &out[n]);
+        for (q = out[n].name; *q; q++)          /* (DOS's names as DOS has them, in capitals) */
+            if (*q >= 'a' && *q <= 'z')
+                *q -= 32;
+        gui_dos_text(out[n].name, out[n].text, sizeof out[n].text);
+        n++;
+    }
+#else
+    struct dirent *de;
+    char full[512];
+    while (n < room && (de = readdir(d->d)) != NULL) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
+            continue;
+        gui_path_join(full, sizeof full, d->dir, de->d_name);
+        if (gui_stat(full, &out[n]) != 0)
+            continue;
+        gui_dos_text(out[n].name, out[n].text, sizeof out[n].text);
+        n++;
+    }
+#endif
+    return n;
+}
+
+void gui_dir_close(struct gui_dir *d)
+{
+    if (!d)
+        return;
+#ifdef __DJGPP__
+    if (d->state == 1)
+        find_end(&d->f);                        /* (a find not gone through: its handle given back) */
+#else
+    closedir(d->d);
+#endif
+    free(d);
+}
+
+void gui_dir_sort(struct gui_dirent *e, int n)
+{
+    if (n > 1)
+        qsort(e, (size_t)n, sizeof *e, qcmp);
+}
+
 
 static int page(void)
 {

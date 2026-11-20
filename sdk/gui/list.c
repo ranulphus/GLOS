@@ -249,6 +249,13 @@ void gui_list_thumb(struct gui_widget *w, int row, const unsigned *px, int tw, i
 
 int gui_list_shown(struct gui_widget *w, int *first) { return gui_vlist_shown(w, first); }
 
+void gui_list_resort(struct gui_widget *w)
+{
+    struct lstore *s = store_of(w);
+    if (s->cmp && s->n > 1)
+        sort_rows(s);
+}
+
 void gui_list_sort(struct gui_widget *w, int col, int (*cmp)(struct gui_widget *, int, int, int))
 {
     struct lstore *s = store_of(w);
