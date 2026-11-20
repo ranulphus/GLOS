@@ -556,10 +556,8 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   - **From an app** each call goes to the system VM's thread and back (docs/milestones-m6.md): some 0.8 ms more
     on the 486DX2's profile, six times a Pentium II's own call there.
   - **Done about it:** the toolkit asks DOS itself for a file's size and date (one call where the C library's
-    `stat` made a dozen: `sdk/gui/files.c`); and those five instructions have a short way through the trap
-    path when nothing waits on them (`vm_gp_fast`, `kernel/vm/v86.c`): the plain call 474 to 321 microseconds
-    for a program there, a file found 1,880 to 1,390, 512 bytes read 2,337 to 1,609; for an app 1,303 to 1,133.
-    What is left of a trap is the processor's own way in and out, as 86Box counts it.
+    `stat` made a dozen: `sdk/gui/files.c`). **Under test:** a short way through the trap path for those five
+    instructions (`vm_gp_fast`: a quarter to a third off a program's DOS calls in 86Box).
   - **Owed:** the same numbers on the real 486 (86Box's cycle counts are not a 486's: the bench's are the
     ones to believe), and a cheaper way for an app's call into the VM.
 

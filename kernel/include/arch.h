@@ -51,7 +51,6 @@ void panic(const char *why, struct trapframe *tf) __attribute__((noreturn));
 void vm_user_entry(struct trapframe *tf);       /* every entry from V86 mode or ring 3 */
 void vm_user_exit(struct trapframe *tf);        /* every way out (trap_exit), to any ring */
 void vm_exception(struct trapframe *tf);
-int vm_gp_fast(struct trapframe *tf);           /* a #GP from V86 code that needs only its instruction done: 1, done */
 void vm_return(struct trapframe *tf);
 
 extern u32 cpu_cr4_bits;        /* CR4 bits that stick (0 without CR4) */
