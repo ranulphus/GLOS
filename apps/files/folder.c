@@ -2521,7 +2521,7 @@ static void open_with(struct view *v, const char *path)
 {
     static const struct { const char *title, *exe; int kind; } own[] = {
         { GUI_N("Notepad"), "NOTEPAD.EXE", IC_NOTEPAD }, { GUI_N("Images"), "IMAGES.EXE", IC_IMAGES },
-        { GUI_N("Paint"), "PAINT.EXE", IC_PAINT } };
+        { GUI_N("Paint"), "PAINT.EXE", IC_PAINT }, { GUI_N("Player"), "PLAYER.EXE", IC_SOUND } };
     struct gui_widget *box, *row;
     char t[300], name[128], ext[8] = ".", now[120], cmd[600], dir[260];
     const char *d = strrchr(gui_path_name(path), '.');

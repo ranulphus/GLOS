@@ -46,7 +46,8 @@ static const struct { const char *title, *exe; int kind, desk; } apps[] = {
     { "Notepad", "NOTEPAD.EXE", IC_NOTEPAD, 1 }, { "Calculator", "CALC.EXE", IC_CALC, 1 },
     { "Images", "IMAGES.EXE", IC_IMAGES, 1 }, { "Monitor", "MONITOR.EXE", IC_MONITOR, 1 },
     { "Control Panel", "CONTROL.EXE", IC_CONTROL, 1 }, { "Paint", "PAINT.EXE", IC_PAINT, 1 },
-    { "Mixer", "MIXER.EXE", IC_SOUND, 0 }, { "Sound Recorder", "RECORDER.EXE", IC_SOUND, 0 } };
+    { "Mixer", "MIXER.EXE", IC_SOUND, 0 }, { "Sound Recorder", "RECORDER.EXE", IC_SOUND, 0 },
+    { "Player", "PLAYER.EXE", IC_SOUND, 0 } };
 #define NAPPS ((int)(sizeof apps / sizeof *apps))
 
 static void say(const char *what, const char *a)
@@ -158,6 +159,10 @@ int files_open(const char *path)
     }
     if (ext_in(path, "PNG JPG JPEG BMP GIF TGA PCX PPM PGM PNM")) {
         run_app("IMAGES.EXE", path);
+        return 0;
+    }
+    if (ext_in(path, "WAV MOD M3U")) {          /* what the Player plays (phase F), and its playlists */
+        run_app("PLAYER.EXE", path);
         return 0;
     }
     run_app("NOTEPAD.EXE", path);               /* (anything else: as text) */

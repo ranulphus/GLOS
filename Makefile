@@ -166,6 +166,8 @@ host-test-run:
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/wave_test tests/host/wave_test.c apps/shared/wave.c \
 	  && build/host/wave_test `python3 tests/host/wave_cases.py build/host/wave` \
 	  && python3 tests/host/wave_cases.py check build/host/wave
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/mod_test tests/host/mod_test.c apps/shared/mod.c -lm \
+	  && build/host/mod_test `python3 tests/host/mod_cases.py build/host/mod`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/disk_test tests/host/disk_test.c kernel/disk/mbr.c \
 	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  && tests/host/disk_test.sh build/host/disk_test build/host/disk
@@ -193,7 +195,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
-APPS := notepad calc images term files monitor control paint mixer recorder
+APPS := notepad calc images term files monitor control paint mixer recorder player
 # (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
 # shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
@@ -221,6 +223,10 @@ APP_LIBS_paint := apps/shared/picfile.c
 # Sound in memory and WAV files (the Sound Recorder's takes, phase F).
 APP_HOST_LIBS_recorder := apps/shared/wave.c
 APP_LIBS_recorder := apps/shared/wave.c
+# Sound files as they are played (the Player, phase F): WAV piece by piece, MOD modules.
+SOURCE_SRCS := apps/shared/source.c apps/shared/wave.c apps/shared/mod.c
+APP_HOST_LIBS_player := $(SOURCE_SRCS)
+APP_LIBS_player := $(SOURCE_SRCS)
 build/host/libsshc32.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h
 	@mkdir -p build/host/sshc32
 	$(Q)echo "  CC      $@"
@@ -565,7 +571,7 @@ loopa-display: all dos-tests build/dj/APPTEST.EXE host-test check-deps
 loopa-desk: all dos-tests apps host-test check-deps
 	$(Q)python3 tests/loopa/jobs.py desk -j $(JOBS)
 # Windows, input and the API (M6 steps E and F): WINTESTs on the desktop, driven with glos key and glos mouse.
-loopa-win: all dos-tests build/dj/WINTEST.EXE check-deps
+loopa-win: all dos-tests build/dj/WINTEST.EXE build/apps/CONTROL.EXE build/apps/MIXER.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py win -j $(JOBS)
 # The GPU lock and apps' VRAM (M8 steps B and C): GPUTESTs drawing with the engine beside the desktop.
 loopa-gpu: all dos-tests build/dj/GPUTEST.EXE check-deps
@@ -574,7 +580,8 @@ loopa-gpu: all dos-tests build/dj/GPUTEST.EXE check-deps
 # The virtual game port (docs/gamepad.md J1): glos joy's stick read by JOYTEST three ways on bf6 and the 486.
 loopa-joy: all dos-tests build/dj/JOYTEST.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py joy -j $(JOBS)
-loopa-audio: all dos-tests build/dj/AUDTEST.EXE build/apps/MIXER.EXE build/apps/RECORDER.EXE check-deps
+loopa-audio: all dos-tests build/dj/AUDTEST.EXE build/apps/MIXER.EXE build/apps/RECORDER.EXE build/apps/PLAYER.EXE \
+             check-deps
 	$(Q)python3 tests/loopa/jobs.py audio -j $(JOBS)
 # Windowed DOS-GL (M8 step D): DOS-GL's conformance EXEs (from DOSGL_DIR's build) full-screen on plain DOS and
 # windowed on GLOS desktops, their frames identical.
@@ -993,6 +1000,9 @@ APP_AFTER_files := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/F
 APP_DEPS_notepad := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_notepad := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/NOTEPAD.map -Wl,--cref
 APP_AFTER_notepad := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/NOTEPAD.map
+APP_DEPS_player := build/sdk/gloswrap.opt tools/wrapcheck.py
+APP_LINK_player := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/PLAYER.map -Wl,--cref
+APP_AFTER_player := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/PLAYER.map
 APP_DEPS_images := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_images := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/IMAGES.map -Wl,--cref
 APP_AFTER_images := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/IMAGES.map

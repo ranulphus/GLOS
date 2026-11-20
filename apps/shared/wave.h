@@ -65,6 +65,15 @@ const char *wave_error(int err);        /* a few words for the user */
    (the toolkit's gui_fopen and gui_unlink, for the host). */
 void wave_files(void *(*open)(const char *path, const char *mode), int (*unlink)(const char *path));
 
+/* A WAV file read piece by piece (the Player's: a file longer than memory). rate, channels, frames: what it is
+   (any may be NULL); detail: a few words of how it is kept ("16 bits", "ADPCM"; may be NULL). NULL and *err. */
+struct wave_in;
+struct wave_in *wave_in_open(const char *path, unsigned *rate, unsigned *channels, unsigned long *frames, char *detail,
+                             unsigned room, int *err);
+unsigned long wave_in_read(struct wave_in *in, short *pcm, unsigned long frames);       /* those read: fewer at its end */
+int wave_in_seek(struct wave_in *in, unsigned long frame);     /* the next read begins there */
+void wave_in_close(struct wave_in *in);
+
 /* A WAV file written as its samples come (a recording that is longer than memory): begun, given samples, ended
    (its sizes are written then). PCM of 16 bits. */
 struct wave_out;

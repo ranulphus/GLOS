@@ -4,6 +4,16 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The Player (2026-11-20)
+
+- **A new program, the Player** (PLAYER.EXE, in the Start menu; Files opens WAV, MOD and M3U files with it): a
+  list of music files played one after the other, with Play, Pause, Stop, Previous and Next, a slider to move
+  within a file, its own volume, Repeat and Shuffle. Files are added singly or a folder at once; lists are
+  saved and opened as M3U playlists.
+- **It plays WAV files and MOD tracker modules** (ProTracker's and those of up to 32 channels). The music
+  goes on while its menus and dialogs are open.
+- **Not yet:** S3M, XM and IT modules, MP3, Ogg Vorbis, MIDI and CD audio.
+
 ## The Sound Recorder (2026-11-20)
 
 - **A new program, the Sound Recorder** (RECORDER.EXE, in the Start menu): record from the sound card's input

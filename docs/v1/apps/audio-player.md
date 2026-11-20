@@ -1,5 +1,7 @@
 # Audio Player: plan (GLOS v1, phase A)
 
+**Its first part built 2026-11-20** (`docs/v1/phase-f.md` says what, and what is left of this plan).
+
 **New in v1.** A music player for these PCs: their own era's formats (tracker modules, MIDI through the OPL3 chip)
 and today's (MP3, Ogg Vorbis) where the CPU allows.
 

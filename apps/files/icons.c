@@ -260,6 +260,7 @@ int icon_for_file(const char *name, int dir)
     static const char *const progs[] = { "EXE", "COM", 0 };
     static const char *const bats[] = { "BAT", 0 };
     static const char *const arcs[] = { "ZIP", "TAR", "GZ", "TGZ", "LZH", "LHA", "ARJ", "7Z", 0 };
+    static const char *const sounds[] = { "WAV", "MOD", "M3U", "VOC", "MID", "S3M", "XM", "IT", "MP3", "OGG", 0 };
     if (dir)
         return IC_FOLDER;
     if (ext_is(name, arcs))
@@ -268,6 +269,8 @@ int icon_for_file(const char *name, int dir)
         return IC_TEXT;
     if (ext_is(name, pics_))
         return IC_PICTURE;
+    if (ext_is(name, sounds))
+        return IC_SOUND;
     if (ext_is(name, progs))
         return IC_PROGRAM;
     if (ext_is(name, bats))

@@ -75,3 +75,46 @@ as samples in memory, its edits, WAV files), which the Player will read WAV file
 - **Not yet:** takes longer than memory (recorded straight to a file, edited in pieces); the level while
   waiting; the timer (start and stop at a time); more steps of undo; the monitor; a scroll bar under the
   waveform; the waveform's columns kept (a long take is looked through for every picture).
+
+## The Player (2026-11-20): the first part
+
+Plan: `docs/v1/apps/audio-player.md`. `apps/player` (PLAYER.EXE): `player.c` the window, `engine.c` the playing;
+`apps/shared/source.c` a sound file as samples had as they are wanted, `wave.c` and `mod.c` under it.
+
+- **A list of files,** each with its title (the song's own name where the file has one), length and kind; Enter
+  or a double click plays a row. The one playing has a mark; its title, kind and rate are above the list, with
+  the time, a slider that shows where it is and goes there when moved, and the volume of the Player's own
+  stream (the Mixer shows the same). When a file ends the next begins; Repeat begins the list again, Shuffle
+  takes any other. Files are added one at a time or a folder's at once; a list is saved and opened as an M3U
+  playlist (a path a line; a path with no drive is beside the playlist). Files opens WAV, MOD and M3U files
+  with it, and gives sound files their icon.
+- **WAV** (PCM of 8 to 32 bits, IMA ADPCM) is read piece by piece from its file (`wave_in_*`: the same reader
+  `wave_load` is made of), so a file may be longer than memory.
+- **MOD modules** (`apps/shared/mod.c`): ProTracker's format and its descendants of 1 to 32 channels ("M.K.",
+  "xCHN", "xxCH"), played in ticks as the format's descriptions have it: notes by the Amiga's periods with fine
+  tuning, the volume and its slides, slides of pitch (up, down, to a note), vibrato and tremolo with their
+  waves, arpeggio, sample offset, position jump and pattern break, pattern loop and delay, note cut, delay and
+  retrigger, speed and tempo. A side's two channels of four at their loudest are full scale, a quarter of each
+  side in the other. Each sample is taken on the line between the two it falls between (`mod_smooth(0)`: the
+  nearer, for a slow PC). A song that goes round for ever ends where it comes to a row it has played; its
+  length is found by going through it without sound, and seeking does the same to the place asked for (the
+  samples after a seek are those of playing to there: tested). Whole numbers throughout.
+  - `tests/host/mod_test.c` on songs `mod_cases.py` writes: each note's pitch by its cycles counted, loudness
+    and sides, lengths to the frame for speeds, tempos, jumps, breaks, loops and delays, slides' ends, the
+    arpeggio's mean, fine tuning, eight channels, a sample that ends by itself, files cut short, and 400
+    modules with bytes changed at random (no harm, under the sanitizers too).
+  - ffmpeg's libopenmpt plays the same songs to the same pitches, the same loudness of a soft note against a
+    full one (0.250) and the same share of a channel in the other side (3.00), looked at once on the host.
+- **The playing is a thread's** (`engine.c`): every 15 ms it fills the stream's ring from the file, under a lock
+  it shares with the window's calls, so that the music goes on while a menu is open or a dialog is up. A
+  module is played at the mixer's own rate. A seek while it plays closes the stream and opens another (what was
+  queued is of the old place). FILES, IMAGES and NOTEPAD already link with the C library's lock for threads;
+  the Player is the fourth.
+- **Tests.** `tests/gui/player.txt`, host and Loop A, with no card and no clock (`PLAYER -demo`: F9 is ten
+  seconds heard): a module and a WAV added, a text named .WAV refused, the module played, paused and on, the
+  WAV begun by itself at its end, the list through, a playlist saved (its bytes checked), cleared, a playlist
+  opened. The audio suite: the real Player given a WAV of 1175 Hz and a module of 259 Hz plays one after the
+  other, says so, and both tones are in 86Box's recording.
+- **Not yet:** S3M, XM and IT modules; VOC; MP3 and Ogg Vorbis (minimp3 and stb_vorbis, a Pentium's); MIDI
+  through the OPL3; CD audio; tags; drag and drop and sorting in the list; the small view; a visualisation and
+  the pattern view; gapless playing; a folder's files added in the background.

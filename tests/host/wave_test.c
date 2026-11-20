@@ -249,6 +249,46 @@ int main(int argc, char **argv)
     snprintf(path, sizeof path, "%s/no-such-file.wav", dir);
     CHECK(wave_load(path, &w) == WAVE_E_OPEN, "a file that is not there");
 
+    /* Read piece by piece (the Player's way): the same samples as read whole, in pieces of every size; sought
+       to, the same from there on. PCM and ADPCM (whose blocks are unpacked as they are come to). */
+    {
+        static const char *const names[] = { "in-pcm16.wav", "in-pcm8.wav", "in-adpcm1.wav", "in-adpcm2.wav", "in-adpcm3.wav" };
+        static short piece[2 * 3000];
+        unsigned k, rate, ch;
+        unsigned long n, at, total;
+        char detail[40];
+        for (k = 0; k < 5; k++) {
+            struct wave_in *in;
+            snprintf(path, sizeof path, "%s/%s", dir, names[k]);
+            r = wave_load(path, &w);
+            in = wave_in_open(path, &rate, &ch, &total, detail, sizeof detail, &err);
+            CHECK(r == 0 && in && err == 0 && rate == w.rate && ch == w.channels && total == w.frames && detail[0],
+                  "%s opened to be read in pieces: %d %d", names[k], r, err);
+            if (!in || r != 0)
+                continue;
+            ok = 1;
+            for (at = 0; ok && at < total; at += n) {
+                unsigned long want = 1 + (at * 7 + k) % 2999;
+                n = wave_in_read(in, piece, want);
+                ok = n == (want < total - at ? want : total - at) && !memcmp(piece, w.pcm + at * ch, n * ch * sizeof(short));
+            }
+            CHECK(ok && wave_in_read(in, piece, 100) == 0, "%s in pieces: other samples at %lu", names[k], at);
+            for (i = 0; i < 40; i++) {
+                at = (i * 7919ul + 13) % (total + 50);
+                ok = wave_in_seek(in, at) == 0;
+                n = wave_in_read(in, piece, 700);
+                if (at > total)
+                    at = total;
+                ok = ok && n == (700 < total - at ? 700 : total - at) && !memcmp(piece, w.pcm + at * ch, n * ch * sizeof(short));
+                CHECK(ok, "%s sought to %lu: %lu frames, or other samples", names[k], at, n);
+            }
+            wave_in_close(in);
+            wave_free(&w);
+        }
+        snprintf(path, sizeof path, "%s/in-alaw.wav", dir);
+        CHECK(!wave_in_open(path, NULL, NULL, NULL, NULL, 0, &err) && err == WAVE_E_FORMAT, "a-law, to be read in pieces: %d", err);
+    }
+
     /* Files written: read back here to the sample, and by wave_cases.py check after. */
     make(&w, 22050, 2, 5000);
     snprintf(path, sizeof path, "%s/out-pcm16.wav", dir);

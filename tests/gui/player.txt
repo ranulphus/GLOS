@@ -1,0 +1,56 @@
+# The Player (apps/player; phase F, docs/v1/apps/audio-player.md) with no card and no clock of its own (PLAYER
+# -demo: F9 is ten seconds heard): a module and a WAV added by the dialog, a file that is no sound refused; the
+# module played, ten seconds into it, paused and on; at its end the WAV begins by itself, and at its end the
+# list is through; the list saved as a playlist, cleared, and a playlist opened. The files are
+# tests/gui/mksnd.py's, in C:\SND.
+run PLAYER.EXE -demo
+wait "Player"
+shot empty "Player"
+key ctrl+o
+wait "Add Files"
+type C:\\SND\\SONG.MOD\n
+said PLAYER added SONG.MOD MOD 0:30
+key ctrl+o
+wait "Add Files"
+type C:\\SND\\TONE.WAV\n
+said PLAYER added TONE.WAV WAV 0:02
+key ctrl+o
+wait "Add Files"
+type C:\\SND\\NOSOUND.WAV\n
+said PLAYER refused NOSOUND.WAV -2
+pause 500
+key enter
+shot two "Player"
+key home
+key enter
+said PLAYER playing 1 SONG.MOD
+key f9
+shot playing "Player"
+key f5
+said PLAYER paused
+key f5
+said PLAYER on
+key f9
+key f9
+key f9
+said PLAYER ended SONG.MOD
+said PLAYER playing 2 TONE.WAV
+shot next "Player"
+key f9
+said PLAYER ended TONE.WAV
+said PLAYER through
+key ctrl+s
+wait "Save Playlist"
+type C:\\OUT\\MINE\n
+said PLAYER list saved MINE.M3U 2
+file C:\OUT\MINE.M3U C:\\SND\\SONG.MOD\r\nC:\\SND\\TONE.WAV\r\n
+key alt+f c
+said PLAYER cleared
+key alt+f o
+wait "Open Playlist"
+type C:\\SND\\LIST.M3U\n
+said PLAYER list opened 2 0
+shot list "Player"
+key alt+f4
+gone "Player"
+expect PLAYER end

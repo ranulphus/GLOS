@@ -1,0 +1,156 @@
+/* A sound file as samples, had as they are wanted (source.h): the Player's files. A WAV is read piece by piece
+ * from its file (wave.c's wave_in); a module is read whole (they are small) and played by mod.c. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "mod.h"
+#include "source.h"
+#include "wave.h"
+
+#define MOD_MAX (16ul << 20)            /* a module's file at most */
+
+static void *open_plain(const char *path, const char *mode) { return fopen(path, mode); }
+static void *(*file_open)(const char *path, const char *mode) = open_plain;
+
+void source_files(void *(*open)(const char *path, const char *mode))
+{
+    file_open = open ? open : open_plain;
+}
+
+struct source {
+    struct source_info info;
+    struct wave_in *wav;
+    struct mod *mod;
+    unsigned char *bytes;               /* the module's file */
+    unsigned long at;                   /* frames given so far */
+};
+
+static int of_wave(int e)
+{
+    switch (e) {
+    case WAVE_OK: return SOURCE_OK;
+    case WAVE_E_OPEN: return SOURCE_E_OPEN;
+    case WAVE_E_KIND: return SOURCE_E_KIND;
+    case WAVE_E_FORMAT: return SOURCE_E_FORMAT;
+    case WAVE_E_MEMORY: return SOURCE_E_MEMORY;
+    default: return SOURCE_E_DAMAGED;
+    }
+}
+
+struct source *source_open(const char *path, unsigned rate, int *err)
+{
+    struct source *s = calloc(1, sizeof *s);
+    unsigned char head[12];
+    FILE *f;
+    long size;
+    int dummy, e;
+    if (!err)
+        err = &dummy;
+    *err = SOURCE_E_MEMORY;
+    if (!s)
+        return NULL;
+    *err = SOURCE_E_OPEN;
+    if (!(f = file_open(path, "rb")))
+        goto bad;
+    if (fseek(f, 0, SEEK_END) != 0 || (size = ftell(f)) < 0 || fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        goto bad;
+    }
+    *err = SOURCE_E_KIND;
+    if (fread(head, 1, 12, f) != 12) {
+        fclose(f);
+        goto bad;
+    }
+    if (!memcmp(head, "RIFF", 4) && !memcmp(head + 8, "WAVE", 4)) {
+        char detail[40];
+        fclose(f);
+        s->wav = wave_in_open(path, &s->info.rate, &s->info.channels, &s->info.frames, detail, sizeof detail, &e);
+        if (!s->wav) {
+            *err = of_wave(e);
+            goto bad;
+        }
+        strcpy(s->info.kind, "WAV");
+        snprintf(s->info.detail, sizeof s->info.detail, "%s", detail);
+    } else {                                    /* a module, if it is anything: read whole */
+        if (size < 1084 || (unsigned long)size > MOD_MAX) {
+            fclose(f);
+            goto bad;
+        }
+        *err = SOURCE_E_MEMORY;
+        if (!(s->bytes = malloc((size_t)size))) {
+            fclose(f);
+            goto bad;
+        }
+        rewind(f);
+        *err = SOURCE_E_OPEN;
+        if (fread(s->bytes, 1, (size_t)size, f) != (size_t)size) {
+            fclose(f);
+            goto bad;
+        }
+        fclose(f);
+        s->mod = mod_open(s->bytes, (unsigned long)size, rate, &e);
+        if (!s->mod) {
+            *err = e == MOD_E_KIND ? SOURCE_E_KIND : e == MOD_E_MEMORY ? SOURCE_E_MEMORY : SOURCE_E_DAMAGED;
+            goto bad;
+        }
+        s->info.rate = rate, s->info.channels = 2;
+        s->info.frames = mod_length(s->mod);
+        strcpy(s->info.kind, "MOD");
+        snprintf(s->info.title, sizeof s->info.title, "%s", mod_title(s->mod));
+        snprintf(s->info.detail, sizeof s->info.detail, "%u channels", mod_channels(s->mod));
+    }
+    *err = SOURCE_OK;
+    return s;
+bad:
+    source_close(s);
+    return NULL;
+}
+
+void source_close(struct source *s)
+{
+    if (!s)
+        return;
+    if (s->wav)
+        wave_in_close(s->wav);
+    if (s->mod)
+        mod_free(s->mod);
+    free(s->bytes);
+    free(s);
+}
+
+const struct source_info *source_info(const struct source *s) { return &s->info; }
+unsigned long source_tell(const struct source *s) { return s->at; }
+
+unsigned long source_read(struct source *s, short *pcm, unsigned long frames)
+{
+    unsigned long n = s->wav ? wave_in_read(s->wav, pcm, frames) : mod_render(s->mod, pcm, frames);
+    s->at += n;
+    return n;
+}
+
+int source_seek(struct source *s, unsigned long frame)
+{
+    if (frame > s->info.frames)
+        frame = s->info.frames;
+    if (s->wav) {
+        if (wave_in_seek(s->wav, frame) != WAVE_OK)
+            return -1;
+    } else {
+        mod_seek(s->mod, frame);
+    }
+    s->at = frame;
+    return 0;
+}
+
+const char *source_error(int err)
+{
+    switch (err) {
+    case SOURCE_OK: return "no error";
+    case SOURCE_E_OPEN: return "the file couldn't be read";
+    case SOURCE_E_KIND: return "not a sound file of a kind that is played here";
+    case SOURCE_E_FORMAT: return "packed in a way that isn't played here";
+    case SOURCE_E_MEMORY: return "not enough memory";
+    default: return "the file is damaged";
+    }
+}

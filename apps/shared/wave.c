@@ -348,22 +348,37 @@ static void put32(unsigned char *p, unsigned long v)
 
 #define PIECE 8192u
 
-int wave_load(const char *path, struct wave *w)
+/* A WAV being read, piece by piece (the Player's; wave_load is all of its pieces). */
+struct wave_in {
+    FILE *f;
+    unsigned tag, channels, align, per_block;
+    unsigned long rate, data, frames;
+    unsigned long at;                   /* the next frame to be given */
+    unsigned char *raw;                 /* PIECE bytes, or an ADPCM block's */
+    short *block;                       /* ADPCM: a block unpacked ... */
+    unsigned long block_at;             /* ... which one (~0: none) ... */
+    unsigned block_n;                   /* ... and how many frames it gave */
+};
+
+struct wave_in *wave_in_open(const char *path, unsigned *rate_out, unsigned *channels_out, unsigned long *frames_out,
+                             char *detail, unsigned room, int *err)
 {
-    FILE *f = file_open(path, "rb");
-    unsigned char h[40], *buf = NULL;
+    struct wave_in *in = calloc(1, sizeof *in);
+    FILE *f = NULL;
+    unsigned char h[40];
     unsigned tag = 0, channels = 0, bits = 0, align = 0, per_block = 0;
-    unsigned long rate = 0, data = 0, fact = 0, at, size, frames, got = 0;
+    unsigned long rate = 0, data = 0, fact = 0, at, size, frames;
     long end;
-    int r = WAVE_E_KIND, have_fmt = 0;
-    memset(w, 0, sizeof *w);
-    if (!f)
-        return WAVE_E_OPEN;
-    if (fseek(f, 0, SEEK_END) != 0 || (end = ftell(f)) < 0) {
-        fclose(f);
-        return WAVE_E_OPEN;
-    }
+    int r = WAVE_E_MEMORY, have_fmt = 0, dummy;
+    if (!err)
+        err = &dummy;
+    if (!in)
+        goto out;
+    r = WAVE_E_OPEN;
+    if (!(f = file_open(path, "rb")) || fseek(f, 0, SEEK_END) != 0 || (end = ftell(f)) < 0)
+        goto out;
     rewind(f);
+    r = WAVE_E_KIND;
     if (fread(h, 1, 12, f) != 12 || memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4))
         goto out;
     r = WAVE_E_DAMAGED;
@@ -404,6 +419,8 @@ int wave_load(const char *path, struct wave *w)
             goto out;
         align = bytes * channels;
         frames = size / align;
+        if (detail)
+            snprintf(detail, room, "%u bits", bytes * 8);
     } else if (tag == 0x11) {
         if (bits != 4 || align < 4 * channels + channels || align > 8192 || align % (4 * channels))
             goto out;
@@ -412,58 +429,138 @@ int wave_load(const char *path, struct wave *w)
         frames = size / align * per_block;
         if (fact && fact < frames)              /* (the last block is filled out: "fact" has the true count) */
             frames = fact;
+        if (detail)
+            snprintf(detail, room, "ADPCM");
     } else {
         goto out;
     }
-    if ((r = wave_init(w, (unsigned)rate, channels)) != WAVE_OK)
-        goto out;
-    if (frames && (r = room_for(w, frames)) != WAVE_OK)
-        goto out;
     r = WAVE_E_MEMORY;
-    if (!(buf = malloc(PIECE)))
+    if (!(in->raw = malloc(tag == 0x11 && align > PIECE ? align : PIECE)))
+        goto out;
+    if (tag == 0x11 && !(in->block = malloc((size_t)per_block * channels * sizeof *in->block)))
         goto out;
     r = WAVE_E_DAMAGED;
     if (fseek(f, (long)data, SEEK_SET) != 0)
         goto out;
-    if (tag == 1) {
-        unsigned bytes = align / channels, per = PIECE / align, i, n;
-        while (got < frames) {
-            unsigned want = frames - got < per ? (unsigned)(frames - got) : per;
-            if ((n = (unsigned)fread(buf, align, want, f)) == 0)
+    in->f = f;
+    in->tag = tag, in->channels = channels, in->align = align, in->per_block = per_block;
+    in->rate = rate, in->data = data, in->frames = frames;
+    in->block_at = ~0ul;
+    if (rate_out)
+        *rate_out = (unsigned)rate;
+    if (channels_out)
+        *channels_out = channels;
+    if (frames_out)
+        *frames_out = frames;
+    *err = WAVE_OK;
+    return in;
+out:
+    if (f)
+        fclose(f);
+    if (in) {
+        free(in->raw);
+        free(in->block);
+    }
+    free(in);
+    *err = r;
+    return NULL;
+}
+
+void wave_in_close(struct wave_in *in)
+{
+    if (!in)
+        return;
+    fclose(in->f);
+    free(in->raw);
+    free(in->block);
+    free(in);
+}
+
+/* ADPCM: the block that has frame `at`, unpacked. 0: the file has no such block. */
+static int in_block(struct wave_in *in, unsigned long b)
+{
+    struct ima s[2];
+    unsigned c, k, n = 1, channels = in->channels, bytes = in->align / channels - 4;   /* (a channel's packed bytes) */
+    const unsigned char *buf = in->raw;
+    if (in->block_at == b)
+        return 1;
+    in->block_at = ~0ul;
+    if (fseek(in->f, (long)(in->data + b * in->align), SEEK_SET) != 0 || fread(in->raw, 1, in->align, in->f) != in->align)
+        return 0;
+    for (c = 0; c < channels; c++) {
+        s[c].pred = (short)le16(buf + c * 4);
+        s[c].index = buf[c * 4 + 2] > 88 ? 88 : buf[c * 4 + 2];
+        in->block[c] = (short)s[c].pred;
+    }
+    /* Then four bytes of a channel's codes (eight samples, the low half of a byte first), four of the next
+       channel's, and so on. */
+    for (k = 0; k < bytes * 2 && n < in->per_block; k++, n++)
+        for (c = 0; c < channels; c++) {
+            unsigned byte = 4 * channels + (k / 8) * 4 * channels + c * 4 + (k % 8) / 2;
+            in->block[n * channels + c] = ima_decode(&s[c], k & 1 ? buf[byte] >> 4 : buf[byte] & 15);
+        }
+    in->block_at = b, in->block_n = n;
+    return 1;
+}
+
+unsigned long wave_in_read(struct wave_in *in, short *pcm, unsigned long frames)
+{
+    unsigned long done = 0;
+    unsigned channels = in->channels;
+    if (frames > in->frames - in->at)
+        frames = in->frames - in->at;
+    if (in->tag == 1) {
+        unsigned bytes = in->align / channels, per = PIECE / in->align, i, n;
+        while (done < frames) {
+            unsigned want = frames - done < per ? (unsigned)(frames - done) : per;
+            if ((n = (unsigned)fread(in->raw, in->align, want, in->f)) == 0)
                 break;
             for (i = 0; i < n * channels; i++) {
-                const unsigned char *p = buf + i * bytes;
-                w->pcm[got * channels + i] = bytes == 1 ? (short)((p[0] - 128) * 256)
-                                                        : (short)(p[bytes - 2] | (unsigned)p[bytes - 1] << 8);
+                const unsigned char *p = in->raw + i * bytes;
+                pcm[done * channels + i] = bytes == 1 ? (short)((p[0] - 128) * 256)
+                                                      : (short)(p[bytes - 2] | (unsigned)p[bytes - 1] << 8);
             }
-            got += n;
+            done += n;
         }
     } else {
-        while (got < frames && fread(buf, 1, align, f) == align) {
-            struct ima s[2];
-            unsigned c, k, n = 1, bytes = align / channels - 4;        /* (a channel's packed bytes in a block) */
-            short *o = w->pcm + got * channels;
-            unsigned long left = frames - got;
-            for (c = 0; c < channels; c++) {
-                s[c].pred = (short)le16(buf + c * 4);
-                s[c].index = buf[c * 4 + 2] > 88 ? 88 : buf[c * 4 + 2];
-                o[c] = (short)s[c].pred;
-            }
-            /* Then four bytes of a channel's codes (eight samples, the low half of a byte first), four of the
-               next channel's, and so on. */
-            for (k = 0; k < bytes * 2 && n < per_block && n < left; k++, n++)
-                for (c = 0; c < channels; c++) {
-                    unsigned byte = 4 * channels + (k / 8) * 4 * channels + c * 4 + (k % 8) / 2;
-                    o[n * channels + c] = ima_decode(&s[c], k & 1 ? buf[byte] >> 4 : buf[byte] & 15);
-                }
-            got += n;
+        while (done < frames) {
+            unsigned long b = (in->at + done) / in->per_block;
+            unsigned off = (unsigned)((in->at + done) % in->per_block), n;
+            if (!in_block(in, b) || off >= in->block_n)
+                break;
+            n = in->block_n - off;
+            if (n > frames - done)
+                n = (unsigned)(frames - done);
+            memcpy(pcm + done * channels, in->block + off * channels, (size_t)n * channels * sizeof *pcm);
+            done += n;
         }
     }
-    w->frames = got;                            /* (a file cut short: what it has) */
-    r = WAVE_OK;
-out:
-    free(buf);
-    fclose(f);
+    in->at += done;
+    return done;
+}
+
+int wave_in_seek(struct wave_in *in, unsigned long frame)
+{
+    if (frame > in->frames)
+        frame = in->frames;
+    if (in->tag == 1 && fseek(in->f, (long)(in->data + frame * in->align), SEEK_SET) != 0)
+        return WAVE_E_OPEN;
+    in->at = frame;
+    return WAVE_OK;
+}
+
+int wave_load(const char *path, struct wave *w)
+{
+    struct wave_in *in;
+    unsigned rate, channels;
+    unsigned long frames;
+    int r;
+    memset(w, 0, sizeof *w);
+    if (!(in = wave_in_open(path, &rate, &channels, &frames, NULL, 0, &r)))
+        return r;
+    if ((r = wave_init(w, rate, channels)) == WAVE_OK && frames && (r = room_for(w, frames)) == WAVE_OK)
+        w->frames = wave_in_read(in, w->pcm, frames);   /* (a file cut short: what it has) */
+    wave_in_close(in);
     if (r != WAVE_OK)
         wave_free(w);
     return r;
