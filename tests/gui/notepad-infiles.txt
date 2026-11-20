@@ -1,0 +1,27 @@
+# Find in Files in Notepad (apps/notepad; phase E, docs/v1/apps/notepad.md): text looked for in the files of a
+# folder and of those under it (C:\INF, this script's own: three files have the word, one of them in capitals and
+# indented, one in a folder below; a file that is no text has it too and is left out). The files are read on a
+# worker's thread; each line found is listed in a pane under the tabs as it comes, and Notepad says when the
+# search has ended. Enter on one opens its file at that line. View's item puts the pane away.
+run NOTEPAD.EXE
+wait "Untitled - Notepad"
+key ctrl+shift+f
+wait "Find in Files"
+type needle
+key tab
+type c:\\inf
+shot dialog "Find in Files"
+key enter
+gone "Find in Files"
+said NOTEPAD found in files 3 needle
+shot results "Untitled - Notepad"
+key down
+key enter
+wait "A.TXT - Notepad"
+shot went "A.TXT - Notepad"
+key alt+v r
+shot away "A.TXT - Notepad"
+key alt+f4
+expect NOTEPAD found in files 3 needle
+expect NOTEPAD went to C:\INF\A.TXT 2
+expect NOTEPAD end

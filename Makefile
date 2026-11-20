@@ -977,11 +977,14 @@ build/dj/GUITEST.EXE: tests/dos/guitest.c build/sdk/libgui.a build/sdk/libglos.a
 	$(Q)python3 tools/glosmark.py $@
 # The native apps for DOS: build/apps/NAME.EXE.
 APP_EXES := $(foreach a,$(APPS),build/apps/$(shell echo $(a) | tr a-z A-Z).EXE)
-# An app with threads of its own (the toolkit's tasks: Files' copying, Images' filmstrip) is linked with the C library's lock
+# An app with threads of its own (the toolkit's tasks: Files' copying, Images' filmstrip, Notepad's Find in Files) is linked with the C library's lock
 # (@build/sdk/gloswrap.opt, as GUITEST is), and its map is checked for callers that went round the lock.
 APP_DEPS_files := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_files := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/FILES.map -Wl,--cref
 APP_AFTER_files := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/FILES.map
+APP_DEPS_notepad := build/sdk/gloswrap.opt tools/wrapcheck.py
+APP_LINK_notepad := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/NOTEPAD.map -Wl,--cref
+APP_AFTER_notepad := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/NOTEPAD.map
 APP_DEPS_images := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_images := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/IMAGES.map -Wl,--cref
 APP_AFTER_images := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/IMAGES.map

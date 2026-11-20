@@ -120,8 +120,16 @@ Plan: `docs/v1/apps/notepad.md`. The first of its parts.
   the shown document's kind by hand, or By the File's Name again: a file with no name, or one whose name says
   nothing, can be coloured.
 - **Tests:** `lex_test` (Markdown's lines, the kinds' list); `notepad-kind` on the host and on Loop A.
-- **Not done yet:** files dropped on the window; the results pane, find in files; code pages; large files;
-  bookmarks and the chosen kind kept with the session.
+- **Find in Files** (2026-11-20; Edit's menu, Ctrl+Shift+F): the text, the folder (the shown file's at first;
+  Browse has the toolkit's folder dialog) and the files' names (`*.TXT;*.MD`). The files of the folder and of
+  those under it are read on a worker's thread (Notepad is linked with the C library's lock now), and each
+  line that has the text is listed as it is found in a pane under the tabs: the file, the line's number, the
+  line. Enter or a double click opens the file (or shows its tab) at the line. Letters' case apart unless
+  Match case is ticked; a file with a zero byte in its first 512 is no text and is left out, as is one of
+  more than 4 MB; a thousand lines at most. View's item, or the pane's Close, puts the pane away and ends a
+  search at work. `notepad-infiles` on the host and on Loop A (`C:\INF`).
+- **Not done yet:** files dropped on the window; the pane resized by a bar, regular expressions and whole
+  words in Find in Files; code pages; large files; bookmarks and the chosen kind kept with the session.
 
 ## Files (2026-11-18): the browser's toolbar and address bar
 

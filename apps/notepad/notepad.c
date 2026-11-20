@@ -21,6 +21,7 @@
  * A file that doesn't exist yet is a new one by that name, made when it is
  * saved. Changes not saved are asked about before the file or the window
  * goes. "NOTEPAD ..." lines on stdout say what happened (the suite's). */
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,7 +32,7 @@
 
 enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_CUT, C_COPY, C_PASTE, C_DELETE, C_FIND, C_NEXT,
        C_REPLACE, C_GOTO, C_ALL, C_WRAP, C_ABOUT, C_CLOSE, C_NUMBERS, C_COLOURS, C_SESSION, C_BOOK, C_BOOKNEXT,
-       C_BOOKPREV,
+       C_BOOKPREV, C_INFILES, C_RESULTS,
        C_KIND_AUTO = 200, C_KIND };     /* Highlight As: by the file's name; C_KIND + i: the i-th kind (lexers.c) */
 
 #define DOCS 12
@@ -467,6 +468,363 @@ static void find_open(int replace)
     gui_find(win, &fr);
 }
 
+/* ---- Find in Files (phase E; docs/v1/apps/notepad.md): text looked for in the files of a folder and of the
+   folders under it. The dialog takes the text, the folder (the shown file's at first) and the files' names (DOS's
+   wildcards, several with ; between them); the files are read on a worker's thread, and each line that has the
+   text is listed as it is found in a pane under the tabs: the file, the line's number, the line. Enter or a double
+   click on one opens its file (or shows its tab) at that line. Another search, or the pane's Close, ends the
+   one at work. Letters' case apart unless the box says otherwise; a file with a zero byte in its first 512 is no
+   text and is left out, as is one of more than INF_BIG bytes. */
+#define INF_HITS 1000
+#define INF_BIG (4ul << 20)
+
+struct hit {
+    char path[260];
+    int line, col;
+};
+
+static struct {
+    struct gui_widget *box, *list, *note;      /* the pane (hidden until the first search) */
+    int on;                             /* it shows */
+    struct hit *hit;
+    int n;
+    struct gui_task *task;              /* the search at work (NULL: none) */
+    int gen;                            /* which search: an older one's word is nobody's */
+    char what[128], dir[260], names[80];
+    int match_case;
+} inf;
+
+struct isearch {                        /* a search at work */
+    int gen, match_case, nwhat;
+    char what[128], dir[260], names[80];
+    int found, files, more;
+    unsigned at;                        /* when the window was last told how far it is */
+};
+
+struct inote {                          /* its word to the window's thread */
+    int gen, kind;                      /* kind: 0 a line found; 1 how far it is; 2 its end */
+    int found, files, more;
+    struct hit h;
+    char text[120];
+};
+
+static int inf_wild(const char *p, const char *s)      /* a name against a pattern of * and ?, case apart */
+{
+    for (; *p; p++, s++) {
+        if (*p == '*') {
+            while (p[1] == '*')
+                p++;
+            if (!p[1])
+                return 1;
+            for (; *s; s++)
+                if (inf_wild(p + 1, s))
+                    return 1;
+            return 0;
+        }
+        if (!*s || (*p != '?' && toupper((unsigned char)*p) != toupper((unsigned char)*s)))
+            return 0;
+    }
+    return !*s;
+}
+
+static int inf_named(const char *names, const char *name)      /* one of the patterns (; or a space between) */
+{
+    char one[80];
+    const char *p = names;
+    while (*p) {
+        size_t k = strcspn(p, "; ");
+        if (k && k < sizeof one) {
+            memcpy(one, p, k);
+            one[k] = 0;
+            if (inf_wild(one, name))
+                return 1;
+        }
+        p += k + (p[k] ? 1 : 0);
+    }
+    return 0;
+}
+
+static void inf_said(void *data)        /* (the window's thread) */
+{
+    struct inote *n = data;
+    char t[300], num[16];
+    if (inf.box && n->gen == inf.gen) {
+        if (n->kind == 0 && inf.n < INF_HITS) {
+            const char *cells[3];
+            const char *rel = n->h.path + strlen(inf.dir);
+            while (*rel == '\\')
+                rel++;
+            snprintf(num, sizeof num, "%d", n->h.line);
+            cells[0] = rel, cells[1] = num, cells[2] = n->text;
+            inf.hit[inf.n] = n->h;
+            gui_list_add(inf.list, cells, NULL, (void *)(size_t)inf.n);
+            inf.n++;
+        } else if (n->kind == 1) {
+            snprintf(t, sizeof t, GUI_T("\"%s\": %d lines so far, %d files read..."), inf.what, n->found, n->files);
+            gui_set_text(inf.note, t);
+        } else if (n->kind == 2) {
+            if (n->more)
+                snprintf(t, sizeof t, GUI_T("\"%s\": %d lines and more, in %s"), inf.what, inf.n, inf.dir);
+            else
+                snprintf(t, sizeof t, GUI_T("\"%s\": %d lines in %d files read, in %s"), inf.what, inf.n, n->files, inf.dir);
+            gui_set_text(inf.note, t);
+            if (inf.n && gui_list_get(inf.list) < 0)
+                gui_list_set(inf.list, 0);
+            printf("NOTEPAD found in files %d %s\n", inf.n, inf.what);
+            fflush(stdout);
+        }
+    }
+    free(n);
+}
+
+static void inf_tell(struct gui_task *t, struct isearch *q, int kind, const char *path, int line, int col,
+                     const char *text, int ntext)
+{
+    struct inote *n = calloc(1, sizeof *n);
+    int i, k = 0;
+    if (!n)
+        return;
+    n->gen = q->gen, n->kind = kind, n->found = q->found, n->files = q->files, n->more = q->more;
+    if (path)
+        snprintf(n->h.path, sizeof n->h.path, "%s", path);
+    n->h.line = line, n->h.col = col;
+    for (i = 0; text && i < ntext && (text[i] == ' ' || text[i] == '\t'); i++)
+        ;                                       /* (the line without what it is indented by) */
+    for (; text && i < ntext && k < (int)sizeof n->text - 1; i++)
+        n->text[k++] = text[i] == '\t' ? ' ' : text[i];
+    n->text[k] = 0;
+    q->at = glos_ticks();
+    gui_task_post(t, inf_said, n);
+}
+
+static void inf_file(struct gui_task *t, struct isearch *q, const char *path, unsigned long size)
+{
+    FILE *f;
+    char *buf;
+    size_t n, i, ls = 0;
+    int line = 1;
+    if (size > INF_BIG || !size || !(buf = malloc(size + 1)))
+        return;
+    if (!(f = gui_fopen(path, "rb"))) {
+        free(buf);
+        return;
+    }
+    n = fread(buf, 1, size, f);
+    fclose(f);
+    q->files++;
+    for (i = 0; i < n && i < 512; i++)
+        if (!buf[i]) {                          /* (no text) */
+            free(buf);
+            return;
+        }
+    buf[n] = '\n';
+    for (i = 0; i <= n && !q->more; i++) {
+        if (buf[i] != '\n')
+            continue;
+        {                                       /* the line ls..i: the text's first place in it */
+            size_t len = i - ls, at, where = 0;
+            int hit = 0;
+            if (len && buf[i - 1] == '\r')
+                len--;
+            for (at = 0; !hit && at + (size_t)q->nwhat <= len; at++) {
+                int k;
+                for (k = 0; k < q->nwhat; k++) {
+                    unsigned char a = (unsigned char)buf[ls + at + (size_t)k], b = (unsigned char)q->what[k];
+                    if (a != b && (q->match_case || toupper(a) != toupper(b)))
+                        break;
+                }
+                if (k == q->nwhat)
+                    hit = 1, where = at;
+            }
+            if (hit) {
+                if (q->found == INF_HITS) {
+                    q->more = 1;
+                } else {
+                    q->found++;
+                    inf_tell(t, q, 0, path, line, (int)where, buf + ls, (int)len);
+                }
+            }
+        }
+        ls = i + 1;
+        line++;
+    }
+    free(buf);
+}
+
+static void inf_walk(struct gui_task *t, struct isearch *q, const char *dir, int depth)
+{
+    struct gui_dirent *e = NULL;
+    int n = gui_dir_read(dir, &e), i;
+    char p[260];
+    for (i = 0; i < n && !q->more && !gui_task_cancelled(t); i++) {
+        gui_path_join(p, sizeof p, dir, e[i].name);
+        if (e[i].dir) {
+            if (depth < 24)
+                inf_walk(t, q, p, depth + 1);
+        } else if (inf_named(q->names, e[i].name)) {
+            inf_file(t, q, p, e[i].size);
+        }
+        if (glos_ticks() - q->at >= 500)
+            inf_tell(t, q, 1, NULL, 0, 0, NULL, 0);
+    }
+    if (n >= 0)
+        free(e);
+}
+
+static void inf_work(struct gui_task *t, void *arg)
+{
+    struct isearch *q = arg;
+    q->at = glos_ticks();
+    inf_walk(t, q, q->dir, 0);
+    if (!gui_task_cancelled(t))
+        inf_tell(t, q, 2, NULL, 0, 0, NULL, 0);
+}
+
+static void inf_done(struct gui_window *owner, void *arg, int cancelled)
+{
+    struct isearch *q = arg;
+    (void)owner, (void)cancelled;
+    if (q->gen == inf.gen)
+        inf.task = NULL;                        /* (the toolkit frees it after this) */
+    free(q);
+}
+
+static void inf_stop(void)              /* the search at work, if any, ends, and has nobody to tell */
+{
+    if (inf.task)
+        gui_task_cancel(inf.task);
+    inf.task = NULL;
+    inf.gen++;
+}
+
+static void inf_show(int on)
+{
+    inf.on = on;
+    gui_visible(inf.box, on);
+    gui_menu_check(view, C_RESULTS, on);
+    gui_relayout(win);
+    if (!on) {
+        inf_stop();
+        gui_focus(cur()->ed);
+    }
+}
+
+static void inf_list_on(struct gui_widget *w, int what_on)     /* Enter, a double click: its file at its line */
+{
+    int r = gui_list_get(w), k;
+    if (what_on != GUI_ON_ACTIVATE || r < 0)
+        return;
+    k = (int)(size_t)gui_list_user(w, r);
+    if (k < 0 || k >= inf.n)
+        return;
+    open_file(inf.hit[k].path);
+    gui_code_goto(cur()->ed, inf.hit[k].line, inf.hit[k].col + 1);
+    gui_focus(cur()->ed);
+    printf("NOTEPAD went to %s %d\n", inf.hit[k].path, inf.hit[k].line);
+    fflush(stdout);
+}
+
+static void inf_close(struct gui_widget *b, int what_on)
+{
+    (void)b, (void)what_on;
+    inf_show(0);
+}
+
+static struct {                         /* the dialog */
+    struct gui_window *win;
+    struct gui_widget *what, *dir, *names, *mcase;
+} infd;
+
+static void infd_button(struct gui_widget *b, int what_on)
+{
+    (void)what_on;
+    if (b->id == 1) {                           /* Find: read while the dialog is there (gui_modal closes it) */
+        if (!gui_get_text(infd.what)[0])
+            return;
+        snprintf(inf.what, sizeof inf.what, "%s", gui_get_text(infd.what));
+        snprintf(inf.dir, sizeof inf.dir, "%s", gui_get_text(infd.dir));
+        snprintf(inf.names, sizeof inf.names, "%s", gui_get_text(infd.names)[0] ? gui_get_text(infd.names) : "*.*");
+        inf.match_case = gui_checked(infd.mcase);
+        gui_end_modal(infd.win, 1);
+    } else if (b->id == 2) {
+        gui_end_modal(infd.win, 0);
+    } else if (b->id == 3) {                    /* Browse: the folder chosen in the toolkit's dialog */
+        char p[260];
+        snprintf(p, sizeof p, "%s", gui_get_text(infd.dir));
+        if (gui_folder_dialog(infd.win, GUI_T("Find in Folder"), p, sizeof p))
+            gui_set_text(infd.dir, p);
+    }
+}
+
+static void find_in_files(void)
+{
+    struct gui_widget *box, *form, *row;
+    struct isearch *q;
+    char *p;
+    size_t n;
+    infd.win = gui_window(GUI_T("Find in Files"), 360, 0, GUI_W_DIALOG);
+    infd.win->owner = win;
+    box = gui_vbox(infd.win->root, 6, 8);
+    form = gui_form(box);
+    infd.what = gui_field(gui_row(form, GUI_T("Find &what:"), NULL), 30);
+    row = gui_row(form, GUI_T("In &folder:"), NULL);
+    infd.dir = gui_field(row, 24);
+    gui_button(row, GUI_T("&Browse..."), infd_button, 3);
+    infd.names = gui_field(gui_row(form, GUI_T("Files &named:"), NULL), 30);
+    infd.mcase = gui_check(box, GUI_T("Match &case"), inf.match_case);
+    row = gui_hbox(box, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("Find"), infd_button, 1)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), infd_button, 2)->flags |= GUI_CANCEL;
+    if (!inf.dir[0]) {                          /* the shown file's folder, or the boot drive's root */
+        snprintf(inf.dir, sizeof inf.dir, "%s", cur()->path[0] ? cur()->path : glos_boot_root());
+        if (cur()->path[0])
+            gui_path_up(inf.dir);
+    }
+    {                                           /* what is chosen in the text, if it is of one line: looked for */
+        char *sel = gui_code_selection(cur()->ed);
+        if (sel && sel[0] && !strchr(sel, '\n') && strlen(sel) < sizeof inf.what)
+            snprintf(inf.what, sizeof inf.what, "%s", sel);
+        free(sel);
+    }
+    gui_set_text(infd.what, inf.what);
+    gui_set_text(infd.dir, inf.dir);
+    gui_set_text(infd.names, inf.names[0] ? inf.names : "*.*");
+    gui_focus(infd.what);
+    if (gui_modal(infd.win) != 1)               /* (which closes it) */
+        return;
+    for (p = inf.dir; *p; p++)                  /* (a folder typed: as DOS has it) */
+        if (*p >= 'a' && *p <= 'z')
+            *p = (char)(*p - 32);
+    for (n = strlen(inf.dir); n > 3 && inf.dir[n - 1] == '\\'; n--)
+        inf.dir[n - 1] = 0;
+    if (!gui_is_dir(inf.dir)) {
+        gui_message(win, GUI_T("Find in Files"), GUI_T("There is no such folder."), GUI_MB_OK);
+        return;
+    }
+    inf_stop();
+    if (!inf.hit && !(inf.hit = malloc(INF_HITS * sizeof *inf.hit)))
+        return;
+    if (!(q = calloc(1, sizeof *q)))
+        return;
+    q->gen = inf.gen, q->match_case = inf.match_case;
+    if (gui_text_dos(inf.what, q->what, sizeof q->what) != 0)  /* (as the files have it: DOS's bytes) */
+        snprintf(q->what, sizeof q->what, "%s", inf.what);
+    q->nwhat = (int)strlen(q->what);
+    snprintf(q->dir, sizeof q->dir, "%s", inf.dir);
+    snprintf(q->names, sizeof q->names, "%s", inf.names);
+    gui_list_clear(inf.list);
+    inf.n = 0;
+    gui_set_text(inf.note, GUI_T("Looking..."));
+    inf_show(1);
+    if (!(inf.task = gui_task_start(NULL, NULL, inf_work, q, inf_done, 0))) {
+        gui_set_text(inf.note, GUI_T("There are no threads to search with."));
+        free(q);
+        return;
+    }
+    gui_focus(inf.list);
+}
+
 static void command(struct gui_window *w, int id)
 {
     struct doc *d = cur();
@@ -512,6 +870,12 @@ static void command(struct gui_window *w, int id)
     case C_FIND:
         find_open(0);
         break;
+    case C_INFILES:
+        find_in_files();
+        return;
+    case C_RESULTS:
+        inf_show(!inf.on);
+        return;
     case C_NEXT:                                /* (F3: the next one, with nothing to look for yet, asked) */
         if (!fr.what[0])
             find_open(0);
@@ -653,6 +1017,7 @@ int main(int argc, char **argv)
     gui_menu_item(m, GUI_T("&Find..."), C_FIND, GUI_T("Ctrl+F"));
     gui_menu_item(m, GUI_T("Find &Next"), C_NEXT, GUI_T("F3"));
     gui_menu_item(m, GUI_T("&Replace..."), C_REPLACE, GUI_T("Ctrl+H"));
+    gui_menu_item(m, GUI_T("Find in F&iles..."), C_INFILES, GUI_T("Ctrl+Shift+F"));
     gui_menu_item(m, GUI_T("&Go To..."), C_GOTO, GUI_T("Ctrl+G"));
     gui_menu_sep(m);
     gui_menu_item(m, GUI_T("Toggle &Bookmark"), C_BOOK, GUI_T("Ctrl+F2"));
@@ -675,6 +1040,7 @@ int main(int argc, char **argv)
             gui_menu_item(kind_menu, GUI_T(name), C_KIND + k, NULL);
     }
     gui_menu_item(m, GUI_T("&Keep Session"), C_SESSION, NULL);
+    gui_menu_item(m, GUI_T("Find in Files' &Results"), C_RESULTS, NULL);
     m = gui_menu(bar, GUI_T("&Help"));
     gui_menu_item(m, GUI_T("&About Notepad"), C_ABOUT, NULL);
     strip = gui_tabs(gui_vbox(win->root, 0, 0));
@@ -683,6 +1049,21 @@ int main(int argc, char **argv)
     gui_on(strip, strip_on, 0);
     gui_grow(strip->parent, 1);
     gui_grow(strip, 1);
+    {                                           /* Find in Files' pane, under the tabs: there once a search is made */
+        static const char *const heads[3] = { GUI_N("File"), GUI_N("Line"), GUI_N("Text") };
+        static const int widths[3] = { 150, 40, 300 };
+        struct gui_widget *row;
+        inf.box = gui_vbox(strip->parent, 2, 2);
+        row = gui_hbox(inf.box, 6, 0);
+        inf.note = gui_label(row, "");
+        gui_grow(inf.note, 1);
+        gui_button(row, GUI_T("Close"), inf_close, 0);
+        inf.list = gui_list(inf.box, 3, heads, widths);
+        gui_size(inf.list, 0, 100);
+        gui_grow(inf.list, 0);
+        gui_on(inf.list, inf_list_on, 0);
+        gui_visible(inf.box, 0);
+    }
     status = gui_status(win);
     kind_at = gui_status_section(status, 90);
     gui_menu_check(format, C_WRAP, wrap);

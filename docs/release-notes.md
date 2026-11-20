@@ -4,6 +4,12 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Notepad: Find in Files (2026-11-20)
+
+- **Edit's Find in Files... (Ctrl+Shift+F)** looks for text in every file of a folder and of the folders under
+  it. The lines found are listed in a pane under the tabs as the search goes; Enter on one opens its file at
+  that line.
+
 ## Terminal: Find (2026-11-20)
 
 - **Edit's Find... (Ctrl+Shift+F)** looks for text in everything the tab has kept: each match is selected and
