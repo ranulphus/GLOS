@@ -531,6 +531,22 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
 
 ## Open faults (noted, not yet chased)
 
+- **Drive C: "not ready" in the middle of a settings write, on the 486DX2's profile** (the twenty-third gate,
+  2026-11-20, devserver: `apps-486dx2-ne2k`). Ten small apps had started and ended, then `glos config set`
+  wrote GLOS.CFG: the write stood in the BIOS for a minute or two (its own timeout, stretched by the traps of
+  a processor without VME), DOS's critical error said drive not ready (`GLOS-DOS critical ah=39 drive=C
+  code=02`), and every read and write of the disc after it failed the same way. The emulator's host had room
+  and no errors of its own. **Not seen again:** seven runs of the case and two hundred rounds of an app's
+  start and end followed by a settings write (`build/run_cfgstress.py`), all here, all clean. **Not
+  explained.** That gate was the first with two changes to the kernel that are at work on exactly this
+  profile (the short way for the V86 traps of a processor without VME, and an app's call no longer going
+  through the 256 vectors), neither of which shows a way to lose a disc's interrupt on reading; they are
+  taken out of what goes to main (the branch `v86-fast` keeps them, with a third: an app's call made from the
+  stub's wait) until the fault is found, or the case has run a few dozen times under a gate's load with them
+  and without. What to look at when it comes again: whether the BIOS's INT 76h ran for the write's
+  interrupt (the kernel masks a line from its interrupt to the program's EOI: an interrupt the drive takes
+  back while the line is masked is lost in 86Box's PIC).
+
 - **`apiset-bf6-g200`'s `screen-off` failed once** (the twenty-second gate, 2026-11-20, devserver; never in the
   ninety runs before it). **Mended:** the suite's own race. It waited for `GLOS-DISPLAY power can=` in the log
   and then read the log again for the value after it, and that once the first reading had caught the line
