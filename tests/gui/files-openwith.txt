@@ -3,7 +3,8 @@
 # list, chosen. With the box ticked the kind is that program's from then on ([open] .DAT = ... in GLOS.CFG): Open
 # With on the file again has the program in its list, chosen.
 # (The program here is a batch file that says a word and ends: one of GLOS's own would leave its window on Loop
-# A's desktop, where the scripts after this one are played. No other script opens a .DAT file.)
+# A's desktop, where the scripts after this one are played. No other script opens a .DAT file. While it runs it
+# is a DOS program with the keyboard: the script waits for its end, settle, before it types on.)
 run FILES.EXE -browse C:\FM
 wait "C:\FM - Files"
 key home
@@ -20,6 +21,7 @@ key alt+a
 shot other "Open With"
 key enter
 gone "Open With"
+settle
 key alt+f w
 wait "Open With"
 shot kept "Open With"
