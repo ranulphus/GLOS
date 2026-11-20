@@ -5836,10 +5836,11 @@ def api_set_case(profile, vcard, card):
         # The screen's power: off [saver] power minutes after the saver came on, where the card can; on with its end.
         agent.ssh("glos config set saver power 1")
         agent.ssh("glos idle +90")
-        t0 = time.time()
-        while time.time() - t0 < 30 and "GLOS-DISPLAY power can=" not in agent.log():
-            time.sleep(0.5)
-        m = re.search(r"GLOS-DISPLAY power can=(\w+)", agent.log())
+        t0, m = time.time(), None
+        while time.time() - t0 < 30 and not m:  # (the line whole: the twenty-second gate read it when half of it
+            m = re.search(r"GLOS-DISPLAY power can=(\w+)\r?\n", agent.log())    # was there, and then found no value)
+            if not m:
+                time.sleep(0.5)
         can = int(m.group(1), 16) if m else -1
         info += " power-can=%x" % can if m else " power-can=?"
         time.sleep(2)

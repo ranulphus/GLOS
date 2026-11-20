@@ -531,6 +531,13 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
 
 ## Open faults (noted, not yet chased)
 
+- **`apiset-bf6-g200`'s `screen-off` failed once** (the twenty-second gate, 2026-11-20, devserver; never in the
+  ninety runs before it). **Mended:** the suite's own race. It waited for `GLOS-DISPLAY power can=` in the log
+  and then read the log again for the value after it, and that once the first reading had caught the line
+  half written: no value, though the kernel had done everything (the whole case took 27 seconds, and the log
+  has `power can=f` and `power=3` in their places). It waits for the whole line now. Other waits of the suites
+  that look for the beginning of a line and read its end afterwards may have the same in them.
+
 - **A DOS call is dear on a 486 without VME, and dearer from an app** (measured 2026-11-20 in Loop A with
   `tests/dos/doscalls.c`; 86Box's 486DX2 and Pentium II; microseconds a call, the least of three runs):
 
