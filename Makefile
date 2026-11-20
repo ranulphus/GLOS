@@ -177,10 +177,10 @@ host-test-run:
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/song_test tests/host/song_test.c apps/shared/song.c \
 	  apps/shared/smf.c && build/host/song_test build/host/smf
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c loader/inflate.c \
-	  && build/host/pdf_test `python3 tests/host/pdf_cases.py build/host/pdf`
+	  && build/host/pdf_test `python3 tests/host/pdf_cases.py build/host/pdfcases`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdfdraw_test tests/host/pdfdraw_test.c apps/shared/pdfdraw.c \
 	  apps/shared/pdffont.c apps/shared/ttf.c apps/shared/pdf.c loader/inflate.c -lm \
-	  && build/host/pdfdraw_test build/host/pdf apps/pdf/fonts
+	  && build/host/pdfdraw_test build/host/pdfcases apps/pdf/fonts
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/ttf_test tests/host/ttf_test.c apps/shared/ttf.c \
 	  && build/host/ttf_test apps/pdf/fonts
 	@mkdir -p build/host/packed && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/packed_test \
@@ -220,7 +220,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
-APPS := notepad calc images term files monitor control paint mixer recorder player studio
+APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf
 # (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
 # shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
@@ -260,6 +260,14 @@ APP_LIBS_player := $(SOURCE_SRCS) apps/shared/smf.c apps/shared/midiplay.c
 # Songs as MIDI Studio holds them (phase F), read from and written as MIDI files, and played as the Player plays them.
 APP_HOST_LIBS_studio := apps/shared/song.c apps/shared/smf.c apps/shared/midiplay.c
 APP_LIBS_studio := apps/shared/song.c apps/shared/smf.c apps/shared/midiplay.c
+# PDF files read and drawn (the PDF Viewer, phase F); its stand-in fonts as one file beside the program.
+PDF_SRCS := apps/shared/pdf.c apps/shared/pdfdraw.c apps/shared/pdffont.c apps/shared/ttf.c apps/shared/picfile.c loader/inflate.c
+APP_HOST_LIBS_pdf := $(PDF_SRCS)
+APP_LIBS_pdf := $(PDF_SRCS)
+APP_DEPS_pdf := build/apps/PDFFONTS.DAT
+build/apps/PDFFONTS.DAT: $(wildcard apps/pdf/fonts/*.TTF) tools/mkpdffonts.py
+	@mkdir -p build/apps
+	$(Q)python3 tools/mkpdffonts.py --pack apps/pdf/fonts $@
 build/host/libsshc32.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h
 	@mkdir -p build/host/sshc32
 	$(Q)echo "  CC      $@"
@@ -275,12 +283,12 @@ GUI_SCRIPTS := $(wildcard tests/gui/*.txt)
 # (A:, C:\HX, C:\OUT and C:\TEST are the Loop A machine's own, which the file manager's tree shows.)
 gui-goldens:
 	$(Q)$(DEV) $(MAKE) -s gui-goldens-run
-gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS))
+gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS)) build/apps/PDFFONTS.DAT
 	@rm -rf build/host/gui build/host/gui-drives && mkdir -p build/host/gui
 	@set -e; for t in $(GUI_SCRIPTS); do n=$$(basename $$t .txt); \
 	  if head -1 $$t | grep -q '^#loopa-run-only'; then continue; fi; prog=$$(awk '$$1=="run"{print tolower($$2); exit}' $$t); \
 	  prog=$${prog%.exe}; mkdir -p build/host/gui/$$n; for b in 8 16 32; do rm -rf build/host/gui-drives; \
-	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT sdk/gui/fonts/FONTS.DAT sdk/gui/fonts/ICONS.DAT build/host/gui-drives/C/GLOS/; \
+	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT sdk/gui/fonts/FONTS.DAT sdk/gui/fonts/ICONS.DAT build/apps/PDFFONTS.DAT build/host/gui-drives/C/GLOS/; \
 	    mkdir -p build/host/gui-drives/A build/host/gui-drives/C/HX build/host/gui-drives/C/OUT build/host/gui-drives/C/TEST; \
 	    GLOS_HOST_DRIVES=build/host/gui-drives build/host/$$prog $$t build/host/gui/$$n $$b > build/host/gui/$$n-$$b.log \
 	      || { echo "gui-goldens: $$n at $$b bits:"; cat build/host/gui/$$n-$$b.log; exit 1; }; done; \

@@ -7,14 +7,25 @@ the names Liberation, Arimo, Tinos and Cousine: what is made here is a changed f
 name table at all; the files are PDFSANS.TTF and so on). Kept in the repository: GLOS's build needs no fonts.
 
     mkpdffonts.py SOURCE-DIR OUT-DIR      (/usr/share/fonts/truetype/liberation apps/pdf/fonts)
+    mkpdffonts.py --pack FONTS-DIR FILE   the twelve as one file, PDFFONTS.DAT, as the program reads them (the build's:
+                                          "GPDF", twelve, then each one's place and length, family * 4 + bold * 2 +
+                                          italic; then the fonts)
 
 No library is needed: a TrueType file's tables are read and written here."""
 import hashlib, os, struct, sys
 
+FACES = [("LiberationSans", "PDFSANS"), ("LiberationSerif", "PDFSERI"), ("LiberationMono", "PDFMONO")]
+STYLES = [("Regular", ""), ("Italic", "I"), ("Bold", "B"), ("BoldItalic", "Z")]          # (in the packed file's order)
+if sys.argv[1] == "--pack":
+    fonts = [open(os.path.join(sys.argv[2], short + letter + ".TTF"), "rb").read() for _, short in FACES for _, letter in STYLES]
+    at, table = 8 + 8 * len(fonts), b""
+    for f in fonts:
+        table += struct.pack("<II", at, len(f))
+        at += len(f)
+    open(sys.argv[3], "wb").write(b"GPDF" + struct.pack("<I", len(fonts)) + table + b"".join(fonts))
+    sys.exit(0)
 src, out = sys.argv[1], sys.argv[2]
 os.makedirs(out, exist_ok=True)
-FACES = [("LiberationSans", "PDFSANS"), ("LiberationSerif", "PDFSERI"), ("LiberationMono", "PDFMONO")]
-STYLES = [("Regular", ""), ("Bold", "B"), ("Italic", "I"), ("BoldItalic", "Z")]
 WANT = (list(range(0x20, 0x7F)) + list(range(0xA0, 0x100))
         + [0x152, 0x153, 0x160, 0x161, 0x178, 0x17D, 0x17E, 0x192, 0x2C6, 0x2DC, 0x2013, 0x2014, 0x2018, 0x2019, 0x201A, 0x201C,
            0x201D, 0x201E, 0x2020, 0x2021, 0x2022, 0x2026, 0x2030, 0x2039, 0x203A, 0x20AC, 0x2122, 0x2212, 0xFB01, 0xFB02,

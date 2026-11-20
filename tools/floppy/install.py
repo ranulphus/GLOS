@@ -32,7 +32,7 @@ import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-APPS = ["FILES", "TERM", "NOTEPAD", "CALC", "IMAGES", "PAINT", "MONITOR", "CONTROL", "MIXER", "RECORDER", "PLAYER", "STUDIO", "PKG", "FETCH"]
+APPS = ["FILES", "TERM", "NOTEPAD", "CALC", "IMAGES", "PAINT", "MONITOR", "CONTROL", "MIXER", "RECORDER", "PLAYER", "STUDIO", "PDF", "PKG", "FETCH"]
 SAVERS = ["STARS", "PIPES", "TEXT", "OBJECTS", "MAZE"]                      # (apps/savers: NAME.SCR beside GLOS.EXE)
 
 AUTOEXEC_LINES = [":glosrun", "C:\\GLOS\\GLOS.EXE", "IF ERRORLEVEL 200 GOTO glosrun"]
@@ -194,6 +194,7 @@ def glos_files(args):
     files += [("build/glos/CERTS.DAT", "CERTS.DAT"), ("sdk/gui/fonts/SMOOTH.DAT", "SMOOTH.DAT"),
               ("sdk/gui/fonts/FONTS.DAT", "FONTS.DAT"),         # (the UI's small and large fonts: toolkit 2)
               ("sdk/gui/fonts/ICONS.DAT", "ICONS.DAT"),         # (GLOS's colour icons, by name)
+              ("build/apps/PDFFONTS.DAT", "PDFFONTS.DAT"),      # (the PDF Viewer's stand-in fonts: phase F)
               ("build/glos/KEYS/PKG/GLOS.PUB", "KEYS/PKG/GLOS.PUB"),
               (os.path.join(args.keys, "HOSTKEY"), "KEYS/HOSTKEY"), (os.path.join(args.keys, "AUTHKEYS"), "KEYS/AUTHKEYS")]
     missing = [src for src, _ in files if not os.path.exists(os.path.join(ROOT, src))]

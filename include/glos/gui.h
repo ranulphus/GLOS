@@ -1033,6 +1033,8 @@ void gui_dir_sort(struct gui_dirent *e, int n);        /* as gui_dir_read gives 
 int gui_drives(char *letters);          /* the drives there are, "ACD": their number */
 int gui_is_dir(const char *path);
 void *gui_fopen(const char *path, const char *mode);    /* a FILE * */
+/* A file beside the program (its own data: FONTS.DAT is found so), to read: a FILE *, or NULL. */
+void *gui_open_beside(const char *name);
 int gui_mkdir(const char *path);
 int gui_rmdir(const char *path);
 int gui_unlink(const char *path);

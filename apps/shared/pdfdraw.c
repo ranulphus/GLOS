@@ -383,14 +383,15 @@ static void stroke(struct ctx *c)
 static unsigned colour(const double *v, int n)  /* by how many numbers it has: gray, RGB, CMYK */
 {
     int c[3], i;
+    /* (0.7 is 178.5 of 255: the hair added makes that 179 whichever way the product was rounded) */
     if (n == 1)
-        c[0] = c[1] = c[2] = (int)(v[0] * 255 + 0.5);
+        c[0] = c[1] = c[2] = (int)(v[0] * 255 + 0.5 + 1e-9);
     else if (n == 3)
         for (i = 0; i < 3; i++)
-            c[i] = (int)(v[i] * 255 + 0.5);
+            c[i] = (int)(v[i] * 255 + 0.5 + 1e-9);
     else if (n == 4)
         for (i = 0; i < 3; i++)
-            c[i] = (int)((1 - v[i]) * (1 - v[3]) * 255 + 0.5);
+            c[i] = (int)((1 - v[i]) * (1 - v[3]) * 255 + 0.5 + 1e-9);
     else
         c[0] = c[1] = c[2] = 128;               /* (a pattern or a space not known here) */
     for (i = 0; i < 3; i++)

@@ -10709,7 +10709,7 @@ def console_case(profile, vcard, card, bits):
 
 # The native apps (M9 steps D-G): their scripts (tests/gui, all but GUITEST's) on the desktop, the apps beside
 # GLOS.EXE.
-NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER", "RECORDER", "PLAYER", "STUDIO"]
+NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER", "RECORDER", "PLAYER", "STUDIO", "PDF"]
 NATIVE_CASES = [("bf6", "vbe", "ne2kpci", 8), ("bf6", "g200", "ne2kpci", 16), ("bf6", "g400", "ne2kpci", 32),
                 ("486dx2", "vbe", "ne2k", 8)]
 
@@ -10721,9 +10721,12 @@ def native_case(profile, vcard, card, bits):
     only = os.environ.get("NATIVE_ONLY")        # e.g. NATIVE_ONLY=notepad,calc
     if only:
         scripts = [f for f in scripts if f[:-4] in only.split(",")]
+    if profile.startswith("486"):               # (a script marked #pentium is of a program whose floor is one)
+        scripts = [f for f in scripts if "#pentium" not in open(os.path.join(ROOT, "tests", "gui", f)).readline()]
     return gui_case(profile, vcard, card, bits, scripts=scripts, tag_prefix="native",
                     files=["build/apps/%s.EXE=/TEST/%s.EXE" % (a, a) for a in NATIVE_APPS]
                     + ["build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE", "build/ow/dos/CONIN.EXE=/TEST/CONIN.EXE",
+                       "build/apps/PDFFONTS.DAT=/TEST/PDFFONTS.DAT",        # (the PDF Viewer's stand-in fonts)
                        "tests/gui/drives/C/GLOS/GLOS.CFG=/TEST/GLOS.CFG"])   # (the Control Panel's, beside GLOS.EXE)
 
 

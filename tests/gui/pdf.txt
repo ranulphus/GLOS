@@ -1,0 +1,41 @@
+#host-only (the pages are drawn with floating-point sums: a shade's last step differs between the host's compiler and DJGPP,
+# so Loop A's pictures are not held to the host's; pdf-run.txt is the same there, without pictures)
+# The PDF Viewer (apps/pdf; phase F, docs/v1/apps/pdf-viewer.md): nothing open; a PDF of two pages opened by the
+# dialog (tests/gui/mkpdf.py's, in C:\GLOS), its first page as wide as the view; the next page; at its actual
+# size; back by Go to Page; a locked PDF and a file that is none refused.
+run PDF.EXE
+wait "PDF Viewer"
+shot empty "PDF Viewer"
+key ctrl+o
+wait "Open"
+type C:\\GLOS\\GUIDE.PDF\n
+said PDF opened GUIDE.PDF pages=2
+said PDF page 1 of 2 600x777 at 98%
+shot first "PDF Viewer"
+key ctrl+pgdn
+said PDF page 2 of 2 600x777 at 98%
+shot second "PDF Viewer"
+key ctrl+1
+said PDF page 2 of 2 612x792 at 100%
+key ctrl+g
+wait "Go to Page"
+key down
+key enter
+said PDF page 1 of 2 612x792 at 100%
+key ctrl+2
+said PDF page 1 of 2 600x777 at 98%
+key ctrl+o
+wait "Open"
+type C:\\GLOS\\LOCKED.PDF\n
+said PDF refused LOCKED.PDF -5
+pause 500
+key enter
+key ctrl+o
+wait "Open"
+type C:\\SND\\TONE.WAV\n
+said PDF refused TONE.WAV -1
+pause 500
+key enter
+key alt+f4
+gone "PDF Viewer"
+expect PDF end

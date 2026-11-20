@@ -631,5 +631,36 @@ has already (`loader/inflate.c`). PDFio was not tried; no code of another reader
     bold with accents and the euro, italic by `T*`, a TrueType font the file carries, one by glyph numbers
     (`Identity-H`), text turned a quarter, unseen text (no ink), small blue text; the damaged-file runs take
     the text page too.
-- **Next**: the program (`apps/pdf`); then embedded CFF and Type 1 fonts, and what the plan lists after.
+- **The program** (`apps/pdf/pdf.c`, PDF.EXE, "PDF Viewer" in the Start menu; Files opens PDF files with it):
+  its first part.
+  - A page at a time in a toolkit image view (scroll bars, the wheel, the arrows; the left button moves the
+    page): the page is drawn whole into a picture of its own at the zoom, at most three million pixels (the
+    zoom stops there).
+  - **Pages**: Next and Previous (Ctrl+PgDn, Ctrl+PgUp), First and Last (Ctrl+Home, Ctrl+End), Go to Page...
+    (Ctrl+G). **Zoom**: In and Out by steps from 25% to 400%, Actual Size (a point a pixel), Fit Width (as a
+    file opens: the page as wide as the view).
+  - The file is read through `fseek` and `fread` as its objects are wanted; what a page needed is let go
+    (above 2 MB) when the next is drawn. JPEGs in a page are decoded by `apps/shared/picfile.c`.
+  - **The stand-in fonts** are one file beside the program, `PDFFONTS.DAT` (487 KB; made at build time from
+    `apps/pdf/fonts` by `tools/mkpdffonts.py --pack`; a face is read from it when first wanted), found by
+    the toolkit's `gui_open_beside`, now a public call. The installer and the suites put it there.
+  - A locked file, a file that is no PDF, a damaged one and one that can't be read are each refused with
+    their reason.
+  - **Not yet** (the plan's rest): drawing off the window's thread and a cache of pages; continuous and
+    two-page views; search, selecting and copying text; the outline and thumbnails; links; encrypted files
+    with an empty password; a part of a page at zooms beyond the picture's limit.
+  - **Tests.** On `tests/gui/mkpdf.py`'s files: nothing open, a two-page PDF opened (its first page fitted
+    to the view: title, text in three stand-in faces, shapes), the next page, the actual size, Go to Page,
+    Fit Width again, a locked file and a WAV refused; each drawn page is said with its size and zoom.
+    `tests/gui/pdf.txt` on the host, with pictures to look at; `tests/gui/pdf-run.txt` the same on Loop A
+    with the real program, without pictures and not on the 486 (`#pentium`, a new mark the native suite
+    heeds: the PDF Viewer's floor is a Pentium, and a page takes the emulated 486 longer than a script
+    waits).
+  - **Why Loop A's pictures are not held to the host's here**, as every other program's are: the drawing's
+    sums are floating point, and the two compilers (the host's gcc, DJGPP) round a shade's last step
+    differently (a first run differed in thousands of pixels by one step of 255; 0.7 of 255 is 178.5, and
+    came out 178 in one and 179 in the other: that one is settled now, the smoothed edges are not). The
+    pages look the same. A filler in whole numbers would make them the same to the bit, and is noted as
+    work to come, not needed for reading.
+- **Next**: embedded CFF and Type 1 fonts (papers made by TeX carry those), then what the plan lists after.
 

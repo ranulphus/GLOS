@@ -20,7 +20,7 @@ choice, 2026-11-06), and approved before any code of phases B–F.
 | `phase-b.md` | Phase B's step plan: API 2.0 and the window system in 15 steps, with their tests | Plan v1, questions answered |
 | `phase-d.md` | Phase D's step plan: the desktop shell and the system, in eight steps, with their tests | Plan v1 (2026-11-17) |
 | `phase-e.md` | Phase E as built: the core apps, upgraded | Its list done 2026-11-20 |
-| `phase-f.md` | Phase F as built: the new apps | Begun 2026-11-20 (the Mixer; the Sound Recorder's and the Player's first parts; Files' folders on other computers; SSH's tunnels; the Terminal's saved sessions; Telnet; serial sessions; MP3 and Ogg in the Player; S3M and XM modules; MIDI files; MIDI Studio's first part) |
+| `phase-f.md` | Phase F as built: the new apps | Begun 2026-11-20 (the Mixer; the Sound Recorder's and the Player's first parts; Files' folders on other computers; SSH's tunnels; the Terminal's saved sessions; Telnet; serial sessions; MP3 and Ogg in the Player; S3M and XM modules; MIDI files; MIDI Studio's first part; the PDF Viewer's first part) |
 
 ## The API's areas
 

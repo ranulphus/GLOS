@@ -4,6 +4,21 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The PDF Viewer (2026-11-20)
+
+- **A new program, the PDF Viewer** (PDF.EXE, in the Start menu; Files opens PDF files with it), with a reader
+  and a renderer of GLOS's own: a page at a time, text, lines and shapes with smoothed edges, pictures (JPEG
+  among them); next and previous page, go to a page; zoom from 25% to 400%, actual size, fit to the window's
+  width.
+- **Text** is drawn in the TrueType fonts a file carries, and otherwise in stand-ins for Helvetica, Times and
+  Courier (regular, bold, italic) that come with GLOS (`PDFFONTS.DAT`, made from the Liberation fonts; SIL
+  Open Font License).
+- It reads old and new kinds of PDF (cross-reference tables and streams, object streams, updates), and files
+  whose tables are damaged are read by going through them.
+- **Not yet:** the fonts of the Type 1 and CFF kinds a file carries (their text is shown in the stand-ins);
+  searching and copying text; the outline; continuous scrolling; password-protected files.
+- **For programs:** `gui_open_beside` opens a file that lies beside the program.
+
 ## MIDI Studio (2026-11-20)
 
 - **A new program, MIDI Studio** (STUDIO.EXE, in the Start menu): songs made of tracks, each an instrument of
