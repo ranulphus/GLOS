@@ -823,6 +823,11 @@ struct gui_term_cb {
 };
 struct gui_widget *gui_terminal(struct gui_widget *parent, int lines_kept);
 void gui_term_callbacks(struct gui_widget *w, const struct gui_term_cb *cb);
+/* (phase F) A terminal's own look: colours (0xRRGGBB) for the text and the ground its program leaves as they
+   are, in place of the theme's (on 0: the theme's again); its own text, a monospaced font of gui_font_get's
+   (NULL: the UI's, in the theme's size). Another size of text is another number of columns and rows. */
+void gui_term_colours(struct gui_widget *w, int on, unsigned text, unsigned back);
+void gui_term_font(struct gui_widget *w, const struct gfx_font *font);
 void gui_term_feed(struct gui_widget *w, const void *data, int n);
 void gui_term_size(struct gui_widget *w, int *cols, int *rows);        /* the screen's, as laid out */
 void gui_term_end(struct gui_widget *w);        /* the program has gone: no cursor, no keys taken */

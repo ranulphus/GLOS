@@ -730,6 +730,18 @@ struct sshc_chan *sshc_direct(struct sshc *c, const char *host, unsigned port, c
     return ch;
 }
 
+void sshc_keepalive(struct sshc *c)
+{
+    uint8_t m[16];
+    struct sbuf b;
+    if (c->state != SSHC_READY || c->kex || c->dead)
+        return;
+    sb_init(&b, m, sizeof m);
+    sb_u8(&b, MSG_IGNORE);
+    sb_string(&b, (const uint8_t *)"", 0);
+    send_sb(c, &b);
+}
+
 int sshc_chan_ok(const struct sshc_chan *ch)
 {
     if (ch->refused)

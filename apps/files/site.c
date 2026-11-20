@@ -12,6 +12,7 @@
 #include <glos/glos.h>
 
 #include "../shared/remote.h"
+#include "../shared/sessions.h"
 #include "files.h"
 #include "site.h"
 
@@ -182,6 +183,65 @@ static void ssh_dir(char *out, size_t room)     /* where the key and the known h
         snprintf(out, room, "%s\\SSH", files_home);
 }
 
+/* ---- the saved sessions (apps/shared/sessions.h: the Terminal's Sessions keeps them, SESSIONS.CFG beside the
+   key): a computer is asked for by a session's name, and a session's own key logs in to its computer. Read
+   again each time they are asked for (the Terminal may have changed them). */
+static struct session *sess;
+static int nsess;
+
+static void sess_read(void)                     /* (the window's thread) */
+{
+    char dir[260], path[300];
+    if (!sites_lock)
+        sites_lock = glos_lock();
+    glos_take(sites_lock, 0xFFFFFFFFu);
+    if (!sess)
+        sess = malloc(SESSIONS_MAX * sizeof *sess);
+    ssh_dir(dir, sizeof dir);
+    sessions_path(path, sizeof path, dir);
+    sessions_files(gui_fopen);
+    nsess = sess ? sessions_load(path, sess, SESSIONS_MAX) : 0;
+    glos_give(sites_lock);
+}
+
+int site_sessions(const char **names, int room)
+{
+    int i;
+    sess_read();
+    for (i = 0; i < nsess && i < room; i++)
+        names[i] = sess[i].name;
+    return i;
+}
+
+int site_session(const char *name, char *url, int room)
+{
+    char port[12] = "";
+    int i;
+    sess_read();
+    if ((i = sessions_find(sess, nsess, name)) < 0)
+        return -1;
+    if (sess[i].port && sess[i].port != 22)
+        snprintf(port, sizeof port, ":%d", sess[i].port);
+    snprintf(url, (size_t)room, "sftp://%s%s%s%s", sess[i].user, sess[i].user[0] ? "@" : "", sess[i].host, port);
+    return 0;
+}
+
+/* The key's file a saved session names for that computer, port and user (a session with no user is anyone's):
+   into out, "" if none does. (A worker's thread.) */
+static void session_key(const char *user, const char *host, unsigned port, char *out, size_t room)
+{
+    int i;
+    out[0] = 0;
+    glos_take(sites_lock, 0xFFFFFFFFu);
+    for (i = 0; i < nsess; i++)
+        if (sess[i].key[0] && !strcmp(sess[i].host, host) && (unsigned)(sess[i].port ? sess[i].port : 22) == port
+            && (!sess[i].user[0] || !strcmp(sess[i].user, user))) {
+            snprintf(out, room, "%s", sess[i].key);
+            break;
+        }
+    glos_give(sites_lock);
+}
+
 /* ---- a folder asked for: connected, listed */
 
 struct ask {                            /* a question of the connection's, put to the user on the window's thread */
@@ -305,7 +365,7 @@ static int listed(struct site *s, const char *path, struct site_ent **ents, int 
 static void list_work(struct gui_task *t, void *arg)
 {
     struct req *q = arg;
-    char user[40], host[80], path[260], dir[260];
+    char user[40], host[80], path[260], dir[260], key[120];
     unsigned port;
     struct site *s;
     q->task = t;
@@ -330,9 +390,10 @@ static void list_work(struct gui_task *t, void *arg)
         glos_give(sites_lock);
     }
     glos_take(s->lock, 0xFFFFFFFFu);
+    session_key(user, host, port, key, sizeof key);
     if (!s->r) {
         ssh_dir(dir, sizeof dir);
-        s->r = remote_open(host, port, user, dir, &ui, q, &q->err, q->why, sizeof q->why);
+        s->r = remote_open(host, port, user, dir, key, &ui, q, &q->err, q->why, sizeof q->why);
         printf("FILES site %s %s\n", s->r ? "connected" : "refused", host);
         fflush(stdout);
     }
@@ -343,7 +404,7 @@ static void list_work(struct gui_task *t, void *arg)
         if (q->err == REMOTE_E_GONE) {          /* the connection had ended (the other side's time-out): once more */
             remote_close(s->r);
             ssh_dir(dir, sizeof dir);
-            s->r = remote_open(host, port, user, dir, &ui, q, &q->err, q->why, sizeof q->why);
+            s->r = remote_open(host, port, user, dir, key, &ui, q, &q->err, q->why, sizeof q->why);
             if (s->r)
                 q->err = listed(s, path, &q->ents, &q->n);
         }
@@ -373,8 +434,7 @@ int site_list(struct gui_window *win, const char *url, site_done done, void *ctx
     struct req *q = calloc(1, sizeof *q);
     if (!q)
         return -1;
-    if (!sites_lock)
-        sites_lock = glos_lock();
+    sess_read();                                /* (a session's own key is its computer's: as they are now) */
     q->win = win, q->done = done, q->ctx = ctx;
     snprintf(q->url, sizeof q->url, "%s", url);
     /* (No dialog of the task's own: it would come up over the connection's questions, a second into them, and

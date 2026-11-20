@@ -15,19 +15,25 @@
  * one; a tab's close box, Close Tab or Ctrl+Shift+W closes it and ends its session; EXIT in a shell closes its
  * tab, and the last tab's end is the Terminal's. Eight at most.
  *
- * Saved connections (File's Connections..., Ctrl+Shift+O): a name, a host, a user and a port each, kept in
- * TERM.CFG beside the program. Connect opens a tab and types the SSH command into its shell (SSH.EXE does the
- * rest, its keys and its questions included: nothing secret is kept here).
+ * Saved sessions (File's Sessions..., Ctrl+Shift+O; phase F, the owner's choice of 2026-11-20: saved
+ * connections and their settings as PuTTY has them): a list of sessions, each a computer to log in to (its
+ * host, port and user, a key's file, a command to run there, a keep-alive, a file its output is logged to), its
+ * tunnels, and the look of its tab (colours, the text's size, the lines kept). They are SESSIONS.CFG beside SSH's key
+ * (apps/shared/sessions.h), which `ssh NAME` reads too. Open makes a tab with that look and types the SSH
+ * command into its shell: `ssh NAME` for a session as it is saved, the whole command for one that is not
+ * (SSH.EXE does the rest, its keys and its questions included: nothing secret is kept here).
  *
- *   TERM [-log] [COMMAND]
- *                      a terminal; COMMAND typed into it first. -log: on stdout, the screen whenever it has
- *                      been still for a moment ("VT| ...") and, at the end, every line kept and the screen
- *                      ("TERM| ...": the suite's) */
+ *   TERM [-log] [-session NAME] [COMMAND]
+ *                      a terminal; COMMAND typed into it first. -session: its first tab is that saved
+ *                      session's. -log: on stdout, the screen whenever it has been still for a moment
+ *                      ("VT| ...") and, at the end, every line kept and the screen ("TERM| ...": the suite's) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <glos/gui.h>
+
+#include "../shared/sessions.h"
 
 #define LINES 1000
 #define TABS 8
@@ -201,8 +207,23 @@ static void term_on(struct gui_widget *w, int what)    /* the title a program se
     title_now();
 }
 
-/* A tab more: its terminal, and a shell's session at it. NULL if there are eight, or GLOS has no more. */
-static struct tab *tab_new(void)
+/* A saved session's colours: the text and the ground that its programs leave as they are (0: the theme's). */
+static const struct { unsigned text, back; } scheme[SESSION_COLOURS] = {
+    { 0, 0 }, { 0x000000, 0xFFFFFF }, { 0xE5E5E5, 0x000000 }, { 0x33FF66, 0x001400 }, { 0xFFB000, 0x180C00 },
+    { 0xFFFFFF, 0x0000AA },
+};
+
+static void tab_look(struct tab *t, int colours, int font)
+{
+    if (colours > 0 && colours < SESSION_COLOURS)
+        gui_term_colours(t->grid, 1, scheme[colours].text, scheme[colours].back);
+    if (font >= 1 && font <= 3)                 /* (a size FONTS.DAT hasn't: the UI's stays) */
+        gui_term_font(t->grid, gui_font_get(GUI_FONT_MONO, font - 1));
+}
+
+/* A tab more: its terminal (so many lines kept above its screen; 0: the Terminal's thousand), and a shell's
+   session at it. NULL if there are eight, or GLOS has no more. */
+static struct tab *tab_new(int lines)
 {
     static const struct gui_term_cb cb = { term_send, term_resize, NULL };
     struct tab *t;
@@ -214,7 +235,7 @@ static struct tab *tab_new(void)
     t->number = ++made;
     snprintf(name, sizeof name, GUI_T("Shell %d"), t->number);
     t->page = gui_tab(strip, name);
-    t->grid = gui_terminal(t->page, LINES);
+    t->grid = gui_terminal(t->page, lines > 0 ? lines : LINES);
     gui_term_callbacks(t->grid, &cb);
     gui_on(t->grid, term_on, 0);
     gui_grow(t->grid, 1);
@@ -234,24 +255,32 @@ static int tab_start(struct tab *t, int cols, int rows)
     return 0;
 }
 
-static void tab_open(void)                      /* (the "+", New Tab) */
+/* A new tab, shown: with a saved session's look (k), or the Terminal's own (NULL: the "+", New Tab). */
+static struct tab *tab_open_as(const struct session *k)
 {
     struct tab *shown = tab_shown(), *t;
     int cols = 80, rows = 25, i;
     if (shown)
         gui_term_size(shown->grid, &cols, &rows);
-    if (!(t = tab_new()))
-        return;
-    tab_start(t, cols, rows);
+    if (!(t = tab_new(k ? k->lines : 0)))
+        return NULL;
+    if (k)
+        tab_look(t, k->colours, k->font);
     for (i = 0; gui_tabs_page(strip, i); i++)
         if (gui_tabs_page(strip, i) == t->page)
             gui_tabs_set(strip, i);
     gui_relayout(win);
+    if (k && k->font)                           /* (text of another size: its own columns and rows) */
+        gui_term_size(t->grid, &cols, &rows);
+    tab_start(t, cols, rows);
     gui_focus(t->grid);
     title_now();
     printf("TERM tab new tabs=%d\n", ntabs);
     fflush(stdout);
+    return t;
 }
+
+static void tab_open(void) { tab_open_as(NULL); }
 
 static void tab_close(struct tab *t)            /* (a close box, Close Tab) */
 {
@@ -284,81 +313,144 @@ static void strip_on(struct gui_widget *w, int what)
     }
 }
 
-/* ---- saved connections */
+/* ---- saved sessions (apps/shared/sessions.h): the list, and the dialog that keeps it */
 
-#define CONNS 16
+static struct session sess[SESSIONS_MAX];
+static int nsess;
+static char home[200];                  /* the program's folder */
+static char sess_dir[240], sess_file[300];      /* SSH's folder and SESSIONS.CFG in it ("": nowhere to keep them) */
+static struct gui_window *sdlg;
+static struct gui_widget *slist, *spages, *sname, *shost, *sport, *suser, *skey, *scmd, *salive, *slog, *tlist, *tport,
+                         *tto, *topen, *scolours, *sfont, *slines;
+static char tunnels_now[sizeof sess[0].tunnels];        /* the tunnels of the session the fields show */
 
-static struct conn {
-    char name[24], host[64], user[24];
-    int port;                           /* 0: SSH's own (22) */
-} conn[CONNS];
-static int nconn;
-static char home[200];                  /* the program's folder: TERM.CFG is there (none known: nothing is kept) */
-static struct gui_window *cdlg;
-static struct gui_widget *clist, *cname, *chost, *cuser, *cport;
-
-static void conn_load(void)
+/* TERM.CFG's connections (phase E's: a name, a host, a user and a port each, tabs between) taken over once,
+   where there are no sessions yet. */
+static void sess_import(void)
 {
     char path[240], line[160];
     FILE *f;
     snprintf(path, sizeof path, "%s\\TERM.CFG", home);
-    if (!home[0] || !(f = gui_fopen(path, "r")))
+    if (!(f = gui_fopen(path, "r")))
         return;
-    while (nconn < CONNS && fgets(line, sizeof line, f)) {
-        struct conn *c = &conn[nconn];
-        char *p[4], *q = line;
-        int k;
+    while (nsess < SESSIONS_MAX && fgets(line, sizeof line, f)) {
+        struct session *k = &sess[nsess];
+        char *p[4], *q;
+        int n;
         line[strcspn(line, "\r\n")] = 0;
         if (strncmp(line, "connection ", 11))
             continue;
-        for (k = 0, q = line + 11; k < 4; k++) {
-            p[k] = q;
+        for (n = 0, q = line + 11; n < 4; n++) {
+            p[n] = q;
             if ((q = strchr(q, '\t')) != NULL)
                 *q++ = 0;
             else
-                q = p[k] + strlen(p[k]);
+                q = p[n] + strlen(p[n]);
         }
-        if (!p[0][0] || !p[1][0])
+        if (!session_name_ok(p[0]) || !p[1][0] || sessions_find(sess, nsess, p[0]) >= 0)
             continue;
-        snprintf(c->name, sizeof c->name, "%s", p[0]);
-        snprintf(c->host, sizeof c->host, "%s", p[1]);
-        snprintf(c->user, sizeof c->user, "%s", p[2]);
-        c->port = atoi(p[3]);
-        nconn++;
+        session_defaults(k);
+        snprintf(k->name, sizeof k->name, "%s", p[0]);
+        snprintf(k->host, sizeof k->host, "%s", p[1]);
+        snprintf(k->user, sizeof k->user, "%s", p[2]);
+        k->port = atoi(p[3]) > 0 && atoi(p[3]) < 65536 ? atoi(p[3]) : 0;
+        nsess++;
     }
     fclose(f);
 }
 
-static void conn_save(void)
+static void sess_store(void)
 {
-    char path[240];
-    FILE *f;
-    int i;
-    snprintf(path, sizeof path, "%s\\TERM.CFG", home);
-    if (!home[0] || !(f = gui_fopen(path, "w")))
+    if (!sess_file[0])
         return;
-    for (i = 0; i < nconn; i++)
-        fprintf(f, "connection %s\t%s\t%s\t%d\n", conn[i].name, conn[i].host, conn[i].user, conn[i].port);
-    fclose(f);
+    gui_mkdir(sess_dir);                        /* (SSH's folder, if no key has made it yet) */
+    if (sessions_save(sess_file, sess, nsess) != 0 && sdlg)
+        gui_message(sdlg, GUI_T("Sessions"), GUI_T("The sessions could not be written to their file."), GUI_MB_OK);
 }
 
-static void conn_fill(void)
+static void sess_start(void)
 {
-    int i, keep = gui_list_get(clist);
-    gui_list_clear(clist);
-    for (i = 0; i < nconn; i++) {
+    const char *e = getenv("GLOSSSH");
+    if (e && *e)
+        snprintf(sess_dir, sizeof sess_dir, "%s", e);
+    else if (home[0])
+        snprintf(sess_dir, sizeof sess_dir, "%s\\SSH", home);
+    else
+        return;
+    sessions_files(gui_fopen);
+    sessions_path(sess_file, sizeof sess_file, sess_dir);
+    nsess = sessions_load(sess_file, sess, SESSIONS_MAX);
+    if (!nsess && home[0]) {
+        sess_import();
+        if (nsess)
+            sess_store();
+    }
+}
+
+static void sess_fill(int keep)
+{
+    int i;
+    gui_list_clear(slist);
+    for (i = 0; i < nsess; i++) {
         char where[100];
         const char *cells[2];
-        snprintf(where, sizeof where, "%s%s%s", conn[i].user, conn[i].user[0] ? "@" : "", conn[i].host);
-        cells[0] = conn[i].name, cells[1] = where;
-        gui_list_add(clist, cells, NULL, NULL);
+        snprintf(where, sizeof where, "%s%s%s", sess[i].user, sess[i].user[0] ? "@" : "", sess[i].host);
+        cells[0] = sess[i].name, cells[1] = where;
+        gui_list_add(slist, cells, NULL, NULL);
     }
-    if (keep >= 0 && keep < nconn)
-        gui_list_set(clist, keep);
+    if (keep >= 0 && keep < nsess)
+        gui_list_set(slist, keep);
 }
 
-/* A word of a field, as a connection can have it: no spaces, tabs or quotes (it goes into a command line). */
-static int conn_word(struct gui_widget *field, char *out, size_t room)
+static void tun_fill(void)                      /* the tunnels' list, from their line */
+{
+    const char *p = tunnels_now, *e;
+    gui_list_clear(tlist);
+    while (*p) {
+        char host[80], port[12], to[100];
+        const char *cells[3];
+        unsigned lp = 0, hp = 0;
+        int open = -1;
+        while (*p == ' ')
+            p++;
+        for (e = p; *e && *e != ' '; e++)
+            ;
+        if (e > p && session_tunnel(p, (int)(e - p), &open, &lp, host, sizeof host, &hp) == 0) {
+            snprintf(port, sizeof port, "%u", lp);
+            snprintf(to, sizeof to, "%s:%u", host, hp);
+            cells[0] = port, cells[1] = to, cells[2] = open == 1 ? GUI_T("Every computer") : GUI_T("This PC");
+            gui_list_add(tlist, cells, NULL, NULL);
+        }
+        p = e;
+    }
+}
+
+static void sess_show(const struct session *k)  /* a session into the fields */
+{
+    char n[16];
+    gui_set_text(sname, k->name);
+    gui_set_text(shost, k->host);
+    snprintf(n, sizeof n, "%d", k->port);
+    gui_set_text(sport, k->port ? n : "");
+    gui_set_text(suser, k->user);
+    gui_set_text(skey, k->key);
+    gui_set_text(scmd, k->command);
+    snprintf(n, sizeof n, "%d", k->keepalive);
+    gui_set_text(salive, k->keepalive ? n : "");
+    gui_set_text(slog, k->log);
+    snprintf(tunnels_now, sizeof tunnels_now, "%s", k->tunnels);
+    tun_fill();
+    gui_set_text(tport, "");
+    gui_set_text(tto, "");
+    gui_set_checked(topen, 0);
+    gui_set_value(scolours, k->colours);
+    gui_set_value(sfont, k->font);
+    snprintf(n, sizeof n, "%d", k->lines);
+    gui_set_text(slines, k->lines ? n : "");
+}
+
+/* A field's text without the blanks at its ends: 1 if it is a word (nothing a command line would take apart). */
+static int sess_word(struct gui_widget *field, char *out, size_t room, int word)
 {
     const char *t = gui_get_text(field);
     while (*t == ' ')
@@ -366,124 +458,314 @@ static int conn_word(struct gui_widget *field, char *out, size_t room)
     snprintf(out, room, "%s", t);
     while (out[0] && out[strlen(out) - 1] == ' ')
         out[strlen(out) - 1] = 0;
-    return !strpbrk(out, " \t\"'&|<>");
+    return !strpbrk(out, word ? " \t\"'&|<>" : "\t\r\n");
 }
 
-/* The fields as a connection: 0, or -1 with the user told. */
-static int conn_read(struct conn *c)
+static int sess_number(struct gui_widget *field, int low, int high, int *out)   /* empty: 0 */
 {
-    char port[12];
-    memset(c, 0, sizeof *c);
-    if (!conn_word(cname, c->name, sizeof c->name) || !conn_word(chost, c->host, sizeof c->host)
-        || !conn_word(cuser, c->user, sizeof c->user) || !conn_word(cport, port, sizeof port) || !c->host[0]
-        || (port[0] && (atoi(port) < 1 || atoi(port) > 65535))) {
-        gui_message(cdlg, GUI_T("Connections"), GUI_T("A connection wants a host, and words without spaces; its port is 1 to 65535."),
-                    GUI_MB_OK);
+    char t[16], *end;
+    long v;
+    if (!sess_word(field, t, sizeof t, 1))
+        return 0;
+    *out = 0;
+    if (!t[0])
+        return 1;
+    v = strtol(t, &end, 10);
+    if (*end || v < low || v > high)
+        return 0;
+    *out = (int)v;
+    return 1;
+}
+
+/* The fields as a session: 0, or -1 with the user told what is wrong. named: it must have a name (Save). */
+static int sess_read(struct session *k, int named)
+{
+    const char *wrong = NULL;
+    session_defaults(k);
+    if (!sess_word(sname, k->name, sizeof k->name, 1) || (k->name[0] && !session_name_ok(k->name)) || (named && !k->name[0]))
+        wrong = GUI_T("A session's name is a word of up to 23 characters, without @ : \\ or /.");
+    else if (!sess_word(shost, k->host, sizeof k->host, 1) || !k->host[0])
+        wrong = GUI_T("A session wants a host: a computer's name or its address.");
+    else if (!sess_number(sport, 1, 65535, &k->port))
+        wrong = GUI_T("The port is a number from 1 to 65535 (none: SSH's own, 22).");
+    else if (!sess_word(suser, k->user, sizeof k->user, 1))
+        wrong = GUI_T("The user is a word without spaces.");
+    else if (!sess_word(skey, k->key, sizeof k->key, 1))
+        wrong = GUI_T("The key's file is a path without spaces.");
+    else if (!sess_word(scmd, k->command, sizeof k->command, 0))
+        wrong = GUI_T("The command is one line.");
+    else if (!sess_number(salive, 1, 3600, &k->keepalive))
+        wrong = GUI_T("Keep alive is a number of seconds up to 3600 (none: no such packets).");
+    else if (!sess_word(slog, k->log, sizeof k->log, 1))
+        wrong = GUI_T("The log's file is a path without spaces.");
+    else if (!sess_number(slines, 100, 20000, &k->lines))
+        wrong = GUI_T("The lines kept are 100 to 20000 (none: 1000).");
+    if (wrong) {
+        printf("TERM session wrong\n");
+        fflush(stdout);
+        gui_message(sdlg, GUI_T("Sessions"), wrong, GUI_MB_OK);
         return -1;
     }
-    c->port = atoi(port);
-    if (!c->name[0])
-        snprintf(c->name, sizeof c->name, "%.23s", c->host);
+    snprintf(k->tunnels, sizeof k->tunnels, "%s", tunnels_now);
+    k->colours = gui_value(scolours), k->font = gui_value(sfont);
     return 0;
 }
 
-static void tab_open(void);
-
-static void conn_button(struct gui_widget *b, int what)
+/* SSH's program as a shell is told to run it: SSH.EXE beside the Terminal by its whole path (a tab's shell
+   begins at the boot drive's root, and nothing says that the programs' folder is on its PATH); with no folder
+   known, the word alone. */
+static int ssh_word(char *line, size_t room)
 {
-    struct conn c;
-    int i, r = gui_list_get(clist);
-    (void)what;
-    if (b->id == 11) {                          /* Save: a new one, or the one of that name again */
-        if (conn_read(&c) != 0)
-            return;
-        for (i = 0; i < nconn && strcmp(conn[i].name, c.name); i++)
+    return home[0] ? snprintf(line, room, "%s\\SSH.EXE", home) : snprintf(line, room, "ssh");
+}
+
+/* The SSH command a session is opened by: its name alone where it is saved just so, else all of it in words. */
+static void sess_command(const struct session *k, char *line, size_t room)
+{
+    int i = k->name[0] ? sessions_find(sess, nsess, k->name) : -1;
+    size_t n = (size_t)ssh_word(line, room);
+    const char *p, *e;
+    if (n >= room)
+        return;
+    if (i >= 0 && session_same(&sess[i], k)) {
+        snprintf(line + n, room - n, " %s\r", sess[i].name);
+        return;
+    }
+    if (k->port && n < room)
+        n += (size_t)snprintf(line + n, room - n, " -p %d", k->port);
+    if (k->key[0] && n < room)
+        n += (size_t)snprintf(line + n, room - n, " -i %s", k->key);
+    if (k->keepalive && n < room)
+        n += (size_t)snprintf(line + n, room - n, " -o ServerAliveInterval=%d", k->keepalive);
+    if (k->log[0] && n < room)
+        n += (size_t)snprintf(line + n, room - n, " -sessionlog %s", k->log);
+    for (p = k->tunnels; *p && n < room; p = e) {
+        while (*p == ' ')
+            p++;
+        for (e = p; *e && *e != ' '; e++)
             ;
-        if (i == CONNS)
+        if (e > p)
+            n += (size_t)snprintf(line + n, room - n, " -L %.*s", (int)(e - p), p);
+    }
+    if (n < room)
+        n += (size_t)snprintf(line + n, room - n, " %s%s%s", k->user, k->user[0] ? "@" : "", k->host);
+    if (k->command[0] && n < room)
+        n += (size_t)snprintf(line + n, room - n, " %s", k->command);
+    if (n < room)
+        snprintf(line + n, room - n, "\r");
+}
+
+/* A session opened: a tab with its look, and its SSH command typed into the tab's shell. */
+static void sess_open(const struct session *k)
+{
+    char line[700];
+    struct tab *t = tab_open_as(k);
+    if (!t)
+        return;
+    sess_command(k, line, sizeof line);
+    job_write(t, line, (int)strlen(line));
+    printf("TERM connect %s\n", k->name[0] ? k->name : k->host);
+    fflush(stdout);
+}
+
+static struct session opened;                   /* what Open took from the fields, for after the dialog */
+
+static void sess_button(struct gui_widget *b, int what)
+{
+    struct session k;
+    int i, r = gui_list_get(slist);
+    (void)what;
+    switch (b->id) {
+    case 10:                                    /* Open: what the fields say, saved or not */
+        if (sess_read(&k, 0) != 0)
             return;
-        conn[i] = c;
-        if (i == nconn)
-            nconn++;
-        conn_save();
-        conn_fill();
-        gui_list_set(clist, i);
-        printf("TERM connection saved %s\n", c.name);
+        opened = k;
+        gui_end_modal(sdlg, 10);
+        return;
+    case 11:                                    /* Save: a new one, or the one of that name again */
+        if (sess_read(&k, 1) != 0)
+            return;
+        if ((i = sessions_find(sess, nsess, k.name)) < 0) {
+            if (nsess == SESSIONS_MAX) {
+                gui_message(sdlg, GUI_T("Sessions"), GUI_T("There is no room for one more session."), GUI_MB_OK);
+                return;
+            }
+            i = nsess++;
+        }
+        sess[i] = k;
+        sess_store();
+        sess_fill(i);
+        printf("TERM session saved %s tunnels=%d colours=%d font=%d\n", k.name, session_tunnels_ok(k.tunnels), k.colours, k.font);
         fflush(stdout);
-    } else if (b->id == 12) {                   /* Remove */
-        if (r < 0 || r >= nconn)
+        return;
+    case 12:                                    /* Remove */
+        if (r < 0 || r >= nsess)
             return;
-        memmove(&conn[r], &conn[r + 1], (size_t)(nconn - r - 1) * sizeof conn[0]);
-        nconn--;
-        conn_save();
-        conn_fill();
-    } else if (b->id == 10) {                   /* Connect: what the fields say, saved or not */
-        if (conn_read(&c) != 0)
+        printf("TERM session removed %s\n", sess[r].name);
+        fflush(stdout);
+        memmove(&sess[r], &sess[r + 1], (size_t)(nsess - r - 1) * sizeof sess[0]);
+        nsess--;
+        sess_store();
+        sess_fill(r < nsess ? r : nsess - 1);
+        return;
+    case 14:                                    /* New: empty fields */
+        session_defaults(&k);
+        gui_list_set(slist, -1);
+        sess_show(&k);
+        gui_tabs_set(spages, 0);
+        gui_focus(sname);
+        return;
+    case 15: {                                  /* Browse: the key's file */
+        char path[260];
+        snprintf(path, sizeof path, "%s", gui_get_text(skey)[0] ? gui_get_text(skey) : sess_dir);
+        if (gui_file_dialog(sdlg, GUI_T("A Private Key"), 0, path, sizeof path) == 1)
+            gui_set_text(skey, path);
+        return;
+    }
+    case 18: {                                  /* ... and the log's (one to make, or one to add to) */
+        char path[260];
+        snprintf(path, sizeof path, "%s", gui_get_text(slog));
+        if (gui_file_dialog(sdlg, GUI_T("The Session's Log"), 1, path, sizeof path) == 1)
+            gui_set_text(slog, path);
+        return;
+    }
+    case 16: {                                  /* a tunnel added: PORT, and HOST:PORT it goes to */
+        char port[16], to[100], spec[130];
+        if (!sess_word(tport, port, sizeof port, 1) || !sess_word(tto, to, sizeof to, 1))
+            port[0] = 0;
+        snprintf(spec, sizeof spec, "%s%s:%s", gui_checked(topen) ? "*:" : "", port, to);
+        if (!port[0] || session_tunnel(spec, -1, 0, 0, 0, 0, 0) != 0) {
+            gui_message(sdlg, GUI_T("Sessions"), GUI_T("A tunnel wants a port of this PC (1 to 65535), and where it goes: a "
+                        "host and its port, as intranet:80."), GUI_MB_OK);
             return;
-        conn[CONNS - 1 >= nconn ? nconn : CONNS - 1] = c;      /* (kept past the dialog's end, beyond the saved ones) */
-        gui_end_modal(cdlg, 10);
-    } else {
-        gui_end_modal(cdlg, 0);
+        }
+        if (session_tunnels_ok(tunnels_now) >= SESSION_TUNNELS || strlen(tunnels_now) + strlen(spec) + 2 > sizeof tunnels_now) {
+            gui_message(sdlg, GUI_T("Sessions"), GUI_T("A session has four tunnels at most."), GUI_MB_OK);
+            return;
+        }
+        if (tunnels_now[0])
+            strcat(tunnels_now, " ");
+        strcat(tunnels_now, spec);
+        tun_fill();
+        gui_set_text(tport, "");
+        gui_set_text(tto, "");
+        gui_set_checked(topen, 0);
+        gui_focus(tport);
+        return;
+    }
+    case 17: {                                  /* the chosen tunnel removed: its words out of the line */
+        char left[sizeof tunnels_now] = "";
+        const char *p = tunnels_now, *e;
+        int n = 0, row = gui_list_get(tlist);
+        if (row < 0)
+            return;
+        while (*p) {
+            while (*p == ' ')
+                p++;
+            for (e = p; *e && *e != ' '; e++)
+                ;
+            if (e > p && n++ != row)
+                snprintf(left + strlen(left), sizeof left - strlen(left), "%s%.*s", left[0] ? " " : "", (int)(e - p), p);
+            p = e;
+        }
+        strcpy(tunnels_now, left);
+        tun_fill();
+        return;
+    }
+    default:
+        gui_end_modal(sdlg, 0);
     }
 }
 
-static void conn_pick(struct gui_widget *w, int what)
+static void sess_pick(struct gui_widget *w, int what)
 {
     int r = gui_list_get(w);
-    char port[12];
-    (void)what;
-    if (r < 0 || r >= nconn)
+    if (r < 0 || r >= nsess)
         return;
-    gui_set_text(cname, conn[r].name);
-    gui_set_text(chost, conn[r].host);
-    gui_set_text(cuser, conn[r].user);
-    snprintf(port, sizeof port, "%d", conn[r].port);
-    gui_set_text(cport, conn[r].port ? port : "");
+    sess_show(&sess[r]);
+    if (what == GUI_ON_ACTIVATE) {              /* (a double click, Enter on the list: opened) */
+        opened = sess[r];
+        gui_end_modal(sdlg, 10);
+    }
 }
 
-static void conn_dialog(void)
+static void sess_dialog(void)
 {
     static const char *const heads[2] = { GUI_N("Name"), GUI_N("Where") };
-    static const int widths[2] = { 100, 190 };
-    struct gui_widget *box, *form, *row;
-    struct tab *t;
-    char line[160];
-    int r;
-    cdlg = gui_window(GUI_T("Connections"), 330, 300, GUI_W_DIALOG);
-    cdlg->owner = win;
-    box = gui_vbox(cdlg->root, 6, 8);
+    static const int widths[2] = { 84, 110 };
+    static const char *const theads[3] = { GUI_N("Port"), GUI_N("Goes to"), GUI_N("For") };
+    static const int twidths[3] = { 50, 150, 96 };
+    struct gui_widget *box, *cols, *left, *page, *form, *row;
+    struct session none;
+    int r, i;
+    sdlg = gui_window(GUI_T("Sessions"), 580, 330, GUI_W_DIALOG);
+    sdlg->owner = win;
+    box = gui_vbox(sdlg->root, 8, 8);
     gui_grow(box, 1);
-    clist = gui_list(box, 2, heads, widths);
-    gui_grow(clist, 1);
-    gui_on(clist, conn_pick, 0);
-    form = gui_form(box);
-    cname = gui_field(gui_row(form, GUI_T("&Name:"), NULL), 22);
-    chost = gui_field(gui_row(form, GUI_T("&Host:"), NULL), 30);
-    cuser = gui_field(gui_row(form, GUI_T("&User:"), NULL), 22);
-    cport = gui_field(gui_row(form, GUI_T("&Port:"), NULL), 6);
+    cols = gui_hbox(box, 8, 0);
+    gui_grow(cols, 1);
+    left = gui_vbox(cols, 6, 0);
+    gui_label(left, GUI_T("Sa&ved sessions:"));
+    slist = gui_list(left, 2, heads, widths);
+    gui_grow(slist, 1);
+    gui_on(slist, sess_pick, 0);
+    row = gui_hbox(left, 6, 0);
+    gui_button(row, GUI_T("Ne&w"), sess_button, 14);
+    gui_button(row, GUI_T("&Remove"), sess_button, 12);
+    spages = gui_tabs(cols);
+    gui_grow(spages, 1);
+    page = gui_tab(spages, GUI_T("Computer"));
+    form = gui_form(page);
+    sname = gui_field(gui_row(form, GUI_T("&Name:"), NULL), 22);
+    shost = gui_field(gui_row(form, GUI_T("&Host:"), NULL), 30);
+    sport = gui_field(gui_row(form, GUI_T("&Port:"), NULL), 6);
+    suser = gui_field(gui_row(form, GUI_T("&User:"), NULL), 22);
+    row = gui_row(form, GUI_T("&Key file:"), NULL);
+    skey = gui_field(row, 22);
+    gui_button(row, GUI_T("&Browse..."), sess_button, 15);
+    scmd = gui_field(gui_row(form, GUI_T("Co&mmand:"), NULL), 30);
+    row = gui_row(form, GUI_T("Keep &alive:"), NULL);
+    salive = gui_field(row, 6);
+    gui_label(row, GUI_T("seconds"));
+    row = gui_row(form, GUI_T("Log &file:"), NULL);
+    slog = gui_field(row, 22);
+    gui_button(row, GUI_T("Browse..."), sess_button, 18);
+    page = gui_tab(spages, GUI_T("Tunnels"));
+    tlist = gui_list(page, 3, theads, twidths);
+    gui_grow(tlist, 1);
+    form = gui_form(page);
+    tport = gui_field(gui_row(form, GUI_T("&This PC's port:"), NULL), 6);
+    tto = gui_field(gui_row(form, GUI_T("&Goes to:"), NULL), 28);
+    topen = gui_check(gui_row(form, "", NULL), GUI_T("Other computers ma&y use it"), 0);
+    row = gui_hbox(page, 6, 0);
+    gui_button(row, GUI_T("A&dd"), sess_button, 16);
+    gui_button(row, GUI_T("Remov&e"), sess_button, 17);
+    page = gui_tab(spages, GUI_T("Look"));
+    form = gui_form(page);
+    scolours = gui_choice(gui_row(form, GUI_T("Co&lours:"), NULL), 18);
+    for (i = 0; i < SESSION_COLOURS; i++)
+        gui_choice_add(scolours, GUI_T(session_colour_names[i]));
+    sfont = gui_choice(gui_row(form, GUI_T("Te&xt:"), NULL), 18);
+    gui_choice_add(sfont, GUI_T("The theme's size"));
+    gui_choice_add(sfont, GUI_T("Small"));
+    gui_choice_add(sfont, GUI_T("Normal"));
+    gui_choice_add(sfont, GUI_T("Large"));
+    row = gui_row(form, GUI_T("L&ines kept:"), NULL);
+    slines = gui_field(row, 6);
+    gui_label(row, GUI_T("(1000 if none)"));
     row = gui_hbox(box, 6, 0);
-    gui_button(row, GUI_T("&Connect"), conn_button, 10)->flags |= GUI_DEFAULT;
-    gui_button(row, GUI_T("&Save"), conn_button, 11);
-    gui_button(row, GUI_T("&Remove"), conn_button, 12);
+    gui_button(row, GUI_T("&Open"), sess_button, 10)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("&Save"), sess_button, 11);
     gui_space(row, 0, 0);
-    gui_button(row, GUI_T("Close"), conn_button, 13)->flags |= GUI_CANCEL;
-    conn_fill();
-    gui_focus(cname);
-    r = gui_modal(cdlg);                        /* (which closes it) */
-    cdlg = NULL;
-    if (r != 10)
-        return;
-    {                                           /* a tab, and the SSH command typed into its shell */
-        const struct conn *c = &conn[CONNS - 1 >= nconn ? nconn : CONNS - 1];
-        char port[16] = "";
-        if (c->port)
-            snprintf(port, sizeof port, "-p %d ", c->port);
-        snprintf(line, sizeof line, "ssh %s%s%s%s\r", port, c->user, c->user[0] ? "@" : "", c->host);
-        tab_open();
-        if ((t = tab_shown()) != NULL)
-            job_write(t, line, (int)strlen(line));
-        printf("TERM connect %s\n", c->name);
-        fflush(stdout);
-    }
+    gui_button(row, GUI_T("Close"), sess_button, 13)->flags |= GUI_CANCEL;
+    session_defaults(&none);
+    sess_show(&none);
+    sess_fill(-1);
+    gui_focus(sname);
+    r = gui_modal(sdlg);                        /* (which closes it) */
+    sdlg = NULL;
+    if (r == 10)
+        sess_open(&opened);
 }
 
 /* ---- the window */
@@ -566,7 +848,7 @@ static void command(struct gui_window *w, int id)
     case C_FIND_PREV: find_step(1); return;
     case C_NEW: tab_open(); return;
     case C_CLOSE: tab_close(t); return;
-    case C_CONNS: conn_dialog(); return;
+    case C_CONNS: sess_dialog(); return;
     case C_COPY:
         if (t)
             gui_term_copy(t->grid);
@@ -607,7 +889,7 @@ int main(int argc, char **argv)
     struct gui_menubar *bar;
     struct gui_menu *m;
     struct tab *t;
-    int i, cols, rows;
+    int i, cols, rows, first = -1;
     if (gui_init(argc, argv) != 0) {
         printf("TERM no GLOS\n");
         return 1;
@@ -622,10 +904,15 @@ int main(int argc, char **argv)
         else
             home[0] = 0;
     }
-    conn_load();
+    sess_start();
     if (argc > 1 && !strcmp(argv[1], "-log")) {
         log_on = 1;
         argv++, argc--;
+    }
+    if (argc > 2 && !strcmp(argv[1], "-session")) {     /* its first tab: that saved session's */
+        if ((first = sessions_find(sess, nsess, argv[2])) < 0)
+            printf("TERM no session %s\n", argv[2]);
+        argv += 2, argc -= 2;
     }
     win = gui_window(GUI_T("Terminal"), 8 + 80 * 7 + GUI_SB + 4 + 2 * PAGE_PAD + 2, 25 * 14 + 4 + STRIP_H, 0);
     gui_window_icon(win, "app-terminal");
@@ -635,7 +922,7 @@ int main(int argc, char **argv)
     m = gui_menu(bar, GUI_T("&File"));
     gui_menu_item(m, GUI_T("New &Tab"), C_NEW, GUI_T("Ctrl+Shift+T"));
     gui_menu_item(m, GUI_T("&Close Tab"), C_CLOSE, GUI_T("Ctrl+Shift+W"));
-    gui_menu_item(m, GUI_T("C&onnections..."), C_CONNS, GUI_T("Ctrl+Shift+O"));
+    gui_menu_item(m, GUI_T("&Sessions..."), C_CONNS, GUI_T("Ctrl+Shift+O"));
     gui_menu_sep(m);
     gui_menu_item(m, GUI_T("E&xit"), C_EXIT, NULL);
     m = gui_menu(bar, GUI_T("&Edit"));
@@ -654,7 +941,9 @@ int main(int argc, char **argv)
     gui_on(strip, strip_on, 0);
     gui_grow(strip->parent, 1);
     gui_grow(strip, 1);
-    t = tab_new();
+    t = tab_new(first >= 0 ? sess[first].lines : 0);
+    if (first >= 0)
+        tab_look(t, sess[first].colours, sess[first].font);
     win->focus = t->grid;
     gui_on_event(events);
     gui_show(win, 1);
@@ -664,7 +953,13 @@ int main(int argc, char **argv)
         printf("TERM size %dx%d\n", cols, rows);
         fflush(stdout);
     }
-    if (argc > 1) {                             /* COMMAND: typed into it */
+    if (first >= 0) {                           /* the session's SSH command typed into it */
+        char line[300];
+        sess_command(&sess[first], line, sizeof line);
+        job_write(t, line, (int)strlen(line));
+        printf("TERM connect %s\n", sess[first].name);
+        fflush(stdout);
+    } else if (argc > 1) {                      /* COMMAND: typed into it */
         char line[256] = "";
         for (i = 1; i < argc; i++) {
             strncat(line, argv[i], sizeof line - strlen(line) - 2);

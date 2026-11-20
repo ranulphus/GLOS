@@ -119,7 +119,7 @@ static int settle(struct remote *r, int while_in)
     return sshc_state(r->c) == while_in || sshc_state(r->c) == SSHC_DEAD ? -1 : 0;
 }
 
-struct remote *remote_open(const char *host, unsigned port, const char *user, const char *dir,
+struct remote *remote_open(const char *host, unsigned port, const char *user, const char *dir, const char *key_file,
                            const struct remote_ui *ui, void *ctx, int *err, char *why, unsigned room)
 {
     struct remote *r = calloc(1, sizeof *r);
@@ -138,7 +138,10 @@ struct remote *remote_open(const char *host, unsigned port, const char *user, co
     snprintf(r->host, sizeof r->host, "%s", host);
     r->port = port ? port : 22;
     snprintf(r->known, sizeof r->known, "%s\\KNOWNHST.TXT", dir);
-    snprintf(key, sizeof key, "%s\\ID_ED25", dir);
+    if (key_file && key_file[0])
+        snprintf(key, sizeof key, "%s", key_file);
+    else
+        snprintf(key, sizeof key, "%s\\ID_ED25", dir);
     have_key = sshc_key_read(key, sk, pk) == 0;
     *err = REMOTE_E_NAME;
     if (inet_aton(host, &ia)) {

@@ -1,0 +1,49 @@
+#loopa-run-only (it starts the Terminal from the Start menu, which only GLOS does; no shots)
+# The Terminal's saved sessions in the Start menu (apps/files/start.c; phase F, docs/v1/phase-f.md): a session
+# saved in the Terminal (started from the Start menu) is a task on the Terminal's own page there; chosen, it
+# starts the Terminal on that session. The session is removed again (the scripts share one disc), the shell ended.
+run FILES.EXE
+wait "Desktop"
+launch
+wait "Start"
+type term
+key enter
+gone "Start"
+wait "Terminal"
+key ctrl+shift+o
+wait "Sessions"
+type depot
+key tab
+type 127.0.0.1
+key tab
+type 2222
+key alt+s
+key esc
+gone "Sessions"
+type exit\n
+gone "Terminal"
+launch
+wait "Start"
+type term
+key down
+key alt+m
+key end
+key up
+key enter
+gone "Start"
+wait "Terminal"
+pause 4000
+key ctrl+shift+o
+wait "Sessions"
+key alt+v
+key end
+key alt+r
+key esc
+gone "Sessions"
+type exit\n
+gone "Terminal"
+key alt+f4
+gone "Desktop"
+expect FILES start run Terminal
+expect FILES start task -session depot
+expect FILES end 

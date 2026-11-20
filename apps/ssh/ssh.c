@@ -4,6 +4,13 @@
  * key, a password) are asked a line at a time.
  *
  *   ssh [-p PORT] [-i KEY] [-l USER] [-L [ADDRESS:]PORT:HOST:HOSTPORT]... [-g] [-N] [USER@]HOST [COMMAND]
+ *                              HOST can be a saved session's name (SESSIONS.CFG beside the key, kept by the
+ *                              Terminal's Sessions: apps/shared/sessions.h): its computer, port, user, key,
+ *                              command, tunnels and keep-alive are taken, each unless the command line says
+ *                              its own. -o ServerAliveInterval=SECONDS: a packet that says nothing after so
+ *                              long a quiet, for a connection that something on the way would forget.
+ *                              -sessionlog FILE (a session's `log`): what the session writes is added to
+ *                              that file as text (apps/shared/sesslog.h).
  *                              -L: a tunnel: connections to PORT of this PC go through the session and come
  *                              out of the other computer to HOST:HOSTPORT (up to four -L's; six connections
  *                              through them at a time). The port is this PC's programs' alone (it is
@@ -37,6 +44,8 @@
 #include <glos/sshc.h>
 
 #include "cli.h"
+#include "../shared/sessions.h"
+#include "../shared/sesslog.h"
 
 enum { S_OFF, S_CONNECTED, S_ASK_HOST, S_ASK_PASSWORD, S_LOGGING_IN, S_OPENING, S_RUNNING, S_SFTP };
 #define NFWD 4                          /* -L's */
@@ -69,6 +78,9 @@ static struct {
         glos_handle listener;
     } fwd[NFWD];
     int nfwd, no_shell, gateway;
+    unsigned keepalive, last_io;        /* a session's: seconds of quiet before a packet that says nothing */
+    char title[24];                     /* a saved session's name: the terminal's title, not the host */
+    char log[100];                      /* the session's log's file ("": none) */
     struct {
         glos_handle sock;               /* (0: free) */
         struct sshc_chan *ch;
@@ -122,6 +134,7 @@ static void err(const char *s1)
 static void net_send(void *io, const uint8_t *d, uint32_t n)
 {
     (void)io;
+    s.last_io = glos_ticks();
     while (n && s.conn) {
         int k = glos_net_send(s.conn, d, n, 10000);
         if (k <= 0)
@@ -145,6 +158,7 @@ static int net_read(unsigned wait_ms)
             return -1;
         if (k == 0)
             return 0;
+        s.last_io = glos_ticks();
         if (sshc_input(s.c, buf, (uint32_t)k) != 0)
             return -1;
     }
@@ -220,6 +234,7 @@ static void on_data(struct sshc_chan *ch, int stream, const uint8_t *d, uint32_t
         sftpc_input(s.sf, d, n);
         return;
     }
+    sesslog_write(d, (int)n);                   /* (the session's log, if it has one) */
     if (s.screen) {                             /* (a pty: the terminal has the bytes as they are) */
         term_raw((const char *)d, (int)n);
         return;
@@ -348,6 +363,7 @@ static void finish(int code)
         s.screen = 0;
     }
     tunnels_end();
+    sesslog_close();
     if (s.sf)
         sftpc_free(s.sf);
     if (s.c)
@@ -504,6 +520,10 @@ void ssh_poll(void)
         return;
     }
     tunnels_poll();
+    if (s.keepalive && s.c && sshc_state(s.c) == SSHC_READY && glos_ticks() - s.last_io >= s.keepalive * 1000u) {
+        sshc_keepalive(s.c);                    /* (which is sent: last_io is now) */
+        milestone("keepalive");
+    }
     if (s.stage != S_ASK_HOST && s.stage != S_ASK_PASSWORD && s.stage != S_SFTP)
         step();
 }
@@ -543,10 +563,62 @@ static int connect_to(void)
     return 0;
 }
 
+static int add_tunnel(const char *spec, int len)        /* one -L's words: 0, or -1 (not a tunnel, or one too many) */
+{
+    if (s.nfwd == NFWD || session_tunnel(spec, len, &s.fwd[s.nfwd].open, &s.fwd[s.nfwd].port, s.fwd[s.nfwd].host,
+                                         sizeof s.fwd[0].host, &s.fwd[s.nfwd].hport) != 0)
+        return -1;
+    s.nfwd++;
+    return 0;
+}
+
+/* HOST as a saved session's name: what the session says, where the command line said nothing. */
+static void by_session(const char *dir, char *key, size_t kroom, int port_said, int user_said, int sftp)
+{
+    static struct session all[SESSIONS_MAX];
+    char path[300];
+    const struct session *k;
+    int n, i;
+    sessions_path(path, sizeof path, dir);
+    n = sessions_load(path, all, SESSIONS_MAX);
+    if ((i = sessions_find(all, n, s.host)) < 0)
+        return;
+    k = &all[i];
+    milestone("session %s", k->name);
+    snprintf(s.title, sizeof s.title, "%s", k->name);
+    snprintf(s.host, sizeof s.host, "%s", k->host);
+    if (!port_said && k->port)
+        s.port = (unsigned)k->port;
+    if (!user_said && k->user[0])
+        snprintf(s.user, sizeof s.user, "%s", k->user);
+    if (!key[0] && k->key[0])
+        snprintf(key, kroom, "%s", k->key);
+    if (!s.keepalive)
+        s.keepalive = (unsigned)k->keepalive;
+    if (sftp)
+        return;
+    if (!s.cmd[0])
+        snprintf(s.cmd, sizeof s.cmd, "%s", k->command);
+    if (!s.log[0])
+        snprintf(s.log, sizeof s.log, "%s", k->log);
+    {
+        const char *p = k->tunnels, *e;         /* its tunnels, after the command line's own */
+        while (*p) {
+            while (*p == ' ')
+                p++;
+            for (e = p; *e && *e != ' '; e++)
+                ;
+            if (e > p)
+                add_tunnel(p, (int)(e - p));
+            p = e;
+        }
+    }
+}
+
 static int start(int argc, char **argv, int sftp)
 {
     char dir[260], key[260] = "";
-    int i;
+    int i, port_said = 0, user_said = 0;
     if (s.stage != S_OFF) {
         err("ssh: a session is open already\r\n");
         return 1;
@@ -556,39 +628,25 @@ static int start(int argc, char **argv, int sftp)
     s.port = 22;
     for (i = 1; i < argc && argv[i][0] == '-'; i++) {
         if ((!strcmp(argv[i], "-p") || !strcmp(argv[i], "-P")) && i + 1 < argc)
-            s.port = (unsigned)atoi(argv[++i]);
+            s.port = (unsigned)atoi(argv[++i]), port_said = 1;
         else if (!strcmp(argv[i], "-i") && i + 1 < argc)
             snprintf(key, sizeof key, "%s", argv[++i]);
         else if (!strcmp(argv[i], "-l") && i + 1 < argc)
-            snprintf(s.user, sizeof s.user, "%s", argv[++i]);
+            snprintf(s.user, sizeof s.user, "%s", argv[++i]), user_said = 1;
+        else if (!strcmp(argv[i], "-o") && i + 1 < argc && !strncmp(argv[i + 1], "ServerAliveInterval=", 20)
+                 && atoi(argv[i + 1] + 20) >= 0 && atoi(argv[i + 1] + 20) <= 3600)
+            s.keepalive = (unsigned)atoi(argv[++i] + 20);       /* (as OpenSSH calls it: seconds; 0: none) */
+        else if (!sftp && !strcmp(argv[i], "-sessionlog") && i + 1 < argc)
+            snprintf(s.log, sizeof s.log, "%s", argv[++i]);
         else if (!sftp && !strcmp(argv[i], "-N"))
             s.no_shell = 1;
         else if (!sftp && !strcmp(argv[i], "-g"))
             s.gateway = 1;
         else if (!sftp && !strcmp(argv[i], "-L") && i + 1 < argc) {     /* [address:]port:host:hostport */
-            const char *a = argv[++i], *c1 = strchr(a, ':'), *c2 = c1 ? strchr(c1 + 1, ':') : NULL;
-            const char *c3 = c2 ? strchr(c2 + 1, ':') : NULL;
-            unsigned lp = 0, hp = 0;
-            int open = -1, bad = 0;
-            if (c3) {                           /* an address first: whose the port is */
-                size_t n = (size_t)(c1 - a);
-                if ((n == 1 && a[0] == '*') || (n == 7 && !strncmp(a, "0.0.0.0", 7)))
-                    open = 1;
-                else if (!n || (n == 9 && (!strncmp(a, "127.0.0.1", 9) || !strncmp(a, "localhost", 9))))
-                    open = 0;
-                else
-                    bad = 1;
-                a = c1 + 1, c1 = c2, c2 = c3;
-            }
-            if (c1 && c2)
-                lp = (unsigned)atoi(a), hp = (unsigned)atoi(c2 + 1);
-            if (bad || !lp || lp > 65535 || !hp || hp > 65535 || c2 - c1 - 1 <= 0 || c2 - c1 - 1 >= 80 || s.nfwd == NFWD) {
+            if (add_tunnel(argv[++i], -1) != 0) {
                 term_printf("ssh: -L wants [ADDRESS:]PORT:HOST:HOSTPORT, ADDRESS * or 127.0.0.1 (at most %d of them)\r\n", NFWD);
                 return 1;
             }
-            s.fwd[s.nfwd].port = lp, s.fwd[s.nfwd].hport = hp, s.fwd[s.nfwd].open = open;
-            snprintf(s.fwd[s.nfwd].host, sizeof s.fwd[0].host, "%.*s", (int)(c2 - c1 - 1), c1 + 1);
-            s.nfwd++;
         }
         else {
             term_printf("%s: unknown option %s\r\n", sftp ? "sftp" : "ssh", argv[i]);
@@ -605,11 +663,12 @@ static int start(int argc, char **argv, int sftp)
             strncat(s.cmd, " ", sizeof s.cmd - strlen(s.cmd) - 1);
         strncat(s.cmd, argv[i], sizeof s.cmd - strlen(s.cmd) - 1);
     }
+    ssh_dir(dir, sizeof dir);
+    by_session(dir, key, sizeof key, port_said, user_said || s.user[0], sftp);
     if (!s.user[0]) {
         const char *u = getenv("USER");
         snprintf(s.user, sizeof s.user, "%s", u && *u ? u : "glos");
     }
-    ssh_dir(dir, sizeof dir);
     snprintf(s.known, sizeof s.known, "%s\\KNOWNHST.TXT", dir);
     if (!key[0])
         snprintf(key, sizeof key, "%s\\ID_ED25", dir);
@@ -624,7 +683,13 @@ static int start(int argc, char **argv, int sftp)
         return 255;
     }
     s.stage = S_CONNECTED;
-    term_title(s.host);
+    term_title(s.title[0] ? s.title : s.host);
+    if (s.log[0]) {                             /* the session's log: begun now, or said to be none */
+        char what[120];
+        snprintf(what, sizeof what, "ssh %s%s%s", s.title[0] ? "" : s.user, s.title[0] ? "" : "@", s.title[0] ? s.title : s.host);
+        if (sesslog_open(s.log, what) != 0)
+            term_printf("ssh: the log %s can't be written: no log is kept\r\n", s.log);
+    }
     return -2;                                  /* (it goes on: shell_resume() at its end) */
 }
 

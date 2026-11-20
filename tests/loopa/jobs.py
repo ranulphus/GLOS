@@ -8957,16 +8957,20 @@ def filesnet_case(profile, vcard, card, bits):
     the login by the key; its folder listed, a folder there gone into and left again; a file copied to this PC
     (its bytes), a larger one (SHA-256), a long name as DOS can have it; a file of this PC pasted there (SHA-256
     in the container); a folder made, renamed and deleted there. Then with no key: the password asked for, a
-    wrong one refused and asked again, the right one in."""
+    wrong one refused and asked again, the right one in; and a saved session (SESSIONS.CFG beside the known
+    hosts, as the Terminal keeps it) asked for by its name in Go's Connect to a Computer: its computer and port,
+    logged in to with the session's own key, no password asked."""
     import hashlib
     import threading
     tag = "%s-%s" % (profile, vcard)
     out = os.path.join(ROOT, "out", "filesnet-%s-files" % tag)
     os.makedirs(out, exist_ok=True)
     srv = SshdContainer("fn-" + tag, out)
-    p1 = srv.ports[0]
+    p1, p2 = srv.ports
     up = bytes((i * 40503 >> 7) & 255 for i in range(150000))
     open(os.path.join(out, "UP.BIN"), "wb").write(up)
+    open(os.path.join(out, "SESSIONS.CFG"), "w").write(
+        "[Box]\nhost = 10.0.2.2\nport = %d\nuser = glos\nkey = C:\\TEST\\KEYS\\BOXKEY\n" % p2)
     rel = lambda f: os.path.relpath(os.path.join(out, f), ROOT)
     srv.run("mkdir -p docs/deep && printf 'hello from the other side\\n' > docs/hello.txt && "
             "head -c 300000 /dev/urandom > big.bin && printf 'long\\n' > 'A long name for a file.text'")
@@ -8976,6 +8980,7 @@ def filesnet_case(profile, vcard, card, bits):
         "--file", "sdk/gui/fonts/ICONS.DAT=/TEST/ICONS.DAT",
         "--file", "%s=/TEST/SSH/ID_ED25" % rel("sshd/client"), "--file", "%s=/TEST/UP.BIN" % rel("UP.BIN"),
         "--file", "%s=/TEST/NOKEY/README.TXT" % rel("UP.BIN"),
+        "--file", "%s=/TEST/NOKEY/SESSIONS.CFG" % rel("SESSIONS.CFG"), "--file", "%s=/TEST/KEYS/BOXKEY" % rel("sshd/client"),
         "--cmd", "SERSAY HX-START filesnet", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"],
         timeout=3600)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
@@ -9107,6 +9112,18 @@ def filesnet_case(profile, vcard, card, bits):
         time.sleep(2)
         typed(SshdContainer.PASSWORD + "\\n")
         checks["pw-in"] = said(fl, "FILES site connected 10.0.2.2") and said(fl, "FILES site listed 6 " + base)
+        # A saved session by its name: the container's other port, the session's own key (no password this time).
+        box = "sftp://glos@10.0.2.2:%d" % p2
+        keys("alt+g", "c")                      # Go, Connect to a Computer...
+        time.sleep(2)
+        typed("box\\n")
+        checks["session-asked"] = said(fl, "FILES connect " + box)
+        checks["session-new-host"] = said(fl, "FILES site new-host 10.0.2.2", count=2)
+        time.sleep(2)
+        keys("alt+y")
+        checks["session-in"] = said(fl, "FILES site connected 10.0.2.2", count=2) \
+            and said(fl, "FILES site listed 6 " + box + "/home/glos") \
+            and bytes(fl.said).decode("latin-1").count("FILES site password asked") == 1
         keys("alt+f4")
         try:
             checks["pw-closed"] = fl.wait(60) == 0
@@ -9141,20 +9158,29 @@ def sshprog_case(profile, card):
     session (a command, 200 KB each way by SHA-256, two logins at once); one to a port nothing listens on closes
     what comes to it; one of this PC's own (the default: listened on at 127.0.0.1) is nobody's for the host,
     and a second SSH.EXE on the PC logs in through it; Ctrl+C ends them, and a -L that is no tunnel is refused
-    with the usage; and with no terminal, a command through the hop."""
+    with the usage; saved sessions (SESSIONS.CFG beside the key: apps/shared/sessions.c): `ssh NAME` logs in to
+    the session's computer, port and user and runs its command, the command line's own command in its place,
+    `sftp NAME`, and a session's tunnel and its keep-alive packets; a session's log (its `log`: each run of it
+    added to the file under a line that says so) and -sessionlog for a login with a pty, the file text with
+    none of the terminal's sequences in it; and with no terminal, a command through the hop."""
     import hashlib
     import socket
     tag = "prog-%s-%s" % (profile, card)
-    tun, tun2, tun3 = free_port(), free_port(), free_port()
+    tun, tun2, tun3, tun4 = free_port(), free_port(), free_port(), free_port()
     out = os.path.join(ROOT, "out", "sshc-%s-files" % tag)
     os.makedirs(out, exist_ok=True)
     srv = SshdContainer(tag, out)
     p1 = srv.ports[0]
     data = bytes((i * 2654435761 >> 11) & 255 for i in range(200000))
     open(os.path.join(out, "DATA.BIN"), "wb").write(data)
+    open(os.path.join(out, "SESSIONS.CFG"), "w").write(
+        "; the suite's sessions\n[box]\nhost = 10.0.2.2\nport = %d\nuser = glos\ncommand = echo by-its-name\n"
+        "log = C:\\TEST\\BOX.LOG\n"
+        "[Tunnel]\nhost = 10.0.2.2\nport = %d\nuser = nobody\ntunnels = *:2225:127.0.0.1:22\nkeepalive = 2\n" % (p1, p1))
     rel = lambda f: os.path.relpath(os.path.join(out, f), ROOT)
     agent = Agent("sshc-" + tag, profile, card, ["--net-fwd", "%d:2222" % tun, "--net-fwd", "%d:2223" % tun2,
-        "--net-fwd", "%d:2224" % tun3,
+        "--net-fwd", "%d:2224" % tun3, "--net-fwd", "%d:2225" % tun4,
+        "--file", "%s=/TEST/SSH/SESSIONS.CFG" % rel("SESSIONS.CFG"),
         "--file", "build/apps/SSH.EXE=/TEST/SSH.EXE",
         "--file", "build/apps/SFTP.EXE=/TEST/SFTP.EXE", "--file", "build/apps/SSHKEY.EXE=/TEST/SSHKEY.EXE",
         "--file", "%s=/TEST/SSH/ID_ED25" % rel("sshd/client"), "--file", "%s=/TEST/DATA.BIN" % rel("DATA.BIN"),
@@ -9254,6 +9280,51 @@ def sshprog_case(profile, card):
         checks["tunnel-own-exit"] = t2.end() == 0
         t.send("\x03")
         checks["tunnel-end"] = t.expect("Connection to 10.0.2.2 closed.") and t.expect("C:\\TEST>")
+        # Saved sessions: a name in the host's place.
+        t.send("ssh box\r")
+        checks["by-name"] = t.expect("by-its-name\n", 180) and t.expect("C:\\TEST>")
+        mark = len(t.text())
+        t.send("ssh BOX echo my-own-words\r")
+        checks["by-name-command"] = t.expect("my-own-words\n", 180) and t.expect("C:\\TEST>") \
+            and "by-its-name" not in t.text()[mark:]
+        t.send("sftp box\r")
+        ok = t.expect("sftp> ", 180)
+        t.send("bye\r")
+        checks["by-name-sftp"] = ok and t.expect("C:\\TEST>")
+        t.send("set SSHLOG=1\r")                    # (its milestones on the terminal: the keep-alive's)
+        t.expect("C:\\TEST>")
+        t.send("ssh -l glos -N tunnel\r")           # (the session's user is nobody: the command line's is taken)
+        ok = t.expect("SSH| session Tunnel", 180) and t.expect("The tunnels are open.", 180)
+        try:
+            with socket.create_connection(("127.0.0.1", tun4), timeout=30) as c:
+                c.settimeout(60)
+                ok = ok and c.recv(64).startswith(b"SSH-2.0-OpenSSH")
+        except OSError as e:
+            ok = False
+            print("  %s by-name-tunnel: %s" % (tag, e))
+        checks["by-name-tunnel"] = ok
+        checks["keepalive"] = t.expect("SSH| keepalive", 30) and t.expect("SSH| keepalive", 30)
+        t.send("\x03")
+        checks["by-name-end"] = t.expect("Connection to 10.0.2.2 closed.") and t.expect("C:\\TEST>")
+        t.send("set SSHLOG=\r")
+        t.expect("C:\\TEST>")
+        # The sessions' logs: box's two runs in its file; a login with a pty logged by -sessionlog, as text.
+        log = raw("glos dd if=c:\\test\\box.log of=-")[1]
+        checks["log"] = log.count(b"=== ssh box, 20") == 2 and b" ===\r\nby-its-name\r\n" in log \
+            and b" ===\r\nmy-own-words\r\n" in log
+        if not checks["log"]:
+            print("  %s log: %r" % (tag, log[-300:]))
+        t.send("ssh -sessionlog C:\\TEST\\PTY.LOG -p %d glos@10.0.2.2\r" % p1)
+        ok = t.expect("$ ", 180)
+        t.send("echo logged-$((6*7))\r")
+        ok = ok and t.expect("logged-42\n")
+        t.send("exit\r")
+        ok = ok and t.expect("Connection to 10.0.2.2 closed.") and t.expect("C:\\TEST>")
+        log = raw("glos dd if=c:\\test\\pty.log of=-")[1]
+        checks["log-pty"] = ok and log.startswith(b"=== ssh glos@10.0.2.2, 20") and b"\r\nlogged-42\r\n" in log \
+            and b"\x1b" not in log and b"\x07" not in log
+        if not checks["log-pty"]:
+            print("  %s log-pty: %r" % (tag, log[-400:]))
         t.send("exit\r")
         checks["exit"] = t.end() == 0
         rc, out, err = agent.ssh("C:\\TEST\\SSH.EXE -p %d glos@10.0.2.2 echo through-the-hop" % p1, timeout=300)
@@ -9278,7 +9349,10 @@ def sshc_case(profile, vcard, card, bits):
     which draws what they and the far side write (apps/term, its xterm screen), against OpenSSH in a container: a new host key asked about and kept; a command's output and its exit status as %ERRORLEVEL%; a login
     by password after a wrong one; a session with a pty: vi editing a file (read back in the container) and top's
     screen; a changed host key refused; SFTP put and get of 1 MB (SHA-256 on both sides) and ls; ssh-keygen's key
-    read by OpenSSH's ssh-keygen."""
+    read by OpenSSH's ssh-keygen. Then the Terminal started on a saved session (TERM -session NAME; SESSIONS.CFG
+    beside the key): its first tab has the session's look (the large text: fewer columns and rows) and logs in
+    by the session's name: the command typed into its shell is SSH.EXE by its whole path (the tab's shell is at
+    A:\\, and the programs' folder is not on the suite's PATH) and the name."""
     import hashlib
     import threading
     tag = "%s-%s" % (profile, vcard)
@@ -9289,8 +9363,12 @@ def sshc_case(profile, vcard, card, bits):
     open(os.path.join(out, "KNOWNHST.TXT"), "w").write("[10.0.2.2]:%d ssh-ed25519 %s\n" % (p2, srv.pub("other")))
     mb = bytes((i * 2654435761 >> 13) & 255 for i in range(1 << 20))
     open(os.path.join(out, "MB.BIN"), "wb").write(mb)
+    open(os.path.join(out, "SESSIONS.CFG"), "w").write(
+        "[Box]\nhost = 10.0.2.2\nport = %d\nuser = glos\ncolours = 3\nfont = 3\nlines = 200\n" % p1)
     rel = lambda f: os.path.relpath(os.path.join(out, f), ROOT)
     agent = Agent("sshc-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/TERM.EXE=/TEST/TERM.EXE",
+        "--file", "%s=/TEST/SSH/SESSIONS.CFG" % rel("SESSIONS.CFG"),
+        "--file", "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT",        # (the session's large text)
         "--file", "build/apps/SSH.EXE=/TEST/SSH.EXE", "--file", "build/apps/SFTP.EXE=/TEST/SFTP.EXE",
         "--file", "build/apps/SSHKEY.EXE=/TEST/SSHKEY.EXE",
         "--file", "%s=/TEST/SSH/ID_ED25" % rel("sshd/client"), "--file", "%s=/TEST/SSH/KNOWNHST.TXT" % rel("KNOWNHST.TXT"),
@@ -9445,6 +9523,28 @@ def sshc_case(profile, vcard, card, bits):
         typed("exit\\n")
         term.wait(timeout=120)
         time.sleep(1)
+        # The Terminal started on a saved session: the tab's look, and the login by the session's name.
+        mark = len(lines)
+        term = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\TERM.EXE -log -session box"],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        threading.Thread(target=reader, args=(term,), daemon=True).start()
+        k = screen(lambda rows: [r for r in rows if r.strip()][-1:] and [r for r in rows if r.strip()][-1].endswith("$"),
+                   180, start=mark)
+        size = [re.match(r"TERM size (\d+)x(\d+)$", l) for l in lines[mark:]]
+        size = [(int(m.group(1)), int(m.group(2))) for m in size if m]
+        checks["by-session"] = bool(k) and "TERM connect Box" in lines[mark:] \
+            and any(l.startswith("VT| ") and "\\TEST\\SSH.EXE Box" in l for l in lines[mark:])
+        checks["session-look"] = bool(size) and 20 <= size[0][0] < 80 and 3 <= size[0][1] < 25
+        if not checks["session-look"]:
+            notes.append("the session's tab: %r" % size)
+        pic = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=120)
+        open(os.path.join(out, "session.png"), "wb").write(pic.stdout)      # (its colours, for whoever looks)
+        typed("exit\\n")
+        k = screen(has("Connection to 10.0.2.2 closed."), start=k)
+        typed("exit\\n")
+        term.wait(timeout=120)
+        time.sleep(1)
+        checks["session-end"] = bool(k) and "TERM end" in lines[mark:]
         text = "\n".join(lines)
         open(os.path.join(out, "term.log"), "w").write(text + "\n")    # (what the Terminal said, for a failure's reader)
         for want in ("TERM| hello-over-ssh", "TERM| status 7", "TERM| by-password", "TERM| sftp> ls -l"):

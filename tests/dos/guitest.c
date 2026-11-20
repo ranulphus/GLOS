@@ -2611,7 +2611,14 @@ static void tw_send(struct gui_widget *w, const char *d, int n, int typed)
 {
     char out[64];
     int i, k = 0;
-    (void)w;
+    if (typed && n == 5 && !memcmp(d, "\033[20~", 5)) {     /* F9: a look of its own (phase F: gui_term_colours,
+                                                           gui_term_font), green on black in the large text */
+        gui_term_colours(w, 1, 0x33FF66, 0x001400);
+        gui_term_font(w, gui_font_get(GUI_FONT_MONO, 2));
+        snprintf(out, sizeof out, "%dx%d", gui_term_cols(w), gui_term_rows(w));
+        say("look %s", out, 0);
+        return;
+    }
     for (i = 0; i < n && k < (int)sizeof out - 5; i++)  /* (what would go to a program, as text) */
         k += snprintf(out + k, sizeof out - (size_t)k, (unsigned char)d[i] < 0x20 ? "^%c" : "%c",
                       (unsigned char)d[i] < 0x20 ? d[i] + 0x40 : d[i]);

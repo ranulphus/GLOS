@@ -297,8 +297,14 @@ two command sets that don't match). Before phase C, because the Terminal is one 
     scroll-back; its tunnels), loaded, saved and opened from one dialog; `ssh NAME` from any shell, and the
     connections in the Start menu (`docs/v1/apps/term.md`).
   - **Port forwarding:** local tunnels (`ssh -L`), kept with a connection.
-  - **Built 2026-11-20** (`docs/v1/phase-f.md`): the remote folders, and the tunnels (with API 2.9: a PC
-    reaches its own ports at 127.0.0.1). Next: the session manager, which keeps a connection's tunnels too.
+  - **Built 2026-11-20** (`docs/v1/phase-f.md`): the remote folders; the tunnels (with API 2.9: a PC reaches
+    its own ports at 127.0.0.1); the session manager (the Terminal's Sessions, `ssh NAME`, Files' Connect by
+    a session; the sessions as the Terminal's tasks in the Start menu). This item is done.
+  - **More of PuTTY** (the owner, 2026-11-20, asked once the SSH sessions were built): a session's log to a
+    file (built the same day); Telnet and raw TCP sessions; serial sessions on a COM port
+    (`docs/v1/phase-f.md`).
+  - The Mixer, the Sound Recorder and the Player stay in the Start menu alone (the owner, the same day): the
+    desktop keeps its eight.
   - Not chosen: older servers (RSA host keys, AES ciphers). The client stays with the modern set.
 - **Two games of GLOS's own** (the owner, 2026-11-19): GLOS comes with games that need nobody's licensed files.
   The ports all need their games' data, and Fifth Wheel and Echoes are projects with timelines of their own, too

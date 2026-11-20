@@ -168,6 +168,12 @@ host-test-run:
 	  && python3 tests/host/wave_cases.py check build/host/wave
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/mod_test tests/host/mod_test.c apps/shared/mod.c -lm \
 	  && build/host/mod_test `python3 tests/host/mod_cases.py build/host/mod`
+	@mkdir -p build/host/sessions && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation \
+	  -o build/host/sessions_test tests/host/sessions_test.c apps/shared/sessions.c \
+	  && build/host/sessions_test build/host/sessions
+	@mkdir -p build/host/sesslog && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation \
+	  -o build/host/sesslog_test tests/host/sesslog_test.c apps/shared/sesslog.c \
+	  && build/host/sesslog_test build/host/sesslog
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/disk_test tests/host/disk_test.c kernel/disk/mbr.c \
 	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  && tests/host/disk_test.sh build/host/disk_test build/host/disk
@@ -208,15 +214,18 @@ build/host/$(1): $$(wildcard apps/$(1)/*.c apps/$(1)/*.h) $$(GUI_SRCS) sdk/gui/g
 	  tests/host/glosshim.c $$(GUI_SRCS) $$(LIBGLOS_GFX) kernel/lib/png.c $$(CFG_SRCS) $$(CP_SRCS) $$(APP_HOST_LIBS_$(1)) -lm
 endef
 # The terminal's ssh (M10): the client for the host too, 32-bit as the rest, its crypto without -Werror.
-APP_HOST_LIBS_term := tests/host/shimshell.c sdk/shell/shell.c sdk/shell/edit.c
+APP_HOST_LIBS_term := tests/host/shimshell.c sdk/shell/shell.c sdk/shell/edit.c apps/shared/sessions.c
+APP_LIBS_term := apps/shared/sessions.c
 # Archives read and ZIPs written (Files' folders, phase E): the reader and writer, the packer, the loader's unpacker.
 # (7z archives: the LZMA SDK's reader, third_party/lzma, unchanged; arc7z.c is ours between it and arc.c)
 LZMA_SRCS := $(addprefix third_party/lzma/,7zArcIn.c 7zDec.c LzmaDec.c Lzma2Dec.c Bcj2.c Bra.c Bra86.c Delta.c 7zBuf.c 7zStream.c)
 ARC_SRCS := apps/shared/arc.c apps/shared/arc7z.c apps/shared/lzh.c apps/shared/deflate.c loader/inflate.c $(LZMA_SRCS)
 # Pictures read and written: one code in the viewer and the editor (apps/shared/picfile.c).
 # (... and folders on other computers over SFTP, phase F: apps/shared/remote.c on the SSH client's library.)
-APP_HOST_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c apps/shared/remote.c build/host/libsshc32.a
-APP_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c apps/shared/remote.c build/sdk/libsshc.a
+APP_HOST_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c apps/shared/remote.c apps/shared/sessions.c \
+    build/host/libsshc32.a
+APP_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c apps/shared/remote.c apps/shared/sessions.c \
+    build/sdk/libsshc.a
 APP_HOST_LIBS_images := apps/shared/picfile.c apps/shared/thumbs.c
 APP_HOST_LIBS_paint := apps/shared/picfile.c
 APP_LIBS_images := apps/shared/picfile.c apps/shared/thumbs.c
@@ -868,11 +877,12 @@ build/apps/FETCH.EXE: apps/fetch/fetch.c $(NET_LIBS) tools/glosmark.py
 # terminal (API 2.1's GLOS_INIT_TERMINAL), one source built three ways.
 SSH_EXES := build/apps/SSH.EXE build/apps/SFTP.EXE build/apps/SSHKEY.EXE
 define ssh_exe
-build/apps/$(1).EXE: apps/ssh/cli.c apps/ssh/ssh.c apps/ssh/cli.h build/sdk/libsshc.a build/sdk/libglos.a tools/glosmark.py
+build/apps/$(1).EXE: apps/ssh/cli.c apps/ssh/ssh.c apps/ssh/cli.h apps/shared/sessions.c apps/shared/sessions.h \
+    apps/shared/sesslog.c apps/shared/sesslog.h build/sdk/libsshc.a build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/apps
 	$$(Q)echo "  DJCC    apps/ssh ($(1))"
 	$$(Q)$$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -DCLI_WHICH=$(2) -Iinclude -o $$@ \
-	  apps/ssh/cli.c apps/ssh/ssh.c build/sdk/libsshc.a build/sdk/libglos.a
+	  apps/ssh/cli.c apps/ssh/ssh.c apps/shared/sessions.c apps/shared/sesslog.c build/sdk/libsshc.a build/sdk/libglos.a
 	$$(Q)python3 tools/glosmark.py $$@
 endef
 $(eval $(call ssh_exe,SSH,0))

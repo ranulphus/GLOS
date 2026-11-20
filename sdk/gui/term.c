@@ -28,6 +28,9 @@ struct term {
     int back;                           /* lines scrolled back (0: the screen shows) */
     int sel_on, sel_a_line, sel_a_col, sel_b_line, sel_b_col, dragging;        /* lines: kept ones, then the screen's */
     int cursor_y, ended, discard;
+    int own;                            /* its own colours, not the theme's (gui_term_colours) */
+    unsigned own_text, own_back;
+    const struct gfx_font *font;        /* its own text (gui_term_font), or NULL: the UI's monospaced font */
     struct gui_sb sb;
     struct gui_term_cb cb;
 };
@@ -115,8 +118,9 @@ static void send(struct term *t, const char *d, int n, int typed)
 static void measure_grid(struct term *t)
 {
     int w = t->w.r.w - GUI_SB - 8, h = t->w.r.h - 4;
-    t->cw = gui_char_w(gui_mono, 'n');
-    t->ch = gui_mono->height;
+    const struct gfx_font *font = t->font ? t->font : gui_mono;
+    t->cw = gui_char_w(font, 'n');
+    t->ch = font->height;
     t->cols = w / t->cw > 20 ? w / t->cw : 20;
     if (t->cols > VT_COLS_MAX)
         t->cols = VT_COLS_MAX;
@@ -137,12 +141,13 @@ static void tm_layout(struct gui_widget *w)    /* the window's size is the scree
     gui_damage(w);
 }
 
-/* A cell's colour: the program's, or for the default the theme's (a field's text and a field), not vt_rgb's
-   black on white, so that the default text shows in a dark theme too. fg: the default means the foreground. */
-static unsigned cell_rgb(unsigned short c, int fg)
+/* A cell's colour: the program's, or for the default the terminal's own if it has them, else the theme's (a
+   field's text and a field), not vt_rgb's black on white, so that the default text shows in a dark theme too.
+   fg: the default means the foreground. */
+static unsigned cell_rgb(const struct term *t, unsigned short c, int fg)
 {
     if (c == VT_DEFAULT)
-        return fg ? GUI_FIELD_TEXT : GUI_FIELD;
+        return t->own ? (fg ? t->own_text : t->own_back) : fg ? GUI_FIELD_TEXT : GUI_FIELD;
     return vt_rgb(c, fg);
 }
 
@@ -151,9 +156,14 @@ static void tm_draw(struct gui_widget *w, struct gfx_surface *s)
     struct term *t = TM(w);
     struct vt *vt = t->vt;
     struct gfx_rect frame = { w->r.x, w->r.y, w->r.w - GUI_SB + 1, w->r.h };
-    int x0 = w->r.x + 4, y0 = w->r.y + 2, y, x, ymin, ymax, first = first_shown(t), cw = t->cw, ch = t->ch;
+    int x0 = w->r.x + 4, y0 = w->r.y + 2, y, x, ymin, ymax, first = first_shown(t), cw, ch;
+    const struct gfx_font *font = t->font ? t->font : gui_mono;
+    unsigned ground = t->own ? t->own_back : GUI_FIELD, ink = t->own ? t->own_text : GUI_FIELD_TEXT;
     measure_grid(t);
+    cw = t->cw, ch = t->ch;
     gui_draw_field(s, &frame, 1);
+    if (t->own)
+        gfx_fill(s, frame.x + 1, frame.y + 1, frame.w - 2, frame.h - 2, ground);
     ymin = (s->clip.y - y0) / ch;               /* (only the rows being drawn again) */
     ymax = (s->clip.y + s->clip.h - y0) / ch + 1;
     for (y = ymin > 0 ? ymin : 0; y < t->rows && y <= ymax; y++) {
@@ -167,11 +177,11 @@ static void tm_draw(struct gui_widget *w, struct gfx_surface *s)
                   && !t->ended;
             if (!c) {
                 if (chosen || cur)
-                    gfx_fill(s, x0 + x * cw, y0 + y * ch, cw, ch, chosen ? GUI_CHOSEN : GUI_FIELD_TEXT);
+                    gfx_fill(s, x0 + x * cw, y0 + y * ch, cw, ch, chosen ? GUI_CHOSEN : ink);
                 continue;
             }
             rev = !!(c->attr & VT_REVERSE) ^ vt->reverse_screen;
-            fg = cell_rgb(rev ? c->bg : c->fg, !rev), bg = cell_rgb(rev ? c->fg : c->bg, rev);
+            fg = cell_rgb(t, rev ? c->bg : c->fg, !rev), bg = cell_rgb(t, rev ? c->fg : c->bg, rev);
             if ((c->attr & VT_BOLD) && c->fg < 8 && !rev)
                 fg = vt_rgb((unsigned short)(c->fg + 8), 1);     /* (bold as the bright colour, as xterm can) */
             if (cur) {
@@ -180,11 +190,11 @@ static void tm_draw(struct gui_widget *w, struct gfx_surface *s)
             }
             if (chosen)
                 fg = GUI_CHOSEN_TEXT, bg = GUI_CHOSEN;
-            if (bg != GUI_FIELD)                /* (the field is there already) */
+            if (bg != ground)                   /* (the field is there already) */
                 gfx_fill(s, x0 + x * cw, y0 + y * ch, cw, ch, bg);
             if (c->ch == ' ' || (c->attr & VT_HIDDEN))
                 continue;
-            gfx_text(s, x0 + x * cw, y0 + y * ch, gui_mono, u, utf8_of(c->ch, u), fg);
+            gfx_text(s, x0 + x * cw, y0 + y * ch, font, u, utf8_of(c->ch, u), fg);
             if (c->attr & VT_UNDER)
                 gfx_fill(s, x0 + x * cw, y0 + y * ch + ch - 1, cw, 1, fg);
         }
@@ -409,8 +419,27 @@ static int tm_event(struct gui_widget *w, struct gui_ev *e)
 
 static void tm_measure(struct gui_widget *w, int *pw, int *ph)
 {
-    (void)w;
-    *pw = 8 + 80 * gui_char_w(gui_mono, 'n') + GUI_SB, *ph = 4 + 25 * gui_mono->height;
+    const struct gfx_font *font = TM(w)->font ? TM(w)->font : gui_mono;
+    *pw = 8 + 80 * gui_char_w(font, 'n') + GUI_SB, *ph = 4 + 25 * font->height;
+}
+
+/* (phase F: a saved session's look) Its own colours for the text and the ground that the program leaves as
+   they are (on: 0 gives it the theme's again); its own text (NULL: the UI's monospaced font, in the theme's
+   size). The grid is laid out again: another size of text is another number of columns and rows. */
+void gui_term_colours(struct gui_widget *w, int on, unsigned text, unsigned back)
+{
+    struct term *t = TM(w);
+    t->own = on != 0, t->own_text = text, t->own_back = back;
+    gui_damage(w);
+}
+
+void gui_term_font(struct gui_widget *w, const struct gfx_font *font)
+{
+    struct term *t = TM(w);
+    t->font = font;
+    if (w->r.w > 0 && w->r.h > 0)
+        tm_layout(w);
+    gui_damage(w);
 }
 
 static void tm_destroy(struct gui_widget *w)

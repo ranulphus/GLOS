@@ -194,3 +194,65 @@ The suite had asked the pool twice within a second; but it showed a fault of GLO
 an answer and 15 s more before asking again, so a second question went out just as `glos time sync` gave up.
 One lost answer failed the sync. The wait is 5 s now (the second question at 20 s), the suite's NTP server can
 be told to lose an answer (`asked-again`), and the pool is asked once.
+
+## The Terminal: saved sessions, as PuTTY has them (2026-11-20)
+
+The owner's choice of 2026-11-20 (`docs/v1-route.md`, F, "More of SSH"; in his words: saved connections and
+config like PuTTY). The Terminal's Connections (a name, a host, a user and a port) became **Sessions**.
+
+- **A session** is a name for a computer to log in to and all that goes with it: the host, port and user; a
+  key's file, where it is not SSH's own; a command to run there in place of a shell; a keep-alive (seconds of
+  quiet before a packet that says nothing, for a connection that a router on the way would forget); a file
+  its output is logged to; up to four tunnels; and the look of its tab: one of six colour schemes (the theme's, black on white, white on
+  black, a green screen, an amber one, white on blue), the text's size (the theme's, small, normal, large)
+  and the lines kept above the screen (100 to 20,000).
+- **The dialog** (File's Sessions..., Ctrl+Shift+O): the saved sessions down the left with New and Remove;
+  three pages on the right, Computer, Tunnels (a list, and a tunnel added from a port of this PC, where it
+  goes, and whether other computers may use it) and Look; Open and Save under them. Choosing a session in the
+  list fills the pages; Enter or a double click on it opens it. Open opens what the pages say, saved or not,
+  as PuTTY does; what is wrong (a port that is none, a name with a space) is said and nothing is done.
+- **Opening** makes a tab with the session's look and types the SSH command into its shell: `ssh NAME` for a
+  session as it is saved, the whole command (`ssh -p ... -i ... -o ServerAliveInterval=... -L ... user@host
+  command`) for one that is not. So the login, its questions and the tunnels are SSH.EXE's as ever, and
+  nothing secret is the Terminal's. **`TERM -session NAME`** starts the Terminal on a session.
+- **`ssh NAME`, `sftp NAME`** from any shell: a saved session's name in the host's place takes its computer,
+  port, user, key, command, tunnels and keep-alive, each unless the command line says its own (`ssh -l root
+  NAME`, `ssh NAME uptime`). The tab's title is the session's name. `ssh -o ServerAliveInterval=N` is new
+  with it (OpenSSH's name for the keep-alive).
+- **A session's log** (the first of PuTTY's other things the owner chose): a session's `log`, or
+  `ssh -sessionlog FILE`. What the session writes is added to that file as text as it comes: the terminal's
+  sequences (colours, the cursor's moves, titles) and the control characters are left out, a line ends as
+  DOS ends one, and each run begins under a line that says what and when (`=== ssh office, 2026-11-20
+  16:40:02 ===`). It is SSH.EXE's doing (`apps/shared/sesslog.c`), so `ssh NAME` from any shell logs, not
+  the Terminal's tabs alone; what is typed is not logged, except as the far side echoes it. A log that can't
+  be written is said, and the session goes on without one.
+- **Files** asks for a computer the same way: Go's Connect to a Computer takes a saved session's name (its
+  line drops the names down) as well as an address, and a session's own key logs in to its computer.
+- **Kept where:** `SESSIONS.CFG` beside SSH's key and known hosts (`SSH\` beside the programs, or `GLOSSSH`),
+  text, a section a session (`apps/shared/sessions.h` has its words). The Terminal writes it; SSH.EXE and
+  Files read it. No passwords and no keys are in it: a key is its file's name. The connections of phase E's
+  `TERM.CFG` are taken over the first time, where there are no sessions yet.
+- **The toolkit** gained a terminal's own look: `gui_term_colours` (the text and the ground a program leaves
+  as they are; a program's own colours stay) and `gui_term_font` (one of the three sizes; the grid is laid
+  out again, and the program told its new size). `sshc_keepalive` in `sdk/sshc` sends SSH's ignore message.
+- **In the Start menu** the saved sessions are the Terminal's tasks (its own page there: More, or Shift+F10
+  on its row): each starts the Terminal on that session.
+- **Not yet:** a look for the Terminal's own shell tabs.
+- **Decided by the owner, 2026-11-20** (asked which of PuTTY's things beyond SSH the Terminal should have):
+  all three offered. **A session's log to a file** (built: above); **serial sessions** (a COM port in a
+  computer's place: speed, bits, flow control; it needs a call for an app to own a COM port, beside the
+  kernel's own serial log and the cable link); **Telnet and raw TCP sessions** (old BBSes and gear without
+  SSH; code page 437 and ANSI colours drawn right). Telnet next, then serial, each a step of its own.
+- **Tests.** `sessions_test` on the host: names, a tunnel's words (19 bad ones refused), 32 sessions written
+  and read back the same, a file written by hand with its faults, 300 files of rubbish that do no harm (366
+  checks, under the sanitizers too). `tests/gui/term-sess.txt` (the host's player and Loop A's native
+  suite): a session made with two tunnels and a look, saved, a wrong port told and put right, opened in a
+  tab, removed. `terminal.txt`: the terminal widget in its own colours and the large text (its grid laid out
+  again: 49 by 10 in the test's window). The sshc suite: `ssh NAME` and its command, the command line's own command in its place,
+  `sftp NAME`, a session's tunnel reached from the host and its keep-alive packets seen
+  (`sshprog_case`); the Terminal started on a session, its tab in the session's look, logged in
+  (`sshc_case`); Files' Connect by a session's name, logged in with the session's own key where the folder
+  has none (`filesnet_case`). `start-session.txt` (Loop A): a session saved in the Terminal is a task on the
+  Terminal's page of the Start menu, and starts it. The log: `sesslog_test` on the host (what is kept of 17
+  kinds of output, each also cut in two at every place; the file begun and added to; 2,000 pieces of
+  rubbish), and on Loop A a session's two runs in its file and a login with a pty logged with no escape in it.

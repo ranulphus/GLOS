@@ -9,7 +9,7 @@
  * tasks, its recent documents) and Power (exit GLOS, restart GLOS, restart the PC).
  *
  * The entries are SHELL's ENTRY list (the programs whose profiles ask to be listed) and GLOS's own apps beside
- * FILES.EXE. The pins in their order, how often each entry was started and when each was first seen are kept in
+ * FILES.EXE. The Terminal's tasks are its saved sessions (phase F: each starts the Terminal on that session). The pins in their order, how often each entry was started and when each was first seen are kept in
  * START.CFG there: an entry first seen in the last fortnight and not yet started is "Recently added" (the first
  * START.CFG takes everything there is for old).
  * Everything is by keys: type to search, Down into the list, Enter, Tab to the tiles, Esc (back a page, then
@@ -20,6 +20,7 @@
 #include <strings.h>
 
 #include "files.h"
+#include "site.h"
 
 #define ENTS 64
 #define ROWS 160
@@ -29,7 +30,7 @@
 
 struct ent {
     char name[48];                      /* a profile's program name, or one of GLOS's own apps' command */
-    char title[40], dir[100], args[100], tasks[192];
+    char title[40], dir[100], args[100], tasks[420];
     int kind;                           /* IC_ */
     int own;                            /* one of GLOS's own apps (run from FILES.EXE's folder) */
     int uses;
@@ -181,6 +182,23 @@ static char *part(char **at)
     return s;
 }
 
+/* The Terminal's saved sessions as its tasks (phase F; site.c reads SESSIONS.CFG): "NAME=-session NAME;" each,
+   as many as there is room for. */
+static void session_tasks(struct ent *e)
+{
+    const char *names[32];
+    int n = site_sessions(names, 32), i;
+    size_t at = 0;
+    for (i = 0; i < n; i++) {
+        int k = snprintf(e->tasks + at, sizeof e->tasks - at, "%s=-session %s;", names[i], names[i]);
+        if (k < 0 || (size_t)k >= sizeof e->tasks - at) {
+            e->tasks[at] = 0;
+            break;
+        }
+        at += (size_t)k;
+    }
+}
+
 static void entries_load(void)
 {
     static char buf[8192];
@@ -196,6 +214,8 @@ static void entries_load(void)
         snprintf(e->title, sizeof e->title, "%s", title);
         e->kind = kind;
         e->own = 1;
+        if (!strncasecmp(exe, "TERM.EXE", 8))
+            session_tasks(e);
     }
     buf[0] = 0;
     if (glos_entry_list(buf, sizeof buf - 1, &len) == 0)
@@ -653,8 +673,10 @@ static void act(int r)
         break;
     case R_TASK: {                              /* the entry's task: its arguments */
         char label[64], args[100];
-        if (task_at(ents[e].tasks, w->idx, label, sizeof label, args, sizeof args) == 1)
+        if (task_at(ents[e].tasks, w->idx, label, sizeof label, args, sizeof args) == 1) {
+            say("task", args);
             run_ent(e, args);
+        }
         break;
     }
     case R_ACT:

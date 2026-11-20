@@ -1,0 +1,79 @@
+# The Terminal's saved sessions (apps/term; phase F, docs/v1/phase-f.md): File's Sessions...: one made, with a
+# keep-alive, a log's file, two tunnels and a look of its own, and saved; a port that is none is told and put right; Open makes a tab for it
+# and types the session's SSH command into the tab's shell (the host's stand-in has one shell and no SSH, and
+# in Loop A nothing listens there: the tab is not looked at here; the look is terminal.txt's, the login by a
+# session the sshc suite's); the session chosen in the list again and removed; the tab closed, the Terminal
+# ended.
+run TERM.EXE -log
+wait "Terminal"
+key ctrl+shift+o
+wait "Sessions"
+shot sess-empty "Sessions"
+type lab
+key tab
+type 127.0.0.1
+key tab
+type 2222
+key tab
+type glos
+key alt+a
+type 30
+key alt+f
+type C:\\TERM\\LAB.LOG
+key ctrl+tab
+key alt+t
+type 8080
+key alt+g
+type intranet:80
+key alt+d
+key alt+t
+type 2222
+key alt+g
+type 10.0.0.9:22
+key alt+y
+key alt+d
+shot sess-tunnels "Sessions"
+key ctrl+tab
+key alt+l
+key down down down
+key alt+x
+key down down down
+key alt+i
+type 500
+shot sess-look "Sessions"
+key alt+s
+key ctrl+tab
+key alt+p
+key home shift+end
+type 99999
+key alt+s
+key enter
+key alt+p
+key home shift+end
+type 2222
+key alt+s
+shot sess-saved "Sessions"
+key alt+o
+gone "Sessions"
+wait "Shell 2 - Terminal"
+pause 3000
+key ctrl+shift+w
+wait "Terminal"
+key ctrl+shift+o
+wait "Sessions"
+key alt+v
+key home
+key alt+r
+shot sess-removed "Sessions"
+key esc
+gone "Sessions"
+type exit\n
+gone "Terminal"
+expect TERM session saved lab tunnels=2 colours=3 font=3
+expect TERM session wrong
+expect TERM session saved lab tunnels=2 colours=3 font=3
+expect TERM tab new tabs=2
+expect TERM connect lab
+expect TERM tab closed tabs=1
+expect TERM session removed lab
+expect TERM end

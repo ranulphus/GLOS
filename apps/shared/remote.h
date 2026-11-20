@@ -28,9 +28,10 @@ struct remote_ui {
 
 struct remote;
 
-/* dir: where the key (ID_ED25) and the known hosts (KNOWNHST.TXT) are. why: a line for the user when it fails
-   (the other side's own words where it gave some). */
-struct remote *remote_open(const char *host, unsigned port, const char *user, const char *dir,
+/* dir: where the key (ID_ED25) and the known hosts (KNOWNHST.TXT) are; key_file: another key's file in that
+   one's place (a saved session's), or NULL. why: a line for the user when it fails (the other side's own words
+   where it gave some). */
+struct remote *remote_open(const char *host, unsigned port, const char *user, const char *dir, const char *key_file,
                            const struct remote_ui *ui, void *ctx, int *err, char *why, unsigned room);
 void remote_close(struct remote *r);
 const char *remote_home(const struct remote *r);        /* where a login begins ("/home/ross"), "/" if not told */

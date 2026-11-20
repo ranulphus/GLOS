@@ -69,6 +69,8 @@ int sshc_chan_ok(const struct sshc_chan *ch);
    sshc_chan_ok() says 1 once it is open; refused: chan_closed is told, and it is gone. What is written before it
    is open is kept and sent then. */
 struct sshc_chan *sshc_direct(struct sshc *c, const char *host, unsigned port, const char *from, unsigned from_port);
+void sshc_keepalive(struct sshc *c);     /* (SSHC_READY) a packet that says nothing (SSH_MSG_IGNORE): for a quiet
+                                            connection that something between the two computers would forget */
 uint32_t sshc_write(struct sshc_chan *ch, const uint8_t *data, uint32_t len);  /* buffered past the server's window:
                                            the bytes buffered and not yet sent */
 void sshc_eof(struct sshc_chan *ch);    /* no more input from us */

@@ -4,6 +4,22 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Saved sessions in the Terminal (2026-11-20)
+
+- **The Terminal's Connections are now Sessions**, as PuTTY has them (File, Sessions..., Ctrl+Shift+O): each
+  saved session keeps a computer (host, port, user), a key's file, a command to run there, a keep-alive, up to
+  four tunnels, and the look of its tab: colours, the text's size, the lines kept.
+- **`ssh NAME` and `sftp NAME`** from any shell use a saved session; what you say on the command line wins
+  over what the session says. `TERM -session NAME` starts the Terminal on one.
+- **Files** takes a session's name in Go, Connect to a Computer..., and logs in with the session's key.
+- The sessions are a text file, `SESSIONS.CFG` beside SSH's key. Nothing secret is in it.
+- `ssh -o ServerAliveInterval=SECONDS`: a packet now and then on a quiet connection, so that a router does
+  not drop it.
+- **A session's log:** give a session a log file (or `ssh -sessionlog FILE`) and what it writes is added to
+  that file as plain text, colours and cursor movements left out.
+- **In the Start menu** the saved sessions are on the Terminal's own page (More): each opens the Terminal on
+  that session.
+
 ## SSH tunnels, and 127.0.0.1 (API 2.9, 2026-11-20)
 
 - **`ssh -L PORT:HOST:HOSTPORT`:** a port of this PC that leads, through the SSH session, to HOST:HOSTPORT as

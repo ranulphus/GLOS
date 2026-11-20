@@ -85,6 +85,66 @@ static struct view *view_of(struct gui_window *w)
     return NULL;
 }
 
+/* ---- Connect to a Computer (phase F): an address typed as for ssh, or one of the Terminal's saved sessions,
+   which the line's list holds (apps/shared/sessions.h; site.c reads them). */
+static struct gui_window *cn_win;
+static struct gui_widget *cn_line;
+static char cn_text[200];
+
+static void cn_done(int ok)
+{
+    const char *t = gui_get_text(cn_line);
+    while (*t == ' ')
+        t++;
+    snprintf(cn_text, sizeof cn_text, "%s", ok ? t : "");
+    while (cn_text[0] && cn_text[strlen(cn_text) - 1] == ' ')
+        cn_text[strlen(cn_text) - 1] = 0;
+    gui_end_modal(cn_win, ok);
+}
+
+static void cn_button(struct gui_widget *b, int what)
+{
+    (void)what;
+    cn_done(b->id == 1);
+}
+
+static void cn_line_on(struct gui_widget *w, int what)
+{
+    (void)w;
+    if (what == GUI_ON_ACTIVATE)                /* (Enter in the line) */
+        cn_done(1);
+}
+
+static int connect_ask(struct gui_window *owner, char *out, int room)
+{
+    const char *names[32];
+    struct gui_widget *box, *row;
+    int n = site_sessions(names, 32), i, r;
+    cn_win = gui_window(GUI_T("Connect to a Computer"), 430, 140, GUI_W_DIALOG);
+    cn_win->owner = owner;
+    box = gui_vbox(cn_win->root, 6, 10);
+    gui_grow(box, 1);
+    gui_label(box, GUI_T("Its name or address, as for ssh (user@computer, with :port and /folder if"));
+    gui_label(box, GUI_T("need be), or one of the Terminal's saved sessions:"));
+    cn_line = gui_combo(box, 44);
+    for (i = 0; i < n; i++)
+        gui_combo_add(cn_line, names[i]);
+    gui_on(cn_line, cn_line_on, 0);
+    gui_space(box, 0, 0);
+    row = gui_hbox(box, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("OK"), cn_button, 1)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), cn_button, 2)->flags |= GUI_CANCEL;
+    cn_text[0] = 0;
+    gui_focus(cn_line);
+    r = gui_modal(cn_win);                      /* (which closes it) */
+    cn_win = NULL;
+    if (r != 1 || !cn_text[0])
+        return 0;
+    snprintf(out, (size_t)room, "%s", cn_text);
+    return 1;
+}
+
 /* ---- archives as folders (phase E; docs/v1/apps/files.md). An archive's file in a path is gone into as a
    folder is: C:\DOCS\PACK.ZIP\TEXT is the folder TEXT inside PACK.ZIP. What is in it is listed from the archive
    (arc_list), a file of it is opened from a copy unpacked beside FILES.EXE (ARCTEMP), and what is copied out of
@@ -2404,12 +2464,11 @@ static void command(struct gui_window *w, int id)
     case C_FIND:
         find_files(v);
         break;
-    case C_CONNECT:                             /* another computer's folders: whose, and where */
-        t[0] = 0;
-        if (gui_ask(w, GUI_T("Connect to a Computer"),
-                    GUI_T("Its name or address, as for ssh (user@computer, with :port and /folder if need be):"), t,
-                    (int)sizeof t - 8) && t[0]) {
-            snprintf(to, sizeof to, "sftp://%s", t);
+    case C_CONNECT:                             /* another computer's folders: whose, and where; or a saved
+                                                   session's name, which stands for its computer */
+        if (connect_ask(w, t, (int)sizeof t - 8)) {
+            if (site_session(t, to, sizeof to) != 0)
+                snprintf(to, sizeof to, "sftp://%s", t);
             say("connect", to);
             if (v->browser)
                 go(v, to);

@@ -41,6 +41,11 @@ int site_mkdir(const char *url);
 int site_remove(const char *url, int dir);
 int site_rename(const char *from, const char *to);
 int site_exists(const char *url, int *dir);                             /* 1 and whether it is a folder, 0, or -1 */
+/* The saved sessions (the Terminal's Sessions; apps/shared/sessions.h): their names, how many (room at most);
+   one's computer as an address, sftp://[user@]host[:port]: 0, or -1 (no session of that name). A session's own
+   key is the one its computer is logged in to with. */
+int site_sessions(const char **names, int room);
+int site_session(const char *name, char *url, int room);
 void site_end(void);                    /* every connection closed (Files is going) */
 void site_keys(const char *dir);        /* where the key and the known hosts are, if not SSH\ beside the program */
 
