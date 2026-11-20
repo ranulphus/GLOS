@@ -2166,6 +2166,7 @@ gdb -ex 'set architecture i386' -ex 'target remote | ssh -W localhost:2345 pc'
 | Matrox G-series cards are AGP only | 486 profiles can't have a Matrox card | S3 Trio64V2/DX until a PCI-variant patch at M7 |
 | The dynarec (the old one MGA-Glide builds) checks segment limits on stores, never on loads (`MEM_LOAD_ADDR_EA_*`) | DJGPP's Ctrl-C and SIGALRM cut DS's limit to 4 KB in the IRQ handler; a loop that only reads never faults, on any host (found by djtst205's HANG, M4b) | **Fixed:** patch 0112 (MGA-Glide 81c0686; V86TEST case V) |
 | The PIIX4's RTC aliases at 74h–77h had index registers of their own, not 70h–73h's | The BF6 BIOS's SMM handler for port 71h works through 74h/75h: after any change of century (GLOS's SNTP set, DOS's DATE) every read of port 71h returned the century, and the RTC tick stopped (M10) | **Fixed:** patch 0118 (MGA-Glide selftest `rtc`; §8.4) |
+| VERR and VERW read the descriptor even past the GDT's or LDT's limit (`src/cpu/x86_ops_pmode.h`: validity from the limit, the read made anyway; LAR and LSL read only when valid); silicon checks the limit first | A selector past a short LDT page-faulted in 86Box (HDPMI's IRQ0TSTP VERRs a real-mode segment, 2C5Eh, as a selector: the memory diet's one-page LDT, 2026-11-20) | The LDT is a sparse 64 KB window: its unbacked pages read as zeros, to its full limit (§12.1a, `mm_win_sparse`). Invariant: a table the CPU indexes reads as zeros up to its limit. Not patched |
 
 ## 21. Invariants checklist (for code review)
 
