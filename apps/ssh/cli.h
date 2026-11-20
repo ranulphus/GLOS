@@ -22,6 +22,7 @@ int ssh_command(int argc, char **argv);         /* -2: under way (shell_resume()
 int sftp_command(int argc, char **argv);
 int keygen_command(int argc, char **argv);
 int telnet_command(int argc, char **argv);      /* (telnetc.c: TELNET.EXE's; it answers to the names below too) */
+int serial_command(int argc, char **argv);      /* (telnetc.c again: SERIAL.EXE's) */
 int ssh_screen(void);                           /* a session with a pty runs: what is typed is its */
 int ssh_asking(void);                           /* the line typed is its: a question's answer, sftp's command */
 void ssh_answer(const char *line);

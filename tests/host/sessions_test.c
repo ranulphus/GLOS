@@ -60,6 +60,20 @@ int main(int argc, char **argv)
     CHECK(session_tunnels_ok("1:a:2 nonsense") == -1 && session_tunnels_ok("1:a:2 2:a:2 3:a:2 4:a:2 5:a:2") == -1,
           "bad lines of tunnels");
 
+    /* a serial session's port and frame */
+    CHECK(session_com("COM1") == 1 && session_com("com4") == 4 && session_com("Com2") == 2 && !session_com("COM5")
+          && !session_com("COM0") && !session_com("COM") && !session_com("COM12") && !session_com("LPT1") && !session_com(""),
+          "COM ports");
+    {
+        unsigned b = 0, p = 9, st = 0;
+        CHECK(session_frame("", &b, &p, &st) == 0 && b == 8 && p == 0 && st == 1, "no frame: 8N1");
+        CHECK(session_frame("7e2", &b, &p, &st) == 0 && b == 7 && p == 2 && st == 2, "7E2: %u %u %u", b, p, st);
+        CHECK(session_frame("5O1", &b, &p, &st) == 0 && b == 5 && p == 1 && st == 1, "5O1: %u %u %u", b, p, st);
+        CHECK(session_frame("8N1", 0, 0, 0) == 0 && session_frame("9N1", 0, 0, 0) == -1 && session_frame("4N1", 0, 0, 0) == -1
+              && session_frame("8X1", 0, 0, 0) == -1 && session_frame("8N3", 0, 0, 0) == -1 && session_frame("8N", 0, 0, 0) == -1
+              && session_frame("8N11", 0, 0, 0) == -1, "frames that are none");
+    }
+
     /* the file's name */
     sessions_path(path, sizeof path, "C:\\GLOS\\SSH");
     CHECK(!strcmp(path, "C:\\GLOS\\SSH\\SESSIONS.CFG"), "path: %s", path);
@@ -85,7 +99,14 @@ int main(int argc, char **argv)
         if (i & 16)
             snprintf(s[i].tunnels, sizeof s[i].tunnels, "%d:web:80 *:%d:10.0.0.%d:22", 8000 + i, 2200 + i, i);
         s[i].keepalive = i % 3 ? 30 * i : 0;
-        s[i].kind = i % 5 == 1 ? SESSION_TELNET : i % 5 == 2 ? SESSION_RAW : SESSION_SSH;
+        s[i].kind = i % 5 == 1 ? SESSION_TELNET : i % 5 == 2 ? SESSION_RAW : i % 5 == 3 ? SESSION_SERIAL : SESSION_SSH;
+        if (s[i].kind == SESSION_SERIAL) {
+            memset(s[i].host, 0, sizeof s[i].host);     /* (they are compared byte for byte) */
+            snprintf(s[i].host, sizeof s[i].host, "COM%d", 1 + i % 4);
+            s[i].speed = i % 2 ? 9600 : 0;
+            snprintf(s[i].frame, sizeof s[i].frame, "%s", i % 3 ? "7E1" : "");
+            s[i].flow = i % 3;
+        }
         s[i].charset = i % 4 == 1 ? 437 : i % 4 == 2 ? 850 : 0;
         if (i % 7 == 3)
             snprintf(s[i].log, sizeof s[i].log, "C:\\LOGS\\S%d.LOG", i);
@@ -151,7 +172,9 @@ int main(int argc, char **argv)
                   && back[i].port <= 65535 && session_tunnels_ok(back[i].tunnels) >= 0 && back[i].colours >= 0
                   && back[i].colours < SESSION_COLOURS && back[i].font >= 0 && back[i].font <= 3
                   && (back[i].lines == 0 || (back[i].lines >= 100 && back[i].lines <= 20000)) && back[i].keepalive >= 0
-                  && back[i].keepalive <= 3600 && back[i].kind >= SESSION_SSH && back[i].kind <= SESSION_RAW
+                  && back[i].keepalive <= 3600 && back[i].kind >= SESSION_SSH && back[i].kind <= SESSION_SERIAL
+                  && (back[i].speed == 0 || (back[i].speed >= 50 && back[i].speed <= 115200))
+                  && session_frame(back[i].frame, 0, 0, 0) == 0 && back[i].flow >= 0 && back[i].flow <= 2
                   && back[i].charset >= 0 && back[i].charset <= 65535, "rubbish %d: session %d is not one", j, i);
     }
     printf("sessions_test: %d failures (%d checks)\n", fails, checks);

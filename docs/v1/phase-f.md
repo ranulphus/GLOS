@@ -311,4 +311,42 @@ but here: it is what Telnet is.
   e acute sent as 82h, Ctrl+]; the saved session and its log; a raw session and a Telnet one with no echo, a
   line at a time; a port nobody listens on. `sshprog_case`: an e acute typed to an SSH session arrives as
   UTF-8.
-- **Not yet:** serial sessions (the third the owner chose): next.
+
+## Serial sessions, and a COM port for an app (API 2.10, 2026-11-20)
+
+The third of PuTTY's other things the owner chose: a COM port in a computer's place, for what is at the end of
+a serial cable (a router's or a switch's console, a modem, another PC).
+
+- **SERIAL.EXE** (`serial [-f none|rts|xon] [-c PAGE] [-sessionlog FILE] COMn [SPEED] [FRAME]`): TELNET.EXE's
+  source built again (`apps/ssh/telnetc.c`, `CLI_WHICH` 4) with a COM port for its connection. SPEED is 50 to
+  115200 (115200 if none), FRAME the bits, the parity and the stop bits as `8N1` (which it is if none), `-f`
+  the flow control: the RTS and CTS wires, or XON and XOFF. Every key goes down the line at once and nothing is
+  shown that the far side does not send back; Ctrl+] ends the session; `-c` and `-sessionlog` as Telnet's.
+- **API 2.10: NET's SERIAL** (`glos_net_serial`). A COM port opened as a connection: SEND and RECEIVE are its
+  bytes, CLOSE its end (what waits goes out first), its events and its WAITING and ROOM a connection's; its
+  wires are the LINES property (DTR and RTS set, CTS, DSR, DCD and RI read), BREAK holds the line at a
+  break. No network is needed. One line for all apps at a time; a port the cable link has is refused.
+- **In the kernel.** `kernel/drv/uart.c` was one line, the cable link's; it is two now, the second an app's
+  (4 KB rings of its own), with a frame, any speed the chip's divisor comes within a hundredth of, and flow
+  control done in the interrupt: RTS dropped (or XOFF sent) when three quarters of the ring wait, raised
+  again at a quarter; nothing sent while CTS is off (or after an XOFF) but the XON or XOFF this side owes; XON
+  and XOFF are no text then. Two lines on one interrupt (COM1 and COM3) share it. The port is hidden from DOS
+  programs while it is open and as DOS left it afterwards; COM1 carries none of GLOS's log meanwhile, as for
+  the cable link. `kernel/net/sock.c` has a serial flavour of a connection: the net thread moves bytes between
+  the driver's rings and the app's on its turns (the driver kicks it when bytes come and when there is room).
+- **Saved sessions:** the kind Serial, its host the port (COM1 to COM4), and a Serial page in the Terminal's
+  dialog (speed, data bits, parity, stop bits, flow control); `serial NAME`; `ssh` and `telnet` given such a
+  name say whose it is.
+- **Found by its test: a page pasted to a terminal program lost its end.** What is typed to a program at a
+  terminal waited in a ring of a kilobyte, and what found no room was dropped; 4,000 characters typed at once
+  to SERIAL.EXE arrived as 1,024. The shell's session now takes no more from the terminal while that ring is
+  full (the 4 KB before it then fills, and is as it was), and the Terminal app keeps what a tab's session has
+  no room for and gives it later (a paste of up to 256 KB), where it was dropped too.
+- **Not yet:** a break sent from the keyboard; the wires shown; more than one serial session at a time; a
+  serial session for a full-screen DOS program (they have the port itself, as ever).
+- **Tests.** Loop A, the sshc suite's `serial_case` on both machines, the guest's COM2 in the host's hands
+  through the emulator's bridge: the port opened (the kernel's line says how), both ways a key at a time,
+  4,000 bytes each way whole, a second session refused, COM4 not there, a frame and a speed that are none,
+  7E2 set, the port DOS's again; the saved session with XON and XOFF (an XOFF holds what is typed until the
+  XON; neither is text) and its log. The cable link's cases (the ssh suite) run on the driver's first line as
+  before. Real hardware is owed: a bench's COM port against the host's.

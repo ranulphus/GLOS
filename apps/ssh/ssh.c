@@ -587,8 +587,9 @@ static int by_session(const char *dir, char *key, size_t kroom, int port_said, i
         return 0;
     k = &all[i];
     if (k->kind != SESSION_SSH) {
-        term_printf("%s: %s is a %s session: telnet %s\r\n", sftp ? "sftp" : "ssh", k->name,
-                    k->kind == SESSION_RAW ? "raw" : "Telnet", k->name);
+        term_printf("%s: %s is a %s session: %s %s\r\n", sftp ? "sftp" : "ssh", k->name,
+                    k->kind == SESSION_RAW ? "raw" : k->kind == SESSION_SERIAL ? "serial" : "Telnet",
+                    k->kind == SESSION_SERIAL ? "serial" : "telnet", k->name);
         return -1;
     }
     milestone("session %s", k->name);

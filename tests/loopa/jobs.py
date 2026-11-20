@@ -9552,6 +9552,141 @@ def telnet_case(profile, card):
         not bad
 
 
+def serial_case(profile, card):
+    """SERIAL.EXE (apps/ssh/telnetc.c built again; kernel/drv/uart.c's line for an app; API 2.10: NET's SERIAL) at
+    an SSH login to GLOS's shell, with the PC's COM2 in the host's hands through Loop A's bridge: the port opened
+    by its name (the kernel's line says how); what the far side sends is on the terminal, every key goes down the
+    line at once; 4,000 bytes each way arrive whole (typed in one go: the session holds what the program has
+    not yet read); the port is one program's at a time (a second serial is told so), COM4 is not there, a frame
+    and a speed that are none are refused; a frame of 7E2 set; Ctrl+] ends it and the
+    port is DOS's again. A saved session of that kind by its name, with XON and XOFF: an XOFF from the far side
+    holds what is typed until its XON, and neither is text; its log. `ssh` and `telnet` given that name say
+    whose it is."""
+    import socket
+    tag = "serial-%s-%s" % (profile, card)
+    out = os.path.join(ROOT, "out", "sshc-%s-files" % tag)
+    os.makedirs(out, exist_ok=True)
+    open(os.path.join(out, "SESSIONS.CFG"), "w").write(
+        "[Console]\nkind = serial\nhost = COM2\nspeed = 9600\nframe = 8N1\nflow = xon\nlog = C:\\TEST\\CONSOLE.LOG\n")
+    rel = lambda f: os.path.relpath(os.path.join(out, f), ROOT)
+    agent = Agent("sshc-" + tag, profile, card, ["--com2", "--file", "build/apps/SERIAL.EXE=/TEST/SERIAL.EXE",
+        "--file", "build/apps/TELNET.EXE=/TEST/TELNET.EXE", "--file", "build/apps/SSH.EXE=/TEST/SSH.EXE",
+        "--file", "%s=/TEST/SSH/SESSIONS.CFG" % rel("SESSIONS.CFG"),
+        "--cmd", "SERSAY HX-START serial", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1500)
+    checks = {"listen": agent.listening()}
+    line = None
+
+    def came(n, limit=30):                      # n bytes from the PC's port, or what there was in the time
+        got, t0 = b"", time.time()
+        line.settimeout(0.5)
+        while len(got) < n and time.time() - t0 < limit:
+            try:
+                d = line.recv(n - len(got))
+            except socket.timeout:
+                continue
+            if not d:
+                break
+            got += d
+        return got
+
+    def raw(cmd):
+        p = subprocess.run(agent.opts + ["glos@127.0.0.1", cmd], capture_output=True, timeout=300)
+        return p.returncode, p.stdout
+
+    try:
+        line = socket.create_connection(("127.0.0.1", cable_port("sshc-" + tag)), timeout=30)
+        t = Login(agent)
+        checks["login"] = t.expect("C:\\TEST>")
+        # The port by its name: both ways, a key at a time.
+        t.send("serial COM2 115200\r")
+        checks["open"] = t.expect("Connected to COM2 at 115200 8N1. Ctrl+] ends the session.", 120) \
+            and "GLOS-UART app com=2 base=2f8 irq=3 baud=115200 bits=8 parity=0 stop=1 flow=0" in agent.log()
+        line.sendall(b"router> ")
+        ok = t.expect("router> ", 60)
+        t.send("sh")
+        ok = ok and came(2) == b"sh"            # (nothing waits for a line's end)
+        t.send("ow version\r")
+        ok = ok and came(11) == b"ow version\r"
+        line.sendall(b"show version\r\nIOS 12.0\r\nrouter> ")
+        checks["both-ways"] = ok and t.expect("IOS 12.0\n", 60) and t.expect("router> ")
+        # 4,000 bytes each way.
+        lines = b"".join(b"line %04d of the far side's\r\n" % i for i in range(140))
+        line.sendall(lines)
+        checks["bulk-in"] = t.expect("line 0139 of the far side's\n", 120) \
+            and all(("line %04d of the far side's" % i) in t.text() for i in range(140))
+        typed = "".join("typed %03d " % i for i in range(400))
+        t.send(typed)
+        got = came(len(typed), 120)
+        checks["bulk-out"] = got == typed.encode()
+        if not checks["bulk-out"]:
+            k = next((i for i in range(min(len(got), len(typed))) if got[i] != typed.encode()[i]), min(len(got), len(typed)))
+            print("  %s bulk-out: %d of %d bytes, the first other at %d: %r for %r" % (tag, len(got), len(typed), k,
+                                                                                    got[k:k + 24], typed[k:k + 24]))
+        # One program's at a time; a port that is not there; a frame that is none.
+        t2 = Login(agent)
+        ok = t2.expect("C:\\TEST>")
+        t2.send("serial COM2\r")
+        ok = ok and t2.expect("COM2: a serial session is open already", 120) and t2.expect("C:\\TEST>")
+        t2.send("echo status %errorlevel%\r")
+        ok = ok and t2.expect("status 255\n")
+        t2.send("exit\r")
+        ok = ok and t2.end() == 0
+        t.send("\x1d")
+        checks["end"] = t.expect("Connection to COM2 closed.") and t.expect("C:\\TEST>") \
+            and bool(re.search(r"GLOS-UART app closed rx=(\d+) tx=(\d+) overruns=0 errors=0 dropped=0", agent.log()))
+        t.send("serial COM4\r")
+        ok = ok and t.expect("COM4: this PC has no such port", 120) and t.expect("C:\\TEST>")
+        t.send("serial COM2 9600 9X1\r")
+        ok = ok and t.expect("a frame its bits") and t.expect("C:\\TEST>")
+        t.send("serial COM2 20\r")
+        checks["refusals"] = ok and t.expect("a speed is 50 to 115200") and t.expect("C:\\TEST>")
+        if not checks["refusals"]:
+            print("  %s refusals: %r" % (tag, t.text()[-400:]))
+        # Another frame.
+        t.send("serial COM2 9600 7E2\r")
+        checks["frame"] = t.expect("Connected to COM2 at 9600 7E2.", 120) \
+            and "GLOS-UART app com=2 base=2f8 irq=3 baud=9600 bits=7 parity=2 stop=2 flow=0" in agent.log()
+        t.send("\x1d")
+        t.expect("C:\\TEST>")
+        # The saved session: XON and XOFF, its log.
+        t.send("serial console\r")
+        ok = t.expect("Connected to COM2 at 9600 8N1, XON/XOFF.", 120)
+        line.sendall(b"login: ")
+        ok = ok and t.expect("login: ", 60)
+        line.sendall(b"\x13")                   # XOFF: wait
+        time.sleep(1.5)
+        t.send("held")
+        held = came(4, 3)
+        line.sendall(b"\x11 and \x11let go\r\n")  # XON (twice: neither is text)
+        checks["xon-xoff"] = ok and held == b"" and came(4, 30) == b"held" and t.expect(" and let go\n", 60) \
+            and "\x11" not in t.text() and "\x13" not in t.text()
+        t.send("\x1d")
+        ok = t.expect("Connection to COM2 closed.") and t.expect("C:\\TEST>")
+        log = raw("glos dd if=c:\\test\\console.log of=-")[1]
+        checks["by-name"] = ok and log.startswith(b"=== serial Console, 20") and b"login:  and let go\r\n" in log
+        if not checks["by-name"]:
+            print("  %s log: %r" % (tag, log[-200:]))
+        t.send("ssh console\r")
+        ok = t.expect("Console is a serial session: serial Console") and t.expect("C:\\TEST>")
+        t.send("telnet console\r")
+        checks["whose"] = ok and t.expect("Console is a serial session: serial Console") and t.expect("C:\\TEST>")
+        t.send("exit\r")
+        checks["exit"] = t.end() == 0
+        checks["sockets"] = "sockets=0" in agent.ssh("glos net")[1]
+        checks["glos-exit"] = agent.ssh("glos exit")[0] == 0
+    except (subprocess.TimeoutExpired, OSError) as e:
+        checks["timeout"] = False
+        print("  %s %s" % (tag, type(e).__name__))
+    text = agent.wait()
+    if line:
+        line.close()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("sshc-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
+        not bad
+
+
 SSHC_CASES = [("bf6", "g200", "ne2kpci", 16), ("486dx2", "vbe", "ne2k", 8)]
 
 
@@ -10861,7 +10996,7 @@ def main():
     if a.suite == "sshc":
         cases = [c for c in SSHC_CASES if not a.profile or c[0] in a.profile]
         progs = [c for c in (("bf6", "ne2kpci"), ("486dx2", "ne2k")) if not a.profile or c[0] in a.profile]
-        only = os.environ.get("SSHC_ONLY", "")  # (SSHC_ONLY=term, prog, filesnet or telnet: that part alone)
+        only = os.environ.get("SSHC_ONLY", "")  # (SSHC_ONLY=term, prog, filesnet, telnet or serial: that part alone)
         res = []
         if only in ("", "term"):
             res += matrix(sshc_case, cases, a.jobs)
@@ -10871,6 +11006,8 @@ def main():
             res += matrix(filesnet_case, cases, a.jobs)
         if only in ("", "telnet"):              # TELNET.EXE (phase F)
             res += matrix(telnet_case, progs, a.jobs)
+        if only in ("", "serial"):              # SERIAL.EXE and API 2.10's serial line (phase F)
+            res += matrix(serial_case, progs, a.jobs)
         return 0 if res and all(r[1] for r in res) else 1
     if a.suite == "https":
         cases = [c for c in HTTPS_CASES if not a.profile or c[0] in a.profile]

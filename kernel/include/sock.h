@@ -21,6 +21,10 @@ int sock_hard(struct app *a, u32 id, int v);            /* its close resets it: 
 int sock_state(struct app *a, u32 id, u32 *waiting, u32 *state, u32 *room);
 int sock_peer(struct app *a, u32 id, u32 *addr, u32 *port);
 int sock_dgram(struct app *a, u32 port, u32 flags, u32 *id);    /* a datagram port (UDP; 0: any) */
+/* (API 2.10) A COM port as a connection, and its wires (set 0: read; 1: DTR and RTS from v's bits 0 and 1;
+   2: a break on or off): the wires as UART_LINE_ bits, or -1 (no such line). */
+int sock_serial(struct app *a, u32 com, u32 baud, u32 bits, u32 parity, u32 stop, u32 flow, u32 flags, u32 *id);
+int sock_serial_lines(struct app *a, u32 id, int set, u32 v);
 int sock_bcast(struct app *a, u32 id, int v);           /* it may send to broadcast addresses: read (-1) or set; -1 none */
 int sock_sendto(struct app *a, u32 id, u16 ds, u32 off, u32 n, u32 ms, u32 addr, u32 port);
 int sock_recvfrom(struct app *a, u32 id, u16 ds, u32 off, u32 room, u32 ms, u32 *got, u32 *len, u32 *addr, u32 *port);

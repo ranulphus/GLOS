@@ -4,6 +4,17 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Serial sessions (API 2.10, 2026-11-20)
+
+- **A new program, `serial`** (SERIAL.EXE): `serial COM2 9600` puts the terminal on a COM port, for a router's
+  or a switch's console, a modem or another PC on a serial cable. Speed, frame (`8N1`, `7E1`, ...) and flow
+  control (`-f rts`, `-f xon`) as the far side wants them. Ctrl+] ends a session.
+- The Terminal's saved sessions have the kind Serial, with a page for the line's settings.
+- **For programs:** a COM port as a connection (`glos_net_serial`, API 2.10): send, receive and events as for
+  a network connection, the modem's wires as a property.
+- **Fixed:** a long text pasted into a program at a terminal (an SSH, Telnet or serial session) lost
+  everything after the first kilobyte or so.
+
 ## Telnet (2026-11-20)
 
 - **A new program, `telnet`** (TELNET.EXE): `telnet HOST [PORT]` for systems without SSH. `-c 437` shows a

@@ -213,6 +213,25 @@ static int datagram(struct app *a, struct trapframe *tf)
     return a2_ok(tf, 0);
 }
 
+static int serial(struct app *a, struct trapframe *tf)  /* (2.10) a COM port as a connection */
+{
+    struct glos_net_serial q;
+    u32 size, id = 0;
+    int r;
+    if (a2_rd(tf, &q, sizeof q, &size) != 0)
+        return a2_fail(tf, GLOS_E_ARGUMENT);
+    if ((r = sock_serial(a, q.com, q.speed, q.bits, q.parity, q.stop, q.flow, q.flags, &id)) != 0)
+        return a2_fail(tf, (u32)r);
+    q.handle = handle_for(a, id);
+    if (!q.handle || a2_wr(tf, &q, sizeof q, size) != 0) {
+        if (q.handle)
+            handle_drop(a, q.handle);
+        sock_close(a, id, 1);
+        return a2_fail(tf, q.handle ? GLOS_E_ARGUMENT : GLOS_E_MEMORY);
+    }
+    return a2_ok(tf, 0);
+}
+
 static int dgram_io(struct app *a, struct trapframe *tf, int send)
 {
     struct glos_net_dgram q;
@@ -298,6 +317,8 @@ int api2_net(struct app *a, struct trapframe *tf, u32 n)
         return dgram_io(a, tf, 1);
     case GLOS_NET_RECVFROM:
         return dgram_io(a, tf, 0);
+    case GLOS_NET_SERIAL:
+        return serial(a, tf);
     }
     return a2_fail(tf, GLOS_E_FUNCTION);
 }
@@ -360,6 +381,37 @@ static int bcast_set(struct app *a, void *obj, s32 v, const char *text, u32 len)
     return sock_bcast(a, (u32)obj, v) >= 0 ? 0 : GLOS_E_PROPERTY;
 }
 
+/* (2.10) A serial line's wires, as GLOS_SERIAL_ bits (the driver's UART_LINE_ are the same bits). */
+static int lines_get(struct app *a, void *obj, s32 *v, char *text, u32 *len)
+{
+    int r = sock_serial_lines(a, (u32)obj, 0, 0);
+    (void)text, (void)len;
+    if (r < 0)
+        return GLOS_E_PROPERTY;                 /* (a serial line's alone) */
+    *v = r;
+    return 0;
+}
+
+static int lines_set(struct app *a, void *obj, s32 v, const char *text, u32 len)
+{
+    (void)text, (void)len;
+    return sock_serial_lines(a, (u32)obj, 1, (u32)v) >= 0 ? 0 : GLOS_E_PROPERTY;
+}
+
+static int break_get(struct app *a, void *obj, s32 *v, char *text, u32 *len)
+{
+    (void)a, (void)obj, (void)v, (void)text, (void)len;
+    return GLOS_E_PROPERTY;
+}
+
+static int break_set(struct app *a, void *obj, s32 v, const char *text, u32 len)
+{
+    (void)text, (void)len;
+    if (v != 0 && v != 1)
+        return GLOS_E_ARGUMENT;
+    return sock_serial_lines(a, (u32)obj, 2, (u32)v) >= 0 ? 0 : GLOS_E_PROPERTY;
+}
+
 static int no_set(struct app *a, void *obj, s32 v, const char *text, u32 len)
 {
     (void)a, (void)obj, (void)v, (void)text, (void)len;
@@ -374,5 +426,7 @@ const struct propdef api2_net_props[] = {
     { GLOS_PROP_NET_PORT, P_NUM | P_RO, port_get, no_set },
     { GLOS_PROP_NET_RESET, P_NUM, reset_get, reset_set },
     { GLOS_PROP_NET_BROADCAST, P_NUM, bcast_get, bcast_set },
+    { GLOS_PROP_NET_LINES, P_NUM, lines_get, lines_set },
+    { GLOS_PROP_NET_BREAK, P_NUM, break_get, break_set },
 };
 const u32 api2_net_nprops = ARRAY_SIZE(api2_net_props);

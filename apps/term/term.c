@@ -16,7 +16,8 @@
  * tab, and the last tab's end is the Terminal's. Eight at most.
  *
  * Saved sessions (File's Sessions..., Ctrl+Shift+O; phase F, the owner's choice of 2026-11-20: saved
- * connections and their settings as PuTTY has them): a list of sessions, each a computer to log in to (its
+ * connections and their settings as PuTTY has them; of four kinds: SSH, Telnet, raw TCP, and a serial line on a
+ * COM port, each its own program's: SSH.EXE, TELNET.EXE, SERIAL.EXE): a list of sessions, each a computer to log in to (its
  * host, port and user, a key's file, a command to run there, a keep-alive, a file its output is logged to), its
  * tunnels, and the look of its tab (colours, the text's size, the lines kept). They are SESSIONS.CFG beside SSH's key
  * (apps/shared/sessions.h), which `ssh NAME` reads too. Open makes a tab with that look and types the SSH
@@ -43,6 +44,8 @@
 struct tab {
     struct gui_widget *page, *grid;
     glos_handle job;                    /* its shell's session */
+    char *held;                         /* typed or pasted, and not yet taken by the session (it was behind) */
+    int nheld;
     int ended, dump_due, number;
     unsigned changed_at;
 };
@@ -74,13 +77,45 @@ static struct tab *tab_shown(void)
 
 /* ---- a session */
 
+#define HELD_MAX (256 * 1024)                   /* (a paste of more than that loses its end) */
+
+/* What the session has no room for now is kept, and given to it as it takes it (held_turn: every poll). It was
+   lost: a page pasted for a program at the far end of a serial line or an SSH session arrived cut short. */
 static void job_write(struct tab *t, const char *d, int n)
 {
-    while (n > 0 && t->job && !t->ended) {
+    while (n > 0 && t->job && !t->ended && !t->nheld) {
         int k = glos_job_write(t->job, d, (unsigned)n);
         if (k <= 0)
-            break;                              /* (it takes no more now: what is left is lost, as typed ahead) */
+            break;
         d += k, n -= k;
+    }
+    if (n > 0 && t->job && !t->ended && t->nheld + n <= HELD_MAX) {
+        char *more = realloc(t->held, (size_t)(t->nheld + n));
+        if (more) {
+            memcpy(more + t->nheld, d, (size_t)n);
+            t->held = more, t->nheld += n;
+        }
+    }
+}
+
+static void held_turn(struct tab *t)
+{
+    int done = 0;
+    while (done < t->nheld && t->job && !t->ended) {
+        int k = glos_job_write(t->job, t->held + done, (unsigned)(t->nheld - done));
+        if (k <= 0)
+            break;
+        done += k;
+    }
+    if (done || t->ended || !t->job) {
+        if (t->ended || !t->job)
+            done = t->nheld;
+        memmove(t->held, t->held + done, (size_t)(t->nheld - done));
+        t->nheld -= done;
+        if (!t->nheld) {
+            free(t->held);
+            t->held = NULL;
+        }
     }
 }
 
@@ -112,6 +147,8 @@ static void title_now(void)                     /* the window's title: the shown
 static void tab_drop(struct tab *t)
 {
     int i, at = (int)(t - tab);
+    free(t->held);
+    t->held = NULL, t->nheld = 0;
     if (t->job)
         glos_close(t->job);
     for (i = 0; gui_tabs_page(strip, i); i++)
@@ -140,6 +177,8 @@ static void poll(void)
         int n, any = 0;
         if (!t->job || t->ended)
             continue;
+        if (t->nheld)
+            held_turn(t);
         if (glos_job_status(t->job, &st) != 0)  /* (its state first: once it has ended, what is read is all of it) */
             st.state = GLOS_JS_DONE, st.code = 255;
         in_poll = 1;
@@ -321,7 +360,8 @@ static char home[200];                  /* the program's folder */
 static char sess_dir[240], sess_file[300];      /* SSH's folder and SESSIONS.CFG in it ("": nowhere to keep them) */
 static struct gui_window *sdlg;
 static struct gui_widget *slist, *spages, *skind, *sname, *shost, *sport, *suser, *skey, *scmd, *salive, *slog, *tlist,
-                         *tport, *tto, *topen, *scolours, *sfont, *slines, *schars;
+                         *tport, *tto, *topen, *scolours, *sfont, *slines, *schars, *sspeed, *sbits, *sparity, *sstop,
+                         *sflow;
 static const int char_pages[] = { 0, 437, 850, 852, 866, 737 };        /* the Characters choice: GLOS's code pages */
 #define NCHARS ((int)(sizeof char_pages / sizeof char_pages[0]))
 static char tunnels_now[sizeof sess[0].tunnels];        /* the tunnels of the session the fields show */
@@ -432,6 +472,17 @@ static void sess_show(const struct session *k)  /* a session into the fields */
     char n[16];
     int i;
     gui_set_value(skind, k->kind);
+    {                                           /* a serial line's: its speed, its frame (8N1 if none), its flow */
+        unsigned bits = 8, parity = 0, stop = 1;
+        char sp[16];
+        session_frame(k->frame, &bits, &parity, &stop);
+        snprintf(sp, sizeof sp, "%d", k->speed);
+        gui_set_text(sspeed, k->speed ? sp : "");
+        gui_set_value(sbits, (int)bits - 5);
+        gui_set_value(sparity, (int)parity);
+        gui_set_value(sstop, (int)stop - 1);
+        gui_set_value(sflow, k->flow);
+    }
     for (i = NCHARS - 1; i > 0 && char_pages[i] != k->charset; i--)
         ;
     gui_set_value(schars, i);
@@ -517,6 +568,24 @@ static int sess_read(struct session *k, int named)
     k->colours = gui_value(scolours), k->font = gui_value(sfont);
     k->kind = gui_value(skind);
     k->charset = gui_value(schars) > 0 && gui_value(schars) < NCHARS ? char_pages[gui_value(schars)] : 0;
+    if (k->kind == SESSION_SERIAL) {            /* a serial line's: its port in the host's place, and the Serial page */
+        int b = gui_value(sbits), pa = gui_value(sparity), st = gui_value(sstop);
+        wrong = NULL;
+        if (!session_com(k->host))
+            wrong = GUI_T("A serial session's host is its port: COM1, COM2, COM3 or COM4.");
+        else if (!sess_number(sspeed, 50, 115200, &k->speed))
+            wrong = GUI_T("The speed is 50 to 115200 bits a second (none: 115200).");
+        if (wrong) {
+            printf("TERM session wrong\n");
+            fflush(stdout);
+            gui_message(sdlg, GUI_T("Sessions"), wrong, GUI_MB_OK);
+            return -1;
+        }
+        if (b != 3 || pa != 0 || st != 0)       /* (8N1 is what a frame left out means) */
+            snprintf(k->frame, sizeof k->frame, "%c%c%c", '5' + b, "NOE"[pa < 0 || pa > 2 ? 0 : pa], '1' + st);
+        k->flow = gui_value(sflow) >= 0 && gui_value(sflow) <= 2 ? gui_value(sflow) : 0;
+        k->host[0] = 'C', k->host[1] = 'O', k->host[2] = 'M';     /* (as it is written) */
+    }
     return 0;
 }
 
@@ -525,10 +594,10 @@ static int sess_read(struct session *k, int named)
    PATH); with no folder known, the word alone. */
 static int ssh_word(char *line, size_t room, int kind)
 {
-    const char *prog = kind == SESSION_SSH ? "SSH" : "TELNET";
+    const char *prog = kind == SESSION_SSH ? "SSH" : kind == SESSION_SERIAL ? "SERIAL" : "TELNET";
     if (home[0])
         return snprintf(line, room, "%s\\%s.EXE", home, prog);
-    return snprintf(line, room, "%s", kind == SESSION_SSH ? "ssh" : "telnet");
+    return snprintf(line, room, "%s", kind == SESSION_SSH ? "ssh" : kind == SESSION_SERIAL ? "serial" : "telnet");
 }
 
 /* The SSH command a session is opened by: its name alone where it is saved just so, else all of it in words. */
@@ -541,6 +610,20 @@ static void sess_command(const struct session *k, char *line, size_t room)
         return;
     if (i >= 0 && session_same(&sess[i], k)) {
         snprintf(line + n, room - n, " %s\r", sess[i].name);
+        return;
+    }
+    if (k->kind == SESSION_SERIAL) {            /* serial [-f FLOW] [-c PAGE] [-sessionlog FILE] COMn [SPEED] [FRAME] */
+        if (k->flow)
+            n += (size_t)snprintf(line + n, room - n, " -f %s", k->flow == 1 ? "rts" : "xon");
+        if (k->charset && n < room)
+            n += (size_t)snprintf(line + n, room - n, " -c %d", k->charset);
+        if (k->log[0] && n < room)
+            n += (size_t)snprintf(line + n, room - n, " -sessionlog %s", k->log);
+        if (n < room)
+            n += (size_t)snprintf(line + n, room - n, " %s %d%s%s", k->host, k->speed ? k->speed : 115200, k->frame[0] ? " " : "",
+                                  k->frame);
+        if (n < room)
+            snprintf(line + n, room - n, "\r");
         return;
     }
     if (k->kind != SESSION_SSH) {               /* Telnet, or raw: telnet [-r] [-c PAGE] [-sessionlog FILE] HOST [PORT] */
@@ -748,6 +831,7 @@ static void sess_dialog(void)
     gui_choice_add(skind, GUI_T("SSH"));
     gui_choice_add(skind, GUI_T("Telnet"));
     gui_choice_add(skind, GUI_T("Raw (TCP alone)"));
+    gui_choice_add(skind, GUI_T("Serial (a COM port)"));
     shost = gui_field(gui_row(form, GUI_T("&Host:"), NULL), 30);
     sport = gui_field(gui_row(form, GUI_T("&Port:"), NULL), 6);
     suser = gui_field(gui_row(form, GUI_T("&User:"), NULL), 22);
@@ -771,6 +855,29 @@ static void sess_dialog(void)
     row = gui_hbox(page, 6, 0);
     gui_button(row, GUI_T("A&dd"), sess_button, 16);
     gui_button(row, GUI_T("Remov&e"), sess_button, 17);
+    page = gui_tab(spages, GUI_T("Serial"));      /* a serial session's: its port is the Computer page's host */
+    gui_label(page, GUI_T("A session of the kind Serial: its host is its port"));
+    gui_label(page, GUI_T("(COM1 to COM4), and this is its line:"));
+    form = gui_form(page);
+    row = gui_row(form, GUI_T("Spee&d:"), NULL);
+    sspeed = gui_field(row, 8);
+    gui_label(row, GUI_T("bits a second (115200 if none)"));
+    sbits = gui_choice(gui_row(form, GUI_T("Data &bits:"), NULL), 6);
+    gui_choice_add(sbits, "5");
+    gui_choice_add(sbits, "6");
+    gui_choice_add(sbits, "7");
+    gui_choice_add(sbits, "8");
+    sparity = gui_choice(gui_row(form, GUI_T("&Parity:"), NULL), 10);
+    gui_choice_add(sparity, GUI_T("None"));
+    gui_choice_add(sparity, GUI_T("Odd"));
+    gui_choice_add(sparity, GUI_T("Even"));
+    sstop = gui_choice(gui_row(form, GUI_T("S&top bits:"), NULL), 6);
+    gui_choice_add(sstop, "1");
+    gui_choice_add(sstop, "2");
+    sflow = gui_choice(gui_row(form, GUI_T("&Flow control:"), NULL), 16);
+    gui_choice_add(sflow, GUI_T("None"));
+    gui_choice_add(sflow, GUI_T("RTS and CTS"));
+    gui_choice_add(sflow, GUI_T("XON and XOFF"));
     page = gui_tab(spages, GUI_T("Look"));
     form = gui_form(page);
     scolours = gui_choice(gui_row(form, GUI_T("Co&lours:"), NULL), 18);

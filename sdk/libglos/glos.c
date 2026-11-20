@@ -1234,6 +1234,15 @@ glos_handle glos_net_datagram(unsigned port, unsigned flags)
     return r ? 0 : q.handle;
 }
 
+glos_handle glos_net_serial(unsigned com, unsigned speed, unsigned bits, unsigned parity, unsigned stop, unsigned flow,
+                            unsigned flags)
+{
+    struct glos_net_serial q = { sizeof q, com, speed, bits, parity, stop, flow, flags, 0 };
+    int r = raw(GLOS_NET_SERIAL, &q, 0);
+    last_error = r;
+    return r ? 0 : q.handle;
+}
+
 int glos_net_sendto(glos_handle h, const void *bytes, unsigned count, unsigned ms, unsigned address, unsigned port)
 {
     struct glos_net_dgram q = { sizeof q, h, (unsigned)bytes, count, ms, address, port, 0, 0 };

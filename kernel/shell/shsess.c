@@ -860,6 +860,11 @@ static void fg_tell(struct shsess *s)
     irq_restore(f);
 }
 
+static int fg_full(const struct shsess *s)
+{
+    return s->fg && s->job_on && s->ft - s->fh >= sizeof s->fgin;
+}
+
 static void fg_key(struct shsess *s, int c)
 {
     if (s->ft - s->fh < sizeof s->fgin) {       /* (typed faster than it reads: lost past a kilobyte) */
@@ -1269,7 +1274,9 @@ static int key(struct shsess *s)
             irq_restore(f);
             return (int)c;
         }
-        while ((s->ih == s->it || s->ext_on) && !s->closing && !s->resized
+        /* (A terminal program that is behind with what was typed: no more is taken for it until it has read
+           some. It was dropped past a kilobyte: a page pasted into a serial console lost its end.) */
+        while ((s->ih == s->it || s->ext_on || fg_full(s)) && !s->closing && !s->resized
                && !((s->job_on || s->nbeside) && s->job_evt) && !(s->ext_on && s->ext_evt)   /* (while a command of the server's runs, what is typed waits) */
                && !((s->nnotes || s->redraw) && s->editing && !s->job_on && !s->ext_on))
             thread_block(&s->wq);
@@ -1310,7 +1317,7 @@ static int key(struct shsess *s)
             ed_back(&s->ed);
             continue;
         }
-        if (s->ih == s->it || s->ext_on) {      /* (woken for nothing of ours) */
+        if (s->ih == s->it || s->ext_on || fg_full(s)) {        /* (woken for nothing of ours) */
             irq_restore(f);
             continue;
         }
@@ -1854,8 +1861,11 @@ int shsess_term_is(struct shsess *s, u32 seq, u32 *cols, u32 *rows)
 u32 shsess_term_read(struct shsess *s, u8 *buf, u32 room)
 {
     u32 n = 0;
+    int was_full = s->ft - s->fh >= sizeof s->fgin;
     while (n < room && s->fh != s->ft)
         buf[n++] = s->fgin[s->fh++ % sizeof s->fgin];
+    if (was_full && n)
+        thread_wake(&s->wq);                    /* (room again: the session's thread has more for it) */
     return n;
 }
 

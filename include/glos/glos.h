@@ -238,6 +238,12 @@ glos_handle glos_net_listen(unsigned port, unsigned backlog, unsigned flags);
 glos_handle glos_net_accept(glos_handle listener, unsigned ms, unsigned flags, unsigned *address, unsigned *port);
 int glos_net_state(struct glos_net_if *out, unsigned room, unsigned *count);
 glos_handle glos_net_datagram(unsigned port, unsigned flags);          /* a datagram port (UDP; API 2.2); 0: glos_error() */
+/* (API 2.10) A COM port (1 to 4) as a connection: glos_net_send, glos_net_receive and glos_net_close are its;
+   its wires are GLOS_PROP_NET_LINES. parity GLOS_SERIAL_PARITY_, flow GLOS_SERIAL_FLOW_. 0: glos_error()
+   (GLOS_E_NOT_FOUND: no such port; GLOS_E_REFUSED: it is in use; GLOS_E_ARGUMENT: a speed or frame it can't have;
+   GLOS_E_FUNCTION: a GLOS before 2.10). */
+glos_handle glos_net_serial(unsigned com, unsigned speed, unsigned bits, unsigned parity, unsigned stop, unsigned flow,
+                            unsigned flags);
 int glos_net_sendto(glos_handle h, const void *bytes, unsigned count, unsigned ms, unsigned address, unsigned port);
                                                         /* 0, or -GLOS_E_ */
 int glos_net_recvfrom(glos_handle h, void *buffer, unsigned room, unsigned ms, unsigned *address, unsigned *port,

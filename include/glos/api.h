@@ -54,7 +54,8 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 9            /* (2.9: NET reaches this PC's own ports (127.0.0.1, its own address);
+#define GLOS_MINOR 10           /* (2.10: NET's SERIAL, a COM port as a connection;
+                                   2.9: NET reaches this PC's own ports (127.0.0.1, its own address);
                                    GLOS_NETF_LOCAL, a port for this PC's programs alone;
                                    2.8: GLOS_WF_OWN_MODE, a full-screen window that keeps its size;
                                    2.7: WINVRAM says when the display is on the window's own pixels;
@@ -1161,7 +1162,13 @@ struct glos_ev_midi {
  * datagram is this PC's other datagram ports' too (those on the port it is sent to; not the sender's own). It
  * needs the network up all the same (GLOS_E_NET_DOWN without). A port listened on with GLOS_NETF_LOCAL takes
  * connections to 127.0.0.1 alone: this PC's. (A GLOS before 2.9 has no such address, and listens for
- * everyone whatever the flag: a program that relies on it looks at VERSION's minor first.) */
+ * everyone whatever the flag: a program that relies on it looks at VERSION's minor first.)
+ *
+ * 2.10: a serial line. SERIAL opens one of the PC's COM ports as a connection: SEND and RECEIVE are its bytes,
+ * CLOSE its end (what waits to be sent goes out first), its events and its WAITING and ROOM a connection's.
+ * It needs no network. One at a time for all apps; a port the cable link has is refused (GLOS_E_REFUSED), one
+ * where no chip answers is not there (GLOS_E_NOT_FOUND). While it is open the port is not the DOS programs',
+ * and COM1 carries none of GLOS's log (it stays in memory: glos log). Its wires are its LINES property. */
 #define GLOS_NET_RESOLVE GLOS_FN(GLOS_AREA_NET, 0)      /* struct glos_net_resolve: a name's address (DNS) */
 #define GLOS_NET_CONNECT GLOS_FN(GLOS_AREA_NET, 1)      /* struct glos_net_connect: a connection out */
 #define GLOS_NET_SEND    GLOS_FN(GLOS_AREA_NET, 2)      /* struct glos_net_io */
@@ -1173,6 +1180,7 @@ struct glos_ev_midi {
 #define GLOS_NET_DATAGRAM GLOS_FN(GLOS_AREA_NET, 7)     /* struct glos_net_datagram: a UDP port of the app's (2.2) */
 #define GLOS_NET_SENDTO  GLOS_FN(GLOS_AREA_NET, 8)      /* struct glos_net_dgram: one datagram out */
 #define GLOS_NET_RECVFROM GLOS_FN(GLOS_AREA_NET, 9)     /* struct glos_net_dgram: the next datagram that came in */
+#define GLOS_NET_SERIAL  GLOS_FN(GLOS_AREA_NET, 10)     /* struct glos_net_serial: a COM port as a connection (2.10) */
 
 #define GLOS_E_NET_DOWN    11   /* no network: no card GLOS can use, or no address yet */
 #define GLOS_E_NET_NAME    12   /* no such name (DNS) */
@@ -1255,6 +1263,30 @@ struct glos_net_datagram {
     glos_handle handle;         /* -> */
 };
 
+struct glos_net_serial {        /* (2.10) */
+    unsigned size;
+    unsigned com;               /* 1 to 4: COM1 to COM4 */
+    unsigned speed;             /* bits a second: 50 to 115200, as near as the chip comes (within a hundredth) */
+    unsigned bits;              /* 5 to 8 in a character */
+    unsigned parity;            /* GLOS_SERIAL_PARITY_ */
+    unsigned stop;              /* 1 or 2 stop bits */
+    unsigned flow;              /* GLOS_SERIAL_FLOW_ */
+    unsigned flags;             /* GLOS_NETF_EVENTS */
+    glos_handle handle;         /* -> */
+};
+#define GLOS_SERIAL_PARITY_NONE 0
+#define GLOS_SERIAL_PARITY_ODD  1
+#define GLOS_SERIAL_PARITY_EVEN 2
+#define GLOS_SERIAL_FLOW_NONE   0
+#define GLOS_SERIAL_FLOW_RTS    1       /* the RTS and CTS wires */
+#define GLOS_SERIAL_FLOW_XON    2       /* XON and XOFF among the bytes (they are no text then) */
+#define GLOS_SERIAL_DTR 1               /* LINES: this side's two wires (set) ... */
+#define GLOS_SERIAL_RTS 2               /* (the flow control's own where the line has GLOS_SERIAL_FLOW_RTS) */
+#define GLOS_SERIAL_CTS 4               /* ... and the far side's four (read) */
+#define GLOS_SERIAL_DSR 8
+#define GLOS_SERIAL_DCD 16
+#define GLOS_SERIAL_RI  32
+
 struct glos_net_dgram {
     unsigned size;
     glos_handle handle;
@@ -1282,6 +1314,10 @@ struct glos_net_dgram {
                                                                    datagram port: its own (read) */
 #define GLOS_PROP_NET_RESET   GLOS_PROP(GLOS_HK_CONNECTION, 5)  /* 1: CLOSE resets it at once, and what waits to
                                                                    be sent is dropped */
+#define GLOS_PROP_NET_LINES   GLOS_PROP(GLOS_HK_CONNECTION, 7)  /* (2.10) a serial line's wires: GLOS_SERIAL_ bits;
+                                                                   set: DTR and RTS as given */
+#define GLOS_PROP_NET_BREAK   GLOS_PROP(GLOS_HK_CONNECTION, 8)  /* (2.10) a serial line: 1 holds it at a break, 0
+                                                                   lets it go (write) */
 #define GLOS_PROP_NET_BROADCAST GLOS_PROP(GLOS_HK_CONNECTION, 6) /* a datagram port: 1: SENDTO may send to a
                                                                    broadcast address (2.2) */
 

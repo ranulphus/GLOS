@@ -25,7 +25,7 @@
   folders, and the session manager with `ssh NAME`, a session's log and the Start menu's list
   (`../phase-f.md`).
 - **Decided by the owner, 2026-11-20:** PuTTY's other kinds too: a session's log to a file, serial sessions
-  (COM ports), Telnet and raw TCP sessions. Built: the log and Telnet (`../phase-f.md`); serial is next.
+  (COM ports), Telnet and raw TCP sessions. All three built the same day (`../phase-f.md`).
 - **SFTP from the session:** a side pane to drag files between the PC and the host (Files' views over SFTP),
   beside the session's tab.
 - **Scroll-back:** as long as memory allows (a setting), searchable (Ctrl+Shift+F), with matches highlighted.

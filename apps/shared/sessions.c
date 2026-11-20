@@ -123,6 +123,30 @@ int session_tunnels_ok(const char *all)
     return n;
 }
 
+int session_com(const char *host)
+{
+    return (host[0] == 'C' || host[0] == 'c') && (host[1] == 'O' || host[1] == 'o') && (host[2] == 'M' || host[2] == 'm')
+           && host[3] >= '1' && host[3] <= '4' && !host[4] ? host[3] - '0' : 0;
+}
+
+int session_frame(const char *frame, unsigned *bits, unsigned *parity, unsigned *stop)
+{
+    unsigned b = 8, p = 0, s = 1;
+    if (frame[0]) {
+        char c = (char)toupper((unsigned char)frame[1]);
+        if (strlen(frame) != 3 || frame[0] < '5' || frame[0] > '8' || !strchr("NEO", c) || (frame[2] != '1' && frame[2] != '2'))
+            return -1;
+        b = (unsigned)(frame[0] - '0'), p = c == 'O' ? 1 : c == 'E' ? 2 : 0, s = (unsigned)(frame[2] - '0');
+    }
+    if (bits)
+        *bits = b;
+    if (parity)
+        *parity = p;
+    if (stop)
+        *stop = s;
+    return 0;
+}
+
 void sessions_path(char *out, int room, const char *ssh_dir)
 {
     snprintf(out, (size_t)room, "%s%sSESSIONS.CFG", ssh_dir, ssh_dir[0] && !strchr("\\/", ssh_dir[strlen(ssh_dir) - 1]) ? "\\" : "");
@@ -180,7 +204,8 @@ int sessions_load(const char *path, struct session *out, int room)
         if (!strcmp(p, "host"))
             snprintf(s->host, sizeof s->host, "%s", v);
         else if (!strcmp(p, "kind"))
-            s->kind = !strcmp(v, "telnet") ? SESSION_TELNET : !strcmp(v, "raw") ? SESSION_RAW : SESSION_SSH;
+            s->kind = !strcmp(v, "telnet") ? SESSION_TELNET : !strcmp(v, "raw") ? SESSION_RAW
+                    : !strcmp(v, "serial") ? SESSION_SERIAL : SESSION_SSH;
         else if (!strcmp(p, "charset"))
             s->charset = within(v, 1, 65535, 0);
         else if (!strcmp(p, "user"))
@@ -198,6 +223,13 @@ int sessions_load(const char *path, struct session *out, int room)
             s->keepalive = within(v, 0, 3600, 0);
         else if (!strcmp(p, "log"))
             snprintf(s->log, sizeof s->log, "%s", v);
+        else if (!strcmp(p, "speed"))
+            s->speed = within(v, 50, 115200, 0);
+        else if (!strcmp(p, "frame")) {
+            if (strlen(v) == 3 && session_frame(v, 0, 0, 0) == 0)
+                snprintf(s->frame, sizeof s->frame, "%c%c%c", v[0], toupper((unsigned char)v[1]), v[2]);
+        } else if (!strcmp(p, "flow"))
+            s->flow = !strcmp(v, "rts") ? 1 : !strcmp(v, "xon") ? 2 : 0;
         else if (!strcmp(p, "colours"))
             s->colours = within(v, 0, SESSION_COLOURS - 1, 0);
         else if (!strcmp(p, "font"))
@@ -219,7 +251,7 @@ int sessions_save(const char *path, const struct session *s, int n)
     for (i = 0; i < n; i++, s++) {
         fprintf(f, "\n[%s]\n", s->name);
         if (s->kind != SESSION_SSH)
-            fprintf(f, "kind = %s\n", s->kind == SESSION_TELNET ? "telnet" : "raw");
+            fprintf(f, "kind = %s\n", s->kind == SESSION_TELNET ? "telnet" : s->kind == SESSION_RAW ? "raw" : "serial");
         if (s->charset)
             fprintf(f, "charset = %d\n", s->charset);
         fprintf(f, "host = %s\n", s->host);
@@ -235,6 +267,12 @@ int sessions_save(const char *path, const struct session *s, int n)
             fprintf(f, "tunnels = %s\n", s->tunnels);
         if (s->keepalive)
             fprintf(f, "keepalive = %d\n", s->keepalive);
+        if (s->speed)
+            fprintf(f, "speed = %d\n", s->speed);
+        if (s->frame[0])
+            fprintf(f, "frame = %s\n", s->frame);
+        if (s->flow)
+            fprintf(f, "flow = %s\n", s->flow == 1 ? "rts" : "xon");
         if (s->log[0])
             fprintf(f, "log = %s\n", s->log);
         if (s->colours)
@@ -252,7 +290,8 @@ int session_same(const struct session *a, const struct session *b)
 {
     return !strcmp(a->name, b->name) && a->kind == b->kind && a->charset == b->charset && !strcmp(a->host, b->host) && !strcmp(a->user, b->user) && a->port == b->port
            && !strcmp(a->key, b->key) && !strcmp(a->command, b->command) && !strcmp(a->tunnels, b->tunnels)
-           && a->keepalive == b->keepalive && !strcmp(a->log, b->log) && a->colours == b->colours && a->font == b->font && a->lines == b->lines;
+           && a->keepalive == b->keepalive && !strcmp(a->log, b->log) && a->speed == b->speed
+           && !strcmp(a->frame, b->frame) && a->flow == b->flow && a->colours == b->colours && a->font == b->font && a->lines == b->lines;
 }
 
 int sessions_find(const struct session *s, int n, const char *name)

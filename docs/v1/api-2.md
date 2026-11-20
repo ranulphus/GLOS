@@ -392,6 +392,7 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
 | CONNECT, SEND, RECEIVE | TCP, as 1.x's GLOS_FN_NET |
 | LISTEN, ACCEPT | A port to accept connections on (new) |
 | DATAGRAM, SENDTO, RECVFROM | UDP: a datagram port, one datagram out, the next one in (2.2) |
+| SERIAL | A COM port as a connection: its bytes by SEND and RECEIVE (2.10) |
 | RESOLVE | A name's address (DNS) |
 | STATE | The network: the card, the link, the address, DHCP's lease, DNS, the gateway, the counters (new: the tray's icon and the Network page) |
 
@@ -425,6 +426,13 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   `ssh -L`: a tunnel's port is local unless it is opened. An older GLOS ignores the flag and listens for
   everyone: a program that relies on it reads VERSION's minor first. Tests: `APITEST net` (`net-own`,
   `net-local`), with the test's host finding nobody at the local port.
+- **2.10 (2026-11-20): a serial line**, asked for by the Terminal's serial sessions. SERIAL opens COM1 to
+  COM4 as a connection, with a speed (50 to 115200), a frame (5 to 8 bits, no, odd or even parity, 1 or 2 stop
+  bits) and flow control (none, RTS and CTS, XON and XOFF). From there it is a connection: SEND, RECEIVE,
+  CLOSE, GLOS_EV_NET, the WAITING and ROOM properties. Two properties of its own: LINES (the wires: DTR and
+  RTS set, CTS, DSR, DCD and RI read) and BREAK. No network is needed. One at a time for all apps
+  (GLOS_E_REFUSED for a second, and for the cable link's port); GLOS_E_NOT_FOUND where no chip answers. As
+  built: `docs/v1/phase-f.md`. Tests: the sshc suite's `serial_case`.
 
 ### 0Ch SETTINGS
 

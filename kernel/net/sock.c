@@ -47,6 +47,7 @@
 #include "sched.h"
 #include "sock.h"
 #include "timer.h"
+#include "uart.h"
 #include "vm.h"
 
 #define NSOCK 32
@@ -87,6 +88,8 @@ static struct sock {
     volatile u32 rx_n;                          /* datagrams in the receive ring */
     u32 tx_need;                                /* the room a SENDTO waits for */
     u32 dropped;                                /* those that came in and found no room */
+    /* a serial line (API 2.10) */
+    u8 serial;                                  /* its bytes are a COM port's (drv/uart.c's app line), not a pcb's */
 } socks[NSOCK];
 static u32 accept_seq;
 
@@ -506,6 +509,57 @@ static void dgram_poll(struct sock *s)
     }
 }
 
+/* A serial line's turn (API 2.10): what the port has taken in goes to the app's ring (as much as it has room
+   for: the rest waits in the driver's, which then tells the far side to wait where the line has flow control),
+   what the app queued to the port as it takes it; let go: closed once that has gone out, or at once. */
+static void serial_poll(struct sock *s)
+{
+    u8 buf[256];
+    u32 n, f;
+    int was_empty, took = 0;
+    f = irq_save();
+    s->unacked = 0;                             /* (TCP's count: nothing here) */
+    irq_restore(f);
+    for (;;) {
+        u32 room = RING - (s->rx_in - s->rx_out);
+        if (!room || !(n = uart_app_read(buf, room < sizeof buf ? room : sizeof buf)))
+            break;
+        was_empty = s->rx_in == s->rx_out;
+        ring_put(s->rx, s->rx_in, buf, n);
+        barrier();
+        s->rx_in += n;
+        notify(s, was_empty);
+    }
+    while (s->tx_in != s->tx_out && !s->reset && (n = uart_app_room()) != 0) {
+        u32 have = s->tx_in - s->tx_out, at = s->tx_out % RING;
+        if (n > have)
+            n = have;
+        if (n > RING - at)
+            n = RING - at;
+        uart_app_write(s->tx + at, n);
+        barrier();
+        s->tx_out += n;
+        took = 1;
+    }
+    if (took) {                                 /* room again: a writer that waits, an event owed */
+        int ev = s->tx_ev && RING - (s->tx_in - s->tx_out) >= RING / 4;
+        if (ev)
+            s->tx_ev = 0;
+        notify(s, ev);
+    }
+    if (s->closing && (s->reset || (s->tx_in == s->tx_out && uart_app_idle()))) {
+        uart_app_close();
+        kfree(s->rx);
+        kfree(s->tx);
+        s->rx = s->tx = 0;
+        s->serial = 0;
+        barrier();
+        s->used = 0;
+    } else if (s->closing) {
+        net_kick();                             /* (its last bytes are still going out: looked at again) */
+    }
+}
+
 static void do_nagle(void *arg)
 {
     struct sock *s = arg;
@@ -558,6 +612,10 @@ void sock_net_poll(void)
             continue;
         if (s->dgram) {
             dgram_poll(s);
+            continue;
+        }
+        if (s->serial) {
+            serial_poll(s);
             continue;
         }
         f = irq_save();
@@ -720,7 +778,7 @@ int sock_connect(struct app *a, u32 addr, u32 port, u32 ms, u32 flags, u32 *id)
     s->flags = flags & (GLOS_NETF_EVENTS | GLOS_NETF_NAGLE);
     s->state = GLOS_NETS_CONNECTING;
     s->why = 0;
-    s->closing = s->reset = s->tx_ev = s->listen = s->pending = s->hard = s->dgram = 0;
+    s->closing = s->reset = s->tx_ev = s->listen = s->pending = s->hard = s->dgram = s->serial = 0;
     s->pcb = s->lpcb = 0;
     s->parent = 0;
     s->rx_in = s->rx_out = s->tx_in = s->tx_out = s->unacked = 0;
@@ -745,6 +803,61 @@ int sock_connect(struct app *a, u32 addr, u32 port, u32 ms, u32 flags, u32 *id)
     }
     *id = id_of(s);
     return 0;
+}
+
+/* A COM port opened as a connection (API 2.10): its bytes are SEND's and RECEIVE's, its end CLOSE's. One at a
+   time (the driver's app line); no network is needed. */
+int sock_serial(struct app *a, u32 com, u32 baud, u32 bits, u32 parity, u32 stop, u32 flow, u32 flags, u32 *id)
+{
+    struct uart_setup su;
+    struct sock *s;
+    u8 *rx, *tx;
+    int r;
+    if (com < 1 || com > 4)
+        return GLOS_E_ARGUMENT;
+    if (!(s = slot(a)))
+        return GLOS_E_MEMORY;
+    rx = kmalloc(RING);
+    tx = kmalloc(RING);
+    su.com = com, su.baud = baud, su.bits = bits, su.parity = parity, su.stop = stop, su.flow = flow;
+    r = rx && tx ? uart_app_open(&su, net_kick) : -4;
+    if (r != 0) {
+        kfree(rx);
+        kfree(tx);
+        s->used = 0;
+        return r == -4 ? GLOS_E_MEMORY : r == -3 ? GLOS_E_ARGUMENT : r == -2 ? GLOS_E_REFUSED : GLOS_E_NOT_FOUND;
+    }
+    s->gen++;
+    s->flags = flags & GLOS_NETF_EVENTS;
+    s->why = 0;
+    s->closing = s->reset = s->tx_ev = s->listen = s->pending = s->hard = s->dgram = 0;
+    s->pcb = s->lpcb = 0;
+    s->parent = 0;
+    s->rx_in = s->rx_out = s->tx_in = s->tx_out = s->unacked = 0;
+    memset(&s->ip, 0, sizeof s->ip);
+    s->port = (u16)com;
+    s->app = a;
+    s->tx = tx;
+    s->serial = 1;
+    s->state = GLOS_NETS_OPEN;
+    barrier();
+    s->rx = rx;
+    *id = id_of(s);
+    return 0;
+}
+
+/* A serial line's wires (API 2.10): read (set 0: UART_LINE_ bits, which are GLOS_SERIAL_'s), or this side's two
+   set (set 1: dtr and rts in v's bits 0 and 1), or a break begun or ended (set 2: v). -1: no such line. */
+int sock_serial_lines(struct app *a, u32 id, int set, u32 v)
+{
+    struct sock *s = find(a, id);
+    if (!s || !s->serial)
+        return -1;
+    if (set == 1)
+        uart_app_set(v & 1, v & 2);
+    else if (set == 2)
+        uart_app_break(v != 0);
+    return (int)uart_app_lines();
 }
 
 int sock_send(struct app *a, u32 id, u16 ds, u32 off, u32 n, u32 ms, u32 *taken)
