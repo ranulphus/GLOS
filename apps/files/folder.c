@@ -1991,9 +1991,12 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
     }
 }
 
-/* ---- properties (phase E): what the chosen file or folder is: its name, where it is, its kind, its size (a
-   folder's: its files' in all, counted to a limit), when it was last written, its attributes; with nothing
-   chosen, the folder shown, and its drive's room. */
+/* ---- properties (phase E): what the chosen file or folder is: its name, where it is, its kind, its size, when
+   it was last written, its attributes; with nothing chosen, the folder shown, and its drive's room.
+
+   What a folder holds is counted on a worker's thread while the dialog is up (the whole of a drive may be asked
+   for): the line says how far the count has got, twice a second or so, and then the whole. Closing the dialog
+   ends the count. (Without threads it is counted first, to a limit, as it was.) */
 
 #define COUNT_MAX 5000
 
@@ -2015,6 +2018,124 @@ static void count(const char *dir, unsigned long *files, unsigned long long *byt
     }
     if (n >= 0)
         free(e);
+}
+
+static struct {                         /* the dialog that is up: its "Holds" line, and the count for it */
+    struct gui_widget *label;           /* (NULL: none is up) */
+    struct gui_task *task;
+    int gen;                            /* which dialog: a count's word for an older one is nobody's */
+} pshow;
+
+struct pcount {                         /* a count at work */
+    char dir[260];
+    int gen;
+    unsigned long files, told;          /* told: files when the dialog was last told */
+    unsigned long long bytes;
+    unsigned at;                        /* ... and when */
+};
+
+struct pnote {                          /* its word to the window's thread */
+    int gen, done;
+    unsigned long files, kb;
+};
+
+static void pcount_said(void *data)
+{
+    struct pnote *n = data;
+    if (pshow.label && n->gen == pshow.gen) {
+        char t[100];
+        snprintf(t, sizeof t, n->done ? GUI_T("%lu files, %lu KB") : GUI_T("%lu files, %lu KB so far"), n->files, n->kb);
+        gui_set_text(pshow.label, t);
+        if (n->done) {
+            snprintf(t, sizeof t, "%lu files %lu KB", n->files, n->kb);
+            say("counted", t);
+        }
+    }
+    free(n);
+}
+
+static void pcount_tell(struct gui_task *t, struct pcount *c, int done)
+{
+    struct pnote *n = malloc(sizeof *n);
+    if (!n)
+        return;
+    n->gen = c->gen, n->done = done, n->files = c->files, n->kb = (unsigned long)((c->bytes + 1023) / 1024);
+    c->told = c->files, c->at = glos_ticks();
+    gui_task_post(t, pcount_said, n);
+}
+
+static void pcount_walk(struct gui_task *t, struct pcount *c, const char *dir, int depth)
+{
+    struct gui_dirent *e = NULL;
+    int n = gui_dir_read(dir, &e), i;
+    char p[260];
+    for (i = 0; i < n && !gui_task_cancelled(t); i++) {
+        if (recycle_is(dir, e[i].name))
+            continue;
+        if (!e[i].dir) {
+            c->files++;
+            c->bytes += e[i].size;
+        } else if (depth < 24) {
+            gui_path_join(p, sizeof p, dir, e[i].name);
+            pcount_walk(t, c, p, depth + 1);
+        }
+        if (c->files - c->told >= 64 && glos_ticks() - c->at >= 400)
+            pcount_tell(t, c, 0);
+    }
+    if (n >= 0)
+        free(e);
+}
+
+static void pcount_work(struct gui_task *t, void *arg)
+{
+    struct pcount *c = arg;
+    c->at = glos_ticks();
+    pcount_walk(t, c, c->dir, 0);
+    if (!gui_task_cancelled(t))
+        pcount_tell(t, c, 1);
+}
+
+static void pcount_done(struct gui_window *owner, void *arg, int cancelled)
+{
+    struct pcount *c = arg;
+    (void)owner, (void)cancelled;
+    if (c->gen == pshow.gen)
+        pshow.task = NULL;                      /* (the toolkit frees it after this) */
+    free(c);
+}
+
+/* The dialog's "Holds" line for the folder at path, its count begun. */
+static void props_holds(struct gui_widget *form, const char *path)
+{
+    struct pcount *c = calloc(1, sizeof *c);
+    char t[100];
+    pshow.gen++;
+    pshow.label = gui_label(gui_row(form, GUI_T("Holds:"), NULL), GUI_T("Counting..."));
+    gui_size(pshow.label, 190, 0);              /* (room for what it will say) */
+    if (c) {
+        snprintf(c->dir, sizeof c->dir, "%s", path);
+        c->gen = pshow.gen;
+        if ((pshow.task = gui_task_start(NULL, NULL, pcount_work, c, pcount_done, 0)) != NULL)
+            return;
+        free(c);
+    }
+    {                                           /* (no threads: counted here, to a limit) */
+        unsigned long files = 0;
+        unsigned long long bytes = 0;
+        count(path, &files, &bytes, 0);
+        snprintf(t, sizeof t, files >= COUNT_MAX ? GUI_T("%lu files or more, %lu KB or more") : GUI_T("%lu files, %lu KB"), files,
+                 (unsigned long)((bytes + 1023) / 1024));
+        gui_set_text(pshow.label, t);
+    }
+}
+
+static void props_closed(void)          /* the dialog has gone: its count ends, and has nobody to tell */
+{
+    pshow.label = NULL;
+    if (pshow.task)
+        gui_task_cancel(pshow.task);
+    pshow.task = NULL;
+    pshow.gen++;
 }
 
 static void props_ok(struct gui_widget *b, int what)
@@ -2104,13 +2225,8 @@ static void properties(struct view *v)
     props_row(form, GUI_T("Name:"), ent.text);
     props_row(form, GUI_T("Where:"), item ? v->dir : path);
     if (ent.dir) {
-        unsigned long files = 0;
-        unsigned long long bytes = 0;
-        count(path, &files, &bytes, 0);
         props_row(form, GUI_T("Kind:"), GUI_T("Folder"));
-        snprintf(t, sizeof t, files >= COUNT_MAX ? GUI_T("%lu files or more, %lu KB or more") : GUI_T("%lu files, %lu KB"), files,
-                 (unsigned long)((bytes + 1023) / 1024));
-        props_row(form, GUI_T("Holds:"), t);
+        props_holds(form, path);
     } else {
         const char *dot = strrchr(ent.name, '.');
         snprintf(t, sizeof t, dot && dot[1] ? GUI_T("%s file") : GUI_T("File"), dot ? dot + 1 : "");
@@ -2139,6 +2255,7 @@ static void properties(struct view *v)
     gui_button(row, GUI_T("OK"), props_ok, 1)->flags |= GUI_DEFAULT | GUI_CANCEL;
     say("properties", path);
     gui_modal(d);                               /* (which closes it) */
+    props_closed();
 }
 
 /* ---- search (phase E): files and folders by name, under the folder shown: a name with DOS's wildcards (* and

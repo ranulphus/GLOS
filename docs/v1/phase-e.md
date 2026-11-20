@@ -291,9 +291,13 @@ are as they were).
     on Loop A (Files run twice: the second browser opens in the first's view).
   - **Not yet:** a list view (names in columns, downwards); a thumbnail's size chosen; thumbnails of what is in
     an archive; the toolbar's view button as a list of the four.
+- **A folder's size is counted in the background** (2026-11-20): Properties is up at once, its Holds line
+  saying how far the count has got ("1,234 files, 56,789 KB so far") and then the whole; closing the dialog
+  ends the count. The whole of a drive can be asked for now: the count had a limit of 5,000 files while the
+  window waited for it (`files-props` waits for the count's word).
 - **Not done yet:** the rest of the plan: folders that load as they go, long names, "open with" and apps'
   entries in the context menu, the rest of archives (above), a search that goes on in the background and looks
-  inside files, a folder's size counted in the background, drag and drop.
+  inside files, drag and drop.
 
 ## Images (2026-11-19): the viewer's toolbar, turning, details, slideshow
 
