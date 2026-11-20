@@ -1054,6 +1054,11 @@ build/dj/JOYTEST.EXE: tests/dos/joytest.c build/sdk/libglos.a tools/glosmark.py
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
 	$(Q)python3 tools/glosmark.py $@
+# What a DOS call costs a DJGPP program, plain and as an app (phase E: Files' jobs on a 486). Built by name.
+build/dj/DOSCALLS.EXE: tests/dos/doscalls.c build/sdk/libglos.a
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
 # Every UHCI USB controller's state as the BIOS left it, read-only (docs/gamepad.md J0).
 build/dj/USBPEEK.EXE: tests/dos/usbpeek.c
 	@mkdir -p $(dir $@)

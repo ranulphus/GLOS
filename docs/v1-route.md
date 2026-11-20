@@ -531,6 +531,29 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
 
 ## Open faults (noted, not yet chased)
 
+- **A DOS call is dear on a 486 without VME, and dearer from an app** (measured 2026-11-20 in Loop A with
+  `tests/dos/doscalls.c`; 86Box's 486DX2 and Pentium II; microseconds a call, the least of three runs):
+
+  | | plain DOS (CWSDPMI) | a program under GLOS | a GLOS app |
+  |---|---|---|---|
+  | 486DX2, INT 21h 30h (the call alone) | 55 | 474 | 1,303 |
+  | 486DX2, a file found | 653 | 1,880 | 3,561 |
+  | 486DX2, 512 bytes read | 527 | 2,337 | 5,678 |
+  | 486DX2, the C library's `stat` | 116,178 | 19,942 | 41,163 |
+  | Pentium II, INT 21h 30h | 7 | 12 | 78 |
+  | Pentium II, a file found | 72 | 85 | 215 |
+
+  - **Without VME** (the 486DX2's profile; the bench's ST 486DX4 has none either) every CLI, STI, PUSHF, POPF
+    and IRET of V86 code is a trap: DOS's plainest call is 16 of them (`glos stat`'s `gp`), each the whole way
+    round the kernel's trap path. With VME (the Pentium II) the same call traps not once.
+  - **From an app** each call goes to the system VM's thread and back (docs/milestones-m6.md): some 0.8 ms more
+    on the 486DX2's profile, six times a Pentium II's own call there.
+  - **Done about it:** the toolkit asks DOS itself for a file's size and date (one call where the C library's
+    `stat` made a dozen: `sdk/gui/files.c`). **Under test:** a short way through the trap path for those five
+    instructions (`vm_gp_fast`: a quarter to a third off a program's DOS calls in 86Box).
+  - **Owed:** the same numbers on the real 486 (86Box's cycle counts are not a 486's: the bench's are the
+    ones to believe), and a cheaper way for an app's call into the VM.
+
 - **Two cases that failed once under a gate's load on devserver and not in isolation** (the ninth gate,
   2026-11-18; three runs each here afterwards, all passing):
   - `native-486dx2-vbe-8`, `term-run`: "MODE do" for "MODE done" in the Terminal. **Mended 2026-11-19:** it was
