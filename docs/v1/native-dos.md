@@ -605,6 +605,33 @@ the performance counters, so it can pace each machine.
   paces every DOS program in it); a speed per program needs N6; best with SMP (the paced game on one core, GLOS's
   network, desktop and sound at full speed on another). **M.**
 
+### A 386 floor (the owner asked, 2026-11-20; a probe made the same day)
+
+- **The question:** could GLOS run on a 386SX? The 486 is the floor today (the owner's decision of 2026-10-01).
+  Everything GLOS's design rests on is the 386's (paging, V86 mode, the I/O bitmap, the debug registers); the
+  386 has no VME, as bench C's 486 hasn't.
+- **The probe** (local branches `probe-386` in GLOS, `~/wt-glos-386`, and RetroGPU, `~/wt-rgpu-386`; nothing on
+  main): a Loop A profile `386sx` (an AAEON SBC-350A, ALi M1217, AMIBIOS 1993, an Intel 386SX-33, no FPU, 8 MB,
+  IBM's VGA; its CMOS set once by a key script and cached, `--from-start`), and GLOS built with `KARCH=i386`
+  and `LOADER_DEFS=-dGLOS_ALLOW_386`: `invlpg()` reloads CR3 on a 386 (EFLAGS.AC found fixed at boot), and
+  `GLOS.EXE` lets a 386 through, saying so. Everything else newer than the 386 was guarded already (CR4,
+  CPUID, RDTSC), and the DPMI host already copes with no FPU (`kernel/dpmi/host.c`).
+- **Found:** GLOS boots on it (`GLOS-RING0 cpu=386 tlb=cr3`, raw mode, the disk cache on its ISA IDE disk),
+  runs a DOS program in a session, and is the DPMI host of a DJGPP program (DOSCALLS) with no FPU; both leave
+  cleanly. With 8 MB, 4.5 MB is free once the kernel is in.
+- **What it would take:** for headless GLOS (SSH, SFTP, the shell, DOS programs) the probe's changes made
+  proper (the floor a setting or a build, the TLB fallback kept), a slimmer kernel (below), FPU emulation for
+  apps that use floating point (DJGPP's emulator through the host's 0E01h), and a real 386 for speed (86Box's
+  speed is no measure). The desktop is more: ISA cards have no linear framebuffer (banked VESA, or VGA's
+  planar 16 colours), 16 MB is the 386SX's ceiling, and it is 5-10 times slower than a 486DX2.
+- **The kernel's size** (the owner asked what uses that much memory, 2026-11-20): the probe's kernel is 786 KB
+  of code, 147 KB of constants and 1.73 MB of static data: 16 job slots with their rings (644 KB,
+  `kernel/dos/agent.c`), a frame bitmap for 4 GB (128 KB), lwIP's heap and pool (204 KB), static page tables
+  (about 100 KB). At run time a DPMI context is about 92 KB (72 KB of it a full LDT), an SSH connection about
+  90 KB, the desktop's back buffer 0.94 MB at 800×600×16 and VNC's shadow about 1 MB. About 1 MB of the static
+  data could be allocated as needed, on every PC; loadable drivers (Room to grow) would take the code down
+  further.
+
 ### Newer hardware: the BIOS is the next thing under GLOS
 
 - 32-bit protected mode and V86 mode are on every x86 CPU, even where the firmware is UEFI only. What such a PC
