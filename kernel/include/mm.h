@@ -64,6 +64,9 @@ void kunmap(void *p);
 void *dma_alloc(u32 frames, u32 *phys); /* contiguous, zeroed, mapped for good: a device's own memory; 0 if none */
 void *mm_win_alloc(u32 bytes);          /* a window's pixels: whole pages at WIN_BASE, zeroed; NULL if none */
 void mm_win_free(void *mem, u32 bytes);
+void *mm_win_sparse(u32 bytes);         /* whole pages at WIN_BASE, all on one zeroed read-only frame; NULL if none */
+int mm_win_back(void *mem, u32 bytes);  /* ... those of mem..+bytes given zeroed frames of their own; -1 without memory */
+void mm_win_free_sparse(void *mem, u32 bytes);
 u32 mm_win_frame(const void *p);        /* the frame behind a page of them */
 void mm_low_page(u32 lin, u32 frame);   /* a page of the first MB: the frame's (in every space), or its own (0) */
 void mm_vga_hide(int on);                /* A0000h-BFFFFh: a spare frame's (1), the VGA's again (0), or not

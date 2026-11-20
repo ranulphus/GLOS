@@ -1,7 +1,7 @@
 /* Descriptors and selectors (supervisor.md §12.1, §13: 0000h-000Dh). Each
- * context has an LDT that only the host writes: a page (512 entries) at first,
- * doubled as its clients want more, 8192 entries at most (until 2026-11-20 it
- * was 8192 from the start: 64 KB and more a context; the memory diet). A client's
+ * context has an LDT of 8192 entries that only the host writes, of which a page
+ * (512) has memory at first, more as its clients want them; the rest read as
+ * zeros (until 2026-11-20 all 64 KB had memory from the start; the memory diet). A client's
  * selector has TI set and RPL 3; 0000h hands out indices from 16 up, so
  * selectors 04h-7Ch stay free for 000Dh. A descriptor a client sets must be
  * a code or data segment of DPL 3: no gates, no system segments. The base
@@ -36,30 +36,25 @@ void ldt_init(struct dpmi_ctx *c)
     c->ldt_used[0] = 1;
 }
 
-/* The current context's LDT made `cap` entries (more than now): new pages, the descriptors and their owners
-   copied, LDTR loaded with the new one before the old pages go. -1 without memory (nothing changed). */
+/* The current context's LDT made `cap` entries (more than now): the pages for the new entries given frames (the
+   LDT stays where it is, its limit as it was: LDTR is untouched), and its owners' table made bigger. -1 without
+   memory (nothing changed that matters: pages backed early read as zeros as before). */
 static int ldt_grow(u32 cap)
 {
-    u32 *ldt = mm_win_alloc(cap * 8), f;
-    u8 *used = ldt ? kmalloc(cap) : 0;
-    u32 *old = dctx->ldt, old_cap = dctx->ldt_cap;
-    u8 *old_used = dctx->ldt_used;
+    u32 old_cap = dctx->ldt_cap, f;
+    u8 *used = kmalloc(cap), *old_used = dctx->ldt_used;
 
-    if (!used) {
-        if (ldt)
-            mm_win_free(ldt, cap * 8);
+    if (!used || mm_win_back(dctx->ldt + old_cap * 2, (cap - old_cap) * 8) != 0) {
+        if (used)
+            kfree(used);
         return -1;
     }
     memset(used, 0, cap);
     f = irq_save();
-    memcpy(ldt, old, old_cap * 8);
     memcpy(used, old_used, old_cap);
-    dctx->ldt = ldt;
     dctx->ldt_used = used;
     dctx->ldt_cap = cap;
-    cpu_set_ldt(ldt, cap * 8 - 1);
     irq_restore(f);
-    mm_win_free(old, old_cap * 8);
     kfree(old_used);
     return 0;
 }

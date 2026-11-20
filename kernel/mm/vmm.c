@@ -322,6 +322,76 @@ void *mm_win_alloc(u32 bytes)
     return p;
 }
 
+/* Sparse windows (a DPMI context's LDT: the memory diet, 2026-11-20): whole pages at WIN_BASE, every one mapped,
+   read-only, onto one zeroed frame until mm_win_back gives it a frame of its own. Reading an unbacked page reads
+   zeros, as a fully allocated one would (86Box's VERR reads a descriptor even past the LDT's limit: it must not
+   fault there). With interrupts off, as everything here. */
+static u32 zero_frame;
+
+void *mm_win_sparse(u32 bytes)
+{
+    u32 n = (bytes + 0xFFF) >> 12, i, run = 0, first = 0, f = irq_save();
+    u8 *p = 0;
+    if (!zero_frame && (zero_frame = take1()) != 0) {
+        void *z = kmap(zero_frame);
+        memset(z, 0, PAGE_SIZE);
+        kunmap(z);
+    }
+    for (i = 0; zero_frame && n && i < WIN_MAX >> 12 && run < n; i++) {
+        if (win_used[i >> 5] & (1u << (i & 31)))
+            run = 0;
+        else if (!run++)
+            first = i;
+    }
+    if (zero_frame && n && run == n) {
+        for (i = first; i < first + n; i++) {
+            win_used[i >> 5] |= 1u << (i & 31);
+            kpt_win[i >> 10][i & 1023] = zero_frame | PTE_P;
+            invlpg(WIN_BASE + (i << 12));
+        }
+        p = (u8 *)(WIN_BASE + (first << 12));
+    }
+    irq_restore(f);
+    return p;
+}
+
+/* The pages of a sparse window from mem for bytes, those still on the zero frame, each given a zeroed frame of its
+   own, writable. 0; -1 without memory (those backed so far stay so). */
+int mm_win_back(void *mem, u32 bytes)
+{
+    u32 first = ((u32)mem - WIN_BASE) >> 12, last = ((u32)mem + bytes - 1 - WIN_BASE) >> 12, i, f = irq_save();
+    int r = 0;
+    for (i = first; i <= last && i < WIN_MAX >> 12; i++) {
+        u32 *pte = &kpt_win[i >> 10][i & 1023], fr;
+        if ((*pte & ~0xFFFu) != zero_frame)
+            continue;
+        if (mm_avail_frames() <= 64 || !(fr = take1())) {
+            r = -1;
+            break;
+        }
+        *pte = fr | PTE_P | PTE_W;
+        invlpg(WIN_BASE + (i << 12));
+        memset((void *)(WIN_BASE + (i << 12)), 0, PAGE_SIZE);
+    }
+    irq_restore(f);
+    return r;
+}
+
+/* A sparse window given back: the frames of its backed pages, and its pages. */
+void mm_win_free_sparse(void *mem, u32 bytes)
+{
+    u32 n = (bytes + 0xFFF) >> 12, first = ((u32)mem - WIN_BASE) >> 12, i, f = irq_save();
+    for (i = first; i < first + n && i < WIN_MAX >> 12; i++) {
+        u32 fr = kpt_win[i >> 10][i & 1023] & ~0xFFFu;
+        if (fr && fr != zero_frame)
+            pmm_give(&pmm, fr);
+        kpt_win[i >> 10][i & 1023] = 0;
+        invlpg(WIN_BASE + (i << 12));
+        win_used[i >> 5] &= ~(1u << (i & 31));
+    }
+    irq_restore(f);
+}
+
 void mm_win_free(void *mem, u32 bytes)
 {
     u32 n = (bytes + 0xFFF) >> 12, first = ((u32)mem - WIN_BASE) >> 12, i, f = irq_save();

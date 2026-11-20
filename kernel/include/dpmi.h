@@ -105,8 +105,9 @@ struct dpmi_level {
 
 struct dpmi_ctx {
     u32 cr3;                            /* its page directory */
-    u32 *ldt;                           /* ldt_cap descriptors (two dwords each), whole pages of their own (mm_win_alloc) */
-    u32 ldt_cap;                        /* LDT_FIRST_CAP, doubled as clients want more, LDT_ENTRIES at most */
+    u32 *ldt;                           /* LDT_ENTRIES descriptors (two dwords each): a sparse window (mm_win_sparse) ... */
+    u32 ldt_cap;                        /* ... whose first ldt_cap entries have frames: LDT_FIRST_CAP, doubled as its
+                                           clients want more; the rest read as zeros (not present) */
     u16 ldt_alias;                      /* "MS-DOS" 0100h: a selector for it, read-only; 0 until asked */
     u8 tsr_pending;                     /* the client's program called INT 21h 31h: it goes resident ... */
     u16 resident_parent;                /* ... and its context with it, until this program (its parent) ends */
