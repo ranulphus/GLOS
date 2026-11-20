@@ -295,9 +295,13 @@ are as they were).
   saying how far the count has got ("1,234 files, 56,789 KB so far") and then the whole; closing the dialog
   ends the count. The whole of a drive can be asked for now: the count had a limit of 5,000 files while the
   window waited for it (`files-props` waits for the count's word).
+- **The search goes on in the background, and looks inside files** (2026-11-20): Find Files lists what it
+  finds as it comes, with a line saying where it has got to; the window answers meanwhile (Go To one already
+  found, Find again for another search, Close to end it). **Containing:** takes text, and then only the files
+  that have it in them are found (letters' case apart; with no name given, any file). 2,000 found at most, with
+  no limit on what is gone through (it was 200 of 5,000 while the window waited). `files-find` has both.
 - **Not done yet:** the rest of the plan: folders that load as they go, long names, "open with" and apps'
-  entries in the context menu, the rest of archives (above), a search that goes on in the background and looks
-  inside files, drag and drop.
+  entries in the context menu, the rest of archives (above), drag and drop.
 
 ## Images (2026-11-19): the viewer's toolbar, turning, details, slideshow
 

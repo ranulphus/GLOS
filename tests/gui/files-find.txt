@@ -1,6 +1,8 @@
 # Search in the browser (apps/files; phase E, docs/v1/apps/files.md): Find Files, a name with a wildcard: what is
 # found under the folder shown, with its folders; Go To (here Enter on one) shows the chosen one in its folder;
-# a piece of a name finds too, under the folder shown now.
+# a piece of a name finds too, under the folder shown now; and text finds the files that have it in them
+# (letters' case apart), whatever their names. The folders are gone through on a worker's thread and what is
+# found is listed as it comes: the pictures wait for the search's end, which Files says.
 run FILES.EXE -browse C:\FM
 wait "C:\FM - Files"
 key ctrl+f
@@ -8,7 +10,7 @@ wait "Find Files"
 shot find-empty "Find Files"
 type *.txt
 key enter
-pause 500
+said FILES found 4 *.txt
 shot find-txt "Find Files"
 key down
 key enter
@@ -19,13 +21,31 @@ key ctrl+f
 wait "Find Files"
 type let
 key enter
-pause 500
+said FILES found 1 let
 shot find-piece "Find Files"
 key esc
 gone "Find Files"
+key backspace
+wait "C:\FM - Files"
+key ctrl+f
+wait "Find Files"
+type *.bat
+key tab
+type SCORE
+key enter
+said FILES found 0 *.bat containing SCORE
+key shift+tab
+type *
+key enter
+said FILES found 1 * containing SCORE
+shot find-text "Find Files"
+key esc
+gone "Find Files"
 key alt+f4
-gone "C:\FM\DOCS - Files"
+gone "C:\FM - Files"
 expect FILES found 4 *.txt
 expect FILES went LIST.TXT
 expect FILES found 1 let
+expect FILES found 1 * containing SCORE
+expect FILES found 0 *.bat containing SCORE
 expect FILES end 

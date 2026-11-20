@@ -4,6 +4,12 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Files: searching and counting in the background (2026-11-20)
+
+- **Find Files** lists what it finds as it comes, and can look inside files: **Containing:** takes text, and
+  only the files with that text in them are found. A whole drive can be searched; the window goes on answering.
+- **Properties** of a folder is up at once and counts what the folder holds while it is shown.
+
 ## Images: a filmstrip (2026-11-20)
 
 - **View's Filmstrip (T)** shows the folder's pictures in a row along the bottom of the viewer's window; the

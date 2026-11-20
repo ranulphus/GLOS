@@ -2259,18 +2259,36 @@ static void properties(struct view *v)
 }
 
 /* ---- search (phase E): files and folders by name, under the folder shown: a name with DOS's wildcards (* and
-   ?), or a piece of a name; what is found is listed with its folder, and Go To shows one in its folder. Looked
-   for at once, to a limit (the plan's search in the background, with its results as they come, is to come). */
+   ?), or a piece of a name; and, if text is given too, only the files that have that text in them (letters' case
+   apart). The folders are gone through on a worker's thread: what is found is listed as it comes, with its
+   folder, and a line says where the search has got to; Find again begins another, and closing the window ends
+   it. Go To shows one in its folder. */
 
-#define FOUND_MAX 200
-#define VISIT_MAX 5000
+#define FOUND_MAX 2000
 
 static struct {
     struct gui_window *win;
-    struct gui_widget *what, *list, *note;
-    char dir[FOUND_MAX][200], name[FOUND_MAX][64];
-    int n, visited, go;
+    struct gui_widget *what, *text, *list, *note;
+    char (*dir)[200], (*name)[64];      /* what was found, in the list's order */
+    int n, room, go;
+    struct gui_task *task;              /* the search at work (NULL: none) */
+    int gen;                            /* which search: an older one's word is nobody's */
 } fnd;
+
+struct fsearch {                        /* a search at work */
+    int gen;
+    char top[260], pattern[80], text[80];       /* text: DOS's bytes, in capitals ("": names alone) */
+    int ntext, found, more;             /* more: it stopped at FOUND_MAX */
+    unsigned long seen;
+    unsigned at;                        /* when the window was last told where it is */
+    unsigned char *buf;                 /* a file's bytes, a piece at a time */
+};
+
+struct fnote {                          /* its word to the window's thread */
+    int gen, kind;                      /* kind: 0 one found (dir, name); 1 where it is (dir); 2 its end */
+    int found, more;
+    char dir[200], name[64];
+};
 
 /* A name against a pattern of * and ?, letters' case apart. */
 static int wild(const char *p, const char *s)
@@ -2292,60 +2310,176 @@ static int wild(const char *p, const char *s)
     return !*s;
 }
 
-static void find_in(const char *dir, const char *pattern, int depth)
+static void find_said(void *data)       /* (the window's thread) */
+{
+    struct fnote *n = data;
+    char t[300];
+    if (fnd.win && n->gen == fnd.gen) {
+        if (n->kind == 0 && fnd.n < fnd.room) {
+            const char *cells[2] = { n->name, n->dir };
+            snprintf(fnd.dir[fnd.n], sizeof fnd.dir[0], "%s", n->dir);
+            snprintf(fnd.name[fnd.n], sizeof fnd.name[0], "%s", n->name);
+            gui_list_add(fnd.list, cells, NULL, (void *)(size_t)fnd.n);
+            fnd.n++;
+        } else if (n->kind == 1) {
+            snprintf(t, sizeof t, GUI_T("%d found so far. Looking in %s"), n->found, n->dir);
+            gui_set_text(fnd.note, t);
+        } else if (n->kind == 2) {
+            snprintf(t, sizeof t, n->more ? GUI_T("%d found, and there may be more.") : GUI_T("%d found."), fnd.n);
+            gui_set_text(fnd.note, t);
+            if (fnd.n && gui_list_get(fnd.list) < 0) {
+                gui_list_set(fnd.list, 0);
+                if (fnd.win->focus == fnd.what || fnd.win->focus == fnd.text)
+                    gui_focus(fnd.list);
+            }
+            snprintf(t, sizeof t, "%d %s%s%s", fnd.n, gui_get_text(fnd.what)[0] ? gui_get_text(fnd.what) : "*",
+                     gui_get_text(fnd.text)[0] ? " containing " : "", gui_get_text(fnd.text));
+            say("found", t);
+        }
+    }
+    free(n);
+}
+
+static void find_tell(struct gui_task *t, struct fsearch *q, int kind, const char *dir, const char *name)
+{
+    struct fnote *n = calloc(1, sizeof *n);
+    if (!n)
+        return;
+    n->gen = q->gen, n->kind = kind, n->found = q->found, n->more = q->more;
+    snprintf(n->dir, sizeof n->dir, "%s", dir ? dir : "");
+    snprintf(n->name, sizeof n->name, "%s", name ? name : "");
+    q->at = glos_ticks();
+    gui_task_post(t, find_said, n);
+}
+
+/* Whether the file has the text in it: read a piece at a time, each piece begun with the end of the one before
+   (the text may lie across two). Letters' case apart (ASCII's: the text is in capitals already). */
+#define FIND_PIECE 16384
+static int find_inside(struct gui_task *t, struct fsearch *q, const char *path)
+{
+    FILE *f = gui_fopen(path, "rb");
+    size_t have = 0, got, i;
+    int hit = 0;
+    if (!f)
+        return 0;
+    while (!hit && !gui_task_cancelled(t) && (got = fread(q->buf + have, 1, FIND_PIECE, f)) > 0) {
+        size_t n = have + got;
+        for (i = have; i < n; i++)
+            if (q->buf[i] >= 'a' && q->buf[i] <= 'z')
+                q->buf[i] -= 32;
+        for (i = 0; !hit && i + (size_t)q->ntext <= n; i++)
+            hit = q->buf[i] == (unsigned char)q->text[0] && !memcmp(q->buf + i, q->text, (size_t)q->ntext);
+        have = n < (size_t)q->ntext - 1 ? n : (size_t)q->ntext - 1;
+        memmove(q->buf, q->buf + n - have, have);
+    }
+    fclose(f);
+    return hit;
+}
+
+static void find_in(struct gui_task *t, struct fsearch *q, const char *dir, int depth)
 {
     struct gui_dirent *e = NULL;
     int n = gui_dir_read(dir, &e), i;
     char p[260];
-    for (i = 0; i < n && fnd.n < FOUND_MAX && fnd.visited < VISIT_MAX; i++) {
+    for (i = 0; i < n && !q->more && !gui_task_cancelled(t); i++) {
         if (recycle_is(dir, e[i].name))
             continue;
-        fnd.visited++;
-        if (wild(pattern, e[i].name)) {
-            snprintf(fnd.dir[fnd.n], sizeof fnd.dir[0], "%s", dir);
-            snprintf(fnd.name[fnd.n++], sizeof fnd.name[0], "%s", e[i].name);
-        }
-        if (e[i].dir && depth < 8) {
+        q->seen++;
+        if (wild(q->pattern, e[i].name) && (!q->ntext || !e[i].dir)) {
             gui_path_join(p, sizeof p, dir, e[i].name);
-            find_in(p, pattern, depth + 1);
+            if (!q->ntext || find_inside(t, q, p)) {
+                if (q->found == FOUND_MAX) {
+                    q->more = 1;
+                    break;
+                }
+                q->found++;
+                find_tell(t, q, 0, dir, e[i].name);
+            }
         }
+        if (e[i].dir && depth < 24) {
+            gui_path_join(p, sizeof p, dir, e[i].name);
+            find_in(t, q, p, depth + 1);
+        }
+        if (glos_ticks() - q->at >= 500)
+            find_tell(t, q, 1, dir, NULL);
     }
     if (n >= 0)
         free(e);
 }
 
+static void find_work(struct gui_task *t, void *arg)
+{
+    struct fsearch *q = arg;
+    q->at = glos_ticks();
+    if (!q->ntext || (q->buf = malloc(FIND_PIECE + sizeof q->text)) != NULL)
+        find_in(t, q, q->top, 0);
+    free(q->buf);
+    if (!gui_task_cancelled(t))
+        find_tell(t, q, 2, NULL, NULL);
+}
+
+static void find_done(struct gui_window *owner, void *arg, int cancelled)
+{
+    struct fsearch *q = arg;
+    (void)owner, (void)cancelled;
+    if (q->gen == fnd.gen)
+        fnd.task = NULL;                        /* (the toolkit frees it after this) */
+    free(q);
+}
+
+static void find_stop(void)             /* the search at work, if any, ends, and has nobody to tell */
+{
+    if (fnd.task)
+        gui_task_cancel(fnd.task);
+    fnd.task = NULL;
+    fnd.gen++;
+}
+
+static void find_start(struct view *v)
+{
+    struct fsearch *q;
+    char t[100], dos[80];
+    const char *named = gui_get_text(fnd.what), *text = gui_get_text(fnd.text);
+    int i;
+    if (!named[0] && !text[0])
+        return;
+    find_stop();
+    if (!(q = calloc(1, sizeof *q)))
+        return;
+    q->gen = fnd.gen;
+    snprintf(q->top, sizeof q->top, "%s", v->dir);
+    snprintf(q->pattern, sizeof q->pattern, "%s", named[0] ? named : "*");
+    if (!strpbrk(q->pattern, "*?")) {           /* (a piece of a name: anywhere in it) */
+        snprintf(t, sizeof t, "*%s*", q->pattern);
+        snprintf(q->pattern, sizeof q->pattern, "%s", t);
+    }
+    if (text[0]) {                              /* (as the files have it: DOS's bytes) */
+        if (gui_text_dos(text, dos, sizeof dos) != 0)
+            snprintf(dos, sizeof dos, "%s", text);
+        snprintf(q->text, sizeof q->text, "%s", dos);
+        for (i = 0; q->text[i]; i++)
+            if (q->text[i] >= 'a' && q->text[i] <= 'z')
+                q->text[i] = (char)(q->text[i] - 32);
+        q->ntext = i;
+    }
+    gui_list_clear(fnd.list);
+    fnd.n = 0;
+    gui_set_text(fnd.note, GUI_T("Looking..."));
+    if (!(fnd.task = gui_task_start(NULL, NULL, find_work, q, find_done, 0))) {        /* (no threads: here) */
+        gui_message(fnd.win, GUI_T("Find Files"), GUI_T("There is no memory to search with."), GUI_MB_OK);
+        free(q);
+    }
+}
+
 static void find_button(struct gui_widget *b, int what)
 {
     struct view *v = b->win->owner ? view_of(b->win->owner) : NULL;
-    char pattern[80], t[100];
-    int i;
     (void)what;
     if (b->id == 10 && v) {                     /* Find: under the folder shown */
-        snprintf(pattern, sizeof pattern, "%s", gui_get_text(fnd.what));
-        if (!pattern[0])
-            return;
-        if (!strpbrk(pattern, "*?")) {          /* (a piece of a name: anywhere in it) */
-            snprintf(t, sizeof t, "*%s*", pattern);
-            snprintf(pattern, sizeof pattern, "%s", t);
-        }
-        fnd.n = fnd.visited = 0;
-        find_in(v->dir, pattern, 0);
-        gui_list_clear(fnd.list);
-        for (i = 0; i < fnd.n; i++) {
-            const char *cells[2] = { fnd.name[i], fnd.dir[i] };
-            gui_list_add(fnd.list, cells, NULL, NULL);
-        }
-        snprintf(t, sizeof t, fnd.n == FOUND_MAX || fnd.visited == VISIT_MAX ? GUI_T("%d found, and there may be more.")
-                                                                           : GUI_T("%d found."), fnd.n);
-        gui_set_text(fnd.note, t);
-        if (fnd.n) {
-            gui_list_set(fnd.list, 0);
-            gui_focus(fnd.list);
-        }
-        snprintf(t, sizeof t, "%d %s", fnd.n, gui_get_text(fnd.what));
-        say("found", t);
+        find_start(v);
     } else if (b->id == 11) {                   /* Go To: the chosen one, in its folder */
-        fnd.go = gui_list_get(fnd.list);
+        int r = gui_list_get(fnd.list);
+        fnd.go = r >= 0 ? (int)(size_t)gui_list_user(fnd.list, r) : -1;
         if (fnd.go >= 0 && fnd.go < fnd.n)
             gui_end_modal(fnd.win, 1);
     } else if (b->id == 12) {
@@ -2356,7 +2490,8 @@ static void find_button(struct gui_widget *b, int what)
 static void find_list_on(struct gui_widget *w, int what)
 {
     if (what == GUI_ON_ACTIVATE) {              /* (Enter or a double click on one: Go To) */
-        fnd.go = gui_list_get(w);
+        int r = gui_list_get(w);
+        fnd.go = r >= 0 ? (int)(size_t)gui_list_user(w, r) : -1;
         if (fnd.go >= 0 && fnd.go < fnd.n)
             gui_end_modal(fnd.win, 1);
     }
@@ -2366,17 +2501,30 @@ static void find_files(struct view *v)
 {
     static const char *const heads[2] = { GUI_N("Name"), GUI_N("In folder") };
     static const int widths[2] = { 110, 210 };
-    struct gui_widget *box, *row;
+    struct gui_widget *box, *form, *row;
+    char dir[200], name[64];
     int r, i;
-    fnd.win = gui_window(GUI_T("Find Files"), 360, 260, GUI_W_DIALOG);
+    if (!fnd.dir) {                             /* (room for what is found: once) */
+        fnd.dir = malloc(FOUND_MAX * sizeof *fnd.dir);
+        fnd.name = malloc(FOUND_MAX * sizeof *fnd.name);
+        if (!fnd.dir || !fnd.name)
+            abort();
+        fnd.room = FOUND_MAX;
+    }
+    fnd.win = gui_window(GUI_T("Find Files"), 360, 290, GUI_W_DIALOG);
     fnd.win->owner = v->win;
     box = gui_vbox(fnd.win->root, 6, 8);
     gui_grow(box, 1);
     row = gui_hbox(box, 6, 0);
-    gui_label(row, GUI_T("Named:"));
-    fnd.what = gui_field(row, 24);
-    gui_grow(fnd.what, 1);
-    gui_button(row, GUI_T("&Find"), find_button, 10)->flags |= GUI_DEFAULT;
+    form = gui_form(row);
+    gui_grow(form, 1);
+    fnd.what = gui_field(gui_row(form, GUI_T("Named:"), NULL), 24);
+    fnd.text = gui_field(gui_row(form, GUI_T("Containing:"), NULL), 24);
+    {                                           /* (the button at its own height, beside the first field) */
+        struct gui_widget *col = gui_vbox(row, 0, 0);
+        gui_button(col, GUI_T("&Find"), find_button, 10)->flags |= GUI_DEFAULT;
+        gui_space(col, 0, 0);
+    }
     fnd.list = gui_list(box, 2, heads, widths);
     gui_grow(fnd.list, 1);
     gui_on(fnd.list, find_list_on, 0);
@@ -2389,16 +2537,19 @@ static void find_files(struct view *v)
     gui_focus(fnd.what);
     r = gui_modal(fnd.win);                     /* (which closes it) */
     fnd.win = NULL;
-    if (r != 1)
+    find_stop();
+    if (r != 1 || fnd.go < 0 || fnd.go >= fnd.n)
         return;
+    snprintf(dir, sizeof dir, "%s", fnd.dir[fnd.go]);
+    snprintf(name, sizeof name, "%s", fnd.name[fnd.go]);
     if (v->browser)                             /* the one chosen, shown in its folder */
-        go(v, fnd.dir[fnd.go]);
+        go(v, dir);
     else
-        folder_open(fnd.dir[fnd.go]);
+        folder_open(dir);
     for (i = 0; v->browser && i < v->n; i++)
-        if (!strcmp(v->ents[(size_t)gui_list_user(v->list, i)].name, fnd.name[fnd.go]))
+        if (!strcmp(v->ents[(size_t)gui_list_user(v->list, i)].name, name))
             gui_list_set(v->list, i);
-    say("went", fnd.name[fnd.go]);
+    say("went", name);
 }
 
 /* The address bar: Enter goes to the folder typed (or chosen from the ones kept); what is no folder is said. */
