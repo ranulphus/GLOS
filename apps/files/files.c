@@ -39,11 +39,14 @@ struct item {
 static struct item items[ITEMS];
 static int nitems, chosen = -1, dragging = -1, drag_dx, drag_dy, moved;
 
-static const struct { const char *title, *exe; int kind; } apps[] = {
-    { "Files", "FILES.EXE -browse", IC_FILES }, { "Terminal", "TERM.EXE", IC_TERMINAL },
-    { "Notepad", "NOTEPAD.EXE", IC_NOTEPAD }, { "Calculator", "CALC.EXE", IC_CALC }, { "Images", "IMAGES.EXE", IC_IMAGES },
-    { "Monitor", "MONITOR.EXE", IC_MONITOR }, { "Control Panel", "CONTROL.EXE", IC_CONTROL },
-    { "Paint", "PAINT.EXE", IC_PAINT } };
+/* GLOS's own programs: all in the Start menu; `desk`: on the desktop too, when it is first laid out (phase F's
+   come to the menu alone: the desktop is for what is used every day). */
+static const struct { const char *title, *exe; int kind, desk; } apps[] = {
+    { "Files", "FILES.EXE -browse", IC_FILES, 1 }, { "Terminal", "TERM.EXE", IC_TERMINAL, 1 },
+    { "Notepad", "NOTEPAD.EXE", IC_NOTEPAD, 1 }, { "Calculator", "CALC.EXE", IC_CALC, 1 },
+    { "Images", "IMAGES.EXE", IC_IMAGES, 1 }, { "Monitor", "MONITOR.EXE", IC_MONITOR, 1 },
+    { "Control Panel", "CONTROL.EXE", IC_CONTROL, 1 }, { "Paint", "PAINT.EXE", IC_PAINT, 1 },
+    { "Mixer", "MIXER.EXE", IC_SOUND, 0 } };
 #define NAPPS ((int)(sizeof apps / sizeof *apps))
 
 static void say(const char *what, const char *a)
@@ -256,6 +259,8 @@ static void desktop_items(void)
             add_item(name, what, IC_DRIVE);
         }
     for (i = 0; i < NAPPS; i++) {
+        if (!apps[i].desk)
+            continue;
         snprintf(what, sizeof what, "app %s", apps[i].exe);
         add_item(apps[i].title, what, apps[i].kind);
     }

@@ -4,6 +4,15 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The Mixer (2026-11-20)
+
+- **A new program, the Mixer** (MIXER.EXE; in the Start menu, and a double-click on the task bar's volume icon
+  opens it): the master volume with the output's level; the sound card's own levels (its master, wave, FM, CD,
+  line and microphone, each with a balance and a mute) and the input that is recorded; and a strip for every
+  program that is playing, with its own volume, balance, mute and level. Strips come and go as programs begin
+  and stop playing.
+- The first of phase F's new apps (`docs/v1/phase-f.md`).
+
 ## Files: 7z archives (2026-11-20)
 
 - **A 7z archive is gone into like a folder** in Files' browser, as a ZIP is: listed, its files opened, copied

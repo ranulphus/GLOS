@@ -8,8 +8,12 @@
  *                              ring kept full, the app sleeping 10 ms
  *                              between fills (exit code 41)
  *   AUDTEST info               VERSION: the API's version and what the machine can do
+ *   AUDTEST levels             the mixer as it is now: the output's level (the highest of a third of a second),
+ *                              the master, and each stream's volume, balance, mute and level (the Mixer's test:
+ *                              what MIXER.EXE sets is read back here)
  *
- * Lines: "AUD-START NAME stream=ID", "AUD-OK NAME periods=N underruns=U
+ * Lines: "AUD-LEVELS out=L,R master=V mute=M streams=N [id=I vol=V bal=B mute=M level=L] ...",
+ * "AUD-START NAME stream=ID", "AUD-OK NAME periods=N underruns=U
  * frames=F" (the counts while the stream was still fed: its end, when the
  * app stops writing, is no underrun of the mixer's), "AUD-ERR ...". */
 #include <crt0.h>
@@ -51,6 +55,39 @@ int main(int argc, char **argv)
         v.size = sizeof v;
         glos_version(&v);
         say("AUD-INFO version=%x caps=%x\n", v.major << 16 | v.minor, v.machine);
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1], "levels")) {
+        static struct glos_audio_stream st[16], top[16];
+        struct glos_audio_mixer m, ms;
+        unsigned l, r, bl = 0, br = 0, i, n = 0;
+        if ((k = glos_init("AUDTEST", "", "")) != 0) {
+            say("AUD-ERR levels init error=%d\n", k);
+            return 44;
+        }
+        for (k = 0; k < 10; k++) {              /* (a level is the last period's peak: the highest of ten looks) */
+            l = r = 0;
+            glos_audio_levels(0, &l, &r);
+            bl = l > bl ? l : bl, br = r > br ? r : br;
+            memset(&ms, 0, sizeof ms);
+            ms.what = GLOS_MIXER_STREAMS, ms.buffer = (unsigned)st, ms.room = sizeof st;
+            if (glos_mixer(&ms) == 0) {
+                n = ms.count;
+                for (i = 0; i < n && i < 16; i++) {
+                    unsigned was = top[i].id == st[i].id ? top[i].left : 0;
+                    top[i] = st[i];
+                    top[i].left = st[i].left > was ? st[i].left : was;
+                }
+            }
+            glos_sleep(30);
+        }
+        memset(&m, 0, sizeof m);
+        m.what = GLOS_MIXER_MASTER;
+        glos_mixer(&m);
+        say("AUD-LEVELS out=%u,%u master=%d mute=%d streams=%u", bl, br, m.volume, m.mute, n);
+        for (i = 0; i < n && i < 16; i++)
+            say(" [id=%u vol=%u bal=%d mute=%u level=%u]", top[i].id, top[i].volume, top[i].balance, top[i].mute, top[i].left);
+        say("\n");
         return 0;
     }
     if (argc < 5 || strcmp(argv[1], "tone"))

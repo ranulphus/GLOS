@@ -3,6 +3,8 @@
 **New in v1.** The volumes of everything that makes a sound, after Windows' Volume Control. Opened from the task
 bar's volume icon (double-click) and from the Control Panel's Sound page.
 
+**Built 2026-11-20** (`docs/v1/phase-f.md` says what, and what is left of this plan).
+
 ## What it does
 
 - **Master:** the overall volume and mute (the same as the volume icon's slider).

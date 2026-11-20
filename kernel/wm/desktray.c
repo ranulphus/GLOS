@@ -6,7 +6,7 @@
  * or not, their picture, their tooltip. Their pictures are one-bit shapes in the bar's text colour, made again
  * when the theme changes. A press is theirs (deskshell.c):
  *   the volume    a press: its slider (deskpop.c) and mute; the wheel over it: up and down; the right button:
- *                 mute; twice: the Control Panel's Sound page. Kept in [sound] volume and mute once the slider
+ *                 mute; twice: the Mixer (phase F: MIXER.EXE). Kept in [sound] volume and mute once the slider
  *                 goes (after the desktop's lock is let go: desktray_keep).
  *   the network   a press: its address, gateway and counts, and Network settings; twice: the Network page.
  *   the pads      a press: which joystick each is, and Game controllers; twice: the Joystick page.
@@ -203,12 +203,15 @@ void desktray_turn(struct wm *m, int screen, int again)
 
 /* ---- their presses */
 
-enum { GO_SOUND = 1, GO_NETWORK, GO_PADS };
+enum { GO_SOUND = 1, GO_NETWORK, GO_PADS, GO_MIXER };
 
 static void go(struct wm *m, u32 data)
 {
     (void)m;
-    api2_shell_start("CONTROL.EXE", data == GO_SOUND ? "sound" : data == GO_NETWORK ? "network" : "joystick");
+    if (data == GO_MIXER)
+        api2_shell_start("MIXER.EXE", NULL);
+    else
+        api2_shell_start("CONTROL.EXE", data == GO_SOUND ? "sound" : data == GO_NETWORK ? "network" : "joystick");
 }
 
 static void line(struct popmenu *pm, const char *fmt, const char *a, const char *b)
@@ -229,7 +232,7 @@ void desktray_press(struct wm *m, u32 id, int what, const struct gfx_rect *r)
         int mute;
         if (what == 2) {
             deskvol_close(m);
-            go(m, GO_SOUND);
+            go(m, GO_MIXER);
         } else if (what == 3) {
             mixer_master_get(&v, &mute);
             vol_set(v, !mute);

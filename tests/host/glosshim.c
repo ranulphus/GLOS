@@ -230,6 +230,49 @@ unsigned glos_audio_write(struct glos_audio_ring *r, const void *samples, unsign
     return 0;
 }
 
+glos_handle glos_audio_in(unsigned rate, unsigned channels, unsigned bytes, struct glos_audio_ring **ring, unsigned *id)
+{
+    (void)rate, (void)channels, (void)bytes, (void)ring, (void)id;
+    last_error = GLOS_E_NO_AUDIO;
+    return 0;
+}
+
+unsigned glos_audio_read(struct glos_audio_ring *r, void *samples, unsigned room)
+{
+    (void)r, (void)samples, (void)room;
+    return 0;
+}
+
+unsigned glos_audio_room(const struct glos_audio_ring *r)
+{
+    (void)r;
+    return 0;
+}
+
+int glos_mixer(struct glos_audio_mixer *m)
+{
+    (void)m;
+    return GLOS_E_NO_AUDIO;
+}
+
+int glos_audio_levels(unsigned id, unsigned *left, unsigned *right)
+{
+    (void)id;
+    if (left)
+        *left = 0;
+    if (right)
+        *right = 0;
+    return GLOS_E_NO_AUDIO;
+}
+
+int glos_audio_devices(struct glos_audio_device *out, unsigned room, unsigned *count)
+{
+    (void)out, (void)room;
+    if (count)
+        *count = 0;
+    return 0;
+}
+
 /* (The pads: none plugged in.) */
 int glos_pads(struct glos_pads *p, int events)
 {

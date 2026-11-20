@@ -4825,6 +4825,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     import time
     crystal = sound != "sb16"
     tag = "%s-%s" % (profile, vcard) + ("-" + sound if crystal else "")
+    # (Then phase F's Mixer, the real program, on a tone that plays: below.)
     # With the virtual Sound Blaster (the rule since 2026-11-19; docs/v1/vsb.md) the mixer plays from GLOS's
     # start and keeps the card through a session, and BLASTER is the virtual card's; with [sound] virtual = off
     # (virtual False) it is as it was: the mixer idle with no desktop, the card handed to a session and taken
@@ -4838,7 +4839,9 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     agent = Agent("audio-" + tag, profile, card, ["--card", vcard, "--sound", sound, "--wav"] + off_cfg
         + ([] if crystal else ["--pre", "SET BLASTER=" + blaster]) + [
         "--file", "build/dj/AUDTEST.EXE=/TEST/AUDTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
-        "--file", "build/ow/dos/FMTEST.EXE=/TEST/FMTEST.EXE",
+        "--file", "build/ow/dos/FMTEST.EXE=/TEST/FMTEST.EXE", "--file", "build/apps/MIXER.EXE=/TEST/MIXER.EXE",
+        "--file", "sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT", "--file", "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT",
+        "--file", "sdk/gui/fonts/ICONS.DAT=/TEST/ICONS.DAT",
         "--cmd", "SERSAY HX-START audio", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
         "--cmd", "VECCHK check"] + (["--cmd", "SET BLASTER=" + blaster] if crystal else []) + [
         "--cmd", "SBCHK", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
@@ -4887,6 +4890,50 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         rc, o, _ = agent.ssh("C:\\TEST\\ECHOARGS.EXE beside the mixer")
         checks["session"] = rc == 7
         checks["after-session"] = played(finish(d), "D")[0]
+        # The Mixer (phase F; apps/mixer, docs/v1/apps/mixer.md), the real one on a tone that plays: what its
+        # sliders and checks set is what the mixer does (AUDTEST levels reads it back, and the output's level).
+        # Its window opens with the keyboard on the master's slider; Shift+Tab from there is the last strip's
+        # mute, the tone's own; two more, that strip's volume.
+        def levels():
+            o = agent.ssh(app + "levels")[1]
+            m = re.search(r"AUD-LEVELS out=(\d+),\d+ master=(\d+) mute=(\d+) streams=(\d+)(.*)", o)
+            st = re.search(r"\[id=\d+ vol=(\d+) bal=-?\d+ mute=(\d+) level=(\d+)\]", m.group(5)) if m else None
+            if not m or not st:
+                print("    %s AUDTEST levels: %r" % (tag, o[-300:]))
+                return {"out": -1, "master": -1, "mute": -1, "streams": -1, "vol": -1, "smute": -1, "level": -1}
+            return {"out": int(m.group(1)), "master": int(m.group(2)), "mute": int(m.group(3)), "streams": int(m.group(4)),
+                    "vol": int(st.group(1)), "smute": int(st.group(2)), "level": int(st.group(3))}
+
+        def keys(*specs):
+            agent.ssh("glos key " + gui_key_list(list(specs)))
+            time.sleep(1.5)
+
+        tone = start(app + "tone M 880 90")
+        mix = start("C:\\TEST\\MIXER.EXE")
+        g = GuiDriver(agent, os.path.join(ROOT, "out", "audio-" + tag), 16, False, "C:\\TEST\\")
+        checks["mixer-window"] = bool(g.until(lambda d: g.window("Mixer", d) is not None, 120))
+        time.sleep(2)
+        a = levels()
+        checks["mixer-sees"] = a["streams"] == 1 and a["master"] == 100 and a["vol"] == 256 and a["out"] > 3000
+        keys("home")                            # the master down to nothing
+        b = levels()
+        checks["mixer-master"] = b["master"] == 0 and b["out"] == 0 and b["level"] > 3000
+        keys("end")
+        keys("shift+tab", "space")              # the tone's strip: muted
+        c = levels()
+        checks["mixer-mute"] = c["master"] == 100 and c["smute"] == 1 and c["out"] == 0
+        keys("space")
+        keys("shift+tab", "shift+tab", "pgdn")  # its volume: ten steps down of twenty
+        d2 = levels()
+        checks["mixer-volume"] = (d2["smute"] == 0 and 100 <= d2["vol"] <= 160 and a["out"] > 0
+                                  and abs(d2["out"] * 256 - a["out"] * d2["vol"]) < a["out"] * 40)
+        keys("esc")
+        rc_mix, o_mix = finish(mix, 60)
+        checks["mixer-said"] = (rc_mix == 0 and "MIXER streams 1 AUDTEST" in o_mix and "MIXER master 0 mute 0" in o_mix
+                                and "MIXER stream AUDTEST volume 256 balance 0 mute 1" in o_mix and "MIXER end" in o_mix)
+        if not all(checks[k] for k in ("mixer-sees", "mixer-master", "mixer-mute", "mixer-volume", "mixer-said")):
+            print("    %s mixer: %r %r %r %r %r" % (tag, a, b, c, d2, o_mix[-300:]))
+        checks["mixer-tone"] = played(finish(tone), "M")[0]
         if crystal:                             # the FM synthesiser in a session, at the AdLib's ports and the SB Pro's
             agent.ssh("C:\\TEST\\FMTEST.EXE 388 330 400")          # (86Box: the first notes after power-on are faint)
             rc1, o1, _ = agent.ssh("C:\\TEST\\FMTEST.EXE 388 330 1500")
@@ -9808,7 +9855,7 @@ def console_case(profile, vcard, card, bits):
 
 # The native apps (M9 steps D-G): their scripts (tests/gui, all but GUITEST's) on the desktop, the apps beside
 # GLOS.EXE.
-NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT"]
+NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER"]
 NATIVE_CASES = [("bf6", "vbe", "ne2kpci", 8), ("bf6", "g200", "ne2kpci", 16), ("bf6", "g400", "ne2kpci", 32),
                 ("486dx2", "vbe", "ne2k", 8)]
 

@@ -1,0 +1,36 @@
+# The Mixer (apps/mixer; phase F, docs/v1/apps/mixer.md) on the test's own numbers (MIXER -demo: a card that is
+# always there, streams that come and go at F9): the master, the card's channels and the input recorded; a
+# program's strip when it begins to play, a second, the first gone; the master turned down by the keyboard, a
+# stream and a channel of the card muted by the mouse (the card takes its levels in steps: 248 for 255), another
+# input chosen. (A pause before the pictures that follow a level's fall: a meter holds its peak a second and a half.)
+run MIXER.EXE -demo
+wait "Mixer"
+shot none "Mixer"
+key f9
+said MIXER streams 1 PLAYER
+shot one "Mixer"
+key f9
+said MIXER streams 2 PLAYER SKIING
+shot two "Mixer"
+key down
+said MIXER master 75 mute 0
+click "Mixer" 473 195
+said MIXER stream SKIING volume 128 balance -128 mute 1
+click "Mixer" 143 195
+said MIXER channel Wave 248,248 mute 1
+click "Mixer" 228 221
+key down
+key enter
+said MIXER input Line in
+pause 2000
+shot set "Mixer"
+key f9
+said MIXER streams 1 SKIING
+pause 2000
+shot second "Mixer"
+key esc
+gone "Mixer"
+expect MIXER card yes channels 6
+expect MIXER master 75 mute 0
+expect MIXER input Line in
+expect MIXER end

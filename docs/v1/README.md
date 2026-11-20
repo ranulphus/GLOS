@@ -19,6 +19,8 @@ choice, 2026-11-06), and approved before any code of phases B–F.
 | RetroGPU `gl/docs/backend-interface.md` | Step B0 of DOS-GL's software renderer plan (`gl/docs/backends.md`) | Written (RetroGPU branch b0-docs) |
 | `phase-b.md` | Phase B's step plan: API 2.0 and the window system in 15 steps, with their tests | Plan v1, questions answered |
 | `phase-d.md` | Phase D's step plan: the desktop shell and the system, in eight steps, with their tests | Plan v1 (2026-11-17) |
+| `phase-e.md` | Phase E as built: the core apps, upgraded | Its list done 2026-11-20 |
+| `phase-f.md` | Phase F as built: the new apps | Begun 2026-11-20 (the Mixer) |
 
 ## The API's areas
 

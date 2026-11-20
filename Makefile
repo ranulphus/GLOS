@@ -190,7 +190,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
-APPS := notepad calc images term files monitor control paint
+APPS := notepad calc images term files monitor control paint mixer
 # (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
 # shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
@@ -568,7 +568,7 @@ loopa-gpu: all dos-tests build/dj/GPUTEST.EXE check-deps
 # The virtual game port (docs/gamepad.md J1): glos joy's stick read by JOYTEST three ways on bf6 and the 486.
 loopa-joy: all dos-tests build/dj/JOYTEST.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py joy -j $(JOBS)
-loopa-audio: all dos-tests build/dj/AUDTEST.EXE check-deps
+loopa-audio: all dos-tests build/dj/AUDTEST.EXE build/apps/MIXER.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py audio -j $(JOBS)
 # Windowed DOS-GL (M8 step D): DOS-GL's conformance EXEs (from DOSGL_DIR's build) full-screen on plain DOS and
 # windowed on GLOS desktops, their frames identical.

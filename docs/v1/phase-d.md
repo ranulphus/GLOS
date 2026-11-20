@@ -106,7 +106,7 @@ Each step is a branch, its tests, the gate, and a merge; the order is the one be
 ### D2. GLOS's own tray icons and notifications (kernel)
 
 - **Volume:** the mixer's master (AUDIO); a click drops a slider and mute (kernel-drawn), the wheel over it
-  changes it; a double-click opens the Control Panel's Sound page until phase F's Mixer is there.
+  changes it; a double-click opens the Mixer (phase F, 2026-11-20; the Control Panel's Sound page before it).
 - **Network:** the address in its tooltip (the link's state is phase H's: until then "connected" means an
   address); a click shows status (address, gateway, frames in and out); a double-click opens the Network page.
 - **Pads and USB devices:** what is plugged in (GLOS's own USB stack knows; the API's "device came or went" event
@@ -632,8 +632,7 @@ The steps:
 
 ## What waits for other phases
 
-- The volume icon's double-click opens the Mixer when phase F has made it (the Control Panel's Sound page until
-  then).
+- The volume icon's double-click opens the Mixer: done with phase F's Mixer, 2026-11-20 (`phase-f.md`).
 - The network icon's link state, and the API's "device came or went" event, are phase H's.
 - 24-bit desktops wait for a second vendor's card (S3 ViRGE on bench C is the first).
 - The savers on non-Matrox cards use DOS-GL's software renderer, which is merged in RetroGPU (B1, B2, V3); its
