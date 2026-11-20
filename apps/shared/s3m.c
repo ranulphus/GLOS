@@ -652,7 +652,7 @@ static void tick(const struct s3m *m, struct state *s)
 
 static void mix(const struct s3m *m, struct state *s, short *pcm, unsigned long n)
 {
-    long long acc[2 * 256];
+    long acc[2 * 256];
     unsigned k;
     while (n) {
         unsigned long part = n > 256 ? 256 : n;

@@ -5064,6 +5064,16 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
             and "PLAYER slow" not in o_p
         if not checks["player-said"]:
             print("    %s player: rc=%d %r" % (tag, rc_p, o_p[-400:]))
+        # PLAYER -time: no window, each file's sound made as fast as the PC can and the time said (86Box's own speed:
+        # the line's shape is what is looked at, not its numbers).
+        rc_t, o_t, _ = agent.ssh("C:\\TEST\\PLAYER.EXE -time -rate 22050 C:\\TEST\\PSONG.MOD C:\\TEST\\PS3M.S3M C:\\TEST\\PXM.XM "
+                                 "C:\\TEST\\NONE.MOD", timeout=900)
+        o_t = o_t.replace("\r", "")
+        checks["player-time"] = rc_t == 1 and "PLAYER timed NONE.MOD refused -1\n" in o_t and all(
+            re.search(r"PLAYER timed %s %s rate=22050 channels=2 lasts=%s s took=\d+\.\d\d s share=\d+%%\n" % t, o_t)
+            for t in (("PSONG.MOD", "MOD", r"7\.6"), ("PS3M.S3M", "S3M", r"3\.0"), ("PXM.XM", "XM", r"3\.0")))
+        if not checks["player-time"]:
+            print("    %s player -time: rc=%d %r" % (tag, rc_t, o_t[-400:]))
         # MIDI Studio (phase F; apps/studio), the real one: a MIDI file of its command line opened as a song (a
         # track, a note), played by F5 through the card's FM chip to its end; its tone is in the recording.
         stu = start("C:\\TEST\\STUDIO.EXE C:\\TEST\\STUNE.MID")

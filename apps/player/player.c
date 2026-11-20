@@ -15,6 +15,7 @@
  *
  * PLAYER FILE... adds the files (a playlist's, for an .M3U) and plays the first (Files' "open").
  *
+ * PLAYER -time FILE ...: no window: how fast this PC makes each file's sound (timing(), below).
  * PLAYER -demo: no card is asked for and no time passes by itself: F9 is ten seconds heard (the GUI scripts'
  * pictures are the same on every PC and on the host).
  *
@@ -24,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <glos/gui.h>
 
@@ -579,10 +581,58 @@ static void build(void)
     status = gui_status(win);
 }
 
+/* PLAYER -time [-rate N] FILE ...: how fast this PC makes each file's sound, with no window, no card and no GLOS
+   needed (it runs under plain DOS too): the whole file read as samples (a module at N frames a second, 44100
+   unless said: a 486's mixer runs at 22050), and how long that took beside how long the sound lasts. A PC that
+   needs more than the sound's own time can't play the file; one that needs most of it has little left for
+   anything else. Whole numbers only (a 486SX has no FPU). */
+static int timing(int argc, char **argv)
+{
+    static short buf[2048 * 2];
+    unsigned rate = 44100;
+    int i, bad = 0;
+    for (i = 1; i < argc; i++) {
+        const char *name = strrchr(argv[i], '\\') ? strrchr(argv[i], '\\') + 1 : strrchr(argv[i], '/') ? strrchr(argv[i], '/') + 1
+                           : argv[i];
+        const struct source_info *in;
+        struct source *s;
+        unsigned long long frames = 0;
+        unsigned long got, took, lasts;
+        clock_t t0;
+        int err;
+        if (!strcmp(argv[i], "-rate") && i + 1 < argc) {
+            rate = (unsigned)atoi(argv[++i]);
+            continue;
+        }
+        if (argv[i][0] == '-')
+            continue;
+        if (!(s = source_open(argv[i], rate, &err))) {
+            printf("PLAYER timed %s refused %d\n", name, err);
+            bad = 1;
+            continue;
+        }
+        in = source_info(s);
+        t0 = clock();
+        while ((got = source_read(s, buf, 2048)) != 0)
+            frames += got;
+        took = (unsigned long)((unsigned long long)(clock() - t0) * 1000 / CLOCKS_PER_SEC);
+        lasts = in->rate ? (unsigned long)(frames * 1000 / in->rate) : 0;
+        printf("PLAYER timed %s %s rate=%u channels=%u lasts=%lu.%lu s took=%lu.%02lu s share=%lu%%\n", name, in->kind, in->rate,
+               in->channels, lasts / 1000, lasts % 1000 / 100, took / 1000, took % 1000 / 10,
+               lasts ? (unsigned long)((unsigned long long)took * 100 / lasts) : 0);
+        fflush(stdout);
+        source_close(s);
+    }
+    return bad;
+}
+
 int main(int argc, char **argv)
 {
     char *q;
     int i, first = -1;
+    for (i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "-time"))
+            return timing(argc, argv);
     if (gui_init(argc, argv) != 0) {
         printf("PLAYER no GLOS\n");
         return 1;

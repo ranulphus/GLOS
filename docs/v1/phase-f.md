@@ -393,7 +393,14 @@ work.
   forth (XM's: the place runs on past the loop's end for the way back, so one sum serves both); each sample on
   the line between the two it falls between, or the nearer one. Four channels at their loudest are the top;
   songs of more are mixed at 2 / the root of their number (they are seldom loud together), and what still goes
-  over is held at the top.
+  over is held at the top. Most frames of a voice are made in runs that need no look at the sample's end or
+  loop (as many as surely lie before it), with sums of 32 bits and a 16-bit sample read in one load.
+  - **Measured on bench-g400** (a Pentium II Deschutes; `PLAYER -time`, under GLOS, 2026-11-20), two songs of a
+    minute with all 16 channels sounding: the first, frame-by-frame version took 11% of the PC's time at
+    22050 Hz and 22% at 44100 Hz (S3M 7.03 s and 14.01 s for 61.4 s of sound; XM 7.25 s and 14.39 s); this
+    one 2.6% and 5.3% (S3M 1.59 s and 3.24 s; XM 1.42 s and 2.80 s): 4.4 to 5.1 times less. For comparison
+    there, a minute of MP3 (128 kbit/s, stereo, 44100 Hz) takes 3.18 s and of Ogg Vorbis 2.96 s. A 486's own
+    figures are owed from bench C.
 - **S3M** (`apps/shared/s3m.c`): up to 32 channels of samples (the AdLib's channels and instruments are passed
   over), the file's own places for them or left and right as Scream Tracker has them, a song that is not stereo
   in the middle; the orders with their markers; samples of 8 or 16 bits, signed (the old way) or not, each with
@@ -419,6 +426,11 @@ work.
   FastTracker 2's last form (1.04) is said to be packed in a way that isn't played here.
 - **Files** opens S3M and XM files with the Player; the Player's dialog and its folders' listing know them.
 - **Not yet:** IT modules; an S3M's AdLib channels; XM's glissando; the pattern view.
+- **`PLAYER -time [-rate N] FILE ...`** (no window, no card, and under plain DOS too): each file's whole sound
+  made as fast as the PC can, and the time that took beside the time the sound lasts (`share=37%`: the PC's
+  time the file needs while it plays). For the benches: what a real 486 has left with a 16-channel module at
+  the mixer's 22050 Hz, or a Pentium with an MP3, is measured there, not reckoned from 86Box. Loop A's audio
+  suite looks at the lines' shape alone.
 - **Tests.** `s3m_test` and `xm_test` on the host, each with some thirty small songs written byte by byte
   (`tests/host/s3m_cases.py`, `xm_cases.py`) and held to what must be heard: every note's pitch (the cycles
   counted), how loud on which side, each command's effect on pitch, volume, place or the song's length, the
