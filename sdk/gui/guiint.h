@@ -109,7 +109,8 @@ void gui_menu_to(struct gui_menu *m, struct gui_widget *w, void (*fn)(struct gui
 extern void (*gui_libc_hook)(int on);           /* (files.c) the C library's lock taken (1) and given back (0), in a
                                                    program with tasks (task.c sets it: glos_libc_lock is in such a
                                                    program only); NULL: one thread, nothing to lock */
-struct gui_window *gui_menu_popup_of(struct gui_window *owner);  /* (menu.c) its open menu's pop-up, or NULL */
+struct gui_window *gui_menu_popup_of(struct gui_window *owner);  /* (menu.c) its open menu's deepest pop-up (owner:
+                                           the menu's window, or a pop-up of the menu with a submenu over it), or NULL */
 void gui_menu_gone(struct gui_window *w);       /* (menu.c) w is being closed: an open menu that is its is forgotten */
 extern int (*gui_post_hook)(unsigned code);     /* (core.c) an event of the app's own: 1 if it was the tasks'
                                                    (handled); NULL until a task is started */

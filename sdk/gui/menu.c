@@ -693,7 +693,19 @@ void gui_menu_gone(struct gui_window *w)
    pop-up had the keyboard is the menu's all the same (core.c). */
 struct gui_window *gui_menu_popup_of(struct gui_window *owner)
 {
-    return M.popup && M.owner == owner ? M.popup : NULL;
+    int i;
+    if (!M.popup)
+        return NULL;
+    if (M.owner == owner)
+        return M.popup;
+    for (i = 0; i < nunder; i++)                /* (a menu's pop-up that has a submenu open over it: a key GLOS
+                                                   sent it before the submenu's pop-up had the keyboard is the
+                                                   submenu's. Format, Encoding, 4 typed at once on the 486: the 4
+                                                   was the Format menu's, which has no such item, and the submenu
+                                                   stayed open: notepad-enc, 2026-11-20) */
+        if (U[i].popup == owner)
+            return M.popup;
+    return NULL;
 }
 
 static void open_level(struct gui_window *owner, struct gui_menu *m, int sx, int sy, struct gui_menubar *bar,

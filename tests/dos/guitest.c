@@ -1104,7 +1104,7 @@ static void slow_close(struct gui_window *w)
 static void slow_command(struct gui_window *w, int id)
 {
     (void)w;
-    say("slow %s", id == 1 ? "alpha" : "beta", 0);
+    say("slow %s", id == 1 ? "alpha" : id == 2 ? "beta" : "gamma", 0);
 }
 
 static int slow_key(struct gui_window *w, struct gui_ev *e)
@@ -1129,6 +1129,7 @@ static void slow_page(void)
     m = gui_menu(bar, "&Menu");
     gui_menu_item(m, "&Alpha", 1, NULL);
     gui_menu_item(m, "&Beta", 2, NULL);
+    gui_menu_item(gui_menu_sub(m, "&Deeper"), "&Gamma", 3, NULL);
     gui_label(gui_vbox(win->root, 6, 8), "This window is always a second behind.");
     status = gui_status(win);
     gui_show(win, 1);

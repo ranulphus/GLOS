@@ -1040,10 +1040,12 @@ static void key(struct gui_window *w, const struct os_event *ev)
     memset(&e, 0, sizeof e);
     e.type = GUI_EV_KEY;
     e.key = ev->key, e.ch = ev->ch, e.mods = ev->mods, e.time = ev->time;
-    if (!(w->flags & GUI_W_POPUP)) {            /* a key typed while this window's menu was opening (Alt+T, then D
+    {                                           /* a key typed while this window's menu was opening (Alt+T, then D
                                                    at once, on a slow PC: GLOS sent it here, the pop-up not yet
                                                    having the keyboard) is the menu's: the letter chose nothing and
-                                                   went to the app, the menu left open (Paint's suite, the 486) */
+                                                   went to the app, the menu left open (Paint's suite, the 486).
+                                                   Likewise a key sent to a menu's pop-up whose submenu was opening:
+                                                   the submenu's */
         struct gui_window *p = gui_menu_popup_of(w);
         if (p)
             w = p;
