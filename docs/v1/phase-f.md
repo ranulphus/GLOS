@@ -115,9 +115,9 @@ Plan: `docs/v1/apps/audio-player.md`. `apps/player` (PLAYER.EXE): `player.c` the
   WAV begun by itself at its end, the list through, a playlist saved (its bytes checked), cleared, a playlist
   opened. The audio suite: the real Player given a WAV of 1175 Hz and a module of 259 Hz plays one after the
   other, says so, and both tones are in 86Box's recording.
-- **Not yet:** S3M, XM and IT modules; VOC; MP3 and Ogg Vorbis (minimp3 and stb_vorbis, a Pentium's); MIDI
-  through the OPL3; CD audio; tags; drag and drop and sorting in the list; the small view; a visualisation and
-  the pattern view; gapless playing; a folder's files added in the background.
+- **Not yet:** IT modules; VOC; CD audio; tags; drag and drop and sorting in the list; the small view; a
+  visualisation and the pattern view; gapless playing; a folder's files added in the background. (MP3 and Ogg
+  Vorbis, S3M and XM modules, and MIDI files came after: below.)
 
 ## Files: folders on other computers (2026-11-20)
 
@@ -380,3 +380,87 @@ are others' work, unchanged (`THIRD_PARTY.md`): **minimp3** (CC0: MPEG audio lay
   (bytes changed, cut short, a piece overwritten), opened or refused and played to their end, under the
   sanitizers on the host. Loop A's audio suite, on the Pentium: an MP3 and an Ogg file after the WAV and the
   module in the Player, their two tones in the recording.
+
+## The Player: S3M and XM modules (2026-11-20)
+
+The route's next of the Player's kinds: the two module formats of the PC's own trackers, by players written
+here from the formats' public descriptions (Scream Tracker 3's TECH.DOC, FastTracker 2's XM.TXT, and what is
+told of how the two trackers play; no code of another player's). Whole numbers throughout, as `mod.c`: a 486's
+work.
+
+- **`apps/shared/trkmix.h`**: what the two share, a tracker's voices mixed into samples. A voice's place in its
+  sample is a whole part and a 32-bit fraction; 8 and 16 bits, signed or not; loops forwards, and back and
+  forth (XM's: the place runs on past the loop's end for the way back, so one sum serves both); each sample on
+  the line between the two it falls between, or the nearer one. Four channels at their loudest are the top;
+  songs of more are mixed at 2 / the root of their number (they are seldom loud together), and what still goes
+  over is held at the top.
+- **S3M** (`apps/shared/s3m.c`): up to 32 channels of samples (the AdLib's channels and instruments are passed
+  over), the file's own places for them or left and right as Scream Tracker has them, a song that is not stereo
+  in the middle; the orders with their markers; samples of 8 or 16 bits, signed (the old way) or not, each with
+  its own rate for a middle C. The commands A to X: speed and tempo, jumps, breaks and the pattern loop (one for
+  the song, the next beginning after the last, as Scream Tracker has it), the row gone through again, volume
+  slides (on the first tick too for the first Scream Tracker 3's files), slides in pitch with the fine and
+  extra fine ones, the slide to a note, vibrato and the fine vibrato, tremor, arpeggio, the sample's offset,
+  the note struck again, tremolo, the note cut and put off, tunings, the song's volume, places.
+- **XM** (`apps/shared/xm.c`): up to 32 channels, patterns of 1 to 256 rows, both kinds of period (the linear
+  ones, 64 to the semitone, from a table of 2^(i/768) reckoned in whole numbers when the file is opened; and
+  the Amiga's), instruments of several samples chosen by the note, each with its volume, place, tuning and
+  note of its own; the volume and place envelopes with their held point and loop; the fade when the key is
+  let go (and the stop at once where there is no envelope); the instrument's own vibrato. A note with no
+  instrument keeps the volume and the envelopes where they are; an instrument with no note begins them again.
+  The commands 0 to F, the E's, G, H, K, L, P, R, T and X, and the volume column's. Its samples are stored as
+  differences: they are made whole where they lie when the file is opened (no second copy of the file), after
+  everything else about it has been found sound.
+- **Both** end a song that would go round for ever where it comes to a row it has played before (a pattern
+  loop's rows apart); tell a song's length by going through it with no voices (a row's place in its pattern is
+  kept from the row before: the packed patterns are not gone through from their start each row); and seek by
+  playing to there silently, which leaves every voice as playing would (a test holds them to it).
+- **The kind is the file's bytes**: `Extended Module: ` at the start, `SCRM` at 2Ch. An XM of before
+  FastTracker 2's last form (1.04) is said to be packed in a way that isn't played here.
+- **Files** opens S3M and XM files with the Player; the Player's dialog and its folders' listing know them.
+- **Not yet:** IT modules; an S3M's AdLib channels; XM's glissando; the pattern view.
+- **Tests.** `s3m_test` and `xm_test` on the host, each with some thirty small songs written byte by byte
+  (`tests/host/s3m_cases.py`, `xm_cases.py`) and held to what must be heard: every note's pitch (the cycles
+  counted), how loud on which side, each command's effect on pitch, volume, place or the song's length, the
+  envelopes' and the fade's levels tick by tick, seeking against playing sample for sample; files cut short;
+  and 800 and 1000 copies with bytes changed at random, played, sought in and measured under the sanitizers.
+  `packed_test` plays one of each through `source.c` (`tests/host/sndfix/modules.py` writes them). Loop A's
+  audio suite: an S3M and an XM after the WAV and the MOD in the Player, on every PC of the suite, their two
+  tones in the recording.
+
+## The Player: MIDI files (2026-11-20)
+
+The route's next: `.MID` files (and `.RMI`, the same in a RIFF wrapper) through AUDIO's MIDI port, which GLOS
+has had since phase B (API 2.0, step 10): the card's FM chip played by the kernel's own General MIDI driver, or
+an MPU-401 with whatever is plugged into it. The Player is that port's first real user.
+
+- **`apps/shared/smf.c`** reads a Standard MIDI File of type 0 or 1: its tracks side by side, the earliest
+  event next, so that the channel messages come out in the order they are to be sent, each with its time in
+  milliseconds: the tempo changes are worked in as they are met (a tick is so many to the quarter note, or to
+  a frame of film time). Running status; a note on with no force as a note off; system exclusive messages and
+  the events that are for a reader passed over, but for the tempo, the first track's name (the song's title)
+  and a track's end. A file cut short gives what there is of it. Type 2 (songs side by side) is said to be a
+  kind that isn't played here.
+- **The engine** (`apps/player/engine.c`) sends, at each look of its thread, the messages of the next 400 ms
+  with their times on GLOS's clock; GLOS plays each at its time, whatever the Player is doing. The FM chip
+  where there is one, else an MPU-401; where there is neither, or another program has the port, the Player
+  says so. To the window a MIDI file is 1000 "frames" a second, so the time, the slider and the list's length
+  are as for any other file; the last notes have 0.8 s to die away.
+- **Pause, going on and seeking.** A pause drops what waits and ends the notes. Going on, or a seek, first
+  tells the port how things stand at that place: for each channel every controller as General MIDI begins,
+  then what the file had said up to there (its controllers, its instrument, its bend, and the bend's range
+  where the file set it), and then the messages from there on. No note from before the place is struck late,
+  and a seek backwards doesn't keep a later instrument.
+- **The volume** of the Player is the force of the notes (a MIDI port has no stream to turn down); the Mixer
+  has the FM chip's own level.
+- **Files** opens MID and RMI files with the Player; the Player's dialog and its folders' listing know them. A
+  file added to the list is asked what it is through the engine now (`eng_probe`), not played to find out.
+- **Not yet:** a choice of the MIDI device in the Player (FM first, as built); system exclusive messages to
+  an MPU-401; the software synthesiser with a SoundFont (a fast Pentium's); karaoke words.
+- **Tests.** `smf_test` on the host: files written byte by byte (`tests/host/smf_cases.py`) held to every
+  message and its time (two tempos, three tracks together in their order, film-time ticks, the wrapper, a file
+  cut in a message), refusals, and 2000 copies with bytes changed at random (what comes out never goes back
+  in time and is always a channel message), under the sanitizers too. `tests/gui/player-kinds.txt`, host and
+  Loop A, with no card: a MIDI file, an S3M and an XM added and played through, a type 2 file refused. Loop
+  A's audio suite: the real Player plays a MIDI file of one flute note through the card's FM chip after the
+  modules, on every PC of the suite, and its 370 Hz is in the recording.

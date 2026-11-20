@@ -1,6 +1,7 @@
-/* The Player's playing (apps/player/engine.c): one file at a time, its samples fed to a stream out by a thread of
-   the engine's own, so that the music goes on whatever the window is doing (a menu open, a dialog up, a folder
-   being listed). Every call here is the window's thread's. */
+/* The Player's playing (apps/player/engine.c): one file at a time, its samples fed to a stream out (or a MIDI
+   file's messages sent to a MIDI port) by a thread of the engine's own, so that the music goes on whatever the
+   window is doing (a menu open, a dialog up, a folder being listed). Every call here is the window's thread's.
+   A MIDI file counts 1000 "frames" a second. */
 #ifndef ENGINE_H
 #define ENGINE_H
 
@@ -22,7 +23,11 @@ int eng_begin(int demo);                /* 0, or -1 (no thread to be had). demo:
 void eng_end(void);
 int eng_open(const char *path, struct source_info *info);       /* SOURCE_OK and the file ready at its start, or a
                                            SOURCE_E_; whatever was open is closed either way */
-int eng_play(void);                     /* 0, or -1: there is no card to play through */
+/* What a file says of itself (its kind, length, title), with nothing opened for playing: SOURCE_OK or a
+   SOURCE_E_. */
+int eng_probe(const char *path, struct source_info *info);
+int eng_play(void);                     /* 0; -1: there is no card to play through; -2: (a MIDI file) no MIDI
+                                           device: neither an FM chip nor an MPU-401, or another program has it */
 void eng_pause(void);                   /* paused, or on again */
 void eng_stop(void);                    /* silent, at the file's start again */
 void eng_close(void);

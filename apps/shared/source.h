@@ -1,7 +1,8 @@
 /* A sound file as samples, had as they are wanted: what the Player plays (phase F; docs/v1/apps/audio-player.md).
-   WAV files (wave.c reads them piece by piece), MOD modules (mod.c plays them), and MP3 and Ogg Vorbis files
-   (packed.c: unpacked as they are wanted); the kind is told by the file's bytes, not its name. One code for the app and for the host's tests. Samples are 16 bits; a frame is a sample
-   of each channel. */
+   WAV files (wave.c reads them piece by piece), MOD, S3M and XM modules (mod.c, s3m.c and xm.c play them), and
+   MP3 and Ogg Vorbis files (packed.c: unpacked as they are wanted); the kind is told by the file's bytes, not
+   its name. One code for the app and for the host's tests. Samples are 16 bits; a frame is a sample of each
+   channel. */
 #ifndef SOURCE_H
 #define SOURCE_H
 
@@ -19,7 +20,7 @@ struct source;
 struct source_info {
     unsigned rate, channels;            /* channels: 1 or 2 */
     unsigned long frames;               /* its length (a module's: to where its song ends or goes round) */
-    char kind[8];                       /* "WAV", "MOD", "MP3" (or "MP2", "MP1"), "OGG" */
+    char kind[8];                       /* "WAV", "MOD", "S3M", "XM", "MP3" (or "MP2", "MP1"), "OGG" */
     char title[64];                     /* the song's own name where the file has one, else "" */
     char detail[40];                    /* "16 bits", "ADPCM", "4 channels" ... */
 };
@@ -35,5 +36,8 @@ const char *source_error(int err);      /* a few words for the user */
 /* How files are opened (as fopen does): the C library's way unless an app says otherwise (the toolkit's
    gui_fopen, for the host). */
 void source_files(void *(*open)(const char *path, const char *mode));
+/* A whole file read into memory, opened in the same way (for what is no stream of samples: a MIDI file): its
+   bytes (the caller's to free) and *size, or NULL: it couldn't be read, is empty, or is longer than max. */
+unsigned char *source_whole(const char *path, unsigned long max, unsigned long *size);
 
 #endif

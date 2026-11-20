@@ -224,6 +224,29 @@ glos_handle glos_audio_out(unsigned rate, unsigned channels, unsigned bytes, str
     return 0;
 }
 
+glos_handle glos_midi_out(unsigned port)
+{
+    (void)port;
+    last_error = GLOS_E_NO_AUDIO;
+    return 0;
+}
+
+int glos_midi_send(glos_handle h, const struct glos_midi_msg *m, unsigned count, unsigned *taken, unsigned *queued)
+{
+    (void)h, (void)m, (void)count;
+    if (taken)
+        *taken = 0;
+    if (queued)
+        *queued = 0;
+    return GLOS_E_HANDLE;
+}
+
+int glos_midi_flush(glos_handle h)
+{
+    (void)h;
+    return GLOS_E_HANDLE;
+}
+
 unsigned glos_audio_write(struct glos_audio_ring *r, const void *samples, unsigned bytes)
 {
     (void)r, (void)samples, (void)bytes;

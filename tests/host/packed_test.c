@@ -156,6 +156,10 @@ int main(int argc, char **argv)
     play(argv[1], "STEREO.MP3", "MP3", 44100, 2, 2 * 44100, 3500, "", 440, 880);
     play(argv[1], "TONE.OGG", "OGG", 44100, 2, 2 * 44100, 0, "Two Tones", 440, 880);
     play(argv[1], "MONO.OGG", "OGG", 22050, 1, 22050, 0, "", 440, 0);
+    /* The two modules beside them (sndfix/modules.py), by source.c's way to their players: 25 rows of six ticks
+       of 882 frames. */
+    play(argv[1], "PS3M.S3M", "S3M", 44100, 2, 25 * 6 * 882ul, 0, "a tone", 1320, 1320);
+    play(argv[1], "PXM.XM", "XM", 44100, 2, 25 * 6 * 882ul, 0, "a tone", 1863, 1863);
     damage(argv[1], "TONE.MP3", argv[2]);
     damage(argv[1], "STEREO.MP3", argv[2]);
     damage(argv[1], "TONE.OGG", argv[2]);

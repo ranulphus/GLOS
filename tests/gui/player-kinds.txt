@@ -1,0 +1,40 @@
+# The Player's other kinds (apps/player; phase F), with no card and no clock of its own (PLAYER -demo: F9 is ten
+# seconds heard): a MIDI file, an S3M and an XM module added by the dialog, each said with its kind and its
+# length; a MIDI file of the kind that isn't played refused; the three played, each to its end, the next begun
+# by itself. The files are tests/gui/mksnd.py's, in C:\SND.
+run PLAYER.EXE -demo
+wait "Player"
+key ctrl+o
+wait "Add Files"
+type C:\\SND\\TUNE.MID\n
+said PLAYER added TUNE.MID MID 0:03
+key ctrl+o
+wait "Add Files"
+type C:\\SND\\SCREAM.S3M\n
+said PLAYER added SCREAM.S3M S3M 0:03
+key ctrl+o
+wait "Add Files"
+type C:\\SND\\FAST.XM\n
+said PLAYER added FAST.XM XM 0:03
+key ctrl+o
+wait "Add Files"
+type C:\\SND\\SONGS.MID\n
+said PLAYER refused SONGS.MID -3
+pause 500
+key enter
+shot kinds "Player"
+key home
+key enter
+said PLAYER playing 1 TUNE.MID
+key f9
+said PLAYER ended TUNE.MID
+said PLAYER playing 2 SCREAM.S3M
+key f9
+said PLAYER ended SCREAM.S3M
+said PLAYER playing 3 FAST.XM
+key f9
+said PLAYER ended FAST.XM
+said PLAYER through
+key alt+f4
+gone "Player"
+expect PLAYER end

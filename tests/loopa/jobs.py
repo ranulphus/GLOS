@@ -4880,6 +4880,11 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         song += (bytes([0x01, 0xAC, 0x10, 0x00]) if r == 0 else bytes(4)) + bytes(12)
     song += bytes(int(round(127 * math.sin(2 * math.pi * i / 32))) & 0xFF for i in range(32))
     open(os.path.join(snd, "PSONG.MOD"), "wb").write(bytes(song))
+    # ... and a MIDI file: a flute's F sharp (370 Hz) for two and a half seconds, on a tick of 5.208 ms (96 to the
+    # quarter note, 120 of those a minute); its track ends at three seconds
+    tune = bytes([0, 0xC0, 73, 0, 0x90, 66, 127, 0x83, 0x60, 0x80, 66, 0, 0x60, 0xFF, 0x2F, 0])
+    open(os.path.join(snd, "PTUNE.MID"), "wb").write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, 96) + b"MTrk"
+                                                     + struct.pack(">I", len(tune)) + tune)
     off_cfg = [] if virtual else ["--file", batfile("audio-%s/GLOS.CFG" % tag, [
         "; jobs.py audio, the virtual Sound Blaster off", "[time]", "sntp = off", "[sound]", "virtual = off"])
         + "=/TEST/GLOS.CFG"]
@@ -4890,6 +4895,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         "--file", "build/apps/RECORDER.EXE=/TEST/RECORDER.EXE", "--file", "build/apps/PLAYER.EXE=/TEST/PLAYER.EXE",
         "--file", os.path.join(snd, "PTONE.WAV") + "=/TEST/PTONE.WAV",
         "--file", os.path.join(snd, "PSONG.MOD") + "=/TEST/PSONG.MOD",
+        "--file", os.path.join(snd, "PTUNE.MID") + "=/TEST/PTUNE.MID",
+        "--file", "tests/host/sndfix/PS3M.S3M=/TEST/PS3M.S3M", "--file", "tests/host/sndfix/PXM.XM=/TEST/PXM.XM",
         "--file", "tests/host/sndfix/PMP3.MP3=/TEST/PMP3.MP3", "--file", "tests/host/sndfix/POGG.OGG=/TEST/POGG.OGG",
         "--file", "sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT", "--file", "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT",
         "--file", "sdk/gui/fonts/ICONS.DAT=/TEST/ICONS.DAT",
@@ -5018,13 +5025,14 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
             print("    %s recorder: rc=%d %r file=%d bytes" % (tag, rc_rec, o_rec[-300:], len(wav)))
         info += " recorded=%d peak=%s" % (n_rec, m.group(2) if m else "?")
         checks["rec-tone"] = played(finish(tone), "R")[0]
-        # The Player (phase F; apps/player), the real one: the WAV and the module of its command line played one
-        # after the other through a stream of its own, the next begun by itself; their tones are in 86Box's
-        # recording (checked with the others at the end).
+        # The Player (phase F; apps/player), the real one: the WAV and the modules of its command line (a MOD, an
+        # S3M and an XM: tests/host/sndfix/modules.py) played one after the other through a stream of its own,
+        # the next begun by itself, and then a MIDI file through the card's FM chip (AUDIO's MIDI port, GLOS's
+        # own driver); their tones are in 86Box's recording (checked with the others at the end).
         # On the Pentium, an MP3 and an Ogg Vorbis file after them (minimp3 and stb_vorbis under packed.c: three
         # seconds each of a tone of its own); the 486 is not asked to (docs/v1/apps/audio-player.md: a Pentium's).
         packed = profile == "bf6"
-        ply = start("C:\\TEST\\PLAYER.EXE C:\\TEST\\PTONE.WAV C:\\TEST\\PSONG.MOD"
+        ply = start("C:\\TEST\\PLAYER.EXE C:\\TEST\\PTONE.WAV C:\\TEST\\PSONG.MOD C:\\TEST\\PS3M.S3M C:\\TEST\\PXM.XM C:\\TEST\\PTUNE.MID"
                     + (" C:\\TEST\\PMP3.MP3 C:\\TEST\\POGG.OGG" if packed else ""))
         ply.said = bytearray()
         heard = threading.Thread(target=GuiDriver._listen, args=(ply,), daemon=True)
@@ -5042,9 +5050,12 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         o_p = bytes(ply.said).decode("latin-1").replace("\r", "")
         checks["player-said"] = rc_p == 0 and all(l in o_p for l in (
             "PLAYER added PTONE.WAV WAV 0:05", "PLAYER added PSONG.MOD MOD 0:07", "PLAYER playing 1 PTONE.WAV",
-            "PLAYER ended PTONE.WAV", "PLAYER playing 2 PSONG.MOD", "PLAYER ended PSONG.MOD", "PLAYER through", "PLAYER end")
-            + (("PLAYER added PMP3.MP3 MP3 0:03", "PLAYER added POGG.OGG OGG 0:03", "PLAYER playing 3 PMP3.MP3",
-                "PLAYER ended PMP3.MP3", "PLAYER playing 4 POGG.OGG", "PLAYER ended POGG.OGG") if packed else ())) \
+            "PLAYER ended PTONE.WAV", "PLAYER playing 2 PSONG.MOD", "PLAYER ended PSONG.MOD", "PLAYER through", "PLAYER end",
+            "PLAYER added PS3M.S3M S3M 0:03", "PLAYER added PXM.XM XM 0:03", "PLAYER playing 3 PS3M.S3M",
+            "PLAYER ended PS3M.S3M", "PLAYER playing 4 PXM.XM", "PLAYER ended PXM.XM",
+            "PLAYER added PTUNE.MID MID 0:03", "PLAYER playing 5 PTUNE.MID", "PLAYER ended PTUNE.MID")
+            + (("PLAYER added PMP3.MP3 MP3 0:03", "PLAYER added POGG.OGG OGG 0:03", "PLAYER playing 6 PMP3.MP3",
+                "PLAYER ended PMP3.MP3", "PLAYER playing 7 POGG.OGG", "PLAYER ended POGG.OGG") if packed else ())) \
             and "PLAYER slow" not in o_p
         if not checks["player-said"]:
             print("    %s player: rc=%d %r" % (tag, rc_p, o_p[-400:]))
@@ -5064,7 +5075,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     wav = os.path.join(ROOT, "out", "audio-" + tag, "audio.wav")
     checks["recorded"] = os.path.exists(wav) and subprocess.run(
         [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440", "--tone", "1000",
-         "--tone", "784", "--tone", "523", "--tone", "1175", "--tone", "259"]       # (the last two: the Player's)
+         "--tone", "784", "--tone", "523", "--tone", "1175", "--tone", "259",       # (the last two: the Player's;
+         "--tone", "1319.8", "--tone", "1862.6", "--tone", "370"]                   # its S3M's, its XM's, its MIDI file's)
         + (["--tone", "1568", "--tone", "2093"] if profile == "bf6" else [])      # (... and its MP3's and its Ogg's)
         + (["--tone", "330", "--tone", "659"] if crystal else []),
         capture_output=True).returncode == 0

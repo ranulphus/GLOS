@@ -1,6 +1,7 @@
 /* PLAYER: the music player (GLOS v1, phase F; docs/v1/apps/audio-player.md): its first part. A list of files, one
  * of them playing through a stream of its own (engine.c: a thread feeds it, so that the music goes on whatever
- * the window does); WAV files and MOD modules (apps/shared/source.c).
+ * the window does); WAV files, MOD, S3M and XM modules, MP3 and Ogg Vorbis files (apps/shared/source.c), and
+ * MIDI files through a MIDI port (apps/shared/smf.c; engine.c).
  *
  *   the list      a row a file: its title (the song's own name, where the file has one), its length, its kind;
  *                 Enter or a double click plays the row; Del removes it; the one playing has the play mark
@@ -95,7 +96,7 @@ static void show_list(int choose)
 static int playable(const char *name)   /* by its name's end (a folder's files; the dialog's filter) */
 {
     const char *dot = strrchr(name, '.');
-    static const char *const ends[] = { ".WAV", ".MOD", ".MP3", ".MP2", ".OGG", NULL };
+    static const char *const ends[] = { ".WAV", ".MOD", ".S3M", ".XM", ".MID", ".RMI", ".MP3", ".MP2", ".OGG", NULL };
     int i;
     for (i = 0; dot && ends[i]; i++) {
         const char *a = dot, *b = ends[i];
@@ -110,23 +111,20 @@ static int playable(const char *name)   /* by its name's end (a folder's files; 
 /* A file onto the list's end: 0, or why not (a SOURCE_E_). */
 static int add(const char *path)
 {
-    struct source *s;
-    const struct source_info *in;
+    struct source_info info;
+    const struct source_info *in = &info;
     struct item *it;
     int err;
-    if (!(s = source_open(path, 44100, &err))) {
+    if ((err = eng_probe(path, &info)) != SOURCE_OK) {
         say("refused %s %d", gui_path_name(path), err);
         return err;
     }
     if (nitems == room) {
         struct item *m = realloc(items, (size_t)(room ? room * 2 : 32) * sizeof *m);
-        if (!m) {
-            source_close(s);
+        if (!m)
             return SOURCE_E_MEMORY;
-        }
         items = m, room = room ? room * 2 : 32;
     }
-    in = source_info(s);
     it = &items[nitems++];
     memset(it, 0, sizeof *it);
     snprintf(it->path, sizeof it->path, "%s", path);
@@ -140,7 +138,6 @@ static int add(const char *path)
         clock_text(it->seconds, len, sizeof len);
         say("added %s %s %s", gui_path_name(path), it->kind, len);
     }
-    source_close(s);
     return SOURCE_OK;
 }
 
@@ -195,9 +192,11 @@ static int play_row(int i)              /* 1 if it plays */
     current = i;
     show_list(i);
     show_now();
-    if (eng_play() != 0) {
-        say("refused card");
-        gui_message(win, GUI_T("Player"), GUI_T("There is no sound card to play through."), GUI_MB_OK);
+    if ((err = eng_play()) != 0) {
+        say(err == -2 ? "refused midi" : "refused card");
+        gui_message(win, GUI_T("Player"), err == -2 ? GUI_T("There is no MIDI device to play through: no FM chip and no MPU-401, "
+                                                            "or another program is using it.")
+                                                    : GUI_T("There is no sound card to play through."), GUI_MB_OK);
         return 0;
     }
     say("playing %d %s", i + 1, gui_path_name(items[i].path));
@@ -376,7 +375,7 @@ static void settings_read(void)
 
 /* ---- commands */
 
-static const char *const sounds[] = { "Music and sounds|*.WAV;*.MOD;*.MP3;*.MP2;*.OGG", "All files|*.*", NULL };
+static const char *const sounds[] = { "Music and sounds|*.WAV;*.MOD;*.S3M;*.XM;*.MID;*.RMI;*.MP3;*.MP2;*.OGG", "All files|*.*", NULL };
 static const char *const lists[] = { "Playlists|*.M3U", "All files|*.*", NULL };
 
 static void command(struct gui_window *w, int id)

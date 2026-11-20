@@ -6,7 +6,11 @@ run again only to change them.
 
 SONG.MOD: a module of one pattern played four times (its order table names it four times): three notes and a
 soft one on a sine of 32 bytes, 30 seconds. TONE.WAV: two seconds of 440 Hz, 8 bits, one channel, 8000 Hz.
-NOSOUND.WAV: a text. LIST.M3U: the two, by their names alone (they are beside it)."""
+NOSOUND.WAV: a text. LIST.M3U: the two, by their names alone (they are beside it).
+
+For player-kinds.txt: TUNE.MID, a MIDI file of one track (a flute's two notes, three seconds); SONGS.MID, one of
+the kind that holds songs side by side (type 2: not played); SCREAM.S3M and FAST.XM, the two modules of
+tests/host/sndfix (modules.py there), three seconds each."""
 import math, os, struct
 
 here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drives", "C", "SND")
@@ -34,4 +38,27 @@ wav = b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, 8000, 8000, 1, 8) + b"data
 open(os.path.join(here, "TONE.WAV"), "wb").write(b"RIFF" + struct.pack("<I", len(wav)) + wav)
 open(os.path.join(here, "NOSOUND.WAV"), "wb").write(b"This file is named as a sound and is none.\r\n")
 open(os.path.join(here, "LIST.M3U"), "wb").write(b"# a playlist: a file a line\r\nSONG.MOD\r\nTONE.WAV\r\n")
+
+
+def num(v):
+    b = [v & 0x7F]
+    while v > 0x7F:
+        v >>= 7
+        b.insert(0, 0x80 | (v & 0x7F))
+    return bytes(b)
+
+
+def track(*events):
+    body = b"".join(num(d) + e for d, e in events)
+    return b"MTrk" + struct.pack(">I", len(body)) + body
+
+
+# 96 ticks to the quarter note, 120 quarter notes a minute: a tick is 5.208 ms
+tune = track((0, bytes([0xFF, 0x03, 6]) + b"A Tune"), (0, bytes([0xC0, 73])), (0, bytes([0x90, 66, 100])), (192, bytes([0x80, 66, 0])),
+             (0, bytes([0x90, 73, 100])), (288, bytes([0x80, 73, 0])), (96, bytes([0xFF, 0x2F, 0])))
+open(os.path.join(here, "TUNE.MID"), "wb").write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, 96) + tune)
+open(os.path.join(here, "SONGS.MID"), "wb").write(b"MThd" + struct.pack(">IHHH", 6, 2, 2, 96) + tune + tune)
+fix = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "host", "sndfix")
+open(os.path.join(here, "SCREAM.S3M"), "wb").write(open(os.path.join(fix, "PS3M.S3M"), "rb").read())
+open(os.path.join(here, "FAST.XM"), "wb").write(open(os.path.join(fix, "PXM.XM"), "rb").read())
 print(here)
