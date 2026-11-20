@@ -190,7 +190,7 @@ static void ask_command(struct gui_window *w, int id)  /* OK (1): the line typed
     }
 }
 
-int gui_ask(struct gui_window *owner, const char *title, const char *prompt, char *buf, int room)
+static int ask_for(struct gui_window *owner, const char *title, const char *prompt, char *buf, int room, int secret)
 {
     char err[96];
     struct gui_window *w = gui_load_text(ask_text, err, sizeof err);
@@ -201,10 +201,21 @@ int gui_ask(struct gui_window *owner, const char *title, const char *prompt, cha
     w->on_command = ask_command;
     gui_set_text(gui_named(w, "Prompt"), prompt);
     ask.field = gui_named(w, "Answer");
+    gui_field_mask(ask.field, secret);
     gui_set_text(ask.field, buf);
     ask.buf = buf, ask.room = room;
     w->focus = ask.field;
     return gui_modal(w) == GUI_OK;
+}
+
+int gui_ask(struct gui_window *owner, const char *title, const char *prompt, char *buf, int room)
+{
+    return ask_for(owner, title, prompt, buf, room, 0);
+}
+
+int gui_ask_secret(struct gui_window *owner, const char *title, const char *prompt, char *buf, int room)
+{
+    return ask_for(owner, title, prompt, buf, room, 1);
 }
 
 #define PATH_ROOM 160

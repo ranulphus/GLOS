@@ -214,8 +214,9 @@ APP_HOST_LIBS_term := tests/host/shimshell.c sdk/shell/shell.c sdk/shell/edit.c
 LZMA_SRCS := $(addprefix third_party/lzma/,7zArcIn.c 7zDec.c LzmaDec.c Lzma2Dec.c Bcj2.c Bra.c Bra86.c Delta.c 7zBuf.c 7zStream.c)
 ARC_SRCS := apps/shared/arc.c apps/shared/arc7z.c apps/shared/lzh.c apps/shared/deflate.c loader/inflate.c $(LZMA_SRCS)
 # Pictures read and written: one code in the viewer and the editor (apps/shared/picfile.c).
-APP_HOST_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c
-APP_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c
+# (... and folders on other computers over SFTP, phase F: apps/shared/remote.c on the SSH client's library.)
+APP_HOST_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c apps/shared/remote.c build/host/libsshc32.a
+APP_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c apps/shared/remote.c build/sdk/libsshc.a
 APP_HOST_LIBS_images := apps/shared/picfile.c apps/shared/thumbs.c
 APP_HOST_LIBS_paint := apps/shared/picfile.c
 APP_LIBS_images := apps/shared/picfile.c apps/shared/thumbs.c
@@ -643,7 +644,7 @@ loopa-pkg: all build/apps/PKG.EXE build/host/mkcerts build/glos/CERTS.DAT build/
            check-deps
 	$(Q)python3 tests/loopa/jobs.py pkg -j $(JOBS)
 # M10 step D: the terminal's ssh, sftp and ssh-keygen against OpenSSH in a container (tests/sshd).
-loopa-sshc: all build/apps/TERM.EXE $(SSH_EXES) check-deps
+loopa-sshc: all build/apps/TERM.EXE build/apps/FILES.EXE $(SSH_EXES) check-deps
 	$(Q)python3 tests/loopa/jobs.py sshc -j $(JOBS)
 # M9's exit: the toolkit, the settings, console jobs, the apps, the Control Panel.
 loopa-m9: loopa-gui loopa-config loopa-console loopa-native loopa-control

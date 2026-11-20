@@ -118,3 +118,40 @@ Plan: `docs/v1/apps/audio-player.md`. `apps/player` (PLAYER.EXE): `player.c` the
 - **Not yet:** S3M, XM and IT modules; VOC; MP3 and Ogg Vorbis (minimp3 and stb_vorbis, a Pentium's); MIDI
   through the OPL3; CD audio; tags; drag and drop and sorting in the list; the small view; a visualisation and
   the pattern view; gapless playing; a folder's files added in the background.
+
+## Files: folders on other computers (2026-11-20)
+
+The owner's choice of 2026-11-20 (`docs/v1-route.md`, F, "More of SSH"): a remote GLOS or Linux PC opened in
+Files over SFTP, like a drive. `apps/shared/remote.c` (a connection whose calls wait for their answers),
+`apps/files/site.c` (the connections Files keeps, addresses, a folder asked for) and its hooks in `folder.c`.
+
+- **An address is a folder:** `sftp://user@computer/folder` (`:port` after the computer for another port; no
+  folder: the login's own) typed into the browser's address bar, given to `FILES -browse`, or asked for by
+  **Go's Connect to a Computer...** (as `ssh` is told: `user@computer`). Back, Forward and Up go along it as
+  along any path; the address bar keeps the ones gone to.
+- **The login is `ssh`'s own:** the same key (`SSH\ID_ED25` beside the programs) and the same known hosts
+  (`KNOWNHST.TXT`), so a computer `ssh` has logged in to needs no question here, and the other way about. A
+  computer met for the first time is asked about with its key's fingerprint and kept on a yes; one whose key
+  has changed is refused. Where the key does not log in, the password is asked for (stars as it is typed), up
+  to three times.
+- **It is listed and worked on off the window's thread.** A folder asked for is connected to and listed by a
+  background task, the status bar saying so meanwhile; its questions are put on the window's thread and the
+  task waits for the answer. (The task has no progress dialog of its own: the first try had one, and it came
+  up over the host's question a second into it and took the keyboard.) One connection is kept for each
+  computer and login while Files runs, shared by its windows and jobs, one call at a time (a lock each). A
+  connection the other side has ended is made again at the next folder asked for.
+- **What can be done there:** a folder gone into; a file opened (fetched under a name DOS can have, beside
+  FILES.EXE, and opened by its kind); Copy and a paste into a folder of this PC (a folder with what is in it;
+  long names as DOS can have them, numbered where two would be alike); things of this PC pasted there (their
+  names as they are); New Folder, Rename and Delete (asked about: it can't be had back). All of the copying
+  and deleting are jobs, with the progress window and Cancel every job has.
+- **What can't, yet:** Cut (a move), Find, properties, thumbnails, the tree (another computer's folders are
+  not in it), from one computer straight to another, a clash asked about (a file of the same name there or
+  here is written over), a file opened there kept in step with its fetched copy, the saved connections as
+  places (they are the Terminal's session manager's, next).
+- **Tests.** The sshc suite's new case (`filesnet_case`, both its machines), against OpenSSH in the suite's
+  container: the browser started on an address; the new host asked about and kept; the key's login; the
+  folder listed; a folder gone into, Back and Up; a file fetched (its bytes), everything fetched at once (a
+  300 KB file by its SHA-256, a long name's DOS name, a folder with its file); a 150 KB file of this PC pasted
+  there (SHA-256 in the container); a folder made, renamed and deleted there; then with no key, the password
+  asked, a wrong one, the right one.

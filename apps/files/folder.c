@@ -13,6 +13,8 @@
 #include <string.h>
 
 #include "files.h"
+#include "site.h"
+#include "../shared/remote.h"
 #include "../shared/arc.h"
 #include "../shared/thumbs.h"
 
@@ -44,6 +46,10 @@ struct view {
     char **arc_row;                     /* each of ents' own name there (ents' keep 63 characters of it) */
     struct gui_dirent arc_was;          /* the file as it was when it was opened (changed: opened again) */
     int stale;                          /* its folder changed while a job was at work: to be listed again */
+    /* The folder shown is on another computer (phase F: site.c). dir is its address (sftp://...); ents are what
+       its last listing gave, each one's whole name in arc_row (as an archive's). */
+    int site;
+    unsigned site_gen;                  /* which asking: an answer to an older one is nobody's */
 };
 
 static struct view *views;
@@ -62,7 +68,7 @@ static struct {                         /* the browser's view and its columns, a
 
 enum { C_OPEN = 1, C_NEWDIR, C_RENAME, C_DELETE, C_CLOSE, C_CUT, C_COPY, C_PASTE, C_ALL, C_BIG, C_DETAILS, C_REFRESH,
        C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS, C_PROPS, C_FIND, C_EXTRACT, C_ZIP, C_DELETE_NOW, C_RECYCLE,
-       C_SMALL, C_THUMBS, C_OPENWITH, C_EXTRACT_TO };
+       C_SMALL, C_THUMBS, C_OPENWITH, C_EXTRACT_TO, C_CONNECT };
 
 static void say(const char *what, const char *a)
 {
@@ -235,10 +241,13 @@ static int arc_read(struct view *v)
 static int row_path(struct view *v, int row, char *out, size_t room)
 {
     size_t idx = (size_t)gui_list_user(v->list, row);
-    const char *name = v->arc ? v->arc_row[idx] : v->ents[idx].name;
+    const char *name = v->arc || v->site ? v->arc_row[idx] : v->ents[idx].name;
     if (strlen(v->dir) + strlen(name) + 2 > room)
         return -1;
-    gui_path_join(out, (int)room, v->dir, name);
+    if (v->site)
+        site_join(out, (int)room, v->dir, name);
+    else
+        gui_path_join(out, (int)room, v->dir, name);
     return 0;
 }
 
@@ -485,6 +494,17 @@ static void fill(struct view *v)
     if (keep >= 0 && (size_t)gui_list_user(v->list, keep) < (size_t)v->n)      /* (the row's entry: the header sorts) */
         snprintf(keep_name, sizeof keep_name, "%s", v->ents[(size_t)gui_list_user(v->list, keep)].name);
     list_stop(v);
+    if (v->site) {                              /* on another computer: what its last listing gave (Refresh asks) */
+        gui_list_clear(v->list);
+        for (i = 0; i < v->n; i++) {
+            add_row(v, i);
+            if (keep_name[0] && !strcmp(keep_name, v->ents[i].name))
+                gui_list_set(v->list, i);
+        }
+        gui_list_resort(v->list);
+        status_text(v);
+        return;
+    }
     if (v->arc && !arc_read(v)) {               /* the archive has gone: the folder it was in */
         snprintf(v->dir, sizeof v->dir, "%s", v->arc_file);
         gui_path_up(v->dir);
@@ -784,13 +804,14 @@ static void way(struct view *v)
     }
     gui_command_enable(v->win, C_BACK, v->at > 0);
     gui_command_enable(v->win, C_FORWARD, v->at + 1 < v->nhist);
-    gui_command_enable(v->win, C_UP, strlen(v->dir) > 3);
-    {                                           /* (in an archive: what a ZIP can have done to it, and no more) */
+    gui_command_enable(v->win, C_UP, v->site ? strchr(v->dir + 7, '/') && strchr(v->dir + 7, '/')[1] : strlen(v->dir) > 3);
+    {                                           /* in an archive: what a ZIP can have done to it, and no more; on
+                                                   another computer: the first five, and no properties or pictures */
         static const int changes[] = { C_NEWDIR, C_DELETE, C_PASTE, C_DELETE_NOW, C_RENAME, C_CUT, C_FIND, C_EXTRACT,
-                                       C_ZIP, C_EXTRACT_TO, C_OPENWITH };
+                                       C_ZIP, C_EXTRACT_TO, C_OPENWITH, C_PROPS, C_THUMBS };
         size_t k;
         for (k = 0; k < sizeof changes / sizeof changes[0]; k++)
-            gui_command_enable(v->win, changes[k], !v->arc || (k < 5 && in_zip(v)));
+            gui_command_enable(v->win, changes[k], v->site ? k < 5 : !v->arc ? 1 : k < 5 ? in_zip(v) : k >= 11);
     }
     if (v->address) {
         gui_set_text(v->address, v->dir);
@@ -806,7 +827,7 @@ static void tree_follow(struct view *v)
     const char *rest, *e;
     struct gui_node *n, *c;
     size_t k;
-    if (!v->tree || !v->dir[0])
+    if (!v->tree || !v->dir[0] || v->site)      /* (another computer's folders are not in the tree) */
         return;
     snprintf(root, sizeof root, "%c:", toupper((unsigned char)v->dir[0]));
     if (!(n = gui_tree_child(v->tree, NULL, root)))
@@ -826,10 +847,111 @@ static void tree_follow(struct view *v)
     v->following = 0;
 }
 
+/* ---- a folder on another computer (phase F; site.c): asked for, and shown when the answer has come */
+
+struct site_ask {
+    struct view *v;
+    unsigned gen;
+};
+
+static void site_open(struct view *v, const char *url);
+static int site_command(struct view *v, int id, int r);
+
+static void site_leave(struct view *v)
+{
+    if (v->site) {
+        arc_rows_free(v);
+        v->site = 0;
+    }
+    v->site_gen++;                              /* (an answer still on its way is nobody's) */
+}
+
+static void go(struct view *v, const char *dir);
+
+static void site_listed(void *ctx, int err, const char *why, const char *url, struct site_ent *ents, int n)
+{
+    struct site_ask *a = ctx;
+    struct view *v, *asked = a->v;
+    unsigned gen = a->gen;
+    char t[500];
+    int i;
+    free(a);
+    for (v = views; v && v != asked; v = v->next)
+        ;
+    if (!v || gen != v->site_gen) {             /* its window has gone, or it has gone elsewhere since */
+        free(ents);
+        return;
+    }
+    if (err) {
+        snprintf(t, sizeof t, GUI_T("The other computer's folder can't be shown: %s."),
+                 why && why[0] ? why : GUI_T(remote_error(err)));
+        say("site", "refused");
+        gui_message(v->win, GUI_T("Files"), t, GUI_MB_OK);
+        if (!v->dir[0])                         /* (a window opened for it: the boot drive's top instead) */
+            go(v, "C:\\");
+        else
+            status_text(v);
+        return;
+    }
+    if (v->arc)
+        arc_leave(v);
+    arc_rows_free(v);
+    free(v->ents);
+    v->ents = calloc((size_t)(n ? n : 1), sizeof *v->ents);
+    v->arc_row = calloc((size_t)(n ? n : 1), sizeof *v->arc_row);
+    v->n = 0;
+    for (i = 0; v->ents && v->arc_row && i < n; i++) {
+        struct gui_dirent *d = &v->ents[v->n];
+        if (!(v->arc_row[v->n] = malloc(strlen(ents[i].name) + 1)))
+            break;
+        strcpy(v->arc_row[v->n], ents[i].name);
+        snprintf(d->name, sizeof d->name, "%s", ents[i].name);
+        arc_text(ents[i].name, d->text, sizeof d->text);
+        d->dir = ents[i].dir;
+        d->size = ents[i].size > 0xFFFFFFFFull ? 0xFFFFFFFFul : (unsigned long)ents[i].size;
+        d->date = ents[i].date, d->time = ents[i].time;
+        v->n++;
+    }
+    free(ents);
+    v->site = 1;
+    snprintf(v->dir, sizeof v->dir, "%s", url);
+    if (v->watch)
+        glos_close(v->watch);
+    v->watch = 0;
+    thumbs_drop(v);
+    way(v);
+    retitle(v);
+    fill(v);
+    if (gui_list_count(v->list))
+        gui_list_set(v->list, 0);
+    status_text(v);
+    snprintf(t, sizeof t, "%d %s", v->n, url);
+    say("site listed", t);
+}
+
+static void site_go(struct view *v, const char *url)
+{
+    struct site_ask *a = calloc(1, sizeof *a);
+    if (!a)
+        return;
+    a->v = v, a->gen = ++v->site_gen;
+    gui_set_text(v->status, GUI_T("Asking the other computer..."));
+    if (site_list(v->win, url, site_listed, a) != 0) {
+        free(a);
+        gui_message(v->win, GUI_T("Files"), GUI_T("There is no memory for that."), GUI_MB_OK);
+    }
+}
+
 static void go(struct view *v, const char *dir)
 {
     char file[260], in[520], t[300];
-    int in_arc = arc_split(dir, file, sizeof file, in, sizeof in);
+    int in_arc;
+    if (site_is(dir)) {                         /* on another computer: shown when it has answered */
+        site_go(v, dir);
+        return;
+    }
+    site_leave(v);
+    in_arc = arc_split(dir, file, sizeof file, in, sizeof in);
     if (in_arc && (!v->arc || strcmp(v->arc_file, file))) {     /* into an archive: opened first */
         int err;
         struct arc *a = arc_open(file, &err);
@@ -940,6 +1062,9 @@ struct job {
     int n, cut, del, shown;             /* (del: a delete: `from` alone, and the counts are of files and folders) */
     int ext;                            /* an archive unpacked whole (Extract Here): said so */
     int bin;                            /* a delete that goes to the Recycle folder (recycle.c) */
+    int site;                           /* to or from another computer (site.c): `from` or `to` are addresses
+                                           (a delete there: arc[] says which are folders) */
+    unsigned site_kb;                   /* ... the kilobytes of the files done before the one in hand */
     int zip;                            /* a ZIP changed (zfile): 1: each `from` put into it under the name `to`
                                            (with what is in it, a folder); 2: the `to`s and all under them taken
                                            out of it; 3: as 1, a new ZIP (Add to ZIP): said so */
@@ -1364,12 +1489,141 @@ static void zip_work(struct job *j)
         remove_tree(j, j->from[i]);
 }
 
+/* ---- ... to and from another computer (phase F; site.c). A folder goes with what is in it. What is fetched gets
+   names DOS can have (one that is there already: the next number); what is sent keeps the names it has. */
+
+static void site_moved(void *ctx, unsigned long long done, unsigned long long total)
+{
+    struct job *j = ctx;
+    (void)total;
+    j->done_kb = j->site_kb + (unsigned)(done >> 10);
+}
+
+static int site_fetch(struct job *j, const char *from, int dir, const char *to)
+{
+    struct site_ent *e = NULL;
+    int n = 0, i, bad = 0, r;
+    if (job_stopped(j))
+        return -1;
+    if (!dir) {
+        r = site_get(from, to, site_moved, j);
+        j->site_kb = j->done_kb;
+        if (r != REMOTE_OK)
+            gui_unlink(to);
+        return r == REMOTE_OK ? 0 : -1;
+    }
+    gui_mkdir(to);
+    if (site_read(from, &e, &n) != REMOTE_OK)
+        return -1;
+    for (i = 0; i < n && !job_stopped(j); i++) {
+        struct gui_dirent st;
+        char a[260], b[260], dos[16];
+        unsigned k = 0;
+        if (strlen(from) + strlen(e[i].name) + 2 > sizeof a) {
+            bad = 1;
+            continue;
+        }
+        site_join(a, sizeof a, from, e[i].name);
+        do {                                    /* (two long names that DOS would have alike: numbered) */
+            arc_dos_part(e[i].name, (unsigned)strlen(e[i].name), k, dos);
+            gui_path_join(b, sizeof b, to, dos);
+        } while (++k < 100 && (gui_is_dir(b) || gui_stat(b, &st) == 0));
+        if (site_fetch(j, a, e[i].dir, b) != 0)
+            bad = 1;
+    }
+    free(e);
+    return bad || job_stopped(j) ? -1 : 0;
+}
+
+static int site_send(struct job *j, const char *from, const char *to)
+{
+    struct gui_dirent *e;
+    int n, i, bad = 0, r;
+    if (job_stopped(j))
+        return -1;
+    if (!gui_is_dir(from)) {
+        r = site_put(from, to, site_moved, j);
+        j->site_kb = j->done_kb;
+        return r == REMOTE_OK ? 0 : -1;
+    }
+    if (site_exists(to, NULL) != 1 && site_mkdir(to) != REMOTE_OK)
+        return -1;
+    if ((n = gui_dir_read(from, &e)) < 0)
+        return -1;
+    for (i = 0; i < n && !job_stopped(j); i++) {
+        char a[260], b[260];
+        if (strlen(to) + strlen(e[i].name) + 2 > sizeof b) {
+            bad = 1;
+            continue;
+        }
+        gui_path_join(a, sizeof a, from, e[i].name);
+        site_join(b, sizeof b, to, e[i].name);
+        if (site_send(j, a, b) != 0)
+            bad = 1;
+    }
+    free(e);
+    return bad || job_stopped(j) ? -1 : 0;
+}
+
+static int site_delete(struct job *j, const char *url, int dir)
+{
+    struct site_ent *e = NULL;
+    int n = 0, i, bad = 0;
+    if (job_stopped(j))
+        return -1;
+    if (dir) {
+        if (site_read(url, &e, &n) != REMOTE_OK)
+            return -1;
+        for (i = 0; i < n && !job_stopped(j); i++) {
+            char a[260];
+            if (strlen(url) + strlen(e[i].name) + 2 > sizeof a) {
+                bad = 1;
+                continue;
+            }
+            site_join(a, sizeof a, url, e[i].name);
+            if (site_delete(j, a, e[i].dir) != 0)
+                bad = 1;
+        }
+        free(e);
+        if (bad || job_stopped(j))
+            return -1;
+    }
+    j->done_kb++;
+    return site_remove(url, dir) == REMOTE_OK ? 0 : -1;
+}
+
+static void site_work(struct job *j)
+{
+    int i, dir;
+    j->counted = 1;                             /* (what there is on the other side is not counted first) */
+    j->t_count = glos_ticks();
+    for (i = 0; i < j->n && !job_stopped(j); i++) {
+        int ok;
+        j->at = i;
+        if (j->del)
+            ok = site_delete(j, j->from[i], j->arc[i]) == 0;
+        else if (site_is(j->from[i]))
+            ok = site_exists(j->from[i], &dir) == 1 && site_fetch(j, j->from[i], dir, j->to[i]) == 0;
+        else
+            ok = site_send(j, j->from[i], j->to[i]) == 0;
+        if (ok) {
+            j->well[i] = 1;
+            j->ok++;
+        }
+    }
+}
+
 static void job_work(struct gui_task *t, void *arg)
 {
     struct job *j = arg;
     int i;
     (void)t;
     j->t_work = j->t_count = glos_ticks();
+    if (j->site) {
+        site_work(j);
+        j->t_end = glos_ticks();
+        return;
+    }
     if (j->zip) {
         zip_work(j);
         j->t_end = glos_ticks();
@@ -1497,7 +1751,10 @@ static void job_done(struct gui_window *owner, void *arg, int cancelled)
         arc_changed(j->zfile);
     for (v = views; v; v = v->next) {           /* (where it wrote and what it took from, shown as they are now) */
         v->stale = 0;
-        fill(v);
+        if (v->site && j->site)
+            site_go(v, v->dir);
+        else
+            fill(v);
     }
     gui_close(j->win);
     free(j->buf);
@@ -1682,6 +1939,39 @@ static void paste(struct view *v)
         paste_zip(v);
         return;
     }
+    if (clip.n && (v->site || site_is(clip.paths[0]))) {       /* to or from another computer: no asking, as it is */
+        if (v->site && site_is(clip.paths[0])) {
+            gui_message(v->win, GUI_T("Files"),
+                        GUI_T("From one computer's folder to another's: copy it to a folder of this PC first."), GUI_MB_OK);
+            return;
+        }
+        if (!(j = calloc(1, sizeof *j)) || !(j->buf = malloc(JOB_BUF))) {
+            free(j);
+            return;
+        }
+        j->site = 1;
+        for (i = 0; i < clip.n && j->n < JOB_ITEMS; i++) {
+            const char *name = v->site ? gui_path_name(clip.paths[i]) : site_last(clip.paths[i]);
+            char dos[16];
+            if (v->site) {
+                if (strlen(v->dir) + strlen(name) + 2 > sizeof to)
+                    continue;
+                site_join(to, sizeof to, v->dir, name);
+            } else {
+                arc_dos_part(name, (unsigned)strlen(name), 0, dos);
+                gui_path_join(to, sizeof to, v->dir, dos);
+            }
+            snprintf(j->from[j->n], sizeof j->from[0], "%s", clip.paths[i]);
+            snprintf(j->to[j->n++], sizeof j->to[0], "%s", to);
+        }
+        if (!j->n) {
+            free(j->buf);
+            free(j);
+            return;
+        }
+        job_start(j);
+        return;
+    }
     if (!clip.n || !(j = calloc(1, sizeof *j)) || !(j->buf = malloc(JOB_BUF))) {
         say("pasted", clip.cut ? "0 moved" : "0 copied");
         return;
@@ -1744,6 +2034,81 @@ static void find_files(struct view *v);
 static void open_with(struct view *v, const char *path);
 
 /* A name typed (text) as DOS's bytes, in place: false, and said, if DOS's code page hasn't got all of it. */
+/* A command in a view of another computer's folder: 1 if the rest of command() is to do it as for any folder
+   (what only looks at the list and the window), 0 if it was done here or is not done there at all. */
+static int site_command(struct view *v, int id, int r)
+{
+    struct gui_window *w = v->win;
+    char name[128], from[260], to[260], t[300];
+    struct job *j;
+    int i, k;
+    switch (id) {
+    case C_OPEN: case C_CLOSE: case C_COPY: case C_PASTE: case C_ALL: case C_BIG: case C_SMALL: case C_DETAILS:
+    case C_BACK: case C_FORWARD: case C_ADDRESS: case C_RECYCLE: case C_CONNECT:
+        return 1;
+    case C_REFRESH:
+        site_go(v, v->dir);
+        return 0;
+    case C_UP:
+        snprintf(to, sizeof to, "%s", v->dir);
+        if (site_up(to) == 0)
+            go(v, to);
+        return 0;
+    case C_NEWDIR:
+        snprintf(name, sizeof name, "%s", "newfolder");
+        if (gui_ask(w, GUI_T("New Folder"), GUI_T("The new folder's name:"), name, sizeof name) && name[0]
+            && !strchr(name, '/') && strlen(v->dir) + strlen(name) + 2 <= sizeof to) {
+            site_join(to, sizeof to, v->dir, name);
+            if (site_mkdir(to) != REMOTE_OK)
+                gui_message(w, GUI_T("Files"), GUI_T("The folder couldn't be made."), GUI_MB_OK);
+            else
+                say("site made", name);
+            site_go(v, v->dir);
+        }
+        return 0;
+    case C_RENAME:
+        if (r < 0 || row_path(v, r, from, sizeof from) != 0)
+            return 0;
+        snprintf(name, sizeof name, "%s", site_last(from));
+        if (gui_ask(w, GUI_T("Rename"), GUI_T("Its new name:"), name, sizeof name) && name[0] && !strchr(name, '/')
+            && strcmp(name, site_last(from)) && strlen(v->dir) + strlen(name) + 2 <= sizeof to) {
+            site_join(to, sizeof to, v->dir, name);
+            if (site_exists(to, NULL) == 1 || site_rename(from, to) != REMOTE_OK)
+                gui_message(w, GUI_T("Files"), GUI_T("It couldn't be renamed (is there one of that name already?)."), GUI_MB_OK);
+            else
+                say("site renamed", name);
+            site_go(v, v->dir);
+        }
+        return 0;
+    case C_DELETE:
+    case C_DELETE_NOW:
+        for (i = k = 0; i < v->n; i++)
+            k += gui_list_chosen(v->list, i);
+        if (!k)
+            return 0;
+        if (k == 1)
+            snprintf(t, sizeof t, GUI_T("Delete %s from the other computer? It can't be had back."),
+                     v->arc_row[(size_t)gui_list_user(v->list, r >= 0 ? r : 0)]);
+        else
+            snprintf(t, sizeof t, GUI_T("Delete these %d things from the other computer? They can't be had back."), k);
+        if (gui_message(w, GUI_T("Files"), t, GUI_MB_YESNO) != GUI_YES)
+            return 0;
+        if (!(j = calloc(1, sizeof *j)) || !(j->buf = malloc(JOB_BUF))) {
+            free(j);
+            return 0;
+        }
+        j->site = j->del = 1;
+        for (i = 0; i < v->n && j->n < JOB_ITEMS; i++)
+            if (gui_list_chosen(v->list, i) && row_path(v, i, j->from[j->n], sizeof j->from[0]) == 0) {
+                j->arc[j->n] = v->ents[(size_t)gui_list_user(v->list, i)].dir;
+                j->n++;
+            }
+        job_start(j);
+        return 0;
+    }
+    return 0;
+}
+
 static int dos_name(struct gui_window *w, char *name)
 {
     char b[128];
@@ -1764,6 +2129,8 @@ static void command(struct gui_window *w, int id)
     if (!v)
         return;
     r = gui_list_get(v->list);
+    if (v->site && !site_command(v, id, r))
+        return;                                 /* (on another computer: done there its own way, or not at all) */
     if (v->arc && (id == C_CUT || id == C_FIND || id == C_EXTRACT || id == C_ZIP || id == C_EXTRACT_TO || id == C_OPENWITH
                    || ((id == C_NEWDIR || id == C_DELETE || id == C_DELETE_NOW || id == C_PASTE || id == C_RENAME)
                        && !in_zip(v))))
@@ -2037,6 +2404,19 @@ static void command(struct gui_window *w, int id)
     case C_FIND:
         find_files(v);
         break;
+    case C_CONNECT:                             /* another computer's folders: whose, and where */
+        t[0] = 0;
+        if (gui_ask(w, GUI_T("Connect to a Computer"),
+                    GUI_T("Its name or address, as for ssh (user@computer, with :port and /folder if need be):"), t,
+                    (int)sizeof t - 8) && t[0]) {
+            snprintf(to, sizeof to, "sftp://%s", t);
+            say("connect", to);
+            if (v->browser)
+                go(v, to);
+            else
+                browser_open(to);
+        }
+        break;
     case C_ADDRESS:                             /* the keyboard's way to the address bar */
         if (v->address) {                       /* (its text chosen, as its own Ctrl+A does: what is typed takes
                                                    its place; gui_editor_command is the editor's alone) */
@@ -2055,6 +2435,51 @@ static void command(struct gui_window *w, int id)
         gui_focus(v->list);
 }
 
+/* A file on another computer opened: fetched into ARCTEMP (as an archive's file is unpacked there) under a name
+   DOS can have, on a worker's thread, and that opened. */
+struct sfetch {
+    char url[260], local[260];
+    int r;
+};
+
+static void sfetch_work(struct gui_task *t, void *arg)
+{
+    struct sfetch *f = arg;
+    (void)t;
+    f->r = site_get(f->url, f->local, NULL, NULL);
+}
+
+static void sfetch_done(struct gui_window *owner, void *arg, int cancelled)
+{
+    struct sfetch *f = arg;
+    char t[300];
+    if (f->r == REMOTE_OK && !cancelled) {
+        say("site fetched", gui_path_name(f->local));
+        files_open(f->local);
+    } else {
+        gui_unlink(f->local);
+        snprintf(t, sizeof t, GUI_T("The file couldn't be fetched: %s."), GUI_T(remote_error(f->r)));
+        gui_message(owner, GUI_T("Files"), t, GUI_MB_OK);
+    }
+    free(f);
+}
+
+static void site_open(struct view *v, const char *url)
+{
+    struct sfetch *f = calloc(1, sizeof *f);
+    char dir[260], dos[16];
+    const char *name = site_last(url);
+    if (!f)
+        return;
+    arc_temp(dir, sizeof dir);
+    gui_mkdir(dir);
+    arc_dos_part(name, (unsigned)strlen(name), 0, dos);
+    gui_path_join(f->local, sizeof f->local, dir, dos);
+    snprintf(f->url, sizeof f->url, "%s", url);
+    if (!gui_task_start(v->win, GUI_T("Fetching"), sfetch_work, f, sfetch_done, GUI_TASK_DIALOG))
+        free(f);
+}
+
 static void list_on(struct gui_widget *w, int what)
 {
     struct view *v = view_of(w->win);
@@ -2068,6 +2493,15 @@ static void list_on(struct gui_widget *w, int what)
     }
     if (what != GUI_ON_ACTIVATE || (r = gui_list_get(w)) < 0)
         return;
+    if (v->site) {                              /* on another computer: its folders gone into, its files fetched */
+        if (row_path(v, r, p, sizeof p) != 0)
+            return;
+        if (v->ents[(size_t)gui_list_user(w, r)].dir)
+            go(v, p);
+        else
+            site_open(v, p);
+        return;
+    }
     if (v->arc) {                               /* in an archive: its folders gone into, its files opened unpacked */
         if (!v->ents[(size_t)gui_list_user(w, r)].dir)
             arc_open_row(v, r);
@@ -2101,6 +2535,8 @@ static void closing(struct gui_window *w)
     int x, y;
     if (v && v->arc)
         arc_leave(v);
+    if (v)
+        site_leave(v);
     if (v && !v->browser && gui_origin(w, &x, &y) == 0) {      /* (where it was: for the next time) */
         int i;
         for (i = 0; i < places.n && strcmp(places.path[i], v->dir); i++)
@@ -2182,6 +2618,7 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
         }
         gui_menu_item(m, GUI_T("&Up a folder"), C_UP, GUI_T("Backspace"));
         gui_menu_item(m, GUI_T("&Recycle Folder"), C_RECYCLE, NULL);
+        gui_menu_item(m, GUI_T("&Connect to a Computer..."), C_CONNECT, NULL);
         if (!browser)
             gui_menu_item(m, GUI_T("&Browser"), C_BROWSER, NULL);
         return view;
@@ -2889,6 +3326,13 @@ static void address_on(struct gui_widget *w, int what)
         snprintf(typed, sizeof typed, "%s", gui_get_text(w));
         for (n = strlen(typed); n > 3 && (typed[n - 1] == '\\' || typed[n - 1] == ' '); n--)
             typed[n - 1] = 0;
+        if (site_is(typed)) {                   /* another computer's folder: as typed (its names have small
+                                                   letters); shown when it has answered */
+            say("address", typed);
+            go(v, typed);
+            gui_focus(v->list);
+            return;
+        }
         snprintf(p, sizeof p, "%s", typed);
         for (n = 0; p[n]; n++)
             if (p[n] >= 'a' && p[n] <= 'z')

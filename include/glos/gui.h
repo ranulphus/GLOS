@@ -627,6 +627,8 @@ enum { GUI_OK = 1, GUI_CANCEL_R = 2, GUI_YES = 3, GUI_NO = 4 };
 #define GUI_MB_YESNOCANCEL 4
 int gui_message(struct gui_window *owner, const char *title, const char *text, int buttons);    /* GUI_OK ... */
 int gui_ask(struct gui_window *owner, const char *title, const char *prompt, char *buf, int room);  /* 1: OK */
+int gui_ask_secret(struct gui_window *owner, const char *title, const char *prompt, char *buf, int room);   /* the
+                                           same, the answer shown as stars as it is typed (a password) */
 int gui_message_check(struct gui_window *owner, const char *title, const char *text, int buttons, const char *check,
                       int *checked);    /* (toolkit 2) with a check box under the text ("&Don't ask again", "Do
                                            this for &all"): its state in and out through *checked, the app's to

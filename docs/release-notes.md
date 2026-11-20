@@ -4,6 +4,16 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Files: folders on other computers (2026-11-20)
+
+- **Another computer's folders in Files, over SFTP:** a remote GLOS or Linux PC is opened like a drive. Type
+  `sftp://user@computer/folder` into the browser's address bar, or use **Go, Connect to a Computer...**
+- **The login is `ssh`'s:** the same key and the same known hosts; a computer met for the first time is asked
+  about, and a password is asked for where the key does not log in.
+- There you can go into folders, open files, copy to this PC and paste from it, make a folder, rename and
+  delete. Copying and deleting run in the background with a progress window, as on a drive.
+- **Not yet:** Cut, Find, properties and thumbnails there; from one computer straight to another.
+
 ## The Player (2026-11-20)
 
 - **A new program, the Player** (PLAYER.EXE, in the Start menu; Files opens WAV, MOD and M3U files with it): a

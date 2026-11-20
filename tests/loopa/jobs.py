@@ -8923,6 +8923,185 @@ class SshdContainer:
         subprocess.run(["docker", "rm", "-f", self.name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def filesnet_case(profile, vcard, card, bits):
+    """Files' folders on another computer (phase F; apps/files/site.c, apps/shared/remote.c), against OpenSSH in
+    a container: the browser started on an address of it; a host met for the first time asked about and kept;
+    the login by the key; its folder listed, a folder there gone into and left again; a file copied to this PC
+    (its bytes), a larger one (SHA-256), a long name as DOS can have it; a file of this PC pasted there (SHA-256
+    in the container); a folder made, renamed and deleted there. Then with no key: the password asked for, a
+    wrong one refused and asked again, the right one in."""
+    import hashlib
+    import threading
+    tag = "%s-%s" % (profile, vcard)
+    out = os.path.join(ROOT, "out", "filesnet-%s-files" % tag)
+    os.makedirs(out, exist_ok=True)
+    srv = SshdContainer("fn-" + tag, out)
+    p1 = srv.ports[0]
+    up = bytes((i * 40503 >> 7) & 255 for i in range(150000))
+    open(os.path.join(out, "UP.BIN"), "wb").write(up)
+    rel = lambda f: os.path.relpath(os.path.join(out, f), ROOT)
+    srv.run("mkdir -p docs/deep && printf 'hello from the other side\\n' > docs/hello.txt && "
+            "head -c 300000 /dev/urandom > big.bin && printf 'long\\n' > 'A long name for a file.text'")
+    big_sum = srv.run("sha256sum big.bin").split()[0]
+    agent = Agent("filesnet-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/FILES.EXE=/TEST/FILES.EXE",
+        "--file", "sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT", "--file", "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT",
+        "--file", "sdk/gui/fonts/ICONS.DAT=/TEST/ICONS.DAT",
+        "--file", "%s=/TEST/SSH/ID_ED25" % rel("sshd/client"), "--file", "%s=/TEST/UP.BIN" % rel("UP.BIN"),
+        "--file", "%s=/TEST/NOKEY/README.TXT" % rel("UP.BIN"),
+        "--cmd", "SERSAY HX-START filesnet", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"],
+        timeout=3600)
+    agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
+                   "-o", "ControlPersist=600"]
+    checks, notes = {"listen": agent.listening()}, []
+    base = "sftp://glos@10.0.2.2:%d/home/glos" % p1
+
+    def run_files(args):
+        p = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\FILES.EXE " + args], stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT)
+        p.said = bytearray()
+        threading.Thread(target=GuiDriver._listen, args=(p,), daemon=True).start()
+        return p
+
+    def said(p, text, limit=120, count=1):
+        t0 = time.time()
+        limit = min(limit, int(os.environ.get("FILESNET_WAIT", "9999")))       # (a short wait, to look at a failure)
+        while time.time() - t0 < limit:
+            if bytes(p.said).decode("latin-1").replace("\r", "").split("\n").count(text) >= count:
+                return True
+            time.sleep(0.4)
+        notes.append("waited %ds for %r; it said %r" % (limit, text, bytes(p.said).decode("latin-1")[-300:]))
+        return False
+
+    def keys(*specs):
+        agent.ssh("glos key " + gui_key_list(list(specs)))
+        time.sleep(1.0)
+
+    def typed(text):
+        agent.ssh("glos type " + text)
+        time.sleep(0.5)
+
+    def fetch(path, dst):
+        f = subprocess.run(["scp", "-q", "-P", str(agent.port)] + agent.opts[agent.opts.index("-o"):]
+                           + ["glos@127.0.0.1:/" + path[0] + path[2:].replace("\\", "/"), dst], capture_output=True, timeout=120)
+        return open(dst, "rb").read() if f.returncode == 0 and os.path.exists(dst) else None
+
+    fl = None
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x%d" % bits)[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and (" 640x480x%d " % bits) not in agent.ssh("glos display")[1]:
+            time.sleep(0.5)
+        agent.ssh("mkdir C:\\GOT")
+        fl = run_files("-browse " + base)
+        checks["new-host"] = said(fl, "FILES site new-host 10.0.2.2")
+        time.sleep(2)
+        if os.environ.get("FILESNET_WAIT"):     # (looking at a failure: the screen as the question stands)
+            pic = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=120)
+            open(os.path.join(out, "newhost.png"), "wb").write(pic.stdout)
+            notes.append("desk: " + agent.ssh("glos desk")[1].replace("\r", "")[:700])
+        keys("alt+y")                           # "Is that the right computer?" Yes
+        checks["connected"] = said(fl, "FILES site connected 10.0.2.2")
+        checks["listed"] = said(fl, "FILES site listed 6 " + base)       # docs; three dot files, the big one, the long name
+        known = agent.ssh("type C:\\TEST\\SSH\\KNOWNHST.TXT")[1]
+        checks["host-kept"] = ("[10.0.2.2]:%d ssh-ed25519 %s" % (p1, srv.pub("hostkey"))) in known
+        keys("home", "enter")                   # docs (folders first)
+        checks["into-docs"] = said(fl, "FILES site listed 2 " + base + "/docs")
+        keys("end", "ctrl+c")                   # hello.txt, copied
+        keys("ctrl+l")
+        typed("C:\\\\GOT\\n")
+        time.sleep(2)
+        keys("ctrl+v")
+        checks["fetched"] = said(fl, "FILES pasted 1 copied")
+        checks["fetched-bytes"] = agent.ssh("type C:\\GOT\\HELLO.TXT")[1].replace("\r", "") == "hello from the other side\n"
+        keys("alt+left")                        # back to docs, then up to the login's folder
+        checks["back"] = said(fl, "FILES site listed 2 " + base + "/docs", count=2)
+        keys("backspace")
+        checks["up"] = said(fl, "FILES site listed 6 " + base, count=2)
+        keys("ctrl+a", "ctrl+c")                # all of it: the folder with what is in it, the big file, the long name
+        keys("ctrl+l")
+        typed("C:\\\\GOT\\n")
+        time.sleep(2)
+        keys("ctrl+v")
+        checks["fetched-all"] = said(fl, "FILES pasted 6 copied", 300)
+        got = fetch("C:\\GOT\\BIG.BIN", os.path.join(out, "big.got"))
+        checks["big-sum"] = got is not None and hashlib.sha256(got).hexdigest() == big_sum
+        listing = agent.ssh("dir /b C:\\GOT")[1].upper()
+        checks["long-name"] = "ALONGNAM.TEX" in listing and agent.ssh("type C:\\GOT\\DOCS\\HELLO.TXT")[0] == 0
+        # this PC's file pasted there
+        keys("ctrl+l")
+        typed("C:\\\\TEST\\\\NOKEY\\n")
+        time.sleep(2)
+        keys("home", "ctrl+c")                  # README.TXT (150 KB)
+        keys("ctrl+l")
+        typed(base.replace("\\", "\\\\") + "/docs\\n")
+        checks["there-again"] = said(fl, "FILES site listed 2 " + base + "/docs", count=3)
+        keys("ctrl+v")
+        checks["sent"] = said(fl, "FILES pasted 1 copied", 300, count=2)
+        checks["sent-sum"] = srv.run("sha256sum docs/README.TXT").split()[:1] == [hashlib.sha256(up).hexdigest()]
+        checks["sent-listed"] = said(fl, "FILES site listed 3 " + base + "/docs")
+        # a folder made, renamed, deleted there
+        keys("ctrl+shift+n")
+        time.sleep(1.5)
+        typed("made\\n")
+        checks["made"] = said(fl, "FILES site made newfoldermade") or said(fl, "FILES site made made", 5)
+        made = "newfoldermade" if "FILES site made newfoldermade" in bytes(fl.said).decode("latin-1") else "made"
+        checks["made-there"] = made in srv.run("ls docs")
+        keys("home")                            # folders first: deep, then the new one (by name): find it
+        if made < "deep":
+            pass
+        else:
+            keys("down")
+        keys("f2")
+        time.sleep(1.5)
+        keys("ctrl+a")
+        typed("renamed\\n")
+        checks["renamed"] = said(fl, "FILES site renamed renamed") and "renamed" in srv.run("ls docs")
+        said(fl, "FILES site listed 4 " + base + "/docs", 60, count=2)
+        keys("home", "down", "del")             # deep, renamed: the second
+        time.sleep(1.5)
+        keys("alt+y")
+        checks["deleted"] = said(fl, "FILES deleted " + base + "/docs/renamed") and "renamed" not in srv.run("ls docs")
+        keys("alt+f4")
+        try:
+            checks["closed"] = fl.wait(60) == 0
+        except subprocess.TimeoutExpired:
+            checks["closed"] = False
+        fl = None
+        # with no key: the password, a wrong one first
+        fl = run_files("-browse " + base + " -sshdir C:\\TEST\\NOKEY")
+        checks["pw-new-host"] = said(fl, "FILES site new-host 10.0.2.2")
+        time.sleep(2)
+        keys("alt+y")
+        checks["pw-asked"] = said(fl, "FILES site password asked")
+        time.sleep(2)
+        typed("not-the-password\\n")
+        checks["pw-again"] = said(fl, "FILES site password again")
+        time.sleep(2)
+        typed(SshdContainer.PASSWORD + "\\n")
+        checks["pw-in"] = said(fl, "FILES site connected 10.0.2.2") and said(fl, "FILES site listed 6 " + base)
+        keys("alt+f4")
+        try:
+            checks["pw-closed"] = fl.wait(60) == 0
+        except subprocess.TimeoutExpired:
+            checks["pw-closed"] = False
+        fl = None
+        agent.ssh("glos exit")
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    finally:
+        if fl:
+            fl.kill()
+    text = agent.wait()
+    srv.close()
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    if bad:
+        for n in notes:
+            print("    %s %s" % (tag, n[:400]))
+    return "  %-22s %s%s" % ("filesnet-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def sshprog_case(profile, card):
     """SSH.EXE, SFTP.EXE and SSHKEY.EXE (apps/ssh; docs/v1/shell.md, S2c): the SSH client as programs run at a
     terminal, here an SSH login to GLOS itself (a hop from one computer to the next), against OpenSSH in a
@@ -10285,9 +10464,11 @@ def main():
         return 0 if all(r[1] for r in matrix(pkg_case, cases, a.jobs)) else 1
     if a.suite == "sshc":
         cases = [c for c in SSHC_CASES if not a.profile or c[0] in a.profile]
-        res = matrix(sshc_case, cases, a.jobs)
-        res += matrix(sshprog_case, [c for c in (("bf6", "ne2kpci"), ("486dx2", "ne2k")) if not a.profile or c[0] in a.profile],
+        res = [] if os.environ.get("SSHC_ONLY") else matrix(sshc_case, cases, a.jobs)
+        res += [] if os.environ.get("SSHC_ONLY") else matrix(sshprog_case, [c for c in (("bf6", "ne2kpci"), ("486dx2", "ne2k")) if not a.profile or c[0] in a.profile],
                       a.jobs)
+        if not os.environ.get("SSHC_ONLY") or os.environ["SSHC_ONLY"] == "filesnet":   # Files' remote folders (phase F)
+            res = ([] if os.environ.get("SSHC_ONLY") else res) + matrix(filesnet_case, cases, a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "https":
         cases = [c for c in HTTPS_CASES if not a.profile or c[0] in a.profile]

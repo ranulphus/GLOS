@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "files.h"
+#include "site.h"
 #include "../shared/arc.h"
 
 char files_home[260];
@@ -480,6 +481,9 @@ int main(int argc, char **argv)
     gui_on_event(app_event);
     folders_load();
     folder_slow = argc > 3 && !strcmp(argv[3], "-slowcopy");   /* (FILES -browse DIR -slowcopy: the suites') */
+    if (argc > 4 && !strcmp(argv[3], "-sshdir"))               /* (FILES -browse ADDRESS -sshdir FOLDER: the key and
+                                                                   the known hosts for another computer's folders) */
+        site_keys(argv[4]);
     if (argc > 4 && !strcmp(argv[3], "-listfirst"))            /* (FILES -browse DIR -listfirst N: a folder of more
                                                                    than N entries is "big", for the suites) */
         folder_list_first(atoi(argv[4]));
