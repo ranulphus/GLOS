@@ -4,6 +4,15 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The Sound Recorder (2026-11-20)
+
+- **A new program, the Sound Recorder** (RECORDER.EXE, in the Start menu): record from the sound card's input
+  (the one the Mixer has chosen) at 8000 to 44100 Hz, one channel or two; see the take as a waveform; play it;
+  select with the mouse or the keyboard and cut, copy, paste, trim; make it louder, softer or as loud as fits,
+  fade it in and out, turn it backwards; one step of undo.
+- **WAV files** opened (PCM of 8 to 32 bits, IMA ADPCM) and saved as 16 bits, 8 bits or IMA ADPCM.
+- The take is kept in memory: a recording stops by itself when 24 MB are full.
+
 ## The Mixer (2026-11-20)
 
 - **A new program, the Mixer** (MIXER.EXE; in the Start menu, and a double-click on the task bar's volume icon

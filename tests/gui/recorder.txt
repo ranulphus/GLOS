@@ -1,0 +1,50 @@
+# The Sound Recorder (apps/recorder; phase F, docs/v1/apps/sound-recorder.md) on the test's own sound (RECORDER
+# -demo: each Record puts a second of it on the take; no card is asked for): a take recorded and shown; made as
+# loud as fits; a piece selected by the keyboard, faded in, cut and pasted at the end; undone; a second recorded
+# after the first; made one channel and half the rate; saved as a WAV, a new take begun, the file opened again.
+run RECORDER.EXE -demo
+wait "New take - Sound Recorder"
+shot empty "New take - Sound Recorder"
+key ctrl+r
+said RECORDER recorded 22050 at 22050 Hz 2 channels peak 26000
+shot one "New take* - Sound Recorder"
+key alt+t f
+said RECORDER edit normalise 0 22050 -> 22050 frames peak 32767
+key home
+key shift+right shift+right shift+right shift+right shift+right shift+right shift+right shift+right shift+right shift+right
+key alt+t i
+said RECORDER edit fade-in 0 2200 -> 22050 frames peak 32767
+shot faded "New take* - Sound Recorder"
+key ctrl+x
+said RECORDER edit cut 0 2200 -> 19850 frames peak 32767
+key end
+key ctrl+v
+said RECORDER edit paste 19850 22050 -> 22050 frames peak 32767
+shot pasted "New take* - Sound Recorder"
+key ctrl+z
+said RECORDER undo -> 19850 frames peak 32767
+key ctrl+r
+said RECORDER recorded 22050 at 22050 Hz 2 channels peak 26000
+key alt+o o
+said RECORDER edit mono 0 41900 -> 41900 frames peak 31016
+key alt+o down down down enter
+said RECORDER edit rate 0 20950 -> 20950 frames peak 30957
+shot mono "New take* - Sound Recorder"
+key ctrl+s
+wait "Save As"
+type C:\\OUT\\TAKE\n
+said RECORDER saved TAKE.WAV 20950 pcm16
+shot saved "TAKE.WAV - Sound Recorder"
+key ctrl+n
+said RECORDER new
+key ctrl+o
+wait "Open"
+type C:\\OUT\\TAKE.WAV\n
+said RECORDER opened TAKE.WAV 20950 11025 1 peak 30957
+key ctrl+a
+key f5
+said RECORDER played 0 to 20950
+shot opened "TAKE.WAV - Sound Recorder"
+key alt+f4
+gone "TAKE.WAV - Sound Recorder"
+expect RECORDER end

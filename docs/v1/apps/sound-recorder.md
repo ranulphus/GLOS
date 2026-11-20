@@ -2,6 +2,8 @@
 
 **New in v1.** Recording from the sound card's input: the line in, the microphone, the CD's audio.
 
+**Its first part built 2026-11-20** (`docs/v1/phase-f.md` says what, and what is left of this plan).
+
 ## What it does
 
 - **Record:**

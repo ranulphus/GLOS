@@ -4822,10 +4822,11 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     session and taken back, every tone in 86Box's recording, the card stopped when GLOS leaves (SBCHK).
     A Crystal CS423x (crystal.c, docs/crystal-audio.md) instead of the SB16: no BLASTER, GLOS sets the chip up by
     itself (the data sheet's resources), plays through its codec, and gives sessions BLASTER for its SB Pro."""
+    import struct
     import time
     crystal = sound != "sb16"
     tag = "%s-%s" % (profile, vcard) + ("-" + sound if crystal else "")
-    # (Then phase F's Mixer, the real program, on a tone that plays: below.)
+    # (Then phase F's Mixer and Sound Recorder, the real programs, on tones that play: below.)
     # With the virtual Sound Blaster (the rule since 2026-11-19; docs/v1/vsb.md) the mixer plays from GLOS's
     # start and keeps the card through a session, and BLASTER is the virtual card's; with [sound] virtual = off
     # (virtual False) it is as it was: the mixer idle with no desktop, the card handed to a session and taken
@@ -4840,6 +4841,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         + ([] if crystal else ["--pre", "SET BLASTER=" + blaster]) + [
         "--file", "build/dj/AUDTEST.EXE=/TEST/AUDTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
         "--file", "build/ow/dos/FMTEST.EXE=/TEST/FMTEST.EXE", "--file", "build/apps/MIXER.EXE=/TEST/MIXER.EXE",
+        "--file", "build/apps/RECORDER.EXE=/TEST/RECORDER.EXE",
         "--file", "sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT", "--file", "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT",
         "--file", "sdk/gui/fonts/ICONS.DAT=/TEST/ICONS.DAT",
         "--cmd", "SERSAY HX-START audio", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
@@ -4934,6 +4936,39 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         if not all(checks[k] for k in ("mixer-sees", "mixer-master", "mixer-mute", "mixer-volume", "mixer-said")):
             print("    %s mixer: %r %r %r %r %r" % (tag, a, b, c, d2, o_mix[-300:]))
         checks["mixer-tone"] = played(finish(tone), "M")[0]
+        # The Sound Recorder (phase F; apps/recorder), the real one: some seconds recorded from the card's input
+        # while a tone plays, stopped and saved; the WAV fetched has as many frames as it said, at its rate. (86Box's
+        # SB16 records silence, peak=0 in this case's line: the sound in the samples is the bench's to hear.)
+        tone = start(app + "tone R 660 45")
+        rec = start("C:\\TEST\\RECORDER.EXE")
+        checks["rec-window"] = bool(g.until(lambda d: g.window("New take - Sound Recorder", d) is not None, 120))
+        time.sleep(2)
+        keys("ctrl+r")
+        time.sleep(4)
+        keys("f6")
+        keys("ctrl+s")
+        checks["rec-dialog"] = bool(g.until(lambda d: g.window("Save As", d) is not None, 60))
+        agent.ssh("glos type C:\\\\OUT\\\\TAKE\\n")
+        checks["rec-saved"] = bool(g.until(lambda d: g.window("TAKE.WAV - Sound Recorder", d) is not None, 60))
+        keys("alt+f4")
+        rc_rec, o_rec = finish(rec, 60)
+        m = re.search(r"RECORDER recorded (\d+) at 22050 Hz 2 channels peak (\d+)", o_rec)
+        n_rec = int(m.group(1)) if m else 0
+        checks["rec-said"] = (rc_rec == 0 and 22050 * 2 <= n_rec <= 22050 * 15
+                              and "RECORDER saved TAKE.WAV %d pcm16" % n_rec in o_rec and "RECORDER end" in o_rec)
+        take = os.path.join(ROOT, "out", "audio-" + tag, "TAKE.WAV")
+        if os.path.exists(take):
+            os.remove(take)
+        p = subprocess.run(["scp", "-q", "-P", str(agent.port)] + agent.opts[agent.opts.index("-o"):]
+                           + ["glos@127.0.0.1:/C/OUT/TAKE.WAV", take], capture_output=True, timeout=300)
+        wav = open(take, "rb").read() if p.returncode == 0 and os.path.exists(take) else b""
+        checks["rec-file"] = (len(wav) == 44 + n_rec * 4 and wav[:4] == b"RIFF" and wav[8:16] == b"WAVEfmt "
+                              and struct.unpack_from("<HHIIHH", wav, 20) == (1, 2, 22050, 88200, 4, 16)
+                              and wav[36:40] == b"data" and struct.unpack_from("<I", wav, 40)[0] == n_rec * 4)
+        if not (checks["rec-said"] and checks["rec-file"]):
+            print("    %s recorder: rc=%d %r file=%d bytes" % (tag, rc_rec, o_rec[-300:], len(wav)))
+        info += " recorded=%d peak=%s" % (n_rec, m.group(2) if m else "?")
+        checks["rec-tone"] = played(finish(tone), "R")[0]
         if crystal:                             # the FM synthesiser in a session, at the AdLib's ports and the SB Pro's
             agent.ssh("C:\\TEST\\FMTEST.EXE 388 330 400")          # (86Box: the first notes after power-on are faint)
             rc1, o1, _ = agent.ssh("C:\\TEST\\FMTEST.EXE 388 330 1500")
@@ -9855,7 +9890,7 @@ def console_case(profile, vcard, card, bits):
 
 # The native apps (M9 steps D-G): their scripts (tests/gui, all but GUITEST's) on the desktop, the apps beside
 # GLOS.EXE.
-NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER"]
+NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER", "RECORDER"]
 NATIVE_CASES = [("bf6", "vbe", "ne2kpci", 8), ("bf6", "g200", "ne2kpci", 16), ("bf6", "g400", "ne2kpci", 32),
                 ("486dx2", "vbe", "ne2k", 8)]
 

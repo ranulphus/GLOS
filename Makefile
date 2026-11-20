@@ -163,6 +163,9 @@ host-test-run:
 	  $(ARC_SRCS) && build/host/arc_test `python3 tests/host/arc_cases.py build/host/arc`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -o build/host/arcw_test tests/host/arcw_test.c \
 	  $(ARC_SRCS) && build/host/arcw_test build/host/arc && python3 tests/host/arcw_check.py build/host/arc
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/wave_test tests/host/wave_test.c apps/shared/wave.c \
+	  && build/host/wave_test `python3 tests/host/wave_cases.py build/host/wave` \
+	  && python3 tests/host/wave_cases.py check build/host/wave
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/disk_test tests/host/disk_test.c kernel/disk/mbr.c \
 	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  && tests/host/disk_test.sh build/host/disk_test build/host/disk
@@ -190,7 +193,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
-APPS := notepad calc images term files monitor control paint mixer
+APPS := notepad calc images term files monitor control paint mixer recorder
 # (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
 # shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
@@ -215,6 +218,9 @@ APP_HOST_LIBS_images := apps/shared/picfile.c apps/shared/thumbs.c
 APP_HOST_LIBS_paint := apps/shared/picfile.c
 APP_LIBS_images := apps/shared/picfile.c apps/shared/thumbs.c
 APP_LIBS_paint := apps/shared/picfile.c
+# Sound in memory and WAV files (the Sound Recorder's takes, phase F).
+APP_HOST_LIBS_recorder := apps/shared/wave.c
+APP_LIBS_recorder := apps/shared/wave.c
 build/host/libsshc32.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h
 	@mkdir -p build/host/sshc32
 	$(Q)echo "  CC      $@"
@@ -568,7 +574,7 @@ loopa-gpu: all dos-tests build/dj/GPUTEST.EXE check-deps
 # The virtual game port (docs/gamepad.md J1): glos joy's stick read by JOYTEST three ways on bf6 and the 486.
 loopa-joy: all dos-tests build/dj/JOYTEST.EXE check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py joy -j $(JOBS)
-loopa-audio: all dos-tests build/dj/AUDTEST.EXE build/apps/MIXER.EXE check-deps
+loopa-audio: all dos-tests build/dj/AUDTEST.EXE build/apps/MIXER.EXE build/apps/RECORDER.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py audio -j $(JOBS)
 # Windowed DOS-GL (M8 step D): DOS-GL's conformance EXEs (from DOSGL_DIR's build) full-screen on plain DOS and
 # windowed on GLOS desktops, their frames identical.

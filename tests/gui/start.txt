@@ -1,7 +1,8 @@
 #host-only (its programs and recent documents are the host's made-up ones: start-run.txt is Loop A's)
 # The Start menu (apps/files/start.c; phase D, D3): up by the launcher's event; the first tile dragged to the
 # last one's place; "con" typed finds the Control
-# Panel, Enter starts it; "sound" finds the Control Panel's Sound page; "note", Down into the list and More
+# Panel, Enter starts it; "joy" finds the Control Panel's Joystick page (not "sound": the Sound Recorder is a program
+# of that name since phase F, and programs come first); "note", Down into the list and More
 # (Alt+M): Notepad's own page, unpinned there, back by Esc; Tab to the tiles, the second started by Enter; Doom's
 # page by Shift+F10: its tasks, the second run; a file on the drive found by its name and opened; Power's page; a recent document found by its name and opened; a
 # folder's path typed opens the folder.
@@ -26,7 +27,7 @@ key enter
 gone "Start"
 launch
 wait "Start"
-type sound
+type joy
 shot found-page "Start"
 key enter
 gone "Start"
@@ -83,8 +84,8 @@ gone "Desktop"
 expect FILES start up 
 expect FILES start moved Files
 expect FILES start run Control Panel
-expect FILES start page sound
-expect FILES run C:\GLOS\CONTROL.EXE sound
+expect FILES start page joystick
+expect FILES run C:\GLOS\CONTROL.EXE joystick
 expect FILES start unpinned Notepad
 expect FILES start run Files
 expect FILES start run Doom
