@@ -2,15 +2,20 @@
 # clipboard as a picture, and Paste takes the picture that is there, whoever put it. A stroke drawn, selected and
 # copied; then the clipboard is given words in the picture's place (the script's clip, as another program's
 # copy), and Paste finds no picture; copied again and pasted at another selection's corner, as a layer of its own.
+# (Each step is waited for by what Paint says of it: the words are put on the clipboard from outside, at once,
+# and a copy Paint had not got to yet would come after them.)
 run PAINT.EXE
 wait "Untitled - Paint"
 drag "Untitled - Paint" 70 89 120 139
 key s
 drag "Untitled - Paint" 70 89 120 139
 key ctrl+c
+said PAINT copy 51x51
 clip words and no picture
 key ctrl+v
+said PAINT paste none
 key ctrl+c
+said PAINT copy 51x51
 drag "Untitled - Paint" 200 99 220 119
 key ctrl+v
 key p
