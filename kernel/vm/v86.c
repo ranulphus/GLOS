@@ -1309,6 +1309,56 @@ static void soft_int(struct trapframe *tf, u8 n, u32 next, u32 at)
     vm_int(tf, n, next);
 }
 
+/* The short way for what a CPU without VME traps V86 code for all the time: CLI, STI, PUSHF, POPF and IRET
+   (16 bits wide, no prefix) with nothing to do but the instruction itself. DOS's own code is full of them: its
+   plainest call is sixteen such traps on a 486DX2, each of which went the whole way round (the instruction
+   fetched and decoded, the log pumped, the scheduler asked, the VM's return gone through): a DOS call there
+   cost a session nine times what it costs on plain DOS (tests/dos/doscalls.c, 2026-11-20). 1: done, straight
+   back to the program. 0: the long way, which is taken whenever something waits on it: an interrupt for the
+   flag this would set, work or a kill for the VM, direct mode. */
+int vm_gp_fast(struct trapframe *tf)
+{
+    u32 ip = tf->eip & 0xFFFF, sp, f;
+    if (vm.vme || vm.direct || work || vm.kill_req || current != vm.thread)
+        return 0;
+    switch (vm_rd8(vm_lin(tf->cs, ip))) {
+    case 0xFA:
+        current->vif = 0;
+        break;
+    case 0xFB:
+        if (vpic_pending(&vm.pic))
+            return 0;
+        current->vif = 1;
+        break;
+    case 0x9C:
+        push16(tf, flags_image(tf));
+        break;
+    case 0x9D:
+        sp = tf->esp & 0xFFFF;
+        f = vm_rd16(vm_lin(tf->ss, sp));
+        if ((f & FL_IF) && vpic_pending(&vm.pic))
+            return 0;
+        flags_apply(tf, pop16(tf), 0);
+        break;
+    case 0xCF:
+        sp = tf->esp & 0xFFFF;
+        f = vm_rd16(vm_lin(tf->ss, sp + 4));
+        if ((f & FL_IF) && vpic_pending(&vm.pic))
+            return 0;
+        ip = pop16(tf);
+        tf->cs = pop16(tf);
+        flags_apply(tf, pop16(tf), 0);
+        tf->eip = ip;
+        vm.n_gp++;
+        return 1;
+    default:
+        return 0;
+    }
+    tf->eip = (ip + 1) & 0xFFFF;
+    vm.n_gp++;
+    return 1;
+}
+
 static void vm_gp(struct trapframe *tf)
 {
     struct v86insn in;
