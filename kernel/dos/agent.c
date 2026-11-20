@@ -66,7 +66,10 @@
 #define IN_RING  0x1000u                        /* a job's standard input from its app: a power of two */
 #define SFT_SIZE 0x3B                           /* an SFT entry, DOS 4 and later */
 
-enum { J_FREE, J_QUEUED, J_RUNNING, J_DONE };
+/* J_TAKEN: a poster has the slot (take_slot) and is filling it in; nobody else may take it, the VM thread doesn't
+   run it, and no lookup finds it (its seq is SEQ_NONE until it is queued). */
+enum { J_FREE, J_QUEUED, J_RUNNING, J_DONE, J_TAKEN };
+#define SEQ_NONE 0xFFFFFFFFu
 
 struct ring {
     u8 buf[RING];
@@ -160,8 +163,12 @@ static u32 ring_used(const struct ring *r) { return r->head - r->tail; }
 
 static char upper(char c) { return c >= 'a' && c <= 'z' ? (char)(c - 32) : c; }
 
-/* A free slot, its buffers there (taken now if it had none), or NULL: none free, or no memory for them. Safe with
-   interrupts off (agent_post_detached is the VM thread's). The buffers of other slots idle since are given back
+/* A free slot, taken (J_TAKEN: the caller fills it in and queues it), its buffers there (taken now if it had none),
+   or NULL: none free, or no memory for them. Safe with interrupts off (agent_post_detached is the VM thread's).
+   Posters are several threads (each SSH command's shell session is one): a slot only chosen, left J_FREE while its
+   poster filled it in, could be chosen by another poster too, which then wrote over the job the first had queued
+   and the VM thread had started (ssh's dos-queued, once under load, 2026-11-20; the same window was in the code
+   before take_slot). The buffers of other slots idle since are given back
    here, one slot's kept for the next job: never those of the running job or of the one whose files are being
    closed, and only of free slots, which nobody reads (every reader looks at a job's state first). */
 static struct agent_job *take_slot(void)
@@ -193,6 +200,13 @@ static struct agent_job *take_slot(void)
             j = NULL;
     }
     if (j) {
+        j->state = J_TAKEN;
+        j->seq = SEQ_NONE;
+        j->owner = NULL;
+        j->app_owner = NULL;
+        j->notify = 0;
+        j->app = 0;
+        j->kill = 0;
         j->out = j->bufs->out;
         j->in = j->bufs->in;
     }
@@ -353,8 +367,8 @@ int agent_post_job(void *app, const struct krun *r, const struct agent_opts *o, 
     *seq = j->seq;
     vm_kick();
     irq_restore(f);
-    kprintf("GLOS-AGENT post seq=%u app=%u%s%s%s cmd=\"%s\"\n", j->seq, app && !j->notify ? app_id(app) : 0, j->console ? " console=1" : "",
-            j->full ? " full=1" : "", j->detach ? " detach=1" : "", j->cmd);
+    kprintf("GLOS-AGENT post seq=%u app=%u%s%s%s cmd=\"%s\" slot=%u\n", j->seq, app && !j->notify ? app_id(app) : 0, j->console ? " console=1" : "",
+            j->full ? " full=1" : "", j->detach ? " detach=1" : "", j->cmd, (u32)(j - jobs));
     return 0;
 }
 
@@ -1078,8 +1092,8 @@ static void finish(struct agent_job *j)
     j->t_end = timer_ticks();
     done_at = timer_ticks();
     j->state = J_DONE;
-    kprintf("GLOS-AGENT done seq=%u code=%u via=%s%s\n", j->seq, result & 0xFF, j->shell ? "comspec" : j->path,
-            (result & 0x10000) ? " cannot-run" : "");
+    kprintf("GLOS-AGENT done seq=%u code=%u via=%s%s slot=%u\n", j->seq, result & 0xFF, j->shell ? "comspec" : j->path,
+            (result & 0x10000) ? " cannot-run" : "", (u32)(j - jobs));
     if (j->console && j->full)                  /* (a terminal's program that took the screen: how much of what it
                                                    wrote was kept for its terminal. A line of it went missing in a
                                                    gate, 2026-11-21; kernel/shell/shsess.c says how much it showed) */
@@ -1198,8 +1212,8 @@ int agent_vm_next(u32 result, const char *comspec, struct agent_exec *x)
             vm_wr8(0x41A, (u8)tail);
             vm_wr8(0x41B, (u8)(tail >> 8));
         }
-        kprintf("GLOS-AGENT run seq=%u cmd=\"%s\"%s%s%s%s%s\n", j->seq, j->cmd, j->direct ? " direct=1" : "",
-                j->profile[0] ? " profile=" : "", j->profile, j->dir[0] ? " dir=" : "", j->dir);
+        kprintf("GLOS-AGENT run seq=%u cmd=\"%s\"%s%s%s%s%s slot=%u\n", j->seq, j->cmd, j->direct ? " direct=1" : "",
+                j->profile[0] ? " profile=" : "", j->profile, j->dir[0] ? " dir=" : "", j->dir, (u32)(j - jobs));
         tell(j);
         j->fs = 0;
         j->fstep = FS_OPEN;
