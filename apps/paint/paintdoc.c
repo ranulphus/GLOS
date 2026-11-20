@@ -190,6 +190,23 @@ static void tip(struct pd_doc *d, int x, int y, unsigned argb, int size)
     }
 }
 
+/* A shape given as a picture of it: the current layer's pixels where mask has a byte that isn't 0 take the
+   colour, the shape's corner at (x, y) (clipped). Text is put on a picture so (the app has the letters drawn). */
+void pd_stamp(struct pd_doc *d, const unsigned char *mask, int w, int h, int x, int y, unsigned colour)
+{
+    unsigned argb = ink(colour);
+    int i, j;
+    for (j = 0; j < h; j++)
+        for (i = 0; i < w; i++)
+            if (mask[j * w + i]) {
+                int a = i;
+                while (i + 1 < w && mask[j * w + i + 1])
+                    i++;
+                span(d, y + j, x + a, x + i, argb);
+            }
+    touch(d, x, y, x + w, y + h);
+}
+
 void pd_dot(struct pd_doc *d, int x, int y, unsigned colour, int size)
 {
     if (size < 1)

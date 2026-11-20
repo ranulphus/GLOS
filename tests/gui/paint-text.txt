@@ -1,0 +1,24 @@
+# The Text tool in Paint (apps/paint; phase E, docs/v1/apps/paint.md): T, a press on the picture, a line of text
+# typed: the letters are on the current layer in the button's colour, their corner where the press was; one
+# step to undo, and again with the other button (the second colour) and a larger, bold face chosen in the font
+# dialog (Alt+F in the tool's own dialog: the toolkit's, GLOS's faces and sizes).
+run PAINT.EXE
+wait "Untitled - Paint"
+key t
+click "Untitled - Paint" 80 99
+wait "Text"
+type Hello, GLOS
+shot dialog "Text"
+key enter
+gone "Text"
+shot text "Untitled - Paint"
+key ctrl+z
+key ctrl+y
+key alt+f4
+wait "Paint"
+key alt+n
+expect PAINT tool text
+expect PAINT text 20,20 69x14 000000 Hello, GLOS
+expect PAINT undone
+expect PAINT redone
+expect PAINT end

@@ -31,6 +31,8 @@ void pd_clean(struct pd_doc *d);        /* nothing changed, from here */
 
 /* The tools: colours are 00RRGGBBh, places are pixels (any, clipped), size is a round tip's width (1 a pixel). */
 void pd_dot(struct pd_doc *d, int x, int y, unsigned colour, int size);
+void pd_stamp(struct pd_doc *d, const unsigned char *mask, int w, int h, int x, int y, unsigned colour);       /* the
+                                           pixels where mask (w by h bytes, its corner at x, y) isn't 0: text's */
 void pd_line(struct pd_doc *d, int xa, int ya, int xb, int yb, unsigned colour, int size);
 /* A rectangle and an ellipse between two corners (either way round), an outline `size` wide (0: none) in
    colour, filled with `fill` unless that is PD_NONE. */

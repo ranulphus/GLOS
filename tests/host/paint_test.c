@@ -66,6 +66,22 @@ int main(void)
     is("dots changed y1", d->y1, 5);
     pd_free(d);
 
+    {                                           /* a shape stamped from its picture (text's way), clipped */
+        static const unsigned char m[3 * 4] = { 1, 0, 1, 1,  0, 9, 0, 0,  1, 1, 1, 0 };
+        d = pd_new(6, 4, PAPER);
+        pd_clean(d);
+        pd_stamp(d, m, 4, 3, 1, 0, INK);
+        pd_stamp(d, m, 4, 3, 4, 2, INK);
+        check("a stamp, and one cut by the edges", d,
+              ".#.##.\n"
+              "..#...\n"
+              ".####.\n"
+              ".....#\n");
+        is("the stamps changed x0", d->x0, 1);
+        is("the stamps changed y1", d->y1, 4);
+        pd_free(d);
+    }
+
     d = pd_new(9, 9, PAPER);
     pd_dot(d, 4, 4, INK, 5);
     check("a tip five wide", d,

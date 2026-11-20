@@ -25,7 +25,7 @@ enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_IN, C_OUT,
        C_TURN = 50,                     /* + PD_RIGHT, PD_LEFT, PD_ACROSS, PD_OVER */
        C_ADJUST = 60,                   /* + PD_INVERT, PD_GREY, PD_SEPIA, PD_BRIGHT */
        C_TOOL = 100 };
-enum { T_PENCIL, T_BRUSH, T_ERASER, T_LINE, T_RECT, T_ELLIPSE, T_FILL, T_PICK, T_SELECT, T_COUNT };
+enum { T_PENCIL, T_BRUSH, T_ERASER, T_LINE, T_RECT, T_ELLIPSE, T_FILL, T_PICK, T_SELECT, T_TEXT, T_COUNT };
 
 static const struct {
     const char *name, *text, *glyph, *tip;
@@ -40,6 +40,7 @@ static const struct {
     { "fill", GUI_N("&Fill"), "fill", GUI_N("Fill (F)"), 'f' },
     { "picker", GUI_N("Colour P&icker"), "picker", GUI_N("Colour picker (I)"), 'i' },
     { "select", GUI_N("Selec&t"), "select", GUI_N("Select (S)"), 's' },
+    { "text", GUI_N("Te&xt"), "underline", GUI_N("Text (T)"), 't' },
 };
 
 /* The palette: strong colours along the top, lighter ones under them; black first and white last, which are the
@@ -538,10 +539,86 @@ static void shape(int x, int y)
     show(doc->x0, doc->y0, doc->x1, doc->y1);
 }
 
+/* ---- the Text tool (phase E): a press on the picture asks for a line of text and its font (GLOS's own faces and
+   sizes: the toolkit's font dialog), and the letters are put on the current layer in the button's colour, their
+   top left corner where the press was: one step to undo. The letters are drawn by the 2D library into a picture
+   of their own, and the pixels they took are stamped on the layer (pd_stamp). */
+static struct gui_fontspec text_font = { GUI_FONT_SANS, 1 };
+static struct {
+    struct gui_window *win;
+    struct gui_widget *field;
+    char text[160];
+} tx;
+
+static void text_button(struct gui_widget *b, int what)
+{
+    (void)what;
+    if (b->id == 1) {                           /* (read while the dialog is there: gui_modal closes it) */
+        snprintf(tx.text, sizeof tx.text, "%s", gui_get_text(tx.field));
+        gui_end_modal(tx.win, 1);
+    } else if (b->id == 2) {
+        gui_end_modal(tx.win, 0);
+    } else {
+        gui_font_dialog(tx.win, GUI_T("Font"), &text_font);
+    }
+}
+
+static void text_at(int x, int y, unsigned colour)
+{
+    struct gui_widget *box, *row;
+    const struct gfx_font *f;
+    struct gfx_surface s;
+    unsigned *px, *before;
+    unsigned char *mask;
+    int w, h, i;
+    tx.win = gui_window(GUI_T("Text"), 300, 0, GUI_W_DIALOG);
+    tx.win->owner = win;
+    box = gui_vbox(tx.win->root, 6, 8);
+    gui_label(box, GUI_T("The text to put on the picture:"));
+    tx.field = gui_field(box, 36);
+    gui_set_text(tx.field, tx.text);
+    row = gui_hbox(box, 6, 0);
+    gui_button(row, GUI_T("&Font..."), text_button, 3);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("OK"), text_button, 1)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), text_button, 2)->flags |= GUI_CANCEL;
+    gui_focus(tx.field);
+    if (gui_modal(tx.win) != 1 || !tx.text[0])  /* (which closes it) */
+        return;
+    f = gui_font_get(text_font.face, text_font.size);
+    if (!f)
+        f = gui_font;
+    w = gfx_text_width(f, tx.text, -1) + 2, h = f->height;
+    if (w < 1 || h < 1 || !(px = calloc((size_t)w * (size_t)h, sizeof *px)))
+        return;
+    if (!(mask = malloc((size_t)w * (size_t)h)) || !(before = pd_before(doc))) {
+        free(px);
+        free(mask);
+        gui_message(win, GUI_T("Paint"), GUI_T("There isn't the memory to draw on this picture."), GUI_MB_OK);
+        return;
+    }
+    gfx_init(&s, px, w, h, (unsigned)w * sizeof *px, &gfx_fmt888);
+    gfx_text(&s, 1, 0, f, tx.text, -1, 0xFFFFFF);
+    for (i = 0; i < w * h; i++)
+        mask[i] = (px[i] & 0xFFFFFF) != 0;
+    pd_clean(doc);
+    pd_stamp(doc, mask, w, h, x, y, colour);
+    show(doc->x0, doc->y0, doc->x1, doc->y1);
+    printf("PAINT text %d,%d %dx%d %06X %s\n", x, y, w, h, colour, tx.text);
+    fflush(stdout);
+    commit(GUI_T("Text"), before);
+    free(px);
+    free(mask);
+}
+
 static void press(struct gui_ev *e, int x, int y)
 {
     unsigned a = gui_colour_get(first), b = gui_colour_get(second);
     unsigned colour = e->button == 1 ? a : b, other = e->button == 1 ? b : a;
+    if (tool == T_TEXT) {
+        text_at(x, y, colour);
+        return;
+    }
     if (tool == T_SELECT) {                     /* a rectangle dragged out; a click takes the selection away */
         deselect();
         drag.on = 1;
