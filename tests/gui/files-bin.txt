@@ -1,0 +1,62 @@
+# The Recycle folder (apps/files/recycle.c; phase E, docs/v1/apps/files.md): a file and a folder deleted go to
+# their drive's Recycle folder (the question says so) and are gone from their own; the Recycle folder's window
+# lists them with where they were; the file is restored and is where it was, byte for byte; the folder is
+# deleted from there for good; then the file with Shift+Del, for good at once: the Recycle folder is empty.
+# The files are tests/gui/mkarc.py's, in C:\RCY. When each was deleted is blanked in the window's picture. (Named
+# to come before the other scripts that delete: on Loop A
+# they run on one disk, and what those delete is in the Recycle folder after them.)
+run FILES.EXE -browse C:\RCY
+wait "C:\RCY - Files"
+key home
+key down
+key del
+wait "Delete"
+shot ask "Delete"
+key alt+y
+gone "Delete"
+said FILES recycled C:\RCY\GONE.TXT
+said FILES deleted C:\RCY\GONE.TXT
+gone "Deleting"
+key home
+key del
+wait "Delete"
+key alt+y
+gone "Delete"
+said FILES recycled C:\RCY\OLD
+gone "Deleting"
+shot after "C:\RCY - Files" 371 0 169 330
+key alt+g r
+wait "Recycle Folder"
+shot bin "Recycle Folder" 258 8 112 120
+key alt+r
+said FILES restored C:\RCY\GONE.TXT
+file C:\RCY\GONE.TXT Deleted, and had back.\r\n
+key alt+d
+wait "Recycle"
+shot ask-bin "Recycle"
+key alt+y
+gone "Recycle"
+said FILES recycle-deleted C:\RCY\OLD
+key esc
+gone "Recycle Folder"
+key home
+key shift+del
+wait "Delete"
+shot ask-good "Delete"
+key alt+y
+gone "Delete"
+said FILES deleted C:\RCY\GONE.TXT
+gone "Deleting"
+key alt+g r
+wait "Recycle Folder"
+shot empty "Recycle Folder"
+key esc
+gone "Recycle Folder"
+shot end "C:\RCY - Files" 371 0 169 330
+key alt+f4
+gone "C:\RCY - Files"
+expect FILES recycled C:\RCY\GONE.TXT
+expect FILES recycled C:\RCY\OLD
+expect FILES restored C:\RCY\GONE.TXT
+expect FILES recycle-deleted C:\RCY\OLD
+expect FILES end 

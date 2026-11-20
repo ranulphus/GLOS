@@ -313,6 +313,8 @@ static void walk_tick(void *arg)
     n = gui_dir_read(dir, &e);
     for (i = 0; i < n; i++) {
         gui_path_join(path, sizeof path, dir, e[i].name);
+        if (recycle_is(dir, e[i].name))
+            continue;                           /* (what was deleted is not found) */
         if (e[i].dir) {
             if (depth < DEPTH)
                 todo_add(path, depth + 1);

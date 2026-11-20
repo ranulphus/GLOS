@@ -52,7 +52,7 @@ static struct {                         /* where folders' windows were */
 } places;
 
 enum { C_OPEN = 1, C_NEWDIR, C_RENAME, C_DELETE, C_CLOSE, C_CUT, C_COPY, C_PASTE, C_ALL, C_BIG, C_DETAILS, C_REFRESH,
-       C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS, C_PROPS, C_FIND, C_EXTRACT, C_ZIP };
+       C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS, C_PROPS, C_FIND, C_EXTRACT, C_ZIP, C_DELETE_NOW, C_RECYCLE };
 
 static void say(const char *what, const char *a)
 {
@@ -329,6 +329,12 @@ static void fill(struct view *v)
         v->n = gui_dir_read(v->dir, &v->ents);
         if (v->n < 0)
             v->n = 0;
+        for (i = 0; i < v->n; i++)              /* (a drive's Recycle folder is Files' own: recycle.c) */
+            if (recycle_is(v->dir, v->ents[i].name)) {
+                memmove(&v->ents[i], &v->ents[i + 1], (size_t)(v->n - i - 1) * sizeof *v->ents);
+                v->n--;
+                break;
+            }
     }
     gui_list_clear(v->list);
     for (i = 0; i < v->n; i++) {
@@ -378,10 +384,11 @@ static void way(struct view *v)
     gui_command_enable(v->win, C_FORWARD, v->at + 1 < v->nhist);
     gui_command_enable(v->win, C_UP, strlen(v->dir) > 3);
     {                                           /* (in an archive: what a ZIP can have done to it, and no more) */
-        static const int changes[] = { C_NEWDIR, C_DELETE, C_PASTE, C_RENAME, C_CUT, C_FIND, C_EXTRACT, C_ZIP };
+        static const int changes[] = { C_NEWDIR, C_DELETE, C_PASTE, C_DELETE_NOW, C_RENAME, C_CUT, C_FIND, C_EXTRACT,
+                                       C_ZIP };
         size_t k;
         for (k = 0; k < sizeof changes / sizeof changes[0]; k++)
-            gui_command_enable(v->win, changes[k], !v->arc || (k < 3 && in_zip(v)));
+            gui_command_enable(v->win, changes[k], !v->arc || (k < 4 && in_zip(v)));
     }
     if (v->address) {
         gui_set_text(v->address, v->dir);
@@ -530,6 +537,7 @@ struct job {
                                            how long each took: where a job's time goes on a slow PC) */
     int n, cut, del, shown;             /* (del: a delete: `from` alone, and the counts are of files and folders) */
     int ext;                            /* an archive unpacked whole (Extract Here): said so */
+    int bin;                            /* a delete that goes to the Recycle folder (recycle.c) */
     int zip;                            /* a ZIP changed (zfile): 1: each `from` put into it under the name `to`
                                            (with what is in it, a folder); 2: the `to`s and all under them taken
                                            out of it; 3: as 1, a new ZIP (Add to ZIP): said so */
@@ -976,7 +984,7 @@ static void job_work(struct gui_task *t, void *arg)
     j->t_count = glos_ticks();
     for (i = 0; i < j->n && !job_stopped(j); i++) {
         j->at = i;
-        if (j->del ? remove_tree(j, j->from[i]) == 0
+        if (j->del ? (j->bin ? recycle_put(j->from[i]) == 0 : remove_tree(j, j->from[i]) == 0)
             : j->cut ? (gui_rename(j->from[i], j->to[i]) == 0
                         || (copy_tree(j, j->from[i], j->to[i]) == 0 && remove_tree(j, j->from[i]) == 0))
             : copy_tree(j, j->from[i], j->to[i]) == 0) {
@@ -1072,8 +1080,11 @@ static void job_done(struct gui_window *owner, void *arg, int cancelled)
     if (j->del) {
         int i;
         for (i = 0; i < j->n; i++)
-            if (j->well[i])
+            if (j->well[i]) {
+                if (j->bin)
+                    say("recycled", j->from[i]);
                 say("deleted", j->from[i]);
+            }
     } else if (j->zip == 3) {
         say("zipped", j->ok == j->n ? gui_path_name(j->zfile) : "nothing");
     } else {
@@ -1351,7 +1362,7 @@ static void command(struct gui_window *w, int id)
         return;
     r = gui_list_get(v->list);
     if (v->arc && (id == C_RENAME || id == C_CUT || id == C_FIND || id == C_EXTRACT || id == C_ZIP
-                   || ((id == C_NEWDIR || id == C_DELETE || id == C_PASTE) && !in_zip(v))))
+                   || ((id == C_NEWDIR || id == C_DELETE || id == C_DELETE_NOW || id == C_PASTE) && !in_zip(v))))
         return;                                 /* (in an archive: what a ZIP can have done to it, and no more) */
     switch (id) {
     case C_OPEN:
@@ -1431,18 +1442,29 @@ static void command(struct gui_window *w, int id)
             fill(v);
         }
         break;
-    case C_DELETE:
+    case C_RECYCLE:
+        recycle_window(w);
+        for (v = views; v; v = v->next)         /* (what was put back is shown where it is again) */
+            fill(v);
+        return;
+    case C_DELETE:                              /* to the Recycle folder, where the drive has one (recycle.c) ... */
+    case C_DELETE_NOW: {                        /* ... or for good: Shift+Del, an archive's things, a floppy's */
+        int bin;
         if (!(n = chosen_paths(v, paths, 64)))
             break;
+        for (bin = id == C_DELETE && !v->arc, i = 0; i < n && bin; i++)
+            bin = recycle_can(paths[i]);
         if (n == 1)
-            snprintf(t, sizeof t, GUI_T("Delete %s?"), gui_dos_text(gui_path_name(paths[0]), name, sizeof name));
+            snprintf(t, sizeof t, bin ? GUI_T("Move %s to the Recycle folder?") : GUI_T("Delete %s for good?"),
+                     gui_dos_text(gui_path_name(paths[0]), name, sizeof name));
         else
-            snprintf(t, sizeof t, GUI_T("Delete these %d?"), n);
+            snprintf(t, sizeof t, bin ? GUI_T("Move these %d to the Recycle folder?") : GUI_T("Delete these %d for good?"), n);
         if (gui_message(w, GUI_T("Delete"), t, GUI_MB_YESNO) == GUI_YES) {
             struct job *j = calloc(1, sizeof *j);       /* a job's work, as a paste's: its end says what went */
             if (!j)
                 break;
             j->del = 1;
+            j->bin = bin;
             if (v->arc) {                       /* out of the ZIP shown: each by its name there */
                 j->zip = 2;
                 snprintf(j->zfile, sizeof j->zfile, "%s", v->arc_file);
@@ -1458,6 +1480,7 @@ static void command(struct gui_window *w, int id)
             job_start(j);
         }
         break;
+    }
     case C_ZIP:                                 /* a new ZIP of what is chosen, here: named after it (one thing), or
                                                    after the folder (several) */
         if (!(n = chosen_paths(v, paths, 64)))
@@ -1657,6 +1680,7 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
     gui_menu_item(m, GUI_T("&New Folder"), C_NEWDIR, GUI_T("Ctrl+Shift+N"));
     gui_menu_item(m, GUI_T("&Rename"), C_RENAME, GUI_T("F2"));
     gui_menu_item(m, GUI_T("&Delete"), C_DELETE, GUI_T("Del"));
+    gui_menu_item(m, GUI_T("Delete for &Good"), C_DELETE_NOW, GUI_T("Shift+Del"));
     gui_menu_item(m, GUI_T("&Extract Here"), C_EXTRACT, NULL);
     gui_menu_item(m, GUI_T("Add to &ZIP"), C_ZIP, NULL);
     gui_menu_item(m, GUI_T("P&roperties"), C_PROPS, GUI_T("Alt+Enter"));
@@ -1684,6 +1708,7 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
             gui_menu_item(m, GUI_T("&Address bar"), C_ADDRESS, GUI_T("Ctrl+L"));
         }
         gui_menu_item(m, GUI_T("&Up a folder"), C_UP, GUI_T("Backspace"));
+        gui_menu_item(m, GUI_T("&Recycle Folder"), C_RECYCLE, NULL);
         if (!browser)
             gui_menu_item(m, GUI_T("&Browser"), C_BROWSER, NULL);
         return view;
@@ -1702,6 +1727,8 @@ static void count(const char *dir, unsigned long *files, unsigned long long *byt
     int n = gui_dir_read(dir, &e), i;
     char p[260];
     for (i = 0; i < n; i++) {
+        if (recycle_is(dir, e[i].name))
+            continue;
         if (!e[i].dir) {
             (*files)++;
             *bytes += e[i].size;
@@ -1878,6 +1905,8 @@ static void find_in(const char *dir, const char *pattern, int depth)
     int n = gui_dir_read(dir, &e), i;
     char p[260];
     for (i = 0; i < n && fnd.n < FOUND_MAX && fnd.visited < VISIT_MAX; i++) {
+        if (recycle_is(dir, e[i].name))
+            continue;
         fnd.visited++;
         if (wild(pattern, e[i].name)) {
             snprintf(fnd.dir[fnd.n], sizeof fnd.dir[0], "%s", dir);
@@ -2140,7 +2169,7 @@ static void tree_on(struct gui_widget *w, int what)
         if ((k = gui_dir_read(path, &e)) < 0)
             return;
         for (i = 0; i < k; i++)
-            if (e[i].dir) {
+            if (e[i].dir && !recycle_is(path, e[i].name)) {
                 char *p = malloc(260);
                 gui_path_join(p, 260, path, e[i].name);
                 gui_tree_add(w, n, e[i].text, icon(IC_FOLDER, 0), p, 1);

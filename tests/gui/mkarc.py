@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The archives of the GUI scripts' drive (tests/gui/drives/C/ARC: files-arc.txt) and the files that
-files-zip.txt packs (C/ZIP), made once and kept in the tree; run again only to change them.
+files-zip.txt packs (C/ZIP) and files-bin.txt deletes (C/RCY), made once and kept in the tree; run again only to
+change them.
 
     python3 tests/gui/mkarc.py
 """
@@ -48,6 +49,12 @@ os.makedirs(os.path.join(zipdir, "PAPERS"), exist_ok=True)       # (names the St
 for name, data in [("PAPERS/ONE.TXT", b"The first note.\r\n"), ("PAPERS/TWO.TXT", b"The second note.\r\n" * 50),
                    ("MEMO.TXT", b"A memo, to go into a ZIP.\r\n"), ("MORE.TXT", b"More, " * 300 + b"and no more.\r\n")]:
     open(os.path.join(zipdir, *name.split("/")), "wb").write(data)
+# ... and what files-bin.txt deletes and has back (C:\RCY).
+rcy = os.path.join(os.path.dirname(here), "RCY")
+os.makedirs(os.path.join(rcy, "OLD"), exist_ok=True)
+for name, data in [("OLD/ONE.TXT", b"In a folder that is deleted whole.\r\n"), ("GONE.TXT", b"Deleted, and had back.\r\n"),
+                   ("KEEP.TXT", b"Never deleted.\r\n")]:
+    open(os.path.join(rcy, *name.split("/")), "wb").write(data)
 for n in sorted(os.listdir(here)):
     p = os.path.join(here, n)
     print("%-12s %s" % (n, "folder" if os.path.isdir(p) else "%d bytes" % os.path.getsize(p)))

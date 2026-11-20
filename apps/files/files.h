@@ -6,7 +6,7 @@
 /* icons.c: 16- and 32-pixel pictures, palette indices (0 clear) */
 enum { IC_FOLDER, IC_DRIVE, IC_FILE, IC_TEXT, IC_PICTURE, IC_PROGRAM, IC_BATCH, IC_TERMINAL, IC_NOTEPAD, IC_CALC,
        IC_IMAGES, IC_MONITOR, IC_CONTROL, IC_FILES, IC_GAME, IC_TOOL, IC_SOUND, IC_NETWORK, IC_PAINT, IC_ARCHIVE,
-       IC_COUNT };
+       IC_RECYCLE, IC_COUNT };
 const unsigned char *icon(int kind, int big);
 int icon_by_name(const char *name);     /* [program] icon = NAME */
 int icon_for_file(const char *name, int dir);
@@ -40,5 +40,23 @@ void folder_changed(unsigned watch);
 void folders_save(void);
 void folders_load(void);
 extern int folder_slow;                 /* -slowcopy, the suites': a paste waits ten seconds before each file */
+
+/* recycle.c: the Recycle folder (phase E): what is deleted in Files, kept on its drive until it is emptied */
+struct recycled {
+    char drive;                         /* 'C' */
+    char stored[16];                    /* its name in the drive's folder */
+    char was[260];                      /* where it was */
+    unsigned short date, time;          /* when it was deleted (DOS's) */
+    unsigned long kb;
+    int dir;
+};
+int recycle_on(void);                   /* [desktop] recycle */
+int recycle_can(const char *path);      /* a thing of this path would go there (a hard disc's, and it is on) */
+int recycle_is(const char *dir, const char *name);      /* name in dir is a drive's Recycle folder itself: not shown */
+int recycle_put(const char *path);      /* moved there: 0, or -1 (it is where it was) */
+int recycle_list(struct recycled **out);        /* all the drives': how many (malloc'd) */
+int recycle_restore(const struct recycled *it, char *where, int room);  /* back where it was (where: its path now) */
+int recycle_delete(const struct recycled *it);  /* gone for good */
+void recycle_window(struct gui_window *owner);  /* its window: Restore, Delete, Empty */
 
 #endif

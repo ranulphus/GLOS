@@ -131,6 +131,8 @@ const struct cfg_key cfg_schema[] = {
       "A program's windows share one button on the task bar (auto: when their buttons would be too narrow)" },
     { "desktop", "quiet", CFG_CHOICE, CFG_NOW, 0, 0, "off|on", "off", "&Quiet: hold notifications back",
       "Notifications wait, and the task bar says how many: a press on that number shows them" },
+    { "desktop", "recycle", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "&Recycle folder",
+      "What is deleted in Files goes to its drive's Recycle folder and can be had back (off: it is deleted at once)" },
     { "desktop", "snap", CFG_CHOICE, CFG_NOW, 0, 0, "on|off", "on", "S&nap to the screen's edges",
       "A window dragged to the screen's top fills it; dragged to a side, it fills that half" },
     { "desktop", "text", CFG_CHOICE, CFG_NOW, 0, 0, "small|normal|large", "normal", "Te&xt size",

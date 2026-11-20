@@ -87,6 +87,15 @@ static void draw(int kind, struct pen *g)
     case IC_TEXT:
         page(g, GREY);
         break;
+    case IC_RECYCLE:                            /* a bin: its lid and handle, its ribs */
+        fill(g, 8, 10, 16, 18, LIGHT);
+        frame(g, 8, 10, 16, 18, BLACK);
+        fill(g, 6, 6, 20, 4, GREY);
+        frame(g, 6, 6, 20, 4, BLACK);
+        fill(g, 13, 3, 6, 3, BLACK);
+        fill(g, 12, 13, 2, 12, DARK);
+        fill(g, 18, 13, 2, 12, DARK);
+        break;
     case IC_ARCHIVE:                            /* a box done up: its lid, a strap round it, the strap's buckle */
         fill(g, 4, 6, 24, 22, CUBE(4, 3, 1));
         frame(g, 4, 6, 24, 22, BLACK);

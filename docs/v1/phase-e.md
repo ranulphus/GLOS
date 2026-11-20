@@ -252,10 +252,24 @@ are as they were).
     listed as they load (a TAR in a GZ is unpacked from end to end for its list, with the window waiting),
     names by long file names where DOS has them, the packer's speed on a 486 (unmeasured: its quick level is
     there for it).
+- **The Recycle folder** (the eighth part, 2026-11-20; `apps/files/recycle.c`): what is deleted in Files is not
+  gone at once. Del asks "Move ... to the Recycle folder?", and the thing goes to its drive's own
+  (`X:\RECYCLE.GLS`, under a name of the folder's own, with a line in its `INDEX` saying where it was and when
+  it went): renamed there, so it is at once, whatever its size. **Go's Recycle Folder** and the desktop's
+  **Recycle** icon open its window: every drive's, with where each thing was; **Restore** puts one back where
+  it was (its folders made again if they have gone; beside what has its name now, if something has),
+  **Delete** takes one out for good, **Empty** all of them.
+  - **For good at once:** Shift+Del (File's Delete for Good); a floppy's files (drives A and B have no such
+    folder); what is deleted inside a ZIP; and whatever a DOS program deletes, as the plan has it.
+  - **A tenth of the drive at most:** when more is put in, the oldest go for good.
+  - **`[desktop] recycle = off`** (the Control Panel's Desktop page): nothing goes in.
+  - The folder itself is not shown in its drive's listing, in the tree, to Find or to the Start menu's search.
+  - **Tests:** `files-bin` on the host and on Loop A (a file and a folder deleted, the window's list, the
+    file restored and read back byte for byte, the folder deleted from there, Shift+Del, the folder empty).
 - **Not done yet:** the rest of the plan: views
   (small icons, a list, resized columns), folders that load as they go, long names, "open with" and apps'
   entries in the context menu, the rest of archives (above), a search that goes on in the background and looks
-  inside files, a folder's size counted in the background, thumbnails, drag and drop, the Recycle folder.
+  inside files, a folder's size counted in the background, thumbnails, drag and drop.
 
 ## Images (2026-11-19): the viewer's toolbar, turning, details, slideshow
 

@@ -4,6 +4,14 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Files: the Recycle folder (2026-11-20)
+
+- **What is deleted in Files can be had back.** Del moves it to its drive's Recycle folder (`X:\RECYCLE.GLS`);
+  the desktop's Recycle icon and Go's Recycle Folder list what is there, with Restore, Delete and Empty.
+  Shift+Del deletes for good, as before; so do floppies, archives and DOS programs.
+- A drive's Recycle folder holds a tenth of the drive at most (the oldest go first). `[desktop] recycle = off`
+  turns it off.
+
 ## DOS calls on a 486 without VME (2026-11-20)
 
 - **A quarter to a third quicker for programs** on a processor without VME (a 486DX2, the Cyrix and ST 486s):

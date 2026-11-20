@@ -264,6 +264,7 @@ static void desktop_items(void)
         snprintf(what, sizeof what, "program %s", pn[i]);
         add_item(pt[i], what, pk[i]);
     }
+    add_item("Recycle", "recycle", IC_RECYCLE); /* (the last: the others are where they were before there was one) */
     positions_load();
 }
 
@@ -273,6 +274,8 @@ static void open_item(int i)
         return;
     if (!strncmp(items[i].what, "app ", 4)) {
         run_app(items[i].what + 4, NULL);
+    } else if (!strcmp(items[i].what, "recycle")) {
+        recycle_window(desk);
     } else if (!strncmp(items[i].what, "program ", 8)) {
         char sec[48], args[200], dir[100], cmd[300];
         snprintf(sec, sizeof sec, "program %s", items[i].what + 8);
