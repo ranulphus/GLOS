@@ -559,7 +559,14 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
     `stat` made a dozen: `sdk/gui/files.c`); and those five instructions have a short way through the trap
     path when nothing waits on them (`vm_gp_fast`, `kernel/vm/v86.c`): the plain call 474 to 321 microseconds
     for a program there, a file found 1,880 to 1,390, 512 bytes read 2,337 to 1,609; for an app 1,303 to 1,133.
-    What is left of a trap is the processor's own way in and out, as 86Box counts it.
+    What is left of a trap is the processor's own way in and out, as 86Box counts it. And an app's call no
+    longer goes through all 256 real-mode vectors twice (`adopt`, `unadopt` in `kernel/app/app.c`: the table
+    is compared whole first, and nearly every call has changed nothing): an app's plain call 1,133 to 912
+    there, 512 bytes read 4,881 to 3,937 (5,678 before both).
+  - **Counted:** an app's call makes two traps more than a program's (18 to 16 on the 486DX2's profile), so
+    what an app still pays over a program (some 0.6 ms a call there) is the kernel's own work in handing
+    the call over: two changes of thread, four of address space, the app's DOS state put in and taken out.
+    Not yet taken apart.
   - **Owed:** the same numbers on the real 486 (86Box's cycle counts are not a 486's: the bench's are the
     ones to believe), and a cheaper way for an app's call into the VM.
 
