@@ -395,6 +395,7 @@ static void wr32(u32 lin, u32 v)
 }
 
 static int mine(const struct app *a, u32 v) { return (a->ivt_mine[v >> 3] >> (v & 7)) & 1; }
+static u32 ivt_in[256];                 /* the vectors as adopt() gave them to the call in hand */
 
 /* ---- DOS's current drive and directory (the VM thread, as the system) */
 
@@ -1033,9 +1034,14 @@ static void adopt(struct app *a)
     sys.ps_stack = vm_rd32(lp + 0x2E);
     memcpy(sys.ivt, vm_ptr(0), sizeof sys.ivt);
     sys.job = agent_vm_as(a->job);
-    for (v = 0; v < 256; v++)
-        if (mine(a, v))
-            wr32(v * 4, a->ivt[v]);
+    for (v = 0; v < 256; v += 8)                /* (its own vectors in: few have any, and those a handful) */
+        if (a->ivt_mine[v >> 3]) {
+            u32 k;
+            for (k = v; k < v + 8; k++)
+                if (mine(a, k))
+                    wr32(k * 4, a->ivt[k]);
+        }
+    memcpy(ivt_in, vm_ptr(0), sizeof ivt_in);   /* (the table as the call finds it: unadopt's question) */
     wr16(vm.sda + 0x10, a->psp);
     wr32(vm.sda + 0x0C, a->dta);
     memset(vm_ptr(((u32)vm.loader_cs << 4) + spare), 0, 48);
@@ -1060,15 +1066,19 @@ static void unadopt(struct app *a, int cwd)
     if (!a->dead) {
         a->dta = vm_rd32(vm.sda + 0x0C);
         (a->dos_owner ? a->dos_owner : a->thread)->vif = current->vif;
-        for (v = 0; v < 256; v++) {
-            u32 cur = vm_rd32(v * 4);
-            if (cur != sys.ivt[v]) {
-                a->ivt[v] = cur;
-                a->ivt_mine[v >> 3] |= (u8)(1u << (v & 7));
-            } else {
-                a->ivt_mine[v >> 3] &= (u8)~(1u << (v & 7));
+        /* The vectors the call changed are the app's own from now. Nearly every call changes none: the table is
+           as it was given, and what is the app's own is as it was (asked first: going through all 256 after
+           every call of every app was a good part of what an app's DOS call cost a 486). */
+        if (memcmp(vm_ptr(0), ivt_in, sizeof ivt_in) != 0)
+            for (v = 0; v < 256; v++) {
+                u32 cur = vm_rd32(v * 4);
+                if (cur != sys.ivt[v]) {
+                    a->ivt[v] = cur;
+                    a->ivt_mine[v >> 3] |= (u8)(1u << (v & 7));
+                } else {
+                    a->ivt_mine[v >> 3] &= (u8)~(1u << (v & 7));
+                }
             }
-        }
     }
     memcpy(vm_ptr(0), sys.ivt, sizeof sys.ivt);
     wr16(vm.sda + 0x10, sys.psp);
