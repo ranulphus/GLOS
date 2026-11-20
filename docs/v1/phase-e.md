@@ -249,8 +249,14 @@ are as they were).
     that was not enough for these, and the keys typed while a job's window was going were nobody's.
   - **Extract To...** (2026-11-20; File's menu, the context menu): the archive unpacked into a folder of its
     name in a folder chosen for it (the toolkit's folder dialog: its tree, or a path typed). `files-arc` has it.
+  - **Renaming inside a ZIP** (2026-11-20): Rename (F2) on a file or a folder of the ZIP shown; a folder's
+    entries all get its new name. The name may be any a ZIP can hold (longer than DOS's, with small letters);
+    the archive is written again beside itself, the entries' packed bytes as they are (`arc_zip_rename`;
+    `arcw_test` has a file, a folder to a deeper and longer name, the archive behind a program and the one
+    with sizes after the bytes, read back by Python's zipfile; `files-zip` renames a file and its folder and
+    unpacks them).
   - **Not yet:** a thing of one archive pasted straight into another (it is unpacked to a folder first),
-    renaming inside a ZIP, LZH/LHA, ARJ and 7z, the old ZIPs' implode and shrink, big archives
+    LZH/LHA, ARJ and 7z, the old ZIPs' implode and shrink, big archives
     listed as they load (a TAR in a GZ is unpacked from end to end for its list, with the window waiting),
     names by long file names where DOS has them, the packer's speed on a 486 (unmeasured: its quick level is
     there for it).

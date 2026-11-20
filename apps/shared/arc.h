@@ -95,6 +95,11 @@ int arcw_close(struct arcw *w, int keep);   /* keep 0: given up, the disc as it 
    error (the old archive is as it was). */
 int arc_zip_remove(const char *path, int (*drop)(void *ctx, const char *name), void *ctx);
 
+/* An entry of a ZIP renamed: `from` (the name it is listed by; a folder's: all under it too) is `to` after, the
+   archive written again as for arc_zip_remove. How many entries have new names (0: none had that name), or an
+   error. Whether `to` is free is the caller's to look at first (arc_find, arc_has_folder). */
+int arc_zip_rename(const char *path, const char *from, const char *to);
+
 /* How files are opened (as fopen does), taken away and renamed here: the C library's own way unless an app
    says otherwise, once, before anything else (the toolkit's gui_fopen, gui_unlink and gui_rename know where
    DOS's paths are when the app runs on the host). */

@@ -1,7 +1,8 @@
 # ZIPs changed from the browser (apps/files; phase E, docs/v1/apps/files.md; apps/shared/arc.c's writer and
 # apps/shared/deflate.c): a folder packed into a new ZIP (Add to ZIP) and gone into; a file pasted into the ZIP,
 # and pasted again over itself (Replace: one of it is there after); a new folder made in it; a file deleted from
-# it; then all of it unpacked beside it again (Extract Here) and its files read back, byte for byte.
+# it; the file left renamed (to a name longer than DOS has), and its folder; then all of it unpacked beside it
+# again (Extract Here) and its files read back, byte for byte, under the names DOS can have.
 # The files are tests/gui/mkarc.py's, in C:\ZIP. The dates' column is blanked: they are the copy's. Each job's
 # end is waited for by what Files says of it (said), and then its window's going, if it had one (a job that
 # takes more than a second has, on a 486: keys typed while it goes are nobody's).
@@ -53,7 +54,21 @@ key alt+y
 gone "Delete"
 said FILES deleted C:\ZIP\PAPERS.ZIP\PAPERS\TWO.TXT
 gone "Deleting"
+key home
+key f2
+wait "Rename"
+type First note.text\n
+gone "Rename"
 shot less "C:\ZIP\PAPERS.ZIP\PAPERS - Files" 371 0 169 330
+key backspace
+wait "C:\ZIP\PAPERS.ZIP - Files"
+key home
+key down
+key f2
+wait "Rename"
+type NOTES\n
+gone "Rename"
+shot renamed "C:\ZIP\PAPERS.ZIP - Files" 371 0 169 330
 key ctrl+l
 type c:\\zip\n
 wait "C:\ZIP - Files"
@@ -61,7 +76,7 @@ key end
 key alt+f e
 said FILES extracted 1 unpacked
 gone "Unpacking"
-file C:\ZIP\PAPERS~1\PAPERS\ONE.TXT The first note.\r\n
+file C:\ZIP\PAPERS~1\NOTES\FIRSTNOT.TEX The first note.\r\n
 file C:\ZIP\PAPERS~1\MEMO.TXT A memo, to go into a ZIP.\r\n
 shot after "C:\ZIP - Files" 371 0 169 330
 key alt+f4
@@ -71,5 +86,7 @@ expect FILES archive ZIP
 expect FILES pasted 1 copied
 expect FILES made EXTRA
 expect FILES deleted C:\ZIP\PAPERS.ZIP\PAPERS\TWO.TXT
+expect FILES renamed PAPERS/First note.text
+expect FILES renamed NOTES
 expect FILES extracted 1 unpacked
 expect FILES end 

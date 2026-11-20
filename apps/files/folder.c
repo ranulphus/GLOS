@@ -646,10 +646,10 @@ static void way(struct view *v)
     gui_command_enable(v->win, C_UP, strlen(v->dir) > 3);
     {                                           /* (in an archive: what a ZIP can have done to it, and no more) */
         static const int changes[] = { C_NEWDIR, C_DELETE, C_PASTE, C_DELETE_NOW, C_RENAME, C_CUT, C_FIND, C_EXTRACT,
-                                       C_ZIP };
+                                       C_ZIP, C_EXTRACT_TO, C_OPENWITH };
         size_t k;
         for (k = 0; k < sizeof changes / sizeof changes[0]; k++)
-            gui_command_enable(v->win, changes[k], !v->arc || (k < 4 && in_zip(v)));
+            gui_command_enable(v->win, changes[k], !v->arc || (k < 5 && in_zip(v)));
     }
     if (v->address) {
         gui_set_text(v->address, v->dir);
@@ -1623,8 +1623,9 @@ static void command(struct gui_window *w, int id)
     if (!v)
         return;
     r = gui_list_get(v->list);
-    if (v->arc && (id == C_RENAME || id == C_CUT || id == C_FIND || id == C_EXTRACT || id == C_ZIP
-                   || ((id == C_NEWDIR || id == C_DELETE || id == C_DELETE_NOW || id == C_PASTE) && !in_zip(v))))
+    if (v->arc && (id == C_CUT || id == C_FIND || id == C_EXTRACT || id == C_ZIP || id == C_EXTRACT_TO || id == C_OPENWITH
+                   || ((id == C_NEWDIR || id == C_DELETE || id == C_DELETE_NOW || id == C_PASTE || id == C_RENAME)
+                       && !in_zip(v))))
         return;                                 /* (in an archive: what a ZIP can have done to it, and no more) */
     switch (id) {
     case C_OPEN:
@@ -1709,6 +1710,38 @@ static void command(struct gui_window *w, int id)
     case C_RENAME:
         if (r < 0)
             break;
+        if (v->arc) {                           /* in the ZIP shown: the entry, or the folder and all under it */
+            char was[600], now[600];
+            int k;
+            if (strcmp(arc_kind(v->arc), "ZIP") != 0) {
+                gui_message(w, GUI_T("Files"), GUI_T("Only what is in a ZIP can be renamed."), GUI_MB_OK);
+                break;
+            }
+            snprintf(name, sizeof name, "%s", v->ents[(size_t)gui_list_user(v->list, r)].text);
+            if (!gui_ask(w, GUI_T("Rename"), GUI_T("Its new name:"), name, sizeof name) || !name[0])
+                break;
+            if (strpbrk(name, "/\\:") || !strcmp(name, ".") || !strcmp(name, "..")) {
+                gui_message(w, GUI_T("Files"), GUI_T("A name has no \\, / or : in it."), GUI_MB_OK);
+                break;
+            }
+            snprintf(was, sizeof was, "%s%s%s", v->arc_in, v->arc_in[0] ? "/" : "",
+                     v->arc_row[(size_t)gui_list_user(v->list, r)]);
+            snprintf(now, sizeof now, "%s%s%s", v->arc_in, v->arc_in[0] ? "/" : "", name);
+            if (!strcmp(was, now))
+                break;
+            if (arc_find(v->arc, now) >= 0 || arc_has_folder(v->arc, now)) {
+                gui_message(w, GUI_T("Files"), GUI_T("There is one of that name there already."), GUI_MB_OK);
+                break;
+            }
+            k = arc_zip_rename(v->arc_file, was, now);
+            if (k <= 0)
+                gui_message(w, GUI_T("Files"), k < 0 ? GUI_T(arc_error(k)) : GUI_T("It couldn't be renamed."), GUI_MB_OK);
+            else
+                say("renamed", now);
+            arc_changed(v->arc_file);
+            fill(v);
+            break;
+        }
         gui_path_join(from, sizeof from, v->dir, v->ents[(size_t)gui_list_user(v->list, r)].name);
         snprintf(name, sizeof name, "%s", v->ents[(size_t)gui_list_user(v->list, r)].text);
         if (gui_ask(w, GUI_T("Rename"), GUI_T("Its new name:"), name, sizeof name) && name[0]) {

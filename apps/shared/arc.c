@@ -1642,7 +1642,12 @@ int arcw_close(struct arcw *w, int keep)
     return r;
 }
 
-int arc_zip_remove(const char *path, int (*drop)(void *ctx, const char *name), void *ctx)
+/* A ZIP written again beside itself and put in its own place: without the entries drop says 1 for (drop NULL:
+   none), and with `from` (an entry, or a folder and all under it) under the name `to` (from NULL: none). Each
+   entry's packed bytes go over as they are. How many went or were renamed, or an error (the old archive is as it
+   was). */
+static int zip_rewrite(const char *path, int (*drop)(void *ctx, const char *name), void *ctx, const char *from,
+                       const char *to)
 {
     struct zipdir z;
     char tmp[260];
@@ -1651,7 +1656,7 @@ int arc_zip_remove(const char *path, int (*drop)(void *ctx, const char *name), v
     unsigned long at = 0, cd_n = 0, left;
     unsigned k, kept = 0, gone = 0;
     long size, pos;
-    size_t n = strlen(path), dot;
+    size_t n = strlen(path), dot, flen = from ? strlen(from) : 0, tlen = to ? strlen(to) : 0;
     int r;
     memset(&z, 0, sizeof z);
     if (!in)
@@ -1667,8 +1672,8 @@ int arc_zip_remove(const char *path, int (*drop)(void *ctx, const char *name), v
         snprintf(tmp, sizeof tmp, "%.*s$$$", (int)dot, path);
     else
         snprintf(tmp, sizeof tmp, "%s.$$$", path);
-    r = ARC_E_MEMORY;
-    if (!(cd = malloc(z.cd_size ? z.cd_size : 1)) || !(buf = malloc(BUF)))
+    r = ARC_E_MEMORY;                           /* (a renamed entry's line in the directory may be longer) */
+    if (!(cd = malloc(z.cd_size + (unsigned long)z.count * (tlen + 2) + 1)) || !(buf = malloc(BUF)))
         goto out;
     r = ARC_E_OPEN;
     if (!(out = file_open(tmp, "wb")))
@@ -1682,8 +1687,9 @@ int arc_zip_remove(const char *path, int (*drop)(void *ctx, const char *name), v
     for (k = 0; k < z.count; k++) {
         const unsigned char *c = zip_dir_next(&z, &at);
         unsigned long len;
-        unsigned nlen;
-        char *name;
+        unsigned nlen, wlen;
+        char *name, *renamed = NULL;
+        const unsigned char *wname;
         int dir, go;
         r = ARC_E_DAMAGED;
         if (!c)
@@ -1694,28 +1700,60 @@ int arc_zip_remove(const char *path, int (*drop)(void *ctx, const char *name), v
         nlen = le16(c + 28);
         len = 46ul + nlen + le16(c + 30) + le16(c + 32);
         name = clean_name((const char *)c + 46, nlen, &dir);
-        go = name && drop(ctx, name);
+        go = name && drop && drop(ctx, name);
+        if (name && !go && from && !strncmp(name, from, flen) && (!name[flen] || name[flen] == '/')) {
+            size_t rest = strlen(name + flen);  /* the entry itself, or one under the folder: its new name */
+            r = ARC_E_BIG;
+            if (tlen + rest + 1 > 0xFFFF) {
+                free(name);
+                goto out;
+            }
+            r = ARC_E_MEMORY;
+            if (!(renamed = malloc(tlen + rest + 2))) {
+                free(name);
+                goto out;
+            }
+            memcpy(renamed, to, tlen);
+            memcpy(renamed + tlen, name + flen, rest);
+            if (dir)
+                renamed[tlen + rest++] = '/';
+            renamed[tlen + rest] = 0;
+            gone++;
+        }
         free(name);
         if (go) {
             gone++;
             continue;
         }
+        wname = renamed ? (const unsigned char *)renamed : c + 46;
+        wlen = renamed ? (unsigned)strlen(renamed) : nlen;
         /* Its bytes as they are, behind a header made from the directory's (which has its sizes for certain). */
         r = ARC_E_DAMAGED;
         if (fseek(in, (long)(z.base + le32(c + 42)), SEEK_SET) != 0 || fread(h, 1, 30, in) != 30 || le32(h) != 0x04034B50ul
-            || fseek(in, (long)(le16(h + 26) + le16(h + 28)), SEEK_CUR) != 0)
+            || fseek(in, (long)(le16(h + 26) + le16(h + 28)), SEEK_CUR) != 0) {
+            free(renamed);
             goto out;
+        }
         r = ARC_E_OPEN;
-        if ((pos = ftell(out)) < 0)
+        if ((pos = ftell(out)) < 0) {
+            free(renamed);
             goto out;
+        }
         memset(h, 0, sizeof h);
         wr32(h, 0x04034B50ul);
         wr16(h + 4, le16(c + 6));
         wr16(h + 6, le16(c + 8) & ~8u);         /* (its sizes are in the header now, not after its bytes) */
         memcpy(h + 8, c + 10, 18);              /* how it is packed, its time, its check and sizes */
-        wr16(h + 26, nlen);
-        if (fwrite(h, 1, 30, out) != 30 || fwrite(c + 46, 1, nlen, out) != nlen)
+        wr16(h + 26, wlen);
+        if (fwrite(h, 1, 30, out) != 30 || fwrite(wname, 1, wlen, out) != wlen) {
+            free(renamed);
             goto out;
+        }
+        memcpy(cd + cd_n, c, 46);               /* its line in the directory: the name it has now, the rest as it was */
+        memcpy(cd + cd_n + 46, wname, wlen);
+        memcpy(cd + cd_n + 46 + wlen, c + 46 + nlen, len - 46 - nlen);
+        wr16(cd + cd_n + 28, wlen);
+        free(renamed);
         for (left = le32(c + 20); left; left -= n) {
             n = left < BUF ? (size_t)left : BUF;
             r = ARC_E_DAMAGED;
@@ -1725,10 +1763,9 @@ int arc_zip_remove(const char *path, int (*drop)(void *ctx, const char *name), v
             if (fwrite(buf, 1, n, out) != n)
                 goto out;
         }
-        memcpy(cd + cd_n, c, len);
         wr16(cd + cd_n + 8, le16(c + 8) & ~8u);
         wr32(cd + cd_n + 42, (unsigned long)pos - z.base);
-        cd_n += len;
+        cd_n += len - nlen + wlen;
         kept++;
     }
     r = ARC_E_OPEN;
@@ -1764,4 +1801,16 @@ out:
     free(cd);
     free(buf);
     return r == ARC_OK ? (int)gone : r;
+}
+
+int arc_zip_remove(const char *path, int (*drop)(void *ctx, const char *name), void *ctx)
+{
+    return zip_rewrite(path, drop, ctx, NULL, NULL);
+}
+
+int arc_zip_rename(const char *path, const char *from, const char *to)
+{
+    if (!from || !to || !from[0] || !to[0])
+        return 0;
+    return zip_rewrite(path, NULL, NULL, from, to);
 }

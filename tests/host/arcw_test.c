@@ -5,7 +5,8 @@
  *   - an addition given up, and one that fails for want of room: the archive is, byte for byte, as it was;
  *     a new archive given up or failed is not left behind;
  *   - entries taken out again (their packed bytes copied as they are, sizes after the bytes moved into the
- *     headers), and nothing taken out: the archive untouched.
+ *     headers), and nothing taken out: the archive untouched;
+ *   - an entry renamed, and a folder with all under it (arc_zip_rename).
  * Each result is read back here (apps/shared/arc.c's reader), and listed in DIR/WLIST for arcw_check.py, which
  * reads them with Python's zipfile, which wrote none of this.
  *
@@ -186,6 +187,40 @@ static void verify(const char *file, unsigned from, unsigned count)
         }
     }
     arc_close(a);
+}
+
+/* `now` is `was` with from (an entry, or a folder and all under it) named to: every entry of was is in now under
+   the name it should have, with the bytes it had, and now has no more. How many names changed. */
+static int renamed_is(const char *was, const char *now, const char *from, const char *to)
+{
+    int err, changed = 0;
+    struct arc *a = arc_open(in_dir(was), &err), *b = arc_open(in_dir(now), &err);
+    size_t flen = strlen(from);
+    unsigned i;
+    CHECK(a && b, "%s, %s: opened", was, now);
+    if (a && b) {
+        CHECK(arc_count(a) == arc_count(b), "%s: %u entries, %s had %u", now, arc_count(b), was, arc_count(a));
+        for (i = 0; i < arc_count(a); i++) {
+            const struct arc_entry *e = arc_at(a, i), *f;
+            char name[600];
+            struct got g = { 0, 0 }, h = { 0, 0 };
+            int k, moved = !strncmp(e->name, from, flen) && (!e->name[flen] || e->name[flen] == '/');
+            snprintf(name, sizeof name, "%s%s", moved ? to : "", moved ? e->name + flen : e->name);
+            changed += moved;
+            k = arc_find(b, name);
+            CHECK(k >= 0, "%s: no %s (it was %s)", now, name, e->name);
+            if (k < 0)
+                continue;
+            f = arc_at(b, (unsigned)k);
+            arc_extract(a, i, take, &g);
+            arc_extract(b, (unsigned)k, take, &h);
+            CHECK(f->dir == e->dir && f->size == e->size && g.crc == h.crc && g.n == h.n && f->date == e->date
+                  && f->time == e->time, "%s %s: not as %s was", now, name, e->name);
+        }
+    }
+    arc_close(a);
+    arc_close(b);
+    return changed;
 }
 
 static int drop_some(void *ctx, const char *name)
@@ -384,6 +419,50 @@ int main(int argc, char **argv)
     verify("w-none.zip", 0, 0);
     CHECK(arc_zip_remove(in_dir("plain.tar"), drop_all, NULL) == ARC_E_KIND, "a TAR's entries taken out as a ZIP's");
     CHECK(arc_zip_remove(in_dir("no-such.zip"), drop_all, NULL) == ARC_E_OPEN, "... and a file's that is not there");
+
+    /* Renamed: a file; a folder, with all that is under it, to a longer name some folders down; nothing (the
+       archive untouched); in the archive behind a program, and in the one with sizes after the bytes. */
+    copy("w-new.zip", "w-ren1.zip");
+    r = arc_zip_rename(in_dir("w-ren1.zip"), "TWO.TXT", "SECOND.TEXT");
+    CHECK(r == 1 && renamed_is("w-new.zip", "w-ren1.zip", "TWO.TXT", "SECOND.TEXT") == 1, "a file renamed: %d", r);
+    copy("w-ren1.zip", "w-ren2.zip");
+    r = arc_zip_rename(in_dir("w-ren2.zip"), "DIR", "A/LONGER NAME/Folder");
+    CHECK(r >= 3 && renamed_is("w-ren1.zip", "w-ren2.zip", "DIR", "A/LONGER NAME/Folder") == r,
+          "a folder renamed, with what is under it: %d", r);
+    nputs = 0;
+    verify("w-ren2.zip", 0, 10);
+    {
+        struct arc *a = arc_open(in_dir("w-ren2.zip"), &err);
+        CHECK(a && arc_find(a, "DIR/BIG.BIN") < 0 && arc_find(a, "A/LONGER NAME/Folder/BIG.BIN") >= 0
+              && arc_find(a, "A/LONGER NAME/Folder/SUB/EMPTY") >= 0 && arc_find(a, "DIRT") < 0, "... under its new name");
+        arc_close(a);
+    }
+    copy("w-ren2.zip", "w-ren3.zip");
+    CHECK(arc_zip_rename(in_dir("w-ren3.zip"), "DI", "X") == 0 && arc_zip_rename(in_dir("w-ren3.zip"), "NOT/THERE", "X") == 0
+          && same_file("w-ren2.zip", "w-ren3.zip"), "no such name (a piece of one is none): untouched");
+    CHECK(!(f = fopen(in_dir("w-ren3.$$$"), "rb")), "... and nothing left beside it");
+    if (f)
+        fclose(f);
+    copy("w-sfx.zip", "w-sfxren.zip");
+    {
+        struct arc *a = arc_open(in_dir("w-sfx.zip"), &err);
+        char first[300] = "";
+        if (a && arc_count(a))
+            snprintf(first, sizeof first, "%s", arc_at(a, 0)->name);
+        arc_close(a);
+        r = arc_zip_rename(in_dir("w-sfxren.zip"), first, "RENAMED.1");
+        CHECK(r >= 1 && renamed_is("w-sfx.zip", "w-sfxren.zip", first, "RENAMED.1") == r,
+              "%s renamed in the archive behind a program: %d", first, r);
+        p = slurp(in_dir("w-sfxren.zip"), &n);
+        q = slurp(in_dir("sfx.zip"), &n);
+        CHECK(p && q && !memcmp(p, q, 5000), "... the program still before it");
+        free(p), free(q);
+    }
+    copy("w-descr.zip", "w-descrren.zip");
+    r = arc_zip_rename(in_dir("w-descrren.zip"), "TWO.TXT", "2");
+    CHECK(r == 1 && renamed_is("w-descr.zip", "w-descrren.zip", "TWO.TXT", "2") == 1,
+          "TWO.TXT renamed in the one with sizes after the bytes: %d", r);
+    CHECK(arc_zip_rename(in_dir("plain.tar"), "A", "B") == ARC_E_KIND, "a TAR's entry renamed as a ZIP's");
 
     fclose(wlist);
     printf("arcw_test: %d failures (%d checks)\n", fails, checks);
