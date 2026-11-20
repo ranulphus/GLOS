@@ -301,8 +301,8 @@ two command sets that don't match). Before phase C, because the Terminal is one 
     its own ports at 127.0.0.1); the session manager (the Terminal's Sessions, `ssh NAME`, Files' Connect by
     a session; the sessions as the Terminal's tasks in the Start menu). This item is done.
   - **More of PuTTY** (the owner, 2026-11-20, asked once the SSH sessions were built): a session's log to a
-    file (built the same day); Telnet and raw TCP sessions; serial sessions on a COM port
-    (`docs/v1/phase-f.md`).
+    file and Telnet and raw TCP sessions (TELNET.EXE), both built the same day; serial sessions on a COM
+    port, next (`docs/v1/phase-f.md`).
   - The Mixer, the Sound Recorder and the Player stay in the Start menu alone (the owner, the same day): the
     desktop keeps its eight.
   - Not chosen: older servers (RSA host keys, AES ciphers). The client stays with the modern set.

@@ -1316,6 +1316,13 @@ static int key(struct shsess *s)
         }
         c = s->in[s->ih++ % IN_RING];
         irq_restore(f);
+        if (s->fg && s->job_on) {               /* a terminal program's (GLOS_INIT_TERMINAL): the bytes as the
+                                                   terminal sent them, UTF-8 and all, as SYS's TERMINAL says.
+                                                   (They were turned into the PC's code page like the shell's
+                                                   own: an e acute typed to SSH.EXE went to the far side as 82h.) */
+            s->utf_left = 0;
+            return (int)c;
+        }
         if (s->utf_left) {                      /* more of a character */
             if ((c & 0xC0) == 0x80) {
                 s->utf = s->utf << 6 | (c & 0x3F);

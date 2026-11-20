@@ -320,8 +320,10 @@ static int nsess;
 static char home[200];                  /* the program's folder */
 static char sess_dir[240], sess_file[300];      /* SSH's folder and SESSIONS.CFG in it ("": nowhere to keep them) */
 static struct gui_window *sdlg;
-static struct gui_widget *slist, *spages, *sname, *shost, *sport, *suser, *skey, *scmd, *salive, *slog, *tlist, *tport,
-                         *tto, *topen, *scolours, *sfont, *slines;
+static struct gui_widget *slist, *spages, *skind, *sname, *shost, *sport, *suser, *skey, *scmd, *salive, *slog, *tlist,
+                         *tport, *tto, *topen, *scolours, *sfont, *slines, *schars;
+static const int char_pages[] = { 0, 437, 850, 852, 866, 737 };        /* the Characters choice: GLOS's code pages */
+#define NCHARS ((int)(sizeof char_pages / sizeof char_pages[0]))
 static char tunnels_now[sizeof sess[0].tunnels];        /* the tunnels of the session the fields show */
 
 /* TERM.CFG's connections (phase E's: a name, a host, a user and a port each, tabs between) taken over once,
@@ -428,6 +430,11 @@ static void tun_fill(void)                      /* the tunnels' list, from their
 static void sess_show(const struct session *k)  /* a session into the fields */
 {
     char n[16];
+    int i;
+    gui_set_value(skind, k->kind);
+    for (i = NCHARS - 1; i > 0 && char_pages[i] != k->charset; i--)
+        ;
+    gui_set_value(schars, i);
     gui_set_text(sname, k->name);
     gui_set_text(shost, k->host);
     snprintf(n, sizeof n, "%d", k->port);
@@ -508,27 +515,47 @@ static int sess_read(struct session *k, int named)
     }
     snprintf(k->tunnels, sizeof k->tunnels, "%s", tunnels_now);
     k->colours = gui_value(scolours), k->font = gui_value(sfont);
+    k->kind = gui_value(skind);
+    k->charset = gui_value(schars) > 0 && gui_value(schars) < NCHARS ? char_pages[gui_value(schars)] : 0;
     return 0;
 }
 
-/* SSH's program as a shell is told to run it: SSH.EXE beside the Terminal by its whole path (a tab's shell
-   begins at the boot drive's root, and nothing says that the programs' folder is on its PATH); with no folder
-   known, the word alone. */
-static int ssh_word(char *line, size_t room)
+/* A session's program as a shell is told to run it: SSH.EXE or TELNET.EXE beside the Terminal by its whole
+   path (a tab's shell begins at the boot drive's root, and nothing says that the programs' folder is on its
+   PATH); with no folder known, the word alone. */
+static int ssh_word(char *line, size_t room, int kind)
 {
-    return home[0] ? snprintf(line, room, "%s\\SSH.EXE", home) : snprintf(line, room, "ssh");
+    const char *prog = kind == SESSION_SSH ? "SSH" : "TELNET";
+    if (home[0])
+        return snprintf(line, room, "%s\\%s.EXE", home, prog);
+    return snprintf(line, room, "%s", kind == SESSION_SSH ? "ssh" : "telnet");
 }
 
 /* The SSH command a session is opened by: its name alone where it is saved just so, else all of it in words. */
 static void sess_command(const struct session *k, char *line, size_t room)
 {
     int i = k->name[0] ? sessions_find(sess, nsess, k->name) : -1;
-    size_t n = (size_t)ssh_word(line, room);
+    size_t n = (size_t)ssh_word(line, room, k->kind);
     const char *p, *e;
     if (n >= room)
         return;
     if (i >= 0 && session_same(&sess[i], k)) {
         snprintf(line + n, room - n, " %s\r", sess[i].name);
+        return;
+    }
+    if (k->kind != SESSION_SSH) {               /* Telnet, or raw: telnet [-r] [-c PAGE] [-sessionlog FILE] HOST [PORT] */
+        if (k->kind == SESSION_RAW)
+            n += (size_t)snprintf(line + n, room - n, " -r");
+        if (k->charset && n < room)
+            n += (size_t)snprintf(line + n, room - n, " -c %d", k->charset);
+        if (k->log[0] && n < room)
+            n += (size_t)snprintf(line + n, room - n, " -sessionlog %s", k->log);
+        if (n < room)
+            n += (size_t)snprintf(line + n, room - n, " %s", k->host);
+        if (k->port && n < room)
+            n += (size_t)snprintf(line + n, room - n, " %d", k->port);
+        if (n < room)
+            snprintf(line + n, room - n, "\r");
         return;
     }
     if (k->port && n < room)
@@ -717,6 +744,10 @@ static void sess_dialog(void)
     page = gui_tab(spages, GUI_T("Computer"));
     form = gui_form(page);
     sname = gui_field(gui_row(form, GUI_T("&Name:"), NULL), 22);
+    skind = gui_choice(gui_row(form, GUI_T("Kin&d:"), NULL), 18);
+    gui_choice_add(skind, GUI_T("SSH"));
+    gui_choice_add(skind, GUI_T("Telnet"));
+    gui_choice_add(skind, GUI_T("Raw (TCP alone)"));
     shost = gui_field(gui_row(form, GUI_T("&Host:"), NULL), 30);
     sport = gui_field(gui_row(form, GUI_T("&Port:"), NULL), 6);
     suser = gui_field(gui_row(form, GUI_T("&User:"), NULL), 22);
@@ -753,6 +784,13 @@ static void sess_dialog(void)
     row = gui_row(form, GUI_T("L&ines kept:"), NULL);
     slines = gui_field(row, 6);
     gui_label(row, GUI_T("(1000 if none)"));
+    schars = gui_choice(gui_row(form, GUI_T("&Characters:"), NULL), 18);
+    gui_choice_add(schars, GUI_T("As they are (UTF-8)"));
+    for (i = 1; i < NCHARS; i++) {
+        char t[32];
+        snprintf(t, sizeof t, GUI_T("Code page %d"), char_pages[i]);
+        gui_choice_add(schars, t);
+    }
     row = gui_hbox(box, 6, 0);
     gui_button(row, GUI_T("&Open"), sess_button, 10)->flags |= GUI_DEFAULT;
     gui_button(row, GUI_T("&Save"), sess_button, 11);

@@ -34,6 +34,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <glos/cp.h>
 #include <glos/glos.h>
 #ifdef __DJGPP__
 #include <glos/net.h>
@@ -572,8 +573,9 @@ static int add_tunnel(const char *spec, int len)        /* one -L's words: 0, or
     return 0;
 }
 
-/* HOST as a saved session's name: what the session says, where the command line said nothing. */
-static void by_session(const char *dir, char *key, size_t kroom, int port_said, int user_said, int sftp)
+/* HOST as a saved session's name: what the session says, where the command line said nothing. 0, or -1 (a
+   session of another kind: said). */
+static int by_session(const char *dir, char *key, size_t kroom, int port_said, int user_said, int sftp)
 {
     static struct session all[SESSIONS_MAX];
     char path[300];
@@ -582,8 +584,13 @@ static void by_session(const char *dir, char *key, size_t kroom, int port_said, 
     sessions_path(path, sizeof path, dir);
     n = sessions_load(path, all, SESSIONS_MAX);
     if ((i = sessions_find(all, n, s.host)) < 0)
-        return;
+        return 0;
     k = &all[i];
+    if (k->kind != SESSION_SSH) {
+        term_printf("%s: %s is a %s session: telnet %s\r\n", sftp ? "sftp" : "ssh", k->name,
+                    k->kind == SESSION_RAW ? "raw" : "Telnet", k->name);
+        return -1;
+    }
     milestone("session %s", k->name);
     snprintf(s.title, sizeof s.title, "%s", k->name);
     snprintf(s.host, sizeof s.host, "%s", k->host);
@@ -596,7 +603,7 @@ static void by_session(const char *dir, char *key, size_t kroom, int port_said, 
     if (!s.keepalive)
         s.keepalive = (unsigned)k->keepalive;
     if (sftp)
-        return;
+        return 0;
     if (!s.cmd[0])
         snprintf(s.cmd, sizeof s.cmd, "%s", k->command);
     if (!s.log[0])
@@ -613,6 +620,7 @@ static void by_session(const char *dir, char *key, size_t kroom, int port_said, 
             p = e;
         }
     }
+    return 0;
 }
 
 static int start(int argc, char **argv, int sftp)
@@ -664,7 +672,8 @@ static int start(int argc, char **argv, int sftp)
         strncat(s.cmd, argv[i], sizeof s.cmd - strlen(s.cmd) - 1);
     }
     ssh_dir(dir, sizeof dir);
-    by_session(dir, key, sizeof key, port_said, user_said || s.user[0], sftp);
+    if (by_session(dir, key, sizeof key, port_said, user_said || s.user[0], sftp) != 0)
+        return 1;
     if (!s.user[0]) {
         const char *u = getenv("USER");
         snprintf(s.user, sizeof s.user, "%s", u && *u ? u : "glos");
@@ -798,9 +807,18 @@ static void progress(void *arg, uint64_t done, uint64_t total)
     (void)total;
 }
 
+/* A file's name on this PC as it was typed (UTF-8, as the terminal sends it) in DOS's own code page, which is
+   what DOS knows it by. */
+static const char *here(const char *typed, char *out, size_t room)
+{
+    if (cp_from_utf8(cp_active(), typed, out, (int)room) < 0)
+        snprintf(out, room, "%s", typed);
+    return out;
+}
+
 static void sftp_line(const char *line)
 {
-    char copy[600], *argv[8], path[600], local[300];
+    char copy[600], *argv[8], path[600], local[300], dos[300];
     int argc = 0;
     char *p;
     snprintf(copy, sizeof copy, "%s", line);
@@ -821,9 +839,9 @@ static void sftp_line(const char *line)
     } else if (!strcmp(argv[0], "pwd")) {
         term_printf("Remote working directory: %s\r\n", s.rcwd);
     } else if (!strcmp(argv[0], "lpwd") || !strcmp(argv[0], "lcd")) {
-        if (argc > 1 && chdir(argv[1]) != 0)
+        if (argc > 1 && chdir(here(argv[1], dos, sizeof dos)) != 0)
             term_printf("Couldn't change local directory to %s\r\n", argv[1]);
-        else if (getcwd(local, sizeof local))
+        else if (getcwd(dos, sizeof dos) && cp_to_utf8(cp_active(), dos, local, sizeof local) >= 0)
             term_printf("Local working directory: %s\r\n", local);
     } else if (!strcmp(argv[0], "cd") && argc > 1) {
         struct sftpc_attrs a;
@@ -843,7 +861,7 @@ static void sftp_line(const char *line)
         FILE *f;
         remote_path(argv[1], path, sizeof path);
         snprintf(local, sizeof local, "%s", argc > 2 ? argv[2] : base_of(argv[1]));
-        if (!(f = fopen(local, "wb"))) {
+        if (!(f = fopen(here(local, dos, sizeof dos), "wb"))) {
             term_printf("Couldn't open %s here\r\n", local);
         } else {
             unsigned t0 = glos_ticks();
@@ -853,15 +871,15 @@ static void sftp_line(const char *line)
             fclose(f);
             if (r != 0) {
                 term_printf("Couldn't get %s: %s\r\n", path, sftpc_why(s.sf));
-                remove(local);
+                remove(dos);
             } else {
                 struct stat st;
-                stat(local, &st);
+                stat(dos, &st);
                 term_printf("%s: %ld bytes in %u ms\r\n", local, (long)st.st_size, glos_ticks() - t0);
             }
         }
     } else if (!strcmp(argv[0], "put") && argc > 1) {
-        FILE *f = fopen(argv[1], "rb");
+        FILE *f = fopen(here(argv[1], dos, sizeof dos), "rb");
         remote_path(argc > 2 ? argv[2] : base_of(argv[1]), path, sizeof path);
         if (!f) {
             term_printf("Couldn't open %s here\r\n", argv[1]);

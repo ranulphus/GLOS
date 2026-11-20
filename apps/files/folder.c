@@ -119,7 +119,7 @@ static int connect_ask(struct gui_window *owner, char *out, int room)
 {
     const char *names[32];
     struct gui_widget *box, *row;
-    int n = site_sessions(names, 32), i, r;
+    int n = site_sessions(names, 32, 0), i, r;
     cn_win = gui_window(GUI_T("Connect to a Computer"), 430, 140, GUI_W_DIALOG);
     cn_win->owner = owner;
     box = gui_vbox(cn_win->root, 6, 10);

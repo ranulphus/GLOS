@@ -4,6 +4,14 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Telnet (2026-11-20)
+
+- **A new program, `telnet`** (TELNET.EXE): `telnet HOST [PORT]` for systems without SSH. `-c 437` shows a
+  bulletin board's characters as they should be; `-r` is a plain TCP connection. Ctrl+] ends a session.
+- The Terminal's saved sessions have a kind now: SSH, Telnet or Raw.
+- **Fixed:** accented letters typed in an SSH session went to the other computer in the PC's code page, not
+  UTF-8.
+
 ## Saved sessions in the Terminal (2026-11-20)
 
 - **The Terminal's Connections are now Sessions**, as PuTTY has them (File, Sessions..., Ctrl+Shift+O): each

@@ -9238,6 +9238,10 @@ def sshprog_case(profile, card):
         checks["session"] = t.expect("$ ", 180)
         t.send("echo term=$TERM; stty size\r")
         checks["pty"] = t.expect("term=xterm\n") and t.expect("24 80\n")
+        # (What is typed to a terminal program is its as the terminal sent it: UTF-8. The shell's session turned
+        # it into the PC's code page first, as for its own line: an e acute went out as 82h.)
+        t.send("printf caf\u00e9 | od -An -tx1\r")
+        checks["typed-utf8"] = t.expect("63 61 66 c3 a9\n", 60)
         t.send("exit\r")
         checks["closed"] = t.expect("Connection to 10.0.2.2 closed.") and t.expect("C:\\TEST>")
         t.send("sftp -P %d glos@10.0.2.2\r" % p1)
@@ -9356,6 +9360,191 @@ def sshprog_case(profile, card):
         checks["timeout"] = False
     text = agent.wait()
     srv.close()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("sshc-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad)), \
+        not bad
+
+
+class TelnetServer:
+    """A Telnet server on 127.0.0.1 (the guest's 10.0.2.2), for the suite's Telnet case. `board`: a bulletin
+    board's manners: it will echo and suppress go-aheads, asks for the terminal's type and its size, greets in
+    code page 437 with ANSI colours, echoes what is typed and answers a line with "welcome LINE" ("quit": it says
+    bye and closes). Not `board`: no Telnet at all and no echo: it asks "name? " and answers a line with
+    "hello LINE" (a far side that leaves the echo to the terminal, and a raw session's). What each connection
+    told is kept: `ttype`, `naws`, `lines` (as bytes), `raw` (all that came)."""
+
+    def __init__(self, board):
+        import socket
+        import threading
+        self.board, self.ttype, self.naws, self.lines, self.raw, self.total = board, None, None, [], b"", 0
+        self.s = socket.socket()
+        self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.s.bind(("127.0.0.1", 0))
+        self.s.listen(8)
+        self.port = self.s.getsockname()[1]
+        threading.Thread(target=self.accept, daemon=True).start()
+
+    def accept(self):
+        import threading
+        while True:
+            try:
+                c, _ = self.s.accept()
+            except OSError:
+                return
+            self.total += 1
+            threading.Thread(target=self.serve, args=(c,), daemon=True).start()
+
+    def serve(self, c):
+        line, pend = b"", b""
+        try:
+            if self.board:
+                c.sendall(b"\xff\xfb\x01\xff\xfb\x03\xff\xfd\x18\xff\xfd\x1f")     # WILL ECHO, WILL SGA, DO TTYPE, DO NAWS
+                time.sleep(1.5)
+                c.sendall(b"\xff\xfa\x18\x01\xff\xf0")                             # TTYPE SEND
+                time.sleep(1.0)
+                c.sendall(b"\x1b[2J\x1b[H\x1b[1;33m\xc9\xcd\xcd\xbb BBS \xb0\xb1\xb2\x1b[0m\r\nlogin: ")
+            else:
+                c.sendall(b"name? ")
+            while True:
+                d = c.recv(4096)
+                if not d:
+                    break
+                self.raw += d
+                pend += d
+                text = b""
+                while pend:                     # Telnet's words out of it (a cut one waits for its rest)
+                    if pend[0] != 0xFF or not self.board:
+                        text, pend = text + pend[:1], pend[1:]
+                    elif len(pend) < 2:
+                        break
+                    elif pend[1] == 0xFF:
+                        text, pend = text + b"\xff", pend[2:]
+                    elif pend[1] == 0xFA:
+                        end = pend.find(b"\xff\xf0")
+                        if end < 0:
+                            break
+                        sub = pend[2:end].replace(b"\xff\xff", b"\xff")
+                        if sub[:2] == b"\x18\x00":
+                            self.ttype = sub[2:]
+                        elif sub[:1] == b"\x1f" and len(sub) == 5:
+                            self.naws = (sub[1] << 8 | sub[2], sub[3] << 8 | sub[4])
+                        pend = pend[end + 2:]
+                    elif pend[1] in (0xFB, 0xFC, 0xFD, 0xFE):
+                        if len(pend) < 3:
+                            break
+                        pend = pend[3:]
+                    else:
+                        pend = pend[2:]
+                for b in text:
+                    ch = bytes([b])
+                    if ch == b"\x00" or ch == b"\n":
+                        continue
+                    if ch != b"\r":
+                        line += ch
+                        if self.board:
+                            c.sendall(ch)       # (its echo)
+                        continue
+                    self.lines.append(line)
+                    if line == b"quit":
+                        c.sendall(b"\r\nbye\r\n")
+                        return
+                    c.sendall((b"\r\nwelcome " + line + b"\r\n> ") if self.board else (b"hello " + line + b"\r\nname? "))
+                    line = b""
+        except OSError:
+            pass
+        finally:
+            c.close()
+
+    def close(self):
+        self.s.close()
+
+
+def telnet_case(profile, card):
+    """TELNET.EXE (apps/ssh/telnetc.c, apps/shared/telnet.c; phase F: Telnet and raw sessions, as PuTTY has them)
+    at an SSH login to GLOS's shell, against the suite's own servers on the host. A bulletin board's manners
+    (-c 437): its picture in code page 437 shown as it should be, the terminal's type (ANSI) and size told,
+    every key sent at once and echoed by the far side, a letter outside ASCII sent in the board's code page,
+    Ctrl+] to end it. A saved session of that kind by its name, with its log (the picture as text, no escape in
+    it); `ssh` given that name says whose it is. A raw session (-r) and a Telnet one to a far side with no
+    echo: a line at a time, shown here, Ctrl+C to end it. A port nothing listens on."""
+    tag = "telnet-%s-%s" % (profile, card)
+    out = os.path.join(ROOT, "out", "sshc-%s-files" % tag)
+    os.makedirs(out, exist_ok=True)
+    board, plain, closed = TelnetServer(True), TelnetServer(False), free_port()
+    open(os.path.join(out, "SESSIONS.CFG"), "w").write(
+        "[Board]\nkind = telnet\ncharset = 437\nhost = 10.0.2.2\nport = %d\nlog = C:\\TEST\\BOARD.LOG\n" % board.port)
+    rel = lambda f: os.path.relpath(os.path.join(out, f), ROOT)
+    agent = Agent("sshc-" + tag, profile, card, ["--file", "build/apps/TELNET.EXE=/TEST/TELNET.EXE",
+        "--file", "build/apps/SSH.EXE=/TEST/SSH.EXE", "--file", "%s=/TEST/SSH/SESSIONS.CFG" % rel("SESSIONS.CFG"),
+        "--cmd", "SERSAY HX-START telnet", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1500)
+    checks = {"listen": agent.listening()}
+
+    def raw(cmd):
+        p = subprocess.run(agent.opts + ["glos@127.0.0.1", cmd], capture_output=True, timeout=300)
+        return p.returncode, p.stdout
+
+    try:
+        t = Login(agent)
+        checks["login"] = t.expect("C:\\TEST>")
+        # A bulletin board.
+        t.send("telnet -c 437 10.0.2.2 %d\r" % board.port)
+        ok = t.expect("Connected to 10.0.2.2.", 120) and t.expect("login: ", 60)
+        checks["board"] = ok and "\u2554\u2550\u2550\u2557 BBS \u2591\u2592\u2593" in t.text()
+        checks["board-options"] = board.ttype == b"ANSI" and board.naws == (80, 24)
+        t.send("gue")
+        ok = t.expect("gue")
+        t.send("st\r")
+        checks["board-keys"] = ok and t.expect("welcome guest", 60) and board.lines[-1:] == [b"guest"]
+        t.send("caf\u00e9\r")                    # (e acute: 82h in code page 437)
+        checks["board-page"] = t.expect("welcome caf\u00e9", 60) and board.lines[-1:] == [b"caf\x82"]
+        if not checks["board-page"]:
+            print("  %s board-page: the board had %r, the terminal %r" % (tag, board.lines[-2:], t.text()[-80:]))
+        t.send("\x1d")
+        checks["board-end"] = t.expect("Connection to 10.0.2.2 closed.") and t.expect("C:\\TEST>")
+        # The saved session, by its name; its log.
+        t.send("telnet board\r")
+        ok = t.expect("login: ", 120)
+        t.send("quit\r")
+        checks["by-name"] = ok and t.expect("bye", 60) and t.expect("Connection to 10.0.2.2 closed.") and t.expect("C:\\TEST>")
+        log = raw("glos dd if=c:\\test\\board.log of=-")[1]
+        checks["log"] = log.startswith(b"=== telnet Board, 20") and "\u2554\u2550\u2550\u2557 BBS".encode() in log \
+            and b"\r\nlogin: quit\r\nbye\r\n" in log and b"\x1b" not in log
+        if not checks["log"]:
+            print("  %s log: %r" % (tag, log[-300:]))
+        t.send("ssh board\r")
+        checks["not-ssh"] = t.expect("Board is a Telnet session: telnet Board") and t.expect("C:\\TEST>")
+        # Raw: a line at a time, shown here.
+        t.send("telnet -r 10.0.2.2 %d\r" % plain.port)
+        ok = t.expect("name? ", 120)
+        t.send("glos\r")
+        ok = ok and t.expect("hello glos", 60) and t.expect("name? ")
+        t.send("\x03")
+        checks["raw"] = ok and t.expect("Connection to 10.0.2.2 closed.") and t.expect("C:\\TEST>") \
+            and plain.lines[-1:] == [b"glos"] and plain.raw == b"glos\r\n"
+        # Telnet, to a far side that does not echo: a line at a time too, and Telnet's line end.
+        n = len(plain.raw)
+        t.send("telnet 10.0.2.2 %d\r" % plain.port)
+        ok = t.expect("name? ", 120)
+        t.send("again\r")
+        ok = ok and t.expect("hello again", 60)
+        t.send("\x03")
+        checks["no-echo"] = ok and t.expect("Connection to 10.0.2.2 closed.") and t.expect("C:\\TEST>") \
+            and plain.raw[n:] == b"again\r\n"
+        # Nobody there.
+        t.send("telnet 10.0.2.2 %d\r" % closed)
+        ok = t.expect("Connection refused", 120) and t.expect("C:\\TEST>")
+        t.send("echo status %errorlevel%\r")
+        checks["refused"] = ok and t.expect("status 255\n")
+        t.send("exit\r")
+        checks["exit"] = t.end() == 0
+        checks["glos-exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    board.close()
+    plain.close()
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
     checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
     bad = [k for k, v in checks.items() if not v]
@@ -10671,12 +10860,18 @@ def main():
         return 0 if all(r[1] for r in matrix(pkg_case, cases, a.jobs)) else 1
     if a.suite == "sshc":
         cases = [c for c in SSHC_CASES if not a.profile or c[0] in a.profile]
-        res = [] if os.environ.get("SSHC_ONLY") else matrix(sshc_case, cases, a.jobs)
-        res += [] if os.environ.get("SSHC_ONLY") else matrix(sshprog_case, [c for c in (("bf6", "ne2kpci"), ("486dx2", "ne2k")) if not a.profile or c[0] in a.profile],
-                      a.jobs)
-        if not os.environ.get("SSHC_ONLY") or os.environ["SSHC_ONLY"] == "filesnet":   # Files' remote folders (phase F)
-            res = ([] if os.environ.get("SSHC_ONLY") else res) + matrix(filesnet_case, cases, a.jobs)
-        return 0 if all(r[1] for r in res) else 1
+        progs = [c for c in (("bf6", "ne2kpci"), ("486dx2", "ne2k")) if not a.profile or c[0] in a.profile]
+        only = os.environ.get("SSHC_ONLY", "")  # (SSHC_ONLY=term, prog, filesnet or telnet: that part alone)
+        res = []
+        if only in ("", "term"):
+            res += matrix(sshc_case, cases, a.jobs)
+        if only in ("", "prog"):
+            res += matrix(sshprog_case, progs, a.jobs)
+        if only in ("", "filesnet"):            # Files' remote folders (phase F)
+            res += matrix(filesnet_case, cases, a.jobs)
+        if only in ("", "telnet"):              # TELNET.EXE (phase F)
+            res += matrix(telnet_case, progs, a.jobs)
+        return 0 if res and all(r[1] for r in res) else 1
     if a.suite == "https":
         cases = [c for c in HTTPS_CASES if not a.profile or c[0] in a.profile]
         return 0 if all(r[1] for r in matrix(https_case, cases, a.jobs)) else 1

@@ -174,6 +174,8 @@ host-test-run:
 	@mkdir -p build/host/sesslog && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation \
 	  -o build/host/sesslog_test tests/host/sesslog_test.c apps/shared/sesslog.c \
 	  && build/host/sesslog_test build/host/sesslog
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/telnet_test tests/host/telnet_test.c \
+	  apps/shared/telnet.c && build/host/telnet_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/disk_test tests/host/disk_test.c kernel/disk/mbr.c \
 	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  && tests/host/disk_test.sh build/host/disk_test build/host/disk
@@ -875,7 +877,17 @@ build/apps/FETCH.EXE: apps/fetch/fetch.c $(NET_LIBS) tools/glosmark.py
 	$(Q)python3 tools/glosmark.py $@
 # SSH.EXE, SFTP.EXE and SSHKEY.EXE (apps/ssh; docs/v1/shell.md, S2c): the SSH client as programs run at a
 # terminal (API 2.1's GLOS_INIT_TERMINAL), one source built three ways.
-SSH_EXES := build/apps/SSH.EXE build/apps/SFTP.EXE build/apps/SSHKEY.EXE
+SSH_EXES := build/apps/SSH.EXE build/apps/SFTP.EXE build/apps/SSHKEY.EXE build/apps/TELNET.EXE
+# TELNET.EXE (phase F): the same terminal (cli.c) with Telnet's client in the SSH client's place.
+build/apps/TELNET.EXE: apps/ssh/cli.c apps/ssh/telnetc.c apps/ssh/cli.h apps/shared/telnet.c apps/shared/telnet.h \
+    apps/shared/sessions.c apps/shared/sessions.h apps/shared/sesslog.c apps/shared/sesslog.h build/sdk/libglos.a \
+    tools/glosmark.py
+	@mkdir -p build/apps
+	$(Q)echo "  DJCC    apps/ssh (TELNET)"
+	$(Q)$(DJCC) -O2 -Wall -Werror -Wno-format-truncation -DCLI_WHICH=3 -Iinclude -o $@ \
+	  apps/ssh/cli.c apps/ssh/telnetc.c apps/shared/telnet.c apps/shared/sessions.c apps/shared/sesslog.c \
+	  build/sdk/libglos.a
+	$(Q)python3 tools/glosmark.py $@
 define ssh_exe
 build/apps/$(1).EXE: apps/ssh/cli.c apps/ssh/ssh.c apps/ssh/cli.h apps/shared/sessions.c apps/shared/sessions.h \
     apps/shared/sesslog.c apps/shared/sesslog.h build/sdk/libsshc.a build/sdk/libglos.a tools/glosmark.py

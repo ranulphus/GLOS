@@ -6,6 +6,8 @@
    The file is text, a section a session:
 
        [office]
+       kind = telnet                    (or raw; left out: ssh)
+       charset = 437                    (the far side's DOS code page; left out: its bytes as they are)
        host = 10.0.0.5
        port = 2222
        user = me
@@ -26,8 +28,12 @@
 #define SESSIONS_MAX 32
 #define SESSION_TUNNELS 4               /* -L's a session (SSH.EXE's own limit) */
 
+enum { SESSION_SSH, SESSION_TELNET, SESSION_RAW };     /* a session's kind: SSH.EXE's, or TELNET.EXE's (raw: -r) */
+
 struct session {
     char name[24];                      /* a word: no spaces, and nothing an address has (@ : / \) */
+    int kind;                           /* SESSION_ */
+    int charset;                        /* Telnet and raw: the far side's code page (437, ...); 0: as they are */
     char host[64], user[24];
     int port;                           /* 0: SSH's own (22) */
     char key[100];                      /* a private key's file; "": SSH's own (ID_ED25 beside the file) */

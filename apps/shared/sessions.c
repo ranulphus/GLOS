@@ -179,6 +179,10 @@ int sessions_load(const char *path, struct session *out, int room)
         p = trimmed(p), v = trimmed(eq + 1);
         if (!strcmp(p, "host"))
             snprintf(s->host, sizeof s->host, "%s", v);
+        else if (!strcmp(p, "kind"))
+            s->kind = !strcmp(v, "telnet") ? SESSION_TELNET : !strcmp(v, "raw") ? SESSION_RAW : SESSION_SSH;
+        else if (!strcmp(p, "charset"))
+            s->charset = within(v, 1, 65535, 0);
         else if (!strcmp(p, "user"))
             snprintf(s->user, sizeof s->user, "%s", v);
         else if (!strcmp(p, "port"))
@@ -213,7 +217,12 @@ int sessions_save(const char *path, const struct session *s, int n)
         return -1;
     fprintf(f, "; GLOS's saved sessions: the Terminal's Sessions keeps them, and `ssh NAME` reads them.\n");
     for (i = 0; i < n; i++, s++) {
-        fprintf(f, "\n[%s]\nhost = %s\n", s->name, s->host);
+        fprintf(f, "\n[%s]\n", s->name);
+        if (s->kind != SESSION_SSH)
+            fprintf(f, "kind = %s\n", s->kind == SESSION_TELNET ? "telnet" : "raw");
+        if (s->charset)
+            fprintf(f, "charset = %d\n", s->charset);
+        fprintf(f, "host = %s\n", s->host);
         if (s->port)
             fprintf(f, "port = %d\n", s->port);
         if (s->user[0])
@@ -241,7 +250,7 @@ int sessions_save(const char *path, const struct session *s, int n)
 
 int session_same(const struct session *a, const struct session *b)
 {
-    return !strcmp(a->name, b->name) && !strcmp(a->host, b->host) && !strcmp(a->user, b->user) && a->port == b->port
+    return !strcmp(a->name, b->name) && a->kind == b->kind && a->charset == b->charset && !strcmp(a->host, b->host) && !strcmp(a->user, b->user) && a->port == b->port
            && !strcmp(a->key, b->key) && !strcmp(a->command, b->command) && !strcmp(a->tunnels, b->tunnels)
            && a->keepalive == b->keepalive && !strcmp(a->log, b->log) && a->colours == b->colours && a->font == b->font && a->lines == b->lines;
 }

@@ -8,7 +8,8 @@
  * read a line at a time here. With no terminal (ssh pc "SSH host command", a batch file) what it says goes
  * to its standard output, and a question can't be asked: it ends.
  *
- * Built three times: CLI_WHICH 0 ssh, 1 sftp, 2 ssh-keygen. */
+ * Built three times: CLI_WHICH 0 ssh, 1 sftp, 2 ssh-keygen; and a fourth with telnetc.c in ssh.c's place:
+ * CLI_WHICH 3, TELNET.EXE (phase F). */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -143,7 +144,7 @@ static void typed(const unsigned char *b, int n)
 
 int main(int argc, char **argv)
 {
-    static const char *const names[] = { "SSH", "SFTP", "SSH key maker" };
+    static const char *const names[] = { "SSH", "SFTP", "SSH key maker", "Telnet" };
     unsigned char ev[GLOS_EV_MAX], b[256];
     unsigned c2, r2;
     char *p;
@@ -161,7 +162,11 @@ int main(int argc, char **argv)
         return 2;
     }
     have_term = glos_terminal_size(&cols, &rows) == 0;
+#if CLI_WHICH == 3
+    r = telnet_command(argc, argv);
+#else
     r = CLI_WHICH == 2 ? keygen_command(argc, argv) : CLI_WHICH == 1 ? sftp_command(argc, argv) : ssh_command(argc, argv);
+#endif
     if (r != -2)
         return r;
     while (!resumed) {

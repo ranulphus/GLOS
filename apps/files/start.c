@@ -187,7 +187,7 @@ static char *part(char **at)
 static void session_tasks(struct ent *e)
 {
     const char *names[32];
-    int n = site_sessions(names, 32), i;
+    int n = site_sessions(names, 32, 1), i;
     size_t at = 0;
     for (i = 0; i < n; i++) {
         int k = snprintf(e->tasks + at, sizeof e->tasks - at, "%s=-session %s;", names[i], names[i]);

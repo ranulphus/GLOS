@@ -10,11 +10,11 @@ key ctrl+shift+o
 wait "Sessions"
 shot sess-empty "Sessions"
 type lab
-key tab
+key alt+h
 type 127.0.0.1
-key tab
+key alt+p
 type 2222
-key tab
+key alt+u
 type glos
 key alt+a
 type 30

@@ -21,6 +21,7 @@ void shell_resume(int code);                    /* the command has ended with th
 int ssh_command(int argc, char **argv);         /* -2: under way (shell_resume() at its end); or the exit code */
 int sftp_command(int argc, char **argv);
 int keygen_command(int argc, char **argv);
+int telnet_command(int argc, char **argv);      /* (telnetc.c: TELNET.EXE's; it answers to the names below too) */
 int ssh_screen(void);                           /* a session with a pty runs: what is typed is its */
 int ssh_asking(void);                           /* the line typed is its: a question's answer, sftp's command */
 void ssh_answer(const char *line);

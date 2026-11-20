@@ -274,3 +274,41 @@ nothing in its commits to do with either. An old race, found by it:
 - **Tests** (the display suite, every card): the answer right after an asking is "display changing" (or the
   mode asked for, with its real number, where the card was quicker than the question); a mode asked for a
   second after another ends as the mode on the screen, and no line of the log says `mode=0`.
+
+## Telnet and raw sessions (2026-11-20)
+
+The second of PuTTY's other things the owner chose: for what has no SSH (old systems, bulletin boards,
+switches and their like). Nothing such a session carries is secret from the network, and it says so nowhere
+but here: it is what Telnet is.
+
+- **TELNET.EXE** (`telnet [-r] [-c PAGE] [-sessionlog FILE] HOST [PORT]`): a program at a terminal as SSH.EXE
+  is, on the same terminal code (`apps/ssh/cli.c`) with `telnetc.c` in the SSH client's place. Telnet's own
+  words among the bytes are `apps/shared/telnet.c`: it agrees to the far side's echo, to go-aheads left out
+  and to binary both ways, tells the terminal's type and its size (again when the window changes), and
+  refuses everything else once. To a Telnet server's own port (23) it says what it has first; to any other
+  port it speaks Telnet only when spoken to, so a plain service on a port is not sent Telnet's bytes.
+- **Every key, or a line.** Where the far side echoes (most do) every key goes at once and Ctrl+C is the far
+  side's; where it does not, a line is typed here, shown here and sent at Enter, and Ctrl+C ends the
+  session. **Ctrl+]** ends it at any time.
+- **`-r`, raw:** a TCP connection and nothing else, a line at a time.
+- **`-c PAGE`, a bulletin board's characters:** the far side's bytes are a DOS code page's (437, 850, 852,
+  866, 737: those GLOS has); they are shown as they should be (the box and block characters are in the
+  terminal's font), and what is typed is sent in that page. The terminal then calls itself ANSI, which is what
+  boards ask for; the colours and the cursor's moves are the ones the terminal's screen has always known.
+- **Saved sessions have a kind** (the Terminal's Sessions: SSH, Telnet, Raw) and their characters (the Look
+  page); `telnet NAME` opens one, its log kept as an SSH session's is; `ssh NAME` on one says whose it is.
+  The Start menu lists them with the rest; Files' Connect lists the SSH ones, which have folders.
+- **Found by its test: what is typed to a terminal program was not UTF-8.** The shell's session turned typed
+  characters into the PC's code page for every reader, its own line editor and a program at the terminal
+  alike, though SYS's TERMINAL says a program has them as the terminal sent them. An e acute typed to
+  SSH.EXE went to the far side as 82h. A terminal program now has the bytes as they are (`shsess.c`), and
+  SFTP, which had local file names right by that accident, turns what is typed for this PC's files into
+  DOS's code page itself.
+- **Tests.** `telnet_test` on the host (3,110 checks: a server's opening answered, cut in two at every place;
+  the type and size told; text with Telnet's words among it; what is typed as Telnet carries it; an offer
+  taken and refused; rubbish). Loop A, the sshc suite's `telnet_case` on both machines, against two servers
+  of the suite's own: a board's picture in code page 437, its type and size, keys echoed by the far side, an
+  e acute sent as 82h, Ctrl+]; the saved session and its log; a raw session and a Telnet one with no echo, a
+  line at a time; a port nobody listens on. `sshprog_case`: an e acute typed to an SSH session arrives as
+  UTF-8.
+- **Not yet:** serial sessions (the third the owner chose): next.

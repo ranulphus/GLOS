@@ -85,6 +85,8 @@ int main(int argc, char **argv)
         if (i & 16)
             snprintf(s[i].tunnels, sizeof s[i].tunnels, "%d:web:80 *:%d:10.0.0.%d:22", 8000 + i, 2200 + i, i);
         s[i].keepalive = i % 3 ? 30 * i : 0;
+        s[i].kind = i % 5 == 1 ? SESSION_TELNET : i % 5 == 2 ? SESSION_RAW : SESSION_SSH;
+        s[i].charset = i % 4 == 1 ? 437 : i % 4 == 2 ? 850 : 0;
         if (i % 7 == 3)
             snprintf(s[i].log, sizeof s[i].log, "C:\\LOGS\\S%d.LOG", i);
         s[i].colours = i % SESSION_COLOURS, s[i].font = i % 4, s[i].lines = i % 5 ? 100 * (i + 1) : 0;
@@ -105,7 +107,8 @@ int main(int argc, char **argv)
     put(path, "host = nobody's\r\n; a comment\r\n\r\n  [ Office ]  \r\n  host=10.0.0.5\r\nport = 2222 \r\nuser =  me \r\n"
               "colour = 3\r\ncolours = 3\r\nfont = 9\r\nlines = 50\r\nkeepalive = 60\r\nwhat is this\r\n"
               "tunnels = 8080:intranet:80\r\ncommand = echo x = y\r\nlog = C:\\LOGS\\OFFICE.LOG\r\n"
-              "[office]\r\nhost = second\r\n[two words]\r\nhost = bad\r\n[home]\r\nhost = home.example\r\nport = 0\r\n"
+              "[office]\r\nhost = second\r\n[two words]\r\nhost = bad\r\n[home]\r\nkind = telnet\r\ncharset = 437\r\n"
+              "host = home.example\r\nport = 0\r\n"
               "tunnels = nonsense\r\nkey = C:\\KEYS\\HOME\r\n[broken\r\nhost = never\r\n");
     n = sessions_load(path, back, SESSIONS_MAX);
     CHECK(n == 2, "by hand: %d sessions", n);
@@ -115,6 +118,8 @@ int main(int argc, char **argv)
           && !strcmp(back[0].log, "C:\\LOGS\\OFFICE.LOG"),
           "by hand, the first: %s %s %d %s %d %d %d %d %s %s", back[0].name, back[0].host, back[0].port, back[0].user,
           back[0].colours, back[0].font, back[0].lines, back[0].keepalive, back[0].tunnels, back[0].command);
+    CHECK(back[0].kind == SESSION_SSH && back[0].charset == 0 && back[1].kind == SESSION_TELNET && back[1].charset == 437,
+          "by hand, their kinds: %d %d, %d %d", back[0].kind, back[0].charset, back[1].kind, back[1].charset);
     CHECK(!strcmp(back[1].name, "home") && !strcmp(back[1].host, "home.example") && back[1].port == 0 && !back[1].tunnels[0]
           && !strcmp(back[1].key, "C:\\KEYS\\HOME"), "by hand, the second: %s %s %d %s %s", back[1].name, back[1].host,
           back[1].port, back[1].tunnels, back[1].key);
@@ -146,7 +151,8 @@ int main(int argc, char **argv)
                   && back[i].port <= 65535 && session_tunnels_ok(back[i].tunnels) >= 0 && back[i].colours >= 0
                   && back[i].colours < SESSION_COLOURS && back[i].font >= 0 && back[i].font <= 3
                   && (back[i].lines == 0 || (back[i].lines >= 100 && back[i].lines <= 20000)) && back[i].keepalive >= 0
-                  && back[i].keepalive <= 3600, "rubbish %d: session %d is not one", j, i);
+                  && back[i].keepalive <= 3600 && back[i].kind >= SESSION_SSH && back[i].kind <= SESSION_RAW
+                  && back[i].charset >= 0 && back[i].charset <= 65535, "rubbish %d: session %d is not one", j, i);
     }
     printf("sessions_test: %d failures (%d checks)\n", fails, checks);
     return fails != 0;
