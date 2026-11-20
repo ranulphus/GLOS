@@ -4,6 +4,7 @@
  * fill, stretch, centre or tile). The shell makes it once into a picture the desktop's size, draws that under the
  * icons, and makes it again when either setting or the screen changes. With none, or one that can't be read, the
  * desktop is its theme's colour. The 2D library dithers it on an 8-bit desktop. */
+#define WALLMAKE_STB_ELSEWHERE          /* (the decoders' code is picfile.c's here: thumbs.c) */
 #include "wallmake.h"
 
 #include "files.h"

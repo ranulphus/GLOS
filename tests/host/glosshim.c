@@ -1612,7 +1612,7 @@ static int step(void)
                                                    waits for another of it. What the app prints is this program's
                                                    own output: read back from its file (the suite's log); printed
                                                    to anything else it cannot be, and a second and a half passes. */
-            static struct { char line[200]; int n; } heard[32];
+            static struct { char line[200]; int n; } heard[256];
             static int nheard, waited;
             struct stat st;
             int k, have = 0;
@@ -1622,10 +1622,12 @@ static int step(void)
             a[strcspn(a, "\r\n")] = 0;
             for (k = 0; k < nheard && strcmp(heard[k].line, a); k++)
                 ;
-            if (k == nheard && nheard < 32)
+            if (k == nheard && nheard == 256)   /* (it was 32, and the thirty-third line was not waited for at all) */
+                fail("said: more than 256 different lines in a script");
+            if (k == nheard)
                 snprintf(heard[nheard++].line, sizeof heard[0].line, "%s", a);
             fflush(stdout);
-            if (k < 32 && fstat(1, &st) == 0 && S_ISREG(st.st_mode)) {
+            if (fstat(1, &st) == 0 && S_ISREG(st.st_mode)) {
                 FILE *f = fopen("/proc/self/fd/1", "r");
                 char l[1024];
                 while (f && fgets(l, sizeof l, f)) {

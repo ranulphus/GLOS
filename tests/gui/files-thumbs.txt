@@ -1,0 +1,45 @@
+# The browser's views (apps/files; phase E, docs/v1/apps/files.md, Views): thumbnails, small icons, large icons
+# and details of one folder, C:\PIX (tests/gui/mkpix.py's: a PNG, a BMP, a PCX taller than wide, a BMP smaller
+# than a thumbnail, a file with a picture's name and none in it, a text file and a folder).
+# Thumbnails are made one at a time on a worker's thread, in the rows' order, and Files says each (said): made
+# the first time (decoded, made small, and kept in THUMBS beside FILES.EXE), kept when the view is come back to
+# (read from there; only those on the screen and a screenful after them are made, so Home first). The script leaves the browser in the details view, as the other scripts find it (on Loop A
+# they share a disc, and the browser's view is kept from one run to the next).
+run FILES.EXE -browse C:\PIX
+wait "C:\PIX - Files"
+key alt+v t
+said FILES view thumbnails
+said FILES thumb none BROKEN.PNG
+said FILES thumb GRID.PNG 96x64 made
+said FILES thumb SUNSET.BMP 96x60 made
+said FILES thumb TALL.PCX 38x96 made
+said FILES thumb TINY.BMP 20x12 made
+shot thumbs "C:\PIX - Files"
+key down
+key right
+shot chosen "C:\PIX - Files"
+key alt+v s
+said FILES view small
+shot small "C:\PIX - Files"
+key alt+v l
+said FILES view large
+shot large "C:\PIX - Files"
+key home
+key alt+v t
+said FILES view thumbnails
+said FILES thumb none BROKEN.PNG
+said FILES thumb GRID.PNG 96x64 kept
+said FILES thumb SUNSET.BMP 96x60 kept
+said FILES thumb TALL.PCX 38x96 kept
+said FILES thumb TINY.BMP 20x12 kept
+shot again "C:\PIX - Files"
+key alt+v d
+said FILES view details
+key alt+f4
+gone "C:\PIX - Files"
+expect FILES browser C:\PIX
+expect FILES thumb GRID.PNG 96x64 made
+expect FILES thumb GRID.PNG 96x64 kept
+expect FILES thumb none BROKEN.PNG
+expect FILES view details
+expect FILES end 

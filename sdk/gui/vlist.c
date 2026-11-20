@@ -77,6 +77,12 @@ static int shown(struct vlist *l)               /* lines of the screen */
     return h / unit > 1 ? h / unit : 1;
 }
 
+static int page_lines(struct vlist *l)          /* what Page Up and Page Down move by: a screen less a line, and a
+                                                   line at least (one line of thumbnails may be all that fits) */
+{
+    return shown(l) > 1 ? shown(l) - 1 : 1;
+}
+
 static int col_x(struct vlist *l, int p)       /* (p a place, left to right) */
 {
     int x = l->w.r.x + 1, i;
@@ -595,8 +601,8 @@ static int vl_event(struct gui_widget *w, struct gui_ev *e)
     case GUI_K_DOWN: go(l, l->cur < 0 ? 0 : l->cur + per_line(l), shift, 0); return 1;
     case GUI_K_LEFT: if (!icons(l)) return 0; go(l, l->cur - 1, shift, 0); return 1;
     case GUI_K_RIGHT: if (!icons(l)) return 0; go(l, l->cur < 0 ? 0 : l->cur + 1, shift, 0); return 1;
-    case GUI_K_PGUP: go(l, l->cur - per_line(l) * (shown(l) - 1), shift, 0); return 1;
-    case GUI_K_PGDN: go(l, l->cur + per_line(l) * (shown(l) - 1), shift, 0); return 1;
+    case GUI_K_PGUP: go(l, l->cur - per_line(l) * page_lines(l), shift, 0); return 1;
+    case GUI_K_PGDN: go(l, l->cur + per_line(l) * page_lines(l), shift, 0); return 1;
     case GUI_K_HOME: go(l, 0, shift, 0); return 1;
     case GUI_K_END: go(l, n - 1, shift, 0); return 1;
     case GUI_K_ENTER:
@@ -780,6 +786,19 @@ void gui_vlist_view(struct gui_widget *w, int view)
     if (cur >= 0)
         see(l, cur);                            /* (the current row stays on the screen) */
     gui_damage(w);
+}
+
+int gui_vlist_shown(struct gui_widget *w, int *first)   /* the rows on the screen now (a line more than fits) */
+{
+    struct vlist *l = VL(w);
+    int n = count(l), per = per_line(l), a, b;
+    place(l, n);
+    a = l->top * per, b = (l->top + shown(l) + 1) * per;
+    if (b > n)
+        b = n;
+    if (first)
+        *first = a < b ? a : 0;
+    return a < b ? b - a : 0;
 }
 
 int gui_vlist_chosen(struct gui_widget *w, unsigned long *ids, int room)

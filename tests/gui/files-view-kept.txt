@@ -1,0 +1,19 @@
+#loopa-run-only (Files is run twice: the host's stand-in is one run of it)
+# The browser's view is kept from one run of Files to the next (FOLDERS.CFG beside FILES.EXE: its view, and its
+# columns' widths and order): left in small icons, the next browser opens in them and says so. Then details
+# again, as the other scripts find it.
+run FILES.EXE -browse C:\PIX
+wait "C:\PIX - Files"
+key alt+v s
+said FILES view small
+key alt+f4
+gone "C:\PIX - Files"
+run FILES.EXE -browse C:\PIX
+wait "C:\PIX - Files"
+said FILES view kept small
+key alt+v d
+said FILES view details
+key alt+f4
+gone "C:\PIX - Files"
+expect FILES view kept small
+expect FILES end 

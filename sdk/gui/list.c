@@ -15,7 +15,9 @@
 
 struct row {
     char **cells;
-    const unsigned char *icon;
+    const unsigned char *icon, *big;    /* (big NULL: the icon itself in the grids) */
+    const unsigned *thumb;              /* gui_list_thumb: the app's pixels */
+    short tw, th;
     void *user;
     unsigned long id;
 };
@@ -43,7 +45,8 @@ static void l_row(void *ctx, int i, struct gui_vrow *out)
     for (c = 0; c < s->cols && c < GUI_VCOLS; c++)
         out->cell[c] = s->rows[i].cells[c];
     out->icon = s->rows[i].icon;
-    out->big = s->rows[i].icon;                 /* (the same icon, drawn big in the grid) */
+    out->big = s->rows[i].big ? s->rows[i].big : s->rows[i].icon;      /* (else the same icon, drawn big in the grid) */
+    out->thumb = s->rows[i].thumb, out->thumb_w = s->rows[i].tw, out->thumb_h = s->rows[i].th;
     out->id = s->rows[i].id;
 }
 
@@ -175,6 +178,7 @@ int gui_list_add(struct gui_widget *w, const char *const *cells, const unsigned 
     for (c = 0; c < s->cols; c++)
         r->cells[c] = strdup(cells && cells[c] ? cells[c] : "");
     r->icon = icon, r->user = user, r->id = ++s->next_id;
+    r->big = NULL, r->thumb = NULL, r->tw = r->th = 0;
     s->n++;
     gui_vlist_changed(w);
     return s->n - 1;
@@ -223,6 +227,27 @@ int gui_list_chosen(struct gui_widget *w, int row)
 }
 
 void gui_list_icons(struct gui_widget *w, int big) { gui_vlist_view(w, big ? GUI_VIEW_ICONS : GUI_VIEW_DETAIL); }
+
+void gui_list_view(struct gui_widget *w, int view) { gui_vlist_view(w, view); }
+
+void gui_list_big(struct gui_widget *w, int row, const unsigned char *big)
+{
+    struct lstore *s = store_of(w);
+    if (row >= 0 && row < s->n)
+        s->rows[row].big = big;
+}
+
+void gui_list_thumb(struct gui_widget *w, int row, const unsigned *px, int tw, int th)
+{
+    struct lstore *s = store_of(w);
+    if (row < 0 || row >= s->n)
+        return;
+    s->rows[row].thumb = px && tw > 0 && th > 0 ? px : NULL;
+    s->rows[row].tw = (short)tw, s->rows[row].th = (short)th;
+    gui_damage(w);
+}
+
+int gui_list_shown(struct gui_widget *w, int *first) { return gui_vlist_shown(w, first); }
 
 void gui_list_sort(struct gui_widget *w, int col, int (*cmp)(struct gui_widget *, int, int, int))
 {

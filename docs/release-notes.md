@@ -4,6 +4,16 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Files: small icons and thumbnails (2026-11-20)
+
+- **View has four views now:** Large icons, Small icons, Thumbnails and Details. Thumbnails shows each picture
+  (PNG, JPEG, BMP, GIF, TGA, PNM, PCX) as a small copy of itself. They are made in the background, one at a
+  time, and kept on the disc beside FILES.EXE (`THUMBS`, at most 400 files and 6 MB), so a folder shown before
+  is shown at once the next time.
+- **The browser remembers** its view and its columns' widths and order from one run to the next, and each
+  folder's own window its view.
+- For apps (the toolkit's plain list): `gui_list_view`, `gui_list_big`, `gui_list_thumb`, `gui_list_shown`.
+
 ## Files: the Recycle folder (2026-11-20)
 
 - **What is deleted in Files can be had back.** Del moves it to its drive's Recycle folder (`X:\RECYCLE.GLS`);

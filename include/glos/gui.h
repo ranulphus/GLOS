@@ -449,6 +449,15 @@ void gui_list_sort(struct gui_widget *w, int col, int (*cmp)(struct gui_widget *
 void gui_list_multi(struct gui_widget *w, int on);      /* more than one row chosen (Ctrl, Shift; Ctrl+A: all) */
 int gui_list_chosen(struct gui_widget *w, int row);
 void gui_list_icons(struct gui_widget *w, int big);     /* rows (0), or 32-pixel icons in a grid (1) */
+void gui_list_view(struct gui_widget *w, int view);     /* any of the virtual list's views (GUI_VIEW_, below) */
+void gui_list_big(struct gui_widget *w, int row, const unsigned char *big);    /* a row's GUI_BIG_W icon for the
+                                           grids of big pictures (without it the row's one icon is drawn there),
+                                           so that a list changes its view without being filled again */
+void gui_list_thumb(struct gui_widget *w, int row, const unsigned *px, int tw, int th);        /* a row's
+                                           thumbnail for GUI_VIEW_THUMBS (00RRGGBBh, at most GUI_THUMB each way):
+                                           the app's pixels, to be kept while the row has them (NULL: none) */
+int gui_list_shown(struct gui_widget *w, int *first);   /* how many rows are on the screen now, and the first's
+                                           place: what a thumbnail is wanted for first */
 /* An icon: GUI_ICON_W x GUI_ICON_W pixels, a byte each: 0 clear, else a palette index of the 8-bit palette. */
 #define GUI_ICON_W 16
 #define GUI_BIG_W  32
@@ -506,6 +515,8 @@ void gui_vlist_view(struct gui_widget *w, int view);   /* rows of cells under th
                                            GUI_VIEW_SMALL: small icons in a grid, each name beside its icon;
                                            GUI_VIEW_THUMBS: the rows' thumbnails (else their big icons), each
                                            name under; the arrows and the band as in the icon view */
+int gui_vlist_shown(struct gui_widget *w, int *first);  /* how many rows are on the screen now (with the line
+                                           that is partly there), and the first's place */
 int gui_vlist_chosen(struct gui_widget *w, unsigned long *ids, int room);      /* how many rows are chosen, and the
                                            ids of as many as there is room for */
 void gui_vlist_sort(struct gui_widget *w, int *col, int *down);        /* at GUI_ON_SORT: the column whose head was

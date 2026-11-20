@@ -14,7 +14,10 @@
 
 #include <glos/gui.h>
 
+#ifndef WALLMAKE_STB_ELSEWHERE          /* (FILES has the decoders' code through apps/shared/picfile.c, for its
+                                           thumbnails: one copy a program) */
 #define STB_IMAGE_IMPLEMENTATION
+#endif
 #define STBI_NO_STDIO
 #define STBI_NO_HDR
 #define STBI_NO_LINEAR

@@ -207,8 +207,8 @@ APP_HOST_LIBS_term := tests/host/shimshell.c sdk/shell/shell.c sdk/shell/edit.c
 # Archives read and ZIPs written (Files' folders, phase E): the reader and writer, the packer, the loader's unpacker.
 ARC_SRCS := apps/shared/arc.c apps/shared/deflate.c loader/inflate.c
 # Pictures read and written: one code in the viewer and the editor (apps/shared/picfile.c).
-APP_HOST_LIBS_files := $(ARC_SRCS)
-APP_LIBS_files := $(ARC_SRCS)
+APP_HOST_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c
+APP_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c
 APP_HOST_LIBS_images := apps/shared/picfile.c
 APP_HOST_LIBS_paint := apps/shared/picfile.c
 APP_LIBS_images := apps/shared/picfile.c

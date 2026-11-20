@@ -266,10 +266,34 @@ are as they were).
   - The folder itself is not shown in its drive's listing, in the tree, to Find or to the Start menu's search.
   - **Tests:** `files-bin` on the host and on Loop A (a file and a folder deleted, the window's list, the
     file restored and read back byte for byte, the folder deleted from there, Shift+Del, the folder empty).
-- **Not done yet:** the rest of the plan: views
-  (small icons, a list, resized columns), folders that load as they go, long names, "open with" and apps'
+- **Views** (the ninth part, 2026-11-20): View has **Large icons, Small icons, Thumbnails** and **Details**,
+  in the browser and in a folder's own window. The toolkit's list had the four already (`sdk/gui/vlist.c`);
+  its plain list (`gui_list`) now gives them to its apps: `gui_list_view`, a row's big icon beside its small
+  one (`gui_list_big`: a view changes without the list's being filled again), a row's thumbnail
+  (`gui_list_thumb`: the app's pixels), and the rows on the screen now (`gui_list_shown`).
+  - **Thumbnails** (`apps/files/thumbs.c`) are made of pictures by the viewer's and the editor's own decoders
+    (`apps/shared/picfile.c`: PNG, JPEG, BMP, GIF, TGA, PNM, PCX), 96 pixels at most each way, each pixel the
+    mean of those it stands for. One is made at a time on a worker's thread, those on the screen first and a
+    screenful after them; none while a copy or another job is at work. Files' windows go on answering.
+  - **Kept:** each thumbnail is written beside FILES.EXE (`THUMBS\XXXXXXXX.THM`, the name from the picture's
+    path; its head has the file's size and date, so a changed picture's is made again). The next time it is
+    one small file read, which is what makes the view usable on a 486 (a big JPEG is many seconds there). The
+    folder is kept to 400 files and 6 MB: the oldest go.
+  - **Memory:** all the windows' thumbnails together are kept to 3 MB; when more are wanted, those farthest
+    from what is shown go, and come back (from the kept files) when they are scrolled to. A picture of more
+    than eight million pixels has no thumbnail (the decoders want eight bytes a pixel while they work).
+  - **A folder listed again** (something in it changed) keeps the thumbnails of the files that did not.
+  - **Kept from one run to the next** (`FOLDERS.CFG` beside FILES.EXE): the browser's view, its columns'
+    widths and their order (they were dragged already, and forgotten); each folder window's view, with its
+    place.
+  - **Tests:** `files-thumbs` on the host and on Loop A (the four views of a folder of pictures, `tests/gui/
+    mkpix.py`'s; each thumbnail made, then kept; a file with a picture's name and no picture); `files-view-kept`
+    on Loop A (Files run twice: the second browser opens in the first's view).
+  - **Not yet:** a list view (names in columns, downwards); a thumbnail's size chosen; thumbnails of what is in
+    an archive; the toolbar's view button as a list of the four.
+- **Not done yet:** the rest of the plan: folders that load as they go, long names, "open with" and apps'
   entries in the context menu, the rest of archives (above), a search that goes on in the background and looks
-  inside files, a folder's size counted in the background, thumbnails, drag and drop.
+  inside files, a folder's size counted in the background, drag and drop.
 
 ## Images (2026-11-19): the viewer's toolbar, turning, details, slideshow
 
@@ -389,6 +413,12 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
   the keyboard (`kernel/wm/deskapp.c`, `desk_win_state`): its host has it until the user presses inside.
   `tests/gui/preview-late.txt` makes the order certain (GUITEST's program inside waits two and a half seconds
   before it shows its window): it failed as the gate's did on every machine before the change.
+- **Page Up and Page Down did nothing in a grid one line high** (the toolkit's list: they move by a screen
+  less a line, which was no line when one line of big pictures is all that fits; a line at least now). Found
+  by the thumbnail view in the browser's window at its first size.
+- **The host's script player waited for the first 32 different `said` lines only,** and went straight past
+  any after them: a script with more passed without its lines being said. 256 now, and a script with more
+  fails.
 - **The suites:** a GUI script that fails now reports each app's exit code and what it wrote to stderr; a
   script waits for a full-screen program's end by `settle` (no DOS program running) where it paused a fixed
   time (a session is 8.6 seconds on the G400's machine: `term-run`, the twelfth gate); the batch case waits

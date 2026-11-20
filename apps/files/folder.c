@@ -28,10 +28,13 @@ struct view {
     char dir[260];
     char hist[HIST][260];               /* the browser's way here: Back and Forward go along it */
     int nhist, at, moving;              /* at: where in it the folder shown is; moving: go() by Back or Forward */
-    int browser, big;
+    int browser, view;                  /* view: the list's (GUI_VIEW_) */
     glos_handle watch;
     struct gui_dirent *ents;
     int n;
+    struct tpic *tp;                    /* the thumbnail view: one for each of ents (thumbnails, below) */
+    int tp_n;                           /* ... as many as there were entries when they were last fitted */
+    char tp_dir[260];                   /* ... of that folder */
     /* The folder shown is in an archive (phase E: archives as folders; apps/shared/arc.c): */
     struct arc *arc;                    /* it, open */
     char arc_file[260], arc_in[520];    /* its file, and the folder inside ('/' between its parts; "" its top) */
@@ -46,13 +49,17 @@ static struct {                         /* the files cut or copied */
     int n, cut;
 } clip;
 
-static struct {                         /* where folders' windows were */
+static struct {                         /* where folders' windows were, and how each showed its folder */
     char path[64][100];
-    int x[64], y[64], w[64], h[64], n;
+    int x[64], y[64], w[64], h[64], view[64], n;
 } places;
+static struct {                         /* the browser's view and its columns, as they last were */
+    int set, view, widths[3], order[3]; /* (set: to be written to FOLDERS.CFG) */
+} bview = { 0, GUI_VIEW_DETAIL, { 130, 70, 120 }, { 0, 1, 2 } };
 
 enum { C_OPEN = 1, C_NEWDIR, C_RENAME, C_DELETE, C_CLOSE, C_CUT, C_COPY, C_PASTE, C_ALL, C_BIG, C_DETAILS, C_REFRESH,
-       C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS, C_PROPS, C_FIND, C_EXTRACT, C_ZIP, C_DELETE_NOW, C_RECYCLE };
+       C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS, C_PROPS, C_FIND, C_EXTRACT, C_ZIP, C_DELETE_NOW, C_RECYCLE,
+       C_SMALL, C_THUMBS };
 
 static void say(const char *what, const char *a)
 {
@@ -309,6 +316,7 @@ static void status_text(struct view *v)
 
 static void retitle(struct view *v);
 static void way(struct view *v);
+static void thumbs_fit(struct view *v);
 
 static void fill(struct view *v)
 {
@@ -350,11 +358,263 @@ static void fill(struct view *v)
         if (!e->date)
             date[0] = 0;                        /* (a folder that is only in an archive's names has none) */
         cells[0] = e->text, cells[1] = size, cells[2] = date;
-        gui_list_add(v->list, cells, icon(icon_for_file(e->name, e->dir), v->big), (void *)(size_t)i);
+        gui_list_big(v->list, gui_list_add(v->list, cells, icon(icon_for_file(e->name, e->dir), 0), (void *)(size_t)i),
+                     icon(icon_for_file(e->name, e->dir), 1));
         if (keep_name[0] && !strcmp(keep_name, e->name))
             gui_list_set(v->list, i);
     }
+    thumbs_fit(v);
     status_text(v);
+}
+
+/* ---- thumbnails (phase E: the thumbnail view; thumbs.c makes one)
+
+   A view that shows thumbnails has one place for each of its folder's entries (tp, beside ents). Pictures' are
+   made one at a time on a worker's thread, those on the screen first and then a screenful after them
+   (thumb_next, four times a second and at each one's end; none while a job is at work, which has the worker
+   first). Their pixels are the view's: the list's row has only their address. All the views' together are kept
+   under THUMB_ROOM, but for what is on the screen: when more would be needed, those farthest from what their view
+   shows go, and are made again (from thumbs.c's kept files, quickly) when they are scrolled to. A folder listed
+   again keeps the thumbnails of the files that have not changed. */
+#define THUMB_ROOM (3ul << 20)
+
+struct tpic {
+    unsigned *px;
+    short w, h;
+    char state;                         /* 0 not looked at; 1 being made; 2 made (px); 3 none (no picture) */
+    char name[64];                      /* whose it is: the entry as it was then */
+    unsigned long size;
+    unsigned short date, time;
+};
+
+struct tmake {                          /* one being made */
+    struct view *v;
+    char dir[260], path[300];
+    struct gui_dirent e;
+    unsigned *px;
+    int w, h, made;
+};
+
+static struct {
+    int busy, ticking, trimmed;
+    unsigned long bytes;                /* all the views' thumbnails */
+} thumbs;
+
+static int jobs_running(void);
+static void thumb_next(void *arg);
+
+static int tp_is(const struct tpic *t, const struct gui_dirent *e)
+{
+    return !strcmp(t->name, e->name) && t->size == e->size && t->date == e->date && t->time == e->time;
+}
+
+static void tp_free(struct tpic *t)
+{
+    if (t->px)
+        thumbs.bytes -= (unsigned long)t->w * (unsigned long)t->h * sizeof *t->px;
+    free(t->px);
+    t->px = NULL;
+}
+
+static int list_row_of(struct view *v, int ent)        /* the list's row that shows ents[ent] (sorting moves them) */
+{
+    int r, n = gui_list_count(v->list);
+    if (ent < n && (int)(size_t)gui_list_user(v->list, ent) == ent)
+        return ent;
+    for (r = 0; r < n; r++)
+        if ((int)(size_t)gui_list_user(v->list, r) == ent)
+            return r;
+    return -1;
+}
+
+static void thumbs_drop(struct view *v)         /* the view's all go (it shows another view, or it is closing) */
+{
+    int i;
+    for (i = 0; v->tp && i < v->tp_n; i++) {
+        if (v->tp[i].px && v->list)
+            gui_list_thumb(v->list, list_row_of(v, i), NULL, 0, 0);
+        tp_free(&v->tp[i]);
+    }
+    free(v->tp);
+    v->tp = NULL, v->tp_n = 0;
+}
+
+/* The view's folder has been listed (fill): the thumbnails' places made for what is there now, those of entries
+   that are as they were taken over. (The old places are in the old entries' order, which is mostly the new:
+   each is looked for from where the last was found.) */
+static void thumbs_fit(struct view *v)
+{
+    struct tpic *old = v->tp, *tp;
+    int old_n = v->tp_n, i, j, at = 0, same;
+    if (v->view != GUI_VIEW_THUMBS) {
+        for (i = 0; old && i < old_n; i++)      /* (the list has been filled again: no row has their addresses) */
+            tp_free(&old[i]);
+        free(old);
+        v->tp = NULL, v->tp_n = 0;
+        return;
+    }
+    same = old && old_n && !v->arc && !strcmp(v->tp_dir, v->dir);
+    if (!(tp = calloc((size_t)v->n + 1, sizeof *tp)))
+        abort();
+    for (i = 0; i < v->n; i++) {
+        const struct gui_dirent *e = &v->ents[i];
+        snprintf(tp[i].name, sizeof tp[i].name, "%s", e->name);
+        tp[i].size = e->size, tp[i].date = e->date, tp[i].time = e->time;
+        tp[i].state = e->dir || v->arc || !thumb_is_picture(e->name) ? 3 : 0;
+        for (j = 0; same && !tp[i].state && j < old_n; j++) {
+            struct tpic *o = &old[(at + j) % old_n];
+            if (tp_is(o, e)) {
+                tp[i].px = o->px, tp[i].w = o->w, tp[i].h = o->h, tp[i].state = o->state;
+                o->px = NULL, o->name[0] = 0;
+                at = (at + j + 1) % old_n;
+                break;
+            }
+        }
+        if (tp[i].px)
+            gui_list_thumb(v->list, list_row_of(v, i), tp[i].px, tp[i].w, tp[i].h);
+    }
+    for (j = 0; old && j < old_n; j++)
+        tp_free(&old[j]);
+    free(old);
+    v->tp = tp, v->tp_n = v->n;
+    snprintf(v->tp_dir, sizeof v->tp_dir, "%s", v->arc ? "" : v->dir);
+    if (!thumbs.ticking) {
+        thumbs.ticking = 1;
+        gui_idle(thumb_next, NULL, 250);
+    }
+    thumb_next(NULL);                           /* (the first of them at once) */
+}
+
+static void thumb_work(struct gui_task *t, void *arg)
+{
+    struct tmake *m = arg;
+    (void)t;
+    if (!thumbs.trimmed) {                      /* (once a run of Files, before the first is made) */
+        thumbs.trimmed = 1;
+        thumb_trim();
+    }
+    m->px = thumb_make(m->path, &m->e, &m->w, &m->h, &m->made);
+}
+
+static void thumb_done(struct gui_window *owner, void *arg, int cancelled)
+{
+    struct tmake *m = arg;
+    struct view *v;
+    int i;
+    (void)owner, (void)cancelled;
+    thumbs.busy = 0;
+    for (v = views; v && v != m->v; v = v->next)
+        ;
+    if (v && v->tp && !v->arc && !strcmp(v->tp_dir, m->dir))
+        for (i = 0; i < v->tp_n; i++)
+            if (v->tp[i].state == 1 && tp_is(&v->tp[i], &m->e)) {
+                struct tpic *t = &v->tp[i];
+                if (m->px) {
+                    char line[120];
+                    t->px = m->px, t->w = (short)m->w, t->h = (short)m->h, t->state = 2;
+                    thumbs.bytes += (unsigned long)t->w * (unsigned long)t->h * sizeof *t->px;
+                    m->px = NULL;
+                    gui_list_thumb(v->list, list_row_of(v, i), t->px, t->w, t->h);
+                    snprintf(line, sizeof line, "%s %dx%d %s", m->e.name, t->w, t->h, m->made ? "made" : "kept");
+                    say("thumb", line);
+                } else {
+                    t->state = 3;
+                    say("thumb none", m->e.name);
+                }
+                break;
+            }
+    free(m->px);
+    free(m);
+    thumb_next(NULL);
+}
+
+/* Room made for one more, which is `than` rows from what its view shows (0: on the screen): the thumbnail
+   farthest from what its own view shows goes, if that is farther. 0: none is. (Only farther ones: two rows as far
+   as each other would take each other's room in turn for ever.) */
+static int thumb_evict(int than)
+{
+    struct view *v, *bv = NULL;
+    int best = -1, far = than;
+    for (v = views; v; v = v->next) {
+        int first = 0, n, r, rows;
+        if (!v->tp || v->view != GUI_VIEW_THUMBS)
+            continue;
+        n = gui_list_shown(v->list, &first);
+        rows = gui_list_count(v->list);
+        for (r = 0; r < rows; r++) {
+            int ent = (int)(size_t)gui_list_user(v->list, r), d = r < first ? first - r : r >= first + n ? r - (first + n) + 1 : 0;
+            if (ent < v->tp_n && v->tp[ent].state == 2 && d > far)
+                far = d, best = ent, bv = v;
+        }
+    }
+    if (!bv)
+        return 0;
+    gui_list_thumb(bv->list, list_row_of(bv, best), NULL, 0, 0);
+    tp_free(&bv->tp[best]);
+    bv->tp[best].state = 0;
+    return 1;
+}
+
+static void thumb_next(void *arg)
+{
+    struct view *v;
+    int any = 0;
+    (void)arg;
+    for (v = views; v; v = v->next)
+        any |= v->tp != NULL;
+    if (!any) {                                 /* (no view shows thumbnails any more) */
+        if (thumbs.ticking)
+            gui_idle(thumb_next, NULL, 0);
+        thumbs.ticking = 0;
+        return;
+    }
+    if (thumbs.busy || jobs_running())
+        return;
+    for (v = views; v; v = v->next) {
+        int first = 0, n, r, rows;
+        if (!v->tp || v->view != GUI_VIEW_THUMBS)
+            continue;
+        n = gui_list_shown(v->list, &first);
+        rows = gui_list_count(v->list);
+        for (r = first; r < rows && r < first + 2 * n; r++) {  /* (what is shown, then as much after it) */
+            int ent = (int)(size_t)gui_list_user(v->list, r);
+            struct tmake *m;
+            if (ent >= v->n || ent >= v->tp_n || v->tp[ent].state != 0 || !tp_is(&v->tp[ent], &v->ents[ent]))
+                continue;
+            while (thumbs.bytes + GUI_THUMB * GUI_THUMB * sizeof(unsigned) > THUMB_ROOM)
+                if (!thumb_evict(r < first + n ? 0 : r - (first + n) + 1)) {
+                    if (r < first + n)
+                        break;                  /* (what is on the screen is made, whatever the room) */
+                    return;                     /* (no room for those after the screen's) */
+                }
+            if (!(m = calloc(1, sizeof *m)))
+                return;
+            m->v = v, m->e = v->ents[ent];
+            snprintf(m->dir, sizeof m->dir, "%s", v->dir);
+            gui_path_join(m->path, sizeof m->path, v->dir, v->ents[ent].name);
+            v->tp[ent].state = 1;
+            thumbs.busy = 1;
+            if (!gui_task_start(NULL, NULL, thumb_work, m, thumb_done, 0)) {   /* (no threads: made here) */
+                thumb_work(NULL, m);
+                thumb_done(NULL, m, 0);
+            }
+            return;
+        }
+    }
+}
+
+static void set_view(struct view *v, int view)
+{
+    v->view = view;
+    gui_list_view(v->list, view);
+    if (v->view_menu) {
+        gui_menu_check(v->view_menu, C_BIG, view == GUI_VIEW_ICONS);
+        gui_menu_check(v->view_menu, C_SMALL, view == GUI_VIEW_SMALL);
+        gui_menu_check(v->view_menu, C_THUMBS, view == GUI_VIEW_THUMBS);
+        gui_menu_check(v->view_menu, C_DETAILS, view == GUI_VIEW_DETAIL);
+    }
+    if (v->browser)
+        bview.view = view;
 }
 
 static void retitle(struct view *v)
@@ -1539,12 +1799,17 @@ static void command(struct gui_window *w, int id)
         status_text(v);
         break;
     case C_BIG:
+    case C_SMALL:
+    case C_THUMBS:
     case C_DETAILS:
-        v->big = id == C_BIG;
-        gui_list_icons(v->list, v->big);
-        gui_menu_check(v->view_menu, C_BIG, v->big);
-        gui_menu_check(v->view_menu, C_DETAILS, !v->big);
-        fill(v);
+        set_view(v, id == C_BIG ? GUI_VIEW_ICONS : id == C_SMALL ? GUI_VIEW_SMALL : id == C_THUMBS ? GUI_VIEW_THUMBS
+                    : GUI_VIEW_DETAIL);
+        if (v->view == GUI_VIEW_THUMBS)
+            thumbs_fit(v);                      /* (their places made; the pictures follow) */
+        else
+            thumbs_drop(v);
+        say("view", v->view == GUI_VIEW_ICONS ? "large" : v->view == GUI_VIEW_SMALL ? "small"
+                    : v->view == GUI_VIEW_THUMBS ? "thumbnails" : "details");
         break;
     case C_REFRESH:
         fill(v);
@@ -1651,9 +1916,17 @@ static void closing(struct gui_window *w)
         if (i < 64) {
             snprintf(places.path[i], sizeof places.path[i], "%s", v->dir);
             places.x[i] = x - 1, places.y[i] = y - 20, places.w[i] = w->w, places.h[i] = w->h;
+            places.view[i] = v->view;
         }
         folders_save();
     }
+    if (v && v->browser) {                      /* (its view and its columns: the next browser's) */
+        bview.set = 1, bview.view = v->view;
+        gui_vlist_columns(v->list, bview.order, bview.widths);
+        folders_save();
+    }
+    if (v)
+        thumbs_drop(v);
     for (p = &views; *p; p = &(*p)->next)
         if (*p == v) {
             *p = v->next;
@@ -1696,6 +1969,8 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
     gui_menu_item(m, GUI_T("&Find..."), C_FIND, GUI_T("Ctrl+F"));
     m = gui_menu(bar, GUI_T("&View"));
     gui_menu_item(m, GUI_T("&Large icons"), C_BIG, NULL);
+    gui_menu_item(m, GUI_T("&Small icons"), C_SMALL, NULL);
+    gui_menu_item(m, GUI_T("&Thumbnails"), C_THUMBS, NULL);
     gui_menu_item(m, GUI_T("&Details"), C_DETAILS, NULL);
     gui_menu_sep(m);
     gui_menu_item(m, GUI_T("&Refresh"), C_REFRESH, GUI_T("F5"));
@@ -2051,10 +2326,10 @@ static struct view *new_view(const char *dir, int browser)
     if (!v)
         abort();
     v->browser = browser;
-    v->big = !browser;
+    v->view = browser ? bview.view : GUI_VIEW_ICONS;
     for (i = 0; !browser && i < places.n; i++)
         if (!strcmp(places.path[i], dir))
-            x = places.x[i], y = places.y[i], w = places.w[i], h = places.h[i];
+            x = places.x[i], y = places.y[i], w = places.w[i], h = places.h[i], v->view = places.view[i];
     v->win = gui_window_at(dir, x, y, browser ? 540 : w, browser ? 330 : h, 0);
     if (v->win)
         gui_window_icon(v->win, browser ? "app-files" : "folder");
@@ -2105,7 +2380,8 @@ static struct view *new_view(const char *dir, int browser)
         }
         v->list = gui_list(row, browser ? 3 : 1, browser ? heads : NULL, browser ? widths : NULL);
         gui_list_multi(v->list, 1);
-        gui_list_icons(v->list, v->big);
+        if (browser)                            /* (its columns as they were last left) */
+            gui_vlist_set_columns(v->list, bview.order, bview.widths);
         gui_on(v->list, list_on, 0);
         {                                       /* the list's context menu (the right button, the Menu key) */
             struct gui_menu *c = v->context = gui_menu_new();
@@ -2128,8 +2404,7 @@ static struct view *new_view(const char *dir, int browser)
             gui_list_sort(v->list, 0, by_column);   /* (a column's head sorts by it) */
     }
     v->status = gui_status(v->win);
-    gui_menu_check(v->view_menu, C_BIG, v->big);
-    gui_menu_check(v->view_menu, C_DETAILS, !v->big);
+    set_view(v, v->view);
     v->next = views;
     views = v;
     return v;
@@ -2197,6 +2472,8 @@ void browser_open(const char *dir)
     v->win->focus = v->list;
     gui_show(v->win, 1);
     say("browser", dir);
+    if (v->view != GUI_VIEW_DETAIL)             /* (the view the last browser was left in) */
+        say("view kept", v->view == GUI_VIEW_ICONS ? "large" : v->view == GUI_VIEW_SMALL ? "small" : "thumbnails");
 }
 
 /* ---- where folders' windows were */
@@ -2211,9 +2488,23 @@ void folders_load(void)
     if (!(f = gui_fopen(p, "r")))
         return;
     while (fgets(line, sizeof line, f) && places.n < 64) {
-        int n = 0, k = places.n;
+        int n = 0, k = places.n, view = 0, m = 0;
+        if (!strncmp(line, "browser ", 8)) {    /* the browser's view and columns */
+            int b[7];
+            if (sscanf(line + 8, "%d %d %d %d %d %d %d", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &b[6]) == 7
+                && b[0] >= GUI_VIEW_DETAIL && b[0] <= GUI_VIEW_THUMBS && b[4] + b[5] + b[6] == 3
+                && b[4] >= 0 && b[5] >= 0 && b[6] >= 0 && b[4] != b[5] && b[5] != b[6] && b[4] != b[6]) {
+                bview.set = 1, bview.view = b[0];
+                memcpy(bview.widths, b + 1, sizeof bview.widths);
+                memcpy(bview.order, b + 4, sizeof bview.order);
+            }
+            continue;
+        }
         if (sscanf(line, "%d %d %d %d %n", &places.x[k], &places.y[k], &places.w[k], &places.h[k], &n) != 4)
             continue;
+        places.view[k] = GUI_VIEW_ICONS;
+        if (sscanf(line + n, "view=%d %n", &view, &m) == 1 && m && view >= GUI_VIEW_DETAIL && view <= GUI_VIEW_THUMBS)
+            places.view[k] = view, n += m;      /* (how it showed its folder: after the four numbers, since phase E) */
         snprintf(places.path[k], sizeof places.path[k], "%s", line + n);
         places.path[k][strcspn(places.path[k], "\r\n")] = 0;
         places.n++;
@@ -2227,9 +2518,13 @@ void folders_save(void)
     FILE *f;
     int i;
     snprintf(p, sizeof p, "%s\\FOLDERS.CFG", files_home);
-    if (!places.n || !(f = gui_fopen(p, "w")))
+    if ((!places.n && !bview.set) || !(f = gui_fopen(p, "w")))
         return;
+    if (bview.set)
+        fprintf(f, "browser %d %d %d %d %d %d %d\n", bview.view, bview.widths[0], bview.widths[1], bview.widths[2],
+                bview.order[0], bview.order[1], bview.order[2]);
     for (i = 0; i < places.n; i++)
-        fprintf(f, "%d %d %d %d %s\n", places.x[i], places.y[i], places.w[i], places.h[i], places.path[i]);
+        fprintf(f, "%d %d %d %d view=%d %s\n", places.x[i], places.y[i], places.w[i], places.h[i], places.view[i],
+                places.path[i]);
     fclose(f);
 }
