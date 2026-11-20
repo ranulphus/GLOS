@@ -4,6 +4,18 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Paint: text and effects (2026-11-20)
+
+- **A Text tool (T):** press on the picture, type a line, choose a font if you like: the letters are painted
+  there in the colour of the button you pressed with.
+- **An Effects menu:** Blur, Sharpen, Emboss, Find Edges and Pixelate, on the selection or the whole layer.
+- Copy and Paste use the desktop's clipboard: pictures go between Paint and other programs.
+
+## Files: big folders (2026-11-20)
+
+- **A folder of hundreds or thousands of files is shown at once,** its first screenfuls first and the rest as
+  they are read; the window no longer waits for the last file before it shows the first.
+
 ## Notepad: code pages and UTF-8 (2026-11-20)
 
 - **A DOS text with accented letters is shown as it should be,** and written back as it was: Notepad reads a

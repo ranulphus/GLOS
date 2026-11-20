@@ -340,8 +340,21 @@ are as they were).
   has already, if it is another; **Other** finds any program on the discs. **Always open .EXT files with it**
   writes `[open] .EXT = PROGRAM` (the setting Files has gone by since M9; the Control Panel shows it too).
   `files-openwith` on the host and on Loop A.
-- **Not done yet:** the rest of the plan: folders that load as they go, long names, apps' own entries in the
-  context menu, the rest of archives (above), drag and drop.
+- **A big folder is listed as it loads** (2026-11-20): a folder's first 256 entries are read and shown at
+  once, which is all of nearly every folder, and nothing is different for those. A bigger one's rest is read
+  on a worker's thread, 64 at a time, each piece put into its place in the list (the order the list shows:
+  folders first and by name, or as its header says), with "so far: reading more..." in the status bar until
+  the end. The window answers meanwhile: what is listed already is opened, chosen and copied as ever. A
+  listing of 2,000 files kept the window waiting two to seven seconds on the 486's profile (a find call an
+  entry, each a DOS call from an app).
+  - The toolkit has the reading (`gui_dir_open`, `gui_dir_next`, `gui_dir_close`, `gui_dir_sort`) and
+    `gui_list_resort` for rows added to a sorted list.
+  - **Tests:** `files-big` on the host and on Loop A (`-listfirst 2` makes `C:\FM` a big folder: two entries
+    at once, four after; the list as any listing of it once Files says the last has come).
+  - **Not yet:** a thing gone to by name (Find's Go To, a new folder) is chosen only if it is listed already;
+    an archive's listing still waits for all of it.
+- **Not done yet:** the rest of the plan: long names, apps' own entries in the context menu, the rest of
+  archives (above), drag and drop.
 
 ## Images (2026-11-19): the viewer's toolbar, turning, details, slideshow
 
@@ -432,8 +445,18 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
   and any other program that takes them. One the clipboard has no room for stays Paint's own until the next
   copy. `paint-clip` on the host and on Loop A (a copy, the clipboard given words instead, a paste that finds
   no picture, a copy pasted).
+- **The Text tool** (2026-11-20; T): a press on the picture asks for a line of text and, by its Font button,
+  one of GLOS's faces and sizes (the toolkit's font dialog); the letters go on the current layer in the
+  button's colour, their top left corner where the press was, as one step to undo. The 2D library draws them
+  into a picture of their own and the pixels they took are stamped on the layer (`pd_stamp`). `paint-text`.
+- **Effects** (2026-11-20; a menu of their own): **Blur** (how far is asked, 1 to 12 pixels), **Sharpen**,
+  **Emboss**, **Find Edges** and **Pixelate** (a block's side is asked), on the selection or the whole of
+  the current layer, each one step to undo. Every pixel is made from its neighbours as they were (a copy of
+  the layer is worked from); what is clear stays clear, and a neighbour that is clear or outside the picture
+  counts as the pixel itself, so edges are not darkened by what is not there (`pd_effect`; `paint_test` has
+  each on pictures small enough to work out by hand; `paint-effects`).
 - **Not done yet:** blend modes, layers renamed and dragged, the layered format written; selections of other
-  shapes, a selection moved; text; gradients, curves, the clone stamp; resizing in
+  shapes, a selection moved; text of more than a line, turned or with fonts from files; effects' previews; gradients, curves, the clone stamp; resizing in
   proportion and bicubic; levels, curves, hue and saturation, the effects, their previews; tiles for pictures
   of any size.
 - **PCX written** (2026-11-19): Save As has PCX, of 24 bits (three planes a row, each run-length coded by
