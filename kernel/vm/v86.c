@@ -1146,6 +1146,31 @@ static int key_wait(struct trapframe *tf, u32 at)
    with its output kept and no console of its own. A program somebody runs at the PC, full-screen or in a
    terminal's window, is asked as ever. 1: answered (AL 3), the handler not called. (2026-11-12: an SFTP read of
    a floppy with a bad sector stopped bench-g400 so; an unformatted partition does the same.) */
+/* A hard disc that DOS could not read or write (the twenty-third gate, 2026-11-20: drive C: "not ready" in the
+   middle of a write on the 486DX2's profile, the BIOS having waited out its timeout, never explained): how the
+   interrupts stood when DOS gave up, for whoever reads the log. The virtual controller's requests, in service
+   and masks; the lines a physical interrupt raised that the program has not ended; the physical controller's
+   mask as the kernel has it, and its own requests and in service (asked of the chips); the first IDE
+   channel's status by its second register, which takes no interrupt back; the BIOS's "the disc has
+   interrupted" byte; the virtual interrupt flag. The first few times only. */
+static void disk_state(void)
+{
+    static u8 said;
+    u8 irr0, irr1, isr0, isr1;
+    if (said >= 4)
+        return;
+    said++;
+    outb(0x20, 0x0A), irr0 = inb(0x20);
+    outb(0xA0, 0x0A), irr1 = inb(0xA0);
+    outb(0x20, 0x0B), isr0 = inb(0x20);
+    outb(0xA0, 0x0B), isr1 = inb(0xA0);
+    outb(0x20, 0x0A), outb(0xA0, 0x0A);         /* (requests again: what a read of the chips gives by default) */
+    kprintf("GLOS-DISK state virtual irr=%02x%02x isr=%02x%02x imr=%04x inflight=%04x physical mask=%04x chips=%02x%02x"
+            " irr=%02x%02x isr=%02x%02x ide=%02x bios=%02x vif=%u\n", vm.pic.p[1].irr, vm.pic.p[0].irr, vm.pic.p[1].isr,
+            vm.pic.p[0].isr, vpic_imr(&vm.pic), vm.pic.inflight, vm.phys_mask, inb(0xA1), inb(0x21), irr1, irr0, isr1,
+            isr0, inb(0x3F6), vm_rd8(0x48E), current->vif);
+}
+
 static int critical_error(struct trapframe *tf)
 {
     u32 ah = (tf->eax >> 8) & 0xFF, al = tf->eax & 0xFF;
@@ -1160,6 +1185,8 @@ static int critical_error(struct trapframe *tf)
     }
     kprintf("GLOS-DOS critical ah=%02x drive=%c code=%02x psp=%04x answer=fail\n", ah, ah & 0x80 ? '-' : (char)('A' + al),
             tf->edi & 0xFF, psp);
+    if (!(ah & 0x80) && al >= 2)
+        disk_state();
     tf->eax = (tf->eax & ~0xFFu) | 3;
     return 1;
 }
