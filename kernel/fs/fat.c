@@ -1,4 +1,5 @@
-/* FAT volumes read by GLOS itself (fat.h; docs/v1/native-dos.md, N1a). Microsoft's FAT specification
+/* FAT volumes read by GLOS itself (fat.h; docs/v1/native-dos.md, N1a). Also built 16-bit (Open Watcom), for
+ * GLOS's own loader (N3): `unsigned` may be 16 bits, so code points and masks are longs. Microsoft's FAT specification
  * (FAT12/16/32 and VFAT's long names) and RBIL are the references; FreeDOS's kernel is a behavioural one only
  * (PRD D26). */
 #include <string.h>
@@ -306,25 +307,25 @@ int fat_name_eq(const char *a, const char *b)
 }
 
 /* Code point u as UTF-8 at *p, if `room` bytes remain before end: the bytes written (0: no room). */
-static int put_utf8(char *p, int room, unsigned u)
+static int put_utf8(char *p, int room, unsigned long u)
 {
     if (u < 0x80 && room >= 1) {
         p[0] = (char)u;
         return 1;
     }
     if (u < 0x800 && room >= 2) {
-        p[0] = (char)(0xC0 | u >> 6);
+        p[0] = (char)(0xC0 | (u >> 6));
         p[1] = (char)(0x80 | (u & 0x3F));
         return 2;
     }
-    if (u < 0x10000 && u >= 0x800 && room >= 3) {
-        p[0] = (char)(0xE0 | u >> 12);
+    if (u < 0x10000UL && u >= 0x800 && room >= 3) {
+        p[0] = (char)(0xE0 | (u >> 12));
         p[1] = (char)(0x80 | (u >> 6 & 0x3F));
         p[2] = (char)(0x80 | (u & 0x3F));
         return 3;
     }
-    if (u >= 0x10000 && room >= 4) {
-        p[0] = (char)(0xF0 | u >> 18);
+    if (u >= 0x10000UL && room >= 4) {
+        p[0] = (char)(0xF0 | (u >> 18));
         p[1] = (char)(0x80 | (u >> 12 & 0x3F));
         p[2] = (char)(0x80 | (u >> 6 & 0x3F));
         p[3] = (char)(0x80 | (u & 0x3F));
@@ -337,12 +338,12 @@ static int put_utf8(char *p, int room, unsigned u)
 static void lfn_to_utf8(const unsigned short *in, int n, char *out)
 {
     int i, o = 0, w;
-    unsigned u;
+    unsigned long u;
 
     for (i = 0; i < n && in[i]; i++) {
         u = in[i];
         if (u >= 0xD800 && u <= 0xDBFF && i + 1 < n && in[i + 1] >= 0xDC00 && in[i + 1] <= 0xDFFF) {
-            u = 0x10000 + ((u - 0xD800) << 10) + (in[i + 1] - 0xDC00);
+            u = 0x10000UL + ((u - 0xD800) << 10) + (unsigned long)(in[i + 1] - 0xDC00);
             i++;
         } else if (u >= 0xD800 && u <= 0xDFFF) {
             u = 0xFFFD;
@@ -411,7 +412,8 @@ int fat_readdir(struct fat_dir *d, struct fat_ent *e)
 {
     static const unsigned char at[13] = { 1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30 };
     unsigned short lfn[20 * 13];
-    unsigned nseq = 0, have = 0, sum = 0, count = 0, k;
+    unsigned nseq = 0, sum = 0, count = 0, k;
+    unsigned long have = 0;
     unsigned char ent[32];
 
     for (;;) {
@@ -445,7 +447,7 @@ int fat_readdir(struct fat_dir *d, struct fat_ent *e)
             }
             for (k = 0; k < 13; k++)
                 lfn[(seq - 1) * 13 + k] = (unsigned short)rd16(ent + at[k]);
-            have |= 1u << (seq - 1);
+            have |= 1UL << (seq - 1);
             count++;
             continue;
         }
@@ -466,7 +468,7 @@ int fat_readdir(struct fat_dir *d, struct fat_ent *e)
         e->wdate = (unsigned short)rd16(ent + 24);
         e->dir = d->first;
         e->index = d->index - 1;
-        if (nseq && have == (1u << nseq) - 1 && fat_lfn_sum(ent) == sum) {
+        if (nseq && have == (1UL << nseq) - 1 && fat_lfn_sum(ent) == sum) {
             lfn_to_utf8(lfn, (int)nseq * 13, e->name);
             e->has_long = e->name[0] != 0;
             e->lfn_entries = count;

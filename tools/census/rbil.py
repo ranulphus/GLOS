@@ -8,8 +8,9 @@ doesn't have answered as MS-DOS 7.1 answers them when the feature isn't loaded; 
     make rbil                                  (fetches RBIL release 61 into the cache, then runs this)
     tools/census/rbil.py --rbil DIR [--out FILE]
 
-Read from RBIL (INTERRUP.A to .N, INT 00h-2Fh): the entries of category D (DOS kernel) for INT 20h-2Fh, and for
-INT 2Fh also the multiplex functions of DOS's own parts and of what GLOS provides in their place (Windows' and
+Read from RBIL (INTERRUP.A to .R): the entries of category D (DOS kernel) for INT 20h-2Fh; the disk BIOS's standard
+functions (INT 13h), Microsoft's mouse driver's (INT 33h), LIM EMS's and VCPI's (INT 67h), which native GLOS
+answers itself (its own IDE driver, mouse and EMS: the owner, 2026-11-20); and for INT 2Fh also the multiplex functions of DOS's own parts and of what GLOS provides in their place (Windows' and
 DPMI's 16xxh, XMS, MSCDEX, the clipboard, KEYB, DOSKEY, ANSI.SYS, APPEND, the task switcher). An entry applies to
 GLOS's DOS when RBIL gives it to MS-DOS ("DOS n+", "MS-DOS 7", "Windows95" for MS-DOS 7's long names and FAT32);
 entries of other systems (DR DOS, OS/2, PC-MOS, European MS-DOS 4 ...) are listed apart.
@@ -60,6 +61,14 @@ MUX_TITLE = re.compile(r"MS Windows|Windows95|DPMI|EXTENDED MEMORY SPECIFICATION
 WIN_ANSWERED = {(0x16, 0x00), (0x16, 0x0A), (0x16, 0x80), (0x16, 0x81), (0x16, 0x82), (0x16, 0x83), (0x16, 0x84),
                 (0x16, 0x86), (0x16, 0x87), (0x16, 0x89), (0x16, 0x8F)}
 
+# Vectors beyond DOS's that native GLOS answers itself (the owner, 2026-11-20: GLOS's own IDE driver, the mouse,
+# EMS): the disk BIOS's standard functions, Microsoft's mouse driver's, LIM EMS's and VCPI's.
+BIOSLIKE = {
+    0x13: re.compile(r"(DISK|HARD DISK|FIXED DISK|FLOPPY DISK|IBM/MS INT 13 Extensions) - "),
+    0x33: re.compile(r"MS MOUSE"),
+    0x67: re.compile(r"LIM EMS|Virtual Control Program Interface"),
+}
+
 # Hand-made statuses: (int, ah, al or None) -> (status, note).
 OVERRIDES = {
     (0x2F, 0x10, 0x00): ("implement", "sharing is built in: SHARE is there"),
@@ -106,18 +115,29 @@ OVERRIDES = {
 }
 for al in range(0x00, 0x04):
     OVERRIDES[(0x21, 0x6F, al)] = ("absent", "ROM DOS's")
+# INT 13h on GLOS's IDE disks: what an AT BIOS of the 1990s answers; the XT's, PS/2's and ESDI's functions are
+# refused as such BIOSes refuse them (AH 01h, invalid function); the floppy's own go to the BIOS.
+for ah in (0x05, 0x06, 0x07, 0x0A, 0x0B, 0x0E, 0x0F, 0x12, 0x13, 0x14, 0x19, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25):
+    OVERRIDES[(0x13, ah, None)] = ("absent", "IDE disks: AH 01h (invalid function), as AT BIOSes answer")
+OVERRIDES[(0x13, 0x09, None)] = ("implement", "IDE disks: nothing to do, success")
+for ah in (0x16, 0x17, 0x18):
+    OVERRIDES[(0x13, ah, None)] = ("implement", "floppies: the BIOS")
+OVERRIDES[(0x67, 0x49, None)] = ("absent", "reserved in EMS 4.0")
+OVERRIDES[(0x67, 0x4A, None)] = ("absent", "reserved in EMS 4.0")
+OVERRIDES[(0x33, 0x01, 0x2E)] = ("absent", None)
+OVERRIDES[(0x33, 0x02, 0x2E)] = ("absent", None)
 for al in range(0xA2, 0xA6):
     OVERRIDES[(0x21, 0x71, al)] = ("absent", "Windows 95's internal")
 for al in range(0x80, 0x86):
     OVERRIDES[(0x2F, 0xAD, al)] = ("implement", "KEYB's calls, with the keyboard's layout (N4)")
 for al in range(0x00, 0x100):
-    OVERRIDES.setdefault((0x2F, 0x15, al), ("later", "MSCDEX, with the CD-ROM (N4, optional): until then absent"))
+    OVERRIDES.setdefault((0x2F, 0x15, al), ("implement", "MSCDEX's calls, with GLOS's CD-ROM (N4)"))
 
 
 def parse(rbil):
     """[(int, ah, al, qual, cat, flags, title)] for the entries in scope."""
     out = []
-    files = sorted(f for f in glob.glob(os.path.join(rbil, "INTERRUP.?")) if f[-1] in "ABCDEFGHIJKLMN")
+    files = sorted(f for f in glob.glob(os.path.join(rbil, "INTERRUP.?")) if f[-1] in "ABCDEFGHIJKLMNOPQR")
     if not files:
         sys.exit("no RBIL in %s (make rbil fetches it)" % rbil)
     for fn in files:
@@ -128,12 +148,17 @@ def parse(rbil):
                 continue
             cat, vec, ah, al, qual = m.group(1), int(m.group(2), 16), m.group(3), m.group(4), m.group(5)
             t = TITLE.match(lines[i + 1].rstrip("\r"))
-            if not t or not 0x20 <= vec <= 0x2F or (not ah and vec in (0x21, 0x2F)):
+            if not t or (not ah and vec in (0x13, 0x21, 0x2F, 0x33, 0x67)):
                 continue
             ah = int(ah, 16) if ah else None
             al = int(al, 16) if al else None
             title = t.group(3).strip()
-            if cat != "D" and not (vec == 0x2F and ah in MUX and MUX_TITLE.search(title)):
+            if vec in BIOSLIKE:
+                if not BIOSLIKE[vec].match(title):
+                    continue
+            elif not 0x20 <= vec <= 0x2F:
+                continue
+            elif cat != "D" and not (vec == 0x2F and ah in MUX and MUX_TITLE.search(title)):
                 continue
             if vec == 0x2F and ah == 0x16 and m.group(5):
                 continue                    # one VxD's API (1607h, 1684h BX=id): answered as their function's
@@ -146,6 +171,14 @@ def status(vec, ah, al, flags, title):
     o = OVERRIDES.get((vec, ah, al))
     if o:
         return o
+    if vec == 0x13:
+        return ("implement", "IDE disks: GLOS's own driver answers it; floppies and other disks: the BIOS")
+    if vec == 0x33:
+        return ("implement", "GLOS's mouse (N4)")
+    if vec == 0x67:
+        if title.startswith("Virtual Control Program Interface"):
+            return ("absent", "no VCPI: GLOS is the DPMI host (PRD D25)")
+        return ("implement", "GLOS's EMS (N4)")
     if not APPLIES.search(title) or OTHER.search(title):
         if vec == 0x2F and ah == 0x16 and "Windows" in title:
             pass                                    # Windows' own: judged below
@@ -215,7 +248,7 @@ def main():
              "**Proposed status** (for the owner's review; `OVERRIDES` in the script holds the hand-made ones): "
              "**implement**; **absent** (answered as without the feature); **null** (DOS's own null or reserved "
              "function); **callout** (DOS or Windows calls it and programs answer: GLOS's DOS makes DOS's, not Windows'); **internal** (INT 2Fh 12xxh, for "
-             "TSRs and redirectors: after the core); **later** (MSCDEX, with the CD-ROM); **other** (another "
+             "TSRs and redirectors: after the core); **later** (ANSI.SYS, with the console); **other** (another "
              "system's).", "",
              "**Counts:** " + ", ".join("%s %d" % (k, counts[k]) for k in sorted(counts)) +
              " (%d entries; a function with entries for several systems is counted once)." % len(rows), "",

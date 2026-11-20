@@ -1379,7 +1379,8 @@ $(GLOS_RBIL)/.rbil: tools/setup/versions.mk
 	$(Q)tools/setup/fetch.sh $(RBIL_A_URL) $(RBIL_A_SHA256) $(MGA_CACHE)/dl/inter61a.zip
 	$(Q)tools/setup/fetch.sh $(RBIL_B_URL) $(RBIL_B_SHA256) $(MGA_CACHE)/dl/inter61b.zip
 	$(Q)tools/setup/fetch.sh $(RBIL_C_URL) $(RBIL_C_SHA256) $(MGA_CACHE)/dl/inter61c.zip
-	$(Q)for z in a b c; do unzip -o -q $(MGA_CACHE)/dl/inter61$$z.zip -d $(GLOS_RBIL); done
+	$(Q)tools/setup/fetch.sh $(RBIL_D_URL) $(RBIL_D_SHA256) $(MGA_CACHE)/dl/inter61d.zip
+	$(Q)for z in a b c d; do unzip -o -q $(MGA_CACHE)/dl/inter61$$z.zip -d $(GLOS_RBIL); done
 	@touch $@
 rbil: $(GLOS_RBIL)/.rbil
 	$(Q)python3 tools/census/rbil.py --rbil $(GLOS_RBIL)

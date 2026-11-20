@@ -26,6 +26,18 @@ from Ralf Brown's Interrupt List ([native-dos-rbil.md](native-dos-rbil.md), `mak
   (host-tested only, in its own worktree, no change to GLOS's behaviour; native boot and the INT 21h work wait for
   phase F); programs' opens of the root's `AUTOEXEC.BAT` and `CONFIG.SYS` are **not redirected**; GLOS's names are
   **`\GLOSLDR.SYS`, `\GLOS\STARTUP.BAT` and `\GLOS\DOSBOOT.BIN`**.
+- **Decided after the review of the plan's gaps** (question tool, 2026-11-20):
+  - **Disks through GLOS's own IDE driver from native GLOS's first version** (not the BIOS first); the BIOS for
+    floppies and other controllers ([N1](#n1-decided-in-detail-2026-11-20)).
+  - **DOS on another partition:** the boot manager **flips the active flag** in the MBR
+    ([N3](#the-boot-manager)).
+  - **Drive letters under GLOS as the DOS beside it sees them**, so a path is the same in both systems.
+  - **Hosted mode goes** when native GLOS passes the acceptance set, the conformance program and the gate on
+    native boots, and runs on the benches beside their DOS. The wider corpus is not a condition.
+  - **Before hosted mode goes, native GLOS has its own CD-ROM, EMS and USB mass storage**
+    ([N4](#n4-what-dos-programs-had-from-drivers)), beside the mouse, long names and the keyboard's layout.
+  - **MS-DOS 7.1 for Loop A:** the owner provides an image (private, like `BORLAND_DIR`), for the conformance
+    program's reference and the boot manager's tests ([N7](#n7-loop-a-and-the-gate-on-native-boots)).
 - Also asked: how GLOS's DOS can improve on FreeDOS's and MS-DOS's kernels, and grow towards newer hardware
   (SMP, power management, shared resources): [Beyond DOS](#beyond-dos-what-a-dos-of-gloss-own-makes-possible).
 
@@ -109,7 +121,8 @@ nothing is left out unknowingly.
     the tables' layouts, so N2 fills them whole; either can come later if a program shows the need;
   - **gaps that say so:** native GLOS logs every function it doesn't answer, with the program's name (as
     `DPMI-UNIMPL` does for the DPMI host), and the gate fails on such a line;
-  - **hosted mode is removed only after the wider corpus passes too**, not the acceptance set alone.
+  - **when hosted mode goes** (the owner, 2026-11-20): the acceptance set, the conformance program and the gate
+    on native boots, and the benches running native GLOS beside their DOS; the wider corpus is not a condition.
 
 ### What it found (2026-11-20)
 
@@ -147,16 +160,18 @@ The tables are in [native-dos-census.md](native-dos-census.md); what they mean f
 ### The checklist from RBIL
 
 [native-dos-rbil.md](native-dos-rbil.md), made by `tools/census/rbil.py` (`make rbil` fetches RBIL release 61,
-pinned in `tools/setup/versions.mk`): every entry of RBIL's DOS category for INT 20h-2Fh, and INT 2Fh's functions
-of DOS's own parts and of what GLOS stands in for (Windows' and DPMI's 16xxh, XMS, MSCDEX, the clipboard, KEYB,
-DOSKEY, ANSI.SYS, APPEND, the task switcher), each with the census's count and a proposed status. As made
-(2026-11-20): 463 entries; **implement 220**, **absent 90** (answered as MS-DOS 7.1 answers without the feature:
-the network server and redirector, printer setup, SHARE's internals, APPEND, DOSKEY, NLSFUNC, Windows' own),
-**internal 47** (INT 2Fh 12xxh, DOS's services for TSRs and redirectors: after the core), **later 20** (MSCDEX,
-ANSI.SYS, with the CD-ROM and the console), **callout 17** (DOS calls them and programs answer: INT 23h, 24h, 28h,
-2Ah; Windows' broadcasts, which GLOS doesn't make), **null 9**, **other 60** (European MS-DOS 4's multitasking,
-DOS 2.11's OEM calls, DOS 4's extended attributes ...). The statuses are proposals: the script's `OVERRIDES` holds
-the ones made by hand, for review.
+parts A-D, pinned in `tools/setup/versions.mk`): every entry of RBIL's DOS category for INT 20h-2Fh; INT 2Fh's
+functions of DOS's own parts and of what GLOS stands in for (Windows' and DPMI's 16xxh, XMS, MSCDEX, the clipboard,
+KEYB, DOSKEY, ANSI.SYS, APPEND, the task switcher); and, since the owner's answers of 2026-11-20, the disk BIOS's
+standard INT 13h functions (GLOS's IDE driver answers them), Microsoft's mouse driver's INT 33h and LIM EMS's and
+VCPI's INT 67h. Each has the census's count and a proposed status. As made (2026-11-20): 604 entries;
+**implement 346**; **absent 124** (answered as MS-DOS 7.1 answers without the feature: the network server and
+redirector, printer setup, SHARE's internals, APPEND, DOSKEY, NLSFUNC, Windows' own, VCPI, the XT's and PS/2's
+disk functions on IDE disks); **internal 47** (INT 2Fh 12xxh, DOS's services for TSRs and redirectors: after the
+core); **callout 17** (DOS calls them and programs answer: INT 23h, 24h, 28h, 2Ah; Windows' broadcasts, which
+GLOS doesn't make); **null 9**; **later 1** (ANSI.SYS, with the console); **other 60** (European MS-DOS 4's
+multitasking, DOS 2.11's OEM calls, DOS 4's extended attributes ...). The statuses are proposals: the script's
+`OVERRIDES` holds the ones made by hand, for review.
 
 N2 works through **implement** in its areas' order (processes, handles, directories, long names, FCBs,
 information, INT 2Fh), each area's census functions first; **absent** and **null** come with their area (the
@@ -164,9 +179,11 @@ right error is part of the answer); **internal** after the core.
 
 ## N1: the file system
 
-- **FAT12, FAT16 and FAT32 with long names (VFAT)**, read and write, in the kernel, over the sectors as they are
-  reached today: `kernel/disk/bdisk.c` (runs of 32 KB through the BIOS's INT 13h) and the disk cache
-  (`kernel/drv/cache.c`). Native disk drivers come later ([Beyond DOS](#beyond-dos-what-a-dos-of-gloss-own-makes-possible)).
+- **FAT12, FAT16 and FAT32 with long names (VFAT)**, read and write, in the kernel, over GLOS's own block layer:
+  GLOS's IDE driver for IDE disks (the owner's choice: from native GLOS's first version), the BIOS's INT 13h
+  (`kernel/disk/bdisk.c`, through the system VM's thread) for floppies and other controllers, and one block cache
+  under both (today's `kernel/drv/cache.c` and `cstore.c`, which cache the BIOS's INT 13h, moved under the block
+  layer).
 - **What Windows 98 expects of a volume it shares:** long-name entries with their checksums, FSInfo's free count
   and next-free hint, the FAT's clean-shutdown and no-error bits (FAT16 and FAT32), FAT32's backup boot sector
   untouched, the last-access date. ScanDisk must find nothing after GLOS has written a volume.
@@ -179,12 +196,12 @@ right error is part of the answer); **internal** after the core.
   kernel's own files, apps, and DOS programs in several machines ([N6](#n6-several-dos-programs-at-once)).
 - **The volume GLOS boots from may be DOS's too** (the owner's same-partition case). Only one writer may ever
   touch a FAT volume: under native GLOS no DOS runs, so GLOS is that writer.
-- **While hosted mode still exists** (until native runs the acceptance set), the kernel's file system has a
+- **While hosted mode still exists** (until the owner's conditions for its end are met: [the order](#the-order-and-how-each-step-shows-it-works)), the kernel's file system has a
   second back end: the DOS server as today. Two writers on one volume would corrupt it, so the native back end
   is never used under a DOS.
 - **Tests:** host tests against `mtools` and `fsck.fat` (as S0's were), images made by Windows 98 and MS-DOS 7.1
   in 86Box; power cut in Loop A in the middle of writes, then `fsck.fat` and ScanDisk.
-- **In steps** (beside phase F, the owner's choice; none changes what GLOS does until N1d):
+- **In steps** (beside phase F, the owner's choice; none changes what GLOS does but behind a setting that is off by default (N1c), and nothing native runs before N3):
   - **N1a, reading:** `kernel/fs/fat.c`, plain C over a sector callback as `kernel/disk` is: a volume mounted
     from its boot sector (FAT12, FAT16, FAT32), cluster chains, folders with their long names (UTF-8, the short
     names in the code page), paths looked up by either name without regard to case, files read and sought, free
@@ -198,10 +215,55 @@ right error is part of the answer); **internal** after the core.
     deleted and renamed, folders made and removed, long names with their short names made as Windows makes
     them (`~1`), attributes and times; the writes in order and the dirty bits. Host test: random sequences of
     those against a model of the tree, `fsck.fat` after each, mtools reading the result.
-  - **N1c, the cache and many callers:** sectors through the disk cache, a lock per volume, handles that stay
-    right while another caller changes the folder they are in.
-  - **N1d, the kernel's users onto it** behind the file system's interface, the DOS server staying the back end
+  - **N1c, GLOS's IDE driver and the block layer:** the driver (PIO), the cache under it, INT 13h for its disks
+    answered by GLOS; proven under hosted GLOS behind `[disk] driver = bios | glos` (bios by default), with DOS,
+    ScanDisk and the gate on top of it, before native GLOS relies on it.
+  - **N1d, many callers:** a lock per volume, handles that stay right while another caller changes the folder
+    they are in.
+  - **N1e, the kernel's users onto it** behind the file system's interface, the DOS server staying the back end
     while GLOS starts from a DOS (hosted mode: never two writers); used only by native GLOS, from N3.
+  - **N1f, bus-master DMA** on the PCI IDE controllers (PIIX, ICH, VIA, SiS, ALi), measured on the benches;
+    before hosted mode goes.
+
+### N1 decided in detail (2026-11-20)
+
+- **Long names written as Windows 9x writes them:** long-name entries whenever the name isn't a valid 8.3 name in
+  upper case in the code page (so `readme.txt` gets one, as on Windows 98); NT's case bits read, never written.
+- **Short names made as Windows 9x makes them:** upper case in the code page; what the page hasn't got, and what
+  8.3 doesn't allow, becomes `_`; spaces and leading dots dropped; the base cut to six and `~1` added, the number
+  raised until the name is free in that folder (`~1` to `~999999`, the base shorter as the tail grows).
+- **Times:** local time (GLOS's clock with `[region]`'s time zone), as DOS and Windows keep them; creation time
+  to 10 ms; the last-access date set when a file is made or written, not on reads (Windows 98 sets it on reads
+  too: GLOS spares those writes).
+- **Write-back:** a written sector stays in the cache 2 seconds at most; sooner at idle, by a commit (68h, 6Ah),
+  before a restart or power off, and before a removable disk can change. The order: the data, each FAT copy
+  (FAT32 with mirroring off: the active one), the directory entry, FSInfo. The volume's dirty bit (FAT16, FAT32)
+  is set before the first write and cleared by the flush that leaves nothing unwritten (Windows 98 runs ScanDisk
+  at its start when it finds it set).
+- **Removable disks:** the change line (INT 13h 16h; ATAPI's media status for CD drives) asked before a floppy's
+  first access after 2 seconds idle, and the volume's serial number compared; a change drops that volume from
+  the cache; a change with writes pending is DOS's "Invalid disk change" (INT 24h).
+- **Partitions:** the primary table and the extended chain (`mbr.c` gains the EBR walk). Types 01h, 04h, 06h,
+  0Bh, 0Ch and 0Eh are FAT volumes; hidden types (11h, 14h, 16h, 1Bh, 1Ch, 1Eh) and other systems' get no letter,
+  as under DOS; `DISK` lists them all.
+- **Drive letters as the DOS beside GLOS sees them** (the owner, 2026-11-20): MS-DOS's order worked out as if the
+  DOS's partition were the active one (the boot manager's DOS entry), so `C:\GAMES` is the same path in both
+  systems; GLOS's own partition gets the letter DOS gives it, or the next free one where DOS gives none. With no
+  DOS on the disk, MS-DOS's order with GLOS's partition active. The rules are checked against MS-DOS 7.1 and
+  Windows 98 in 86Box (N7): a primary partition per disk, disk by disk, then the logical drives, then the other
+  primaries (Windows 9x's; MS-DOS 6.22 gives a second primary no letter). CD drives after the disks, as MSCDEX
+  letters them; USB drives as they are plugged in, the next free letters.
+- **The IDE driver** (N1c): the channels at 1F0h and 170h (ISA, VLB, and PCI controllers in compatibility mode)
+  and a PCI IDE function's own ports in native mode; IDENTIFY; LBA28, LBA48 past 128 GB, CHS for drives without
+  LBA; PIO with READ/WRITE MULTIPLE first, by IRQ 14 and 15 (polled where the interrupt isn't free); FLUSH CACHE
+  before a restart and power off; the drive's write cache left as the BIOS set it; ATAPI's packets for CD drives
+  (N4). SATA controllers in IDE (legacy) mode are IDE to it; AHCI later ([Beyond DOS](#newer-hardware-the-bios-is-the-next-thing-under-glos)).
+- **Once GLOS drives a controller, the BIOS never touches its disks again:** GLOS answers INT 13h for them itself
+  (the checklist's INT 13h section: what an AT BIOS answers), for DOS programs and direct-mode sessions alike,
+  and their ports are never given to a program (direct mode excludes them). Floppies and the disks of other
+  controllers (SCSI cards with their own BIOS, the BIOS's USB emulation until N4) stay the BIOS's.
+- **Stacks:** the file system runs on the caller's kernel stack; its frames stay under 3 KB (N1a's deepest, a
+  lookup, is about 2.5 KB).
 
 ## N2: the DOS personality
 
@@ -232,6 +294,38 @@ conventional memory (a few KB, where DOS's kernel data is):
 - each program's **PSP** with its handle table (20 handles, 67h for more), and its **environment**.
 
 Everything else (the files, the directories, the cache) is the kernel's, above 1 MB.
+
+### N2 decided in detail (2026-11-20)
+
+- **A machine's memory:** the vector table and the BIOS's data area as the BIOS left them; 0500h-05FFh as DOS has
+  it; GLOS's DOS area from 0060:0000h (the entry stub for INT 20h-2Fh, the List of Lists with the device chain,
+  the SFT with `[dos] files` entries, 40 by default, 26 CDS entries (LASTDRIVE Z), the DPBs, the SDA); then the
+  first MCB. Target: at least 625 KB free for programs (MS-DOS 7.1 with DOS=HIGH,UMB gives about 620 KB). The HMA
+  stays free for XMS's clients: GLOS's DOS is "low". UMBs (58xxh's link, LOADHIGH) from upper-memory pages GLOS
+  maps (no ROM, no BAR, as `kernel/mm/umapage.c` finds them).
+- **The root process:** a PSP of GLOS's own, its own parent, as COMMAND.COM's is under DOS; it owns the master
+  environment (`[shell] envsize`); programs the kernel's shell starts are its children; GLOS's COMMAND.COM runs
+  batch files as now.
+- **Identity:** MS-DOS 7.10 (30h: 7.10, OEM FFh; 3306h: 7.10 revision 0, DOS neither in the HMA nor in ROM), long
+  names and FAT32 there. A version per program can be set (`[dos] version PROGRAM.EXE = 6.22`: SETVER's job).
+- **Date and time:** 2Ah and 2Ch from GLOS's clock in local time; a program's 2Bh or 2Dh moves only its machine's
+  date and time (an offset), not GLOS's clock, which GLOS's DATE and TIME and SNTP set.
+- **Calls back into the machine:** INT 23h, 24h, 28h and 2Ah are made as DOS makes them, as nested real-mode calls
+  on the machine's thread (supervisor.md §9.5), with InDOS as DOS has it around each; an INT 24h handler's answer
+  (retry, ignore, fail, abort) is acted on as DOS acts on it.
+- **CON:** input through the machine's own INT 16h (its BIOS, fed by GLOS's virtual keyboard), cooked or raw by
+  IOCTL 4401h; Ctrl-C, Ctrl-S and Ctrl-P as DOS has them; output through the machine's INT 29h and INT 10h's
+  teletype, and into a job's capture (supervisor.md §17.4) with no SFT walk. AUX through the BIOS's INT 14h, PRN
+  through its INT 17h; COM1 stays GLOS's log port.
+- **The DPMI host:** bootinfo's `indos` and `sda` point at GLOS's own SDA; the DOS lock and its safe point
+  (§17.1, §17.2) become the personality's own locks; a protected-mode call reaches the personality without V86
+  when the vector is GLOS's (above).
+- **A function GLOS doesn't answer** logs `GLOS-DOS unanswered int= ax= prog=` and is answered as MS-DOS 7.1
+  answers an unknown function (AL 0; carry set with 01h where the function reports by carry); the gate fails on
+  that line.
+- **Targets** (the 486DX2 profile without VME, `tests/dos/doscalls.c`): INT 21h 30h from a program 70 µs at most
+  (55 under plain DOS, 474 under GLOS today); from a DJGPP program 150 µs; findfirst and a cached 512-byte read no
+  slower than under plain DOS (653 and 527 µs).
 
 ### What it answers
 
@@ -268,11 +362,18 @@ Everything the [checklist](#the-checklist-from-rbil) marks implement, absent or 
 
 1. **The disk's first sector** (`kernel/disk/mbrboot.S`, GLOS's already): the boot manager's first stage.
 2. **The volume's boot sector** (`kernel/disk/fdboot.S`, GLOS's already, for FAT12/16/32): loads GLOS's loader
-   (`\GLOSLDR.SYS`, hidden and system: the owner's name) instead of `KERNEL.SYS`.
-3. **The loader** (16-bit, Open Watcom, much of today's `loader/` reused): a FAT reader through INT 13h (and the
-   LBA extensions); `\GLOS\GLOS.CFG`'s `[boot]` section; `GLOSK.BIN` read (packed or not, as now); memory by
-   E820h/E801h/88h and A20 as raw mode does now; the menu ([below](#the-boot-manager)); bootinfo with a new
-   `BI_F_NATIVE`; protected mode and paging as `loader/pm.asm` does.
+   (`\GLOSLDR.SYS`, hidden and system: the owner's name) whole at 0060:0000h, as it loads `KERNEL.SYS` today (BL
+   and DL the disk; about 150 KB at most, below where the boot code moves itself).
+3. **The loader** (16-bit Open Watcom, a raw binary with no DOS runtime; much of today's `loader/` reused):
+   `kernel/fs/fat.c` built 16-bit (clean since 2026-11-20) over INT 13h and its LBA extensions; `\GLOS\GLOS.CFG`
+   read whole and handed to the kernel in bootinfo, with the boot disk and partition, the BIOS's disks and the
+   volumes' letters; `GLOSK.BIN` read (packed or not, as now); memory by E820h/E801h/88h and A20 as raw mode does
+   now; the menu ([below](#the-boot-manager)); bootinfo with a new `BI_F_NATIVE`; protected mode and paging as
+   `loader/pm.asm` does. What stays below 1 MB is the first machine's resident code: the entry stub, the kill
+   stub and the host's real-mode stacks (what `loader/stub.asm` holds today, without its EXEC loop).
+5. **A PC started from a USB stick** (the BIOS's USB emulation): the loader reads through the BIOS; once GLOS
+   takes the USB controllers (as it does for HID today), its own mass-storage driver (N4) carries the boot volume
+   on, found again by its serial number.
 4. **The kernel** builds the first machine from the BIOS's state (its vector table, its data area), mounts the
    volumes, puts the personality into the machine, and runs GLOS's startup ([names](#names-nothing-dos-or-windows-owns)).
 
@@ -281,10 +382,17 @@ Everything the [checklist](#the-checklist-from-rbil) marks implement, absent or 
 - **The same partition** as MS-DOS or Windows 9x (the owner's first wish): when GLOS's boot records are put on a
   volume that already starts a DOS, the DOS's boot sector is saved first (`\GLOS\DOSBOOT.BIN`, as Windows NT
   kept `BOOTSECT.DOS`). The loader's menu offers GLOS or that DOS; choosing DOS loads the saved sector at
-  0000:7C00h and jumps to it with the boot drive in DL. DOS then starts from its own `IO.SYS` as if GLOS weren't
-  there. Simple, and the way NT shared a volume with MS-DOS.
-- **Another partition:** the first stage lists the partitions that start something and chains to the chosen
-  one's boot sector (marking it active in memory only, so that DOS finds itself). MS-DOS must be on a primary
+  0000:7C00h and jumps to it with the boot drive in DL and DS:SI at the partition's table entry, as MBR code
+  leaves them. DOS then starts from its own `IO.SYS` as if GLOS weren't there. Simple, and the way NT shared a
+  volume with MS-DOS. Only sector 0 is GLOS's: a FAT32 volume's second boot code sector (2, MS-DOS 7.1's) stays,
+  and so does the backup at sector 6 (a DOS tool that restores from it restores DOS's start; `DISK n BOOT` puts
+  GLOS's back).
+- **Another partition** (the owner, 2026-11-20: flip the active flag): DOS letters its drives from the table on
+  the disk, so the DOS's partition must be the active one when it starts. GLOS's first stage (`mbrboot.S`, with
+  the number of GLOS's partition kept in it) always starts GLOS's loader, whichever partition is active, so the
+  menu is always there. Choosing DOS writes the active flag to DOS's partition if it isn't active already (two
+  bytes of the MBR, the rest of the table as it was), then chains to its boot sector as above. Choosing GLOS
+  changes nothing: GLOS gives letters as DOS sees them, active flag or not. MS-DOS must be on a primary
   partition, as it always must.
 - **The menu:** `[boot] default = glos | dos | partition N`, `timeout = 5`, the names shown; a key held (Shift
   or F8) shows it when the timeout is 0. Text mode, through the BIOS.
@@ -316,15 +424,28 @@ The owner's rule (2026-11-20): no crossover with a DOS on the same volume.
 
 ## N4: what DOS programs had from drivers
 
+Before hosted mode goes (the owner, 2026-11-20), native GLOS has all of this section but `DEVICE=`.
+
 - **The mouse (INT 33h):** GLOS emulates it for apps already (supervisor.md §12.5, graphics.md §5.4); DOS programs in a
   machine get the same, from the PC's PS/2 or serial mouse, or USB through GLOS. No CuteMouse.
 - **Long names:** in the personality (N2, 71xxh). No DOSLFN.
 - **The keyboard's layout:** `[region] layout` reaches the desktop and apps today; native, the machine's INT 16h
   and INT 09h see the layout's characters too. No KEYB.
-- **Memory managers:** none needed. GLOS is the XMS server already; upper memory and EMS become a page-table
-  matter per machine, which D25 can revisit (its reasons were DOS's arena).
-- **CD-ROM (optional, later):** ATAPI, ISO 9660, and MSCDEX's INT 2Fh 15xxh for programs (GLQuake asks for it:
-  CD audio); ISO and CUE/BIN images as drives, their audio played through GLOS's mixer.
+- **Memory managers:** none needed. GLOS is the XMS server already; UMBs per machine (N2).
+- **EMS** (the owner, 2026-11-20; revisits PRD D25, which is amended when it lands): LIM EMS 4.0 per machine (the
+  checklist's INT 67h section): a 64 KB page frame in a free 64 KB of upper memory, pages from GLOS's memory,
+  INT 67h's vector at a device header named `EMMXXXX0` (how programs find an EMM); `[dos] ems = KB`, 8 MB by
+  default (as DOSBox has it), 0 for none, per program too; no VCPI (GLOS is the DPMI host, which DOS extenders ask
+  for first).
+- **CD-ROM** (the owner, 2026-11-20): ATAPI drives on GLOS's IDE driver; ISO 9660 (Joliet's long names later);
+  MSCDEX's INT 2Fh 15xxh, 1510h's device requests too (programs ask for audio play, the Q channel and the
+  drive's state that way); CD audio read digitally (READ CD) and played through GLOS's mixer, the drive's
+  analog output where it can't; ISO and CUE/BIN images as drives too. GLQuake, GTA and Half-Life ask for MSCDEX
+  (census).
+- **USB mass storage** (the owner, 2026-11-20): GLOS's USB (UHCI today) gains OHCI and EHCI (non-Intel chipsets'
+  USB 1.1, and USB 2.0) and the mass-storage class (Bulk-Only Transport, SCSI's commands): sticks, USB floppy
+  and CD drives as removable drives; plugged in, the next free letter; pulled with writes pending, GLOS says so
+  (the log, the desktop) and the program gets INT 24h.
 - **Not supported at first:** DOS device drivers loaded from CONFIG.SYS (`DEVICE=`). GLOS has its own for what
   matters; a loader for character-device drivers could come later if a program needs one.
 
@@ -345,18 +466,29 @@ The owner's choice of 2026-11-13 ([shell.md](shell.md), "later"): with INT 21h a
 can have a machine of its own (its own 640 KB, its own virtual devices), text programs in separate terminals.
 After N2 works in the one machine; its own plan then.
 
+## N7: Loop A and the gate on native boots
+
+Every suite today boots FreeDOS and starts `GLOS.EXE`; before hosted mode goes, every suite boots native GLOS.
+- **`make native-image`** (mtools on the host) makes disk images: GLOS alone; GLOS with FreeDOS on the same volume;
+  GLOS with MS-DOS 7.1 on the same volume and on another partition, from the owner's MS-DOS 7.1 image (`MSDOS_DIR`
+  in `config.local.mk`, private like `BORLAND_DIR`).
+- **RetroGPU's `run.py`** boots them with `--hdd` (there today); the harness's programs (SERSAY, VECCHK, UTEXIT and
+  the rest of `C:\HX`) run on GLOS's DOS; jobs.py's suites gain native boots; the gate runs on them.
+- **MS-DOS 7.1 in Loop A** also gives the conformance program its reference and the boot manager its tests.
+
 ## The order, and how each step shows it works
 
 | Step | What | Shows it works |
 |---|---|---|
 | N0 | This design; the census of what the acceptance programs ask of DOS (`tools/census`) | The owner's review; [native-dos-census.md](native-dos-census.md) |
-| N1 | The kernel's file system: FAT12/16/32 and long names over INT 13h and the cache; the kernel's users moved onto it; the DOS server kept as the second back end while hosted mode lives | Host tests against `mtools` and `fsck.fat`; Windows 98's ScanDisk on volumes GLOS wrote; Loop A power cuts |
+| N1 | The kernel's file system: FAT12/16/32 and long names over GLOS's IDE driver and the BIOS, the cache under both, INT 13h for IDE disks answered by GLOS; the kernel's users moved onto it; the DOS server kept as the second back end while hosted mode lives | Host tests against `mtools` and `fsck.fat`; the IDE driver under hosted GLOS behind its setting (DOS, ScanDisk and the gate on top); Windows 98's ScanDisk on volumes GLOS wrote; Loop A power cuts |
 | N2 | The DOS personality in one machine: the checklist's functions area by area, and the tables programs read | The conformance program ([below](#the-conformance-program)) matching MS-DOS 7.1's transcripts; the census run again under native GLOS finds nothing unanswered; no line saying a function went unanswered in the gate |
 | N3 | GLOS's loader from its own boot sector; the boot manager (same partition and other partition) | Loop A from a native disk image; MS-DOS 7.1 and Windows 98 started from GLOS's menu on the same volume |
-| N4 | INT 33h, the layout, (CD-ROM) for DOS programs | The survey's suites in a `native` variant against `base`; DJGPP's tests, HDPMI's regression, TPX; GLOS's gate on a native boot |
+| N4 | INT 33h, the layout, CD-ROM (ATAPI, ISO 9660, MSCDEX, CD audio), EMS, USB mass storage | The survey's suites in a `native` variant against `base` (GLQuake with its CD audio); an EMS game; a USB stick in 86Box and on the benches; DJGPP's tests, HDPMI's regression, TPX |
 | N5 | The floppy and `install.py` with nothing of FreeDOS's | `loopa-floppy`; the 486 |
-| N6 | A machine per DOS program | Its own plan |
-| then | Hosted mode removed (`GLOS.EXE` from DOS) | The wider corpus (N0) as well as the acceptance set; the benches on native GLOS: bench-g400 and the P3 beside their MS-DOS 7.1 and Windows 98 |
+| N6 | A machine per DOS program | Its own plan (not a condition for hosted mode's end) |
+| N7 | Loop A's suites and the gate on native boots | The gate green on native images |
+| then | Hosted mode removed (`GLOS.EXE` from DOS) | The owner's condition: the acceptance set on native boots, the conformance program matching MS-DOS 7.1, the gate on native boots (N7), the benches (bench-g400, the P3, the 486) running native GLOS beside their DOS |
 
 The benches: bench C (the 486, no VME: where DOS calls cost most today, DOSCALLS before and after), the P3
 (Windows 98 SE on the same disk: the boot manager and FAT32 with long names shared), bench-g400 (MS-DOS 7.1 on
@@ -387,7 +519,13 @@ the same volume).
   cache: refused on a mounted volume unless the program has the disk to itself (the cache flushed and dropped
   first), and logged.
 - **Old BIOSes:** INT 13h without the LBA extensions reaches 8 GB at most (CHS); some BIOSes are slow or wrong.
-  Native disk drivers remove the BIOS from the path ([Beyond DOS](#beyond-dos-what-a-dos-of-gloss-own-makes-possible)).
+  GLOS's IDE driver takes the BIOS out of the path for IDE disks; floppies and other controllers keep it.
+- **GLOS's own IDE driver** (the owner's choice): controllers' quirks (the CMD640's and RZ1000's bugs, PIIX, VIA,
+  SiS, ALi, Promise), drives without LBA or with odd geometries, a slave without a master, 32-bit PIO, a drive's
+  write cache at power off. Tested in 86Box and on every bench (the 300PL's PIIX4, the P3, the P4's ICH5, the
+  486's ISA IDE) under hosted GLOS first, behind its setting.
+- **New USB host controllers** (OHCI, EHCI) and mass storage are sizeable, boards differ, and the BIOS's legacy
+  emulation must be handed over cleanly (GLOS does it for HID already).
 - **Size:** N2 is the largest piece of GLOS since the DPMI host (`kernel/dpmi` is 3,852 lines today) and likely
   larger; N1 a few thousand lines with its tests.
 
@@ -471,8 +609,8 @@ the performance counters, so it can pace each machine.
 
 - 32-bit protected mode and V86 mode are on every x86 CPU, even where the firmware is UEFI only. What such a PC
   lacks is the **BIOS**: INT 10h, 13h, 15h, 16h.
-- **The path:** (1) GLOS's own DOS (this plan); (2) native disk drivers (IDE with bus-master DMA on the PIIX, then
-  AHCI, USB mass storage), the BIOS only a fallback; (3) the display through UEFI's GOP framebuffer, input through
+- **The path:** (1) GLOS's own DOS (this plan); (2) native disk drivers (IDE and USB mass storage are in this
+  plan; AHCI next), the BIOS only a fallback; (3) the display through UEFI's GOP framebuffer, input through
   GLOS's USB, and a **small virtual BIOS in each machine** for DOS programs; (4) GLOS started by UEFI on a current
   PC. Each step is useful on period PCs too: native disks are faster and reach past 8 GB.
 - **GLOS stays 32-bit:** long mode has no V86 mode, and 4 GB is plenty for this software.
@@ -487,7 +625,12 @@ the performance counters, so it can pace each machine.
 ## Open questions
 
 1. **The checklist's statuses** ([native-dos-rbil.md](native-dos-rbil.md)): proposals, to change where the owner
-   sees otherwise (for example ANSI.SYS later rather than now, DOSKEY absent, the clipboard calls in).
+   sees otherwise (for example ANSI.SYS later rather than now, DOSKEY absent, the clipboard calls in, EMS 8 MB by
+   default).
 2. **Which of "Beyond DOS" go on the route**, and when.
+3. **The MS-DOS 7.1 image** (N7): where it is (`MSDOS_DIR`), and what it is (an installed hard disk image, a
+   Windows 98 SE startup floppy, or both).
 
-Answered 2026-11-20: N1 beside phase F; no redirect of the root's files; the names as proposed.
+Answered 2026-11-20: N1 beside phase F; no redirect of the root's files; the names as proposed; GLOS's own IDE
+driver from the start; the active flag flipped for DOS on another partition; letters as DOS sees them; hosted
+mode's end (above); CD-ROM, EMS and USB mass storage before it; the owner's MS-DOS 7.1 image for Loop A.
