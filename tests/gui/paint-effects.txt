@@ -1,0 +1,38 @@
+# Effects in Paint (apps/paint; phase E, docs/v1/apps/paint.md): the Effects menu on a rectangle and a brush
+# stroke: Blur (how far is asked: 3), Pixelate (the block's side as offered, 8), Emboss, Find Edges and Sharpen,
+# each undone before the next (each is one step); the last is left and the picture not saved.
+run PAINT.EXE
+wait "Untitled - Paint"
+key r
+drag "Untitled - Paint" 100 119 220 199
+key b
+drag "Untitled - Paint" 110 129 210 189
+key alt+c b
+wait "Blur"
+type 3\n
+gone "Blur"
+shot blur "Untitled - Paint"
+key ctrl+z
+key alt+c p
+wait "Pixelate"
+key enter
+gone "Pixelate"
+shot pixelate "Untitled - Paint"
+key ctrl+z
+key alt+c e
+shot emboss "Untitled - Paint"
+key ctrl+z
+key alt+c f
+shot edges "Untitled - Paint"
+key ctrl+z
+key alt+c s
+shot sharpen "Untitled - Paint"
+key alt+f4
+wait "Paint"
+key alt+n
+expect PAINT effect blur 3
+expect PAINT effect pixelate 8
+expect PAINT effect emboss 0
+expect PAINT effect edges 0
+expect PAINT effect sharpen 0
+expect PAINT end

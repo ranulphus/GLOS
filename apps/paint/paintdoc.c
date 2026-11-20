@@ -507,6 +507,89 @@ void pd_adjust(struct pd_doc *d, int kind, int a, int b, int x, int y, int w, in
 /* ---- the whole picture another size */
 
 /* The layers' new pixels put in place of the old (taken over), the picture nw by nh. */
+/* ---- effects: the current layer's pixels in a rectangle made from their neighbours. Each is worked out from
+   a copy of the rectangle as it was, so that no pixel is made from one already changed. What is clear stays
+   clear, and a clear neighbour, or one outside the rectangle's layer, counts as the pixel itself (edges are not
+   darkened by what is not there). */
+
+static int clip_rect(const struct pd_doc *d, int *x, int *y, int *w, int *h);
+
+/* A neighbour (nx, ny) of a pixel, in the copy of the layer: its colour, or the pixel's own where there is
+   none. */
+static unsigned near_px(const struct pd_doc *d, const unsigned *src, int nx, int ny, unsigned own)
+{
+    unsigned p;
+    if (nx < 0 || ny < 0 || nx >= d->w || ny >= d->h)
+        return own;
+    p = src[(size_t)ny * d->w + nx];
+    return p >> 24 ? p : own;
+}
+
+int pd_effect(struct pd_doc *d, int kind, int amount, int x, int y, int w, int h)
+{
+    unsigned *px = d->layer[d->cur].px, *src;
+    int r, c, k;
+    if (!clip_rect(d, &x, &y, &w, &h))
+        return 0;
+    if (!(src = malloc((size_t)d->w * d->h * sizeof *src)))
+        return -1;
+    memcpy(src, px, (size_t)d->w * d->h * sizeof *src);
+    if (kind == PD_PIXELATE) {                  /* blocks `amount` a side, from the rectangle's corner: each its mean */
+        int b = amount < 2 ? 2 : amount > 64 ? 64 : amount, by, bx;
+        for (by = y; by < y + h; by += b)
+            for (bx = x; bx < x + w; bx += b) {
+                unsigned long R = 0, G = 0, B = 0, n = 0;
+                unsigned m;
+                for (r = by; r < by + b && r < y + h; r++)
+                    for (c = bx; c < bx + b && c < x + w; c++) {
+                        unsigned p = src[(size_t)r * d->w + c];
+                        if (p >> 24)
+                            R += p >> 16 & 255, G += p >> 8 & 255, B += p & 255, n++;
+                    }
+                if (!n)
+                    continue;
+                m = (unsigned)((R + n / 2) / n) << 16 | (unsigned)((G + n / 2) / n) << 8 | (unsigned)((B + n / 2) / n);
+                for (r = by; r < by + b && r < y + h; r++)
+                    for (c = bx; c < bx + b && c < x + w; c++)
+                        if (px[(size_t)r * d->w + c] >> 24)
+                            px[(size_t)r * d->w + c] = (px[(size_t)r * d->w + c] & 0xFF000000u) | m;
+            }
+    } else {
+        int rad = kind == PD_BLUR ? (amount < 1 ? 1 : amount > 12 ? 12 : amount) : 1;
+        for (r = y; r < y + h; r++)
+            for (c = x; c < x + w; c++) {
+                unsigned own = src[(size_t)r * d->w + c];
+                int v[3], i, j;
+                if (!(own >> 24))
+                    continue;
+                for (k = 0; k < 3; k++) {
+                    int sh = 16 - k * 8;
+#define N(dx, dy) ((int)(near_px(d, src, c + (dx), r + (dy), own) >> sh & 255))
+                    if (kind == PD_BLUR) {      /* the mean of the square round it */
+                        long sum = 0;
+                        for (j = -rad; j <= rad; j++)
+                            for (i = -rad; i <= rad; i++)
+                                sum += N(i, j);
+                        v[k] = (int)((sum + (2 * rad + 1) * (2 * rad + 1) / 2) / ((2 * rad + 1) * (2 * rad + 1)));
+                    } else if (kind == PD_SHARPEN) {    /* itself, more, less its four neighbours */
+                        v[k] = 5 * N(0, 0) - N(-1, 0) - N(1, 0) - N(0, -1) - N(0, 1);
+                    } else if (kind == PD_EMBOSS) {     /* lit from the top left: grey where nothing changes */
+                        v[k] = 128 + N(1, 1) - N(-1, -1);
+                    } else {                    /* edges (Sobel's two sums): bright where the colour changes */
+                        int gx = N(1, -1) + 2 * N(1, 0) + N(1, 1) - N(-1, -1) - 2 * N(-1, 0) - N(-1, 1);
+                        int gy = N(-1, 1) + 2 * N(0, 1) + N(1, 1) - N(-1, -1) - 2 * N(0, -1) - N(1, -1);
+                        v[k] = (gx < 0 ? -gx : gx) + (gy < 0 ? -gy : gy);
+                    }
+#undef N
+                }
+                px[(size_t)r * d->w + c] = (own & 0xFF000000u) | clamp8(v[0]) << 16 | clamp8(v[1]) << 8 | clamp8(v[2]);
+            }
+    }
+    free(src);
+    touch(d, x, y, x + w, y + h);
+    return 0;
+}
+
 static int resized(struct pd_doc *d, unsigned **n, int nw, int nh)
 {
     unsigned *flat = malloc((size_t)nw * (size_t)nh * sizeof *flat);

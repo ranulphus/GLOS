@@ -69,6 +69,13 @@ int pd_turn_back(int how);
 enum { PD_INVERT = 1, PD_GREY, PD_SEPIA, PD_BRIGHT };
 void pd_adjust(struct pd_doc *d, int kind, int a, int b, int x, int y, int w, int h);
 
+/* Effects: the current layer's pixels in a rectangle (clipped; what is clear stays clear) made from their
+   neighbours as they were. Blur (amount: how far, 1 to 12 pixels each way), sharpen, emboss (lit from the top
+   left; grey where nothing changes), edges (bright where the colour changes), pixelate (amount: a block's side,
+   2 to 64). 0, or -1 with nothing changed (no memory for the copy). */
+enum { PD_BLUR = 1, PD_SHARPEN, PD_EMBOSS, PD_EDGES, PD_PIXELATE };
+int pd_effect(struct pd_doc *d, int kind, int amount, int x, int y, int w, int h);
+
 /* The whole picture another size. pd_resize: every layer scaled (smooth: each new pixel from the four old ones
    round where it falls; else from the nearest). pd_canvas: the picture as it is on a canvas nw by nh, at the
    place ax, ay say (0 the left or top, 1 the middle, 2 the right or bottom): what falls outside is cut off,

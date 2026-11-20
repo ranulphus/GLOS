@@ -82,6 +82,50 @@ int main(void)
         pd_free(d);
     }
 
+    /* Effects: each pixel from its neighbours as they were. */
+    d = pd_new(3, 3, 0xFFFFFF);                 /* blur: a black middle is shared out; what is outside counts as the
+                                                   pixel itself, so the corners come to the same */
+    pd_dot(d, 1, 1, 0x000000, 1);
+    is("blur", pd_effect(d, PD_BLUR, 1, 0, 0, 3, 3), 0);
+    pd_flatten(d, 0, 0, 3, 3);
+    is("blur: the middle", (long)pd_get(d, 1, 1), 0xE3E3E3);
+    is("blur: a corner", (long)pd_get(d, 0, 0), 0xE3E3E3);
+    pd_free(d);
+    d = pd_new(4, 3, 0x406080);                 /* a plain picture: sharpened it is itself, embossed grey, no edges */
+    pd_effect(d, PD_SHARPEN, 0, 0, 0, 4, 3);
+    pd_flatten(d, 0, 0, 4, 3);
+    is("sharpen: plain stays", (long)pd_get(d, 2, 1), 0x406080);
+    pd_effect(d, PD_EMBOSS, 0, 0, 0, 4, 3);
+    pd_flatten(d, 0, 0, 4, 3);
+    is("emboss: plain is grey", (long)pd_get(d, 2, 1), 0x808080);
+    pd_effect(d, PD_EDGES, 0, -5, -5, 99, 99);  /* (a rectangle bigger than the picture: clipped) */
+    pd_flatten(d, 0, 0, 4, 3);
+    is("edges: none in a plain picture", (long)pd_get(d, 0, 0), 0x000000);
+    pd_free(d);
+    d = pd_new(4, 2, 0x000000);                 /* edges: bright where black meets white, dark away from it */
+    pd_rect(d, 2, 0, 3, 1, 0xFFFFFF, 0, 0xFFFFFF);
+    pd_effect(d, PD_EDGES, 0, 0, 0, 4, 2);
+    pd_flatten(d, 0, 0, 4, 2);
+    is("edges: at the step", (long)pd_get(d, 1, 0), 0xFFFFFF);
+    is("edges: away from it", (long)pd_get(d, 0, 0), 0x000000);
+    pd_free(d);
+    d = pd_new(4, 2, 0x202020);                 /* pixelate: a block's mean; a block that is one colour stays */
+    pd_dot(d, 0, 0, 0xFFFFFF, 1);
+    pd_dot(d, 1, 1, 0xFFFFFF, 1);
+    pd_dot(d, 1, 0, 0x000000, 1);
+    pd_dot(d, 0, 1, 0x000000, 1);
+    pd_effect(d, PD_PIXELATE, 2, 0, 0, 4, 2);
+    pd_flatten(d, 0, 0, 4, 2);
+    is("pixelate: a block's mean", (long)pd_get(d, 1, 0), 0x808080);
+    is("pixelate: a plain block", (long)pd_get(d, 3, 1), 0x202020);
+    is("the effects changed x1", d->x1, 4);
+    pd_layer_add(d);                            /* a clear layer over it: nothing of it is changed, nor shows */
+    pd_effect(d, PD_BLUR, 3, 0, 0, 4, 2);
+    pd_effect(d, PD_EMBOSS, 0, 0, 0, 4, 2);
+    pd_flatten(d, 0, 0, 4, 2);
+    is("effects leave clear pixels clear", (long)pd_get(d, 1, 0), 0x808080);
+    pd_free(d);
+
     d = pd_new(9, 9, PAPER);
     pd_dot(d, 4, 4, INK, 5);
     check("a tip five wide", d,

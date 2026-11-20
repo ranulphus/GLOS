@@ -24,6 +24,7 @@ enum { C_NEW = 1, C_OPEN, C_SAVE, C_SAVEAS, C_EXIT, C_UNDO, C_REDO, C_IN, C_OUT,
        C_RESIZE, C_CANVAS, C_CUT, C_COPY, C_PASTE, C_ALL, C_CROP, C_LADD, C_LCOPY, C_LDELETE, C_LUP, C_LDOWN, C_LMERGE, C_LSHOWN, C_LOPACITY,
        C_TURN = 50,                     /* + PD_RIGHT, PD_LEFT, PD_ACROSS, PD_OVER */
        C_ADJUST = 60,                   /* + PD_INVERT, PD_GREY, PD_SEPIA, PD_BRIGHT */
+       C_EFFECT = 70,                   /* + PD_BLUR, PD_SHARPEN, PD_EMBOSS, PD_EDGES, PD_PIXELATE */
        C_TOOL = 100 };
 enum { T_PENCIL, T_BRUSH, T_ERASER, T_LINE, T_RECT, T_ELLIPSE, T_FILL, T_PICK, T_SELECT, T_TEXT, T_COUNT };
 
@@ -379,6 +380,37 @@ static void adjust(int kind)
     pd_adjust(doc, kind, bc.va, bc.vb, x, y, w, h);
     show(doc->x0, doc->y0, doc->x1, doc->y1);
     printf("PAINT adjust %s %d %d\n", words[kind], bc.va, bc.vb);
+    fflush(stdout);
+    commit(GUI_T(names[kind]), before);
+}
+
+/* An effect (Effects' menu; paintdoc.c): the current layer's pixels made from their neighbours, in the selection
+   or all of it; a step to undo, as an adjustment is. Blur and Pixelate ask how much. */
+static void effect(int kind)
+{
+    static const char *const names[] = { "", GUI_N("Blur"), GUI_N("Sharpen"), GUI_N("Emboss"), GUI_N("Find Edges"),
+                                         GUI_N("Pixelate") };
+    static const char *const words[] = { "", "blur", "sharpen", "emboss", "edges", "pixelate" };
+    int x = sel.w ? sel.x : 0, y = sel.w ? sel.y : 0, w = sel.w ? sel.w : doc->w, h = sel.w ? sel.h : doc->h;
+    int amount = 0;
+    unsigned *before;
+    if (kind == PD_BLUR || kind == PD_PIXELATE) {
+        char t[16];
+        snprintf(t, sizeof t, "%d", kind == PD_BLUR ? 2 : 8);
+        if (!gui_ask(win, GUI_T(names[kind]), kind == PD_BLUR ? GUI_T("How far, in pixels (1 to 12):")
+                                                              : GUI_T("A block's side, in pixels (2 to 64):"), t, sizeof t))
+            return;
+        amount = atoi(t);
+        if (amount < (kind == PD_BLUR ? 1 : 2))
+            return;
+    }
+    if (!(before = pd_before(doc)) || (pd_clean(doc), pd_effect(doc, kind, amount, x, y, w, h)) != 0) {
+        free(before);
+        gui_message(win, GUI_T("Paint"), GUI_T("There isn't the memory for that."), GUI_MB_OK);
+        return;
+    }
+    show(doc->x0, doc->y0, doc->x1, doc->y1);
+    printf("PAINT effect %s %d\n", words[kind], amount);
     fflush(stdout);
     commit(GUI_T(names[kind]), before);
 }
@@ -910,6 +942,10 @@ static void command(struct gui_window *w, int id)
         edit_command(id);
         return;
     }
+    if (id > C_EFFECT && id <= C_EFFECT + PD_PIXELATE) {
+        effect(id - C_EFFECT);
+        return;
+    }
     if (id > C_ADJUST && id <= C_ADJUST + PD_BRIGHT) {
         adjust(id - C_ADJUST);
         return;
@@ -1061,6 +1097,12 @@ int main(int argc, char **argv)
     gui_menu_item(m, GUI_T("Black and &White"), C_ADJUST + PD_GREY, NULL);
     gui_menu_item(m, GUI_T("&Sepia"), C_ADJUST + PD_SEPIA, NULL);
     gui_menu_item(m, GUI_T("&Brightness and Contrast..."), C_ADJUST + PD_BRIGHT, NULL);
+    m = gui_menu(bar, GUI_T("Effe&cts"));
+    gui_menu_item(m, GUI_T("&Blur..."), C_EFFECT + PD_BLUR, NULL);
+    gui_menu_item(m, GUI_T("&Sharpen"), C_EFFECT + PD_SHARPEN, NULL);
+    gui_menu_item(m, GUI_T("&Emboss"), C_EFFECT + PD_EMBOSS, NULL);
+    gui_menu_item(m, GUI_T("&Find Edges"), C_EFFECT + PD_EDGES, NULL);
+    gui_menu_item(m, GUI_T("&Pixelate..."), C_EFFECT + PD_PIXELATE, NULL);
     layers_menu = m = gui_menu(bar, GUI_T("&Layers"));
     gui_menu_item(m, GUI_T("&New Layer"), C_LADD, GUI_T("Ctrl+Shift+N"));
     gui_menu_item(m, GUI_T("&Duplicate"), C_LCOPY, NULL);
