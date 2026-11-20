@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Archives for tests/host/arc_test.c (apps/shared/arc.c), made here with Python's own zipfile, tarfile and gzip,
+"""Archives for tests/host/arc_test.c (apps/shared/arc.c), made here with Python's own zipfile, tarfile, gzip and
+lzma, those in tests/host/arcfix that other tools made, and LZH, ARJ and 7z archives written by arcfix/pack.py,
 and a list of what each must be read as.
 
     arc_cases.py DIR      writes the archives and DIR/MANIFEST; prints DIR
@@ -383,9 +384,16 @@ def fixture(fname, special={}):
 
 
 for fname in sorted(made):
-    kind = "LZH" if fname.endswith(".LZH") else "ARJ"
+    kind = "LZH" if fname.endswith(".LZH") else "7Z" if fname.endswith(".7Z") else "ARJ"
     special = {}
-    if fname == "LOCKED.ARJ":
+    if fname == "S5.7Z":                                # (its header has a password: no list to be had)
+        write(fname, open(os.path.join(fix, fname), "rb").read())
+        manifest(fname, "!", [])
+        continue
+    if fname in ("S4.7Z", "S6.7Z"):                     # files with a password; PPMd: listed, not unpacked
+        why = -6 if fname == "S4.7Z" else -5
+        special = {n: (FX[n], why, str(why)) for n, isdir in made[fname] if not isdir}
+    elif fname == "LOCKED.ARJ":
         special = {"READ.ME": (FX["READ.ME"], -6, "-6")}
     elif fname == "VOL.ARJ":                            # (a file that goes on in the next volume: not unpacked)
         cutat = os.path.getsize(os.path.join(fix, "VOL.ARJ"))
@@ -595,6 +603,63 @@ awrong = [
 write("wrong.arj", pack.arj(awrong, (ZD, ZT)))
 manifest("wrong.arj", "ARJ", [(e[0], e[3], -5 if e[1] == 9 else 0, "0" if e[0].startswith("GOOD") else "-5" if e[1] == 9 else "x")
                               for e in awrong], stamp=ZSTAMP)
+
+# ---- 7z. 7-Zip's own archives are among those above (S1 to S6.7Z); here, archives whose format is written by
+# arcfix/pack.py around streams that liblzma packs (another packer than the SDK's, whose reader ours is).
+exe = bytearray(lrnd.getrandbits(8) for _ in range(20000))
+for k in range(0, len(exe) - 5, 7):                     # (calls, as a program has them: the x86 filter's work)
+    exe[k] = 0xE8
+    exe[k + 4] = 0 if k % 3 else 0xFF
+s_files = [("A.TXT", text(13000)), ("SUB/B.EXE", bytes(exe)), ("SUB/C.BIN", bytes(range(256)) * 20)]
+s_second = [("SECOND/D.TXT", text(1000))]
+s_others = [("SUB", None), ("EMPTYDIR", None), ("NOTHING.DAT", b"")]
+s_all = [(n, d, 0, "0") for n, d in s_others + s_files + s_second]
+for how in ("copy", "lzma2", "lzma2big", "lzma", "bcj", "delta"):
+    write("sz-%s.7z" % how, pack.sevenz([(how, s_files), ("lzma2", s_second)], s_others, UNIX))
+    manifest("sz-%s.7z" % how, "7Z", s_all)
+write("sz-empty.7z", pack.sevenz([], [], UNIX))
+manifest("sz-empty.7z", "?", [])                        # (no files at all: opened or not, no harm)
+wide = [("café/naïve 日本.txt", b"names are UTF-16 in a 7z: UTF-8 in our list"),
+        ("far \U0001F600 plane.txt", b"a character of two UTF-16 units")]
+write("sz-names.7z", pack.sevenz([("lzma2", wide)], [], UNIX))
+manifest("sz-names.7z", "7Z", [(n.encode("utf-8").decode("latin-1"), d, 0, "0") for n, d in wide])
+write("sz-evil.7z", pack.sevenz([("lzma2", evil)], [], UNIX))
+manifest("sz-evil.7z", "7Z", [("ok.txt", b"2", 0, "0"), ("abs/path.txt", b"3", 0, "0"), ("x/y.txt", b"4", 0, "0"),
+                              ("dot/file.txt", b"6", 0, "0"), ("ctl_name.txt", b"8", 0, "0")])
+write("sz-many.7z", pack.sevenz([("lzma2big", many[:1500]), ("lzma2", many[1500:])], [], UNIX))
+manifest("sz-many.7z", "7Z", ok(many))
+
+
+def spoil_pack(k, packed, sums):
+    if k == 0:
+        packed = bytearray(packed)
+        packed[len(packed) // 2] ^= 0xFF
+        packed[len(packed) // 2 + 1] ^= 0xFF
+    return bytes(packed)
+
+
+def spoil_sum(k, packed, sums):
+    if k == 0:
+        sums[1] ^= 1
+    return packed
+
+
+write("sz-badpack.7z", pack.sevenz([("lzma2", s_files), ("lzma2", s_second)], s_others, UNIX, spoil_pack))
+manifest("sz-badpack.7z", "7Z", [(n, d, 0, "x" if (n, d) in s_files else "0") for n, d, _, _ in s_all])
+write("sz-badsum.7z", pack.sevenz([("lzma2", s_files), ("lzma2", s_second)], s_others, UNIX, spoil_sum))
+manifest("sz-badsum.7z", "7Z", changed(s_all, "SUB/B.EXE", "-7"))      # (the block's other files are good)
+write("sz-method.7z", pack.sevenz([("unknown", s_files), ("lzma2", s_second)], s_others, UNIX))
+manifest("sz-method.7z", "7Z", [(n, d, -5 if (n, d) in s_files else 0, "-5" if (n, d) in s_files else "0")
+                                for n, d, _, _ in s_all])
+sz = pack.sevenz([("lzma2", s_files), ("lzma2", s_second)], s_others, UNIX)
+write("sz-cut.7z", sz[:len(sz) // 2])
+manifest("sz-cut.7z", "!", [])
+zb = bytearray(sz)
+zb[-20] ^= 1                                            # (its header's sum is of other bytes)
+write("sz-badhead.7z", bytes(zb))
+manifest("sz-badhead.7z", "!", [])
+write("sz-sfx.7z", b"MZ" + bytes(lrnd.getrandbits(8) for _ in range(700)) + sz)    # (a program before it: not looked for)
+manifest("sz-sfx.7z", "!", [])
 
 # ---- no archives
 write("random.bin", bytes(rnd.getrandbits(8) for _ in range(9000)))

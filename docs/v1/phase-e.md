@@ -312,8 +312,35 @@ are as they were).
       and arj unpack every good one of those to the same bytes. The changed-archives loop takes all of the
       list now (2640 a run); 19,200 changed LZH and ARJ archives went through it once under the address and
       undefined-behaviour sanitizers, nothing found. `files-lzh` goes into one of each in the browser.
+  - **7z read** (2026-11-20; `apps/shared/arc7z.c` over the LZMA SDK's reader, `third_party/lzma`, unchanged:
+    ten of its C files, some 50 KB of code in FILES.EXE). The SDK reads the archive's header (itself packed, as a
+    rule) and unpacks LZMA, LZMA2, the filters for programs (x86 and the others, BCJ2 among them), delta and
+    "not packed"; ours is the little between it and `arc.c`: the file read through the toolkit's calls, the
+    names from UTF-16 to UTF-8, the times, the CRC by `arc.c`'s own (the SDK's has tables for CPUs we have not),
+    and for each file whether it can be unpacked at all, said in the list before it is tried: a password (the
+    AES coder: "encrypted"), a coder the SDK has not as built here (PPMd, BZip2, Deflate: "packed in a way not
+    unpacked here"). An archive whose header has a password is refused as encrypted (told from its packed
+    header's coders).
+    - **A solid block is unpacked whole into memory,** as the SDK does it, and kept while its files are taken
+      one after another (a walk of the archive unpacks each block once); given back when the walk ends, and
+      after a single file's bytes if it is over a megabyte. A block larger than the memory there is: "not
+      enough memory" for its files, the rest of the archive as it is. A block that did not unpack is not
+      tried again for each of its files (a thousand files of one damaged block would each take the block's
+      time); a file whose own CRC is wrong leaves the block's other files good.
+    - **Tests** (`arc_test`, 94 archives now): 7-Zip's own archives (`arcfix/make.py`: as it packs by itself,
+      solid; LZMA with a block a file; BCJ2; a password on the files; on the header; PPMd) held to the bytes
+      packed, and archives whose format `arcfix/pack.py` writes around streams packed by liblzma (Python's
+      `lzma`: another packer than the SDK's): each coder and filter, two blocks, files of no bytes and folders,
+      names beyond ASCII and beyond UTF-16's first plane, names that would leave their folder, 3000 files,
+      and damage: packed bytes changed (that block's files fail, the next block's are good), one file's CRC
+      wrong, a coder unknown, the archive cut short, its header's CRC wrong, a program before it. 7-Zip tests
+      every good one of them "Ok". 13,800 changed 7z archives went through the reader once under the
+      sanitizers: nothing. `files-lzh` goes into one in the browser and copies a file out.
+    - **Not yet:** a block unpacked through a window of its dictionary's size and no more (the SDK's parts
+      allow it for all but BCJ2: then a block of any size would need only that); PPMd (the SDK has it; it
+      wants the memory the archive names); 7z archives that begin after a program (self-extracting).
   - **Not yet:** a thing of one archive pasted straight into another (it is unpacked to a folder first),
-    7z, the old ZIPs' implode and shrink, big archives
+    the old ZIPs' implode and shrink, big archives
     listed as they load (a TAR in a GZ is unpacked from end to end for its list, with the window waiting),
     names by long file names where DOS has them, the packer's speed on a 486 (unmeasured: its quick level is
     there for it).
@@ -549,6 +576,6 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
 
 ## What is next
 
-More of Paint (layers, selections, the image's size, adjustments); the rest of Files' plan (views, archives,
-thumbnails); Images' filmstrip; what is left of the Terminal's and Notepad's plans. Each by its plan in
-`docs/v1/apps/`.
+More of Paint (layers, selections, the image's size, adjustments); what is left of Files', the Terminal's and
+Notepad's plans. Each by its plan in `docs/v1/apps/`. (Done since this was written: Files' views, thumbnails
+and archives, ZIP to 7z; Images' filmstrip.)

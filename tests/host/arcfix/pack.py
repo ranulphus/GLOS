@@ -8,8 +8,11 @@ lengths of 19 codes: 3 bits each, 7 and more as 1 bits to a 0; after the third, 
 table C (510 lengths, written in T's codes: 0 one zero, 1 and 4 bits 3 to 18 zeros, 2 and 9 bits 20 to 531, n+2
 the length n), the table P (as T, without the skip), then the codes: C's, and after one of 256 and more (a match
 of code - 253 bytes) one of P's: 0, or the number of bits of the distance - 1, whose bits under the top one
-follow. A table of one code is written as no lengths and the code: its codes take no bits."""
-import heapq, struct, zlib
+follow. A table of one code is written as no lengths and the code: its codes take no bits.
+
+And 7z archives (sevenz, at the end): the archive's own format written here around streams that Python's lzma
+(liblzma: not the LZMA SDK's packer) makes."""
+import heapq, lzma, struct, zlib
 
 NC, NT = 510, 19
 LH5, LH6, LH7, ARJ = (14, 4, 1 << 13), (16, 5, 1 << 15), (17, 5, 1 << 16), (17, 5, 26624)     # P's codes, bits, window
@@ -285,3 +288,92 @@ def arj(entries, stamp, name="TEST.ARJ"):
         out += header(fname, method, 0, len(packed), len(data), zlib.crc32(data) & 0xFFFFFFFF, e[4] if len(e) > 4 else 0)
         out += packed
     return bytes(out) + b"\x60\xEA\0\0"
+
+
+# ---- 7z: the format around streams packed by liblzma
+
+def number(v):
+    """7z's numbers: the first byte's leading 1 bits say how many bytes follow"""
+    for extra in range(8):
+        if v < 1 << (7 * (extra + 1)):
+            return bytes([(0xFF << (8 - extra)) & 0xFF | v >> (8 * extra)]) + (v & ((1 << (8 * extra)) - 1)).to_bytes(extra, "little")
+    return b"\xFF" + v.to_bytes(8, "little")
+
+
+def bits_of(flags):
+    out = bytearray((len(flags) + 7) // 8)
+    for i, f in enumerate(flags):
+        if f:
+            out[i >> 3] |= 0x80 >> (i & 7)
+    return bytes(out)
+
+
+LZMA2_64K = {"id": lzma.FILTER_LZMA2, "dict_size": 1 << 16}
+CODERS = {                              # how: (liblzma's filters or None, the 7z coders: (id, properties))
+    "copy": (None, [(b"\x00", b"")]),
+    "lzma2": ([LZMA2_64K], [(b"\x21", b"\x08")]),
+    "lzma2big": ([{"id": lzma.FILTER_LZMA2, "dict_size": 1 << 20}], [(b"\x21", b"\x10")]),
+    "lzma": ([{"id": lzma.FILTER_LZMA1, "dict_size": 1 << 16, "lc": 3, "lp": 0, "pb": 2}],
+             [(b"\x03\x01\x01", bytes([3 + 0 * 9 + 2 * 45]) + struct.pack("<I", 1 << 16))]),
+    "bcj": ([{"id": lzma.FILTER_X86}, LZMA2_64K], [(b"\x21", b"\x08"), (b"\x03\x03\x01\x03", b"")]),
+    "delta": ([{"id": lzma.FILTER_DELTA, "dist": 4}, LZMA2_64K], [(b"\x21", b"\x08"), (b"\x03", b"\x03")]),
+    "unknown": (None, [(b"\x04\x01\x08", b"")]),         # (Deflate: no coder of ours)
+}
+
+
+def sevenz(folders, others=(), when=0, spoil=None):
+    """folders: (how, [(name, bytes)]): a solid block of files each. others: (name, None for a folder or b"" for a
+    file of no bytes), listed before the blocks' files. when: every one's time (Unix's). spoil: a function given
+    (the block's number, its packed bytes, the sums of its files), which may change the first and the last."""
+    packs, sizes, sums, files = [], [], [], []
+    for k, (how, members) in enumerate(folders):
+        plain = b"".join(d for _, d in members)
+        filters, coders = CODERS[how]
+        packed = plain if filters is None else lzma.compress(plain, format=lzma.FORMAT_RAW, filters=filters)
+        crcs = [zlib.crc32(d) & 0xFFFFFFFF for _, d in members]
+        if spoil:
+            packed = spoil(k, packed, crcs)
+        packs.append(packed)
+        sizes.append(len(plain))
+        sums.append(crcs)
+        files += [n for n, _ in members]
+    names = [n for n, _ in others] + files
+    empty = [True] * len(others) + [False] * len(files)
+
+    h = bytearray(b"\x01")                                              # the header
+    if folders:
+        h += b"\x04"                                                    # the streams
+        h += b"\x06" + number(0) + number(len(packs)) + b"\x09" + b"".join(number(len(p)) for p in packs) + b"\x00"
+        h += b"\x07\x0B" + number(len(folders)) + b"\x00"
+        for how, _ in folders:
+            coders = CODERS[how][1]
+            h += number(len(coders))
+            for cid, props in coders:
+                h += bytes([len(cid) | (0x20 if props else 0)]) + cid
+                if props:
+                    h += number(len(props)) + props
+            if len(coders) == 2:
+                h += number(1) + number(0)                              # the filter's input is the unpacker's output
+        h += b"\x0C"
+        for (how, _), size in zip(folders, sizes):
+            h += number(size) * len(CODERS[how][1])
+        h += b"\x00"
+        h += b"\x08\x0D" + b"".join(number(len(m)) for _, m in folders)
+        h += b"\x09" + b"".join(number(len(d)) for _, m in folders for _, d in m[:-1])
+        h += b"\x0A\x01" + b"".join(struct.pack("<I", c) for cs in sums for c in cs)
+        h += b"\x00\x00"
+    h += b"\x05" + number(len(names))
+    if others:
+        v = bits_of(empty)
+        h += b"\x0E" + number(len(v)) + v
+        v = bits_of([d is not None for _, d in others])                 # of those: a file of no bytes (else a folder)
+        h += b"\x0F" + number(len(v)) + v
+    v = b"\x00" + b"".join(n.encode("utf-16-le") + b"\0\0" for n in names)
+    h += b"\x11" + number(len(v)) + v
+    if when:
+        v = b"\x01\x00" + struct.pack("<Q", (when + 11644473600) * 10000000) * len(names)
+        h += b"\x14" + number(len(v)) + v
+    h += b"\x00\x00"
+    body = b"".join(packs)
+    start = struct.pack("<QQI", len(body), len(h), zlib.crc32(bytes(h)) & 0xFFFFFFFF)
+    return b"7z\xBC\xAF\x27\x1C\x00\x04" + struct.pack("<I", zlib.crc32(start) & 0xFFFFFFFF) + start + body + bytes(h)

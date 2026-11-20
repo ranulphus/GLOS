@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""The LZH and ARJ archives beside this, made with the tools people made such archives with: jlha (LHA's methods
-and its three levels of header) and arj 3.10, in a container thrown away after (Ubuntu 24.04's packages
-jlha-utils, lhasa and arj). Each is then tested by a second program (lhasa's lha; arj itself) and listed by a
-third (7-Zip, on this PC): LIST is 7-Zip's account of what is in each, which tests/host/arc_cases.py holds our
-reader to. PACK.LZH and PACK.ARJ are put on the GUI scripts' drive too (tests/gui/drives/C/LZH: files-lzh.txt).
+"""The LZH, ARJ and 7z archives beside this, made with the tools people made such archives with: jlha (LHA's
+methods and its three levels of header) and arj 3.10, in a container thrown away after (Ubuntu 24.04's packages
+jlha-utils, lhasa and arj), and 7-Zip (23.01, on this PC). Each LZH and ARJ is then tested by a second program
+(lhasa's lha; arj itself) and listed by a third (7-Zip): LIST is 7-Zip's account of what is in each, which tests/host/arc_cases.py holds our
+reader to. PACK.LZH, PACK.ARJ and PACK.7Z are put on the GUI scripts' drive too (tests/gui/drives/C/LZH: files-lzh.txt).
 Run once; what it made is in the tree.
 
-    tests/host/arcfix/make.py WORK      (WORK: an empty folder for the files to pack; needs docker and 7z)
+    tests/host/arcfix/make.py WORK [old] [7z]
+
+WORK: an empty folder for the files to pack. old: the LZH and ARJ archives (needs docker); 7z: the 7z ones; both
+if neither is said. (arj writes the time an archive was made into it: its archives are other bytes each time.)
+Needs 7z.
 """
 import calendar, os, shutil, subprocess, sys, zlib
 
@@ -15,6 +19,7 @@ sys.path.insert(0, here)
 import inputs
 
 work = os.path.abspath(sys.argv[1])
+kinds = sys.argv[2:] or ["old", "7z"]
 src, out = os.path.join(work, "in"), os.path.join(work, "out")
 for d in (src, out):
     shutil.rmtree(d, ignore_errors=True)
@@ -61,16 +66,42 @@ for f in /w/out/M?.ARJ /w/out/PACK.ARJ; do arj t $f > /dev/null; done
 ls -l /w/out
 chown -R %(uid)d:%(gid)d /w
 """ % {"all": ALL, "uid": os.getuid(), "gid": os.getgid()}
-open(os.path.join(work, "make.sh"), "w").write(script)
-subprocess.run(["docker", "run", "--rm", "-v", work + ":/w", "ubuntu:24.04", "bash", "/w/make.sh"], check=True)
+if "old" in kinds:
+    open(os.path.join(work, "make.sh"), "w").write(script)
+    subprocess.run(["docker", "run", "--rm", "-v", work + ":/w", "ubuntu:24.04", "bash", "/w/make.sh"], check=True)
 
-lines = []
+# 7z: 7-Zip's own work (this PC's 7z). S1: as it packs by itself (LZMA2, one solid block, the header packed too);
+# S2: LZMA, a block a file; S3: BCJ2 (a program's bytes through four streams); S4: files with a password; S5: the
+# header with one too; S6: PPMd (not unpacked by us).
+def sevenz(name, files, *how, cwd=src):
+    subprocess.run(["7z", "a", "-bd", "-y"] + list(how) + [os.path.join(out, name)] + files, check=True, cwd=cwd,
+                   stdout=subprocess.DEVNULL)
+
+
+if "7z" in kinds:
+    sevenz("S1.7Z", ALL.split())
+    sevenz("S2.7Z", ["READ.ME", "TEXT.TXT", "EMPTY", "DOCS"], "-ms=off", "-m0=LZMA")
+    sevenz("S3.7Z", ["SKEW.BIN", "READ.ME"], "-m0=BCJ2", "-m1=LZMA2", "-m2=LZMA", "-m3=LZMA", "-mb0:1", "-mb0s1:2",
+           "-mb0s2:3")
+    sevenz("S4.7Z", ["READ.ME", "DOCS"], "-psecret")
+    sevenz("S5.7Z", ["READ.ME"], "-psecret", "-mhe=on")
+    sevenz("S6.7Z", ["TEXT.TXT", "READ.ME"], "-m0=PPMd")
+    sevenz("PACK.7Z", ["READ.ME", "DOCS"])
+
+lists = {}                              # LIST: each archive's lines (those not made this time stay as they are)
+if os.path.exists(os.path.join(here, "LIST")):
+    for ln in open(os.path.join(here, "LIST")).read().split("\n"):
+        if ln.startswith("A\t"):
+            cur = lists.setdefault(ln.split("\t")[1], [])
+        elif ln:
+            cur.append(ln)
 for f in sorted(os.listdir(out)):
+    lines = lists[f] = []
     path = os.path.join(out, f)
-    if f not in ("LOCKED.ARJ", "VOL.ARJ", "VOL.A01"):
+    if f not in ("LOCKED.ARJ", "VOL.ARJ", "VOL.A01", "S4.7Z", "S5.7Z"):
         subprocess.run(["7z", "t", path], check=True, stdout=subprocess.DEVNULL)
-    listing = subprocess.run(["7z", "l", "-slt", path], check=False, stdout=subprocess.PIPE).stdout.decode("latin-1")
-    lines.append("A\t%s" % f)
+    listing = subprocess.run(["7z", "l", "-slt", "-psecret", path], check=False,
+                             stdout=subprocess.PIPE).stdout.decode("latin-1")
     entry = None
     for ln in listing.split("\n"):
         ln = ln.rstrip("\r")
@@ -80,15 +111,17 @@ for f in sorted(os.listdir(out)):
             k, v = ln.split(" = ", 1)
             entry[k] = v
         elif entry is not None and not ln.strip():
-            lines.append("E\t%s\t%s\t%s" % (entry["Path"].replace("\\", "/"), "d" if entry.get("Folder") == "+" else "f",
+            lines.append("E\t%s\t%s\t%s" % (entry["Path"].replace("\\", "/"), "d" if entry.get("Folder") == "+" or entry.get("Attributes", "").startswith("D") else "f",
                                            entry.get("Size", "0")))
             entry = None
     shutil.copy(path, os.path.join(here, f))
+lines = [ln for f in sorted(lists) for ln in ["A\t%s" % f] + lists[f]]
 open(os.path.join(here, "LIST"), "w").write("\n".join(lines) + "\n")
 gui = os.path.join(here, "..", "..", "gui", "drives", "C", "LZH")    # (the two that tests/gui/files-lzh.txt goes into)
 os.makedirs(os.path.join(gui, "OUT"), exist_ok=True)
-for f in ("PACK.LZH", "PACK.ARJ"):
-    shutil.copy(os.path.join(out, f), os.path.join(gui, f))
+for f in ("PACK.LZH", "PACK.ARJ", "PACK.7Z"):
+    if os.path.exists(os.path.join(out, f)):
+        shutil.copy(os.path.join(out, f), os.path.join(gui, f))
 sums = ["%s\t%d\t%08x" % (n, len(d), zlib.crc32(d) & 0xFFFFFFFF) for n, d in inputs.files() if d is not None]
 open(os.path.join(here, "SUMS"), "w").write("\n".join(sums) + "\n")
 print("\n".join(lines))

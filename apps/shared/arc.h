@@ -1,5 +1,6 @@
 /* Archives read as folders (Files; phase E, docs/v1/apps/files.md): what is in one, and its files unpacked.
-   ZIP (stored and deflated), TAR (ustar, GNU's and pax's long names), GZ, and a TAR inside a GZ; the kind is
+   ZIP (stored and deflated), TAR (ustar, GNU's and pax's long names), GZ, and a TAR inside a GZ; LZH (-lh5-,
+   -lh6-, -lh7-) and ARJ (lzh.c); 7z (LZMA, LZMA2 and the SDK's filters: arc7z.c); the kind is
    told by the file's bytes, not its name. ZIPs are written too (below). One code for the app and for the host's
    tests (tests/host/arc_test.c, arcw_test.c).
 
@@ -29,7 +30,7 @@ struct arc;
 struct arc_entry {
     const char *name;                   /* in the archive: "DOCS/READ.ME" */
     unsigned long size;                 /* unpacked; a folder's is 0 */
-    unsigned long packed;
+    unsigned long packed;               /* (the same as size where the archive has none for the file: TAR, 7z) */
     unsigned short date, time;          /* as DOS has them (0: not known) */
     unsigned char dir;                  /* a folder */
     signed char how;                    /* ARC_OK, or why its bytes cannot be had: ARC_E_METHOD, ARC_E_LOCKED */
@@ -38,7 +39,7 @@ struct arc_entry {
 int arc_name_is(const char *name);                      /* by its name's end, a kind read here: 1 */
 struct arc *arc_open(const char *path, int *err);       /* its list read; NULL and *err (may be NULL) */
 void arc_close(struct arc *a);
-const char *arc_kind(const struct arc *a);              /* "ZIP", "TAR", "GZ", "TAR.GZ" */
+const char *arc_kind(const struct arc *a);              /* "ZIP", "TAR", "GZ", "TAR.GZ", "LZH", "ARJ", "7Z" */
 unsigned arc_count(const struct arc *a);
 const struct arc_entry *arc_at(const struct arc *a, unsigned i);        /* in the archive's order */
 int arc_find(const struct arc *a, const char *name);    /* the entry of that name: its number, or -1 */

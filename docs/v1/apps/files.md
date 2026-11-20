@@ -95,7 +95,8 @@ A folder is read whole before anything is shown. No toolbar, no archives, 8.3 na
 ## Libraries
 
 - **ZIP:** miniz (MIT), reading and writing.
-- **7z:** the LZMA SDK's decoder (public domain), read only.
+- **7z:** the LZMA SDK's decoder (public domain), read only (done: `third_party/lzma`, `apps/shared/arc7z.c`;
+  a solid block is unpacked in memory).
 - **TAR and GZ:** TAR GLOS's own; GZ by miniz's inflate.
 - **LZH/LHA and ARJ:** GLOS's own decoders, written from the formats' public descriptions (done:
   `apps/shared/lzh.c`; -lh5-, -lh6-, -lh7- and ARJ's methods 1 to 4).

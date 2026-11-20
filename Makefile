@@ -205,7 +205,9 @@ endef
 # The terminal's ssh (M10): the client for the host too, 32-bit as the rest, its crypto without -Werror.
 APP_HOST_LIBS_term := tests/host/shimshell.c sdk/shell/shell.c sdk/shell/edit.c
 # Archives read and ZIPs written (Files' folders, phase E): the reader and writer, the packer, the loader's unpacker.
-ARC_SRCS := apps/shared/arc.c apps/shared/lzh.c apps/shared/deflate.c loader/inflate.c
+# (7z archives: the LZMA SDK's reader, third_party/lzma, unchanged; arc7z.c is ours between it and arc.c)
+LZMA_SRCS := $(addprefix third_party/lzma/,7zArcIn.c 7zDec.c LzmaDec.c Lzma2Dec.c Bcj2.c Bra.c Bra86.c Delta.c 7zBuf.c 7zStream.c)
+ARC_SRCS := apps/shared/arc.c apps/shared/arc7z.c apps/shared/lzh.c apps/shared/deflate.c loader/inflate.c $(LZMA_SRCS)
 # Pictures read and written: one code in the viewer and the editor (apps/shared/picfile.c).
 APP_HOST_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c
 APP_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c

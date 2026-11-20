@@ -1,8 +1,8 @@
-# LZH and ARJ archives as folders in the browser (apps/files; phase E, docs/v1/apps/files.md; apps/shared/arc.c
-# and lzh.c): an LZH gone into (its folders have entries of their own), a file's properties there, a folder
-# copied out of it by a paste; an ARJ unpacked whole by Extract Here and then gone into. The two archives are
-# LHA's and ARJ's own tools' work (tests/host/arcfix/make.py: PACK.LZH is of -lh5-, PACK.ARJ of its method 1),
-# in C:\LZH.
+# LZH, ARJ and 7z archives as folders in the browser (apps/files; phase E, docs/v1/apps/files.md;
+# apps/shared/arc.c, lzh.c and arc7z.c): an LZH gone into (its folders have entries of their own), a file's
+# properties there, a folder copied out of it by a paste; an ARJ unpacked whole by Extract Here and then gone
+# into; a 7z gone into and a file copied out of it. The three archives are LHA's, ARJ's and 7-Zip's own work
+# (tests/host/arcfix/make.py: PACK.LZH is of -lh5-, PACK.ARJ of its method 1, PACK.7Z of LZMA2), in C:\LZH.
 run FILES.EXE -browse C:\LZH
 wait "C:\LZH - Files"
 key end
@@ -32,6 +32,7 @@ type c:\\lzh\n
 wait "C:\LZH - Files"
 key home
 key down
+key down
 key alt+f e
 said FILES extracted 1 unpacked
 gone "Unpacking"
@@ -46,10 +47,28 @@ key ctrl+l
 type c:\\lzh\\pack.arj\\DOCS\\DEEP\n
 wait "C:\LZH\PACK.ARJ\DOCS\DEEP - Files"
 shot arj-deep "C:\LZH\PACK.ARJ\DOCS\DEEP - Files"
+key ctrl+l
+type c:\\lzh\\pack.7z\n
+wait "C:\LZH\PACK.7Z - Files"
+shot sz "C:\LZH\PACK.7Z - Files"
+key end
+key ctrl+c
+key home
+key enter
+wait "C:\LZH\PACK.7Z\DOCS - Files"
+shot sz-docs "C:\LZH\PACK.7Z\DOCS - Files"
+key ctrl+l
+type c:\\lzh\\out\n
+wait "C:\LZH\OUT - Files"
+key ctrl+v
+said FILES pasted 1 copied
+gone "Copying"
+file C:\LZH\OUT\READ.ME LZH and ARJ archives are read as folders too.\r\n
 key alt+f4
-gone "C:\LZH\PACK.ARJ\DOCS\DEEP - Files"
+gone "C:\LZH\OUT - Files"
 expect FILES archive LZH
 expect FILES pasted 1 copied
 expect FILES extracted 1 unpacked
 expect FILES archive ARJ
+expect FILES archive 7Z
 expect FILES end 

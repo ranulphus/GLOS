@@ -2390,8 +2390,10 @@ static void properties(struct view *v)
         } else if (e) {
             snprintf(t, sizeof t, GUI_T("%lu bytes"), e->size);
             props_row(form, GUI_T("Size:"), t);
-            snprintf(t, sizeof t, GUI_T("%lu bytes"), e->packed);
-            props_row(form, GUI_T("Packed:"), t);
+            if (e->packed != e->size) {         /* (a TAR's file, or one of a 7z's solid block: no size of its own) */
+                snprintf(t, sizeof t, GUI_T("%lu bytes"), e->packed);
+                props_row(form, GUI_T("Packed:"), t);
+            }
             if (e->how != ARC_OK)
                 props_row(form, GUI_T("Note:"), GUI_T(arc_error(e->how)));
         }

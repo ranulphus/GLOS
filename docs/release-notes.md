@@ -4,6 +4,17 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Files: 7z archives (2026-11-20)
+
+- **A 7z archive is gone into like a folder** in Files' browser, as a ZIP is: listed, its files opened, copied
+  out or all unpacked. Archives packed with LZMA or LZMA2 (what 7-Zip makes by itself), with its filters for
+  programs, or not packed at all.
+- **A solid block is unpacked whole into memory** (7-Zip packs many files as one block): its files need that
+  much free memory, and Files says so when there is not enough.
+- **Listed but not unpacked:** files with a password, and files packed with PPMd, BZip2 or Deflate. An archive
+  whose list itself has a password is not opened ("encrypted"); a self-extracting one (an .EXE) is not gone into.
+- The reader is the LZMA SDK's (Igor Pavlov's, public domain): `third_party/lzma`.
+
 ## Files: LZH and ARJ archives (2026-11-20)
 
 - **An LZH (or LHA) or an ARJ archive is gone into like a folder** in Files' browser, as a ZIP is: listed, its
@@ -11,7 +22,6 @@ in its `docs/milestones-*.md`.
   ARJ's 1 to 4 are unpacked, and files that were not packed at all.
 - **Listed but not unpacked:** files packed by LHarc 1 (-lh1-) and LArc (-lz5-), an ARJ's files with a password,
   and a file that goes on in an ARJ's next volume. A self-extracting LZH or ARJ (an .EXE) is not gone into.
-- **Not yet:** 7z.
 
 ## Paint: text and effects (2026-11-20)
 

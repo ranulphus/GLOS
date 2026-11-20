@@ -11,18 +11,20 @@
 #include <unistd.h>
 
 #include "arc.h"
+#include "arc7z.h"
 #include "lzh.h"
 #include "deflate.h"
 #include "../../loader/inflate.h"
 
-enum { K_ZIP, K_TAR, K_GZ, K_TGZ, K_LZH, K_ARJ };
+enum { K_ZIP, K_TAR, K_GZ, K_TGZ, K_LZH, K_ARJ, K_7Z };
 #define BUF 4096u
 #define CD_MAX (8ul << 20)              /* a ZIP's directory at most: some hundred thousand names */
 
 struct ent {
     struct arc_entry e;
     char *name;
-    unsigned long at;                   /* ZIP: its local header; TAR: its bytes (in the file, or in the GZ's stream) */
+    unsigned long at;                   /* ZIP: its local header; TAR: its bytes (in the file, or in the GZ's stream);
+                                           LZH, ARJ: its packed bytes; 7z: its number in the archive */
     unsigned long crc;
     unsigned short method;
 };
@@ -40,6 +42,7 @@ struct arc {
     unsigned n, room;
     struct ent **sorted;                /* by name */
     struct infl *z;                     /* the unpacker's state and window, had when first needed */
+    struct sz *sz;                      /* 7z: the SDK's account of the archive (arc7z.c) */
     unsigned char *win;
     char **dos;                         /* each entry's path on a DOS disc (arc_dos_path), made when first asked */
     unsigned char buf[BUF];
@@ -125,7 +128,7 @@ static int ends_with(const char *name, const char *end)
 int arc_name_is(const char *name)
 {
     return ends_with(name, ".ZIP") || ends_with(name, ".TAR") || ends_with(name, ".GZ") || ends_with(name, ".TGZ")
-        || ends_with(name, ".LZH") || ends_with(name, ".LHA") || ends_with(name, ".ARJ");
+        || ends_with(name, ".LZH") || ends_with(name, ".LHA") || ends_with(name, ".ARJ") || ends_with(name, ".7Z");
 }
 
 /* An entry's name as it is kept (malloc'd): '\' is '/', no drive, no '/' before, after or doubled, no "."
@@ -1263,6 +1266,42 @@ static int lzh_extract(struct arc *a, const struct ent *e, int (*data)(void *ctx
     return g.crc == e->crc ? ARC_OK : ARC_E_CRC;
 }
 
+/* ---- 7z: arc7z.c reads it (the LZMA SDK's reader); here, its files as entries. A solid block is unpacked whole
+   into memory and kept while its files are taken one after another: given back when a walk ends, and after one
+   file's bytes if it is a big one (SZ_KEEP). */
+#define SZ_KEEP (1ul << 20)
+
+static int sz_entry(void *ctx, unsigned i, const char *name, unsigned n, int dir, unsigned long size,
+                    unsigned long when, int how)
+{
+    struct arc *a = ctx;
+    struct ent *e;
+    int isdir = dir;
+    char *clean = clean_name(name, n, &isdir);
+    if (!clean)
+        return ARC_OK;                          /* (a name that would leave the folder: not listed) */
+    if (!(e = add(a, clean))) {
+        free(clean);
+        return ARC_E_MEMORY;
+    }
+    e->at = i;
+    e->e.dir = (unsigned char)(dir || isdir);
+    if (when)
+        dos_stamp(when, &e->e.date, &e->e.time);
+    if (!e->e.dir) {
+        e->e.size = e->e.packed = size;
+        e->e.how = (signed char)how;
+    }
+    return ARC_OK;
+}
+
+static int sz_take(struct arc *a, const struct ent *e, int (*data)(void *ctx, const void *p, unsigned n), void *ctx)
+{
+    if (e->e.how)
+        return e->e.how;
+    return sz_extract(a->sz, a->f, (unsigned)e->at, data, ctx);
+}
+
 struct arc *arc_open(const char *path, int *err)
 {
     struct arc *a = calloc(1, sizeof *a);
@@ -1287,6 +1326,9 @@ struct arc *arc_open(const char *path, int *err)
     n = (unsigned)fread(h, 1, sizeof h, a->f);
     if (n >= 2 && h[0] == 0x1F && h[1] == 0x8B) {
         r = gz_open(a, path);
+    } else if (n >= 6 && !memcmp(h, "7z\xBC\xAF\x27\x1C", 6)) {
+        a->kind = K_7Z;
+        r = sz_open(a->f, &a->sz, sz_entry, a);
     } else if (n >= 2 && h[0] == 0x60 && h[1] == 0xEA) {
         a->kind = K_ARJ;
         r = arj_open(a);
@@ -1340,12 +1382,13 @@ void arc_close(struct arc *a)
     free(a->sorted);
     free(a->z);
     free(a->win);
+    sz_close(a->sz);
     free(a);
 }
 
 const char *arc_kind(const struct arc *a)
 {
-    static const char *const names[] = { "ZIP", "TAR", "GZ", "TAR.GZ", "LZH", "ARJ" };
+    static const char *const names[] = { "ZIP", "TAR", "GZ", "TAR.GZ", "LZH", "ARJ", "7Z" };
     return names[a->kind];
 }
 
@@ -1424,7 +1467,7 @@ static int walk(struct arc *a, const struct arc_sink *s, void *ctx)
         const struct ent *e = &a->ents[i];
         r = s->begin ? s->begin(ctx, i, &e->e) : 0;
         if (r < 0)
-            return ARC_E_STOP;
+            break;
         if (!r)
             continue;
         if (e->e.dir)
@@ -1433,13 +1476,17 @@ static int walk(struct arc *a, const struct arc_sink *s, void *ctx)
             r = zip_extract(a, e, s->data, ctx);
         else if (a->kind == K_LZH || a->kind == K_ARJ)
             r = lzh_extract(a, e, s->data, ctx);
+        else if (a->kind == K_7Z)
+            r = sz_take(a, e, s->data, ctx);
         else
             r = gz_extract(a, e, s->data, ctx);
         s->end(ctx, i, r);
         if (r == ARC_E_STOP)
-            return r;
+            break;
     }
-    return ARC_OK;
+    if (a->sz)
+        sz_drop(a->sz);
+    return i < a->n ? ARC_E_STOP : ARC_OK;
 }
 
 int arc_walk(struct arc *a, const struct arc_sink *s, void *ctx)
@@ -1503,6 +1550,12 @@ static int extract(struct arc *a, unsigned i, int (*data)(void *ctx, const void 
         return zip_extract(a, e, data, ctx);
     if (a->kind == K_LZH || a->kind == K_ARJ)
         return lzh_extract(a, e, data, ctx);
+    if (a->kind == K_7Z) {
+        int r = sz_take(a, e, data, ctx);
+        if (sz_kept(a->sz) > SZ_KEEP)
+            sz_drop(a->sz);
+        return r;
+    }
     if (a->kind == K_GZ)
         return gz_extract(a, e, data, ctx);
     if (a->kind == K_TAR) {             /* its bytes are where the list says */
