@@ -84,7 +84,7 @@ OWENV  := env WATCOM=$(WATCOM) INCLUDE=$(WATCOM)/h PATH=$(OWBIN):$(PATH)
 WCC16  := $(OWENV) $(OWBIN)/wcc
 WLINK  := $(OWENV) $(OWBIN)/wlink
 
-.PHONY: census rbil floppy loopa-floppy loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
+.PHONY: census rbil fat-test fat-test-run floppy loopa-floppy loopa-joy loopa-int2f loopa-cache loopa-mem-page loopa-umaprobe loopa-umb sshc-test apps gui-goldens gui-goldens-run loopa-gui loopa-native loopa-config loopa-console loopa-control loopa-m9 loopa-time loopa-netapp loopa-https loopa-sshc loopa-pkg loopa-vnc loopa-m10 loopa-apps loopa-display loopa-desk loopa-win loopa-gpu loopa-audio loopa-glwin loopa-sdlwin loopa-games loopa-m8 dosgl-inputs games-inputs fonts all dos-tests kernel host-test ssh-test loopa loopa-m1 loopa-m2 loopa-hostile loopa-sched loopa-mem loopa-shell loopa-net loopa-ssh loopa-m3 loopa-dpmi loopa-m4a loopa-djtst loopa-dpmitools loopa-m4b loopa-hdpmireg loopa-ecm loopa-m4c-games loopa-m4c loopa-dpmi16 loopa-tpx loopa-m4d loopa-sess gate loopa-gdb djtst glos-cache m4c-inputs m4d-inputs check-deps clean help survey-tools
 all: build/ow/GLOS.EXE build/kernel/GLOSK.BIN build/glos/COMMAND.COM
 
 help:
@@ -118,6 +118,14 @@ HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:ke
               vdma_test:kernel/vm/vdma.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
+# N1a's FAT reader against mkfs.fat's, mtools' and fat_format's volumes (docs/v1/native-dos.md): fat-test alone.
+fat-test:
+	$(Q)$(DEV) $(MAKE) -s fat-test-run
+fat-test-run:
+	@mkdir -p build/host
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -Iinclude -o build/host/fat_test tests/host/fat_test.c kernel/fs/fat.c \
+	  kernel/disk/mbr.c kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S $(CP_SRCS) \
+	  && tests/host/fat_test.sh build/host/fat_test build/host/fat
 host-test-run: build/host/libpdfbr32.a
 	@mkdir -p build/host
 	@set -e; for t in $(HOST_TESTS); do n=$${t%%:*}; src=$${t#*:}; \
@@ -224,6 +232,7 @@ host-test-run: build/host/libpdfbr32.a
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/disk_test tests/host/disk_test.c kernel/disk/mbr.c \
 	  kernel/disk/fatfmt.c kernel/disk/mbrboot.S kernel/disk/fdboot.S \
 	  && tests/host/disk_test.sh build/host/disk_test build/host/disk
+	@$(MAKE) -s fat-test-run
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Iinclude -o build/host/shell_test tests/host/shell_test.c sdk/shell/shell.c \
 	  && tests/host/shell_test.sh build/host/shell_test build/host/shell
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/edit_test tests/host/edit_test.c sdk/shell/edit.c \

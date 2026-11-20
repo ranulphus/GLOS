@@ -184,6 +184,24 @@ right error is part of the answer); **internal** after the core.
   is never used under a DOS.
 - **Tests:** host tests against `mtools` and `fsck.fat` (as S0's were), images made by Windows 98 and MS-DOS 7.1
   in 86Box; power cut in Loop A in the middle of writes, then `fsck.fat` and ScanDisk.
+- **In steps** (beside phase F, the owner's choice; none changes what GLOS does until N1d):
+  - **N1a, reading:** `kernel/fs/fat.c`, plain C over a sector callback as `kernel/disk` is: a volume mounted
+    from its boot sector (FAT12, FAT16, FAT32), cluster chains, folders with their long names (UTF-8, the short
+    names in the code page), paths looked up by either name without regard to case, files read and sought, free
+    space. Host test: trees of files with long and short names, deep folders, empty and fragmented files, copied
+    by mtools into volumes mkfs.fat and GLOS's own `fat_format` made, then read back through the library and
+    compared byte for byte. **Done 2026-11-20** (`kernel/fs/fat.c`, `make fat-test`, in `host-test` too): eight
+    volumes pass, FAT12/16/32 from mkfs.fat (clusters of 512 bytes to 32 KB) and from `fat_format`, 154-334 files
+    each, the free space and the label as mtools has them; built with the kernel's flags (5.8 KB of code, not yet
+    linked into GLOSK.BIN: nothing uses it).
+  - **N1b, writing:** clusters allocated and freed (FSInfo's hints kept), files made, written, cut short,
+    deleted and renamed, folders made and removed, long names with their short names made as Windows makes
+    them (`~1`), attributes and times; the writes in order and the dirty bits. Host test: random sequences of
+    those against a model of the tree, `fsck.fat` after each, mtools reading the result.
+  - **N1c, the cache and many callers:** sectors through the disk cache, a lock per volume, handles that stay
+    right while another caller changes the folder they are in.
+  - **N1d, the kernel's users onto it** behind the file system's interface, the DOS server staying the back end
+    while GLOS starts from a DOS (hosted mode: never two writers); used only by native GLOS, from N3.
 
 ## N2: the DOS personality
 
