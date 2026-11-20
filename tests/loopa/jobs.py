@@ -4890,6 +4890,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         "--file", "build/apps/RECORDER.EXE=/TEST/RECORDER.EXE", "--file", "build/apps/PLAYER.EXE=/TEST/PLAYER.EXE",
         "--file", os.path.join(snd, "PTONE.WAV") + "=/TEST/PTONE.WAV",
         "--file", os.path.join(snd, "PSONG.MOD") + "=/TEST/PSONG.MOD",
+        "--file", "tests/host/sndfix/PMP3.MP3=/TEST/PMP3.MP3", "--file", "tests/host/sndfix/POGG.OGG=/TEST/POGG.OGG",
         "--file", "sdk/gui/fonts/SMOOTH.DAT=/TEST/SMOOTH.DAT", "--file", "sdk/gui/fonts/FONTS.DAT=/TEST/FONTS.DAT",
         "--file", "sdk/gui/fonts/ICONS.DAT=/TEST/ICONS.DAT",
         "--cmd", "SERSAY HX-START audio", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
@@ -5020,13 +5021,17 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         # The Player (phase F; apps/player), the real one: the WAV and the module of its command line played one
         # after the other through a stream of its own, the next begun by itself; their tones are in 86Box's
         # recording (checked with the others at the end).
-        ply = start("C:\\TEST\\PLAYER.EXE C:\\TEST\\PTONE.WAV C:\\TEST\\PSONG.MOD")
+        # On the Pentium, an MP3 and an Ogg Vorbis file after them (minimp3 and stb_vorbis under packed.c: three
+        # seconds each of a tone of its own); the 486 is not asked to (docs/v1/apps/audio-player.md: a Pentium's).
+        packed = profile == "bf6"
+        ply = start("C:\\TEST\\PLAYER.EXE C:\\TEST\\PTONE.WAV C:\\TEST\\PSONG.MOD"
+                    + (" C:\\TEST\\PMP3.MP3 C:\\TEST\\POGG.OGG" if packed else ""))
         ply.said = bytearray()
         heard = threading.Thread(target=GuiDriver._listen, args=(ply,), daemon=True)
         heard.start()
         checks["player-window"] = bool(g.until(lambda d: g.window("Player", d) is not None, 120))
         t0 = time.time()
-        while time.time() - t0 < 180 and b"PLAYER through" not in ply.said:
+        while time.time() - t0 < 240 and b"PLAYER through" not in ply.said:
             time.sleep(1)
         keys("alt+f4")
         try:
@@ -5037,7 +5042,10 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         o_p = bytes(ply.said).decode("latin-1").replace("\r", "")
         checks["player-said"] = rc_p == 0 and all(l in o_p for l in (
             "PLAYER added PTONE.WAV WAV 0:05", "PLAYER added PSONG.MOD MOD 0:07", "PLAYER playing 1 PTONE.WAV",
-            "PLAYER ended PTONE.WAV", "PLAYER playing 2 PSONG.MOD", "PLAYER ended PSONG.MOD", "PLAYER through", "PLAYER end"))
+            "PLAYER ended PTONE.WAV", "PLAYER playing 2 PSONG.MOD", "PLAYER ended PSONG.MOD", "PLAYER through", "PLAYER end")
+            + (("PLAYER added PMP3.MP3 MP3 0:03", "PLAYER added POGG.OGG OGG 0:03", "PLAYER playing 3 PMP3.MP3",
+                "PLAYER ended PMP3.MP3", "PLAYER playing 4 POGG.OGG", "PLAYER ended POGG.OGG") if packed else ())) \
+            and "PLAYER slow" not in o_p
         if not checks["player-said"]:
             print("    %s player: rc=%d %r" % (tag, rc_p, o_p[-400:]))
         if crystal:                             # the FM synthesiser in a session, at the AdLib's ports and the SB Pro's
@@ -5057,6 +5065,7 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
     checks["recorded"] = os.path.exists(wav) and subprocess.run(
         [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440", "--tone", "1000",
          "--tone", "784", "--tone", "523", "--tone", "1175", "--tone", "259"]       # (the last two: the Player's)
+        + (["--tone", "1568", "--tone", "2093"] if profile == "bf6" else [])      # (... and its MP3's and its Ogg's)
         + (["--tone", "330", "--tone", "659"] if crystal else []),
         capture_output=True).returncode == 0
     checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None

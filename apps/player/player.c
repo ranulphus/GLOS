@@ -95,7 +95,7 @@ static void show_list(int choose)
 static int playable(const char *name)   /* by its name's end (a folder's files; the dialog's filter) */
 {
     const char *dot = strrchr(name, '.');
-    static const char *const ends[] = { ".WAV", ".MOD", NULL };
+    static const char *const ends[] = { ".WAV", ".MOD", ".MP3", ".MP2", ".OGG", NULL };
     int i;
     for (i = 0; dot && ends[i]; i++) {
         const char *a = dot, *b = ends[i];
@@ -233,6 +233,12 @@ static void tick(void *arg)
     char a[16], b[16], t[40];
     (void)arg;
     eng_now(&n);
+    if (n.slow && current >= 0) {               /* stopped by the engine: said, the list not gone on with */
+        say("slow %s", gui_path_name(items[current].path));
+        gui_message(win, GUI_T("Player"), GUI_T("This PC can't unpack this file as fast as it plays. MP3 and Ogg Vorbis "
+                    "files want a Pentium."), GUI_MB_OK);
+        eng_now(&n);
+    }
     if (n.ended && current >= 0) {
         say("ended %s", gui_path_name(items[current].path));
         next(1);
@@ -370,7 +376,7 @@ static void settings_read(void)
 
 /* ---- commands */
 
-static const char *const sounds[] = { "Music and sounds|*.WAV;*.MOD", "All files|*.*", NULL };
+static const char *const sounds[] = { "Music and sounds|*.WAV;*.MOD;*.MP3;*.MP2;*.OGG", "All files|*.*", NULL };
 static const char *const lists[] = { "Playlists|*.M3U", "All files|*.*", NULL };
 
 static void command(struct gui_window *w, int id)

@@ -4,6 +4,11 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The Player: MP3 and Ogg Vorbis (2026-11-20)
+
+- **The Player plays MP3 and Ogg Vorbis files** (and MP2), with their titles and lengths; Files opens them
+  with it. They want a Pentium: on a PC that can't keep up the Player stops and says so.
+
 ## Serial sessions (API 2.10, 2026-11-20)
 
 - **A new program, `serial`** (SERIAL.EXE): `serial COM2 9600` puts the terminal on a COM port, for a router's

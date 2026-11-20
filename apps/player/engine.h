@@ -13,6 +13,7 @@ struct eng_now {
     unsigned long at, frames;           /* the frame heard now; the file's length */
     unsigned rate;
     int ended;                          /* the file played to its end since this was asked last */
+    int slow;                           /* ... or was stopped: the PC can't unpack it as fast as it plays */
     int left, right;                    /* its level now, 0 to 1000 */
 };
 

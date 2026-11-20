@@ -162,7 +162,7 @@ int files_open(const char *path)
         run_app("IMAGES.EXE", path);
         return 0;
     }
-    if (ext_in(path, "WAV MOD M3U")) {          /* what the Player plays (phase F), and its playlists */
+    if (ext_in(path, "WAV MOD MP3 MP2 OGG M3U")) {      /* what the Player plays (phase F), and its playlists */
         run_app("PLAYER.EXE", path);
         return 0;
     }

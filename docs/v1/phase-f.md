@@ -350,3 +350,33 @@ a serial cable (a router's or a switch's console, a modem, another PC).
   7E2 set, the port DOS's again; the saved session with XON and XOFF (an XOFF holds what is typed until the
   XON; neither is text) and its log. The cable link's cases (the ssh suite) run on the driver's first line as
   before. Real hardware is owed: a bench's COM port against the host's.
+
+## The Player: MP3 and Ogg Vorbis (2026-11-20)
+
+The route's next of the Player's kinds (`docs/v1/apps/audio-player.md`): today's packed music, by decoders that
+are others' work, unchanged (`THIRD_PARTY.md`): **minimp3** (CC0: MPEG audio layers I to III) and
+**stb_vorbis** (MIT or public domain).
+
+- **`apps/shared/packed.c`** stands between them and `source.c`: a file is unpacked as it is played, a few
+  frames of it in memory, never the whole. An MP3's old and new tags are stepped over (the old one gives the
+  title), its first frame is looked for in its first 128 KB, its length is the count in its Xing header or, with
+  none, reckoned from its size (frames of one size); a seek goes to the place as far through the file as the
+  time is through the sound, and plays on from the first frame found there. An Ogg Vorbis file's length and
+  seeks are exact; its TITLE comment is the title; more than two channels are mixed down. Each decoder is a
+  file of its own to the compiler (`packedv.c` is stb_vorbis's): their names meet otherwise.
+- **The kind is the file's bytes**, as for the rest: `OggS`, an ID3 tag or a frame's first bytes; what begins
+  as neither and is no module is still tried as an MP3.
+- **A Pentium's work.** They do their sums in floating point. The feeding thread now does a tenth of a
+  second's work at most in a turn (the window's calls never wait longer), and where the stream has run dry at
+  twenty of its looks in a row it stops the file and the Player says that this PC can't unpack it as fast as it
+  plays: said, rather than broken sound. So a 486 is told, and a mono file at a low rate that it can manage
+  plays. The thread's stack is a quarter of a megabyte (the unpackers' tables).
+- **Files** opens MP3, MP2 and OGG files with the Player; the Player's dialog and its folders' listing know
+  them.
+- **Not yet:** the tags' other fields (artist, album); a seek table for files of varying frames; gapless ends.
+- **Tests.** `packed_test` on the host, with six small files made by ffmpeg and kept (`tests/host/sndfix`):
+  what each says of itself (kind, rate, channels, length, title), its sound from end to end (each channel's
+  pitch by its zero crossings), a seek to the middle and back to the start; and 300 damaged copies of each
+  (bytes changed, cut short, a piece overwritten), opened or refused and played to their end, under the
+  sanitizers on the host. Loop A's audio suite, on the Pentium: an MP3 and an Ogg file after the WAV and the
+  module in the Player, their two tones in the recording.

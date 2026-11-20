@@ -1,10 +1,12 @@
 /* A sound file as samples, had as they are wanted (source.h): the Player's files. A WAV is read piece by piece
- * from its file (wave.c's wave_in); a module is read whole (they are small) and played by mod.c. */
+ * from its file (wave.c's wave_in); a module is read whole (they are small) and played by mod.c; an MP3 or an Ogg
+ * Vorbis file is unpacked piece by piece (packed.c). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "mod.h"
+#include "packed.h"
 #include "source.h"
 #include "wave.h"
 
@@ -22,6 +24,7 @@ struct source {
     struct source_info info;
     struct wave_in *wav;
     struct mod *mod;
+    struct packed *packed;              /* an MP3's or an Ogg Vorbis file's unpacker */
     unsigned char *bytes;               /* the module's file */
     unsigned long at;                   /* frames given so far */
 };
@@ -72,6 +75,14 @@ struct source *source_open(const char *path, unsigned rate, int *err)
         }
         strcpy(s->info.kind, "WAV");
         snprintf(s->info.detail, sizeof s->info.detail, "%s", detail);
+    } else if (!memcmp(head, "OggS", 4) || !memcmp(head, "ID3", 3) || (head[0] == 0xFF && (head[1] & 0xE0) == 0xE0)) {
+        /* Ogg, or what an MP3 begins with (its tag, or a frame): unpacked as it is played */
+        s->packed = packed_open(f, head, 12, (unsigned long)size, &s->info, &e);
+        if (!s->packed) {
+            fclose(f);
+            *err = e;
+            goto bad;
+        }
     } else {                                    /* a module, if it is anything: read whole */
         if (size < 1084 || (unsigned long)size > MOD_MAX) {
             fclose(f);
@@ -88,10 +99,22 @@ struct source *source_open(const char *path, unsigned rate, int *err)
             fclose(f);
             goto bad;
         }
-        fclose(f);
         s->mod = mod_open(s->bytes, (unsigned long)size, rate, &e);
+        if (!s->mod && e == MOD_E_KIND) {       /* no module: an MP3 that begins with neither tag nor frame? */
+            free(s->bytes);
+            s->bytes = NULL;
+            s->packed = packed_open(f, head, 12, (unsigned long)size, &s->info, &e);
+            if (!s->packed) {
+                fclose(f);
+                *err = e;
+                goto bad;
+            }
+            *err = SOURCE_OK;
+            return s;
+        }
+        fclose(f);
         if (!s->mod) {
-            *err = e == MOD_E_KIND ? SOURCE_E_KIND : e == MOD_E_MEMORY ? SOURCE_E_MEMORY : SOURCE_E_DAMAGED;
+            *err = e == MOD_E_MEMORY ? SOURCE_E_MEMORY : SOURCE_E_DAMAGED;
             goto bad;
         }
         s->info.rate = rate, s->info.channels = 2;
@@ -115,6 +138,7 @@ void source_close(struct source *s)
         wave_in_close(s->wav);
     if (s->mod)
         mod_free(s->mod);
+    packed_close(s->packed);
     free(s->bytes);
     free(s);
 }
@@ -124,7 +148,8 @@ unsigned long source_tell(const struct source *s) { return s->at; }
 
 unsigned long source_read(struct source *s, short *pcm, unsigned long frames)
 {
-    unsigned long n = s->wav ? wave_in_read(s->wav, pcm, frames) : mod_render(s->mod, pcm, frames);
+    unsigned long n = s->wav ? wave_in_read(s->wav, pcm, frames) : s->packed ? packed_read(s->packed, pcm, frames)
+                      : mod_render(s->mod, pcm, frames);
     s->at += n;
     return n;
 }
@@ -135,6 +160,9 @@ int source_seek(struct source *s, unsigned long frame)
         frame = s->info.frames;
     if (s->wav) {
         if (wave_in_seek(s->wav, frame) != WAVE_OK)
+            return -1;
+    } else if (s->packed) {
+        if (packed_seek(s->packed, frame) != 0)
             return -1;
     } else {
         mod_seek(s->mod, frame);

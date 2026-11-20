@@ -168,6 +168,8 @@ host-test-run:
 	  && python3 tests/host/wave_cases.py check build/host/wave
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/mod_test tests/host/mod_test.c apps/shared/mod.c -lm \
 	  && build/host/mod_test `python3 tests/host/mod_cases.py build/host/mod`
+	@mkdir -p build/host/packed && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/packed_test \
+	  tests/host/packed_test.c $(SOURCE_SRCS) -lm && build/host/packed_test tests/host/sndfix build/host/packed
 	@mkdir -p build/host/sessions && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation \
 	  -o build/host/sessions_test tests/host/sessions_test.c apps/shared/sessions.c \
 	  && build/host/sessions_test build/host/sessions
@@ -236,7 +238,7 @@ APP_LIBS_paint := apps/shared/picfile.c
 APP_HOST_LIBS_recorder := apps/shared/wave.c
 APP_LIBS_recorder := apps/shared/wave.c
 # Sound files as they are played (the Player, phase F): WAV piece by piece, MOD modules.
-SOURCE_SRCS := apps/shared/source.c apps/shared/wave.c apps/shared/mod.c
+SOURCE_SRCS := apps/shared/source.c apps/shared/wave.c apps/shared/mod.c apps/shared/packed.c apps/shared/packedv.c
 APP_HOST_LIBS_player := $(SOURCE_SRCS)
 APP_LIBS_player := $(SOURCE_SRCS)
 build/host/libsshc32.a: $(SSHC_SRCS) sdk/sshc/random.c $(TINYSSH_SRCS) include/glos/sshc.h include/glos/sftpc.h
