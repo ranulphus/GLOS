@@ -297,6 +297,8 @@ two command sets that don't match). Before phase C, because the Terminal is one 
     scroll-back; its tunnels), loaded, saved and opened from one dialog; `ssh NAME` from any shell, and the
     connections in the Start menu (`docs/v1/apps/term.md`).
   - **Port forwarding:** local tunnels (`ssh -L`), kept with a connection.
+  - **Built 2026-11-20** (`docs/v1/phase-f.md`): the remote folders, and the tunnels (with API 2.9: a PC
+    reaches its own ports at 127.0.0.1). Next: the session manager, which keeps a connection's tunnels too.
   - Not chosen: older servers (RSA host keys, AES ciphers). The client stays with the modern set.
 - **Two games of GLOS's own** (the owner, 2026-11-19): GLOS comes with games that need nobody's licensed files.
   The ports all need their games' data, and Fifth Wheel and Echoes are projects with timelines of their own, too

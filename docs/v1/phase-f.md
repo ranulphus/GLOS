@@ -155,3 +155,41 @@ Files over SFTP, like a drive. `apps/shared/remote.c` (a connection whose calls 
   300 KB file by its SHA-256, a long name's DOS name, a folder with its file); a 150 KB file of this PC pasted
   there (SHA-256 in the container); a folder made, renamed and deleted there; then with no key, the password
   asked, a wrong one, the right one.
+
+## SSH: tunnels, and the PC's own ports (2026-11-20)
+
+The owner's choice of 2026-11-20 (`docs/v1-route.md`, F, "More of SSH"): port forwarding, as `ssh -L` has it.
+
+- **`ssh -L [ADDRESS:]PORT:HOST:HOSTPORT`:** connections to PORT of this PC go through the session and come
+  out of the other computer to HOST:HOSTPORT, a "direct-tcpip" channel each (`sshc_direct` in `sdk/sshc`). Up
+  to four `-L`'s a session, six connections through them at a time (the client has eight channels). **`-N`:**
+  no shell or command, the tunnels alone, until Ctrl+C.
+- **Whose the port is.** As OpenSSH and PuTTY have it, a tunnel's port is this PC's programs' alone unless it
+  is opened: it is listened on at 127.0.0.1. `-g` opens a session's tunnels to every computer that reaches
+  this PC; `*:` before a port opens that one, `127.0.0.1:` keeps one to the PC under `-g`.
+- **That needed the PC to reach itself: API 2.9.** GLOS's network had no 127.0.0.1, and a packet for the PC's
+  own address went out of the card for nobody. lwIP's loopback is on now, and LISTEN has `GLOS_NETF_LOCAL`
+  (`docs/v1/api-2.md`, NET; `docs/supervisor.md` §17.11). It is every program's gain: one that serves can be
+  its own client (a game that hosts and joins on one PC), and two programs on a PC can talk.
+- **Carried how.** SSH.EXE's poll takes new connections and what each has to send, no further than 32 KB
+  ahead of the far side; what comes back is written to the connection at once (where this PC's side is slow
+  that waits, up to ten seconds, and the session's other traffic with it); either end's last byte is told to
+  the other; a refusal on the far side closes the connection here. On a GLOS before 2.9 a tunnel that is not
+  opened is refused with the reason: there it would be everyone's.
+- **Not yet:** remote tunnels (`-R`), a SOCKS port (`-D`), tunnels kept with a saved connection (the session
+  manager's, next).
+- **Tests.** On the host, `sshc_test` against OpenSSH: a direct channel to the sshd's own port brings its
+  banner and its answer to ours (written before the channel was open); one to a port with no listener is
+  refused. On Loop A, the sshc suite's `sshprog_case` on both machines: through a tunnel opened with `*:` the
+  host comes in (a port SLiRP forwards) and logs in to the container's sshd through the guest's session: a
+  command, 200 KB each way by SHA-256, two logins at once; a tunnel to a port nothing listens on closes what
+  comes to it; a tunnel of the PC's own is nobody's for the host, and a second SSH.EXE on the guest logs in
+  through it at 127.0.0.1; Ctrl+C ends them. `APITEST net`: `net-own` and `net-local`.
+
+## The clock: a lost answer (2026-11-20)
+
+Gate 28 failed once on the time suite's question to pool.ntp.org, and passed when the suite was run again.
+The suite had asked the pool twice within a second; but it showed a fault of GLOS's own: lwIP waited 15 s for
+an answer and 15 s more before asking again, so a second question went out just as `glos time sync` gave up.
+One lost answer failed the sync. The wait is 5 s now (the second question at 20 s), the suite's NTP server can
+be told to lose an answer (`asked-again`), and the pool is asked once.

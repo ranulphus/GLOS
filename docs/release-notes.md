@@ -4,6 +4,17 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## SSH tunnels, and 127.0.0.1 (API 2.9, 2026-11-20)
+
+- **`ssh -L PORT:HOST:HOSTPORT`:** a port of this PC that leads, through the SSH session, to HOST:HOSTPORT as
+  the other computer reaches it. Up to four in a session; `-N` for the tunnels alone (Ctrl+C ends them).
+- A tunnel's port is for this PC's own programs unless you open it to other computers: `-g`, or `*:` before
+  the port.
+- **A GLOS PC reaches its own ports** at 127.0.0.1 and at its own address (API 2.9): a program can connect to
+  another on the same PC, or to itself. `GLOS_NETF_LOCAL` listens for this PC alone.
+- **The clock:** an answer lost on its way from the time server is asked for again within `glos time sync`'s
+  wait (the sync used to fail).
+
 ## Files: folders on other computers (2026-11-20)
 
 - **Another computer's folders in Files, over SFTP:** a remote GLOS or Linux PC is opened like a drive. Type

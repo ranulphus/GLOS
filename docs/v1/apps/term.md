@@ -21,7 +21,8 @@
   become a session manager as PuTTY has one (a list of sessions, each with its settings: host, port, user, key,
   the terminal's font, colours and scroll-back, its tunnels), with `ssh NAME` and the Start menu's list; port
   forwarding (local tunnels); and remote folders are Files' (below, and `files.md`). Older servers' RSA and AES
-  were offered and not chosen.
+  were offered and not chosen. **Built 2026-11-20:** the tunnels (`ssh -L`, `-g`, `-N`) and Files' remote
+  folders (`../phase-f.md`); the session manager is next.
 - **SFTP from the session:** a side pane to drag files between the PC and the host (Files' views over SFTP),
   beside the session's tab.
 - **Scroll-back:** as long as memory allows (a setting), searchable (Ctrl+Shift+F), with matches highlighted.
