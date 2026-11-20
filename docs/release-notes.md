@@ -4,6 +4,13 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## DOS calls on a 486 without VME (2026-11-20)
+
+- **A quarter to a third quicker for programs** on a processor without VME (a 486DX2, the Cyrix and ST 486s):
+  there every CLI, STI, PUSHF, POPF and IRET of DOS's own code is a trap into GLOS, sixteen of them in DOS's
+  plainest call, and each went the whole way round. They have a short way now when nothing waits on them.
+  Measured in 86Box only; `tests/dos/doscalls.c` measures it on a PC.
+
 ## Files: archives as folders (2026-11-19)
 
 - **A ZIP, a TAR, a GZ or a TAR in a GZ is gone into like a folder** in Files' browser: its folders and files

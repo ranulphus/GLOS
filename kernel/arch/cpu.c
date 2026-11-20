@@ -392,6 +392,8 @@ static void dispatch(struct trapframe *tf)
 void trap_dispatch(struct trapframe *tf)
 {
     u32 top;
+    if ((tf->eflags & EFLAGS_VM) && tf->vec == 13 && vm_gp_fast(tf))
+        return;                         /* (the system VM's CLI, STI, PUSHF, POPF, IRET on a CPU without VME) */
     dispatch(tf);
     if (!(tf->eflags & EFLAGS_VM) && !(tf->cs & 3))
         return;
