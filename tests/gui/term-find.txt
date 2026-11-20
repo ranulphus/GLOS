@@ -3,6 +3,8 @@
 # down the lines and round to the top; a word that isn't there is said in the dialog; with the dialog away,
 # Ctrl+Shift+H finds the one before what is chosen, Ctrl+Shift+G the one after. Letters' case apart unless the
 # box says otherwise (Alpha is found for alpha).
+# (The terminal's pictures are taken with the dialog away: on GLOS it lies over the window, and the host's
+# stand-in draws each window by itself.)
 run TERM.EXE
 wait "Terminal"
 type c:\n
@@ -14,12 +16,12 @@ key ctrl+shift+f
 wait "Find"
 type alpha
 key enter
-shot first "Terminal"
-key enter
-key enter
-shot third "Terminal"
 key esc
 gone "Find"
+shot first "Terminal"
+key ctrl+shift+g
+key ctrl+shift+g
+shot third "Terminal"
 key ctrl+shift+h
 shot back "Terminal"
 key ctrl+shift+g
