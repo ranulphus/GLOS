@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The archives of the GUI scripts' drive (tests/gui/drives/C/ARC: files-arc.txt) and the files that
 files-zip.txt packs (C/ZIP) and files-bin.txt deletes (C/RCY), made once and kept in the tree; run again only to
-change them.
+change them. (C/LZH's two archives are not made here: LHA's and ARJ's own tools made them, tests/host/arcfix/make.py.)
 
     python3 tests/gui/mkarc.py
 """

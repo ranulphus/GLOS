@@ -288,8 +288,32 @@ are as they were).
     `arcw_test` has a file, a folder to a deeper and longer name, the archive behind a program and the one
     with sizes after the bytes, read back by Python's zipfile; `files-zip` renames a file and its folder and
     unpacks them).
+  - **LZH/LHA and ARJ read** (2026-11-20; `apps/shared/lzh.c` unpacks, `arc.c` reads the archives around it).
+    One method serves both: LHA's -lh5-, -lh6- and -lh7- and ARJ's 1 to 3 are the same blocks of codes with
+    three tables of code lengths, apart in the window (8, 32, 64 and 26 KB) and in two fields' widths; ARJ's 4
+    is a simpler one of its own. 75 KB of memory while a file is unpacked. LZH headers of all three levels
+    (the path in the name, or in extended headers with FFh between its parts; `-lhd-` folders; DOS's time or
+    Unix's; the CRC-16); ARJ's headers with their own CRC-32, whose time is Unix's when ARJ on Unix made the
+    archive (found by the test: its host byte says so).
+    - **What is refused, and how:** LHarc 1's -lh1- and LArc's -lz5- are listed and not unpacked ("packed in
+      a way not unpacked here"), as are an ARJ's files with a password and the pieces of a file that goes on
+      in another volume. An ARJ whose header is damaged is a damaged archive (what follows cannot be found);
+      one whose end was not written is read all the same, as is an LZH with a file transfer's padding after
+      its last file. A self-extracting archive is not looked into (a ZIP's is: its list is at its end).
+    - **A window of spaces:** LHA's packers begin with a window full of spaces, and a file that begins with
+      some may be packed as a match from "before" its first byte. LHA and lhasa unpack that; 7-Zip calls it
+      an error. Ours unpacks it for LZH and refuses it in an ARJ (whose own tool gives rubbish there).
+    - **Tests** (`tests/host/arc_test`, 71 archives now): archives made by the tools people made them with
+      (`tests/host/arcfix/make.py`: jlha for every header level and method, arj 3.10 for its five methods,
+      folders, a password, volumes), each tested by a second program and listed by a third (7-Zip), held to
+      the bytes that were packed; and archives written bit by bit (`arcfix/pack.py`) for the corners no
+      packer goes into when asked: tables of one code, codes of 16 bits in each of the three tables, zeros in
+      runs of every size, the largest block, the farthest match, and the streams that must be refused. lhasa
+      and arj unpack every good one of those to the same bytes. The changed-archives loop takes all of the
+      list now (2640 a run); 19,200 changed LZH and ARJ archives went through it once under the address and
+      undefined-behaviour sanitizers, nothing found. `files-lzh` goes into one of each in the browser.
   - **Not yet:** a thing of one archive pasted straight into another (it is unpacked to a folder first),
-    LZH/LHA, ARJ and 7z, the old ZIPs' implode and shrink, big archives
+    7z, the old ZIPs' implode and shrink, big archives
     listed as they load (a TAR in a GZ is unpacked from end to end for its list, with the window waiting),
     names by long file names where DOS has them, the packer's speed on a 486 (unmeasured: its quick level is
     there for it).

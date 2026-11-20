@@ -1,5 +1,6 @@
 /* Host test for the archives' reader (apps/shared/arc.c): the archives tests/host/arc_cases.py makes with
- * Python's zipfile, tarfile and gzip, each against the script's list of what it must be read as.
+ * Python's zipfile, tarfile and gzip, those LHA's and ARJ's own tools made (tests/host/arcfix) and LZH and ARJ
+ * archives written bit by bit (arcfix/pack.py), each against the script's list of what it must be read as.
  *
  *     arc_test DIR        (DIR/MANIFEST and the archives beside it)
  *
@@ -429,11 +430,11 @@ int main(int argc, char **argv)
     {
         unsigned long seed = 20261119ul, made = 0, opened = 0;
         static unsigned char *bytes;
-        static char names[64][200];
+        static char names[128][200];
         unsigned n = 0, round;
         snprintf(path, sizeof path, "%s/MANIFEST", dir);
         m = fopen(path, "r");
-        while (m && fgets(line, sizeof line, m) && n < 64)
+        while (m && fgets(line, sizeof line, m) && n < 128)
             if (line[0] == 'A' && line[1] == '\t') {
                 char *p = line + 2;
                 snprintf(names[n++], sizeof names[0], "%s", field(&p));

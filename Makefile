@@ -205,7 +205,7 @@ endef
 # The terminal's ssh (M10): the client for the host too, 32-bit as the rest, its crypto without -Werror.
 APP_HOST_LIBS_term := tests/host/shimshell.c sdk/shell/shell.c sdk/shell/edit.c
 # Archives read and ZIPs written (Files' folders, phase E): the reader and writer, the packer, the loader's unpacker.
-ARC_SRCS := apps/shared/arc.c apps/shared/deflate.c loader/inflate.c
+ARC_SRCS := apps/shared/arc.c apps/shared/lzh.c apps/shared/deflate.c loader/inflate.c
 # Pictures read and written: one code in the viewer and the editor (apps/shared/picfile.c).
 APP_HOST_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c
 APP_LIBS_files := $(ARC_SRCS) apps/shared/picfile.c apps/shared/thumbs.c

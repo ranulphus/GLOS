@@ -11,10 +11,11 @@
 #include <unistd.h>
 
 #include "arc.h"
+#include "lzh.h"
 #include "deflate.h"
 #include "../../loader/inflate.h"
 
-enum { K_ZIP, K_TAR, K_GZ, K_TGZ };
+enum { K_ZIP, K_TAR, K_GZ, K_TGZ, K_LZH, K_ARJ };
 #define BUF 4096u
 #define CD_MAX (8ul << 20)              /* a ZIP's directory at most: some hundred thousand names */
 
@@ -123,7 +124,8 @@ static int ends_with(const char *name, const char *end)
 
 int arc_name_is(const char *name)
 {
-    return ends_with(name, ".ZIP") || ends_with(name, ".TAR") || ends_with(name, ".GZ") || ends_with(name, ".TGZ");
+    return ends_with(name, ".ZIP") || ends_with(name, ".TAR") || ends_with(name, ".GZ") || ends_with(name, ".TGZ")
+        || ends_with(name, ".LZH") || ends_with(name, ".LHA") || ends_with(name, ".ARJ");
 }
 
 /* An entry's name as it is kept (malloc'd): '\' is '/', no drive, no '/' before, after or doubled, no "."
@@ -918,6 +920,349 @@ static int gz_extract(struct arc *a, const struct ent *e, int (*data)(void *ctx,
 
 /* ---- the archive */
 
+/* ---- LZH (LHA's archives) and ARJ: a header before each file's packed bytes, one after another to the end. Both
+   pack with the one method lzh.c unpacks (ARJ has a second, its "fastest"), or not at all.
+
+   An LZH header is of one of three levels (its byte 20). Level 0: its size and a sum, the method ("-lh5-"), the
+   packed and the real size, DOS's time and date, an attribute, the name with its path, the file's CRC-16. Level
+   1: the same with the name alone, and then extended headers (each: its size, a type, its bytes), of which 01h is
+   the name and 02h the path (FFh between its parts); their sizes are counted in "the packed size". Level 2: the
+   whole header's size first, Unix time, the CRC, then extended headers. "-lhd-" is a folder. */
+
+static unsigned crc16(unsigned crc, const unsigned char *p, unsigned n)        /* LHA's: x^16 + x^15 + x^2 + 1 */
+{
+    unsigned k;
+    while (n--) {
+        crc ^= *p++;
+        for (k = 0; k < 8; k++)
+            crc = crc & 1 ? crc >> 1 ^ 0xA001u : crc >> 1;
+    }
+    return crc & 0xFFFF;
+}
+
+static int lzh_method(const unsigned char *m)   /* 0 stored, LZH_ of lzh.h, -1 a folder, -2 one not unpacked here */
+{
+    if (!memcmp(m, "-lh0-", 5) || !memcmp(m, "-lz4-", 5))
+        return 0;
+    if (!memcmp(m, "-lh5-", 5))
+        return LZH_LH5;
+    if (!memcmp(m, "-lh6-", 5))
+        return LZH_LH6;
+    if (!memcmp(m, "-lh7-", 5))
+        return LZH_LH7;
+    if (!memcmp(m, "-lhd-", 5))
+        return -1;
+    return -2;
+}
+
+#define LZH_NAME 1024
+
+static int lzh_open(struct arc *a)
+{
+    unsigned long at = 0;
+    unsigned char *h = malloc(65536 + 64);
+    char *path = malloc(2 * LZH_NAME + 2);
+    int r = ARC_OK;
+    if (!h || !path) {
+        free(h);
+        free(path);
+        return ARC_E_MEMORY;
+    }
+    for (;;) {
+        unsigned long packed, size, data, tstamp;
+        unsigned level, hsize, nname = 0, ndir = 0, crc = 0, i, next;
+        unsigned short date = 0, time = 0;
+        const unsigned char *name = NULL;
+        char dir[LZH_NAME + 1];
+        struct ent *e;
+        char *clean;
+        int method, isdir = 0;
+        if (at + 21 > a->size || fseek(a->f, (long)at, SEEK_SET) != 0 || fread(h, 1, 21, a->f) != 21 || h[0] == 0)
+            break;                              /* (the end: a zero, or nothing more) */
+        if (h[2] != '-' || h[3] != 'l' || h[6] != '-') {
+            r = a->n ? ARC_OK : ARC_E_DAMAGED;  /* (what follows the last entry is not ours to judge) */
+            break;
+        }
+        level = h[20];
+        packed = le32(h + 7), size = le32(h + 11), tstamp = le32(h + 15);
+        method = lzh_method(h + 2);
+        dir[0] = 0;
+        if (level <= 1) {
+            hsize = h[0] + 2u;
+            if (hsize < 24 || at + hsize > a->size || fread(h + 21, 1, hsize - 21, a->f) != hsize - 21) {
+                r = ARC_E_DAMAGED;
+                break;
+            }
+            nname = h[21];
+            if (22 + nname + 2 > hsize) {
+                r = ARC_E_DAMAGED;
+                break;
+            }
+            name = h + 22;
+            crc = le16(h + 22 + nname);
+            time = (unsigned short)tstamp, date = (unsigned short)(tstamp >> 16);
+            data = at + hsize;
+            if (level == 1) {                   /* the extended headers: counted in the packed size */
+                next = le16(h + hsize - 2);
+                while (next) {
+                    unsigned char x[LZH_NAME + 4];
+                    unsigned take = next < sizeof x ? next : (unsigned)sizeof x;
+                    if (next < 3 || data + next > a->size || packed < next || fseek(a->f, (long)data, SEEK_SET) != 0
+                        || fread(x, 1, take, a->f) != take) {
+                        r = ARC_E_DAMAGED;
+                        break;
+                    }
+                    if (x[0] == 0x01 && next - 3 <= LZH_NAME && take == next) {
+                        nname = next - 3;       /* (the name: over the header's own) */
+                        memcpy(h + 22, x + 1, nname);
+                        name = h + 22;
+                    } else if (x[0] == 0x02 && next - 3 <= LZH_NAME && take == next) {
+                        ndir = next - 3;
+                        memcpy(dir, x + 1, ndir);
+                    }
+                    data += next, packed -= next;
+                    if (take == next) {
+                        next = le16(x + next - 2);
+                    } else {                    /* (a long one of another kind: its last two bytes read apart) */
+                        unsigned char t[2];
+                        if (fseek(a->f, (long)(data - 2), SEEK_SET) != 0 || fread(t, 1, 2, a->f) != 2) {
+                            r = ARC_E_DAMAGED;
+                            break;
+                        }
+                        next = le16(t);
+                    }
+                }
+                if (r != ARC_OK)
+                    break;
+            }
+        } else {                                /* level 2: the header's whole size first */
+            unsigned long p;
+            hsize = le16(h);
+            if (hsize < 26 || at + hsize > a->size || fread(h + 21, 1, hsize - 21, a->f) != hsize - 21) {
+                r = ARC_E_DAMAGED;
+                break;
+            }
+            crc = le16(h + 21);
+            dos_stamp(tstamp, &date, &time);
+            data = at + hsize;
+            next = le16(h + 24);
+            for (p = 26; next; ) {
+                if (next < 3 || p + next > hsize) {
+                    r = ARC_E_DAMAGED;
+                    break;
+                }
+                if (h[p] == 0x01 && next - 3 <= LZH_NAME) {
+                    nname = next - 3;
+                    name = h + p + 1;
+                } else if (h[p] == 0x02 && next - 3 <= LZH_NAME) {
+                    ndir = next - 3;
+                    memcpy(dir, h + p + 1, ndir);
+                }
+                p += next;
+                next = le16(h + p - 2);
+            }
+            if (r != ARC_OK)
+                break;
+        }
+        if (data > a->size || packed > a->size - data) {
+            r = ARC_E_DAMAGED;
+            break;
+        }
+        for (i = 0; i < ndir; i++)              /* the path's parts, then the name: as one name */
+            path[i] = (unsigned char)dir[i] == 0xFF ? '/' : dir[i];
+        if (ndir && path[ndir - 1] != '/')
+            path[ndir++] = '/';
+        if (nname > LZH_NAME)
+            nname = LZH_NAME;
+        for (i = 0; i < nname; i++)
+            path[ndir + i] = name[i] == 0xFF ? '/' : (char)name[i];
+        isdir = method == -1;
+        clean = clean_name(path, ndir + nname, &isdir);
+        if (method == -1)
+            isdir = 1;
+        if (clean) {
+            if (!(e = add(a, clean))) {
+                free(clean);
+                r = ARC_E_MEMORY;
+                break;
+            }
+            e->at = data, e->crc = crc;
+            e->method = (unsigned short)(method > 0 ? method : 0);
+            e->e.date = date, e->e.time = time;
+            e->e.dir = (unsigned char)isdir;
+            if (!isdir) {
+                e->e.size = size, e->e.packed = packed;
+                if (method == -2)
+                    e->e.how = ARC_E_METHOD;
+            }
+        }
+        at = data + packed;
+    }
+    free(h);
+    free(path);
+    return r;
+}
+
+/* ARJ: 60h EAh, the header's size, the header (its own first part's size, versions, the host, flags, the method,
+   the kind of entry, the time and date (DOS's, or Unix's from ARJ on Unix), the packed and the real size, the
+   file's CRC-32, ...), the name and a
+   comment, each to a zero, the header's CRC; then extended headers (none are made), then the packed bytes. The
+   first header is the archive's own; a header of no size ends it. A header that is none, or whose CRC is of other
+   bytes: the archive is damaged (what is after it cannot be found). */
+static int arj_open(struct arc *a)
+{
+    unsigned long at = 0;
+    unsigned char *h = malloc(2600 + 16);
+    int first = 1, r = ARC_OK;
+    if (!h)
+        return ARC_E_MEMORY;
+    for (;;) {
+        unsigned char q[4];
+        unsigned hsize, fsize, flags, method, kind, nname;
+        unsigned long packed, size, data;
+        struct ent *e;
+        char *clean;
+        int isdir;
+        if (at == a->size && !first)
+            break;                              /* (its end was not written: read all the same) */
+        if (at + 4 > a->size || fseek(a->f, (long)at, SEEK_SET) != 0 || fread(q, 1, 4, a->f) != 4 || q[0] != 0x60
+            || q[1] != 0xEA) {
+            r = ARC_E_DAMAGED;
+            break;
+        }
+        hsize = le16(q + 2);
+        if (!hsize)
+            break;                              /* the end */
+        if (hsize > 2600 || hsize < 30 || fread(h, 1, hsize + 4, a->f) != hsize + 4
+            || arc_crc32(0, h, hsize) != le32(h + hsize)) {
+            r = ARC_E_DAMAGED;
+            break;
+        }
+        data = at + 4 + hsize + 4;
+        for (;;) {                              /* extended headers: each its size, its bytes, their CRC */
+            unsigned x;
+            if (data + 2 > a->size || fseek(a->f, (long)data, SEEK_SET) != 0 || fread(q, 1, 2, a->f) != 2) {
+                r = ARC_E_DAMAGED;
+                break;
+            }
+            data += 2;
+            if (!(x = le16(q)))
+                break;
+            data += x + 4;
+        }
+        if (r != ARC_OK)
+            break;
+        fsize = h[0], flags = h[4], method = h[5], kind = h[6];
+        packed = le32(h + 12), size = le32(h + 16);
+        if (first) {                            /* the archive's own header: no bytes follow it */
+            first = 0;
+            at = data;
+            continue;
+        }
+        if (fsize < 30 || fsize >= hsize || data > a->size || packed > a->size - data) {
+            r = ARC_E_DAMAGED;
+            break;
+        }
+        for (nname = 0; fsize + nname < hsize && h[fsize + nname]; nname++)
+            ;
+        isdir = kind == 3;
+        clean = clean_name((const char *)h + fsize, nname, &isdir);
+        if (kind == 3)
+            isdir = 1;
+        if (clean) {
+            if (!(e = add(a, clean))) {
+                free(clean);
+                r = ARC_E_MEMORY;
+                break;
+            }
+            e->at = data, e->crc = le32(h + 20);
+            e->method = (unsigned short)(method == 0 ? 0 : method <= 3 ? LZH_ARJ : LZH_ARJ4);
+            if (h[3] == 2 || h[3] == 8)         /* made on Unix (or NeXT): its time is Unix's */
+                dos_stamp(le32(h + 8), &e->e.date, &e->e.time);
+            else
+                e->e.time = (unsigned short)le16(h + 8), e->e.date = (unsigned short)le16(h + 10);
+            e->e.dir = (unsigned char)isdir;
+            if (!isdir) {
+                e->e.size = size, e->e.packed = packed;
+                if (flags & 0x01)
+                    e->e.how = ARC_E_LOCKED;
+                else if (flags & 0x0C)          /* (a piece of a file that goes on in another volume) */
+                    e->e.how = ARC_E_BIG;
+                else if (method > 4 || kind > 1)
+                    e->e.how = ARC_E_METHOD;
+            }
+        }
+        at = data + packed;
+    }
+    free(h);
+    return r;
+}
+
+struct lzh_run {                        /* an entry's bytes going through lzh_unpack */
+    struct arc *a;
+    unsigned have, at;                  /* of buf */
+    unsigned long left;                 /* packed bytes not yet read */
+    unsigned long crc, total;
+    int crc32;
+    int (*data)(void *ctx, const void *p, unsigned n);
+    void *ctx;
+};
+
+static int lzh_get(void *ctx)
+{
+    struct lzh_run *g = ctx;
+    if (g->at == g->have) {
+        unsigned n = g->left < BUF ? (unsigned)g->left : BUF;
+        if (!n || (g->have = (unsigned)fread(g->a->buf, 1, n, g->a->f)) == 0)
+            return -1;
+        g->left -= g->have, g->at = 0;
+    }
+    return g->a->buf[g->at++];
+}
+
+static int lzh_put(void *ctx, const void *p, unsigned n)
+{
+    struct lzh_run *g = ctx;
+    g->crc = g->crc32 ? arc_crc32(g->crc, p, n) : crc16((unsigned)g->crc, p, n);
+    g->total += n;
+    return g->data && g->data(g->ctx, p, n) != 0 ? ARC_E_STOP : 0;
+}
+
+static int lzh_extract(struct arc *a, const struct ent *e, int (*data)(void *ctx, const void *p, unsigned n), void *ctx)
+{
+    struct lzh_run g;
+    int r;
+    if (e->e.how)
+        return e->e.how;
+    if (fseek(a->f, (long)e->at, SEEK_SET) != 0)
+        return ARC_E_DAMAGED;
+    memset(&g, 0, sizeof g);
+    g.a = a, g.left = e->e.packed, g.data = data, g.ctx = ctx, g.crc32 = a->kind == K_ARJ;
+    if (e->method == 0) {                       /* not packed */
+        unsigned long left;
+        if (e->e.packed != e->e.size)
+            return ARC_E_DAMAGED;
+        for (left = e->e.size; left; ) {
+            unsigned char piece[512];           /* (the archive's own buffer is lzh_get's) */
+            unsigned n = left < sizeof piece ? (unsigned)left : (unsigned)sizeof piece;
+            if (fread(piece, 1, n, a->f) != n)
+                return ARC_E_DAMAGED;
+            if ((r = lzh_put(&g, piece, n)) != 0)
+                return r;
+            left -= n;
+        }
+    } else {
+        r = lzh_unpack(e->method, e->e.packed, e->e.size, lzh_get, lzh_put, &g);
+        if (r == ARC_E_STOP)
+            return r;
+        if (r == LZH_MEMORY)
+            return ARC_E_MEMORY;
+        if (r != 0 || g.total != e->e.size)
+            return ARC_E_DAMAGED;
+    }
+    return g.crc == e->crc ? ARC_OK : ARC_E_CRC;
+}
+
 struct arc *arc_open(const char *path, int *err)
 {
     struct arc *a = calloc(1, sizeof *a);
@@ -942,6 +1287,12 @@ struct arc *arc_open(const char *path, int *err)
     n = (unsigned)fread(h, 1, sizeof h, a->f);
     if (n >= 2 && h[0] == 0x1F && h[1] == 0x8B) {
         r = gz_open(a, path);
+    } else if (n >= 2 && h[0] == 0x60 && h[1] == 0xEA) {
+        a->kind = K_ARJ;
+        r = arj_open(a);
+    } else if (n >= 21 && h[2] == '-' && h[3] == 'l' && h[6] == '-' && h[20] <= 2) {
+        a->kind = K_LZH;
+        r = lzh_open(a);
     } else if (n == 512 && tar_header_ok(h)) {
         a->kind = K_TAR;
         r = tar_pass(a, NULL, NULL);
@@ -994,7 +1345,7 @@ void arc_close(struct arc *a)
 
 const char *arc_kind(const struct arc *a)
 {
-    static const char *const names[] = { "ZIP", "TAR", "GZ", "TAR.GZ" };
+    static const char *const names[] = { "ZIP", "TAR", "GZ", "TAR.GZ", "LZH", "ARJ" };
     return names[a->kind];
 }
 
@@ -1080,6 +1431,8 @@ static int walk(struct arc *a, const struct arc_sink *s, void *ctx)
             r = ARC_OK;
         else if (a->kind == K_ZIP)
             r = zip_extract(a, e, s->data, ctx);
+        else if (a->kind == K_LZH || a->kind == K_ARJ)
+            r = lzh_extract(a, e, s->data, ctx);
         else
             r = gz_extract(a, e, s->data, ctx);
         s->end(ctx, i, r);
@@ -1148,6 +1501,8 @@ static int extract(struct arc *a, unsigned i, int (*data)(void *ctx, const void 
     const struct ent *e = &a->ents[i];
     if (a->kind == K_ZIP)
         return zip_extract(a, e, data, ctx);
+    if (a->kind == K_LZH || a->kind == K_ARJ)
+        return lzh_extract(a, e, data, ctx);
     if (a->kind == K_GZ)
         return gz_extract(a, e, data, ctx);
     if (a->kind == K_TAR) {             /* its bytes are where the list says */

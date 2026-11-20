@@ -4,6 +4,15 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Files: LZH and ARJ archives (2026-11-20)
+
+- **An LZH (or LHA) or an ARJ archive is gone into like a folder** in Files' browser, as a ZIP is: listed, its
+  files opened, copied out or all unpacked (Extract Here, Extract To). LHA's methods -lh5-, -lh6- and -lh7- and
+  ARJ's 1 to 4 are unpacked, and files that were not packed at all.
+- **Listed but not unpacked:** files packed by LHarc 1 (-lh1-) and LArc (-lz5-), an ARJ's files with a password,
+  and a file that goes on in an ARJ's next volume. A self-extracting LZH or ARJ (an .EXE) is not gone into.
+- **Not yet:** 7z.
+
 ## Paint: text and effects (2026-11-20)
 
 - **A Text tool (T):** press on the picture, type a line, choose a font if you like: the letters are painted

@@ -353,6 +353,249 @@ manifest("badsum.tgz", "TAR.GZ", ok(tplain), walk="-7")
 write("names.tgz", make_tar([(n.rstrip("/"), d) for n, d in nd], tarfile.PAX_FORMAT, gz=True))
 manifest("names.tgz", "TAR.GZ", ok(nd), dos=[d for _, d in names])
 
+# ---- LZH and ARJ. First the archives that LHA's and ARJ's own tools made (tests/host/arcfix: make.py says how;
+# LIST is 7-Zip's account of what is in each, SUMS the sums of the files packed), held to what inputs.py makes
+# again here.
+fix = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arcfix")
+sys.path.insert(0, fix)
+import inputs, pack
+
+assert inputs.STAMP == STAMP
+FX = dict(inputs.files())
+for ln in open(os.path.join(fix, "SUMS")):
+    n, size, c = ln.rstrip("\n").split("\t")
+    assert len(FX[n]) == int(size) and crc(FX[n]) == int(c, 16), "inputs.py does not make %s as it was packed" % n
+made = {}
+for ln in open(os.path.join(fix, "LIST")):
+    f = ln.rstrip("\n").split("\t")
+    if f[0] == "A":
+        cur = made.setdefault(f[1], [])
+    else:
+        cur.append((f[1], f[2] == "d"))
+
+
+def fixture(fname, special={}):
+    """a made archive's bytes, and its entries for the manifest (special: name -> (data, how, get))"""
+    ents = []
+    for name, isdir in made[fname]:
+        ents.append((name,) + special.get(name, (None if isdir else FX[name], 0, "0")))
+    return open(os.path.join(fix, fname), "rb").read(), ents
+
+
+for fname in sorted(made):
+    kind = "LZH" if fname.endswith(".LZH") else "ARJ"
+    special = {}
+    if fname == "LOCKED.ARJ":
+        special = {"READ.ME": (FX["READ.ME"], -6, "-6")}
+    elif fname == "VOL.ARJ":                            # (a file that goes on in the next volume: not unpacked)
+        cutat = os.path.getsize(os.path.join(fix, "VOL.ARJ"))
+        piece = len(FX["FAR.BIN"]) - 13346
+        special = {"FAR.BIN": (FX["FAR.BIN"][:piece], -9, "-9")}
+    elif fname == "VOL.A01":
+        special = {"FAR.BIN": (FX["FAR.BIN"][-13346:], -9, "-9")}
+    b, ents = fixture(fname, special)
+    write(fname, b)
+    manifest(fname, kind, ents, stamp=ZSTAMP)
+
+
+def le16(b, at):
+    return struct.unpack_from("<H", b, at)[0]
+
+
+def lzh_data(b, name):
+    """where a level 0 archive's entry has its header and its packed bytes"""
+    at = b.find(name.encode()) - 22
+    return at, at + b[at] + 2
+
+
+def arj_data(b, name):
+    """where an ARJ's entry has its header and its packed bytes"""
+    at, first = 0, True
+    while le16(b, at + 2):
+        size = le16(b, at + 2)
+        head = at + 4 + b[at + 4]
+        data = at + 4 + size + 4 + 2
+        if not first and b[head:b.find(b"\0", head)] == name.encode():
+            return at, data
+        at = data + (0 if first else struct.unpack_from("<I", b, at + 4 + 12)[0])
+        first = False
+    raise KeyError(name)
+
+
+def changed(ents, name, get):
+    return [(n, d, h, get if n == name else g) for n, d, h, g in ents]
+
+
+l0, l0e = fixture("L0.LZH")
+write("cut.lzh", l0[:len(l0) // 2])                     # (in the middle of a file's packed bytes)
+manifest("cut.lzh", "!", [])
+lb = bytearray(l0)
+_, at = lzh_data(l0, "TEXT.TXT")
+lb[at + 600] ^= 0xFF
+lb[at + 601] ^= 0xFF
+write("badpack.lzh", bytes(lb))
+manifest("badpack.lzh", "LZH", changed(l0e, "TEXT.TXT", "x"), stamp=ZSTAMP)
+lb = bytearray(l0)
+at = l0.find(b"SKEW.BIN") + 8                           # (the sum of the file's bytes, after its name)
+lb[at] ^= 1
+write("badsum.lzh", bytes(lb))
+manifest("badsum.lzh", "LZH", changed(l0e, "SKEW.BIN", "-7"), stamp=ZSTAMP)
+write("padded.lzh", l0.rstrip(b"\0") + b"\x1a" * 100)   # (no end written, and a file transfer's padding after)
+manifest("padded.lzh", "LZH", l0e, stamp=ZSTAMP)
+write("sfx.lzh", b"MZ" + bytes(rnd.getrandbits(8) for _ in range(700)) + l0)     # (a program before it: not looked for)
+manifest("sfx.lzh", "!", [])
+
+m1, m1e = fixture("M1.ARJ")
+write("cut.arj", m1[:len(m1) // 2])
+manifest("cut.arj", "!", [])
+mb = bytearray(m1)
+_, at = arj_data(m1, "SKEW.BIN")
+mb[at + 500] ^= 0xFF
+mb[at + 501] ^= 0xFF
+write("badpack.arj", bytes(mb))
+manifest("badpack.arj", "ARJ", changed(m1e, "SKEW.BIN", "x"), stamp=ZSTAMP)
+m4, m4e = fixture("M4.ARJ")
+mb = bytearray(m4)
+_, at = arj_data(m4, "TEXT.TXT")
+mb[at + 500] ^= 0xFF
+write("badpack4.arj", bytes(mb))
+manifest("badpack4.arj", "ARJ", changed(m4e, "TEXT.TXT", "x"), stamp=ZSTAMP)
+m0, m0e = fixture("M0.ARJ")
+mb = bytearray(m0)
+_, at = arj_data(m0, "NOISE.BIN")
+mb[at + 10] ^= 4                                        # (stored as it is: one byte of it another)
+write("badsum.arj", bytes(mb))
+manifest("badsum.arj", "ARJ", changed(m0e, "NOISE.BIN", "-7"), stamp=ZSTAMP)
+mb = bytearray(m1)
+at, _ = arj_data(m1, "READ.ME")
+mb[at + 40] ^= 1                                        # (a header in its middle whose own sum is not its bytes')
+write("badhead.arj", bytes(mb))
+manifest("badhead.arj", "!", [])
+assert m1.endswith(b"\x60\xEA\0\0")
+write("noend.arj", m1[:-4])                             # (no end written: read all the same)
+manifest("noend.arj", "ARJ", m1e, stamp=ZSTAMP)
+write("junk.arj", m1[:-4] + b"\x1a" * 64)               # (and what follows the last file is no header)
+manifest("junk.arj", "!", [])
+
+# Then archives written here bit by bit (arcfix/pack.py): the method's corners, which no packer goes into when
+# asked. (7-Zip and lhasa unpack every one of the good ones to the same bytes: looked at when these were written.)
+ZD, ZT = [int(x) for x in ZSTAMP.split("\t")]
+SP = b" " * 65536                                       # LHA's window before the first byte: spaces
+lrnd = random.Random(1991)
+
+
+def four(n):
+    return bytes(b"ACGT"[lrnd.getrandbits(2)] for _ in range(n))
+
+
+def lh(tokens, kind, before=b"", **how):
+    """(packed, the bytes it is of)"""
+    return pack.pack(tokens, kind, **how), pack.unparse(tokens, before)
+
+
+deep_syms = [0, 2, 5, 9, 28, 48, 69, 91, 120, 121, 122, 200, 255, 256, 300, 400, 509]   # (C's: zeros between them in
+deep_len = [0] * pack.NC                                                                # runs of every size)
+for k, sym in enumerate(deep_syms):
+    deep_len[sym] = min(k + 1, 16)                      # code lengths 1 to 16 (two of 16)
+deep_tok = [0, 2, 5, 9, 28, 48, 69, 91, 120, 121, 122, 200, 255, (3, 1), (47, 13), (147, 5), (256, 60)]
+for _ in range(3000):                                   # (the short codes often, the long ones now and then)
+    k, x = 0, lrnd.getrandbits(20)
+    while x & 1 and k < 16:
+        k, x = k + 1, x >> 1
+    t = deep_syms[k]
+    deep_tok.append(t if t < 256 else (t - 253, 1 + lrnd.getrandbits(4)))
+t_len = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 15, 16, 16, 16, 16]             # T's 19 codes, as long as may be
+p_len = list(range(1, 16)) + [16, 16]                   # P's 17 (lh7), of every length
+p_tok = [97] + [(3 + j, 1 if j == 0 else (1 << (j - 1)) + 1) for j in range(17)] * 3 + [(256, 65536), (3, 65535)]
+txt = text(30000)
+big = four(66000)
+big_tok = list(big) + [(3, 65536), (256, 65536), (100, 32769), (5, 32768), (40, 8193), (256, 1), (3, 65000)]
+six = four(34000)
+six_tok = list(six) + [(256, 32768), (3, 32768), (77, 16385), (9, 8192)]
+spaces = [(10, 5), 120, (20, 8192), (5, 3), (256, 8000), 121, (3, 1)]
+
+corners5 = [
+    ("ONE.BIN", b"-lh5-") + lh([65], pack.LH5),                                         # C of one code
+    ("RUN.BIN", b"-lh5-") + lh([66, (255, 1), (3, 1)], pack.LH5),                       # P of one code
+    ("SPACES.TXT", b"-lh5-") + lh(spaces, pack.LH5, SP),                                # from before the first byte
+    ("DEEP.BIN", b"-lh5-") + lh(deep_tok, pack.LH5, clen=deep_len),                     # C's codes to 16 bits
+    ("DEEP2.BIN", b"-lh5-") + lh(deep_tok, pack.LH5, clen=deep_len, runs=(999, 3)),     # zeros without code 2
+    ("DEEP3.BIN", b"-lh5-") + lh(deep_tok, pack.LH5, clen=deep_len, runs=(999, 999)),   # and one by one
+    ("TDEEP.BIN", b"-lh5-") + lh(deep_tok, pack.LH5, clen=deep_len, tlen=t_len),        # T's codes to 16 bits
+    ("BLOCKS.TXT", b"-lh5-") + lh(pack.parse(txt, 8192), pack.LH5, per=300),            # many small blocks
+    ("STORED.TXT", b"-lh0-", txt[:500], txt[:500]),
+    ("OLD.TXT", b"-lz4-", txt[:300], txt[:300]),                                        # (LArc's "not packed")
+]
+write("corners5.lzh", pack.lzh(corners5, (ZD, ZT)))
+manifest("corners5.lzh", "LZH", [(n, d, 0, "0") for n, _, _, d in corners5], stamp=ZSTAMP)
+corners6 = [("FAR6.BIN", b"-lh6-") + lh(six_tok, pack.LH6, per=20000),
+            ("BLOCKS6.TXT", b"-lh6-") + lh(pack.parse(txt, 32768), pack.LH6, per=1000)]
+write("corners6.lzh", pack.lzh(corners6, (ZD, ZT), level=1))
+manifest("corners6.lzh", "LZH", [(n, d, 0, "0") for n, _, _, d in corners6], stamp=ZSTAMP)
+corners7 = [("PDEEP.BIN", b"-lh7-") + lh(p_tok, pack.LH7, SP, plen=p_len),             # P's codes to 16 bits
+            ("FAR7.BIN", b"-lh7-") + lh(big_tok, pack.LH7, per=65535)]                  # the largest block there is
+write("corners7.lzh", pack.lzh(corners7, (ZD, ZT)))
+manifest("corners7.lzh", "LZH", [(n, d, 0, "0") for n, _, _, d in corners7], stamp=ZSTAMP)
+other = [("ONE.TXT", b"-lh5-") + lh([65], pack.LH5), ("OLD1.TXT", b"-lh1-", b"\0" * 20, txt[:100]),
+         ("OLD5.TXT", b"-lz5-", b"\0" * 20, txt[:100]), ("LAST.TXT", b"-lh0-", b"last", b"last")]
+write("methods.lzh", pack.lzh(other, (ZD, ZT)))         # (LHarc 1's and LArc's ways of packing: listed, not unpacked)
+manifest("methods.lzh", "LZH", [(n, d, -5 if m in (b"-lh1-", b"-lz5-") else 0, "-5" if m in (b"-lh1-", b"-lz5-") else "0")
+                                for n, m, _, d in other], stamp=ZSTAMP)
+
+
+def raw(*fields):
+    w = pack.Bits()
+    for value, nbits in fields:
+        w.put(value, nbits)
+    return w.bytes() + bytes(8)
+
+
+wrong = [
+    ("GOOD.TXT", b"-lh5-") + lh([65, 66, 67], pack.LH5),
+    ("OVER.BIN", b"-lh5-", raw((5, 16), (3, 5), (1, 3), (1, 3), (1, 3), (0, 2)), b"12345"),     # T: three codes of 1 bit
+    ("UNDER.BIN", b"-lh5-", raw((5, 16), (1, 5), (1, 3)), b"12345"),                    # T: one code of 1 bit
+    ("NOSUCH.BIN", b"-lh5-", raw((5, 16), (0, 5), (0, 5), (0, 9), (511, 9), (0, 4), (0, 4)), b"12345"),     # C's one code: 511
+    ("NOBLOCK.BIN", b"-lh5-", raw((0, 16)), b"12345"),                                  # a block of no codes
+    ("SHORT.BIN", b"-lh5-", lh(pack.parse(txt[:4000], 8192), pack.LH5)[0][:700], txt[:4000]),   # its packed bytes end early
+    ("LONG.BIN", b"-lh5-", lh([65, 66, 67], pack.LH5)[0], b"ABCDEFGH"),                 # said to be of more bytes
+    ("STORED.BIN", b"-lh0-", b"abc", b"abcdef"),                                        # stored, of two sizes
+    ("GOOD2.TXT", b"-lh5-") + lh([97, (20, 1)], pack.LH5),
+]
+write("wrong.lzh", pack.lzh(wrong, (ZD, ZT)))
+manifest("wrong.lzh", "LZH", [(n, d, 0, "0" if n.startswith("GOOD") else "x") for n, _, _, d in wrong], stamp=ZSTAMP)
+
+a_txt = pack.parse(txt, 26624)
+a_far = list(six[:27000]) + [(256, 26624), (3, 26624), (50, 16385), (256, 1)]
+f_txt = pack.parse(txt, 15872)
+f_far = list(six[:16000]) + [(256, 15872), (3, 15872), (2 + 127, 513), (3, 512), (256, 1), (130, 7000), (66, 1025)]
+arjs = [
+    ("ONE.BIN", 1) + lh([65], pack.ARJ),
+    ("RUN.BIN", 1) + lh([66, (255, 1), (3, 1)], pack.ARJ),
+    ("DEEP.BIN", 2) + lh(deep_tok, pack.ARJ, clen=deep_len),
+    ("TDEEP.BIN", 3) + lh(deep_tok, pack.ARJ, clen=deep_len, tlen=t_len),
+    ("BLOCKS.TXT", 1) + lh(a_txt, pack.ARJ, per=300),
+    ("FAR.BIN", 1) + lh(a_far, pack.ARJ, per=65535),
+    ("ONE4.BIN", 4, pack.arj4([65]), b"A"),
+    ("RUN4.BIN", 4, pack.arj4([66, (255, 1), (256, 1), (3, 1)]), b"B" * 515),
+    ("TEXT4.TXT", 4, pack.arj4(f_txt), txt),
+    ("FAR4.BIN", 4, pack.arj4(f_far), pack.unparse(f_far)),
+    ("STORED.TXT", 0, txt[:500], txt[:500]),
+]
+write("corners.arj", pack.arj(arjs, (ZD, ZT)))
+manifest("corners.arj", "ARJ", [(e[0], e[3], 0, "0") for e in arjs], stamp=ZSTAMP)
+awrong = [
+    ("GOOD.TXT", 1) + lh([65, 66, 67], pack.ARJ),
+    ("BEFORE.BIN", 1) + lh([65, (5, 3)], pack.ARJ, SP),                                 # from before the first byte
+    ("BEYOND.BIN", 1) + lh(list(six[:30000]) + [(3, 30000)], pack.ARJ, per=65535),      # from farther than its window
+    ("BEFORE4.BIN", 4, pack.arj4([65, (5, 3)]), b"A    "),
+    ("SHORT4.BIN", 4, pack.arj4(f_txt)[:900], txt),
+    ("METHOD9.BIN", 9, b"what", b"what"),                                               # (no such method)
+    ("GOOD2.TXT", 4, pack.arj4([97, (20, 1)]), b"a" * 21),
+]
+write("wrong.arj", pack.arj(awrong, (ZD, ZT)))
+manifest("wrong.arj", "ARJ", [(e[0], e[3], -5 if e[1] == 9 else 0, "0" if e[0].startswith("GOOD") else "-5" if e[1] == 9 else "x")
+                              for e in awrong], stamp=ZSTAMP)
+
 # ---- no archives
 write("random.bin", bytes(rnd.getrandbits(8) for _ in range(9000)))
 manifest("random.bin", "!", [])
