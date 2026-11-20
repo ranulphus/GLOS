@@ -2482,6 +2482,10 @@ static void chat_page(void)
 /* ---- the preview surface (toolkit 2, step C8): another GUITEST inside a widget */
 static const char *self;                        /* GUITEST's own path (argv[0]) */
 static struct gui_widget *pv;
+static int pv_late;                             /* "preview late", "embedded late": the program inside is slow to
+                                                   draw, so that its window is shown only after the page took it in
+                                                   (the order a loaded 486 gave gate 24: the page's keys must stay
+                                                   the page's) */
 
 static void pv_on(struct gui_widget *w, int what)
 {
@@ -2504,7 +2508,7 @@ static void pv_start(struct gui_widget *w, int what)
 {
     char cmd[200], *p;
     (void)w, (void)what;
-    snprintf(cmd, sizeof cmd, "%s embedded", self);
+    snprintf(cmd, sizeof cmd, "%s embedded%s", self, pv_late ? " late" : "");
     for (p = cmd; *p && *p != ' '; p++)         /* (DJGPP's argv[0] is c:/test/guitest.exe: DOS's is wanted, or the
                                                    agent runs it through COMMAND.COM, under which it may not be an
                                                    app) */
@@ -2539,6 +2543,10 @@ static void preview_page(void)
 
 static void embedded_draw(struct gui_widget *w, struct gfx_surface *s)
 {
+    if (pv_late) {                              /* (the first drawing: before the window is shown) */
+        pv_late = 0;
+        glos_sleep(2500);
+    }
     gfx_fill(s, w->r.x, w->r.y, w->r.w, w->r.h, 0x3060C0);
     gfx_text(s, w->r.x + 8, w->r.y + 8, gui_bold, "Embedded", -1, 0xFFFFFF);
 }
@@ -3101,6 +3109,7 @@ int main(int argc, char **argv)
 {
     const char *what = argc > 1 ? argv[1] : "gallery";
     self = argv[0];
+    pv_late = argc > 2 && !strcmp(argv[2], "late") && (!strcmp(what, "preview") || !strcmp(what, "embedded"));
     if (gui_init(argc, argv) != 0) {
         printf("GUI no GLOS\n");
         return 1;

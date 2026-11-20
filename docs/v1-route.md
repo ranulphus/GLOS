@@ -554,6 +554,13 @@ short Loop A smoke, and the Pentium 4 bench as the silicon tier.
   has `power can=f` and `power=3` in their places). It waits for the whole line now. Other waits of the suites
   that look for the beginning of a line and read its end afterwards may have the same in them.
 
+- **`gui-486dx2-vbe-8`'s `preview` failed** (the twenty-fourth gate, 2026-11-20, devserver; the same steps had
+  failed once the day before and been put down to the machine's slowness). **Mended:** GLOS's own fault, a
+  race over the keyboard between a window and the program shown inside it (`docs/v1/phase-e.md`, the faults'
+  list): being shown no longer gives a window inside another the keyboard. `tests/gui/preview-late.txt` makes
+  the order that lost certain. The gate's other thirty-six suites were green, the drive's fault of the gate
+  before among them (not seen).
+
 - **A DOS call is dear on a 486 without VME, and dearer from an app** (measured 2026-11-20 in Loop A with
   `tests/dos/doscalls.c`; 86Box's 486DX2 and Pentium II; microseconds a call, the least of three runs):
 

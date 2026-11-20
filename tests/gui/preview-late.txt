@@ -1,0 +1,19 @@
+#loopa-only (as preview.txt: the host has no other program)
+# The preview surface with a program that is slow to draw (gate 24, 2026-11-20): GUITEST "embedded late" waits two
+# and a half seconds between making its window and showing it, so the page has taken the window in, and the
+# keyboard back, before the program shows it. Being shown must not give the window the keyboard: Stop (Alt+T) is
+# the page's key, and so is Alt+F4. (Without that the keys went to the program inside: Stop did nothing, Alt+F4
+# closed the program and the page stayed.)
+run GUITEST.EXE preview late
+wait "GUITEST Preview"
+key alt+s
+pause 9000
+key alt+t
+gone "GUITEST Embedded"
+pause 3000
+key alt+f4
+gone "GUITEST Preview"
+expect GUI preview
+expect GUI preview in: GUITEST Embedded, 278x120
+expect GUI preview ended
+expect GUI end

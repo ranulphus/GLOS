@@ -380,6 +380,15 @@ Plan: `docs/v1/apps/paint.md`. A new program, `PAINT.EXE`, in the launcher and t
   (`sdk/gui/basic.c`). Found by Paint's Brightness and Contrast in its script.
 - **An open menu is forgotten when its window goes** (`gui_menu_gone`): the menus' state pointed at freed
   windows when a menu's owner was closed with the menu open.
+- **A program shown inside a window took the keyboard from it** (the preview surface; the twenty-fourth gate's
+  `preview` on the 486, 2026-11-20, and the "embedded program still there two seconds after Stop" of the day
+  before, which was taken for slowness): a toolkit program makes its window, draws it, and only then shows
+  it; a host that looked in between took the window in and took the keyboard back, and the program's showing
+  it then gave the keyboard to the window inside. The host's keys were the program's from there: Stop did
+  nothing, Alt+F4 closed the program and left the host. Being shown no longer gives a window inside another
+  the keyboard (`kernel/wm/deskapp.c`, `desk_win_state`): its host has it until the user presses inside.
+  `tests/gui/preview-late.txt` makes the order certain (GUITEST's program inside waits two and a half seconds
+  before it shows its window): it failed as the gate's did on every machine before the change.
 - **The suites:** a GUI script that fails now reports each app's exit code and what it wrote to stderr; a
   script waits for a full-screen program's end by `settle` (no DOS program running) where it paused a fixed
   time (a session is 8.6 seconds on the G400's machine: `term-run`, the twelfth gate); the batch case waits

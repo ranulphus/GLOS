@@ -374,6 +374,9 @@ int desk_win_new(struct app *a, const struct desk_new *n, u32 *id)
     return r;
 }
 
+/* (A window shown inside another's does not take the keyboard by being shown: its host has it until the user
+   presses inside. A program slow to draw shows its window after its host took it in and took the keyboard back,
+   and the host's keys were then the program's: gate 24's "preview" on the 486's profile, 2026-11-20.) */
 int desk_win_state(struct app *a, u32 id, int state, int focus)
 {
     struct wm *m = desk_lock();
@@ -404,7 +407,7 @@ int desk_win_state(struct app *a, u32 id, int state, int focus)
             r = GLOS_E_MEMORY;
         else if (state == WS_MIN)
             desk_refocus(m);
-        else if (focus)
+        else if (focus && !(w->flags & WF_EMBED))
             wm_set_focus(m, w);
     }
     let_go(a);                                  /* (pixels of its old size) */
