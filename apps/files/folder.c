@@ -60,7 +60,7 @@ static struct {                         /* the browser's view and its columns, a
 
 enum { C_OPEN = 1, C_NEWDIR, C_RENAME, C_DELETE, C_CLOSE, C_CUT, C_COPY, C_PASTE, C_ALL, C_BIG, C_DETAILS, C_REFRESH,
        C_UP, C_BROWSER, C_BACK, C_FORWARD, C_ADDRESS, C_PROPS, C_FIND, C_EXTRACT, C_ZIP, C_DELETE_NOW, C_RECYCLE,
-       C_SMALL, C_THUMBS };
+       C_SMALL, C_THUMBS, C_OPENWITH };
 
 static void say(const char *what, const char *a)
 {
@@ -1600,6 +1600,7 @@ static void paste(struct view *v)
 static void closing(struct gui_window *w);
 static void properties(struct view *v);
 static void find_files(struct view *v);
+static void open_with(struct view *v, const char *path);
 
 /* A name typed (text) as DOS's bytes, in place: false, and said, if DOS's code page hasn't got all of it. */
 static int dos_name(struct gui_window *w, char *name)
@@ -1629,6 +1630,13 @@ static void command(struct gui_window *w, int id)
     case C_OPEN:
         if (r >= 0)
             gui_send(v->list, GUI_ON_ACTIVATE);
+        break;
+    case C_OPENWITH:                            /* the chosen file, by a program chosen for it */
+        if (r >= 0 && !v->arc && !v->ents[(size_t)gui_list_user(v->list, r)].dir) {
+            char p[260];
+            gui_path_join(p, sizeof p, v->dir, v->ents[(size_t)gui_list_user(v->list, r)].name);
+            open_with(v, p);
+        }
         break;
     case C_EXTRACT:                             /* the chosen archive unpacked into a folder of its name, here */
         if (r < 0)
@@ -1951,6 +1959,7 @@ static struct gui_menu *menus(struct gui_window *w, int browser)
     struct gui_menubar *bar = gui_menubar(w);
     struct gui_menu *m = gui_menu(bar, GUI_T("&File"));
     gui_menu_item(m, GUI_T("&Open"), C_OPEN, NULL);
+    gui_menu_item(m, GUI_T("Open &With..."), C_OPENWITH, NULL);
     gui_menu_item(m, GUI_T("&New Folder"), C_NEWDIR, GUI_T("Ctrl+Shift+N"));
     gui_menu_item(m, GUI_T("&Rename"), C_RENAME, GUI_T("F2"));
     gui_menu_item(m, GUI_T("&Delete"), C_DELETE, GUI_T("Del"));
@@ -2256,6 +2265,131 @@ static void properties(struct view *v)
     say("properties", path);
     gui_modal(d);                               /* (which closes it) */
     props_closed();
+}
+
+/* ---- Open With (phase E): the chosen file opened by a program of the user's choosing, this once or, with the
+   box ticked, whenever a file of its kind is opened ([open] .EXT = PROGRAM in GLOS.CFG, which is what Files goes
+   by: files.c). The list has GLOS's own programs that take a file, the one [open] names now if it is another,
+   and whatever Other finds (any program on the discs). */
+
+static struct {
+    struct gui_window *win;
+    struct gui_widget *list, *always;
+    char prog[8][260];                  /* each row's program: a name beside FILES.EXE, or a path */
+    int n, go, keep;                    /* go: the row chosen; keep: the box was ticked */
+} ow;
+
+static void ow_add(const char *title, const char *prog, int kind)
+{
+    const char *cells[1] = { title };
+    int i;
+    for (i = 0; i < ow.n; i++)
+        if (!strcasecmp(ow.prog[i], prog)) {    /* (there already: it is chosen) */
+            gui_list_set(ow.list, i);
+            return;
+        }
+    if (ow.n == 8)
+        return;
+    snprintf(ow.prog[ow.n], sizeof ow.prog[0], "%s", prog);
+    gui_list_set(ow.list, gui_list_add(ow.list, cells, icon(kind, 0), NULL));
+    ow.n++;
+}
+
+static void ow_button(struct gui_widget *b, int what)
+{
+    static const char *const filters[] = { GUI_N("Programs|*.EXE;*.COM;*.BAT"), NULL };
+    (void)what;
+    if (b->id == 1) {
+        ow.go = gui_list_get(ow.list);
+        ow.keep = ow.always && gui_checked(ow.always);  /* (read while the dialog is there: gui_modal closes it) */
+        if (ow.go >= 0)
+            gui_end_modal(ow.win, 1);
+    } else if (b->id == 2) {
+        gui_end_modal(ow.win, 0);
+    } else if (b->id == 3) {                    /* Other: a program found on the discs */
+        struct gui_file_opts o;
+        char p[260];
+        memset(&o, 0, sizeof o);
+        o.filters = filters;
+        snprintf(p, sizeof p, "%s", files_home);
+        if (gui_file_dialog_ex(ow.win, GUI_T("Choose a Program"), 0, p, sizeof p, &o)) {
+            char name[128];
+            ow_add(gui_dos_text(gui_path_name(p), name, sizeof name), p, IC_PROGRAM);
+        }
+    }
+}
+
+static void ow_list_on(struct gui_widget *w, int what)
+{
+    if (what == GUI_ON_ACTIVATE && (ow.go = gui_list_get(w)) >= 0) {
+        ow.keep = ow.always && gui_checked(ow.always);
+        gui_end_modal(ow.win, 1);
+    }
+}
+
+static void open_with(struct view *v, const char *path)
+{
+    static const struct { const char *title, *exe; int kind; } own[] = {
+        { GUI_N("Notepad"), "NOTEPAD.EXE", IC_NOTEPAD }, { GUI_N("Images"), "IMAGES.EXE", IC_IMAGES },
+        { GUI_N("Paint"), "PAINT.EXE", IC_PAINT } };
+    struct gui_widget *box, *row;
+    char t[300], name[128], ext[8] = ".", now[120], cmd[600], dir[260];
+    const char *d = strrchr(gui_path_name(path), '.');
+    int set = 0, r;
+    size_t i;
+    ow.win = gui_window(GUI_T("Open With"), 300, 0, GUI_W_DIALOG);
+    ow.win->owner = v->win;
+    box = gui_vbox(ow.win->root, 6, 8);
+    snprintf(t, sizeof t, GUI_T("Open %s with:"), gui_dos_text(gui_path_name(path), name, sizeof name));
+    gui_label(box, t);
+    ow.list = gui_list(box, 1, NULL, NULL);
+    gui_size(ow.list, 280, 110);
+    gui_on(ow.list, ow_list_on, 0);
+    ow.n = 0;
+    for (i = 0; i < sizeof own / sizeof own[0]; i++)
+        ow_add(GUI_T(own[i].title), own[i].exe, own[i].kind);
+    gui_list_set(ow.list, 0);
+    now[0] = 0;
+    if (d && d[1] && strlen(d) <= 4) {          /* (the kind's own program, if [open] names one: chosen) */
+        snprintf(ext + 1, sizeof ext - 1, "%s", d + 1);
+        if (glos_setting_get("open", ext, now, sizeof now, &set) == 0 && set && now[0])
+            ow_add(gui_path_name(now), now, IC_PROGRAM);
+    }
+    if (ext[1]) {
+        snprintf(t, sizeof t, GUI_T("&Always open %s files with it"), ext);
+        ow.always = gui_check(box, t, 0);
+    } else {
+        ow.always = NULL;                       /* (a name without a kind: this once only) */
+    }
+    row = gui_hbox(box, 6, 0);
+    gui_button(row, GUI_T("O&ther..."), ow_button, 3);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("OK"), ow_button, 1)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), ow_button, 2)->flags |= GUI_CANCEL;
+    gui_focus(ow.list);
+    ow.go = -1, ow.keep = 0;
+    r = gui_modal(ow.win);                      /* (which closes it) */
+    ow.win = NULL;
+    if (r != 1 || ow.go < 0 || ow.go >= ow.n)
+        return;
+    snprintf(dir, sizeof dir, "%s", path);
+    gui_path_up(dir);
+    if (strchr(ow.prog[ow.go], '\\') || strchr(ow.prog[ow.go], ':'))
+        snprintf(cmd, sizeof cmd, "%s %s", ow.prog[ow.go], path);
+    else
+        snprintf(cmd, sizeof cmd, "%s\\%s %s", files_home, ow.prog[ow.go], path);
+    snprintf(t, sizeof t, "%s %s", ow.prog[ow.go], path);
+    say("open-with", t);
+    files_run(cmd, dir);
+    if (ow.keep) {
+        char why[120] = "";
+        if (glos_setting_set("open", ext, ow.prog[ow.go], NULL, why, sizeof why) != 0) {
+            gui_message(v->win, GUI_T("Open With"), why[0] ? why : GUI_T("The setting couldn't be written."), GUI_MB_OK);
+        } else {
+            snprintf(t, sizeof t, "%s %s", ext, ow.prog[ow.go]);
+            say("always", t);
+        }
+    }
 }
 
 /* ---- search (phase E): files and folders by name, under the folder shown: a name with DOS's wildcards (* and
@@ -2655,6 +2789,7 @@ static struct view *new_view(const char *dir, int browser)
         {                                       /* the list's context menu (the right button, the Menu key) */
             struct gui_menu *c = v->context = gui_menu_new();
             gui_menu_item(c, GUI_T("&Open"), C_OPEN, NULL);
+            gui_menu_item(c, GUI_T("Open &With..."), C_OPENWITH, NULL);
             gui_menu_sep(c);
             gui_menu_item(c, GUI_T("Cu&t"), C_CUT, NULL);
             gui_menu_item(c, GUI_T("&Copy"), C_COPY, NULL);

@@ -300,8 +300,13 @@ are as they were).
   found, Find again for another search, Close to end it). **Containing:** takes text, and then only the files
   that have it in them are found (letters' case apart; with no name given, any file). 2,000 found at most, with
   no limit on what is gone through (it was 200 of 5,000 while the window waited). `files-find` has both.
-- **Not done yet:** the rest of the plan: folders that load as they go, long names, "open with" and apps'
-  entries in the context menu, the rest of archives (above), drag and drop.
+- **Open With** (2026-11-20; File's menu and the context menu): the chosen file opened by a program chosen
+  for it. The list has GLOS's own that take a file (Notepad, Images, Paint) and the program the file's kind
+  has already, if it is another; **Other** finds any program on the discs. **Always open .EXT files with it**
+  writes `[open] .EXT = PROGRAM` (the setting Files has gone by since M9; the Control Panel shows it too).
+  `files-openwith` on the host and on Loop A.
+- **Not done yet:** the rest of the plan: folders that load as they go, long names, apps' own entries in the
+  context menu, the rest of archives (above), drag and drop.
 
 ## Images (2026-11-19): the viewer's toolbar, turning, details, slideshow
 

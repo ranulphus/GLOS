@@ -9,6 +9,8 @@ in its `docs/milestones-*.md`.
 - **Find Files** lists what it finds as it comes, and can look inside files: **Containing:** takes text, and
   only the files with that text in them are found. A whole drive can be searched; the window goes on answering.
 - **Properties** of a folder is up at once and counts what the folder holds while it is shown.
+- **Open With** (File's menu, the right button's menu): a file opened by a program you choose, once or, with
+  the box ticked, for every file of its kind from then on.
 
 ## Images: a filmstrip (2026-11-20)
 

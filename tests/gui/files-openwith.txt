@@ -1,0 +1,32 @@
+# Open With in the browser (apps/files; phase E, docs/v1/apps/files.md): the chosen file opened by a program
+# chosen for it: the list has GLOS's own that take a file; Other finds any program on the discs, which joins the
+# list, chosen. With the box ticked the kind is that program's from then on ([open] .DAT = ... in GLOS.CFG): Open
+# With on the file again has the program in its list, chosen.
+# (The program here is a batch file that says a word and ends: one of GLOS's own would leave its window on Loop
+# A's desktop, where the scripts after this one are played. No other script opens a .DAT file.)
+run FILES.EXE -browse C:\FM
+wait "C:\FM - Files"
+key home
+key down
+key down
+key alt+f w
+wait "Open With"
+shot list "Open With"
+key alt+t
+wait "Choose a Program"
+type c:\\fm\\hello.bat\n
+gone "Choose a Program"
+key alt+a
+shot other "Open With"
+key enter
+gone "Open With"
+key alt+f w
+wait "Open With"
+shot kept "Open With"
+key esc
+gone "Open With"
+key alt+f4
+gone "C:\FM - Files"
+expect FILES open-with C:\FM\HELLO.BAT C:\FM\DATA.DAT
+expect FILES always .DAT C:\FM\HELLO.BAT
+expect FILES end 
