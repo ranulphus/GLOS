@@ -46,6 +46,8 @@ struct doc {
     int kind;                           /* its highlighting chosen by hand (lexer_kind's number); -1: by its name */
     int enc;                            /* how its file's bytes are text: 0 UTF-8, else a DOS code page's number */
     int bom;                            /* (UTF-8) its file began with the byte order mark: written again */
+    int loading;                        /* its file is being read on a worker's thread (which reading: load_big) */
+    struct gui_task *ltask;
 };
 
 static struct gui_window *win;
@@ -289,20 +291,38 @@ static struct doc *doc_new(void)
     return d;
 }
 
-/* A file read into a document. as: how its bytes are text (0 UTF-8, a code page's number), or -1: found out. */
-static int load_as(struct doc *d, const char *p, int as)
+/* ---- a file read into a document.
+
+   read_text reads the file and makes the editor's text of it (UTF-8), saying how its bytes were text; it touches
+   no widget, so that a big file's reading can be a worker's (load_big). loaded_put gives the text to the
+   document, on the window's thread. A file of BIG_MIN bytes or more is read on a worker's thread, with the
+   toolkit's progress dialog after a second (its Cancel leaves the document empty and nameless); the window
+   answers meanwhile, and the other tabs are as they were. (Until 2026-11-20 every file was read by the window's
+   own thread: 20 MB kept it deaf for as long as the disc took.) */
+#define BIG_MIN (1ul << 20)
+static unsigned long big_min = BIG_MIN; /* (NOTEPAD -big N: the tests' way to a "big" file of forty bytes) */
+static int load_gen;
+
+struct loaded {
+    char path[260];
+    char *buf;                          /* the editor's text (malloc'd), or NULL */
+    size_t n, size;                     /* its length; the file's own */
+    int as, dos;                        /* in: how to take its bytes (-1: found out); the code page DOS has */
+    int enc, bom;                       /* out */
+    int err;                            /* 0; 1 no such file (a new one by that name); 2 no memory; 3 given up */
+    int gen;                            /* (load_big: which reading) */
+};
+
+static void read_text(struct loaded *L, struct gui_task *t)
 {
-    FILE *f = gui_fopen(p, "rb");
+    FILE *f = gui_fopen(L->path, "rb");
     char *buf = NULL;
-    size_t n = 0, room = 0, k, size;
+    size_t n = 0, room = 0, k;
     int high = 0;
+    L->buf = NULL, L->n = L->size = 0, L->enc = L->dos, L->bom = 0, L->err = 0;
     if (!f) {
-        strncpy(d->path, p, sizeof d->path - 1);        /* (a new file by that name) */
-        gui_code_set(d->ed, NULL, 0);
-        doc_style(d);
-        note("new %s", p);
-        title();
-        return 0;
+        L->err = 1;
+        return;
     }
     for (;;) {
         if (n == room) {
@@ -310,50 +330,134 @@ static int load_as(struct doc *d, const char *p, int as)
             if (!nb) {
                 fclose(f);
                 free(buf);
-                gui_message(win, GUI_T("Notepad"), GUI_T("The file is too big for the memory there is."), GUI_MB_OK);
-                return -1;
+                L->err = 2;
+                return;
             }
             buf = nb;
         }
-        if (!(k = fread(buf + n, 1, room - n, f)))
+        if (!(k = fread(buf + n, 1, room - n < 65536 ? room - n : 65536, f)))
             break;
         n += k;
+        if (t) {                                /* (a worker's: how far it is, and whether it is still wanted) */
+            gui_task_progress(t, (int)(n >> 10), 0, NULL);
+            if (gui_task_cancelled(t)) {
+                fclose(f);
+                free(buf);
+                L->err = 3;
+                return;
+            }
+        }
     }
     fclose(f);
-    size = n;
-    d->bom = 0;
-    if (as != 0 && as != -1) {                  /* (said: that code page's) */
-        d->enc = as;
+    L->size = n;
+    if (L->as != 0 && L->as != -1) {            /* (said: that code page's) */
+        L->enc = L->as;
     } else if (n >= 3 && !memcmp(buf, "\xEF\xBB\xBF", 3)) {
-        d->enc = 0, d->bom = 1;
+        L->enc = 0, L->bom = 1;
         memmove(buf, buf + 3, n -= 3);
-    } else if (as == 0 || (utf8_ok((const unsigned char *)buf, n, &high) && high)) {
-        d->enc = 0;
+    } else if (L->as == 0 || (utf8_ok((const unsigned char *)buf, n, &high) && high)) {
+        L->enc = 0;
     } else {
-        d->enc = enc_dos();
+        L->enc = L->dos;
     }
-    if (d->enc) {                               /* its bytes as the editor's text */
+    if (L->enc) {                               /* its bytes as the editor's text */
         size_t m = 0;
-        char *u = enc_to_utf8(d->enc, buf, n, &m);
-        if (!u) {
-            free(buf);
-            gui_message(win, GUI_T("Notepad"), GUI_T("The file is too big for the memory there is."), GUI_MB_OK);
-            return -1;
-        }
+        char *u = enc_to_utf8(L->enc, buf, n, &m);
         free(buf);
+        if (!u) {
+            L->err = 2;
+            return;
+        }
         buf = u, n = m;
     }
-    gui_code_set(d->ed, buf, n);                /* (the buffer is the editor's now) */
-    strncpy(d->path, p, sizeof d->path - 1);
-    d->path[sizeof d->path - 1] = 0;
+    L->buf = buf, L->n = n;
+}
+
+static int loaded_put(struct doc *d, struct loaded *L)  /* 0, or -1: not read */
+{
+    if (L->err == 1) {
+        snprintf(d->path, sizeof d->path, "%s", L->path);       /* (a new file by that name) */
+        gui_code_set(d->ed, NULL, 0);
+        doc_style(d);
+        note("new %s", L->path);
+        title();
+        return 0;
+    }
+    if (L->err) {
+        if (L->err == 2)
+            gui_message(win, GUI_T("Notepad"), GUI_T("The file is too big for the memory there is."), GUI_MB_OK);
+        return -1;
+    }
+    d->enc = L->enc, d->bom = L->bom;
+    gui_code_set(d->ed, L->buf, L->n);          /* (the buffer is the editor's now) */
+    L->buf = NULL;
+    snprintf(d->path, sizeof d->path, "%s", L->path);
     doc_style(d);
     title();
     {
         char t[300];
-        snprintf(t, sizeof t, "%s %lu", p, (unsigned long)size);
+        snprintf(t, sizeof t, "%s %lu", L->path, (unsigned long)L->size);
         note("open %s", t);
     }
     return 0;
+}
+
+static void big_work(struct gui_task *t, void *arg) { read_text(arg, t); }
+
+static void big_done(struct gui_window *owner, void *arg, int cancelled)
+{
+    struct loaded *L = arg;
+    int i;
+    (void)owner, (void)cancelled;
+    for (i = 0; i < ndocs; i++)
+        if (doc[i].loading == L->gen) {         /* (its document is still there: a closed tab's reading is nobody's) */
+            struct doc *d = &doc[i];
+            d->loading = 0, d->ltask = NULL;
+            gui_enable(d->ed, 1);
+            if (loaded_put(d, L) != 0) {        /* given up, or no memory: an empty, nameless text again */
+                d->path[0] = 0;
+                gui_code_set(d->ed, NULL, 0);
+                doc_style(d);
+                title();
+                note("open given up %s", L->path);
+            }
+            break;
+        }
+    free(L->buf);
+    free(L);
+}
+
+/* as: how its bytes are text (0 UTF-8, a code page's number), or -1: found out. */
+static int load_as(struct doc *d, const char *p, int as)
+{
+    struct loaded *L = calloc(1, sizeof *L);
+    struct gui_dirent st;
+    char title_text[200], name[128];
+    int r;
+    if (!L)
+        return -1;
+    snprintf(L->path, sizeof L->path, "%s", p);
+    L->as = as, L->dos = enc_dos();
+    if (gui_stat(p, &st) == 0 && !st.dir && st.size >= big_min) {      /* a big one: read beside the window */
+        if (d->ltask)
+            gui_task_cancel(d->ltask);
+        d->loading = L->gen = ++load_gen;
+        strncpy(d->path, p, sizeof d->path - 1);        /* (its tab has its name while it is read) */
+        d->path[sizeof d->path - 1] = 0;
+        gui_code_set(d->ed, NULL, 0);
+        gui_enable(d->ed, 0);
+        title();
+        snprintf(title_text, sizeof title_text, GUI_T("Opening %s"), gui_dos_text(gui_path_name(p), name, sizeof name));
+        if ((d->ltask = gui_task_start(win, title_text, big_work, L, big_done, GUI_TASK_DIALOG)) != NULL)
+            return 0;
+        d->loading = 0;                         /* (no threads: read here after all) */
+        gui_enable(d->ed, 1);
+    }
+    read_text(L, NULL);
+    r = loaded_put(d, L);
+    free(L->buf);
+    free(L);
+    return r;
 }
 
 static int load(struct doc *d, const char *p) { return load_as(d, p, -1); }
@@ -381,9 +485,11 @@ static void open_file(const char *p)
 static int save_to(struct doc *d, const char *p)
 {
     size_t n;
-    char *buf = gui_code_text(d->ed, &n);
+    char *buf;
     FILE *f;
-    if (!buf)
+    if (d->loading)                             /* (its file is still being read: nothing of it to write yet) */
+        return -1;
+    if (!(buf = gui_code_text(d->ed, &n)))
         return -1;
     if (d->enc) {                               /* as its code page's bytes; what the page hasn't got is asked about */
         size_t m = 0;
@@ -472,6 +578,11 @@ static void doc_close(struct doc *d)
     int i, at = (int)(d - doc);
     if (keep_changes(d) != 0)
         return;
+    if (d->ltask) {                             /* (its file is being read: no longer wanted) */
+        gui_task_cancel(d->ltask);
+        d->ltask = NULL, d->loading = 0;
+        gui_enable(d->ed, 1);
+    }
     note("closed %s", d->path[0] ? d->path : "Untitled");
     if (ndocs == 1) {
         d->path[0] = 0;
@@ -1275,7 +1386,10 @@ int main(int argc, char **argv)
     gui_menu_check(view, C_SESSION, session);
     doc_new();
     for (i = 1; i < argc; i++)                  /* NOTEPAD FILE...: each in a tab */
-        open_file(argv[i]);
+        if (!strcmp(argv[i], "-big") && i + 1 < argc)   /* (-big N: files of N bytes and more are "big": the suites') */
+            big_min = strtoul(argv[++i], NULL, 10);
+        else
+            open_file(argv[i]);
     if (argc < 2)
         session_load(1);                        /* (started bare: the session's files, if one is kept) */
     if (ndocs > 1) {

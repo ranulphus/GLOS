@@ -1,0 +1,23 @@
+# A big file in Notepad (apps/notepad; phase E, docs/v1/apps/notepad.md): a file of a megabyte or more is read on
+# a worker's thread, the window answering meanwhile (a progress dialog comes after a second of it, with Cancel).
+# "Big" here is thirty bytes or more (-big 30), so that C:\INF\A.TXT is one and NONE.TXT, opened after it, is
+# not: both are there as any file is, and Notepad says when the big one has come.
+run NOTEPAD.EXE -big 30 C:\INF\A.TXT
+wait "A.TXT - Notepad"
+said NOTEPAD open C:\INF\A.TXT 38
+shot big "A.TXT - Notepad"
+key ctrl+end
+type more
+key ctrl+o
+wait "Open"
+type c:\\inf\\none.txt\n
+wait "NONE.TXT - Notepad"
+shot small "NONE.TXT - Notepad"
+key ctrl+w
+key ctrl+w
+wait "Notepad"
+key alt+n
+key alt+f4
+expect NOTEPAD open C:\INF\A.TXT 38
+expect NOTEPAD open C:\INF\NONE.TXT 22
+expect NOTEPAD end

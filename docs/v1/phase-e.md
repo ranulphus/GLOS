@@ -139,9 +139,15 @@ Plan: `docs/v1/apps/notepad.md`. The first of its parts.
   - Until now a file's bytes were shown as UTF-8 whatever they were: a DOS text with accents was strays.
   - **Tests:** `notepad-enc` on the host and on Loop A (a code page file changed and read back byte for byte;
     a UTF-8 file with its mark; a UTF-8 text saved in code page 437 with a euro sign in it).
+- **Large files** (2026-11-20): a file of a megabyte or more is read on a worker's thread, and made the
+  editor's text there (its code page taken for UTF-8 too): its tab has its name at once, the window and the
+  other tabs answer meanwhile, and after a second of reading the toolkit's progress dialog says how far it is,
+  with Cancel (the tab is an empty, nameless text again). Every file was read by the window's own thread
+  until now: twenty megabytes kept it deaf for as long as the disc took. A text being read is not saved
+  over its file. `notepad-big` on the host and on Loop A (`-big 30` makes a file of 38 bytes a big one).
 - **Not done yet:** files dropped on the window; the pane resized by a bar, regular expressions and whole
-  words in Find in Files; the line ends in the status bar and chosen; large files; bookmarks and the chosen
-  kind kept with the session.
+  words in Find in Files; the line ends in the status bar and chosen; a big file's first screen before the
+  rest of it is read, and files bigger than memory; bookmarks and the chosen kind kept with the session.
 
 ## Files (2026-11-18): the browser's toolbar and address bar
 

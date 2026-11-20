@@ -16,6 +16,11 @@ in its `docs/milestones-*.md`.
 - **A folder of hundreds or thousands of files is shown at once,** its first screenfuls first and the rest as
   they are read; the window no longer waits for the last file before it shows the first.
 
+## Notepad: big files (2026-11-20)
+
+- **A file of a megabyte or more is opened in the background:** Notepad goes on answering while it is read,
+  shows how far the reading has got, and lets you cancel it.
+
 ## Notepad: code pages and UTF-8 (2026-11-20)
 
 - **A DOS text with accented letters is shown as it should be,** and written back as it was: Notepad reads a
