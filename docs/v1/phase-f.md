@@ -1147,3 +1147,25 @@ beacons, the lamp or the next buoy. Not a toolkit program: its window is DOS-GL'
 - **Not yet**: all of the plan beyond that (the lobby, network games, arenas from files, sound, pads and
   the mouse, full screen, names over the craft). **To be measured**: frames a second on
   the benches' cards and with the software renderer.
+
+### Its network's messages (the same day; no sockets yet)
+
+`apps/shared/hvnet.c`: what the PCs of a game say to each other, as bytes in and out, so that the host's test
+can put a bad network between copies of the game. One PC opens a game and runs its steps for everyone; the
+others send their craft's controls each step and are sent the whole game's state every other step (157 bytes
+for eight craft: every craft's place, speed and heading, the scores, flags, beacons and lamp). Nothing depends
+on a message before it: a datagram lost is the next one's to mend; an older one that comes late is passed
+over (controls by their count, states by their step). FIND and OFFER (a game looked for and shown), JOIN and
+TAKEN or FULL (asked again, the same craft is given), KEYS, STATE, BYE. A joiner not heard for three seconds
+is the computer's. Every message has the game's mark and version: another release's is not answered, but
+for a JOIN, which is told so.
+
+- **Tests** (in `hv_test`, 133 checks in all): an opener and two joiners over a network that loses 30 in a
+  hundred, doubles 10 and delivers up to three steps late and out of order: both join, each with its own
+  craft; every state a joiner takes in is the opener's game as it was at that step, to the unit; a game of
+  beacons is played to a score by the joiners' own driving from what they see; the quiet one and the one
+  that leaves; a game with no craft free; another release; 20000 datagrams of no sense or with bytes changed
+  never put a craft of a joiner's view off the arena.
+- **Not yet**: the sockets (GLOS's UDP, API 2.2: a broadcast to find, datagrams to play), the lobby that
+  lists games and joins one, a joiner's own craft drawn from its own controls at once and put right gently
+  (the messages carry what that needs: the controls' count), the others drawn between the states told.

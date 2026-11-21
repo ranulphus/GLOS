@@ -8,6 +8,7 @@
 #include "../../apps/shared/hvarenas.h"
 #include "../../apps/shared/hvbasin.h"
 #include "../../apps/shared/hvgame.h"
+#include "../../apps/shared/hvnet.h"
 
 static int fails, checks;
 static int iabs(int v) { return v < 0 ? -v : v; }
@@ -284,6 +285,155 @@ static void game_tests(void)
     }
 }
 
+/* ---- the game over a network (apps/shared/hvnet.c): an opener and two joiners in this one program, and between
+   them a network that loses datagrams, sends some twice, and delivers them late and out of order. */
+
+struct wire {                           /* a datagram on its way */
+    unsigned char m[HV_NET_MOST];
+    int n, due, to;                     /* to: 0 the opener, 1 and 2 the joiners; from a joiner: who it is from */
+    unsigned long from;
+};
+static struct wire wires[512];
+static int nwires, lose = 30, twice = 10, late = 3;     /* per cent lost, per cent doubled, steps late at most */
+
+static void post(int to, unsigned long from, const unsigned char *m, int n, int now)
+{
+    int copies = (int)(rnd() % 100) < lose ? 0 : (int)(rnd() % 100) < twice ? 2 : 1;
+    while (copies-- > 0 && nwires < 512 && n > 0) {
+        memcpy(wires[nwires].m, m, (size_t)n);
+        wires[nwires].n = n, wires[nwires].to = to, wires[nwires].from = from;
+        wires[nwires++].due = now + (late ? (int)(rnd() % (unsigned)(late + 1)) : 0);
+    }
+}
+
+static void net_tests(void)
+{
+    static struct hv_arena basin;
+    static struct hv_opener o;
+    static struct hv_joiner j[3];
+    static struct hv_craft past[64][HV_CRAFT];          /* the opener's craft at its last 64 steps */
+    static int past_score[64][2];
+    unsigned char m[HV_NET_MOST], back[HV_NET_MOST];
+    char why[160], name[17];
+    int now, k, i, n, offer[4], bad = 0, heard_offer = 0, behind_most = 0;
+    hv_arena_read(&basin, hv_arenas[0], strlen(hv_arenas[0]), why, sizeof why);
+    hv_opener_start(&o, &basin, 0, HV_BEACONS, 4, "Opener's game");
+    hv_joiner_start(&j[1]), hv_joiner_start(&j[2]);
+    nwires = 0;
+    for (now = 0; now < 1800; now++) {
+        for (k = 1; k <= 2; k++) {              /* the joiners: look, ask until taken, then their controls each step */
+            if (!j[k].joined && now % 10 == 0) {
+                post(0, (unsigned long)k, m, hv_joiner_find(m), now);
+                post(0, (unsigned long)k, m, hv_joiner_join(k == 1 ? "First" : "Second", m), now);
+            } else if (j[k].joined) {
+                unsigned keys = j[k].step ? hv_auto(&j[k].view, j[k].craft, 1) : 0;
+                post(0, (unsigned long)k, m, hv_joiner_keys(&j[k], keys, m), now);
+            }
+        }
+        for (i = 0; i < nwires;) {              /* what is due is delivered, in no order */
+            struct wire w;
+            if (wires[i].due > now) {
+                i++;
+                continue;
+            }
+            w = wires[i];
+            wires[i] = wires[--nwires];
+            if (w.to == 0) {
+                n = hv_opener_hear(&o, w.from, w.m, w.n, back);
+                post((int)w.from, 0, back, n, now);
+            } else {
+                int r = hv_joiner_hear(&j[w.to], &basin, w.m, w.n, offer, name);
+                if (r == 1)
+                    heard_offer += offer[0] == HV_BEACONS && offer[2] == 4 && !strcmp(name, "Opener's game");
+                if (r == 2 && j[w.to].step) {   /* its view is the opener's game as it was at that step, to the unit */
+                    const struct hv_craft *was = past[j[w.to].step % 64];
+                    int behind = (int)(o.game.steps - j[w.to].step);
+                    if (behind > behind_most)
+                        behind_most = behind;
+                    for (k = 0; k < 4 && behind < 64; k++)
+                        bad += j[w.to].view.c[k].x != was[k].x || j[w.to].view.c[k].y != was[k].y || j[w.to].view.c[k].heading != was[k].heading
+                               || j[w.to].view.c[k].vx != was[k].vx || j[w.to].view.c[k].side != was[k].side;
+                    bad += behind < 64 && (j[w.to].view.score[0] != past_score[j[w.to].step % 64][0]
+                                           || j[w.to].view.score[1] != past_score[j[w.to].step % 64][1]);
+                }
+            }
+        }
+        hv_opener_step(&o, hv_auto(&o.game, 0, 1));
+        memcpy(past[o.game.steps % 64], o.game.c, sizeof o.game.c);
+        past_score[o.game.steps % 64][0] = o.game.score[0], past_score[o.game.steps % 64][1] = o.game.score[1];
+        if (now % 2 == 0) {
+            n = hv_opener_state(&o, m);
+            post(1, 0, m, n, now), post(2, 0, m, n, now);
+        }
+    }
+    CHECK(j[1].joined && j[2].joined && j[1].craft != j[2].craft && j[1].craft != 0 && j[2].craft != 0 && heard_offer > 0,
+          "two joined over a bad network: craft %d and %d, offers %d", j[1].craft, j[2].craft, heard_offer);
+    CHECK(o.seat[j[1].craft].taken && o.seat[j[2].craft].taken && !strcmp(o.seat[j[1].craft].name, "First"), "the opener knows them: %s",
+          o.seat[j[1].craft].name);
+    CHECK(bad == 0 && behind_most < 40 && o.game.steps - j[1].step < 30 && o.game.steps - j[2].step < 30,
+          "what a joiner sees is the game as it was: %d faults, %d steps behind at most, now %u and %u of %u", bad, behind_most, j[1].step,
+          j[2].step, o.game.steps);
+    CHECK(o.game.score[0] + o.game.score[1] > 10 && j[1].view.score[0] + j[1].view.score[1] > 10, "a game was played: %d %d", o.game.score[0],
+          o.game.score[1]);
+    /* a joiner gone quiet is the computer's after three seconds; one that says so, at once */
+    for (k = 0; k < HV_NET_QUIET + 5; k++) {
+        n = hv_joiner_keys(&j[2], 0, m);
+        hv_opener_hear(&o, 2, m, n, back);
+        hv_opener_step(&o, 0);
+    }
+    CHECK(!o.seat[j[1].craft].taken && o.seat[j[2].craft].taken, "the quiet one's craft is the computer's");
+    n = hv_joiner_bye(&j[2], m);
+    hv_opener_hear(&o, 2, m, n, back);
+    CHECK(!o.seat[j[2].craft].taken, "the one that left");
+    /* no craft free; another release; what is no message at all */
+    hv_opener_start(&o, &basin, 0, HV_LAPS, 2, "Small");
+    hv_joiner_start(&j[1]), hv_joiner_start(&j[2]);
+    n = hv_opener_hear(&o, 1, m, hv_joiner_join("A", m), back);
+    hv_joiner_hear(&j[1], &basin, back, n, offer, name);
+    n = hv_opener_hear(&o, 2, m, hv_joiner_join("B", m), back);
+    hv_joiner_hear(&j[2], &basin, back, n, offer, name);
+    CHECK(j[1].joined && j[1].craft == 1 && !j[2].joined && j[2].refused == 1, "a game of two: one joins, one is told it is full");
+    n = hv_opener_hear(&o, 1, m, hv_joiner_join("A", m), back);
+    CHECK(n > 4 && back[3] == HV_M_TAKEN && back[4] == 1, "asked again: the same craft");
+    hv_opener_start(&o, &basin, 0, HV_LAPS, 4, "Other");
+    hv_joiner_start(&j[1]);
+    n = hv_joiner_join("A", m);
+    m[2] = HV_NET_VERSION + 1;
+    n = hv_opener_hear(&o, 1, m, n, back);
+    CHECK(n == 4 && back[3] == HV_M_FULL && !o.seat[1].taken, "another release is not let in");
+    back[2] = HV_NET_VERSION + 1;
+    hv_joiner_hear(&j[1], &basin, back, n, offer, name);
+    CHECK(!j[1].joined && j[1].refused == 2, "... and knows why");
+    n = hv_joiner_find(m);
+    m[2] = HV_NET_VERSION + 1;
+    CHECK(hv_opener_hear(&o, 1, m, n, back) == 0, "... nor shown the game");
+    hv_joiner_start(&j[1]);
+    n = hv_opener_hear(&o, 1, m, hv_joiner_join("A", m), back);
+    hv_joiner_hear(&j[1], &basin, back, n, offer, name);
+    for (k = 0, bad = 0; k < 20000; k++) {      /* bytes of no sense, and true messages with bytes changed */
+        int len = (int)(rnd() % HV_NET_MOST) + 1;
+        if (k & 1) {
+            len = hv_opener_state(&o, m);
+            for (i = 0; i < 3; i++)
+                m[rnd() % (unsigned)len] = (unsigned char)rnd();
+            if (k & 2)
+                len = (int)(rnd() % (unsigned)len);
+        } else {
+            for (i = 0; i < len; i++)
+                m[i] = (unsigned char)rnd();
+            if (k & 4)
+                m[0] = 'H', m[1] = 'V', m[2] = HV_NET_VERSION, m[3] = (unsigned char)(rnd() % 10);
+        }
+        hv_opener_hear(&o, (unsigned long)(k % 3), m, len, back);
+        hv_joiner_hear(&j[1], &basin, m, len, offer, name);
+        for (i = 0; i < 4 && j[1].step; i++)
+            bad += j[1].view.c[i].x < 0 || j[1].view.c[i].x >= basin.w * 256 || j[1].view.c[i].y < 0 || j[1].view.c[i].y >= basin.h * 256
+                   || j[1].view.c[i].heading > 1023;
+        hv_opener_step(&o, 0);
+    }
+    CHECK(bad == 0, "20000 bad datagrams: a view's craft off the arena %d times", bad);
+}
+
 int main(int argc, char **argv)
 {
     static struct hv_arena a;
@@ -360,6 +510,7 @@ int main(int argc, char **argv)
         CHECK(refused(wide, "line 1: a row longer than an arena is wide"), "49 squares wide");
     }
     game_tests();
+    net_tests();
     CHECK(hv_arena_read(&a, HV_BASIN, sizeof HV_BASIN - 1, why, sizeof why) == 0 && a.nbuoy == 4 && a.nbeacon == 4 && a.ndock[0] == 3,
           "the program's own arena: %s", why);
     {
