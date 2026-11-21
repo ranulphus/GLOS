@@ -384,7 +384,11 @@ Everything else (the files, the directories, the cache) is the kernel's, above 1
   FINDFIRST's template, matching and search attributes, and a byte's upper case in the code page
   (`names_test`); `exe.c`, what EXEC computes of a .COM or .EXE (the image from the header's pages and last
   page, memory needed and wanted, loading high when both allocations are 0, relocations by a factor for 4B03h's
-  overlays too, the starting registers RBIL gives) (`exe_test`). FCB parsing (29h) waits for MS-DOS 7.1 to
+  overlays too, the starting registers RBIL gives) (`exe_test`); `mcb.c`, the memory chain (48h, 49h, 4Ah,
+  5801h, 5803h: first, best and last fit, upper memory only or first, the largest block told on failure, free
+  blocks joined on allocating and resizing but not on freeing, a failed resize leaving the block as large as it
+  can be (DOS 2.1-6.0's, to check against 7.1), upper memory linked through a DOS "SC" block from A000h)
+  (`mcb_test`). FCB parsing (29h) waits for MS-DOS 7.1 to
   compare with: RBIL doesn't give its separators and terminators. Open: whether MS-DOS 7.1's table for 437 makes e acute E acute (as GLOS does now, and
   Windows 98's short names) or E: checked against its COUNTRY.SYS with the owner's image (N7).
 
