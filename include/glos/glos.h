@@ -265,8 +265,9 @@ int glos_secret_remove(const char *name, unsigned flags);
 /* The store itself (what: GLOS_STORE_STATE, _UNLOCK, _PASSWORD): its state (GLOS_STORE_) and whether it has a
    master password, as they are afterwards (either pointer may be 0). The user is asked in GLOS's own dialogs. */
 int glos_secrets_store(unsigned what, unsigned *state, unsigned *has_password);
-/* DRAW's CACHE: some of the program's DOS memory write-combining (GLOS_CACHE_WC) or write-back again; for any
-   program. 0, or GLOS_E_. */
+/* DRAW's CACHE: some of the program's DOS memory write-combining (GLOS_CACHE_WC) or write-back again, or 4 to
+   64 KB of a video card's memory that it has mapped write-combining or uncached again (GLOS_CACHE_UC; 2.11);
+   for any program. 0, or GLOS_E_. */
 int glos_cache(unsigned address, unsigned bytes, unsigned type);
 /* DEBUG: a channel to a job of this app's (run with GLOS_RUNF_DEBUG, or running), 0 with glos_error(); gdb's
    remote protocol's bytes to the stub and from it. */

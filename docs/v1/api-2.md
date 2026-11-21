@@ -433,6 +433,19 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   RTS set, CTS, DSR, DCD and RI read) and BREAK. No network is needed. One at a time for all apps
   (GLOS_E_REFUSED for a second, and for the cable link's port); GLOS_E_NOT_FOUND where no chip answers. As
   built: `docs/v1/phase-f.md`. Tests: the sshc suite's `serial_case`.
+- **2.11 (2026-11-21): a write-combining page of a video card's own**, asked for by DOS-GL's Rage 128 layer,
+  whose command words were each an uncached write. DRAW's CACHE, until now for the program's conventional
+  memory alone, also takes memory of a video card's that the program has mapped (DPMI 0800h): 4 to 64 KB, a
+  power of two, the physical address a multiple of the size and all of it inside one memory range of a video
+  card's by PCI (so never RAM, never another device). `GLOS_CACHE_WC` takes one of the CPU's variable ranges
+  for it and maps the program's pages so that the range's type reaches them; the new `GLOS_CACHE_UC` (0) puts
+  it back, and so does the program's end. One such range at a time for all programs (GLOS_E_REFUSED for a
+  second program; also where the CPU's own ranges don't allow it); GLOS_E_FUNCTION on a CPU without such
+  ranges; GLOS_E_ARGUMENT for anything else, which is also what an older GLOS answers for any address above
+  the first megabyte, so a program needs no version check: it asks, and carries on uncached if refused. No
+  new function. By hand: the `MTRR PAGE base [KB]` command (`MTRR PAGE OFF`; `MTRR OFF` too), for a program
+  that maps the page afterwards. Tests: CACHEWC in `make loopa-dpmi` (`HX-CACHE-CARD`), the command in the
+  ssh suite's `mtrr` check.
 
 ### 0Ch SETTINGS
 

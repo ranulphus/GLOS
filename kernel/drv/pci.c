@@ -153,6 +153,41 @@ int pci_uses_line(const struct pci_dev *d) { return d->pin >= 1 && d->pin <= 4 &
    (if asked), and its size, capped: 32 MB (no card of the period has more behind it), and 16 MB for S3's, whose
    64 MB range has the card's registers at its sixteenth megabyte. 0: none found. (kernel/arch/mtrr.c's
    write-combining: the MTRR command and [display] write_combining.) */
+/* A memory BAR's size, by the all-ones write (interrupts off for it: nothing decodes there meanwhile). */
+static u32 bar_size(const struct pci_dev *d, int k)
+{
+    u32 reg = 0x10 + 4u * (u32)k, size, f = irq_save();
+    pci_write32(d->bus, d->dev, d->fn, reg, 0xFFFFFFFFu);
+    size = ~(pci_read32(d->bus, d->dev, d->fn, reg) & ~15u) + 1;
+    pci_write32(d->bus, d->dev, d->fn, reg, d->bar[k]);
+    irq_restore(f);
+    return size;
+}
+
+/* 1 if the bytes from base are all inside one memory range of a video card's own (a 32-bit memory BAR of a
+   display-class function, above 1 MB): what may be made write-combining a page at a time (kernel/arch/mtrr.c's
+   mtrr_wc_page), and nothing else may. */
+int pci_video_mem(u32 base, u32 bytes)
+{
+    struct pci_dev *d;
+    int i, k;
+    if (!bytes || base + bytes < base)
+        return 0;
+    for (i = 0; (d = pci_at(i)) != 0; i++) {
+        if (d->class != 0x03)
+            continue;
+        for (k = 0; k < 6; k++) {
+            u32 b = d->bar[k], size;
+            if (!b || (b & 1) || (b & 6) || (b & ~15u) < 0x100000u || base < (b & ~15u))
+                continue;
+            size = bar_size(d, k);
+            if (size >= 0x1000u && !(size & (size - 1)) && base - (b & ~15u) < size && bytes <= size - (base - (b & ~15u)))
+                return 1;
+        }
+    }
+    return 0;
+}
+
 u32 pci_lfb_range(u32 *base, const struct pci_dev **card)
 {
     struct pci_dev *d;
@@ -161,16 +196,12 @@ u32 pci_lfb_range(u32 *base, const struct pci_dev **card)
         if (d->class != 0x03)
             continue;
         for (k = 0; k < 6; k++) {
-            u32 b = d->bar[k], reg = 0x10 + 4u * (u32)k, size, f, cap = d->vendor == 0x5333 ? 16u << 20 : 32u << 20;
+            u32 b = d->bar[k], size, cap = d->vendor == 0x5333 ? 16u << 20 : 32u << 20;
             int matrox_fb = d->vendor == 0x102B && k == 0;      /* (Matrox's G-series: BAR 0 is the framebuffer,
                                                    whatever its flags say: 86Box's G100 has it not prefetchable) */
             if (!b || (b & 1) || (!(b & 8) && !matrox_fb) || (b & 6))   /* (I/O; not prefetchable; 64-bit or below 1 MB) */
                 continue;
-            f = irq_save();
-            pci_write32(d->bus, d->dev, d->fn, reg, 0xFFFFFFFFu);
-            size = ~(pci_read32(d->bus, d->dev, d->fn, reg) & ~15u) + 1;
-            pci_write32(d->bus, d->dev, d->fn, reg, b);
-            irq_restore(f);
+            size = bar_size(d, k);
             if (size < (1u << 20) || (size & (size - 1)))
                 continue;
             *base = b & ~15u;

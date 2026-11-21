@@ -38,6 +38,9 @@ static u64 vga_boot;                    /* the VGA's fixed ranges (A0000h-BFFFFh
 static int vga_on;                      /* ... A0000h-AFFFFh made write-combining (mtrr_vga) */
 static int wc_reg = -1;                 /* the variable range GLOS took, or -1 */
 static u32 wc_base, wc_bytes;
+static u32 pg_base, pg_bytes;           /* a page of a card's own made write-combining (mtrr_wc_page): 0 bytes, none */
+static int pg_reg = -1;                 /* ... the variable range taken for it, or -1 (it was write-combining already) */
+static struct dpmi_ctx *pg_owner;       /* ... the program that asked (0: the MTRR command) */
 static u8 boot_type[UNITS], cur_type[UNITS];
 static struct dpmi_ctx *owner[UNITS];
 
@@ -157,7 +160,7 @@ int mtrr_set(struct dpmi_ctx *c, u32 lin, u32 bytes, u32 type)
     return 0;
 }
 
-/* A program's context ends: the units it changed as they were at boot. */
+/* A program's context ends: the units it changed as they were at boot, and its page (mtrr_wc_page) off. */
 void mtrr_release(struct dpmi_ctx *c)
 {
     int u, changed = 0;
@@ -171,6 +174,8 @@ void mtrr_release(struct dpmi_ctx *c)
         write_fixed();
         kprintf("GLOS-MTRR restored psp=%04x\n", c->psp);
     }
+    if (c && pg_bytes && pg_owner == c)
+        mtrr_wc_page(c, 0, 0, 0);
 }
 
 /* ---- a variable range for a linear framebuffer */
@@ -251,11 +256,75 @@ int mtrr_wc(u32 base, u32 bytes, int on)
     return 0;
 }
 
+/* A page of a card's own made write-combining, apart from the framebuffer's range: 4 KB to 64 KB, a power of
+   two, the base a multiple of it. For a card whose command FIFO takes bursts through a window of its registers
+   (DOS-GL on the Rage 128, 2026-11-21: every command word an uncached write). Asked for by a program for memory
+   it has mapped (c; DRAW's CACHE, API 2.11: off again when it ends, mtrr_release) or by the MTRR command's PAGE
+   (c 0: until PAGE OFF). The callers have seen by PCI that the range is inside a video card's own memory:
+   never RAM, never another device. One such range at a time. 0; 1: it was write-combining already (the BIOS's
+   range, or the framebuffer's); -1 the CPU can't; -2 a bad range; -3 it meets a range of another type; -4 no
+   range left; -5 none to take away; -6 another program's, or the command's, is there. */
+int mtrr_wc_page(struct dpmi_ctx *c, u32 base, u32 bytes, int on)
+{
+    u32 i, b, n, t;
+    int spare = -1, had = 0;
+    if (!var_ok)
+        return -1;
+    if (!on) {
+        if (!pg_bytes || pg_owner != c)
+            return -5;
+        if (pg_reg >= 0)
+            var_write((u32)pg_reg, 0, 0);
+        kprintf("GLOS-MTRR page off var=%d base=%08x bytes=%x psp=%04x\n", pg_reg, pg_base, pg_bytes, c ? c->psp : 0);
+        pg_reg = -1;
+        pg_base = pg_bytes = 0;
+        pg_owner = 0;
+        return 0;
+    }
+    if (bytes < 0x1000u || bytes > 0x10000u || (bytes & (bytes - 1)) || (base & (bytes - 1)) || base < 0x100000u || base + bytes < base)
+        return -2;
+    if (pg_bytes) {
+        if (pg_owner != c)                      /* (the command's is a program's too, if it is the same) */
+            return !pg_owner && pg_base == base && pg_bytes == bytes ? 0 : -6;
+        if (pg_base == base && pg_bytes == bytes)
+            return 0;
+        mtrr_wc_page(c, 0, 0, 0);
+    }
+    for (i = 0; i < var_n; i++) {
+        if (!var_get(i, &b, &n, &t)) {
+            if (spare < 0)
+                spare = (int)i;
+            continue;
+        }
+        if (!n)
+            return -3;
+        if (b + n <= base || base + bytes <= b)
+            continue;
+        if (t != MTRR_WC || b > base || base + bytes > b + n)
+            return -3;
+        had = 1;
+    }
+    if (!had) {
+        if (spare < 0)
+            return -4;
+        var_write((u32)spare, (u64)base | MTRR_WC, ((u64)0xF << 32) | (u64)(~(bytes - 1) & ~0xFFFu) | (1u << 11));
+    }
+    pg_reg = had ? -1 : spare;
+    pg_base = base, pg_bytes = bytes;
+    pg_owner = c;
+    kprintf("GLOS-MTRR page on var=%d base=%08x bytes=%x psp=%04x\n", pg_reg, base, bytes, c ? c->psp : 0);
+    return had;
+}
+
 /* The page flags for a program's mapping of device memory at phys: uncached; inside GLOS's write-combining
-   range, PCD alone, which lets the MTRR's type through. */
+   range, or the MTRR command's page, PCD alone, which lets the MTRR's type through. (Not inside a page that a
+   program asked for: its own pages are mapped so when it asks, kernel/app/api.c, and every other mapping of
+   that memory stays strictly uncached, whatever the CPU's range says: another program's writes to the card's
+   registers there must go one by one.) */
 u32 mtrr_dev_flags(u32 phys)
 {
-    return wc_reg >= 0 && phys >= wc_base && phys - wc_base < wc_bytes ? 0x10u : 0x18u;
+    return (wc_reg >= 0 && phys >= wc_base && phys - wc_base < wc_bytes)
+           || (pg_bytes && !pg_owner && phys >= pg_base && phys - pg_base < pg_bytes) ? 0x10u : 0x18u;
 }
 
 /* The ranges as text, a line each, for the MTRR command: its length. */
@@ -297,7 +366,7 @@ u32 mtrr_text(char *out, u32 room)
         if (!var_get(i, &b, &n, &t))
             continue;
         k += (u32)ksnprintf(out + k, room - k, "range %u: %08x, %u KB, %s%s\n", i, b, n >> 10, t < 7 ? names[t] : "?",
-                            (int)i == wc_reg ? " (GLOS's)" : "");
+                            (int)i == wc_reg ? " (GLOS's)" : (int)i == pg_reg ? " (GLOS's page)" : "");
     }
     return k;
 }
@@ -341,5 +410,7 @@ void mtrr_leave(void)                           /* GLOS is leaving: the CPU as i
 {
     if (wc_reg >= 0)
         mtrr_wc(0, 0, 0);
+    if (pg_bytes)
+        mtrr_wc_page(pg_owner, 0, 0, 0);
     mtrr_vga(0);
 }

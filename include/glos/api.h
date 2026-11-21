@@ -54,7 +54,8 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 10           /* (2.10: NET's SERIAL, a COM port as a connection;
+#define GLOS_MINOR 11           /* (2.11: DRAW's CACHE takes a page of a video card's own memory;
+                                   2.10: NET's SERIAL, a COM port as a connection;
                                    2.9: NET reaches this PC's own ports (127.0.0.1, its own address);
                                    GLOS_NETF_LOCAL, a port for this PC's programs alone;
                                    2.8: GLOS_WF_OWN_MODE, a full-screen window that keeps its size;
@@ -487,7 +488,8 @@ struct glos_ev_state {
 #define GLOS_DRAW_MODES   GLOS_FN(GLOS_AREA_DRAW, 9)    /* struct glos_modes: the screen modes the card has (for the
                                                            Control Panel; the mode itself is [display] mode) */
 #define GLOS_DRAW_CACHE   GLOS_FN(GLOS_AREA_DRAW, 10)   /* struct glos_cache: how the CPU caches some of the
-                                                           program's DOS memory; for any program (1.4's CACHE) */
+                                                           program's DOS memory, or a page of a video card's
+                                                           (2.11); for any program (1.4's CACHE) */
 
 /* A pixel format: bits a pixel, and where each colour's bits are in one (at 8 bits: GLOS's palette, the 6x6x6
    cube and greys of glos/gfx.h). */
@@ -535,13 +537,25 @@ struct glos_modes {
    memory a device fetches without the CPU's caches in the way (a Matrox card's command buffers), or write-back
    again (as at boot; so too when the program ends). Whole pages; sizes an MTRR can hold: 64 KB steps below
    80000h, 16 KB from there to A0000h. For any program, an app or not (a Glide game under DOS/4GW).
-   GLOS_E_ARGUMENT: not such a range, or not a type; GLOS_E_FUNCTION: this CPU has no such registers. */
+   GLOS_E_ARGUMENT: not such a range, or not a type; GLOS_E_FUNCTION: this CPU has no such registers.
+
+   Since 2.11, also memory of a video card's own that the program has mapped (DPMI 0800h): 4 to 64 KB of it, a
+   power of two, made write-combining (GLOS_CACHE_WC) or uncached again (GLOS_CACHE_UC; so too when the program
+   ends). For a card whose commands are taken in bursts through a window of its registers (DOS-GL's Rage 128
+   layer): the CPU then gathers the writes and sends a cache line of them at once. `address` is the linear
+   address of the mapping's page, on a 4 KB step; the physical address behind it must be a multiple of `bytes`
+   and all of it inside one memory range of a video card's, by PCI. One such range at a time for all programs.
+   Care: writes to a write-combining page reach the card late, gathered, and two to the same address may arrive
+   as one; registers that are not such a window stay on their uncached pages. GLOS_E_ARGUMENT: not such a range
+   (an older GLOS says so for any address above the first megabyte); GLOS_E_FUNCTION: this CPU can't;
+   GLOS_E_REFUSED: another program has a range, or the CPU's own ranges don't allow it. */
 struct glos_cache {
     unsigned size;
-    unsigned address;           /* the linear address: its real-mode segment times 16 */
+    unsigned address;           /* the linear address: its real-mode segment times 16 (or a card's mapped page) */
     unsigned bytes;
     unsigned type;              /* GLOS_CACHE_ */
 };
+#define GLOS_CACHE_UC 0         /* uncached: a card's memory as it is mapped (2.11) */
 #define GLOS_CACHE_WC 1         /* write-combining */
 #define GLOS_CACHE_WB 6         /* write-back */
 

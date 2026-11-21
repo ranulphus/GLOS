@@ -66,6 +66,8 @@ int mtrr_set(struct dpmi_ctx *c, u32 lin, u32 bytes, u32 type);    /* 0; -1 the 
 void mtrr_release(struct dpmi_ctx *c);  /* its changes undone */
 int mtrr_wc(u32 base, u32 bytes, int on);       /* a range write-combining by a variable MTRR, or GLOS's off:
                                                    0; 1 so already; negative: why not (mtrr.c) */
+int mtrr_wc_page(struct dpmi_ctx *c, u32 base, u32 bytes, int on);     /* 4 to 64 KB of a card's own write-combining, for
+                                                   the program c (0: the MTRR command), or off: as mtrr_wc; -6 another's */
 u32 mtrr_dev_flags(u32 phys);           /* the cache bits of a program's mapping of device memory there */
 u32 mtrr_text(char *out, u32 room);     /* the variable ranges, a line each */
 int mtrr_vga(int on);                   /* A0000h-AFFFFh write-combining (a fixed range), or as found: 0; -1 the

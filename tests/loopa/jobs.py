@@ -1156,7 +1156,10 @@ def cachewc(profile, boot):
     """CACHEWC (API 1.4): GLOS_FN_CACHE. On the Pentium II (bf6: MTRRs with write-combining) a 64 KB unit of the
     program's DOS memory is made write-combining and reads back what was written, and GLOS gives it back when the
     program ends (GLOS-MTRR restored); a quarter unit, a unit's middle, DOS's own memory and write-through are
-    refused (GLOS_E_ARGUMENT). On a 486 (no MTRRs) GLOS_E_FUNCTION or GLOS_E_ARGUMENT, and no change."""
+    refused (GLOS_E_ARGUMENT). On a 486 (no MTRRs) GLOS_E_FUNCTION or GLOS_E_ARGUMENT, and no change.
+    API 2.11: a page of the video card's own memory, mapped by the program, write-combining (HX-CACHE-CARD):
+    three pages and the program's own memory refused, the page after it in its place, uncached again, and the
+    one left at the end taken back by GLOS (GLOS-MTRR page off the last such line)."""
     tag = "%s-%s" % (profile, boot)
     st, gl = run("cachewc-" + tag, ["--machine", profile, "--boot-cfg", boot, "--file",
                                     "build/dj/CACHEWC.EXE=/TEST/CACHEWC.EXE", "--timeout", "300",
@@ -1165,15 +1168,23 @@ def cachewc(profile, boot):
     m = re.search(r"HX-CACHE wc=(\d+) unit16=(\d+) part=(\d+) foreign=(\d+) type=(\d+) kept=(\d)", gl)
     mtrr = profile == "bf6"
     want = ("0", "3", "3", "3", "3", "1") if mtrr else None
+    c = re.search(r"HX-CACHE-CARD bar=[0-9a-f]{8} page=(\d+) odd=(\d+) ram=(\d+) again=(\d+) next=(\d+) uc=(\d+) "
+                  r"left=(\d+) read=(\d)", gl)
+    pages = re.findall(r"GLOS-MTRR page (on|off) ", gl)
     checks = {"status": st == "PASS", "line": bool(m),
               "calls": bool(m) and (m.groups() == want if mtrr else
                                     m.group(1) in ("1", "3") and m.group(6) == "1"),
               "set": ("GLOS-MTRR set" in gl) == mtrr,
               "restored": ("GLOS-MTRR restored" in gl) == mtrr,
+              "card": (bool(c) and c.groups() == ("0", "3", "3", "0", "0", "0", "0", "1")
+                       and pages == ["on", "off", "on", "off", "on", "off"]) if mtrr
+                      else (not pages and ("HX-CACHE-CARD none" in gl
+                                           or bool(c) and c.group(1) in ("1", "3") and c.group(8) == "1")),
               "clean": "GLOS-PANIC" not in gl and "GLOS-CRASH" not in gl and "GLOS-WARN" not in gl}
     bad = [k for k, v in checks.items() if not v]
-    return "  %-22s %s %s%s" % ("cachewc-" + tag, "PASS" if not bad else "FAIL", m.group(0)[9:] if m else "",
-                                "" if not bad else " failed: " + " ".join(bad)), not bad
+    return "  %-22s %s %s%s%s" % ("cachewc-" + tag, "PASS" if not bad else "FAIL", m.group(0)[9:] if m else "",
+                                  " card " + c.group(0)[27:] if c else "",
+                                  "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
 def dpmi(profile, boot):
@@ -3014,8 +3025,27 @@ def ssh_case(profile, card):
                 and ssh("glos mtrr bogus")[0] == 2 \
                 and ssh("glos mtrr vga on")[0] == 0 and "window (a0000, 64 KB): write-combining" in ssh("glos mtrr")[1] \
                 and ssh("glos mtrr vga off")[0] == 0 and "window (a0000, 64 KB): uncached" in ssh("glos mtrr")[1]
+            # ... and a page of the video card's own memory (glos mtrr page): 4 KB at the start of one of its
+            # ranges (its second, if it has two: the first is the framebuffer) taken, listed as GLOS's page, and
+            # off again, by its own word and by glos mtrr off; memory that is no video card's, a size that is no
+            # power of two and a base off its step refused.
+            vid = [l for l in ssh("glos pci")[1].split("\n") if "class=03" in l]
+            mems = [int(x, 16) & ~15 for x in re.findall(r" mem\d=([0-9a-f]+)", vid[0])] if vid else []
+            mems = [x for x in mems if x >= 0x100000]
+            if checks["mtrr"] and mems:
+                at = "%x" % (mems[1] if len(mems) > 1 else mems[0])
+                rc3, pg, _ = ssh("glos mtrr page " + at)
+                listed = ssh("glos mtrr")[1]
+                checks["mtrr"] = rc3 == 0 and "on for the 4 KB at " in pg and "(GLOS's page)" in listed \
+                    and ssh("glos mtrr page off")[0] == 0 and "(GLOS's page)" not in ssh("glos mtrr")[1] \
+                    and ssh("glos mtrr page off")[0] == 1 and ssh("glos mtrr page 200000")[0] == 1 \
+                    and ssh("glos mtrr page %s 12" % at)[0] == 1 and ssh("glos mtrr page %s800 4" % at[:-3])[0] == 1 \
+                    and ssh("glos mtrr page %s 8" % at)[0] == 0 and ", 8 KB, write-combining (GLOS's page)" in ssh("glos mtrr")[1] \
+                    and ssh("glos mtrr off")[0] == 0 and "(GLOS's page)" not in ssh("glos mtrr")[1]
+                on = pg
         else:
-            checks["mtrr"] = rc == 0 and "no MTRRs" in out and ssh("glos mtrr lfb on")[0] == 1
+            checks["mtrr"] = rc == 0 and "no MTRRs" in out and ssh("glos mtrr lfb on")[0] == 1 \
+                and ssh("glos mtrr page e0000000")[0] == 1
         if not checks["mtrr"]:
             info += " mtrr=%r on=%r listed=%r pci=%r" % (out[:200], locals().get("on"), locals().get("listed"),
                                                         [l for l in ssh("glos pci")[1].split("\n") if "class=03" in l])

@@ -1315,11 +1315,14 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         /* glos mtrr: the CPU's variable memory-type ranges. glos mtrr lfb on: the video card's linear framebuffer
            write-combining (its prefetchable memory, by PCI); glos mtrr wc BASE MB: a range named (hexadecimal
            base, megabytes); glos mtrr off: GLOS's range taken away. An experiment (the owner, 2026-11-14): what
-           FASTVID does from plain DOS. Programs started afterwards have it; kernel/arch/mtrr.c. */
+           FASTVID does from plain DOS. Programs started afterwards have it; kernel/arch/mtrr.c.
+           glos mtrr page BASE [KB]: 4 to 64 KB of a video card's own memory (by PCI) write-combining, for a card
+           that takes its commands in bursts through a window of its registers (DOS-GL's Rage 128 layer,
+           2026-11-21; a program asks for its own by DRAW's CACHE); glos mtrr page off. */
         const char *p = cmd + 9;
         char t[1024];
         u32 base = 0, bytes = 0;
-        int e = -2, on = 1;
+        int e = -2, on = 1, page = 0;
         while (*p == ' ')
             p++;
         if (!*p) {
@@ -1337,6 +1340,24 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             }
             if (ci_starts(p, "off") && !p[3]) {
                 on = 0;
+                page = 2;                       /* (both go) */
+            } else if (ci_starts(p, "page off") && !p[8]) {
+                on = 0;
+                page = 1;
+            } else if (ci_starts(p, "page ")) {
+                u32 kb = 0;
+                page = 1;
+                for (p += 5; (*p >= '0' && *p <= '9') || ((*p | 32) >= 'a' && (*p | 32) <= 'f'); p++)
+                    base = base << 4 | (u32)(*p <= '9' ? *p - '0' : (*p | 32) - 'a' + 10);
+                while (*p == ' ')
+                    p++;
+                if (!*p)
+                    kb = 4;
+                for (; *p >= '0' && *p <= '9' && kb < 4096; p++)
+                    kb = kb * 10 + (u32)(*p - '0');
+                bytes = *p || kb > 64 ? 0 : kb << 10;
+                if (bytes && ((bytes & 0xFFF) || !pci_video_mem(base, bytes)))
+                    bytes = 0;
             } else if (ci_starts(p, "lfb off") && !p[7]) {
                 on = 0;
             } else if (ci_starts(p, "lfb on") && !p[6]) {
@@ -1354,20 +1375,35 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
                 on = -1;
             }
             if (on < 0) {
-                say(ch, 1, "glos mtrr [lfb on | lfb off | vga on | vga off | wc BASE MB | off] (BASE hexadecimal; MB a power of two)\n");
+                say(ch, 1, "glos mtrr [lfb on | lfb off | vga on | vga off | wc BASE MB | page BASE [KB] | page off | off]\n"
+                    "(BASE hexadecimal; MB a power of two; KB 4, 8, 16, 32 or 64, in a video card's own memory)\n");
                 ssh_chan_exit(ch, 2);
             } else {
-                e = on && !bytes ? -2 : mtrr_wc(base, bytes, on);
-                if (e == 0 && on)
+                if (page == 2) {                /* (off: the framebuffer's range and the command's page) */
+                    int e2 = mtrr_wc_page(0, 0, 0, 0);
+                    e = mtrr_wc(0, 0, 0);
+                    if (e2 == 0)
+                        e = 0;
+                } else if (page) {
+                    e = on && !bytes ? -2 : mtrr_wc_page(0, base, bytes, on);
+                } else {
+                    e = on && !bytes ? -2 : mtrr_wc(base, bytes, on);
+                }
+                if (e == 0 && on && page)
+                    ksnprintf(t, sizeof t, "Write-combining is on for the %u KB at %08x. Programs that map it from now on have it.\n",
+                              bytes >> 10, base);
+                else if (e == 0 && on)
                     ksnprintf(t, sizeof t, "Write-combining is on for %08x, %u MB. Programs started from now on have it.\n",
                               base, bytes >> 20);
                 else
                     ksnprintf(t, sizeof t, "%s\n", e == 0 ? "Write-combining is off again."
                               : e == 1 ? "That memory is write-combining already (the BIOS set it): nothing changed."
                               : e == -1 ? "glos mtrr: this CPU has no write-combining to set (no MTRRs, or they are off)"
+                              : e == -2 && page ? "glos mtrr: no such range (4 to 64 KB, a power of two, the base a multiple of it, all inside a video card's own memory by PCI)"
                               : e == -2 ? "glos mtrr: no such range (no video card's framebuffer found by PCI, or a base or size that won't do)"
                               : e == -3 ? "glos mtrr: the range meets one the BIOS set with another type: left alone (glos mtrr lists them)"
                               : e == -4 ? "glos mtrr: the CPU has no range left"
+                              : e == -6 ? "glos mtrr: a program has a page of its own write-combining now"
                               : "glos mtrr: GLOS has set none");
                 say(ch, e < 0, t);
                 ssh_chan_exit(ch, e < 0);

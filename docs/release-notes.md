@@ -4,6 +4,18 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## A write-combining page of the video card's own (2026-11-21, API 2.11)
+
+- **For programs that drive a video card themselves:** DRAW's CACHE (`glos_cache`) now also makes 4 to 64 KB
+  of a video card's own memory write-combining, for a card that takes its commands in bursts through a window
+  of its registers (asked for by DOS-GL for the ATI Rage 128, where every command word was an uncached
+  write). The program maps the card's memory as before and names the page; GLOS checks by PCI that it is a
+  video card's, and takes it back when the program ends. `GLOS_CACHE_UC` puts it back sooner.
+- **By hand:** `MTRR PAGE base [KB]` and `MTRR PAGE OFF` (`glos mtrr page ...`), beside `MTRR LFB ON`; `MTRR`
+  lists it as "GLOS's page". A program that maps the page afterwards has it.
+- Pentium Pro, II and III class CPUs, as for the framebuffer's range; elsewhere the call is refused and the
+  program carries on as before.
+
 ## Memory (2026-11-21)
 
 - **GLOS takes less memory:** about 700 KB more is free once it has started (a 64 MB PC), and each DPMI
