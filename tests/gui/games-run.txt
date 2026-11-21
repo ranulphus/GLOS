@@ -1,0 +1,18 @@
+#loopa-run-only (playing wants a real GLOS: on the host no program of DOS's runs)
+# The Games Library (apps/games; phase F): a game played: its program run by GLOS (BLIP.COM, a real program of five
+# bytes that ends at once with the code 7), its end seen, the play counted, twice; a library of its own, so that
+# games.txt finds none on this disc.
+run GAMES.EXE -library C:\TEST\GAMERUN.CFG
+wait "Games"
+said GAMES scanned folders=1 games=5 added=5
+key enter
+said GAMES playing Blip
+said GAMES ended Blip code=7 times=1
+key enter
+said GAMES playing Blip
+said GAMES ended Blip code=7 times=2
+key ctrl+b
+said GAMES favourites 1 shown=0
+key alt+f4
+gone "Games"
+expect GAMES end

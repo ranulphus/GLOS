@@ -1,0 +1,53 @@
+# The Games Library (apps/games; phase F, docs/v1/apps/games-library.md): the folders of games on C: found as it
+# starts (tests/gui/drives/C/GAMES: names only, nothing of any game): two known by their files, one by its
+# folder's files (a set-up program apart), a real small program; a game's page; a favourite, and favourites
+# alone; found as it is typed (by its maker); a game's properties (a title, a picture, notes); the list; a game
+# added by hand and removed.
+run GAMES.EXE
+wait "Games"
+said GAMES scanned folders=1 games=5 added=5
+shot grid "Games"
+click "Games" 282 125
+shot doom "Games"
+key ctrl+d
+said GAMES favourite Doom 1
+key ctrl+b
+said GAMES favourites 1 shown=1
+key ctrl+b
+said GAMES favourites 0 shown=5
+key ctrl+f
+type id soft
+said GAMES found 2 for "id soft"
+shot found "Games"
+key ctrl+a
+key del
+said GAMES found 5 for ""
+click "Games" 170 245
+key alt+enter
+wait "Properties"
+key ctrl+a
+type Zapper II
+key alt+p
+type C:\\PIX\\SUNSET.BMP
+key alt+n
+type Level 3: ZAP-777
+key enter
+said GAMES changed Zapper II favourite=0 picture=SUNSET.BMP
+shot changed "Games"
+key ctrl+2
+said GAMES view list
+shot list "Games"
+key ctrl+1
+said GAMES view pictures
+key ctrl+n
+wait "Add a Game: Its Program"
+type C:\\GAMES\\ZAPPER\\INSTALL.EXE\n
+said GAMES added Zapper
+shot added "Games"
+key del
+wait "Remove"
+key alt+y
+said GAMES removed Zapper
+key alt+f4
+gone "Games"
+expect GAMES end

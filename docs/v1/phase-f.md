@@ -777,3 +777,53 @@ has already (`loader/inflate.c`). PDFio was not tried; no code of another reader
     (SASLprep: plain letters are the same either way).
 - **Next**: drawing off the window's thread with a cache of pages, choosing text with the mouse, links.
 
+## The Games Library (2026-11-21): the first part
+
+The plan is `docs/v1/apps/games-library.md`. GAMES.EXE, "Games" in the Start menu.
+
+- **The known games** (`apps/shared/gamedb.c`): GLOS's own list, written by hand: 85 well-known DOS games, each
+  with its title, year, maker and kind, the program that runs it, and a file (or folder) that lies beside it
+  where the program's name alone is not enough (Doom is DOOM.EXE with DOOM.WAD or DOOM1.WAD; Final Doom runs by
+  DOOM2.EXE as Doom II does, and its own WAD tells it: the list is tried in order, the more telling first).
+  A game is in the list only where its program's name is beyond doubt; the plan's "a few hundred" comes by
+  adding to it. **Not by size**, as the plan had it: sizes would have to be measured from the games' own
+  files, which GLOS's source has none of; names and companions are facts anyone can state.
+- **The library** (`apps/shared/gamelib.c`): the games with what the user gave them (a title, a picture,
+  notes, a favourite) and what was counted (time played, how often, when last), kept as lines of text in
+  GAMES.CFG in GLOS's folder; lines it doesn't know are passed over (a newer GLOS's file reads).
+  - **A folder of games gone through**: each folder in it is a game if it holds a known game's files, or a
+    program that looks like one: named as its folder (or nearly: KEEN4E.EXE in KEEN), else a batch file
+    (there to start it), else the largest; set-up and installing programs, sound choosers, DOS extenders
+    and the like are no games (a set-up program is kept for the game's page). A folder with none but with
+    folders is looked into, once (C:\GAMES\ID\DOOM).
+  - **Scanned again**: nothing twice; what the user changed stays; a game whose program has gone is marked,
+    not let go (its times and notes are the user's), and found again when it is back.
+  - The folders to begin with: GAMES on the drive DOS started from, and C:\GAMES, where they are there.
+- **The program** (`apps/games/games.c`):
+  - the games as a grid of pictures (the toolkit's thumbnail view: a game's picture where the user gave it
+    one, any format Images reads, made small and kept by `apps/shared/thumbs.c`) or as a list (title, year,
+    maker, kind, time played); sorted by title, by when last played, by time played; favourites alone;
+    Find narrows them as it is typed (titles, makers, kinds);
+  - a game's page at the right: what is known of it, where it is, how long and how often it was played and
+    when last, the user's notes; Play, and Set Up where it has a set-up program;
+  - Play (Enter, a double click) runs the program by JOB as any program of DOS's (its profile decides how:
+    full-screen when it wants the screen); its end is seen (JOB's event), the time it ran counted and kept;
+    a program that could not be run is said so and counts as no play;
+  - Add Game... (any program, by hand), Add Folder..., Scan Now (F5; and as it starts), Properties (title,
+    picture, notes, favourite), Remove (from the library: nothing on the disk is touched).
+- **Tests.**
+  - `gamelib_test` on the host (32 checks, under the sanitizers too): the list whole and no game hidden
+    behind another; a made-up tree of game folders: known games (the more telling companion, a companion
+    that is a folder, names in any case), unknown ones each way a program is chosen, folders in folders,
+    folders with no game; the file written and read back the same, a newer GLOS's and a damaged one; a second
+    scan; games added by hand and removed; the orders and the search.
+  - `tests/gui/games.txt` (host and Loop A, pictures compared) on `tests/gui/drives/C/GAMES` (made by
+    `tests/gui/mkgames.py`: names only, nothing of any game; each "program" two bytes that end it at once
+    should it ever be run): five games found, a game's page, favourites, Find, properties with a picture,
+    the list, a game added by hand and removed.
+  - `tests/gui/games-run.txt` (Loop A alone: the host runs no program of DOS's): a real program of five bytes
+    played twice: its end and its exit code seen, the plays counted.
+- **Not yet** (the plan's rest): the scan in the background and folders watched; a game's profile as a form
+  (exclusive or windowed, memory, BLASTER, the controller's mapping); pictures dropped onto a game, the
+  games' own icons, screenshots taken while they run; DOSBench from a game's page; the Start menu's Games
+  group and pinned games; grouping by kind and year.

@@ -176,6 +176,8 @@ host-test-run: build/host/libpdfbr32.a
 	  && build/host/smf_test `python3 tests/host/smf_cases.py build/host/smf`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/song_test tests/host/song_test.c apps/shared/song.c \
 	  apps/shared/smf.c && build/host/song_test build/host/smf
+	@mkdir -p build/host/gamecases && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/gamelib_test \
+	  tests/host/gamelib_test.c apps/shared/gamedb.c apps/shared/gamelib.c && build/host/gamelib_test build/host/gamecases
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c apps/shared/pdfnav.c \
 	  apps/shared/pdfcrypt.c loader/inflate.c build/host/libpdfbr32.a \
 	  && build/host/pdf_test `python3 tests/host/pdf_cases.py build/host/pdfcases`
@@ -223,7 +225,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
-APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf
+APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf games
 # (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
 # shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
@@ -263,6 +265,10 @@ APP_LIBS_player := $(SOURCE_SRCS) apps/shared/smf.c apps/shared/midiplay.c
 # Songs as MIDI Studio holds them (phase F), read from and written as MIDI files, and played as the Player plays them.
 APP_HOST_LIBS_studio := apps/shared/song.c apps/shared/smf.c apps/shared/midiplay.c
 APP_LIBS_studio := apps/shared/song.c apps/shared/smf.c apps/shared/midiplay.c
+# The Games Library's games (phase F): the known games, the library's file and scan; pictures as Images has them.
+GAMES_SRCS := apps/shared/gamedb.c apps/shared/gamelib.c apps/shared/picfile.c apps/shared/thumbs.c
+APP_HOST_LIBS_games := $(GAMES_SRCS)
+APP_LIBS_games := $(GAMES_SRCS)
 # PDF files read and drawn (the PDF Viewer, phase F); its stand-in fonts as one file beside the program.
 PDF_SRCS := apps/shared/pdf.c apps/shared/pdfnav.c apps/shared/pdfcrypt.c apps/shared/pdfdraw.c apps/shared/pdffont.c \
             apps/shared/psfont.c apps/shared/ttf.c apps/shared/picfile.c loader/inflate.c

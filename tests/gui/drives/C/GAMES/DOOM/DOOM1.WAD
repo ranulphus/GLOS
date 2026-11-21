@@ -1,0 +1,1 @@
+A placeholder for GLOS's tests: only its name matters.
