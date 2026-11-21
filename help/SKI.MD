@@ -51,4 +51,5 @@ ranked by its time, a free run by its points.
 **Game, Watch the Careful Skier** (F9) shows the mountain skied without a fall: a way down that always
 exists. It is not the fastest way.
 
-The **Jacket** menu changes the skier's colour.
+The **Jacket** menu changes the skier's colour. **Game, Sound** turns the game's sounds off and on: the
+skis' hiss tells you your speed and the snow you are on, with your eyes on the slope.

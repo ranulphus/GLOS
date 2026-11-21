@@ -1083,9 +1083,14 @@ name is one line of the program. GLOS's own game: its skier, pictures, mountains
     mountain 7 held at three steps and at the valley; then a run of the player's with no key held, which
     falls eight times, misses sixteen gates and still arrives, to the step; its place in the table under a
     name; a mountain by number; a jacket.
-- **Not yet** (the plan's rest): the best run beside you as a ghost; weather and night; other skiers, the
-  groomer, the hare, lift pylons; sound; the mouse and pads; the window doubled and full screen; the
-  demonstration playing by itself when nobody does. **To be measured**: the frame rate on the 486 bench
+- **Sound** (`apps/ski/sound.c`, added the same day): one stream into GLOS's mixer, made by rule as it
+  plays: the skis' hiss (noise through a filter that ice opens and powder closes, as loud as the skier is
+  fast, silent in the air), a gate's bell, a miss's buzz, a jump's rush of air, a landing's thump, a fall,
+  the valley's three notes. Game, Sound turns it off. Silent where there is no card GLOS plays through,
+  and in the suite's runs.
+- **Not yet** (the plan's rest): the best run beside you as a ghost; weather and night (and the wind's
+  sound); other skiers, the groomer, the hare, lift pylons; the mouse and pads; the window doubled and full
+  screen; the demonstration playing by itself when nobody does. **To be measured**: the frame rate on the 486 bench
   (the plan's floor: thirty a second on a 486DX2-66 at 8 bits).
 
 ## The hovercraft game (2026-11-21): its core, not yet a program

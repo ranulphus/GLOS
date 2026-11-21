@@ -26,8 +26,11 @@
  * suite's: the careful skier on mountain N, the picture held at given steps, the clock several times faster
  * (a run is its steps: it ends the same). tests/gui/ski.txt. Its lines: "SKI ..." on the output.
  *
+ * Sound (apps/ski/sound.c), made by rule: the skis' hiss by the speed and the snow, a gate's bell, a miss, a
+ * jump, a landing, a fall, the valley's chime.
+ *
  * Not yet (the plan's rest): the best run beside you as a ghost; weather and night; other skiers, the groomer
- * and the hare; sound; the mouse and pads; the window doubled, and full screen. */
+ * and the hare; the wind's sound; the mouse and pads; the window doubled, and full screen. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,11 +43,12 @@
 #include "../shared/skirun.h"
 #include "../shared/skitable.h"
 #include "art.h"
+#include "sound.h"
 
 #define GAME_NAME "Skiing"              /* (the working name) */
 
 enum { C_AGAIN = 1, C_NEW, C_DAY, C_NUMBER, C_WATCH, C_TABLES, C_PAUSE, C_EXIT, C_SLALOM, C_FREE, C_GREEN, C_BLUE, C_RED, C_BLACK,
-       C_JACKET };                      /* (C_JACKET + n: the jackets) */
+       C_SOUND, C_JACKET };             /* (C_JACKET + n: the jackets) */
 enum { P_READY, P_RUN, P_PAUSED, P_DONE };
 
 #define FW 480                          /* the field */
@@ -70,6 +74,7 @@ static long until = -1;                 /* the suite's: the picture held at this
 static long untils[8];                  /* ... and at these after it, each when the one before is let go */
 static int nuntils;
 static int stopped;                     /* (past the finish: the glide has ended, and was said) */
+static int sound_on = 1, sounding;      /* Sound is chosen; and there is a card it plays through */
 static int speed = 1;                   /* the suite's: the clock so many times faster (a run is its steps: the same) */
 static unsigned frames;                 /* (the strip of figures is drawn every third: ten times a second) */
 static int suite, held;                 /* the suite's run: every step that is due is made (its clock jumps); held:
@@ -227,6 +232,8 @@ static void step(void)
     char text[64];
     keys_now = watching ? skirun_auto(&run) : keys_held();
     skirun_step(&run, keys_now);
+    if (sounding)
+        sound_events(run.ev);
     if (!(run.steps & 1) && run.state != SKI_S_DONE) {  /* the track: a point every other step */
         track[track_at].x = (short)(run.x >> 8);
         track[track_at].y = run.state == SKI_S_SKIING ? (short)(run.y >> 8) : -1;
@@ -293,6 +300,8 @@ static void frame(void *arg)            /* the game's clock: the steps that are 
             break;
         }
     }
+    if (sounding)                       /* the skis' sound for this picture's time */
+        sound_frame(skirun_speed(&run), run.state == SKI_S_SKIING ? skimount_snow(&run.m, run.x >> 8, run.y >> 8) : -1);
     if (++frames % 3 == 0 || phase != P_RUN) {  /* the figures ten times a second, and whenever the run stops */
         gui_damage(canvas);
     } else {                            /* the field alone */
@@ -650,6 +659,14 @@ static void command(struct gui_window *w, int id)
         break;
     case C_TABLES: tables_show(); break;
     case C_PAUSE: pause_toggle(); break;
+    case C_SOUND:
+        sound_on = !sound_on;
+        if (sound_on)
+            sounding = sound_start();
+        else
+            sound_stop(), sounding = 0;
+        say("sound %d playing=%d", sound_on, sounding);
+        break;
     case C_SLALOM: case C_FREE:
         mode = id == C_SLALOM ? SKI_SLALOM : SKI_FREE;
         tables_keep();
@@ -673,6 +690,7 @@ static void update(struct gui_window *w)
     for (i = 0; i < 5; i++)
         gui_command_check(w, C_JACKET + i, jacket == i);
     gui_command_check(w, C_DAY, of_day);
+    gui_command_check(w, C_SOUND, sound_on);
     gui_command_enable(w, C_PAUSE, phase == P_RUN || phase == P_PAUSED);
 }
 
@@ -718,6 +736,7 @@ static void build(void)
     gui_command(win, C_WATCH, GUI_T("&Watch the Careful Skier"), "F9", NULL, NULL);
     gui_command(win, C_TABLES, GUI_T("&Best Runs..."), "Ctrl+B", NULL, NULL);
     gui_command(win, C_PAUSE, GUI_T("&Pause"), NULL, NULL, NULL);
+    gui_command(win, C_SOUND, GUI_T("&Sound"), NULL, NULL, NULL);
     gui_command(win, C_EXIT, GUI_T("E&xit"), "Alt+F4", NULL, NULL);
     gui_command(win, C_SLALOM, GUI_T("&Slalom"), NULL, NULL, NULL);
     gui_command(win, C_FREE, GUI_T("&Free Run"), NULL, NULL, NULL);
@@ -731,7 +750,7 @@ static void build(void)
     m = gui_menu(bar, GUI_T("&Game"));
     gui_menu_command(m, C_AGAIN), gui_menu_command(m, C_PAUSE), gui_menu_command(m, C_WATCH);
     gui_menu_sep(m);
-    gui_menu_command(m, C_TABLES);
+    gui_menu_command(m, C_TABLES), gui_menu_command(m, C_SOUND);
     gui_menu_sep(m);
     gui_menu_command(m, C_EXIT);
     m = gui_menu(bar, GUI_T("&Mountain"));
@@ -793,10 +812,13 @@ int main(int argc, char **argv)
     build();
     ready();
     gui_show(win, 1);
+    if (!suite)                         /* (the suite's runs are silent: its clock is not the sound's) */
+        sounding = sound_start();
     gui_idle(frame, NULL, 33);          /* thirty pictures a second (the motion is sixty steps, whatever the pictures) */
     if (demo && until >= 0)
         start(1);
     gui_run();
+    sound_stop();
     printf("SKI end\n");
     return 0;
 }
