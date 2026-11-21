@@ -1,0 +1,140 @@
+#host-only (the host's disks are made up, the same each run: a floppy never formatted in A:, and a hard disk of one partition; disks-run.txt is Loop A's)
+# Disk Tools (apps/disks; phase F, docs/v1/apps/disk-tools.md): the PC's disks listed; the floppy formatted with a
+# label; a new image made of a folder's files (C:\GAMES: folders in it), and one of another size; the image
+# written to the floppy and read back, the other refused for its size; the floppy looked inside, a folder
+# entered and left, everything copied out; the floppy's image read to a file, which is the image written, and
+# opened; the floppy checked; the hard disk's partition, and that nothing writes to it.
+run DISKS.EXE
+wait "Disk Tools"
+said DISKS disks 2
+shot disks "Disk Tools"
+key alt+d
+key f
+wait "Format"
+type glos test
+shot format "Format"
+key enter
+said DISKS disk 00 sectors=2880 looked=1 fat=12 label=GLOS TEST parts=-1
+said DISKS formatted disk=00 fat=12 label=GLOS TEST
+wait "The Disk Formatted"
+key enter
+gone "The Disk Formatted"
+shot formatted "Disk Tools"
+key ctrl+n
+wait "New Image from a Folder"
+key ctrl+a
+type C:\\GAMES
+key alt+l
+type games
+shot new "New Image from a Folder"
+key enter
+wait "The New Image: Save As"
+key alt+n
+type C:\\OUT\\NEW.IMG\n
+said DISKS made NEW.IMG files=11 bytes=579 left=0 sectors=2880
+wait "The New Image"
+shot made "The New Image"
+key enter
+gone "The New Image"
+key ctrl+n
+wait "New Image from a Folder"
+key ctrl+a
+type C:\\WEB
+key alt+s
+key up
+key up
+key enter
+key enter
+wait "The New Image: Save As"
+key alt+n
+type C:\\OUT\\SMALL.IMG\n
+said DISKS made SMALL.IMG files=3 bytes=1562 left=0 sectors=1440
+wait "The New Image"
+key enter
+gone "The New Image"
+key ctrl+w
+wait "The Image to Write"
+key alt+n
+type C:\\OUT\\SMALL.IMG\n
+said DISKS refused image bytes=737280 disk=00
+wait "The Image's Size"
+shot size "The Image's Size"
+key enter
+gone "The Image's Size"
+key ctrl+w
+wait "The Image to Write"
+key alt+n
+type C:\\OUT\\NEW.IMG\n
+wait "Write an Image"
+shot ask "Write an Image"
+key alt+y
+said DISKS disk 00 sectors=2880 looked=1 fat=12 label=GAMES parts=-1
+said DISKS wrote disk=00 sectors=2880 bad=0 verified=1
+wait "The Image Written"
+key enter
+gone "The Image Written"
+shot written "Disk Tools"
+key enter
+wait "Floppy A:"
+said DISKS opened Floppy A: fat=12 label=GAMES sectors=2880
+said DISKS folder \ entries=6
+shot inside "Floppy A:"
+key down
+key enter
+said DISKS folder \DOOM entries=3
+shot folder "Floppy A:"
+key backspace
+said DISKS folder \ entries=6
+key alt+e
+wait "Copy the Files to"
+key tab enter
+gone "Copy the Files to"
+said DISKS copied out files=11 bytes=579 to C:\
+file C:\\BLIP\\BLIP.COM \xB8\x07\x4C\xCD\x21
+shot copied "Floppy A:"
+key alt+f4
+gone "Floppy A:"
+key ctrl+s
+wait "The Disk's Image: Save As"
+key alt+n
+type C:\\OUT\\BACK.IMG\n
+said DISKS read disk=00 sectors=2880 bad=0 to C:\OUT\BACK.IMG
+wait "The Disk's Image"
+shot read "The Disk's Image"
+key enter
+gone "The Disk's Image"
+key ctrl+o
+wait "Open an Image"
+key alt+n
+type C:\\OUT\\BACK.IMG\n
+wait "BACK.IMG"
+said DISKS opened BACK.IMG fat=12 label=GAMES sectors=2880
+key down
+key down
+key down
+key down
+key down
+key alt+c
+wait "Copy the Files to"
+key tab enter
+gone "Copy the Files to"
+said DISKS copied out files=3 bytes=172 to C:\OUT
+shot image "BACK.IMG"
+key alt+f4
+gone "BACK.IMG"
+key ctrl+k
+said DISKS checked disk=00 sectors=2880 bad=0
+wait "The Disk Checked"
+shot checked "The Disk Checked"
+key enter
+gone "The Disk Checked"
+key down
+shot harddisk "Disk Tools"
+key ctrl+k
+said DISKS checked disk=80 sectors=131072 bad=0
+wait "The Disk Checked"
+key enter
+gone "The Disk Checked"
+key alt+f4
+gone "Disk Tools"
+expect DISKS end

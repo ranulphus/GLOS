@@ -184,6 +184,11 @@ host-test-run: build/host/libpdfbr32.a
 	  apps/shared/url.c && build/host/html_test
 	@mkdir -p build/host/gamecases && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/gamelib_test \
 	  tests/host/gamelib_test.c apps/shared/gamedb.c apps/shared/gamelib.c && build/host/gamelib_test build/host/gamecases
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wl,-z,noexecstack -o build/host/fatimg_test tests/host/fatimg_test.c \
+	  apps/shared/fatimg.c kernel/disk/fatfmt.c kernel/disk/fdboot.S \
+	  && tests/host/fatimg_test.sh build/host/fatimg_test build/host/fatimg
+	@mkdir -p build/host/diskjob && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/diskjob_test \
+	  tests/host/diskjob_test.c apps/shared/diskjob.c && build/host/diskjob_test build/host/diskjob
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c apps/shared/pdfnav.c \
 	  apps/shared/pdfcrypt.c loader/inflate.c build/host/libpdfbr32.a \
 	  && build/host/pdf_test `python3 tests/host/pdf_cases.py build/host/pdfcases`
@@ -231,7 +236,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
-APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf games chat web
+APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf games chat web disks
 # (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
 # shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
@@ -287,6 +292,15 @@ APP_LIBS_web := $(WEB_SRCS) apps/shared/webget.c build/sdk/libhttp.a build/sdk/l
 APP_DEPS_web := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_web := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/WEB.map -Wl,--cref
 APP_AFTER_web := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/WEB.map
+# Disk Tools (phase F): FAT volumes read and added to, the sector jobs; new volumes and partition tables by the
+# kernel's own code (kernel/disk: with its boot code, as bytes).
+DISKS_SRCS := apps/shared/fatimg.c apps/shared/diskjob.c kernel/disk/fatfmt.c kernel/disk/mbr.c kernel/disk/fdboot.S \
+              kernel/disk/mbrboot.S
+APP_HOST_LIBS_disks := $(DISKS_SRCS)
+APP_LIBS_disks := $(DISKS_SRCS)
+APP_DEPS_disks := build/sdk/gloswrap.opt tools/wrapcheck.py kernel/disk/disk.h
+APP_LINK_disks := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/DISKS.map -Wl,--cref
+APP_AFTER_disks := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/DISKS.map
 # The Games Library's games (phase F): the known games, the library's file and scan; pictures as Images has them.
 GAMES_SRCS := apps/shared/gamedb.c apps/shared/gamelib.c apps/shared/picfile.c apps/shared/thumbs.c
 APP_HOST_LIBS_games := $(GAMES_SRCS)

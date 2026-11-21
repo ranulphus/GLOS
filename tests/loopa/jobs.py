@@ -7778,7 +7778,8 @@ class GuiDriver:
                 want = line.split(None, 1)[1].rstrip("\n")     # window's title (a job's). Said twice, it is waited
                 t0, ok = time.time(), False                    # for twice: each `said` is another of that line.
                 asked = t0
-                while not ok and time.time() - t0 < 120:
+                limit, self.within = getattr(self, "within", 0) or 120, 0      # (`within N` before it: N seconds)
+                while not ok and time.time() - t0 < limit:
                     n_said = sum(bytes(q.said).decode("latin-1").replace("\r", "").split("\n").count(want)
                                  for q in self.procs)
                     ok = n_said > self.heard.get(want, 0)
@@ -7832,6 +7833,8 @@ class GuiDriver:
                 self.point(w["x"] + int(args[1]), w["y"] + int(args[2]))
             elif cmd == "pause":
                 time.sleep(int(args[0]) / 1000.0)
+            elif cmd == "within":               # within SECONDS: the next `said` waits so long, not two minutes
+                self.within = int(args[0])      # (a job on a real drive: a floppy written and read back)
             elif cmd == "settle":               # until no DOS program runs: one that had the PC's own screen has given
                 t0, ok = time.time(), False     # it back, and what is typed next is the shell's (a session's length
                 while not ok and time.time() - t0 < 120:    # is the card's and the load's: 8.6 s on the G400's
@@ -10880,7 +10883,7 @@ def console_case(profile, vcard, card, bits):
 
 # The native apps (M9 steps D-G): their scripts (tests/gui, all but GUITEST's) on the desktop, the apps beside
 # GLOS.EXE.
-NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER", "RECORDER", "PLAYER", "STUDIO", "PDF", "GAMES", "CHAT", "WEB"]
+NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER", "RECORDER", "PLAYER", "STUDIO", "PDF", "GAMES", "CHAT", "WEB", "DISKS"]
 NATIVE_CASES = [("bf6", "vbe", "ne2kpci", 8), ("bf6", "g200", "ne2kpci", 16), ("bf6", "g400", "ne2kpci", 32),
                 ("486dx2", "vbe", "ne2k", 8)]
 

@@ -945,7 +945,10 @@ struct glos_fs_sectors {
     unsigned disk;              /* the BIOS's number: 0 and 1 the floppy drives, 80h up the hard disks */
     unsigned write;             /* 0 read, 1 write (GLOS_E_REFUSED: the disk GLOS itself runs from is never written) */
     unsigned lba_lo, lba_hi;    /* the first sector */
-    unsigned count;             /* how many: 0 (only the disk's size is asked) to 32 */
+    unsigned count;             /* how many: 0 (only the disk's size is asked) to 32. They go to the BIOS in
+                                   runs: all of them at one call where it has the LBA calls, else to the end of
+                                   their track (a floppy's track is read in one turn of the disk). A floppy's
+                                   tracks are counted as its drive's largest disk has them */
     unsigned buffer;            /* count sectors' bytes */
     unsigned bytes;             /* -> a sector's size (512) */
     unsigned total_lo, total_hi;        /* -> how many sectors the disk has */

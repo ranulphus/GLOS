@@ -1,0 +1,66 @@
+#loopa-run-only (the PC's real floppy drive, by the BIOS: the emulated PC's own boot floppy in A:; disks.txt is the host's, with pictures)
+# Disk Tools on a real GLOS (apps/disks; phase F): a new image made of a folder's files, opened, a folder of it
+# copied out; then the floppy in A: (the machine's boot floppy, a copy of the harness's: FreeDOS's): its image
+# read to a file, the image opened; the image written back to the floppy (the same bytes: the floppy is as it
+# was) and read back; the floppy looked inside. (Each pass over a floppy is most of a minute, as on a real
+# drive: the check, which reads as the image's reading does, is the host's.)
+run DISKS.EXE
+wait "Disk Tools"
+key ctrl+n
+wait "New Image from a Folder"
+key ctrl+a
+type C:\\GAMES
+key alt+l
+type games
+key enter
+wait "The New Image: Save As"
+key alt+n
+type C:\\OUT\\NEW.IMG\n
+said DISKS made NEW.IMG files=11 bytes=579 left=0 sectors=2880
+wait "The New Image"
+key enter
+gone "The New Image"
+key ctrl+o
+wait "Open an Image"
+key alt+n
+type C:\\OUT\\NEW.IMG\n
+wait "NEW.IMG"
+said DISKS opened NEW.IMG fat=12 label=GAMES sectors=2880
+said DISKS folder \ entries=6
+key alt+c
+wait "Copy the Files to"
+key tab enter
+gone "Copy the Files to"
+said DISKS copied out files=1 bytes=5 to C:\OUT
+file C:\\OUT\\BLIP\\BLIP.COM \xB8\x07\x4C\xCD\x21
+key alt+f4
+gone "NEW.IMG"
+key ctrl+s
+wait "The Disk's Image: Save As"
+key alt+n
+type C:\\OUT\\A.IMG\n
+within 300
+said DISKS read disk=00 sectors=2880 bad=0 to C:\OUT\A.IMG
+wait "The Disk's Image"
+key enter
+gone "The Disk's Image"
+key ctrl+w
+wait "The Image to Write"
+key alt+n
+type C:\\OUT\\A.IMG\n
+wait "Write an Image"
+key alt+y
+within 600
+said DISKS wrote disk=00 sectors=2880 bad=0 verified=1
+wait "The Image Written"
+key enter
+gone "The Image Written"
+key enter
+wait "Floppy A:"
+said DISKS opened Floppy A: fat=12 label=FD14-BOOT sectors=2880
+said DISKS folder \ entries=4
+key alt+f4
+gone "Floppy A:"
+key alt+f4
+gone "Disk Tools"
+expect DISKS end

@@ -3,7 +3,12 @@
    reads its first sector to 0:7C00h (the BIOS's LBA call where it has one, else by the entry's cylinder, head
    and sector) and jumps to it, DL the disk and SI the entry, as DOS's boot sectors expect. 386 code: GLOS
    needs one. Linked into the kernel as bytes (mbr_code to mbr_code_end); never run there. */
+#ifdef __DJGPP__                        /* (linked into an app as well: Disk Tools. COFF: its data, and C's names
+                                           with their underscore, at the end) */
+    .data
+#else
     .section .rodata
+#endif
     .code16
     .globl mbr_code, mbr_code_end
 mbr_code:
@@ -83,4 +88,10 @@ msg_read:
 msg_system:
     .asciz "No system on the disk's partition\r\n"
 mbr_code_end:
+#ifdef __DJGPP__
+    .globl _mbr_code, _mbr_code_end
+    .set _mbr_code, mbr_code
+    .set _mbr_code_end, mbr_code_end
+#else
     .section .note.GNU-stack, "", @progbits
+#endif

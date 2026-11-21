@@ -946,3 +946,67 @@ their links, over HTTPS; no scripts, no styles' sheets.
 - **Not yet** (the plan's rest): pictures in pages (their places are shown by their words); forms; a part
   of a page gone to by its `#name`; tabs, history kept between runs and bookmarks; find in page; downloads;
   cookies; the reader view; Gemini and Gopher; compressed bodies (none are asked for); styles' sheets.
+
+## Disk Tools (2026-11-21): the first part
+
+The plan is `docs/v1/apps/disk-tools.md`. DISKS.EXE, "Disk Tools" in the Start menu: the PC's disks as the
+BIOS has them, images of them, and what is inside an image.
+
+- **FAT volumes** (`apps/shared/fatimg.c`): GLOS's own small reader and writer, FAT12 and FAT16 from
+  Microsoft's specification, over a call that reads and writes sectors (an image's file, a disk). A volume's
+  first sector is held to the rules before anything is believed; its FAT is kept in memory; folders are
+  listed with their long names; files are read from any byte; folders and files are added by their DOS
+  names (a chain is bounded by the volume's clusters, a folder grows by a cluster, what could not be finished
+  is taken back).
+- **Sector jobs** (`apps/shared/diskjob.c`): a disk to a file, a file to a disk and read back against it,
+  every sector read. 32 sectors a call, or a floppy's track (each call is then one turn of the disk: a
+  1.44 MB floppy is read in about 50 seconds, where runs of 32, which cross tracks, took 73); a run that fails
+  is gone through a sector at a time, each tried three times; a sector that stays bad is counted and its place kept (the first sixteen), and is zeros in an image,
+  so that every other sector is at its own place. A tick says how far, and stops the job.
+- **GLOS_FS_SECTORS, faster** (`kernel/app/api2fs.c`): the call went to the BIOS a sector at a time. A
+  floppy's next sector may be past the head by the time it is asked for, and the disk then turns once for
+  each: ten minutes for a disk. It now asks for runs: to the end of the track by cylinder, head and sector,
+  all 32 with the LBA calls, through a larger block of DOS's memory laid so that the sectors never cross a
+  64 KB line (the floppy's DMA). No change to the call itself.
+- **The program** (`apps/disks/disks.c`):
+  - **The disks**: the floppy drives and the hard disks, their sizes; a hard disk's partitions (kind, start,
+    size, which one starts the PC); a floppy's label, file system and free space once it is looked at (F5, or
+    a job: a floppy is not made to spin by the list).
+  - **An image of a disk** to a file: bad sectors tried again, counted and named at the end.
+  - **An image written to a disk**: its size must be the disk's; asked once for a floppy and twice for a
+    hard disk (by its size and what is on it); the first sector is read and written back first, which finds
+    a write-protected disk and the disk GLOS runs from (the kernel refuses that one, with no way round);
+    then every sector is read back against the image. DOS is told to forget its buffers (INT 21h's disk
+    reset); after a hard disk the PC is to be restarted.
+  - **Check**: every sector read.
+  - **Format** a floppy: a new empty FAT12 volume with a label, as the drive's own size has it (the
+    kernel's `fat_format`, the code GLOS's DISK command uses).
+  - **Look inside** an image file or a floppy: folders entered and left, files and folders copied out to a
+    folder (dated as they were).
+  - **A new image from a folder**: 360 KB to 2.88 MB, the folder's files and folders added; names that are
+    not DOS's are left out and counted; a file that does not fit stops it, and no image is left.
+  - Long jobs are the toolkit's tasks: progress, Cancel, one at a time. A stopped or failed image is removed.
+- **Buttons' numbers** (a fault found here): a button's function is told what happened, not the button's
+  number, which is `b->id`. Four dialogs took the one for the other, so that Cancel and Esc did what OK does:
+  the PDF Viewer's Go to Page, MIDI Studio's Instrument and Tempo, Chat's Settings, the Games Library's
+  Properties (whose Choose button closed the dialog, and whose Set Up button played the game). Put right;
+  each script now leaves its dialog by Esc and waits for the program to say so.
+- **Tests.**
+  - `fatimg_test` (69 checks) and `fatimg_test.sh`: volumes of 360 KB, 1.44 MB and FAT16 made, filled and
+    read back; `fsck.fat` finds each clean and mtools reads its files to the byte; a volume of mtools'
+    making, with long names, is listed and read; 900 damaged volumes neither crash nor run on.
+  - `diskjob_test` (34 checks): a disk in memory whose sectors fail for ever, a number of times, on
+    writing, or keep other bytes than those written; stops; files of the wrong size and files that can't be
+    written.
+  - `tests/gui/disks.txt` (the host's made-up disks, pictures): format, two new images, an image of the
+    wrong size refused, written and read back, looked inside, copied out, the floppy's image, checks.
+  - `tests/gui/disks-run.txt` (Loop A, the BIOS's floppy, four machines): a new image, opened, copied out;
+    the PC's own boot floppy read to an image, the image written back and verified (the same bytes: the
+    floppy is as it was), looked inside. About four minutes a machine, most of it the floppy's turning. A
+    script's `said` waits two minutes; `within N` before it (new) makes the next one wait N seconds.
+  - APITEST: 32 sectors in one call are the same bytes as 32 calls, on the hard disk and the floppy; a run
+    written to the second disk and read back in two.
+- **Not yet** (the plan's rest): a full format and floppies of another size than their drive's (both want
+  the BIOS's track format and the disk's own geometry in GLOS_FS_SECTORS: an API step); the system put on a
+  formatted disk; images in parts for disks over 2 GB; logical drives in an extended partition; an image
+  opened as a folder in Files; long names written; backups over SFTP and their schedule.

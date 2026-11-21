@@ -23,7 +23,12 @@
 #define DIRBUF   0x8000                 /* a sector of the root folder */
 #define FATBUF   0x8200                 /* FAT12: the whole FAT (12 sectors at most); else one sector of it */
 
+#ifdef __DJGPP__                        /* (linked into an app as well: Disk Tools. COFF: its data, and C's names
+                                           with their underscore, at the end) */
+    .data
+#else
     .section .rodata
+#endif
     .code16
 
     .macro bootcode fat, base, drv
@@ -295,4 +300,14 @@ fdboot16_end:
 fdboot32_code:
     bootcode 32, 90, 0x40
 fdboot32_end:
+#ifdef __DJGPP__
+    .globl _fdboot12_code, _fdboot12_end, _fdboot16_code, _fdboot16_end, _fdboot32_code, _fdboot32_end
+    .set _fdboot12_code, fdboot12_code
+    .set _fdboot12_end, fdboot12_end
+    .set _fdboot16_code, fdboot16_code
+    .set _fdboot16_end, fdboot16_end
+    .set _fdboot32_code, fdboot32_code
+    .set _fdboot32_end, fdboot32_end
+#else
     .section .note.GNU-stack, "", @progbits
+#endif

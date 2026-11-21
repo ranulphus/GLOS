@@ -852,7 +852,7 @@ static struct glos_fs_entry *entry_named(void *buf, unsigned count, const char *
 static void files(unsigned many)
 {
     static unsigned char buf[16384], seen[4096 / 8];
-    static unsigned char sec[4 * 512], back[4 * 512];
+    static unsigned char sec[4 * 512], back[4 * 512], run[32 * 512], one[32 * 512];
     static struct glos_fs_drive dr[26];
     unsigned char ev[GLOS_EV_MAX];
     struct glos_fs_entry *e;
@@ -1014,6 +1014,33 @@ static void files(unsigned many)
     x = (unsigned)glos_fs_sectors(&q);
     check("fs-sectors", ok && x == GLOS_E_REFUSED && q.error, "r=%d total=%u sig=%02x%02x none=%u error=%x", r, q.total_lo, sec[510],
           sec[511], x, q.error);
+    /* A call's most, 32 sectors, in one run: the same bytes as sector by sector. Of the hard disk; and of the
+       floppy drive if a disk is in it (its tracks are 18 sectors: the run is three of the BIOS's calls). */
+    for (c = 0; c < 2; c++) {
+        memset(&q, 0, sizeof q);
+        q.disk = c ? 0 : 0x80;
+        q.lba_lo = c ? 10 : 50;
+        q.count = 32;
+        q.buffer = (unsigned)run;
+        memset(run, 0xEE, sizeof run), memset(one, 0xDD, sizeof one);
+        r = glos_fs_sectors(&q);
+        if (r != 0 && c) {
+            check("fs-sectors-floppy", 1, "no floppy to read (r=%d error=%x)", r, q.error);
+            break;
+        }
+        for (i = 0, x = 0; i < 32; i++) {
+            q.lba_lo = (c ? 10 : 50) + i;
+            q.count = 1;
+            q.buffer = (unsigned)(one + i * 512);
+            x += glos_fs_sectors(&q) != 0;
+        }
+        for (i = 0, n = 0; i < sizeof run; i++)
+            n += run[i] != 0;
+        check(c ? "fs-sectors-floppy" : "fs-sectors-run", r == 0 && x == 0 && !memcmp(run, one, sizeof run),
+              "r=%d singles failed=%u same=%d bytes set=%u total=%u", r, x, !memcmp(run, one, sizeof run), n, q.total_lo);
+        /* (the two were filled with other bytes: the same now, both were read) */
+    }
+    c = 0;
     memset(&q, 0, sizeof q);
     q.disk = 0x81;
     r = glos_fs_sectors(&q);                            /* (count 0: only its size) */
@@ -1034,6 +1061,20 @@ static void files(unsigned many)
     q.write = 0;
     q.buffer = (unsigned)back;
     ok = ok && glos_fs_sectors(&q) == 0 && !memcmp(sec, back, sizeof sec);
+    for (i = 0; i < sizeof run; i++)                    /* a run of 32 written, read back as two of 16 */
+        run[i] = (unsigned char)(i * 7 + (i >> 9) * 31 + 3);
+    q.write = 1;
+    q.lba_lo = 200;
+    q.count = 32;
+    q.buffer = (unsigned)run;
+    ok = ok && glos_fs_sectors(&q) == 0;
+    q.write = 0;
+    q.count = 16;
+    q.buffer = (unsigned)one;
+    ok = ok && glos_fs_sectors(&q) == 0;
+    q.lba_lo = 216;
+    q.buffer = (unsigned)(one + 16 * 512);
+    ok = ok && glos_fs_sectors(&q) == 0 && !memcmp(run, one, sizeof run);
     q.lba_lo = n;                                       /* past its end */
     q.count = 1;
     x = (unsigned)glos_fs_sectors(&q);

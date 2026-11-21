@@ -20,6 +20,7 @@
  *   pause MS                   time passes (timers run)
  *   said LINE                  until the app has printed LINE (a job's end, which shows in no window): each
  *                              `said` of a line waits for another of it
+ *   within SECONDS             (Loop A's) the next `said` waits so long, not two minutes: a job on a real drive
  *   launch, syskey             the shell's events: the launcher (Ctrl+Esc), the task list (Ctrl+Alt+Del)
  *   clip TEXT                  the clipboard's text (glos clip)
  *   shot NAME "TITLE" [X Y W H]   OUTDIR/NAME-BPP.png: that window's client area (the rectangle, if given,
@@ -205,6 +206,51 @@ int glos_fs_drives(unsigned drive, struct glos_fs_drive *out, unsigned room, uns
     (void)drive, (void)out, (void)room;
     if (count)
         *count = 0;
+    return 0;
+}
+
+/* (Disks: a floppy drive with a 1.44 MB disk of the shim's own memory in it, never formatted when the program
+   starts; and a first hard disk of 64 MB, GLOS's own and so never written, with its partition table and
+   nothing else.) */
+int glos_fs_sectors(struct glos_fs_sectors *s)
+{
+    static unsigned char *floppy;
+    unsigned char *data = (unsigned char *)(size_t)s->buffer;
+    unsigned total = s->disk == 0 ? 2880 : 131072, i;
+    s->size = sizeof *s;
+    s->bytes = 512;
+    s->error = 0;
+    s->total_lo = s->total_hi = 0;
+    if (s->count > 32 || s->write > 1 || s->disk > 0xFF || (s->disk >= 4 && s->disk < 0x80))
+        return last_error = GLOS_E_ARGUMENT;
+    if (s->write && s->count && s->disk == 0x80)
+        return last_error = GLOS_E_REFUSED;
+    if (s->disk != 0 && s->disk != 0x80) {
+        s->error = s->disk < 0x80 ? 0x80 : 0x01;        /* (no such drive, as a BIOS says it) */
+        return last_error = GLOS_E_REFUSED;
+    }
+    s->total_lo = total;
+    if (s->lba_hi || s->lba_lo >= total || s->count > total - s->lba_lo) {
+        s->error = 4;
+        return last_error = GLOS_E_REFUSED;
+    }
+    if (!floppy && !(floppy = calloc(2880, 512)))
+        return last_error = GLOS_E_MEMORY;
+    for (i = 0; i < s->count; i++) {
+        unsigned lba = s->lba_lo + i;
+        if (s->disk == 0 && s->write) {
+            memcpy(floppy + lba * 512, data + i * 512, 512);
+        } else if (s->disk == 0) {
+            memcpy(data + i * 512, floppy + lba * 512, 512);
+        } else {
+            memset(data + i * 512, 0, 512);
+            if (lba == 0) {                             /* one partition, FAT16, the one the PC starts from */
+                static const unsigned char part[16] = { 0x80, 1, 1, 0, 0x06, 15, 63, 129, 63, 0, 0, 0, 0xC1, 0xFF, 0x01, 0 };
+                memcpy(data + 446, part, 16);
+                data[510] = 0x55, data[511] = 0xAA;
+            }
+        }
+    }
     return 0;
 }
 
@@ -1819,6 +1865,8 @@ static int step(void)
         } else if (!strcmp(cmd, "pause")) {
             H.clock += (unsigned)atoi(word(&p, b, sizeof b) ? b : "0");
             return 1;
+        } else if (!strcmp(cmd, "within")) {    /* (Loop A's: how long the next `said` waits; here work is done
+                                                   before the clock moves) */
         } else if (!strcmp(cmd, "settle")) {    /* (Loop A's: until no DOS program runs; there are none here) */
             return 1;
         } else if (!strcmp(cmd, "theme") || !strcmp(cmd, "text")) {     /* theme NAME, text SIZE: the desktop's

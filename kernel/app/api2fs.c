@@ -32,6 +32,7 @@
 #define INFO_MAX  64u
 #define PATH_MAX_ 260u                  /* a path's bytes, with its NUL */
 #define SECT_MAX  32u
+#define SECT_PARAS(n) (0x10u + 2u * (n) * 32u + 1u)     /* DOS's memory for n sectors at a call (sect_batch) */
 
 /* The borrowed block: the find data (or a drive's information) at 0, a path at 180h. */
 #define LOW_PARAS 0x40u
@@ -792,14 +793,23 @@ static void sect_batch(struct app *a, void *arg)
 {
     struct sect_job *j = arg;
     struct rmregs r;
-    u32 seg, lin, i, cyls = 0, heads = 0, spt = 0, tries;
+    u32 seg, lin, buf, i, n, room = SECT_MAX, cyls = 0, heads = 0, spt = 0, tries;
     int ext = 0, e = 0;
     (void)a;
-    if (!(seg = low_get(LOW_PARAS))) {  /* (the BIOS's packet at 0, a sector at 100h) */
-        j->error = GLOS_E_MEMORY;
-        return;
+    /* The BIOS's packet at 0, and the sectors' bytes: as many as a call may ask, or (DOS's memory short) one. A
+       floppy's sectors go by the DMA chip, which does not cross a 64 KB line: the block has room for them twice
+       over, so that either its start or the line inside it has them whole. */
+    if (!(seg = low_get(SECT_PARAS(room)))) {
+        room = 1;
+        if (!(seg = low_get(SECT_PARAS(room)))) {
+            j->error = GLOS_E_MEMORY;
+            return;
+        }
     }
     lin = seg << 4;
+    buf = lin + 0x100;
+    if ((buf & 0xFFFF) + room * 512 > 0x10000)
+        buf = (buf + 0xFFFF) & ~0xFFFFu;
     j->bytes = 512;
     if (j->disk >= 0x80) {              /* a hard disk: the BIOS's extensions, where it has them */
         memset(&r, 0, sizeof r);
@@ -841,36 +851,43 @@ static void sect_batch(struct app *a, void *arg)
         j->bios = (r.eax >> 8) & 0xFF ? (r.eax >> 8) & 0xFF : 1;
     if (e == 0 && j->bytes != 512 && j->count)
         j->bios = 1;                    /* (sectors of another size: not read or written here) */
-    for (i = 0; e == 0 && !j->bios && i < j->count; i++) {
-        u32 at = lin + 0x100, lba = j->lba_lo + i;
+    /* A run at a call: all that is asked of a disk with the BIOS's extensions; else to its track's end (a
+       floppy's track read whole is a turn of the disk; sector by sector the next one may be past the head by
+       the time it is asked for, and the disk turns once for each). */
+    for (i = 0; e == 0 && !j->bios && i < j->count; i += n) {
+        u32 lba = j->lba_lo + i, c = 0, h = 0, s = 0;
+        n = j->count - i < room ? j->count - i : room;
+        if (!ext) {
+            if (!spt || !heads || j->lba_hi || lba >= cyls * heads * spt) {
+                j->bios = 4;            /* (no such sector) */
+                break;
+            }
+            c = lba / (heads * spt), h = lba / spt % heads, s = lba % spt + 1;
+            if (n > spt - (s - 1))
+                n = spt - (s - 1);
+        }
         if (j->write)
-            memcpy(vm_ptr(at), j->data + i * 512, 512);
+            memcpy(vm_ptr(buf), j->data + i * 512, n * 512);
         for (tries = 0; tries < 3; tries++) {
             memset(&r, 0, sizeof r);
             r.edx = j->disk;
             if (ext) {
                 memset(vm_ptr(lin), 0, 0x10);
                 vm_wr8(lin, 0x10);
-                vm_wr8(lin + 2, 1);
-                vm_wr8(lin + 4, 0x00), vm_wr8(lin + 5, 0x01);    /* (the sector's bytes at seg:0100h) */
-                vm_wr8(lin + 6, (u8)seg), vm_wr8(lin + 7, (u8)(seg >> 8));
+                vm_wr8(lin + 2, (u8)n);
+                vm_wr8(lin + 4, (u8)(buf & 0xF));       /* (the sectors' bytes, as offset and segment) */
+                vm_wr8(lin + 6, (u8)(buf >> 4)), vm_wr8(lin + 7, (u8)(buf >> 12));
                 memcpy(vm_ptr(lin + 8), &lba, 4);
                 memcpy(vm_ptr(lin + 12), &j->lba_hi, 4);
                 r.eax = j->write ? 0x4300 : 0x4200;
                 r.ds = (u16)seg;
                 r.esi = 0;
             } else {
-                u32 c, h, s;
-                if (!spt || !heads || j->lba_hi || lba >= cyls * heads * spt) {
-                    j->bios = 4;        /* (no such sector) */
-                    break;
-                }
-                c = lba / (heads * spt), h = lba / spt % heads, s = lba % spt + 1;
-                r.eax = (j->write ? 0x0300u : 0x0200u) | 1;
+                r.eax = (j->write ? 0x0300u : 0x0200u) | n;
                 r.ecx = ((c & 0xFF) << 8) | ((c >> 2) & 0xC0) | s;
                 r.edx |= h << 8;
-                r.es = (u16)seg;
-                r.ebx = 0x100;
+                r.es = (u16)(buf >> 4);
+                r.ebx = buf & 0xF;
             }
             if ((e = bios13(&r)) <= 0)
                 break;
@@ -882,12 +899,11 @@ static void sect_batch(struct app *a, void *arg)
                 break;
             }
         }
-        if (e == 0 && !j->bios && !j->write)
-            memcpy(j->data + i * 512, vm_ptr(at), 512);
-        if (e == 0 && tries < 3)
-            j->bios = j->bios == 4 ? 4 : 0;     /* (it went through, perhaps at a second try) */
-        if (j->bios)
-            break;
+        if (e == 0 && tries < 3) {      /* (it went through, perhaps at a second try) */
+            j->bios = 0;
+            if (!j->write)
+                memcpy(j->data + i * 512, vm_ptr(buf), n * 512);
+        }
     }
     if (e >= 0)
         low_put(seg);
