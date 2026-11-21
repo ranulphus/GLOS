@@ -388,7 +388,9 @@ Everything else (the files, the directories, the cache) is the kernel's, above 1
   5801h, 5803h: first, best and last fit, upper memory only or first, the largest block told on failure, free
   blocks joined on allocating and resizing but not on freeing, a failed resize leaving the block as large as it
   can be (DOS 2.1-6.0's, to check against 7.1), upper memory linked through a DOS "SC" block from A000h)
-  (`mcb_test`). FCB parsing (29h) waits for MS-DOS 7.1 to
+  (`mcb_test`); `psp.c`, a PSP as RBIL's table 01378 lays it out (CALL 5's far call to F01D:FEF0, which wraps to
+  0000:00C0, where N2's DOS area keeps a jump to its CP/M entry, and the HMA a copy while A20 is on) and a
+  child's environment (the parent's strings, 0001h, the program's full name; 32 KB at most) (`psp_test`). FCB parsing (29h) waits for MS-DOS 7.1 to
   compare with: RBIL doesn't give its separators and terminators. Open: whether MS-DOS 7.1's table for 437 makes e acute E acute (as GLOS does now, and
   Windows 98's short names) or E: checked against its COUNTRY.SYS with the owner's image (N7).
 
