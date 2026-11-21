@@ -2,7 +2,8 @@
  * "Hovercraft" is its working name: its name is the owner's to choose. GLOS's own game: its craft, arenas, rules
  * and look were made for it; nothing of any other game is in it.
  *
- * Here: the game's six arenas (built in: apps/shared/hvarenas.c; arenas from files, and the lobby, are to come),
+ * Here: the game's six arenas (built in: apps/shared/hvarenas.c) and the user's own (text files in the folder
+ * ARENAS beside the program, as hvarena.h says they are written; the lobby is to come),
  * the player's craft with its side's and the other side's driven by the computer, the four kinds of game
  * (apps/shared/hvgame.c is their truth, thirty steps a second), and the picture, drawn with DOS-GL (RetroGPU's
  * gl) in a window of the desktop: the card's engine where DOS-GL has one for a window, its software renderer
@@ -19,11 +20,12 @@
  * Sound (apps/hover/hvsound.c), made by rule: the fans by their work, the air by the speed, the skirt's scrape,
  * bumps, the water, a flag or the lamp taken and lost, a point, a beacon.
  *
- * Not yet (the plan's rest): the lobby and network games; arenas from files; pads and the mouse; full
- * screen; the computer's strengths chosen; names over the craft; an arrow to the flag or the lamp. */
+ * Not yet (the plan's rest): the lobby and network games; pads and the mouse; full screen; the computer's strengths chosen; names over the craft; an arrow to the flag or the lamp. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <dir.h>
 
 #include <GL/dosgl.h>
 #include <GL/gl.h>
@@ -38,6 +40,51 @@
 
 static struct hv_arena arena;
 static struct hv_game game;
+
+/* The arenas: the six that come with the game, then the user's own: text files (hvarena.h says how they are
+   written) in the folder ARENAS beside the program. One that the reader refuses is left out, and why is said on
+   the program's output (a terminal's, if it was started from one). */
+#define USER_ARENAS 24
+static char *user_arena[USER_ARENAS];
+static int nuser;
+
+static const char *arena_text(int k) { return k < HV_ARENAS ? hv_arenas[k] : user_arena[k - HV_ARENAS]; }
+
+static void user_arenas(const char *argv0)
+{
+    static struct hv_arena trial;
+    char dir[260], path[540], why[160];
+    struct ffblk ff;
+    const char *cut = argv0, *p;
+    int done;
+    for (p = argv0; *p; p++)
+        if (*p == '/' || *p == '\\' || *p == ':')
+            cut = p + 1;
+    snprintf(dir, sizeof dir, "%.*sARENAS", (int)(cut - argv0), argv0);
+    snprintf(path, sizeof path, "%s/*.TXT", dir);
+    for (done = findfirst(path, &ff, 0); !done && nuser < USER_ARENAS; done = findnext(&ff)) {
+        FILE *f;
+        char *text;
+        long n;
+        snprintf(path, sizeof path, "%s/%s", dir, ff.ff_name);
+        if (!(f = fopen(path, "rb")))
+            continue;
+        text = malloc(8192);
+        n = text ? (long)fread(text, 1, 8191, f) : 0;
+        fclose(f);
+        if (!text)
+            continue;
+        text[n] = 0;
+        if (hv_arena_read(&trial, text, (size_t)n, why, sizeof why) == 0) {
+            user_arena[nuser++] = text;
+            printf("HVCRAFT arena %s: %s\n", ff.ff_name, trial.name);
+        } else {
+            printf("HVCRAFT arena %s refused: %s\n", ff.ff_name, why);
+            free(text);
+        }
+    }
+    fflush(stdout);
+}
 static const float SIDE[2][3] = { { 0.92f, 0.48f, 0.16f }, { 0.16f, 0.60f, 0.82f } };
 
 /* A box between two corners, each side the colour times how it is lit by the way it faces. */
@@ -310,13 +357,16 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-until") && i + 1 < argc)
             until = atol(argv[++i]);
         else if (!strcmp(argv[i], "-arena") && i + 1 < argc)
-            which = atoi(argv[++i]) % HV_ARENAS;
+            which = atoi(argv[++i]);
     }
     if (glos_init(GAME_NAME, 0, 0) != 0) {
         printf("HVCRAFT no GLOS\n");
         return 2;
     }
-    if (hv_arena_read(&arena, hv_arenas[which], strlen(hv_arenas[which]), why, sizeof why) != 0
+    user_arenas(argc > 0 ? argv[0] : "");
+    if (which < 0 || which >= HV_ARENAS + nuser)
+        which = 0;
+    if (hv_arena_read(&arena, arena_text(which), strlen(arena_text(which)), why, sizeof why) != 0
         || hv_game_start(&game, &arena, kind, HV_DEMO_CRAFT) != 0) {
         printf("HVCRAFT arena %s\n", why);
         return 3;
@@ -396,10 +446,13 @@ int main(int argc, char **argv)
                     title(win);
                 } else if (k->key == 0x0F || k->key == 0x31) { /* Tab or N: the next arena, the same kind of game */
                     int kind_now = game.kind;
-                    which = (which + 1) % HV_ARENAS;
-                    if (hv_arena_read(&arena, hv_arenas[which], strlen(hv_arenas[which]), why, sizeof why) != 0)
-                        which = 0, hv_arena_read(&arena, hv_arenas[0], strlen(hv_arenas[0]), why, sizeof why);
-                    hv_game_start(&game, &arena, kind_now, HV_DEMO_CRAFT);
+                    which = (which + 1) % (HV_ARENAS + nuser);
+                    if (hv_arena_read(&arena, arena_text(which), strlen(arena_text(which)), why, sizeof why) != 0
+                        || hv_game_start(&game, &arena, kind_now, HV_DEMO_CRAFT) != 0) {        /* (one without what this kind wants) */
+                        which = 0;
+                        hv_arena_read(&arena, hv_arenas[0], strlen(hv_arenas[0]), why, sizeof why);
+                        hv_game_start(&game, &arena, kind_now, HV_DEMO_CRAFT);
+                    }
                     title(win);
                 }
             }

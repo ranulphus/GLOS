@@ -36,6 +36,38 @@ small map at the top right shows the arena from above, with every craft (yours i
 - **The lamp:** everyone for themselves. Whoever carries the lamp scores by the second; any bump takes it.
 - **Laps:** round the buoys in their order; the tall yellow one is next.
 
+## An arena of your own
+
+An arena is a text file: write one in [Notepad](NOTEPAD.MD) and save it, with a name ending .TXT, in the
+folder ARENAS beside the game (C:\GLOS\ARENAS). Tab reaches it after the game's own six. A line for its
+name, an empty line, then the arena, a letter a square:
+
+```
+name: A Yard of My Own
+
+#########
+#A.a.b.B#
+#A.*.*.B#
+#..d.c..#
+#########
+```
+
+| Letter | What it is |
+|---|---|
+| # | A wall |
+| . | Floor |
+| 1 and 2 | Floor one and two levels up: a quay, a deck |
+| ^ v < > | A ramp, rising the way it points to a floor one level up |
+| ~ | Water |
+| A and B | Each side's dock, where its craft start and its flag stands |
+| * | A beacon |
+| ! | The lamp |
+| a b c ... | The buoys of a lap, in their order |
+
+Every row is the same length, each side needs a dock, and every place must be one a craft can reach and
+leave. A file that breaks a rule is left out; start the game from a [Terminal](TERM.MD) (HVCRAFT) and it
+says which line is wrong.
+
 ## It needs
 
 A graphics card that GLOS's DOS-GL draws on in a window; on other cards it is drawn by the processor, which

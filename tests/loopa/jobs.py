@@ -7398,7 +7398,10 @@ def hover_case(profile, vcard, card):
     while it plays: the sky above, the arena under it, more than a few colours."""
     import time
     tag = "%s-%s" % (profile, vcard)
+    mine = batfile("hover-%s/MINE.TXT" % tag, ["name: A Yard of My Own", "", "#########", "#A.a.b.B#", "#A.*.*.B#", "#..d.c..#", "#########"])
+    wrong = batfile("hover-%s/WRONG.TXT" % tag, ["name: Walled In", "", "#######", "#A.#.B#", "#######"])
     agent = Agent("hover-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/HVCRAFT.EXE=/TEST/HVCRAFT.EXE",
+        "--file", mine + "=/TEST/ARENAS/MINE.TXT", "--file", wrong + "=/TEST/ARENAS/WRONG.TXT",
         "--cmd", "SERSAY HX-START hover", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1200)
     out = os.path.join(ROOT, "out", "hover-" + tag)
     checks, info = {"listen": agent.listening()}, ""
@@ -7415,6 +7418,14 @@ def hover_case(profile, vcard, card):
             checks["kind%d" % kind] = rc == 0 and "HVCRAFT end" in o and bool(at) and at[0] == HOVER_AT.get(kind, at[0])
             if not checks["kind%d" % kind] or kind not in HOVER_AT:
                 print("    %s kind %d: %s" % (tag, kind, said[kind]))
+        # an arena of the user's own, from a file in ARENAS beside the program (the seventh, after the game's six);
+        # one the reader refuses is left out, and why is said
+        rc, o, e = agent.ssh("C:\\TEST\\HVCRAFT.EXE -demo -kind 3 -arena 6 -until 60", timeout=400)
+        o = o.replace("\r", "")
+        checks["own-arena"] = rc == 0 and "HVCRAFT arena MINE.TXT: A Yard of My Own" in o and "arena=A Yard of My Own" in o \
+            and "HVCRAFT arena WRONG.TXT refused: line 4: nobody can reach the square at column 5" in o
+        if not checks["own-arena"]:
+            print("    %s own arena: %s" % (tag, o.strip()[-300:]))
         # a picture while a game plays
         h = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\HVCRAFT.EXE -demo -kind 0 -until 1500"],
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)

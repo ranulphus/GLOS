@@ -1155,8 +1155,12 @@ beacons, the lamp or the next buoy. Not a toolkit program: its window is DOS-GL'
   fans' hum, whose pitch follows their work (idling, pushing, boosting; low when set down), air by the
   craft's speed, the skirt's scrape, bumps, walls, the water, a flag or the lamp taken and lost, a point, a
   beacon. Silent with no card, and in the suite's games.
-- **Not yet**: all of the plan beyond that (the lobby, network games, arenas from files, pads and the
-  mouse, full screen, names over the craft). **To be measured**: frames a second on
+- **The user's own arenas** (added the same day): text files in the folder ARENAS beside the program, read
+  after the game's six; one the reader refuses is left out and why is said on the program's output. The
+  guide's page says how one is written. Loop A's hover case has one read and played, and one refused with
+  its line.
+- **Not yet**: all of the plan beyond that (the lobby, network games, pads and the mouse, full screen,
+  names over the craft). **To be measured**: frames a second on
   the benches' cards and with the software renderer.
 
 ### Its network's messages (the same day; no sockets yet)
