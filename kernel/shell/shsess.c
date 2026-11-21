@@ -86,6 +86,9 @@ struct shsess {
     volatile u8 job_evt;                /* ... it has written, or moved on */
     u8 job_esc;                         /* a key's sequence under way, typed to it */
     u8 job_full;                        /* it has the PC's own screen: its terminal has been told */
+    u8 job_how;                         /* ... how: 'A' a piece of a line taken off and written again under the
+                                           notice, 'B' a line ended first, 'P' plainly (the log's, with job_shown) */
+    u32 job_shown;                      /* bytes of the program's output given to the terminal */
     void *via;                          /* a COMMAND.COM of GLOS's is this session's (cmdcom.c; S4c): it makes its
                                            DOS calls, starts its programs, and writes what it writes */
     char *cmd_env;                      /* ... and this was its environment: the shell's variables to start with */
@@ -843,6 +846,7 @@ static int h_run(void *ctx, const char *command, const char *prog, const char *n
     s->job = seq;
     s->job_on = 1;
     s->job_esc = s->job_full = 0;
+    s->job_how = 0, s->job_shown = 0;
     return 1;
 }
 
@@ -891,6 +895,7 @@ static void job_turn(struct shsess *s)
         while ((n = agent_app_read1(s, s->job, stream, buf, sizeof buf)) > 0) {
             if (s->local && !agent_app_is_app(s, s->job))
                 continue;                       /* (a DOS program at the PC: it wrote that on the screen itself) */
+            s->job_shown += (u32)n;
             if (s->tty)
                 term_text(s, (const char *)buf, n, 1);
             else
@@ -912,10 +917,12 @@ static void job_turn(struct shsess *s)
             char piece[sizeof s->mid];
             int k = s->nmid;
             memcpy(piece, s->mid, (size_t)k);
+            s->job_how = 'A';
             term_text(s, "\r\x1b[K", 4, 0);
             term_text(s, full, (int)sizeof full - 1, 1);
             term_text(s, piece, k, 1);
         } else {
+            s->job_how = s->out_mid ? 'B' : 'P';
             if (s->out_mid)
                 term_text(s, "\r\n", 2, 1);
             term_text(s, full, (int)sizeof full - 1, 1);
@@ -932,6 +939,9 @@ static void job_turn(struct shsess *s)
         irq_restore(f);
     }
     if (gone || st == GLOS_JS_DONE || (st == GLOS_JS_APP && s->tty && !s->fg)) {
+        if (s->job_full)                        /* (the log's: with the agent's "full-out ... kept=", where a line
+                                                   of such a program went missing is told apart) */
+            kprintf("GLOS-SHELL full-job seq=%u shown=%u how=%c\n", s->job, s->job_shown, s->job_how ? s->job_how : '-');
         s->fg = 0;
         if (!gone && s->tty) {                  /* what was typed to it and it never read: the characters of it */
             u16 left[64];

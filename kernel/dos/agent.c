@@ -95,6 +95,7 @@ struct agent_job {
     u8 from_app;                                /* its output is its app's to read, its keys the app's to type */
     u8 console;                                 /* KRUN_CONSOLE: its program writes into the app's window */
     u8 full;                                    /* ... until it wanted the screen (or KRUN_FULL) */
+    u32 nput;                                   /* bytes of its output kept so far (said when it ends: the log's) */
     u8 detach;                                  /* KRUN_DETACH: nobody's; no output kept */
     u8 dir_step;                                /* starting in dir: 1 its drive set, 2 its folder, 0 done */
     u8 told;                                    /* the GLOS_JOB_ state its app last heard of, FFh none */
@@ -183,6 +184,7 @@ int agent_post_run(void *owner, const char *cmd, int direct, int exclusive, cons
         j->profile[i] = profile[i];
     j->profile[i] = 0;
     j->out[0].head = j->out[0].tail = j->out[1].head = j->out[1].tail = 0;
+    j->nput = 0;
     j->from_app = j->console = j->full = j->detach = j->dir_step = 0;
     j->told = 0xFF;
     j->app_owner = NULL;
@@ -293,6 +295,7 @@ int agent_post_job(void *app, const struct krun *r, const struct agent_opts *o, 
     j->ih = j->it = 0;
     j->t_start = j->t_end = 0;
     j->out[0].head = j->out[0].tail = j->out[1].head = j->out[1].tail = 0;
+    j->nput = 0;
     j->detach = (u8)((r->flags & KRUN_DETACH) != 0);
     j->from_app = (u8)!j->detach;
     j->console = (u8)(!j->detach && (r->flags & KRUN_CONSOLE));
@@ -1036,6 +1039,10 @@ static void finish(struct agent_job *j)
     j->state = J_DONE;
     kprintf("GLOS-AGENT done seq=%u code=%u via=%s%s\n", j->seq, result & 0xFF, j->shell ? "comspec" : j->path,
             (result & 0x10000) ? " cannot-run" : "");
+    if (j->console && j->full)                  /* (a terminal's program that took the screen: how much of what it
+                                                   wrote was kept for its terminal. A line of it went missing in a
+                                                   gate, 2026-11-21; kernel/shell/shsess.c says how much it showed) */
+        kprintf("GLOS-AGENT full-out seq=%u kept=%u\n", j->seq, j->nput);
     if (done_hook)
         done_hook(j->seq, (result & 0x10000) || j->missing ? 126 : result & 0xFF);
     if (running == j)
@@ -1355,6 +1362,7 @@ static void put(int stream, u8 c)
     r->buf[r->head & (RING - 1)] = c;
     __asm__ volatile("" ::: "memory");
     r->head++;
+    running->nput++;
     if (running->from_app && (c == '\n' || ring_used(r) > RING / 2))
         thread_wake(&running->readq);           /* (the app reads a line at a time, or a lot) */
     if (running->from_app && running->app_owner && ring_used(r) == 1 && !ring_used(&running->out[!stream])) {
