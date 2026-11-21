@@ -195,32 +195,56 @@ int hv_joiner_hear(struct hv_joiner *j, const struct hv_arena *a, const unsigned
             return 0;
         if (j->step && r32(m + 4) <= j->step)   /* (an older one, come late or twice) */
             return 0;
-        j->step = (unsigned)r32(m + 4);
-        g->a = a;
-        g->kind = m[8], g->ncraft = m[9];
-        g->steps = j->step;
-        g->score[0] = s16(m + 10), g->score[1] = s16(m + 12);
-        g->lamp_holder = m[14] == 0xFF || m[14] >= g->ncraft ? -1 : m[14];
-        for (i = 0; i < HV_SPOTS; i++)
-            g->beacon[i] = (signed char)(m[15 + i] <= 1 ? m[15 + i] : -1);
-        k = 31;
-        for (i = 0; i < 2; i++, k += 7) {
-            g->flag[i].x = r16(m + k), g->flag[i].y = r16(m + k + 2);
-            g->flag[i].holder = m[k + 4] < g->ncraft ? m[k + 4] : -1;
-            g->flag[i].away = r16(m + k + 5);
-        }
-        for (i = 0; i < g->ncraft; i++, k += 15) {
-            struct hv_craft *c = &g->c[i];
-            int x = r16(m + k), y = r16(m + k + 2);
-            if (x >= a->w * 256 || y >= a->h * 256)     /* (never a place off the arena, whatever the bytes) */
-                x = y = 128;
-            c->x = x, c->y = y;
-            c->vx = s16(m + k + 4), c->vy = s16(m + k + 6);
-            c->heading = r16(m + k + 8) & 1023;
-            c->tank = m[k + 10] > HV_TANK ? HV_TANK : m[k + 10];
-            c->down = m[k + 11] & 1, c->wet = m[k + 11] & 2 ? 1 : 0, c->carrying = (m[k + 11] >> 2) & 1, c->side = (m[k + 11] >> 3) & 1;
-            c->score = s16(m + k + 12);
-            c->buoy = a->nbuoy ? m[k + 14] % a->nbuoy : 0;
+        {                               /* what happened since the state before is said by how the two differ */
+            int first = !j->step, was, v;
+            unsigned ev = 0;
+            j->step = (unsigned)r32(m + 4);
+            j->coasted = 0;
+            g->a = a;
+            g->kind = m[8], g->ncraft = m[9];
+            g->steps = j->step;
+            if (g->kind == HV_FLAGS && (s16(m + 10) > g->score[0] || s16(m + 12) > g->score[1]))
+                ev |= HV_EV_SCORE;
+            g->score[0] = s16(m + 10), g->score[1] = s16(m + 12);
+            was = g->lamp_holder;
+            g->lamp_holder = m[14] == 0xFF || m[14] >= g->ncraft ? -1 : m[14];
+            if (g->lamp_holder >= 0 && g->lamp_holder != was)
+                ev |= HV_EV_TAKEN;
+            for (i = 0; i < HV_SPOTS; i++) {
+                v = m[15 + i] <= 1 ? m[15 + i] : -1;
+                if (v >= 0 && v != g->beacon[i])
+                    ev |= HV_EV_BEACON;
+                g->beacon[i] = (signed char)v;
+            }
+            k = 31;
+            for (i = 0; i < 2; i++, k += 7) {
+                was = g->flag[i].holder;
+                g->flag[i].x = r16(m + k), g->flag[i].y = r16(m + k + 2);
+                g->flag[i].holder = m[k + 4] < g->ncraft ? m[k + 4] : -1;
+                g->flag[i].away = r16(m + k + 5);
+                if (g->flag[i].holder >= 0 && was < 0)
+                    ev |= HV_EV_TAKEN;
+                else if (g->flag[i].holder < 0 && was >= 0 && !(ev & HV_EV_SCORE))
+                    ev |= HV_EV_DROP;
+            }
+            for (i = 0; i < g->ncraft; i++, k += 15) {
+                struct hv_craft *c = &g->c[i];
+                int x = r16(m + k), y = r16(m + k + 2);
+                if (x >= a->w * 256 || y >= a->h * 256)     /* (never a place off the arena, whatever the bytes) */
+                    x = y = 128;
+                c->x = x, c->y = y;
+                c->vx = s16(m + k + 4), c->vy = s16(m + k + 6);
+                c->heading = r16(m + k + 8) & 1023;
+                c->tank = m[k + 10] > HV_TANK ? HV_TANK : m[k + 10];
+                if ((m[k + 11] & 2) && !c->wet)
+                    ev |= HV_EV_SPLASH;
+                c->down = m[k + 11] & 1, c->wet = m[k + 11] & 2 ? 1 : 0, c->carrying = (m[k + 11] >> 2) & 1, c->side = (m[k + 11] >> 3) & 1;
+                if (g->kind == HV_LAPS && s16(m + k + 12) > c->score)
+                    ev |= HV_EV_SCORE;
+                c->score = s16(m + k + 12);
+                c->buoy = a->nbuoy ? m[k + 14] % a->nbuoy : 0;
+            }
+            g->ev = first ? 0 : ev;
         }
         if (g->lamp_holder >= 0)
             g->lamp_x = g->c[g->lamp_holder].x, g->lamp_y = g->c[g->lamp_holder].y;
@@ -229,4 +253,27 @@ int hv_joiner_hear(struct hv_joiner *j, const struct hv_arena *a, const unsigned
         return 2;
     }
     return 0;
+}
+
+void hv_joiner_coast(struct hv_joiner *j)
+{
+    struct hv_game *g = &j->view;
+    int i;
+    g->ev = 0;
+    if (!j->joined || !j->step || !g->a || j->coasted >= 3)
+        return;
+    j->coasted++;
+    for (i = 0; i < g->ncraft; i++) {
+        struct hv_craft *c = &g->c[i];
+        int x = c->x + c->vx / 256, y = c->y + c->vy / 256;
+        if (c->wet || c->down || x < 0 || y < 0 || x >= g->a->w * 256 || y >= g->a->h * 256
+            || g->a->sq[y >> 8][x >> 8].kind == HV_WALL)
+            continue;
+        c->x = x, c->y = y;
+    }
+    for (i = 0; i < 2; i++)
+        if (g->kind == HV_FLAGS && g->flag[i].holder >= 0)
+            g->flag[i].x = g->c[g->flag[i].holder].x, g->flag[i].y = g->c[g->flag[i].holder].y;
+    if (g->kind == HV_LAMP && g->lamp_holder >= 0)
+        g->lamp_x = g->c[g->lamp_holder].x, g->lamp_y = g->c[g->lamp_holder].y;
 }

@@ -434,6 +434,59 @@ static void net_tests(void)
     CHECK(bad == 0, "20000 bad datagrams: a view's craft off the arena %d times", bad);
 }
 
+/* What a joiner makes of two states that differ (the sounds' events), and a step without a state. */
+static void view_tests(void)
+{
+    static struct hv_arena basin;
+    static struct hv_opener o;
+    static struct hv_joiner j;
+    unsigned char m[HV_NET_MOST], back[HV_NET_MOST];
+    char why[160], name[17];
+    int offer[4], n, x, y, i;
+#define TELL() (o.game.steps += 2, hv_joiner_hear(&j, &basin, m, hv_opener_state(&o, m), offer, name))
+    hv_arena_read(&basin, hv_arenas[0], strlen(hv_arenas[0]), why, sizeof why);
+    hv_opener_start(&o, &basin, 0, HV_FLAGS, 4, "Game");
+    hv_joiner_start(&j);
+    n = hv_opener_hear(&o, 7, m, hv_joiner_join("A", m), back);
+    hv_joiner_hear(&j, &basin, back, n, offer, name);
+    o.game.flag[1].holder = 0;                  /* (already so when the joiner first hears: nothing new to it) */
+    CHECK(TELL() == 2 && j.view.ev == 0 && j.view.flag[1].holder == 0, "the first state: nothing happened yet (ev %x)", j.view.ev);
+    CHECK(TELL() == 2 && j.view.ev == 0, "a state like the one before: nothing happened");
+    o.game.flag[1].holder = -1;
+    CHECK(TELL() == 2 && j.view.ev == HV_EV_DROP, "a flag no longer carried: dropped (ev %x)", j.view.ev);
+    o.game.flag[1].holder = 2;
+    CHECK(TELL() == 2 && j.view.ev == HV_EV_TAKEN, "a flag carried: taken (ev %x)", j.view.ev);
+    o.game.flag[1].holder = -1, o.game.score[0]++;
+    CHECK(TELL() == 2 && j.view.ev == HV_EV_SCORE, "no longer carried and a point more: brought home, not dropped (ev %x)", j.view.ev);
+    o.game.beacon[1] = 1, o.game.c[3].wet = 20;
+    CHECK(TELL() == 2 && j.view.ev == (HV_EV_BEACON | HV_EV_SPLASH), "a beacon turned, a craft in the water (ev %x)", j.view.ev);
+    CHECK(TELL() == 2 && j.view.ev == 0, "... and still in the water: said once");
+    /* coasting: a craft goes on as it was going for three steps at most, not into a wall, not when set down */
+    o.game.c[3].wet = 0;
+    o.game.c[0].vx = 10 * 256, o.game.c[0].vy = -5 * 256;
+    o.game.c[1].vx = 10 * 256, o.game.c[1].down = 1;
+    o.game.flag[1].holder = 0;
+    TELL();
+    x = j.view.c[0].x, y = j.view.c[0].y;
+    hv_joiner_coast(&j);
+    CHECK(j.view.c[0].x == x + 10 && j.view.c[0].y == y - 5 && j.view.c[1].x == o.game.c[1].x && j.view.ev == 0,
+          "a step without a state: on as it was going (%d,%d from %d,%d), one set down stays", j.view.c[0].x, j.view.c[0].y, x, y);
+    CHECK(j.view.flag[1].x == j.view.c[0].x && j.view.flag[1].y == j.view.c[0].y, "the flag goes with its carrier");
+    for (i = 0; i < 5; i++)
+        hv_joiner_coast(&j);
+    CHECK(j.view.c[0].x == x + 30 && j.view.c[0].y == y - 15, "three steps at most (%d,%d from %d,%d)", j.view.c[0].x, j.view.c[0].y, x, y);
+    for (i = 0; i < basin.w && basin.sq[o.game.c[0].y >> 8][i].kind != HV_WALL; i++)
+        ;
+    o.game.c[0].x = i * 256 - 10, o.game.c[0].vx = 100 * 256, o.game.c[0].vy = 0;    /* (10 short of a wall to its right) */
+    if (i < basin.w && i > 0) {
+        TELL();
+        hv_joiner_coast(&j);
+        CHECK(j.view.c[0].x == i * 256 - 10, "never into a wall (%d)", j.view.c[0].x);
+    }
+    CHECK(TELL() == 2 && j.coasted == 0, "a state: the count begins again");
+#undef TELL
+}
+
 int main(int argc, char **argv)
 {
     static struct hv_arena a;
@@ -511,6 +564,7 @@ int main(int argc, char **argv)
     }
     game_tests();
     net_tests();
+    view_tests();
     CHECK(hv_arena_read(&a, HV_BASIN, sizeof HV_BASIN - 1, why, sizeof why) == 0 && a.nbuoy == 4 && a.nbeacon == 4 && a.ndock[0] == 3,
           "the program's own arena: %s", why);
     {

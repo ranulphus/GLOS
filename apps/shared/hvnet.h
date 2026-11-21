@@ -63,8 +63,12 @@ struct hv_joiner {
     int kind, arena, ncraft;
     unsigned long sent;                 /* controls sent so far */
     unsigned step;                      /* the newest state heard: the game's step; an older one that comes late is passed over */
-    struct hv_game view;                /* the game as last told (its craft, scores, flags, beacons, lamp) */
+    struct hv_game view;                /* the game as last told (its craft, scores, flags, beacons, lamp); its `ev`:
+                                           what happened since the state before, as far as two states show it
+                                           (a flag or the lamp taken, a flag dropped, a point, a beacon, a craft
+                                           in the water; not the bumps) */
     int refused;                        /* the opener had no craft free, or is of another version */
+    int coasted;                        /* steps gone since the last state (hv_joiner_coast) */
 };
 
 void hv_joiner_start(struct hv_joiner *j);
@@ -76,5 +80,8 @@ int hv_joiner_bye(const struct hv_joiner *j, unsigned char *m);
    the joiner's view changed, 0 otherwise. `a` is the arena the view's game is in (the caller reads it when told
    which, at HV_M_TAKEN). */
 int hv_joiner_hear(struct hv_joiner *j, const struct hv_arena *a, const unsigned char *m, int n, int *offer, char *name17);
+/* A step in which no state came: every craft goes on as it was going (three steps at most; never into a wall),
+   and what is carried goes with its carrier. The next state puts everything right. */
+void hv_joiner_coast(struct hv_joiner *j);
 
 #endif

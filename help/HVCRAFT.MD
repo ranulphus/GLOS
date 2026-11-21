@@ -1,7 +1,7 @@
 # Hovercraft
 
-A game of hovercraft in walled harbour yards, in 3D. (Its name is still a working one, and this is its first
-part: six arenas, and the computer driving every craft but yours.)
+A game of hovercraft in walled harbour yards, in 3D, alone against the computer's craft or with the other
+GLOS PCs of your network. (Its name is still a working one, and more of it is to come.)
 
 A hovercraft has almost no grip. Its fans change its speed, not its place: it goes on the way it was going
 until you have pushed it somewhere else. Turn early, and use the side fans to stop a slide.
@@ -17,6 +17,8 @@ until you have pushed it somewhere else. Turn early, and use the side fans to st
 | Space | Set down on the skirt: the craft stops in a length and cannot be pushed, and cannot move either |
 | 1, 2, 3, 4 | Begin a game of flags, beacons, the lamp, laps |
 | Tab (or N) | The next of the six arenas |
+| O | Open your game to the network, or close it |
+| J | Look for a game on the network and join it, or leave it |
 | Esc | Leave |
 
 Your craft is orange with a white cabin, and you see it from behind. Nothing is shot and nobody is destroyed:
@@ -35,6 +37,26 @@ small map at the top right shows the arena from above, with every craft (yours i
   scores.
 - **The lamp:** everyone for themselves. Whoever carries the lamp scores by the second; any bump takes it.
 - **Laps:** round the buoys in their order; the tall yellow one is next.
+
+## With other PCs
+
+GLOS PCs on the same network (by their network cards, or joined by a [cable](NETWORK.MD)) play together. No
+addresses are needed.
+
+1. On one PC, choose the game (1 to 4) and the arena (Tab), then press **O**. The game begins again, open to
+   the others; the window's title says so, and how many have joined.
+2. On each other PC, press **J**. The game looks for an open one and joins it; the title says whose game you
+   are in. If nobody has a game open, it says so after ten seconds and you play on alone.
+
+The first PC to join drives a craft of the other side, the next one of the opener's side, and so on; the
+craft nobody drives are the computer's. **J** again leaves the game (the computer takes your craft); **O**
+again closes it, and everyone in it plays on alone. A game is opened in one of the six arenas that come with
+it, not in one of your own.
+
+The game remembers the game and the arena you last played, in the file HVCRAFT.CFG beside it. On a PC that
+the others always join, add the line `network = open` to that file (with [Notepad](NOTEPAD.MD)): the game
+then opens to the network whenever it starts. A line `name = Harbour` gives the game another name on the
+network than the PC's own.
 
 ## An arena of your own
 

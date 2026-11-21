@@ -1178,9 +1178,10 @@ savers: $(SAVER_SCRS)
 apps: $(APP_EXES) $(SSH_EXES) $(SAVER_SCRS)
 # The hovercraft game (phase F): its truth (apps/shared/hv*.c) and a picture drawn with RetroGPU's DOS-GL, as the
 # savers draw (no copy of it). Not a toolkit program: its window is DOS-GL's.
-HVCRAFT_SRCS := apps/hover/hvcraft.c apps/hover/hvsound.c apps/shared/hvarena.c apps/shared/hvgame.c apps/shared/hvarenas.c
+HVCRAFT_SRCS := apps/hover/hvcraft.c apps/hover/hvsound.c apps/hover/hvlink.c apps/shared/hvarena.c apps/shared/hvgame.c apps/shared/hvarenas.c \
+    apps/shared/hvnet.c
 build/apps/HVCRAFT.EXE: $(HVCRAFT_SRCS) apps/shared/hvarena.h apps/shared/hvgame.h apps/shared/hvarenas.h apps/shared/hvbasin.h \
-                        apps/hover/hvsound.h \
+                        apps/hover/hvsound.h apps/hover/hvlink.h apps/shared/hvnet.h \
                         build/sdk/libglos.a tools/glosmark.py \
                         $(DOSGL_DIR)/build/lib/libGL.a
 	@mkdir -p build/apps

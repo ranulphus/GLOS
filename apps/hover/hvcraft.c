@@ -14,13 +14,27 @@
  * begin it again; Tab (or N) goes to the next arena; Esc ends. Over the scene: the score, the boost's tank, and a small map of the arena (the craft,
  * the flags, beacons, the lamp or the next buoy).
  *
+ * Over the network (apps/hover/hvlink.c; the messages: apps/shared/hvnet.h): O opens the game to the other GLOS
+ * PCs of the network (one of the game's six arenas; it begins again), and closes it; J looks for an open game
+ * and joins the first that has a craft free, and leaves it. No addresses: a broadcast finds the games. The
+ * opener's PC keeps the game; the craft nobody has are the computer's; a PC that leaves or goes quiet gives its
+ * craft back to the computer; when the opener leaves, its joiners are alone again. The window's title says how
+ * things stand. The game and the arena are the opener's to choose, before it opens.
+ *
  * HVCRAFT -demo [-kind 0..3] [-until STEP] is the suite's: every craft the computer's, the game's state said at
- * a step ("HVCRAFT at ..."), which is the same on every PC whatever the pictures cost.
+ * a step ("HVCRAFT at ..."), which is the same on every PC whatever the pictures cost. With -open or -join
+ * [-name NAME] the game is opened or one is joined at once, and both say the game at every 150th step as they
+ * have it ("HVCRAFT net at ..."): the same line on both PCs. A joiner's -until counts steps from the first it is
+ * told.
  *
  * Sound (apps/hover/hvsound.c), made by rule: the fans by their work, the air by the speed, the skirt's scrape,
  * bumps, the water, a flag or the lamp taken and lost, a point, a beacon.
  *
- * Not yet (the plan's rest): the lobby and network games; pads and the mouse; full screen; the computer's strengths chosen; names over the craft; an arrow to the flag or the lamp. */
+ * HVCRAFT.CFG beside the program keeps the last game and arena, a name, and whether the game opens to the
+ * network whenever it starts.
+ *
+ * Not yet (the plan's rest): the lobby (the games found as a list, names, the craft's colour); a joiner's own
+ * craft moved at once by its own controls; pads and the mouse; full screen; the computer's strengths chosen; names over the craft; an arrow to the flag or the lamp. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,12 +48,17 @@
 #include "../shared/hvarenas.h"
 #include "../shared/hvbasin.h"
 #include "../shared/hvgame.h"
+#include "hvlink.h"
 #include "hvsound.h"
 
 #define GAME_NAME "Hovercraft"          /* (the working name) */
 
 static struct hv_arena arena;
-static struct hv_game game;
+static struct hv_game alone;            /* the game played alone */
+static struct hv_game *G = &alone;      /* the game shown: that one, or a network game (the opener's own; a joiner's
+                                           view of it) */
+static int me;                          /* the player's craft in it */
+static int which;                       /* the arena: the game's six, then the user's own */
 
 /* The arenas: the six that come with the game, then the user's own: text files (hvarena.h says how they are
    written) in the folder ARENAS beside the program. One that the reader refuses is left out, and why is said on
@@ -149,21 +168,21 @@ static void draw_arena(void)
     /* what stands in it: the beacons in their side's colour, the lamp, a lap's buoys, the flags */
     for (k = 0; k < arena.nbeacon; k++) {
         float fx = (float)arena.beacon[k].x + 0.5f, fz = (float)arena.beacon[k].y + 0.5f;
-        box(fx - 0.06f, 0.0f, fz - 0.06f, fx + 0.06f, 0.9f, fz + 0.06f, game.beacon[k] < 0 ? white : SIDE[game.beacon[k]]);
-        box(fx - 0.16f, 0.9f, fz - 0.16f, fx + 0.16f, 1.1f, fz + 0.16f, game.beacon[k] < 0 ? white : SIDE[game.beacon[k]]);
+        box(fx - 0.06f, 0.0f, fz - 0.06f, fx + 0.06f, 0.9f, fz + 0.06f, G->beacon[k] < 0 ? white : SIDE[G->beacon[k]]);
+        box(fx - 0.16f, 0.9f, fz - 0.16f, fx + 0.16f, 1.1f, fz + 0.16f, G->beacon[k] < 0 ? white : SIDE[G->beacon[k]]);
     }
-    if (game.kind == HV_LAMP) {
-        float fx = (float)game.lamp_x / 256.0f, fz = (float)game.lamp_y / 256.0f, up = game.lamp_holder >= 0 ? 0.55f : 0.0f;
+    if (G->kind == HV_LAMP) {
+        float fx = (float)G->lamp_x / 256.0f, fz = (float)G->lamp_y / 256.0f, up = G->lamp_holder >= 0 ? 0.55f : 0.0f;
         box(fx - 0.10f, up, fz - 0.10f, fx + 0.10f, up + 0.35f, fz + 0.10f, lampc);
     }
-    if (game.kind == HV_LAPS)
+    if (G->kind == HV_LAPS)
         for (k = 0; k < arena.nbuoy; k++) {
             float fx = (float)arena.buoy[k].x + 0.5f, fz = (float)arena.buoy[k].y + 0.5f;
-            box(fx - 0.10f, 0.0f, fz - 0.10f, fx + 0.10f, k == game.c[0].buoy ? 0.9f : 0.4f, fz + 0.10f, k == game.c[0].buoy ? lampc : buoy);
+            box(fx - 0.10f, 0.0f, fz - 0.10f, fx + 0.10f, k == G->c[me].buoy ? 0.9f : 0.4f, fz + 0.10f, k == G->c[me].buoy ? lampc : buoy);
         }
-    if (game.kind == HV_FLAGS)
+    if (G->kind == HV_FLAGS)
         for (k = 0; k < 2; k++) {
-            float fx = (float)game.flag[k].x / 256.0f, fz = (float)game.flag[k].y / 256.0f, up = game.flag[k].holder >= 0 ? 0.35f : 0.0f;
+            float fx = (float)G->flag[k].x / 256.0f, fz = (float)G->flag[k].y / 256.0f, up = G->flag[k].holder >= 0 ? 0.35f : 0.0f;
             box(fx - 0.03f, up, fz - 0.03f, fx + 0.03f, up + 1.0f, fz + 0.03f, white);
             box(fx + 0.03f, up + 0.70f, fz - 0.02f, fx + 0.40f, up + 1.0f, fz + 0.02f, SIDE[k]);
         }
@@ -173,8 +192,8 @@ static void draw_arena(void)
 static void draw_craft(int i)
 {
     static const float dark[3] = { 0.20f, 0.20f, 0.22f }, glass[3] = { 0.80f, 0.90f, 0.95f }, white[3] = { 0.95f, 0.95f, 0.95f };
-    const struct hv_craft *c = &game.c[i];
-    float up = (float)hv_craft_level(&game, i) / 256.0f * LEVEL + (c->down ? 0.0f : 0.10f);
+    const struct hv_craft *c = &G->c[i];
+    float up = (float)hv_craft_level(G, i) / 256.0f * LEVEL + (c->down ? 0.0f : 0.10f);
     if (c->wet)
         return;
     glPushMatrix();
@@ -183,7 +202,7 @@ static void draw_craft(int i)
     glBegin(GL_TRIANGLES);
     box(-0.26f, 0.00f, -0.30f, 0.26f, 0.08f, 0.30f, dark);                      /* the skirt */
     box(-0.22f, 0.08f, -0.28f, 0.22f, 0.20f, 0.26f, SIDE[c->side]);            /* the hull */
-    box(-0.10f, 0.20f, -0.16f, 0.10f, 0.30f, 0.04f, i == 0 ? white : glass);    /* the cabin (the player's: white) */
+    box(-0.10f, 0.20f, -0.16f, 0.10f, 0.30f, 0.04f, i == me ? white : glass);    /* the cabin (the player's: white) */
     box(-0.16f, 0.20f, 0.12f, 0.16f, 0.36f, 0.24f, dark);                       /* the fan's housing, at the back */
     glEnd();
     glPopMatrix();
@@ -191,10 +210,10 @@ static void draw_craft(int i)
 
 static void frame(float aspect)
 {
-    const struct hv_craft *me = &game.c[0];
-    float heading = (float)me->heading * 360.0f / 1024.0f;
-    float s = (float)hv_sin(me->heading) / 16384.0f, c = (float)hv_cos(me->heading) / 16384.0f;
-    float px = (float)me->x / 256.0f, pz = (float)me->y / 256.0f, py = (float)hv_craft_level(&game, 0) / 256.0f * LEVEL;
+    const struct hv_craft *my = &G->c[me];
+    float heading = (float)my->heading * 360.0f / 1024.0f;
+    float s = (float)hv_sin(my->heading) / 16384.0f, c = (float)hv_cos(my->heading) / 16384.0f;
+    float px = (float)my->x / 256.0f, pz = (float)my->y / 256.0f, py = (float)hv_craft_level(G, me) / 256.0f * LEVEL;
     float back = 0.5f, d;
     int i;
     /* the eye: behind the craft and above it, but never the far side of a wall from it: as far back as the
@@ -215,7 +234,7 @@ static void frame(float aspect)
     glRotatef(heading, 0.0f, 1.0f, 0.0f);
     glTranslatef(-(px - s * back), -(py + 0.75f + back * 0.26f), -(pz + c * back));
     draw_arena();
-    for (i = 0; i < game.ncraft; i++)
+    for (i = 0; i < G->ncraft; i++)
         draw_craft(i);
 }
 
@@ -253,7 +272,7 @@ static void overlay(int w, int h)
 {
     static const float dark[3] = { 0.10f, 0.10f, 0.12f }, light[3] = { 0.80f, 0.80f, 0.82f }, mid[3] = { 0.55f, 0.55f, 0.58f },
                        water[3] = { 0.15f, 0.35f, 0.65f }, white[3] = { 1.0f, 1.0f, 1.0f }, tank[3] = { 0.98f, 0.86f, 0.20f };
-    const struct hv_craft *me = &game.c[0];
+    const struct hv_craft *own = &G->c[me];
     float x, mx, my, cell = 4.0f;
     int i, sx, sy;
     glMatrixMode(GL_PROJECTION);
@@ -264,17 +283,17 @@ static void overlay(int w, int h)
     glDisable(GL_DEPTH_TEST);
     glBegin(GL_TRIANGLES);
     /* the score: the two sides', or the player's own */
-    flat(8.0f, 8.0f, game.kind <= HV_BEACONS ? 104.0f : 52.0f, 34.0f, dark);
-    if (game.kind <= HV_BEACONS) {
-        x = number(14.0f, 13.0f, game.score[0], SIDE[0]);
+    flat(8.0f, 8.0f, G->kind <= HV_BEACONS ? 104.0f : 52.0f, 34.0f, dark);
+    if (G->kind <= HV_BEACONS) {
+        x = number(14.0f, 13.0f, G->score[0], SIDE[0]);
         flat(x + 2.0f, 20.0f, 4.0f, 4.0f, light), flat(x + 2.0f, 28.0f, 4.0f, 4.0f, light);
-        number(x + 12.0f, 13.0f, game.score[1], SIDE[1]);
+        number(x + 12.0f, 13.0f, G->score[1], SIDE[1]);
     } else {
-        number(14.0f, 13.0f, me->score, white);
+        number(14.0f, 13.0f, own->score, white);
     }
     /* the boost's tank */
     flat(8.0f, (float)h - 20.0f, 104.0f, 12.0f, dark);
-    flat(10.0f, (float)h - 18.0f, 100.0f * (float)me->tank / (float)HV_TANK, 8.0f, tank);
+    flat(10.0f, (float)h - 18.0f, 100.0f * (float)own->tank / (float)HV_TANK, 8.0f, tank);
     /* the map: the arena from above, its top the grid's */
     mx = (float)w - 8.0f - cell * (float)arena.w, my = 8.0f;
     flat(mx - 2.0f, my - 2.0f, cell * (float)arena.w + 4.0f, cell * (float)arena.h + 4.0f, dark);
@@ -285,17 +304,17 @@ static void overlay(int w, int h)
                 flat(mx + cell * (float)sx, my + cell * (float)sy, cell, cell,
                      q->kind == HV_WATER ? water : q->mark == 'A' || q->mark == 'B' ? SIDE[q->mark - 'A'] : q->level || q->kind == HV_RAMP ? light : mid);
         }
-    for (i = 0; i < arena.nbeacon && game.kind == HV_BEACONS; i++)
-        flat(mx + cell * (float)arena.beacon[i].x, my + cell * (float)arena.beacon[i].y, cell, cell, game.beacon[i] < 0 ? white : SIDE[game.beacon[i]]);
-    if (game.kind == HV_LAMP)
-        flat(mx + (float)game.lamp_x / 256.0f * cell - 2.0f, my + (float)game.lamp_y / 256.0f * cell - 2.0f, 5.0f, 5.0f, tank);
-    if (game.kind == HV_LAPS)
-        flat(mx + cell * (float)arena.buoy[me->buoy].x, my + cell * (float)arena.buoy[me->buoy].y, cell, cell, tank);
-    for (i = 0; i < 2 && game.kind == HV_FLAGS; i++)
-        flat(mx + (float)game.flag[i].x / 256.0f * cell - 1.0f, my + (float)game.flag[i].y / 256.0f * cell - 4.0f, 2.0f, 6.0f, white);
-    for (i = game.ncraft - 1; i >= 0; i--)
-        if (!game.c[i].wet)
-            flat(mx + (float)game.c[i].x / 256.0f * cell - 1.5f, my + (float)game.c[i].y / 256.0f * cell - 1.5f, 3.0f, 3.0f, i ? SIDE[game.c[i].side] : white);
+    for (i = 0; i < arena.nbeacon && G->kind == HV_BEACONS; i++)
+        flat(mx + cell * (float)arena.beacon[i].x, my + cell * (float)arena.beacon[i].y, cell, cell, G->beacon[i] < 0 ? white : SIDE[G->beacon[i]]);
+    if (G->kind == HV_LAMP)
+        flat(mx + (float)G->lamp_x / 256.0f * cell - 2.0f, my + (float)G->lamp_y / 256.0f * cell - 2.0f, 5.0f, 5.0f, tank);
+    if (G->kind == HV_LAPS)
+        flat(mx + cell * (float)arena.buoy[own->buoy].x, my + cell * (float)arena.buoy[own->buoy].y, cell, cell, tank);
+    for (i = 0; i < 2 && G->kind == HV_FLAGS; i++)
+        flat(mx + (float)G->flag[i].x / 256.0f * cell - 1.0f, my + (float)G->flag[i].y / 256.0f * cell - 4.0f, 2.0f, 6.0f, white);
+    for (i = G->ncraft - 1; i >= 0; i--)
+        if (!G->c[i].wet)
+            flat(mx + (float)G->c[i].x / 256.0f * cell - 1.5f, my + (float)G->c[i].y / 256.0f * cell - 1.5f, 3.0f, 3.0f, i != me ? SIDE[G->c[i].side] : white);
     glEnd();
     glEnable(GL_DEPTH_TEST);
 }
@@ -330,12 +349,96 @@ static unsigned keys_held(void)
 static void title(glos_handle win)
 {
     static const char *const kinds[4] = { "Flags", "Beacons", "The lamp", "Laps" };
-    char t[64];
-    if (game.kind == HV_FLAGS || game.kind == HV_BEACONS)
-        snprintf(t, sizeof t, "%s: %s, %s %d : %d", GAME_NAME, arena.name, kinds[game.kind], game.score[0], game.score[1]);
+    char t[128], lead[56];
+    int m = hvlink_mode();
+    if (m == HVL_OPEN)
+        snprintf(lead, sizeof lead, "%s (open, %d joined)", GAME_NAME, hvlink_seats());
+    else if (m == HVL_LOOKING)
+        snprintf(lead, sizeof lead, "%s (looking for a game)", GAME_NAME);
+    else if (m == HVL_JOINED)
+        snprintf(lead, sizeof lead, "%s (in %.16s)", GAME_NAME, hvlink_host());
     else
-        snprintf(t, sizeof t, "%s: %s, %s %ld", GAME_NAME, arena.name, kinds[game.kind], game.c[0].score);
+        snprintf(lead, sizeof lead, "%s", GAME_NAME);
+    if (G->kind == HV_FLAGS || G->kind == HV_BEACONS)
+        snprintf(t, sizeof t, "%s: %s, %s %d : %d", lead, G->a->name, kinds[G->kind & 3], G->score[0], G->score[1]);
+    else
+        snprintf(t, sizeof t, "%s: %s, %s %ld", lead, G->a->name, kinds[G->kind & 3], G->c[me].score);
     glos_set_text(win, GLOS_PROP_WIN_TITLE, t);
+}
+
+/* What the game remembers, in HVCRAFT.CFG beside the program, lines of "key = value": the kind of game and the
+   arena last played (written when the game ends), the player's name on the network (the PC's own if none is
+   written), and "network = open" or "network = join": the game opens to the network, or looks for a game,
+   whenever it starts (for a PC that is the one others join; written by hand until the lobby sets it). */
+static const char *const kind_words[4] = { "flags", "beacons", "lamp", "laps" };
+static char cfg_path[540], cfg_name[17];
+static int cfg_network;                 /* 0 alone, 1 open, 2 join */
+
+static void cfg_read(const char *argv0, int *kind)
+{
+    char line[120], key[24], val[64];
+    const char *cut = argv0, *p;
+    FILE *f;
+    int i;
+    for (p = argv0; *p; p++)
+        if (*p == '/' || *p == '\\' || *p == ':')
+            cut = p + 1;
+    snprintf(cfg_path, sizeof cfg_path, "%.*sHVCRAFT.CFG", (int)(cut - argv0), argv0);
+    if (!(f = fopen(cfg_path, "r")))
+        return;
+    while (fgets(line, sizeof line, f)) {
+        if (sscanf(line, " %23[a-z] = %63[^\r\n]", key, val) != 2)
+            continue;
+        if (!strcmp(key, "game")) {
+            for (i = 0; i < 4; i++)
+                if (!strcmp(val, kind_words[i]))
+                    *kind = i;
+        } else if (!strcmp(key, "arena")) {
+            which = atoi(val);
+        } else if (!strcmp(key, "name")) {
+            snprintf(cfg_name, sizeof cfg_name, "%.16s", val);
+        } else if (!strcmp(key, "network")) {
+            cfg_network = !strcmp(val, "open") ? 1 : !strcmp(val, "join") ? 2 : 0;
+        }
+    }
+    fclose(f);
+}
+
+static void cfg_write(int kind)
+{
+    FILE *f = cfg_path[0] ? fopen(cfg_path, "w") : 0;
+    if (!f)
+        return;
+    fprintf(f, "game = %s\narena = %d\n", kind_words[kind & 3], which);
+    if (cfg_name[0])
+        fprintf(f, "name = %s\n", cfg_name);
+    if (cfg_network)
+        fprintf(f, "network = %s\n", cfg_network == 1 ? "open" : "join");
+    fclose(f);
+}
+
+/* The game alone, begun: in the arena chosen, or the first if that one has not what the kind wants. */
+static void begin_alone(int kind)
+{
+    char why[160];
+    G = &alone, me = 0;
+    if (hv_arena_read(&arena, arena_text(which), strlen(arena_text(which)), why, sizeof why) != 0
+        || hv_game_start(&alone, &arena, kind, HV_DEMO_CRAFT) != 0) {
+        which = 0;
+        hv_arena_read(&arena, hv_arenas[0], strlen(hv_arenas[0]), why, sizeof why);
+        hv_game_start(&alone, &arena, kind, HV_DEMO_CRAFT);
+    }
+}
+
+/* The game opened to the network: 0; -1 (an arena of this PC's own, which the others have not; no network). */
+static int open_game(int kind, const char *name)
+{
+    if (which >= HV_ARENAS || hvlink_open(&arena, which, kind, HV_DEMO_CRAFT, name) != 0)
+        return -1;
+    G = hvlink_game(), me = hvlink_craft();
+    printf("HVCRAFT net open kind=%d arena=%d name=%s\n", kind, which, name);
+    fflush(stdout);
+    return 0;
 }
 
 int main(int argc, char **argv)
@@ -344,11 +447,13 @@ int main(int argc, char **argv)
     const struct glos_ev *ev = (const struct glos_ev *)evbuf;
     DGLConfig cfg;
     glos_handle win;
-    char why[160];
-    unsigned last, acc = 0, said = 0, my_keys = 0;
-    int sounding = 0;
-    int w = 480, h = 360, i, on = 1, demo = 0, kind = HV_FLAGS, which = 0;
+    char why[160], name[17] = "";
+    unsigned last, acc = 0, said = 0, my_keys = 0, marked = 0, heard_from = 0;
+    int heard = 0;
+    int sounding = 0, code = 0;
+    int w = 480, h = 360, i, on = 1, demo = 0, kind = HV_FLAGS, opening = 0, joining = 0;
     long until = -1;
+    cfg_read(argc > 0 ? argv[0] : "", &kind);
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-demo"))
             demo = 1;
@@ -358,16 +463,29 @@ int main(int argc, char **argv)
             until = atol(argv[++i]);
         else if (!strcmp(argv[i], "-arena") && i + 1 < argc)
             which = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "-open"))
+            opening = 1;
+        else if (!strcmp(argv[i], "-join"))
+            joining = 1;
+        else if (!strcmp(argv[i], "-name") && i + 1 < argc)
+            snprintf(name, sizeof name, "%s", argv[++i]);
     }
     if (glos_init(GAME_NAME, 0, 0) != 0) {
         printf("HVCRAFT no GLOS\n");
         return 2;
     }
+    if (!name[0])
+        snprintf(name, sizeof name, "%s", cfg_name);
+    if (!name[0]) {                             /* the player's name on the network: the PC's own, unless said */
+        int set = 0;
+        if (glos_setting_get("net", "hostname", name, sizeof name, &set) != 0 || !name[0])
+            snprintf(name, sizeof name, "GLOS PC");
+    }
     user_arenas(argc > 0 ? argv[0] : "");
     if (which < 0 || which >= HV_ARENAS + nuser)
         which = 0;
     if (hv_arena_read(&arena, arena_text(which), strlen(arena_text(which)), why, sizeof why) != 0
-        || hv_game_start(&game, &arena, kind, HV_DEMO_CRAFT) != 0) {
+        || hv_game_start(&alone, &arena, kind, HV_DEMO_CRAFT) != 0) {
         printf("HVCRAFT arena %s\n", why);
         return 3;
     }
@@ -389,10 +507,18 @@ int main(int argc, char **argv)
     glViewport(0, 0, w, h);
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.55f, 0.70f, 0.85f, 1.0f);
+    if ((opening && open_game(kind, name) != 0) || (joining && hvlink_look(name) != 0)) {
+        printf("HVCRAFT net no network\n");
+        code = 6, on = 0;
+    } else if (!opening && !joining && !demo && cfg_network == 1) {     /* (as HVCRAFT.CFG says: failing, the game alone) */
+        open_game(kind, name);
+    } else if (!opening && !joining && !demo && cfg_network == 2) {
+        hvlink_look(name);
+    }
     title(win);
     if (!demo)                          /* (the suite's games are silent) */
         sounding = hvsound_start();
-    printf("HVCRAFT started kind=%d craft=%d arena=%s\n", game.kind, game.ncraft, arena.name);
+    printf("HVCRAFT started kind=%d craft=%d arena=%s\n", G->kind, G->ncraft, arena.name);
     fflush(stdout);
     last = glos_ticks();
     while (on) {
@@ -404,26 +530,71 @@ int main(int argc, char **argv)
         if (!demo && due > 6)                   /* (a PC too slow for thirty a second: the game slows, it does not skip) */
             due = 6;
         while (due-- && on) {
-            unsigned char keys[HV_CRAFT];
-            for (i = 0; i < game.ncraft; i++)
-                keys[i] = (unsigned char)(i == 0 && !demo ? keys_held() : hv_auto(&game, i, HV_DEMO_STRENGTH));
-            my_keys = keys[0];
-            hv_game_step(&game, keys);
+            unsigned ctl = demo ? hv_auto(G, me, HV_DEMO_STRENGTH) : keys_held(), evs = 0, le = 0;
+            int mode = hvlink_mode();
+            my_keys = ctl;
+            if (mode == HVL_ALONE || mode == HVL_LOOKING) {     /* the game alone (it goes on while a game is looked for) */
+                unsigned char keys[HV_CRAFT];
+                keys[0] = (unsigned char)ctl;
+                for (i = 1; i < alone.ncraft; i++)
+                    keys[i] = (unsigned char)hv_auto(&alone, i, HV_DEMO_STRENGTH);
+                hv_game_step(&alone, keys);
+                evs = alone.ev;
+            }
+            if (mode != HVL_ALONE) {
+                le = hvlink_step(ctl);
+                if (le & HVL_CRAFT) {           /* a craft in somebody's game: its arena, which is one of the six */
+                    const struct hv_joiner *j = hvlink_joiner();
+                    if (j->arena >= 0 && j->arena < HV_ARENAS
+                        && hv_arena_read(&arena, hv_arenas[j->arena], strlen(hv_arenas[j->arena]), why, sizeof why) == 0) {
+                        hvlink_arena(&arena);
+                        G = hvlink_game(), me = hvlink_craft();
+                        printf("HVCRAFT net joined craft=%d of=%d kind=%d arena=%d game=%s\n", me, j->ncraft, j->kind, j->arena, hvlink_host());
+                    } else {
+                        hvlink_leave();
+                        le |= HVL_ENDED;
+                    }
+                }
+                if (mode == HVL_OPEN || (le & HVL_STATE))
+                    evs = G->ev;
+                if ((le & HVL_STATE) && !heard)
+                    heard = 1, heard_from = G->steps;   /* (a joiner's -until counts from the first step it is told) */
+                if (le & HVL_SEATS)
+                    printf("HVCRAFT net seats=%d\n", hvlink_seats());
+                if ((mode == HVL_OPEN || (le & HVL_STATE)) && G->steps % 150 == 0 && G->steps != marked) {
+                    marked = G->steps;          /* (the suite's: the game as both PCs have it at this step) */
+                    printf("HVCRAFT net at %u score=%d:%d c0=%d,%d,%d c1=%d,%d,%d lamp=%d\n", G->steps, G->score[0], G->score[1],
+                           G->c[0].x, G->c[0].y, G->c[0].heading, G->c[1].x, G->c[1].y, G->c[1].heading, G->lamp_holder);
+                }
+                if (le & (HVL_ENDED | HVL_NOBODY)) {
+                    printf(le & HVL_ENDED ? "HVCRAFT net ended\n" : "HVCRAFT net nobody\n");
+                    begin_alone(kind);
+                    if (joining)                /* (the suite's: that was what it came for) */
+                        code = le & HVL_NOBODY ? 5 : 0, on = 0;
+                }
+                if (le)
+                    fflush(stdout);
+            }
             if (sounding)
-                hvsound_events(game.ev);
-            if (until >= 0 && (long)game.steps >= until) {     /* the suite's: the game's state at this step, and the end */
-                printf(HV_AT_LINE, game.steps, game.score[0], game.score[1], game.c[0].x, game.c[0].y, game.c[0].heading, game.c[1].x,
-                       game.c[1].y, game.lamp_holder, game.c[0].score);
+                hvsound_events(evs);
+            if (until >= 0 && hvlink_mode() != HVL_LOOKING && on
+                && (hvlink_mode() == HVL_JOINED ? heard && (long)(G->steps - heard_from) >= until : (long)G->steps >= until)) {
+                /* the suite's: the game's state at this step, and the end */
+                if (hvlink_mode() == HVL_ALONE)
+                    printf(HV_AT_LINE, G->steps, G->score[0], G->score[1], G->c[0].x, G->c[0].y, G->c[0].heading, G->c[1].x,
+                           G->c[1].y, G->lamp_holder, G->c[0].score);
+                else
+                    printf("HVCRAFT net end step=%u seats=%d\n", G->steps, hvlink_seats());
                 fflush(stdout);
                 on = 0;
             }
         }
         if (sounding) {                 /* the player's own fans, and the air by the craft's speed */
-            const struct hv_craft *me = &game.c[0];
-            int vx = me->vx < 0 ? -me->vx : me->vx, vy = me->vy < 0 ? -me->vy : me->vy;
-            int work = (my_keys & HV_C_BOOST && me->tank > 0 ? 3 : 0) + (my_keys & (HV_C_FWD | HV_C_BACK) ? 1 : 0)
+            const struct hv_craft *my = &G->c[me];
+            int vx = my->vx < 0 ? -my->vx : my->vx, vy = my->vy < 0 ? -my->vy : my->vy;
+            int work = (my_keys & HV_C_BOOST && my->tank > 0 ? 3 : 0) + (my_keys & (HV_C_FWD | HV_C_BACK) ? 1 : 0)
                        + (my_keys & (HV_C_SLIDE_L | HV_C_SLIDE_R) ? 1 : 0);
-            hvsound_frame(work > 3 ? 3 : work, vx > vy ? vx + vy * 3 / 8 : vy + vx * 3 / 8, me->down, me->wet != 0);
+            hvsound_frame(work > 3 ? 3 : work, vx > vy ? vx + vy * 3 / 8 : vy + vx * 3 / 8, my->down, my->wet != 0);
         }
         frame((float)w / (float)h);
         overlay(w, h);
@@ -437,29 +608,48 @@ int main(int argc, char **argv)
                 on = 0;
             } else if (ev->kind == GLOS_EV_KEY) {
                 const struct glos_ev_key *k = (const struct glos_ev_key *)evbuf;
+                int mode = hvlink_mode();
                 if (!k->down)
                     continue;
                 if (k->key == 0x01)             /* Esc */
                     on = 0;
-                else if (k->key >= 0x02 && k->key <= 0x05) {    /* 1 to 4: that kind of game, begun again */
-                    hv_game_start(&game, &arena, (int)k->key - 2, HV_DEMO_CRAFT);
+                else if (k->key == 0x18) {      /* O: the game opened to the network (begun again), or closed */
+                    if (mode == HVL_OPEN) {
+                        hvlink_leave();
+                        begin_alone(kind);
+                        printf("HVCRAFT net closed\n");
+                    } else if (mode == HVL_ALONE) {
+                        open_game(kind, name);
+                    }
+                    title(win);
+                } else if (k->key == 0x24) {    /* J: a game looked for and joined, or left */
+                    if (mode == HVL_LOOKING || mode == HVL_JOINED) {
+                        hvlink_leave();
+                        begin_alone(kind);
+                        printf("HVCRAFT net left\n");
+                    } else if (mode == HVL_ALONE) {
+                        hvlink_look(name);
+                    }
+                    title(win);
+                } else if (mode != HVL_ALONE) {
+                    ;                           /* (the game and the arena are chosen before a game is opened, and by its opener) */
+                } else if (k->key >= 0x02 && k->key <= 0x05) {  /* 1 to 4: that kind of game, begun again */
+                    kind = (int)k->key - 2;
+                    begin_alone(kind);
                     title(win);
                 } else if (k->key == 0x0F || k->key == 0x31) { /* Tab or N: the next arena, the same kind of game */
-                    int kind_now = game.kind;
                     which = (which + 1) % (HV_ARENAS + nuser);
-                    if (hv_arena_read(&arena, arena_text(which), strlen(arena_text(which)), why, sizeof why) != 0
-                        || hv_game_start(&game, &arena, kind_now, HV_DEMO_CRAFT) != 0) {        /* (one without what this kind wants) */
-                        which = 0;
-                        hv_arena_read(&arena, hv_arenas[0], strlen(hv_arenas[0]), why, sizeof why);
-                        hv_game_start(&game, &arena, kind_now, HV_DEMO_CRAFT);
-                    }
+                    begin_alone(kind);
                     title(win);
                 }
             }
         }
     }
+    hvlink_leave();
     hvsound_stop();
     dglShutdown();
+    if (!demo && until < 0)                     /* (the suite's games leave nothing behind) */
+        cfg_write(kind);
     printf("HVCRAFT end\n");
-    return 0;
+    return code;
 }

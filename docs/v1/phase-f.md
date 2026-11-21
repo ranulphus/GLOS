@@ -1184,3 +1184,46 @@ for a JOIN, which is told so.
 - **Not yet**: the sockets (GLOS's UDP, API 2.2: a broadcast to find, datagrams to play), the lobby that
   lists games and joins one, a joiner's own craft drawn from its own controls at once and put right gently
   (the messages carry what that needs: the controls' count), the others drawn between the states told.
+
+### Over the network (the same day): the sockets, and two keys
+
+`apps/hover/hvlink.c` puts GLOS's datagram ports (NET, API 2.2) under those messages, and the game has two
+keys for them. **O** opens the game to the other GLOS PCs of the network (it begins again; one of the game's
+six arenas, which every PC has) and closes it; **J** looks for an open game and joins the first with a craft
+free, and leaves it. No addresses are typed: the one that looks asks everyone on port 18518 twice a second,
+and every open game answers. The window's title says how things stand (open and how many have joined; looking;
+in whose game). The game's name on the network is the PC's own (`[net] hostname`).
+
+- **The ports:** an opener has the well-known port (shared, so several games may be open on one PC), where it
+  is asked, and a port of its own, from which it answers and at which its joiners then speak to it. A joiner
+  has one port of its own. Nothing waits: a step takes what has come in and sends what is due.
+- **A joiner** sends its controls each step and takes one state a step (they come fifteen a second: none waits
+  long, and a PC that draws slowly, hearing them in bursts, still sees each; if many wait, the newest). In a
+  step without one every craft goes on as it was going, three steps at most and never into a wall
+  (`hv_joiner_coast`). The sounds' events are made from how two states differ: a flag or the lamp taken, a
+  flag dropped, a point, a beacon, a craft in the water (not the bumps). Its camera, map and tank are its own
+  craft's.
+- **Ends:** a joiner that leaves says so (twice); one not heard for three seconds is the computer's; a joiner
+  that hears nothing for three seconds is alone again, and so is one that finds no game in ten.
+- **What the game remembers:** `HVCRAFT.CFG` beside the program, lines of `key = value`: the game and the
+  arena last played (written when the game ends), a `name` for the network (the PC's own if none), and
+  `network = open` or `network = join`: the game opens to the network, or looks for a game, whenever it
+  starts (for the PC that the others join; written by hand until the lobby sets it). The suite's games
+  (`-demo`, `-until`) write nothing.
+- **Tests:** `hv_test` (144 checks): the events from pairs of states, and coasting. Loop A, the desk suite:
+  - the hover case: two copies of the game on one emulated PC, where a broadcast reaches the PC's own ports
+    as it would another PC's (API 2.9): one opens, the other finds it and is given the second craft; both say
+    the game at every 150th step as they have it, and for the same step the two lines are the same; the
+    joiner leaves and the opener says its craft the computer's again; one that looks where nobody has a game
+    says so;
+  - `hoverpair` (`DESK_ONLY=hoverpair`): **two emulated PCs**, the near one with a network card, the far one
+    with none, joined to it by a cable (COM2 to COM2) and a member of its network. The far PC's desktop
+    starts the game (`[desktop] start`), which opens a game of beacons as its HVCRAFT.CFG says, under the
+    PC's own name; the near PC's copy looks, its broadcast is copied down the cable, and it is given the
+    second craft and told the game for 900 steps across the cable (some 2 KB a second each way at 115200).
+- **Found on the way:** a batch file among `[desktop] start`'s programs cannot start an app (it runs under
+  COMMAND.COM, and an app's parent must be GLOS): programs there take no arguments, which is why the game
+  reads a file of its own.
+- **Not yet:** the lobby (the games found as a list, the player's name and craft's colour, the computer's
+  strength); an arena of the user's own sent to the joiners; a joiner's own craft moved at once by its own
+  controls and put right gently; two real PCs across a switch and across a cable.

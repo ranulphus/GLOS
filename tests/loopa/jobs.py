@@ -7424,8 +7424,10 @@ def hover_case(profile, vcard, card):
     """The hovercraft game (phase F; apps/hover, apps/shared/hvgame.c) on a desktop: HVCRAFT -demo, every craft
     the computer's, for each of the four kinds of game to step 450: the game's state it says there is the one
     written here (a game is its arena and its controls: the same on every PC, whatever draws the picture: the
-    card's engine in a window on the Matrox card, DOS-GL's software renderer on the S3). And a picture of it
-    while it plays: the sky above, the arena under it, more than a few colours."""
+    card's engine in a window on the Matrox card, DOS-GL's software renderer on the S3). An arena of the
+    user's own read and one refused; a game over the network between two copies on this PC (hover_pair_case
+    has two PCs). And a picture of it while it plays: the sky above, the arena under it, more than a few
+    colours."""
     import time
     tag = "%s-%s" % (profile, vcard)
     mine = batfile("hover-%s/MINE.TXT" % tag, ["name: A Yard of My Own", "", "#########", "#A.a.b.B#", "#A.*.*.B#", "#..d.c..#", "#########"])
@@ -7456,6 +7458,39 @@ def hover_case(profile, vcard, card):
             and "HVCRAFT arena WRONG.TXT refused: line 4: nobody can reach the square at column 5" in o
         if not checks["own-arena"]:
             print("    %s own arena: %s" % (tag, o.strip()[-300:]))
+        # Over the network (apps/hover/hvlink.c), both copies of the game on this PC, where a broadcast reaches
+        # the PC's own ports as it would another PC's: one opens a game, the other finds it and is given the
+        # second craft; both say the game at every 150th step as they have it, and for the same step the two
+        # say the same line; the joiner leaves 1200 steps after the first it was told, the opener says its craft
+        # the computer's again and plays on to its own end. And where nobody has a game open, one that looks
+        # says so and ends.
+        ho = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\HVCRAFT.EXE -demo -open -name Quay -until 3000"],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        started = lambda: agent.log().split("HX-START hover")[-1].count("GLOS-APP start")
+        n0, t0 = started(), time.time()
+        while time.time() - t0 < 120 and started() == n0:
+            time.sleep(0.5)
+        time.sleep(3)
+        rc, oj, _ = agent.ssh("C:\\TEST\\HVCRAFT.EXE -demo -join -name Skiff -until 1200", timeout=600)
+        try:
+            oo = ho.communicate(timeout=600)[0].decode("latin-1").replace("\r", "")
+        except subprocess.TimeoutExpired:
+            ho.kill()
+            oo = "(the opener never ended)"
+        oj = oj.replace("\r", "")
+        mo, mj = dict(re.findall(r"HVCRAFT net at (\d+) (.*)", oo)), dict(re.findall(r"HVCRAFT net at (\d+) (.*)", oj))
+        both = [k for k in mj if k in mo]
+        checks["net"] = rc == 0 and ho.returncode == 0 and "HVCRAFT net open kind=0 arena=0 name=Quay" in oo \
+            and "HVCRAFT net joined craft=1 of=4 kind=0 arena=0 game=Quay" in oj and len(both) >= 3 \
+            and all(mo[k] == mj[k] for k in both) and "HVCRAFT net end step=" in oj \
+            and re.findall(r"HVCRAFT net seats=(\d)", oo) == ["1", "0"] and "HVCRAFT net end step=3000 seats=0" in oo
+        info += " net=%d" % len(both)
+        if not checks["net"]:
+            rest = lambda o: [l for l in o.split("\n") if l and not l.startswith("HVCRAFT net at ")]
+            print("    %s net: opener rc=%r %r joiner rc=%r %r marks %r %r" % (tag, ho.returncode, rest(oo), rc, rest(oj),
+                                                                           sorted(mo.items())[:3], sorted(mj.items())[:3]))
+        rc, o, _ = agent.ssh("C:\\TEST\\HVCRAFT.EXE -demo -join -until 300", timeout=400)
+        checks["net-nobody"] = rc == 5 and "HVCRAFT net nobody" in o
         # a picture while a game plays
         h = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\HVCRAFT.EXE -demo -kind 0 -until 1500"],
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -7482,11 +7517,106 @@ def hover_case(profile, vcard, card):
     except subprocess.TimeoutExpired:
         checks["timeout"] = False
     text = agent.wait()
-    checks["apps"] = text.count("prog=HVCRAFT.EXE") >= 5
+    checks["apps"] = text.count("prog=HVCRAFT.EXE") >= 8
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
     checks["done"] = "GLOS-EXIT code=0" in text
     bad = [k for k, v in checks.items() if not v]
     return "  %-22s %s%s%s" % ("hover-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
+def hover_pair_case(profile, card):
+    """The hovercraft game between two emulated PCs (apps/hover/hvlink.c). The near PC has a network card; the
+    far one has none, is joined to it by a cable (COM2 to COM2, carried here) and is a member of its network
+    (kernel/net/member.c). The far PC's desktop, switched on at its own prompt, starts the game ([desktop]
+    start), which opens to the network as its HVCRAFT.CFG says (network = open; a game of beacons, as it says
+    too); its name there is the PC's own, "far". The near PC's copy, started over SSH, looks for a game: its
+    broadcast is copied down the cable, the far PC's answer comes back, and it is given the second craft. It
+    says the game as it is told it at every 150th step for 900 steps: the steps go up, its craft moves; then it
+    leaves. Both PCs end clean."""
+    import socket
+    import threading
+    import time
+    tag = "hoverpair-%s" % profile
+    stop = []
+    cfg_a = batfile(tag + "/near/GLOS.CFG", ["; jobs.py desk, the hovercraft game: the PC with the card", "[time]", "sntp = off",
+                                             "[net]", "hostname = near", "cable = server com2"])
+    cfg_b = batfile(tag + "/far/GLOS.CFG", ["; jobs.py desk, the hovercraft game: the PC at the cable's far end", "[time]",
+                                            "sntp = off", "[net]", "hostname = far", "cable = client com2",
+                                            "[desktop]", "start = C:\\TEST\\HVCRAFT.EXE"])
+    own = batfile(tag + "/far/HVCRAFT.CFG", ["game = beacons", "arena = 0", "network = open"])
+    game = ["--card", "vbe", "--com2", "--file", "build/apps/HVCRAFT.EXE=/TEST/HVCRAFT.EXE"]
+    near = Agent(tag, profile, card, game + ["--file", cfg_a + "=/TEST/GLOS.CFG", "--cmd", "SERSAY HX-START hoverpair",
+                                             "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    far = run(tag + "-far", ["--machine", profile, "--timeout", "900", "--idle", "600"] + game
+              + ["--file", cfg_b + "=/TEST/GLOS.CFG", "--file", own + "=/TEST/HVCRAFT.CFG",
+                 "--keys", "@GLOS-NET cable member ip=," + typed_keys("display on 640x480x16\n", 3.0)] + GLOS_FILES + KEYS
+              + ["--cmd", "SERSAY HX-START far", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
+              background=True)
+    fserial = os.path.join(ROOT, "out", tag + "-far", "serial.log")
+    flog = lambda: open(fserial, "rb").read().decode("latin-1").replace("\r", "") if os.path.exists(fserial) else ""
+
+    def join(pa, pb):                           # the cable: bytes from each COM2 bridge to the other
+        try:
+            sa = socket.create_connection(("127.0.0.1", pa), timeout=10)
+            sb = socket.create_connection(("127.0.0.1", pb), timeout=10)
+        except OSError:
+            return
+        for s_ in (sa, sb):
+            s_.settimeout(0.05)
+        while not stop:
+            for src, dst in ((sa, sb), (sb, sa)):
+                try:
+                    d = src.recv(4096)
+                    if d:
+                        dst.sendall(d)
+                except socket.timeout:
+                    pass
+                except OSError:
+                    return
+
+    def until(test, limit):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            r = test()
+            if r:
+                return r
+            time.sleep(1)
+        return test()
+
+    checks, info = {"listen": near.listening()}, ""
+    try:
+        pa, pb = cable_port(tag), cable_port(tag + "-far")
+        checks["ports"] = bool(pa and pb)
+        threading.Thread(target=join, args=(pa, pb), daemon=True).start()
+        checks["member"] = bool(until(lambda: "GLOS-NET member ip=" in near.log(), 300))
+        checks["far-open"] = bool(until(lambda: re.search(r"GLOS-APP start id=\d+ prog=HVCRAFT\.EXE", flog()), 240))
+        checks["on"] = near.ssh("glos display on 640x480x16")[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and not near.ssh("glos display")[1].startswith("display on mode="):
+            time.sleep(0.5)
+        time.sleep(5)                           # (the far PC's game: its window made, its ports open)
+        rc, o, _ = near.ssh("C:\\TEST\\HVCRAFT.EXE -demo -join -name Near -until 900", timeout=600)
+        o = o.replace("\r", "")
+        marks = re.findall(r"HVCRAFT net at (\d+) score=\d+:\d+ c0=(\S+) c1=(\S+) ", o)
+        steps = [int(m[0]) for m in marks]
+        checks["joined"] = "HVCRAFT net joined craft=1 of=4 kind=1 arena=0 game=far" in o
+        checks["played"] = rc == 0 and len(marks) >= 4 and steps == sorted(set(steps)) \
+            and len(set(m[2] for m in marks)) >= 3 and "HVCRAFT net end step=" in o
+        info += " marks=%d" % len(marks)
+        if not (checks["joined"] and checks["played"]):
+            info += " near=%r far-tail=%r" % ([l for l in o.split("\n") if l][-8:], flog().split("\n")[-5:])
+        checks["exit"] = near.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    stop.append(1)
+    text = near.wait()
+    far.kill()
+    far.wait()
+    checks["clean"] = not re.search(r"GLOS-PANIC|GLOS-WARN|GLOS-CRASH", text + flog())
+    checks["done"] = "GLOS-EXIT code=0" in text and "HX-DONE 0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % (tag, "PASS" if not bad else "FAIL", info if bad else info.split(" near=")[0],
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
@@ -11318,16 +11448,20 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]
-        res = [] if os.environ.get("DESK_ONLY") == "hover" else matrix(desk_case, cases, a.jobs)
+        res = [] if os.environ.get("DESK_ONLY") in ("hover", "hoverpair") else matrix(desk_case, cases, a.jobs)
         # (the G100 since RetroGPU d51210f, 2026-11-18: its window's first lock divided by nothing, and on the real
         # card the memory's size was misread)
         savers = [c for c in [("bf6", "g200", "ne2kpci"), ("bf6", "vbe", "ne2kpci"), ("bf6", "g100", "ne2kpci")]
                   if not a.profile or c[0] in a.profile]
         hovers = [c for c in savers if c[1] != "g100"]  # ... and the hovercraft game, by the card and in software
-        if os.environ.get("DESK_ONLY") == "hover":      # (DESK_ONLY=hover: those alone)
+        pairs = [c for c in [("bf6", "ne2kpci")] if not a.profile or c[0] in a.profile]    # ... and between two PCs
+        if os.environ.get("DESK_ONLY") == "hover":      # (DESK_ONLY=hover: those alone; hoverpair: the two PCs)
             return 0 if all(r[1] for r in matrix(hover_case, hovers, a.jobs)) else 1
+        if os.environ.get("DESK_ONLY") == "hoverpair":
+            return 0 if all(r[1] for r in matrix(hover_pair_case, pairs, a.jobs)) else 1
         res += matrix(saver_case, savers, a.jobs)       # ... and a saver that is a program (phase D)
         res += matrix(hover_case, hovers, a.jobs)
+        res += matrix(hover_pair_case, pairs, a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "win":
         cases = [(win_case,) + c for c in WIN_CASES if not a.profile or c[0] in a.profile] \
