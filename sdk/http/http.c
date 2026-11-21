@@ -297,8 +297,9 @@ int http_get(struct http_get *g)
             port[0] = 0;
         else
             snprintf(port, sizeof port, ":%u", u.port);
-        snprintf(req, sizeof req, "GET %s HTTP/1.1\r\nHost: %s%s\r\nUser-Agent: GLOS-FETCH/1.0\r\n"
-                 "Accept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n", u.path, u.host, port);
+        snprintf(req, sizeof req, "GET %s HTTP/1.1\r\nHost: %s%s\r\nUser-Agent: %.80s\r\n"
+                 "Accept: %.120s\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n", u.path, u.host, port,
+                 g->agent && g->agent[0] ? g->agent : "GLOS-FETCH/1.0", g->accept && g->accept[0] ? g->accept : "*/*");
         if (send_all(&c, req, strlen(req)) != 0) {
             snprintf(g->why, sizeof g->why, "%s", c.tls ? tls_why(c.tls) : "connection lost");
             close_conn(&c);
@@ -310,7 +311,7 @@ int http_get(struct http_get *g)
             return -1;
         }
         g->status = atoi(l + 9);
-        location[0] = 0;
+        location[0] = 0, g->type[0] = 0;
         while ((r = line(&c, l, sizeof l)) > 0) {
             char *v = strchr(l, ':');
             if (!v)
@@ -324,6 +325,8 @@ int http_get(struct http_get *g)
                 is_chunked = 1;
             else if (!strcasecmp(l, "Location"))
                 snprintf(location, sizeof location, "%s", v);
+            else if (!strcasecmp(l, "Content-Type"))
+                snprintf(g->type, sizeof g->type, "%s", v);
         }
         if (r < 0) {
             snprintf(g->why, sizeof g->why, "%s", c.why);

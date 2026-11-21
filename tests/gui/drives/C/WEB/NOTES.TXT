@@ -1,0 +1,3 @@
+Notes, as plain text.
+  Two blanks before this line.
+<b>No tags here.</b>

@@ -893,3 +893,56 @@ The plan is `docs/v1/apps/chat.md`. CHAT.EXE, "Chat" in the Start menu: an IRC c
   search over them; notifications when the window is not in front and the task bar's flash; IRCv3's chat
   history, account-notify and message tags beyond the time; stripping colours by a setting; joins and parts
   hidden by a setting; reconnecting by itself; a ping of its own when the server is silent.
+
+## The Web Reader (2026-11-21): the first part
+
+The plan is `docs/v1/apps/web-reader.md`. WEB.EXE, "Web Reader" in the Start menu: pages read as text with
+their links, over HTTPS; no scripts, no styles' sheets.
+
+- **URLs** (`apps/shared/url.c`), from RFC 3986: taken apart (scheme, host, port, path, query, fragment;
+  an address in brackets), a link made whole against its page's address (the RFC's rules, the dots of its path
+  removed), what a URL cannot have written as escapes, a search's words escaped.
+- **HTML** (`apps/shared/html.c`): GLOS's own reader in the manner of HTML5's tokenizer: whatever the bytes, a
+  page comes out. No tree is kept: the page is laid out as it is read, into calls (a block of a kind and
+  depth, a run of text with its style and link, a row's next cell, a colour, a picture's place, the title, an
+  anchor, a form's field) which the app makes a rich-text document of and the tests lines of text.
+  - **Text**: blanks made one (but in `pre`), character references (the named ones a page is likely to
+    have, the vowels with their marks by rule, numbers in tens and sixteens, Windows-1252's where pages mean
+    them; in an attribute, one with no semicolon before "=" or a letter is left alone: a query's `&copy=`).
+  - **Elements**: headings, paragraphs and the other blocks, styles in styles (bold, italic, code,
+    struck), links (made whole; a link in a link ends the first), lists in lists with their depth, quotes,
+    preformatted text, line breaks, rules, tables as rows of cells (a block in a cell is a blank, not a
+    block), definitions, pictures (their address, their words, a link they are in), `base`, forms' fields
+    (told; shown as a word in brackets until forms are done).
+  - **Not shown**: scripts, styles, templates, SVG, frames and their like with all in them; elements marked
+    `hidden` or `display: none`; comments. A colour written on an element is heeded where it can be read on
+    white.
+  - **Tags out of order**: the open elements are a stack; an end tag closes back to its start, one with
+    none is passed over, one does not reach out of a table's cell; a paragraph is ended by a block, an
+    item by the next item, a cell by the next cell; a tag not known is as if it were not there.
+  - **Characters**: as the sender says; else the page's own `meta`; else UTF-8 if its bytes are that, and
+    Latin (Windows-1252) if not.
+- **Fetching** (`apps/shared/webget.c`): a thread runs GLOS's HTTP client and keeps what comes (2 MB at most);
+  the window's thread asks how far it is, and may give it up. `sdk/http` now says what a body is
+  (`Content-Type`) and takes who asks and what is wanted (`User-Agent`, `Accept`).
+- **The program** (`apps/web/web.c`): the address (a whole address, a site's name, a DOS path, or words to
+  search for: DuckDuckGo's plain pages, as the owner chose), the page in the rich-text view (links pressed
+  or reached by Tab and Enter), Back, Forward, Reload, Stop, Home; `http:`, `https:`, `file:` and its own
+  start page; text files as they are; a picture that a link leads to is shown (Images' decoders); other
+  files are named, not saved yet. A page that can't be had is said in the page's place, with why.
+  `WEB -dump URL` fetches and reads a page with no window and prints it a line a block.
+- **Tests.**
+  - `url_test` (64 checks): the RFC's own examples of references made whole, normal and abnormal, every
+    one; what pages have (blanks, capitals, ports, other schemes, letters beyond ASCII); 20000 URLs of
+    random bytes.
+  - `html_test` (30 checks): pages written out, each read into lines and held against what it should be:
+    every element and rule above, pages in Latin and UTF-8 each way they can say so, a paragraph longer
+    than a run's buffer, elements nested 800 deep; 6000 pages with bytes changed and 500 of no sense.
+  - `tests/gui/web.txt` (host and Loop A, pictures compared) on `tests/gui/drives/C/WEB`: a page of
+    everything, its link followed by Tab and Enter to a page in Latin letters, Back and Forward, a page
+    that is not there, a text file, a picture, the start page.
+  - Loop A's https suite: `WEB -dump` of a page from the suite's HTTPS server: its title, heading, text
+    with a link made whole, list, table and picture's place; the same page sent in Latin letters; a 404.
+- **Not yet** (the plan's rest): pictures in pages (their places are shown by their words); forms; a part
+  of a page gone to by its `#name`; tabs, history kept between runs and bookmarks; find in page; downloads;
+  cookies; the reader view; Gemini and Gopher; compressed bodies (none are asked for); styles' sheets.

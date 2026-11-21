@@ -27,6 +27,11 @@ struct http_get {
     char url_got[512];                  /* the URL the body came from (after redirects) */
     char tls[64];                       /* tls_version()'s, for https */
     char why[128];                      /* why it failed */
+    /* (phase F: the Web Reader's) */
+    const char *agent;                  /* in: who asks (User-Agent); 0: "GLOS-FETCH/1.0" */
+    const char *accept;                 /* in: what is wanted (Accept); 0: anything */
+    char type[96];                      /* out: what the body is, as its sender says (Content-Type: "text/html;
+                                           charset=utf-8"), or "" */
 };
 
 int http_get(struct http_get *g);       /* 0: a 2xx response's body given; -1 and why ("HTTP 404" for another status) */

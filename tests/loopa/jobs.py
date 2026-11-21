@@ -8858,6 +8858,15 @@ class HttpsServer:
                     self.send_header("Connection", "close")
                     self.end_headers()
                     self.wfile.write(HTTPS_BODY)
+                elif self.path in ("/page.html", "/latin.html"):   # (the Web Reader's: a page, and one in Latin letters)
+                    latin = self.path == "/latin.html"
+                    body = HTTPS_PAGE.encode("latin-1" if latin else "utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=" + ("ISO-8859-1" if latin else "utf-8"))
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(body)
                 elif self.path in ("/redirect", "/relative"):
                     self.send_response(302)
                     self.send_header("Location", "/file" if self.path == "/redirect" else "file")
@@ -8995,6 +9004,10 @@ class IrcServer:
         self.sock.close()
 
 
+# The Web Reader's page on the https suite's server (WEB -dump reads it over TLS and says what it read).
+HTTPS_PAGE = ("<!DOCTYPE html><html><head><title>Loop A's page</title><script>no()</script></head><body>"
+              "<h1>Served over TLS</h1><p>A <b>bold</b> word and a <a href=\"/file\">link</a>: caf\u00e9.</p>"
+              "<ul><li>One<li>Two</ul><table><tr><td>a<td>b</table><img src=\"pic.png\" alt=\"A picture\"></body></html>")
 HTTPS_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
 HTTPS_INTERNET = [("github", "https://raw.githubusercontent.com/curl/curl/curl-8_10_1/COPYING"),
                   ("freedos", "https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/mem.zip")]
@@ -9006,6 +9019,9 @@ def https_case(profile, card):
     redirects (absolute and relative), a chunked body, each the host's bytes (SHA-256); refusals for a name that
     isn't the certificate's, an expired certificate, one from a CA nobody trusts, a 404. With the internet: a file
     from GitHub and one from a FreeDOS mirror, Mozilla's roots alone, their SHA-256 the host's.
+    The Web Reader (phase F; WEB -dump: a page fetched and read with no window): a page over TLS, its title, heading,
+    text with a link made whole, list, table and picture's place as they were read; the same page sent in Latin
+    letters; a page that is not there.
     Chat's connection and IRC (phase F; IRCTEST, a connection kept open by a thread): over TLS with an account
     (SASL), and plain: announced, a channel joined (its topic and names), a line said and the bot's answer heard
     with the server's time on it, the link closed; a certificate of another name and a port nobody listens on
@@ -9026,7 +9042,7 @@ def https_case(profile, card):
     open(cfg, "w").write("; GLOS.CFG for the https suite: the clock set by hand\r\n[time]\r\nsntp = off\r\n")
     agent = Agent("https-" + tag, profile, card, ["--file", "%s=/TEST/GLOS.CFG" % os.path.relpath(cfg, ROOT),
         "--file", "build/apps/FETCH.EXE=/TEST/FETCH.EXE", "--file", "%s=/TEST/CERTS.DAT" % os.path.relpath(certs, ROOT),
-        "--file", "build/dj/IRCTEST.EXE=/TEST/IRCTEST.EXE",
+        "--file", "build/dj/IRCTEST.EXE=/TEST/IRCTEST.EXE", "--file", "build/apps/WEB.EXE=/TEST/WEB.EXE",
         "--cmd", "SERSAY HX-START https", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=3600)
     checks, notes = {"listen": agent.listening()}, []
     want = hashlib.sha256(HTTPS_BODY).hexdigest()
@@ -9069,6 +9085,22 @@ def https_case(profile, card):
             fetch(name, url, ok_sha=host_sha, resolve=False, timeout=900)
         if not internet:
             notes.append("no internet from the guest: GitHub and the FreeDOS mirror not asked")
+        # The Web Reader: a page read over TLS, as text a line a block
+        for name, path in (("web-page", "page.html"), ("web-latin", "latin.html")):
+            base = "https://test.glos:%d" % good
+            rc, o, e = agent.ssh("C:\\TEST\\WEB.EXE -dump %s/%s -resolve test.glos:10.0.2.2" % (base, path), timeout=600)
+            o = (o + e).replace("\r", "")
+            lines = ["WEB dump got ", " type=text/html; charset=%s from %s/%s" % ("utf-8" if path == "page.html" else "ISO-8859-1", base, path),
+                     "WEB dump TITLE: Loop A's page", "WEB dump H1: Served over TLS",
+                     # (the page's UTF-8, as the agent's output is read here: a byte a character)
+                     "WEB dump P0: A bold word and a <%s/file|link>: %s." % (base, "caf\u00e9".encode("utf-8").decode("latin-1")),
+                     "WEB dump B0: One", "WEB dump B0: Two",
+                     "WEB dump T0: a | b", "WEB dump IMG: %s/pic.png (A picture)" % base, "WEB dump end"]
+            checks[name] = rc == 0 and all(l in o for l in lines) and "no()" not in o
+            if not checks[name]:
+                notes.append("%s: %s" % (name, " | ".join(o.strip().split("\n"))[-400:]))
+        rc, o, e = agent.ssh("C:\\TEST\\WEB.EXE -dump https://test.glos:%d/nothing -resolve test.glos:10.0.2.2" % good, timeout=600)
+        checks["web-not-found"] = rc == 1 and "WEB dump failed: HTTP 404" in (o + e)
         # Chat's connection and IRC, against IRC servers on the host
         import socket
         irc = {"tls": IrcServer(pki, "good"), "plain": IrcServer(), "name": IrcServer(pki, "name")}
@@ -10848,7 +10880,7 @@ def console_case(profile, vcard, card, bits):
 
 # The native apps (M9 steps D-G): their scripts (tests/gui, all but GUITEST's) on the desktop, the apps beside
 # GLOS.EXE.
-NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER", "RECORDER", "PLAYER", "STUDIO", "PDF", "GAMES", "CHAT"]
+NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER", "RECORDER", "PLAYER", "STUDIO", "PDF", "GAMES", "CHAT", "WEB"]
 NATIVE_CASES = [("bf6", "vbe", "ne2kpci", 8), ("bf6", "g200", "ne2kpci", 16), ("bf6", "g400", "ne2kpci", 32),
                 ("486dx2", "vbe", "ne2k", 8)]
 

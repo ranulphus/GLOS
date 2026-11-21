@@ -178,6 +178,10 @@ host-test-run: build/host/libpdfbr32.a
 	  apps/shared/smf.c && build/host/song_test build/host/smf
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/irc_test tests/host/irc_test.c apps/shared/irc.c \
 	  && build/host/irc_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/url_test tests/host/url_test.c apps/shared/url.c \
+	  && build/host/url_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/html_test tests/host/html_test.c apps/shared/html.c \
+	  apps/shared/url.c && build/host/html_test
 	@mkdir -p build/host/gamecases && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/gamelib_test \
 	  tests/host/gamelib_test.c apps/shared/gamedb.c apps/shared/gamelib.c && build/host/gamelib_test build/host/gamecases
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c apps/shared/pdfnav.c \
@@ -227,7 +231,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
-APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf games chat
+APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf games chat web
 # (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
 # shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
@@ -274,6 +278,15 @@ APP_LIBS_chat := apps/shared/irc.c apps/shared/ircnet.c build/sdk/libtls.a build
 APP_DEPS_chat := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_chat := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/CHAT.map -Wl,--cref
 APP_AFTER_chat := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/CHAT.map
+# The Web Reader (phase F): HTML read, URLs, pictures as Images has them; pages fetched on a thread by GLOS's HTTP
+# client (TLS: BearSSL), so the lock round the C library; on the host, where there is no network, a stand-in (its
+# suite reads pages from the test drive).
+WEB_SRCS := apps/shared/html.c apps/shared/url.c apps/shared/picfile.c
+APP_HOST_LIBS_web := $(WEB_SRCS) apps/shared/webget_none.c
+APP_LIBS_web := $(WEB_SRCS) apps/shared/webget.c build/sdk/libhttp.a build/sdk/libtls.a build/sdk/libbearssl.a
+APP_DEPS_web := build/sdk/gloswrap.opt tools/wrapcheck.py
+APP_LINK_web := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/WEB.map -Wl,--cref
+APP_AFTER_web := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/WEB.map
 # The Games Library's games (phase F): the known games, the library's file and scan; pictures as Images has them.
 GAMES_SRCS := apps/shared/gamedb.c apps/shared/gamelib.c apps/shared/picfile.c apps/shared/thumbs.c
 APP_HOST_LIBS_games := $(GAMES_SRCS)
@@ -707,7 +720,7 @@ loopa-time: all dos-tests check-deps
 loopa-netapp: all build/dj/NETTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py netapp -j $(JOBS)
 # M10 step C: HTTPS (FETCH) against servers on the host with a test CA, refusals, GitHub and a FreeDOS mirror.
-loopa-https: all build/apps/FETCH.EXE build/dj/IRCTEST.EXE build/host/mkcerts build/glos/CERTS.DAT check-deps
+loopa-https: all build/apps/FETCH.EXE build/apps/WEB.EXE build/dj/IRCTEST.EXE build/host/mkcerts build/glos/CERTS.DAT check-deps
 	$(Q)python3 tests/loopa/jobs.py https -j $(JOBS)
 # M10 step F: VNC through an SSH tunnel with a stock client (vncdotool: tests/vnc), and glos rec.
 loopa-vnc: all apps check-deps
