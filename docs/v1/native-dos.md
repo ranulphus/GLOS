@@ -253,8 +253,12 @@ right error is part of the answer); **internal** after the core.
     recalibrate as done, 01h the last status, verifies (04h, 44h) by the drive's own READ VERIFY; formatting,
     long reads and writes and calls the cache can't decode still go to the BIOS (their errors stay its own).
     A CHS call's AL is answered as the BIOS was seen to answer it, learnt apart for reads, writes and verifies
-    (86Box's BIOS gives 0 for all three; DSKTORT's digest and a trace of its calls showed each). Still to come
-    in N1c: the cache keeping writes for 2 seconds, IRQ-driven transfers.
+    (86Box's BIOS gives 0 for all three; DSKTORT's digest and a trace of its calls showed each). Loop A's
+    disks are under 1,024 cylinders, where 86Box reports no LBA and its BIOS sets no multiple: the driver's
+    CHS single-sector path is what Loop A proves; LBA, 48-bit and READ/WRITE MULTIPLE are the host test's and
+    the benches'. (A Loop A scratch disk past 504 MB needs RetroGPU's run.py to allow one: it keeps them to the
+    BIOS's CHS limit.) Still to come in N1c: the gate run with `driver = glos` as the default (every suite on
+    it), the benches' real disks, the cache keeping writes for 2 seconds, IRQ-driven transfers.
   - **N1d, many callers:** a lock per volume, handles that stay right while another caller changes the folder
     they are in.
   - **N1e, the kernel's users onto it** behind the file system's interface, the DOS server staying the back end
