@@ -108,7 +108,7 @@ SSHC_FLAGS := -Iinclude -Ikernel/ssh -Ithird_party/tinyssh -Ithird_party/tinyssh
 HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:kernel/vm/v86dec.c \
               cache_test:kernel/drv/cstore.c umapage_test:kernel/mm/umapage.c \
               vpic_test:kernel/vm/vpic.c png_test:kernel/lib/png.c uhci_test:kernel/drv/uhcitd.c \
-              hid_test:kernel/drv/hidparse.c xpad_test:kernel/drv/xpad.c ata_test:kernel/drv/ata.c share_test:kernel/ndos/share.c exe_test:kernel/ndos/exe.c mcb_test:kernel/ndos/mcb.c psp_test:kernel/ndos/psp.c \
+              hid_test:kernel/drv/hidparse.c xpad_test:kernel/drv/xpad.c ata_test:kernel/drv/ata.c share_test:kernel/ndos/share.c exe_test:kernel/ndos/exe.c mcb_test:kernel/ndos/mcb.c psp_test:kernel/ndos/psp.c dtime_test:kernel/ndos/dtime.c \
               usbkbd_test:kernel/drv/usbkbd.c handle_test:kernel/app/handle.c \
               tsync_test:kernel/app/tsync.c region_test:sdk/config/region.c theme_test:kernel/wm/theme.c \
               clip_test:kernel/app/clipstore.c dnd_test:kernel/wm/dnd.c notes_test:kernel/wm/notes.c \

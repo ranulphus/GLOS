@@ -399,7 +399,9 @@ Everything else (the files, the directories, the cache) is the kernel's, above 1
   current folder, '.' and '..', both separators, the code page's upper case, parts cut to 8.3) and 60h's and
   47h's forms (`path_test`); `find.c`, 4Eh and 4Fh with their state in the DTA as RBIL's table 01626 has it
   (MS-DOS 5's layout, FAT32's cluster's high word in its reserved bytes), going on from where they were after
-  other calls, several at once (`find_test`). To check against MS-DOS 7.1: parts cut to 8.3 rather than
+  other calls, several at once (`find_test`); `dtime.c`, 2Ah-2Dh: DOS's dates (1980-2099, leap years, the day of
+  the week), a machine's own offset that its programs' 2Bh and 2Dh move, never GLOS's clock (`dtime_test`).
+  To check against MS-DOS 7.1: parts cut to 8.3 rather than
   refused, the longest whole path (127 here), and 4Eh with nothing matching (12h here, or 02h). FCB parsing (29h) waits for MS-DOS 7.1 to
   compare with: RBIL doesn't give its separators and terminators. Open: whether MS-DOS 7.1's table for 437 makes e acute E acute (as GLOS does now, and
   Windows 98's short names) or E: checked against its COUNTRY.SYS with the owner's image (N7).
