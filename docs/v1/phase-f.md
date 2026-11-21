@@ -1087,3 +1087,39 @@ name is one line of the program. GLOS's own game: its skier, pictures, mountains
   groomer, the hare, lift pylons; sound; the mouse and pads; the window doubled and full screen; the
   demonstration playing by itself when nobody does. **To be measured**: the frame rate on the 486 bench
   (the plan's floor: thirty a second on a 486DX2-66 at 8 bits).
+
+## The hovercraft game (2026-11-21): its core, not yet a program
+
+The plan is `docs/v1/apps/hovercraft.md`. No program yet: the game's truth, which every later part stands
+on, written and tested on the host. Its name, its setting and whether anything is picked up are the owner's
+to choose (the plan's last section); nothing here depends on them.
+
+- **Arenas** (`apps/shared/hvarena.c`): a text file, a letter a square (wall, floor, floor one and two
+  levels up, ramps and their way, water, each side's dock, beacons, the lamp, a lap's buoys) under a short
+  head. The reader refuses a file with a square it cannot read, a row of another length, no dock for a
+  side, a ramp that comes from nowhere or leads nowhere, a place nobody can reach, or a place a craft could
+  never leave, and says the line (and the column). Where a craft can go from square to square (level, a
+  drop, up a ramp; never up a step, across a ramp's side, or into a wall), and how far every square is from
+  a place by those ways: the computer's driving goes by it.
+- **The game's truth** (`apps/shared/hvgame.c`): thirty steps a second from every craft's controls. A
+  craft's fans change its speed, never its place: thrust along its heading, side fans across it, a boost
+  with a tank; the air takes a twenty-fourth of its speed a step; set down on its skirt it stops in a
+  length and cannot be pushed. An edge it may not cross sends it back with half its speed; water takes it
+  three seconds and puts it at its dock. Craft that touch pass speed along the line between them. The four
+  games' rules: flags (a hard bump gives the flag to whoever bumped: home if it is theirs, in their hands
+  if they are the carrier's side; a carrier set down keeps it), beacons counted each second, the lamp held
+  for points and taken by any bump, laps round the buoys in order.
+- **The computer's craft** (`hv_auto`): the place wanted by the game's state, the next square nearer to it,
+  and the fans that go there; three strengths (the side fans against a slide, the boost on a straight run).
+- **Whole numbers only**: a game is its arena and its controls, the same on every build (and, later, on
+  every PC of a network game).
+- **Tests** (`hv_test`, 90 checks): the arena's letters, ways and distances, and each fault a file can
+  have; speeds, the slide, set down, the boost and its tank; walls, steps, ramps, drops, water; ten
+  thousand steps of eight craft with random fans never put one in a wall; bumps head on and against a
+  craft set down; each game's rules; the computer's craft against one that stands still score in every
+  kind of game at every strength; every game played twice is the same.
+- **Not yet**: the drawing (DOS-GL), the lobby, the network's messages and their model, sound, the six
+  arenas, the computer's craft against each other measured over many games. **Known**: with the two
+  stronger drivers one craft of four made no lap in the laps test (it starts beside the craft that stands
+  still in its dock, and does not get round it); the mild driver's did. To be put right with the driving's
+  own tests.

@@ -191,6 +191,8 @@ host-test-run: build/host/libpdfbr32.a
 	  tests/host/diskjob_test.c apps/shared/diskjob.c && build/host/diskjob_test build/host/diskjob
 	@$(HOST_CC) -m32 -O2 -g -Wall -Wextra -Werror -o build/host/ski_test tests/host/ski_test.c apps/shared/skimount.c \
 	  apps/shared/skirun.c apps/shared/skitable.c && build/host/ski_test
+	@$(HOST_CC) -m32 -O2 -g -Wall -Wextra -Werror -o build/host/hv_test tests/host/hv_test.c apps/shared/hvarena.c \
+	  apps/shared/hvgame.c && build/host/hv_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c apps/shared/pdfnav.c \
 	  apps/shared/pdfcrypt.c loader/inflate.c build/host/libpdfbr32.a \
 	  && build/host/pdf_test `python3 tests/host/pdf_cases.py build/host/pdfcases`
