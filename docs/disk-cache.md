@@ -244,7 +244,8 @@ two stay coherent.
     disk as well and compares; `count` caches nothing and counts. It changes at once, applied when no INT 13h is in
     progress; the block buffer comes only with a start.
   - `size = auto|N` (MB, 1–2048), default `auto`, shrinking at once.
-  - `driver = bios|glos`, default `bios` (native GLOS's N1c, docs/v1/native-dos.md): with `glos` the reads, block
+  - `driver = bios|glos|glos-read`, default `bios` (`glos-read`: GLOS's driver reads, the BIOS still writes: a
+    first trial on a real disk, with `enabled = verify` checking every hit against the BIOS) (native GLOS's N1c, docs/v1/native-dos.md): with `glos` the reads, block
     fills and writes the cache makes for an IDE disk go to GLOS's own driver (kernel/drv/ide.c, ata.c) instead of
     the BIOS, for each BIOS drive it matches to one disk by sector 0. Its other calls are answered without the
     BIOS: 08h, 15h, 41h and 48h as the BIOS answered them at the switch, resets, seeks and the like as done,

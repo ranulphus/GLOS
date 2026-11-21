@@ -177,7 +177,7 @@ struct bootinfo {
                                                    DOS (the network card's driver looks before the kernel has read
                                                    GLOS.CFG); empty: none */
     /* version 11: GLOS's own IDE driver (docs/v1/native-dos.md, N1c) */
-    bi_u32 cache_driver;                        /* [cache] driver: 0 bios, 1 glos */
+    bi_u32 cache_driver;                        /* [cache] driver: 0 bios, 1 glos, 2 glos-read (its reads only) */
 };
 #define BI_CABLE_SERVER 1u
 #define BI_CABLE_CLIENT 2u

@@ -113,9 +113,9 @@ const struct cfg_key cfg_schema[] = {
       "keeps nothing and counts. Its 4 KB block buffer comes with GLOS's next start" },
     { "cache", "size", CFG_NUMBER, CFG_NOW, 1, 2048, "auto", "auto", "Cache &size (MB)",
       "At most this much memory; auto: all that is spare, given back the moment anything needs it" },
-    { "cache", "driver", CFG_CHOICE, CFG_NOW, 0, 0, "bios|glos", "bios", "Disk &driver",
+    { "cache", "driver", CFG_CHOICE, CFG_NOW, 0, 0, "bios|glos|glos-read", "bios", "Disk &driver",
       "How the cache reads and writes IDE hard disks: through the BIOS, or by GLOS's own driver (a trial: "
-      "each disk it can match to the BIOS's)" },
+      "each disk it can match to the BIOS's); glos-read: GLOS's driver reads, the BIOS writes" },
     /* [memory]: upper memory (docs/upper-memory.md) */
     { "memory", "stub_page", CFG_TEXT, CFG_RESTART, 3, 4, "page", "off", "&Upper memory page",
       "GLOS's resident part (2.6 KB) in a free 4 KB page above 640 KB: auto finds one from C800, or name it (D800). "

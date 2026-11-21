@@ -699,7 +699,8 @@ def cache(profile, boot):
     session (its ports untrapped) bypasses it and drops it at its end; P7 with the cache on (8 KB); in agent
     mode glos cache, glos stat and glos mem, and the mode changed live by glos config; and with [cache] driver =
     glos (docs/v1/native-dos.md, N1c) GLOS's own IDE driver in the BIOS's place: DSKTORT again, on and
-    verifying (every hit read again from the BIOS and compared), the same digest as plain DOS."""
+    verifying (every hit read again from the BIOS and compared), and with glos-read (its reads, the BIOS's
+    writes) verifying, each with the digest plain DOS gives."""
     import json
     import time
     tag = "%s-%s" % (profile, boot)
@@ -767,13 +768,19 @@ def cache(profile, boot):
         "--cmd", g + "/CACHE=ON /RUN " + (t % (1, ops)) + " > C:\\OUT\\ION.TXT",
         "--cmd", g + "/CACHE=VERIFY /RUN " + (t % (1, ops)) + " > C:\\OUT\\IVER.TXT",
         "--cmd", "SERSAY HX-DONE 0"])
+    rcfg = batfile("cache-ider-%s/GLOS.CFG" % tag, ["; jobs.py cache", "[cache]", "driver = glos-read"])
+    st7, s7 = run("cache-ider-" + tag, common + ["--file", rcfg + "=/TEST/GLOS.CFG",
+        "--cmd", g + "/CACHE=VERIFY /RUN " + (t % (1, ops)) + " > C:\\OUT\\IRD.TXT", "--cmd", "SERSAY HX-DONE 0"])
+    i_rd = tort(files("cache-ider-" + tag).get("IRD.TXT", ""))
     f6 = files("cache-ide-" + tag)
     i_on, i_ver = tort(f6.get("ION.TXT", "")), tort(f6.get("IVER.TXT", ""))
     ends6 = re.findall(r"GLOS-CACHE end mode=(\w+) hits=(\d+) .* mismatches=(\d+)", s6)
     checks["ide"] = st6 == "PASS" and all(v and v[6] == "1" and v[4] == "ok" for v in (i_on, i_ver)) \
         and bool(r.get("P")) and i_on[5] == r["P"][5] == i_ver[5] \
         and s6.count("GLOS-IDE dl=81 driver=glos") == 2 and [e[0] for e in ends6] == ["on", "verify"] \
-        and all(e[2] == "0" for e in ends6) and "GLOS-IDE error" not in s6 and "GLOS-PANIC" not in s6
+        and all(e[2] == "0" for e in ends6) and "GLOS-IDE error" not in s6 and "GLOS-PANIC" not in s6 \
+        and st7 == "PASS" and bool(i_rd) and i_rd[6] == "1" and i_rd[5] == r["P"][5] \
+        and "GLOS-IDE dl=81 driver=glos-read" in s7 and " mismatches=0" in s7 and "GLOS-IDE error" not in s7
 
     # A direct-mode session: the cache stands aside, and drops everything when it ends.
     dcfg = batfile("cache-direct-%s/GLOS.CFG" % tag, ["; jobs.py cache", "[cache]", "enabled = on",

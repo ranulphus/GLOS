@@ -85,7 +85,8 @@ struct hent { u32 key, reads; };
 static struct {
     u8 mode, trapped, direct, inside, ready, ports_on;
     u8 want;                                    /* a mode asked for while the BIOS was busy (0xFF: none) */
-    u8 driver, want_driver;                     /* 1: GLOS's IDE driver; asked for (the same: nothing to do) */
+    u8 driver, want_driver;                     /* 1: GLOS's IDE driver, 2: its reads only (writes the BIOS's);
+                                                   asked for (the same: nothing to do) */
     int busy_at;                                /* rm_nesting() of the cache's BIOS call in progress; 0 none */
     u32 gen;                                    /* a drop of everything: a request started before keeps nothing */
     u32 buf;                                    /* the block buffer (linear), its DAP at buf + 4096; 0 none */
@@ -808,8 +809,8 @@ static void set_driver(const struct call *k, int glos)
         if (!why) {
             d->ide = hit;
             record_drive(k, d);
-            kprintf("GLOS-IDE dl=%02x driver=glos model=\"%s\" mult=%u answers=%s\n", d->dl, hit->model,
-                    hit->multiple, d->rec ? "glos" : "bios");
+            kprintf("GLOS-IDE dl=%02x driver=%s model=\"%s\" mult=%u answers=%s\n", d->dl,
+                    glos == 2 ? "glos-read" : "glos", hit->model, hit->multiple, d->rec ? "glos" : "bios");
         } else {
             kprintf("GLOS-IDE dl=%02x driver=bios why=%s\n", d->dl, why);
         }
@@ -888,7 +889,7 @@ int cache_int13(struct trapframe *from, struct rmregs *cr, int kind)
     }
     if (q.ah == 0x03 || q.ah == 0x43) {         /* a write: the range goes first, comes back once written */
         forget(q.d->idx, q.lba, q.n);
-        if (q.d->ide && (q.dap || q.d->wal_known)) {
+        if (q.d->ide && c.driver == 1 && (q.dap || q.d->wal_known)) {
             e = ide_io(q.d, q.lba, q.n, q.buf, &done, 1);
             if (!e) {
                 keep(q.d->idx, q.lba, q.n, q.buf, gen);
@@ -1054,7 +1055,7 @@ void cache_apply(const char *key, const char *v)
             kprintf("GLOS-CACHE mode=%s\n", mode_name[c.mode]);
         }
     } else if (!strcmp(key, "driver")) {
-        c.want_driver = (u8)!strcmp(v, "glos");  /* (the VM thread, at its next INT 13h) */
+        c.want_driver = (u8)(!strcmp(v, "glos") ? 1 : !strcmp(v, "glos-read") ? 2 : 0);  /* (at the next INT 13h) */
     } else if (!strcmp(key, "size")) {
         u32 mb = 0, f;
         const char *p;
@@ -1079,7 +1080,8 @@ void cache_init(struct bootinfo *bi)
 
     c.cap = bi->cache_size_mb ? bi->cache_size_mb << 8 : 0xFFFFFFFFu;
     c.want = 0xFF;
-    c.want_driver = (u8)(bi->cache_driver == 1);  /* (taken up at the first INT 13h; GLOS.CFG read later may change it) */
+    c.want_driver = (u8)(bi->cache_driver <= 2 ? bi->cache_driver : 0);  /* (at the first INT 13h; GLOS.CFG read
+                                                                       later may change it) */
     for (i = 0; i < bi->n_disks && c.nd < BI_DISKS; i++) {
         struct bi_disk *b = &bi->disks[i];
         struct drive *d = &c.d[c.nd];
