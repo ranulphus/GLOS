@@ -473,6 +473,45 @@ int ata_write(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, uns
     return transfer(d, lba_lo, lba_hi, n, (unsigned char *)buf, done, 1);
 }
 
+int ata_verify(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, unsigned long *done)
+{
+    struct ata_chan *ch = d->ch;
+    unsigned long did = 0;
+    int r = ATA_OK;
+
+    if (done)
+        *done = 0;
+    if (!d->present || d->atapi)
+        return d->present ? ATA_ENOTSUP : ATA_ENODEV;
+    if (!n || !in_range(d, lba_lo, lba_hi, n))
+        return ATA_ERANGE;
+    while (did < n && !r) {
+        int ext;
+        unsigned long c = chunk(d, lba_lo, lba_hi, n - did, &ext);
+
+        control(ch, C_NIEN);
+        r = issue(d, lba_lo, lba_hi, c == 65536UL ? 0 : c, ext, ext ? 0x42 : 0x40);
+        if (!r)
+            r = block_ready(d, ATA_T_CMD, 0);
+        if (r == ATA_EDEVICE && d->lba && !ext) {
+            /* (the drive leaves the bad sector's address in its LBA registers) */
+            unsigned long at = in(ch, R_LBA0) | (unsigned long)in(ch, R_LBA1) << 8 |
+                               (unsigned long)in(ch, R_LBA2) << 16 | (unsigned long)(in(ch, R_DEV) & 0x0F) << 24;
+
+            if (at >= lba_lo && at < lba_lo + c)
+                did += at - lba_lo;
+        }
+        r = finish(d, r);
+        if (!r)
+            did += c;
+        lba_lo += c;
+        lba_hi += lba_lo < c;
+    }
+    if (done)
+        *done = did;
+    return r;
+}
+
 int ata_flush(struct ata_dev *d)
 {
     struct ata_chan *ch = d->ch;

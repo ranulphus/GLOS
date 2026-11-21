@@ -248,8 +248,8 @@ two stay coherent.
     fills and writes the cache makes for an IDE disk go to GLOS's own driver (kernel/drv/ide.c, ata.c) instead of
     the BIOS, for each BIOS drive it matches to one disk by sector 0. Its other calls are answered without the
     BIOS: 08h, 15h, 41h and 48h as the BIOS answered them at the switch, resets, seeks and the like as done,
-    01h the last status; formatting, long reads and writes, verifies and what the cache can't decode still go
-    to the BIOS. Taken up at the next INT 13h. A trial until the rest of N1c.
+    01h the last status, verifies by the drive's READ VERIFY; formatting, long reads and writes and what the
+    cache can't decode still go to the BIOS. Taken up at the next INT 13h. A trial until the rest of N1c.
 - **Commands** (kernel/ssh/sshd.c):
   - `glos cache`: one JSON line, in the form of `glos stat`: `{"mode":"on","kb":..,"blocks":..,"protected":..,
     "hits":..,"misses":..,"hit_sectors":..,"miss_sectors":..,"write_sectors":..,"drops":..,"reclaims":..,

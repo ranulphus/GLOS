@@ -10,6 +10,8 @@
  *     code (0301h into a two-byte thunk: the V86 trap);
  *   - small reads (1-7 sectors: the block fills), big ones (runs), any alignment;
  *   - reads that run past the disk's end (the BIOS's error, the same with the cache and without);
+ *   - verifies (04h by CHS, 44h by LBA) of what was just read, every 16th operation (GLOS's IDE driver answers
+ *     them with the drive's own READ VERIFY: the same AH, CF, AL and count as the BIOS);
  *   - with PIOBASE (170 for IDE 1:0), single sectors written by the program itself through the IDE ports,
  *     behind the BIOS's back: the cache must drop what it held (its port watch), or later reads go wrong.
  * Every 64 operations, a file of C:\DSKTORT\ is written or read back through DOS and checked.
@@ -122,6 +124,46 @@ static unsigned xfer(int write, int chs, int real, unsigned lba, unsigned n, int
     if (!write && !*cf)
         dosmemget(base + 16, n * 512, sec);
     return r.h.ah;
+}
+
+/* n sectors at lba verified (04h or 44h): AH, CF, AL (CHS) and the DAP's count go in the digest. */
+static void vrfy(int chs, int real, unsigned lba, unsigned n)
+{
+    __dpmi_regs r;
+    unsigned char dap[16];
+    unsigned base = (unsigned)dos_seg << 4, cnt = 0;
+    int cf;
+    memset(&r, 0, sizeof r);
+    if (chs) {
+        unsigned c = lba / (heads * spt), h = (lba / spt) % heads, s = lba % spt + 1;
+        r.h.ah = 0x04;
+        r.h.al = (unsigned char)n;
+        r.x.cx = (unsigned short)(((c & 0xFF) << 8) | ((c >> 2) & 0xC0) | s);
+        r.h.dh = (unsigned char)h;
+        r.x.es = (unsigned short)dos_seg;
+        r.x.bx = 16;
+    } else {
+        memset(dap, 0, 16);
+        dap[0] = 16;
+        *(unsigned short *)(dap + 2) = (unsigned short)n;
+        *(unsigned *)(dap + 8) = lba;
+        dosmemput(dap, 16, base);
+        r.h.ah = 0x44;
+        r.x.ds = (unsigned short)dos_seg;
+        r.x.si = 0;
+    }
+    r.h.dl = (unsigned char)drive;
+    i13(&r, real);
+    cf = r.x.flags & 1;
+    if (!chs)
+        dosmemget(base + 2, 2, &cnt);
+    mix(r.h.ah | ((unsigned)cf << 8) | (chs ? (unsigned)r.h.al << 16 : 0) | (2u << 24));
+    if (!chs)
+        mix(cnt & 0xFFFF);
+    if (trace)
+        fprintf(trace, "%u v%s lba=%u n=%u real=%d ah=%02x cf=%d al=%02x cnt=%u\n", calls, chs ? "chs" : "lba", lba, n,
+                real, r.h.ah, cf, r.h.al, chs ? 0 : cnt & 0xFFFF);
+    calls++;
 }
 
 static int pio_wait(unsigned base, unsigned want, int err)  /* status: BSY clear, want's bits set; err: ERR fails */
@@ -346,6 +388,8 @@ int main(int argc, char **argv)
                     printf("DSKTORT bad read lba=%u n=%u chs=%d real=%d\n", lba, n, chs, real);
             } else {
                 check(lba, n, chs ? "chs" : "lba");
+                if ((op & 15) == 7)             /* (no draw of rnd(): the sequence stays as it was) */
+                    vrfy(chs, real, lba, n);
             }
         } else if (what < 80) {                 /* a write: new versions */
             for (i = 0; i < n; i++)

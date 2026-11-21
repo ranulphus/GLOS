@@ -61,6 +61,9 @@ int ata_read(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsi
              unsigned long *done);
 int ata_write(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, const void *buf,
               unsigned long *done);
+/* n sectors at lba checked by the drive (READ VERIFY SECTORS, or its EXT form): no data moves. ATA_OK, or the
+   error with the sectors before the bad one in *done where the drive says (its LBA registers). */
+int ata_verify(struct ata_dev *d, unsigned long lba_lo, unsigned long lba_hi, unsigned long n, unsigned long *done);
 /* The drive's write cache written out (FLUSH CACHE, or its EXT form). */
 int ata_flush(struct ata_dev *d);
 

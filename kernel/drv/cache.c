@@ -58,6 +58,7 @@ struct drive {
     u8 al_zero;                                 /* its BIOS answers a CHS read with AL 0, not the count (86Box's) */
     u8 al_known;                                /* learnt: until then a CHS read goes to the BIOS */
     u8 wal_zero, wal_known;                     /* the same for a CHS write (driver = glos: until then, the BIOS's) */
+    u8 val_zero, val_known;                     /* ... and a CHS verify (04h) */
     struct cgeo g;
     u32 sectors;
     struct ata_dev *ide;                        /* [cache] driver = glos: its IDE disk (0: the BIOS) */
@@ -355,6 +356,14 @@ static void learn_w(struct drive *d, u32 al, u32 n)
         d->wal_zero = 1, d->wal_known = 1;
     else if (al == n)
         d->wal_zero = 0, d->wal_known = 1;
+}
+
+static void learn_v(struct drive *d, u32 al, u32 n)
+{
+    if (n && !al)
+        d->val_zero = 1, d->val_known = 1;
+    else if (al == n)
+        d->val_zero = 0, d->val_known = 1;
 }
 
 /* Sectors [lba, lba + n) of q's drive to linear dst, by one BIOS call; *got: how many it did. */
@@ -665,15 +674,54 @@ static void said_status(struct rmregs *cr, u32 ah)
     vm_wr8(0x474, (u8)ah);
 }
 
+/* A verify (04h by CHS, 44h by its DAP) the drive does itself: 1 with the answer in cr, or 0 if it isn't one the
+   cache understands exactly (the BIOS's, with its own error). */
+static int verify(struct drive *d, struct rmregs *cr)
+{
+    u32 ah = (cr->eax >> 8) & 0xFF, lba, n, e = 0, dap = 0;
+    unsigned long done = 0;
+    int r;
+
+    if (ah == 0x04) {
+        n = cr->eax & 0xFF;
+        if (!d->val_known || cs_chs_lba(&d->g, cr->ecx & 0xFFFF, (cr->edx >> 8) & 0xFF, &lba) != 0)
+            return 0;                           /* (the first goes to the BIOS: its AL is learnt) */
+    } else {
+        dap = vm_lin(cr->ds, cr->esi);
+        if (!d->edd || vm_rd8(dap) < 16 || vm_rd32(dap + 12) != 0)
+            return 0;
+        n = vm_rd16(dap + 2);
+        lba = vm_rd32(dap + 8);
+    }
+    if (n < 1 || n > 127 || lba >= d->sectors || n > d->sectors - lba)
+        return 0;
+    r = ata_verify(d->ide, lba, 0, n, &done);
+    c.calls++;
+    if (r) {
+        e = ide_bios_error(d->ide, r);
+        kprintf("GLOS-IDE error dl=%02x lba=%u n=%u verify r=%d status=%02x err=%02x\n", d->dl, lba, n, r,
+                d->ide->status, d->ide->err);
+    }
+    said_status(cr, e);
+    if (dap)
+        put16(dap + 2, (u32)done);
+    else
+        cr->eax = (cr->eax & 0xFFFFFF00u) | (!e && d->val_zero ? 0 : (u32)done & 0xFF);
+    return 1;
+}
+
 /* The other INT 13h calls for a drive GLOS's driver has, answered without the BIOS: 1, or 0 (to the BIOS:
-   formatting, long reads and writes, verifies, and the calls the cache couldn't decode, whose errors stay the
-   BIOS's own). */
+   formatting, long reads and writes, and the calls the cache couldn't decode, whose errors stay the BIOS's
+   own). */
 static int answer_other(struct drive *d, struct rmregs *cr)
 {
     u32 ah = (cr->eax >> 8) & 0xFF, n, size, buf;
     const struct said *rs = 0;
 
     switch (ah) {
+    case 0x04:
+    case 0x44:
+        return verify(d, cr);
     case 0x00: case 0x09: case 0x0C: case 0x0D: case 0x10: case 0x11: case 0x12: case 0x13: case 0x14: case 0x47:
         said_status(cr, 0);                     /* (resets, seeks, ready, recalibrate, diagnostics: nothing to do) */
         return 1;
@@ -797,7 +845,7 @@ int cache_int13(struct trapframe *from, struct rmregs *cr, int kind)
 {
     struct call k;
     struct req q;
-    u32 e, done, gen = c.gen, mode = c.direct ? BI_CACHE_OFF : c.mode;
+    u32 e, done, gen = c.gen, mode = c.direct ? BI_CACHE_OFF : c.mode, k_ah, k_al;
 
     if (!c.trapped || c.inside || current != vm.thread)
         return 0;
@@ -812,6 +860,7 @@ int cache_int13(struct trapframe *from, struct rmregs *cr, int kind)
     k.from = from, k.kind = kind, k.cs = cr->cs, k.ip = cr->ip, k.ss = cr->ss, k.sp = cr->sp, k.flags = cr->flags;
     if (c.want_driver != c.driver)
         set_driver(&k, c.want_driver);
+    k_ah = (cr->eax >> 8) & 0xFF, k_al = cr->eax & 0xFF;  /* (the call as asked: a verify's AL is learnt from the BIOS) */
     if (mode != BI_CACHE_OFF && !decode(cr, &q)) {     /* GLOS's driver: the BIOS kept away from its drives */
         struct drive *d = drive(cr->edx & 0xFF);
         if (d && d->ide && d->rec && answer_other(d, cr))
@@ -825,6 +874,9 @@ int cache_int13(struct trapframe *from, struct rmregs *cr, int kind)
         }
         if (original(&k, cr) == 0x1FF)
             return 0;
+        if (mode != BI_CACHE_OFF && ((cr->eax >> 8) & 0xFF) == 0 && !(cr->flags & FL_CF) && drive(cr->edx & 0xFF)
+            && k_ah == 0x04)
+            learn_v(drive(cr->edx & 0xFF), cr->eax & 0xFF, k_al);
         return 1;
     }
     if (mode == BI_CACHE_COUNT) {

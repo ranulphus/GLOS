@@ -250,9 +250,11 @@ right error is part of the answer); **internal** after the core.
     and leaves none pending, and answers CHS calls with the AL the BIOS was seen to give. The other INT 13h
     calls for those drives are answered without the BIOS: 08h, 15h, 41h and 48h as the BIOS answered them once
     at the switch (its geometry is what the partition tables were made with), resets, seeks, ready and
-    recalibrate as done, 01h the last status; formatting, long reads and writes, verifies and calls the cache
-    can't decode still go to the BIOS (their errors stay its own). Still to come in N1c: verifies by the
-    driver, the cache keeping writes for 2 seconds, IRQ-driven transfers.
+    recalibrate as done, 01h the last status, verifies (04h, 44h) by the drive's own READ VERIFY; formatting,
+    long reads and writes and calls the cache can't decode still go to the BIOS (their errors stay its own).
+    A CHS call's AL is answered as the BIOS was seen to answer it, learnt apart for reads, writes and verifies
+    (86Box's BIOS gives 0 for all three; DSKTORT's digest and a trace of its calls showed each). Still to come
+    in N1c: the cache keeping writes for 2 seconds, IRQ-driven transfers.
   - **N1d, many callers:** a lock per volume, handles that stay right while another caller changes the folder
     they are in.
   - **N1e, the kernel's users onto it** behind the file system's interface, the DOS server staying the back end

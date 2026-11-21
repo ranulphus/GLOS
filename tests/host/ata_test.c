@@ -284,6 +284,29 @@ static void command(struct drive *d, unsigned cmd)
             ch.intrq = 0;                       /* (data out: no interrupt before the first block) */
         return;
     }
+    case 0x40:
+    case 0x42:
+        if (cmd == 0x42 && !d->lba48) {
+            abort_cmd(d);
+            return;
+        }
+        if (address(d, cmd == 0x42, &lba, &n)) {
+            d->status = 0x51;
+            d->err = 0x10;
+            raise_irq();
+            return;
+        }
+        d->busy = 10;
+        d->status = 0x50;
+        if (d->bad_read >= lba && d->bad_read < lba + n) {
+            d->status = 0x51;
+            d->err = 0x40;
+            d->lba0[0] = (unsigned char)d->bad_read, d->lba1[0] = (unsigned char)(d->bad_read >> 8);
+            d->lba2[0] = (unsigned char)(d->bad_read >> 16);
+            d->dev = (unsigned char)((d->dev & 0xF0) | ((d->bad_read >> 24) & 0x0F));
+        }
+        raise_irq();
+        return;
     case 0xE7:
     case 0xEA:
         if (cmd == 0xEA && !d->lba48) {
@@ -728,6 +751,20 @@ static void t_faults(void)
     CHECK(r == ATA_ETIMEOUT, "stuck: %d", r);
     CHECK(ch.us - t0 >= (ATA_T_CMD - 1) * 1000 && ch.us - t0 < ATA_T_CMD * 3000, "stuck: %llu us", ch.us - t0);
     CHECK(!ch.nien, "stuck: nIEN left set");
+
+    /* Verify: no data moves; a bad sector's place told. */
+    setup();
+    ata_disk(&ch.d[0], "VERIFY", 100000, 1, 0, 16);
+    probe();
+    ch.d[0].cmds = 0;
+    r = ata_verify(&dev[0], 1000, 0, 600, &done);
+    CHECK(r == ATA_OK && done == 600 && ch.d[0].cmds == 3 && ch.d[0].last_cmd == 0x40, "verify: %d %lu cmds %d", r,
+          done, ch.d[0].cmds);
+    ch.d[0].bad_read = 1300;
+    r = ata_verify(&dev[0], 1000, 0, 600, &done);
+    CHECK(r == ATA_EDEVICE && done == 300 && dev[0].err == 0x40, "verify, bad at 1300: %d %lu %02x", r, done,
+          dev[0].err);
+    left_clean("verify");
 
     /* More than one command takes (28-bit: 256 at most): 256 + 256 + 88. */
     setup();
