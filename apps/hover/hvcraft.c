@@ -25,24 +25,10 @@
 #include <GL/gl.h>
 #include <glos/glos.h>
 
+#include "../shared/hvbasin.h"
 #include "../shared/hvgame.h"
 
 #define GAME_NAME "Hovercraft"          /* (the working name) */
-
-static const char ARENA[] =
-    "name: The Old Basin\n"
-    "light: day\n"
-    "\n"
-    "########################\n"
-    "#AA........11........BB#\n"
-    "#A....a...>11<...b....B#\n"
-    "#....*.....~~.....*....#\n"
-    "#..##......~~......##..#\n"
-    "#..........!...........#\n"
-    "#..##......11......##..#\n"
-    "#....*....>11<....*....#\n"
-    "#.....d....11....c.....#\n"
-    "########################\n";
 
 static struct hv_arena arena;
 static struct hv_game game;
@@ -231,7 +217,7 @@ int main(int argc, char **argv)
         printf("HVCRAFT no GLOS\n");
         return 2;
     }
-    if (hv_arena_read(&arena, ARENA, sizeof ARENA - 1, why, sizeof why) != 0 || hv_game_start(&game, &arena, kind, 4) != 0) {
+    if (hv_arena_read(&arena, HV_BASIN, sizeof HV_BASIN - 1, why, sizeof why) != 0 || hv_game_start(&game, &arena, kind, HV_DEMO_CRAFT) != 0) {
         printf("HVCRAFT arena %s\n", why);
         return 3;
     }
@@ -268,11 +254,11 @@ int main(int argc, char **argv)
         while (due-- && on) {
             unsigned char keys[HV_CRAFT];
             for (i = 0; i < game.ncraft; i++)
-                keys[i] = (unsigned char)(i == 0 && !demo ? keys_held() : hv_auto(&game, i, 1));
+                keys[i] = (unsigned char)(i == 0 && !demo ? keys_held() : hv_auto(&game, i, HV_DEMO_STRENGTH));
             hv_game_step(&game, keys);
             if (until >= 0 && (long)game.steps >= until) {     /* the suite's: the game's state at this step, and the end */
-                printf("HVCRAFT at %u score=%d:%d craft0=%d,%d,%d craft1=%d,%d lamp=%d own=%ld\n", game.steps, game.score[0], game.score[1],
-                       game.c[0].x, game.c[0].y, game.c[0].heading, game.c[1].x, game.c[1].y, game.lamp_holder, game.c[0].score);
+                printf(HV_AT_LINE, game.steps, game.score[0], game.score[1], game.c[0].x, game.c[0].y, game.c[0].heading, game.c[1].x,
+                       game.c[1].y, game.lamp_holder, game.c[0].score);
                 fflush(stdout);
                 on = 0;
             }

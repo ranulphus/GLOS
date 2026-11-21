@@ -1119,10 +1119,10 @@ to choose (the plan's last section); nothing here depends on them.
   craft set down; each game's rules; the computer's craft against one that stands still score in every
   kind of game at every strength; every game played twice is the same.
 - **Not yet**: the drawing (DOS-GL), the lobby, the network's messages and their model, sound, the six
-  arenas, the computer's craft against each other measured over many games. **Known**: with the two
-  stronger drivers one craft of four made no lap in the laps test (it starts beside the craft that stands
-  still in its dock, and does not get round it); the mild driver's did. To be put right with the driving's
-  own tests.
+  arenas, the computer's craft against each other measured over many games. (A craft whose goal was dead
+  astern neither turned nor pushed: one of four made no lap. It turns about now, by the right.) **Known**:
+  the keenest driver's boost wins it laps and loses it flags (it overshoots): the strengths want their own
+  measuring.
 
 ### Its first playable part (the same day)
 
@@ -1134,7 +1134,8 @@ lamp, buoys and flags as posts, the craft as a few boxes turned to their heading
 above the player's. The score in the window's title. Not a toolkit program: its window is DOS-GL's.
 
 - **Loop A** (`hover_case`, in the desk suite, on the G200 and on the S3): `HVCRAFT -demo`, every craft
-  the computer's, each kind of game to step 450: the state it says there is the one written in the suite,
+  the computer's, each kind of game to step 450: the state it says there is the one written in the suite
+  (made on the host by the same code: `hv_test demo KIND 450`, from the arena both share),
   the same whether the card's engine draws the window or DOS-GL's software renderer does; and a picture
   taken while it plays has a scene's worth of colours.
 - **Not yet**: all of the plan beyond that (the lobby, network games, arenas from files, the map and the

@@ -456,7 +456,7 @@ unsigned hv_auto(struct hv_game *g, int i, int strength)
     const struct hv_arena *a = g->a;
     struct hv_craft *c = &g->c[i];
     const unsigned short (*d)[HV_GRID];
-    int sx = c->x >> 8, sy = c->y >> 8, tx = c->x, ty = c->y, k, best, ax, ay, fx, fy, dx, dy, cross, dot, side_speed;
+    int sx = c->x >> 8, sy = c->y >> 8, tx = c->x, ty = c->y, k, best = 0, ax, ay, fx, fy, dx, dy, cross, dot, side_speed, run = -1;
     unsigned keys = 0;
     if (!in_play(c))
         return 0;
@@ -502,6 +502,7 @@ unsigned hv_auto(struct hv_game *g, int i, int strength)
             if (nx >= 0 && ny >= 0 && nx < a->w && ny < a->h && hv_arena_step(a, sx, sy, k) && d[ny][nx] < best) {
                 best = d[ny][nx];
                 ax = nx * 256 + 128, ay = ny * 256 + 128;
+                run = k;
             }
         }
     }
@@ -514,6 +515,8 @@ unsigned hv_auto(struct hv_game *g, int i, int strength)
         keys |= HV_C_RIGHT;
     else if (cross < -256 * 12)
         keys |= HV_C_LEFT;
+    else if (dot < 0)                   /* (dead astern: about, by the right) */
+        keys |= HV_C_RIGHT;
     if (dot > 0 && iabs(cross) < iabs(dot) * 2)
         keys |= HV_C_FWD;
     if (strength >= 1) {
@@ -523,7 +526,10 @@ unsigned hv_auto(struct hv_game *g, int i, int strength)
         else if (side_speed < -256 * 6 && cross >= -256 * 40)
             keys |= HV_C_SLIDE_R;
     }
-    if (strength >= 2 && (keys & HV_C_FWD) && iabs(cross) < 256 * 8 && dot > 256 * 256 * 3 && c->tank > HV_TANK / 3)
-        keys |= HV_C_BOOST;             /* a straight run of three squares: the boost */
+    if (strength >= 2 && (keys & HV_C_FWD) && iabs(cross) < 256 * 16 && c->tank > HV_TANK / 3 && run >= 0) {
+        int nx = sx + 2 * DX[run], ny = sy + 2 * DY[run];       /* the way goes straight on a square more: the boost */
+        if (nx >= 0 && ny >= 0 && nx < a->w && ny < a->h && hv_arena_step(a, sx + DX[run], sy + DY[run], run) && d[ny][nx] < best)
+            keys |= HV_C_BOOST;
+    }
     return keys;
 }

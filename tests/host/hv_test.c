@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../../apps/shared/hvbasin.h"
 #include "../../apps/shared/hvgame.h"
 
 static int fails, checks;
@@ -282,12 +283,27 @@ static void game_tests(void)
     }
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     static struct hv_arena a;
     static unsigned short dist[HV_GRID][HV_GRID];
     char why[160] = "";
-    int r = hv_arena_read(&a, GOOD, strlen(GOOD), why, sizeof why);
+    int r;
+    if (argc == 4 && !strcmp(argv[1], "demo")) {        /* hv_test demo KIND STEPS: what HVCRAFT -demo says at that step */
+        static struct hv_game d;
+        int i;
+        if (hv_arena_read(&a, HV_BASIN, sizeof HV_BASIN - 1, why, sizeof why) != 0 || hv_game_start(&d, &a, atoi(argv[2]), HV_DEMO_CRAFT) != 0)
+            return 2;
+        while ((long)d.steps < atol(argv[3])) {
+            unsigned char keys[HV_CRAFT];
+            for (i = 0; i < d.ncraft; i++)
+                keys[i] = (unsigned char)hv_auto(&d, i, HV_DEMO_STRENGTH);
+            hv_game_step(&d, keys);
+        }
+        printf(HV_AT_LINE, d.steps, d.score[0], d.score[1], d.c[0].x, d.c[0].y, d.c[0].heading, d.c[1].x, d.c[1].y, d.lamp_holder, d.c[0].score);
+        return 0;
+    }
+    r = hv_arena_read(&a, GOOD, strlen(GOOD), why, sizeof why);
     CHECK(r == 0, "the good arena: %s", why);
     CHECK(!strcmp(a.name, "The Test Basin") && a.light == 1 && a.w == 14 && a.h == 6, "its head and size: %s %d %dx%d", a.name, a.light, a.w, a.h);
     CHECK(a.ndock[0] == 2 && a.ndock[1] == 2 && a.dock[0][0].x == 1 && a.dock[0][0].y == 1 && a.dock[1][1].x == 12 && a.dock[1][1].y == 2,
@@ -343,6 +359,8 @@ int main(void)
         CHECK(refused(wide, "line 1: a row longer than an arena is wide"), "49 squares wide");
     }
     game_tests();
+    CHECK(hv_arena_read(&a, HV_BASIN, sizeof HV_BASIN - 1, why, sizeof why) == 0 && a.nbuoy == 4 && a.nbeacon == 4 && a.ndock[0] == 3,
+          "the program's own arena: %s", why);
     printf("hv_test: %d failures (%d checks)\n", fails, checks);
     return fails != 0;
 }
