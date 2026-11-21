@@ -1,0 +1,74 @@
+# The skiing game (apps/ski; phase F, docs/v1/apps/skiing.md), by its demonstration: the careful skier on
+# mountain 7, a red slalom, the picture held at three steps of the run (the start's hut behind, gates and the
+# forest, ice) and at its end; the tables, empty; then a run of the player's own with no key held (straight
+# down: falls and missed gates, and still the valley), whose time goes into the table under a name; a mountain
+# by its number; another jacket. Every run is its mountain's number and its keys: the same on every PC, and
+# the same with the suite's clock four times faster (-speed 4), which is what keeps this script short.
+run SKI.EXE -demo 7 -grade 2 -until 240,700,1300 -speed 4 -table C:\\OUT\\SKI.DAT -day 20261121
+wait "Skiing"
+said SKI ready seed=7 grade=2 mode=0 day=0
+said SKI started watching
+pause 1500
+said SKI at 240 x=435 y=827 speed=232 score=0 gates=1/0 falls=0
+shot early "Skiing"
+key esc
+said SKI resumed
+pause 2500
+said SKI at 700 x=546 y=2403 speed=227 score=0 gates=5/0 falls=0
+shot gates "Skiing"
+key esc
+said SKI resumed
+pause 3200
+said SKI at 1300 x=570 y=4418 speed=223 score=0 gates=10/0 falls=0
+shot later "Skiing"
+key esc
+said SKI resumed
+pause 7000
+within 300
+said SKI finished steps=2730 ms=45500 score=0 passed=21 missed=0 falls=0 place=-1
+pause 1500
+said SKI stopped x=610 y=9091
+shot down "Skiing"
+key ctrl+b
+wait "Best Runs"
+said SKI tables 2 rows=0
+key esc
+gone "Best Runs"
+key f2
+said SKI ready seed=7 grade=2 mode=0 day=0
+key enter
+said SKI started
+pause 16000
+within 300
+said SKI finished steps=3566 ms=139433 score=0 passed=5 missed=16 falls=8 place=0
+wait "A Place in the Table"
+type Ada\n
+gone "A Place in the Table"
+said SKI table 1 Ada
+pause 1500
+said SKI stopped x=476 y=9040
+shot mine "Skiing"
+key ctrl+b
+wait "Best Runs"
+said SKI tables 2 rows=1
+shot tables "Best Runs"
+key esc
+gone "Best Runs"
+key ctrl+g
+wait "A Mountain's Number"
+key ctrl+a
+type 4242\n
+gone "A Mountain's Number"
+said SKI ready seed=4242 grade=2 mode=0 day=0
+key ctrl+g
+wait "A Mountain's Number"
+key esc
+gone "A Mountain's Number"
+said SKI number left
+key alt+j
+key b
+said SKI jacket 1
+shot blue "Skiing"
+key alt+f4
+gone "Skiing"
+expect SKI end

@@ -209,6 +209,14 @@ int glos_fs_drives(unsigned drive, struct glos_fs_drive *out, unsigned room, uns
     return 0;
 }
 
+/* (The keyboard as it is now: no key is ever held on the host: a script's keys go down and up at once.) */
+int glos_keys(struct glos_keys *k)
+{
+    memset(k, 0, sizeof *k);
+    k->size = sizeof *k;
+    return 0;
+}
+
 /* (Disks: a floppy drive with a 1.44 MB disk of the shim's own memory in it, never formatted when the program
    starts; and a first hard disk of 64 MB, GLOS's own and so never written, with its partition table and
    nothing else.) */

@@ -1040,3 +1040,50 @@ The plan is `docs/v1/apps/help.md`. HELP.EXE, "Help" in the Start menu, and F1 i
 - **Not yet** (the plan's rest): pictures in pages; the place in a page a link names and where a search's
   words are; the welcome tour on the first start and the tip of the day; a dialog's own Help button; one
   Help window for every F1 (each F1 starts another now); the guide in other languages.
+
+## The skiing game (2026-11-21): the first part
+
+The plan is `docs/v1/apps/skiing.md`. SKI.EXE, "Skiing" in the Start menu: **a working name**. The name, the
+skier's figure and whether a fall can end a run are the owner's to choose (the plan's last section); built
+with the plan's defaults (one figure with a jacket's colour chosen; a fall costs time and no more), and the
+name is one line of the program. GLOS's own game: its skier, pictures, mountains and rules were made for it.
+
+- **The mountains** (`apps/shared/skimount.c`): a mountain is a number. The piste's middle wanders and its
+  width swells and narrows by values every few hundred pixels with an easy curve between; one line down it is
+  kept clear (in a slalom it swings through the gates), and nothing is ever put within a skier's width of
+  that line; beside the piste powder, then forest; on it, a piece of 128 pixels at a time and each piece
+  from the number alone: rocks, lone firs, moguls, ramps, short fences, and from blue up patches of ice. Four
+  grades (wander, width, how much is in the way, ice, the gates' gap and width, the length).
+- **The runs** (`apps/shared/skirun.c`): sixty steps a second from the keys held. Seventeen headings (eight
+  each side of the fall line, and the fall line: the plan said sixteen); the slope pulls along the skis by
+  how nearly they point down it; the snow drags by its kind and takes away the speed across the skis (a
+  quarter of it a step on the piste, a twenty-fourth on ice: the skier slides on); a tuck, a plough; ramps
+  and moguls throw the skier into the air, where turning turns the skier: a half turn or a whole one landed
+  is points, part of one a fall; trees, rocks, fences and the hut are falls of a second and a half, with
+  three quarters of a second afterwards in which nothing is; gates passed or missed (five seconds); a free
+  run's points. `skirun_auto` is the careful skier: the keys that follow the clear line and brake.
+- **Whole numbers only**, in both: a run is its mountain's number and its keys, and ends at the same step
+  with the same score on the host's 64-bit and 32-bit builds and on DJGPP's.
+- **The tables** (`apps/shared/skitable.c`): the best ten of each grade and kind, and of the mountain of the
+  day, with names; SKI.DAT in GLOS's folder, which also keeps the last name and choices.
+- **The program** (`apps/ski/ski.c`, `art.c`): the field of 480 by 360 and a strip of figures beside it.
+  The snow in bands by its kind, the ice, the skier's tracks, then everything in sight from the top down
+  with the skier among it. The pictures are made by rule when the game starts (`art.c`: one-colour shapes
+  laid over one another; the skier in three poses and 32 directions), in colours the 8-bit palette has, so
+  the game is the same at every depth. Slalom, free run, the mountain of the day, a mountain by its number,
+  four grades, five jackets, the tables' window, Pause, and the careful skier to watch.
+- **Tests.**
+  - `ski_test` (58 checks): a mountain made twice is the same; 1200 mountains (8000 with `more`) keep to
+    the slope and keep their things off the clear line; a way down is found on its own over a grid of the
+    piste with everything on it taken out, through every gate (320 mountains; 2000); the careful skier gets
+    down 1200 (24000) without a fall or a missed gate; speeds by heading, tuck, plough, snow and grade; a
+    ramp, the turns that land and the one that does not; a rock; gates missed; four runs whose last step
+    and score are written in the test; the tables' order, file and day.
+  - `tests/gui/ski.txt` (host and Loop A, pictures compared at 8, 16 and 32 bits): the careful skier on
+    mountain 7 held at three steps and at the valley; then a run of the player's with no key held, which
+    falls eight times, misses sixteen gates and still arrives, to the step; its place in the table under a
+    name; a mountain by number; a jacket.
+- **Not yet** (the plan's rest): the best run beside you as a ghost; weather and night; other skiers, the
+  groomer, the hare, lift pylons; sound; the mouse and pads; the window doubled and full screen; the
+  demonstration playing by itself when nobody does. **To be measured**: the frame rate on the 486 bench
+  (the plan's floor: thirty a second on a 486DX2-66 at 8 bits).

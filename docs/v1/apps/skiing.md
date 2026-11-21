@@ -13,8 +13,8 @@ Its name is the owner's to choose (below); "the skiing game" until then.
 - **A mountain, top to valley.** The slope is seen from above and scrolls up under the skier, who is a third of
   the way down the window. A run begins at the summit hut and ends under the banner at the valley station.
 - **The skier:**
-  - steers left and right through sixteen headings, from across the slope to straight down the fall line; the
-    nearer the fall line, the faster;
+  - steers left and right through seventeen headings (eight each side of the fall line, and the fall line),
+    from across the slope to straight down; the nearer the fall line, the faster;
   - **tucks** (faster, turns slower) and **snow-ploughs** (brakes);
   - leaves **tracks** in the snow behind, which stay for the run;
   - leaves the ground at a ramp or a mogul taken fast, and can turn in the air (a half turn, a whole one, two)
@@ -98,6 +98,12 @@ emulator; if it falls short there, the field is 320 by 240, doubled.
 
 Music; two skiers on one PC (the field split); the day's table shared between PCs on a network; a course
 editor.
+
+## As built so far
+
+The first part is in `docs/v1/phase-f.md` ("The skiing game"): the mountains, the runs, the tables, slalom,
+free run and the mountain of the day, under the working name "Skiing" and with this page's defaults for the
+points below.
 
 ## For the owner
 

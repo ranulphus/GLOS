@@ -29,6 +29,7 @@ contents are at the left; **Ctrl+F** looks for words in every page.
   - [Chat](CHAT.MD)
   - [Web Reader](WEB.MD)
   - [Disk Tools](DISKS.MD)
+  - [Skiing](SKI.MD)
 - [Sound](SOUND.MD)
 - [Keyboards, mice and game pads](PADS.MD)
 - [The network](NETWORK.MD)

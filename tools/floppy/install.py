@@ -32,7 +32,7 @@ import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-APPS = ["FILES", "TERM", "NOTEPAD", "CALC", "IMAGES", "PAINT", "MONITOR", "CONTROL", "MIXER", "RECORDER", "PLAYER", "STUDIO", "PDF", "GAMES", "CHAT", "WEB", "DISKS", "HELP", "PKG", "FETCH"]
+APPS = ["FILES", "TERM", "NOTEPAD", "CALC", "IMAGES", "PAINT", "MONITOR", "CONTROL", "MIXER", "RECORDER", "PLAYER", "STUDIO", "PDF", "GAMES", "CHAT", "WEB", "DISKS", "HELP", "SKI", "PKG", "FETCH"]
 SAVERS = ["STARS", "PIPES", "TEXT", "OBJECTS", "MAZE"]                      # (apps/savers: NAME.SCR beside GLOS.EXE)
 
 AUTOEXEC_LINES = [":glosrun", "C:\\GLOS\\GLOS.EXE", "IF ERRORLEVEL 200 GOTO glosrun"]

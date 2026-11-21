@@ -189,6 +189,8 @@ host-test-run: build/host/libpdfbr32.a
 	  && tests/host/fatimg_test.sh build/host/fatimg_test build/host/fatimg
 	@mkdir -p build/host/diskjob && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/diskjob_test \
 	  tests/host/diskjob_test.c apps/shared/diskjob.c && build/host/diskjob_test build/host/diskjob
+	@$(HOST_CC) -m32 -O2 -g -Wall -Wextra -Werror -o build/host/ski_test tests/host/ski_test.c apps/shared/skimount.c \
+	  apps/shared/skirun.c apps/shared/skitable.c && build/host/ski_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c apps/shared/pdfnav.c \
 	  apps/shared/pdfcrypt.c loader/inflate.c build/host/libpdfbr32.a \
 	  && build/host/pdf_test `python3 tests/host/pdf_cases.py build/host/pdfcases`
@@ -236,7 +238,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
-APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf games chat web disks help
+APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf games chat web disks help ski
 # (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
 # shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
@@ -292,6 +294,10 @@ APP_LIBS_web := $(WEB_SRCS) apps/shared/webget.c build/sdk/libhttp.a build/sdk/l
 APP_DEPS_web := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_web := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/WEB.map -Wl,--cref
 APP_AFTER_web := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/WEB.map
+# The skiing game (phase F): its mountains, runs and tables (whole numbers: the same on every build).
+SKI_SRCS := apps/shared/skimount.c apps/shared/skirun.c apps/shared/skitable.c
+APP_HOST_LIBS_ski := $(SKI_SRCS)
+APP_LIBS_ski := $(SKI_SRCS)
 # Help (phase F): the user guide's pages (help/*.MD) as one file beside the programs, held to the guide's rules
 # as it is made (tools/mkhelp.py: a link that goes nowhere, a page not in the contents, stops the build).
 HELP_PAGES := $(wildcard help/*.MD)
