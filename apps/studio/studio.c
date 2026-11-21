@@ -605,11 +605,12 @@ static int ask_save(void)               /* 1: go on (saved, or not wanted); 0: t
 static struct gui_widget *dlg_list, *dlg_spin;
 static int dlg_value;
 
-static void dlg_done(struct gui_widget *b, int id)
+static void dlg_done(struct gui_widget *b, int what)
 {
-    if (id == 1)                                /* (read while the dialog is there: gui_modal closes it) */
+    (void)what;                         /* (the button's own number is b->id) */
+    if (b->id == 1)                                /* (read while the dialog is there: gui_modal closes it) */
         dlg_value = dlg_list ? gui_list_get(dlg_list) : gui_value(dlg_spin);
-    gui_end_modal(b->win, id == 1 ? GUI_OK : GUI_CANCEL_R);
+    gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
 }
 
 static void dlg_open(struct gui_widget *l, int what)
@@ -657,7 +658,9 @@ static void pick_instrument(void)
     dlg_buttons(d, box);
     gui_focus(dlg_list);
     dlg_value = -1;
-    if (gui_modal(d) == GUI_OK && dlg_value >= 0 && dlg_value < 128) {
+    if (gui_modal(d) != GUI_OK) {
+        say("instrument left");
+    } else if (dlg_value >= 0 && dlg_value < 128) {
         t->program = (unsigned char)dlg_value;
         changed = 1;
         say("instrument %d %s", cur + 1, gm[dlg_value]);
@@ -679,7 +682,9 @@ static void pick_tempo(void)
     dlg_buttons(d, box);
     gui_focus(dlg_spin);
     dlg_value = 0;
-    if (gui_modal(d) == GUI_OK && dlg_value >= 20 && dlg_value <= 400) {
+    if (gui_modal(d) != GUI_OK) {
+        say("tempo left");
+    } else if (dlg_value >= 20 && dlg_value <= 400) {
         song_tempo_set(song, 0, (unsigned)dlg_value);
         changed = 1;
         say("tempo %u", song_tempo_at(song, 0));

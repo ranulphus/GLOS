@@ -36,6 +36,12 @@ wait "Instrument"
 key end
 key enter
 said STUDIO instrument 2 Gunshot
+key ctrl+i
+wait "Instrument"
+key home
+key esc
+gone "Instrument"
+said STUDIO instrument left
 click "MIDI Studio" 70 280
 said STUDIO note added key=64 at=480 len=960
 key ctrl+m

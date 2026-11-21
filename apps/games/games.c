@@ -350,9 +350,10 @@ static struct gui_widget *p_title, *p_picture, *p_notes, *p_fav;
 static struct { char title[80], picture[128], notes[200]; int fav; } p_got;
 static const char *const pictures_kinds[] = { "Pictures|*.PNG;*.JPG;*.BMP;*.GIF;*.PCX;*.TGA", "All files|*.*", NULL };
 
-static void props_done(struct gui_widget *b, int id)
+static void props_done(struct gui_widget *b, int what)
 {
-    if (id == 3) {                              /* its picture chosen */
+    (void)what;                         /* (the button's own number is b->id) */
+    if (b->id == 3) {                              /* its picture chosen */
         struct gui_file_opts o;
         char p[300];
         memset(&o, 0, sizeof o);
@@ -362,13 +363,13 @@ static void props_done(struct gui_widget *b, int id)
             gui_set_text(p_picture, p);
         return;
     }
-    if (id == 1) {                              /* (read while the dialog is there: gui_modal closes it) */
+    if (b->id == 1) {                              /* (read while the dialog is there: gui_modal closes it) */
         snprintf(p_got.title, sizeof p_got.title, "%s", gui_get_text(p_title));
         snprintf(p_got.picture, sizeof p_got.picture, "%s", gui_get_text(p_picture));
         snprintf(p_got.notes, sizeof p_got.notes, "%s", gui_get_text(p_notes));
         p_got.fav = gui_checked(p_fav);
     }
-    gui_end_modal(b->win, id == 1 ? GUI_OK : GUI_CANCEL_R);
+    gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
 }
 
 static void properties(void)
@@ -398,7 +399,11 @@ static void properties(void)
     gui_button(row, GUI_T("OK"), props_done, 1)->flags |= GUI_DEFAULT;
     gui_button(row, GUI_T("Cancel"), props_done, 2)->flags |= GUI_CANCEL;
     gui_focus(p_title);
-    if (gui_modal(d) != GUI_OK || !(g = gamelib_find(&lib, id)))
+    if (gui_modal(d) != GUI_OK) {
+        say("properties left");
+        return;
+    }
+    if (!(g = gamelib_find(&lib, id)))
         return;
     if (p_got.title[0] && strcmp(g->title, p_got.title)) {
         snprintf(g->title, sizeof g->title, "%s", p_got.title);
@@ -538,10 +543,10 @@ static void search_on(struct gui_widget *w, int what)
     say("found %u for \"%s\"", norder, finding);
 }
 
-static void button(struct gui_widget *b, int id)
+static void button(struct gui_widget *b, int what)
 {
-    (void)b;
-    command(win, id);
+    (void)what;                         /* (the button's own number is b->id) */
+    command(win, b->id);
 }
 
 static void build(void)

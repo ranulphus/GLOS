@@ -493,11 +493,12 @@ static void outline_on(struct gui_widget *w, int what)
 static struct gui_widget *goto_spin;
 static int goto_value;
 
-static void goto_done(struct gui_widget *b, int id)
+static void goto_done(struct gui_widget *b, int what)
 {
-    if (id == 1)                                /* (read while the dialog is there: gui_modal closes it) */
+    (void)what;                         /* (the button's own number is b->id) */
+    if (b->id == 1)                                /* (read while the dialog is there: gui_modal closes it) */
         goto_value = gui_value(goto_spin);
-    gui_end_modal(b->win, id == 1 ? GUI_OK : GUI_CANCEL_R);
+    gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
 }
 
 static void go_to(void)
@@ -517,7 +518,9 @@ static void go_to(void)
     gui_button(row, GUI_T("Cancel"), goto_done, 2)->flags |= GUI_CANCEL;
     gui_focus(goto_spin);
     goto_value = 0;
-    if (gui_modal(d) == GUI_OK && goto_value >= 1)
+    if (gui_modal(d) != GUI_OK)
+        say("go to left");
+    else if (goto_value >= 1)
         go(goto_value - 1);
 }
 

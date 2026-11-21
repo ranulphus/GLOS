@@ -641,9 +641,10 @@ static struct gui_widget *s_server, *s_port, *s_tls, *s_nick, *s_alt, *s_real, *
 static char s_pw[128];
 static int s_ok;
 
-static void settings_done(struct gui_widget *b, int id)
+static void settings_done(struct gui_widget *b, int what)
 {
-    if (id == 1) {                              /* (read while the dialog is there: gui_modal closes it) */
+    (void)what;                         /* (the button's own number is b->id) */
+    if (b->id == 1) {                              /* (read while the dialog is there: gui_modal closes it) */
         snprintf(cfg.server, sizeof cfg.server, "%s", gui_get_text(s_server));
         cfg.port = (unsigned)gui_value(s_port);
         cfg.tls = gui_checked(s_tls);
@@ -656,7 +657,7 @@ static void settings_done(struct gui_widget *b, int id)
         cfg.at_start = gui_checked(s_start);
         s_ok = 1;
     }
-    gui_end_modal(b->win, id == 1 ? GUI_OK : GUI_CANCEL_R);
+    gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
 }
 
 static void settings(void)
@@ -691,8 +692,10 @@ static void settings(void)
     gui_button(row, GUI_T("Cancel"), settings_done, 2)->flags |= GUI_CANCEL;
     gui_focus(s_server);
     s_ok = 0, s_pw[0] = 0;
-    if (gui_modal(d) != GUI_OK || !s_ok)
+    if (gui_modal(d) != GUI_OK || !s_ok) {
+        say("settings left");
         return;
+    }
     if (s_pw[0] && !demo)
         glos_secret_put("chat", s_pw, (unsigned)strlen(s_pw), 0);
     memset(s_pw, 0, sizeof s_pw);

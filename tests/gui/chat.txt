@@ -57,6 +57,14 @@ type /quit\n
 pause 300
 said CHAT ended closed by the server
 shot ended "Chat"
+key alt+c
+key s
+wait "Chat Settings"
+key alt+n
+type nobody
+key esc
+gone "Chat Settings"
+said CHAT settings left
 key alt+f4
 gone "Chat"
 expect CHAT end

@@ -26,6 +26,13 @@ click "Games" 170 245
 key alt+enter
 wait "Properties"
 key ctrl+a
+type Nonsense
+key esc
+gone "Properties"
+said GAMES properties left
+key alt+enter
+wait "Properties"
+key ctrl+a
 type Zapper II
 key alt+p
 type C:\\PIX\\SUNSET.BMP

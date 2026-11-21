@@ -30,6 +30,12 @@ wait "Go to Page"
 key down
 key enter
 said PDF page 1 of 2 612x792 at 100%
+key ctrl+g
+wait "Go to Page"
+key up
+key esc
+gone "Go to Page"
+said PDF go to left
 key ctrl+2
 said PDF page 1 of 2 594x769 at 97%
 key ctrl+c
