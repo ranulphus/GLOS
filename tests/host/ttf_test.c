@@ -36,7 +36,7 @@ static void s_move(void *c, double x, double y)
 
 static void s_line(void *c, double x, double y) { (void)c; seen.lines++; track(x, y); }
 static void s_curve(void *c, double cx, double cy, double x, double y) { (void)c; seen.curves++; track(cx, cy); track(x, y); }
-static const struct ttf_sink sink = { s_move, s_line, s_curve, NULL };
+static const struct ttf_sink sink = { s_move, s_line, s_curve, NULL, NULL };
 
 static int shape(const struct ttf *t, unsigned g)
 {

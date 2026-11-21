@@ -238,14 +238,52 @@ int main(int argc, char **argv)
         CHECK(0, "text.pdf: not opened: %d", err);
     }
 
+    /* fonts of the PostScript kinds that the file carries (psfont_cases.py's, whose shapes are known), at twice
+       the size: an em of the big letters is 100 pixels. Each letter is where it should be, and the shape it is:
+       the A a triangle 60 pixels wide and 70 high (2100 pixels), the CFF's B a box of 60 with a round hole of 20. */
+    if ((d = open_pdf("fonts.pdf", &err)) != NULL) {
+        int l, r, l2, r2, n2;
+        canvas(600, 400);
+        CHECK(pdf_draw(d, 0, 2, 0, 0, &cv) == PDF_OK, "fonts drawn");
+        keep("fonts");
+        n = ink(40, 45, 118, 121, &l, &r);
+        n2 = ink(40, 0, 118, 49, &l2, &r2);
+        CHECK(n > 1950 && n < 2250 && l >= 50 && l <= 52 && r >= 108 && r <= 110 && n2 == 0,
+              "a Type 1 font's A by its own encoding: %d pixels from %d to %d, %d above it", n, l, r, n2);
+        n = ink(130, 80, 190, 119, &l, &r);
+        CHECK(n > 200 && n < 500 && r >= 174 && r <= 176, "its B, 80 pixels on: %d pixels to %d", n, r);
+        n = ink(200, 20, 280, 44, &l, &r);
+        n2 = ink(200, 45, 280, 121, &l2, &r2);
+        CHECK(n >= 20 && n <= 60 && l >= 235 && r <= 251 && n2 > 1950 && n2 < 2250 && l2 >= 210 && l2 <= 212,
+              "a letter and its accent: the accent %d pixels from %d to %d, the letter %d from %d", n, l, r, n2, l2);
+        n = ink(40, 165, 118, 241, &l, &r);
+        CHECK(n > 1950 && n < 2250 && l >= 50 && l <= 52, "a CFF font's A by its own encoding: %d pixels from %d", n, l);
+        CHECK(is(165, 216, 0) && is(220, 192, 0) && is(150, 200, 0xFFFFFF) && is(210, 230, 0xFFFFFF),
+              "a glyph by the name the Differences give its code");
+        n = ink(243, 170, 320, 241, &l, &r);    /* (the glyph before it bulges to 241) */
+        CHECK(n > 3150 && n < 3400 && l == 245 && r == 304 && is(275, 205, 0xFFFFFF) && is(250, 180, 0) && is(300, 230, 0),
+              "the B after it, its hole a hole: %d pixels from %d to %d", n, l, r);
+        n = ink(380, 165, 460, 241, &l, &r);
+        n2 = ink(480, 170, 560, 241, &l2, &r2);
+        CHECK(n > 1950 && n < 2250 && l >= 390 && l <= 392 && n2 > 3150 && n2 < 3400 && l2 == 485 && is(515, 205, 0xFFFFFF),
+              "a composite font's glyphs by their numbers: %d pixels from %d, %d from %d", n, l, n2, l2);
+        n = ink(380, 45, 460, 121, &l, &r);
+        CHECK(n > 1950 && n < 2250 && l >= 390 && l <= 392, "a CFF font within an OpenType font: %d pixels from %d", n, l);
+        n = ink(30, 310, 100, 362, &l, &r);
+        CHECK(n > 150 && l >= 40 && r < 90, "a font nothing can be made of, a stand-in for it: %d pixels from %d to %d", n, l, r);
+        pdf_close(d);
+    } else {
+        CHECK(0, "fonts.pdf: not opened: %d", err);
+    }
+
     /* Files with bytes changed, drawn: whatever is in them, the drawing comes back and stays in its canvas. */
     {
         unsigned long made = 0, drawn = 0, round, k, orig_size = 0;
         unsigned char *orig = NULL;
         for (round = 0; round < 1500; round++) {
             unsigned long changes;
-            if (round % 750 == 0) {             /* (the shapes' page, then the text's) */
-                d = open_pdf(round ? "text.pdf" : "draw.pdf", &err);
+            if (round % 500 == 0) {             /* (the shapes' page, then the text's, then the carried fonts') */
+                d = open_pdf(round == 0 ? "draw.pdf" : round == 500 ? "text.pdf" : "fonts.pdf", &err);
                 pdf_close(d);
                 free(orig);
                 orig = malloc(file_size), orig_size = file_size;

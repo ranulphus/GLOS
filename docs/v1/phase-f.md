@@ -614,7 +614,8 @@ has already (`loader/inflate.c`). PDFio was not tried; no code of another reader
     (Windows', the Macintosh's, Adobe's), changed by `Differences` through a table of some 230 glyph names
     (and `uniXXXX`), and `ToUnicode`'s `bfchar` and `bfrange` runs.
   - **Its outlines**: from the TrueType font the PDF carries (`FontFile2`, by `ttf.c`): a symbolic font's
-    glyphs by its symbol or Macintosh map, the others by their characters; else from a stand-in, chosen by
+    glyphs by its symbol or Macintosh map, the others by their characters; from a carried font of a
+    PostScript kind (below); else from a stand-in, chosen by
     the font's name and flags (mono, serif or sans; bold; italic), the glyph of the code's character, made as
     wide as the PDF says where that is near the stand-in's own (0.6 to 1.6 of it). A standard font with no
     widths said (old PDFs) takes the stand-in's.
@@ -622,10 +623,8 @@ has already (`loader/inflate.c`). PDFio was not tried; no code of another reader
     (filled, stroked, both, or unseen: a scanned page's hidden text). Each glyph's outline goes through the
     text matrix, the size and the page's matrix into the same filler as every path, its curves cut by their
     length on the screen; glyphs out of the canvas's sight are not made.
-  - **Not yet**: embedded Type 1 and CFF fonts (they are drawn by the stand-ins: right letters and places,
-    not their own shapes; a font whose letters are symbols or whose encoding is its own shows wrong or not at
-    all), Type 3 fonts, the Symbol font, vertical writing, CJK encodings other than by glyph numbers, a
-    cache of glyphs (each is made anew every time).
+  - **Not yet**: Type 3 fonts, the Symbol font, vertical writing, CJK encodings other than by glyph numbers,
+    a cache of glyphs (each is made anew every time).
   - **Tests.** `pdfdraw_test` (34 checks now): a page of text at twice the size: the stand-in sans, serif
     (with `TJ`'s kerning), mono (with `Tc` and `Tw`: a line's length to the pixel by its font's advances),
     bold with accents and the euro, italic by `T*`, a TrueType font the file carries, one by glyph numbers
@@ -662,5 +661,40 @@ has already (`loader/inflate.c`). PDFio was not tried; no code of another reader
     came out 178 in one and 179 in the other: that one is settled now, the smoothed edges are not). The
     pages look the same. A filler in whole numbers would make them the same to the bit, and is noted as
     work to come, not needed for reading.
-- **Next**: embedded CFF and Type 1 fonts (papers made by TeX carry those), then what the plan lists after.
+- **Embedded fonts of the PostScript kinds** (`apps/shared/psfont.c`, some 1100 lines; papers made by TeX
+  and most made by publishing programs carry these, and until now a stand-in drew them: right letters and
+  places, not their own shapes, and a font of symbols wrong).
+  - **CFF** (`FontFile3`: `Type1C`, `CIDFontType0C`, or the `CFF ` table of an `OpenType` font): GLOS's own
+    reader from Adobe's Technical Notes 5176 and 5177: the tables and dictionaries, the glyphs' names (the
+    391 standard strings by their characters, the font's own by `pdffont.c`'s table of names), the font's own
+    encoding (and the standard one), a CID-keyed font's numbers and its several private dictionaries; and the
+    glyphs' programs (Type 2) run straight into the filler: every move, line and curve operator, the four
+    flexes, hints and their masks passed over, subroutines of both kinds ten deep, the width that may come
+    first.
+  - **Type 1** (`FontFile`): from "Adobe Type 1 Font Format": the clear part (matrix, encoding), the part
+    after `eexec` decrypted (binary or hex), the subroutines and glyphs by name decrypted again (`lenIV`);
+    the programs run: `hsbw` and `sbw`, the lines and curves, `div`, flex by its calls out of the program, a
+    letter and its accent put together (`seac`), hints passed over.
+  - **Which glyph a code is** (`pdffont.c`): by the name the `Differences` give the code, else by the
+    character a named table gives it, else (no table named) by the font's own encoding; a composite font's
+    codes are the CFF's own numbers (CIDs), or the glyphs' numbers where the CFF is not CID-keyed. A font
+    nothing can be made of is drawn by a stand-in, as before.
+  - Curves with two control points go to the filler as they are (`cubic`, new in the sink that `ttf.c`'s
+    outlines use; the PDF's own curves went that way already).
+  - Every count, offset and stack depth is checked: the font is whatever the PDF's writer put there.
+  - **Tests.** `psfont_test` on the host (21 checks, under the sanitizers too) on two made-up fonts
+    (`tests/host/psfont_cases.py` writes them byte by byte: a CFF and a Type 1, plain and in hex) that between
+    them use every operator read: glyphs found by name, character, code; each outline's pieces where they
+    should be; 4000 copies with bytes changed at random, every glyph of those that open drawn. `pdfdraw_test`
+    (44 checks now) draws a page that carries them each way a PDF can (a Type 1 by its own encoding, a CFF by
+    `Differences`' names, in a composite font by glyph numbers, within an OpenType font by a named table) and
+    one nothing can be made of: each letter in its place and of its shape (a triangle's pixels counted, a
+    hole a hole); its damaged-file runs take that page too, the fonts' bytes among those changed.
+  - **Found by the 32-bit run**: a negative number written in five bytes came out wrong by 2^32 where a
+    `long` is 32 bits (as it is under DOS): the 64-bit run under the sanitizers could not see it. Fixed; the
+    made-up Type 1 font writes its numbers that way.
+  - **Not yet**: a glyph's width from the font itself (the PDF's `Widths` are used, as they must be there);
+    hints (at reading sizes on a screen the smoothing carries it); CFF2 and multiple masters.
+- **Next**: search and copying of text (the places of the letters are known), the outline, drawing off the
+  window's thread with a cache of pages, encrypted files with an empty password.
 

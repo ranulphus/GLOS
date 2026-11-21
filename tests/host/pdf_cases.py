@@ -3,7 +3,7 @@
 object is known.
 
     pdf_cases.py DIR      writes DIR/*.pdf; prints DIR"""
-import os, struct, sys, zlib
+import os, struct, subprocess, sys, zlib
 
 out = sys.argv[1]
 os.makedirs(out, exist_ok=True)
@@ -349,4 +349,50 @@ text = {
     16: stream(b"/Filter /FlateDecode /Length1 %d" % len(mono), zlib.compress(mono)),
 }
 write("text.pdf", classic(text, 1)[0])
+
+# ---- fonts of the PostScript kinds, carried in the file (tests/host/pdfdraw_test.c): psfont_cases.py's made-up
+#      fonts, whose shapes are known, each way a PDF may carry and use one. A page 300 by 200 points; the fonts'
+#      streams as they are, so that the test's changed bytes fall in them too.
+subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "psfont_cases.py"), out], check=True,
+               stdout=subprocess.DEVNULL)
+cff = open(os.path.join(out, "SYNTH.CFF"), "rb").read()
+pfa = open(os.path.join(out, "SYNTH.PFA"), "rb").read()
+# an OpenType font of the PostScript kind: the CFF font as its one table
+otto = b"OTTO" + struct.pack(">HHHH", 1, 16, 0, 0) + b"CFF " + struct.pack(">III", 0, 28, len(cff)) + cff + b"\0" * (-len(cff) % 4)
+clear = pfa.index(b"eexec") + 6
+words = b"\n".join([
+    b"BT /F1 50 Tf 20 140 Td (AB\\301) Tj ET",          # Type 1, by its own encoding: A, B, A with an acute accent
+    b"BT /F2 50 Tf 20 80 Td (Aab) Tj ET",               # CFF: A by its own encoding, then two the Differences name
+    b"BT /F3 50 Tf 190 80 Td <00010002> Tj ET",         # CFF in a composite font: by the glyphs' numbers
+    b"BT /F4 50 Tf 190 140 Td (A) Tj ET",               # CFF within an OpenType font, by a named table's character
+    b"BT /F5 30 Tf 20 20 Td (A) Tj ET",                 # a Type 1 font nothing can be made of: a stand-in draws
+])
+fonts = {
+    1: b"<< /Type /Catalog /Pages 2 0 R >>",
+    2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 8 0 R /F3 11 0 R "
+       b"/F4 15 0 R /F5 18 0 R >> >> >>",
+    4: stream(b"", words),
+    5: b"<< /Type /Font /Subtype /Type1 /BaseFont /ABCDEF+Synth /FirstChar 65 /LastChar 193 /Widths ["
+       + b" ".join(b"800" for _ in range(129)) + b"] /FontDescriptor 6 0 R >>",
+    6: b"<< /Type /FontDescriptor /FontName /ABCDEF+Synth /Flags 4 /FontFile 7 0 R >>",
+    7: stream(b"/Length1 %d /Length2 %d /Length3 0" % (clear, len(pfa) - clear), pfa),
+    8: b"<< /Type /Font /Subtype /Type1 /BaseFont /BCDEFG+Synth /FirstChar 65 /LastChar 98 /Widths ["
+       + b" ".join(b"1000" for _ in range(34)) + b"] /Encoding << /Type /Encoding /Differences [97 /blob /B] >> /FontDescriptor 9 0 R >>",
+    9: b"<< /Type /FontDescriptor /FontName /BCDEFG+Synth /Flags 4 /FontFile3 10 0 R >>",
+    10: stream(b"/Subtype /Type1C", cff),
+    11: b"<< /Type /Font /Subtype /Type0 /BaseFont /CDEFGH+Synth /Encoding /Identity-H /DescendantFonts [12 0 R] >>",
+    12: b"<< /Type /Font /Subtype /CIDFontType0 /BaseFont /CDEFGH+Synth /DW 1000 /FontDescriptor 13 0 R >>",
+    13: b"<< /Type /FontDescriptor /FontName /CDEFGH+Synth /Flags 4 /FontFile3 14 0 R >>",
+    14: stream(b"/Subtype /CIDFontType0C", cff),
+    15: b"<< /Type /Font /Subtype /Type1 /BaseFont /DEFGHI+Synth /Encoding /WinAnsiEncoding /FirstChar 65 /LastChar 66 "
+        b"/Widths [1000 1000] /FontDescriptor 16 0 R >>",
+    16: b"<< /Type /FontDescriptor /FontName /DEFGHI+Synth /Flags 32 /FontFile3 17 0 R >>",
+    17: stream(b"/Subtype /OpenType", otto),
+    18: b"<< /Type /Font /Subtype /Type1 /BaseFont /EFGHIJ+Helvetica /Encoding /WinAnsiEncoding /FirstChar 65 /LastChar 65 "
+        b"/Widths [667] /FontDescriptor 19 0 R >>",
+    19: b"<< /Type /FontDescriptor /FontName /EFGHIJ+Helvetica /Flags 32 /FontFile 20 0 R >>",
+    20: stream(b"", b"%!PS-AdobeFont-1.0: nothing of use\n" + bytes(range(256))),
+}
+write("fonts.pdf", classic(fonts, 1)[0])
 print(out)

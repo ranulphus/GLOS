@@ -3,17 +3,21 @@
  * A font in a PDF is a dictionary: what kind it is ("Subtype"), its name, how wide each code is ("Widths", or a
  * composite font's "W"), which character each code stands for (an "Encoding": one of three standard tables,
  * changed by "Differences" that name glyphs; and "ToUnicode", a small program of ranges), and maybe the font
- * itself as a stream ("FontFile2": TrueType). A simple font's codes are a byte; a composite font's ("Type0")
- * are two, and are glyph numbers of the font it is made from (straight, or by a table).
+ * itself as a stream ("FontFile2": TrueType; "FontFile": Type 1; "FontFile3": CFF, bare or as an OpenType
+ * font's table). A simple font's codes are a byte; a composite font's ("Type0") are two, and are glyph numbers
+ * of the font it is made from (straight, or by a table), or a CFF font's own numbers for its glyphs (CIDs).
  *
- * Here: an embedded TrueType font gives the outlines (apps/shared/ttf.c); for every other font a stand-in face
- * does, chosen by the font's name and flags (mono, serif or sans; bold; italic), the glyph of the code's
- * character, squeezed or stretched to the width the PDF says where that is near its own. Not yet: embedded
- * Type 1 and CFF fonts (drawn by the stand-ins), Type 3 fonts, the Symbol font's own letters. */
+ * Here: an embedded font gives the outlines (TrueType: apps/shared/ttf.c; Type 1 and CFF: psfont.c). A simple
+ * font of a PostScript kind finds a code's glyph by the name the Differences give the code, else by the
+ * character the named table gives it, else (no table named) by the font's own encoding. For a font the PDF
+ * doesn't carry, or one nothing could be made of, a stand-in face draws: chosen by the font's name and flags
+ * (mono, serif or sans; bold; italic), the glyph of the code's character, squeezed or stretched to the width
+ * the PDF says where that is near its own. Not yet: Type 3 fonts, the Symbol font's own letters. */
 #include <stdlib.h>
 #include <string.h>
 
 #include "pdffont.h"
+#include "psfont.h"
 
 struct range {                          /* codes first to last: widths (a composite font's), or characters */
     unsigned first, last;
@@ -30,9 +34,12 @@ struct pdf_font {
     unsigned nw;
     struct range *to;                   /* ToUnicode */
     unsigned nto;
-    unsigned char *file;                /* an embedded TrueType font's bytes */
+    unsigned char *file;                /* an embedded font's bytes (TrueType, CFF) */
     struct ttf ttf;
     int has_ttf;
+    struct psfont *ps;                  /* an embedded font of a PostScript kind */
+    char *diff[256];                    /* a simple font's glyph names by code, where its Differences give one */
+    int own_codes;                      /* its Encoding names no table: the font's own encoding is the one */
     unsigned char *cid2gid;             /* a composite font's glyph of each code (two bytes each), or NULL: itself */
     unsigned long ncid2gid;
     const struct ttf *stand;            /* the stand-in face, or NULL */
@@ -222,6 +229,31 @@ static unsigned long utf16(const char *s, unsigned n)   /* a ToUnicode's answer:
     return a;
 }
 
+/* An OpenType font's table of that name (a CFF font may come as one's "CFF " table), or NULL. */
+static const unsigned char *sfnt_table(const unsigned char *d, unsigned long n, const char *tag, unsigned long *len)
+{
+    unsigned count = n >= 12 ? (unsigned)d[4] << 8 | d[5] : 0, i;
+    for (i = 0; i < count && 12 + 16ul * (i + 1) <= n; i++) {
+        const unsigned char *e = d + 12 + 16ul * i;
+        unsigned long at = (unsigned long)e[8] << 24 | (unsigned long)e[9] << 16 | (unsigned long)e[10] << 8 | e[11];
+        unsigned long size = (unsigned long)e[12] << 24 | (unsigned long)e[13] << 16 | (unsigned long)e[14] << 8 | e[15];
+        if (!memcmp(e, tag, 4)) {
+            *len = size;
+            return at <= n && size <= n - at ? d + at : NULL;
+        }
+    }
+    return NULL;
+}
+
+static char *copy_of(const char *s)
+{
+    size_t n = strlen(s) + 1;
+    char *c = malloc(n);
+    if (c)
+        memcpy(c, s, n);
+    return c;
+}
+
 static unsigned code_of(const struct pdf_obj *o)        /* a code written as a string of one or two bytes */
 {
     unsigned n = 0;
@@ -333,15 +365,19 @@ struct pdf_font *pdf_font_open(struct pdf *d, struct pdf_obj *dict)
         o = pdf_is(enc, PDF_DICT) ? pdf_get(d, enc, "BaseEncoding") : enc;
         table(f->uni, pdf_name_is(o, "MacRomanEncoding") ? 1 : pdf_name_is(o, "WinAnsiEncoding") ? 0
               : pdf_name_is(o, "StandardEncoding") || (!o && !strcmp(sub, "Type1")) ? 2 : 0);
+        f->own_codes = !pdf_name_is(o, "MacRomanEncoding") && !pdf_name_is(o, "WinAnsiEncoding") && !pdf_name_is(o, "StandardEncoding");
         if (pdf_is(enc, PDF_DICT)) {
             struct pdf_obj *diff = pdf_get(d, enc, "Differences");
             unsigned code = 0;
             for (i = 0; pdf_is(diff, PDF_ARRAY) && i < diff->n; i++) {
                 struct pdf_obj *e = pdf_item(d, diff, i);
-                if (pdf_is(e, PDF_NUMBER))
+                if (pdf_is(e, PDF_NUMBER)) {
                     code = (unsigned)pdf_int(e, 0);
-                else if (pdf_is(e, PDF_NAME) && code < 256)
+                } else if (pdf_is(e, PDF_NAME) && code < 256) {
+                    free(f->diff[code]);
+                    f->diff[code] = copy_of(pdf_name(e));
                     f->uni[code++] = (unsigned short)by_name(pdf_name(e));
+                }
             }
         }
     }
@@ -353,8 +389,33 @@ struct pdf_font *pdf_font_open(struct pdf *d, struct pdf_obj *dict)
         unsigned long len = 0;
         if ((f->file = pdf_stream(d, o, &len, NULL, NULL)) != NULL && ttf_open(&f->ttf, f->file, len) == 0)
             f->has_ttf = 1;
+    } else if (pdf_is(o = pdf_get(d, desc, "FontFile3"), PDF_DICT) && o->stream) {
+        unsigned long len = 0, part = 0;        /* a CFF font: bare, or within an OpenType font (which may be TrueType) */
+        if ((f->file = pdf_stream(d, o, &len, NULL, NULL)) != NULL) {
+            if (len >= 12 && (!memcmp(f->file, "OTTO", 4) || !memcmp(f->file, "\0\1\0\0", 4) || !memcmp(f->file, "true", 4))) {
+                const unsigned char *cff = sfnt_table(f->file, len, "CFF ", &part);
+                if (cff)
+                    f->ps = psfont_cff(cff, part, by_name);
+                else if (ttf_open(&f->ttf, f->file, len) == 0)
+                    f->has_ttf = 1;
+            } else {
+                f->ps = psfont_cff(f->file, len, by_name);
+            }
+        }
+    } else if (pdf_is(o = pdf_get(d, desc, "FontFile"), PDF_DICT) && o->stream) {
+        unsigned long len = 0;
+        unsigned char *b = pdf_stream(d, o, &len, NULL, NULL);
+        if (b)
+            f->ps = psfont_type1(b, len, by_name);      /* (it keeps a copy) */
+        free(b);
     }
-    if (!f->has_ttf) {                          /* a stand-in, by what the font says of itself */
+    if (f->ps && !f->composite && f->own_codes)         /* its codes' characters: the font's own encoding says */
+        for (i = 0; i < 256; i++)
+            if (!f->diff[i]) {
+                int g = psfont_by_code(f->ps, i);
+                f->uni[i] = g >= 0 && psfont_unicode(f->ps, g) < 0x10000 ? (unsigned short)psfont_unicode(f->ps, g) : 0;
+            }
+    if (!f->has_ttf && !f->ps) {                /* a stand-in, by what the font says of itself */
         family = (flags & 1) || has(name, "courier") || has(name, "mono") || has(name, "typewriter") || has(name, "consol")
                  || !strncmp(name, "CMTT", 4) ? 2
                  : (flags & 2) || has(name, "times") || has(name, "serif") || has(name, "roman") || has(name, "georgia")
@@ -372,8 +433,12 @@ struct pdf_font *pdf_font_open(struct pdf *d, struct pdf_obj *dict)
 
 void pdf_font_close(struct pdf_font *f)
 {
+    unsigned i;
     if (!f)
         return;
+    for (i = 0; i < 256; i++)
+        free(f->diff[i]);
+    psfont_close(f->ps);
     free(f->w);
     free(f->to);
     free(f->file);
@@ -439,10 +504,17 @@ static void sc_curve(void *c, double cx, double cy, double x, double y)
     s->to->curve(s->to->ctx, cx * s->sx, cy * s->sy, x * s->sx, y * s->sy);
 }
 
+static void sc_cubic(void *c, double ax, double ay, double bx, double by, double x, double y)
+{
+    struct scaled *s = c;
+    if (s->to->cubic)
+        s->to->cubic(s->to->ctx, ax * s->sx, ay * s->sy, bx * s->sx, by * s->sy, x * s->sx, y * s->sy);
+}
+
 int pdf_font_outline(const struct pdf_font *f, unsigned code, const struct ttf_sink *to)
 {
     struct scaled s = { to, 1, 1 };
-    struct ttf_sink mine = { sc_move, sc_line, sc_curve, &s };
+    struct ttf_sink mine = { sc_move, sc_line, sc_curve, &s, sc_cubic };
     unsigned g = 0;
     if (f->has_ttf) {
         if (f->composite) {                     /* the code is the glyph, or the table says which */
@@ -462,6 +534,23 @@ int pdf_font_outline(const struct pdf_font *f, unsigned code, const struct ttf_s
             return -1;
         s.sx = s.sy = 1.0 / f->ttf.em;
         return ttf_outline(&f->ttf, g, &mine);
+    }
+    if (f->ps) {
+        int pg = -1;
+        if (f->composite) {                     /* the code is the font's own number for the glyph, or the glyph */
+            pg = psfont_is_cid(f->ps) ? psfont_by_cid(f->ps, code) : (int)code;
+        } else {
+            code &= 255;
+            if (f->diff[code])
+                pg = psfont_by_name(f->ps, f->diff[code]);
+            else if (!f->own_codes && f->uni[code])
+                pg = psfont_by_unicode(f->ps, f->uni[code]);
+            if (pg < 0 && !f->diff[code])
+                pg = psfont_by_code(f->ps, code);
+            if (pg < 0 && f->uni[code])
+                pg = psfont_by_unicode(f->ps, f->uni[code]);
+        }
+        return pg < 0 || !to->cubic ? -1 : psfont_outline(f->ps, pg, to);
     }
     if (!f->stand || !(g = stand_glyph(f, code)))
         return -1;

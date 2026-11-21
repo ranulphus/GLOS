@@ -627,10 +627,28 @@ static void g_curve(void *v, double cx, double cy, double x, double y)  /* (one 
     c->gx = bx, c->gy = by;
 }
 
+static void g_cubic(void *v, double x1, double y1, double x2, double y2, double x3, double y3)   /* (two control points) */
+{
+    struct ctx *c = v;
+    double ax, ay, bx, by, ex, ey, len;
+    int i, n;
+    to_device(c->gm, x1, y1, &ax, &ay);
+    to_device(c->gm, x2, y2, &bx, &by);
+    to_device(c->gm, x3, y3, &ex, &ey);
+    len = fabs(ax - c->gx) + fabs(ay - c->gy) + fabs(bx - ax) + fabs(by - ay) + fabs(ex - bx) + fabs(ey - by);
+    n = len < 1.5 ? 1 : len < 6 ? 2 : len < 20 ? 4 : len < 80 ? 8 : 16;
+    for (i = 1; i <= n; i++) {
+        double t = (double)i / n, u = 1 - t;
+        path_point(&c->tp, u * u * u * c->gx + 3 * u * u * t * ax + 3 * u * t * t * bx + t * t * t * ex,
+                   u * u * u * c->gy + 3 * u * u * t * ay + 3 * u * t * t * by + t * t * t * ey, 0);
+    }
+    c->gx = ex, c->gy = ey;
+}
+
 /* A string shown: each code's glyph through the text matrix, which then moves on by its width. */
 static void show(struct ctx *c, const unsigned char *s, unsigned len)
 {
-    const struct ttf_sink sink = { g_move, g_line, g_curve, c };
+    const struct ttf_sink sink = { g_move, g_line, g_curve, c, g_cubic };
     struct pdf_font *f = c->g.font;
     unsigned code, n;
     if (!f)

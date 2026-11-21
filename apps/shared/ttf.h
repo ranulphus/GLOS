@@ -14,12 +14,14 @@ struct ttf {
     unsigned glyphs, long_loca, advances, em;
 };
 
-/* What draws an outline: its pieces in the font's units (y up), curves with one control point. */
+/* What draws an outline: its pieces in the font's units (y up). TrueType's curves have one control point; the
+   PostScript kinds of font (apps/shared/psfont.c) have two, and a sink that is to draw those has `cubic` too. */
 struct ttf_sink {
     void (*move)(void *ctx, double x, double y);
     void (*line)(void *ctx, double x, double y);
     void (*curve)(void *ctx, double cx, double cy, double x, double y);
     void *ctx;
+    void (*cubic)(void *ctx, double ax, double ay, double bx, double by, double x, double y);
 };
 
 int ttf_open(struct ttf *t, const unsigned char *data, unsigned long n);       /* 0, or -1: no font to be read */
