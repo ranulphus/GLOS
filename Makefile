@@ -133,6 +133,9 @@ host-test-run: build/host/libpdfbr32.a
 	  build/host/$$n; done
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/vsb_test \
 	  tests/host/vsb_test.c kernel/vm/vsb.c kernel/vm/vdma.c && build/host/vsb_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -Ikernel/include -Iinclude -o build/host/fsv_test \
+	  tests/host/fsv_test.c kernel/fs/fsv.c kernel/fs/fat.c kernel/disk/fatfmt.c kernel/disk/mbr.c \
+	  kernel/disk/mbrboot.S kernel/disk/fdboot.S $(CP_SRCS) && build/host/fsv_test
 	@$(HOST_CC) -m32 -O2 -g -Wall -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -o build/host/crypto_kat \
 	  tests/host/crypto_kat.c $(TINYSSH_SRCS) && build/host/crypto_kat
 	@$(HOST_CC) -m32 -O2 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint \

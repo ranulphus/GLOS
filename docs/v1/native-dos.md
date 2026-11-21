@@ -260,7 +260,17 @@ right error is part of the answer); **internal** after the core.
     BIOS's CHS limit.) Still to come in N1c: the gate run with `driver = glos` as the default (every suite on
     it), the benches' real disks, the cache keeping writes for 2 seconds, IRQ-driven transfers.
   - **N1d, many callers:** a lock per volume, handles that stay right while another caller changes the folder
-    they are in.
+    they are in. **Built 2026-11-21** (`kernel/fs/fsv.c`, plain C with the lock as callbacks; not yet linked
+    into GLOSK.BIN: nothing uses it before N1e): every call under the volume's lock; a file's handles share one
+    node (its entry's place, size and first cluster), each handle its own position and place in the chain,
+    dropped when another handle changes the chain other than by growing it (the node's generation); an open
+    file can't be deleted, renamed, made again or have its attributes changed (`FSV_ESHARE`, as DOS with SHARE
+    answers); access and denial per open (DOS's sharing modes, compatibility mode treated as deny-none until
+    N2 gives it DOS's rules and whose process opened what); 64 files open on a volume. Entries never move when
+    others are made, deleted or renamed, nor when their folder is renamed or moved, so an open file's entry
+    stays its own. A folder listed between calls holds no lock: what others do meanwhile may or may not be
+    seen (entries there throughout are seen once). Host test `fsv_test` (in host-test), checked by mutation:
+    without the generation, a handle's stale place reads another file's clusters and the test fails.
   - **N1e, the kernel's users onto it** behind the file system's interface, the DOS server staying the back end
     while GLOS starts from a DOS (hosted mode: never two writers); used only by native GLOS, from N3.
   - **N1f, bus-master DMA** on the PCI IDE controllers (PIIX, ICH, VIA, SiS, ALi), measured on the benches;
