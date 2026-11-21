@@ -4,6 +4,15 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Memory (2026-11-21)
+
+- **GLOS takes less memory:** about 700 KB more is free once it has started (a 64 MB PC), and each DPMI
+  program's context takes about 70 KB less. A program's job buffers are made when the job starts and given
+  back when it ends; the table of free memory is as big as the PC's memory, not as big as 4 GB; and each DPMI
+  context's descriptor table grows as its programs ask for more, from one page.
+- **A fix:** two programs started from the shell at the same moment could be given the same job (a rare
+  failure in the test suites, now gone).
+
 ## The PDF Viewer (2026-11-20)
 
 - **A new program, the PDF Viewer** (PDF.EXE, in the Start menu; Files opens PDF files with it), with a reader
