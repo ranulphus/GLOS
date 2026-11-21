@@ -325,6 +325,11 @@ static unsigned fold(unsigned u)
     return u;
 }
 
+unsigned fat_fold(unsigned u)
+{
+    return fold(u);
+}
+
 int fat_name_eq(const char *a, const char *b)
 {
     while (*a && *b)

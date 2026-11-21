@@ -108,7 +108,7 @@ SSHC_FLAGS := -Iinclude -Ikernel/ssh -Ithird_party/tinyssh -Ithird_party/tinyssh
 HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:kernel/vm/v86dec.c \
               cache_test:kernel/drv/cstore.c umapage_test:kernel/mm/umapage.c \
               vpic_test:kernel/vm/vpic.c png_test:kernel/lib/png.c uhci_test:kernel/drv/uhcitd.c \
-              hid_test:kernel/drv/hidparse.c xpad_test:kernel/drv/xpad.c ata_test:kernel/drv/ata.c \
+              hid_test:kernel/drv/hidparse.c xpad_test:kernel/drv/xpad.c ata_test:kernel/drv/ata.c share_test:kernel/ndos/share.c \
               usbkbd_test:kernel/drv/usbkbd.c handle_test:kernel/app/handle.c \
               tsync_test:kernel/app/tsync.c region_test:sdk/config/region.c theme_test:kernel/wm/theme.c \
               clip_test:kernel/app/clipstore.c dnd_test:kernel/wm/dnd.c notes_test:kernel/wm/notes.c \
@@ -136,6 +136,8 @@ host-test-run: build/host/libpdfbr32.a
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Wno-format-truncation -Ikernel/include -Iinclude -o build/host/fsv_test \
 	  tests/host/fsv_test.c kernel/fs/fsv.c kernel/fs/fat.c kernel/disk/fatfmt.c kernel/disk/mbr.c \
 	  kernel/disk/mbrboot.S kernel/disk/fdboot.S $(CP_SRCS) && build/host/fsv_test
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/names_test \
+	  tests/host/names_test.c kernel/ndos/names.c kernel/fs/fat.c $(CP_SRCS) && build/host/names_test
 	@$(HOST_CC) -m32 -O2 -g -Wall -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -o build/host/crypto_kat \
 	  tests/host/crypto_kat.c $(TINYSSH_SRCS) && build/host/crypto_kat
 	@$(HOST_CC) -m32 -O2 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint \

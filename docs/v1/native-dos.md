@@ -378,6 +378,13 @@ Everything else (the files, the directories, the cache) is the kernel's, above 1
   (55 under plain DOS, 474 under GLOS today); from a DJGPP program 150 µs; findfirst and a cached 512-byte read no
   slower than under plain DOS (653 and 527 µs).
 
+- **Where it lives:** `kernel/ndos/` (the native DOS; `kernel/dos/` stays the hosted DOS server until hosted
+  mode ends). Built so far, plain C and host-tested ahead of the rest: `share.c`, RBIL's table 01404 (DOS 7.x
+  sharing) as data, every one of its 400 cells checked against RBIL's own text (`share_test`); `names.c`,
+  FINDFIRST's template, matching and search attributes, and a byte's upper case in the code page
+  (`names_test`). Open: whether MS-DOS 7.1's table for 437 makes e acute E acute (as GLOS does now, and
+  Windows 98's short names) or E: checked against its COUNTRY.SYS with the owner's image (N7).
+
 ### What it answers
 
 Everything the [checklist](#the-checklist-from-rbil) marks implement, absent or null; the census

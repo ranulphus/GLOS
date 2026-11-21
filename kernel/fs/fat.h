@@ -166,6 +166,8 @@ int fat_free(struct fat_vol *v, unsigned long *clusters);
 /* Names: UTF-8 compared without regard to case (the simple upper case of Latin, Greek and Cyrillic, which the
    DOS code pages hold), and a long name's checksum of its short entry's 11 bytes. */
 int fat_name_eq(const char *a, const char *b);
+/* A character's simple upper case (what fat_name_eq compares by): Latin, Greek, Cyrillic; others as they are. */
+unsigned fat_fold(unsigned u);
 unsigned char fat_lfn_sum(const unsigned char name11[11]);
 
 #endif
