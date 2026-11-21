@@ -260,3 +260,10 @@ void art_draw(struct gfx_surface *s, const struct art *a, int x, int y)
     for (i = 0; i < a->n; i++)
         gfx_mono(s, x - a->ox, y - a->oy, a->l[i].bits, a->w, a->h, (unsigned)a->stride, a->l[i].rgb, GFX_NONE);
 }
+
+void art_draw_plain(struct gfx_surface *s, const struct art *a, int x, int y, unsigned rgb)
+{
+    int i;
+    for (i = 0; i < a->n; i++)
+        gfx_mono(s, x - a->ox, y - a->oy, a->l[i].bits, a->w, a->h, (unsigned)a->stride, rgb, GFX_NONE);
+}

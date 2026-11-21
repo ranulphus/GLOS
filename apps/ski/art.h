@@ -28,5 +28,6 @@ extern struct art art_skier[POSE_COUNT][32];    /* by pose, and by where the ski
 
 void art_make(unsigned jacket);         /* every picture (again, for another jacket) */
 void art_draw(struct gfx_surface *s, const struct art *a, int x, int y);
+void art_draw_plain(struct gfx_surface *s, const struct art *a, int x, int y, unsigned rgb);   /* its shape, in one colour */
 
 #endif

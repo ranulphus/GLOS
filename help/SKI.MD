@@ -29,6 +29,7 @@ A downhill skiing game: a slope seen from above, a skier, and a mountain made ne
 Chosen in the **Mountain** menu:
 
 - **Slalom:** go between each gate's red and blue poles, against the clock. A gate missed adds five seconds.
+  Ski a mountain again (F2) and your best run there skis beside you as a grey shape: a ghost to beat.
 - **Free run:** the whole mountain for points: for the way you make without a fall, for time in the air,
   for turns landed, and for passing things closely.
 - **The Mountain of the Day** (F4): the same mountain for everyone that day, with tables of its own.

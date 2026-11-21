@@ -29,8 +29,11 @@
  * Sound (apps/ski/sound.c), made by rule: the skis' hiss by the speed and the snow, a gate's bell, a miss, a
  * jump, a landing, a fall, the valley's chime.
  *
- * Not yet (the plan's rest): the best run beside you as a ghost; weather and night; other skiers, the groomer
- * and the hare; the wind's sound; the mouse and pads; the window doubled, and full screen. */
+ * The ghost: the best slalom on a mountain is kept as its keys (SKIGHOST.DAT, the last mountain's) and skis
+ * beside the player there, a grey shape on the snow.
+ *
+ * Not yet (the plan's rest): weather and night; other skiers, the groomer and the hare; the wind's sound; the
+ * mouse and pads; the window doubled, and full screen. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,6 +78,19 @@ static long untils[8];                  /* ... and at these after it, each when 
 static int nuntils;
 static int stopped;                     /* (past the finish: the glide has ended, and was said) */
 static int sound_on = 1, sounding;      /* Sound is chosen; and there is a card it plays through */
+
+/* The ghost: the best slalom skied on a mountain, as its keys (a run is its mountain and its keys), kept in a
+   file beside the tables and skied again beside the player on that mountain. */
+#define GHOST_STEPS (5 * 60 * SKI_STEPS)
+static unsigned char rec[GHOST_STEPS];  /* the keys of the run under way */
+static struct {
+    unsigned seed, steps;
+    int grade;
+    unsigned long ms;
+    unsigned char keys[GHOST_STEPS];
+} ghost;
+static struct skirun ghost_run;
+static int ghost_on;                    /* it skis in this run */
 static int speed = 1;                   /* the suite's: the clock so many times faster (a run is its steps: the same) */
 static unsigned frames;                 /* (the strip of figures is drawn every third: ten times a second) */
 static int suite, held;                 /* the suite's run: every step that is due is made (its clock jumps); held:
@@ -126,6 +142,60 @@ static void tables_keep(void)
 
 static struct ski_table *table_now(void) { return of_day ? &tables.day[mode] : &tables.grade[mode][grade]; }
 
+/* ---- the ghost's file */
+
+static void ghost_path(char *out, size_t room)
+{
+    char *cut;
+    snprintf(out, room, "%s", table_path);
+    cut = strrchr(out, '\\');
+    snprintf(cut ? cut + 1 : out, room - (size_t)(cut ? cut + 1 - out : 0), "SKIGHOST.DAT");
+}
+
+static void ghost_load(void)
+{
+    char p[300];
+    unsigned char h[20];
+    FILE *f;
+    ghost.steps = 0;
+    if (!table_path[0])
+        return;
+    ghost_path(p, sizeof p);
+    if (!(f = gui_fopen(p, "rb")))
+        return;
+    if (fread(h, 1, 20, f) == 20 && !memcmp(h, "SKIG", 4)) {
+        unsigned n = h[12] | h[13] << 8 | (unsigned)h[14] << 16;
+        ghost.seed = h[4] | h[5] << 8 | (unsigned)h[6] << 16 | (unsigned)h[7] << 24;
+        ghost.grade = h[8] & 3;
+        ghost.ms = h[16] | h[17] << 8 | (unsigned long)h[18] << 16 | (unsigned long)h[19] << 24;
+        if (n && n <= GHOST_STEPS && fread(ghost.keys, 1, n, f) == n)
+            ghost.steps = n;
+    }
+    fclose(f);
+}
+
+static void ghost_keep(void)            /* the run just ended is its mountain's best: it is the ghost now */
+{
+    char p[300];
+    unsigned char h[20] = "SKIG";
+    FILE *f;
+    ghost.seed = seed, ghost.grade = grade, ghost.steps = run.finish_steps, ghost.ms = skirun_ms(&run);
+    memcpy(ghost.keys, rec, ghost.steps);
+    if (!table_path[0])
+        return;
+    ghost_path(p, sizeof p);
+    if (!(f = gui_fopen(p, "wb")))
+        return;
+    h[4] = (unsigned char)seed, h[5] = (unsigned char)(seed >> 8), h[6] = (unsigned char)(seed >> 16), h[7] = (unsigned char)(seed >> 24);
+    h[8] = (unsigned char)grade;
+    h[12] = (unsigned char)ghost.steps, h[13] = (unsigned char)(ghost.steps >> 8), h[14] = (unsigned char)(ghost.steps >> 16);
+    h[16] = (unsigned char)ghost.ms, h[17] = (unsigned char)(ghost.ms >> 8), h[18] = (unsigned char)(ghost.ms >> 16), h[19] = (unsigned char)(ghost.ms >> 24);
+    fwrite(h, 1, 20, f);
+    fwrite(ghost.keys, 1, ghost.steps, f);
+    fclose(f);
+    say("ghost kept steps=%u ms=%lu", ghost.steps, ghost.ms);
+}
+
 /* ---- a run begun, stepped, ended */
 
 static void time_text(unsigned long ms, char *out, size_t room)
@@ -143,6 +213,11 @@ static void ready(void)                 /* at the summit of the mountain chosen 
     banner[0] = 0;
     acc = 0;
     say("ready seed=%u grade=%d mode=%d day=%d", seed, grade, mode, of_day);
+    ghost_on = mode == SKI_SLALOM && ghost.steps && ghost.seed == seed && ghost.grade == grade;
+    if (ghost_on) {                     /* this mountain's best run, to ski beside */
+        skirun_start(&ghost_run, seed, grade, mode);
+        say("ghost steps=%u ms=%lu", ghost.steps, ghost.ms);
+    }
     if (canvas)
         gui_damage(canvas);
 }
@@ -185,6 +260,9 @@ static void finished(void)
     phase = P_DONE;
     say("finished steps=%u ms=%lu score=%ld passed=%d missed=%d falls=%d place=%d", run.finish_steps, ms, run.score, run.gates_passed,
         run.gates_missed, run.falls, place);
+    if (!watching && mode == SKI_SLALOM && run.finish_steps <= GHOST_STEPS
+        && (!ghost.steps || ghost.seed != seed || ghost.grade != grade || ms < ghost.ms))
+        ghost_keep();
     if (place >= 0) {                   /* among the ten: a name for the table */
         struct ski_entry e;
         char name[20];
@@ -231,7 +309,11 @@ static void step(void)
 {
     char text[64];
     keys_now = watching ? skirun_auto(&run) : keys_held();
+    if (run.state != SKI_S_DONE && run.steps < GHOST_STEPS)
+        rec[run.steps] = (unsigned char)keys_now;
     skirun_step(&run, keys_now);
+    if (ghost_on && !watching && ghost_run.state != SKI_S_DONE && ghost_run.steps < ghost.steps)
+        skirun_step(&ghost_run, ghost.keys[ghost_run.steps]);
     if (sounding)
         sound_events(run.ev);
     if (!(run.steps & 1) && run.state != SKI_S_DONE) {  /* the track: a point every other step */
@@ -395,6 +477,13 @@ static void draw_field(struct gfx_surface *s, int ox, int oy)
         int mid = skimount_centre(&run.m, run.m.length) - cam_x, half = skimount_half(&run.m, run.m.length), x;
         for (x = mid - half - 6; x < mid + half + 6; x += 8)
             gfx_fill(s, ox + x, oy + y - 3, 8, 6, ((x - mid + 4096) / 8) & 1 ? 0xCC0000u : 0xFFFFFFu);
+    }
+    /* the ghost: the best run's skier, a shape on the snow where that run was at this step */
+    if (ghost_on && !watching && phase != P_READY && ghost_run.state != SKI_S_FALLEN) {
+        int gx = (ghost_run.x >> 8) - cam_x, gy = (ghost_run.y >> 8) - cam_y;
+        if (gx > -20 && gx < FW + 20 && gy > -20 && gy < FH + 20)
+            art_draw_plain(s, &art_skier[POSE_SKI][(ghost_run.state == SKI_S_AIR ? ghost_run.heading + 2 * ghost_run.spin : ghost_run.heading) & 31],
+                           ox + gx, oy + gy - skirun_height(&ghost_run), 0xB2B2B2u);
     }
     /* the skier, then everything in sight from the top down, the skier in their place among it */
     sx = px - cam_x, sy = py - cam_y;
@@ -801,6 +890,7 @@ int main(int argc, char **argv)
             today = atoi(argv[++i]);    /* (the suite's: a day that does not change) */
     }
     tables_load();
+    ghost_load();
     grade = tables.grade_last, mode = tables.mode_last, jacket = tables.jacket < 5 ? tables.jacket : 0;
     if (!demo)
         seed = new_seed();

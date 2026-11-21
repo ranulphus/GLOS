@@ -1088,8 +1088,10 @@ name is one line of the program. GLOS's own game: its skier, pictures, mountains
   fast, silent in the air), a gate's bell, a miss's buzz, a jump's rush of air, a landing's thump, a fall,
   the valley's three notes. Game, Sound turns it off. Silent where there is no card GLOS plays through,
   and in the suite's runs.
-- **Not yet** (the plan's rest): the best run beside you as a ghost; weather and night (and the wind's
-  sound); other skiers, the groomer, the hare, lift pylons; the mouse and pads; the window doubled and full
+- **The ghost** (added the same day): a slalom that is its mountain's best is kept as its keys (a byte a
+  step: SKIGHOST.DAT beside the tables, the last mountain's) and skied again beside the player on that
+  mountain, a grey shape on the snow: the same run, since a run is its mountain and its keys.
+- **Not yet** (the plan's rest): weather and night (and the wind's sound); other skiers, the groomer, the hare, lift pylons; the mouse and pads; the window doubled and full
   screen; the demonstration playing by itself when nobody does. **To be measured**: the frame rate on the 486 bench
   (the plan's floor: thirty a second on a 486DX2-66 at 8 bits).
 
