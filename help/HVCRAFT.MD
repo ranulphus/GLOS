@@ -24,7 +24,8 @@ Quays are reached by their ramps; you can drop off a quay's edge, not climb it.
 
 ## The four games
 
-The score is in the window's title.
+The score is at the top left, in the sides' colours; the bar at the bottom left is the boost's tank; the
+small map at the top right shows the arena from above, with every craft (yours is white).
 
 - **Flags:** two sides, a flag at each dock. Touch the other side's flag to take it, and bring it to your own
   dock while your own flag is there. Carrying it you are slower and cannot boost. If the flag's own side

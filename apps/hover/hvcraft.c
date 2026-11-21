@@ -10,13 +10,14 @@
  *
  * Keys: Up and Down (or W and S) the fans forwards and back; Left and Right (or A and D) turn; Q and E the side
  * fans; Shift the boost; Space sets the craft down. 1 to 4 choose the game (flags, beacons, the lamp, laps) and
- * begin it again; Esc ends. The score is in the window's title.
+ * begin it again; Esc ends. Over the scene: the score, the boost's tank, and a small map of the arena (the craft,
+ * the flags, beacons, the lamp or the next buoy).
  *
  * HVCRAFT -demo [-kind 0..3] [-until STEP] is the suite's: every craft the computer's, the game's state said at
  * a step ("HVCRAFT at ..."), which is the same on every PC whatever the pictures cost.
  *
- * Not yet (the plan's rest): the lobby and network games; arenas from files; the small map, the score and the
- * tank drawn in the picture; sound; pads and the mouse; full screen; the computer's strengths chosen. */
+ * Not yet (the plan's rest): the lobby and network games; arenas from files; sound; pads and the mouse; full
+ * screen; the computer's strengths chosen; names over the craft; an arrow to the flag or the lamp. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -142,19 +143,109 @@ static void frame(float aspect)
     float heading = (float)me->heading * 360.0f / 1024.0f;
     float s = (float)hv_sin(me->heading) / 16384.0f, c = (float)hv_cos(me->heading) / 16384.0f;
     float px = (float)me->x / 256.0f, pz = (float)me->y / 256.0f, py = (float)hv_craft_level(&game, 0) / 256.0f * LEVEL;
+    float back = 0.5f, d;
     int i;
+    /* the eye: behind the craft and above it, but never the far side of a wall from it: as far back as the
+       squares behind are open, to 2.3 squares */
+    for (d = 0.75f; d <= 2.31f; d += 0.25f) {
+        int qx = (int)(px - s * d), qz = (int)(pz + c * d);
+        if (qx < 0 || qz < 0 || qx >= arena.w || qz >= arena.h || arena.sq[qz][qx].kind == HV_WALL)
+            break;
+        back = d;
+    }
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glFrustum(-0.11f * aspect, 0.11f * aspect, -0.11f, 0.11f, 0.2f, 60.0f);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    glRotatef(24.0f, 1.0f, 0.0f, 0.0f);         /* looking down a little, from behind and above the craft */
+    glRotatef(24.0f + (2.3f - back) * 12.0f, 1.0f, 0.0f, 0.0f);         /* looking down a little: more, the nearer the eye */
     glRotatef(heading, 0.0f, 1.0f, 0.0f);
-    glTranslatef(-(px - s * 2.3f), -(py + 1.35f), -(pz + c * 2.3f));
+    glTranslatef(-(px - s * back), -(py + 0.75f + back * 0.26f), -(pz + c * back));
     draw_arena();
     for (i = 0; i < game.ncraft; i++)
         draw_craft(i);
+}
+
+/* ---- over the scene: the score, the boost's tank, a small map. Flat, in the window's own pixels. */
+
+static void flat(float x, float y, float w, float h, const float *c)
+{
+    glColor3f(c[0], c[1], c[2]);
+    glVertex3f(x, y, 0.0f), glVertex3f(x + w, y, 0.0f), glVertex3f(x + w, y + h, 0.0f);
+    glVertex3f(x, y, 0.0f), glVertex3f(x + w, y + h, 0.0f), glVertex3f(x, y + h, 0.0f);
+}
+
+/* A number in the seven strokes of a clock's figures, each figure 14 by 24 pixels; the x after it. */
+static float number(float x, float y, long v, const float *c)
+{
+    /* the strokes lit for each figure: top, upper left, upper right, middle, lower left, lower right, bottom */
+    static const unsigned char lit[10] = { 0x77, 0x24, 0x5D, 0x6D, 0x2E, 0x6B, 0x7B, 0x25, 0x7F, 0x6F };
+    char text[12];
+    int i;
+    snprintf(text, sizeof text, "%ld", v < 0 ? 0 : v);
+    for (i = 0; text[i]; i++, x += 18.0f) {
+        unsigned m = lit[text[i] - '0'];
+        if (m & 0x01) flat(x, y, 14.0f, 3.0f, c);
+        if (m & 0x02) flat(x, y, 3.0f, 12.0f, c);
+        if (m & 0x04) flat(x + 11.0f, y, 3.0f, 12.0f, c);
+        if (m & 0x08) flat(x, y + 10.0f, 14.0f, 3.0f, c);
+        if (m & 0x10) flat(x, y + 12.0f, 3.0f, 12.0f, c);
+        if (m & 0x20) flat(x + 11.0f, y + 12.0f, 3.0f, 12.0f, c);
+        if (m & 0x40) flat(x, y + 21.0f, 14.0f, 3.0f, c);
+    }
+    return x;
+}
+
+static void overlay(int w, int h)
+{
+    static const float dark[3] = { 0.10f, 0.10f, 0.12f }, light[3] = { 0.80f, 0.80f, 0.82f }, mid[3] = { 0.55f, 0.55f, 0.58f },
+                       water[3] = { 0.15f, 0.35f, 0.65f }, white[3] = { 1.0f, 1.0f, 1.0f }, tank[3] = { 0.98f, 0.86f, 0.20f };
+    const struct hv_craft *me = &game.c[0];
+    float x, mx, my, cell = 4.0f;
+    int i, sx, sy;
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0.0, (double)w, (double)h, 0.0, -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glDisable(GL_DEPTH_TEST);
+    glBegin(GL_TRIANGLES);
+    /* the score: the two sides', or the player's own */
+    flat(8.0f, 8.0f, game.kind <= HV_BEACONS ? 104.0f : 52.0f, 34.0f, dark);
+    if (game.kind <= HV_BEACONS) {
+        x = number(14.0f, 13.0f, game.score[0], SIDE[0]);
+        flat(x + 2.0f, 20.0f, 4.0f, 4.0f, light), flat(x + 2.0f, 28.0f, 4.0f, 4.0f, light);
+        number(x + 12.0f, 13.0f, game.score[1], SIDE[1]);
+    } else {
+        number(14.0f, 13.0f, me->score, white);
+    }
+    /* the boost's tank */
+    flat(8.0f, (float)h - 20.0f, 104.0f, 12.0f, dark);
+    flat(10.0f, (float)h - 18.0f, 100.0f * (float)me->tank / (float)HV_TANK, 8.0f, tank);
+    /* the map: the arena from above, its top the grid's */
+    mx = (float)w - 8.0f - cell * (float)arena.w, my = 8.0f;
+    flat(mx - 2.0f, my - 2.0f, cell * (float)arena.w + 4.0f, cell * (float)arena.h + 4.0f, dark);
+    for (sy = 0; sy < arena.h; sy++)
+        for (sx = 0; sx < arena.w; sx++) {
+            const struct hv_square *q = &arena.sq[sy][sx];
+            if (q->kind != HV_WALL)
+                flat(mx + cell * (float)sx, my + cell * (float)sy, cell, cell,
+                     q->kind == HV_WATER ? water : q->mark == 'A' || q->mark == 'B' ? SIDE[q->mark - 'A'] : q->level || q->kind == HV_RAMP ? light : mid);
+        }
+    for (i = 0; i < arena.nbeacon && game.kind == HV_BEACONS; i++)
+        flat(mx + cell * (float)arena.beacon[i].x, my + cell * (float)arena.beacon[i].y, cell, cell, game.beacon[i] < 0 ? white : SIDE[game.beacon[i]]);
+    if (game.kind == HV_LAMP)
+        flat(mx + (float)game.lamp_x / 256.0f * cell - 2.0f, my + (float)game.lamp_y / 256.0f * cell - 2.0f, 5.0f, 5.0f, tank);
+    if (game.kind == HV_LAPS)
+        flat(mx + cell * (float)arena.buoy[me->buoy].x, my + cell * (float)arena.buoy[me->buoy].y, cell, cell, tank);
+    for (i = 0; i < 2 && game.kind == HV_FLAGS; i++)
+        flat(mx + (float)game.flag[i].x / 256.0f * cell - 1.0f, my + (float)game.flag[i].y / 256.0f * cell - 4.0f, 2.0f, 6.0f, white);
+    for (i = game.ncraft - 1; i >= 0; i--)
+        if (!game.c[i].wet)
+            flat(mx + (float)game.c[i].x / 256.0f * cell - 1.5f, my + (float)game.c[i].y / 256.0f * cell - 1.5f, 3.0f, 3.0f, i ? SIDE[game.c[i].side] : white);
+    glEnd();
+    glEnable(GL_DEPTH_TEST);
 }
 
 static unsigned keys_held(void)
@@ -264,6 +355,7 @@ int main(int argc, char **argv)
             }
         }
         frame((float)w / (float)h);
+        overlay(w, h);
         dglSwapBuffers();
         if (now - said >= 1000) {
             said = now;

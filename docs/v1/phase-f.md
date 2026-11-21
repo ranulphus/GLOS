@@ -1131,13 +1131,15 @@ in; the player's craft and three of the computer's (the middle strength); the fo
 to 4; the picture drawn with DOS-GL in a window, as the savers draw: the arena's squares as boxes lit by the
 way they face (walls, floors, quays, ramps as wedges, water, docks in their sides' colours), beacons, the
 lamp, buoys and flags as posts, the craft as a few boxes turned to their headings, seen from behind and
-above the player's. The score in the window's title. Not a toolkit program: its window is DOS-GL's.
+above the player's (the eye comes in closer where a wall is behind the craft). Over the scene, flat: the
+score in the sides' colours, the boost's tank, and a small map of the arena with the craft, the flags, the
+beacons, the lamp or the next buoy. Not a toolkit program: its window is DOS-GL's.
 
 - **Loop A** (`hover_case`, in the desk suite, on the G200 and on the S3): `HVCRAFT -demo`, every craft
   the computer's, each kind of game to step 450: the state it says there is the one written in the suite
   (made on the host by the same code: `hv_test demo KIND 450`, from the arena both share),
   the same whether the card's engine draws the window or DOS-GL's software renderer does; and a picture
   taken while it plays has a scene's worth of colours.
-- **Not yet**: all of the plan beyond that (the lobby, network games, arenas from files, the map and the
-  figures in the picture, sound, pads and the mouse, full screen). **To be measured**: frames a second on
+- **Not yet**: all of the plan beyond that (the lobby, network games, arenas from files, sound, pads and
+  the mouse, full screen, names over the craft). **To be measured**: frames a second on
   the benches' cards and with the software renderer.
