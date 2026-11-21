@@ -395,7 +395,10 @@ Everything else (the files, the directories, the cache) is the kernel's, above 1
   closed at its exit): the system file table in the machine's memory as RBIL's table 01642 lays it out (AUX,
   CON, PRN its first three, a file's fields brought up to date at each call), each program's handle table
   through its PSP, DOS 7's sharing table between every entry open on a file, the file itself `fsv.c`'s
-  (`files_test`, mutation-checked). FCB parsing (29h) waits for MS-DOS 7.1 to
+  (`files_test`, mutation-checked); `path.c`, a program's path made a drive and a whole path (each drive's
+  current folder, '.' and '..', both separators, the code page's upper case, parts cut to 8.3) and 60h's and
+  47h's forms (`path_test`). To check against MS-DOS 7.1: parts cut to 8.3 rather than refused, and the longest
+  whole path (127 here). FCB parsing (29h) waits for MS-DOS 7.1 to
   compare with: RBIL doesn't give its separators and terminators. Open: whether MS-DOS 7.1's table for 437 makes e acute E acute (as GLOS does now, and
   Windows 98's short names) or E: checked against its COUNTRY.SYS with the owner's image (N7).
 
