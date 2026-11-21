@@ -1,16 +1,27 @@
 #loopa-run-only #pentium (pdf.txt's steps on the real program, without pictures; the PDF Viewer's floor is a Pentium: not on the 486)
 # The PDF Viewer (apps/pdf; phase F, docs/v1/apps/pdf-viewer.md): nothing open; a PDF of two pages opened by the
-# dialog (tests/gui/mkpdf.py's, in C:\GLOS), its first page as wide as the view; the next page; at its actual
-# size; back by Go to Page; a locked PDF and a file that is none refused.
+# dialog (tests/gui/mkpdf.py's, in C:\GLOS): its outline in the pane at the left, its first page as wide as the
+# room beside it; an outline's entry chosen: its page; the page before and the next; the pane folded away; at its actual
+# size; back by Go to Page; the page's text copied; a phrase over two lines found and tinted, a word found
+# again and again through the file, round its end and backwards, and one that isn't there; a locked PDF and a file
+# that is none refused.
 run PDF.EXE
 wait "PDF Viewer"
 key ctrl+o
 wait "Open"
 type C:\\GLOS\\GUIDE.PDF\n
 said PDF opened GUIDE.PDF pages=2
-said PDF page 1 of 2 600x777 at 98%
+said PDF outline 3
+said PDF page 1 of 2 423x547 at 69%
+click "PDF Viewer" 60 86
+said PDF outline chose 3 page 2
+said PDF page 2 of 2 423x547 at 69%
+key ctrl+pgup
+said PDF page 1 of 2 423x547 at 69%
 key ctrl+pgdn
-said PDF page 2 of 2 600x777 at 98%
+said PDF page 2 of 2 423x547 at 69%
+key f9
+said PDF page 2 of 2 594x769 at 97%
 key ctrl+1
 said PDF page 2 of 2 612x792 at 100%
 key ctrl+g
@@ -19,7 +30,38 @@ key down
 key enter
 said PDF page 1 of 2 612x792 at 100%
 key ctrl+2
-said PDF page 1 of 2 600x777 at 98%
+said PDF page 1 of 2 594x769 at 97%
+key ctrl+c
+said PDF copied 346
+key ctrl+f
+wait "Find"
+type stand-ins for helvetica\n
+said PDF found stand-ins for helvetica page 1 marks=2
+key ctrl+f
+wait "Find"
+key ctrl+a
+type page\n
+said PDF found page page 1 marks=1
+key f3
+said PDF page 2 of 2 594x769 at 97%
+said PDF found page page 2 marks=1
+key f3
+said PDF found page page 2 marks=1
+key f3
+said PDF page 1 of 2 594x769 at 97%
+said PDF found page page 1 marks=1
+key shift+f3
+said PDF page 2 of 2 594x769 at 97%
+said PDF found page page 2 marks=1
+key ctrl+c
+said PDF copied 87
+key ctrl+f
+wait "Find"
+key ctrl+a
+type zebra\n
+said PDF not found zebra
+pause 500
+key enter
 key ctrl+o
 wait "Open"
 type C:\\GLOS\\LOCKED.PDF\n

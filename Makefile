@@ -176,7 +176,8 @@ host-test-run:
 	  && build/host/smf_test `python3 tests/host/smf_cases.py build/host/smf`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/song_test tests/host/song_test.c apps/shared/song.c \
 	  apps/shared/smf.c && build/host/song_test build/host/smf
-	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c loader/inflate.c \
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c apps/shared/pdfnav.c \
+	  loader/inflate.c \
 	  && build/host/pdf_test `python3 tests/host/pdf_cases.py build/host/pdfcases`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdfdraw_test tests/host/pdfdraw_test.c apps/shared/pdfdraw.c \
 	  apps/shared/pdffont.c apps/shared/psfont.c apps/shared/ttf.c apps/shared/pdf.c loader/inflate.c -lm \
@@ -263,7 +264,7 @@ APP_LIBS_player := $(SOURCE_SRCS) apps/shared/smf.c apps/shared/midiplay.c
 APP_HOST_LIBS_studio := apps/shared/song.c apps/shared/smf.c apps/shared/midiplay.c
 APP_LIBS_studio := apps/shared/song.c apps/shared/smf.c apps/shared/midiplay.c
 # PDF files read and drawn (the PDF Viewer, phase F); its stand-in fonts as one file beside the program.
-PDF_SRCS := apps/shared/pdf.c apps/shared/pdfdraw.c apps/shared/pdffont.c apps/shared/psfont.c apps/shared/ttf.c \
+PDF_SRCS := apps/shared/pdf.c apps/shared/pdfnav.c apps/shared/pdfdraw.c apps/shared/pdffont.c apps/shared/psfont.c apps/shared/ttf.c \
             apps/shared/picfile.c loader/inflate.c
 APP_HOST_LIBS_pdf := $(PDF_SRCS)
 APP_LIBS_pdf := $(PDF_SRCS)

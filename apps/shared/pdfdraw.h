@@ -25,4 +25,26 @@ int pdf_page_size(struct pdf *d, unsigned n, double *w, double *h);
    page can't be drawn is left out. */
 int pdf_draw(struct pdf *d, unsigned n, double scale, int ox, int oy, struct pdf_canvas *c);
 
+/* A letter of a page's text, as it lies on the page shown at one pixel to the point (the page's top left the
+   origin, x to the right, y down): its character, where it begins on its baseline, the step along the baseline
+   to its end, and its size there (its font's height). */
+struct pdf_letter {
+    unsigned long u;
+    float x, y, dx, dy, size;
+};
+
+/* Page n's letters in the order its words show them: malloc'd (the caller's to free), *count of them. Where the
+   page only leaves a gap between words, or goes to another line, a space or a '\n' is put in. Text that is not
+   painted (a scanned page's) is there too; letters whose characters nothing says are not. PDF_OK; PDF_E_MEMORY;
+   PDF_E_DAMAGED: no such page. */
+int pdf_text(struct pdf *d, unsigned n, struct pdf_letter **letters, unsigned *count);
+
+/* Where `what` (UTF-8) is next in the letters from letter `from` on, or with `back` last before it: its first
+   letter's number and *len letters, or -1. Capitals and small letters are one; a line's end is a space; curled
+   quotes and long dashes are plain ones. */
+long pdf_text_find(const struct pdf_letter *l, unsigned n, const char *what, unsigned from, int back, unsigned *len);
+
+/* Letters first to last-1 as UTF-8 (lines end "\r\n"): malloc'd, NUL after, *bytes without it. NULL: no memory. */
+char *pdf_text_utf8(const struct pdf_letter *l, unsigned first, unsigned last, unsigned long *bytes);
+
 #endif

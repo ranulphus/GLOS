@@ -395,4 +395,40 @@ fonts = {
     20: stream(b"", b"%!PS-AdobeFont-1.0: nothing of use\n" + bytes(range(256))),
 }
 write("fonts.pdf", classic(fonts, 1)[0])
+
+
+# ---- an outline (tests/host/pdf_test.c, apps/shared/pdfnav.c): five pages in a tree two deep, and bookmarks that
+#      lead to them each way a file can say it: a destination written out, an action, a name, a string in the tree
+#      of names, a page's number; one that leads out of the file; titles in the format's own characters and UTF-16
+def u16(text):
+    return b"<FEFF" + text.encode("utf-16-be").hex().encode() + b">"
+
+
+nav = {
+    1: b"<< /Type /Catalog /Pages 2 0 R /Outlines 20 0 R /Dests << /Old << /D [8 0 R /Fit] >> >> /Names << /Dests 30 0 R >> >>",
+    2: b"<< /Type /Pages /Kids [3 0 R 6 0 R 7 0 R] /Count 5 /MediaBox [0 0 300 200] /Resources << /Font << /F1 12 0 R >> >> >>",
+    3: b"<< /Type /Pages /Parent 2 0 R /Kids [4 0 R 5 0 R] /Count 2 >>",
+    4: b"<< /Type /Page /Parent 3 0 R /Contents 10 0 R >>",
+    5: b"<< /Type /Page /Parent 3 0 R /Contents 10 0 R >>",
+    6: b"<< /Type /Page /Parent 2 0 R /Contents 10 0 R >>",
+    7: b"<< /Type /Pages /Parent 2 0 R /Kids [8 0 R 9 0 R] /Count 2 >>",
+    8: b"<< /Type /Page /Parent 7 0 R /Contents 10 0 R >>",
+    9: b"<< /Type /Page /Parent 7 0 R /Contents 10 0 R >>",
+    10: stream(b"", b"BT /F1 12 Tf 20 150 Td (A page) Tj ET"),
+    11: b"<< /Type /Page /Contents 10 0 R >>",          # a page of no tree
+    12: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    20: b"<< /Type /Outlines /First 21 0 R /Last 27 0 R /Count 6 >>",
+    21: b"<< /Title (Chapter 1) /Parent 20 0 R /Next 24 0 R /First 22 0 R /Last 23 0 R /Count 2 /Dest [4 0 R /Fit] >>",
+    22: b"<< /Title (Section 1.1) /Parent 21 0 R /Next 23 0 R /A << /S /GoTo /D [5 0 R /XYZ 0 150 0] >> >>",
+    23: b"<< /Title (Section 1.2) /Parent 21 0 R /Prev 22 0 R /Dest (sec.1.2) >>",
+    24: b"<< /Title " + u16("Chapter 2 \u2013 \u00fcn\u00ef \U0001F600") + b" /Parent 20 0 R /Prev 21 0 R /Next 25 0 R /Dest /Old >>",
+    25: b"<< /Title (Elsewhere) /Parent 20 0 R /Next 26 0 R /A << /S /URI /URI (http://example.invalid/) >> >>",
+    26: b"<< /Title (Last \\200 page\\222) /Parent 20 0 R /Next 27 0 R /Dest [9 0 R /Fit] >>",
+    27: b"<< /Title (Closed) /Parent 20 0 R /First 28 0 R /Last 28 0 R /Count -1 /Dest (nowhere) >>",
+    28: b"<< /Title (Hidden) /Parent 27 0 R /Dest [4 /Fit] >>",
+    30: b"<< /Kids [31 0 R 32 0 R] >>",
+    31: b"<< /Limits [(a) (m)] /Names [(alpha) [4 0 R /Fit] (beta) [5 0 R /Fit]] >>",
+    32: b"<< /Limits [(n) (z)] /Names [(sec.1.1) [5 0 R /Fit] (sec.1.2) << /D [6 0 R /FitH 100] >>] >>",
+}
+write("nav.pdf", classic(nav, 1)[0])
 print(out)

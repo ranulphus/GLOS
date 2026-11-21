@@ -695,6 +695,51 @@ has already (`loader/inflate.c`). PDFio was not tried; no code of another reader
     made-up Type 1 font writes its numbers that way.
   - **Not yet**: a glyph's width from the font itself (the PDF's `Widths` are used, as they must be there);
     hints (at reading sizes on a screen the smoothing carries it); CFF2 and multiple masters.
-- **Next**: search and copying of text (the places of the letters are known), the outline, drawing off the
-  window's thread with a cache of pages, encrypted files with an empty password.
+- **The pages' text: Find and Copy.**
+  - **`pdf_text`** (`pdfdraw.c`): a page gone through as for drawing, nothing drawn: each letter noted with
+    its character, where it begins on its baseline, its step along the line and its size, on the page as it is
+    shown (turned as the page is). A page's words seldom say their spaces and never their lines' ends: where a
+    letter begins more than 0.15 of its size after the last one ended, a space is put between; where it is
+    off the last one's line by more than half the larger size, or back before it, a line's end. Joined letters
+    (fi, fl, ffi...) are said singly. Unseen text (a scanned page's) is there too.
+  - **A letter's character**: a simple font's by its encoding (a carried Type 1 or CFF font's own encoding
+    through its glyphs' names); `ToUnicode` where there is one; a composite font without one by the font it
+    carries: a TrueType font's character map read backwards (once, when first asked), a CFF font's names.
+  - **`pdf_text_find`**: the next place a text is, or the one before; capitals and small letters one (Latin-1
+    and Latin Extended-A too), a line's end a space, curled quotes and long dashes plain. **`pdf_text_utf8`**:
+    letters as UTF-8, lines ended CR LF.
+  - **In the program**: Edit, Find... (Ctrl+F), Find Next (F3), Find Previous (Shift+F3): on this page after
+    what was last found, then page after page round the file's end to where it began; what is found is tinted
+    yellow in the page's picture (a mark a line; what was under it is kept and put back) and scrolled into
+    sight, at any zoom. Copy Page Text (Ctrl+C) puts the page's text on the clipboard.
+  - **Tests.** `pdfdraw_test` (54 checks): the text page's 174 letters as text, to the letter (the kerned
+    line's gap a space, the unseen line there, the line by glyph numbers read by its font's character map),
+    letters' places and sizes (one turned a quarter), finding forwards and backwards, over a line's end, in
+    another case; the carried fonts' page as text; the damaged-file runs read each file's text too. The
+    program's scripts copy both pages' text (346 and 87 bytes), find a phrase that runs over two lines (two
+    marks), a word through the file and round its end, backwards, and one that isn't there.
+  - **Not yet**: choosing text with the mouse (the button moves the page: a text tool beside it); a long
+    search can't be stopped; text in columns comes in the order the file draws it; right-to-left text.
+- **The outline** (a file's own list of its chapters, "bookmarks").
+  - **`apps/shared/pdfnav.c`**: the outline's chain of entries read into a list in order, each with its title,
+    its depth, whether the file shows it open, and the page it leads to; at most 4000 entries, 16 deep (a
+    chain that never ends is cut by counting). A destination is found each way a file can say it: written
+    out (an array that begins with the page), an action of the kind `GoTo`, a name in the catalog's `Dests`,
+    a string in the catalog's tree of names (`Names`, `Dests`: `Kids` between their `Limits`, leaves of
+    `Names`), a page's number; anything else (another file, the web) leads nowhere.
+  - **`pdf_page_number`** (`pdf.c`): which page an object is: up by its parents to the tree's top, counting
+    at each the pages its parent has before it. **`pdf_text_string`**: a title as UTF-8, from the format's own
+    table of characters (PDFDocEncoding) or UTF-16 after its mark (pairs beyond 65535 too), or UTF-8's.
+  - **In the program**: a pane at the left of the page (a splitter: dragged, folded by View, Outline: F9),
+    opened as a file with an outline opens, folded away for one without; a tree, the entries the file shows
+    open opened; an entry chosen (the mouse, the arrows) shows its page. Fit Width fits what the pane leaves.
+  - **Tests.** `pdf_test` (64 checks): a file of five pages in a tree two deep: each page's number, what is
+    no page (a page of no tree, a branch, the catalog); its outline's eight entries each with title, depth
+    and page: every way of saying a destination, one that leads out, a title with the format's own bullet
+    and trade mark, one in UTF-16 with a face from beyond 65535; a file with none; the damaged-file runs
+    (3000 now, the new file among them) read each file's outline and ask every object's page. The program's
+    scripts: the test document's outline of three opens the pane, an entry chosen by the keyboard goes to
+    the second page, the pane folds away and the page is fitted to the room.
+- **Next**: drawing off the window's thread with a cache of pages, encrypted files with an empty password,
+  choosing text with the mouse, links.
 

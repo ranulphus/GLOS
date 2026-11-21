@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "../../apps/shared/pdf.h"
+#include "../../apps/shared/pdfnav.h"
 
 static int fails, checks;
 #define CHECK(c, ...) do { checks++; if (!(c)) { printf("FAIL %s:%d %s: ", __FILE__, __LINE__, #c); printf(__VA_ARGS__); \
@@ -193,12 +194,55 @@ int main(int argc, char **argv)
         CHECK(0, "tree.pdf: not opened: %d", err);
     }
 
+    /* Ways about a file: which page an object is (five pages in a tree two deep); the outline's entries in
+       order, each with its depth and its page: by a destination written out, an action, a string looked up in
+       the tree of names, a name in the catalog's list, a page's number; one that leads out of the file; a
+       title in the format's own characters, one in UTF-16 (beyond its first 65536 too). */
+    if ((d = open_pdf("nav.pdf", &err)) != NULL) {
+        static const struct { const char *title; int depth, open; long page; } want[8] = {
+            { "Chapter 1", 0, 1, 0 }, { "Section 1.1", 1, 0, 1 }, { "Section 1.2", 1, 0, 2 },
+            { "Chapter 2 \xE2\x80\x93 \xC3\xBCn\xC3\xAF \xF0\x9F\x98\x80", 0, 0, 3 }, { "Elsewhere", 0, 0, -1 },
+            { "Last \xE2\x80\xA2 page\xE2\x84\xA2", 0, 0, 4 }, { "Closed", 0, 0, -1 }, { "Hidden", 1, 0, 4 } };
+        struct pdf_mark *m = NULL;
+        unsigned count = 0, i;
+        int ok;
+        CHECK(pdf_pages(d) == 5 && pdf_page_number(d, 4) == 0 && pdf_page_number(d, 5) == 1 && pdf_page_number(d, 6) == 2
+              && pdf_page_number(d, 8) == 3 && pdf_page_number(d, 9) == 4, "nav: its pages' numbers: %ld %ld %ld %ld %ld",
+              pdf_page_number(d, 4), pdf_page_number(d, 5), pdf_page_number(d, 6), pdf_page_number(d, 8), pdf_page_number(d, 9));
+        CHECK(pdf_page_number(d, 11) == -1 && pdf_page_number(d, 3) == -1 && pdf_page_number(d, 1) == -1 && pdf_page_number(d, 2) == -1
+              && pdf_page_number(d, 99) == -1 && pdf_page_number(d, 0) == -1, "nav: what is no page of the tree");
+        CHECK(pdf_outline(d, &m, &count) == PDF_OK && count == 8, "nav: the outline: %u entries", count);
+        for (i = 0, ok = count == 8; ok && i < 8; i++)
+            if (strcmp(m[i].title, want[i].title) || m[i].depth != want[i].depth || m[i].open != want[i].open
+                || m[i].page != want[i].page) {
+                printf("  entry %u: \"%s\" depth %d open %d page %ld\n", i, m[i].title, m[i].depth, m[i].open, m[i].page);
+                ok = 0;
+            }
+        CHECK(ok, "nav: each entry's title, depth and page");
+        pdf_marks_free(m, count);
+        pdf_close(d);
+    } else {
+        CHECK(0, "nav.pdf: not opened: %d", err);
+    }
+    if ((d = open_pdf("plain.pdf", &err)) != NULL) {     /* a file with no outline */
+        struct pdf_mark *m = (struct pdf_mark *)&err;
+        unsigned count = 9;
+        char *t = pdf_text_string(pdf_get(d, pdf_get(d, pdf_trailer(d), "Info"), "Hex"));
+        CHECK(pdf_outline(d, &m, &count) == PDF_OK && !m && !count, "no outline");
+        CHECK(t && !strcmp(t, "Hello "), "a string as text: %s", t ? t : "(none)");
+        free(t);
+        t = pdf_text_string(NULL);
+        CHECK(t && !t[0], "no string as text");
+        free(t);
+        pdf_close(d);
+    }
+
     /* Files with bytes changed: opened or refused; every object, page and stream of what opens is gone through. */
     {
-        static const char *const from[] = { "plain.pdf", "packed.pdf", "filters.pdf", "update.pdf", "tree.pdf" };
+        static const char *const from[] = { "plain.pdf", "packed.pdf", "filters.pdf", "update.pdf", "tree.pdf", "nav.pdf" };
         unsigned long seed = 20261120ul, made = 0, opened = 0, round, k, orig_size = 0;
         unsigned char *orig = NULL;
-        for (round = 0; round < 2500; round++) {
+        for (round = 0; round < 3000; round++) {
             unsigned long changes;
             if (round % 500 == 0) {
                 d = open_pdf(from[round / 500], &err);
@@ -241,11 +285,19 @@ int main(int argc, char **argv)
                     if (n == 30)
                         pdf_trim(d, 2000);
                 }
+                {                               /* its outline, and which page each of its first objects is */
+                    struct pdf_mark *m = NULL;
+                    unsigned count = 0;
+                    pdf_outline(d, &m, &count);
+                    pdf_marks_free(m, count);
+                    for (n = 0; n < 40; n++)
+                        pdf_page_number(d, n);
+                }
                 pdf_close(d);
             }
         }
         free(orig);
-        CHECK(made == 2500 && opened > 1500, "%lu changed files, %lu of them opened", made, opened);
+        CHECK(made == 3000 && opened > 1800, "%lu changed files, %lu of them opened", made, opened);
         printf("pdf_test: %lu changed files, %lu of them opened\n", made, opened);
     }
     free(file);

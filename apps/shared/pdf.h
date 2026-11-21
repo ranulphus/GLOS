@@ -49,6 +49,8 @@ struct pdf_obj *pdf_page(struct pdf *d, unsigned n);            /* page n (from 
 struct pdf_obj *pdf_page_attr(struct pdf *d, struct pdf_obj *page, const char *key);
 struct pdf_obj *pdf_trailer(struct pdf *d);
 struct pdf_obj *pdf_catalog(struct pdf *d);
+/* Which page (from 0) object `num` is, by its place in the tree of pages; -1: none of that tree's. */
+long pdf_page_number(struct pdf *d, unsigned num);
 
 /* Objects. Every object given here is the document's and stays good until pdf_trim or pdf_close. A reference is
    followed (to PDF_NULL where it leads nowhere); NULL is taken as a null object: these never fail. */
@@ -62,6 +64,9 @@ long pdf_int(const struct pdf_obj *o, long otherwise);
 const char *pdf_name(const struct pdf_obj *o);                  /* a name's text, or "" */
 const char *pdf_string(const struct pdf_obj *o, unsigned *len); /* a string's bytes, or "" */
 int pdf_name_is(const struct pdf_obj *o, const char *name);
+/* A string meant to be read (a title, a name in the outline) as UTF-8: malloc'd, the caller's; "" for what is no
+   string; NULL: no memory. Such strings are in the format's own table of characters, or in UTF-16 after a mark. */
+char *pdf_text_string(const struct pdf_obj *o);
 
 /* A stream's bytes, unpacked through its filters (Flate with its predictors, LZW, ASCII85, ASCIIHex, RunLength);
    the caller frees them. *last: the name of a filter left undone where one is (a JPEG's "DCTDecode": the bytes

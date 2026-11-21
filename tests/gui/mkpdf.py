@@ -44,7 +44,7 @@ two += b"0 G 0.5 w " + b" ".join(b"%d 560 m %d 600 l S" % (72 + 12 * i, 72 + 12 
 two += b"BT /F4 11 Tf 72 80 Td (Page 2) Tj ET\n"
 fonts = b"<< /F1 6 0 R /F2 7 0 R /F3 8 0 R /F4 9 0 R /F5 10 0 R >>"
 objs = {
-    1: b"<< /Type /Catalog /Pages 2 0 R >>",
+    1: b"<< /Type /Catalog /Pages 2 0 R /Outlines 12 0 R >>",
     2: b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 612 792] /Resources << /Font " + fonts + b" >> >>",
     3: b"<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>",
     4: b"<< /Type /Page /Parent 2 0 R /Contents 11 0 R >>",
@@ -55,6 +55,11 @@ objs = {
     9: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
     10: b"<< /Type /Font /Subtype /Type1 /BaseFont /Times-Italic /Encoding /WinAnsiEncoding >>",
     11: stream(b"/Filter /FlateDecode", zlib.compress(two)),
+    # the outline: the first page's title with an entry under it (shown open), and the second page's
+    12: b"<< /Type /Outlines /First 13 0 R /Last 15 0 R /Count 3 >>",
+    13: b"<< /Title (A Guide to Nothing Much) /Parent 12 0 R /Next 15 0 R /First 14 0 R /Last 14 0 R /Count 1 /Dest [3 0 R /Fit] >>",
+    14: b"<< /Title (The shapes) /Parent 13 0 R /Dest [3 0 R /XYZ 72 520 0] >>",
+    15: b"<< /Title (The Second Page) /Parent 12 0 R /Prev 13 0 R /A << /S /GoTo /D [4 0 R /Fit] >> >>",
 }
 open(os.path.join(here, "GUIDE.PDF"), "wb").write(pdf(objs))
 open(os.path.join(here, "LOCKED.PDF"), "wb").write(pdf(objs, b"/Encrypt << /Filter /Standard /V 1 /R 2 >>"))

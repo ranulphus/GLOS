@@ -37,6 +37,8 @@ struct pdf_font {
     unsigned char *file;                /* an embedded font's bytes (TrueType, CFF) */
     struct ttf ttf;
     int has_ttf;
+    unsigned short *back;               /* ... its glyphs' characters (its character map backwards), when asked for */
+    int back_made;
     struct psfont *ps;                  /* an embedded font of a PostScript kind */
     char *diff[256];                    /* a simple font's glyph names by code, where its Differences give one */
     int own_codes;                      /* its Encoding names no table: the font's own encoding is the one */
@@ -439,6 +441,7 @@ void pdf_font_close(struct pdf_font *f)
     for (i = 0; i < 256; i++)
         free(f->diff[i]);
     psfont_close(f->ps);
+    free(f->back);
     free(f->w);
     free(f->to);
     free(f->file);
@@ -460,12 +463,38 @@ unsigned pdf_font_next(const struct pdf_font *f, const unsigned char *s, unsigne
 
 int pdf_font_is_space(const struct pdf_font *f, unsigned code) { return !f->composite && code == 32; }
 
+static unsigned cid_glyph(const struct pdf_font *f, unsigned code)      /* a composite TrueType font's glyph of a code */
+{
+    return f->cid2gid ? (2ul * code + 1 < f->ncid2gid ? (unsigned)f->cid2gid[2 * code] << 8 | f->cid2gid[2 * code + 1] : 0) : code;
+}
+
 unsigned long pdf_font_unicode(const struct pdf_font *f, unsigned code)
 {
     const struct range *r = f->nto ? range_of(f->to, f->nto, code) : NULL;
     if (r)
         return r->to + (r->to ? code - r->first : 0);
-    return f->composite ? 0 : f->uni[code & 255];
+    if (!f->composite)
+        return f->uni[code & 255];
+    /* a composite font that says nothing of its characters: the font it carries may (a TrueType font's character
+       map, read backwards once; a CFF font's names for its glyphs) */
+    if (f->has_ttf) {
+        struct pdf_font *m = (struct pdf_font *)f;      /* (made when first asked for: the font is the same font) */
+        unsigned g = cid_glyph(f, code);
+        if (!m->back_made) {
+            unsigned long u;
+            m->back_made = 1;
+            if ((m->back = calloc((size_t)f->ttf.glyphs + 2, sizeof m->back[0])) != NULL)
+                for (u = 0xFFFF; u >= 0x20; u--) {
+                    unsigned k = ttf_by_unicode(&f->ttf, u);
+                    if (k && k <= f->ttf.glyphs)
+                        m->back[k] = (unsigned short)u;
+                }
+        }
+        return f->back && g && g <= f->ttf.glyphs ? f->back[g] : 0;
+    }
+    if (f->ps && !psfont_is_cid(f->ps))
+        return psfont_unicode(f->ps, (int)code);
+    return 0;
 }
 
 static unsigned stand_glyph(const struct pdf_font *f, unsigned code)
@@ -518,7 +547,7 @@ int pdf_font_outline(const struct pdf_font *f, unsigned code, const struct ttf_s
     unsigned g = 0;
     if (f->has_ttf) {
         if (f->composite) {                     /* the code is the glyph, or the table says which */
-            g = f->cid2gid ? (2ul * code + 1 < f->ncid2gid ? (unsigned)f->cid2gid[2 * code] << 8 | f->cid2gid[2 * code + 1] : 0) : code;
+            g = cid_glyph(f, code);
         } else {
             unsigned long u = pdf_font_unicode(f, code);
             if (!f->symbolic && u)

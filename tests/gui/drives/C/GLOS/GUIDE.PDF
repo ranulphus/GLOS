@@ -1,7 +1,7 @@
 %PDF-1.4
 %âãÏÓ
 1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
+<< /Type /Catalog /Pages 2 0 R /Outlines 12 0 R >>
 endobj
 2 0 obj
 << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R /F2 7 0 R /F3 8 0 R /F4 9 0 R /F5 10 0 R >> >> >>
@@ -43,22 +43,38 @@ stream
 xœMÓÁNÃ0à;Oáã@$¶“¦'Bâ€´wé¶†Ê&±‰½>)«íœZıJò¥ÕïE†‡gè ï Ah\yÛÂ,ö°ì7ÇÃŞ»şò<å›Å¸<€Çq¹ßÆM1^7½»a¿Sÿ³ßÍ¡+{×ıp¼Àşëã°…Sw8=ş•ïÊ9<3Ût»?‡CWÍo?‡–‹„{çDvğî>ÀeC¿¡-rY5ÀO™w¬a%ôQCï’¤˜,-?`JÙYJBù`–gÅ¢a>¨ÖTZT-UZmüJM[ÑĞ›†N4DÓĞ‹†d¢hÈ¦!«MÃ ZSiQµTijm¥%ÑÈ™FN4BÓÈ‹Fd¡hÄ¦‰FÁ4bÕb¥EÕR¥iE¨êiI¸*	iK¸j	kK¸j	kKØZr‰Òe?PºÃ86€Rß?–Ä»¬
 endstream
 endobj
+12 0 obj
+<< /Type /Outlines /First 13 0 R /Last 15 0 R /Count 3 >>
+endobj
+13 0 obj
+<< /Title (A Guide to Nothing Much) /Parent 12 0 R /Next 15 0 R /First 14 0 R /Last 14 0 R /Count 1 /Dest [3 0 R /Fit] >>
+endobj
+14 0 obj
+<< /Title (The shapes) /Parent 13 0 R /Dest [3 0 R /XYZ 72 520 0] >>
+endobj
+15 0 obj
+<< /Title (The Second Page) /Parent 12 0 R /Prev 13 0 R /A << /S /GoTo /D [4 0 R /Fit] >> >>
+endobj
 xref
-0 12
+0 16
 0000000000 65535 f 
 0000000015 00000 n 
-0000000064 00000 n 
-0000000231 00000 n 
-0000000294 00000 n 
-0000000358 00000 n 
-0000000871 00000 n 
-0000000973 00000 n 
-0000001072 00000 n 
-0000001167 00000 n 
-0000001264 00000 n 
-0000001365 00000 n 
+0000000081 00000 n 
+0000000248 00000 n 
+0000000311 00000 n 
+0000000375 00000 n 
+0000000888 00000 n 
+0000000990 00000 n 
+0000001089 00000 n 
+0000001184 00000 n 
+0000001281 00000 n 
+0000001382 00000 n 
+0000001788 00000 n 
+0000001862 00000 n 
+0000002000 00000 n 
+0000002085 00000 n 
 trailer
-<< /Size 12 /Root 1 0 R  >>
+<< /Size 16 /Root 1 0 R  >>
 startxref
-1771
+2194
 %%EOF

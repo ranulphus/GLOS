@@ -66,6 +66,9 @@ struct ctx {
     int nfonts;
     struct path tp;                     /* a glyph's outline, in device pixels */
     double gm[6], gx, gy;               /* ... the matrix it is drawn through, and where its last piece ended */
+    int text;                           /* the page is read for its text: nothing is drawn, the letters are noted */
+    struct pdf_letter *letters;
+    unsigned nletters, room;
 };
 
 /* ---- matrices: x' = a x + c y + e, y' = b x + d y + f */
@@ -645,6 +648,51 @@ static void g_cubic(void *v, double x1, double y1, double x2, double y2, double 
     c->gx = ex, c->gy = ey;
 }
 
+/* ---- the page's text: its letters noted where they lie */
+
+static void letter_put(struct ctx *c, unsigned long u, double x, double y, double dx, double dy, double size)
+{
+    struct pdf_letter *l;
+    if (c->nletters == c->room) {
+        unsigned room = c->room ? c->room * 2 : 256;
+        if (room > 400000u || !(l = realloc(c->letters, room * sizeof *l)))
+            return;                             /* (a page of more letters than that: its first ones) */
+        c->letters = l, c->room = room;
+    }
+    l = &c->letters[c->nletters++];
+    l->u = u, l->x = (float)x, l->y = (float)y, l->dx = (float)dx, l->dy = (float)dy, l->size = (float)size;
+}
+
+/* A letter where it lies. A page's words seldom say their spaces and never their lines' ends: where this
+   letter begins well after the last one ended, along the line, a space goes between; where it is off the last
+   one's line, or back before it, a line's end does. */
+static void letter(struct ctx *c, unsigned long u, double x, double y, double dx, double dy, double size)
+{
+    static const char *const joined[] = { "ff", "fi", "fl", "ffi", "ffl" };
+    if (!(size > 0.01 && size < 20000 && fabs(x) < 1e6 && fabs(y) < 1e6 && fabs(dx) < 1e6 && fabs(dy) < 1e6))
+        return;
+    if (c->nletters) {
+        const struct pdf_letter *p = &c->letters[c->nletters - 1];
+        double len = sqrt(dx * dx + dy * dy), ux = len > 1e-6 ? dx / len : 1, uy = len > 1e-6 ? dy / len : 0;
+        double gx = x - (p->x + p->dx), gy = y - (p->y + p->dy), along = gx * ux + gy * uy, off = fabs(gy * ux - gx * uy);
+        double big = size > p->size ? size : p->size, back = sqrt((double)p->dx * p->dx + (double)p->dy * p->dy);
+        if (off > 0.5 * big || along < -0.5 * big - back) {
+            if (p->u != '\n')
+                letter_put(c, '\n', p->x + p->dx, p->y + p->dy, 0, 0, p->size);
+        } else if (along > 0.15 * size && p->u != ' ' && p->u != '\n' && u != ' ') {
+            letter_put(c, ' ', p->x + p->dx, p->y + p->dy, gx, gy, size);
+        }
+    }
+    if (u >= 0xFB00 && u <= 0xFB04) {           /* letters joined in one glyph: each said, a share of the step each */
+        const char *s = joined[u - 0xFB00];
+        int n = (int)strlen(s), i;
+        for (i = 0; i < n; i++)
+            letter_put(c, (unsigned char)s[i], x + dx * i / n, y + dy * i / n, dx / n, dy / n, size);
+    } else {
+        letter_put(c, u, x, y, dx, dy, size);
+    }
+}
+
 /* A string shown: each code's glyph through the text matrix, which then moves on by its width. */
 static void show(struct ctx *c, const unsigned char *s, unsigned len)
 {
@@ -661,7 +709,12 @@ static void show(struct ctx *c, const unsigned char *s, unsigned len)
         concat(c->gm, m);
         to_device(c->gm, 0, 0, &ox, &oy);
         em = fabs(c->gm[0]) + fabs(c->gm[1]) + fabs(c->gm[2]) + fabs(c->gm[3]);        /* (no smaller than it is) */
-        if ((c->g.mode & 3) != 3 && ox + 2 * em >= c->g.clip[0] && ox - 2 * em <= c->g.clip[2] && oy + 2 * em >= c->g.clip[1]
+        if (c->text) {                          /* (its step: the glyph's own width, in ems, along the line) */
+            unsigned long u = pdf_font_unicode(f, code);
+            double wide = pdf_font_width(f, code) / 1000;
+            if (u)
+                letter(c, u, ox, oy, c->gm[0] * wide, c->gm[1] * wide, sqrt(c->gm[2] * c->gm[2] + c->gm[3] * c->gm[3]));
+        } else if ((c->g.mode & 3) != 3 && ox + 2 * em >= c->g.clip[0] && ox - 2 * em <= c->g.clip[2] && oy + 2 * em >= c->g.clip[1]
             && oy - 2 * em <= c->g.clip[3]) {   /* (not the unseen kind, nor out of sight) */
             c->tp.n = 0;
             if (pdf_font_outline(f, code, &sink) == 0 && c->tp.n) {
@@ -694,6 +747,11 @@ static void run(struct ctx *c, const unsigned char *bytes, unsigned long len, st
 
 static void paint(struct ctx *c, int fill_it, int evenodd, int stroke_it)
 {
+    if (c->text) {
+        c->clip_next = 0;
+        path_clear(&c->p);
+        return;
+    }
     if (fill_it)
         fill(c, &c->p, evenodd, c->g.fill, c->g.fill_alpha);
     if (stroke_it)
@@ -718,6 +776,8 @@ static void do_object(struct ctx *c, struct pdf_obj *resources, const char *name
         return;
     if (!strcmp(kind, "Image")) {
         struct picture pic;
+        if (c->text)
+            return;
         int mask = pdf_num(pdf_get(d, o, "ImageMask"), 0) != 0 || (pdf_is(pdf_get(d, o, "ImageMask"), PDF_BOOL)
                                                                       && pdf_get(d, o, "ImageMask")->u.num != 0);
         if (picture(c, o, mask, c->g.fill, &pic, 0) == 0) {
@@ -965,7 +1025,9 @@ int pdf_page_size(struct pdf *d, unsigned n, double *w, double *h)
     return PDF_OK;
 }
 
-int pdf_draw(struct pdf *d, unsigned n, double scale, int ox, int oy, struct pdf_canvas *cv)
+/* A page gone through: drawn into the canvas, or (letters not NULL) read for its text. */
+static int go_through(struct pdf *d, unsigned n, double scale, int ox, int oy, struct pdf_canvas *cv, struct pdf_letter **letters,
+                      unsigned *nletters)
 {
     struct pdf_obj *page = pdf_page(d, n), *contents, *resources;
     struct ctx *c;
@@ -976,7 +1038,7 @@ int pdf_draw(struct pdf *d, unsigned n, double scale, int ox, int oy, struct pdf
         return PDF_E_DAMAGED;
     if (!(c = calloc(1, sizeof *c)))
         return PDF_E_MEMORY;
-    c->d = d, c->c = cv;
+    c->d = d, c->c = cv, c->text = letters != NULL;
     page_box(d, page, box, &turn);
     w = box[2] - box[0], h = box[3] - box[1];
     /* the page's points to the device's pixels: its top left at the top left, as it is turned */
@@ -1031,6 +1093,101 @@ int pdf_draw(struct pdf *d, unsigned n, double scale, int ox, int oy, struct pdf
     free(c->p.xy);
     free(c->p.first);
     free(c->acc);
+    if (letters)
+        *letters = c->letters, *nletters = c->nletters;
     free(c);
     return PDF_OK;
+}
+
+int pdf_draw(struct pdf *d, unsigned n, double scale, int ox, int oy, struct pdf_canvas *cv)
+{
+    return go_through(d, n, scale, ox, oy, cv, NULL, NULL);
+}
+
+/* ---- a page's text read */
+
+int pdf_text(struct pdf *d, unsigned n, struct pdf_letter **letters, unsigned *count)
+{
+    struct pdf_canvas none = { NULL, 0, 0 };
+    *letters = NULL, *count = 0;
+    return go_through(d, n, 1, 0, 0, &none, letters, count);
+}
+
+/* A character as the search takes it: small, a line's end and a hard space a space, curled quotes and long
+   dashes plain. */
+static unsigned long plain(unsigned long u)
+{
+    if (u >= 'A' && u <= 'Z')
+        return u + 32;
+    if (u < 0xA0)
+        return u == '\n' || u == '\r' || u == '\t' ? ' ' : u;
+    if (u == 0xA0)
+        return ' ';
+    if (u >= 0xC0 && u <= 0xDE && u != 0xD7)
+        return u + 32;
+    if ((u >= 0x100 && u <= 0x137) || (u >= 0x14A && u <= 0x177))
+        return u | 1;
+    if ((u >= 0x139 && u <= 0x148) || (u >= 0x179 && u <= 0x17E))
+        return u + (u & 1);
+    if (u == 0x178)
+        return 0xFF;
+    if (u == 0x2018 || u == 0x2019 || u == 0x201A)
+        return '\'';
+    if (u == 0x201C || u == 0x201D || u == 0x201E)
+        return '"';
+    if (u == 0x2010 || u == 0x2011 || u == 0x2013 || u == 0x2014 || u == 0x2212)
+        return '-';
+    return u;
+}
+
+long pdf_text_find(const struct pdf_letter *l, unsigned n, const char *what, unsigned from, int back, unsigned *len)
+{
+    unsigned long w[128];
+    unsigned m = 0, k;
+    long i;
+    const unsigned char *s = (const unsigned char *)what;
+    while (*s && m < 128) {                     /* its characters, from UTF-8 */
+        unsigned long u = *s++;
+        int more = u >= 0xF0 ? 3 : u >= 0xE0 ? 2 : u >= 0xC0 ? 1 : 0;
+        u &= more == 3 ? 7 : more == 2 ? 15 : more == 1 ? 31 : 127;
+        for (; more && (*s & 0xC0) == 0x80; more--)
+            u = u << 6 | (*s++ & 63);
+        w[m++] = plain(u);
+    }
+    *len = m;
+    if (!m || m > n)
+        return -1;
+    for (i = back ? (long)(from < n - m ? from : n - m) : (long)from; back ? i >= 0 : (unsigned long)i + m <= n; i += back ? -1 : 1) {
+        for (k = 0; k < m && plain(l[i + k].u) == w[k]; k++)
+            ;
+        if (k == m)
+            return i;
+    }
+    return -1;
+}
+
+char *pdf_text_utf8(const struct pdf_letter *l, unsigned first, unsigned last, unsigned long *bytes)
+{
+    char *t = malloc(last > first ? 4ul * (last - first) + 1 : 1);
+    unsigned long n = 0;
+    unsigned i;
+    if (!t)
+        return NULL;
+    for (i = first; i < last; i++) {
+        unsigned long u = l[i].u;
+        if (u == '\n')
+            t[n++] = '\r', t[n++] = '\n';
+        else if (u < 0x80)
+            t[n++] = (char)u;
+        else if (u < 0x800)
+            t[n++] = (char)(0xC0 | u >> 6), t[n++] = (char)(0x80 | (u & 63));
+        else if (u < 0x10000)
+            t[n++] = (char)(0xE0 | u >> 12), t[n++] = (char)(0x80 | (u >> 6 & 63)), t[n++] = (char)(0x80 | (u & 63));
+        else
+            t[n++] = (char)(0xF0 | (u >> 18 & 7)), t[n++] = (char)(0x80 | (u >> 12 & 63)), t[n++] = (char)(0x80 | (u >> 6 & 63)),
+            t[n++] = (char)(0x80 | (u & 63));
+    }
+    t[n] = 0;
+    *bytes = n;
+    return t;
 }

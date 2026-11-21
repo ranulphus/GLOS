@@ -5,6 +5,7 @@
  * bytes changed at random, drawn: no harm.
  *
  *     pdfdraw_test DIR [OUT]        (the .pdf files; OUT: the pages written there as .ppm, to look at) */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -276,6 +277,54 @@ int main(int argc, char **argv)
         CHECK(0, "fonts.pdf: not opened: %d", err);
     }
 
+    /* The pages' text: the letters in their places, a space where the page only leaves a gap between words (the
+       kerned line's), a line's end where it goes to another line, the unseen text too; a font by glyph numbers
+       says its characters by its own character map; and what is looked for is found. */
+    if ((d = open_pdf("text.pdf", &err)) != NULL) {
+        static const char want[] = "Hello, GLOS!\r\nThe quick brown fox, kerned: AVA\r\nCourier, spaced out\r\n"
+                                   "Bold: caf\xC3\xA9 na\xC3\xAFve \xE2\x82\xAC 5\r\nItalic, on the next line\r\n"
+                                   "A font the file carries\r\nGLOS 2.10\r\nTurned\r\nUnseen\r\nsmall and blue";
+        struct pdf_letter *l = NULL;
+        unsigned count = 0, len = 0, len2 = 0;
+        unsigned long bytes = 0;
+        char *t;
+        CHECK(pdf_text(d, 0, &l, &count) == PDF_OK && count == 174, "the text page read: %u letters", count);
+        t = pdf_text_utf8(l, 0, count, &bytes);
+        CHECK(t && !strcmp(t, want) && bytes == strlen(want), "its text: %s", t ? t : "(none)");
+        free(t);
+        if (count == 174) {
+            /* the H of "Hello" at the line's start, 24 points high, as wide as Helvetica's; "Turned" goes up the page */
+            CHECK(l[0].u == 'H' && fabs(l[0].x - 20) < 0.01 && fabs(l[0].y - 35) < 0.01 && fabs(l[0].size - 24) < 0.01
+                  && fabs(l[0].dx - 0.722 * 24) < 0.05 && fabs(l[0].dy) < 0.01, "the first letter: %g, %g, by %g, %g high", l[0].x, l[0].y,
+                  l[0].dx, l[0].size);
+            CHECK(l[146].u == 'T' && fabs(l[146].x - 280) < 0.01 && fabs(l[146].y - 180) < 0.01 && fabs(l[146].dx) < 0.01 && l[146].dy < -5
+                  && fabs(l[146].size - 12) < 0.01, "a letter turned: %g, %g, by %g, %g", l[146].x, l[146].y, l[146].dx, l[146].dy);
+            CHECK(pdf_text_find(l, count, "BROWN fox", 0, 0, &len) == 23 && len == 9
+                  && pdf_text_find(l, count, "CAF\xC3\x89", 0, 0, &len2) == 72 && len2 == 4, "found, whatever the letters' case");
+            CHECK(pdf_text_find(l, count, "glos", 0, 0, &len) == 7 && pdf_text_find(l, count, "glos", 8, 0, &len) == 136
+                  && pdf_text_find(l, count, "glos", count, 1, &len) == 136 && pdf_text_find(l, count, "glos", 135, 1, &len) == 7
+                  && pdf_text_find(l, count, "glos", 6, 1, &len) == -1 && pdf_text_find(l, count, "glos", 137, 0, &len) == -1,
+                  "the next and the one before");
+            CHECK(pdf_text_find(l, count, "ava\ncourier", 0, 0, &len) == 42 && len == 11 && pdf_text_find(l, count, "zebra", 0, 0, &len) == -1
+                  && pdf_text_find(l, count, "", 0, 0, &len) == -1, "over a line's end; what is not there; nothing");
+        }
+        free(l);
+        pdf_close(d);
+    }
+    if ((d = open_pdf("fonts.pdf", &err)) != NULL) {     /* the carried fonts say their letters: by their encodings, their names */
+        struct pdf_letter *l = NULL;
+        unsigned count = 0;
+        unsigned long bytes = 0;
+        char *t;
+        CHECK(pdf_text(d, 0, &l, &count) == PDF_OK, "the fonts' page read");
+        t = pdf_text_utf8(l, 0, count, &bytes);
+        CHECK(t && !strcmp(t, "AB\xC3\x81\r\nA B AB\r\nA\r\nA"), "its text: %s", t ? t : "(none)");
+        free(t);
+        free(l);
+        CHECK(pdf_text(d, 5, &l, &count) == PDF_E_DAMAGED && !l && !count, "no such page's text");
+        pdf_close(d);
+    }
+
     /* Files with bytes changed, drawn: whatever is in them, the drawing comes back and stays in its canvas. */
     {
         unsigned long made = 0, drawn = 0, round, k, orig_size = 0;
@@ -309,6 +358,13 @@ int main(int argc, char **argv)
                     if (pdf_draw(d, (unsigned)n, 0.25 + (double)(rnd() % 300) / 100, (int)(rnd() % 100) - 20, (int)(rnd() % 100) - 20, &cv)
                         == PDF_OK)
                         drawn++;
+                }
+                {                               /* ... and read for its text */
+                    struct pdf_letter *l = NULL;
+                    unsigned count = 0, len = 0;
+                    if (pdf_text(d, 0, &l, &count) == PDF_OK && count)
+                        pdf_text_find(l, count, "a", 0, 0, &len);
+                    free(l);
                 }
                 pdf_close(d);
             }

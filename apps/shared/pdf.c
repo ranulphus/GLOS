@@ -1333,3 +1333,103 @@ struct pdf_obj *pdf_page_attr(struct pdf *d, struct pdf_obj *page, const char *k
     }
     return NULL;
 }
+
+static const struct pdf_obj *written(const struct pdf_obj *dict, const char *key)      /* a value as it is written: a reference
+                                                                                           not followed */
+{
+    unsigned i;
+    if (dict && dict->type == PDF_DICT)
+        for (i = 0; i < dict->n; i++)
+            if (!strcmp(dict->u.d.key[i], key))
+                return dict->u.d.value[i];
+    return NULL;
+}
+
+/* Up from the page by its parents to the tree's top, counting at each the pages its parent has before it. */
+long pdf_page_number(struct pdf *d, unsigned num)
+{
+    const struct pdf_obj *top = written(pdf_catalog(d), "Pages");
+    struct pdf_obj *node = pdf_object(d, num);
+    unsigned long before = 0;
+    int up;
+    if (!pdf_is(node, PDF_DICT) || pdf_is(pdf_get(d, node, "Kids"), PDF_ARRAY))
+        return -1;
+    for (up = 0; up < MAX_DEPTH; up++) {
+        const struct pdf_obj *ref = written(node, "Parent");
+        struct pdf_obj *parent = pdf_get(d, node, "Parent"), *kids;
+        unsigned i;
+        if (top && top->type == PDF_REF && top->u.ref.num == num)
+            return up && before < d->pages ? (long)before : -1;
+        if (!pdf_is(parent, PDF_DICT))          /* (the top, where the catalog has it written out, not referred to) */
+            return up && (!top || top->type != PDF_REF) && before < d->pages ? (long)before : -1;
+        if (!ref || ref->type != PDF_REF || !pdf_is(kids = pdf_get(d, parent, "Kids"), PDF_ARRAY))
+            return -1;
+        for (i = 0; i < kids->n; i++) {
+            const struct pdf_obj *k = kids->u.item[i];
+            struct pdf_obj *kid;
+            if (k && k->type == PDF_REF && k->u.ref.num == num)
+                break;
+            kid = pdf_item(d, kids, i);
+            if (pdf_is(kid, PDF_DICT)) {
+                long count = pdf_is(pdf_get(d, kid, "Kids"), PDF_ARRAY) ? pdf_int(pdf_get(d, kid, "Count"), 0) : 1;
+                before += count > 0 ? (unsigned long)count : 0;
+            }
+        }
+        if (i == kids->n)
+            return -1;                          /* (its parent doesn't know it) */
+        node = parent, num = ref->u.ref.num;
+    }
+    return -1;
+}
+
+/* ---- strings meant to be read */
+
+static char *utf8_put(char *p, unsigned long u)
+{
+    if (u < 0x80)
+        *p++ = (char)u;
+    else if (u < 0x800)
+        *p++ = (char)(0xC0 | u >> 6), *p++ = (char)(0x80 | (u & 63));
+    else if (u < 0x10000)
+        *p++ = (char)(0xE0 | u >> 12), *p++ = (char)(0x80 | (u >> 6 & 63)), *p++ = (char)(0x80 | (u & 63));
+    else
+        *p++ = (char)(0xF0 | (u >> 18 & 7)), *p++ = (char)(0x80 | (u >> 12 & 63)), *p++ = (char)(0x80 | (u >> 6 & 63)),
+        *p++ = (char)(0x80 | (u & 63));
+    return p;
+}
+
+char *pdf_text_string(const struct pdf_obj *o)
+{
+    /* the format's own table (PDFDocEncoding) where it is not Latin-1: 18h to 1Fh, and 80h to A0h */
+    static const unsigned short low[8] = { 0x2D8, 0x2C7, 0x2C6, 0x2D9, 0x2DD, 0x2DB, 0x2DA, 0x2DC };
+    static const unsigned short high[33] = { 0x2022, 0x2020, 0x2021, 0x2026, 0x2014, 0x2013, 0x192, 0x2044, 0x2039, 0x203A, 0x2212,
+                                             0x2030, 0x201E, 0x201C, 0x201D, 0x2018, 0x2019, 0x201A, 0x2122, 0xFB01, 0xFB02, 0x141,
+                                             0x152, 0x160, 0x178, 0x17D, 0x131, 0x142, 0x153, 0x161, 0x17E, 0, 0x20AC };
+    unsigned n = 0, i;
+    const unsigned char *s = (const unsigned char *)pdf_string(o, &n);
+    char *t = malloc(3ul * n + 4), *p = t;
+    if (!t)
+        return NULL;
+    if (n >= 2 && s[0] == 0xFE && s[1] == 0xFF) {       /* UTF-16, the high byte first */
+        for (i = 2; i + 1 < n; i += 2) {
+            unsigned long u = (unsigned long)s[i] << 8 | s[i + 1];
+            if (u >= 0xD800 && u < 0xDC00 && i + 3 < n && (s[i + 2] & 0xFC) == 0xDC) {
+                u = 0x10000 + ((u - 0xD800) << 10) + ((((unsigned long)s[i + 2] << 8 | s[i + 3])) - 0xDC00);
+                i += 2;
+            }
+            p = utf8_put(p, u < 0x20 ? ' ' : u);
+        }
+    } else if (n >= 3 && s[0] == 0xEF && s[1] == 0xBB && s[2] == 0xBF) {        /* UTF-8 (PDF 2.0) */
+        for (i = 3; i < n; i++)
+            *p++ = s[i] < 0x20 ? ' ' : (char)s[i];
+    } else {
+        for (i = 0; i < n; i++) {
+            unsigned long u = s[i];
+            u = u >= 0x18 && u < 0x20 ? low[u - 0x18] : u < 0x20 ? ' ' : u >= 0x80 && u <= 0xA0 ? high[u - 0x80] : u;
+            if (u)
+                p = utf8_put(p, u);
+        }
+    }
+    *p = 0;
+    return t;
+}
