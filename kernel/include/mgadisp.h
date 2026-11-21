@@ -37,6 +37,7 @@ u32 mga_regs_phys(void);
 int mga_handover(int kernel, int reset);        /* the engine changes hands: drained (reset: reset first); kernel:
                                                    the kernel's HAL resynchronised. -1 if it had hung (reset) */
 u32 mga_display_stat(char *buf, u32 max);       /* glos display: a line */
+int mga_is(u32 bus, u32 dev, u32 fn);   /* 1 if that PCI function is the Matrox card GLOS's engine drives */
 
 
 /* Apps' blocks of VRAM (M8 step C), at the same offsets for their lives: kept in the system's memory while the

@@ -8,7 +8,7 @@
 
 /* ---- the schema */
 
-const char *const cfg_sections[] = { "display", "input", "joystick", "usb", "sound", "net", "time", "region", "cache",
+const char *const cfg_sections[] = { "display", "input", "joystick", "usb", "sound", "net", "devices", "time", "region", "cache",
                                      "memory", "vnc", "desktop", "saver", "services", "shell", "open", "program",
                                      0 };
 
@@ -143,6 +143,10 @@ const struct cfg_key cfg_schema[] = {
       "A picture for the desktop (PNG, JPEG, BMP, GIF or TGA); empty: the theme's colour" },
     { "desktop", "wallpaper_style", CFG_CHOICE, CFG_NOW, 0, 0, "fill|stretch|centre|tile", "fill", "Wallpaper st&yle",
       "How the picture is put on the desktop: made to cover it, made its size, in its middle, or side by side" },
+    /* [devices]: the devices GLOS's drivers leave to DOS (phase F, the Devices page; kernel/drv/devlist.c) */
+    { "devices", "off", CFG_TEXT, CFG_RESTART, 0, 190, "line", "", "&Left to DOS",
+      "Devices GLOS's drivers leave to DOS: a PCI device by its place (00:03.0), sb16, crystal or ne2000, spaces "
+      "between them" },
     /* [services]: the background apps (phase D; kernel/core/services.c) */
     { "services", "run", CFG_TEXT, CFG_NOW, 0, 190, "line", "", "Pr&ograms",
       "Programs GLOS starts with itself and starts again if they end: their command lines, ; between them" },

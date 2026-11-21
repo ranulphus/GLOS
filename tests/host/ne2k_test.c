@@ -142,6 +142,11 @@ u32 pci_read32(u32 bus, u32 dev, u32 fn, u32 reg) { (void)bus, (void)dev, (void)
 void pci_write32(u32 bus, u32 dev, u32 fn, u32 reg, u32 v) { (void)bus, (void)dev, (void)fn, (void)reg, (void)v; }
 int nic_pci(struct pci_dev *d, const char *name) { (void)d, (void)name; return -1; }
 void nic_claimed(struct nic *n, struct pci_dev *d) { (void)d; card = n; }
+int dev_turned_off(const char *id) { (void)id; return 0; }     /* ([devices] off: nothing in the test) */
+void dev_note(const char *id, const char *driver, int state, const char *why, const char *res)
+{
+    (void)id, (void)driver, (void)state, (void)why, (void)res;
+}
 void vdev_hide(u16 base, u16 len) { (void)base, (void)len; }
 
 void net_rx(struct nic *n, const u8 *frame, u32 len)

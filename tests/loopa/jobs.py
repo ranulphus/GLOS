@@ -2821,6 +2821,88 @@ def cable_case(profile, card):
         not bad
 
 
+def devices_case(profile, card):
+    """The devices GLOS finds and what serves each (kernel/drv/devlist.c; the Control Panel's Devices page; API
+    2.12). Over SSH: glos devices (and the shell's DEVICES, the same) has a line for every PCI function glos pci
+    lists, at the same places; the network card GLOS took is on, with its driver and its details (the address
+    it has); a Sound Blaster 16 (BLASTER set) is on; on the Pentium II the USB controller too; a PCI bridge has
+    no ranges of a device's (glos pci wrote nonsense there once); the keyboard's controller and GLOS's clock.
+    [devices] off set over SSH names the SB16 and the USB controller from the next start (listed=1) while they
+    stay on; after glos restart (RUN.BAT loops on it) they are off, left to DOS. Then GLOS started with [devices]
+    off naming the network card, and DEVLIST (GLOS /RUN: no SSH without the card) prints the list: the card is
+    off, its driver says why it left it, and nobody else took it."""
+    import time
+    tag = "devices-%s-%s" % (profile, card)
+    checks, info = {}, ""
+    sb = ["--sound", "sb16", "--pre", "SET BLASTER=A220 I5 D1 H5 T6"]
+    agent = Agent("ssh-" + tag, profile, card, sb + ["--cmd", "SERSAY HX-START devices", "--cmd", ":again",
+                                                    "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "IF ERRORLEVEL 200 GOTO again",
+                                                    "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks["listen"] = agent.listening()
+    net = usb = None
+    try:
+        rc, out, _ = agent.ssh("glos devices")
+        out = out.replace("\r", "")
+        rc2, again, _ = agent.ssh("DEVICES")
+        pci = [l.split()[0] for l in agent.ssh("glos pci")[1].replace("\r", "").split("\n") if l[:1].isdigit()]
+        lines = [l for l in out.split("\n") if l and not l.startswith(" ")]
+        ids = [l.split()[0] for l in lines]
+        checks["pci"] = rc == 0 and len(pci) >= 3 and [i for i in ids if i[:1].isdigit()] == pci
+        checks["shell"] = rc2 == 0 and [l.split()[0] for l in again.replace("\r", "").split("\n") if l and l[0] != " "] == ids
+        m = re.search(r"^(\S+) kind=net state=on driver=(\w+) can=1 .*\n  card=\2 .*\n  ip=10\.0\.2\.15 ", out, re.M)
+        checks["net"] = bool(m)
+        net = m.group(1) if m else None
+        checks["sb16"] = bool(re.search(r"^sb16 kind=sound state=on driver=sb16 can=1 io=0220-022f irq=5 dma=1,5\n  audio ", out, re.M))
+        off = ["sb16"]
+        if profile == "bf6":
+            m = re.search(r"^(\S+) kind=usb state=on driver=uhci can=1 vendor=8086 .* io=[0-9a-f]{4}-[0-9a-f]{4}\n  2 ports", out, re.M)
+            checks["usb"] = bool(m)
+            usb = m.group(1) if m else None
+            off += [usb] if usb else []
+            checks["bridge"] = all(" io=" not in l and " mem=" not in l for l in lines if "class=0604" in l)
+        checks["own"] = "\nkbd kind=input state=on driver=8042 name=Keyboard_controller io=0060,0064 irq=1\n" in out \
+            and "\nrtc kind=system state=on driver=glos " in out and "\npic kind=system state=on " in out
+        if not all(checks.values()):
+            info += " out=%r" % out[-900:]
+        # turned off: named now, off from the next start
+        rc = agent.ssh("glos config set devices off %s" % " ".join(off))[0]
+        now = agent.ssh("glos devices")[1].replace("\r", "")
+        checks["listed"] = rc == 0 and all(re.search(r"^%s kind=\w+ state=on driver=\w+ listed=1 can=1 " % re.escape(x), now, re.M)
+                                           for x in off)
+        checks["restart"] = agent.ssh("glos restart")[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 300 and (agent.log().count("GLOS-SSH listen") < 2 or agent.log().count("GLOS-NET dhcp") < 2):
+            time.sleep(1)
+        after = agent.ssh("glos devices")[1].replace("\r", "")
+        checks["off"] = all(re.search(r"^%s kind=\w+ state=off driver=\w+ listed=1 can=1 " % re.escape(x), after, re.M) for x in off) \
+            and agent.log().split("GLOS-EXIT code=200")[-1].count("GLOS-DEV off id=") == len(off)
+        if not checks["off"] or not checks["listed"]:
+            info += " now=%r after=%r" % ([l for l in now.split("\n") if "listed" in l], [l for l in after.split("\n") if "listed" in l])
+        checks["unset"] = agent.ssh("glos config unset devices off")[0] == 0 and "listed=1" not in agent.ssh("glos devices")[1]
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
+    # GLOS again, with [devices] off naming the network card: DEVLIST under GLOS /RUN says how it is
+    if net:
+        cfg = batfile(tag + "/GLOS.CFG", ["; jobs.py ssh, the network card left to DOS", "[devices]", "off = " + net])
+        st, gl = run("ssh-" + tag + "-off", ["--machine", profile, "--net", card, "--timeout", "300",
+                                             "--file", cfg + "=/TEST/GLOS.CFG", "--file", "build/dj/DEVLIST.EXE=/TEST/DEVLIST.EXE"]
+                     + GLOS_FILES + ["--cmd", "SERSAY HX-START devoff", "--cmd", "C:\\TEST\\GLOS.EXE /RUN C:\\TEST\\DEVLIST.EXE",
+                                     "--cmd", "SERSAY HX-DONE 0"])
+        gl = gl.replace("\r", "")
+        dv = "\n".join(l[7:] for l in gl.split("\n") if l.startswith("HX-DEV "))
+        checks["off-net"] = bool(re.search(r"^%s kind=net state=off driver=\w+ listed=1 can=1(?: |$)" % re.escape(net), dv, re.M)) \
+            and bool(re.search(r"GLOS-NET refuse card=\w+ reason=off", gl)) and "GLOS-NET card=" not in gl
+        checks["off-run"] = st == "PASS" and "HX-DEVS lines=" in gl and "GLOS-PANIC" not in gl
+        if not checks["off-net"] or not checks["off-run"]:
+            info += " off=%r" % [l for l in dv.split("\n") if "kind=net" in l]
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("ssh-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad) + info), \
+        not bad
+
+
 def restart_case(profile, card):
     """glos restart: GLOS leaves with ERRORLEVEL 200 (AGENT_RESTART), and RUN.BAT, as bench-g400's AUTOEXEC.BAT does,
     loops back on it to start GLOS.EXE again: no reset, GLOS answering again in seconds; then glos exit (0) falls
@@ -4037,7 +4119,7 @@ def win_case(profile, vcard, card, bits, bits2):
     agent = Agent("win-" + tag, profile, card, ["--card", vcard]
         + (["--sound", "sb16", "--pre", "SET BLASTER=A220 I5 D1 H5 T6"] if sound else []) + [
         "--file", "build/dj/WINTEST.EXE=/TEST/WINTEST.EXE", "--file", "build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE",
-        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE",  # (the clock's double press opens it: phase D)
+        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--file", "build/apps/PCIIDS.DAT=/TEST/PCIIDS.DAT",  # (the clock's double press opens it: phase D)
         "--file", "build/apps/MIXER.EXE=/TEST/MIXER.EXE",      # (... and the volume icon's the Mixer: phase F)
         "--cmd", "SERSAY HX-START win", "--cmd", "VECCHK save", "--cmd", "C:\\TEST\\GLOS.EXE",
         "--cmd", "VECCHK check", "--cmd", "VMODE", "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
@@ -7633,7 +7715,7 @@ def saver_case(profile, vcard, card):
     agent = Agent("saver-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/STARS.SCR=/TEST/STARS.SCR",
         "--file", "build/apps/PIPES.SCR=/TEST/PIPES.SCR", "--file", "build/apps/TEXT.SCR=/TEST/TEXT.SCR",
         "--file", "build/apps/OBJECTS.SCR=/TEST/OBJECTS.SCR", "--file", "build/apps/MAZE.SCR=/TEST/MAZE.SCR",
-        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--cmd", "SERSAY HX-START saver", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--file", "build/apps/PCIIDS.DAT=/TEST/PCIIDS.DAT", "--cmd", "SERSAY HX-START saver", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
                    "-o", "ControlPersist=600"]
     out = os.path.join(ROOT, "out", "saver-" + tag)
@@ -11143,6 +11225,7 @@ def native_case(profile, vcard, card, bits):
                     + ["build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE", "build/ow/dos/CONIN.EXE=/TEST/CONIN.EXE",
                        "build/apps/PDFFONTS.DAT=/TEST/PDFFONTS.DAT",        # (the PDF Viewer's stand-in fonts)
                        "build/apps/HELP.DAT=/TEST/HELP.DAT",                # (the user guide: Help, and any app's F1)
+                       "build/apps/PCIIDS.DAT=/TEST/PCIIDS.DAT",            # (the Control Panel's names for PCI devices)
                        "tests/gui/drives/C/GLOS/GLOS.CFG=/TEST/GLOS.CFG"])   # (the Control Panel's, beside GLOS.EXE)
 
 
@@ -11256,7 +11339,7 @@ def control_case(profile, vcard, card):
     open(os.path.join(ROOT, script), "w").write("\n".join(lines) + "\n")
     agent = Agent("control-" + tag, profile, card, ["--card", vcard, "--sound", "sb16",
         "--pre", "SET BLASTER=A220 I5 D1 H5 T6", "--file", "%s=/TEST/GLOS.CFG" % os.path.relpath(cfg, ROOT),
-        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE",
+        "--file", "build/apps/CONTROL.EXE=/TEST/CONTROL.EXE", "--file", "build/apps/PCIIDS.DAT=/TEST/PCIIDS.DAT",
         "--cmd", "SERSAY HX-START control", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "VMODE",
         "--cmd", "SERSAY HX-DONE 0"], timeout=2400)
     agent.opts += ["-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(agent.tmp, "cm"),
@@ -11273,6 +11356,12 @@ def control_case(profile, vcard, card):
         open(os.path.join(out, "control.out"), "w").write(text)
         checks["script"] = not g.bad
         notes += g.notes + (["script: " + " ".join(g.bad)] if g.bad else [])
+        # the Devices page (phase F): the emulated PC's devices read, every PCI device named from PCIIDS.DAT
+        m = re.search(r"CONTROL devices names=(\d+) of (\d+)", text)
+        checks["devices"] = bool(m) and int(m.group(2)) >= 5 and m.group(1) == m.group(2) \
+            and bool(re.search(r"CONTROL devices=\d\d", text))
+        if not checks["devices"]:
+            notes.append("devices: %r" % [l for l in text.split("\n") if "CONTROL devices" in l][:4])
         bad = []
         for sec, key, val in want:
             rc, o, _ = agent.ssh("glos config get %s %s" % (sec.replace("program ", "program:"), key))
@@ -11433,10 +11522,13 @@ def main():
                 print("    %s-%s XMSTEST: %s" % (p, b, "; ".join(l[11:] for l in r[2])))
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "ssh":
+        if os.environ.get("SSH_ONLY") == "devices":     # (SSH_ONLY=devices: the devices' cases alone)
+            return 0 if all(r[1] for r in matrix(devices_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)) else 1
         res = matrix(ssh_case, SSH_CASES, a.jobs)
         if not os.environ.get("SSH_ONE") and not os.environ.get("SSH_ONLY"):
             res += matrix(reboot_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(restart_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
+            res += matrix(devices_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(idle_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(shell_case, [("bf6", "ne2kpci"), ("486dx2", "ne2k")], a.jobs)
             res += matrix(cable_case, [("bf6", "ne2kpci"), ("486dx2", "none"), ("bf6", "off")], a.jobs)

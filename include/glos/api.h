@@ -54,7 +54,8 @@
 #define GLOS_API_H
 
 #define GLOS_MAJOR 2
-#define GLOS_MINOR 11           /* (2.11: DRAW's CACHE takes a page of a video card's own memory;
+#define GLOS_MINOR 12           /* (2.12: SYS's STAT GLOS_STAT_DEVICES, the devices and what serves each;
+                                   2.11: DRAW's CACHE takes a page of a video card's own memory;
                                    2.10: NET's SERIAL, a COM port as a connection;
                                    2.9: NET reaches this PC's own ports (127.0.0.1, its own address);
                                    GLOS_NETF_LOCAL, a port for this PC's programs alone;
@@ -2176,6 +2177,8 @@ struct glos_sys_stat {
 #define GLOS_STAT_CACHE   20    /* glos cache */
 #define GLOS_STAT_THREADS 21    /* the kernel's threads and their time */
 #define GLOS_STAT_SERVICES 22   /* glos services: the background apps, a line each (phase D) */
+#define GLOS_STAT_DEVICES 23    /* glos devices: every device GLOS finds and what serves it, a line each with its
+                                   details under it (2.12; kernel/drv/devlist.c says how the lines are written) */
 
 struct glos_sys_system {
     unsigned size;

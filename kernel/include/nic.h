@@ -52,6 +52,7 @@ int net_lookup_poll(int i, unsigned char ip[4]);       /* ... 0 asking; 1 found,
 void net_lookup_drop(int i);            /* ... or given up */
 void net_sntp_restart(void);            /* [time] changed, or glos time sync: SNTP again */
 int net_counts(u8 ip[4], u32 *rx, u32 *tx, char *card, u32 room);     /* GLOS_FN_STAT's (M9) */
+const char *nic_refusal(void);          /* why no card was looked for ([net] card = off, a packet driver), or 0 */
 u32 net_stat(char *buf, u32 max, int json);     /* glos net's lines, or glos stat's JSON object */
 struct net_if {                         /* API 2.0's NET STATE: the interface as it is now */
     char card[16], host[16];

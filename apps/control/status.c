@@ -11,8 +11,7 @@
  * The Input page: a field to try the keys' repeat in, and a place that counts the double clicks made on it (by
  * the double-click time this program started with: the setting is an app's at its start).
  *
- * The USB page: GLOS's USB controllers and what is plugged into them, as `glos usb` says it (SYS's STAT), read
- * every two seconds: a pad or a keyboard plugged in is there a moment later.
+ * (The USB page's tree of controllers and devices is the Devices page's since phase F: devices.c.)
  *
  * The Saver page: the saver its list has chosen, running small in the page: its own program, started with /P and
  * the picture's size, its window taken into the page (the toolkit's gui_preview). Only while the page is the one
@@ -210,142 +209,6 @@ void status_add_sound(struct gui_widget *page)
     gui_button(row, GUI_T("&Test sound"), sound_test, 0);
     sound_says = gui_label(row, "");
     gui_grow(sound_says, 1);
-}
-
-/* ---- USB's controllers and devices */
-
-#define USB_DEVS 24
-
-/* The USB page (phase D): SYS's USB text (a line a controller, a line a device with its place: the root port's
-   number, ".N" a hub's port more, ":N" another interface of the same device) as a tree, each device under the
-   hub it is plugged into; under the tree, the chosen one's figures. The tree is made again only when what is
-   plugged in changes (the frame's number and the reports' count change all the time: they aren't part of it). */
-static struct gui_widget *usb_tree, *usb_detail;
-static struct {
-    char path[16], text[72], detail[96];
-    struct gui_node *node;
-} ud[USB_DEVS];
-static int nud;
-static char usb_sig[600], usb_shown[100];
-
-static const char *usb_kind(const char *is)
-{
-    return !strcmp(is, "hub") ? GUI_T("Hub") : !strcmp(is, "keyboard") ? GUI_T("Keyboard") : !strcmp(is, "mouse") ? GUI_T("Mouse")
-         : !strcmp(is, "pad") || !strcmp(is, "xbox") || !strcmp(is, "xbox360") ? GUI_T("Gamepad") : is;
-}
-
-static void usb_poll(void)
-{
-    static char text[1600], sig[600];
-    static unsigned last;
-    unsigned now = glos_ticks(), length = 0, count = 0;
-    char *p = text, *e, ctl[4][72];
-    struct gui_node *root = NULL, *chosen;
-    int i, k, nctl = 0;
-    size_t ns = 0;
-    if (!usb_tree || (last && now - last < 2000))
-        return;
-    last = now ? now : 1;
-    if (glos_sys_stat(GLOS_STAT_USB, text, sizeof text - 1, &length, &count) != 0 && glos_error() != GLOS_E_ROOM)
-        length = 0;
-    text[length < sizeof text - 1 ? length : sizeof text - 1] = 0;
-    nud = 0;
-    sig[0] = 0;
-    for (; *p; p = e) {
-        char path[16], speed[8], is[16], bus[16], *q;
-        unsigned addr = 0, vendor = 0, product = 0, ports = 0, reports = 0, errors = 0, pad = 0;
-        if ((e = strchr(p, '\n')) != NULL)
-            *e++ = 0;
-        else
-            e = p + strlen(p);
-        if (sscanf(p, "uhci %15s io=%*x ports=%u", bus, &ports) == 2 && nctl < 4) {
-            snprintf(ctl[nctl++], sizeof ctl[0], GUI_T("USB controller at %s, %u ports"), bus, ports);
-            ns += (size_t)snprintf(sig + ns, sizeof sig - ns, "c%s;", bus);
-        } else if (sscanf(p, "port=%15s addr=%u speed=%7s id=%x:%x is=%15s", path, &addr, speed, &vendor, &product, is) == 6
-                   && nud < USB_DEVS) {
-            if ((q = strstr(p, " pad=")) != NULL)
-                pad = (unsigned)atoi(q + 5);
-            if ((q = strstr(p, "reports=")) != NULL)
-                reports = (unsigned)atoi(q + 8);
-            if ((q = strstr(p, "errors=")) != NULL)
-                errors = (unsigned)atoi(q + 7);
-            for (k = nud; k > 0 && strcmp(ud[k - 1].path, path) > 0; k--)       /* by their places: a hub before */
-                ud[k] = ud[k - 1];                                              /* what is plugged into it */
-            snprintf(ud[k].path, sizeof ud[k].path, "%s", path);
-            {                                   /* (its last step: ":N" an interface, ".N" a hub's port) */
-                char *c1 = strrchr(ud[k].path, ':'), *c2 = strrchr(ud[k].path, '.');
-                q = c1 && (!c2 || c1 > c2) ? c1 : c2;
-            }
-            if (q && *q == ':')
-                snprintf(ud[k].text, sizeof ud[k].text, GUI_T("Interface %s: %s"), q + 1, usb_kind(is));
-            else if (pad)
-                snprintf(ud[k].text, sizeof ud[k].text, GUI_T("Port %s: %s %04x:%04x, pad %u"), q ? q + 1 : ud[k].path,
-                         usb_kind(is), vendor, product, pad);
-            else
-                snprintf(ud[k].text, sizeof ud[k].text, GUI_T("Port %s: %s %04x:%04x"), q ? q + 1 : ud[k].path, usb_kind(is),
-                         vendor, product);
-            snprintf(ud[k].detail, sizeof ud[k].detail, GUI_T("Address %u, %s speed, %u reports, %u errors"), addr,
-                     !strcmp(speed, "low") ? GUI_T("low") : GUI_T("full"), reports, errors);
-            ud[k].node = NULL;
-            nud++;
-            ns += (size_t)snprintf(sig + ns, sizeof sig - ns, "%s=%x:%x:%s:%u;", path, vendor, product, is, pad);
-        } else if (p[0] && !nctl && !nud) {
-            snprintf(ctl[nctl++], sizeof ctl[0], "%.70s", p);  /* ("usb none", "usb not-started": as it says) */
-            ns += (size_t)snprintf(sig + ns, sizeof sig - ns, "%s;", p);
-        }
-        if (ns >= sizeof sig)
-            ns = sizeof sig - 1;
-    }
-    if (strcmp(sig, usb_sig)) {                 /* what is plugged in changed: the tree again, all of it open */
-        strcpy(usb_sig, sig);
-        gui_tree_clear(usb_tree, NULL);
-        for (i = 0; i < nctl; i++) {
-            struct gui_node *n = gui_tree_add(usb_tree, NULL, ctl[i], gui_icon("computer", 0), NULL, nud > 0 && nctl == 1);
-            if (!i)
-                root = n;
-        }
-        for (i = 0; i < nud; i++) {
-            struct gui_node *parent = nctl == 1 ? root : NULL;
-            size_t len = strlen(ud[i].path);
-            int kids = 0;
-            for (k = 0; k < nud; k++)           /* the hub (or the device, for an interface) it hangs from; its own */
-                if (k != i) {
-                    size_t l2 = strlen(ud[k].path);
-                    if (l2 < len && !strncmp(ud[k].path, ud[i].path, l2) && (ud[i].path[l2] == '.' || ud[i].path[l2] == ':')
-                        && !strpbrk(ud[i].path + l2 + 1, ".:") && ud[k].node)
-                        parent = ud[k].node;
-                    if (l2 > len && !strncmp(ud[k].path, ud[i].path, len) && (ud[k].path[len] == '.' || ud[k].path[len] == ':'))
-                        kids = 1;
-                }
-            ud[i].node = gui_tree_add(usb_tree, parent, ud[i].text, NULL, NULL, kids);
-        }
-        if (root && nud && nctl == 1)
-            gui_tree_expand(usb_tree, root, 1);
-        for (i = 0; i < nud; i++)
-            gui_tree_expand(usb_tree, ud[i].node, 1);
-        printf("CONTROL usb devices=%d\n", nud);
-        fflush(stdout);
-    }
-    chosen = gui_tree_get(usb_tree);            /* the chosen one's figures, as they are now */
-    {
-        const char *d = "";
-        for (i = 0; chosen && i < nud; i++)
-            if (!strcmp(gui_node_text(chosen), ud[i].text))
-                d = ud[i].detail;
-        if (strcmp(usb_shown, d)) {
-            snprintf(usb_shown, sizeof usb_shown, "%s", d);
-            gui_set_text(usb_detail, d);
-        }
-    }
-}
-
-/* The USB page's tree, under its settings. */
-void status_add_usb(struct gui_widget *page)
-{
-    gui_label(page, GUI_T("Controllers and devices now:"));
-    usb_tree = gui_tree(page);
-    gui_grow(usb_tree, 1);
-    usb_detail = gui_label(page, "");
 }
 
 /* ---- the saver, running small */
@@ -767,7 +630,6 @@ void status_poll(void)
     const struct glos_net_if *n = &nif[0];
     pads_poll();
     sound_poll();
-    usb_poll();
     saver_poll();
     clock_poll();
     sl_poll();

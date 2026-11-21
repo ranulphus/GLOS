@@ -7,6 +7,7 @@
  * no longer reach the device's DOS driver; docs/devices.md). */
 #include "glos/bootinfo.h"
 #include "dev.h"
+#include "devlist.h"
 #include "io.h"
 #include "kprintf.h"
 #include "nic.h"
@@ -16,6 +17,9 @@
 struct nic *nic0;
 static struct pci_dev *pdev;            /* the PCI card nic_pci_on set going, and its command register before */
 static u32 pcmd;
+static const char *refused;             /* why no card was looked for (the Devices list's) */
+
+const char *nic_refusal(void) { return refused; }
 
 /* A packet driver's signature at any of the vectors they use: the vector. */
 static int packet_driver(void)
@@ -32,13 +36,20 @@ static int packet_driver(void)
 
 int nic_pci(struct pci_dev *d, const char *name)
 {
-    char with[12];
+    char with[12], w[8], why[24];
+    if (dev_pci_off(d, name)) {                 /* ([devices] off: DOS's) */
+        kprintf("GLOS-NET refuse card=%s reason=off\n", name);
+        return -1;
+    }
     if (d->irq == 0 || d->irq == 2 || d->irq >= 16) {
         kprintf("GLOS-NET refuse card=%s reason=no-irq irq=%u\n", name, d->irq);
+        dev_note(pci_where(d, w), name, DEVS_REFUSED, "no-irq", 0);
         return -1;
     }
     if (dev_take_line(d, with, sizeof with) != 0) {     /* (others on its line: quiet, or it's refused) */
         kprintf("GLOS-NET refuse card=%s reason=shared-irq irq=%u with=%s\n", name, d->irq, with);
+        ksnprintf(why, sizeof why, "shared-irq:%s", with);
+        dev_note(pci_where(d, w), name, DEVS_REFUSED, why, 0);
         return -1;
     }
     return 0;
@@ -49,6 +60,14 @@ void nic_claimed(struct nic *n, struct pci_dev *d)
     vm_claim_irq(n->irq, net_irq);
     if (d)
         pci_claim(d);
+    if (d) {
+        char w[8];
+        dev_note(pci_where(d, w), n->name, DEVS_ON, "", 0);
+    } else {                                    /* (an ISA card: its ports and line) */
+        char res[40];
+        ksnprintf(res, sizeof res, "io=%04x-%04x irq=%u", n->base, n->base + 0x1F, n->irq);
+        dev_note(n->name, n->name, DEVS_ON, "", res);
+    }
     nic0 = n;
     kprintf("GLOS-NET card=%s base=%x irq=%u mac=%02x:%02x:%02x:%02x:%02x:%02x\n", n->name, n->base, n->irq, n->mac[0],
             n->mac[1], n->mac[2], n->mac[3], n->mac[4], n->mac[5]);
@@ -79,11 +98,13 @@ int nic_probe(void)
     int pd;
     if (vm.bi->flags & BI_F_NOCARD) {           /* [net] card = off */
         kprintf("GLOS-NET refuse reason=config\n");
+        refused = "net-setting";
         return -1;
     }
     pd = packet_driver();
     if (pd) {
         kprintf("GLOS-NET refuse reason=packet-driver int=%02x\n", pd);
+        refused = "packet-driver";
         return -1;
     }
     return rtl8139_probe() == 0 || e100_probe() == 0 || rhine_probe() == 0 || ne2k_probe() == 0 ? 0 : -1;

@@ -1227,3 +1227,38 @@ in whose game). The game's name on the network is the PC's own (`[net] hostname`
 - **Not yet:** the lobby (the games found as a list, the player's name and craft's colour, the computer's
   strength); an arena of the user's own sent to the joiners; a joiner's own craft moved at once by its own
   controls and put right gently; two real PCs across a switch and across a cable.
+
+## The Devices page (2026-11-21)
+
+The owner asked for a Device Manager in the Control Panel (2026-11-21): what devices are found, whether
+GLOS's drivers support them and have them, and each one's details. The owner chose a page of the Control
+Panel (the USB page's tree moved into it), turning GLOS's drivers off and on per device, and names from the
+PCI ID Project's list under its BSD option.
+
+- **The kernel's list** (`kernel/drv/devlist.c`; API 2.12's `GLOS_STAT_DEVICES`, the shell's `DEVICES`): the
+  PCI functions as the scan found them (their revision, subsystem and the sizes of their ranges now kept, the
+  ranges sized once as GLOS starts, a bridge's registers after its first two no longer taken for ranges),
+  each with what its driver did (`dev_note`: the network card's, the USB controllers', the sound cards'; the
+  Matrox engine's card; the card GLOS draws on through VBE), the ISA cards GLOS's drivers know, the USB
+  devices under their controllers, the PC's own (COM and LPT ports as the BIOS counted them, the keyboard's
+  controller, a PS/2 mouse, the floppy controller with its drives' kinds from the CMOS, the hard disks'
+  count, a game port, the interrupt and DMA controllers, the timer and the RTC) and GLOS's virtual Sound
+  Blaster. Details under each from its driver (`glos net`'s, `glos audio`'s, `glos display`'s lines).
+- **`[devices] off`**: the devices GLOS's drivers leave to DOS, by PCI place or name (sb16, crystal,
+  ne2000). The loader copies it into the boot information (version 10: the network card is looked for
+  before the kernel has read GLOS.CFG), and the drivers ask it as they look (`dev_turned_off`): the network
+  card's (any of the four PCI ones, and the ISA NE2000: the next card in the order is looked at), the USB
+  controllers', the SB16's (where the mixer first finds it) and the Crystal chip's. `listed=1` says the
+  setting names a device now, so the page can say "turned off when GLOS starts again".
+- **The page** (`apps/control/devices.c`): a tree by kind, the chosen one's lines in a list under it, Turn
+  off / Turn on, which edits the page's setting field (Apply writes it); the network card GLOS uses and a USB
+  controller ask first. PCI names from `PCIIDS.DAT` beside the program (`tools/mkpciids.py`: 2526 vendors,
+  21914 devices, 218 KB packed; `apps/shared/pciids.c` finds every name asked for in one pass through it).
+- **Tests:** `pciids_test` (the names of the benches' devices, damaged copies); APITEST `sys-devices`; the
+  ssh suite's `devices` case (`SSH_ONLY=devices`): the list against `glos pci`, the network card's, the SB16's
+  and the USB controller's lines, the setting named, a restart, each off; the network card off under GLOS
+  /RUN with DEVLIST printing the list; host GUI script `control-devices` (the page, the question, Turn off
+  and on); the control suite's run checks every emulated PCI device is named.
+- **Not yet:** the setting for devices with settings of their own (the display's engine, the virtual Sound
+  Blaster: their own pages); names for USB devices (usb.ids); the PC's ACPI and Plug and Play BIOS's lists
+  of ISA devices; a device's driver started or stopped without GLOS starting again.

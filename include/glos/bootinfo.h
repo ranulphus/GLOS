@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 9
+#define BOOTINFO_VERSION 10
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -172,6 +172,10 @@ struct bootinfo {
     /* version 9 */
     bi_u32 boot_drive;                          /* the drive DOS started from, as DOS says it (INT 21h 3305h): 1 A:,
                                                    3 C:; 0: it doesn't say */
+    /* version 10 (phase F: the Devices page) */
+    char dev_off[192];                          /* [devices] off as GLOS starts: the devices GLOS's drivers leave to
+                                                   DOS (the network card's driver looks before the kernel has read
+                                                   GLOS.CFG); empty: none */
 };
 #define BI_CABLE_SERVER 1u
 #define BI_CABLE_CLIENT 2u

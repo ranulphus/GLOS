@@ -72,5 +72,7 @@ int crystal_init(const char *cfg);              /* [sound] crystal (auto, off, o
 u16 crystal_sb(void);                           /* its SB Pro's port, 0 if none set up */
 const char *crystal_blaster(void);              /* BLASTER for programs (A220 I5 D1 T4), 0 if none set up */
 int sb16_init(const struct bootinfo *bi);       /* the DSP found, version 4 or later: 0 */
+const char *sb16_res(void);
+void sb16_left(const struct bootinfo *bi);      /* [devices] off names it: noted as DOS's, not looked at */             /* its ports, line and channels, as the Devices list writes them */
 
 #endif

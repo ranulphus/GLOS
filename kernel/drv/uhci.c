@@ -25,6 +25,7 @@
  *     GLOS-USB port=1 gone
  *     GLOS-USB port=2 error=STEP status=XXXXXXXX           (a transfer that failed: the step, the TD's status) */
 #include <string.h>
+#include "devlist.h"
 #include "glos/bootinfo.h"
 #include "hid.h"
 #include "io.h"
@@ -923,7 +924,7 @@ static int take(struct pci_dev *pd)
         return -1;
     h->legsup = pd->vendor == 0x8086 ? pci_read32(pd->bus, pd->dev, pd->fn, UHCI_LEGSUP) & 0xFFFF : 0;
     if (!(h->frames = dma_alloc(1, &h->frames_phys)) || !(h->pool = dma_alloc(1, &h->pool_phys)))
-        return -1;
+        return -2;
     h->qh_ctrl = (struct uhci_qh *)h->pool;     /* the page: the control QH at 0, the pipes' QHs at 16-143, the */
     h->qh_int = (struct uhci_qh *)(h->pool + 16);      /* control TDs at 256, the setup packet at 1536, the */
     h->td = (struct uhci_td *)(h->pool + 256);         /* pipes' TDs at 1600, their buffers at 2048, a control */
@@ -983,8 +984,11 @@ void usb_late(void)
         return;
     }
     for (i = 0; (pd = pci_at(i)) != 0 && nhc < MAX_HC; i++)
-        if (pd->class == 0x0C && pd->subclass == 0x03 && pd->progif == 0x00)
-            take(pd);
+        if (pd->class == 0x0C && pd->subclass == 0x03 && pd->progif == 0x00 && !dev_pci_off(pd, "uhci")) {
+            char w[8];
+            int e = take(pd);
+            dev_note(pci_where(pd, w), "uhci", e ? DEVS_REFUSED : DEVS_ON, e ? (e == -2 ? "no-memory" : "no-io") : "", 0);
+        }
     if (nhc)
         thread_create("usb", PRIO_NORMAL, usb_thread, 0);
 }
@@ -1001,6 +1005,38 @@ void usb_leave(void)
         if (h->pci->vendor == 0x8086)
             pci_write32(h->pci->bus, h->pci->dev, h->pci->fn, UHCI_LEGSUP, h->legsup | LEGSUP_CLEAR);
     }
+}
+
+int usb_off(void) { char v[8]; v[0] = 0; kcfg_get("usb", "enabled", v, sizeof v); return !strcmp(v, "off"); }
+
+/* The Devices list's (devlist.c): a controller's details, if it is GLOS's ... */
+u32 usb_hc_detail(const struct pci_dev *pd, char *b, u32 room)
+{
+    int i;
+    for (i = 0; i < nhc; i++)
+        if (hc[i].pci == pd)
+            return (u32)ksnprintf(b, room, "%u ports, its registers at %x\n", hc[i].ports, hc[i].io);
+    return 0;
+}
+
+/* ... and every device plugged into GLOS's controllers, a line each (devlist.h's form), under its controller.
+   A device GLOS has no driver for is there, and says so (state=none). */
+u32 usb_dev_lines(char *b, u32 room)
+{
+    u32 n = 0;
+    int i;
+    for (i = 0; i < MAX_DEV && n + 200 < room; i++)
+        if (dev[i].used) {
+            char w[16], p[8];
+            const char *is = dev[i].is ? dev[i].is : "other";
+            n += (u32)ksnprintf(b + n, room - n, "usb%u:%s kind=usbdev state=%s driver=%s parent=%s vendor=%04x device=%04x "
+                                "class=%02x%02x%02x speed=%s\n  %u reports, %u errors\n", dev[i].hc_i, loc(&dev[i], w),
+                                !strcmp(is, "other") ? "none" : "on", is, pci_where(hc[dev[i].hc_i].pci, p),
+                                dev[i].vendor, dev[i].product, dev[i].dclass ? dev[i].dclass : dev[i].iclass,
+                                dev[i].dclass ? dev[i].dsub : dev[i].isub, dev[i].dclass ? dev[i].dproto : dev[i].iproto,
+                                dev[i].low ? "low" : "full", dev[i].reports, dev[i].errors);
+        }
+    return n;
 }
 
 int usb_stat(char *b, u32 room)

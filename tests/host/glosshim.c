@@ -1321,6 +1321,61 @@ int glos_sys_stat(unsigned kind, void *out, unsigned room, unsigned *length, uns
             *count = 5;
         return sizeof usb - 1 > room ? GLOS_E_ROOM : 0;
     }
+    if (kind == GLOS_STAT_DEVICES) {            /* (made up: a PC like bench-g400, its USB devices as above) */
+        static const char devs[] =
+            "00:00.0 kind=bridge state=dos vendor=8086 device=7190 class=060000 rev=03 mem=f0000000-f3ffffff\n"
+            "00:01.0 kind=bridge state=dos vendor=8086 device=7191 class=060400 rev=03\n"
+            "00:02.0 kind=bridge state=dos vendor=8086 device=7110 class=060100 rev=02\n"
+            "00:02.1 kind=storage state=dos vendor=8086 device=7111 class=010180 rev=01 io=fff0-ffff\n"
+            "00:02.2 kind=usb state=on driver=uhci can=1 vendor=8086 device=7112 class=0c0300 rev=01 irq=11 io=ff00-ff1f\n"
+            "  2 ports, its registers at ff00\n"
+            "00:02.3 kind=bridge state=dos vendor=8086 device=7113 class=068000 rev=02\n"
+            "00:03.0 kind=net state=on driver=i8255x can=1 vendor=8086 device=1229 class=020000 rev=05 sub=1014:005c irq=11 "
+            "io=7c60-7c7f mem=effff000-efffffff,f7600000-f76fffff\n"
+            "  card=i8255x io=7c60 irq=11 mac=00:06:29:26:d0:1b\n"
+            "  ip=192.168.1.41 mask=255.255.255.0 gw=192.168.1.1 dns=192.168.1.1\n"
+            "  rx=4867 tx=318 rx_errors=0 overruns=0\n"
+            "01:00.0 kind=display state=on driver=mga vendor=102b device=0525 class=030000 rev=05 irq=9 "
+            "mem=f4000000-f5ffffff,f77fc000-f77fffff,f7800000-f7ffffff\n"
+            "  display on mode=111 640x480x16 pitch=1280 lfb=f4000000 rgb=5.6.5 dac=0\n"
+            "  accel on MGA-G400/G450 vram=16384K free=14000K largest=13000K draws=100\n"
+            "crystal kind=sound state=on driver=crystal can=1 io=0534-0537,0388-038b,0220-022f irq=5 dma=1,0\n"
+            "  audio on rate=22050 period=256 periods=4000 irqs=4000 card=crystal errors=0\n"
+            "  midi fm=opl3@388 mpu=330\n"
+            "usb0:1 kind=usbdev state=on driver=hub parent=00:02.2 vendor=0409 device=0058 class=090000 speed=full\n"
+            "  0 reports, 0 errors\n"
+            "usb0:1.1 kind=usbdev state=on driver=hid-keyboard parent=00:02.2 vendor=046d device=c31c class=030101 speed=low\n"
+            "  12 reports, 0 errors\n"
+            "usb0:1.3 kind=usbdev state=on driver=xbox360 parent=00:02.2 vendor=045e device=028e class=ff5d01 speed=full\n"
+            "  340 reports, 0 errors\n"
+            "usb0:2 kind=usbdev state=on driver=hid-mouse parent=00:02.2 vendor=046d device=c077 class=030102 speed=low\n"
+            "  81 reports, 0 errors\n"
+            "com1 kind=port state=dos name=COM1 io=03f8-03ff irq=4\n"
+            "com2 kind=port state=dos name=COM2 io=02f8-02ff irq=3\n"
+            "lpt1 kind=port state=dos name=LPT1 io=0378-037a\n"
+            "kbd kind=input state=on driver=8042 name=Keyboard_controller io=0060,0064 irq=1\n"
+            "  GLOS reads the keyboard; DOS's programs are given what it types\n"
+            "ps2mouse kind=input state=on driver=8042 name=PS/2_mouse irq=12\n"
+            "fdc kind=storage state=dos name=Floppy_controller io=03f0-03f7 irq=6 dma=2\n"
+            "  A: 1.44 MB\n"
+            "disks kind=storage state=dos name=Hard_disks\n"
+            "  1, as the BIOS counted them\n"
+            "pic kind=system state=on driver=glos name=Interrupt_controllers io=0020-0021,00a0-00a1\n"
+            "pit kind=system state=dos name=System_timer io=0040-0043 irq=0\n"
+            "  DOS's clock: GLOS keeps it as DOS set it\n"
+            "rtc kind=system state=on driver=glos name=Real-time_clock io=0070-0071 irq=8\n"
+            "  GLOS's clock\n"
+            "dma kind=system state=dos name=DMA_controllers io=0000-000f,0080-008f,00c0-00df\n"
+            "vsb kind=virtual state=on driver=glos name=Sound_Blaster_(GLOS's)\n"
+            "  BLASTER=A220 I5 D1 T4 P330\n";
+        unsigned n = sizeof devs - 1 < room ? sizeof devs - 1 : room;
+        memcpy(out, devs, n);
+        if (length)
+            *length = sizeof devs - 1;
+        if (count)
+            *count = 0;
+        return sizeof devs - 1 > room ? GLOS_E_ROOM : 0;
+    }
     if (kind == GLOS_STAT_SERVICES) {           /* (no background apps on the host: what glos services says then) */
         static const char none[] = "no services ([services] run)\n";
         unsigned n = sizeof none - 1 < room ? sizeof none - 1 : room;

@@ -44,10 +44,27 @@ void pci_write32(u32 bus, u32 dev, u32 fn, u32 reg, u32 v)
     irq_on(f);
 }
 
+/* A BAR's size, by the all-ones write, with interrupts off (nothing of GLOS's or DOS's runs meanwhile; a BIOS's
+   SMI could, for a moment, as under any system that sizes them). The upper half of a 64-bit BAR: 0. */
+static u32 size_of(u32 bus, u32 dev, u32 fn, u32 reg, u32 v)
+{
+    u32 f, got, mask;
+    if (!v)
+        return 0;
+    f = irq_off();
+    outl(0xCF8, addr(bus, dev, fn, reg));
+    outl(0xCFC, 0xFFFFFFFFu);
+    got = inl(0xCFC);
+    outl(0xCFC, v);
+    irq_on(f);
+    mask = (v & 1) ? (got & ~3u) | 0xFFFF0000u : got & ~15u;    /* (an I/O BAR's upper 16 bits may read 0) */
+    return mask ? ~mask + 1 : 0;
+}
+
 static void add(u32 bus, u32 dev, u32 fn)
 {
     struct pci_dev *d = &devs[ndevs++];
-    u32 id = pci_read32(bus, dev, fn, 0), cls = pci_read32(bus, dev, fn, 8), i;
+    u32 id = pci_read32(bus, dev, fn, 0), cls = pci_read32(bus, dev, fn, 8), i, nbar, sub;
     d->bus = (u8)bus;
     d->dev = (u8)dev;
     d->fn = (u8)fn;
@@ -56,12 +73,30 @@ static void add(u32 bus, u32 dev, u32 fn)
     d->class = (u8)(cls >> 24);
     d->subclass = (u8)(cls >> 16);
     d->progif = (u8)(cls >> 8);
+    d->rev = (u8)cls;
+    d->hdr = (u8)((pci_read32(bus, dev, fn, 0x0C) >> 16) & 0x7F);
     i = pci_read32(bus, dev, fn, 0x3C);
     d->irq = (u8)i;
     d->pin = (u8)(i >> 8);
     d->keeper = DEV_DOS;
-    for (i = 0; i < 6; i++)
-        d->bar[i] = pci_read32(bus, dev, fn, 0x10 + i * 4);
+    nbar = d->hdr == 0 ? 6 : d->hdr == 1 ? 2 : d->hdr == 2 ? 1 : 0;    /* (a bridge's registers after them are others) */
+    sub = d->hdr == 0 ? pci_read32(bus, dev, fn, 0x2C) : d->hdr == 2 ? pci_read32(bus, dev, fn, 0x40) : 0;
+    d->sub_vendor = (u16)sub, d->sub_device = (u16)(sub >> 16);
+    for (i = 0; i < 6; i++) {
+        d->bar[i] = i < nbar ? pci_read32(bus, dev, fn, 0x10 + i * 4) : 0;
+        d->bar_size[i] = 0;
+    }
+    for (i = 0; i < nbar; i++) {
+        d->bar_size[i] = size_of(bus, dev, fn, 0x10 + i * 4, d->bar[i]);
+        if (!(d->bar[i] & 1) && (d->bar[i] & 6) == 4)
+            i++;                                /* (a 64-bit BAR: the next is its upper half) */
+    }
+}
+
+char *pci_where(const struct pci_dev *d, char *b)
+{
+    ksnprintf(b, 8, "%02x:%02x.%u", d->bus, d->dev, d->fn);
+    return b;
 }
 
 /* Every function on buses 0-7 (enough for the machines GLOS targets). */

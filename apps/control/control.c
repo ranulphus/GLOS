@@ -92,7 +92,7 @@ static void modes_read(void)
 }
 
 static const char *const titles[] = { GUI_N("Display"), GUI_N("Input"), GUI_N("Joystick"), GUI_N("USB"),
-    GUI_N("Sound"), GUI_N("Network"), GUI_N("Date and Time"), GUI_N("Region"), GUI_N("Disk Cache"), GUI_N("Memory"),
+    GUI_N("Sound"), GUI_N("Network"), GUI_N("Devices"), GUI_N("Date and Time"), GUI_N("Region"), GUI_N("Disk Cache"), GUI_N("Memory"),
     GUI_N("Remote Desktop"), GUI_N("Desktop"), GUI_N("Saver"), GUI_N("Services"), GUI_N("Shell"), GUI_N("File Types"),
     GUI_N("Programs") };
                                                 /* (cfg_sections' order) */
@@ -306,6 +306,7 @@ static void help_poll(void *arg)
     (void)arg;
     look_poll();                                /* (the desktop's look follows its page: look.c) */
     status_poll();                              /* (and the network's state is read: status.c) */
+    devices_poll();                             /* (and the devices: devices.c) */
     for (i = 0; i < nctl; i++)
         if (win->focus == ctls[i].w)
             k = ctls[i].k;
@@ -798,7 +799,7 @@ int main(int argc, char **argv)
     static const char *const heads[2] = { GUI_N("Kind"), GUI_N("Opened by") };
     static const int widths[2] = { 70, 200 };
     struct gui_widget *box, *page, *form, *row, *left, *b, *side = NULL;
-    struct ctl *wall = NULL, *style = NULL, *begin = NULL, *saver, *run, *zone;
+    struct ctl *wall = NULL, *style = NULL, *begin = NULL, *saver, *run, *zone, *devoff;
     int s, i;
     if (gui_init(argc, argv) != 0) {
         printf("CONTROL no GLOS\n");
@@ -857,7 +858,7 @@ int main(int argc, char **argv)
             form = gui_form(page);
         }
         field_chars = side && !strcmp(sec, "desktop") ? 20 : 30;        /* (the look takes room beside that page's) */
-        saver = run = zone = NULL;
+        saver = run = zone = devoff = NULL;
         for (i = 0; i < cfg_schema_n; i++)
             if (!strcmp(cfg_schema[i].section, sec) && nctl < MAXCTL) {
                 struct ctl *c = ctl_add(form, &cfg_schema[i], s);
@@ -865,6 +866,8 @@ int main(int argc, char **argv)
                     saver = c;
                 if (!strcmp(sec, "services") && !strcmp(c->k->key, "run"))
                     run = c;
+                if (!strcmp(sec, "devices") && !strcmp(c->k->key, "off"))
+                    devoff = c;
                 if (!strcmp(sec, "time") && !strcmp(c->k->key, "zone"))
                     zone = c;
                 if (!strcmp(sec, "desktop") && !strcmp(c->k->key, "wallpaper"))
@@ -882,8 +885,6 @@ int main(int argc, char **argv)
             status_add_input(page);             /* (a field and a place to try the keys and the mouse) */
         if (!strcmp(sec, "sound"))
             status_add_sound(page);             /* (two notes, to hear that there is sound) */
-        if (!strcmp(sec, "usb"))
-            status_add_usb(page);               /* (the controllers and what is plugged in) */
         if (!strcmp(sec, "display"))
             status_add_display(page);           /* (the card, its memory and the mode now) */
         if (zone)
@@ -892,6 +893,8 @@ int main(int argc, char **argv)
             status_add_time(page);              /* (the clock now, set by hand, the server asked) */
         if (run)
             status_add_services(win, page, run->w);     /* (its programs as a list, Add... and Remove) */
+        if (devoff)
+            devices_add(win, page, devoff->w, argv[0]); /* (every device, what serves it; Turn off: devices.c) */
         if (saver)
             status_add_saver(tabs, s, page, saver->w, saver->choice, argv[0]);  /* (the saver chosen, running small) */
     }

@@ -1412,6 +1412,24 @@ static void sys(void)
     ok = ok && len > 10 && glos_sys_stat(9, text, sizeof text, &len, &count) == GLOS_E_ARGUMENT
          && glos_sys_stat(GLOS_STAT_SYSTEM, (void *)0xFFFFFF00u, 4096, &len, &count) == GLOS_E_ARGUMENT;
     check("sys-text", ok, "r=%d threads=%u bytes", r, len);
+    {   /* The devices (2.12): every PCI function a line, the keyboard's controller and GLOS's clock among the PC's
+           own; too little room: what fits, and the length all of it wants. */
+        static char devs[12288];
+        unsigned lines = 0, pcis = 0;
+        const char *p;
+        devs[0] = 0;
+        r = glos_sys_stat(GLOS_STAT_DEVICES, devs, sizeof devs - 1, &len, &count);
+        devs[r == 0 && len < sizeof devs ? len : sizeof devs - 1] = 0;
+        for (p = devs; *p; p++)
+            if (p == devs || (p[-1] == '\n' && *p != ' ')) {
+                lines++;
+                pcis += p[0] >= '0' && p[0] <= '9' && p[2] == ':' && p[5] == '.';
+            }
+        n = glos_sys_stat(GLOS_STAT_DEVICES, devs, 20, &i, &count);
+        check("sys-devices", r == 0 && strstr(devs, "\nkbd kind=input state=on driver=8042 ") != 0
+              && strstr(devs, "\nrtc kind=system state=on ") != 0 && pcis >= 3 && lines > 6 && n == GLOS_E_ROOM && i == len,
+              "r=%d len=%u lines=%u pci=%u n=%d whole=%u", r, len, lines, pcis, n, i);
+    }
 
     /* The programs: this one among them. */
     r = glos_programs(progs, sizeof progs, &count);

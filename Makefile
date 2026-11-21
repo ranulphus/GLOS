@@ -155,6 +155,8 @@ host-test-run: build/host/libpdfbr32.a
 	  && build/host/vt_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/inflate_test tests/host/inflate_test.c loader/inflate.c \
 	  && build/host/inflate_test `python3 tests/host/inflate_cases.py build/host/inflate build/kernel/GLOSK.BIN`
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pciids_test tests/host/pciids_test.c apps/shared/pciids.c \
+	  loader/inflate.c && build/host/pciids_test apps/control/pciids/PCIIDS.DAT
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/deflate_test tests/host/deflate_test.c \
 	  apps/shared/deflate.c loader/inflate.c \
 	  && build/host/deflate_test `python3 tests/host/deflate_cases.py make build/host/deflate` \
@@ -340,6 +342,14 @@ build/host/libpdfbr32.a: $(addprefix third_party/bearssl/src/,$(addsuffix .c,$(P
 	  done
 	$(Q)ar rcs $@ $(PDF_BR_OBJS)
 APP_DEPS_pdf := build/apps/PDFFONTS.DAT
+# The Control Panel's Devices page: the PCI devices' names (tools/mkpciids.py made the file from the PCI ID
+# Project's list; THIRD_PARTY.md), beside the program.
+APP_LIBS_control := apps/shared/pciids.c loader/inflate.c
+APP_HOST_LIBS_control := apps/shared/pciids.c loader/inflate.c
+APP_DEPS_control := build/apps/PCIIDS.DAT
+build/apps/PCIIDS.DAT: apps/control/pciids/PCIIDS.DAT
+	@mkdir -p build/apps
+	$(Q)cp $< $@
 build/apps/PDFFONTS.DAT: $(wildcard apps/pdf/fonts/*.TTF) tools/mkpdffonts.py
 	@mkdir -p build/apps
 	$(Q)python3 tools/mkpdffonts.py --pack apps/pdf/fonts $@
@@ -358,12 +368,13 @@ GUI_SCRIPTS := $(wildcard tests/gui/*.txt)
 # (A:, C:\HX, C:\OUT and C:\TEST are the Loop A machine's own, which the file manager's tree shows.)
 gui-goldens:
 	$(Q)$(DEV) $(MAKE) -s gui-goldens-run
-gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS)) build/apps/PDFFONTS.DAT build/apps/HELP.DAT
+gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS)) build/apps/PDFFONTS.DAT build/apps/HELP.DAT \
+                 build/apps/PCIIDS.DAT
 	@rm -rf build/host/gui build/host/gui-drives && mkdir -p build/host/gui
 	@set -e; for t in $(GUI_SCRIPTS); do n=$$(basename $$t .txt); \
 	  if head -1 $$t | grep -q '^#loopa-run-only'; then continue; fi; prog=$$(awk '$$1=="run"{print tolower($$2); exit}' $$t); \
 	  prog=$${prog%.exe}; mkdir -p build/host/gui/$$n; for b in 8 16 32; do rm -rf build/host/gui-drives; \
-	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT sdk/gui/fonts/FONTS.DAT sdk/gui/fonts/ICONS.DAT build/apps/PDFFONTS.DAT build/apps/HELP.DAT build/host/gui-drives/C/GLOS/; \
+	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT sdk/gui/fonts/FONTS.DAT sdk/gui/fonts/ICONS.DAT build/apps/PDFFONTS.DAT build/apps/HELP.DAT build/apps/PCIIDS.DAT build/host/gui-drives/C/GLOS/; \
 	    mkdir -p build/host/gui-drives/A build/host/gui-drives/C/HX build/host/gui-drives/C/OUT build/host/gui-drives/C/TEST; \
 	    GLOS_HOST_DRIVES=build/host/gui-drives build/host/$$prog $$t build/host/gui/$$n $$b > build/host/gui/$$n-$$b.log \
 	      || { echo "gui-goldens: $$n at $$b bits:"; cat build/host/gui/$$n-$$b.log; exit 1; }; done; \
@@ -520,7 +531,7 @@ KCFLAGS := -m32 -march=i486 -ffreestanding -fno-pic -fno-pie -fno-stack-protecto
            -Ithird_party/lwip/src/include -Ithird_party/tinyssh -Ithird_party/tinyssh/cryptoint -Ikernel/ssh \
            -I$(RETROGPU)/hal/include
 KSRCS := kernel/entry.S kernel/arch/stubs.S kernel/arch/cpu.c kernel/arch/mtrr.c kernel/core/main.c kernel/core/timer.c \
-         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
+         kernel/core/sched.c kernel/drv/pci.c kernel/drv/dev.c kernel/drv/devlist.c kernel/drv/cstore.c kernel/drv/cache.c kernel/drv/nic.c kernel/drv/ne2k.c kernel/drv/rtl8139.c kernel/drv/e100.c \
          kernel/net/net.c kernel/net/sock.c kernel/lib/libc.c \
          kernel/core/random.c kernel/core/kat.c kernel/ssh/ssh.c kernel/ssh/sshbuf.c kernel/ssh/sshkeys.c \
          kernel/ssh/sshd.c \
@@ -663,7 +674,7 @@ loopa-shell: all check-deps
 loopa-net: all check-deps
 	$(Q)$(DEV) python3 tests/loopa/jobs.py net -j $(JOBS)
 # On the host: ssh is not in the dev container; jobs.py starts Loop A through it.
-loopa-ssh: all dos-tests build/dj/APPTEST.EXE check-deps
+loopa-ssh: all dos-tests build/dj/APPTEST.EXE build/dj/DEVLIST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py ssh -j $(JOBS)
 # M3's exit: the ssh suite (its 486DX2 + NE2000 and bf6 + RTL8029 cases).
 loopa-m3: loopa-ssh
@@ -829,6 +840,12 @@ build/dj/MODELOOP.EXE: tests/dos/modeloop.c
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -o $@ $<
+# DEVLIST (tests/dos/devlist.c): SYS's STAT GLOS_STAT_DEVICES to COM1 (API 2.12), for runs with no SSH.
+build/dj/DEVLIST.EXE: tests/dos/devlist.c build/sdk/libglos.a tools/glosmark.py
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)python3 tools/glosmark.py $@
 # CACHEWC (tests/dos/cachewc.c): GLOS_FN_CACHE, write-combining conventional memory (API 1.4).
 build/dj/CACHEWC.EXE: tests/dos/cachewc.c build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/dj

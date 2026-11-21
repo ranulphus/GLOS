@@ -26,9 +26,11 @@
 #include "stat.h"
 #include "timer.h"
 #include "usb.h"
+#include "devlist.h"
 #include "vm.h"
 
 #define TEXT_ROOM 4096u
+#define DEV_ROOM 12288u                 /* (the devices' list: a PC's thirty and their details) */
 
 static void put_str(char *to, u32 room, const char *from)
 {
@@ -60,7 +62,7 @@ int api2_sys_stat(struct trapframe *tf)         /* (for any program: api2.c) */
     int r, i;
     if (a2_rd(tf, &q, sizeof q, &size) != 0)
         return a2_fail(tf, GLOS_E_ARGUMENT);
-    if (!(b = kmalloc(TEXT_ROOM)))
+    if (!(b = kmalloc(q.kind == GLOS_STAT_DEVICES ? DEV_ROOM : TEXT_ROOM)))
         return a2_fail(tf, GLOS_E_MEMORY);
     switch (q.kind) {
     case GLOS_STAT_SYSTEM: {
@@ -143,6 +145,10 @@ int api2_sys_stat(struct trapframe *tf)         /* (for any program: api2.c) */
         break;
     case GLOS_STAT_SERVICES:
         n = services_stat(b, TEXT_ROOM);
+        r = give(tf, &q, size, b, n, 0);
+        break;
+    case GLOS_STAT_DEVICES:
+        n = dev_list(b, DEV_ROOM);
         r = give(tf, &q, size, b, n, 0);
         break;
     default:

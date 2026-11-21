@@ -14,6 +14,7 @@
  *
  * The card is a session's while one runs (session.c): the mixer stops it and
  * gives the line back to the system VM first, and starts it again after. */
+#include "devlist.h"
 #include "glos/bootinfo.h"
 #include "arch.h"
 #include "io.h"
@@ -77,6 +78,27 @@ static int dsp_reset(void)
     return -1;
 }
 
+/* Its resources, as the Devices list writes them (devlist.h). */
+const char *sb16_res(void)
+{
+    static char r[48];
+    if (sb.dma8 <= 3)
+        ksnprintf(r, sizeof r, "io=%04x-%04x irq=%u dma=%u,%u", sb.base, sb.base + 15, sb.irq, sb.dma8, sb.dma);
+    else
+        ksnprintf(r, sizeof r, "io=%04x-%04x irq=%u dma=%u", sb.base, sb.base + 15, sb.irq, sb.dma);
+    return r;
+}
+
+/* [devices] off names it: not looked at, only noted, with the resources BLASTER gives. */
+void sb16_left(const struct bootinfo *bi)
+{
+    sb.base = (u16)bi->sb_port;
+    sb.irq = (u8)bi->sb_irq;
+    sb.dma = (u8)bi->sb_dma16;
+    sb.dma8 = (u8)(bi->sb_dma8 <= 3 ? bi->sb_dma8 : 0xFF);
+    dev_note("sb16", "sb16", DEVS_OFF, "", sb16_res());
+}
+
 int sb16_init(const struct bootinfo *bi)
 {
     int hi, lo;
@@ -93,10 +115,12 @@ int sb16_init(const struct bootinfo *bi)
     sb.major = (u8)hi, sb.minor = (u8)lo;
     if (hi < 4) {
         kprintf("GLOS-SB refuse port=%x dsp=%u.%02u reason=not-sb16\n", sb.base, hi, lo);
+        dev_note("sb16", "sb16", DEVS_REFUSED, "not-sb16", sb16_res());
         return -1;
     }
     sb.found = 1;
     kprintf("GLOS-SB found port=%x irq=%u dma16=%u dsp=%u.%02u\n", sb.base, sb.irq, sb.dma, hi, lo);
+    dev_note("sb16", "sb16", DEVS_ON, "", sb16_res());
     return 0;
 }
 

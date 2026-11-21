@@ -920,7 +920,7 @@ static void read_cfg(const char *argv0, int shell_keys)
     char line[160], path[128], *k, *v, *e;
     const char *slash = strrchr(argv0, '\\');
     size_t n = slash ? (size_t)(slash - argv0 + 1) : 0;
-    int in_shell = 0, in_net = 0, in_display = 0, in_sound = 0, in_cache = 0, in_memory = 0;
+    int in_shell = 0, in_net = 0, in_display = 0, in_sound = 0, in_cache = 0, in_memory = 0, in_devices = 0;
     struct bi_profile *prof = NULL;
     char sec[24], why[64];
     const struct cfg_key *ck;
@@ -946,6 +946,7 @@ static void read_cfg(const char *argv0, int shell_keys)
             in_sound = !strnicmp(k, "[sound]", 7);
             in_cache = !strnicmp(k, "[cache]", 7);
             in_memory = !strnicmp(k, "[memory]", 8);
+            in_devices = !strnicmp(k, "[devices]", 9);
             prof = NULL;
             if (!strnicmp(k, "[program", 8) && (e = strchr(k, ']')) != NULL) {
                 *e = 0;
@@ -955,7 +956,7 @@ static void read_cfg(const char *argv0, int shell_keys)
             }
             continue;
         }
-        if ((!in_shell && !prof && !in_net && !in_display && !in_sound && !in_cache && !in_memory)
+        if ((!in_shell && !prof && !in_net && !in_display && !in_sound && !in_cache && !in_memory && !in_devices)
             || !(v = strchr(k, '=')))
             continue;
         for (e = v; e > k && (e[-1] == ' ' || e[-1] == '\t'); e--) ;
@@ -1008,6 +1009,12 @@ static void read_cfg(const char *argv0, int shell_keys)
                 bi.cache_size_mb = !stricmp(v, "auto") ? 0 : (unsigned long)atol(v);
             else
                 say("GLOS-WARN cfg-key section=cache key=%s", k);
+            continue;
+        }
+        if (in_devices) {                       /* off = the devices GLOS's drivers leave to DOS (the Devices page;
+                                                   the kernel's devlist.c reads the words) */
+            if (!stricmp(k, "off") && strlen(v) < sizeof bi.dev_off)
+                strcpy(bi.dev_off, v);
             continue;
         }
         if (in_memory) {                        /* stub_page = off | auto | SEGMENT: the stub in a page of upper

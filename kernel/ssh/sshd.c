@@ -25,6 +25,7 @@
 #include "kcfg.h"
 #include "app.h"
 #include "arch.h"
+#include "devlist.h"
 #include "desk.h"
 #include "display.h"
 #include "io.h"
@@ -1608,6 +1609,17 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
             k = secrets_stat(b, sizeof b);
         ssh_chan_write(ch, 0, (const uint8_t *)b, k);
         ssh_chan_exit(ch, r ? 1 : 0);
+    } else if (!strcmp(cmd, "glos devices")) {
+        /* glos devices: every device GLOS found and what serves it, its details under it (kernel/drv/devlist.c
+           says how the lines are written; the Control Panel's Devices page reads the same). */
+        char *b = kmalloc(12288);
+        u32 k = b ? dev_list(b, 12288) : 0;
+        if (b)
+            ssh_chan_write(ch, 0, (const uint8_t *)b, k);
+        else
+            say(ch, 1, "glos devices: no memory\n");
+        kfree(b);
+        ssh_chan_exit(ch, b ? 0 : 1);
     } else if (!strcmp(cmd, "glos services") || !strncmp(cmd, "glos services ", 14)) {
         /* glos services: the background apps ([services] run; kernel/core/services.c). glos services stop NAME:
            one ended, and left so; glos services start NAME: started again. */
@@ -1768,7 +1780,7 @@ static int k_exec(struct ssh_chan *ch, const char *cmd)
         }
     } else {
         say(ch, 1, "glos: no such command (glos ver, echo, run, shot, key, type, mouse, log, stat, ps, mem, net, tick, "
-                   "joy, usb, pci, mtrr, services, kill, gdb, exit, restart, reboot)\n");
+                   "joy, usb, pci, devices, mtrr, services, kill, gdb, exit, restart, reboot)\n");
         ssh_chan_exit(ch, 127);
     }
     return 0;

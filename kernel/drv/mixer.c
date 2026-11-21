@@ -28,6 +28,7 @@
  * whatever the graphics card). */
 #include <string.h>
 
+#include "devlist.h"
 #include "kapi.h"
 #include "glos/bootinfo.h"
 #include "app.h"
@@ -110,7 +111,13 @@ int mixer_init(const struct bootinfo *bi)
     mx.master = MIX_UNITY;
     mx.out = 1;                                 /* (until the desktop is up) */
     mx.bi = bi;
-    if ((bi->sound_flags & BI_SOUND_OFF) || sb16_init(bi) != 0)
+    if (bi->sound_flags & BI_SOUND_OFF)
+        return -1;
+    if (bi->sb_port && dev_turned_off("sb16")) {       /* ([devices] off: the Sound Blaster is DOS's) */
+        sb16_left(bi);
+        return -1;
+    }
+    if (sb16_init(bi) != 0)
         return -1;
     mx.card = &sb16_card;
     mx.found = mx.on = 1;
@@ -144,12 +151,14 @@ static void late(void)
         mixer_desktop(1);
 }
 
+static int listed_off_sb16(void) { return dev_turned_off("sb16"); }
+
 /* [sound] mixer changed (M9): the card found now if it wasn't looked for, and played if the desktop has it. */
 void mixer_enable(int on)
 {
     if (on && !mx.on) {
         if (!mx.found && !mx.card) {
-            if (sb16_init(mx.bi) != 0)
+            if (listed_off_sb16() || sb16_init(mx.bi) != 0)
                 return;
             mx.card = &sb16_card;
         }

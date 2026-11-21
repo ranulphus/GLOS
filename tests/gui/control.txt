@@ -2,8 +2,8 @@
 # (tests/gui/drives/C/GLOS/GLOS.CFG; beside GLOS.EXE in Loop A); what the setting with the keyboard does and when
 # it takes effect; a program's profile; a wrong value refused with the schema's rule, before anything is set; a
 # new program; Cancel, which sets nothing. (Every setting changed by keys: the control suite.)
-# (The Display page's card, the Network page's lines of how the network is now, the USB page's of what is
-# plugged in and the Date and Time page's clock are the machine's: masked.)
+# (The Display page's card, the Network page's lines of how the network is now, the Devices page's tree and
+# lines and the Date and Time page's clock are the machine's: masked.)
 run CONTROL.EXE
 wait "Control Panel"
 shot cp-display "Control Panel" 146 182 440 44
@@ -12,11 +12,13 @@ shot cp-input "Control Panel"
 key ctrl+tab
 shot cp-joystick "Control Panel"
 key ctrl+tab
-shot cp-usb "Control Panel" 146 80 440 264
+shot cp-usb "Control Panel"
 key ctrl+tab
 shot cp-sound "Control Panel"
 key ctrl+tab
 shot cp-network "Control Panel" 146 176 440 84
+key ctrl+tab
+shot cp-devices "Control Panel" 146 66 440 248
 key ctrl+tab
 shot cp-time "Control Panel" 146 168 440 46
 key ctrl+tab

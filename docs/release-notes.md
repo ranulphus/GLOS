@@ -4,6 +4,21 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## Devices (2026-11-21, API 2.12)
+
+- **A new page in the Control Panel, Devices:** every device GLOS finds in the PC, by kind (display, network,
+  sound, USB with what is plugged in, storage, ports, keyboard and mouse, GLOS's own devices for DOS programs,
+  bridges, the system's), PCI devices by their names (the PCI ID Project's list, `PCIIDS.DAT`). Choose one to
+  see what serves it (one of GLOS's drivers, DOS, or nothing, and why), its interrupt, DMA, ports and memory,
+  and what its driver says of it. The USB page's tree of devices is here now.
+- **Turn off / Turn on:** a device one of GLOS's drivers can have (a network card, a USB controller, a Sound
+  Blaster 16, a Crystal chip, an ISA NE2000) can be left to DOS, for a DOS packet driver or a game's own sound
+  driver: the new setting `[devices] off`, from GLOS's next start. Turning off the network card GLOS uses, or a
+  USB controller, asks first.
+- **`DEVICES`** at GLOS's prompt prints the same list; programs read it from SYS's STAT (`GLOS_STAT_DEVICES`).
+- **Fixed:** `PCI` printed nonsense memory ranges for PCI-to-PCI bridges (their registers after the first two
+  are no device's ranges).
+
 ## A write-combining page of the video card's own (2026-11-21, API 2.11)
 
 - **For programs that drive a video card themselves:** DRAW's CACHE (`glos_cache`) now also makes 4 to 64 KB

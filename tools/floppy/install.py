@@ -196,6 +196,7 @@ def glos_files(args):
               ("sdk/gui/fonts/ICONS.DAT", "ICONS.DAT"),         # (GLOS's colour icons, by name)
               ("build/apps/PDFFONTS.DAT", "PDFFONTS.DAT"),      # (the PDF Viewer's stand-in fonts: phase F)
               ("build/apps/HELP.DAT", "HELP.DAT"),              # (the user guide's pages: Help)
+              ("build/apps/PCIIDS.DAT", "PCIIDS.DAT"),          # (the Control Panel's names for PCI devices: phase F)
               ("build/glos/KEYS/PKG/GLOS.PUB", "KEYS/PKG/GLOS.PUB"),
               (os.path.join(args.keys, "HOSTKEY"), "KEYS/HOSTKEY"), (os.path.join(args.keys, "AUTHKEYS"), "KEYS/AUTHKEYS")]
     missing = [src for src, _ in files if not os.path.exists(os.path.join(ROOT, src))]

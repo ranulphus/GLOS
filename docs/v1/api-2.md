@@ -433,6 +433,16 @@ Each area below lists its calls, its handles' properties, and its events. "(new)
   RTS set, CTS, DSR, DCD and RI read) and BREAK. No network is needed. One at a time for all apps
   (GLOS_E_REFUSED for a second, and for the cable link's port); GLOS_E_NOT_FOUND where no chip answers. As
   built: `docs/v1/phase-f.md`. Tests: the sshc suite's `serial_case`.
+- **2.12 (2026-11-21): the devices**, asked for by the owner for the Control Panel's Devices page. SYS's STAT
+  has a new text kind, `GLOS_STAT_DEVICES`: every device GLOS finds (PCI functions, USB devices under their
+  controllers, ISA cards GLOS's drivers know, the PC's own ports, keyboard controller, floppy controller and
+  clocks, GLOS's virtual devices) a line each, `ID kind=... state=... driver=... why=... listed=1 can=1 ...`
+  with its resources and numbers, and what its driver says of it on indented lines under it
+  (`kernel/drv/devlist.c` says how the lines are written). Some 3 KB on a bench PC; up to 12 KB. A new
+  setting goes with it, `[devices] off`: the devices whose GLOS drivers leave them to DOS, read as GLOS
+  starts (the loader copies it: bootinfo version 10). The shell's `DEVICES` (`glos devices`) prints the same.
+  An older GLOS answers GLOS_E_ARGUMENT for the kind. Tests: APITEST's `sys-devices`; the ssh suite's
+  `devices` case.
 - **2.11 (2026-11-21): a write-combining page of a video card's own**, asked for by DOS-GL's Rage 128 layer,
   whose command words were each an uncached write. DRAW's CACHE, until now for the program's conventional
   memory alone, also takes memory of a video card's that the program has mapped (DPMI 0800h): 4 to 64 KB, a

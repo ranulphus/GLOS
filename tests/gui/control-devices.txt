@@ -1,0 +1,33 @@
+#host-only (the host's devices are made up, the same each run: a PC like bench-g400, with a hub, a keyboard, a pad and a mouse on USB)
+# The Control Panel's Devices page (apps/control/devices.c; phase F): every device as a tree by kind, the PCI
+# ones by name (PCIIDS.DAT), USB's under their controller; the chosen one's lines under the tree; Turn off asks
+# first for the network card (No: nothing written), and writes the field at once for the sound chip, Turn on
+# takes it out again; Esc leaves without applying.
+run CONTROL.EXE devices
+wait "Control Panel"
+pause 2500
+shot cp-devices-tree "Control Panel"
+click "Control Panel" 260 123
+pause 2500
+shot cp-devices-net "Control Panel"
+key alt+o
+wait "Turn Off a Device"
+shot cp-devices-ask "Turn Off a Device"
+key alt+n
+gone "Turn Off a Device"
+click "Control Panel" 260 155
+pause 2500
+key alt+o
+pause 1000
+shot cp-devices-off "Control Panel"
+key alt+o
+pause 1000
+key esc
+gone "Control Panel"
+expect CONTROL devices names=8 of 8
+expect CONTROL devices=25
+expect CONTROL usb devices=4
+expect CONTROL devices kept 00:03.0
+expect CONTROL devices off=crystal
+expect CONTROL devices off=
+expect CONTROL end

@@ -4,6 +4,7 @@
  *
  * What makes GLOS refuse a card is in nic.c. An ISA card's IRQ is found by
  * making it interrupt and reading the PICs' request registers. */
+#include "devlist.h"
 #include "io.h"
 #include "kprintf.h"
 #include "nic.h"
@@ -396,6 +397,11 @@ int ne2k_probe(void)
             return -1;
         pci_write32(d->bus, d->dev, d->fn, 4, pci_read32(d->bus, d->dev, d->fn, 4) | 0x05);  /* I/O, bus master */
         return claim("rtl8029", (u16)(d->bar[0] & ~3u), d->irq, d);
+    }
+    if (dev_turned_off("ne2000")) {             /* ([devices] off: an ISA card is DOS's, wherever it is) */
+        kprintf("GLOS-NET refuse card=ne2000 reason=off\n");
+        dev_note("ne2000", "ne2000", DEVS_OFF, "", 0);
+        return -1;
     }
     for (i = 0; i < ARRAY_SIZE(isa); i++) {
         u8 cr = inb(isa[i]);

@@ -31,6 +31,7 @@
  * codec from the start when it plays again. */
 #include <string.h>
 
+#include "devlist.h"
 #include "glos/bootinfo.h"
 #include "arch.h"
 #include "io.h"
@@ -190,6 +191,15 @@ static void slam(u8 reg, u32 v, int bytes)
     outb(PNP_ADDR, (u8)v);
 }
 
+/* Its resources, as the Devices list writes them (devlist.h): the codec's, FM's and SB Pro's ports. */
+static const char *res(void)
+{
+    static char r[64];
+    ksnprintf(r, sizeof r, "io=%04x-%04x,%04x-%04x,%04x-%04x irq=%u dma=%u,%u", cs.wss, cs.wss + 3, cs.syn, cs.syn + 3,
+              cs.sb, cs.sb + 15, cs.irq, cs.dma, cs.cap);
+    return r;
+}
+
 int crystal_init(const char *cfg)
 {
     const char *why;
@@ -198,8 +208,13 @@ int crystal_init(const char *cfg)
         kprintf("GLOS-SOUND crystal off%s\n", cfg && strcmp(cfg, "off") ? " reason=config" : "");
         return -1;
     }
+    if (dev_turned_off("crystal")) {            /* ([devices] off: DOS's, as its own setup program left it) */
+        dev_note("crystal", "crystal", DEVS_OFF, "", res());
+        return -1;
+    }
     if ((why = conflict()) != 0) {
         kprintf("GLOS-SOUND crystal refuse reason=%s\n", why);
+        dev_note("crystal", "crystal", DEVS_REFUSED, "conflict", res());
         return -1;
     }
     cs.game_on = cs.game && inb((u16)(cs.game + 1)) == 0xFF;  /* (nothing answering there yet) */
@@ -228,6 +243,8 @@ int crystal_init(const char *cfg)
     pause(1000);
     if (!codec_there()) {
         kprintf("GLOS-SOUND crystal none wss=%x\n", cs.wss);
+        if (cfg && strcmp(cfg, "auto"))         /* (named in [sound] crystal, and not there; auto only looked) */
+            dev_note("crystal", "crystal", DEVS_REFUSED, "no-chip", res());
         return -1;
     }
     /* The MPU-401 at its port, with no interrupt (midi.c reads it on the tick), when nothing else answers there
@@ -255,6 +272,7 @@ int crystal_init(const char *cfg)
     kprintf("GLOS-SOUND crystal wss=%x sb=%x fm=%x irq=%u dma=%u cap=%u game=%x ctrl=%x id=%02x ver=%02x mpu=%x\n",
             cs.wss, cs.sb, cs.syn, cs.irq, cs.dma, cs.cap, cs.game_on ? cs.game : 0, cs.ctrl, id, ver,
             cs.mpu_on ? cs.mpu : 0);
+    dev_note("crystal", "crystal", DEVS_ON, "", res());
     return 0;
 }
 

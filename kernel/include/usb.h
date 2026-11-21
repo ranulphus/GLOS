@@ -3,6 +3,7 @@
 #ifndef K_USB_H
 #define K_USB_H
 #include "types.h"
+#include "pci.h"
 
 /* UHCI transfer descriptors and queue heads, as the controller reads them (Intel's UHCI design guide rev 1.1, §3). */
 struct uhci_td {
@@ -75,5 +76,8 @@ void usb_kbd_leds(u8 ps2);              /* the LEDs a program set (EDh's byte: 1
 void usb_late(void);                    /* after GLOS.CFG: [usb] enabled, every UHCI taken */
 void usb_leave(void);                   /* glos exit: each controller stopped, reset and its registers given back */
 int usb_stat(char *b, u32 room);        /* glos usb */
+int usb_off(void);                      /* [usb] enabled = off */
+u32 usb_hc_detail(const struct pci_dev *pd, char *b, u32 room);  /* the Devices list's: a controller of GLOS's */
+u32 usb_dev_lines(char *b, u32 room);   /* ... every device plugged in, a line each */
 
 #endif

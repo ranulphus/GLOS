@@ -1082,16 +1082,17 @@ static const struct {
     { "IDLE", "idle" }, { "RESTART", "restart" }, { "REBOOT", "reboot" },
     { "SENDTEXT", "type" }, { "SENDKEYS", "key" }, { "SENDMOUSE", "mouse" }, { "SHUTDOWN", "exit" },
     { "CLOCK", "time" }, { "SYSMEM", "mem" }, { "NETWORK", "net" }, { "DISK", "disk" }, { "DD", "dd" }, { "PCI", "pci" },
-    { "MTRR", "mtrr" }, { "SERVICES", "services" } };
+    { "MTRR", "mtrr" }, { "SERVICES", "services" }, { "DEVICES", "devices" } };
 
 static const char *const own_names[] = { "GLOS", "PS", "KILL", "LOG", "STAT", "RUN", "CONFIG", "DISPLAY", "DESK", "SHOT",
     "REC", "SECRETS", "USB", "JOY", "CLIP", "AUDIO", "CACHE", "IDLE", "RESTART", "REBOOT", "SENDTEXT", "SENDKEYS",
-    "SENDMOUSE", "SHUTDOWN", "CLOCK", "SYSMEM", "NETWORK", "DISK", "DD", "PCI", "MTRR", "SERVICES",
+    "SENDMOUSE", "SHUTDOWN", "CLOCK", "SYSMEM", "NETWORK", "DISK", "DD", "PCI", "MTRR", "SERVICES", "DEVICES",
     "DATE", "TIME", "CHCP", 0 };
 
 static const char *const own_help[] = {
     "PS, KILL [n], RUN [--exclusive|--app] program   what runs; one ended; a program started GLOS's way",
     "LOG, STAT, SYSMEM, NETWORK, CLOCK, USB, JOY, PCI   GLOS's log, figures, memory, network, time, devices",
+    "DEVICES                                         every device, and whether a GLOS driver has it",
     "NETWORK SERVER|CLIENT COMn [speed], NETWORK CABLE OFF   the network over a serial cable",
     "MTRR, MTRR LFB ON|OFF, MTRR PAGE base [KB]|OFF  the video card's framebuffer, or a page of its own, write-combining",
     "CONFIG, DISPLAY, DESK, AUDIO, CACHE, IDLE, CLIP, SECRETS   settings and the desktop",

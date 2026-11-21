@@ -628,6 +628,9 @@ const struct gfx_dev *mga_store_dev(const void *p) { return owns(p) ? &mga_dev :
 
 void mga_store_limit(u32 bytes) { m.store_max = bytes; }
 
+/* The Devices list's (devlist.c): the Matrox card GLOS's engine drives, by its place: 1 if it is that one. */
+int mga_is(u32 bus, u32 dev, u32 fn) { return m.found && mga.bus == bus && mga.dev == dev && mga.fn == fn; }
+
 u32 mga_display_stat(char *buf, u32 max)
 {
     u32 largest, free_, n;
