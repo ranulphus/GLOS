@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../../apps/shared/hvarenas.h"
 #include "../../apps/shared/hvbasin.h"
 #include "../../apps/shared/hvgame.h"
 
@@ -361,6 +362,33 @@ int main(int argc, char **argv)
     game_tests();
     CHECK(hv_arena_read(&a, HV_BASIN, sizeof HV_BASIN - 1, why, sizeof why) == 0 && a.nbuoy == 4 && a.nbeacon == 4 && a.ndock[0] == 3,
           "the program's own arena: %s", why);
+    {
+        /* the arenas that come with the game: each is read, has what every kind of game wants, and the computer's
+           craft (four of them, the middle strength) score in it at every kind within three minutes */
+        int n, kind, i;
+        for (n = 0; n < HV_ARENAS; n++) {
+            why[0] = 0;
+            r = hv_arena_read(&a, hv_arenas[n], strlen(hv_arenas[n]), why, sizeof why);
+            CHECK(r == 0 && a.nbuoy >= 3 && a.nbeacon >= 3 && (a.nbeacon & 1) == 0 && a.ndock[0] >= 2 && a.ndock[1] >= 2,
+                  "arena %d (%s): %s; buoys %d beacons %d", n, a.name, why, a.nbuoy, a.nbeacon);
+            if (r != 0)
+                continue;
+            for (kind = HV_FLAGS; kind <= HV_LAPS; kind++) {
+                long points, steps_n;
+                hv_game_start(&g, &a, kind, 4);
+                for (steps_n = 0; steps_n < 3 * 60 * HV_STEPS; steps_n++) {
+                    unsigned char keys[HV_CRAFT];
+                    for (i = 0; i < 4; i++)
+                        keys[i] = (unsigned char)hv_auto(&g, i, 1);
+                    hv_game_step(&g, keys);
+                }
+                points = kind <= HV_BEACONS ? g.score[0] + g.score[1] : g.c[0].score + g.c[1].score + g.c[2].score + g.c[3].score;
+                CHECK(points >= (kind == HV_FLAGS ? 1 : 4), "arena %d (%s) kind %d: %ld points in three minutes", n, a.name, kind, points);
+                printf("  %-18s kind %d: sides %d %d, craft %ld %ld %ld %ld\n", a.name, kind, g.score[0], g.score[1], g.c[0].score, g.c[1].score,
+                       g.c[2].score, g.c[3].score);
+            }
+        }
+    }
     printf("hv_test: %d failures (%d checks)\n", fails, checks);
     return fails != 0;
 }

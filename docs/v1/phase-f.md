@@ -1120,14 +1120,18 @@ to choose (the plan's last section); nothing here depends on them.
   kind of game at every strength; every game played twice is the same.
 - **Not yet**: the drawing (DOS-GL), the lobby, the network's messages and their model, sound, the six
   arenas, the computer's craft against each other measured over many games. (A craft whose goal was dead
-  astern neither turned nor pushed: one of four made no lap. It turns about now, by the right.) **Known**:
+  astern neither turned nor pushed: one of four made no lap. It turns about now, by the right. And two that
+  met head on pushed at each other for good: a craft with another close ahead slides to its own right, and
+  they pass, where the lane is two craft wide: the arenas' lanes are.) The test plays every arena at every
+  kind of game with four of the computer's craft, which must score in each. **Known**:
   the keenest driver's boost wins it laps and loses it flags (it overshoots): the strengths want their own
   measuring.
 
 ### Its first playable part (the same day)
 
-HVCRAFT.EXE, "Hovercraft" in the Start menu (**a working name**): `apps/hover/hvcraft.c`. One arena, built
-in; the player's craft and three of the computer's (the middle strength); the four kinds of game on keys 1
+HVCRAFT.EXE, "Hovercraft" in the Start menu (**a working name**): `apps/hover/hvcraft.c`. Six arenas, built
+in (`apps/shared/hvarenas.c`: the Old Basin, the Dry Dock, the Timber Yard, the Lock Gates, the Customs Quay,
+the Roundhouse; Tab goes from one to the next); the player's craft and three of the computer's (the middle strength); the four kinds of game on keys 1
 to 4; the picture drawn with DOS-GL in a window, as the savers draw: the arena's squares as boxes lit by the
 way they face (walls, floors, quays, ramps as wedges, water, docks in their sides' colours), beacons, the
 lamp, buoys and flags as posts, the craft as a few boxes turned to their headings, seen from behind and

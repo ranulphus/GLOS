@@ -7383,10 +7383,10 @@ def apps_case(profile, card):
 
 HOVER_AT = {                            # the line HVCRAFT -demo says at step 450, by the kind of game: made on the
     # host by the same code (build/host/hv_test demo KIND 450), and so again whenever the game's rules change
-    0: "HVCRAFT at 450 score=0:0 craft0=5250,660,784 craft1=398,366 lamp=-1 own=0",
-    1: "HVCRAFT at 450 score=2:1 craft0=4654,2048,768 craft1=1495,702 lamp=-1 own=0",
-    2: "HVCRAFT at 450 score=0:0 craft0=5087,653,672 craft1=3764,641 lamp=1 own=4",
-    3: "HVCRAFT at 450 score=0:0 craft0=1738,2166,816 craft1=2170,2183 lamp=-1 own=1",
+    0: "HVCRAFT at 450 score=1:0 craft0=987,395,256 craft1=515,865 lamp=-1 own=0",
+    1: "HVCRAFT at 450 score=2:2 craft0=1105,1885,1008 craft1=4426,1413 lamp=-1 own=0",
+    2: "HVCRAFT at 450 score=0:0 craft0=638,336,160 craft1=353,498 lamp=2 own=2",
+    3: "HVCRAFT at 450 score=0:0 craft0=4814,791,496 craft1=4708,2195 lamp=-1 own=0",
 }
 
 

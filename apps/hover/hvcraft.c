@@ -2,7 +2,7 @@
  * "Hovercraft" is its working name: its name is the owner's to choose. GLOS's own game: its craft, arenas, rules
  * and look were made for it; nothing of any other game is in it.
  *
- * Here: one arena (built in: the six that come as files, and the lobby that chooses among them, are to come),
+ * Here: the game's six arenas (built in: apps/shared/hvarenas.c; arenas from files, and the lobby, are to come),
  * the player's craft with its side's and the other side's driven by the computer, the four kinds of game
  * (apps/shared/hvgame.c is their truth, thirty steps a second), and the picture, drawn with DOS-GL (RetroGPU's
  * gl) in a window of the desktop: the card's engine where DOS-GL has one for a window, its software renderer
@@ -10,7 +10,7 @@
  *
  * Keys: Up and Down (or W and S) the fans forwards and back; Left and Right (or A and D) turn; Q and E the side
  * fans; Shift the boost; Space sets the craft down. 1 to 4 choose the game (flags, beacons, the lamp, laps) and
- * begin it again; Esc ends. Over the scene: the score, the boost's tank, and a small map of the arena (the craft,
+ * begin it again; Tab (or N) goes to the next arena; Esc ends. Over the scene: the score, the boost's tank, and a small map of the arena (the craft,
  * the flags, beacons, the lamp or the next buoy).
  *
  * HVCRAFT -demo [-kind 0..3] [-until STEP] is the suite's: every craft the computer's, the game's state said at
@@ -26,6 +26,7 @@
 #include <GL/gl.h>
 #include <glos/glos.h>
 
+#include "../shared/hvarenas.h"
 #include "../shared/hvbasin.h"
 #include "../shared/hvgame.h"
 
@@ -280,9 +281,9 @@ static void title(glos_handle win)
     static const char *const kinds[4] = { "Flags", "Beacons", "The lamp", "Laps" };
     char t[64];
     if (game.kind == HV_FLAGS || game.kind == HV_BEACONS)
-        snprintf(t, sizeof t, "%s: %s %d : %d", GAME_NAME, kinds[game.kind], game.score[0], game.score[1]);
+        snprintf(t, sizeof t, "%s: %s, %s %d : %d", GAME_NAME, arena.name, kinds[game.kind], game.score[0], game.score[1]);
     else
-        snprintf(t, sizeof t, "%s: %s %ld", GAME_NAME, kinds[game.kind], game.c[0].score);
+        snprintf(t, sizeof t, "%s: %s, %s %ld", GAME_NAME, arena.name, kinds[game.kind], game.c[0].score);
     glos_set_text(win, GLOS_PROP_WIN_TITLE, t);
 }
 
@@ -294,7 +295,7 @@ int main(int argc, char **argv)
     glos_handle win;
     char why[160];
     unsigned last, acc = 0, said = 0;
-    int w = 480, h = 360, i, on = 1, demo = 0, kind = HV_FLAGS;
+    int w = 480, h = 360, i, on = 1, demo = 0, kind = HV_FLAGS, which = 0;
     long until = -1;
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-demo"))
@@ -303,12 +304,15 @@ int main(int argc, char **argv)
             kind = atoi(argv[++i]) & 3;
         else if (!strcmp(argv[i], "-until") && i + 1 < argc)
             until = atol(argv[++i]);
+        else if (!strcmp(argv[i], "-arena") && i + 1 < argc)
+            which = atoi(argv[++i]) % HV_ARENAS;
     }
     if (glos_init(GAME_NAME, 0, 0) != 0) {
         printf("HVCRAFT no GLOS\n");
         return 2;
     }
-    if (hv_arena_read(&arena, HV_BASIN, sizeof HV_BASIN - 1, why, sizeof why) != 0 || hv_game_start(&game, &arena, kind, HV_DEMO_CRAFT) != 0) {
+    if (hv_arena_read(&arena, hv_arenas[which], strlen(hv_arenas[which]), why, sizeof why) != 0
+        || hv_game_start(&game, &arena, kind, HV_DEMO_CRAFT) != 0) {
         printf("HVCRAFT arena %s\n", why);
         return 3;
     }
@@ -371,7 +375,14 @@ int main(int argc, char **argv)
                 if (k->key == 0x01)             /* Esc */
                     on = 0;
                 else if (k->key >= 0x02 && k->key <= 0x05) {    /* 1 to 4: that kind of game, begun again */
-                    hv_game_start(&game, &arena, (int)k->key - 2, 4);
+                    hv_game_start(&game, &arena, (int)k->key - 2, HV_DEMO_CRAFT);
+                    title(win);
+                } else if (k->key == 0x0F || k->key == 0x31) { /* Tab or N: the next arena, the same kind of game */
+                    int kind_now = game.kind;
+                    which = (which + 1) % HV_ARENAS;
+                    if (hv_arena_read(&arena, hv_arenas[which], strlen(hv_arenas[which]), why, sizeof why) != 0)
+                        which = 0, hv_arena_read(&arena, hv_arenas[0], strlen(hv_arenas[0]), why, sizeof why);
+                    hv_game_start(&game, &arena, kind_now, HV_DEMO_CRAFT);
                     title(win);
                 }
             }

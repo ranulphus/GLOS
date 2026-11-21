@@ -519,6 +519,22 @@ unsigned hv_auto(struct hv_game *g, int i, int strength)
         keys |= HV_C_RIGHT;
     if (dot > 0 && iabs(cross) < iabs(dot) * 2)
         keys |= HV_C_FWD;
+    /* a craft in its way, close ahead: the side fan takes it round, to the right of one dead ahead (two that meet
+       head on each go to their own right, and pass) */
+    for (k = 0; k < g->ncraft; k++) {
+        const struct hv_craft *o = &g->c[k];
+        int ox = o->x - c->x, oy = o->y - c->y, ahead, aside;
+        if (k == i || !in_play(o) || iabs(ox) > 400 || iabs(oy) > 400)
+            continue;
+        if (g->kind == HV_LAMP && (g->lamp_holder == k) != (g->lamp_holder == i) && g->lamp_holder != i)
+            continue;                   /* (the lamp's carrier is what it is after: no going round that one) */
+        ahead = ((fx / 64) * ox + (fy / 64) * oy) / 256;        /* in 1/256 square, along its heading */
+        aside = ((fx / 64) * oy - (fy / 64) * ox) / 256;        /* ... and to its right */
+        if (ahead > 0 && ahead < 380 && iabs(aside) < 200) {
+            keys |= aside > 24 ? HV_C_SLIDE_L : HV_C_SLIDE_R;
+            return keys;
+        }
+    }
     if (strength >= 1) {
         side_speed = (c->vx / 64) * (-fy / 64) + (c->vy / 64) * (fx / 64);     /* its speed to its own right */
         if (side_speed > 256 * 6 && cross <= 256 * 40)

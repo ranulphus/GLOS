@@ -192,7 +192,7 @@ host-test-run: build/host/libpdfbr32.a
 	@$(HOST_CC) -m32 -O2 -g -Wall -Wextra -Werror -o build/host/ski_test tests/host/ski_test.c apps/shared/skimount.c \
 	  apps/shared/skirun.c apps/shared/skitable.c && build/host/ski_test
 	@$(HOST_CC) -m32 -O2 -g -Wall -Wextra -Werror -o build/host/hv_test tests/host/hv_test.c apps/shared/hvarena.c \
-	  apps/shared/hvgame.c && build/host/hv_test
+	  apps/shared/hvgame.c apps/shared/hvarenas.c && build/host/hv_test
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c apps/shared/pdfnav.c \
 	  apps/shared/pdfcrypt.c loader/inflate.c build/host/libpdfbr32.a \
 	  && build/host/pdf_test `python3 tests/host/pdf_cases.py build/host/pdfcases`
@@ -1178,8 +1178,9 @@ savers: $(SAVER_SCRS)
 apps: $(APP_EXES) $(SSH_EXES) $(SAVER_SCRS)
 # The hovercraft game (phase F): its truth (apps/shared/hv*.c) and a picture drawn with RetroGPU's DOS-GL, as the
 # savers draw (no copy of it). Not a toolkit program: its window is DOS-GL's.
-HVCRAFT_SRCS := apps/hover/hvcraft.c apps/shared/hvarena.c apps/shared/hvgame.c
-build/apps/HVCRAFT.EXE: $(HVCRAFT_SRCS) apps/shared/hvarena.h apps/shared/hvgame.h build/sdk/libglos.a tools/glosmark.py \
+HVCRAFT_SRCS := apps/hover/hvcraft.c apps/shared/hvarena.c apps/shared/hvgame.c apps/shared/hvarenas.c
+build/apps/HVCRAFT.EXE: $(HVCRAFT_SRCS) apps/shared/hvarena.h apps/shared/hvgame.h apps/shared/hvarenas.h apps/shared/hvbasin.h \
+                        build/sdk/libglos.a tools/glosmark.py \
                         $(DOSGL_DIR)/build/lib/libGL.a
 	@mkdir -p build/apps
 	$(Q)echo "  DJCC    apps/hover"

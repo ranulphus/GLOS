@@ -1,7 +1,7 @@
 # Hovercraft
 
-A game of hovercraft in a walled yard, in 3D. (Its name is still a working one, and this is its first part:
-one arena, and the computer driving every craft but yours.)
+A game of hovercraft in walled harbour yards, in 3D. (Its name is still a working one, and this is its first
+part: six arenas, and the computer driving every craft but yours.)
 
 A hovercraft has almost no grip. Its fans change its speed, not its place: it goes on the way it was going
 until you have pushed it somewhere else. Turn early, and use the side fans to stop a slide.
@@ -16,6 +16,7 @@ until you have pushed it somewhere else. Turn early, and use the side fans to st
 | Shift | The boost, while its tank lasts; the tank fills again by itself |
 | Space | Set down on the skirt: the craft stops in a length and cannot be pushed, and cannot move either |
 | 1, 2, 3, 4 | Begin a game of flags, beacons, the lamp, laps |
+| Tab (or N) | The next of the six arenas |
 | Esc | Leave |
 
 Your craft is orange with a white cabin, and you see it from behind. Nothing is shot and nobody is destroyed:
