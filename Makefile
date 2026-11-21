@@ -118,7 +118,7 @@ HOST_TESTS := pmm_test:kernel/mm/pmm.c heap_test:kernel/mm/heap.c v86dec_test:ke
               vdma_test:kernel/vm/vdma.c
 host-test:
 	$(Q)$(DEV) $(MAKE) -s host-test-run
-host-test-run:
+host-test-run: build/host/libpdfbr32.a
 	@mkdir -p build/host
 	@set -e; for t in $(HOST_TESTS); do n=$${t%%:*}; src=$${t#*:}; \
 	  $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -Ikernel/include -Iinclude -o build/host/$$n tests/host/$$n.c $$src; \
@@ -177,11 +177,11 @@ host-test-run:
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/song_test tests/host/song_test.c apps/shared/song.c \
 	  apps/shared/smf.c && build/host/song_test build/host/smf
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c apps/shared/pdfnav.c \
-	  loader/inflate.c \
+	  apps/shared/pdfcrypt.c loader/inflate.c build/host/libpdfbr32.a \
 	  && build/host/pdf_test `python3 tests/host/pdf_cases.py build/host/pdfcases`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdfdraw_test tests/host/pdfdraw_test.c apps/shared/pdfdraw.c \
-	  apps/shared/pdffont.c apps/shared/psfont.c apps/shared/ttf.c apps/shared/pdf.c loader/inflate.c -lm \
-	  && build/host/pdfdraw_test build/host/pdfcases apps/pdf/fonts
+	  apps/shared/pdffont.c apps/shared/psfont.c apps/shared/ttf.c apps/shared/pdf.c apps/shared/pdfcrypt.c loader/inflate.c \
+	  build/host/libpdfbr32.a -lm && build/host/pdfdraw_test build/host/pdfcases apps/pdf/fonts
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/ttf_test tests/host/ttf_test.c apps/shared/ttf.c \
 	  && build/host/ttf_test apps/pdf/fonts
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/psfont_test tests/host/psfont_test.c apps/shared/psfont.c -lm \
@@ -264,10 +264,24 @@ APP_LIBS_player := $(SOURCE_SRCS) apps/shared/smf.c apps/shared/midiplay.c
 APP_HOST_LIBS_studio := apps/shared/song.c apps/shared/smf.c apps/shared/midiplay.c
 APP_LIBS_studio := apps/shared/song.c apps/shared/smf.c apps/shared/midiplay.c
 # PDF files read and drawn (the PDF Viewer, phase F); its stand-in fonts as one file beside the program.
-PDF_SRCS := apps/shared/pdf.c apps/shared/pdfnav.c apps/shared/pdfdraw.c apps/shared/pdffont.c apps/shared/psfont.c apps/shared/ttf.c \
-            apps/shared/picfile.c loader/inflate.c
-APP_HOST_LIBS_pdf := $(PDF_SRCS)
-APP_LIBS_pdf := $(PDF_SRCS)
+PDF_SRCS := apps/shared/pdf.c apps/shared/pdfnav.c apps/shared/pdfcrypt.c apps/shared/pdfdraw.c apps/shared/pdffont.c \
+            apps/shared/psfont.c apps/shared/ttf.c apps/shared/picfile.c loader/inflate.c
+APP_HOST_LIBS_pdf := $(PDF_SRCS) build/host/libpdfbr32.a
+APP_LIBS_pdf := $(PDF_SRCS) build/sdk/libbearssl.a
+# A locked PDF's hashes and AES (apps/shared/pdfcrypt.c) are BearSSL's: the DOS program links build/sdk/libbearssl.a;
+# the host's program and tests are 32-bit, and take the few files of it they use, built so.
+PDF_BR := hash/md5 hash/sha2small hash/sha2big symcipher/aes_big_cbcdec symcipher/aes_big_cbcenc symcipher/aes_big_dec \
+          symcipher/aes_big_enc symcipher/aes_common codec/dec32be codec/dec32le codec/enc32be codec/enc32le codec/dec64be \
+          codec/enc64be
+PDF_BR_OBJS := $(addprefix build/host/pdfbr32/,$(addsuffix .o,$(notdir $(PDF_BR))))
+build/host/libpdfbr32.a: $(addprefix third_party/bearssl/src/,$(addsuffix .c,$(PDF_BR)))
+	@mkdir -p build/host/pdfbr32
+	$(Q)echo "  CC      $@"
+	$(Q)for f in $(PDF_BR); do \
+	    $(HOST_CC) -m32 -O2 -Ithird_party/bearssl/inc -Ithird_party/bearssl/src -c -o build/host/pdfbr32/$$(basename $$f).o \
+	      third_party/bearssl/src/$$f.c || exit 1; \
+	  done
+	$(Q)ar rcs $@ $(PDF_BR_OBJS)
 APP_DEPS_pdf := build/apps/PDFFONTS.DAT
 build/apps/PDFFONTS.DAT: $(wildcard apps/pdf/fonts/*.TTF) tools/mkpdffonts.py
 	@mkdir -p build/apps

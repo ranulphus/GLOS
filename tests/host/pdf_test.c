@@ -194,6 +194,68 @@ int main(int argc, char **argv)
         CHECK(0, "tree.pdf: not opened: %d", err);
     }
 
+    /* Locked files that want no password: opened, their strings and streams as the plain file's. Each way the
+       format locks: RC4 with keys of 40, 56 and 128 bits; AES of 128 bits, and RC4, named by crypt filters
+       (once with the strings left open); AES of 256 bits, both ways of making its key; and objects packed in a
+       locked object stream. Let go and read again, they are unlocked again. Files that want a password stay
+       locked. (tests/host/pdf_lock.py locks them as a writer does; other programs open them too.) */
+    {
+        static const char *const locked[8] = { "lock-rc4-40.pdf", "lock-rc4-128.pdf", "lock-rc4-56.pdf", "lock-aes.pdf", "lock-aes-open.pdf",
+                                               "lock-v4-rc4.pdf", "lock-aes256-5.pdf", "lock-aes256.pdf" };
+        unsigned k;
+        for (k = 0; k < 8; k++) {
+            two_pages(locked[k], "BT /F1 12 Tf 72 720 Td (Page 1) Tj ET", "A locked file");
+            if ((d = open_pdf(locked[k], &err)) != NULL) {
+                struct pdf_obj *parts = pdf_get(d, pdf_get(d, pdf_trailer(d), "Info"), "Parts");
+                unsigned len = 9;
+                CHECK(!strcmp(pdf_string(pdf_item(d, parts, 0), NULL), "one") && !pdf_string(pdf_item(d, parts, 1), &len)[0] && !len
+                      && pdf_is(pdf_item(d, parts, 1), PDF_STRING)
+                      && !strcmp(pdf_string(pdf_item(d, pdf_item(d, parts, 2), 0), NULL), "sixteen bytes it is"), "%s: its strings",
+                      locked[k]);
+                pdf_trim(d, 0);
+                CHECK(!strcmp(pdf_string(pdf_get(d, pdf_get(d, pdf_trailer(d), "Info"), "Title"), NULL), "A locked file")
+                      && page_says(d, 1, "BT /F1 12 Tf 72 720 Td (Page 2) Tj ET"), "%s: let go and read again", locked[k]);
+                pdf_close(d);
+            }
+        }
+        two_pages("lock-packed.pdf", "BT /F1 12 Tf 72 720 Td (Page 1) Tj ET", "Packed");
+        if ((d = open_pdf("lock-aes-open.pdf", &err)) != NULL) {        /* what a lock leaves open */
+            unsigned long len = 0;
+            unsigned char *b = pdf_stream(d, pdf_object(d, 11), &len, NULL, NULL);
+            CHECK(b && len == 32 && !memcmp(b, "<x:xmpmeta>left open</x:xmpmeta>", 32), "metadata the lock leaves open");
+            free(b);
+            b = pdf_stream(d, pdf_object(d, 12), &len, NULL, NULL);
+            CHECK(b && len == 10 && !memcmp(b, "not locked", 10), "a stream that says it is not locked");
+            free(b);
+            b = pdf_stream(d, pdf_object(d, 13), &len, NULL, NULL);
+            CHECK(b && len == 6 && !memcmp(b, "locked", 6), "... and one that names the lock");
+            free(b);
+            pdf_close(d);
+        }
+        /* files that want a password: locked without it and with a wrong one; opened by the user's and by the
+           owner's, each kind of lock (and a password with letters beyond ASCII, as each kind takes them) */
+        {
+            static const char *const wants[7] = { "lock-user.pdf", "lock-user40.pdf", "lock-useraes.pdf", "lock-user256-5.pdf",
+                                                  "lock-user256.pdf", "lock-userword.pdf", "lock-userword256.pdf" };
+            for (k = 0; k < 7; k++) {
+                const char *user = k >= 5 ? "gr\xC3\xBC\xC3\x9F dich" : "secret", *owner = k >= 5 ? "\xC3\xA9t\xC3\xA9" : "owner";
+                int e1 = 0, e2 = 0, e3 = 0, e4 = 0;
+                struct pdf *none = open_pdf(wants[k], &e1), *wrong = pdf_open_password(mem_read, NULL, file_size, "Secret", &e2);
+                struct pdf *by_user = pdf_open_password(mem_read, NULL, file_size, user, &e3);
+                struct pdf *by_owner = pdf_open_password(mem_read, NULL, file_size, owner, &e4);
+                CHECK(!none && e1 == PDF_E_LOCKED && !wrong && e2 == PDF_E_LOCKED, "%s: locked without its password: %d %d", wants[k], e1,
+                      e2);
+                CHECK(by_user && pdf_pages(by_user) == 2 && page_says(by_user, 0, "BT /F1 12 Tf 72 720 Td (Page 1) Tj ET")
+                      && !strcmp(pdf_string(pdf_get(by_user, pdf_get(by_user, pdf_trailer(by_user), "Info"), "Title"), NULL), "A locked file"),
+                      "%s: opened by the user's password: %d", wants[k], e3);
+                CHECK(by_owner && page_says(by_owner, 1, "BT /F1 12 Tf 72 720 Td (Page 2) Tj ET")
+                      && !strcmp(pdf_string(pdf_get(by_owner, pdf_get(by_owner, pdf_trailer(by_owner), "Info"), "Title"), NULL),
+                                 "A locked file"), "%s: opened by the owner's password: %d", wants[k], e4);
+                pdf_close(none), pdf_close(wrong), pdf_close(by_user), pdf_close(by_owner);
+            }
+        }
+    }
+
     /* Ways about a file: which page an object is (five pages in a tree two deep); the outline's entries in
        order, each with its depth and its page: by a destination written out, an action, a string looked up in
        the tree of names, a name in the catalog's list, a page's number; one that leads out of the file; a
@@ -239,10 +301,11 @@ int main(int argc, char **argv)
 
     /* Files with bytes changed: opened or refused; every object, page and stream of what opens is gone through. */
     {
-        static const char *const from[] = { "plain.pdf", "packed.pdf", "filters.pdf", "update.pdf", "tree.pdf", "nav.pdf" };
+        static const char *const from[] = { "plain.pdf", "packed.pdf", "filters.pdf", "update.pdf", "tree.pdf", "nav.pdf", "lock-aes.pdf",
+                                            "lock-rc4-128.pdf", "lock-aes256.pdf", "lock-packed.pdf" };
         unsigned long seed = 20261120ul, made = 0, opened = 0, round, k, orig_size = 0;
         unsigned char *orig = NULL;
-        for (round = 0; round < 3000; round++) {
+        for (round = 0; round < 5000; round++) {
             unsigned long changes;
             if (round % 500 == 0) {
                 d = open_pdf(from[round / 500], &err);
@@ -297,7 +360,7 @@ int main(int argc, char **argv)
             }
         }
         free(orig);
-        CHECK(made == 3000 && opened > 1800, "%lu changed files, %lu of them opened", made, opened);
+        CHECK(made == 5000 && opened > 2500, "%lu changed files, %lu of them opened", made, opened);
         printf("pdf_test: %lu changed files, %lu of them opened\n", made, opened);
     }
     free(file);

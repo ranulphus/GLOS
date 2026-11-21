@@ -10,6 +10,8 @@
  *                 found tinted on its page; Copy Page Text (Ctrl+C)
  *   the outline   a file's own list of its chapters ("bookmarks"), in a pane at the left that a file with one
  *                 opens (View, Outline: F9): an entry chosen shows its page
+ *   locked files  most open as they are (they are locked only against printing or copying); one that wants a
+ *                 password asks for it
  *
  * The file is read a piece at a time as its objects are wanted, never whole; what was read for a page is let go
  * when the next is drawn. A page is drawn whole into a picture of its own (no larger than three million
@@ -323,12 +325,26 @@ static int open_file(const char *name)
     FILE *f = gui_fopen(name, "rb");
     struct pdf *d;
     long size;
-    int err = PDF_E_READ;
+    int err = PDF_E_READ, asked = 0, gave_up = 0;
     if (f && fseek(f, 0, SEEK_END) == 0 && (size = ftell(f)) > 0) {
         FILE *was = file;
         unsigned long was_size = file_size;
         file = f, file_size = (unsigned long)size;      /* (the reader reads through `file`) */
         d = pdf_open(file_read, NULL, file_size, &err);
+        while (!d && err == PDF_E_LOCKED) {             /* it wants a password: asked for until it is right, or given up */
+            char pw[128] = "";
+            snprintf(t, sizeof t, asked ? GUI_T("That is not its password. The password of %s:") : GUI_T("%s is locked. Its password:"),
+                     gui_path_name(name));
+            if (!gui_ask_secret(win, GUI_T("Password"), t, pw, sizeof pw)) {
+                gave_up = 1;
+                break;
+            }
+            asked = 1;
+            d = pdf_open_password(file_read, NULL, file_size, pw, &err);
+            memset(pw, 0, sizeof pw);
+            if (!d && err == PDF_E_LOCKED)
+                say("wrong password %s", gui_path_name(name));
+        }
         if (d) {
             file = was;
             close_file();
@@ -345,8 +361,10 @@ static int open_file(const char *name)
     if (f)
         fclose(f);
     say("refused %s %d", gui_path_name(name), err);
-    snprintf(t, sizeof t, err == PDF_E_LOCKED ? GUI_T("%s is locked with a password: such files aren't read here yet.")
-             : err == PDF_E_KIND ? GUI_T("%s is no PDF file.") : err == PDF_E_READ ? GUI_T("%s couldn't be read.")
+    if (gave_up)                                /* (the password was not given: nothing more to say) */
+        return -1;
+    snprintf(t, sizeof t, err == PDF_E_KIND ? GUI_T("%s is no PDF file.") : err == PDF_E_READ ? GUI_T("%s couldn't be read.")
+             : err == PDF_E_MEMORY ? GUI_T("There is not enough memory to open %s.")
              : GUI_T("%s is damaged: nothing of it could be made out."), gui_path_name(name));
     gui_message(win, GUI_T("PDF Viewer"), t, GUI_MB_OK);
     return -1;

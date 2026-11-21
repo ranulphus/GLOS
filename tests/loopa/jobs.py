@@ -10723,6 +10723,8 @@ def native_case(profile, vcard, card, bits):
         scripts = [f for f in scripts if f[:-4] in only.split(",")]
     if profile.startswith("486"):               # (a script marked #pentium is of a program whose floor is one)
         scripts = [f for f in scripts if "#pentium" not in open(os.path.join(ROOT, "tests", "gui", f)).readline()]
+    if not scripts:                             # (NATIVE_ONLY's are not this machine's: nothing to run, not all of them)
+        return "  %-22s PASS (no script for it)" % ("native-%s-%s-%d" % (profile, vcard, bits)), True
     return gui_case(profile, vcard, card, bits, scripts=scripts, tag_prefix="native",
                     files=["build/apps/%s.EXE=/TEST/%s.EXE" % (a, a) for a in NATIVE_APPS]
                     + ["build/ow/dos/ECHOARGS.EXE=/TEST/ECHOARGS.EXE", "build/ow/dos/CONIN.EXE=/TEST/CONIN.EXE",

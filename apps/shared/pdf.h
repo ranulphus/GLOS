@@ -10,7 +10,7 @@ enum {
     PDF_E_DAMAGED = -2,                 /* nothing of it could be made out */
     PDF_E_MEMORY = -3,
     PDF_E_FILTER = -4,                  /* a stream packed in a way that isn't unpacked here */
-    PDF_E_LOCKED = -5,                  /* encrypted */
+    PDF_E_LOCKED = -5,                  /* encrypted, and it wants a password (one that wants none is opened) */
     PDF_E_READ = -6                     /* the file couldn't be read */
 };
 
@@ -29,8 +29,7 @@ struct pdf_obj {
         struct { unsigned num, gen; } ref;
     } u;
     unsigned long at;                   /* a stream's first byte: in the file, or in its object stream's bytes */
-    int from;                           /* 0: the file; else the number of the object stream it lies in (never: a
-                                           stream is no part of an object stream; kept for what is damaged) */
+    int from;                           /* a stream's own object number (its key, in a locked file) */
 };
 
 struct pdf;
@@ -41,6 +40,9 @@ typedef unsigned long (*pdf_read_fn)(void *ctx, unsigned long at, void *buf, uns
 /* A file of `size` bytes opened: its cross-reference tables read (or, if they are damaged, made anew by going
    through the file), its pages counted. NULL and *err. */
 struct pdf *pdf_open(pdf_read_fn read, void *ctx, unsigned long size, int *err);
+/* The same, for a locked file: with its password (UTF-8; the user's or the owner's). A locked file that wants
+   none is opened by either call; one that wants one gives PDF_E_LOCKED until it is the right one. */
+struct pdf *pdf_open_password(pdf_read_fn read, void *ctx, unsigned long size, const char *password, int *err);
 void pdf_close(struct pdf *d);
 
 unsigned pdf_pages(const struct pdf *d);

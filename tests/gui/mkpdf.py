@@ -5,9 +5,13 @@ again only to change them.
     python3 tests/gui/mkpdf.py
 
 GUIDE.PDF: two pages of the usual size (612 by 792 points): a title, lines of text in the standard fonts (which
-the file doesn't carry: GLOS's stand-ins draw them), a few shapes; its words packed (Flate). LOCKED.PDF: the same
-with an Encrypt entry (refused)."""
-import os, zlib
+the file doesn't carry: GLOS's stand-ins draw them), a few shapes; its words packed (Flate); an outline of three.
+OPENLOCK.PDF: the same, locked (AES of 128 bits) with no password to open it: it opens. LOCKED.PDF: the same,
+locked with a password: refused. (tests/host/pdf_lock.py locks them.)"""
+import os, sys, zlib
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "host"))
+import pdf_lock
 
 here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drives", "C", "GLOS")
 os.makedirs(here, exist_ok=True)
@@ -43,24 +47,38 @@ two += b"BT /F5 12 Tf 15 TL 72 660 Td (Italic serif, and below it bold sans:) Tj
 two += b"0 G 0.5 w " + b" ".join(b"%d 560 m %d 600 l S" % (72 + 12 * i, 72 + 12 * i + 20) for i in range(30)) + b"\n"
 two += b"BT /F4 11 Tf 72 80 Td (Page 2) Tj ET\n"
 fonts = b"<< /F1 6 0 R /F2 7 0 R /F3 8 0 R /F4 9 0 R /F5 10 0 R >>"
-objs = {
-    1: b"<< /Type /Catalog /Pages 2 0 R /Outlines 12 0 R >>",
-    2: b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 612 792] /Resources << /Font " + fonts + b" >> >>",
-    3: b"<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>",
-    4: b"<< /Type /Page /Parent 2 0 R /Contents 11 0 R >>",
-    5: stream(b"/Filter /FlateDecode", zlib.compress(one)),
-    6: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
-    7: b"<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>",
-    8: b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>",
-    9: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
-    10: b"<< /Type /Font /Subtype /Type1 /BaseFont /Times-Italic /Encoding /WinAnsiEncoding >>",
-    11: stream(b"/Filter /FlateDecode", zlib.compress(two)),
-    # the outline: the first page's title with an entry under it (shown open), and the second page's
-    12: b"<< /Type /Outlines /First 13 0 R /Last 15 0 R /Count 3 >>",
-    13: b"<< /Title (A Guide to Nothing Much) /Parent 12 0 R /Next 15 0 R /First 14 0 R /Last 14 0 R /Count 1 /Dest [3 0 R /Fit] >>",
-    14: b"<< /Title (The shapes) /Parent 13 0 R /Dest [3 0 R /XYZ 72 520 0] >>",
-    15: b"<< /Title (The Second Page) /Parent 12 0 R /Prev 13 0 R /A << /S /GoTo /D [4 0 R /Fit] >> >>",
-}
-open(os.path.join(here, "GUIDE.PDF"), "wb").write(pdf(objs))
-open(os.path.join(here, "LOCKED.PDF"), "wb").write(pdf(objs, b"/Encrypt << /Filter /Standard /V 1 /R 2 >>"))
+
+def guide(lock=None):
+    """the file's objects: as they are, or locked"""
+    L = (lambda n, data: lock.data(n, data)) if lock else (lambda n, data: data)
+    T = (lambda n, text: lock.string(n, text)) if lock else (lambda n, text: b"(" + text + b")")
+    objs = {
+        1: b"<< /Type /Catalog /Pages 2 0 R /Outlines 12 0 R >>",
+        2: b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 612 792] /Resources << /Font " + fonts + b" >> >>",
+        3: b"<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>",
+        4: b"<< /Type /Page /Parent 2 0 R /Contents 11 0 R >>",
+        5: stream(b"/Filter /FlateDecode", L(5, zlib.compress(one))),
+        6: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
+        7: b"<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>",
+        8: b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>",
+        9: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        10: b"<< /Type /Font /Subtype /Type1 /BaseFont /Times-Italic /Encoding /WinAnsiEncoding >>",
+        11: stream(b"/Filter /FlateDecode", L(11, zlib.compress(two))),
+        # the outline: the first page's title with an entry under it (shown open), and the second page's
+        12: b"<< /Type /Outlines /First 13 0 R /Last 15 0 R /Count 3 >>",
+        13: b"<< /Title " + T(13, b"A Guide to Nothing Much") + b" /Parent 12 0 R /Next 15 0 R /First 14 0 R /Last 14 0 R /Count 1 "
+            b"/Dest [3 0 R /Fit] >>",
+        14: b"<< /Title " + T(14, b"The shapes") + b" /Parent 13 0 R /Dest [3 0 R /XYZ 72 520 0] >>",
+        15: b"<< /Title " + T(15, b"The Second Page") + b" /Parent 12 0 R /Prev 13 0 R /A << /S /GoTo /D [4 0 R /Fit] >> >>",
+    }
+    if not lock:
+        return pdf(objs)
+    objs[16] = lock.dictionary()
+    ident = lock.ident.hex().encode()
+    return pdf(objs, b"/Encrypt 16 0 R /ID [<%s> <%s>]" % (ident, ident))
+
+
+open(os.path.join(here, "GUIDE.PDF"), "wb").write(guide())
+open(os.path.join(here, "OPENLOCK.PDF"), "wb").write(guide(pdf_lock.Lock(4, 4, 128, "aes")))
+open(os.path.join(here, "LOCKED.PDF"), "wb").write(guide(pdf_lock.Lock(4, 4, 128, "aes", user=b"secret")))
 print(here)

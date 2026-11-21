@@ -4,7 +4,8 @@
 # room beside it; an outline's entry chosen: its page; the page before and the next; the pane folded away; at its actual
 # size; back by Go to Page; the page's text copied; a phrase over two lines found and tinted, a word found
 # again and again through the file, round its end and backwards, and one that isn't there; a locked PDF and a file
-# that is none refused.
+# that is none refused; a locked file that wants no password opened (its outline and its text as the plain one's);
+# one that wants a password: a wrong one, given up, and the right one.
 run PDF.EXE
 wait "PDF Viewer"
 key ctrl+o
@@ -64,10 +65,29 @@ pause 500
 key enter
 key ctrl+o
 wait "Open"
+type C:\\GLOS\\OPENLOCK.PDF\n
+said PDF opened OPENLOCK.PDF pages=2
+said PDF outline 3
+said PDF page 1 of 2 423x547 at 69%
+key ctrl+c
+said PDF copied 346
+key ctrl+o
+wait "Open"
 type C:\\GLOS\\LOCKED.PDF\n
+wait "Password"
+type wrong\n
+said PDF wrong password LOCKED.PDF
+wait "Password"
+key esc
 said PDF refused LOCKED.PDF -5
-pause 500
-key enter
+key ctrl+o
+wait "Open"
+type C:\\GLOS\\LOCKED.PDF\n
+wait "Password"
+type secret\n
+said PDF opened LOCKED.PDF pages=2
+said PDF outline 3
+said PDF page 1 of 2 423x547 at 69%
 key ctrl+o
 wait "Open"
 type C:\\SND\\TONE.WAV\n

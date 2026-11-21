@@ -5,6 +5,8 @@ object is known.
     pdf_cases.py DIR      writes DIR/*.pdf; prints DIR"""
 import os, struct, subprocess, sys, zlib
 
+import pdf_lock
+
 out = sys.argv[1]
 os.makedirs(out, exist_ok=True)
 TEXT = (b"The quick brown fox jumps over the lazy dog. " * 20) + bytes(range(256))
@@ -176,7 +178,8 @@ write("nopdf.pdf", bytes((i * 37 + 11) & 0xFF for i in range(3000)))
 
 
 # ---- a file of 1.5's kind: most objects packed in an object stream, the table a stream with a predictor
-def packed_file(damage=False):
+def packed_file(damage=False, lock=None):
+    """lock: the same file locked (its streams, and so all the objects in its object stream; not its table)"""
     inner = {1: b"<< /Type /Catalog /Pages 2 0 R >>",
              2: b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 612 792] >>",
              3: b"<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>",
@@ -188,15 +191,16 @@ def packed_file(damage=False):
         body += inner[n] + b"\n"
     b = bytearray(b"%PDF-1.5\n%\xe2\xe3\xcf\xd3\n")
     where = {}
-    for n, obj in ((5, stream(b"/Filter /FlateDecode", zlib.compress(page(1)))),
-                   (6, stream(b"/Filter /FlateDecode", zlib.compress(page(2)))),
+    locked = (lambda n, data: lock.data(n, data)) if lock else (lambda n, data: data)
+    for n, obj in ((5, stream(b"/Filter /FlateDecode", locked(5, zlib.compress(page(1))))),
+                   (6, stream(b"/Filter /FlateDecode", locked(6, zlib.compress(page(2))))),
                    (7, stream(b"/Type /ObjStm /N %d /First %d /Filter /FlateDecode" % (len(inner), len(index)),
-                              zlib.compress(index + body)))):
+                              locked(7, zlib.compress(index + body))))) + (((10, lock.dictionary()),) if lock else ()):
         where[n] = len(b)
         b += b"%d 0 obj\n" % n + obj + b"\nendobj\n"
     at = len(b)
-    rows = bytearray()
-    for n in range(10):                         # a row an object: its kind, two bytes of where, one of which
+    rows, size = bytearray(), 11 if lock else 10
+    for n in range(size):                       # a row an object: its kind, two bytes of where, one of which
         if n in inner:
             rows += struct.pack(">BHB", 2, 7, sorted(inner).index(n))
         elif n in where:
@@ -206,11 +210,12 @@ def packed_file(damage=False):
         else:
             rows += struct.pack(">BHB", 0, 0, 255)
     up, last = bytearray(), bytes(4)            # (PNG's "up": each row less the one above)
-    for r in range(10):
+    for r in range(size):
         cur = rows[r * 4:r * 4 + 4]
         up += bytes([2]) + bytes((cur[i] - last[i]) & 255 for i in range(4))
         last = cur
-    b += b"8 0 obj\n" + stream(b"/Type /XRef /Size 10 /W [1 2 1] /Root 1 0 R /Info 9 0 R /Filter /FlateDecode "
+    more = b"/Encrypt 10 0 R /ID [<%s> <%s>] " % (lock.ident.hex().encode(), lock.ident.hex().encode()) if lock else b""
+    b += b"8 0 obj\n" + stream(b"/Type /XRef /Size %d /W [1 2 1] /Root 1 0 R /Info 9 0 R " % size + more + b"/Filter /FlateDecode "
                                b"/DecodeParms << /Predictor 12 /Columns 4 >>", zlib.compress(bytes(up))) + b"\nendobj\n"
     b += b"startxref\n%d\n%%%%EOF\n" % (at + (7 if damage else 0))
     return bytes(b)
@@ -218,6 +223,52 @@ def packed_file(damage=False):
 
 write("packed.pdf", packed_file())
 write("brokenp.pdf", packed_file(damage=True))
+
+
+# ---- locked files (apps/shared/pdfcrypt.c): plain.pdf's two pages and a title, locked each way the format has, with
+#      no password to open them (only the owner's, "owner": which nothing here needs); and two that do want one
+def locked_file(lock, extras=False):
+    S = lock.string
+    objs = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> >>",
+        3: b"<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>",
+        4: b"<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>",
+        5: stream(b"/Filter /FlateDecode", lock.data(5, zlib.compress(page(1)))),
+        6: stream(b"", lock.data(6, page(2))),
+        7: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        9: b"<< /Title " + S(9, b"A locked file") + b" /Parts [" + S(9, b"one") + b" " + S(9, b"") + b" [" + S(9, b"sixteen bytes it is")
+           + b"]] >>",
+        10: lock.dictionary(),
+    }
+    if extras:                                  # what a lock leaves open: metadata (it says so), a stream that says so itself
+        objs[11] = stream(b"/Type /Metadata /Subtype /XML", b"<x:xmpmeta>left open</x:xmpmeta>")
+        objs[12] = stream(b"/Filter [/Crypt /FlateDecode] /DecodeParms [<< /Name /Identity >> null]", zlib.compress(b"not locked"))
+        objs[13] = stream(b"/Filter [/Crypt /FlateDecode] /DecodeParms [<< /Name /StdCF >> null]", lock.data(13, zlib.compress(b"locked")))
+    ident = lock.ident.hex().encode()
+    return classic(objs, 1, b"/Info 9 0 R /Encrypt 10 0 R /ID [<%s> <%s>]" % (ident, ident))[0]
+
+
+write("lock-rc4-40.pdf", locked_file(pdf_lock.Lock(1, 2, 40, "rc4")))
+write("lock-rc4-128.pdf", locked_file(pdf_lock.Lock(2, 3, 128, "rc4")))
+write("lock-rc4-56.pdf", locked_file(pdf_lock.Lock(2, 3, 56, "rc4", p=-44)))
+write("lock-aes.pdf", locked_file(pdf_lock.Lock(4, 4, 128, "aes")))
+write("lock-aes-open.pdf", locked_file(pdf_lock.Lock(4, 4, 128, "aes", meta=False, strings=False), extras=True))
+write("lock-v4-rc4.pdf", locked_file(pdf_lock.Lock(4, 4, 128, "rc4")))
+write("lock-aes256-5.pdf", locked_file(pdf_lock.Lock(5, 5, 256, "aes256")))
+write("lock-aes256.pdf", locked_file(pdf_lock.Lock(5, 6, 256, "aes256")))
+write("lock-packed.pdf", packed_file(lock=pdf_lock.Lock(4, 4, 128, "aes")))
+write("lock-user.pdf", locked_file(pdf_lock.Lock(2, 3, 128, "rc4", user=b"secret")))
+write("lock-user40.pdf", locked_file(pdf_lock.Lock(1, 2, 40, "rc4", user=b"secret")))
+write("lock-useraes.pdf", locked_file(pdf_lock.Lock(4, 4, 128, "aes", user=b"secret")))
+write("lock-user256-5.pdf", locked_file(pdf_lock.Lock(5, 5, 256, "aes256", user=b"secret")))
+write("lock-user256.pdf", locked_file(pdf_lock.Lock(5, 6, 256, "aes256", user=b"secret")))
+# ... with letters beyond ASCII: the older kinds take them in the format's own characters (Latin-1's here), the newest
+#     in UTF-8: one file of each, the same words
+write("lock-userword.pdf", locked_file(pdf_lock.Lock(2, 3, 128, "rc4", user="gr\u00fc\u00df dich".encode("latin-1"),
+                                                     owner="\u00e9t\u00e9".encode("latin-1"))))
+write("lock-userword256.pdf", locked_file(pdf_lock.Lock(5, 6, 256, "aes256", user="gr\u00fc\u00df dich".encode("utf-8"),
+                                                        owner="\u00e9t\u00e9".encode("utf-8"))))
 
 # ---- streams packed every way: each is TEXT, or (the predictors') ROWS
 flt = {1: b"<< /Type /Catalog /Pages 2 0 R >>", 2: b"<< /Type /Pages /Kids [] /Count 0 >>"}

@@ -740,6 +740,40 @@ has already (`loader/inflate.c`). PDFio was not tried; no code of another reader
     (3000 now, the new file among them) read each file's outline and ask every object's page. The program's
     scripts: the test document's outline of three opens the pane, an entry chosen by the keyboard goes to
     the second page, the pane folds away and the page is fitted to the room.
-- **Next**: drawing off the window's thread with a cache of pages, encrypted files with an empty password,
-  choosing text with the mouse, links.
+- **Locked files** (`apps/shared/pdfcrypt.c`). Most locked PDFs open for anyone: they are encrypted only so
+  that a reader may refuse to print or copy them, and their key is made from what the file itself says. They
+  were refused; now they open. A file that does want a password asks for it.
+  - **The format's standard handler, every kind**: RC4 with keys of 40 to 128 bits (V 1, 2), crypt filters
+    naming RC4 or AES of 128 bits for strings and for streams (V 4), AES of 256 bits (V 5) with both ways of
+    making its key (R 5's SHA-256, R 6's rounds of AES and SHA-256, -384, -512). The key is made with no
+    password and checked against the file's `U`; a file whose check fails wants a password
+    (`PDF_E_LOCKED`), and `pdf_open_password` tries one: as the user's, then as the owner's (which gives the
+    user's, or the key itself). The older kinds take a password in the format's own characters (Latin-1's,
+    from the UTF-8 typed), the newest in UTF-8.
+  - **In the program**: a file that wants a password asks for it (shown as stars), again while it is wrong,
+    until it is given up. What the file's lock forbids (printing, copying) is not looked at: the Viewer
+    prints nothing yet, and copying a page's text is the reader's own business.
+  - **Unlocking** (`pdf.c`): an object's strings as it is read from the file (each object has a key of its
+    own from the file's, its number and its generation), a stream's bytes before its filters. Not unlocked,
+    as the format has it: the lock's own dictionary, the tables (streams of the XRef type), what lies in an
+    object stream (the whole stream was), metadata where the lock says it is left open, a stream whose own
+    `Crypt` filter says Identity.
+  - **Hashes and AES are BearSSL's** (in the tree since M10 for TLS; `third_party/bearssl`, MIT): MD5,
+    SHA-256, -384, -512, AES in chained blocks. RC4 is a dozen lines here. The DOS program links
+    `libbearssl.a` (only what it uses comes in); the host's 32-bit program and tests take the fourteen files
+    they use (`build/host/libpdfbr32.a`).
+  - **Tests.** `tests/host/pdf_lock.py` locks files as a writer does (RC4 and AES written out in plain
+    Python, its AES checked against FIPS 197's examples); the files it makes were opened with two other
+    programs too (poppler's and MuPDF's tools, run as programs: titles, pages and text as the plain file's,
+    with no password, the user's and the owner's), so reader and writer are not only right by each other.
+    `pdf_test` (144 checks): eight locked files, each
+    way: their pages' words, their strings (an empty one, one of 19 bytes: AES's padding), let go and read
+    again; objects packed in a locked object stream; what a lock leaves open; seven files that want a
+    password (each kind; two with letters beyond ASCII): locked without it and with a wrong one, opened by
+    the user's and by the owner's; the damaged-file runs (5000 now) take four locked files too. The
+    program's scripts open a locked copy of the test document (its outline and its text as the plain one's),
+    and one that wants a password: a wrong one, given up, then the right one.
+  - **Not yet**: locks of other makers' handlers (public keys); passwords prepared as the newest kind asks
+    (SASLprep: plain letters are the same either way).
+- **Next**: drawing off the window's thread with a cache of pages, choosing text with the mouse, links.
 

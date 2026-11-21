@@ -17,6 +17,7 @@
 
 #include "../../loader/inflate.h"
 #include "pdf.h"
+#include "pdfcrypt.h"
 
 #define MAX_OBJECTS 4000000ul
 #define MAX_STREAM (64ul << 20)         /* a stream unpacked at most */
@@ -26,6 +27,7 @@ struct entry {
     unsigned long at;                   /* where: in the file, or which item of its object stream */
     unsigned stm;                       /* the object stream's number */
     unsigned char kind;                 /* 0: none; 1: in the file; 2: in an object stream */
+    unsigned short gen;                 /* its generation, as its "N G obj" says (a part of a locked file's keys) */
     struct pdf_obj *obj;                /* read already */
 };
 
@@ -47,6 +49,9 @@ struct pdf {
     unsigned long held;                 /* bytes of objects read */
     unsigned pages;
     int depth;                          /* (objects being read within objects) */
+    const char *password;               /* (while it is opened: what to try a lock with) */
+    struct pdf_crypt *crypt;            /* a locked file's keys (pdfcrypt.c), once it is unlocked */
+    unsigned crypt_num;                 /* its Encrypt dictionary's object (0: written in the trailer): never locked */
 };
 
 struct src {
@@ -452,6 +457,35 @@ static unsigned char *fetch(struct pdf *d, unsigned long at, unsigned long n, un
     return b;
 }
 
+/* A locked file's object as it was read: its strings unlocked, each where it lies (a string of AES's is shorter
+   after). */
+static void unlock_strings(struct pdf *d, struct pdf_obj *o, unsigned num, unsigned gen, int depth)
+{
+    unsigned i;
+    if (!o || depth > MAX_DEPTH)
+        return;
+    if (o->type == PDF_STRING) {
+        o->n = (unsigned)pdf_crypt_string(d->crypt, num, gen, (unsigned char *)o->u.s, o->n);
+        o->u.s[o->n] = 0;
+    } else if (o->type == PDF_ARRAY) {
+        for (i = 0; i < o->n; i++)
+            unlock_strings(d, o->u.item[i], num, gen, depth + 1);
+    } else if (o->type == PDF_DICT) {
+        for (i = 0; i < o->n; i++)
+            unlock_strings(d, o->u.d.value[i], num, gen, depth + 1);
+    }
+}
+
+static int type_is(const struct pdf_obj *dict, const char *name)       /* its Type, written out, is that */
+{
+    unsigned i;
+    if (dict && dict->type == PDF_DICT)
+        for (i = 0; i < dict->n; i++)
+            if (!strcmp(dict->u.d.key[i], "Type"))
+                return pdf_name_is(dict->u.d.value[i], name);
+    return 0;
+}
+
 /* The numbered object written at `at` ("N G obj ..."): read. *num: its number as written there. */
 static struct pdf_obj *object_at(struct pdf *d, unsigned long at, unsigned *num)
 {
@@ -490,6 +524,17 @@ static struct pdf_obj *object_at(struct pdf *d, unsigned long at, unsigned *num)
             }
             if (num)
                 *num = (unsigned)n;
+            if (o) {
+                unsigned gen = g >= 0 && g < 65536 ? (unsigned)g : 0;
+                if (n < d->nx)
+                    d->x[(unsigned long)n].gen = (unsigned short)gen;
+                if (o->stream)
+                    o->from = (int)n;           /* (a stream knows its own number: its key, in a locked file) */
+                /* a locked file's strings: but not the lock's own dictionary's, nor a table's (a stream of the XRef
+                   type) */
+                if (d->crypt && n && (unsigned)n != d->crypt_num && !type_is(o, "XRef"))
+                    unlock_strings(d, o, (unsigned)n, gen, 0);
+            }
         }
         free(b);
         return o;
@@ -806,12 +851,24 @@ unsigned char *pdf_stream(struct pdf *d, struct pdf_obj *o, unsigned long *len, 
     if (!(parms = pdf_get(d, o, "DecodeParms")))
         parms = pdf_get(d, o, "DP");
     count = pdf_is(filters, PDF_ARRAY) ? filters->n : pdf_is(filters, PDF_NAME) ? 1 : 0;
+    /* A locked file's stream: unlocked first, as the file's lock says: but not a table (the XRef type), nor
+       metadata where the lock leaves that open, nor a stream whose own first filter says it is not locked
+       ("Crypt" with no name, or the name Identity). */
+    if (d->crypt && o->from > 0 && !type_is(o, "XRef") && (pdf_crypt_meta(d->crypt) || !type_is(o, "Metadata"))) {
+        struct pdf_obj *f0 = pdf_is(filters, PDF_ARRAY) ? pdf_item(d, filters, 0) : filters;
+        struct pdf_obj *p0 = pdf_is(parms, PDF_ARRAY) ? pdf_item(d, parms, 0) : parms;
+        const char *named = pdf_name(pdf_get(d, p0, "Name"));
+        if (!(pdf_name_is(f0, "Crypt") && (!named[0] || !strcmp(named, "Identity"))))
+            n = pdf_crypt_stream(d->crypt, (unsigned)o->from, (unsigned long)o->from < d->nx ? d->x[o->from].gen : 0, b, n);
+    }
     for (i = 0; i < count && i < 8; i++) {
         struct pdf_obj *f = pdf_is(filters, PDF_ARRAY) ? pdf_item(d, filters, i) : filters;
         struct pdf_obj *p = pdf_is(parms, PDF_ARRAY) ? pdf_item(d, parms, i) : i == 0 ? parms : NULL;
         const char *fn = pdf_name(f);
         struct out to = { 0, 0, 0, 0 };
         int flate = !strcmp(fn, "FlateDecode") || !strcmp(fn, "Fl"), lzw = !strcmp(fn, "LZWDecode") || !strcmp(fn, "LZW");
+        if (!strcmp(fn, "Crypt"))               /* (done already, or not to be done) */
+            continue;
         if (flate)
             unflate(b, n, &to);
         else if (lzw)
@@ -1193,7 +1250,45 @@ static int usable(struct pdf *d)        /* a catalog with a tree of pages can be
     return pdf_is(root, PDF_DICT) && pdf_is(pdf_get(d, root, "Pages"), PDF_DICT);
 }
 
+static const struct pdf_obj *written(const struct pdf_obj *dict, const char *key);
+
+/* A locked file's lock tried, with the password given or none. 1: it is not locked, or it is open now; 0: it
+   stays locked. What
+   was read before this was read as it lies in the file: it is let go, to be read again unlocked (all but the
+   lock's own dictionary, which is never locked). */
+static int unlock(struct pdf *d)
+{
+    const struct pdf_obj *w = written(d->trailer, "Encrypt");
+    struct pdf_obj *enc;
+    unsigned idn = 0, k;
+    const char *id;
+    unsigned long i;
+    if (!w || d->crypt)
+        return 1;
+    if (!pdf_is(enc = pdf_get(d, d->trailer, "Encrypt"), PDF_DICT))
+        return 0;
+    id = pdf_string(pdf_item(d, pdf_get(d, d->trailer, "ID"), 0), &idn);
+    d->crypt_num = w->type == PDF_REF ? w->u.ref.num : 0;
+    if (!(d->crypt = pdf_crypt_open(d, enc, (const unsigned char *)id, idn, d->password)))
+        return 0;
+    for (i = 0; i < d->nx; i++)
+        if (i != d->crypt_num || !i) {
+            unmake(d->x[i].obj);
+            d->x[i].obj = NULL;
+        }
+    for (k = 0; k < 2; k++) {
+        free(d->os[k].bytes);
+        memset(&d->os[k], 0, sizeof d->os[k]);
+    }
+    return 1;
+}
+
 struct pdf *pdf_open(pdf_read_fn read, void *ctx, unsigned long size, int *err)
+{
+    return pdf_open_password(read, ctx, size, NULL, err);
+}
+
+struct pdf *pdf_open_password(pdf_read_fn read, void *ctx, unsigned long size, const char *password, int *err)
 {
     struct pdf *d;
     unsigned char *b;
@@ -1205,7 +1300,7 @@ struct pdf *pdf_open(pdf_read_fn read, void *ctx, unsigned long size, int *err)
     *err = PDF_E_MEMORY;
     if (!(d = calloc(1, sizeof *d)))
         return NULL;
-    d->read = read, d->ctx = ctx, d->size = size;
+    d->read = read, d->ctx = ctx, d->size = size, d->password = password;
     *err = PDF_E_KIND;
     if (!(b = fetch(d, 0, 1024, &got)))
         goto bad;
@@ -1240,18 +1335,24 @@ struct pdf *pdf_open(pdf_read_fn read, void *ctx, unsigned long size, int *err)
             break;
         at = (unsigned long)prev;
     }
+    if (found && !unlock(d)) {
+        *err = PDF_E_LOCKED;
+        goto bad;
+    }
     if (!found || !usable(d)) {
         rebuild(d);
+        if (!unlock(d)) {                       /* (tables made anew may show a lock the damaged ones hid) */
+            *err = PDF_E_LOCKED;
+            goto bad;
+        }
         if (!usable(d))
             goto bad;
     }
-    *err = PDF_E_LOCKED;
-    if (pdf_get(d, d->trailer, "Encrypt"))
-        goto bad;
     {
         long count = pdf_int(pdf_get(d, pdf_get(d, pdf_catalog(d), "Pages"), "Count"), 0);
         d->pages = count < 0 ? 0 : (unsigned long)count > d->nx ? (unsigned)d->nx : (unsigned)count;
     }
+    d->password = NULL;
     *err = PDF_OK;
     return d;
 bad:
@@ -1282,6 +1383,7 @@ void pdf_close(struct pdf *d)
     free(d->os[0].bytes);
     free(d->os[1].bytes);
     free(d->x);
+    pdf_crypt_close(d->crypt);
     free(d);
 }
 
