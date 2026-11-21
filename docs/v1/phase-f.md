@@ -827,3 +827,69 @@ The plan is `docs/v1/apps/games-library.md`. GAMES.EXE, "Games" in the Start men
   (exclusive or windowed, memory, BLASTER, the controller's mapping); pictures dropped onto a game, the
   games' own icons, screenshots taken while they run; DOSBench from a game's page; the Start menu's Games
   group and pinned games; grouping by kind and year.
+
+## Chat (2026-11-21): the first part
+
+The plan is `docs/v1/apps/chat.md`. CHAT.EXE, "Chat" in the Start menu: an IRC client.
+
+- **IRC** (`apps/shared/irc.c`): GLOS's own protocol code, a connection's whole state as a machine with no
+  I/O of its own: the server's bytes are fed in, the bytes to send come out through a call, and what there is
+  to show is kept there and told by events. So one code serves the app and the host's tests, which feed it
+  sessions written out line by line.
+  - **A line taken apart**: tags (their escapes undone), the prefix and its nick, the command, up to sixteen
+    parameters, the last with its spaces.
+  - **The user announced**: `CAP LS 302`, the capabilities wanted of those the server has (`server-time`,
+    `multi-prefix`, `away-notify`, and `sasl` where the user has an account) asked for, in however many lines
+    they come; SASL PLAIN; a server with no SASL has the password given to NickServ once on; one with no
+    `CAP` at all is as good; a nick that is taken: the other, then the nick with underscores.
+  - **What is kept**: a buffer for the server's own words, one a channel, one a private conversation; in
+    each its last 400 lines (who, when: the server's time where it stamps lines, what kind: said, an action,
+    a notice, a coming or going, a rank, a topic, an error), a channel's topic and its users in order (by
+    rank as the server's `PREFIX` orders ranks, then by name as its `CASEMAPPING` compares names), counts of
+    what is unread and of lines that name the user (as a word: "glossary" does not name glos).
+  - **What happens**: joins, parts, quits, kicks, nicks changed (a private conversation follows its nick),
+    ranks given and taken (modes with and without parameters, by `CHANMODES`), topics, away and back,
+    messages to channels and to the user, notices (the server's and the services': no tab each), CTCP
+    (an action is shown, VERSION and PING are answered, anything else, files offered among it, is not
+    taken), the numbers (errors go to the tab they are about).
+  - **What the user types**: said, or a command begun with a slash (/join, /part, /msg, /query, /me, /nick,
+    /topic, /notice, /away, /kick, /mode, /names, /quit, /raw; any other is sent as it is); long lines go
+    in pieces a line can carry, cut at a space and never within a character; a line's end typed or pasted
+    is no line's end sent. Tab's nicks: those who spoke latest first.
+  - **mIRC's codes** (bold, italic, underline, reverse, strike, monospace, the sixteen colours, colours by
+    red, green and blue passed over) made runs of one look, or only taken out.
+- **The connection** (`apps/shared/ircnet.c`): a thread of its own looks the name up, connects, and does
+  TLS's handshake (seconds on a 486: the window stays alive), then goes round: what is queued to go is sent,
+  what comes within a tenth of a second is queued for the window's thread. **TLS** is BearSSL's as for HTTPS
+  (`sdk/tls`), which gains `tls_read_wait`: a read that waits a given time and loses nothing when none
+  comes (HTTP's reads end the connection when their time runs out; a chat's connection stays open and
+  mostly has nothing to say).
+- **The toolkit** gains `gui_keys`: an app's own keys in a widget that has the keyboard, asked before the
+  widget (Tab among them, which would else move on): Chat's line completes nicks and has its history so.
+- **The program** (`apps/chat/chat.c`): the tabs at the left (a tree with the unread counts as badges, "!"
+  where the user was named), the lines in a rich-text view that stays at its end (times, nicks each in a
+  colour of its own, the sent colours and bold, links: pressed, a link is copied until there is a Web Reader
+  to open it), a channel's topic above and its users at the right, the line at the bottom (Enter, Tab, the
+  arrows for what was typed before), Connect and Disconnect, Join..., Leave and Close, Settings (server,
+  port, TLS, nick, other nick, real name, account, password, channels to join, connect at start: CHAT.CFG
+  in GLOS's folder; the password in GLOS's secrets, never in the file).
+  `CHAT -demo` talks to a server made up inside it, with a clock of its own: Chat without a network, and
+  the same every time for the suite.
+- **Tests.**
+  - `irc_test` on the host (75 checks, under the sanitizers too): lines and tags, the codes, whole sessions
+    (with and without SASL, SASL refused, no SASL, no CAP, nicks taken), a channel's life, messages of every
+    kind, every command typed, long lines, Tab, names compared both ways, more lines than are kept, lines
+    too long and in pieces, closing and ending; then 3000 sessions with bytes changed and commands typed at
+    random, and 200 of no sense at all.
+  - Loop A's https suite: `IRCTEST` (`tests/dos/irctest.c`: the connection's thread and IRC with no window)
+    against an IRC server on the host (`tests/loopa/jobs.py`): over TLS with an account (SASL), and plain:
+    announced, a channel joined (topic, names), a line said, the bot's answer heard with the server's time
+    on it, the link closed by QUIT; a certificate of another name refused ("wrong name"), a port nobody
+    listens on.
+  - `tests/gui/chat.txt` (host and Loop A, pictures compared) with `CHAT -demo`: on and joined, lines said
+    and answered (colours, a link, the user named), an action, Tab and the arrows, a private conversation
+    and its tab, another channel by the menu, the topic changed, a tab closed, the link ended.
+- **Not yet** (the plan's rest): more than one network at a time and a list of them; logs to files and a
+  search over them; notifications when the window is not in front and the task bar's flash; IRCv3's chat
+  history, account-notify and message tags beyond the time; stripping colours by a setting; joins and parts
+  hidden by a setting; reconnecting by itself; a ping of its own when the server is silent.

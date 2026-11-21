@@ -164,6 +164,8 @@ struct gui_widget {
     char *name;                         /* (toolkit 2) its name (gui_set_name, a resource file's), or NULL */
     int cmd;                            /* (toolkit 2) a command: pressed, with no function of its own, its window's
                                            on_command is told it */
+    int (*keys)(struct gui_widget *w, struct gui_ev *e);        /* (phase F) the app's, asked before the widget for
+                                           each key it would have (gui_keys): 1: taken */
 };
 
 /* ---- windows */
@@ -260,6 +262,10 @@ const char *gui_get_text(struct gui_widget *w);
 void gui_size(struct gui_widget *w, int pw, int ph);   /* its size (0: as measured) */
 void gui_grow(struct gui_widget *w, int share);
 void gui_on(struct gui_widget *w, void (*on)(struct gui_widget *, int), int id);
+/* (phase F) The app's own keys in a widget that has the keyboard: asked first for every key (Tab too, which would
+   else move on to the next widget); 1: taken, 0: the widget's as ever. A chat's input line completes names by
+   Tab and has its history on the arrows so. NULL: no more. */
+void gui_keys(struct gui_widget *w, int (*keys)(struct gui_widget *w, struct gui_ev *e));
 void gui_tip(struct gui_widget *w, const char *text);  /* its tooltip: shown by the pointer once it has rested over
                                            the widget (NULL: none). A toolbar's buttons have their commands' */
 void gui_tip_at(struct gui_widget *w, int key, const char *text);      /* for a widget of an app's own, from its
@@ -901,6 +907,8 @@ void gui_richview_set(struct gui_widget *w, struct gui_rdoc *doc);
 struct gui_rdoc *gui_richview_doc(struct gui_widget *w);
 void gui_richview_changed(struct gui_widget *w);       /* (after the document grew) laid out again */
 void gui_richview_follow(struct gui_widget *w, int on);        /* kept at the end as the document grows */
+void gui_richview_tight(struct gui_widget *w, int on);         /* (phase F) its blocks a pixel apart, not a
+                                           paragraph's gap: the lines of a log or of a chat */
 const char *gui_richview_link(struct gui_widget *w);
 char *gui_richview_text(struct gui_widget *w, int chosen);     /* the text (all, or what is chosen): malloc'd */
 /* Markdown (CommonMark's headings, paragraphs, lists, quotes, code, rules, tables, emphasis, code spans, links,

@@ -1,24 +1,62 @@
-# The chat view (toolkit 2, step C8; docs/v1/toolkit-2.md, Widgets): GUITEST's chat, kept to twelve blocks. Lines
-# with who wrote them in bold in their colour, Markdown's inline styles and links, a message of several blocks;
-# fifteen more lines (the oldest go, the view at the end); scrolled back, a line sent leaves it where it is; at the
-# end again (End), a line sent is followed.
-run GUITEST.EXE chat
-wait "GUITEST Chat"
-shot start "GUITEST Chat"
-key alt+m
-shot many "GUITEST Chat"
-key alt+s
-key shift+tab
-key pgup
-key alt+s
-shot back "GUITEST Chat"
-key shift+tab
-key end
-key alt+s
-shot end "GUITEST Chat"
+# Chat (apps/chat; phase F, docs/v1/apps/chat.md) with the server made up inside it (CHAT -demo: no network): the
+# user announced and on, the channel of its settings joined (its topic, its users by rank, a greeting); a line
+# said and answered; a question, whose answer has colours, bold and a link, and names the user; an action; a nick
+# completed by Tab (the latest speaker first) and the line before brought back by the arrow; a private
+# conversation begun by /msg, its tab and its answer; back to the channel; another channel joined by the menu;
+# the topic changed; a tab closed; the link ended. (The pauses: the made-up server answers at Chat's next look,
+# a tenth of a second on; the host's clock moves only when a script waits.)
+run CHAT.EXE -demo
+wait "Chat"
+pause 300
+said CHAT on glos
+said CHAT shown #glos lines=0
+said CHAT line #glos <grace> Hello glos, welcome to #glos
+shot joined "Chat"
+type hello everyone\n
+said CHAT line #glos <glos> hello everyone
+pause 300
+said CHAT line #glos <ada> You said: hello everyone
+type is this thing on?\n
+pause 300
+said CHAT line #glos <ada> glos: a good question, see https://example.org/faq for more
+type /me waves\n
+said CHAT line #glos * glos waves
+type a
+key tab
+type thanks
+key enter
+said CHAT line #glos <glos> ada: thanks
+pause 300
+said CHAT line #glos <ada> You said: ada: thanks
+key up up
+key enter
+said CHAT line #glos * glos waves
+shot talk "Chat"
+type /msg linus are you there\n
+said CHAT line linus <glos> are you there
+pause 300
+said CHAT line linus <linus> Got it: are you there
+key alt+down
+said CHAT shown linus lines=2
+shot private "Chat"
+key alt+up
+said CHAT shown #glos lines=10
+key ctrl+j
+wait "Join a Channel"
+type dos\n
+pause 300
+said CHAT shown #dos lines=0
+said CHAT line #dos <grace> Hello glos, welcome to #dos
+type /topic All about DOS\n
+pause 300
+shot second "Chat"
+key ctrl+w
+said CHAT closed #dos
+pause 300
+type /quit\n
+pause 300
+said CHAT ended closed by the server
+shot ended "Chat"
 key alt+f4
-gone "GUITEST Chat"
-expect GUI chat
-expect GUI blocks 5
-expect GUI blocks 12
-expect GUI end
+gone "Chat"
+expect CHAT end

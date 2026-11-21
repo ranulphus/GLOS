@@ -49,7 +49,7 @@ static const struct { const char *title, *exe; int kind, desk; } apps[] = {
     { "Control Panel", "CONTROL.EXE", IC_CONTROL, 1 }, { "Paint", "PAINT.EXE", IC_PAINT, 1 },
     { "Mixer", "MIXER.EXE", IC_SOUND, 0 }, { "Sound Recorder", "RECORDER.EXE", IC_SOUND, 0 },
     { "Player", "PLAYER.EXE", IC_SOUND, 0 }, { "MIDI Studio", "STUDIO.EXE", IC_SOUND, 0 },
-    { "PDF Viewer", "PDF.EXE", IC_IMAGES, 0 }, { "Games", "GAMES.EXE", IC_GAME, 0 } };
+    { "PDF Viewer", "PDF.EXE", IC_IMAGES, 0 }, { "Games", "GAMES.EXE", IC_GAME, 0 }, { "Chat", "CHAT.EXE", IC_NETWORK, 0 } };
 #define NAPPS ((int)(sizeof apps / sizeof *apps))
 
 static void say(const char *what, const char *a)

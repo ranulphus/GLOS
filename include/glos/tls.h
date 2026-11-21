@@ -39,6 +39,9 @@ struct tls *tls_open(unsigned conn, const char *host, const struct tls_anchors *
                      size_t room);      /* the handshake done over GLOS connection `conn` (it is the TLS's then),
                                            host the name checked; 0 and why */
 int tls_read(struct tls *t, void *buf, size_t n);     /* bytes; 0 at the end; -1 (tls_why) */
+int tls_read_wait(struct tls *t, void *buf, size_t n, unsigned ms);    /* as tls_read, waiting ms at most for
+                                           bytes: -2 if none came in that time (nothing is lost: asked again
+                                           later). For a connection that stays open: a chat's */
 int tls_write(struct tls *t, const void *buf, size_t n);  /* all of them: n, or -1 */
 const char *tls_why(const struct tls *t);
 void tls_close(struct tls *t);          /* close_notify sent, the connection closed, t freed */

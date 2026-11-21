@@ -1052,6 +1052,8 @@ static void key(struct gui_window *w, const struct os_event *ev)
     }
     if (!(w->flags & GUI_W_POPUP) && gui_menubar_key(w, &e, 0))
         return;
+    if (w->focus && usable(w->focus) && w->focus->keys && w->focus->keys(w->focus, &e))
+        return;                                 /* (the app's own keys in it: gui_keys) */
     if (w->focus && usable(w->focus) && w->focus->cls->event && w->focus->cls->event(w->focus, &e))
         return;
     /* A pop-up's one widget has had the key (a menu, a drop-down). A pop-up that is a whole panel (the Start
@@ -1199,6 +1201,7 @@ static void resized(struct gui_window *w)
 static void (*app_events)(const struct glos_ev *ev);
 
 void gui_on_event(void (*fn)(const struct glos_ev *ev)) { app_events = fn; }
+void gui_keys(struct gui_widget *w, int (*keys)(struct gui_widget *w, struct gui_ev *e)) { w->keys = keys; }
 
 /* One of GLOS's events as the toolkit's record of it: 1; 0: not one of a window's (the app's own to take: a
    job's, the shell's); 2: nothing to do (a typed character: its key's event had it). */

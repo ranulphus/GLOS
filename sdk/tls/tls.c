@@ -22,6 +22,8 @@ struct tls {
     int lost;                           /* the network failed (or timed out): the engine isn't run again */
     int timed_out;
     int eof;                            /* the far end closed TCP (with or without close_notify) */
+    unsigned wait_ms;                   /* tls_read_wait: how long this read waits for the network */
+    int waiting, idle;                  /* ... is under way; nothing came in that time (which loses nothing) */
     char why[64];
 };
 
@@ -30,11 +32,15 @@ struct tls {
 static int low_read(struct tls *t, unsigned char *buf, size_t len)
 {
     unsigned st;
-    int r = glos_net_receive(t->conn, buf, (unsigned)len, t->timeout_ms, &st);
+    int r = glos_net_receive(t->conn, buf, (unsigned)len, t->waiting ? t->wait_ms : t->timeout_ms, &st);
     if (r > 0)
         return r;
     if (r == 0 && st == GLOS_NETS_CLOSED) {
         t->eof = 1;
+        return -1;
+    }
+    if (r == 0 && t->waiting) {                 /* (a connection kept open has nothing to say just now) */
+        t->idle = 1;
         return -1;
     }
     if (r == 0)
@@ -198,6 +204,34 @@ int tls_write(struct tls *t, const void *buf, size_t n)
         return -1;
     }
     return (int)n;
+}
+
+/* tls_read for a connection that stays open (a chat): the engine is left as it is when nothing comes in the time,
+   to be asked again; a record that has come in part stays in its buffer. */
+int tls_read_wait(struct tls *t, void *buf, size_t n, unsigned ms)
+{
+    unsigned char *p;
+    size_t len;
+    int r;
+    if (!n)
+        return 0;
+    t->waiting = 1, t->wait_ms = ms, t->idle = 0;
+    r = run_until(t, BR_SSL_RECVAPP);
+    t->waiting = 0;
+    if (r != 0) {
+        if (t->idle && !t->lost && !t->eof)
+            return -2;
+        if (br_ssl_engine_last_error(&t->sc.eng) == BR_ERR_OK || (t->eof && !t->lost))
+            return 0;
+        reason(t);
+        return -1;
+    }
+    p = br_ssl_engine_recvapp_buf(&t->sc.eng, &len);
+    if (len > n)
+        len = n;
+    memcpy(buf, p, len);
+    br_ssl_engine_recvapp_ack(&t->sc.eng, len);
+    return (int)len;
 }
 
 const char *tls_why(const struct tls *t) { return t->why; }

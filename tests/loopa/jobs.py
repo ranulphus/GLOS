@@ -8892,6 +8892,109 @@ class HttpsServer:
         self.httpd.shutdown()
 
 
+class IrcServer:
+    """A small IRC server on 127.0.0.1 (the guest's 10.0.2.2) for IRCTEST (phase F: Chat's connection and IRC):
+    plain, or TLS with one of the test certificates. It offers capabilities in two lines (server-time,
+    multi-prefix, sasl), takes SASL PLAIN for the account acct with the password secret, welcomes the user once
+    the capabilities are settled, answers PING, lets anyone join any channel (its topic, three names), has a bot
+    answer what is said there with "pong to NICK: TEXT" (stamped with a fixed time where server-time was asked
+    for), and closes the link at QUIT. `seen`: the lines it was sent; `sasl`: an account was taken."""
+
+    def __init__(self, pki=None, cert=None):
+        import socket
+        import ssl
+        import threading
+        self.ctx = None
+        if cert:
+            self.ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            self.ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            self.ctx.load_cert_chain(os.path.join(pki, cert + ".pem"), os.path.join(pki, cert + ".key"))
+        self.sock = socket.socket()
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(4)
+        self.port = self.sock.getsockname()[1]
+        self.seen, self.sasl = [], False
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        import threading
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            threading.Thread(target=self.client, args=(conn,), daemon=True).start()
+
+    def client(self, conn):
+        import base64
+        try:
+            if self.ctx:
+                conn = self.ctx.wrap_socket(conn, server_side=True)
+
+            def send(line):
+                conn.sendall(line.encode() + b"\r\n")
+
+            nick, user, caps, negotiating, welcomed, buf = "*", False, "", False, False, b""
+            while True:
+                data = conn.recv(4096)
+                if not data:
+                    return
+                buf += data
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    line = line.rstrip(b"\r").decode("utf-8", "replace")
+                    self.seen.append(line)
+                    cmd, _, rest = line.partition(" ")
+                    cmd = cmd.upper()
+                    if cmd == "CAP" and rest.startswith("LS"):
+                        negotiating = True
+                        send(":loop CAP * LS * :server-time")
+                        send(":loop CAP * LS :multi-prefix sasl=PLAIN")
+                    elif cmd == "CAP" and rest.startswith("REQ"):
+                        caps = rest.split(":", 1)[-1]
+                        send(":loop CAP * ACK :" + caps)
+                    elif cmd == "CAP" and rest.startswith("END"):
+                        negotiating = False
+                    elif cmd == "AUTHENTICATE":
+                        if rest == "PLAIN":
+                            send("AUTHENTICATE +")
+                        else:
+                            self.sasl = base64.b64decode(rest) == b"acct\0acct\0secret"
+                            send(":loop 903 * :SASL authentication successful" if self.sasl
+                                 else ":loop 904 * :SASL authentication failed")
+                    elif cmd == "NICK":
+                        nick = rest.strip()
+                    elif cmd == "USER":
+                        user = True
+                    elif cmd == "PING":
+                        send("PONG " + rest)
+                    elif cmd == "JOIN":
+                        chan = rest.split()[0]
+                        send(":%s!glos@guest JOIN %s" % (nick, chan))
+                        send(":loop 332 %s %s :Loop A's channel" % (nick, chan))
+                        send(":loop 353 %s = %s :%s @bot +listener" % (nick, chan, nick))
+                        send(":loop 366 %s %s :End of names" % (nick, chan))
+                    elif cmd == "PRIVMSG":
+                        target, _, text = rest.partition(" :")
+                        stamp = "@time=2026-11-21T01:02:03.000Z " if "server-time" in caps else ""
+                        send("%s:bot!b@loop PRIVMSG %s :pong to %s: %s" % (stamp, target, nick, text))
+                    elif cmd == "QUIT":
+                        send("ERROR :Closing link")
+                        conn.close()
+                        return
+                    if user and nick != "*" and not negotiating and not welcomed:
+                        welcomed = True
+                        send(":loop 001 %s :Welcome to LoopNet, %s" % (nick, nick))
+                        send(":loop 005 %s PREFIX=(ov)@+ CHANTYPES=# NETWORK=LoopNet :are supported by this server" % nick)
+                        send(":loop 376 %s :End of the message of the day" % nick)
+        except (OSError, ValueError):
+            pass
+
+    def close(self):
+        self.sock.close()
+
+
 HTTPS_CASES = [("bf6", "ne2kpci"), ("486dx2", "ne2k")]
 HTTPS_INTERNET = [("github", "https://raw.githubusercontent.com/curl/curl/curl-8_10_1/COPYING"),
                   ("freedos", "https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/mem.zip")]
@@ -8902,7 +9005,11 @@ def https_case(profile, card):
     servers on the host with a test CA (added to Mozilla's roots in the guest's CERTS.DAT): a file with its length,
     redirects (absolute and relative), a chunked body, each the host's bytes (SHA-256); refusals for a name that
     isn't the certificate's, an expired certificate, one from a CA nobody trusts, a 404. With the internet: a file
-    from GitHub and one from a FreeDOS mirror, Mozilla's roots alone, their SHA-256 the host's."""
+    from GitHub and one from a FreeDOS mirror, Mozilla's roots alone, their SHA-256 the host's.
+    Chat's connection and IRC (phase F; IRCTEST, a connection kept open by a thread): over TLS with an account
+    (SASL), and plain: announced, a channel joined (its topic and names), a line said and the bot's answer heard
+    with the server's time on it, the link closed; a certificate of another name and a port nobody listens on
+    refused."""
     import hashlib
     import urllib.request
     tag = "%s-%s" % (profile, card)
@@ -8919,6 +9026,7 @@ def https_case(profile, card):
     open(cfg, "w").write("; GLOS.CFG for the https suite: the clock set by hand\r\n[time]\r\nsntp = off\r\n")
     agent = Agent("https-" + tag, profile, card, ["--file", "%s=/TEST/GLOS.CFG" % os.path.relpath(cfg, ROOT),
         "--file", "build/apps/FETCH.EXE=/TEST/FETCH.EXE", "--file", "%s=/TEST/CERTS.DAT" % os.path.relpath(certs, ROOT),
+        "--file", "build/dj/IRCTEST.EXE=/TEST/IRCTEST.EXE",
         "--cmd", "SERSAY HX-START https", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=3600)
     checks, notes = {"listen": agent.listening()}, []
     want = hashlib.sha256(HTTPS_BODY).hexdigest()
@@ -8961,6 +9069,37 @@ def https_case(profile, card):
             fetch(name, url, ok_sha=host_sha, resolve=False, timeout=900)
         if not internet:
             notes.append("no internet from the guest: GitHub and the FreeDOS mirror not asked")
+        # Chat's connection and IRC, against IRC servers on the host
+        import socket
+        irc = {"tls": IrcServer(pki, "good"), "plain": IrcServer(), "name": IrcServer(pki, "name")}
+        shut = socket.socket()
+        shut.bind(("127.0.0.1", 0))
+        nobody = shut.getsockname()[1]
+        shut.close()
+
+        def chat(name, how, port, more="", why=None):
+            t0 = time.time()
+            rc, o, e = agent.ssh("C:\\TEST\\IRCTEST.EXE test.glos=10.0.2.2 %d %s glos #loop%s" % (port, how, more), timeout=600)
+            o = (o + e).replace("\r", "")
+            if why:
+                good = rc == 1 and ("IRCTEST failed: " + why) in o
+            else:
+                good = rc == 0 and all(l in o for l in (
+                    "IRCTEST on nick=glos network=LoopNet", "IRCTEST joined #loop users=3 topic=Loop A's channel",
+                    "IRCTEST heard bot at 1795222923: pong to glos: ping from GLOS", "IRCTEST ended: closed by the server"))
+            checks[name] = good
+            if not good or name == "irc-tls":
+                notes.append("%s (%.1fs): %s" % (name, time.time() - t0, " | ".join(o.strip().split("\n"))[-300:]))
+
+        chat("irc-tls", "tls", irc["tls"].port, more=" acct secret")
+        checks["irc-sasl"] = irc["tls"].sasl and "CAP REQ :server-time multi-prefix sasl" in irc["tls"].seen
+        chat("irc-plain", "plain", irc["plain"].port)
+        checks["irc-no-account"] = not irc["plain"].sasl and "CAP REQ :server-time multi-prefix" in irc["plain"].seen \
+            and "QUIT :done" in irc["plain"].seen
+        chat("irc-wrong-name", "tls", irc["name"].port, why="wrong name")
+        chat("irc-refused", "plain", nobody, why="no answer, or refused")
+        for srv in irc.values():
+            srv.close()
         checks["sockets"] = "sockets=0" in agent.ssh("glos net")[1]
         checks["exit"] = agent.ssh("glos exit")[0] == 0
     except subprocess.TimeoutExpired:
@@ -10709,7 +10848,7 @@ def console_case(profile, vcard, card, bits):
 
 # The native apps (M9 steps D-G): their scripts (tests/gui, all but GUITEST's) on the desktop, the apps beside
 # GLOS.EXE.
-NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER", "RECORDER", "PLAYER", "STUDIO", "PDF", "GAMES"]
+NATIVE_APPS = ["NOTEPAD", "CALC", "IMAGES", "TERM", "FILES", "MONITOR", "CONTROL", "PAINT", "MIXER", "RECORDER", "PLAYER", "STUDIO", "PDF", "GAMES", "CHAT"]
 NATIVE_CASES = [("bf6", "vbe", "ne2kpci", 8), ("bf6", "g200", "ne2kpci", 16), ("bf6", "g400", "ne2kpci", 32),
                 ("486dx2", "vbe", "ne2k", 8)]
 

@@ -282,6 +282,7 @@ struct rview {
     int follow;                         /* (the app's: gui_richview_follow) kept at the end as the document grows ... */
     int at_end;                         /* ... while it is scrolled to the end */
     int limit;                          /* (a chat view) the blocks kept at most (0: no limit) */
+    int tight;                          /* (gui_richview_tight) paragraphs close under one another: a log's lines */
 };
 
 #define RV(w) ((struct rview *)(w))
@@ -505,7 +506,7 @@ static void layout(struct rview *v)
         return;
     for (i = 0; i < d->n;) {
         struct rblock *b = &d->b[i];
-        int x0 = MARGIN + b->depth * INDENT, x1 = MARGIN + width, gap = 6, k;
+        int x0 = MARGIN + b->depth * INDENT, x1 = MARGIN + width, gap = v->tight ? 1 : 6, k;
         for (k = b->parent; k >= 0; k = d->b[k].parent)
             x0 += 16;                           /* (what a block that opens holds: under its summary's text) */
         if (hidden(d, i)) {
@@ -922,6 +923,13 @@ void gui_richview_changed(struct gui_widget *w)        /* the document grew or c
     v->laid_w = 0;
     if (v->link >= v->np)
         v->link = -1;
+    gui_damage(w);
+}
+
+void gui_richview_tight(struct gui_widget *w, int on)   /* its blocks a pixel apart: lines of a log, not paragraphs */
+{
+    RV(w)->tight = on != 0;
+    RV(w)->laid_w = 0;
     gui_damage(w);
 }
 

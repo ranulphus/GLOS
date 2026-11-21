@@ -1155,6 +1155,46 @@ __attribute__((weak)) int glos_job_signal(glos_handle job, unsigned what) { (voi
 __attribute__((weak)) int glos_job_status(glos_handle job, struct glos_job_status *out) { (void)job, (void)out; return GLOS_E_HANDLE; }
 int glos_shell(int on) { (void)on; return 0; }
 
+/* SECRETS: a few, kept for the run (Chat's password). */
+static struct { char name[32]; unsigned char value[128]; unsigned length; } kept_secrets[4];
+int glos_secret_put(const char *name, const void *value, unsigned length, unsigned flags)
+{
+    int i, at = -1;
+    (void)flags;
+    for (i = 0; i < 4; i++)
+        if (!strcmp(kept_secrets[i].name, name) || (at < 0 && !kept_secrets[i].name[0]))
+            at = !strcmp(kept_secrets[i].name, name) ? i : at < 0 ? i : at;
+    if (at < 0 || length > sizeof kept_secrets[0].value || strlen(name) >= sizeof kept_secrets[0].name)
+        return GLOS_E_REFUSED;
+    strcpy(kept_secrets[at].name, name);
+    memcpy(kept_secrets[at].value, value, length);
+    kept_secrets[at].length = length;
+    return 0;
+}
+int glos_secret_get(const char *name, void *buffer, unsigned room, unsigned *length, unsigned flags)
+{
+    int i;
+    (void)flags;
+    for (i = 0; i < 4; i++)
+        if (kept_secrets[i].name[0] && !strcmp(kept_secrets[i].name, name)) {
+            unsigned n = kept_secrets[i].length < room ? kept_secrets[i].length : room;
+            memcpy(buffer, kept_secrets[i].value, n);
+            if (length)
+                *length = kept_secrets[i].length;
+            return 0;
+        }
+    return GLOS_E_NOT_FOUND;
+}
+int glos_secret_remove(const char *name, unsigned flags)
+{
+    int i;
+    (void)flags;
+    for (i = 0; i < 4; i++)
+        if (!strcmp(kept_secrets[i].name, name))
+            kept_secrets[i].name[0] = 0;
+    return 0;
+}
+
 /* The Start menu's entries (SHELL's ENTRY; FILES' Start menu, phase D): as the kernel makes them, the programs
    whose profiles in the settings say menu = 1 (a script's `config program:NAME menu 1` lines), each a line of
    name, title, group, icon, folder, arguments and tasks. The recent documents (RECENT) are made up, the same

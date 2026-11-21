@@ -176,6 +176,8 @@ host-test-run: build/host/libpdfbr32.a
 	  && build/host/smf_test `python3 tests/host/smf_cases.py build/host/smf`
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/song_test tests/host/song_test.c apps/shared/song.c \
 	  apps/shared/smf.c && build/host/song_test build/host/smf
+	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/irc_test tests/host/irc_test.c apps/shared/irc.c \
+	  && build/host/irc_test
 	@mkdir -p build/host/gamecases && $(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/gamelib_test \
 	  tests/host/gamelib_test.c apps/shared/gamedb.c apps/shared/gamelib.c && build/host/gamelib_test build/host/gamecases
 	@$(HOST_CC) -m32 -O1 -g -Wall -Wextra -Werror -o build/host/pdf_test tests/host/pdf_test.c apps/shared/pdf.c apps/shared/pdfnav.c \
@@ -225,7 +227,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
-APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf games
+APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf games chat
 # (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
 # shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
@@ -265,6 +267,13 @@ APP_LIBS_player := $(SOURCE_SRCS) apps/shared/smf.c apps/shared/midiplay.c
 # Songs as MIDI Studio holds them (phase F), read from and written as MIDI files, and played as the Player plays them.
 APP_HOST_LIBS_studio := apps/shared/song.c apps/shared/smf.c apps/shared/midiplay.c
 APP_LIBS_studio := apps/shared/song.c apps/shared/smf.c apps/shared/midiplay.c
+# Chat (phase F): IRC, and its connection: a thread with TLS on GLOS (so the lock round the C library, as every
+# program with threads); on the host, where there is no network, a stand-in (Chat's suite talks to CHAT -demo).
+APP_HOST_LIBS_chat := apps/shared/irc.c apps/shared/ircnet_none.c
+APP_LIBS_chat := apps/shared/irc.c apps/shared/ircnet.c build/sdk/libtls.a build/sdk/libbearssl.a
+APP_DEPS_chat := build/sdk/gloswrap.opt tools/wrapcheck.py
+APP_LINK_chat := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/CHAT.map -Wl,--cref
+APP_AFTER_chat := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/CHAT.map
 # The Games Library's games (phase F): the known games, the library's file and scan; pictures as Images has them.
 GAMES_SRCS := apps/shared/gamedb.c apps/shared/gamelib.c apps/shared/picfile.c apps/shared/thumbs.c
 APP_HOST_LIBS_games := $(GAMES_SRCS)
@@ -698,7 +707,7 @@ loopa-time: all dos-tests check-deps
 loopa-netapp: all build/dj/NETTEST.EXE check-deps
 	$(Q)python3 tests/loopa/jobs.py netapp -j $(JOBS)
 # M10 step C: HTTPS (FETCH) against servers on the host with a test CA, refusals, GitHub and a FreeDOS mirror.
-loopa-https: all build/apps/FETCH.EXE build/host/mkcerts build/glos/CERTS.DAT check-deps
+loopa-https: all build/apps/FETCH.EXE build/dj/IRCTEST.EXE build/host/mkcerts build/glos/CERTS.DAT check-deps
 	$(Q)python3 tests/loopa/jobs.py https -j $(JOBS)
 # M10 step F: VNC through an SSH tunnel with a stock client (vncdotool: tests/vnc), and glos rec.
 loopa-vnc: all apps check-deps
@@ -1057,6 +1066,14 @@ build/dj/NETTEST.EXE: tests/dos/nettest.c build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) -O1 -Wall -Werror -Iinclude -o $@ $< build/sdk/libglos.a
+	$(Q)python3 tools/glosmark.py $@
+# IRCTEST (phase F): Chat's connection and its IRC with no window, for the https suite's IRC server on the host.
+build/dj/IRCTEST.EXE: tests/dos/irctest.c apps/shared/irc.c apps/shared/irc.h apps/shared/ircnet.c apps/shared/ircnet.h \
+                      build/sdk/libtls.a build/sdk/libbearssl.a build/sdk/libglos.a build/sdk/gloswrap.opt tools/glosmark.py
+	@mkdir -p build/dj
+	$(Q)echo "  DJCC    $<"
+	$(Q)$(DJCC) -O1 -Wall -Wextra -Werror -Wno-format-truncation -Iinclude -o $@ tests/dos/irctest.c apps/shared/irc.c \
+	  apps/shared/ircnet.c build/sdk/libtls.a build/sdk/libbearssl.a build/sdk/libglos.a @build/sdk/gloswrap.opt
 	$(Q)python3 tools/glosmark.py $@
 build/dj/RUNTEST.EXE: tests/dos/runtest.c build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/dj
