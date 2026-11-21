@@ -1057,6 +1057,10 @@ const char *gui_dos_text(const char *dos, char *out, int room); /* a name or pat
 int gui_text_dos(const char *text, char *out, int room);        /* text typed, as DOS's bytes: 0, or -1 if the
                                            code page hasn't got one of its characters ('?' there) or out is short */
 
+/* ---- Help (phase F): the guide opened at a page ("NOTEPAD": NOTEPAD.MD; NULL: the program's own, by its
+   file's name). F1 does it in any window whose app and widgets leave the key alone. 1: Help was started. */
+int gui_help(const char *page);
+
 /* ---- background work (toolkit 2; docs/v1/toolkit-2.md 3): a function run on a thread of the app's own, while
    the window's thread goes on taking events. Only the window's thread touches widgets: the work tells it things
    by the calls below. The program is linked with @gloswrap.opt (libglos's lock round the C library). */

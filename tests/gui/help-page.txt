@@ -1,0 +1,10 @@
+# Help asked for a program's page by its name (what F1 in the program does: gui_help): HELP NOTEPAD is the page
+# NOTEPAD.MD, chosen in the contents too; a name the guide has no page for is its first page.
+run HELP.EXE NOTEPAD
+wait "Notepad - Help"
+said HELP guide asked=NOTEPAD
+said HELP page NOTEPAD.MD
+shot notepad "Notepad - Help"
+key alt+f4
+gone "Notepad - Help"
+expect HELP end

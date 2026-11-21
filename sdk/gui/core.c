@@ -6,6 +6,8 @@
  * is drawn into the window's back buffer, widget by widget from the root
  * down, each clipped to its rectangle (and to its parents'), then copied
  * into the window's pixels and presented, a rectangle at a time. */
+#include <stdio.h>
+
 #include "guiint.h"
 
 const struct gfx_font *gui_font = &gfx_font_ui, *gui_bold = &gfx_font_bold, *gui_mono = &gfx_font_mono;
@@ -58,10 +60,25 @@ static void theme_read(void)
         gui_theme = t;
 }
 
+/* Help (phase F): F1 in a window, when neither the app nor the widget with the keyboard has a use for it, opens
+   the guide at the program's own page: HELP.EXE, beside the program, started with the program's name (NOTEPAD:
+   the page NOTEPAD.MD; a program the guide has no page for gets its first page). */
+static char help_dir[128], help_name[16];
+
+int gui_help(const char *page)
+{
+    char cmd[300];
+    if (!page || !page[0])
+        page = help_name;
+    snprintf(cmd, sizeof cmd, "%sHELP.EXE %s", help_dir, page);
+    glos_job_run(cmd, NULL, NULL, GLOS_RUN_HIDDEN, GLOS_RUNF_DETACH, NULL);
+    return glos_error() == 0;
+}
+
 int gui_init(int argc, char **argv)
 {
     char v[16], name[32] = "App";
-    const char *p = argc > 0 && argv[0] ? argv[0] : "", *q;
+    const char *p = argc > 0 && argv[0] ? argv[0] : "", *q, *start = p;
     unsigned i;
     for (q = p; *q; q++)                        /* the program's name, for GLOS's lists: its file's, less the folder */
         if (*q == '\\' || *q == '/' || *q == ':')
@@ -70,6 +87,16 @@ int gui_init(int argc, char **argv)
         name[i] = p[i];
     if (i)
         name[i] = 0;
+    snprintf(help_name, sizeof help_name, "%s", i ? name : "");
+    if ((size_t)(p - start) < sizeof help_dir) {        /* (its folder, with the sign that ends it; as DOS writes
+                                                           a path: DJGPP's has "/", with which GLOS would take the
+                                                           command for COMMAND.COM's, and that starts no app) */
+        memcpy(help_dir, start, (size_t)(p - start));
+        help_dir[p - start] = 0;
+        for (i = 0; help_dir[i]; i++)
+            if (help_dir[i] == '/')
+                help_dir[i] = '\\';
+    }
     if (glos_init(name, "", "") != 0)
         return -1;
     if (glos_setting_get("input", "double_click", v, sizeof v, 0) == 0 && atoi(v) >= 200 && atoi(v) <= 1000)
@@ -1116,8 +1143,10 @@ static void key(struct gui_window *w, const struct os_event *ev)
             return;
         }
     }
-    if (w->on_key)
-        w->on_key(w, &e);
+    if (w->on_key && w->on_key(w, &e))
+        return;
+    if (e.key == GUI_K_F1 && !e.mods)           /* (nobody's: Help's, at this program's page) */
+        gui_help(NULL);
 }
 
 static void send_ev(struct gui_widget *w, struct gui_ev *e)

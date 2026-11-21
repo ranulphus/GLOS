@@ -236,7 +236,7 @@ build/host/guitest: tests/dos/guitest.c $(GUI_SRCS) sdk/gui/guiint.h include/glo
 	$(Q)$(GUI_HOST) -o $@ build/host/guitest-app.o tests/host/glosshim.c $(GUI_SRCS) $(LIBGLOS_GFX) kernel/lib/png.c \
 	  $(CFG_SRCS) $(CP_SRCS)
 # The native apps (apps/NAME/NAME.c, M9): on the host for their goldens, as GUITEST.
-APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf games chat web disks
+APPS := notepad calc images term files monitor control paint mixer recorder player studio pdf games chat web disks help
 # (TERM is a terminal alone since S2c: the shell is the kernel's, a session opened as a job. On the host the
 # shim runs the same interpreter and line editor for it: tests/host/shimshell.c.)
 APP_HOST_FLAGS := -Ithird_party/stb
@@ -292,6 +292,13 @@ APP_LIBS_web := $(WEB_SRCS) apps/shared/webget.c build/sdk/libhttp.a build/sdk/l
 APP_DEPS_web := build/sdk/gloswrap.opt tools/wrapcheck.py
 APP_LINK_web := @build/sdk/gloswrap.opt -Wl,-Map,build/apps/WEB.map -Wl,--cref
 APP_AFTER_web := python3 tools/wrapcheck.py sdk/libglos/wrap.list build/apps/WEB.map
+# Help (phase F): the user guide's pages (help/*.MD) as one file beside the programs, held to the guide's rules
+# as it is made (tools/mkhelp.py: a link that goes nowhere, a page not in the contents, stops the build).
+HELP_PAGES := $(wildcard help/*.MD)
+APP_DEPS_help := build/apps/HELP.DAT
+build/apps/HELP.DAT: $(HELP_PAGES) tools/mkhelp.py
+	@mkdir -p build/apps
+	$(Q)python3 tools/mkhelp.py $@ $(HELP_PAGES)
 # Disk Tools (phase F): FAT volumes read and added to, the sector jobs; new volumes and partition tables by the
 # kernel's own code (kernel/disk: with its boot code, as bytes).
 DISKS_SRCS := apps/shared/fatimg.c apps/shared/diskjob.c kernel/disk/fatfmt.c kernel/disk/mbr.c kernel/disk/fdboot.S \
@@ -343,12 +350,12 @@ GUI_SCRIPTS := $(wildcard tests/gui/*.txt)
 # (A:, C:\HX, C:\OUT and C:\TEST are the Loop A machine's own, which the file manager's tree shows.)
 gui-goldens:
 	$(Q)$(DEV) $(MAKE) -s gui-goldens-run
-gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS)) build/apps/PDFFONTS.DAT
+gui-goldens-run: build/host/guitest $(addprefix build/host/,$(APPS)) build/apps/PDFFONTS.DAT build/apps/HELP.DAT
 	@rm -rf build/host/gui build/host/gui-drives && mkdir -p build/host/gui
 	@set -e; for t in $(GUI_SCRIPTS); do n=$$(basename $$t .txt); \
 	  if head -1 $$t | grep -q '^#loopa-run-only'; then continue; fi; prog=$$(awk '$$1=="run"{print tolower($$2); exit}' $$t); \
 	  prog=$${prog%.exe}; mkdir -p build/host/gui/$$n; for b in 8 16 32; do rm -rf build/host/gui-drives; \
-	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT sdk/gui/fonts/FONTS.DAT sdk/gui/fonts/ICONS.DAT build/apps/PDFFONTS.DAT build/host/gui-drives/C/GLOS/; \
+	    cp -r tests/gui/drives build/host/gui-drives; cp sdk/gui/fonts/SMOOTH.DAT sdk/gui/fonts/FONTS.DAT sdk/gui/fonts/ICONS.DAT build/apps/PDFFONTS.DAT build/apps/HELP.DAT build/host/gui-drives/C/GLOS/; \
 	    mkdir -p build/host/gui-drives/A build/host/gui-drives/C/HX build/host/gui-drives/C/OUT build/host/gui-drives/C/TEST; \
 	    GLOS_HOST_DRIVES=build/host/gui-drives build/host/$$prog $$t build/host/gui/$$n $$b > build/host/gui/$$n-$$b.log \
 	      || { echo "gui-goldens: $$n at $$b bits:"; cat build/host/gui/$$n-$$b.log; exit 1; }; done; \

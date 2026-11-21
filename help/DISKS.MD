@@ -1,0 +1,41 @@
+# Disk Tools
+
+Disk Tools works on whole disks: floppies and hard disks as the PC's BIOS has them, and images of them in
+files.
+
+The list at the top has the floppy drives and the hard disks; under it are the chosen hard disk's partitions.
+A floppy is not read until you ask: **F5** looks at the disk in the drive.
+
+**The disk GLOS runs from is never written,** whatever you choose.
+
+## A disk's image
+
+- **Disk, Image of the Disk** (Ctrl+S) reads every sector of the disk into a file. A sector that cannot be
+  read is tried again; if it stays bad it is zeros in the image, and you are told which sectors they were.
+- **Disk, Write an Image to the Disk** (Ctrl+W) writes an image file over the disk and reads it back to see
+  that it is there. The image must be exactly the disk's size. **Everything on the disk is replaced:** you are
+  asked first, and twice for a hard disk. After writing a hard disk, restart the PC before DOS uses it.
+- **Disk, Check the Disk** (Ctrl+K) reads every sector and tells you which could not be read.
+
+A floppy takes about a minute to read and two to write and read back. Cancel stops a job; an image that was
+not finished is removed.
+
+## Floppies
+
+- **Disk, Format** makes an empty DOS disk of the floppy, with a label if you give one. The floppy must have
+  been formatted once before, at its drive's own size: a brand new or damaged disk wants DOS's FORMAT.
+- **Disk, Look Inside** (Enter) shows the floppy's folders and files without DOS.
+
+## Inside an image
+
+**Image, Open an Image** (Ctrl+O) shows what is in an image file of a DOS disk. Enter opens a folder,
+Backspace goes up. **Copy Out** copies the chosen files and folders to a folder on your disk; **Copy
+Everything Out** copies it all.
+
+**Image, New Image from a Folder** (Ctrl+N) makes a floppy image (360 KB to 2.88 MB) holding a folder's
+files, ready to write to a floppy or to give to an emulator.
+
+## Not yet
+
+Disks larger than 2 GB cannot be read to an image yet. A floppy of another size than its drive's (a 720 KB
+disk in a 1.44 MB drive) is not read or written yet.

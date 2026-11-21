@@ -62,7 +62,10 @@ Keyboard-first (PRD D34):
 - **Enter** presses the window's default button (`GUI_DEFAULT`, drawn with a second line) and **Esc** its cancel
   button, unless the widget with the focus takes them (the editor takes Enter; a menu takes Esc);
 - **shortcuts** shown in menus ("Ctrl+S", "F3", "Del"): those with Ctrl or Alt before the widget with the focus
-  sees the key; those without (Del, F3) only if it leaves the key alone, so Del still deletes in a field.
+  sees the key; those without (Del, F3) only if it leaves the key alone, so Del still deletes in a field;
+- **F1** that nobody took (no shortcut of the app's, not the widget with the focus, not the window's `on_key`)
+  opens Help at the program's page (`gui_help`, phase F: HELP.EXE beside the program, started with the
+  program's name; `docs/v1/phase-f.md`).
 
 The mouse: a press gives the focus to the widget under it (or the nearest parent that takes it), which then has
 every move and the release until the buttons are up; a second press of the same button within 500 ms and 4
@@ -77,7 +80,7 @@ compare, and costs a redraw twice a second for nothing.
 | Widget | What it is |
 |---|---|
 | label | text, "&" marking its letter; style: font, colour, alignment |
-| button | pressed by the mouse, Space, Enter or its letter; default and cancel buttons |
+| button | pressed by the mouse, Space, Enter or its letter; default and cancel buttons. Its function is told what happened (`GUI_ON_CLICK`); the number it was made with is `b->id` |
 | check box, radio button | a group of radio buttons are the siblings made with the same first |
 | field | one line of UTF-8; selection, copy, cut, paste; stars for a password; Enter is `GUI_ON_ACTIVATE`. An app's own keys in it, or in any widget that has the keyboard, by `gui_keys` (phase F): asked before the widget, Tab among them (Chat's line completes names so) |
 | editor | a file's bytes (below) |

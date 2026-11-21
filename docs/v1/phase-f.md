@@ -1010,3 +1010,33 @@ BIOS has them, images of them, and what is inside an image.
   the BIOS's track format and the disk's own geometry in GLOS_FS_SECTORS: an API step); the system put on a
   formatted disk; images in parts for disks over 2 GB; logical drives in an extended partition; an image
   opened as a folder in Files; long names written; backups over SFTP and their schedule.
+
+## Help (2026-11-21): the first part
+
+The plan is `docs/v1/apps/help.md`. HELP.EXE, "Help" in the Start menu, and F1 in every program.
+
+- **The guide** (`help/*.MD`): GLOS's user guide, 28 pages of Markdown written for the user: the desktop,
+  Files, DOS programs and games, the command line, a page for each program (named as the program is:
+  NOTEPAD.MD), sound, keyboards and pads, the network, settings, and what to do when something goes wrong.
+  Written from what the programs do now (their menus and keys read out of the sources), not from the
+  plans: what is not built is not promised. **The owner has yet to read it.**
+- **One file** (`tools/mkhelp.py` makes `build/apps/HELP.DAT`, beside the programs): the pages one after
+  another. Making it holds the guide to its rules, and a page that breaks one stops the build: a link goes
+  to a page that is there, every page is in the first page's contents, a page begins with its title, names
+  are DOS's.
+- **The program** (`apps/help/help.c`): the contents as a tree (the first page's list of links, nested as
+  it is), a page in the rich-text view by the toolkit's Markdown reader, links between pages (pressed, or
+  reached by Tab), Back, Forward and First Page, and a search of every page for the words typed (all of
+  them in a line, letters in either case), whose lines open their pages. The window is titled with the
+  page's title. `HELP NAME` opens NAME.MD.
+- **F1** (`gui_help`, sdk/gui/core.c): a key nobody took (no command of the app's, not the widget with the
+  keyboard, not the window's own key function) that is F1 starts HELP.EXE, beside the program, with the
+  program's name: its page, or the first page if the guide has none for it. A terminal's F1 stays the
+  program's in it. `gui_help("NAME")` is for an app that wants another page.
+- **Tests.** The build's own checks of the guide; `tests/gui/help.txt` (host and Loop A, pictures
+  compared): the contents, a link by Tab and Enter, Back, Forward, a search and its page, F1 in Help
+  itself; `help-page.txt`: a program's page by its name; `help-f1.txt` (Loop A): F1 in Notepad opens
+  Help at Notepad's page.
+- **Not yet** (the plan's rest): pictures in pages; the place in a page a link names and where a search's
+  words are; the welcome tour on the first start and the tip of the day; a dialog's own Help button; one
+  Help window for every F1 (each F1 starts another now); the guide in other languages.

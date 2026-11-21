@@ -1,0 +1,12 @@
+#loopa-run-only (F1 starts another program, Help: only GLOS runs those)
+# F1 in a program opens the guide at the program's page: Notepad's F1 is Help at "Notepad" (the toolkit's
+# gui_help, HELP.EXE beside the program). Help is closed first, then Notepad.
+run NOTEPAD.EXE
+wait "Untitled - Notepad"
+key f1
+wait "Notepad - Help"
+key alt+f4
+gone "Notepad - Help"
+wait "Untitled - Notepad"
+key alt+f4
+gone "Untitled - Notepad"

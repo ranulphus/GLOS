@@ -1,0 +1,41 @@
+# Help (apps/help; phase F, docs/v1/apps/help.md) on the guide itself (help/*.MD): its first page and the
+# contents; a page chosen in the contents; a link in a page reached by Tab and followed; Back, Forward and the
+# first page; words looked for in every page, and the page of a line found; Help's own page by F1.
+run HELP.EXE
+wait "Welcome to GLOS - Help"
+said HELP guide asked=-
+said HELP page INDEX.MD
+shot first "Welcome to GLOS - Help"
+key ctrl+t
+key down
+said HELP page DESKTOP.MD
+wait "The desktop - Help"
+shot desktop "The desktop - Help"
+click "The desktop - Help" 420 200
+key tab
+key enter
+said HELP page MIXER.MD
+wait "Mixer - Help"
+shot mixer "Mixer - Help"
+key alt+left
+said HELP page DESKTOP.MD
+wait "The desktop - Help"
+key alt+right
+said HELP page MIXER.MD
+key alt+home
+said HELP page INDEX.MD
+wait "Welcome to GLOS - Help"
+key ctrl+f
+type two short notes\n
+said HELP found 1 lines in 1 pages for "two short notes"
+shot found "Welcome to GLOS - Help"
+key enter
+said HELP page TROUBLE.MD
+wait "When something goes wrong - Help"
+shot trouble "When something goes wrong - Help"
+key f1
+said HELP page HELP.MD
+wait "Using Help - Help"
+key alt+f4
+gone "Using Help - Help"
+expect HELP end
