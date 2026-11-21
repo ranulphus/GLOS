@@ -40,12 +40,12 @@ struct fat_made {
     unsigned long clusters, fat_sectors, data_start;
 };
 /* The volume's sectors `lba` on (from its start), `count` of them: 0, or anything else to stop. */
-typedef int (*fat_write)(void *ctx, unsigned long lba, const unsigned char *data, unsigned count);
+typedef int (*fat_write_fn)(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count);
 
 /* Writes a new, empty volume: its boot sector (with a short program that says the disk has no system), its
    FATs, its root folder. Floppies of 360 KB, 720 KB, 1.2 MB, 1.44 MB and 2.88 MB are as DOS formats them.
    0; -1: a size no FAT of that kind fits; -2: the write stopped. */
-int fat_format(const struct fat_geo *g, fat_write write, void *ctx, struct fat_made *made);
+int fat_format(const struct fat_geo *g, fat_write_fn write, void *ctx, struct fat_made *made);
 
 /* GLOS's boot code that starts FreeDOS's kernel (KERNEL.SYS in the root folder; kernel/disk/fdboot.S) into a
    volume's first sector, its parameters kept: what FreeDOS's SYS does to a volume. `fat` is 12, 16 or 32 (the

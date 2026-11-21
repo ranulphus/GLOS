@@ -214,7 +214,31 @@ right error is part of the answer); **internal** after the core.
   - **N1b, writing:** clusters allocated and freed (FSInfo's hints kept), files made, written, cut short,
     deleted and renamed, folders made and removed, long names with their short names made as Windows makes
     them (`~1`), attributes and times; the writes in order and the dirty bits. Host test: random sequences of
-    those against a model of the tree, `fsck.fat` after each, mtools reading the result.
+    those against a model of the tree, `fsck.fat` after each, mtools reading the result. **Built 2026-11-21**
+    (`fat_mount_rw`, `fat_create`, `fat_write`, `fat_truncate`, `fat_unlink`, `fat_mkdir`, `fat_rmdir`,
+    `fat_rename`, `fat_setattr`, `fat_settime`, `fat_flush`; `FAT_READ_ONLY` leaves them out of the loader's
+    16-bit build). Write-through until N1c's cache, in an order that leaves the volume repairable wherever it
+    stops: a cluster's FAT entries (end mark, then the link to it) before the data, the data before the size
+    that covers it, a smaller size before the chain is cut and freed, a new folder's cluster zeroed and its "."
+    and ".." written before the entry that points at it, a renamed entry's new entries before its old ones go, a
+    deleted name's short entry before its long-name entries and those from the nearest back to the first (a cut
+    the other way round leaves fragments without their start in front of a live entry, which `fsck.fat` won't
+    repair: the cuts found it). Every loop over the disk's structures is bounded (a folder at 65,536 entries, a
+    chain at the cluster count), so a damaged volume gives an error, never a hang (the cuts found one too: a
+    folder grown by a link that never reached the disk). A FAT12 entry across two sectors can't be written at once: the half
+    written first is the one whose half-way value is the old, the new, or past the volume's clusters, which fsck
+    and ScanDisk end the chain at (the low byte first for a link, the high first for a new end; the cuts found a
+    torn link).
+    The host test is one script (rather than random sequences) done twice, through `fat.c` on a volume and
+    through the host's own calls in a mirror folder, then: mtools' copy of the volume compared with the mirror,
+    `fsck.fat -n` clean, the reader's own check of every file by both names, mtools' free space; and the same
+    script cut short at sampled writes (a power cut: what follows is dropped), where `fsck.fat` may find only
+    lost clusters, chains longer than their files, the FAT copies apart, or long-name entries left alone,
+    never a file longer than its chain or a cluster in two chains. The short names Windows 9x gives are checked
+    by name (`LONGFI~1.TXT` to `~6`, `X_Y_Z~1.TXT`, `HIDDEN~1`, `CAFÉ.TXT` in code page 850). Left for later:
+    the creation time's 10 ms (the clock callback gives DOS's 2 seconds), the volume label written (DOS's create
+    with attribute 08h, N2), FSInfo's free count worked out when it says "unknown" (N1c, at mount, by the
+    cache's scan).
   - **N1c, GLOS's IDE driver and the block layer:** the driver (PIO), the cache under it, INT 13h for its disks
     answered by GLOS; proven under hosted GLOS behind `[disk] driver = bios | glos` (bios by default), with DOS,
     ScanDisk and the gate on top of it, before native GLOS relies on it.

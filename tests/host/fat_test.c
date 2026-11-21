@@ -7,11 +7,24 @@
  *                                                and with seeks; no file the manifest hasn't got; each found by
  *                                                its short names too and in upper case; the label LABEL ("-":
  *                                                none); "FREE n" (bytes) printed for the script to compare
+ *     fat_test write IMAGE MIRROR [CUT]          N1b: one script of writes (files of every size around a cluster,
+ *                                                odd pieces, gaps, overwrites, appends, truncation both ways, long,
+ *                                                Unicode and colliding names, a folder over many clusters, the
+ *                                                root filled, renames within and across folders, folders moved,
+ *                                                deletion, attributes, times, the disk filled) done through
+ *                                                kernel/fs on IMAGE and through the host's own calls in folder
+ *                                                MIRROR, for the script to compare (mtools, fsck.fat); the short
+ *                                                names Windows 9x gives checked. "WRITES n": sector writes made;
+ *                                                "CUTTABLE n": those before the disk is filled (cut runs skip it).
+ *                                                CUT: writes after the CUT-th dropped (a power cut), for fsck.fat
+ *                                                to judge; MIRROR then unused
  * "fat_test: 0 failures" at the end when all held. */
 #define _FILE_OFFSET_BITS 64
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -292,6 +305,404 @@ static int format(const char *image, unsigned long sectors, int fat)
     return r != 0;
 }
 
+/* ---- writing (N1b) */
+
+static const char *mirror;
+static unsigned long writes, cut;
+
+/* Sector writes counted, and dropped after the cut (the cache in fat.c keeps them: the program goes on). */
+static int wr_counted(void *ctx, unsigned long lba, const unsigned char *data, unsigned count)
+{
+    if (cut && writes++ >= cut)
+        return 0;
+    if (!cut)
+        writes++;
+    return wr(ctx, lba, data, count);
+}
+
+/* 2026-11-21 12:34:56, DOS's way. */
+static unsigned long fixed_now(void *ctx)
+{
+    (void)ctx;
+    return (unsigned long)((46u << 9) | (11u << 5) | 21u) << 16 | (12u << 11) | (34u << 5) | 28u;
+}
+
+/* The mirror's path of a DOS path ("\a\b" -> MIRROR/a/b). */
+static void host_path(char *out, size_t size, const char *dos)
+{
+    size_t n = (size_t)snprintf(out, size, "%s/", mirror), i;
+
+    for (i = 0; dos[i] && n + 1 < size; i++)
+        if (!(i == 0 && (dos[i] == '\\')))
+            out[n++] = dos[i] == '\\' ? '/' : dos[i];
+    out[n] = 0;
+}
+
+static unsigned long rnd_state = 20261121;
+
+static unsigned rnd(unsigned n)
+{
+    rnd_state = rnd_state * 1103515245UL + 12345;
+    return (unsigned)((rnd_state >> 8) % n);
+}
+
+static void fill_bytes(unsigned char *p, unsigned long n, unsigned seed)
+{
+    unsigned long i, x = seed * 2654435761UL + 1;
+
+    for (i = 0; i < n; i++) {
+        x = x * 1664525UL + 1013904223UL;
+        p[i] = (unsigned char)(x >> 13);
+    }
+}
+
+static void expect(const char *what, const char *path, int got, int want)
+{
+    char d[1200];
+
+    if (got != want) {
+        snprintf(d, sizeof d, "%s: %d, want %d", path, got, want);
+        fail(what, d);
+    }
+}
+
+/* path written: n bytes of seed's, from offset at (the file created when `create`), in pieces of up to `piece`
+   (0: random sizes). The mirror the same. */
+static void put_file(struct fat_vol *v, const char *path, int create, unsigned long at, unsigned long n,
+                     unsigned seed, unsigned long piece)
+{
+    static unsigned char buf[1 << 20];
+    struct fat_file f;
+    unsigned long done = 0;
+    char hp[2048];
+    int r, fd;
+
+    if (n > sizeof buf)
+        n = sizeof buf;
+    fill_bytes(buf, n, seed);
+    r = create ? fat_create(v, path, 0, &f) : fat_open(v, path, &f);
+    if (r) {
+        expect(create ? "create" : "open", path, r, 0);
+        return;
+    }
+    fat_seek(&f, at);
+    while (done < n) {
+        unsigned long k = piece ? piece : 1 + rnd(rnd(3) ? 700 : 20000);
+        long w;
+
+        if (k > n - done)
+            k = n - done;
+        w = fat_write(&f, buf + done, k);
+        if (w != (long)k) {
+            char d[2100];
+
+            snprintf(d, sizeof d, "%s: wrote %ld of %lu at %lu", path, w, k, done);
+            fail("write", d);
+            break;
+        }
+        done += k;
+    }
+    expect("close", path, fat_close(&f), 0);
+    if (cut)
+        return;
+    host_path(hp, sizeof hp, path);
+    fd = open(hp, O_WRONLY | O_CREAT, 0644);
+    if (fd < 0 || pwrite(fd, buf, done, (off_t)at) != (ssize_t)done)
+        fail("mirror write", hp);
+    if (fd >= 0)
+        close(fd);
+}
+
+static void do_mkdir(struct fat_vol *v, const char *path)
+{
+    char hp[2048];
+
+    expect("mkdir", path, fat_mkdir(v, path), 0);
+    host_path(hp, sizeof hp, path);
+    if (!cut)
+        mkdir(hp, 0755);
+}
+
+static void do_unlink(struct fat_vol *v, const char *path)
+{
+    char hp[2048];
+
+    expect("unlink", path, fat_unlink(v, path), 0);
+    host_path(hp, sizeof hp, path);
+    if (!cut)
+        unlink(hp);
+}
+
+static void do_rename(struct fat_vol *v, const char *from, const char *to)
+{
+    char a[2048], b[2048];
+
+    expect("rename", from, fat_rename(v, from, to), 0);
+    host_path(a, sizeof a, from);
+    host_path(b, sizeof b, to);
+    if (!cut)
+        rename(a, b);
+}
+
+static void do_truncate(struct fat_vol *v, const char *path, unsigned long size)
+{
+    struct fat_file f;
+    char hp[2048];
+
+    if (fat_open(v, path, &f)) {
+        expect("open", path, 1, 0);
+        return;
+    }
+    expect("truncate", path, fat_truncate(&f, size), 0);
+    host_path(hp, sizeof hp, path);
+    if (!cut && truncate(hp, (off_t)size))
+        fail("mirror truncate", hp);
+}
+
+static void want_short(struct fat_vol *v, const char *path, const char *sname, int has_long)
+{
+    struct fat_ent e;
+    char d[1200];
+
+    if (fat_lookup(v, path, &e)) {
+        fail("short name: no entry", path);
+        return;
+    }
+    if (strcmp(e.sname, sname) || e.has_long != has_long) {
+        snprintf(d, sizeof d, "%s: %s%s, want %s%s", path, e.sname, e.has_long ? " +long" : "", sname,
+                 has_long ? " +long" : "");
+        fail("short name", d);
+    }
+}
+
+static int write_test(const char *image, const char *mirror_dir, unsigned long cut_at)
+{
+    struct fat_vol v;
+    struct fat_file f;
+    struct fat_ent e;
+    unsigned long csize, free0, free1, i, n;
+    char path[1200], name[600];
+    int r;
+
+    mirror = mirror_dir;
+    cut = cut_at;
+    img = fopen(image, "r+b");
+    if (!img) {
+        fail("image", image);
+        return 1;
+    }
+    r = fat_mount_rw(&v, rd, wr_counted, fixed_now, 0, 850);
+    if (r) {
+        printf("FAIL mount: %d\n", r);
+        return 1;
+    }
+    csize = v.spc * 512UL;
+    fat_free(&v, &free0);
+    printf("VOLUME fat=%d spc=%u clusters=%lu free=%lu\n", v.fat, v.spc, v.clusters, free0);
+
+    /* Names, and the short names Windows 9x gives them. */
+    put_file(&v, "\\short.txt", 1, 0, 100, 1, 0);
+    put_file(&v, "\\README", 1, 0, 0, 2, 0);
+    put_file(&v, "\\A Longer Name With Spaces.data", 1, 0, 5000, 3, 0);
+    put_file(&v, "\\many.dots.in.this.name.txt", 1, 0, 1234, 4, 0);
+    put_file(&v, "\\.hidden", 1, 0, 77, 5, 0);
+    put_file(&v, "\\Ünïcödé Ελληνικά кириллица.txt", 1, 0, 4321, 6, 0);
+    put_file(&v, "\\café.txt", 1, 0, 10, 7, 0);
+    put_file(&v, "\\x+y=z.txt", 1, 0, 11, 8, 0);
+    for (i = 1; i <= 6; i++) {
+        snprintf(path, sizeof path, "\\Long File Name %lu.txt", i);
+        put_file(&v, path, 1, 0, 50 + i, 10 + (unsigned)i, 0);
+    }
+    memset(name, 'n', 255);
+    name[255] = 0;
+    memcpy(name, "\\Two hundred and fifty-five", 27);
+    put_file(&v, name, 1, 0, 255, 17, 0);
+    if (!cut) {
+        want_short(&v, "\\short.txt", "SHORT.TXT", 1);
+        want_short(&v, "\\README", "README", 0);
+        want_short(&v, "\\A Longer Name With Spaces.data", "ALONGE~1.DAT", 1);
+        want_short(&v, "\\many.dots.in.this.name.txt", "MANYDO~1.TXT", 1);
+        want_short(&v, "\\.hidden", "HIDDEN~1", 1);
+        want_short(&v, "\\x+y=z.txt", "X_Y_Z~1.TXT", 1);
+        want_short(&v, "\\Long File Name 1.txt", "LONGFI~1.TXT", 1);
+        want_short(&v, "\\Long File Name 6.txt", "LONGFI~6.TXT", 1);
+        want_short(&v, "\\café.txt", "CAF\x90.TXT", 1);
+        expect("create twice", "\\README", fat_create(&v, "\\readme", 0, &f), FAT_EEXIST);
+        expect("bad name", "\\a*b", fat_create(&v, "\\a*b", 0, &f), FAT_EINVAL);
+        expect("in a file", "\\README\\x", fat_create(&v, "\\README\\x", 0, &f), FAT_ENOTDIR);
+        expect("no folder", "\\nope\\x", fat_create(&v, "\\nope\\x", 0, &f), FAT_ENOENT);
+    }
+
+    /* Sizes around a cluster, written in pieces of every kind. */
+    do_mkdir(&v, "\\sizes");
+    {
+        const unsigned long sizes[] = { 0, 1, 511, 512, 513, csize - 1, csize, csize + 1, 3 * csize + 7,
+                                        40000, 200000 };
+        const unsigned long pieces[] = { 0, 1, 512, 4096, 0, 0, 1000, 0, 0, 65536, 0 };
+
+        for (i = 0; i < sizeof sizes / sizeof sizes[0]; i++) {
+            snprintf(path, sizeof path, "\\sizes\\s%07lu.bin", sizes[i]);
+            if (fat_lookup(&v, path, &e) == FAT_OK)
+                continue;                       /* (512-byte clusters: the same sizes twice) */
+            put_file(&v, path, 1, 0, sizes[i], 100 + (unsigned)i, pieces[i]);
+        }
+    }
+
+    /* Folders deep, and one over many clusters of entries (holes made, then filled by long names). */
+    do_mkdir(&v, "\\deep");
+    do_mkdir(&v, "\\deep\\er");
+    do_mkdir(&v, "\\deep\\er\\and deeper");
+    put_file(&v, "\\deep\\er\\and deeper\\leaf.bin", 1, 0, 999, 200, 0);
+    put_file(&v, "\\deep\\er\\sibling.txt", 1, 0, 1, 201, 0);
+    do_mkdir(&v, "\\many");
+    n = v.clusters > 10000 ? 300 : 120;
+    for (i = 0; i < n; i++) {
+        snprintf(path, sizeof path, "\\many\\file number %03lu.txt", i);
+        put_file(&v, path, 1, 0, rnd(600), 300 + (unsigned)i, 0);
+    }
+    for (i = 0; i < n; i += 3) {
+        snprintf(path, sizeof path, "\\many\\file number %03lu.txt", i);
+        do_unlink(&v, path);
+    }
+    for (i = 0; i < n / 4; i++) {
+        snprintf(path, sizeof path, "\\many\\a later and rather longer name, number %03lu.txt", i);
+        put_file(&v, path, 1, 0, rnd(300), 700 + (unsigned)i, 0);
+    }
+
+    /* Gaps, overwrites, appends, truncation. */
+    put_file(&v, "\\sparse.bin", 1, 10000, 100, 900, 0);
+    put_file(&v, "\\sizes\\s0040000.bin", 0, 1000, 3000, 901, 0);
+    put_file(&v, "\\sizes\\s0040000.bin", 0, 39000, 5000, 902, 0);
+    put_file(&v, "\\sizes\\s0000001.bin", 0, 1, csize * 2, 903, 777);
+    do_truncate(&v, "\\sizes\\s0200000.bin", 1000);
+    do_truncate(&v, "\\sizes\\s0200000.bin", 5000);
+    do_truncate(&v, "\\sizes\\s0200000.bin", csize);
+    do_truncate(&v, "\\sizes\\s0000513.bin", 0);
+    do_truncate(&v, "\\README", 3);
+
+    /* Renames: within a folder, across, case only, folders moved (their ".." follows); refusals. */
+    do_rename(&v, "\\short.txt", "\\a much longer name now.txt");
+    do_rename(&v, "\\A Longer Name With Spaces.data", "\\SHORTER.DAT");
+    do_rename(&v, "\\README", "\\ReadMe");
+    do_rename(&v, "\\many.dots.in.this.name.txt", "\\deep\\er\\moved here.txt");
+    do_rename(&v, "\\deep\\er\\and deeper", "\\moved folder");
+    do_rename(&v, "\\moved folder", "\\deep\\moved back");
+    if (!cut) {
+        expect("into itself", "\\deep", fat_rename(&v, "\\deep", "\\deep\\er\\x"), FAT_EINVAL);
+        expect("onto another", "\\ReadMe", fat_rename(&v, "\\ReadMe", "\\SHORTER.DAT"), FAT_EEXIST);
+        expect("the root", "\\", fat_rename(&v, "\\", "\\x"), FAT_EACCES);
+        if (!fat_lookup(&v, "\\deep", &e)) {
+            struct fat_ent d2;
+
+            r = fat_lookup(&v, "\\deep\\moved back\\..", &d2);
+            expect("\"..\" is its new parent", "\\deep\\moved back", r == FAT_OK && d2.cluster == e.cluster, 1);
+        }
+        want_short(&v, "\\ReadMe", "README", 1);
+    }
+
+    /* Removal, attributes and times. */
+    do_mkdir(&v, "\\empty");
+    if (!cut) {
+        expect("rmdir full", "\\deep", fat_rmdir(&v, "\\deep"), FAT_ENOTEMPTY);
+        expect("rmdir a file", "\\ReadMe", fat_rmdir(&v, "\\ReadMe"), FAT_ENOTDIR);
+        expect("unlink a folder", "\\deep", fat_unlink(&v, "\\deep"), FAT_EISDIR);
+        expect("rmdir the root", "\\", fat_rmdir(&v, "\\"), FAT_EACCES);
+    }
+    expect("rmdir", "\\empty", fat_rmdir(&v, "\\empty"), 0);
+    if (!cut) {
+        char hp[2048];
+
+        host_path(hp, sizeof hp, "\\empty");
+        rmdir(hp);
+    }
+    expect("setattr", "\\ReadMe", fat_setattr(&v, "\\ReadMe", FAT_A_RDONLY | FAT_A_HIDDEN), 0);
+    if (!cut) {
+        expect("unlink read-only", "\\ReadMe", fat_unlink(&v, "\\ReadMe"), FAT_EACCES);
+        r = fat_lookup(&v, "\\ReadMe", &e);
+        expect("attributes", "\\ReadMe", r ? -1 : e.attr, FAT_A_RDONLY | FAT_A_HIDDEN);
+    }
+    expect("setattr", "\\ReadMe", fat_setattr(&v, "\\ReadMe", FAT_A_ARCHIVE), 0);
+    expect("settime", "\\x+y=z.txt", fat_settime(&v, "\\x+y=z.txt", (20u << 9) | (6u << 5) | 15u, 0x6000), 0);
+    if (!cut) {
+        r = fat_lookup(&v, "\\x+y=z.txt", &e);
+        expect("time", "\\x+y=z.txt", r ? -1 : e.wdate == ((20u << 9) | (6u << 5) | 15u) && e.wtime == 0x6000, 1);
+        r = fat_lookup(&v, "\\café.txt", &e);
+        expect("written now", "\\café.txt", r ? -1 : (e.wdate == (fixed_now(0) >> 16)), 1);
+    }
+
+    /* The root filled (FAT12 and FAT16: its fixed entries; FAT32's grows), then emptied. */
+    for (i = 0; i < 600; i++) {
+        snprintf(path, sizeof path, "\\R%05lu", i);
+        r = fat_create(&v, path, 0, &f);
+        if (r)
+            break;
+        if (!cut) {
+            char hp[2048];
+            int fd;
+
+            host_path(hp, sizeof hp, path);
+            fd = open(hp, O_WRONLY | O_CREAT, 0644);
+            if (fd >= 0)
+                close(fd);
+        }
+    }
+    if (!cut)
+        expect("root full", "\\", v.fat == 32 ? r : r == FAT_ENOSPC && i < 600 ? 0 : r, 0);
+    while (i--) {
+        snprintf(path, sizeof path, "\\R%05lu", i);
+        do_unlink(&v, path);
+    }
+
+    /* The disk filled: the last write short, nothing free; then given back. (Not in a power-cut run: the writes
+       before it are the ones cut.) */
+    printf("CUTTABLE %lu\n", writes);
+    fat_free(&v, &free1);
+    if (!cut) {
+        static unsigned char buf[65536];
+        unsigned long total = 0;
+        long w;
+        char hp[2048];
+        int fd;
+
+        expect("create", "\\fill.bin", fat_create(&v, "\\fill.bin", 0, &f), 0);
+        host_path(hp, sizeof hp, "\\fill.bin");
+        fd = open(hp, O_WRONLY | O_CREAT, 0644);
+        fill_bytes(buf, sizeof buf, 999);
+        for (;;) {
+            w = fat_write(&f, buf, sizeof buf);
+            if (w > 0) {
+                if (pwrite(fd, buf, (size_t)w, (off_t)total) != w)
+                    fail("mirror write", hp);
+                total += (unsigned long)w;
+            }
+            if (w != (long)sizeof buf)
+                break;
+        }
+        close(fd);
+        expect("disk full", "\\fill.bin", w < 0 ? (int)w : 0, w < 0 ? FAT_ENOSPC : 0);
+        fat_free(&v, &n);
+        expect("nothing free", "\\fill.bin", (int)n, 0);
+        expect("filled", "\\fill.bin", total == free1 * csize, 1);
+        if (v.free_count != 0xFFFFFFFFUL)
+            expect("free count", "\\fill.bin", (int)v.free_count, 0);
+        do_unlink(&v, "\\fill.bin");
+        fat_free(&v, &n);
+        expect("given back", "\\fill.bin", n == free1, 1);
+    }
+
+    fat_free(&v, &n);
+    if (!cut && v.free_count != 0xFFFFFFFFUL && v.free_count != n) {
+        char d[100];
+
+        snprintf(d, sizeof d, "kept %lu, FAT %lu", v.free_count, n);
+        fail("free count", d);
+    }
+    expect("flush", "", fat_flush(&v), 0);
+    printf("WRITES %lu\n", writes);
+    fclose(img);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 5 && !strcmp(argv[1], "format"))
@@ -301,6 +712,11 @@ int main(int argc, char **argv)
         printf("fat_test: %d failures\n", fails);
         return fails != 0;
     }
-    fprintf(stderr, "fat_test format IMAGE SECTORS FAT | check IMAGE MANIFEST CP LABEL\n");
+    if ((argc == 4 || argc == 5) && !strcmp(argv[1], "write")) {
+        write_test(argv[2], argv[3], argc == 5 ? strtoul(argv[4], 0, 10) : 0);
+        printf("fat_test: %d failures\n", fails);
+        return fails != 0;
+    }
+    fprintf(stderr, "fat_test format IMAGE SECTORS FAT | check IMAGE MANIFEST CP LABEL | write IMAGE MIRROR [CUT]\n");
     return 2;
 }

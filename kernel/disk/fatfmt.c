@@ -127,7 +127,7 @@ static void label11(unsigned char *out, const char *label)
         out[i] = ' ';
 }
 
-int fat_format(const struct fat_geo *g, fat_write write, void *ctx, struct fat_made *made)
+int fat_format(const struct fat_geo *g, fat_write_fn write, void *ctx, struct fat_made *made)
 {
     unsigned char s[512];
     struct plan p;

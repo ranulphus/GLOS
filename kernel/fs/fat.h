@@ -3,13 +3,19 @@
  * (tests/host/fat_test.c reads what mkfs.fat, mtools and kernel/disk's fat_format made). Names are UTF-8; short
  * names are bytes in a DOS code page (glos/cp.h), as DOS keeps them on the disk.
  *
- * N1a reads. Writing (N1b), the disk cache and several callers (N1c) come after. */
+ * N1a reads; N1b writes (fat_mount_rw), write-through in the order that keeps a volume repairable at any moment:
+ * a cluster's FAT entries before the directory entry that points at it, a file's data before the size that
+ * covers it. The disk cache and several callers (N1c, N1d) come after. */
 #ifndef K_FAT_H
 #define K_FAT_H
 
 /* `count` sectors from the volume's sector `lba` (counted from its start) into `buf`: 0, or anything else for
    an error. */
 typedef int (*fat_read_fn)(void *ctx, unsigned long lba, unsigned char *buf, unsigned count);
+/* ... and written: 0, or anything else for an error. */
+typedef int (*fat_write_fn)(void *ctx, unsigned long lba, const unsigned char *buf, unsigned count);
+/* The time now, local, as DOS keeps it: the date in the high 16 bits, the time in the low. */
+typedef unsigned long (*fat_time_fn)(void *ctx);
 
 enum {
     FAT_OK = 0,
@@ -20,7 +26,12 @@ enum {
     FAT_ECORRUPT = -6,                  /* a chain leaves the volume or loops, an entry makes no sense */
     FAT_ENOTFAT = -7,                   /* the first sector is no FAT volume's */
     FAT_EINVAL = -8,                    /* a name or path that can't be */
-    FAT_ENOTSUP = -9                    /* a FAT volume GLOS doesn't read (sectors other than 512 bytes) */
+    FAT_ENOTSUP = -9,                   /* a FAT volume GLOS doesn't read (sectors other than 512 bytes) */
+    FAT_EEXIST = -10,                   /* the name is there already */
+    FAT_ENOSPC = -11,                   /* no free cluster, or no room in a FAT12/16 root folder */
+    FAT_ENOTEMPTY = -12,                /* a folder to remove still has entries */
+    FAT_EROFS = -13,                    /* mounted for reading only */
+    FAT_EACCES = -14                    /* read-only, a volume label, or the root */
 };
 
 #define FAT_SECTOR 512
@@ -34,12 +45,16 @@ enum {
 
 struct fat_vol {
     fat_read_fn read;
+    fat_write_fn write;                 /* 0: mounted for reading only */
+    fat_time_fn now;
     void *ctx;
     int fat;                            /* 12, 16 or 32 */
     int cp;                             /* the code page of its short names (437 unless said) */
     unsigned spc;                       /* sectors a cluster */
     unsigned long total;                /* sectors in the volume */
     unsigned long fat_start, fat_sectors;   /* the FAT in use (FAT32's mirroring off: the active one) */
+    unsigned long fat0;                 /* the first FAT's sector (the reserved sectors' end) */
+    int mirror;                         /* writes go to every FAT copy (FAT32 with mirroring off: the active one) */
     unsigned nfats;
     unsigned long root_start, root_sectors;     /* FAT12 and FAT16: the root folder's fixed place */
     unsigned long root_cluster;         /* FAT32: the root folder's first cluster */
@@ -48,6 +63,10 @@ struct fat_vol {
     unsigned long fsinfo;               /* FAT32: FSInfo's sector, 0 if none */
     unsigned long fsinfo_free;          /* FSInfo's free count, 0xFFFFFFFF if it doesn't say */
     unsigned long serial;
+    unsigned long free_count;           /* free clusters as far as known (0xFFFFFFFF: unknown) */
+    unsigned long next_free;            /* where the next search for one starts */
+    int dirty;                          /* the clean bit cleared on the disk, until fat_flush */
+    int was_dirty;                      /* it was already when mounted: fat_flush leaves it so (ScanDisk's) */
     char label[12];                     /* the boot sector's, the code page's bytes, trailing blanks gone */
     struct {
         unsigned long lba;
@@ -81,11 +100,13 @@ struct fat_dir {
     unsigned long cl, cl_ord;           /* the cluster that holds entry cl_ord * per-cluster, and that ordinal */
 };
 
-/* A file being read. */
+/* A file being read or written. */
 struct fat_file {
     struct fat_vol *v;
     unsigned long first, size, pos;
     unsigned long cl, cl_ord;           /* the cluster that holds byte cl_ord * cluster size, and that ordinal */
+    unsigned long dir, index;           /* its short entry (struct fat_ent's), for its size and first cluster */
+    int changed;                        /* written since its entry was last brought up to date */
 };
 
 /* The volume whose first sector `read` gives: 0, FAT_ENOTFAT, FAT_ENOTSUP, FAT_EIO. `cp` 0: 437. */
@@ -110,6 +131,34 @@ int fat_open(struct fat_vol *v, const char *path, struct fat_file *f);
 long fat_read(struct fat_file *f, void *buf, unsigned long n);
 /* The position (past the end: there, reading gives 0). */
 int fat_seek(struct fat_file *f, unsigned long pos);
+
+/* ---- writing (N1b): a volume mounted with a write callback; every call writes what it changed before it
+   returns (write-through), FSInfo's count and hint and the clean bit at fat_flush */
+
+/* The volume, for reading and writing. `now` 0: times are left 0. */
+int fat_mount_rw(struct fat_vol *v, fat_read_fn read, fat_write_fn write, fat_time_fn now, void *ctx, int cp);
+/* FSInfo's free count and hint written, and the volume marked clean (unless it came dirty). */
+int fat_flush(struct fat_vol *v);
+
+/* A new, empty file (FAT_EEXIST if the name is there), opened for writing at 0. attr: FAT_A_RDONLY, HIDDEN,
+   SYSTEM (ARCHIVE is added). */
+int fat_create(struct fat_vol *v, const char *path, unsigned char attr, struct fat_file *f);
+/* n bytes at the file's position (past its end: the gap is zeros): how many, or an error. */
+long fat_write(struct fat_file *f, const void *buf, unsigned long n);
+/* The file made `size` bytes long: clusters past it freed, or zeros added. */
+int fat_truncate(struct fat_file *f, unsigned long size);
+/* Its directory entry brought up to date (size, first cluster, written time): fat_write does it as it goes. */
+int fat_close(struct fat_file *f);
+int fat_unlink(struct fat_vol *v, const char *path);
+int fat_mkdir(struct fat_vol *v, const char *path);
+int fat_rmdir(struct fat_vol *v, const char *path);
+/* A file or folder given another name, in the same folder or another (a folder never into itself). */
+int fat_rename(struct fat_vol *v, const char *from, const char *to);
+int fat_setattr(struct fat_vol *v, const char *path, unsigned char attr);
+int fat_settime(struct fat_vol *v, const char *path, unsigned short date, unsigned short time);
+/* The short name Windows 9x would give `name` in folder `dir` (its first cluster; 0 the root): 11 bytes, the
+   code page's. 0 and *lfn whether the name needs long-name entries; an error. */
+int fat_short_name(struct fat_vol *v, unsigned long dir, const char *name, unsigned char out[11], int *lfn);
 
 /* Free clusters, counted in the FAT (FSInfo's count is a hint, which Windows doesn't always keep). */
 int fat_free(struct fat_vol *v, unsigned long *clusters);
