@@ -390,7 +390,12 @@ Everything else (the files, the directories, the cache) is the kernel's, above 1
   can be (DOS 2.1-6.0's, to check against 7.1), upper memory linked through a DOS "SC" block from A000h)
   (`mcb_test`); `psp.c`, a PSP as RBIL's table 01378 lays it out (CALL 5's far call to F01D:FEF0, which wraps to
   0000:00C0, where N2's DOS area keeps a jump to its CP/M entry, and the HMA a copy while A20 is on) and a
-  child's environment (the parent's strings, 0001h, the program's full name; 32 KB at most) (`psp_test`). FCB parsing (29h) waits for MS-DOS 7.1 to
+  child's environment (the parent's strings, 0001h, the program's full name; 32 KB at most) (`psp_test`);
+  `files.c`, files by handle (3Ch, 3Dh, 3Eh, 3Fh, 40h, 42h, 45h, 46h, 5Bh, EXEC's inheritance, a program's handles
+  closed at its exit): the system file table in the machine's memory as RBIL's table 01642 lays it out (AUX,
+  CON, PRN its first three, a file's fields brought up to date at each call), each program's handle table
+  through its PSP, DOS 7's sharing table between every entry open on a file, the file itself `fsv.c`'s
+  (`files_test`, mutation-checked). FCB parsing (29h) waits for MS-DOS 7.1 to
   compare with: RBIL doesn't give its separators and terminators. Open: whether MS-DOS 7.1's table for 437 makes e acute E acute (as GLOS does now, and
   Windows 98's short names) or E: checked against its COUNTRY.SYS with the owner's image (N7).
 
