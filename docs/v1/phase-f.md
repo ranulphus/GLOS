@@ -1123,3 +1123,20 @@ to choose (the plan's last section); nothing here depends on them.
   stronger drivers one craft of four made no lap in the laps test (it starts beside the craft that stands
   still in its dock, and does not get round it); the mild driver's did. To be put right with the driving's
   own tests.
+
+### Its first playable part (the same day)
+
+HVCRAFT.EXE, "Hovercraft" in the Start menu (**a working name**): `apps/hover/hvcraft.c`. One arena, built
+in; the player's craft and three of the computer's (the middle strength); the four kinds of game on keys 1
+to 4; the picture drawn with DOS-GL in a window, as the savers draw: the arena's squares as boxes lit by the
+way they face (walls, floors, quays, ramps as wedges, water, docks in their sides' colours), beacons, the
+lamp, buoys and flags as posts, the craft as a few boxes turned to their headings, seen from behind and
+above the player's. The score in the window's title. Not a toolkit program: its window is DOS-GL's.
+
+- **Loop A** (`hover_case`, in the desk suite, on the G200 and on the S3): `HVCRAFT -demo`, every craft
+  the computer's, each kind of game to step 450: the state it says there is the one written in the suite,
+  the same whether the card's engine draws the window or DOS-GL's software renderer does; and a picture
+  taken while it plays has a scene's worth of colours.
+- **Not yet**: all of the plan beyond that (the lobby, network games, arenas from files, the map and the
+  figures in the picture, sound, pads and the mouse, full screen). **To be measured**: frames a second on
+  the benches' cards and with the software renderer.

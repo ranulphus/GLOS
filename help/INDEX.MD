@@ -30,6 +30,7 @@ contents are at the left; **Ctrl+F** looks for words in every page.
   - [Web Reader](WEB.MD)
   - [Disk Tools](DISKS.MD)
   - [Skiing](SKI.MD)
+  - [Hovercraft](HVCRAFT.MD)
 - [Sound](SOUND.MD)
 - [Keyboards, mice and game pads](PADS.MD)
 - [The network](NETWORK.MD)

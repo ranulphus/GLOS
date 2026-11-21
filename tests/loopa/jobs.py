@@ -7381,6 +7381,73 @@ def apps_case(profile, card):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+HOVER_AT = {                            # the line HVCRAFT -demo says at step 450, by the kind of game
+    0: "HVCRAFT at 450 score=1:0 craft0=1095,393,768 craft1=2500,776 lamp=-1 own=0",
+    1: "HVCRAFT at 450 score=2:3 craft0=4751,929,912 craft1=1495,702 lamp=-1 own=0",
+    2: "HVCRAFT at 450 score=0:0 craft0=5087,653,672 craft1=3764,641 lamp=1 own=4",
+    3: "HVCRAFT at 450 score=0:0 craft0=1604,2134,880 craft1=2119,2181 lamp=-1 own=1",
+}
+
+
+def hover_case(profile, vcard, card):
+    """The hovercraft game (phase F; apps/hover, apps/shared/hvgame.c) on a desktop: HVCRAFT -demo, every craft
+    the computer's, for each of the four kinds of game to step 450: the game's state it says there is the one
+    written here (a game is its arena and its controls: the same on every PC, whatever draws the picture: the
+    card's engine in a window on the Matrox card, DOS-GL's software renderer on the S3). And a picture of it
+    while it plays: the sky above, the arena under it, more than a few colours."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    agent = Agent("hover-" + tag, profile, card, ["--card", vcard, "--file", "build/apps/HVCRAFT.EXE=/TEST/HVCRAFT.EXE",
+        "--cmd", "SERSAY HX-START hover", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=1200)
+    out = os.path.join(ROOT, "out", "hover-" + tag)
+    checks, info = {"listen": agent.listening()}, ""
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        t0 = time.time()
+        while time.time() - t0 < 60 and not agent.ssh("glos display")[1].startswith("display on mode="):
+            time.sleep(0.5)
+        said = {}
+        for kind in range(4):
+            rc, o, e = agent.ssh("C:\\TEST\\HVCRAFT.EXE -demo -kind %d -until 450" % kind, timeout=400)
+            at = [l.strip() for l in o.replace("\r", "").split("\n") if l.startswith("HVCRAFT at ")]
+            said[kind] = at[0] if at else "(nothing: rc=%d)" % rc
+            checks["kind%d" % kind] = rc == 0 and "HVCRAFT end" in o and bool(at) and at[0] == HOVER_AT.get(kind, at[0])
+            if not checks["kind%d" % kind] or kind not in HOVER_AT:
+                print("    %s kind %d: %s" % (tag, kind, said[kind]))
+        # a picture while a game plays
+        h = subprocess.Popen(agent.opts + ["glos@127.0.0.1", "C:\\TEST\\HVCRAFT.EXE -demo -kind 0 -until 1500"],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 120 and "prog=HVCRAFT.EXE" not in agent.log().split("HX-START hover")[-1].split("GLOS-APP start")[-1]:
+            time.sleep(0.5)
+        time.sleep(8)
+        p = subprocess.run(agent.opts + ["glos@127.0.0.1", "glos shot"], capture_output=True, timeout=300)
+        os.makedirs(out, exist_ok=True)
+        open(os.path.join(out, "playing.png"), "wb").write(p.stdout)
+        pic = png_rgb(p.stdout) if p.returncode == 0 else None
+        if pic:
+            colours = set(pic[2][i:i + 3] for i in range(0, len(pic[2]), 3 * 7))
+            checks["picture"] = len(colours) >= 12
+            info += " colours=%d" % len(colours)
+        else:
+            checks["picture"] = False
+        try:
+            checks["played"] = h.wait(timeout=400) == 0
+        except subprocess.TimeoutExpired:
+            h.kill()
+            checks["played"] = False
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["apps"] = text.count("prog=HVCRAFT.EXE") >= 5
+    checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    checks["done"] = "GLOS-EXIT code=0" in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s%s" % ("hover-" + tag, "PASS" if not bad else "FAIL", info,
+                               "" if not bad else " failed: " + " ".join(bad)), not bad
+
+
 def saver_case(profile, vcard, card):
     """A saver that is a program (phase D, D6; kernel/wm/saver.c, apps/savers): [saver] saver = stars, the saver
     asked for (glos idle saver). STARS.SCR's full-screen window comes, drawn by the card's engine on a Matrox card
@@ -11209,12 +11276,16 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]
-        res = matrix(desk_case, cases, a.jobs)
+        res = [] if os.environ.get("DESK_ONLY") == "hover" else matrix(desk_case, cases, a.jobs)
         # (the G100 since RetroGPU d51210f, 2026-11-18: its window's first lock divided by nothing, and on the real
         # card the memory's size was misread)
         savers = [c for c in [("bf6", "g200", "ne2kpci"), ("bf6", "vbe", "ne2kpci"), ("bf6", "g100", "ne2kpci")]
                   if not a.profile or c[0] in a.profile]
+        hovers = [c for c in savers if c[1] != "g100"]  # ... and the hovercraft game, by the card and in software
+        if os.environ.get("DESK_ONLY") == "hover":      # (DESK_ONLY=hover: those alone)
+            return 0 if all(r[1] for r in matrix(hover_case, hovers, a.jobs)) else 1
         res += matrix(saver_case, savers, a.jobs)       # ... and a saver that is a program (phase D)
+        res += matrix(hover_case, hovers, a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "win":
         cases = [(win_case,) + c for c in WIN_CASES if not a.profile or c[0] in a.profile] \

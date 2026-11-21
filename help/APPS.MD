@@ -22,6 +22,7 @@ These come with GLOS. All are in the Start menu.
 | [Web Reader](WEB.MD) | Reading web pages as text |
 | [Disk Tools](DISKS.MD) | Floppy and disk images |
 | [Skiing](SKI.MD) | A game: down a mountain on skis |
+| [Hovercraft](HVCRAFT.MD) | A game: hovercraft in a walled yard, in 3D |
 | [Help](HELP.MD) | This guide |
 
 ## What they share

@@ -1176,6 +1176,17 @@ endef
 $(foreach s,$(SAVERS),$(eval $(call saver_scr,$(shell echo $(s) | tr a-z A-Z),$(s))))
 savers: $(SAVER_SCRS)
 apps: $(APP_EXES) $(SSH_EXES) $(SAVER_SCRS)
+# The hovercraft game (phase F): its truth (apps/shared/hv*.c) and a picture drawn with RetroGPU's DOS-GL, as the
+# savers draw (no copy of it). Not a toolkit program: its window is DOS-GL's.
+HVCRAFT_SRCS := apps/hover/hvcraft.c apps/shared/hvarena.c apps/shared/hvgame.c
+build/apps/HVCRAFT.EXE: $(HVCRAFT_SRCS) apps/shared/hvarena.h apps/shared/hvgame.h build/sdk/libglos.a tools/glosmark.py \
+                        $(DOSGL_DIR)/build/lib/libGL.a
+	@mkdir -p build/apps
+	$(Q)echo "  DJCC    apps/hover"
+	$(Q)$(DJCC) -O2 -Wall -Werror -Iinclude -I$(DOSGL_DIR)/include -o $@ $(HVCRAFT_SRCS) $(DOSGL_DIR)/build/lib/libGL.a \
+	  build/sdk/libglos.a -lm
+	$(Q)python3 tools/glosmark.py $@
+apps: build/apps/HVCRAFT.EXE
 build/dj/APPTEST.EXE: tests/dos/apptest.c build/sdk/libglos.a tools/glosmark.py
 	@mkdir -p build/dj
 	$(Q)echo "  DJCC    $<"
