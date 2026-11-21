@@ -397,8 +397,10 @@ Everything else (the files, the directories, the cache) is the kernel's, above 1
   through its PSP, DOS 7's sharing table between every entry open on a file, the file itself `fsv.c`'s
   (`files_test`, mutation-checked); `path.c`, a program's path made a drive and a whole path (each drive's
   current folder, '.' and '..', both separators, the code page's upper case, parts cut to 8.3) and 60h's and
-  47h's forms (`path_test`). To check against MS-DOS 7.1: parts cut to 8.3 rather than refused, and the longest
-  whole path (127 here). FCB parsing (29h) waits for MS-DOS 7.1 to
+  47h's forms (`path_test`); `find.c`, 4Eh and 4Fh with their state in the DTA as RBIL's table 01626 has it
+  (MS-DOS 5's layout, FAT32's cluster's high word in its reserved bytes), going on from where they were after
+  other calls, several at once (`find_test`). To check against MS-DOS 7.1: parts cut to 8.3 rather than
+  refused, the longest whole path (127 here), and 4Eh with nothing matching (12h here, or 02h). FCB parsing (29h) waits for MS-DOS 7.1 to
   compare with: RBIL doesn't give its separators and terminators. Open: whether MS-DOS 7.1's table for 437 makes e acute E acute (as GLOS does now, and
   Windows 98's short names) or E: checked against its COUNTRY.SYS with the owner's image (N7).
 
