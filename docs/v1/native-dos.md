@@ -382,7 +382,10 @@ Everything else (the files, the directories, the cache) is the kernel's, above 1
   mode ends). Built so far, plain C and host-tested ahead of the rest: `share.c`, RBIL's table 01404 (DOS 7.x
   sharing) as data, every one of its 400 cells checked against RBIL's own text (`share_test`); `names.c`,
   FINDFIRST's template, matching and search attributes, and a byte's upper case in the code page
-  (`names_test`). Open: whether MS-DOS 7.1's table for 437 makes e acute E acute (as GLOS does now, and
+  (`names_test`); `exe.c`, what EXEC computes of a .COM or .EXE (the image from the header's pages and last
+  page, memory needed and wanted, loading high when both allocations are 0, relocations by a factor for 4B03h's
+  overlays too, the starting registers RBIL gives) (`exe_test`). FCB parsing (29h) waits for MS-DOS 7.1 to
+  compare with: RBIL doesn't give its separators and terminators. Open: whether MS-DOS 7.1's table for 437 makes e acute E acute (as GLOS does now, and
   Windows 98's short names) or E: checked against its COUNTRY.SYS with the owner's image (N7).
 
 ### What it answers
