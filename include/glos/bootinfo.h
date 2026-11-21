@@ -11,7 +11,7 @@ typedef unsigned int   bi_u32;
 #endif
 
 #define BOOTINFO_MAGIC   0x4F4F4247UL           /* "GBOO" */
-#define BOOTINFO_VERSION 10
+#define BOOTINFO_VERSION 11
 
 #define KERNEL_MAGIC     0x4B4F4C47UL           /* "GLOK", first word of GLOSK.BIN */
 #define KERNEL_LINK      0xC0100000UL           /* where the kernel is linked */
@@ -176,6 +176,8 @@ struct bootinfo {
     char dev_off[192];                          /* [devices] off as GLOS starts: the devices GLOS's drivers leave to
                                                    DOS (the network card's driver looks before the kernel has read
                                                    GLOS.CFG); empty: none */
+    /* version 11: GLOS's own IDE driver (docs/v1/native-dos.md, N1c) */
+    bi_u32 cache_driver;                        /* [cache] driver: 0 bios, 1 glos */
 };
 #define BI_CABLE_SERVER 1u
 #define BI_CABLE_CLIENT 2u

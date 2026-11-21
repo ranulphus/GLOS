@@ -24,7 +24,16 @@
  * Memory: frames from the top (pmm_alloc_high), given back the moment
  * anything else needs one (cache_reclaim, from kernel/mm/vmm.c). Its tables
  * are changed, and its blocks copied, with interrupts off, so the reclaims
- * (also with interrupts off) never see a block half done. */
+ * (also with interrupts off) never see a block half done.
+ *
+ * [cache] driver = glos (docs/v1/native-dos.md, N1c): the reads and writes
+ * the cache makes for a drive go to GLOS's own IDE driver (kernel/drv/ide.c)
+ * instead of the BIOS, for each BIOS drive matched to one IDE disk (sector 0
+ * the same through both, and no other disk's). Taken up at the next INT 13h,
+ * in the VM thread, where the BIOS can't be in the middle of a command; every
+ * other INT 13h call still goes to the BIOS, which finds the channel as it
+ * left it (ata.c). Verify mode reads its hits from the BIOS and compares:
+ * blocks the IDE driver filled, checked against the BIOS as they are used. */
 #include <string.h>
 
 #include "glos/bootinfo.h"
@@ -32,6 +41,7 @@
 #include "cache.h"
 #include "cstore.h"
 #include "dpmi.h"
+#include "ide.h"
 #include "io.h"
 #include "kprintf.h"
 #include "mm.h"
@@ -47,8 +57,15 @@ struct drive {
     u8 dl, idx, edd, nofill;
     u8 al_zero;                                 /* its BIOS answers a CHS read with AL 0, not the count (86Box's) */
     u8 al_known;                                /* learnt: until then a CHS read goes to the BIOS */
+    u8 wal_zero, wal_known;                     /* the same for a CHS write (driver = glos: until then, the BIOS's) */
     struct cgeo g;
     u32 sectors;
+    struct ata_dev *ide;                        /* [cache] driver = glos: its IDE disk (0: the BIOS) */
+    u8 rec;                                     /* the BIOS's answers below recorded at the switch */
+    struct said { u32 eax, ebx, ecx, edx; u16 flags; } r08, r15, r41;
+    u8 p48[0x42];                               /* 48h's buffer as the BIOS filled it */
+    u32 n48;                                    /* its bytes (0: 48h failed: r48's AH says how) */
+    struct said r48;
 };
 
 struct call {                                   /* how the caller's INT was made: the cache's calls are the same */
@@ -67,6 +84,7 @@ struct hent { u32 key, reads; };
 static struct {
     u8 mode, trapped, direct, inside, ready, ports_on;
     u8 want;                                    /* a mode asked for while the BIOS was busy (0xFF: none) */
+    u8 driver, want_driver;                     /* 1: GLOS's IDE driver; asked for (the same: nothing to do) */
     int busy_at;                                /* rm_nesting() of the cache's BIOS call in progress; 0 none */
     u32 gen;                                    /* a drop of everything: a request started before keeps nothing */
     u32 buf;                                    /* the block buffer (linear), its DAP at buf + 4096; 0 none */
@@ -331,11 +349,37 @@ static void learn(struct drive *d, u32 al, u32 n)
         d->al_zero = 0, d->al_known = 1;
 }
 
+static void learn_w(struct drive *d, u32 al, u32 n)
+{
+    if (n && !al)
+        d->wal_zero = 1, d->wal_known = 1;
+    else if (al == n)
+        d->wal_zero = 0, d->wal_known = 1;
+}
+
 /* Sectors [lba, lba + n) of q's drive to linear dst, by one BIOS call; *got: how many it did. */
+/* n sectors at lba of drive d to or from linear dst by GLOS's IDE driver: 0, or the BIOS's error (AH) + 100h
+   with the sectors done in *got. */
+static u32 ide_io(struct drive *d, u32 lba, u32 n, u32 dst, u32 *got, int writing)
+{
+    unsigned long done = 0;
+    int r = writing ? ata_write(d->ide, lba, 0, n, vm_ptr(dst), &done) : ata_read(d->ide, lba, 0, n, vm_ptr(dst), &done);
+
+    *got = (u32)done;
+    c.calls++;
+    if (!r)
+        return 0;
+    kprintf("GLOS-IDE error dl=%02x lba=%u n=%u %s r=%d status=%02x err=%02x\n", d->dl, lba, n,
+            writing ? "write" : "read", r, d->ide->status, d->ide->err);
+    return 0x100 | ide_bios_error(d->ide, r);
+}
+
 static u32 read_to(const struct call *k, const struct req *q, const struct rmregs *cr, u32 lba, u32 n, u32 dst, u32 *got)
 {
     struct rmregs r;
     u32 e, seg, off, cx, dh;
+    if (q->d->ide)
+        return ide_io(q->d, lba, n, dst, got, 0);
     memset(&r, 0, sizeof r);
     seg_off(dst, &seg, &off);
     if (q->dap) {                               /* the caller's DAP, for this run */
@@ -370,7 +414,15 @@ static u32 read_to(const struct call *k, const struct req *q, const struct rmreg
 static u32 fill(const struct call *k, struct drive *d, u32 blk, u32 gen)
 {
     struct rmregs r;
-    u32 n = d->sectors - blk < 8 ? d->sectors - blk : 8, e, cx, dh, dap = c.buf + 4096;
+    u32 n = d->sectors - blk < 8 ? d->sectors - blk : 8, e, cx, dh, dap = c.buf + 4096, got;
+    if (d->ide) {
+        e = ide_io(d, blk, n, c.buf, &got, 0);
+        if (e)
+            return e;
+        keep(d->idx, blk, n, c.buf, gen);
+        c.fills++;
+        return 0;
+    }
     memset(&r, 0, sizeof r);
     if (d->edd) {
         vm_wr8(dap, 16);
@@ -455,7 +507,8 @@ static int decode(const struct rmregs *r, struct req *q)
 static void result(const struct req *q, struct rmregs *cr, u32 e, u32 done)
 {
     cr->eax = (cr->eax & 0xFFFF0000u) | ((e & 0xFF) << 8)
-              | (q->dap ? (cr->eax & 0xFF) : !e && q->d->al_zero ? 0 : (done & 0xFF));
+              | (q->dap ? (cr->eax & 0xFF)
+                 : !e && (q->ah == 0x03 ? q->d->wal_zero : q->d->al_zero) ? 0 : (done & 0xFF));
     if (e)
         cr->flags |= FL_CF;
     else
@@ -534,6 +587,187 @@ static u32 do_read(const struct call *k, const struct req *q, struct rmregs *cr,
     return e;
 }
 
+/* ---- GLOS's IDE driver in the BIOS's place */
+
+/* Sector lba of drive d through the BIOS into the block buffer (not kept): 0, or the BIOS's error. */
+static u32 bios_sector(const struct call *k, struct drive *d, u32 lba)
+{
+    struct rmregs r;
+    u32 cx, dh, dap = c.buf + 4096;
+    memset(&r, 0, sizeof r);
+    if (d->edd) {
+        vm_wr8(dap, 16);
+        vm_wr8(dap + 1, 0);
+        put16(dap + 2, 1);
+        put16(dap + 4, c.buf & 15);
+        put16(dap + 6, c.buf >> 4);
+        put32(dap + 8, lba);
+        put32(dap + 12, 0);
+        r.eax = 0x4200;
+        r.ds = (u16)(dap >> 4);
+        r.esi = dap & 15;
+    } else {
+        cs_lba_chs(&d->g, lba, &cx, &dh);
+        r.eax = 0x0201;
+        r.ecx = cx;
+        r.edx = dh << 8;
+        r.es = (u16)(c.buf >> 4);
+        r.ebx = c.buf & 15;
+    }
+    r.edx |= d->dl;
+    return bios(k, &r);
+}
+
+/* One BIOS call about drive d (AH ax >> 8, AL ax), its answer kept: 0, or 1FFh if it can't be made. */
+static u32 record(const struct call *k, struct drive *d, u32 ax, u32 si_lin, struct said *out)
+{
+    struct rmregs r;
+    u32 e;
+    memset(&r, 0, sizeof r);
+    r.eax = ax;
+    r.ebx = 0x55AA;                             /* (41h's) */
+    r.edx = d->dl;
+    if (si_lin) {
+        r.ds = (u16)(si_lin >> 4);
+        r.esi = si_lin & 15;
+    }
+    e = bios(k, &r);
+    out->eax = r.eax, out->ebx = r.ebx, out->ecx = r.ecx, out->edx = r.edx, out->flags = r.flags;
+    return e == 0x1FF ? e : 0;
+}
+
+/* The BIOS's answers about a drive that never change, asked once: 08h, 15h, 41h, 48h. */
+static void record_drive(const struct call *k, struct drive *d)
+{
+    u32 n;
+    d->rec = 0;
+    if (!c.buf || record(k, d, 0x0800, 0, &d->r08) || record(k, d, 0x1500, 0, &d->r15)
+        || record(k, d, 0x4100, 0, &d->r41))
+        return;
+    put16(c.buf, sizeof d->p48);
+    if (record(k, d, 0x4800, c.buf, &d->r48))
+        return;
+    n = (d->r48.flags & FL_CF) ? 0 : vm_rd16(c.buf);
+    d->n48 = n > sizeof d->p48 ? sizeof d->p48 : n;
+    for (n = 0; n < d->n48; n++)
+        d->p48[n] = vm_rd8(c.buf + n);
+    d->rec = 1;
+}
+
+/* What an answer leaves behind: AH, CF and the BIOS's last status (0040:0074). */
+static void said_status(struct rmregs *cr, u32 ah)
+{
+    cr->eax = (cr->eax & 0xFFFF00FFu) | ((ah & 0xFF) << 8);
+    if (ah)
+        cr->flags |= FL_CF;
+    else
+        cr->flags &= (u16)~FL_CF;
+    vm_wr8(0x474, (u8)ah);
+}
+
+/* The other INT 13h calls for a drive GLOS's driver has, answered without the BIOS: 1, or 0 (to the BIOS:
+   formatting, long reads and writes, verifies, and the calls the cache couldn't decode, whose errors stay the
+   BIOS's own). */
+static int answer_other(struct drive *d, struct rmregs *cr)
+{
+    u32 ah = (cr->eax >> 8) & 0xFF, n, size, buf;
+    const struct said *rs = 0;
+
+    switch (ah) {
+    case 0x00: case 0x09: case 0x0C: case 0x0D: case 0x10: case 0x11: case 0x12: case 0x13: case 0x14: case 0x47:
+        said_status(cr, 0);                     /* (resets, seeks, ready, recalibrate, diagnostics: nothing to do) */
+        return 1;
+    case 0x01:                                  /* the last status, left as it is */
+        ah = vm_rd8(0x474);
+        cr->eax = (cr->eax & 0xFFFF00FFu) | (ah << 8);
+        if (ah)
+            cr->flags |= FL_CF;
+        else
+            cr->flags &= (u16)~FL_CF;
+        return 1;
+    case 0x08: rs = &d->r08; break;
+    case 0x15: rs = &d->r15; break;
+    case 0x41: rs = &d->r41; break;
+    case 0x48:
+        if (!d->n48) {
+            rs = &d->r48;
+            break;
+        }
+        buf = vm_lin(cr->ds, cr->esi);
+        size = vm_rd16(buf);
+        if (size < 0x1A) {                      /* (EDD's least) */
+            said_status(cr, 0x01);
+            return 1;
+        }
+        n = size < d->n48 ? size : d->n48;
+        for (size = 2; size < n; size++)
+            vm_wr8(buf + size, d->p48[size]);
+        put16(buf, n);
+        said_status(cr, 0);
+        return 1;
+    default:
+        return 0;
+    }
+    cr->eax = rs->eax, cr->ebx = rs->ebx, cr->ecx = rs->ecx, cr->edx = rs->edx;
+    cr->flags = (u16)((cr->flags & ~FL_CF) | (rs->flags & FL_CF));
+    vm_wr8(0x474, (u8)(rs->eax >> 8));
+    return 1;
+}
+
+/* Each BIOS drive matched to the one IDE disk (big enough) whose sector 0 is the BIOS's sector 0; none, or two
+   alike (cloned disks), leaves it to the BIOS. */
+static void set_driver(const struct call *k, int glos)
+{
+    static u8 sec[512];
+    u32 i;
+    int j;
+
+    c.driver = (u8)glos;
+    for (i = 0; i < c.nd; i++)
+        c.d[i].ide = 0;
+    if (!glos) {
+        kprintf("GLOS-IDE driver=bios\n");
+        return;
+    }
+    ide_probe(0);
+    for (i = 0; i < c.nd; i++) {
+        struct drive *d = &c.d[i];
+        struct ata_dev *a, *hit = 0;
+        int hits = 0;
+        u32 e;
+        const char *why = 0;
+
+        if (!c.buf) {
+            why = "no-buffer";
+        } else if ((e = bios_sector(k, d, 0)) != 0) {
+            why = "bios-error";
+        } else {
+            for (j = 0; (a = ide_dev(j)) != 0; j++) {
+                u32 x;
+                int taken = 0;
+
+                if (!a->present || a->atapi || (!a->sectors_hi && a->sectors_lo < d->sectors))
+                    continue;
+                for (x = 0; x < i; x++)
+                    taken |= c.d[x].ide == a;
+                if (taken || ata_read(a, 0, 0, 1, sec, 0) != ATA_OK || memcmp(sec, vm_ptr(c.buf), 512))
+                    continue;
+                hits++;
+                hit = a;
+            }
+            why = hits == 1 ? 0 : hits ? "ambiguous" : "no-match";
+        }
+        if (!why) {
+            d->ide = hit;
+            record_drive(k, d);
+            kprintf("GLOS-IDE dl=%02x driver=glos model=\"%s\" mult=%u answers=%s\n", d->dl, hit->model,
+                    hit->multiple, d->rec ? "glos" : "bios");
+        } else {
+            kprintf("GLOS-IDE dl=%02x driver=bios why=%s\n", d->dl, why);
+        }
+    }
+}
+
 static void hist_add(u32 di, u32 lba, u32 n)
 {
     u32 mask = (1u << HIST_BITS) - 1, key, h;
@@ -576,6 +810,13 @@ int cache_int13(struct trapframe *from, struct rmregs *cr, int kind)
         gen = c.gen, mode = c.direct ? BI_CACHE_OFF : c.mode;
     }
     k.from = from, k.kind = kind, k.cs = cr->cs, k.ip = cr->ip, k.ss = cr->ss, k.sp = cr->sp, k.flags = cr->flags;
+    if (c.want_driver != c.driver)
+        set_driver(&k, c.want_driver);
+    if (mode != BI_CACHE_OFF && !decode(cr, &q)) {     /* GLOS's driver: the BIOS kept away from its drives */
+        struct drive *d = drive(cr->edx & 0xFF);
+        if (d && d->ide && d->rec && answer_other(d, cr))
+            return 1;
+    }
     if (!decode(cr, &q) || mode == BI_CACHE_OFF) {
         if (mode != BI_CACHE_OFF && drive(cr->edx & 0xFF)) {
             u32 ah = (cr->eax >> 8) & 0xFF;     /* writes the cache can't follow: their drive's blocks go */
@@ -595,10 +836,21 @@ int cache_int13(struct trapframe *from, struct rmregs *cr, int kind)
     }
     if (q.ah == 0x03 || q.ah == 0x43) {         /* a write: the range goes first, comes back once written */
         forget(q.d->idx, q.lba, q.n);
+        if (q.d->ide && (q.dap || q.d->wal_known)) {
+            e = ide_io(q.d, q.lba, q.n, q.buf, &done, 1);
+            if (!e) {
+                keep(q.d->idx, q.lba, q.n, q.buf, gen);
+                c.write_sectors += q.n;
+            }
+            result(&q, cr, e & 0xFF, done);
+            return 1;
+        }
         e = original(&k, cr);
         if (e == 0x1FF)
             return 0;
         if (!e) {
+            if (q.ah == 0x03)
+                learn_w(q.d, cr->eax & 0xFF, q.n);
             keep(q.d->idx, q.lba, q.n, q.buf, gen);
             c.write_sectors += q.n;
         }
@@ -749,6 +1001,8 @@ void cache_apply(const char *key, const char *v)
             set_mode(m);
             kprintf("GLOS-CACHE mode=%s\n", mode_name[c.mode]);
         }
+    } else if (!strcmp(key, "driver")) {
+        c.want_driver = (u8)!strcmp(v, "glos");  /* (the VM thread, at its next INT 13h) */
     } else if (!strcmp(key, "size")) {
         u32 mb = 0, f;
         const char *p;
@@ -773,6 +1027,7 @@ void cache_init(struct bootinfo *bi)
 
     c.cap = bi->cache_size_mb ? bi->cache_size_mb << 8 : 0xFFFFFFFFu;
     c.want = 0xFF;
+    c.want_driver = (u8)(bi->cache_driver == 1);  /* (taken up at the first INT 13h; GLOS.CFG read later may change it) */
     for (i = 0; i < bi->n_disks && c.nd < BI_DISKS; i++) {
         struct bi_disk *b = &bi->disks[i];
         struct drive *d = &c.d[c.nd];

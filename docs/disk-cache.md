@@ -244,6 +244,12 @@ two stay coherent.
     disk as well and compares; `count` caches nothing and counts. It changes at once, applied when no INT 13h is in
     progress; the block buffer comes only with a start.
   - `size = auto|N` (MB, 1–2048), default `auto`, shrinking at once.
+  - `driver = bios|glos`, default `bios` (native GLOS's N1c, docs/v1/native-dos.md): with `glos` the reads, block
+    fills and writes the cache makes for an IDE disk go to GLOS's own driver (kernel/drv/ide.c, ata.c) instead of
+    the BIOS, for each BIOS drive it matches to one disk by sector 0. Its other calls are answered without the
+    BIOS: 08h, 15h, 41h and 48h as the BIOS answered them at the switch, resets, seeks and the like as done,
+    01h the last status; formatting, long reads and writes, verifies and what the cache can't decode still go
+    to the BIOS. Taken up at the next INT 13h. A trial until the rest of N1c.
 - **Commands** (kernel/ssh/sshd.c):
   - `glos cache`: one JSON line, in the form of `glos stat`: `{"mode":"on","kb":..,"blocks":..,"protected":..,
     "hits":..,"misses":..,"hit_sectors":..,"miss_sectors":..,"write_sectors":..,"drops":..,"reclaims":..,
@@ -256,6 +262,9 @@ two stay coherent.
   - `GLOS-CACHE off reason=config|smartdrv|controller`;
   - `GLOS-CACHE drop reason=port|direct|format|write-error|ended|command blocks=`;
   - `GLOS-CACHE mismatch dl= lba=`;
+  - `GLOS-IDE dev= chan=1f0/3f6 master|slave ata|atapi sectors= hi= mult= lba= lba48= model=""` for each device
+    found, `GLOS-IDE dl= driver=glos model= mult=` or `driver=bios why=no-buffer|bios-error|no-match|ambiguous`
+    for each BIOS drive, `GLOS-IDE error dl= lba= n= read|write r= status= err=`;
   - `GLOS-CACHE end` with the totals, at exit.
 
 ### Not in this plan

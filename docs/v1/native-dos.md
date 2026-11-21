@@ -240,8 +240,19 @@ right error is part of the answer); **internal** after the core.
     with attribute 08h, N2), FSInfo's free count worked out when it says "unknown" (N1c, at mount, by the
     cache's scan).
   - **N1c, GLOS's IDE driver and the block layer:** the driver (PIO), the cache under it, INT 13h for its disks
-    answered by GLOS; proven under hosted GLOS behind `[disk] driver = bios | glos` (bios by default), with DOS,
-    ScanDisk and the gate on top of it, before native GLOS relies on it.
+    answered by GLOS; proven under hosted GLOS behind `[cache] driver = bios | glos` (bios by default; first
+    named `[disk] driver`, put with the cache because the cache is what makes the calls), with DOS, ScanDisk and
+    the gate on top of it, before native GLOS relies on it. **Under way 2026-11-21:** part 1, the ATA protocol
+    (`kernel/drv/ata.c`, plain C over port callbacks, host-tested against a model of a channel); part 2, the
+    kernel's side (`kernel/drv/ide.c`: the channels, a clock that breathes) and the cache's reads, block fills
+    and writes going to it for each BIOS drive matched by sector 0. Hosted, the driver never resets a channel or
+    changes a drive's multiple (the BIOS's settings stay), holds the channel's interrupt off for each command
+    and leaves none pending, and answers CHS calls with the AL the BIOS was seen to give. The other INT 13h
+    calls for those drives are answered without the BIOS: 08h, 15h, 41h and 48h as the BIOS answered them once
+    at the switch (its geometry is what the partition tables were made with), resets, seeks, ready and
+    recalibrate as done, 01h the last status; formatting, long reads and writes, verifies and calls the cache
+    can't decode still go to the BIOS (their errors stay its own). Still to come in N1c: verifies by the
+    driver, the cache keeping writes for 2 seconds, IRQ-driven transfers.
   - **N1d, many callers:** a lock per volume, handles that stay right while another caller changes the folder
     they are in.
   - **N1e, the kernel's users onto it** behind the file system's interface, the DOS server staying the back end

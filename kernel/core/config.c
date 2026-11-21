@@ -604,6 +604,12 @@ static void apply_read(void)
         }
         idle_config();
     }
+    /* [cache] driver: GLOS's IDE driver (N1c), from the next INT 13h. The loader gives it in bootinfo too; this
+       is for a GLOS.CFG the kernel reads later (agent and desktop modes). */
+    v[0] = 0;
+    if (kcfg_get("cache", "driver", v, sizeof v) < 0)
+        v[0] = 0;
+    kcfg_apply("cache", "driver", v);
     mixer_late();                               /* a Crystal chip, with no SB16 ([sound] crystal) */
     joy_config();                               /* [joystick] port and range */
     usb_late();                                 /* [usb] enabled: GLOS's USB controllers */

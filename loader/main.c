@@ -1007,6 +1007,8 @@ static void read_cfg(const char *argv0, int shell_keys)
                 bi.cache_mode = (unsigned long)cache_word(v);
             else if (!stricmp(k, "size"))
                 bi.cache_size_mb = !stricmp(v, "auto") ? 0 : (unsigned long)atol(v);
+            else if (!stricmp(k, "driver") && (!stricmp(v, "bios") || !stricmp(v, "glos")))
+                bi.cache_driver = !stricmp(v, "glos");     /* (GLOS's IDE driver, N1c) */
             else
                 say("GLOS-WARN cfg-key section=cache key=%s", k);
             continue;
