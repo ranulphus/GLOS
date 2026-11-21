@@ -603,7 +603,7 @@ static unsigned spt_of(unsigned long sectors)   /* a floppy's sectors a track, b
     return sectors == 720 || sectors == 1440 ? 9 : sectors == 2400 ? 15 : sectors == 2880 ? 18 : sectors == 5760 ? 36 : 0;
 }
 
-static int make_volume(struct job *j, fat_write write, void *ctx)
+static int make_volume(struct job *j, fat_write_fn write, void *ctx)
 {
     struct fat_geo g;
     struct fat_made made;
