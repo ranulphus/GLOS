@@ -1151,8 +1151,12 @@ beacons, the lamp or the next buoy. Not a toolkit program: its window is DOS-GL'
   (made on the host by the same code: `hv_test demo KIND 450`, from the arena both share),
   the same whether the card's engine draws the window or DOS-GL's software renderer does; and a picture
   taken while it plays has a scene's worth of colours.
-- **Not yet**: all of the plan beyond that (the lobby, network games, arenas from files, sound, pads and
-  the mouse, full screen, names over the craft). **To be measured**: frames a second on
+- **Sound** (`apps/hover/hvsound.c`, added the same day): one stream into the mixer, made by rule: the
+  fans' hum, whose pitch follows their work (idling, pushing, boosting; low when set down), air by the
+  craft's speed, the skirt's scrape, bumps, walls, the water, a flag or the lamp taken and lost, a point, a
+  beacon. Silent with no card, and in the suite's games.
+- **Not yet**: all of the plan beyond that (the lobby, network games, arenas from files, pads and the
+  mouse, full screen, names over the craft). **To be measured**: frames a second on
   the benches' cards and with the software renderer.
 
 ### Its network's messages (the same day; no sockets yet)

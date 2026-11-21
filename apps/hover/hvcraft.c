@@ -16,7 +16,10 @@
  * HVCRAFT -demo [-kind 0..3] [-until STEP] is the suite's: every craft the computer's, the game's state said at
  * a step ("HVCRAFT at ..."), which is the same on every PC whatever the pictures cost.
  *
- * Not yet (the plan's rest): the lobby and network games; arenas from files; sound; pads and the mouse; full
+ * Sound (apps/hover/hvsound.c), made by rule: the fans by their work, the air by the speed, the skirt's scrape,
+ * bumps, the water, a flag or the lamp taken and lost, a point, a beacon.
+ *
+ * Not yet (the plan's rest): the lobby and network games; arenas from files; pads and the mouse; full
  * screen; the computer's strengths chosen; names over the craft; an arrow to the flag or the lamp. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +32,7 @@
 #include "../shared/hvarenas.h"
 #include "../shared/hvbasin.h"
 #include "../shared/hvgame.h"
+#include "hvsound.h"
 
 #define GAME_NAME "Hovercraft"          /* (the working name) */
 
@@ -294,7 +298,8 @@ int main(int argc, char **argv)
     DGLConfig cfg;
     glos_handle win;
     char why[160];
-    unsigned last, acc = 0, said = 0;
+    unsigned last, acc = 0, said = 0, my_keys = 0;
+    int sounding = 0;
     int w = 480, h = 360, i, on = 1, demo = 0, kind = HV_FLAGS, which = 0;
     long until = -1;
     for (i = 1; i < argc; i++) {
@@ -335,6 +340,8 @@ int main(int argc, char **argv)
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.55f, 0.70f, 0.85f, 1.0f);
     title(win);
+    if (!demo)                          /* (the suite's games are silent) */
+        sounding = hvsound_start();
     printf("HVCRAFT started kind=%d craft=%d arena=%s\n", game.kind, game.ncraft, arena.name);
     fflush(stdout);
     last = glos_ticks();
@@ -350,13 +357,23 @@ int main(int argc, char **argv)
             unsigned char keys[HV_CRAFT];
             for (i = 0; i < game.ncraft; i++)
                 keys[i] = (unsigned char)(i == 0 && !demo ? keys_held() : hv_auto(&game, i, HV_DEMO_STRENGTH));
+            my_keys = keys[0];
             hv_game_step(&game, keys);
+            if (sounding)
+                hvsound_events(game.ev);
             if (until >= 0 && (long)game.steps >= until) {     /* the suite's: the game's state at this step, and the end */
                 printf(HV_AT_LINE, game.steps, game.score[0], game.score[1], game.c[0].x, game.c[0].y, game.c[0].heading, game.c[1].x,
                        game.c[1].y, game.lamp_holder, game.c[0].score);
                 fflush(stdout);
                 on = 0;
             }
+        }
+        if (sounding) {                 /* the player's own fans, and the air by the craft's speed */
+            const struct hv_craft *me = &game.c[0];
+            int vx = me->vx < 0 ? -me->vx : me->vx, vy = me->vy < 0 ? -me->vy : me->vy;
+            int work = (my_keys & HV_C_BOOST && me->tank > 0 ? 3 : 0) + (my_keys & (HV_C_FWD | HV_C_BACK) ? 1 : 0)
+                       + (my_keys & (HV_C_SLIDE_L | HV_C_SLIDE_R) ? 1 : 0);
+            hvsound_frame(work > 3 ? 3 : work, vx > vy ? vx + vy * 3 / 8 : vy + vx * 3 / 8, me->down, me->wet != 0);
         }
         frame((float)w / (float)h);
         overlay(w, h);
@@ -388,6 +405,7 @@ int main(int argc, char **argv)
             }
         }
     }
+    hvsound_stop();
     dglShutdown();
     printf("HVCRAFT end\n");
     return 0;
