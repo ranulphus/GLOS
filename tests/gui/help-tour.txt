@@ -1,0 +1,31 @@
+# Help's tour of the desktop (HELP /TOUR: what GLOS starts the first time the desktop comes on after it is
+# installed): the guide's page TOUR.MD, its seven parts a step each by Enter, the four that name a part of the
+# desktop beside it (the Start button, the task bar, the notification area, the clock); at the end Help shows
+# its first page. Then from its own menu, Help, Tour, closed by Esc at the third step. (No picture of the
+# clock's step: the clock's width is its text's, which the host only guesses.)
+run HELP.EXE /TOUR
+wait "The tour - Help"
+said HELP tour steps=7
+wait "Tour"
+shot welcome "Tour"
+key enter
+shot start "Tour"
+key enter
+shot bar "Tour"
+key enter
+key enter
+key enter
+key enter
+shot settings "Tour"
+key enter
+gone "Tour"
+said HELP tour ended step=7 finished=1
+wait "Welcome to GLOS - Help"
+key alt+h t
+wait "Tour"
+key enter enter esc
+gone "Tour"
+said HELP tour ended step=3 finished=0
+key alt+f4
+gone "Welcome to GLOS - Help"
+expect HELP end

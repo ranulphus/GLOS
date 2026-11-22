@@ -1,0 +1,15 @@
+# The tip of the day (HELP /TIP N: what GLOS starts when the desktop comes on with [desktop] tips on): TIPS.MD's
+# first tip in a window of its own, Next Tip, the box that turns the tips on (it was off: the setting written),
+# Close.
+run HELP.EXE /TIP 0
+wait "Tip of the Day"
+said HELP tip 1 of 12
+shot first "Tip of the Day"
+key alt+n
+said HELP tip 2 of 12
+shot second "Tip of the Day"
+key alt+s
+key alt+c
+gone "Tip of the Day"
+said HELP tips on
+expect HELP end

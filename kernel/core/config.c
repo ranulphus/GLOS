@@ -605,17 +605,31 @@ static void apply_read(void)
    no folder of their own, each a job of nobody's. */
 void kcfg_desktop_started(void)
 {
-    char list[128], cmd[200], dir[80];
+    char list[128], cmd[200], dir[80], v[8];
     u32 i, n;
     const char *p, *slash = 0;
-    if (kcfg_get("desktop", "start", list, sizeof list) < 0 || !list[0])
-        return;
     for (p = c.path; *p; p++)
         if (*p == '\\')
             slash = p;
     n = slash ? (u32)(slash - c.path) : 0;
     memcpy(dir, c.path, n);
     dir[n] = 0;
+    /* Help's tour of the desktop, once ([desktop] tour: the installer's, for the first start), or else the tip of
+       the day ([desktop] tips). HELP.EXE is beside GLOS.EXE. */
+    v[0] = 0;
+    if (kcfg_get("desktop", "tour", v, sizeof v) == 1 && !strcmp(v, "on")) {
+        char why[64];
+        ksnprintf(cmd, sizeof cmd, "%s\\HELP.EXE /TOUR", dir);
+        agent_post_detached(cmd, dir);
+        kcfg_set("desktop", "tour", "off", why, sizeof why);
+        kprintf("GLOS-CFG desktop-tour cmd=%s\n", cmd);
+    } else if (v[0] = 0, kcfg_get("desktop", "tips", v, sizeof v) == 1 && !strcmp(v, "on")) {
+        ksnprintf(cmd, sizeof cmd, "%s\\HELP.EXE /TIP", dir);
+        agent_post_detached(cmd, dir);
+        kprintf("GLOS-CFG desktop-tip cmd=%s\n", cmd);
+    }
+    if (kcfg_get("desktop", "start", list, sizeof list) < 0 || !list[0])
+        return;
     for (p = list; *p; ) {
         u32 k = 0;
         while (*p == ' ')

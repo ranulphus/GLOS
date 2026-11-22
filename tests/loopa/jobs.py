@@ -7702,6 +7702,51 @@ def hover_pair_case(profile, card):
                                "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+def tour_case(profile, vcard, card):
+    """The first start after an installation (tools/floppy/install.py writes [desktop] tour = on and tips = on):
+    when the desktop comes on, GLOS starts Help's tour (HELP /TOUR, beside GLOS.EXE) and turns the setting off,
+    so the tour is shown once: Help's window and the tour's bubble are on the desktop. The desktop on again:
+    no tour, the tip of the day instead (HELP /TIP)."""
+    import time
+    tag = "%s-%s" % (profile, vcard)
+    cfg = batfile("tour-%s/GLOS.CFG" % tag, ["; jobs.py desk, the first start after an installation", "[desktop]",
+                                              "tour = on", "tips = on"])
+    agent = Agent("tour-" + tag, profile, card, ["--card", vcard, "--file", cfg + "=/TEST/GLOS.CFG",
+        "--file", "build/apps/HELP.EXE=/TEST/HELP.EXE", "--file", "build/apps/HELP.DAT=/TEST/HELP.DAT",
+        "--cmd", "SERSAY HX-START tour", "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"], timeout=900)
+    checks, info = {"listen": agent.listening()}, ""
+
+    def until(test, limit):
+        t0 = time.time()
+        while time.time() - t0 < limit:
+            if test():
+                return True
+            time.sleep(1)
+        return test()
+    try:
+        checks["on"] = agent.ssh("glos display on 640x480x16")[0] == 0
+        checks["tour"] = until(lambda: "GLOS-CFG desktop-tour cmd=C:\\TEST\\HELP.EXE /TOUR" in agent.log(), 120) \
+            and until(lambda: "prog=HELP.EXE" in agent.log(), 120)
+        checks["windows"] = until(lambda: (lambda m: bool(m) and int(m.group(1)) >= 2)(
+            re.search(r"windows=(\d+)", agent.ssh("glos desk")[1])), 120)
+        if not checks["windows"]:
+            info += " desk=%r" % agent.ssh("glos desk")[1][:300]
+        rc, o, _ = agent.ssh("glos config get desktop tour")
+        checks["once"] = rc == 0 and o.strip() == "off"
+        checks["off"] = agent.ssh("glos display off")[0] == 0 and until(lambda: agent.ssh("glos display")[1].startswith("display off"), 60)
+        checks["again"] = agent.ssh("glos display on 640x480x16")[0] == 0 \
+            and until(lambda: "GLOS-CFG desktop-tip cmd=C:\\TEST\\HELP.EXE /TIP" in agent.log(), 120) \
+            and agent.log().count("GLOS-CFG desktop-tour") == 1
+        checks["exit"] = agent.ssh("glos exit")[0] == 0
+    except subprocess.TimeoutExpired:
+        checks["timeout"] = False
+    text = agent.wait()
+    checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
+    bad = [k for k, v in checks.items() if not v]
+    return "  %-22s %s%s" % ("tour-" + tag, "PASS" if not bad else "FAIL", "" if not bad else " failed: " + " ".join(bad) + info), \
+        not bad
+
+
 def saver_case(profile, vcard, card):
     """A saver that is a program (phase D, D6; kernel/wm/saver.c, apps/savers): [saver] saver = stars, the saver
     asked for (glos idle saver). STARS.SCR's full-screen window comes, drawn by the card's engine on a Matrox card
@@ -11540,7 +11585,7 @@ def main():
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "desk":
         cases = [c for c in DESK_CASES if not a.profile or c[0] in a.profile]
-        res = [] if os.environ.get("DESK_ONLY") in ("hover", "hoverpair") else matrix(desk_case, cases, a.jobs)
+        res = [] if os.environ.get("DESK_ONLY") in ("hover", "hoverpair", "tour") else matrix(desk_case, cases, a.jobs)
         # (the G100 since RetroGPU d51210f, 2026-11-18: its window's first lock divided by nothing, and on the real
         # card the memory's size was misread)
         savers = [c for c in [("bf6", "g200", "ne2kpci"), ("bf6", "vbe", "ne2kpci"), ("bf6", "g100", "ne2kpci")]
@@ -11551,9 +11596,13 @@ def main():
             return 0 if all(r[1] for r in matrix(hover_case, hovers, a.jobs)) else 1
         if os.environ.get("DESK_ONLY") == "hoverpair":
             return 0 if all(r[1] for r in matrix(hover_pair_case, pairs, a.jobs)) else 1
+        tours = [c for c in [("bf6", "g200", "ne2kpci")] if not a.profile or c[0] in a.profile]     # ... and Help's tour
+        if os.environ.get("DESK_ONLY") == "tour":
+            return 0 if all(r[1] for r in matrix(tour_case, tours, a.jobs)) else 1
         res += matrix(saver_case, savers, a.jobs)       # ... and a saver that is a program (phase D)
         res += matrix(hover_case, hovers, a.jobs)
         res += matrix(hover_pair_case, pairs, a.jobs)
+        res += matrix(tour_case, tours, a.jobs)
         return 0 if all(r[1] for r in res) else 1
     if a.suite == "win":
         cases = [(win_case,) + c for c in WIN_CASES if not a.profile or c[0] in a.profile] \

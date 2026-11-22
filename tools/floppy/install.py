@@ -225,7 +225,8 @@ def put_glos(pc, args, files):
     print("  copied and checked in %d seconds" % (time.time() - t0))
     if pc.get_text("/C/GLOS/GLOS.CFG") is None:
         pc.put_text("/C/GLOS/GLOS.CFG", ["[net]", "hostname = " + args.name]
-                    + (["cable = " + args.cable] if args.cable else []))
+                    + (["cable = " + args.cable] if args.cable else [])
+                    + ["[desktop]", "tour = on", "tips = on"])   # (Help's tour the first time the desktop comes on)
         print("  C:\\GLOS\\GLOS.CFG: the PC's name is %s (%s.local)" % (args.name, args.name))
     else:
         print("  C:\\GLOS\\GLOS.CFG is there already: kept")

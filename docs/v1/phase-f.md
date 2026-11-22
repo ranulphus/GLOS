@@ -1262,3 +1262,25 @@ PCI ID Project's list under its BSD option.
 - **Not yet:** the setting for devices with settings of their own (the display's engine, the virtual Sound
   Blaster: their own pages); names for USB devices (usb.ids); the PC's ACPI and Plug and Play BIOS's lists
   of ISA devices; a device's driver started or stopped without GLOS starting again.
+
+## Help: the welcome tour and the tip of the day (2026-11-22)
+
+The rest of Help's plan's first item (`docs/v1/apps/help.md`): the tour on GLOS's first start, and tips.
+
+- **The tour** (`HELP /TOUR`, and Tour on Help's Help menu): the guide's page TOUR.MD, a step for each of its
+  `## ` parts, by the toolkit's tour (`gui_tour`, toolkit 2's C8): a bubble with the part's words beside the
+  part of the desktop it names in a line of its own (`*At the Start button.*`, the task bar, the
+  notification area, the clock: SHELL's POINT), or in the middle. Its words are the guide's, so they are
+  written and checked as the guide is. Help shows the tour's page under it, and its first page at the end.
+- **The first start:** `[desktop] tour` (off by default; GLOS's installer, `tools/floppy/install.py`, writes
+  `tour = on` and `tips = on` into a new GLOS.CFG). When the desktop comes on (`kcfg_desktop_started`, the
+  same place as `[desktop] start`'s programs), GLOS starts `HELP.EXE /TOUR` beside GLOS.EXE and turns the
+  setting off: shown once. Otherwise, with `[desktop] tips` on, `HELP.EXE /TIP`.
+- **The tip of the day** (`HELP /TIP [N]`): TIPS.MD's list, a tip a day (the day's number, or the Nth), in a
+  small window of its own: the tip, Next Tip, a box for `[desktop] tips` (written when Close finds it
+  changed), Close.
+- **Tests:** GUI scripts `help-tour` (the seven steps, four beside the shell's parts, the end; again from the
+  menu, closed at the third) and `help-tip` (the first two tips, the box turned on and written), on the host
+  and the emulated desktops; the desk suite's `tour` case (`DESK_ONLY=tour`): a GLOS.CFG as the installer
+  writes it, the desktop on, Help's tour started and the setting turned off; on again, the tip instead.
+- **Not yet:** a "show me" that opens the part (the Start menu itself); pictures in the tour's steps.

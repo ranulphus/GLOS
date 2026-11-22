@@ -4,6 +4,16 @@ What each milestone added. Everything here is built and tested in 86Box (Loop A,
 (real PCs and Matrox cards) re-verifies before a release (PRD §19). Each milestone's plan, status and evidence is
 in its `docs/milestones-*.md`.
 
+## The welcome tour and the tip of the day (2026-11-22)
+
+- **The tour:** a few steps over the desktop (the Start button, the task bar, the notification area, the clock,
+  DOS programs and games, the settings), each in a bubble beside the part it is about. GLOS shows it the first
+  time the desktop comes on after it is installed, once; Help's Help menu shows it again. Its words are a page
+  of the guide, The tour.
+- **The tip of the day:** a tip from the guide's page of tips each time the desktop comes on, while it is
+  turned on (the installer turns it on; the tip's own window, or the Control Panel's Desktop page, turns it off).
+- **Settings:** `[desktop] tour` (on: the tour at the desktop's next start, then off again) and `[desktop] tips`.
+
 ## The two games' names (2026-11-21)
 
 - The skiing game is **Fall Line** and the hovercraft game is **Cushion** (the owner's choices), in the Start

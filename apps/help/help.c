@@ -13,8 +13,17 @@
  * HELP NAME opens the page NAME.MD (the first page if there is none): F1 in any program is the toolkit's
  * (gui_help), which starts HELP with the program's own name, so NOTEPAD's F1 is the page NOTEPAD.MD.
  *
- * Not yet: pictures in pages, the place in a page a link names (#part) and where a search's words are, the
- * welcome tour and the tip of the day, a dialog's own Help button, one Help window for every F1.
+ * The tour (HELP /TOUR, and Tour on the Help menu): the guide's page TOUR.MD, a step for each of its "## "
+ * parts, shown by the toolkit's tour (gui_tour): a bubble with the part's words, beside the part of the
+ * desktop it names in a line of its own ("*At the Start button.*": the Start button, the task bar, the
+ * notification area, the clock), or in the middle of the screen. GLOS starts HELP /TOUR when the desktop first
+ * comes on after GLOS is installed ([desktop] tour, which the kernel then turns off).
+ *
+ * The tip of the day (HELP /TIP [N]): one of TIPS.MD's list in a small window of its own (the day's, or the
+ * Nth), Next Tip, and a box for [desktop] tips, which GLOS starts it by each time the desktop comes on.
+ *
+ * Not yet: pictures in pages, the place in a page a link names (#part) and where a search's words are, a
+ * dialog's own Help button, one Help window for every F1.
  *
  * The suite's lines (tests/gui/help.txt): "HELP ..." on the output. */
 #include <ctype.h>
@@ -22,11 +31,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <glos/glos.h>
 #include <glos/gui.h>
 
-enum { C_BACK = 1, C_FORWARD, C_HOME, C_FIND, C_CONTENTS, C_ABOUT, C_EXIT };
+enum { C_BACK = 1, C_FORWARD, C_HOME, C_FIND, C_CONTENTS, C_ABOUT, C_TOUR, C_EXIT };
 
 #define PAGES 96
 #define TRAIL 64
@@ -302,6 +312,188 @@ static void results_on(struct gui_widget *w, int what)
         show((int)(size_t)gui_list_user(w, row) - 1, 0);
 }
 
+/* ---- the tour: TOUR.MD's parts, a step each */
+
+#define STEPS 12
+
+static struct gui_tour_step steps[STEPS];
+static char step_title[STEPS][64], step_text[STEPS][400];
+
+/* The words of a part's lines (Markdown's marks left out), one line after another. */
+static void words_of(const char *p, const char *end, char *out, size_t room)
+{
+    size_t k = 0;
+    while (p < end) {
+        const char *e = memchr(p, '\n', (size_t)(end - p));
+        char line[400];
+        if (!e)
+            e = end;
+        plain(p, (size_t)(e - p), line, sizeof line);
+        if (line[0] && k + 2 < room)
+            k += (size_t)snprintf(out + k, room - k, "%s%s", k ? " " : "", line);
+        else if (!line[0] && k && k + 2 < room && out[k - 1] != '\n')
+            out[k++] = '\n', out[k] = 0;       /* (an empty line: the paragraph ends) */
+        if (k >= room)
+            k = room - 1;
+        p = e + 1;
+    }
+    while (k && (out[k - 1] == '\n' || out[k - 1] == ' '))
+        out[--k] = 0;
+}
+
+static int tour_steps(void)
+{
+    static const struct { const char *at; int point; } places[] = {
+        { "*At the Start button.*", GLOS_POINT_START }, { "*At the task bar.*", GLOS_POINT_BAR },
+        { "*At the notification area.*", GLOS_POINT_TRAY }, { "*At the clock.*", GLOS_POINT_CLOCK } };
+    int k = page_named("TOUR", 4), n = 0, i;
+    const char *p, *end, *part;
+    if (k < 0)
+        return 0;
+    p = pages[k].text, end = p + pages[k].len;
+    while (p < end && n < STEPS) {
+        const char *head = strstr(p, "\n## ");
+        const char *next, *body, *tail;
+        if (!head || head >= end)
+            break;
+        part = head + 4;
+        body = memchr(part, '\n', (size_t)(end - part));
+        if (!body)
+            break;
+        snprintf(step_title[n], sizeof step_title[n], "%.*s", (int)(body - part), part);
+        next = strstr(body, "\n## ");
+        tail = next && next < end ? next : end;
+        steps[n].point = 0;
+        steps[n].at = NULL;
+        for (i = 0; i < (int)(sizeof places / sizeof places[0]); i++) {
+            const char *m = strstr(body, places[i].at);
+            if (m && m < tail) {
+                steps[n].point = places[i].point;
+                body = m + strlen(places[i].at);
+            }
+        }
+        words_of(body + 1, tail, step_text[n], sizeof step_text[n]);
+        steps[n].title = step_title[n];
+        steps[n].text = step_text[n];
+        n++;
+        p = tail;
+    }
+    return n;
+}
+
+static void tour_done(int step, int finished)
+{
+    say("tour ended step=%d finished=%d", step + 1, finished);
+    show(0, 0);
+}
+
+static void tour(void)
+{
+    int n = tour_steps(), k = page_named("TOUR", 4);
+    if (!n) {
+        say("tour none");
+        return;
+    }
+    if (k >= 0)
+        show(k, 0);
+    say("tour steps=%d", n);
+    gui_tour(win, steps, n, tour_done);
+}
+
+/* ---- the tip of the day: TIPS.MD's list, one at a time, in a window of its own */
+
+#define TIPS 40
+
+static char *tips[TIPS];
+static int ntips, tip_at, tips_were, tips_now = -1;    /* tips_now: the box as Close found it (-1: not closed so) */
+static struct gui_window *tip_win;
+static struct gui_widget *tip_view, *tip_box;
+
+static void tip_show(void)
+{
+    char t[600];
+    snprintf(t, sizeof t, "%s", tips[tip_at]);
+    gui_richview_set(tip_view, gui_markdown(t, (int)strlen(t), NULL, NULL));
+    say("tip %d of %d", tip_at + 1, ntips);
+}
+
+static void tip_button(struct gui_widget *b, int what)
+{
+    (void)what;
+    if (b->id == 1) {                           /* Next Tip */
+        tip_at = (tip_at + 1) % ntips;
+        tip_show();
+    } else {                                    /* Close (and Esc): the box read while its window is there */
+        tips_now = gui_checked(tip_box);
+        gui_close(tip_win);
+    }
+}
+
+static int tip(const char *which)
+{
+    int k = page_named("TIPS", 4), set = 0, on;
+    char v[8] = "";
+    const char *p, *end;
+    struct gui_widget *row, *b;
+    if (k < 0)
+        return 1;
+    for (p = pages[k].text, end = p + pages[k].len; p < end && ntips < TIPS;) {     /* its list's lines, a tip each */
+        const char *e = memchr(p, '\n', (size_t)(end - p));
+        if (!e)
+            e = end;
+        if (e - p > 2 && p[0] == '-' && p[1] == ' ') {
+            const char *q = e;
+            while (q + 2 < end && q[1] == ' ' && q[2] == ' ') {        /* (its lines that go on, indented) */
+                const char *nl = memchr(q + 1, '\n', (size_t)(end - q - 1));
+                q = nl ? nl : end;
+            }
+            if ((tips[ntips] = malloc((size_t)(q - p))) != NULL) {
+                size_t n = 0;
+                const char *c;
+                for (c = p + 2; c < q; c++) {   /* (the indents of the lines that go on: one space) */
+                    if (*c == '\n') {
+                        while (c + 1 < q && c[1] == ' ')
+                            c++;
+                        tips[ntips][n++] = ' ';
+                    } else {
+                        tips[ntips][n++] = *c;
+                    }
+                }
+                tips[ntips++][n] = 0;
+            }
+            e = q;
+        }
+        p = e + 1;
+    }
+    if (!ntips)
+        return 1;
+    tip_at = which && *which ? atoi(which) % ntips : (int)((time(NULL) / 86400) % ntips);     /* (the day's) */
+    glos_setting_get("desktop", "tips", v, sizeof v, &set);
+    tips_were = on = !strcmp(v, "on");
+    tip_win = gui_window(GUI_T("Tip of the Day"), 380, 200, GUI_W_DIALOG);
+    gui_window_icon(tip_win, "app-help");
+    tip_view = gui_richview(tip_win->root);
+    gui_size(tip_view, 360, 76);
+    gui_grow(tip_view, 1);
+    tip_box = gui_check(tip_win->root, GUI_T("&Show a tip when the desktop starts"), on);
+    row = gui_hbox(tip_win->root, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("&Next Tip"), tip_button, 1);
+    b = gui_button(row, GUI_T("&Close"), tip_button, 2);
+    b->flags |= GUI_DEFAULT | GUI_CANCEL;
+    tip_show();
+    gui_show(tip_win, 1);
+    gui_run();
+    on = tips_now;
+    if (on >= 0 && on != tips_were) {           /* (the box changed: the setting with it) */
+        unsigned when = 0;
+        char why[80];
+        glos_setting_set("desktop", "tips", on ? "on" : "off", &when, why, sizeof why);
+        say("tips %s", on ? "on" : "off");
+    }
+    return 0;
+}
+
 /* ---- commands */
 
 static void command(struct gui_window *w, int id)
@@ -331,6 +523,7 @@ static void command(struct gui_window *w, int id)
             show(k, 0);
         break;
     }
+    case C_TOUR: tour(); break;
     case C_EXIT: gui_close(win); break;
     }
 }
@@ -358,12 +551,13 @@ static void build(void)
     gui_command(win, C_FIND, GUI_T("&Search..."), "Ctrl+F", gui_glyph("find"), GUI_T("Look for words in every page"));
     gui_command(win, C_CONTENTS, GUI_T("&Contents"), "Ctrl+T", gui_glyph("list"), GUI_T("The guide's contents"));
     gui_command(win, C_ABOUT, GUI_T("&Using Help"), "F1", gui_glyph("help"), NULL);
+    gui_command(win, C_TOUR, GUI_T("&Tour"), NULL, NULL, GUI_T("A short tour of the desktop"));
     gui_command(win, C_EXIT, GUI_T("E&xit"), "Alt+F4", NULL, NULL);
     bar = gui_menubar(win);
     m = gui_menu(bar, GUI_T("&Help"));
     gui_menu_command(m, C_CONTENTS), gui_menu_command(m, C_FIND);
     gui_menu_sep(m);
-    gui_menu_command(m, C_ABOUT);
+    gui_menu_command(m, C_ABOUT), gui_menu_command(m, C_TOUR);
     gui_menu_sep(m);
     gui_menu_command(m, C_EXIT);
     m = gui_menu(bar, GUI_T("&Go"));
@@ -403,14 +597,22 @@ int main(int argc, char **argv)
         printf("HELP no guide\n");
         return 1;
     }
+    if (argc > 1 && !strcasecmp(argv[1], "/TIP")) {    /* HELP /TIP [N]: the tip of the day, alone */
+        int r = tip(argc > 2 ? argv[2] : NULL);
+        free(dat);
+        printf("HELP end\n");
+        return r;
+    }
     build();
     contents();
     gui_show(win, 1);
-    if (argc > 1 && argv[1][0] != '-')          /* HELP NAME: that program's page, if the guide has one */
+    if (argc > 1 && argv[1][0] != '-' && argv[1][0] != '/')     /* HELP NAME: that program's page, if the guide has one */
         k = page_named(argv[1], strcspn(argv[1], "."));
     say("guide asked=%s", argc > 1 ? argv[1] : "-");
     show(k >= 0 ? k : 0, 0);
     gui_focus(view);
+    if (argc > 1 && !strcasecmp(argv[1], "/TOUR"))     /* HELP /TOUR: the tour, over the guide's page of it */
+        tour();
     gui_run();
     free(dat);
     printf("HELP end\n");

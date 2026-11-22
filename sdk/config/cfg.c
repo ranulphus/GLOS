@@ -123,6 +123,10 @@ const struct cfg_key cfg_schema[] = {
     /* [desktop] (M9) */
     { "desktop", "start", CFG_TEXT, CFG_DESKTOP, 0, 120, "line", "", "&Start with the desktop",
       "Programs started when the desktop starts, beside GLOS.EXE (FILES.EXE draws the desktop's icons)" },
+    { "desktop", "tour", CFG_CHOICE, CFG_DESKTOP, 0, 0, "off|on", "off", "Show the t&our again",
+      "Help's tour of the desktop when the desktop next comes on, once (GLOS's installer sets it for the first start)" },
+    { "desktop", "tips", CFG_CHOICE, CFG_DESKTOP, 0, 0, "off|on", "off", "T&ip of the day",
+      "A tip from the user guide each time the desktop comes on" },
     { "desktop", "bar", CFG_CHOICE, CFG_NOW, 0, 0, "bottom|top", "bottom", "Task &bar at the screen's",
       "Where the task bar is: along the screen's bottom or its top" },
     { "desktop", "bar_hide", CFG_CHOICE, CFG_NOW, 0, 0, "off|on", "off", "&Hide the task bar",

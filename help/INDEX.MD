@@ -37,6 +37,8 @@ contents are at the left; **Ctrl+F** looks for words in every page.
 - [Settings](SETTINGS.MD)
 - [When something goes wrong](TROUBLE.MD)
 - [Using Help](HELP.MD)
+  - [The tour](TOUR.MD)
+  - [Tips](TIPS.MD)
 
 ## In a few lines
 
