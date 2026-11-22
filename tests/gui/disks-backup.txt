@@ -10,6 +10,7 @@ wait "Back Up a Folder"
 shot backup "Back Up a Folder"
 key enter
 said DISKS backup no computer "" where "glos-backups/C"
+wait "Backups"
 key enter
 gone "Backups"
 key esc

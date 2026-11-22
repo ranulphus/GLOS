@@ -20,7 +20,9 @@ key ctrl+a
 type 7:5
 key enter
 said DISKS backup no time "7:5"
+wait "Backups"
 key enter
+gone "Backups"
 key alt+m
 key ctrl+a
 type 07:45

@@ -580,7 +580,7 @@ static void props_done(struct gui_widget *b, int what)
         snprintf(p_got.joymap, sizeof p_got.joymap, "%s", gui_get_text(p_joymap));
         if (!joymap_ok(p_got.joymap)) {         /* (said before the dialog goes: it stays to be put right) */
             say("properties joymap refused %s", p_got.joymap);
-            gui_message(b->win, GUI_T("Properties"),
+            gui_message(b->win, GUI_T("Pad Mapping"),
                         GUI_T("A pad mapping is eight words: four axes (lx, ly, rx, ry, one with a minus before it the "
                               "other way round, or none), then four buttons by number (1 to 16, or none). Or nothing, "
                               "for the mapping every program has."), GUI_MB_OK);

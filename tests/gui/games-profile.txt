@@ -20,7 +20,9 @@ type lx ly
 quick alt+d
 key enter
 said GAMES properties joymap refused lx ly
+wait "Pad Mapping"
 key enter
+gone "Pad Mapping"
 key end
 key space
 type rx ry 2 1 none 3
