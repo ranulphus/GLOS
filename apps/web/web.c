@@ -128,7 +128,7 @@ static void c_image(void *c, const char *src, const char *alt, int w, int h, con
         rs[nrs - 1].picture = 1;
 }
 
-static const struct html_sink counting = { c_block, c_text, NULL, NULL, c_image, NULL, NULL, NULL, NULL };
+static const struct html_sink counting = { c_block, c_text, NULL, NULL, c_image, NULL, NULL, NULL, NULL, NULL };
 
 static int reader_choose(void)          /* rkeep[] for each block: the number kept */
 {
@@ -347,7 +347,44 @@ static void d_title(void *c, const char *title)
         snprintf(page_title, sizeof page_title, "%s", title);
 }
 
-static const struct html_sink to_doc = { d_block, d_text, d_cell, d_colour, d_image, d_title, d_anchor, NULL, NULL };
+/* (phase F) A page's forms, as it is made: where each is sent, how, and its fields (their names and values as
+   the page gives them). A field's word in the page is a link to about:form?N, which opens the form's dialog. */
+#define FORMS 16
+#define FIELDS 24
+static struct wform {
+    char action[600], method[8];
+    int n;
+    struct { char kind[12], name[48], value[120]; } f[FIELDS];
+} forms[FORMS];
+static int nforms;
+
+static void d_form(void *c, const char *action, const char *method)
+{
+    (void)c;
+    if (nforms == FORMS) {
+        nforms++;                               /* (past the last kept: its fields go nowhere) */
+        return;
+    }
+    if (nforms > FORMS)
+        return;
+    snprintf(forms[nforms].action, sizeof forms[0].action, "%s", action);
+    snprintf(forms[nforms].method, sizeof forms[0].method, "%s", method);
+    forms[nforms++].n = 0;
+}
+
+static void d_field(void *c, const char *kind, const char *name, const char *value)
+{
+    struct wform *f;
+    (void)c;
+    if (!nforms || nforms > FORMS || (f = &forms[nforms - 1])->n == FIELDS)
+        return;
+    snprintf(f->f[f->n].kind, sizeof f->f[0].kind, "%s", kind);
+    snprintf(f->f[f->n].name, sizeof f->f[0].name, "%s", name);
+    snprintf(f->f[f->n].value, sizeof f->f[0].value, "%s", value);
+    f->n++;
+}
+
+static const struct html_sink to_doc = { d_block, d_text, d_cell, d_colour, d_image, d_title, d_anchor, d_field, d_form, NULL };
 
 /* The page shown at the place "#name" leads to ("": its top); said for the suite. */
 static void show_place(const char *name)
@@ -418,7 +455,7 @@ static void show_page(const char *url, const char *bytes, unsigned long n, const
         snprintf(page_url, sizeof page_url, "%s", url);
     }
     doc = gui_rdoc_new();
-    page_title[0] = 0, blocks = links = 0, nanchors = 0, text_in_block = 0;
+    page_title[0] = 0, blocks = links = 0, nanchors = 0, text_in_block = 0, nforms = 0;
     if (!doc)
         return;
     if (is_picture) {
@@ -719,6 +756,103 @@ static void file_path(const char *url, char *out, unsigned room)       /* file:/
     out[n] = 0;
 }
 
+/* ---- a form filled in: its dialog (the fields one types in), then sent as GET sends it: the address the form
+   names, its query made of the fields' names and values (the hidden ones as the page gave them, the first
+   button's). A form sent by POST is not sent yet: the HTTP client asks by GET alone. */
+
+static int typed_kind(const char *k)
+{
+    return !strcmp(k, "text") || !strcmp(k, "search") || !strcmp(k, "input") || !strcmp(k, "email") || !strcmp(k, "url")
+        || !strcmp(k, "tel") || !strcmp(k, "number") || !strcmp(k, "password") || !strcmp(k, "textarea")
+        || !strcmp(k, "select");
+}
+
+static struct gui_widget *ff_box[8];
+static char ff_got[8][120];
+static int ff_n;
+
+static void form_done(struct gui_widget *b, int what)
+{
+    int i;
+    (void)what;
+    if (b->id == 1)
+        for (i = 0; i < ff_n; i++)
+            snprintf(ff_got[i], sizeof ff_got[i], "%s", gui_get_text(ff_box[i]));
+    gui_end_modal(b->win, b->id == 1 ? GUI_OK : GUI_CANCEL_R);
+}
+
+static void go(const char *url, int push);
+
+static void form_fill(int k)
+{
+    struct wform *f;
+    struct gui_window *dlg;
+    struct gui_widget *box, *form, *row;
+    char url[1100], esc[400], label[64];
+    int i, which[8], n, sent_button = 0;
+    size_t at;
+    if (k < 0 || k >= nforms || k >= FORMS) {
+        say("form none %d", k);
+        return;
+    }
+    f = &forms[k];
+    if (strcmp(f->method, "get")) {
+        say("form %d %s refused", k, f->method);
+        gui_message(win, GUI_T("Form Not Sent"), GUI_T("This form sends what is typed in a way the Web Reader can't use yet "
+                                                     "(POST): it can be filled in only in another browser."), GUI_MB_OK);
+        return;
+    }
+    dlg = gui_window(GUI_T("Fill In the Form"), 420, 0, GUI_W_DIALOG);
+    dlg->owner = win;
+    box = gui_vbox(dlg->root, 6, 8);
+    form = gui_form(box);
+    for (i = n = 0; i < f->n && n < 8; i++) {
+        if (!typed_kind(f->f[i].kind))
+            continue;
+        snprintf(label, sizeof label, "%.40s:", f->f[i].name[0] ? f->f[i].name : f->f[i].kind);
+        ff_box[n] = gui_field(gui_row(form, label, NULL), 30);
+        gui_set_text(ff_box[n], f->f[i].value);
+        which[n++] = i;
+    }
+    ff_n = n;
+    if (!n)
+        gui_label(box, GUI_T("The form has nothing to type in: Send sends it as it is."));
+    row = gui_hbox(box, 6, 0);
+    gui_space(row, 0, 0);
+    gui_button(row, GUI_T("Send"), form_done, 1)->flags |= GUI_DEFAULT;
+    gui_button(row, GUI_T("Cancel"), form_done, 2)->flags |= GUI_CANCEL;
+    if (n)
+        gui_focus(ff_box[0]);
+    say("form %d fields=%d", k, n);
+    if (gui_modal(dlg) != GUI_OK) {
+        say("form left");
+        return;
+    }
+    at = strcspn(f->action, "?#");              /* (GET: the form's words are the query, in place of the address's) */
+    snprintf(url, sizeof url, "%.*s?", (int)(at < 600 ? at : 600), f->action);
+    for (i = 0; i < f->n; i++) {
+        const char *v = f->f[i].value;
+        int j, pressed = !strcmp(f->f[i].kind, "submit") || !strcmp(f->f[i].kind, "image");
+        if (!f->f[i].name[0] || (!typed_kind(f->f[i].kind) && strcmp(f->f[i].kind, "hidden") && !pressed))
+            continue;
+        if (pressed && sent_button++)
+            continue;                           /* (the first button is the one pressed) */
+        for (j = 0; j < n; j++)
+            if (which[j] == i)
+                v = ff_got[j];
+        if (strlen(url) + strlen(f->f[i].name) + 3 * strlen(v) + 3 >= sizeof url)
+            break;
+        url_escape(f->f[i].name, esc, sizeof esc);
+        strcat(url, url[strlen(url) - 1] == '?' ? "" : "&");
+        strcat(url, esc);
+        strcat(url, "=");
+        url_escape(v, esc, sizeof esc);
+        strcat(url, esc);
+    }
+    say("form %d sent %s", k, url);
+    go(url, 1);
+}
+
 static int reloading;                   /* (Reload: the page read again, though it is the one shown) */
 
 static void push_place(const char *url)        /* a place in the page shown: kept in the history as a page is */
@@ -751,6 +885,8 @@ static void go(const char *url, int push)
     stop();
     if (starts(url, "about:bookmarks")) {
         show_marks(push);
+    } else if (starts(url, "about:form?")) {
+        form_fill(atoi(url + 11));              /* (a form's field pressed: its dialog, over the page shown) */
     } else if (starts(url, "about:unmark?")) {
         marks_load();
         unmark(atoi(url + 13));
@@ -1134,7 +1270,7 @@ static void p_image(void *c, const char *src, const char *alt, int w, int h, con
 
 static int dump(const char *url, const char *resolve)
 {
-    static const struct html_sink to_text = { p_block, p_text, p_cell, NULL, p_image, p_title, NULL, NULL, NULL };
+    static const struct html_sink to_text = { p_block, p_text, p_cell, NULL, p_image, p_title, NULL, NULL, NULL, NULL };
     struct tls_anchors anchors = { 0, 0 };
     struct http_get h;
     char certs[300];

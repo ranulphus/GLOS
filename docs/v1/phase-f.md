@@ -1550,3 +1550,19 @@ older than 2.13 each F1 has a Help of its own, as before (an older kernel would 
   Help moved to its first page, back in Notepad F1 again: the open Help shows Notepad's page (its first
   page's title gone, so no second Help), then Alt+F4 closes it. (Seen on the way: the title changed before
   the window came forward, and a fast PC's script sent Alt+F4 to Notepad in between.)
+
+## The Web Reader: forms sent by GET (2026-11-22)
+
+The notes' "Not yet: forms". The HTML reader tells a sink that takes forms where each form begins (its action
+made whole, "" the page's own, and its method) and its fields alone (hidden ones too); a form's fields' words in
+the page (a placeholder, or the field's name) are links to `about:form?N`. The Web Reader keeps
+each form's fields (16 forms, 24 fields each) and opens **Fill In the Form** for one: a box for each field one
+types in (text and its kin, a text area, a list as text), the page's values in them; **Send** goes to the
+form's address with its query made of the fields' names and values (the hidden ones as the page gave them, the
+first button's), `+` for a blank as forms send them. A form sent by POST is refused with its reason: the HTTP
+client asks by GET alone.
+
+- **Tests:** `web-form` (host and the emulated desktops): FORM.HTM's GET form sent with "hello there" (the
+  address with `src=glos&q=hello+there`), its POST form refused; `html_test`'s form. (Disk Tools' image of
+  C:\WEB: two pages more.)
+- **Not yet:** POST; check boxes and radio buttons; a list's own choices; fields typed in the page itself.

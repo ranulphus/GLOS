@@ -93,7 +93,18 @@ static void s_field(void *c, const char *kind, const char *name, const char *val
     note("%s%s", t, "");
 }
 
-static const struct html_sink sink = { s_block, s_text, s_cell, s_colour, s_image, s_title, s_anchor, s_field, NULL };
+static const struct html_sink sink = { s_block, s_text, s_cell, s_colour, s_image, s_title, s_anchor, s_field, NULL, NULL };
+
+static void s_form(void *c, const char *action, const char *method)
+{
+    char t[700];
+    (void)c;
+    snprintf(t, sizeof t, "FORM(%s,%s)", action, method);
+    note("%s%s", t, "");
+}
+
+/* (phase F) A sink that takes forms: their beginnings, their fields alone (hidden ones too), words as links. */
+static const struct html_sink form_sink = { s_block, s_text, s_cell, s_colour, s_image, s_title, s_anchor, s_field, s_form, NULL };
 
 static const char *read_n(const char *page, unsigned long n, const char *charset)
 {
@@ -155,6 +166,13 @@ int main(void)
        "<p><font color=\"#f00\">red</font> <span style=\"color: rgb(0, 128, 0); font-weight: bold\">green</span> <span style=\"color:white\">white</span>"
        " <span style='COLOR:Navy;font-style:italic'>navy</span></p>",
        "P0:(ff0000)red(008000) {b:green}(-) white(000080) {i:navy}");       /* (a blank between two runs is told with the second's colour) */
+    ngot = 0, got[0] = 0;
+    html_read("<input name=out><form action=\"s?old=1\" method=GET><input type=hidden name=h value=1>"
+              "<input name=q placeholder=Words> <input type=submit value=Go></form><form method=post><textarea name=t>x</textarea></form>",
+              206, "", "http://h/d/p.html", &form_sink);
+    CHECK(!strcmp(got, "P0:[input]FORM(http://h/d/s?old=1,get)FIELD(hidden,h,1)FIELD(input,q,)\nP0:<about:form?0|[Words]>"
+                       "FIELD(submit,,Go) <about:form?0|[Go]>FORM(http://h/d/p.html,post)FIELD(textarea,t,)\nP0:<about:form?1|[t]>"),
+          "forms:\n  got  %s", got);
     is("a form's fields",
        "<form action=/s><input type=text name=q value=\"hi\"><input type=submit value=\"Go\"> <select name=s><option>One<option>Two</select>"
        "<textarea name=t>typed &amp; kept</textarea><button>Press</button><input type=hidden name=h value=1><input></form>",

@@ -90,6 +90,7 @@ struct reader {
     char buf[1024];                     /* text gathered for one call of the sink's */
     unsigned nbuf;
     int field_skip;                     /* in a <textarea> or <select>: what is in it is the field's, not the page's */
+    int forms, in_form;                 /* forms begun so far; the one fields are in now (-1: none) */
 };
 
 static int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
@@ -552,6 +553,20 @@ static void start_tag(struct reader *r, int tag, const struct attr *a, int na, i
         break;
     case K_BLOCK:
         end_block(r);
+        if (!strcmp(t->name, "form") && r->s->form) {   /* (phase F) a form: where it goes, how */
+            char url[600], m[8];
+            const char *act = attr_of(a, na, "action"), *how = attr_of(a, na, "method");
+            unsigned k;
+            if (act && act[0])
+                whole(r, act, url, sizeof url);
+            else
+                snprintf(url, sizeof url, "%s", r->base);
+            for (k = 0; how && how[k] && k < sizeof m - 1; k++)
+                m[k] = (char)lower((unsigned char)how[k]);
+            m[how ? k : 0] = 0;
+            r->s->form(r->s->ctx, url, m[0] ? m : "get");
+            r->in_form = r->forms++;
+        }
         break;
     case K_HEAD:
         end_block(r);
@@ -648,19 +663,36 @@ static void start_tag(struct reader *r, int tag, const struct attr *a, int na, i
     case K_FIELD: {
         static const char *const kinds[] = { "input", "textarea", "select", "button" };
         const char *type = attr_of(a, na, "type"), *value = attr_of(a, na, "value"), *name = attr_of(a, na, "name");
-        const char *kind = t->arg == 0 && type ? type : kinds[t->arg];
-        if (!strcmp(kind, "hidden"))
+        const char *kind = t->arg == 0 && type ? type : kinds[t->arg], *ph = attr_of(a, na, "placeholder");
+        int forming = r->s->form && r->in_form >= 0;
+        if (!strcmp(kind, "hidden")) {
+            if (r->s->field && forming)         /* (a form's hidden field is sent with it) */
+                r->s->field(r->s->ctx, kind, name ? name : "", value ? value : "");
             break;
-        if (r->s->field)
-            r->s->field(r->s->ctx, kind, name ? name : "", value ? value : "");
+        }
+        if (r->s->field && (!r->s->form || forming))  /* (a sink of forms: a form's fields alone) */
+            r->s->field(r->s->ctx, kind, name ? name : "", value && value[0] ? value : "");
         if (t->arg == 1 || t->arg == 2)
             r->field_skip = 1;
         if (t->arg != 3) {                      /* (a button's own words are in it; the others are shown by a word) */
-            char word[80];
-            snprintf(word, sizeof word, "[%.60s]", !strcmp(kind, "submit") || !strcmp(kind, "button") || !strcmp(kind, "reset")
-                     ? (value && value[0] ? value : kind) : kind);
+            char word[80], keep[600];
+            int was_in = r->in_link;
+            int pressed = !strcmp(kind, "submit") || !strcmp(kind, "button") || !strcmp(kind, "reset") || !strcmp(kind, "image");
+            snprintf(word, sizeof word, "[%.60s]", pressed ? (value && value[0] ? value : kind)
+                     : forming && ph && ph[0] ? ph : forming && name && name[0] ? name : kind);
             r->field_skip = 0;
-            put(r, word, (unsigned)strlen(word));
+            if (forming) {                      /* (phase F) the word a link to the form's dialog */
+                flush(r);
+                memcpy(keep, r->link, sizeof keep);
+                snprintf(r->link, sizeof r->link, "about:form?%d", r->in_form);
+                r->in_link = 1;
+                put(r, word, (unsigned)strlen(word));
+                flush(r);
+                memcpy(r->link, keep, sizeof keep);
+                r->in_link = was_in;
+            } else {
+                put(r, word, (unsigned)strlen(word));
+            }
             r->field_skip = t->arg == 1 || t->arg == 2;
         }
         break;
@@ -674,6 +706,8 @@ static void end_tag(struct reader *r, int tag)
 {
     int at = find_open(r, tag), i;
     flush(r);
+    if (!strcmp(tags[tag].name, "form"))
+        r->in_form = -1;
     if (at < 0) {
         if (tags[tag].kind == K_BLOCK && !strcmp(tags[tag].name, "p"))  /* ("</p>" with no "<p>": a paragraph's end all the same) */
             end_block(r);
@@ -754,6 +788,7 @@ void html_read(const char *bytes, unsigned long n, const char *charset, const ch
         return;
     r->s = sink ? sink : &none;
     r->colour = r->told_colour = -1;
+    r->in_form = -1;
     snprintf(r->base, sizeof r->base, "%s", base ? base : "");
     /* Its characters: as its sender said; else as its own <meta> says in its first bytes; else UTF-8 if its bytes
        are that, and Latin if not. A mark at its start (EF BB BF) settles it. */
