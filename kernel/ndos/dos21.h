@@ -49,11 +49,38 @@ struct dos_m {
     unsigned last_error;                /* 59h's */
     unsigned unanswered;
     int ended;                          /* the root's child has ended: the machine with it */
+    /* The console's input (NS3): the keys typed (scan code << 8 | character), a ring dos_type fills from the
+       machine's terminal (another thread: one writer, one reader) and the machine reads; wait blocks until a key
+       may have come (0) or the machine is to end (-1). */
+    unsigned short keys[64];
+    volatile unsigned khead, ktail;
+    int (*wait)(void *ctx);
+    void (*idle)(void *ctx);            /* a poll found no key (06h, 0Bh, 44h 06h): its time slice given up */
+    unsigned char after_cr;             /* (dos_type's: an LF after a CR is the same Enter) */
+    unsigned char pend_scan;            /* 01h/07h/08h: an extended key's scan code, the next call's AL */
+    char line[132];                     /* 3Fh on CON, cooked: a line read, CR LF at its end, what's left of it */
+    unsigned line_n, line_at;
 };
+
+/* Terminal bytes typed into the machine (its terminal's: UTF-8 none yet, VT100's keys' sequences as the PC's
+   keys): 1 if a key went in, 0 if the ring was full or nothing made a key. */
+int dos_type(struct dos_m *m, const unsigned char *b, unsigned n);
+
+/* The keyboard as the BIOS's INT 16h shows it (ndm.c's): the next key without taking it (-1: none), the next key
+   waited for and taken (-1: the machine is to end), a key put in (CX of 05h: 0, or 1 if the ring is full). */
+int dos_key_peek(struct dos_m *m);
+int dos_key_get(struct dos_m *m);
+int dos_key_push(struct dos_m *m, unsigned key);
 
 /* What a call came to: done (the registers are the caller's, answered); another program runs (EXEC, or an end
    into the parent: the registers are its); the machine's first program has ended (exit_code its). */
-enum { DOS21_DONE, DOS21_SWITCH, DOS21_END, DOS21_UNANSWERED };
+enum { DOS21_DONE, DOS21_SWITCH, DOS21_END, DOS21_UNANSWERED, DOS21_CTRLC, DOS21_GONE };
+/* (DOS21_GONE: a call waiting for a key was told the machine is to end) */
+
+/* DOS21_CTRLC: Ctrl-C was typed (or Ctrl-Break) during the call; r is as the call came in. The machine calls the
+   program's INT 23h with it (dos_ctrl_c_end when the vector is GLOS's own): if the handler returns by IRET, or by
+   RETF with CF clear, the call is made again; by RETF with CF set, the program ends (4Dh's AH 01h). */
+int dos_ctrl_c_end(struct dos_m *m, struct dos_regs86 *r);
 
 /* The machine's DOS made in its memory (size bytes from mem): the vector table is the caller's (ndm.c points
    every vector at its ARPL) and kept from 0 to 3FFh, DOS's data, the file table, the root PSP and its

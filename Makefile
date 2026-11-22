@@ -527,6 +527,7 @@ $(eval $(call dos_test,I2FTSR,i2ftsr))
 $(eval $(call dos_test,FMTEST,fmtest))
 $(eval $(call dos_test,NDOSTEST,ndostest))
 $(eval $(call dos_test,DOSDIFF,dosdiff))
+$(eval $(call dos_test,CONTEST,contest))
 $(eval $(call dos_test,STUBTSR,stubtsr))
 $(eval $(call dos_test,UMBRD,umbrd))
 $(eval $(call dos_test,JOYTEST,joytest))
@@ -564,7 +565,7 @@ DOS_TESTS := build/ow/dos/HOSTILE.EXE build/ow/dos/XMSTEST.EXE build/ow/dos/XMSB
              build/ow/dos/RUNOUT.EXE build/ow/dos/DPMI16.EXE build/ow/dos/SESSTEST.EXE build/ow/dos/TIMECHK.EXE \
              build/ow/dos/SHOTTEST.EXE build/ow/dos/TYPEIN.EXE build/ow/dos/CONIN.EXE build/ow/dos/CLOCKCHK.EXE build/ow/dos/SBTEST.EXE \
              build/ow/dos/I2FTSR.EXE build/ow/dos/STUBTSR.EXE build/ow/dos/UMBRD.EXE build/ow/dos/FMTEST.EXE \
-             build/ow/dos/JOYTEST.EXE build/ow/dos/SCRTEXT.EXE build/ow/dos/NDOSTEST.EXE build/ow/dos/DOSDIFF.EXE
+             build/ow/dos/JOYTEST.EXE build/ow/dos/SCRTEXT.EXE build/ow/dos/NDOSTEST.EXE build/ow/dos/DOSDIFF.EXE build/ow/dos/CONTEST.EXE
 dos-tests: $(DOS_TESTS)
 
 # The 2D library (kernel/gfx; M6 step C) and its fonts: 1-bit bitmaps made from TrueType fonts by

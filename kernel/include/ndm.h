@@ -17,6 +17,9 @@ struct ndm *ndm_start(struct fsv_vol *v, const char *path, const u8 *image, u32 
 u32 ndm_read(struct ndm *m, char *buf, u32 room);       /* what the program wrote since the last read */
 int ndm_done(const struct ndm *m, int *code);           /* 1 once it has ended: its first program's exit code */
 void ndm_free(struct ndm *m);                           /* its reader has done with it (or gone) */
+void ndm_type(struct ndm *m, const u8 *b, u32 n);       /* its terminal's bytes, typed (NS3) */
+void ndm_input_end(struct ndm *m);                      /* nothing more will be typed: a wait for a key ends it */
+void ndm_stop(struct ndm *m);                           /* its command has gone: it ends */
 
 /* A test program built into the kernel (NS1, before native volumes): "HELLO". */
 extern const u8 ndm_hello[];

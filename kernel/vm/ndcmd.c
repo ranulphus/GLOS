@@ -39,8 +39,11 @@ struct ndcmd {
     char out[OUT_RING];
     u32 head, tail;
     volatile int done;
-    int code, gone;
+    int code, gone, eof;
     void (*kick)(void);
+    struct ndm *machine;                /* NDOS RUN's, while it runs: what the client types goes to it */
+    u8 pre[1024];                       /* ... and what was typed before it started */
+    u32 npre;
 };
 
 static int busy;
@@ -467,6 +470,17 @@ static int cmd_run(struct ndcmd *c, const char *arg)
         b = strrchr(path, '\\');
         m = ndm_start(&vol, dospath, 0, 0, b ? b + 1 : path, tail ? tail : "", relay, &e);
     }
+    if (m) {
+        u32 fl = irq_save();
+
+        c->machine = m;
+        if (c->npre)
+            ndm_type(m, c->pre, c->npre);
+        c->npre = 0;
+        if (c->eof)
+            ndm_input_end(m);
+        irq_restore(fl);
+    }
     if (!m) {
         say(c, e == 0x02 || e == 0x03 ? "NDOS RUN: %s: no such program\n"
                : e == 0x0B ? "NDOS RUN: %s: not a program\n" : "NDOS RUN: %s: DOS error %02x\n", name, e);
@@ -488,7 +502,15 @@ static int cmd_run(struct ndcmd *c, const char *arg)
         }
         if (done)
             break;
+        if (c->gone)
+            ndm_stop(m);                        /* (its channel has gone: the machine with it) */
         thread_sleep_until(timer_ticks() + 8);
+    }
+    {
+        u32 fl = irq_save();
+
+        c->machine = 0;
+        irq_restore(fl);
     }
     ndm_free(m);
     running_cmd = 0;
@@ -597,6 +619,29 @@ int ndcmd_done(const struct ndcmd *c, int *code)
         return 0;
     *code = c->code;
     return 1;
+}
+
+void ndcmd_input(struct ndcmd *c, const u8 *b, u32 n)
+{
+    u32 f = irq_save();
+
+    if (c->machine) {
+        ndm_type(c->machine, b, n);
+    } else {
+        for (; n && c->npre < sizeof c->pre; n--)
+            c->pre[c->npre++] = *b++;
+    }
+    irq_restore(f);
+}
+
+void ndcmd_input_end(struct ndcmd *c)
+{
+    u32 f = irq_save();
+
+    c->eof = 1;
+    if (c->machine)
+        ndm_input_end(c->machine);
+    irq_restore(f);
 }
 
 void ndcmd_free(struct ndcmd *c)

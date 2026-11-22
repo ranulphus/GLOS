@@ -2053,6 +2053,15 @@ static void k_data(struct ssh_chan *ch, const uint8_t *d, uint32_t n)
         gdbp_input(d, n);
         return;
     }
+    {
+        u32 i;
+
+        for (i = 0; i < ARRAY_SIZE(streams); i++)
+            if (streams[i].ch == ch && streams[i].turn == ndos_turn) {
+                ndcmd_input(streams[i].arg, d, n);      /* (a native machine's keys) */
+                return;
+            }
+    }
     if (ssh_chan_user(ch))
         sftp_input(ssh_chan_user(ch), d, n);
 }
@@ -2077,6 +2086,15 @@ static void k_eof(struct ssh_chan *ch)
         gdbp_detach();
         ssh_chan_close(ch);
         return;
+    }
+    {
+        u32 i;
+
+        for (i = 0; i < ARRAY_SIZE(streams); i++)
+            if (streams[i].ch == ch && streams[i].turn == ndos_turn) {
+                ndcmd_input_end(streams[i].arg);        /* (a wait for a key now ends its machine) */
+                return;
+            }
     }
     if (ssh_chan_user(ch))
         sftp_eof(ssh_chan_user(ch));

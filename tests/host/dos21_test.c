@@ -26,6 +26,10 @@ static int rd(void *c, unsigned long lba, unsigned char *b, unsigned n) { (void)
 static int wr(void *c, unsigned long lba, const unsigned char *b, unsigned n) { (void)c; memcpy(disk + lba * 512, b, n * 512UL); return 0; }
 static void con(void *c, const char *s, unsigned n) { (void)c; memcpy(out + outn, s, n); outn += n; out[outn] = 0; }
 static unsigned long now(void *c) { (void)c; return now_secs; }
+static int no_more(void *c) { (void)c; return -1; }      /* (nothing else will be typed: a wait is told to end) */
+static int idles;
+static void idle(void *c) { (void)c; idles++; }
+static void type(const char *s) { dos_type(&m, (const unsigned char *)s, (unsigned)strlen(s)); }
 
 #define CHECK(c, ...) do { if (!(c)) { printf("FAIL line %d: ", __LINE__); printf(__VA_ARGS__); printf("\n"); fails++; } } while (0)
 
@@ -106,6 +110,8 @@ int main(void)
     dos_m_init(&m, mem, SIZE, &vol, 2, 437);
     m.out = con;
     m.now = now;
+    m.wait = no_more;
+    m.idle = idle;
     now_secs = dos_to_seconds(&dd, &tt);
 
     /* ---- a .COM started */
@@ -579,6 +585,95 @@ int main(void)
         call(&r, 0x4900);
         CHECK(!(r.flags & 1), "the TSR's block freed");
     }
+
+    /* ---- the console: keys typed, the input calls, Ctrl-C */
+    outn = 0, out[0] = 0;
+    type("ab\r");
+    call(&r, 0x0100);
+    CHECK((r.ax & 0xFF) == 'a' && !strcmp(out, "a"), "01h 'a' echoed \"%s\"", out);
+    call(&r, 0x0700);
+    CHECK((r.ax & 0xFF) == 'b' && !strcmp(out, "a"), "07h 'b' not echoed");
+    call(&r, 0x0800);
+    CHECK((r.ax & 0xFF) == 0x0D, "08h Enter");
+    type("\x1b[A\x1b[5~\x1bOP");
+    call(&r, 0x0700);
+    res = r.ax & 0xFF;
+    call(&r, 0x0700);
+    CHECK(res == 0 && (r.ax & 0xFF) == 0x48, "an arrow: 00h then 48h (%x %x)", res, r.ax & 0xFF);
+    CHECK(dos_key_get(&m) == 0x4900 && dos_key_get(&m) == 0x3B00, "Page Up, F1");
+    r.ax = 0x0100;
+    res = call(&r, 0x0100);
+    CHECK(res == DOS21_GONE && r.ax == 0x0100, "a wait told to end: %d", res);
+    outn = 0, out[0] = 0;
+    type("hel\x7flo\r");
+    mem[lin(psp, 0x600)] = 20;
+    r.ds = psp, r.dx = 0x600;
+    call(&r, 0x0A00);
+    CHECK(mem[lin(psp, 0x601)] == 4 && !memcmp(mem + lin(psp, 0x602), "helo\r", 5) && !strcmp(out, "hel\b \blo\r"),
+          "0Ah: %u \"%.5s\" echo \"%s\"", mem[lin(psp, 0x601)], (char *)mem + lin(psp, 0x602), out);
+    type("ab\x1b" "cd\r");
+    call(&r, 0x0A00);
+    CHECK(mem[lin(psp, 0x601)] == 2 && !memcmp(mem + lin(psp, 0x602), "cd\r", 3), "0Ah after Esc");
+    mem[lin(psp, 0x600)] = 3;
+    outn = 0, out[0] = 0;
+    type("wxyz\r");
+    call(&r, 0x0A00);
+    CHECK(mem[lin(psp, 0x601)] == 2 && !memcmp(mem + lin(psp, 0x602), "wx\r", 3) && strchr(out, '\a'),
+          "0Ah full: a bell, the rest refused");
+    idles = 0;
+    call(&r, 0x0B00);
+    CHECK((r.ax & 0xFF) == 0 && idles == 1, "0Bh none");
+    type("k");
+    call(&r, 0x0B00);
+    CHECK((r.ax & 0xFF) == 0xFF, "0Bh one");
+    r.dx = 0xFF;
+    r.flags = 0;
+    call(&r, 0x0600);
+    CHECK((r.ax & 0xFF) == 'k' && !(r.flags & 0x40), "06h FFh: 'k'");
+    r.dx = 0xFF;
+    call(&r, 0x0600);
+    CHECK((r.flags & 0x40) && (r.ax & 0xFF) == 0, "06h FFh: none, ZF");
+    type("zz");
+    r.dx = 0xFF;
+    call(&r, 0x0C06);
+    CHECK((r.flags & 0x40), "0Ch: what was typed ahead flushed");
+    /* 3Fh from CON, cooked */
+    type("line one\r");
+    r.ds = psp, r.bx = 0, r.cx = 4, r.dx = 0x700;
+    call(&r, 0x3F00);
+    CHECK(r.ax == 4 && !memcmp(mem + lin(psp, 0x700), "line", 4), "3Fh CON 4: %u", r.ax);
+    r.bx = 0, r.cx = 100, r.dx = 0x700;
+    call(&r, 0x3F00);
+    CHECK(r.ax == 6 && !memcmp(mem + lin(psp, 0x700), " one\r\n", 6), "3Fh CON the rest: %u", r.ax);
+    type("\x1a\r");
+    r.bx = 0, r.cx = 100, r.dx = 0x700;
+    call(&r, 0x3F00);
+    CHECK(!(r.flags & 1) && r.ax == 0, "3Fh CON Ctrl-Z: the end (%u)", r.ax);
+    r.bx = 0;
+    call(&r, 0x4406);
+    CHECK((r.ax & 0xFF) == 0, "4406h CON: nothing typed");
+    /* Ctrl-C */
+    outn = 0, out[0] = 0;
+    type("\x03");
+    r.ax = 0x0100, r.bx = 0x1234;
+    res = call(&r, 0x0100);
+    CHECK(res == DOS21_CTRLC && r.ax == 0x0100 && r.bx == 0x1234 && !strcmp(out, "^C\r\n"), "01h Ctrl-C %d \"%s\"",
+          res, out);
+    type("\x03");
+    r.ds = psp, r.dx = 0x200;
+    res = call(&r, 0x0900);
+    CHECK(res == DOS21_CTRLC, "09h with Ctrl-C waiting: %d", res);
+    type("\x03");
+    res = call(&r, 0x0700);
+    CHECK(res == DOS21_DONE && (r.ax & 0xFF) == 3, "07h takes Ctrl-C as a key");
+    r.dx = 0x0001;
+    call(&r, 0x3301);
+    type("\x03");
+    res = call(&r, 0x2A00);
+    CHECK(res == DOS21_CTRLC, "BREAK ON: any call: %d", res);
+    r.dx = 0;
+    call(&r, 0x3301);
+    CHECK(dos_key_push(&m, 0x1C0D) == 0 && dos_key_peek(&m) == 0x1C0D && dos_key_get(&m) == 0x1C0D, "05h-style push");
 
     /* ---- what isn't there */
     r.flags = 0;

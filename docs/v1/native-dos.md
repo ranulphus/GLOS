@@ -498,7 +498,23 @@ second V86 machine, the one N6 needs anyway. What it is:
     census's programs themselves (they need NS3's console and NS4's DPMI first); console input (NS3); 36h on a
     large FAT32 volume (DOSDIFF's disk is 128 MB).
   - **NS3, the console and the clock:** INT 16h and 10h's teletype, cooked input, Ctrl-C, INT 23h and 24h, the
-    timer IRQ.
+    timer IRQ. **Built 2026-11-22:** what the client of `glos ndos run` types (the SSH channel's
+    data: `sshd.c` hands it to the command, which keeps what comes before the machine starts) goes through
+    `dos_type` (VT100's arrows, Home/End, Insert/Delete, Page keys and F1-F12 as the PC's keys; CR, LF or CR LF as
+    Enter; Backspace and DEL as Backspace) into a ring of 64 keys in GLOS's own DOS, which INT 16h (00h-02h, 05h,
+    10h-12h) and INT 21h's input calls read: 01h, 06h, 07h, 08h, 0Ah (Backspace, Esc a new start, ^X for control
+    characters, a bell when full), 0Bh, 0Ch, 3Fh from CON (cooked, a line with CR LF given out over the reads it
+    takes, Ctrl-Z at its start the end; raw as 4401h sets it), 4406h on CON. A poll that finds no key gives the
+    machine's time slice up. Ctrl-C (and with BREAK ON any call, and the output calls always, finding one waiting)
+    says "^C" and calls the program's INT 23h with the call's registers, returning to GLOS by an ARPL at 005F:0006:
+    IRET, or RETF with CF clear, makes the call again; RETF with CF set, or no handler of its own, ends the
+    program (4Dh's AH 01h). The machine's input ending (the client's EOF), or its command going, ends a wait for a
+    key, and the machine. The BIOS's data area as a program finds it (640 KB, an 80 x 25 colour screen, the ticks
+    since midnight); the timer at 18.2 Hz from the kernel's 1024 Hz clock as INT 08h while the machine's IF is on
+    (VIF with VME), one at a time, the next after GLOS's own INT 08h (the tick count, then the program's INT 1Ch)
+    or the program's EOI to port 20h; INT 29h. Loop A: CONTEST (`tests/dos/contest.c`) with what the test types:
+    a line by 0Ah, a key by INT 16h, 08h, Ctrl-C into its own INT 23h and the call made again, ticks counted by
+    INT 1Ch and the tick count; and Ctrl-C ending it with no handler of its own.
   - **NS4, programs that need more:** DPMI on a native machine (DJGPP programs), EMS and XMS, a VGA of its own.
   - **NS5, a suite:** `loopa-ndos` in the gate.
 

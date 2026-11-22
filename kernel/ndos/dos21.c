@@ -156,12 +156,266 @@ static int resolve(struct dos_m *m, unsigned seg, unsigned off, struct fsv_vol *
     return resolve_str(m, p, v, drive, out);
 }
 
-/* ---- the console (NS3's: CON's input is nothing yet) */
+/* ---- the console */
 
 static void con_out(struct dos_m *m, const char *s, unsigned n)
 {
     if (m->out && n)
         m->out(m->ctx, s, n);
+}
+
+/* The PC's scan code for a character as a US keyboard types it (0: none). */
+static unsigned scan_for(unsigned char c)
+{
+    static const char *const rows[] = { "1234567890-=", "!@#$%^&*()_+", "qwertyuiop[]", "QWERTYUIOP{}",
+                                        "asdfghjkl;'`", "ASDFGHJKL:\"~", "zxcvbnm,./", "ZXCVBNM<>?" };
+    static const unsigned char first[] = { 0x02, 0x02, 0x10, 0x10, 0x1E, 0x1E, 0x2C, 0x2C };
+    unsigned i;
+    const char *p;
+
+    if (c == ' ')
+        return 0x39;
+    if (c == '\\' || c == '|')
+        return 0x2B;
+    for (i = 0; i < 8; i++)
+        if (c && (p = strchr(rows[i], c)) != 0)
+            return first[i] + (unsigned)(p - rows[i]);
+    return 0;
+}
+
+static int kring_put(struct dos_m *m, unsigned k)
+{
+    unsigned h = m->khead;
+
+    if (h - m->ktail >= sizeof m->keys / sizeof m->keys[0])
+        return 0;
+    m->keys[h % (sizeof m->keys / sizeof m->keys[0])] = (unsigned short)k;
+    m->khead = h + 1;
+    return 1;
+}
+
+int dos_key_peek(struct dos_m *m)
+{
+    return m->khead != m->ktail ? m->keys[m->ktail % (sizeof m->keys / sizeof m->keys[0])] : -1;
+}
+
+int dos_key_get(struct dos_m *m)
+{
+    int k;
+
+    while ((k = dos_key_peek(m)) < 0)
+        if (!m->wait || m->wait(m->ctx) < 0)
+            return -1;
+    m->ktail++;
+    return k;
+}
+
+int dos_key_push(struct dos_m *m, unsigned key) { return kring_put(m, key) ? 0 : 1; }
+
+/* A VT100 sequence's key: ESC [ n ~ (n), ESC [ X or ESC O X (x: the letter). 0: none. */
+static unsigned seq_key(unsigned n, unsigned char x)
+{
+    static const unsigned short tilde[25] = { 0, 0x4700, 0x5200, 0x5300, 0x4F00, 0x4900, 0x5100, 0x4700, 0x4F00, 0,
+                                              0, 0x3B00, 0x3C00, 0x3D00, 0x3E00, 0x3F00, 0, 0x4000, 0x4100, 0x4200,
+                                              0x4300, 0x4400, 0, 0x8500, 0x8600 };
+
+    switch (x) {
+    case '~': return n < 25 ? tilde[n] : 0;
+    case 'A': return 0x4800;
+    case 'B': return 0x5000;
+    case 'C': return 0x4D00;
+    case 'D': return 0x4B00;
+    case 'H': return 0x4700;
+    case 'F': return 0x4F00;
+    case 'P': return 0x3B00;
+    case 'Q': return 0x3C00;
+    case 'R': return 0x3D00;
+    case 'S': return 0x3E00;
+    }
+    return 0;
+}
+
+int dos_type(struct dos_m *m, const unsigned char *b, unsigned n)
+{
+    unsigned i, k, any = 0;
+
+    for (i = 0; i < n; i++) {
+        unsigned char c = b[i];
+
+        if (c == 0x1B && i + 2 < n && (b[i + 1] == '[' || b[i + 1] == 'O')) {
+            unsigned j = i + 2, num = 0;
+
+            while (j < n && b[j] >= '0' && b[j] <= '9')
+                num = num * 10 + (b[j++] - '0');
+            while (j < n && (b[j] == ';' || (b[j] >= '0' && b[j] <= '9')))
+                j++;                            /* (a modifier's number: the key as it is unmodified) */
+            if (j < n && b[j] >= 0x40 && b[j] <= 0x7E) {
+                if ((k = seq_key(num, b[j])) != 0)
+                    any |= (unsigned)kring_put(m, k);
+                i = j;
+                m->after_cr = 0;
+                continue;
+            }
+        }
+        if (c == '\n' && m->after_cr) {
+            m->after_cr = 0;
+            continue;
+        }
+        m->after_cr = c == '\r';
+        if (c == '\r' || c == '\n')
+            k = 0x1C0D;
+        else if (c == 0x7F || c == 0x08)
+            k = 0x0E08;
+        else if (c == '\t')
+            k = 0x0F09;
+        else if (c == 0x1B)
+            k = 0x011B;
+        else if (c < 0x20)
+            k = scan_for((unsigned char)('a' + c - 1)) << 8 | c;
+        else if (c < 0x80)
+            k = scan_for(c) << 8 | c;
+        else
+            k = c;
+        any |= (unsigned)kring_put(m, k);
+    }
+    return (int)any;
+}
+
+/* Ctrl-C waiting (an output call checks, as every call does with BREAK ON): taken, "^C" said, 1. */
+static int break_waiting(struct dos_m *m)
+{
+    int k = dos_key_peek(m);
+
+    if (k < 0 || (k & 0xFF) != 0x03)
+        return 0;
+    m->ktail++;
+    con_out(m, "^C\r\n", 4);
+    return 1;
+}
+
+/* A character for 01h, 07h, 08h (an extended key: 00h, then its scan code at the next call): -1 the machine is to
+   end, -2 Ctrl-C (check: 01h's and 08h's). */
+static int getc_dos(struct dos_m *m, int check, int echo)
+{
+    int k;
+    unsigned c;
+
+    if (m->pend_scan) {
+        c = m->pend_scan;
+        m->pend_scan = 0;
+        return (int)c;
+    }
+    if ((k = dos_key_get(m)) < 0)
+        return -1;
+    c = (unsigned)k & 0xFF;
+    if (check && c == 0x03) {
+        con_out(m, "^C\r\n", 4);
+        return -2;
+    }
+    if (c == 0 || c == 0xE0) {
+        m->pend_scan = (unsigned char)(k >> 8);
+        return 0;
+    }
+    if (echo) {
+        char e = (char)c;
+
+        con_out(m, &e, 1);
+    }
+    return (int)c;
+}
+
+/* 0Ah's line (buf: max, count, the characters and their CR) from the keys, edited as DOS edits it (Backspace,
+   Esc a new start; control characters shown as ^X): 0, -1 the machine is to end, -2 Ctrl-C. */
+static int read_line(struct dos_m *m, unsigned char *buf, unsigned max)
+{
+    unsigned n = 0;
+    int k;
+
+    if (!max)
+        return 0;
+    for (;;) {
+        unsigned c;
+
+        if ((k = dos_key_get(m)) < 0)
+            return -1;
+        c = (unsigned)k & 0xFF;
+        if (c == 0x03) {
+            con_out(m, "^C\r\n", 4);
+            return -2;
+        }
+        if (c == 0x0D) {
+            buf[n] = 0x0D;
+            con_out(m, "\r", 1);
+            buf[-1] = (unsigned char)n;
+            return 0;
+        }
+        if (c == 0 || c == 0xE0)
+            continue;                           /* (F1-F6, the template's keys: to do) */
+        if (c == 0x08) {
+            if (n) {
+                n--;
+                con_out(m, buf[n] < 0x20 && buf[n] != '\t' ? "\b \b\b \b" : "\b \b", buf[n] < 0x20 && buf[n] != '\t' ? 6 : 3);
+            }
+            continue;
+        }
+        if (c == 0x1B) {
+            con_out(m, "\\\r\n", 3);
+            n = 0;
+            continue;
+        }
+        if (n + 1 >= max) {
+            con_out(m, "\a", 1);
+            continue;
+        }
+        buf[n++] = (unsigned char)c;
+        if (c < 0x20 && c != '\t') {
+            char e[2];
+
+            e[0] = '^', e[1] = (char)(c + '@');
+            con_out(m, e, 2);
+        } else {
+            char e = (char)c;
+
+            con_out(m, &e, 1);
+        }
+    }
+}
+
+/* 3Fh from CON: raw (its word's bit 5), what's typed as it comes, at least one key; cooked, a line as 0Ah reads
+   it with CR LF after it, given out over as many reads as it takes (Ctrl-Z first: the end, 0). Bytes, -1, -2. */
+static long con_read(struct dos_m *m, unsigned char *dst, unsigned long cnt, int raw)
+{
+    unsigned long i = 0;
+    int k;
+
+    if (!cnt)
+        return 0;
+    if (raw) {
+        do {
+            if ((k = dos_key_get(m)) < 0)
+                return i ? (long)i : -1;
+            dst[i++] = (unsigned char)k;
+        } while (i < cnt && dos_key_peek(m) >= 0);
+        return (long)i;
+    }
+    if (m->line_at >= m->line_n) {
+        unsigned char tmp[130];
+
+        tmp[0] = 128;
+        if ((k = read_line(m, tmp + 2, 128)) < 0)
+            return k;
+        con_out(m, "\n", 1);
+        memcpy(m->line, tmp + 2, tmp[1]);
+        m->line[tmp[1]] = '\r', m->line[tmp[1] + 1] = '\n';
+        m->line_n = tmp[1] + 2u, m->line_at = 0;
+        if (tmp[1] && m->line[0] == 0x1A) {
+            m->line_n = 0;
+            return 0;
+        }
+    }
+    while (i < cnt && m->line_at < m->line_n)
+        dst[i++] = (unsigned char)m->line[m->line_at++];
+    return (long)i;
 }
 
 /* ---- programs */
@@ -527,11 +781,24 @@ static int file_io(struct dos_m *m, struct dos_regs86 *r, unsigned ah)
     else if (cnt > m->size - a)
         cnt = m->size - a;
     switch (m->files.k[i].dev) {
-    case DOS_DEV_CON:
-        if (ah == 0x40)
+    case DOS_DEV_CON: {
+        int raw = (rd16(m, m->files.table + 6 + (unsigned long)i * DOS_SFT_SIZE + 5) & 0x20) != 0;
+
+        if (ah == 0x40) {
+            if (!raw && break_waiting(m))
+                return DOS21_CTRLC;
             con_out(m, (const char *)m->mem + a, (unsigned)cnt);
-        r->ax = ah == 0x40 ? (unsigned)cnt : 0; /* (no keyboard yet: nothing to read) */
+            r->ax = (unsigned)cnt;
+            return ok(r);
+        }
+        got = con_read(m, m->mem + a, cnt, raw);
+        if (got == -1)
+            return DOS21_GONE;
+        if (got == -2)
+            return DOS21_CTRLC;
+        r->ax = (unsigned)got;
         return ok(r);
+    }
     case DOS_DEV_AUX:
     case DOS_DEV_PRN:
         r->ax = ah == 0x40 ? (unsigned)cnt : 0; /* (no ports: what's written goes nowhere) */
@@ -565,9 +832,11 @@ static int ioctl(struct dos_m *m, struct dos_regs86 *r, unsigned al)
                 return err(m, r, 0x01);         /* (a file's word isn't set) */
             wr8(m, en + 5, (rd16(m, en + 5) & 0xDF) | (r->dx & 0x20));     /* (raw or cooked) */
         } else if (al == 0x06) {
-            if (m->files.k[i].dev == DOS_DEV_CON)
-                set_al(r, 0);                   /* (no key waiting) */
-            else
+            if (m->files.k[i].dev == DOS_DEV_CON) {
+                set_al(r, dos_key_peek(m) >= 0 || m->line_at < m->line_n ? 0xFF : 0);
+                if (!(r->ax & 0xFF) && m->idle)
+                    m->idle(m->ctx);
+            } else
                 set_al(r, m->files.k[i].dev || m->files.k[i].f.pos < fsv_size(&m->files.k[i].f) ? 0xFF : 0);
         } else {
             set_al(r, 0xFF);
@@ -859,7 +1128,7 @@ static int exec_call(struct dos_m *m, struct dos_regs86 *r, unsigned al)
 
 /* ---- INT 21h */
 
-int dos21(struct dos_m *m, struct dos_regs86 *r)
+static int dos21_call(struct dos_m *m, struct dos_regs86 *r)
 {
     unsigned ah = ah_of(r), al = al_of(r), h;
     char path[128], path2[128];
@@ -867,15 +1136,39 @@ int dos21(struct dos_m *m, struct dos_regs86 *r)
     struct fat_ent fe;
     int drive, drive2, e, d;
 
+    if (m->ctrl_break && ah != 0x06 && ah != 0x07 && ah != 0x33 && ah != 0x4C && break_waiting(m))
+        return DOS21_CTRLC;                     /* (BREAK ON: every call looks) */
     switch (ah) {
     case 0x00:
         return end_program(m, r, 0, 0);
+    case 0x01:
+    case 0x07:
+    case 0x08:
+        if ((e = getc_dos(m, ah != 0x07, ah == 0x01)) == -1)
+            return DOS21_GONE;
+        if (e == -2)
+            return DOS21_CTRLC;
+        set_al(r, (unsigned)e);
+        return DOS21_DONE;
     case 0x02:
     case 0x06:
         if (ah == 0x06 && (r->dx & 0xFF) == 0xFF) {
-            r->flags |= ZF;                     /* (input: none yet) */
-            set_al(r, 0);
-        } else {
+            int k = m->pend_scan ? 0 : dos_key_peek(m);
+
+            if (k < 0) {                        /* (nothing typed: ZF, and the machine's time given up) */
+                r->flags |= ZF;
+                set_al(r, 0);
+                if (m->idle)
+                    m->idle(m->ctx);
+                return DOS21_DONE;
+            }
+            r->flags &= ~ZF;
+            set_al(r, (unsigned)getc_dos(m, 0, 0));
+            return DOS21_DONE;
+        }
+        if (ah == 0x02 && break_waiting(m))
+            return DOS21_CTRLC;
+        {
             char c = (char)(r->dx & 0xFF);
 
             con_out(m, &c, 1);
@@ -885,6 +1178,8 @@ int dos21(struct dos_m *m, struct dos_regs86 *r)
     case 0x09: {
         unsigned long a = lin(r->ds, r->dx), i;
 
+        if (break_waiting(m))
+            return DOS21_CTRLC;
         for (i = 0; i < 65536 && a + i < m->size && m->mem[a + i] != '$'; i++)
             ;
         if (a < m->size)
@@ -892,8 +1187,32 @@ int dos21(struct dos_m *m, struct dos_regs86 *r)
         set_al(r, '$');
         return DOS21_DONE;
     }
+    case 0x0A: {
+        unsigned long b = lin(r->ds, r->dx);
+        unsigned max = rd8(m, b);
+
+        if (b + 2 + max > m->size)
+            return DOS21_DONE;
+        if ((e = read_line(m, m->mem + b + 2, max)) == -1)
+            return DOS21_GONE;
+        return e == -2 ? DOS21_CTRLC : DOS21_DONE;
+    }
     case 0x0B:
-        set_al(r, 0);                           /* (no key waits) */
+        if (break_waiting(m))
+            return DOS21_CTRLC;
+        set_al(r, dos_key_peek(m) >= 0 || m->pend_scan ? 0xFF : 0);
+        if (!(r->ax & 0xFF) && m->idle)
+            m->idle(m->ctx);
+        return DOS21_DONE;
+    case 0x0C:
+        m->ktail = m->khead;                    /* (what was typed ahead, gone) */
+        m->pend_scan = 0;
+        m->line_n = m->line_at = 0;
+        if (al == 0x01 || al == 0x06 || al == 0x07 || al == 0x08 || al == 0x0A) {
+            r->ax = al << 8 | (r->ax & 0xFF);
+            return dos21_call(m, r);
+        }
+        set_al(r, 0);
         return DOS21_DONE;
     case 0x0D:
         for (d = 0; d < DOS_DRIVES; d++)
@@ -1255,4 +1574,19 @@ int dos21(struct dos_m *m, struct dos_regs86 *r)
         set_al(r, 0);
     }
     return DOS21_UNANSWERED;
+}
+
+int dos21(struct dos_m *m, struct dos_regs86 *r)
+{
+    struct dos_regs86 in = *r;
+    int res = dos21_call(m, r);
+
+    if (res == DOS21_CTRLC || res == DOS21_GONE)
+        *r = in;                                /* (as it came: INT 23h's, and the call made again after it) */
+    return res;
+}
+
+int dos_ctrl_c_end(struct dos_m *m, struct dos_regs86 *r)
+{
+    return end_program(m, r, 0, 1);
 }

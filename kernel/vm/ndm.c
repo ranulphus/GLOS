@@ -28,6 +28,7 @@
 #include "v86dec.h"
 #include "vm.h"
 #include "clock.h"
+#include "timer.h"
 #include "../ndos/dos21.h"
 
 #define LOW_PAGES 160                   /* 0-9FFFFh */
@@ -37,6 +38,11 @@
 #define EFL_VM    0x00020000u
 #define EFL_IF    0x00000200u
 #define EFL_CF    0x00000001u
+#define EFL_ZF    0x00000040u
+#define EFL_TF    0x00000100u
+#define EFL_VIF   0x00080000u
+#define C23_SEG   0x005Fu               /* INT 23h's way back to GLOS: an ARPL at 005F:0006 (DOS's bytes: dos21.h) */
+#define C23_OFF   0x0006u
 
 void vm_enter(struct trapframe *tf) __attribute__((noreturn));
 
@@ -56,6 +62,12 @@ struct ndm {
     void (*kick)(void);
     char name[16];
     u32 unanswered, ports;
+    struct waitq kq;                    /* its keys: a reader waits here for dos_type's */
+    volatile int stop, eof;             /* its command has gone (end it); nothing more will be typed */
+    struct dos_regs86 c23;              /* the call Ctrl-C stopped, made again after the program's INT 23h */
+    u32 c23_sp;
+    u32 tick_last, tick_frac, owed;     /* its timer: PIT ticks owed it (18.2 Hz from the kernel's 1024 Hz) */
+    int in_int8;                        /* an INT 08h delivered, not yet ended (its EOI, or GLOS's own handler) */
 };
 
 static struct ndm *machine(void) { return current->ctx; }
@@ -139,6 +151,34 @@ static void say(struct ndm *m, const char *s, u32 n)
         m->kick();
 }
 
+/* ---- its virtual IF: VIF with VME (its CLI and STI don't trap), GLOS's own without */
+
+static int vif_of(struct ndm *m, const struct trapframe *tf) { return vm.vme ? (tf->eflags & EFL_VIF) != 0 : m->vif; }
+
+static void vif_set(struct ndm *m, struct trapframe *tf, int on)
+{
+    if (vm.vme)
+        tf->eflags = on ? tf->eflags | EFL_VIF : tf->eflags & ~EFL_VIF;
+    m->vif = (u8)(on != 0);
+}
+
+static int is_stub(u32 n) { return rd16(n * 4) == 2 * n && rd16(n * 4 + 2) == STUB_SEG; }
+
+/* An interrupt delivered into the machine as the CPU delivers one in real mode: FLAGS, CS and IP pushed, IF and TF
+   cleared, its vector's CS:IP. */
+static void reflect(struct ndm *m, struct trapframe *tf, u32 n)
+{
+    u32 f = (tf->eflags & 0xFFFF & ~EFL_IF) | (vif_of(m, tf) ? EFL_IF : 0);
+
+    push16(tf, f);
+    push16(tf, tf->cs & 0xFFFF);
+    push16(tf, tf->eip & 0xFFFF);
+    tf->eip = rd16(n * 4);
+    tf->cs = rd16(n * 4 + 2);
+    vif_set(m, tf, 0);
+    tf->eflags &= ~EFL_TF;
+}
+
 /* ---- its end: every file it left open closed (that may write, so with interrupts on), its memory freed */
 
 static void end(struct ndm *m, int code, const char *why)
@@ -201,13 +241,112 @@ static void dos(struct ndm *m, struct trapframe *tf, u32 n)
     sti();                                      /* (its disk's I/O is the VM thread's work: it waits for it) */
     res = n == 0x20 ? dos20(&m->dos, &r) : dos21(&m->dos, &r);
     cli();
+    if (res == DOS21_GONE)
+        end(m, 255, "gone");
+    if (res == DOS21_CTRLC) {
+        if (is_stub(0x23)) {                    /* (no handler of the program's: it ends, as DOS's own does) */
+            if (dos_ctrl_c_end(&m->dos, &r) == DOS21_END)
+                end(m, (int)(m->dos.exit_code & 0xFF), "ctrl-c");
+            from_regs(tf, &r);
+            return;
+        }
+        /* Its INT 23h, with the registers as the call came in, returning to GLOS by an ARPL of its own. */
+        m->c23 = r;
+        from_regs(tf, &r);
+        m->c23_sp = tf->esp & 0xFFFF;
+        push16(tf, (tf->eflags & 0xFFFF & ~EFL_IF) | (vif_of(m, tf) ? EFL_IF : 0));
+        push16(tf, C23_SEG);
+        push16(tf, C23_OFF);
+        tf->eip = rd16(0x23 * 4);
+        tf->cs = rd16(0x23 * 4 + 2);
+        return;
+    }
     if (res == DOS21_END)
-        end(m, (int)(m->dos.exit_code & 0xFF), n == 0x20 ? "int20" : ah == 0x4C ? "int21-4c" : "int21-00");
+        end(m, (int)(m->dos.exit_code & 0xFF), n == 0x20 ? "int20" : ah == 0x4C ? "int21-4c" : ah == 0x31 ? "tsr"
+                                                                                             : "int21-00");
     if (res == DOS21_UNANSWERED)
         unanswered(m, tf, n);
     if (res == DOS21_SWITCH)
-        m->vif = 1;
+        vif_set(m, tf, 1);
     from_regs(tf, &r);
+}
+
+/* Back from the program's INT 23h: by IRET, or RETF with CF clear, the call made again; by RETF with CF set, the
+   program ends. */
+static void ctrl_c_back(struct ndm *m, struct trapframe *tf)
+{
+    struct dos_regs86 r;
+    u32 sp = tf->esp & 0xFFFF;
+
+    if (sp == ((m->c23_sp - 2) & 0xFFFF) && (pop16(tf) & EFL_CF)) {
+        to_regs(tf, &r);
+        if (dos_ctrl_c_end(&m->dos, &r) == DOS21_END)
+            end(m, (int)(m->dos.exit_code & 0xFF), "ctrl-c");
+        from_regs(tf, &r);
+        return;
+    }
+    r = m->c23;
+    from_regs(tf, &r);
+    dos(m, tf, 0x21);
+}
+
+/* INT 16h: the keys dos_type puts in (dos21.c's ring). */
+static void keyboard(struct ndm *m, struct trapframe *tf)
+{
+    u32 ah = (tf->eax >> 8) & 0xFF;
+    int k;
+
+    switch (ah) {
+    case 0x00:
+    case 0x10:
+        sti();
+        k = dos_key_get(&m->dos);
+        cli();
+        if (k < 0)
+            end(m, 255, "gone");
+        LO16(tf->eax, (u32)k);
+        return;
+    case 0x01:
+    case 0x11:
+        if ((k = dos_key_peek(&m->dos)) < 0) {
+            tf->eflags |= EFL_ZF;               /* (none: and its time slice given up) */
+            sti();
+            thread_sleep_until(timer_ticks() + 1);
+            cli();
+        } else {
+            tf->eflags &= ~EFL_ZF;
+            LO16(tf->eax, (u32)k);
+        }
+        return;
+    case 0x02:
+        tf->eax &= 0xFFFFFF00u;                 /* (no shift key down) */
+        return;
+    case 0x12:
+        tf->eax &= 0xFFFF0000u;
+        return;
+    case 0x05:
+        tf->eax = (tf->eax & 0xFFFFFF00u) | (u32)dos_key_push(&m->dos, tf->ecx & 0xFFFF);
+        return;
+    case 0x03:
+        return;
+    }
+    unanswered(m, tf, 0x16);
+}
+
+/* INT 08h's end in GLOS's own handler: the BIOS's tick count, then INT 1Ch if the program has one. */
+static void timer_int(struct ndm *m, struct trapframe *tf)
+{
+    u32 t = rd16(0x46C) | rd16(0x46E) << 16;
+
+    if (++t >= 0x1800B0u) {
+        t = 0;
+        wr8(0x470, 1);
+    }
+    wr16(0x46C, t & 0xFFFF);
+    wr16(0x46E, t >> 16);
+    m->in_int8 = 0;
+    if (!is_stub(0x1C))
+        reflect(m, tf, 0x1C);
 }
 
 static void video(struct ndm *m, struct trapframe *tf)
@@ -247,8 +386,28 @@ static void clock_int(struct ndm *m, struct trapframe *tf)
 
 static void answer(struct ndm *m, struct trapframe *tf, u32 n)
 {
+    char c;
+
     if (n == 0x20 || n == 0x21)
         dos(m, tf, n);
+    else if (n == 0x16)
+        keyboard(m, tf);
+    else if (n == 0x29) {
+        c = (char)(tf->eax & 0xFF);             /* (DOS's fast console output) */
+        say(m, &c, 1);
+    } else if (n == 0x08)
+        timer_int(m, tf);
+    else if (n == 0x1C)
+        ;                                       /* (the BIOS's own: nothing) */
+    else if (n == 0x23) {                       /* (DOS's own Ctrl-C handler, called or chained to: the end) */
+        struct dos_regs86 r;
+
+        to_regs(tf, &r);
+        if (dos_ctrl_c_end(&m->dos, &r) == DOS21_END)
+            end(m, (int)(m->dos.exit_code & 0xFF), "ctrl-c");
+        from_regs(tf, &r);
+    } else if (n == 0x24)
+        tf->eax = (tf->eax & 0xFFFFFF00u) | 3;  /* (a critical error: fail) */
     else if (n == 0x10)
         video(m, tf);
     else if (n == 0x1A)
@@ -279,8 +438,12 @@ void ndm_exception(struct trapframe *tf)
         tf->cs = pop16(tf);
         f = pop16(tf);
         tf->eflags = (tf->eflags & ~0xFFFu) | (f & 0xFFF & ~EFL_IF) | EFL_IF;
-        m->vif = (f & EFL_IF) != 0;
+        vif_set(m, tf, (f & EFL_IF) != 0);
         answer(m, tf, n);
+        return;
+    }
+    if (tf->vec == 6 && (tf->cs & 0xFFFF) == C23_SEG && ip == C23_OFF) {
+        ctrl_c_back(m, tf);
         return;
     }
     if (tf->vec == 13) {
@@ -329,6 +492,11 @@ void ndm_exception(struct trapframe *tf)
             return;
         case V86_OUT:
         case V86_OUTS:
+            if (!in.port_dx && in.imm == 0x20 && in.kind == V86_OUT) {
+                m->in_int8 = 0;                 /* (the PIC's EOI: its INT 08h has ended) */
+                tf->eip = (tf->eip + in.len) & 0xFFFF;
+                return;
+            }
             if (m->ports++ < 8)
                 kprintf("GLOS-NDOS port out prog=%s port=%04x\n", m->name, in.port_dx ? tf->edx & 0xFFFF : in.imm);
             tf->eip = (tf->eip + in.len) & 0xFFFF;
@@ -342,9 +510,79 @@ void ndm_exception(struct trapframe *tf)
     end(m, 255, "fault");
 }
 
+/* On every way back into the machine: its command gone, it ends; its timer's ticks, as INT 08h while its IF is
+   on (one at a time: the next after the last one's end). */
 void ndm_return(struct trapframe *tf)
 {
-    (void)tf;                                   /* (no IRQ is a native machine's yet) */
+    struct ndm *m = machine();
+    u32 now, d;
+
+    if (!m || !(tf->eflags & EFL_VM))
+        return;
+    if (m->stop)
+        end(m, 255, "stopped");
+    now = timer_ticks();
+    if ((d = now - m->tick_last) != 0) {
+        m->tick_last = now;
+        if (d > 2048)
+            d = 2048;
+        m->tick_frac += d * 1193182u;           /* (PIT counts, 65536 a tick, at 1024 kernel ticks a second) */
+        while (m->tick_frac >= 67108864u) {
+            m->tick_frac -= 67108864u;
+            if (m->owed < 18)
+                m->owed++;
+        }
+    }
+    if (m->owed && !m->in_int8 && vif_of(m, tf)) {
+        m->owed--;
+        m->in_int8 = 1;
+        reflect(m, tf, 0x08);
+    }
+}
+
+/* ---- what's typed */
+
+static int key_wait(void *ctx)
+{
+    struct ndm *m = ctx;
+
+    if (m->stop || m->gone || m->eof)
+        return -1;
+    thread_wait(&m->kq, timer_ticks() + 1024);  /* (a second at most: then it looks again) */
+    return m->stop || m->gone ? -1 : 0;
+}
+
+static void key_idle(void *ctx)
+{
+    (void)ctx;
+    thread_sleep_until(timer_ticks() + 1);
+}
+
+void ndm_type(struct ndm *m, const u8 *b, u32 n)
+{
+    u32 f = irq_save();
+
+    dos_type(&m->dos, b, n);
+    thread_wake(&m->kq);
+    irq_restore(f);
+}
+
+void ndm_input_end(struct ndm *m)
+{
+    u32 f = irq_save();
+
+    m->eof = 1;
+    thread_wake(&m->kq);
+    irq_restore(f);
+}
+
+void ndm_stop(struct ndm *m)
+{
+    u32 f = irq_save();
+
+    m->stop = 1;
+    thread_wake(&m->kq);
+    irq_restore(f);
 }
 
 /* ---- starting one */
@@ -360,6 +598,29 @@ static void ndm_main(void *arg)
 }
 
 static void dos_out(void *ctx, const char *s, unsigned n) { say(ctx, s, n); }
+
+/* The BIOS's data area as a program finds it: 640 KB, an 80 x 25 colour text screen, an empty keyboard buffer, a
+   101-key keyboard, the ticks since midnight. */
+static void bda(struct ndm *m)
+{
+    u8 *b = m->mem + 0x400;
+    u32 t = clock_local() % 86400u * 18206u / 1000u;
+
+#define W16(o, v) (b[o] = (u8)(v), b[(o) + 1] = (u8)((v) >> 8))
+    W16(0x10, 0x0020);
+    W16(0x13, 640);
+    W16(0x1A, 0x001E), W16(0x1C, 0x001E), W16(0x80, 0x001E), W16(0x82, 0x003E);
+    b[0x49] = 3;
+    W16(0x4A, 80);
+    W16(0x4C, 4096);
+    W16(0x60, 0x0607);
+    W16(0x63, 0x03D4);
+    b[0x65] = 0x29;
+    W16(0x6C, t & 0xFFFF), W16(0x6E, t >> 16);
+    b[0x84] = 24, b[0x85] = 16;
+    b[0x96] = 0x10;
+#undef W16
+}
 
 static unsigned long dos_now(void *ctx)
 {
@@ -400,8 +661,12 @@ struct ndm *ndm_start(struct fsv_vol *v, const char *path, const u8 *image, u32 
         m->mem[i * 4 + 2] = (u8)STUB_SEG, m->mem[i * 4 + 3] = (u8)(STUB_SEG >> 8);
         m->mem[STUB_SEG * 16 + 2 * i] = 0x63, m->mem[STUB_SEG * 16 + 2 * i + 1] = 0xC0;
     }
+    bda(m);
     dos_m_init(&m->dos, m->mem, LOW_END, v, 2, 437);
     m->dos.out = dos_out, m->dos.now = dos_now, m->dos.ctx = m;
+    m->dos.wait = key_wait, m->dos.idle = key_idle;
+    m->mem[C23_SEG * 16 + C23_OFF] = 0x63, m->mem[C23_SEG * 16 + C23_OFF + 1] = 0xC0;
+    m->tick_last = timer_ticks();
     e = image ? dos_m_start_image(&m->dos, name, image, len, tail ? tail : "", &r)
               : dos_m_start(&m->dos, path, tail ? tail : "", &r);
     if (e) {

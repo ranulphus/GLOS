@@ -1730,9 +1730,9 @@ class Agent:
             time.sleep(1)
         return False
 
-    def ssh(self, cmd, keyfile=None, timeout=180):
+    def ssh(self, cmd, keyfile=None, timeout=180, input=None):
         p = subprocess.run((self.base + ["-i", keyfile] if keyfile else self.opts) + ["glos@127.0.0.1", cmd],
-                           capture_output=True, timeout=timeout)
+                           capture_output=True, timeout=timeout, input=input)
         return p.returncode, p.stdout.decode("latin-1"), p.stderr.decode("latin-1")
 
     def wait(self):
@@ -7236,7 +7236,9 @@ def ndos_case(profile, card):
     files, folders, searches, memory, EXEC of itself as a child, date and time) under the DOS beside GLOS first (the
     reference), then copied to the native volume and run in a native machine: 0 failures both times, the children's
     words and codes, no fault; what its C library asked that isn't answered yet is shown. DOSDIFF in a native
-    machine: every line MS-DOS 7.1's (tests/dos/dosdiff.msdos71.txt) but DOSDIFF_KNOWN's."""
+    machine: every line MS-DOS 7.1's (tests/dos/dosdiff.msdos71.txt) but DOSDIFF_KNOWN's. NS3: CONTEST with
+    what's typed on the command's standard input (a line by 0Ah, a key by INT 16h, 08h, Ctrl-C into its own INT
+    23h, the timer by INT 1Ch and the tick count), and Ctrl-C ending it when it has no handler."""
     tag = "%s-%s" % (profile, card)
     prog = os.path.join(ROOT, "out", "bat", "ndos", "NHELLO.COM")
     os.makedirs(os.path.dirname(prog), exist_ok=True)
@@ -7244,6 +7246,7 @@ def ndos_case(profile, card):
     agent = Agent("ndos-" + tag, profile, card, ["--scratch-hdd", "64", "--file", prog + "=/TEST/NHELLO.COM",
                                                  "--file", "build/ow/dos/NDOSTEST.EXE=/TEST/NDOSTEST.EXE",
                                                  "--file", "build/ow/dos/DOSDIFF.EXE=/TEST/DOSDIFF.EXE",
+                                                 "--file", "build/ow/dos/CONTEST.EXE=/TEST/CONTEST.EXE",
                                                  "--cmd", "C:\\TEST\\GLOS.EXE", "--cmd", "SERSAY HX-DONE 0"],
                   timeout=1200)
     want = "Hello from GLOS's own DOS\r\n!7.10\r\n"
@@ -7296,6 +7299,19 @@ def ndos_case(profile, card):
             checks["dosdiff"] = cp3[0] == 0 and dd[0] == 0 and "DOSDIFF end" in dd[1] and not diffs
             if not checks["dosdiff"]:
                 info += " dosdiff(%d)=%r" % (len(diffs), diffs[:10] if diffs else dd[1][-300:])
+            # NS3: the console, typed on the command's standard input: a line, a key, Ctrl-C into the program's
+            # own INT 23h, the timer; and Ctrl-C with no handler of its own, which ends it.
+            cp4 = agent.ssh("glos ndos copy C:\\TEST\\CONTEST.EXE N:\\CONTEST.EXE")
+            ct = agent.ssh("glos ndos run N:\\CONTEST.EXE", input=b"Ada\rkm\x03x")
+            ctc = agent.ssh("glos ndos run N:\\CONTEST.EXE CTRLC", input=b"\x03")
+            checks["console"] = cp4[0] == 0 and ct[0] == 0 and \
+                "CONTEST line=Ada key=256B ch=m c23=1 after=x ticks=ok bios=ok" in ct[1]
+            checks["ctrl-c"] = ctc[0] == 0 and "^C" in ctc[1] and "not ended" not in ctc[1]   # (typed ahead: DOS
+                                                                # may end it at its first output, as here)
+            if not checks["console"]:
+                info += " console=%r/%d" % (ct[1][-200:], ct[0])
+            if not checks["ctrl-c"]:
+                info += " ctrl-c=%r/%d" % (ctc[1][-120:], ctc[0])
             if not checks["ndostest-ref"]:
                 info += " ref=%r/%d" % (ref[1][-300:], ref[0])
             if not checks["ndostest"]:
@@ -7315,6 +7331,7 @@ def ndos_case(profile, card):
     checks["log"] = text.count("GLOS-NDOS start prog=HELLO") == 6 \
         and text.count("GLOS-NDOS end prog=HELLO code=42 why=int21-4c unanswered=0") == 6
     checks["clean"] = "GLOS-EXIT code=0" in text and "GLOS-PANIC" not in text and "GLOS-NDOS fault" not in text
+    checks["ctrl-c-log"] = "GLOS-NDOS end prog=CONTEST.EXE code=0 why=ctrl-c" in text
     asked = sorted(set(re.findall(r"GLOS-NDOS unanswered int=(\w+) ax=(\w+) prog=NDOSTEST", text)))
     if asked:
         info += " unanswered=%s" % ",".join("%s:%s" % a for a in asked[:12])
