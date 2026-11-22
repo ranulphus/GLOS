@@ -1451,7 +1451,7 @@ def dpmi_tools(boot):
             and "GLOS-CRASH" not in gl and "DPMI-UNIMPL" not in gl
         if key == "wav":
             wav = os.path.join(ROOT, "out", "tools-wav-glos-%s" % boot, "audio.wav")
-            ok = ok and subprocess.run([sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone",
+            ok = ok and wavcheck_run([sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone",
                                         "440"], capture_output=True).returncode == 0
         res[key] = ok
         if not ok:
@@ -3347,6 +3347,62 @@ def sess_kill(profile, boot):
                              "" if not bad else " failed: " + " ".join(bad)), not bad
 
 
+# RetroGPU's wavcheck.py reads a recording whole, into Python's lists: some twenty bytes of memory a byte of it.
+# A run that stood long records a big one: gate 45's stuck panic (2026-11-22) stood 31 minutes while devserver
+# was stalled, its 353 MB recording took wavcheck past 4.5 GB in 25 s, on a machine production shares. So a
+# recording over WAV_MAX is checked by its last two minutes (a copy beside it), and the check may not take more
+# than WAV_MEM: a check that would is a failure, not a stall.
+WAV_MAX = 64 << 20
+WAV_MEM = 3 << 30
+
+
+def wav_for_check(wav):
+    """The recording wavcheck.py is given: wav itself, or its last two minutes (wav-tail.wav) if it is over
+    WAV_MAX. The RIFF chunks are read as wavcheck reads them; the copy has the same fmt chunk."""
+    import struct
+    try:
+        size = os.path.getsize(wav)
+    except OSError:
+        return wav
+    if size <= WAV_MAX:
+        return wav
+    with open(wav, "rb") as f:
+        head = f.read(12)
+        if head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+            return wav
+        pos, fmt, data_at, data_len = 12, None, None, 0
+        while pos + 8 <= size and data_at is None:
+            f.seek(pos)
+            cid, n = f.read(4), struct.unpack("<I", f.read(4))[0]
+            if cid == b"fmt ":
+                fmt = f.read(n)
+            elif cid == b"data":
+                data_at, data_len = pos + 8, min(n, size - pos - 8)
+            pos += 8 + n + (n & 1)
+        if fmt is None or data_at is None or len(fmt) < 16:
+            return wav
+        rate, align = struct.unpack("<I", fmt[4:8])[0], struct.unpack("<H", fmt[12:14])[0] or 1
+        keep = min(data_len, rate * align * 120) // align * align
+        f.seek(data_at + data_len - keep)
+        tail = f.read(keep)
+    out = wav[:-4] + "-tail.wav"
+    with open(out, "wb") as g:
+        g.write(b"RIFF" + struct.pack("<I", 4 + 8 + len(fmt) + (len(fmt) & 1) + 8 + len(tail)) + b"WAVE")
+        g.write(b"fmt " + struct.pack("<I", len(fmt)) + fmt + (b"\0" if len(fmt) & 1 else b""))
+        g.write(b"data" + struct.pack("<I", len(tail)) + tail)
+    return out
+
+
+def wav_limit():
+    """(preexec_fn) The check's memory held to WAV_MEM."""
+    import resource
+    resource.setrlimit(resource.RLIMIT_AS, (WAV_MEM, WAV_MEM))
+
+
+def wavcheck_run(args, **kw):
+    return subprocess.run(args, preexec_fn=wav_limit, **kw)
+
+
 def panic_case(profile, card, how="asked"):
     """A panic's last words at the PC (kernel/arch/cpu.c, 2026-11-19: the 486 bench stood dead twice with no
     serial cable and nothing to say why). Asked for under GLOS /SELFTEST (glos panic), the log has its line,
@@ -3381,8 +3437,8 @@ def panic_case(profile, card, how="asked"):
         checks["timeout"] = False
     text = agent.wait()                         # (the run's own time limit ends it: the PC stands)
     wav = os.path.join(ROOT, "out", "panic-" + tag, "audio.wav")
-    checks["sounded"] = os.path.exists(wav) and subprocess.run(
-        [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "880"],
+    checks["sounded"] = os.path.exists(wav) and wavcheck_run(
+        [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "880"],
         capture_output=True).returncode == 0
     checks["once"] = text.count("GLOS-PANIC why=") == 1 and "HX-DONE" not in text
     bad = [k for k, v in checks.items() if not v]
@@ -5223,8 +5279,8 @@ def audio_case(profile, vcard, card, sound="sb16", virtual=True):
         checks["timeout"] = False
     text = agent.wait()
     wav = os.path.join(ROOT, "out", "audio-" + tag + os.environ.get("LOOPA_SUFFIX", ""), "audio.wav")
-    checks["recorded"] = os.path.exists(wav) and subprocess.run(
-        [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440", "--tone", "1000",
+    checks["recorded"] = os.path.exists(wav) and wavcheck_run(
+        [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "440", "--tone", "1000",
          "--tone", "784", "--tone", "523", "--tone", "1175", "--tone", "259",       # (the last two: the Player's;
          "--tone", "1319.8", "--tone", "1862.6", "--tone", "370",                   # its S3M's, its XM's, its MIDI file's)
          "--tone", "293.7"]                                                         # (MIDI Studio's)
@@ -5558,8 +5614,8 @@ def sdlsess_case(profile, vcard, card):
         checks["timeout"] = False
     text = agent.wait()
     wav = os.path.join(ROOT, "out", "sdlsess-" + tag, "audio.wav")
-    checks["recorded"] = os.path.exists(wav) and subprocess.run(
-        [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440"],
+    checks["recorded"] = os.path.exists(wav) and wavcheck_run(
+        [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "440"],
         capture_output=True).returncode == 0
     checks["clean"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text and "GLOS-CRASH" not in text
     bad = [k for k, v in checks.items() if not v]
@@ -5689,8 +5745,8 @@ def sdlwin_case(profile, vcard, card, desk):
         checks["timeout"] = False
     text = agent.wait()
     wav = os.path.join(ROOT, "out", "sdlwin-" + tag, "audio.wav")
-    checks["recorded"] = os.path.exists(wav) and subprocess.run(
-        [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440"],
+    checks["recorded"] = os.path.exists(wav) and wavcheck_run(
+        [sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "440"],
         capture_output=True).returncode == 0
     checks["sb-stopped"] = re.search(r"HX-SBCHK dma=\d+ stopped", text) is not None
     checks["no-panic"] = "GLOS-PANIC" not in text and "GLOS-WARN" not in text
@@ -7013,7 +7069,7 @@ def api_midi_case(profile, vcard, card, sound="sb16"):
     checks["mpu-played"] = bool(m) and m.group(1) == "40" and int(m.group(2)) <= 20
     checks["mpu-in"] = re.search(r"GLOS-MIDI close app=\d+ port=mpu dir=in received=0 lost=0", text) is not None
     wav = os.path.join(ROOT, "out", "apimidi-" + tag, "audio.wav")
-    res = subprocess.run([sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav, "--tone", "440", "--tone", "659",
+    res = wavcheck_run([sys.executable, os.path.join(MGA, "tools/loopa/wavcheck.py"), wav_for_check(wav), "--tone", "440", "--tone", "659",
                           "--tone", "523", "--tone", "330", "--tone", "784"], capture_output=True, text=True) \
         if os.path.exists(wav) else None
     checks["recorded"] = res is not None and res.returncode == 0
